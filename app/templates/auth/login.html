@@ -1,0 +1,35 @@
+{% extends "base.html" %}
+{% block title %}登录 - 学生管理系统{% endblock %}
+{% block content %}
+<div class="d-flex justify-content-center align-items-center" style="min-height:80vh;">
+    <div class="card shadow" style="width:400px;">
+        <div class="card-body p-4">
+            <div class="text-center mb-4">
+                <i class="bi bi-building" style="font-size:48px;color:#3b82f6;"></i>
+                <h4 class="mt-2 fw-bold">学生管理系统</h4>
+                <p class="text-muted">请登录您的账户</p>
+            </div>
+            <form method="POST">
+                {{ form.hidden_tag() }}
+                <div class="mb-3">
+                    <label class="form-label">用户名</label>
+                    {{ form.username(class="form-control form-control-lg", placeholder="请输入用户名") }}
+                    {% for error in form.username.errors %}
+                    <div class="text-danger small mt-1">{{ error }}</div>
+                    {% endfor %}
+                </div>
+                <div class="mb-3">
+                    <label class="form-label">密码</label>
+                    {{ form.password(class="form-control form-control-lg", placeholder="请输入密码") }}
+                    {% for error in form.password.errors %}
+                    <div class="text-danger small mt-1">{{ error }}</div>
+                    {% endfor %}
+                </div>
+                <button type="submit" class="btn btn-primary btn-lg w-100">
+                    <i class="bi bi-box-arrow-in-right"></i> 登 录
+                </button>
+            </form>
+        </div>
+    </div>
+</div>
+{% endblock %}

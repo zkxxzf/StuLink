@@ -1,0 +1,174 @@
+{% extends "base.html" %}
+{% block title %}宿舍报表{% endblock %}
+
+{% block extra_css %}
+<style>
+    @media print {
+        .sidebar, .navbar, .btn, .form-select, .no-print { display: none !important; }
+        .main-content { margin-left: 0 !important; padding: 0 !important; }
+        .card { box-shadow: none !important; border: 1px solid #dee2e6 !important; }
+        .table { font-size: 12px; }
+        .report-header { text-align: center; margin-bottom: 16px; }
+        @page { size: A4; margin: 12mm; }
+    }
+    .report-header h4 { font-weight: 700; }
+    .table th { white-space: nowrap; background: #f8f9fa; font-size: 12px; }
+    .table td { font-size: 12px; vertical-align: middle; }
+    .gender-section { margin-bottom: 24px; }
+    .gender-title {
+        font-size: 16px; font-weight: 700; padding: 8px 14px;
+        border-radius: 6px; margin-bottom: 8px;
+    }
+    .gender-title.male { background: #e3f2fd; color: #1565c0; }
+    .gender-title.female { background: #fce4ec; color: #c62828; }
+    .class-summary-row { background: #fafafa; font-weight: 600; }
+    .room-row { }
+    .section-card { margin-bottom: 0; }
+    .stats-bar { font-size: 13px; }
+    .stats-bar .stat-item {
+        display: inline-block; padding: 4px 16px; margin-right: 12px;
+        border-radius: 20px; background: #f1f5f9; font-weight: 600;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3 no-print">
+    <h4 class="fw-bold mb-0"><i class="bi bi-file-earmark-spreadsheet"></i> 宿舍报表</h4>
+    <div class="d-flex gap-2">
+        <select class="form-select form-select-sm" style="width:160px;" id="gradeFilter" onchange="filterGrade()">
+            <option value="">全部年级</option>
+            {% for g in grades %}
+            <option value="{{ g }}" {% if g == grade_filter %}selected{% endif %}>{{ g }}</option>
+            {% endfor %}
+        </select>
+        <button class="btn btn-sm btn-outline-primary" onclick="window.print()">
+            <i class="bi bi-printer"></i> 打印
+        </button>
+        <button class="btn btn-sm btn-outline-success" onclick="exportExcel()">
+            <i class="bi bi-file-earmark-excel"></i> 导出Excel
+        </button>
+    </div>
+</div>
+
+<!-- 顶部汇总 -->
+<div class="row g-2 mb-3">
+    <div class="col-6 col-md-4"><div class="stat-card card p-2 text-center">
+        <div class="stat-number text-primary">{{ total_rooms }}</div>
+        <div class="stat-label">已分配房间</div>
+    </div></div>
+    <div class="col-6 col-md-4"><div class="stat-card card p-2 text-center">
+        <div class="stat-number text-success">{{ total_beds }}</div>
+        <div class="stat-label">可用床位数</div>
+    </div></div>
+    <div class="col-6 col-md-4"><div class="stat-card card p-2 text-center">
+        <div class="stat-number text-info">{{ total_boarders }}</div>
+        <div class="stat-label">住校生总数</div>
+    </div></div>
+</div>
+
+<!-- 打印标题 -->
+<div class="report-header d-none d-print-block">
+    <h4>宿舍分配报表</h4>
+    <p class="text-muted mb-1">打印时间：{{ now.strftime('%Y-%m-%d %H:%M') }}</p>
+    <p class="text-muted">
+        已分配 {{ total_rooms }} 间宿舍 / {{ total_beds }} 张床位 / 住校生 {{ total_boarders }} 人
+        {% if grade_filter %}<br>年级：{{ grade_filter }}{% endif %}
+    </p>
+</div>
+
+{% if not tree %}
+<div class="alert alert-info">
+    <i class="bi bi-info-circle"></i> 暂无已分配的宿舍数据，请先完成宿舍分配。
+</div>
+{% endif %}
+
+{% for grade, genders in tree.items() %}
+<div class="section-card card mb-3">
+    <div class="card-header py-2">
+        <h5 class="mb-0"><i class="bi bi-mortarboard"></i> {{ grade }}</h5>
+    </div>
+    <div class="card-body p-0">
+
+    {% for gender, classes in genders.items() %}
+    {% set gender_label = '男生' if gender == '男' else '女生' %}
+    {% set gender_class = 'male' if gender == '男' else 'female' %}
+    <div class="gender-section px-3 pt-3">
+        <div class="gender-title {{ gender_class }}">
+            <i class="bi bi-gender-{{ 'male' if gender == '男' else 'female' }}"></i> {{ gender_label }}
+        </div>
+
+        <div class="table-responsive">
+            <table class="table table-bordered table-sm mb-0">
+                <thead>
+                    <tr>
+                        <th style="width:80px;">班级</th>
+                        <th style="width:70px;">住校生</th>
+                        <th style="width:150px;">宿舍楼</th>
+                        <th style="width:70px;">房间号</th>
+                        <th style="width:80px;">床位数</th>
+                        <th style="width:80px;">合班标记</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for class_name, room_list in classes.items() %}
+                    {% set class_key = (grade, class_name, gender) %}
+                    {% set boarders = class_totals.get(class_key, 0) %}
+                    {% set room_count = room_list|length %}
+                    {% for room in room_list %}
+                    <tr class="room-row">
+                        {% if loop.first %}
+                        <td rowspan="{{ room_count }}" class="class-summary-row align-middle text-center">{{ grade }}{{ class_name }}</td>
+                        <td rowspan="{{ room_count }}" class="class-summary-row align-middle text-center">{{ boarders }}</td>
+                        {% endif %}
+                        <td>{{ room.building }}</td>
+                        <td>{{ room.room_number }}</td>
+                        <td class="text-center">{{ room.capacity }}</td>
+                        <td class="text-center">
+                            {% if room.combined_class and room.combined_class != '' %}
+                            <span class="badge bg-info">{{ room.combined_class }}</span>
+                            {% else %}
+                            <span class="text-muted">—</span>
+                            {% endif %}
+                        </td>
+                    </tr>
+                    {% endfor %}
+                    <!-- 班级小计 -->
+                    <tr class="table-light fw-bold" style="font-size:11px;">
+                        <td colspan="3"></td>
+                        <td class="text-end">小计：{{ room_count }}间</td>
+                        {% set cls_beds = room_list|sum(attribute='capacity') %}
+                        <td class="text-center">{{ cls_beds }} 床</td>
+                        <td></td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+    {% endfor %}
+
+    </div>
+</div>
+{% endfor %}
+
+<div class="text-muted mt-3 small no-print" style="border-top:1px solid #dee2e6;padding-top:12px;">
+    <i class="bi bi-info-circle"></i> 报表仅显示已分配班级的宿舍。支持打印（A4竖版）和导出Excel。
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+function filterGrade() {
+    var g = document.getElementById('gradeFilter').value;
+    if (g) window.location.href = '{{ url_for("rooms.report") }}?grade=' + encodeURIComponent(g);
+    else window.location.href = '{{ url_for("rooms.report") }}';
+}
+function exportExcel() {
+    var grade = document.getElementById('gradeFilter').value;
+    var url = '{{ url_for("rooms.report_export") }}';
+    if (grade) url += '?grade=' + encodeURIComponent(grade);
+    window.location.href = url;
+}
+</script>
+{% endblock %}

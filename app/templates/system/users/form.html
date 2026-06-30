@@ -1,0 +1,76 @@
+{% extends "base.html" %}
+{% block title %}{{ title }}{% endblock %}
+{% block content %}
+<div class="d-flex align-items-center mb-3">
+    <a href="{{ url_for('users.list_users') }}" class="btn btn-sm btn-outline-secondary me-3">
+        <i class="bi bi-arrow-left"></i> 返回
+    </a>
+    <h4 class="fw-bold mb-0">{{ title }}</h4>
+</div>
+
+<div class="row justify-content-center">
+    <div class="col-md-8">
+        <div class="card">
+            <div class="card-body">
+                <form method="POST">
+                    {{ form.hidden_tag() }}
+                    <div class="row">
+                        <div class="col-md-6 mb-3">
+                            <label class="form-label">用户名 <span class="text-danger">*</span></label>
+                            {{ form.username(class="form-control") }}
+                            {% for e in form.username.errors %}<div class="text-danger small">{{ e }}</div>{% endfor %}
+                        </div>
+                        <div class="col-md-6 mb-3">
+                            <label class="form-label">真实姓名 <span class="text-danger">*</span></label>
+                            {{ form.real_name(class="form-control") }}
+                            {% for e in form.real_name.errors %}<div class="text-danger small">{{ e }}</div>{% endfor %}
+                        </div>
+                        <div class="col-md-6 mb-3">
+                            <label class="form-label">角色 <span class="text-danger">*</span></label>
+                            {{ form.role(class="form-select", id="roleSelect") }}
+                        </div>
+                        <div class="col-md-6 mb-3">
+                            <label class="form-label">权限组 <small class="text-muted">(决定菜单可见范围)</small></label>
+                            {{ form.permission_group_id(class="form-select") }}
+                        </div>
+                        <div class="col-md-6 mb-3">
+                            <label class="form-label">密码 {% if not form.password.data %}(默认123456){% endif %}</label>
+                            {{ form.password(class="form-control", placeholder="不填则不修改") }}
+                            {% for e in form.password.errors %}<div class="text-danger small">{{ e }}</div>{% endfor %}
+                        </div>
+                        <div class="col-md-6 mb-3" id="gradeField">
+                            <label class="form-label">管理年级 <small class="text-muted">(班主任/年级长必填)</small></label>
+                            {{ form.grade(class="form-select") }}
+                        </div>
+                        <div class="col-md-6 mb-3" id="classField">
+                            <label class="form-label">管理班级 <small class="text-muted">(班主任必填)</small></label>
+                            {{ form.class_name(class="form-select") }}
+                        </div>
+                    </div>
+                    <hr>
+                    <button type="submit" class="btn btn-primary"><i class="bi bi-check-lg"></i> 保存</button>
+                    <a href="{{ url_for('users.list_users') }}" class="btn btn-secondary">取消</a>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+function toggleFields(){
+    var role = $('#roleSelect').val();
+    if(role === 'homeroom_teacher'){
+        $('#gradeField, #classField').show();
+    } else if(role === 'grade_leader'){
+        $('#gradeField').show();
+        $('#classField').hide();
+    } else {
+        $('#gradeField, #classField').hide();
+    }
+}
+$('#roleSelect').change(toggleFields);
+toggleFields();
+</script>
+{% endblock %}

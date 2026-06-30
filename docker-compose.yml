@@ -1,0 +1,21 @@
+version: '3.8'
+
+services:
+  dormitory:
+    image: dormitory:v1
+    container_name: dormitory
+    ports:
+      - "5000:5000"
+    volumes:
+      # 代码目录（升级时整个替换）
+      - ./dormitory-code:/app
+      # 数据目录（永不覆盖，含 db + 密钥文件）
+      - ./dormitory-data:/data
+      - ./dormitory-data:/app/data
+    restart: unless-stopped
+    environment:
+      - TZ=Asia/Shanghai
+      - DATABASE_URL=sqlite:////data/system.db
+      # ⚠ 生产部署务必替换为强随机密钥：python -c "import secrets; print(secrets.token_hex(32))"
+      # 留空则自动生成并持久化到 data/.secret_key
+      - SECRET_KEY=

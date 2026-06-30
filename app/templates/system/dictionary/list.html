@@ -1,0 +1,88 @@
+{% extends "base.html" %}
+{% block title %}字典管理{% endblock %}
+{% block content %}
+<h4 class="fw-bold mb-3"><i class="bi bi-book"></i> 字典管理</h4>
+
+<!-- 标签页 -->
+<ul class="nav nav-tabs mb-3">
+    {% for cat in categories %}
+    <li class="nav-item">
+        <a class="nav-link {% if cat.code == current_tab %}active{% endif %}"
+           href="{{ url_for('dictionary.list_items', tab=cat.code) }}">
+            {{ cat.name }}
+        </a>
+    </li>
+    {% endfor %}
+</ul>
+
+<!-- Add form -->
+<div class="card mb-3">
+    <div class="card-body">
+        <form method="POST" action="{{ url_for('dictionary.add_item') }}" class="row g-2 align-items-end">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <input type="hidden" name="category_code" value="{{ current_tab }}">
+            <div class="col-auto">
+                <label class="form-label">新增值</label>
+                <input type="text" name="value" class="form-control" placeholder="请输入新值" required style="width:240px;">
+            </div>
+            <div class="col-auto">
+                <button type="submit" class="btn btn-primary">
+                    <i class="bi bi-plus-lg"></i> 添加
+                </button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<!-- 值列表 -->
+<div class="card">
+    <div class="card-body p-0">
+        <table class="table table-hover mb-0">
+            <thead class="table-light">
+                <tr>
+                    <th style="width:60px;">#</th>
+                    <th>值</th>
+                    <th style="width:100px;">状态</th>
+                    <th style="width:100px;">操作</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% if items %}
+                {% for item in items %}
+                <tr>
+                    <td class="text-muted">{{ loop.index }}</td>
+                    <td class="fw-bold">{{ item.value }}</td>
+                    <td>
+                        {% if item.in_use %}
+                        <span class="badge bg-success">在用</span>
+                        {% else %}
+                        <span class="badge bg-secondary">未使用</span>
+                        {% endif %}
+                    </td>
+                    <td>
+                        {% if item.in_use %}
+                        <button class="btn btn-sm btn-outline-secondary" disabled title="已被使用，无法删除">
+                            <i class="bi bi-trash"></i>
+                        </button>
+                        {% else %}
+                        <form method="POST" action="{{ url_for('dictionary.delete_item', item_id=item.id) }}" style="display:inline;"
+                              onsubmit="return confirm('确定要删除「{{ item.value }}」吗？')">
+                            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                            <button type="submit" class="btn btn-sm btn-outline-danger" title="删除">
+                                <i class="bi bi-trash"></i>
+                            </button>
+                        </form>
+                        {% endif %}
+                    </td>
+                </tr>
+                {% endfor %}
+                {% else %}
+                <tr>
+                    <td colspan="4" class="text-center text-muted py-4">暂无数据</td>
+                </tr>
+                {% endif %}
+            </tbody>
+        </table>
+    </div>
+</div>
+{% endblock %}

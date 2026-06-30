@@ -1,0 +1,986 @@
+{% extends "base.html" %}
+{% block title %}可视化宿舍分配{% endblock %}
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+    <h4 class="fw-bold mb-0"><i class="bi bi-diagram-3"></i> 可视化宿舍分配</h4>
+    <a href="{{ url_for('rooms.assign_auto') }}" class="btn btn-primary">
+        <i class="bi bi-magic"></i> 自动分配向导
+    </a>
+</div>
+
+<div class="row">
+    <!-- 左侧：班级列表 -->
+    <div class="col-lg-4 col-md-5">
+        <div class="card">
+            <div class="card-header bg-light d-flex justify-content-between align-items-center">
+                <span><i class="bi bi-people"></i> 班级列表</span>
+                <div>
+                    <button class="btn btn-sm btn-danger me-2" id="clearAll">
+                        <i class="bi bi-trash"></i> 清除所有已分配宿舍
+                    </button>
+                    <button class="btn btn-sm btn-success" id="saveAll">
+                        <i class="bi bi-check-lg"></i> 保存分配
+                    </button>
+                </div>
+            </div>
+            <div class="card-body p-2" id="classList" style="max-height: calc(100vh - 180px); overflow-y: auto;">
+                <!-- 班级列表由 JS 动态生成 -->
+            </div>
+        </div>
+    </div>
+    
+    <!-- 右侧：宿舍列表 -->
+    <div class="col-lg-8 col-md-7">
+        <div class="card">
+            <div class="card-header bg-light d-flex justify-content-between align-items-center">
+                <span><i class="bi bi-building"></i> 宿舍列表</span>
+                <button class="btn btn-sm btn-primary" id="setCombinedMode">
+                    <i class="bi bi-pencil"></i> 设置合班宿舍
+                </button>
+            </div>
+            <div class="card-body p-2" id="roomList" style="max-height: calc(100vh - 180px); overflow-y: auto;">
+                <!-- 宿舍列表由 JS 动态生成 -->
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_css %}
+<style>
+/* 宿舍小方块 - 横向卡片样式 */
+.room-block {
+    width: 60px;
+    height: 45px;
+    margin: 3px;
+    padding: 4px 5px;
+    border: 2px solid #dee2e6;
+    border-radius: 4px;
+    cursor: move;
+    font-size: 0.65rem;
+    position: relative;
+    background: #fff;
+    transition: all 0.2s;
+    user-select: none;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+}
+
+.room-block:hover {
+    transform: scale(1.05);
+    box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+}
+
+.room-block.male {
+    background: rgba(13,110,253,0.08);
+    color: #1e293b;
+    border-color: #93c5fd;
+}
+
+.room-block.female {
+    background: rgba(220,53,69,0.08);
+    color: #1e293b;
+    border-color: #f9a8d4;
+}
+
+.room-block.assigned {
+    background: rgba(25,135,84,0.1) !important;
+    border-color: #a3e635;
+    opacity: 1;
+    cursor: not-allowed;
+}
+
+.room-block.combined::after {
+    content: "合";
+    position: absolute;
+    top: 1px;
+    right: 2px;
+    background: #dc3545;
+    color: white;
+    font-size: 0.5rem;
+    padding: 0px 2px;
+    border-radius: 2px;
+    font-weight: bold;
+}
+
+.room-block .room-number {
+    font-weight: bold;
+    font-size: 0.75rem;
+    line-height: 1.1;
+}
+
+.room-block .room-info {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-size: 0.6rem;
+    opacity: 0.8;
+    margin-top: 1px;
+}
+
+.room-block .room-gender {
+    font-size: 0.7rem;
+}
+
+/* 宿舍已分配班级显示 */
+.room-block .room-classes {
+    position: absolute;
+    bottom: 1px;
+    left: 2px;
+    right: 2px;
+    font-size: 0.5rem;
+    line-height: 1.0;
+    color: #64748b;
+    opacity: 0.95;
+    text-align: left;
+    overflow: hidden;
+    max-height: 18px;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+    cursor: default;
+}
+
+/* 班级卡片 */
+.class-card {
+    margin-bottom: 8px;
+    border-radius: 8px;
+    border: 1px solid #e2e8f0;
+    transition: all 0.2s;
+    background: #fff;
+    box-shadow: 0 1px 2px rgba(0,0,0,.05);
+}
+
+.class-card.male-zone {
+    border-left: 3px solid #3b82f6;
+}
+
+.class-card.female-zone {
+    border-left: 3px solid #ec4899;
+}
+
+.class-card .class-header {
+    padding: 5px 8px;
+    font-weight: bold;
+    font-size: 0.85rem;
+    border-bottom: 1px solid #dee2e6;
+    cursor: pointer;
+}
+
+.class-card .class-stats {
+    padding: 4px 8px;
+    font-size: 0.75rem;
+    color: #6c757d;
+    border-bottom: 1px solid #f0f0f0;
+    display: flex;
+    gap: 12px;
+}
+
+.class-card .gender-split {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding: 8px;
+}
+
+.class-card .gender-box {
+    flex: 1;
+    padding: 6px;
+    border-radius: 4px;
+    font-size: 0.75rem;
+    min-width: 0;
+}
+
+.class-card .gender-box.male {
+    background: rgba(13,110,253,0.06);
+    border: 1px solid #bfdbfe;
+}
+
+.class-card .gender-box.female {
+    background: rgba(220,53,69,0.06);
+    border: 1px solid #fbcfe8;
+}
+
+.class-card .gender-box .stat-row {
+    display: block;
+    margin-bottom: 3px;
+    padding: 2px 0;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    font-size: 0.72rem;
+}
+
+.class-card .gender-box .stat-row span {
+    font-size: 0.7rem;
+}
+
+.class-card .gender-box .stat-row:last-child {
+    margin-bottom: 0;
+}
+
+.class-card .gender-box .dropzone {
+    min-height: 40px;
+    padding: 4px;
+    margin-top: 4px;
+    border: 2px dashed #dee2e6;
+    border-radius: 4px;
+    background: rgba(255,255,255,0.8);
+    transition: all 0.2s;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+}
+
+.class-card .gender-box .dropzone .room-block {
+    margin: 2px;
+    position: relative;
+}
+
+.class-card .gender-box .dropzone .room-block .remove-btn {
+    position: absolute;
+    top: -6px;
+    right: -6px;
+    width: 18px;
+    height: 18px;
+    border-radius: 50%;
+    background: #dc3545;
+    color: white;
+    border: 2px solid white;
+    font-size: 12px;
+    line-height: 14px;
+    text-align: center;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: bold;
+    z-index: 10;
+}
+
+.class-card .gender-box .dropzone .room-block .remove-btn:hover {
+    background: #bd2130;
+}
+
+.class-card .gender-box .dropzone.drag-over {
+    border-color: #198754;
+    background: rgba(25, 135, 84, 0.1);
+    transform: scale(1.02);
+}
+
+.class-card .gender-box .dropzone.drag-over.male {
+    border-color: #0d6efd;
+    background: rgba(13, 110, 253, 0.15);
+}
+
+.class-card .gender-box .dropzone.drag-over.female {
+    border-color: #d63384;
+    background: rgba(214, 51, 132, 0.15);
+}
+
+/* 年级分组 */
+.grade-section {
+    border: 1px solid #dee2e6;
+    border-radius: 6px;
+    padding: 8px;
+    background: #fff;
+    margin-bottom: 12px;
+}
+
+.grade-header {
+    transition: all 0.2s;
+    user-select: none;
+}
+
+.grade-header:hover {
+    background: #e9ecef;
+}
+
+.grade-body {
+    display: block;
+}
+
+.grade-body.collapse {
+    display: none;
+}
+
+/* 宿舍楼分组 */
+.building-group {
+    margin-bottom: 12px;
+    border: 1px solid #dee2e6;
+    border-radius: 6px;
+}
+
+.building-group .building-header {
+    background: #f8f9fa;
+    padding: 6px 10px;
+    font-weight: bold;
+    border-bottom: 1px solid #dee2e6;
+    cursor: pointer;
+}
+
+.building-group .building-body {
+    padding: 8px;
+}
+
+.building-group .floor-row {
+    display: block;
+    width: 100%;
+    margin-bottom: 8px;
+}
+
+.building-group .floor-label {
+    font-size: 0.8rem;
+    color: #6c757d;
+    margin-bottom: 4px;
+    font-weight: 500;
+}
+
+.building-group .floor-rooms {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+}
+
+/* 拖拽预览 */
+.room-block.dragging {
+    opacity: 0.5;
+}
+
+.room-block.ui-draggable-dragging {
+    z-index: 9999;
+    transform: rotate(3deg);
+}
+
+/* 统计信息 */
+.stats-badge {
+    display: inline-block;
+    padding: 2px 6px;
+    border-radius: 3px;
+    font-size: 0.75rem;
+    font-weight: bold;
+}
+
+.stats-badge.male {
+    background: #0d6efd;
+    color: white;
+}
+
+.stats-badge.female {
+    background: #d63384;
+    color: white;
+}
+
+.stats-badge.success {
+    background: #198754;
+    color: white;
+}
+
+/* 宿舍选择状态 */
+.room-block.selected {
+    box-shadow: 0 0 0 3px rgba(59,130,246,.25);
+    transform: scale(1.08);
+    z-index: 100;
+}
+
+/* 已分配宿舍被选中时的样式 */
+.room-block.assigned.selected {
+    box-shadow: 0 0 0 3px #ffc107, 0 0 10px rgba(255, 193, 7, 0.5);
+}
+</style>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+// 全局数据
+var allRooms = [];
+var allClasses = [];
+var assignments = {}; // 保存分配关系：room_id -> [class_key, ...]
+var combinedRooms = new Set(); // 合班宿舍 ID 集合
+var selectedRoomId = null; // 当前选中的宿舍 ID
+var collapsedBuildings = {}; // 记录折叠的宿舍楼（building名 -> true）
+
+// 页面加载时获取数据
+$(document).ready(function() {
+    loadData();
+    initEventHandlers();
+});
+
+// 加载数据
+function loadData() {
+    $.ajax({
+        url: '/rooms/assign-data',
+        success: function(data) {
+            allRooms = data.rooms || [];
+            allClasses = data.classes || [];
+            
+            // 初始化分配关系
+            allRooms.forEach(function(room) {
+                if (room.grade && room.class_name) {
+                    var key = room.grade + '|' + room.class_name;
+                    if (!assignments[room.id]) {
+                        assignments[room.id] = [];
+                    }
+                    if (!assignments[room.id].includes(key)) {
+                        assignments[room.id].push(key);
+                    }
+                }
+                if (room.is_combined) {
+                    combinedRooms.add(room.id);
+                }
+            });
+            
+            renderClassList();
+            renderRoomList();
+            updateSetCombinedButton();
+        },
+        error: function() {
+            alert('加载数据失败');
+        }
+    });
+}
+
+// 渲染班级列表
+function renderClassList() {
+    var $classList = $('#classList');
+    $classList.empty();
+    
+    // 按年级分组
+    var classesByGrade = {};
+    allClasses.forEach(function(cls) {
+        if (!classesByGrade[cls.grade]) {
+            classesByGrade[cls.grade] = [];
+        }
+        classesByGrade[cls.grade].push(cls);
+    });
+    
+    // 获取所有年级并排序
+    var grades = Object.keys(classesByGrade).sort();
+    
+    // 渲染每个年级
+    grades.forEach(function(grade, index) {
+        var $gradeSection = $('<div class="grade-section mb-3"></div>');
+        var gradeId = 'grade-section-' + index;
+        
+        // 年级标题 - 可点击折叠
+        var $gradeHeader = $('<div class="grade-header d-flex justify-content-between align-items-center fw-bold mb-2 text-primary" style="cursor: pointer; padding: 8px; background: #f8f9fa; border-radius: 6px;">' +
+            '<span><i class="bi bi-chevron-down"></i> ' + grade + '</span>' +
+            '<span class="badge bg-primary">' + classesByGrade[grade].length + '个班</span>' +
+        '</div>');
+        $gradeSection.append($gradeHeader);
+        
+        // 年级内容区域
+        var $gradeBody = $('<div id="' + gradeId + '" class="grade-body"></div>');
+        $gradeSection.append($gradeBody);
+        
+        // 点击年级标题切换折叠
+        var isCollapsed = false;
+        $gradeHeader.click(function() {
+            var $icon = $(this).find('.bi-chevron-down');
+            if (isCollapsed) {
+                $gradeBody.show();
+                $icon.removeClass('bi-chevron-right').addClass('bi-chevron-down');
+                isCollapsed = false;
+            } else {
+                $gradeBody.hide();
+                $icon.removeClass('bi-chevron-down').addClass('bi-chevron-right');
+                isCollapsed = true;
+            }
+        });
+        
+        classesByGrade[grade].forEach(function(cls) {
+            var classKey = cls.grade + '|' + cls.class_name;
+            var assignedRooms = getAssignedRooms(classKey);
+            
+            // 按性别分开统计
+            var assignedMaleRooms = assignedRooms.filter(function(r) { return r.gender === '男'; });
+            var assignedFemaleRooms = assignedRooms.filter(function(r) { return r.gender === '女'; });
+            var assignedMaleCount = assignedMaleRooms.length;
+            var assignedFemaleCount = assignedFemaleRooms.length;
+            var availableMaleBeds = assignedMaleRooms.reduce(function(sum, room) {
+                return sum + room.capacity;
+            }, 0);
+            var availableFemaleBeds = assignedFemaleRooms.reduce(function(sum, room) {
+                return sum + room.capacity;
+            }, 0);
+            
+            var $classCard = $('<div class="class-card"></div>');
+            
+            // 确定性别区域
+            if (cls.boarding_male > 0 && cls.boarding_female === 0) {
+                $classCard.addClass('male-zone');
+            } else if (cls.boarding_female > 0 && cls.boarding_male === 0) {
+                $classCard.addClass('female-zone');
+            }
+            
+            $classCard.html(
+                '<div class="class-header" data-bs-toggle="collapse" data-bs-target="#class-' + classKey + '">' +
+                    '<i class="bi bi-chevron-down"></i> ' + grade + cls.class_name +
+                '</div>' +
+                '<div class="class-stats">' +
+                    '<span><i class="bi bi-people"></i> 住校：' + ((cls.boarding_male || 0) + (cls.boarding_female || 0)) + '人</span>' +
+                    '<span><i class="bi bi-building"></i> 已分配：' + assignedRooms.length + '间</span>' +
+                '</div>' +
+                '<div id="class-' + classKey + '" class="collapse show">' +
+                    '<div class="gender-split">' +
+                        (cls.boarding_male > 0 ? 
+                            '<div class="gender-box male" data-gender="male">' +
+                                '<div class="stat-row"><strong>男生宿舍区</strong></div>' +
+                                '<div class="stat-row"><span>住校：' + (cls.boarding_male || 0) + '人 | 已分配：' + assignedMaleCount + '间 | 可用：' + availableMaleBeds + '床</span></div>' +
+                                '<div class="dropzone" data-class="' + classKey + '" data-gender="male"></div>' +
+                            '</div>' : '') +
+                        (cls.boarding_female > 0 ? 
+                            '<div class="gender-box female" data-gender="female">' +
+                                '<div class="stat-row"><strong>女生宿舍区</strong></div>' +
+                                '<div class="stat-row"><span>住校：' + (cls.boarding_female || 0) + '人 | 已分配：' + assignedFemaleCount + '间 | 可用：' + availableFemaleBeds + '床</span></div>' +
+                                '<div class="dropzone" data-class="' + classKey + '" data-gender="female"></div>' +
+                            '</div>' : '') +
+                    '</div>' +
+                '</div>'
+            );
+            
+            // 渲染已分配的宿舍 - 按房间号排序
+            var $maleDropzone = $classCard.find('.gender-box.male .dropzone');
+            var $femaleDropzone = $classCard.find('.gender-box.female .dropzone');
+            
+            assignedMaleRooms.sort(function(a, b) {
+                return parseInt(a.room_number) - parseInt(b.room_number);
+            }).forEach(function(room) {
+                var $roomBlock = createRoomBlock(room, true, classKey);
+                if ($maleDropzone.length > 0) $maleDropzone.append($roomBlock);
+            });
+            
+            assignedFemaleRooms.sort(function(a, b) {
+                return parseInt(a.room_number) - parseInt(b.room_number);
+            }).forEach(function(room) {
+                var $roomBlock = createRoomBlock(room, true, classKey);
+                if ($femaleDropzone.length > 0) $femaleDropzone.append($roomBlock);
+            });
+            
+            $gradeBody.append($classCard);
+        });
+        
+        $classList.append($gradeSection);
+    });
+}
+
+// 渲染宿舍列表
+function renderRoomList() {
+    var $roomList = $('#roomList');
+    $roomList.empty();
+    
+    // 按宿舍楼分组
+    var roomsByBuilding = {};
+    allRooms.forEach(function(room) {
+        if (!roomsByBuilding[room.building]) {
+            roomsByBuilding[room.building] = {};
+        }
+        if (!roomsByBuilding[room.building][room.floor]) {
+            roomsByBuilding[room.building][room.floor] = [];
+        }
+        roomsByBuilding[room.building][room.floor].push(room);
+    });
+    
+    // 渲染每个宿舍楼
+    for (var building in roomsByBuilding) {
+        var $buildingGroup = $('<div class="building-group"></div>');
+        $buildingGroup.html(
+            '<div class="building-header" data-bs-toggle="collapse" data-bs-target="#building-' + building + '">' +
+                '<i class="bi bi-chevron-down"></i> ' + building +
+            '</div>' +
+            '<div id="building-' + building + '" class="collapse show">' +
+                '<div class="building-body"></div>' +
+            '</div>'
+        );
+        
+        var $buildingBody = $buildingGroup.find('.building-body');
+        
+        // 渲染每层楼 - 横向排列
+        var floors = Object.keys(roomsByBuilding[building]).sort(function(a, b) {
+            return parseInt(a) - parseInt(b);
+        });
+        
+        floors.forEach(function(floor) {
+            var $floorRow = $('<div class="floor-row"></div>');
+            $floorRow.append('<div class="floor-label">' + floor + '层</div>');
+            
+            var $floorRooms = $('<div class="floor-rooms"></div>');
+            roomsByBuilding[building][floor].forEach(function(room) {
+                // 检查房间是否已分配
+                var isAssigned = assignments[room.id] && assignments[room.id].length > 0;
+                var $roomBlock = createRoomBlock(room, isAssigned);
+                $floorRooms.append($roomBlock);
+            });
+            
+            $floorRow.append($floorRooms);
+            $buildingBody.append($floorRow);
+        });
+        
+        $roomList.append($buildingGroup);
+    }
+    
+    // 恢复折叠状态
+    for (var bld in collapsedBuildings) {
+        var $collapse = $('#building-' + bld);
+        if ($collapse.length) {
+            $collapse.removeClass('show');
+            var $header = $collapse.prev('.building-header');
+            $header.find('i').removeClass('bi-chevron-down').addClass('bi-chevron-right');
+        }
+    }
+    
+    if (Object.keys(roomsByBuilding).length === 0) {
+        $roomList.html('<div class="text-muted text-center p-3">没有符合条件的宿舍</div>');
+    }
+}
+
+// 创建宿舍小方块
+function createRoomBlock(room, isAssigned, classKey) {
+    var $block = $('<div class="room-block" data-room-id="' + room.id + '"></div>');
+    
+    if (room.gender === '男') {
+        $block.addClass('male');
+    } else {
+        $block.addClass('female');
+    }
+    
+    if (isAssigned) {
+        $block.addClass('assigned');
+    }
+    
+    if (combinedRooms.has(room.id)) {
+        $block.addClass('combined');
+    }
+    
+    // 设置模式下显示选中状态
+    // 选中状态
+    if (selectedRoomId === room.id) {
+        $block.addClass('selected');
+    }
+    
+    var buildingShort = room.building ? room.building.substring(0, 1) : '';
+    
+    // 获取已分配的班级列表，并按年级合并显示
+    var assignedClasses = [];
+    var classesByGrade = {};
+    if (assignments[room.id]) {
+        assignments[room.id].forEach(function(key) {
+            var parts = key.split('|');
+            var grade = parts[0];
+            var className = parts[1];
+            if (!classesByGrade[grade]) {
+                classesByGrade[grade] = [];
+            }
+            classesByGrade[grade].push(className);
+        });
+        
+        // 按年级排序并格式化显示
+        Object.keys(classesByGrade).sort().forEach(function(grade) {
+            var classNames = classesByGrade[grade].sort().join('/');
+            assignedClasses.push(grade + classNames);
+        });
+    }
+    
+    // 横向卡片布局：房间号在上，床位数和性别在下
+    $block.html(
+        '<div class="room-number">' + buildingShort + room.room_number + '</div>' +
+        '<div class="room-info">' +
+            '<span>' + room.capacity + '床</span>' +
+            '<span class="room-gender">' + (room.gender === '男' ? '♂' : '♀') + '</span>' +
+        '</div>' +
+        (assignedClasses.length > 0 ? 
+            '<div class="room-classes" title="' + assignedClasses.join(', ') + '">' + assignedClasses.join(', ') + '</div>' : 
+            '')
+    );
+    
+    // 如果是已分配的，添加删除按钮
+    if (isAssigned && classKey) {
+        var $removeBtn = $('<div class="remove-btn">×</div>');
+        $removeBtn.on('click', function(e) {
+            e.preventDefault();
+            e.stopPropagation();
+            removeRoomAssignment(room.id, classKey);
+        });
+        $block.append($removeBtn);
+    }
+    
+    // 添加拖拽功能 - 使用原生 HTML5 API
+    // 合班宿舍可以多次拖动（即使已分配），非合班宿舍只能在未分配时拖动
+    var isCombined = combinedRooms.has(room.id);
+    var canDrag = !isAssigned || isCombined;
+    
+    if (canDrag) {
+        $block[0].draggable = true;
+        $block.on('dragstart', function(e) {
+            e.originalEvent.dataTransfer.setData('text/plain', room.id);
+            e.originalEvent.dataTransfer.effectAllowed = 'copy';
+            $(this).addClass('dragging');
+        });
+        $block.on('dragend', function() {
+            $(this).removeClass('dragging');
+        });
+    }
+    
+    return $block;
+}
+
+// 更新设置合班宿舍按钮文本
+function updateSetCombinedButton() {
+    if (selectedRoomId === null) {
+        $('#setCombinedMode').html('<i class="bi bi-pencil"></i> 设置合班宿舍');
+        $('#setCombinedMode').removeClass('btn-success btn-danger').addClass('btn-primary');
+    } else {
+        var isCombined = combinedRooms.has(selectedRoomId);
+        if (isCombined) {
+            $('#setCombinedMode').html('<i class="bi bi-x-lg"></i> 取消合班宿舍');
+            $('#setCombinedMode').removeClass('btn-primary btn-success').addClass('btn-danger');
+        } else {
+            $('#setCombinedMode').html('<i class="bi bi-check-lg"></i> 设置为合班宿舍');
+            $('#setCombinedMode').removeClass('btn-primary btn-danger').addClass('btn-success');
+        }
+    }
+}
+
+// 获取已分配的宿舍
+function getAssignedRooms(classKey) {
+    var assignedRooms = [];
+    allRooms.forEach(function(room) {
+        if (assignments[room.id] && assignments[room.id].includes(classKey)) {
+            assignedRooms.push(room);
+        }
+    });
+    return assignedRooms;
+}
+
+// 初始化事件处理
+function initEventHandlers() {
+    // 保存分配
+    $('#saveAll').click(function() {
+        saveAssignments();
+    });
+    
+    // 宿舍楼折叠/展开事件跟踪
+    $(document).on('hidden.bs.collapse', '[id^="building-"]', function() {
+        var building = this.id.replace('building-', '');
+        collapsedBuildings[building] = true;
+        $(this).prev('.building-header').find('i').removeClass('bi-chevron-down').addClass('bi-chevron-right');
+    });
+    $(document).on('shown.bs.collapse', '[id^="building-"]', function() {
+        var building = this.id.replace('building-', '');
+        delete collapsedBuildings[building];
+        $(this).prev('.building-header').find('i').removeClass('bi-chevron-right').addClass('bi-chevron-down');
+    });
+    
+    // 清除所有已分配宿舍
+    $('#clearAll').click(function() {
+        if (confirm('确定要清除所有已分配的宿舍吗？此操作无法撤销。')) {
+            assignments = {};
+            selectedRoomId = null;
+            renderClassList();
+            renderRoomList();
+            updateSetCombinedButton();
+        }
+    });
+    
+    // 点击宿舍列表中的宿舍进行选择（包括已分配的宿舍）
+    $(document).on('click', '#roomList .room-block', function(e) {
+        e.preventDefault();
+        e.stopPropagation();
+        
+        var roomId = parseInt($(this).data('room-id'));
+        
+        // 如果已经选中，则取消选中
+        if (selectedRoomId === roomId) {
+            selectedRoomId = null;
+        } else {
+            selectedRoomId = roomId;
+        }
+        
+        renderRoomList();
+        updateSetCombinedButton();
+    });
+    
+    // 设置合班宿舍按钮
+    $('#setCombinedMode').click(function() {
+        if (selectedRoomId === null) {
+            alert('请先点击选择一个宿舍');
+            return;
+        }
+        
+        var room = allRooms.find(function(r) { return r.id === selectedRoomId; });
+        if (!room) return;
+        
+        var isCombined = combinedRooms.has(selectedRoomId);
+        
+        if (isCombined) {
+            // 已经是合班宿舍，尝试取消
+            // 检查是否分配给了多个班级
+            if (assignments[selectedRoomId] && assignments[selectedRoomId].length > 1) {
+                var classList = assignments[selectedRoomId].map(function(key) {
+                    var parts = key.split('|');
+                    return parts[0] + parts[1];
+                }).join(' 和 ');
+                alert('该房间已被分配给 ' + classList + '，无法取消合班设置。');
+                return;
+            }
+            
+            // 取消合班宿舍
+            toggleCombined(selectedRoomId);
+            selectedRoomId = null;
+            renderRoomList();
+            updateSetCombinedButton();
+        } else {
+            // 设置为合班宿舍
+            toggleCombined(selectedRoomId);
+            selectedRoomId = null;
+            renderRoomList();
+            updateSetCombinedButton();
+        }
+    });
+    
+    // 放置区域事件 - 使用原生 HTML5 dragover
+    $(document).on('dragover', '.dropzone', function(e) {
+        e.preventDefault();
+        e.stopPropagation();
+        $(this).addClass('drag-over');
+        return false;
+    });
+    
+    $(document).on('dragleave', '.dropzone', function(e) {
+        e.preventDefault();
+        e.stopPropagation();
+        $(this).removeClass('drag-over');
+    });
+    
+    $(document).on('drop', '.dropzone', function(e) {
+        e.preventDefault();
+        e.stopPropagation();
+        $(this).removeClass('drag-over');
+        
+        var dropzone = this;
+        var classKey = $(this).data('class');
+        var gender = $(this).data('gender');
+        var roomId = e.originalEvent.dataTransfer.getData('text/plain');
+        
+        if (!roomId) return;
+        
+        roomId = parseInt(roomId);
+        var room = allRooms.find(function(r) { return r.id === roomId; });
+        if (!room) return;
+        
+        // 检查性别匹配
+        if (gender === 'male' && room.gender !== '男') {
+            alert('男生区域只能分配男生宿舍');
+            return;
+        }
+        if (gender === 'female' && room.gender !== '女') {
+            alert('女生区域只能分配女生宿舍');
+            return;
+        }
+        
+        // 检查是否已经分配过（非合班宿舍只能分配一次）
+        var isCombined = combinedRooms.has(roomId);
+        if (!isCombined && assignments[roomId] && assignments[roomId].length > 0) {
+            alert('该宿舍已分配给其他班级，只有合班宿舍可以分配给多个班级');
+            return;
+        }
+        
+        // 添加分配关系
+        if (!assignments[roomId]) {
+            assignments[roomId] = [];
+        }
+        if (!assignments[roomId].includes(classKey)) {
+            assignments[roomId].push(classKey);
+        }
+        
+        // 重新渲染班级列表和宿舍列表，更新灰色状态
+        renderClassList();
+        renderRoomList();
+    });
+}
+
+// 删除房间分配
+function removeRoomAssignment(roomId, classKey) {
+    // 从指定班级的分配中移除该房间
+    if (assignments[roomId]) {
+        var index = assignments[roomId].indexOf(classKey);
+        if (index > -1) {
+            assignments[roomId].splice(index, 1);
+        }
+        
+        // 如果该房间不再分配给任何班级，删除整个分配记录
+        if (assignments[roomId].length === 0) {
+            delete assignments[roomId];
+        }
+    }
+    
+    renderClassList();
+    renderRoomList();
+    updateSetCombinedButton();
+}
+
+// 切换合班状态
+function toggleCombined(roomId) {
+    var isCombined = combinedRooms.has(roomId);
+    
+    $.ajax({
+        url: '/rooms/set-combined',
+        method: 'POST',
+        contentType: 'application/json',
+        data: JSON.stringify({
+            room_id: roomId,
+            is_combined: !isCombined
+        }),
+        success: function() {
+            if (isCombined) {
+                combinedRooms.delete(roomId);
+            } else {
+                combinedRooms.add(roomId);
+            }
+            renderRoomList();
+            renderClassList();
+            updateSetCombinedButton();
+        },
+        error: function() {
+            alert('操作失败');
+        }
+    });
+}
+
+// 保存所有分配
+function saveAssignments() {
+    var saveData = [];
+    
+    for (var roomId in assignments) {
+        assignments[roomId].forEach(function(classKey) {
+            var parts = classKey.split('|');
+            saveData.push({
+                room_id: parseInt(roomId),
+                grade: parts[0],
+                class_name: parts[1]
+            });
+        });
+    }
+    
+    $.ajax({
+        url: '/rooms/save-assignments',
+        method: 'POST',
+        contentType: 'application/json',
+        data: JSON.stringify({
+            assignments: saveData
+        }),
+        success: function(response) {
+            alert(response.message || '保存成功！');
+            loadData(); // 重新加载数据
+        },
+        error: function(xhr) {
+            var errorMsg = '保存失败';
+            if (xhr.responseJSON && xhr.responseJSON.message) {
+                errorMsg = xhr.responseJSON.message;
+            }
+            alert(errorMsg);
+        }
+    });
+}
+</script>
+{% endblock %}

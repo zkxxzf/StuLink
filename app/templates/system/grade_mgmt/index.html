@@ -1,0 +1,81 @@
+{% extends "base.html" %}
+{% block title %}年级管理{% endblock %}
+{% block content %}
+<h4 class="fw-bold mb-3"><i class="bi bi-gear"></i> 年级管理</h4>
+
+<div class="alert alert-info small">
+    <i class="bi bi-info-circle"></i> 毕业操作将<strong>自动备份数据库</strong>，然后清空该年级所有房间和床位占用。历史数据可通过备份文件查询。
+</div>
+
+<div class="row g-3">
+    {% set grades = ['2023级', '2024级', '2025级'] %}
+    {% for grade in grades %}
+    {% set gs = settings.get(grade, {}) %}
+    <div class="col-md-4">
+        <div class="card h-100 {% if gs.is_graduated %}border-secondary bg-light{% endif %}">
+            <div class="card-body text-center">
+                <h5 class="card-title">
+                    {{ grade }}
+                    {% if gs.is_graduated %}
+                    <span class="badge bg-secondary ms-1">已毕业</span>
+                    {% else %}
+                    <span class="badge bg-success ms-1">在读</span>
+                    {% endif %}
+                </h5>
+                <p class="text-muted small mb-3">
+                    {% if gs.is_graduated %}
+                    该年级已毕业，数据已存档
+                    {% else %}
+                    点击下方按钮执行毕业操作
+                    {% endif %}
+                </p>
+                <button class="btn {% if gs.is_graduated %}btn-outline-secondary{% else %}btn-outline-danger{% endif %} btn-sm"
+                        onclick="graduate('{{ grade }}')"
+                        {% if gs.is_graduated %}disabled{% endif %}>
+                    {% if gs.is_graduated %}
+                    <i class="bi bi-check-circle"></i> 已毕业
+                    {% else %}
+                    <i class="bi bi-mortarboard"></i> 设为毕业
+                    {% endif %}
+                </button>
+            </div>
+        </div>
+    </div>
+    {% endfor %}
+</div>
+
+{% block extra_js %}
+<script>
+function graduate(grade) {
+    if (!confirm('确定将 ' + grade + ' 设为毕业？\n\n此操作将：\n1. 自动备份数据库\n2. 清空该年级所有房间分配\n3. 清空该年级所有床位\n\n操作不可撤销！')) return;
+
+    var btn = event.target;
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span> 处理中...';
+
+    $.ajax({
+        url: "{{ url_for('grade_mgmt.graduate') }}",
+        method: 'POST',
+        contentType: 'application/json',
+        headers: { 'X-CSRFToken': csrfToken },
+        data: JSON.stringify({ grade: grade }),
+        success: function(res) {
+            if (res.success) {
+                alert(res.message);
+                location.reload();
+            } else {
+                alert(res.message);
+                btn.disabled = false;
+                btn.innerHTML = '<i class="bi bi-mortarboard"></i> 设为毕业';
+            }
+        },
+        error: function() {
+            alert('操作失败');
+            btn.disabled = false;
+            btn.innerHTML = '<i class="bi bi-mortarboard"></i> 设为毕业';
+        }
+    });
+}
+</script>
+{% endblock %}
+{% endblock %}

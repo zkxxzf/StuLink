@@ -1,0 +1,262 @@
+{% extends "base.html" %}
+{% block title %}班型设置{% endblock %}
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+    <h4 class="fw-bold mb-0"><i class="bi bi-tags"></i> 班型设置</h4>
+    <div>
+        <span id="saveStatus" class="text-muted me-2" style="font-size:14px;"></span>
+        <button class="btn btn-primary" id="saveAllBtn">
+            <i class="bi bi-check-lg"></i> 保存全部
+        </button>
+    </div>
+</div>
+
+<form id="batchForm">
+{% for grade in grades %}
+<div class="card mb-3">
+    <div class="card-header bg-light d-flex justify-content-between align-items-center" style="cursor:pointer;"
+         data-bs-toggle="collapse" data-bs-target="#grade-{{ grade|replace('级','') }}">
+        <span><i class="bi bi-chevron-down"></i> {{ grade }}</span>
+        <span class="badge bg-primary">{{ matrix[grade]|length }}个班</span>
+    </div>
+    <div id="grade-{{ grade|replace('级','') }}" class="collapse show">
+        <div class="card-body p-2">
+            <div class="table-responsive">
+            <table class="table table-sm table-hover mb-0 align-middle">
+                <thead class="table-light">
+                    <tr>
+                        <th style="width:80px;">班级</th>
+                        <th style="width:120px;">班型</th>
+                        <th style="width:100px;">选科方向</th>
+                        <th>选科组合</th>
+                        <th style="width:240px;">班主任</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for row in matrix[grade] %}
+                    <tr data-grade="{{ row.grade }}" data-class="{{ row.class_name }}"
+                        data-profile-id="{{ row.profile_id or '' }}"
+                        class="{% if row.class_type or row.subject_direction %}table-active{% endif %}">
+                        <td class="fw-bold">{{ row.class_name }}</td>
+                        <td>
+                            <select class="form-select form-select-sm class-type-select" style="min-width:100px;">
+                                <option value="">—</option>
+                                {% for t in class_type_options %}
+                                <option value="{{ t }}" {% if row.class_type == t %}selected{% endif %}>{{ t }}</option>
+                                {% endfor %}
+                            </select>
+                        </td>
+                        <td>
+                            <select class="form-select form-select-sm direction-select" style="min-width:90px;">
+                                <option value="">—</option>
+                                {% for d in direction_options %}
+                                <option value="{{ d }}" {% if row.subject_direction == d %}selected{% endif %}>{{ d }}</option>
+                                {% endfor %}
+                            </select>
+                        </td>
+                        <td>
+                            <div class="d-flex flex-wrap gap-1 subject-checks">
+                                {% for s in subject_options %}
+                                <label class="badge-subject {% if s in row.subjects %}active{% endif %}"
+                                       data-value="{{ s }}">{{ s }}</label>
+                                {% endfor %}
+                            </div>
+                        </td>
+                        <td>
+                            <div class="teacher-list d-flex flex-wrap gap-1 align-items-center">
+                                {% for t in row.teachers %}
+                                <span class="teacher-tag" data-user-id="{{ t.id }}">
+                                    {{ t.name }}
+                                    <button type="button" class="btn-close btn-close-sm teacher-remove" title="移除"></button>
+                                </span>
+                                {% endfor %}
+                                <select class="form-select form-select-sm teacher-add-select" style="width:90px;{% if row.teachers|length >= 3 %}display:none;{% endif %}">
+                                    <option value="">+添加</option>
+                                    {% for u in teacher_options %}
+                                    <option value="{{ u.id }}">{{ u.real_name }}</option>
+                                    {% endfor %}
+                                </select>
+                            </div>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+            </div>
+        </div>
+    </div>
+</div>
+{% endfor %}
+</form>
+{% endblock %}
+
+{% block extra_css %}
+<style>
+.badge-subject {
+    display: inline-block; padding: 2px 8px; font-size: 12px;
+    border: 1px solid #dee2e6; border-radius: 4px; cursor: pointer;
+    user-select: none; background: #fff; transition: all .15s;
+}
+.badge-subject:hover { border-color: #6c757d; }
+.badge-subject.active {
+    background: #0d6efd; color: #fff; border-color: #0d6efd;
+}
+.table-active { background: #f8faff !important; }
+.table-active:hover { background: #eef2ff !important; }
+.teacher-tag {
+    display: inline-flex; align-items: center; gap: 2px;
+    background: #e0e7ff; color: #3730a3; font-size: 12px;
+    padding: 2px 4px 2px 8px; border-radius: 4px; white-space: nowrap;
+}
+.teacher-tag .btn-close-sm {
+    width: 12px; height: 12px; font-size: 8px; opacity: .5; cursor: pointer;
+}
+.teacher-tag .btn-close-sm:hover { opacity: 1; }
+</style>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+$(function() {
+    // 选科标签点击切换
+    $(document).on('click', '.badge-subject', function() {
+        $(this).toggleClass('active');
+        $(this).closest('tr').attr('data-dirty', '1');
+    });
+
+    // 下拉框修改标记
+    $(document).on('change', '.class-type-select, .direction-select', function() {
+        $(this).closest('tr').attr('data-dirty', '1');
+    });
+
+    // 添加班主任
+    $(document).on('change', '.teacher-add-select', function() {
+        var $sel = $(this);
+        var userId = $sel.val();
+        if (!userId) return;
+        var $row = $sel.closest('tr');
+        var grade = $row.data('grade');
+        var cls = $row.data('class');
+        $.ajax({
+            url: '/class-profile/teachers/' + encodeURIComponent(grade) + '/' + encodeURIComponent(cls) + '/add',
+            method: 'POST',
+            contentType: 'application/json',
+            data: JSON.stringify({ user_id: parseInt(userId) }),
+            success: function(resp) {
+                var tag = '<span class="teacher-tag" data-user-id="' + resp.teacher.id + '">'
+                    + resp.teacher.name
+                    + '<button type="button" class="btn-close btn-close-sm teacher-remove" title="移除"></button></span>';
+                $sel.before(tag);
+                $sel.val('');
+                // 移除已选选项
+                $sel.find('option[value="' + resp.teacher.id + '"]').remove();
+                // 满3人隐藏添加
+                var count = $row.find('.teacher-tag').length;
+                if (count >= 3) $sel.hide();
+            },
+            error: function(xhr) {
+                var msg = '添加失败';
+                try { msg = JSON.parse(xhr.responseText).message; } catch(e) {}
+                alert(msg);
+                $sel.val('');
+            }
+        });
+    });
+
+    // 移除班主任
+    $(document).on('click', '.teacher-remove', function() {
+        var $tag = $(this).closest('.teacher-tag');
+        var $row = $tag.closest('tr');
+        var userId = $tag.data('user-id');
+        var grade = $row.data('grade');
+        var cls = $row.data('class');
+        var teacherName = $tag.text().trim();
+        if (!confirm('确定移除 ' + teacherName + ' 的班主任身份？')) return;
+        $.ajax({
+            url: '/class-profile/teachers/' + encodeURIComponent(grade) + '/' + encodeURIComponent(cls) + '/remove',
+            method: 'POST',
+            contentType: 'application/json',
+            data: JSON.stringify({ user_id: parseInt(userId) }),
+            success: function(resp) {
+                // 把移除的教师加回下拉框
+                var $sel = $row.find('.teacher-add-select');
+                $sel.append('<option value="' + userId + '">' + teacherName + '</option>');
+                $tag.remove();
+                var count = $row.find('.teacher-tag').length;
+                if (count < 3) $sel.show();
+            },
+            error: function(xhr) {
+                var msg = '移除失败';
+                try { msg = JSON.parse(xhr.responseText).message; } catch(e) {}
+                alert(msg);
+            }
+        });
+    });
+
+    // 保存全部（班型+选科）
+    $('#saveAllBtn').click(function() {
+        var items = [];
+        var dirtyCount = 0;
+        $('#batchForm tbody tr').each(function() {
+            var $row = $(this);
+            var grade = $row.data('grade');
+            var className = $row.data('class');
+            var classType = $row.find('.class-type-select').val() || '';
+            var direction = $row.find('.direction-select').val() || '';
+            var subjects = [];
+            $row.find('.badge-subject.active').each(function() {
+                subjects.push($(this).data('value'));
+            });
+            items.push({
+                grade: grade,
+                class_name: className,
+                class_type: classType,
+                subject_direction: direction,
+                subjects: subjects
+            });
+            if ($row.attr('data-dirty') === '1') dirtyCount++;
+        });
+        if (dirtyCount === 0) {
+            $('#saveStatus').text('没有修改').removeClass('text-success text-danger');
+            return;
+        }
+        var $btn = $('#saveAllBtn').prop('disabled', true);
+        $('#saveStatus').text('保存中...').removeClass('text-success text-danger');
+        $.ajax({
+            url: '/class-profile/batch-save',
+            method: 'POST',
+            contentType: 'application/json',
+            data: JSON.stringify({ items: items }),
+            headers: { 'X-CSRFToken': '{{ csrf_token() }}' },
+            success: function(resp) {
+                $('#saveStatus').text(resp.message).addClass('text-success');
+                $('#batchForm tbody tr').removeAttr('data-dirty');
+                updateRowHighlight();
+                setTimeout(function() {
+                    $('#saveStatus').text('').removeClass('text-success');
+                }, 3000);
+            },
+            error: function(xhr) {
+                var msg = '保存失败';
+                try { msg = JSON.parse(xhr.responseText).message; } catch(e) {}
+                $('#saveStatus').text(msg).addClass('text-danger');
+                setTimeout(function() {
+                    $('#saveStatus').text('').removeClass('text-danger');
+                }, 5000);
+            },
+            complete: function() { $btn.prop('disabled', false); }
+        });
+    });
+
+    function updateRowHighlight() {
+        $('#batchForm tbody tr').each(function() {
+            var $row = $(this);
+            var hasType = $row.find('.class-type-select').val();
+            var hasDir = $row.find('.direction-select').val();
+            if (hasType || hasDir) $row.addClass('table-active');
+            else $row.removeClass('table-active');
+        });
+    }
+});
+</script>
+{% endblock %}

@@ -1,0 +1,47 @@
+{% extends "base.html" %}
+{% block title %}宿舍总览{% endblock %}
+{% block content %}
+<h4 class="fw-bold mb-3"><i class="bi bi-map"></i> 宿舍总览</h4>
+
+{% for floor_name, rooms in floor_data.items() %}
+<div class="card mb-3">
+    <div class="card-header py-2">
+        <h6 class="mb-0">{{ floor_name }}</h6>
+    </div>
+    <div class="card-body">
+        <div class="row g-2">
+            {% for rd in rooms %}
+            {% set room = rd.room %}
+            {% set occ = rd.occupancy %}
+            {% set pct = (occ / room.capacity * 100)|int %}
+            <div class="col-6 col-sm-4 col-md-3 col-lg-2">
+                <a href="{{ url_for('rooms.detail', id=room.id) }}" class="text-decoration-none">
+                    <div class="text-center p-2 rounded border
+                         {% if occ == room.capacity %}border-success bg-success bg-opacity-10
+                         {% elif occ > 0 %}border-warning bg-warning bg-opacity-10
+                         {% else %}border-light{% endif %}"
+                         style="font-size:12px;">
+                        <div class="fw-bold text-dark">{{ room.display_name }}</div>
+                        <div class="{% if occ == room.capacity %}text-success{% elif occ > 0 %}text-warning{% else %}text-muted{% endif %}">
+                            {{ occ }}/{{ room.capacity }}
+                        </div>
+                        {% if room.class_name %}
+                        <div class="text-muted" style="font-size:10px;">{{ room.class_name }}</div>
+                        {% endif %}
+                    </div>
+                </a>
+            </div>
+            {% endfor %}
+        </div>
+    </div>
+</div>
+{% endfor %}
+
+<div class="card">
+    <div class="card-body small">
+        <span class="me-3"><span class="d-inline-block rounded border border-success bg-success bg-opacity-10" style="width:14px;height:14px;"></span> 满员</span>
+        <span class="me-3"><span class="d-inline-block rounded border border-warning bg-warning bg-opacity-10" style="width:14px;height:14px;"></span> 部分入住</span>
+        <span><span class="d-inline-block rounded border border-light" style="width:14px;height:14px;"></span> 空房</span>
+    </div>
+</div>
+{% endblock %}

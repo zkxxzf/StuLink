@@ -1,0 +1,450 @@
+{% extends "base.html" %}
+{% block title %}床位分配{% endblock %}
+{% block content %}
+<h4 class="fw-bold mb-3"><i class="bi bi-grid-3x3-gap"></i> 床位分配</h4>
+
+{% if not current_user.has_role('homeroom_teacher') %}
+<!-- 管理员/宿管选择年级班级（只能单选一个班） -->
+<div class="card mb-3">
+    <div class="card-body">
+        <form method="GET" class="row g-2 align-items-end">
+            <div class="col-md-3">
+                <label class="form-label small">年级 <span class="text-danger">*</span></label>
+                <select name="grade" class="form-select form-select-sm" required>
+                    <option value="">请选择</option>
+                    <option value="2025级" {{ 'selected' if current_grade=='2025级' }}>2025级</option>
+                    <option value="2024级" {{ 'selected' if current_grade=='2024级' }}>2024级</option>
+                    <option value="2023级" {{ 'selected' if current_grade=='2023级' }}>2023级</option>
+                </select>
+            </div>
+            <div class="col-md-3">
+                <label class="form-label small">班级 <span class="text-danger">*</span></label>
+                <select name="class_name" class="form-select form-select-sm" required>
+                    <option value="">请选择</option>
+                    {% for i in range(1, 11) %}
+                    <option value="{{ '%02d班' % i }}" {{ 'selected' if current_class=='%02d班' % i }}>{{ '%02d班' % i }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="col-md-2">
+                <button type="submit" class="btn btn-primary btn-sm"><i class="bi bi-funnel"></i> 查看</button>
+            </div>
+        </form>
+    </div>
+</div>
+{% endif %}
+
+{% if need_filter %}
+<div class="alert alert-warning"><i class="bi bi-exclamation-triangle"></i> 请先选择年级和班级</div>
+{% else %}
+<!-- 操作栏 -->
+<div class="d-flex justify-content-between align-items-center mb-2">
+    <span class="text-muted small"><i class="bi bi-building"></i> 当前：{{ current_grade }} {{ current_class }}</span>
+    <button class="btn btn-outline-danger btn-sm" onclick="clearClass()" title="清除本班全部已分配床位">
+        <i class="bi bi-eraser"></i> 清除本班床位
+    </button>
+</div>
+{% endif %}
+
+{% if no_rooms %}
+<div class="alert alert-danger"><i class="bi bi-x-circle"></i> <strong>该班级尚未被宿管分配宿舍！</strong>请先由宿管在"宿舍管理→自动分配宿舍"中为本班分配房间。</div>
+{% elif beds_insufficient %}
+<div class="alert alert-warning"><i class="bi bi-exclamation-triangle"></i> <strong>床位不足！</strong>本班 {{ total_students_needed }} 名住校生，但分配到的宿舍总容量仅 {{ total_capacity }} 人，缺少 {{ total_students_needed - total_capacity }} 个床位。请联系宿管增配宿舍。</div>
+{% endif %}
+
+<div class="row g-3">
+    <!-- 左侧：未分配学生 -->
+    <div class="col-lg-3">
+        <div class="card" style="position:sticky;top:70px;">
+            <div class="card-header bg-warning bg-opacity-10 d-flex justify-content-between align-items-center">
+                <div>
+                    <h6 class="mb-1"><i class="bi bi-people"></i> 待分配学生 ({{ unassigned_students|length }})</h6>
+                    <div style="font-size:11px;color:#64748b;">
+                        <span class="text-primary">男</span> 已分配{{ assigned_male }}/{{ total_male }}
+                        &nbsp;<span class="text-danger">女</span> 已分配{{ assigned_female }}/{{ total_female }}
+                        &nbsp;合计 已分配{{ assigned_total }}/{{ total_all }}
+                    </div>
+                </div>
+                {% if unassigned_students %}
+                <button class="btn btn-sm btn-success" onclick="autoAssign()" title="一键自动分配">
+                    <i class="bi bi-magic"></i> 自动分配
+                </button>
+                {% endif %}
+            </div>
+            <div class="card-body p-0" style="max-height:70vh;overflow-y:auto;">
+                {% for s in unassigned_students %}
+                <div class="student-item p-2 border-bottom d-flex justify-content-between align-items-center {% if s.gender == '男' %}male-student{% else %}female-student{% endif %}"
+                     draggable="true" data-student-id="{{ s.id }}" data-student-name="{{ s.name }}"
+                     ondragstart="dragStart(event, {{ s.id }}, '{{ s.name }}')"
+                     ondragend="dragEnd(event)"
+                     style="cursor:grab;font-size:13px;">
+                    <div>
+                        <strong>{{ s.name }}</strong>
+                        <div class="text-muted" style="font-size:11px;">
+                            {{ s.student_number }}
+                            {% if s.gender=='男' %}<span class="badge bg-primary" style="font-size:10px;">男</span>
+                            {% else %}<span class="badge bg-danger" style="font-size:10px;">女</span>{% endif %}
+                        </div>
+                    </div>
+                    <span class="badge bg-light text-dark" style="font-size:10px;">{{ s.class_name }}</span>
+                </div>
+                {% endfor %}
+                {% if not unassigned_students %}
+                <div class="text-center text-muted py-4 small">全部已分配</div>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+
+    <!-- 右侧：宿舍床位网格 -->
+    <div class="col-lg-9">
+        {% if not rooms_data %}
+        <div class="text-center text-muted py-5">
+            <i class="bi bi-inbox" style="font-size:48px;"></i>
+            <p class="mt-2">没有找到已分配的宿舍，请先由宿管分配宿舍给班级</p>
+        </div>
+        {% endif %}
+
+        <div class="row g-3">
+            {% for rd in rooms_data %}
+            <div class="col-md-6">
+                <div class="card {% if rd.room.gender == '男' %}border-primary{% elif rd.room.gender == '女' %}border-danger{% endif %}">
+                    <div class="card-header py-2 d-flex justify-content-between {% if rd.room.gender == '男' %}bg-primary bg-opacity-10{% elif rd.room.gender == '女' %}bg-danger bg-opacity-10{% endif %}">
+                        <span class="fw-bold">
+                            {% if rd.room.building %}{{ rd.room.building|replace('宿舍楼','') }} {% endif %}{{ rd.room.room_number }}
+                            {% if rd.room.gender == '男' %}<span class="badge bg-primary ms-1" style="font-size:10px;">男</span>
+                            {% elif rd.room.gender == '女' %}<span class="badge bg-danger ms-1" style="font-size:10px;">女</span>
+                            {% endif %}
+                            {% if rd.room.combined_class and rd.room.combined_class.strip() %}<span class="badge bg-warning text-dark ms-1" style="font-size:10px;" title="合班宿舍，需手动分配">合班</span>{% endif %}
+                        </span>
+                        <span class="badge bg-secondary">{{ rd.room.grade }} {{ rd.room.class_name or '' }}</span>
+                    </div>
+                    <div class="card-body py-2">
+                        <div class="bed-grid">
+                            {% for bd in rd.beds %}
+                            <div class="bed-slot {% if bd.student %}occupied{% else %}empty{% endif %} {% if rd.room.gender == '男' %}male-room{% elif rd.room.gender == '女' %}female-room{% endif %}"
+                                 data-bed-id="{{ bd.bed.id }}"
+                                 {% if bd.student %}data-student-id="{{ bd.student.id }}" data-student-name="{{ bd.student.name }}"{% endif %}
+                                 {% if bd.student %}draggable="true"{% endif %}
+                                 ondragstart="{% if bd.student %}dragStartBed(event, {{ bd.bed.id }}, {{ bd.student.id }}, '{{ bd.student.name }}'){% endif %}"
+                                 ondragend="{% if bd.student %}dragEnd(event){% endif %}"
+                                 ondragover="dragOver(event)"
+                                 ondragleave="dragLeave(event)"
+                                 ondrop="dropStudent(event, {{ bd.bed.id }}, {{ bd.student.id if bd.student else 0 }}, '{{ bd.student.name if bd.student else '' }}')"
+                                 onclick="{% if bd.student %}removeBed({{ bd.bed.id }}, '{{ bd.student.name }}'){% endif %}"><!-- 空床点击无反应，等待拖放 -->
+                                <div class="bed-number">{{ bd.bed.bed_number }}床 {% if bd.bed.bed_number % 2 == 1 %}(下铺){% else %}(上铺){% endif %}</div>
+                                {% if bd.student %}
+                                <div class="bed-student" style="cursor:grab;">{{ bd.student.name }}</div>
+                                <div style="font-size:10px;color:#ef4444;cursor:pointer;" title="点击移除" onclick="event.stopPropagation();removeBed({{ bd.bed.id }}, '{{ bd.student.name }}')"><i class="bi bi-x-circle"></i> 移除</div>
+                                <div style="font-size:9px;color:#9ca3af;">按住拖拽可换位</div>
+                                {% else %}
+                                <div class="text-muted small"><i class="bi bi-arrow-down-circle"></i> 拖放学生</div>
+                                {% endif %}
+                            </div>
+                            {% endfor %}
+                        </div>
+                    </div>
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+    </div>
+</div>
+
+<!-- 分配弹窗 -->
+<div class="modal fade" id="assignModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h6 class="modal-title">选择学生分配到 <span id="modalBedInfo"></span></h6>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body" style="max-height:400px;overflow-y:auto;">
+                <input type="text" class="form-control form-control-sm mb-2" id="studentFilter"
+                       placeholder="输入姓名或学号搜索...">
+                <div id="studentListModal"></div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+var currentBedId = null;
+var draggedStudentId = null;
+var draggedStudentName = '';
+var draggedFromBedId = null;  // null=左侧列表, 有值=从某床位拖出
+var students = [
+    {% for s in unassigned_students %}
+    {id: {{ s.id }}, name: "{{ s.name }}", number: "{{ s.student_number }}", gender: "{{ s.gender }}", cls: "{{ s.class_name }}"},
+    {% endfor %}
+];
+
+/* ========== 拖放相关 ========== */
+// 从左侧学生列表拖出
+function dragStart(e, studentId, studentName) {
+    draggedStudentId = studentId;
+    draggedStudentName = studentName;
+    draggedFromBedId = null;  // 来自列表
+    e.dataTransfer.effectAllowed = 'move';
+    e.dataTransfer.setData('text/plain', 'student:' + studentId);
+    e.currentTarget.style.opacity = '0.5';
+}
+
+// 从已占床位拖出
+function dragStartBed(e, bedId, studentId, studentName) {
+    draggedStudentId = studentId;
+    draggedStudentName = studentName;
+    draggedFromBedId = bedId;  // 来自床位
+    e.dataTransfer.effectAllowed = 'move';
+    e.dataTransfer.setData('text/plain', 'bed:' + bedId + ':' + studentId);
+    e.currentTarget.style.opacity = '0.5';
+}
+
+function dragEnd(e) {
+    e.currentTarget.style.opacity = '1';
+    $('.bed-slot.drag-over').removeClass('drag-over');
+}
+
+function dragOver(e) {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+    var bed = e.currentTarget.closest('.bed-slot') || e.target.closest('.bed-slot');
+    if (bed) { bed.classList.add('drag-over'); }
+}
+
+function dragLeave(e) {
+    var bed = e.currentTarget.closest('.bed-slot') || e.target.closest('.bed-slot');
+    if (bed) { bed.classList.remove('drag-over'); }
+}
+
+function dropStudent(e, toBedId, toStudentId, toStudentName) {
+    e.preventDefault();
+    var bed = e.currentTarget;
+    if (bed) { bed.classList.remove('drag-over'); }
+
+    // 从 dataTransfer 恢复（兼容兜底）
+    if (!draggedStudentId) {
+        var raw = e.dataTransfer.getData('text/plain');
+        if (raw.startsWith('student:')) {
+            draggedStudentId = parseInt(raw.split(':')[1]);
+            draggedFromBedId = null;
+        } else if (raw.startsWith('bed:')) {
+            var parts = raw.split(':');
+            draggedFromBedId = parseInt(parts[1]);
+            draggedStudentId = parseInt(parts[2]);
+        }
+    }
+
+    if (!draggedStudentId) {
+        alert('请从左侧列表或已占床位拖动学生');
+        return;
+    }
+
+    var sid = draggedStudentId;
+    var fromBed = draggedFromBedId;
+    draggedStudentId = null;
+    draggedFromBedId = null;
+
+    // 放到自己身上 → 无操作
+    if (fromBed && fromBed === toBedId) return;
+
+    // 情形1: 从左侧列表拖到空床 → 新分配（绿色脉冲，动效与请求并行）
+    if (fromBed === null && toStudentId === 0) {
+        $('.bed-slot[data-bed-id="' + toBedId + '"]').addClass('bed-assign');
+        doAssign(sid, toBedId);
+        return;
+    }
+
+    // 情形2: 从床位拖到空床 → 搬移（紫色脉冲+源床淡出，动效与请求并行）
+    if (fromBed !== null && toStudentId === 0) {
+        var srcSlot = $('.bed-slot[data-bed-id="' + fromBed + '"]');
+        srcSlot.css({opacity: 0.4, transform: 'scale(0.9)', transition: 'all 0.3s'});
+        $('.bed-slot[data-bed-id="' + toBedId + '"]').addClass('bed-move-in');
+        doMove(sid, fromBed, toBedId);
+        return;
+    }
+
+    // 情形3: 从床位拖到另一个有人的床位 → 互换（橙色双闪，动效与请求并行）
+    if (fromBed !== null && toStudentId !== 0 && fromBed !== toBedId) {
+        var fromSlot = $('.bed-slot[data-bed-id="' + fromBed + '"]');
+        var toSlot = $('.bed-slot[data-bed-id="' + toBedId + '"]');
+        fromSlot.add(toSlot).addClass('bed-swapping');
+        doSwap(sid, fromBed, toStudentId, toBedId);
+        return;
+    }
+
+    // 情形4: 从左侧列表拖到已占床位 → 拒绝（红色抖动）
+    if (fromBed === null && toStudentId !== 0) {
+        $('.bed-slot[data-bed-id="' + toBedId + '"]').addClass('bed-reject');
+        setTimeout(function() {
+            $('.bed-slot[data-bed-id="' + toBedId + '"]').removeClass('bed-reject');
+        }, 400);
+        return;
+    }
+}
+
+/* ========== 分配/移除 ========== */
+function doAssign(studentId, bedId) {
+    var btn = $('.student-item[data-student-id="' + studentId + '"]');
+    btn.addClass('opacity-50');
+    $.ajax({
+        url: "{{ url_for('assignments.assign') }}",
+        method: 'POST',
+        contentType: 'application/json',
+        headers: { 'X-CSRFToken': csrfToken },
+        data: JSON.stringify({student_id: studentId, bed_id: bedId || currentBedId}),
+        success: function(res) {
+            if(res.success) { location.reload(); }
+            else { alert(res.message); btn.removeClass('opacity-50'); }
+        },
+        error: function(xhr) {
+            var msg = xhr.responseJSON ? xhr.responseJSON.message : '操作失败';
+            alert(msg);
+            btn.removeClass('opacity-50');
+        }
+    });
+}
+
+/* ========== 搬移/互换 ========== */
+function doMove(studentId, fromBedId, toBedId) {
+    $.ajax({
+        url: "{{ url_for('assignments.move') }}",
+        method: 'POST',
+        contentType: 'application/json',
+        headers: { 'X-CSRFToken': csrfToken },
+        data: JSON.stringify({student_id: studentId, from_bed_id: fromBedId, to_bed_id: toBedId}),
+        success: function(res) {
+            if(res.success) { location.reload(); }
+            else { alert(res.message); }
+        },
+        error: function(xhr) {
+            var msg = xhr.responseJSON ? xhr.responseJSON.message : '操作失败';
+            alert(msg);
+        }
+    });
+}
+
+function doSwap(studentIdA, fromBedId, studentIdB, toBedId) {
+    $.ajax({
+        url: "{{ url_for('assignments.swap') }}",
+        method: 'POST',
+        contentType: 'application/json',
+        headers: { 'X-CSRFToken': csrfToken },
+        data: JSON.stringify({student_id_a: studentIdA, bed_id_a: fromBedId, student_id_b: studentIdB, bed_id_b: toBedId}),
+        success: function(res) {
+            if(res.success) { location.reload(); }
+            else { alert(res.message); }
+        },
+        error: function(xhr) {
+            var msg = xhr.responseJSON ? xhr.responseJSON.message : '操作失败';
+            alert(msg);
+        }
+    });
+}
+
+/* ========== 移除 ========== */
+function removeBed(bedId, studentName) {
+    var slot = $('.bed-slot[data-bed-id="' + bedId + '"]');
+    slot.css({opacity: 0.5, transform: 'scale(0.9)', transition: 'all 0.25s ease-out'});
+    $.ajax({
+        url: "{{ url_for('assignments.unassign') }}",
+        method: 'POST',
+        contentType: 'application/json',
+        headers: { 'X-CSRFToken': csrfToken },
+        data: JSON.stringify({bed_id: bedId}),
+        success: function(res) {
+            if(res.success) { location.reload(); }
+            else { alert(res.message); }
+        },
+        error: function(xhr) {
+            var msg = xhr.responseJSON ? xhr.responseJSON.message : '操作失败';
+            alert(msg);
+        }
+    });
+}
+
+/* ========== 自动分配 ========== */
+function autoAssign() {
+    var btn = $('.btn-success');
+    btn.prop('disabled', true).html('<span class="spinner-border spinner-border-sm"></span> 分配中...');
+    
+    $.ajax({
+        url: "{{ url_for('assignments.auto_assign') }}",
+        method: 'POST',
+        contentType: 'application/json',
+        headers: { 'X-CSRFToken': csrfToken },
+        data: JSON.stringify({
+            grade: "{{ current_grade }}",
+            class_name: "{{ current_class }}"
+        }),
+        success: function(res) {
+            if(res.success) { 
+                location.reload(); 
+            }
+            else { alert(res.message || '自动分配失败'); btn.prop('disabled', false).html('<i class="bi bi-magic"></i> 自动分配'); }
+        },
+        error: function(xhr) {
+            var msg = xhr.responseJSON ? xhr.responseJSON.message : '请求失败';
+            alert(msg);
+            btn.prop('disabled', false).html('<i class="bi bi-magic"></i> 自动分配');
+        }
+    });
+}
+
+/* ========== 清除本班床位 ========== */
+function clearClass() {
+    if (!confirm('确定清除 {{ current_grade }} {{ current_class }} 的全部已分配床位？\n\n该操作不可撤销，所有学生将回到待分配状态。')) return;
+    
+    var btn = $('.btn-outline-danger');
+    btn.prop('disabled', true).html('<span class="spinner-border spinner-border-sm"></span> 清除中...');
+    
+    $.ajax({
+        url: "{{ url_for('assignments.clear_class') }}",
+        method: 'POST',
+        contentType: 'application/json',
+        headers: { 'X-CSRFToken': csrfToken },
+        data: JSON.stringify({
+            grade: "{{ current_grade }}",
+            class_name: "{{ current_class }}"
+        }),
+        success: function(res) {
+            if(res.success) { location.reload(); }
+            else { alert(res.message); btn.prop('disabled', false).html('<i class="bi bi-eraser"></i> 清除本班床位'); }
+        },
+        error: function(xhr) {
+            var msg = xhr.responseJSON ? xhr.responseJSON.message : '请求失败';
+            alert(msg);
+            btn.prop('disabled', false).html('<i class="bi bi-eraser"></i> 清除本班床位');
+        }
+    });
+}
+
+/* ========== 兼容旧的弹窗模式（保留备用） ========== */
+function showAssignModal(bedId, roomNumber, bedNumber) {
+    currentBedId = bedId;
+    $('#modalBedInfo').text(roomNumber + ' ' + bedNumber + '床');
+    renderStudentList('');
+    new bootstrap.Modal('#assignModal').show();
+    setTimeout(function(){ $('#studentFilter').focus(); }, 300);
+}
+
+$('#studentFilter').on('input', function(){
+    renderStudentList(this.value.toLowerCase());
+});
+
+function renderStudentList(filter) {
+    var html = '';
+    students.forEach(function(s){
+        if(filter && s.name.toLowerCase().indexOf(filter) < 0 && s.number.indexOf(filter) < 0) return;
+        html += '<div class="d-flex justify-content-between align-items-center p-2 border-bottom" style="cursor:pointer;" onclick="doAssign('+s.id+', null)">';
+        html += '<div><strong>'+s.name+'</strong> <span class="text-muted small">'+s.number+'</span></div>';
+        html += '<span class="badge bg-light text-dark">'+s.cls+'</span>';
+        html += '</div>';
+    });
+    if(!html) html = '<div class="text-center text-muted py-3">没有可分配的学生</div>';
+    $('#studentListModal').html(html);
+}
+</script>
+{% endblock %}

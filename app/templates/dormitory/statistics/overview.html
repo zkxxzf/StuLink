@@ -1,0 +1,278 @@
+{% extends "base.html" %}
+{% block title %}统计报表{% endblock %}
+{% block content %}
+<h4 class="fw-bold mb-3"><i class="bi bi-bar-chart-line"></i> 统计报表</h4>
+
+<!-- 宿舍概况卡片 -->
+<div class="row g-3 mb-4">
+    <div class="col-sm-6 col-lg-3">
+        <div class="card stat-card">
+            <div class="card-body text-center">
+                <div class="stat-number text-primary">{{ dorm_stats.total_rooms }}</div>
+                <div class="stat-label">宿舍总数</div>
+            </div>
+        </div>
+    </div>
+    <div class="col-sm-6 col-lg-3">
+        <div class="card stat-card">
+            <div class="card-body text-center">
+                <div class="stat-number text-success">{{ dorm_stats.occupied_beds }}</div>
+                <div class="stat-label">已用床位</div>
+            </div>
+        </div>
+    </div>
+    <div class="col-sm-6 col-lg-3">
+        <div class="card stat-card">
+            <div class="card-body text-center">
+                <div class="stat-number text-warning">{{ dorm_stats.empty_beds }}</div>
+                <div class="stat-label">空余床位</div>
+            </div>
+        </div>
+    </div>
+    <div class="col-sm-6 col-lg-3">
+        <div class="card stat-card">
+            <div class="card-body text-center">
+                <div class="stat-number text-info">{{ dorm_stats.occupancy_rate }}%</div>
+                <div class="stat-label">床位使用率</div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Tab导航 -->
+<ul class="nav nav-tabs mb-3">
+    {% if scope_type in ('school',) or not scope_type %}
+    <li class="nav-item">
+        <a class="nav-link {% if tab == 'school' %}active{% endif %}"
+           href="{{ url_for('statistics.index', tab='school') }}">
+            <i class="bi bi-building"></i> 全校统计报表
+        </a>
+    </li>
+    {% endif %}
+    {% if scope_type in ('school', 'grade') or not scope_type %}
+    <li class="nav-item">
+        <a class="nav-link {% if tab == 'grade' %}active{% endif %}"
+           href="{{ url_for('statistics.index', tab='grade', grade=sel_grade) }}">
+            <i class="bi bi-layers"></i> 年级统计报表
+        </a>
+    </li>
+    {% endif %}
+    <li class="nav-item">
+        <a class="nav-link {% if tab == 'class' %}active{% endif %}"
+           href="{{ url_for('statistics.index', tab='class', grade=sel_grade) }}">
+            <i class="bi bi-people"></i> 班级统计报表
+        </a>
+    </li>
+</ul>
+
+<!-- 年级选择器（年级/班级tab时显示） -->
+{% if tab in ('grade', 'class') and grade_options|length > 1 %}
+<div class="mb-3">
+    <label class="form-label d-inline me-2">选择年级：</label>
+    <select class="form-select d-inline-block" style="width:180px;" onchange="location.href='?tab={{ tab }}&grade='+this.value">
+        <option value="">全部</option>
+        {% for g in grade_options %}
+        <option value="{{ g }}" {% if sel_grade == g %}selected{% endif %}>{{ g }}</option>
+        {% endfor %}
+    </select>
+</div>
+{% endif %}
+
+<!-- Tab: 全校统计 -->
+{% if tab == 'school' and school_stats %}
+<div class="row g-3 mb-4">
+    <div class="col-sm-4">
+        <div class="card stat-card"><div class="card-body text-center">
+            <div class="stat-number text-primary">{{ school_stats.grade_count }}</div>
+            <div class="stat-label">年级数</div>
+        </div></div>
+    </div>
+    <div class="col-sm-4">
+        <div class="card stat-card"><div class="card-body text-center">
+            <div class="stat-number text-info">{{ school_stats.class_count }}</div>
+            <div class="stat-label">班级数</div>
+        </div></div>
+    </div>
+    <div class="col-sm-4">
+        <div class="card stat-card"><div class="card-body text-center">
+            <div class="stat-number text-success">{{ school_stats.total }}</div>
+            <div class="stat-label">学生总数</div>
+        </div></div>
+    </div>
+</div>
+<div class="card">
+    <div class="card-header"><h6 class="mb-0">按年级汇总</h6></div>
+    <div class="card-body p-0"><div class="table-responsive">
+        <table class="table table-hover table-sm mb-0">
+            <thead class="table-light">
+                <tr>
+                    <th>年级</th><th>班级数</th><th>总人数</th>
+                    <th class="text-primary">男</th><th class="text-danger">女</th>
+                    <th>住校</th><th>住校男</th><th>住校女</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for s in per_grade_stats %}
+                <tr>
+                    <td class="fw-bold">{{ s.grade }}</td>
+                    <td>{{ s.class_count }}</td>
+                    <td>{{ s.total }}</td>
+                    <td class="text-primary">{{ s.male }}</td>
+                    <td class="text-danger">{{ s.female }}</td>
+                    <td>{{ s.boarding }}</td>
+                    <td>{{ s.male_boarding }}</td>
+                    <td>{{ s.female_boarding }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+            <tfoot class="table-light fw-bold">
+                <tr>
+                    <td>合计</td><td>{{ school_stats.class_count }}</td><td>{{ school_stats.total }}</td>
+                    <td class="text-primary">{{ school_stats.male }}</td><td class="text-danger">{{ school_stats.female }}</td>
+                    <td>{{ school_stats.boarding }}</td><td>{{ school_stats.male_boarding }}</td><td>{{ school_stats.female_boarding }}</td>
+                </tr>
+            </tfoot>
+        </table>
+    </div></div>
+</div>
+{% endif %}
+
+<!-- Tab: 年级统计 -->
+{% if tab == 'grade' and per_grade_stats %}
+<div class="row g-3 mb-4">
+    {% set gs = per_grade_stats[0] if per_grade_stats else {} %}
+    {% if gs %}
+    <div class="col-sm-4">
+        <div class="card stat-card"><div class="card-body text-center">
+            <div class="stat-number text-primary">{{ gs.class_count }}</div>
+            <div class="stat-label">{{ gs.grade }} 班级数</div>
+        </div></div>
+    </div>
+    <div class="col-sm-4">
+        <div class="card stat-card"><div class="card-body text-center">
+            <div class="stat-number text-success">{{ gs.total }}</div>
+            <div class="stat-label">学生总数</div>
+        </div></div>
+    </div>
+    <div class="col-sm-4">
+        <div class="card stat-card"><div class="card-body text-center">
+            <div class="stat-number text-info">{{ gs.boarding }}</div>
+            <div class="stat-label">住校人数</div>
+        </div></div>
+    </div>
+    {% endif %}
+</div>
+<div class="card">
+    <div class="card-header"><h6 class="mb-0">{{ sel_grade or '全部年级' }} - 班级明细</h6></div>
+    <div class="card-body p-0"><div class="table-responsive">
+        <table class="table table-hover table-sm mb-0">
+            <thead class="table-light">
+                <tr>
+                    <th>班级</th><th>总人数</th>
+                    <th class="text-primary">男</th><th class="text-danger">女</th>
+                    <th>住校</th><th>住校男</th><th>住校女</th>
+                    <th>走读</th><th>走读男</th><th>走读女</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% set ns = namespace(t=0,m=0,f=0,b=0,mb=0,fb=0,d=0,md=0,fd=0) %}
+                {% for s in per_class_stats %}
+                <tr>
+                    <td class="fw-bold">{{ s.class_name }}</td>
+                    <td>{{ s.total }}</td>
+                    <td class="text-primary">{{ s.male }}</td>
+                    <td class="text-danger">{{ s.female }}</td>
+                    <td>{{ s.boarding }}</td>
+                    <td>{{ s.male_boarding }}</td>
+                    <td>{{ s.female_boarding }}</td>
+                    <td>{{ s.day_student }}</td>
+                    <td>{{ s.male_day }}</td>
+                    <td>{{ s.female_day }}</td>
+                </tr>
+                {% set ns.t = ns.t + s.total %}
+                {% set ns.m = ns.m + s.male %}
+                {% set ns.f = ns.f + s.female %}
+                {% set ns.b = ns.b + s.boarding %}
+                {% set ns.mb = ns.mb + s.male_boarding %}
+                {% set ns.fb = ns.fb + s.female_boarding %}
+                {% set ns.d = ns.d + s.day_student %}
+                {% set ns.md = ns.md + s.male_day %}
+                {% set ns.fd = ns.fd + s.female_day %}
+                {% endfor %}
+            </tbody>
+            <tfoot class="table-light fw-bold">
+                <tr>
+                    <td>合计</td><td>{{ ns.t }}</td>
+                    <td class="text-primary">{{ ns.m }}</td><td class="text-danger">{{ ns.f }}</td>
+                    <td>{{ ns.b }}</td><td>{{ ns.mb }}</td><td>{{ ns.fb }}</td>
+                    <td>{{ ns.d }}</td><td>{{ ns.md }}</td><td>{{ ns.fd }}</td>
+                </tr>
+            </tfoot>
+        </table>
+    </div></div>
+</div>
+{% endif %}
+
+<!-- Tab: 班级统计 -->
+{% if tab == 'class' %}
+<div class="card">
+    <div class="card-header"><h6 class="mb-0">
+        {% if scope_type == 'class' %}我所管的班级{% else %}班级明细{% endif %}
+    </h6></div>
+    <div class="card-body p-0"><div class="table-responsive">
+        <table class="table table-hover table-sm mb-0">
+            <thead class="table-light">
+                <tr>
+                    <th>年级</th><th>班级</th><th>总人数</th>
+                    <th class="text-primary">男</th><th class="text-danger">女</th>
+                    <th>住校</th><th>住校男</th><th>住校女</th>
+                    <th>走读</th><th>走读男</th><th>走读女</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% set ns = namespace(t=0,m=0,f=0,b=0,mb=0,fb=0,d=0,md=0,fd=0) %}
+                {% for s in per_class_stats %}
+                <tr>
+                    <td>{{ s.grade }}</td>
+                    <td class="fw-bold">{{ s.class_name }}</td>
+                    <td>{{ s.total }}</td>
+                    <td class="text-primary">{{ s.male }}</td>
+                    <td class="text-danger">{{ s.female }}</td>
+                    <td>{{ s.boarding }}</td>
+                    <td>{{ s.male_boarding }}</td>
+                    <td>{{ s.female_boarding }}</td>
+                    <td>{{ s.day_student }}</td>
+                    <td>{{ s.male_day }}</td>
+                    <td>{{ s.female_day }}</td>
+                </tr>
+                {% set ns.t = ns.t + s.total %}
+                {% set ns.m = ns.m + s.male %}
+                {% set ns.f = ns.f + s.female %}
+                {% set ns.b = ns.b + s.boarding %}
+                {% set ns.mb = ns.mb + s.male_boarding %}
+                {% set ns.fb = ns.fb + s.female_boarding %}
+                {% set ns.d = ns.d + s.day_student %}
+                {% set ns.md = ns.md + s.male_day %}
+                {% set ns.fd = ns.fd + s.female_day %}
+                {% endfor %}
+            </tbody>
+            <tfoot class="table-light fw-bold">
+                <tr>
+                    <td colspan="2">合计</td><td>{{ ns.t }}</td>
+                    <td class="text-primary">{{ ns.m }}</td><td class="text-danger">{{ ns.f }}</td>
+                    <td>{{ ns.b }}</td><td>{{ ns.mb }}</td><td>{{ ns.fb }}</td>
+                    <td>{{ ns.d }}</td><td>{{ ns.md }}</td><td>{{ ns.fd }}</td>
+                </tr>
+            </tfoot>
+        </table>
+    </div></div>
+</div>
+{% endif %}
+
+{% if not per_class_stats and not per_grade_stats %}
+<div class="text-center text-muted py-5">
+    <i class="bi bi-inbox" style="font-size:48px;"></i>
+    <p class="mt-2">暂无数据</p>
+</div>
+{% endif %}
+{% endblock %}

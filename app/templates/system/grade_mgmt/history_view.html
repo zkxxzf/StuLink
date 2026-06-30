@@ -1,0 +1,90 @@
+{% extends "base.html" %}
+{% block title %}历史数据 - {{ filename }}{% endblock %}
+{% block content %}
+<h4 class="fw-bold mb-3">
+    <a href="{{ url_for('grade_mgmt.history') }}" class="text-decoration-none text-muted"><i class="bi bi-clock-history"></i> 历史查询</a>
+    <i class="bi bi-chevron-right"></i> {{ filename }}
+</h4>
+
+<!-- 学生统计 -->
+<div class="card mb-3">
+    <div class="card-header py-2"><strong><i class="bi bi-people"></i> 学生统计</strong></div>
+    <div class="card-body p-0">
+        <table class="table table-bordered mb-0 small">
+            <thead class="table-light">
+                <tr><th>年级</th><th class="text-primary">男生</th><th class="text-danger">女生</th><th>合计</th></tr>
+            </thead>
+            <tbody>
+                {% set ns = namespace(total_m=0, total_f=0) %}
+                {% for grade, stats in student_stats.items()|sort %}
+                <tr>
+                    <td>{{ grade }}</td>
+                    <td class="text-primary">{{ stats.male }}人</td>
+                    <td class="text-danger">{{ stats.female }}人</td>
+                    <td><strong>{{ stats.male + stats.female }}人</strong></td>
+                </tr>
+                {% set ns.total_m = ns.total_m + stats.male %}
+                {% set ns.total_f = ns.total_f + stats.female %}
+                {% endfor %}
+                <tr class="table-secondary fw-bold">
+                    <td>总计</td>
+                    <td class="text-primary">{{ ns.total_m }}人</td>
+                    <td class="text-danger">{{ ns.total_f }}人</td>
+                    <td>{{ ns.total_m + ns.total_f }}人</td>
+                </tr>
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<!-- 房间分配 -->
+<div class="card mb-3">
+    <div class="card-header py-2"><strong><i class="bi bi-building"></i> 房间分配统计</strong></div>
+    <div class="card-body p-0">
+        <table class="table table-bordered mb-0 small">
+            <thead class="table-light">
+                <tr><th>年级</th><th>性别</th><th>房间数</th><th>总床位</th></tr>
+            </thead>
+            <tbody>
+                {% for r in rooms %}
+                <tr>
+                    <td>{{ r.grade }}</td>
+                    <td>{{ r.gender }}</td>
+                    <td>{{ r.cnt }}间</td>
+                    <td>{{ r.cap }}人</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<!-- 班级明细 -->
+<div class="card">
+    <div class="card-header py-2"><strong><i class="bi bi-list-ul"></i> 班级-房间明细</strong></div>
+    <div class="card-body p-0" style="max-height:500px;overflow-y:auto;">
+        <table class="table table-bordered mb-0 small">
+            <thead class="table-light sticky-top">
+                <tr><th>年级</th><th>班级</th><th>楼栋</th><th>房号</th><th>容量</th><th>性别</th><th>入住</th></tr>
+            </thead>
+            <tbody>
+                {% for cd in class_detail %}
+                <tr>
+                    <td>{{ cd.grade }}</td>
+                    <td>{{ cd.class_name }}</td>
+                    <td>{{ cd.building }}</td>
+                    <td>{{ cd.room_number }}</td>
+                    <td>{{ cd.capacity }}人</td>
+                    <td>{{ cd.gender }}</td>
+                    <td>{{ cd.occupied }}人</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<a href="{{ url_for('grade_mgmt.history') }}" class="btn btn-outline-secondary mt-3">
+    <i class="bi bi-arrow-left"></i> 返回备份列表
+</a>
+{% endblock %}

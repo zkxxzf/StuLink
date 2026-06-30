@@ -1,0 +1,65 @@
+{% extends "base.html" %}
+{% block title %}{{ room.room_number }} - 宿舍详情{% endblock %}
+{% block content %}
+<div class="d-flex align-items-center mb-3">
+    <a href="{{ url_for('rooms.list_rooms') }}" class="btn btn-sm btn-outline-secondary me-3">
+        <i class="bi bi-arrow-left"></i> 返回
+    </a>
+    <h4 class="fw-bold mb-0">{{ room.room_number }} 宿舍详情</h4>
+    {% if current_user.has_role('admin', 'dorm_manager') %}
+    <a href="{{ url_for('rooms.edit', id=room.id) }}" class="btn btn-sm btn-primary ms-auto">
+        <i class="bi bi-pencil"></i> 编辑宿舍
+    </a>
+    {% endif %}
+</div>
+
+<div class="row g-3">
+    <div class="col-lg-4">
+        <div class="card">
+            <div class="card-header"><h6 class="mb-0">基本信息</h6></div>
+            <div class="card-body">
+                <div class="mb-2"><span class="text-muted">宿舍楼：</span><strong>{{ room.building or '未设置' }}</strong></div>
+                <div class="mb-2"><span class="text-muted">房间号：</span><strong>{{ room.room_number }}</strong></div>
+                <div class="mb-2"><span class="text-muted">性别：</span>
+                    {% if room.gender == '男' %}<span class="badge bg-primary">男生宿舍</span>
+                    {% else %}<span class="badge bg-danger">女生宿舍</span>{% endif %}
+                </div>
+                <div class="mb-2"><span class="text-muted">楼层：</span>{{ room.floor }}楼</div>
+                <div class="mb-2"><span class="text-muted">床位数：</span>{{ room.capacity }}</div>
+                <div class="mb-2"><span class="text-muted">分配年级：</span>{{ room.grade or '未分配' }}</div>
+                <div class="mb-2"><span class="text-muted">分配班级：</span>{{ room.class_name or '未分配' }}</div>
+                {% if room.combined_class %}
+                <div class="mb-2"><span class="text-muted">合班：</span>{{ room.combined_class }}</div>
+                {% endif %}
+                {% if room.notes %}
+                <div class="mb-2"><span class="text-muted">备注：</span>{{ room.notes }}</div>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+    <div class="col-lg-8">
+        <div class="card">
+            <div class="card-header"><h6 class="mb-0"><i class="bi bi-grid-3x3-gap"></i> 床位分布</h6></div>
+            <div class="card-body">
+                <div class="bed-grid">
+                    {% for bed in beds %}
+                    <div class="bed-slot {% if bed.student_info %}occupied{% else %}empty{% endif %}">
+                        <div class="bed-number">{{ bed.bed_number }}床 {% if bed.bed_number % 2 == 1 %}(下铺){% else %}(上铺){% endif %}</div>
+                        {% if bed.student_info %}
+                        <div class="bed-student">
+                            <a href="{{ url_for('students.detail', id=bed.student_info.id) }}" class="text-decoration-none">
+                                {{ bed.student_info.name }}
+                            </a>
+                        </div>
+                        <div class="text-muted" style="font-size:11px;">{{ bed.student_info.student_number }}</div>
+                        {% else %}
+                        <div class="text-muted"><i class="bi bi-dash-lg"></i> 空床</div>
+                        {% endif %}
+                    </div>
+                    {% endfor %}
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

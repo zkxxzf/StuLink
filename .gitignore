@@ -1,0 +1,38 @@
+# 数据目录 - 不纳入版本控制
+data/
+dormitory-data/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+
+# IDE
+.idea/
+.vscode/
+.qoder/
+.lingma/
+
+# 截图和临时文件
+*.png
+*.jpg
+screenshot*
+step*
+img-*
+verify*
+
+# 部署相关（保留模板，不提交实例）
+dormitory-code/
+dormitory.tar
+
+# 环境文件
+.env
+.venv/
+venv/
+
+# 密钥文件（自动生成，切勿提交）
+.secret_key
+.encryption_key
+data/.secret_key
+data/.encryption_key

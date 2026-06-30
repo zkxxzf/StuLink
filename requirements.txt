@@ -1,0 +1,7 @@
+flask>=3.0
+flask-sqlalchemy>=3.1
+flask-login>=0.6
+flask-wtf>=1.2
+openpyxl>=3.1
+waitress>=3.0
+cryptography>=41.0

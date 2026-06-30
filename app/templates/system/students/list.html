@@ -1,0 +1,372 @@
+{% extends "base.html" %}
+{% block title %}学生列表{% endblock %}
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+    <h4 class="fw-bold mb-0"><i class="bi bi-people"></i> 学生列表</h4>
+    {% if current_user.has_role('admin', 'homeroom_teacher') %}
+    <div class="d-flex gap-2">
+        <button class="btn btn-success" data-bs-toggle="modal" data-bs-target="#importModal">
+            <i class="bi bi-file-earmark-excel"></i> 批量导入
+        </button>
+        <button class="btn btn-info" data-bs-toggle="modal" data-bs-target="#batchTransferModal">
+            <i class="bi bi-arrow-left-right"></i> 批量调班
+        </button>
+        {% if current_user.has_role('admin') %}
+        <button class="btn btn-danger" id="btnBatchDelete" style="display:none;" onclick="submitBatchDelete()">
+            <i class="bi bi-trash"></i> 批量删除 (<span id="selectedCount">0</span>)
+        </button>
+        {% endif %}
+        <a href="{{ url_for('students.create') }}" class="btn btn-primary">
+            <i class="bi bi-plus-lg"></i> 新增学生
+        </a>
+    </div>
+    {% endif %}
+</div>
+
+{% if current_user.has_role('admin') %}
+<form id="batchDeleteForm" method="POST" action="{{ url_for('students.batch_delete') }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+</form>
+{% endif %}
+
+<div class="card">
+    <div class="card-body">
+        <table id="studentsTable" class="table table-hover" style="width:100%">
+            <thead class="table-light">
+                <tr>
+                    {% if current_user.has_role('admin') %}
+                    <th class="text-center" style="width:40px;">
+                        <input type="checkbox" class="form-check-input" id="checkAll" title="全选">
+                    </th>
+                    {% endif %}
+                    <th>学号</th>
+                    <th>姓名</th>
+                    <th>性别</th>
+                    <th>年级</th>
+                    <th>班级</th>
+                    <th>选科</th>
+                    <th>住校/走读</th>
+                    <th>出门权限</th>
+                    <th>宿舍</th>
+                    <th>毕业学校</th>
+                    <th>联系方式 1</th>
+                    <th>联系方式 2</th>
+                    <th>操作</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for s in students %}
+                <tr>
+                    {% if current_user.has_role('admin') %}
+                    <td class="text-center">
+                        <input type="checkbox" class="form-check-input student-check"
+                               form="batchDeleteForm" name="student_ids" value="{{ s.id }}">
+                    </td>
+                    {% endif %}
+                    <td>
+                        {% if s.student_number %}
+                        {{ s.student_number }}
+                        {% else %}
+                        <span class="text-danger fw-bold"><i class="bi bi-exclamation-triangle"></i> 缺少学号</span>
+                        {% endif %}
+                    </td>
+                    <td><a href="{{ url_for('students.detail', id=s.id) }}" class="text-decoration-none fw-bold">{{ s.name }}</a></td>
+                    <td>
+                        {% if s.gender == '男' %}
+                        <span class="badge bg-primary">男</span>
+                        {% else %}
+                        <span class="badge bg-danger">女</span>
+                        {% endif %}
+                    </td>
+                    <td>{{ s.grade }}</td>
+                    <td>{{ s.class_name }}</td>
+                    <td>{{ s.subject_selection or '-' }}</td>
+                    <td>
+                        {% if s.boarding_type == '住校' %}
+                        <span class="badge bg-success">住校</span>
+                        {% else %}
+                        <span class="badge bg-secondary">{{ s.boarding_type }}</span>
+                        {% endif %}
+                    </td>
+                    <td>
+                        {% if s.day_student_type %}
+                        <span class="badge bg-info">{{ s.day_student_type }}</span>
+                        {% else %}
+                        <span class="text-muted">-</span>
+                        {% endif %}
+                    </td>
+                    <td>
+                        {% if s.bed_assignment and s.bed_assignment.room %}
+                        {{ s.bed_assignment.room.display_name }}-{{ s.bed_assignment.bed_number }}床
+                        {% else %}
+                        <span class="text-muted">未分配</span>
+                        {% endif %}
+                    </td>
+                    <td>
+                        {% if s.graduation_school %}
+                        <small>{{ s.graduation_school }}</small>
+                        {% if s.graduation_school_code %}
+                        <br><span class="badge bg-secondary" style="font-size:9px;">{{ s.graduation_school_code }}</span>
+                        {% endif %}
+                        {% else %}
+                        <span class="text-muted">-</span>
+                        {% endif %}
+                    </td>
+                    <td>{{ s.phone1 or '-' }}</td>
+                    <td>{{ s.phone2 or '-' }}</td>
+                    <td>
+                        <a href="{{ url_for('students.detail', id=s.id) }}" class="btn btn-sm btn-outline-primary" title="查看">
+                            <i class="bi bi-eye"></i>
+                        </a>
+                        {% if current_user.has_role('admin', 'homeroom_teacher') %}
+                        <a href="{{ url_for('students.edit', id=s.id) }}" class="btn btn-sm btn-outline-warning" title="编辑">
+                            <i class="bi bi-pencil"></i>
+                        </a>
+                        <button class="btn btn-sm btn-outline-info" title="调班"
+                                onclick="openTransferModal({{ s.id }}, '{{ s.name }}', '{{ s.grade }}', '{{ s.class_name }}')">
+                            <i class="bi bi-arrow-left-right"></i>
+                        </button>
+                        {% endif %}
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        
+        <!-- 分页组件 -->
+        {% if pagination and pagination.pages > 1 %}
+        <nav aria-label="Page navigation" class="mt-3">
+            <ul class="pagination justify-content-center">
+                <li class="page-item {% if not pagination.has_prev %}disabled{% endif %}">
+                    <a class="page-link" href="{{ url_for('students.list_students', page=pagination.prev_num) if pagination.has_prev else '#' }}">
+                        <i class="bi bi-chevron-left"></i> 上一页
+                    </a>
+                </li>
+                
+                {% for page_num in pagination.iter_pages(left_edge=1, right_edge=1, left_current=2, right_current=2) %}
+                    {% if page_num %}
+                        <li class="page-item {% if page_num == pagination.page %}active{% endif %}">
+                            <a class="page-link" href="{{ url_for('students.list_students', page=page_num) }}">{{ page_num }}</a>
+                        </li>
+                    {% else %}
+                        <li class="page-item disabled"><span class="page-link">...</span></li>
+                    {% endif %}
+                {% endfor %}
+                
+                <li class="page-item {% if not pagination.has_next %}disabled{% endif %}">
+                    <a class="page-link" href="{{ url_for('students.list_students', page=pagination.next_num) if pagination.has_next else '#' }}">
+                        下一页 <i class="bi bi-chevron-right"></i>
+                    </a>
+                </li>
+            </ul>
+        </nav>
+        <div class="text-center text-muted small mb-2">
+            共 {{ pagination.total }} 条记录，第 {{ pagination.page }} / {{ pagination.pages }} 页
+        </div>
+        {% endif %}
+    </div>
+</div>
+
+{% if current_user.has_role('admin', 'homeroom_teacher') %}
+<!-- 导入弹窗 -->
+<div class="modal fade" id="importModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title"><i class="bi bi-file-earmark-excel"></i> 批量导入学生</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <form method="POST" action="{{ url_for('students.import_students') }}" enctype="multipart/form-data">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <div class="modal-body">
+                    <div class="mb-3">
+                        <label class="form-label">选择Excel文件</label>
+                        <input type="file" name="file" class="form-control" accept=".xlsx,.xls" required>
+                    </div>
+                    <div class="alert alert-info small mb-0">
+                        <i class="bi bi-info-circle"></i> <strong>导入说明：</strong>
+                        <ul class="mb-0 mt-1">
+                            <li>支持 .xlsx 格式</li>
+                            <li>必填项：<strong>姓名、性别、身份证号</strong></li>
+                            <li>学号可不填，缺少学号的学生导入后会标红提示</li>
+                            <li>身份证号必须是有效的18位身份证号</li>
+                            <li>有错误的行不会导入，其余正确的行正常导入</li>
+                        </ul>
+                        <hr class="my-2">
+                        <a href="{{ url_for('students.download_template') }}" class="text-decoration-none">
+                            <i class="bi bi-download"></i> 下载导入模板
+                        </a>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">取消</button>
+                    <button type="submit" class="btn btn-success">
+                        <i class="bi bi-upload"></i> 开始导入
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<!-- 单个调班弹窗 -->
+<div class="modal fade" id="transferModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title"><i class="bi bi-arrow-left-right"></i> 调班调年级</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <form id="transferForm" method="POST">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <div class="modal-body">
+                    <div class="mb-3">
+                        <label class="form-label fw-bold">学生</label>
+                        <p id="transferStudentName" class="mb-0"></p>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label fw-bold">当前</label>
+                        <p id="transferCurrentInfo" class="text-muted mb-0"></p>
+                    </div>
+                    <div class="row">
+                        <div class="col-6 mb-3">
+                            <label for="transferGrade" class="form-label">新年级</label>
+                            <select class="form-select" id="transferGrade" name="new_grade" required>
+                                <option value="">请选择年级</option>
+                                {% for g in grades %}
+                                <option value="{{ g }}">{{ g }}</option>
+                                {% endfor %}
+                            </select>
+                        </div>
+                        <div class="col-6 mb-3">
+                            <label for="transferClass" class="form-label">新班级</label>
+                            <select class="form-select" id="transferClass" name="new_class" required>
+                                <option value="">请选择班级</option>
+                                {% for c in classes %}
+                                <option value="{{ c }}">{{ c }}</option>
+                                {% endfor %}
+                            </select>
+                        </div>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">取消</button>
+                    <button type="submit" class="btn btn-primary">
+                        <i class="bi bi-check-lg"></i> 确认调班
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<!-- 批量调班弹窗 -->
+<div class="modal fade" id="batchTransferModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title"><i class="bi bi-arrow-left-right"></i> 批量调班</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <form method="POST" action="{{ url_for('students.batch_transfer') }}" enctype="multipart/form-data">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <div class="modal-body">
+                    <div class="mb-3">
+                        <label class="form-label fw-bold">模板类型</label>
+                        <div class="form-check">
+                            <input class="form-check-input" type="radio" name="tpl_type" value="student_number" id="tplSnum" checked>
+                            <label class="form-check-label" for="tplSnum">按学号调班</label>
+                        </div>
+                        <div class="form-check">
+                            <input class="form-check-input" type="radio" name="tpl_type" value="id_card" id="tplIdCard">
+                            <label class="form-check-label" for="tplIdCard">按身份证号调班</label>
+                        </div>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">选择Excel文件</label>
+                        <input type="file" name="file" class="form-control" accept=".xlsx,.xls" required>
+                    </div>
+                    <div class="alert alert-info small mb-0">
+                        <i class="bi bi-info-circle"></i> <strong>调班说明：</strong>
+                        <ul class="mb-0 mt-1">
+                            <li>请先下载对应模板，填写后上传</li>
+                            <li>模板中的学号/身份证号必须与系统中已有学生匹配</li>
+                            <li>新年级和新班级为必填项</li>
+                            <li>匹配成功的学生会立即调班，未匹配的会提示</li>
+                        </ul>
+                        <hr class="my-2">
+                        <a href="{{ url_for('students.download_transfer_template', type='student_number') }}" class="text-decoration-none me-3">
+                            <i class="bi bi-download"></i> 下载学号版模板
+                        </a>
+                        <a href="{{ url_for('students.download_transfer_template', type='id_card') }}" class="text-decoration-none">
+                            <i class="bi bi-download"></i> 下载身份证号版模板
+                        </a>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">取消</button>
+                    <button type="submit" class="btn btn-primary">
+                        <i class="bi bi-upload"></i> 开始调班
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+{% endif %}
+{% endblock %}
+
+{% block extra_js %}
+<script>
+// 全选/取消全选
+$('#checkAll').on('change', function() {
+    $('.student-check').prop('checked', this.checked);
+    updateSelectedCount();
+});
+
+// 单个选择变化
+$('#studentsTable').on('change', '.student-check', function() {
+    updateSelectedCount();
+    var total = $('.student-check').length;
+    var checked = $('.student-check:checked').length;
+    $('#checkAll').prop('checked', total > 0 && total === checked);
+});
+
+function updateSelectedCount() {
+    var count = $('.student-check:checked').length;
+    $('#selectedCount').text(count);
+    if (count > 0) {
+        $('#btnBatchDelete').show();
+    } else {
+        $('#btnBatchDelete').hide();
+    }
+}
+
+function submitBatchDelete() {
+    var count = $('.student-check:checked').length;
+    if (count === 0) {
+        alert('请先选择要删除的学生');
+        return;
+    }
+    if (!confirm('确定要删除选中的 ' + count + ' 名学生吗？此操作不可恢复！')) {
+        return;
+    }
+    // 将所有选中的checkbox复制到form中
+    var form = $('#batchDeleteForm');
+    form.find('.dynamic-input').remove();
+    $('.student-check:checked').each(function() {
+        form.append('<input type="hidden" class="dynamic-input" name="student_ids" value="' + this.value + '">');
+    });
+    form.submit();
+}
+
+function openTransferModal(id, name, grade, className) {
+    $('#transferStudentName').text(name);
+    $('#transferCurrentInfo').text(grade + ' ' + className);
+    $('#transferGrade').val(grade);
+    $('#transferClass').val(className);
+    $('#transferForm').attr('action', '/students/' + id + '/transfer');
+    new bootstrap.Modal(document.getElementById('transferModal')).show();
+}
+</script>
+{% endblock %}

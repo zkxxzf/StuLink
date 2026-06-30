@@ -1,0 +1,170 @@
+{% extends "base.html" %}
+{% block title %}{{ student.name }} - 学生详情{% endblock %}
+{% block content %}
+<div class="d-flex align-items-center mb-3">
+    <a href="{{ url_for('students.list_students') }}" class="btn btn-sm btn-outline-secondary me-3">
+        <i class="bi bi-arrow-left"></i> 返回
+    </a>
+    <h4 class="fw-bold mb-0">{{ student.name }} 的信息</h4>
+    {% if current_user.has_role('admin', 'homeroom_teacher') %}
+    <a href="{{ url_for('students.edit', id=student.id) }}" class="btn btn-sm btn-warning ms-auto">
+        <i class="bi bi-pencil"></i> 编辑
+    </a>
+    {% endif %}
+</div>
+
+<div class="row g-3">
+    <div class="col-lg-8">
+        <div class="card">
+            <div class="card-body">
+                <div class="row">
+                    <!-- 第一行：基本信息 -->
+                    <div class="col-12 mb-3">
+                        <div class="row g-3">
+                            <div class="col-sm-4">
+                                <label class="text-muted small">姓名</label>
+                                <div class="fs-5 fw-bold text-primary">{{ student.name }}</div>
+                            </div>
+                            <div class="col-sm-2">
+                                <label class="text-muted small">性别</label>
+                                <div>
+                                    {% if student.gender == '男' %}<span class="badge bg-primary">男</span>
+                                    {% else %}<span class="badge bg-danger">女</span>{% endif %}
+                                </div>
+                            </div>
+                            <div class="col-sm-2">
+                                <label class="text-muted small">民族</label>
+                                <div>{{ student.ethnicity or '-' }}</div>
+                            </div>
+                            <div class="col-sm-4">
+                                <label class="text-muted small">身份证号</label>
+                                <div class="font-monospace small">{{ student.id_card_number or '-' }}</div>
+                            </div>
+                            <div class="col-sm-4">
+                                <label class="text-muted small">学号</label>
+                                <div class="fs-5 fw-bold text-primary">{{ student.student_number or '-' }}</div>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- 第二行：年级、班级、选科、原班级 -->
+                    <div class="col-12 mb-3">
+                        <div class="row g-3">
+                            <div class="col-sm-3">
+                                <label class="text-muted small">年级</label>
+                                <div>{{ student.grade }}</div>
+                            </div>
+                            <div class="col-sm-3">
+                                <label class="text-muted small">班级</label>
+                                <div>{{ student.class_name }}</div>
+                            </div>
+                            <div class="col-sm-3">
+                                <label class="text-muted small">选科</label>
+                                <div>{{ student.subject_selection or '-' }}</div>
+                            </div>
+                            <div class="col-sm-3">
+                                <label class="text-muted small">原班级</label>
+                                <div>{{ student.original_class or '-' }}</div>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- 第三行：住校/走读、出门权限、联系方式 -->
+                    <div class="col-12 mb-3">
+                        <div class="row g-3">
+                            <div class="col-sm-3">
+                                <label class="text-muted small">住校/走读</label>
+                                <div>
+                                    {% if student.boarding_type == '住校' %}<span class="badge bg-success">住校</span>
+                                    {% else %}<span class="badge bg-secondary">{{ student.boarding_type }}</span>{% endif %}
+                                </div>
+                            </div>
+                            <div class="col-sm-3">
+                                <label class="text-muted small">出门权限</label>
+                                <div>
+                                    {% if student.day_student_type %}
+                                    <span class="badge bg-info">{{ student.day_student_type }}</span>
+                                    {% else %}
+                                    <span class="text-muted">-</span>
+                                    {% endif %}
+                                </div>
+                            </div>
+                            <div class="col-sm-3">
+                                <label class="text-muted small">联系方式 1</label>
+                                <div><a href="tel:{{ student.phone1 }}" class="text-decoration-none">{{ student.phone1 or '-' }}</a></div>
+                            </div>
+                            <div class="col-sm-3">
+                                <label class="text-muted small">联系方式 2</label>
+                                <div><a href="tel:{{ student.phone2 }}" class="text-decoration-none">{{ student.phone2 or '-' }}</a></div>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- 第四行：学籍情况、学籍备注、课本 -->
+                    <div class="col-12 mb-3">
+                        <div class="row g-3">
+                            <div class="col-sm-3">
+                                <label class="text-muted small">学籍情况</label>
+                                <div>{{ student.enrollment_status or '正常' }}</div>
+                            </div>
+                            <div class="col-sm-6">
+                                <label class="text-muted small">学籍备注</label>
+                                <div class="small text-muted">{{ student.enrollment_notes or '-' }}</div>
+                            </div>
+                            <div class="col-sm-3">
+                                <label class="text-muted small">课本</label>
+                                <div>{{ student.textbook or '-' }}</div>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- 第五行：毕业学校代码、毕业学校 -->
+                    {% if student.graduation_school or student.graduation_school_code %}
+                    <div class="col-12 mb-3">
+                        <div class="row g-3">
+                            <div class="col-sm-4">
+                                <label class="text-muted small">毕业学校代码</label>
+                                <div><span class="badge bg-secondary">{{ student.graduation_school_code or '-' }}</span></div>
+                            </div>
+                            <div class="col-sm-8">
+                                <label class="text-muted small">毕业学校</label>
+                                <div class="fw-bold">{{ student.graduation_school or '-' }}</div>
+                            </div>
+                        </div>
+                    </div>
+                    {% endif %}
+                    
+                    <!-- 第六行：备注（单独一行） -->
+                    {% if student.teacher_notes %}
+                    <div class="col-12">
+                        <div class="bg-light p-3 rounded border">
+                            <small class="text-muted d-block mb-1 fw-bold">备注：</small>
+                            {{ student.teacher_notes }}
+                        </div>
+                    </div>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+    </div>
+    <div class="col-lg-4">
+        <div class="card">
+            <div class="card-header"><h6 class="mb-0"><i class="bi bi-door-open"></i> 住宿信息</h6></div>
+            <div class="card-body text-center">
+                {% if student.bed_assignment and student.bed_assignment.room %}
+                {% set room = student.bed_assignment.room %}
+                <div style="font-size:48px;color:#3b82f6;"><i class="bi bi-building"></i></div>
+                <h5 class="fw-bold mt-2">{{ room.room_number }}</h5>
+                <p class="text-muted">{{ student.bed_assignment.bed_number }} 床</p>
+                <a href="{{ url_for('rooms.detail', id=room.id) }}" class="btn btn-sm btn-outline-primary">
+                    查看宿舍详情
+                </a>
+                {% else %}
+                <div style="font-size:48px;color:#9ca3af;"><i class="bi bi-question-circle"></i></div>
+                <p class="text-muted mt-2">暂未分配宿舍</p>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

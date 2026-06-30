@@ -1,0 +1,895 @@
+{% extends "base.html" %}
+{% block title %}自动分配宿舍{% endblock %}
+
+{% block content %}
+<div class="container-fluid">
+    <h4 class="fw-bold mb-3"><i class="bi bi-magic"></i> 自动分配宿舍向导</h4>
+    
+    <!-- 步骤指示器 -->
+    <div class="row mb-3">
+        <div class="col-12">
+            <div class="d-flex justify-content-center">
+                <div class="step-indicator active" id="step1-indicator">
+                    <div class="step-number">1</div>
+                    <div class="step-label">选择年级性别</div>
+                </div>
+                <div class="step-line"></div>
+                <div class="step-indicator" id="step2-indicator">
+                    <div class="step-number">2</div>
+                    <div class="step-label">配置参数</div>
+                </div>
+                <div class="step-line"></div>
+                <div class="step-indicator" id="step3-indicator">
+                    <div class="step-number">3</div>
+                    <div class="step-label">预览方案</div>
+                </div>
+                <div class="step-line"></div>
+                <div class="step-indicator" id="step4-indicator">
+                    <div class="step-number">4</div>
+                    <div class="step-label">执行分配</div>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <!-- 第1步：选择年级和性别 -->
+    <div class="step-content" id="step1">
+        <div class="card">
+            <div class="card-header">
+                <h5 class="mb-0"><i class="bi bi-1-circle-fill text-primary"></i> 选择要分配的年级和性别</h5>
+            </div>
+            <div class="card-body">
+                <div class="alert alert-info mb-3">
+                    <i class="bi bi-info-circle"></i> 请勾选需要分配宿舍的班级。可以同时选择多个班级进行一键编排。
+                </div>
+                
+                <!-- 响应式年级布局：PC端三列，平板两列，手机一列 -->
+                <div class="row g-3">
+                    {% for grade in grades %}
+                    <div class="col-lg-4 col-md-6 col-12">
+                        <div class="card h-100">
+                            <div class="card-header py-2">
+                                <div class="d-flex justify-content-between align-items-center">
+                                    <h6 class="mb-0" style="font-size: 0.95rem;">
+                                        <a class="text-decoration-none" data-bs-toggle="collapse" href="#grade_{{ grade }}" role="button" aria-expanded="true">
+                                            <i class="bi bi-chevron-down"></i> <strong>{{ grade }}</strong>
+                                        </a>
+                                    </h6>
+                                    <div>
+                                        <div class="form-check form-check-inline mb-0">
+                                            <input class="form-check-input grade-gender-select" type="checkbox" 
+                                                   id="grade_{{ grade }}_all_male"
+                                                   data-grade="{{ grade }}" 
+                                                   data-gender="男">
+                                            <label class="form-check-label" style="font-size: 0.75rem;" for="grade_{{ grade }}_all_male">
+                                                <i class="bi bi-gender-male text-primary"></i> 男生全选
+                                            </label>
+                                        </div>
+                                        <div class="form-check form-check-inline mb-0">
+                                            <input class="form-check-input grade-gender-select" type="checkbox" 
+                                                   id="grade_{{ grade }}_all_female"
+                                                   data-grade="{{ grade }}" 
+                                                   data-gender="女">
+                                            <label class="form-check-label" style="font-size: 0.75rem;" for="grade_{{ grade }}_all_female">
+                                                <i class="bi bi-gender-female text-danger"></i> 女生全选
+                                            </label>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="collapse show" id="grade_{{ grade }}">
+                                <table class="table table-bordered align-middle mb-0" style="font-size: 0.85rem;">
+                                    <thead class="table-light">
+                                        <tr>
+                                            <th style="width: 80px;">班级</th>
+                                            <th style="width: 70px;" class="text-center">
+                                                <i class="bi bi-gender-male text-primary"></i> 男生
+                                            </th>
+                                            <th style="width: 70px;" class="text-center">
+                                                <i class="bi bi-gender-female text-danger"></i> 女生
+                                            </th>
+                                            <th class="text-center">已选</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {% for class_item in grade_class_stats[grade] %}
+                                        <tr data-grade="{{ grade }}" data-class="{{ class_item.class_name }}">
+                                            <td class="fw-bold" style="font-size: 0.8rem;">{{ class_item.class_name }}</td>
+                                            <td class="text-center">
+                                                <div class="form-check d-inline-block">
+                                                    <input class="form-check-input gender-checkbox" type="checkbox" 
+                                                           name="class_gender" 
+                                                           value="{{ grade }}-{{ class_item.class_name }}-男" 
+                                                           id="cg_{{ grade }}_{{ class_item.class_name }}_male"
+                                                           data-grade="{{ grade }}" 
+                                                           data-class="{{ class_item.class_name }}"
+                                                           data-gender="男"
+                                                           data-count="{{ class_item.male }}">
+                                                    <label class="form-check-label" for="cg_{{ grade }}_{{ class_item.class_name }}_male" style="font-size: 0.75rem;">
+                                                        <span class="male-count">{{ class_item.male }}</span>人
+                                                    </label>
+                                                </div>
+                                            </td>
+                                            <td class="text-center">
+                                                <div class="form-check d-inline-block">
+                                                    <input class="form-check-input gender-checkbox" type="checkbox" 
+                                                           name="class_gender" 
+                                                           value="{{ grade }}-{{ class_item.class_name }}-女" 
+                                                           id="cg_{{ grade }}_{{ class_item.class_name }}_female"
+                                                           data-grade="{{ grade }}" 
+                                                           data-class="{{ class_item.class_name }}"
+                                                           data-gender="女"
+                                                           data-count="{{ class_item.female }}">
+                                                    <label class="form-check-label" for="cg_{{ grade }}_{{ class_item.class_name }}_female" style="font-size: 0.75rem;">
+                                                        <span class="female-count">{{ class_item.female }}</span>人
+                                                    </label>
+                                                </div>
+                                            </td>
+                                            <td class="text-center">
+                                                <strong class="selected-count" style="font-size: 0.8rem;">0</strong>
+                                            </td>
+                                        </tr>
+                                        {% endfor %}
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+                    {% endfor %}
+                </div>
+                
+                <div class="mt-3">
+                    <div class="alert alert-secondary py-2">
+                        <i class="bi bi-check-circle"></i> 
+                        已选择 <strong id="selectedClasses">0</strong> 个班级组合，
+                        共 <strong id="selectedStudents">0</strong> 名学生需要分配
+                    </div>
+                </div>
+            </div>
+            <div class="card-footer text-end">
+                <button class="btn btn-primary" id="btnStep1Next" disabled>
+                    下一步：配置参数 <i class="bi bi-arrow-right"></i>
+                </button>
+            </div>
+        </div>
+    </div>
+    
+    <!-- 第2步：配置参数 -->
+    <div class="step-content" id="step2" style="display:none;">
+        <div class="card">
+            <div class="card-header">
+                <h5 class="mb-0"><i class="bi bi-2-circle-fill text-primary"></i> 选择目标楼栋和楼层</h5>
+            </div>
+            <div class="card-body">
+                <div class="alert alert-info">
+                    <div class="mb-1" style="font-size: 0.85rem;">
+                        <span><i class="bi bi-gender-male text-primary"></i> 已选择 <strong id="maleClassesCount">0</strong> 个班男生，共 <strong id="maleStudentsCount">0</strong> 名男生</span>
+                    </div>
+                    <div class="mb-1" style="font-size: 0.85rem;">
+                        <span><i class="bi bi-gender-female text-danger"></i> 已选择 <strong id="femaleClassesCount">0</strong> 个班女生，共 <strong id="femaleStudentsCount">0</strong> 名女生</span>
+                    </div>
+                    <div style="font-size: 0.85rem;">
+                        已选宿舍：<strong id="selectedBedsCount">0</strong> 间
+                        <span class="ms-2"><i class="bi bi-gender-male text-primary"></i> 男生宿舍：<strong id="selectedMaleRooms">0</strong> 间</span>
+                        <span class="ms-2"><i class="bi bi-gender-female text-danger"></i> 女生宿舍：<strong id="selectedFemaleRooms">0</strong> 间</span>
+                    </div>
+                    <div class="mt-1" style="font-size: 0.85rem;">
+                        已选床位：<strong id="totalAvailableBeds">0</strong> 个
+                        <span class="ms-2"><i class="bi bi-gender-male text-primary"></i> 男生床位：<strong id="maleBeds">0</strong> 个</span>
+                        <span class="ms-2"><i class="bi bi-gender-female text-danger"></i> 女生床位：<strong id="femaleBeds">0</strong> 个</span>
+                    </div>
+                    <div class="mt-1" id="bedsStatusTips" style="font-size: 0.85rem;"></div>
+                </div>
+                
+                <div class="mb-3">
+                    <h6 class="fw-bold mb-2" style="font-size: 0.9rem;">已选择的班级：</h6>
+                    <div id="selectedClassesList" class="row g-2">
+                        <!-- 动态显示已选择的班级 -->
+                    </div>
+                </div>
+                
+                <div class="mb-3">
+                    <div class="d-flex justify-content-between align-items-center mb-2">
+                        <h6 class="fw-bold mb-0" style="font-size: 0.9rem;">选择可用房间</h6>
+                        <button class="btn btn-sm btn-outline-primary" id="btnLoadRooms">
+                            <i class="bi bi-arrow-clockwise"></i> 刷新房间数据
+                        </button>
+                    </div>
+                    <div id="roomsLoading" class="text-center py-4">
+                        <div class="spinner-border text-primary" role="status"></div>
+                        <p class="mt-2 text-muted">加载房间数据...</p>
+                    </div>
+                    <div id="roomsContainer" style="display:none;">
+                        <!-- 动态生成楼栋-楼层-房间的折叠卡片 -->
+                    </div>
+                </div>
+            </div>
+            <div class="card-footer d-flex justify-content-between">
+                <button class="btn btn-secondary" id="btnStep2Prev">
+                    <i class="bi bi-arrow-left"></i> 上一步
+                </button>
+                <button class="btn btn-primary" id="btnStep2Next" disabled>
+                    下一步：预览方案 <i class="bi bi-arrow-right"></i>
+                </button>
+            </div>
+        </div>
+    </div>
+    
+    <!-- 第3步：预览方案 -->
+    <div class="step-content" id="step3" style="display:none;">
+        <div class="card">
+            <div class="card-header">
+                <h5 class="mb-0"><i class="bi bi-3-circle-fill text-primary"></i> 预览分配方案</h5>
+            </div>
+            <div class="card-body">
+                <div id="previewLoading" class="text-center py-5">
+                    <div class="spinner-border text-primary" role="status"></div>
+                    <p class="mt-3 text-muted">正在计算分配方案...</p>
+                </div>
+                
+                <div id="previewResult" style="display:none;">
+                    <div class="alert alert-info">
+                        <h6 class="fw-bold mb-1" style="font-size: 0.9rem;">分配方案概览</h6>
+                        <div id="previewStats"></div>
+                    </div>
+                    
+                    <h6 class="fw-bold mt-2 mb-2" style="font-size: 0.9rem;">详细分配方案：</h6>
+                    <div id="previewAssignments">
+                        <!-- 按性别+班级分组显示 -->
+                    </div>
+                    
+                    <div id="previewAssignmentsFlat" class="table-responsive" style="display:none;">
+                        <table class="table table-sm table-bordered">
+                            <thead class="table-light">
+                                <tr><th>房间</th><th>分配班级</th><th>预计人数</th><th>类型</th></tr>
+                            </thead>
+                            <tbody id="previewAssignmentsBody"></tbody>
+                        </table>
+                    </div>
+                    
+                    <h6 class="fw-bold mt-2 mb-2" style="font-size: 0.9rem;">分配日志：</h6>
+                    <div id="previewLogs" class="bg-dark text-light p-3 rounded" style="max-height:300px; overflow-y:auto; font-family: monospace; font-size: 12px;">
+                    </div>
+                </div>
+                
+                <div id="previewError" class="alert alert-danger" style="display:none;">
+                    <h6 class="fw-bold"><i class="bi bi-exclamation-triangle"></i> 分配失败</h6>
+                    <p id="previewErrorMessage"></p>
+                </div>
+            </div>
+            <div class="card-footer d-flex justify-content-between">
+                <button class="btn btn-secondary" id="btnStep3Prev">
+                    <i class="bi bi-arrow-left"></i> 上一步
+                </button>
+                <button class="btn btn-success" id="btnStep3Next" style="display:none;">
+                    确认执行分配 <i class="bi bi-check-lg"></i>
+                </button>
+            </div>
+        </div>
+    </div>
+    
+    <!-- 第4步：执行结果 -->
+    <div class="step-content" id="step4" style="display:none;">
+        <div class="card">
+            <div class="card-header">
+                <h5 class="mb-0"><i class="bi bi-4-circle-fill text-primary"></i> 执行结果</h5>
+            </div>
+            <div class="card-body">
+                <div id="executeLoading" class="text-center py-5">
+                    <div class="spinner-border text-primary" role="status"></div>
+                    <p class="mt-3 text-muted">正在执行分配...</p>
+                </div>
+                
+                <div id="executeResult" style="display:none;">
+                    <div id="executeSuccess" class="alert alert-success">
+                        <h5 class="fw-bold mb-1"><i class="bi bi-check-circle"></i> 分配成功！</h5>
+                        <div id="executeStats"></div>
+                    </div>
+                    
+                    <div id="executePartial" class="alert alert-warning" style="display:none;">
+                        <h6 class="fw-bold"><i class="bi bi-exclamation-triangle"></i> 部分分配</h6>
+                        <p>由于房间不足，部分学生未能分配。</p>
+                    </div>
+                    
+                    <h6 class="fw-bold mt-2 mb-2" style="font-size: 0.9rem;">执行日志：</h6>
+                    <div id="executeLogs" class="bg-dark text-light p-3 rounded" style="max-height:400px; overflow-y:auto; font-family: monospace; font-size: 12px;">
+                    </div>
+                    
+                    <div class="mt-4 text-center">
+                        <a href="{{ url_for('rooms.list_rooms') }}" class="btn btn-primary">
+                            <i class="bi bi-door-open"></i> 查看房间列表
+                        </a>
+                        <button class="btn btn-outline-secondary ms-2" onclick="location.reload()">
+                            <i class="bi bi-arrow-repeat"></i> 重新分配
+                        </button>
+                    </div>
+                </div>
+                
+                <div id="executeError" class="alert alert-danger" style="display:none;">
+                    <h5 class="fw-bold"><i class="bi bi-x-circle"></i> 执行失败</h5>
+                    <p id="executeErrorMessage"></p>
+                    <button class="btn btn-outline-danger mt-2" onclick="location.reload()">
+                        <i class="bi bi-arrow-repeat"></i> 重试
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 已分配确认弹窗 -->
+    <div class="modal fade" id="hasAssignedModal" tabindex="-1" data-bs-backdrop="static">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header bg-warning">
+                    <h5 class="modal-title"><i class="bi bi-exclamation-triangle"></i> 检测到已有分配</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <p>您选择的房间中有 <strong id="hasAssignedCount">0</strong> 间已有分配记录（班级分配或学生床位）。</p>
+                    <div id="hasAssignedList" class="mb-3" style="max-height:200px;overflow-y:auto;"></div>
+                    <p class="mb-0"><strong>是否清除已有分配？</strong></p>
+                    <ul class="mb-0">
+                        <li><strong>覆盖</strong>：清除原有班级和床位分配，重新编排</li>
+                        <li><strong>保留</strong>：保留原有分配，仅使用未分配房间</li>
+                    </ul>
+                </div>
+                <div id="noRoomsLeftWarning" class="alert alert-danger mx-3 mb-0" style="display:none;">
+                    <i class="bi bi-x-circle"></i> <strong>所有选中的房间都已分配！</strong>只能选择<strong>覆盖重新分配</strong>或返回上一步更换房间。
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" id="btnKeepExisting">
+                        <i class="bi bi-shield"></i> 保留原有分配
+                    </button>
+                    <button type="button" class="btn btn-warning" id="btnClearAll">
+                        <i class="bi bi-arrow-repeat"></i> 覆盖重新分配
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 合班确认弹窗 -->
+    <div class="modal fade" id="combineModal" tabindex="-1" data-bs-backdrop="static">
+        <div class="modal-dialog modal-lg">
+            <div class="modal-content">
+                <div class="modal-header bg-info">
+                    <h5 class="modal-title"><i class="bi bi-people"></i> 合班宿舍确认</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="alert alert-warning mb-3">
+                        <i class="bi bi-info-circle"></i> 
+                        房间数量不足，以下班级需要设置合班宿舍。请为每组选择一间合班宿舍房间，然后确认。
+                    </div>
+                    <div id="combineSuggestionsContainer">
+                        <!-- 动态生成合班建议 -->
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" id="btnCombineSkip">
+                        <i class="bi bi-skip-end"></i> 跳过合班（可能有人无法分配）
+                    </button>
+                    <button type="button" class="btn btn-primary" id="btnCombineConfirm">
+                        <i class="bi bi-check-lg"></i> 确认合班方案
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+</div>
+
+<style>
+.step-indicator{display:flex;flex-direction:column;align-items:center;opacity:0.5;transition:all 0.3s}
+.step-indicator.active{opacity:1;transform:scale(1.05)}
+.step-indicator.completed .step-number{background-color:#10b981;border-color:#10b981;color:white}
+.step-number{width:36px;height:36px;border-radius:50%;border:2px solid #3b82f6;display:flex;align-items:center;justify-content:center;font-weight:bold;color:#3b82f6;margin-bottom:6px;font-size:0.9rem;transition:all 0.3s}
+.step-label{font-size:0.75rem;color:#64748b;font-weight:500}
+.step-line{width:50px;height:2px;background-color:#e2e8f0;margin:0 8px;align-self:center;margin-bottom:26px}
+.table th,.table td{padding:0.4rem 0.5rem;vertical-align:middle}
+table tbody tr:hover{background-color:rgba(59,130,246,0.05)}
+.card-header .btn-link,.card-header a[data-bs-toggle="collapse"]{text-decoration:none!important;color:inherit}
+.card-header .btn-link:hover,.card-header a[data-bs-toggle="collapse"]:hover{color:#3b82f6}
+.alert-info{padding:0.6rem 0.8rem;font-size:0.85rem}
+.btn-sm{padding:0.25rem 0.5rem;font-size:0.8rem}
+#roomsContainer .card{margin-bottom:0.5rem}
+#roomsContainer .card-header{padding:0.5rem 0.75rem;font-size:0.9rem}
+#roomsContainer .card-body{padding:0.5rem}
+#previewAssignments .card{margin-bottom:0.75rem}
+#previewAssignments .card-header{padding:0.4rem 0.75rem;font-size:0.85rem}
+.bg-dark{font-size:0.75rem!important;line-height:1.4}
+#selectedClassesList .badge{font-size:0.75rem;padding:0.35rem 0.6rem}
+@media (min-width:992px){ #step1 .col-lg-4 .card{max-height:calc(100vh - 280px);overflow-y:auto}}
+@media (min-width:768px) and (max-width:991px){ #step1 .col-md-6 .card{max-height:calc(100vh - 250px);overflow-y:auto}}
+@media (max-width:767px){ #step1 .col-12 .card{max-height:calc(100vh - 220px);overflow-y:auto}}
+#step1 .card .table tbody tr{transition:background-color 0.2s}
+#step1 .card .table tbody tr:hover{background-color:rgba(59,130,246,0.08)}
+#step2 #roomsContainer > .row{display:flex;flex-wrap:wrap;gap:0.75rem}
+#step2 #roomsContainer > .row > .col-lg-4,#step2 #roomsContainer > .row > .col-md-6,#step2 #roomsContainer > .row > .col-12{display:flex;flex-direction:column}
+#step2 #roomsContainer .card{flex:1;display:flex;flex-direction:column}
+#step2 #roomsContainer .card-body{flex:1;overflow-y:auto;max-height:calc(100vh - 350px)}
+@media (min-width:992px){ #step2 #roomsContainer .card-body{max-height:calc(100vh - 320px)}}
+@media (min-width:768px) and (max-width:991px){ #step2 #roomsContainer .card-body{max-height:calc(100vh - 300px)}}
+@media (max-width:767px){ #step2 #roomsContainer .card-body{max-height:calc(100vh - 280px)}}
+#roomsContainer .table th,#roomsContainer .table td{padding:0.35rem 0.4rem;vertical-align:middle}
+#roomsContainer .form-check-inline{margin-right:0.3rem;margin-bottom:0.2rem}
+</style>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+var currentStep = 1;
+var selectedKeys = [];
+var selectedRoomIds = [];
+var assignMode = 'keep_existing';
+function initAssignAuto() {
+    if (typeof $ === 'undefined') { setTimeout(initAssignAuto, 100); return; }
+    console.log('=== 宿舍分配页面初始化 ===');
+    updateSelection();
+    $(document).on('change', '.grade-gender-select', function() {
+        var grade = $(this).data('grade');
+        var gender = $(this).data('gender');
+        var checked = $(this).prop('checked');
+        $('.gender-checkbox[data-grade="' + grade + '"][data-gender="' + gender + '"]').prop('checked', checked);
+        updateSelection();
+    });
+    $(document).on('change', '.gender-checkbox', function() { updateSelection(); });
+    $('#btnStep1Next').on('click', function() { goToStep(2); initStep2(); });
+    $('#btnStep2Prev').on('click', function() { goToStep(1); });
+    $('#btnStep2Next').on('click', function() { goToStep(3); loadPreview(); });
+    $('#btnStep3Prev').on('click', function() { goToStep(2); });
+    $('#btnStep3Next').on('click', function() { goToStep(4); executeAssignment(); });
+}
+function updateSelection() {
+    selectedKeys = [];
+    $('.gender-checkbox:checked').each(function() {
+        selectedKeys.push({ grade: $(this).data('grade'), class_name: $(this).data('class'), gender: $(this).data('gender') });
+    });
+    $('.selected-count').text('0');
+    $('.grade-gender-select').each(function() {
+        var grade = $(this).data('grade');
+        var gender = $(this).data('gender');
+        var allCheckboxes = $('.gender-checkbox[data-grade="' + grade + '"][data-gender="' + gender + '"]');
+        var checkedCheckboxes = allCheckboxes.filter(':checked');
+        $(this).prop('checked', allCheckboxes.length > 0 && allCheckboxes.length === checkedCheckboxes.length);
+    });
+    if (selectedKeys.length > 0) {
+        var keysParam = selectedKeys.map(function(k) { return encodeURIComponent(k.grade + ':' + k.class_name + ':' + k.gender); }).join(',');
+        $.get('{{ url_for("rooms.assign_auto_stats") }}?keys=' + keysParam, function(response) {
+            if (response.success) {
+                response.details.forEach(function(d) {
+                    var row = $('tr[data-grade="' + d.grade + '"][data-class="' + d.class_name + '"]');
+                    if (row.length) {
+                        var currentVal = parseInt(row.find('.selected-count').text()) || 0;
+                        row.find('.selected-count').text(currentVal + d.count);
+                    }
+                });
+                $('#selectedClasses').text(response.summary.total_classes);
+                $('#selectedStudents').text(response.summary.total_students);
+                window._step1Summary = response.summary;
+                window._step1Details = response.details;
+            }
+        });
+    } else {
+        $('#selectedClasses').text('0');
+        $('#selectedStudents').text('0');
+        window._step1Summary = null;
+        window._step1Details = null;
+    }
+    checkStep1Complete();
+}
+function checkStep1Complete() { $('#btnStep1Next').prop('disabled', selectedKeys.length === 0); }
+function initStep2() {
+    var summary = window._step1Summary;
+    if (summary) {
+        $('#maleClassesCount').text(summary.male_class_count);
+        $('#maleStudentsCount').text(summary.male_total);
+        $('#femaleClassesCount').text(summary.female_class_count);
+        $('#femaleStudentsCount').text(summary.female_total);
+    } else { refreshStep2Stats(); }
+    var details = window._step1Details || [];
+    var html = '';
+    var seen = {};
+    details.forEach(function(d) {
+        var key = d.grade + ':' + d.class_name;
+        if (!seen[key]) { seen[key] = {grade: d.grade, class_name: d.class_name, male: 0, female: 0}; }
+        if (d.gender === '男') seen[key].male = d.count;
+        else seen[key].female = d.count;
+    });
+    for (var k in seen) {
+        var cls = seen[k];
+        var badge = '';
+        if (cls.male > 0 && cls.female > 0) {
+            badge = '<span class="badge bg-primary">男 ' + cls.male + '</span> <span class="badge bg-danger">女 ' + cls.female + '</span>';
+        } else if (cls.male > 0) {
+            badge = '<span class="badge bg-primary">男 ' + cls.male + '</span>';
+        } else { badge = '<span class="badge bg-danger">女 ' + cls.female + '</span>'; }
+        html += '<div class="col-md-6 col-lg-4"><div class="card border-0 bg-light"><div class="card-body py-2 px-3"><div class="d-flex justify-content-between align-items-center"><strong>' + cls.grade + ' ' + cls.class_name + '</strong><div>' + badge + '</div></div></div></div></div>';
+    }
+    $('#selectedClassesList').html(html);
+    loadRoomsData();
+    checkStep2Complete();
+}
+function refreshStep2Stats() {
+    if (selectedKeys.length === 0) return;
+    var keysParam = selectedKeys.map(function(k) { return encodeURIComponent(k.grade + ':' + k.class_name + ':' + k.gender); }).join(',');
+    $.get('{{ url_for("rooms.assign_auto_stats") }}?keys=' + keysParam, function(response) {
+        if (response.success) {
+            window._step1Summary = response.summary;
+            window._step1Details = response.details;
+            $('#maleClassesCount').text(response.summary.male_class_count);
+            $('#maleStudentsCount').text(response.summary.male_total);
+            $('#femaleClassesCount').text(response.summary.female_class_count);
+            $('#femaleStudentsCount').text(response.summary.female_total);
+        }
+    });
+}
+function loadRoomsData() {
+    $('#roomsLoading').show();
+    $('#roomsContainer').hide();
+    $.ajax({
+        url: '{{ url_for("rooms.available_rooms_data") }}',
+        method: 'GET',
+        success: function(data) { $('#roomsLoading').hide(); renderRooms(data); $('#roomsContainer').show(); },
+        error: function() { $('#roomsLoading').html('<div class="alert alert-danger">加载房间数据失败</div>'); }
+    });
+}
+function renderRooms(buildingsData) {
+    var containerHtml = '';
+    var buildingIndex = 0;
+    containerHtml += '<div class="row g-3">';
+    for (var buildingName in buildingsData) {
+        buildingIndex++;
+        var buildingId = 'building_' + buildingIndex + '_' + buildingName.replace(/[^a-zA-Z0-9]/g, '_');
+        var floorsData = buildingsData[buildingName];
+        containerHtml += '<div class="col-lg-4 col-md-6 col-12"><div class="card h-100"><div class="card-header py-2"><div class="d-flex justify-content-between align-items-center"><h6 class="mb-0" style="font-size: 0.95rem;"><a class="text-decoration-none" data-bs-toggle="collapse" href="#' + buildingId + '" role="button" aria-expanded="true"><i class="bi bi-chevron-down"></i> <strong>' + buildingName + '</strong></a></h6><div class="form-check form-check-inline mb-0"><input class="form-check-input building-gender-select" type="checkbox" id="bgs_' + buildingId + '_male" data-building="' + buildingName + '" data-gender="男"><label class="form-check-label" style="font-size: 0.75rem;" for="bgs_' + buildingId + '_male"><i class="bi bi-gender-male text-primary"></i> 男生全选</label></div><div class="form-check form-check-inline mb-0"><input class="form-check-input building-gender-select" type="checkbox" id="bgs_' + buildingId + '_female" data-building="' + buildingName + '" data-gender="女"><label class="form-check-label" style="font-size: 0.75rem;" for="bgs_' + buildingId + '_female"><i class="bi bi-gender-female text-danger"></i> 女生全选</label></div></div></div><div class="collapse show" id="' + buildingId + '"><div class="card-body p-2"><table class="table table-bordered mb-0 align-middle" style="font-size: 0.85rem;"><thead class="table-light"><tr><th style="width: 80px;">楼层</th><th class="text-center"><i class="bi bi-gender-male text-primary"></i> 男生房间</th><th class="text-center"><i class="bi bi-gender-female text-danger"></i> 女生房间</th></tr></thead><tbody>';
+        var sortedFloors = Object.keys(floorsData).sort(function(a, b) { return parseInt(a) - parseInt(b); });
+        for (var i = 0; i < sortedFloors.length; i++) {
+            var floor = sortedFloors[i];
+            var rooms = floorsData[floor];
+            var floorId = buildingId + '_floor_' + floor;
+            var maleRooms = [];
+            var femaleRooms = [];
+            for (var j = 0; j < rooms.length; j++) {
+                var room = rooms[j];
+                if (room.gender === '男' || room.gender === '不限') { maleRooms.push(room); }
+                if (room.gender === '女' || room.gender === '不限') { femaleRooms.push(room); }
+            }
+            containerHtml += '<tr data-floor="' + floor + '"><td class="text-center fw-bold" style="font-size: 0.8rem;">' + floor + '楼</td>';
+            containerHtml += '<td class="text-center">';
+            if (maleRooms.length > 0) {
+                containerHtml += '<div class="form-check d-inline-block mb-1"><input class="form-check-input floor-gender-select" type="checkbox" id="fgs_' + floorId + '_male" data-building="' + buildingName + '" data-floor="' + floor + '" data-gender="男"><label class="form-check-label" style="font-size: 0.75rem;" for="fgs_' + floorId + '_male">全选</label></div><div class="mt-1">';
+                for (var j = 0; j < maleRooms.length; j++) {
+                    var room = maleRooms[j];
+                    var roomId = 'room_' + room.id;
+                    var isAssigned = room.class_name && room.class_name.trim() !== '';
+                    var assignedTitle = isAssigned ? ' title="已分配给: ' + (room.grade || '') + ' ' + room.class_name + '"' : '';
+                    var assignedStyle = isAssigned ? ' style="background:#fff3cd;border-radius:3px;padding:1px 4px;"' : '';
+                    containerHtml += '<div class="form-check form-check-inline"' + assignedTitle + '><input class="form-check-input room-checkbox" type="checkbox" id="' + roomId + '" data-room-id="' + room.id + '" data-building="' + buildingName + '" data-floor="' + floor + '" data-room-number="' + room.room_number + '" data-available="' + room.available + '" data-gender="男"' + (isAssigned ? ' data-is-assigned="1" data-assigned-class="' + (room.grade || '') + ' ' + room.class_name + '"' : '') + '>';
+                    var labelText = room.room_number + '(' + room.capacity + ')';
+                    if (isAssigned) { labelText += ' <span class="badge bg-warning text-dark" style="font-size:0.6rem">' + (room.grade || '') + ' ' + room.class_name + '</span>'; }
+                    containerHtml += '<label class="form-check-label" style="font-size: 0.75rem;" for="' + roomId + '"' + assignedStyle + '>' + labelText + '</label></div>';
+                }
+                containerHtml += '</div>';
+            } else { containerHtml += '<span class="text-muted" style="font-size: 0.75rem;">无</span>'; }
+            containerHtml += '</td>';
+            containerHtml += '<td class="text-center">';
+            if (femaleRooms.length > 0) {
+                containerHtml += '<div class="form-check d-inline-block mb-1"><input class="form-check-input floor-gender-select" type="checkbox" id="fgs_' + floorId + '_female" data-building="' + buildingName + '" data-floor="' + floor + '" data-gender="女"><label class="form-check-label" style="font-size: 0.75rem;" for="fgs_' + floorId + '_female">全选</label></div><div class="mt-1">';
+                for (var j = 0; j < femaleRooms.length; j++) {
+                    var room = femaleRooms[j];
+                    var roomId = 'room_' + room.id;
+                    var isAssigned = room.class_name && room.class_name.trim() !== '';
+                    var assignedTitle = isAssigned ? ' title="已分配给: ' + (room.grade || '') + ' ' + room.class_name + '"' : '';
+                    var assignedStyle = isAssigned ? ' style="background:#fff3cd;border-radius:3px;padding:1px 4px;"' : '';
+                    containerHtml += '<div class="form-check form-check-inline"' + assignedTitle + '><input class="form-check-input room-checkbox" type="checkbox" id="' + roomId + '" data-room-id="' + room.id + '" data-building="' + buildingName + '" data-floor="' + floor + '" data-room-number="' + room.room_number + '" data-available="' + room.available + '" data-gender="女"' + (isAssigned ? ' data-is-assigned="1" data-assigned-class="' + (room.grade || '') + ' ' + room.class_name + '"' : '') + '>';
+                    var labelText = room.room_number + '(' + room.capacity + ')';
+                    if (isAssigned) { labelText += ' <span class="badge bg-warning text-dark" style="font-size:0.6rem">' + (room.grade || '') + ' ' + room.class_name + '</span>'; }
+                    containerHtml += '<label class="form-check-label" style="font-size: 0.75rem;" for="' + roomId + '"' + assignedStyle + '>' + labelText + '</label></div>';
+                }
+                containerHtml += '</div>';
+            } else { containerHtml += '<span class="text-muted" style="font-size: 0.75rem;">无</span>'; }
+            containerHtml += '</td></tr>';
+        }
+        containerHtml += '</tbody></table></div></div></div></div>';
+    }
+    containerHtml += '</div>';
+    $('#roomsContainer').html(containerHtml);
+    bindRoomCheckboxEvents();
+}
+function bindRoomCheckboxEvents() {
+    $(document).on('change', '.room-checkbox', function() { updateSelectedBeds(); checkStep2Complete(); });
+    $(document).on('change', '.floor-gender-select', function() {
+        var building = $(this).data('building');
+        var floor = $(this).data('floor');
+        var gender = $(this).data('gender');
+        var checked = $(this).prop('checked');
+        $('.room-checkbox[data-building="' + building + '"][data-floor="' + floor + '"][data-gender="' + gender + '"]').prop('checked', checked);
+        updateSelectedBeds();
+        checkStep2Complete();
+    });
+    $(document).on('change', '.building-gender-select', function() {
+        var building = $(this).data('building');
+        var gender = $(this).data('gender');
+        var checked = $(this).prop('checked');
+        $('.room-checkbox[data-building="' + building + '"][data-gender="' + gender + '"]').prop('checked', checked);
+        $('.floor-gender-select[data-building="' + building + '"][data-gender="' + gender + '"]').prop('checked', checked);
+        updateSelectedBeds();
+        checkStep2Complete();
+    });
+    $('#btnLoadRooms').on('click', function() { loadRoomsData(); });
+}
+function updateSelectedBeds() {
+    selectedRoomIds = [];
+    $('.room-checkbox:checked').each(function() { selectedRoomIds.push(parseInt($(this).data('room-id'))); });
+    $('.floor-selected-beds').text('0');
+    if (selectedRoomIds.length === 0) {
+        $('#selectedBedsCount').text('0');
+        $('#selectedMaleRooms').text('0');
+        $('#selectedFemaleRooms').text('0');
+        $('#totalAvailableBeds').text('0');
+        $('#maleBeds').text('0');
+        $('#femaleBeds').text('0');
+        checkStep2Complete();
+        return;
+    }
+    $.ajax({
+        url: '{{ url_for("rooms.assign_auto_room_stats") }}',
+        method: 'POST',
+        contentType: 'application/json',
+        headers: { 'X-CSRFToken': csrfToken },
+        data: JSON.stringify({ room_ids: selectedRoomIds }),
+        success: function(response) {
+            if (response.success) {
+                $('#selectedBedsCount').text(response.male_rooms + response.female_rooms);
+                $('#selectedMaleRooms').text(response.male_rooms);
+                $('#selectedFemaleRooms').text(response.female_rooms);
+                $('#totalAvailableBeds').text(response.total_beds);
+                $('#maleBeds').text(response.male_beds);
+                $('#femaleBeds').text(response.female_beds);
+                window._roomStats = response;
+            }
+            checkStep2Complete();
+        },
+        error: function() { checkStep2Complete(); }
+    });
+}
+function checkStep2Complete() {
+    var hasSelectedRooms = selectedRoomIds.length > 0;
+    var stats = window._roomStats || {};
+    var summary = window._step1Summary || {};
+    var maleBeds = stats.male_beds || 0;
+    var femaleBeds = stats.female_beds || 0;
+    var maleStudents = summary.male_total || 0;
+    var femaleStudents = summary.female_total || 0;
+    var maleBedsEnough = maleBeds >= maleStudents;
+    var femaleBedsEnough = femaleBeds >= femaleStudents;
+    var canProceed = hasSelectedRooms && maleBedsEnough && femaleBedsEnough;
+    $('#btnStep2Next').prop('disabled', !canProceed);
+    var tips = [];
+    if (hasSelectedRooms) {
+        var maleDiff = maleBeds - maleStudents;
+        var femaleDiff = femaleBeds - femaleStudents;
+        if (maleStudents > 0) {
+            if (maleDiff < 0) { tips.push('<span class="text-danger"><i class="bi bi-x-circle"></i> 男生床位不足，还差 ' + Math.abs(maleDiff) + ' 个（请增选宿舍）</span>'); }
+            else if (maleDiff === 0) { tips.push('<span class="text-warning"><i class="bi bi-exclamation-triangle"></i> 男生床位刚好（可能会出现8人间住满）</span>'); }
+            else { tips.push('<span class="text-success"><i class="bi bi-check-circle"></i> 男生床位充足，余 ' + maleDiff + ' 个</span>'); }
+        }
+        if (femaleStudents > 0) {
+            if (femaleDiff < 0) { tips.push('<span class="text-danger"><i class="bi bi-x-circle"></i> 女生床位不足，还差 ' + Math.abs(femaleDiff) + ' 个（请增选宿舍）</span>'); }
+            else if (femaleDiff === 0) { tips.push('<span class="text-warning"><i class="bi bi-exclamation-triangle"></i> 女生床位刚好（可能会出现8人间住满）</span>'); }
+            else { tips.push('<span class="text-success"><i class="bi bi-check-circle"></i> 女生床位充足，余 ' + femaleDiff + ' 个</span>'); }
+        }
+    }
+    if (tips.length > 0) { $('#bedsStatusTips').html(tips.join(' &nbsp;|&nbsp; ')); }
+    else { $('#bedsStatusTips').html(''); }
+}
+function goToStep(step) {
+    $('.step-content').hide();
+    $('.step-indicator').removeClass('active');
+    for (var i = 1; i < step; i++) { $('#step' + i + '-indicator').addClass('completed'); }
+    $('#step' + step).show();
+    $('#step' + step + '-indicator').addClass('active');
+    currentStep = step;
+    if (step <= 2) { window._existingConfirmed = false; }  // 回到选择步骤时重置标记
+}
+function loadPreview() {
+    $('#previewLoading').show();
+    $('#previewResult').hide();
+    $('#previewError').hide();
+    $('#btnStep3Next').hide();
+    $.ajax({
+        url: '{{ url_for("rooms.assign_auto_preview") }}',
+        method: 'POST',
+        contentType: 'application/json',
+        headers: { 'X-CSRFToken': csrfToken },
+        data: JSON.stringify({ selected_keys: selectedKeys, selected_room_ids: selectedRoomIds, mode: assignMode }),
+        success: function(response) { $('#previewLoading').hide(); if (response.success) { showPreviewResult(response); } else { showPreviewError(response.error || '未知错误'); } },
+        error: function(xhr) { $('#previewLoading').hide(); showPreviewError('请求失败: ' + xhr.statusText); }
+    });
+}
+function showPreviewResult(result) {
+    window._previewData = result;
+    $('#previewResult').show();
+    var stats = result.stats || {};
+    var unallocatedHtml = '';
+    if (stats.unallocated_students && stats.unallocated_students > 0) {
+        unallocatedHtml = '<div class="col-md-3"><strong class="text-danger">未分配:</strong> <span class="text-danger fw-bold">' + stats.unallocated_students + '人</span></div>';
+    } else { unallocatedHtml = '<div class="col-md-3"><strong class="text-success">未分配:</strong> <span class="text-success">0人 ✓</span></div>'; }
+    $('#previewStats').html(
+        '<div class="row">' +
+        '<div class="col-md-3"><strong>使用情形:</strong> <span class="fw-bold">情形' + (result.scenario || '?') + '</span></div>' +
+        '<div class="col-md-3"><strong>总学生数:</strong> ' + (stats.total_students || 0) + '人</div>' +
+        '<div class="col-md-3"><strong>需要房间:</strong> ' + (stats.total_rooms_needed || 0) + '间</div>' +
+        '<div class="col-md-3"><strong>已分配房间:</strong> ' + (stats.total_rooms_assigned || 0) + '间</div>' +
+        '</div>' +
+        '<div class="row mt-2">' +
+        '<div class="col-md-3"><strong>合班宿舍:</strong> ' + (stats.combined_rooms || 0) + '间</div>' +
+        unallocatedHtml +
+        '</div>'
+    );
+    if (result.no_rooms_left) { showHasAssignedModal(result, true); $('#btnStep3Next').hide(); return; }
+    var assignmentsByRoom = {};
+    result.assignments.forEach(function(a) { var roomKey = (a.building || '') + '|' + (a.room_number || ''); assignmentsByRoom[roomKey] = a; });
+    var sortedRoomKeys = Object.keys(assignmentsByRoom).sort(function(k1, k2) {
+        var parts1 = k1.split('|');
+        var parts2 = k2.split('|');
+        if (parts1[0] !== parts2[0]) { return parts1[0].localeCompare(parts2[0]); }
+        var num1 = parseInt(parts1[1]) || 0;
+        var num2 = parseInt(parts2[1]) || 0;
+        return num1 - num2;
+    });
+    var html = '';
+    var currentBuilding = '';
+    sortedRoomKeys.forEach(function(roomKey) {
+        var a = assignmentsByRoom[roomKey];
+        var parts = roomKey.split('|');
+        var building = parts[0];
+        var roomNumber = parts[1];
+        if (building !== currentBuilding) {
+            currentBuilding = building;
+            html += '<div class="card mb-3 border-secondary"><div class="card-header py-2 bg-secondary bg-opacity-10"><strong><i class="bi bi-building"></i> ' + building + '</strong></div><div class="card-body p-2"><div class="row g-2">';
+        }
+        var roomLabel = roomNumber + ' (' + (a.expected_count || 0) + '人)';
+        var badgeClass = a.is_combined ? 'bg-warning text-dark' : 'bg-light text-dark border';
+        var classText = '';
+        if (a.is_combined && a.combined_info) { classText = '<strong>' + (a.grade || '') + ' ' + a.combined_info + '</strong>'; }
+        else { classText = '<strong>' + (a.grade || '') + ' ' + (a.class_name || '') + '</strong>'; }
+        var genderIcon = '';
+        if (a.gender === '男') { genderIcon = '<i class="bi bi-gender-male text-primary" title="男生"></i>'; }
+        else if (a.gender === '女') { genderIcon = '<i class="bi bi-gender-female text-danger" title="女生"></i>'; }
+        else if (a.is_combined) { genderIcon = '<i class="bi bi-people text-warning" title="合班"></i>'; }
+        html += '<div class="col-md-4 col-lg-3"><div class="card h-100 ' + (a.is_combined ? 'border-warning' : 'border-light') + '"><div class="card-body p-2"><div class="d-flex justify-content-between align-items-start mb-1"><span class="badge ' + badgeClass + '">' + roomLabel + '</span><span>' + genderIcon + '</span></div><div class="small text-truncate" title="' + classText + '">' + classText + '</div></div></div></div>';
+    });
+    if (currentBuilding) { html += '</div></div></div>'; }
+    $('#previewAssignments').html(html);
+    $('#previewAssignmentsFlat').hide();
+    var logsHtml = '';
+    result.logs.forEach(function(log) {
+        var logClass = log.includes('[ERROR]') ? 'text-danger' : log.includes('[WARN]') ? 'text-warning' : log.includes('[OK]') || log.includes('[DONE]') ? 'text-success' : 'text-light';
+        logsHtml += '<div class="' + logClass + '">' + log + '</div>';
+    });
+    $('#previewLogs').html(logsHtml);
+    if ((result.has_assigned || result.has_existing) && !window._existingConfirmed) { showHasAssignedModal(result); return; }
+    if (result.needs_combine && result.combine_suggestions && result.combine_suggestions.length > 0) { showCombineModal(result); $('#btnStep3Next').hide(); return; }
+    $('#btnStep3Next').show();
+}
+function showPreviewError(message) { $('#previewError').show(); $('#previewErrorMessage').text(message); }
+function showHasAssignedModal(result, noRoomsLeft) {
+    window._existingConfirmed = true;  // 标记已弹窗，避免反复弹出
+    noRoomsLeft = noRoomsLeft || result.no_rooms_left || false;
+    var assignedCount = result.assigned_room_count || 0;
+    if (assignedCount === 0) {
+        result.logs.forEach(function(log) { if (log.indexOf('[WARN] 有') === 0) { var m = log.match(/\d+/); if (m) assignedCount = parseInt(m[0]); } });
+    }
+    $('#hasAssignedCount').text(assignedCount);
+    
+    // 构建分配信息列表（房间分配 + 床位分配）
+    var listHtml = '';
+    var roomAssignments = result.rooms_with_assignments || [];
+    var roomBeds = result.rooms_with_beds || [];
+    if (roomAssignments.length > 0) {
+        listHtml += '<div class="mb-2"><strong class="text-warning"><i class="bi bi-building"></i> 已分配给班级：</strong></div>';
+        listHtml += '<ul class="list-group list-group-flush mb-2">';
+        roomAssignments.forEach(function(room) { listHtml += '<li class="list-group-item py-1 px-2 small"><i class="bi bi-building"></i> ' + room + '</li>'; });
+        listHtml += '</ul>';
+    }
+    if (roomBeds.length > 0) {
+        listHtml += '<div class="mb-2"><strong class="text-danger"><i class="bi bi-person-check"></i> 已有学生床位分配：</strong></div>';
+        listHtml += '<ul class="list-group list-group-flush">';
+        roomBeds.forEach(function(room) { listHtml += '<li class="list-group-item py-1 px-2 small"><i class="bi bi-person-check"></i> ' + room + '</li>'; });
+        listHtml += '</ul>';
+    }
+    if (!listHtml) { listHtml = '<p class="text-muted">详情请看上方日志</p>'; }
+    $('#hasAssignedList').html(listHtml);
+    
+    if (noRoomsLeft) { $('#btnKeepExisting').prop('disabled', true).text('无可用房间，无法保留'); $('#noRoomsLeftWarning').show(); }
+    else { $('#btnKeepExisting').prop('disabled', false).html('<i class="bi bi-shield"></i> 保留原有分配'); $('#noRoomsLeftWarning').hide(); }
+    $('#btnKeepExisting').off('click').on('click', function() { $('#hasAssignedModal').modal('hide'); $('#btnStep3Next').show(); });
+    $('#btnClearAll').off('click').on('click', function() { assignMode = 'clear_all'; $('#hasAssignedModal').modal('hide'); loadPreview(); });
+    $('#hasAssignedModal').modal('show');
+}
+function showCombineModal(result) {
+    var suggestions = result.combine_suggestions || [];
+    var html = '';
+    suggestions.forEach(function(s, idx) {
+        html += '<div class="card mb-3 border-info"><div class="card-header bg-info bg-opacity-10"><strong><i class="bi bi-people"></i> 合班建议 #' + (idx + 1) + '</strong>';
+        var gender1 = s.class1.gender || '';
+        var gender2 = s.class2.gender || '';
+        var genderIcon1 = gender1 === '男' ? '<i class="bi bi-gender-male text-primary" title="男生"></i>' : gender1 === '女' ? '<i class="bi bi-gender-female text-danger" title="女生"></i>' : '';
+        var genderIcon2 = gender2 === '男' ? '<i class="bi bi-gender-male text-primary" title="男生"></i>' : gender2 === '女' ? '<i class="bi bi-gender-female text-danger" title="女生"></i>' : '';
+        html += ' <span class="ms-2">' + genderIcon1 + ' ' + genderIcon2 + '</span></div><div class="card-body"><p class="mb-2"><span class="badge bg-primary me-2">' + s.class1.grade + ' ' + s.class1.class_name + '</span> 剩余 <strong>' + s.class1.count + '</strong> 人 + <span class="badge bg-danger me-2">' + s.class2.grade + ' ' + s.class2.class_name + '</span> 剩余 <strong>' + s.class2.count + '</strong> 人 = 共 <strong>' + s.combined_count + '</strong> 人</p>';
+        if (s.candidate_rooms && s.candidate_rooms.length > 0) {
+            var buildings = new Set();
+            s.candidate_rooms.forEach(function(room) { if (room.building) buildings.add(room.building); });
+            if (buildings.size > 0) { html += '<p class="text-muted small mb-2"><i class="bi bi-building"></i> 可用楼栋: ' + Array.from(buildings).join(', ') + '</p>'; }
+            html += '<div class="mb-2"><strong>选择合班房间：</strong></div><select class="form-select combine-room-select" data-suggestion-idx="' + idx + '"><option value="">-- 请选择合班宿舍房间 --</option>';
+            s.candidate_rooms.forEach(function(room) {
+                var label = room.building + ' ' + room.room_number + ' (' + room.available + '床可用)';
+                if (room.currently_assigned_to) { label += ' [当前: ' + room.currently_assigned_to + ']'; }
+                html += '<option value="' + room.room_id + '">' + label + '</option>';
+            });
+            html += '</select>';
+        } else { html += '<p class="text-danger">无可用房间作为合班宿舍</p>'; }
+        html += '</div></div>';
+    });
+    $('#combineSuggestionsContainer').html(html);
+    $('#btnCombineConfirm').off('click').on('click', function() {
+        var confirmations = [];
+        var allSelected = true;
+        $('.combine-room-select').each(function() {
+            var idx = parseInt($(this).data('suggestion-idx'));
+            var roomId = $(this).val();
+            if (!roomId) { allSelected = false; return false; }
+            var s = suggestions[idx];
+            confirmations.push({ class1: { grade: s.class1.grade, class_name: s.class1.class_name, count: s.class1.count }, class2: { grade: s.class2.grade, class_name: s.class2.class_name, count: s.class2.count }, room_id: parseInt(roomId) });
+        });
+        if (!allSelected) { alert('请为每组合班建议选择一个房间'); return; }
+        window._combineConfirmations = confirmations;
+        $('#combineModal').modal('hide');
+        loadPreviewWithCombine(confirmations);
+    });
+    $('#btnCombineSkip').off('click').on('click', function() { window._combineConfirmations = []; $('#combineModal').modal('hide'); $('#btnStep3Next').show(); });
+    $('#combineModal').modal('show');
+}
+function loadPreviewWithCombine(confirmations) {
+    $('#previewLoading').show();
+    $('#previewResult').hide();
+    $('#previewError').hide();
+    $('#btnStep3Next').hide();
+    $.ajax({
+        url: '{{ url_for("rooms.assign_auto_preview") }}',
+        method: 'POST',
+        contentType: 'application/json',
+        headers: { 'X-CSRFToken': csrfToken },
+        data: JSON.stringify({ selected_keys: selectedKeys, selected_room_ids: selectedRoomIds, mode: assignMode, combine_confirmations: confirmations }),
+        success: function(response) { $('#previewLoading').hide(); if (response.success) { showPreviewResult(response); } else { showPreviewError(response.error || '未知错误'); } },
+        error: function(xhr) { $('#previewLoading').hide(); showPreviewError('请求失败: ' + xhr.statusText); }
+    });
+}
+function executeAssignment() {
+    $('#executeLoading').show();
+    $('#executeResult').hide();
+    $('#executeError').hide();
+    $.ajax({
+        url: '{{ url_for("rooms.assign_auto_execute") }}',
+        method: 'POST',
+        contentType: 'application/json',
+        headers: { 'X-CSRFToken': csrfToken },
+        data: JSON.stringify({ selected_keys: selectedKeys, selected_room_ids: selectedRoomIds, mode: assignMode, combine_confirmations: window._combineConfirmations || [], force_full_8: window._forceFull8 || false }),
+        success: function(response) { $('#executeLoading').hide(); $('#executeResult').show(); if (response.success) { showExecuteResult(response); } else { showExecuteError(response.error || '未知错误'); } },
+        error: function(xhr) { $('#executeLoading').hide(); showExecuteError('请求失败: ' + xhr.statusText); }
+    });
+}
+function showExecuteResult(result) {
+    var stats = result.stats;
+    $('#executeStats').html('<div class="row"><div class="col-md-4"><strong>已分配学生:</strong> ' + stats.total_students + '人</div><div class="col-md-4"><strong>使用房间:</strong> ' + stats.total_rooms_assigned + '间</div><div class="col-md-4"><strong>合班宿舍:</strong> ' + stats.combined_rooms + '间</div></div>');
+    if (result.partial) { $('#executePartial').show(); }
+    var logsHtml = '';
+    result.logs.forEach(function(log) { var logClass = log.includes('[ERROR]') ? 'text-danger' : log.includes('[WARN]') ? 'text-warning' : log.includes('[OK]') || log.includes('[DONE]') ? 'text-success' : 'text-light'; logsHtml += '<div class="' + logClass + '">' + log + '</div>'; });
+    $('#executeLogs').html(logsHtml);
+}
+function showExecuteError(message) { $('#executeError').show(); $('#executeErrorMessage').text(message); }
+initAssignAuto();
+</script>
+{% endblock %}

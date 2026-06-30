@@ -1,0 +1,173 @@
+{% extends "base.html" %}
+{% block title %}权限组管理{% endblock %}
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+    <h4 class="fw-bold mb-0"><i class="bi bi-shield-lock"></i> 权限组管理</h4>
+    <button class="btn btn-primary" onclick="openModal()">
+        <i class="bi bi-plus-lg"></i> 新增权限组
+    </button>
+</div>
+
+<div class="row">
+{% for g in groups %}
+<div class="col-md-6 mb-3">
+    <div class="card h-100">
+        <div class="card-body">
+            <div class="d-flex justify-content-between align-items-start mb-2">
+                <h6 class="fw-bold mb-0">{{ g.name }}</h6>
+                <div>
+                    <button class="btn btn-sm btn-outline-warning" onclick="editGroup({{ g.id }})"><i class="bi bi-pencil"></i></button>
+                    <button class="btn btn-sm btn-outline-danger" onclick="deleteGroup({{ g.id }})"><i class="bi bi-trash"></i></button>
+                </div>
+            </div>
+            <div class="mb-2">
+                <span class="badge bg-info me-1">管理范围:
+                    {% if g.scope_type == 'school' %}全校
+                    {% elif g.scope_type == 'grade' %}所管年级
+                    {% elif g.scope_type == 'class' %}所管班级
+                    {% else %}无限制{% endif %}
+                </span>
+                <span class="badge bg-secondary">{{ g._user_count }}人</span>
+            </div>
+            {% if g.description %}<p class="text-muted small mb-2">{{ g.description }}</p>{% endif %}
+            <div class="d-flex flex-wrap gap-1">
+                {% set keys = g.get_menu_keys() %}
+                {% for k, label in all_menu_keys %}
+                <span class="menu-chip {% if k in keys %}active{% else %}inactive{% endif %}" style="font-size:11px;">
+                    {{ label }}
+                </span>
+                {% endfor %}
+            </div>
+        </div>
+    </div>
+</div>
+{% endfor %}
+</div>
+
+<!-- Modal -->
+<div class="modal fade" id="groupModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="modalTitle">新增权限组</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <input type="hidden" id="groupId">
+                <div class="mb-3">
+                    <label class="form-label">组名 <span class="text-danger">*</span></label>
+                    <input class="form-control" id="groupName" placeholder="如：班主任组">
+                </div>
+                <div class="mb-3">
+                    <label class="form-label">管理范围</label>
+                    <select class="form-select" id="scopeType">
+                        <option value="none">无限制</option>
+                        <option value="class">所管班级</option>
+                        <option value="grade">所管年级</option>
+                        <option value="school">全校</option>
+                    </select>
+                </div>
+                <div class="mb-3">
+                    <label class="form-label">描述</label>
+                    <input class="form-control" id="groupDesc" placeholder="可选">
+                </div>
+                <div class="mb-3">
+                    <label class="form-label">可见菜单</label>
+                    <div class="d-flex flex-wrap gap-2" id="menuChecks">
+                        {% for k, label in all_menu_keys %}
+                        <label class="menu-check-label">
+                            <input type="checkbox" value="{{ k }}" class="menu-check"> {{ label }}
+                        </label>
+                        {% endfor %}
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" data-bs-dismiss="modal">取消</button>
+                <button class="btn btn-primary" onclick="saveGroup()">保存</button>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_css %}
+<style>
+.menu-chip {
+    display: inline-block; padding: 1px 7px; border-radius: 3px; border: 1px solid #dee2e6;
+}
+.menu-chip.active { background: #dbeafe; color: #1e40af; border-color: #93c5fd; }
+.menu-chip.inactive { background: #f8f9fa; color: #adb5bd; border-color: #e9ecef; }
+.menu-check-label {
+    display: inline-flex; align-items: center; gap: 4px; font-size: 13px;
+    padding: 3px 8px; border: 1px solid #dee2e6; border-radius: 4px; cursor: pointer;
+    user-select: none;
+}
+.menu-check-label:has(input:checked) { background: #dbeafe; border-color: #93c5fd; }
+</style>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+function openModal(id) {
+    $('#modalTitle').text('新增权限组');
+    $('#groupId').val('');
+    $('#groupName').val('');
+    $('#scopeType').val('none');
+    $('#groupDesc').val('');
+    $('.menu-check').prop('checked', false);
+    new bootstrap.Modal('#groupModal').show();
+}
+
+function editGroup(id) {
+    $.get('/perm-groups/' + id + '/json', function(g) {
+        $('#modalTitle').text('编辑权限组');
+        $('#groupId').val(g.id);
+        $('#groupName').val(g.name);
+        $('#scopeType').val(g.scope_type);
+        $('#groupDesc').val(g.description || '');
+        $('.menu-check').prop('checked', false);
+        (g.menu_keys || []).forEach(function(k) {
+            $('.menu-check[value="' + k + '"]').prop('checked', true);
+        });
+        new bootstrap.Modal('#groupModal').show();
+    });
+}
+
+function saveGroup() {
+    var id = $('#groupId').val();
+    var name = $('#groupName').val().trim();
+    var scopeType = $('#scopeType').val();
+    var desc = $('#groupDesc').val().trim();
+    var keys = [];
+    $('.menu-check:checked').each(function() { keys.push($(this).val()); });
+    if (!name) { alert('请输入组名'); return; }
+    $.ajax({
+        url: '/perm-groups/save',
+        method: 'POST',
+        contentType: 'application/json',
+        data: JSON.stringify({ id: id || null, name: name, scope_type: scopeType, description: desc, menu_keys: keys }),
+        success: function() { location.reload(); },
+        error: function(xhr) {
+            var msg = '保存失败';
+            try { msg = JSON.parse(xhr.responseText).message; } catch(e) {}
+            alert(msg);
+        }
+    });
+}
+
+function deleteGroup(id) {
+    if (!confirm('确定删除此权限组？')) return;
+    $.ajax({
+        url: '/perm-groups/' + id + '/delete',
+        method: 'POST',
+        success: function() { location.reload(); },
+        error: function(xhr) {
+            var msg = '删除失败';
+            try { msg = JSON.parse(xhr.responseText).message; } catch(e) {}
+            alert(msg);
+        }
+    });
+}
+</script>
+{% endblock %}

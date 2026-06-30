@@ -1,0 +1,46 @@
+{% extends "base.html" %}
+{% block title %}历史查询{% endblock %}
+{% block content %}
+<h4 class="fw-bold mb-3"><i class="bi bi-clock-history"></i> 历史数据查询</h4>
+
+<div class="alert alert-info small">
+    <i class="bi bi-info-circle"></i> 以下为毕业时自动备份的数据库文件。选择一份即可查看毕业时的学生、房间、床位数据。
+</div>
+
+{% if not backups %}
+<div class="text-center py-5 text-muted">
+    <i class="bi bi-inbox" style="font-size:48px;"></i>
+    <p class="mt-2">暂无历史备份，执行"设为毕业"后自动生成</p>
+</div>
+{% else %}
+<div class="table-responsive">
+<table class="table table-hover align-middle">
+    <thead class="table-light">
+        <tr>
+            <th>备份文件</th>
+            <th>年级</th>
+            <th>大小</th>
+            <th>时间</th>
+            <th>操作</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for b in backups %}
+        <tr>
+            <td><code>{{ b.filename }}</code></td>
+            <td>{% if b.grade %}<span class="badge bg-secondary">{{ b.grade }}</span>{% else %}-{% endif %}</td>
+            <td>{{ b.size }}</td>
+            <td>{{ b.date }}</td>
+            <td>
+                <a href="{{ url_for('grade_mgmt.history_view', filename=b.filename) }}"
+                   class="btn btn-outline-primary btn-sm">
+                    <i class="bi bi-eye"></i> 查看
+                </a>
+            </td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+</div>
+{% endif %}
+{% endblock %}

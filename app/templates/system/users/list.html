@@ -1,0 +1,46 @@
+{% extends "base.html" %}
+{% block title %}用户管理{% endblock %}
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+    <h4 class="fw-bold mb-0"><i class="bi bi-person-gear"></i> 用户管理</h4>
+    <a href="{{ url_for('users.create') }}" class="btn btn-primary">
+        <i class="bi bi-plus-lg"></i> 新建用户
+    </a>
+</div>
+
+<div class="card">
+    <div class="card-body p-0">
+        <table class="table table-hover mb-0">
+            <thead class="table-light">
+                <tr><th>用户名</th><th>姓名</th><th>角色</th><th>权限组</th><th>状态</th><th>操作</th></tr>
+            </thead>
+            <tbody>
+                {% for u in users %}
+                <tr>
+                    <td>{{ u.username }}</td>
+                    <td class="fw-bold">{{ u.real_name }}</td>
+                    <td><span class="badge bg-{% if u.role=='admin' %}danger{% elif u.role=='dorm_manager' %}warning text-dark{% elif u.role=='homeroom_teacher' %}primary{% elif u.role=='grade_leader' %}info{% elif u.role=='school_viewer' %}success{% else %}secondary{% endif %}">{{ u.role_display }}</span></td>
+                    <td>{{ u.permission_group.name if u.permission_group else '-' }}</td>
+                    <td>{% if u.is_active %}<span class="badge bg-success">启用</span>{% else %}<span class="badge bg-secondary">禁用</span>{% endif %}</td>
+                    <td>
+                        <a href="{{ url_for('users.edit', id=u.id) }}" class="btn btn-sm btn-outline-warning"><i class="bi bi-pencil"></i></a>
+                        <form method="POST" action="{{ url_for('users.toggle', id=u.id) }}" style="display:inline;">
+                            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                            <button type="submit" class="btn btn-sm btn-outline-{% if u.is_active %}secondary{% else %}success{% endif %}"
+                                    title="{% if u.is_active %}禁用{% else %}启用{% endif %}">
+                                <i class="bi bi-{% if u.is_active %}pause{% else %}play{% endif %}-circle"></i>
+                            </button>
+                        </form>
+                        <form method="POST" action="{{ url_for('users.reset_password', id=u.id) }}" style="display:inline;"
+                              onsubmit="return confirm('确定重置 {{ u.real_name }} 的密码为 123456？')">
+                            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                            <button type="submit" class="btn btn-sm btn-outline-info" title="重置密码"><i class="bi bi-key"></i></button>
+                        </form>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+{% endblock %}

@@ -1,0 +1,268 @@
+{% extends "base.html" %}
+{% block title %}宿舍列表{% endblock %}
+
+{% block extra_css %}
+<style>
+    .room-card { 
+        position: relative;
+        border-radius: 8px;
+        box-shadow: 0 1px 2px rgba(0,0,0,.05);
+    }
+    .room-card.full { border: 1px solid #198754; background: rgba(25,135,84,.1); }
+    .room-card.partial { border: 1px solid #ffc107; background: rgba(255,193,7,.1); }
+    .room-card.empty { border: 1px solid #e2e8f0; background: #fff; }
+    .room-card .card-check {
+        position: absolute; top: 8px; right: 8px; z-index: 2;
+    }
+    .room-card.selected { 
+        outline: 2px solid #3b82f6; 
+        outline-offset: -2px;
+        box-shadow: 0 0 0 4px rgba(59,130,246,.12);
+    }
+    .class-badge {
+        display: inline-block;
+        font-size: 9px;
+        padding: 2px 4px;
+        border-radius: 3px;
+        margin-top: 2px;
+        max-width: 100%;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+    .class-badge.assigned {
+        background: rgba(59,130,246,.08);
+        color: #3b82f6;
+        border: 1px solid #bfdbfe;
+    }
+    .class-badge.unassigned {
+        background: #f8fafc;
+        color: #94a3b8;
+        border: 1px dashed #e2e8f0;
+    }
+    /* 每行 5 个房间 */
+    @media (min-width: 992px) {
+        .room-col { flex: 0 0 20%; max-width: 20%; }
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="d-flex align-items-center mb-3">
+    <h4 class="fw-bold mb-0"><i class="bi bi-door-open"></i> 宿舍列表</h4>
+    {% if current_user.has_role('admin', 'dorm_manager') %}
+    <div class="ms-auto d-flex gap-2">
+        <a href="{{ url_for('rooms.batch_add_rooms') }}" class="btn btn-sm btn-info">
+            <i class="bi bi-building"></i> 批量添加楼层
+        </a>
+        <a href="{{ url_for('rooms.create') }}" class="btn btn-sm btn-success">
+            <i class="bi bi-plus-lg"></i> 新增宿舍
+        </a>
+    </div>
+    {% endif %}
+</div>
+
+<!-- 筛选 -->
+<div class="card mb-3">
+    <div class="card-body">
+        <form method="GET" class="row g-2 align-items-end">
+            <div class="col-md-2">
+                <label class="form-label small">宿舍楼</label>
+                <select name="building" class="form-select form-select-sm">
+                    <option value="">全部</option>
+                    {% for b in buildings %}
+                    <option value="{{ b }}" {{ 'selected' if request.args.get('building')==b }}>{{ b }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="col-md-2">
+                <label class="form-label small">性别</label>
+                <select name="gender" class="form-select form-select-sm">
+                    <option value="">全部</option>
+                    <option value="男" {{ 'selected' if request.args.get('gender')=='男' }}>男生宿舍</option>
+                    <option value="女" {{ 'selected' if request.args.get('gender')=='女' }}>女生宿舍</option>
+                </select>
+            </div>
+            <div class="col-md-2">
+                <label class="form-label small">楼层</label>
+                <select name="floor" class="form-select form-select-sm">
+                    <option value="">全部</option>
+                    {% for f in floors %}
+                    <option value="{{ f }}" {{ 'selected' if request.args.get('floor')==f }}>{{ f }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="col-md-2">
+                <button type="submit" class="btn btn-primary btn-sm"><i class="bi bi-funnel"></i> 筛选</button>
+                <a href="{{ url_for('rooms.list_rooms') }}" class="btn btn-outline-secondary btn-sm">重置</a>
+            </div>
+        </form>
+    </div>
+</div>
+
+{% if current_user.has_role('admin', 'dorm_manager') %}
+<!-- 批量操作栏 -->
+<div class="card mb-3 border-primary" style="position:sticky; top:56px; z-index:90;">
+    <div class="card-body py-2">
+        <form method="POST" action="{{ url_for('rooms.batch_setting') }}" id="batchForm">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <div class="row g-2 align-items-center">
+                <div class="col-auto">
+                    <input type="checkbox" id="selectAll" class="form-check-input">
+                    <label class="form-check-label small ms-1" for="selectAll">全选</label>
+                </div>
+                <div class="col-auto">
+                    <select name="gender" class="form-select form-select-sm" style="width:120px;">
+                        <option value="">性别不改</option>
+                        <option value="男">男生宿舍</option>
+                        <option value="女">女生宿舍</option>
+                    </select>
+                </div>
+                <div class="col-auto">
+                    <input type="number" name="capacity" class="form-control form-control-sm"
+                           placeholder="床位数不改" min="1" max="20" style="width:130px;">
+                </div>
+                <div class="col-auto">
+                    <button type="submit" class="btn btn-primary btn-sm">
+                        <i class="bi bi-check-lg"></i> 批量设置
+                    </button>
+                </div>
+                <div class="col-auto">
+                    <span class="text-muted small" id="selectedCount">已选 0 间</span>
+                </div>
+            </div>
+        </form>
+    </div>
+</div>
+{% endif %}
+
+<!-- 按楼层分组显示 -->
+{% set ns = namespace(last_key='', first=true) %}
+{% for rd in room_data %}
+{% set room = rd.room %}
+{% set occ = rd.occupancy %}
+{% set current_key = room.building + '_' + room.floor|string %}
+
+{% if ns.last_key != current_key %}
+    {% if not ns.first %}</div></div></div>{% endif %}
+    {% set ns.last_key = current_key %}
+    {% set ns.first = false %}
+    <div class="card mb-3">
+        <div class="card-header py-2 bg-light">
+            <strong>{{ room.building }}</strong> · {{ room.floor }}层
+        </div>
+        <div class="card-body p-2">
+            <div class="row g-2">
+{% endif %}
+
+                <div class="col-6 col-md-4 room-col">
+                    <div class="card h-100 room-card {% if occ == room.capacity %}full{% elif occ > 0 %}partial{% else %}empty{% endif %}" data-room-id="{{ room.id }}">
+                        {% if current_user.has_role('admin', 'dorm_manager') %}
+                        <input type="checkbox" name="room_ids" value="{{ room.id }}"
+                               form="batchForm" class="form-check-input card-check room-check">
+                        {% endif %}
+                        <div class="card-body py-2">
+                            <div class="d-flex justify-content-between align-items-center">
+                                <a href="{{ url_for('rooms.detail', id=room.id) }}" class="fw-bold text-dark text-decoration-none small">
+                                    {{ room.room_number }}
+                                </a>
+                                <span class="badge {% if occ == room.capacity %}bg-success{% elif occ > 0 %}bg-warning text-dark{% else %}bg-light text-muted{% endif %} badge-sm" style="margin-right:{% if current_user.has_role('admin', 'dorm_manager') %}20px{% else %}0{% endif %}; font-size:10px;">
+                                    {{ occ }}/{{ room.capacity }}
+                                </span>
+                            </div>
+                            <div class="mt-1 small text-muted" style="font-size:10px;">
+                                {% if room.gender == '男' %}<span class="badge bg-primary" style="font-size:9px;">男</span>{% else %}<span class="badge bg-danger" style="font-size:9px;">女</span>{% endif %}
+                                {{ room.capacity }}人间
+                            </div>
+                            {% set class_info = rd.class_info %}
+                            <div class="mt-1">
+                                {% if class_info %}
+                                <span class="class-badge assigned" title="{{ class_info }}">
+                                    <i class="bi bi-book"></i> {{ class_info }}
+                                </span>
+                                {% else %}
+                                <span class="class-badge unassigned">
+                                    <i class="bi bi-x-circle"></i> 未分配
+                                </span>
+                                {% endif %}
+                            </div>
+                            <div class="progress mt-1" style="height:3px;">
+                                <div class="progress-bar {% if occ == room.capacity %}bg-success{% elif occ > 0 %}bg-warning{% endif %}"
+                                     style="width:{{ (occ / room.capacity * 100)|int }}%"></div>
+                            </div>
+                            {% if current_user.has_role('admin', 'dorm_manager') %}
+                            <div class="mt-1 d-flex gap-1">
+                                <a href="{{ url_for('rooms.edit', id=room.id) }}" class="btn btn-sm btn-outline-secondary py-0 px-1" title="编辑">
+                                    <i class="bi bi-pencil" style="font-size:10px;"></i>
+                                </a>
+                                <form method="POST" action="{{ url_for('rooms.delete', id=room.id) }}" class="d-inline delete-form">
+                                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                                    <button type="submit" class="btn btn-sm btn-outline-danger py-0 px-1" title="删除">
+                                        <i class="bi bi-trash" style="font-size:10px;"></i>
+                                    </button>
+                                </form>
+                            </div>
+                            {% endif %}
+                        </div>
+                    </div>
+                </div>
+{% endfor %}
+{% if room_data %}</div></div></div>{% endif %}
+
+{% if not room_data %}
+<div class="card">
+    <div class="card-body text-center text-muted py-5">
+        没有找到匹配的宿舍
+        {% if current_user.has_role('admin', 'dorm_manager') %}
+        <br><a href="{{ url_for('rooms.create') }}" class="btn btn-success btn-sm mt-2"><i class="bi bi-plus-lg"></i> 新增宿舍</a>
+        {% endif %}
+    </div>
+</div>
+{% endif %}
+{% endblock %}
+
+{% block extra_js %}
+<script>
+{% if current_user.has_role('admin', 'dorm_manager') %}
+// 全选/反选
+$('#selectAll').on('click', function(){
+    var isChecked = this.checked;
+    $('.room-check').each(function(){
+        this.checked = isChecked;
+        $(this).closest('.room-card').toggleClass('selected', isChecked);
+    });
+    updateCount();
+});
+
+// 单个复选框
+$(document).on('click', '.room-check', function(e){
+    e.stopPropagation();
+    $(this).closest('.room-card').toggleClass('selected', this.checked);
+    var total = $('.room-check').length;
+    var checked = $('.room-check:checked').length;
+    $('#selectAll').prop('checked', total > 0 && total === checked);
+    updateCount();
+});
+
+function updateCount(){
+    var n = $('.room-check:checked').length;
+    $('#selectedCount').text('已选 ' + n + ' 间');
+}
+
+// 批量提交校验
+$('#batchForm').on('submit', function(e){
+    if ($('.room-check:checked').length === 0) {
+        alert('请先勾选要设置的宿舍');
+        e.preventDefault();
+    }
+});
+
+// 删除确认
+$(document).on('submit', '.delete-form', function(e){
+    if (!confirm('确定要删除这间宿舍吗？此操作不可恢复。')) {
+        e.preventDefault();
+    }
+});
+{% endif %}
+</script>
+{% endblock %}
