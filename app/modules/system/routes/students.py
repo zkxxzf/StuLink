@@ -1,4 +1,4 @@
-# StuLink v1.4.5 2026-06-30
+# StuLink v1.4.6 2026-06-30
 # Copyright (c) 2026 zkxxzf. CC BY-NC 4.0
 from flask import Blueprint, render_template, redirect, url_for, flash, request, send_file
 from flask_login import login_required, current_user
@@ -19,13 +19,13 @@ bp = Blueprint('students', __name__, url_prefix='/students')
 @login_required
 def list_students():
     query = Student.query
-    # 班主任只能看自己班
+    # 班主任只能看自己�?
     if current_user.role == 'homeroom_teacher':
         query = query.filter_by(grade=current_user.grade, class_name=current_user.class_name)
     
     # 分页参数
     page = request.args.get('page', 1, type=int)
-    per_page = 50  # 每页显示50条
+    per_page = 50  # 每页显示50�?
     
     # 使用分页查询
     pagination = query.order_by(Student.grade, Student.class_name, Student.student_number).paginate(
@@ -50,15 +50,15 @@ def create():
         # 1. 验证身份证号格式
         id_card = form.id_card_number.data
         if id_card and not _validate_id_card(id_card):
-            flash('身份证号格式不正确', 'danger')
+            flash('身份证号格式不正�?, 'danger')
             return render_template('system/students/form.html', form=form, title='新增学生')
         
-        # 2. 检查身份证号是否重复
+        # 2. 检查身份证号是否重�?
         if id_card and Student.query.filter_by(_id_card_encrypted=_encrypt_id(id_card)).first():
             flash('该身份证号已存在', 'danger')
             return render_template('system/students/form.html', form=form, title='新增学生')
         
-        # 3. 检查学号唯一性（学号不为空时）
+        # 3. 检查学号唯一性（学号不为空时�?
         if form.student_number.data:
             if Student.query.filter_by(student_number=form.student_number.data).first():
                 flash('该学号已存在', 'danger')
@@ -69,7 +69,7 @@ def create():
         db.session.add(student)
         db.session.commit()
         log_operation(current_user, '创建', '学生', student.id, f'{student.name} {student.grade}{student.class_name}')
-        flash('学生信息已添加', 'success')
+        flash('学生信息已添�?, 'success')
         return redirect(url_for('students.list_students'))
     # 班主任默认填入自己管理的年级班级
     if current_user.role == 'homeroom_teacher':
@@ -92,17 +92,17 @@ def edit(id):
     # 班主任只能编辑自己班学生
     if current_user.role == 'homeroom_teacher':
         if student.grade != current_user.grade or student.class_name != current_user.class_name:
-            flash('无权编辑该学生', 'danger')
+            flash('无权编辑该学�?, 'danger')
             return redirect(url_for('students.list_students'))
     form = StudentForm(obj=student)
     if form.validate_on_submit():
         # 1. 验证身份证号格式
         id_card = form.id_card_number.data
         if id_card and not _validate_id_card(id_card):
-            flash('身份证号格式不正确', 'danger')
+            flash('身份证号格式不正�?, 'danger')
             return render_template('system/students/form.html', form=form, title='编辑学生')
         
-        # 2. 检查身份证号是否重复（排除自身）
+        # 2. 检查身份证号是否重复（排除自身�?
         if id_card:
             existing_id = Student.query.filter(
                 Student._id_card_encrypted == _encrypt_id(id_card),
@@ -125,7 +125,7 @@ def edit(id):
         _populate_student(student, form)
         db.session.commit()
         log_operation(current_user, '更新', '学生', student.id, f'{student.name} {student.grade}{student.class_name}')
-        flash('学生信息已更新', 'success')
+        flash('学生信息已更�?, 'success')
         return redirect(url_for('students.detail', id=student.id))
     return render_template('system/students/form.html', form=form, title='编辑学生')
 
@@ -134,13 +134,13 @@ def edit(id):
 @role_required('admin')
 def delete(id):
     student = Student.query.get_or_404(id)
-    # 先删除床位分配
+    # 先删除床位分�?
     if student.bed_assignment:
         student.bed_assignment.student_id = None
     db.session.delete(student)
     db.session.commit()
     log_operation(current_user, '删除', '学生', id, f'{student.name} {student.grade}{student.class_name}')
-    flash(f'学生 {student.name} 已删除', 'success')
+    flash(f'学生 {student.name} 已删�?, 'success')
     return redirect(url_for('students.list_students'))
 
 
@@ -177,7 +177,7 @@ def search():
 
     # 分页参数
     page = request.args.get('page', 1, type=int)
-    per_page = 50  # 每页显示50条
+    per_page = 50  # 每页显示50�?
     
     # 使用分页查询
     pagination = query.order_by(Student.grade, Student.class_name, Student.student_number).paginate(
@@ -201,7 +201,7 @@ def search():
 
 
 def _populate_student(student, form):
-    """从表单填充学生对象"""
+    """从表单填充学生对�?""
     for field_name in ['name', 'gender', 'student_number', 'id_card_number', 'ethnicity',
                        'phone1', 'phone2', 'grade', 'class_name', 'original_class',
                        'subject_selection', 'boarding_type', 'day_student_type',
@@ -211,7 +211,7 @@ def _populate_student(student, form):
 
 
 def _validate_id_card(id_card):
-    """验证身份证号是否有效（18位）"""
+    """验证身份证号是否有效�?8位）"""
     if not id_card:
         return False
     id_card = str(id_card).strip()
@@ -242,8 +242,8 @@ def download_template():
 
     # 新顺序：与编辑页面一致，添加毕业学校信息
     headers = ['姓名', '性别', '民族', '身份证号', '学号', '学籍情况', '学籍备注',
-               '年级', '班级', '原班级', '选科', '住校/走读', '出门权限',
-               '联系方式 1', '联系方式 2', '课本', '班主任备注',
+               '年级', '班级', '原班�?, '选科', '住校/走读', '出门权限',
+               '联系方式 1', '联系方式 2', '课本', '班主任备�?,
                '毕业学校代码', '毕业学校']
 
     header_fill = PatternFill(start_color='4472C4', end_color='4472C4', fill_type='solid')
@@ -253,7 +253,7 @@ def download_template():
         left=Side(style='thin'), right=Side(style='thin'),
         top=Side(style='thin'), bottom=Side(style='thin'))
 
-    required_cols = {0, 1, 3, 4}  # 姓名、性别、身份证号、学号
+    required_cols = {0, 1, 3, 4}  # 姓名、性别、身份证号、学�?
 
     for col_idx, header in enumerate(headers, 1):
         cell = ws.cell(row=1, column=col_idx, value=header)
@@ -266,13 +266,13 @@ def download_template():
     for i, w in enumerate(widths, 1):
         ws.column_dimensions[openpyxl.utils.get_column_letter(i)].width = w
 
-    ws.append(['张三', '男', '汉族', '110101200801011234', '20251001', '借读', '',
-               '2025 级', '01 班', '', '史政地', '住校', '', '13800138000', '', '', '',
+    ws.append(['张三', '�?, '汉族', '110101200801011234', '20251001', '借读', '',
+               '2025 �?, '01 �?, '', '史政�?, '住校', '', '13800138000', '', '', '',
                '0440', '郑州市管城回族区第二中学'])
 
-    # 第 2 行：填写说明（合并单元格）
+    # �?2 行：填写说明（合并单元格�?
     ws.merge_cells('A2:S2')
-    instr_cell = ws.cell(row=2, column=1, value='说明：橙色列必填 | 性别男/女 | 身份证 18 位 | 住校填住校/男走读/女走读/离校 | 出门权限填晚走读/午晚走读/艺术生 | 毕业学校代码与名称关联 | 第 3 行起填数据，删除本行和示例')
+    instr_cell = ws.cell(row=2, column=1, value='说明：橙色列必填 | 性别�?�?| 身份�?18 �?| 住校填住�?男走�?女走�?离校 | 出门权限填晚走读/午晚走读/艺术�?| 毕业学校代码与名称关�?| �?3 行起填数据，删除本行和示�?)
     instr_cell.font = Font(color='FF0000', bold=True, size=10)
     instr_cell.alignment = Alignment(horizontal='left')
     buf = io.BytesIO()
@@ -289,7 +289,7 @@ def import_students():
     """批量导入学生"""
     file = request.files.get('file')
     if not file or not file.filename.endswith(('.xlsx', '.xls')):
-        flash('请上传 .xlsx 格式的Excel文件', 'danger')
+        flash('请上�?.xlsx 格式的Excel文件', 'danger')
         return redirect(url_for('students.list_students'))
 
     try:
@@ -311,16 +311,16 @@ def import_students():
             if val:
                 header_map[str(val).strip()] = col
 
-        # Excel列名 → Student模型字段
+        # Excel列名 �?Student模型字段
         field_mapping = {
             '姓名': 'name', '性别': 'gender', '学号': 'student_number',
             '身份证号': 'id_card_number', '年级': 'grade',
-            '班级': 'class_name', '新班级': 'class_name',
+            '班级': 'class_name', '新班�?: 'class_name',
             '民族': 'ethnicity', '联系方式1': 'phone1', '联系方式2': 'phone2',
-            '原班级': 'original_class', '选科': 'subject_selection',
+            '原班�?: 'original_class', '选科': 'subject_selection',
             '走读/住校': 'boarding_type', '走读类型': 'day_student_type',
             '学籍情况': 'enrollment_status', '课本': 'textbook',
-            '班主任备注': 'teacher_notes', '学籍备注': 'enrollment_notes',
+            '班主任备�?: 'teacher_notes', '学籍备注': 'enrollment_notes',
             '毕业学校代码': 'graduation_school_code', '毕业学校': 'graduation_school',
         }
 
@@ -359,14 +359,14 @@ def import_students():
                 continue
 
             row_errors = []
-            row_label = f'第{row_idx}行'
+            row_label = f'第{row_idx}�?
             gender = row_data.get('gender', '')
             snum = row_data.get('student_number', '')
             id_card = row_data.get('id_card_number', '')
 
             if not gender:
                 row_errors.append('性别为空')
-            elif gender not in ('男', '女'):
+            elif gender not in ('�?, '�?):
                 row_errors.append(f'性别"{gender}"无效')
             if not id_card:
                 row_errors.append('身份证号为空')
@@ -375,9 +375,9 @@ def import_students():
 
             if snum:
                 if snum in existing_snums:
-                    row_errors.append(f'学号"{snum}"已存在')
+                    row_errors.append(f'学号"{snum}"已存�?)
                 elif snum in seen_snums:
-                    row_errors.append(f'学号"{snum}"文件内重复')
+                    row_errors.append(f'学号"{snum}"文件内重�?)
                 else:
                     seen_snums.add(snum)
 
@@ -385,9 +385,9 @@ def import_students():
                 if not _validate_id_card(id_card):
                     row_errors.append(f'身份证号无效')
                 elif _encrypt_id(id_card) in existing_ids:
-                    row_errors.append(f'身份证号已存在')
+                    row_errors.append(f'身份证号已存�?)
                 elif _encrypt_id(id_card) in seen_ids:
-                    row_errors.append(f'身份证号文件内重复')
+                    row_errors.append(f'身份证号文件内重�?)
                 else:
                     seen_ids.add(_encrypt_id(id_card))
 
@@ -420,24 +420,24 @@ def import_students():
             # 部分导入：正确的行导入，错误的行报告
             db.session.add_all(students_to_add)
             db.session.commit()
-            log_operation(current_user, '导入', '学生', None, f'部分导入 {len(students_to_add)} 名，{len(errors)} 条失败')
+            log_operation(current_user, '导入', '学生', None, f'部分导入 {len(students_to_add)} 名，{len(errors)} 条失�?)
             error_summary = f'成功导入 {len(students_to_add)} 名学生，但有 {len(errors)} 条数据未导入：\n' + '\n'.join(errors[:20])
             if len(errors) > 20:
-                error_summary += f'\n...还有 {len(errors) - 20} 条错误'
+                error_summary += f'\n...还有 {len(errors) - 20} 条错�?
             flash(error_summary, 'warning')
         elif errors:
             # 全部错误，无有效数据
             error_summary = f'发现 {len(errors)} 条错误，未导入任何数据：\n' + '\n'.join(errors[:20])
             if len(errors) > 20:
-                error_summary += f'\n...还有 {len(errors) - 20} 条错误'
+                error_summary += f'\n...还有 {len(errors) - 20} 条错�?
             flash(error_summary, 'danger')
         elif not students_to_add:
             flash('Excel中没有有效的学生数据', 'warning')
         else:
             db.session.add_all(students_to_add)
             db.session.commit()
-            log_operation(current_user, '导入', '学生', None, f'批量导入 {len(students_to_add)} 名学生')
-            flash(f'成功导入 {len(students_to_add)} 名学生', 'success')
+            log_operation(current_user, '导入', '学生', None, f'批量导入 {len(students_to_add)} 名学�?)
+            flash(f'成功导入 {len(students_to_add)} 名学�?, 'success')
 
     except Exception as e:
         db.session.rollback()
@@ -463,7 +463,7 @@ def batch_delete():
 
     students = Student.query.filter(Student.id.in_(id_list)).all()
     if not students:
-        flash('未找到选中的学生', 'warning')
+        flash('未找到选中的学�?, 'warning')
         return redirect(url_for('students.list_students'))
 
     count = len(students)
@@ -472,21 +472,21 @@ def batch_delete():
             s.bed_assignment.student_id = None
         db.session.delete(s)
     db.session.commit()
-    log_operation(current_user, '删除', '学生', None, f'批量删除 {count} 名学生')
-    flash(f'已删除 {count} 名学生', 'success')
+    log_operation(current_user, '删除', '学生', None, f'批量删除 {count} 名学�?)
+    flash(f'已删�?{count} 名学�?, 'success')
     return redirect(url_for('students.list_students'))
 
 
 @bp.route('/<int:id>/transfer', methods=['POST'])
 @role_required('admin', 'homeroom_teacher')
 def transfer(id):
-    """单个学生调班调年级"""
+    """单个学生调班调年�?""
     student = Student.query.get_or_404(id)
     new_grade = request.form.get('new_grade', '').strip()
     new_class = request.form.get('new_class', '').strip()
 
     if not new_grade or not new_class:
-        flash('年级和班级不能为空', 'danger')
+        flash('年级和班级不能为�?, 'danger')
         return redirect(url_for('students.list_students'))
 
     old_info = f'{student.grade} {student.class_name}'
@@ -501,7 +501,7 @@ def transfer(id):
 @bp.route('/download-transfer-template')
 @role_required('admin', 'homeroom_teacher')
 def download_transfer_template():
-    """下载调班模板（学号版或身份证号版）"""
+    """下载调班模板（学号版或身份证号版�?""
     import openpyxl
     from openpyxl.styles import Font, Alignment, PatternFill, Border, Side
 
@@ -512,15 +512,15 @@ def download_transfer_template():
 
     if tpl_type == 'id_card':
         ws.title = '身份证号调班模板'
-        headers = ['身份证号', '新年级', '新班级']
-        filename = '调班模板_身份证号版.xlsx'
-        example_row = ['110101200801011234', '2025级', '02班']
+        headers = ['身份证号', '新年�?, '新班�?]
+        filename = '调班模板_身份证号�?xlsx'
+        example_row = ['110101200801011234', '2025�?, '02�?]
         widths = [22, 12, 10]
     else:
         ws.title = '学号调班模板'
-        headers = ['学号', '新年级', '新班级']
-        filename = '调班模板_学号版.xlsx'
-        example_row = ['20251001', '2025级', '02班']
+        headers = ['学号', '新年�?, '新班�?]
+        filename = '调班模板_学号�?xlsx'
+        example_row = ['20251001', '2025�?, '02�?]
         widths = [15, 12, 10]
 
     header_fill = PatternFill(start_color='4472C4', end_color='4472C4', fill_type='solid')
@@ -542,14 +542,14 @@ def download_transfer_template():
 
     ws.append(example_row)
 
-    ws.cell(row=4, column=1, value='说明：').font = Font(bold=True, color='FF0000')
-    ws.cell(row=5, column=1, value='1. 所有列均为必填项')
+    ws.cell(row=4, column=1, value='说明�?).font = Font(bold=True, color='FF0000')
+    ws.cell(row=5, column=1, value='1. 所有列均为必填�?)
     if tpl_type == 'id_card':
         ws.cell(row=6, column=1, value='2. 身份证号必须与系统中已有学生匹配')
     else:
         ws.cell(row=6, column=1, value='2. 学号必须与系统中已有学生匹配')
-    ws.cell(row=7, column=1, value='3. 新年级格式如：2025级')
-    ws.cell(row=8, column=1, value='4. 新班级格式如：01班')
+    ws.cell(row=7, column=1, value='3. 新年级格式如�?025�?)
+    ws.cell(row=8, column=1, value='4. 新班级格式如�?1�?)
     ws.cell(row=9, column=1, value='5. 导入时请删除本说明和示例数据')
 
     buf = io.BytesIO()
@@ -568,7 +568,7 @@ def batch_transfer():
     tpl_type = request.form.get('tpl_type', 'student_number')
 
     if not file or not file.filename.endswith(('.xlsx', '.xls')):
-        flash('请上传 .xlsx 格式的Excel文件', 'danger')
+        flash('请上�?.xlsx 格式的Excel文件', 'danger')
         return redirect(url_for('students.list_students'))
 
     try:
@@ -589,7 +589,7 @@ def batch_transfer():
             if val:
                 header_map[str(val).strip()] = col
 
-        # 确定匹配列
+        # 确定匹配�?
         if tpl_type == 'id_card':
             match_col = header_map.get('身份证号')
             match_label = '身份证号'
@@ -597,14 +597,14 @@ def batch_transfer():
             match_col = header_map.get('学号')
             match_label = '学号'
 
-        grade_col = header_map.get('新年级')
-        class_col = header_map.get('新班级')
+        grade_col = header_map.get('新年�?)
+        class_col = header_map.get('新班�?)
 
         if not match_col:
-            flash(f'Excel缺少"{match_label}"列', 'danger')
+            flash(f'Excel缺少"{match_label}"�?, 'danger')
             return redirect(url_for('students.list_students'))
         if not grade_col or not class_col:
-            flash('Excel缺少"新年级"或"新班级"列', 'danger')
+            flash('Excel缺少"新年�?�?新班�?�?, 'danger')
             return redirect(url_for('students.list_students'))
 
         errors = []
@@ -625,10 +625,10 @@ def batch_transfer():
             new_grade = str(new_grade).strip() if new_grade else ''
             new_class = str(new_class).strip() if new_class else ''
 
-            row_label = f'第{row_idx}行'
+            row_label = f'第{row_idx}�?
 
             if not new_grade or not new_class:
-                errors.append(f'{row_label}（{match_val}）：新年级或新班级为空')
+                errors.append(f'{row_label}（{match_val}）：新年级或新班级为�?)
                 continue
 
             if tpl_type == 'id_card':
@@ -645,9 +645,9 @@ def batch_transfer():
             updated_count += 1
 
         if errors:
-            error_summary = f'调班完成，但有 {len(errors)} 条未处理：\n' + '\n'.join(errors[:20])
+            error_summary = f'调班完成，但�?{len(errors)} 条未处理：\n' + '\n'.join(errors[:20])
             if len(errors) > 20:
-                error_summary += f'\n...还有 {len(errors) - 20} 条'
+                error_summary += f'\n...还有 {len(errors) - 20} �?
             if updated_count > 0:
                 db.session.commit()
                 flash(f'成功调班 {updated_count} 名学生。{error_summary}', 'warning')
@@ -656,7 +656,7 @@ def batch_transfer():
                 flash(error_summary, 'danger')
         elif updated_count > 0:
             db.session.commit()
-            flash(f'成功调班 {updated_count} 名学生', 'success')
+            flash(f'成功调班 {updated_count} 名学�?, 'success')
         else:
             flash('Excel中没有有效的调班数据', 'warning')
 

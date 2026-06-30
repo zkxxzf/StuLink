@@ -1,4 +1,4 @@
-# StuLink v1.4.5 2026-06-30
+# StuLink v1.4.6 2026-06-30
 # Copyright (c) 2026 zkxxzf. CC BY-NC 4.0
 from flask import Blueprint, render_template, request
 from flask_login import login_required, current_user
@@ -8,13 +8,13 @@ from app.utils.helpers import get_dict_values
 
 bp = Blueprint('statistics', __name__, url_prefix='/statistics')
 
-SCOPE_CLASS = 'class'    # 班主任：只看所管班级
-SCOPE_GRADE = 'grade'    # 年级长：只看所管年级
-SCOPE_SCHOOL = 'school'  # 全校组/admin：看全部
+SCOPE_CLASS = 'class'    # 班主任：只看所管班�?
+SCOPE_GRADE = 'grade'    # 年级长：只看所管年�?
+SCOPE_SCHOOL = 'school'  # 全校�?admin：看全部
 
 
 def _get_scope():
-    """获取当前用户的权限范围"""
+    """获取当前用户的权限范�?""
     pg = current_user.permission_group
     if not pg:
         return SCOPE_SCHOOL, None
@@ -22,12 +22,12 @@ def _get_scope():
 
 
 def _get_user_class_links():
-    """获取当前班主任的所有班级关联"""
+    """获取当前班主任的所有班级关�?""
     return UserClassLink.query.filter_by(user_id=current_user.id).all()
 
 
 def _build_per_class_stats(filter_grade=None, filter_classes=None):
-    """按年级+班级统计"""
+    """按年�?班级统计"""
     q = db.session.query(
         Student.grade, Student.class_name
     ).distinct().order_by(Student.grade, Student.class_name)
@@ -43,14 +43,14 @@ def _build_per_class_stats(filter_grade=None, filter_classes=None):
     for grade, class_name in results:
         qs = Student.query.filter_by(grade=grade, class_name=class_name)
         total = qs.count()
-        male = qs.filter_by(gender='男').count()
-        female = qs.filter_by(gender='女').count()
+        male = qs.filter_by(gender='�?).count()
+        female = qs.filter_by(gender='�?).count()
         boarding = qs.filter_by(boarding_type='住校').count()
-        male_boarding = qs.filter_by(gender='男', boarding_type='住校').count()
-        female_boarding = qs.filter_by(gender='女', boarding_type='住校').count()
+        male_boarding = qs.filter_by(gender='�?, boarding_type='住校').count()
+        female_boarding = qs.filter_by(gender='�?, boarding_type='住校').count()
         day_student = qs.filter_by(boarding_type='走读').count()
-        male_day = qs.filter_by(gender='男', boarding_type='走读').count()
-        female_day = qs.filter_by(gender='女', boarding_type='走读').count()
+        male_day = qs.filter_by(gender='�?, boarding_type='走读').count()
+        female_day = qs.filter_by(gender='�?, boarding_type='走读').count()
 
         stats.append({
             'grade': grade, 'class_name': class_name,
@@ -63,7 +63,7 @@ def _build_per_class_stats(filter_grade=None, filter_classes=None):
 
 
 def _build_per_grade_stats(filter_grade=None):
-    """按年级汇总"""
+    """按年级汇�?""
     q = db.session.query(Student.grade).distinct().order_by(Student.grade)
     if filter_grade:
         q = q.filter(Student.grade == filter_grade)
@@ -73,11 +73,11 @@ def _build_per_grade_stats(filter_grade=None):
     for grade in grades:
         qs = Student.query.filter_by(grade=grade)
         total = qs.count()
-        male = qs.filter_by(gender='男').count()
-        female = qs.filter_by(gender='女').count()
+        male = qs.filter_by(gender='�?).count()
+        female = qs.filter_by(gender='�?).count()
         boarding = qs.filter_by(boarding_type='住校').count()
-        male_boarding = qs.filter_by(gender='男', boarding_type='住校').count()
-        female_boarding = qs.filter_by(gender='女', boarding_type='住校').count()
+        male_boarding = qs.filter_by(gender='�?, boarding_type='住校').count()
+        female_boarding = qs.filter_by(gender='�?, boarding_type='住校').count()
         class_count = db.session.query(Student.class_name).filter_by(grade=grade).distinct().count()
 
         result.append({
@@ -90,14 +90,14 @@ def _build_per_grade_stats(filter_grade=None):
 
 
 def _build_school_stats():
-    """全校汇总"""
+    """全校汇�?""
     qs = Student.query
     total = qs.count()
-    male = qs.filter_by(gender='男').count()
-    female = qs.filter_by(gender='女').count()
+    male = qs.filter_by(gender='�?).count()
+    female = qs.filter_by(gender='�?).count()
     boarding = qs.filter_by(boarding_type='住校').count()
-    male_boarding = qs.filter_by(gender='男', boarding_type='住校').count()
-    female_boarding = qs.filter_by(gender='女', boarding_type='住校').count()
+    male_boarding = qs.filter_by(gender='�?, boarding_type='住校').count()
+    female_boarding = qs.filter_by(gender='�?, boarding_type='住校').count()
     grade_count = db.session.query(Student.grade).distinct().count()
     class_count = db.session.query(Student.grade, Student.class_name).distinct().count()
 
@@ -140,7 +140,7 @@ def index():
         per_grade_stats = []
         school_stats = {}
         grade_options = list(set(l.grade for l in links))
-    # 年级长：看 grade 或 class tab，限制年级
+    # 年级长：�?grade �?class tab，限制年�?
     elif scope_type == SCOPE_GRADE:
         if tab == 'school':
             tab = 'grade'
@@ -151,7 +151,7 @@ def index():
         school_stats = _build_school_stats() if tab == 'school' else {}
         grade_options = [user_grade] if user_grade else []
     else:
-        # 全校组/admin：全部数据
+        # 全校�?admin：全部数�?
         per_class_stats = _build_per_class_stats(filter_grade=sel_grade if tab == 'class' and sel_grade else None)
         per_grade_stats = _build_per_grade_stats()
         school_stats = _build_school_stats()

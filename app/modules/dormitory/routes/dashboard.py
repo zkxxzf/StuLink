@@ -1,4 +1,4 @@
-# StuLink v1.4.5 2026-06-30
+# StuLink v1.4.6 2026-06-30
 # Copyright (c) 2026 zkxxzf. CC BY-NC 4.0
 from flask import Blueprint, render_template
 from flask_login import login_required
@@ -15,13 +15,13 @@ def index():
     # 使用单次聚合查询优化统计性能
     student_stats = db.session.query(
         func.count(Student.id).label('total'),
-        func.sum(case((Student.gender == '男', 1), else_=0)).label('male'),
-        func.sum(case((Student.gender == '女', 1), else_=0)).label('female'),
+        func.sum(case((Student.gender == '�?, 1), else_=0)).label('male'),
+        func.sum(case((Student.gender == '�?, 1), else_=0)).label('female'),
         func.sum(case((Student.boarding_type == '住校', 1), else_=0)).label('boarding'),
         func.sum(case((Student.boarding_type == '走读', 1), else_=0)).label('day')
     ).one()
 
-    # 房间和床位统计
+    # 房间和床位统�?
     total_rooms = db.session.query(func.count(Room.id)).filter(Room.is_active == True).scalar()
     
     # 获取活跃房间的ID列表
@@ -55,12 +55,12 @@ def index():
         'total_users': total_users or 0,
     }
 
-    # 按年级统计 - 使用单次查询
+    # 按年级统�?- 使用单次查询
     grade_query = db.session.query(
         Student.grade,
         func.count(Student.id).label('total'),
-        func.sum(case((Student.gender == '男', 1), else_=0)).label('male'),
-        func.sum(case((Student.gender == '女', 1), else_=0)).label('female'),
+        func.sum(case((Student.gender == '�?, 1), else_=0)).label('male'),
+        func.sum(case((Student.gender == '�?, 1), else_=0)).label('female'),
         func.sum(case((Student.boarding_type == '住校', 1), else_=0)).label('boarding'),
         func.sum(case((Student.boarding_type == '走读', 1), else_=0)).label('day')
     ).group_by(Student.grade).order_by(Student.grade).all()

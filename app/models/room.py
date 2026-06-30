@@ -1,4 +1,4 @@
-# StuLink v1.4.5 2026-06-30
+# StuLink v1.4.6 2026-06-30
 # Copyright (c) 2026 zkxxzf. CC BY-NC 4.0
 from datetime import datetime
 from app.extensions import db
@@ -9,13 +9,13 @@ class Room(db.Model):
     __tablename__ = 'rooms'
 
     id = db.Column(db.Integer, primary_key=True)
-    building = db.Column(db.String(50), nullable=False, default='')  # 宿舍楼名称
+    building = db.Column(db.String(50), nullable=False, default='')  # 宿舍楼名�?
     room_number = db.Column(db.String(10), nullable=False)  # 201
-    gender = db.Column(db.String(2), nullable=False)  # 男/女
+    gender = db.Column(db.String(2), nullable=False)  # �?�?
     floor = db.Column(db.Integer, nullable=False)
     capacity = db.Column(db.Integer, nullable=False, default=8)
-    grade = db.Column(db.String(10))      # 宿管分配的年级
-    class_name = db.Column(db.String(10)) # 宿管分配的班级
+    grade = db.Column(db.String(10))      # 宿管分配的年�?
+    class_name = db.Column(db.String(10)) # 宿管分配的班�?
     combined_class = db.Column(db.String(10))  # 合班
     notes = db.Column(db.Text)
     is_active = db.Column(db.Boolean, default=True)
@@ -36,7 +36,7 @@ class Room(db.Model):
 
     @property
     def display_name(self):
-        """显示名称：宿舍楼 + 房间号"""
+        """显示名称：宿舍楼 + 房间�?""
         if self.building:
             return f"{self.building} {self.room_number}"
         return self.room_number
@@ -60,12 +60,12 @@ class BedAssignment(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     room_id = db.Column(db.Integer, db.ForeignKey('rooms.id'), nullable=False)
     bed_number = db.Column(db.Integer, nullable=False)  # 1-8
-    # 跨库引用：System.db 的 students / users，FK 已拆除
+    # 跨库引用：System.db �?students / users，FK 已拆�?
     student_id = db.Column(db.Integer, nullable=True, index=True)
     assigned_by = db.Column(db.Integer)
     assigned_at = db.Column(db.DateTime, default=datetime.now)
 
-    # 跨库 relationship（viewonly）
+    # 跨库 relationship（viewonly�?
     room = db.relationship('Room', back_populates='beds')
     student = db.relationship(
         'Student',

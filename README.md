@@ -3,7 +3,7 @@
 [![License](https://img.shields.io/badge/license-CC%20BY--NC%204.0-blue.svg)](LICENSE)
 [![Python](https://img.shields.io/badge/python-3.11+-green.svg)](https://python.org)
 [![Flask](https://img.shields.io/badge/flask-3.x-lightgrey.svg)](https://flask.palletsprojects.com/)
-[![Version](https://img.shields.io/badge/version-1.4.5-orange.svg)](https://github.com/zkxxzf/stulink)
+[![Version](https://img.shields.io/badge/version-1.4.6-orange.svg)](https://github.com/zkxxzf/stulink)
 
 面向中学的综合学生管理平台。支持宿舍分配、床位管理、学生信息管理、多角色权限控制、数据统计与 Excel 导出，采用模块化架构设计，为积分管理、成绩管理等后续功能预留扩展接口。
 
@@ -63,6 +63,7 @@ StuLink/
 
 - [设计文档](docs/设计文档.md)
 - [用户手册](docs/用户文档.md)
+- [部署文档](docs/部署文档.md)（Docker / 阿里云 / NAS）
 - [测试文档](docs/测试文档.md)
 - [数据库分库规格说明](docs/模块化重构规格说明.md)
 - [历史记录与日志设计](docs/历史记录与日志系统设计.md)

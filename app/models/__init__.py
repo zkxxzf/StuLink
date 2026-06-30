@@ -1,4 +1,4 @@
-# StuLink v1.4.5 2026-06-30
+# StuLink v1.4.6 2026-06-30
 # Copyright (c) 2026 zkxxzf. CC BY-NC 4.0
 from app.models.user import User
 from app.models.student import Student

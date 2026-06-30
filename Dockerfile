@@ -11,8 +11,11 @@ RUN ln -snf /usr/share/zoneinfo/$TZ /etc/localtime && echo $TZ > /etc/timezone
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt -i https://pypi.tuna.tsinghua.edu.cn/simple
 
-# 代码通过 docker-compose volumes 挂载，不 COPY 到镜像
-# 创建数据目录
+# 复制应用代码（打包进镜像，无需卷挂载）
+COPY app/ ./app/
+COPY config.py run.py ./
+
+# 创建数据目录（运行时通过卷挂载持久化）
 RUN mkdir -p /app/data /app/data/backups
 
 # 暴露端口

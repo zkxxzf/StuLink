@@ -1,4 +1,4 @@
-# StuLink v1.4.5 2026-06-30
+# StuLink v1.4.6 2026-06-30
 # Copyright (c) 2026 zkxxzf. CC BY-NC 4.0
 from app.models import DictCategory, Student, Room, ClassProfile, ClassSubject
 from app.utils.cache import cache
@@ -6,7 +6,7 @@ from flask import request
 
 
 def log_operation(user, action, target_type, target_id=None, detail=None, module='system', severity='INFO'):
-    """记录操作审计日志（静默失败，不阻塞主流程）"""
+    """记录操作审计日志（静默失败，不阻塞主流程�?""
     try:
         from app.models.operation_log import OperationLog
         from app.extensions import db
@@ -22,11 +22,11 @@ def log_operation(user, action, target_type, target_id=None, detail=None, module
         )
         db.session.add(log)
     except Exception:
-        pass  # 日志记录失败不阻塞业务
+        pass  # 日志记录失败不阻塞业�?
 
 
 def is_dict_value_in_use(category_code, value):
-    """检查字典值是否被学生或宿舍引用"""
+    """检查字典值是否被学生或宿舍引�?""
     try:
         if category_code == 'grade':
             if Student.query.filter_by(grade=value).first():
@@ -53,7 +53,7 @@ def is_dict_value_in_use(category_code, value):
                 return True
         elif category_code == 'floor':
             try:
-                floor_num = int(value.replace('楼', ''))
+                floor_num = int(value.replace('�?, ''))
                 if Room.query.filter_by(floor=floor_num).first():
                     return True
             except (ValueError, AttributeError):
@@ -85,7 +85,7 @@ def is_dict_value_in_use(category_code, value):
 
 
 def get_dict_items(code):
-    """根据字典分类code获取所有选项，返回 [(值，值), ...] 用于WTForms SelectField"""
+    """根据字典分类code获取所有选项，返�?[(值，�?, ...] 用于WTForms SelectField"""
     cat = DictCategory.query.filter_by(code=code).first()
     if not cat:
         return []

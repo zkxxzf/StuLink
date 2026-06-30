@@ -4,7 +4,7 @@ def register_blueprints(app):
     from app.modules.auth.routes import bp as auth_bp
     app.register_blueprint(auth_bp)
 
-    # 欢迎页（/）
+    # 欢迎页（/�?
     from app.modules.welcome.routes import bp as welcome_bp
     app.register_blueprint(welcome_bp)
 
@@ -38,5 +38,5 @@ def register_blueprints(app):
     app.register_blueprint(points_bp)
     app.register_blueprint(grades_bp)
 
-# StuLink v1.4.5 2026-06-30
+# StuLink v1.4.6 2026-06-30
 # Copyright (c) 2026 zkxxzf. CC BY-NC 4.0
