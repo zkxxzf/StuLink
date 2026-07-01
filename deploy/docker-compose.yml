@@ -2,7 +2,7 @@ version: '3.8'
 
 services:
   stulink:
-    image: stulink:v1.4.6
+    image: stulink:v1.5.0
     container_name: stulink
     ports:
       - "5000:5000"
@@ -13,6 +13,4 @@ services:
     environment:
       - TZ=Asia/Shanghai
       - DATABASE_URL=sqlite:////app/data/system.db
-      # ⚠ 生产部署务必替换为强随机密钥：python -c "import secrets; print(secrets.token_hex(32))"
-      # 留空则自动生成并持久化到 data/.secret_key
       - SECRET_KEY=

@@ -11,6 +11,9 @@
         <button class="btn btn-info" data-bs-toggle="modal" data-bs-target="#batchTransferModal">
             <i class="bi bi-arrow-left-right"></i> 批量调班
         </button>
+        <button class="btn btn-warning" id="btnBatchEdit" style="display:none;" data-bs-toggle="modal" data-bs-target="#batchEditModal">
+            <i class="bi bi-pencil-square"></i> 批量修改
+        </button>
         {% if current_user.has_role('admin') %}
         <button class="btn btn-danger" id="btnBatchDelete" style="display:none;" onclick="submitBatchDelete()">
             <i class="bi bi-trash"></i> 批量删除 (<span id="selectedCount">0</span>)
@@ -183,6 +186,13 @@
                         <label class="form-label">选择Excel文件</label>
                         <input type="file" name="file" class="form-control" accept=".xlsx,.xls" required>
                     </div>
+                    <div class="mb-3 form-check">
+                        <input type="checkbox" class="form-check-input" name="update_mode" value="1" id="updateModeCheck">
+                        <label class="form-check-label" for="updateModeCheck">
+                            <strong>更新已有学生</strong>
+                            <small class="text-muted d-block">勾选后：按学号+姓名匹配已有学生，仅补填空白字段；若Excel值与库中已有值冲突则跳过并提示</small>
+                        </label>
+                    </div>
                     <div class="alert alert-info small mb-0">
                         <i class="bi bi-info-circle"></i> <strong>导入说明：</strong>
                         <ul class="mb-0 mt-1">
@@ -202,6 +212,72 @@
                     <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">取消</button>
                     <button type="submit" class="btn btn-success">
                         <i class="bi bi-upload"></i> 开始导入
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<!-- 批量修改宿舍信息弹窗 -->
+<div class="modal fade" id="batchEditModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title"><i class="bi bi-pencil-square"></i> 批量修改宿舍信息</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <form id="batchEditForm" method="POST" action="{{ url_for('students.batch_edit_dormitory') }}">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <div id="batchEditStudentIds"></div>
+                <div class="modal-body">
+                    <p class="text-muted small">已选择 <strong id="editSelectedCount">0</strong> 名学生。留空的字段不修改。</p>
+                    <div class="row">
+                        <div class="col-6 mb-3">
+                            <label class="form-label">选科</label>
+                            <select class="form-select" name="subject_selection">
+                                <option value="">不修改</option>
+                                {% for s in subjects %}
+                                <option value="{{ s }}">{{ s }}</option>
+                                {% endfor %}
+                            </select>
+                        </div>
+                        <div class="col-6 mb-3">
+                            <label class="form-label">住校/走读</label>
+                            <select class="form-select" name="boarding_type">
+                                <option value="">不修改</option>
+                                {% for b in boarding_types %}
+                                <option value="{{ b }}">{{ b }}</option>
+                                {% endfor %}
+                            </select>
+                        </div>
+                        <div class="col-6 mb-3">
+                            <label class="form-label">出门权限</label>
+                            <select class="form-select" name="day_student_type">
+                                <option value="">不修改</option>
+                                {% for d in day_student_types %}
+                                <option value="{{ d }}">{{ d }}</option>
+                                {% endfor %}
+                            </select>
+                        </div>
+                        <div class="col-6 mb-3">
+                            <label class="form-label">课本</label>
+                            <select class="form-select" name="textbook">
+                                <option value="">不修改</option>
+                                <option value="领">领</option>
+                                <option value="未领">未领</option>
+                            </select>
+                        </div>
+                        <div class="col-12 mb-3">
+                            <label class="form-label">班主任备注</label>
+                            <input type="text" class="form-control" name="teacher_notes" placeholder="留空不修改">
+                        </div>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">取消</button>
+                    <button type="submit" class="btn btn-warning">
+                        <i class="bi bi-check-lg"></i> 确认修改
                     </button>
                 </div>
             </form>
@@ -337,10 +413,22 @@ function updateSelectedCount() {
     $('#selectedCount').text(count);
     if (count > 0) {
         $('#btnBatchDelete').show();
+        $('#btnBatchEdit').show();
     } else {
         $('#btnBatchDelete').hide();
+        $('#btnBatchEdit').hide();
     }
 }
+
+// batch edit: populate student IDs when modal opens
+$('#batchEditModal').on('show.bs.modal', function() {
+    var container = $('#batchEditStudentIds');
+    container.empty();
+    $('.student-check:checked').each(function() {
+        container.append('<input type="hidden" name="student_ids" value="' + this.value + '">');
+    });
+    $('#editSelectedCount').text($('.student-check:checked').length);
+});
 
 function submitBatchDelete() {
     var count = $('.student-check:checked').length;

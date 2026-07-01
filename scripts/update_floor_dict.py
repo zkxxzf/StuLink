@@ -1,4 +1,4 @@
-"""更新楼层字典：从'X �?改为'X �?"""
+"""更新楼层字典：从'X 楼'改为'X 层'"""
 import os
 import sys
 
@@ -16,7 +16,7 @@ with app.app_context():
     cat = DictCategory.query.filter_by(code='floor').first()
     
     if not cat:
-        print('楼层分类不存�?)
+        print('楼层分类不存在')
         sys.exit(1)
     
     # 删除所有旧的楼层项
@@ -24,8 +24,8 @@ with app.app_context():
     for item in old_items:
         db.session.delete(item)
     
-    # 添加新的楼层�?
-    new_floors = ['1 �?, '2 �?, '3 �?, '4 �?, '5 �?, '6 �?]
+    # 添加新的楼层项
+    new_floors = ['1 层', '2 层', '3 层', '4 层', '5 层', '6 层']
     for i, floor in enumerate(new_floors):
         item = DictItem(category_id=cat.id, value=floor, sort_order=i+1)
         db.session.add(item)
@@ -34,5 +34,5 @@ with app.app_context():
     db.session.commit()
     print('\n楼层字典已更新完成！')
 
-# StuLink v1.4.6 2026-06-30
+# StuLink v1.5.0 2026-07-01
 # Copyright (c) 2026 zkxxzf. CC BY-NC 4.0

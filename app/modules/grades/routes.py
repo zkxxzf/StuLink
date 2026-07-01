@@ -1,4 +1,4 @@
-# StuLink v1.4.6 2026-06-30
+# StuLink v1.5.0 2026-07-01
 # Copyright (c) 2026 zkxxzf. CC BY-NC 4.0
 from flask import Blueprint, render_template
 from flask_login import login_required

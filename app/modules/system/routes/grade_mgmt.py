@@ -1,4 +1,4 @@
-"""年级管理：毕�?存档/历史查询"""
+"""年级管理：毕业/存档/历史查询"""
 import os
 import shutil
 import sqlite3
@@ -12,7 +12,7 @@ from app.utils.helpers import log_operation
 
 bp = Blueprint('grade_mgmt', __name__, url_prefix='/grade-mgmt')
 
-GRADES = ['2023�?, '2024�?, '2025�?]
+GRADES = ['2023级', '2024级', '2025级']
 
 
 @bp.route('/')
@@ -20,7 +20,7 @@ GRADES = ['2023�?, '2024�?, '2025�?]
 @role_required('admin')
 def index():
     """年级管理页面"""
-# StuLink v1.4.6 2026-06-30
+# StuLink v1.5.0 2026-07-01
 # Copyright (c) 2026 zkxxzf. CC BY-NC 4.0
     settings = {}
     for grade in GRADES:
@@ -41,7 +41,7 @@ def graduate():
     grade = data.get('grade', '')
     
     if grade not in GRADES:
-        return jsonify({'success': False, 'message': '无效的年�?}), 400
+        return jsonify({'success': False, 'message': '无效的年级'}), 400
     
     gs = GradeSetting.query.filter_by(grade=grade).first()
     if not gs:
@@ -51,7 +51,7 @@ def graduate():
     if gs.is_graduated:
         return jsonify({'success': False, 'message': f'{grade} 已经毕业'}), 400
     
-    # 1. 备份数据�?
+    # 1. 备份数据库
     from config import BASE_DIR
     db_path = os.path.join(BASE_DIR, 'data', 'dormitory.db')
     backups_dir = os.path.join(BASE_DIR, 'data', 'backups')
@@ -60,7 +60,7 @@ def graduate():
     backup_name = f'graduate_{grade}_{timestamp}.db'
     backup_path = os.path.join(backups_dir, backup_name)
     shutil.copy2(db_path, backup_path)
-    # 同时备份历史�?
+    # 同时备份历史库
     history_db_path = os.path.join(BASE_DIR, 'data', 'history.db')
     if os.path.exists(history_db_path):
         history_backup_name = f'history_{grade}_{timestamp}.db'
@@ -91,11 +91,11 @@ def graduate():
     gs.graduated_by = current_user.id
     db.session.commit()
 
-    log_operation(current_user, '毕业', '年级', None, f'{grade} 毕业，清空{rooms_updated}间房、{beds_cleared}个床�?)
+    log_operation(current_user, '毕业', '年级', None, f'{grade} 毕业，清空{rooms_updated}间房、{beds_cleared}个床位')
 
     return jsonify({
         'success': True,
-        'message': f'{grade} 已毕业！备份：{backup_name}，清空{rooms_updated}间房、{beds_cleared}个床�?,
+        'message': f'{grade} 已毕业！备份：{backup_name}，清空{rooms_updated}间房、{beds_cleared}个床位',
         'backup': backup_name
     })
 
@@ -111,7 +111,7 @@ def history():
     backups_dir = os.path.join(BASE_DIR, 'data', 'backups')
     os.makedirs(backups_dir, exist_ok=True)
     
-    # 列出所有备份文�?
+    # 列出所有备份文件
     backups = []
     for f in sorted(os.listdir(backups_dir), reverse=True):
         if f.endswith('.db'):
@@ -145,10 +145,10 @@ def history_view(filename):
     backup_path = os.path.join(BASE_DIR, 'data', 'backups', safe_filename)
     
     if not os.path.exists(backup_path):
-        flash('备份文件不存�?, 'danger')
+        flash('备份文件不存在', 'danger')
         return redirect(url_for('grade_mgmt.history'))
     
-    # �?sqlite3 直接读取备份
+    # 用 sqlite3 直接读取备份
     conn = sqlite3.connect(backup_path)
     conn.row_factory = sqlite3.Row
     
@@ -187,7 +187,7 @@ def history_view(filename):
         g = row['grade'] or '未知'
         if g not in student_stats:
             student_stats[g] = {'male': 0, 'female': 0}
-        if row['gender'] == '�?:
+        if row['gender'] == '男':
             student_stats[g]['male'] = row['cnt']
         else:
             student_stats[g]['female'] = row['cnt']

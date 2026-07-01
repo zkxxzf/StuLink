@@ -14,6 +14,7 @@ RUN pip install --no-cache-dir -r requirements.txt -i https://pypi.tuna.tsinghua
 # 复制应用代码（打包进镜像，无需卷挂载）
 COPY app/ ./app/
 COPY config.py run.py ./
+COPY scripts/ ./scripts/
 
 # 创建数据目录（运行时通过卷挂载持久化）
 RUN mkdir -p /app/data /app/data/backups

@@ -17,7 +17,7 @@
             transition: transform .2s;
         }
         .sidebar .nav-link {
-            color: #94a3b8; padding: 10px 20px; font-size: 14px;
+            color: #cbd5e1; padding: 10px 20px; font-size: 14px;
             border-left: 3px solid transparent;
         }
         .sidebar .nav-link:hover { color: #e2e8f0; background: rgba(255,255,255,.05); }
@@ -27,7 +27,7 @@
         }
         .sidebar .nav-link i { width: 20px; margin-right: 8px; text-align: center; }
         .sidebar .nav-section {
-            color: #64748b; font-size: 11px; text-transform: uppercase;
+            color: #94a3b8; font-size: 11px; text-transform: uppercase;
             padding: 15px 20px 5px; letter-spacing: .5px;
         }
         .main-content { margin-left: var(--sidebar-width); padding: 20px 24px 24px; min-height: 100vh; }
@@ -35,7 +35,7 @@
         .stat-card { border: none; border-radius: 10px; box-shadow: 0 1px 3px rgba(0,0,0,.08); }
         .stat-card .stat-icon { width: 48px; height: 48px; border-radius: 10px; display: flex; align-items: center; justify-content: center; font-size: 22px; }
         .stat-card .stat-number { font-size: 26px; font-weight: 700; }
-        .stat-card .stat-label { color: #64748b; font-size: 13px; }
+        .stat-card .stat-label { color: #64748b; font-size: 13px; font-weight: 500; }
         .card { border: none; border-radius: 10px; box-shadow: 0 1px 3px rgba(0,0,0,.08); }
         .bed-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
         .bed-slot {
@@ -82,7 +82,7 @@
 <body>
     <!-- 顶部导航 -->
     <nav class="navbar navbar-expand-lg navbar-dark bg-dark fixed-top px-3" style="height:56px;">
-        <button class="btn btn-dark d-md-none me-2" onclick="document.querySelector('.sidebar').classList.toggle('show')">
+        <button class="btn btn-dark d-md-none me-2" onclick="document.querySelector('.sidebar').classList.toggle('show')" aria-label="切换菜单">
             <i class="bi bi-list"></i>
         </button>
         <a class="navbar-brand fw-bold" href="{{ url_for('welcome.index') if current_user.is_authenticated else '#' }}">

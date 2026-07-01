@@ -12,14 +12,14 @@
             <form method="POST">
                 {{ form.hidden_tag() }}
                 <div class="mb-3">
-                    <label class="form-label">用户名</label>
+                    <label class="form-label" for="username">用户名</label>
                     {{ form.username(class="form-control form-control-lg", placeholder="请输入用户名") }}
                     {% for error in form.username.errors %}
                     <div class="text-danger small mt-1">{{ error }}</div>
                     {% endfor %}
                 </div>
                 <div class="mb-3">
-                    <label class="form-label">密码</label>
+                    <label class="form-label" for="password">密码</label>
                     {{ form.password(class="form-control form-control-lg", placeholder="请输入密码") }}
                     {% for error in form.password.errors %}
                     <div class="text-danger small mt-1">{{ error }}</div>
@@ -31,5 +31,10 @@
             </form>
         </div>
     </div>
+</div>
+<div class="text-center mt-3">
+    <span class="text-muted small">v1.5.0 release</span>
+    <span class="text-muted small mx-2">|</span>
+    <span class="text-muted small">&copy; 2026 StuLink &middot; @zkxxzf</span>
 </div>
 {% endblock %}

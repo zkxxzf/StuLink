@@ -1,4 +1,4 @@
-# StuLink v1.4.6 2026-06-30
+# StuLink v1.5.0 2026-07-01
 # Copyright (c) 2026 zkxxzf. CC BY-NC 4.0
 from datetime import datetime
 from app.extensions import db
@@ -15,24 +15,24 @@ class Student(db.Model):
     ethnicity = db.Column(db.String(20), default='汉族')
     phone1 = db.Column(db.String(20))
     phone2 = db.Column(db.String(20))
-    gender = db.Column(db.String(2), nullable=False)  # �?�?
-    student_number = db.Column(db.String(20), unique=True, nullable=False)  # 业务主键，必�?
-    grade = db.Column(db.String(10), nullable=False)     # 2025�?
-    class_name = db.Column(db.String(10), nullable=False) # 01�?
+    gender = db.Column(db.String(2), nullable=False)  # 男/女
+    student_number = db.Column(db.String(20), unique=True, nullable=False)  # 业务主键，必填
+    grade = db.Column(db.String(10), nullable=False)     # 2025级
+    class_name = db.Column(db.String(10), nullable=False) # 01班
     original_class = db.Column(db.String(10))
-    subject_selection = db.Column(db.String(20))  # 史政�?
-    boarding_type = db.Column(db.String(10), nullable=False)  # 住校/男走�?女走�?离校
+    subject_selection = db.Column(db.String(20))  # 史政地
+    boarding_type = db.Column(db.String(10), nullable=False)  # 住校/男走读/女走读/离校
     day_student_type = db.Column(db.String(20))
-    enrollment_status = db.Column(db.String(20))  # 借读/在籍不在�?转入
+    enrollment_status = db.Column(db.String(20))  # 借读/在籍不在校/转入
     textbook = db.Column(db.String(50))
     teacher_notes = db.Column(db.Text)
     enrollment_notes = db.Column(db.String(100))
-    graduation_school_code = db.Column(db.String(10))  # 毕业学校代码（如0440�?
+    graduation_school_code = db.Column(db.String(10))  # 毕业学校代码（如0440）
     graduation_school = db.Column(db.String(100))      # 毕业学校名称
     created_at = db.Column(db.DateTime, default=datetime.now)
     updated_at = db.Column(db.DateTime, default=datetime.now, onupdate=datetime.now)
 
-    # 关联床位（跨�?relationship，viewonly�?
+    # 关联床位（跨库 relationship，viewonly）
     bed_assignment = db.relationship(
         'BedAssignment',
         primaryjoin='Student.id == BedAssignment.student_id',

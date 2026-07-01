@@ -1,4 +1,4 @@
-# StuLink v1.4.6 2026-06-30
+# StuLink v1.5.0 2026-07-01
 # Copyright (c) 2026 zkxxzf. CC BY-NC 4.0
 from flask import Blueprint, render_template, redirect, url_for, flash, request, jsonify
 from flask_login import login_required, current_user
@@ -27,12 +27,12 @@ def list_rooms():
     if gender:
         query = query.filter_by(gender=gender)
     if floor:
-        # 去掉可能�?�?字，提取数字
-        floor_num = floor.replace('�?, '').strip()
+        # 去掉可能的"层"字，提取数字
+        floor_num = floor.replace('层', '').strip()
         try:
             query = query.filter_by(floor=int(floor_num))
         except ValueError:
-            pass  # 如果转换失败，忽略该筛选条�?
+            pass  # 如果转换失败，忽略该筛选条件
     if capacity:
         try:
             query = query.filter_by(capacity=int(capacity))
@@ -41,7 +41,7 @@ def list_rooms():
 
     rooms = query.order_by(Room.building, Room.floor, Room.room_number).all()
 
-    # 优化：使用单次聚合查询获取所有房间的入住人数，避�?N+1 查询
+    # 优化：使用单次聚合查询获取所有房间的入住人数，避免 N+1 查询
     occupancy_data = db.session.query(
         BedAssignment.room_id,
         func.count(BedAssignment.id).label('count')
@@ -49,7 +49,7 @@ def list_rooms():
         BedAssignment.student_id.isnot(None)
     ).group_by(BedAssignment.room_id).all()
     
-    # 转换为字典便于查�?
+    # 转换为字典便于查找
     occupancy_map = {row.room_id: row.count for row in occupancy_data}
 
     room_data = []
@@ -118,7 +118,7 @@ def edit(id):
         room.combined_class = new_combined
         room.notes = new_notes
         db.session.commit()
-        flash(f'{room.display_name} 信息已更�?, 'success')
+        flash(f'{room.display_name} 信息已更新', 'success')
         return redirect(url_for('rooms.detail', id=room.id))
 
     return render_template('dormitory/rooms/form.html', room=room, title='编辑宿舍',
@@ -133,7 +133,7 @@ def create():
         building = request.form.get('building', '').strip()
         room_number = request.form.get('room_number', '').strip()
         floor = request.form.get('floor', '').strip()
-        gender = request.form.get('gender', '�?)
+        gender = request.form.get('gender', '男')
         capacity = int(request.form.get('capacity', 8))
         notes = request.form.get('notes', '') or None
 
@@ -144,12 +144,12 @@ def create():
                                    buildings=get_dict_values('building'), floors=get_dict_values('floor'))
 
         if Room.query.filter_by(building=building, room_number=room_number).first():
-            flash(f'{building} {room_number} 已存�?, 'danger')
+            flash(f'{building} {room_number} 已存在', 'danger')
             return render_template('dormitory/rooms/form.html', room=None, title='新增宿舍',
                                    grades=get_dict_values('grade'), classes=get_dict_values('class'),
                                    buildings=get_dict_values('building'), floors=get_dict_values('floor'))
 
-        # 优先使用选择的楼层，如果没有则从房间号提�?
+        # 优先使用选择的楼层，如果没有则从房间号提取
         floor_num = 1
         if floor:
             try:
@@ -198,13 +198,13 @@ def delete(id):
     db.session.delete(room)
     db.session.commit()
     log_operation(current_user, '删除', '宿舍', room.id, f'{room.display_name}')
-    flash(f'宿舍 {room.room_number} 已删�?, 'success')
+    flash(f'宿舍 {room.room_number} 已删除', 'success')
     return redirect(url_for('rooms.list_rooms'))
 
 @bp.route('/assign-visual')
 @role_required('admin', 'dorm_manager')
 def assign_visual():
-    """可视化宿舍分配页�?""
+    """可视化宿舍分配页面"""
     grades = get_dict_values('grade')
     buildings = get_dict_values('building')
     return render_template('dormitory/rooms/assign_visual.html', grades=grades, buildings=buildings)
@@ -213,15 +213,15 @@ def assign_visual():
 @bp.route('/assign-data')
 @login_required
 def assign_data():
-    """获取宿舍分配页面所需的所有数�?""
+    """获取宿舍分配页面所需的所有数据"""
     from flask import jsonify
     
-    # 获取所有宿�?
+    # 获取所有宿舍
     rooms = Room.query.filter_by(is_active=True).order_by(
         Room.building, Room.floor, Room.room_number
     ).all()
     
-    # 获取所有班级和住校学生�?
+    # 获取所有班级和住校学生数
     from app.models import Student
     grades = get_dict_values('grade')
     classes_list = get_dict_values('class')
@@ -231,11 +231,11 @@ def assign_data():
         for cls_name in classes_list:
             male_count = Student.query.filter_by(
                 grade=grade, class_name=cls_name,
-                gender='�?, boarding_type='住校'
+                gender='男', boarding_type='住校'
             ).count()
             female_count = Student.query.filter_by(
                 grade=grade, class_name=cls_name,
-                gender='�?, boarding_type='住校'
+                gender='女', boarding_type='住校'
             ).count()
             
             if male_count > 0 or female_count > 0:
@@ -246,7 +246,7 @@ def assign_data():
                     'boarding_female': female_count
                 })
     
-    # 格式化宿舍数�?
+    # 格式化宿舍数据
     rooms_data = []
     for room in rooms:
         rooms_data.append({
@@ -273,7 +273,7 @@ def assign_data():
 @bp.route('/assign-room', methods=['POST'])
 @role_required('admin', 'dorm_manager')
 def assign_room():
-    """分配宿舍给班�?""
+    """分配宿舍给班级"""
     from flask import jsonify
     data = request.get_json()
     
@@ -282,11 +282,11 @@ def assign_room():
     class_name = data.get('class_name')
     
     if not room_id or not grade or not class_name:
-        return jsonify({'success': False, 'message': '参数不完�?}), 400
+        return jsonify({'success': False, 'message': '参数不完整'}), 400
     
     room = Room.query.get(room_id)
     if not room:
-        return jsonify({'success': False, 'message': '宿舍不存�?}), 404
+        return jsonify({'success': False, 'message': '宿舍不存在'}), 404
     
     # 更新宿舍分配信息
     room.grade = grade
@@ -306,11 +306,11 @@ def unassign_room():
     room_id = data.get('room_id')
     
     if not room_id:
-        return jsonify({'success': False, 'message': '参数不完�?}), 400
+        return jsonify({'success': False, 'message': '参数不完整'}), 400
     
     room = Room.query.get(room_id)
     if not room:
-        return jsonify({'success': False, 'message': '宿舍不存�?}), 404
+        return jsonify({'success': False, 'message': '宿舍不存在'}), 404
     
     # 取消分配
     room.grade = None
@@ -332,11 +332,11 @@ def set_combined():
     is_combined = data.get('is_combined', False)
     
     if not room_id:
-        return jsonify({'success': False, 'message': '参数不完�?}), 400
+        return jsonify({'success': False, 'message': '参数不完整'}), 400
     
     room = Room.query.get(room_id)
     if not room:
-        return jsonify({'success': False, 'message': '宿舍不存�?}), 404
+        return jsonify({'success': False, 'message': '宿舍不存在'}), 404
     
     # 设置合班标记
     if is_combined:
@@ -351,15 +351,15 @@ def set_combined():
 @bp.route('/save-assignments', methods=['POST'])
 @role_required('admin', 'dorm_manager')
 def save_assignments():
-    """批量保存所有分�?""
+    """批量保存所有分配"""
     from flask import jsonify
     data = request.get_json()
     
     assignments = data.get('assignments', [])
     
-    # 如果没有分配数据，清空所有宿舍的分配状�?
+    # 如果没有分配数据，清空所有宿舍的分配状态
     if not assignments:
-        # 将所有已分配的宿舍重置为未分配状�?
+        # 将所有已分配的宿舍重置为未分配状态
         rooms = Room.query.filter(Room.grade.isnot(None) | Room.class_name.isnot(None)).all()
         count = 0
         for room in rooms:
@@ -368,7 +368,7 @@ def save_assignments():
             count += 1
         
         db.session.commit()
-        return jsonify({'success': True, 'message': f'已清�?{count} 个分�?})
+        return jsonify({'success': True, 'message': f'已清空 {count} 个分配'})
     
     # 保存新的分配数据
     count = 0
@@ -381,13 +381,13 @@ def save_assignments():
     
     db.session.commit()
     
-    return jsonify({'success': True, 'message': f'已保�?{count} 个分�?})
+    return jsonify({'success': True, 'message': f'已保存 {count} 个分配'})
 
 
 @bp.route('/class-bed-requirement')
 @login_required
 def class_bed_requirement():
-    """获取某个班级的床位需求和已分配情�?""
+    """获取某个班级的床位需求和已分配情况"""
     from flask import jsonify
     grade = request.args.get('grade', '')
     class_name = request.args.get('class_name', '')
@@ -403,18 +403,18 @@ def class_bed_requirement():
     male_count = Student.query.filter_by(
         grade=grade, 
         class_name=class_name, 
-        gender='�?, 
+        gender='男', 
         boarding_type='住校'
     ).count()
     
     female_count = Student.query.filter_by(
         grade=grade, 
         class_name=class_name, 
-        gender='�?, 
+        gender='女', 
         boarding_type='住校'
     ).count()
     
-    # 统计该班级已分配的宿�?(按性别)
+    # 统计该班级已分配的宿舍 (按性别)
     assigned_rooms = Room.query.filter_by(grade=grade, class_name=class_name, is_active=True).all()
     
     assigned_male_rooms = 0
@@ -428,7 +428,7 @@ def class_bed_requirement():
             BedAssignment.student_id.isnot(None)
         ).count()
         
-        if room.gender == '�?:
+        if room.gender == '男':
             assigned_male_rooms += 1
             assigned_male_beds += occupancy
         else:
@@ -449,7 +449,7 @@ def class_bed_requirement():
 @bp.route('/update-room-assignment', methods=['POST'])
 @role_required('admin', 'dorm_manager')
 def update_room_assignment():
-    """更新单个房间的年级班级分�?""
+    """更新单个房间的年级班级分配"""
     from flask import jsonify
     data = request.get_json()
     
@@ -462,7 +462,7 @@ def update_room_assignment():
     
     room = Room.query.get(room_id)
     if not room:
-        return jsonify({'success': False, 'message': '房间不存�?}), 404
+        return jsonify({'success': False, 'message': '房间不存在'}), 404
     
     # 更新房间分配信息
     room.grade = grade or None
@@ -485,7 +485,7 @@ def batch_setting():
             return redirect(url_for('rooms.list_rooms'))
 
         if not new_gender and not new_capacity:
-            flash('请至少选择一项要修改的内容（性别或床位数�?, 'warning')
+            flash('请至少选择一项要修改的内容（性别或床位数）', 'warning')
             return redirect(url_for('rooms.list_rooms'))
 
         count = 0
@@ -508,8 +508,8 @@ def batch_setting():
         if new_gender:
             msg_parts.append(f'性别={new_gender}')
         if new_capacity:
-            msg_parts.append(f'床位�?{new_capacity}')
-        flash(f'已批量设�?{count} 间宿舍（{", ".join(msg_parts)}�?, 'success')
+            msg_parts.append(f'床位数={new_capacity}')
+        flash(f'已批量设置 {count} 间宿舍（{", ".join(msg_parts)}）', 'success')
         return redirect(url_for('rooms.list_rooms'))
 
     return redirect(url_for('rooms.list_rooms'))
@@ -521,17 +521,17 @@ def batch_add_rooms():
     if request.method == 'POST':
         building = request.form.get('building', '').strip()
         floor = request.form.get('floor', '').strip()
-        gender = request.form.get('gender', '�?)
+        gender = request.form.get('gender', '男')
         room_count = int(request.form.get('room_count', 0))
         start_room_number = request.form.get('start_room_number', '').strip()
         capacity = int(request.form.get('capacity', 8))
 
         if not building or not floor or not start_room_number:
-            flash('请填写完整信�?, 'danger')
+            flash('请填写完整信息', 'danger')
             return redirect(url_for('rooms.list_rooms'))
 
         if room_count <= 0 or room_count > 100:
-            flash('房间数量必须�?1-100 之间', 'danger')
+            flash('房间数量必须在 1-100 之间', 'danger')
             return redirect(url_for('rooms.list_rooms'))
 
         try:
@@ -568,9 +568,9 @@ def batch_add_rooms():
 
         db.session.commit()
 
-        msg = f'成功添加 {created_count} 间宿�?
+        msg = f'成功添加 {created_count} 间宿舍'
         if skipped_count > 0:
-            msg += f'，跳�?{skipped_count} 间已存在的宿�?
+            msg += f'，跳过 {skipped_count} 间已存在的宿舍'
         flash(msg, 'success')
         return redirect(url_for('rooms.list_rooms'))
 
@@ -590,7 +590,7 @@ def _adjust_beds(room, old_capacity, new_capacity):
             bed = BedAssignment.query.filter_by(room_id=room.id, bed_number=bed_num).first()
             if bed:
                 if bed.student_id:
-                    flash(f'{room.display_name} �?{bed_num}�?有学生入住，无法删除', 'warning')
+                    flash(f'{room.display_name} 的 {bed_num}床 有学生入住，无法删除', 'warning')
                 else:
                     db.session.delete(bed)
 
@@ -613,8 +613,8 @@ def assign_auto():
         classes = db.session.query(
             Student.class_name,
             func.count(Student.id).label('count'),
-            func.sum(case((Student.gender == '�?, 1), else_=0)).label('male'),
-            func.sum(case((Student.gender == '�?, 1), else_=0)).label('female')
+            func.sum(case((Student.gender == '男', 1), else_=0)).label('male'),
+            func.sum(case((Student.gender == '女', 1), else_=0)).label('female')
         ).filter(
             Student.grade == grade,
             Student.boarding_type == '住校'
@@ -645,15 +645,15 @@ def assign_auto():
 @login_required
 def assign_auto_stats():
     """
-    获取班级选择统计数据（后端计算，防止篡改�?
+    获取班级选择统计数据（后端计算，防止篡改）
     接收: ?keys=grade:class_name:gender,...
-    返回: 每个组合�?维度信息 + 汇�?
+    返回: 每个组合的4维度信息 + 汇总
     """
     keys_param = request.args.get('keys', '')
     if not keys_param:
-        return jsonify({'success': False, 'error': '参数不完�?})
+        return jsonify({'success': False, 'error': '参数不完整'})
     
-    # 解析选中的班�?性别组合
+    # 解析选中的班级-性别组合
     selected_keys = []
     for key_str in keys_param.split(','):
         parts = key_str.strip().split(':')
@@ -665,9 +665,9 @@ def assign_auto_stats():
             })
     
     if not selected_keys:
-        return jsonify({'success': False, 'error': '参数不完�?})
+        return jsonify({'success': False, 'error': '参数不完整'})
     
-    # 从字典表获取有效�?
+    # 从字典表获取有效值
     valid_grades = get_dict_values('grade')
     valid_classes = get_dict_values('class')
     
@@ -685,10 +685,10 @@ def assign_auto_stats():
         class_name = sk['class_name']
         gender = sk['gender']
         
-        # 验证字典�?
+        # 验证字典表
         if grade not in valid_grades or class_name not in valid_classes:
             continue
-        if gender not in ('�?, '�?):
+        if gender not in ('男', '女'):
             continue
         
         # 从数据库查询真实人数
@@ -706,9 +706,9 @@ def assign_auto_stats():
             'count': student_count
         })
         
-        # 汇总统�?
+        # 汇总统计
         class_ident = f"{grade}:{class_name}"
-        if gender == '�?:
+        if gender == '男':
             male_total += student_count
             if class_ident not in seen_male_classes:
                 seen_male_classes.add(class_ident)
@@ -737,7 +737,7 @@ def assign_auto_stats():
 @login_required
 @role_required('admin', 'dorm_manager')
 def assign_auto_preview():
-    """预览自动分配方案（不执行�? V4"""
+    """预览自动分配方案（不执行）- V4"""
     data = request.json or {}
     
     selected_keys = data.get('selected_keys', [])  # [{grade, class_name, gender}]
@@ -747,7 +747,7 @@ def assign_auto_preview():
     force_full_8 = data.get('force_full_8', False)
     
     if not selected_keys or not selected_room_ids:
-        return jsonify({'success': False, 'error': '参数不完整：请选择班级和房�?})
+        return jsonify({'success': False, 'error': '参数不完整：请选择班级和房间'})
     
     # 检测已有分配的房间
     from app.models import Room as RoomModel, BedAssignment
@@ -803,7 +803,7 @@ def assign_auto_execute():
     force_full_8 = data.get('force_full_8', False)
     
     if not selected_keys or not selected_room_ids:
-        return jsonify({'success': False, 'error': '参数不完整：请选择班级和房�?})
+        return jsonify({'success': False, 'error': '参数不完整：请选择班级和房间'})
     
     from app.modules.dormitory.services.room_assignment_v4 import auto_assign_preview as do_preview
     
@@ -828,7 +828,7 @@ def available_rooms_data():
         Room.building, Room.floor, Room.room_number
     ).all()
     
-    # 组织成楼�?楼层-房间的结�?
+    # 组织成楼栋-楼层-房间的结构
     buildings_data = {}
     
     for room in rooms:
@@ -841,7 +841,7 @@ def available_rooms_data():
         if floor not in buildings_data[building]:
             buildings_data[building][floor] = []
         
-        # 可用床位 = 房间总容量（房间分配阶段不看学生床位�?
+        # 可用床位 = 房间总容量（房间分配阶段不看学生床位）
         buildings_data[building][floor].append({
             'id': room.id,
             'room_number': room.room_number,
@@ -861,7 +861,7 @@ def available_rooms_data():
 @login_required
 def assign_auto_room_stats():
     """
-    获取房间选择统计数据（后端计算，防止篡改�?
+    获取房间选择统计数据（后端计算，防止篡改）
     接收: { room_ids: [1,2,3,...] }
     返回: 男女宿舍/床位统计
     """
@@ -876,7 +876,7 @@ def assign_auto_room_stats():
             'total_beds': 0, 'combined_rooms': 0
         })
     
-    # 验证所有room_id有效并从数据库查�?
+    # 验证所有room_id有效并从数据库查询
     rooms = Room.query.filter(Room.id.in_(room_ids), Room.is_active == True).all()
     
     if len(rooms) != len(room_ids):
@@ -890,14 +890,14 @@ def assign_auto_room_stats():
     combined_rooms = 0
     
     for room in rooms:
-        if room.gender == '�?:
+        if room.gender == '男':
             male_rooms += 1
             male_beds += room.capacity
-        elif room.gender == '�?:
+        elif room.gender == '女':
             female_rooms += 1
             female_beds += room.capacity
         else:
-            # 不限性别的房�?
+            # 不限性别的房间
             male_rooms += 1
             male_beds += room.capacity
             female_rooms += 1
@@ -922,7 +922,7 @@ def assign_auto_room_stats():
 @role_required('admin', 'dorm_manager', 'grade_leader', 'school_viewer')
 def report():
     """
-    宿舍报表：展示已分配宿舍的班�?房间对照�?
+    宿舍报表：展示已分配宿舍的班级-房间对照表
     """
     grade_filter = request.args.get('grade', '')
 
@@ -1058,7 +1058,7 @@ def report_export():
     c.alignment = Alignment(horizontal='center')
     row += 1
 
-    info = f'已分�?{len(rooms)} 间宿�?/ {sum(r.capacity for r in rooms)} 张床�?/ 住校�?{sum(class_totals.values())} �?
+    info = f'已分配 {len(rooms)} 间宿舍 / {sum(r.capacity for r in rooms)} 张床位 / 住校生 {sum(class_totals.values())} 人'
     if grade_filter:
         info += f' / 年级：{grade_filter}'
     ws.merge_cells(start_row=row, start_column=1, end_row=row, end_column=6)
@@ -1067,19 +1067,19 @@ def report_export():
     c.alignment = Alignment(horizontal='center')
     row += 2
 
-    cols = ['班级', '住校�?, '宿舍�?, '房间�?, '床位�?, '合班标记']
+    cols = ['班级', '住校生', '宿舍楼', '房间号', '床位数', '合班标记']
     col_widths = [10, 9, 18, 9, 9, 14]
 
     for grade, genders in tree.items():
         ws.merge_cells(start_row=row, start_column=1, end_row=row, end_column=6)
-        c = ws.cell(row=row, column=1, value=f'�?{grade}')
+        c = ws.cell(row=row, column=1, value=f'▌ {grade}')
         c.font = Font(bold=True, size=12)
         c.alignment = Alignment(horizontal='left')
         row += 1
 
         for gender, classes in genders.items():
-            gender_label = '男生' if gender == '�? else '女生'
-            gender_fill = PatternFill(start_color='E3F2FD', end_color='E3F2FD', fill_type='solid') if gender == '�? else PatternFill(start_color='FCE4EC', end_color='FCE4EC', fill_type='solid')
+            gender_label = '男生' if gender == '男' else '女生'
+            gender_fill = PatternFill(start_color='E3F2FD', end_color='E3F2FD', fill_type='solid') if gender == '男' else PatternFill(start_color='FCE4EC', end_color='FCE4EC', fill_type='solid')
 
             ws.merge_cells(start_row=row, start_column=1, end_row=row, end_column=6)
             c = ws.cell(row=row, column=1, value=f'{gender_label}')
@@ -1123,12 +1123,12 @@ def report_export():
                         ws.cell(row=r, column=ci).border = thin_border
                     row += 1
 
-                # 小计�?
+                # 小计行
                 cls_beds = sum(r.capacity for r in room_list)
-                c = ws.cell(row=row, column=4, value=f'小计：{room_count}�?)
+                c = ws.cell(row=row, column=4, value=f'小计：{room_count}间')
                 c.font = sum_font
                 c.alignment = Alignment(horizontal='right')
-                c = ws.cell(row=row, column=5, value=f'{cls_beds}�?)
+                c = ws.cell(row=row, column=5, value=f'{cls_beds}床')
                 c.font = sum_font
                 c.alignment = center_align
                 for ci in range(1, 7):
@@ -1136,7 +1136,7 @@ def report_export():
                     ws.cell(row=row, column=ci).fill = PatternFill(start_color='F2F2F2', end_color='F2F2F2', fill_type='solid')
                 row += 1
 
-            row += 1  # 性别间空�?
+            row += 1  # 性别间空行
 
     output = BytesIO()
     wb.save(output)

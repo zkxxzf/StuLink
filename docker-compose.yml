@@ -2,7 +2,7 @@ version: '3.8'
 
 services:
   stulink:
-    image: stulink:v1.4.6
+    image: stulink:v1.5.0
     container_name: stulink
     ports:
       - "5000:5000"
