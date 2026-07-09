@@ -25,6 +25,7 @@ verify*
 # 部署相关（保留模板，不提交实例）
 dormitory-code/
 dormitory.tar
+deploy/*.tar
 
 # 环境文件
 .env

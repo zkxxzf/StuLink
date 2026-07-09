@@ -1,4 +1,4 @@
-﻿"""权限组管理路由"""
+"""权限组管理路由"""
 from flask import Blueprint, render_template, request, jsonify, flash, redirect, url_for
 from flask_login import login_required
 from app.extensions import db
@@ -7,28 +7,72 @@ from app.utils.decorators import perm_required
 
 bp = Blueprint('perm_groups', __name__, url_prefix='/perm-groups')
 
-ALL_MENU_KEYS = [
-    ('students.view', '查看学生'),
-    ('students.edit', '编辑学生'),
-    ('students.import', '批量导入学生'),
-    ('students.export', '导出学生'),
-    ('students.transfer', '批量调班'),
-    ('dormitory.view', '查看宿舍'),
-    ('dormitory.manage', '管理宿舍'),
-    ('dormitory.assign', '分配宿舍'),
-    ('dormitory.beds', '床位分配'),
-    ('dormitory.import', '宿舍数据导入'),
-    ('statistics.view', '查看统计报表'),
-    ('system.users', '教师管理'),
-    ('system.dictionary', '字典管理'),
-    ('system.class_profile', '班型设置'),
-    ('system.perm_groups', '权限组管理'),
-    ('system.grade_mgmt', '年级管理'),
-    ('points.view', '查看积分'),
-    ('points.edit', '积分管理'),
-    ('grades.view', '查看成绩'),
-    ('grades.edit', '成绩管理'),
+PERMISSION_MODULES = [
+    {
+        'name': '学生管理',
+        'icon': 'bi-person',
+        'permissions': [
+            ('students.view', '查看学生'),
+            ('students.edit', '编辑学生'),
+            ('students.import', '批量导入学生'),
+            ('students.export', '导出学生'),
+            ('students.export_id_card', '导出身份证号'),
+            ('students.export_phone', '导出手机号'),
+            ('students.export_graduation_school', '导出毕业学校'),
+            ('students.export_enrollment', '导出学籍信息'),
+            ('students.transfer', '批量调班'),
+        ]
+    },
+    {
+        'name': '宿舍管理',
+        'icon': 'bi-building',
+        'permissions': [
+            ('dormitory.view', '查看宿舍'),
+            ('dormitory.manage', '管理宿舍'),
+            ('dormitory.assign', '分配宿舍'),
+            ('dormitory.beds', '床位分配'),
+            ('dormitory.import', '宿舍数据导入'),
+        ]
+    },
+    {
+        'name': '统计报表',
+        'icon': 'bi-bar-chart',
+        'permissions': [
+            ('statistics.view', '查看统计报表'),
+        ]
+    },
+    {
+        'name': '系统管理',
+        'icon': 'bi-gear',
+        'permissions': [
+            ('system.users', '教师管理'),
+            ('system.dictionary', '字典管理'),
+            ('system.class_profile', '班型设置'),
+            ('system.perm_groups', '权限组管理'),
+            ('system.grade_mgmt', '年级管理'),
+        ]
+    },
+    {
+        'name': '积分管理',
+        'icon': 'bi-star',
+        'permissions': [
+            ('points.view', '查看积分'),
+            ('points.edit', '积分管理'),
+        ]
+    },
+    {
+        'name': '成绩管理',
+        'icon': 'bi-book',
+        'permissions': [
+            ('grades.view', '查看成绩'),
+            ('grades.edit', '成绩管理'),
+        ]
+    },
 ]
+
+ALL_MENU_KEYS = []
+for module in PERMISSION_MODULES:
+    ALL_MENU_KEYS.extend(module['permissions'])
 
 
 @bp.route('/')
@@ -42,7 +86,8 @@ def manage():
         g._user_count = User.query.filter_by(permission_group_id=g.id).count()
     return render_template('system/perm_groups/manage.html',
                            groups=groups,
-                           all_menu_keys=ALL_MENU_KEYS)
+                           all_menu_keys=ALL_MENU_KEYS,
+                           permission_modules=PERMISSION_MODULES)
 
 
 @bp.route('/save', methods=['POST'])

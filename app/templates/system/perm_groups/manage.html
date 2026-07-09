@@ -30,12 +30,19 @@
                 <span class="badge bg-secondary">{{ g._user_count }}人</span>
             </div>
             {% if g.description %}<p class="text-muted small mb-2">{{ g.description }}</p>{% endif %}
-            <div class="d-flex flex-wrap gap-1">
+            <div class="space-y-2">
                 {% set keys = g.get_menu_keys() %}
-                {% for k, label in all_menu_keys %}
-                <span class="menu-chip {% if k in keys %}active{% else %}inactive{% endif %}" style="font-size:11px;">
-                    {{ label }}
-                </span>
+                {% for module in permission_modules %}
+                <div class="small">
+                    <span class="text-muted">{{ module.name }}:</span>
+                    <div class="d-flex flex-wrap gap-1 mt-1">
+                        {% for k, label in module.permissions %}
+                        <span class="menu-chip {% if k in keys %}active{% else %}inactive{% endif %}">
+                            {{ label }}
+                        </span>
+                        {% endfor %}
+                    </div>
+                </div>
                 {% endfor %}
             </div>
         </div>
@@ -73,11 +80,18 @@
                 </div>
                 <div class="mb-3">
                     <label class="form-label">可见菜单</label>
-                    <div class="d-flex flex-wrap gap-2" id="menuChecks">
-                        {% for k, label in all_menu_keys %}
-                        <label class="menu-check-label">
-                            <input type="checkbox" value="{{ k }}" class="menu-check"> {{ label }}
-                        </label>
+                    <div class="space-y-2" id="menuChecks">
+                        {% for module in permission_modules %}
+                        <div>
+                            <span class="text-muted small">{{ module.name }}</span>
+                            <div class="d-flex flex-wrap gap-2 mt-1">
+                                {% for k, label in module.permissions %}
+                                <label class="menu-check-label">
+                                    <input type="checkbox" value="{{ k }}" class="menu-check"> {{ label }}
+                                </label>
+                                {% endfor %}
+                            </div>
+                        </div>
                         {% endfor %}
                     </div>
                 </div>

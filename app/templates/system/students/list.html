@@ -41,8 +41,7 @@
         <div class="d-flex justify-content-between align-items-center mb-2">
             <small class="text-muted">共 {{ pagination.total if pagination else 0 }} 条</small>
             <div class="d-flex gap-2">
-                <a href="{{ url_for('students.export_students', gender=filter_gender, grade=filter_grade, class_name=filter_class, subject_selection=filter_subject, graduation_school=filter_school, enrollment_status=filter_enrollment, name=request.args.get('name',''), student_number=request.args.get('student_number','')) }}"
-                   class="btn btn-sm btn-outline-success"><i class="bi bi-file-earmark-excel"></i> 导出</a>
+                <button class="btn btn-sm btn-outline-success" onclick="openExportModal()"><i class="bi bi-file-earmark-excel"></i> 导出</button>
                 <a href="{{ url_for('students.list_students') }}" class="btn btn-sm btn-outline-secondary" title="清除筛选"><i class="bi bi-x-lg"></i> 清除</a>
             </div>
         </div>
@@ -366,11 +365,119 @@
         </div>
     </div>
 </div>
+
+<!-- 导出列选择弹窗 -->
+<div class="modal fade" id="exportModal" tabindex="-1">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title"><i class="bi bi-file-earmark-excel"></i> 选择导出列</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <form id="exportForm" method="POST" action="{{ url_for('students.export_students') }}">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <input type="hidden" name="gender" value="{{ filter_gender }}">
+                <input type="hidden" name="grade" value="{{ filter_grade }}">
+                <input type="hidden" name="class_name" value="{{ filter_class }}">
+                <input type="hidden" name="subject_selection" value="{{ filter_subject }}">
+                <input type="hidden" name="graduation_school" value="{{ filter_school }}">
+                <input type="hidden" name="enrollment_status" value="{{ filter_enrollment }}">
+                <input type="hidden" name="name" value="{{ request.args.get('name','') }}">
+                <input type="hidden" name="student_number" value="{{ request.args.get('student_number','') }}">
+                <div class="modal-body">
+                    <div class="alert alert-warning alert-dismissible fade show mb-4" role="alert">
+                        <i class="bi bi-shield-exclamation"></i> <strong>信息保密提醒：</strong>
+                        导出的学生数据包含敏感个人信息，请严格遵守数据保密规定，仅用于业务需要，切勿泄露给无关人员。导出操作将被记录日志。
+                    </div>
+                    <div class="row g-3">
+                        <div class="col-md-6">
+                            <h6 class="text-muted mb-2">基础信息（学号为必选项）</h6>
+                            <div class="space-y-2">
+                                <label class="form-check">
+                                    <input type="checkbox" class="form-check-input" name="columns" value="student_number" checked disabled>
+                                    <span class="form-check-label">学号 <span class="badge bg-secondary bg-opacity-50 text-xs">必选</span></span>
+                                </label>
+                                <label class="form-check">
+                                    <input type="checkbox" class="form-check-input" name="columns" value="name" checked>
+                                    <span class="form-check-label">姓名</span>
+                                </label>
+                                <label class="form-check">
+                                    <input type="checkbox" class="form-check-input" name="columns" value="gender" checked>
+                                    <span class="form-check-label">性别</span>
+                                </label>
+                                <label class="form-check">
+                                    <input type="checkbox" class="form-check-input" name="columns" value="grade" checked>
+                                    <span class="form-check-label">年级</span>
+                                </label>
+                                <label class="form-check">
+                                    <input type="checkbox" class="form-check-input" name="columns" value="class_name" checked>
+                                    <span class="form-check-label">班级</span>
+                                </label>
+                                <label class="form-check">
+                                    <input type="checkbox" class="form-check-input" name="columns" value="subject_selection" checked>
+                                    <span class="form-check-label">选科</span>
+                                </label>
+                                <label class="form-check">
+                                    <input type="checkbox" class="form-check-input" name="columns" value="ethnicity" checked>
+                                    <span class="form-check-label">民族</span>
+                                </label>
+                            </div>
+                        </div>
+                        <div class="col-md-6">
+                            <h6 class="text-muted mb-2">敏感信息（需权限）</h6>
+                            <div class="space-y-2">
+                                <label class="form-check">
+                                    <input type="checkbox" class="form-check-input" name="columns" value="id_card_number" {% if not current_user.has_perm('students.export_id_card') %}disabled{% endif %}>
+                                    <span class="form-check-label">身份证号{% if not current_user.has_perm('students.export_id_card') %} <span class="text-danger small">(无权限)</span>{% endif %}</span>
+                                </label>
+                                <label class="form-check">
+                                    <input type="checkbox" class="form-check-input" name="columns" value="phone1" {% if not current_user.has_perm('students.export_phone') %}disabled{% endif %}>
+                                    <span class="form-check-label">联系方式1{% if not current_user.has_perm('students.export_phone') %} <span class="text-danger small">(无权限)</span>{% endif %}</span>
+                                </label>
+                                <label class="form-check">
+                                    <input type="checkbox" class="form-check-input" name="columns" value="phone2" {% if not current_user.has_perm('students.export_phone') %}disabled{% endif %}>
+                                    <span class="form-check-label">联系方式2{% if not current_user.has_perm('students.export_phone') %} <span class="text-danger small">(无权限)</span>{% endif %}</span>
+                                </label>
+                                <label class="form-check">
+                                    <input type="checkbox" class="form-check-input" name="columns" value="graduation_school" {% if not current_user.has_perm('students.export_graduation_school') %}disabled{% endif %}>
+                                    <span class="form-check-label">毕业学校{% if not current_user.has_perm('students.export_graduation_school') %} <span class="text-danger small">(无权限)</span>{% endif %}</span>
+                                </label>
+                                <label class="form-check">
+                                    <input type="checkbox" class="form-check-input" name="columns" value="graduation_school_code" {% if not current_user.has_perm('students.export_graduation_school') %}disabled{% endif %}>
+                                    <span class="form-check-label">毕业学校代码{% if not current_user.has_perm('students.export_graduation_school') %} <span class="text-danger small">(无权限)</span>{% endif %}</span>
+                                </label>
+                                <label class="form-check">
+                                    <input type="checkbox" class="form-check-input" name="columns" value="enrollment_status" {% if not current_user.has_perm('students.export_enrollment') %}disabled{% endif %}>
+                                    <span class="form-check-label">学籍情况{% if not current_user.has_perm('students.export_enrollment') %} <span class="text-danger small">(无权限)</span>{% endif %}</span>
+                                </label>
+                                <label class="form-check">
+                                    <input type="checkbox" class="form-check-input" name="columns" value="enrollment_notes" {% if not current_user.has_perm('students.export_enrollment') %}disabled{% endif %}>
+                                    <span class="form-check-label">学籍备注{% if not current_user.has_perm('students.export_enrollment') %} <span class="text-danger small">(无权限)</span>{% endif %}</span>
+                                </label>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">取消</button>
+                    <button type="submit" class="btn btn-success">
+                        <i class="bi bi-file-earmark-excel"></i> 确认导出
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
 {% endif %}
 {% endblock %}
 
 {% block extra_js %}
 <script>
+function openExportModal() {
+    new bootstrap.Modal(document.getElementById('exportModal')).show();
+}
+
 // 全选/取消全选
 $('#checkAll').on('change', function() {
     $('.student-check').prop('checked', this.checked);

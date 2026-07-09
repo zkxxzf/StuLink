@@ -1,4 +1,4 @@
-﻿# StuLink v1.6.1 2026-07-09
+# StuLink v1.6.1 2026-07-09
 # Copyright (c) 2026 zkxxzf. CC BY-NC 4.0
 from flask import Flask, render_template, request
 from config import Config
@@ -76,7 +76,9 @@ PERMISSION_GROUPS = [
         'description': '系统管理员，拥有全部权限',
         'menu_keys': [
             'students.view', 'students.edit', 'students.import',
-            'students.export', 'students.transfer',
+            'students.export', 'students.export_id_card', 'students.export_phone',
+            'students.export_graduation_school', 'students.export_enrollment',
+            'students.transfer',
             'dormitory.view', 'dormitory.manage', 'dormitory.assign',
             'dormitory.beds', 'dormitory.import',
             'statistics.view',
@@ -93,7 +95,9 @@ PERMISSION_GROUPS = [
         'description': '年级长，管理本年级学生数据和统计',
         'menu_keys': [
             'students.view', 'students.edit', 'students.import',
-            'students.export', 'students.transfer',
+            'students.export', 'students.export_id_card', 'students.export_phone',
+            'students.export_graduation_school', 'students.export_enrollment',
+            'students.transfer',
             'dormitory.view', 'dormitory.beds',
             'statistics.view',
             'points.view', 'grades.view',
@@ -106,7 +110,9 @@ PERMISSION_GROUPS = [
         'description': '班主任，管理本班学生和床位',
         'menu_keys': [
             'students.view', 'students.edit', 'students.import',
-            'students.export', 'students.transfer',
+            'students.export', 'students.export_id_card', 'students.export_phone',
+            'students.export_graduation_school', 'students.export_enrollment',
+            'students.transfer',
             'dormitory.view', 'dormitory.beds',
             'statistics.view',
             'points.view', 'grades.view',

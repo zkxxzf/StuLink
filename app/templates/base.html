@@ -112,7 +112,7 @@
             <a class="nav-link" href="{{ url_for('dashboard.index') }}">
                 <i class="bi bi-house"></i>宿舍管理
             </a>
-            {% elif request.blueprint in ('system_dashboard','students','users','dictionary','class_profile','perm_groups','grade_mgmt') %}
+            {% elif request.blueprint in ('system_dashboard','students','users','dictionary','class_profile','perm_groups','grade_mgmt','operation_logs') %}
             <a class="nav-link" href="{{ url_for('system_dashboard.index') }}">
                 <i class="bi bi-house"></i>系统管理
             </a>
@@ -167,7 +167,7 @@
             {% endif %}
 
             {# ========= 系统管理模块侧边栏 ========= #}
-            {% if request.blueprint in ('system_dashboard','students','users','dictionary','class_profile','perm_groups','grade_mgmt') and request.endpoint != 'students.search' %}
+            {% if request.blueprint in ('system_dashboard','students','users','dictionary','class_profile','perm_groups','grade_mgmt','operation_logs') and request.endpoint != 'students.search' %}
             <div class="nav-section">系统管理</div>
             <a class="nav-link {% if request.endpoint == 'students.list_students' %}active{% endif %}"
                href="{{ url_for('students.list_students') }}">
@@ -192,6 +192,10 @@
             <a class="nav-link {% if request.endpoint and request.endpoint.startswith('grade_mgmt.') %}active{% endif %}"
                href="{{ url_for('grade_mgmt.index') }}">
                 <i class="bi bi-mortarboard"></i>年级管理
+            </a>
+            <a class="nav-link {% if request.endpoint and request.endpoint.startswith('operation_logs.') %}active{% endif %}"
+               href="{{ url_for('operation_logs.list_logs') }}">
+                <i class="bi bi-journal-text"></i>操作日志
             </a>
             {% endif %}
         </nav>

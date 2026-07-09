@@ -109,6 +109,11 @@ def search_student_accommodation():
     if graduated:
         query = query.filter(~Student.grade.in_(graduated))
 
+    if current_user.role == 'homeroom_teacher':
+        query = query.filter_by(grade=current_user.grade, class_name=current_user.class_name)
+    elif current_user.role == 'grade_leader':
+        query = query.filter_by(grade=current_user.grade)
+
     name = request.args.get('name', '').strip()
     student_number = request.args.get('student_number', '').strip()
     grade = request.args.get('grade', '')
@@ -179,10 +184,13 @@ def search_student_accommodation():
                            pagination=pagination)
 
 
-@bp.route('/search/export')
+@bp.route('/search/export', methods=['GET', 'POST'])
+@bp.route('/export', methods=['GET', 'POST'])
 @login_required
 def export_student_accommodation():
     from app.utils.export_helpers import do_export_student_accommodation
+    if request.method == 'POST':
+        return do_export_student_accommodation(request.form)
     return do_export_student_accommodation(request.args)
 
 

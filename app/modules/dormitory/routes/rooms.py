@@ -220,60 +220,74 @@ def assign_data():
     from flask import jsonify
     from app.utils.helpers import get_graduated_grades
     
-    # 获取所有宿舍
-    rooms = Room.query.filter_by(is_active=True).order_by(
-        Room.building, Room.floor, Room.room_number
-    ).all()
-    
-    # 获取所有班级和住校学生数（排除已毕业年级）
-    from app.models import Student
-    all_grades = get_dict_values('grade')
-    graduated = get_graduated_grades()
-    grades = [g for g in all_grades if g not in graduated]
-    classes_list = get_dict_values('class')
-    
-    classes_data = []
-    for grade in grades:
-        for cls_name in classes_list:
-            male_count = Student.query.filter_by(
-                grade=grade, class_name=cls_name,
-                gender='男', boarding_type='住校'
-            ).filter(~Student.grade.in_(graduated)).count()
-            female_count = Student.query.filter_by(
-                grade=grade, class_name=cls_name,
-                gender='女', boarding_type='住校'
-            ).filter(~Student.grade.in_(graduated)).count()
-            
-            if male_count > 0 or female_count > 0:
-                classes_data.append({
-                    'grade': grade,
-                    'class_name': cls_name,
-                    'boarding_male': male_count,
-                    'boarding_female': female_count
-                })
-    
-    # 格式化宿舍数据
-    rooms_data = []
-    for room in rooms:
-        rooms_data.append({
-            'id': room.id,
-            'building': room.building,
-            'room_number': room.room_number,
-            'floor': room.floor,
-            'gender': room.gender,
-            'capacity': room.capacity,
-            'grade': room.grade,
-            'class_name': room.class_name,
-            'combined_class': room.combined_class,
-            'is_combined': bool(room.combined_class)
+    try:
+        rooms = Room.query.filter_by(is_active=True).order_by(
+            Room.building, Room.floor, Room.room_number
+        ).all()
+        
+        from app.models import Student, StudentAccommodation
+        all_grades = get_dict_values('grade')
+        graduated = get_graduated_grades()
+        grades = [g for g in all_grades if g not in graduated]
+        classes_list = get_dict_values('class')
+        
+        boarding_student_ids = set()
+        for acc in StudentAccommodation.query.filter_by(boarding_type='住校').all():
+            boarding_student_ids.add(acc.student_id)
+        
+        classes_data = []
+        for grade in grades:
+            for cls_name in classes_list:
+                male_count = Student.query.filter(
+                    Student.grade == grade, 
+                    Student.class_name == cls_name,
+                    Student.gender == '男',
+                    Student.id.in_(boarding_student_ids),
+                    ~Student.grade.in_(graduated)
+                ).count()
+                female_count = Student.query.filter(
+                    Student.grade == grade, 
+                    Student.class_name == cls_name,
+                    Student.gender == '女',
+                    Student.id.in_(boarding_student_ids),
+                    ~Student.grade.in_(graduated)
+                ).count()
+                
+                if male_count > 0 or female_count > 0:
+                    classes_data.append({
+                        'grade': grade,
+                        'class_name': cls_name,
+                        'boarding_male': male_count,
+                        'boarding_female': female_count
+                    })
+        
+        rooms_data = []
+        for room in rooms:
+            rooms_data.append({
+                'id': room.id,
+                'building': room.building,
+                'room_number': room.room_number,
+                'floor': room.floor,
+                'gender': room.gender,
+                'capacity': room.capacity,
+                'grade': room.grade,
+                'class_name': room.class_name,
+                'combined_class': room.combined_class,
+                'is_combined': bool(room.combined_class)
+            })
+        
+        return jsonify({
+            'rooms': rooms_data,
+            'classes': classes_data,
+            'buildings': get_dict_values('building'),
+            'grades': grades
         })
     
-    return jsonify({
-        'rooms': rooms_data,
-        'classes': classes_data,
-        'buildings': get_dict_values('building'),
-        'grades': grades
-    })
+    except Exception as e:
+        import traceback
+        print(f'assign-data error: {str(e)}')
+        traceback.print_exc()
+        return jsonify({'error': str(e)}), 500
 
 
 @bp.route('/assign-room', methods=['POST'])
@@ -1100,8 +1114,34 @@ def report_export():
     wb.save(output)
     output.seek(0)
 
+    from datetime import datetime
     from flask import send_file
-    filename = f'宿舍分配报表_{grade_filter or "全部"}.xlsx'
+    from app.models import OperationLog
+    from app.extensions import db
+    import json
+
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    filename = f'宿舍分配报表_{grade_filter or "全部"}_{timestamp}.xlsx'
+
+    try:
+        log_detail = {
+            'columns': ['班级', '住校生', '宿舍楼', '房间号', '床位数', '合班标记'],
+            'record_count': len(rooms),
+            'file_name': filename,
+            'filters': {'grade': grade_filter}
+        }
+        log = OperationLog(
+            user_id=current_user.id,
+            action='导出',
+            target_type='宿舍分配报表',
+            module='dormitory',
+            detail=json.dumps(log_detail, ensure_ascii=False)
+        )
+        db.session.add(log)
+        db.session.commit()
+    except Exception:
+        db.session.rollback()
+
     return send_file(output, mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
                      as_attachment=True, download_name=filename)
 

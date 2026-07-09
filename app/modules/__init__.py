@@ -1,4 +1,4 @@
-﻿"""模块蓝图注册入口"""
+"""模块蓝图注册入口"""
 def register_blueprints(app):
     # 认证模块（共享）
     from app.modules.auth.routes import bp as auth_bp
@@ -26,6 +26,7 @@ def register_blueprints(app):
     from app.modules.system.routes.class_profile import bp as class_profile_bp
     from app.modules.system.routes.perm_groups import bp as perm_groups_bp
     from app.modules.system.routes.grade_mgmt import bp as grade_mgmt_bp
+    from app.modules.system.routes.operation_logs import bp as operation_logs_bp
     app.register_blueprint(system_dashboard_bp)
     app.register_blueprint(students_bp)
     app.register_blueprint(users_bp)
@@ -33,6 +34,7 @@ def register_blueprints(app):
     app.register_blueprint(class_profile_bp)
     app.register_blueprint(perm_groups_bp)
     app.register_blueprint(grade_mgmt_bp)
+    app.register_blueprint(operation_logs_bp)
 
     # 占位模块
     from app.modules.points.routes import bp as points_bp

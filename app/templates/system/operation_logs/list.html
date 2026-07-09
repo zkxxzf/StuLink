@@ -1,0 +1,173 @@
+{% extends "base.html" %}
+{% block title %}操作日志{% endblock %}
+{% block content %}
+<h4 class="fw-bold mb-3"><i class="bi bi-journal-text"></i> 操作日志</h4>
+
+<div class="card">
+    <div class="card-header">
+        <form method="GET" class="row g-3">
+            <div class="col-md-2">
+                <select name="action" class="form-select form-select-sm">
+                    <option value="">全部操作</option>
+                    {% for action in actions %}
+                    <option value="{{ action }}" {% if current_action == action %}selected{% endif %}>{{ action }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="col-md-2">
+                <select name="module" class="form-select form-select-sm">
+                    <option value="">全部模块</option>
+                    {% for module in modules %}
+                    <option value="{{ module }}" {% if current_module == module %}selected{% endif %}>{{ module }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="col-md-2">
+                <select name="target_type" class="form-select form-select-sm">
+                    <option value="">全部类型</option>
+                    {% for tt in target_types %}
+                    <option value="{{ tt }}" {% if current_target_type == tt %}selected{% endif %}>{{ tt }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="col-md-2">
+                <select name="user_id" class="form-select form-select-sm">
+                    <option value="">全部用户</option>
+                    {% for user in users %}
+                    <option value="{{ user.id }}" {% if current_user_id == user.id %}selected{% endif %}>{{ user.real_name }} ({{ user.username }})</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="col-md-2">
+                <input type="date" name="date_start" class="form-control form-control-sm" value="{{ date_start }}">
+            </div>
+            <div class="col-md-2">
+                <input type="date" name="date_end" class="form-control form-control-sm" value="{{ date_end }}">
+            </div>
+            <div class="col-md-3">
+                <input type="text" name="keyword" class="form-control form-control-sm" placeholder="搜索详情..." value="{{ keyword }}">
+            </div>
+            <div class="col-md-2">
+                <button type="submit" class="btn btn-sm btn-primary w-100"><i class="bi bi-search"></i> 查询</button>
+            </div>
+            <div class="col-md-1">
+                <a href="{{ url_for('operation_logs.list_logs') }}" class="btn btn-sm btn-outline-secondary w-100"><i class="bi bi-x-lg"></i> 清除</a>
+            </div>
+        </form>
+    </div>
+    <div class="card-body p-0">
+        <table class="table table-hover table-sm mb-0" style="width:100%">
+            <thead class="table-light">
+                <tr>
+                    <th style="width:50px;">ID</th>
+                    <th style="width:120px;">时间</th>
+                    <th style="width:100px;">操作用户</th>
+                    <th style="width:80px;">操作</th>
+                    <th style="width:100px;">模块</th>
+                    <th style="width:100px;">目标类型</th>
+                    <th style="width:80px;">目标ID</th>
+                    <th>详情</th>
+                    <th style="width:100px;">IP</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for item in logs %}
+                {% set log = item.log %}
+                {% set detail = item.detail_data %}
+                <tr>
+                    <td>{{ log.id }}</td>
+                    <td>{{ log.created_at.strftime('%Y-%m-%d %H:%M:%S') }}</td>
+                    <td>{% if log.user %}{{ log.user.real_name }}{% else %}<span class="text-muted">-</span>{% endif %}</td>
+                    <td><span class="badge {% if log.action == '导出' %}bg-success{% elif log.action == '导入' %}bg-info{% elif log.action == '创建' %}bg-primary{% elif log.action == '更新' %}bg-warning{% elif log.action == '删除' %}bg-danger{% else %}bg-secondary{% endif %}">{{ log.action }}</span></td>
+                    <td>{{ log.module }}</td>
+                    <td>{{ log.target_type or '-' }}</td>
+                    <td>{{ log.target_id or '-' }}</td>
+                    <td>
+                        {% if detail %}
+                        <button class="btn btn-xs btn-outline-info" onclick="toggleDetail(this)">
+                            <i class="bi bi-chevron-down"></i> 查看详情
+                        </button>
+                        <div class="detail-content mt-2 p-2 bg-light rounded d-none" style="font-size:12px;">
+                            {% if log.action == '导出' and detail.get('columns') %}
+                            <div class="mb-1"><strong>导出列：</strong><span class="text-primary">{{ detail.columns|join(', ') }}</span></div>
+                            {% endif %}
+                            {% if detail.get('record_count') %}
+                            <div class="mb-1"><strong>记录数：</strong><span class="text-success">{{ detail.record_count }} 条</span></div>
+                            {% endif %}
+                            {% if detail.get('file_name') %}
+                            <div class="mb-1"><strong>文件名：</strong><span class="text-info">{{ detail.file_name }}</span></div>
+                            {% endif %}
+                            {% if detail.get('filters') %}
+                            <div class="mb-1"><strong>筛选条件：</strong>
+                                {% set has_filter = false %}
+                                {% for key, val in detail.filters.items() %}
+                                    {% if val %}
+                                    <span class="badge bg-secondary bg-opacity-50">{{ key }}: {{ val }}</span>
+                                    {% set has_filter = true %}
+                                    {% endif %}
+                                {% endfor %}
+                                {% if not has_filter %}
+                                <span class="text-muted">无（全部数据）</span>
+                                {% endif %}
+                            </div>
+                            {% endif %}
+                        </div>
+                        {% elif log.detail %}
+                        <small class="text-muted">{{ log.detail[:50] }}{% if log.detail|length > 50 %}...{% endif %}</small>
+                        {% else %}
+                        <span class="text-muted">-</span>
+                        {% endif %}
+                    </td>
+                    <td>{{ log.ip_address or '-' }}</td>
+                </tr>
+                {% endfor %}
+                {% if not logs %}
+                <tr><td colspan="9" class="text-center text-muted py-4">没有找到日志记录</td></tr>
+                {% endif %}
+            </tbody>
+        </table>
+    </div>
+    {% if pagination and pagination.pages > 1 %}
+    <div class="card-footer">
+        <nav aria-label="Page navigation">
+            <ul class="pagination justify-content-center mb-0">
+                <li class="page-item {% if not pagination.has_prev %}disabled{% endif %}">
+                    <a class="page-link" href="?page={{ pagination.prev_num }}{% if request.query_string %}&{{ request.query_string.decode().replace('page='+pagination.page|string,'').strip('&') }}{% endif %}"><i class="bi bi-chevron-left"></i></a>
+                </li>
+                {% for page_num in pagination.iter_pages(left_edge=1, right_edge=1, left_current=2, right_current=2) %}
+                    {% if page_num %}
+                    <li class="page-item {% if page_num == pagination.page %}active{% endif %}">
+                        <a class="page-link" href="?page={{ page_num }}{% if request.query_string %}&{{ request.query_string.decode().replace('page='+pagination.page|string,'').strip('&') }}{% endif %}">{{ page_num }}</a>
+                    </li>
+                    {% else %}
+                    <li class="page-item disabled"><span class="page-link">...</span></li>
+                    {% endif %}
+                {% endfor %}
+                <li class="page-item {% if not pagination.has_next %}disabled{% endif %}">
+                    <a class="page-link" href="?page={{ pagination.next_num }}{% if request.query_string %}&{{ request.query_string.decode().replace('page='+pagination.page|string,'').strip('&') }}{% endif %}"><i class="bi bi-chevron-right"></i></a>
+                </li>
+            </ul>
+        </nav>
+        <div class="text-center text-muted small mt-2">共 {{ pagination.total }} 条，第 {{ pagination.page }}/{{ pagination.pages }} 页</div>
+    </div>
+    {% endif %}
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+function toggleDetail(btn) {
+    var content = btn.nextElementSibling;
+    var icon = btn.querySelector('i');
+    if (content.classList.contains('d-none')) {
+        content.classList.remove('d-none');
+        icon.classList.remove('bi-chevron-down');
+        icon.classList.add('bi-chevron-up');
+    } else {
+        content.classList.add('d-none');
+        icon.classList.remove('bi-chevron-up');
+        icon.classList.add('bi-chevron-down');
+    }
+}
+</script>
+{% endblock %}

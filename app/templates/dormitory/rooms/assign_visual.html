@@ -409,7 +409,9 @@ $(document).ready(function() {
 // 加载数据
 function loadData() {
     $.ajax({
-        url: '/rooms/assign-data',
+        url: '/rooms/assign-data?' + Date.now(),
+        dataType: 'json',
+        cache: false,
         success: function(data) {
             allRooms = data.rooms || [];
             allClasses = data.classes || [];
@@ -434,8 +436,21 @@ function loadData() {
             renderRoomList();
             updateSetCombinedButton();
         },
-        error: function() {
-            alert('加载数据失败');
+        error: function(xhr, status, error) {
+            console.error('加载数据失败:', status, error);
+            console.error('状态码:', xhr.status);
+            console.error('响应内容:', xhr.responseText);
+            var errorMsg = '加载数据失败';
+            if (xhr.status === 401) {
+                errorMsg = '登录已过期，请重新登录';
+            } else if (xhr.status === 403) {
+                errorMsg = '没有访问权限';
+            } else if (xhr.status === 500) {
+                errorMsg = '服务器内部错误，请联系管理员';
+            } else {
+                errorMsg = '网络请求失败（状态码：' + xhr.status + '）';
+            }
+            alert(errorMsg);
         }
     });
 }

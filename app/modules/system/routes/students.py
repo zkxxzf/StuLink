@@ -16,10 +16,12 @@ import time
 bp = Blueprint('students', __name__, url_prefix='/students')
 
 
-@bp.route('/export')
+@bp.route('/export', methods=['GET', 'POST'])
 @login_required
 def export_students():
     from app.utils.export_helpers import do_export_students
+    if request.method == 'POST':
+        return do_export_students(request.form)
     return do_export_students(request.args)
 
 # 导入错误日志暂存（key=uuid, value=(errors_list, expiry_time)）
@@ -48,9 +50,11 @@ def list_students():
     graduated = get_graduated_grades()
     if graduated:
         query = query.filter(~Student.grade.in_(graduated))
-    # 班主任只能看自己班
+    # 权限范围限制
     if current_user.role == 'homeroom_teacher':
         query = query.filter_by(grade=current_user.grade, class_name=current_user.class_name)
+    elif current_user.role == 'grade_leader':
+        query = query.filter_by(grade=current_user.grade)
 
     # 筛选参数
     filter_gender = request.args.get('gender', '')
@@ -213,11 +217,18 @@ def detail(id):
 @perm_required('students.edit')
 def edit(id):
     student = Student.query.get_or_404(id)
-    # 班主任只能编辑自己班学生
+    # 权限控制：检查用户是否有权限编辑该学生
     if current_user.role == 'homeroom_teacher':
         if student.grade != current_user.grade or student.class_name != current_user.class_name:
             flash('无权编辑该学生', 'danger')
             return redirect(url_for('students.list_students'))
+    elif current_user.role == 'grade_leader':
+        if student.grade != current_user.grade:
+            flash('无权编辑该年级学生', 'danger')
+            return redirect(url_for('students.list_students'))
+    elif current_user.role not in ('admin',):
+        flash('无权编辑学生', 'danger')
+        return redirect(url_for('students.list_students'))
     form = StudentForm(obj=student)
     if form.validate_on_submit():
         # 1. 验证身份证号格式
@@ -258,6 +269,18 @@ def edit(id):
 @perm_required('students.import')
 def delete(id):
     student = Student.query.get_or_404(id)
+    # 权限控制：检查用户是否有权限删除该学生
+    if current_user.role == 'homeroom_teacher':
+        if student.grade != current_user.grade or student.class_name != current_user.class_name:
+            flash('无权删除该学生', 'danger')
+            return redirect(url_for('students.list_students'))
+    elif current_user.role == 'grade_leader':
+        if student.grade != current_user.grade:
+            flash('无权删除该年级学生', 'danger')
+            return redirect(url_for('students.list_students'))
+    elif current_user.role not in ('admin',):
+        flash('无权删除学生', 'danger')
+        return redirect(url_for('students.list_students'))
     # 先删除床位分配
     if student.bed_assignment:
         student.bed_assignment.student_id = None
@@ -827,14 +850,45 @@ def import_students():
         elif not students_to_add:
             flash('Excel中没有有效的学生数据', 'warning')
         else:
-            db.session.add_all(students_to_add)
+            actual_students = [s[0] for s in students_to_add]
+            db.session.add_all(actual_students)
+            db.session.flush()
+            for student, acc_data in students_to_add:
+                acc_boarding_type = acc_data['boarding_type']
+                acc_day_student_type = acc_data['day_student_type']
+                acc_textbook = acc_data['textbook']
+                acc_teacher_notes = acc_data['teacher_notes']
+                if acc_boarding_type or acc_day_student_type or acc_textbook or acc_teacher_notes:
+                    acc = StudentAccommodation(
+                        student_id=student.id,
+                        boarding_type=acc_boarding_type,
+                        day_student_type=acc_day_student_type,
+                        textbook=acc_textbook,
+                        teacher_notes=acc_teacher_notes
+                    )
+                    db.session.add(acc)
             db.session.commit()
             log_operation(current_user, '导入', '学生', None, f'批量导入 {len(students_to_add)} 名学生')
             flash(f'成功导入 {len(students_to_add)} 名学生', 'success')
 
     except Exception as e:
         db.session.rollback()
-        flash(f'导入失败：{str(e)}', 'danger')
+        error_str = str(e)
+        friendly_msg = '导入失败：'
+        if 'UNIQUE constraint failed' in error_str:
+            if 'student_accommodation.student_id' in error_str:
+                friendly_msg += '检测到重复的学生住宿记录，请检查是否重复导入同一批学生数据，或使用"增量更新"模式导入'
+            elif 'students.student_number' in error_str:
+                friendly_msg += '学号重复，请检查Excel中是否有重复学号，或该学号已在系统中存在'
+            elif 'students._id_card_encrypted' in error_str:
+                friendly_msg += '身份证号重复，请检查Excel中是否有重复身份证号，或该身份证号已在系统中存在'
+            else:
+                friendly_msg += '数据重复，请检查Excel中是否有重复数据'
+        elif 'student_accommodation' in error_str:
+            friendly_msg += '住宿信息导入失败，请检查数据格式是否正确'
+        else:
+            friendly_msg += '系统处理异常，请联系管理员'
+        flash(friendly_msg, 'danger')
 
     return redirect(url_for('students.list_students'))
 
@@ -956,6 +1010,18 @@ def batch_delete():
 def transfer(id):
     """单个学生调班调年级"""
     student = Student.query.get_or_404(id)
+    # 权限控制：检查用户是否有权限调班该学生
+    if current_user.role == 'homeroom_teacher':
+        if student.grade != current_user.grade or student.class_name != current_user.class_name:
+            flash('无权调班该学生', 'danger')
+            return redirect(url_for('students.list_students'))
+    elif current_user.role == 'grade_leader':
+        if student.grade != current_user.grade:
+            flash('无权调班该年级学生', 'danger')
+            return redirect(url_for('students.list_students'))
+    elif current_user.role not in ('admin',):
+        flash('无权调班学生', 'danger')
+        return redirect(url_for('students.list_students'))
     new_grade = request.form.get('new_grade', '').strip()
     new_class = request.form.get('new_class', '').strip()
 
