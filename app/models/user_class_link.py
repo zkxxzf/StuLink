@@ -1,10 +1,10 @@
-"""用户-班级多对多关联：一个人可管多个班，一个班最多3个班主任"""
+﻿"""用户-班级多对多关联：一个人可管多个班，一个班最多3个班主任"""
 from app.extensions import db
 
 
 class UserClassLink(db.Model):
     """用户与班级的多对多关联"""
-# StuLink v1.5.0 2026-07-01
+# StuLink v1.6.1 2026-07-09
 # Copyright (c) 2026 zkxxzf. CC BY-NC 4.0
     __tablename__ = 'user_class_links'
 
@@ -22,3 +22,5 @@ class UserClassLink(db.Model):
 
     def __repr__(self):
         return f'<UserClassLink {self.grade}{self.class_name} → user:{self.user_id}>'
+
+

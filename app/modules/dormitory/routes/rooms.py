@@ -1,10 +1,10 @@
-# StuLink v1.5.0 2026-07-01
+# StuLink v1.6.1 2026-07-09
 # Copyright (c) 2026 zkxxzf. CC BY-NC 4.0
 from flask import Blueprint, render_template, redirect, url_for, flash, request, jsonify
 from flask_login import login_required, current_user
 from app.extensions import db
-from app.models import Room, BedAssignment, Student
-from app.utils.decorators import role_required
+from app.models import Room, BedAssignment, Student, StudentAccommodation
+from app.utils.decorators import perm_required
 from app.utils.helpers import get_dict_values, log_operation
 from sqlalchemy import func
 import json
@@ -96,7 +96,7 @@ def detail(id):
 
 
 @bp.route('/<int:id>/edit', methods=['GET', 'POST'])
-@role_required('admin', 'dorm_manager')
+@perm_required('dormitory.manage')
 def edit(id):
     room = Room.query.get_or_404(id)
     if request.method == 'POST':
@@ -127,7 +127,7 @@ def edit(id):
 
 
 @bp.route('/create', methods=['GET', 'POST'])
-@role_required('admin', 'dorm_manager')
+@perm_required('dormitory.manage')
 def create():
     if request.method == 'POST':
         building = request.form.get('building', '').strip()
@@ -183,7 +183,7 @@ def create():
 
 
 @bp.route('/<int:id>/delete', methods=['POST'])
-@role_required('admin', 'dorm_manager')
+@perm_required('dormitory.manage')
 def delete(id):
     room = Room.query.get_or_404(id)
     occupied = BedAssignment.query.filter(
@@ -202,10 +202,13 @@ def delete(id):
     return redirect(url_for('rooms.list_rooms'))
 
 @bp.route('/assign-visual')
-@role_required('admin', 'dorm_manager')
+@perm_required('dormitory.manage')
 def assign_visual():
     """可视化宿舍分配页面"""
-    grades = get_dict_values('grade')
+    from app.utils.helpers import get_graduated_grades
+    all_grades = get_dict_values('grade')
+    graduated = get_graduated_grades()
+    grades = [g for g in all_grades if g not in graduated]
     buildings = get_dict_values('building')
     return render_template('dormitory/rooms/assign_visual.html', grades=grades, buildings=buildings)
 
@@ -215,15 +218,18 @@ def assign_visual():
 def assign_data():
     """获取宿舍分配页面所需的所有数据"""
     from flask import jsonify
+    from app.utils.helpers import get_graduated_grades
     
     # 获取所有宿舍
     rooms = Room.query.filter_by(is_active=True).order_by(
         Room.building, Room.floor, Room.room_number
     ).all()
     
-    # 获取所有班级和住校学生数
+    # 获取所有班级和住校学生数（排除已毕业年级）
     from app.models import Student
-    grades = get_dict_values('grade')
+    all_grades = get_dict_values('grade')
+    graduated = get_graduated_grades()
+    grades = [g for g in all_grades if g not in graduated]
     classes_list = get_dict_values('class')
     
     classes_data = []
@@ -232,11 +238,11 @@ def assign_data():
             male_count = Student.query.filter_by(
                 grade=grade, class_name=cls_name,
                 gender='男', boarding_type='住校'
-            ).count()
+            ).filter(~Student.grade.in_(graduated)).count()
             female_count = Student.query.filter_by(
                 grade=grade, class_name=cls_name,
                 gender='女', boarding_type='住校'
-            ).count()
+            ).filter(~Student.grade.in_(graduated)).count()
             
             if male_count > 0 or female_count > 0:
                 classes_data.append({
@@ -271,7 +277,7 @@ def assign_data():
 
 
 @bp.route('/assign-room', methods=['POST'])
-@role_required('admin', 'dorm_manager')
+@perm_required('dormitory.manage')
 def assign_room():
     """分配宿舍给班级"""
     from flask import jsonify
@@ -297,7 +303,7 @@ def assign_room():
 
 
 @bp.route('/unassign-room', methods=['POST'])
-@role_required('admin', 'dorm_manager')
+@perm_required('dormitory.manage')
 def unassign_room():
     """取消宿舍分配"""
     from flask import jsonify
@@ -322,7 +328,7 @@ def unassign_room():
 
 
 @bp.route('/set-combined', methods=['POST'])
-@role_required('admin', 'dorm_manager')
+@perm_required('dormitory.manage')
 def set_combined():
     """设置合班宿舍"""
     from flask import jsonify
@@ -349,7 +355,7 @@ def set_combined():
 
 
 @bp.route('/save-assignments', methods=['POST'])
-@role_required('admin', 'dorm_manager')
+@perm_required('dormitory.manage')
 def save_assignments():
     """批量保存所有分配"""
     from flask import jsonify
@@ -359,16 +365,19 @@ def save_assignments():
     
     # 如果没有分配数据，清空所有宿舍的分配状态
     if not assignments:
-        # 将所有已分配的宿舍重置为未分配状态
+        # 清空所有房间分配
         rooms = Room.query.filter(Room.grade.isnot(None) | Room.class_name.isnot(None)).all()
-        count = 0
+        room_count = 0
         for room in rooms:
             room.grade = None
             room.class_name = None
-            count += 1
-        
+            room_count += 1
+        # 同时清空所有床位
+        bed_count = BedAssignment.query.filter(
+            BedAssignment.student_id.isnot(None)
+        ).update({'student_id': None, 'assigned_by': None, 'assigned_at': None}, synchronize_session=False)
         db.session.commit()
-        return jsonify({'success': True, 'message': f'已清空 {count} 个分配'})
+        return jsonify({'success': True, 'message': f'已清空 {room_count} 间房间分配、{bed_count} 个床位'})
     
     # 保存新的分配数据
     count = 0
@@ -447,7 +456,7 @@ def class_bed_requirement():
 
 
 @bp.route('/update-room-assignment', methods=['POST'])
-@role_required('admin', 'dorm_manager')
+@perm_required('dormitory.manage')
 def update_room_assignment():
     """更新单个房间的年级班级分配"""
     from flask import jsonify
@@ -473,7 +482,7 @@ def update_room_assignment():
 
 
 @bp.route('/batch-setting', methods=['GET', 'POST'])
-@role_required('admin', 'dorm_manager')
+@perm_required('dormitory.manage')
 def batch_setting():
     if request.method == 'POST':
         room_ids = request.form.getlist('room_ids')
@@ -516,7 +525,7 @@ def batch_setting():
 
 
 @bp.route('/batch-add-rooms', methods=['GET', 'POST'])
-@role_required('admin', 'dorm_manager')
+@perm_required('dormitory.manage')
 def batch_add_rooms():
     if request.method == 'POST':
         building = request.form.get('building', '').strip()
@@ -599,16 +608,22 @@ def _adjust_beds(room, old_capacity, new_capacity):
 
 @bp.route('/assign-auto')
 @login_required
-@role_required('admin', 'dorm_manager')
+@perm_required('dormitory.manage')
 def assign_auto():
     """自动分配宿舍向导页面"""
-    # 获取所有年级和班级
-    grades = get_dict_values('grade')
+    from app.utils.helpers import get_graduated_grades
+    all_grades = get_dict_values('grade')
+    graduated = get_graduated_grades()
+    grades = [g for g in all_grades if g not in graduated]
     
     # 获取各年级各班级的住校生统计
     grade_class_stats = {}
     for grade in grades:
         from sqlalchemy import case
+        
+        boarding_ids = [sa.student_id for sa in StudentAccommodation.query.filter(
+            StudentAccommodation.boarding_type == '住校'
+        ).all()]
         
         classes = db.session.query(
             Student.class_name,
@@ -617,7 +632,8 @@ def assign_auto():
             func.sum(case((Student.gender == '女', 1), else_=0)).label('female')
         ).filter(
             Student.grade == grade,
-            Student.boarding_type == '住校'
+            Student.id.in_(boarding_ids)
+        ).filter(~Student.grade.in_(graduated) if graduated else True
         ).group_by(Student.class_name).order_by(Student.class_name).all()
         
         grade_class_stats[grade] = [
@@ -735,7 +751,7 @@ def assign_auto_stats():
 
 @bp.route('/assign-auto/preview', methods=['POST'])
 @login_required
-@role_required('admin', 'dorm_manager')
+@perm_required('dormitory.manage')
 def assign_auto_preview():
     """预览自动分配方案（不执行）- V4"""
     data = request.json or {}
@@ -791,7 +807,7 @@ def assign_auto_preview():
 
 @bp.route('/assign-auto/execute', methods=['POST'])
 @login_required
-@role_required('admin', 'dorm_manager')
+@perm_required('dormitory.manage')
 def assign_auto_execute():
     """执行自动分配 - V4"""
     data = request.json or {}
@@ -919,77 +935,19 @@ def assign_auto_room_stats():
 
 @bp.route('/report')
 @login_required
-@role_required('admin', 'dorm_manager', 'grade_leader', 'school_viewer')
 def report():
-    """
-    宿舍报表：展示已分配宿舍的班级-房间对照表
-    """
-    grade_filter = request.args.get('grade', '')
-
-    query = Room.query.filter(
-        Room.is_active == True,
-        Room.class_name.isnot(None),
-        Room.class_name != ''
-    )
-    if grade_filter:
-        query = query.filter_by(grade=grade_filter)
-
-    rooms = query.order_by(
-        Room.grade, Room.gender, Room.class_name,
-        Room.building, Room.room_number
-    ).all()
-
-    from collections import defaultdict, OrderedDict
-    tree = OrderedDict()
-    class_totals = {}
-
-    for room in rooms:
-        g = room.grade or ''
-        gender = room.gender or ''
-        cn = room.class_name or ''
-        if g not in tree:
-            tree[g] = OrderedDict()
-        if gender not in tree[g]:
-            tree[g][gender] = OrderedDict()
-        if cn not in tree[g][gender]:
-            tree[g][gender][cn] = []
-        tree[g][gender][cn].append(room)
-
-    for g in tree:
-        for gender in tree[g]:
-            for cn in tree[g][gender]:
-                cnt = Student.query.filter_by(
-                    grade=g, class_name=cn, gender=gender,
-                    boarding_type='住校'
-                ).count()
-                class_totals[(g, cn, gender)] = cnt
-
-    total_rooms = len(rooms)
-    total_beds = sum(r.capacity for r in rooms)
-    total_occupied = sum(
-        BedAssignment.query.filter_by(room_id=r.id)
-        .filter(BedAssignment.student_id.isnot(None)).count()
-        for r in rooms
-    )
-    total_boarders = sum(class_totals.values())
-
-    return render_template('dormitory/rooms/report.html',
-                           tree=tree,
-                           class_totals=class_totals,
-                           grade_filter=grade_filter,
-                           grades=get_dict_values('grade'),
-                           total_rooms=total_rooms,
-                           total_beds=total_beds,
-                           total_occupied=total_occupied,
-                           total_boarders=total_boarders,
-                           now=__import__('datetime').datetime.now())
+    """宿舍报表 → 已合并到 /statistics/?tab=rooms"""
+    grade = request.args.get('grade', '')
+    url = url_for('statistics.index', tab='rooms')
+    if grade:
+        url += f'?grade={grade}'
+    return redirect(url)
 
 
 @bp.route('/report/export')
 @login_required
-@role_required('admin', 'dorm_manager', 'grade_leader', 'school_viewer')
 def report_export():
-    """导出宿舍报表为Excel"""
+    """导出宿舍报表为Excel（保持原路由，由 statistics 页面调用）"""
     from io import BytesIO
     from openpyxl import Workbook
     from openpyxl.styles import Font, Alignment, Border, Side, PatternFill
@@ -1146,3 +1104,5 @@ def report_export():
     filename = f'宿舍分配报表_{grade_filter or "全部"}.xlsx'
     return send_file(output, mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
                      as_attachment=True, download_name=filename)
+
+

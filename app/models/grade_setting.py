@@ -1,4 +1,4 @@
-"""年级毕业状态模型"""
+﻿"""年级毕业状态模型"""
 from datetime import datetime
 from app.extensions import db
 
@@ -23,5 +23,7 @@ class GradeSetting(db.Model):
             'backup_path': self.backup_path or '',
         }
 
-# StuLink v1.5.0 2026-07-01
+# StuLink v1.6.1 2026-07-09
 # Copyright (c) 2026 zkxxzf. CC BY-NC 4.0
+
+

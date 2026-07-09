@@ -1,4 +1,4 @@
-"""模块蓝图注册入口"""
+﻿"""模块蓝图注册入口"""
 def register_blueprints(app):
     # 认证模块（共享）
     from app.modules.auth.routes import bp as auth_bp
@@ -19,12 +19,14 @@ def register_blueprints(app):
     app.register_blueprint(statistics_bp)
 
     # 系统管理模块
+    from app.modules.system.routes.dashboard import bp as system_dashboard_bp
     from app.modules.system.routes.students import bp as students_bp
     from app.modules.system.routes.users import bp as users_bp
     from app.modules.system.routes.dictionary import bp as dictionary_bp
     from app.modules.system.routes.class_profile import bp as class_profile_bp
     from app.modules.system.routes.perm_groups import bp as perm_groups_bp
     from app.modules.system.routes.grade_mgmt import bp as grade_mgmt_bp
+    app.register_blueprint(system_dashboard_bp)
     app.register_blueprint(students_bp)
     app.register_blueprint(users_bp)
     app.register_blueprint(dictionary_bp)
@@ -38,5 +40,7 @@ def register_blueprints(app):
     app.register_blueprint(points_bp)
     app.register_blueprint(grades_bp)
 
-# StuLink v1.5.0 2026-07-01
+# StuLink v1.6.1 2026-07-09
 # Copyright (c) 2026 zkxxzf. CC BY-NC 4.0
+
+

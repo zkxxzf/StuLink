@@ -1,10 +1,10 @@
-"""权限组模型：定义用户组及其菜单/范围权限"""
+﻿"""权限组模型：定义用户组及其菜单/范围权限"""
 from app.extensions import db
 
 
 class PermissionGroup(db.Model):
     """权限组：用户只能通过组获得权限，不允许单独设置"""
-# StuLink v1.5.0 2026-07-01
+# StuLink v1.6.1 2026-07-09
 # Copyright (c) 2026 zkxxzf. CC BY-NC 4.0
     __tablename__ = 'permission_groups'
 
@@ -12,8 +12,9 @@ class PermissionGroup(db.Model):
     name = db.Column(db.String(30), unique=True, nullable=False)
     # 管理范围: 'class'=所管班级 / 'grade'=所管年级 / 'school'=全校 / 'none'=无范围
     scope_type = db.Column(db.String(10), nullable=False, default='none')
-    # 可见菜单: JSON数组，如 ["dashboard","students","rooms"]
+    # 可见菜单: JSON数组，如 ["students.view","dormitory.assign"]
     menu_keys = db.Column(db.Text, default='[]')
+    role = db.Column(db.String(20), default='')  # admin/grade_leader/homeroom_teacher/dorm_manager/teacher/viewer
     description = db.Column(db.String(200), default='')
 
     users = db.relationship('User', backref='permission_group', lazy='dynamic')
@@ -34,3 +35,5 @@ class PermissionGroup(db.Model):
 
     def __repr__(self):
         return f'<PermissionGroup {self.name}>'
+
+

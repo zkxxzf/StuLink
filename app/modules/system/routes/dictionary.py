@@ -1,10 +1,10 @@
-# StuLink v1.5.0 2026-07-01
+﻿# StuLink v1.6.1 2026-07-09
 # Copyright (c) 2026 zkxxzf. CC BY-NC 4.0
 from flask import Blueprint, render_template, redirect, url_for, flash, request
 from flask_login import login_required
 from app.extensions import db
 from app.models import DictCategory, DictItem
-from app.utils.decorators import role_required
+from app.utils.decorators import perm_required
 from app.utils.helpers import is_dict_value_in_use, clear_dict_cache
 
 bp = Blueprint('dictionary', __name__, url_prefix='/dictionary')
@@ -14,7 +14,7 @@ MANAGED_CATEGORIES = ['grade', 'class', 'building', 'floor', 'boarding_type', 'e
 
 
 @bp.route('/')
-@role_required('admin')
+@perm_required('system.dictionary')
 def list_items():
     """字典管理主页"""
     current_tab = request.args.get('tab', 'grade')
@@ -50,7 +50,7 @@ def list_items():
 
 
 @bp.route('/add', methods=['POST'])
-@role_required('admin')
+@perm_required('system.dictionary')
 def add_item():
     """添加字典值"""
     category_code = request.form.get('category_code', '').strip()
@@ -86,7 +86,7 @@ def add_item():
 
 
 @bp.route('/<int:item_id>/delete', methods=['POST'])
-@role_required('admin')
+@perm_required('system.dictionary')
 def delete_item(item_id):
     """删除字典值（仅未使用的可以删除）"""
     item = DictItem.query.get_or_404(item_id)
@@ -104,3 +104,5 @@ def delete_item(item_id):
     
     flash(f'已删除 "{item.value}"', 'success')
     return redirect(url_for('dictionary.list_items', tab=cat_code))
+
+

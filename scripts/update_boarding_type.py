@@ -1,4 +1,4 @@
-# StuLink v1.5.0 2026-07-01
+﻿# StuLink v1.6.1 2026-07-09
 # Copyright (c) 2026 zkxxzf. CC BY-NC 4.0
 import sqlite3
 import os
@@ -33,3 +33,5 @@ conn.close()
 print(f'字典已更新：住校、走读、离校')
 print(f'共有 {count} 名学生为走读类型')
 print('\n更新完成！')
+
+

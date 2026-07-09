@@ -1,4 +1,4 @@
-"""创建 history.db 及 assignment_history 表"""
+﻿"""创建 history.db 及 assignment_history 表"""
 import os
 import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -14,5 +14,7 @@ with app.app_context():
     db_path = os.path.join(BASE_DIR, 'data', 'history.db')
     print(f'     位置: {db_path}')
 
-# StuLink v1.5.0 2026-07-01
+# StuLink v1.6.1 2026-07-09
 # Copyright (c) 2026 zkxxzf. CC BY-NC 4.0
+
+

@@ -1,4 +1,4 @@
-# StuLink v1.5.0 2026-07-01
+# StuLink v1.6.1 2026-07-09
 # Copyright (c) 2026 zkxxzf. CC BY-NC 4.0
 from datetime import datetime
 from app.extensions import db
@@ -19,13 +19,8 @@ class Student(db.Model):
     student_number = db.Column(db.String(20), unique=True, nullable=False)  # 业务主键，必填
     grade = db.Column(db.String(10), nullable=False)     # 2025级
     class_name = db.Column(db.String(10), nullable=False) # 01班
-    original_class = db.Column(db.String(10))
     subject_selection = db.Column(db.String(20))  # 史政地
-    boarding_type = db.Column(db.String(10), nullable=False)  # 住校/男走读/女走读/离校
-    day_student_type = db.Column(db.String(20))
     enrollment_status = db.Column(db.String(20))  # 借读/在籍不在校/转入
-    textbook = db.Column(db.String(50))
-    teacher_notes = db.Column(db.Text)
     enrollment_notes = db.Column(db.String(100))
     graduation_school_code = db.Column(db.String(10))  # 毕业学校代码（如0440）
     graduation_school = db.Column(db.String(100))      # 毕业学校名称
@@ -37,6 +32,15 @@ class Student(db.Model):
         'BedAssignment',
         primaryjoin='Student.id == BedAssignment.student_id',
         foreign_keys='BedAssignment.student_id',
+        viewonly=True,
+        uselist=False
+    )
+
+    # 关联住宿信息（跨库 relationship，viewonly）
+    accommodation = db.relationship(
+        'StudentAccommodation',
+        primaryjoin='Student.id == StudentAccommodation.student_id',
+        foreign_keys='StudentAccommodation.student_id',
         viewonly=True,
         uselist=False
     )
@@ -58,7 +62,6 @@ class Student(db.Model):
     __table_args__ = (
         db.Index('idx_student_grade_class', 'grade', 'class_name'),
         db.Index('idx_student_gender', 'gender'),
-        db.Index('idx_student_boarding', 'boarding_type'),
         db.Index('idx_student_id_card', 'id_card_number'),
         db.Index('idx_student_number', 'student_number'),
     )

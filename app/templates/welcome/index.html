@@ -1,4 +1,4 @@
-{% extends "base.html" %}
+﻿{% extends "base.html" %}
 {% block title %}StuLink - 智联校园学生管理系统{% endblock %}
 {% block content %}
 <div class="text-center mb-4">
@@ -48,12 +48,12 @@
 <!-- 系统管理 -->
 <div class="row justify-content-center mt-4" style="max-width:960px;margin:0 auto;">
     <div class="col-12">
-        <a href="{{ url_for('students.list_students') }}" class="card shadow-sm text-decoration-none" style="transition:transform .15s;" onmouseover="this.style.transform='translateY(-2px)'" onmouseout="this.style.transform=''">
+        <a href="{{ url_for('system_dashboard.index') }}" class="card shadow-sm text-decoration-none" style="transition:transform .15s;" onmouseover="this.style.transform='translateY(-2px)'" onmouseout="this.style.transform=''">
             <div class="card-body py-3 d-flex align-items-center">
                 <div style="font-size:36px;width:60px;text-align:center;">⚙</div>
                 <div class="flex-grow-1 ms-3">
                     <h6 class="mb-1 text-dark">系统管理</h6>
-                    <small class="text-muted">学生管理 · 用户管理 · 字典配置 · 权限组 · 年级管理</small>
+                    <small class="text-muted">学生管理 · 教师管理 · 字典配置 · 权限组 · 年级管理</small>
                 </div>
                 <span class="btn btn-outline-secondary btn-sm">进入</span>
             </div>
@@ -61,6 +61,7 @@
     </div>
 </div>
 <div class="text-center mt-4">
-    <small class="text-muted">v1.5.0 release &nbsp;|&nbsp; &copy; 2026 StuLink · @zkxxzf</small>
+    <small class="text-muted">v1.6.1 release &nbsp;|&nbsp; &copy; 2026 StuLink · @zkxxzf</small>
 </div>
 {% endblock %}
+

@@ -1,4 +1,4 @@
-"""更新宿舍楼名称：男生宿舍楼->西宿舍楼，女生宿舍楼->东宿舍楼"""
+﻿"""更新宿舍楼名称：男生宿舍楼->西宿舍楼，女生宿舍楼->东宿舍楼"""
 import os
 import sys
 
@@ -43,5 +43,7 @@ with app.app_context():
     print(f'\n宿舍楼名称已更新完成！')
     print(f'更新了 {rooms_updated} 间宿舍记录')
 
-# StuLink v1.5.0 2026-07-01
+# StuLink v1.6.1 2026-07-09
 # Copyright (c) 2026 zkxxzf. CC BY-NC 4.0
+
+

@@ -1,18 +1,29 @@
-version: '3.8'
+﻿version: '3.8'
 
 services:
   stulink:
-    image: stulink:v1.5.0
+    image: stulink:v1.6.1
     container_name: stulink
     ports:
       - "5000:5000"
     volumes:
-      # 数据目录（永不覆盖，含 db + 密钥文件）
       - ./stulink-data:/app/data
     restart: unless-stopped
     environment:
       - TZ=Asia/Shanghai
       - DATABASE_URL=sqlite:////app/data/system.db
-      # ⚠ 生产部署务必替换为强随机密钥：python -c "import secrets; print(secrets.token_hex(32))"
-      # 留空则自动生成并持久化到 data/.secret_key
       - SECRET_KEY=
+
+  alumni:
+    image: stulink-alumni:v1.0.0
+    container_name: stulink-alumni
+    ports:
+      - "5001:5001"
+    volumes:
+      - ./stulink-data:/app/data:ro
+    restart: unless-stopped
+    environment:
+      - TZ=Asia/Shanghai
+      # 使用与主应用相同的 SECRET_KEY 以共享加密数据
+      - SECRET_KEY=
+

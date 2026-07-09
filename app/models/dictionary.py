@@ -1,4 +1,4 @@
-# StuLink v1.5.0 2026-07-01
+﻿# StuLink v1.6.1 2026-07-09
 # Copyright (c) 2026 zkxxzf. CC BY-NC 4.0
 from app.extensions import db
 
@@ -26,3 +26,5 @@ class DictItem(db.Model):
     __table_args__ = (
         db.UniqueConstraint('category_id', 'value', name='uq_category_value'),
     )
+
+

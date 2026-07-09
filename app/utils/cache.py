@@ -1,6 +1,6 @@
-"""简单的内存缓存工具"""
+﻿"""简单的内存缓存工具"""
 import time
-# StuLink v1.5.0 2026-07-01
+# StuLink v1.6.1 2026-07-09
 # Copyright (c) 2026 zkxxzf. CC BY-NC 4.0
 
 class SimpleCache:
@@ -46,3 +46,5 @@ class SimpleCache:
 
 # 全局缓存实例
 cache = SimpleCache(default_timeout=300)
+
+

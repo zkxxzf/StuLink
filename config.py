@@ -1,4 +1,4 @@
-# StuLink v1.5.0 2026-07-01
+﻿# StuLink v1.6.1 2026-07-09
 # Copyright (c) 2026 zkxxzf. CC BY-NC 4.0
 import os
 import secrets
@@ -66,3 +66,5 @@ class Config:
         'dormitory': 'sqlite:///' + os.path.join(BASE_DIR, 'data', 'dormitory.db'),
         'history': 'sqlite:///' + os.path.join(BASE_DIR, 'data', 'history.db'),
     }
+
+

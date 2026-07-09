@@ -1,33 +1,41 @@
-"""权限组管理路由"""
+﻿"""权限组管理路由"""
 from flask import Blueprint, render_template, request, jsonify, flash, redirect, url_for
 from flask_login import login_required
 from app.extensions import db
 from app.models import PermissionGroup, User
-from app.utils.decorators import role_required
+from app.utils.decorators import perm_required
 
 bp = Blueprint('perm_groups', __name__, url_prefix='/perm-groups')
 
 ALL_MENU_KEYS = [
-    ('dashboard', '首页概览'),
-    ('search', '学生查询'),
-    ('students', '学生列表'),
-    ('rooms', '宿舍列表'),
-    ('assign', '分配宿舍'),
-    ('beds', '床位分配'),
-    ('overview', '宿舍总览'),
-    ('statistics', '统计报表'),
-    ('users', '用户管理'),
-    ('dictionary', '字典管理'),
-    ('class_profile', '班型设置'),
-    ('perm_groups', '权限组管理'),
+    ('students.view', '查看学生'),
+    ('students.edit', '编辑学生'),
+    ('students.import', '批量导入学生'),
+    ('students.export', '导出学生'),
+    ('students.transfer', '批量调班'),
+    ('dormitory.view', '查看宿舍'),
+    ('dormitory.manage', '管理宿舍'),
+    ('dormitory.assign', '分配宿舍'),
+    ('dormitory.beds', '床位分配'),
+    ('dormitory.import', '宿舍数据导入'),
+    ('statistics.view', '查看统计报表'),
+    ('system.users', '教师管理'),
+    ('system.dictionary', '字典管理'),
+    ('system.class_profile', '班型设置'),
+    ('system.perm_groups', '权限组管理'),
+    ('system.grade_mgmt', '年级管理'),
+    ('points.view', '查看积分'),
+    ('points.edit', '积分管理'),
+    ('grades.view', '查看成绩'),
+    ('grades.edit', '成绩管理'),
 ]
 
 
 @bp.route('/')
-@role_required('admin')
+@perm_required('system.perm_groups')
 def manage():
     """权限组管理主页"""
-# StuLink v1.5.0 2026-07-01
+# StuLink v1.6.1 2026-07-09
 # Copyright (c) 2026 zkxxzf. CC BY-NC 4.0
     groups = PermissionGroup.query.order_by(PermissionGroup.id).all()
     for g in groups:
@@ -38,7 +46,7 @@ def manage():
 
 
 @bp.route('/save', methods=['POST'])
-@role_required('admin')
+@perm_required('system.perm_groups')
 def save():
     """创建或更新权限组"""
     data = request.get_json()
@@ -79,7 +87,7 @@ def save():
 
 
 @bp.route('/<int:id>/delete', methods=['POST'])
-@role_required('admin')
+@perm_required('system.perm_groups')
 def delete(id):
     group = PermissionGroup.query.get_or_404(id)
     user_count = User.query.filter_by(permission_group_id=id).count()
@@ -92,7 +100,7 @@ def delete(id):
 
 
 @bp.route('/<int:id>/json')
-@role_required('admin')
+@perm_required('system.perm_groups')
 def get_json(id):
     group = PermissionGroup.query.get_or_404(id)
     return jsonify({
@@ -102,3 +110,5 @@ def get_json(id):
         'description': group.description,
         'menu_keys': group.get_menu_keys(),
     })
+
+

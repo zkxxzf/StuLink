@@ -1,4 +1,4 @@
-"""初始化数据库：建表 + 创建默认管理员 + 导入字典数据"""
+﻿"""初始化数据库：建表 + 创建默认管理员 + 导入字典数据"""
 import os
 import sys
 
@@ -144,5 +144,7 @@ def init_database():
 if __name__ == '__main__':
     init_database()
 
-# StuLink v1.5.0 2026-07-01
+# StuLink v1.6.1 2026-07-09
 # Copyright (c) 2026 zkxxzf. CC BY-NC 4.0
+
+

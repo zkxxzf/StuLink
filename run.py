@@ -1,4 +1,4 @@
-# StuLink v1.5.0 2026-07-01
+﻿# StuLink v1.6.1 2026-07-09
 # Copyright (c) 2026 zkxxzf. CC BY-NC 4.0
 import os
 import sys
@@ -24,3 +24,5 @@ if __name__ == '__main__':
         print('宿舍管理系统已启动 (生产模式)')
         print('请在浏览器访问: http://0.0.0.0:5000')
         serve(app, host='0.0.0.0', port=5000)
+
+

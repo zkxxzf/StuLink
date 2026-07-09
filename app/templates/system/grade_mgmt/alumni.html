@@ -1,0 +1,115 @@
+{% extends "base.html" %}
+{% block title %}往届生基本信息查询{% endblock %}
+{% block content %}
+<h4 class="fw-bold mb-3"><i class="bi bi-archive"></i> 往届生基本信息查询</h4>
+
+<div class="alert alert-info small">
+    <i class="bi bi-info-circle"></i> 查询已毕业年级的学生基本信息和学习经历变迁。数据为毕业时的存档快照，不可更改。
+</div>
+
+<div class="card mb-4">
+    <div class="card-body">
+        <form method="GET" action="{{ url_for('grade_mgmt.alumni') }}">
+            <div class="row g-2 align-items-end">
+                <div class="col-md-2">
+                    <label class="form-label small">毕业年级 <span class="text-danger">*</span></label>
+                    <select name="grade" class="form-select" required>
+                        <option value="">请选择</option>
+                        {% for g in graduated_grades %}
+                        <option value="{{ g }}" {% if search_grade == g %}selected{% endif %}>{{ g }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div class="col-md-2">
+                    <label class="form-label small">姓名</label>
+                    <input type="text" name="name" class="form-control" placeholder="模糊搜索"
+                           value="{{ search_name }}">
+                </div>
+                <div class="col-md-2">
+                    <label class="form-label small">学号</label>
+                    <input type="text" name="student_number" class="form-control" placeholder="模糊搜索"
+                           value="{{ search_student_number }}">
+                </div>
+                <div class="col-md-2">
+                    <label class="form-label small">毕业学校代码</label>
+                    <input type="text" name="school_code" class="form-control" placeholder="模糊搜索"
+                           value="{{ search_school_code }}">
+                </div>
+                <div class="col-md-2">
+                    <button type="submit" class="btn btn-primary w-100">
+                        <i class="bi bi-search"></i> 查询
+                    </button>
+                </div>
+            </div>
+        </form>
+    </div>
+</div>
+
+{% if results %}
+<div class="alert alert-success small py-2 mb-3">
+    <i class="bi bi-check-circle"></i> 找到 <strong>{{ results|length }}</strong> 名往届生
+</div>
+
+{% for s in results %}
+<div class="card mb-3">
+    <div class="card-header py-2 d-flex justify-content-between align-items-center">
+        <span>
+            <strong>{{ s.name }}</strong>
+            <span class="badge bg-secondary ms-2">{{ s.graduated_grade }}</span>
+            <span class="text-muted ms-2">{{ s.class_name }}班</span>
+            {% if s.gender == '男' %}
+            <span class="badge bg-primary ms-1">男</span>
+            {% else %}
+            <span class="badge bg-danger ms-1">女</span>
+            {% endif %}
+        </span>
+        <small class="text-muted">毕业时间：{{ s.graduated_at or '-' }}</small>
+    </div>
+    <div class="card-body py-2">
+        <div class="row g-2 small">
+            <div class="col-md-3"><span class="text-muted">学号：</span>{{ s.student_number or '-' }}</div>
+            <div class="col-md-3"><span class="text-muted">身份证号：</span>{{ s.id_card_masked or '-' }}</div>
+            <div class="col-md-3"><span class="text-muted">民族：</span>{{ s.ethnicity or '-' }}</div>
+            <div class="col-md-3"><span class="text-muted">选科：</span>{{ s.subject_selection or '-' }}</div>
+            <div class="col-md-3"><span class="text-muted">住校/走读：</span>{{ s.boarding_type or '-' }}</div>
+            <div class="col-md-3"><span class="text-muted">学籍：</span>{{ s.enrollment_status or '-' }}</div>
+            <div class="col-md-3"><span class="text-muted">毕业学校：</span>{{ s.graduation_school or '-' }} {% if s.graduation_school_code %}({{ s.graduation_school_code }}){% endif %}</div>
+            <div class="col-md-3"><span class="text-muted">联系方式1：</span>{{ s.phone1 or '-' }}</div>
+            <div class="col-md-3"><span class="text-muted">联系方式2：</span>{{ s.phone2 or '-' }}</div>
+        </div>
+
+        {% set logs = change_logs.get(s.original_id, []) %}
+        {% if logs %}
+        <hr class="my-2">
+        <div class="small">
+            <strong class="text-muted"><i class="bi bi-arrow-repeat"></i> 学习经历变迁：</strong>
+            <ul class="list-unstyled mb-0 mt-1">
+                {% for log in logs %}
+                <li class="text-muted" style="font-size:11px;">
+                    {{ log.changed_at or '' }}
+                    {% if log.change_type == 'class' %}📋 班级变动 → {{ log.new_value or '-' }}
+                    {% elif log.change_type == 'dormitory' %}🏠 宿舍调整：{{ log.detail or '-' }}
+                    {% elif log.change_type == 'graduate' %}🎓 毕业
+                    {% else %}{{ log.change_type }}: {{ log.old_value }} → {{ log.new_value }}
+                    {% endif %}
+                    <span class="ms-1">({{ log.operator or '系统' }})</span>
+                </li>
+                {% endfor %}
+            </ul>
+        </div>
+        {% endif %}
+    </div>
+</div>
+{% endfor %}
+
+{% elif search_grade and not results %}
+<div class="alert alert-warning">
+    <i class="bi bi-exclamation-triangle"></i> 未找到匹配的往届生记录
+</div>
+{% elif not graduated_grades %}
+<div class="text-center py-5 text-muted">
+    <i class="bi bi-inbox" style="font-size:48px;"></i>
+    <p class="mt-2">暂无往届生数据，请先在「年级管理」中执行毕业操作</p>
+</div>
+{% endif %}
+{% endblock %}

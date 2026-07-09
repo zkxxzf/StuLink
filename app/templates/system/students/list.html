@@ -1,6 +1,13 @@
 {% extends "base.html" %}
 {% block title %}学生列表{% endblock %}
 {% block content %}
+<style>
+.filter-row th { padding: 2px 4px; background: #fafafa; }
+.filter-row select { width: 100%; font-size: 11px; padding: 2px 4px; border: 1px solid #dee2e6; border-radius: 3px; background: #fff; }
+.filter-row select:focus { border-color: #86b7fe; outline: none; box-shadow: 0 0 0.15rem rgba(13,110,253,.25); }
+.filter-row input { width: 100%; font-size: 11px; padding: 2px 4px; border: 1px solid #dee2e6; border-radius: 3px; }
+.filter-row input:focus { border-color: #86b7fe; outline: none; box-shadow: 0 0 0 0.15rem rgba(13,110,253,.25); }
+</style>
 <div class="d-flex justify-content-between align-items-center mb-3">
     <h4 class="fw-bold mb-0"><i class="bi bi-people"></i> 学生列表</h4>
     {% if current_user.has_role('admin', 'homeroom_teacher') %}
@@ -10,9 +17,6 @@
         </button>
         <button class="btn btn-info" data-bs-toggle="modal" data-bs-target="#batchTransferModal">
             <i class="bi bi-arrow-left-right"></i> 批量调班
-        </button>
-        <button class="btn btn-warning" id="btnBatchEdit" style="display:none;" data-bs-toggle="modal" data-bs-target="#batchEditModal">
-            <i class="bi bi-pencil-square"></i> 批量修改
         </button>
         {% if current_user.has_role('admin') %}
         <button class="btn btn-danger" id="btnBatchDelete" style="display:none;" onclick="submitBatchDelete()">
@@ -34,7 +38,16 @@
 
 <div class="card">
     <div class="card-body">
-        <table id="studentsTable" class="table table-hover" style="width:100%">
+        <div class="d-flex justify-content-between align-items-center mb-2">
+            <small class="text-muted">共 {{ pagination.total if pagination else 0 }} 条</small>
+            <div class="d-flex gap-2">
+                <a href="{{ url_for('students.export_students', gender=filter_gender, grade=filter_grade, class_name=filter_class, subject_selection=filter_subject, graduation_school=filter_school, enrollment_status=filter_enrollment, name=request.args.get('name',''), student_number=request.args.get('student_number','')) }}"
+                   class="btn btn-sm btn-outline-success"><i class="bi bi-file-earmark-excel"></i> 导出</a>
+                <a href="{{ url_for('students.list_students') }}" class="btn btn-sm btn-outline-secondary" title="清除筛选"><i class="bi bi-x-lg"></i> 清除</a>
+            </div>
+        </div>
+        <form method="GET">
+        <table id="studentsTable" class="table table-hover table-sm" style="width:100%">
             <thead class="table-light">
                 <tr>
                     {% if current_user.has_role('admin') %}
@@ -48,13 +61,60 @@
                     <th>年级</th>
                     <th>班级</th>
                     <th>选科</th>
-                    <th>住校/走读</th>
-                    <th>出门权限</th>
-                    <th>宿舍</th>
                     <th>毕业学校</th>
                     <th>联系方式 1</th>
                     <th>联系方式 2</th>
+                    <th>学籍情况</th>
+                    <th>学籍备注</th>
                     <th>操作</th>
+                </tr>
+                <tr class="filter-row">
+                    {% if current_user.has_role('admin') %}
+                    <th></th>
+                    {% endif %}
+                    <th><input type="text" name="student_number" placeholder="学号"
+                           value="{{ request.args.get('student_number','') }}" onkeydown="if(event.key==='Enter')this.form.submit()"></th>
+                    <th><input type="text" name="name" placeholder="姓名"
+                           value="{{ request.args.get('name','') }}" onkeydown="if(event.key==='Enter')this.form.submit()"></th>
+                    <th><select name="gender" onchange="this.form.submit()">
+                        <option value="">全部</option>
+                        <option value="男" {% if filter_gender == '男' %}selected{% endif %}>男</option>
+                        <option value="女" {% if filter_gender == '女' %}selected{% endif %}>女</option>
+                    </select></th>
+                    <th><select name="grade" onchange="this.form.submit()">
+                        <option value="">全部</option>
+                        {% for g in grades %}
+                        <option value="{{ g }}" {% if filter_grade == g %}selected{% endif %}>{{ g }}</option>
+                        {% endfor %}
+                    </select></th>
+                    <th><select name="class_name" onchange="this.form.submit()">
+                        <option value="">全部</option>
+                        {% for c in classes %}
+                        <option value="{{ c }}" {% if filter_class == c %}selected{% endif %}>{{ c }}</option>
+                        {% endfor %}
+                    </select></th>
+                    <th><select name="subject_selection" onchange="this.form.submit()">
+                        <option value="">全部</option>
+                        {% for s in subjects %}
+                        <option value="{{ s }}" {% if filter_subject == s %}selected{% endif %}>{{ s }}</option>
+                        {% endfor %}
+                    </select></th>
+                    <th><select name="graduation_school" onchange="this.form.submit()">
+                        <option value="">全部</option>
+                        {% for s in school_list %}
+                        <option value="{{ s }}" {% if filter_school == s %}selected{% endif %}>{{ s }}</option>
+                        {% endfor %}
+                    </select></th>
+                    <th></th>
+                    <th></th>
+                    <th><select name="enrollment_status" onchange="this.form.submit()">
+                        <option value="">全部</option>
+                        {% for v in enrollment_statuses %}
+                        <option value="{{ v }}" {% if filter_enrollment == v %}selected{% endif %}>{{ v }}</option>
+                        {% endfor %}
+                    </select></th>
+                    <th></th>
+                    <th></th>
                 </tr>
             </thead>
             <tbody>
@@ -85,27 +145,6 @@
                     <td>{{ s.class_name }}</td>
                     <td>{{ s.subject_selection or '-' }}</td>
                     <td>
-                        {% if s.boarding_type == '住校' %}
-                        <span class="badge bg-success">住校</span>
-                        {% else %}
-                        <span class="badge bg-secondary">{{ s.boarding_type }}</span>
-                        {% endif %}
-                    </td>
-                    <td>
-                        {% if s.day_student_type %}
-                        <span class="badge bg-info">{{ s.day_student_type }}</span>
-                        {% else %}
-                        <span class="text-muted">-</span>
-                        {% endif %}
-                    </td>
-                    <td>
-                        {% if s.bed_assignment and s.bed_assignment.room %}
-                        {{ s.bed_assignment.room.display_name }}-{{ s.bed_assignment.bed_number }}床
-                        {% else %}
-                        <span class="text-muted">未分配</span>
-                        {% endif %}
-                    </td>
-                    <td>
                         {% if s.graduation_school %}
                         <small>{{ s.graduation_school }}</small>
                         {% if s.graduation_school_code %}
@@ -117,6 +156,8 @@
                     </td>
                     <td>{{ s.phone1 or '-' }}</td>
                     <td>{{ s.phone2 or '-' }}</td>
+                    <td>{{ s.enrollment_status or '-' }}</td>
+                    <td><small>{{ s.enrollment_notes or '-' }}</small></td>
                     <td>
                         <a href="{{ url_for('students.detail', id=s.id) }}" class="btn btn-sm btn-outline-primary" title="查看">
                             <i class="bi bi-eye"></i>
@@ -125,8 +166,8 @@
                         <a href="{{ url_for('students.edit', id=s.id) }}" class="btn btn-sm btn-outline-warning" title="编辑">
                             <i class="bi bi-pencil"></i>
                         </a>
-                        <button class="btn btn-sm btn-outline-info" title="调班"
-                                onclick="openTransferModal({{ s.id }}, '{{ s.name }}', '{{ s.grade }}', '{{ s.class_name }}')">
+                        <button type="button" class="btn btn-sm btn-outline-info" title="调班"
+                                onclick="openTransferModal({{ s.id }}, '{{ s.name|e }}', '{{ s.grade }}', '{{ s.class_name }}')">
                             <i class="bi bi-arrow-left-right"></i>
                         </button>
                         {% endif %}
@@ -135,6 +176,7 @@
                 {% endfor %}
             </tbody>
         </table>
+        </form>
         
         <!-- 分页组件 -->
         {% if pagination and pagination.pages > 1 %}
@@ -197,10 +239,10 @@
                         <i class="bi bi-info-circle"></i> <strong>导入说明：</strong>
                         <ul class="mb-0 mt-1">
                             <li>支持 .xlsx 格式</li>
-                            <li>必填项：<strong>姓名、性别、身份证号</strong></li>
+                            <li>必填项：<strong>姓名、性别、身份证号、学号、民族、年级、班级</strong></li>
                             <li>学号可不填，缺少学号的学生导入后会标红提示</li>
                             <li>身份证号必须是有效的18位身份证号</li>
-                            <li>有错误的行不会导入，其余正确的行正常导入</li>
+                            <li>宿舍相关字段请到「统计报表 → 宿舍数据导入」管理</li>
                         </ul>
                         <hr class="my-2">
                         <a href="{{ url_for('students.download_template') }}" class="text-decoration-none">
@@ -219,71 +261,6 @@
     </div>
 </div>
 
-<!-- 批量修改宿舍信息弹窗 -->
-<div class="modal fade" id="batchEditModal" tabindex="-1">
-    <div class="modal-dialog">
-        <div class="modal-content">
-            <div class="modal-header">
-                <h5 class="modal-title"><i class="bi bi-pencil-square"></i> 批量修改宿舍信息</h5>
-                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
-            </div>
-            <form id="batchEditForm" method="POST" action="{{ url_for('students.batch_edit_dormitory') }}">
-                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                <div id="batchEditStudentIds"></div>
-                <div class="modal-body">
-                    <p class="text-muted small">已选择 <strong id="editSelectedCount">0</strong> 名学生。留空的字段不修改。</p>
-                    <div class="row">
-                        <div class="col-6 mb-3">
-                            <label class="form-label">选科</label>
-                            <select class="form-select" name="subject_selection">
-                                <option value="">不修改</option>
-                                {% for s in subjects %}
-                                <option value="{{ s }}">{{ s }}</option>
-                                {% endfor %}
-                            </select>
-                        </div>
-                        <div class="col-6 mb-3">
-                            <label class="form-label">住校/走读</label>
-                            <select class="form-select" name="boarding_type">
-                                <option value="">不修改</option>
-                                {% for b in boarding_types %}
-                                <option value="{{ b }}">{{ b }}</option>
-                                {% endfor %}
-                            </select>
-                        </div>
-                        <div class="col-6 mb-3">
-                            <label class="form-label">出门权限</label>
-                            <select class="form-select" name="day_student_type">
-                                <option value="">不修改</option>
-                                {% for d in day_student_types %}
-                                <option value="{{ d }}">{{ d }}</option>
-                                {% endfor %}
-                            </select>
-                        </div>
-                        <div class="col-6 mb-3">
-                            <label class="form-label">课本</label>
-                            <select class="form-select" name="textbook">
-                                <option value="">不修改</option>
-                                <option value="领">领</option>
-                                <option value="未领">未领</option>
-                            </select>
-                        </div>
-                        <div class="col-12 mb-3">
-                            <label class="form-label">班主任备注</label>
-                            <input type="text" class="form-control" name="teacher_notes" placeholder="留空不修改">
-                        </div>
-                    </div>
-                </div>
-                <div class="modal-footer">
-                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">取消</button>
-                    <button type="submit" class="btn btn-warning">
-                        <i class="bi bi-check-lg"></i> 确认修改
-                    </button>
-                </div>
-            </form>
-        </div>
-    </div>
-</div>
 
 <!-- 单个调班弹窗 -->
 <div class="modal fade" id="transferModal" tabindex="-1">
@@ -413,22 +390,10 @@ function updateSelectedCount() {
     $('#selectedCount').text(count);
     if (count > 0) {
         $('#btnBatchDelete').show();
-        $('#btnBatchEdit').show();
     } else {
         $('#btnBatchDelete').hide();
-        $('#btnBatchEdit').hide();
     }
 }
-
-// batch edit: populate student IDs when modal opens
-$('#batchEditModal').on('show.bs.modal', function() {
-    var container = $('#batchEditStudentIds');
-    container.empty();
-    $('.student-check:checked').each(function() {
-        container.append('<input type="hidden" name="student_ids" value="' + this.value + '">');
-    });
-    $('#editSelectedCount').text($('.student-check:checked').length);
-});
 
 function submitBatchDelete() {
     var count = $('.student-check:checked').length;

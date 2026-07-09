@@ -1,4 +1,4 @@
-# StuLink v1.5.0 2026-07-01
+# StuLink v1.6.1 2026-07-09
 # Copyright (c) 2026 zkxxzf. CC BY-NC 4.0
 from datetime import datetime
 from app.extensions import db
@@ -85,3 +85,20 @@ class BedAssignment(db.Model):
         db.Index('idx_bed_student', 'student_id'),
         db.Index('idx_bed_room', 'room_id'),
     )
+
+
+class StudentAccommodation(db.Model):
+    __bind_key__ = 'dormitory'
+    __tablename__ = 'student_accommodation'
+
+    id = db.Column(db.Integer, primary_key=True)
+    student_id = db.Column(db.Integer, nullable=False, unique=True, index=True)
+    boarding_type = db.Column(db.String(10))
+    day_student_type = db.Column(db.String(20))
+    textbook = db.Column(db.String(50))
+    teacher_notes = db.Column(db.Text)
+
+    created_at = db.Column(db.DateTime, default=datetime.now)
+    updated_at = db.Column(db.DateTime, default=datetime.now, onupdate=datetime.now)
+
+

@@ -1,4 +1,4 @@
-# StuLink v1.5.0 2026-07-01
+﻿# StuLink v1.6.1 2026-07-09
 # Copyright (c) 2026 zkxxzf. CC BY-NC 4.0
 from flask_wtf import FlaskForm
 from wtforms import StringField, SelectField, PasswordField
@@ -30,3 +30,5 @@ class UserForm(FlaskForm):
         self.class_name.choices = [('', '不限')] + get_dict_items('class')
         groups = PermissionGroup.query.order_by(PermissionGroup.id).all()
         self.permission_group_id.choices = [(0, '— 请选择 —')] + [(g.id, g.name) for g in groups]
+
+

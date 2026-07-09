@@ -1,4 +1,4 @@
-# StuLink v1.5.0 2026-07-01
+﻿# StuLink v1.6.1 2026-07-09
 # Copyright (c) 2026 zkxxzf. CC BY-NC 4.0
 from flask import Blueprint, render_template, redirect, url_for, flash, request
 from flask_login import login_user, logout_user, login_required, current_user
@@ -91,3 +91,5 @@ def change_password():
             flash('密码修改成功', 'success')
             return redirect(url_for('welcome.index'))
     return render_template('auth/change_password.html', form=form)
+
+

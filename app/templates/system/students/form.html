@@ -13,113 +13,127 @@
         <form method="POST">
             {{ form.hidden_tag() }}
             
-            <!-- 第一行：姓名、性别、民族、身份证号、学号 (不可修改) -->
+            <!-- 基本信息（录入后不可修改，空缺时可补充） -->
             <div class="card mb-3 bg-light">
                 <div class="card-body py-2">
                     <h6 class="card-subtitle mb-2 text-muted"><i class="bi bi-person-badge"></i> 基本信息（录入后不可修改）</h6>
                     <div class="row g-2">
                         <div class="col-md-2">
                             <label class="form-label small">姓名 <span class="text-danger">*</span></label>
-                            {{ form.name(class="form-control form-control-sm", readonly=True if title=='编辑学生' else False) }}
+                            {% if form.name.data %}
+                            <div class="form-control form-control-sm bg-white border-0">{{ form.name.data }}</div>
+                            {% else %}
+                            {{ form.name(class="form-control form-control-sm") }}
+                            {% endif %}
                             {% for e in form.name.errors %}<div class="text-danger small">{{ e }}</div>{% endfor %}
                         </div>
                         <div class="col-md-2">
                             <label class="form-label small">性别 <span class="text-danger">*</span></label>
-                            {{ form.gender(class="form-select form-select-sm", readonly=True if title=='编辑学生' else False) }}
+                            {% if form.gender.data %}
+                            <div class="form-control form-control-sm bg-white border-0">{{ form.gender.data }}</div>
+                            {% else %}
+                            {{ form.gender(class="form-select form-select-sm") }}
+                            {% endif %}
                         </div>
                         <div class="col-md-2">
                             <label class="form-label small">民族</label>
-                            {{ form.ethnicity(class="form-select form-select-sm", readonly=True if title=='编辑学生' else False) }}
+                            {% if form.ethnicity.data %}
+                            <div class="form-control form-control-sm bg-white border-0">{{ form.ethnicity.data }}</div>
+                            {% else %}
+                            {{ form.ethnicity(class="form-select form-select-sm") }}
+                            {% endif %}
                         </div>
                         <div class="col-md-4">
                             <label class="form-label small">身份证号</label>
-                            {{ form.id_card_number(class="form-control form-control-sm", readonly=True if title=='编辑学生' else False) }}
+                            {% if form.id_card_number.data %}
+                            <div class="form-control form-control-sm bg-white border-0">{{ form.id_card_number.data }}</div>
+                            {% else %}
+                            {{ form.id_card_number(class="form-control form-control-sm") }}
+                            {% endif %}
                         </div>
                         <div class="col-md-2">
                             <label class="form-label small">学号 <span class="text-danger">*</span></label>
-                            {{ form.student_number(class="form-control form-control-sm", readonly=True if title=='编辑学生' else False) }}
+                            {% if form.student_number.data %}
+                            <div class="form-control form-control-sm bg-white border-0">{{ form.student_number.data }}</div>
+                            {% else %}
+                            {{ form.student_number(class="form-control form-control-sm") }}
+                            {% endif %}
                             {% for e in form.student_number.errors %}<div class="text-danger small">{{ e }}</div>{% endfor %}
                         </div>
                     </div>
                 </div>
             </div>
             
-            <!-- 第二行：年级、班级、选科、原班级 -->
+            <!-- 年级、班级（编辑时不显示，通过调班界面修改） -->
+            {% if title == '新增学生' %}
             <div class="row g-2 mb-3">
-                <div class="col-md-3">
+                <div class="col-md-4">
                     <label class="form-label small">年级 <span class="text-danger">*</span></label>
                     {{ form.grade(class="form-select") }}
                 </div>
-                <div class="col-md-3">
+                <div class="col-md-4">
                     <label class="form-label small">班级 <span class="text-danger">*</span></label>
                     {{ form.class_name(class="form-select") }}
                 </div>
-                <div class="col-md-3">
+                <div class="col-md-4">
                     <label class="form-label small">选科</label>
                     {{ form.subject_selection(class="form-select") }}
                 </div>
-                <div class="col-md-3">
-                    <label class="form-label small">原班级</label>
-                    {{ form.original_class(class="form-select") }}
+            </div>
+            {% else %}
+            <div class="row g-2 mb-3">
+                <div class="col-md-4">
+                    <label class="form-label small">选科</label>
+                    {{ form.subject_selection(class="form-select") }}
                 </div>
             </div>
+            {% endif %}
             
-            <!-- 第三行：住校/走读、出门权限、联系方式 1、联系方式 2 -->
+            <!-- 联系方式 -->
             <div class="row g-2 mb-3">
-                <div class="col-md-3">
-                    <label class="form-label small">住校/走读 <span class="text-danger">*</span></label>
-                    {{ form.boarding_type(class="form-select") }}
-                </div>
-                <div class="col-md-3">
-                    <label class="form-label small">出门权限</label>
-                    {{ form.day_student_type(class="form-select") }}
-                </div>
-                <div class="col-md-3">
+                <div class="col-md-6">
                     <label class="form-label small">联系方式 1</label>
                     {{ form.phone1(class="form-control") }}
                 </div>
-                <div class="col-md-3">
+                <div class="col-md-6">
                     <label class="form-label small">联系方式 2</label>
                     {{ form.phone2(class="form-control") }}
                 </div>
             </div>
             
-            <!-- 第四行：学籍情况、学籍备注、课本 -->
+            <!-- 学籍情况、学籍备注 -->
             <div class="row g-2 mb-3">
                 <div class="col-md-3">
                     <label class="form-label small">学籍情况</label>
                     {{ form.enrollment_status(class="form-select") }}
                 </div>
-                <div class="col-md-6">
+                <div class="col-md-9">
                     <label class="form-label small">学籍备注</label>
                     {{ form.enrollment_notes(class="form-control") }}
                 </div>
-                <div class="col-md-3">
-                    <label class="form-label small">课本</label>
-                    {{ form.textbook(class="form-select") }}
-                </div>
             </div>
             
-            <!-- 第五行：毕业学校代码、毕业学校 -->
+            <!-- 毕业学校（录入后不可修改，空缺时可补充） -->
             <div class="row g-2 mb-3">
                 <div class="col-md-3">
                     <label class="form-label small">毕业学校代码</label>
+                    {% if form.graduation_school_code.data %}
+                    <div class="form-control form-control-sm bg-white border-0">{{ form.graduation_school_code.data }}</div>
+                    {% else %}
                     {{ form.graduation_school_code(class="form-control", placeholder="如：0440") }}
+                    {% endif %}
                     {% for e in form.graduation_school_code.errors %}<div class="text-danger small">{{ e }}</div>{% endfor %}
                 </div>
                 <div class="col-md-9">
                     <label class="form-label small">毕业学校</label>
+                    {% if form.graduation_school.data %}
+                    <div class="form-control form-control-sm bg-white border-0">{{ form.graduation_school.data }}</div>
+                    {% else %}
                     {{ form.graduation_school(class="form-control", placeholder="如：郑州市管城回族区第二中学") }}
+                    {% endif %}
                     {% for e in form.graduation_school.errors %}<div class="text-danger small">{{ e }}</div>{% endfor %}
                     <small class="text-muted">毕业学校代码与学校名称相关联，代码一旦设定不会变化</small>
                 </div>
-            </div>
-            
-            <!-- 第六行：备注（单独一行） -->
-            <div class="mb-3">
-                <label class="form-label small">备注</label>
-                {{ form.teacher_notes(class="form-control", rows="3") }}
-                <small class="text-muted">班主任备注信息</small>
             </div>
             
             <hr>

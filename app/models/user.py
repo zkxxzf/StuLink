@@ -1,4 +1,4 @@
-# StuLink v1.5.0 2026-07-01
+﻿# StuLink v1.6.1 2026-07-09
 # Copyright (c) 2026 zkxxzf. CC BY-NC 4.0
 from datetime import datetime
 from flask_login import UserMixin
@@ -43,7 +43,18 @@ class User(UserMixin, db.Model):
     def has_role(self, *roles):
         return self.role in roles
 
+    def has_perm(self, perm_key):
+        """检查用户是否有指定权限"""
+        if self.role == 'admin':
+            return True
+        pg = self.permission_group
+        if pg:
+            return pg.has_menu(perm_key)
+        return False
+
 
 @login_manager.user_loader
 def load_user(user_id):
     return db.session.get(User, int(user_id))
+
+

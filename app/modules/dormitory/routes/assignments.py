@@ -1,20 +1,24 @@
-# StuLink v1.5.0 2026-07-01
+# StuLink v1.6.1 2026-07-09
 # Copyright (c) 2026 zkxxzf. CC BY-NC 4.0
 from flask import Blueprint, render_template, request, jsonify, flash, redirect, url_for
 from flask_login import login_required, current_user
 from datetime import datetime
 from app.extensions import db
-from app.models import Room, BedAssignment, Student
-from app.utils.decorators import role_required
-from app.utils.helpers import get_dict_values, log_operation
+from app.models import Room, BedAssignment, Student, StudentAccommodation
+from app.utils.decorators import perm_required
+from app.utils.helpers import get_dict_values, log_operation, get_graduated_grades
 from app.services.history_service import record_assignment
 
 bp = Blueprint('assignments', __name__, url_prefix='/assignments')
 
 
 @bp.route('/manage')
-@role_required('admin', 'dorm_manager', 'homeroom_teacher')
+@perm_required('dormitory.beds')
 def manage():
+    grades = get_dict_values('grade')
+    graduated = get_graduated_grades()
+    grades = [g for g in grades if g not in graduated]
+
     # 班主任只看自己班的宿舍
     if current_user.role == 'homeroom_teacher':
         grade = current_user.grade
@@ -28,7 +32,7 @@ def manage():
             return render_template('dormitory/assignments/manage.html',
                                    rooms_data=[], unassigned_students=[],
                                    current_grade='', current_class='',
-                                   need_filter=True)
+                                   grades=grades, need_filter=True)
 
     # 查找已分配给该班级的宿舍
     room_query = Room.query.filter_by(is_active=True)
@@ -50,9 +54,11 @@ def manage():
     # 检查班级是否有宿舍分配
     no_rooms = len(rooms) == 0
     total_capacity = sum(r.capacity for r in rooms)
-    total_students_needed = Student.query.filter_by(
-        boarding_type='住校', grade=grade, class_name=class_name
-    ).count()
+    graduated = get_graduated_grades()
+    base_student_query = Student.query.filter_by(boarding_type='住校', grade=grade, class_name=class_name)
+    if graduated:
+        base_student_query = base_student_query.filter(~Student.grade.in_(graduated))
+    total_students_needed = base_student_query.count()
     beds_insufficient = (not no_rooms) and total_capacity < total_students_needed
 
     # 构建宿舍和床位数据
@@ -68,29 +74,30 @@ def manage():
 
     # 未分配床位的学生
     student_query = Student.query.filter_by(boarding_type='住校')
+    if graduated:
+        student_query = student_query.filter(~Student.grade.in_(graduated))
     if grade:
         student_query = student_query.filter_by(grade=grade)
     if class_name:
         student_query = student_query.filter_by(class_name=class_name)
 
-    # 排除已有床位的学生
-    assigned_ids = db.session.query(BedAssignment.student_id).filter(
+    # 排除已有床位的学生（分两步避免跨库子查询）
+    assigned_ids = [b.student_id for b in BedAssignment.query.filter(
         BedAssignment.student_id.isnot(None)
-    ).subquery()
+    ).all()]
     unassigned_students = student_query.filter(
-        ~Student.id.in_(assigned_ids)
+        ~Student.id.in_(assigned_ids) if assigned_ids else True
     ).order_by(
         Student.gender.desc(),  # 女先男后
         Student.student_number
     ).all()
 
     # 人数统计
-    total_male = Student.query.filter_by(
-        boarding_type='住校', grade=grade, class_name=class_name, gender='男'
-    ).count()
-    total_female = Student.query.filter_by(
-        boarding_type='住校', grade=grade, class_name=class_name, gender='女'
-    ).count()
+    gender_base = Student.query.filter_by(boarding_type='住校', grade=grade, class_name=class_name)
+    if graduated:
+        gender_base = gender_base.filter(~Student.grade.in_(graduated))
+    total_male = gender_base.filter_by(gender='男').count()
+    total_female = gender_base.filter_by(gender='女').count()
     unassigned_male = len([s for s in unassigned_students if s.gender == '男'])
     unassigned_female = len([s for s in unassigned_students if s.gender == '女'])
     assigned_male = total_male - unassigned_male
@@ -112,12 +119,12 @@ def manage():
                            total_male=total_male, total_female=total_female,
                            assigned_male=assigned_male, assigned_female=assigned_female,
                            assigned_total=assigned_total, total_all=total_all,
-                           grades=get_dict_values('grade'),
+                           grades=grades,
                            classes=get_dict_values('class'))
 
 
 @bp.route('/clear-class', methods=['POST'])
-@role_required('admin', 'dorm_manager', 'homeroom_teacher')
+@perm_required('dormitory.beds')
 def clear_class():
     """清除本班全部已分配床位"""
     data = request.get_json() or {}
@@ -131,24 +138,17 @@ def clear_class():
     if not grade or not class_name:
         return jsonify({'success': False, 'message': '请指定年级和班级'}), 400
     
-    # 找到该班级的所有房间
-    rooms = Room.query.filter(
-        Room.grade == grade
-    ).filter(
-        db.or_(
-            Room.class_name == class_name,
-            Room.class_name.contains(class_name)
-        )
-    ).all()
+    graduated = get_graduated_grades()
+    if grade in graduated:
+        return jsonify({'success': False, 'message': f'{grade}已毕业，无法操作床位分配'}), 400
     
-    if not rooms:
-        return jsonify({'success': False, 'message': '该班级没有宿舍'}), 400
+    # 找到该班级有床位的所有学生
+    student_ids = [s.id for s in Student.query.filter_by(grade=grade, class_name=class_name).all()]
+    if not student_ids:
+        return jsonify({'success': False, 'message': '该班级没有住校生'}), 400
     
-    room_ids = [r.id for r in rooms]
-    # 记录历史：先查询被清除的床位
     cleared_beds = BedAssignment.query.filter(
-        BedAssignment.room_id.in_(room_ids),
-        BedAssignment.student_id.isnot(None)
+        BedAssignment.student_id.in_(student_ids)
     ).all()
     count = len(cleared_beds)
     for bed in cleared_beds:
@@ -156,10 +156,10 @@ def clear_class():
         room = Room.query.get(bed.room_id)
         if student and room:
             record_assignment('clear', student, room, bed.bed_number, current_user)
-    BedAssignment.query.filter(
-        BedAssignment.room_id.in_(room_ids),
-        BedAssignment.student_id.isnot(None)
-    ).update({'student_id': None, 'assigned_by': None, 'assigned_at': None}, synchronize_session=False)
+    if cleared_beds:
+        BedAssignment.query.filter(
+            BedAssignment.student_id.in_(student_ids)
+        ).update({'student_id': None, 'assigned_by': None, 'assigned_at': None}, synchronize_session=False)
     log_operation(current_user, '清空班级', '床位分配', None,
                   f'{grade}{class_name} 清除 {count} 个床位', module='dormitory', severity='WARNING')
     db.session.commit()
@@ -168,7 +168,7 @@ def clear_class():
 
 
 @bp.route('/assign', methods=['POST'])
-@role_required('admin', 'dorm_manager', 'homeroom_teacher')
+@perm_required('dormitory.beds')
 def assign():
     data = request.get_json()
     student_id = data.get('student_id')
@@ -182,6 +182,10 @@ def assign():
 
     if bed.student_id:
         return jsonify({'success': False, 'message': '该床位已有人'}), 400
+
+    graduated = get_graduated_grades()
+    if student.grade in graduated:
+        return jsonify({'success': False, 'message': f'{student.name}所在{student.grade}已毕业，无法分配床位'}), 400
 
     # 检查学生是否已分配床位
     existing = BedAssignment.query.filter_by(student_id=student_id).filter(
@@ -226,7 +230,7 @@ def assign():
 
 
 @bp.route('/unassign', methods=['POST'])
-@role_required('admin', 'dorm_manager', 'homeroom_teacher')
+@perm_required('dormitory.beds')
 def unassign():
     data = request.get_json()
     bed_id = data.get('bed_id')
@@ -235,7 +239,13 @@ def unassign():
     if not bed or not bed.student_id:
         return jsonify({'success': False, 'message': '该床位无人'}), 400
 
-    student_name = Student.query.get(bed.student_id).name if bed.student_id else ''
+    student = Student.query.get(bed.student_id)
+    if student:
+        graduated = get_graduated_grades()
+        if student.grade in graduated:
+            return jsonify({'success': False, 'message': f'{student.name}所在{student.grade}已毕业，无法操作床位'}), 400
+
+    student_name = student.name if student else ''
     room = Room.query.get(bed.room_id)
     student = Student.query.get(bed.student_id)
     if student and room:
@@ -251,7 +261,7 @@ def unassign():
 
 
 @bp.route('/move', methods=['POST'])
-@role_required('admin', 'dorm_manager', 'homeroom_teacher')
+@perm_required('dormitory.beds')
 def move():
     """搬移学生从一个床位到另一个空床位"""
     data = request.get_json()
@@ -271,6 +281,10 @@ def move():
 
     if to_bed.student_id:
         return jsonify({'success': False, 'message': '目标床位已有人'}), 400
+
+    graduated = get_graduated_grades()
+    if student.grade in graduated:
+        return jsonify({'success': False, 'message': f'{student.name}所在{student.grade}已毕业，无法搬移床位'}), 400
 
     # 性别校验
     room = Room.query.get(to_bed.room_id)
@@ -308,7 +322,7 @@ def move():
 
 
 @bp.route('/swap', methods=['POST'])
-@role_required('admin', 'dorm_manager', 'homeroom_teacher')
+@perm_required('dormitory.beds')
 def swap():
     """互换两个座位上的学生"""
     data = request.get_json()
@@ -327,6 +341,10 @@ def swap():
 
     if bed_a.student_id != sid_a or bed_b.student_id != sid_b:
         return jsonify({'success': False, 'message': '床位信息不匹配'}), 400
+
+    graduated = get_graduated_grades()
+    if stu_a.grade in graduated or stu_b.grade in graduated:
+        return jsonify({'success': False, 'message': '已毕业年级的学生无法互换床位'}), 400
 
     # 性别校验（互换后各自性别匹配）
     room_a = Room.query.get(bed_a.room_id)
@@ -369,7 +387,7 @@ def swap():
 
 
 @bp.route('/auto-assign', methods=['POST'])
-@role_required('admin', 'dorm_manager', 'homeroom_teacher')
+@perm_required('dormitory.beds')
 def auto_assign():
     """一键自动为本班学生分配床位"""
     data = request.get_json() or {}
@@ -416,17 +434,26 @@ def auto_assign():
     if not available_beds:
         return jsonify({'success': False, 'message': '该班级所有床位已满'}), 400
     
-    # 3. 获取未分配床位的学生
-    assigned_ids = db.session.query(BedAssignment.student_id).filter(
+    # 3. 获取未分配床位的学生（分两步避免跨库子查询）
+    assigned_ids = [b.student_id for b in BedAssignment.query.filter(
         BedAssignment.student_id.isnot(None)
-    ).subquery()
+    ).all()]
+    
+    boarding_ids = [sa.student_id for sa in StudentAccommodation.query.filter(
+        StudentAccommodation.boarding_type == '住校'
+    ).all()]
     
     unassigned = Student.query.filter(
-        Student.boarding_type == '住校',
+        Student.id.in_(boarding_ids),
         Student.grade == grade,
         Student.class_name == class_name,
-        ~Student.id.in_(assigned_ids)
-    ).order_by(
+    )
+    if assigned_ids:
+        unassigned = unassigned.filter(~Student.id.in_(assigned_ids))
+    graduated = get_graduated_grades()
+    if graduated:
+        unassigned = unassigned.filter(~Student.grade.in_(graduated))
+    unassigned = unassigned.order_by(
         Student.gender.desc(),  # 女生优先
         Student.student_number
     ).all()
@@ -541,3 +568,5 @@ def overview():
         })
 
     return render_template('dormitory/assignments/overview.html', floor_data=floor_data)
+
+

@@ -1,4 +1,4 @@
-"""数据库分库迁移 - 一键执行所有步骤"""
+﻿"""数据库分库迁移 - 一键执行所有步骤"""
 import sqlite3, os, sys, shutil
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import functools
@@ -133,5 +133,7 @@ for f in ['system.db', 'dormitory.db', 'history.db']:
 print('\n下一步: 修改模型代码 (config.py, room.py, student.py)')
 
 
-# StuLink v1.5.0 2026-07-01
+# StuLink v1.6.1 2026-07-09
 # Copyright (c) 2026 zkxxzf. CC BY-NC 4.0
+
+

@@ -1,11 +1,16 @@
 {% extends "base.html" %}
-{% block title %}用户管理{% endblock %}
+{% block title %}教师管理{% endblock %}
 {% block content %}
 <div class="d-flex justify-content-between align-items-center mb-3">
-    <h4 class="fw-bold mb-0"><i class="bi bi-person-gear"></i> 用户管理</h4>
-    <a href="{{ url_for('users.create') }}" class="btn btn-primary">
-        <i class="bi bi-plus-lg"></i> 新建用户
-    </a>
+    <h4 class="fw-bold mb-0"><i class="bi bi-person-gear"></i> 教师管理</h4>
+    <div class="d-flex gap-2">
+        <button class="btn btn-success" data-bs-toggle="modal" data-bs-target="#importTeacherModal">
+            <i class="bi bi-file-earmark-excel"></i> 批量导入
+        </button>
+        <a href="{{ url_for('users.create') }}" class="btn btn-primary">
+            <i class="bi bi-plus-lg"></i> 新建教师
+        </a>
+    </div>
 </div>
 
 <div class="card">
@@ -43,4 +48,45 @@
         </table>
     </div>
 </div>
+
+<!-- 批量导入教师弹窗 -->
+<div class="modal fade" id="importTeacherModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title"><i class="bi bi-file-earmark-excel"></i> 批量导入教师</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <form method="POST" action="{{ url_for('users.import_teachers') }}" enctype="multipart/form-data">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <div class="modal-body">
+                    <div class="mb-3">
+                        <label class="form-label" for="importFile">选择Excel文件</label>
+                        <input type="file" name="file" id="importFile" class="form-control" accept=".xlsx,.xls" required>
+                    </div>
+                    <div class="alert alert-info small mb-0">
+                        <i class="bi bi-info-circle"></i> <strong>导入说明：</strong>
+                        <ul class="mb-0 mt-1">
+                            <li>必填列：<strong>手机号、真实姓名、权限组</strong></li>
+                            <li>手机号即登录名，默认密码=手机号</li>
+                            <li>首次登录强制修改密码</li>
+                            <li>已有手机号不会重复创建</li>
+                        </ul>
+                        <hr class="my-2">
+                        <a href="{{ url_for('users.download_teacher_template') }}" class="text-decoration-none">
+                            <i class="bi bi-download"></i> 下载导入模板
+                        </a>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">取消</button>
+                    <button type="submit" class="btn btn-success">
+                        <i class="bi bi-upload"></i> 开始导入
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
 {% endblock %}

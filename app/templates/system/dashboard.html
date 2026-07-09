@@ -1,0 +1,65 @@
+{% extends "base.html" %}
+{% block title %}系统管理{% endblock %}
+{% block content %}
+<div class="mb-4">
+    <h4 class="fw-bold"><i class="bi bi-gear"></i> 系统管理</h4>
+    <p class="text-muted">基础数据管理、用户权限配置</p>
+</div>
+
+<div class="row g-4">
+    <div class="col-md-4">
+        <a href="{{ url_for('students.list_students') }}" class="card h-100 text-center shadow-sm text-decoration-none" style="transition:transform .15s;" onmouseover="this.style.transform='translateY(-4px)'" onmouseout="this.style.transform=''">
+            <div class="card-body py-4">
+                <div style="font-size:40px;">👥</div>
+                <h6 class="mt-2 text-dark">学生管理</h6>
+                <p class="text-muted small mb-2">新增 / 编辑 / 批量导入学生</p>
+            </div>
+        </a>
+    </div>
+    <div class="col-md-4">
+        <a href="{{ url_for('users.list_users') }}" class="card h-100 text-center shadow-sm text-decoration-none" style="transition:transform .15s;" onmouseover="this.style.transform='translateY(-4px)'" onmouseout="this.style.transform=''">
+            <div class="card-body py-4">
+                <div style="font-size:40px;">👤</div>
+                <h6 class="mt-2 text-dark">教师管理</h6>
+                <p class="text-muted small mb-2">新建 / 编辑 / 批量导入</p>
+            </div>
+        </a>
+    </div>
+    <div class="col-md-4">
+        <a href="{{ url_for('dictionary.list_items') }}" class="card h-100 text-center shadow-sm text-decoration-none" style="transition:transform .15s;" onmouseover="this.style.transform='translateY(-4px)'" onmouseout="this.style.transform=''">
+            <div class="card-body py-4">
+                <div style="font-size:40px;">📖</div>
+                <h6 class="mt-2 text-dark">字典管理</h6>
+                <p class="text-muted small mb-2">年级 / 班级 / 民族等下拉项</p>
+            </div>
+        </a>
+    </div>
+    <div class="col-md-4">
+        <a href="{{ url_for('class_profile.manage') }}" class="card h-100 text-center shadow-sm text-decoration-none" style="transition:transform .15s;" onmouseover="this.style.transform='translateY(-4px)'" onmouseout="this.style.transform=''">
+            <div class="card-body py-4">
+                <div style="font-size:40px;">🏷️</div>
+                <h6 class="mt-2 text-dark">班型设置</h6>
+                <p class="text-muted small mb-2">班型 / 选科方向配置</p>
+            </div>
+        </a>
+    </div>
+    <div class="col-md-4">
+        <a href="{{ url_for('perm_groups.manage') }}" class="card h-100 text-center shadow-sm text-decoration-none" style="transition:transform .15s;" onmouseover="this.style.transform='translateY(-4px)'" onmouseout="this.style.transform=''">
+            <div class="card-body py-4">
+                <div style="font-size:40px;">🔐</div>
+                <h6 class="mt-2 text-dark">权限组管理</h6>
+                <p class="text-muted small mb-2">自定义权限组配置</p>
+            </div>
+        </a>
+    </div>
+    <div class="col-md-4">
+        <a href="{{ url_for('grade_mgmt.index') }}" class="card h-100 text-center shadow-sm text-decoration-none" style="transition:transform .15s;" onmouseover="this.style.transform='translateY(-4px)'" onmouseout="this.style.transform=''">
+            <div class="card-body py-4">
+                <div style="font-size:40px;">🎓</div>
+                <h6 class="mt-2 text-dark">年级管理</h6>
+                <p class="text-muted small mb-2">毕业操作 / 历史查询</p>
+            </div>
+        </a>
+    </div>
+</div>
+{% endblock %}

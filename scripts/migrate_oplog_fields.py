@@ -1,4 +1,4 @@
-"""为 operation_logs 表增加 module 和 severity 列"""
+﻿"""为 operation_logs 表增加 module 和 severity 列"""
 import sqlite3
 import os
 import sys
@@ -32,5 +32,7 @@ conn.commit()
 conn.close()
 print('[DONE] 迁移完成')
 
-# StuLink v1.5.0 2026-07-01
+# StuLink v1.6.1 2026-07-09
 # Copyright (c) 2026 zkxxzf. CC BY-NC 4.0
+
+

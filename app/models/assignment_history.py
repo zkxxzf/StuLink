@@ -1,4 +1,4 @@
-"""寝室分配历史记录模型 — 独立数据库 data/history.db"""
+﻿"""寝室分配历史记录模型 — 独立数据库 data/history.db"""
 from datetime import datetime
 from app.extensions import db
 
@@ -43,5 +43,7 @@ class AssignmentHistory(db.Model):
         db.Index('idx_ah_grade_class', 'grade', 'class_name'),
     )
 
-# StuLink v1.5.0 2026-07-01
+# StuLink v1.6.1 2026-07-09
 # Copyright (c) 2026 zkxxzf. CC BY-NC 4.0
+
+

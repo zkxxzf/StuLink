@@ -3,169 +3,209 @@
 {% block content %}
 <h4 class="fw-bold mb-3"><i class="bi bi-search"></i> 学生查询</h4>
 
-<!-- 搜索条件 -->
-<div class="card mb-3">
-    <div class="card-body py-2">
-        <form method="GET" class="row g-2 align-items-end">
-            <div class="col-md col-4">
-                <label class="form-label small mb-1">姓名</label>
-                <input type="text" name="name" class="form-control form-control-sm"
-                       value="{{ request.args.get('name', '') }}" placeholder="模糊搜索">
-            </div>
-            <div class="col-md col-4">
-                <label class="form-label small mb-1">学号</label>
-                <input type="text" name="student_number" class="form-control form-control-sm"
-                       value="{{ request.args.get('student_number', '') }}">
-            </div>
-            <div class="col-md col-4">
-                <label class="form-label small mb-1">年级</label>
-                <select name="grade" class="form-select form-select-sm">
-                    <option value="">全部</option>
-                    {% for g in grades %}
-                    <option value="{{ g }}" {{ 'selected' if request.args.get('grade')==g }}>{{ g }}</option>
-                    {% endfor %}
-                </select>
-            </div>
-            <div class="col-md col-4">
-                <label class="form-label small mb-1">班级</label>
-                <select name="class_name" class="form-select form-select-sm">
-                    <option value="">全部</option>
-                    {% for c in classes %}
-                    <option value="{{ c }}" {{ 'selected' if request.args.get('class_name')==c }}>{{ c }}</option>
-                    {% endfor %}
-                </select>
-            </div>
-            <div class="col-md-auto col-4">
-                <label class="form-label small mb-1">性别</label>
-                <select name="gender" class="form-select form-select-sm">
-                    <option value="">全部</option>
-                    <option value="男" {{ 'selected' if request.args.get('gender')=='男' }}>男</option>
-                    <option value="女" {{ 'selected' if request.args.get('gender')=='女' }}>女</option>
-                </select>
-            </div>
-            <div class="col-md col-6">
-                <label class="form-label small mb-1">住校/走读</label>
-                <select name="boarding_type" class="form-select form-select-sm">
-                    <option value="">全部</option>
-                    {% for bt in boarding_types %}
-                    <option value="{{ bt }}" {{ 'selected' if request.args.get('boarding_type')==bt }}>{{ bt }}</option>
-                    {% endfor %}
-                </select>
-            </div>
-            <div class="col-md col-6">
-                <label class="form-label small mb-1">出门权限</label>
-                <select name="day_student_type" class="form-select form-select-sm">
-                    <option value="">全部</option>
-                    {% for dst in day_student_types %}
-                    <option value="{{ dst }}" {{ 'selected' if request.args.get('day_student_type')==dst }}>{{ dst }}</option>
-                    {% endfor %}
-                </select>
-            </div>
-            <div class="col-md col-6">
-                <label class="form-label small mb-1">选科</label>
-                <select name="subject_selection" class="form-select form-select-sm">
-                    <option value="">全部</option>
-                    {% for subj in subjects %}
-                    <option value="{{ subj }}" {{ 'selected' if request.args.get('subject_selection')==subj }}>{{ subj }}</option>
-                    {% endfor %}
-                </select>
-            </div>
-            <div class="col-md-auto col-4">
-                <label class="form-label small mb-1">&nbsp;</label>
-                <button type="submit" class="btn btn-primary btn-sm px-3">
-                    <i class="bi bi-search"></i> 搜索
-                </button>
-            </div>
-        </form>
-    </div>
-</div>
+<style>
+.filter-row th { padding: 2px 4px; background: #fafafa; }
+.filter-row select { width: 100%; font-size: 11px; padding: 2px 4px; border: 1px solid #dee2e6; border-radius: 3px; background: #fff; }
+.filter-row select:focus { border-color: #86b7fe; outline: none; box-shadow: 0 0 0 0.15rem rgba(13,110,253,.25); }
+.filter-row input { width: 100%; font-size: 11px; padding: 2px 4px; border: 1px solid #dee2e6; border-radius: 3px; }
+.filter-row input:focus { border-color: #86b7fe; outline: none; box-shadow: 0 0 0 0.15rem rgba(13,110,253,.25); }
+</style>
 
-<!-- 搜索结果 -->
-{% if students is defined %}
+<!-- 结果表 -->
 <div class="card">
     <div class="card-header d-flex justify-content-between align-items-center">
-        <span>找到 <strong id="totalCount">{{ students|length }}</strong> 条记录</span>
+        <span>{% if students is defined %}找到 <strong>{{ students|length }}</strong> 条记录{% else %}请输入条件搜索{% endif %}</span>
+        <div class="d-flex gap-2">
+            <a href="{{ url_for('students.export_students', name=request.args.get('name',''), student_number=request.args.get('student_number',''), gender=request.args.get('gender',''), grade=request.args.get('grade',''), class_name=request.args.get('class_name',''), subject_selection=request.args.get('subject_selection',''), boarding_type=request.args.get('boarding_type',''), day_student_type=request.args.get('day_student_type',''), room_number=request.args.get('room_number','')) }}"
+               class="btn btn-sm btn-outline-success"><i class="bi bi-file-earmark-excel"></i> 导出</a>
+            <a href="{{ url_for('students.search') }}" class="btn btn-sm btn-outline-secondary"><i class="bi bi-x-lg"></i> 清除</a>
+            {% if current_user.has_perm('dormitory.manage') or current_user.has_perm('students.edit') %}
+            <button type="button" class="btn btn-warning btn-sm" id="btnBatchEditSearch" style="display:none;"
+                    data-bs-toggle="modal" data-bs-target="#batchEditSearchModal">
+                <i class="bi bi-pencil-square"></i> 批量修改
+            </button>
+            {% endif %}
+        </div>
     </div>
     <div class="card-body p-0">
-        <table id="searchTable" class="table table-hover mb-0" style="width:100%">
+        {% if students is defined %}
+        <form method="GET" id="filterForm">
+        <table class="table table-hover table-sm mb-0" style="width:100%">
             <thead class="table-light">
                 <tr>
-                    <th>学号</th><th>姓名</th><th>性别</th><th>年级</th><th>班级</th>
-                    <th>选科</th><th>住校/走读</th><th>出门权限</th><th>宿舍床位</th>
-                    <th>毕业学校</th>
-                    <th>联系方式 1</th><th>联系方式 2</th><th></th>
+                    {% if current_user.has_perm('dormitory.manage') or current_user.has_perm('students.edit') %}
+                    <th class="text-center" style="width:36px;">
+                        <input type="checkbox" class="form-check-input" id="checkAllSearch" title="全选">
+                    </th>
+                    {% endif %}
+                    <th>学号</th><th>姓名</th>
+                    <th>性别</th><th>年级</th><th>班级</th>
+                    <th>选科</th><th>住校/走读</th><th>出门权限</th>
+                    <th>宿舍</th><th>床位</th>
+                    <th>联系方式1</th><th>联系方式2</th>
+                    <th></th>
+                </tr>
+                <tr class="filter-row">
+                    {% if current_user.has_perm('dormitory.manage') or current_user.has_perm('students.edit') %}
+                    <th></th>
+                    {% endif %}
+                    <th><input type="text" name="student_number" placeholder="学号"
+                           value="{{ request.args.get('student_number','') }}" onkeydown="if(event.key==='Enter')document.getElementById('filterForm').submit()"></th>
+                    <th><input type="text" name="name" placeholder="姓名"
+                           value="{{ request.args.get('name','') }}" onkeydown="if(event.key==='Enter')document.getElementById('filterForm').submit()"></th>
+                    <th><select name="gender" onchange="document.getElementById('filterForm').submit()">
+                        <option value="">全部</option>
+                        <option value="男" {{ 'selected' if request.args.get('gender')=='男' }}>男</option>
+                        <option value="女" {{ 'selected' if request.args.get('gender')=='女' }}>女</option>
+                    </select></th>
+                    <th><select name="grade" onchange="document.getElementById('filterForm').submit()">
+                        <option value="">全部</option>
+                        {% for g in grades %}
+                        <option value="{{ g }}" {{ 'selected' if request.args.get('grade')==g }}>{{ g }}</option>
+                        {% endfor %}
+                    </select></th>
+                    <th><select name="class_name" onchange="document.getElementById('filterForm').submit()">
+                        <option value="">全部</option>
+                        {% for c in classes %}
+                        <option value="{{ c }}" {{ 'selected' if request.args.get('class_name')==c }}>{{ c }}</option>
+                        {% endfor %}
+                    </select></th>
+                    <th><select name="subject_selection" onchange="document.getElementById('filterForm').submit()">
+                        <option value="">全部</option>
+                        {% for s in subjects %}
+                        <option value="{{ s }}" {{ 'selected' if request.args.get('subject_selection')==s }}>{{ s }}</option>
+                        {% endfor %}
+                    </select></th>
+                    <th><select name="boarding_type" onchange="document.getElementById('filterForm').submit()">
+                        <option value="">全部</option>
+                        {% for bt in boarding_types %}
+                        <option value="{{ bt }}" {{ 'selected' if request.args.get('boarding_type')==bt }}>{{ bt }}</option>
+                        {% endfor %}
+                    </select></th>
+                    <th><select name="day_student_type" onchange="document.getElementById('filterForm').submit()">
+                        <option value="">全部</option>
+                        {% for dst in day_student_types %}
+                        <option value="{{ dst }}" {{ 'selected' if request.args.get('day_student_type')==dst }}>{{ dst }}</option>
+                        {% endfor %}
+                    </select></th>
+                    <th><input type="text" name="room_number" placeholder="房间号"
+                           value="{{ request.args.get('room_number','') }}" onchange="document.getElementById('filterForm').submit()"></th>
+                    <th></th><th></th><th></th><th></th>
                 </tr>
             </thead>
             <tbody>
                 {% for s in students %}
                 <tr>
+                    {% if current_user.has_perm('dormitory.manage') or current_user.has_perm('students.edit') %}
+                    <td class="text-center">
+                        <input type="checkbox" class="form-check-input student-check-search" value="{{ s.id }}"
+                               data-name="{{ s.name }}" data-grade="{{ s.grade }}" data-class="{{ s.class_name }}"
+                               data-boarding="{{ s.accommodation.boarding_type if s.accommodation else '' }}" data-day-type="{{ s.accommodation.day_student_type if s.accommodation else '' }}">
+                    </td>
+                    {% endif %}
                     <td>{{ s.student_number }}</td>
                     <td class="fw-bold">{{ s.name }}</td>
                     <td>{% if s.gender=='男' %}<span class="badge bg-primary">男</span>{% else %}<span class="badge bg-danger">女</span>{% endif %}</td>
                     <td>{{ s.grade }}</td>
                     <td>{{ s.class_name }}</td>
                     <td>{{ s.subject_selection or '-' }}</td>
-                    <td>{{ s.boarding_type }}</td>
-                    <td>
-                        {% if s.day_student_type %}
-                        <span class="badge bg-info">{{ s.day_student_type }}</span>
-                        {% else %}-{% endif %}
-                    </td>
-                    <td>
-                        {% if s.bed_assignment and s.bed_assignment.room %}
-                        {{ s.bed_assignment.room.room_number }}-{{ s.bed_assignment.bed_number }}床
-                        {% else %}-{% endif %}
-                    </td>
-                    <td>
-                        {% if s.graduation_school %}
-                        <small>{{ s.graduation_school }}</small>
-                        {% if s.graduation_school_code %}
-                        <br><span class="badge bg-secondary" style="font-size:9px;">{{ s.graduation_school_code }}</span>
-                        {% endif %}
-                        {% else %}-{% endif %}
-                    </td>
+                    <td>{% if s.accommodation %}{{ s.accommodation.boarding_type }}{% else %}-{% endif %}</td>
+                    <td>{% if s.accommodation and s.accommodation.day_student_type %}<span class="badge bg-info">{{ s.accommodation.day_student_type }}</span>{% else %}-{% endif %}</td>
+                    <td>{% if s.bed_assignment and s.bed_assignment.room %}{{ s.bed_assignment.room.building }}{{ s.bed_assignment.room.room_number }}{% else %}-{% endif %}</td>
+                    <td>{% if s.bed_assignment %}{{ s.bed_assignment.bed_number }}床{% else %}-{% endif %}</td>
                     <td>{{ s.phone1 or '-' }}</td>
                     <td>{{ s.phone2 or '-' }}</td>
                     <td><a href="{{ url_for('students.detail', id=s.id) }}" class="btn btn-sm btn-outline-primary"><i class="bi bi-eye"></i></a></td>
                 </tr>
                 {% endfor %}
                 {% if not students %}
-                <tr><td colspan="13" class="text-center text-muted py-4">没有找到匹配的学生</td></tr>
+                <tr><td colspan="14" class="text-center text-muted py-4">没有找到匹配的学生</td></tr>
                 {% endif %}
             </tbody>
         </table>
-        
-        <!-- 分页组件 -->
+        </form>
+
         {% if pagination and pagination.pages > 1 %}
-        <nav aria-label="Page navigation" class="mt-3">
+        <nav aria-label="Page navigation" class="mt-3 px-3">
             <ul class="pagination justify-content-center">
                 <li class="page-item {% if not pagination.has_prev %}disabled{% endif %}">
-                    <a class="page-link" href="?page={{ pagination.prev_num }}&name={{ request.args.get('name', '') }}&student_number={{ request.args.get('student_number', '') }}&grade={{ request.args.get('grade', '') }}&class_name={{ request.args.get('class_name', '') }}&gender={{ request.args.get('gender', '') }}&boarding_type={{ request.args.get('boarding_type', '') }}&day_student_type={{ request.args.get('day_student_type', '') }}&subject_selection={{ request.args.get('subject_selection', '') }}">
-                        <i class="bi bi-chevron-left"></i> 上一页
-                    </a>
+                    <a class="page-link" href="?page={{ pagination.prev_num }}&{{ request.query_string.decode().replace('page='+pagination.page|string,'').strip('&') }}"><i class="bi bi-chevron-left"></i> 上一页</a>
                 </li>
-                
                 {% for page_num in pagination.iter_pages(left_edge=1, right_edge=1, left_current=2, right_current=2) %}
                     {% if page_num %}
-                        <li class="page-item {% if page_num == pagination.page %}active{% endif %}">
-                            <a class="page-link" href="?page={{ page_num }}&name={{ request.args.get('name', '') }}&student_number={{ request.args.get('student_number', '') }}&grade={{ request.args.get('grade', '') }}&class_name={{ request.args.get('class_name', '') }}&gender={{ request.args.get('gender', '') }}&boarding_type={{ request.args.get('boarding_type', '') }}&day_student_type={{ request.args.get('day_student_type', '') }}&subject_selection={{ request.args.get('subject_selection', '') }}">{{ page_num }}</a>
-                        </li>
+                    <li class="page-item {% if page_num == pagination.page %}active{% endif %}">
+                        <a class="page-link" href="?page={{ page_num }}&{{ request.query_string.decode().replace('page='+pagination.page|string,'').strip('&') }}">{{ page_num }}</a>
+                    </li>
                     {% else %}
-                        <li class="page-item disabled"><span class="page-link">...</span></li>
+                    <li class="page-item disabled"><span class="page-link">...</span></li>
                     {% endif %}
                 {% endfor %}
-                
                 <li class="page-item {% if not pagination.has_next %}disabled{% endif %}">
-                    <a class="page-link" href="?page={{ pagination.next_num }}&name={{ request.args.get('name', '') }}&student_number={{ request.args.get('student_number', '') }}&grade={{ request.args.get('grade', '') }}&class_name={{ request.args.get('class_name', '') }}&gender={{ request.args.get('gender', '') }}&boarding_type={{ request.args.get('boarding_type', '') }}&day_student_type={{ request.args.get('day_student_type', '') }}&subject_selection={{ request.args.get('subject_selection', '') }}">
-                        下一页 <i class="bi bi-chevron-right"></i>
-                    </a>
+                    <a class="page-link" href="?page={{ pagination.next_num }}&{{ request.query_string.decode().replace('page='+pagination.page|string,'').strip('&') }}">下一页 <i class="bi bi-chevron-right"></i></a>
                 </li>
             </ul>
         </nav>
-        <div class="text-center text-muted small mb-2">
-            共 {{ pagination.total }} 条记录，第 {{ pagination.page }} / {{ pagination.pages }} 页
-        </div>
+        <div class="text-center text-muted small mb-2">共 {{ pagination.total }} 条，第 {{ pagination.page }}/{{ pagination.pages }} 页</div>
         {% endif %}
+        {% endif %}
+    </div>
+</div>
+
+<!-- 批量修改弹窗 -->
+{% if current_user.has_perm('dormitory.manage') or current_user.has_perm('students.edit') %}
+<div class="modal fade" id="batchEditSearchModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title"><i class="bi bi-pencil-square"></i> 批量修改</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <p class="text-muted small">已选择 <strong id="editSearchCount">0</strong> 名学生。留空的字段不修改。</p>
+                <div class="row g-2">
+                    <div class="col-6">
+                        <label class="form-label small">住校/走读</label>
+                        <select class="form-select form-select-sm" id="batchBoarding">
+                            <option value="">不修改</option>
+                            {% for b in boarding_types %}
+                            <option value="{{ b }}">{{ b }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    <div class="col-6">
+                        <label class="form-label small">出门权限</label>
+                        <select class="form-select form-select-sm" id="batchDayType">
+                            <option value="">不修改</option>
+                            {% for d in day_student_types %}
+                            <option value="{{ d }}">{{ d }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    <div class="col-6">
+                        <label class="form-label small">宿舍楼</label>
+                        <select class="form-select form-select-sm" id="batchBuilding">
+                            <option value="">不修改</option>
+                            {% for b in buildings %}
+                            <option value="{{ b }}">{{ b }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    <div class="col-6">
+                        <label class="form-label small">房间号</label>
+                        <input type="text" class="form-control form-control-sm" id="batchRoom" placeholder="如 201">
+                    </div>
+                    <div class="col-6">
+                        <label class="form-label small">床位号</label>
+                        <input type="number" class="form-control form-control-sm" id="batchBed" placeholder="如 3" min="1" max="8">
+                    </div>
+                </div>
+                <div id="batchSearchError" class="alert alert-danger py-1 mt-2 small" style="display:none;"></div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">取消</button>
+                <button type="button" class="btn btn-warning btn-sm" onclick="doBatchEditSearch()">确认修改</button>
+            </div>
+        </div>
     </div>
 </div>
 {% endif %}
@@ -173,6 +213,55 @@
 
 {% block extra_js %}
 <script>
-// DataTables 已移除，使用服务端分页提升性能
+var csrfToken = "{{ csrf_token() }}";
+
+// 全选
+document.getElementById('checkAllSearch').addEventListener('change', function() {
+    document.querySelectorAll('.student-check-search').forEach(cb => cb.checked = this.checked);
+    updateBatchEditBtn();
+});
+document.querySelectorAll('.student-check-search').forEach(cb => {
+    cb.addEventListener('change', updateBatchEditBtn);
+});
+function updateBatchEditBtn() {
+    var cnt = document.querySelectorAll('.student-check-search:checked').length;
+    document.getElementById('editSearchCount').textContent = cnt;
+    document.getElementById('btnBatchEditSearch').style.display = cnt > 0 ? '' : 'none';
+}
+
+// 批量修改
+function doBatchEditSearch() {
+    var ids = [];
+    document.querySelectorAll('.student-check-search:checked').forEach(cb => ids.push(cb.value));
+    if (!ids.length) { alert('请先选择学生'); return; }
+
+    var boarding = document.getElementById('batchBoarding').value;
+    var dayType = document.getElementById('batchDayType').value;
+    var building = document.getElementById('batchBuilding').value;
+    var roomNumber = document.getElementById('batchRoom').value.trim();
+    var bedNumber = document.getElementById('batchBed').value.trim();
+    var errDiv = document.getElementById('batchSearchError');
+
+    if (!boarding && !dayType && !building && !roomNumber && !bedNumber) {
+        errDiv.textContent = '请至少选择一项修改内容';
+        errDiv.style.display = ''; return;
+    }
+
+    var data = { student_ids: ids, boarding_type: boarding, day_student_type: dayType,
+                 building: building, room_number: roomNumber, bed_number: bedNumber };
+
+    fetch("{{ url_for('students.batch_edit_search') }}", {
+        method: 'POST', headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrfToken },
+        body: JSON.stringify(data)
+    }).then(r => r.json()).then(res => {
+        if (res.success) {
+            alert(res.message); location.reload();
+        } else {
+            errDiv.textContent = res.message; errDiv.style.display = '';
+        }
+    }).catch(e => {
+        errDiv.textContent = '操作失败'; errDiv.style.display = '';
+    });
+}
 </script>
 {% endblock %}

@@ -1,4 +1,4 @@
-# StuLink v1.5.0 2026-07-01
+﻿# StuLink v1.6.1 2026-07-09
 # Copyright (c) 2026 zkxxzf. CC BY-NC 4.0
 from app.models import DictCategory, Student, Room, ClassProfile, ClassSubject
 from app.utils.cache import cache
@@ -116,3 +116,51 @@ def clear_dict_cache():
     keys_to_delete = [key for key in cache._cache.keys() if key.startswith('dict_values_')]
     for key in keys_to_delete:
         cache.delete(key)
+
+
+def get_graduated_grades():
+    """返回已毕业年级列表"""
+    try:
+        from app.models.grade_setting import GradeSetting
+        return [gs.grade for gs in GradeSetting.query.filter_by(is_graduated=True).all()]
+    except Exception:
+        return []
+
+
+def write_change_log(change_type, students_data, old_value='', new_value='', detail='', operator_name=''):
+    """写入学生变迁日志到 history.db
+    students_data: list of dicts with keys id, student_number, name
+    """
+    import sqlite3
+    import os
+    from config import BASE_DIR
+    history_db_path = os.path.join(BASE_DIR, 'data', 'history.db')
+    try:
+        conn = sqlite3.connect(history_db_path)
+        conn.execute('''
+            CREATE TABLE IF NOT EXISTS student_change_log (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                student_id INTEGER NOT NULL,
+                student_number TEXT,
+                student_name TEXT NOT NULL,
+                change_type TEXT NOT NULL,
+                old_value TEXT,
+                new_value TEXT,
+                detail TEXT,
+                operator TEXT,
+                changed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        ''')
+        conn.commit()
+        for s in students_data:
+            conn.execute(
+                'INSERT INTO student_change_log (student_id,student_number,student_name,change_type,old_value,new_value,detail,operator) VALUES (?,?,?,?,?,?,?,?)',
+                (s['id'], s.get('student_number', ''), s.get('name', ''),
+                 change_type, old_value, new_value, detail, operator_name)
+            )
+        conn.commit()
+        conn.close()
+    except Exception as e:
+        print(f'写入变迁日志异常: {e}')
+
+

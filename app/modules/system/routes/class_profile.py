@@ -1,17 +1,17 @@
-# StuLink v1.5.0 2026-07-01
+﻿# StuLink v1.6.1 2026-07-09
 # Copyright (c) 2026 zkxxzf. CC BY-NC 4.0
 from flask import Blueprint, render_template, redirect, url_for, flash, request, jsonify
 from flask_login import login_required
 from app.extensions import db
 from app.models import DictCategory, DictItem, ClassProfile, ClassSubject, User, UserClassLink
-from app.utils.decorators import role_required
+from app.utils.decorators import perm_required
 from app.utils.helpers import get_dict_values
 
 bp = Blueprint('class_profile', __name__, url_prefix='/class-profile')
 
 
 @bp.route('/')
-@role_required('admin')
+@perm_required('system.class_profile')
 def manage():
     """班型管理主页 - 列出全部班级，支持批量编辑"""
     grades = sorted(get_dict_values('grade'), reverse=True)
@@ -73,7 +73,7 @@ def manage():
 
 
 @bp.route('/batch-save', methods=['POST'])
-@role_required('admin')
+@perm_required('system.class_profile')
 def batch_save():
     """批量保存所有班型设置"""
     import json
@@ -182,7 +182,7 @@ def batch_save():
 
 
 @bp.route('/teachers/<grade>/<class_name>', methods=['GET'])
-@role_required('admin')
+@perm_required('system.class_profile')
 def get_teachers(grade, class_name):
     """获取某班的班主任列表"""
     links = UserClassLink.query.filter_by(grade=grade, class_name=class_name).all()
@@ -195,7 +195,7 @@ def get_teachers(grade, class_name):
 
 
 @bp.route('/teachers/<grade>/<class_name>/add', methods=['POST'])
-@role_required('admin')
+@perm_required('system.class_profile')
 def add_teacher(grade, class_name):
     """为某班添加班主任（最多3人）"""
     data = request.get_json()
@@ -225,7 +225,7 @@ def add_teacher(grade, class_name):
 
 
 @bp.route('/teachers/<grade>/<class_name>/remove', methods=['POST'])
-@role_required('admin')
+@perm_required('system.class_profile')
 def remove_teacher(grade, class_name):
     """移除某班班主任"""
     data = request.get_json()
@@ -239,3 +239,5 @@ def remove_teacher(grade, class_name):
     db.session.delete(link)
     db.session.commit()
     return jsonify({'success': True, 'message': f'已取消 {user.real_name} 的班主任身份'})
+
+

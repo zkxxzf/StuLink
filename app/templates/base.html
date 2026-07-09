@@ -112,8 +112,8 @@
             <a class="nav-link" href="{{ url_for('dashboard.index') }}">
                 <i class="bi bi-house"></i>宿舍管理
             </a>
-            {% elif request.blueprint in ('students','users','dictionary','class_profile','perm_groups','grade_mgmt') %}
-            <a class="nav-link" href="{{ url_for('students.list_students') }}">
+            {% elif request.blueprint in ('system_dashboard','students','users','dictionary','class_profile','perm_groups','grade_mgmt') %}
+            <a class="nav-link" href="{{ url_for('system_dashboard.index') }}">
                 <i class="bi bi-house"></i>系统管理
             </a>
             {% elif request.blueprint == 'points' %}
@@ -132,11 +132,11 @@
 
             {# ========= 宿舍管理模块侧边栏 ========= #}
             {% if request.blueprint in ('dashboard','rooms','assignments','statistics') or request.endpoint == 'students.search' %}
-            <a class="nav-link {% if request.endpoint and request.endpoint.startswith('students.search') %}active{% endif %}"
-               href="{{ url_for('students.search') }}">
-                <i class="bi bi-search"></i>学生查询
+            <a class="nav-link {% if request.endpoint and request.endpoint.startswith('dashboard.search') %}active{% endif %}"
+               href="{{ url_for('dashboard.search_student_accommodation') }}">
+                <i class="bi bi-search"></i>学生住宿
             </a>
-            {% if current_user.has_role('admin', 'dorm_manager', 'grade_leader', 'school_viewer') %}
+            {% if current_user.has_perm('dormitory.view') %}
             <div class="nav-section">宿舍管理</div>
             <a class="nav-link {% if request.endpoint == 'rooms.list_rooms' %}active{% endif %}"
                href="{{ url_for('rooms.list_rooms') }}">
@@ -146,12 +146,8 @@
                href="{{ url_for('rooms.assign_visual') }}">
                 <i class="bi bi-diagram-3"></i>分配宿舍
             </a>
-            <a class="nav-link {% if request.endpoint == 'rooms.report' %}active{% endif %}"
-               href="{{ url_for('rooms.report') }}">
-                <i class="bi bi-file-earmark-spreadsheet"></i>宿舍报表
-            </a>
             {% endif %}
-            {% if current_user.has_role('admin', 'dorm_manager', 'homeroom_teacher', 'grade_leader', 'school_viewer') %}
+            {% if current_user.has_perm('dormitory.beds') %}
             <div class="nav-section">床位管理</div>
             <a class="nav-link {% if request.endpoint == 'assignments.manage' %}active{% endif %}"
                href="{{ url_for('assignments.manage') }}">
@@ -162,15 +158,16 @@
                href="{{ url_for('assignments.overview') }}">
                 <i class="bi bi-map"></i>宿舍总览
             </a>
-            <div class="nav-section">数据统计</div>
+            {% if current_user.has_perm('statistics.view') %}
             <a class="nav-link {% if request.endpoint == 'statistics.index' %}active{% endif %}"
                href="{{ url_for('statistics.index') }}">
                 <i class="bi bi-bar-chart-line"></i>统计报表
             </a>
             {% endif %}
+            {% endif %}
 
             {# ========= 系统管理模块侧边栏 ========= #}
-            {% if request.blueprint in ('students','users','dictionary','class_profile','perm_groups','grade_mgmt') and request.endpoint != 'students.search' %}
+            {% if request.blueprint in ('system_dashboard','students','users','dictionary','class_profile','perm_groups','grade_mgmt') and request.endpoint != 'students.search' %}
             <div class="nav-section">系统管理</div>
             <a class="nav-link {% if request.endpoint == 'students.list_students' %}active{% endif %}"
                href="{{ url_for('students.list_students') }}">
@@ -178,7 +175,7 @@
             </a>
             <a class="nav-link {% if request.endpoint and request.endpoint.startswith('users.') %}active{% endif %}"
                href="{{ url_for('users.list_users') }}">
-                <i class="bi bi-person-gear"></i>用户管理
+                <i class="bi bi-person-gear"></i>教师管理
             </a>
             <a class="nav-link {% if request.endpoint and request.endpoint.startswith('dictionary.') %}active{% endif %}"
                href="{{ url_for('dictionary.list_items') }}">
@@ -196,10 +193,6 @@
                href="{{ url_for('grade_mgmt.index') }}">
                 <i class="bi bi-mortarboard"></i>年级管理
             </a>
-            <a class="nav-link {% if request.endpoint == 'grade_mgmt.history' %}active{% endif %}"
-               href="{{ url_for('grade_mgmt.history') }}">
-                <i class="bi bi-clock-history"></i>历史查询
-            </a>
             {% endif %}
         </nav>
     </div>
@@ -212,7 +205,7 @@
         <div class="mb-3">
             {% for category, message in messages %}
             <div class="alert alert-{{ category }} alert-dismissible fade show" role="alert">
-                {{ message|nl2br }}
+                {{ message|safe if message.__class__.__name__ == 'Markup' else message|nl2br }}
                 <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
             </div>
             {% endfor %}

@@ -1,0 +1,27 @@
+{% extends "base.html" %}
+{% block title %}登录 - 往届生查询{% endblock %}
+{% block content %}
+<div class="row justify-content-center" style="margin-top:60px;">
+    <div class="col-md-4">
+        <div class="card shadow">
+            <div class="card-body p-4">
+                <h4 class="text-center mb-4"><i class="bi bi-archive"></i> 往届生查询系统</h4>
+                <form method="POST">
+                    <div class="mb-3">
+                        <label class="form-label">用户名</label>
+                        <input type="text" name="username" class="form-control" required autofocus>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">密码</label>
+                        <input type="password" name="password" class="form-control" required>
+                    </div>
+                    <button type="submit" class="btn btn-primary w-100">登录</button>
+                </form>
+                <p class="text-muted small text-center mt-3">
+                    使用主系统的账号密码登录
+                </p>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

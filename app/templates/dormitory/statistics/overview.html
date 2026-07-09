@@ -63,6 +63,22 @@
             <i class="bi bi-people"></i> 班级统计报表
         </a>
     </li>
+    {% if current_user.has_role('admin', 'dorm_manager', 'grade_leader', 'school_viewer') %}
+    <li class="nav-item">
+        <a class="nav-link {% if tab == 'rooms' %}active{% endif %}"
+           href="{{ url_for('statistics.index', tab='rooms') }}">
+            <i class="bi bi-diagram-3"></i> 宿舍分配明细
+        </a>
+    </li>
+    {% endif %}
+    {% if current_user.has_role('admin', 'dorm_manager') %}
+    <li class="nav-item">
+        <a class="nav-link {% if tab == 'import' %}active{% endif %}"
+           href="{{ url_for('statistics.index', tab='import') }}">
+            <i class="bi bi-upload"></i> 宿舍数据导入
+        </a>
+    </li>
+    {% endif %}
 </ul>
 
 <!-- 年级选择器（年级/班级tab时显示） -->
@@ -269,10 +285,183 @@
 </div>
 {% endif %}
 
-{% if not per_class_stats and not per_grade_stats %}
+<!-- Tab: 宿舍分配明细（原 /rooms/report） -->
+{% if tab == 'rooms' %}
+<div class="d-flex justify-content-between align-items-center mb-3 no-print">
+    <div class="d-flex gap-2">
+        <button class="btn btn-sm btn-outline-primary" onclick="window.print()">
+            <i class="bi bi-printer"></i> 打印
+        </button>
+        <button class="btn btn-sm btn-outline-success" onclick="exportRoomExcel()">
+            <i class="bi bi-file-earmark-excel"></i> 导出Excel
+        </button>
+    </div>
+</div>
+
+<div class="row g-2 mb-3">
+    <div class="col-4"><div class="stat-card card p-2 text-center">
+        <div class="stat-number text-primary">{{ room_total_rooms }}</div>
+        <div class="stat-label">已分配房间</div>
+    </div></div>
+    <div class="col-4"><div class="stat-card card p-2 text-center">
+        <div class="stat-number text-success">{{ room_total_beds }}</div>
+        <div class="stat-label">可用床位数</div>
+    </div></div>
+    <div class="col-4"><div class="stat-card card p-2 text-center">
+        <div class="stat-number text-info">{{ room_total_boarders }}</div>
+        <div class="stat-label">住校生总数</div>
+    </div></div>
+</div>
+
+{% if not room_tree %}
+<div class="alert alert-info"><i class="bi bi-info-circle"></i> 暂无已分配的宿舍数据，请先完成宿舍分配。</div>
+{% endif %}
+
+{% for grade, genders in room_tree.items() %}
+<div class="section-card card mb-3">
+    <div class="card-header py-2">
+        <h5 class="mb-0"><i class="bi bi-mortarboard"></i> {{ grade }}</h5>
+    </div>
+    <div class="card-body p-0">
+    {% for gender, classes in genders.items() %}
+    {% set gender_label = '男生' if gender == '男' else '女生' %}
+    {% set gender_class = 'male' if gender == '男' else 'female' %}
+    <div class="gender-section px-3 pt-3">
+        <div class="gender-title {{ gender_class }}">
+            <i class="bi bi-gender-{{ 'male' if gender == '男' else 'female' }}"></i> {{ gender_label }}
+        </div>
+        <div class="table-responsive">
+            <table class="table table-bordered table-sm mb-0">
+                <thead>
+                    <tr>
+                        <th style="width:80px;">班级</th>
+                        <th style="width:70px;">住校生</th>
+                        <th style="width:150px;">宿舍楼</th>
+                        <th style="width:70px;">房间号</th>
+                        <th style="width:80px;">床位数</th>
+                        <th style="width:80px;">合班标记</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for class_name, room_list in classes.items() %}
+                    {% set class_key = (grade, class_name, gender) %}
+                    {% set boarders = room_class_totals.get(class_key, 0) %}
+                    {% set room_count = room_list|length %}
+                    {% for room in room_list %}
+                    <tr class="room-row">
+                        {% if loop.first %}
+                        <td rowspan="{{ room_count }}" class="class-summary-row align-middle text-center">{{ grade }}{{ class_name }}</td>
+                        <td rowspan="{{ room_count }}" class="class-summary-row align-middle text-center">{{ boarders }}</td>
+                        {% endif %}
+                        <td>{{ room.building }}</td>
+                        <td>{{ room.room_number }}</td>
+                        <td class="text-center">{{ room.capacity }}</td>
+                        <td class="text-center">
+                            {% if room.combined_class and room.combined_class != '' %}
+                            <span class="badge bg-info">{{ room.combined_class }}</span>
+                            {% else %}
+                            <span class="text-muted">—</span>
+                            {% endif %}
+                        </td>
+                    </tr>
+                    {% endfor %}
+                    <tr class="table-light fw-bold" style="font-size:11px;">
+                        <td colspan="3"></td>
+                        <td class="text-end">小计：{{ room_count }}间</td>
+                        {% set cls_beds = room_list|sum(attribute='capacity') %}
+                        <td class="text-center">{{ cls_beds }} 床</td>
+                        <td></td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+    {% endfor %}
+    </div>
+</div>
+{% endfor %}
+{% endif %}
+
+<!-- Tab: 宿舍数据导入 -->
+{% if tab == 'import' and current_user.has_role('admin', 'dorm_manager') %}
+<div class="card">
+    <div class="card-header"><h6 class="mb-0"><i class="bi bi-building"></i> 宿舍数据批量导入</h6></div>
+    <div class="card-body">
+        <form method="POST" action="{{ url_for('statistics.import_dormitory') }}" enctype="multipart/form-data">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <div class="mb-3">
+                <label class="form-label">选择Excel文件</label>
+                <input type="file" name="file" class="form-control" accept=".xlsx,.xls" required>
+            </div>
+            <div class="alert alert-info small mb-3">
+                <i class="bi bi-info-circle"></i> <strong>导入说明：</strong>
+                <ul class="mb-0 mt-1">
+                    <li>按<strong>学号+姓名</strong>双重匹配已有学生，更新宿舍相关字段</li>
+                    <li>必填项：<strong>学号、姓名</strong></li>
+                    <li>「住校/走读」「出门权限」「课本」「班主任备注」可选填</li>
+                    <li>学号+姓名与基础数据不匹配的行会跳过并报告</li>
+                </ul>
+            </div>
+            <div class="d-flex gap-2">
+                <a href="{{ url_for('statistics.download_dormitory_template') }}" class="btn btn-outline-primary">
+                    <i class="bi bi-download"></i> 下载导入模板
+                </a>
+                <button type="submit" class="btn btn-success">
+                    <i class="bi bi-upload"></i> 开始导入
+                </button>
+            </div>
+        </form>
+    </div>
+</div>
+{% endif %}
+
+{% if tab != 'import' and not per_class_stats and not per_grade_stats %}
 <div class="text-center text-muted py-5">
     <i class="bi bi-inbox" style="font-size:48px;"></i>
     <p class="mt-2">暂无数据</p>
 </div>
 {% endif %}
+{% endblock %}
+
+{% block extra_css %}
+<style>
+    @media print {
+        .sidebar, .navbar, .btn, .form-select, .no-print, .nav-tabs { display: none !important; }
+        .main-content { margin-left: 0 !important; padding: 0 !important; }
+        .card { box-shadow: none !important; border: 1px solid #dee2e6 !important; }
+        .table { font-size: 12px; }
+        .report-header { text-align: center; margin-bottom: 16px; }
+        @page { size: A4; margin: 12mm; }
+    }
+    .report-header h4 { font-weight: 700; }
+    .table th { white-space: nowrap; background: #f8f9fa; font-size: 12px; }
+    .table td { font-size: 12px; vertical-align: middle; }
+    .gender-section { margin-bottom: 24px; }
+    .gender-title {
+        font-size: 16px; font-weight: 700; padding: 8px 14px;
+        border-radius: 6px; margin-bottom: 8px;
+    }
+    .gender-title.male { background: #e3f2fd; color: #1565c0; }
+    .gender-title.female { background: #fce4ec; color: #c62828; }
+    .class-summary-row { background: #fafafa; font-weight: 600; }
+    .room-row { }
+    .section-card { margin-bottom: 0; }
+    .stats-bar { font-size: 13px; }
+    .stats-bar .stat-item {
+        display: inline-block; padding: 4px 16px; margin-right: 12px;
+        border-radius: 20px; background: #f1f5f9; font-weight: 600;
+    }
+</style>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+function exportRoomExcel() {
+    var grade = '{{ sel_grade }}';
+    var url = '{{ url_for("rooms.report_export") }}';
+    if (grade) url += '?grade=' + encodeURIComponent(grade);
+    window.location.href = url;
+}
+</script>
 {% endblock %}

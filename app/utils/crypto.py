@@ -1,9 +1,9 @@
-"""AES-256-CBC 对称加密工具 — 用于加密身份证号等敏感字段
+﻿"""AES-256-CBC 对称加密工具 — 用于加密身份证号等敏感字段
 
 使用确定性 IV：同一明文 → 同一密文 → 支持数据库等值查询
 密钥来源：环境变量 ENCRYPTION_KEY，否则从 data/.encryption_key 自动生成
 """
-# StuLink v1.5.0 2026-07-01
+# StuLink v1.6.1 2026-07-09
 # Copyright (c) 2026 zkxxzf. CC BY-NC 4.0
 import os
 import hashlib
@@ -82,3 +82,5 @@ def decrypt(ciphertext_b64):
     except Exception:
         # 解密失败，可能是旧数据明文，直接返回
         return ciphertext_b64
+
+

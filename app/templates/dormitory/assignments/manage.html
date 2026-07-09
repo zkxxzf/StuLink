@@ -12,9 +12,9 @@
                 <label class="form-label small">年级 <span class="text-danger">*</span></label>
                 <select name="grade" class="form-select form-select-sm" required>
                     <option value="">请选择</option>
-                    <option value="2025级" {{ 'selected' if current_grade=='2025级' }}>2025级</option>
-                    <option value="2024级" {{ 'selected' if current_grade=='2024级' }}>2024级</option>
-                    <option value="2023级" {{ 'selected' if current_grade=='2023级' }}>2023级</option>
+                    {% for g in grades %}
+                    <option value="{{ g }}" {{ 'selected' if current_grade==g }}>{{ g }}</option>
+                    {% endfor %}
                 </select>
             </div>
             <div class="col-md-3">

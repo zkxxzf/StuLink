@@ -1,4 +1,4 @@
-# StuLink v1.5.0 2026-07-01
+﻿# StuLink v1.6.1 2026-07-09
 # Copyright (c) 2026 zkxxzf. CC BY-NC 4.0
 from flask_wtf import FlaskForm
 from wtforms import StringField, PasswordField
@@ -20,3 +20,5 @@ class ChangePasswordForm(FlaskForm):
         DataRequired(message='请再次输入新密码'),
         EqualTo('new_password', message='两次输入的密码不一致'),
     ])
+
+

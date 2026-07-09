@@ -1,16 +1,35 @@
-version: '3.8'
-
-services:
+﻿services:
   stulink:
-    image: stulink:v1.5.0
+    image: stulink:v1.6.1
     container_name: stulink
+    pull_policy: never
     ports:
       - "5000:5000"
     volumes:
-      # 数据目录（永不覆盖，含 db + 密钥文件）
       - ./stulink-data:/app/data
     restart: unless-stopped
     environment:
       - TZ=Asia/Shanghai
       - DATABASE_URL=sqlite:////app/data/system.db
-      - SECRET_KEY=
+    healthcheck:
+      test: ["CMD", "python", "-c", "import os; exit(0 if os.path.exists('/app/data/.secret_key') else 1)"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+
+  alumni:
+    image: stulink-alumni:v1.0.0
+    container_name: stulink-alumni
+    pull_policy: never
+    depends_on:
+      stulink:
+        condition: service_healthy
+    ports:
+      - "5001:5001"
+    volumes:
+      - ./stulink-data:/app/data:ro
+    restart: unless-stopped
+    environment:
+      - TZ=Asia/Shanghai
+
