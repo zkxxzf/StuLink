@@ -1,4 +1,4 @@
-"""往届生查询系统"""
+﻿"""往届生查询系统"""
 from flask import Flask
 from config import Config
 from app.auth import init_auth

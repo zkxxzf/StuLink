@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+﻿#!/usr/bin/env python
 # -*- coding: utf-8 -*-
 """归档原班级数据到历史数据库，并从主库移除该列"""
 import sqlite3

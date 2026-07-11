@@ -1,4 +1,4 @@
-"""模块蓝图注册入口"""
+﻿"""模块蓝图注册入口"""
 def register_blueprints(app):
     # 认证模块（共享）
     from app.modules.auth.routes import bp as auth_bp
@@ -43,6 +43,6 @@ def register_blueprints(app):
     app.register_blueprint(grades_bp)
 
 # StuLink v1.6.1 2026-07-09
-# Copyright (c) 2026 zkxxzf. CC BY-NC 4.0
+# Copyright (c) 2026 zkxxzf. Apache License 2.0
 
 

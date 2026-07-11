@@ -1,6 +1,6 @@
 # StuLink - 智联校园学生管理系统
 
-[![License](https://img.shields.io/badge/license-CC%20BY--NC%204.0-blue.svg)](LICENSE)
+[![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
 [![Python](https://img.shields.io/badge/python-3.11+-green.svg)](https://python.org)
 [![Flask](https://img.shields.io/badge/flask-3.x-lightgrey.svg)](https://flask.palletsprojects.com/)
 [![Version](https://img.shields.io/badge/version-1.5.0-orange.svg)](https://github.com/zkxxzf/stulink)
@@ -98,6 +98,6 @@ StuLink/
 
 ## 许可证
 
-[CC BY-NC 4.0](LICENSE) — 署名-非商业性使用 4.0 国际
+[Apache License 2.0](LICENSE) — 允许商用，保留版权署名
 
 Copyright (c) 2026 zkxxzf

@@ -5,7 +5,7 @@ from app.extensions import db
 class PermissionGroup(db.Model):
     """权限组：用户只能通过组获得权限，不允许单独设置"""
 # StuLink v1.6.1 2026-07-09
-# Copyright (c) 2026 zkxxzf. CC BY-NC 4.0
+# Copyright (c) 2026 zkxxzf. Apache License 2.0
     __tablename__ = 'permission_groups'
 
     id = db.Column(db.Integer, primary_key=True)

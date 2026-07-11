@@ -1,5 +1,5 @@
 ﻿# StuLink v1.6.1 2026-07-09
-# Copyright (c) 2026 zkxxzf. CC BY-NC 4.0
+# Copyright (c) 2026 zkxxzf. Apache License 2.0
 from flask_sqlalchemy import SQLAlchemy
 from flask_login import LoginManager
 from flask_wtf.csrf import CSRFProtect

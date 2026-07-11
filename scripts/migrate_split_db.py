@@ -134,6 +134,6 @@ print('\n下一步: 修改模型代码 (config.py, room.py, student.py)')
 
 
 # StuLink v1.6.1 2026-07-09
-# Copyright (c) 2026 zkxxzf. CC BY-NC 4.0
+# Copyright (c) 2026 zkxxzf. Apache License 2.0
 
 

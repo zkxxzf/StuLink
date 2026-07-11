@@ -1,4 +1,4 @@
-"""年级管理：毕业/存档/历史查询"""
+﻿"""年级管理：毕业/存档/历史查询"""
 import os
 import shutil
 import sqlite3

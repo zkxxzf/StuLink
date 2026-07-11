@@ -5,7 +5,7 @@ from app.extensions import db
 class UserClassLink(db.Model):
     """用户与班级的多对多关联"""
 # StuLink v1.6.1 2026-07-09
-# Copyright (c) 2026 zkxxzf. CC BY-NC 4.0
+# Copyright (c) 2026 zkxxzf. Apache License 2.0
     __tablename__ = 'user_class_links'
 
     id = db.Column(db.Integer, primary_key=True)

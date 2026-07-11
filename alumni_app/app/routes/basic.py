@@ -1,4 +1,4 @@
-"""往届生基本信息查询"""
+﻿"""往届生基本信息查询"""
 import sqlite3
 from flask import Blueprint, render_template, request, flash, redirect, url_for
 from flask_login import login_required, login_user, logout_user, current_user

@@ -1,7 +1,7 @@
 ﻿"""简单的内存缓存工具"""
 import time
 # StuLink v1.6.1 2026-07-09
-# Copyright (c) 2026 zkxxzf. CC BY-NC 4.0
+# Copyright (c) 2026 zkxxzf. Apache License 2.0
 
 class SimpleCache:
     """简单的内存缓存实现"""

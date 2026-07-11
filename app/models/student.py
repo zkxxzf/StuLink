@@ -1,5 +1,5 @@
-# StuLink v1.6.1 2026-07-09
-# Copyright (c) 2026 zkxxzf. CC BY-NC 4.0
+﻿# StuLink v1.6.1 2026-07-09
+# Copyright (c) 2026 zkxxzf. Apache License 2.0
 from datetime import datetime
 from app.extensions import db
 from app.utils.crypto import encrypt, decrypt

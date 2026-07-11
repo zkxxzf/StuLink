@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+﻿#!/usr/bin/env python
 # -*- coding: utf-8 -*-
 """迁移脚本：为 graduated_students 表添加 id_card_number 字段并填充历史数据"""
 import sqlite3

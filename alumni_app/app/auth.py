@@ -1,4 +1,4 @@
-"""认证模块：复用主项目 system.db 的 users 表"""
+﻿"""认证模块：复用主项目 system.db 的 users 表"""
 import sqlite3
 from flask_login import LoginManager, UserMixin, login_required, login_user, logout_user, current_user
 

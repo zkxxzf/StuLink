@@ -1,4 +1,4 @@
-"""往届生查询系统 启动入口"""
+﻿"""往届生查询系统 启动入口"""
 import os, sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 os.environ['ALUMNI_CONFIG'] = os.path.join(os.path.dirname(__file__), 'config.py')

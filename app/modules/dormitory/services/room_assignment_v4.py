@@ -14,7 +14,7 @@ Phase 2（选房后）: 按7种情形逐级尝试，找到第一个可行方案
 确定情形后：按(楼栋,楼层,房号)顺序分配，同班级房间同楼层连续，合班居中。
 """
 # StuLink v1.6.1 2026-07-09
-# Copyright (c) 2026 zkxxzf. CC BY-NC 4.0
+# Copyright (c) 2026 zkxxzf. Apache License 2.0
 import math
 from collections import defaultdict, OrderedDict
 from app.models import Room, Student, ClassProfile

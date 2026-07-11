@@ -1,4 +1,4 @@
-"""往届生宿舍查询"""
+﻿"""往届生宿舍查询"""
 import sqlite3
 from flask import Blueprint, render_template, request, flash
 from flask_login import login_required

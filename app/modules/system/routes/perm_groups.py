@@ -1,4 +1,4 @@
-"""权限组管理路由"""
+﻿"""权限组管理路由"""
 from flask import Blueprint, render_template, request, jsonify, flash, redirect, url_for
 from flask_login import login_required
 from app.extensions import db
@@ -80,7 +80,7 @@ for module in PERMISSION_MODULES:
 def manage():
     """权限组管理主页"""
 # StuLink v1.6.1 2026-07-09
-# Copyright (c) 2026 zkxxzf. CC BY-NC 4.0
+# Copyright (c) 2026 zkxxzf. Apache License 2.0
     groups = PermissionGroup.query.order_by(PermissionGroup.id).all()
     for g in groups:
         g._user_count = User.query.filter_by(permission_group_id=g.id).count()
