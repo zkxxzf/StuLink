@@ -1,4 +1,4 @@
-﻿# StuLink v1.6.1 2026-07-09
+# StuLink v1.7.0 2026-08-02
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 import io
 from flask import Blueprint, render_template, request, redirect, url_for, flash, send_file
@@ -26,31 +26,72 @@ def index():
         base_q = base_q.filter(~Student.grade.in_(graduated))
     student_stats = base_q.one()
 
-    # 查询 dormitory.db 中的住宿统计
-    boarding_count = StudentAccommodation.query.filter(
-        StudentAccommodation.boarding_type == '住校'
-    ).count()
-    day_count = StudentAccommodation.query.filter(
-        StudentAccommodation.boarding_type == '走读'
-    ).count()
+    # 查询 dormitory.db 中的住宿统计（关联 Student 表，只统计存在的学生）
+    active_student_ids = db.session.query(Student.id)
+    if graduated:
+        active_student_ids = active_student_ids.filter(~Student.grade.in_(graduated))
+    active_student_ids = [r[0] for r in active_student_ids.all()]
+    
+    if active_student_ids:
+        boarding_records = StudentAccommodation.query.filter(
+            StudentAccommodation.student_id.in_(active_student_ids),
+            StudentAccommodation.boarding_type == '住校'
+        ).all()
+        boarding_count = len(boarding_records)
+        day_count = StudentAccommodation.query.filter(
+            StudentAccommodation.student_id.in_(active_student_ids),
+            StudentAccommodation.boarding_type == '走读'
+        ).count()
+        # 住校生性别分组
+        boarding_student_ids = [r.student_id for r in boarding_records]
+        if boarding_student_ids:
+            gender_rows = db.session.query(Student.gender, func.count(Student.id)).filter(
+                Student.id.in_(boarding_student_ids)
+            ).group_by(Student.gender).all()
+            boarding_male = sum(c for g, c in gender_rows if g == '男')
+            boarding_female = sum(c for g, c in gender_rows if g == '女')
+        else:
+            boarding_male = boarding_female = 0
+    else:
+        boarding_count = 0
+        day_count = 0
+        boarding_male = boarding_female = 0
 
-    total_rooms = db.session.query(func.count(Room.id)).filter(Room.is_active == True).scalar()
-    
-    active_room_ids = db.session.query(Room.id).filter(Room.is_active == True).all()
-    active_room_ids = [r[0] for r in active_room_ids]
-    
+    # 宿舍统计（按性别分组）
+    room_rows = db.session.query(
+        Room.id, Room.gender, Room.capacity, Room.class_name
+    ).filter(Room.is_active == True).all()
+
+    total_rooms = len(room_rows)
+    total_rooms_male = sum(1 for r in room_rows if r.gender == '男')
+    total_rooms_female = sum(1 for r in room_rows if r.gender == '女')
+    assigned_rooms = sum(1 for r in room_rows if r.class_name)
+    assigned_rooms_male = sum(1 for r in room_rows if r.gender == '男' and r.class_name)
+    assigned_rooms_female = sum(1 for r in room_rows if r.gender == '女' and r.class_name)
+
+    active_room_ids = [r.id for r in room_rows]
+    room_gender_map = {r.id: r.gender for r in room_rows}
+
     if active_room_ids:
-        total_beds = db.session.query(func.count(BedAssignment.id)).filter(
-            BedAssignment.room_id.in_(active_room_ids)
-        ).scalar()
-        assigned_beds = db.session.query(func.count(BedAssignment.id)).filter(
+        total_beds = sum(r.capacity for r in room_rows)
+        total_beds_male = sum(r.capacity for r in room_rows if r.gender == '男')
+        total_beds_female = sum(r.capacity for r in room_rows if r.gender == '女')
+
+        bed_rows = db.session.query(BedAssignment.room_id).filter(
             BedAssignment.room_id.in_(active_room_ids),
             BedAssignment.student_id.isnot(None)
-        ).scalar()
+        ).all()
+        assigned_beds = len(bed_rows)
+        assigned_beds_male = sum(1 for b in bed_rows if room_gender_map.get(b.room_id) == '男')
+        assigned_beds_female = sum(1 for b in bed_rows if room_gender_map.get(b.room_id) == '女')
     else:
-        total_beds = 0
-        assigned_beds = 0
-    
+        total_beds = total_beds_male = total_beds_female = 0
+        assigned_beds = assigned_beds_male = assigned_beds_female = 0
+
+    empty_beds = total_beds - assigned_beds
+    empty_beds_male = total_beds_male - assigned_beds_male
+    empty_beds_female = total_beds_female - assigned_beds_female
+
     total_users = db.session.query(func.count(User.id)).filter(User.is_active == True).scalar()
 
     stats = {
@@ -58,10 +99,24 @@ def index():
         'male_students': student_stats.male or 0,
         'female_students': student_stats.female or 0,
         'boarding_students': boarding_count,
+        'boarding_male': boarding_male,
+        'boarding_female': boarding_female,
         'day_students': day_count,
-        'total_rooms': total_rooms or 0,
-        'assigned_beds': assigned_beds or 0,
-        'total_beds': total_beds or 0,
+        'total_rooms': total_rooms,
+        'total_rooms_male': total_rooms_male,
+        'total_rooms_female': total_rooms_female,
+        'assigned_rooms': assigned_rooms,
+        'assigned_rooms_male': assigned_rooms_male,
+        'assigned_rooms_female': assigned_rooms_female,
+        'total_beds': total_beds,
+        'total_beds_male': total_beds_male,
+        'total_beds_female': total_beds_female,
+        'assigned_beds': assigned_beds,
+        'assigned_beds_male': assigned_beds_male,
+        'assigned_beds_female': assigned_beds_female,
+        'empty_beds': empty_beds,
+        'empty_beds_male': empty_beds_male,
+        'empty_beds_female': empty_beds_female,
         'total_users': total_users or 0,
     }
 
@@ -70,31 +125,50 @@ def index():
         func.count(Student.id).label('total'),
         func.sum(case((Student.gender == '男', 1), else_=0)).label('male'),
         func.sum(case((Student.gender == '女', 1), else_=0)).label('female')
-    ).group_by(Student.grade).order_by(Student.grade).all()
+    )
+    if graduated:
+        grade_query = grade_query.filter(~Student.grade.in_(graduated))
+    grade_query = grade_query.group_by(Student.grade).all()
+    # 按年份降序（新年级在前）
+    grade_query.sort(key=lambda g: int(''.join(filter(str.isdigit, g.grade or '')) or '0'), reverse=True)
 
     grade_accomm_map = {}
     for g in grade_query:
         grade = g.grade
-        grade_student_ids = [s.id for s in Student.query.filter_by(grade=grade).all()]
-        grade_boarding = StudentAccommodation.query.filter(
+        # 一次查出该年级所有学生的 id+gender
+        grade_students = db.session.query(Student.id, Student.gender).filter_by(grade=grade).all()
+        grade_student_ids = [s[0] for s in grade_students]
+        gender_map = {s[0]: s[1] for s in grade_students}
+
+        boarding_records = StudentAccommodation.query.filter(
             StudentAccommodation.student_id.in_(grade_student_ids),
             StudentAccommodation.boarding_type == '住校'
-        ).count()
-        grade_day = StudentAccommodation.query.filter(
+        ).all() if grade_student_ids else []
+        day_count = StudentAccommodation.query.filter(
             StudentAccommodation.student_id.in_(grade_student_ids),
             StudentAccommodation.boarding_type == '走读'
-        ).count()
-        grade_accomm_map[grade] = {'boarding': grade_boarding, 'day': grade_day}
+        ).count() if grade_student_ids else 0
+
+        boarding_male = sum(1 for r in boarding_records if gender_map.get(r.student_id) == '男')
+        boarding_female = sum(1 for r in boarding_records if gender_map.get(r.student_id) == '女')
+        grade_accomm_map[grade] = {
+            'boarding': len(boarding_records),
+            'boarding_male': boarding_male,
+            'boarding_female': boarding_female,
+            'day': day_count,
+        }
 
     grade_stats = []
     for g in grade_query:
-        acc_data = grade_accomm_map.get(g.grade, {'boarding': 0, 'day': 0})
+        acc_data = grade_accomm_map.get(g.grade, {'boarding': 0, 'boarding_male': 0, 'boarding_female': 0, 'day': 0})
         grade_stats.append({
             'grade': g.grade,
             'total': g.total,
             'male': g.male,
             'female': g.female,
             'boarding': acc_data['boarding'],
+            'boarding_male': acc_data['boarding_male'],
+            'boarding_female': acc_data['boarding_female'],
             'day': acc_data['day'],
         })
 
@@ -396,8 +470,8 @@ def import_dormitory_info():
             # 1. 更新住校/走读（写入 StudentAccommodation）
             bt = row_data.get('boarding_type', '')
             if bt:
-                if bt not in ('住校', '走读'):
-                    errors.append(f'第{row_idx}行：住校/走读"{bt}"无效（应为"住校"或"走读"）')
+                if bt not in ('住校', '走读', '离校'):
+                    errors.append(f'第{row_idx}行：住校/走读"{bt}"无效（应为"住校"、"走读"或"离校"）')
                 else:
                     acc = StudentAccommodation.query.filter_by(student_id=student.id).first()
                     if not acc:

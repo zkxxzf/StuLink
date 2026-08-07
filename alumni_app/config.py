@@ -1,4 +1,4 @@
-﻿# StuLink Alumni v1.0.0 2026-07-03
+# StuLink Alumni v1.0.0 2026-07-03
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 import os
 import secrets

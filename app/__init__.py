@@ -1,4 +1,4 @@
-﻿# StuLink v1.6.1 2026-07-09
+# StuLink v1.7.0 2026-08-02
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 from flask import Flask, render_template, request
 from config import Config
@@ -9,7 +9,7 @@ import gzip
 DICT_DATA = {
     'grade': ('年级', ['2025级', '2024级', '2023级']),
     'class': ('班级', ['01班', '02班', '03班', '04班', '05班', '06班', '07班',
-                       '08班', '09班', '10班', '未分班', '已转出', '离校']),
+                       '08班', '09班', '10班', '不分班', '已转出', '离校']),
     'gender': ('性别', ['男', '女']),
     'subject': ('选科', ['物化生', '物化政', '物化地', '物生政', '物生地', '物政地',
                          '史政地', '史生地', '史生政', '史化生', '史化政', '史化地']),
@@ -204,7 +204,7 @@ def create_app():
     app = Flask(__name__)
     app.config.from_object(Config)
     
-    app.jinja_env.auto_reload = True
+    app.jinja_env.auto_reload = app.config.get('TEMPLATES_AUTO_RELOAD', False)
 
     db.init_app(app)
     login_manager.init_app(app)

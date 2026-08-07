@@ -1,4 +1,4 @@
-﻿"""更新 init_db.py 中的学生数据：女走读->走读"""
+"""更新 init_db.py 中的学生数据：女走读->走读"""
 import os
 
 script_dir = os.path.dirname(os.path.abspath(__file__))
@@ -16,7 +16,7 @@ with open(file_path, 'w', encoding='utf-8') as f:
 
 print('init_db.py 中的学生数据已更新')
 
-# StuLink v1.6.1 2026-07-09
+# StuLink v1.7.0 2026-08-02
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 
 

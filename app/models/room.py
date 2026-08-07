@@ -1,4 +1,4 @@
-﻿# StuLink v1.6.1 2026-07-09
+# StuLink v1.7.0 2026-08-02
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 from datetime import datetime
 from app.extensions import db
@@ -15,8 +15,9 @@ class Room(db.Model):
     floor = db.Column(db.Integer, nullable=False)
     capacity = db.Column(db.Integer, nullable=False, default=8)
     grade = db.Column(db.String(10))      # 宿管分配的年级
-    class_name = db.Column(db.String(10)) # 宿管分配的班级
-    combined_class = db.Column(db.String(10))  # 合班
+    class_name = db.Column(db.String(100))  # 宿管分配的班级（合班时存完整合班名，多个班用+拼接，不分主次）
+    combined_class = db.Column(db.String(100))  # 合班（兼容字段：与 class_name 同步；含+即合班宿舍）
+    combined_details = db.Column(db.Text)  # 合班详情JSON: [{"class_name":"07班","count":4},{"class_name":"08班","count":4}]
     notes = db.Column(db.Text)
     is_active = db.Column(db.Boolean, default=True)
     created_at = db.Column(db.DateTime, default=datetime.now)
@@ -51,6 +52,29 @@ class Room(db.Model):
     @property
     def occupancy_display(self):
         return f"{self.occupancy}/{self.capacity}"
+
+    @property
+    def is_combined(self):
+        """是否为合班宿舍：class_name 含多个班（+）即自动识别，无需手动设置"""
+        if self.class_name and '+' in self.class_name:
+            return True
+        return bool(self.combined_class and self.combined_class.strip())
+
+    @property
+    def class_list(self):
+        """班级列表（合班名自动拆分，不分主次）"""
+        if not self.class_name:
+            return []
+        return [c.strip() for c in self.class_name.split('+') if c.strip()]
+
+    @property
+    def combined_name(self):
+        """合班完整名称（兼容历史数据：合班名可能存于 combined_class）"""
+        if self.class_name and '+' in self.class_name:
+            return self.class_name
+        if self.combined_class and '+' in self.combined_class:
+            return self.combined_class
+        return None
 
 
 class BedAssignment(db.Model):

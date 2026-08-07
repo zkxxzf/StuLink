@@ -1,50 +1,124 @@
-﻿"""
-宿舍自动分配算法 V4.0 — 两阶段 + 7种情形逐级尝试
-
-Phase 1（选班后）: 计算 sum(ceil/6) 得到最多所需房间数
-Phase 2（选房后）: 按7种情形逐级尝试，找到第一个可行方案
-  情形1: 均≤6人，无合班
-  情形2: 均≤6人，有合班(合班≤6)
-  情形3: 6人间6人，8人间7人，无合班
-  情形4: 6人间6人，8人间7人，有合班(合班≤6)
-  情形5: 6人间6人，8人间8人，无合班
-  情形6: 6人间6人，8人间8人，有合班(合班≤6)
-  情形7: 6人间6人，8人间8人，有合班(合班≤8) — 极限模式
-
-确定情形后：按(楼栋,楼层,房号)顺序分配，同班级房间同楼层连续，合班居中。
 """
-# StuLink v1.6.1 2026-07-09
+宿舍自动分配算法 V5 — 均衡分配 + 最少合班
+
+================================================================================
+核心规则
+================================================================================
+R1: 男女生完全独立计算和分配
+R2: 同班各房间人数均衡（差异不超过1人）
+R3: 任何房间最终人数 >= 6
+R4: 合班最少化 — 每班最多1个合班宿舍，每间合班最多2个班
+R5: 合班条件 — 同性别 + 同年级 + 同班型(class_type)
+R6: 高年级(年份数字小=学长)住低楼层
+R7: 小序号班级分配小房号
+R8: 6人间=6人固定，8人间=6~8人灵活
+R9: 兜底 — 余量无法合班时：重分配/加房/吸收
+R10: 保留 keep_existing / clear_all 两种模式
+
+================================================================================
+算法流程
+================================================================================
+[1] 数据加载 → 按性别分组
+[2] 对每个性别独立执行:
+    [2.1] 年级排序(高年级先→低楼层) + 班级排序(班号升序)
+    [2.2] 房间排序(楼栋,楼层,房号)
+    [2.3] 计算每班房间需求(均衡数学)
+    [2.4] 顺序分配房间
+    [2.5] 余量处理(合班配对 → 重分配 → 吸收)
+[3] 合并结果，格式化输出
+"""
+# StuLink v1.7.0 2026-08-02
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 import math
-from collections import defaultdict, OrderedDict
-from app.models import Room, Student, ClassProfile
+import re
+import json
+from collections import defaultdict
+from app.models import Room, Student, ClassProfile, StudentAccommodation, BedAssignment
 from app.extensions import db
 
 
 # ============================================================================
-# 统一入口（与V3保持相同接口）
+# 防御性工具函数
+# ============================================================================
+
+def _ensure_room_beds(room_ids, logs=None):
+    """
+    确保指定房间的 BedAssignment 记录完整（与 capacity 匹配）
+    """
+    if not room_ids:
+        return 0
+
+    rooms = Room.query.filter(Room.id.in_(room_ids), Room.is_active == True).all()
+    fixed_count = 0
+
+    for room in rooms:
+        bed_count = BedAssignment.query.filter_by(room_id=room.id).count()
+        expected_beds = room.capacity
+
+        if bed_count < expected_beds:
+            existing_bed_nums = set(
+                b.bed_number for b in
+                BedAssignment.query.filter_by(room_id=room.id).all()
+            )
+            beds_to_create = [
+                BedAssignment(room_id=room.id, bed_number=bed_num)
+                for bed_num in range(1, expected_beds + 1)
+                if bed_num not in existing_bed_nums
+            ]
+            if beds_to_create:
+                db.session.add_all(beds_to_create)
+                fixed_count += len(beds_to_create)
+                if logs is not None:
+                    logs.append(f"[FIX] 房间 {room.building} {room.room_number} "
+                                f"({expected_beds}人间) 补充 {len(beds_to_create)} 个床位记录")
+        elif bed_count > expected_beds:
+            extra_beds = BedAssignment.query.filter(
+                BedAssignment.room_id == room.id,
+                BedAssignment.bed_number > expected_beds,
+                BedAssignment.student_id.is_(None)
+            ).all()
+            if extra_beds:
+                for bed in extra_beds:
+                    db.session.delete(bed)
+                if logs is not None:
+                    logs.append(f"[FIX] 房间 {room.building} {room.room_number} "
+                                f"删除 {len(extra_beds)} 个多余的空床位")
+
+    if fixed_count > 0:
+        if logs is not None:
+            logs.append(f"[FIX] 共修复 {fixed_count} 个床位记录")
+
+    return fixed_count
+
+
+# ============================================================================
+# 统一入口
 # ============================================================================
 
 def auto_assign_preview(selected_keys, selected_room_ids, mode='keep_existing',
-                        combine_confirmations=None, force_full_8=False, dry_run=True):
+                        combine_confirmations=None, force_full_8=False, dry_run=True,
+                        adjusted_assignments=None):
     """
-    预览/执行自动分配 V4
+    预览/执行自动分配 V5
 
-    参数同 V3:
+    参数:
         selected_keys: [{grade, class_name, gender}, ...]
         selected_room_ids: [room_id, ...]
         mode: 'keep_existing' | 'clear_all'
-        combine_confirmations: [{class1, class2, room_id}, ...]
-        force_full_8: True=允许情形7（极限模式）
+        combine_confirmations: 保留参数兼容性（V5不使用）
+        force_full_8: 保留参数兼容性
         dry_run: True=仅预览, False=写DB
+        adjusted_assignments: 用户手动调整后的分配方案
 
     返回: {success, logs, assignments, stats, needs_combine, combine_suggestions,
-            scenario, needs_level_upgrade, has_assigned, ...}
+            has_assigned, ...}
     """
     logs = []
     all_assignments = []
     total_stats = {
         'total_students': 0,
+        'rooms_needed_6': 0,
+        'rooms_needed_8': 0,
         'total_rooms_assigned': 0,
         'combined_rooms': 0,
         'unassigned_students': 0,
@@ -56,15 +130,16 @@ def auto_assign_preview(selected_keys, selected_room_ids, mode='keep_existing',
         total_students = sum(c['count'] for c in male_classes) + sum(c['count'] for c in female_classes)
         logs.append(f"[INFO] 本次分配共 {total_students} 名学生")
 
-        # ---- 2. 加载房间，按性别分组 ----
+        # ---- 2. 加载房间 ----
         all_rooms = _load_rooms(selected_room_ids)
+        _ensure_room_beds(selected_room_ids, logs)
+        db.session.commit()
 
-        # 已分配房间检测 - mode='keep_existing'时保留原有分配
+        # ---- 3. 已分配房间检测 ----
         has_assigned, assigned_info = _check_assigned(all_rooms)
-        
+
         if has_assigned and mode == 'keep_existing':
             logs.append(f"[WARN] 有 {len(assigned_info)} 间已分配，将保留并跳过")
-            # 从可用房间中移除已分配的房间（这些房间已有班级占用）
             male_rooms_raw = [r for r in all_rooms if r.gender in ('男', '不限') and not (r.class_name and r.class_name.strip())]
             female_rooms_raw = [r for r in all_rooms if r.gender in ('女', '不限') and not (r.class_name and r.class_name.strip())]
             logs.append(f"[INFO] 剩余可用房间: 男生{len(male_rooms_raw)}间, 女生{len(female_rooms_raw)}间")
@@ -75,8 +150,7 @@ def auto_assign_preview(selected_keys, selected_room_ids, mode='keep_existing',
                     r.grade = None
                     r.class_name = None
                     r.combined_class = None
-                # 同时清除这些房间的床位分配
-                from app.models import BedAssignment
+                    r.combined_details = None
                 room_ids = [r.id for r in all_rooms]
                 BedAssignment.query.filter(
                     BedAssignment.room_id.in_(room_ids),
@@ -85,37 +159,45 @@ def auto_assign_preview(selected_keys, selected_room_ids, mode='keep_existing',
             male_rooms_raw = [r for r in all_rooms if r.gender in ('男', '不限')]
             female_rooms_raw = [r for r in all_rooms if r.gender in ('女', '不限')]
         else:
-            # 无已分配或dry_run模式
             male_rooms_raw = [r for r in all_rooms if r.gender in ('男', '不限')]
             female_rooms_raw = [r for r in all_rooms if r.gender in ('女', '不限')]
 
-        # ---- Phase 1: 选班后估算 ----
-        male_max_rooms = sum(max(1, math.ceil(c['count'] / 6)) for c in male_classes if c['count'] > 0)
-        female_max_rooms = sum(max(1, math.ceil(c['count'] / 6)) for c in female_classes if c['count'] > 0)
-        male_total_students = sum(c['count'] for c in male_classes)
-        female_total_students = sum(c['count'] for c in female_classes)
-        logs.append(f"[Phase1] 男生: {male_total_students}人, 最多需{male_max_rooms}间(6人/间)")
-        logs.append(f"[Phase1] 女生: {female_total_students}人, 最多需{female_max_rooms}间(6人/间)")
-
-        # 床位校验
+        # ---- 4. 容量校验 ----
+        male_total = sum(c['count'] for c in male_classes)
+        female_total = sum(c['count'] for c in female_classes)
         male_beds = sum(r.capacity for r in male_rooms_raw)
         female_beds = sum(r.capacity for r in female_rooms_raw)
-        if male_total_students > 0 and male_beds < male_total_students:
-            logs.append(f"[ERROR] 男生床位不足！需{male_total_students}个，仅{male_beds}个")
-        if female_total_students > 0 and female_beds < female_total_students:
-            logs.append(f"[ERROR] 女生床位不足！需{female_total_students}个，仅{female_beds}个")
 
-        no_rooms_left = has_assigned and mode == 'keep_existing' and \
-                        len(male_rooms_raw) == 0 and len(female_rooms_raw) == 0
+        total_stats['rooms_needed_6'] = sum(math.ceil(c['count'] / 6) for c in male_classes + female_classes if c['count'] > 0)
+        total_stats['rooms_needed_8'] = sum(math.ceil(c['count'] / 8) for c in male_classes + female_classes if c['count'] > 0)
 
-        # ---- 加载班型信息 ----
-        all_classes_list = male_classes + female_classes
-        profiles = _load_class_profiles(all_classes_list)
+        insufficient_details = []
+        if male_total > 0 and male_beds < male_total:
+            shortage = male_total - male_beds
+            logs.append(f"[ERROR] 男生床位不足！需{male_total}个，仅{male_beds}个，差{shortage}个")
+            insufficient_details.append({'gender': '男', 'needed': male_total, 'available': male_beds, 'shortage': shortage})
+        if female_total > 0 and female_beds < female_total:
+            shortage = female_total - female_beds
+            logs.append(f"[ERROR] 女生床位不足！需{female_total}个，仅{female_beds}个，差{shortage}个")
+            insufficient_details.append({'gender': '女', 'needed': female_total, 'available': female_beds, 'shortage': shortage})
 
-        # ---- 处理各性别（多年级支持：先入校年级分在低楼层）----
+        if insufficient_details:
+            detail_msgs = [f"{d['gender']}生：需{d['needed']}个床位，仅{d['available']}个，差{d['shortage']}个" for d in insufficient_details]
+            return {
+                'success': False,
+                'error': '床位不足，无法分配。\n' + '\n'.join(detail_msgs) + '\n请增选宿舍后重试。',
+                'logs': logs,
+                'insufficient_details': insufficient_details,
+            }
+
+        no_rooms_left = has_assigned and mode == 'keep_existing' and len(male_rooms_raw) == 0 and len(female_rooms_raw) == 0
+
+        # ---- 5. 加载班型信息 ----
+        profiles = _load_class_profiles(male_classes + female_classes)
+
+        # ---- 6. 分性别独立分配 ----
         needs_combine = False
         combine_suggestions = []
-        overall_scenario = 0
 
         for gender_classes, gender_rooms, gender_label in [
             (male_classes, male_rooms_raw, '男'),
@@ -124,16 +206,19 @@ def auto_assign_preview(selected_keys, selected_room_ids, mode='keep_existing',
             if not gender_classes:
                 continue
             if not gender_rooms:
-                logs.append(f"[WARN] {gender_label}生无可用房间")
+                logs.append(f"[ERROR] {gender_label}生无可用房间，{sum(c['count'] for c in gender_classes)}人无法分配")
                 total_stats['unassigned_students'] += sum(c['count'] for c in gender_classes)
                 continue
 
-            gender_combine_groups = _build_combine_groups(gender_classes, profiles)
+            result = _allocate_gender_v5(gender_classes, gender_rooms, gender_label, profiles, logs)
 
-            result = _allocate_gender_v4(
-                gender_classes, gender_rooms, gender_label,
-                gender_combine_groups, combine_confirmations, force_full_8, logs
-            )
+            if not result['success']:
+                return {
+                    'success': False,
+                    'error': result.get('error', f'{gender_label}生分配失败'),
+                    'logs': logs,
+                    'stats': total_stats,
+                }
 
             all_assignments.extend(result['assignments'])
             total_stats['total_students'] += result['stats']['total_students']
@@ -141,31 +226,59 @@ def auto_assign_preview(selected_keys, selected_room_ids, mode='keep_existing',
             total_stats['combined_rooms'] += result['stats']['combined_rooms']
             total_stats['unassigned_students'] += result['stats']['unassigned_students']
 
-            if result.get('scenario', 0) > overall_scenario:
-                overall_scenario = result['scenario']
             if result.get('needs_combine'):
                 needs_combine = True
                 combine_suggestions.extend(result.get('combine_suggestions', []))
 
-        # ---- Phase 1 估算信息 ----
-        phase1_info = {
-            'male_max_rooms': male_max_rooms,
-            'female_max_rooms': female_max_rooms,
-            'male_total': male_total_students,
-            'female_total': female_total_students,
-        }
+        # 最终校验
+        if total_stats['unassigned_students'] > 0:
+            failure_msg = f"有{total_stats['unassigned_students']}人无法分配宿舍，请增选宿舍后重试"
+            logs.append(f"[ERROR] {failure_msg}")
+            return {'success': False, 'error': failure_msg, 'logs': logs, 'stats': total_stats}
 
-        # ---- 写DB ----
+        # ---- 7. 应用用户手动调整 ----
+        if adjusted_assignments and dry_run is False:
+            logs.append("[INFO] 应用用户手动调整的分配方案...")
+            room_map = {r.id: r for r in all_rooms}
+            adjusted = []
+            for aa in adjusted_assignments:
+                room = room_map.get(aa.get('room_id'))
+                if not room:
+                    continue
+                adjusted.append({
+                    'room': room,
+                    'grade': aa.get('grade', ''),
+                    'class_name': aa.get('class_name', ''),
+                    'gender': aa.get('gender', ''),
+                    'expected_count': aa.get('expected_count', 0),
+                    'is_combined': aa.get('is_combined', False),
+                    'combined_info': aa.get('combined_info', ''),
+                    'class_counts': aa.get('class_counts', []),
+                })
+            if adjusted:
+                all_assignments = adjusted
+                logs.append(f"[INFO] 已应用手动调整方案，共 {len(adjusted)} 间房间")
+
+        # ---- 8. 写DB ----
         if not dry_run and all_assignments:
             _write_to_db(all_assignments, all_rooms, logs)
             db.session.commit()
 
-        response = {
+        phase1_info = {
+            'male_max_rooms_6': sum(math.ceil(c['count'] / 6) for c in male_classes if c['count'] > 0),
+            'female_max_rooms_6': sum(math.ceil(c['count'] / 6) for c in female_classes if c['count'] > 0),
+            'male_max_rooms_8': sum(math.ceil(c['count'] / 8) for c in male_classes if c['count'] > 0),
+            'female_max_rooms_8': sum(math.ceil(c['count'] / 8) for c in female_classes if c['count'] > 0),
+            'male_total': male_total,
+            'female_total': female_total,
+        }
+
+        return {
             'success': True,
             'logs': logs,
             'assignments': _format_assignments(all_assignments),
             'stats': total_stats,
-            'scenario': overall_scenario,
+            'scenario': 0,
             'phase1': phase1_info,
             'has_assigned': has_assigned,
             'assigned_room_count': len(assigned_info),
@@ -173,1000 +286,501 @@ def auto_assign_preview(selected_keys, selected_room_ids, mode='keep_existing',
             'needs_combine': needs_combine,
             'combine_suggestions': combine_suggestions,
         }
-        return response
 
     except Exception as e:
         db.session.rollback()
         logs.append(f"[ERROR] 分配异常: {str(e)}")
+        import traceback
+        logs.append(f"[TRACE] {traceback.format_exc()}")
         return {'success': False, 'error': str(e), 'logs': logs}
 
 
 # ============================================================================
-# V4核心：单性别7种情形逐级尝试
+# V5 核心：单性别均衡分配
 # ============================================================================
 
-def _allocate_gender_v4(classes, rooms, gender, combine_groups,
-                         combine_confirmations, force_full_8, logs):
+def _allocate_gender_v5(classes, rooms, gender, profiles, logs):
     """
-    对单一性别执行 V4 算法：逐级尝试7种情形
+    对单一性别执行均衡分配
 
-    返回: {sufficient, assignments, stats, scenario, needs_combine, combine_suggestions, needs_level_upgrade}
-    """
-    total_students = sum(c['count'] for c in classes)
-    if total_students == 0:
-        return {
-            'sufficient': True, 'assignments': [], 'scenario': 0,
-            'stats': {'total_students': 0, 'total_rooms_assigned': 0, 'combined_rooms': 0, 'unassigned_students': 0},
-            'needs_combine': False, 'combine_suggestions': [], 'needs_level_upgrade': False,
-        }
+    参数:
+        classes: [{'grade','class_name','count','gender'}, ...]
+        rooms: [Room, ...] 已按(楼栋,楼层,房号)排序
+        gender: '男' | '女'
+        profiles: 班型信息字典
+        logs: 日志列表
 
-    # 分类房间
-    rooms_6 = [r for r in rooms if r.capacity == 6]
-    rooms_8 = [r for r in rooms if r.capacity == 8]
-    all_rooms_sorted = sorted(rooms, key=lambda r: (r.building or '', r.floor or 0, r.room_number or ''))
-
-    logs.append(f"[INFO] ===== {gender}生: {total_students}人, "
-                f"{len(rooms_6)}间6人间 + {len(rooms_8)}间8人间 = {len(rooms)}间 =====")
-
-    # 7种情形定义: (limit_6, limit_8, allow_combine, combine_limit)
-    scenarios = [
-        # (name, limit_6, limit_8, allow_combine, combine_limit)
-        ("情形1: ≤6人/间，不合班",      6, 6, False, 0),
-        ("情形2: ≤6人/间，合班≤6",      6, 6, True,  6),
-        ("情形3: 6人=6, 8人=7，不合班",  6, 7, False, 0),
-        ("情形4: 6人=6, 8人=7，合班≤6",  6, 7, True,  6),
-        ("情形5: 6人=6, 8人=8，不合班",  6, 8, False, 0),
-        ("情形6: 6人=6, 8人=8，合班≤6",  6, 8, True,  6),
-        ("情形7: 6人=6, 8人=8，合班≤8",  6, 8, True,  8),
-    ]
-
-    best_partial = None  # 跟踪最佳(未分配最少)的部分结果
-
-    # [安全] 防御性清理：确保本次所选房间的合班标记在进入场景循环前为None
-    # 注意：all_rooms_sorted 仅包含用户已选的房间（来自 selected_room_ids）
-    for r in all_rooms_sorted:
-        r.combined_class = None
-
-    for idx, (name, limit_6, limit_8, allow_combine, combine_limit) in enumerate(scenarios, 1):
-        # 快速容量检查
-        effective_capacity = len(rooms_6) * min(6, limit_6) + len(rooms_8) * min(8, limit_8)
-        if effective_capacity < total_students:
-            logs.append(f"[INFO] {name} → 跳过（有效容量{effective_capacity} < 需{total_students}）")
-            continue
-
-        logs.append(f"[INFO] 尝试 {name}...")
-
-        if allow_combine:
-            result = _try_allocate_with_combine(
-                classes, rooms_6, rooms_8, all_rooms_sorted,
-                limit_6, limit_8, combine_limit,
-                combine_groups, combine_confirmations, gender, logs
-            )
-        else:
-            result = _try_allocate_no_combine(
-                classes, rooms_6, rooms_8, all_rooms_sorted,
-                limit_6, limit_8, gender, logs
-            )
-
-        if result['sufficient']:
-            result['scenario'] = idx
-            logs.append(f"[OK] {gender}生 {name} 成功！场景{idx}")
-            return result
-        else:
-            logs.append(f"[INFO] {name} → 不足（{result['stats']['unassigned_students']}人无法分配）")
-            # 跟踪最佳部分结果
-            if best_partial is None or result['stats']['unassigned_students'] < best_partial['stats']['unassigned_students']:
-                best_partial = result
-                best_partial['scenario'] = idx
-
-    # 所有情形都失败 → 返回最佳部分结果
-    logs.append(f"[WARN] {gender}生所有情形均失败！返回最佳部分结果")
-    if best_partial:
-        best_partial['sufficient'] = False
-        return best_partial
-    return {
-        'sufficient': False,
-        'assignments': [],
-        'scenario': 0,
-        'stats': {
-            'total_students': total_students,
-            'total_rooms_assigned': 0,
-            'combined_rooms': 0,
-            'unassigned_students': total_students,
-        },
-        'needs_combine': False,
-        'combine_suggestions': [],
-    }
-
-
-# ============================================================================
-# 不合班分配（情形1, 3, 5）
-# ============================================================================
-
-def _try_allocate_no_combine(classes, rooms_6, rooms_8, all_rooms_sorted,
-                               limit_6, limit_8, gender, logs):
-    """
-    不合班分配：大班优先分配8人间→均衡分配人数→同楼层连续排房
-
-    步骤:
-      1. 计算每个班级需要的房间数（大班优先分配8人间）
-      2. 按楼栋/楼层/房号排序分配连续房间（大班优先）
-      3. 班内均衡分配人数（8人间可多分配）
+    返回: {success, assignments, stats, needs_combine, combine_suggestions, error}
     """
     assignments = []
-    total_students = sum(c['count'] for c in classes)
-    total_rooms = len(rooms_6) + len(rooms_8)
-    stats = {
-        'total_students': total_students,
-        'total_rooms_assigned': 0,
-        'combined_rooms': 0,
-        'unassigned_students': 0,
-    }
-
-    active_classes = [(cls, cls['count']) for cls in classes if cls['count'] > 0]
-    if not active_classes:
-        return {'sufficient': True, 'assignments': [], 'stats': stats,
-                'needs_combine': False, 'combine_suggestions': []}
-
-    logs.append(f"[DEBUG] {gender}生独立分配: {len(active_classes)}个班级, "
-                f"{len(rooms_6)}间6人间, {len(rooms_8)}间8人间")
-
-    # ---- 步骤1: 计算每班房间数（大班优先分配8人间）----
-    total_max_need = sum(max(1, math.ceil(count / 6)) for _, count in active_classes)
-    if limit_6 == 6 and limit_8 == 6 and total_max_need > total_rooms:
-        return {
-            'sufficient': False,
-            'assignments': [],
-            'stats': {'total_students': total_students, 'total_rooms_assigned': 0,
-                       'combined_rooms': 0, 'unassigned_students': total_students},
-            'needs_combine': False, 'combine_suggestions': [],
-        }
-
-    class_room_counts = _calc_class_room_counts(
-        active_classes, total_students, total_rooms, limit_6, limit_8,
-        len(rooms_6), len(rooms_8)
-    )
-
-    if sum(class_room_counts.values()) > total_rooms:
-        return {
-            'sufficient': False,
-            'assignments': [],
-            'stats': {'total_students': total_students, 'total_rooms_assigned': 0,
-                       'combined_rooms': 0, 'unassigned_students': total_students},
-            'needs_combine': False, 'combine_suggestions': [],
-        }
-
-    # ---- 步骤2: 按楼层连续分配具体房间（大班优先选8人间）----
-    free_rooms = list(all_rooms_sorted)
-
-    class_order = sorted(active_classes, key=lambda x: x[1], reverse=True)
-
-    class_assignments = {}
-    room_type_preference = {}
-
-    for cls, count in class_order:
-        key = _class_key(cls)
-        need = class_room_counts.get(key, 0)
-        if need == 0:
-            continue
-
-        logs.append(f"[DEBUG] 班级 {cls['class_name']}: {count}人, 需要{need}间")
-
-        # 大班优先分配8人间
-        if count >= limit_8 and len(rooms_8) > 0:
-            room_type_preference[key] = '8'
-            assigned = _pick_consecutive_rooms_by_type(free_rooms, need, prefer_8=True)
-        else:
-            room_type_preference[key] = '6'
-            assigned = _pick_consecutive_rooms(free_rooms, need)
-
-        class_assignments[key] = assigned
-
-        for r in assigned:
-            if r in free_rooms:
-                free_rooms.remove(r)
-
-    # ---- 步骤3: 班内均衡分配人数 ----
-    for cls, count in class_order:
-        key = _class_key(cls)
-        taken = class_assignments.get(key, [])
-        if not taken:
-            stats['unassigned_students'] += count
-            continue
-
-        limits = [_room_effective_cap(r, limit_6, limit_8) for r in taken]
-        total_limit = sum(limits)
-        actual = min(count, total_limit)
-
-        base = actual // len(taken)
-        rem = actual % len(taken)
-
-        for i, room in enumerate(taken):
-            expected = base + (1 if i < rem else 0)
-            if expected > limits[i]:
-                expected = limits[i]
-            assignments.append({
-                'room': room,
-                'grade': cls['grade'],
-                'class_name': cls['class_name'],
-                'expected_count': expected,
-                'gender': gender,
-                'is_combined': False,
-                'combined_info': '',
-            })
-
-        stats['total_rooms_assigned'] += len(taken)
-
-        remaining = count - actual
-        if remaining > 0:
-            stats['unassigned_students'] += remaining
-            logs.append(f"[DEBUG] 班级 {cls['class_name']}: {remaining}人未分配")
-
-    # ---- 容量平衡：如有未分配，尝试交换房间优化容量 ----
-    if stats['unassigned_students'] > 0:
-        logs.append(f"[DEBUG] 尝试容量平衡，{stats['unassigned_students']}人未分配")
-        for cls, count in class_order:
-            key = _class_key(cls)
-            if key not in class_assignments:
-                continue
-            taken = class_assignments[key]
-            limits = [_room_effective_cap(r, limit_6, limit_8) for r in taken]
-            total_cap = sum(limits)
-            if total_cap >= count:
-                continue
-            deficit = count - total_cap
-            for other_cls, other_count in class_order:
-                if deficit <= 0:
-                    break
-                other_key = _class_key(other_cls)
-                if other_key == key:
-                    continue
-                other_taken = class_assignments.get(other_key, [])
-                other_limits = [_room_effective_cap(r, limit_6, limit_8) for r in other_taken]
-                other_cap = sum(other_limits)
-                other_surplus = other_cap - other_count
-                if other_surplus <= 0:
-                    continue
-                for i, (r_self, lim_self) in enumerate(zip(taken, limits)):
-                    if deficit <= 0:
-                        break
-                    for j, (r_other, lim_other) in enumerate(zip(other_taken, other_limits)):
-                        if deficit <= 0:
-                            break
-                        if lim_other > lim_self and other_surplus - (lim_other - lim_self) >= 0:
-                            taken[i], other_taken[j] = r_other, r_self
-                            limits[i], other_limits[j] = lim_other, lim_self
-                            total_cap = sum(limits)
-                            deficit = count - total_cap
-                            other_surplus -= (lim_other - lim_self)
-                            break
-                class_assignments[key] = taken
-                class_assignments[other_key] = other_taken
-
-        assignments.clear()
-        stats['total_rooms_assigned'] = 0
-        stats['unassigned_students'] = 0
-        for cls, count in class_order:
-            key = _class_key(cls)
-            taken = class_assignments.get(key, [])
-            if not taken:
-                stats['unassigned_students'] += count
-                continue
-            limits = [_room_effective_cap(r, limit_6, limit_8) for r in taken]
-            total_limit = sum(limits)
-            actual = min(count, total_limit)
-            base = actual // len(taken)
-            rem = actual % len(taken)
-            for i, room in enumerate(taken):
-                expected = base + (1 if i < rem else 0)
-                if expected > limits[i]:
-                    expected = limits[i]
-                assignments.append({
-                    'room': room,
-                    'grade': cls['grade'],
-                    'class_name': cls['class_name'],
-                    'expected_count': expected,
-                    'gender': gender,
-                    'is_combined': False,
-                    'combined_info': '',
-                })
-            stats['total_rooms_assigned'] += len(taken)
-            remaining = count - actual
-            if remaining > 0:
-                stats['unassigned_students'] += remaining
-
-    sufficient = stats['unassigned_students'] == 0
-    return {
-        'sufficient': sufficient,
-        'assignments': assignments,
-        'stats': stats,
-        'needs_combine': False,
-        'combine_suggestions': [],
-    }
-
-
-def _pick_consecutive_rooms_by_type(free_rooms, need, prefer_8=True):
-    """
-    优先选择8人间的连续房间分配
-    """
-    if prefer_8:
-        rooms_8_filtered = [r for r in free_rooms if r.capacity == 8]
-        if len(rooms_8_filtered) >= need:
-            return _pick_consecutive_rooms(rooms_8_filtered, need)
-        assigned = _pick_consecutive_rooms(rooms_8_filtered, len(rooms_8_filtered))
-        remaining = need - len(assigned)
-        if remaining > 0:
-            remaining_rooms = [r for r in free_rooms if r not in assigned]
-            assigned.extend(_pick_consecutive_rooms(remaining_rooms, remaining))
-        return assigned
-    return _pick_consecutive_rooms(free_rooms, need)
-
-
-# ============================================================================
-# 含合班分配（情形2, 4, 6, 7）
-# ============================================================================
-
-def _try_allocate_with_combine(classes, rooms_6, rooms_8, all_rooms_sorted,
-                                 limit_6, limit_8, combine_limit,
-                                 combine_groups, combine_confirmations,
-                                 gender, logs):
-    """
-    含合班分配：
-      1. 先按不合班方式分配（使用ceil(total/limit)计算最小房间数）
-      2. 收集各班级剩余学生
-      3. 在同合班组内配对合班
-      4. 剩余房间分配给合班
-      5. 尽量最后一公里吸收
-    """
-    assignments = []
-    total_students = sum(c['count'] for c in classes)
-    total_rooms = len(rooms_6) + len(rooms_8)
-    stats = {
-        'total_students': total_students,
-        'total_rooms_assigned': 0,
-        'combined_rooms': 0,
-        'unassigned_students': 0,
-    }
     combine_suggestions = []
 
-    active_classes = [(cls, cls['count']) for cls in classes if cls['count'] > 0]
-    if not active_classes:
-        return {'sufficient': True, 'assignments': [], 'stats': stats,
-                'needs_combine': False, 'combine_suggestions': []}
+    # ---- 排序班级: 高年级(年份小)在前 + 班号升序 ----
+    sorted_classes = sorted(classes, key=lambda c: (_extract_grade_year(c['grade']), _extract_class_number(c['class_name'])))
 
-    # ---- 步骤1: 按最小值(ceil(total/limit))分配房间数 ----
-    # 使用高效上限: 8人间用limit_8, 6人间用limit_6
-    avg_limit = (len(rooms_6) * limit_6 + len(rooms_8) * limit_8) / max(total_rooms, 1)
-    min_total_rooms = math.ceil(total_students / avg_limit) if avg_limit > 0 else total_rooms
+    # ---- 排序房间: 按(楼栋,楼层,房号) ----
+    sorted_rooms = sorted(rooms, key=lambda r: (r.building or '', r.floor or 0, _room_number_int(r.room_number)))
 
-    # 实际使用的房间数 = min(总房间数, 按某个合理比例)
-    # 为了给合班留房间，使用 min_total_rooms 作为基础
-    rooms_to_use = min(total_rooms, max(min_total_rooms, total_rooms - 2))  # 留2间给合班
+    total_students = sum(c['count'] for c in sorted_classes)
+    total_rooms = len(sorted_rooms)
+    total_beds = sum(r.capacity for r in sorted_rooms)
 
-    class_room_counts = _calc_class_room_counts_compact(
-        active_classes, total_students, rooms_to_use, limit_6, limit_8,
-        len(rooms_6), len(rooms_8)
-    )
+    logs.append(f"[V5-{gender}] {total_students}人, {len(sorted_classes)}个班, {total_rooms}间房/{total_beds}床")
 
-    # ---- 步骤2: 分配具体房间 + 收集剩余 ----
-    free_rooms = list(all_rooms_sorted)
-    class_order = sorted(active_classes, key=lambda x: x[1], reverse=True)
+    # ---- 计算每班房间需求 ----
+    class_plans = []  # [{'cls', 'count', 'k', 'room_counts', 'remainder'}]
+    total_rooms_ideal = 0
+    total_rooms_absolute_min = 0
 
-    class_assignments = {}
-    unallocated = []  # [(cls_info, remaining_count), ...]
+    for cls in sorted_classes:
+        n = cls['count']
+        plan = _calc_room_plan(n)
+        plan['cls'] = cls
+        # 绝对最少房间: 保证余量<=8（可通过合班解决）
+        plan['abs_min_k'] = max(0, math.ceil(n / 8) - 1) if n > 8 else 0
+        class_plans.append(plan)
+        total_rooms_ideal += plan['k']
+        total_rooms_absolute_min += plan['abs_min_k']
 
-    for cls, count in class_order:
-        key = _class_key(cls)
-        need = class_room_counts.get(key, 0)
-        if need == 0:
-            unallocated.append((cls, count))
-            continue
+    logs.append(f"[V5-{gender}] 理想需{total_rooms_ideal}间, 绝对最少{total_rooms_absolute_min}间, 可用{total_rooms}间")
 
-        assigned = _pick_consecutive_rooms(free_rooms, need)
-        class_assignments[key] = assigned
-        for r in assigned:
-            if r in free_rooms:
-                free_rooms.remove(r)
+    # 硬性判断: 只有绝对最少房间数超过可用数才失败
+    if total_rooms_absolute_min > total_rooms:
+        return {
+            'success': False,
+            'error': f'{gender}生房间严重不足：至少需要{total_rooms_absolute_min}间（不含合班房），仅有{total_rooms}间。请增选宿舍。',
+            'assignments': [], 'stats': {'total_students': 0, 'total_rooms_assigned': 0, 'combined_rooms': 0, 'unassigned_students': total_students},
+        }
 
-    # ---- 步骤3: 均衡分配 + 收集剩余 ----
-    for cls, count in class_order:
-        key = _class_key(cls)
-        taken = class_assignments.get(key, [])
-        if not taken:
-            continue
+    # ---- 两阶段分配房间 ----
+    # Phase A: 先给每班分配绝对最少数房间（保证余量<=8）
+    # Phase B: 剩余房间按需求差额分配给需要更多房间的班级（均衡优化）
+    cursor = 0
 
-        limits = [_room_effective_cap(r, limit_6, limit_8) for r in taken]
-        total_limit = sum(limits)
-        actual = min(count, total_limit)
+    # Phase A: 绝对最少
+    for plan in class_plans:
+        k = plan['abs_min_k']
+        plan['k'] = k
+        if k > 0:
+            plan['rooms'] = sorted_rooms[cursor: cursor + k]
+            cursor += k
+            plan['room_counts'] = [8] * k  # 先按满员8计算
+            plan['remainder'] = plan['count'] - 8 * k
+        else:
+            plan['rooms'] = []
+            plan['room_counts'] = []
+            plan['remainder'] = plan['count']
 
-        base = actual // len(taken)
-        rem = actual % len(taken)
+    # Phase B: 用剩余房间均衡优化（给有余量且能消化的班级加房）
+    remaining_rooms = total_rooms - cursor
+    # 按"加一间房能减少多少余量"的优先级分配
+    upgradeable = [p for p in class_plans if p['remainder'] > 0 and p['k'] < p.get('count', 0) // 6]
+    # 优先给余量大的班级加房
+    upgradeable.sort(key=lambda p: p['remainder'], reverse=True)
 
-        for i, room in enumerate(taken):
-            expected = base + (1 if i < rem else 0)
-            if expected > limits[i]:
-                expected = limits[i]
+    for plan in upgradeable:
+        if remaining_rooms <= 0:
+            break
+        # 加一间房后能否让所有房间>=6?
+        new_k = plan['k'] + 1
+        n = plan['count']
+        if n >= 6 * new_k:  # 加房后每间至少6人
+            plan['k'] = new_k
+            plan['rooms'] = sorted_rooms[cursor: cursor + 1] + plan.get('rooms', [])
+            # 重新排序房间(保持楼层顺序)
+            plan['rooms'].sort(key=lambda r: (r.building or '', r.floor or 0, _room_number_int(r.room_number)))
+            cursor += 1
+            remaining_rooms -= 1
+            # 重新均衡计算
+            plan['room_counts'] = _distribute_evenly(n, new_k)
+            plan['remainder'] = n - sum(plan['room_counts'])
+
+    # 对所有班级重新校验room_counts（确保每间房6~8人）
+    for plan in class_plans:
+        if plan['k'] > 0 and plan.get('rooms'):
+            n = plan['count']
+            k = plan['k']
+            if 6 * k <= n <= 8 * k:
+                # 可以完美均衡，无余量
+                plan['room_counts'] = _distribute_evenly(n, k)
+                plan['remainder'] = 0
+            else:
+                # 无法均衡（n>8k 或 n<6k），按满员8分配，产生余量
+                plan['room_counts'] = [8] * k
+                plan['remainder'] = n - 8 * k
+
+    # 剩余房间作为合班/兜底备用
+    spare_rooms = sorted_rooms[cursor:]
+    logs.append(f"[V5-{gender}] 常规分配{cursor}间, 备用{len(spare_rooms)}间(用于合班)")
+
+    # ---- 处理余量(合班) ----
+    remainder_plans = [p for p in class_plans if p.get('remainder', 0) > 0]
+
+    if remainder_plans:
+        logs.append(f"[V5-{gender}] {len(remainder_plans)}个班有余量需处理: " +
+                    ", ".join(f"{p['cls']['grade']}{p['cls']['class_name']}(余{p['remainder']}人)" for p in remainder_plans))
+
+        combine_result = _handle_remainders(remainder_plans, class_plans, spare_rooms, gender, profiles, logs)
+        assignments.extend(combine_result['assignments'])
+        combine_suggestions.extend(combine_result.get('combine_suggestions', []))
+        spare_rooms = combine_result['remaining_spare']
+
+    # ---- 生成常规分配结果 ----
+    for plan in class_plans:
+        cls = plan['cls']
+        room_counts = plan.get('room_counts', [])
+        plan_rooms = plan.get('rooms', [])
+
+        for i, room in enumerate(plan_rooms):
+            count = room_counts[i] if i < len(room_counts) else 0
+            if count <= 0:
+                continue
             assignments.append({
                 'room': room,
                 'grade': cls['grade'],
                 'class_name': cls['class_name'],
-                'expected_count': expected,
                 'gender': gender,
+                'expected_count': count,
                 'is_combined': False,
                 'combined_info': '',
             })
 
-        stats['total_rooms_assigned'] += len(taken)
+    # ---- 统计 ----
+    combined_count = sum(1 for a in assignments if a.get('is_combined'))
+    assigned_students = sum(a['expected_count'] for a in assignments)
+    unassigned = total_students - assigned_students
 
-        remaining = count - actual
-        if remaining > 0:
-            unallocated.append((cls, remaining))
+    needs_combine = len(combine_suggestions) > 0
 
-    # ---- 步骤4: 合班配对 ----
-    if unallocated and free_rooms:
-        pairs, suggestions, used_keys = _find_combine_pairs(
-            unallocated, combine_groups, free_rooms,
-            combine_confirmations, gender, combine_limit,
-            class_assignments=class_assignments
-        )
+    logs.append(f"[V5-{gender}] 完成: {len(assignments)}间房, 合班{combined_count}间, 未分配{unassigned}人")
 
-        for pair in pairs:
-            room = pair['room']
-            c1 = pair['class1']
-            c2 = pair.get('class2')
-            combined_name = pair.get('combined_name') or \
-                           f"{c1['class_name']}+{c2['class_name']}" if c2 else c1['class_name']
-            limit = _room_effective_cap(room, limit_6, limit_8)
-            expected = min(pair['combined_count'], min(limit, combine_limit))
-
-            assignments.append({
-                'room': room,
-                'grade': c1['grade'],
-                'class_name': combined_name,
-                'expected_count': expected,
-                'gender': gender,
-                'is_combined': True,
-                'combined_info': combined_name,
-            })
-            stats['total_rooms_assigned'] += 1
-            stats['combined_rooms'] += 1
-            if room in free_rooms:
-                free_rooms.remove(room)
-
-        # 重新计算未分配
-        stats['unassigned_students'] = 0
-        for cls_info, remaining in unallocated:
-            key = _class_key(cls_info)
-            if key not in used_keys:
-                stats['unassigned_students'] += remaining
-
-        # ---- 最后一公里吸收 ----
-        if stats['unassigned_students'] > 0 and not combine_confirmations:
-            _last_mile_absorb(assignments, unallocated, used_keys,
-                              combine_groups, limit_6, limit_8, stats)
-
-        if suggestions and not combine_confirmations:
-            combine_suggestions = suggestions
-            return {
-                'sufficient': False,
-                'assignments': assignments,
-                'stats': stats,
-                'needs_combine': True,
-                'combine_suggestions': suggestions,
-            }
-    else:
-        stats['unassigned_students'] = sum(r for _, r in unallocated)
-
-    sufficient = stats['unassigned_students'] == 0
     return {
-        'sufficient': sufficient,
+        'success': True,
         'assignments': assignments,
-        'stats': stats,
-        'needs_combine': False,
+        'stats': {
+            'total_students': total_students,
+            'total_rooms_assigned': len(assignments),
+            'combined_rooms': combined_count,
+            'unassigned_students': max(0, unassigned),
+        },
+        'needs_combine': needs_combine,
         'combine_suggestions': combine_suggestions,
     }
 
 
 # ============================================================================
-# 房间数计算
+# 房间需求计算（核心数学）
 # ============================================================================
 
-def _calc_class_room_counts(active_classes, total_students, total_rooms,
-                              limit_6, limit_8, count_6, count_8):
+def _calc_room_plan(n):
     """
-    按比例计算每班的房间数（不合班场景）
+    计算一个班级(n人)的房间分配计划
 
-    返回: {class_key: room_count}
+    规则:
+    - 6人间固定住6人, 8人间住6~8人
+    - 所有房间人数 >= 6
+    - 均衡: 各房间人数差异不超过1
+
+    返回: {'count', 'k', 'room_counts', 'remainder'}
     """
-    counts = {}
-    allocated = 0
-    total_max_need = 0
-    per_class_info = []
+    if n <= 0:
+        return {'count': 0, 'k': 0, 'room_counts': [], 'remainder': 0}
 
-    for cls, count in active_classes:
-        # 使用当前情形的最大有效容量估算（而非固定6）
-        max_limit = max(limit_6, limit_8)
-        max_need = max(1, math.ceil(count / max_limit))
-        ideal = max(1, round(count / total_students * total_rooms)) if total_students > 0 else 0
-        per_class_info.append({
-            'cls': cls,
-            'count': count,
-            'max_need': max_need,
-            'ideal': ideal,
-        })
-        total_max_need += max_need
+    k_min = math.ceil(n / 8)   # 最少房间数(每间最多8人)
+    k_max = n // 6             # 最多房间数(每间最少6人)
 
-    # 确定最终房间数
-    if total_max_need <= total_rooms:
-        # 房间充足：每班给max_need
-        for info in per_class_info:
-            counts[_class_key(info['cls'])] = info['max_need']
+    if k_min <= k_max:
+        # 正常: 使用 k_min 间房, 均衡分配
+        k = k_min
+        room_counts = _distribute_evenly(n, k)
+        remainder = 0
     else:
-        # 房间不够：按ideal分配
-        for info in per_class_info:
-            counts[_class_key(info['cls'])] = info['ideal']
-        allocated = sum(counts.values())
-
-        # 调整到 total_rooms
-        if allocated > total_rooms:
-            excess = allocated - total_rooms
-            sorted_keys = sorted(counts.keys(), key=lambda k: counts[k], reverse=True)
-            for k in sorted_keys:
-                if excess <= 0:
-                    break
-                if counts[k] > 1:
-                    counts[k] -= 1
-                    excess -= 1
-        elif allocated < total_rooms:
-            deficit = total_rooms - allocated
-            sorted_info = sorted(per_class_info, key=lambda x: x['count'], reverse=True)
-            for info in sorted_info:
-                if deficit <= 0:
-                    break
-                k = _class_key(info['cls'])
-                if counts.get(k, 0) < info['max_need']:
-                    counts[k] = counts.get(k, 0) + 1
-                    deficit -= 1
-
-        # ---- 容量保证：确保每班房间数×平均容量 ≥ 人数 ----
-        if total_rooms > 0:
-            avg_eff_cap = (count_6 * limit_6 + count_8 * limit_8) / total_rooms
+        # 冲突: 人数无法让所有房间>=6
+        # 用 k_max 间房, 每间尽量装满(8人), 产生余量
+        k = max(k_max, 1) if n > 8 else 1
+        if k == k_max and k_max > 0:
+            room_counts = [8] * k_max
+            remainder = n - 8 * k_max
         else:
-            avg_eff_cap = 6
-        for info in sorted(per_class_info, key=lambda x: x['count'], reverse=False):
-            k = _class_key(info['cls'])
-            current = counts.get(k, 0)
-            if current * avg_eff_cap >= info['count']:
-                continue
-            need = max(1, math.ceil(info['count'] / avg_eff_cap))
-            deficit = need - current
-            for other in sorted(per_class_info, key=lambda x: x['count'], reverse=True):
-                if deficit <= 0:
-                    break
-                ok = _class_key(other['cls'])
-                if ok == k:
-                    continue
-                other_rooms = counts.get(ok, 0)
-                if other_rooms > 1 and (other_rooms - 1) * avg_eff_cap >= other['count']:
-                    counts[ok] -= 1
-                    counts[k] = counts.get(k, 0) + 1
-                    deficit -= 1
+            # n <= 8 的特殊情况
+            room_counts = [n] if n >= 6 else []
+            remainder = 0 if n >= 6 else n
 
-    return counts
+    return {'count': n, 'k': k, 'room_counts': room_counts, 'remainder': remainder}
 
 
-def _calc_class_room_counts_compact(active_classes, total_students, rooms_to_use,
-                                      limit_6, limit_8, count_6, count_8):
-    """
-    紧凑模式房间数计算（含合班场景，留空间给合班）
-
-    使用 ceil(count / max_limit) 作为每班最多房间数（max_limit = max(limit_6, limit_8)）
-    确保为合班预留至少 2 间房间
-    """
-    max_limit = max(limit_6, limit_8)
-    # 预留合班房间：rooms_to_use 已预留2间，这里再轻量预留
-    reserve = max(1, min(rooms_to_use // 8, 3))
-    allocatable = rooms_to_use - reserve
-
-    counts = {}
-    total_max_need = 0
-    per_class_info = []
-
-    for cls, count in active_classes:
-        max_need = max(1, math.ceil(count / max_limit))  # 用max_limit而非固定6
-        ideal = max(1, round(count / total_students * allocatable)) if total_students > 0 else 0
-        per_class_info.append({
-            'cls': cls,
-            'count': count,
-            'max_need': max_need,
-            'ideal': min(ideal, max_need),
-        })
-        total_max_need += max_need
-
-    for info in per_class_info:
-        counts[_class_key(info['cls'])] = info['ideal']
-
-    allocated = sum(counts.values())
-
-    # 调整到 allocatable
-    if allocated > allocatable:
-        excess = allocated - allocatable
-        sorted_keys = sorted(counts.keys(), key=lambda k: counts[k], reverse=True)
-        for k in sorted_keys:
-            if excess <= 0:
-                break
-            if counts[k] > 1:
-                counts[k] -= 1
-                excess -= 1
-    elif allocated < allocatable:
-        deficit = allocatable - allocated
-        sorted_info = sorted(per_class_info, key=lambda x: x['count'], reverse=True)
-        for info in sorted_info:
-            if deficit <= 0:
-                break
-            k = _class_key(info['cls'])
-            if counts.get(k, 0) < info['max_need']:
-                counts[k] = counts.get(k, 0) + 1
-                deficit -= 1
-
-    # ---- 容量保证（紧凑模式）----
-    if allocatable > 0:
-        avg_eff_cap = (count_6 * limit_6 + count_8 * limit_8) / max(allocatable, 1)
-    else:
-        avg_eff_cap = 6
-    for info in sorted(per_class_info, key=lambda x: x['count'], reverse=False):
-        k = _class_key(info['cls'])
-        current = counts.get(k, 0)
-        if current * avg_eff_cap >= info['count']:
-            continue
-        need = max(1, math.ceil(info['count'] / avg_eff_cap))
-        deficit = need - current
-        for other in sorted(per_class_info, key=lambda x: x['count'], reverse=True):
-            if deficit <= 0:
-                break
-            ok = _class_key(other['cls'])
-            if ok == k:
-                continue
-            other_rooms = counts.get(ok, 0)
-            if other_rooms > 1 and (other_rooms - 1) * avg_eff_cap >= other['count']:
-                counts[ok] -= 1
-                counts[k] = counts.get(k, 0) + 1
-                deficit -= 1
-
-    return counts
-
-
-# ============================================================================
-# 楼层连续房间分配
-# ============================================================================
-
-def _pick_consecutive_rooms(free_rooms, need):
-    """
-    从空闲房间中选择 need 间，尽量同楼层连续。
-
-    策略:
-      1. 按(楼栋, 楼层)分组
-      2. 在组内找连续的 need 间
-      3. 如果找不到，选最长的连续段
-      4. 如果都不够，按房号排序贪心取
-    """
-    if need <= 0 or not free_rooms:
+def _distribute_evenly(n, k):
+    """将n人均衡分配到k个房间，差异不超过1"""
+    if k <= 0:
         return []
+    base = n // k
+    extra = n % k
+    # extra间房住(base+1)人, 其余住base人
+    return [base + 1] * extra + [base] * (k - extra)
 
-    if need >= len(free_rooms):
-        return list(free_rooms)
 
-    # 按(楼栋, 楼层, 房号)分组排序
+# ============================================================================
+# 余量处理（合班逻辑）
+# ============================================================================
+
+def _handle_remainders(remainder_plans, all_plans, spare_rooms, gender, profiles, logs):
+    """
+    处理有余量的班级: 合班配对 → 重分配 → 吸收
+
+    返回: {'assignments', 'combine_suggestions', 'remaining_spare'}
+    """
+    assignments = []
+    combine_suggestions = []
+    used_spare = set()
+
+    # 按合班条件分组: (grade, class_type)
     groups = defaultdict(list)
-    for r in free_rooms:
-        floor_key = (r.building or '', r.floor or 0)
-        groups[floor_key].append(r)
+    for plan in remainder_plans:
+        cls = plan['cls']
+        profile = profiles.get(f"{cls['grade']}:{cls['class_name']}")
+        class_type = (profile.class_type or 'default') if profile else 'default'
+        gkey = f"{cls['grade']}|{class_type}"
+        groups[gkey].append(plan)
 
-    for key in groups:
-        groups[key].sort(key=lambda r: _room_number_int(r.room_number))
+    unpaired = []  # 配对后仍有余量的班级
 
-    # 尝试在每个楼层组内找连续段
-    best = None
-    best_len = 0
+    for gkey, group in groups.items():
+        # 按余量降序排列
+        group.sort(key=lambda p: p['remainder'], reverse=True)
+        paired = set()
 
-    for floor_key, room_list in groups.items():
-        if len(room_list) < need:
-            continue
-        # 滑窗找连续段
-        for i in range(len(room_list) - need + 1):
-            segment = room_list[i:i + need]
-            if _is_consecutive_numbers(segment):
-                return segment
-            if len(segment) > best_len:
-                best = segment
-                best_len = len(segment)
-
-    # 找不到完全连续的 → 在同楼层内尽量多取
-    if best and len(best) == need:
-        return best
-
-    # 跨楼层时选最紧凑的房间集（最小化楼层跨度）
-    all_sorted = sorted(free_rooms, key=lambda r: (
-        r.building or '', r.floor or 0, _room_number_int(r.room_number)))
-
-    if need >= len(all_sorted):
-        return list(all_sorted)
-
-    # 滑窗找房号跨度最小的 need 间（同楼层 > 相邻楼层 > 远距离）
-    best_span = float('inf')
-    best_start = 0
-    for i in range(len(all_sorted) - need + 1):
-        first = all_sorted[i]
-        last = all_sorted[i + need - 1]
-        # 跨度 = 楼栋变化*10000 + 楼层变化*1000 + 房号差
-        b_diff = (1 if (last.building or '') != (first.building or '') else 0)
-        f_diff = abs((last.floor or 0) - (first.floor or 0))
-        span = b_diff * 10000 + f_diff * 1000
-        if span < best_span:
-            best_span = span
-            best_start = i
-            if span == 0:  # 同楼栋同楼层，最优
-                break
-    return all_sorted[best_start:best_start + need]
-
-
-def _room_number_int(room_number):
-    """房间号转整数，用于排序"""
-    try:
-        return int(room_number)
-    except (ValueError, TypeError):
-        return 0
-
-
-def _is_consecutive_numbers(rooms):
-    """检查房间号是否连续（整数意义上的连续）"""
-    if len(rooms) <= 1:
-        return True
-    nums = []
-    for r in rooms:
-        n = _room_number_int(r.room_number)
-        if n == 0:
-            return False
-        nums.append(n)
-    nums.sort()
-    for i in range(1, len(nums)):
-        if nums[i] != nums[i-1] + 1:
-            return False
-    return True
-
-
-def _room_effective_cap(room, limit_6, limit_8):
-    """计算房间在指定情形下的有效容量"""
-    if room.capacity == 6:
-        return min(6, limit_6)
-    else:
-        return min(room.capacity, limit_8)
-
-
-# ============================================================================
-# 合班配对（支持多班合并，<=6人上限）
-# ============================================================================
-
-def _find_combine_pairs(unallocated_by_class, combine_groups, room_pool,
-                         combine_confirmations, gender, combine_limit=6,
-                         class_assignments=None):
-    """
-    在同组内寻找最优合班配对
-
-    unallocated_by_class: [(cls_info, remaining), ...]
-    combine_groups: {group_key: [class_key, ...]}
-    room_pool: 剩余可用房间列表
-    combine_limit: 合班人数上限 (6 or 8)
-    class_assignments: 已有班级房间分配，用于选择合班房间中间位置
-
-    支持多班合并: 同一合班组内多个班级剩余之和 ≤ combine_limit 可合并到一间
-    返回: (applied_pairs, suggestions, used_class_keys)
-    """
-    used_keys = set()
-    applied_pairs = []
-    suggestions = []
-
-    # 先处理用户确认的合班
-    confirmed = combine_confirmations or []
-    for conf in confirmed:
-        c1 = conf.get('class1', {})
-        c2 = conf.get('class2', {})
-        room_id = conf.get('room_id')
-        room = next((r for r in room_pool if r.id == room_id), None)
-
-        if room and c1 and c2:
-            key1 = _class_key(c1)
-            key2 = _class_key(c2)
-            rem1 = next((r for cls, r in unallocated_by_class if _class_key(cls) == key1), 0)
-            rem2 = next((r for cls, r in unallocated_by_class if _class_key(cls) == key2), 0)
-
-            applied_pairs.append({
-                'room': room,
-                'class1': c1, 'class2': c2,
-                'combined_count': rem1 + rem2,
-            })
-            used_keys.add(key1)
-            used_keys.add(key2)
-            if room in room_pool:
-                room_pool.remove(room)
-
-    if confirmed:
-        return applied_pairs, [], used_keys
-
-    # 按合班分组归类剩余
-    groups_remaining = defaultdict(list)
-    for cls_info, remaining in unallocated_by_class:
-        key = _class_key(cls_info)
-        found = False
-        for gkey, keys in combine_groups.items():
-            if key in keys:
-                groups_remaining[gkey].append((cls_info, remaining))
-                found = True
-                break
-        if not found:
-            groups_remaining['__default__'].append((cls_info, remaining))
-
-    # 在每个组内：贪心合并
-    for gkey, group_items in groups_remaining.items():
-        if not group_items:
-            continue
-        group_items.sort(key=lambda x: x[1], reverse=True)
-        group_used = set()
-
-        i = 0
-        while i < len(group_items):
-            cls1, rem1 = group_items[i]
-            key1 = _class_key(cls1)
-            if key1 in group_used:
-                i += 1
+        # 贪心配对: 大余量配小余量, 使和>=6且<=8
+        for i in range(len(group)):
+            if i in paired:
                 continue
+            pi = group[i]
+            best_j = None
+            best_diff = 999
 
-            best_combo = [i]
-            best_sum = rem1
-
-            # 贪心：尝试加入更多班级直到总和接近 combine_limit
-            for j in range(i + 1, len(group_items)):
-                cls_j, rem_j = group_items[j]
-                key_j = _class_key(cls_j)
-                if key_j in group_used:
+            for j in range(i + 1, len(group)):
+                if j in paired:
                     continue
-                if best_sum + rem_j <= combine_limit:
-                    best_combo.append(j)
-                    best_sum += rem_j
-                    if best_sum == combine_limit:
-                        break
+                pj = group[j]
+                total = pi['remainder'] + pj['remainder']
+                if 6 <= total <= 8:
+                    diff = abs(total - 7)  # 越接近7越好(均衡)
+                    if diff < best_diff:
+                        best_diff = diff
+                        best_j = j
 
-            if len(best_combo) >= 2:
-                combo_classes = [group_items[idx][0] for idx in best_combo]
-                key1 = _class_key(combo_classes[0])
-                key2 = _class_key(combo_classes[1]) if len(combo_classes) >= 2 else None
-                
-                room = _pick_combine_room(room_pool, class_assignments, key1, key2)
+            if best_j is not None:
+                pj = group[best_j]
+                paired.add(i)
+                paired.add(best_j)
+
+                # 创建合班宿舍
+                combined_count = pi['remainder'] + pj['remainder']
+                cls_i = pi['cls']
+                cls_j = pj['cls']
+                combined_name = f"{cls_i['class_name']}+{cls_j['class_name']}"
+
+                # 找一间备用房(优先8人间)
+                room = _pick_spare_room(spare_rooms, used_spare, combined_count)
                 if room:
-                    room_pool.remove(room)
-                    combined_name = '+'.join(c['class_name'] for c in combo_classes)
-                    for idx in best_combo:
-                        group_used.add(_class_key(group_items[idx][0]))
-                        used_keys.add(_class_key(group_items[idx][0]))
-
-                    applied_pairs.append({
+                    used_spare.add(room.id)
+                    assignments.append({
                         'room': room,
-                        'class1': combo_classes[0],
-                        'class2': combo_classes[1] if len(combo_classes) >= 2 else combo_classes[0],
-                        'combined_count': best_sum,
-                        'combined_name': combined_name,
+                        'grade': cls_i['grade'],
+                        'class_name': combined_name,
+                        'gender': gender,
+                        'expected_count': combined_count,
+                        'is_combined': True,
+                        'combined_info': f"{cls_i['grade']} {combined_name}",
+                        'class_counts': [
+                            {'class_name': cls_i['class_name'], 'count': pi['remainder']},
+                            {'class_name': cls_j['class_name'], 'count': pj['remainder']},
+                        ],
                     })
+                    logs.append(f"[V5-{gender}] 合班: {cls_i['grade']} {combined_name} "
+                                f"({pi['remainder']}+{pj['remainder']}={combined_count}人) → {room.building} {room.room_number}")
                 else:
-                    combo_classes = [group_items[idx][0] for idx in best_combo]
-                    suggestions.append({
-                        'class1': {
-                            'grade': combo_classes[0]['grade'],
-                            'class_name': combo_classes[0]['class_name'],
-                            'count': group_items[best_combo[0]][1],
-                            'gender': gender,
-                        },
-                        'class2': {
-                            'grade': combo_classes[1]['grade'] if len(combo_classes) >= 2 else '',
-                            'class_name': combo_classes[1]['class_name'] if len(combo_classes) >= 2 else '',
-                            'count': group_items[best_combo[1]][1] if len(combo_classes) >= 2 else 0,
-                            'gender': gender,
-                        },
-                        'combined_count': best_sum,
-                        'candidate_rooms': [],
-                    })
-                i += 1
-            else:
-                i += 1
+                    # 无备用房: 尝试吸收
+                    unpaired.append(pi)
+                    unpaired.append(pj)
+                    logs.append(f"[WARN-{gender}] 合班 {combined_name} 无可用房间")
 
-    return applied_pairs, suggestions, used_keys
+                combine_suggestions.append({
+                    'class1': f"{cls_i['grade']} {cls_i['class_name']}",
+                    'class2': f"{cls_j['grade']} {cls_j['class_name']}",
+                    'count': combined_count,
+                })
 
+        # 未配对的班级
+        for idx in range(len(group)):
+            if idx not in paired:
+                unpaired.append(group[idx])
 
-def _pick_combine_room(room_pool, class_assignments=None, class1_key=None, class2_key=None):
-    """
-    从可用房间中选一个合班房间
-    优先选择两个班级房间之间的中间位置
-    """
-    if not room_pool:
-        return None
-
-    if class_assignments and class1_key and class2_key:
-        c1_rooms = class_assignments.get(class1_key, [])
-        c2_rooms = class_assignments.get(class2_key, [])
-        
-        if c1_rooms and c2_rooms:
-            c1_last = sorted(c1_rooms, key=lambda r: (r.building or '', r.floor or 0, r.room_number or ''))[-1]
-            c2_first = sorted(c2_rooms, key=lambda r: (r.building or '', r.floor or 0, r.room_number or ''))[0]
-            
-            c1_key = (c1_last.building or '', c1_last.floor or 0)
-            c2_key = (c2_first.building or '', c2_first.floor or 0)
-            
-            if c1_key == c2_key:
-                c1_room_num = _room_number_int(c1_last.room_number)
-                c2_room_num = _room_number_int(c2_first.room_number)
-                
-                for room in room_pool:
-                    if (room.building or '', room.floor or 0) == c1_key:
-                        room_num = _room_number_int(room.room_number)
-                        if c1_room_num < room_num < c2_room_num:
-                            return room
-
-    mid = len(room_pool) // 2
-    return room_pool[mid]
-
-
-def _last_mile_absorb(assignments, unallocated, used_keys,
-                       combine_groups, limit_6, limit_8, stats):
-    """
-    最后一公里：尝试把未分配学生塞进同合班组已有空位的房间
-    """
-    for cls_info, remaining in list(unallocated):
-        key = _class_key(cls_info)
-        if key in used_keys:
+    # ---- 处理未配对的余量 ----
+    for plan in unpaired:
+        if plan['remainder'] <= 0:
             continue
+        cls = plan['cls']
+        rem = plan['remainder']
+
+        # 策略1: 从本班已有房间匀人 + 备用房 → 凑>=6
+        resolved = _try_redistribute(plan, spare_rooms, used_spare, gender, assignments, logs)
+        if resolved:
+            continue
+
+        # 策略2: 吸收到本班已有房间(不超容量8)
+        absorbed = _try_absorb(plan, gender, logs)
+        if absorbed:
+            continue
+
+        # 策略3: 实在无法处理，用备用房(即使<6)
+        room = _pick_spare_room(spare_rooms, used_spare, rem)
+        if room:
+            used_spare.add(room.id)
+            assignments.append({
+                'room': room,
+                'grade': cls['grade'],
+                'class_name': cls['class_name'],
+                'gender': gender,
+                'expected_count': rem,
+                'is_combined': False,
+                'combined_info': '',
+            })
+            logs.append(f"[WARN-{gender}] {cls['grade']} {cls['class_name']} 余{rem}人单独安排(不足6人)")
+        else:
+            logs.append(f"[ERROR-{gender}] {cls['grade']} {cls['class_name']} 余{rem}人无法安排")
+
+    remaining_spare = [r for r in spare_rooms if r.id not in used_spare]
+    return {
+        'assignments': assignments,
+        'combine_suggestions': combine_suggestions,
+        'remaining_spare': remaining_spare,
+    }
+
+
+def _try_redistribute(plan, spare_rooms, used_spare, gender, assignments, logs):
+    """
+    重分配策略: 从本班已有房间匀人 + 一间备用房, 凑成>=6人的新房间
+
+    条件: 本班已有房间中有"可抽出"的人(即该房间人数>6)
+    """
+    cls = plan['cls']
+    rem = plan['remainder']
+    need_from_others = 6 - rem  # 需要从其他房间抽多少人
+
+    if need_from_others <= 0:
+        # 余量本身>=6, 直接给一间备用房
+        room = _pick_spare_room(spare_rooms, used_spare, rem)
+        if room:
+            used_spare.add(room.id)
+            assignments.append({
+                'room': room,
+                'grade': cls['grade'],
+                'class_name': cls['class_name'],
+                'gender': gender,
+                'expected_count': rem,
+                'is_combined': False,
+                'combined_info': '',
+            })
+            logs.append(f"[V5-{gender}] {cls['grade']} {cls['class_name']} 余{rem}人独立安排")
+            plan['remainder'] = 0
+            return True
+        return False
+
+    # 从本班room_counts中抽人
+    room_counts = plan.get('room_counts', [])
+    available_to_pull = sum(max(0, c - 6) for c in room_counts)
+
+    if available_to_pull < need_from_others:
+        return False  # 抽不出足够的人
+
+    # 执行抽人
+    pulled = 0
+    for i in range(len(room_counts)):
+        if pulled >= need_from_others:
+            break
+        can_pull = room_counts[i] - 6
+        if can_pull > 0:
+            take = min(can_pull, need_from_others - pulled)
+            room_counts[i] -= take
+            pulled += take
+
+    # 分配备用房
+    new_count = rem + pulled  # = 6
+    room = _pick_spare_room(spare_rooms, used_spare, new_count)
+    if room:
+        used_spare.add(room.id)
+        assignments.append({
+            'room': room,
+            'grade': cls['grade'],
+            'class_name': cls['class_name'],
+            'gender': gender,
+            'expected_count': new_count,
+            'is_combined': False,
+            'combined_info': '',
+        })
+        plan['remainder'] = 0
+        logs.append(f"[V5-{gender}] {cls['grade']} {cls['class_name']} 重分配: "
+                    f"余{rem}人+抽出{pulled}人={new_count}人 → {room.building} {room.room_number}")
+        return True
+
+    return False
+
+
+def _try_absorb(plan, gender, logs):
+    """
+    吸收策略: 将余量塞入本班已有房间(不超容量8)
+    """
+    cls = plan['cls']
+    rem = plan['remainder']
+    room_counts = plan.get('room_counts', [])
+    rooms = plan.get('rooms', [])
+
+    if not room_counts or not rooms:
+        return False
+
+    # 计算本班已有房间还能容纳多少人(上限8)
+    total_absorbable = sum(max(0, 8 - c) for c in room_counts)
+    if total_absorbable < rem:
+        return False
+
+    # 均匀吸收
+    remaining = rem
+    for i in range(len(room_counts)):
         if remaining <= 0:
+            break
+        space = 8 - room_counts[i]
+        if space > 0:
+            take = min(space, remaining)
+            room_counts[i] += take
+            remaining -= take
+
+    if remaining == 0:
+        plan['remainder'] = 0
+        logs.append(f"[V5-{gender}] {cls['grade']} {cls['class_name']} 余{rem}人已吸收到本班房间")
+        return True
+
+    return False
+
+
+def _pick_spare_room(spare_rooms, used_spare, need_count):
+    """从备用房间中选一间合适的(优先容量匹配的)"""
+    best = None
+    for r in spare_rooms:
+        if r.id in used_spare:
             continue
-
-        # 找该班级所在的合班组
-        cls_gkey = None
-        for gkey, keys in combine_groups.items():
-            if key in keys:
-                cls_gkey = gkey
-                break
-        if not cls_gkey:
-            continue
-
-        group_keys = set(combine_groups.get(cls_gkey, []))
-
-        for a in assignments:
-            if remaining <= 0:
-                break
-            if a.get('is_combined'):
-                continue
-            a_key = f"{a['grade']}:{a['class_name']}"
-            if a_key not in group_keys:
-                continue
-
-            limit = _room_effective_cap(a['room'], limit_6, limit_8)
-            spare = limit - a['expected_count']
-            if spare > 0:
-                take = min(spare, remaining)
-                a['expected_count'] += take
-                remaining -= take
-
-        if remaining <= 0:
-            used_keys.add(key)
-
-    # 重新计算未分配
-    unassigned = 0
-    for cls_info, remaining in unallocated:
-        key2 = _class_key(cls_info)
-        if key2 not in used_keys:
-            unassigned += remaining
-    stats['unassigned_students'] = unassigned
+        if r.capacity >= need_count:
+            if best is None or r.capacity < best.capacity:
+                best = r
+    # 如果没有容量完全匹配的，返回任何可用房间
+    if best is None:
+        for r in spare_rooms:
+            if r.id not in used_spare:
+                return r
+    return best
 
 
 # ============================================================================
-# 辅助函数（与V3共用的部分）
+# 数据加载工具函数
 # ============================================================================
 
 def _group_by_gender(selected_keys, logs):
@@ -1178,6 +792,11 @@ def _group_by_gender(selected_keys, logs):
         valid_classes = set(get_dict_values('class'))
     except Exception:
         valid_grades, valid_classes = set(), set()
+
+    # 一次性查询所有住校学生ID
+    boarding_ids = [sa.student_id for sa in StudentAccommodation.query.filter(
+        StudentAccommodation.boarding_type == '住校'
+    ).all()]
 
     male_list, female_list = [], []
     male_map, female_map = {}, {}
@@ -1193,10 +812,18 @@ def _group_by_gender(selected_keys, logs):
             continue
         if gender not in ('男', '女'):
             continue
+        if class_name == '已转出':
+            continue
 
-        count = Student.query.filter_by(
-            grade=grade, class_name=class_name,
-            gender=gender, boarding_type='住校'
+        count = Student.query.filter(
+            Student.grade == grade,
+            Student.class_name == class_name,
+            Student.gender == gender,
+            Student.id.in_(boarding_ids) if boarding_ids else False,
+            db.or_(
+                Student.enrollment_status.is_(None),
+                ~Student.enrollment_status.in_(['学籍已转出', '借读后离校'])
+            )
         ).count()
 
         if count == 0:
@@ -1224,7 +851,7 @@ def _load_rooms(room_ids):
     if not room_ids:
         return []
     rooms = Room.query.filter(Room.id.in_(room_ids), Room.is_active == True).all()
-    rooms.sort(key=lambda r: (r.building or '', r.floor or 0, r.room_number or ''))
+    rooms.sort(key=lambda r: (r.building or '', r.floor or 0, _room_number_int(r.room_number)))
     return rooms
 
 
@@ -1256,40 +883,68 @@ def _load_class_profiles(classes):
     return profiles
 
 
-def _build_combine_groups(classes, profiles):
-    """
-    构建合班分组：同组才能合班
-    group_key = grade|class_type
-    合班限制：同性别、同年级、同班型（强基/卓越分开）
-    """
-    groups = defaultdict(list)
-    for cls in classes:
-        key = _class_key(cls)
-        profile = profiles.get(f"{cls['grade']}:{cls['class_name']}")
-        if profile:
-            ct = profile.class_type or 'default'
-            gkey = f"{cls['grade']}|{ct}"
-        else:
-            gkey = f"{cls['grade']}|default"
-        groups[gkey].append(key)
-    return dict(groups)
+# ============================================================================
+# 排序工具函数
+# ============================================================================
+
+def _room_number_int(room_number):
+    """房间号转整数，用于排序"""
+    try:
+        return int(room_number)
+    except (ValueError, TypeError):
+        return 0
+
+
+def _extract_class_number(class_name):
+    """从班名提取数字用于排序，如 '01班' -> 1, '10班' -> 10"""
+    if not class_name:
+        return 9999
+    m = re.search(r'(\d+)', class_name)
+    return int(m.group(1)) if m else 9999
+
+
+def _extract_grade_year(grade):
+    """从年级字符串提取年份，如 '2024级' -> 2024"""
+    if not grade:
+        return 9999
+    m = re.search(r'(\d+)', grade)
+    return int(m.group(1)) if m else 9999
 
 
 def _class_key(cls):
     return f"{cls['grade']}:{cls['class_name']}"
 
 
+# ============================================================================
+# 输出函数
+# ============================================================================
+
 def _write_to_db(assignments, all_rooms, logs):
-    """将分配结果写入 Room 表，合班标记统一为'合班'（与手动设置一致）"""
+    """将分配结果写入 Room 表"""
     for a in assignments:
         room = a['room']
         room.grade = a.get('grade', '') or None
-        room.class_name = a.get('class_name', '') or None
         room.gender = a.get('gender', room.gender or '')
+
         if a.get('is_combined'):
-            room.combined_class = '合班'
+            combined_name = a.get('class_name', '')
+            primary_class = combined_name.split('+')[0].strip() if '+' in combined_name else combined_name
+            room.class_name = primary_class or None
+            room.combined_class = combined_name or '合班'
+
+            class_counts = a.get('class_counts', [])
+            if class_counts:
+                room.combined_details = json.dumps(class_counts, ensure_ascii=False)
+            else:
+                parts = combined_name.split('+')
+                count_per = a.get('expected_count', 0) // len(parts) if parts else 0
+                details = [{'class_name': p.strip(), 'count': count_per} for p in parts]
+                room.combined_details = json.dumps(details, ensure_ascii=False)
         else:
+            room.class_name = a.get('class_name', '') or None
             room.combined_class = None
+            room.combined_details = None
+
     logs.append(f"[DONE] 已写入 {len(assignments)} 个房间分配")
 
 
@@ -1300,6 +955,7 @@ def _format_assignments(assignments):
         'room_number': a['room'].room_number,
         'building': a['room'].building,
         'floor': a['room'].floor,
+        'capacity': a['room'].capacity,
         'grade': a.get('grade', ''),
         'class_name': a.get('class_name', ''),
         'gender': a.get('gender', ''),
@@ -1307,18 +963,3 @@ def _format_assignments(assignments):
         'is_combined': a.get('is_combined', False),
         'combined_info': a.get('combined_info', ''),
     } for a in assignments]
-
-
-def _sort_grades_by_enrollment(grades):
-    """
-    按入学时间排序年级：先入校年级在前（数字小的年级先入校）
-    如：2024级 → 2025级 → 2026级
-    """
-    def grade_sort_key(grade):
-        try:
-            return int(grade.replace('级', ''))
-        except:
-            return 9999
-    return sorted(grades, key=grade_sort_key)
-
-

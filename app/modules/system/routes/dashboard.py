@@ -1,4 +1,4 @@
-﻿# StuLink v1.6.1 2026-07-09
+# StuLink v1.7.0 2026-08-02
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 """系统管理模块概览页"""
 from flask import Blueprint, render_template, redirect, url_for

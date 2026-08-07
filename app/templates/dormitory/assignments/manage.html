@@ -35,7 +35,79 @@
 {% endif %}
 
 {% if need_filter %}
-<div class="alert alert-warning"><i class="bi bi-exclamation-triangle"></i> 请先选择年级和班级</div>
+<div class="card mb-3">
+    <div class="card-header bg-warning bg-opacity-10">
+        <h6 class="mb-0"><i class="bi bi-exclamation-triangle text-warning"></i> 未分配宿舍住校生统计</h6>
+    </div>
+    <div class="card-body">
+        <div class="row mb-3">
+            <div class="col-md-3">
+                <div class="alert alert-warning mb-0 py-2">
+                    <strong>总未分配：</strong><span class="fs-5">{{ total_unassigned }}</span> 人
+                </div>
+            </div>
+            <div class="col-md-3">
+                <div class="alert alert-primary mb-0 py-2">
+                    <i class="bi bi-gender-male"></i> 男生：<strong>{{ total_unassigned_male }}</strong> 人
+                </div>
+            </div>
+            <div class="col-md-3">
+                <div class="alert alert-danger mb-0 py-2">
+                    <i class="bi bi-gender-female"></i> 女生：<strong>{{ total_unassigned_female }}</strong> 人
+                </div>
+            </div>
+            <div class="col-md-3 text-end">
+                <button type="button" class="btn btn-sm btn-warning" id="btnAutoAssignAll"
+                        onclick="autoAssignAll()">
+                    <i class="bi bi-lightning-charge"></i> 全部自动分配
+                </button>
+            </div>
+        </div>
+        {% if unassigned_stats %}
+        <div class="table-responsive">
+            <table class="table table-sm table-bordered table-hover align-middle">
+                <thead class="table-light">
+                    <tr>
+                        <th style="width: 100px;">年级</th>
+                        <th style="width: 100px;">班级</th>
+                        <th style="width: 120px;" class="text-center"><i class="bi bi-gender-male text-primary"></i> 男生</th>
+                        <th style="width: 120px;" class="text-center"><i class="bi bi-gender-female text-danger"></i> 女生</th>
+                        <th style="width: 120px;" class="text-center">合计</th>
+                        <th style="width: 120px;" class="text-center">操作</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for item in unassigned_stats %}
+                    <tr>
+                        <td>{{ item.grade }}</td>
+                        <td>{{ item.class_name }}</td>
+                        <td class="text-center">
+                            {% if item.male > 0 %}<span class="badge bg-primary">{{ item.male }}</span>
+                            {% else %}<span class="text-muted">-</span>{% endif %}
+                        </td>
+                        <td class="text-center">
+                            {% if item.female > 0 %}<span class="badge bg-danger">{{ item.female }}</span>
+                            {% else %}<span class="text-muted">-</span>{% endif %}
+                        </td>
+                        <td class="text-center"><strong>{{ item.total }}</strong></td>
+                        <td class="text-center">
+                            <a href="{{ url_for('assignments.manage', grade=item.grade, class_name=item.class_name) }}" class="btn btn-sm btn-outline-primary">
+                                <i class="bi bi-arrow-right"></i> 去分配
+                            </a>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% else %}
+        <div class="text-center text-muted py-4">
+            <i class="bi bi-check-circle text-success" style="font-size: 48px;"></i>
+            <p class="mt-2 mb-0">所有住校生都已分配宿舍</p>
+        </div>
+        {% endif %}
+    </div>
+</div>
 {% else %}
 <!-- 操作栏 -->
 <div class="d-flex justify-content-between align-items-center mb-2">
@@ -135,6 +207,9 @@
                                 <div class="bed-number">{{ bd.bed.bed_number }}床 {% if bd.bed.bed_number % 2 == 1 %}(下铺){% else %}(上铺){% endif %}</div>
                                 {% if bd.student %}
                                 <div class="bed-student" style="cursor:grab;">{{ bd.student.name }}</div>
+                                {% if rd.room.combined_class and rd.room.combined_class.strip() %}
+                                <div style="font-size:10px;color:#6366f1;font-weight:500;">{{ bd.student.class_name }}</div>
+                                {% endif %}
                                 <div style="font-size:10px;color:#ef4444;cursor:pointer;" title="点击移除" onclick="event.stopPropagation();removeBed({{ bd.bed.id }}, '{{ bd.student.name }}')"><i class="bi bi-x-circle"></i> 移除</div>
                                 <div style="font-size:9px;color:#9ca3af;">按住拖拽可换位</div>
                                 {% else %}
@@ -163,6 +238,25 @@
                 <input type="text" class="form-control form-control-sm mb-2" id="studentFilter"
                        placeholder="输入姓名或学号搜索...">
                 <div id="studentListModal"></div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- 全部自动分配结果弹窗（可复制文字） -->
+<div class="modal fade" id="resultModal" tabindex="-1">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header bg-success text-white">
+                <h6 class="modal-title"><i class="bi bi-check-circle"></i> 分配结果</h6>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <pre id="resultModalContent" style="white-space:pre-wrap;word-break:break-all;font-size:13px;max-height:60vh;overflow-y:auto;user-select:text;cursor:text;background:#f8f9fa;padding:12px;border-radius:6px;"></pre>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-outline-secondary btn-sm" onclick="copyResultText()"><i class="bi bi-clipboard"></i> 复制全部</button>
+                <button type="button" class="btn btn-primary btn-sm" data-bs-dismiss="modal" onclick="location.reload()">关闭</button>
             </div>
         </div>
     </div>
@@ -445,6 +539,77 @@ function renderStudentList(filter) {
     });
     if(!html) html = '<div class="text-center text-muted py-3">没有可分配的学生</div>';
     $('#studentListModal').html(html);
+}
+
+/* 全部自动分配 */
+function autoAssignAll() {
+    if (!confirm('确定要为全校所有未分配住校生自动分配床位吗？\n\n' +
+                 '分配规则：\n' +
+                 '1. 按年级降序（高年级优先）、班级升序依次分配\n' +
+                 '2. 合班宿舍参与分配，先分配的班级从1号床开始\n' +
+                 '3. 同性别学生分配到同性别的宿舍\n' +
+                 '4. 每个班级在多个宿舍间均衡分配\n\n' +
+                 '此操作不可撤销。')) {
+        return;
+    }
+
+    var btn = $('#btnAutoAssignAll');
+    btn.prop('disabled', true).html(
+        '<span class="spinner-border spinner-border-sm"></span> 分配中...'
+    );
+
+    $.ajax({
+        url: '{{ url_for("assignments.auto_assign_all") }}',
+        method: 'POST',
+        contentType: 'application/json',
+        headers: { 'X-CSRFToken': csrfToken },
+        data: JSON.stringify({}),
+        success: function(res) {
+            var msg = res.message;
+            if (res.class_results && res.class_results.length > 0) {
+                var detail = res.class_results.filter(function(c) {
+                    return c.assigned > 0 || c.remaining > 0;
+                }).map(function(c) {
+                    var line = c.grade + c.class_name + ': 分配' + c.assigned + '人';
+                    if (c.remaining > 0) {
+                        line += '，剩余' + c.remaining + '人';
+                        if (c.reason) line += '（' + c.reason + '）';
+                    }
+                    return line;
+                });
+                if (detail.length > 0) {
+                    msg += '\n\n各班级明细：\n' + detail.join('\n');
+                }
+            }
+            // 用可复制的弹窗代替 alert
+            $('#resultModalContent').text(msg);
+            new bootstrap.Modal('#resultModal').show();
+        },
+        error: function(xhr) {
+            var errorMsg = xhr.responseJSON ? xhr.responseJSON.message : '请求失败';
+            alert(errorMsg);
+            btn.prop('disabled', false).html(
+                '<i class="bi bi-lightning-charge"></i> 全部自动分配'
+            );
+        }
+    });
+}
+
+/* 复制结果文本 */
+function copyResultText() {
+    var text = $('#resultModalContent').text();
+    navigator.clipboard.writeText(text).then(function() {
+        alert('已复制到剪贴板');
+    }).catch(function() {
+        // 备用方案
+        var ta = document.createElement('textarea');
+        ta.value = text;
+        document.body.appendChild(ta);
+        ta.select();
+        document.execCommand('copy');
+        document.body.removeChild(ta);
+        alert('已复制到剪贴板');
+    });
 }
 </script>
 {% endblock %}

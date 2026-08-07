@@ -1,10 +1,10 @@
-﻿"""用户-班级多对多关联：一个人可管多个班，一个班最多3个班主任"""
+"""用户-班级多对多关联：一个人可管多个班，一个班最多3个班主任"""
 from app.extensions import db
 
 
 class UserClassLink(db.Model):
     """用户与班级的多对多关联"""
-# StuLink v1.6.1 2026-07-09
+# StuLink v1.7.0 2026-08-02
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
     __tablename__ = 'user_class_links'
 

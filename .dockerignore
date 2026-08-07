@@ -30,3 +30,5 @@ Dockerfile
 docker-compose.yml
 DEPLOY_NAS.md
 .gitignore
+_tmp_*
+data

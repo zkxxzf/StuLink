@@ -1,10 +1,10 @@
-﻿"""权限组模型：定义用户组及其菜单/范围权限"""
+"""权限组模型：定义用户组及其菜单/范围权限"""
 from app.extensions import db
 
 
 class PermissionGroup(db.Model):
     """权限组：用户只能通过组获得权限，不允许单独设置"""
-# StuLink v1.6.1 2026-07-09
+# StuLink v1.7.0 2026-08-02
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
     __tablename__ = 'permission_groups'
 

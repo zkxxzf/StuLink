@@ -3,49 +3,13 @@
 {% block content %}
 <h4 class="fw-bold mb-3"><i class="bi bi-bar-chart-line"></i> 统计报表</h4>
 
-<!-- 宿舍概况卡片 -->
-<div class="row g-3 mb-4">
-    <div class="col-sm-6 col-lg-3">
-        <div class="card stat-card">
-            <div class="card-body text-center">
-                <div class="stat-number text-primary">{{ dorm_stats.total_rooms }}</div>
-                <div class="stat-label">宿舍总数</div>
-            </div>
-        </div>
-    </div>
-    <div class="col-sm-6 col-lg-3">
-        <div class="card stat-card">
-            <div class="card-body text-center">
-                <div class="stat-number text-success">{{ dorm_stats.occupied_beds }}</div>
-                <div class="stat-label">已用床位</div>
-            </div>
-        </div>
-    </div>
-    <div class="col-sm-6 col-lg-3">
-        <div class="card stat-card">
-            <div class="card-body text-center">
-                <div class="stat-number text-warning">{{ dorm_stats.empty_beds }}</div>
-                <div class="stat-label">空余床位</div>
-            </div>
-        </div>
-    </div>
-    <div class="col-sm-6 col-lg-3">
-        <div class="card stat-card">
-            <div class="card-body text-center">
-                <div class="stat-number text-info">{{ dorm_stats.occupancy_rate }}%</div>
-                <div class="stat-label">床位使用率</div>
-            </div>
-        </div>
-    </div>
-</div>
-
 <!-- Tab导航 -->
 <ul class="nav nav-tabs mb-3">
     {% if scope_type in ('school',) or not scope_type %}
     <li class="nav-item">
         <a class="nav-link {% if tab == 'school' %}active{% endif %}"
            href="{{ url_for('statistics.index', tab='school') }}">
-            <i class="bi bi-building"></i> 全校统计报表
+            <i class="bi bi-building"></i> 全校统计
         </a>
     </li>
     {% endif %}
@@ -53,21 +17,21 @@
     <li class="nav-item">
         <a class="nav-link {% if tab == 'grade' %}active{% endif %}"
            href="{{ url_for('statistics.index', tab='grade', grade=sel_grade) }}">
-            <i class="bi bi-layers"></i> 年级统计报表
+            <i class="bi bi-layers"></i> 年级统计
         </a>
     </li>
     {% endif %}
     <li class="nav-item">
         <a class="nav-link {% if tab == 'class' %}active{% endif %}"
            href="{{ url_for('statistics.index', tab='class', grade=sel_grade) }}">
-            <i class="bi bi-people"></i> 班级统计报表
+            <i class="bi bi-people"></i> 班级统计
         </a>
     </li>
     {% if current_user.has_role('admin', 'dorm_manager', 'grade_leader', 'school_viewer') %}
     <li class="nav-item">
         <a class="nav-link {% if tab == 'rooms' %}active{% endif %}"
            href="{{ url_for('statistics.index', tab='rooms') }}">
-            <i class="bi bi-diagram-3"></i> 宿舍分配明细
+            <i class="bi bi-diagram-3"></i> 宿舍明细
         </a>
     </li>
     {% endif %}
@@ -75,7 +39,7 @@
     <li class="nav-item">
         <a class="nav-link {% if tab == 'import' %}active{% endif %}"
            href="{{ url_for('statistics.index', tab='import') }}">
-            <i class="bi bi-upload"></i> 宿舍数据导入
+            <i class="bi bi-upload"></i> 导入导出
         </a>
     </li>
     {% endif %}
@@ -155,29 +119,6 @@
 
 <!-- Tab: 年级统计 -->
 {% if tab == 'grade' and per_grade_stats %}
-<div class="row g-3 mb-4">
-    {% set gs = per_grade_stats[0] if per_grade_stats else {} %}
-    {% if gs %}
-    <div class="col-sm-4">
-        <div class="card stat-card"><div class="card-body text-center">
-            <div class="stat-number text-primary">{{ gs.class_count }}</div>
-            <div class="stat-label">{{ gs.grade }} 班级数</div>
-        </div></div>
-    </div>
-    <div class="col-sm-4">
-        <div class="card stat-card"><div class="card-body text-center">
-            <div class="stat-number text-success">{{ gs.total }}</div>
-            <div class="stat-label">学生总数</div>
-        </div></div>
-    </div>
-    <div class="col-sm-4">
-        <div class="card stat-card"><div class="card-body text-center">
-            <div class="stat-number text-info">{{ gs.boarding }}</div>
-            <div class="stat-label">住校人数</div>
-        </div></div>
-    </div>
-    {% endif %}
-</div>
 <div class="card">
     <div class="card-header"><h6 class="mb-0">{{ sel_grade or '全部年级' }} - 班级明细</h6></div>
     <div class="card-body p-0"><div class="table-responsive">
@@ -295,22 +236,13 @@
         <button class="btn btn-sm btn-outline-success" onclick="exportRoomExcel()">
             <i class="bi bi-file-earmark-excel"></i> 导出Excel
         </button>
+        <a class="btn btn-sm btn-outline-info" href="{{ url_for('statistics.export_bed_detail', grade=sel_grade) }}">
+            <i class="bi bi-file-earmark-spreadsheet"></i> 导出床铺明细
+        </a>
     </div>
-</div>
-
-<div class="row g-2 mb-3">
-    <div class="col-4"><div class="stat-card card p-2 text-center">
-        <div class="stat-number text-primary">{{ room_total_rooms }}</div>
-        <div class="stat-label">已分配房间</div>
-    </div></div>
-    <div class="col-4"><div class="stat-card card p-2 text-center">
-        <div class="stat-number text-success">{{ room_total_beds }}</div>
-        <div class="stat-label">可用床位数</div>
-    </div></div>
-    <div class="col-4"><div class="stat-card card p-2 text-center">
-        <div class="stat-number text-info">{{ room_total_boarders }}</div>
-        <div class="stat-label">住校生总数</div>
-    </div></div>
+    <div class="text-muted small">
+        已分配 {{ room_total_rooms }} 间宿舍，共 {{ room_total_beds }} 床位，住校生 {{ room_total_boarders }} 人
+    </div>
 </div>
 
 {% if not room_tree %}

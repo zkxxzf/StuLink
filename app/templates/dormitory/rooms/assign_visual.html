@@ -416,16 +416,20 @@ function loadData() {
             allRooms = data.rooms || [];
             allClasses = data.classes || [];
             
-            // 初始化分配关系
+            // 初始化分配关系（合班房 class_name 含多个班，拆分到各班级显示，不分主次）
             allRooms.forEach(function(room) {
                 if (room.grade && room.class_name) {
-                    var key = room.grade + '|' + room.class_name;
-                    if (!assignments[room.id]) {
-                        assignments[room.id] = [];
-                    }
-                    if (!assignments[room.id].includes(key)) {
-                        assignments[room.id].push(key);
-                    }
+                    room.class_name.split('+').forEach(function(cn) {
+                        cn = (cn || '').trim();
+                        if (!cn) return;
+                        var key = room.grade + '|' + cn;
+                        if (!assignments[room.id]) {
+                            assignments[room.id] = [];
+                        }
+                        if (!assignments[room.id].includes(key)) {
+                            assignments[room.id].push(key);
+                        }
+                    });
                 }
                 if (room.is_combined) {
                     combinedRooms.add(room.id);
@@ -790,6 +794,7 @@ function initEventHandlers() {
     $('#clearAll').click(function() {
         if (confirm('确定要清除所有已分配的宿舍吗？此操作无法撤销。')) {
             assignments = {};
+            combinedRooms.clear();
             selectedRoomId = null;
             renderClassList();
             renderRoomList();

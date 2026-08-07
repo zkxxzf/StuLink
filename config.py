@@ -1,4 +1,4 @@
-﻿# StuLink v1.6.1 2026-07-09
+# StuLink v1.7.0 2026-08-02
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 import os
 import secrets
@@ -31,7 +31,7 @@ def _get_secret_key():
 
 class Config:
     SECRET_KEY = _get_secret_key()
-    # 数据库路径：优先用环境变量，其次 data/dormitory.db（兼容现有部署）
+    # 主库路径：优先用环境变量，其次 data/system.db（多库架构：主库 + dormitory/history 绑定库）
     SQLALCHEMY_DATABASE_URI = os.environ.get(
         'DATABASE_URL',
         'sqlite:///' + os.path.join(BASE_DIR, 'data', 'system.db')

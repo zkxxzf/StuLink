@@ -1,9 +1,9 @@
-﻿"""
+"""
 数据库迁移脚本：为学生表添加毕业学校相关字段
 - graduation_school_code: 毕业学校代码（如0440）
 - graduation_school: 毕业学校名称
 """
-# StuLink v1.6.1 2026-07-09
+# StuLink v1.7.0 2026-08-02
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 import sys
 import os

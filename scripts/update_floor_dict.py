@@ -1,4 +1,4 @@
-﻿"""更新楼层字典：从'X 楼'改为'X 层'"""
+"""更新楼层字典：从'X 楼'改为'X 层'"""
 import os
 import sys
 
@@ -34,7 +34,7 @@ with app.app_context():
     db.session.commit()
     print('\n楼层字典已更新完成！')
 
-# StuLink v1.6.1 2026-07-09
+# StuLink v1.7.0 2026-08-02
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 
 

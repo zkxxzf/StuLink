@@ -8,8 +8,7 @@
 </div>
 
 <div class="row g-3">
-    {% set grades = ['2023级', '2024级', '2025级'] %}
-    {% for grade in grades %}
+    {% for grade in settings.keys() %}
     {% set gs = settings.get(grade, {}) %}
     <div class="col-md-4">
         <div class="card h-100 {% if gs.is_graduated %}border-secondary bg-light{% endif %}">
@@ -69,8 +68,10 @@ function graduate(grade) {
                 btn.innerHTML = '<i class="bi bi-mortarboard"></i> 设为毕业';
             }
         },
-        error: function() {
-            alert('操作失败');
+        error: function(xhr) {
+            var msg = '操作失败';
+            try { var res = JSON.parse(xhr.responseText); if (res.message) msg = res.message; } catch(e) {}
+            alert(msg);
             btn.disabled = false;
             btn.innerHTML = '<i class="bi bi-mortarboard"></i> 设为毕业';
         }

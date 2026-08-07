@@ -1,5 +1,6 @@
-﻿# StuLink v1.6.1 2026-07-09
+# StuLink v1.7.0 2026-08-02
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
+import re
 from flask import Blueprint, render_template, request, flash, redirect, url_for, send_file
 from markupsafe import Markup
 from flask_login import login_required, current_user
@@ -16,6 +17,17 @@ bp = Blueprint('statistics', __name__, url_prefix='/statistics')
 SCOPE_CLASS = 'class'    # 班主任：只看所管班级
 SCOPE_GRADE = 'grade'    # 年级长：只看所管年级
 SCOPE_SCHOOL = 'school'  # 全校组/admin：看全部
+
+# 标准班级名匹配模式：包含数字+"班"的（如 01班、2024级01班）
+# 非标准班级：未分班、不分班、转出、转进、借读等
+_VALID_CLASS_PATTERN = re.compile(r'\d+班')
+
+
+def _is_valid_class(class_name):
+    """判断是否为标准班级名"""
+    if not class_name:
+        return False
+    return bool(_VALID_CLASS_PATTERN.search(class_name))
 
 
 def _get_scope():
@@ -43,6 +55,8 @@ def _build_per_class_stats(filter_grade=None, filter_classes=None):
         q = q.filter(Student.grade == filter_grade)
 
     results = q.all()
+    # 过滤非标准班级（未分班、不分班、转出等）
+    results = [r for r in results if _is_valid_class(r[1])]
     if filter_classes:
         allowed = {(g, c) for g, c in filter_classes}
         results = [r for r in results if (r[0], r[1]) in allowed]
@@ -255,7 +269,7 @@ def index():
         for room in rooms:
             g = room.grade or ''
             gender = room.gender or ''
-            cn = room.class_name or ''
+            cn = room.combined_name or room.class_name or ''
             if g not in room_tree:
                 room_tree[g] = OrderedDict()
             if gender not in room_tree[g]:
@@ -263,13 +277,33 @@ def index():
             if cn not in room_tree[g][gender]:
                 room_tree[g][gender][cn] = []
             room_tree[g][gender][cn].append(room)
+        
+        boarding_ids = [sa.student_id for sa in StudentAccommodation.query.filter(
+            StudentAccommodation.boarding_type == '住校'
+        ).all()]
+        
         for g in room_tree:
             for gender in room_tree[g]:
                 for cn in room_tree[g][gender]:
-                    cnt = Student.query.filter_by(
-                        grade=g, class_name=cn, gender=gender,
-                        boarding_type='住校'
-                    ).count()
+                    # 合班房：统计多个班级的住校生总和（班级不分主次）
+                    if '+' in cn:
+                        class_parts = [p.strip() for p in cn.split('+') if p.strip()]
+                        cnt = sum(
+                            Student.query.filter(
+                                Student.grade == g,
+                                Student.class_name == p,
+                                Student.gender == gender,
+                                Student.id.in_(boarding_ids) if boarding_ids else False
+                            ).count()
+                            for p in class_parts
+                        )
+                    else:
+                        cnt = Student.query.filter(
+                            Student.grade == g,
+                            Student.class_name == cn,
+                            Student.gender == gender,
+                            Student.id.in_(boarding_ids) if boarding_ids else False
+                        ).count()
                     room_class_totals[(g, cn, gender)] = cnt
         room_total_rooms = len(rooms)
         room_total_beds = sum(r.capacity for r in rooms)
@@ -510,6 +544,141 @@ def download_dormitory_template():
     output.seek(0)
     return send_file(output, as_attachment=True,
                      download_name='宿舍数据导入模板.xlsx',
+                     mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+
+
+@bp.route('/export-bed-detail')
+@login_required
+@perm_required('statistics.view')
+def export_bed_detail():
+    """导出宿舍床铺分配明细（A4打印友好，含班级/学号/姓名/宿舍楼/宿舍号/床位号）"""
+    import openpyxl
+    from openpyxl.styles import Font, Alignment, PatternFill, Border, Side
+    from openpyxl.utils import get_column_letter
+
+    sel_grade = request.args.get('grade', '')
+
+    # 查询所有已分配床位的房间
+    rq = Room.query.filter(
+        Room.is_active == True,
+        Room.class_name.isnot(None),
+        Room.class_name != ''
+    )
+    if sel_grade:
+        rq = rq.filter_by(grade=sel_grade)
+    rooms = rq.order_by(
+        Room.grade, Room.gender, Room.class_name,
+        Room.building, Room.room_number
+    ).all()
+
+    if not rooms:
+        flash('暂无已分配的宿舍数据', 'info')
+        return redirect(url_for('statistics.index', tab='rooms'))
+
+    room_ids = [r.id for r in rooms]
+    room_map = {r.id: r for r in rooms}
+
+    # 查询所有床位分配（dormitory.db）
+    beds = BedAssignment.query.filter(
+        BedAssignment.room_id.in_(room_ids),
+        BedAssignment.student_id.isnot(None)
+    ).order_by(BedAssignment.room_id, BedAssignment.bed_number).all()
+
+    # 批量查询学生信息（system.db）
+    student_ids = list(set(b.student_id for b in beds))
+    student_map = {}
+    if student_ids:
+        students = Student.query.filter(Student.id.in_(student_ids)).all()
+        student_map = {s.id: s for s in students}
+
+    # 构建数据行：按 年级→班级→宿舍楼→房间号→床位号 排序
+    rows = []
+    for bed in beds:
+        room = room_map.get(bed.room_id)
+        if not room:
+            continue
+        student = student_map.get(bed.student_id)
+        if not student:
+            continue
+        rows.append({
+            'grade': student.grade or '',
+            'class_name': student.class_name or '',
+            'student_number': student.student_number or '',
+            'name': student.name or '',
+            'gender': student.gender or '',
+            'building': room.building or '',
+            'room_number': room.room_number or '',
+            'bed_number': bed.bed_number or 0,
+        })
+
+    # 排序：年级→班级→宿舍楼→房间号→床位号
+    rows.sort(key=lambda x: (x['grade'], x['class_name'], x['building'], int(x['room_number']) if x['room_number'].isdigit() else 0, x['bed_number']))
+
+    # 生成 Excel
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = '宿舍床铺分配明细'
+
+    headers = ['年级', '班级', '学号', '姓名', '性别', '宿舍楼', '宿舍号', '床位号']
+    header_fill = PatternFill(start_color='4472C4', end_color='4472C4', fill_type='solid')
+    header_font = Font(color='FFFFFF', bold=True, size=11)
+    thin_border = Border(
+        left=Side(style='thin'), right=Side(style='thin'),
+        top=Side(style='thin'), bottom=Side(style='thin'))
+
+    # 写表头
+    for col_idx, header in enumerate(headers, 1):
+        cell = ws.cell(row=1, column=col_idx, value=header)
+        cell.font = header_font
+        cell.fill = header_fill
+        cell.alignment = Alignment(horizontal='center', vertical='center')
+        cell.border = thin_border
+
+    # 写数据
+    for row_idx, row in enumerate(rows, 2):
+        values = [row['grade'], row['class_name'], row['student_number'],
+                  row['name'], row['gender'], row['building'], row['room_number'], row['bed_number']]
+        for col_idx, val in enumerate(values, 1):
+            cell = ws.cell(row=row_idx, column=col_idx, value=val)
+            cell.alignment = Alignment(horizontal='center', vertical='center')
+            cell.border = thin_border
+            cell.font = Font(size=10)
+
+    # 列宽（A4纵向友好）
+    widths = [10, 8, 14, 10, 6, 12, 10, 8]
+    for i, w in enumerate(widths, 1):
+        ws.column_dimensions[get_column_letter(i)].width = w
+
+    # 冻结表头
+    ws.freeze_panes = 'A2'
+    # 自动筛选
+    ws.auto_filter.ref = f'A1:H{ws.max_row}'
+
+    # A4 打印设置
+    ws.page_setup.paperSize = ws.PAPERSIZE_A4
+    ws.page_setup.orientation = ws.ORIENTATION_PORTRAIT
+    ws.page_setup.fitToWidth = 1
+    ws.page_setup.fitToHeight = 0
+    ws.sheet_properties.pageSetUpPr = openpyxl.worksheet.properties.PageSetupProperties(fitToPage=True)
+    ws.print_title_rows = '1:1'
+    ws.page_margins = openpyxl.worksheet.page.PageMargins(left=0.3, right=0.3, top=0.5, bottom=0.5)
+
+    # 生成文件名
+    timestamp = time.strftime('%Y%m%d_%H%M%S')
+    grade_str = f'_{sel_grade}' if sel_grade else ''
+    filename = f'宿舍床铺分配明细{grade_str}_{timestamp}.xlsx'
+
+    output = io.BytesIO()
+    wb.save(output)
+    output.seek(0)
+
+    # 记录操作日志
+    log_operation(current_user, '导出', '统计报表', None,
+                  f'导出宿舍床铺分配明细：{len(rows)}条记录，文件{filename}',
+                  module='statistics')
+
+    return send_file(output, as_attachment=True,
+                     download_name=filename,
                      mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
 
 

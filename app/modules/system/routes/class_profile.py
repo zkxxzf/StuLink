@@ -1,11 +1,11 @@
-﻿# StuLink v1.6.1 2026-07-09
+# StuLink v1.7.0 2026-08-02
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 from flask import Blueprint, render_template, redirect, url_for, flash, request, jsonify
 from flask_login import login_required
 from app.extensions import db
 from app.models import DictCategory, DictItem, ClassProfile, ClassSubject, User, UserClassLink
 from app.utils.decorators import perm_required
-from app.utils.helpers import get_dict_values
+from app.utils.helpers import get_dict_values, get_graduated_grades
 
 bp = Blueprint('class_profile', __name__, url_prefix='/class-profile')
 
@@ -14,10 +14,11 @@ bp = Blueprint('class_profile', __name__, url_prefix='/class-profile')
 @perm_required('system.class_profile')
 def manage():
     """班型管理主页 - 列出全部班级，支持批量编辑"""
-    grades = sorted(get_dict_values('grade'), reverse=True)
+    graduated_grades = get_graduated_grades()
+    grades = sorted([g for g in get_dict_values('grade') if g not in graduated_grades], reverse=True)
     class_options = get_dict_values('class')
     # 过滤掉特殊班级（未分班、已转出、离校等）
-    normal_classes = [c for c in class_options if c.endswith('班') and '未分班' not in c and '离校' not in c and '已转出' not in c]
+    normal_classes = [c for c in class_options if c.endswith('班') and '不分班' not in c and '离校' not in c and '已转出' not in c]
 
     # 获取现有 profiles
     profiles = ClassProfile.query.all()

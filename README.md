@@ -3,11 +3,11 @@
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
 [![Python](https://img.shields.io/badge/python-3.11+-green.svg)](https://python.org)
 [![Flask](https://img.shields.io/badge/flask-3.x-lightgrey.svg)](https://flask.palletsprojects.com/)
-[![Version](https://img.shields.io/badge/version-1.5.0-orange.svg)](https://github.com/zkxxzf/stulink)
+[![Version](https://img.shields.io/badge/version-1.7.0-orange.svg)](https://github.com/zkxxzf/stulink)
 
 面向中学的综合学生管理平台，采用双站点架构：
 
-- **在校生系统（主应用 :5000）**：宿舍分配 · 床位管理 · 学生信息管理 · 批量导入/调班 · 多角色权限 · 统计报表
+- **在校生系统（主应用 :5000）**：宿舍自动分配 · 合班管理 · 床位管理 · 学生信息管理 · 批量导入/调班 · 多角色权限 · 统计报表
 - **往届生查询（独立应用 :5001）**：毕业生数据快照查询 · 学习经历变迁 · 宿舍历史
 
 ## 功能模块
@@ -15,10 +15,21 @@
 | 模块 | 站点 | 状态 | 说明 |
 |------|------|------|------|
 | 📚 系统管理 | 主应用 | ✅ 已完成 | 学生管理 · 教师管理 · 字典管理 · 班型设置 · 权限组 · 年级毕业归档 |
-| 🏠 宿舍管理 | 主应用 | ✅ 已完成 | 宿舍列表 · 可视化拖拽分配 · 床位管理 · 自动分配 V4 · 统计报表 · 宿舍数据导入 |
+| 🏠 宿舍管理 | 主应用 | ✅ 已完成 | 宿舍列表 · 可视化拖拽分配 · 床位管理 · 自动分配 V20260805 · 合班自动识别 · 统计报表 · 宿舍数据导入 |
 | 🔍 往届查询 | 独立应用 | ✅ 已完成 | 毕业生基本信息查询 · 宿舍分配快照 · 学习经历变迁时间线 |
 | ⭐ 积分管理 | 主应用 | 🚧 开发中 | 学生积分记录与奖惩管理 |
 | 📊 成绩管理 | 主应用 | 🚧 开发中 | 成绩录入、排名分析与报表导出 |
+
+## 宿舍自动分配算法（V20260805）
+
+平滑动态贪心 + 全局压力等级制：
+
+- **压力等级 L=6/7/8**：根据所选房间总数与总人数自动判定宽松/紧张模式，无需人工调参
+- **宽松优先**：优先 L=7（8 人间只住 7 人）；房间不足时自动升档 L=8 极限重试，保证分配成功
+- **动态前瞻**：分配时检查后续容量，压力均匀分散，班级连续切段（S 型序列化，偶数层正向/奇数层反向）
+- **合班被动触发**：班级收尾剩 1~3 人时与下一班（同性别+同年级+同班型）合并，两班不分主次
+- **合班调整优化**：自动拆分链式合班，减少合班宿舍数量（如 16 间 → 13 间）
+- **合班自动识别**：手动选择多班（如 `01班+02班`）即自动识别为合班宿舍，全站（列表/详情/可视化/统计）自动显示，无需手动标记
 
 ## 项目架构
 
@@ -50,12 +61,14 @@ python run.py --dev
 cd alumni_app && python run.py
 
 # Docker 部署（两个容器）
-docker build -t stulink:v1.5 .
-docker build -t stulink-alumni:v1.0 ./alumni_app
+docker build -t stulink:v1.7.0 .
+docker build -t stulink-alumni:v1.0.0 ./alumni_app
 docker-compose up -d
 ```
 
 默认管理员：`admin` / `admin123`（首次登录请立即修改）
+
+> 💡 生产部署推荐直接使用发布包：`deploy/stulink-v1.7.0.tar`（详见 [部署文档](docs/部署文档.md)）
 
 ## 目录结构
 
@@ -92,6 +105,7 @@ StuLink/
 - [用户手册](docs/用户文档.md)
 - [部署文档](docs/部署文档.md)（Docker / 阿里云 / NAS）
 - [测试文档](docs/测试文档.md)
+- [安全审计报告](docs/安全审计报告_20260807.md)
 - [数据库分库规格说明](docs/模块化重构规格说明.md)
 - [历史记录与日志设计](docs/历史记录与日志系统设计.md)
 - [宿舍分配算法规范](docs/宿舍分配算法设计规范.md)

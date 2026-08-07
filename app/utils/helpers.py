@@ -1,4 +1,4 @@
-﻿# StuLink v1.6.1 2026-07-09
+# StuLink v1.7.0 2026-08-02
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 from app.models import DictCategory, Student, Room, ClassProfile, ClassSubject
 from app.utils.cache import cache
@@ -21,6 +21,7 @@ def log_operation(user, action, target_type, target_id=None, detail=None, module
             severity=severity,
         )
         db.session.add(log)
+        db.session.commit()
     except Exception:
         pass  # 日志记录失败不阻塞业务
 
@@ -53,19 +54,21 @@ def is_dict_value_in_use(category_code, value):
                 return True
         elif category_code == 'floor':
             try:
-                floor_num = int(value.replace('楼', ''))
+                floor_num = int(value.replace(' 层', '').replace('层', '').strip())
                 if Room.query.filter_by(floor=floor_num).first():
                     return True
             except (ValueError, AttributeError):
                 pass
         elif category_code == 'boarding_type':
-            if Student.query.filter_by(boarding_type=value).first():
+            from app.models import StudentAccommodation
+            if StudentAccommodation.query.filter_by(boarding_type=value).first():
                 return True
         elif category_code == 'enrollment_status':
             if Student.query.filter_by(enrollment_status=value).first():
                 return True
         elif category_code == 'day_student_type':
-            if Student.query.filter_by(day_student_type=value).first():
+            from app.models import StudentAccommodation
+            if StudentAccommodation.query.filter_by(day_student_type=value).first():
                 return True
         elif category_code == 'class_type':
             try:
@@ -161,6 +164,7 @@ def write_change_log(change_type, students_data, old_value='', new_value='', det
         conn.commit()
         conn.close()
     except Exception as e:
-        print(f'写入变迁日志异常: {e}')
+        import logging
+        logging.getLogger(__name__).error(f'写入变迁日志异常: {e}', exc_info=True)
 
 

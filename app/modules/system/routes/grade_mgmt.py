@@ -1,4 +1,4 @@
-﻿"""年级管理：毕业/存档/历史查询"""
+"""年级管理：毕业/存档/历史查询"""
 import os
 import shutil
 import sqlite3
@@ -35,8 +35,10 @@ def _get_all_grades():
 def index():
     """年级管理页面"""
     settings = {}
-    grades = _get_all_grades()
-    for grade in grades:
+    all_grades = _get_all_grades()
+    # 按年份降序排列（新年级在前）
+    all_grades.sort(key=lambda g: int(''.join(filter(str.isdigit, g)) or '0'), reverse=True)
+    for grade in all_grades:
         gs = GradeSetting.query.filter_by(grade=grade).first()
         settings[grade] = {
             'is_graduated': gs.is_graduated if gs else False,
@@ -128,7 +130,8 @@ def graduate():
         student_count = len(students)
     except Exception as e:
         student_count = 0
-        print(f'归档学生数据异常: {e}')
+        from flask import current_app
+        current_app.logger.error(f'归档学生数据异常: {e}', exc_info=True)
     
     # 1.6 归档宿舍数据到历史库
     room_archived = 0
@@ -148,11 +151,16 @@ def graduate():
                 grade TEXT,
                 class_name TEXT,
                 combined_class TEXT,
+                combined_details TEXT,
                 notes TEXT,
                 graduated_grade TEXT,
                 graduated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         ''')
+        # 兼容旧表：确保 combined_details 列存在
+        room_cols = [row[1] for row in hist_conn.execute('PRAGMA table_info(graduated_rooms)').fetchall()]
+        if 'combined_details' not in room_cols:
+            hist_conn.execute('ALTER TABLE graduated_rooms ADD COLUMN combined_details TEXT')
         hist_conn.execute('''
             CREATE TABLE IF NOT EXISTS graduated_beds (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -174,12 +182,12 @@ def graduate():
         # 归档房间
         dorm_conn = sqlite3.connect(db_path)
         rooms = dorm_conn.execute(
-            'SELECT id,building,room_number,gender,floor,capacity,grade,class_name,combined_class,notes FROM rooms WHERE grade=?',
+            'SELECT id,building,room_number,gender,floor,capacity,grade,class_name,combined_class,combined_details,notes FROM rooms WHERE grade=?',
             (grade,)
         ).fetchall()
         for r in rooms:
             hist_conn.execute(
-                'INSERT INTO graduated_rooms (original_room_id,building,room_number,gender,floor,capacity,grade,class_name,combined_class,notes,graduated_grade) VALUES (?,?,?,?,?,?,?,?,?,?,?)',
+                'INSERT INTO graduated_rooms (original_room_id,building,room_number,gender,floor,capacity,grade,class_name,combined_class,combined_details,notes,graduated_grade) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)',
                 (*r, grade)
             )
         room_archived = len(rooms)
@@ -218,7 +226,8 @@ def graduate():
         hist_conn.commit()
         hist_conn.close()
     except Exception as e:
-        print(f'归档宿舍数据异常: {e}')
+        from flask import current_app
+        current_app.logger.error(f'归档宿舍数据异常: {e}', exc_info=True)
 
     # 1.7 写入毕业变迁日志
     try:
@@ -228,7 +237,8 @@ def graduate():
             write_change_log('graduate', students_data, old_value='在校', new_value='毕业',
                            detail=f'{grade} 毕业归档', operator_name=current_user.real_name)
     except Exception as e:
-        print(f'毕业变迁日志异常: {e}')
+        from flask import current_app
+        current_app.logger.error(f'毕业变迁日志异常: {e}', exc_info=True)
 
     # 2. 获取该年级所有房间ID（清空前查）
     rooms = Room.query.filter(Room.grade == grade).all()

@@ -1,110 +1,173 @@
 {% extends "base.html" %}
 {% block title %}首页 - 宿舍管理系统{% endblock %}
+{% block extra_css %}
+<style>
+    .dash-card {
+        border: none; border-radius: 14px;
+        box-shadow: 0 1px 4px rgba(0,0,0,.05); transition: box-shadow .2s;
+    }
+    .dash-card:hover { box-shadow: 0 4px 12px rgba(0,0,0,.08); }
+    .dash-card .card-header {
+        background: #fff; border-bottom: 1px solid #f1f5f9;
+        padding: 13px 20px; border-radius: 14px 14px 0 0 !important;
+    }
+    /* 概览指标行 */
+    .metric-row { display: flex; gap: 12px; flex-wrap: wrap; }
+    .metric-box {
+        flex: 1; min-width: 150px; border-radius: 12px; padding: 16px 18px;
+        background: #f8fafc; border: 1px solid #f1f5f9; position: relative; overflow: hidden;
+    }
+    .metric-box::before {
+        content: ''; position: absolute; top: 0; left: 0; width: 4px; height: 100%;
+    }
+    .metric-box.m-blue::before { background: #3b82f6; }
+    .metric-box.m-green::before { background: #10b981; }
+    .metric-box.m-amber::before { background: #f59e0b; }
+    .metric-box.m-rose::before { background: #f43f5e; }
+    .metric-box.m-violet::before { background: #8b5cf6; }
+    .metric-box.m-cyan::before { background: #06b6d4; }
+    .metric-title { font-size: 12px; color: #94a3b8; font-weight: 500; margin-bottom: 6px; }
+    .metric-num { font-size: 24px; font-weight: 700; color: #1e293b; line-height: 1; }
+    .metric-num small { font-size: 13px; font-weight: 400; color: #94a3b8; }
+    .metric-sub { font-size: 11px; color: #64748b; margin-top: 6px; display: flex; gap: 10px; }
+    .metric-sub .tag-m { color: #3b82f6; }
+    .metric-sub .tag-f { color: #ec4899; }
+    /* 性别分布 */
+    .gender-item { text-align: center; padding: 14px 8px; border-radius: 12px; background: #f8fafc; border: 1px solid #f1f5f9; }
+    .gender-item .g-icon { font-size: 28px; margin-bottom: 4px; }
+    .gender-item .g-num { font-size: 22px; font-weight: 700; color: #1e293b; }
+    .gender-item .g-label { font-size: 11px; color: #94a3b8; margin-top: 2px; }
+</style>
+{% endblock %}
 {% block content %}
-<h4 class="fw-bold mb-4"><i class="bi bi-speedometer2"></i> 系统管理</h4>
+<div class="d-flex align-items-center mb-4">
+    <h4 class="fw-bold mb-0"><i class="bi bi-speedometer2 text-primary me-2"></i>数据概览</h4>
+    <span class="text-muted ms-auto small">在校 {{ stats.total_students }} 人 · 住校 {{ stats.boarding_students }} 人 · 走读 {{ stats.day_students }} 人</span>
+</div>
 
-<!-- 统计卡片 -->
+<!-- 核心指标 -->
+<div class="metric-row mb-4">
+    <div class="metric-box m-blue">
+        <div class="metric-title">学生总数</div>
+        <div class="metric-num">{{ stats.total_students }}</div>
+        <div class="metric-sub"><span class="tag-m"><i class="bi bi-gender-male"></i> {{ stats.male_students }}</span><span class="tag-f"><i class="bi bi-gender-female"></i> {{ stats.female_students }}</span></div>
+    </div>
+    <div class="metric-box m-green">
+        <div class="metric-title">住校学生</div>
+        <div class="metric-num">{{ stats.boarding_students }}</div>
+        <div class="metric-sub"><span>走读 {{ stats.day_students }} 人</span></div>
+    </div>
+    <div class="metric-box m-cyan">
+        <div class="metric-title">宿舍总数</div>
+        <div class="metric-num">{{ stats.total_rooms }}</div>
+        <div class="metric-sub"><span class="tag-m"><i class="bi bi-gender-male"></i> {{ stats.total_rooms_male }}</span><span class="tag-f"><i class="bi bi-gender-female"></i> {{ stats.total_rooms_female }}</span></div>
+    </div>
+    <div class="metric-box m-violet">
+        <div class="metric-title">已分配宿舍</div>
+        <div class="metric-num">{{ stats.assigned_rooms }} <small>/ {{ stats.total_rooms }}</small></div>
+        <div class="metric-sub"><span class="tag-m"><i class="bi bi-gender-male"></i> {{ stats.assigned_rooms_male }}</span><span class="tag-f"><i class="bi bi-gender-female"></i> {{ stats.assigned_rooms_female }}</span></div>
+    </div>
+    <div class="metric-box m-amber">
+        <div class="metric-title">剩余宿舍</div>
+        <div class="metric-num">{{ stats.total_rooms - stats.assigned_rooms }}</div>
+        <div class="metric-sub"><span class="tag-m"><i class="bi bi-gender-male"></i> {{ stats.total_rooms_male - stats.assigned_rooms_male }}</span><span class="tag-f"><i class="bi bi-gender-female"></i> {{ stats.total_rooms_female - stats.assigned_rooms_female }}</span></div>
+    </div>
+    <div class="metric-box m-blue">
+        <div class="metric-title">已分配床位</div>
+        <div class="metric-num">{{ stats.assigned_beds }} <small>/ {{ stats.total_beds }}</small></div>
+        <div class="metric-sub"><span class="tag-m"><i class="bi bi-gender-male"></i> {{ stats.assigned_beds_male }}/{{ stats.total_beds_male }}</span><span class="tag-f"><i class="bi bi-gender-female"></i> {{ stats.assigned_beds_female }}/{{ stats.total_beds_female }}</span></div>
+    </div>
+    <div class="metric-box m-rose">
+        <div class="metric-title">空余床位</div>
+        <div class="metric-num">{{ stats.empty_beds }}</div>
+        <div class="metric-sub"><span class="tag-m"><i class="bi bi-gender-male"></i> {{ stats.empty_beds_male }}</span><span class="tag-f"><i class="bi bi-gender-female"></i> {{ stats.empty_beds_female }}</span></div>
+    </div>
+</div>
+
+<!-- 柱状图 + 性别分布 -->
 <div class="row g-3 mb-4">
-    <div class="col-sm-6 col-lg-3">
-        <div class="card stat-card">
-            <div class="card-body d-flex align-items-center">
-                <div class="stat-icon bg-primary bg-opacity-10 text-primary me-3">
-                    <i class="bi bi-people-fill"></i>
+    <div class="col-lg-8">
+        <div class="card dash-card h-100">
+            <div class="card-header d-flex align-items-center">
+                <h6 class="mb-0 fw-bold"><i class="bi bi-bar-chart-fill text-primary me-2"></i>各年级人数统计</h6>
+                <div class="ms-auto d-flex gap-3 small text-muted">
+                    <span><i class="bi bi-square-fill" style="color:#fbbf24;font-size:10px;"></i> 走读</span>
+                    <span><i class="bi bi-square-fill" style="color:#3b82f6;font-size:10px;"></i> 住校男</span>
+                    <span><i class="bi bi-square-fill" style="color:#ec4899;font-size:10px;"></i> 住校女</span>
                 </div>
-                <div>
-                    <div class="stat-number">{{ stats.total_students }}</div>
-                    <div class="stat-label">学生总数</div>
-                </div>
+            </div>
+            <div class="card-body" style="height: 220px; padding: 12px 16px;">
+                <canvas id="gradeChart"></canvas>
             </div>
         </div>
     </div>
-    <div class="col-sm-6 col-lg-3">
-        <div class="card stat-card">
-            <div class="card-body d-flex align-items-center">
-                <div class="stat-icon bg-success bg-opacity-10 text-success me-3">
-                    <i class="bi bi-house-door-fill"></i>
+    <div class="col-lg-4">
+        <div class="card dash-card h-100">
+            <div class="card-header"><h6 class="mb-0 fw-bold"><i class="bi bi-pie-chart-fill text-info me-2"></i>学生构成</h6></div>
+            <div class="card-body d-flex flex-column justify-content-center">
+                <div class="row g-2 mb-2">
+                    <div class="col-4"><div class="gender-item"><div class="g-icon" style="color:#3b82f6;"><i class="bi bi-gender-male"></i></div><div class="g-num">{{ stats.male_students }}</div><div class="g-label">男生</div></div></div>
+                    <div class="col-4"><div class="gender-item"><div class="g-icon" style="color:#ec4899;"><i class="bi bi-gender-female"></i></div><div class="g-num">{{ stats.female_students }}</div><div class="g-label">女生</div></div></div>
+                    <div class="col-4"><div class="gender-item"><div class="g-icon" style="color:#8b5cf6;"><i class="bi bi-person-walking"></i></div><div class="g-num">{{ stats.day_students }}</div><div class="g-label">走读生</div></div></div>
                 </div>
-                <div>
-                    <div class="stat-number">{{ stats.boarding_students }}</div>
-                    <div class="stat-label">住校学生</div>
+                <div class="row g-2 mb-2">
+                    <div class="col-6">
+                        <div class="gender-item">
+                            <div class="g-num" style="font-size:20px;color:#3b82f6;">{{ stats.boarding_male }}</div>
+                            <div class="g-label">住校男生</div>
+                        </div>
+                    </div>
+                    <div class="col-6">
+                        <div class="gender-item">
+                            <div class="g-num" style="font-size:20px;color:#ec4899;">{{ stats.boarding_female }}</div>
+                            <div class="g-label">住校女生</div>
+                        </div>
+                    </div>
                 </div>
-            </div>
-        </div>
-    </div>
-    <div class="col-sm-6 col-lg-3">
-        <div class="card stat-card">
-            <div class="card-body d-flex align-items-center">
-                <div class="stat-icon bg-info bg-opacity-10 text-info me-3">
-                    <i class="bi bi-door-open-fill"></i>
-                </div>
-                <div>
-                    <div class="stat-number">{{ stats.total_rooms }}</div>
-                    <div class="stat-label">宿舍总数</div>
-                </div>
-            </div>
-        </div>
-    </div>
-    <div class="col-sm-6 col-lg-3">
-        <div class="card stat-card">
-            <div class="card-body d-flex align-items-center">
-                <div class="stat-icon bg-warning bg-opacity-10 text-warning me-3">
-                    <i class="bi bi-grid-3x3-gap-fill"></i>
-                </div>
-                <div>
-                    <div class="stat-number">{{ stats.assigned_beds }}/{{ stats.total_beds }}</div>
-                    <div class="stat-label">已分配床位</div>
+                <div class="row g-2">
+                    <div class="col-6">
+                        <div class="gender-item">
+                            <div class="g-num" style="font-size:16px;color:#3b82f6;">{{ stats.assigned_beds_male }}<small class="text-muted">/{{ stats.total_beds_male }}</small></div>
+                            <div class="g-label">男生床位使用</div>
+                        </div>
+                    </div>
+                    <div class="col-6">
+                        <div class="gender-item">
+                            <div class="g-num" style="font-size:16px;color:#ec4899;">{{ stats.assigned_beds_female }}<small class="text-muted">/{{ stats.total_beds_female }}</small></div>
+                            <div class="g-label">女生床位使用</div>
+                        </div>
+                    </div>
                 </div>
             </div>
         </div>
     </div>
 </div>
 
-<!-- 性别分布 + 年级统计 -->
+<!-- 年级明细表 -->
 <div class="row g-3">
-    <div class="col-lg-4">
-        <div class="card">
-            <div class="card-header"><h6 class="mb-0">性别分布</h6></div>
-            <div class="card-body">
-                <div class="d-flex justify-content-around text-center">
-                    <div>
-                        <div style="font-size:36px;color:#3b82f6;"><i class="bi bi-gender-male"></i></div>
-                        <div class="fw-bold fs-4">{{ stats.male_students }}</div>
-                        <div class="text-muted small">男生</div>
-                    </div>
-                    <div>
-                        <div style="font-size:36px;color:#ec4899;"><i class="bi bi-gender-female"></i></div>
-                        <div class="fw-bold fs-4">{{ stats.female_students }}</div>
-                        <div class="text-muted small">女生</div>
-                    </div>
-                    <div>
-                        <div style="font-size:36px;color:#8b5cf6;"><i class="bi bi-person-walking"></i></div>
-                        <div class="fw-bold fs-4">{{ stats.day_students }}</div>
-                        <div class="text-muted small">走读生</div>
-                    </div>
-                </div>
-            </div>
-        </div>
-    </div>
-    <div class="col-lg-8">
-        <div class="card">
-            <div class="card-header"><h6 class="mb-0">年级统计</h6></div>
+    <div class="col-12">
+        <div class="card dash-card">
+            <div class="card-header"><h6 class="mb-0 fw-bold"><i class="bi bi-table text-success me-2"></i>年级明细</h6></div>
             <div class="card-body p-0">
-                <table class="table table-hover mb-0">
+                <table class="table table-hover mb-0 align-middle">
                     <thead class="table-light">
-                        <tr><th>年级</th><th>总人数</th><th>男生</th><th>女生</th><th>住校</th></tr>
+                        <tr><th>年级</th><th>总人数</th><th>男生</th><th>女生</th><th>住校男</th><th>住校女</th><th>走读</th><th>住校合计</th></tr>
                     </thead>
                     <tbody>
                         {% for g in grade_stats %}
                         <tr>
                             <td class="fw-bold">{{ g.grade }}</td>
-                            <td>{{ g.total }}</td>
+                            <td><strong>{{ g.total }}</strong></td>
                             <td><span class="text-primary">{{ g.male }}</span></td>
                             <td><span class="text-danger">{{ g.female }}</span></td>
-                            <td>{{ g.boarding }}</td>
+                            <td><span class="badge rounded-pill bg-primary bg-opacity-10 text-primary">{{ g.boarding_male }}</span></td>
+                            <td><span class="badge rounded-pill bg-danger bg-opacity-10 text-danger">{{ g.boarding_female }}</span></td>
+                            <td><span class="badge rounded-pill bg-warning bg-opacity-10 text-warning">{{ g.day }}</span></td>
+                            <td><span class="badge rounded-pill bg-success bg-opacity-10 text-success">{{ g.boarding }}</span></td>
                         </tr>
                         {% endfor %}
                         {% if not grade_stats %}
-                        <tr><td colspan="5" class="text-center text-muted py-4">暂无数据</td></tr>
+                        <tr><td colspan="8" class="text-center text-muted py-4">暂无数据</td></tr>
                         {% endif %}
                     </tbody>
                 </table>
@@ -112,4 +175,102 @@
         </div>
     </div>
 </div>
+{% endblock %}
+
+{% block extra_js %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.2.0/dist/chartjs-plugin-datalabels.min.js"></script>
+<script>
+(function() {
+    if (typeof Chart === 'undefined') {
+        document.getElementById('gradeChart').parentElement.innerHTML = '<p class="text-muted text-center py-4">图表加载失败，请刷新页面重试</p>';
+        return;
+    }
+    Chart.register(ChartDataLabels);
+
+    var labels = [{% for g in grade_stats %}'{{ g.grade }}'{% if not loop.last %},{% endif %}{% endfor %}];
+    var dayData = [{% for g in grade_stats %}{{ g.day }}{% if not loop.last %},{% endif %}{% endfor %}];
+    var boardMaleData = [{% for g in grade_stats %}{{ g.boarding_male }}{% if not loop.last %},{% endif %}{% endfor %}];
+    var boardFemaleData = [{% for g in grade_stats %}{{ g.boarding_female }}{% if not loop.last %},{% endif %}{% endfor %}];
+
+    var ctx = document.getElementById('gradeChart').getContext('2d');
+    new Chart(ctx, {
+        type: 'bar',
+        data: {
+            labels: labels,
+            datasets: [
+                {
+                    label: '走读',
+                    data: dayData,
+                    backgroundColor: 'rgba(251, 191, 36, 0.85)',
+                    hoverBackgroundColor: 'rgba(251, 191, 36, 1)',
+                    borderRadius: 4,
+                    borderSkipped: false
+                },
+                {
+                    label: '住校男生',
+                    data: boardMaleData,
+                    backgroundColor: 'rgba(59, 130, 246, 0.85)',
+                    hoverBackgroundColor: 'rgba(59, 130, 246, 1)',
+                    borderRadius: 4,
+                    borderSkipped: false
+                },
+                {
+                    label: '住校女生',
+                    data: boardFemaleData,
+                    backgroundColor: 'rgba(236, 72, 153, 0.85)',
+                    hoverBackgroundColor: 'rgba(236, 72, 153, 1)',
+                    borderRadius: 4,
+                    borderSkipped: false
+                }
+            ]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            interaction: { mode: 'index', intersect: false },
+            plugins: {
+                legend: { display: false },
+                datalabels: {
+                    display: function(ctx) {
+                        return ctx.dataset.data[ctx.dataIndex] > 0;
+                    },
+                    color: '#fff',
+                    font: { size: 11, weight: '600' },
+                    anchor: 'center',
+                    align: 'center'
+                },
+                tooltip: {
+                    backgroundColor: 'rgba(30,41,59,0.92)',
+                    titleFont: { size: 13, weight: 'bold' },
+                    bodyFont: { size: 12 },
+                    padding: 12,
+                    cornerRadius: 8,
+                    callbacks: {
+                        afterBody: function(items) {
+                            var idx = items[0].dataIndex;
+                            var total = dayData[idx] + boardMaleData[idx] + boardFemaleData[idx];
+                            return '\n合计：' + total + ' 人';
+                        }
+                    }
+                }
+            },
+            scales: {
+                x: {
+                    stacked: true,
+                    grid: { display: false },
+                    ticks: { font: { size: 12, weight: '600' }, color: '#64748b' }
+                },
+                y: {
+                    stacked: true,
+                    beginAtZero: true,
+                    grid: { color: 'rgba(0,0,0,0.04)' },
+                    border: { display: false },
+                    ticks: { font: { size: 11 }, color: '#94a3b8', stepSize: 100 }
+                }
+            }
+        }
+    });
+})();
+</script>
 {% endblock %}

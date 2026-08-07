@@ -27,9 +27,12 @@
                 <div class="mb-2"><span class="text-muted">楼层：</span>{{ room.floor }}楼</div>
                 <div class="mb-2"><span class="text-muted">床位数：</span>{{ room.capacity }}</div>
                 <div class="mb-2"><span class="text-muted">分配年级：</span>{{ room.grade or '未分配' }}</div>
-                <div class="mb-2"><span class="text-muted">分配班级：</span>{{ room.class_name or '未分配' }}</div>
-                {% if room.combined_class %}
-                <div class="mb-2"><span class="text-muted">合班：</span>{{ room.combined_class }}</div>
+                <div class="mb-2"><span class="text-muted">分配班级：</span>{{ room.combined_name or room.class_name or '未分配' }}</div>
+                {% if room.is_combined %}
+                <div class="mb-2"><span class="text-muted">合班：</span>
+                    <span class="badge bg-warning text-dark">合班</span>
+                    <span>{{ room.combined_name or room.class_name }}</span>
+                </div>
                 {% endif %}
                 {% if room.notes %}
                 <div class="mb-2"><span class="text-muted">备注：</span>{{ room.notes }}</div>
@@ -47,11 +50,15 @@
                         <div class="bed-number">{{ bed.bed_number }}床 {% if bed.bed_number % 2 == 1 %}(下铺){% else %}(上铺){% endif %}</div>
                         {% if bed.student_info %}
                         <div class="bed-student">
-                            <a href="{{ url_for('students.detail', id=bed.student_info.id) }}" class="text-decoration-none">
-                                {{ bed.student_info.name }}
-                            </a>
+                            <strong>{{ bed.student_info.name }}</strong>
                         </div>
-                        <div class="text-muted" style="font-size:11px;">{{ bed.student_info.student_number }}</div>
+                        <div class="text-muted" style="font-size:11px;">
+                            {% if bed.student_info.gender == '男' %}<span class="badge bg-primary" style="font-size:10px;">男</span>
+                            {% else %}<span class="badge bg-danger" style="font-size:10px;">女</span>{% endif %}
+                            {{ bed.student_info.student_number }}
+                        </div>
+                        <div class="text-muted" style="font-size:11px;">{{ bed.student_info.grade or '' }} {{ bed.student_info.class_name or '' }}</div>
+                        <div class="text-muted" style="font-size:11px;"><i class="bi bi-telephone"></i> {{ bed.student_info.phone1 or '未填写' }}</div>
                         {% else %}
                         <div class="text-muted"><i class="bi bi-dash-lg"></i> 空床</div>
                         {% endif %}

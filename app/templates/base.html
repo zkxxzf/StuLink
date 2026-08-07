@@ -137,7 +137,6 @@
                 <i class="bi bi-search"></i>学生住宿
             </a>
             {% if current_user.has_perm('dormitory.view') %}
-            <div class="nav-section">宿舍管理</div>
             <a class="nav-link {% if request.endpoint == 'rooms.list_rooms' %}active{% endif %}"
                href="{{ url_for('rooms.list_rooms') }}">
                 <i class="bi bi-door-open"></i>宿舍列表
@@ -148,16 +147,11 @@
             </a>
             {% endif %}
             {% if current_user.has_perm('dormitory.beds') %}
-            <div class="nav-section">床位管理</div>
             <a class="nav-link {% if request.endpoint == 'assignments.manage' %}active{% endif %}"
                href="{{ url_for('assignments.manage') }}">
-                <i class="bi bi-grid-3x3-gap"></i>床位分配
+                <i class="bi bi-grid-3x3-gap"></i>分配床位
             </a>
             {% endif %}
-            <a class="nav-link {% if request.endpoint == 'assignments.overview' %}active{% endif %}"
-               href="{{ url_for('assignments.overview') }}">
-                <i class="bi bi-map"></i>宿舍总览
-            </a>
             {% if current_user.has_perm('statistics.view') %}
             <a class="nav-link {% if request.endpoint == 'statistics.index' %}active{% endif %}"
                href="{{ url_for('statistics.index') }}">

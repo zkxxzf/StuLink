@@ -2,7 +2,7 @@
 
 services:
   stulink:
-    image: stulink:v1.6.1
+    image: stulink:v1.7.0
     container_name: stulink
     ports:
       - "5000:5000"

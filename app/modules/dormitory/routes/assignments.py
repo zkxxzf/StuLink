@@ -1,4 +1,4 @@
-﻿# StuLink v1.6.1 2026-07-09
+# StuLink v1.7.0 2026-08-02
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 from flask import Blueprint, render_template, request, jsonify, flash, redirect, url_for
 from flask_login import login_required, current_user
@@ -28,11 +28,61 @@ def manage():
         class_name = request.args.get('class_name', '')
         # 非班主任必须指定班级
         if not grade or not class_name:
-            flash('请选择具体的年级和班级', 'warning')
+            # 计算全校未分配住校学生统计（按年级+班级+性别分组）
+            graduated = get_graduated_grades()
+            boarding_ids = [sa.student_id for sa in StudentAccommodation.query.filter(
+                StudentAccommodation.boarding_type == '住校'
+            ).all()]
+            assigned_ids = [b.student_id for b in BedAssignment.query.filter(
+                BedAssignment.student_id.isnot(None)
+            ).all()]
+            unassigned_query = Student.query.filter(
+                Student.id.in_(boarding_ids) if boarding_ids else False
+            )
+            if graduated:
+                unassigned_query = unassigned_query.filter(~Student.grade.in_(graduated))
+            if assigned_ids:
+                unassigned_query = unassigned_query.filter(~Student.id.in_(assigned_ids))
+            unassigned_all = unassigned_query.order_by(
+                Student.grade.desc(), Student.class_name, Student.gender.desc()
+            ).all()
+            
+            # 按年级+班级+性别分组统计
+            unassigned_stats = []
+            total_unassigned = 0
+            total_unassigned_male = 0
+            total_unassigned_female = 0
+            grade_class_map = {}
+            for s in unassigned_all:
+                key = (s.grade, s.class_name)
+                if key not in grade_class_map:
+                    grade_class_map[key] = {'male': 0, 'female': 0}
+                if s.gender == '男':
+                    grade_class_map[key]['male'] += 1
+                    total_unassigned_male += 1
+                else:
+                    grade_class_map[key]['female'] += 1
+                    total_unassigned_female += 1
+                total_unassigned += 1
+            
+            # 按年级降序、班级升序排列
+            for (g, c), counts in sorted(grade_class_map.items(), key=lambda x: (-int(x[0][0].replace('级', '')) if x[0][0].replace('级', '').isdigit() else 0, x[0][1])):
+                unassigned_stats.append({
+                    'grade': g,
+                    'class_name': c,
+                    'male': counts['male'],
+                    'female': counts['female'],
+                    'total': counts['male'] + counts['female']
+                })
+            
             return render_template('dormitory/assignments/manage.html',
                                    rooms_data=[], unassigned_students=[],
                                    current_grade='', current_class='',
-                                   grades=grades, need_filter=True)
+                                   grades=grades, need_filter=True,
+                                   unassigned_stats=unassigned_stats,
+                                   total_unassigned=total_unassigned,
+                                   total_unassigned_male=total_unassigned_male,
+                                   total_unassigned_female=total_unassigned_female)
 
     # 查找已分配给该班级的宿舍
     room_query = Room.query.filter_by(is_active=True)
@@ -42,7 +92,12 @@ def manage():
         room_query = room_query.filter(
             db.or_(
                 Room.class_name == class_name,
-                Room.class_name.contains(class_name)   # 含班名如 "01班+02班"
+                Room.class_name.like(class_name + '+%'),
+                Room.class_name.like('%+' + class_name + '+%'),
+                Room.class_name.like('%+' + class_name),
+                Room.combined_class.like(class_name + '+%'),
+                Room.combined_class.like('%+' + class_name + '+%'),
+                Room.combined_class.like('%+' + class_name)
             )
         )
     rooms = room_query.order_by(
@@ -51,11 +106,25 @@ def manage():
         Room.room_number
     ).all()
 
+    # 确保这些房间的 BedAssignment 记录完整
+    if rooms:
+        from app.modules.dormitory.services.room_assignment_v4 import _ensure_room_beds
+        _ensure_room_beds([r.id for r in rooms])
+
     # 检查班级是否有宿舍分配
     no_rooms = len(rooms) == 0
     total_capacity = sum(r.capacity for r in rooms)
     graduated = get_graduated_grades()
-    base_student_query = Student.query.filter_by(boarding_type='住校', grade=grade, class_name=class_name)
+    
+    boarding_ids = [sa.student_id for sa in StudentAccommodation.query.filter(
+        StudentAccommodation.boarding_type == '住校'
+    ).all()]
+    
+    base_student_query = Student.query.filter(
+        Student.grade == grade,
+        Student.class_name == class_name,
+        Student.id.in_(boarding_ids) if boarding_ids else False
+    )
     if graduated:
         base_student_query = base_student_query.filter(~Student.grade.in_(graduated))
     total_students_needed = base_student_query.count()
@@ -73,7 +142,9 @@ def manage():
         rooms_data.append({'room': room, 'beds': bed_list})
 
     # 未分配床位的学生
-    student_query = Student.query.filter_by(boarding_type='住校')
+    student_query = Student.query.filter(
+        Student.id.in_(boarding_ids) if boarding_ids else False
+    )
     if graduated:
         student_query = student_query.filter(~Student.grade.in_(graduated))
     if grade:
@@ -93,7 +164,11 @@ def manage():
     ).all()
 
     # 人数统计
-    gender_base = Student.query.filter_by(boarding_type='住校', grade=grade, class_name=class_name)
+    gender_base = Student.query.filter(
+        Student.grade == grade,
+        Student.class_name == class_name,
+        Student.id.in_(boarding_ids) if boarding_ids else False
+    )
     if graduated:
         gender_base = gender_base.filter(~Student.grade.in_(graduated))
     total_male = gender_base.filter_by(gender='男').count()
@@ -208,7 +283,7 @@ def assign():
             }), 400
 
     # 跨班防护：非合班宿舍只能分配给本班学生
-    is_combined = room.combined_class and room.combined_class.strip()
+    is_combined = room.is_combined
     if not is_combined:
         # 检查学生是否属于该房间的班级
         room_classes = (room.class_name or '').replace('+', ' ').split()
@@ -293,7 +368,7 @@ def move():
             return jsonify({'success': False, 'message': f'性别不匹配：{student.name}是{student.gender}生'}), 400
 
     # 跨班防护：非合班宿舍只能进本班学生
-    is_combined = room.combined_class and room.combined_class.strip()
+    is_combined = room.is_combined
     if not is_combined:
         room_classes = (room.class_name or '').replace('+', ' ').split()
         if student.class_name not in room_classes:
@@ -356,7 +431,7 @@ def swap():
 
     # 跨班防护：非合班宿舍只能进本班学生
     def check_cross_class(stu, target_room, label):
-        is_comb = target_room.combined_class and target_room.combined_class.strip()
+        is_comb = target_room.is_combined
         if not is_comb:
             room_classes = (target_room.class_name or '').replace('+', ' ').split()
             if stu.class_name not in room_classes:
@@ -402,25 +477,29 @@ def auto_assign():
     if not grade or not class_name:
         return jsonify({'success': False, 'message': '请先选择年级和班级'}), 400
     
-    # 1. 找到该班级的房间（自动分配排除合班宿舍）
+    # 1. 找到该班级的房间（包括合班宿舍，合班班级不分主次）
     rooms = Room.query.filter(
         Room.is_active == True,
         Room.grade == grade
     ).filter(
         db.or_(
             Room.class_name == class_name,
-            Room.class_name.contains(class_name)
-        )
-    ).filter(
-        db.or_(
-            Room.combined_class.is_(None),
-            Room.combined_class == ''
+            Room.class_name.like(class_name + '+%'),
+            Room.class_name.like('%+' + class_name + '+%'),
+            Room.class_name.like('%+' + class_name),
+            Room.combined_class.like(class_name + '+%'),
+            Room.combined_class.like('%+' + class_name + '+%'),
+            Room.combined_class.like('%+' + class_name)
         )
     ).order_by(Room.building, Room.room_number).all()
     
     if not rooms:
         return jsonify({'success': False, 'message': '该班级尚未分配宿舍房间'}), 400
     
+    # 1.1 确保这些房间的 BedAssignment 记录完整
+    from app.modules.dormitory.services.room_assignment_v4 import _ensure_room_beds
+    _ensure_room_beds([r.id for r in rooms])
+
     # 2. 收集所有空床位
     available_beds = []
     for room in rooms:
@@ -447,6 +526,11 @@ def auto_assign():
         Student.id.in_(boarding_ids),
         Student.grade == grade,
         Student.class_name == class_name,
+        # 排除非在读学生（学籍已转出/借读后离校）
+        db.or_(
+            Student.enrollment_status.is_(None),
+            ~Student.enrollment_status.in_(['学籍已转出', '借读后离校'])
+        )
     )
     if assigned_ids:
         unassigned = unassigned.filter(~Student.id.in_(assigned_ids))
@@ -548,25 +632,241 @@ def auto_assign():
     return jsonify({'success': True, 'message': msg, 'count': len(assigned_names), 'remaining': remaining})
 
 
-@bp.route('/overview')
-@login_required
-def overview():
-    rooms = Room.query.filter_by(is_active=True).order_by(Room.building, Room.room_number).all()
+@bp.route('/auto-assign-all', methods=['POST'])
+@perm_required('dormitory.beds')
+def auto_assign_all():
+    """
+    一键为全校所有未分配住校生自动分配床位
+    
+    v4.1 合班宿舍床位分配逻辑:
+    - 对每个班级，查找匹配的房间（非合班: class_name匹配; 合班: combined_class包含班级名）
+    - 合班宿舍检查 combined_details 字段，按班级人数限额分配床位
+    - 防止一个班级抢占合班宿舍的所有床位
+    - 使用"最少填充"策略分配：优先将学生分配到当前已分配人数最少的房间
+    """
+    graduated = get_graduated_grades()
 
-    floor_data = {}
-    for room in rooms:
-        key = f"{room.building} {room.floor}楼" if room.building else f"{room.floor}楼"
-        if key not in floor_data:
-            floor_data[key] = []
-        occupancy = BedAssignment.query.filter(
-            BedAssignment.room_id == room.id,
-            BedAssignment.student_id.isnot(None)
-        ).count()
-        floor_data[key].append({
-            'room': room,
-            'occupancy': occupancy,
+    # 0. 确保所有已分配宿舍的房间都有 BedAssignment 记录
+    from app.modules.dormitory.services.room_assignment_v4 import _ensure_room_beds
+    all_assigned_rooms = Room.query.filter(
+        Room.class_name.isnot(None),
+        Room.class_name != ''
+    ).all()
+    if all_assigned_rooms:
+        _ensure_room_beds([r.id for r in all_assigned_rooms])
+
+    # 1. 获取所有已分配床位的student_id
+    assigned_ids = [b.student_id for b in BedAssignment.query.filter(
+        BedAssignment.student_id.isnot(None)
+    ).all()]
+
+    # 2. 获取所有住校学生ID
+    boarding_ids = [sa.student_id for sa in StudentAccommodation.query.filter(
+        StudentAccommodation.boarding_type == '住校'
+    ).all()]
+
+    # 3. 获取所有未分配床位的住校学生
+    unassigned_query = Student.query.filter(
+        Student.id.in_(boarding_ids) if boarding_ids else False
+    )
+    if graduated:
+        unassigned_query = unassigned_query.filter(~Student.grade.in_(graduated))
+    if assigned_ids:
+        unassigned_query = unassigned_query.filter(~Student.id.in_(assigned_ids))
+
+    unassigned_all = unassigned_query.order_by(
+        Student.grade.desc(),
+        Student.class_name,
+        Student.gender.desc(),
+        Student.student_number
+    ).all()
+
+    if not unassigned_all:
+        return jsonify({'success': False, 'message': '所有住校学生已分配完毕'}), 400
+
+    # 4. 按年级+班级分组
+    grade_class_map = {}
+    for s in unassigned_all:
+        key = (s.grade, s.class_name)
+        if key not in grade_class_map:
+            grade_class_map[key] = []
+        grade_class_map[key].append(s)
+
+    # 按年级降序、班级升序排列
+    sorted_keys = sorted(grade_class_map.keys(), key=lambda x: (
+        -int(x[0].replace('级', '')) if x[0].replace('级', '').isdigit() else 0,
+        x[1]
+    ))
+
+    now = datetime.now()
+    total_assigned = 0
+    total_remaining = 0
+    class_results = []
+
+    for grade, class_name in sorted_keys:
+        students = grade_class_map[(grade, class_name)]
+
+        # 找到该班级的房间：
+        # 1. 非合班宿舍：class_name 匹配
+        # 2. 合班宿舍：class_name 是主班级名 OR combined_class 包含当前班级名
+        # 注意：不过滤年级，因为 V7 算法的合班房间可能包含同年级不同班级的学生
+        # 通过 class_name/combined_class 匹配已经足够精确
+        rooms = Room.query.filter(
+            Room.is_active == True,
+        ).filter(
+            db.or_(
+                Room.class_name == class_name,
+                Room.class_name.like(class_name + '+%'),
+                Room.class_name.like('%+' + class_name + '+%'),
+                Room.class_name.like('%+' + class_name),
+                Room.combined_class.like(class_name + '+%'),
+                Room.combined_class.like('%+' + class_name + '+%'),
+                Room.combined_class.like('%+' + class_name)
+            )
+        ).order_by(Room.building, Room.room_number).all()
+
+        # 不再过滤合班宿舍，让所有相关班级都能看到合班宿舍
+        # 通过空床位查询来确保不会重复分配（只有 student_id is None 的床位会被使用）
+
+        if not rooms:
+            total_remaining += len(students)
+            class_results.append({
+                'grade': grade, 'class_name': class_name,
+                'assigned': 0, 'remaining': len(students),
+                'reason': '无宿舍房间'
+            })
+            continue
+
+        # 收集空床位（合班宿舍按分配限额过滤）
+        available_beds = []
+        # 预计算：每个房间当前班级的可用床位数
+        room_bed_limits = {}  # {room_id: max_beds_for_this_class}
+        
+        for room in rooms:
+            beds_in_room = BedAssignment.query.filter(
+                BedAssignment.room_id == room.id,
+                BedAssignment.student_id.is_(None)
+            ).order_by(BedAssignment.bed_number).all()
+            
+            # 检查是否为合班宿舍
+            if room.combined_details:
+                import json
+                try:
+                    details = json.loads(room.combined_details)
+                    # 找到当前班级的分配限额
+                    class_limit = 0
+                    for d in details:
+                        if d.get('class_name') == class_name:
+                            class_limit = d.get('count', 0)
+                            break
+                    if class_limit > 0:
+                        room_bed_limits[room.id] = min(class_limit, len(beds_in_room))
+                        # 只加入限额内的床位
+                        for i, bed in enumerate(beds_in_room):
+                            if i < room_bed_limits[room.id]:
+                                available_beds.append(bed)
+                    else:
+                        # 无分配限额，使用全部
+                        for bed in beds_in_room:
+                            available_beds.append(bed)
+                except (json.JSONDecodeError, TypeError):
+                    for bed in beds_in_room:
+                        available_beds.append(bed)
+            else:
+                for bed in beds_in_room:
+                    available_beds.append(bed)
+
+        if not available_beds:
+            total_remaining += len(students)
+            class_results.append({
+                'grade': grade, 'class_name': class_name,
+                'assigned': 0, 'remaining': len(students),
+                'reason': '床位已满'
+            })
+            continue
+
+        # 按性别分组
+        male_students = [s for s in students if s.gender == '男']
+        female_students = [s for s in students if s.gender == '女']
+
+        # 按性别分房间
+        bed_groups = {}
+        for bed in available_beds:
+            bed_groups.setdefault(bed.room_id, []).append(bed)
+
+        male_rooms = []
+        female_rooms = []
+        unisex_rooms = []
+        for rid, beds in bed_groups.items():
+            room = Room.query.get(rid)
+            if room:
+                if room.gender == '男':
+                    male_rooms.append(beds)
+                elif room.gender == '女':
+                    female_rooms.append(beds)
+                else:
+                    unisex_rooms.append(beds)
+            else:
+                unisex_rooms.append(beds)
+
+        assigned_names = []
+
+        def distribute_least_filled(students_list, rooms_list):
+            assigned = []
+            if not rooms_list or not students_list:
+                return assigned
+            room_data = [{'beds': beds, 'count': 0} for beds in rooms_list]
+
+            for student in students_list:
+                best = None
+                best_count = 9999
+                for rd in room_data:
+                    if rd['count'] < len(rd['beds']):
+                        if rd['count'] < best_count:
+                            best = rd
+                            best_count = rd['count']
+                if not best:
+                    break
+                for bed in best['beds']:
+                    if bed.student_id is None:
+                        bed.student_id = student.id
+                        bed.assigned_by = current_user.id
+                        bed.assigned_at = now
+                        best['count'] += 1
+                        assigned.append(student.name)
+                        r = Room.query.get(bed.room_id)
+                        if r:
+                            record_assignment('auto_assign', student, r, bed.bed_number, current_user)
+                        break
+            return assigned
+
+        assigned_names += distribute_least_filled(male_students, male_rooms + unisex_rooms)
+        assigned_names += distribute_least_filled(female_students, female_rooms + unisex_rooms)
+
+        remaining = len(students) - len(assigned_names)
+        total_assigned += len(assigned_names)
+        total_remaining += remaining
+
+        class_results.append({
+            'grade': grade, 'class_name': class_name,
+            'assigned': len(assigned_names), 'remaining': remaining
         })
 
-    return render_template('dormitory/assignments/overview.html', floor_data=floor_data)
+    db.session.commit()
+
+    log_operation(current_user, '全部自动分配', '床位分配', None,
+                  f'全校自动分配 {total_assigned} 人，剩余 {total_remaining} 人', module='dormitory')
+
+    msg = f'已分配 {total_assigned} 名学生'
+    if total_remaining > 0:
+        msg += f'，剩余 {total_remaining} 名未分配（可能床位不足或无宿舍）'
+
+    return jsonify({
+        'success': True,
+        'message': msg,
+        'total_assigned': total_assigned,
+        'total_remaining': total_remaining,
+        'class_results': class_results
+    })
 
 

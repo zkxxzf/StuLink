@@ -1,10 +1,10 @@
-﻿# StuLink v1.6.1 2026-07-09
+# StuLink v1.7.0 2026-08-02
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
-from flask import Blueprint, render_template, redirect, url_for, flash, request, send_file
+from flask import Blueprint, render_template, redirect, url_for, flash, request, send_file, jsonify
 from markupsafe import Markup
 from flask_login import login_required, current_user
 from app.extensions import db
-from app.models import Student, BedAssignment, StudentAccommodation
+from app.models import Student, BedAssignment, StudentAccommodation, Room
 from app.utils.crypto import encrypt as _encrypt_id
 from app.forms.student_forms import StudentForm
 from app.utils.decorators import perm_required
@@ -695,6 +695,13 @@ def import_students():
                 else:
                     seen_ids.add(_encrypt_id(id_card))
 
+            # 班级名称校验：只允许两位数数字班级、不分班、已转出
+            class_val = row_data.get('class_name', '').strip()
+            if class_val and not update_mode:
+                import re as _re
+                if not (_re.fullmatch(r'\d{2}班', class_val) or class_val in ('不分班', '已转出')):
+                    row_errors.append(f'班级"{class_val}"无效，只允许两位数班级（如01班）、不分班、已转出')
+
             if row_errors:
                 errors.append(f'{row_label}（{name}）：{"; ".join(row_errors)}')
                 continue
@@ -759,7 +766,7 @@ def import_students():
                 name=name, gender=gender, student_number=snum or None,
                 id_card_number=id_card,
                 grade=row_data.get('grade') or '',
-                class_name=row_data.get('class_name') or '未分班',
+                class_name=row_data.get('class_name') or '不分班',
                 ethnicity=row_data.get('ethnicity') or '汉族',
                 phone1=row_data.get('phone1') or None,
                 phone2=row_data.get('phone2') or None,
@@ -778,25 +785,6 @@ def import_students():
 
         # commit and report
         if students_updated:
-            db.session.commit()
-        if students_to_add:
-            actual_students = [s[0] for s in students_to_add]
-            db.session.add_all(actual_students)
-            db.session.flush()
-            for student, acc_data in students_to_add:
-                acc_boarding_type = acc_data['boarding_type']
-                acc_day_student_type = acc_data['day_student_type']
-                acc_textbook = acc_data['textbook']
-                acc_teacher_notes = acc_data['teacher_notes']
-                if acc_boarding_type or acc_day_student_type or acc_textbook or acc_teacher_notes:
-                    acc = StudentAccommodation(
-                        student_id=student.id,
-                        boarding_type=acc_boarding_type,
-                        day_student_type=acc_day_student_type,
-                        textbook=acc_textbook,
-                        teacher_notes=acc_teacher_notes
-                    )
-                    db.session.add(acc)
             db.session.commit()
 
         if update_mode:

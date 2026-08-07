@@ -89,18 +89,29 @@
                     </select>
                 </div>
                 <div class="col-md-4">
-                    <label class="form-label">分配班级</label>
-                    <select name="class_name" class="form-select">
+                    <label class="form-label">分配班级 <span class="text-muted small">(可多选，自动识别合班)</span></label>
+                    <select name="class_name" id="classNameSelect" class="form-select">
                         <option value="">未分配</option>
                         {% for c in classes %}
-                        <option value="{{ c }}" {% if room.class_name == c %}selected{% endif %}>{{ c }}</option>
+                        <option value="{{ c }}" {% if room.class_name and room.class_name.split('+')[0] == c %}selected{% endif %}>{{ c }}</option>
                         {% endfor %}
                     </select>
                 </div>
                 <div class="col-md-4">
-                    <label class="form-label">合班</label>
-                    <input type="text" name="combined_class" class="form-control"
-                           value="{{ room.combined_class or '' }}" placeholder="如有合班请填写">
+                    <label class="form-label">合班班级 <span class="text-muted small">(可添加多个)</span></label>
+                    <div id="combineTagsContainer" class="d-flex flex-wrap gap-1 mb-1" style="min-height:24px;"></div>
+                    <div class="input-group input-group-sm">
+                        <select id="combineClassInput" class="form-select form-select-sm">
+                            <option value="">选择班级...</option>
+                            {% for c in classes %}
+                            <option value="{{ c }}">{{ c }}</option>
+                            {% endfor %}
+                        </select>
+                        <button type="button" class="btn btn-outline-primary btn-sm" id="btnAddCombine">
+                            <i class="bi bi-plus-lg"></i>
+                        </button>
+                    </div>
+                    <input type="hidden" name="combined_class" id="combinedClassHidden" value="{{ room.combined_class or '' }}">
                 </div>
             </div>
             {% endif %}
@@ -119,4 +130,80 @@
         </form>
     </div>
 </div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+(function() {
+    // 从 class_name 中解析合班班级（第一个班在"分配班级"下拉框，其余在合班标签）
+    var combineTags = [];
+    {% if room and room.class_name %}
+    var parts = '{{ room.class_name }}'.split('+');
+    if (parts.length > 1) {
+        for (var i = 1; i < parts.length; i++) {
+            var c = parts[i].trim();
+            if (c) combineTags.push(c);
+        }
+    }
+    {% endif %}
+
+    function renderTags() {
+        var container = document.getElementById('combineTagsContainer');
+        container.innerHTML = '';
+        combineTags.forEach(function(tag, idx) {
+            var badge = document.createElement('span');
+            badge.className = 'badge bg-warning text-dark d-flex align-items-center';
+            badge.style.fontSize = '0.8rem';
+            badge.style.padding = '0.3rem 0.5rem';
+            badge.innerHTML = tag + ' <i class="bi bi-x-lg ms-1" style="cursor:pointer;"></i>';
+            badge.querySelector('i').onclick = function() {
+                combineTags.splice(idx, 1);
+                renderTags();
+            };
+            container.appendChild(badge);
+        });
+        // 同步到隐藏字段：合班班级用逗号分隔存储
+        document.getElementById('combinedClassHidden').value = combineTags.join(',');
+    }
+
+    function addTag() {
+        var select = document.getElementById('combineClassInput');
+        var val = select.value;
+        if (!val) return;
+        // 避免重复添加
+        if (combineTags.indexOf(val) >= 0) { select.value = ''; return; }
+        // 避免与"分配班级"相同
+        var mainClass = document.getElementById('classNameSelect').value;
+        if (val === mainClass) { alert('该班级已在"分配班级"中选择'); select.value = ''; return; }
+        combineTags.push(val);
+        select.value = '';
+        renderTags();
+    }
+
+    document.getElementById('btnAddCombine').addEventListener('click', addTag);
+    document.getElementById('combineClassInput').addEventListener('change', addTag);
+
+    // 表单提交前：把第一个班级 + 合班标签组合成 "01班+02班+03班" 格式存入 class_name
+    document.querySelector('form').addEventListener('submit', function(e) {
+        var mainClass = document.getElementById('classNameSelect').value;
+        var allClasses = [mainClass].concat(combineTags).filter(function(c) { return c; });
+        var combined = allClasses.join('+');
+
+        // 创建临时字段覆盖 class_name
+        var hiddenInput = document.createElement('input');
+        hiddenInput.type = 'hidden';
+        hiddenInput.name = 'class_name';
+        hiddenInput.value = combined;
+        // 禁用原来的 select 避免重复提交
+        document.getElementById('classNameSelect').disabled = true;
+        document.getElementById('classNameSelect').name = '_class_name_display';
+        document.querySelector('form').appendChild(hiddenInput);
+
+        // combined_class: 有合班标签则标记为"合班"，否则清空
+        document.getElementById('combinedClassHidden').value = combineTags.length > 0 ? '合班' : '';
+    });
+
+    renderTags();
+})();
+</script>
 {% endblock %}

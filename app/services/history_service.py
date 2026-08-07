@@ -1,4 +1,4 @@
-﻿"""寝室分配历史记录服务 — 静默失败，不阻塞主业务"""
+"""寝室分配历史记录服务 — 静默失败，不阻塞主业务"""
 import json
 from datetime import datetime
 
@@ -8,7 +8,7 @@ from app.extensions import db
 
 def _current_semester():
     """根据当前月份推导学期，如 '2025-2026-2'"""
-# StuLink v1.6.1 2026-07-09
+# StuLink v1.7.0 2026-08-02
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
     now = datetime.now()
     year = now.year
