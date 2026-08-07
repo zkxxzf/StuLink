@@ -28,9 +28,10 @@ test_debug.py
 # 学生数据导出（含个人隐私，禁止提交）
 docs/*.xlsx
 
-# 部署相关（镜像包体积大，按需显式提交）
+# 部署相关（镜像包体积大，托管于 GitHub Releases）
 dormitory-code/
 dormitory.tar
+deploy/*.tar
 
 # 环境文件
 .env

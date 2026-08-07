@@ -68,7 +68,7 @@ docker-compose up -d
 
 默认管理员：`admin` / `admin123`（首次登录请立即修改）
 
-> 💡 生产部署推荐直接使用发布包：`deploy/stulink-v1.7.0.tar`（详见 [部署文档](docs/部署文档.md)）
+> 💡 生产部署推荐直接使用发布包：镜像托管于 [GitHub Releases](https://github.com/zkxxzf/StuLink/releases) 附件（详见 [部署文档](docs/部署文档.md)）
 
 ## 目录结构
 
