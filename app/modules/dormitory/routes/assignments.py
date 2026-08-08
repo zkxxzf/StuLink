@@ -1,4 +1,4 @@
-# StuLink v1.7.0 2026-08-02
+# StuLink v1.7.1 2026-08-08（并发安全：床位操作原子化）
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 from flask import Blueprint, render_template, request, jsonify, flash, redirect, url_for
 from flask_login import login_required, current_user
@@ -8,8 +8,26 @@ from app.models import Room, BedAssignment, Student, StudentAccommodation
 from app.utils.decorators import perm_required
 from app.utils.helpers import get_dict_values, log_operation, get_graduated_grades
 from app.services.history_service import record_assignment
+from sqlalchemy import and_, exists
+import threading
+from functools import wraps
 
 bp = Blueprint('assignments', __name__, url_prefix='/assignments')
+
+# 床位写操作互斥锁：串行化"读-检查-写"，防止多用户并发操作同一床位产生覆盖
+# （Waitress 单进程多线程部署下有效；配合原子条件 UPDATE 双保险）
+_bed_write_lock = threading.Lock()
+
+
+def _bed_write_lock_decorator(f):
+    @wraps(f)
+    def wrapper(*args, **kwargs):
+        with _bed_write_lock:
+            # 结束锁外（权限检查等）建立的旧事务快照，确保锁内读取到最新数据
+            # （SQLite 快照在事务内首次查询时固定，不重置会导致并发覆盖）
+            db.session.rollback()
+            return f(*args, **kwargs)
+    return wrapper
 
 
 @bp.route('/manage')
@@ -200,6 +218,7 @@ def manage():
 
 @bp.route('/clear-class', methods=['POST'])
 @perm_required('dormitory.beds')
+@_bed_write_lock_decorator
 def clear_class():
     """清除本班全部已分配床位"""
     data = request.get_json() or {}
@@ -244,6 +263,7 @@ def clear_class():
 
 @bp.route('/assign', methods=['POST'])
 @perm_required('dormitory.beds')
+@_bed_write_lock_decorator
 def assign():
     data = request.get_json()
     student_id = data.get('student_id')
@@ -293,9 +313,22 @@ def assign():
                 'message': f'班级不匹配：{student.name}是{student.class_name}，该房间属于{room.class_name}'
             }), 400
 
-    bed.student_id = student_id
-    bed.assigned_by = current_user.id
-    bed.assigned_at = datetime.now()
+    # 原子占用：床位仍为空且学生仍无床时才写入成功（防并发冲突）
+    updated = db.session.query(BedAssignment).filter(
+        and_(
+            BedAssignment.id == bed.id,
+            BedAssignment.student_id.is_(None),
+            ~exists().where(BedAssignment.student_id == student_id)
+        )
+    ).update({
+        'student_id': student_id,
+        'assigned_by': current_user.id,
+        'assigned_at': datetime.now()
+    }, synchronize_session=False)
+    if updated != 1:
+        db.session.rollback()
+        return jsonify({'success': False, 'message': '床位状态已变化（可能已被其他用户操作），请刷新页面后重试'}), 409
+
     record_assignment('assign', student, room, bed.bed_number, current_user)
     log_operation(current_user, '分配床位', '床位分配', bed.id,
                   f'{student.name} → {room.display_name} {bed.bed_number}床', module='dormitory')
@@ -306,6 +339,7 @@ def assign():
 
 @bp.route('/unassign', methods=['POST'])
 @perm_required('dormitory.beds')
+@_bed_write_lock_decorator
 def unassign():
     data = request.get_json()
     bed_id = data.get('bed_id')
@@ -323,11 +357,22 @@ def unassign():
     student_name = student.name if student else ''
     room = Room.query.get(bed.room_id)
     student = Student.query.get(bed.student_id)
+    # 原子移除：床位仍被占用时才写入成功（防并发冲突）
+    updated = db.session.query(BedAssignment).filter(
+        and_(
+            BedAssignment.id == bed.id,
+            BedAssignment.student_id.isnot(None)
+        )
+    ).update({
+        'student_id': None,
+        'assigned_by': None,
+        'assigned_at': None
+    }, synchronize_session=False)
+    if updated != 1:
+        db.session.rollback()
+        return jsonify({'success': False, 'message': '床位状态已变化（可能已被其他用户操作），请刷新页面后重试'}), 409
     if student and room:
         record_assignment('unassign', student, room, bed.bed_number, current_user)
-    bed.student_id = None
-    bed.assigned_by = None
-    bed.assigned_at = None
     log_operation(current_user, '取消分配', '床位分配', bed.id,
                   f'{student_name} 从 {room.display_name if room else "?"} {bed.bed_number}床移除', module='dormitory')
     db.session.commit()
@@ -337,6 +382,7 @@ def unassign():
 
 @bp.route('/move', methods=['POST'])
 @perm_required('dormitory.beds')
+@_bed_write_lock_decorator
 def move():
     """搬移学生从一个床位到另一个空床位"""
     data = request.get_json()
@@ -374,22 +420,37 @@ def move():
         if student.class_name not in room_classes:
             return jsonify({'success': False, 'message': f'禁止跨班转移：{student.name}是{student.class_name}，目标房间属于{room.class_name}'}), 400
 
-    # 搬移：清空旧床，填入新床
+    # 防御：目标床与旧床不能是同一张床
+    if from_bed_id == to_bed_id:
+        return jsonify({'success': False, 'message': '目标床位与当前床位相同'}), 400
+
+    # 原子搬移：目标床必须仍为空、旧床必须仍是该学生，任一不满足则整体回滚（防并发冲突）
     from_room = Room.query.get(from_bed.room_id)
+    now = datetime.now()
+    r1 = db.session.query(BedAssignment).filter(
+        and_(BedAssignment.id == to_bed.id, BedAssignment.student_id.is_(None))
+    ).update({
+        'student_id': student_id,
+        'assigned_by': current_user.id,
+        'assigned_at': now
+    }, synchronize_session=False)
+    r2 = db.session.query(BedAssignment).filter(
+        and_(BedAssignment.id == from_bed.id, BedAssignment.student_id == student_id)
+    ).update({
+        'student_id': None,
+        'assigned_by': None,
+        'assigned_at': None
+    }, synchronize_session=False)
+    if r1 != 1 or r2 != 1:
+        db.session.rollback()
+        return jsonify({'success': False, 'message': '床位状态已变化（可能已被其他用户操作），请刷新页面后重试'}), 409
+
     if from_room:
         record_assignment('move_out', student, from_room, from_bed.bed_number,
                           current_user, {'to_room': room.display_name, 'to_bed': to_bed.bed_number})
-    from_bed.student_id = None
-    from_bed.assigned_by = None
-    from_bed.assigned_at = None
-    
     record_assignment('move_in', student, room, to_bed.bed_number,
                       current_user, {'from_room': from_room.display_name if from_room else '?', 'from_bed': from_bed.bed_number})
-    
-    to_bed.student_id = student_id
-    to_bed.assigned_by = current_user.id
-    to_bed.assigned_at = datetime.now()
-    
+
     log_operation(current_user, '搬移床位', '床位分配', to_bed.id,
                   f'{student.name} {from_room.display_name if from_room else "?"}{from_bed.bed_number}床 → {room.display_name}{to_bed.bed_number}床', module='dormitory')
     db.session.commit()
@@ -398,6 +459,7 @@ def move():
 
 @bp.route('/swap', methods=['POST'])
 @perm_required('dormitory.beds')
+@_bed_write_lock_decorator
 def swap():
     """互换两个座位上的学生"""
     data = request.get_json()
@@ -443,17 +505,34 @@ def swap():
     err = check_cross_class(stu_b, room_a, 'B')
     if err: return jsonify({'success': False, 'message': err}), 400
 
-    # 互换
+    # 防御：两个床位不能是同一张床
+    if bid_a == bid_b:
+        return jsonify({'success': False, 'message': '不能在同一张床上互换'}), 400
+
+    # 原子互换：两个床位的当前学生必须与请求一致，任一不满足则整体回滚（防并发冲突）
+    now = datetime.now()
+    r1 = db.session.query(BedAssignment).filter(
+        and_(BedAssignment.id == bed_a.id, BedAssignment.student_id == sid_a)
+    ).update({
+        'student_id': sid_b,
+        'assigned_by': current_user.id,
+        'assigned_at': now
+    }, synchronize_session=False)
+    r2 = db.session.query(BedAssignment).filter(
+        and_(BedAssignment.id == bed_b.id, BedAssignment.student_id == sid_b)
+    ).update({
+        'student_id': sid_a,
+        'assigned_by': current_user.id,
+        'assigned_at': now
+    }, synchronize_session=False)
+    if r1 != 1 or r2 != 1:
+        db.session.rollback()
+        return jsonify({'success': False, 'message': '床位状态已变化（可能已被其他用户操作），请刷新页面后重试'}), 409
+
     record_assignment('swap', stu_a, room_b, bed_b.bed_number,
                       current_user, {'pair_student': stu_b.name, 'pair_bed': bed_a.bed_number})
     record_assignment('swap', stu_b, room_a, bed_a.bed_number,
                       current_user, {'pair_student': stu_a.name, 'pair_bed': bed_b.bed_number})
-    bed_a.student_id, bed_b.student_id = sid_b, sid_a
-    now = datetime.now()
-    bed_a.assigned_by = current_user.id
-    bed_b.assigned_by = current_user.id
-    bed_a.assigned_at = now
-    bed_b.assigned_at = now
 
     log_operation(current_user, '互换床位', '床位分配', bed_a.id,
                   f'{stu_a.name} ⇄ {stu_b.name}', module='dormitory')
@@ -463,6 +542,7 @@ def swap():
 
 @bp.route('/auto-assign', methods=['POST'])
 @perm_required('dormitory.beds')
+@_bed_write_lock_decorator
 def auto_assign():
     """一键自动为本班学生分配床位"""
     data = request.get_json() or {}
@@ -634,6 +714,7 @@ def auto_assign():
 
 @bp.route('/auto-assign-all', methods=['POST'])
 @perm_required('dormitory.beds')
+@_bed_write_lock_decorator
 def auto_assign_all():
     """
     一键为全校所有未分配住校生自动分配床位

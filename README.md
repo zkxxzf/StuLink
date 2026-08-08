@@ -3,7 +3,7 @@
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
 [![Python](https://img.shields.io/badge/python-3.11+-green.svg)](https://python.org)
 [![Flask](https://img.shields.io/badge/flask-3.x-lightgrey.svg)](https://flask.palletsprojects.com/)
-[![Version](https://img.shields.io/badge/version-1.7.0-orange.svg)](https://github.com/zkxxzf/stulink)
+[![Version](https://img.shields.io/badge/version-1.7.1-orange.svg)](https://github.com/zkxxzf/stulink)
 
 面向中学的综合学生管理平台，采用双站点架构：
 
@@ -15,7 +15,7 @@
 | 模块 | 站点 | 状态 | 说明 |
 |------|------|------|------|
 | 📚 系统管理 | 主应用 | ✅ 已完成 | 学生管理 · 教师管理 · 字典管理 · 班型设置 · 权限组 · 年级毕业归档 |
-| 🏠 宿舍管理 | 主应用 | ✅ 已完成 | 宿舍列表 · 可视化拖拽分配 · 床位管理 · 自动分配 V20260805 · 合班自动识别 · 统计报表 · 宿舍数据导入 |
+| 🏠 宿舍管理 | 主应用 | ✅ 已完成 | 宿舍列表 · 可视化拖拽分配 · 床位管理 · 自动分配 V20260805 · 合班自动识别 · 统计报表 · 宿舍数据导入 · 床位操作并发安全 |
 | 🔍 往届查询 | 独立应用 | ✅ 已完成 | 毕业生基本信息查询 · 宿舍分配快照 · 学习经历变迁时间线 |
 | ⭐ 积分管理 | 主应用 | 🚧 开发中 | 学生积分记录与奖惩管理 |
 | 📊 成绩管理 | 主应用 | 🚧 开发中 | 成绩录入、排名分析与报表导出 |
@@ -61,7 +61,7 @@ python run.py --dev
 cd alumni_app && python run.py
 
 # Docker 部署（两个容器）
-docker build -t stulink:v1.7.0 .
+docker build -t stulink:v1.7.1 .
 docker build -t stulink-alumni:v1.0.0 ./alumni_app
 docker-compose up -d
 ```
@@ -104,11 +104,11 @@ StuLink/
 - [设计文档](docs/设计文档.md)
 - [用户手册](docs/用户文档.md)
 - [部署文档](docs/部署文档.md)（Docker / 阿里云 / NAS）
-- [测试文档](docs/测试文档.md)
-- [安全审计报告](docs/安全审计报告_20260807.md)
-- [数据库分库规格说明](docs/模块化重构规格说明.md)
-- [历史记录与日志设计](docs/历史记录与日志系统设计.md)
+- [宿舍分配使用手册](docs/宿舍分配使用手册.md)（自动分配 4 步向导 + 算法说明 + FAQ）
 - [宿舍分配算法规范](docs/宿舍分配算法设计规范.md)
+- [安全审计报告](docs/安全审计报告_20260807.md)
+- [测试报告 v1.7.1](docs/测试报告_20260808.md)
+- [历史记录与日志设计](docs/历史记录与日志系统设计.md)
 
 ## 许可证
 
