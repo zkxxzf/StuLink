@@ -1,4 +1,4 @@
-# StuLink v1.7.1 2026-08-08（并发安全：床位操作原子化）
+# StuLink v1.7.2 2026-08-13（并发安全 + 合班床位份额过滤）
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 from flask import Blueprint, render_template, request, jsonify, flash, redirect, url_for
 from flask_login import login_required, current_user
@@ -580,15 +580,39 @@ def auto_assign():
     from app.modules.dormitory.services.room_assignment_v4 import _ensure_room_beds
     _ensure_room_beds([r.id for r in rooms])
 
-    # 2. 收集所有空床位
+    # 2. 收集所有空床位（合班宿舍按 combined_details 份额过滤，防止抢占其他班床位）
     available_beds = []
+    room_bed_limits = {}  # {room_id: max_beds_for_this_class}
     for room in rooms:
-        beds = BedAssignment.query.filter(
+        beds_in_room = BedAssignment.query.filter(
             BedAssignment.room_id == room.id,
             BedAssignment.student_id.is_(None)
         ).order_by(BedAssignment.bed_number).all()
-        for bed in beds:
-            available_beds.append(bed)
+
+        # 合班宿舍：只取本班份额内的空床
+        if room.combined_details:
+            import json as _json
+            try:
+                details = _json.loads(room.combined_details)
+                class_limit = 0
+                for d in details:
+                    if d.get('class_name') == class_name:
+                        class_limit = d.get('count', 0)
+                        break
+                if class_limit > 0:
+                    room_bed_limits[room.id] = min(class_limit, len(beds_in_room))
+                    for i, bed in enumerate(beds_in_room):
+                        if i < room_bed_limits[room.id]:
+                            available_beds.append(bed)
+                else:
+                    for bed in beds_in_room:
+                        available_beds.append(bed)
+            except (_json.JSONDecodeError, TypeError):
+                for bed in beds_in_room:
+                    available_beds.append(bed)
+        else:
+            for bed in beds_in_room:
+                available_beds.append(bed)
     
     if not available_beds:
         return jsonify({'success': False, 'message': '该班级所有床位已满'}), 400

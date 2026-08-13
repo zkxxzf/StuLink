@@ -19,7 +19,7 @@
    1 间独立房，减少合班宿舍数量，不影响主算法结果
 ================================================================================
 """
-# StuLink v1.7.0 2026-08-02
+# StuLink v1.7.2 2026-08-13（算法：小容量房间优先住满 + 独享宿舍优先于合班）
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 import re
 import json
@@ -58,15 +58,16 @@ def _extract_grade_year(grade):
 
 def sort_rooms_s(rooms):
     """S型序列化：楼层分组，偶数层正向、奇数层反向，楼层升序连接
+    同层内容量小的房间优先（如 6 人间先于 8 人间），保证小容量房间尽量住满
 
-    rooms: [{floor, room_number, ...}, ...]（dict 或 Room 对象均可）
+    rooms: [{floor, room_number, capacity, ...}, ...]（dict 或 Room 对象均可）
     """
     floor_groups = defaultdict(list)
     for r in rooms:
         floor_groups[r['floor']].append(r)
     result = []
     for f in sorted(floor_groups):
-        group = sorted(floor_groups[f], key=lambda r: _room_number_int(r['room_number']))
+        group = sorted(floor_groups[f], key=lambda r: (r['capacity'], _room_number_int(r['room_number'])))
         if f % 2 == 0:
             result.extend(group)
         else:
@@ -158,21 +159,24 @@ def _allocate_with_level(classes, rooms, L):
     allocations = {c['key']: [] for c in classes}
     room_details = {}
     occupied = [0] * n
+    class_rooms = defaultdict(list)    # key -> [room_idx,...] 本班占用的房间（用于收尾时填满独享空床）
 
     for i, cur in enumerate(classes):
         key = cur['key']
-        rem = class_rem[key]
-        if rem == 0:
-            continue
 
-        # ---- 处理上一班遗留的合班房 ----
+        # ---- 处理上一班遗留的合班房（必须先于 rem==0 检查，确保被借完的班份额正确记录）----
         if has_merged:
             r = rooms[room_idx]
             borrowed = occupied[room_idx] - merge_prev_share
             allocations[key].append((room_idx, borrowed))
             room_details.setdefault(room_idx, []).append((key, borrowed))
+            class_rooms[key].append(room_idx)
             has_merged = False
             room_idx += 1
+
+        rem = class_rem[key]
+        if rem == 0:
+            continue
 
         # ---- 分配当前班 ----
         while rem > 0:
@@ -194,14 +198,35 @@ def _allocate_with_level(classes, rooms, L):
                 occupied[room_idx] = occ
                 allocations[key].append((room_idx, occ))
                 room_details.setdefault(room_idx, []).append((key, occ))
+                class_rooms[key].append(room_idx)
                 rem -= occ
                 room_idx += 1
             else:
                 # ---- 收尾: 0 < rem < limit（1~5人）----
+                # ① 优先填满本班独享宿舍的空床（突破 limit 至物理容量，合班房不填），
+                #    保证合班宿舍只有在独享宿舍都住满后才被使用
+                for ri in list(class_rooms[key]):
+                    if rem <= 0:
+                        break
+                    if len(room_details.get(ri, [])) != 1:
+                        continue  # 合班房不参与填满
+                    space = rooms[ri]['capacity'] - occupied[ri]
+                    if space <= 0:
+                        continue
+                    fill = min(space, rem)
+                    occupied[ri] += fill
+                    room_details[ri] = [(key, occupied[ri])]
+                    allocations[key] = [(r2, c) for r2, c in allocations[key] if r2 != ri] \
+                        + [(ri, occupied[ri])]
+                    rem -= fill
+                if rem == 0:
+                    break
+                # ② 独享宿舍已满仍有人剩余，才走原有收尾逻辑（末班独占/合班）
                 if i == len(classes) - 1:
                     occupied[room_idx] = rem
                     allocations[key].append((room_idx, rem))
                     room_details.setdefault(room_idx, []).append((key, rem))
+                    class_rooms[key].append(room_idx)
                     rem = 0
                     room_idx += 1
                 else:
@@ -213,6 +238,7 @@ def _allocate_with_level(classes, rooms, L):
                         occupied[room_idx] = rem
                         allocations[key].append((room_idx, rem))
                         room_details.setdefault(room_idx, []).append((key, rem))
+                        class_rooms[key].append(room_idx)
                         rem = 0
                         room_idx += 1
                     else:
