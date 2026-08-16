@@ -143,7 +143,7 @@
                 </button>
                 {% endif %}
             </div>
-            <div class="card-body p-0" style="max-height:70vh;overflow-y:auto;">
+            <div class="card-body p-0">
                 {% for s in unassigned_students %}
                 <div class="student-item p-2 border-bottom d-flex justify-content-between align-items-center {% if s.gender == '男' %}male-student{% else %}female-student{% endif %}"
                      draggable="true" data-student-id="{{ s.id }}" data-student-name="{{ s.name }}"

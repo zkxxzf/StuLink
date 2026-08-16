@@ -66,6 +66,10 @@ def list_students():
     filter_name = request.args.get('name', '').strip()
     filter_student_number = request.args.get('student_number', '').strip()
 
+    # 班级必须与年级成对使用：只按班级名筛选会串到其他年级的同名班级
+    if filter_class and not filter_grade:
+        filter_class = ''
+
     if filter_gender:
         query = query.filter_by(gender=filter_gender)
     if filter_grade:
@@ -284,6 +288,11 @@ def delete(id):
     # 先删除床位分配
     if student.bed_assignment:
         student.bed_assignment.student_id = None
+    # 同步删除住宿记录（跨库 dormitory）：否则残留记录会在重新导入时因
+    # student_id 复用（SQLite 无 AUTOINCREMENT）触发 UNIQUE 冲突
+    acc = StudentAccommodation.query.filter_by(student_id=student.id).first()
+    if acc:
+        db.session.delete(acc)
     db.session.delete(student)
     db.session.commit()
     log_operation(current_user, '删除', '学生', id, f'{student.name} {student.grade}{student.class_name}')
@@ -309,6 +318,10 @@ def search():
     day_student_type = request.args.get('day_student_type', '')
     subject_selection = request.args.get('subject_selection', '')
     room_number = request.args.get('room_number', '').strip()
+
+    # 班级必须与年级成对使用：只按班级名筛选会串到其他年级的同名班级
+    if class_name and not grade:
+        class_name = ''
 
     if name:
         query = query.filter(Student.name.contains(name))
@@ -986,6 +999,10 @@ def batch_delete():
     for s in students:
         if s.bed_assignment:
             s.bed_assignment.student_id = None
+        # 同步删除住宿记录（跨库 dormitory），防止残留导致重新导入时 id 复用冲突
+        acc = StudentAccommodation.query.filter_by(student_id=s.id).first()
+        if acc:
+            db.session.delete(acc)
         db.session.delete(s)
     db.session.commit()
     log_operation(current_user, '删除', '学生', None, f'批量删除 {count} 名学生')

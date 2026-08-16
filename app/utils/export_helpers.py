@@ -67,6 +67,10 @@ def do_export_students(args):
         q = q.filter(~Student.grade.in_(gds))
     if current_user.role == 'homeroom_teacher':
         q = q.filter_by(grade=current_user.grade, class_name=current_user.class_name)
+    # 班级必须与年级成对使用：只按班级名筛选会串到其他年级的同名班级
+    if args.get('class_name') and not args.get('grade'):
+        args = args.copy()
+        args['class_name'] = ''
     for k in ['gender', 'grade', 'class_name', 'subject_selection', 'enrollment_status']:
         v = args.get(k)
         if v:
@@ -209,6 +213,10 @@ def do_export_student_accommodation(args):
     if gds:
         q = q.filter(~Student.grade.in_(gds))
 
+    # 班级必须与年级成对使用：只按班级名筛选会串到其他年级的同名班级
+    if args.get('class_name') and not args.get('grade'):
+        args = args.copy()
+        args['class_name'] = ''
     for k in ['gender', 'grade', 'class_name', 'subject_selection']:
         v = args.get(k)
         if v:

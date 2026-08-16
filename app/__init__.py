@@ -1,4 +1,4 @@
-# StuLink v1.7.0 2026-08-02
+# StuLink v1.8.0 2026-08-02
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 from flask import Flask, render_template, request
 from config import Config

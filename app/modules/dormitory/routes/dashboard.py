@@ -198,6 +198,10 @@ def search_student_accommodation():
     subject_selection = request.args.get('subject_selection', '')
     room_number = request.args.get('room_number', '').strip()
 
+    # 班级必须与年级成对使用：只按班级名筛选会串到其他年级的同名班级
+    if class_name and not grade:
+        class_name = ''
+
     if name:
         query = query.filter(Student.name.contains(name))
     if student_number:

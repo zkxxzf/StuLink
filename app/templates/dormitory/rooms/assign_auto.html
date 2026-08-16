@@ -3,7 +3,7 @@
 
 {% block content %}
 <div class="container-fluid">
-    <h4 class="fw-bold mb-3"><i class="bi bi-magic"></i> 自动分配宿舍 <span class="badge bg-primary" style="font-size:0.7rem;">v20260805</span></h4>
+    <h4 class="fw-bold mb-3"><i class="bi bi-magic"></i> 自动分配宿舍 <span class="badge bg-primary" style="font-size:0.7rem;">v7</span></h4>
     
     <!-- 步骤指示器 -->
     <div class="row mb-3">
@@ -130,6 +130,29 @@
                 </div>
                 <div class="alert alert-light border py-2 mb-2" style="font-size:0.85rem;">
                     <i class="bi bi-lightning-charge-fill text-warning"></i> <strong>实时拥挤提示：</strong>勾选房间时自动计算分配后的拥挤程度（宽松≤6人 / 7人间合班 / 8人间住满 / 床位不足），毫秒级响应
+                </div>
+                <!-- v8 高级参数面板（评分权重 + 迭代轮数，前端可调） -->
+                <div class="card border mb-2">
+                    <div class="card-header py-1 px-2" style="font-size:0.85rem;">
+                        <a class="text-decoration-none text-dark" data-bs-toggle="collapse" href="#advParams" role="button">
+                            <i class="bi bi-sliders"></i> 高级参数（v8 评分权重与迭代轮数） <span class="text-muted small">点击展开/收起</span>
+                        </a>
+                    </div>
+                    <div class="collapse" id="advParams">
+                        <div class="card-body py-2" style="font-size:0.8rem;">
+                            <div class="row g-2">
+                                <div class="col-6 col-md-4">宽松优先(L) <input type="number" id="wL" class="form-control form-control-sm" value="200" min="0" step="10"></div>
+                                <div class="col-6 col-md-4">8人间超6人 <input type="number" id="wOver6" class="form-control form-control-sm" value="80" min="0" step="10"></div>
+                                <div class="col-6 col-md-4">合班宿舍 <input type="number" id="wComb" class="form-control form-control-sm" value="50" min="0" step="10"></div>
+                                <div class="col-6 col-md-4">班级分散 <input type="number" id="wSpread" class="form-control form-control-sm" value="80" min="0" step="10"></div>
+                                <div class="col-6 col-md-4">小房(≤3人) <input type="number" id="wSmall" class="form-control form-control-sm" value="100" min="0" step="10"></div>
+                                <div class="col-6 col-md-4">空房 <input type="number" id="wEmpty" class="form-control form-control-sm" value="20" min="0" step="10"></div>
+                                <div class="col-6 col-md-4">满8(8人间住满) <input type="number" id="wFull8" class="form-control form-control-sm" value="100" min="0" step="10"></div>
+                                <div class="col-6 col-md-4">迭代轮数 <input type="number" id="wIter" class="form-control form-control-sm" value="1000" min="0" step="100"></div>
+                            </div>
+                            <div class="mt-1 text-muted">分数越低越好：宽松优先=想避免8人间住满/住7；超6人=8人间超过6人的惩罚（每超1人）；满8=8人间住满8人的额外惩罚；合班=每间合班宿舍；班级分散=每个班多占1间房的惩罚；小房=≤3人房间；空房=勾选未用房间。调整后重新预览生效。</div>
+                        </div>
+                    </div>
                 </div>
                 <div class="d-flex justify-content-between align-items-center mb-2">
                     <h6 class="fw-bold mb-0" style="font-size:0.9rem;">选择可用房间：</h6>
@@ -272,13 +295,28 @@ function initAssignAuto() {
     if (typeof $ === 'undefined') { setTimeout(initAssignAuto, 100); return; }
     // Step1 → Step2
     $('#btnStep1Next').on('click', function() { goToStep(2); initStep2(); });
-    // 班级勾选
+    // 班级勾选（单年级限制：不允许同时勾选两个年级）
+    function checkSingleGrade($this) {
+        if(!$this.prop('checked')) return true;
+        var g = $this.data('grade');
+        var other = $('.gender-checkbox:checked').filter(function(){ return $(this).data('grade') !== g; });
+        if(other.length > 0){
+            alert('不允许同时分配两个年级的宿舍，请先取消其他年级的勾选（' + other.first().data('grade') + '）');
+            $this.prop('checked', false);
+            return false;
+        }
+        return true;
+    }
     $(document).on('change', '.grade-gender-select', function() {
+        if(!checkSingleGrade($(this))){ return; }
         var g = $(this).data('grade'), gn = $(this).data('gender'), c = $(this).prop('checked');
         $('.gender-checkbox[data-grade="'+g+'"][data-gender="'+gn+'"]').prop('checked', c);
         updateSelection();
     });
-    $(document).on('change', '.gender-checkbox', function() { updateSelection(); });
+    $(document).on('change', '.gender-checkbox', function() {
+        if(!checkSingleGrade($(this))){ return; }
+        updateSelection();
+    });
     // Step2 按钮
     $('#btnStep2Prev').on('click', function() { goToStep(1); });
     $('#btnPreview').on('click', doPreview);
@@ -351,19 +389,37 @@ function renderRooms(bd) {
             var mr=[],fr=[];for(var j=0;j<rms.length;j++){if(rms[j].gender==='男'||rms[j].gender==='不限')mr.push(rms[j]);if(rms[j].gender==='女'||rms[j].gender==='不限')fr.push(rms[j]);}
             h+='<tr><td class="text-center fw-bold" style="font-size:.8rem;">'+fl+'楼</td><td class="text-center">';
             if(mr.length){h+='<div class="form-check d-inline-block mb-1"><input class="form-check-input floor-gender-select" type="checkbox" id="fgs_'+fId+'_m" data-building="'+bn+'" data-floor="'+fl+'" data-gender="男"><label class="form-check-label" style="font-size:.75rem;" for="fgs_'+fId+'_m">全选</label></div><div class="mt-1">';
-                for(var j=0;j<mr.length;j++){var r=mr[j],rid='r_'+r.id,ia=r.class_name&&r.class_name.trim()!=='';h+='<div class="form-check form-check-inline"><input class="form-check-input room-checkbox" type="checkbox" id="'+rid+'" data-room-id="'+r.id+'" data-building="'+bn+'" data-floor="'+fl+'" data-room-number="'+r.room_number+'" data-gender="男"><label class="form-check-label" style="font-size:.75rem;" for="'+rid+'">'+r.room_number+'('+r.capacity+')'+(ia?' <span class="badge bg-warning text-dark" style="font-size:.55rem">已分配</span>':'')+'</label></div>';}
+                for(var j=0;j<mr.length;j++){var r=mr[j],rid='r_'+r.id,ia=r.class_name&&r.class_name.trim()!=='';h+='<div class="form-check form-check-inline"><input class="form-check-input room-checkbox" type="checkbox" id="'+rid+'" data-room-id="'+r.id+'" data-building="'+bn+'" data-floor="'+fl+'" data-room-number="'+r.room_number+'" data-gender="男"'+(ia?' data-assigned="1" data-class-info="'+ (r.grade||'')+' '+(r.class_name||'')+'"':'')+'><label class="form-check-label" style="font-size:.75rem;" for="'+rid+'">'+r.room_number+'('+r.capacity+')'+(ia?' <span class="badge bg-warning text-dark" style="font-size:.55rem">已分配</span>':'')+'</label></div>';}
                 h+='</div>';}else h+='<span class="text-muted" style="font-size:.75rem;">无</span>';
             h+='</td><td class="text-center">';
             if(fr.length){h+='<div class="form-check d-inline-block mb-1"><input class="form-check-input floor-gender-select" type="checkbox" id="fgs_'+fId+'_f" data-building="'+bn+'" data-floor="'+fl+'" data-gender="女"><label class="form-check-label" style="font-size:.75rem;" for="fgs_'+fId+'_f">全选</label></div><div class="mt-1">';
-                for(var j=0;j<fr.length;j++){var r=fr[j],rid='r_'+r.id,ia=r.class_name&&r.class_name.trim()!=='';h+='<div class="form-check form-check-inline"><input class="form-check-input room-checkbox" type="checkbox" id="'+rid+'" data-room-id="'+r.id+'" data-building="'+bn+'" data-floor="'+fl+'" data-room-number="'+r.room_number+'" data-gender="女"><label class="form-check-label" style="font-size:.75rem;" for="'+rid+'">'+r.room_number+'('+r.capacity+')'+(ia?' <span class="badge bg-warning text-dark" style="font-size:.55rem">已分配</span>':'')+'</label></div>';}
+                for(var j=0;j<fr.length;j++){var r=fr[j],rid='r_'+r.id,ia=r.class_name&&r.class_name.trim()!=='';h+='<div class="form-check form-check-inline"><input class="form-check-input room-checkbox" type="checkbox" id="'+rid+'" data-room-id="'+r.id+'" data-building="'+bn+'" data-floor="'+fl+'" data-room-number="'+r.room_number+'" data-gender="女"'+(ia?' data-assigned="1" data-class-info="'+ (r.grade||'')+' '+(r.class_name||'')+'"':'')+'><label class="form-check-label" style="font-size:.75rem;" for="'+rid+'">'+r.room_number+'('+r.capacity+')'+(ia?' <span class="badge bg-warning text-dark" style="font-size:.55rem">已分配</span>':'')+'</label></div>';}
                 h+='</div>';}else h+='<span class="text-muted" style="font-size:.75rem;">无</span>';
             h+='</td></tr>';}
         h+='</tbody></table></div></div></div></div>';}
     h+='</div>';
     $('#roomsContainer').html(h);
-    $(document).on('change','.room-checkbox',function(){updateRoomStats();});
-    $(document).on('change','.floor-gender-select',function(){var b=$(this).data('building'),f=$(this).data('floor'),g=$(this).data('gender'),c=$(this).prop('checked');$('.room-checkbox[data-building="'+b+'"][data-floor="'+f+'"][data-gender="'+g+'"]').prop('checked',c);updateRoomStats();});
-    $(document).on('change','.building-gender-select',function(){var b=$(this).data('building'),g=$(this).data('gender'),c=$(this).prop('checked');$('.room-checkbox[data-building="'+b+'"][data-gender="'+g+'"]').prop('checked',c);$('.floor-gender-select[data-building="'+b+'"][data-gender="'+g+'"]').prop('checked',c);updateRoomStats();});
+    // 勾选已分配宿舍时提示：需先清除原分配，或确认覆盖重新分配
+    function confirmAssignedRooms() {
+        var assigned = $('.room-checkbox[data-assigned="1"]:checked');
+        if(!assigned.length) return true;
+        var first = assigned.first().data('class-info') || '其他班级';
+        return confirm('所选房间中包含 ' + assigned.length + ' 间已分配宿舍（如「' + first + '」）。\n\n' +
+            '继续将以"覆盖"方式重新分配这些房间（原班级分配将被清除）；\n' +
+            '或先清除原班级的分配后再勾选。\n\n确定继续吗？');
+    }
+    $(document).on('change','.room-checkbox',function(){
+        if($(this).prop('checked') && $(this).data('assigned')){
+            var info=$(this).data('class-info')||'其他班级';
+            if(!confirm('房间 ' + $(this).data('room-number') + ' 已分配给「' + info + '」。\n\n继续勾选将以"覆盖"方式重新分配该房间（原班级分配将被清除）；\n或先清除原班级的分配后再勾选。\n\n确定继续勾选吗？')){
+                $(this).prop('checked',false);
+                return;
+            }
+        }
+        updateRoomStats();
+    });
+    $(document).on('change','.floor-gender-select',function(){var b=$(this).data('building'),f=$(this).data('floor'),g=$(this).data('gender'),c=$(this).prop('checked');$('.room-checkbox[data-building="'+b+'"][data-floor="'+f+'"][data-gender="'+g+'"]').prop('checked',c);if(c&&!confirmAssignedRooms()){$('.room-checkbox[data-building="'+b+'"][data-floor="'+f+'"][data-gender="'+g+'"]').prop('checked',false);$(this).prop('checked',false);}updateRoomStats();});
+    $(document).on('change','.building-gender-select',function(){var b=$(this).data('building'),g=$(this).data('gender'),c=$(this).prop('checked');$('.room-checkbox[data-building="'+b+'"][data-gender="'+g+'"]').prop('checked',c);$('.floor-gender-select[data-building="'+b+'"][data-gender="'+g+'"]').prop('checked',c);if(c&&!confirmAssignedRooms()){$('.room-checkbox[data-building="'+b+'"][data-gender="'+g+'"]').prop('checked',false);$('.floor-gender-select[data-building="'+b+'"][data-gender="'+g+'"]').prop('checked',false);$(this).prop('checked',false);}updateRoomStats();});
     $('#btnLoadRooms').off('click').on('click',function(){loadRoomsData();});
 }
 
@@ -377,10 +433,19 @@ function updateRoomStats() {
     _roomStatsTimer=setTimeout(requestRoomStats, 250);
 }
 
+function getAdvParams(){
+    return {weights:{L:parseInt($('#wL').val()||200),over6:parseInt($('#wOver6').val()||80),
+            comb:parseInt($('#wComb').val()||50),spread:parseInt($('#wSpread').val()||80),
+            small:parseInt($('#wSmall').val()||100),empty:parseInt($('#wEmpty').val()||20),
+            full8:parseInt($('#wFull8').val()||100)},
+        iterations:parseInt($('#wIter').val()||1000)};
+}
+
 function requestRoomStats() {
+    var adv=getAdvParams();
     $.ajax({url:'{{ url_for("rooms.assign_auto_room_stats") }}',method:'POST',contentType:'application/json',
         headers:{'X-CSRFToken':csrfToken},
-        data:JSON.stringify({room_ids:selectedRoomIds,selected_keys:selectedKeys}),
+        data:JSON.stringify({room_ids:selectedRoomIds,selected_keys:selectedKeys,weights:adv.weights,iterations:adv.iterations}),
         success:function(r){if(r.success){
             $('#selectedBedsCount').text((r.male_rooms||0)+(r.female_rooms||0));
             $('#totalAvailableBeds').text(r.total_beds);
@@ -390,11 +455,11 @@ function requestRoomStats() {
             $('#btnExecute').prop('disabled',!ok||selectedRoomIds.length===0);
             var tips=[];
             if(s.male_total>0){
-                tips.push('<span class="text-muted">男生：'+(r.male_rooms||0)+'间/'+(r.male_beds||0)+'床</span>');
+                tips.push('<span class="text-muted">男生：需床位 <strong>'+(s.male_total||0)+'</strong> 个 | 已选 '+(r.male_rooms||0)+'间/'+(r.male_beds||0)+'床</span>');
                 tips.push(pressureTip('男生', r.male_pressure));
             }
             if(s.female_total>0){
-                tips.push('<span class="text-muted">女生：'+(r.female_rooms||0)+'间/'+(r.female_beds||0)+'床</span>');
+                tips.push('<span class="text-muted">女生：需床位 <strong>'+(s.female_total||0)+'</strong> 个 | 已选 '+(r.female_rooms||0)+'间/'+(r.female_beds||0)+'床</span>');
                 tips.push(pressureTip('女生', r.female_pressure));
             }
             $('#bedsStatusTips').html(tips.join('<br>'));
@@ -403,7 +468,7 @@ function requestRoomStats() {
     });
 }
 
-// v20260805 实时拥挤提示（基于全局压力等级 L + 合班数）
+// v7 实时拥挤提示（当前级别 + 各级别床位缺口预览）
 function pressureTip(label,p){
     if(!p) return '';
     if(!p.ok) return '<span class="text-danger"><i class="bi bi-x-circle"></i> <strong>'+label+'：</strong>'+(p.error||'床位不足，需增选宿舍')+'</span>';
@@ -411,11 +476,23 @@ function pressureTip(label,p){
     var icon = p.level===6 ? 'bi-check-circle' : 'bi-exclamation-triangle';
     var txt;
     if(p.level===6){
-        txt = p.combined_rooms>0 ? '宽松模式：全部≤6人，有合班宿舍 '+p.combined_rooms+' 间' : '宽松模式：全部宿舍≤6人，无合班';
+        txt = '宽松（L=6）：6人间住满6人、8人间住6人'+(p.combined_rooms>0?'，合班宿舍'+p.combined_rooms+'间':'，无合班');
     } else if(p.level===7){
-        txt = '紧张模式（L=7）：8人间住7人'+(p.combined_rooms>0?'，有合班宿舍≤7人':'，无合班');
+        txt = '紧张（L=7）：8人间住7人'+(p.combined_rooms>0?'，合班宿舍'+p.combined_rooms+'间':'，无合班');
     } else {
-        txt = '极限模式（L=8）：8人间住满8人'+(p.combined_rooms>0?'，有合班宿舍≤8人':'，无合班');
+        txt = '极限（L=8）：8人间住满8人'+(p.combined_rooms>0?'，合班宿舍'+p.combined_rooms+'间':'，无合班');
+    }
+    if(p.avg_per_room){
+        txt += ' | 预测每间约 <strong>'+p.avg_per_room+'</strong> 人';
+    }
+    // 各级别床位缺口预览（方便继续勾选房间）
+    if(p.levels_info){
+        var parts = [];
+        var li = p.levels_info;
+        if(li[6] && !li[6].ok) parts.push('L=6还缺<strong>'+li[6].need_beds+'</strong>床≈'+li[6].need_rooms+'间');
+        if(li[7] && !li[7].ok) parts.push('L=7还缺<strong>'+li[7].need_beds+'</strong>床≈'+li[7].need_rooms+'间');
+        if(li[8] && li[8].ok) parts.push('L=8已够');
+        if(parts.length) txt += '<br><span class="text-muted" style="font-size:.75rem;"><i class="bi bi-lightbulb"></i> '+parts.join('；')+'</span>';
     }
     return '<span class="'+cls+'"><i class="bi '+icon+'"></i> <strong>'+label+'：</strong>'+txt+'</span>';
 }
@@ -435,9 +512,10 @@ function goToStep(step) {
 function doPreview() {
     $('#step2').hide(); $('#stepPreview').show();
     $('#previewLoading').show(); $('#previewResult').hide(); $('#previewError').hide(); $('#btnConfirmExecute').hide();
+    var adv=getAdvParams();
     $.ajax({url:'{{ url_for("rooms.assign_auto_preview") }}',method:'POST',contentType:'application/json',
         headers:{'X-CSRFToken':csrfToken},
-        data:JSON.stringify({selected_keys:selectedKeys,selected_room_ids:selectedRoomIds,mode:assignMode}),
+        data:JSON.stringify({selected_keys:selectedKeys,selected_room_ids:selectedRoomIds,mode:assignMode,weights:adv.weights,iterations:adv.iterations}),
         success:function(r){
             $('#previewLoading').hide();
             if(r.success){lastPreviewResult=r;showPreviewPanel(r);$('#previewResult').show();
@@ -466,7 +544,7 @@ function showPreviewPanel(r) {
         levelInfo='<br>'+parts.join(' | ');
     }
     $('#previewStats').html(
-        '<strong>v20260805 平滑动态贪心</strong>（全局压力等级制，宽松优先）'+levelInfo+'<br>'+
+        '<strong>v20260805 v8 迭代爬山</strong>（初稿 + 迭代爬山 + 评分选优）'+levelInfo+'<br>'+
         '总学生:'+s.total_students+'人 | 使用房间:'+s.total_rooms_assigned+'间 | 合班:'+s.combined_rooms+'间 | '+unalloc
     );
     // 分配卡片
@@ -510,9 +588,10 @@ function doConfirmExecute() {
 
 function doExecute() {
     $('#executeLoading').show(); $('#executeResult').hide(); $('#executeError').hide();
+    var adv=getAdvParams();
     $.ajax({url:'{{ url_for("rooms.assign_auto_execute") }}',method:'POST',contentType:'application/json',
         headers:{'X-CSRFToken':csrfToken},
-        data:JSON.stringify({selected_keys:selectedKeys,selected_room_ids:selectedRoomIds,mode:assignMode}),
+        data:JSON.stringify({selected_keys:selectedKeys,selected_room_ids:selectedRoomIds,mode:assignMode,weights:adv.weights,iterations:adv.iterations}),
         success:function(r){$('#executeLoading').hide();$('#executeResult').show();
             if(r.success){var s=r.stats;$('#executeStats').html('<div class="row"><div class="col-md-4"><strong>已分配:</strong> '+s.total_students+'人</div><div class="col-md-4"><strong>使用房间:</strong> '+s.total_rooms_assigned+'间</div><div class="col-md-4"><strong>合班:</strong> '+s.combined_rooms+'间</div></div>');
                 var lh='';r.logs.forEach(function(l){var c=l.includes('[ERROR]')?'text-danger':l.includes('[WARN')?'text-warning':(l.includes('[OK]')||l.includes('[DONE]'))?'text-success':'text-light';lh+='<div class="'+c+'">'+l+'</div>';});$('#executeLogs').html(lh);

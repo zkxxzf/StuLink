@@ -3,7 +3,7 @@
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
 [![Python](https://img.shields.io/badge/python-3.11+-green.svg)](https://python.org)
 [![Flask](https://img.shields.io/badge/flask-3.x-lightgrey.svg)](https://flask.palletsprojects.com/)
-[![Version](https://img.shields.io/badge/version-1.7.2-orange.svg)](https://github.com/zkxxzf/stulink)
+[![Version](https://img.shields.io/badge/version-1.8.0-orange.svg)](https://github.com/zkxxzf/stulink)
 
 面向中学的综合学生管理平台，采用双站点架构：
 
@@ -31,6 +31,7 @@
 - **合班调整优化**：自动拆分链式合班，减少合班宿舍数量（如 16 间 → 13 间）
 - **合班自动识别**：手动选择多班（如 `01班+02班`）即自动识别为合班宿舍，全站（列表/详情/可视化/统计）自动显示，无需手动标记
 - **床位填充优先级（v1.7.2）**：小容量房间（6 人间）优先住满；班级收尾时先填满独享宿舍空床，独享都满才允许合班；分床位时合班宿舍严格按份额分配
+- **迭代爬山算法（v1.8.0 里程碑）**：初稿（严格分级贪心）+ 迭代爬山 + 全局评分选优；7 项权重（宽松/超6/满8/合班/班级分散/小房/空房）前端可调；连续 20 轮未刷新最优自动收敛；默认 1000 轮上限；满8 惩罚消除"8人满 vs 6人"并存
 
 ## 项目架构
 
@@ -62,7 +63,7 @@ python run.py --dev
 cd alumni_app && python run.py
 
 # Docker 部署（两个容器）
-docker build -t stulink:v1.7.2 .
+docker build -t stulink:v1.8.0 .
 docker build -t stulink-alumni:v1.0.0 ./alumni_app
 docker-compose up -d
 ```

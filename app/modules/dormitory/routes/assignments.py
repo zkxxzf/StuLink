@@ -1,4 +1,4 @@
-# StuLink v1.7.2 2026-08-13（并发安全 + 合班床位份额过滤）
+# StuLink v1.8.0 2026-08-13（并发安全 + 合班床位份额过滤）
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 from flask import Blueprint, render_template, request, jsonify, flash, redirect, url_for
 from flask_login import login_required, current_user
@@ -10,6 +10,7 @@ from app.utils.helpers import get_dict_values, log_operation, get_graduated_grad
 from app.services.history_service import record_assignment
 from sqlalchemy import and_, exists
 import threading
+import json
 from functools import wraps
 
 bp = Blueprint('assignments', __name__, url_prefix='/assignments')
@@ -167,7 +168,8 @@ def manage():
         student_query = student_query.filter(~Student.grade.in_(graduated))
     if grade:
         student_query = student_query.filter_by(grade=grade)
-    if class_name:
+    # 班级必须与年级成对使用（防御：入口已校验，此处兜底防直接 URL 绕过）
+    if class_name and grade:
         student_query = student_query.filter_by(class_name=class_name)
 
     # 排除已有床位的学生（分两步避免跨库子查询）
@@ -254,6 +256,7 @@ def clear_class():
         BedAssignment.query.filter(
             BedAssignment.student_id.in_(student_ids)
         ).update({'student_id': None, 'assigned_by': None, 'assigned_at': None}, synchronize_session=False)
+
     log_operation(current_user, '清空班级', '床位分配', None,
                   f'{grade}{class_name} 清除 {count} 个床位', module='dormitory', severity='WARNING')
     db.session.commit()
@@ -558,9 +561,14 @@ def auto_assign():
         return jsonify({'success': False, 'message': '请先选择年级和班级'}), 400
     
     # 1. 找到该班级的房间（包括合班宿舍，合班班级不分主次）
+    # 独享房必须同年级（不同年级的同名班级是不同班级）；
+    # 合班房不限年级（跨年级合班时，份额在 combined_details 中带年级，匹配时精确校验）
     rooms = Room.query.filter(
         Room.is_active == True,
-        Room.grade == grade
+        db.or_(
+            db.and_(Room.grade == grade, db.or_(Room.combined_details.is_(None), Room.combined_details == '')),
+            db.and_(Room.combined_details.isnot(None), Room.combined_details != ''),
+        )
     ).filter(
         db.or_(
             Room.class_name == class_name,
@@ -589,14 +597,14 @@ def auto_assign():
             BedAssignment.student_id.is_(None)
         ).order_by(BedAssignment.bed_number).all()
 
-        # 合班宿舍：只取本班份额内的空床
+        # 合班宿舍：只取本班份额内的空床（份额按 grade + class_name 精确匹配）
         if room.combined_details:
             import json as _json
             try:
                 details = _json.loads(room.combined_details)
                 class_limit = 0
                 for d in details:
-                    if d.get('class_name') == class_name:
+                    if d.get('class_name') == class_name and d.get('grade', room.grade) == grade:
                         class_limit = d.get('count', 0)
                         break
                 if class_limit > 0:
@@ -604,6 +612,10 @@ def auto_assign():
                     for i, bed in enumerate(beds_in_room):
                         if i < room_bed_limits[room.id]:
                             available_beds.append(bed)
+                elif details:
+                    # 合班房已有份额明细但不含本班（含跨年级合班）→ 本班无份额，跳过该房间
+                    # （否则会抢占其他班份额，导致后续班级无床）
+                    continue
                 else:
                     for bed in beds_in_room:
                         available_beds.append(bed)
@@ -770,9 +782,13 @@ def auto_assign_all():
         StudentAccommodation.boarding_type == '住校'
     ).all()]
 
-    # 3. 获取所有未分配床位的住校学生
+    # 3. 获取所有未分配床位的住校学生（与分宿舍统计口径一致：排除学籍已转出/借读后离校）
     unassigned_query = Student.query.filter(
-        Student.id.in_(boarding_ids) if boarding_ids else False
+        Student.id.in_(boarding_ids) if boarding_ids else False,
+        db.or_(
+            Student.enrollment_status.is_(None),
+            ~Student.enrollment_status.in_(['学籍已转出', '借读后离校'])
+        )
     )
     if graduated:
         unassigned_query = unassigned_query.filter(~Student.grade.in_(graduated))
@@ -812,12 +828,15 @@ def auto_assign_all():
         students = grade_class_map[(grade, class_name)]
 
         # 找到该班级的房间：
-        # 1. 非合班宿舍：class_name 匹配
+        # 1. 非合班宿舍：class_name 匹配（必须同年级，不同年级的同名班级是不同班级）
         # 2. 合班宿舍：class_name 是主班级名 OR combined_class 包含当前班级名
-        # 注意：不过滤年级，因为 V7 算法的合班房间可能包含同年级不同班级的学生
-        # 通过 class_name/combined_class 匹配已经足够精确
+        #    （合班房不限年级：跨年级合班时份额在 combined_details 中带年级，匹配时精确校验）
         rooms = Room.query.filter(
             Room.is_active == True,
+            db.or_(
+                db.and_(Room.grade == grade, db.or_(Room.combined_details.is_(None), Room.combined_details == '')),
+                db.and_(Room.combined_details.isnot(None), Room.combined_details != ''),
+            )
         ).filter(
             db.or_(
                 Room.class_name == class_name,
@@ -858,10 +877,10 @@ def auto_assign_all():
                 import json
                 try:
                     details = json.loads(room.combined_details)
-                    # 找到当前班级的分配限额
+                    # 找到当前班级的分配限额（按 grade + class_name 精确匹配）
                     class_limit = 0
                     for d in details:
-                        if d.get('class_name') == class_name:
+                        if d.get('class_name') == class_name and d.get('grade', room.grade) == grade:
                             class_limit = d.get('count', 0)
                             break
                     if class_limit > 0:
@@ -870,6 +889,10 @@ def auto_assign_all():
                         for i, bed in enumerate(beds_in_room):
                             if i < room_bed_limits[room.id]:
                                 available_beds.append(bed)
+                    elif details:
+                        # 合班房已有份额明细但不含本班（含跨年级合班）→ 本班无份额，跳过该房间
+                        # （否则会抢占其他班份额，导致后续班级无床）
+                        continue
                     else:
                         # 无分配限额，使用全部
                         for bed in beds_in_room:

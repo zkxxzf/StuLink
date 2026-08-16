@@ -1,4 +1,4 @@
-# StuLink v1.7.0 2026-08-02
+﻿# StuLink v1.8.0 2026-08-02
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 from flask import Blueprint, render_template, redirect, url_for, flash, request, jsonify
 from flask_login import login_required, current_user
@@ -34,12 +34,10 @@ def list_rooms():
     if gender:
         query = query.filter_by(gender=gender)
     if floor:
-        # 去掉可能的"层"字，提取数字
-        floor_num = floor.replace('层', '').strip()
-        try:
-            query = query.filter_by(floor=int(floor_num))
-        except ValueError:
-            pass  # 如果转换失败，忽略该筛选条件
+        # 兼容 "1 楼"/"2层" 等字典格式，提取数字
+        m = re.search(r'\d+', floor)
+        if m:
+            query = query.filter_by(floor=int(m.group()))
     if capacity:
         try:
             query = query.filter_by(capacity=int(capacity))
@@ -677,22 +675,40 @@ def batch_add_rooms():
         building = request.form.get('building', '').strip()
         floor = request.form.get('floor', '').strip()
         gender = request.form.get('gender', '男')
-        room_count = int(request.form.get('room_count', 0))
+        room_count = request.form.get('room_count', '0').strip()
         start_room_number = request.form.get('start_room_number', '').strip()
-        capacity = int(request.form.get('capacity', 8))
+        capacity = request.form.get('capacity', '8').strip()
 
         if not building or not floor or not start_room_number:
             flash('请填写完整信息', 'danger')
-            return redirect(url_for('rooms.list_rooms'))
-
-        if room_count <= 0 or room_count > 100:
-            flash('房间数量必须在 1-100 之间', 'danger')
             return redirect(url_for('rooms.list_rooms'))
 
         try:
             start_num = int(start_room_number)
         except ValueError:
             flash('起始房间号必须是数字', 'danger')
+            return redirect(url_for('rooms.list_rooms'))
+
+        # 楼层解析：兼容字典 "1 楼"/"2层" 格式，提取数字
+        m = re.search(r'\d+', floor)
+        if not m:
+            flash('楼层格式无效，请选择有效楼层', 'danger')
+            return redirect(url_for('rooms.list_rooms'))
+        floor_num = int(m.group())
+
+        try:
+            room_count = int(room_count)
+            capacity = int(capacity)
+        except (ValueError, TypeError):
+            flash('房间数量和床位数必须是数字', 'danger')
+            return redirect(url_for('rooms.list_rooms'))
+
+        if room_count <= 0 or room_count > 100:
+            flash('房间数量必须在 1-100 之间', 'danger')
+            return redirect(url_for('rooms.list_rooms'))
+
+        if capacity <= 0 or capacity > 20:
+            flash('床位数必须在 1-20 之间', 'danger')
             return redirect(url_for('rooms.list_rooms'))
 
         created_count = 0
@@ -709,7 +725,7 @@ def batch_add_rooms():
                 building=building,
                 room_number=room_num,
                 gender=gender,
-                floor=int(floor),
+                floor=floor_num,
                 capacity=capacity,
                 is_active=True
             )
@@ -957,8 +973,12 @@ def assign_auto_preview():
         if bed_count > 0:
             rooms_with_beds.append(f"{room.building} {room.room_number}({bed_count}床已分配)")
     
-    from app.modules.dormitory.services.room_assignment_v6 import auto_assign_preview as do_preview
-    
+    from app.modules.dormitory.services.room_assignment_v8 import auto_assign_preview as do_preview
+
+    data = request.json or {}
+    weights = data.get('weights') or None
+    iterations = data.get('iterations') or None
+
     result = do_preview(
         selected_keys=selected_keys,
         selected_room_ids=selected_room_ids,
@@ -966,7 +986,9 @@ def assign_auto_preview():
         occ_ranges=None,
         dry_run=True,
         combine_confirmations=combine_confirmations,
-        force_full_8=force_full_8
+        force_full_8=force_full_8,
+        weights=weights,
+        iterations=iterations
     )
     
     # 预览模式回滚
@@ -994,11 +1016,13 @@ def assign_auto_execute():
     combine_confirmations = data.get('combine_confirmations', [])
     force_full_8 = data.get('force_full_8', False)
     adjusted_assignments = data.get('adjusted_assignments')  # 用户手动调整后的方案
+    weights = data.get('weights') or None
+    iterations = data.get('iterations') or None
 
     if not selected_keys or not selected_room_ids:
         return jsonify({'success': False, 'error': '参数不完整：请选择班级和房间'})
 
-    from app.modules.dormitory.services.room_assignment_v6 import auto_assign_preview as do_preview
+    from app.modules.dormitory.services.room_assignment_v8 import auto_assign_preview as do_preview
 
     result = do_preview(
         selected_keys=selected_keys,
@@ -1008,7 +1032,9 @@ def assign_auto_execute():
         dry_run=False,
         combine_confirmations=combine_confirmations,
         force_full_8=force_full_8,
-        adjusted_assignments=adjusted_assignments
+        adjusted_assignments=adjusted_assignments,
+        weights=weights,
+        iterations=iterations
     )
 
     return jsonify(result)
@@ -1164,10 +1190,13 @@ def assign_auto_room_stats():
                 elif room.capacity == 8:
                     female_8 += 1
 
-    # ---- v20260805 实时拥挤度评估（毫秒级，只读不写库） ----
+    # ---- v7 实时拥挤度评估（毫秒级，只读不写库） ----
     try:
-        from app.modules.dormitory.services.room_assignment_v6 import calc_pressure
+        from app.modules.dormitory.services.room_assignment_v8 import calc_pressure
         pressure = calc_pressure(selected_keys, room_ids)
+        # 单年级校验失败（S13）→ 直接返回错误
+        if isinstance(pressure, dict) and pressure.get('error'):
+            return jsonify({'success': False, 'error': pressure['error']})
     except Exception:
         pressure = {}
 

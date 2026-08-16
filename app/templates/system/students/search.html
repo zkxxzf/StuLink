@@ -64,7 +64,7 @@
                         <option value="{{ g }}" {{ 'selected' if request.args.get('grade')==g }}>{{ g }}</option>
                         {% endfor %}
                     </select></th>
-                    <th><select name="class_name" onchange="document.getElementById('filterForm').submit()">
+                    <th><select name="class_name" onchange="if(this.value && document.querySelector('[name=grade]').value===''){alert('请先选择年级，再选择班级');this.value='';return;}document.getElementById('filterForm').submit()">
                         <option value="">全部</option>
                         {% for c in classes %}
                         <option value="{{ c }}" {{ 'selected' if request.args.get('class_name')==c }}>{{ c }}</option>

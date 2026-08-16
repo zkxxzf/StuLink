@@ -2,7 +2,7 @@
 
 services:
   stulink:
-    image: stulink:v1.7.0
+    image: stulink:v1.8.0
     container_name: stulink
     ports:
       - "5000:5000"
@@ -26,4 +26,5 @@ services:
       - TZ=Asia/Shanghai
       # 使用与主应用相同的 SECRET_KEY 以共享加密数据
       - SECRET_KEY=
+
 
