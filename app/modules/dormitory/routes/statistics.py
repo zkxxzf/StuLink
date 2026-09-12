@@ -260,12 +260,12 @@ def index():
         school_stats = _build_school_stats()
         grade_options = sorted(get_dict_values('grade'), reverse=True)
 
-    # 宿舍分配明细（原 /rooms/report）
+    # 宿舍分配明细（原 /rooms/report）：年级 → 性别 → 房间列表（一房一行）
     room_tree = {}
-    room_class_totals = {}
     room_total_beds = 0
-    room_total_boarders = 0
     room_total_rooms = 0
+    room_student_map = {}
+    room_total_occupied = 0
     if tab == 'rooms':
         from collections import OrderedDict
         rq = Room.query.filter(
@@ -275,53 +275,46 @@ def index():
         )
         if sel_grade:
             rq = rq.filter_by(grade=sel_grade)
+        # 以宿舍为单位：房间按 宿舍楼→楼层→房间号 排列
         rooms = rq.order_by(
-            Room.grade, Room.gender, Room.class_name,
-            Room.building, Room.room_number
+            Room.grade, Room.gender, Room.building, Room.floor, Room.room_number
         ).all()
         room_tree = OrderedDict()
         for room in rooms:
             g = room.grade or ''
             gender = room.gender or ''
-            cn = room.combined_name or room.class_name or ''
             if g not in room_tree:
                 room_tree[g] = OrderedDict()
-            if gender not in room_tree[g]:
-                room_tree[g][gender] = OrderedDict()
-            if cn not in room_tree[g][gender]:
-                room_tree[g][gender][cn] = []
-            room_tree[g][gender][cn].append(room)
-        
-        boarding_ids = [sa.student_id for sa in StudentAccommodation.query.filter(
-            StudentAccommodation.boarding_type == '住校'
-        ).all()]
-        
-        for g in room_tree:
-            for gender in room_tree[g]:
-                for cn in room_tree[g][gender]:
-                    # 合班房：统计多个班级的住校生总和（班级不分主次）
-                    if '+' in cn:
-                        class_parts = [p.strip() for p in cn.split('+') if p.strip()]
-                        cnt = sum(
-                            Student.query.filter(
-                                Student.grade == g,
-                                Student.class_name == p,
-                                Student.gender == gender,
-                                Student.id.in_(boarding_ids) if boarding_ids else False
-                            ).count()
-                            for p in class_parts
-                        )
-                    else:
-                        cnt = Student.query.filter(
-                            Student.grade == g,
-                            Student.class_name == cn,
-                            Student.gender == gender,
-                            Student.id.in_(boarding_ids) if boarding_ids else False
-                        ).count()
-                    room_class_totals[(g, cn, gender)] = cnt
+            room_tree[g].setdefault(gender, []).append(room)
+
         room_total_rooms = len(rooms)
         room_total_beds = sum(r.capacity for r in rooms)
-        room_total_boarders = sum(room_class_totals.values())
+
+        # 每个房间的入住学生名单（按床位号排序）
+        room_student_map = {}
+        if rooms:
+            room_ids = [r.id for r in rooms]
+            bed_rows = BedAssignment.query.filter(
+                BedAssignment.room_id.in_(room_ids),
+                BedAssignment.student_id.isnot(None)
+            ).order_by(BedAssignment.room_id, BedAssignment.bed_number).all()
+            bed_student_ids = [b.student_id for b in bed_rows]
+            _student_map = {}
+            if bed_student_ids:
+                for s in Student.query.filter(Student.id.in_(bed_student_ids)).all():
+                    _student_map[s.id] = s
+            for bed in bed_rows:
+                stu = _student_map.get(bed.student_id)
+                if not stu:
+                    continue
+                room_student_map.setdefault(bed.room_id, []).append({
+                    'bed_number': bed.bed_number,
+                    'student_number': stu.student_number or '',
+                    'name': stu.name or '',
+                    'gender': stu.gender or '',
+                    'class_name': stu.class_name or '',
+                })
+            room_total_occupied = sum(len(v) for v in room_student_map.values())
 
     return render_template('dormitory/statistics/overview.html',
                            tab=tab,
@@ -333,10 +326,10 @@ def index():
                            dorm_stats=_dorm_stats(),
                            scope_type=scope_type,
                            room_tree=room_tree,
-                           room_class_totals=room_class_totals,
+                           room_student_map=room_student_map,
                            room_total_rooms=room_total_rooms,
                            room_total_beds=room_total_beds,
-                           room_total_boarders=room_total_boarders)
+                           room_total_occupied=room_total_occupied)
 
 
 # ---- 宿舍历史查询 ----
