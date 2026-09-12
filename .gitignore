@@ -31,6 +31,10 @@ docs/*.xlsx
 # 参考表格（含真实学生姓名与成绩，禁止提交）
 参考表格/
 
+# 本地数据打包及其它 zip 归档（含隐私数据，禁止提交）
+data*.zip
+*.zip.bak
+
 # 部署相关（镜像包体积大，托管于 GitHub Releases）
 dormitory-code/
 dormitory.tar
