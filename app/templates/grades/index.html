@@ -45,6 +45,7 @@
     <li class="nav-item" data-tab="teacher"><a class="nav-link" data-bs-toggle="tab" href="#pane-teacher">任课教师</a></li>
 </ul>
 
+<div class="tab-content" id="gTabContent">
 {% for t in ['grade', 'class', 'subject', 'teacher'] %}
 <div class="tab-pane fade" id="pane-{{ t }}" data-tab="{{ t }}">
     <div class="tab-pane-loading d-none"><div class="spinner-border text-primary"></div><div>加载中…</div></div>
@@ -52,6 +53,7 @@
     <div class="tab-content-area"></div>
 </div>
 {% endfor %}
+</div>
 
 <!-- 打印区域占位（打印时 clone 当前 tab 内容） -->
 <div id="printArea" class="d-none"></div>

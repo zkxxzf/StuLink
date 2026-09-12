@@ -68,15 +68,15 @@ def grade_tab(exam_id, direction=''):
     }
     # A1-T3 分数段 / A1-T4 名次段
     _segment_tables(data, tables, direction=dr, classes=shown_classes)
-    # A1-T5 历次考试总览
+    # A1-T5 历次考试总览（聚合查询，避免逐场构造 ExamData）
     rows = []
-    for ex in st.trend_exams(exam.grade):
-        d = st.ExamData(ex.id)
-        tot = d.totals_of(direction=dr)
-        if not tot:
+    _tm = st.exam_score_means(exam.grade, [TOTAL_SUBJECT], direction=dr)
+    for _eid, _info in _tm.items():
+        _m = _info.get('means', {}).get(TOTAL_SUBJECT)
+        _c = _info.get('counts', {}).get(TOTAL_SUBJECT)
+        if _m is None:
             continue
-        rows.append({'exam': ex.name, 'date': ex.exam_date.strftime('%Y-%m-%d'),
-                     'count': len(tot), 'avg': st.mean([t['score'] for t in tot])})
+        rows.append({'exam': _info['name'], 'date': _info['date'], 'count': _c, 'avg': _m})
     tables['trend_overview'] = {
         'title': '历次考试总览',
         'columns': [{'key': 'exam', 'label': '考试', 'type': 'text'},
@@ -179,21 +179,17 @@ def _stack_series(rows, cls):
 
 
 def _trend_lines(grade, direction=None):
-    """历次考试折线数据；direction 过滤时只统计该方向"""
+    """历次考试折线数据；direction 过滤时只统计该方向（聚合查询，避免逐场构造 ExamData）"""
     x, series_map = [], {}
-    for ex in st.trend_exams(grade):
-        d = st.ExamData(ex.id)
-        tot = d.totals_of(direction=direction)
-        if not tot:
+    _means = st.exam_score_means(grade, [TOTAL_SUBJECT] + list(SUBJECTS), direction=direction)
+    for _eid, _info in _means.items():
+        _m = _info.get('means', {})
+        if _m.get(TOTAL_SUBJECT) is None:
             continue
-        x.append(ex.exam_date.strftime('%m-%d'))
-        series_map.setdefault('总分', []).append(st.mean([t['score'] for t in tot]))
+        x.append(_info['date'][5:])
+        series_map.setdefault(TOTAL_SUBJECT, []).append(_m.get(TOTAL_SUBJECT))
         for sub in SUBJECTS:
-            scores = d.scores_of_subject(sub, direction=direction)
-            if scores:
-                series_map.setdefault(sub, []).append(st.mean(scores))
-            else:
-                series_map.setdefault(sub, []).append(None)
+            series_map.setdefault(sub, []).append(_m.get(sub))
     series = [{'name': k, 'data': v} for k, v in series_map.items()]
     return {'x': x, 'series': series}
 
@@ -368,14 +364,15 @@ def _histogram(data, class_name):
 
 def _class_trend(grade, class_name):
     x, cls_line, grd_line = [], [], []
-    for ex in st.trend_exams(grade):
-        d = st.ExamData(ex.id)
-        if not d.total_rows:
+    _cls = st.exam_score_means(grade, [TOTAL_SUBJECT], class_name=class_name)
+    _grd = st.exam_score_means(grade, [TOTAL_SUBJECT])
+    for _eid, _info in _cls.items():
+        _cm = _info.get('means', {}).get(TOTAL_SUBJECT)
+        if _cm is None:
             continue
-        x.append(ex.exam_date.strftime('%m-%d'))
-        cls_vals = [t['score'] for t in d.totals_of(class_name=class_name)]
-        cls_line.append(st.mean(cls_vals) if cls_vals else None)
-        grd_line.append(st.mean([r.score for r in d.total_rows]))
+        x.append(_info['date'][5:])
+        cls_line.append(_cm)
+        grd_line.append(_grd.get(_eid, {}).get('means', {}).get(TOTAL_SUBJECT))
     return {'type': 'line', 'title': '班级历次考试平均分走势',
             'xAxis': x,
             'series': [{'name': f'{class_name}总分均分', 'data': cls_line},
@@ -458,20 +455,11 @@ def subject_tab(exam_id, subject, direction=''):
         'columns': cmp_cols,
         'rows': t1,
     }
-    # A3-T2 学科历次
+    # A3-T2 学科历次（聚合查询，避免逐场构造 ExamData）
     t2 = []
-    for ex in st.trend_exams(exam.grade):
-        d = st.ExamData(ex.id)
-        scores = d.scores_of_subject(subject, direction=dr)
-        if not scores:
-            continue
-        l2 = d.subject_lines(subject)
-        t2.append({'exam': ex.name, 'date': ex.exam_date.strftime('%Y-%m-%d'),
-                   'count': len(scores), 'avg': st.mean(scores),
-                   'pass_rate': st.fmt_rate(sum(1 for s in scores if s >= l2['pass']),
-                                            len(scores)),
-                   'good_rate': st.fmt_rate(sum(1 for s in scores if s >= l2['excellent']),
-                                            len(scores))})
+    for _r in st.exam_trend_series(exam.grade, subject, direction=dr, need_rates=True):
+        t2.append({'exam': _r['name'], 'date': _r['date'], 'count': _r['count'],
+                   'avg': _r['avg'], 'pass_rate': _r['pass_rate'], 'good_rate': _r['good_rate']})
     tables['history'] = {
         'title': f'{subject}学科历次考试统计表',
         'columns': [{'key': 'exam', 'label': '考试', 'type': 'text'},
@@ -657,17 +645,15 @@ def teacher_tab(exam_id, subject=None, links=None, grade=None):
     combo = combos[0] if combos else None
     t2 = []
     if combo:
-        for ex in st.trend_exams(exam.grade):
-            d = st.ExamData(ex.id)
-            s = d.scores_of_subject(combo['subject'], class_name=combo['class_name'])
-            if not s:
-                continue
-            l2 = d.subject_lines(combo['subject'])
-            t2.append({'exam': ex.name, 'date': ex.exam_date.strftime('%Y-%m-%d'),
-                       'count': len(s),
-                       'avg': st.mean(s),
-                       'grd_avg': st.mean(d.scores_of_subject(combo['subject'])),
-                       'pass_rate': st.fmt_rate(sum(1 for v in s if v >= l2['pass']), len(s))})
+        _cls_track = st.exam_trend_series(exam.grade, combo['subject'],
+                                          class_name=combo['class_name'], need_rates=True)
+        _grd_track = {_r['id']: _r for _r in
+                      st.exam_trend_series(exam.grade, combo['subject'])}
+        for _r in _cls_track:
+            t2.append({'exam': _r['name'], 'date': _r['date'], 'count': _r['count'],
+                       'avg': _r['avg'],
+                       'grd_avg': _grd_track.get(_r['id'], {}).get('avg'),
+                       'pass_rate': _r['pass_rate']})
     tables['teacher_track'] = {
         'title': '教师历次考试跟踪表',
         'columns': [{'key': 'exam', 'label': '考试', 'type': 'text'},
