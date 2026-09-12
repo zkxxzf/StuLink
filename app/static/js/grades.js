@@ -145,7 +145,14 @@ function activateTab(tab, fromClick){
     $('#gSubject').toggleClass('d-none', tab !== 'subject' && tab !== 'teacher');
     if (tab === 'subject' || tab === 'teacher') fillSubject();
     $('#gTabs a[href="#pane-'+tab+'"]').tab('show');
-    if (tab !== 'class'){ state.class_name = ''; $('#gClass').val(''); }
+    // 切回班级分析时，从班级下拉还原 state.class_name（离开班级 tab 时会被清空，
+    // 否则返回后 class_name 为空导致 class_tab 返回空数据）
+    if (tab === 'class'){
+        state.class_name = $('#gClass').val() || '';
+    } else {
+        state.class_name = '';
+        $('#gClass').val('');
+    }
     loadCurrent();
 }
 

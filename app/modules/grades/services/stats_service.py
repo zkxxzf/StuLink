@@ -5,6 +5,8 @@
 import math
 import statistics
 
+from sqlalchemy import func
+
 from app.models.grades import Exam, ExamScore, ExamBand, SUBJECTS, TOTAL_SUBJECT, \
     subjects_of_selection
 
@@ -255,6 +257,73 @@ def trend_exams(grade):
     """历次考试（imported）列表（时间升序）"""
     return (Exam.query.filter_by(grade=grade, status='imported')
             .order_by(Exam.exam_date.asc(), Exam.id.asc()).all())
+
+
+def exam_score_means(grade, subjects, direction=None, class_name=None):
+    """历次考试（同年级 imported）在指定 subjects 上的均值（单次分组聚合查询）。
+
+    用于趋势折线/总览表，避免为每场历史考试构造完整 ExamData（后者会加载全部明细行
+    并查 prev_exam，是成绩分析打开慢的主因）。
+
+    返回 {exam_id: {'name', 'date', 'means': {subject: avg|None},
+                     'counts': {subject: int}}}，键按 trend_exams 顺序。
+    direction / class_name 过滤被聚合的分数行。
+    """
+    exams = trend_exams(grade)
+    out = {e.id: {'name': e.name, 'date': e.exam_date.strftime('%Y-%m-%d')}
+           for e in exams}
+    ids = list(out.keys())
+    if ids and subjects:
+        q = (ExamScore.query
+             .filter(ExamScore.exam_id.in_(ids),
+                     ExamScore.subject.in_(subjects),
+                     ExamScore.score.isnot(None)))
+        if direction:
+            q = q.filter(ExamScore.direction == direction)
+        if class_name:
+            q = q.filter(ExamScore.class_name == class_name)
+        rows = (q.group_by(ExamScore.exam_id, ExamScore.subject)
+                  .with_entities(ExamScore.exam_id, ExamScore.subject,
+                                 func.avg(ExamScore.score), func.count(ExamScore.score))
+                  .all())
+        for eid, subj, avg, cnt in rows:
+            info = out.setdefault(eid, {'name': '', 'date': ''})
+            info.setdefault('means', {})[subj] = round(avg, 1) if avg is not None else None
+            info.setdefault('counts', {})[subj] = cnt
+    return out
+
+
+def exam_trend_series(grade, subject, direction=None, class_name=None, need_rates=False):
+    """历次考试（同年级 imported）在指定 subject 上的聚合序列（按时间升序）。
+
+    全程只做聚合查询，不加载明细行。返回 list：
+    {'id','name','date','avg','count','pass_rate','good_rate'（need_rates 时）}。
+    用于学科/教师历次趋势表（含及格率/优秀率）。
+    """
+    out = []
+    for ex in trend_exams(grade):
+        base = ExamScore.query.filter_by(exam_id=ex.id, subject=subject)
+        base = base.filter(ExamScore.score.isnot(None))
+        if direction:
+            base = base.filter(ExamScore.direction == direction)
+        if class_name:
+            base = base.filter(ExamScore.class_name == class_name)
+        avg, cnt = base.with_entities(func.avg(ExamScore.score),
+                                      func.count(ExamScore.score)).one()
+        if not cnt:
+            continue
+        rec = {'id': ex.id, 'name': ex.name,
+               'date': ex.exam_date.strftime('%Y-%m-%d'),
+               'avg': round(avg, 1), 'count': cnt}
+        if need_rates:
+            lines = ex.subject_lines(subject)
+            rec['pass_rate'] = round(
+                base.filter(ExamScore.score >= lines['pass']).count() / cnt * 100, 1)
+            rec['good_rate'] = round(
+                base.filter(ExamScore.score >= lines['excellent']).count() / cnt * 100, 1)
+        out.append(rec)
+    return out
+
 
 
 def box_five(values):
