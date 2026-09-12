@@ -112,14 +112,6 @@
             <a class="nav-link" href="{{ url_for('dashboard.index') }}">
                 <i class="bi bi-house"></i>宿舍管理
             </a>
-            {% elif request.blueprint in ('system_dashboard','students','users','dictionary','class_profile','perm_groups','grade_mgmt','operation_logs') %}
-            <a class="nav-link" href="{{ url_for('system_dashboard.index') }}">
-                <i class="bi bi-house"></i>系统管理
-            </a>
-            {% elif request.blueprint == 'points' %}
-            <a class="nav-link" href="{{ url_for('points.index') }}">
-                <i class="bi bi-house"></i>积分管理
-            </a>
             {% elif request.blueprint == 'grades' %}
             <a class="nav-link" href="{{ url_for('grades.index') }}">
                 <i class="bi bi-house"></i>成绩管理
@@ -132,10 +124,6 @@
 
             {# ========= 宿舍管理模块侧边栏 ========= #}
             {% if request.blueprint in ('dashboard','rooms','assignments','statistics') or request.endpoint == 'students.search' %}
-            <a class="nav-link {% if request.endpoint and request.endpoint.startswith('dashboard.search') %}active{% endif %}"
-               href="{{ url_for('dashboard.search_student_accommodation') }}">
-                <i class="bi bi-search"></i>学生住宿
-            </a>
             {% if current_user.has_perm('dormitory.view') %}
             <a class="nav-link {% if request.endpoint == 'rooms.list_rooms' %}active{% endif %}"
                href="{{ url_for('rooms.list_rooms') }}">
@@ -191,6 +179,33 @@
                href="{{ url_for('operation_logs.list_logs') }}">
                 <i class="bi bi-journal-text"></i>操作日志
             </a>
+            {% endif %}
+
+            {# ========= 成绩管理模块侧边栏 ========= #}
+            {% if request.blueprint == 'grades' %}
+            <div class="nav-section">成绩管理</div>
+            <a class="nav-link {% if request.endpoint == 'grades.index' %}active{% endif %}"
+               href="{{ url_for('grades.index') }}">
+                <i class="bi bi-graph-up"></i>成绩分析
+            </a>
+            {% if current_user.has_perm('grades.edit') %}
+            <a class="nav-link {% if request.endpoint in ('grades.exams_list','grades.exam_new','grades.exam_detail','grades.exam_import') %}active{% endif %}"
+               href="{{ url_for('grades.exams_list') }}">
+                <i class="bi bi-journal-text"></i>考试管理
+            </a>
+            {% endif %}
+            {% if current_user.has_perm('grades.teachers') %}
+            <a class="nav-link {% if request.endpoint in ('grades.teachers_page','grades.teachers_import_page') %}active{% endif %}"
+               href="{{ url_for('grades.teachers_page') }}">
+                <i class="bi bi-person-workspace"></i>任课教师映射
+            </a>
+            {% endif %}
+            {% if current_user.has_perm('grades.view') %}
+            <a class="nav-link {% if request.endpoint == 'grades.history' %}active{% endif %}"
+               href="{{ url_for('grades.history') }}">
+                <i class="bi bi-mortarboard"></i>毕业生成绩（二期）
+            </a>
+            {% endif %}
             {% endif %}
         </nav>
     </div>

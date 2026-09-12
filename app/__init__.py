@@ -16,6 +16,9 @@ DICT_DATA = {
     'boarding_type': ('走读/住校', ['住校', '走读', '离校']),
     'subject_direction': ('选科方向', ['物理', '历史']),
     'class_type': ('班型', ['强基班', '卓越班']),
+    'exam_type': ('考试类型', ['月考', '期中', '期末', '联考', '开学考', '模拟', '其他']),
+    'exam_subject': ('考试科目', ['语文', '数学', '外语', '物理', '历史',
+                                 '化学', '生物', '政治', '地理']),
     'day_student_type': ('走读类型', ['晚走读', '午晚走读']),
     'bed_number': ('床号', ['1床', '2床', '3床', '4床', '5床', '6床', '7床', '8床']),
     'textbook': ('课本', ['领', '未领']),
@@ -86,6 +89,7 @@ PERMISSION_GROUPS = [
             'system.perm_groups', 'system.grade_mgmt',
             'points.view', 'points.edit',
             'grades.view', 'grades.edit',
+            'grades.import', 'grades.settings', 'grades.teachers',
         ],
     },
     {
@@ -101,6 +105,7 @@ PERMISSION_GROUPS = [
             'dormitory.view', 'dormitory.beds',
             'statistics.view',
             'points.view', 'grades.view',
+            'grades.edit', 'grades.import', 'grades.settings',
         ],
     },
     {
@@ -138,7 +143,7 @@ PERMISSION_GROUPS = [
         'menu_keys': [
             'students.view',
             'points.view', 'points.edit',
-            'grades.view', 'grades.edit',
+            'grades.view',
         ],
     },
 ]

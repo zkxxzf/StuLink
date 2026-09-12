@@ -66,6 +66,9 @@ PERMISSION_MODULES = [
         'permissions': [
             ('grades.view', '查看成绩'),
             ('grades.edit', '成绩管理'),
+            ('grades.import', '成绩导入'),
+            ('grades.settings', '划线分层'),
+            ('grades.teachers', '任课教师映射'),
         ]
     },
 ]

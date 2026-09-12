@@ -41,7 +41,7 @@ _ENCRYPTION_KEY = _get_encryption_key()
 
 
 def encrypt(plaintext):
-    """加密明文，返回 base64 字符串；空值返回 None"""
+    """加密明文，返回 base64 字符串；空值返回 None（确定性 IV，支持等值查询）"""
     if not plaintext:
         return None
     plaintext = str(plaintext).strip()
@@ -57,8 +57,24 @@ def encrypt(plaintext):
     return base64.b64encode(iv + ciphertext).decode()
 
 
+def encrypt_rand(plaintext):
+    """随机 IV 加密（API Key 等无需等值查询的场景；返回 base64：iv+密文）"""
+    if not plaintext:
+        return None
+    plaintext = str(plaintext).strip()
+    if not plaintext:
+        return None
+    iv = secrets.token_bytes(16)
+    padder = padding.PKCS7(128).padder()
+    padded = padder.update(plaintext.encode()) + padder.finalize()
+    cipher = Cipher(algorithms.AES(_ENCRYPTION_KEY), modes.CBC(iv))
+    encryptor = cipher.encryptor()
+    ciphertext = encryptor.update(padded) + encryptor.finalize()
+    return base64.b64encode(iv + ciphertext).decode()
+
+
 def decrypt(ciphertext_b64):
-    """解密密文（base64 字符串），返回明文；空值/明文直接返回"""
+    """解密密文（base64 字符串，兼容 随机IV/确定性IV 两种密文），返回明文；空值/明文直接返回"""
     if not ciphertext_b64:
         return None
     ciphertext_b64 = str(ciphertext_b64).strip()
