@@ -24,6 +24,8 @@ def index():
     )
     if graduated:
         base_q = base_q.filter(~Student.grade.in_(graduated))
+    # 在校生口径：不包含“不分班”学生
+    base_q = base_q.filter(func.coalesce(Student.class_name, '') != '不分班')
     student_stats = base_q.one()
 
     # 查询 dormitory.db 中的住宿统计（关联 Student 表，只统计存在的学生）

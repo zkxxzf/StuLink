@@ -6,6 +6,7 @@ from markupsafe import Markup
 from flask_login import login_required, current_user
 from app.models import Student, Room, BedAssignment, UserClassLink, StudentAccommodation
 from app.extensions import db
+from sqlalchemy import func
 from app.utils.helpers import get_dict_values, log_operation, get_graduated_grades
 from app.utils.decorators import perm_required
 import io
@@ -126,6 +127,8 @@ def _build_per_grade_stats(filter_grade=None):
         qs = Student.query.filter_by(grade=grade)
         if graduated:
             qs = qs.filter(~Student.grade.in_(graduated))
+        # 在校生口径：不包含“不分班”学生
+        qs = qs.filter(func.coalesce(Student.class_name, '') != '不分班')
         total = qs.count()
         male = qs.filter_by(gender='男').count()
         female = qs.filter_by(gender='女').count()
@@ -148,7 +151,10 @@ def _build_per_grade_stats(filter_grade=None):
             StudentAccommodation.boarding_type == '住校'
         ).count()
         
-        class_count = db.session.query(Student.class_name).filter_by(grade=grade).distinct().count()
+        class_count = db.session.query(Student.class_name).filter(
+            Student.grade == grade,
+            func.coalesce(Student.class_name, '') != '不分班'
+        ).distinct().count()
 
         result.append({
             'grade': grade, 'class_count': class_count,
@@ -165,6 +171,8 @@ def _build_school_stats():
     qs = Student.query
     if graduated:
         qs = qs.filter(~Student.grade.in_(graduated))
+    # 在校生口径：不包含“不分班”学生
+    qs = qs.filter(func.coalesce(Student.class_name, '') != '不分班')
     total = qs.count()
     male = qs.filter_by(gender='男').count()
     female = qs.filter_by(gender='女').count()
@@ -187,8 +195,12 @@ def _build_school_stats():
         StudentAccommodation.boarding_type == '住校'
     ).count()
     
-    grade_count = db.session.query(Student.grade).distinct().count()
-    class_count = db.session.query(Student.grade, Student.class_name).distinct().count()
+    grade_count = db.session.query(Student.grade).filter(
+        func.coalesce(Student.class_name, '') != '不分班'
+    ).distinct().count()
+    class_count = db.session.query(Student.grade, Student.class_name).filter(
+        func.coalesce(Student.class_name, '') != '不分班'
+    ).distinct().count()
 
     return {
         'grade_count': grade_count, 'class_count': class_count,
@@ -216,7 +228,9 @@ def _dorm_stats():
 def index():
     scope_type, user_grade = _get_scope()
     tab = request.args.get('tab', scope_type)  # 默认选用户范围对应的tab
-    if tab not in ('school', 'grade', 'class', 'import', 'rooms'):
+    if tab == 'grade':  # 旧链接兼容：年级统计已并入班级统计
+        tab = 'class'
+    if tab not in ('school', 'class', 'import', 'rooms'):
         tab = 'school'
     sel_grade = request.args.get('grade', user_grade or '')
 
@@ -229,10 +243,10 @@ def index():
         per_grade_stats = []
         school_stats = {}
         grade_options = list(set(l.grade for l in links))
-    # 年级长：看 grade 或 class tab，限制年级
+    # 年级长：只看 class tab，限制年级
     elif scope_type == SCOPE_GRADE:
         if tab == 'school':
-            tab = 'grade'
+            tab = 'class'
         if not sel_grade:
             sel_grade = user_grade or ''
         per_class_stats = _build_per_class_stats(filter_grade=sel_grade)
