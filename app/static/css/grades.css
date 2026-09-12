@@ -1,0 +1,48 @@
+/* StuLink 成绩管理模块统一样式 v1.9.0 */
+.g-table thead th {
+    background: #1e293b !important;
+    color: #fff !important;
+    font-weight: 600;
+    font-size: 12px;
+    white-space: nowrap;
+    position: sticky;
+    top: 0;
+    z-index: 2;
+}
+.g-table thead th.num { text-align: right; }
+.g-table tbody td { font-size: 13px; }
+.g-table tbody tr:nth-child(even) { background: #f8fafc; }
+.g-table .num { text-align: right; font-variant-numeric: tabular-nums; }
+.g-table .center { text-align: center; }
+
+/* 分析页图表卡片 */
+.chart-card { border: none; border-radius: 10px; box-shadow: 0 1px 3px rgba(0,0,0,.08); }
+.chart-card .card-header { background: #fff; border-bottom: 1px solid #f1f5f9; }
+.chart-box { width: 100%; height: 360px; }
+.chart-box.short { height: 300px; }
+
+/* 表格卡片 */
+.tbl-card { border: none; border-radius: 10px; box-shadow: 0 1px 3px rgba(0,0,0,.08); }
+.tbl-card .card-header { background: #fff; border-bottom: 1px solid #f1f5f9; padding: 8px 14px; }
+.tbl-wrap { max-height: 480px; overflow: auto; }
+
+/* 分析页 tab 面板 */
+.tab-pane-loading { padding: 60px 0; text-align: center; color: #94a3b8; }
+.empty-state { padding: 50px 20px; text-align: center; color: #64748b; }
+.empty-state .bi { font-size: 40px; color: #cbd5e1; }
+
+/* 打印（导出 PDF）：仅打印当前激活 tab，横向 A4 */
+@media print {
+    body { background: #fff; }
+    .navbar, .sidebar, .g-filter-bar, .g-actions, .nav-tabs, .btn,
+    .alert, .no-print { display: none !important; }
+    .main-content { margin: 0 !important; padding: 0 !important; }
+    .tab-pane { display: none !important; }
+    .tab-pane.active { display: block !important; }
+    .tbl-card, .chart-card { box-shadow: none !important; border: 1px solid #e2e8f0;
+        break-inside: avoid; page-break-inside: avoid; }
+    .chart-box { height: 260px !important; }
+    .g-table thead th { position: static; }
+    table { page-break-inside: auto; }
+    tr { page-break-inside: avoid; }
+}

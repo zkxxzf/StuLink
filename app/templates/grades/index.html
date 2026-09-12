@@ -1,14 +1,63 @@
 {% extends "base.html" %}
-{% block title %}成绩管理{% endblock %}
+{% block title %}成绩分析{% endblock %}
+{% block extra_css_head %}
+<link href="{{ url_for('static', filename='css/grades.css') }}" rel="stylesheet">
+{% endblock %}
 {% block content %}
-<div class="d-flex justify-content-center align-items-center" style="min-height:60vh;">
-    <div class="text-center">
-        <div style="font-size:72px;">📊</div>
-        <h4 class="mt-3">成绩管理</h4>
-        <p class="text-muted">该模块正在开发中，敬请期待...</p>
-        <a href="{{ url_for('welcome.index') }}" class="btn btn-outline-secondary mt-2">
-            <i class="bi bi-arrow-left"></i> 返回首页
+<div id="gradeApp" class="no-print d-flex flex-wrap gap-2 align-items-center mb-3 g-filter-bar">
+    <h5 class="mb-0 me-1"><i class="bi bi-graph-up"></i> 成绩分析</h5>
+    <select id="gGrade" class="form-select form-select-sm w-auto" title="年级">
+        <option value="">年级…</option>
+    </select>
+    <select id="gExam" class="form-select form-select-sm w-auto" style="min-width:200px;" title="考试">
+        <option value="">考试…</option>
+    </select>
+    <select id="gDir" class="form-select form-select-sm w-auto d-none" title="方向">
+        <option value="">全部方向</option>
+        <option value="物理">物理</option>
+        <option value="历史">历史</option>
+    </select>
+    <select id="gClass" class="form-select form-select-sm w-auto d-none" title="班级">
+        <option value="">班级…</option>
+    </select>
+    <select id="gSubject" class="form-select form-select-sm w-auto d-none" title="科目">
+    </select>
+    <div class="ms-auto g-actions">
+        <button class="btn btn-sm btn-outline-secondary" id="gAi" title="AI 分析（需配置个人 API Key 或使用管理员公共 Key）">
+            <i class="bi bi-stars"></i> AI 分析
+        </button>
+        <a class="btn btn-sm btn-outline-dark" id="gAiHistory" href="{{ url_for('grades.ai_reports') }}" title="查看历史 AI 报告">
+            <i class="bi bi-clock-history"></i> AI 报告
         </a>
+        <button class="btn btn-sm btn-outline-success" id="gExport" title="导出当前模块全部表格为 Excel">
+            <i class="bi bi-file-earmark-excel"></i> 导出 Excel
+        </button>
+        <button class="btn btn-sm btn-outline-primary" id="gPrint" title="打印/另存 PDF（仅当前页签）">
+            <i class="bi bi-printer"></i> 打印 / PDF
+        </button>
     </div>
 </div>
+
+<ul class="nav nav-tabs mb-3" id="gTabs" role="tablist">
+    <li class="nav-item" data-tab="grade"><a class="nav-link" data-bs-toggle="tab" href="#pane-grade">年级分析</a></li>
+    <li class="nav-item" data-tab="class"><a class="nav-link" data-bs-toggle="tab" href="#pane-class">班级分析</a></li>
+    <li class="nav-item" data-tab="subject"><a class="nav-link" data-bs-toggle="tab" href="#pane-subject">学科分析</a></li>
+    <li class="nav-item" data-tab="teacher"><a class="nav-link" data-bs-toggle="tab" href="#pane-teacher">任课教师</a></li>
+</ul>
+
+{% for t in ['grade', 'class', 'subject', 'teacher'] %}
+<div class="tab-pane fade" id="pane-{{ t }}" data-tab="{{ t }}">
+    <div class="tab-pane-loading d-none"><div class="spinner-border text-primary"></div><div>加载中…</div></div>
+    <div class="empty-state d-none"><i class="bi bi-inbox"></i><p class="mt-2 mb-0"></p></div>
+    <div class="tab-content-area"></div>
+</div>
+{% endfor %}
+
+<!-- 打印区域占位（打印时 clone 当前 tab 内容） -->
+<div id="printArea" class="d-none"></div>
+{% endblock %}
+{% block extra_js %}
+<script src="{{ url_for('static', filename='js/echarts.min.js') }}"></script>
+<script src="{{ url_for('static', filename='js/grades_md.js') }}"></script>
+<script src="{{ url_for('static', filename='js/grades.js') }}"></script>
 {% endblock %}

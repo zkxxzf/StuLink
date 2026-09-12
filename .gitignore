@@ -28,6 +28,9 @@ test_debug.py
 # 学生数据导出（含个人隐私，禁止提交）
 docs/*.xlsx
 
+# 参考表格（含真实学生姓名与成绩，禁止提交）
+参考表格/
+
 # 部署相关（镜像包体积大，托管于 GitHub Releases）
 dormitory-code/
 dormitory.tar

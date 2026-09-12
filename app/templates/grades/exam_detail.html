@@ -1,0 +1,164 @@
+{% extends "base.html" %}
+{% block title %}{{ exam.name }} - 考试详情{% endblock %}
+{% block content %}
+<div class="d-flex align-items-center mb-3 flex-wrap gap-2" id="examToolbar" data-exam-id="{{ exam.id }}">
+    <a href="{{ url_for('grades.exams_list') }}" class="btn btn-sm btn-outline-secondary">
+        <i class="bi bi-arrow-left"></i>
+    </a>
+    <h5 class="mb-0 me-2"><i class="bi bi-journal-text"></i> {{ exam.name }}</h5>
+    {% if exam.status == 'imported' %}
+    <span class="badge bg-success">已导入</span>
+    {% elif exam.status == 'dirty' %}
+    <span class="badge bg-warning text-dark">待重算</span>
+    {% else %}
+    <span class="badge bg-secondary">未导入</span>
+    {% endif %}
+    <span class="text-muted small">{{ exam.grade }} · {{ exam.exam_date.strftime('%Y-%m-%d') }}
+        · {{ exam.exam_type or '其他' }}</span>
+    <div class="ms-auto d-flex gap-2">
+        {% if exam.status != 'imported' %}
+        <a href="{{ url_for('grades.exam_import', exam_id=exam.id) }}" class="btn btn-primary btn-sm">
+            <i class="bi bi-upload"></i> 导入成绩
+        </a>
+        {% else %}
+        <a href="{{ url_for('grades.exam_import', exam_id=exam.id) }}" class="btn btn-outline-primary btn-sm">
+            <i class="bi bi-upload"></i> 分批导入/覆盖
+        </a>
+        <form method="post" action="{{ url_for('grades.exam_recalc', exam_id=exam.id) }}">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <button type="submit" class="btn btn-outline-warning btn-sm" title="单条修改后需重算">
+                <i class="bi bi-arrow-repeat"></i> 重新计算排名
+            </button>
+        </form>
+        {% endif %}
+        <a href="{{ url_for('grades.bands_page', exam_id=exam.id) }}" class="btn btn-outline-info btn-sm">
+            <i class="bi bi-bar-chart"></i> 划线分层
+        </a>
+        <button class="btn btn-outline-danger btn-sm" data-bs-toggle="modal" data-bs-target="#delModal">
+            <i class="bi bi-trash"></i> 删除考试
+        </button>
+    </div>
+</div>
+
+{% if import_info %}
+<div class="alert alert-light border small py-2">
+    <i class="bi bi-info-circle"></i> 最近导入：{{ import_info.fname }}（{{ import_info.mode }}模式，
+    新增{{ import_info.summary.new_students }}人 / 更新{{ import_info.summary.updated_rows }}条 /
+    删除{{ import_info.summary.deleted_rows }}条 / 未出现保留{{ import_info.summary.unseen }}人，
+    错误{{ import_info.errors }}条），操作人 {{ import_info.operator }}，{{ import_info.time }}
+</div>
+{% endif %}
+
+{% if exam.status == 'dirty' %}
+<div class="alert alert-warning small">
+    <i class="bi bi-exclamation-triangle"></i> 成绩发生过修改，排名尚未更新，请点击右上角「重新计算排名」。
+</div>
+{% endif %}
+
+<div class="card">
+    <div class="card-header py-2">
+        <div class="d-flex align-items-center">
+            <h6 class="mb-0"><i class="bi bi-people"></i> 成绩单（{{ students|length }} 人）</h6>
+            <span class="text-muted small ms-3">点击任一分数可修改（输入数字保存，输入 del 删除该科=缺考）</span>
+        </div>
+    </div>
+    <div class="table-responsive" style="max-height:70vh;">
+        <table class="table table-sm table-hover align-middle g-table mb-0">
+            <thead class="sticky-top">
+            <tr>
+                <th>学号</th><th>姓名</th><th>班级</th><th>方向</th><th>选科</th>
+                <th class="text-end">总分</th>
+                <th class="text-end">方向排</th><th class="text-end">班排</th>
+                <th class="text-end">进退步</th>
+                {% for s in subjects %}<th class="text-end">{{ s }}</th>{% endfor %}
+            </tr>
+            </thead>
+            <tbody>
+            {% for stu in students %}
+            <tr data-no="{{ stu.no }}">
+                <td class="small">{{ stu.no }}</td>
+                <td>{{ stu.name }}
+                    {% if stu.status %}
+                    <span class="badge bg-secondary-subtle text-secondary small" title="学籍状态">籍</span>
+                    {% endif %}
+                </td>
+                <td>{{ stu.class_name }}</td>
+                <td>{{ stu.direction }}</td>
+                <td class="small text-muted">{{ stu.selection }}</td>
+                <td class="text-end fw-bold score-cell" data-sid="{{ stu.total_sid or '' }}" title="点击修改">
+                    {{ stu.total if stu.total is not none else '—' }}
+                </td>
+                <td class="text-end">{{ stu.rank if stu.rank else '—' }}</td>
+                <td class="text-end">{{ stu.rank_class if stu.rank_class else '—' }}</td>
+                <td class="text-end {{ 'text-success' if stu.move is not none and stu.move < 0 else 'text-danger' if stu.move is not none and stu.move > 0 }}">
+                    {{ ('%+d' % stu.move) if stu.move is not none else '—' }}
+                </td>
+                {% for s in subjects %}
+                {% set cell = stu.subjects.get(s) %}
+                <td class="text-end score-cell small {{ 'table-warning' if cell is none else '' }}"
+                    data-sid="{{ cell.id if cell else '' }}"
+                    title="{{ '缺考' if cell is none else '点击修改' }}">
+                    {{ cell.score if cell else '缺' }}
+                </td>
+                {% endfor %}
+            </tr>
+            {% else %}
+            <tr><td colspan="{{ 9 + subjects|length }}" class="text-center text-muted py-5">
+                暂无成绩。点击右上角「导入成绩」，从 Excel 模板导入本场考试成绩。
+            </td></tr>
+            {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<!-- 删除确认 -->
+<div class="modal fade" id="delModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <form method="post" action="{{ url_for('grades.exam_delete', exam_id=exam.id) }}">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <div class="modal-header"><h6 class="modal-title">删除考试</h6>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
+                <div class="modal-body">
+                    <p>将删除「{{ exam.name }}」及其全部成绩，不可恢复。</p>
+                    <input type="text" name="confirm_name" class="form-control"
+                           placeholder="请输入考试名称确认：{{ exam.name }}" required>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">取消</button>
+                    <button type="submit" class="btn btn-danger btn-sm">确认删除</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+{% endblock %}
+{% block extra_js %}
+<script>
+$(function(){
+    var examId = $('#examToolbar').data('examId');
+    // 点击分数单元格：输入数字保存；输入 del 删除该科（缺考）
+    $('.score-cell[data-sid]').each(function(){
+        var td = $(this), sid = td.data('sid');
+        if(!sid){ return; }
+        td.css('cursor', 'pointer').attr('title', '点击修改');
+        td.on('click', function(){
+            var label = td.closest('table').find('th').eq(td.index()).text() || '分数';
+            var cur = td.text().trim();
+            if(cur === '—' || cur === '缺'){ cur = ''; }
+            var input = prompt('修改「' + label + '」分数：\n输入数字保存；输入 del 删除该科（缺考）', cur);
+            if(input === null){ return; }
+            var v = input.trim();
+            if(v === ''){ return; }
+            if(v.toLowerCase() === 'del'){
+                if(!confirm('删除该科成绩（视为缺考）？修改后需点击“重新计算排名”。')){ return; }
+                $.post('/grades/exams/' + examId + '/score/' + sid + '/delete', function(){ location.reload(); });
+            } else {
+                $.post('/grades/exams/' + examId + '/score/' + sid, {score: v}, function(){ location.reload(); });
+            }
+        });
+    });
+});
+</script>
+{% endblock %}

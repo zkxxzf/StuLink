@@ -1,0 +1,26 @@
+- generic [active] [ref=e1]:
+  - navigation [ref=e2]:
+    - text: 
+    - link " StuLink" [ref=e3] [cursor=pointer]:
+      - /url: "#"
+      - generic [ref=e4]: 
+      - text: StuLink
+  - generic [ref=e5]:
+    - generic [ref=e8]:
+      - generic [ref=e9]:
+        - generic [ref=e10]: 
+        - heading "学生管理系统" [level=4] [ref=e11]
+        - paragraph [ref=e12]: 请登录您的账户
+      - generic [ref=e13]:
+        - generic [ref=e14]:
+          - generic [ref=e15]: 用户名
+          - textbox "用户名" [ref=e16]:
+            - /placeholder: 请输入用户名
+        - generic [ref=e17]:
+          - generic [ref=e18]: 密码
+          - textbox "密码" [ref=e19]:
+            - /placeholder: 请输入密码
+        - button " 登 录" [ref=e20] [cursor=pointer]:
+          - generic [ref=e21]: 
+          - text: 登 录
+    - generic [ref=e22]: v1.9.0 release | © 2026 StuLink · @zkxxzf

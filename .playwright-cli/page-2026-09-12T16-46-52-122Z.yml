@@ -1,0 +1,143 @@
+- generic [active] [ref=f3e1]:
+  - navigation [ref=f3e2]:
+    - text: 
+    - link " StuLink" [ref=f3e3] [cursor=pointer]:
+      - /url: /
+      - generic [ref=f3e4]: 
+      - text: StuLink
+    - generic [ref=f3e5]:
+      - generic [ref=f3e6]:
+        - generic [ref=f3e7]: 
+        - text: 系统管理员
+        - generic [ref=f3e8]: 管理员
+      - link " 改密码" [ref=f3e9] [cursor=pointer]:
+        - /url: /change-password
+        - generic [ref=f3e10]: 
+        - text: 改密码
+      - link " 退出" [ref=f3e11] [cursor=pointer]:
+        - /url: /logout
+        - generic [ref=f3e12]: 
+        - text: 退出
+  - navigation [ref=f3e14]:
+    - link " 成绩管理" [ref=f3e15] [cursor=pointer]:
+      - /url: /grades/
+      - generic [ref=f3e16]: 
+      - text: 成绩管理
+    - generic [ref=f3e17]: 成绩管理
+    - link " 成绩分析" [ref=f3e18] [cursor=pointer]:
+      - /url: /grades/
+      - generic [ref=f3e19]: 
+      - text: 成绩分析
+    - link " 考试管理" [ref=f3e20] [cursor=pointer]:
+      - /url: /grades/exams
+      - generic [ref=f3e21]: 
+      - text: 考试管理
+    - link " 任课教师映射" [ref=f3e22] [cursor=pointer]:
+      - /url: /grades/teachers
+      - generic [ref=f3e23]: 
+      - text: 任课教师映射
+    - link " 毕业生成绩（二期）" [ref=f3e24] [cursor=pointer]:
+      - /url: /grades/history
+      - generic [ref=f3e25]: 
+      - text: 毕业生成绩（二期）
+  - generic [ref=f3e26]:
+    - generic [ref=f3e27]:
+      - heading " 成绩分析" [level=5] [ref=f3e28]:
+        - generic [ref=f3e29]: 
+        - text: 成绩分析
+      - combobox "年级" [ref=f3e30]:
+        - option "年级…"
+        - option "2027级"
+        - option "2026级" [selected]
+        - option "2025级"
+        - option "2024级"
+        - option "2023级"
+      - combobox "考试" [ref=f3e31]:
+        - option "考试…"
+        - option "2026级模拟2027-04-30（2027-04-30）" [selected]
+        - option "2026级期末2027-04-22（2027-04-22）"
+        - option "2026级期中2027-04-14（2027-04-14）"
+        - option "2026级单元测2027-04-06（2027-04-06）"
+        - option "2026级月考2027-03-29（2027-03-29）"
+        - option "2026级模拟2027-03-21（2027-03-21）"
+        - option "2026级期末2027-03-13（2027-03-13）"
+        - option "2026级期中2027-03-05（2027-03-05）"
+        - option "2026级单元测2027-02-25（2027-02-25）"
+        - option "2026级月考2027-02-17（2027-02-17）"
+        - option "2026级模拟2027-02-09（2027-02-09）"
+        - option "2026级期末2027-02-01（2027-02-01）"
+        - option "2026级期中2027-01-24（2027-01-24）"
+        - option "2026级单元测2027-01-16（2027-01-16）"
+        - option "2026级月考2027-01-08（2027-01-08）"
+        - option "2026级模拟2026-12-31（2026-12-31）"
+        - option "2026级期末2026-12-23（2026-12-23）"
+        - option "2026级期中2026-12-15（2026-12-15）"
+        - option "2026级单元测2026-12-07（2026-12-07）"
+        - option "2026级月考2026-11-29（2026-11-29）"
+        - option "2026级模拟2026-11-21（2026-11-21）"
+        - option "2026级期末2026-11-13（2026-11-13）"
+        - option "2026级期中2026-11-05（2026-11-05）"
+        - option "2026级单元测2026-10-28（2026-10-28）"
+        - option "2026级月考2026-10-20（2026-10-20）"
+        - option "2026级模拟2026-10-12（2026-10-12）"
+        - option "2026级期末2026-10-04（2026-10-04）"
+        - option "2026级期中2026-09-26（2026-09-26）"
+        - option "2026级单元测2026-09-18（2026-09-18）"
+        - option "2026级月考2026-09-10（2026-09-10）"
+      - combobox "班级" [ref=f3e32]:
+        - option "班级…"
+        - option "01班" [selected]
+        - option "02班"
+        - option "03班"
+        - option "04班"
+        - option "05班"
+        - option "06班"
+        - option "07班"
+        - option "08班"
+        - option "09班"
+        - option "10班"
+        - option "11班"
+        - option "12班"
+        - option "13班"
+        - option "14班"
+        - option "15班"
+        - option "16班"
+        - option "17班"
+        - option "18班"
+        - option "19班"
+        - option "20班"
+        - option "21班"
+        - option "22班"
+        - option "23班"
+        - option "24班"
+        - option "25班"
+        - option "26班"
+        - option "27班"
+        - option "28班"
+        - option "29班"
+        - option "30班"
+      - generic [ref=f3e33]:
+        - button " AI 分析" [ref=f3e34] [cursor=pointer]:
+          - generic [ref=f3e35]: 
+          - text: AI 分析
+        - link " AI 报告" [ref=f3e36] [cursor=pointer]:
+          - /url: /grades/ai/reports
+          - generic [ref=f3e37]: 
+          - text: AI 报告
+        - button " 导出 Excel" [ref=f3e38] [cursor=pointer]:
+          - generic [ref=f3e39]: 
+          - text: 导出 Excel
+        - button " 打印 / PDF" [ref=f3e40] [cursor=pointer]:
+          - generic [ref=f3e41]: 
+          - text: 打印 / PDF
+    - tablist [ref=f3e42]:
+      - tab "年级分析" [ref=f3e43] [cursor=pointer]
+      - tab "班级分析" [selected] [ref=f3e44] [cursor=pointer]
+      - tab "学科分析" [ref=f3e45] [cursor=pointer]
+      - tab "任课教师" [ref=f3e46] [cursor=pointer]
+    - tabpanel: 
+    - tabpanel [ref=f3e47]:
+      - generic [ref=f3e48]: 加载中…
+      - text: 
+    - tabpanel: 
+    - tabpanel: 

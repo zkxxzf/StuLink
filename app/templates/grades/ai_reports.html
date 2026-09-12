@@ -1,0 +1,98 @@
+{% extends "base.html" %}
+{% block title %}AI 报告历史 - 成绩管理{% endblock %}
+{% block extra_css_head %}
+<link href="{{ url_for('static', filename='css/grades.css') }}" rel="stylesheet">
+{% endblock %}
+{% block content %}
+<div class="d-flex align-items-center mb-3 flex-wrap gap-2">
+    <a href="{{ url_for('grades.index') }}" class="btn btn-sm btn-outline-secondary">
+        <i class="bi bi-arrow-left"></i>
+    </a>
+    <h5 class="mb-0"><i class="bi bi-stars"></i> AI 报告历史</h5>
+    <span class="text-muted small">仅显示您本人生成的报告{% if current_user.role == 'admin' %}（管理员可见全部）{% endif %}；报告内容由 AI 生成，仅供参考</span>
+</div>
+
+<div class="card">
+    <div class="table-responsive">
+        <table class="table table-hover g-table mb-0">
+            <thead>
+            <tr>
+                <th>生成时间</th><th>考试</th><th>年级</th><th>发送范围</th>
+                <th class="text-end">人数</th><th>服务</th><th>生成人</th>
+                <th class="text-end">操作</th>
+            </tr>
+            </thead>
+            <tbody id="aiListBody">
+            <tr><td colspan="8" class="text-center text-muted py-4">加载中…</td></tr>
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<!-- 报告详情 -->
+<div class="card mt-3 d-none" id="aiDetailCard">
+    <div class="card-header py-2 d-flex justify-content-between align-items-center">
+        <h6 class="mb-0"><i class="bi bi-file-text"></i> 报告详情</h6>
+        <button class="btn btn-sm btn-outline-secondary" id="aiDetailClose">关闭</button>
+    </div>
+    <div class="card-body" id="aiDetailBody"></div>
+</div>
+{% endblock %}
+{% block extra_js %}
+<script src="{{ url_for('static', filename='js/grades_md.js') }}"></script>
+<script>
+$(function(){
+    function loadList(){
+        $.getJSON('/grades/ai/reports/list', function(res){
+            var $tb = $('#aiListBody').empty();
+            var rows = res.data || [];
+            if(!rows.length){
+                $tb.append('<tr><td colspan="8" class="text-center text-muted py-4">暂无 AI 报告。'
+                    + '在成绩分析页选择考试后点击「AI 分析」生成。</td></tr>');
+                return;
+            }
+            rows.forEach(function(r){
+                var tr = $('<tr>');
+                tr.append('<td>' + r.created_at + '</td>')
+                  .append('<td>' + r.exam_name + '</td>')
+                  .append('<td>' + (r.grade || '—') + '</td>')
+                  .append('<td>' + (r.scope_desc || '—') + '</td>')
+                  .append('<td class="num">' + (r.scope_students || 0) + '</td>')
+                  .append('<td class="small">' + (r.provider || '') + ' · ' + (r.model || '') + '</td>')
+                  .append('<td>' + r.operator + '</td>')
+                  .append('<td class="num">'
+                    + '<button class="btn btn-sm btn-outline-primary ai-view" data-id="' + r.id + '">查看</button> '
+                    + '<button class="btn btn-sm btn-outline-danger ai-del" data-id="' + r.id + '">删除</button></td>');
+                $tb.append(tr);
+            });
+        }).fail(function(){ $('#aiListBody').html(
+            '<tr><td colspan="8" class="text-center text-danger py-4">加载失败</td></tr>'); });
+    }
+    $('#aiListBody').on('click', '.ai-view', function(){
+        var id = $(this).data('id');
+        $.getJSON('/grades/ai/reports/' + id, function(res){
+            var d = res.data;
+            $('#aiDetailCard').removeClass('d-none');
+            $('#aiDetailBody').empty()
+                .append('<div class="text-muted small mb-2">' + (d.scope_desc || '') +
+                    ' · ' + (d.scope_students || 0) + ' 人 · ' + (d.operator || '') +
+                    ' · ' + (d.created_at || '') + '</div>')
+                .append('<div class="ai-report-content">' + renderGradeMd(d.content) + '</div>')
+                .append('<div class="alert alert-light border small mt-3 mb-0">' +
+                    '<i class="bi bi-info-circle"></i> 本报告由 AI 生成，仅供参考，不代表学校评价结论。</div>');
+            window.scrollTo({top: document.body.scrollHeight, behavior: 'smooth'});
+        });
+    });
+    $('#aiListBody').on('click', '.ai-del', function(){
+        var id = $(this).data('id');
+        if(!confirm('确认删除该报告？')){ return; }
+        $.post('/grades/ai/reports/' + id + '/delete', function(){
+            loadList();
+            $('#aiDetailCard').addClass('d-none');
+        });
+    });
+    $('#aiDetailClose').on('click', function(){ $('#aiDetailCard').addClass('d-none'); });
+    loadList();
+});
+</script>
+{% endblock %}

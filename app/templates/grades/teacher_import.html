@@ -1,0 +1,41 @@
+{% extends "base.html" %}
+{% block title %}批量导入任课教师 - 成绩管理{% endblock %}
+{% block content %}
+<div class="d-flex align-items-center mb-3">
+    <a href="{{ url_for('grades.teachers_page') }}" class="btn btn-sm btn-outline-secondary me-2">
+        <i class="bi bi-arrow-left"></i>
+    </a>
+    <h5 class="mb-0"><i class="bi bi-upload"></i> 批量导入《教师安排表》</h5>
+</div>
+<div class="card" style="max-width:820px;">
+    <div class="card-body">
+        <div class="alert alert-light border small">
+            <i class="bi bi-info-circle"></i> 支持直接上传教务排课的<b>总任课表</b>（一行一个班级、科目为列，可含多个年级区段；
+            "英语"自动对应系统"外语"科目；体育/音乐/美术/信息/心理/正副班主任/教室位置/班型等列自动忽略）。
+            也可先
+            <a href="{{ url_for('grades.teacher_template_download') }}">下载模板</a> 参考格式。
+        </div>
+        <form method="post" enctype="multipart/form-data"
+              action="{{ url_for('grades.teachers_import_upload') }}">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <div class="mb-3">
+                <label class="form-label fw-semibold">教师安排表 Excel 文件</label>
+                <input type="file" name="file" class="form-control" accept=".xlsx,.xls" required>
+            </div>
+            <div class="alert alert-warning small py-2">
+                <i class="bi bi-exclamation-triangle"></i> 导入时将<b>按姓名</b>核对系统账号：已有账号 → 直接绑定；
+                没有账号 → 自动新建（账号默认=姓名拼音，可在下一步预览中修改；初始密码随机生成、首次登录强制修改）；
+                姓名与账号绑定后<b>姓名不可修改</b>（如需改名请联系管理员评估影响）。
+            </div>
+            <div class="alert alert-light border small py-2">
+                <i class="bi bi-people"></i> <b>班主任列（正班/副班1/副班2）</b>：文件中填写的正/副班主任将自动开通为
+                「班主任」账号（归属班主任组），并同步到<b>系统管理-班型设置</b>的班主任名单——
+                班主任登录后可查看本班<b>全部科目</b>的成绩分析；重复导入以本次文件为准（原班主任被换下会自动移除）。
+            </div>
+            <button type="submit" class="btn btn-primary">
+                <i class="bi bi-search"></i> 解析并核对账号
+            </button>
+        </form>
+    </div>
+</div>
+{% endblock %}

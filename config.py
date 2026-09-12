@@ -65,6 +65,7 @@ class Config:
     SQLALCHEMY_BINDS = {
         'dormitory': 'sqlite:///' + os.path.join(BASE_DIR, 'data', 'dormitory.db'),
         'history': 'sqlite:///' + os.path.join(BASE_DIR, 'data', 'history.db'),
+        'grades': 'sqlite:///' + os.path.join(BASE_DIR, 'data', 'grades.db'),
     }
 
 

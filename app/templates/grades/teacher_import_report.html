@@ -1,0 +1,80 @@
+{% extends "base.html" %}
+{% block title %}导入预览 - 任课教师{% endblock %}
+{% block content %}
+<div class="d-flex align-items-center mb-3">
+    <a href="{{ url_for('grades.teachers_import_page') }}" class="btn btn-sm btn-outline-secondary me-2">
+        <i class="bi bi-arrow-left"></i>
+    </a>
+    <h5 class="mb-0"><i class="bi bi-list-check"></i> 账号核对预览</h5>
+</div>
+
+{% if sections %}
+<div class="alert alert-light border small">
+    解析到年级：{% for g, cls in sections.items() %}<span class="badge bg-secondary me-2">{{ g }}（{{ cls|length }} 班）</span>{% endfor %}
+    任课记录 {{ preview|selectattr('kind', 'equalto', 'subject')|list|length }} 条；
+    班主任 {{ head_total }} 人次（导入后自动与「班型设置」页面同步，开通本班全部成绩查看权限）。
+</div>
+{% endif %}
+{% if errors %}
+<div class="alert alert-warning small">解析提示 {{ errors|length }} 条：
+    {% for e in errors %}{{ e.line }}行：{{ e.reason }}；{% endfor %}
+</div>
+{% endif %}
+
+<form method="post" action="{{ url_for('grades.teachers_import_confirm') }}"
+      onsubmit="return confirm('确认导入？将按下方状态绑定/新建账号并写入映射。')">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <input type="hidden" name="token" value="{{ token }}">
+    <div class="card mb-3">
+        <div class="table-responsive" style="max-height:60vh;">
+            <table class="table table-sm g-table mb-0">
+                <thead>
+                <tr>
+                    <th>类别</th><th>年级</th><th>班级</th><th>科目/职务</th><th>教师姓名</th>
+                    <th style="min-width:220px;">核对结果 / 账号</th><th>初始密码</th>
+                </tr>
+                </thead>
+                <tbody>
+                {% for it in preview %}
+                <tr>
+                    <td>
+                        {% if it.kind == 'head' %}
+                        <span class="badge bg-primary">班主任·{{ it.label }}</span>
+                        {% else %}
+                        <span class="badge bg-light text-dark">任课</span>
+                        {% endif %}
+                    </td>
+                    <td>{{ it.grade }}</td><td>{{ it.class_name }}</td>
+                    <td>{{ it.label if it.kind == 'head' else it.subject }}</td>
+                    <td>{{ it.teacher_name }}</td>
+                    <td>
+                        {% if it.status == 'bound' %}
+                        <span class="badge bg-success">已有账号，绑定</span>
+                        {% elif it.status == 'to_create' %}
+                        <span class="badge bg-warning text-dark">无账号，自动开户</span>
+                        <input type="text" class="form-control form-control-sm mt-1"
+                               name="un_{{ it.idx }}" value="{{ it.username }}"
+                               placeholder="账号（默认拼音，可修改）" required>
+                        {% elif it.status == 'disabled' %}
+                        <span class="badge bg-secondary">账号已停用</span>
+                        <span class="text-danger small d-block">{{ it.reason }}</span>
+                        {% else %}
+                        <span class="badge bg-danger">同名账号多个</span>
+                        <span class="text-danger small d-block">{{ it.reason }}</span>
+                        {% endif %}
+                    </td>
+                    <td class="text-muted small">
+                        {% if it.status == 'to_create' %}导入后随机生成（一次性可见）{% else %}—{% endif %}
+                    </td>
+                </tr>
+                {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+    <div class="d-flex gap-2">
+        <button type="submit" class="btn btn-success"><i class="bi bi-check-lg"></i> 确认导入</button>
+        <a href="{{ url_for('grades.teachers_import_page') }}" class="btn btn-outline-secondary">返回重选文件</a>
+    </div>
+</form>
+{% endblock %}

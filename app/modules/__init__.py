@@ -38,7 +38,7 @@ def register_blueprints(app):
 
     # 占位模块
     from app.modules.points.routes import bp as points_bp
-    from app.modules.grades.routes import bp as grades_bp
+    from app.modules.grades import bp as grades_bp
     app.register_blueprint(points_bp)
     app.register_blueprint(grades_bp)
 

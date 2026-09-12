@@ -1,0 +1,269 @@
+{% extends "base.html" %}
+{% block title %}划线分层 - {{ exam.name }}{% endblock %}
+{% block content %}
+<div class="d-flex align-items-center mb-3 flex-wrap gap-2">
+    <a href="{{ url_for('grades.exam_detail', exam_id=exam.id) }}" class="btn btn-sm btn-outline-secondary">
+        <i class="bi bi-arrow-left"></i>
+    </a>
+    <h5 class="mb-0"><i class="bi bi-bar-chart"></i> 划线分层：{{ exam.name }}</h5>
+    <span class="text-muted small">{{ exam.grade }} · 参考学生 {{ total_count }} 人</span>
+</div>
+
+<div class="card" id="bandApp"
+     data-exam-id="{{ exam.id }}"
+     data-dirs='{{ directions|tojson }}'
+     data-dir-subjects='{{ dir_subjects|tojson }}'>
+    <div class="card-body">
+        <div class="row g-2 align-items-center mb-3">
+            <div class="col-auto">
+                <label class="form-label mb-0 me-1">下界方式</label>
+                <select id="qMode" class="form-select form-select-sm d-inline-block w-auto">
+                    <option value="score">固定分数</option>
+                    <option value="ratio">人数比例%</option>
+                </select>
+            </div>
+            <div class="col-auto">
+                <label class="form-label mb-0 me-1">录入形态</label>
+                <select id="qScope" class="form-select form-select-sm d-inline-block w-auto">
+                    <option value="per_subject">分科（各科分别填）</option>
+                    <option value="all">全科统一（一套值套所有科）</option>
+                </select>
+            </div>
+            <div class="col-auto form-check">
+                <input class="form-check-input" type="checkbox" id="qTotal" checked>
+                <label class="form-check-label small" for="qTotal">含总分</label>
+            </div>
+            <div class="col-auto">
+                <span class="text-muted small me-1">快速填层名：</span>
+                <button class="btn btn-sm btn-outline-secondary" id="qFill4">四层</button>
+            </div>
+            <div class="col-auto">
+                <button class="btn btn-sm btn-outline-secondary" id="qFillGk">高考线</button>
+            </div>
+        </div>
+        <div class="table-responsive">
+            <table class="table g-table align-middle" id="bandTable">
+                <thead></thead>
+                <tbody></tbody>
+            </table>
+        </div>
+        <div class="d-flex gap-2">
+            <button class="btn btn-sm btn-outline-success" id="qAdd"><i class="bi bi-plus"></i> 新增层</button>
+            <button class="btn btn-sm btn-primary" id="qSave"><i class="bi bi-save"></i> 保存划线</button>
+            <span class="text-muted small align-self-center" id="qMsg"></span>
+        </div>
+        <div class="text-muted small mt-2">
+            行 = 层（第 1 层最高），列 = 科目（已分科时按物理类 / 历史类分组，两组可填不同的线）。
+            同一层内下界需从高到低；留空的格子不划线，也不会改动已有设置。
+            选「人数比例」时按该组该科自己的排名换算成分数。
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{# 脚本必须放在 extra_js 块：base.html 的 jQuery 在 body 末尾加载，
+   写在 content 块内会因执行早于 jQuery 而报 "$ is not defined" #}
+{% block extra_js %}
+<script>
+$(function(){
+    var $app = $('#bandApp'), examId = $app.data('examId');
+    var dirs = $app.data('dirs') || [''];
+    var dirSubjects = $app.data('dirSubjects') || {};
+    var layers = [];
+
+    function mode(){ return $('#qMode').val(); }
+    function scope(){ return $('#qScope').val(); }
+    function colsOf(d){
+        var subs = (dirSubjects[d] || []).slice();
+        if ($('#qTotal').is(':checked')) subs.unshift('总分');
+        return subs;
+    }
+    function colKeys(){
+        var keys = [];
+        if (scope() === 'all') return ['*'];
+        dirs.forEach(function(d){ colsOf(d).forEach(function(s){ keys.push(d + '|' + s); }); });
+        return keys;
+    }
+    function colLabel(k){ return k === '*' ? '（全部学科）' : k.replace('|', '类·'); }
+    function dirLabel(d){ return d ? (d + '类') : '全体（未分科）'; }
+
+    function buildHead(){
+        var $th = $('#bandTable thead').empty();
+        var r1 = $('<tr>'), r2 = $('<tr>');
+        r1.append('<th rowspan="2" style="width:70px">序号</th>');
+        r1.append('<th rowspan="2">层名</th>');
+        if (scope() === 'all'){
+            r1.append($('<th rowspan="2">').text(mode() === 'ratio' ? '比例%（全部学科共用）' : '分数（全部学科共用）'));
+        } else {
+            dirs.forEach(function(d){
+                var subs = colsOf(d);
+                r1.append($('<th>').attr('colspan', subs.length).text(dirLabel(d)));
+                subs.forEach(function(s){ r2.append($('<th style="min-width:82px">').text(s)); });
+            });
+        }
+        r1.append('<th rowspan="2" style="width:70px"></th>');
+        $th.append(r1);
+        if (scope() !== 'all') $th.append(r2);
+    }
+    function render(){
+        buildHead();
+        var $tb = $('#bandTable tbody').empty();
+        layers.forEach(function(l){
+            var tr = $('<tr>');
+            tr.append($('<td>').append($('<input type="number" min="1" class="form-control form-control-sm q-seq">').val(l.seq)));
+            tr.append($('<td>').append($('<input class="form-control form-control-sm q-name">').val(l.name)));
+            if (scope() === 'all'){
+                tr.append($('<td>').append($('<input type="number" step="0.5" class="form-control form-control-sm q-value">').val(l.value == null ? '' : l.value)));
+            } else {
+                dirs.forEach(function(d){
+                    colsOf(d).forEach(function(s){
+                        var k = d + '|' + s;
+                        tr.append($('<td>').append($('<input type="number" step="0.5" class="form-control form-control-sm q-cell">')
+                            .attr('data-key', k)
+                            .val((l.values && l.values[k] != null) ? l.values[k] : '')));
+                    });
+                });
+            }
+            tr.append($('<td>').append($('<button class="btn btn-sm btn-outline-danger q-del"><i class="bi bi-x"></i></button>')));
+            $tb.append(tr);
+        });
+    }
+    function read(){
+        var out = [];
+        $('#bandTable tbody tr').each(function(){
+            var $r = $(this), o = {};
+            o.seq = $r.find('.q-seq').val();
+            o.name = $r.find('.q-name').val();
+            if (scope() === 'all'){
+                o.value = $r.find('.q-value').val();
+            } else {
+                o.values = {};
+                $r.find('.q-cell').each(function(){ o.values[$(this).data('key')] = $(this).val(); });
+            }
+            out.push(o);
+        });
+        return out;
+    }
+    function hasValue(){
+        return read().some(function(x){
+            if (scope() === 'all') return x.value !== '' && x.value != null;
+            return Object.keys(x.values || {}).some(function(k){ return x.values[k] !== ''; });
+        });
+    }
+    /* 提交前校验：逐列检查下界递减与取值区间，避免提交后才报失败 */
+    function validate(payload){
+        var errs = [];
+        payload.forEach(function(x){
+            if (!x.name){ errs.push('有层的「层名」为空'); }
+        });
+        colKeys().forEach(function(k){
+            var prev = null, prevName = '';
+            payload.forEach(function(l){
+                var raw = (scope() === 'all') ? l.value : (l.values || {})[k];
+                if (raw === '' || raw == null) return;
+                var v = parseFloat(raw);
+                if (isNaN(v)){ errs.push(colLabel(k) + '「' + l.name + '」不是数字'); return; }
+                if (v < 0){ errs.push(colLabel(k) + '「' + l.name + '」不能为负数'); }
+                if (mode() === 'ratio' && v > 100){ errs.push(colLabel(k) + '「' + l.name + '」比例需在 0-100 之间'); }
+                if (prev !== null && v > prev){
+                    errs.push(colLabel(k) + '「' + l.name + '」下界 ' + v + ' 高于上一层「' + prevName + '」' + prev);
+                }
+                prev = v; prevName = l.name;
+            });
+        });
+        return errs;
+    }
+    function setLayers(names){
+        layers = names.map(function(n, i){ return {seq: i + 1, name: n, value: '', values: {}}; });
+        render();
+    }
+    /* 已加载的划线回填到矩阵（保存后刷新用） */
+    function load(){
+        if (scope() === 'all'){ render(); return; }
+        var pending = colKeys().length;
+        if (!pending){ render(); return; }
+        colKeys().forEach(function(k){
+            var parts = k.split('|');
+            $.getJSON('/grades/api/bands', {exam_id: examId, direction: parts[0], subject: parts[1]},
+                function(res){
+                    var vals = {};
+                    (res.data || []).forEach(function(b){ vals[b.name] = b.lower_value; });
+                    layers.forEach(function(l){ if (vals[l.name] != null) l.values[k] = vals[l.name]; });
+                }).always(function(){
+                    // 单个失败也要继续，避免整表不刷新
+                    if (--pending <= 0) render();
+                });
+        });
+    }
+
+    $('#qMode').on('change', function(){
+        // 分数与比例含义不同（如 120 分 vs 120%），切换时清空已填值，避免提交被拒
+        if (hasValue() && !confirm('切换下界方式会清空已填数值（分数与比例含义不同），继续？')){
+            $('#qMode').val(mode() === 'ratio' ? 'score' : 'ratio');
+            return;
+        }
+        layers = read();
+        layers.forEach(function(l){ l.value = ''; l.values = {}; });
+        render();
+    });
+    $('#qScope,#qTotal').on('change', function(){ layers = read(); render(); });
+    $('#qAdd').on('click', function(){
+        layers = read();
+        var maxSeq = layers.reduce(function(m, x){ return Math.max(m, +x.seq || 0); }, 0);
+        layers.push({seq: maxSeq + 1, name: '', value: '', values: {}});
+        render();
+    });
+    $('#bandTable').on('click', '.q-del', function(){
+        layers = read();
+        layers.splice($(this).closest('tr').index(), 1);
+        render();
+    });
+    $('#qFill4').on('click', function(){ setLayers(['优秀', '良好', '及格', '待提升']); });
+    $('#qFillGk').on('click', function(){ setLayers(['清北', '985', '211', '特控', '本科', '未上线']); });
+    $('#qSave').on('click', function(){
+        var payload = read();
+        if (!payload.length){ alert('请先填层名或新增层'); return; }
+        if (!hasValue()){ alert('请至少填写一个格子的下界值'); return; }
+        var errs = validate(payload);
+        if (errs.length){
+            console.warn('[划线] 前端校验未通过，共 ' + errs.length + ' 处', errs);
+            alert('以下 ' + errs.length + " 处需要修正：\n\n" + errs.slice(0, 8).join('\n')
+                  + (errs.length > 8 ? '\n…（其余省略）' : ''));
+            return;
+        }
+        var reqBody = {exam_id: examId, mode: mode(), scope: scope(),
+                       include_total: $('#qTotal').is(':checked'), layers: payload};
+        console.log('[划线] 提交保存', reqBody);
+        if (!confirm('将按当前表格覆盖对应的划线，继续？')){ return; }
+        // 显式带 CSRF 头，不依赖 base.html 的 $.ajaxSetup（少一层失效风险）
+        $.ajax({
+            url: '/grades/api/bands/batch',
+            type: 'POST',
+            data: JSON.stringify(reqBody),
+            contentType: 'application/json',
+            headers: {'X-CSRFToken': (window.csrfToken || '')},
+            success: function(res){
+                console.log('[划线] 保存成功', res);
+                $('#qMsg').text(res.message || '已保存');
+                load();
+            },
+            error: function(x){
+                console.error('[划线] 保存失败 HTTP ' + x.status,
+                              (x.responseText || '').slice(0, 300));
+                var msg = x.responseJSON && x.responseJSON.message;
+                if (!msg){
+                    // 400/403 通常是安全校验未通过（返回的是 HTML，取不到 JSON 信息）
+                    msg = (x.status === 400 || x.status === 403)
+                        ? '页面已过期或安全校验未通过，请刷新页面（Ctrl+F5）后重试'
+                        : ('服务器错误 ' + x.status);
+                }
+                alert('保存失败：' + msg);
+            }
+        });
+    });
+
+    setLayers(['优秀', '良好', '及格', '待提升']);
+    load();
+});
+</script>
+{% endblock %}

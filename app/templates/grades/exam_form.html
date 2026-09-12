@@ -1,0 +1,71 @@
+{% extends "base.html" %}
+{% block title %}新建考试 - 成绩管理{% endblock %}
+{% block content %}
+<div class="d-flex align-items-center mb-3">
+    <a href="{{ url_for('grades.exams_list') }}" class="btn btn-sm btn-outline-secondary me-2">
+        <i class="bi bi-arrow-left"></i>
+    </a>
+    <h5 class="mb-0"><i class="bi bi-plus-circle"></i> 新建考试</h5>
+</div>
+<div class="card" style="max-width:560px;">
+    <div class="card-body">
+        <form method="post">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <div class="mb-3">
+                <label class="form-label">年级 <span class="text-danger">*</span></label>
+                <select name="grade" id="f_grade" class="form-select" required>
+                    <option value="">请选择年级</option>
+                    {% for g in grade_options %}
+                    <option value="{{ g }}" {% if g == grade %}selected{% endif %}>{{ g }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="mb-3">
+                <label class="form-label">考试日期 <span class="text-danger">*</span></label>
+                <input type="date" name="exam_date" id="f_date" class="form-control"
+                       value="{{ exam_date }}" required>
+            </div>
+            <div class="mb-3">
+                <label class="form-label">考试名称 <span class="text-danger">*</span></label>
+                <input type="text" name="name" id="f_name" class="form-control"
+                       placeholder="默认：年级+考试日期（如 2025级2026-01-15），可修改"
+                       value="{{ name }}" required>
+                <div class="form-text">默认自动生成为「年级 + 考试日期」，可手工修改以便区分（如同日补考）。</div>
+            </div>
+            <div class="mb-3">
+                <label class="form-label">考试类型</label>
+                <select name="exam_type" class="form-select">
+                    <option value="">其他</option>
+                    <option value="月考" {% if exam_type == '月考' %}selected{% endif %}>月考</option>
+                    <option value="期中" {% if exam_type == '期中' %}selected{% endif %}>期中</option>
+                    <option value="期末" {% if exam_type == '期末' %}selected{% endif %}>期末</option>
+                    <option value="联考" {% if exam_type == '联考' %}selected{% endif %}>联考</option>
+                    <option value="开学考" {% if exam_type == '开学考' %}selected{% endif %}>开学考</option>
+                    <option value="模拟" {% if exam_type == '模拟' %}selected{% endif %}>模拟</option>
+                    <option value="其他" {% if exam_type == '其他' %}selected{% endif %}>其他</option>
+                </select>
+            </div>
+            <button type="submit" class="btn btn-primary">
+                <i class="bi bi-check-lg"></i> 创建考试
+            </button>
+        </form>
+    </div>
+</div>
+{% endblock %}
+{% block extra_js %}
+<script>
+$(function(){
+    // 名称默认 = 年级+日期（用户手工改过则不覆盖）
+    var auto = true;
+    function refreshName(){
+        if(!auto) return;
+        var g = $('#f_grade').val(), d = $('#f_date').val();
+        if(g && d){ $('#f_name').val(g + d); }
+    }
+    $('#f_grade').change(refreshName);
+    $('#f_date').change(refreshName);
+    $('#f_name').on('input', function(){ auto = false; });
+    refreshName();
+});
+</script>
+{% endblock %}
