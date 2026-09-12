@@ -3,11 +3,11 @@
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
 [![Python](https://img.shields.io/badge/python-3.11+-green.svg)](https://python.org)
 [![Flask](https://img.shields.io/badge/flask-3.x-lightgrey.svg)](https://flask.palletsprojects.com/)
-[![Version](https://img.shields.io/badge/version-1.8.0-orange.svg)](https://github.com/zkxxzf/stulink)
+[![Version](https://img.shields.io/badge/version-1.9.0-orange.svg)](https://github.com/zkxxzf/stulink)
 
 面向中学的综合学生管理平台，采用双站点架构：
 
-- **在校生系统（主应用 :5000）**：宿舍自动分配 · 合班管理 · 床位管理 · 学生信息管理 · 批量导入/调班 · 多角色权限 · 统计报表
+- **在校生系统（主应用 :5000）**：宿舍自动分配 · 合班管理 · 床位管理 · 学生信息管理 · 批量导入/调班 · 多角色权限 · 统计报表 · 成绩管理与分析（ECharts）· AI 分析（BYOK）
 - **往届生查询（独立应用 :5001）**：毕业生数据快照查询 · 学习经历变迁 · 宿舍历史
 
 ## 功能模块
@@ -18,7 +18,7 @@
 | 🏠 宿舍管理 | 主应用 | ✅ 已完成 | 宿舍列表 · 可视化拖拽分配 · 床位管理 · 自动分配 V20260805 · 合班自动识别 · 统计报表 · 宿舍数据导入 · 床位操作并发安全 |
 | 🔍 往届查询 | 独立应用 | ✅ 已完成 | 毕业生基本信息查询 · 宿舍分配快照 · 学习经历变迁时间线 |
 | ⭐ 积分管理 | 主应用 | 🚧 开发中 | 学生积分记录与奖惩管理 |
-| 📊 成绩管理 | 主应用 | 🚧 开发中 | 成绩录入、排名分析与报表导出 |
+| 📊 成绩管理 | 主应用 | ✅ 已完成 | 考试登记 · 成绩导入（分批覆盖）· 划线分层 · 四大分析（年级/班级/学科/任课教师，ECharts 可视化）· Excel/PDF 导出 · AI 分析（个人 Key/公共 Key，数据按权限收敛） |
 
 ## 宿舍自动分配算法（V20260805）
 
@@ -44,12 +44,13 @@
   data/system.db     基础库（用户/学生/字典/权限）
   data/dormitory.db  宿舍库（房间/床位）
   data/history.db    历史库（毕业生快照 + 变迁日志 + 分配历史）
+  data/grades.db     成绩库（考试/成绩/分层/任课映射/AI Key 与报告）
   data/backups/      毕业备份
 ```
 
 - **后端**: Python 3.11+ / Flask 3.x / Flask-Login / SQLAlchemy / Waitress
-- **前端**: Bootstrap 5 / jQuery / Jinja2
-- **安全**: AES-256 身份证加密 / CSRF 防护 / 登录频率限制 / 审计日志
+- **前端**: Bootstrap 5 / jQuery / Jinja2 / ECharts（成绩可视化）
+- **安全**: AES-256 身份证与 AI Key 加密 / CSRF 防护 / 登录频率限制 / 审计日志
 - **部署**: 支持 Docker Compose（独立容器）/ 阿里云 ECS / 绿联 NAS / Windows 本地
 
 ## 快速开始
@@ -63,7 +64,7 @@ python run.py --dev
 cd alumni_app && python run.py
 
 # Docker 部署（两个容器）
-docker build -t stulink:v1.8.0 .
+docker build -t stulink:v1.9.0 .
 docker build -t stulink-alumni:v1.0.0 ./alumni_app
 docker-compose up -d
 ```
@@ -83,7 +84,7 @@ StuLink/
 │   │   ├── system/         # 系统管理（学生/教师/字典/权限/年级）
 │   │   ├── dormitory/      # 宿舍管理（房间/床位/分配/统计）
 │   │   ├── points/         # 积分管理（占位）
-│   │   └── grades/         # 成绩管理（占位）
+│   │   └── grades/         # 成绩管理（导入/分层/四大分析/AI）
 │   ├── models/             # 数据模型
 │   ├── templates/          # Jinja2 模板
 │   ├── services/           # 业务逻辑
@@ -104,6 +105,7 @@ StuLink/
 ## 文档
 
 - [设计文档](docs/设计文档.md)
+- [成绩管理与可视化分析系统设计文档](docs/成绩管理与可视化分析系统设计文档.md)（四大分析 + AI 分析）
 - [用户手册](docs/用户文档.md)
 - [部署文档](docs/部署文档.md)（Docker / 阿里云 / NAS）
 - [宿舍分配使用手册](docs/宿舍分配使用手册.md)（自动分配 4 步向导 + 算法说明 + FAQ）

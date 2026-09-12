@@ -1,0 +1,135 @@
+{% extends "base.html" %}
+{% block title %}导入成绩 - {{ exam.name }}{% endblock %}
+{% block content %}
+{% set info = {'A': '增量覆盖（默认）', 'B': '整场重置'} %}
+<div class="d-flex align-items-center mb-3 flex-wrap gap-2">
+    <a href="{{ url_for('grades.exam_detail', exam_id=exam.id) }}" class="btn btn-sm btn-outline-secondary">
+        <i class="bi bi-arrow-left"></i>
+    </a>
+    <h5 class="mb-0"><i class="bi bi-upload"></i> 导入成绩：{{ exam.name }}</h5>
+    <span class="text-muted small">{{ exam.grade }} · {{ exam.exam_date.strftime('%Y-%m-%d') }} · 状态：{{ status_label[exam.status] }}</span>
+    <a href="{{ url_for('grades.template_download') }}" class="btn btn-outline-primary btn-sm ms-auto">
+        <i class="bi bi-download"></i> 下载成绩导入模板
+    </a>
+</div>
+
+{% if step == 'upload' %}
+<div class="card" style="max-width:760px;">
+    <div class="card-body">
+        <form method="post" enctype="multipart/form-data"
+              action="{{ url_for('grades.exam_import_upload', exam_id=exam.id) }}">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <div class="mb-3">
+                <label class="form-label fw-semibold">1. 选择成绩 Excel 文件</label>
+                <input type="file" name="file" class="form-control" accept=".xlsx,.xls" required>
+                <div class="form-text">
+                    模板 A：学号/姓名/年级(可选)/班级(可选)/总分(可选)/9 科列 —— 参考 Excel「学生成绩表」可直接整表粘贴；
+                    模板 B：学号/姓名/年级(可选)/若干科目列。两模板均允许分批（只含部分班级/方向/科目）。
+                </div>
+            </div>
+            <div class="mb-3">
+                <label class="form-label fw-semibold">2. 导入模式</label>
+                <div class="form-check">
+                    <input class="form-check-input" type="radio" name="mode" id="m_a" value="A" checked>
+                    <label class="form-check-label" for="m_a">
+                        <strong>模式 A：增量覆盖（推荐）</strong> —— 文件中出现的（学生×科目）覆盖旧成绩；
+                        文件为空的科目视为缺考；文件未出现的科目列与未出现的学生保留不动。
+                    </label>
+                </div>
+                <div class="form-check mt-1">
+                    <input class="form-check-input" type="radio" name="mode" id="m_b" value="B">
+                    <label class="form-check-label" for="m_b">
+                        <strong>模式 B：整场重置</strong> —— 清空本场全部成绩后仅按本次文件导入（上次整体导错时用）。
+                    </label>
+                </div>
+                <div class="form-check mt-2" id="rmWrap">
+                    <input class="form-check-input" type="checkbox" name="remove_missing" id="rm" value="1">
+                    <label class="form-check-label" for="rm">一并移除本次文件中未出现的原有学生成绩（模式 A，慎用）</label>
+                </div>
+            </div>
+            <div class="mb-3">
+                <label class="form-label fw-semibold">3. 上传并校验</label>
+                <button type="submit" class="btn btn-primary">
+                    <i class="bi bi-search"></i> 解析并预览差异
+                </button>
+            </div>
+        </form>
+        <script>
+        $(function(){
+            $('input[name=mode]').on('change', function(){
+                $('#rmWrap').toggle($(this).val() === 'A');
+            });
+        });
+        </script>
+    </div>
+</div>
+
+{% elif step == 'report' %}
+{% set headers = draft.headers %}
+{% set stats = draft.stats %}
+{% set diff = draft.diff %}
+<div class="alert alert-{{ 'success' if stats.ok_rows > 0 else 'danger' }} py-2 small">
+    <i class="bi bi-file-earmark-excel"></i> 文件《{{ draft.fname }}》：识别为模板{{ 'A' if draft.template == 'A' else 'B' }}（{{ '含总分列' if headers.total else '无总分列，系统按应考科累加' }}），
+    科目列：{{ headers.subjects|join('、') }}{% if headers.grade %}；含年级列（已逐行校验）{% endif %}{% if headers.class_name %}；含班级列{% endif %}{% if headers.ignored %}；忽略列：{{ headers.ignored|join('、') }}{% endif %}
+</div>
+
+<div class="row g-3 mb-3">
+    <div class="col"><div class="card stat-card"><div class="card-body text-center">
+        <div class="stat-number text-primary">{{ stats.ok_rows }}</div>
+        <div class="stat-label">可导入（人）</div></div></div></div>
+    <div class="col"><div class="card stat-card"><div class="card-body text-center">
+        <div class="stat-number text-warning">{{ draft.errors|length }}</div>
+        <div class="stat-label">错误（行）</div></div></div></div>
+    <div class="col"><div class="card stat-card"><div class="card-body text-center">
+        <div class="stat-number text-secondary">{{ stats.absent_rows }}</div>
+        <div class="stat-label">整行无分（未参加）</div></div></div></div>
+    <div class="col"><div class="card stat-card"><div class="card-body text-center">
+        <div class="stat-number text-success">{{ diff.new_students }}</div>
+        <div class="stat-label">将新增学生</div></div></div></div>
+    <div class="col"><div class="card stat-card"><div class="card-body text-center">
+        <div class="stat-number text-info">{{ diff.updated_rows }}</div>
+        <div class="stat-label">将更新（条）</div></div></div></div>
+    <div class="col"><div class="card stat-card"><div class="card-body text-center">
+        <div class="stat-number text-danger">{{ diff.deleted_rows }}</div>
+        <div class="stat-label">将删除（缺考）</div></div></div></div>
+    <div class="col"><div class="card stat-card"><div class="card-body text-center">
+        <div class="stat-number">{{ diff.unseen }}</div>
+        <div class="stat-label">未出现保留（人）</div></div></div></div>
+</div>
+
+{% if draft.errors %}
+<div class="card mb-3">
+    <div class="card-header py-2 d-flex justify-content-between align-items-center">
+        <h6 class="mb-0 text-danger"><i class="bi bi-exclamation-circle"></i> 错误行（{{ draft.errors|length }} 条，已跳过不导入）</h6>
+        <a href="{{ url_for('grades.exam_import_errors', exam_id=exam.id) }}" class="btn btn-sm btn-outline-danger">
+            <i class="bi bi-download"></i> 下载错误明细
+        </a>
+    </div>
+    <div class="table-responsive" style="max-height:260px;">
+        <table class="table table-sm g-table mb-0">
+            <thead><tr><th>行号</th><th>学号</th><th>原因</th></tr></thead>
+            <tbody>
+            {% for e in draft.errors[:50] %}
+            <tr><td>{{ e.line }}</td><td>{{ e.no or '—' }}</td><td class="text-danger">{{ e.reason }}</td></tr>
+            {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+{% endif %}
+
+<form method="post" action="{{ url_for('grades.exam_import_confirm', exam_id=exam.id) }}"
+      onsubmit="return confirm('确认按当前差异导入？导入后自动重算排名。')">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <input type="hidden" name="token" value="{{ token }}">
+    <div class="d-flex gap-2">
+        <button type="submit" class="btn btn-success" {{ 'disabled' if stats.ok_rows == 0 }}>
+            <i class="bi bi-check-lg"></i> 确认导入（{{ info.get(draft.mode, draft.mode) }}）
+        </button>
+        <a href="{{ url_for('grades.exam_import', exam_id=exam.id) }}" class="btn btn-outline-secondary">
+            修改文件重新上传
+        </a>
+    </div>
+</form>
+{% endif %}
+{% endblock %}
