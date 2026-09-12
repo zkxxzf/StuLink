@@ -5,7 +5,7 @@ from flask_login import login_required, current_user
 from app.extensions import db
 from app.models import Room, BedAssignment, Student, StudentAccommodation
 from app.utils.decorators import perm_required
-from app.utils.helpers import get_dict_values, log_operation
+from app.utils.helpers import get_dict_values, get_active_grades, get_class_options, log_operation
 from sqlalchemy import func
 import json
 import re
@@ -130,7 +130,13 @@ def edit(id):
         new_gender = request.form.get('gender', room.gender)
         new_capacity = int(request.form.get('capacity', room.capacity))
         new_grade = request.form.get('grade', '') or None
-        new_class = request.form.get('class_name', '') or None
+        # 分配班级（可多选）：按勾选顺序拼接为 "01班+02班"
+        raw_classes = [c.strip() for c in request.form.getlist('class_names') if c and c.strip()]
+        ordered_classes = []
+        for c in raw_classes:
+            if c not in ordered_classes:
+                ordered_classes.append(c)
+        new_class = '+'.join(ordered_classes) if ordered_classes else None
         new_notes = request.form.get('notes', '') or None
 
         # 检查房间是否已分配班级或已安排床铺
@@ -161,10 +167,10 @@ def edit(id):
         room.capacity = new_capacity
         room.grade = new_grade
         room.class_name = new_class
-        # 自动识别合班：class_name 含多个班（+）即视为合班宿舍，无需手动设置合班标记
+        # 自动判定合班：选中多个班级（+）即合班宿舍；只选一个或取消即为非合班
         # 手动编辑不维护合班详情（自动分配才会写入各班级人数份额）
         room.combined_details = None
-        if new_class and '+' in new_class:
+        if len(ordered_classes) > 1:
             room.combined_class = new_class
         else:
             room.combined_class = None
@@ -173,8 +179,14 @@ def edit(id):
         flash(f'{room.display_name} 信息已更新', 'success')
         return redirect(url_for('rooms.detail', id=room.id))
 
+    # 年级只列出在校年级（已毕业年级仅在往届查询站使用）；
+    # 若该宿舍历史数据仍关联已毕业年级，保留原值避免保存时被清空
+    edit_grades = get_active_grades()
+    if room and room.grade and room.grade not in edit_grades:
+        edit_grades = edit_grades + [room.grade]
+
     return render_template('dormitory/rooms/form.html', room=room, title='编辑宿舍',
-                           grades=get_dict_values('grade'), classes=get_dict_values('class'),
+                           grades=edit_grades, classes=get_class_options(),
                            buildings=get_dict_values('building'), floors=get_dict_values('floor'))
 
 
@@ -192,13 +204,13 @@ def create():
         if not room_number or not building:
             flash('请输入宿舍楼和房间号', 'danger')
             return render_template('dormitory/rooms/form.html', room=None, title='新增宿舍',
-                                   grades=get_dict_values('grade'), classes=get_dict_values('class'),
+                                   grades=get_active_grades(), classes=get_class_options(),
                                    buildings=get_dict_values('building'), floors=get_dict_values('floor'))
 
         if Room.query.filter_by(building=building, room_number=room_number).first():
             flash(f'{building} {room_number} 已存在', 'danger')
             return render_template('dormitory/rooms/form.html', room=None, title='新增宿舍',
-                                   grades=get_dict_values('grade'), classes=get_dict_values('class'),
+                                   grades=get_active_grades(), classes=get_class_options(),
                                    buildings=get_dict_values('building'), floors=get_dict_values('floor'))
 
         # 优先使用选择的楼层，如果没有则从房间号提取
@@ -230,7 +242,7 @@ def create():
         return redirect(url_for('rooms.detail', id=room.id))
 
     return render_template('dormitory/rooms/form.html', room=None, title='新增宿舍',
-                           grades=get_dict_values('grade'), classes=get_dict_values('class'),
+                           grades=get_active_grades(), classes=get_class_options(),
                            buildings=get_dict_values('building'), floors=get_dict_values('floor'))
 
 
@@ -258,9 +270,9 @@ def delete(id):
 def assign_visual():
     """可视化宿舍分配页面"""
     from app.utils.helpers import get_graduated_grades
-    all_grades = get_dict_values('grade')
+    all_grades = get_active_grades()
     graduated = get_graduated_grades()
-    grades = [g for g in all_grades if g not in graduated]
+    grades = all_grades  # 已排除已毕业年级
     buildings = get_dict_values('building')
     return render_template('dormitory/rooms/assign_visual.html', grades=grades, buildings=buildings)
 
@@ -278,9 +290,9 @@ def assign_data():
         ).all()
         
         from app.models import Student, StudentAccommodation
-        all_grades = get_dict_values('grade')
+        all_grades = get_active_grades()
         graduated = get_graduated_grades()
-        grades = [g for g in all_grades if g not in graduated]
+        grades = all_grades  # 已排除已毕业年级
         classes_list = get_dict_values('class')
         
         boarding_student_ids = set()
@@ -774,9 +786,9 @@ def _adjust_beds(room, old_capacity, new_capacity):
 def assign_auto():
     """自动分配宿舍向导页面"""
     from app.utils.helpers import get_graduated_grades
-    all_grades = get_dict_values('grade')
+    all_grades = get_active_grades()
     graduated = get_graduated_grades()
-    grades = [g for g in all_grades if g not in graduated]
+    grades = all_grades  # 已排除已毕业年级
     # 按年份降序（新年级在最前/最左）
     grades.sort(key=lambda g: int(''.join(filter(str.isdigit, g)) or '0'), reverse=True)
     
@@ -864,7 +876,7 @@ def assign_auto_stats():
         return jsonify({'success': False, 'error': '参数不完整'})
     
     # 从字典表获取有效值
-    valid_grades = get_dict_values('grade')
+    valid_grades = get_active_grades()
     valid_classes = get_dict_values('class')
     
     # 统计每个组合的真实住校生人数
@@ -1135,7 +1147,7 @@ def assign_auto_room_stats():
     needed_female_max = needed_female_min = 0
     total_male_students = total_female_students = 0
     if selected_keys:
-        valid_grades = get_dict_values('grade')
+        valid_grades = get_active_grades()
         valid_classes = get_dict_values('class')
         boarding_ids = [sa.student_id for sa in StudentAccommodation.query.filter(
             StudentAccommodation.boarding_type == '住校'

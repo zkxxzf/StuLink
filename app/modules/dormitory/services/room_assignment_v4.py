@@ -785,10 +785,10 @@ def _pick_spare_room(spare_rooms, used_spare, need_count):
 
 def _group_by_gender(selected_keys, logs):
     """将 selected_keys 按性别分组，查询实际住校人数"""
-    from app.utils.helpers import get_dict_values
+    from app.utils.helpers import get_dict_values, get_active_grades
 
     try:
-        valid_grades = set(get_dict_values('grade'))
+        valid_grades = set(get_active_grades())
         valid_classes = set(get_dict_values('class'))
     except Exception:
         valid_grades, valid_classes = set(), set()
