@@ -13,14 +13,6 @@
         </a>
     </li>
     {% endif %}
-    {% if scope_type in ('school', 'grade') or not scope_type %}
-    <li class="nav-item">
-        <a class="nav-link {% if tab == 'grade' %}active{% endif %}"
-           href="{{ url_for('statistics.index', tab='grade', grade=sel_grade) }}">
-            <i class="bi bi-layers"></i> 年级统计
-        </a>
-    </li>
-    {% endif %}
     <li class="nav-item">
         <a class="nav-link {% if tab == 'class' %}active{% endif %}"
            href="{{ url_for('statistics.index', tab='class', grade=sel_grade) }}">
@@ -46,7 +38,7 @@
 </ul>
 
 <!-- 年级选择器（年级/班级tab时显示） -->
-{% if tab in ('grade', 'class') and grade_options|length > 1 %}
+{% if tab == 'class' and grade_options|length > 1 %}
 <div class="mb-3">
     <label class="form-label d-inline me-2">选择年级：</label>
     <select class="form-select d-inline-block" style="width:180px;" onchange="location.href='?tab={{ tab }}&grade='+this.value">
@@ -117,58 +109,7 @@
 </div>
 {% endif %}
 
-<!-- Tab: 年级统计 -->
-{% if tab == 'grade' and per_grade_stats %}
-<div class="card">
-    <div class="card-header"><h6 class="mb-0">{{ sel_grade or '全部年级' }} - 班级明细</h6></div>
-    <div class="card-body p-0"><div class="table-responsive">
-        <table class="table table-hover table-sm mb-0">
-            <thead class="table-light">
-                <tr>
-                    <th>班级</th><th>总人数</th>
-                    <th class="text-primary">男</th><th class="text-danger">女</th>
-                    <th>住校</th><th>住校男</th><th>住校女</th>
-                    <th>走读</th><th>走读男</th><th>走读女</th>
-                </tr>
-            </thead>
-            <tbody>
-                {% set ns = namespace(t=0,m=0,f=0,b=0,mb=0,fb=0,d=0,md=0,fd=0) %}
-                {% for s in per_class_stats %}
-                <tr>
-                    <td class="fw-bold">{{ s.class_name }}</td>
-                    <td>{{ s.total }}</td>
-                    <td class="text-primary">{{ s.male }}</td>
-                    <td class="text-danger">{{ s.female }}</td>
-                    <td>{{ s.boarding }}</td>
-                    <td>{{ s.male_boarding }}</td>
-                    <td>{{ s.female_boarding }}</td>
-                    <td>{{ s.day_student }}</td>
-                    <td>{{ s.male_day }}</td>
-                    <td>{{ s.female_day }}</td>
-                </tr>
-                {% set ns.t = ns.t + s.total %}
-                {% set ns.m = ns.m + s.male %}
-                {% set ns.f = ns.f + s.female %}
-                {% set ns.b = ns.b + s.boarding %}
-                {% set ns.mb = ns.mb + s.male_boarding %}
-                {% set ns.fb = ns.fb + s.female_boarding %}
-                {% set ns.d = ns.d + s.day_student %}
-                {% set ns.md = ns.md + s.male_day %}
-                {% set ns.fd = ns.fd + s.female_day %}
-                {% endfor %}
-            </tbody>
-            <tfoot class="table-light fw-bold">
-                <tr>
-                    <td>合计</td><td>{{ ns.t }}</td>
-                    <td class="text-primary">{{ ns.m }}</td><td class="text-danger">{{ ns.f }}</td>
-                    <td>{{ ns.b }}</td><td>{{ ns.mb }}</td><td>{{ ns.fb }}</td>
-                    <td>{{ ns.d }}</td><td>{{ ns.md }}</td><td>{{ ns.fd }}</td>
-                </tr>
-            </tfoot>
-        </table>
-    </div></div>
-</div>
-{% endif %}
+
 
 <!-- Tab: 班级统计 -->
 {% if tab == 'class' %}
