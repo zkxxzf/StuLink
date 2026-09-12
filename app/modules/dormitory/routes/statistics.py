@@ -7,7 +7,8 @@ from flask_login import login_required, current_user
 from app.models import Student, Room, BedAssignment, UserClassLink, StudentAccommodation
 from app.extensions import db
 from sqlalchemy import func
-from app.utils.helpers import get_dict_values, log_operation, get_graduated_grades
+from app.utils.helpers import (get_dict_values, get_active_grades, get_class_options,
+                               is_standard_class, log_operation, get_graduated_grades)
 from app.utils.decorators import perm_required
 import io
 import uuid
@@ -19,16 +20,9 @@ SCOPE_CLASS = 'class'    # 班主任：只看所管班级
 SCOPE_GRADE = 'grade'    # 年级长：只看所管年级
 SCOPE_SCHOOL = 'school'  # 全校组/admin：看全部
 
-# 标准班级名匹配模式：包含数字+"班"的（如 01班、2024级01班）
-# 非标准班级：未分班、不分班、转出、转进、借读等
-_VALID_CLASS_PATTERN = re.compile(r'\d+班')
-
-
 def _is_valid_class(class_name):
-    """判断是否为标准班级名"""
-    if not class_name:
-        return False
-    return bool(_VALID_CLASS_PATTERN.search(class_name))
+    """判断是否为标准班级名（统一走 helpers.is_standard_class，避免口径漂移）"""
+    return is_standard_class(class_name)
 
 
 def _get_scope():
@@ -195,12 +189,14 @@ def _build_school_stats():
         StudentAccommodation.boarding_type == '住校'
     ).count()
     
+    # 年级数/班级数同样按在校生口径：排除已毕业年级
+    _exclude_graduated = ~Student.grade.in_(graduated) if graduated else True
     grade_count = db.session.query(Student.grade).filter(
         func.coalesce(Student.class_name, '') != '不分班'
-    ).distinct().count()
+    ).filter(_exclude_graduated).distinct().count()
     class_count = db.session.query(Student.grade, Student.class_name).filter(
         func.coalesce(Student.class_name, '') != '不分班'
-    ).distinct().count()
+    ).filter(_exclude_graduated).distinct().count()
 
     return {
         'grade_count': grade_count, 'class_count': class_count,
@@ -258,7 +254,7 @@ def index():
         per_class_stats = _build_per_class_stats(filter_grade=sel_grade if tab == 'class' and sel_grade else None)
         per_grade_stats = _build_per_grade_stats()
         school_stats = _build_school_stats()
-        grade_options = sorted(get_dict_values('grade'), reverse=True)
+        grade_options = sorted(get_active_grades(), reverse=True)
 
     # 宿舍分配明细（原 /rooms/report）：年级 → 性别 → 房间列表（一房一行）
     room_tree = {}

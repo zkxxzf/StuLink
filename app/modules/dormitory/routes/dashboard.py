@@ -6,7 +6,7 @@ from flask_login import login_required, current_user
 from app.models import Student, Room, BedAssignment, User, StudentAccommodation
 from app.extensions import db
 from sqlalchemy import func, case, text
-from app.utils.helpers import get_graduated_grades, get_dict_values
+from app.utils.helpers import get_graduated_grades, get_dict_values, get_active_grades
 from app.utils.decorators import perm_required
 from app.utils.helpers import log_operation
 
@@ -246,7 +246,7 @@ def search_student_accommodation():
     )
     students = pagination.items
 
-    grades = get_dict_values('grade')
+    grades = get_active_grades()
     grades = [g for g in grades if g not in graduated]
     classes = get_dict_values('class')
     boarding_types = get_dict_values('boarding_type')
