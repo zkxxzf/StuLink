@@ -1,0 +1,147 @@
+{% extends "base.html" %}
+{% block title %}任课教师映射 - 成绩管理{% endblock %}
+{% block content %}
+<div class="d-flex align-items-center mb-3 flex-wrap gap-2">
+    <a href="{{ url_for('grades.index') }}" class="btn btn-sm btn-outline-secondary">
+        <i class="bi bi-arrow-left"></i>
+    </a>
+    <h5 class="mb-0"><i class="bi bi-person-workspace"></i> 任课教师映射</h5>
+    <span class="text-muted small">按年级维护：科目 × 班级 → 任课教师（账号制，同一教师可跨年级/跨班带课）</span>
+    <div class="ms-auto d-flex gap-2">
+        <a href="{{ url_for('grades.teachers_import_page') }}" class="btn btn-primary btn-sm">
+            <i class="bi bi-upload"></i> 批量导入教师安排表
+        </a>
+        <a href="{{ url_for('grades.teacher_template_download') }}" class="btn btn-outline-primary btn-sm">
+            <i class="bi bi-download"></i> 下载模板
+        </a>
+    </div>
+</div>
+
+<div class="card" id="tcApp" data-url="{{ url_for('grades.teachers_get') }}"
+     data-save-url="{{ url_for('grades.teachers_save') }}">
+    <div class="card-body">
+        <div class="d-flex align-items-center mb-2 flex-wrap gap-2">
+            <label class="form-label mb-0 me-1">年级</label>
+            <select id="tcGrade" class="form-select form-select-sm w-auto">
+                {% for g in grade_options %}
+                <option value="{{ g }}" {% if g == grade %}selected{% endif %}>{{ g }}</option>
+                {% endfor %}
+            </select>
+            <span class="text-muted small">教师账号须先在「系统管理-教师管理」创建；导入安排表时无账号将自动开户。</span>
+            <button class="btn btn-sm btn-success ms-auto" id="tcSave"><i class="bi bi-save"></i> 保存全部</button>
+        </div>
+        <div class="table-responsive" style="max-height:65vh;">
+            <table class="table table-sm g-table align-middle mb-0" id="tcTable">
+                <thead>
+                <tr><th style="min-width:90px;">科目</th></tr>
+                </thead>
+                <tbody></tbody>
+            </table>
+        </div>
+        <div class="mt-2 text-muted small" id="tcMsg"></div>
+    </div>
+</div>
+{% endblock %}
+{% block extra_js %}
+<script>
+$(function(){
+    var app = $('#tcApp'), cells = {}, usersStore = [];
+    function load(){
+        var grade = $('#tcGrade').val();
+        cells = {};
+        $('#tcMsg').text('加载中…');
+        $.getJSON('/grades/api/teachers', {grade: grade}, function(res){
+            var d = res.data;
+            renderMatrix(d);
+            $('#tcMsg').text('');
+        }).fail(function(){ $('#tcMsg').text('加载失败'); });
+    }
+    function buildUserOptions(sel, selected){
+        sel.empty().append('<option value="">— 未指定 —</option>');
+        usersStore.forEach(function(u){
+            sel.append($('<option value="' + u.id + '">' + u.name +
+                (u.username ? '（' + u.username + '）' : '') + '</option>'));
+        });
+        if (selected) sel.val(String(selected));
+        return sel;
+    }
+    function renderMatrix(d){
+        usersStore = d.users || [];
+        var $head = $('#tcTable thead tr').empty()
+            .append('<th style="min-width:90px;">科目</th>');
+        d.classes.forEach(function(c){
+            var th = $('<th class="text-center" style="min-width:120px;"></th>');
+            th.append('<div class="d-flex align-items-center justify-content-center gap-1">' +
+                '<span>' + c + '</span>' +
+                '<button type="button" class="btn btn-sm btn-outline-secondary colfill px-1 py-0" ' +
+                'data-cls="' + c + '" title="为该班全部科目批量指定同一教师（整列填充）">' +
+                '<i class="bi bi-arrow-down"></i></button></div>');
+            $head.append(th);
+        });
+        $head.append('<th style="width:170px;">整行设为（如带 01-05 班同科）</th>');
+        var $tb = $('#tcTable tbody').empty();
+        d.subjects.forEach(function(sub){
+            var tr = $('<tr>').append('<td><strong>' + sub + '</strong></td>');
+            d.classes.forEach(function(cls){
+                var key = cls + '|' + sub;
+                var cur = d.cells[key] ? d.cells[key].user_id : '';
+                cells[key] = cur || '';
+                var sel = buildUserOptions($('<select class="form-select form-select-sm tcell" data-key="' + key + '"></select>'), cur);
+                tr.append($('<td class="text-center">').append(sel));
+            });
+            var rowSel = buildUserOptions($('<select class="form-select form-select-sm rowfill"></select>'), '');
+            tr.append($('<td class="text-center">').append(rowSel));
+            $tb.append(tr);
+        });
+    }
+    // 单元格改动（委托，避免重复绑定）
+    $('#tcTable').on('change', '.tcell', function(){
+        cells[$(this).data('key')] = $(this).val();
+    });
+    // 整行填充：把该科目（一行）所有班级设为同一教师
+    $('#tcTable').on('change', '.rowfill', function(){
+        var v = $(this).val();
+        $(this).closest('tr').find('.tcell').each(function(){
+            $(this).val(v);
+            cells[$(this).data('key')] = v;
+        });
+    });
+    // 整列填充：为该班全部科目指定同一教师（按姓名/账号匹配）
+    $('#tcTable').on('click', '.colfill', function(){
+        var cls = $(this).data('cls');
+        var input = prompt('为 ' + cls + ' 全部科目指定同一教师：\n输入教师姓名或账号（留空=清除该班全部科目）', '');
+        if (input === null){ return; }
+        var name = input.trim();
+        var u = name ? usersStore.filter(function(x){ return x.name === name || x.username === name; })[0] : null;
+        if (name && !u){
+            alert('未找到该教师。候选：' + usersStore.slice(0, 12).map(function(x){ return x.name; }).join('、') + (usersStore.length > 12 ? '…' : ''));
+            return;
+        }
+        var v = u ? String(u.id) : '';
+        $('#tcTable tbody tr').each(function(){
+            $(this).find('.tcell').each(function(){
+                if ($(this).data('key').indexOf(cls + '|') === 0){
+                    $(this).val(v);
+                    cells[$(this).data('key')] = v;
+                }
+            });
+        });
+    });
+    $('#tcGrade').change(load);
+    $('#tcSave').on('click', function(){
+        var grade = $('#tcGrade').val();
+        $('#tcMsg').text('保存中…');
+        $.post('/grades/api/teachers/save', JSON.stringify({grade: grade, cells: cells}),
+            function(res){
+                $('#tcMsg').text(res.message + '（' + (res.changes ? ('绑定' + res.changes.bound +
+                    ' / 变更' + res.changes.changed + ' / 停用' + res.changes.released) : '') + '）');
+                load();
+            }).fail(function(x){
+                alert(x.responseJSON && x.responseJSON.message || '保存失败');
+                $('#tcMsg').text('保存失败');
+            });
+    });
+    load();
+});
+</script>
+{% endblock %}

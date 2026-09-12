@@ -10,9 +10,13 @@ from app.models.class_profile import ClassProfile, ClassSubject
 from app.models.permission_group import PermissionGroup
 from app.models.user_class_link import UserClassLink
 from app.models.grade_setting import GradeSetting
+from app.models.grades import Exam, ExamScore, ExamBand, TeacherSubjectLink, \
+    AiKey, AiGlobalKey, AiReport
 
 __all__ = ['User', 'Student', 'Room', 'BedAssignment', 'StudentAccommodation',
            'DictCategory', 'DictItem', 'OperationLog', 'AssignmentHistory',
            'ClassProfile', 'ClassSubject',
-           'PermissionGroup', 'UserClassLink', 'GradeSetting']
+           'PermissionGroup', 'UserClassLink', 'GradeSetting',
+           'Exam', 'ExamScore', 'ExamBand', 'TeacherSubjectLink',
+           'AiKey', 'AiGlobalKey', 'AiReport']
 

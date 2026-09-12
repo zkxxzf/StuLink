@@ -1,0 +1,62 @@
+{% extends "base.html" %}
+{% block title %}导入完成 - 任课教师{% endblock %}
+{% block content %}
+<div class="mb-3">
+    <h5 class="mb-0"><i class="bi bi-check-circle text-success"></i> 教师映射导入完成</h5>
+</div>
+
+{% if sync %}
+<div class="alert alert-info small">
+    <i class="bi bi-people"></i> 任课绑定/更新 <strong>{{ sync.bound }}</strong> 条；
+    班主任同步 <strong>{{ sync.heads_added }}</strong> 人次（已写入「班型设置」班主任关联，登录后可查看本班全部成绩）；
+    移除旧班主任 <strong>{{ sync.removed_heads }}</strong> 人次（其中 <strong>{{ sync.demoted }}</strong> 个账号不再担任任何班主任，已降为任课教师）。
+</div>
+{% endif %}
+
+{% if created %}
+<div class="card mb-3">
+    <div class="card-header py-2 d-flex justify-content-between align-items-center">
+        <h6 class="mb-0 text-warning"><i class="bi bi-person-plus"></i> 新开账号清单（{{ created|length }} 个）</h6>
+        <button class="btn btn-sm btn-outline-primary" onclick="copyAccounts()"><i class="bi bi-clipboard"></i> 复制清单</button>
+    </div>
+    <div class="card-body p-0">
+        <table class="table table-sm g-table mb-0" id="acctTable">
+            <thead><tr><th>姓名</th><th>登录账号</th><th>初始密码（仅此一次可见）</th><th>身份</th></tr></thead>
+            <tbody>
+            {% for c in created %}
+            <tr><td>{{ c.name }}</td><td>{{ c.username }}</td><td class="text-danger">{{ c.password }}</td>
+                <td>{{ c.role }}</td></tr>
+            {% endfor %}
+            </tbody>
+        </table>
+        <div class="alert alert-warning m-3 py-2 small">
+            <i class="bi bi-exclamation-triangle"></i> 初始密码仅此处可见，请复制/截图下发给对应教师；
+            教师首次登录后<b>必须修改密码</b>；账号（登录名）后期可自行修改为手机号，<b>姓名不可修改</b>。
+        </div>
+    </div>
+</div>
+{% endif %}
+
+<div class="d-flex gap-2">
+    <a href="{{ url_for('grades.teachers_page') }}" class="btn btn-primary">返回映射管理</a>
+    <a href="{{ url_for('grades.index') }}" class="btn btn-outline-secondary">前往成绩分析</a>
+</div>
+{% endblock %}
+{% block extra_js %}
+<script>
+function copyAccounts(){
+    var lines = ['姓名\t账号\t初始密码'];
+    $('#acctTable tbody tr').each(function(){
+        var tds = $(this).find('td');
+        lines.push(tds.eq(0).text() + '\t' + tds.eq(1).text() + '\t' + tds.eq(2).text());
+    });
+    var ta = document.createElement('textarea');
+    ta.value = lines.join('\n');
+    document.body.appendChild(ta);
+    ta.select();
+    document.execCommand('copy');
+    document.body.removeChild(ta);
+    alert('清单已复制，请粘贴保存并下发给教师');
+}
+</script>
+{% endblock %}

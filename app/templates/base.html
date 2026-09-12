@@ -4,9 +4,9 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>{% block title %}学生管理系统{% endblock %}</title>
-    <!-- 使用国内镜像加速资源加载 -->
-    <link href="https://unpkg.com/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet" integrity="sha384-QWTKZyjpPEjISv5WaRU9OFeRpok6YctnYmDr5pNlyT2bRjXh0JMhjY6hW+ALEwIH" crossorigin="anonymous">
-    <link href="https://unpkg.com/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" rel="stylesheet">
+    <!-- 全部使用本地静态资源：避免外网 CDN 不可达导致样式丢失、或 jQuery 未加载报 $ is not defined -->
+    <link href="{{ url_for('static', filename='css/bootstrap.min.css') }}" rel="stylesheet">
+    <link href="{{ url_for('static', filename='css/bootstrap-icons.min.css') }}" rel="stylesheet">
     {% block extra_css_head %}{% endblock %}
     <style>
         :root { --sidebar-width: 220px; }
@@ -112,14 +112,6 @@
             <a class="nav-link" href="{{ url_for('dashboard.index') }}">
                 <i class="bi bi-house"></i>宿舍管理
             </a>
-            {% elif request.blueprint in ('system_dashboard','students','users','dictionary','class_profile','perm_groups','grade_mgmt','operation_logs') %}
-            <a class="nav-link" href="{{ url_for('system_dashboard.index') }}">
-                <i class="bi bi-house"></i>系统管理
-            </a>
-            {% elif request.blueprint == 'points' %}
-            <a class="nav-link" href="{{ url_for('points.index') }}">
-                <i class="bi bi-house"></i>积分管理
-            </a>
             {% elif request.blueprint == 'grades' %}
             <a class="nav-link" href="{{ url_for('grades.index') }}">
                 <i class="bi bi-house"></i>成绩管理
@@ -132,10 +124,6 @@
 
             {# ========= 宿舍管理模块侧边栏 ========= #}
             {% if request.blueprint in ('dashboard','rooms','assignments','statistics') or request.endpoint == 'students.search' %}
-            <a class="nav-link {% if request.endpoint and request.endpoint.startswith('dashboard.search') %}active{% endif %}"
-               href="{{ url_for('dashboard.search_student_accommodation') }}">
-                <i class="bi bi-search"></i>学生住宿
-            </a>
             {% if current_user.has_perm('dormitory.view') %}
             <a class="nav-link {% if request.endpoint == 'rooms.list_rooms' %}active{% endif %}"
                href="{{ url_for('rooms.list_rooms') }}">
@@ -192,6 +180,33 @@
                 <i class="bi bi-journal-text"></i>操作日志
             </a>
             {% endif %}
+
+            {# ========= 成绩管理模块侧边栏 ========= #}
+            {% if request.blueprint == 'grades' %}
+            <div class="nav-section">成绩管理</div>
+            <a class="nav-link {% if request.endpoint == 'grades.index' %}active{% endif %}"
+               href="{{ url_for('grades.index') }}">
+                <i class="bi bi-graph-up"></i>成绩分析
+            </a>
+            {% if current_user.has_perm('grades.edit') %}
+            <a class="nav-link {% if request.endpoint in ('grades.exams_list','grades.exam_new','grades.exam_detail','grades.exam_import') %}active{% endif %}"
+               href="{{ url_for('grades.exams_list') }}">
+                <i class="bi bi-journal-text"></i>考试管理
+            </a>
+            {% endif %}
+            {% if current_user.has_perm('grades.teachers') %}
+            <a class="nav-link {% if request.endpoint in ('grades.teachers_page','grades.teachers_import_page') %}active{% endif %}"
+               href="{{ url_for('grades.teachers_page') }}">
+                <i class="bi bi-person-workspace"></i>任课教师映射
+            </a>
+            {% endif %}
+            {% if current_user.has_perm('grades.view') %}
+            <a class="nav-link {% if request.endpoint == 'grades.history' %}active{% endif %}"
+               href="{{ url_for('grades.history') }}">
+                <i class="bi bi-mortarboard"></i>毕业生成绩（二期）
+            </a>
+            {% endif %}
+            {% endif %}
         </nav>
     </div>
     {% endif %}
@@ -214,9 +229,11 @@
         {% block content %}{% endblock %}
     </div>
 
-    <!-- 延迟加载非关键资源 -->
-    <script src="https://unpkg.com/jquery@3.7.1/dist/jquery.min.js"></script>
-    <script src="https://unpkg.com/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js" integrity="sha384-YvpcrYf0tY3lHB60NNkmXc5s9fDVZLESaAA55NDzOxhy9GkcIdslK1eN7N6jIeHz" crossorigin="anonymous"></script>
+    {# 本地文件优先：不依赖外网 CDN。
+       此前 jQuery 走 unpkg.com，国内网络经常加载失败导致 "$ is not defined"；
+       而 document.write 兜底在 Chrome 慢速/失败网络下会被拦截，同样不可靠。 #}
+    <script src="{{ url_for('static', filename='js/jquery-3.7.1.min.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/bootstrap.bundle.min.js') }}"></script>
     <script>
         // CSRF 令牌用于 AJAX 请求
         var csrfToken = "{{ csrf_token() }}";
