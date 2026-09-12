@@ -169,11 +169,8 @@
 
 <!-- Tab: 宿舍分配明细（原 /rooms/report） -->
 {% if tab == 'rooms' %}
-<div class="d-flex justify-content-between align-items-center mb-3 no-print">
+<div class="d-flex justify-content-between align-items-center mb-3">
     <div class="d-flex gap-2">
-        <button class="btn btn-sm btn-outline-primary" onclick="window.print()">
-            <i class="bi bi-printer"></i> 打印
-        </button>
         <button class="btn btn-sm btn-outline-success" onclick="exportRoomExcel()">
             <i class="bi bi-file-earmark-excel"></i> 导出Excel
         </button>
@@ -182,7 +179,7 @@
         </a>
     </div>
     <div class="text-muted small">
-        已分配 {{ room_total_rooms }} 间宿舍，共 {{ room_total_beds }} 床位，住校生 {{ room_total_boarders }} 人
+        宿舍 {{ room_total_rooms }} 间 / 床位 {{ room_total_beds }} 个 / 已入住 {{ room_total_occupied }} 人
     </div>
 </div>
 
@@ -196,7 +193,7 @@
         <h5 class="mb-0"><i class="bi bi-mortarboard"></i> {{ grade }}</h5>
     </div>
     <div class="card-body p-0">
-    {% for gender, classes in genders.items() %}
+    {% for gender, room_list in genders.items() %}
     {% set gender_label = '男生' if gender == '男' else '女生' %}
     {% set gender_class = 'male' if gender == '男' else 'female' %}
     <div class="gender-section px-3 pt-3">
@@ -204,48 +201,49 @@
             <i class="bi bi-gender-{{ 'male' if gender == '男' else 'female' }}"></i> {{ gender_label }}
         </div>
         <div class="table-responsive">
-            <table class="table table-bordered table-sm mb-0">
+            <table class="table table-bordered table-sm mb-0 room-detail-table">
                 <thead>
                     <tr>
-                        <th style="width:80px;">班级</th>
-                        <th style="width:70px;">住校生</th>
-                        <th style="width:150px;">宿舍楼</th>
-                        <th style="width:70px;">房间号</th>
-                        <th style="width:80px;">床位数</th>
-                        <th style="width:80px;">合班标记</th>
+                        <th style="width:14%;">宿舍楼</th>
+                        <th style="width:8%;">房间号</th>
+                        <th style="width:14%;">班级</th>
+                        <th style="width:8%;">床位数</th>
+                        <th style="width:9%;">住宿人数</th>
+                        <th>学生名单（床位·姓名）</th>
                     </tr>
                 </thead>
                 <tbody>
-                    {% for class_name, room_list in classes.items() %}
-                    {% set class_key = (grade, class_name, gender) %}
-                    {% set boarders = room_class_totals.get(class_key, 0) %}
-                    {% set room_count = room_list|length %}
+                    {% set ns = namespace(occ=0) %}
                     {% for room in room_list %}
+                    {% set members = room_student_map.get(room.id, []) %}
+                    {% set ns.occ = ns.occ + members|length %}
+                    {% set room_class = room.combined_name or room.class_name or '' %}
                     <tr class="room-row">
-                        {% if loop.first %}
-                        <td rowspan="{{ room_count }}" class="class-summary-row align-middle text-center">{{ grade }}{{ class_name }}</td>
-                        <td rowspan="{{ room_count }}" class="class-summary-row align-middle text-center">{{ boarders }}</td>
-                        {% endif %}
-                        <td>{{ room.building }}</td>
-                        <td>{{ room.room_number }}</td>
-                        <td class="text-center">{{ room.capacity }}</td>
-                        <td class="text-center">
-                            {% if room.combined_class and room.combined_class != '' %}
-                            <span class="badge bg-info">{{ room.combined_class }}</span>
+                        <td class="align-middle">{{ room.building }}</td>
+                        <td class="text-center align-middle fw-bold">{{ room.room_number }}</td>
+                        <td class="align-middle">
+                            {{ grade }}{{ room_class }}
+                            {% if room.is_combined %}<span class="badge bg-info ms-1">合班</span>{% endif %}
+                        </td>
+                        <td class="text-center align-middle">{{ room.capacity }}</td>
+                        <td class="text-center align-middle {% if members|length >= room.capacity %}text-success fw-bold{% elif members|length == 0 %}text-danger{% endif %}">{{ members|length }}</td>
+                        <td class="student-list-cell">
+                            {% if members %}
+                                {% for m in members %}
+                                <span class="stu-badge" title="学号 {{ m.student_number }}">{{ m.bed_number }}<span class="stu-bed">床</span>{{ m.name or '未知' }}{% if room.is_combined and m.class_name %}<span class="stu-cls">{{ m.class_name }}</span>{% endif %}</span>
+                                {% endfor %}
                             {% else %}
-                            <span class="text-muted">—</span>
+                                <span class="text-muted">未分配</span>
                             {% endif %}
                         </td>
                     </tr>
                     {% endfor %}
                     <tr class="table-light fw-bold" style="font-size:11px;">
-                        <td colspan="3"></td>
-                        <td class="text-end">小计：{{ room_count }}间</td>
-                        {% set cls_beds = room_list|sum(attribute='capacity') %}
-                        <td class="text-center">{{ cls_beds }} 床</td>
+                        <td class="text-end" colspan="3">小计</td>
+                        <td class="text-center">{{ room_list|sum(attribute='capacity') }} 床</td>
+                        <td class="text-center">{{ ns.occ }} 人</td>
                         <td></td>
                     </tr>
-                    {% endfor %}
                 </tbody>
             </table>
         </div>
@@ -299,15 +297,6 @@
 
 {% block extra_css %}
 <style>
-    @media print {
-        .sidebar, .navbar, .btn, .form-select, .no-print, .nav-tabs { display: none !important; }
-        .main-content { margin-left: 0 !important; padding: 0 !important; }
-        .card { box-shadow: none !important; border: 1px solid #dee2e6 !important; }
-        .table { font-size: 12px; }
-        .report-header { text-align: center; margin-bottom: 16px; }
-        @page { size: A4; margin: 12mm; }
-    }
-    .report-header h4 { font-weight: 700; }
     .table th { white-space: nowrap; background: #f8f9fa; font-size: 12px; }
     .table td { font-size: 12px; vertical-align: middle; }
     .gender-section { margin-bottom: 24px; }
@@ -317,14 +306,16 @@
     }
     .gender-title.male { background: #e3f2fd; color: #1565c0; }
     .gender-title.female { background: #fce4ec; color: #c62828; }
-    .class-summary-row { background: #fafafa; font-weight: 600; }
-    .room-row { }
-    .section-card { margin-bottom: 0; }
-    .stats-bar { font-size: 13px; }
-    .stats-bar .stat-item {
-        display: inline-block; padding: 4px 16px; margin-right: 12px;
-        border-radius: 20px; background: #f1f5f9; font-weight: 600;
+    .room-detail-table { width: 100%; table-layout: fixed; }
+    .student-list-cell { white-space: normal; }
+    .stu-badge {
+        display: inline-block; padding: 1px 6px; margin: 1px 2px;
+        border-radius: 4px; background: #f1f5f9; border: 1px solid #e2e8f0;
+        font-size: 11px; line-height: 1.6; white-space: nowrap;
     }
+    .stu-badge .stu-bed { color: #94a3b8; margin: 0 1px; font-size: 10px; }
+    .stu-badge .stu-cls { color: #0d6efd; margin-left: 3px; font-size: 10px; }
+    .section-card { margin-bottom: 0; }
 </style>
 {% endblock %}
 
