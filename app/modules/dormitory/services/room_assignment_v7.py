@@ -797,10 +797,10 @@ def _ensure_room_beds(room_ids, logs=None):
 
 def _group_by_gender(selected_keys, logs):
     """将 selected_keys 按性别分组，查询实际住校人数—— S13/S14（grade+class_name 成对）"""
-    from app.utils.helpers import get_dict_values
+    from app.utils.helpers import get_dict_values, get_active_grades
 
     try:
-        valid_grades = set(get_dict_values('grade'))
+        valid_grades = set(get_active_grades())
         valid_classes = set(get_dict_values('class'))
     except Exception:
         valid_grades, valid_classes = set(), set()

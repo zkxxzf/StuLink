@@ -1,206 +1,352 @@
 {% extends "base.html" %}
 {% block title %}{{ title }}{% endblock %}
 {% block content %}
-<div class="d-flex align-items-center mb-3">
-    <a href="{% if room %}{{ url_for('rooms.detail', id=room.id) }}{% else %}{{ url_for('rooms.list_rooms') }}{% endif %}" class="btn btn-sm btn-outline-secondary me-3">
+{% set back_url = url_for('rooms.detail', id=room.id) if room else url_for('rooms.list_rooms') %}
+
+<div class="d-flex align-items-center flex-wrap gap-2 mb-3">
+    <a href="{{ back_url }}" class="btn btn-sm btn-outline-secondary">
         <i class="bi bi-arrow-left"></i> 返回
     </a>
     <h4 class="fw-bold mb-0"><i class="bi bi-door-open"></i> {{ title }}</h4>
+    {% if room %}
+    <span class="badge bg-light text-dark border ms-1">{{ room.display_name }}</span>
+    <span class="badge bg-{{ 'primary' if room.gender == '男' else 'danger' }}">
+        <i class="bi bi-gender-{{ 'male' if room.gender == '男' else 'female' }}"></i>
+        {{ '男生' if room.gender == '男' else '女生' }}宿舍
+    </span>
+    {% endif %}
 </div>
 
-<div class="card" style="max-width: 640px;">
-    <div class="card-body">
-        <form method="POST">
+<div class="row g-4">
+    <!-- 左侧：表单 -->
+    <div class="col-lg-7">
+        <form method="POST" id="roomForm">
             <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
 
-            <div class="mb-3">
-                <label class="form-label">宿舍楼 <span class="text-danger">*</span></label>
-                {% if room %}
-                <input type="text" class="form-control" value="{{ room.building }}" disabled>
-                {% else %}
-                <select name="building" class="form-select" required>
-                    <option value="">请选择宿舍楼</option>
-                    {% for b in buildings %}
-                    <option value="{{ b }}">{{ b }}</option>
-                    {% endfor %}
-                </select>
-                {% endif %}
-            </div>
+            <div class="card border-0 shadow-sm mb-4">
+                <div class="card-header bg-white py-2">
+                    <span class="rf-section-title"><i class="bi bi-building"></i> 基本信息</span>
+                </div>
+                <div class="card-body">
+                    <div class="row g-3">
+                        <div class="col-md-6">
+                            <label class="rf-label">
+                                宿舍楼 <span class="text-danger">*</span>
+                                {% if room %}<span class="rf-lock">不可修改</span>{% endif %}
+                            </label>
+                            {% if room %}
+                            <input type="text" class="form-control bg-light" value="{{ room.building }}" disabled>
+                            {% else %}
+                            <select name="building" class="form-select" required>
+                                <option value="">请选择宿舍楼</option>
+                                {% for b in buildings %}
+                                <option value="{{ b }}">{{ b }}</option>
+                                {% endfor %}
+                            </select>
+                            {% endif %}
+                        </div>
 
-            <div class="mb-3">
-                <label class="form-label">房间号 <span class="text-danger">*</span></label>
-                {% if room %}
-                <input type="text" class="form-control" value="{{ room.room_number }}" disabled>
-                {% else %}
-                <input type="text" name="room_number" class="form-control" placeholder="例如：201" required>
-                <div class="form-text">系统会根据房间号首位数字自动识别楼层，也可手动选择楼层</div>
-                {% endif %}
-            </div>
+                        <div class="col-md-6">
+                            <label class="rf-label">
+                                房间号 <span class="text-danger">*</span>
+                                {% if room %}<span class="rf-lock">不可修改</span>{% endif %}
+                            </label>
+                            {% if room %}
+                            <input type="text" class="form-control bg-light" value="{{ room.room_number }}" disabled>
+                            {% else %}
+                            <input type="text" name="room_number" class="form-control" placeholder="例如：201" required>
+                            <div class="form-text">首位数字会用于自动识别楼层，也可手动选择</div>
+                            {% endif %}
+                        </div>
 
-            <div class="row g-3 mb-3">
-                <div class="col-md-6">
-                    <label class="form-label">楼层 <span class="text-danger">*</span></label>
-                    <select name="floor" class="form-select" required>
+                        <div class="col-md-6">
+                            <label class="rf-label">楼层 <span class="text-danger">*</span></label>
+                            <select name="floor" class="form-select" required>
+                                {% if room %}
+                                {% set floor_range = range(1, 10) %}
+                                {% if room.floor not in floor_range %}
+                                <option value="{{ room.floor }}" selected>{{ room.floor }}层</option>
+                                {% endif %}
+                                {% for f in floor_range %}
+                                <option value="{{ f }}" {% if room.floor == f %}selected{% endif %}>{{ f }}层</option>
+                                {% endfor %}
+                                {% else %}
+                                <option value="">请选择楼层</option>
+                                {% for f in floors %}
+                                <option value="{{ f }}">{{ f }}</option>
+                                {% endfor %}
+                                {% endif %}
+                            </select>
+                        </div>
+
+                        <div class="col-md-6">
+                            <label class="rf-label">性别 <span class="text-danger">*</span></label>
+                            <div class="d-flex gap-2">
+                                <input type="radio" class="btn-check" name="gender" id="genderMale" value="男"
+                                       {% if not room or room.gender == '男' %}checked{% endif %}>
+                                <label class="btn btn-outline-primary flex-fill" for="genderMale">
+                                    <i class="bi bi-gender-male"></i> 男生
+                                </label>
+                                <input type="radio" class="btn-check" name="gender" id="genderFemale" value="女"
+                                       {% if room and room.gender == '女' %}checked{% endif %}>
+                                <label class="btn btn-outline-danger flex-fill" for="genderFemale">
+                                    <i class="bi bi-gender-female"></i> 女生
+                                </label>
+                            </div>
+                        </div>
+
+                        <div class="col-md-6">
+                            <label class="rf-label">床位数 <span class="text-danger">*</span></label>
+                            <div class="input-group">
+                                <span class="input-group-text bg-white"><i class="bi bi-hdd"></i></span>
+                                <input type="number" name="capacity" id="capacityInput" class="form-control"
+                                       value="{{ room.capacity if room else 8 }}" min="1" max="20" required>
+                                <span class="input-group-text">张床</span>
+                            </div>
+                            <div class="form-text">默认 8 人间，可按实际情况调整</div>
+                        </div>
+
                         {% if room %}
-                        {% for f in range(1, 10) %}
-                        <option value="{{ f }}" {% if room.floor == f %}selected{% endif %}>{{ f }}层</option>
-                        {% endfor %}
-                        {% else %}
-                        <option value="">请选择楼层</option>
-                        {% for f in floors %}
-                        <option value="{{ f }}">{{ f }}</option>
-                        {% endfor %}
+                        <div class="col-md-6">
+                            <label class="rf-label">当前入住</label>
+                            <div class="rf-readonly">
+                                <span class="fw-bold fs-5">{{ room.occupancy }}</span>
+                                <span class="text-muted">/ {{ room.capacity }} 人</span>
+                                {% if room.capacity and room.occupancy >= room.capacity %}
+                                <span class="badge bg-success ms-1">已满</span>
+                                {% elif room.occupancy == 0 %}
+                                <span class="badge bg-secondary ms-1">空房</span>
+                                {% endif %}
+                            </div>
+                        </div>
                         {% endif %}
-                    </select>
+                    </div>
                 </div>
-                <div class="col-md-6">
-                    <label class="form-label">性别 <span class="text-danger">*</span></label>
-                    <select name="gender" class="form-select">
-                        <option value="男" {% if room and room.gender == '男' %}selected{% endif %}>男生宿舍</option>
-                        <option value="女" {% if room and room.gender == '女' %}selected{% endif %}>女生宿舍</option>
-                    </select>
-                </div>
-            </div>
-
-            <div class="row g-3 mb-3">
-                <div class="col-md-6">
-                    <label class="form-label">床位数 <span class="text-danger">*</span></label>
-                    <input type="number" name="capacity" class="form-control"
-                           value="{{ room.capacity if room else 8 }}" min="1" max="20" required>
-                    <div class="form-text">默认 8 人间，可根据实际情况调整</div>
-                </div>
-                {% if room %}
-                <div class="col-md-6">
-                    <label class="form-label">入住人数</label>
-                    <p class="form-control-plaintext">{{ room.occupancy_display }}</p>
-                </div>
-                {% endif %}
             </div>
 
             {% if room %}
-            <div class="row g-3 mb-3">
-                <div class="col-md-4">
-                    <label class="form-label">分配年级</label>
-                    <select name="grade" class="form-select">
-                        <option value="">未分配</option>
-                        {% for g in grades %}
-                        <option value="{{ g }}" {% if room.grade == g %}selected{% endif %}>{{ g }}</option>
-                        {% endfor %}
-                    </select>
+            <div class="card border-0 shadow-sm mb-4">
+                <div class="card-header bg-white py-2">
+                    <span class="rf-section-title"><i class="bi bi-people"></i> 班级分配</span>
                 </div>
-                <div class="col-md-4">
-                    <label class="form-label">分配班级 <span class="text-muted small">(可多选，自动识别合班)</span></label>
-                    <select name="class_name" id="classNameSelect" class="form-select">
-                        <option value="">未分配</option>
-                        {% for c in classes %}
-                        <option value="{{ c }}" {% if room.class_name and room.class_name.split('+')[0] == c %}selected{% endif %}>{{ c }}</option>
-                        {% endfor %}
-                    </select>
-                </div>
-                <div class="col-md-4">
-                    <label class="form-label">合班班级 <span class="text-muted small">(可添加多个)</span></label>
-                    <div id="combineTagsContainer" class="d-flex flex-wrap gap-1 mb-1" style="min-height:24px;"></div>
-                    <div class="input-group input-group-sm">
-                        <select id="combineClassInput" class="form-select form-select-sm">
-                            <option value="">选择班级...</option>
+                <div class="card-body">
+                    <div class="mb-3">
+                        <label class="rf-label">分配年级</label>
+                        <select name="grade" class="form-select">
+                            <option value="">未分配</option>
+                            {% for g in grades %}
+                            <option value="{{ g }}" {% if room.grade == g %}selected{% endif %}>{{ g }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+
+                    <div>
+                        <label class="rf-label">
+                            分配班级
+                            <span class="rf-tip">下拉框点选逐个添加，点击标签删除</span>
+                        </label>
+                        {% set room_class_list = (room.class_name or '').split('+') %}
+                        <div id="classTagsContainer" class="rf-tagbox"></div>
+                        <select id="classPickerSelect" class="form-select">
+                            <option value="">点击选择班级…</option>
                             {% for c in classes %}
                             <option value="{{ c }}">{{ c }}</option>
                             {% endfor %}
                         </select>
-                        <button type="button" class="btn btn-outline-primary btn-sm" id="btnAddCombine">
-                            <i class="bi bi-plus-lg"></i>
-                        </button>
+                        <div class="form-text">选择多个班级（如 01班 + 02班）会自动标记为合班宿舍。</div>
+                        <div id="classSelectHint" class="mt-2"></div>
+                        <div id="classHiddenInputs">
+                            {% for c in room_class_list %}{% if c %}
+                            <input type="hidden" name="class_names" value="{{ c }}">
+                            {% endif %}{% endfor %}
+                        </div>
                     </div>
-                    <input type="hidden" name="combined_class" id="combinedClassHidden" value="{{ room.combined_class or '' }}">
                 </div>
             </div>
             {% endif %}
 
-            <div class="mb-3">
-                <label class="form-label">备注</label>
-                <textarea name="notes" class="form-control" rows="2" placeholder="选填">{{ room.notes or '' if room else '' }}</textarea>
-            </div>
-
-            <div class="d-flex gap-2">
-                <button type="submit" class="btn btn-primary">
-                    <i class="bi bi-check-lg"></i> {% if room %}保存修改{% else %}创建宿舍{% endif %}
-                </button>
-                <a href="{% if room %}{{ url_for('rooms.detail', id=room.id) }}{% else %}{{ url_for('rooms.list_rooms') }}{% endif %}" class="btn btn-outline-secondary">取消</a>
+            <div class="card border-0 shadow-sm">
+                <div class="card-body">
+                    <label class="rf-label">备注</label>
+                    <textarea name="notes" class="form-control" rows="2" placeholder="选填，例如：靠近楼梯口 / 遮阳好">{{ room.notes or '' if room else '' }}</textarea>
+                </div>
+                <div class="card-footer bg-white d-flex justify-content-end gap-2 py-3">
+                    <a href="{{ back_url }}" class="btn btn-outline-secondary">
+                        <i class="bi bi-x-lg"></i> 取消
+                    </a>
+                    <button type="submit" class="btn btn-primary px-4">
+                        <i class="bi bi-check-lg"></i> {% if room %}保存修改{% else %}创建宿舍{% endif %}
+                    </button>
+                </div>
             </div>
         </form>
     </div>
+
+    <!-- 右侧：信息摘要 -->
+    {% if room %}
+    <div class="col-lg-5">
+        <div class="card border-0 shadow-sm rf-summary">
+            <div class="card-header bg-white py-2">
+                <span class="rf-section-title"><i class="bi bi-info-circle"></i> 宿舍概览</span>
+            </div>
+            <div class="card-body">
+                <div class="text-center mb-3">
+                    <div class="rf-room-no">{{ room.building }} {{ room.room_number }}</div>
+                    <div class="text-muted small">{{ room.floor }}层 · {{ room.capacity }}人间</div>
+                </div>
+
+                <div class="mb-3">
+                    <div class="d-flex justify-content-between small mb-1">
+                        <span class="text-muted">入住率</span>
+                        <span class="fw-bold">{{ room.occupancy }} / {{ room.capacity }}</span>
+                    </div>
+                    <div class="progress" style="height:8px;">
+                        {% set rate = (room.occupancy / room.capacity * 100) if room.capacity else 0 %}
+                        <div class="progress-bar bg-{{ 'success' if room.occupancy >= room.capacity else 'primary' }}"
+                             style="width: {{ rate|round(1) }}%"></div>
+                    </div>
+                </div>
+
+                <ul class="list-unstyled rf-kv mb-0">
+                    <li><span>性别</span><b>{{ room.gender }}</b></li>
+                    <li><span>年级</span><b>{{ room.grade or '未分配' }}</b></li>
+                    <li>
+                        <span>班级</span>
+                        <b>
+                            {% if room.class_name %}
+                                {{ room.class_name }}
+                                {% if room.is_combined %}<span class="badge bg-info ms-1">合班</span>{% endif %}
+                            {% else %}
+                                未分配
+                            {% endif %}
+                        </b>
+                    </li>
+                    <li><span>床位</span><b>{{ room.capacity }} 张</b></li>
+                </ul>
+
+                {% if room.occupancy > 0 or room.class_name %}
+                <div class="alert alert-warning rf-alert mt-3 mb-0">
+                    <i class="bi bi-exclamation-triangle"></i>
+                    <span>该宿舍已有{% if room.occupancy > 0 %}<b>{{ room.occupancy }}</b> 名学生入住{% endif %}{% if room.occupancy > 0 and room.class_name %}且{% endif %}{% if room.class_name %}已分配班级{% endif %}，<b>性别与床位数不可修改</b>，如需调整请先清空床位与班级分配。</span>
+                </div>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+    {% endif %}
 </div>
+{% endblock %}
+
+{% block extra_css %}
+<style>
+    .rf-section-title { font-weight: 600; font-size: 14px; }
+    .rf-label {
+        display: block; font-size: 13px; font-weight: 600;
+        color: #495057; margin-bottom: 6px;
+    }
+    .rf-lock {
+        font-size: 11px; color: #adb5bd; font-weight: 400; margin-left: 4px;
+    }
+    .rf-tip {
+        font-size: 12px; color: #6c757d; font-weight: 400; margin-left: 6px;
+    }
+    .rf-readonly {
+        border: 1px dashed #dee2e6; border-radius: 6px;
+        padding: 8px 12px; background: #f8f9fa;
+    }
+    .rf-tagbox {
+        display: flex; flex-wrap: wrap; gap: 6px;
+        min-height: 38px; padding: 6px 8px;
+        border: 1px solid #e9ecef; border-radius: 6px; background: #fbfcfd;
+    }
+    .rf-tagbox .rf-empty { color: #adb5bd; font-size: 13px; line-height: 26px; }
+    .rf-tag {
+        display: inline-flex; align-items: center; gap: 4px;
+        background: #e7f1ff; color: #0b5ed7; border: 1px solid #cfe2ff;
+        border-radius: 999px; padding: 3px 10px; font-size: 13px;
+        cursor: pointer; transition: all .15s ease;
+    }
+    .rf-tag:hover { background: #ffe3e3; color: #b02a37; border-color: #f5c2c7; }
+    .rf-tag i { font-size: 11px; }
+    .rf-room-no {
+        font-size: 26px; font-weight: 700; letter-spacing: .5px; color: #212529;
+    }
+    .rf-summary .rf-kv li {
+        display: flex; justify-content: space-between; align-items: center;
+        padding: 8px 0; border-bottom: 1px dashed #eef0f2; font-size: 13px;
+    }
+    .rf-summary .rf-kv li:last-child { border-bottom: none; }
+    .rf-summary .rf-kv span { color: #6c757d; }
+    .rf-alert { font-size: 12.5px; line-height: 1.6; padding: 10px 12px; }
+</style>
 {% endblock %}
 
 {% block extra_js %}
 <script>
 (function() {
-    // 从 class_name 中解析合班班级（第一个班在"分配班级"下拉框，其余在合班标签）
-    var combineTags = [];
-    {% if room and room.class_name %}
-    var parts = '{{ room.class_name }}'.split('+');
-    if (parts.length > 1) {
-        for (var i = 1; i < parts.length; i++) {
-            var c = parts[i].trim();
-            if (c) combineTags.push(c);
-        }
-    }
-    {% endif %}
+    var sel = document.getElementById('classPickerSelect');
+    var tagsBox = document.getElementById('classTagsContainer');
+    var hiddenBox = document.getElementById('classHiddenInputs');
+    var hint = document.getElementById('classSelectHint');
+    if (!sel || !tagsBox) return;
+
+    // 初始标签来自后端渲染的同名隐藏字段（保持合班顺序）
+    var tags = [];
+    Array.prototype.slice.call(hiddenBox.querySelectorAll('input[name="class_names"]'))
+        .forEach(function(i) { if (i.value && tags.indexOf(i.value) < 0) tags.push(i.value); });
 
     function renderTags() {
-        var container = document.getElementById('combineTagsContainer');
-        container.innerHTML = '';
-        combineTags.forEach(function(tag, idx) {
-            var badge = document.createElement('span');
-            badge.className = 'badge bg-warning text-dark d-flex align-items-center';
-            badge.style.fontSize = '0.8rem';
-            badge.style.padding = '0.3rem 0.5rem';
-            badge.innerHTML = tag + ' <i class="bi bi-x-lg ms-1" style="cursor:pointer;"></i>';
-            badge.querySelector('i').onclick = function() {
-                combineTags.splice(idx, 1);
-                renderTags();
-            };
-            container.appendChild(badge);
+        tagsBox.innerHTML = '';
+        if (!tags.length) {
+            tagsBox.innerHTML = '<span class="rf-empty">未分配班级</span>';
+        } else {
+            tags.forEach(function(t) {
+                var el = document.createElement('span');
+                el.className = 'rf-tag';
+                el.title = '点击删除 ' + t;
+                el.innerHTML = t + ' <i class="bi bi-x-lg"></i>';
+                el.onclick = function() {
+                    tags.splice(tags.indexOf(t), 1);
+                    renderTags();
+                };
+                tagsBox.appendChild(el);
+            });
+        }
+
+        // 同步隐藏字段：多个同名 class_names 供后端 getlist 读取
+        hiddenBox.innerHTML = '';
+        tags.forEach(function(t) {
+            var input = document.createElement('input');
+            input.type = 'hidden';
+            input.name = 'class_names';
+            input.value = t;
+            hiddenBox.appendChild(input);
         });
-        // 同步到隐藏字段：合班班级用逗号分隔存储
-        document.getElementById('combinedClassHidden').value = combineTags.join(',');
+
+        // 已添加的班级从下拉框中隐藏，避免重复
+        Array.prototype.slice.call(sel.options).forEach(function(o) {
+            if (!o.value) return;
+            var used = tags.indexOf(o.value) >= 0;
+            o.disabled = used;
+            o.hidden = used;
+        });
+        sel.value = '';
+
+        if (tags.length > 1) {
+            hint.innerHTML = '<span class="badge bg-info">合班宿舍</span> '
+                + '<span class="text-muted small">' + tags.join(' + ') + '</span>';
+        } else if (tags.length === 1) {
+            hint.innerHTML = '<span class="text-muted small">已选 1 个班级：' + tags[0] + '（非合班）</span>';
+        } else {
+            hint.innerHTML = '';
+        }
     }
 
-    function addTag() {
-        var select = document.getElementById('combineClassInput');
-        var val = select.value;
-        if (!val) return;
-        // 避免重复添加
-        if (combineTags.indexOf(val) >= 0) { select.value = ''; return; }
-        // 避免与"分配班级"相同
-        var mainClass = document.getElementById('classNameSelect').value;
-        if (val === mainClass) { alert('该班级已在"分配班级"中选择'); select.value = ''; return; }
-        combineTags.push(val);
-        select.value = '';
-        renderTags();
-    }
-
-    document.getElementById('btnAddCombine').addEventListener('click', addTag);
-    document.getElementById('combineClassInput').addEventListener('change', addTag);
-
-    // 表单提交前：把第一个班级 + 合班标签组合成 "01班+02班+03班" 格式存入 class_name
-    document.querySelector('form').addEventListener('submit', function(e) {
-        var mainClass = document.getElementById('classNameSelect').value;
-        var allClasses = [mainClass].concat(combineTags).filter(function(c) { return c; });
-        var combined = allClasses.join('+');
-
-        // 创建临时字段覆盖 class_name
-        var hiddenInput = document.createElement('input');
-        hiddenInput.type = 'hidden';
-        hiddenInput.name = 'class_name';
-        hiddenInput.value = combined;
-        // 禁用原来的 select 避免重复提交
-        document.getElementById('classNameSelect').disabled = true;
-        document.getElementById('classNameSelect').name = '_class_name_display';
-        document.querySelector('form').appendChild(hiddenInput);
-
-        // combined_class: 有合班标签则标记为"合班"，否则清空
-        document.getElementById('combinedClassHidden').value = combineTags.length > 0 ? '合班' : '';
+    sel.addEventListener('change', function() {
+        if (sel.value && tags.indexOf(sel.value) < 0) {
+            tags.push(sel.value);
+            renderTags();
+        }
     });
 
     renderTags();
