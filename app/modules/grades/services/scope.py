@@ -26,8 +26,13 @@ def visible_grades(user):
     if scope == SCOPE_GRADE:
         return [grade] if grade else []
     # 班主任/任课教师：所辖班级所在年级
+    # 任课教师通常没有 UserClassLink，必须并入本人任课映射的年级，
+    # 否则其可见年级为空 → 分析页考试下拉选不到任何考试
     links = UserClassLink.query.filter_by(user_id=user.id).all()
-    return sorted({l.grade for l in links})
+    grades = {l.grade for l in links}
+    for l in TeacherSubjectLink.query.filter_by(user_id=user.id, active=True).all():
+        grades.add(l.grade)
+    return sorted(grades)
 
 
 def visible_classes(user):

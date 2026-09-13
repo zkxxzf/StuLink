@@ -8,7 +8,10 @@ var state = {grade: '', examId: '', tab: 'grade', class_name: '', subject: '', d
 var opts = null;
 var charts = {};
 
-function $(s){ return jQuery(s); }
+// 注意：不要在此处把 $ 重定义为普通函数（如 function $(s){ return jQuery(s); }）。
+// 一旦覆盖，$.getJSON / $.post / $.ajax 等 jQuery 静态方法全部不可用，
+// 会导致页面初始化第一行就抛 TypeError、年级/考试下拉为空、AI 分析失效。
+// 这里直接使用 base.html 已加载的全局 jQuery。
 
 function fmt(v){
     if (v === null || v === undefined || v === '') return '—';
@@ -37,7 +40,17 @@ function fillGrades(){
     var sel = $('#gGrade').empty().append('<option value="">年级…</option>');
     opts.grades.forEach(function(g){ sel.append('<option value="'+g+'">'+g+'</option>'); });
     // 锁定年级
-    if (opts.locked.grade){ $('#gGrade').val(opts.locked.grade).prop('disabled', true); }
+    if (opts.locked.grade){
+        $('#gGrade').val(opts.locked.grade).prop('disabled', true);
+    } else {
+        // 未锁定时默认选中「第一个有考试的年级」，
+        // 否则停在占位项上，考试下拉会是空的
+        var first = (opts.grades || []).filter(function(g){
+            return (opts.exams[g] || []).length > 0;
+        })[0];
+        if (first){ $('#gGrade').val(first); }
+        else if ((opts.grades || []).length){ $('#gGrade').val(opts.grades[0]); }
+    }
     fillExams();
 }
 
@@ -128,10 +141,18 @@ function activateTab(tab, fromClick){
     // 筛选器显隐：方向仅年级/学科分析可用；班级仅班级分析；科目按 tab
     $('#gClass').toggleClass('d-none', tab !== 'class');
     $('#gDir').toggleClass('d-none', tab !== 'grade' && tab !== 'subject');
-    $('#gSubject').toggleClass('d-none', tab === 'subject' || tab === 'teacher');
+    // 修复：原条件写反——学科/教师分析 tab 需要显示科目筛选器，年级/班级 tab 隐藏
+    $('#gSubject').toggleClass('d-none', tab !== 'subject' && tab !== 'teacher');
     if (tab === 'subject' || tab === 'teacher') fillSubject();
     $('#gTabs a[href="#pane-'+tab+'"]').tab('show');
-    if (tab !== 'class'){ state.class_name = ''; $('#gClass').val(''); }
+    // 切回班级分析时，从班级下拉还原 state.class_name（离开班级 tab 时会被清空，
+    // 否则返回后 class_name 为空导致 class_tab 返回空数据）
+    if (tab === 'class'){
+        state.class_name = $('#gClass').val() || '';
+    } else {
+        state.class_name = '';
+        $('#gClass').val('');
+    }
     loadCurrent();
 }
 
@@ -161,14 +182,21 @@ function loadCurrent(){
     });
 }
 
+// 修复：拼接进 HTML 的服务端字符串统一转义，防止存储型 XSS（考试名/班级/科目等）
+function escHtml(s){
+    return String(s == null ? '' : s).replace(/[&<>"']/g, function(c){
+        return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];
+    });
+}
+
 function buildExamInfo(data){
     if (!data.exam) return null;
     return $('<div class="alert alert-light border py-2 small">').append(
         '<i class="bi bi-info-circle"></i> ' +
-        '当前考试：<strong>' + (data.exam.name || '') + '</strong> · ' +
-        (data.exam.grade || '') + ' · ' + (data.exam.date || '') +
-        (data.class_name ? ' · 班级：' + data.class_name : '') +
-        (data.subject ? ' · 科目：' + data.subject : '')
+        '当前考试：<strong>' + escHtml(data.exam.name) + '</strong> · ' +
+        escHtml(data.exam.grade) + ' · ' + escHtml(data.exam.date) +
+        (data.class_name ? ' · 班级：' + escHtml(data.class_name) : '') +
+        (data.subject ? ' · 科目：' + escHtml(data.subject) : '')
     );
 }
 
@@ -186,7 +214,7 @@ function renderTables(area, tables){
         var t = tables[key];
         var card = $('<div class="card tbl-card mb-3">');
         var head = $('<div class="card-header d-flex justify-content-between align-items-center">')
-            .append('<h6 class="mb-0"><i class="bi bi-table me-1"></i>' + (t.title || key) + '</h6>')
+            .append('<h6 class="mb-0"><i class="bi bi-table me-1"></i>' + escHtml(t.title || key) + '</h6>')
             .append('<button class="btn btn-sm btn-outline-secondary tbl-fold">折叠</button>');
         card.append(head);
         var body = $('<div class="card-body p-0 tbl-wrap">');
@@ -267,9 +295,18 @@ function yFmt(){ return {type: 'value', axisLabel: {formatter: '{value}'}}; }
 function barOption(c, grouped){
     var series = (c.series || []).map(function(s, i){
         var item = {name: s.name, type: 'bar', data: s.data, itemStyle: {color: colorOf(i)}};
-        if (!grouped && c.markLine != null && i === 0){
-            item.markLine = {silent: true, symbol: 'none', data: [{yAxis: c.markLine}],
-                lineStyle: {color: '#f59e0b', type: 'dashed'}, label: {formatter: '年级均值 {c}'}};
+        if (!grouped && i === 0){
+            // 年级均值参考线 + 该科各层划线参考线
+            var ml = [];
+            if (c.markLine != null){
+                ml.push({yAxis: c.markLine, lineStyle: {color: '#f59e0b', type: 'dashed'},
+                    label: {formatter: '年级均值 {c}'}});
+            }
+            (c.bandLines || []).forEach(function(b){
+                ml.push({yAxis: b.value, lineStyle: {color: '#ef4444', type: 'dashed'},
+                    label: {formatter: b.name + ' {c}'}});
+            });
+            if (ml.length){ item.markLine = {silent: true, symbol: 'none', data: ml}; }
         }
         return item;
     });

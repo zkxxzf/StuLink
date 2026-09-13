@@ -50,3 +50,8 @@ venv/
 .encryption_key
 data/.secret_key
 data/.encryption_key
+
+# 运行日志与测试缓存（勿提交）
+*.log
+logs/
+.playwright-cli/

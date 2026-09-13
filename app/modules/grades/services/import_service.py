@@ -101,6 +101,9 @@ def parse_score_excel(stream, exam):
         has_any = any(i < len(cells) and cells[i] != '' for i in subj_cols)
         if not no and not has_any:
             continue
+        # 修复：启用行数上限（原 MAX_IMPORT_ROWS 常量定义后从未校验），防止超大文件拖垮导入
+        if len(rows) >= MAX_IMPORT_ROWS:
+            raise ParseError(f'数据行超过上限（{MAX_IMPORT_ROWS} 行），请拆分文件后分批导入')
         if not no:
             errors.append({'line': line_no, 'no': '', 'reason': '缺少学号'})
             continue
@@ -155,6 +158,20 @@ def parse_score_excel(stream, exam):
             continue  # 全行无分 = 未参加本场考试
         rows.append({'no': no, 'line': line_no, 'subjects': subjects, 'total': total})
 
+    # 修复：文件内同一学号重复出现时仅保留最后一次出现并给出提示（原先静默后行覆盖前行）
+    _seen = {}
+    for _i, _r in enumerate(rows):
+        _seen.setdefault(_r['no'], []).append(_i)
+    _drop = set()
+    for _no, _idxs in _seen.items():
+        if len(_idxs) > 1:
+            for _i in _idxs[:-1]:
+                _drop.add(_i)
+                errors.append({'line': rows[_i]['line'], 'no': _no,
+                               'reason': '学号在文件中重复出现，已采用最后一次出现的数据'})
+    if _drop:
+        rows[:] = [r for i, r in enumerate(rows) if i not in _drop]
+
     # ---- 3. 主库匹配与快照 ----
     if rows:
         unmatched = _attach_student_info(exam, rows)
@@ -197,8 +214,16 @@ def _attach_student_info(exam, rows):
     # 分块 IN 查询（SQLite 变量数上限 999）
     for i in range(0, len(nos), 800):
         chunk = nos[i:i + 800]
+        # 修复：双边归一化学号——主库侧同样经 _norm_no 归一后建映射，
+        # 兼容主库学号含前导 0（如 020250006）而文件侧被归一为 20250006 的场景
         for s in Student.query.filter(Student.student_number.in_(chunk)).all():
-            stu_map[str(s.student_number)] = s
+            stu_map.setdefault(_norm_no(s.student_number), s)
+        # 前导 0 学号的原文无法命中上面的原文 IN 匹配，追加按数值匹配一次
+        ints = [int(n) for n in chunk if n.isdigit() and int(n) > 0]
+        if ints:
+            for s in Student.query.filter(
+                    db.func.cast(Student.student_number, db.Integer).in_(ints)).all():
+                stu_map.setdefault(_norm_no(s.student_number), s)
     # 该年级班型方向（兜底）
     cp_map = {}
     try:
@@ -215,6 +240,8 @@ def _attach_student_info(exam, rows):
             unmatched.append({'line': r['line'], 'no': r['no'], 'reason': '学号未匹配到主库学生'})
             continue
         r['name'] = stu.name
+        # 修复：学号以主库原值为准（归一化仅用于匹配），保证成绩行与主库键一致
+        r['no'] = stu.student_number
         r['grade'] = stu.grade
         r['class_name'] = stu.class_name
         r['subject_selection'] = stu.subject_selection or ''

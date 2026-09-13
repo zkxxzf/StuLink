@@ -50,6 +50,10 @@ if __name__ == '__main__':
         import warnings
         warnings.warn('⚠ 开发模式已启用，切勿在生产环境使用！', stacklevel=2)
         _set_console_title('StuLink 后端服务运行中 —— 请勿关闭此窗口！')
+        # config.py 为生产性能关闭了模板自动重载，开发模式必须打开，
+        # 否则改了 html 服务器仍返回旧模板（会一直看到旧的 CDN 引用与旧脚本）
+        app.config['TEMPLATES_AUTO_RELOAD'] = True
+        app.jinja_env.auto_reload = True
         print('宿舍管理系统已启动 (开发模式 - 仅限本地)')
         print('请在浏览器访问: http://localhost:5000')
         _print_keep_running_notice('http://localhost:5000')

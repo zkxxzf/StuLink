@@ -7,6 +7,7 @@ import uuid
 from datetime import date, datetime
 
 import openpyxl
+from sqlalchemy import func
 from flask import (Blueprint, render_template, request, jsonify, flash,
                    redirect, url_for, send_file, current_app, abort)
 from flask_login import login_required, current_user
@@ -14,9 +15,9 @@ from app.extensions import db
 from app.models.grades import Exam, ExamScore, SUBJECTS, TOTAL_SUBJECT
 from app.models import Student
 from app.modules.grades import bp
-from app.modules.grades.services import import_service, store_service, ranking
+from app.modules.grades.services import import_service, store_service, ranking, tab_service
 from app.modules.grades.services.import_service import ParseError
-from app.modules.grades.utils import term_of_date, delete_cache_prefix
+from app.modules.grades.utils import term_of_date
 from app.utils.decorators import perm_required
 from app.utils.helpers import log_operation
 
@@ -47,10 +48,14 @@ def exams_list():
         q = q.filter_by(grade=grade)
     exams = q.order_by(Exam.exam_date.desc(), Exam.id.desc()).all()
     counts = {}
-    rows = ExamScore.query.filter(ExamScore.exam_id.in_([e.id for e in exams] or [0]),
-                                  ExamScore.subject == TOTAL_SUBJECT).all()
-    for r in rows:
-        counts[r.exam_id] = counts.get(r.exam_id, 0) + 1
+    # 修复：人数统计改 GROUP BY 聚合（原先把全部总分行载入内存逐条计数）
+    if exams:
+        rows_cnt = (db.session.query(ExamScore.exam_id, func.count(ExamScore.id))
+                    .filter(ExamScore.exam_id.in_([e.id for e in exams]),
+                            ExamScore.subject == TOTAL_SUBJECT)
+                    .group_by(ExamScore.exam_id).all())
+        for eid, cnt in rows_cnt:
+            counts[eid] = cnt
     return render_template('grades/exam_list.html', exams=exams, counts=counts,
                            grade=grade, grade_options=_grade_options(),
                            status_label=EXAM_STATUS_LABEL)
@@ -72,7 +77,12 @@ def exam_new():
                                    exam_type=exam_type, default_date=date.today().isoformat())
         dup = Exam.query.filter_by(grade=grade, name=name).first()
         if dup:
-            flash(f'同年级已存在同名考试「{name}」，建议修改名称加以区分', 'warning')
+            # 修复：同名考试由“仅警告仍创建”改为阻断——避免成绩分散到两场同名考试混淆统计
+            flash(f'同年级已存在同名考试「{name}」（{dup.exam_date}），请修改考试名称',
+                  'danger')
+            return render_template('grades/exam_form.html', grade_options=_grade_options(),
+                                   grade=grade, exam_date=exam_date.isoformat(), name='',
+                                   exam_type=exam_type, default_date=date.today().isoformat())
         exam = Exam(grade=grade, name=name, exam_date=exam_date,
                     exam_type=exam_type or '其他', term=term_of_date(exam_date),
                     operator_id=current_user.id)
@@ -144,7 +154,15 @@ def score_update(exam_id, score_id):
     try:
         val = (request.form.get('score') or '').strip()
         if val == '':
-            flash('分数留空表示删除该科成绩（缺考），如需删除请使用“删除”操作', 'warning')
+            # 修复：空分数提交直接按缺考删除（与提示语一致），并联动重算总分行
+            no = row.student_no
+            is_total = row.subject == TOTAL_SUBJECT
+            db.session.delete(row)
+            if not is_total:
+                store_service.refresh_student_total(Exam.query.get(exam_id), no)
+            _mark_dirty(exam_id)
+            db.session.commit()
+            flash('该科成绩已删除（视为缺考），请点击“重新计算排名”', 'warning')
             return redirect(url_for('grades.exam_detail', exam_id=exam_id))
         score = float(val)
         fm = Exam.query.get(exam_id).full_marks()
@@ -156,6 +174,9 @@ def score_update(exam_id, score_id):
         flash('分数格式不正确', 'danger')
         return redirect(url_for('grades.exam_detail', exam_id=exam_id))
     row.score = score
+    # 修复：单科改分后同步重算该生总分行（直接改总分行时不重算，保留手工修正值）
+    if row.subject != TOTAL_SUBJECT:
+        store_service.refresh_student_total(Exam.query.get(exam_id), row.student_no)
     _mark_dirty(exam_id)
     db.session.commit()
     flash('成绩已修改，请点击“重新计算排名”', 'warning')
@@ -167,7 +188,12 @@ def score_update(exam_id, score_id):
 @perm_required('grades.edit')
 def score_delete(exam_id, score_id):
     row = ExamScore.query.filter_by(id=score_id, exam_id=exam_id).first_or_404()
+    no = row.student_no
+    is_total = row.subject == TOTAL_SUBJECT
     db.session.delete(row)
+    # 修复：删除单科（缺考）后同步重算该生总分行（删除总分行本身时不重算）
+    if not is_total:
+        store_service.refresh_student_total(Exam.query.get(exam_id), no)
     _mark_dirty(exam_id)
     db.session.commit()
     flash('该科成绩已删除（视为缺考），请点击“重新计算排名”', 'warning')
@@ -182,7 +208,8 @@ def exam_recalc(exam_id):
     n = ranking.recalc_exam(exam_id)
     exam.status = 'imported'
     db.session.commit()
-    delete_cache_prefix(f'grades_analysis_{exam_id}')
+    # 修复：清除分析页真实使用的 grades_tab_ 缓存（原 grades_analysis_ 前缀无人写入，属无效清理）
+    tab_service.clear_exam_cache(exam_id)
     log_operation(current_user, '重算', '考试', exam_id, f'{exam.name} 排名重算({n}行)', module='grades')
     flash(f'排名已重新计算（{n} 条成绩）', 'success')
     return redirect(url_for('grades.exam_detail', exam_id=exam_id))
@@ -201,7 +228,8 @@ def exam_delete(exam_id):
     exam_name = exam.name
     db.session.delete(exam)
     db.session.commit()
-    delete_cache_prefix('grades_analysis_')
+    # 修复：删除考试后按其 id 清除分析页 grades_tab_ 缓存（原前缀无人写入，等于没清）
+    tab_service.clear_exam_cache(exam_id)
     log_operation(current_user, '删除', '考试', exam_id, f'{exam_name}', module='grades')
     flash(f'考试「{exam_name}」及全部成绩已删除', 'success')
     return redirect(url_for('grades.exams_list'))
@@ -263,27 +291,31 @@ def exam_import_upload(exam_id):
 
 
 def _preview_diff(exam, parsed, mode):
-    """与库内现有成绩对比的差异预览"""
-    existing_nos = {r.student_no for r in
-                    ExamScore.query.filter_by(exam_id=exam.id).all()}
+    """与库内现有成绩对比的差异预览
+    修复1：原先每行×每科各发一次 DB 查询（千人年级≈9000 次），改为一次性载入本场已有成绩比对
+    修复2：更新计数仅统计分值真正变化的行（原先行存在即计数，数字虚高）
+    """
+    existing = {}
+    nos = set()
+    for r in ExamScore.query.filter_by(exam_id=exam.id).all():
+        existing[(r.student_no, r.subject)] = r.score
+        nos.add(r.student_no)
     new_nos = set()
     update_cnt = 0
     del_cnt = 0
     for r in parsed['rows']:
-        key = (r['no'])
-        if key not in existing_nos:
-            new_nos.add(key)
+        no = r['no']
+        if no not in nos:
+            new_nos.add(no)
         for sub, score in r['subjects'].items():
-            row = ExamScore.query.filter_by(exam_id=exam.id, student_no=r['no'],
-                                            subject=sub).first()
-            if score is not None:
-                if row is not None:
-                    update_cnt += 1
-            else:
-                if row is not None:
+            key = (no, sub)
+            if score is None:
+                if key in existing:
                     del_cnt += 1
+            elif key in existing and existing[key] != score:
+                update_cnt += 1
     file_nos = {r['no'] for r in parsed['rows']}
-    unseen = len(existing_nos - file_nos) if mode == 'A' else 0
+    unseen = len(nos - file_nos) if mode == 'A' else 0
     return {
         'new_students': len(new_nos),
         'updated_rows': update_cnt,
@@ -326,7 +358,8 @@ def exam_import_confirm(exam_id):
         current_app.logger.error(f'成绩导入失败: {e}', exc_info=True)
         flash(f'导入失败，数据已回滚：{e}', 'danger')
         return redirect(url_for('grades.exam_import', exam_id=exam_id))
-    delete_cache_prefix('grades_analysis_')
+    # 修复：按本场考试清除分析页 grades_tab_ 缓存（原前缀无人写入，等于没清）
+    tab_service.clear_exam_cache(exam_id)
     log_operation(current_user, '导入', '考试', exam_id,
                   f'{exam.name} {mode}模式 差异{json.dumps(summary, ensure_ascii=False)}',
                   module='grades')

@@ -146,20 +146,26 @@ class ExamScore(db.Model):
 
 
 class ExamBand(db.Model):
-    """分层配置：考试 × 方向 × 有序层（seq=1 最高层，无上界）"""
+    """分层配置：考试 × 方向 × 学科 × 有序层（seq=1 最高层，无上界）
+
+    subject='总分' 为总分线（原行为）；subject=学科名 为该科单科线，
+    两者独立配置，故同一学科在物理/历史方向下可有不同分数线。
+    """
     __bind_key__ = 'grades'
     __tablename__ = 'exam_bands'
 
     id = db.Column(db.Integer, primary_key=True)
     exam_id = db.Column(db.Integer, nullable=False)
     direction = db.Column(db.String(4), default='')   # 空串=双向套用
+    subject = db.Column(db.String(10), nullable=False,
+                        default=TOTAL_SUBJECT)        # 总分 或 9 科之一
     seq = db.Column(db.Integer, nullable=False)       # 1=最高层
     name = db.Column(db.String(20), nullable=False)   # 层名（优秀/良好/及格/待提升…）
     lower_mode = db.Column(db.String(8), nullable=False, default='score')  # score/ratio
     lower_value = db.Column(db.Float, nullable=False)  # 下界分数或比例(0~100)
 
     __table_args__ = (
-        db.UniqueConstraint('exam_id', 'direction', 'seq', name='uq_band_seq'),
+        db.UniqueConstraint('exam_id', 'direction', 'subject', 'seq', name='uq_band_seq'),
     )
 
 

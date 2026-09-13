@@ -116,8 +116,25 @@ TAB_BY_ROLE = {
 
 
 def _guard_tab(tab):
-    """按角色限制可访问的分析 tab（9.2 可见矩阵的后端强制）"""
-    allowed = TAB_BY_ROLE.get(current_user.role, set())
+    """按角色/范围限制可访问的分析 tab（9.2 可见矩阵的后端强制）
+
+    说明：除以 role 判定外，必须同时认可「全校范围」权限组（校级领导），
+    否则 school_viewer 等角色会被 TAB_BY_ROLE 漏掉而全部 403。
+    """
+    if current_user.role == 'admin':
+        allowed = {'grade', 'class', 'subject', 'teacher'}
+    else:
+        scope_type, _grade = scope_service.get_scope(current_user)
+        if scope_type == 'school':                 # 校级领导：与管理员同范围
+            allowed = {'grade', 'class', 'subject', 'teacher'}
+        elif current_user.role == 'grade_leader' or scope_type == 'grade':
+            allowed = {'grade', 'class', 'subject', 'teacher'}
+        elif current_user.has_role('homeroom_teacher'):
+            allowed = {'class'}
+        elif current_user.has_role('teacher'):
+            allowed = {'teacher'}
+        else:
+            allowed = set()
     if tab not in allowed:
         abort(403)
 
@@ -195,23 +212,26 @@ def api_teacher_tab():
     subject = request.args.get('subject', '').strip() or None
     exam = _get_exam(exam_id)
     scope_type, _ = scope_service.get_scope(current_user)
-    if current_user.has_role('teacher'):
-        # 任课教师：仅本人映射
-        links = scope_service.teacher_links(current_user)
-        if not links:
-            return jsonify(success=True, data=tab_service._empty(exam))
-        data = tab_service.teacher_tab(exam_id, subject=subject, links=links,
-                                       grade=exam.grade)
-    elif current_user.role == 'admin':
-        data = tab_service.teacher_tab(exam_id, subject=subject,
-                                       links=None, grade=exam.grade)
-    elif scope_type == 'grade':
-        # 年级长：本年级
-        grade = scope_service.get_scope(current_user)[1]
-        links = TeacherSubjectLink.query.filter_by(grade=grade, active=True).all()
-        data = tab_service.teacher_tab(exam_id, subject=subject, links=links,
-                                       grade=grade)
-    else:
+    # 修复：数据构建移入 _fetch 的构建函数——原实现在缓存命中时也会先全量计算一遍，
+    # 缓存既不省时、未命中时相当于计算两遍
+    def _build():
+        if current_user.has_role('teacher'):
+            # 任课教师：仅本人映射
+            links = scope_service.teacher_links(current_user)
+            if not links:
+                return tab_service._empty(exam)
+            return tab_service.teacher_tab(exam_id, subject=subject, links=links,
+                                           grade=exam.grade)
+        if current_user.role == 'admin' or scope_type == 'school':
+            # 管理员 / 校级领导：本年级全体任课教师
+            return tab_service.teacher_tab(exam_id, subject=subject,
+                                           links=None, grade=exam.grade)
+        if scope_type == 'grade':
+            # 年级长：本年级
+            grade = scope_service.get_scope(current_user)[1]
+            links = TeacherSubjectLink.query.filter_by(grade=grade, active=True).all()
+            return tab_service.teacher_tab(exam_id, subject=subject, links=links,
+                                           grade=grade)
         abort(403)
     cache_key = f'grades_tab_{exam_id}_teacher_{subject or "*"}_{current_user.id}'
-    return jsonify(success=True, data=_fetch(cache_key, lambda: data))
+    return jsonify(success=True, data=_fetch(cache_key, _build))

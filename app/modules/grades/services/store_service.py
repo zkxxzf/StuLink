@@ -26,6 +26,10 @@ def apply_import(exam, parsed, mode='A', remove_missing=False):
         for key in list(existing.keys()):
             db.session.delete(existing.pop(key))
         summary['deleted_rows'] = 0  # 重置计数（整场清空不计入"缺考删除"）
+        # 修复：模式B删除后立即 flush，确保 DELETE 先于后续 INSERT 落库，
+        # 避免重导文件包含本场已有学生时同事务内触发
+        # UNIQUE(exam_id,student_no,subject) 冲突导致整场导入回滚
+        db.session.flush()
 
     # 本次文件出现的学生集合
     nos_in_file = set()
@@ -104,6 +108,35 @@ def apply_import(exam, parsed, mode='A', remove_missing=False):
     exam.import_token = None
     exam.status = 'imported'
     return summary
+
+
+def refresh_student_total(exam, student_no):
+    """单科成绩修改/删除后重算该生总分行（缺考按 0，与导入口径一致）
+    修复：此前总分仅在导入时计算，手工改分后总分行不联动，导致总分≠Σ单科，
+    排名与全部统计分析基于错误总分。直接修改总分行时不应调用本函数（保留手工修正值）。
+    """
+    rows = ExamScore.query.filter_by(exam_id=exam.id, student_no=student_no).all()
+    if not rows:
+        return
+    # 选科组合取自该生任一行快照（同场考试内统一）
+    sel_subs = subjects_of_selection(rows[0].subject_selection) or []
+    total_row = None
+    merged = {}
+    for r in rows:
+        if r.subject == TOTAL_SUBJECT:
+            total_row = r
+        elif r.subject in sel_subs and r.score is not None:
+            merged[r.subject] = r.score
+    if not sel_subs or not merged:
+        # 应考科目全缺考或无法推断选科：删除总分行
+        if total_row is not None:
+            db.session.delete(total_row)
+        return
+    total = round(sum(merged.get(s, 0) for s in sel_subs), 1)
+    if total_row is None:
+        total_row = ExamScore(exam_id=exam.id, student_no=student_no, subject=TOTAL_SUBJECT)
+        db.session.add(total_row)
+    total_row.score = total
 
 
 def _refresh_snapshot(existing, r, skip_deleted=False):

@@ -6,9 +6,10 @@ from app.extensions import db
 from app.models.grades import ExamScore, TOTAL_SUBJECT, Exam
 
 
-def _assign_ranks(rows):
-    """rows: list[ExamScore]，原地写 rank 属性（不提交）
+def _assign_ranks(rows, attr):
+    """rows: list[ExamScore]，原地写排名属性 attr（rank_dir/rank_class，不提交）
     按 score 降序；同分同名次，下一名次按人数顺延（1,1,3,…）；score 为 None 的不参与
+    修复：原实现将同一名次同时双写 rank_dir/rank_class，导致"方向排"实为班内排名
     """
     rows.sort(key=lambda r: (r.score is None, -(r.score or 0)))
     rank = 0
@@ -17,8 +18,7 @@ def _assign_ranks(rows):
     while idx < n:
         cur_score = rows[idx].score
         if cur_score is None:
-            rows[idx].rank_class = None
-            rows[idx].rank_dir = None
+            setattr(rows[idx], attr, None)
             idx += 1
             continue
         # 找同分段
@@ -27,8 +27,7 @@ def _assign_ranks(rows):
             end += 1
         rank += 1
         for j in range(idx, end):
-            rows[j].rank_class = rank
-            rows[j].rank_dir = rank
+            setattr(rows[j], attr, rank)
         idx = end
     return rows
 
@@ -45,16 +44,25 @@ def recalc_exam(exam_id):
     if not rows:
         return 0
 
-    # 1) 单科与总分行排名：按 (subject, direction, class_name) 分组
+    # 1) 方向排名：按 (subject, direction) 分组（同方向跨班统一排名）
+    # 修复：原实现仅按班级分组且双写两字段，方向排名错成班内名次
     groups = {}
     for r in rows:
         if r.score is None:
             continue  # 无成绩不参与（缺考无行，正常不会出现）
+        groups.setdefault((r.subject, r.direction), []).append(r)
+    for g_rows in groups.values():
+        _assign_ranks(g_rows, attr='rank_dir')
+    # 2) 班排名：按 (subject, direction, class_name) 分组（班内同方向子集）
+    groups = {}
+    for r in rows:
+        if r.score is None:
+            continue
         groups.setdefault((r.subject, r.direction, r.class_name), []).append(r)
     for g_rows in groups.values():
-        _assign_ranks(g_rows)
+        _assign_ranks(g_rows, attr='rank_class')
 
-    # 2) 总分进退步：找上一场同年级考试
+    # 3) 总分进退步：找上一场同年级考试
     prev_exam = (Exam.query
                  .filter(Exam.grade == exam.grade,
                          or_(Exam.exam_date < exam.exam_date,
@@ -70,7 +78,7 @@ def recalc_exam(exam_id):
             if r.score is not None and r.rank_dir:
                 prev_ranks[(r.direction, r.student_no)] = r.rank_dir
 
-    # 3) 更新进退步（仅总分行）
+    # 4) 更新进退步（仅总分行）
     for r in rows:
         if r.subject != TOTAL_SUBJECT:
             continue

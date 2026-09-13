@@ -3,6 +3,7 @@
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 import io
 import json
+import time
 import uuid
 from datetime import date
 
@@ -22,6 +23,16 @@ from app.utils.helpers import log_operation
 
 # 教师导入预览暂存（进程内，token 关联；服务重启后需重传）
 _DRAFT = {}
+# 修复：增加草稿过期回收——原先进程内暂存无上限增长且永不过期
+_DRAFT_TTL = 2 * 3600  # 草稿保留时长（秒），超时未确认自动失效
+
+
+def _purge_expired_drafts():
+    """清理过期的教师导入草稿，防止 _DRAFT 无上限增长"""
+    now = time.time()
+    expired = [t for t, d in _DRAFT.items() if now - d.get('_ts', 0) > _DRAFT_TTL]
+    for t in expired:
+        _DRAFT.pop(t, None)
 
 
 def _grade_classes(grade):
@@ -194,9 +205,11 @@ def teachers_import_upload():
         preview.append(item)
 
     token = str(uuid.uuid4())
+    _purge_expired_drafts()
     _DRAFT[token] = {
         'parsed': parsed, 'preview': preview,
         'created_at': date.today().isoformat(),
+        '_ts': time.time(),
         'fname': file.filename,
     }
     return render_template('grades/teacher_import_report.html', token=token,
@@ -210,6 +223,7 @@ def teachers_import_upload():
 @perm_required('grades.teachers')
 def teachers_import_confirm():
     token = (request.form.get('token') or '').strip()
+    _purge_expired_drafts()
     draft = _DRAFT.get(token)
     if not draft:
         flash('导入批次已失效（服务重启后需重新上传）', 'danger')
