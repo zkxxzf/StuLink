@@ -5,7 +5,7 @@ from flask_login import login_required, current_user
 from app.extensions import db
 from app.models import Room, BedAssignment, Student, StudentAccommodation
 from app.utils.decorators import perm_required
-from app.utils.helpers import get_dict_values, log_operation
+from app.utils.helpers import get_dict_values, get_active_grades, get_class_options, log_operation
 from sqlalchemy import func
 import json
 import re
@@ -130,7 +130,13 @@ def edit(id):
         new_gender = request.form.get('gender', room.gender)
         new_capacity = int(request.form.get('capacity', room.capacity))
         new_grade = request.form.get('grade', '') or None
-        new_class = request.form.get('class_name', '') or None
+        # 分配班级（可多选）：按勾选顺序拼接为 "01班+02班"
+        raw_classes = [c.strip() for c in request.form.getlist('class_names') if c and c.strip()]
+        ordered_classes = []
+        for c in raw_classes:
+            if c not in ordered_classes:
+                ordered_classes.append(c)
+        new_class = '+'.join(ordered_classes) if ordered_classes else None
         new_notes = request.form.get('notes', '') or None
 
         # 检查房间是否已分配班级或已安排床铺
@@ -161,10 +167,10 @@ def edit(id):
         room.capacity = new_capacity
         room.grade = new_grade
         room.class_name = new_class
-        # 自动识别合班：class_name 含多个班（+）即视为合班宿舍，无需手动设置合班标记
+        # 自动判定合班：选中多个班级（+）即合班宿舍；只选一个或取消即为非合班
         # 手动编辑不维护合班详情（自动分配才会写入各班级人数份额）
         room.combined_details = None
-        if new_class and '+' in new_class:
+        if len(ordered_classes) > 1:
             room.combined_class = new_class
         else:
             room.combined_class = None
@@ -173,8 +179,14 @@ def edit(id):
         flash(f'{room.display_name} 信息已更新', 'success')
         return redirect(url_for('rooms.detail', id=room.id))
 
+    # 年级只列出在校年级（已毕业年级仅在往届查询站使用）；
+    # 若该宿舍历史数据仍关联已毕业年级，保留原值避免保存时被清空
+    edit_grades = get_active_grades()
+    if room and room.grade and room.grade not in edit_grades:
+        edit_grades = edit_grades + [room.grade]
+
     return render_template('dormitory/rooms/form.html', room=room, title='编辑宿舍',
-                           grades=get_dict_values('grade'), classes=get_dict_values('class'),
+                           grades=edit_grades, classes=get_class_options(),
                            buildings=get_dict_values('building'), floors=get_dict_values('floor'))
 
 
@@ -192,13 +204,13 @@ def create():
         if not room_number or not building:
             flash('请输入宿舍楼和房间号', 'danger')
             return render_template('dormitory/rooms/form.html', room=None, title='新增宿舍',
-                                   grades=get_dict_values('grade'), classes=get_dict_values('class'),
+                                   grades=get_active_grades(), classes=get_class_options(),
                                    buildings=get_dict_values('building'), floors=get_dict_values('floor'))
 
         if Room.query.filter_by(building=building, room_number=room_number).first():
             flash(f'{building} {room_number} 已存在', 'danger')
             return render_template('dormitory/rooms/form.html', room=None, title='新增宿舍',
-                                   grades=get_dict_values('grade'), classes=get_dict_values('class'),
+                                   grades=get_active_grades(), classes=get_class_options(),
                                    buildings=get_dict_values('building'), floors=get_dict_values('floor'))
 
         # 优先使用选择的楼层，如果没有则从房间号提取
@@ -230,7 +242,7 @@ def create():
         return redirect(url_for('rooms.detail', id=room.id))
 
     return render_template('dormitory/rooms/form.html', room=None, title='新增宿舍',
-                           grades=get_dict_values('grade'), classes=get_dict_values('class'),
+                           grades=get_active_grades(), classes=get_class_options(),
                            buildings=get_dict_values('building'), floors=get_dict_values('floor'))
 
 
@@ -258,9 +270,9 @@ def delete(id):
 def assign_visual():
     """可视化宿舍分配页面"""
     from app.utils.helpers import get_graduated_grades
-    all_grades = get_dict_values('grade')
+    all_grades = get_active_grades()
     graduated = get_graduated_grades()
-    grades = [g for g in all_grades if g not in graduated]
+    grades = all_grades  # 已排除已毕业年级
     buildings = get_dict_values('building')
     return render_template('dormitory/rooms/assign_visual.html', grades=grades, buildings=buildings)
 
@@ -278,9 +290,9 @@ def assign_data():
         ).all()
         
         from app.models import Student, StudentAccommodation
-        all_grades = get_dict_values('grade')
+        all_grades = get_active_grades()
         graduated = get_graduated_grades()
-        grades = [g for g in all_grades if g not in graduated]
+        grades = all_grades  # 已排除已毕业年级
         classes_list = get_dict_values('class')
         
         boarding_student_ids = set()
@@ -774,9 +786,9 @@ def _adjust_beds(room, old_capacity, new_capacity):
 def assign_auto():
     """自动分配宿舍向导页面"""
     from app.utils.helpers import get_graduated_grades
-    all_grades = get_dict_values('grade')
+    all_grades = get_active_grades()
     graduated = get_graduated_grades()
-    grades = [g for g in all_grades if g not in graduated]
+    grades = all_grades  # 已排除已毕业年级
     # 按年份降序（新年级在最前/最左）
     grades.sort(key=lambda g: int(''.join(filter(str.isdigit, g)) or '0'), reverse=True)
     
@@ -864,7 +876,7 @@ def assign_auto_stats():
         return jsonify({'success': False, 'error': '参数不完整'})
     
     # 从字典表获取有效值
-    valid_grades = get_dict_values('grade')
+    valid_grades = get_active_grades()
     valid_classes = get_dict_values('class')
     
     # 统计每个组合的真实住校生人数
@@ -1135,7 +1147,7 @@ def assign_auto_room_stats():
     needed_female_max = needed_female_min = 0
     total_male_students = total_female_students = 0
     if selected_keys:
-        valid_grades = get_dict_values('grade')
+        valid_grades = get_active_grades()
         valid_classes = get_dict_values('class')
         boarding_ids = [sa.student_id for sa in StudentAccommodation.query.filter(
             StudentAccommodation.boarding_type == '住校'
@@ -1267,39 +1279,42 @@ def report_export():
     if grade_filter:
         query = query.filter_by(grade=grade_filter)
 
+    # 以宿舍为单位：房间按 宿舍楼→楼层→房间号 排列
     rooms = query.order_by(
-        Room.grade, Room.gender, Room.class_name,
-        Room.building, Room.room_number
+        Room.grade, Room.gender, Room.building, Room.floor, Room.room_number
     ).all()
 
     tree = OrderedDict()
-    class_totals = {}
     for room in rooms:
         g = room.grade or ''
         gender = room.gender or ''
-        cn = room.class_name or ''
         if g not in tree:
             tree[g] = OrderedDict()
-        if gender not in tree[g]:
-            tree[g][gender] = OrderedDict()
-        if cn not in tree[g][gender]:
-            tree[g][gender][cn] = []
-        tree[g][gender][cn].append(room)
+        tree[g].setdefault(gender, []).append(room)
 
-    boarding_ids = [sa.student_id for sa in StudentAccommodation.query.filter(
-        StudentAccommodation.boarding_type == '住校'
-    ).all()]
-    
-    for g in tree:
-        for gender in tree[g]:
-            for cn in tree[g][gender]:
-                cnt = Student.query.filter(
-                    Student.grade == g,
-                    Student.class_name == cn,
-                    Student.gender == gender,
-                    Student.id.in_(boarding_ids) if boarding_ids else False
-                ).count()
-                class_totals[(g, cn, gender)] = cnt
+    # 每个房间的入住学生名单（按床位号排序）
+    room_students = {}
+    if rooms:
+        room_ids = [r.id for r in rooms]
+        beds = BedAssignment.query.filter(
+            BedAssignment.room_id.in_(room_ids),
+            BedAssignment.student_id.isnot(None)
+        ).order_by(BedAssignment.room_id, BedAssignment.bed_number).all()
+        bed_student_ids = [b.student_id for b in beds]
+        _stu_map = {}
+        if bed_student_ids:
+            for s in Student.query.filter(Student.id.in_(bed_student_ids)).all():
+                _stu_map[s.id] = s
+        for bed in beds:
+            stu = _stu_map.get(bed.student_id)
+            if not stu:
+                continue
+            label = f"{bed.bed_number}床{stu.name or '未知'}"
+            if bed.room_id in room_students:
+                room_students[bed.room_id].append(label)
+            else:
+                room_students[bed.room_id] = [label]
+    total_assigned = sum(len(v) for v in room_students.values())
 
     wb = Workbook()
     ws = wb.active
@@ -1317,38 +1332,41 @@ def report_export():
     )
     center_align = Alignment(horizontal='center', vertical='center')
     left_align = Alignment(horizontal='left', vertical='center')
+    wrap_align = Alignment(horizontal='left', vertical='center', wrap_text=True)
+
+    COL_COUNT = 6
 
     row = 1
-    ws.merge_cells(start_row=row, start_column=1, end_row=row, end_column=7)
-    c = ws.cell(row=row, column=1, value='宿舍分配报表')
+    ws.merge_cells(start_row=row, start_column=1, end_row=row, end_column=COL_COUNT)
+    c = ws.cell(row=row, column=1, value='宿舍分配明细表')
     c.font = title_font
     c.alignment = Alignment(horizontal='center')
     row += 1
 
-    info = f'已分配 {len(rooms)} 间宿舍 / {sum(r.capacity for r in rooms)} 张床位 / 住校生 {sum(class_totals.values())} 人'
+    info = f'已分配 {len(rooms)} 间宿舍 / {sum(r.capacity for r in rooms)} 张床位 / 已入住 {total_assigned} 人'
     if grade_filter:
         info += f' / 年级：{grade_filter}'
-    ws.merge_cells(start_row=row, start_column=1, end_row=row, end_column=7)
+    ws.merge_cells(start_row=row, start_column=1, end_row=row, end_column=COL_COUNT)
     c = ws.cell(row=row, column=1, value=info)
     c.font = Font(size=10, color='666666')
     c.alignment = Alignment(horizontal='center')
     row += 2
 
-    cols = ['班级', '性别', '住校生', '宿舍楼', '房间号', '床位数', '合班标记']
-    col_widths = [10, 6, 9, 18, 9, 9, 14]
+    cols = ['宿舍楼', '房间号', '班级', '床位数', '住宿人数', '学生名单（床位·姓名）']
+    col_widths = [18, 9, 18, 8, 9, 44]
 
     for grade, genders in tree.items():
-        ws.merge_cells(start_row=row, start_column=1, end_row=row, end_column=7)
+        ws.merge_cells(start_row=row, start_column=1, end_row=row, end_column=COL_COUNT)
         c = ws.cell(row=row, column=1, value=f'▌ {grade}')
         c.font = Font(bold=True, size=12)
         c.alignment = Alignment(horizontal='left')
         row += 1
 
-        for gender, classes in genders.items():
+        for gender, room_list in genders.items():
             gender_label = '男生' if gender == '男' else '女生'
             gender_fill = PatternFill(start_color='E3F2FD', end_color='E3F2FD', fill_type='solid') if gender == '男' else PatternFill(start_color='FCE4EC', end_color='FCE4EC', fill_type='solid')
 
-            ws.merge_cells(start_row=row, start_column=1, end_row=row, end_column=7)
+            ws.merge_cells(start_row=row, start_column=1, end_row=row, end_column=COL_COUNT)
             c = ws.cell(row=row, column=1, value=f'{gender_label}')
             c.font = subtitle_font
             c.fill = gender_fill
@@ -1363,51 +1381,50 @@ def report_export():
                 ws.column_dimensions[get_column_letter(ci)].width = width
             row += 1
 
-            for class_name, room_list in classes.items():
-                boarders = class_totals.get((grade, class_name, gender), 0)
-                room_count = len(room_list)
-                start_row_class = row
-
-                for ri, room in enumerate(room_list):
-                    r = row
-                    if ri == 0:
-                        c = ws.cell(row=r, column=1, value=grade + class_name)
-                        ws.merge_cells(start_row=r, start_column=1, end_row=r + room_count - 1, end_column=1)
-                        c.font = Font(bold=True)
-                        c.alignment = center_align
-                        c = ws.cell(row=r, column=2, value=gender)
-                        ws.merge_cells(start_row=r, start_column=2, end_row=r + room_count - 1, end_column=2)
-                        c.font = Font(bold=True)
-                        c.alignment = center_align
-                        c = ws.cell(row=r, column=3, value=boarders)
-                        ws.merge_cells(start_row=r, start_column=3, end_row=r + room_count - 1, end_column=3)
-                        c.font = Font(bold=True)
-                        c.alignment = center_align
-
-                    ws.cell(row=r, column=4, value=room.building).alignment = left_align
-                    ws.cell(row=r, column=5, value=room.room_number).alignment = center_align
-                    ws.cell(row=r, column=6, value=room.capacity).alignment = center_align
-                    combined = room.combined_class if room.combined_class and room.combined_class.strip() else ''
-                    ws.cell(row=r, column=7, value=combined).alignment = center_align
-
-                    for ci in range(1, 8):
-                        ws.cell(row=r, column=ci).border = thin_border
-                    row += 1
-
-                # 小计行
-                cls_beds = sum(r.capacity for r in room_list)
-                c = ws.cell(row=row, column=5, value=f'小计：{room_count}间')
-                c.font = sum_font
-                c.alignment = Alignment(horizontal='right')
-                c = ws.cell(row=row, column=6, value=f'{cls_beds}床')
-                c.font = sum_font
-                c.alignment = center_align
-                for ci in range(1, 8):
-                    ws.cell(row=row, column=ci).border = thin_border
-                    ws.cell(row=row, column=ci).fill = PatternFill(start_color='F2F2F2', end_color='F2F2F2', fill_type='solid')
+            # 一房一行
+            for room in room_list:
+                members = room_students.get(room.id, [])
+                room_class = room.combined_name or room.class_name or ''
+                values = [
+                    room.building or '',
+                    room.room_number or '',
+                    (grade or '') + room_class,
+                    room.capacity,
+                    len(members),
+                    '、'.join(members) if members else '未分配',
+                ]
+                for ci, val in enumerate(values, 1):
+                    cell = ws.cell(row=row, column=ci, value=val)
+                    cell.font = Font(size=10)
+                    cell.border = thin_border
+                    if ci == COL_COUNT:
+                        cell.alignment = wrap_align
+                    elif ci == 1:
+                        cell.alignment = left_align
+                    else:
+                        cell.alignment = center_align
                 row += 1
 
-            row += 1  # 性别间空行
+            # 性别小计行
+            sub_beds = sum(r.capacity for r in room_list)
+            sub_assigned = sum(len(room_students.get(r.id, [])) for r in room_list)
+            sub_values = ['小计', '', f'{len(room_list)} 间', sub_beds, sub_assigned, '']
+            for ci, val in enumerate(sub_values, 1):
+                cell = ws.cell(row=row, column=ci, value=val)
+                cell.font = sum_font
+                cell.border = thin_border
+                cell.fill = PatternFill(start_color='F2F2F2', end_color='F2F2F2', fill_type='solid')
+                cell.alignment = center_align
+            row += 2
+
+    # A4 横向：适应一页宽
+    import openpyxl
+    ws.page_setup.paperSize = ws.PAPERSIZE_A4
+    ws.page_setup.orientation = ws.ORIENTATION_LANDSCAPE
+    ws.page_setup.fitToWidth = 1
+    ws.page_setup.fitToHeight = 0
+    ws.sheet_properties.pageSetUpPr = openpyxl.worksheet.properties.PageSetupProperties(fitToPage=True)
+    ws.page_margins = openpyxl.worksheet.page.PageMargins(left=0.3, right=0.3, top=0.5, bottom=0.5)
 
     output = BytesIO()
     wb.save(output)
@@ -1424,7 +1441,7 @@ def report_export():
 
     try:
         log_detail = {
-            'columns': ['班级', '性别', '住校生', '宿舍楼', '房间号', '床位数', '合班标记'],
+            'columns': ['宿舍楼', '房间号', '班级', '床位数', '住宿人数', '学生名单（床位·姓名）'],
             'record_count': len(rooms),
             'file_name': filename,
             'filters': {'grade': grade_filter}

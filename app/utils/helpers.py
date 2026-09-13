@@ -1,5 +1,6 @@
 # StuLink v1.7.0 2026-08-02
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
+import re
 from app.models import DictCategory, Student, Room, ClassProfile, ClassSubject
 from app.utils.cache import cache
 from flask import request
@@ -128,6 +129,35 @@ def get_graduated_grades():
         return [gs.grade for gs in GradeSetting.query.filter_by(is_graduated=True).all()]
     except Exception:
         return []
+
+
+def get_active_grades():
+    """在校生年级（排除已毕业年级）
+
+    主应用（StuLink）统一使用：年级下拉框、年级筛选、自动/可视化宿舍分配等
+    一律只看到在校年级；已毕业年级只出现在往届生查询站（Alumni）。
+    """
+    graduated = get_graduated_grades()
+    if not graduated:
+        return get_dict_values('grade')
+    return [g for g in get_dict_values('grade') if g not in graduated]
+
+
+# 标准班级名：包含数字+"班"（如 01班、2024级01班）
+# 非标准班级：未分班、不分班、已转出、借读等
+_STANDARD_CLASS_PATTERN = re.compile(r'\d+班')
+
+
+def is_standard_class(class_name):
+    """是否为正式班级（排除 不分班/已转出/借读 等）"""
+    if not class_name:
+        return False
+    return bool(_STANDARD_CLASS_PATTERN.search(class_name))
+
+
+def get_class_options():
+    """班级下拉框选项：只返回正式班级，排除 不分班/已转出 等"""
+    return [c for c in get_dict_values('class') if is_standard_class(c)]
 
 
 def write_change_log(change_type, students_data, old_value='', new_value='', detail='', operator_name=''):

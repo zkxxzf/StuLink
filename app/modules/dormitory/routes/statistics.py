@@ -6,7 +6,9 @@ from markupsafe import Markup
 from flask_login import login_required, current_user
 from app.models import Student, Room, BedAssignment, UserClassLink, StudentAccommodation
 from app.extensions import db
-from app.utils.helpers import get_dict_values, log_operation, get_graduated_grades
+from sqlalchemy import func
+from app.utils.helpers import (get_dict_values, get_active_grades, get_class_options,
+                               is_standard_class, log_operation, get_graduated_grades)
 from app.utils.decorators import perm_required
 import io
 import uuid
@@ -18,16 +20,9 @@ SCOPE_CLASS = 'class'    # 班主任：只看所管班级
 SCOPE_GRADE = 'grade'    # 年级长：只看所管年级
 SCOPE_SCHOOL = 'school'  # 全校组/admin：看全部
 
-# 标准班级名匹配模式：包含数字+"班"的（如 01班、2024级01班）
-# 非标准班级：未分班、不分班、转出、转进、借读等
-_VALID_CLASS_PATTERN = re.compile(r'\d+班')
-
-
 def _is_valid_class(class_name):
-    """判断是否为标准班级名"""
-    if not class_name:
-        return False
-    return bool(_VALID_CLASS_PATTERN.search(class_name))
+    """判断是否为标准班级名（统一走 helpers.is_standard_class，避免口径漂移）"""
+    return is_standard_class(class_name)
 
 
 def _get_scope():
@@ -126,6 +121,8 @@ def _build_per_grade_stats(filter_grade=None):
         qs = Student.query.filter_by(grade=grade)
         if graduated:
             qs = qs.filter(~Student.grade.in_(graduated))
+        # 在校生口径：不包含“不分班”学生
+        qs = qs.filter(func.coalesce(Student.class_name, '') != '不分班')
         total = qs.count()
         male = qs.filter_by(gender='男').count()
         female = qs.filter_by(gender='女').count()
@@ -148,7 +145,10 @@ def _build_per_grade_stats(filter_grade=None):
             StudentAccommodation.boarding_type == '住校'
         ).count()
         
-        class_count = db.session.query(Student.class_name).filter_by(grade=grade).distinct().count()
+        class_count = db.session.query(Student.class_name).filter(
+            Student.grade == grade,
+            func.coalesce(Student.class_name, '') != '不分班'
+        ).distinct().count()
 
         result.append({
             'grade': grade, 'class_count': class_count,
@@ -165,6 +165,8 @@ def _build_school_stats():
     qs = Student.query
     if graduated:
         qs = qs.filter(~Student.grade.in_(graduated))
+    # 在校生口径：不包含“不分班”学生
+    qs = qs.filter(func.coalesce(Student.class_name, '') != '不分班')
     total = qs.count()
     male = qs.filter_by(gender='男').count()
     female = qs.filter_by(gender='女').count()
@@ -187,8 +189,14 @@ def _build_school_stats():
         StudentAccommodation.boarding_type == '住校'
     ).count()
     
-    grade_count = db.session.query(Student.grade).distinct().count()
-    class_count = db.session.query(Student.grade, Student.class_name).distinct().count()
+    # 年级数/班级数同样按在校生口径：排除已毕业年级
+    _exclude_graduated = ~Student.grade.in_(graduated) if graduated else True
+    grade_count = db.session.query(Student.grade).filter(
+        func.coalesce(Student.class_name, '') != '不分班'
+    ).filter(_exclude_graduated).distinct().count()
+    class_count = db.session.query(Student.grade, Student.class_name).filter(
+        func.coalesce(Student.class_name, '') != '不分班'
+    ).filter(_exclude_graduated).distinct().count()
 
     return {
         'grade_count': grade_count, 'class_count': class_count,
@@ -216,7 +224,9 @@ def _dorm_stats():
 def index():
     scope_type, user_grade = _get_scope()
     tab = request.args.get('tab', scope_type)  # 默认选用户范围对应的tab
-    if tab not in ('school', 'grade', 'class', 'import', 'rooms'):
+    if tab == 'grade':  # 旧链接兼容：年级统计已并入班级统计
+        tab = 'class'
+    if tab not in ('school', 'class', 'import', 'rooms'):
         tab = 'school'
     sel_grade = request.args.get('grade', user_grade or '')
 
@@ -229,10 +239,10 @@ def index():
         per_grade_stats = []
         school_stats = {}
         grade_options = list(set(l.grade for l in links))
-    # 年级长：看 grade 或 class tab，限制年级
+    # 年级长：只看 class tab，限制年级
     elif scope_type == SCOPE_GRADE:
         if tab == 'school':
-            tab = 'grade'
+            tab = 'class'
         if not sel_grade:
             sel_grade = user_grade or ''
         per_class_stats = _build_per_class_stats(filter_grade=sel_grade)
@@ -244,14 +254,14 @@ def index():
         per_class_stats = _build_per_class_stats(filter_grade=sel_grade if tab == 'class' and sel_grade else None)
         per_grade_stats = _build_per_grade_stats()
         school_stats = _build_school_stats()
-        grade_options = sorted(get_dict_values('grade'), reverse=True)
+        grade_options = sorted(get_active_grades(), reverse=True)
 
-    # 宿舍分配明细（原 /rooms/report）
+    # 宿舍分配明细（原 /rooms/report）：年级 → 性别 → 房间列表（一房一行）
     room_tree = {}
-    room_class_totals = {}
     room_total_beds = 0
-    room_total_boarders = 0
     room_total_rooms = 0
+    room_student_map = {}
+    room_total_occupied = 0
     if tab == 'rooms':
         from collections import OrderedDict
         rq = Room.query.filter(
@@ -261,53 +271,46 @@ def index():
         )
         if sel_grade:
             rq = rq.filter_by(grade=sel_grade)
+        # 以宿舍为单位：房间按 宿舍楼→楼层→房间号 排列
         rooms = rq.order_by(
-            Room.grade, Room.gender, Room.class_name,
-            Room.building, Room.room_number
+            Room.grade, Room.gender, Room.building, Room.floor, Room.room_number
         ).all()
         room_tree = OrderedDict()
         for room in rooms:
             g = room.grade or ''
             gender = room.gender or ''
-            cn = room.combined_name or room.class_name or ''
             if g not in room_tree:
                 room_tree[g] = OrderedDict()
-            if gender not in room_tree[g]:
-                room_tree[g][gender] = OrderedDict()
-            if cn not in room_tree[g][gender]:
-                room_tree[g][gender][cn] = []
-            room_tree[g][gender][cn].append(room)
-        
-        boarding_ids = [sa.student_id for sa in StudentAccommodation.query.filter(
-            StudentAccommodation.boarding_type == '住校'
-        ).all()]
-        
-        for g in room_tree:
-            for gender in room_tree[g]:
-                for cn in room_tree[g][gender]:
-                    # 合班房：统计多个班级的住校生总和（班级不分主次）
-                    if '+' in cn:
-                        class_parts = [p.strip() for p in cn.split('+') if p.strip()]
-                        cnt = sum(
-                            Student.query.filter(
-                                Student.grade == g,
-                                Student.class_name == p,
-                                Student.gender == gender,
-                                Student.id.in_(boarding_ids) if boarding_ids else False
-                            ).count()
-                            for p in class_parts
-                        )
-                    else:
-                        cnt = Student.query.filter(
-                            Student.grade == g,
-                            Student.class_name == cn,
-                            Student.gender == gender,
-                            Student.id.in_(boarding_ids) if boarding_ids else False
-                        ).count()
-                    room_class_totals[(g, cn, gender)] = cnt
+            room_tree[g].setdefault(gender, []).append(room)
+
         room_total_rooms = len(rooms)
         room_total_beds = sum(r.capacity for r in rooms)
-        room_total_boarders = sum(room_class_totals.values())
+
+        # 每个房间的入住学生名单（按床位号排序）
+        room_student_map = {}
+        if rooms:
+            room_ids = [r.id for r in rooms]
+            bed_rows = BedAssignment.query.filter(
+                BedAssignment.room_id.in_(room_ids),
+                BedAssignment.student_id.isnot(None)
+            ).order_by(BedAssignment.room_id, BedAssignment.bed_number).all()
+            bed_student_ids = [b.student_id for b in bed_rows]
+            _student_map = {}
+            if bed_student_ids:
+                for s in Student.query.filter(Student.id.in_(bed_student_ids)).all():
+                    _student_map[s.id] = s
+            for bed in bed_rows:
+                stu = _student_map.get(bed.student_id)
+                if not stu:
+                    continue
+                room_student_map.setdefault(bed.room_id, []).append({
+                    'bed_number': bed.bed_number,
+                    'student_number': stu.student_number or '',
+                    'name': stu.name or '',
+                    'gender': stu.gender or '',
+                    'class_name': stu.class_name or '',
+                })
+            room_total_occupied = sum(len(v) for v in room_student_map.values())
 
     return render_template('dormitory/statistics/overview.html',
                            tab=tab,
@@ -319,10 +322,10 @@ def index():
                            dorm_stats=_dorm_stats(),
                            scope_type=scope_type,
                            room_tree=room_tree,
-                           room_class_totals=room_class_totals,
+                           room_student_map=room_student_map,
                            room_total_rooms=room_total_rooms,
                            room_total_beds=room_total_beds,
-                           room_total_boarders=room_total_boarders)
+                           room_total_occupied=room_total_occupied)
 
 
 # ---- 宿舍历史查询 ----
