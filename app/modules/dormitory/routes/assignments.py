@@ -6,7 +6,7 @@ from datetime import datetime
 from app.extensions import db
 from app.models import Room, BedAssignment, Student, StudentAccommodation
 from app.utils.decorators import perm_required
-from app.utils.helpers import get_dict_values, log_operation, get_graduated_grades
+from app.utils.helpers import get_dict_values, get_active_grades, log_operation, get_graduated_grades
 from app.services.history_service import record_assignment
 from sqlalchemy import and_, exists
 import threading
@@ -34,7 +34,7 @@ def _bed_write_lock_decorator(f):
 @bp.route('/manage')
 @perm_required('dormitory.beds')
 def manage():
-    grades = get_dict_values('grade')
+    grades = get_active_grades()
     graduated = get_graduated_grades()
     grades = [g for g in grades if g not in graduated]
 

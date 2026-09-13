@@ -6,7 +6,7 @@ from flask_login import login_required, current_user
 from app.models import Student, Room, BedAssignment, User, StudentAccommodation
 from app.extensions import db
 from sqlalchemy import func, case, text
-from app.utils.helpers import get_graduated_grades, get_dict_values
+from app.utils.helpers import get_graduated_grades, get_dict_values, get_active_grades
 from app.utils.decorators import perm_required
 from app.utils.helpers import log_operation
 
@@ -24,6 +24,8 @@ def index():
     )
     if graduated:
         base_q = base_q.filter(~Student.grade.in_(graduated))
+    # 在校生口径：不包含“不分班”学生
+    base_q = base_q.filter(func.coalesce(Student.class_name, '') != '不分班')
     student_stats = base_q.one()
 
     # 查询 dormitory.db 中的住宿统计（关联 Student 表，只统计存在的学生）
@@ -244,7 +246,7 @@ def search_student_accommodation():
     )
     students = pagination.items
 
-    grades = get_dict_values('grade')
+    grades = get_active_grades()
     grades = [g for g in grades if g not in graduated]
     classes = get_dict_values('class')
     boarding_types = get_dict_values('boarding_type')
