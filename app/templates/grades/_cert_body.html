@@ -7,7 +7,7 @@
 {% macro cert_doc(content, cert, mask_id) %}
 {% set h = content.cert_header if content.cert_header else {} %}
 {% set m = content.cert_matrix if content.cert_matrix else none %}
-{% set school = content.school_name or '郑州市郑开学校' %}
+{% set school = content.school_name or 'StuLink' %}
 <div class="cert-doc">
     <div class="cert-school">{{ school }}</div>
     <div class="cert-title">高中学生成绩认定证明</div>

@@ -12,7 +12,7 @@ from app.extensions import db
 from app.models.grades import Exam, ExamBand, BandTemplate, SUBJECTS, TOTAL_SUBJECT
 from app.modules.grades import bp
 from app.modules.grades.services import stats_service as st
-from app.modules.grades.utils import delete_cache_prefix
+from app.modules.grades.utils import delete_cache_prefix, invalidate_exam_cache
 from app.utils.decorators import perm_required
 from app.utils.helpers import log_operation
 
@@ -270,7 +270,7 @@ def bands_save():
     db.session.commit()
     _log().info('单个保存成功 exam_id=%s %s·%s：%d 层 %s', exam_id, direction, subject,
                 len(items), [(i['name'], i['lower_value']) for i in items])
-    delete_cache_prefix(f'grades_tab_{exam_id}_')
+    invalidate_exam_cache(exam_id)
     log_operation(current_user, '划线', '考试', exam_id,
                   f'{exam.name} {direction}·{subject}分层保存', module='grades')
     return jsonify(success=True, data=_bands_payload(exam_id, direction, subject))
@@ -368,7 +368,7 @@ def bands_batch():
 
     db.session.commit()
     _log().info('结果：成功 %d 个组合，跳过 %d 个 %s', len(applied), len(skipped), skipped)
-    delete_cache_prefix(f'grades_tab_{exam_id}_')
+    invalidate_exam_cache(exam_id)
     log_operation(current_user, '划线', '考试', exam_id,
                   f'{exam.name} 批量划线（{mode}，'
                   f'{"全科统一" if scope == "all" else "分科"}，{len(applied)} 个组合）',
@@ -435,7 +435,7 @@ def bands_apply():
         db.session.rollback()
         return jsonify(success=False, message='所选范围没有参考学生，未应用'), 400
     db.session.commit()
-    delete_cache_prefix(f'grades_tab_{exam_id}_')
+    invalidate_exam_cache(exam_id)
     log_operation(current_user, '划线', '考试', exam_id,
                   f'{exam.name} 应用模板 {tpl}（{"全部方向" if both else "、".join(targets)}'
                   f' × {len(subs)}个学科）', module='grades')

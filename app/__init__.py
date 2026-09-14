@@ -236,6 +236,29 @@ def create_app():
     def nl2br_filter(text):
         return Markup(escape(str(text)).replace('\n', '<br>'))
 
+    # 静态资源版本号：取 app/static 下 js/css 的最新修改时间。
+    # 模板里用 {{ url_for('static', filename=..., v=asset_v) }} 追加 ?v=，
+    # 改动 JS/CSS 后浏览器自动拉取新文件，根治「改了代码但浏览器用旧缓存」
+    # 导致的汇报区持续 loading、下拉失效等问题（无需手动 Ctrl+F5）。
+    import os as _os
+
+    @app.context_processor
+    def inject_asset_version():
+        root = _os.path.join(app.static_folder, '')
+        latest = 0
+        for sub in ('js', 'css'):
+            d = _os.path.join(root, sub)
+            if not _os.path.isdir(d):
+                continue
+            for fn in _os.listdir(d):
+                try:
+                    mt = _os.path.getmtime(_os.path.join(d, fn))
+                except OSError:
+                    continue
+                if mt > latest:
+                    latest = mt
+        return {'asset_v': int(latest)}
+
     # Gzip 压缩响应（提升传输速度）
     @app.after_request
     def compress_response(response):

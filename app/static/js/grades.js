@@ -130,6 +130,7 @@ function bindFilters(){
         window.location.href = '/grades/export/' + state.tab + q;
     });
     $('#gPrint').on('click', function(){ window.print(); });
+    // v1.13.0 汇报区入口已移至左侧菜单栏（base.html），顶部按钮及相关逻辑同步移除
 }
 
 function bindTabs(){

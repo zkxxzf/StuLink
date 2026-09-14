@@ -700,4 +700,6 @@ def teacher_tab(exam_id, subject=None, links=None, grade=None):
 
 
 def clear_exam_cache(exam_id):
-    delete_cache_prefix(f'grades_tab_{exam_id}_')
+    # v1.13.0 同时失效汇报区缓存（单/双上线、去差均分等依赖划线与成绩）
+    from app.modules.grades.utils import invalidate_exam_cache
+    invalidate_exam_cache(exam_id)
