@@ -1,0 +1,62 @@
+{% extends "base.html" %}
+{% block title %}系统设置{% endblock %}
+{% block content %}
+<div class="d-flex align-items-center mb-3">
+    <a href="{{ url_for('system_dashboard.index') }}" class="btn btn-sm btn-outline-secondary me-3">
+        <i class="bi bi-arrow-left"></i> 返回
+    </a>
+    <h4 class="fw-bold mb-0"><i class="bi bi-sliders"></i> 系统设置</h4>
+</div>
+
+<div class="row g-4">
+    <div class="col-lg-7">
+        <div class="card border-0 shadow-sm">
+            <div class="card-header bg-white py-2">
+                <span class="fw-semibold"><i class="bi bi-building"></i> 学校名称</span>
+            </div>
+            <div class="card-body">
+                <form method="POST">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                    <div class="mb-3">
+                        <label class="form-label">学校全称 <span class="text-danger">*</span></label>
+                        <input type="text" name="school_name" class="form-control" maxlength="60"
+                               value="{{ school_name }}" placeholder="例如：某某学校" required>
+                        <div class="form-text">用于成绩证明等对外文书的抬头，保存后立即生效（无需重启）。</div>
+                    </div>
+
+                    {% if env_override %}
+                    <div class="alert alert-warning small">
+                        <i class="bi bi-exclamation-triangle"></i>
+                        当前环境已设置环境变量 <code>SCHOOL_NAME</code>，其优先级高于此处，页面保存后实际生效的仍是环境变量值。
+                    </div>
+                    {% endif %}
+
+                    <div class="d-flex gap-2">
+                        <button type="submit" class="btn btn-primary">
+                            <i class="bi bi-check-lg"></i> 保存
+                        </button>
+                        <a href="{{ url_for('system_dashboard.index') }}" class="btn btn-outline-secondary">取消</a>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <div class="col-lg-5">
+        <div class="card border-0 shadow-sm">
+            <div class="card-header bg-white py-2">
+                <span class="fw-semibold"><i class="bi bi-eye"></i> 效果预览</span>
+            </div>
+            <div class="card-body text-center">
+                <div class="fw-bold fs-5">{{ school_name }}</div>
+                <div class="mt-3 text-muted small">高中学生成绩认定证明</div>
+                <hr>
+                <div class="text-muted small text-start">
+                    兹证明学生 <b>张三</b>，性别 男，身份证号：410101********1234，
+                    学籍号：***，现读生自 2024 年 9 月进入本校就读，已完成相应课程，成绩如下：
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

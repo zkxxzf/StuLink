@@ -207,7 +207,9 @@ def api_create_cert():
     basic = result['student']
     # 证明抬头（姓名/性别/身份证号/学籍号/入学时间）与校名随快照固化，保证事后可验真
     result['cert_header'] = student_service.cert_header(student_no)
-    result['school_name'] = current_app.config.get('SCHOOL_NAME', '')
+    # 学校名称：环境变量 > 数据库系统设置 > 化名占位
+    from app.utils.helpers import get_school_name
+    result['school_name'] = get_school_name()
     content_json = json.dumps(result, ensure_ascii=False)
     # v1.12.2 加密防伪码：SL+日期+随机码+HMAC(密钥, 学号|随机码|内容哈希)；随机码/签名随记录落库
     from app.utils.cert_sign import make_code
