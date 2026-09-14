@@ -46,12 +46,22 @@ class ExamData:
                                   ((Exam.exam_date == self.exam.exam_date) &
                                    (Exam.id < self.exam.id)))
                           .order_by(Exam.exam_date.desc(), Exam.id.desc()).first())
-        self.prev_totals = {}
-        if self.prev_exam:
-            for r in ExamScore.query.filter_by(exam_id=self.prev_exam.id,
-                                               subject=TOTAL_SUBJECT).all():
-                if r.score is not None:
-                    self.prev_totals[r.student_no] = (r.score, r.rank_dir)
+        # 惰性：仅班级分析（进退步对比）需要上一场成绩，年级/学科/教师分析用不到，
+        # 故改为首次访问时才查，避免每次构造 ExamData 都白拉一场全量总分行
+        self._prev_totals = None
+
+    @property
+    def prev_totals(self):
+        """上一场考试 {学号: (总分, 方向排名)}（惰性加载）"""
+        if self._prev_totals is None:
+            out = {}
+            if self.prev_exam:
+                for r in ExamScore.query.filter_by(exam_id=self.prev_exam.id,
+                                                   subject=TOTAL_SUBJECT).all():
+                    if r.score is not None:
+                        out[r.student_no] = (r.score, r.rank_dir)
+            self._prev_totals = out
+        return self._prev_totals
 
     # ---------- 基础 ----------
     def full_marks(self):
@@ -113,7 +123,15 @@ class ExamData:
 
     # ---------- 分数段 / 名次段 ----------
     def score_segments(self):
-        """等距分数段 [(label, low, high)]，覆盖到最高分"""
+        """等距分数段 [(label, low, high)]，覆盖到最高分（实例内缓存）
+
+        性能：segment_index() 对每名学生调用一次，若此处每次重算（内部要扫全量
+        total_rows 求最高分）会退化成 O(n²)。1500 人 × 多张分段表时，这是分析页
+        打开慢的主因。ExamData 按请求创建，实例级缓存不跨请求，改配置后不会读到旧值。
+        """
+        cache = getattr(self, '_seg_cache', None)
+        if cache is not None:
+            return cache
         width = self.exam.band_width()
         max_score = max((r.score for r in self.total_rows), default=0) or 0
         top = int(math.ceil(max_score / width) * width)
@@ -122,6 +140,7 @@ class ExamData:
             segs.append((f'[{low},{low + width})', low, low + width))
         if not segs:
             segs.append(('[0,0)', 0, 0))
+        self._seg_cache = segs
         return segs
 
     def segment_index(self, score):
@@ -132,7 +151,10 @@ class ExamData:
         return len(segs) - 1
 
     def rank_segments(self):
-        """名次段 [(label, low, high)]，rank 1 起始"""
+        """名次段 [(label, low, high)]，rank 1 起始（实例内缓存，理由同 score_segments）"""
+        cache = getattr(self, '_rank_seg_cache', None)
+        if cache is not None:
+            return cache
         edges = self.exam.rank_bands()
         segs = []
         prev = 1
@@ -140,6 +162,7 @@ class ExamData:
             segs.append((f'{prev}-{e}', prev, e))
             prev = e + 1
         segs.append((f'{prev}+', prev, 10 ** 9))
+        self._rank_seg_cache = segs
         return segs
 
     def rank_segment_index(self, rank):
@@ -164,6 +187,43 @@ class ExamData:
         for s in sel_sets:
             union |= s
         return [s for s in SUBJECTS if s in union]
+
+    # ---------- 分批导入（一次导一科）识别 ----------
+    @property
+    def imported_subjects(self):
+        """本场已有成绩的科目（分批导入时可能只导入了其中几科）"""
+        cache = getattr(self, '_imported_subs', None)
+        if cache is None:
+            present = {r.subject for r in self.rows
+                       if r.subject != TOTAL_SUBJECT and r.score is not None}
+            self._imported_subs = [s for s in SUBJECTS if s in present]
+        return self._imported_subs
+
+    @property
+    def expected_subjects(self):
+        """本届学生应考科目并集（由选科组合推断）"""
+        cache = getattr(self, '_expected_subs', None)
+        if cache is None:
+            sel = set()
+            for r in self.total_rows:
+                sel |= set(subjects_of_selection(r.subject_selection) or [])
+            self._expected_subs = [s for s in SUBJECTS if s in sel]
+        return self._expected_subs
+
+    def partial_import(self):
+        """分批导入中：仍有应考科目未导入（此时总分＝已导入科目合计，口径不完整）。
+
+        返回 None 表示科目已齐（或未分科无法判断）；否则返回
+        {'imported': [...], 'expected': [...], 'missing': [...]}。
+        """
+        exp = self.expected_subjects
+        if not exp:
+            return None
+        missing = [s for s in exp if s not in self.imported_subjects]
+        if not missing:
+            return None
+        return {'imported': self.imported_subjects, 'expected': exp,
+                'missing': missing}
 
 
 # ============ 指标计算 ============

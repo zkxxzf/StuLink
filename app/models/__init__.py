@@ -11,7 +11,7 @@ from app.models.permission_group import PermissionGroup
 from app.models.user_class_link import UserClassLink
 from app.models.grade_setting import GradeSetting
 from app.models.grades import Exam, ExamScore, ExamBand, TeacherSubjectLink, \
-    AiKey, AiGlobalKey, AiReport
+    AiKey, AiGlobalKey, AiReport, AffairRoomLib  # v1.12.1 考场房间库
 from app.models.points import PointRecord
 
 __all__ = ['User', 'Student', 'Room', 'BedAssignment', 'StudentAccommodation',
@@ -19,5 +19,5 @@ __all__ = ['User', 'Student', 'Room', 'BedAssignment', 'StudentAccommodation',
            'ClassProfile', 'ClassSubject',
            'PermissionGroup', 'UserClassLink', 'GradeSetting',
            'Exam', 'ExamScore', 'ExamBand', 'TeacherSubjectLink',
-           'AiKey', 'AiGlobalKey', 'AiReport', 'PointRecord']
+           'AiKey', 'AiGlobalKey', 'AiReport', 'AffairRoomLib', 'PointRecord']
 

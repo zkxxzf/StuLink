@@ -1,0 +1,44 @@
+{% extends "base.html" %}
+{% block title %}个人成绩查询与分析{% endblock %}
+{% block extra_css_head %}
+<link href="{{ url_for('static', filename='css/grades.css') }}" rel="stylesheet">
+{% endblock %}
+{% block content %}
+<div id="sqApp" class="no-print">
+    <div class="g-filter-bar d-flex flex-wrap gap-2 align-items-center mb-3">
+        <h5 class="mb-0 me-1"><i class="bi bi-person-vcard"></i> 个人成绩查询与分析</h5>
+        <div class="position-relative" style="min-width:240px;">
+            <div class="input-group input-group-sm">
+                <input id="sqStudent" class="form-control" placeholder="输入学号或姓名搜索…" autocomplete="off">
+                <button class="btn btn-outline-secondary" id="sqSearchBtn" type="button">
+                    <i class="bi bi-search"></i>
+                </button>
+            </div>
+            <ul id="sqStudentMenu" class="list-group position-absolute w-100 shadow d-none"
+                style="z-index:1050; top:100%; left:0;"></ul>
+        </div>
+        <select id="sqTerm" class="form-select form-select-sm w-auto" title="学期"><option value="">学期</option></select>
+        <select id="sqType" class="form-select form-select-sm w-auto" title="考试类型"><option value="">考试类型</option></select>
+        <input type="date" id="sqFrom" class="form-control form-control-sm w-auto" title="起始日期">
+        <input type="date" id="sqTo" class="form-control form-control-sm w-auto" title="截止日期">
+        <select id="sqSubject" class="form-select form-select-sm w-auto" title="科目(分析聚焦)"><option value="">科目(分析聚焦)</option></select>
+        <select id="sqExam" class="form-select form-select-sm w-auto d-none" title="指定单场"></select>
+        <button class="btn btn-sm btn-primary" id="sqQuery"><i class="bi bi-graph-up"></i> 查询</button>
+        {# v1.12.2 成绩证明记录入口：查看历史生成台账（防伪码/学生/范围/生成人/时间/状态） #}
+        <a href="{{ url_for('grades.cert_records_page') }}" class="btn btn-sm btn-outline-secondary ms-auto">
+            <i class="bi bi-card-checklist"></i> 证明记录</a>
+        <button class="btn btn-sm btn-outline-success" id="sqCert"><i class="bi bi-file-earmark-check"></i> 生成成绩证明</button>
+    </div>
+
+    <div id="sqStudentInfo" class="alert alert-light border py-2 small d-none"></div>
+    <div id="sqResult"></div>
+    <div id="sqEmpty" class="empty-state d-none text-center text-muted py-5">
+        <i class="bi bi-inbox" style="font-size:2rem;"></i>
+        <p class="mt-2 mb-0">请先选择学生并点击「查询」</p>
+    </div>
+</div>
+{% endblock %}
+{% block extra_js %}
+<script src="{{ url_for('static', filename='js/echarts.min.js') }}"></script>
+<script src="{{ url_for('static', filename='js/student_query.js') }}"></script>
+{% endblock %}

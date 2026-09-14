@@ -32,3 +32,4 @@ DEPLOY_NAS.md
 .gitignore
 _tmp_*
 data
+logs

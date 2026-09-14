@@ -4,6 +4,7 @@
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 from app.models.grades import SUBJECTS, TOTAL_SUBJECT
 from app.modules.grades.services import stats_service as st
+from app.modules.grades.services import pivot_service as pv
 from app.modules.grades.utils import delete_cache_prefix
 
 
@@ -66,8 +67,15 @@ def grade_tab(exam_id, direction=''):
         ],
         'rows': st.subject_table(data, dr),
     }
-    # A1-T3 分数段 / A1-T4 名次段
-    _segment_tables(data, tables, direction=dr, classes=shown_classes)
+    # A1-T6 各班分层上线统计（累计口径：达该层下界及以上，按方向各自划线判定）
+    pass_stats = pv.layer_pass_stats(data, TOTAL_SUBJECT)
+    if pass_stats:
+        _t = pv.layer_pass_table(pass_stats)
+        if _t:
+            tables['layer_pass'] = _t
+    # A1-T3 分数段 / A1-T4 名次段（一次算出，分段结果同时供 G2 堆叠图复用）
+    segs, seg_rows = _segment_tables(data, tables, direction=dr, classes=shown_classes,
+                                     ret=True)
     # A1-T5 历次考试总览（聚合查询，避免逐场构造 ExamData）
     rows = []
     _tm = st.exam_score_means(exam.grade, [TOTAL_SUBJECT], direction=dr)
@@ -94,9 +102,7 @@ def grade_tab(exam_id, direction=''):
         'series': [{'name': '总分均值', 'data': [r['avg'] for r in summary]}],
         'markLine': st.mean([r['avg'] for r in summary if r['avg'] is not None]) or 0,
     }
-    # G2 分数段堆叠柱
-    segs, seg_rows = _segment_tables(data, tables, direction=dr, classes=shown_classes,
-                                     ret=True)
+    # G2 分数段堆叠柱（复用上面已算好的 segs/seg_rows，避免再统计一遍全年级）
     charts['seg_stack'] = {
         'type': 'stack', 'title': '年级分数段人数分布', 'stackKey': 'class_name',
         'xAxis': [s[0] for s in segs],
@@ -118,11 +124,21 @@ def grade_tab(exam_id, direction=''):
         'series': trends['series'],
         'selected': {'总分': True, '语文': True, '数学': True, '外语': True},
     }
+    # G5 各班分层累计上线率（需已划线；未划线时 pass_stats 为 None，不出图）
+    if pass_stats:
+        charts['layer_rate'] = {
+            'type': 'groupbar', 'title': '各班分层累计上线率（%）',
+            'xAxis': [r['class_name'] for r in pass_stats['rows']],
+            'series': [{'name': n,
+                        'data': [r['rate'].get(n) for r in pass_stats['rows']]}
+                       for n in pass_stats['layers']],
+        }
     return {'exam': {'id': exam.id, 'name': exam.name, 'grade': exam.grade,
                      'date': exam.exam_date.strftime('%Y-%m-%d'), 'status': exam.status},
             'tables': tables, 'charts': charts,
             'meta': {'classes': shown_classes, 'directions': data.directions,
-                     'layers': layer_names, 'direction': direction}}
+                     'layers': layer_names, 'direction': direction,
+                     'partial': data.partial_import()}}
 
 
 def _cell_layer(v):
@@ -343,7 +359,7 @@ def class_tab(exam_id, class_name):
                      'date': exam.exam_date.strftime('%Y-%m-%d'), 'status': exam.status},
             'class_name': class_name,
             'tables': tables, 'charts': charts,
-            'meta': {'classes': data.classes}}
+            'meta': {'classes': data.classes, 'partial': data.partial_import()}}
 
 
 def _score_rate(t, fm, key):

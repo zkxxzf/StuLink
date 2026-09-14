@@ -89,7 +89,7 @@ PERMISSION_GROUPS = [
             'system.perm_groups', 'system.grade_mgmt',
             'points.view', 'points.edit',
             'grades.view', 'grades.edit',
-            'grades.import', 'grades.settings', 'grades.teachers',
+            'grades.import', 'grades.settings', 'grades.teachers', 'grades.student_query',
         ],
     },
     {
@@ -105,7 +105,7 @@ PERMISSION_GROUPS = [
             'dormitory.view', 'dormitory.beds',
             'statistics.view',
             'points.view', 'grades.view',
-            'grades.edit', 'grades.import', 'grades.settings',
+            'grades.edit', 'grades.import', 'grades.settings', 'grades.student_query',
         ],
     },
     {
@@ -120,7 +120,7 @@ PERMISSION_GROUPS = [
             'students.transfer',
             'dormitory.view', 'dormitory.beds',
             'statistics.view',
-            'points.view', 'grades.view',
+            'points.view', 'grades.view', 'grades.student_query',
         ],
     },
     {
@@ -143,7 +143,7 @@ PERMISSION_GROUPS = [
         'menu_keys': [
             'students.view',
             'points.view', 'points.edit',
-            'grades.view',
+            'grades.view', 'grades.student_query',
         ],
     },
 ]
@@ -217,6 +217,9 @@ def create_app():
 
     from app.models import User, Student, Room, BedAssignment, DictCategory, DictItem
     from app.models import OperationLog, PermissionGroup, ClassProfile, GradeSetting, UserClassLink, AssignmentHistory
+    from app.models.grades import (Exam, ExamScore, ExamBand, BandTemplate,
+                                   TeacherSubjectLink, AiKey,
+                                   AiGlobalKey, AiReport, Certificate)
     with app.app_context():
         db.create_all()
         

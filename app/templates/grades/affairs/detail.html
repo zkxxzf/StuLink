@@ -1,0 +1,753 @@
+{% extends "base.html" %}
+{% block title %}考务向导 - 成绩管理{% endblock %}
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-2 flex-wrap gap-2">
+    <div>
+        <a href="{{ url_for('grades.affairs_list') }}" class="text-decoration-none text-muted small">
+            <i class="bi bi-arrow-left"></i> 考务批次</a>
+        <h5 class="mb-0 mt-1"><i class="bi bi-clipboard-check"></i> {{ affair.name }}
+            <span class="badge bg-secondary ms-1">{{ affair.grade }}</span>
+            {% if affair.status == 'linked' %}<span class="badge bg-info">已关联成绩</span>
+            {% elif affair.status == 'arranged' %}<span class="badge bg-success">已编排</span>
+            {% else %}<span class="badge bg-light text-dark">草稿</span>{% endif %}
+        </h5>
+    </div>
+    <div class="d-flex align-items-center gap-2 text-muted small">
+        参考 {{ scope_students|length }} 人 · 已编排 {{ arranged|length }} 人 · 考场 {{ rooms|length }} 个
+        {# v1.12.1 批次设置入口：编排模式 / 非参考处理 / 选科考号前后缀 #}
+        <button class="btn btn-outline-secondary btn-sm py-0" onclick="openSettings()">
+            <i class="bi bi-gear"></i> 批次设置</button>
+    </div>
+</div>
+
+<!-- v1.12.2 移除步骤⑤成绩关联：功能使用率低，按考场查成绩走成绩模块自身入口即可 -->
+<ol class="step-bar list-unstyled d-flex flex-wrap gap-2 mb-3 small">
+    <li class="step-pill"><span class="num">1</span> 学生名单</li>
+    <li class="step-pill"><span class="num">2</span> 考场设置</li>
+    <li class="step-pill"><span class="num">3</span> 编排与考号生成</li>
+    <li class="step-pill"><span class="num">4</span> 导出</li>
+</ol>
+
+<ul class="nav nav-tabs mb-3" id="affairTabs" role="tablist">
+    <li class="nav-item"><button class="nav-link active" data-bs-toggle="tab" data-bs-target="#t1">① 学生名单</button></li>
+    <li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#t2">② 考场设置</button></li>
+    <li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#t3">③ 编排考号</button></li>
+    <li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#t4">④ 导出</button></li>
+</ul>
+
+<div class="tab-content">
+    <!-- v1.12.2 编排容量统计压缩为单行摘要，选科明细折叠展开（原大表格占屏过高） -->
+    <div class="card px-3 py-2 mb-3 small">
+        <div class="d-flex flex-wrap align-items-center gap-3">
+            <span class="fw-bold text-nowrap"><i class="bi bi-clipboard-data"></i> 编排容量</span>
+            <span class="text-nowrap">学生 <b>{{ stats.students }}</b> · 参考 <b>{{ stats.attend }}</b></span>
+            <span class="text-nowrap">考场 <b>{{ stats.rooms }}</b> 个 · 容量 <b>{{ stats.capacity }}</b> 座</span>
+            <span class="{{ 'text-danger' if stats.attend > stats.capacity else 'text-success' }} text-nowrap">
+                {% if stats.attend > stats.capacity %}⚠ 缺 {{ stats.attend - stats.capacity }} 座{% else %}✓ 容量充足{% endif %}
+            </span>
+            <button class="btn btn-link btn-sm p-0 ms-auto text-nowrap" data-bs-toggle="collapse"
+                    data-bs-target="#statsDetail" aria-expanded="false">选科明细 <i class="bi bi-chevron-down small"></i></button>
+        </div>
+        <div class="collapse" id="statsDetail">
+            <div class="d-flex flex-wrap gap-2 pt-2">
+                {% for sel, v in stats.per_sel.items() %}
+                <span class="badge bg-light text-dark border fw-normal">
+                    {{ sel }} {{ v.students }}人
+                    {% if v.students > v.capacity %}<span class="text-danger">缺 {{ v.students - v.capacity }}</span>
+                    {% else %}<span class="text-success">余 {{ v.capacity - v.students }}</span>{% endif %}
+                </span>
+                {% else %}
+                <span class="text-muted">暂无参考学生</span>
+                {% endfor %}
+            </div>
+        </div>
+    </div>
+    <!-- ===== 步骤① 学生名单 ===== -->
+    <div class="tab-pane fade show active" id="t1">
+        {# v1.12.1 学生名单改为从学生库同步导入，不再走 Excel 重复导入；新增学生可直接写入学籍库 #}
+        <div class="d-flex gap-2 mb-2 flex-wrap align-items-center">
+            <button class="btn btn-primary btn-sm" onclick="syncStudents(false)">
+                <i class="bi bi-cloud-download"></i> 从学生库导入</button>
+            <div class="form-check ms-1">
+                <input class="form-check-input" type="checkbox" id="syncRemove">
+                <label class="form-check-label small text-muted" for="syncRemove">同时移除学籍已删的学生</label>
+            </div>
+            <button class="btn btn-outline-success btn-sm" onclick="openPick()">
+                <i class="bi bi-person-plus"></i> 加入学生</button>
+            <button class="btn btn-outline-secondary btn-sm" onclick="openStuModal()">
+                <i class="bi bi-pencil-square"></i> 手动新增</button>
+            <button class="btn btn-outline-danger btn-sm" onclick="clearStudents()">
+                <i class="bi bi-trash"></i> 清空名单</button>
+        </div>
+        <div class="card"><div class="table-responsive" style="max-height:60vh;overflow:auto">
+            <table class="table table-sm table-hover align-middle mb-0" id="stuTable">
+                <thead class="sticky-top bg-white">
+                <tr><th>学号</th><th>姓名</th><th>班级</th><th>选科组合</th><th>参考</th>
+                    <th>固定考场</th><th>固定座号</th><th>自定义考号</th>
+                    <th>考场</th><th>座号</th><th>考号</th><th class="text-end">操作</th></tr>
+                </thead>
+                <tbody>
+                {% for s in students %}
+                <tr>
+                    <td>{{ s.student_no }}</td><td>{{ s.name }}</td><td>{{ s.class_name }}</td>
+                    <td>{{ s.subject_selection }}</td>
+                    <td>{% if s.is_attend %}<span class="badge bg-success">是</span>{% else %}<span class="badge bg-light text-dark">否</span>{% endif %}</td>
+                    {# v1.12.2 固定考场/座号改为表格内输入框，失焦即时保存 #}
+                    <td><input class="form-control form-control-sm py-0 fx-room" style="width:70px"
+                         value="{{ s.fixed_room or '' }}" data-sid="{{ s.id }}" onchange="saveFixed(this)"></td>
+                    <td><input class="form-control form-control-sm py-0 fx-seat" type="number" style="width:60px"
+                         value="{{ s.fixed_seat or '' }}" data-sid="{{ s.id }}" onchange="saveFixed(this)"></td>
+                    <td>{{ s.custom_number or '' }}</td>
+                    <td>{{ s.room_no or '—' }}</td><td>{{ s.seat_no or '—' }}</td>
+                    <td>{{ s.exam_number or '—' }}</td>
+                    <td class="text-end">
+                        <button class="btn btn-sm btn-outline-primary py-0" onclick="openStuModal({{ s.id }})">编辑</button>
+                        <button class="btn btn-sm btn-outline-danger py-0" onclick="delStu({{ s.id }})">删</button>
+                    </td>
+                </tr>
+                {% else %}
+                <tr><td colspan="12" class="text-center text-muted py-4">尚未导入学生。点「从学生库导入」一键同步本年级学籍学生，或手动新增。</td></tr>
+                {% endfor %}
+                </tbody>
+            </table>
+        </div></div>
+    </div>
+
+    <!-- ===== 步骤② 考场设置（v1.12.2 左右双列表：考场库 ↔ 本批次考场） ===== -->
+    <div class="tab-pane fade" id="t2">
+        <div class="d-flex gap-2 mb-2 flex-wrap">
+            <button class="btn btn-outline-primary btn-sm" onclick="document.getElementById('roomFile').click()">
+                <i class="bi bi-upload"></i> 导入 Excel</button>
+            <input type="file" id="roomFile" accept=".xlsx,.xls" style="display:none" onchange="importRooms(this)">
+            <button class="btn btn-outline-success btn-sm" onclick="openRoomModal()">
+                <i class="bi bi-plus-lg"></i> 手动新增</button>
+        </div>
+        <div class="row g-2">
+            {# 左：考场库列表，可选取加入本批次 #}
+            <div class="col-5">
+                <div class="card" style="max-height:65vh">
+                    <div class="card-header d-flex justify-content-between align-items-center py-1">
+                        <span class="small fw-bold"><i class="bi bi-collection"></i> 考场库</span>
+                        <span class="text-muted small" id="libCount">—</span>
+                    </div>
+                    <div class="table-responsive" style="max-height:52vh;overflow:auto">
+                        <table class="table table-sm table-hover mb-0" id="libTable">
+                            <thead class="sticky-top bg-white"><tr>
+                                <th>位置</th><th class="text-end">容量</th><th class="text-end">操作</th></tr></thead>
+                            <tbody id="libBody"></tbody>
+                        </table>
+                    </div>
+                    <div class="card-footer p-2">
+                        <div class="row g-1">
+                            <div class="col-7"><input id="libLoc" class="form-control form-control-sm" placeholder="位置，如 教学楼A-104"></div>
+                            <div class="col-2"><input id="libCap" type="number" class="form-control form-control-sm" value="30"></div>
+                            <div class="col-3"><button class="btn btn-primary btn-sm w-100" onclick="libSave()">入库</button></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            {# 右：本批次已选考场 #}
+            <div class="col-7">
+                <div class="card">
+                    <div class="card-header d-flex justify-content-between align-items-center py-1">
+                        <span class="small fw-bold"><i class="bi bi-list-check"></i> 本批次考场（<span id="roomStat">{{ rooms|length }}</span> 个，容量 <span id="capStat">{{ stats.capacity }}</span> 座）</span>
+                    </div>
+                    <div class="table-responsive" style="max-height:55vh;overflow:auto">
+                        <table class="table table-sm table-hover align-middle mb-0" id="roomTable">
+                            <thead class="sticky-top bg-white"><tr><th>考场编号</th><th>位置</th><th>科目/适用选科</th>
+                                <th class="text-end">容量</th><th>考号前缀</th><th>备注</th><th class="text-end">操作</th></tr></thead>
+                            <tbody>
+                            {% for r in rooms %}
+                            <tr>
+                                <td>{{ r.room_no }}</td><td>{{ r.location }}</td>
+                                <td>{{ r.subject }}{% if r.is_universal %} <span class="badge bg-light text-dark">通用</span>{% endif %}</td>
+                                <td class="text-end">{{ r.capacity }}</td><td>{{ r.prefix or '' }}</td><td>{{ r.note or '' }}</td>
+                                <td class="text-end">
+                                    <button class="btn btn-sm btn-outline-primary py-0" onclick="openRoomModal({{ r.id }})">编辑</button>
+                                    <button class="btn btn-sm btn-outline-danger py-0" onclick="delRoom({{ r.id }})">删</button>
+                                </td>
+                            </tr>
+                            {% else %}
+                            <tr><td colspan="7" class="text-center text-muted py-4">本批次尚未选考场。从左侧考场库点「加入」即可。</td></tr>
+                            {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ===== 步骤③ 编排与考号生成 ===== -->
+    <div class="tab-pane fade" id="t3">
+        <div class="card p-3">
+            <h6 class="mb-2">考号生成模式（对应 Excel 宏三种模式）</h6>
+            <div class="form-check"><input class="form-check-input" type="radio" name="mode" id="m0" value="0" {% if affair.mode==0 %}checked{% endif %}>
+                <label class="form-check-label" for="m0"><b>模式0</b>：生成「前缀+考场号+座号」考号（如 1701011432）</label></div>
+            <div class="form-check"><input class="form-check-input" type="radio" name="mode" id="m1" value="1" {% if affair.mode==1 %}checked{% endif %}>
+                <label class="form-check-label" for="m1"><b>模式1</b>：考号 = 学生学号（仅分配考场/座号）</label></div>
+            <div class="form-check"><input class="form-check-input" type="radio" name="mode" id="m2" value="2" {% if affair.mode==2 %}checked{% endif %}>
+                <label class="form-check-label" for="m2"><b>模式2</b>：使用「自定义考号」列（仅分配考场/座号）</label></div>
+            <div class="text-muted small my-2">编排规则：先安置「固定考场/固定座号」学生，其余按选科分组、同班邻座≤1 随机分配（与 Excel 宏一致）。</div>
+            <button class="btn btn-primary btn-sm" onclick="runArrange()">
+                <i class="bi bi-shuffle"></i> 开始编排并生成考号</button>
+            <span id="arrangeMsg" class="ms-2 small"></span>
+        </div>
+        {# v1.12.2 编排前直接编辑各选科考号前/后缀（与批次设置同源，保存后生效） #}
+        <div class="card p-3 mt-2">
+            <div class="d-flex justify-content-between align-items-center mb-2">
+                <h6 class="mb-0">各选科考号前/后缀（模式0，优先于考场/批次默认前缀）</h6>
+                <button class="btn btn-outline-primary btn-sm py-0" onclick="saveSelCfg()">
+                    <i class="bi bi-check2"></i> 保存前后缀</button>
+            </div>
+            <div class="row g-2">
+                {% for sel in sel_options %}
+                {% set cfg = (affair.get_subject_prefixes() or {}).get(sel, {}) %}
+                <div class="col-4 col-md-3">
+                    <div class="border rounded p-2 small">
+                        <div class="fw-bold mb-1">{{ sel }}</div>
+                        <div class="d-flex gap-1">
+                            <input class="form-control form-control-sm py-0 selCfgPrefix" data-sel="{{ sel }}"
+                                   value="{{ cfg.prefix or '' }}" placeholder="前缀">
+                            <input class="form-control form-control-sm py-0 selCfgSuffix" data-sel="{{ sel }}"
+                                   value="{{ cfg.suffix or '' }}" placeholder="后缀">
+                        </div>
+                    </div>
+                </div>
+                {% else %}
+                <div class="text-muted small">暂无选科学生，从学生库同步/加入后自动带出</div>
+                {% endfor %}
+            </div>
+            <div class="form-text">全校同一前缀：所有选科填同一前缀；文理分别前缀：按选科分别填写。留空则用考场/批次默认前缀。</div>
+        </div>
+    </div>
+
+    <!-- ===== 步骤④ 导出 ===== -->
+    <div class="tab-pane fade" id="t4">
+        <div class="card p-3">
+            <p class="text-muted small mb-2">A4 打印版 PDF（浏览器打开后可直接打印或另存）；Excel 版便于二次加工。</p>
+            {# v1.12.2 网页版桌签预览在千人级会卡死，统一改为服务端生成 A4 PDF #}
+            <div class="row g-3">
+                <div class="col-md-6">
+                    <div class="border rounded p-2 h-100">
+                        <div class="fw-bold small mb-2"><i class="bi bi-filetype-pdf"></i> A4 打印版 PDF</div>
+                        <div class="d-flex gap-2 flex-wrap">
+                            <a href="{{ url_for('grades.affair_cards_pdf', aid=affair.id) }}" class="btn btn-primary btn-sm">
+                                <i class="bi bi-printer"></i> 桌签（一页45张·裁开贴桌）</a>
+                            <a href="{{ url_for('grades.affair_export_class_pdf', aid=affair.id) }}" class="btn btn-outline-primary btn-sm">
+                                <i class="bi bi-download"></i> 按班级名单</a>
+                            <a href="{{ url_for('grades.affair_export_room_pdf', aid=affair.id) }}" class="btn btn-outline-primary btn-sm">
+                                <i class="bi bi-download"></i> 按考场名单</a>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-md-6">
+                    <div class="border rounded p-2 h-100">
+                        <div class="fw-bold small mb-2"><i class="bi bi-file-earmark-excel"></i> Excel 数据表</div>
+                        <div class="d-flex gap-2 flex-wrap">
+                            <a href="{{ url_for('grades.affair_export_class', aid=affair.id) }}" class="btn btn-outline-success btn-sm">
+                                <i class="bi bi-download"></i> 按班级学生信息</a>
+                            <a href="{{ url_for('grades.affair_export_room', aid=affair.id) }}" class="btn btn-outline-success btn-sm">
+                                <i class="bi bi-download"></i> 按考场学生信息</a>
+                            <a href="{{ url_for('grades.affair_cards_export', aid=affair.id) }}" class="btn btn-outline-success btn-sm">
+                                <i class="bi bi-download"></i> 竖版桌签</a>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            {% if not arranged %}<div class="alert alert-warning mt-3 py-2 small">尚未编排，请先完成步骤③。</div>{% endif %}
+        </div>
+    </div>
+
+    <!-- v1.12.2 步骤⑤成绩关联面板已移除 -->
+</div>
+
+<!-- 学生编辑弹窗 -->
+<div class="modal fade" id="stuModal" tabindex="-1"><div class="modal-dialog modal-lg">
+    <div class="modal-content">
+        <div class="modal-header"><h6 class="modal-title">学生</h6><button class="btn-close" data-bs-dismiss="modal"></button></div>
+        <div class="modal-body">
+            <input type="hidden" id="stuId">
+            <div class="row g-2">
+                <div class="col-4"><label class="form-label">学号 *</label><input id="stuNo" class="form-control form-control-sm"></div>
+                <div class="col-4"><label class="form-label">姓名</label><input id="stuName" class="form-control form-control-sm"></div>
+                <div class="col-4"><label class="form-label">班级</label><input id="stuCls" class="form-control form-control-sm"></div>
+                <div class="col-4"><label class="form-label">选科组合</label><input id="stuSel" class="form-control form-control-sm" placeholder="如 史政地"></div>
+                <div class="col-2"><label class="form-label">性别</label>
+                    <select id="stuGender" class="form-select form-select-sm"><option>男</option><option>女</option></select></div>
+                <div class="col-3"><label class="form-label">参考</label>
+                    <div class="form-check mt-1"><input id="stuAttend" class="form-check-input" type="checkbox" checked></div>
+                    {# v1.12.1 新增学生可同时写入学籍库，后续批次直接从学生库同步 #}
+                    <div class="form-check"><input id="stuToDb" class="form-check-input" type="checkbox" checked>
+                        <label class="form-check-label small" for="stuToDb">保存到学生库</label></div>
+                </div>
+                <div class="col-3"><label class="form-label">固定考场</label><input id="stuFR" class="form-control form-control-sm"></div>
+                <div class="col-3"><label class="form-label">固定座号</label><input id="stuFS" type="number" class="form-control form-control-sm"></div>
+                <div class="col-12"><label class="form-label">自定义考号（模式2用）</label><input id="stuCustom" class="form-control form-control-sm"></div>
+            </div>
+        </div>
+        <div class="modal-footer"><button class="btn btn-sm btn-secondary" data-bs-dismiss="modal">取消</button>
+            <button class="btn btn-sm btn-primary" onclick="saveStu()">保存</button></div>
+    </div>
+</div></div>
+
+<!-- 考场编辑弹窗 -->
+<div class="modal fade" id="roomModal" tabindex="-1"><div class="modal-dialog">
+    <div class="modal-content">
+        <div class="modal-header"><h6 class="modal-title">考场</h6><button class="btn-close" data-bs-dismiss="modal"></button></div>
+        <div class="modal-body">
+            <input type="hidden" id="roomId">
+            {# v1.12.2 编辑已有考场时：编号/位置/容量锁定只读（由考场库带出，改动破坏编排一致性） #}
+            <div id="roomLockTip" class="alert alert-secondary py-1 px-2 small d-none mb-2">
+                编号、位置、容量由考场库带出不可修改；如需调整请先删除本批次考场，改完考场库后重新选取。</div>
+            <div class="row g-2">
+                <div class="col-6"><label class="form-label">考场编号 *</label><input id="roomNo" class="form-control form-control-sm"></div>
+                <div class="col-6"><label class="form-label">容量</label><input id="roomCap" type="number" class="form-control form-control-sm" value="30"></div>
+                <div class="col-6"><label class="form-label">位置</label><input id="roomLoc" class="form-control form-control-sm"></div>
+                <div class="col-6"><label class="form-label">科目/适用选科</label><input id="roomSubj" class="form-control form-control-sm" placeholder="物化生 / 史政地 / 默认(通用)"></div>
+                <div class="col-6"><label class="form-label">考号前缀（模式0）</label><input id="roomPrefix" class="form-control form-control-sm" placeholder="留空用批次默认"></div>
+                <div class="col-6"><label class="form-label">备注</label><input id="roomNote" class="form-control form-control-sm"></div>
+                <div class="col-12">
+                    <div class="form-check">
+                        <input class="form-check-input" type="checkbox" id="roomToLib">
+                        <label class="form-check-label small" for="roomToLib">将位置/容量存入考场库（供其他批次直接选取）</label>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <div class="modal-footer"><button class="btn btn-sm btn-secondary" data-bs-dismiss="modal">取消</button>
+            <button class="btn btn-sm btn-primary" onclick="saveRoom()">保存</button></div>
+    </div>
+</div></div>
+
+<!-- v1.12.1 批次设置弹窗：编排模式 / 非参考处理 / 选科考号前后缀 -->
+<div class="modal fade" id="settingsModal" tabindex="-1"><div class="modal-dialog">
+    <div class="modal-content">
+        <div class="modal-header"><h6 class="modal-title">批次设置</h6><button class="btn-close" data-bs-dismiss="modal"></button></div>
+        <div class="modal-body">
+            <label class="form-label">编排模式</label>
+            <div class="d-flex gap-3 mb-1">
+                <div class="form-check"><input class="form-check-input" type="radio" name="setMode" id="smSel" value="selected" {% if affair.selection_mode != 'plain' %}checked{% endif %}>
+                    <label class="form-check-label" for="smSel">选科模式（按选科分组分配考场）</label></div>
+                <div class="form-check"><input class="form-check-input" type="radio" name="setMode" id="smPlain" value="plain" {% if affair.selection_mode == 'plain' %}checked{% endif %}>
+                    <label class="form-check-label" for="smPlain">不选科模式（全体一组，考场全通用）</label></div>
+            </div>
+            <label class="form-label mt-2">非参考学生处理</label>
+            <div class="d-flex gap-3 mb-1">
+                <div class="form-check"><input class="form-check-input" type="radio" name="setNonAttend" id="naSkip" value="skip" {% if affair.non_attend_mode != 'tail' %}checked{% endif %}>
+                    <label class="form-check-label" for="naSkip">不安排考场（不参与编排）</label></div>
+                <div class="form-check"><input class="form-check-input" type="radio" name="setNonAttend" id="naTail" value="tail" {% if affair.non_attend_mode == 'tail' %}checked{% endif %}>
+                    <label class="form-check-label" for="naTail">安排到同选科考场尾场（尾座）</label></div>
+            </div>
+            <label class="form-label mt-2">选科考号前后缀（模式0，优先于考场/批次默认前缀）</label>
+            <div class="table-responsive">
+                <table class="table table-sm mb-0 small" id="selCfgTable">
+                    <thead><tr><th>选科组合</th><th>前缀</th><th>后缀</th></tr></thead>
+                    <tbody>
+                    {% for sel in sel_options %}
+                    {% set cfg = (affair.get_subject_prefixes() or {}).get(sel, {}) %}
+                    <tr>
+                        <td>{{ sel }}<input type="hidden" class="selKey" value="{{ sel }}"></td>
+                        <td><input class="form-control form-control-sm py-0 selPrefix" value="{{ cfg.prefix or '' }}" placeholder="留空用默认"></td>
+                        <td><input class="form-control form-control-sm py-0 selSuffix" value="{{ cfg.suffix or '' }}"></td>
+                    </tr>
+                    {% else %}
+                    <tr><td colspan="3" class="text-center text-muted">暂无选科学生，从学生库同步后自动带出</td></tr>
+                    {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+            <div class="form-text">全校同一前缀：所有选科填同一前缀；文理分别前缀：按选科分别填写。</div>
+        </div>
+        <div class="modal-footer"><button class="btn btn-sm btn-secondary" data-bs-dismiss="modal">取消</button>
+            <button class="btn btn-sm btn-primary" onclick="saveSettings()">保存设置</button></div>
+    </div>
+</div></div>
+
+<!-- v1.12.2 加入学生选择器：可筛选（班级/选科/仅未加入）、排序、搜索，多选批量加入 -->
+<div class="modal fade" id="pickModal" tabindex="-1"><div class="modal-dialog modal-lg modal-dialog-scrollable">
+    <div class="modal-content">
+        <div class="modal-header py-2"><h6 class="modal-title">加入学生（学籍库）</h6>
+            <button class="btn-close" data-bs-dismiss="modal"></button></div>
+        <div class="modal-body py-2">
+            <div class="d-flex gap-2 mb-2 flex-wrap align-items-center">
+                <input id="pkSearch" class="form-control form-control-sm" style="width:180px"
+                       placeholder="搜索姓名/学号" oninput="renderPick()">
+                <select id="pkCls" class="form-select form-select-sm w-auto" onchange="renderPick()"><option value="">全部班级</option></select>
+                <select id="pkSel" class="form-select form-select-sm w-auto" onchange="renderPick()"><option value="">全部选科</option></select>
+                <div class="form-check"><input class="form-check-input" type="checkbox" id="pkUnadded" onchange="renderPick()">
+                    <label class="form-check-label small" for="pkUnadded">仅未加入</label></div>
+                <select id="pkSort" class="form-select form-select-sm w-auto" onchange="renderPick()">
+                    <option value="cls">按班级</option><option value="no">按学号</option><option value="name">按姓名</option></select>
+                <span class="ms-auto small text-nowrap">
+                    <a href="javascript:;" onclick="pickAll(true)">全选</a> /
+                    <a href="javascript:;" onclick="pickAll(false)">清空</a>
+                    已选 <b id="pkCount">0</b> 人</span>
+            </div>
+            <div class="table-responsive" style="max-height:50vh;overflow:auto">
+                <table class="table table-sm table-hover mb-0">
+                    <thead class="sticky-top bg-white"><tr>
+                        <th style="width:36px"><input type="checkbox" id="pkHead" onchange="pickAll(this.checked)"></th>
+                        <th>学号</th><th>姓名</th><th>班级</th><th>选科</th><th>状态</th></tr></thead>
+                    <tbody id="pkBody"></tbody>
+                </table>
+            </div>
+        </div>
+        <div class="modal-footer py-1">
+            <button class="btn btn-sm btn-secondary" data-bs-dismiss="modal">取消</button>
+            <button class="btn btn-sm btn-primary" onclick="confirmPick()">加入名单</button></div>
+    </div>
+</div></div>
+
+<!-- 编排日志弹窗 -->
+<div class="modal fade" id="logModal" tabindex="-1"><div class="modal-dialog">
+    <div class="modal-content"><div class="modal-header"><h6 class="modal-title">编排日志</h6>
+        <button class="btn-close" data-bs-dismiss="modal"></button></div>
+        <div class="modal-body"><pre id="logBody" class="small mb-0" style="white-space:pre-wrap;max-height:50vh;overflow:auto"></pre></div>
+        <div class="modal-footer"><button class="btn btn-sm btn-primary" data-bs-dismiss="modal" onclick="location.reload()">确定</button></div>
+    </div>
+</div></div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+const AID = {{ affair.id }};
+function csrf(){ return csrfToken; }
+
+// v1.12.1 记忆当前 tab：切换时写 URL hash，刷新后自动恢复（避免操作后跳回学生名单）
+document.querySelectorAll('#affairTabs button[data-bs-toggle="tab"]').forEach(function(btn){
+    btn.addEventListener('shown.bs.tab', function(){ location.hash = btn.dataset.bsTarget; });
+});
+if(location.hash){
+    var triggerEl = document.querySelector('#affairTabs button[data-bs-target="'+location.hash+'"]');
+    if(triggerEl) new bootstrap.Tab(triggerEl).show();
+}
+
+// v1.12.1 学生名单从学籍库同步导入（增量：新增+刷新基本信息；可选移除学籍已删学生）
+function syncStudents(){
+    var fd = new FormData();
+    if(document.getElementById('syncRemove').checked) fd.append('remove_missing','1');
+    fetch('/grades/affairs/'+AID+'/students/sync', {method:'POST', body:fd, headers:{'X-CSRFToken':csrf()}})
+        .then(r=>r.json()).then(d=>{
+            if(d.ok){ alert('同步完成：新增 '+d.added+' 人，移除 '+d.removed+' 人，学籍共 '+d.total+' 人'); location.reload(); }
+            else alert(d.msg);
+        });
+}
+// v1.12.2 表格内直接保存固定考场/固定座号（同一行的两个输入框一起提交）
+function saveFixed(el){
+    var tr = el.closest('tr');
+    var fd = new FormData();
+    fd.append('fixed_room', tr.querySelector('.fx-room').value.trim());
+    fd.append('fixed_seat', tr.querySelector('.fx-seat').value.trim());
+    fetch('/grades/affairs/'+AID+'/students/'+el.dataset.sid+'/fixed',
+          {method:'POST', body:fd, headers:{'X-CSRFToken':csrf()}})
+        .then(r=>r.json()).then(d=>{ if(!d.ok) alert(d.msg||'保存失败'); });
+}
+
+// v1.12.2 加入学生选择器：拉取学籍 → 本地筛选/排序/搜索 → 多选批量加入
+var _pickAll_ = [];
+function openPick(){
+    fetch('/grades/affairs/'+AID+'/students/pick').then(r=>r.json()).then(d=>{
+        _pickAll_ = d.students||[];
+        // 填充班级/选科筛选下拉
+        var clss = [...new Set(_pickAll_.map(s=>s.class_name).filter(Boolean))].sort();
+        var sels = [...new Set(_pickAll_.map(s=>s.subject_selection).filter(Boolean))].sort();
+        document.getElementById('pkCls').innerHTML = '<option value="">全部班级</option>'+clss.map(c=>'<option>'+c+'</option>').join('');
+        document.getElementById('pkSel').innerHTML = '<option value="">全部选科</option>'+sels.map(c=>'<option>'+c+'</option>').join('');
+        renderPick();
+        new bootstrap.Modal(document.getElementById('pickModal')).show();
+    });
+}
+function _pickFiltered(){
+    var kw = document.getElementById('pkSearch').value.trim().toLowerCase();
+    var cls = document.getElementById('pkCls').value;
+    var sel = document.getElementById('pkSel').value;
+    var only = document.getElementById('pkUnadded').checked;
+    var sort = document.getElementById('pkSort').value;
+    var list = _pickAll_.filter(s=>
+        (!cls || s.class_name===cls) && (!sel || s.subject_selection===sel) &&
+        (!only || !s.in_batch) &&
+        (!kw || s.name.toLowerCase().includes(kw) || s.student_no.toLowerCase().includes(kw)));
+    list.sort((a,b)=> sort==='no' ? a.student_no.localeCompare(b.student_no)
+                         : sort==='name' ? a.name.localeCompare(b.name,'zh')
+                         : (a.class_name||'').localeCompare(b.class_name||'','zh') || a.student_no.localeCompare(b.student_no));
+    return list;
+}
+function renderPick(){
+    var list = _pickFiltered();
+    document.getElementById('pkBody').innerHTML = list.map(s=>
+        '<tr><td><input class="form-check-input pkChk" type="checkbox" value="'+s.student_no+'"'+
+        (s.in_batch?' disabled checked':'')+' onchange="updPickCount()"></td>'+
+        '<td>'+s.student_no+'</td><td>'+s.name+'</td><td>'+(s.class_name||'')+'</td>'+
+        '<td>'+(s.subject_selection||'')+'</td>'+
+        '<td>'+(s.in_batch?'<span class="badge bg-success">已加入</span>':'<span class="text-muted small">—</span>')+'</td></tr>'
+    ).join('') || '<tr><td colspan="6" class="text-center text-muted py-3">无符合条件的学生</td></tr>';
+    updPickCount();
+}
+function updPickCount(){
+    document.getElementById('pkCount').textContent =
+        document.querySelectorAll('.pkChk:checked:not(:disabled)').length;
+}
+function pickAll(on){
+    document.querySelectorAll('.pkChk:not(:disabled)').forEach(c=>c.checked=on);
+    updPickCount();
+}
+function confirmPick(){
+    var nos = Array.from(document.querySelectorAll('.pkChk:checked:not(:disabled)')).map(c=>c.value);
+    if(!nos.length){ alert('请先勾选学生'); return; }
+    var fd = new FormData(); fd.append('student_nos', nos.join(','));
+    fetch('/grades/affairs/'+AID+'/students/batch-add', {method:'POST', body:fd, headers:{'X-CSRFToken':csrf()}})
+        .then(r=>r.json()).then(d=>{
+            if(d.ok){ bootstrap.Modal.getInstance(document.getElementById('pickModal')).hide(); location.reload(); }
+            else alert(d.msg);
+        });
+}
+
+// v1.12.2 步骤③ 各选科前后缀保存（复用 /settings 接口，仅提交 sels + 前后缀，不动模式）
+function saveSelCfg(){
+    var sels = Array.from(document.querySelectorAll('.selCfgPrefix')).map(i=>i.dataset.sel);
+    var fd = new FormData();
+    fd.append('sels', JSON.stringify(sels));
+    sels.forEach(k=>{
+        fd.append('prefix_'+k, document.querySelector('.selCfgPrefix[data-sel="'+k+'"]').value.trim());
+        fd.append('suffix_'+k, document.querySelector('.selCfgSuffix[data-sel="'+k+'"]').value.trim());
+    });
+    fetch('/grades/affairs/'+AID+'/settings', {method:'POST', body:fd, headers:{'X-CSRFToken':csrf()}})
+        .then(r=>r.json()).then(d=>{
+            var el = document.getElementById('arrangeMsg');
+            el.textContent = d.ok ? '前后缀已保存' : ('保存失败：'+d.msg);
+            el.className = 'ms-2 small ' + (d.ok ? 'text-success' : 'text-danger');
+        });
+}
+// v1.12.1 批次设置：编排模式/非参考处理/选科考号前后缀
+function openSettings(){ new bootstrap.Modal(document.getElementById('settingsModal')).show(); }
+function saveSettings(){
+    var fd = new FormData();
+    fd.append('selection_mode', document.querySelector('input[name=setMode]:checked').value);
+    fd.append('non_attend_mode', document.querySelector('input[name=setNonAttend]:checked').value);
+    var keys = Array.from(document.querySelectorAll('#selCfgTable .selKey')).map(i=>i.value);
+    fd.append('sels', JSON.stringify(keys));
+    keys.forEach(k=>{
+        var tr = document.querySelector('#selCfgTable .selKey[value="'+k+'"]').closest('tr');
+        fd.append('prefix_'+k, tr.querySelector('.selPrefix').value.trim());
+        fd.append('suffix_'+k, tr.querySelector('.selSuffix').value.trim());
+    });
+    fetch('/grades/affairs/'+AID+'/settings', {method:'POST', body:fd, headers:{'X-CSRFToken':csrf()}})
+        .then(r=>r.json()).then(d=>{ if(d.ok) location.reload(); else alert(d.msg); });
+}
+// v1.12.2 考场库内联双列表：纯前端渲染，加入/删除即时更新，无刷新闪烁
+// 本批次考场（服务端初值，之后由 JS 增删维护）：{id, room_no, location, capacity, subject, prefix, note}
+var _batchRooms = [{% for r in rooms %}{id:{{ r.id }},room_no:'{{ r.room_no }}',location:'{{ r.location }}',capacity:{{ r.capacity }},subject:'{{ r.subject }}',prefix:'{{ r.prefix or "" }}',note:'{{ r.note or "" }}'},
+                   {% endfor %}];
+var _libData = [];  // 考场库全量，loadLib 后填充
+
+function _locSet(){ return new Set(_batchRooms.map(r=>r.location)); }
+
+function renderRooms(){
+    var cap = _batchRooms.reduce((s,r)=>s+(r.capacity||0),0);
+    document.getElementById('roomStat').textContent = _batchRooms.length;
+    document.getElementById('capStat').textContent = cap;
+    var tb = document.querySelector('#roomTable tbody');
+    if(!_batchRooms.length){
+        tb.innerHTML = '<tr><td colspan="7" class="text-center text-muted py-4">本批次尚未选考场。从左侧考场库点「加入」即可。</td></tr>';
+        return;
+    }
+    tb.innerHTML = _batchRooms.map(r=>
+        '<tr><td>'+r.room_no+'</td><td>'+r.location+'</td>'+
+        '<td>'+r.subject+' <span class="badge bg-light text-dark">通用</span></td>'+
+        '<td class="text-end">'+r.capacity+'</td><td>'+(r.prefix||'')+'</td><td>'+(r.note||'')+'</td>'+
+        '<td class="text-end">'+
+        '<button class="btn btn-sm btn-outline-primary py-0" onclick="openRoomModal('+r.id+')">编辑</button> '+
+        '<button class="btn btn-sm btn-outline-danger py-0" onclick="delRoom('+r.id+')">删</button></td></tr>'
+    ).join('');
+}
+
+function loadLib(){
+    fetch('/grades/affairs/room-lib/list').then(r=>r.json()).then(d=>{
+        _libData = d.rooms||[];
+        var used = _locSet();
+        var html = _libData.map(r=>{
+            var u = used.has(r.location);
+            return '<tr class="'+(u?'table-success':'')+'" data-loc="'+r.location+'">'+
+                '<td>'+r.location+(u?' <span class="badge bg-success">已选</span>':'')+'</td>'+
+                '<td class="text-end">'+r.capacity+'</td>'+
+                '<td class="text-end">'+
+                (u?'<span class="text-muted small">—</span>':
+                 '<button class="btn btn-sm btn-outline-primary py-0" onclick="pickLib('+r.id+')">加入</button>')+
+                ' <button class="btn btn-sm btn-outline-danger py-0" onclick="libDel('+r.id+')">删</button></td></tr>';
+        }).join('') || '<tr><td colspan="3" class="text-center text-muted py-3">考场库为空，在下方输入位置入库</td></tr>';
+        document.getElementById('libBody').innerHTML = html;
+        document.getElementById('libCount').textContent = _libData.length + ' 个房间';
+    });
+}
+// 加入：调接口生成考场 → 前端追加行 + 左侧该行就地标记已选（不刷新）
+function pickLib(id){
+    var lib = _libData.find(r=>r.id===id);
+    var fd = new FormData(); fd.append('lib_id', id);
+    fetch('/grades/affairs/'+AID+'/rooms/from-lib', {method:'POST', body:fd, headers:{'X-CSRFToken':csrf()}})
+        .then(r=>r.json()).then(d=>{
+            if(!d.ok){ alert(d.msg); return; }
+            _batchRooms.push({id:d.id, room_no:d.room_no, location:d.location, capacity:d.capacity, subject:d.subject});
+            renderRooms();
+            if(lib) _markLibUsed(lib.location, true);
+        });
+}
+// 删除：调接口 → 前端移除行 + 解除左侧已选（不刷新）
+function delRoom(id){
+    if(!confirm('删除该考场？')) return;
+    fetch('/grades/affairs/'+AID+'/rooms/'+id+'/delete', {method:'POST', headers:{'X-CSRFToken':csrf()}})
+        .then(r=>r.json()).then(d=>{
+            if(!d.ok) return;
+            var rm = _batchRooms.find(r=>r.id===id);
+            _batchRooms = _batchRooms.filter(r=>r.id!==id);
+            renderRooms();
+            if(rm) _markLibUsed(rm.location, false);
+        });
+}
+// 左侧某行标记/解除「已选」并切换操作按钮
+function _markLibUsed(loc, used){
+    var tr = document.querySelector('#libBody tr[data-loc="'+loc+'"]');
+    if(!tr) return;
+    var lib = _libData.find(r=>r.location===loc);
+    var td0 = tr.querySelector('td');
+    td0.innerHTML = loc + (used?' <span class="badge bg-success">已选</span>':'');
+    tr.className = used ? 'table-success' : '';
+    var opTd = tr.querySelector('td:last-child');
+    opTd.innerHTML = (used?'<span class="text-muted small">—</span>':
+        '<button class="btn btn-sm btn-outline-primary py-0" onclick="pickLib('+lib.id+')">加入</button>')+
+        ' <button class="btn btn-sm btn-outline-danger py-0" onclick="libDel('+lib.id+')">删</button>';
+}
+function libSave(){
+    var fd = new FormData();
+    fd.append('location', document.getElementById('libLoc').value.trim());
+    fd.append('capacity', document.getElementById('libCap').value.trim());
+    if(!fd.get('location')){ alert('房间位置必填'); return; }
+    fetch('/grades/affairs/room-lib/save', {method:'POST', body:fd, headers:{'X-CSRFToken':csrf()}})
+        .then(r=>r.json()).then(d=>{
+            if(d.ok){ document.getElementById('libLoc').value=''; loadLib(); }
+            else alert(d.msg);
+        });
+}
+function libDel(id){
+    if(!confirm('从考场库删除该房间？不影响已生成的考场。')) return;
+    fetch('/grades/affairs/room-lib/'+id+'/delete', {method:'POST', headers:{'X-CSRFToken':csrf()}})
+        .then(r=>r.json()).then(d=>{ if(d.ok) loadLib(); });
+}
+// 切到步骤②时刷新左右列表（右侧由 JS 状态渲染，左侧拉取考场库）
+function _t2refresh(){ renderRooms(); loadLib(); }
+document.querySelector('#affairTabs button[data-bs-target="#t2"]').addEventListener('shown.bs.tab', _t2refresh);
+// v1.12.2 修复：页面带 #t2 hash 重载时，tab 恢复发生在监听器注册之前，
+// shown.bs.tab 已错过，故加载完成后若步骤②处于激活态需补一次加载
+if(document.querySelector('#affairTabs button.active') &&
+   document.querySelector('#affairTabs button.active').dataset.bsTarget === '#t2'){
+    _t2refresh();
+}
+function importRooms(input){
+    if(!input.files.length) return;
+    var fd = new FormData(); fd.append('file', input.files[0]);
+    fetch('/grades/affairs/'+AID+'/rooms/import', {method:'POST', body:fd, headers:{'X-CSRFToken':csrf()}})
+        .then(r=>r.json()).then(d=>{ if(d.ok){ location.reload(); } else alert(d.msg); });
+}
+function clearStudents(){
+    if(!confirm('确定清空全部学生名单？')) return;
+    fetch('/grades/affairs/'+AID+'/students/clear', {method:'POST', headers:{'X-CSRFToken':csrf()}})
+        .then(r=>r.json()).then(d=>{ if(d.ok) location.reload(); });
+}
+function openStuModal(id){
+    document.getElementById('stuId').value = id || '';
+    if(id){
+        // 简单的：从接口取数填充
+    }
+    ['stuNo','stuName','stuCls','stuSel','stuFR','stuFS','stuCustom'].forEach(i=>document.getElementById(i).value='');
+    document.getElementById('stuAttend').checked = true;
+    document.getElementById('stuGender').value = '男';   // v1.12.1 新增学生默认性别
+    document.getElementById('stuToDb').checked = true;   // v1.12.1 默认同时写入学籍库
+    if(id){
+        fetch('/grades/affairs/'+AID+'/students/'+id).then(r=>r.json()).then(s=>{
+            document.getElementById('stuNo').value=s.student_no;
+            document.getElementById('stuName').value=s.name||'';
+            document.getElementById('stuCls').value=s.class_name||'';
+            document.getElementById('stuSel').value=s.subject_selection||'';
+            document.getElementById('stuAttend').checked=s.is_attend;
+            document.getElementById('stuFR').value=s.fixed_room||'';
+            document.getElementById('stuFS').value=s.fixed_seat||'';
+            document.getElementById('stuCustom').value=s.custom_number||'';
+        });
+    }
+    new bootstrap.Modal(document.getElementById('stuModal')).show();
+}
+function saveStu(){
+    var fd = new FormData();
+    fd.append('sid', document.getElementById('stuId').value);
+    fd.append('student_no', document.getElementById('stuNo').value.trim());
+    fd.append('name', document.getElementById('stuName').value.trim());
+    fd.append('class_name', document.getElementById('stuCls').value.trim());
+    fd.append('subject_selection', document.getElementById('stuSel').value.trim());
+    fd.append('is_attend', document.getElementById('stuAttend').checked?'1':'0');
+    // v1.12.1 可选同步写入学籍库（新增学生不再依赖 Excel 回导）
+    fd.append('save_to_db', document.getElementById('stuToDb').checked?'1':'0');
+    fd.append('gender', document.getElementById('stuGender').value);
+    fd.append('fixed_room', document.getElementById('stuFR').value.trim());
+    fd.append('fixed_seat', document.getElementById('stuFS').value.trim());
+    fd.append('custom_number', document.getElementById('stuCustom').value.trim());
+    fetch('/grades/affairs/'+AID+'/students/save', {method:'POST', body:fd, headers:{'X-CSRFToken':csrf()}})
+        .then(r=>r.json()).then(d=>{ if(d.ok) location.reload(); else alert(d.msg); });
+}
+function delStu(id){
+    if(!confirm('删除该学生？')) return;
+    fetch('/grades/affairs/'+AID+'/students/'+id+'/delete', {method:'POST', headers:{'X-CSRFToken':csrf()}})
+        .then(r=>r.json()).then(d=>{ if(d.ok) location.reload(); });
+}
+function openRoomModal(id){
+    ['roomNo','roomLoc','roomSubj','roomPrefix','roomNote'].forEach(i=>document.getElementById(i).value='');
+    document.getElementById('roomCap').value=30;
+    document.getElementById('roomId').value=id||'';
+    // v1.12.2 编辑已有考场：编号/位置/容量只读锁定（后端同样忽略这三项改动）
+    var lock = !!id;
+    ['roomNo','roomLoc','roomCap'].forEach(i=>{
+        var el = document.getElementById(i);
+        el.readOnly = lock;
+        el.classList.toggle('bg-light', lock);
+    });
+    document.getElementById('roomLockTip').classList.toggle('d-none', !lock);
+    if(id){
+        fetch('/grades/affairs/'+AID+'/rooms/'+id).then(r=>r.json()).then(s=>{
+            document.getElementById('roomNo').value=s.room_no;
+            document.getElementById('roomLoc').value=s.location||'';
+            document.getElementById('roomSubj').value=s.subject||'';
+            document.getElementById('roomCap').value=s.capacity;
+            document.getElementById('roomPrefix').value=s.prefix||'';
+            document.getElementById('roomNote').value=s.note||'';
+        });
+    }
+    new bootstrap.Modal(document.getElementById('roomModal')).show();
+}
+function saveRoom(){
+    var fd = new FormData();
+    fd.append('rid', document.getElementById('roomId').value);
+    fd.append('room_no', document.getElementById('roomNo').value.trim());
+    fd.append('location', document.getElementById('roomLoc').value.trim());
+    fd.append('subject', document.getElementById('roomSubj').value.trim());
+    fd.append('capacity', document.getElementById('roomCap').value.trim());
+    fd.append('prefix', document.getElementById('roomPrefix').value.trim());
+    fd.append('note', document.getElementById('roomNote').value.trim());
+    fd.append('save_to_lib', document.getElementById('roomToLib').checked?'1':'0');   // v1.12.1 可选存入考场库
+    fetch('/grades/affairs/'+AID+'/rooms/save', {method:'POST', body:fd, headers:{'X-CSRFToken':csrf()}})
+        .then(r=>r.json()).then(d=>{ if(d.ok) location.reload(); else alert(d.msg); });
+}
+function runArrange(){
+    var mode = document.querySelector('input[name=mode]:checked').value;
+    var fd = new FormData(); fd.append('mode', mode);
+    document.getElementById('arrangeMsg').textContent='编排中…';
+    fetch('/grades/affairs/'+AID+'/arrange', {method:'POST', body:fd, headers:{'X-CSRFToken':csrf()}})
+        .then(r=>r.json()).then(d=>{
+            if(!d.ok){ alert(d.msg); document.getElementById('arrangeMsg').textContent=''; return; }
+            document.getElementById('arrangeMsg').textContent='分配 '+d.assigned+'/'+d.scope+' 人，失败 '+d.failed+' 人';
+            document.getElementById('logBody').textContent = d.log.join('\n');
+            new bootstrap.Modal(document.getElementById('logModal')).show();
+        });
+}
+// v1.12.2 步骤⑤成绩关联已移除：linkExam/unlinkExam/filterRoom 前端入口删除，
+// 后端 /link-exam 接口保留，供其他模块调用
+</script>
+{% endblock %}

@@ -9,7 +9,7 @@ import os
 from flask import render_template, request, jsonify, current_app
 from flask_login import login_required, current_user
 from app.extensions import db
-from app.models.grades import Exam, ExamBand, SUBJECTS, TOTAL_SUBJECT
+from app.models.grades import Exam, ExamBand, BandTemplate, SUBJECTS, TOTAL_SUBJECT
 from app.modules.grades import bp
 from app.modules.grades.services import stats_service as st
 from app.modules.grades.utils import delete_cache_prefix
@@ -57,18 +57,39 @@ def _scope_scores(data, direction, subject):
     return list(data.scores_of_subject(subject, direction=direction))
 
 
-def _ratio_to_score(data, direction, subject, ratio):
-    """按参考人数比例换算下界（名次 ≤ n*ratio% 档最低分）；无参考返回 0"""
-    scores = sorted(_scope_scores(data, direction, subject), reverse=True)
-    if not scores:
+def _ratio_from_sorted(desc, ratio):
+    """由已降序排好的分数换算下界（名次 ≤ n*ratio% 档最低分）；无参考返回 0"""
+    if not desc:
         return 0.0
     if ratio <= 0:
         return 0.0
     if ratio >= 100:
-        return scores[-1]
-    n = len(scores)
+        return desc[-1]
+    n = len(desc)
     idx = max(0, int(math.ceil(n * ratio / 100.0)) - 1)
-    return scores[min(idx, n - 1)]
+    return desc[min(idx, n - 1)]
+
+
+def _ratio_to_score(data, direction, subject, ratio):
+    """按参考人数比例换算下界；无参考返回 0"""
+    return _ratio_from_sorted(sorted(_scope_scores(data, direction, subject), reverse=True),
+                              ratio)
+
+
+def _rank_to_score(data, direction, subject, rank):
+    """按名次换算下界：第 rank 名（1 起）的分数；参考人数不足时取最后一名。
+
+    例：填 50 → 取该（方向×学科）第 50 名的分数作为该层下界，
+    即「前 50 名」这一层。落库与比例模式一样换算成实际分数线（统一存 score）。
+    """
+    desc = sorted(_scope_scores(data, direction, subject), reverse=True)
+    if not desc:
+        return 0.0
+    try:
+        r = int(rank)
+    except (TypeError, ValueError):
+        return 0.0
+    return desc[min(max(r - 1, 0), len(desc) - 1)]
 
 
 def _band_counts(data, direction, subject, bands):
@@ -108,8 +129,11 @@ def bands_page(exam_id):
                            total_count=len(data.total_rows))
 
 
-def _bands_payload(exam_id, direction, subject):
-    """返回该（方向 × 学科）bands（含预览）JSON 列表"""
+def _bands_payload(exam_id, direction, subject, data=None):
+    """返回该（方向 × 学科）bands（含预览）JSON 列表
+
+    data 可传入已构造好的 ExamData 以复用（批量接口用，避免逐列重复加载明细行）。
+    """
     rows = (ExamBand.query.filter_by(exam_id=exam_id, subject=subject)
             .filter(ExamBand.direction.in_([direction, '']))
             .order_by(ExamBand.seq.asc()).all())
@@ -120,16 +144,25 @@ def _bands_payload(exam_id, direction, subject):
     if not real:
         real = rows
     bands = [(r.name, r.lower_value) for r in real]
-    data = st.ExamData(exam_id)
+    data = data or st.ExamData(exam_id)
     counts, total = _band_counts(data, direction, subject, bands)
-    return [{
-        'id': r.id, 'seq': r.seq, 'name': r.name, 'lower_mode': r.lower_mode,
-        'lower_value': r.lower_value,
-        'preview_score': (_ratio_to_score(data, direction, subject, r.lower_value)
-                          if r.lower_mode == 'ratio' else r.lower_value),
-        'count': counts[i] if i < len(counts) else 0,
-        'ratio': st.fmt_rate(counts[i], total) if i < len(counts) else None,
-    } for i, r in enumerate(real)]
+    # 比例模式预览：排序一次复用，避免每层都重排全量分数
+    sorted_desc = None
+    out = []
+    for i, r in enumerate(real):
+        if r.lower_mode == 'ratio':
+            if sorted_desc is None:
+                sorted_desc = sorted(_scope_scores(data, direction, subject), reverse=True)
+            preview = _ratio_from_sorted(sorted_desc, r.lower_value)
+        else:
+            preview = r.lower_value
+        out.append({
+            'id': r.id, 'seq': r.seq, 'name': r.name, 'lower_mode': r.lower_mode,
+            'lower_value': r.lower_value, 'preview_score': preview,
+            'count': counts[i] if i < len(counts) else 0,
+            'ratio': st.fmt_rate(counts[i], total) if i < len(counts) else None,
+        })
+    return out
 
 
 @bp.route('/api/bands')
@@ -145,6 +178,28 @@ def bands_get():
     return jsonify(success=True, data=_bands_payload(exam_id, direction, subject))
 
 
+@bp.route('/api/bands/matrix')
+@login_required
+@perm_required('grades.settings')
+def bands_matrix():
+    """一次返回全部（方向 × 学科）划线，供划线页整表回填
+
+    原实现：前端对每一列发一次 /api/bands，后端每列都要重建 ExamData
+    （一场考试约 1 万行明细），2 个方向 × 多科就是十几次全量加载，是划线页慢的主因。
+    改为单次请求、全程共用一份 ExamData。
+    """
+    exam_id = request.args.get('exam_id', type=int)
+    Exam.query.get_or_404(exam_id)
+    data = st.ExamData(exam_id)
+    directions = data.directions or ['']
+    out = {}
+    for d in directions:
+        subs = [s for s in SUBJECTS if data.scores_of_subject(s, direction=d or None)]
+        for sub in [TOTAL_SUBJECT] + subs:
+            out[f'{d}|{sub}'] = _bands_payload(exam_id, d, sub, data=data)
+    return jsonify(success=True, data=out)
+
+
 def _save_bands(exam_id, direction, subject, payload):
     """payload: [{seq,name,lower_mode,lower_value}]（seq 升序=最高层在前，下界分数依次降低）
     ratio 模式在保存时按当前参考人数换算为实际分数线落库（统一存 score）
@@ -156,18 +211,26 @@ def _save_bands(exam_id, direction, subject, payload):
     for b in payload:
         seq = int(b['seq'])
         name = (b.get('name') or '').strip()
-        mode = b.get('lower_mode') in ('score', 'ratio') and b['lower_mode'] or 'score'
+        mode = b.get('lower_mode') in ('score', 'ratio', 'rank') and b['lower_mode'] or 'score'
         try:
             value = float(b.get('lower_value'))
         except (TypeError, ValueError):
             return None, f'第 {seq} 层下界值不是数字'
         if not name or seq < 1 or seq in seen_seq:
             return None, '层名不能为空且序号不能重复'
-        if value < 0 or (mode == 'ratio' and value > 100):
-            return None, f'第 {seq} 层（{name}）下界值需在有效范围（比例 0-100，分数 ≥0）'
+        # 三种下界方式各自的取值范围：分数≥0；比例 0-100；名次≥1
+        if mode == 'ratio' and (value < 0 or value > 100):
+            return None, f'第 {seq} 层（{name}）比例需在 0-100 之间'
+        if mode == 'rank' and value < 1:
+            return None, f'第 {seq} 层（{name}）名次需 ≥ 1'
+        if mode == 'score' and value < 0:
+            return None, f'第 {seq} 层（{name}）下界分数不能为负'
         if mode == 'ratio':
             # 按（方向×学科）参考人数比例换算为分数线
             value = _ratio_to_score(data, direction, subject, value)
+        elif mode == 'rank':
+            # 按名次换算为分数线（「前 N 名」）
+            value = _rank_to_score(data, direction, subject, value)
         # 修复：允许相邻两层下界相等——不同比例换算落在同一同分段时必然相等
         #（同分学生无法用分数线切分，等界=高层优先收录）；仅拦截逆序（高于上一层）
         if prev_lower is not None and value > prev_lower:
@@ -231,7 +294,7 @@ def bands_batch():
     data = request.get_json(silent=True) or {}
     exam_id = int(data.get('exam_id') or 0)
     exam = Exam.query.get_or_404(exam_id)
-    mode = data.get('mode') if data.get('mode') in ('score', 'ratio') else 'score'
+    mode = data.get('mode') if data.get('mode') in ('score', 'ratio', 'rank') else 'score'
     scope = 'all' if data.get('scope') == 'all' else 'per_subject'
     include_total = bool(data.get('include_total'))
     layers = data.get('layers') or []
@@ -288,6 +351,21 @@ def bands_batch():
         _log().warning('结果：无组合可写入（跳过 %d 个：%s）', len(skipped), skipped)
         return jsonify(success=False,
                        message='没有可写入的组合：请至少填写一个格子（该组合无参考学生时会被跳过）'), 400
+    # 考试 ↔ 分层模板绑定：后续成绩分析（分层人数、各班上线人数/上线率、自由表的「层」）
+    # 都按该模板的层来算。传了 template_id 才处理（0＝解除绑定），老调用方不受影响。
+    if 'template_id' in data:
+        try:
+            tpl_id = int(data.get('template_id') or 0)
+        except (TypeError, ValueError):
+            tpl_id = 0
+        if tpl_id:
+            tpl_obj = BandTemplate.query.get(tpl_id)
+            if tpl_obj:
+                exam.set_band_template(tpl_obj.id, tpl_obj.name)
+        else:
+            exam.set_band_template(None)
+        db.session.add(exam)
+
     db.session.commit()
     _log().info('结果：成功 %d 个组合，跳过 %d 个 %s', len(applied), len(skipped), skipped)
     delete_cache_prefix(f'grades_tab_{exam_id}_')

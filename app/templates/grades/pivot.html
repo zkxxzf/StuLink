@@ -1,0 +1,51 @@
+{% extends "base.html" %}
+{% block title %}自由表{% endblock %}
+{% block extra_css_head %}
+<link href="{{ url_for('static', filename='css/grades.css') }}" rel="stylesheet">
+{% endblock %}
+{% block content %}
+<div class="g-filter-bar d-flex flex-wrap gap-2 align-items-center mb-3">
+    <h5 class="mb-0 me-1"><i class="bi bi-grid-1x2"></i> 自由表</h5>
+    <select id="pvGrade" class="form-select form-select-sm w-auto" title="年级"></select>
+    <select id="pvExam" class="form-select form-select-sm w-auto" style="min-width:230px" title="考试"></select>
+    <select id="pvSubject" class="form-select form-select-sm w-auto" title="统计口径"></select>
+    <select id="pvDir" class="form-select form-select-sm w-auto" title="方向">
+        <option value="">全部方向</option>
+        <option value="物理">物理类</option>
+        <option value="历史">历史类</option>
+    </select>
+</div>
+
+<div class="card mb-3">
+    <div class="card-body py-2">
+        <div class="row g-3 align-items-start">
+            <div class="col-auto">
+                <label class="form-label small mb-1">行维度</label>
+                <select id="pvRow" class="form-select form-select-sm"></select>
+            </div>
+            <div class="col-auto">
+                <label class="form-label small mb-1">列维度</label>
+                <select id="pvCol" class="form-select form-select-sm"></select>
+            </div>
+            <div class="col">
+                <label class="form-label small mb-1">指标（可多选）</label>
+                <div id="pvMeasures" class="d-flex flex-wrap gap-2"></div>
+            </div>
+            <div class="col-auto">
+                <button class="btn btn-sm btn-primary" id="pvRun"><i class="bi bi-play"></i> 生成</button>
+            </div>
+        </div>
+        <div class="text-muted small mt-2 mb-0">
+            口径说明：「层」按<b>累计</b>判定（如一本线＝总分达一本线及以上的人数，不是只落在该档的人数）；
+            行或列放了「层」才能选「上线 / 层内」类指标；及格、优秀按单科三线，仅单科口径有效。
+        </div>
+    </div>
+</div>
+
+<div id="pvResult"></div>
+<div id="pvEmpty" class="empty-state d-none"><i class="bi bi-inbox"></i><p class="mt-2 mb-0"></p></div>
+{% endblock %}
+{% block extra_js %}
+<script src="{{ url_for('static', filename='js/echarts.min.js') }}"></script>
+<script src="{{ url_for('static', filename='js/pivot.js') }}"></script>
+{% endblock %}

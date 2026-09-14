@@ -1,0 +1,85 @@
+{% extends "base.html" %}
+{% block title %}分层模板{% endblock %}
+{% block content %}
+<div class="d-flex align-items-center mb-3 flex-wrap gap-2">
+    <h5 class="mb-0"><i class="bi bi-collection"></i> 分层模板</h5>
+    <button class="btn btn-sm btn-primary ms-auto" id="tplAdd"><i class="bi bi-plus"></i> 新建模板</button>
+</div>
+
+<div class="alert alert-light border small">
+    模板只定义「<b>有哪些层</b>」（层名与顺序，第 1 层最高），以及可选的各层默认比例。
+    一场考试选定模板后，它的划线与<b>成绩分析</b>（分层人数、各班上线人数 / 上线率、自由表里的「层」维度）
+    都按这个模板的层来算；<b>换一场考试可以选另一个模板</b>（如期末用「高考线」、限时练用「四层」）。
+    没绑定模板或没划线的考试，分析只做基础数据展示，不会出分层与上线类指标。
+</div>
+
+<div class="card">
+    <div class="card-body p-0">
+        <table class="table table-hover g-table mb-0" id="tplTable">
+            <thead><tr>
+                <th style="width:160px">模板名</th>
+                <th style="width:120px">默认下界方式</th>
+                <th>层（第 1 层最高）</th>
+                <th style="width:180px">备注</th>
+                <th style="width:130px"></th>
+            </tr></thead>
+            <tbody></tbody>
+        </table>
+    </div>
+</div>
+
+<!-- 编辑弹窗 -->
+<div class="modal fade" id="tplModal" tabindex="-1">
+  <div class="modal-dialog modal-lg modal-dialog-scrollable">
+    <div class="modal-content">
+      <div class="modal-header py-2">
+        <h6 class="modal-title" id="tplModalTitle">模板</h6>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <input type="hidden" id="tplId">
+        <div class="row g-2 mb-3">
+          <div class="col-md-4">
+            <label class="form-label small mb-1">模板名</label>
+            <input id="tplName" class="form-control form-control-sm" placeholder="如：高考线 / 限时练四层">
+          </div>
+          <div class="col-md-3">
+            <label class="form-label small mb-1">默认下界方式</label>
+            <select id="tplMode" class="form-select form-select-sm">
+              <option value="score">固定分数</option>
+              <option value="ratio">人数比例%</option>
+              <option value="rank">人数（名次）</option>
+            </select>
+          </div>
+          <div class="col-md-5">
+            <label class="form-label small mb-1">备注</label>
+            <input id="tplRemark" class="form-control form-control-sm" placeholder="选填">
+          </div>
+        </div>
+        <div class="mb-3">
+          <label class="form-label small mb-1">适用考试类型
+            <span class="text-muted">（不勾 = 通用；勾选后，该类型的新考试会自动默认选中本模板）</span>
+          </label>
+          <div id="tplExamTypes" class="d-flex flex-wrap gap-2"></div>
+        </div>
+        <div class="d-flex align-items-center mb-2">
+          <span class="small fw-semibold">层（从上到下，第 1 层最高）</span>
+          <button class="btn btn-sm btn-outline-success ms-auto" id="tplLayerAdd"><i class="bi bi-plus"></i> 新增层</button>
+        </div>
+        <table class="table table-sm align-middle" id="tplLayers">
+          <thead><tr><th style="width:50px">序号</th><th>层名</th><th style="width:150px" id="tplRatioTh">默认比例%（选填）</th><th style="width:130px"></th></tr></thead>
+          <tbody></tbody>
+        </table>
+        <div class="text-muted small">该列只在「人数比例%」/「人数（名次）」模式下用作初始值（比例填百分比、名次填第几名），留空则手动填。</div>
+      </div>
+      <div class="modal-footer py-2">
+        <button class="btn btn-sm btn-outline-secondary" data-bs-dismiss="modal">取消</button>
+        <button class="btn btn-sm btn-primary" id="tplSave">保存</button>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+{% block extra_js %}
+<script src="{{ url_for('static', filename='js/band_templates.js') }}"></script>
+{% endblock %}

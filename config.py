@@ -61,6 +61,9 @@ class Config:
         'pool_pre_ping': True,
     }
 
+    # 学校名称：成绩证明等对外文书抬头（可用环境变量 SCHOOL_NAME 覆盖）
+    SCHOOL_NAME = os.environ.get('SCHOOL_NAME', '郑州市郑开学校')
+
     # 多库绑定（模块独立数据库）
     SQLALCHEMY_BINDS = {
         'dormitory': 'sqlite:///' + os.path.join(BASE_DIR, 'data', 'dormitory.db'),

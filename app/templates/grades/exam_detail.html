@@ -63,7 +63,7 @@
         </div>
     </div>
     <div class="table-responsive" style="max-height:70vh;">
-        <table class="table table-sm table-hover align-middle g-table mb-0">
+        <table class="table table-sm table-hover align-middle g-table mb-0" id="scoreTable">
             <thead class="sticky-top">
             <tr>
                 <th>学号</th><th>姓名</th><th>班级</th><th>方向</th><th>选科</th>
@@ -110,9 +110,18 @@
             </tbody>
         </table>
     </div>
-</div>
+    <div class="d-flex align-items-center gap-2 mt-2 flex-wrap">
+    <label class="small text-muted mb-0">每页</label>
+    <select id="pgSize" class="form-select form-select-sm w-auto">
+        <option>50</option><option>100</option><option>200</option><option>全部</option>
+    </select>
+    <button id="pgPrev" class="btn btn-sm btn-outline-secondary"><i class="bi bi-chevron-left"></i>上一页</button>
+    <span id="pgInfo" class="small text-muted"></span>
+    <button id="pgNext" class="btn btn-sm btn-outline-secondary">下一页<i class="bi bi-chevron-right"></i></button>
+    </div>
+    </div>
 
-<!-- 删除确认 -->
+    <!-- 删除确认 -->
 <div class="modal fade" id="delModal" tabindex="-1">
     <div class="modal-dialog">
         <div class="modal-content">
@@ -138,7 +147,41 @@
 <script>
 $(function(){
     var examId = $('#examToolbar').data('examId');
-    // 点击分数单元格：输入数字保存；输入 del 删除该科（缺考）
+
+    /* ---------- 成绩单分页（客户端，按页显隐；编辑后 location.reload 用 sessionStorage 保留位置） ---------- */
+    var PAGE_KEY = 'examPage_' + examId;
+    var pageSize = 50;
+    function applyPage(){
+        var rows = $('#scoreTable tbody tr');
+        var total = rows.length;
+        var pages = Math.max(1, Math.ceil(total / pageSize));
+        var p = parseInt(sessionStorage.getItem(PAGE_KEY) || '1', 10);
+        if (isNaN(p) || p < 1) p = 1;
+        if (p > pages) p = pages;
+        rows.hide().slice((p - 1) * pageSize, p * pageSize).show();
+        $('#pgInfo').text('第 ' + p + ' / ' + pages + ' 页 · 共 ' + total + ' 人');
+        $('#pgPrev').prop('disabled', p <= 1);
+        $('#pgNext').prop('disabled', p >= pages);
+        sessionStorage.setItem(PAGE_KEY, p);
+    }
+    $('#pgSize').on('change', function(){
+        var v = $(this).val();
+        pageSize = (v === '全部') ? 1000000 : parseInt(v, 10);
+        sessionStorage.setItem(PAGE_KEY, 1);
+        applyPage();
+    });
+    $('#pgPrev').on('click', function(){
+        var p = parseInt(sessionStorage.getItem(PAGE_KEY) || '1', 10) - 1;
+        if (p < 1) p = 1;
+        sessionStorage.setItem(PAGE_KEY, p); applyPage();
+    });
+    $('#pgNext').on('click', function(){
+        var p = parseInt(sessionStorage.getItem(PAGE_KEY) || '1', 10) + 1;
+        sessionStorage.setItem(PAGE_KEY, p); applyPage();
+    });
+    applyPage();
+
+    /* ---------- 点击分数单元格：输入数字保存；输入 del 删除该科（缺考） ---------- */
     $('.score-cell[data-sid]').each(function(){
         var td = $(this), sid = td.data('sid');
         if(!sid){ return; }

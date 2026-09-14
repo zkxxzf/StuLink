@@ -31,6 +31,27 @@
 .empty-state { padding: 50px 20px; text-align: center; color: #64748b; }
 .empty-state .bi { font-size: 40px; color: #cbd5e1; }
 
+/* 成绩认定证明（打印页 / 公开核验页共用，对齐纸质模板版式） */
+.cert-doc { max-width: 900px; margin: 0 auto; background: #fff; }
+.cert-doc .cert-school { text-align: center; font-size: 1.35rem; font-weight: 700; letter-spacing: 6px; }
+.cert-doc .cert-title { text-align: center; font-size: 1.5rem; font-weight: 700;
+    letter-spacing: 8px; margin: 10px 0 18px; }
+.cert-doc .cert-text { font-size: 15px; line-height: 2; text-indent: 2em; margin-bottom: 14px; }
+.cert-doc .cert-text b { border-bottom: 1px solid #333; padding: 0 4px; }
+.cert-tbl { width: 100%; border-collapse: collapse; font-size: 14px; }
+.cert-tbl th, .cert-tbl td { border: 1px solid #333; padding: 6px 8px; text-align: center; }
+.cert-tbl thead th { background: #f1f5f9; font-weight: 600; }
+.cert-tbl td.subj { font-weight: 600; white-space: nowrap; background: #f8fafc; }
+.cert-tbl td.muted { color: #94a3b8; font-size: 13px; }
+.cert-note { font-size: 13px; color: #475569; margin-top: 10px; }
+.cert-foot { display: flex; justify-content: space-between; align-items: flex-end; margin-top: 36px; }
+.cert-sign { text-align: center; font-size: 14px; line-height: 1.9; white-space: nowrap; }
+.cert-seal {
+    margin: 0 auto 10px; width: 110px; height: 110px; border: 3px solid #b42318; border-radius: 50%;
+    color: #b42318; display: flex; align-items: center; justify-content: center;
+    text-align: center; font-size: .8rem; transform: rotate(-12deg); opacity: .85;
+}
+
 /* 打印（导出 PDF）：仅打印当前激活 tab，横向 A4 */
 @media print {
     body { background: #fff; }
