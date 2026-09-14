@@ -108,7 +108,7 @@
                     <td>{% if s.gender=='男' %}<span class="badge bg-primary">男</span>{% else %}<span class="badge bg-danger">女</span>{% endif %}</td>
                     <td>{{ s.grade }}</td>
                     <td>{{ s.class_name }}</td>
-                    <td>{{ s.subject_selection or '-' }}</td>
+                    <td>{% if s.subject_selection %}<span class="{{ subject_badge_class(s.subject_selection) }}">{{ s.subject_selection }}</span>{% else %}-{% endif %}</td>
                     <td>{% if s.accommodation %}{{ s.accommodation.boarding_type }}{% else %}-{% endif %}</td>
                     <td>{% if s.accommodation and s.accommodation.day_student_type %}<span class="badge bg-info">{{ s.accommodation.day_student_type }}</span>{% else %}-{% endif %}</td>
                     <td>{% if s.bed_assignment and s.bed_assignment.room %}{{ s.bed_assignment.room.building }}{{ s.bed_assignment.room.room_number }}{% else %}-{% endif %}</td>

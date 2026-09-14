@@ -57,7 +57,9 @@
                     </div>
                     <div class="col-sm-3">
                         <label class="text-muted small d-block">选科</label>
-                        <span>{{ student.subject_selection or '-' }}</span>
+                        {% if student.subject_selection %}
+                        <span class="{{ subject_badge_class(student.subject_selection) }}">{{ student.subject_selection }}</span>
+                        {% else %}<span>-</span>{% endif %}
                     </div>
                     <div class="col-sm-3">
                         <label class="text-muted small d-block">学籍情况</label>

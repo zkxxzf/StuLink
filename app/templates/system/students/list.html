@@ -142,7 +142,7 @@
                     </td>
                     <td>{{ s.grade }}</td>
                     <td>{{ s.class_name }}</td>
-                    <td>{{ s.subject_selection or '-' }}</td>
+                    <td>{% if s.subject_selection %}<span class="{{ subject_badge_class(s.subject_selection) }}">{{ s.subject_selection }}</span>{% else %}-{% endif %}</td>
                     <td>
                         {% if s.graduation_school %}
                         <small>{{ s.graduation_school }}</small>

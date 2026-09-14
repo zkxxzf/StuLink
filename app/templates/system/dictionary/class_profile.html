@@ -57,8 +57,9 @@
                         <td>
                             <div class="d-flex flex-wrap gap-1 subject-checks">
                                 {% for s in subject_options %}
-                                <label class="badge-subject {% if s in row.subjects %}active{% endif %}"
-                                       data-value="{{ s }}">{{ s }}</label>
+                                <label class="badge-subject {{ subject_badge_class(s) }} {% if s in row.subjects %}active{% endif %}"
+                                       data-value="{{ s }}"
+                                       title="{{ '物理方向' if subject_direction(s) == 'physics' else ('历史方向' if subject_direction(s) == 'history' else '') }}">{{ s }}</label>
                                 {% endfor %}
                             </div>
                         </td>
@@ -101,6 +102,11 @@
 .badge-subject.active {
     background: #0d6efd; color: #fff; border-color: #0d6efd;
 }
+/* 按方向配色：物理方向（物XX）蓝色系，历史方向（史XX）橙色系 */
+.badge-subject.subj-physics { background: #e7f1ff; color: #0b5ed7; border-color: #b6d4fe; }
+.badge-subject.subj-history { background: #fff3e0; color: #b45309; border-color: #ffd8a8; }
+.badge-subject.subj-physics.active { background: #0d6efd; color: #fff; border-color: #0d6efd; }
+.badge-subject.subj-history.active { background: #e8590c; color: #fff; border-color: #e8590c; }
 .table-active { background: #f8faff !important; }
 .table-active:hover { background: #eef2ff !important; }
 .teacher-tag {
