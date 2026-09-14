@@ -247,18 +247,23 @@ def _attach_student_info(exam, rows):
         r['subject_selection'] = stu.subject_selection or ''
         r['enrollment_status'] = stu.enrollment_status or ''
         direction = ''
-        sel = r['subject_selection']
+        sel = (r['subject_selection'] or '').strip()
         if sel.startswith('物'):
             direction = '物理'
         elif sel.startswith('史'):
             direction = '历史'
+        elif sel in ('理科', '理'):
+            direction = '物理'
+        elif sel in ('文科', '文'):
+            direction = '历史'
         if not direction:
             direction = cp_map.get(stu.class_name) or ''
         r['direction'] = direction
-        if not direction or not sel:
+        # 不分科 / 统一考试本就无方向（direction 留空），不再剔除学生；
+        # 有选科却仍无法识别方向的，按不分科兜底并提示，便于核对
+        if not direction and sel:
             unmatched.append({'line': r['line'], 'no': r['no'],
-                              'reason': '无法确定选科方向（请先在学生管理/班型设置中补齐该生选科）'})
-            continue
+                              'reason': '选科方向无法识别（已按不分科处理，请核对选科）'})
         keep.append(r)
     rows[:] = keep
     return unmatched

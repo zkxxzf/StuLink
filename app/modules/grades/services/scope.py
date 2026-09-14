@@ -1,7 +1,7 @@
 # StuLink v1.9.0 2026-09-03
 # 成绩模块数据范围解析（复用现有角色/权限组体系，参照宿舍统计模块范式）
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
-from app.models import UserClassLink
+from app.models import UserClassLink, Student
 from app.utils.helpers import get_graduated_grades
 from app.models.grades import TeacherSubjectLink
 
@@ -84,3 +84,36 @@ def _all_active_grades():
     grades = [g for g in grades if g not in gds]
     grades.sort(key=lambda g: int(''.join(filter(str.isdigit, g)) or '0'), reverse=True)
     return grades
+
+
+def student_in_scope(user, student_no):
+    """判断 student_no（= Student.student_number）是否在当前用户成绩可见范围内。
+
+    越界抛 PermissionError。沿用现有角色/权限组体系（不新增角色）：
+    admin/校级 → 全校；年级长 → 本年级；班主任 → 所辖班；任课教师 → 任教年级内学生。
+    """
+    if user.role == 'admin':
+        return
+    st_obj = Student.query.filter_by(student_number=student_no).first()
+    if not st_obj:
+        raise PermissionError
+    if user.has_role('teacher'):
+        grades = {l.grade for l in
+                  TeacherSubjectLink.query.filter_by(user_id=user.id, active=True).all()}
+        if st_obj.grade not in grades:
+            raise PermissionError
+        return
+    scope, grade = get_scope(user)
+    if scope == SCOPE_SCHOOL:
+        return
+    if scope == SCOPE_GRADE:
+        if st_obj.grade != grade:
+            raise PermissionError
+        return
+    if scope == SCOPE_CLASS:
+        links = UserClassLink.query.filter_by(user_id=user.id).all()
+        allowed = {(l.grade, l.class_name) for l in links}
+        if (st_obj.grade, st_obj.class_name) not in allowed:
+            raise PermissionError
+        return
+    raise PermissionError

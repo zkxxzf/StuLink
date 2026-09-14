@@ -5,6 +5,9 @@
 var PALETTE = ['#3b82f6', '#8b5cf6', '#10b981', '#f59e0b', '#ef4444',
                '#06b6d4', '#ec4899', '#84cc16', '#f97316', '#6366f1'];
 var state = {grade: '', examId: '', tab: 'grade', class_name: '', subject: '', direction: ''};
+// tab 业务顺序。注意：Flask jsonify 默认按键名排序，Object.keys(opts.tabs) 的首项会是
+// 'class' 而不是 'grade'，因此不能用它决定默认 tab，必须按此固定顺序取第一个可见项。
+var TAB_ORDER = ['grade', 'class', 'subject', 'teacher'];
 var opts = null;
 var charts = {};
 
@@ -29,7 +32,7 @@ function init(){
         Object.keys(opts.tabs).forEach(function(t){
             if (!opts.tabs[t]) $('li[data-tab="'+t+'"]').hide();
         });
-        var first = Object.keys(opts.tabs).filter(function(t){ return opts.tabs[t]; })[0];
+        var first = TAB_ORDER.filter(function(t){ return opts.tabs[t]; })[0];
         if (!first){ showEmpty('grade', '您没有成绩查看权限'); return; }
         activateTab(first);
         window.addEventListener('resize', function(){ Object.keys(charts).forEach(function(k){ charts[k].resize(); }); });
@@ -145,14 +148,10 @@ function activateTab(tab, fromClick){
     $('#gSubject').toggleClass('d-none', tab !== 'subject' && tab !== 'teacher');
     if (tab === 'subject' || tab === 'teacher') fillSubject();
     $('#gTabs a[href="#pane-'+tab+'"]').tab('show');
-    // 切回班级分析时，从班级下拉还原 state.class_name（离开班级 tab 时会被清空，
-    // 否则返回后 class_name 为空导致 class_tab 返回空数据）
-    if (tab === 'class'){
-        state.class_name = $('#gClass').val() || '';
-    } else {
-        state.class_name = '';
-        $('#gClass').val('');
-    }
+    // 班级下拉只随 tab 显隐，**绝不清空其值**：一旦清空，切回班级分析时
+    // state.class_name 读到空 → 后端查不到班级 → 前端误报"该考试尚未导入成绩"。
+    // （buildQuery 仅在 tab==='class' 时带 class_name，其他 tab 保留该值无副作用）
+    state.class_name = $('#gClass').val() || '';
     loadCurrent();
 }
 
@@ -161,6 +160,11 @@ function loadCurrent(){
     var pane = $('#pane-' + state.tab);
     pane.find('.tab-content-area').empty().addClass('d-none');
     pane.find('.empty-state').addClass('d-none');
+    // 班级分析未选班级时直接提示，不发无意义请求（否则后端返回空，会误报成"未导入成绩"）
+    if (state.tab === 'class' && !state.class_name){
+        showEmpty(state.tab, '请先在顶部筛选栏选择班级');
+        return;
+    }
     pane.find('.tab-pane-loading').removeClass('d-none');
     var url = '/grades/api/analysis/' + state.tab + buildQuery();
     $.getJSON(url, function(res){
@@ -191,13 +195,29 @@ function escHtml(s){
 
 function buildExamInfo(data){
     if (!data.exam) return null;
-    return $('<div class="alert alert-light border py-2 small">').append(
+    var wrap = $('<div>');
+    wrap.append($('<div class="alert alert-light border py-2 small mb-2">').append(
         '<i class="bi bi-info-circle"></i> ' +
         '当前考试：<strong>' + escHtml(data.exam.name) + '</strong> · ' +
         escHtml(data.exam.grade) + ' · ' + escHtml(data.exam.date) +
         (data.class_name ? ' · 班级：' + escHtml(data.class_name) : '') +
         (data.subject ? ' · 科目：' + escHtml(data.subject) : '')
-    );
+    ));
+    // 分批导入（一次导一科）时，总分只是「已导入科目合计」，必须显式提示避免误读
+    var p = data.meta && data.meta.partial;
+    if (p){
+        wrap.append($('<div class="alert alert-warning py-2 small mb-2">').append(
+            // 注：expected 是全年级选科并集（可能 9 科），不是某个学生的应考科，
+            // 所以这里不写「x/y 科」的比例，避免误以为学生要考 9 科
+            '<i class="bi bi-exclamation-triangle"></i> <b>分批导入中</b>：本场已导入 '
+            + escHtml((p.imported || []).join('、') || '—') + '；'
+            + '本年级涉及的科目中尚未导入：<b>' + escHtml((p.missing || []).join('、')) + '</b>。'
+            + '此时<b>总分、总分排名、分数段/名次段及基于总分的上线统计</b>都只是'
+            + '「已导入科目合计」的口径，全部科目导完后才准确；'
+            + '单科分析（科目均分、及格率、单科排名）不受影响。'
+        ));
+    }
+    return wrap;
 }
 
 function showEmpty(tab, msg){

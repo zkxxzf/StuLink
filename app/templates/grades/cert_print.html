@@ -1,0 +1,27 @@
+{% extends "base.html" %}
+{% from "grades/_cert_body.html" import cert_doc %}
+{% block title %}成绩认定证明{% endblock %}
+{% block extra_css_head %}
+<link href="{{ url_for('static', filename='css/grades.css') }}" rel="stylesheet">
+<style>
+  @media print {
+    body * { visibility: hidden; }
+    #certDoc, #certDoc * { visibility: visible; }
+    #certDoc { position: absolute; left: 0; top: 0; width: 100%; padding: 0 12px; }
+    .no-print { display: none !important; }
+  }
+</style>
+{% endblock %}
+{% block content %}
+{% if cert.invalid %}
+<div class="alert alert-warning no-print"><i class="bi bi-slash-circle"></i> 该成绩证明已被出具人作废。</div>
+{% endif %}
+<div id="certDoc">
+    {{ cert_doc(content, cert, false) }}
+</div>
+
+<div class="no-print text-center mt-3">
+    <button class="btn btn-sm btn-primary" onclick="window.print()"><i class="bi bi-printer"></i> 打印 / 另存 PDF</button>
+    <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('grades.student_query_page') }}">返回</a>
+</div>
+{% endblock %}

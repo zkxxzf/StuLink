@@ -1,0 +1,65 @@
+{# 成绩认定证明正文：打印页与公开核验页共用同一宏，保证两处版式完全一致。
+   用法：{% from "grades/_cert_body.html" import cert_doc %}
+        {{ cert_doc(content, cert, mask_id, hide_no) }}
+   mask_id=True 时身份证号只显示前6后4（公开核验页不泄露完整证件号）。
+   hide_no=True 时学籍号以 *** 代替（公开核验页不泄露学号）。
+   数据来源：content.cert_matrix（科目 × 学年学期时段矩阵，取自历次考试成绩）。
+#}
+{% macro cert_doc(content, cert, mask_id, hide_no=false) %}
+{% set h = content.cert_header if content.cert_header else {} %}
+{% set m = content.cert_matrix if content.cert_matrix else none %}
+{% set school = content.school_name or '某某学校' %}
+<div class="cert-doc">
+    <div class="cert-school">{{ school }}</div>
+    <div class="cert-title">高中学生成绩认定证明</div>
+
+    <p class="cert-text">
+        兹证明学生 <b>{{ h.name or cert.student_name }}</b>，性别 {{ h.gender or '—' }}，
+        身份证号：{% if mask_id %}{{ h.id_card_masked or '—' }}{% else %}{{ h.id_card or '—' }}{% endif %}，
+        学籍号：{% if hide_no %}***{% else %}{{ h.student_no or cert.student_no }}{% endif %}，现读生自 {{ h.enroll_text or '—' }}
+        进入本校就读，已完成相应课程，成绩如下：
+    </p>
+
+    {% if m and m.cols %}
+    <table class="cert-tbl">
+        <thead>
+            <tr>
+                <th>考试</th>
+                {% for c in m.cols %}<th>{{ c.label }}<br><small>(满分{{ c.full }})</small></th>{% endfor %}
+            </tr>
+        </thead>
+        <tbody>
+            {% for r in m.rows %}
+            <tr>
+                <td class="subj">{{ r.exam_label }}</td>
+                {% for c in m.cols %}
+                <td{% if r[c.key] is string and r[c.key] != '' and r[c.key] in ['未选','未参加'] %} class="muted"{% endif %}>{{ r[c.key] if r[c.key] is not none else '–' }}</td>
+                {% endfor %}
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% if m.exam_names %}
+    <div class="cert-note">
+        说明：各时段成绩取该学期末考试成绩{% for n in m.exam_names %}（{{ loop.index }}）{{ n }}{% if not loop.last %}；{% endif %}{% endfor %}。
+    </div>
+    {% endif %}
+    {% else %}
+    <p class="text-muted small">（该证明无成绩认定矩阵数据）</p>
+    {% endif %}
+
+    <div class="cert-note">备注：本成绩单仅打印后盖章有效，手写无效。</div>
+
+    <div class="cert-foot">
+        <div class="small text-muted">
+            <div>防伪验证码：<strong>{{ cert.code }}</strong></div>
+            <div>生成时间：{{ cert.generated_at.strftime('%Y-%m-%d %H:%M') if cert.generated_at else '' }}</div>
+            <div>核验地址：***</div>
+        </div>
+        <div class="cert-sign">
+            <div>{{ school }}<br>年&nbsp;&nbsp;&nbsp;月&nbsp;&nbsp;&nbsp;日</div>
+        </div>
+    </div>
+    <div class="cert-note">说明：本证明由系统依据已导入成绩数据生成，排名按方向内统计；仅作在校成绩凭证，不代表最终学历结论。</div>
+</div>
+{% endmacro %}

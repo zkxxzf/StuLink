@@ -129,7 +129,7 @@
                     {% if form.graduation_school.data %}
                     <div class="form-control form-control-sm bg-white border-0">{{ form.graduation_school.data }}</div>
                     {% else %}
-                    {{ form.graduation_school(class="form-control", placeholder="如：郑州市管城回族区第二中学") }}
+                    {{ form.graduation_school(class="form-control", placeholder="如：某某中学") }}
                     {% endif %}
                     {% for e in form.graduation_school.errors %}<div class="text-danger small">{{ e }}</div>{% endfor %}
                     <small class="text-muted">毕业学校代码与学校名称相关联，代码一旦设定不会变化</small>

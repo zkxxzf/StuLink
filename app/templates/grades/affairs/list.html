@@ -1,0 +1,134 @@
+{% extends "base.html" %}
+{% block title %}考务管理 - 成绩管理{% endblock %}
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+    <h5 class="mb-0"><i class="bi bi-clipboard-check"></i> 考务批次</h5>
+    <button class="btn btn-primary btn-sm" data-bs-toggle="modal" data-bs-target="#newAffairModal">
+        <i class="bi bi-plus-lg"></i> 新建考务批次
+    </button>
+</div>
+
+<form class="row g-2 mb-3" method="get">
+    <div class="col-auto">
+        <select name="grade" class="form-select form-select-sm" onchange="this.form.submit()">
+            <option value="">全部年级</option>
+            {% for g in grade_options %}
+            <option value="{{ g }}" {% if g == grade %}selected{% endif %}>{{ g }}</option>
+            {% endfor %}
+        </select>
+    </div>
+</form>
+
+<div class="card">
+    <div class="table-responsive">
+        <table class="table table-hover align-middle mb-0">
+            <thead>
+            <tr>
+                <th>批次名称</th>
+                <th>年级</th>
+                <th>考试日期</th>
+                <th>考号模式</th>
+                <th class="text-center">学生/参考</th>
+                <th class="text-center">考场</th>
+                <th class="text-center">已编排</th>
+                <th>状态</th>
+                <th class="text-end">操作</th>
+            </tr>
+            </thead>
+            <tbody>
+            {% for a in affairs %}
+            {% set s = stats[a.id] %}
+            <tr>
+                <td>
+                    <a href="{{ url_for('grades.affair_detail', aid=a.id) }}" class="fw-semibold text-decoration-none">{{ a.name }}</a>
+                    {% if a.exam_id %}<span class="badge bg-info ms-1">已关联成绩</span>{% endif %}
+                </td>
+                <td>{{ a.grade }}</td>
+                <td>{{ a.exam_date.strftime('%Y-%m-%d') if a.exam_date else '—' }}</td>
+                <td>{{ {0:'前缀+考场+座号',1:'学号即考号',2:'自定义考号'}[a.mode] }}</td>
+                <td class="text-center">{{ s.students }}/{{ s.attend }}</td>
+                <td class="text-center">{{ s.rooms }}</td>
+                <td class="text-center">{{ s.arranged }}</td>
+                <td>
+                    {% if a.status == 'linked' %}<span class="badge bg-info">已关联</span>
+                    {% elif a.status == 'arranged' %}<span class="badge bg-success">已编排</span>
+                    {% else %}<span class="badge bg-secondary">草稿</span>{% endif %}
+                </td>
+                <td class="text-end">
+                    <a href="{{ url_for('grades.affair_detail', aid=a.id) }}" class="btn btn-sm btn-outline-primary">进入</a>
+                    <button class="btn btn-sm btn-outline-danger" onclick="delAffair({{ a.id }}, '{{ a.name }}')">删除</button>
+                </td>
+            </tr>
+            {% else %}
+            <tr><td colspan="9" class="text-center text-muted py-4">
+                暂无考务批次。点右上角「新建考务批次」，按流程完成 学生名单→考场设置→编排考号→导出。
+            </td></tr>
+            {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<!-- 新建批次 -->
+<div class="modal fade" id="newAffairModal" tabindex="-1">
+    <div class="modal-dialog">
+        <form method="post" action="{{ url_for('grades.affair_create') }}" class="modal-content">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <div class="modal-header">
+                <h6 class="modal-title">新建考务批次</h6>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <div class="mb-2">
+                    <label class="form-label">批次名称</label>
+                    <input name="name" class="form-control form-control-sm" placeholder="如 2026级 期中 考场编排" required>
+                </div>
+                <div class="row g-2">
+                    <div class="col-6">
+                        <label class="form-label">年级</label>
+                        <select name="grade" class="form-select form-select-sm" required>
+                            {% for g in grade_options %}<option value="{{ g }}">{{ g }}</option>{% endfor %}
+                        </select>
+                    </div>
+                    <div class="col-6">
+                        <label class="form-label">考试日期</label>
+                        <input name="exam_date" type="date" class="form-control form-control-sm">
+                    </div>
+                </div>
+                {# v1.12.2 移除新建批次时的考号前缀输入：前缀统一在步骤③按选科配置，批次默认固定 1701 #}
+                <div class="mb-2">
+                    <label class="form-label">编排模式</label>
+                    <div class="d-flex gap-3">
+                        <div class="form-check"><input class="form-check-input" type="radio" name="selection_mode" id="smSel" value="selected" checked>
+                            <label class="form-check-label" for="smSel">选科模式</label></div>
+                        <div class="form-check"><input class="form-check-input" type="radio" name="selection_mode" id="smPlain" value="plain">
+                            <label class="form-check-label" for="smPlain">不选科模式</label></div>
+                    </div>
+                    {# v1.12.1 新建批次即定编排模式：选科模式按选科分组分配考场，不选科模式全体一组通用 #}
+                    <div class="form-text">选科模式：按选科组合分组分配考场；不选科模式：全体一组，所有考场通用。</div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-sm btn-secondary" data-bs-dismiss="modal">取消</button>
+                <button class="btn btn-sm btn-primary" type="submit">创建</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<form id="delForm" method="post" style="display:none">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <input type="hidden" name="aid" id="delAid">
+</form>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+function delAffair(id, name){
+    if(!confirm('确定删除考务批次「'+name+'」？其学生与考场数据一并删除，不可恢复。')) return;
+    var f = document.getElementById('delForm');
+    f.action = '/grades/affairs/'+id+'/delete';
+    f.submit();
+}
+</script>
+{% endblock %}

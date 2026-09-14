@@ -1,0 +1,102 @@
+{% extends "base.html" %}
+{% block title %}成绩证明记录 - 成绩管理{% endblock %}
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+    <h5 class="mb-0"><i class="bi bi-card-checklist"></i> 成绩证明记录</h5>
+    <a href="{{ url_for('grades.student_query_page') }}" class="btn btn-sm btn-outline-secondary">
+        <i class="bi bi-arrow-left"></i> 返回成绩查询</a>
+</div>
+
+{# 筛选条：关键字 / 状态 / 生成日期区间 #}
+<form class="row g-2 mb-3" method="get">
+    <div class="col-auto">
+        <input name="kw" class="form-control form-control-sm" placeholder="姓名/学号/防伪码" value="{{ kw }}">
+    </div>
+    <div class="col-auto">
+        <select name="status" class="form-select form-select-sm">
+            <option value="">全部状态</option>
+            <option value="valid" {% if status=='valid' %}selected{% endif %}>有效</option>
+            <option value="invalid" {% if status=='invalid' %}selected{% endif %}>已作废</option>
+        </select>
+    </div>
+    <div class="col-auto">
+        <input type="date" name="date_from" class="form-control form-control-sm" value="{{ d_from }}" title="生成起始日">
+    </div>
+    <div class="col-auto">
+        <input type="date" name="date_to" class="form-control form-control-sm" value="{{ d_to }}" title="生成截止日">
+    </div>
+    <div class="col-auto">
+        <button class="btn btn-sm btn-primary"><i class="bi bi-search"></i> 查询</button>
+        <a href="{{ url_for('grades.cert_records_page') }}" class="btn btn-sm btn-outline-secondary">重置</a>
+    </div>
+</form>
+
+<div class="card">
+    <div class="table-responsive">
+        <table class="table table-hover align-middle mb-0">
+            <thead>
+            <tr>
+                <th>防伪码</th>
+                <th>学生</th>
+                <th>班级</th>
+                <th>证明范围</th>
+                <th>生成人</th>
+                <th>生成时间</th>
+                <th>状态</th>
+                <th class="text-end">操作</th>
+            </tr>
+            </thead>
+            <tbody>
+            {% for c in certs %}
+            <tr>
+                <td>
+                    {# v1.12.2 加密防伪码 = SL+日期(8)+随机码(8)+HMAC签名段(16)；随机码/签名均落库 #}
+                    {% if c.nonce %}
+                    <code title="随机码 {{ c.nonce }} · 签名 {{ c.sig }}">{{ c.code }}</code>
+                    {% else %}
+                    <code title="早期版本防伪码（无签名校验）">{{ c.code }}</code>
+                    {% endif %}
+                </td>
+                <td>{{ c.student_name }} <span class="text-muted small">{{ c.student_no }}</span></td>
+                <td>{{ c.grade }} {{ c.class_name }}</td>
+                <td class="small">{{ c.term }}{% if c.scope_desc %} · {{ c.scope_desc }}{% endif %}</td>
+                <td>{{ user_map.get(c.generated_by, '—') }}</td>
+                <td class="small">{{ c.generated_at.strftime('%Y-%m-%d %H:%M') if c.generated_at else '—' }}</td>
+                <td>
+                    {% if c.invalid %}<span class="badge bg-secondary">已作废</span>
+                    {% else %}<span class="badge bg-success">有效</span>{% endif %}
+                </td>
+                <td class="text-end text-nowrap">
+                    <a href="{{ url_for('grades.cert_print', code=c.code) }}" target="_blank"
+                       class="btn btn-sm btn-outline-primary py-0">打印页</a>
+                    <a href="{{ url_for('grades.cert_verify', code=c.code) }}" target="_blank"
+                       class="btn btn-sm btn-outline-secondary py-0">核验</a>
+                    {% if not c.invalid and (current_user.role=='admin' or c.generated_by==current_user.id) %}
+                    <button class="btn btn-sm btn-outline-danger py-0"
+                            onclick="invalidCert('{{ c.code }}')">作废</button>
+                    {% endif %}
+                </td>
+            </tr>
+            {% else %}
+            <tr><td colspan="8" class="text-center text-muted py-4">暂无成绩证明记录。</td></tr>
+            {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+{% if certs|length >= 500 %}
+<div class="text-muted small mt-2">仅显示最近 500 条，请用上方条件缩小范围。</div>
+{% endif %}
+{% endblock %}
+
+{% block extra_js %}
+<script>
+// 作废成绩证明（仅生成人或管理员，后端二次校验）
+function invalidCert(code){
+    if(!confirm('确认作废防伪码 '+code+' 的成绩证明？作废后核验页将提示无效。')) return;
+    fetch('/grades/api/student-query/cert/'+code+'/invalid',
+          {method:'POST', headers:{'X-CSRFToken': csrfToken}})
+        .then(r=>r.json()).then(d=>{ if(d.success) location.reload(); else alert(d.message||'操作失败'); });
+}
+</script>
+{% endblock %}

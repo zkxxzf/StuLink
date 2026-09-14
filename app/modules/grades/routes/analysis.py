@@ -150,11 +150,17 @@ def _get_exam(exam_id):
     return exam
 
 
+# 分析数据只在「导入 / 重算 / 删除考试 / 保存划线」时变化，而这些入口都会执行
+# delete_cache_prefix(f'grades_tab_{exam_id}_')，因此缓存可以放长。
+# 原先 60 秒就过期，来回切换 tab 几次又要整场重算，是"切换很慢"的直接原因。
+CACHE_TIMEOUT = 900
+
+
 def _fetch(key, builder):
     data = cache.get(key)
     if data is None:
         data = builder()
-        cache.set(key, data, timeout=60)
+        cache.set(key, data, timeout=CACHE_TIMEOUT)
     return data
 
 

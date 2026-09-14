@@ -69,6 +69,7 @@ PERMISSION_MODULES = [
             ('grades.import', '成绩导入'),
             ('grades.settings', '划线分层'),
             ('grades.teachers', '任课教师映射'),
+            ('grades.student_query', '个人成绩查询'),
         ]
     },
 ]

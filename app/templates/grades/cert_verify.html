@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>成绩认定证明核验 - StuLink</title>
+    <link href="{{ url_for('static', filename='css/bootstrap.min.css') }}" rel="stylesheet">
+    <link href="{{ url_for('static', filename='css/bootstrap-icons.min.css') }}" rel="stylesheet">
+    <link href="{{ url_for('static', filename='css/grades.css') }}" rel="stylesheet">
+    <style>
+        body { background: #f5f7fb; }
+        .verify-wrap { max-width: 960px; margin: 30px auto; }
+    </style>
+</head>
+<body>
+{% from "grades/_cert_body.html" import cert_doc %}
+<div class="verify-wrap px-3">
+    <div class="card shadow-sm">
+        <div class="card-body">
+            <h5 class="text-center mb-3"><i class="bi bi-shield-check"></i> 成绩认定证明核验</h5>
+
+            {% if not cert %}
+            <div class="alert alert-danger text-center">
+                <i class="bi bi-x-circle"></i> 验证码不存在或已失效，无法核验。
+            </div>
+            {% elif not sig_ok %}
+            {# v1.12.2 加密防伪码：HMAC 签名与 学号+随机码+内容哈希 不符 → 码为伪造或快照被篡改 #}
+            <div class="alert alert-danger text-center">
+                <i class="bi bi-shield-x"></i> 签名校验失败：该验证码非本系统签发，或证明内容已被篡改，请勿采信。
+            </div>
+            {% elif cert.invalid %}
+            <div class="alert alert-warning text-center">
+                <i class="bi bi-slash-circle"></i> 该成绩证明已被出具人作废。
+            </div>
+            {% else %}
+            <div class="alert alert-success text-center">
+                <i class="bi bi-check-circle"></i> 验证通过：该成绩证明真实有效{% if not legacy %}（加密防伪码签名校验通过）{% endif %}。
+            </div>
+            {% if legacy %}
+            <div class="alert alert-secondary small text-center">
+                该证明为早期版本防伪码（无签名校验），内容以数据库快照为准。
+            </div>
+            {% endif %}
+            {# 公开页：身份证号脱敏 + 学籍号隐藏，其余内容与打印件一致 #}
+            {{ cert_doc(content, cert, true, true) }}
+            {% endif %}
+        </div>
+    </div>
+    <p class="text-center text-muted small mt-3">
+        本页面为公开核验页，仅展示证明快照内容，不对未授权第三方披露额外信息。
+    </p>
+</div>
+</body>
+</html>

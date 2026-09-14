@@ -6,4 +6,5 @@ from flask import Blueprint
 bp = Blueprint('grades', __name__, url_prefix='/grades')
 
 # 各子模块通过 @bp.route 注册（延迟 import，保证 bp 已定义）
-from app.modules.grades.routes import exams, bands, teachers, analysis, export, ai  # noqa: E402,F401
+from app.modules.grades.routes import (exams, bands, teachers, analysis, export, ai,  # noqa: E402,F401
+                                       student_query, pivot, band_templates, exam_affairs)

@@ -186,16 +186,43 @@
             {% endif %}
 
             {# ========= 成绩管理模块侧边栏 ========= #}
+            
             {% if request.blueprint == 'grades' %}
             <div class="nav-section">成绩管理</div>
-            <a class="nav-link {% if request.endpoint == 'grades.index' %}active{% endif %}"
-               href="{{ url_for('grades.index') }}">
-                <i class="bi bi-graph-up"></i>成绩分析
-            </a>
             {% if current_user.has_perm('grades.edit') %}
             <a class="nav-link {% if request.endpoint in ('grades.exams_list','grades.exam_new','grades.exam_detail','grades.exam_import') %}active{% endif %}"
                href="{{ url_for('grades.exams_list') }}">
                 <i class="bi bi-journal-text"></i>考试管理
+            </a>
+            {% endif %}
+            {% if current_user.has_perm('grades.edit') %}
+            {# v1.12.1 考务入口简化：折叠菜单+双子菜单合并为单个入口，向导页由详情页面包屑返回 #}
+            <a class="nav-link {% if request.endpoint and request.endpoint.startswith('grades.affair') %}active{% endif %}"
+               href="{{ url_for('grades.affairs_list') }}">
+                <i class="bi bi-clipboard-check"></i>考务管理
+            </a>
+            {% endif %}
+            <a class="nav-link {% if request.endpoint == 'grades.index' %}active{% endif %}"
+               href="{{ url_for('grades.index') }}">
+                <i class="bi bi-graph-up"></i>成绩分析
+            </a>
+            {% if current_user.has_perm('grades.view') %}
+            <a class="nav-link {% if request.endpoint == 'grades.pivot_page' %}active{% endif %}"
+               href="{{ url_for('grades.pivot_page') }}">
+                <i class="bi bi-grid-1x2"></i>成绩分析自由表
+            </a>
+            {% endif %}
+            {% if current_user.has_perm('grades.student_query') %}
+            <a class="nav-link {% if request.endpoint == 'grades.student_query_page' %}active{% endif %}"
+               href="{{ url_for('grades.student_query_page') }}">
+                <i class="bi bi-person-vcard"></i>个人成绩查询
+            </a>
+            {% endif %}
+            
+             {% if current_user.has_perm('grades.settings') %}
+            <a class="nav-link {% if request.endpoint == 'grades.band_templates_page' %}active{% endif %}"
+               href="{{ url_for('grades.band_templates_page') }}">
+                <i class="bi bi-collection"></i>分层模板
             </a>
             {% endif %}
             {% if current_user.has_perm('grades.teachers') %}
@@ -204,6 +231,7 @@
                 <i class="bi bi-person-workspace"></i>任课教师映射
             </a>
             {% endif %}
+           
             {% if current_user.has_perm('grades.view') %}
             <a class="nav-link {% if request.endpoint == 'grades.history' %}active{% endif %}"
                href="{{ url_for('grades.history') }}">

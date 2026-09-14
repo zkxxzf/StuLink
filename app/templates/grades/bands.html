@@ -20,6 +20,7 @@
                 <select id="qMode" class="form-select form-select-sm d-inline-block w-auto">
                     <option value="score">固定分数</option>
                     <option value="ratio">人数比例%</option>
+                    <option value="rank">人数（名次）</option>
                 </select>
             </div>
             <div class="col-auto">
@@ -34,11 +35,21 @@
                 <label class="form-check-label small" for="qTotal">含总分</label>
             </div>
             <div class="col-auto">
-                <span class="text-muted small me-1">快速填层名：</span>
-                <button class="btn btn-sm btn-outline-secondary" id="qFill4">四层</button>
+                <label class="form-label mb-0 me-1">分层模板</label>
+                <select id="qTpl" class="form-select form-select-sm d-inline-block w-auto">
+                    <option value="">（不套用）</option>
+                </select>
             </div>
             <div class="col-auto">
-                <button class="btn btn-sm btn-outline-secondary" id="qFillGk">高考线</button>
+                <button class="btn btn-sm btn-outline-secondary" id="qTplApply">套用层名</button>
+            </div>
+            <div class="col-auto">
+                <a class="btn btn-sm btn-outline-dark" href="{{ url_for('grades.band_templates_page') }}" target="_blank">
+                    <i class="bi bi-collection"></i> 管理模板
+                </a>
+            </div>
+            <div class="col-auto ms-auto">
+                <span class="text-muted small" id="qTplBound"></span>
             </div>
         </div>
         <div class="table-responsive">
@@ -55,7 +66,7 @@
         <div class="text-muted small mt-2">
             行 = 层（第 1 层最高），列 = 科目（已分科时按物理类 / 历史类分组，两组可填不同的线）。
             同一层内下界需从高到低；留空的格子不划线，也不会改动已有设置。
-            选「人数比例」时按该组该科自己的排名换算成分数。
+            选「人数比例」(前 n%) 或「人数（名次）」(前 n 名) 时，按该组该科自己的排名换算成分数落库。
         </div>
     </div>
 </div>
@@ -73,6 +84,8 @@ $(function(){
 
     function mode(){ return $('#qMode').val(); }
     function scope(){ return $('#qScope').val(); }
+    // 单位（用于表头与校验提示）：分数 / 比例% / 名次
+    function unit(){ return mode() === 'ratio' ? '比例%' : (mode() === 'rank' ? '名次' : '分数'); }
     function colsOf(d){
         var subs = (dirSubjects[d] || []).slice();
         if ($('#qTotal').is(':checked')) subs.unshift('总分');
@@ -90,10 +103,9 @@ $(function(){
     function buildHead(){
         var $th = $('#bandTable thead').empty();
         var r1 = $('<tr>'), r2 = $('<tr>');
-        r1.append('<th rowspan="2" style="width:70px">序号</th>');
         r1.append('<th rowspan="2">层名</th>');
         if (scope() === 'all'){
-            r1.append($('<th rowspan="2">').text(mode() === 'ratio' ? '比例%（全部学科共用）' : '分数（全部学科共用）'));
+            r1.append($('<th rowspan="2">').text(unit() + '（全部学科共用）'));
         } else {
             dirs.forEach(function(d){
                 var subs = colsOf(d);
@@ -110,8 +122,7 @@ $(function(){
         var $tb = $('#bandTable tbody').empty();
         layers.forEach(function(l){
             var tr = $('<tr>');
-            tr.append($('<td>').append($('<input type="number" min="1" class="form-control form-control-sm q-seq">').val(l.seq)));
-            tr.append($('<td>').append($('<input class="form-control form-control-sm q-name">').val(l.name)));
+            tr.append($('<td>').append($('<input class="form-control form-control-sm q-name" style="min-width:120px">').val(l.name)));
             if (scope() === 'all'){
                 tr.append($('<td>').append($('<input type="number" step="0.5" class="form-control form-control-sm q-value">').val(l.value == null ? '' : l.value)));
             } else {
@@ -130,9 +141,9 @@ $(function(){
     }
     function read(){
         var out = [];
-        $('#bandTable tbody tr').each(function(){
+        $('#bandTable tbody tr').each(function(i){
             var $r = $(this), o = {};
-            o.seq = $r.find('.q-seq').val();
+            o.seq = i + 1;   // 行序即层序，不再单独维护序号输入列
             o.name = $r.find('.q-name').val();
             if (scope() === 'all'){
                 o.value = $r.find('.q-value').val();
@@ -165,8 +176,22 @@ $(function(){
                 if (isNaN(v)){ errs.push(colLabel(k) + '「' + l.name + '」不是数字'); return; }
                 if (v < 0){ errs.push(colLabel(k) + '「' + l.name + '」不能为负数'); }
                 if (mode() === 'ratio' && v > 100){ errs.push(colLabel(k) + '「' + l.name + '」比例需在 0-100 之间'); }
-                if (prev !== null && v > prev){
-                    errs.push(colLabel(k) + '「' + l.name + '」下界 ' + v + ' 高于上一层「' + prevName + '」' + prev);
+                if (mode() === 'rank' && v < 1){ errs.push(colLabel(k) + '「' + l.name + '」名次需 ≥ 1'); }
+                if (prev !== null){
+                    if (mode() === 'score'){
+                        if (v > prev){
+                            errs.push(colLabel(k) + '「' + l.name + '」下界 ' + v + ' 高于上一层「' + prevName + '」' + prev);
+                        }
+                    } else {
+                        // 比例 / 名次都是「前 n」口径，自上而下应**递增**
+                        //（前20% → 前60%、前50名 → 前200名）；末层常填 0 表示兜底，跳过比较。
+                        // 真正的递减校验由后端换算成分数线后再做（同分可能落在同一界）。
+                        if (v > 0 && prev > 0 && v < prev){
+                            errs.push(colLabel(k) + '「' + l.name + '」' + unit() + ' ' + v
+                                      + ' 低于上一层「' + prevName + '」' + prev
+                                      + '（' + unit() + '应自上而下递增）');
+                        }
+                    }
                 }
                 prev = v; prevName = l.name;
             });
@@ -180,25 +205,22 @@ $(function(){
     /* 已加载的划线回填到矩阵（保存后刷新用） */
     function load(){
         if (scope() === 'all'){ render(); return; }
-        var pending = colKeys().length;
-        if (!pending){ render(); return; }
-        colKeys().forEach(function(k){
-            var parts = k.split('|');
-            $.getJSON('/grades/api/bands', {exam_id: examId, direction: parts[0], subject: parts[1]},
-                function(res){
-                    var vals = {};
-                    (res.data || []).forEach(function(b){ vals[b.name] = b.lower_value; });
-                    layers.forEach(function(l){ if (vals[l.name] != null) l.values[k] = vals[l.name]; });
-                }).always(function(){
-                    // 单个失败也要继续，避免整表不刷新
-                    if (--pending <= 0) render();
-                });
-        });
+        if (!colKeys().length){ render(); return; }
+        // 一次请求取回整张矩阵：原逐列请求会让后端每列都重建一次 ExamData，列多时很慢
+        $.getJSON('/grades/api/bands/matrix', {exam_id: examId}, function(res){
+            var all = res.data || {};
+            colKeys().forEach(function(k){
+                var vals = {};
+                (all[k] || []).forEach(function(b){ vals[b.name] = b.lower_value; });
+                layers.forEach(function(l){ if (vals[l.name] != null) l.values[k] = vals[l.name]; });
+            });
+            render();
+        }).fail(function(){ render(); });   // 失败也刷新，避免整表空白
     }
 
     $('#qMode').on('change', function(){
         // 分数与比例含义不同（如 120 分 vs 120%），切换时清空已填值，避免提交被拒
-        if (hasValue() && !confirm('切换下界方式会清空已填数值（分数与比例含义不同），继续？')){
+        if (hasValue() && !confirm('切换下界方式会清空已填数值（分数 / 比例 / 名次含义不同），继续？')){
             $('#qMode').val(mode() === 'ratio' ? 'score' : 'ratio');
             return;
         }
@@ -218,8 +240,72 @@ $(function(){
         layers.splice($(this).closest('tr').index(), 1);
         render();
     });
-    $('#qFill4').on('click', function(){ setLayers(['优秀', '良好', '及格', '待提升']); });
-    $('#qFillGk').on('click', function(){ setLayers(['清北', '985', '211', '特控', '本科', '未上线']); });
+    /* ---- 分层模板：套用层名 + 考试绑定（考试与模板绑定，分析按该模板的层算） ---- */
+    var templates = [];
+    function loadTemplates(cb){
+        $.getJSON('/grades/api/band-templates', {exam_id: examId}, function(res){
+            templates = (res.data || {}).templates || [];
+            var sel = $('#qTpl').empty().append('<option value="">（不套用）</option>');
+            templates.forEach(function(t){
+                $('<option>').val(t.id).text(t.name + (t.is_builtin ? '（内置）' : '')).appendTo(sel);
+            });
+            var bound = (res.data || {}).bound_id;
+            var suggested = (res.data || {}).suggested_id;
+            if (bound){ sel.val(String(bound)); applyTemplate(true); showBound(bound); }
+            else if (suggested){
+                // 未绑定时按「模板适用考试类型」自动匹配：期末/月考/限时练各用各的
+                sel.val(String(suggested)); applyTemplate(true);
+                $('#qTplBound').text('按考试类型（' + ((res.data || {}).exam_type || '')
+                    + '）自动匹配模板：' + (tplById(suggested) || {}).name
+                    + '（保存划线后正式绑定）');
+            }
+            else { setLayers(['优秀', '良好', '及格', '待提升']); showBound(null); }
+            if (cb) cb();
+        }).fail(function(){
+            setLayers(['优秀', '良好', '及格', '待提升']);
+            if (cb) cb();
+        });
+    }
+    function tplById(id){
+        var hit = null;
+        templates.forEach(function(t){ if (String(t.id) === String(id)) hit = t; });
+        return hit;
+    }
+    function showBound(boundId){
+        var t = tplById(boundId);
+        $('#qTplBound').text(t ? ('本场已绑定模板：' + t.name + '（分析按此模板的层）')
+                               : '本场未绑定模板（分析不出现分层指标）');
+    }
+    function applyTemplate(silent){
+        var t = tplById($('#qTpl').val());
+        if (!t){ if (!silent) alert('请先选择一个模板'); return; }
+        if (!silent && hasValue()
+            && !confirm('套用模板会按模板层名重建表格（已填数值将清空），继续？')) return;
+        $('#qMode').val(t.lower_mode || 'score');
+        var ratios = (t.layers || []).map(function(x){
+            return (x.ratio === null || x.ratio === undefined) ? '' : x.ratio;
+        });
+        layers = (t.layers || []).map(function(x, i){
+            return {seq: i + 1, name: x.name, value: '', values: {}};
+        });
+        // 比例/名次模板：把各层默认值预填进每个格子（分科时各科同值）
+        if (t.lower_mode === 'ratio' || t.lower_mode === 'rank'){
+            var keys = colKeys();
+            layers.forEach(function(l, i){
+                l.value = ratios[i];
+                keys.forEach(function(k){ l.values[k] = ratios[i]; });
+            });
+        }
+        render();
+    }
+    $('#qTplApply').on('click', function(){ applyTemplate(false); });
+    $('#qTpl').on('change', function(){
+        // 选模板即按模板层名重建表格（无需再点「套用层名」）；选「不套用」回到默认四层
+        var id = $(this).val();
+        if (!id){ setLayers(['优秀', '良好', '及格', '待提升']); showBound(null); return; }
+        showBound(id);
+        applyTemplate(true);
+    });
     $('#qSave').on('click', function(){
         var payload = read();
         if (!payload.length){ alert('请先填层名或新增层'); return; }
@@ -232,7 +318,8 @@ $(function(){
             return;
         }
         var reqBody = {exam_id: examId, mode: mode(), scope: scope(),
-                       include_total: $('#qTotal').is(':checked'), layers: payload};
+                       include_total: $('#qTotal').is(':checked'), layers: payload,
+                       template_id: $('#qTpl').val() || 0};   // 保存即绑定考试 ↔ 模板
         console.log('[划线] 提交保存', reqBody);
         if (!confirm('将按当前表格覆盖对应的划线，继续？')){ return; }
         // 显式带 CSRF 头，不依赖 base.html 的 $.ajaxSetup（少一层失效风险）
@@ -245,6 +332,7 @@ $(function(){
             success: function(res){
                 console.log('[划线] 保存成功', res);
                 $('#qMsg').text(res.message || '已保存');
+                showBound($('#qTpl').val() || 0);
                 load();
             },
             error: function(x){
@@ -262,8 +350,8 @@ $(function(){
         });
     });
 
-    setLayers(['优秀', '良好', '及格', '待提升']);
-    load();
+    // 先取模板（本场已绑定则按其层名建表），再回填已保存的下界值
+    loadTemplates(function(){ load(); });
 });
 </script>
 {% endblock %}
