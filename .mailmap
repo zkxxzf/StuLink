@@ -1,0 +1,4 @@
+# 作者身份映射：把早期误填的提交身份映射为真实作者
+# 生效范围：git log / git shortlog 以及 GitHub 提交历史页面
+# 说明：无需改写历史、无需 force push，不影响协作者
+zkxxzf <298106223+zkxxzf@users.noreply.github.com> 123 <123@321.com>
