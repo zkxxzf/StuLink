@@ -52,13 +52,14 @@
     <div class="cert-foot">
         <div class="small text-muted">
             <div>防伪验证码：<strong>{{ cert.code }}</strong></div>
-            <div>生成时间：{{ cert.generated_at.strftime('%Y-%m-%d %H:%M') if cert.generated_at else '' }}</div>
             <div>核验地址：***</div>
         </div>
         <div class="cert-sign">
-            <div>{{ school }}<br>年&nbsp;&nbsp;&nbsp;月&nbsp;&nbsp;&nbsp;日</div>
+            {# 落款日期即证明生成时间；历史数据缺失时回退空白年月日 #}
+            <div>{{ school }}<br>{{ cert.generated_at.strftime('%Y年%m月%d日') if cert.generated_at else '年&nbsp;&nbsp;&nbsp;月&nbsp;&nbsp;&nbsp;日'|safe }}</div>
         </div>
     </div>
-    <div class="cert-note">说明：本证明由系统依据已导入成绩数据生成，排名按方向内统计；仅作在校成绩凭证，不代表最终学历结论。</div>
+    {# v1.12.3 底部说明支持生成时自定义；v1.12.2 及更早的历史证明快照无此字段，兜底默认文案 #}
+    <div class="cert-note" style="white-space: pre-wrap;">说明：{{ content.cert_note or '本证明由系统依据已导入成绩数据生成，排名按方向内统计；仅作在校成绩凭证，不代表最终学历结论。' }}</div>
 </div>
 {% endmacro %}

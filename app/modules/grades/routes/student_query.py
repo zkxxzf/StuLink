@@ -142,6 +142,8 @@ def api_sq_options():
     from app.models.grades import SUBJECTS
     return jsonify(success=True, data={
         'grades': grades, 'terms': terms, 'exam_types': types, 'subjects': SUBJECTS,
+        # 证明说明默认文案（生成弹窗的文本框预填它，经办人可改写）
+        'cert_note_default': student_service.DEFAULT_CERT_NOTE,
     })
 
 
@@ -196,6 +198,11 @@ def api_create_cert():
     # 证明抬头（姓名/性别/身份证号/学籍号/入学时间）与校名随快照固化，保证事后可验真
     result['cert_header'] = student_service.cert_header(student_no)
     result['school_name'] = current_app.config.get('SCHOOL_NAME', '')
+    # v1.12.3 底部说明可由经办人改写；留空用默认文案，超长截断并去除首尾空白
+    note = str(payload.get('cert_note') or '').strip()
+    if len(note) > student_service.CERT_NOTE_MAX:
+        note = note[:student_service.CERT_NOTE_MAX]
+    result['cert_note'] = note or student_service.DEFAULT_CERT_NOTE
     content_json = json.dumps(result, ensure_ascii=False)
     # v1.12.2 加密防伪码：SL+日期+随机码+HMAC(密钥, 学号|随机码|内容哈希)；随机码/签名随记录落库
     from app.utils.cert_sign import make_code
