@@ -1,13 +1,14 @@
 {# 成绩认定证明正文：打印页与公开核验页共用同一宏，保证两处版式完全一致。
    用法：{% from "grades/_cert_body.html" import cert_doc %}
-        {{ cert_doc(content, cert, mask_id) }}
+        {{ cert_doc(content, cert, mask_id, hide_no) }}
    mask_id=True 时身份证号只显示前6后4（公开核验页不泄露完整证件号）。
+   hide_no=True 时学籍号以 *** 代替（公开核验页不泄露学号）。
    数据来源：content.cert_matrix（科目 × 学年学期时段矩阵，取自历次考试成绩）。
 #}
-{% macro cert_doc(content, cert, mask_id) %}
+{% macro cert_doc(content, cert, mask_id, hide_no=false) %}
 {% set h = content.cert_header if content.cert_header else {} %}
 {% set m = content.cert_matrix if content.cert_matrix else none %}
-{% set school = content.school_name or '郑州市郑开学校' %}
+{% set school = content.school_name or '某某学校' %}
 <div class="cert-doc">
     <div class="cert-school">{{ school }}</div>
     <div class="cert-title">高中学生成绩认定证明</div>
@@ -15,7 +16,7 @@
     <p class="cert-text">
         兹证明学生 <b>{{ h.name or cert.student_name }}</b>，性别 {{ h.gender or '—' }}，
         身份证号：{% if mask_id %}{{ h.id_card_masked or '—' }}{% else %}{{ h.id_card or '—' }}{% endif %}，
-        学籍号：{{ h.student_no or cert.student_no }}，现读生自 {{ h.enroll_text or '—' }}
+        学籍号：{% if hide_no %}***{% else %}{{ h.student_no or cert.student_no }}{% endif %}，现读生自 {{ h.enroll_text or '—' }}
         进入本校就读，已完成相应课程，成绩如下：
     </p>
 

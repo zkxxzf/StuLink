@@ -66,6 +66,18 @@ def cert_verify(code):
     """成绩证明公开核验页（无需登录）：验真伪 + 可作废提示。
     v1.12.2 加密防伪码：先做 HMAC 验签（密钥+学号+随机码+内容哈希），签名不符即判为伪造/篡改。"""
     from app.utils.cert_sign import verify, is_legacy
+
+    # 免登录端点，做简单的按 IP 限流，避免被批量探测刷库（60 秒内最多 30 次）
+    from app.utils.cache import cache
+    rate_key = f'cert_verify_rate_{request.remote_addr or "unknown"}'
+    hits = (cache.get(rate_key) or 0) + 1
+    try:
+        cache.set(rate_key, hits, timeout=60)
+    except Exception:
+        pass
+    if hits > 30:
+        abort(429, description='核验请求过于频繁，请稍后再试')
+
     cert = Certificate.query.filter_by(code=code).first()
     content = json.loads(cert.content_json or '{}') if cert else None
     sig_ok = verify(cert) if cert else False

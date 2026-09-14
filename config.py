@@ -62,7 +62,8 @@ class Config:
     }
 
     # 学校名称：成绩证明等对外文书抬头（可用环境变量 SCHOOL_NAME 覆盖）
-    SCHOOL_NAME = os.environ.get('SCHOOL_NAME', '郑州市郑开学校')
+    # 注意：默认值必须为化名占位，真实校名只通过环境变量注入，避免写入公开仓库
+    SCHOOL_NAME = os.environ.get('SCHOOL_NAME', '某某学校')
 
     # 多库绑定（模块独立数据库）
     SQLALCHEMY_BINDS = {
