@@ -1,6 +1,7 @@
 # StuLink v1.7.0 2026-08-02
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 import os
+import socket
 import sys
 
 # 确保 data 目录存在
@@ -22,6 +23,31 @@ def _set_console_title(title):
             sys.stdout.flush()
     except Exception:
         pass
+
+
+def _lan_ip():
+    """探测本机局域网 IP：UDP connect 只查本机路由表、不真正发包；
+    离线时兜底枚举网卡（排除回环/常见虚拟网卡段）。失败返回空串。"""
+    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    try:
+        s.connect(('10.255.255.255', 1))   # 走默认路由的网卡即首选内网 IP
+        ip = s.getsockname()[0]
+        if ip and not ip.startswith('169.254.'):
+            return ip
+    except Exception:
+        pass
+    finally:
+        s.close()
+    # 兜底：枚举主机名解析结果（离线/无网关环境）
+    try:
+        for info in socket.getaddrinfo(socket.gethostname(), None, socket.AF_INET):
+            ip = info[4][0]
+            if (not ip.startswith(('127.', '169.254.'))
+                    and not ip.startswith(('192.168.56.', '192.168.99.'))):  # 排除 VirtualBox/Docker 虚拟网卡
+                return ip
+    except Exception:
+        pass
+    return ''
 
 
 def _print_keep_running_notice(url):
@@ -62,8 +88,11 @@ if __name__ == '__main__':
         from waitress import serve
         _set_console_title('StuLink 后端服务运行中 —— 请勿关闭此窗口！')
         print('宿舍管理系统已启动 (生产模式)')
-        print('请在浏览器访问: http://0.0.0.0:5000')
-        _print_keep_running_notice('http://0.0.0.0:5000  或  http://本机IP:5000')
+        print('请在浏览器访问: http://localhost:5000')
+        # 局域网地址：启动时探测实际本机 IP 并显示（供其他电脑/手机访问）
+        lan = _lan_ip()
+        lan_url = f'http://{lan}:5000' if lan else 'http://本机IP:5000（未能自动获取，请在网络设置中查看）'
+        _print_keep_running_notice(f'http://localhost:5000  或  {lan_url}')
         serve(app, host='0.0.0.0', port=5000)
 
 

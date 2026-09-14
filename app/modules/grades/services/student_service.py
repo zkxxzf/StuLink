@@ -5,7 +5,7 @@
 from datetime import datetime
 
 from app.models.grades import Exam, ExamScore, TOTAL_SUBJECT, SUBJECTS, \
-    CERT_SUBJECT_ORDER, subject_display, semester_of, grade_level_label
+    CERT_SUBJECT_ORDER, DEFAULT_FULL_MARKS, subject_display, semester_of, grade_level_label
 from app.models import Student
 from app.modules.grades.services import stats_service as st
 from app.modules.grades.services.scope import student_in_scope
@@ -67,12 +67,11 @@ def cert_header(student_no):
 
 
 def build_cert_matrix(grade, exams, student_scores, student_sel, chosen_ids=None):
-    """「学年×学期」时段 × 科目 成绩认定矩阵（对应纸质证明模板）。
+    """成绩认定矩阵——列=科目（带满分）、行=每次考试。
 
-    chosen_ids=None：每个时段取代表考试（优先期末，无则最新一场）；
-    chosen_ids=集合：仅纳入用户勾选的考试，同一时段可多场（各成一列，v1.12.2 自选证明考试）。
-    单元格口径：未选（该时段不在选科内）/ 未参加（在选科内但无成绩）/ 具体分数。
-    返回 rep_ids：默认口径下的代表考试 id 集（前端选择框默认勾选用）。
+    单元格口径：未选/未参加/分数/满分（语数外150，其余100）。
+    chosen_ids=None：每个时段取代表考试（优先期末）；
+    chosen_ids=集合：仅纳入用户勾选的考试（同一时段可多场）。
     """
     buckets = {}
     for e in exams:
@@ -87,7 +86,7 @@ def build_cert_matrix(grade, exams, student_scores, student_sel, chosen_ids=None
         return max(finals or lst, key=lambda e: (e.exam_date, e.id))
 
     rep_ids = sorted(_rep(lst).id for lst in buckets.values())
-    reps = []   # [(时段key, 考试)]
+    reps = []
     for k in periods:
         lst = buckets[k]
         if chosen_ids:
@@ -96,42 +95,35 @@ def build_cert_matrix(grade, exams, student_scores, student_sel, chosen_ids=None
         else:
             reps.append((k, _rep(lst)))
     if not reps:
-        return {'groups': [], 'cols': [], 'rows': [], 'exam_names': [],
+        return {'cols': [], 'rows': [], 'exam_names': [],
                 'exam_ids': [], 'rep_ids': rep_ids}
 
-    # 一级表头：同一学年合并列，标注高一/高二/高三
-    by_term = {}
-    for i, ((term, _sem), _e) in enumerate(reps):
-        by_term.setdefault(term, []).append(i)
-    groups = []
-    for term in sorted(by_term):
-        lvl = grade_level_label(grade, term)
-        groups.append({'label': (f'{lvl}（{term}学年）' if lvl else f'{term}学年'),
-                       'colspan': len(by_term[term])})
-
+    # 列头：科目（按 CERT_SUBJECT_ORDER 顺序，附带满分）
     cols = []
-    for i, ((term, sem), e) in enumerate(reps):
+    for sub in CERT_SUBJECT_ORDER:
+        cols.append({'key': sub, 'label': subject_display(sub),
+                     'full': DEFAULT_FULL_MARKS.get(sub, 100)})
+
+    # 行：每次考试
+    rows = []
+    for (term, sem), e in reps:
         label = sem + (e.exam_type or '')
-        # 同一时段勾选多场时，列标签追加日期区分
         if sum(1 for (k2, _e2) in reps if k2 == (term, sem)) > 1:
             label += '·' + e.exam_date.strftime('%m-%d')
-        cols.append({'key': 'p%d' % i, 'label': label})
-
-    rows = []
-    for sub in CERT_SUBJECT_ORDER:
-        row = {'subject': subject_display(sub)}
-        for i, ((_term, _sem), e) in enumerate(reps):
-            sel = st.subjects_of_selection(student_sel.get(e.id))
+        row = {'exam_label': label, 'term': term, 'sem': sem}
+        sel = st.subjects_of_selection(student_sel.get(e.id))
+        for sub in CERT_SUBJECT_ORDER:
             sc = student_scores.get((e.id, sub))
+            full = DEFAULT_FULL_MARKS.get(sub, 100)
             if sel is not None and sub not in sel:
-                row['p%d' % i] = '未选'
+                row[sub] = '未选'
             elif sc is None:
-                row['p%d' % i] = '未参加'
+                row[sub] = '未参加'
             else:
-                row['p%d' % i] = sc
+                row[sub] = f'{sc:.1f}/{full}'
         rows.append(row)
 
-    return {'groups': groups, 'cols': cols, 'rows': rows,
+    return {'cols': cols, 'rows': rows,
             'exam_names': [e.name for _k, e in reps],
             'exam_ids': [e.id for _k, e in reps], 'rep_ids': rep_ids}
 

@@ -23,17 +23,16 @@
     <table class="cert-tbl">
         <thead>
             <tr>
-                <th rowspan="2">科目</th>
-                {% for g in m.groups %}<th colspan="{{ g.colspan }}">{{ g.label }}</th>{% endfor %}
+                <th>考试</th>
+                {% for c in m.cols %}<th>{{ c.label }}<br><small>(满分{{ c.full }})</small></th>{% endfor %}
             </tr>
-            <tr>{% for c in m.cols %}<th>{{ c.label }}</th>{% endfor %}</tr>
         </thead>
         <tbody>
             {% for r in m.rows %}
             <tr>
-                <td class="subj">{{ r.subject }}</td>
+                <td class="subj">{{ r.exam_label }}</td>
                 {% for c in m.cols %}
-                <td{% if r[c.key] is string %} class="muted"{% endif %}>{{ r[c.key] if r[c.key] is not none else '–' }}</td>
+                <td{% if r[c.key] is string and r[c.key] != '' and r[c.key] in ['未选','未参加'] %} class="muted"{% endif %}>{{ r[c.key] if r[c.key] is not none else '–' }}</td>
                 {% endfor %}
             </tr>
             {% endfor %}
@@ -54,10 +53,9 @@
         <div class="small text-muted">
             <div>防伪验证码：<strong>{{ cert.code }}</strong></div>
             <div>生成时间：{{ cert.generated_at.strftime('%Y-%m-%d %H:%M') if cert.generated_at else '' }}</div>
-            <div>核验地址：{{ request.host_url.rstrip('/') }}/grades/cert/{{ cert.code }}</div>
+            <div>核验地址：***</div>
         </div>
         <div class="cert-sign">
-            <div class="cert-seal">教务处<br>（盖章）</div>
             <div>{{ school }}<br>年&nbsp;&nbsp;&nbsp;月&nbsp;&nbsp;&nbsp;日</div>
         </div>
     </div>

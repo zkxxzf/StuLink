@@ -204,30 +204,28 @@ function heatOption(c) {
         series: [{type: 'heatmap', data: cells, label: {show: true, fontSize: 10}}]};
 }
 
-/* ---------- 成绩认定矩阵（科目 × 学年学期，与纸质证明同版式） ---------- */
+/* ---------- 成绩认定矩阵（考试 × 科目，与纸质证明同版式） ---------- */
 function renderCertMatrix(area, m) {
     if (!m || !m.cols || !m.cols.length) return;
     var card = $('<div class="card tbl-card mb-3">');
     card.append('<div class="card-header d-flex justify-content-between align-items-center flex-wrap">'
-        + '<h6 class="mb-0"><i class="bi bi-grid-3x3 me-1"></i>成绩认定表（科目 × 学年学期）</h6>'
-        + '<span class="text-muted small">未选＝该时段不在选科内；未参加＝在选科内但无成绩</span></div>');
+        + '<h6 class="mb-0"><i class="bi bi-grid-3x3 me-1"></i>成绩认定表（每次考试 × 各科满分）</h6>'
+        + '<span class="text-muted small">未选＝不在选科内；未参加＝在选科内但无成绩</span></div>');
     var body = $('<div class="card-body p-0 tbl-wrap">');
     var table = $('<table class="table table-hover g-table mb-0">');
-    var h1 = $('<tr>').append('<th rowspan="2">科目</th>');
-    (m.groups || []).forEach(function (g) {
-        h1.append($('<th colspan="' + g.colspan + '">').text(g.label));
+    var h = $('<tr>').append($('<th>').text('考试'));
+    (m.cols || []).forEach(function (c) {
+        h.append($('<th>').html(c.label + '<br><small class="text-muted">(满分' + c.full + ')</small>'));
     });
-    var h2 = $('<tr>');
-    (m.cols || []).forEach(function (c) { h2.append($('<th>').text(c.label)); });
-    table.append($('<thead>').append(h1).append(h2));
+    table.append($('<thead>').append(h));
 
     var tbody = $('<tbody>');
     (m.rows || []).forEach(function (r) {
-        var tr = $('<tr>').append($('<td class="fw-semibold">').text(r.subject));
+        var tr = $('<tr>').append($('<td class="fw-semibold">').text(r.exam_label));
         (m.cols || []).forEach(function (c) {
             var v = r[c.key];
             var td = $('<td>').text(v === null || v === undefined ? '–' : String(v));
-            if (typeof v === 'string') td.addClass('text-muted');
+            if (typeof v === 'string' && (v === '未选' || v === '未参加')) td.addClass('text-muted');
             tr.append(td);
         });
         tbody.append(tr);
