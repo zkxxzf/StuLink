@@ -371,11 +371,31 @@ class AiReport(db.Model):
     provider = db.Column(db.String(20))
     model = db.Column(db.String(50))
     content = db.Column(db.Text)               # 报告原文
+    charts = db.Column(db.Text)                # 图表数据（JSON，本地统计，随报告固化）
     created_at = db.Column(db.DateTime, default=datetime.now)
 
     __table_args__ = (
         db.Index('idx_ai_report_user', 'user_id'),
         db.Index('idx_ai_report_exam', 'exam_id'),
+    )
+
+
+class AiChatMessage(db.Model):
+    """AI 多轮对话消息（按 用户+考试 组织上下文）"""
+    __bind_key__ = 'grades'
+    __tablename__ = 'ai_chat_messages'
+
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, nullable=False)
+    exam_id = db.Column(db.Integer, nullable=False)
+    role = db.Column(db.String(10), nullable=False)      # user / assistant
+    content = db.Column(db.Text)
+    provider = db.Column(db.String(20))
+    model = db.Column(db.String(50))
+    created_at = db.Column(db.DateTime, default=datetime.now)
+
+    __table_args__ = (
+        db.Index('idx_ai_chat_user_exam', 'user_id', 'exam_id'),
     )
 
 

@@ -227,7 +227,7 @@ def create_app():
     from app.models import OperationLog, PermissionGroup, ClassProfile, GradeSetting, UserClassLink, AssignmentHistory
     from app.models.grades import (Exam, ExamScore, ExamBand, BandTemplate,
                                    TeacherSubjectLink, AiKey,
-                                   AiGlobalKey, AiReport, Certificate)
+                                   AiGlobalKey, AiReport, AiChatMessage, Certificate)
     with app.app_context():
         db.create_all()
         

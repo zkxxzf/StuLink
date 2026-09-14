@@ -437,7 +437,7 @@ $(function(){
     function ensureModal(){
         if ($('#' + aiModalId).length) return;
         $('body').append('<div class="modal fade" id="' + aiModalId + '" tabindex="-1">'
-            + '<div class="modal-dialog modal-lg modal-dialog-scrollable"><div class="modal-content">'
+            + '<div class="modal-dialog modal-xl modal-dialog-scrollable"><div class="modal-content">'
             + '<div class="modal-header"><h6 class="modal-title" id="aiModalTitle"></h6>'
             + '<button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>'
             + '<div class="modal-body" id="aiModalBody"></div>'
@@ -486,140 +486,524 @@ $(function(){
         });
     }
 
-    // 个人 Key 配置表单
+    // ---- 服务商列表（后端注册表驱动）----
+    // 结构固定为 {default: 'deepseek', list: [{key, name, base_url, models, default_model, key_hint, docs, note}]}
+    var PROVIDERS = {default: 'deepseek', list: []};
+    var PROVIDERS_ERR = '';   // 加载失败的原因（供弹窗提示）
+
+    // 列表加载失败时的兜底项，结构与注册表项保持一致
+    function fallbackProvider(){
+        return [{
+            key: 'custom', name: '自定义（OpenAI 兼容）', base_url: '',
+            default_model: '', models: [], key_hint: '由服务商提供', docs: '',
+            note: '服务商列表加载失败，仅可手动填写接口地址与模型名'
+        }];
+    }
+
+    function loadProviders(cb){
+        if (PROVIDERS.list.length){ cb && cb(); return; }
+        $.getJSON('/grades/ai/providers')
+            .done(function(res){
+                var d = (res && res.data) || {};
+                // 显式映射：接口返回 default/providers，前端内部统一用 default/list
+                PROVIDERS = {
+                    default: d.default || 'deepseek',
+                    list: d.providers || []
+                };
+                PROVIDERS_ERR = PROVIDERS.list.length ? '' : '未获取到可用的服务商';
+                if (!PROVIDERS.list.length) PROVIDERS.list = fallbackProvider();
+            })
+            .fail(function(x){
+                PROVIDERS = {default: 'custom', list: fallbackProvider()};
+                PROVIDERS_ERR = '服务商列表加载失败'
+                    + ((x && x.status) ? '（HTTP ' + x.status + '）' : '')
+                    + '，可手动填写接口地址与模型名';
+            })
+            .always(function(){ cb && cb(); });
+    }
+    function providerOf(key){
+        var p = null;
+        (PROVIDERS.list || []).forEach(function(x){ if (x.key === key) p = x; });
+        return p || {key: key || 'custom', name: key || '自定义', base_url: '', models: [], default_model: '', key_hint: ''};
+    }
+    function canManageGlobal(){
+        return $('#aiCanGlobal').text().trim() === '1';
+    }
+
+    // Key 配置表单（支持全部服务商）
     function keyFormHtml(keyData, isGlobal){
         var k = keyData || {};
+        var cur = k.provider || PROVIDERS.default || 'deepseek';
         var html = '';
-        if (k.configured){
-            html += '<div class="alert alert-success small py-2">当前已配置：' + esc(k.masked || '') +
-                '（' + esc(k.provider || '') + ' / ' + esc(k.model || '') + '）' +
-                '<button class="btn btn-sm btn-outline-danger ms-2" id="aiKeyDel">清除</button></div>';
+        if (PROVIDERS_ERR){
+            html += '<div class="alert alert-warning small py-2"><i class="bi bi-exclamation-triangle"></i> '
+                + esc(PROVIDERS_ERR) + '</div>';
         }
-        html += '<div class="mb-2"><label class="form-label small mb-1">服务商</label>'
-            + '<select class="form-select form-select-sm" id="aiProvider">'
-            + '<option value="deepseek"' + (!k.provider || k.provider === 'deepseek' ? ' selected' : '') + '>DeepSeek（推荐）</option>'
-            + '<option value="custom"' + (k.provider === 'custom' ? ' selected' : '') + '>自定义（OpenAI 兼容）</option></select></div>'
-            + '<div class="row"><div class="col-md-6 mb-2"><label class="form-label small mb-1">API Key</label>'
-            + '<input type="password" class="form-control form-control-sm" id="aiApiKey" placeholder="sk-..." autocomplete="off"></div>'
-            + '<div class="col-md-6 mb-2"><label class="form-label small mb-1">模型</label>'
-            + '<input class="form-control form-control-sm" id="aiModel" value="' + esc(k.model || 'deepseek-chat') + '"></div></div>'
-            + '<div class="mb-2 d-none" id="aiCustomWrap"><label class="form-label small mb-1">接口地址（OpenAI 兼容，如 https://api.deepseek.com 或中转站）</label>'
-            + '<input class="form-control form-control-sm" id="aiBaseUrl" placeholder="https://..." value="' + esc(k.base_url || '') + '"></div>'
+        if (k.configured){
+            html += '<div class="alert alert-success small py-2 d-flex justify-content-between align-items-center">'
+                + '<span>当前已配置：<b>' + esc(k.masked || '') + '</b>'
+                + '（' + esc(k.provider_name || cur) + ' / ' + esc(k.model || '') + '）</span>'
+                + '<button class="btn btn-sm btn-outline-danger" id="aiKeyDel">清除</button></div>';
+        }
+        html += '<div class="row g-2">'
+            + '<div class="col-md-6"><label class="form-label small mb-1">服务商</label>'
+            + '<select class="form-select form-select-sm" id="aiProvider">';
+        (PROVIDERS.list || []).forEach(function(p){
+            html += '<option value="' + esc(p.key) + '"' + (p.key === cur ? ' selected' : '') + '>'
+                + esc(p.name) + '</option>';
+        });
+        html += '</select><div class="form-text small" id="aiProviderNote"></div></div>'
+            + '<div class="col-md-6"><label class="form-label small mb-1">模型</label>'
+            + '<input class="form-control form-control-sm" id="aiModel" list="aiModelList" '
+            + 'value="' + esc(k.model || providerOf(cur).default_model || '') + '" placeholder="如 deepseek-chat">'
+            + '<datalist id="aiModelList"></datalist>'
+            + '<div class="form-text small">可从下拉选择，也可手工填写厂商模型名</div></div></div>'
+            + '<div class="mb-2"><label class="form-label small mb-1">API Key</label>'
+            + '<input type="password" class="form-control form-control-sm" id="aiApiKey" '
+            + 'placeholder="' + esc(providerOf(cur).key_hint || 'sk-...') + '" autocomplete="off">'
+            + '<div class="form-text small" id="aiKeyHint"></div></div>'
+            + '<div class="mb-2"><label class="form-label small mb-1">接口地址（OpenAI 兼容，一般无需修改）</label>'
+            + '<input class="form-control form-control-sm" id="aiBaseUrl" placeholder="https://..." value="'
+            + esc(k.base_url || '') + '">'
+            + '<div class="form-text small">留空表示使用该服务商官方地址；中转站或私有部署可自行填写。</div></div>'
+            + '<div id="aiTestResult" class="small mb-2"></div>'
             + '<div class="form-text small">Key 经加密存储，仅本人可见；每次调用使用您自己的额度。</div>';
         return html;
+    }
+
+    // 服务商切换：自动填充默认地址/模型与提示
+    function syncProviderUI(){
+        var p = providerOf($('#aiProvider').val());
+        var $list = $('#aiModelList').empty();
+        (p.models || []).forEach(function(m){
+            $list.append('<option value="' + esc(m) + '"></option>');
+        });
+        if (p.default_model && !$('#aiModel').val()) $('#aiModel').val(p.default_model);
+        $('#aiApiKey').attr('placeholder', p.key_hint || 'sk-...');
+        var note = '';
+        if (p.key_hint) note += 'Key 形如 <code>' + esc(p.key_hint) + '</code>；';
+        if (p.note) note += esc(p.note) + '；';
+        if (p.docs) note += '<a href="' + esc(p.docs) + '" target="_blank" rel="noopener">获取 Key</a>';
+        $('#aiKeyHint').html(note);
+        $('#aiProviderNote').html(p.base_url ? '官方地址：<code>' + esc(p.base_url) + '</code>' : '需填写接口地址');
+        if (!$('#aiBaseUrl').val()) $('#aiBaseUrl').attr('placeholder', p.base_url || 'https://...');
+    }
+
+    // 连通性测试
+    function runKeyTest(isGlobal){
+        var $btn = $('#aiKeyTest').prop('disabled', true);
+        var $box = $('#aiTestResult').html('<span class="text-muted">正在测试连接…</span>');
+        var payload = {
+            scope: isGlobal ? 'global' : 'personal',
+            provider: $('#aiProvider').val(),
+            model: $('#aiModel').val().trim(),
+            base_url: $('#aiBaseUrl').val().trim(),
+            api_key: $('#aiApiKey').val().trim() || 'keep'
+        };
+        ajaxJson('/grades/ai/key/test', payload, function(res){
+            $box.html('<span class="text-success"><i class="bi bi-check-circle"></i> ' + esc(res.message) + '</span>');
+        }, function(x){
+            var msg = (x.responseJSON && x.responseJSON.message) || '测试失败';
+            $box.html('<span class="text-danger"><i class="bi bi-x-circle"></i> ' + esc(msg) + '</span>');
+        }, function(){ $btn.prop('disabled', false); });
+    }
+
+    // 统一 JSON 提交（必须显式 contentType，否则后端 get_json 取不到）
+    function ajaxJson(url, payload, ok, fail, always){
+        return $.ajax({
+            url: url, method: 'POST', contentType: 'application/json',
+            dataType: 'json', data: JSON.stringify(payload)
+        }).done(function(res){ ok && ok(res); })
+          .fail(function(x){ fail && fail(x); })
+          .always(function(){ always && always(); });
     }
 
     // 打开配置弹窗
     function openKeySetup(isGlobal){
         var url = isGlobal ? '/grades/ai/global-key' : '/grades/ai/key';
-        $.getJSON(url, function(res){
-            var k = res.data || {};
-            showAi(isGlobal ? '配置全局公共 AI Key（管理员）' : '配置个人 AI API Key',
-                keyFormHtml(k, isGlobal),
-                '<button class="btn btn-sm btn-secondary" data-bs-dismiss="modal">取消</button>'
-                + '<button class="btn btn-sm btn-primary" id="aiKeySave">保存</button>');
-            if (isGlobal && !(k && k.configured)){
-                $('#aiProvider').val('deepseek');
-            }
-            bindKeyForm(isGlobal);
+        loadProviders(function(){
+            $.getJSON(url, function(res){
+                var k = res.data || {};
+                var foot = '<button class="btn btn-sm btn-outline-secondary me-auto" id="aiKeyTest">'
+                    + '<i class="bi bi-plug"></i> 测试连接</button>'
+                    + '<button class="btn btn-sm btn-secondary" data-bs-dismiss="modal">取消</button>'
+                    + '<button class="btn btn-sm btn-primary" id="aiKeySave">保存</button>';
+                showAi(isGlobal ? '配置全局公共 AI Key（管理员）' : '配置个人 AI API Key',
+                    keyFormHtml(k, isGlobal), foot);
+                bindKeyForm(isGlobal);
+            });
         });
     }
     function bindKeyForm(isGlobal){
         var $b = $('#aiKeyDel');
         if ($b.length){
             $b.on('click', function(){
+                if (!confirm('确定清除已保存的 API Key？')) return;
                 $.ajax({url: isGlobal ? '/grades/ai/global-key' : '/grades/ai/key',
-                    method: 'DELETE', success: function(){ hideAi(); openKeySetup(isGlobal); }});
+                    method: 'DELETE',
+                    success: function(){ hideAi(); openKeySetup(isGlobal); },
+                    error: function(x){
+                        alert((x.responseJSON && x.responseJSON.message) || '清除失败');
+                    }});
             });
         }
         $('#aiProvider').on('change', function(){
-            $('#aiCustomWrap').toggleClass('d-none', $(this).val() !== 'custom');
+            $('#aiModel').val(providerOf($(this).val()).default_model || '');
+            $('#aiBaseUrl').val('');
+            syncProviderUI();
         });
-        $('#aiCustomWrap').toggleClass('d-none', $('#aiProvider').val() !== 'custom');
+        syncProviderUI();
+        $('#aiKeyTest').on('click', function(){ runKeyTest(isGlobal); });
         $('#aiKeySave').on('click', function(){
-            var payload = {
-                provider: $('#aiProvider').val(),
-                model: $('#aiModel').val().trim(),
-                base_url: $('#aiProvider').val() === 'custom' ? $('#aiBaseUrl').val().trim() : '',
-                api_key: $('#aiApiKey').val().trim()
-            };
-            if (!payload.api_key && !($('#aiKeyDel').length)){
-                alert('请输入 API Key'); return;
+            var payload = collectKeyPayload();
+            if (payload === null) return;
+            ajaxJson(isGlobal ? '/grades/ai/global-key' : '/grades/ai/key', payload,
+                function(res){ alert(res.message || '已保存'); hideAi(); },
+                function(x){ alert((x.responseJSON && x.responseJSON.message) || '保存失败'); });
+        });
+    }
+    function collectKeyPayload(){
+        var apiKey = $('#aiApiKey').val().trim();
+        var model = $('#aiModel').val().trim();
+        if (!model){ alert('请填写模型名'); return null; }
+        if (!apiKey && !$('#aiKeyDel').length){ alert('请输入 API Key'); return null; }
+        return {
+            provider: $('#aiProvider').val(),
+            model: model,
+            base_url: $('#aiBaseUrl').val().trim(),
+            api_key: apiKey || 'keep'   // 为空且已配置过 = 不更换 Key
+        };
+    }
+
+    // ---- SSE 流式请求（fetch + ReadableStream；EventSource 不支持 POST）----
+    function streamPost(url, payload, handlers){
+        fetch(url, {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json',
+                      'X-CSRFToken': (typeof csrfToken === 'undefined' ? '' : csrfToken)},
+            body: JSON.stringify(payload)
+        }).then(function(resp){
+            if (!resp.ok || !resp.body){
+                return resp.json().catch(function(){ return {}; }).then(function(j){
+                    handlers.onError && handlers.onError(j.message || ('HTTP ' + resp.status));
+                });
             }
-            if (!payload.api_key){ payload.api_key = 'keep'; } // 不更换仅改其它项
-            $.post(isGlobal ? '/grades/ai/global-key' : '/grades/ai/key',
-                JSON.stringify(payload), function(res){
-                    alert(res.message || '已保存');
-                    hideAi();
-                }).fail(function(x){ alert(x.responseJSON && x.responseJSON.message || '保存失败'); });
+            var reader = resp.body.getReader();
+            var decoder = new TextDecoder('utf-8');
+            var buf = '';
+            function pump(){
+                return reader.read().then(function(r){
+                    if (r.done){ handlers.onDone && handlers.onDone(); return; }
+                    buf += decoder.decode(r.value, {stream: true});
+                    var frames = buf.split('\n\n');
+                    buf = frames.pop();
+                    frames.forEach(function(frame){
+                        frame.split('\n').forEach(function(line){
+                            if (line.indexOf('data:') !== 0) return;
+                            try {
+                                var ev = JSON.parse(line.slice(5).trim());
+                                handlers.onEvent && handlers.onEvent(ev);
+                            } catch (e) { /* 忽略半包 */ }
+                        });
+                    });
+                    return pump();
+                });
+            }
+            return pump();
+        }).catch(function(e){
+            handlers.onError && handlers.onError((e && e.message) || '网络异常');
         });
     }
 
-    // 主流程
+    // ---- 图表渲染（ECharts，数据由后端本地统计，非模型生成）----
+    var PALETTE = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#06b6d4'];
+    function chartCard(title, domId){
+        return '<div class="col-md-6"><div class="ai-chart-card">'
+            + '<div class="ai-chart-title">' + esc(title) + '</div>'
+            + '<div class="ai-chart" id="' + domId + '" style="height:260px;"></div></div></div>';
+    }
+    function renderCharts(container, charts){
+        if (!charts || typeof echarts === 'undefined') return;
+        var specs = [];
+        var sb = charts.score_bands || {};
+        if ((sb.values || []).length)
+            specs.push(['sb', '总分分数段分布', 'bar', sb.labels, sb.values, '人数']);
+        var ca = charts.class_avg || {};
+        if ((ca.values || []).length)
+            specs.push(['ca', '各班总分均分', 'bar', ca.labels, ca.values, '均分']);
+        var sa = charts.subject_avg || {};
+        if ((sa.values || []).length)
+            specs.push(['sa', '各学科均分', 'bar', sa.labels, sa.values, '均分']);
+        var md = charts.move_dist || {};
+        if ((md.values || []).length && md.values.some(function(v){ return v > 0; }))
+            specs.push(['md', '进退步分布', 'pie', md.labels, md.values, '人数']);
+        var cp = charts.compare || {};
+        if ((cp.values || []).length === 2)
+            specs.push(['cp', '本次 vs 上次 均分', 'bar', cp.labels, cp.values, '均分']);
+
+        if (!specs.length) return;
+        var html = '<div class="row g-3 mt-1">';
+        specs.forEach(function(s){ html += chartCard(s[1], 'aiChart_' + s[0]); });
+        html += '</div>';
+        $(container).html(html);
+
+        specs.forEach(function(s){
+            var el = document.getElementById('aiChart_' + s[0]);
+            if (!el) return;
+            var chart = echarts.init(el);
+            var opt;
+            if (s[2] === 'pie'){
+                opt = {
+                    tooltip: {trigger: 'item'},
+                    legend: {bottom: 0, itemWidth: 10, itemHeight: 10, textStyle: {fontSize: 11}},
+                    color: PALETTE,
+                    series: [{
+                        type: 'pie', radius: ['40%', '65%'], center: ['50%', '45%'],
+                        label: {formatter: '{b}\n{c}人', fontSize: 11},
+                        data: s[3].map(function(k, i){ return {name: k, value: s[4][i]}; })
+                            .filter(function(x){ return x.value > 0; })
+                    }]
+                };
+            } else {
+                opt = {
+                    tooltip: {trigger: 'axis', axisPointer: {type: 'shadow'}},
+                    grid: {left: 8, right: 12, top: 24, bottom: 24, containLabel: true},
+                    xAxis: {type: 'category', data: s[3], axisLabel: {fontSize: 10, interval: 0,
+                        rotate: (s[3].length > 8 ? 30 : 0)}},
+                    yAxis: {type: 'value', name: s[5], nameTextStyle: {fontSize: 10}},
+                    series: [{
+                        type: 'bar', data: s[4], barMaxWidth: 28,
+                        itemStyle: {color: PALETTE[0], borderRadius: [4, 4, 0, 0]},
+                        label: {show: true, position: 'top', fontSize: 10}
+                    }]
+                };
+            }
+            chart.setOption(opt);
+            window.addEventListener('resize', function(){ chart.resize(); });
+        });
+    }
+
+    // ---- 对话区 ----
+    function chatShellHtml(s){
+        return '<div class="alert alert-warning small py-2 mb-2"><i class="bi bi-shield-exclamation"></i> '
+            + '成绩数据将发送至 <b>' + esc(s.provider_name || s.provider || '') + '</b>（'
+            + esc(s.model || '') + '），离开学校内网。范围：' + esc(s.scope_desc)
+            + '（' + s.scope_students + ' 人）。</div>'
+            + '<div class="ai-chat" id="aiChat"></div>'
+            + '<div id="aiChatCharts"></div>';
+    }
+    function chatInputHtml(){
+        return '<div class="ai-chat-input mt-2">'
+            + '<textarea class="form-control form-control-sm" id="aiChatInput" rows="2" '
+            + 'placeholder="针对本次考试继续追问，例如：哪些班级的数学需要重点帮扶？"></textarea>'
+            + '<div class="d-flex justify-content-between align-items-center mt-2">'
+            + '<button class="btn btn-sm btn-outline-secondary" id="aiChatClear">'
+            + '<i class="bi bi-eraser"></i> 清空对话</button>'
+            + '<button class="btn btn-sm btn-primary" id="aiChatSend">'
+            + '<i class="bi bi-send"></i> 发送</button></div></div>';
+    }
+    function pushMsg(role, html, extraClass){
+        var $box = $('#aiChat');
+        var $m = $('<div class="ai-msg ' + (role === 'user' ? 'ai-msg-user' : 'ai-msg-ai')
+            + (extraClass ? ' ' + extraClass : '') + '"></div>');
+        $m.append('<div class="ai-bubble">' + html + '</div>');
+        $box.append($m);
+        $box.scrollTop($box[0].scrollHeight);
+        return $m;
+    }
+    function pushStage(text){
+        var $m = pushMsg('ai', '<span class="ai-stage"><span class="spinner-border '
+            + 'spinner-border-sm me-1"></span>' + esc(text) + '</span>');
+        return $m;
+    }
+
+    // 主流程：打开对话式分析面板
     function openAiFlow(){
         var examId = $('#gExam').val();
         if (!examId){ alert('请先选择要分析的考试'); return; }
         if (aiBusy) return;
         $.getJSON('/grades/ai/scope?exam_id=' + examId, function(res){
             var s = res.data;
-            var keyLine = s.key_source === 'personal' ? '个人 Key（' + esc(s.provider) + ' / ' + esc(s.model) + '）'
-                : s.key_source === 'global' ? '管理员公共 Key（' + esc(s.provider) + ' / ' + esc(s.model) + '）'
-                : null;
-            if (!keyLine){
+            if (!s.key_source){
                 // 无 Key：引导配置
-                showAi('配置 AI API Key',
-                    '<p class="small text-muted">进行 AI 分析需要 API Key：您可填写自己的 DeepSeek Key（费用走您自己账户）；'
-                    + '也可联系管理员配置公共 Key 后免填。</p>' + keyFormHtml(null, false),
-                    '<button class="btn btn-sm btn-secondary" data-bs-dismiss="modal">暂不</button>'
-                    + '<button class="btn btn-sm btn-primary" id="aiKeySave">保存并继续</button>');
-                bindKeyForm(false);
-                $('#aiKeySave').on('click', function(){
-                    var payload = {provider: $('#aiProvider').val(),
-                        model: $('#aiModel').val().trim(),
-                        base_url: $('#aiProvider').val() === 'custom' ? $('#aiBaseUrl').val().trim() : '',
-                        api_key: $('#aiApiKey').val().trim()};
-                    if (!payload.api_key){ alert('请输入 API Key'); return; }
-                    $.post('/grades/ai/key', JSON.stringify(payload), function(){
-                        hideAi(); openAiFlow();  // 保存后重新预览
-                    }).fail(function(x){ alert(x.responseJSON && x.responseJSON.message || '保存失败'); });
+                loadProviders(function(){
+                    showAi('配置 AI API Key',
+                        '<p class="small text-muted">进行 AI 分析需要 API Key：可任选一家服务商（DeepSeek / 通义千问 / 智谱 GLM / '
+                        + 'Kimi / 豆包 / 混元 / 文心一言，或自定义 OpenAI 兼容接口），费用走您自己的账户；'
+                        + '也可联系管理员配置公共 Key 后免填。</p>' + keyFormHtml(null, false),
+                        '<button class="btn btn-sm btn-outline-secondary me-auto" id="aiKeyTest">'
+                        + '<i class="bi bi-plug"></i> 测试连接</button>'
+                        + '<button class="btn btn-sm btn-secondary" data-bs-dismiss="modal">暂不</button>'
+                        + '<button class="btn btn-sm btn-primary" id="aiKeySave">保存并继续</button>');
+                    bindKeyForm(false);
+                    $('#aiKeySave').off('click').on('click', function(){
+                        var payload = collectKeyPayload();
+                        if (payload === null) return;
+                        ajaxJson('/grades/ai/key', payload, function(){
+                            hideAi(); openAiFlow();   // 保存后重新进入
+                        }, function(x){
+                            alert((x.responseJSON && x.responseJSON.message) || '保存失败');
+                        });
+                    });
                 });
                 return;
             }
-            // 有 Key：展示发送预览
-            var body = '<div class="alert alert-warning small py-2"><i class="bi bi-shield-exclamation"></i> '
-                + '成绩数据（含学生学号姓名）将发送至 AI 服务商（' + esc(s.provider || 'deepseek') + '），离开学校内网。请确认符合数据使用规定。</div>'
-                + '<table class="table table-sm g-table mb-0">'
-                + '<tr><td style="width:110px;">本次考试</td><td>' + esc(s.exam.name) + '（' + esc(s.exam.grade) + ' ' + esc(s.exam.date) + '）</td></tr>'
-                + '<tr><td>对比考试</td><td>' + (s.prev ? esc(s.prev.name) + '（' + esc(s.prev.date) + '）' : '无（首场考试，仅本次）') + '</td></tr>'
-                + '<tr><td>发送范围</td><td>' + esc(s.scope_desc) + '</td></tr>'
-                + '<tr><td>学生人数</td><td>' + s.scope_students + ' 人（本次有效参考）</td></tr>'
-                + '<tr><td>使用密钥</td><td>' + keyLine + '</td></tr></table>'
-                + '<div class="form-text small mt-2">发送的是本次与上次两次考试的原始成绩（学号/姓名/各科分数/总分/排名/进退步），'
-                + '仅包含您有权查看的数据；预计等待 30~90 秒。</div>';
-            showAi('AI 分析 · 发送确认', body,
-                '<button class="btn btn-sm btn-outline-secondary me-auto" id="aiChangeKey">更换/清除 Key</button>'
-                + '<button class="btn btn-sm btn-secondary" data-bs-dismiss="modal">取消</button>'
-                + '<button class="btn btn-sm btn-primary" id="aiRun"><i class="bi bi-stars"></i> 生成 AI 报告</button>');
-            $('#aiChangeKey').on('click', function(){ openKeySetup(false); });
-            $('#aiRun').on('click', function(){ runAnalyze(examId); });
-        }).fail(function(){ alert('无法获取发送范围（或该考试超出您的权限）'); });
+            openChatPanel(examId, s);
+        }).fail(function(x){
+            alert(((x.responseJSON && x.responseJSON.message) || '无法获取发送范围（或该考试超出您的权限）'));
+        });
     }
 
+    function openChatPanel(examId, s){
+        showAi('AI 分析 · ' + (s.exam ? s.exam.name : ''),
+            chatShellHtml(s),
+            '<button class="btn btn-sm btn-outline-secondary me-auto" id="aiChangeKey">更换/清除 Key</button>'
+            + (canManageGlobal() ? '<button class="btn btn-sm btn-outline-dark" id="aiGlobalKey">'
+                + '<i class="bi bi-key"></i> 公共 Key</button>' : '')
+            + '<button class="btn btn-sm btn-outline-success" id="aiToPage">插入到当前页签</button>'
+            + '<button class="btn btn-sm btn-secondary" data-bs-dismiss="modal">关闭</button>');
+        $('#aiModalBody').append(chatInputHtml());
+        $('#aiChangeKey').on('click', function(){ openKeySetup(false); });
+        $('#aiGlobalKey').on('click', function(){ openKeySetup(true); });
+        $('#aiToPage').on('click', function(){
+            var txt = lastReportText;
+            if (!txt){ alert('还没有生成报告'); return; }
+            showReport(txt, '已保存到 AI 报告历史');
+            hideAi();
+        });
+        $('#aiChatClear').on('click', function(){
+            if (!confirm('清空本次考试的对话记录？')) return;
+            $.ajax({url: '/grades/ai/chat/history?exam_id=' + examId, method: 'DELETE',
+                success: function(){ $('#aiChat').empty(); lastReportText = ''; }});
+        });
+        function send(){
+            var q = $('#aiChatInput').val().trim();
+            if (!q || aiBusy) return;
+            $('#aiChatInput').val('');
+            askFollowUp(examId, q);
+        }
+        $('#aiChatSend').on('click', send);
+        $('#aiChatInput').on('keydown', function(e){
+            if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)){ send(); }
+        });
+        bindReportActions();
+
+        // 已有历史则回放，否则直接生成首份报告
+        $.getJSON('/grades/ai/chat/history?exam_id=' + examId, function(res){
+            var rows = res.data || [];
+            if (rows.length){
+                rows.forEach(function(r){
+                    pushMsg(r.role, r.role === 'user' ? esc(r.content)
+                        : renderGradeMd(r.content || ''));
+                });
+            } else {
+                runAnalyze(examId);
+            }
+        });
+    }
+
+    var lastReportText = '';
+    function bindReportActions(){}
+
+    // 生成首份报告（流式）
     function runAnalyze(examId){
         aiBusy = true;
-        var btn = $('#aiRun');
-        if (btn.length) btn.prop('disabled', true).html('<span class="spinner-border spinner-border-sm me-1"></span>生成中（约 30-90 秒）…');
         $('#gAi').prop('disabled', true);
-        $.post('/grades/ai/analyze', JSON.stringify({exam_id: examId}), function(res){
-            aiBusy = false;
-            $('#gAi').prop('disabled', false);
-            hideAi();
-            var d = res.data || {};
-            showReport(d.content, (res.data && res.data.report_id ? '已保存到 AI 报告历史' : ''));
-        }).fail(function(x){
-            aiBusy = false;
-            $('#gAi').prop('disabled', false);
-            alert(x.responseJSON && x.responseJSON.message || '分析失败，请稍后重试');
+        var $stage = pushStage('正在准备数据…');
+        var $msg = null, $body = null, $think = null;
+        var text = '', think = '', timer = null;
+
+        function flush(){
+            if ($body) $body.html(renderGradeMd(text) + '<span class="ai-caret"></span>');
+            if ($think) $think.text(think);
+            var $box = $('#aiChat');
+            if ($box.length) $box.scrollTop($box[0].scrollHeight);
+        }
+        function schedule(){
+            if (timer) return;
+            timer = setTimeout(function(){ timer = null; flush(); }, 120);
+        }
+
+        streamPost('/grades/ai/analyze', {exam_id: examId, stream: 1}, {
+            onEvent: function(ev){
+                if (ev.type === 'stage'){
+                    $stage.find('.ai-stage').html('<span class="spinner-border '
+                        + 'spinner-border-sm me-1"></span>' + esc(ev.text));
+                } else if (ev.type === 'charts'){
+                    renderCharts('#aiChatCharts', ev.data);
+                } else if (ev.type === 'reasoning'){
+                    think += ev.text;
+                    if (!$think){
+                        if (!$msg){ $msg = pushMsg('ai', ''); $body = $msg.find('.ai-bubble'); }
+                        $think = $('<details class="ai-think" open><summary>'
+                            + '<i class="bi bi-lightbulb"></i> 思考过程</summary>'
+                            + '<div class="ai-think-body small text-muted"></div></details>');
+                        $msg.append($think);
+                        $think = $think.find('.ai-think-body');
+                    }
+                    schedule();
+                } else if (ev.type === 'delta'){
+                    text += ev.text;
+                    if (!$msg){ $msg = pushMsg('ai', ''); $body = $msg.find('.ai-bubble'); }
+                    schedule();
+                } else if (ev.type === 'saved'){
+                    lastReportText = text;
+                } else if (ev.type === 'error'){
+                    pushMsg('ai', '<span class="text-danger"><i class="bi bi-x-circle"></i> '
+                        + esc(ev.text) + '</span>');
+                }
+            },
+            onError: function(msg){
+                pushMsg('ai', '<span class="text-danger"><i class="bi bi-x-circle"></i> '
+                    + esc(msg) + '</span>');
+            },
+            onDone: function(){
+                if (timer){ clearTimeout(timer); timer = null; }
+                flush();
+                if ($body) $body.find('.ai-caret').remove();
+                $stage.remove();
+                if (text) lastReportText = text;
+                aiBusy = false;
+                $('#gAi').prop('disabled', false);
+            }
+        });
+    }
+
+    // 多轮追问（流式）
+    function askFollowUp(examId, question){
+        aiBusy = true;
+        pushMsg('user', esc(question));
+        var $msg = null, $body = null, text = '', timer = null;
+        function flush(){
+            if ($body) $body.html(renderGradeMd(text) + '<span class="ai-caret"></span>');
+            var $box = $('#aiChat');
+            if ($box.length) $box.scrollTop($box[0].scrollHeight);
+        }
+        function schedule(){
+            if (timer) return;
+            timer = setTimeout(function(){ timer = null; flush(); }, 120);
+        }
+        streamPost('/grades/ai/chat', {exam_id: examId, message: question}, {
+            onEvent: function(ev){
+                if (ev.type === 'delta'){
+                    text += ev.text;
+                    if (!$msg){ $msg = pushMsg('ai', ''); $body = $msg.find('.ai-bubble'); }
+                    schedule();
+                } else if (ev.type === 'error'){
+                    pushMsg('ai', '<span class="text-danger"><i class="bi bi-x-circle"></i> '
+                        + esc(ev.text) + '</span>');
+                }
+            },
+            onError: function(msg){
+                pushMsg('ai', '<span class="text-danger"><i class="bi bi-x-circle"></i> '
+                    + esc(msg) + '</span>');
+            },
+            onDone: function(){
+                if (timer){ clearTimeout(timer); timer = null; }
+                flush();
+                if ($body) $body.find('.ai-caret').remove();
+                aiBusy = false;
+            }
         });
     }
 

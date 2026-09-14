@@ -57,6 +57,8 @@
 
 <!-- 打印区域占位（打印时 clone 当前 tab 内容） -->
 <div id="printArea" class="d-none"></div>
+<!-- 当前用户是否可管理公共 Key（管理员或具备 system.users 权限） -->
+<span id="aiCanGlobal" class="d-none">{{ '1' if (current_user.role == 'admin' or current_user.has_perm('system.users')) else '0' }}</span>
 {% endblock %}
 {% block extra_js %}
 <script src="{{ url_for('static', filename='js/echarts.min.js') }}"></script>
