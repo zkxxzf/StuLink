@@ -116,6 +116,10 @@
             <a class="nav-link" href="{{ url_for('grades.index') }}">
                 <i class="bi bi-house"></i>成绩管理
             </a>
+            {% elif request.blueprint == 'points' %}
+            <a class="nav-link" href="{{ url_for('points.index') }}">
+                <i class="bi bi-house"></i>积分管理
+            </a>
             {% else %}
             <a class="nav-link" href="{{ url_for('welcome.index') }}">
                 <i class="bi bi-house"></i>返回首页
@@ -227,6 +231,12 @@
         {% endwith %}
 
         {% block content %}{% endblock %}
+
+        {% if current_user.is_authenticated %}
+        <footer class="text-center text-muted small mt-4 pt-3 border-top">
+            StuLink v1.9.1（2026-09-14） · © 2026 @zkxxzf · 感谢协作开发 @Sakaay
+        </footer>
+        {% endif %}
     </div>
 
     {# 本地文件优先：不依赖外网 CDN。

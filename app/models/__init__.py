@@ -12,11 +12,12 @@ from app.models.user_class_link import UserClassLink
 from app.models.grade_setting import GradeSetting
 from app.models.grades import Exam, ExamScore, ExamBand, TeacherSubjectLink, \
     AiKey, AiGlobalKey, AiReport
+from app.models.points import PointRecord
 
 __all__ = ['User', 'Student', 'Room', 'BedAssignment', 'StudentAccommodation',
            'DictCategory', 'DictItem', 'OperationLog', 'AssignmentHistory',
            'ClassProfile', 'ClassSubject',
            'PermissionGroup', 'UserClassLink', 'GradeSetting',
            'Exam', 'ExamScore', 'ExamBand', 'TeacherSubjectLink',
-           'AiKey', 'AiGlobalKey', 'AiReport']
+           'AiKey', 'AiGlobalKey', 'AiReport', 'PointRecord']
 

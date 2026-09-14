@@ -1,14 +1,156 @@
 {% extends "base.html" %}
 {% block title %}积分管理{% endblock %}
 {% block content %}
-<div class="d-flex justify-content-center align-items-center" style="min-height:60vh;">
-    <div class="text-center">
-        <div style="font-size:72px;">⭐</div>
-        <h4 class="mt-3">积分管理</h4>
-        <p class="text-muted">该模块正在开发中，敬请期待...</p>
-        <a href="{{ url_for('welcome.index') }}" class="btn btn-outline-secondary mt-2">
-            <i class="bi bi-arrow-left"></i> 返回首页
-        </a>
+<div class="d-flex align-items-center mb-3 flex-wrap gap-2">
+    <h5 class="mb-0"><i class="bi bi-star"></i> 积分管理</h5>
+    <span class="text-muted small" id="scopeHint"></span>
+    <div class="ms-auto">
+        <button class="btn btn-sm btn-primary d-none" id="btnAdd">
+            <i class="bi bi-plus-lg"></i> 录入积分
+        </button>
     </div>
 </div>
+
+<!-- 筛选栏 -->
+<div class="card mb-3">
+    <div class="card-body py-2">
+        <div class="row g-2 align-items-center">
+            <div class="col-auto">
+                <select id="fGrade" class="form-select form-select-sm" style="width:130px;">
+                    <option value="">全部年级</option>
+                </select>
+            </div>
+            <div class="col-auto">
+                <select id="fClass" class="form-select form-select-sm" style="width:130px;">
+                    <option value="">全部班级</option>
+                </select>
+            </div>
+            <div class="col-auto">
+                <input id="fKw" class="form-control form-control-sm" style="width:170px;"
+                       placeholder="学号 / 姓名">
+            </div>
+            <div class="col-auto d-flex align-items-center gap-1">
+                <input type="date" id="fFrom" class="form-control form-control-sm" style="width:150px;">
+                <span class="text-muted small">~</span>
+                <input type="date" id="fTo" class="form-control form-control-sm" style="width:150px;">
+            </div>
+            <div class="col-auto">
+                <button class="btn btn-sm btn-outline-primary" id="btnSearch">
+                    <i class="bi bi-search"></i> 查询
+                </button>
+                <button class="btn btn-sm btn-outline-secondary" id="btnReset">重置</button>
+            </div>
+            <div class="col-auto ms-auto">
+                <div class="btn-group btn-group-sm" role="group">
+                    <button class="btn btn-outline-dark active" id="tabRecords">积分记录</button>
+                    <button class="btn btn-outline-dark" id="tabSummary">学生汇总</button>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- 统计卡 -->
+<div class="row g-3 mb-3">
+    <div class="col-md-4"><div class="card stat-card"><div class="card-body text-center py-3">
+        <div class="stat-number text-primary" id="statCount">0</div>
+        <div class="stat-label">筛选结果记录数</div></div></div></div>
+    <div class="col-md-4"><div class="card stat-card"><div class="card-body text-center py-3">
+        <div class="stat-number text-info" id="statStudents">0</div>
+        <div class="stat-label">涉及学生数</div></div></div></div>
+    <div class="col-md-4"><div class="card stat-card"><div class="card-body text-center py-3">
+        <div class="stat-number" id="statPoints">0</div>
+        <div class="stat-label">积分合计（正负相抵）</div></div></div></div>
+</div>
+
+<!-- 记录列表 -->
+<div class="card d-none" id="cardRecords">
+    <div class="table-responsive">
+        <table class="table table-hover g-table align-middle mb-0">
+            <thead>
+            <tr>
+                <th style="width:110px;">日期</th><th>学生</th><th style="width:90px;">班级</th>
+                <th style="width:80px;" class="text-end">分值</th><th style="width:90px;">类别</th>
+                <th>事由</th><th>备注</th><th style="width:100px;">录入人</th>
+                <th style="width:120px;" class="text-end">操作</th>
+            </tr>
+            </thead>
+            <tbody id="tbRecords">
+            <tr><td colspan="9" class="text-center text-muted py-4">加载中…</td></tr>
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<!-- 学生汇总 -->
+<div class="card d-none" id="cardSummary">
+    <div class="table-responsive">
+        <table class="table table-hover g-table align-middle mb-0">
+            <thead>
+            <tr>
+                <th style="width:60px;" class="text-end">排名</th><th>学号</th><th>姓名</th>
+                <th style="width:90px;">班级</th><th class="text-end" style="width:100px;">合计分</th>
+                <th class="text-end" style="width:100px;">记录数</th>
+            </tr>
+            </thead>
+            <tbody id="tbSummary">
+            <tr><td colspan="6" class="text-center text-muted py-4">加载中…</td></tr>
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<!-- 录入/编辑弹窗 -->
+<div class="modal fade" id="recModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header py-2">
+                <h6 class="modal-title" id="recModalTitle">录入积分</h6>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <input type="hidden" id="mId">
+                <div class="mb-2 position-relative">
+                    <label class="form-label small mb-1">学生 <span class="text-danger">*</span></label>
+                    <input class="form-control form-control-sm" id="mStudentInput"
+                           placeholder="输入学号或姓名搜索…" autocomplete="off">
+                    <div class="list-group position-absolute w-100 shadow-sm d-none"
+                         id="stuDrop" style="z-index:1080;max-height:220px;overflow:auto;"></div>
+                    <div class="form-text small" id="mStudentPicked"></div>
+                </div>
+                <div class="row g-2">
+                    <div class="col-4 mb-2">
+                        <label class="form-label small mb-1">分值 <span class="text-danger">*</span></label>
+                        <input type="number" class="form-control form-control-sm" id="mPoints"
+                               placeholder="正加负扣" min="-100" max="100">
+                    </div>
+                    <div class="col-4 mb-2">
+                        <label class="form-label small mb-1">类别</label>
+                        <select class="form-select form-select-sm" id="mCategory"></select>
+                    </div>
+                    <div class="col-4 mb-2">
+                        <label class="form-label small mb-1">日期</label>
+                        <input type="date" class="form-control form-control-sm" id="mDate">
+                    </div>
+                </div>
+                <div class="mb-2">
+                    <label class="form-label small mb-1">事由 <span class="text-danger">*</span></label>
+                    <input class="form-control form-control-sm" id="mReason" maxlength="200"
+                           placeholder="如：月考进步显著 / 宿舍卫生扣分">
+                </div>
+                <div class="mb-1">
+                    <label class="form-label small mb-1">备注</label>
+                    <input class="form-control form-control-sm" id="mRemark" maxlength="200">
+                </div>
+            </div>
+            <div class="modal-footer py-2">
+                <button class="btn btn-sm btn-secondary" data-bs-dismiss="modal">取消</button>
+                <button class="btn btn-sm btn-primary" id="btnSave">保存</button>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+{% block extra_js %}
+<script src="{{ url_for('static', filename='js/points.js') }}"></script>
 {% endblock %}
