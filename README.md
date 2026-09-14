@@ -3,11 +3,11 @@
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
 [![Python](https://img.shields.io/badge/python-3.11+-green.svg)](https://python.org)
 [![Flask](https://img.shields.io/badge/flask-3.x-lightgrey.svg)](https://flask.palletsprojects.com/)
-[![Version](https://img.shields.io/badge/version-1.9.0-orange.svg)](https://github.com/zkxxzf/stulink)
+[![Version](https://img.shields.io/badge/version-1.9.1-orange.svg)](https://github.com/zkxxzf/stulink)
 
 面向中学的综合学生管理平台，采用双站点架构：
 
-- **在校生系统（主应用 :5000）**：宿舍自动分配 · 合班管理 · 床位管理 · 学生信息管理 · 批量导入/调班 · 多角色权限 · 统计报表 · 成绩管理与分析（ECharts）· AI 分析（BYOK）
+- **在校生系统（主应用 :5000）**：宿舍自动分配 · 合班管理 · 床位管理 · 学生信息管理 · 批量导入/调班 · 多角色权限 · 统计报表 · 成绩管理与分析（ECharts）· AI 分析（BYOK）· 积分管理
 - **往届生查询（独立应用 :5001）**：毕业生数据快照查询 · 学习经历变迁 · 宿舍历史
 
 ## 功能模块
@@ -17,8 +17,8 @@
 | 📚 系统管理 | 主应用 | ✅ 已完成 | 学生管理 · 教师管理 · 字典管理 · 班型设置 · 权限组 · 年级毕业归档 |
 | 🏠 宿舍管理 | 主应用 | ✅ 已完成 | 宿舍列表 · 可视化拖拽分配 · 床位管理 · 自动分配 V20260805 · 合班自动识别 · 统计报表 · 宿舍数据导入 · 床位操作并发安全 |
 | 🔍 往届查询 | 独立应用 | ✅ 已完成 | 毕业生基本信息查询 · 宿舍分配快照 · 学习经历变迁时间线 |
-| ⭐ 积分管理 | 主应用 | 🚧 开发中 | 学生积分记录与奖惩管理 |
-| 📊 成绩管理 | 主应用 | ✅ 已完成 | 考试登记 · 成绩导入（分批覆盖）· 划线分层 · 四大分析（年级/班级/学科/任课教师，ECharts 可视化）· Excel/PDF 导出 · AI 分析（个人 Key/公共 Key，数据按权限收敛） |
+| ⭐ 积分管理 | 主应用 | ✅ 基础版已完成（持续完善） | 学生加减分记录 · 学生积分汇总排名 · 范围权限（全校/年级/班级）· 独立数据库 |
+| 📊 成绩管理 | 主应用 | ✅ 已完成（持续完善中） | 考试登记 · 成绩导入（分批覆盖）· 划线分层 · 四大分析（年级/班级/学科/任课教师，ECharts 可视化）· Excel/PDF 导出 · AI 分析（个人 Key/公共 Key，数据按权限收敛） |
 
 ## 宿舍自动分配算法（V20260805）
 
@@ -45,6 +45,7 @@
   data/dormitory.db  宿舍库（房间/床位）
   data/history.db    历史库（毕业生快照 + 变迁日志 + 分配历史）
   data/grades.db     成绩库（考试/成绩/分层/任课映射/AI Key 与报告）
+  data/points.db     积分库（学生加减分记录）
   data/backups/      毕业备份
 ```
 
@@ -119,3 +120,7 @@ StuLink/
 [Apache License 2.0](LICENSE) — 允许商用，保留版权署名
 
 Copyright (c) 2026 zkxxzf
+
+## 致谢
+
+感谢 [@Sakaay](https://github.com/sa-da-sa-da) 参与协作开发（协作指南共建 · 成绩模块测试与修复 · 前端资源本地化）

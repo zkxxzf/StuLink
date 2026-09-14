@@ -1,4 +1,4 @@
-# StuLink v1.8.0 2026-08-02
+# StuLink v1.9.1 2026-09-14
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 import os
 import secrets
@@ -66,6 +66,7 @@ class Config:
         'dormitory': 'sqlite:///' + os.path.join(BASE_DIR, 'data', 'dormitory.db'),
         'history': 'sqlite:///' + os.path.join(BASE_DIR, 'data', 'history.db'),
         'grades': 'sqlite:///' + os.path.join(BASE_DIR, 'data', 'grades.db'),
+        'points': 'sqlite:///' + os.path.join(BASE_DIR, 'data', 'points.db'),
     }
 
 
