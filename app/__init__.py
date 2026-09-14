@@ -86,7 +86,7 @@ PERMISSION_GROUPS = [
             'dormitory.beds', 'dormitory.import',
             'statistics.view',
             'system.users', 'system.dictionary', 'system.class_profile',
-            'system.perm_groups', 'system.grade_mgmt',
+            'system.perm_groups', 'system.grade_mgmt', 'system.settings',
             'points.view', 'points.edit',
             'grades.view', 'grades.edit',
             'grades.import', 'grades.settings', 'grades.teachers', 'grades.student_query',

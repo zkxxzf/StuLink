@@ -4,7 +4,7 @@
 import json
 from datetime import datetime, timedelta
 
-from flask import render_template, request, jsonify, abort, url_for, current_app
+from flask import render_template, request, jsonify, abort, url_for
 from flask_login import login_required, current_user
 from sqlalchemy import or_
 
@@ -66,6 +66,18 @@ def cert_verify(code):
     """成绩证明公开核验页（无需登录）：验真伪 + 可作废提示。
     v1.12.2 加密防伪码：先做 HMAC 验签（密钥+学号+随机码+内容哈希），签名不符即判为伪造/篡改。"""
     from app.utils.cert_sign import verify, is_legacy
+
+    # 免登录端点，做简单的按 IP 限流，避免被批量探测刷库（60 秒内最多 30 次）
+    from app.utils.cache import cache
+    rate_key = f'cert_verify_rate_{request.remote_addr or "unknown"}'
+    hits = (cache.get(rate_key) or 0) + 1
+    try:
+        cache.set(rate_key, hits, timeout=60)
+    except Exception:
+        pass
+    if hits > 30:
+        abort(429, description='核验请求过于频繁，请稍后再试')
+
     cert = Certificate.query.filter_by(code=code).first()
     content = json.loads(cert.content_json or '{}') if cert else None
     sig_ok = verify(cert) if cert else False
@@ -197,7 +209,9 @@ def api_create_cert():
     basic = result['student']
     # 证明抬头（姓名/性别/身份证号/学籍号/入学时间）与校名随快照固化，保证事后可验真
     result['cert_header'] = student_service.cert_header(student_no)
-    result['school_name'] = current_app.config.get('SCHOOL_NAME', '')
+    # 学校名称：环境变量 > 数据库系统设置 > 化名占位
+    from app.utils.helpers import get_school_name
+    result['school_name'] = get_school_name()
     # v1.12.3 底部说明可由经办人改写；留空用默认文案，超长截断并去除首尾空白
     note = str(payload.get('cert_note') or '').strip()
     if len(note) > student_service.CERT_NOTE_MAX:

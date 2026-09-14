@@ -13,11 +13,13 @@ from app.models.grade_setting import GradeSetting
 from app.models.grades import Exam, ExamScore, ExamBand, TeacherSubjectLink, \
     AiKey, AiGlobalKey, AiReport, AffairRoomLib  # v1.12.1 考场房间库
 from app.models.points import PointRecord
+from app.models.system_setting import SystemSetting
 
 __all__ = ['User', 'Student', 'Room', 'BedAssignment', 'StudentAccommodation',
            'DictCategory', 'DictItem', 'OperationLog', 'AssignmentHistory',
            'ClassProfile', 'ClassSubject',
            'PermissionGroup', 'UserClassLink', 'GradeSetting',
            'Exam', 'ExamScore', 'ExamBand', 'TeacherSubjectLink',
-           'AiKey', 'AiGlobalKey', 'AiReport', 'AffairRoomLib', 'PointRecord']
+           'AiKey', 'AiGlobalKey', 'AiReport', 'AffairRoomLib', 'PointRecord',
+           'SystemSetting']
 

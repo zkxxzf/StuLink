@@ -1,5 +1,6 @@
 # StuLink v1.7.0 2026-08-02
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
+import os
 import re
 from app.models import DictCategory, Student, Room, ClassProfile, ClassSubject
 from app.utils.cache import cache
@@ -158,6 +159,41 @@ def is_standard_class(class_name):
 def get_class_options():
     """班级下拉框选项：只返回正式班级，排除 不分班/已转出 等"""
     return [c for c in get_dict_values('class') if is_standard_class(c)]
+
+
+# ---- 系统设置（存库，运行期可维护）----
+
+SCHOOL_NAME_KEY = 'school_name'
+DEFAULT_SCHOOL_NAME = '某某学校'   # 占位化名：真实校名不写进代码/仓库
+
+
+def get_school_name():
+    """学校名称：环境变量 SCHOOL_NAME > 数据库 system_settings > 占位化名
+
+    说明：默认值必须是化名，真实校名通过环境变量或「系统设置」页注入，
+    避免学校名称出现在公开仓库中。
+    """
+    env_name = (os.environ.get('SCHOOL_NAME') or '').strip()
+    if env_name:
+        return env_name
+    try:
+        from app.models.system_setting import SystemSetting
+        db_name = (SystemSetting.get(SCHOOL_NAME_KEY) or '').strip()
+        if db_name:
+            return db_name
+    except Exception:
+        pass
+    return DEFAULT_SCHOOL_NAME
+
+
+def set_school_name(value, user_id=None):
+    """保存学校名称到数据库"""
+    from app.extensions import db
+    from app.models.system_setting import SystemSetting
+
+    SystemSetting.set(SCHOOL_NAME_KEY, (value or '').strip(), user_id=user_id,
+                      description='学校名称：成绩证明等对外文书抬头')
+    db.session.commit()
 
 
 def write_change_log(change_type, students_data, old_value='', new_value='', detail='', operator_name=''):

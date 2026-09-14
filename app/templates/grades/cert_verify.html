@@ -41,8 +41,8 @@
                 该证明为早期版本防伪码（无签名校验），内容以数据库快照为准。
             </div>
             {% endif %}
-            {# 公开页身份证号脱敏，其余内容与打印件一致 #}
-            {{ cert_doc(content, cert, true) }}
+            {# 公开页：身份证号脱敏 + 学籍号隐藏，其余内容与打印件一致 #}
+            {{ cert_doc(content, cert, true, true) }}
             {% endif %}
         </div>
     </div>

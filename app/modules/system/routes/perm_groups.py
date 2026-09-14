@@ -50,6 +50,7 @@ PERMISSION_MODULES = [
             ('system.class_profile', '班型设置'),
             ('system.perm_groups', '权限组管理'),
             ('system.grade_mgmt', '年级管理'),
+            ('system.settings', '系统设置'),
         ]
     },
     {
