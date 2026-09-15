@@ -49,11 +49,15 @@ def api_options():
     # 用户可见考试（未毕业年级 + 范围过滤）
     exams = Exam.query.order_by(Exam.exam_date.desc(), Exam.id.desc()).all()
     exams = [e for e in exams if e.grade in grades]
+    # v1.13.1 汇报区：标注哪些考试已有总分划线（下拉里提示「未划线」，避免选到无法汇报的考试）
+    from app.models.grades import ExamBand, TOTAL_SUBJECT
+    banded_ids = {r[0] for r in ExamBand.query.with_entities(ExamBand.exam_id)
+                  .filter(ExamBand.subject == TOTAL_SUBJECT).distinct().all()}
     by_grade = {}
     for e in exams:
         by_grade.setdefault(e.grade, []).append({
             'id': e.id, 'name': e.name, 'date': e.exam_date.strftime('%Y-%m-%d'),
-            'type': e.exam_type or '', 'status': e.status,
+            'type': e.exam_type or '', 'status': e.status, 'banded': e.id in banded_ids,
         })
     # 班级（年级下的数字教学班 + 锁定范围）
     classes_by_grade = {}

@@ -22,7 +22,8 @@ def _layer_names(data, direction):
 
 def grade_tab(exam_id, direction=''):
     """A1 年级分析；direction=物理/历史 时仅统计该方向（空串=全部）"""
-    data = st.ExamData(exam_id)
+    # v1.13.2 性能：改用进程级共享缓存，避免每次打开分析页重复全量拉取明细行
+    data = st.cached_exam_data(exam_id)
     exam = data.exam
     if not data.total_rows:
         return _empty(exam)
@@ -213,7 +214,7 @@ def _trend_lines(grade, direction=None):
 # ==================== A2 班级分析 ====================
 
 def class_tab(exam_id, class_name):
-    data = st.ExamData(exam_id)
+    data = st.cached_exam_data(exam_id)
     exam = data.exam
     if not data.total_rows or class_name not in data.classes:
         return _empty(exam)
@@ -399,7 +400,7 @@ def _class_trend(grade, class_name):
 
 def subject_tab(exam_id, subject, direction=''):
     """A3 学科分析；direction=物理/历史 时仅统计该方向（空串=全部）"""
-    data = st.ExamData(exam_id)
+    data = st.cached_exam_data(exam_id)
     exam = data.exam
     if not data.total_rows:
         return _empty(exam)
@@ -600,7 +601,7 @@ def teacher_tab(exam_id, subject=None, links=None, grade=None):
     """links: 允许展示的 (grade,class_name,subject,user_id) 列表（None=全部 active）"""
     from app.models.grades import TeacherSubjectLink
     from app.models import User
-    data = st.ExamData(exam_id)
+    data = st.cached_exam_data(exam_id)
     exam = data.exam
     if not data.total_rows:
         return _empty(exam)
@@ -700,4 +701,6 @@ def teacher_tab(exam_id, subject=None, links=None, grade=None):
 
 
 def clear_exam_cache(exam_id):
-    delete_cache_prefix(f'grades_tab_{exam_id}_')
+    # v1.13.0 同时失效汇报区缓存（单/双上线、去差均分等依赖划线与成绩）
+    from app.modules.grades.utils import invalidate_exam_cache
+    invalidate_exam_cache(exam_id)

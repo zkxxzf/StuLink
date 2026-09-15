@@ -252,6 +252,22 @@ function init() {
     $('#sqSubject').on('change', loadData);
     $('#sqCert').on('click', generateCert);
     $(window).on('resize', function () { Object.keys(charts).forEach(function (k) { charts[k].resize(); }); });
+
+    // 从证明打印页「返回」时带 ?student_no=学号，自动定位并查询该学生，无需重新搜索
+    autoOpenFromUrl();
+}
+
+// 读取 URL 上的 student_no 参数，精确匹配后自动选中并加载数据
+function autoOpenFromUrl() {
+    var no = new URLSearchParams(window.location.search).get('student_no');
+    if (!no) return;
+    $.getJSON('/grades/api/student-query/search?q=' + encodeURIComponent(no), function (res) {
+        var hit = (res.data || []).filter(function (s) { return String(s.no) === String(no); })[0];
+        if (!hit) { $('#sqEmpty').removeClass('d-none'); return; }
+        state.student_no = hit.no;
+        $('#sqStudent').val(hit.name + '（' + hit.no + '）');
+        loadData();
+    });
 }
 
 function fillSelect(sel, items) {
@@ -425,6 +441,10 @@ function openCertPicker(cb) {
                 + '<span class="text-muted">' + e.date + (e.type ? ' · ' + escHtml(e.type) : '') + '</span></label>';
         });
     });
+    // v1.12.3 证明底部说明可自行编辑，默认预填系统标准文案
+    html += '<div class="mt-3"><label class="form-label small fw-semibold mb-1" for="cpNote">证明说明（打印在证明底部，可自行修改）</label>'
+        + '<textarea class="form-control form-control-sm" id="cpNote" rows="3" maxlength="500">'
+        + escHtml((opts && opts.cert_note_default) || '') + '</textarea></div>';
     html += '</div><div class="modal-footer py-1">'
         + '<span class="me-auto text-muted small" id="cpCount"></span>'
         + '<button type="button" class="btn btn-sm btn-secondary" data-bs-dismiss="modal">取消</button>'
@@ -443,11 +463,12 @@ function openCertPicker(cb) {
     $m.find('#cpOk').on('click', function () {
         var ids = $m.find('.cp-box:checked').map(function () { return +this.value; }).get();
         if (!ids.length) { alert('请至少勾选一场考试'); return; }
+        var note = $m.find('#cpNote').val();
         state.certChosen = ids;   // 生成后页面矩阵按同一口径刷新
         var bs = bootstrap.Modal.getInstance($m[0]) || new bootstrap.Modal($m[0]);
         bs.hide();
         $m.on('hidden.bs.modal', function () { $m.remove(); });
-        cb(ids);
+        cb(ids, note);
     });
     count();
     new bootstrap.Modal($m[0]).show();
@@ -455,16 +476,17 @@ function openCertPicker(cb) {
 
 function generateCert() {
     if (!state.student_no) { alert('请先选择学生'); return; }
-    openCertPicker(function (ids) { doGenerateCert(ids); });
+    openCertPicker(function (ids, note) { doGenerateCert(ids, note); });
 }
 
-function doGenerateCert(certExamIds) {
+function doGenerateCert(certExamIds, certNote) {
     var payload = {
         student_no: String(state.student_no || ''),
         term: $('#sqTerm').val(), exam_type: $('#sqType').val(),
         date_from: $('#sqFrom').val(), date_to: $('#sqTo').val(),
         subject: $('#sqSubject').val(), exam_id: state.examId,
         cert_exam_ids: certExamIds || [],
+        cert_note: certNote || '',
     };
     $('#sqCert').prop('disabled', true).html('<span class="spinner-border spinner-border-sm me-1"></span>生成中…');
     $.ajax({
@@ -476,9 +498,12 @@ function doGenerateCert(certExamIds) {
         $('#sqCert').prop('disabled', false).html('<i class="bi bi-file-earmark-check"></i> 生成成绩证明');
         if (!res.success) { alert(res.message || '生成失败'); return; }
         var d = res.data || {};
-        if (d.print_url) window.open(d.print_url, '_blank');
-        alert('成绩证明已生成，防伪码：' + d.code + '\n打印页已打开，可打印/另存 PDF。');
-        loadData();   // 刷新页面矩阵为所选考试口径，与证明一致
+        // 当前标签页直接进入打印页（不再新开标签）；打印页「返回成绩查询」会带学号自动恢复查询
+        if (d.print_url) {
+            alert('成绩证明已生成，防伪码：' + d.code + '\n即将进入打印页，可打印/另存 PDF。');
+            window.location.href = d.print_url;
+        }
+        loadData();   // 刷新页面矩阵为所选考试口径，与证明一致（跳转前执行，返回时页面已是最新）
     }).fail(function (x) {
         $('#sqCert').prop('disabled', false).html('<i class="bi bi-file-earmark-check"></i> 生成成绩证明');
         alert(x.responseJSON && x.responseJSON.message || '生成失败');

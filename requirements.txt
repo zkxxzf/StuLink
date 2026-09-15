@@ -4,6 +4,7 @@ flask-login>=0.6
 flask-wtf>=1.2
 openpyxl>=3.1
 reportlab>=4.0  # v1.12.2 考务 A4 打印版 PDF 导出（桌签/名单）
+python-pptx>=1.0  # v1.13.1 汇报区导出 PPTX 交付物
 waitress>=3.0
 cryptography>=41.0
 pypinyin>=0.5

@@ -1,0 +1,45 @@
+{% extends "base.html" %}
+{% block title %}成绩汇报区{% endblock %}
+{% block extra_css_head %}
+<link href="{{ su('css/report.css') }}" rel="stylesheet">
+{% endblock %}
+{% block content %}
+<div class="container-fluid py-3" id="reportApp" data-exam-id="{{ request.args.get('exam_id', '') }}">
+    <div class="d-flex flex-wrap align-items-center gap-2 mb-3 no-copy">
+        <a href="{{ url_for('grades.index') }}" class="btn btn-sm btn-outline-secondary">
+            <i class="bi bi-arrow-left"></i> 返回成绩分析</a>
+        <h5 class="mb-0"><i class="bi bi-megaphone text-danger"></i> 成绩汇报区</h5>
+        <select id="rpExam" class="form-select form-select-sm w-auto" title="考试"></select>
+        <select id="rpDir" class="form-select form-select-sm w-auto" title="方向">
+            <option value="物理">物理类</option>
+            <option value="历史">历史类</option>
+            <option value="">全部方向</option>
+        </select>
+        <select id="rpLayer" class="form-select form-select-sm w-auto" title="层线（特控/本科）"></select>
+        <select id="rpCmp" class="form-select form-select-sm w-auto" title="对比考试（板块一）">
+            <option value="">上一场（默认）</option>
+        </select>
+        <span class="text-muted small ms-2">表格可直接鼠标框选 → Ctrl+C → PPT 里 Ctrl+V；也可点「复制本表」</span>
+        <span class="ms-auto"></span>
+        {# v1.13.1 交付物导出：HTML 独立文件 / PPTX（后端 python-pptx 生成） #}
+        <button class="btn btn-sm btn-outline-success" onclick="window._rpExportHtml()"
+                title="把当前五个板块导出为独立 HTML 文件">
+            <i class="bi bi-filetype-html"></i> 导出 HTML
+        </button>
+        <button class="btn btn-sm btn-outline-success" id="rpExportPptx"
+                onclick="window._rpExportPptx()" title="生成真正的 PowerPoint 文件下载">
+            <i class="bi bi-file-earmark-ppt"></i> 导出 PPT
+        </button>
+    </div>
+
+    <div id="rpBody">
+        <div class="text-center text-muted py-5"><div class="spinner-border"></div><div class="mt-2">加载中…</div></div>
+    </div>
+</div>
+{% endblock %}
+{# 脚本必须放在 jQuery 之后（extra_js 位于 base.html 底部 jQuery 引入之后），否则顶层 $ 报错 #}
+{% block extra_js %}
+<script src="{{ su('js/report.js') }}"></script>
+<script src="{{ su('js/report_pivot.js') }}"></script>
+<script src="{{ su('js/report_warning.js') }}"></script>
+{% endblock %}

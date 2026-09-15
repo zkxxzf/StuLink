@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {% block title %}个人成绩查询与分析{% endblock %}
 {% block extra_css_head %}
-<link href="{{ url_for('static', filename='css/grades.css') }}" rel="stylesheet">
+<link href="{{ su('css/grades.css') }}" rel="stylesheet">
 {% endblock %}
 {% block content %}
 <div id="sqApp" class="no-print">
@@ -39,6 +39,6 @@
 </div>
 {% endblock %}
 {% block extra_js %}
-<script src="{{ url_for('static', filename='js/echarts.min.js') }}"></script>
-<script src="{{ url_for('static', filename='js/student_query.js') }}"></script>
+<script src="{{ su('js/echarts.min.js') }}"></script>
+<script src="{{ su('js/student_query.js') }}"></script>
 {% endblock %}

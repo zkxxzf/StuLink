@@ -4,6 +4,9 @@
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 import math
 import statistics
+import threading
+import time
+from collections import OrderedDict
 
 from sqlalchemy import func
 
@@ -15,6 +18,58 @@ def _stddev(values):
     if len(values) <= 1:
         return 0.0
     return statistics.stdev(values)
+
+
+# ---------- ExamData 进程级缓存（v1.13.1 汇报区性能） ----------
+# 汇报区 5 个板块各自构造 ExamData 会把同一场考试的全量明细重复拉取 8~10 次，
+# 是首屏加载慢的主因。ExamData 构造后只读（惰性属性均为缓存派生值、无懒加载关系），
+# 故可跨请求共享；成绩/划线变更入口统一调 invalidate_exam_cache → clear_exam_data_cache。
+# LRU 上限 3 场（一场全量约几 MB），TTL 900s 与汇报 payload 缓存一致。
+_EXAM_DATA_TTL = 900
+_EXAM_DATA_MAX = 3
+_exam_data_cache = OrderedDict()
+# waitress 多线程下 OrderedDict 的 move_to_end/popitem 非原子，需锁保护；
+# 构建（全量拉取，耗时）也在锁内，配合双重检查使并发冷启动只算一次。
+_exam_data_lock = threading.Lock()
+
+
+def cached_exam_data(exam_id):
+    """取共享 ExamData；过期/超限自动重建。
+    构造后把涉及的 ORM 实例 expunge 出会话：后续请求的 commit/teardown 不会使其过期，
+    共享实例只读列值始终可用（惰性属性 band_list/prev_totals 走类级查询，同样安全）。"""
+    now = time.time()
+    with _exam_data_lock:
+        ent = _exam_data_cache.get(exam_id)
+        if ent and now - ent[0] < _EXAM_DATA_TTL:
+            _exam_data_cache.move_to_end(exam_id)
+            return ent[1]
+        data = ExamData(exam_id)
+        _detach_shared(data)
+        _exam_data_cache[exam_id] = (time.time(), data)
+        while len(_exam_data_cache) > _EXAM_DATA_MAX:
+            _exam_data_cache.popitem(last=False)
+        return data
+
+
+def _detach_shared(data):
+    """将 ExamData 持有的 ORM 实例脱离会话（防止 expire/detach 后读取报错）"""
+    from sqlalchemy.exc import InvalidRequestError
+    from app.extensions import db
+    objs = list(data.rows)
+    if data.exam is not None:
+        objs.append(data.exam)
+    if data.prev_exam is not None:
+        objs.append(data.prev_exam)
+    for o in objs:
+        try:
+            db.session.expunge(o)
+        except InvalidRequestError:
+            pass  # 本就不在该会话中，忽略
+
+
+def clear_exam_data_cache():
+    """成绩/划线变更后清空，防止读到旧快照（由 invalidate_exam_cache 调用）"""
+    _exam_data_cache.clear()
 
 
 class ExamData:

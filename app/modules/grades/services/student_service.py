@@ -10,6 +10,11 @@ from app.models import Student
 from app.modules.grades.services import stats_service as st
 from app.modules.grades.services.scope import student_in_scope
 
+# 成绩证明底部默认说明（生成时可由经办人在弹窗中改写；改写内容随证明快照固化并参与防伪签名）
+DEFAULT_CERT_NOTE = '本证明由系统依据已导入成绩数据生成，排名按方向内统计；仅作在校成绩凭证，不代表最终学历结论。'
+# 自定义说明最大长度（防御性限制，防止异常长文本写入快照）
+CERT_NOTE_MAX = 500
+
 
 def _rate(score, full):
     """得分率%（消除语数外150/其余100的满分差异，便于科目间横向比较）"""
@@ -141,8 +146,11 @@ def student_exams(student_no, grade, term='', exam_type='', date_from='', date_t
     if dt:
         q = q.filter(Exam.exam_date <= dt)
     exams = q.order_by(Exam.exam_date.asc(), Exam.id.asc()).all()
-    have = {r.exam_id for r in
-            ExamScore.query.filter_by(student_no=student_no, subject=TOTAL_SUBJECT).all()}
+    # v1.13.2 性能：只取 exam_id 列（覆盖索引 idx_scores_stu_subject_exam），
+    # 不再实例化该生全部总分 ExamScore ORM 对象
+    have = {r[0] for r in
+            ExamScore.query.filter_by(student_no=student_no, subject=TOTAL_SUBJECT)
+            .with_entities(ExamScore.exam_id).all()}
     return [e for e in exams if e.id in have]
 
 
@@ -225,7 +233,8 @@ def build_data(user, student_no, filters):
 
     # ---- 选定单场：科目明细 + 对比 ----
     sel_exam = Exam.query.get(sel_id)
-    data = st.ExamData(sel_id)
+    # v1.13.2 性能：走共享缓存，不再每次查询全量重建 ExamData（压测 P95 4.2s 的根因）
+    data = st.cached_exam_data(sel_id)
     fm = data.full_marks()
     tr = student_total.get(sel_id)
     cls_name = tr.class_name if tr else ''

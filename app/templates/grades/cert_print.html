@@ -22,6 +22,7 @@
 
 <div class="no-print text-center mt-3">
     <button class="btn btn-sm btn-primary" onclick="window.print()"><i class="bi bi-printer"></i> 打印 / 另存 PDF</button>
-    <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('grades.student_query_page') }}">返回</a>
+    {# 返回时带上学号，成绩查询页自动定位该学生，无需重新搜索 #}
+    <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('grades.student_query_page') }}?student_no={{ cert.student_no }}">返回</a>
 </div>
 {% endblock %}

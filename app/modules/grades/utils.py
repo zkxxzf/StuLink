@@ -45,3 +45,16 @@ def delete_cache_prefix(prefix):
                 cache.delete(key)
     except Exception:
         pass
+
+
+def invalidate_exam_cache(exam_id):
+    """成绩/划线变更后失效该考试的全部分析缓存（四 tab + 汇报区）"""
+    delete_cache_prefix(f'grades_tab_{exam_id}_')
+    # 汇报缓存键含方向/层等后缀，按考试段清除；划线低频，顺带清掉其他考试也无副作用
+    delete_cache_prefix('grades_report_')
+    # v1.13.1：ExamData 进程级共享缓存同步清空（跨请求只读快照，改分/划线后必须重建）
+    try:
+        from app.modules.grades.services.stats_service import clear_exam_data_cache
+        clear_exam_data_cache()
+    except Exception:
+        pass

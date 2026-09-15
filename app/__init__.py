@@ -1,6 +1,6 @@
 # StuLink v1.8.0 2026-08-02
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
-from flask import Flask, render_template, request
+from flask import Flask, render_template, request, url_for
 from config import Config
 from app.extensions import db, login_manager, csrf
 from markupsafe import escape, Markup
@@ -243,6 +243,37 @@ def create_app():
     @app.template_filter('nl2br')
     def nl2br_filter(text):
         return Markup(escape(str(text)).replace('\n', '<br>'))
+
+    # 静态资源版本号：按「单个文件」的修改时间生成 ?v=，模板里用 {{ su('js/x.js') }}。
+    # 改动某文件后浏览器自动拉新，根治「改了代码但浏览器用旧缓存」导致的
+    # 汇报区持续 loading、下拉失效等问题（无需手动 Ctrl+F5）。
+    # v1.13.2：由「全局最大 mtime」改为「按文件 mtime」——避免任意小改动把
+    # echarts(1MB)/bootstrap 等大文件一起挤掉缓存；配合下方 immutable 强缓存，
+    # 未变更的资源二次访问零请求。
+    import os as _os
+
+    def _asset_mtime(filename):
+        p = _os.path.join(app.static_folder, filename.replace('/', _os.sep))
+        try:
+            return int(_os.path.getmtime(p))
+        except OSError:
+            return 0
+
+    @app.context_processor
+    def inject_asset_version():
+        def su(filename):
+            return url_for('static', filename=filename, v=_asset_mtime(filename))
+        return {'su': su}
+
+    # 静态资源强缓存：URL 带 ?v=（内容变更即换 URL）→ 一年 immutable，浏览器零回源；
+    # 不带 ?v= 的（如 CSS 内相对路径引用的字体）保持默认协商缓存，避免改文件读旧版。
+    @app.after_request
+    def cache_static_immutable(response):
+        if (response.status_code == 200
+                and request.path.startswith('/static/')
+                and request.args.get('v')):
+            response.headers['Cache-Control'] = 'public, max-age=31536000, immutable'
+        return response
 
     # Gzip 压缩响应（提升传输速度）
     @app.after_request

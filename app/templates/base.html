@@ -5,8 +5,8 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>{% block title %}学生管理系统{% endblock %}</title>
     <!-- 全部使用本地静态资源：避免外网 CDN 不可达导致样式丢失、或 jQuery 未加载报 $ is not defined -->
-    <link href="{{ url_for('static', filename='css/bootstrap.min.css') }}" rel="stylesheet">
-    <link href="{{ url_for('static', filename='css/bootstrap-icons.min.css') }}" rel="stylesheet">
+    <link href="{{ su('css/bootstrap.min.css') }}" rel="stylesheet">
+    <link href="{{ su('css/bootstrap-icons.min.css') }}" rel="stylesheet">
     {% block extra_css_head %}{% endblock %}
     <style>
         :root { --sidebar-width: 220px; }
@@ -219,6 +219,14 @@
                 <i class="bi bi-grid-1x2"></i>成绩分析自由表
             </a>
             {% endif %}
+            {# v1.13.0 汇报区入口移入侧边栏（与后端 _guard_report 口径一致：仅管理员/校级/年级长可见） #}
+            {% if current_user.role == 'admin' or (current_user.permission_group and
+                 current_user.permission_group.scope_type in ('school', 'grade')) %}
+            <a class="nav-link {% if request.endpoint == 'grades.report_page' %}active{% endif %}"
+               href="{{ url_for('grades.report_page') }}">
+                <i class="bi bi-megaphone"></i>成绩汇报区
+            </a>
+            {% endif %}
             {% if current_user.has_perm('grades.student_query') %}
             <a class="nav-link {% if request.endpoint == 'grades.student_query_page' %}active{% endif %}"
                href="{{ url_for('grades.student_query_page') }}">
@@ -277,8 +285,8 @@
     {# 本地文件优先：不依赖外网 CDN。
        此前 jQuery 走 unpkg.com，国内网络经常加载失败导致 "$ is not defined"；
        而 document.write 兜底在 Chrome 慢速/失败网络下会被拦截，同样不可靠。 #}
-    <script src="{{ url_for('static', filename='js/jquery-3.7.1.min.js') }}"></script>
-    <script src="{{ url_for('static', filename='js/bootstrap.bundle.min.js') }}"></script>
+    <script src="{{ su('js/jquery-3.7.1.min.js') }}"></script>
+    <script src="{{ su('js/bootstrap.bundle.min.js') }}"></script>
     <script>
         // CSRF 令牌用于 AJAX 请求
         var csrfToken = "{{ csrf_token() }}";

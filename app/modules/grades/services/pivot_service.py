@@ -4,6 +4,7 @@
 import statistics
 
 from app.models.grades import SUBJECTS, TOTAL_SUBJECT
+from app.modules.grades.services import report_service
 
 # ============ 维度 ============
 DIM_NONE = ''
@@ -24,8 +25,11 @@ MEASURE_DEFS = [
     ('max', '最高分', False, False),
     ('min', '最低分', False, False),
     ('std', '标准差', False, False),
+    ('trim_avg', '去差均分', False, False),
     ('online_n', '上线人数', True, False),
     ('online_rate', '上线率%', True, False),
+    ('dual_n', '双上线人数', True, False),
+    ('dual_rate', '双上线率%', True, False),
     ('inlayer_n', '层内人数', True, False),
     ('inlayer_rate', '层内占比%', True, False),
     ('pass_n', '及格人数', False, True),
@@ -158,6 +162,10 @@ def _build_records(data, need_subject, subject, direction):
     """
     recs, layer_names = [], []
     bands_cache = {}
+    # 双上线/去差均分所需：去差学生集合（按班班型剔总分末 N 人，口径与汇报区一致）、
+    # 各方向总分层线（独立缓存，避免总分层名混进「科目×层」交叉的层取值）
+    trimmed_nos = report_service.trimmed_nos(data)
+    total_bands = {}
 
     def bands_of(d, sub):
         key = (d, sub)
@@ -169,9 +177,20 @@ def _build_records(data, need_subject, subject, direction):
                     layer_names.append(name)
         return bands_cache[key]
 
+    def total_bands_of(d):
+        if d not in total_bands:
+            total_bands[d] = data.band_list(d, TOTAL_SUBJECT)
+        return total_bands[d]
+
     for r in data.total_rows:
         if direction and r.direction != direction:
             continue
+        # 该生总分在各总分层的达标情况（双上线＝单科过线且总分过同名层线）
+        total_pass = {}
+        for name, lower in total_bands_of(r.direction or ''):
+            if r.score is not None and r.score >= lower:
+                total_pass[name] = True
+        is_trimmed = r.student_no in trimmed_nos
         if need_subject:
             pairs = [(s, data.subj.get((r.student_no, s))) for s in SUBJECTS]
             pairs = [(s, v) for s, v in pairs if v is not None]
@@ -192,6 +211,7 @@ def _build_records(data, need_subject, subject, direction):
                 'subject': sub, 'score': sc,
                 'pass_layers': pass_layers, 'in_layer': in_layer,
                 'lines': (data.exam.subject_lines(sub) if sub != TOTAL_SUBJECT else None),
+                'total_pass_layers': total_pass, 'trimmed': is_trimmed,
             })
     return recs, layer_names
 
@@ -207,6 +227,11 @@ def _measure(group, layer, measures):
     n = len(group)
     pop = [x for x in group if x['pass_layers'].get(layer)] if layer else group
     scores = [x['score'] for x in pop]
+    # 去差均分始终按「组内全体参考学生」去差（不随层筛选变口径），与汇报区图1/图3 一致；
+    # 故在「科目×层」表里各层列下该值相同，即该组整体去差均分
+    trim_scores = [x['score'] for x in group if not x['trimmed']]
+    # 该单元格是否含单科记录（统计口径为总分本身时双上线无意义）
+    has_subject_rec = any(x['subject'] != TOTAL_SUBJECT for x in group)
     out = {}
     for m in measures:
         if m == 'count':
@@ -219,10 +244,21 @@ def _measure(group, layer, measures):
             out[m] = min(scores) if scores else None
         elif m == 'std':
             out[m] = _stddev(scores) if scores else None
+        elif m == 'trim_avg':
+            out[m] = round(sum(trim_scores) / len(trim_scores), 1) if trim_scores else None
         elif m == 'online_n':
             out[m] = len(pop) if layer else None
         elif m == 'online_rate':
             out[m] = round(len(pop) / n * 100, 1) if (layer and n) else None
+        elif m in ('dual_n', 'dual_rate'):
+            # 双上线仅对单科有意义：单科达该科层线 且 总分达同层线；
+            # 统计口径为总分本身（组内无单科记录）时无意义，返回 None
+            if not layer or not has_subject_rec:
+                out[m] = None
+            else:
+                hit = sum(1 for x in pop
+                          if x['subject'] != TOTAL_SUBJECT and x['total_pass_layers'].get(layer))
+                out[m] = hit if m == 'dual_n' else (round(hit / n * 100, 1) if n else None)
         elif m == 'inlayer_n':
             out[m] = sum(1 for x in group if x['in_layer'] == layer) if layer else None
         elif m == 'inlayer_rate':
@@ -251,7 +287,8 @@ def pivot_table(data, row_dim, col_dim, measures, subject=TOTAL_SUBJECT, directi
     measures = [m for m in (measures or []) if m in MEASURE_LABELS]
     if not measures:
         measures = ['count']
-    need_layer = any(m in ('online_n', 'online_rate', 'inlayer_n', 'inlayer_rate')
+    need_layer = any(m in ('online_n', 'online_rate', 'dual_n', 'dual_rate',
+                           'inlayer_n', 'inlayer_rate')
                      for m in measures)
     if need_layer and DIM_LAYER not in (row_dim, col_dim):
         return {'error': '「上线/层内」类指标需要把「层」放到行或列'}

@@ -17,7 +17,7 @@ from app.models import Student
 from app.modules.grades import bp
 from app.modules.grades.services import import_service, store_service, ranking, tab_service
 from app.modules.grades.services.import_service import ParseError
-from app.modules.grades.utils import term_of_date
+from app.modules.grades.utils import term_of_date, invalidate_exam_cache
 from app.utils.decorators import perm_required
 from app.utils.helpers import log_operation
 
@@ -162,6 +162,7 @@ def score_update(exam_id, score_id):
                 store_service.refresh_student_total(Exam.query.get(exam_id), no)
             _mark_dirty(exam_id)
             db.session.commit()
+            invalidate_exam_cache(exam_id)
             flash('该科成绩已删除（视为缺考），请点击“重新计算排名”', 'warning')
             return redirect(url_for('grades.exam_detail', exam_id=exam_id))
         score = float(val)
@@ -179,6 +180,7 @@ def score_update(exam_id, score_id):
         store_service.refresh_student_total(Exam.query.get(exam_id), row.student_no)
     _mark_dirty(exam_id)
     db.session.commit()
+    invalidate_exam_cache(exam_id)
     flash('成绩已修改，请点击“重新计算排名”', 'warning')
     return redirect(url_for('grades.exam_detail', exam_id=exam_id))
 
@@ -196,6 +198,7 @@ def score_delete(exam_id, score_id):
         store_service.refresh_student_total(Exam.query.get(exam_id), no)
     _mark_dirty(exam_id)
     db.session.commit()
+    invalidate_exam_cache(exam_id)
     flash('该科成绩已删除（视为缺考），请点击“重新计算排名”', 'warning')
     return redirect(url_for('grades.exam_detail', exam_id=exam_id))
 

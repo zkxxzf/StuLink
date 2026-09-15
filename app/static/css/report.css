@@ -1,0 +1,33 @@
+/* StuLink v1.13.0 成绩汇报区 —— 对标年级汇报 PPT 的屏幕样式
+   说明：表格本体的边框/底色/对齐在 JS 中以内联 style 输出，
+   是为了框选复制粘贴进 PowerPoint/WPS 时不丢样式。 */
+.rp-section { margin-bottom: 34px; }
+
+/* PPT 标题：红色竖条 + 粗黑标题 */
+.rp-title { display: flex; align-items: center; gap: 10px; margin: 18px 0 12px; }
+.rp-title::before {
+    content: ''; display: inline-block; width: 8px; height: 26px;
+    background: #c00000;
+}
+.rp-title h6 { margin: 0; font-size: 21px; font-weight: 800; color: #222; }
+.rp-title .rp-sub { font-size: 13px; color: #888; font-weight: 400; margin-left: 6px; }
+
+.rp-toolbar { margin-bottom: 6px; }
+.rp-table-wrap { overflow-x: auto; }
+.rp-hint { color: #999; font-size: 12px; margin-top: 6px; }
+
+/* 表头里的「按此指标排名」勾选控件（屏幕交互用；复制 PPT / 打印时隐藏） */
+.rp-rank-opt { display: block; margin-top: 3px; font-weight: 400; font-size: 11px;
+    color: #444; cursor: pointer; white-space: nowrap; line-height: 1.2; }
+.rp-rank-opt input { margin: 0 2px 0 0; padding: 0; vertical-align: -2px; cursor: pointer; }
+.rp-copying .rp-rank-opt { display: none; }
+
+/* 复制成功提示 */
+.rp-copied { position: fixed; top: 20px; left: 50%; transform: translateX(-50%);
+    background: #198754; color: #fff; padding: 8px 18px; border-radius: 6px;
+    z-index: 9999; font-size: 14px; box-shadow: 0 4px 14px rgba(0,0,0,.2); }
+
+@media print {
+    .no-copy, .rp-toolbar, .rp-hint { display: none !important; }
+    .rp-section { page-break-inside: avoid; }
+}

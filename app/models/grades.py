@@ -228,6 +228,9 @@ class ExamScore(db.Model):
         db.Index('idx_scores_exam_subject_class', 'exam_id', 'subject', 'class_name'),
         db.Index('idx_scores_exam_class_subject', 'exam_id', 'class_name', 'subject'),
         db.Index('idx_scores_exam_stu', 'exam_id', 'student_no'),
+        # v1.13.2 性能：学生维度查询（查该生全部总分考试，不带 exam_id）此前全表扫描
+        # 31 万行；覆盖索引 (student_no, subject, exam_id) 让查询只走索引
+        db.Index('idx_scores_stu_subject_exam', 'student_no', 'subject', 'exam_id'),
     )
 
 
