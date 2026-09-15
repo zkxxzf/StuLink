@@ -31,6 +31,63 @@
 .empty-state { padding: 50px 20px; text-align: center; color: #64748b; }
 .empty-state .bi { font-size: 40px; color: #cbd5e1; }
 
+/* ================= AI 分析：对话 / 思维链 / 图表 ================= */
+.ai-chat {
+    display: flex; flex-direction: column; gap: 14px;
+    max-height: 52vh; overflow-y: auto; padding: 14px;
+    background: #f6f8fb; border: 1px solid #eef2f6; border-radius: 10px;
+}
+.ai-msg { display: flex; }
+.ai-msg-user { justify-content: flex-end; }
+.ai-bubble {
+    max-width: 88%; padding: 10px 14px; border-radius: 12px;
+    background: #fff; border: 1px solid #e6ebf2; font-size: 13.5px; line-height: 1.75;
+    box-shadow: 0 1px 2px rgba(15, 23, 42, .04);
+}
+.ai-msg-user .ai-bubble {
+    background: #0d6efd; color: #fff; border-color: #0d6efd;
+    white-space: pre-wrap; word-break: break-word;
+}
+.ai-bubble h4, .ai-bubble h5, .ai-bubble h6 { margin: 12px 0 6px; font-weight: 700; }
+.ai-bubble h4 { font-size: 15px; }
+.ai-bubble h5 { font-size: 14px; }
+.ai-bubble h6 { font-size: 13px; }
+.ai-bubble table { width: 100%; border-collapse: collapse; margin: 8px 0; font-size: 12.5px; }
+.ai-bubble table th, .ai-bubble table td {
+    border: 1px solid #e2e8f0; padding: 5px 8px; text-align: left;
+}
+.ai-bubble table th { background: #f1f5f9; font-weight: 600; }
+.ai-bubble ul, .ai-bubble ol { padding-left: 20px; margin: 6px 0; }
+.ai-bubble code {
+    background: #f1f5f9; padding: 1px 5px; border-radius: 4px; font-size: 12px;
+}
+.ai-bubble blockquote {
+    border-left: 3px solid #cbd5e1; margin: 8px 0; padding: 4px 10px; color: #64748b;
+}
+.ai-caret {
+    display: inline-block; width: 6px; height: 14px; margin-left: 2px;
+    background: #0d6efd; vertical-align: -2px; animation: aiBlink .9s steps(2, start) infinite;
+}
+@keyframes aiBlink { to { visibility: hidden; } }
+.ai-stage { color: #64748b; font-size: 12.5px; }
+.ai-think {
+    margin-top: 8px; border: 1px dashed #cbd5e1; border-radius: 8px;
+    background: #fbfcfe; padding: 6px 10px;
+}
+.ai-think summary {
+    cursor: pointer; color: #64748b; font-size: 12.5px; user-select: none;
+}
+.ai-think-body {
+    margin-top: 6px; max-height: 220px; overflow: auto;
+    white-space: pre-wrap; font-family: inherit; line-height: 1.6;
+}
+.ai-chart-card {
+    border: 1px solid #eef2f6; border-radius: 10px; background: #fff; padding: 10px 12px;
+    box-shadow: 0 1px 2px rgba(15, 23, 42, .04);
+}
+.ai-chart-title { font-size: 13px; font-weight: 600; color: #334155; margin-bottom: 4px; }
+.ai-chart-input textarea { resize: vertical; }
+
 /* 成绩认定证明（打印页 / 公开核验页共用，对齐纸质模板版式） */
 .cert-doc { max-width: 900px; margin: 0 auto; background: #fff; }
 .cert-doc .cert-school { text-align: center; font-size: 1.35rem; font-weight: 700; letter-spacing: 6px; }

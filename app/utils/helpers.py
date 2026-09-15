@@ -186,6 +186,44 @@ def get_school_name():
     return DEFAULT_SCHOOL_NAME
 
 
+# ---- 选科组合 ----
+
+# 3+1+2 共 12 种组合，物理方向在前、历史方向在后（与字典表 subject 保持一致）
+SUBJECT_COMBINATIONS = [
+    '物化生', '物化地', '物化政', '物生地', '物生政', '物地政',
+    '史化生', '史化地', '史化政', '史生地', '史生政', '史地政',
+]
+# 旧写法 → 新写法（统一为「X地政」顺序，避免同义异写）
+SUBJECT_RENAMES = {
+    '物政地': '物地政',
+    '史政地': '史地政',
+}
+
+
+def subject_direction(subject):
+    """选科组合所属方向：physics（物理）/ history（历史）/ 空"""
+    if not subject:
+        return ''
+    if subject.startswith('物'):
+        return 'physics'
+    if subject.startswith('史'):
+        return 'history'
+    return ''
+
+
+def subject_badge_class(subject):
+    """选科标签的配色 class（物理方向 / 历史方向分色）"""
+    d = subject_direction(subject)
+    return f'subj-{d}' if d else ''
+
+
+def normalize_subject(subject):
+    """把旧写法（如 史政地）规范为新写法（史地政）"""
+    if not subject:
+        return subject
+    return SUBJECT_RENAMES.get(subject.strip(), subject.strip())
+
+
 def set_school_name(value, user_id=None):
     """保存学校名称到数据库"""
     from app.extensions import db

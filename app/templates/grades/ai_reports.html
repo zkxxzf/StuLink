@@ -39,9 +39,62 @@
 </div>
 {% endblock %}
 {% block extra_js %}
+<script src="{{ url_for('static', filename='js/echarts.min.js') }}"></script>
 <script src="{{ url_for('static', filename='js/grades_md.js') }}"></script>
 <script>
 $(function(){
+    // 报告随附图表（本地统计，与报告一起固化）
+    var CHART_PALETTE = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#06b6d4'];
+    function renderCharts(container, charts){
+        if(!charts || typeof echarts === 'undefined') return;
+        var specs = [];
+        var sb = charts.score_bands || {};
+        if((sb.values || []).length) specs.push(['sb','总分分数段分布','bar',sb.labels,sb.values,'人数']);
+        var ca = charts.class_avg || {};
+        if((ca.values || []).length) specs.push(['ca','各班总分均分','bar',ca.labels,ca.values,'均分']);
+        var sa = charts.subject_avg || {};
+        if((sa.values || []).length) specs.push(['sa','各学科均分','bar',sa.labels,sa.values,'均分']);
+        var md = charts.move_dist || {};
+        if((md.values || []).some(function(v){ return v > 0; }))
+            specs.push(['md','进退步分布','pie',md.labels,md.values,'人数']);
+        var cp = charts.compare || {};
+        if((cp.values || []).length === 2)
+            specs.push(['cp','本次 vs 上次 均分','bar',cp.labels,cp.values,'均分']);
+        if(!specs.length) return;
+        var html = '<div class="row g-3 mb-3">';
+        specs.forEach(function(s){
+            html += '<div class="col-md-6"><div class="ai-chart-card"><div class="ai-chart-title">'
+                + s[1] + '</div><div id="repChart_' + s[0] + '" style="height:240px;"></div></div></div>';
+        });
+        html += '</div>';
+        $(container).html(html);
+        specs.forEach(function(s){
+            var el = document.getElementById('repChart_' + s[0]);
+            if(!el) return;
+            var chart = echarts.init(el);
+            var opt;
+            if(s[2] === 'pie'){
+                opt = {tooltip:{trigger:'item'}, color: CHART_PALETTE,
+                    legend:{bottom:0, itemWidth:10, itemHeight:10, textStyle:{fontSize:11}},
+                    series:[{type:'pie', radius:['40%','65%'], center:['50%','45%'],
+                        label:{formatter:'{b}\n{c}人', fontSize:11},
+                        data:s[3].map(function(k,i){ return {name:k, value:s[4][i]}; })
+                               .filter(function(x){ return x.value > 0; })}]};
+            }else{
+                opt = {tooltip:{trigger:'axis', axisPointer:{type:'shadow'}},
+                    grid:{left:8, right:12, top:24, bottom:24, containLabel:true},
+                    xAxis:{type:'category', data:s[3],
+                        axisLabel:{fontSize:10, interval:0, rotate:(s[3].length > 8 ? 30 : 0)}},
+                    yAxis:{type:'value', name:s[5], nameTextStyle:{fontSize:10}},
+                    series:[{type:'bar', data:s[4], barMaxWidth:28,
+                        itemStyle:{color:CHART_PALETTE[0], borderRadius:[4,4,0,0]},
+                        label:{show:true, position:'top', fontSize:10}}]};
+            }
+            chart.setOption(opt);
+            window.addEventListener('resize', function(){ chart.resize(); });
+        });
+    }
+
     function loadList(){
         $.getJSON('/grades/ai/reports/list', function(res){
             var $tb = $('#aiListBody').empty();
@@ -77,9 +130,11 @@ $(function(){
                 .append('<div class="text-muted small mb-2">' + (d.scope_desc || '') +
                     ' · ' + (d.scope_students || 0) + ' 人 · ' + (d.operator || '') +
                     ' · ' + (d.created_at || '') + '</div>')
+                .append('<div id="aiDetailCharts"></div>')
                 .append('<div class="ai-report-content">' + renderGradeMd(d.content) + '</div>')
                 .append('<div class="alert alert-light border small mt-3 mb-0">' +
                     '<i class="bi bi-info-circle"></i> 本报告由 AI 生成，仅供参考，不代表学校评价结论。</div>');
+            renderCharts('#aiDetailCharts', d.charts);
             window.scrollTo({top: document.body.scrollHeight, behavior: 'smooth'});
         });
     });

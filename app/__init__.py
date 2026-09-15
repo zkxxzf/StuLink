@@ -11,8 +11,9 @@ DICT_DATA = {
     'class': ('班级', ['01班', '02班', '03班', '04班', '05班', '06班', '07班',
                        '08班', '09班', '10班', '不分班', '已转出', '离校']),
     'gender': ('性别', ['男', '女']),
-    'subject': ('选科', ['物化生', '物化政', '物化地', '物生政', '物生地', '物政地',
-                         '史政地', '史生地', '史生政', '史化生', '史化政', '史化地']),
+    # 选科组合（3+1+2 共 12 种）：物理方向 6 种 + 历史方向 6 种，按此顺序展示
+    'subject': ('选科', ['物化生', '物化地', '物化政', '物生地', '物生政', '物地政',
+                         '史化生', '史化地', '史化政', '史生地', '史生政', '史地政']),
     'boarding_type': ('走读/住校', ['住校', '走读', '离校']),
     'subject_direction': ('选科方向', ['物理', '历史']),
     'class_type': ('班型', ['强基班', '卓越班']),
@@ -210,6 +211,13 @@ def create_app():
     app.config.from_object(Config)
     
     app.jinja_env.auto_reload = app.config.get('TEMPLATES_AUTO_RELOAD', False)
+    # 模板全局函数：选科方向判断与配色
+    from app.utils.helpers import subject_direction, subject_badge_class, normalize_subject
+    app.jinja_env.globals.update(
+        subject_direction=subject_direction,
+        subject_badge_class=subject_badge_class,
+        normalize_subject=normalize_subject,
+    )
 
     db.init_app(app)
     login_manager.init_app(app)
@@ -219,7 +227,7 @@ def create_app():
     from app.models import OperationLog, PermissionGroup, ClassProfile, GradeSetting, UserClassLink, AssignmentHistory
     from app.models.grades import (Exam, ExamScore, ExamBand, BandTemplate,
                                    TeacherSubjectLink, AiKey,
-                                   AiGlobalKey, AiReport, Certificate)
+                                   AiGlobalKey, AiReport, AiChatMessage, Certificate)
     with app.app_context():
         db.create_all()
         
