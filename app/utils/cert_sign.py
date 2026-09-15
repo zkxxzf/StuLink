@@ -14,6 +14,28 @@ _KEY_LEN = 32          # 密钥 32 字节 → 64 位 hex
 NONCE_LEN = 8          # 随机码长度（大写 base36 字符）
 SIG_LEN = 16           # 防伪码中保留的签名段长度
 
+# v1.12.5 快照加密：content_json 落库前整体 AES 加密，加此前缀区分密文/明文（旧数据）
+_ENC_PREFIX = 'enc::'
+
+
+def store_content(plaintext_json):
+    """把明文快照 JSON 加密为落库字符串（带 enc:: 前缀，空值原样返回）。"""
+    if not plaintext_json:
+        return plaintext_json
+    return _ENC_PREFIX + encrypt_rand(plaintext_json)
+
+
+def load_content(stored):
+    """把落库字符串还原为明文快照 JSON。
+    - 带 enc:: 前缀 → 解密（新数据）
+    - 无前缀 → 原样返回（v1.12.5 之前的明文旧数据，向后兼容）
+    """
+    if not stored:
+        return stored
+    if stored.startswith(_ENC_PREFIX):
+        return decrypt(stored[len(_ENC_PREFIX):])
+    return stored
+
 
 def get_signing_key():
     """取签名密钥（bytes）：库中无则自动生成并落库（并发下唯一约束兜底）。"""
@@ -71,10 +93,12 @@ def verify(cert, content_json=None):
     """校验记录签名是否可信：
     - 旧数据（无 nonce/sig）视为通过（向后兼容，核验页提示为早期版本码）
     - 快照被改、学号/随机码/签名任一不符 → False
+    签名绑定的是明文快照，故先解密落库内容再验签（v1.12.5 快照加密）。
     """
     if not getattr(cert, 'nonce', None) or not getattr(cert, 'sig', None):
         return True
     content = cert.content_json if content_json is None else content_json
+    content = load_content(content)
     return hmac.compare_digest(sign(cert.student_no, cert.nonce, content), cert.sig)
 
 

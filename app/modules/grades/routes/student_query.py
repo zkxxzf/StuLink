@@ -57,7 +57,8 @@ def cert_print(code):
     cert = Certificate.query.filter_by(code=code).first()
     if not cert:
         abort(404)
-    content = json.loads(cert.content_json or '{}')
+    from app.utils.cert_sign import load_content
+    content = json.loads(load_content(cert.content_json) or '{}')
     return render_template('grades/cert_print.html', cert=cert, content=content)
 
 
@@ -65,7 +66,7 @@ def cert_print(code):
 def cert_verify(code):
     """成绩证明公开核验页（无需登录）：验真伪 + 可作废提示。
     v1.12.2 加密防伪码：先做 HMAC 验签（密钥+学号+随机码+内容哈希），签名不符即判为伪造/篡改。"""
-    from app.utils.cert_sign import verify, is_legacy
+    from app.utils.cert_sign import verify, is_legacy, load_content
 
     # 免登录端点，做简单的按 IP 限流，避免被批量探测刷库（60 秒内最多 30 次）
     from app.utils.cache import cache
@@ -79,7 +80,7 @@ def cert_verify(code):
         abort(429, description='核验请求过于频繁，请稍后再试')
 
     cert = Certificate.query.filter_by(code=code).first()
-    content = json.loads(cert.content_json or '{}') if cert else None
+    content = json.loads(load_content(cert.content_json) or '{}') if cert else None
     sig_ok = verify(cert) if cert else False
     return render_template('grades/cert_verify.html', cert=cert, content=content,
                            sig_ok=sig_ok, legacy=cert is not None and is_legacy(cert))
@@ -219,7 +220,8 @@ def api_create_cert():
     result['cert_note'] = note or student_service.DEFAULT_CERT_NOTE
     content_json = json.dumps(result, ensure_ascii=False)
     # v1.12.2 加密防伪码：SL+日期+随机码+HMAC(密钥, 学号|随机码|内容哈希)；随机码/签名随记录落库
-    from app.utils.cert_sign import make_code
+    # v1.12.5 快照整体 AES 加密落库（含身份证号等敏感字段），签名仍绑定明文快照，读取时解密
+    from app.utils.cert_sign import make_code, store_content
     code, nonce, sig = make_code(basic['no'], content_json)
     # 范围摘要优先用矩阵实际纳入的考试名（自选口径），否则沿用单场说明
     names = (result.get('cert_matrix') or {}).get('exam_names') or []
@@ -234,7 +236,7 @@ def api_create_cert():
         exam_ids=json.dumps((result.get('cert_matrix') or {}).get('exam_ids')
                             or [e['id'] for e in result['exams']]),
         generated_by=current_user.id, generated_at=datetime.now(),
-        nonce=nonce, sig=sig, content_json=content_json,
+        nonce=nonce, sig=sig, content_json=store_content(content_json),
     )
     from app.extensions import db
     db.session.add(cert)
