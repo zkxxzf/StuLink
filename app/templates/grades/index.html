@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {% block title %}成绩分析{% endblock %}
 {% block extra_css_head %}
-<link href="{{ url_for('static', filename='css/grades.css') }}" rel="stylesheet">
+<link href="{{ su('css/grades.css') }}" rel="stylesheet">
 {% endblock %}
 {% block content %}
 <div id="gradeApp" class="no-print d-flex flex-wrap gap-2 align-items-center mb-3 g-filter-bar">
@@ -62,7 +62,7 @@
 <span id="aiCanGlobal" class="d-none">{{ '1' if (current_user.role == 'admin' or current_user.has_perm('system.users')) else '0' }}</span>
 {% endblock %}
 {% block extra_js %}
-<script src="{{ url_for('static', filename='js/echarts.min.js') }}"></script>
-<script src="{{ url_for('static', filename='js/grades_md.js', v=asset_v) }}"></script>
-<script src="{{ url_for('static', filename='js/grades.js', v=asset_v) }}"></script>
+<script src="{{ su('js/echarts.min.js') }}"></script>
+<script src="{{ su('js/grades_md.js') }}"></script>
+<script src="{{ su('js/grades.js') }}"></script>
 {% endblock %}

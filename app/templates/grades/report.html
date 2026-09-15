@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {% block title %}成绩汇报区{% endblock %}
 {% block extra_css_head %}
-<link href="{{ url_for('static', filename='css/report.css', v=asset_v) }}" rel="stylesheet">
+<link href="{{ su('css/report.css') }}" rel="stylesheet">
 {% endblock %}
 {% block content %}
 <div class="container-fluid py-3" id="reportApp" data-exam-id="{{ request.args.get('exam_id', '') }}">
@@ -39,7 +39,7 @@
 {% endblock %}
 {# 脚本必须放在 jQuery 之后（extra_js 位于 base.html 底部 jQuery 引入之后），否则顶层 $ 报错 #}
 {% block extra_js %}
-<script src="{{ url_for('static', filename='js/report.js', v=asset_v) }}"></script>
-<script src="{{ url_for('static', filename='js/report_pivot.js', v=asset_v) }}"></script>
-<script src="{{ url_for('static', filename='js/report_warning.js', v=asset_v) }}"></script>
+<script src="{{ su('js/report.js') }}"></script>
+<script src="{{ su('js/report_pivot.js') }}"></script>
+<script src="{{ su('js/report_warning.js') }}"></script>
 {% endblock %}

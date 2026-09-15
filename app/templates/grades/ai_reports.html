@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {% block title %}AI 报告历史 - 成绩管理{% endblock %}
 {% block extra_css_head %}
-<link href="{{ url_for('static', filename='css/grades.css') }}" rel="stylesheet">
+<link href="{{ su('css/grades.css') }}" rel="stylesheet">
 {% endblock %}
 {% block content %}
 <div class="d-flex align-items-center mb-3 flex-wrap gap-2">
@@ -39,8 +39,8 @@
 </div>
 {% endblock %}
 {% block extra_js %}
-<script src="{{ url_for('static', filename='js/echarts.min.js') }}"></script>
-<script src="{{ url_for('static', filename='js/grades_md.js') }}"></script>
+<script src="{{ su('js/echarts.min.js') }}"></script>
+<script src="{{ su('js/grades_md.js') }}"></script>
 <script>
 $(function(){
     // 报告随附图表（本地统计，与报告一起固化）

@@ -117,7 +117,7 @@ def _band_counts(data, direction, subject, bands):
 @perm_required('grades.settings')
 def bands_page(exam_id):
     exam = Exam.query.get_or_404(exam_id)
-    data = st.ExamData(exam_id)
+    data = st.cached_exam_data(exam_id)
     # 选科后为 ['物理','历史']；选科前无方向 → ['']（空串=全体，不分方向）
     directions = data.directions or ['']
     # 各组实际开考学科（矩阵列）：四选二导致同方向学生选科不同，取并集
@@ -144,7 +144,7 @@ def _bands_payload(exam_id, direction, subject, data=None):
     if not real:
         real = rows
     bands = [(r.name, r.lower_value) for r in real]
-    data = data or st.ExamData(exam_id)
+    data = data or st.cached_exam_data(exam_id)
     counts, total = _band_counts(data, direction, subject, bands)
     # 比例模式预览：排序一次复用，避免每层都重排全量分数
     sorted_desc = None
@@ -190,7 +190,7 @@ def bands_matrix():
     """
     exam_id = request.args.get('exam_id', type=int)
     Exam.query.get_or_404(exam_id)
-    data = st.ExamData(exam_id)
+    data = st.cached_exam_data(exam_id)
     directions = data.directions or ['']
     out = {}
     for d in directions:

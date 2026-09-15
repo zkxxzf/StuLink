@@ -4,6 +4,7 @@
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 import math
 import statistics
+import threading
 import time
 from collections import OrderedDict
 
@@ -27,23 +28,27 @@ def _stddev(values):
 _EXAM_DATA_TTL = 900
 _EXAM_DATA_MAX = 3
 _exam_data_cache = OrderedDict()
+# waitress 多线程下 OrderedDict 的 move_to_end/popitem 非原子，需锁保护；
+# 构建（全量拉取，耗时）也在锁内，配合双重检查使并发冷启动只算一次。
+_exam_data_lock = threading.Lock()
 
 
 def cached_exam_data(exam_id):
-    """取共享 ExamData；过期/超限自动重建。并发下最多多算一次，无正确性影响。
+    """取共享 ExamData；过期/超限自动重建。
     构造后把涉及的 ORM 实例 expunge 出会话：后续请求的 commit/teardown 不会使其过期，
     共享实例只读列值始终可用（惰性属性 band_list/prev_totals 走类级查询，同样安全）。"""
-    ent = _exam_data_cache.get(exam_id)
     now = time.time()
-    if ent and now - ent[0] < _EXAM_DATA_TTL:
-        _exam_data_cache.move_to_end(exam_id)
-        return ent[1]
-    data = ExamData(exam_id)
-    _detach_shared(data)
-    _exam_data_cache[exam_id] = (now, data)
-    while len(_exam_data_cache) > _EXAM_DATA_MAX:
-        _exam_data_cache.popitem(last=False)
-    return data
+    with _exam_data_lock:
+        ent = _exam_data_cache.get(exam_id)
+        if ent and now - ent[0] < _EXAM_DATA_TTL:
+            _exam_data_cache.move_to_end(exam_id)
+            return ent[1]
+        data = ExamData(exam_id)
+        _detach_shared(data)
+        _exam_data_cache[exam_id] = (time.time(), data)
+        while len(_exam_data_cache) > _EXAM_DATA_MAX:
+            _exam_data_cache.popitem(last=False)
+        return data
 
 
 def _detach_shared(data):

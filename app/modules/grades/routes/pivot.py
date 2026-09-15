@@ -9,7 +9,7 @@ from app.models import DictCategory
 from app.modules.grades import bp
 from app.modules.grades.services import pivot_service as pv
 from app.modules.grades.services import scope as scope_service
-from app.modules.grades.services.stats_service import ExamData
+from app.modules.grades.services.stats_service import cached_exam_data
 from app.utils.decorators import perm_required
 
 
@@ -65,7 +65,7 @@ def api_pivot():
     except PermissionError:
         abort(403)
 
-    data = ExamData(exam_id)
+    data = cached_exam_data(exam_id)
     if not data.total_rows:
         return jsonify(success=False, message='该考试尚未导入成绩')
     res = pv.pivot_table(data, row_dim, col_dim, measures,

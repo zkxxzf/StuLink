@@ -146,8 +146,11 @@ def student_exams(student_no, grade, term='', exam_type='', date_from='', date_t
     if dt:
         q = q.filter(Exam.exam_date <= dt)
     exams = q.order_by(Exam.exam_date.asc(), Exam.id.asc()).all()
-    have = {r.exam_id for r in
-            ExamScore.query.filter_by(student_no=student_no, subject=TOTAL_SUBJECT).all()}
+    # v1.13.2 性能：只取 exam_id 列（覆盖索引 idx_scores_stu_subject_exam），
+    # 不再实例化该生全部总分 ExamScore ORM 对象
+    have = {r[0] for r in
+            ExamScore.query.filter_by(student_no=student_no, subject=TOTAL_SUBJECT)
+            .with_entities(ExamScore.exam_id).all()}
     return [e for e in exams if e.id in have]
 
 
@@ -230,7 +233,8 @@ def build_data(user, student_no, filters):
 
     # ---- 选定单场：科目明细 + 对比 ----
     sel_exam = Exam.query.get(sel_id)
-    data = st.ExamData(sel_id)
+    # v1.13.2 性能：走共享缓存，不再每次查询全量重建 ExamData（压测 P95 4.2s 的根因）
+    data = st.cached_exam_data(sel_id)
     fm = data.full_marks()
     tr = student_total.get(sel_id)
     cls_name = tr.class_name if tr else ''
