@@ -21,6 +21,7 @@ config_mod.Config.SQLALCHEMY_BINDS = {
     'dormitory': 'sqlite:///' + os.path.join(_TMP, 'dormitory.db'),
     'history': 'sqlite:///' + os.path.join(_TMP, 'history.db'),
     'grades': 'sqlite:///' + os.path.join(_TMP, 'grades.db'),
+    'points': 'sqlite:///' + os.path.join(_TMP, 'points.db'),
 }
 # config._get_secret_key 基于 BASE_DIR 读取密钥文件，临时目录下会自动生成
 config_mod.Config.SECRET_KEY = 'smoke-test-secret'
