@@ -1,0 +1,47 @@
+{% extends "base.html" %}
+{% block title %}学生画像{% endblock %}
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+    <h4 class="fw-bold mb-0">
+        <i class="bi bi-person-bounding-box"></i> 学生画像
+        <span class="badge bg-secondary ms-2">规划中</span>
+    </h4>
+</div>
+
+<div class="card">
+    <div class="card-body text-center py-5 text-muted">
+        <i class="bi bi-person-bounding-box" style="font-size:48px;"></i>
+        <h5 class="mt-3 text-dark">学生画像模块建设中</h5>
+        <p class="mb-4">独立数据库（portrait.db）已就绪，功能将在后续版本逐步开放。</p>
+
+        <div class="row justify-content-center g-3" style="max-width:760px;margin:0 auto;">
+            <div class="col-md-4">
+                <div class="border rounded p-3 h-100">
+                    <i class="bi bi-graph-up-arrow" style="font-size:24px;"></i>
+                    <div class="fw-bold text-dark mt-2">学习画像</div>
+                    <small>成绩趋势 · 学科均衡 · 进退步分析</small>
+                </div>
+            </div>
+            <div class="col-md-4">
+                <div class="border rounded p-3 h-100">
+                    <i class="bi bi-activity" style="font-size:24px;"></i>
+                    <div class="fw-bold text-dark mt-2">行为画像</div>
+                    <small>积分表现 · 宿舍行为 · 综合表现</small>
+                </div>
+            </div>
+            <div class="col-md-4">
+                <div class="border rounded p-3 h-100">
+                    <i class="bi bi-journal-bookmark" style="font-size:24px;"></i>
+                    <div class="fw-bold text-dark mt-2">成长档案</div>
+                    <small>荣誉记录 · 教师评语 · 关键事件</small>
+                </div>
+            </div>
+        </div>
+
+        <p class="small mb-0 mt-4">
+            <i class="bi bi-info-circle"></i>
+            画像数据将按学号从各模块（成绩 / 积分 / 宿舍）只读汇聚，不改变各模块独立存储的设计。
+        </p>
+    </div>
+</div>
+{% endblock %}

@@ -91,6 +91,7 @@ PERMISSION_GROUPS = [
             'points.view', 'points.edit',
             'grades.view', 'grades.edit',
             'grades.import', 'grades.settings', 'grades.teachers', 'grades.student_query',
+            'academic.view',
         ],
     },
     {
@@ -228,8 +229,19 @@ def create_app():
     from app.models.grades import (Exam, ExamScore, ExamBand, BandTemplate,
                                    TeacherSubjectLink, AiKey,
                                    AiGlobalKey, AiReport, AiChatMessage, Certificate)
+    from app.models.academic import (Teacher, Timetable, TimetableEntry,
+                                     InspectionRecord, TeacherAchievement)
+    from app.models.portrait import StudentProfile  # noqa: F401 占位模块注册
     with app.app_context():
-        db.create_all()
+        # v1.15.0 模块故障隔离：逐库建表，单个模块库异常不阻塞系统启动。
+        # system 为根基库最先建；其他模块库失败仅告警（对应模块暂不可用），
+        # 系统管理与基础数据不受影响。
+        for _bind in (None, 'dormitory', 'history', 'grades', 'points',
+                      'academic', 'portrait'):
+            try:
+                db.create_all(bind_key=_bind)
+            except Exception as _e:  # noqa: BLE001
+                print(f'[WARN] 数据库 {_bind or "system"} 初始化失败（该模块暂不可用）：{_e}')
         
         if not User.query.filter_by(username='admin').first():
             admin = User(username='admin', real_name='系统管理员', role='admin', must_change_pwd=False)

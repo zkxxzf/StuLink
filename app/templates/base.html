@@ -254,6 +254,36 @@
             </a>
             {% endif %}
             {% endif %}
+
+            {# ========= 教务管理模块侧边栏（v1.14.0） ========= #}
+            {% if request.blueprint == 'academic' and current_user.has_perm('academic.view') %}
+            <div class="nav-section">教务管理</div>
+            <a class="nav-link {% if request.endpoint == 'academic.teachers_page' %}active{% endif %}"
+               href="{{ url_for('academic.teachers_page') }}">
+                <i class="bi bi-person-vcard"></i>教师名单
+            </a>
+            <a class="nav-link {% if request.endpoint == 'academic.timetable_page' %}active{% endif %}"
+               href="{{ url_for('academic.timetable_page') }}">
+                <i class="bi bi-calendar3"></i>课表
+            </a>
+            <a class="nav-link {% if request.endpoint == 'academic.inspection_page' %}active{% endif %}"
+               href="{{ url_for('academic.inspection_page') }}">
+                <i class="bi bi-clipboard2-check"></i>查课统计
+            </a>
+            <a class="nav-link {% if request.endpoint == 'academic.achievements_page' %}active{% endif %}"
+               href="{{ url_for('academic.achievements_page') }}">
+                <i class="bi bi-award"></i>教师业绩库
+            </a>
+            {% endif %}
+
+            {# ========= 教师工作台入口（所有登录教师可见） ========= #}
+            {% if request.blueprint in ('academic', 'workbench') %}
+            <div class="nav-section">个人工作</div>
+            <a class="nav-link {% if request.endpoint == 'workbench.index' %}active{% endif %}"
+               href="{{ url_for('workbench.index') }}">
+                <i class="bi bi-person-workspace"></i>教师工作台
+            </a>
+            {% endif %}
         </nav>
     </div>
     {% endif %}
@@ -277,7 +307,7 @@
 
         {% if current_user.is_authenticated %}
         <footer class="text-center text-muted small mt-4 pt-3 border-top">
-            StuLink v1.9.1（2026-09-14） · © 2026 @zkxxzf · 感谢协作开发 @Sakaay
+            StuLink v1.9.2（2026-09-16） · © 2026 @zkxxzf · 感谢协作开发 @Sakaay
         </footer>
         {% endif %}
     </div>

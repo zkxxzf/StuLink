@@ -1,4 +1,4 @@
-# StuLink v1.9.1 2026-09-14
+# StuLink v1.9.2 2026-09-16
 # 积分管理：单页记录（独立库 points.db）+ 范围权限过滤
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 from datetime import date, datetime

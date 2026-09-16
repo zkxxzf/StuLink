@@ -1,0 +1,243 @@
+{% extends "base.html" %}
+{% block title %}教师工作台{% endblock %}
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
+    <h4 class="fw-bold mb-0"><i class="bi bi-person-workspace"></i> 教师工作台</h4>
+    <span class="text-muted small">{{ today.strftime('%Y-%m-%d') }} {{ weekday_names[today.isoweekday() - 1] }}</span>
+</div>
+
+{% if not teacher %}
+<div class="alert alert-warning">
+    <i class="bi bi-exclamation-triangle"></i>
+    当前账号（{{ current_user.real_name }}）尚未关联教务教师名单，暂时无法展示个人课表与业绩。
+    请联系管理员在「教务管理 - 教师名单」中导入名单并关联本账号。
+</div>
+{% else %}
+
+<div class="row g-3 mb-3">
+    <div class="col-lg-5">
+        <div class="card h-100">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <span><i class="bi bi-person-badge"></i> 我的信息</span>
+                <button class="btn btn-sm btn-outline-primary" data-bs-toggle="modal" data-bs-target="#phoneModal">
+                    <i class="bi bi-phone"></i> 修改手机号
+                </button>
+            </div>
+            <div class="card-body small">
+                <div class="row">
+                    <div class="col-6 mb-2"><span class="text-muted">姓名：</span><span class="fw-bold">{{ teacher.name }}</span></div>
+                    <div class="col-6 mb-2"><span class="text-muted">教师编号：</span><code>{{ teacher.teacher_uid }}</code></div>
+                    <div class="col-6 mb-2"><span class="text-muted">任教学科：</span>{{ teacher.subject or '-' }}</div>
+                    <div class="col-6 mb-2"><span class="text-muted">身份：</span>{{ current_user.role_display }}</div>
+                    <div class="col-6 mb-2"><span class="text-muted">手机号：</span>{{ teacher.phone or '-' }}</div>
+                    <div class="col-6 mb-2">
+                        <span class="text-muted">身份证：</span>
+                        {% if teacher.id_card_enc %}<span class="text-success">已录入</span>
+                        {% else %}<span class="text-warning">未录入（请联系管理员补录）</span>{% endif %}
+                    </div>
+                </div>
+                <div class="text-muted mt-1">
+                    <i class="bi bi-info-circle"></i> 手机号即登录账号，修改后请使用新手机号登录；身份证信息本人不可修改，仅管理员可更新。
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="col-lg-7">
+        <div class="card h-100">
+            <div class="card-header"><i class="bi bi-alarm"></i> 今日课程</div>
+            <div class="card-body">
+                {% if today_entries %}
+                <div class="d-flex flex-wrap gap-2">
+                    {% for e in today_entries %}
+                    <div class="border rounded px-3 py-2">
+                        <div class="fw-bold">第 {{ e.period }} 节 · {{ e.subject or '—' }}</div>
+                        <div class="text-muted small">{{ e.class_name or '' }} {{ e.room or '' }}</div>
+                    </div>
+                    {% endfor %}
+                </div>
+                {% else %}
+                <div class="text-muted text-center py-4">
+                    <i class="bi bi-cup-hot" style="font-size:32px;"></i>
+                    <p class="mb-0 mt-2">今天暂无课程安排</p>
+                    <p class="small mb-0">（课表数据接入后将自动展示每日课程）</p>
+                </div>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="row g-3 mb-3">
+    <div class="col-lg-7">
+        <div class="card h-100">
+            <div class="card-header"><i class="bi bi-calendar3"></i> 我的课表</div>
+            <div class="card-body">
+                {% if entries %}
+                {% for wd in range(1, 8) %}
+                {% set day_items = entries | selectattr('weekday', 'equalto', wd) | list %}
+                {% if day_items %}
+                <div class="mb-2">
+                    <span class="badge bg-light text-dark border">{{ weekday_names[wd - 1] }}</span>
+                    {% for e in day_items %}
+                    <span class="badge bg-white text-dark border me-1">
+                        第{{ e.period }}节 {{ e.subject or '—' }} {{ e.class_name or '' }}
+                    </span>
+                    {% endfor %}
+                </div>
+                {% endif %}
+                {% endfor %}
+                {% else %}
+                <div class="text-muted text-center py-4">
+                    <i class="bi bi-calendar-x" style="font-size:32px;"></i>
+                    <p class="mb-0 mt-2">暂无课表数据</p>
+                    <p class="small mb-0">（课表导入功能将在后续版本开放）</p>
+                </div>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+
+    <div class="col-lg-5">
+        <div class="card h-100">
+            <div class="card-header"><i class="bi bi-clipboard-check"></i> 班主任工作记录</div>
+            <div class="card-body text-muted text-center py-4">
+                {% if is_head %}
+                <i class="bi bi-journal-text" style="font-size:32px;"></i>
+                <p class="mb-0 mt-2">班主任工作记录功能建设中</p>
+                <p class="small mb-0">后续将支持班会记录、家访记录、学生谈话等</p>
+                {% else %}
+                <i class="bi bi-lock" style="font-size:32px;"></i>
+                <p class="mb-0 mt-2">仅班主任可见</p>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="card">
+    <div class="card-header d-flex justify-content-between align-items-center">
+        <span><i class="bi bi-award"></i> 我的业绩（{{ achievements|length }}）</span>
+        <button class="btn btn-sm btn-primary" data-bs-toggle="modal" data-bs-target="#achModal">
+            <i class="bi bi-plus-lg"></i> 提交业绩
+        </button>
+    </div>
+    <div class="table-responsive">
+        <table class="table table-hover table-sm align-middle mb-0">
+            <thead class="table-light">
+                <tr><th>类别</th><th>名称</th><th>级别</th><th>取得时间</th><th>状态</th></tr>
+            </thead>
+            <tbody>
+                {% for a in achievements %}
+                <tr>
+                    <td>
+                        {% for k, label in categories %}
+                        {% if a.category == k %}<span class="badge bg-info text-dark">{{ label }}</span>{% endif %}
+                        {% endfor %}
+                    </td>
+                    <td>{{ a.title }}</td>
+                    <td>{{ a.level or '-' }}</td>
+                    <td>{{ a.obtain_date.strftime('%Y-%m-%d') if a.obtain_date else '-' }}</td>
+                    <td>
+                        <span class="badge bg-{% if a.status == 'approved' %}success{% elif a.status == 'pending' %}warning text-dark{% else %}danger{% endif %}">
+                            {{ status_map.get(a.status, a.status) }}
+                        </span>
+                    </td>
+                </tr>
+                {% else %}
+                <tr><td colspan="5" class="text-center text-muted py-4">暂无业绩记录，点击右上角提交</td></tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<!-- 修改手机号 -->
+<div class="modal fade" id="phoneModal" tabindex="-1">
+    <div class="modal-dialog modal-sm">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">修改手机号</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <form method="POST" action="{{ url_for('workbench.change_phone') }}">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <div class="modal-body">
+                    <div class="mb-3">
+                        <label class="form-label">新手机号</label>
+                        <input name="new_phone" class="form-control" maxlength="11"
+                               value="{{ teacher.phone or '' }}" required>
+                    </div>
+                    <div class="mb-2">
+                        <label class="form-label">当前密码（确认身份）</label>
+                        <input type="password" name="current_password" class="form-control" required>
+                    </div>
+                    <div class="form-text">修改后手机号即为新登录账号，请使用新手机号登录。</div>
+                </div>
+                <div class="modal-footer">
+                    <button type="submit" class="btn btn-primary">确认修改</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<!-- 提交业绩 -->
+<div class="modal fade" id="achModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">提交业绩</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <form method="POST" action="{{ url_for('workbench.achievement_add') }}">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <div class="modal-body">
+                    <div class="row">
+                        <div class="col-6 mb-3">
+                            <label class="form-label">类别 <span class="text-danger">*</span></label>
+                            <select name="category" class="form-select" required>
+                                {% for k, label in categories %}
+                                <option value="{{ k }}">{{ label }}</option>
+                                {% endfor %}
+                            </select>
+                        </div>
+                        <div class="col-6 mb-3">
+                            <label class="form-label">级别</label>
+                            <select name="level" class="form-select">
+                                <option value="">--</option>
+                                {% for lv in levels %}
+                                <option value="{{ lv }}">{{ lv }}</option>
+                                {% endfor %}
+                            </select>
+                        </div>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">名称 <span class="text-danger">*</span></label>
+                        <input name="title" class="form-control" maxlength="100" required>
+                    </div>
+                    <div class="row">
+                        <div class="col-6 mb-3">
+                            <label class="form-label">取得时间</label>
+                            <input type="date" name="obtain_date" class="form-control">
+                        </div>
+                        <div class="col-6 mb-3">
+                            <label class="form-label">颁发单位</label>
+                            <input name="issuer" class="form-control" maxlength="100">
+                        </div>
+                    </div>
+                    <div class="mb-2">
+                        <label class="form-label">备注</label>
+                        <input name="note" class="form-control" maxlength="200">
+                    </div>
+                    <div class="form-text">提交后由教务审核，通过后计入业绩库（证书扫描件上传功能后续开放）。</div>
+                </div>
+                <div class="modal-footer">
+                    <button type="submit" class="btn btn-primary">提交</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+{% endif %}
+{% endblock %}

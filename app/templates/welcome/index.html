@@ -8,60 +8,98 @@
 </div>
 
 <div class="row g-4 justify-content-center" style="max-width:960px;margin:0 auto;">
-    <!-- 宿舍管理 -->
+    <!-- 1. 教师工作台 -->
     <div class="col-md-4">
-        <a href="{{ url_for('dashboard.index') }}" class="card h-100 text-center shadow-sm text-decoration-none" style="transition:transform .15s;" onmouseover="this.style.transform='translateY(-4px)'" onmouseout="this.style.transform=''">
+        <a href="{{ url_for('workbench.index') }}" class="card h-100 text-center shadow-sm text-decoration-none" style="transition:transform .15s;" onmouseover="this.style.transform='translateY(-4px)'" onmouseout="this.style.transform=''">
             <div class="card-body py-4">
-                <div style="font-size:48px;">🏠</div>
-                <h5 class="mt-3 mb-2 text-dark">宿舍管理</h5>
-                <p class="text-muted small mb-3">宿舍分配 · 床位管理 · 统计报表</p>
-                <span class="btn btn-primary btn-sm">进入模块</span>
+                <div style="font-size:48px;">💼</div>
+                <h5 class="mt-3 mb-2 text-dark">教师工作台 <span class="badge bg-secondary fw-normal" style="font-size:11px;vertical-align:middle;">规划中</span></h5>
+                <p class="text-muted small mb-3">我的课表 · 今日课程 · 业绩提交</p>
+                <span class="btn btn-outline-primary btn-sm">进入模块</span>
             </div>
         </a>
     </div>
 
-    <!-- 积分管理 -->
+    <!-- 2. 成绩管理（开发中） -->
+    <div class="col-md-4">
+        <a href="{{ url_for('grades.index') }}" class="card h-100 text-center shadow-sm text-decoration-none" style="transition:transform .15s;" onmouseover="this.style.transform='translateY(-4px)'" onmouseout="this.style.transform=''">
+            <div class="card-body py-4">
+                <div style="font-size:48px;">📊</div>
+                <h5 class="mt-3 mb-2 text-dark">成绩管理 <span class="badge bg-warning text-dark fw-normal" style="font-size:11px;vertical-align:middle;">开发中</span></h5>
+                <p class="text-muted small mb-3">考试导入 · 年级/班级/学科分析 · 成绩汇报</p>
+                <span class="btn btn-outline-primary btn-sm">进入模块</span>
+            </div>
+        </a>
+    </div>
+
+    <!-- 3. 积分管理（开发中） -->
     <div class="col-md-4">
         <a href="{{ url_for('points.index') }}" class="card h-100 text-center shadow-sm text-decoration-none" style="transition:transform .15s;" onmouseover="this.style.transform='translateY(-4px)'" onmouseout="this.style.transform=''">
             <div class="card-body py-4">
                 <div style="font-size:48px;">⭐</div>
-                <h5 class="mt-3 mb-2 text-dark">积分管理</h5>
+                <h5 class="mt-3 mb-2 text-dark">积分管理 <span class="badge bg-secondary fw-normal" style="font-size:11px;vertical-align:middle;">规划中</span></h5>
                 <p class="text-muted small mb-3">加减分记录 · 学生积分汇总</p>
                 <span class="btn btn-outline-primary btn-sm">进入模块</span>
             </div>
         </a>
     </div>
 
-    <!-- 成绩管理 -->
+    <!-- 4. 宿舍管理（可用） -->
     <div class="col-md-4">
-        <a href="{{ url_for('grades.index') }}" class="card h-100 text-center shadow-sm text-decoration-none" style="transition:transform .15s;" onmouseover="this.style.transform='translateY(-4px)'" onmouseout="this.style.transform=''">
+        <a href="{{ url_for('dashboard.index') }}" class="card h-100 text-center shadow-sm text-decoration-none" style="transition:transform .15s;" onmouseover="this.style.transform='translateY(-4px)'" onmouseout="this.style.transform=''">
             <div class="card-body py-4">
-                <div style="font-size:48px;">📊</div>
-                <h5 class="mt-3 mb-2 text-dark">成绩管理</h5>
-                <p class="text-muted small mb-3">考试导入 · 年级/班级/学科/任课教师分析</p>
+                <div style="font-size:48px;">🏠</div>
+                <h5 class="mt-3 mb-2 text-dark">宿舍管理 <span class="badge bg-success fw-normal" style="font-size:11px;vertical-align:middle;">可用</span></h5>
+                <p class="text-muted small mb-3">宿舍分配 · 床位管理 · 统计报表</p>
                 <span class="btn btn-outline-primary btn-sm">进入模块</span>
+            </div>
+        </a>
+    </div>
+
+    <!-- 5. 教务管理（开发中） -->
+    {% if current_user.has_perm('academic.view') %}
+    <div class="col-md-4">
+        <a href="{{ url_for('academic.teachers_page') }}" class="card h-100 text-center shadow-sm text-decoration-none" style="transition:transform .15s;" onmouseover="this.style.transform='translateY(-4px)'" onmouseout="this.style.transform=''">
+            <div class="card-body py-4">
+                <div style="font-size:48px;">🏫</div>
+                <h5 class="mt-3 mb-2 text-dark">教务管理 <span class="badge bg-secondary fw-normal" style="font-size:11px;vertical-align:middle;">规划中</span></h5>
+                <p class="text-muted small mb-3">教师名单 · 查课统计 · 教师业绩库</p>
+                <span class="btn btn-outline-primary btn-sm">进入模块</span>
+            </div>
+        </a>
+    </div>
+    {% endif %}
+
+    <!-- 6. 学生画像（规划中，占位） -->
+    <div class="col-md-4">
+        <a href="{{ url_for('portrait.index') }}" class="card h-100 text-center shadow-sm text-decoration-none" style="transition:transform .15s;" onmouseover="this.style.transform='translateY(-4px)'" onmouseout="this.style.transform=''">
+            <div class="card-body py-4">
+                <div style="font-size:48px;">🔍</div>
+                <h5 class="mt-3 mb-2 text-dark">学生画像 <span class="badge bg-secondary fw-normal" style="font-size:11px;vertical-align:middle;">规划中</span></h5>
+                <p class="text-muted small mb-3">学习画像 · 行为画像 · 成长档案（占位）</p>
+                <span class="btn btn-outline-secondary btn-sm">查看规划</span>
             </div>
         </a>
     </div>
 </div>
 
-<!-- 系统管理 -->
+<!-- 7. 系统管理（项目基础，位置保持原样） -->
 <div class="row justify-content-center mt-4" style="max-width:960px;margin:0 auto;">
     <div class="col-12">
         <a href="{{ url_for('system_dashboard.index') }}" class="card shadow-sm text-decoration-none" style="transition:transform .15s;" onmouseover="this.style.transform='translateY(-2px)'" onmouseout="this.style.transform=''">
             <div class="card-body py-3 d-flex align-items-center">
                 <div style="font-size:36px;width:60px;text-align:center;">⚙</div>
                 <div class="flex-grow-1 ms-3">
-                    <h6 class="mb-1 text-dark">系统管理</h6>
-                    <small class="text-muted">学生管理 · 教师管理 · 字典配置 · 权限组 · 年级管理</small>
+                    <h6 class="mb-1 text-dark">系统管理
+                        <span class="badge bg-success fw-normal ms-1" style="font-size:11px;">可用</span>
+                        <span class="badge bg-light text-dark border fw-normal ms-1" style="font-size:11px;">项目基础 · 底层数据 · 可扩展</span>
+                    </h6>
+                    <small class="text-muted">学生管理 · 教师管理 · 字典配置 · 权限组 · 年级管理（独立基础库，不受其他模块影响）</small>
                 </div>
                 <span class="btn btn-outline-secondary btn-sm">进入</span>
             </div>
         </a>
     </div>
 </div>
-<div class="text-center mt-4">
-    <small class="text-muted">v1.7.0 release &nbsp;|&nbsp; &copy; 2026 StuLink · @zkxxzf</small>
-</div>
+{# 版权与版本信息统一由 base.html 全局页脚展示，此处不再重复 #}
 {% endblock %}
-

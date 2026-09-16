@@ -1,4 +1,4 @@
-# StuLink v1.9.0 2026-09-03
+# StuLink v1.9.2 2026-09-16
 # 教师安排表解析：兼容《教师安排表.xlsx》总任课表横表（多年级区段 / 英语别名 / 忽略非高考科目列）
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 import re

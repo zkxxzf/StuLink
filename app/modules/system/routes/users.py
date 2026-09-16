@@ -24,7 +24,16 @@ def _generate_password():
 @perm_required('system.users')
 def list_users():
     users = User.query.order_by(User.role, User.username).all()
-    return render_template('system/users/list.html', users=users)
+    # v1.14.0：按权限组分组展示（组内按角色/用户名排序），支持分组折叠与搜索
+    from collections import OrderedDict
+    grouped = OrderedDict()
+    for u in users:
+        gname = u.permission_group.name if u.permission_group else '未分组'
+        grouped.setdefault(gname, []).append(u)
+    group_order = {g.name: g.id for g in PermissionGroup.query.all()}
+    groups = OrderedDict(
+        (g, grouped[g]) for g in sorted(grouped, key=lambda x: (group_order.get(x, 9999), x)))
+    return render_template('system/users/list.html', users=users, groups=groups)
 
 
 @bp.route('/create', methods=['GET', 'POST'])

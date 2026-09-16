@@ -3,7 +3,7 @@
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
 [![Python](https://img.shields.io/badge/python-3.11+-green.svg)](https://python.org)
 [![Flask](https://img.shields.io/badge/flask-3.x-lightgrey.svg)](https://flask.palletsprojects.com/)
-[![Version](https://img.shields.io/badge/version-1.9.1-orange.svg)](https://github.com/zkxxzf/stulink)
+[![Version](https://img.shields.io/badge/version-1.9.2-orange.svg)](https://github.com/zkxxzf/stulink)
 
 面向中学的综合学生管理平台，采用双站点架构：
 
@@ -65,7 +65,7 @@ python run.py --dev
 cd alumni_app && python run.py
 
 # Docker 部署（两个容器）
-docker build -t stulink:v1.9.0 .
+docker build -t stulink:v1.9.2 .
 docker build -t stulink-alumni:v1.0.0 ./alumni_app
 docker-compose up -d
 ```

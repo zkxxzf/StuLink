@@ -1,4 +1,4 @@
-# StuLink v1.9.0 2026-09-03
+# StuLink v1.9.2 2026-09-16
 # 成绩排名服务：方向排名 + 班排名 + 总分进退步（同分同名次，后延跳号）
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 from sqlalchemy import or_, and_

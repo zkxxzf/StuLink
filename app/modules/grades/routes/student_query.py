@@ -1,4 +1,4 @@
-# StuLink v1.10.0 2026-09-13
+# StuLink v1.9.2 2026-09-16
 # 个人成绩查询与分析：页面 + 数据API + 学生搜索 + 成绩证明生成/公开核验
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 import json

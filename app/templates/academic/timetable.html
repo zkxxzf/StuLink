@@ -1,0 +1,73 @@
+{% extends "base.html" %}
+{% block title %}课表{% endblock %}
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
+    <h4 class="fw-bold mb-0"><i class="bi bi-calendar3"></i> 课表</h4>
+    {% if timetables %}
+    <form class="d-flex gap-2" method="get">
+        <select name="id" class="form-select form-select-sm" style="width:220px"
+                onchange="this.form.submit()">
+            {% for tt in timetables %}
+            <option value="{{ tt.id }}" {% if current and current.id == tt.id %}selected{% endif %}>
+                {{ tt.name }}{% if tt.grade %} · {{ tt.grade }}{% endif %}
+            </option>
+            {% endfor %}
+        </select>
+    </form>
+    {% endif %}
+</div>
+
+{% if not current %}
+<div class="card">
+    <div class="card-body text-center py-5 text-muted">
+        <i class="bi bi-calendar-x" style="font-size:40px;"></i>
+        <p class="mt-3 mb-1">尚未建立课表数据</p>
+        <p class="small mb-0">课表导入功能将在后续版本开放；当前版本已预置课表数据结构与查看页面。</p>
+    </div>
+</div>
+{% elif not entries %}
+<div class="card">
+    <div class="card-body text-center py-5 text-muted">
+        <i class="bi bi-calendar-x" style="font-size:40px;"></i>
+        <p class="mt-3 mb-1">{{ current.name }} 暂无课表明细</p>
+        <p class="small mb-0">课表导入功能将在后续版本开放。</p>
+    </div>
+</div>
+{% else %}
+<div class="card">
+    <div class="card-header">{{ current.name }}{% if current.grade %} · {{ current.grade }}{% endif %}
+        <span class="text-muted small ms-2">共 {{ entries|length }} 节课</span>
+    </div>
+    <div class="table-responsive">
+        <table class="table table-bordered table-sm align-middle mb-0 text-center">
+            <thead class="table-light">
+                <tr>
+                    <th style="width:70px">节次</th>
+                    {% for wd in weekday_names %}
+                    <th>{{ wd }}</th>
+                    {% endfor %}
+                </tr>
+            </thead>
+            <tbody>
+                {% for p in periods %}
+                <tr>
+                    <th class="table-light">第 {{ p }} 节</th>
+                    {% for wd in range(1, 8) %}
+                    <td class="small" style="min-width:110px">
+                        {% for e in grid.get((wd, p), []) %}
+                        <div class="mb-1">
+                            <div class="fw-bold">{{ e.subject or '—' }}</div>
+                            <div class="text-muted">{{ e.class_name or '' }} {{ e.room or '' }}</div>
+                            {% if e.teacher_name %}<div>{{ e.teacher_name }}</div>{% endif %}
+                        </div>
+                        {% endfor %}
+                    </td>
+                    {% endfor %}
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+{% endif %}
+{% endblock %}

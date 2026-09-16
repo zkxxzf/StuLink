@@ -22,6 +22,8 @@ config_mod.Config.SQLALCHEMY_BINDS = {
     'history': 'sqlite:///' + os.path.join(_TMP, 'history.db'),
     'grades': 'sqlite:///' + os.path.join(_TMP, 'grades.db'),
     'points': 'sqlite:///' + os.path.join(_TMP, 'points.db'),
+    'academic': 'sqlite:///' + os.path.join(_TMP, 'academic.db'),
+    'portrait': 'sqlite:///' + os.path.join(_TMP, 'portrait.db'),
 }
 # config._get_secret_key 基于 BASE_DIR 读取密钥文件，临时目录下会自动生成
 config_mod.Config.SECRET_KEY = 'smoke-test-secret'

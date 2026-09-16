@@ -1,0 +1,79 @@
+{% extends "base.html" %}
+{% block title %}导入结果 - 教师名单{% endblock %}
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+    <h4 class="fw-bold mb-0"><i class="bi bi-check2-circle text-success"></i> 导入完成</h4>
+    <a class="btn btn-sm btn-primary" href="{{ url_for('academic.teachers_page') }}">
+        <i class="bi bi-arrow-left"></i> 返回教师名单
+    </a>
+</div>
+
+<div class="row g-2 mb-3">
+    <div class="col-6 col-md-3">
+        <div class="card text-center"><div class="card-body py-2">
+            <div class="fw-bold fs-5 text-primary">{{ result.created_teachers }}</div>
+            <div class="text-muted small">新建教师</div>
+        </div></div>
+    </div>
+    <div class="col-6 col-md-3">
+        <div class="card text-center"><div class="card-body py-2">
+            <div class="fw-bold fs-5 text-info">{{ result.updated_teachers }}</div>
+            <div class="text-muted small">更新教师</div>
+        </div></div>
+    </div>
+    <div class="col-6 col-md-3">
+        <div class="card text-center"><div class="card-body py-2">
+            <div class="fw-bold fs-5 text-success">{{ result.accounts|length }}</div>
+            <div class="text-muted small">新建登录账号</div>
+        </div></div>
+    </div>
+    <div class="col-6 col-md-3">
+        <div class="card text-center"><div class="card-body py-2">
+            <div class="fw-bold fs-5 text-secondary">{{ result.skipped }}</div>
+            <div class="text-muted small">跳过（冲突行）</div>
+        </div></div>
+    </div>
+</div>
+
+{% if result.accounts %}
+<div class="card mb-3">
+    <div class="card-header d-flex justify-content-between align-items-center">
+        <span><i class="bi bi-key"></i> 新建账号的初始密码（仅本次显示）</span>
+        <a class="btn btn-sm btn-outline-success"
+           href="{{ url_for('academic.teachers_import_passwords', token=token) }}">
+            <i class="bi bi-filetype-csv"></i> 下载密码清单 CSV
+        </a>
+    </div>
+    <div class="table-responsive">
+        <table class="table table-sm mb-0 align-middle">
+            <thead class="table-light">
+                <tr><th>姓名</th><th>教师编号</th><th>登录用户名</th><th>初始密码</th></tr>
+            </thead>
+            <tbody>
+                {% for a in result.accounts %}
+                <tr>
+                    <td class="fw-bold">{{ a.name }}</td>
+                    <td><code>{{ a.teacher_uid }}</code></td>
+                    <td>{{ a.username }}</td>
+                    <td><code>{{ a.password }}</code></td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    <div class="card-footer text-muted small">
+        <i class="bi bi-shield-lock"></i> 请将账号密码线下发给教师本人；首次登录会要求修改密码。离开本页后密码将不再显示，如未保存可在「教师管理」页重置密码。
+    </div>
+</div>
+{% else %}
+<div class="alert alert-info">
+    <i class="bi bi-info-circle"></i> 本次未新建账号（均为关联已有账号或冲突跳过）。
+</div>
+{% endif %}
+
+{% if result.skipped %}
+<div class="alert alert-warning small">
+    <i class="bi bi-exclamation-triangle"></i> 有 {{ result.skipped }} 行因冲突被跳过，请在导入预览记录中核对后重新导入或到教师管理页人工处理。
+</div>
+{% endif %}
+{% endblock %}
