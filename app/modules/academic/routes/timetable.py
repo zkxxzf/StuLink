@@ -16,12 +16,19 @@ _WEEKDAYS = ['周一', '周二', '周三', '周四', '周五', '周六', '周日
 @login_required
 @perm_required('academic.view')
 def timetable_page():
-    """课表查看（按学期切换；数据待后续导入功能接入）"""
+    """课表查看（按学期切换；数据待后续导入功能接入；按用户数据范围过滤年级）"""
+    from flask_login import current_user
+    from app.modules.grades.services.scope import user_grade_scope
+    ug = user_grade_scope(current_user)
     tid = request.args.get('id', type=int)
     timetables = Timetable.query.order_by(Timetable.id.desc()).all()
+    if ug is not None:
+        timetables = [t for t in timetables if not t.grade or t.grade in ug]
     current = None
     if tid:
         current = db.session.get(Timetable, tid)
+        if current and current not in timetables:
+            current = None
     elif timetables:
         current = timetables[0]
 

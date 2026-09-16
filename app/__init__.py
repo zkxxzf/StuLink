@@ -3,6 +3,7 @@
 from flask import Flask, render_template, request, url_for
 from config import Config
 from app.extensions import db, login_manager, csrf
+from app.utils.permission_map import default_keys as _module_keys
 from markupsafe import escape, Markup
 import gzip
 
@@ -147,6 +148,69 @@ PERMISSION_GROUPS = [
             'points.view', 'points.edit',
             'grades.view', 'grades.student_query',
         ],
+    },
+    # ===== v1.9.2 新增身份（身份不写死，可在权限页随时新增/调整） =====
+    {
+        'name': '校长',
+        'role': 'staff',
+        'scope_type': 'school',
+        'description': '校长：全校数据只读（如需限定年级，可在数据范围表勾选）',
+        'menu_keys': _module_keys(
+            ('students', 'read'), ('dormitory', 'read'), ('grades', 'read'),
+            ('points', 'read'), ('academic', 'read')),
+    },
+    {
+        'name': '副校长',
+        'role': 'staff',
+        'scope_type': 'school',
+        'description': '副校长：全校数据只读（如需限定年级，可在数据范围表勾选）',
+        'menu_keys': _module_keys(
+            ('students', 'read'), ('dormitory', 'read'), ('grades', 'read'),
+            ('points', 'read'), ('academic', 'read')),
+    },
+    {
+        'name': '教务主任',
+        'role': 'staff',
+        'scope_type': 'school',
+        'description': '教务主任：学生/成绩/教务写入，其余只读（全校）',
+        'menu_keys': _module_keys(
+            ('students', 'write'), ('dormitory', 'read'), ('grades', 'write'),
+            ('points', 'read'), ('academic', 'write')),
+    },
+    {
+        'name': '教务员',
+        'role': 'staff',
+        'scope_type': 'none',
+        'description': '教务员：成绩/教务写入，学生/积分只读（数据范围按用户勾选，如仅 2025 级）',
+        'menu_keys': _module_keys(
+            ('students', 'read'), ('dormitory', 'read'), ('grades', 'write'),
+            ('points', 'read'), ('academic', 'write')),
+    },
+    {
+        'name': '备课组长',
+        'role': 'staff',
+        'scope_type': 'none',
+        'description': '备课组长：成绩写入，其余只读（数据范围按用户勾选，如本年级）',
+        'menu_keys': _module_keys(
+            ('students', 'read'), ('dormitory', 'read'), ('grades', 'write'),
+            ('points', 'read'), ('academic', 'read')),
+    },
+    {
+        'name': '教研组长',
+        'role': 'staff',
+        'scope_type': 'none',
+        'description': '教研组长：成绩写入，其余只读（数据范围按用户勾选，如本年级）',
+        'menu_keys': _module_keys(
+            ('students', 'read'), ('dormitory', 'read'), ('grades', 'write'),
+            ('points', 'read'), ('academic', 'read')),
+    },
+    {
+        'name': '学生发展中心',
+        'role': 'staff',
+        'scope_type': 'none',
+        'description': '学生发展中心：仅积分写入 + 学生只读（数据范围按用户勾选）',
+        'menu_keys': _module_keys(
+            ('students', 'read'), ('points', 'write')),
     },
 ]
 

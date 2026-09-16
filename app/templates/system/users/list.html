@@ -60,16 +60,23 @@
                     <tr data-search="{{ (u.real_name ~ ' ' ~ u.username ~ ' ' ~ gname)|lower }}">
                         <td>{{ u.username }}</td>
                         <td class="fw-bold">{{ u.real_name }}</td>
-                        <td><span class="badge bg-{% if u.role=='admin' %}danger{% elif u.role=='dorm_manager' %}warning text-dark{% elif u.role=='homeroom_teacher' %}primary{% elif u.role=='grade_leader' %}info{% elif u.role=='school_viewer' %}success{% else %}secondary{% endif %}">{{ u.role_display }}</span></td>
+                        <td><span class="badge bg-{% if u.role=='admin' %}danger{% elif u.role=='dorm_manager' %}warning text-dark{% elif u.role=='homeroom_teacher' %}primary{% elif u.role=='grade_leader' %}info{% elif u.role=='school_viewer' %}success{% else %}secondary{% endif %}">{{ u.display_role }}</span></td>
                         <td>{% if u.is_active %}<span class="badge bg-success">启用</span>{% else %}<span class="badge bg-secondary">禁用</span>{% endif %}</td>
                         <td>
                             <a href="{{ url_for('users.edit', id=u.id) }}" class="btn btn-sm btn-outline-warning"><i class="bi bi-pencil"></i></a>
                             <form method="POST" action="{{ url_for('users.toggle', id=u.id) }}" style="display:inline;">
                                 <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                                {% if u.role == 'admin' and u.is_active %}
+                                <button type="button" class="btn btn-sm btn-outline-secondary" disabled
+                                        title="管理员账号不可禁用">
+                                    <i class="bi bi-shield-lock"></i>
+                                </button>
+                                {% else %}
                                 <button type="submit" class="btn btn-sm btn-outline-{% if u.is_active %}secondary{% else %}success{% endif %}"
                                         title="{% if u.is_active %}禁用{% else %}启用{% endif %}">
                                     <i class="bi bi-{% if u.is_active %}pause{% else %}play{% endif %}-circle"></i>
                                 </button>
+                                {% endif %}
                             </form>
                             <form method="POST" action="{{ url_for('users.reset_password', id=u.id) }}" style="display:inline;"
                                   onsubmit="return confirm('确定重置 {{ u.real_name }} 的密码为 123456？')">

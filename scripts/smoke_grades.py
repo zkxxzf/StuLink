@@ -514,7 +514,7 @@ with app.test_client() as c:
     rid_admin = d['data']['report_id']
     check('AI：报告落库', rid_admin is not None)
     last = ai_calls[-1]
-    payload = _json.loads(last['messages'][1]['content'].split('\n\n', 1)[1])
+    payload = _json.loads(last['messages'][1]['content'].split('\n\n')[-1])
     check('AI：admin payload 12 名学生', len(payload['exam']['students']) == 12)
     check('AI：无上一场考试时 prev 为空', payload['prev'] is None)
 
@@ -542,7 +542,7 @@ with app.test_client() as c:
     check('AI：教师经全局 Key 生成', r.status_code == 200 and d['success'])
     rid_teacher = d['data']['report_id']
     last = ai_calls[-1]
-    payload = _json.loads(last['messages'][1]['content'].split('\n\n', 1)[1])
+    payload = _json.loads(last['messages'][1]['content'].split('\n\n')[-1])
     stu0 = payload['exam']['students'][0]
     check('AI：教师 payload 仅6人且科目仅数学', len(payload['exam']['students']) == 6
           and list(stu0.get('subjects', {}).keys()) == ['数学'], str(stu0))

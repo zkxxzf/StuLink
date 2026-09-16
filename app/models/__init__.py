@@ -17,6 +17,7 @@ from app.models.system_setting import SystemSetting
 from app.models.academic import Teacher, Timetable, TimetableEntry, \
     InspectionRecord, TeacherAchievement
 from app.models.portrait import StudentProfile
+from app.models.user_data_scope import UserDataScope
 
 __all__ = ['User', 'Student', 'Room', 'BedAssignment', 'StudentAccommodation',
            'DictCategory', 'DictItem', 'OperationLog', 'AssignmentHistory',
@@ -28,5 +29,5 @@ __all__ = ['User', 'Student', 'Room', 'BedAssignment', 'StudentAccommodation',
            'SystemSetting',
            'Teacher', 'Timetable', 'TimetableEntry',
            'InspectionRecord', 'TeacherAchievement',
-           'StudentProfile']
+           'StudentProfile', 'UserDataScope']
 

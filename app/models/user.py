@@ -37,8 +37,17 @@ class User(UserMixin, db.Model):
             'grade_leader': '年级长',
             'school_viewer': '全校组',
             'teacher': '普通教师',
+            'staff': '教职人员',
         }
         return role_names.get(self.role, self.role)
+
+    @property
+    def display_role(self):
+        """显示用身份：优先权限组名（身份可自定义），无组时回落角色名"""
+        pg = self.permission_group
+        if pg and pg.name:
+            return pg.name
+        return self.role_display
 
     def has_role(self, *roles):
         return self.role in roles

@@ -20,7 +20,15 @@ CATEGORIES = ['纪律', '学习', '卫生', '活动', '其他']
 # ==================== 数据范围（复用权限组 scope_type 体系） ====================
 
 def _scope():
-    """返回 (scope_type, grade, 班级白名单 or None)"""
+    """返回 (scope_type, grade, 范围明细 or None)
+
+    范围明细：scope='class' 时为班级白名单 [(grade, class_name)]；
+    scope='user_grades' 时为授权年级清单（v1.9.2 用户级数据范围，优先于组级规则）。
+    """
+    from app.modules.grades.services.scope import user_grade_scope
+    ug = user_grade_scope(current_user)
+    if ug is not None:
+        return 'user_grades', '', ug
     pg = current_user.permission_group
     scope = pg.scope_type if pg else 'none'
     grade = current_user.grade or ''
@@ -32,9 +40,11 @@ def _scope():
 
 
 def _apply_scope(q, scope, grade, classes):
-    """把范围条件应用到 PointRecord 查询"""
+    """把范围条件应用到 PointRecord 查询（classes：班级白名单或授权年级清单）"""
     if scope == 'school':
         return q
+    if scope == 'user_grades':
+        return q.filter(PointRecord.grade.in_(classes or []))
     if scope == 'grade' and grade:
         return q.filter_by(grade=grade)
     if scope == 'class' and classes:
@@ -49,6 +59,8 @@ def _apply_scope(q, scope, grade, classes):
 def _in_scope(student, scope, grade, classes):
     if scope == 'school':
         return True
+    if scope == 'user_grades':
+        return student.grade in (classes or [])
     if scope == 'grade':
         return student.grade == grade
     if scope == 'class':

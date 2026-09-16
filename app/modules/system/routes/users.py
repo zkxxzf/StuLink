@@ -102,6 +102,11 @@ def edit(id):
         grade = form.grade.data or None
         class_name = form.class_name.data or None
 
+        # v1.9.2 防误操作：管理员账号的角色不可修改
+        if user.role == 'admin' and role != 'admin':
+            flash('管理员账号的角色不可修改（防止系统失去管理入口）', 'danger')
+            return render_template('system/users/form.html', form=form, title='编辑用户')
+
         if role == 'homeroom_teacher':
             if not grade or not class_name:
                 flash('班主任必须指定年级和班级', 'danger')
@@ -139,6 +144,13 @@ def edit(id):
 @perm_required('system.users')
 def toggle(id):
     user = User.query.get_or_404(id)
+    # v1.9.2 防误操作：管理员账号不可禁用；不能禁用当前登录账号
+    if user.role == 'admin' and user.is_active:
+        flash('管理员账号不允许禁用（防止系统无法登录）', 'danger')
+        return redirect(url_for('users.list_users'))
+    if user.id == current_user.id and user.is_active:
+        flash('不能禁用当前登录的账号', 'danger')
+        return redirect(url_for('users.list_users'))
     user.is_active = not user.is_active
     db.session.commit()
     status = '启用' if user.is_active else '禁用'

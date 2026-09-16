@@ -85,7 +85,7 @@ def teachers_template():
 
 @bp.route('/teachers/import/upload', methods=['POST'])
 @login_required
-@perm_required('academic.view')
+@perm_required('academic.edit')
 def teachers_import_upload():
     """上传教师名单 → 解析并生成导入预览"""
     file = request.files.get('file')
@@ -111,7 +111,7 @@ def teachers_import_upload():
 
 @bp.route('/teachers/import/confirm', methods=['POST'])
 @login_required
-@perm_required('academic.view')
+@perm_required('academic.edit')
 def teachers_import_confirm():
     """确认导入：落库 + 自动建号"""
     token = (request.form.get('token') or '').strip()
@@ -150,7 +150,7 @@ def teachers_import_confirm():
 
 @bp.route('/teachers/import/passwords/<token>.csv')
 @login_required
-@perm_required('academic.view')
+@perm_required('academic.edit')
 def teachers_import_passwords(token):
     """下载本次导入的初始账号密码清单"""
     _purge_expired_drafts()
@@ -165,7 +165,7 @@ def teachers_import_passwords(token):
 
 @bp.route('/teachers/<int:tid>/edit', methods=['GET', 'POST'])
 @login_required
-@perm_required('academic.view')
+@perm_required('academic.edit')
 def teacher_edit(tid):
     """编辑教师：身份证一经录入仅管理员可更新（本页即管理入口）"""
     t = db.session.get(Teacher, tid)

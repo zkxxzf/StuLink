@@ -131,6 +131,9 @@ def _guard_tab(tab):
         scope_type, _grade = scope_service.get_scope(current_user)
         if scope_type == 'school':                 # 校级领导：与管理员同范围
             allowed = {'grade', 'class', 'subject', 'teacher'}
+        elif scope_service.has_user_scope(current_user):
+            # v1.9.2 用户级数据范围（如教务员按年级）：数据已限授权年级，tab 全开
+            allowed = {'grade', 'class', 'subject', 'teacher'}
         elif current_user.role == 'grade_leader' or scope_type == 'grade':
             allowed = {'grade', 'class', 'subject', 'teacher'}
         elif current_user.has_role('homeroom_teacher'):
@@ -232,8 +235,9 @@ def api_teacher_tab():
                 return tab_service._empty(exam)
             return tab_service.teacher_tab(exam_id, subject=subject, links=links,
                                            grade=exam.grade)
-        if current_user.role == 'admin' or scope_type == 'school':
-            # 管理员 / 校级领导：本年级全体任课教师
+        if (current_user.role == 'admin' or scope_type == 'school'
+                or scope_service.has_user_scope(current_user)):
+            # 管理员 / 校级领导 / 用户级数据范围：本年级全体任课教师
             return tab_service.teacher_tab(exam_id, subject=subject,
                                            links=None, grade=exam.grade)
         if scope_type == 'grade':

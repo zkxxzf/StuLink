@@ -78,6 +78,7 @@ class InspectionRecord(db.Model):
 
     id = db.Column(db.Integer, primary_key=True)
     inspect_date = db.Column(db.Date, nullable=False, index=True)
+    grade = db.Column(db.String(10), index=True)           # 年级（v1.9.2 数据范围过滤用）
     period = db.Column(db.Integer)                         # 节次
     teacher_uid = db.Column(db.String(16), index=True)
     teacher_name = db.Column(db.String(50))

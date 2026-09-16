@@ -136,7 +136,8 @@ with app.test_client() as c:
         tuid = Teacher.query.filter_by(name='张老师').first().teacher_uid
     r = c.post('/academic/inspection/add',
                data={'csrf_token': csrf, 'inspect_date': '2026-09-16', 'period': 3,
-                     'teacher_uid': tuid, 'class_name': '01班', 'result': 'normal'},
+                     'grade': '2025级', 'teacher_uid': tuid,
+                     'class_name': '01班', 'result': 'normal'},
                follow_redirects=True)
     with app.app_context():
         check('查课记录落库', InspectionRecord.query.count() == 1)

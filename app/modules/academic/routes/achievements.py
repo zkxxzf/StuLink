@@ -57,7 +57,7 @@ def _parse_date(value):
 
 @bp.route('/achievements/add', methods=['POST'])
 @login_required
-@perm_required('academic.view')
+@perm_required('academic.edit')
 def achievements_add():
     """教务录入业绩（直接生效）"""
     back = redirect(url_for('academic.achievements_page'))
@@ -94,7 +94,7 @@ def achievements_add():
 
 @bp.route('/achievements/<int:aid>/review', methods=['POST'])
 @login_required
-@perm_required('academic.view')
+@perm_required('academic.edit')
 def achievements_review(aid):
     """审核教师工作台提交的业绩"""
     rec = db.session.get(TeacherAchievement, aid)
@@ -120,7 +120,7 @@ def achievements_review(aid):
 
 @bp.route('/achievements/<int:aid>/delete', methods=['POST'])
 @login_required
-@perm_required('academic.view')
+@perm_required('academic.edit')
 def achievements_delete(aid):
     rec = db.session.get(TeacherAchievement, aid)
     if not rec:
