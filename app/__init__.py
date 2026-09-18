@@ -92,6 +92,7 @@ PERMISSION_GROUPS = [
             'points.view', 'points.edit',
             'grades.view', 'grades.edit',
             'grades.import', 'grades.settings', 'grades.teachers', 'grades.student_query',
+            'grades.subject_mgmt',
             'academic.view',
         ],
     },
@@ -109,6 +110,7 @@ PERMISSION_GROUPS = [
             'statistics.view',
             'points.view', 'grades.view',
             'grades.edit', 'grades.import', 'grades.settings', 'grades.student_query',
+            'grades.subject_mgmt',
         ],
     },
     {

@@ -169,15 +169,6 @@
                     <p class="text-muted small">已选择 <strong id="editSelectedCount">0</strong> 名学生。留空的字段不修改。</p>
                     <div class="row">
                         <div class="col-6 mb-3">
-                            <label class="form-label">选科</label>
-                            <select class="form-select" name="subject_selection">
-                                <option value="">不修改</option>
-                                {% for s in subjects %}
-                                <option value="{{ s }}">{{ s }}</option>
-                                {% endfor %}
-                            </select>
-                        </div>
-                        <div class="col-6 mb-3">
                             <label class="form-label">住校/走读</label>
                             <select class="form-select" name="boarding_type">
                                 <option value="">不修改</option>

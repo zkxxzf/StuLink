@@ -306,9 +306,6 @@ def batch_edit_dormitory():
         'textbook': '课本',
         'teacher_notes': '班主任备注',
     }
-    student_fields = {
-        'subject_selection': '选科',
-    }
 
     updated_fields = []
 
@@ -321,13 +318,6 @@ def batch_edit_dormitory():
                     acc = StudentAccommodation(student_id=s.id)
                     db.session.add(acc)
                 setattr(acc, field, val)
-            updated_fields.append(f'{label}={val}')
-
-    for field, label in student_fields.items():
-        val = request.form.get(field, '').strip()
-        if val:
-            for s in students:
-                setattr(s, field, val)
             updated_fields.append(f'{label}={val}')
 
     if updated_fields:

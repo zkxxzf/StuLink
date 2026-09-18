@@ -1,0 +1,83 @@
+{% extends "base.html" %}
+{% block title %}选科维护{% endblock %}
+{% block content %}
+<h4 class="fw-bold mb-3"><i class="bi bi-bookmark-check"></i> 选科维护</h4>
+
+<div class="card mb-3">
+    <div class="card-body py-2">
+        <form method="GET" class="row g-2 align-items-end">
+            <div class="col-auto">
+                <label class="form-label small mb-0">年级</label>
+                <select name="grade" class="form-select form-select-sm" onchange="this.form.submit()">
+                    <option value="">选择年级</option>
+                    {% for g in grades %}
+                    <option value="{{ g }}" {{ 'selected' if grade==g }}>{{ g }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="col-auto">
+                <label class="form-label small mb-0">班级</label>
+                <select name="class_name" class="form-select form-select-sm" onchange="this.form.submit()">
+                    <option value="">选择班级</option>
+                    {% for c in classes %}
+                    <option value="{{ c }}" {{ 'selected' if class_name==c }}>{{ c }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="col-auto">
+                <button class="btn btn-sm btn-primary"><i class="bi bi-search"></i> 查询</button>
+            </div>
+            <div class="col-auto">
+                <span class="text-muted small">按班级列出学生，修改选科后点"保存选科修改"</span>
+            </div>
+        </form>
+    </div>
+</div>
+
+{% if students %}
+<form method="POST" action="{{ url_for('grades.subject_mgmt_save') }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <input type="hidden" name="grade" value="{{ grade }}">
+    <input type="hidden" name="class_name" value="{{ class_name }}">
+    <div class="card">
+        <div class="card-header d-flex justify-content-between align-items-center">
+            <span>{{ grade }} {{ class_name }}：共 <strong>{{ students|length }}</strong> 人</span>
+            <button class="btn btn-sm btn-success"><i class="bi bi-check-lg"></i> 保存选科修改</button>
+        </div>
+        <div class="card-body p-0">
+            <table class="table table-sm table-hover mb-0">
+                <thead class="table-light">
+                    <tr>
+                        <th>学号</th>
+                        <th>姓名</th>
+                        <th>性别</th>
+                        <th style="width:200px;">选科组合</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for s in students %}
+                    <tr>
+                        <td>{{ s.student_number }}</td>
+                        <td class="fw-bold">{{ s.name }}</td>
+                        <td>{% if s.gender=='男' %}<span class="badge bg-primary">男</span>{% else %}<span class="badge bg-danger">女</span>{% endif %}</td>
+                        <td>
+                            <select class="form-select form-select-sm" name="sel_{{ s.id }}">
+                                <option value="">（未设置）</option>
+                                {% for sub in subjects %}
+                                <option value="{{ sub }}" {{ 'selected' if s.subject_selection==sub }}>{{ sub }}</option>
+                                {% endfor %}
+                            </select>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</form>
+{% elif grade and class_name %}
+<div class="alert alert-info">该班级暂无学生（已排除"不分班"学生）</div>
+{% else %}
+<div class="alert alert-secondary">请先选择"年级"和"班级"，以显示学生选科列表</div>
+{% endif %}
+{% endblock %}

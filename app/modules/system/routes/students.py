@@ -404,6 +404,7 @@ def batch_edit_search():
     building = data.get('building', '')
     room_number = data.get('room_number', '')
     bed_number = data.get('bed_number', '')
+    subject_selection = data.get('subject_selection', '')
 
     # 班主任只能改自己班
     if current_user.role == 'homeroom_teacher':
@@ -417,6 +418,9 @@ def batch_edit_search():
 
     if not students:
         return jsonify({'success': False, 'message': '无匹配学生或无权限'})
+
+    if subject_selection and not current_user.has_perm('students.edit'):
+        return jsonify({'success': False, 'message': '无修改选科的权限（需学生编辑权限）'})
 
     updated = 0
     # 批量修改床位
@@ -439,6 +443,8 @@ def batch_edit_search():
             return jsonify({'success': False, 'message': f'{building}{room_number} {bed_num}床已被{occupant.name if occupant else "其他学生"}占用'})
 
     for s in students:
+        if subject_selection:
+            s.subject_selection = subject_selection
         if boarding_type or day_student_type:
             acc = StudentAccommodation.query.filter_by(student_id=s.id).first()
             if not acc:
@@ -912,67 +918,6 @@ def download_import_errors(key):
     return send_file(buf, as_attachment=True,
                      download_name=f'导入错误日志_{key[:8]}.txt',
                      mimetype='text/plain; charset=utf-8')
-
-
-@bp.route('/batch-edit-dormitory', methods=['POST'])
-@perm_required('dormitory.manage')
-def batch_edit_dormitory():
-    """批量编辑宿舍相关信息（选科/住走读/出门权限/课本/班主任备注）"""
-    ids = request.form.getlist('student_ids')
-    if not ids:
-        flash('未选择任何学生', 'warning')
-        return redirect(url_for('students.list_students'))
-
-    try:
-        id_list = [int(i) for i in ids]
-    except ValueError:
-        flash('参数错误', 'danger')
-        return redirect(url_for('students.list_students'))
-
-    students = Student.query.filter(Student.id.in_(id_list)).all()
-    if not students:
-        flash('未找到选中的学生', 'warning')
-        return redirect(url_for('students.list_students'))
-
-    acc_fields = {
-        'boarding_type': '住校/走读',
-        'day_student_type': '出门权限',
-        'textbook': '课本',
-        'teacher_notes': '班主任备注',
-    }
-    student_fields = {
-        'subject_selection': '选科',
-    }
-
-    updated_fields = []
-
-    for field, label in acc_fields.items():
-        val = request.form.get(field, '').strip()
-        if val:
-            for s in students:
-                acc = StudentAccommodation.query.filter_by(student_id=s.id).first()
-                if not acc:
-                    acc = StudentAccommodation(student_id=s.id)
-                    db.session.add(acc)
-                setattr(acc, field, val)
-            updated_fields.append(f'{label}={val}')
-
-    for field, label in student_fields.items():
-        val = request.form.get(field, '').strip()
-        if val:
-            for s in students:
-                setattr(s, field, val)
-            updated_fields.append(f'{label}={val}')
-
-    if updated_fields:
-        db.session.commit()
-        log_operation(current_user, '批量修改', '学生', None,
-                       f'{len(students)}名学生：{", ".join(updated_fields)}')
-        flash(f'已更新{len(students)}名学生的：{", ".join(updated_fields)}', 'success')
-    else:
-        flash('未选择任何要修改的字段', 'warning')
-
-    return redirect(url_for('students.list_students'))
 
 
 @bp.route('/batch-delete', methods=['POST'])

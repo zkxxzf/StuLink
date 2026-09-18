@@ -61,6 +61,8 @@ MODULES = [
              'read': [], 'write': ['grades.teachers']},
             {'key': 'query', 'name': '个人成绩查询',
              'read': [], 'write': ['grades.student_query']},
+            {'key': 'subject', 'name': '选科维护',
+             'read': [], 'write': ['grades.subject_mgmt']},
         ],
     },
     {

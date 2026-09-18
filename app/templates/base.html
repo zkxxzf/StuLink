@@ -238,6 +238,12 @@
             </a>
             {% endif %}
             
+            {% if current_user.has_perm('grades.subject_mgmt') %}
+            <a class="nav-link {% if request.endpoint == 'grades.subject_mgmt' %}active{% endif %}"
+               href="{{ url_for('grades.subject_mgmt') }}">
+                <i class="bi bi-bookmark-check"></i>选科维护
+            </a>
+            {% endif %}
              {% if current_user.has_perm('grades.settings') %}
             <a class="nav-link {% if request.endpoint == 'grades.band_templates_page' %}active{% endif %}"
                href="{{ url_for('grades.band_templates_page') }}">
