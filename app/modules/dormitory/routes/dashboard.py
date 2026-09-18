@@ -1,6 +1,7 @@
 # StuLink v1.7.0 2026-08-02
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 import io
+import re
 from flask import Blueprint, render_template, request, redirect, url_for, flash, send_file
 from flask_login import login_required, current_user
 from app.models import Student, Room, BedAssignment, User, StudentAccommodation
@@ -229,10 +230,16 @@ def search_student_accommodation():
     if subject_selection:
         query = query.filter_by(subject_selection=subject_selection)
     if room_number:
-        bed_sub = db.session.query(BedAssignment.student_id).join(BedAssignment.room).filter(
-            Room.room_number.contains(room_number)
-        ).filter(BedAssignment.student_id.isnot(None)).all()
-        bed_ids = [b[0] for b in bed_sub if b[0]]
+        # 支持 "西201" / "东宿舍楼501" / "501" 等格式（楼栋可省略）
+        rn = room_number.replace('宿舍楼', '').replace('宿舍', '').strip()
+        m = re.match(r'^([东西])\s*(\d+)$', rn)
+        bed_q = db.session.query(BedAssignment.student_id).join(BedAssignment.room)
+        if m:
+            bed_q = bed_q.filter(Room.building == m.group(1) + '宿舍楼',
+                                 Room.room_number.contains(m.group(2)))
+        else:
+            bed_q = bed_q.filter(Room.room_number.contains(rn))
+        bed_ids = [b[0] for b in bed_q.filter(BedAssignment.student_id.isnot(None)).all() if b[0]]
         if bed_ids:
             query = query.filter(Student.id.in_(bed_ids))
         else:
