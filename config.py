@@ -66,12 +66,14 @@ class Config:
     # 注意：默认值必须为化名占位，真实校名只通过环境变量或系统设置页注入，避免写入公开仓库
     SCHOOL_NAME = os.environ.get('SCHOOL_NAME', '某某学校')
 
-    # 多库绑定（模块独立数据库）
+    # 多库绑定（模块独立数据库：一模块一库，故障互不影响）
     SQLALCHEMY_BINDS = {
         'dormitory': 'sqlite:///' + os.path.join(BASE_DIR, 'data', 'dormitory.db'),
         'history': 'sqlite:///' + os.path.join(BASE_DIR, 'data', 'history.db'),
         'grades': 'sqlite:///' + os.path.join(BASE_DIR, 'data', 'grades.db'),
         'points': 'sqlite:///' + os.path.join(BASE_DIR, 'data', 'points.db'),
+        'academic': 'sqlite:///' + os.path.join(BASE_DIR, 'data', 'academic.db'),
+        'portrait': 'sqlite:///' + os.path.join(BASE_DIR, 'data', 'portrait.db'),
     }
 
 

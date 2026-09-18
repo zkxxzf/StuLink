@@ -35,6 +35,9 @@ def _guard_report():
     """班主任/任课教师不开放年级汇报；管理员/校领导/年级长可用"""
     if current_user.role == 'admin':
         return
+    if scope_service.has_user_scope(current_user):
+        # v1.9.2 用户级数据范围（如教务员按年级）：数据已限授权年级
+        return
     scope_type, _ = scope_service.get_scope(current_user)
     if scope_type in ('school', 'grade'):
         return

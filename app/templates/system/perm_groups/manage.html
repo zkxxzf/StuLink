@@ -1,187 +1,376 @@
 {% extends "base.html" %}
-{% block title %}权限组管理{% endblock %}
+{% block title %}权限管理{% endblock %}
 {% block content %}
-<div class="d-flex justify-content-between align-items-center mb-3">
-    <h4 class="fw-bold mb-0"><i class="bi bi-shield-lock"></i> 权限组管理</h4>
-    <button class="btn btn-primary" onclick="openModal()">
-        <i class="bi bi-plus-lg"></i> 新增权限组
+<div class="d-flex justify-content-between align-items-center mb-2 flex-wrap gap-2">
+    <h4 class="fw-bold mb-0"><i class="bi bi-shield-lock"></i> 权限管理</h4>
+    <button class="btn btn-sm btn-primary" id="btnNewGroup">
+        <i class="bi bi-plus-lg"></i> 新建身份
     </button>
 </div>
+<div class="alert alert-info small py-2 mb-3">
+    <i class="bi bi-info-circle"></i>
+    <strong>规则：</strong>权限全部按「身份」分配（人员 → 身份 → 权限），身份可随时新建；
+    格子<strong>点击切换</strong>：灰色=不可见 → 蓝色=只读 → 绿色=写入；
+    <strong>管理员组为系统保留身份，不可修改与删除</strong>。
+</div>
 
-<div class="row">
-{% for g in groups %}
-<div class="col-md-6 mb-3">
-    <div class="card h-100">
-        <div class="card-body">
-            <div class="d-flex justify-content-between align-items-start mb-2">
-                <h6 class="fw-bold mb-0">{{ g.name }}</h6>
-                <div>
-                    <button class="btn btn-sm btn-outline-warning" onclick="editGroup({{ g.id }})"><i class="bi bi-pencil"></i></button>
-                    <button class="btn btn-sm btn-outline-danger" onclick="deleteGroup({{ g.id }})"><i class="bi bi-trash"></i></button>
-                </div>
-            </div>
-            <div class="mb-2">
-                <span class="badge bg-info me-1">管理范围:
-                    {% if g.scope_type == 'school' %}全校
-                    {% elif g.scope_type == 'grade' %}所管年级
-                    {% elif g.scope_type == 'class' %}所管班级
-                    {% else %}无限制{% endif %}
-                </span>
-                <span class="badge bg-secondary">{{ g._user_count }}人</span>
-            </div>
-            {% if g.description %}<p class="text-muted small mb-2">{{ g.description }}</p>{% endif %}
-            <div class="space-y-2">
-                {% set keys = g.get_menu_keys() %}
-                {% for module in permission_modules %}
-                <div class="small">
-                    <span class="text-muted">{{ module.name }}:</span>
-                    <div class="d-flex flex-wrap gap-1 mt-1">
-                        {% for k, label in module.permissions %}
-                        <span class="menu-chip {% if k in keys %}active{% else %}inactive{% endif %}">
-                            {{ label }}
-                        </span>
-                        {% endfor %}
-                    </div>
-                </div>
+<style>
+    /* 表一双向悬挂：表头 sticky top + 首列 sticky left */
+    #permTableWrap { max-height: 62vh; overflow: auto; }
+    #permTable thead tr:first-child th { position: sticky; top: 0; z-index: 3;
+        background: #f8f9fa; height: 38px; white-space: nowrap; }
+    #permTable thead tr:nth-child(2) th { position: sticky; top: 38px; z-index: 3;
+        background: #f8f9fa; }
+    #permTable th.sticky-col, #permTable td.sticky-col {
+        position: sticky; left: 0; z-index: 2; background: #fff; }
+    #permTable thead th.sticky-col { top: 0; left: 0; z-index: 6; }
+    #permTable tr.table-warning td.sticky-col { background: #fff3cd; }
+    /* 紧凑档位徽章 */
+    .lvl { display: inline-block; width: 56px; padding: 1px 0; border-radius: 10px;
+        cursor: pointer; font-size: 12px; user-select: none; line-height: 18px;
+        border: 1px solid transparent; }
+    .lvl.none { background: #eef1f4; color: #8a94a0; border-color: #dde3ea; }
+    .lvl.read { background: #cfe7ff; color: #0a58ca; border-color: #a9d2ff; }
+    .lvl.write { background: #d1f0d8; color: #166534; border-color: #9fd8ac; }
+    .lvl.disabled { cursor: not-allowed; opacity: .55; }
+    /* 表二首列悬挂（表头已 sticky） */
+    #scopeTable th.sticky-col, #scopeTable td.sticky-col {
+        position: sticky; left: 0; z-index: 2; background: #fff; }
+    #scopeTable thead th.sticky-col { top: 0; left: 0; z-index: 6; background: #f8f9fa; }
+</style>
+
+<!-- ============ 表一：功能权限（身份 × 子功能 × 三档，点击切换） ============ -->
+<div class="card mb-4">
+    <div class="card-header d-flex justify-content-between align-items-center flex-wrap gap-2">
+        <span><i class="bi bi-grid-3x3-gap"></i> 功能权限：身份 × 子功能（点击格子切换档位）</span>
+        <button class="btn btn-sm btn-success" id="btnSavePerms">
+            <i class="bi bi-check-lg"></i> 保存功能权限
+        </button>
+    </div>
+    <div id="permTableWrap">
+        <table class="table table-bordered table-sm align-middle text-center mb-0" id="permTable">
+            <thead>
+                <tr>
+                    <th rowspan="2" class="sticky-col text-start" style="min-width:140px;vertical-align:middle">身份 \ 功能</th>
+                    {% for m in modules %}
+                    <th colspan="{{ m['items']|length }}" class="border-start"
+                        style="border-left-width:2px!important">
+                        <i class="{{ m.icon }}"></i> {{ m.name }}
+                    </th>
+                    {% endfor %}
+                    <th rowspan="2" style="vertical-align:middle">用户数</th>
+                    <th rowspan="2" style="min-width:80px;vertical-align:middle">操作</th>
+                </tr>
+                <tr>
+                    {% for m in modules %}
+                    {% for it in m['items'] %}
+                    <th class="small fw-normal {% if loop.first %}border-start{% endif %}"
+                        {% if loop.first %}style="border-left-width:2px!important"{% endif %}>
+                        {{ it.name }}
+                    </th>
+                    {% endfor %}
+                    {% endfor %}
+                </tr>
+            </thead>
+            <tbody>
+                {% for row in group_rows %}
+                <tr data-gid="{{ row.g.id }}" {% if row.protected %}class="table-warning"{% endif %}>
+                    <td class="text-start sticky-col">
+                        <div class="fw-bold">{{ row.g.name }}
+                            {% if row.protected %}
+                            <span class="badge bg-danger ms-1" style="font-size:10px">系统保留</span>
+                            {% endif %}
+                        </div>
+                        {% if row.g.description %}
+                        <div class="text-muted small" style="max-width:180px">{{ row.g.description }}</div>
+                        {% endif %}
+                    </td>
+                    {% for m in modules %}
+                    {% for it in m['items'] %}
+                    {% set iid = m.key ~ ':' ~ it.key %}
+                    {% set lv = row.levels[iid] %}
+                    <td class="{% if loop.first %}border-start{% endif %}"
+                        {% if loop.first %}style="border-left-width:2px!important"{% endif %}>
+                        {% if row.protected %}
+                        <span class="lvl {{ lv }} disabled" title="系统保留身份，不可修改">
+                            {{ {'none':'不可见','read':'只读','write':'写入'}[lv] }}</span>
+                        {% else %}
+                        <span class="lvl {{ lv }}" data-field="{{ iid }}"
+                              data-allow-read="{{ '1' if it.read else '0' }}"
+                              data-level="{{ lv }}" title="点击切换：不可见 → 只读 → 写入"
+                              >{{ {'none':'不可见','read':'只读','write':'写入'}[lv] }}</span>
+                        {% endif %}
+                    </td>
+                    {% endfor %}
+                    {% endfor %}
+                    <td>{{ row.user_count }}</td>
+                    <td class="text-nowrap">
+                        {% if row.protected %}
+                        <button class="btn btn-sm btn-outline-secondary" disabled title="系统保留身份，不可修改">
+                            <i class="bi bi-lock"></i>
+                        </button>
+                        {% else %}
+                        <button class="btn btn-sm btn-outline-warning btn-edit-group" data-gid="{{ row.g.id }}" title="编辑身份">
+                            <i class="bi bi-pencil"></i>
+                        </button>
+                        <button class="btn btn-sm btn-outline-danger btn-del-group" data-gid="{{ row.g.id }}" title="删除身份">
+                            <i class="bi bi-trash"></i>
+                        </button>
+                        {% endif %}
+                    </td>
+                </tr>
                 {% endfor %}
-            </div>
-        </div>
+            </tbody>
+        </table>
+    </div>
+    <div class="card-footer text-muted small">
+        格子点击循环：<span class="lvl none">不可见</span> →
+        <span class="lvl read">只读</span> → <span class="lvl write">写入</span>；
+        纯操作类子功能（如床位分配、敏感导出、系统管理各项）无独立"只读"场景，在
+        灰色 ↔ 绿色 之间切换；模块下全部子功能"写入"即该模块完整权限。
     </div>
 </div>
-{% endfor %}
+
+<!-- ============ 表二：数据范围（用户 × 年级） ============ -->
+<div class="card">
+    <div class="card-header d-flex justify-content-between align-items-center flex-wrap gap-2">
+        <span><i class="bi bi-geo-alt"></i> 数据范围：用户 × 年级（勾选 = 该用户可见这些年级的数据）</span>
+        <div class="d-flex gap-2 align-items-center">
+            <select id="dsGroupFilter" class="form-select form-select-sm" style="width:160px">
+                <option value="">全部身份</option>
+                {% for gname in user_rows | map(attribute='group_name') | unique %}
+                <option value="{{ gname }}">{{ gname }}</option>
+                {% endfor %}
+            </select>
+            <input id="dsSearch" class="form-control form-control-sm" style="width:180px"
+                   placeholder="搜索姓名 / 账号">
+            <button class="btn btn-sm btn-success" id="btnSaveScope">
+                <i class="bi bi-check-lg"></i> 保存数据范围
+            </button>
+        </div>
+    </div>
+    <div class="table-responsive" style="max-height:560px;overflow-y:auto">
+        <table class="table table-sm table-hover align-middle text-center mb-0" id="scopeTable">
+            <thead class="table-light" style="position:sticky;top:0;z-index:1">
+                <tr>
+                    <th class="sticky-col text-start" style="min-width:150px">用户</th>
+                    <th style="min-width:110px">身份</th>
+                    {% for g in grades %}
+                    <th style="min-width:80px">{{ g }}</th>
+                    {% endfor %}
+                    <th>标记</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for r in user_rows %}
+                <tr data-uid="{{ r.u.id }}" data-group="{{ r.group_name }}"
+                    data-search="{{ (r.u.real_name ~ ' ' ~ r.u.username)|lower }}">
+                    <td class="text-start sticky-col">
+                        <span class="fw-bold">{{ r.u.real_name }}</span>
+                        <span class="text-muted small ms-1">{{ r.u.username }}</span>
+                    </td>
+                    <td class="small">{{ r.group_name }}</td>
+                    {% for g in grades %}
+                    <td>
+                        <input type="checkbox" class="form-check-input ds-check"
+                               data-grade="{{ g }}"
+                               {% if g in r.grades %}checked{% endif %}>
+                    </td>
+                    {% endfor %}
+                    <td>
+                        {% if r.has_class_scope %}
+                        <span class="badge bg-info text-dark" title="该用户存在班级级细化配置">班级级</span>
+                        {% endif %}
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    <div class="card-footer text-muted small">
+        未勾选 = 按身份的原范围规则（全校 / 本年级 / 本班）；勾选后 = 仅可见勾选的年级（用于"2025 级教务员"这类按年级分工的人员）。
+    </div>
 </div>
 
-<!-- Modal -->
+<!-- 身份弹窗（新建 / 编辑） -->
 <div class="modal fade" id="groupModal" tabindex="-1">
     <div class="modal-dialog">
         <div class="modal-content">
             <div class="modal-header">
-                <h5 class="modal-title" id="modalTitle">新增权限组</h5>
+                <h5 class="modal-title" id="groupModalTitle">新建身份</h5>
                 <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
             </div>
             <div class="modal-body">
-                <input type="hidden" id="groupId">
+                <input type="hidden" id="gmId">
                 <div class="mb-3">
-                    <label class="form-label">组名 <span class="text-danger">*</span></label>
-                    <input class="form-control" id="groupName" placeholder="如：班主任组">
+                    <label class="form-label">身份名称 <span class="text-danger">*</span></label>
+                    <input id="gmName" class="form-control" maxlength="30" placeholder="如：教务员、宿管组长…">
                 </div>
                 <div class="mb-3">
-                    <label class="form-label">管理范围</label>
-                    <select class="form-select" id="scopeType">
-                        <option value="none">无限制</option>
-                        <option value="class">所管班级</option>
-                        <option value="grade">所管年级</option>
+                    <label class="form-label">默认数据范围（未在表二勾选年级时生效）</label>
+                    <select id="gmScope" class="form-select">
+                        <option value="none">无（按表二勾选年级）</option>
                         <option value="school">全校</option>
+                        <option value="grade">本年级（人员信息中的年级）</option>
+                        <option value="class">本班（人员关联的班级）</option>
                     </select>
                 </div>
-                <div class="mb-3">
-                    <label class="form-label">描述</label>
-                    <input class="form-control" id="groupDesc" placeholder="可选">
+                <div class="mb-2">
+                    <label class="form-label">说明</label>
+                    <input id="gmDesc" class="form-control" maxlength="200">
                 </div>
-                <div class="mb-3">
-                    <label class="form-label">可见菜单</label>
-                    <div class="space-y-2" id="menuChecks">
-                        {% for module in permission_modules %}
-                        <div>
-                            <span class="text-muted small">{{ module.name }}</span>
-                            <div class="d-flex flex-wrap gap-2 mt-1">
-                                {% for k, label in module.permissions %}
-                                <label class="menu-check-label">
-                                    <input type="checkbox" value="{{ k }}" class="menu-check"> {{ label }}
-                                </label>
-                                {% endfor %}
-                            </div>
-                        </div>
-                        {% endfor %}
-                    </div>
-                </div>
+                <div class="form-text">新建后，在上方表格中点击格子配置各子功能权限即可。</div>
             </div>
             <div class="modal-footer">
-                <button class="btn btn-secondary" data-bs-dismiss="modal">取消</button>
-                <button class="btn btn-primary" onclick="saveGroup()">保存</button>
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">取消</button>
+                <button type="button" class="btn btn-primary" id="btnSaveGroup">保存</button>
             </div>
         </div>
     </div>
 </div>
 {% endblock %}
 
-{% block extra_css %}
-<style>
-.menu-chip {
-    display: inline-block; padding: 1px 7px; border-radius: 3px; border: 1px solid #dee2e6;
-}
-.menu-chip.active { background: #dbeafe; color: #1e40af; border-color: #93c5fd; }
-.menu-chip.inactive { background: #f8f9fa; color: #adb5bd; border-color: #e9ecef; }
-.menu-check-label {
-    display: inline-flex; align-items: center; gap: 4px; font-size: 13px;
-    padding: 3px 8px; border: 1px solid #dee2e6; border-radius: 4px; cursor: pointer;
-    user-select: none;
-}
-.menu-check-label:has(input:checked) { background: #dbeafe; border-color: #93c5fd; }
-</style>
-{% endblock %}
-
 {% block extra_js %}
 <script>
-function openModal(id) {
-    $('#modalTitle').text('新增权限组');
-    $('#groupId').val('');
-    $('#groupName').val('');
-    $('#scopeType').val('none');
-    $('#groupDesc').val('');
-    $('.menu-check').prop('checked', false);
-    new bootstrap.Modal('#groupModal').show();
-}
+(function () {
+    function toast(msg) { alert(msg); }
 
-function editGroup(id) {
-    $.get('/perm-groups/' + id + '/json', function(g) {
-        $('#modalTitle').text('编辑权限组');
-        $('#groupId').val(g.id);
-        $('#groupName').val(g.name);
-        $('#scopeType').val(g.scope_type);
-        $('#groupDesc').val(g.description || '');
-        $('.menu-check').prop('checked', false);
-        (g.menu_keys || []).forEach(function(k) {
-            $('.menu-check[value="' + k + '"]').prop('checked', true);
+    var LBL = {none: '不可见', read: '只读', write: '写入'};
+
+    /* ---------- 档位格子点击循环 ---------- */
+    $('#permTable').on('click', '.lvl[data-field]', function () {
+        var $b = $(this);
+        var allowRead = String($b.data('allow-read')) === '1';
+        var cur = $b.data('level');
+        var next;
+        if (cur === 'none') { next = allowRead ? 'read' : 'write'; }
+        else if (cur === 'read') { next = 'write'; }
+        else { next = 'none'; }
+        $b.data('level', next).removeClass('none read write').addClass(next).text(LBL[next]);
+    });
+
+    /* ---------- 表一：保存功能权限 ---------- */
+    $('#btnSavePerms').on('click', function () {
+        var items = [];
+        $('#permTable tbody tr').each(function () {
+            var $tr = $(this);
+            if ($tr.hasClass('table-warning')) { return; } // 系统保留身份跳过
+            var levels = {};
+            $tr.find('.lvl[data-field]').each(function () {
+                levels[$(this).data('field')] = $(this).data('level');
+            });
+            items.push({id: parseInt($tr.data('gid'), 10), levels: levels});
         });
-        new bootstrap.Modal('#groupModal').show();
+        $.ajax({
+            url: '/perm-groups/save-perms', type: 'POST',
+            contentType: 'application/json',
+            data: JSON.stringify({items: items}),
+            success: function (res) {
+                if (res.success) { location.reload(); }
+                else { toast(res.message || '保存失败'); }
+            },
+            error: function () { toast('保存失败，请重试'); }
+        });
     });
-}
 
-function saveGroup() {
-    var id = $('#groupId').val();
-    var name = $('#groupName').val().trim();
-    var scopeType = $('#scopeType').val();
-    var desc = $('#groupDesc').val().trim();
-    var keys = [];
-    $('.menu-check:checked').each(function() { keys.push($(this).val()); });
-    if (!name) { alert('请输入组名'); return; }
-    $.ajax({
-        url: '/perm-groups/save',
-        method: 'POST',
-        contentType: 'application/json',
-        data: JSON.stringify({ id: id || null, name: name, scope_type: scopeType, description: desc, menu_keys: keys }),
-        success: function() { location.reload(); },
-        error: function(xhr) {
-            var msg = '保存失败';
-            try { msg = JSON.parse(xhr.responseText).message; } catch(e) {}
-            alert(msg);
-        }
+    /* ---------- 表二：保存数据范围 ---------- */
+    $('#btnSaveScope').on('click', function () {
+        var scopes = {};
+        $('#scopeTable tbody tr').each(function () {
+            var $tr = $(this);
+            var grades = [];
+            $tr.find('.ds-check:checked').each(function () {
+                grades.push($(this).data('grade'));
+            });
+            scopes[$tr.data('uid')] = grades;
+        });
+        $.ajax({
+            url: '/perm-groups/data-scope/save', type: 'POST',
+            contentType: 'application/json',
+            data: JSON.stringify({scopes: scopes}),
+            success: function (res) {
+                if (res.success) { location.reload(); }
+                else { toast(res.message || '保存失败'); }
+            },
+            error: function () { toast('保存失败，请重试'); }
+        });
     });
-}
 
-function deleteGroup(id) {
-    if (!confirm('确定删除此权限组？')) return;
-    $.ajax({
-        url: '/perm-groups/' + id + '/delete',
-        method: 'POST',
-        success: function() { location.reload(); },
-        error: function(xhr) {
+    /* 数据范围筛选 */
+    function filterScopeRows() {
+        var g = $('#dsGroupFilter').val();
+        var kw = ($('#dsSearch').val() || '').trim().toLowerCase();
+        $('#scopeTable tbody tr').each(function () {
+            var $tr = $(this);
+            var okG = !g || $tr.data('group') === g;
+            var okK = !kw || String($tr.data('search')).indexOf(kw) >= 0;
+            $tr.toggle(okG && okK);
+        });
+    }
+    $('#dsGroupFilter').on('change', filterScopeRows);
+    $('#dsSearch').on('input', filterScopeRows);
+
+    /* ---------- 身份新建 / 编辑 / 删除 ---------- */
+    var modal = new bootstrap.Modal(document.getElementById('groupModal'));
+
+    $('#btnNewGroup').on('click', function () {
+        $('#groupModalTitle').text('新建身份');
+        $('#gmId').val('');
+        $('#gmName').val('');
+        $('#gmScope').val('none');
+        $('#gmDesc').val('');
+        modal.show();
+    });
+
+    $('.btn-edit-group').on('click', function () {
+        var gid = $(this).data('gid');
+        $.getJSON('/perm-groups/' + gid + '/json', function (d) {
+            if (d.protected) { toast('系统保留身份不可修改'); return; }
+            $('#groupModalTitle').text('编辑身份：' + d.name);
+            $('#gmId').val(d.id);
+            $('#gmName').val(d.name);
+            $('#gmScope').val(d.scope_type);
+            $('#gmDesc').val(d.description || '');
+            modal.show();
+        });
+    });
+
+    $('#btnSaveGroup').on('click', function () {
+        var payload = {
+            id: $('#gmId').val() || null,
+            name: $('#gmName').val().trim(),
+            scope_type: $('#gmScope').val(),
+            description: $('#gmDesc').val().trim()
+        };
+        if (!payload.name) { toast('请输入身份名称'); return; }
+        $.ajax({
+            url: '/perm-groups/save', type: 'POST',
+            contentType: 'application/json',
+            data: JSON.stringify(payload),
+            success: function (res) {
+                if (res.success) { location.reload(); }
+                else { toast(res.message || '保存失败'); }
+            },
+            error: function (xhr) {
+                var msg = '保存失败';
+                try { msg = xhr.responseJSON.message || msg; } catch (e) { }
+                toast(msg);
+            }
+        });
+    });
+
+    $('.btn-del-group').on('click', function () {
+        var gid = $(this).data('gid');
+        if (!confirm('确定删除该身份？')) { return; }
+        $.post('/perm-groups/' + gid + '/delete', function (res) {
+            if (res.success) { location.reload(); }
+            else { toast(res.message || '删除失败'); }
+        }).fail(function (xhr) {
             var msg = '删除失败';
-            try { msg = JSON.parse(xhr.responseText).message; } catch(e) {}
-            alert(msg);
-        }
+            try { msg = xhr.responseJSON.message || msg; } catch (e) { }
+            toast(msg);
+        });
     });
-}
+})();
 </script>
 {% endblock %}

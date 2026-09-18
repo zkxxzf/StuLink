@@ -1,4 +1,4 @@
-# StuLink v1.9.0 2026-09-03
+# StuLink v1.9.2 2026-09-16
 # 成绩分析导出：四大模块表格 → Excel（openpyxl，与页面所见一致）
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 import io
@@ -72,7 +72,8 @@ def export_tab(tab):
     """导出模块表格 xlsx（复用各 tab 组装数据，与页面所见一致）"""
     if tab not in _TAB_LABEL:
         abort(404)
-    if tab not in _TAB_BY_ROLE.get(current_user.role, set()):
+    if (tab not in _TAB_BY_ROLE.get(current_user.role, set())
+            and not scope_service.has_user_scope(current_user)):
         abort(403)
     exam_id = request.args.get('exam_id', type=int)
     exam = Exam.query.get_or_404(exam_id)
@@ -101,7 +102,8 @@ def export_tab(tab):
                 links = scope_service.teacher_links(current_user)
                 payload = tab_service.teacher_tab(exam_id, subject=subject or None,
                                                   links=links, grade=exam.grade)
-            elif current_user.role == 'admin':
+            elif (current_user.role == 'admin'
+                    or scope_service.has_user_scope(current_user)):
                 payload = tab_service.teacher_tab(exam_id, subject=subject or None,
                                                   links=None, grade=exam.grade)
             elif scope_type == 'grade':

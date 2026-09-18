@@ -1,4 +1,4 @@
-/* StuLink 个人成绩查询与分析前端 v1.10.0
+/* StuLink 个人成绩查询与分析前端 v1.9.2
  * 表/图渲染复用 grades.js 的同一套 CSS 类与 ECharts 配置生成器，保证风格一致
  */
 (function () {

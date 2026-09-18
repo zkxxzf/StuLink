@@ -1,0 +1,122 @@
+{% extends "base.html" %}
+{% block title %}教师名单{% endblock %}
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
+    <h4 class="fw-bold mb-0">
+        <i class="bi bi-person-vcard"></i> 教师名单
+        <span class="text-muted small fw-normal ms-2">共 {{ rows|length }} 人</span>
+    </h4>
+    <div class="d-flex gap-2">
+        <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('academic.teachers_template') }}">
+            <i class="bi bi-download"></i> 下载导入模板
+        </a>
+        <button class="btn btn-sm btn-success" data-bs-toggle="modal" data-bs-target="#importModal">
+            <i class="bi bi-file-earmark-excel"></i> 批量导入
+        </button>
+    </div>
+</div>
+
+<div class="card mb-3">
+    <div class="card-body py-2">
+        <form class="row g-2 align-items-center" method="get">
+            <div class="col-auto">
+                <input name="kw" value="{{ kw }}" class="form-control form-control-sm"
+                       style="width:260px" placeholder="姓名 / 教师编号 / 手机号 / 学科">
+            </div>
+            <div class="col-auto">
+                <button class="btn btn-sm btn-primary"><i class="bi bi-search"></i> 搜索</button>
+                <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('academic.teachers_page') }}">重置</a>
+            </div>
+            <div class="col-auto text-muted small">教师名单为教务基础数据：唯一编号自动生成、身份证加密存储且仅管理员可更新</div>
+        </form>
+    </div>
+</div>
+
+<div class="card">
+    <div class="table-responsive">
+        <table class="table table-hover align-middle mb-0">
+            <thead class="table-light">
+                <tr>
+                    <th>教师编号</th><th>姓名</th><th>学科</th><th>手机号</th>
+                    <th>身份证号</th><th>登录账号</th><th>任课映射</th><th>状态</th><th>操作</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for r in rows %}
+                <tr {% if r.t.status != 'active' %}class="text-muted"{% endif %}>
+                    <td><code>{{ r.t.teacher_uid }}</code></td>
+                    <td class="fw-bold">{{ r.t.name }}</td>
+                    <td>{{ r.t.subject or '-' }}</td>
+                    <td>{{ r.t.phone or '-' }}</td>
+                    <td>
+                        {% if r.id_masked %}{{ r.id_masked }}
+                        {% else %}<span class="text-muted small">未录入</span>{% endif %}
+                    </td>
+                    <td>
+                        {% if r.account %}
+                        <i class="bi bi-check-circle text-success"></i> {{ r.account.username }}
+                        {% else %}
+                        <span class="badge bg-warning text-dark">未关联</span>
+                        {% endif %}
+                    </td>
+                    <td>{{ r.lesson_count }}</td>
+                    <td>
+                        {% if r.t.status == 'active' %}<span class="badge bg-success">在职</span>
+                        {% else %}<span class="badge bg-secondary">离职</span>{% endif %}
+                    </td>
+                    <td>
+                        <a class="btn btn-sm btn-outline-warning" title="编辑"
+                           href="{{ url_for('academic.teacher_edit', tid=r.t.id) }}">
+                            <i class="bi bi-pencil"></i>
+                        </a>
+                    </td>
+                </tr>
+                {% else %}
+                <tr>
+                    <td colspan="9" class="text-center text-muted py-5">
+                        暂无教师数据，请先点击右上角「批量导入」建立教师名单
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<div class="modal fade" id="importModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title"><i class="bi bi-file-earmark-excel"></i> 批量导入教师名单</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <form method="POST" action="{{ url_for('academic.teachers_import_upload') }}" enctype="multipart/form-data">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <div class="modal-body">
+                    <div class="mb-3">
+                        <label class="form-label" for="importFile">选择 Excel 文件</label>
+                        <input type="file" name="file" id="importFile" class="form-control" accept=".xlsx" required>
+                    </div>
+                    <div class="alert alert-info small mb-0">
+                        <i class="bi bi-info-circle"></i> <strong>导入说明：</strong>
+                        <ul class="mb-0 mt-1">
+                            <li>必填列：<strong>姓名</strong>；身份证号 / 手机号 / 学科 / 备注选填</li>
+                            <li>同一教师匹配顺序：身份证号 &gt; 手机号 &gt; 姓名</li>
+                            <li>未匹配到的教师将自动创建登录账号（初始密码导入后展示）</li>
+                            <li>上传后先预览确认，再执行导入</li>
+                        </ul>
+                        <hr class="my-2">
+                        <a href="{{ url_for('academic.teachers_template') }}" class="text-decoration-none">
+                            <i class="bi bi-download"></i> 下载标准导入模板
+                        </a>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">取消</button>
+                    <button type="submit" class="btn btn-success"><i class="bi bi-upload"></i> 上传并预览</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+{% endblock %}

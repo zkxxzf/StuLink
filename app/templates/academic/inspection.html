@@ -1,0 +1,168 @@
+{% extends "base.html" %}
+{% block title %}查课统计{% endblock %}
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
+    <h4 class="fw-bold mb-0"><i class="bi bi-clipboard2-check"></i> 查课统计</h4>
+</div>
+
+<div class="row g-2 mb-3">
+    <div class="col-6 col-md-3">
+        <div class="card text-center"><div class="card-body py-2">
+            <div class="fw-bold fs-5">{{ month_total }}</div>
+            <div class="text-muted small">本月查课次数</div>
+        </div></div>
+    </div>
+    <div class="col-6 col-md-3">
+        <div class="card text-center"><div class="card-body py-2">
+            <div class="fw-bold fs-5 text-danger">{{ month_abnormal }}</div>
+            <div class="text-muted small">本月异常次数</div>
+        </div></div>
+    </div>
+    {% if month_total %}
+    <div class="col-12 col-md-6">
+        <div class="card"><div class="card-body py-2 small">
+            <span class="text-muted">本月查课较多的教师：</span>
+            {% for uid, name, cnt in by_teacher[:6] %}
+            <span class="badge bg-light text-dark border me-1">{{ name }} × {{ cnt }}</span>
+            {% endfor %}
+        </div></div>
+    </div>
+    {% endif %}
+</div>
+
+<div class="card mb-3">
+    <div class="card-header"><i class="bi bi-plus-circle"></i> 录入查课记录</div>
+    <div class="card-body">
+        <form class="row g-2 align-items-end" method="POST"
+              action="{{ url_for('academic.inspection_add') }}">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <div class="col-6 col-md-2">
+                <label class="form-label small mb-1">日期 <span class="text-danger">*</span></label>
+                <input type="date" name="inspect_date" class="form-control form-control-sm"
+                       value="{{ today }}" required>
+            </div>
+            <div class="col-6 col-md-1">
+                <label class="form-label small mb-1">节次</label>
+                <input type="number" name="period" class="form-control form-control-sm" min="1" max="12">
+            </div>
+            <div class="col-6 col-md-1">
+                <label class="form-label small mb-1">年级 <span class="text-danger">*</span></label>
+                <select name="grade" class="form-select form-select-sm" required>
+                    <option value="">--</option>
+                    {% for g in grade_opts %}<option value="{{ g }}">{{ g }}</option>{% endfor %}
+                </select>
+            </div>
+            <div class="col-12 col-md-2">
+                <label class="form-label small mb-1">教师 <span class="text-danger">*</span></label>
+                <select name="teacher_uid" class="form-select form-select-sm" required>
+                    <option value="">-- 选择教师 --</option>
+                    {% for t in teachers %}
+                    <option value="{{ t.teacher_uid }}">{{ t.name }}（{{ t.teacher_uid }}）</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="col-6 col-md-1">
+                <label class="form-label small mb-1">班级</label>
+                <input name="class_name" class="form-control form-control-sm" maxlength="10">
+            </div>
+            <div class="col-6 col-md-1">
+                <label class="form-label small mb-1">科目</label>
+                <input name="subject" class="form-control form-control-sm" maxlength="20">
+            </div>
+            <div class="col-6 col-md-1">
+                <label class="form-label small mb-1">情况</label>
+                <select name="result" class="form-select form-select-sm">
+                    {% for k, label in results %}
+                    <option value="{{ k }}">{{ label }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="col-12 col-md-2">
+                <label class="form-label small mb-1">备注</label>
+                <input name="note" class="form-control form-control-sm" maxlength="200">
+            </div>
+            <div class="col-12 col-md-1">
+                <button class="btn btn-sm btn-primary w-100"><i class="bi bi-check-lg"></i> 保存</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<div class="card mb-3">
+    <div class="card-body py-2">
+        <form class="row g-2 align-items-center" method="get">
+            <div class="col-auto">
+                <select name="teacher_uid" class="form-select form-select-sm" style="width:200px">
+                    <option value="">全部教师</option>
+                    {% for t in teachers %}
+                    <option value="{{ t.teacher_uid }}" {% if f_teacher == t.teacher_uid %}selected{% endif %}>
+                        {{ t.name }}
+                    </option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="col-auto">
+                <select name="result" class="form-select form-select-sm" style="width:130px">
+                    <option value="">全部情况</option>
+                    {% for k, label in results %}
+                    <option value="{{ k }}" {% if f_result == k %}selected{% endif %}>{{ label }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="col-auto">
+                <input type="date" name="date_from" value="{{ f_from }}" class="form-control form-control-sm">
+            </div>
+            <div class="col-auto">至</div>
+            <div class="col-auto">
+                <input type="date" name="date_to" value="{{ f_to }}" class="form-control form-control-sm">
+            </div>
+            <div class="col-auto">
+                <button class="btn btn-sm btn-primary"><i class="bi bi-funnel"></i> 筛选</button>
+                <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('academic.inspection_page') }}">重置</a>
+            </div>
+        </form>
+    </div>
+</div>
+
+<div class="card">
+    <div class="table-responsive">
+        <table class="table table-hover table-sm align-middle mb-0">
+            <thead class="table-light">
+                <tr>
+                    <th>日期</th><th>节次</th><th>教师</th><th>班级</th>
+                    <th>科目</th><th>情况</th><th>备注</th><th>操作</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for r in records %}
+                <tr>
+                    <td>{{ r.inspect_date.strftime('%Y-%m-%d') }}</td>
+                    <td>{{ r.period or '-' }}</td>
+                    <td class="fw-bold">{{ r.teacher_name }}</td>
+                    <td>{{ r.class_name or '-' }}</td>
+                    <td>{{ r.subject or '-' }}</td>
+                    <td>
+                        {% for k, label in results %}
+                        {% if r.result == k %}
+                        <span class="badge bg-{% if k == 'normal' %}success{% elif k in ('absent', 'late') %}danger{% else %}warning text-dark{% endif %}">{{ label }}</span>
+                        {% endif %}
+                        {% endfor %}
+                    </td>
+                    <td class="small text-muted">{{ r.note or '' }}</td>
+                    <td>
+                        <form method="POST" style="display:inline"
+                              action="{{ url_for('academic.inspection_delete', rid=r.id) }}"
+                              onsubmit="return confirm('确定删除这条查课记录？')">
+                            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                            <button class="btn btn-sm btn-outline-danger"><i class="bi bi-trash"></i></button>
+                        </form>
+                    </td>
+                </tr>
+                {% else %}
+                <tr><td colspan="8" class="text-center text-muted py-4">暂无查课记录</td></tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+{% endblock %}

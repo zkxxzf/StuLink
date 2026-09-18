@@ -3,7 +3,7 @@
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
 [![Python](https://img.shields.io/badge/python-3.11+-green.svg)](https://python.org)
 [![Flask](https://img.shields.io/badge/flask-3.x-lightgrey.svg)](https://flask.palletsprojects.com/)
-[![Version](https://img.shields.io/badge/version-1.9.1-orange.svg)](https://github.com/zkxxzf/stulink)
+[![Version](https://img.shields.io/badge/version-1.9.2-orange.svg)](https://github.com/zkxxzf/stulink)
 
 面向中学的综合学生管理平台，采用双站点架构：
 
@@ -65,7 +65,7 @@ python run.py --dev
 cd alumni_app && python run.py
 
 # Docker 部署（两个容器）
-docker build -t stulink:v1.9.0 .
+docker build -t stulink:v1.9.2 .
 docker build -t stulink-alumni:v1.0.0 ./alumni_app
 docker-compose up -d
 ```
@@ -96,7 +96,7 @@ StuLink/
 │   │   └── templates/      # 登录 + 查询页
 │   └── run.py
 ├── data/                   # 数据库 + 密钥
-├── docs/                   # 设计/测试/用户文档
+├── docs/                   # 设计手册 / 使用手册 / 测试报告
 ├── scripts/                # 初始化/迁移脚本
 ├── deploy/                 # 生产部署包
 ├── Dockerfile              # 主应用镜像
@@ -106,11 +106,11 @@ StuLink/
 ## 文档
 
 - [设计文档](docs/设计文档.md)
-- [成绩管理与可视化分析系统设计文档](docs/成绩管理与可视化分析系统设计文档.md)（四大分析 + AI 分析）
-- [用户手册](docs/用户文档.md)
+- [成绩管理设计手册](docs/成绩管理设计手册.md)（模块手册 ｜ [算法手册](docs/成绩分析算法手册.md)）
+- 模块设计手册：[宿舍](docs/宿舍管理设计手册.md) ｜ [积分](docs/积分管理设计手册.md) ｜ [教务](docs/教务管理设计手册.md) ｜ [教师工作台](docs/教师工作台设计手册.md) ｜ [学生画像](docs/学生画像设计手册.md) ｜ [系统管理](docs/系统管理设计手册.md)
+- [用户手册](docs/用户文档.md)（含宿舍自动分配 4 步向导与成绩管理完整操作）
 - [部署文档](docs/部署文档.md)（Docker / 阿里云 / NAS）
-- [宿舍分配使用手册](docs/宿舍分配使用手册.md)（自动分配 4 步向导 + 算法说明 + FAQ）
-- [宿舍分配算法规范](docs/宿舍分配算法设计规范.md)
+- [宿舍分配算法手册](docs/宿舍分配算法手册.md)
 - [安全审计报告](docs/安全审计报告_20260807.md)
 - [测试报告 v1.7.1](docs/测试报告_20260808.md)
 - [历史记录与日志设计](docs/历史记录与日志系统设计.md)

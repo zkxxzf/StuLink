@@ -14,6 +14,10 @@ from app.models.grades import Exam, ExamScore, ExamBand, TeacherSubjectLink, \
     AiKey, AiGlobalKey, AiReport, AiChatMessage, AffairRoomLib  # v1.12.1 考场房间库
 from app.models.points import PointRecord
 from app.models.system_setting import SystemSetting
+from app.models.academic import Teacher, Timetable, TimetableEntry, \
+    InspectionRecord, TeacherAchievement
+from app.models.portrait import StudentProfile
+from app.models.user_data_scope import UserDataScope
 
 __all__ = ['User', 'Student', 'Room', 'BedAssignment', 'StudentAccommodation',
            'DictCategory', 'DictItem', 'OperationLog', 'AssignmentHistory',
@@ -22,5 +26,8 @@ __all__ = ['User', 'Student', 'Room', 'BedAssignment', 'StudentAccommodation',
            'Exam', 'ExamScore', 'ExamBand', 'TeacherSubjectLink',
            'AiKey', 'AiGlobalKey', 'AiReport', 'AiChatMessage',
            'AffairRoomLib', 'PointRecord',
-           'SystemSetting']
+           'SystemSetting',
+           'Teacher', 'Timetable', 'TimetableEntry',
+           'InspectionRecord', 'TeacherAchievement',
+           'StudentProfile', 'UserDataScope']
 

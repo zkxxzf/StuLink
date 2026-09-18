@@ -3,6 +3,7 @@
 from flask import Flask, render_template, request, url_for
 from config import Config
 from app.extensions import db, login_manager, csrf
+from app.utils.permission_map import default_keys as _module_keys
 from markupsafe import escape, Markup
 import gzip
 
@@ -91,6 +92,7 @@ PERMISSION_GROUPS = [
             'points.view', 'points.edit',
             'grades.view', 'grades.edit',
             'grades.import', 'grades.settings', 'grades.teachers', 'grades.student_query',
+            'academic.view',
         ],
     },
     {
@@ -146,6 +148,69 @@ PERMISSION_GROUPS = [
             'points.view', 'points.edit',
             'grades.view', 'grades.student_query',
         ],
+    },
+    # ===== v1.9.2 新增身份（身份不写死，可在权限页随时新增/调整） =====
+    {
+        'name': '校长',
+        'role': 'staff',
+        'scope_type': 'school',
+        'description': '校长：全校数据只读（如需限定年级，可在数据范围表勾选）',
+        'menu_keys': _module_keys(
+            ('students', 'read'), ('dormitory', 'read'), ('grades', 'read'),
+            ('points', 'read'), ('academic', 'read')),
+    },
+    {
+        'name': '副校长',
+        'role': 'staff',
+        'scope_type': 'school',
+        'description': '副校长：全校数据只读（如需限定年级，可在数据范围表勾选）',
+        'menu_keys': _module_keys(
+            ('students', 'read'), ('dormitory', 'read'), ('grades', 'read'),
+            ('points', 'read'), ('academic', 'read')),
+    },
+    {
+        'name': '教务主任',
+        'role': 'staff',
+        'scope_type': 'school',
+        'description': '教务主任：学生/成绩/教务写入，其余只读（全校）',
+        'menu_keys': _module_keys(
+            ('students', 'write'), ('dormitory', 'read'), ('grades', 'write'),
+            ('points', 'read'), ('academic', 'write')),
+    },
+    {
+        'name': '教务员',
+        'role': 'staff',
+        'scope_type': 'none',
+        'description': '教务员：成绩/教务写入，学生/积分只读（数据范围按用户勾选，如仅 2025 级）',
+        'menu_keys': _module_keys(
+            ('students', 'read'), ('dormitory', 'read'), ('grades', 'write'),
+            ('points', 'read'), ('academic', 'write')),
+    },
+    {
+        'name': '备课组长',
+        'role': 'staff',
+        'scope_type': 'none',
+        'description': '备课组长：成绩写入，其余只读（数据范围按用户勾选，如本年级）',
+        'menu_keys': _module_keys(
+            ('students', 'read'), ('dormitory', 'read'), ('grades', 'write'),
+            ('points', 'read'), ('academic', 'read')),
+    },
+    {
+        'name': '教研组长',
+        'role': 'staff',
+        'scope_type': 'none',
+        'description': '教研组长：成绩写入，其余只读（数据范围按用户勾选，如本年级）',
+        'menu_keys': _module_keys(
+            ('students', 'read'), ('dormitory', 'read'), ('grades', 'write'),
+            ('points', 'read'), ('academic', 'read')),
+    },
+    {
+        'name': '学生发展中心',
+        'role': 'staff',
+        'scope_type': 'none',
+        'description': '学生发展中心：仅积分写入 + 学生只读（数据范围按用户勾选）',
+        'menu_keys': _module_keys(
+            ('students', 'read'), ('points', 'write')),
     },
 ]
 
@@ -228,8 +293,19 @@ def create_app():
     from app.models.grades import (Exam, ExamScore, ExamBand, BandTemplate,
                                    TeacherSubjectLink, AiKey,
                                    AiGlobalKey, AiReport, AiChatMessage, Certificate)
+    from app.models.academic import (Teacher, Timetable, TimetableEntry,
+                                     InspectionRecord, TeacherAchievement)
+    from app.models.portrait import StudentProfile  # noqa: F401 占位模块注册
     with app.app_context():
-        db.create_all()
+        # v1.15.0 模块故障隔离：逐库建表，单个模块库异常不阻塞系统启动。
+        # system 为根基库最先建；其他模块库失败仅告警（对应模块暂不可用），
+        # 系统管理与基础数据不受影响。
+        for _bind in (None, 'dormitory', 'history', 'grades', 'points',
+                      'academic', 'portrait'):
+            try:
+                db.create_all(bind_key=_bind)
+            except Exception as _e:  # noqa: BLE001
+                print(f'[WARN] 数据库 {_bind or "system"} 初始化失败（该模块暂不可用）：{_e}')
         
         if not User.query.filter_by(username='admin').first():
             admin = User(username='admin', real_name='系统管理员', role='admin', must_change_pwd=False)

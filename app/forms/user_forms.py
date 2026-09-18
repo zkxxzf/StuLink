@@ -16,6 +16,7 @@ class UserForm(FlaskForm):
         ('homeroom_teacher', '班主任'),
         ('grade_leader', '年级长'),
         ('school_viewer', '全校组'),
+        ('staff', '教职人员'),
     ], validators=[DataRequired()])
     permission_group_id = SelectField('权限组', validators=[Optional()], coerce=int)
     grade = SelectField('管理年级', validators=[Optional()])

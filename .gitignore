@@ -66,3 +66,5 @@ scripts/tmp_*
 docs/.js
 # 含真实考号姓名的参考表格（隐私，勿提交）
 docs/*.xlsm
+# 临时部署打包文件（不提交）
+_deploy_*.tar.gz

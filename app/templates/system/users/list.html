@@ -1,8 +1,13 @@
 {% extends "base.html" %}
 {% block title %}教师管理{% endblock %}
 {% block content %}
-<div class="d-flex justify-content-between align-items-center mb-3">
-    <h4 class="fw-bold mb-0"><i class="bi bi-person-gear"></i> 教师管理</h4>
+<div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
+    <h4 class="fw-bold mb-0">
+        <i class="bi bi-person-gear"></i> 教师管理
+        <span class="text-muted small fw-normal ms-2">
+            共 {{ users|length }} 个账号 / {{ groups|length }} 个分组
+        </span>
+    </h4>
     <div class="d-flex gap-2">
         <button class="btn btn-success" data-bs-toggle="modal" data-bs-target="#importTeacherModal">
             <i class="bi bi-file-earmark-excel"></i> 批量导入
@@ -13,41 +18,84 @@
     </div>
 </div>
 
-<div class="card">
-    <div class="card-body p-0">
-        <table class="table table-hover mb-0">
-            <thead class="table-light">
-                <tr><th>用户名</th><th>姓名</th><th>角色</th><th>权限组</th><th>状态</th><th>操作</th></tr>
-            </thead>
-            <tbody>
-                {% for u in users %}
-                <tr>
-                    <td>{{ u.username }}</td>
-                    <td class="fw-bold">{{ u.real_name }}</td>
-                    <td><span class="badge bg-{% if u.role=='admin' %}danger{% elif u.role=='dorm_manager' %}warning text-dark{% elif u.role=='homeroom_teacher' %}primary{% elif u.role=='grade_leader' %}info{% elif u.role=='school_viewer' %}success{% else %}secondary{% endif %}">{{ u.role_display }}</span></td>
-                    <td>{{ u.permission_group.name if u.permission_group else '-' }}</td>
-                    <td>{% if u.is_active %}<span class="badge bg-success">启用</span>{% else %}<span class="badge bg-secondary">禁用</span>{% endif %}</td>
-                    <td>
-                        <a href="{{ url_for('users.edit', id=u.id) }}" class="btn btn-sm btn-outline-warning"><i class="bi bi-pencil"></i></a>
-                        <form method="POST" action="{{ url_for('users.toggle', id=u.id) }}" style="display:inline;">
-                            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                            <button type="submit" class="btn btn-sm btn-outline-{% if u.is_active %}secondary{% else %}success{% endif %}"
-                                    title="{% if u.is_active %}禁用{% else %}启用{% endif %}">
-                                <i class="bi bi-{% if u.is_active %}pause{% else %}play{% endif %}-circle"></i>
-                            </button>
-                        </form>
-                        <form method="POST" action="{{ url_for('users.reset_password', id=u.id) }}" style="display:inline;"
-                              onsubmit="return confirm('确定重置 {{ u.real_name }} 的密码为 123456？')">
-                            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                            <button type="submit" class="btn btn-sm btn-outline-info" title="重置密码"><i class="bi bi-key"></i></button>
-                        </form>
-                    </td>
-                </tr>
-                {% endfor %}
-            </tbody>
-        </table>
+<div class="card mb-3">
+    <div class="card-body py-2">
+        <div class="row g-2 align-items-center">
+            <div class="col-auto">
+                <input id="userSearch" class="form-control form-control-sm" style="width:280px"
+                       placeholder="搜索姓名 / 用户名 / 分组（自动定位分组）">
+            </div>
+            <div class="col-auto">
+                <button id="expandAll" class="btn btn-sm btn-outline-secondary">
+                    <i class="bi bi-arrows-expand"></i> 全部展开
+                </button>
+                <button id="collapseAll" class="btn btn-sm btn-outline-secondary">
+                    <i class="bi bi-arrows-collapse"></i> 全部折叠
+                </button>
+            </div>
+            <div class="col-auto text-muted small">按权限组分组展示，点击组标题可折叠</div>
+        </div>
     </div>
 </div>
+
+{% for gname, gusers in groups.items() %}
+<div class="card mb-3 user-group">
+    <div class="card-header d-flex justify-content-between align-items-center user-group-head"
+         style="cursor:pointer" data-bs-toggle="collapse" data-bs-target="#grp-{{ loop.index }}"
+         aria-expanded="true">
+        <span class="fw-bold">
+            <i class="bi bi-chevron-down caret me-1"></i>{{ gname }}
+            <span class="badge bg-secondary ms-1">{{ gusers|length }} 人</span>
+        </span>
+        <small class="text-muted">点击折叠 / 展开</small>
+    </div>
+    <div class="collapse show" id="grp-{{ loop.index }}">
+        <div class="table-responsive">
+            <table class="table table-hover mb-0 align-middle">
+                <thead class="table-light">
+                    <tr><th>用户名</th><th>姓名</th><th>角色</th><th>状态</th><th>操作</th></tr>
+                </thead>
+                <tbody>
+                    {% for u in gusers %}
+                    <tr data-search="{{ (u.real_name ~ ' ' ~ u.username ~ ' ' ~ gname)|lower }}">
+                        <td>{{ u.username }}</td>
+                        <td class="fw-bold">{{ u.real_name }}</td>
+                        <td><span class="badge bg-{% if u.role=='admin' %}danger{% elif u.role=='dorm_manager' %}warning text-dark{% elif u.role=='homeroom_teacher' %}primary{% elif u.role=='grade_leader' %}info{% elif u.role=='school_viewer' %}success{% else %}secondary{% endif %}">{{ u.display_role }}</span></td>
+                        <td>{% if u.is_active %}<span class="badge bg-success">启用</span>{% else %}<span class="badge bg-secondary">禁用</span>{% endif %}</td>
+                        <td>
+                            <a href="{{ url_for('users.edit', id=u.id) }}" class="btn btn-sm btn-outline-warning"><i class="bi bi-pencil"></i></a>
+                            <form method="POST" action="{{ url_for('users.toggle', id=u.id) }}" style="display:inline;">
+                                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                                {% if u.role == 'admin' and u.is_active %}
+                                <button type="button" class="btn btn-sm btn-outline-secondary" disabled
+                                        title="管理员账号不可禁用">
+                                    <i class="bi bi-shield-lock"></i>
+                                </button>
+                                {% else %}
+                                <button type="submit" class="btn btn-sm btn-outline-{% if u.is_active %}secondary{% else %}success{% endif %}"
+                                        title="{% if u.is_active %}禁用{% else %}启用{% endif %}">
+                                    <i class="bi bi-{% if u.is_active %}pause{% else %}play{% endif %}-circle"></i>
+                                </button>
+                                {% endif %}
+                            </form>
+                            <form method="POST" action="{{ url_for('users.reset_password', id=u.id) }}" style="display:inline;"
+                                  onsubmit="return confirm('确定重置 {{ u.real_name }} 的密码为 123456？')">
+                                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                                <button type="submit" class="btn btn-sm btn-outline-info" title="重置密码"><i class="bi bi-key"></i></button>
+                            </form>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+{% else %}
+<div class="card">
+    <div class="card-body text-center text-muted py-5">暂无账号，请点击右上角「新建教师」或「批量导入」</div>
+</div>
+{% endfor %}
 
 <!-- 批量导入教师弹窗 -->
 <div class="modal fade" id="importTeacherModal" tabindex="-1">
@@ -71,6 +119,7 @@
                             <li>手机号即登录名，默认密码=手机号</li>
                             <li>首次登录强制修改密码</li>
                             <li>已有手机号不会重复创建</li>
+                            <li>如需建立教务教师名单（推荐），请使用「教务管理 - 教师名单」导入</li>
                         </ul>
                         <hr class="my-2">
                         <a href="{{ url_for('users.download_teacher_template') }}" class="text-decoration-none">
@@ -88,5 +137,43 @@
         </div>
     </div>
 </div>
+{% endblock %}
 
+{% block extra_js %}
+<script>
+(function () {
+    // v1.14.0：分组折叠 + 搜索定位（人数多时快速找人）
+    var $search = $('#userSearch');
+
+    function applyFilter() {
+        var kw = ($search.val() || '').trim().toLowerCase();
+        $('.user-group').each(function () {
+            var $g = $(this), hit = 0;
+            $g.find('tbody tr[data-search]').each(function () {
+                var ok = !kw || ($(this).attr('data-search') || '').indexOf(kw) >= 0;
+                $(this).toggle(ok);
+                if (ok) { hit++; }
+            });
+            $g.toggle(!kw || hit > 0);
+            if (kw && hit > 0) {
+                $g.find('.collapse').addClass('show');   // 搜索时自动展开命中的组
+            }
+        });
+    }
+
+    $search.on('input', applyFilter);
+    $('#expandAll').on('click', function () { $('.user-group .collapse').addClass('show'); });
+    $('#collapseAll').on('click', function () { $('.user-group .collapse').removeClass('show'); });
+
+    // 折叠状态时箭头旋转
+    function syncCaret($collapse) {
+        var $caret = $collapse.closest('.user-group').find('.caret');
+        var open = $collapse.hasClass('show');
+        $caret.toggleClass('bi-chevron-down', open);
+        $caret.toggleClass('bi-chevron-right', !open);
+    }
+    $('.user-group .collapse').each(function () { syncCaret($(this)); })
+        .on('shown.bs.collapse hidden.bs.collapse', function () { syncCaret($(this)); });
+})();
+</script>
 {% endblock %}

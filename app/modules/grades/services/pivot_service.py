@@ -1,4 +1,4 @@
-# StuLink v1.11.0 2026-09-13
+# StuLink v1.9.2 2026-09-16
 # 分层上线统计（各班各层上线人数/上线率）+ 自由表（行/列/指标自由组合的交叉分析）
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 import statistics

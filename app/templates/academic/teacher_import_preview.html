@@ -1,0 +1,116 @@
+{% extends "base.html" %}
+{% block title %}导入预览 - 教师名单{% endblock %}
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
+    <h4 class="fw-bold mb-0"><i class="bi bi-clipboard-check"></i> 导入预览</h4>
+    <span class="text-muted small">文件：{{ fname }}</span>
+</div>
+
+<div class="row g-2 mb-3">
+    {% for label, key, cls in [
+        ('新建教师', 'create', 'primary'), ('更新教师', 'update', 'info'),
+        ('冲突待处理', 'conflict', 'warning'), ('无效行', 'invalid', 'secondary'),
+        ('新建账号', 'account_create', 'success'), ('关联账号', 'account_bind', 'success'),
+    ] %}
+    <div class="col-6 col-md-2">
+        <div class="card text-center">
+            <div class="card-body py-2">
+                <div class="fw-bold fs-5 text-{{ cls }}">{{ plan.summary[key] }}</div>
+                <div class="text-muted small">{{ label }}</div>
+            </div>
+        </div>
+    </div>
+    {% endfor %}
+</div>
+
+{% if plan.errors %}
+<div class="alert alert-warning">
+    <strong><i class="bi bi-exclamation-triangle"></i> 以下行存在错误，将被跳过：</strong>
+    <ul class="mb-0 mt-1 small">
+        {% for row_no, msg in plan.errors %}
+        <li>第 {{ row_no }} 行：{{ msg }}</li>
+        {% endfor %}
+    </ul>
+</div>
+{% endif %}
+
+<form method="POST" action="{{ url_for('academic.teachers_import_confirm') }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <input type="hidden" name="token" value="{{ token }}">
+
+    <div class="card mb-3">
+        <div class="table-responsive">
+            <table class="table table-sm align-middle mb-0">
+                <thead class="table-light">
+                    <tr>
+                        <th>行号</th><th>处理</th><th>姓名</th><th>身份证号</th>
+                        <th>手机号</th><th>学科</th><th>说明</th><th>账号处理</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for it in plan['items'] %}
+                    <tr {% if it.action == 'conflict' %}class="table-warning"{% endif %}>
+                        <td class="text-muted">{{ it.row_no }}</td>
+                        <td>
+                            {% if it.action == 'create' %}<span class="badge bg-primary">新建</span>
+                            {% elif it.action == 'update' %}<span class="badge bg-info text-dark">更新</span>
+                            {% else %}<span class="badge bg-warning text-dark">冲突</span>{% endif %}
+                        </td>
+                        <td class="fw-bold">{{ it.name }}</td>
+                        <td>
+                            {% if it.id_masked %}{{ it.id_masked }}
+                            {% else %}<span class="text-muted small">未提供（可后补）</span>{% endif %}
+                        </td>
+                        <td>{{ it.phone or '-' }}</td>
+                        <td>{{ it.subject or '-' }}</td>
+                        <td class="small">
+                            {% if it.conflict_reason %}
+                            <span class="text-danger">{{ it.conflict_reason }}</span>
+                            {% endif %}
+                            {% if it.action == 'create' %}
+                            <span class="text-muted">将生成编号 <code>{{ it.teacher_uid }}</code></span>
+                            {% endif %}
+                            {% for k, v in (it.changes or {}).items() %}
+                            <div class="text-muted">{{ v }}</div>
+                            {% endfor %}
+                            {% if not it.conflict_reason and not it.changes and it.action == 'update' %}
+                            <span class="text-muted">无字段变化</span>
+                            {% endif %}
+                        </td>
+                        <td class="small">
+                            {% set acc = it.account %}
+                            {% if acc.status == 'bind' %}
+                            <i class="bi bi-check-circle text-success"></i> 关联已有账号
+                            <code>{{ acc.username }}</code>
+                            {% elif acc.status == 'to_create' %}
+                            <div class="d-flex align-items-center gap-1">
+                                <span class="badge bg-success">新建账号</span>
+                                <input class="form-control form-control-sm" style="width:130px"
+                                       name="un_{{ it.idx }}" value="{{ acc.username }}"
+                                       placeholder="登录用户名">
+                            </div>
+                            {% elif acc.status == 'conflict' %}
+                            <span class="text-danger">{{ acc.reason or '需人工处理' }}</span>
+                            {% else %}
+                            <span class="text-muted">-</span>
+                            {% endif %}
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <div class="d-flex gap-2">
+        <button type="submit" class="btn btn-success">
+            <i class="bi bi-check-lg"></i> 确认导入
+        </button>
+        <a class="btn btn-outline-secondary" href="{{ url_for('academic.teachers_page') }}">取消返回</a>
+        <span class="text-muted small align-self-center">
+            确认后将写入 {{ plan.summary['create'] + plan.summary['update'] }} 条教师记录，
+            新建 {{ plan.summary['account_create'] }} 个账号（用户名可在上表修改）
+        </span>
+    </div>
+</form>
+{% endblock %}

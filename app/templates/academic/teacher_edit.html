@@ -1,0 +1,90 @@
+{% extends "base.html" %}
+{% block title %}编辑教师 - {{ t.name }}{% endblock %}
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+    <h4 class="fw-bold mb-0"><i class="bi bi-pencil-square"></i> 编辑教师：{{ t.name }}</h4>
+    <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('academic.teachers_page') }}">
+        <i class="bi bi-arrow-left"></i> 返回名单
+    </a>
+</div>
+
+<div class="row">
+    <div class="col-lg-7">
+        <div class="card">
+            <div class="card-body">
+                <form method="POST">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+
+                    <div class="mb-3">
+                        <label class="form-label">教师编号（系统生成，不可更改）</label>
+                        <input class="form-control bg-light" value="{{ t.teacher_uid }}" disabled>
+                    </div>
+
+                    <div class="mb-3">
+                        <label class="form-label">姓名 <span class="text-danger">*</span></label>
+                        <input name="name" class="form-control" value="{{ t.name }}" required>
+                    </div>
+
+                    <div class="mb-3">
+                        <label class="form-label">身份证号</label>
+                        <input name="id_card" class="form-control" maxlength="18"
+                               placeholder="{% if id_masked %}已录入：{{ id_masked }}（留空保持不变）{% else %}未录入，可在此补录{% endif %}">
+                        <small class="text-muted">
+                            <i class="bi bi-shield-lock"></i> 加密存储、全局唯一；一经录入教师本人不可修改，仅管理员可在此更新。
+                        </small>
+                    </div>
+
+                    <div class="row">
+                        <div class="col-md-6 mb-3">
+                            <label class="form-label">手机号（可作登录账号）</label>
+                            <input name="phone" class="form-control" maxlength="11" value="{{ t.phone or '' }}">
+                        </div>
+                        <div class="col-md-6 mb-3">
+                            <label class="form-label">任教学科</label>
+                            <input name="subject" class="form-control" maxlength="20" value="{{ t.subject or '' }}">
+                        </div>
+                    </div>
+
+                    <div class="mb-3">
+                        <label class="form-label">状态</label>
+                        <select name="status" class="form-select">
+                            <option value="active" {% if t.status == 'active' %}selected{% endif %}>在职</option>
+                            <option value="left" {% if t.status != 'active' %}selected{% endif %}>离职</option>
+                        </select>
+                    </div>
+
+                    <div class="mb-3">
+                        <label class="form-label">备注</label>
+                        <input name="note" class="form-control" maxlength="200" value="{{ t.note or '' }}">
+                    </div>
+
+                    <div class="d-flex gap-2">
+                        <button class="btn btn-primary"><i class="bi bi-check-lg"></i> 保存</button>
+                        <a class="btn btn-outline-secondary" href="{{ url_for('academic.teachers_page') }}">取消</a>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <div class="col-lg-5">
+        <div class="card">
+            <div class="card-header"><i class="bi bi-link-45deg"></i> 账号关联信息</div>
+            <div class="card-body small">
+                {% if t.user_id %}
+                <p class="mb-1"><span class="text-muted">登录账号：</span>已关联（user_id={{ t.user_id }}）</p>
+                {% else %}
+                <p class="mb-1 text-warning"><span class="text-muted">登录账号：</span>未关联，可在导入时自动创建或到「教师管理」页新建后重新导入匹配</p>
+                {% endif %}
+                <p class="mb-1 text-muted">创建时间：{{ t.created_at.strftime('%Y-%m-%d %H:%M') if t.created_at else '-' }}</p>
+                <p class="mb-0 text-muted">更新时间：{{ t.updated_at.strftime('%Y-%m-%d %H:%M') if t.updated_at else '-' }}</p>
+                <hr>
+                <p class="mb-0 text-muted">
+                    任课映射（成绩管理）与教师工作台均通过「登录账号关联」自动打通；
+                    导入教师名单时系统会自动匹配或创建账号。
+                </p>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

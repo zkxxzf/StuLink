@@ -24,7 +24,16 @@ def _generate_password():
 @perm_required('system.users')
 def list_users():
     users = User.query.order_by(User.role, User.username).all()
-    return render_template('system/users/list.html', users=users)
+    # v1.14.0：按权限组分组展示（组内按角色/用户名排序），支持分组折叠与搜索
+    from collections import OrderedDict
+    grouped = OrderedDict()
+    for u in users:
+        gname = u.permission_group.name if u.permission_group else '未分组'
+        grouped.setdefault(gname, []).append(u)
+    group_order = {g.name: g.id for g in PermissionGroup.query.all()}
+    groups = OrderedDict(
+        (g, grouped[g]) for g in sorted(grouped, key=lambda x: (group_order.get(x, 9999), x)))
+    return render_template('system/users/list.html', users=users, groups=groups)
 
 
 @bp.route('/create', methods=['GET', 'POST'])
@@ -93,6 +102,11 @@ def edit(id):
         grade = form.grade.data or None
         class_name = form.class_name.data or None
 
+        # v1.9.2 防误操作：管理员账号的角色不可修改
+        if user.role == 'admin' and role != 'admin':
+            flash('管理员账号的角色不可修改（防止系统失去管理入口）', 'danger')
+            return render_template('system/users/form.html', form=form, title='编辑用户')
+
         if role == 'homeroom_teacher':
             if not grade or not class_name:
                 flash('班主任必须指定年级和班级', 'danger')
@@ -130,6 +144,13 @@ def edit(id):
 @perm_required('system.users')
 def toggle(id):
     user = User.query.get_or_404(id)
+    # v1.9.2 防误操作：管理员账号不可禁用；不能禁用当前登录账号
+    if user.role == 'admin' and user.is_active:
+        flash('管理员账号不允许禁用（防止系统无法登录）', 'danger')
+        return redirect(url_for('users.list_users'))
+    if user.id == current_user.id and user.is_active:
+        flash('不能禁用当前登录的账号', 'danger')
+        return redirect(url_for('users.list_users'))
     user.is_active = not user.is_active
     db.session.commit()
     status = '启用' if user.is_active else '禁用'
