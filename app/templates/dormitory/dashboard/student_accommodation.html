@@ -93,7 +93,7 @@
                         <option value="{{ dst }}" {{ 'selected' if request.args.get('day_student_type')==dst }}>{{ dst }}</option>
                         {% endfor %}
                     </select></th>
-                    <th><input type="text" name="room_number" placeholder="房间号"
+                    <th><input type="text" name="room_number" placeholder="宿舍（如 西201）"
                            value="{{ request.args.get('room_number','') }}" onchange="document.getElementById('filterForm').submit()"></th>
                     <th></th><th></th><th></th>
                 </tr>

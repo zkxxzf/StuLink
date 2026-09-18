@@ -140,6 +140,10 @@
                href="{{ url_for('rooms.list_rooms') }}">
                 <i class="bi bi-door-open"></i>宿舍列表
             </a>
+            <a class="nav-link {% if request.endpoint == 'dashboard.search_student_accommodation' %}active{% endif %}"
+               href="{{ url_for('dashboard.search_student_accommodation') }}">
+                <i class="bi bi-search"></i>学生住宿
+            </a>
             <a class="nav-link {% if request.endpoint == 'rooms.assign_visual' %}active{% endif %}"
                href="{{ url_for('rooms.assign_visual') }}">
                 <i class="bi bi-diagram-3"></i>分配宿舍
