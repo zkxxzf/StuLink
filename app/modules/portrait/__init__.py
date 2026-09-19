@@ -1,4 +1,4 @@
-# StuLink v1.9.2 2026-09-16
+# StuLink v1.9.3 2026-09-19
 # 学生画像模块（占位）：规划中，仅提供说明页面与独立数据库
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 from flask import Blueprint, render_template
