@@ -6,6 +6,8 @@ from flask_login import login_required, current_user
 
 from app.modules.academic.services import teacher_service
 from app.modules.workbench.services import class_overview_service as svc
+from app.modules.workbench.services import scope_service
+from app.utils.decorators import perm_required
 
 bp = Blueprint('overview', __name__, url_prefix='/workbench')
 
@@ -19,6 +21,7 @@ def _teacher_or_none():
 
 @bp.route('/class-overview')
 @login_required
+@perm_required('workbench.class_view')
 def class_overview_page():
     """班级概览页：管辖班级卡片网格"""
     teacher = _teacher_or_none()
@@ -38,6 +41,7 @@ def class_overview_page():
 
 @bp.route('/students')
 @login_required
+@perm_required('workbench.class_view')
 def students_page():
     """学生信息页：班级切换 + 搜索 + 表格"""
     teacher = _teacher_or_none()
@@ -51,6 +55,9 @@ def students_page():
     # 默认选中第一个班级
     grade = request.args.get('grade', classes_info[0][0])
     class_name = request.args.get('class_name', classes_info[0][1])
+    # 越界（非管辖班级）回退到默认班级
+    if not scope_service.is_class_in_scope(current_user, grade, class_name):
+        grade, class_name = classes_info[0][0], classes_info[0][1]
     search = request.args.get('search', '').strip()
     page = int(request.args.get('page', 1))
 
@@ -63,6 +70,7 @@ def students_page():
 
 @bp.route('/api/students')
 @login_required
+@perm_required('workbench.class_view')
 def students_api():
     """学生数据 JSON（供 AJAX 或外部调用）"""
     user_id = current_user.id
@@ -70,6 +78,8 @@ def students_api():
     class_name = request.args.get('class_name', '')
     if not grade or not class_name:
         return jsonify({'error': '缺少 grade 或 class_name 参数'}), 400
+    if not scope_service.is_class_in_scope(current_user, grade, class_name):
+        return jsonify({'error': '无该班级的访问权限（超出管辖范围）'}), 403
 
     search = request.args.get('search', '').strip()
     page = int(request.args.get('page', 1))
@@ -101,6 +111,7 @@ def students_api():
 
 @bp.route('/grades')
 @login_required
+@perm_required('workbench.class_view')
 def grades_page():
     """成绩概览页：按考试展示任课班级成绩摘要"""
     teacher = _teacher_or_none()
@@ -116,6 +127,7 @@ def grades_page():
 
 @bp.route('/api/grade-summary')
 @login_required
+@perm_required('workbench.class_view')
 def grade_summary_api():
     """成绩摘要 JSON"""
     teacher = _teacher_or_none()
@@ -131,6 +143,7 @@ def grade_summary_api():
 
 @bp.route('/points')
 @login_required
+@perm_required('workbench.class_view')
 def points_page():
     """积分概览页：管辖班级积分统计"""
     teacher = _teacher_or_none()
@@ -144,6 +157,7 @@ def points_page():
 
 @bp.route('/api/points-summary')
 @login_required
+@perm_required('workbench.class_view')
 def points_summary_api():
     """积分汇总 JSON"""
     user_id = current_user.id

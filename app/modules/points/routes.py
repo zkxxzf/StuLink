@@ -301,14 +301,14 @@ def api_record_delete(rid):
 
 @bp.route('/import')
 @login_required
-@perm_required('points.edit')
+@perm_required('points.import')
 def import_page():
     return render_template('points/import.html')
 
 
 @bp.route('/template')
 @login_required
-@perm_required('points.edit')
+@perm_required('points.import')
 def download_template():
     from app.modules.points.services.import_service import generate_template
     out = generate_template()
@@ -319,7 +319,7 @@ def download_template():
 
 @bp.route('/import/upload', methods=['POST'])
 @login_required
-@perm_required('points.edit')
+@perm_required('points.import')
 def import_upload():
     from app.modules.points.services.import_service import parse_points_excel, validate_records
     f = request.files.get('file')
@@ -347,14 +347,21 @@ def import_upload():
 
 @bp.route('/import/confirm', methods=['POST'])
 @login_required
-@perm_required('points.edit')
+@perm_required('points.import')
 def import_confirm():
-    from app.modules.points.services.import_service import import_records
+    from app.modules.points.services.import_service import import_records, validate_records
     payload = request.get_json(silent=True) or {}
     rows = payload.get('rows', [])
     if not rows:
         return jsonify(success=False, message='没有可导入的数据'), 400
-    count = import_records(rows, current_user.id, current_user.real_name)
+    if len(rows) > 3000:
+        return jsonify(success=False, message='单次最多导入 3000 条'), 400
+    # 服务端重新校验（不信任前端提交的数据）
+    valid, invalid = validate_records(rows)
+    if invalid:
+        return jsonify(success=False,
+                       message=f'有 {len(invalid)} 条数据未通过校验，请重新上传文件'), 400
+    count = import_records(valid, current_user.id, current_user.real_name)
     log_operation(current_user, '批量导入', '积分', None,
                   f'导入 {count} 条积分记录', module='points')
     return jsonify(success=True, message=f'成功导入 {count} 条记录')
@@ -364,7 +371,7 @@ def import_confirm():
 
 @bp.route('/export')
 @login_required
-@perm_required('points.view')
+@perm_required('points.export')
 def export_excel():
     import openpyxl
     from openpyxl.styles import Font, Alignment, PatternFill, Border, Side
@@ -407,14 +414,14 @@ def export_excel():
 
 @bp.route('/rules')
 @login_required
-@perm_required('points.view')
+@perm_required('points.rules')
 def rules_page():
     return render_template('points/rules.html')
 
 
 @bp.route('/api/rules')
 @login_required
-@perm_required('points.view')
+@perm_required('points.rules')
 def api_rules_list():
     rules = PointRuleTemplate.query.order_by(PointRuleTemplate.category,
                                               PointRuleTemplate.default_points.desc()).all()
@@ -423,7 +430,7 @@ def api_rules_list():
 
 @bp.route('/api/rules', methods=['POST'])
 @login_required
-@perm_required('points.edit')
+@perm_required('points.rules')
 def api_rules_create():
     data = request.get_json(silent=True) or {}
     name = (data.get('name') or '').strip()[:50]

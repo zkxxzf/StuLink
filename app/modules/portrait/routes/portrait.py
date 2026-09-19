@@ -105,6 +105,14 @@ def edit_comment(comment_id):
     if not content:
         return jsonify(success=False, message='评语内容不能为空')
 
+    # 归属校验：仅作者本人或系统管理员可编辑
+    from app.models.portrait import PortraitComment
+    c = PortraitComment.query.get(comment_id)
+    if not c:
+        return jsonify(success=False, message='评语不存在')
+    if c.teacher_id != current_user.id and not current_user.has_perm('system.settings'):
+        return jsonify(success=False, message='无权编辑他人评语'), 403
+
     result = portrait_service.edit_comment(
         comment_id=comment_id,
         content=content,
@@ -124,6 +132,12 @@ def edit_comment(comment_id):
 @perm_required('portrait.edit')
 def delete_comment(comment_id):
     """删除评语"""
+    from app.models.portrait import PortraitComment
+    c = PortraitComment.query.get(comment_id)
+    if not c:
+        return jsonify(success=False, message='评语不存在')
+    if c.teacher_id != current_user.id and not current_user.has_perm('system.settings'):
+        return jsonify(success=False, message='无权删除他人评语'), 403
     success = portrait_service.delete_comment(comment_id)
     if not success:
         return jsonify(success=False, message='评语不存在')
@@ -177,6 +191,12 @@ def add_event():
 @perm_required('portrait.edit')
 def delete_event(event_id):
     """删除事件"""
+    from app.models.portrait import PortraitEvent
+    e = PortraitEvent.query.get(event_id)
+    if not e:
+        return jsonify(success=False, message='事件不存在')
+    if e.created_by != current_user.id and not current_user.has_perm('system.settings'):
+        return jsonify(success=False, message='无权删除他人事件'), 403
     success = portrait_service.delete_event(event_id)
     if not success:
         return jsonify(success=False, message='事件不存在')

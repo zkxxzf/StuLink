@@ -11,6 +11,8 @@ from app.modules.workbench.services.work_record_service import (
     add_record, get_records, update_record, delete_record, get_record_detail,
 )
 from app.modules.workbench.services.class_overview_service import get_managed_classes
+from app.modules.workbench.services import scope_service
+from app.utils.decorators import perm_required
 from app.models.academic import RECORD_TYPES
 from app.models import Student
 
@@ -29,6 +31,7 @@ def _get_classes(user_id):
 
 @bp.route('/')
 @login_required
+@perm_required('workbench.records')
 def records_page():
     """工作记录列表页（分页 + 类型/班级筛选）"""
     teacher = _teacher_or_none()
@@ -60,6 +63,7 @@ def records_page():
 
 @bp.route('/add', methods=['POST'])
 @login_required
+@perm_required('workbench.records')
 def record_add():
     """新增工作记录"""
     teacher = _teacher_or_none()
@@ -69,6 +73,9 @@ def record_add():
 
     record_type = request.form.get('record_type', '')
     class_name = request.form.get('class_name', '')
+    if class_name and not scope_service.is_class_in_scope(current_user, '', class_name):
+        flash('无该班级的操作权限（超出管辖范围）', 'danger')
+        return redirect(url_for('records.records_page'))
     rec_date = request.form.get('date', '')
     title = request.form.get('title', '')
     content = request.form.get('content', '')
@@ -97,6 +104,7 @@ def record_add():
 
 @bp.route('/<int:record_id>/edit', methods=['POST'])
 @login_required
+@perm_required('workbench.records')
 def record_edit(record_id):
     """编辑工作记录"""
     teacher = _teacher_or_none()
@@ -124,6 +132,7 @@ def record_edit(record_id):
 
 @bp.route('/<int:record_id>/delete', methods=['POST'])
 @login_required
+@perm_required('workbench.records')
 def record_delete(record_id):
     """删除工作记录"""
     teacher = _teacher_or_none()
@@ -141,6 +150,7 @@ def record_delete(record_id):
 
 @bp.route('/api/<int:record_id>')
 @login_required
+@perm_required('workbench.records')
 def record_detail_api(record_id):
     """记录详情 JSON（编辑模态框加载用）"""
     teacher = _teacher_or_none()
@@ -165,6 +175,7 @@ def record_detail_api(record_id):
 
 @bp.route('/api/student-lookup')
 @login_required
+@perm_required('workbench.records')
 def student_lookup():
     """按学号查学生姓名（家访/谈话关联学生用）"""
     no = request.args.get('no', '').strip()

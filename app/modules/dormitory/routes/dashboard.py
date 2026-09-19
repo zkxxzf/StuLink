@@ -303,7 +303,6 @@ def batch_edit_dormitory():
     acc_fields = {
         'boarding_type': '住校/走读',
         'day_student_type': '出门权限',
-        'textbook': '课本',
         'teacher_notes': '班主任备注',
     }
 

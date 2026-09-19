@@ -9,12 +9,15 @@ from app.modules.workbench.services.attendance_service import (
     get_class_students, get_teacher_classes, export_attendance,
 )
 from app.models.academic import ATTENDANCE_STATUS
+from app.modules.workbench.services import scope_service
+from app.utils.decorators import perm_required
 
 bp = Blueprint('attendance', __name__, url_prefix='/workbench/attendance')
 
 
 @bp.route('/')
 @login_required
+@perm_required('workbench.attendance_view')
 def attendance_page():
     """考勤管理页面"""
     classes = get_teacher_classes(current_user.id)
@@ -23,6 +26,9 @@ def attendance_page():
 
     sel_grade = request.args.get('grade', default_grade)
     sel_class = request.args.get('class_name', default_class)
+    # 越界（非管辖班级）回退到默认班级
+    if sel_class and not scope_service.is_class_in_scope(current_user, sel_grade, sel_class):
+        sel_grade, sel_class = default_grade, default_class
     date_from = request.args.get('date_from', '')
     date_to = request.args.get('date_to', '')
     page = request.args.get('page', 1, type=int)
@@ -51,6 +57,7 @@ def attendance_page():
 
 @bp.route('/record', methods=['POST'])
 @login_required
+@perm_required('workbench.attendance')
 def attendance_record():
     """批量记录考勤"""
     attend_date = request.form.get('attend_date', '')
@@ -62,10 +69,17 @@ def attendance_record():
         flash('请选择日期和班级', 'danger')
         return redirect(url_for('attendance.attendance_page'))
 
+    if not scope_service.is_class_in_scope(current_user, grade, class_name):
+        flash('无该班级的操作权限（超出管辖范围）', 'danger')
+        return redirect(url_for('attendance.attendance_page'))
+
     records_list = []
+    valid_nos = {s.student_number for s in get_class_students(class_name, grade)}
     for key, value in request.form.items():
         if key.startswith('status_'):
             student_no = key[7:]
+            if student_no not in valid_nos:
+                continue
             student_name = request.form.get(f'name_{student_no}', '')
             remark = request.form.get(f'remark_{student_no}', '').strip()
             records_list.append({
@@ -91,6 +105,7 @@ def attendance_record():
 
 @bp.route('/export')
 @login_required
+@perm_required('workbench.attendance_view')
 def attendance_export():
     """导出考勤 Excel"""
     class_name = request.args.get('class_name', '')
@@ -100,6 +115,10 @@ def attendance_export():
 
     if not class_name:
         flash('请选择班级后再导出', 'warning')
+        return redirect(url_for('attendance.attendance_page'))
+
+    if not scope_service.is_class_in_scope(current_user, grade, class_name):
+        flash('无该班级的导出权限（超出管辖范围）', 'danger')
         return redirect(url_for('attendance.attendance_page'))
 
     out = export_attendance(
@@ -115,6 +134,7 @@ def attendance_export():
 
 @bp.route('/stats')
 @login_required
+@perm_required('workbench.attendance_view')
 def attendance_stats_api():
     """考勤统计 JSON 接口"""
     class_name = request.args.get('class_name', '')
@@ -123,6 +143,9 @@ def attendance_stats_api():
 
     if not class_name:
         return jsonify({'error': '请选择班级'}), 400
+
+    if not scope_service.is_class_in_scope(current_user, grade, class_name):
+        return jsonify({'error': '无该班级的访问权限（超出管辖范围）'}), 403
 
     stats = get_attendance_stats(class_name, grade=grade, month=month or None)
     return jsonify(stats)
