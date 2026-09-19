@@ -121,6 +121,8 @@ PERMISSION_GROUPS = [
             'points.import', 'points.export', 'points.rules',
             'grades.view', 'grades.edit',
             'grades.import', 'grades.settings', 'grades.teachers', 'grades.student_query',
+            # v1.9.2 合并：master 新增选科维护页权限 + first 学术/画像/工作台权限（取并集）
+            'grades.subject_mgmt',
             'academic.view', 'academic.timetable', 'academic.swap',
             'academic.inspection_export', 'academic.forms', 'academic.forms_view',
             'portrait.view', 'portrait.edit',
@@ -143,6 +145,8 @@ PERMISSION_GROUPS = [
             'statistics.view',
             'points.view', 'grades.view',
             'grades.edit', 'grades.import', 'grades.settings', 'grades.student_query',
+            # v1.9.2 合并：master 新增选科维护页权限 + first 画像/学术/工作台权限（取并集）
+            'grades.subject_mgmt',
             'portrait.view', 'portrait.edit',
             'points.import', 'points.rules',
             'academic.view', 'academic.forms_view',
