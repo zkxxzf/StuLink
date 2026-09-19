@@ -1,0 +1,203 @@
+{% extends "base.html" %}
+{% block title %}积分规则模板{% endblock %}
+{% block content %}
+<div class="d-flex align-items-center mb-3">
+    <h5 class="mb-0"><i class="bi bi-collection"></i> 积分规则模板</h5>
+    <a href="{{ url_for('points.index') }}" class="btn btn-sm btn-outline-secondary ms-3">
+        <i class="bi bi-arrow-left"></i> 返回积分管理
+    </a>
+    <div class="ms-auto">
+        <button class="btn btn-sm btn-primary" id="btnAdd">
+            <i class="bi bi-plus-lg"></i> 新增模板
+        </button>
+    </div>
+</div>
+
+<!-- 规则列表 -->
+<div class="card">
+    <div class="table-responsive">
+        <table class="table table-hover g-table align-middle mb-0">
+            <thead>
+            <tr>
+                <th style="width:50px;">序号</th>
+                <th>规则名称</th>
+                <th style="width:80px;">类别</th>
+                <th style="width:100px;" class="text-end">默认分值</th>
+                <th>说明</th>
+                <th style="width:80px;">状态</th>
+                <th style="width:150px;" class="text-end">操作</th>
+            </tr>
+            </thead>
+            <tbody id="tbRules">
+            <tr><td colspan="7" class="text-center text-muted py-4">加载中…</td></tr>
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<!-- 新增/编辑弹窗 -->
+<div class="modal fade" id="ruleModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header py-2">
+                <h6 class="modal-title" id="ruleModalTitle">新增规则模板</h6>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <input type="hidden" id="rId">
+                <div class="mb-2">
+                    <label class="form-label small mb-1">规则名称 <span class="text-danger">*</span></label>
+                    <input class="form-control form-control-sm" id="rName" maxlength="50"
+                           placeholder="如：课堂表现优秀">
+                </div>
+                <div class="row g-2">
+                    <div class="col-6 mb-2">
+                        <label class="form-label small mb-1">类别 <span class="text-danger">*</span></label>
+                        <select class="form-select form-select-sm" id="rCategory">
+                            <option value="纪律">纪律</option>
+                            <option value="学习">学习</option>
+                            <option value="卫生">卫生</option>
+                            <option value="活动">活动</option>
+                            <option value="其他">其他</option>
+                        </select>
+                    </div>
+                    <div class="col-6 mb-2">
+                        <label class="form-label small mb-1">默认分值 <span class="text-danger">*</span></label>
+                        <input type="number" class="form-control form-control-sm" id="rPoints"
+                               placeholder="正数加分，负数扣分" min="-100" max="100">
+                    </div>
+                </div>
+                <div class="mb-2">
+                    <label class="form-label small mb-1">说明</label>
+                    <input class="form-control form-control-sm" id="rDesc" maxlength="200"
+                           placeholder="可选：简要说明适用场景">
+                </div>
+            </div>
+            <div class="modal-footer py-2">
+                <button class="btn btn-sm btn-secondary" data-bs-dismiss="modal">取消</button>
+                <button class="btn btn-sm btn-primary" id="btnSave">保存</button>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+{% block extra_js %}
+<script>
+(function(){
+'use strict';
+var modal = null;
+var canEdit = true;  // 由权限控制
+
+function esc(v) {
+    return String(v == null ? '' : v).replace(/&/g,'&amp;').replace(/</g,'&lt;')
+        .replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+function fmtPts(p) {
+    var n = Number(p) || 0;
+    var cls = n > 0 ? 'text-success' : n < 0 ? 'text-danger' : '';
+    return '<span class="' + cls + ' fw-bold">' + (n > 0 ? '+' : '') + n + '</span>';
+}
+
+function loadRules() {
+    $.getJSON('/points/api/rules', function(res) {
+        var rules = res.data || [];
+        var $tb = $('#tbRules').empty();
+        if (!rules.length) {
+            $tb.append('<tr><td colspan="7" class="text-center text-muted py-4">暂无规则模板</td></tr>');
+            return;
+        }
+        rules.forEach(function(r, i) {
+            var statusBadge = r.is_active
+                ? '<span class="badge bg-success">启用</span>'
+                : '<span class="badge bg-secondary">禁用</span>';
+            var ops = '';
+            if (canEdit) {
+                ops = '<button class="btn btn-sm btn-outline-primary py-0 px-1 me-1 rule-edit" data-id="' + r.id + '">编辑</button>'
+                    + '<button class="btn btn-sm btn-outline-' + (r.is_active ? 'warning' : 'success') + ' py-0 px-1 me-1 rule-toggle" data-id="' + r.id + '">'
+                    + (r.is_active ? '禁用' : '启用') + '</button>'
+                    + '<button class="btn btn-sm btn-outline-danger py-0 px-1 rule-del" data-id="' + r.id + '">删除</button>';
+            } else {
+                ops = '—';
+            }
+            $tb.append('<tr>'
+                + '<td>' + (i + 1) + '</td>'
+                + '<td>' + esc(r.name) + '</td>'
+                + '<td><span class="badge bg-outline-primary border border-primary text-primary">' + esc(r.category) + '</span></td>'
+                + '<td class="text-end">' + fmtPts(r.default_points) + '</td>'
+                + '<td class="text-muted small">' + esc(r.description || '—') + '</td>'
+                + '<td>' + statusBadge + '</td>'
+                + '<td class="text-end">' + ops + '</td>'
+                + '</tr>');
+        });
+    });
+}
+
+function openModal(rule) {
+    $('#rId').val('');
+    $('#ruleModalTitle').text('新增规则模板');
+    $('#rName').val('');
+    $('#rCategory').val('纪律');
+    $('#rPoints').val('');
+    $('#rDesc').val('');
+    if (rule) {
+        $('#ruleModalTitle').text('编辑规则模板');
+        $('#rId').val(rule.id);
+        $('#rName').val(rule.name);
+        $('#rCategory').val(rule.category);
+        $('#rPoints').val(rule.default_points);
+        $('#rDesc').val(rule.description || '');
+    }
+    modal.show();
+}
+
+function save() {
+    var id = $('#rId').val();
+    var payload = {
+        name: $('#rName').val().trim(),
+        category: $('#rCategory').val(),
+        default_points: $('#rPoints').val(),
+        description: $('#rDesc').val().trim()
+    };
+    if (!payload.name) { alert('请填写规则名称'); return; }
+    if (!payload.default_points) { alert('请填写默认分值'); return; }
+    var url = id ? '/points/api/rules/' + id + '/edit' : '/points/api/rules';
+    $('#btnSave').prop('disabled', true);
+    $.post(url, JSON.stringify(payload), function(res) {
+        $('#btnSave').prop('disabled', false);
+        modal.hide();
+        loadRules();
+    }).fail(function(x) {
+        $('#btnSave').prop('disabled', false);
+        alert(x.responseJSON && x.responseJSON.message || '保存失败');
+    });
+}
+
+$(function() {
+    modal = new bootstrap.Modal(document.getElementById('ruleModal'));
+    loadRules();
+
+    $('#btnAdd').on('click', function() { openModal(null); });
+    $('#btnSave').on('click', save);
+
+    $('#tbRules').on('click', '.rule-edit', function() {
+        var id = $(this).data('id');
+        $.getJSON('/points/api/rules', function(res) {
+            var rule = (res.data || []).find(function(r) { return r.id === id; });
+            if (rule) openModal(rule);
+        });
+    });
+
+    $('#tbRules').on('click', '.rule-toggle', function() {
+        var id = $(this).data('id');
+        $.post('/points/api/rules/' + id + '/toggle', function() { loadRules(); });
+    });
+
+    $('#tbRules').on('click', '.rule-del', function() {
+        var id = $(this).data('id');
+        if (!confirm('确认删除该规则模板？')) return;
+        $.post('/points/api/rules/' + id + '/delete', function() { loadRules(); });
+    });
+});
+})();
+</script>
+{% endblock %}

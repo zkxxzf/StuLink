@@ -1,0 +1,225 @@
+{% extends "base.html" %}
+{% block title %}积分批量导入{% endblock %}
+{% block content %}
+<div class="d-flex align-items-center mb-3">
+    <h5 class="mb-0"><i class="bi bi-upload"></i> 积分批量导入</h5>
+    <a href="{{ url_for('points.index') }}" class="btn btn-sm btn-outline-secondary ms-3">
+        <i class="bi bi-arrow-left"></i> 返回积分管理
+    </a>
+</div>
+
+<!-- 步骤提示 -->
+<div class="card mb-3">
+    <div class="card-body py-3">
+        <div class="d-flex align-items-center">
+            <span class="badge bg-primary rounded-circle me-2">1</span>
+            <span class="me-4">下载模板并填写数据</span>
+            <span class="badge bg-secondary rounded-circle me-2">2</span>
+            <span class="me-4">上传文件预览</span>
+            <span class="badge bg-secondary rounded-circle me-2">3</span>
+            <span>确认导入</span>
+        </div>
+    </div>
+</div>
+
+<!-- 上传区域 -->
+<div class="card mb-3" id="uploadCard">
+    <div class="card-body">
+        <div class="row align-items-center">
+            <div class="col-md-8">
+                <h6 class="mb-2">选择 Excel 文件</h6>
+                <p class="text-muted small mb-2">
+                    支持 .xlsx / .xls 格式，表头需包含：学号、积分值、原因（可选：姓名、年级、班级、类别）
+                </p>
+                <div class="d-flex gap-2">
+                    <input type="file" class="form-control form-control-sm" id="fileInput"
+                           accept=".xlsx,.xls" style="max-width:300px;">
+                    <button class="btn btn-sm btn-primary" id="btnUpload">
+                        <i class="bi bi-cloud-upload"></i> 上传解析
+                    </button>
+                    <a href="{{ url_for('points.download_template') }}" class="btn btn-sm btn-outline-success">
+                        <i class="bi bi-download"></i> 下载模板
+                    </a>
+                </div>
+            </div>
+            <div class="col-md-4 text-end">
+                <div class="small text-muted">
+                    <div>单次最多 3000 行</div>
+                    <div>积分值范围：-100 ~ 100（不为0）</div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- 解析结果 -->
+<div class="card d-none" id="resultCard">
+    <div class="card-header py-2 d-flex align-items-center">
+        <h6 class="mb-0">解析结果</h6>
+        <div class="ms-auto">
+            <span class="badge bg-success me-2" id="statOk">0 条可导入</span>
+            <span class="badge bg-danger" id="statErr">0 条异常</span>
+        </div>
+    </div>
+    <div class="card-body p-0">
+        <!-- 可导入数据 -->
+        <div class="table-responsive" id="validTable">
+            <table class="table table-hover table-sm mb-0">
+                <thead class="table-light">
+                <tr>
+                    <th>行号</th><th>学号</th><th>姓名</th><th>年级</th><th>班级</th>
+                    <th class="text-end">分值</th><th>类别</th><th>原因</th>
+                </tr>
+                </thead>
+                <tbody id="tbValid"></tbody>
+            </table>
+        </div>
+        <!-- 异常数据 -->
+        <div class="border-top" id="errorSection">
+            <div class="bg-light px-3 py-2 small fw-bold text-danger">
+                <i class="bi bi-exclamation-triangle"></i> 异常数据（不会导入）
+            </div>
+            <div class="table-responsive">
+                <table class="table table-hover table-sm mb-0">
+                    <thead class="table-light">
+                    <tr>
+                        <th>行号</th><th>学号</th><th>异常原因</th>
+                    </tr>
+                    </thead>
+                    <tbody id="tbErrors"></tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+    <div class="card-footer py-2 d-flex justify-content-between align-items-center">
+        <button class="btn btn-sm btn-outline-secondary" id="btnReupload">
+            <i class="bi bi-arrow-repeat"></i> 重新上传
+        </button>
+        <button class="btn btn-sm btn-primary" id="btnConfirm">
+            <i class="bi bi-check-lg"></i> 确认导入
+        </button>
+    </div>
+</div>
+
+<!-- 导入成功 -->
+<div class="card d-none" id="successCard">
+    <div class="card-body text-center py-5">
+        <i class="bi bi-check-circle text-success" style="font-size:48px;"></i>
+        <h5 class="mt-3">导入成功</h5>
+        <p class="text-muted" id="successMsg">已导入 0 条记录</p>
+        <a href="{{ url_for('points.index') }}" class="btn btn-primary">
+            <i class="bi bi-arrow-left"></i> 返回积分管理
+        </a>
+    </div>
+</div>
+{% endblock %}
+{% block extra_js %}
+<script>
+(function(){
+'use strict';
+var validRows = [];
+
+function esc(v) {
+    return String(v == null ? '' : v).replace(/&/g,'&amp;').replace(/</g,'&lt;')
+        .replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+function fmtPts(p) {
+    var n = Number(p) || 0;
+    var cls = n > 0 ? 'text-success' : n < 0 ? 'text-danger' : '';
+    return '<span class="' + cls + ' fw-bold">' + (n > 0 ? '+' : '') + n + '</span>';
+}
+
+$('#btnUpload').on('click', function() {
+    var f = $('#fileInput')[0].files[0];
+    if (!f) { alert('请选择文件'); return; }
+    var fd = new FormData();
+    fd.append('file', f);
+    var $btn = $(this);
+    $btn.prop('disabled', true).html('<span class="spinner-border spinner-border-sm"></span> 解析中...');
+    $.ajax({
+        url: '/points/import/upload',
+        type: 'POST',
+        data: fd,
+        processData: false,
+        contentType: false,
+        success: function(res) {
+            $btn.prop('disabled', false).html('<i class="bi bi-cloud-upload"></i> 上传解析');
+            if (!res.success) { alert(res.message || '解析失败'); return; }
+            validRows = res.data.valid || [];
+            var errors = res.data.errors || [];
+            renderResult(validRows, errors);
+        },
+        error: function(xhr) {
+            $btn.prop('disabled', false).html('<i class="bi bi-cloud-upload"></i> 上传解析');
+            alert(xhr.responseJSON && xhr.responseJSON.message || '上传失败');
+        }
+    });
+});
+
+function renderResult(valid, errors) {
+    $('#uploadCard').addClass('d-none');
+    $('#resultCard').removeClass('d-none');
+    $('#successCard').addClass('d-none');
+    $('#statOk').text(valid.length + ' 条可导入');
+    $('#statErr').text(errors.length + ' 条异常');
+
+    var $tb = $('#tbValid').empty();
+    if (valid.length) {
+        valid.forEach(function(r) {
+            $tb.append('<tr><td>' + (r.line || '') + '</td><td>' + esc(r.student_no) +
+                '</td><td>' + esc(r.student_name) + '</td><td>' + esc(r.grade) +
+                '</td><td>' + esc(r.class_name) + '</td><td class="text-end">' + fmtPts(r.points) +
+                '</td><td>' + esc(r.category) + '</td><td>' + esc(r.reason) + '</td></tr>');
+        });
+    } else {
+        $tb.append('<tr><td colspan="8" class="text-center text-muted py-3">无有效数据</td></tr>');
+    }
+
+    var $te = $('#tbErrors').empty();
+    if (errors.length) {
+        errors.forEach(function(e) {
+            $te.append('<tr><td>' + (e.line || '') + '</td><td>' + esc(e.student_no || '') +
+                '</td><td class="text-danger">' + esc(e.reason) + '</td></tr>');
+        });
+        $('#errorSection').show();
+    } else {
+        $('#errorSection').hide();
+    }
+}
+
+$('#btnReupload').on('click', function() {
+    $('#resultCard').addClass('d-none');
+    $('#uploadCard').removeClass('d-none');
+    $('#fileInput').val('');
+    validRows = [];
+});
+
+$('#btnConfirm').on('click', function() {
+    if (!validRows.length) { alert('没有可导入的数据'); return; }
+    if (!confirm('确认导入 ' + validRows.length + ' 条积分记录？')) return;
+    var $btn = $(this);
+    $btn.prop('disabled', true).html('<span class="spinner-border spinner-border-sm"></span> 导入中...');
+    $.ajax({
+        url: '/points/import/confirm',
+        type: 'POST',
+        contentType: 'application/json',
+        data: JSON.stringify({rows: validRows}),
+        success: function(res) {
+            $btn.prop('disabled', false).html('<i class="bi bi-check-lg"></i> 确认导入');
+            if (res.success) {
+                $('#resultCard').addClass('d-none');
+                $('#successCard').removeClass('d-none');
+                $('#successMsg').text(res.message || '导入成功');
+            } else {
+                alert(res.message || '导入失败');
+            }
+        },
+        error: function(xhr) {
+            $btn.prop('disabled', false).html('<i class="bi bi-check-lg"></i> 确认导入');
+            alert(xhr.responseJSON && xhr.responseJSON.message || '导入失败');
+        }
+    });
+});
+})();
+</script>
+{% endblock %}

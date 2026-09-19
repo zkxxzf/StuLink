@@ -1,0 +1,105 @@
+{% extends "base.html" %}
+{% import "academic/_schedule_parts.html" as parts %}
+{% import "academic/_schedule_grid.html" as gridm %}
+{% block title %}{{ grade }}{{ class_name }}课表 · {{ ts.name }}{% endblock %}
+{% block extra_css %}{{ gridm.schedule_grid_css() }}{% endblock %}
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
+    <div class="d-flex align-items-center gap-3 flex-wrap">
+        <h4 class="fw-bold mb-0"><i class="bi bi-calendar-week"></i> {{ grade }}{{ class_name }} 课表</h4>
+        {{ parts.term_selector(schedules, ts, base_endpoint='academic.schedule_class',
+                               base_kwargs={'grade': grade, 'class_name': class_name}, week=week) }}
+        {{ parts.week_selector(ts.total_weeks, ts.get_current_week(), week) }}
+    </div>
+    <div class="d-flex gap-2 flex-wrap">
+        {% if can_edit %}
+        <button class="btn btn-sm btn-success" id="btnAddEntry">
+            <i class="bi bi-plus-lg"></i> 添加课程
+        </button>
+        {% endif %}
+        <a class="btn btn-sm btn-outline-info text-white"
+           href="{{ url_for('academic.schedule_export', sid=ts.id, view_type='class', grade=grade, week=week, **{'class': class_name}) }}">
+            <i class="bi bi-download"></i> 导出本班
+        </a>
+        <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('academic.schedule_grade', sid=ts.id, grade=grade, week=week) }}">
+            <i class="bi bi-layers"></i> 年级课表
+        </a>
+        <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('academic.schedule_manage') }}">
+            <i class="bi bi-house"></i> 学期管理
+        </a>
+    </div>
+</div>
+
+{{ parts.readonly_banner(ts) }}
+
+<div class="row g-3">
+    <div class="col-lg-9">
+        <div class="card h-100">
+            <div class="card-header py-2 d-flex justify-content-between align-items-center">
+                <span class="fw-bold">{{ grade }}{{ class_name }}
+                    <span class="text-muted small ms-2">共 {{ view.total }} 节</span>
+                    {% if week %}<span class="badge bg-info ms-1">第 {{ week }} 周</span>{% endif %}
+                </span>
+                <span class="text-muted small">
+                    <span class="badge bg-light text-dark border me-1">正常</span>
+                    <span class="badge" style="background:#fff7ed;color:#b45309;border:1px solid #fdba74">调课</span>
+                </span>
+            </div>
+            <div class="card-body p-2" id="gridContainer">
+                {{ gridm.schedule_grid(view.periods, view.grid, can_edit=can_edit) }}
+            </div>
+        </div>
+    </div>
+    <div class="col-lg-3">
+        <div class="card mb-3">
+            <div class="card-header py-2"><i class="bi bi-bar-chart"></i> 本周课时统计</div>
+            <div class="card-body py-2">
+                {% if view.stats %}
+                <div class="d-flex flex-wrap gap-1 mb-2">
+                    {% for subj, cnt in view.stats.items()|sort(attribute='1.value', reverse=True) %}
+                    <span class="badge bg-light text-dark border">{{ subj }} × {{ cnt }}</span>
+                    {% endfor %}
+                </div>
+                <div class="text-muted small">合计 <span class="fw-bold text-dark">{{ view.total }}</span> 节/周</div>
+                {% else %}
+                <div class="text-muted small text-center py-3">暂无课程</div>
+                {% endif %}
+            </div>
+        </div>
+        <div class="card">
+            <div class="card-header py-2"><i class="bi bi-pie-chart"></i> 学科课时占比</div>
+            <div class="card-body p-2">
+                <div id="chartSubjectPie" data-lazy-chart="pie" style="height:260px"></div>
+            </div>
+        </div>
+    </div>
+</div>
+
+{{ parts.entry_modal() }}
+
+<script id="scheduleData" type="application/json">
+{
+    "pageType": "class",
+    "sid": {{ ts.id }},
+    "canEdit": {{ 'true' if can_edit else 'false' }},
+    "week": {{ week|tojson }},
+    "grade": {{ grade|tojson }},
+    "className": {{ class_name|tojson }},
+    "periods": {{ view.periods|tojson }},
+    "stats": {{ view.stats|tojson }},
+    "urls": {
+        "classData": {{ url_for('academic.api_schedule_class_data', sid=ts.id)|tojson }},
+        "entryAdd": {{ url_for('academic.schedule_entry_add', sid=ts.id)|tojson }},
+        "entryDetail": {{ url_for('academic.api_schedule_entry_detail', eid=0)|tojson }},
+        "entryEditTpl": {{ url_for('academic.schedule_entry_edit', sid=ts.id, eid=0)|tojson }},
+        "entryDeleteTpl": {{ url_for('academic.schedule_entry_delete', sid=ts.id, eid=0)|tojson }},
+        "checkConflict": {{ url_for('academic.api_schedule_check_conflict')|tojson }},
+        "teachers": {{ url_for('academic.api_schedule_teachers')|tojson }},
+        "classes": {{ url_for('academic.api_schedule_classes', sid=ts.id)|tojson }}
+    }
+}
+</script>
+<script src="{{ su('js/echarts.min.js') }}"></script>
+<script src="{{ su('js/schedule.js') }}"></script>
+<script src="{{ su('js/schedule_term.js') }}"></script>
+{% endblock %}

@@ -97,6 +97,12 @@
         </a>
         <div class="ms-auto d-flex align-items-center">
             {% if current_user.is_authenticated %}
+            <a href="{{ url_for('notifications.notifications_page') }}" class="btn btn-sm btn-outline-light position-relative me-2" style="border-radius:8px;" title="通知公告">
+                <i class="bi bi-bell"></i>
+                <span id="notificationBadge" class="position-absolute top-0 start-100 translate-middle badge rounded-pill bg-danger" style="display:none;font-size:10px;">
+                    0
+                </span>
+            </a>
             <span class="text-light me-3" style="font-size:14px;">
                 <i class="bi bi-person-circle"></i> {{ current_user.real_name }}
                 <span class="badge bg-primary badge-role ms-1">{{ current_user.display_role }}</span>
@@ -126,6 +132,25 @@
             {% elif request.blueprint == 'points' %}
             <a class="nav-link" href="{{ url_for('points.index') }}">
                 <i class="bi bi-house"></i>积分管理
+            </a>
+            <div class="nav-section">积分管理</div>
+            <a class="nav-link {% if request.endpoint == 'points.index' %}active{% endif %}"
+               href="{{ url_for('points.index') }}">
+                <i class="bi bi-list-ul"></i>积分记录
+            </a>
+            {% if current_user.has_perm('points.edit') or current_user.has_perm('points.import') %}
+            <a class="nav-link {% if request.endpoint == 'points.import_page' %}active{% endif %}"
+               href="{{ url_for('points.import_page') }}">
+                <i class="bi bi-upload"></i>批量导入
+            </a>
+            <a class="nav-link {% if request.endpoint == 'points.rules_page' %}active{% endif %}"
+               href="{{ url_for('points.rules_page') }}">
+                <i class="bi bi-collection"></i>规则模板
+            </a>
+            {% endif %}
+            {% elif request.blueprint == 'portrait' %}
+            <a class="nav-link" href="{{ url_for('portrait.index') }}">
+                <i class="bi bi-house"></i>学生画像
             </a>
             {% else %}
             <a class="nav-link" href="{{ url_for('welcome.index') }}">
@@ -265,6 +290,15 @@
             {% endif %}
             {% endif %}
 
+            {# ========= 学生画像模块侧边栏（v1.15.0） ========= #}
+            {% if request.blueprint == 'portrait' and current_user.has_perm('portrait.view') %}
+            <div class="nav-section">学生画像</div>
+            <a class="nav-link {% if request.endpoint == 'portrait.index' %}active{% endif %}"
+               href="{{ url_for('portrait.index') }}">
+                <i class="bi bi-person-vcard"></i>画像总览
+            </a>
+            {% endif %}
+
             {# ========= 教务管理模块侧边栏（v1.14.0） ========= #}
             {% if request.blueprint == 'academic' and current_user.has_perm('academic.view') %}
             <div class="nav-section">教务管理</div>
@@ -284,15 +318,100 @@
                href="{{ url_for('academic.achievements_page') }}">
                 <i class="bi bi-award"></i>教师业绩库
             </a>
+            <div class="nav-section">课表系统</div>
+            {% if current_user.has_perm('academic.timetable') %}
+            <a class="nav-link {% if request.endpoint == 'academic.schedule_manage' %}active{% endif %}"
+               href="{{ url_for('academic.schedule_manage') }}">
+                <i class="bi bi-calendar-range"></i>学期课表管理
+            </a>
+            {% endif %}
+            <a class="nav-link {% if request.endpoint == 'academic.my_schedule' %}active{% endif %}"
+               href="{{ url_for('academic.my_schedule') }}">
+                <i class="bi bi-calendar-week"></i>我的课表
+            </a>
+            <a class="nav-link {% if request.endpoint == 'academic.today_schedule' %}active{% endif %}"
+               href="{{ url_for('academic.today_schedule') }}">
+                <i class="bi bi-clock"></i>今日课表
+            </a>
+            <a class="nav-link {% if request.endpoint == 'academic.inspection_live_schedule' %}active{% endif %}"
+               href="{{ url_for('academic.inspection_live_schedule') }}">
+                <i class="bi bi-broadcast"></i>实时课表
+            </a>
+            <a class="nav-link {% if request.endpoint == 'academic.schedule_history' %}active{% endif %}"
+               href="{{ url_for('academic.schedule_history') }}">
+                <i class="bi bi-clock-history"></i>历史课表
+            </a>
+            {% if current_user.has_perm('academic.timetable') %}
+            <a class="nav-link {% if request.endpoint == 'academic.schedule_compare' %}active{% endif %}"
+               href="{{ url_for('academic.schedule_compare') }}">
+                <i class="bi bi-arrow-left-right"></i>跨学期对比
+            </a>
+            {% endif %}
+            <div class="nav-section">调课管理</div>
+            {% if current_user.has_perm('academic.swap') %}
+            <a class="nav-link {% if request.endpoint and request.endpoint.startswith('academic.swap') %}active{% endif %}"
+               href="{{ url_for('academic.swap_page') }}">
+                <i class="bi bi-arrow-left-right"></i>调课列表
+            </a>
+            <a class="nav-link {% if request.endpoint == 'academic.swap_stats' %}active{% endif %}"
+               href="{{ url_for('academic.swap_stats') }}">
+                <i class="bi bi-bar-chart"></i>调课统计
+            </a>
+            {% endif %}
+            <div class="nav-section">问卷收集</div>
+            {% if current_user.has_perm('academic.edit') %}
+            <a class="nav-link {% if request.endpoint == 'academic.form_list' %}active{% endif %}"
+               href="{{ url_for('academic.form_list') }}">
+                <i class="bi bi-ui-checks-grid"></i>表单管理
+            </a>
+            {% endif %}
+            {% if current_user.has_perm('academic.view') %}
+            <a class="nav-link {% if request.endpoint == 'academic.form_fill_list' %}active{% endif %}"
+               href="{{ url_for('academic.form_fill_list') }}">
+                <i class="bi bi-pencil-square"></i>填写问卷
+            </a>
+            <a class="nav-link {% if request.endpoint == 'academic.form_my_submissions' %}active{% endif %}"
+               href="{{ url_for('academic.form_my_submissions') }}">
+                <i class="bi bi-list-check"></i>我的提交
+            </a>
+            {% endif %}
             {% endif %}
 
-            {# ========= 教师工作台入口（所有登录教师可见） ========= #}
-            {% if request.blueprint in ('academic', 'workbench') %}
+            {# ========= 教师工作台侧边栏（v1.9.3 全量子导航） ========= #}
+            {% if request.blueprint in ('academic', 'workbench', 'overview', 'attendance', 'records') %}
             <div class="nav-section">个人工作</div>
             <a class="nav-link {% if request.endpoint == 'workbench.index' %}active{% endif %}"
                href="{{ url_for('workbench.index') }}">
-                <i class="bi bi-person-workspace"></i>教师工作台
+                <i class="bi bi-person-workspace"></i>工作台首页
             </a>
+            {% if current_user.role == 'homeroom_teacher' %}
+            <a class="nav-link {% if request.blueprint == 'overview' and request.endpoint == 'overview.class_overview_page' %}active{% endif %}"
+               href="{{ url_for('overview.class_overview_page') }}">
+                <i class="bi bi-grid-3x3-gap"></i>班级概览
+            </a>
+            <a class="nav-link {% if request.blueprint == 'overview' and request.endpoint == 'overview.students_page' %}active{% endif %}"
+               href="{{ url_for('overview.students_page') }}">
+                <i class="bi bi-people"></i>学生信息
+            </a>
+            <a class="nav-link {% if request.blueprint == 'overview' and request.endpoint == 'overview.grades_page' %}active{% endif %}"
+               href="{{ url_for('overview.grades_page') }}">
+                <i class="bi bi-graph-up"></i>成绩概览
+            </a>
+            <a class="nav-link {% if request.blueprint == 'overview' and request.endpoint == 'overview.points_page' %}active{% endif %}"
+               href="{{ url_for('overview.points_page') }}">
+                <i class="bi bi-star"></i>积分概览
+            </a>
+            {% endif %}
+            <a class="nav-link {% if request.blueprint == 'attendance' %}active{% endif %}"
+               href="{{ url_for('attendance.attendance_page') }}">
+                <i class="bi bi-calendar-check"></i>考勤管理
+            </a>
+            {% if current_user.role == 'homeroom_teacher' %}
+            <a class="nav-link {% if request.blueprint == 'records' %}active{% endif %}"
+               href="{{ url_for('records.records_page') }}">
+                <i class="bi bi-journal-text"></i>工作记录
+            </a>
+            {% endif %}
             {% endif %}
         </nav>
     </div>
@@ -336,6 +455,28 @@
             }
         });
     </script>
+    {% if current_user.is_authenticated %}
+    <script>
+        // 通知铃铛：轮询未读数量（30秒间隔）
+        function updateNotificationBadge() {
+            fetch('{{ url_for("notifications.unread_count_api") }}')
+                .then(function(r) { return r.json(); })
+                .then(function(data) {
+                    var badge = document.getElementById('notificationBadge');
+                    if (!badge) return;
+                    if (data.count > 0) {
+                        badge.textContent = data.count > 99 ? '99+' : data.count;
+                        badge.style.display = 'inline';
+                    } else {
+                        badge.style.display = 'none';
+                    }
+                })
+                .catch(function() {});
+        }
+        setInterval(updateNotificationBadge, 30000);
+        updateNotificationBadge();
+    </script>
+    {% endif %}
     {% block extra_js %}{% endblock %}
 </body>
 </html>

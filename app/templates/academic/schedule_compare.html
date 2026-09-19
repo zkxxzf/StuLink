@@ -1,0 +1,162 @@
+{% extends "base.html" %}
+{% block title %}跨学期课表对比{% endblock %}
+{% block extra_css %}
+<style>
+.cmp-card { border-top: 3px solid; }
+.cmp-added { border-top-color: #10b981; }
+.cmp-removed { border-top-color: #ef4444; }
+.cmp-changed { border-top-color: #f59e0b; }
+.cmp-unchanged { border-top-color: #64748b; }
+.cmp-num { font-size: 28px; font-weight: 800; line-height: 1; }
+.row-added { background: #ecfdf5; }
+.row-removed { background: #fef2f2; }
+.row-changed { background: #fffbeb; }
+</style>
+{% endblock %}
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
+    <div>
+        <h4 class="fw-bold mb-1"><i class="bi bi-arrow-left-right"></i> 跨学期课表对比</h4>
+        <span class="text-muted small">按 (年级·班级·星期·节次) 对齐，比较两个学期的课表差异</span>
+    </div>
+    <div class="d-flex gap-2 flex-wrap">
+        <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('academic.schedule_history') }}">
+            <i class="bi bi-clock-history"></i> 历史课表
+        </a>
+        <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('academic.schedule_manage') }}">
+            <i class="bi bi-house"></i> 学期管理
+        </a>
+    </div>
+</div>
+
+<div class="card mb-3">
+    <div class="card-body py-3">
+        <form method="GET" id="compareForm" class="row g-2 align-items-end">
+            <div class="col-md-4">
+                <label class="form-label small mb-1">学期 A（基准）</label>
+                <select name="sid_a" class="form-select form-select-sm" required>
+                    <option value="">-- 选择学期 --</option>
+                    {% for s in schedules %}
+                    <option value="{{ s.id }}" {% if sid_a == s.id %}selected{% endif %}>
+                        {{ s.name }}{% if s.status == 'archived' %}（历史）{% endif %}
+                    </option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="col-md-4">
+                <label class="form-label small mb-1">学期 B（对比）</label>
+                <select name="sid_b" class="form-select form-select-sm" required>
+                    <option value="">-- 选择学期 --</option>
+                    {% for s in schedules %}
+                    <option value="{{ s.id }}" {% if sid_b == s.id %}selected{% endif %}>
+                        {{ s.name }}{% if s.status == 'archived' %}（历史）{% endif %}
+                    </option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="col-md-2">
+                <label class="form-label small mb-1">年级（可选）</label>
+                <input name="grade" class="form-control form-control-sm" value="{{ f_grade }}" placeholder="如 01">
+            </div>
+            <div class="col-md-2">
+                <label class="form-label small mb-1">班级（可选）</label>
+                <input name="class" class="form-control form-control-sm" value="{{ f_class }}" placeholder="如 01班">
+            </div>
+            <div class="col-12 d-flex gap-2 mt-2">
+                <button type="submit" class="btn btn-sm btn-primary"><i class="bi bi-arrow-left-right"></i> 对比</button>
+                {% if result %}
+                <a class="btn btn-sm btn-outline-info text-white"
+                   href="{{ url_for('academic.schedule_compare_export', sid_a=sid_a, sid_b=sid_b, grade=f_grade or None, **{'class': f_class or None}) }}">
+                    <i class="bi bi-download"></i> 导出对比结果 Excel
+                </a>
+                {% endif %}
+                <span class="ms-auto align-self-center text-muted small">
+                    同学期版本对比请用 <a href="{{ url_for('academic.schedule_versions', sid=(sid_a or 1)) }}">变更历史时间线</a>
+                </span>
+            </div>
+        </form>
+    </div>
+</div>
+
+{% if result %}
+{% set s = result.summary %}
+<div class="card mb-3">
+    <div class="card-body py-2 small">
+        <span class="fw-bold">{{ result.term_a.name if result.term_a else 'A' }}</span>
+        <i class="bi bi-arrow-right mx-2 text-muted"></i>
+        <span class="fw-bold">{{ result.term_b.name if result.term_b else 'B' }}</span>
+        <span class="text-muted ms-3">A 共 {{ s.total_a }} 条 · B 共 {{ s.total_b }} 条</span>
+    </div>
+</div>
+
+<div class="row g-3 mb-3">
+    <div class="col-6 col-md-3">
+        <div class="card cmp-card cmp-added"><div class="card-body text-center py-3">
+            <div class="cmp-num text-success">{{ s.added }}</div><div class="text-muted small">新增（B有A无）</div>
+        </div></div>
+    </div>
+    <div class="col-6 col-md-3">
+        <div class="card cmp-card cmp-removed"><div class="card-body text-center py-3">
+            <div class="cmp-num text-danger">{{ s.removed }}</div><div class="text-muted small">减少（A有B无）</div>
+        </div></div>
+    </div>
+    <div class="col-6 col-md-3">
+        <div class="card cmp-card cmp-changed"><div class="card-body text-center py-3">
+            <div class="cmp-num text-warning">{{ s.changed }}</div><div class="text-muted small">变更时段</div>
+        </div></div>
+    </div>
+    <div class="col-6 col-md-3">
+        <div class="card cmp-card cmp-unchanged"><div class="card-body text-center py-3">
+            <div class="cmp-num text-secondary">{{ result.unchanged_count }}</div><div class="text-muted small">未变时段</div>
+        </div></div>
+    </div>
+</div>
+
+{% macro diff_table(title, rows, cls, icon) %}
+<div class="card mb-3">
+    <div class="card-header py-2 fw-bold"><i class="bi {{ icon }}"></i> {{ title }}（{{ rows|length }}）</div>
+    <div class="table-responsive">
+        <table class="table table-sm table-hover align-middle mb-0">
+            <thead class="table-light">
+                <tr><th>年级</th><th>班级</th><th>星期</th><th>节次</th>
+                    {% if cls == 'changed' %}<th>字段</th><th>原值(A)</th><th>新值(B)</th>
+                    {% else %}<th>学科</th><th>教师</th><th>教室</th><th>周次</th>{% endif %}</tr>
+            </thead>
+            <tbody>
+                {% for r in rows %}
+                <tr class="row-{{ cls }}">
+                    <td>{{ r.grade }}</td><td>{{ r.class_name }}</td>
+                    <td>{{ r.weekday_text }}</td><td>第{{ r.period_number }}节</td>
+                    {% if cls == 'changed' %}
+                    <td><span class="badge bg-light text-dark border">{{ r.field }}</span></td>
+                    <td class="text-danger text-decoration-line-through">{{ r.old or '（空）' }}</td>
+                    <td class="text-success fw-bold">{{ r.new or '（空）' }}</td>
+                    {% else %}
+                    <td class="fw-bold">{{ r.subject }}</td><td>{{ r.teacher_name or '-' }}</td>
+                    <td>{{ r.room or '-' }}</td><td class="small">{{ r.week_range or '-' }}</td>
+                    {% endif %}
+                </tr>
+                {% else %}
+                <tr><td colspan="8" class="text-center text-muted py-3">无差异</td></tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+{% endmacro %}
+
+{{ diff_table('变更（同时段但学科/教师/教室/周次不同）', result.changed, 'changed', 'bi-pencil-square') }}
+{{ diff_table('新增（B 有 A 无）', result.added, 'added', 'bi-plus-circle') }}
+{{ diff_table('减少（A 有 B 无）', result.removed, 'removed', 'bi-dash-circle') }}
+{% else %}
+<div class="card"><div class="card-body text-center py-5 text-muted">
+    <i class="bi bi-arrow-left-right" style="font-size:40px;"></i>
+    <p class="mt-3 mb-0">请选择学期 A 与学期 B 后点击「对比」</p>
+</div></div>
+{% endif %}
+
+<script id="scheduleData" type="application/json">
+{ "pageType": "compare", "compareUrl": {{ url_for('academic.api_schedule_compare_data')|tojson }} }
+</script>
+<script src="{{ su('js/schedule_term.js') }}"></script>
+{% endblock %}

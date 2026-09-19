@@ -1,14 +1,15 @@
-# StuLink v1.9.2 2026-09-16
-# 积分管理：单页记录（独立库 points.db）+ 范围权限过滤
+# StuLink v1.9.2 2026-09-18
+# 积分管理：单页记录（独立库 points.db）+ 范围权限过滤 + 批量导入导出 + 可视化
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
+import io
 from datetime import date, datetime
 
-from flask import Blueprint, render_template, request, jsonify, abort
+from flask import Blueprint, render_template, request, jsonify, abort, send_file
 from flask_login import login_required, current_user
 from sqlalchemy import func
 
 from app.extensions import db
-from app.models import Student, UserClassLink, PointRecord
+from app.models import Student, UserClassLink, PointRecord, PointRuleTemplate
 from app.utils.decorators import perm_required
 from app.utils.helpers import log_operation, get_graduated_grades
 
@@ -294,3 +295,253 @@ def api_record_delete(rid):
     db.session.commit()
     log_operation(current_user, '删除', '积分', rid, f'{rec.student_name} {rec.points:+d}', module='points')
     return jsonify(success=True, message='已删除')
+
+
+# ==================== 批量导入 ====================
+
+@bp.route('/import')
+@login_required
+@perm_required('points.edit')
+def import_page():
+    return render_template('points/import.html')
+
+
+@bp.route('/template')
+@login_required
+@perm_required('points.edit')
+def download_template():
+    from app.modules.points.services.import_service import generate_template
+    out = generate_template()
+    return send_file(out, as_attachment=True,
+                     download_name=f'积分导入模板_{date.today().strftime("%Y%m%d")}.xlsx',
+                     mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+
+
+@bp.route('/import/upload', methods=['POST'])
+@login_required
+@perm_required('points.edit')
+def import_upload():
+    from app.modules.points.services.import_service import parse_points_excel, validate_records
+    f = request.files.get('file')
+    if not f or not f.filename:
+        return jsonify(success=False, message='请选择文件'), 400
+    if not f.filename.endswith(('.xlsx', '.xls')):
+        return jsonify(success=False, message='仅支持 .xlsx / .xls 格式'), 400
+    try:
+        result = parse_points_excel(f.stream)
+    except Exception as e:
+        return jsonify(success=False, message=f'解析失败：{str(e)}'), 400
+    valid, invalid = validate_records(result['rows'])
+    errors = result['errors'] + [{'line': r.get('line'), 'student_no': r.get('student_no'),
+                                  'reason': r.get('error')} for r in invalid]
+    return jsonify(success=True, data={
+        'valid': valid,
+        'errors': errors,
+        'stats': {
+            'total': result['stats']['total_rows'],
+            'ok': len(valid),
+            'error': len(errors),
+        }
+    })
+
+
+@bp.route('/import/confirm', methods=['POST'])
+@login_required
+@perm_required('points.edit')
+def import_confirm():
+    from app.modules.points.services.import_service import import_records
+    payload = request.get_json(silent=True) or {}
+    rows = payload.get('rows', [])
+    if not rows:
+        return jsonify(success=False, message='没有可导入的数据'), 400
+    count = import_records(rows, current_user.id, current_user.real_name)
+    log_operation(current_user, '批量导入', '积分', None,
+                  f'导入 {count} 条积分记录', module='points')
+    return jsonify(success=True, message=f'成功导入 {count} 条记录')
+
+
+# ==================== 导出 ====================
+
+@bp.route('/export')
+@login_required
+@perm_required('points.view')
+def export_excel():
+    import openpyxl
+    from openpyxl.styles import Font, Alignment, PatternFill, Border, Side
+    q = _filter_query()
+    rows = q.order_by(PointRecord.recorded_at.desc(), PointRecord.id.desc()).limit(5000).all()
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = '积分记录'
+    headers = ['日期', '学号', '姓名', '年级', '班级', '分值', '类别', '事由', '备注', '录入人']
+    hf = Font(bold=True, color='FFFFFF')
+    hfl = PatternFill(start_color='4472C4', end_color='4472C4', fill_type='solid')
+    tb = Border(left=Side(style='thin'), right=Side(style='thin'),
+                top=Side(style='thin'), bottom=Side(style='thin'))
+    for ci, h in enumerate(headers, 1):
+        c = ws.cell(row=1, column=ci, value=h)
+        c.font = hf
+        c.fill = hfl
+        c.alignment = Alignment(horizontal='center')
+        c.border = tb
+    for ri, r in enumerate(rows, 2):
+        vals = [r.recorded_at.strftime('%Y-%m-%d') if r.recorded_at else '',
+                r.student_no, r.student_name, r.grade, r.class_name,
+                r.points, r.category or '', r.reason, r.remark or '', r.operator_name or '']
+        for ci, v in enumerate(vals, 1):
+            c = ws.cell(row=ri, column=ci, value=v)
+            c.border = tb
+    widths = [12, 15, 10, 8, 10, 8, 8, 25, 20, 10]
+    for i, w in enumerate(widths, 1):
+        ws.column_dimensions[openpyxl.utils.get_column_letter(i)].width = w
+    out = io.BytesIO()
+    wb.save(out)
+    out.seek(0)
+    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+    return send_file(out, as_attachment=True,
+                     download_name=f'积分记录_{timestamp}.xlsx',
+                     mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+
+
+# ==================== 规则模板 ====================
+
+@bp.route('/rules')
+@login_required
+@perm_required('points.view')
+def rules_page():
+    return render_template('points/rules.html')
+
+
+@bp.route('/api/rules')
+@login_required
+@perm_required('points.view')
+def api_rules_list():
+    rules = PointRuleTemplate.query.order_by(PointRuleTemplate.category,
+                                              PointRuleTemplate.default_points.desc()).all()
+    return jsonify(success=True, data=[r.to_dict() for r in rules])
+
+
+@bp.route('/api/rules', methods=['POST'])
+@login_required
+@perm_required('points.edit')
+def api_rules_create():
+    data = request.get_json(silent=True) or {}
+    name = (data.get('name') or '').strip()[:50]
+    category = (data.get('category') or '').strip()[:20]
+    if not name or not category:
+        return jsonify(success=False, message='名称和类别不能为空'), 400
+    try:
+        points = int(data.get('default_points', 0))
+    except (TypeError, ValueError):
+        return jsonify(success=False, message='分值必须是整数'), 400
+    if points == 0 or abs(points) > 100:
+        return jsonify(success=False, message='分值需在 -100 ~ 100 之间且不为 0'), 400
+    rule = PointRuleTemplate(name=name, category=category, default_points=points,
+                              description=(data.get('description') or '').strip()[:200])
+    db.session.add(rule)
+    db.session.commit()
+    return jsonify(success=True, message='已创建', data=rule.to_dict())
+
+
+@bp.route('/api/rules/<int:rule_id>/edit', methods=['POST'])
+@login_required
+@perm_required('points.edit')
+def api_rules_edit(rule_id):
+    rule = PointRuleTemplate.query.get_or_404(rule_id)
+    data = request.get_json(silent=True) or {}
+    name = (data.get('name') or '').strip()[:50]
+    category = (data.get('category') or '').strip()[:20]
+    if not name or not category:
+        return jsonify(success=False, message='名称和类别不能为空'), 400
+    try:
+        points = int(data.get('default_points', 0))
+    except (TypeError, ValueError):
+        return jsonify(success=False, message='分值必须是整数'), 400
+    if points == 0 or abs(points) > 100:
+        return jsonify(success=False, message='分值需在 -100 ~ 100 之间且不为 0'), 400
+    rule.name = name
+    rule.category = category
+    rule.default_points = points
+    rule.description = (data.get('description') or '').strip()[:200]
+    db.session.commit()
+    return jsonify(success=True, message='已更新', data=rule.to_dict())
+
+
+@bp.route('/api/rules/<int:rule_id>/toggle', methods=['POST'])
+@login_required
+@perm_required('points.edit')
+def api_rules_toggle(rule_id):
+    rule = PointRuleTemplate.query.get_or_404(rule_id)
+    rule.is_active = not rule.is_active
+    db.session.commit()
+    return jsonify(success=True, message='已' + ('启用' if rule.is_active else '禁用'),
+                   data=rule.to_dict())
+
+
+@bp.route('/api/rules/<int:rule_id>/delete', methods=['POST'])
+@login_required
+@perm_required('points.edit')
+def api_rules_delete(rule_id):
+    rule = PointRuleTemplate.query.get_or_404(rule_id)
+    db.session.delete(rule)
+    db.session.commit()
+    return jsonify(success=True, message='已删除')
+
+
+# ==================== 可视化 API ====================
+
+@bp.route('/api/trend')
+@login_required
+@perm_required('points.view')
+def api_trend():
+    """积分趋势数据：按日期聚合"""
+    q = _filter_query()
+    rows = q.with_entities(PointRecord.recorded_at,
+                           func.sum(PointRecord.points).label('total'),
+                           func.count(PointRecord.id).label('cnt')) \
+            .group_by(PointRecord.recorded_at) \
+            .order_by(PointRecord.recorded_at) \
+            .limit(90).all()
+    return jsonify(success=True, data=[{
+        'date': r[0].strftime('%Y-%m-%d') if r[0] else '',
+        'total': int(r[1] or 0),
+        'count': int(r[2] or 0),
+    } for r in rows])
+
+
+@bp.route('/api/category-distribution')
+@login_required
+@perm_required('points.view')
+def api_category_distribution():
+    """类别分布数据：按 category 聚合"""
+    q = _filter_query()
+    rows = q.with_entities(PointRecord.category,
+                           func.sum(PointRecord.points).label('total'),
+                           func.count(PointRecord.id).label('cnt')) \
+            .group_by(PointRecord.category) \
+            .order_by(func.count(PointRecord.id).desc()).all()
+    return jsonify(success=True, data=[{
+        'category': r[0] or '未分类',
+        'total': int(r[1] or 0),
+        'count': int(r[2] or 0),
+    } for r in rows])
+
+
+@bp.route('/api/class-ranking')
+@login_required
+@perm_required('points.view')
+def api_class_ranking():
+    """班级积分排名：按班级聚合"""
+    q = _filter_query()
+    rows = q.with_entities(PointRecord.grade, PointRecord.class_name,
+                           func.sum(PointRecord.points).label('total'),
+                           func.count(PointRecord.id).label('cnt')) \
+            .group_by(PointRecord.grade, PointRecord.class_name) \
+            .order_by(func.sum(PointRecord.points).desc()) \
+            .limit(20).all()
+    return jsonify(success=True, data=[{
+        'grade': r[0] or '',
+        'class_name': r[1] or '',
+        'total': int(r[2] or 0),
+        'count': int(r[3] or 0),
+    } for r in rows])

@@ -20,7 +20,10 @@ PRESETS = [
             'system.users', 'system.dictionary', 'system.class_profile',
             'system.perm_groups', 'system.grade_mgmt',
             'points.view', 'points.edit',
+            'points.import', 'points.export', 'points.rules',
             'grades.view', 'grades.edit',
+            'academic.view', 'academic.timetable',
+            'portrait.view', 'portrait.edit',
         ],
     },
     {
@@ -34,6 +37,8 @@ PRESETS = [
             'dormitory.view', 'dormitory.beds',
             'statistics.view',
             'points.view', 'grades.view',
+            'portrait.view', 'portrait.edit',
+            'points.import', 'points.rules',
         ],
     },
     {
@@ -47,6 +52,8 @@ PRESETS = [
             'dormitory.view', 'dormitory.beds',
             'statistics.view',
             'points.view', 'grades.view',
+            'portrait.view', 'portrait.edit',
+            'points.import',
         ],
     },
     {
@@ -69,6 +76,7 @@ PRESETS = [
         'menu_keys': [
             'students.view',
             'points.view', 'points.edit',
+            'points.import',
             'grades.view', 'grades.edit',
         ],
     },
@@ -89,7 +97,7 @@ with app.app_context():
                 name=p['name'],
                 role=p['role'],
                 scope_type=p['scope_type'],
-                description=p['description'],
+                description=p.get('description', ''),
             )
             g.set_menu_keys(p['menu_keys'])
             db.session.add(g)

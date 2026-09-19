@@ -298,25 +298,33 @@ def assign_data():
         boarding_student_ids = set()
         for acc in StudentAccommodation.query.filter_by(boarding_type='住校').all():
             boarding_student_ids.add(acc.student_id)
-        
+
+        # 一次性载入学生 (id, grade, class_name, gender)，内存按班级+性别聚合住校人数
+        # v1.16.0 性能改造：旧版 grades×classes 双循环每班 2 条 COUNT（含跨库大 IN），整接口 135 条 SQL；
+        # 现在固定 2 条查询（accommodation + students），跨库不能 JOIN 故用内存过滤，口径完全一致。
+        graduated_set = set(graduated or [])
+        cnt_map = {}
+        for sid, s_grade, s_cls, s_gender in db.session.query(
+                Student.id, Student.grade, Student.class_name, Student.gender).all():
+            if sid not in boarding_student_ids:
+                continue
+            if s_grade in graduated_set:
+                continue
+            d = cnt_map.get((s_grade, s_cls))
+            if d is None:
+                d = cnt_map[(s_grade, s_cls)] = {'男': 0, '女': 0}
+            if s_gender == '男':
+                d['男'] += 1
+            elif s_gender == '女':
+                d['女'] += 1
+
         classes_data = []
         for grade in grades:
             for cls_name in classes_list:
-                male_count = Student.query.filter(
-                    Student.grade == grade, 
-                    Student.class_name == cls_name,
-                    Student.gender == '男',
-                    Student.id.in_(boarding_student_ids),
-                    ~Student.grade.in_(graduated)
-                ).count()
-                female_count = Student.query.filter(
-                    Student.grade == grade, 
-                    Student.class_name == cls_name,
-                    Student.gender == '女',
-                    Student.id.in_(boarding_student_ids),
-                    ~Student.grade.in_(graduated)
-                ).count()
-                
+                d = cnt_map.get((grade, cls_name))
+                male_count = d['男'] if d else 0
+                female_count = d['女'] if d else 0
+
                 if male_count > 0 or female_count > 0:
                     classes_data.append({
                         'grade': grade,

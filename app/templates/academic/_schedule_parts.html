@@ -1,0 +1,167 @@
+{# StuLink v1.16.0 学期课表共用部件：学期切换器 / 只读提示条 / 条目编辑弹窗 #}
+
+{# ===== 学期切换器 =====
+   参数：
+   - schedules: 全部学期列表（含 archived，TermSchedule 对象）
+   - ts: 当前学期（可为 None）
+   - base_endpoint: 带 sid 的页面跳转 endpoint（如 'academic.schedule_master'）
+   - base_kwargs: 附加 url_for 参数 dict（如 {'grade': grade}）
+   - query_mode: 无 sid 页面的模式（today / my_schedule），切换时带 ?sid=
+   - week: 当前周次过滤参数（透传保留）
+#}
+{% macro term_selector(schedules, ts, base_endpoint=None, base_kwargs=None, query_mode=None, week=None) %}
+{% if schedules and schedules|length > 0 %}
+<div class="d-flex align-items-center gap-2" id="termSwitcher"
+     data-mode="{{ 'query' if query_mode else 'path' }}"
+     data-endpoint="{{ base_endpoint or request.endpoint }}"
+     data-query-mode="{{ query_mode or '' }}"
+     data-kw="{{ (base_kwargs or {})|tojson }}"
+     data-week="{{ week or '' }}">
+    <span class="text-muted small text-nowrap"><i class="bi bi-calendar-range"></i> 学期</span>
+    <select class="form-select form-select-sm" id="termSelect" style="width:auto;min-width:230px">
+        {% for s in schedules %}
+        <option value="{{ s.id }}" data-status="{{ s.status }}"
+                {% if ts and s.id == ts.id %}selected{% endif %}>
+            {{ s.name }}{% if s.status == 'archived' %}（历史）{% elif s.status == 'draft' %}（草稿）{% endif %}
+        </option>
+        {% endfor %}
+    </select>
+    {# Task#27：若当前学期已配置起止日期，展示日期区间/当前周（向后兼容，无新增必填参数） #}
+    {% if ts and ts.start_date %}
+    <span class="text-muted small text-nowrap d-none d-xl-inline" title="{{ ts.period_text() }}">
+        <i class="bi bi-clock-history"></i> {{ ts.period_text() }}
+    </span>
+    {% endif %}
+</div>
+{% endif %}
+{% endmacro %}
+
+{# ===== 周次选择器（Task#27）=====
+   参数：
+   - total_weeks: 学期教学周总数（为空/0 时不渲染）
+   - current_week: 当前周（用于标记「本周」）
+   - selected_week: 当前选中的周次过滤值（None=全部周）
+   JS 见 schedule_term.js：切换时在当前 URL 上设置 ?week=N 并刷新
+#}
+{% macro week_selector(total_weeks, current_week=None, selected_week=None) %}
+{% if total_weeks and total_weeks > 0 %}
+<div class="d-flex align-items-center gap-1" id="weekSwitcher"
+     data-total="{{ total_weeks }}" data-current="{{ current_week or '' }}">
+    <span class="text-muted small text-nowrap"><i class="bi bi-calendar-week"></i> 周次</span>
+    <select class="form-select form-select-sm" id="weekSelect" style="width:auto;min-width:130px">
+        <option value="">全部周</option>
+        {% for w in range(1, total_weeks + 1) %}
+        <option value="{{ w }}" {% if selected_week == w %}selected{% endif %}>
+            第 {{ w }} 周{% if current_week == w %}（本周）{% endif %}
+        </option>
+        {% endfor %}
+    </select>
+</div>
+{% endif %}
+{% endmacro %}
+
+{# ===== 归档学期只读提示条 ===== #}
+{% macro readonly_banner(ts) %}
+{% if ts and ts.status == 'archived' %}
+<div class="alert alert-warning py-2 d-flex align-items-center gap-2 mb-3">
+    <i class="bi bi-lock-fill"></i>
+    <span class="small mb-0"><strong>历史学期课表 · 只读</strong> —— 「{{ ts.name }}」已归档，仅供回看，不能添加/编辑/删除/导入。
+    <a href="{{ url_for('academic.schedule_manage') }}" class="alert-link ms-1">返回学期管理</a></span>
+</div>
+{% elif ts and ts.status == 'draft' %}
+<div class="alert alert-secondary py-2 d-flex align-items-center gap-2 mb-3">
+    <i class="bi bi-pencil-square"></i>
+    <span class="small mb-0">「{{ ts.name }}」为<strong>草稿</strong>状态，尚未激活。排课完成后请在
+    <a href="{{ url_for('academic.schedule_manage') }}" class="alert-link">学期管理</a>中激活。</span>
+</div>
+{% endif %}
+{% endmacro %}
+
+{# ===== 课表条目 添加/编辑 弹窗（供 master/grade/class/teacher 复用，JS 见 schedule.js） =====
+   需要页面提供 #scheduleData JSON 配置块（含 sid / entryAddUrl / entryEditUrl / teachers / gradeClasses） #}
+{% macro entry_modal() %}
+<div class="modal fade" id="entryModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header py-2">
+                <h6 class="modal-title"><i class="bi bi-pencil-square"></i> <span id="entryModalTitle">添加课程</span></h6>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <form id="entryForm">
+                    <input type="hidden" id="entryId" value="">
+                    <div id="entryConflictAlert" class="alert alert-danger py-2 small d-none"></div>
+                    <div class="row g-2">
+                        <div class="col-6">
+                            <label class="form-label small mb-1">年级 <span class="text-danger">*</span></label>
+                            <select id="entryGrade" class="form-select form-select-sm" required>
+                                <option value="">--</option>
+                            </select>
+                        </div>
+                        <div class="col-6">
+                            <label class="form-label small mb-1">班级 <span class="text-danger">*</span></label>
+                            <select id="entryClass" class="form-select form-select-sm" required>
+                                <option value="">--</option>
+                            </select>
+                        </div>
+                        <div class="col-6">
+                            <label class="form-label small mb-1">星期 <span class="text-danger">*</span></label>
+                            <select id="entryWeekday" class="form-select form-select-sm" required>
+                                {% for wd in range(1, 8) %}
+                                <option value="{{ wd }}">{{ ['周一','周二','周三','周四','周五','周六','周日'][wd-1] }}</option>
+                                {% endfor %}
+                            </select>
+                        </div>
+                        <div class="col-6">
+                            <label class="form-label small mb-1">节次 <span class="text-danger">*</span></label>
+                            <select id="entryPeriod" class="form-select form-select-sm" required></select>
+                        </div>
+                        <div class="col-6">
+                            <label class="form-label small mb-1">学科 <span class="text-danger">*</span></label>
+                            <input id="entrySubject" class="form-control form-control-sm" maxlength="20" required
+                                   list="subjectSuggestions">
+                            <datalist id="subjectSuggestions">
+                                <option value="语文"></option><option value="数学"></option>
+                                <option value="英语"></option><option value="物理"></option>
+                                <option value="化学"></option><option value="生物"></option>
+                                <option value="政治"></option><option value="历史"></option>
+                                <option value="地理"></option><option value="体育"></option>
+                                <option value="音乐"></option><option value="美术"></option>
+                                <option value="信息技术"></option><option value="班会"></option>
+                            </datalist>
+                        </div>
+                        <div class="col-6">
+                            <label class="form-label small mb-1">教师</label>
+                            <select id="entryTeacher" class="form-select form-select-sm">
+                                <option value="">-- 未指定 --</option>
+                            </select>
+                        </div>
+                        <div class="col-4">
+                            <label class="form-label small mb-1">教室</label>
+                            <input id="entryRoom" class="form-control form-control-sm" maxlength="30">
+                        </div>
+                        <div class="col-4">
+                            <label class="form-label small mb-1">周次</label>
+                            <input id="entryWeekRange" class="form-control form-control-sm" maxlength="20"
+                                   value="1-18" placeholder="如 1-18">
+                        </div>
+                        <div class="col-4">
+                            <label class="form-label small mb-1">备注</label>
+                            <input id="entryNote" class="form-control form-control-sm" maxlength="100">
+                        </div>
+                    </div>
+                </form>
+            </div>
+            <div class="modal-footer py-2">
+                <button type="button" class="btn btn-sm btn-outline-danger me-auto d-none" id="entryDeleteBtn">
+                    <i class="bi bi-trash"></i> 删除
+                </button>
+                <button type="button" class="btn btn-sm btn-secondary" data-bs-dismiss="modal">取消</button>
+                <button type="button" class="btn btn-sm btn-primary" id="entrySaveBtn">
+                    <i class="bi bi-check-lg"></i> 保存
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+{% endmacro %}

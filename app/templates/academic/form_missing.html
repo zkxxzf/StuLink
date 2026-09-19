@@ -1,0 +1,75 @@
+{% extends "base.html" %}
+{% block title %}未交名单 - {{ tpl.title }}{% endblock %}
+{% block extra_css %}{% include "academic/_fx_style.html" %}{% endblock %}
+{% block content %}
+{% set fx_active = 'missing' %}
+<div class="fx-wrap">
+    {% include "academic/_fx_hero.html" %}
+
+    <div class="fx-statgrid fx-stagger" style="grid-template-columns:repeat(auto-fit,minmax(180px,1fr))">
+        <div class="fx-stat bad">
+            <div class="fx-label">未交人数</div>
+            <div class="fx-value" id="fxMissCount">{{ stats.not_submitted }}</div>
+            <div class="fx-sub">应交 {{ stats.expected }} · 已交 {{ stats.submitted }}</div>
+        </div>
+        <div class="fx-stat warn">
+            <div class="fx-label">已催交轮次</div>
+            <div class="fx-value" id="fxRounds">{{ rounds }}</div>
+            <div class="fx-sub">通过通知公告定向提醒</div>
+        </div>
+        <div class="fx-ring-card">
+            <div class="fx-ring">
+                <svg width="108" height="108" viewBox="0 0 108 108">
+                    <circle cx="54" cy="54" r="46" fill="none" stroke="#edf1f8" stroke-width="11"></circle>
+                    <circle id="fxRingArc" cx="54" cy="54" r="46" fill="none" stroke="#10b981" stroke-width="11"
+                            stroke-linecap="round" stroke-dasharray="289" stroke-dashoffset="289"
+                            style="transition:stroke-dashoffset 1.1s cubic-bezier(.4,0,.2,1)"></circle>
+                </svg>
+                <div class="fx-ring-txt"><b class="fx-num" id="fxRingPct">0%</b><span>提交率</span></div>
+            </div>
+            <div>
+                <div style="font-weight:700;font-size:14px">当前进度</div>
+                <div class="fx-hint mt-1">共 {{ stats.expected }} 人应交</div>
+            </div>
+        </div>
+    </div>
+
+    <div class="fx-panel">
+        <div class="fx-panel-head">
+            <div class="fx-seclabel"><span class="fx-tag">Missing</span><i class="bi bi-person-exclamation"></i>未提交名单</div>
+            <div class="fx-toolbar">
+                <select id="fxGrade" class="form-select form-select-sm" style="width:130px">
+                    <option value="">全部年级</option>
+                    {% for g in scope_options %}<option value="{{ g.grade }}">{{ g.grade }}</option>{% endfor %}
+                </select>
+                <label class="d-flex align-items-center gap-1 fx-hint mb-0"><input type="checkbox" id="fxSelAll"> 全选本页</label>
+                <button id="fxRemindSel" class="btn btn-sm btn-outline-warning"><i class="bi bi-bell"></i> 催交选中</button>
+                <button id="fxRemindAll" class="btn btn-sm btn-warning"><i class="bi bi-megaphone"></i> 一键催交全部</button>
+                <a id="fxExportMissing" class="btn btn-sm btn-outline-success" href="{{ url_for('academic.form_export_missing', form_id=tpl.id) }}"><i class="bi bi-download"></i> 导出名单</a>
+            </div>
+        </div>
+        <div class="fx-panel-body">
+            <div id="fxGroups">
+                <div class="fx-empty"><i class="bi bi-hourglass-split"></i>加载中…</div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+window.FX_CTX = {
+    formId: {{ tpl.id }},
+    page: 'missing',
+    scopeOptions: {{ scope_options | tojson }},
+    inlineStats: { rate: {{ stats.rate }} },
+    urls: {
+        missingData: '{{ url_for("academic.api_form_missing_data", form_id=tpl.id) }}',
+        remind: '{{ url_for("academic.form_remind", form_id=tpl.id) }}',
+        exportMissing: '{{ url_for("academic.form_export_missing", form_id=tpl.id) }}'
+    }
+};
+</script>
+{% endblock %}
+{% block extra_js %}
+<script src="{{ su('js/form_summary.js') }}"></script>
+{% endblock %}

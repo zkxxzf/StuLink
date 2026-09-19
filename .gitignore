@@ -63,8 +63,13 @@ logs_dev_err.txt
 scripts/_t_*.py
 scripts/seed_*_certs.py
 scripts/tmp_*
+# mock 测试数据脚本（含虚构演示数据，禁止提交）
+scripts/import_mock_data.py
+scripts/import_mock_forms_data.py
 docs/.js
 # 含真实考号姓名的参考表格（隐私，勿提交）
 docs/*.xlsm
 # 临时部署打包文件（不提交）
 _deploy_*.tar.gz
+*.pdf
+StuLink/app/static/uploads

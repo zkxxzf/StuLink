@@ -124,12 +124,27 @@ def clear_dict_cache():
 
 
 def get_graduated_grades():
-    """返回已毕业年级列表"""
+    """返回已毕业年级列表（TTL 600s 缓存，写法同 get_dict_values）
+
+    被 statistics/scope/students 等多处每请求多次调用（曾在循环体内），
+    而毕业标记几乎不变；年级毕业操作后需调 clear_graduated_grades_cache() 主动失效。
+    """
+    cache_key = 'graduated_grades'
+    cached = cache.get(cache_key)
+    if cached is not None:
+        return cached
     try:
         from app.models.grade_setting import GradeSetting
-        return [gs.grade for gs in GradeSetting.query.filter_by(is_graduated=True).all()]
+        grades = [gs.grade for gs in GradeSetting.query.filter_by(is_graduated=True).all()]
     except Exception:
-        return []
+        return []  # 异常不写缓存，下次重试
+    cache.set(cache_key, grades, timeout=600)
+    return grades
+
+
+def clear_graduated_grades_cache():
+    """清除已毕业年级缓存（年级毕业标记变更后调用）"""
+    cache.delete('graduated_grades')
 
 
 def get_active_grades():
@@ -234,39 +249,73 @@ def set_school_name(value, user_id=None):
     db.session.commit()
 
 
-def write_change_log(change_type, students_data, old_value='', new_value='', detail='', operator_name=''):
-    """写入学生变迁日志到 history.db
-    students_data: list of dicts with keys id, student_number, name
-    """
-    import sqlite3
-    import os
-    from config import BASE_DIR
-    history_db_path = os.path.join(BASE_DIR, 'data', 'history.db')
+def _change_log_ddl():
+    """变迁日志表建表 SQL（与旧版 schema 完全一致）"""
+    return '''
+        CREATE TABLE IF NOT EXISTS student_change_log (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            student_id INTEGER NOT NULL,
+            student_number TEXT,
+            student_name TEXT NOT NULL,
+            change_type TEXT NOT NULL,
+            old_value TEXT,
+            new_value TEXT,
+            detail TEXT,
+            operator TEXT,
+            changed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    '''
+
+
+def init_history_tables():
+    """启动时建好 history.db 的变迁日志表（create_app 调用一次，
+    避免 write_change_log 每次写入都新建 sqlite3 连接并执行 CREATE TABLE）"""
+    from sqlalchemy import text
+    from app.extensions import db
     try:
-        conn = sqlite3.connect(history_db_path)
-        conn.execute('''
-            CREATE TABLE IF NOT EXISTS student_change_log (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                student_id INTEGER NOT NULL,
-                student_number TEXT,
-                student_name TEXT NOT NULL,
-                change_type TEXT NOT NULL,
-                old_value TEXT,
-                new_value TEXT,
-                detail TEXT,
-                operator TEXT,
-                changed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            )
-        ''')
-        conn.commit()
-        for s in students_data:
-            conn.execute(
-                'INSERT INTO student_change_log (student_id,student_number,student_name,change_type,old_value,new_value,detail,operator) VALUES (?,?,?,?,?,?,?,?)',
-                (s['id'], s.get('student_number', ''), s.get('name', ''),
-                 change_type, old_value, new_value, detail, operator_name)
-            )
-        conn.commit()
-        conn.close()
+        engine = db.engines.get('history')
+        if engine is None:
+            return
+        with engine.begin() as conn:
+            conn.execute(text(_change_log_ddl()))
+    except Exception as e:
+        import logging
+        logging.getLogger(__name__).warning(f'初始化变迁日志表失败: {e}')
+
+
+def write_change_log(change_type, students_data, old_value='', new_value='', detail='', operator_name=''):
+    """写入学生变迁日志到 history.db（复用 history bind 的连接池，不再每次新建连接）
+    students_data: list of dicts with keys id, student_number, name
+    函数签名与调用方式与旧版完全一致；表已在 create_app 启动时建好，
+    若表缺失（如绕过启动初始化直接调脚本）则自动补建一次后重试。
+    """
+    from sqlalchemy import text
+    from sqlalchemy.exc import OperationalError
+    from app.extensions import db
+    rows = [
+        {'sid': s['id'], 'sno': s.get('student_number', ''), 'sname': s.get('name', ''),
+         'ctype': change_type, 'old': old_value, 'new': new_value,
+         'detail': detail, 'operator': operator_name}
+        for s in students_data
+    ]
+    if not rows:
+        return
+    insert_sql = text(
+        'INSERT INTO student_change_log (student_id,student_number,student_name,change_type,old_value,new_value,detail,operator) '
+        'VALUES (:sid,:sno,:sname,:ctype,:old,:new,:detail,:operator)'
+    )
+    try:
+        engine = db.engines.get('history')
+        if engine is None:
+            return
+        try:
+            with engine.begin() as conn:
+                conn.execute(insert_sql, rows)
+        except OperationalError:
+            # 表不存在（未经启动初始化的调用方）：补建后重试一次
+            with engine.begin() as conn:
+                conn.execute(text(_change_log_ddl()))
+                conn.execute(insert_sql, rows)
     except Exception as e:
         import logging
         logging.getLogger(__name__).error(f'写入变迁日志异常: {e}', exc_info=True)

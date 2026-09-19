@@ -1,0 +1,567 @@
+{% extends "base.html" %}
+{% block title %}{{ data.student.name }} - 学生画像{% endblock %}
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+    <div>
+        <a href="{{ url_for('portrait.index') }}" class="text-decoration-none">
+            <i class="bi bi-arrow-left"></i> 返回列表
+        </a>
+        <h4 class="fw-bold mb-0 mt-1">
+            <i class="bi bi-person-vcard"></i> {{ data.student.name }}
+            <small class="text-muted">{{ data.student.no }}</small>
+        </h4>
+    </div>
+    {% if current_user.has_perm('portrait.edit') %}
+    <button class="btn btn-outline-primary" id="btnRefresh">
+        <i class="bi bi-arrow-clockwise"></i> 刷新画像
+    </button>
+    {% endif %}
+</div>
+
+<!-- 学生基本信息 + 综合评级 -->
+<div class="row g-3 mb-3">
+    <div class="col-md-8">
+        <div class="card h-100">
+            <div class="card-body">
+                <h6 class="fw-bold mb-3"><i class="bi bi-person"></i> 基本信息</h6>
+                <div class="row">
+                    <div class="col-sm-6 mb-2">
+                        <span class="text-muted">学号：</span>{{ data.student.no }}
+                    </div>
+                    <div class="col-sm-6 mb-2">
+                        <span class="text-muted">姓名：</span>{{ data.student.name }}
+                    </div>
+                    <div class="col-sm-6 mb-2">
+                        <span class="text-muted">年级：</span>{{ data.student.grade }}
+                    </div>
+                    <div class="col-sm-6 mb-2">
+                        <span class="text-muted">班级：</span>{{ data.student.class_name }}
+                    </div>
+                    <div class="col-sm-6 mb-2">
+                        <span class="text-muted">性别：</span>{{ data.student.gender }}
+                    </div>
+                    {% if data.student.selection %}
+                    <div class="col-sm-6 mb-2">
+                        <span class="text-muted">选科：</span>
+                        <span class="badge bg-light text-dark border">{{ data.student.selection }}</span>
+                    </div>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-4">
+        <div class="card h-100 text-center">
+            <div class="card-body d-flex flex-column justify-content-center">
+                <h6 class="fw-bold mb-2">综合评级</h6>
+                {% set p = data.portrait %}
+                {% if p and p.overall_level %}
+                <div class="display-1 fw-bold mb-2
+                    {{ 'text-success' if p.overall_level == 'A' else 'text-primary' if p.overall_level == 'B' else 'text-warning' if p.overall_level == 'C' else 'text-danger' }}">
+                    {{ p.overall_level }}
+                </div>
+                <small class="text-muted">更新于 {{ p.last_updated }}</small>
+                {% else %}
+                <div class="display-4 text-muted mb-2">-</div>
+                <small class="text-muted">尚未评估</small>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- 四维度雷达图 + 成绩趋势 -->
+<div class="row g-3 mb-3">
+    <div class="col-md-5">
+        <div class="card h-100">
+            <div class="card-body">
+                <h6 class="fw-bold mb-3"><i class="bi bi-radar"></i> 维度分析</h6>
+                <div id="radarChart" style="height: 280px;"></div>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-7">
+        <div class="card h-100">
+            <div class="card-body">
+                <h6 class="fw-bold mb-3"><i class="bi bi-graph-up"></i> 成绩趋势</h6>
+                <div id="trendChart" style="height: 280px;"></div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- 积分统计 + 宿舍信息 + 考勤记录 -->
+<div class="row g-3 mb-3">
+    <div class="col-md-4">
+        <div class="card h-100">
+            <div class="card-body">
+                <h6 class="fw-bold mb-3"><i class="bi bi-star"></i> 积分统计</h6>
+                <div class="row text-center mb-3">
+                    <div class="col-4">
+                        <div class="display-6 fw-bold text-primary">{{ data.points.total }}</div>
+                        <small class="text-muted">总积分</small>
+                    </div>
+                    <div class="col-4">
+                        <div class="display-6 fw-bold text-success">{{ data.points.this_month }}</div>
+                        <small class="text-muted">本月</small>
+                    </div>
+                    <div class="col-4">
+                        <div class="display-6 fw-bold text-info">{{ data.points.this_semester }}</div>
+                        <small class="text-muted">本学期</small>
+                    </div>
+                </div>
+                {% if data.points.category_breakdown %}
+                <div id="pointsPieChart" style="height: 150px;"></div>
+                {% else %}
+                <div class="text-center text-muted small">暂无积分记录</div>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+    <div class="col-md-4">
+        <div class="card h-100">
+            <div class="card-body">
+                <h6 class="fw-bold mb-3"><i class="bi bi-building"></i> 宿舍信息</h6>
+                {% if data.dormitory.room_number %}
+                <div class="mb-2">
+                    <span class="text-muted">宿舍楼：</span>{{ data.dormitory.building }}
+                </div>
+                <div class="mb-2">
+                    <span class="text-muted">房间号：</span>{{ data.dormitory.room_number }}
+                </div>
+                <div class="mb-2">
+                    <span class="text-muted">床位号：</span>{{ data.dormitory.bed_number }}
+                </div>
+                {% else %}
+                <div class="text-center text-muted small py-3">
+                    <i class="bi bi-info-circle"></i> 未分配宿舍
+                </div>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+    <div class="col-md-4">
+        <div class="card h-100">
+            <div class="card-body">
+                <h6 class="fw-bold mb-3"><i class="bi bi-clipboard-check"></i> 考勤记录</h6>
+                <div class="mb-2">
+                    <span class="text-muted">纪律记录：</span>{{ data.attendance.total_records }} 条
+                </div>
+                {% if data.attendance.records %}
+                <div class="small" style="max-height: 120px; overflow-y: auto;">
+                    {% for r in data.attendance.records[:5] %}
+                    <div class="border-bottom pb-1 mb-1">
+                        <span class="text-muted">{{ r.date }}</span>
+                        <span class="{{ 'text-danger' if r.points < 0 else 'text-success' }}">{{ r.points }}</span>
+                        <span class="text-truncate d-inline-block" style="max-width: 120px;" title="{{ r.reason }}">{{ r.reason }}</span>
+                    </div>
+                    {% endfor %}
+                </div>
+                {% else %}
+                <div class="text-center text-muted small">暂无纪律记录</div>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- 评语管理 -->
+<div class="card mb-3">
+    <div class="card-header d-flex justify-content-between align-items-center">
+        <h6 class="fw-bold mb-0"><i class="bi bi-chat-left-text"></i> 教师评语</h6>
+        {% if current_user.has_perm('portrait.edit') %}
+        <button class="btn btn-sm btn-primary" data-bs-toggle="modal" data-bs-target="#commentModal" onclick="resetCommentForm()">
+            <i class="bi bi-plus"></i> 添加评语
+        </button>
+        {% endif %}
+    </div>
+    <div class="card-body">
+        <div id="commentsList">
+            {% for c in data.comments %}
+            <div class="border rounded p-2 mb-2 comment-item" data-id="{{ c.id }}">
+                <div class="d-flex justify-content-between align-items-start">
+                    <div>
+                        <span class="badge bg-secondary me-2">{{ c.comment_type }}</span>
+                        <small class="text-muted">{{ c.term }}</small>
+                    </div>
+                    {% if current_user.has_perm('portrait.edit') %}
+                    <div>
+                        <button class="btn btn-sm btn-outline-secondary" onclick="editComment({{ c.id }}, `{{ c.content|e }}`, '{{ c.comment_type }}', '{{ c.term }}')">
+                            <i class="bi bi-pencil"></i>
+                        </button>
+                        <button class="btn btn-sm btn-outline-danger" onclick="deleteComment({{ c.id }})">
+                            <i class="bi bi-trash"></i>
+                        </button>
+                    </div>
+                    {% endif %}
+                </div>
+                <div class="mt-2">{{ c.content|nl2br }}</div>
+                <small class="text-muted">{{ c.created_at }}</small>
+            </div>
+            {% else %}
+            <div class="text-center text-muted small py-3">暂无评语</div>
+            {% endfor %}
+        </div>
+    </div>
+</div>
+
+<!-- 事件记录 -->
+<div class="card mb-3">
+    <div class="card-header d-flex justify-content-between align-items-center">
+        <h6 class="fw-bold mb-0"><i class="bi bi-journal-check"></i> 事件记录</h6>
+        {% if current_user.has_perm('portrait.edit') %}
+        <button class="btn btn-sm btn-primary" data-bs-toggle="modal" data-bs-target="#eventModal" onclick="resetEventForm()">
+            <i class="bi bi-plus"></i> 添加事件
+        </button>
+        {% endif %}
+    </div>
+    <div class="card-body">
+        <div id="eventsList">
+            {% for e in data.events %}
+            <div class="border-start border-3 ps-3 mb-3 event-item
+                {{ 'border-success' if e.event_type == '荣誉' else 'border-danger' if e.event_type == '违纪' else 'border-info' if e.event_type == '活动' else 'border-secondary' }}"
+                data-id="{{ e.id }}">
+                <div class="d-flex justify-content-between align-items-start">
+                    <div>
+                        <span class="badge bg-{{ 'success' if e.event_type == '荣誉' else 'danger' if e.event_type == '违纪' else 'info' if e.event_type == '活动' else 'secondary' }} me-2">
+                            {{ e.event_type }}
+                        </span>
+                        <strong>{{ e.title }}</strong>
+                    </div>
+                    {% if current_user.has_perm('portrait.edit') %}
+                    <button class="btn btn-sm btn-outline-danger" onclick="deleteEvent({{ e.id }})">
+                        <i class="bi bi-trash"></i>
+                    </button>
+                    {% endif %}
+                </div>
+                <div class="small text-muted mb-1">{{ e.event_date }}</div>
+                {% if e.description %}
+                <div class="small">{{ e.description|nl2br }}</div>
+                {% endif %}
+            </div>
+            {% else %}
+            <div class="text-center text-muted small py-3">暂无事件记录</div>
+            {% endfor %}
+        </div>
+    </div>
+</div>
+
+<!-- 评语弹窗 -->
+<div class="modal fade" id="commentModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="commentModalTitle">添加评语</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <input type="hidden" id="commentId">
+                <div class="mb-3">
+                    <label class="form-label">评语类型</label>
+                    <select class="form-select" id="commentType">
+                        <option value="学期评语">学期评语</option>
+                        <option value="操行评语">操行评语</option>
+                        <option value="班主任评语">班主任评语</option>
+                    </select>
+                </div>
+                <div class="mb-3">
+                    <label class="form-label">学期</label>
+                    <input type="text" class="form-control" id="commentTerm" placeholder="如：2025-2026-1">
+                </div>
+                <div class="mb-3">
+                    <label class="form-label">评语内容 <span class="text-danger">*</span></label>
+                    <textarea class="form-control" id="commentContent" rows="4" required></textarea>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">取消</button>
+                <button type="button" class="btn btn-primary" onclick="saveComment()">保存</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- 事件弹窗 -->
+<div class="modal fade" id="eventModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">添加事件</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <div class="mb-3">
+                    <label class="form-label">事件类型</label>
+                    <select class="form-select" id="eventType">
+                        <option value="荣誉">荣誉</option>
+                        <option value="违纪">违纪</option>
+                        <option value="活动">活动</option>
+                        <option value="其他">其他</option>
+                    </select>
+                </div>
+                <div class="mb-3">
+                    <label class="form-label">事件标题 <span class="text-danger">*</span></label>
+                    <input type="text" class="form-control" id="eventTitle" required>
+                </div>
+                <div class="mb-3">
+                    <label class="form-label">事件日期 <span class="text-danger">*</span></label>
+                    <input type="date" class="form-control" id="eventDate" required>
+                </div>
+                <div class="mb-3">
+                    <label class="form-label">事件描述</label>
+                    <textarea class="form-control" id="eventDescription" rows="3"></textarea>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">取消</button>
+                <button type="button" class="btn btn-primary" onclick="saveEvent()">保存</button>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script src="{{ su('js/echarts.min.js') }}"></script>
+<script>
+// 学生数据
+const studentNo = '{{ data.student.no }}';
+const portraitData = {{ data.portrait|tojson }};
+const trendData = {{ data.trend|tojson }};
+const pointsData = {{ data.points|tojson }};
+
+// 初始化图表
+document.addEventListener('DOMContentLoaded', function() {
+    initRadarChart();
+    initTrendChart();
+    if (pointsData.category_breakdown && pointsData.category_breakdown.length > 0) {
+        initPointsPieChart();
+    }
+});
+
+// 雷达图
+function initRadarChart() {
+    const chart = echarts.init(document.getElementById('radarChart'));
+    const p = portraitData || {};
+    chart.setOption({
+        radar: {
+            indicator: [
+                { name: '学业', max: 100 },
+                { name: '行为', max: 100 },
+                { name: '宿舍', max: 100 },
+                { name: '出勤', max: 100 }
+            ],
+            radius: 90
+        },
+        series: [{
+            type: 'radar',
+            data: [{
+                value: [
+                    p.academic_score || 0,
+                    p.behavior_score || 0,
+                    p.dormitory_score || 0,
+                    p.attendance_rate || 0
+                ],
+                name: '维度得分',
+                areaStyle: { opacity: 0.3 }
+            }]
+        }]
+    });
+    window.addEventListener('resize', () => chart.resize());
+}
+
+// 成绩趋势图
+function initTrendChart() {
+    const chart = echarts.init(document.getElementById('trendChart'));
+    if (!trendData || trendData.length === 0) {
+        document.getElementById('trendChart').innerHTML = '<div class="text-center text-muted py-5">暂无成绩数据</div>';
+        return;
+    }
+    chart.setOption({
+        tooltip: { trigger: 'axis' },
+        legend: { data: ['总分', '年级平均'] },
+        xAxis: {
+            type: 'category',
+            data: trendData.map(d => d.exam_name),
+            axisLabel: { rotate: 30, fontSize: 10 }
+        },
+        yAxis: { type: 'value', name: '分数' },
+        series: [
+            {
+                name: '总分',
+                type: 'line',
+                data: trendData.map(d => d.total_score),
+                smooth: true,
+                itemStyle: { color: '#0d6efd' }
+            },
+            {
+                name: '年级平均',
+                type: 'line',
+                data: trendData.map(d => d.avg_score),
+                smooth: true,
+                lineStyle: { type: 'dashed' },
+                itemStyle: { color: '#6c757d' }
+            }
+        ]
+    });
+    window.addEventListener('resize', () => chart.resize());
+}
+
+// 积分饼图
+function initPointsPieChart() {
+    const chart = echarts.init(document.getElementById('pointsPieChart'));
+    chart.setOption({
+        tooltip: { trigger: 'item' },
+        series: [{
+            type: 'pie',
+            radius: ['40%', '70%'],
+            data: pointsData.category_breakdown.map(d => ({
+                name: d.category,
+                value: Math.abs(d.total_points)
+            })),
+            label: { fontSize: 10 }
+        }]
+    });
+    window.addEventListener('resize', () => chart.resize());
+}
+
+// 刷新画像
+document.getElementById('btnRefresh')?.addEventListener('click', function() {
+    if (!confirm('确定要重新计算该学生的画像数据吗？')) return;
+    this.disabled = true;
+    this.innerHTML = '<span class="spinner-border spinner-border-sm"></span> 计算中...';
+    fetch(`/portrait/api/${studentNo}/refresh`, {
+        method: 'POST',
+        headers: { 'X-CSRFToken': csrfToken }
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.success) {
+            location.reload();
+        } else {
+            alert(data.message || '刷新失败');
+            this.disabled = false;
+            this.innerHTML = '<i class="bi bi-arrow-clockwise"></i> 刷新画像';
+        }
+    })
+    .catch(() => {
+        alert('请求失败');
+        this.disabled = false;
+        this.innerHTML = '<i class="bi bi-arrow-clockwise"></i> 刷新画像';
+    });
+});
+
+// 评语管理
+function resetCommentForm() {
+    document.getElementById('commentId').value = '';
+    document.getElementById('commentType').value = '学期评语';
+    document.getElementById('commentTerm').value = '';
+    document.getElementById('commentContent').value = '';
+    document.getElementById('commentModalTitle').textContent = '添加评语';
+}
+
+function editComment(id, content, type, term) {
+    document.getElementById('commentId').value = id;
+    document.getElementById('commentType').value = type;
+    document.getElementById('commentTerm').value = term;
+    document.getElementById('commentContent').value = content;
+    document.getElementById('commentModalTitle').textContent = '编辑评语';
+    new bootstrap.Modal(document.getElementById('commentModal')).show();
+}
+
+function saveComment() {
+    const id = document.getElementById('commentId').value;
+    const data = {
+        student_no: studentNo,
+        comment_type: document.getElementById('commentType').value,
+        term: document.getElementById('commentTerm').value,
+        content: document.getElementById('commentContent').value
+    };
+    if (!data.content) {
+        alert('请输入评语内容');
+        return;
+    }
+    const url = id ? `/portrait/comments/${id}/edit` : '/portrait/comments';
+    fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrfToken },
+        body: JSON.stringify(data)
+    })
+    .then(r => r.json())
+    .then(res => {
+        if (res.success) {
+            location.reload();
+        } else {
+            alert(res.message || '保存失败');
+        }
+    });
+}
+
+function deleteComment(id) {
+    if (!confirm('确定要删除这条评语吗？')) return;
+    fetch(`/portrait/comments/${id}/delete`, {
+        method: 'POST',
+        headers: { 'X-CSRFToken': csrfToken }
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.success) {
+            document.querySelector(`.comment-item[data-id="${id}"]`)?.remove();
+        } else {
+            alert(data.message || '删除失败');
+        }
+    });
+}
+
+// 事件管理
+function resetEventForm() {
+    document.getElementById('eventType').value = '荣誉';
+    document.getElementById('eventTitle').value = '';
+    document.getElementById('eventDate').value = '';
+    document.getElementById('eventDescription').value = '';
+}
+
+function saveEvent() {
+    const data = {
+        student_no: studentNo,
+        event_type: document.getElementById('eventType').value,
+        title: document.getElementById('eventTitle').value,
+        event_date: document.getElementById('eventDate').value,
+        description: document.getElementById('eventDescription').value
+    };
+    if (!data.title || !data.event_date) {
+        alert('请填写标题和日期');
+        return;
+    }
+    fetch('/portrait/events', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrfToken },
+        body: JSON.stringify(data)
+    })
+    .then(r => r.json())
+    .then(res => {
+        if (res.success) {
+            location.reload();
+        } else {
+            alert(res.message || '保存失败');
+        }
+    });
+}
+
+function deleteEvent(id) {
+    if (!confirm('确定要删除这条事件记录吗？')) return;
+    fetch(`/portrait/events/${id}/delete`, {
+        method: 'POST',
+        headers: { 'X-CSRFToken': csrfToken }
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.success) {
+            document.querySelector(`.event-item[data-id="${id}"]`)?.remove();
+        } else {
+            alert(data.message || '删除失败');
+        }
+    });
+}
+</script>
+{% endblock %}
