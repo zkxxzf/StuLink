@@ -474,6 +474,17 @@
 
     // 收集各表结构化数据 → 后端 python-pptx 生成 .pptx 下载
     window._rpExportPptx = function () {
+        // v1.13.2 PPT 干净版：过滤掉网页装饰性底色（交替底纹 #f3f5f9、白底色），
+        // 只保留业务高亮表头（绿/深蓝）与业务文字颜色（红绿字保留）。
+        // 数据行统一白底，避免 PPT 上出现"黑乎乎条条"。
+        var ALT_BG = 'rgb(243,245,249)';   // 网页 tdAlt 交替底纹
+        var WHITE_BG = 'rgba(0,0,0,0)';    // 浏览器默认 background-color（未设置时）
+        var _bgOf = function (c, isHeader) {
+            if (isHeader) return (getComputedStyle(c).backgroundColor || '').replace(/\s/g, '');
+            var bg = (getComputedStyle(c).backgroundColor || '').replace(/\s/g, '');
+            if (bg === ALT_BG || bg === WHITE_BG) return '';
+            return bg;   // 业务高亮（如排名蓝底、警示底色）保留
+        };
         var tables = [];
         document.querySelectorAll('#rpBody .rp-section').forEach(function (sec) {
             var t = sec.querySelector('table');
@@ -484,14 +495,14 @@
             t.querySelectorAll('tr').forEach(function (tr) {
                 var cells = [];
                 tr.querySelectorAll('th,td').forEach(function (c) {
-                    // 勾选框标签不进导出内容
+                    var isHeader = c.tagName.toLowerCase() === 'th';
                     var lab = c.querySelector('.rp-rank-opt');
                     var txt = c.textContent;
                     if (lab) txt = txt.replace(lab.textContent, '');
                     cells.push({
                         text: txt.trim(),
                         color: (getComputedStyle(c).color || '').replace(/\s/g, ''),
-                        bg: (getComputedStyle(c).backgroundColor || '').replace(/\s/g, ''),
+                        bg: _bgOf(c, isHeader),
                         bold: /700|bold/.test(getComputedStyle(c).fontWeight)
                     });
                 });

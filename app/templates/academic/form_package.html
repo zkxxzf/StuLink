@@ -1,0 +1,98 @@
+{% extends "base.html" %}
+{% block title %}材料包下载 - {{ tpl.title }}{% endblock %}
+{% block extra_css %}{% include "academic/_fx_style.html" %}{% endblock %}
+{% block content %}
+{% set fx_active = 'package' %}
+<div class="fx-wrap">
+    {% include "academic/_fx_hero.html" %}
+
+    <div class="row g-3">
+        <div class="col-lg-7">
+            <div class="fx-panel">
+                <div class="fx-panel-head"><div class="fx-seclabel"><span class="fx-tag">Step 1</span><i class="bi bi-funnel"></i>选择打包范围</div></div>
+                <div class="fx-panel-body">
+                    <div class="mb-3">
+                        <div class="d-flex flex-wrap gap-3">
+                            <label class="d-flex align-items-center gap-2"><input type="radio" name="fxScope" value="all" checked> 全部材料</label>
+                            <label class="d-flex align-items-center gap-2"><input type="radio" name="fxScope" value="grade"> 按年级</label>
+                            <label class="d-flex align-items-center gap-2"><input type="radio" name="fxScope" value="class"> 按班级</label>
+                            <label class="d-flex align-items-center gap-2"><input type="radio" name="fxScope" value="question"> 按题目</label>
+                            <label class="d-flex align-items-center gap-2"><input type="radio" name="fxScope" value="uid"> 按指定学生</label>
+                        </div>
+                    </div>
+                    <div class="fx-toolbar" id="fxScopeControls">
+                        <select id="fxGrade" class="form-select form-select-sm" style="width:130px" disabled>
+                            <option value="">全部年级</option>
+                            {% for g in scope_options %}<option value="{{ g.grade }}">{{ g.grade }}</option>{% endfor %}
+                        </select>
+                        <select id="fxClass" class="form-select form-select-sm" style="width:120px" disabled><option value="">全部班级</option></select>
+                        <select id="fxQuestion" class="form-select form-select-sm" style="width:180px" disabled>
+                            <option value="">全部材料题</option>
+                            {% for q in questions %}<option value="{{ q.id }}">{{ q.title }}</option>{% endfor %}
+                        </select>
+                        <input id="fxUid" class="form-control form-control-sm" style="width:170px" placeholder="学号" disabled>
+                    </div>
+                    <hr>
+                    <div class="d-flex flex-wrap gap-3">
+                        <label class="d-flex align-items-center gap-2 fx-hint"><input type="checkbox" id="fxApprovedOnly"> 仅打包已审核通过的材料</label>
+                        <label class="d-flex align-items-center gap-2 fx-hint"><input type="checkbox" id="fxManifest" checked> 在压缩包内附材料清单 CSV</label>
+                    </div>
+                </div>
+            </div>
+
+            <div class="fx-panel">
+                <div class="fx-panel-head"><div class="fx-seclabel"><span class="fx-tag">Step 2</span><i class="bi bi-diagram-3"></i>目录结构方式</div></div>
+                <div class="fx-panel-body">
+                    <div class="fx-struct" id="fxStruct">
+                        <label class="active" data-struct="class_student">
+                            <div><input type="radio" name="fxStructure" value="class_student" checked><span class="fx-st-name">按 班级 / 学生</span></div>
+                            <div class="fx-st-desc">最常用：便于按班分发、按学生归档</div>
+                            <div class="fx-st-path">表单/<br>└ 年级/班级/学号_姓名/<br>&nbsp;&nbsp;&nbsp;└ 题目/原文件名</div>
+                        </label>
+                        <label data-struct="question_class">
+                            <div><input type="radio" name="fxStructure" value="question_class"><span class="fx-st-name">按 题目 / 班级</span></div>
+                            <div class="fx-st-desc">同类材料集中，便于逐题批阅</div>
+                            <div class="fx-st-path">表单/<br>└ 题目/年级/班级/<br>&nbsp;&nbsp;&nbsp;└ 学号_姓名_原文件名</div>
+                        </label>
+                        <label data-struct="flat">
+                            <div><input type="radio" name="fxStructure" value="flat"><span class="fx-st-name">平铺（单层）</span></div>
+                            <div class="fx-st-desc">全部文件在一层，文件名自带信息</div>
+                            <div class="fx-st-path">表单/<br>└ 年级_班级_学号_姓名_<br>&nbsp;&nbsp;&nbsp;题目_原文件名</div>
+                        </label>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="col-lg-5">
+            <div class="fx-panel">
+                <div class="fx-panel-head"><div class="fx-seclabel"><span class="fx-tag">Step 3</span><i class="bi bi-eye"></i>预览与下载</div></div>
+                <div class="fx-panel-body">
+                    <button id="fxPreviewBtn" class="btn btn-sm btn-outline-primary w-100 mb-3"><i class="bi bi-search"></i> 预览打包内容</button>
+                    <div id="fxPreviewResult">
+                        <div class="fx-empty" style="padding:26px"><i class="bi bi-box-seam"></i>点击「预览打包内容」查看将生成的文件数量、总大小与目录树示例</div>
+                    </div>
+                    <hr>
+                    <button id="fxDownloadBtn" class="btn btn-warning w-100 fw-bold" disabled><i class="bi bi-file-earmark-zip"></i> 确认下载材料包</button>
+                    <div class="fx-hint mt-2 text-center">打包大量文件可能耗时，下载期间请勿重复点击</div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+window.FX_CTX = {
+    formId: {{ tpl.id }},
+    page: 'package',
+    scopeOptions: {{ scope_options | tojson }},
+    urls: {
+        preview: '{{ url_for("academic.api_form_package_preview", form_id=tpl.id) }}',
+        download: '{{ url_for("academic.form_package_download", form_id=tpl.id) }}'
+    }
+};
+</script>
+{% endblock %}
+{% block extra_js %}
+<script src="{{ su('js/form_summary.js') }}"></script>
+{% endblock %}

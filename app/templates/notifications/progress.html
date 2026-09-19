@@ -1,0 +1,145 @@
+{% extends "base.html" %}
+{% block title %}已读进度 - {{ notification.title }} - StuLink{% endblock %}
+
+{% block extra_css %}
+<style>
+    .stat-cards { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; margin-bottom: 24px; }
+    .stat-card-item { background: #fff; border-radius: 12px; padding: 20px; text-align: center;
+        box-shadow: 0 1px 3px rgba(0,0,0,.08); }
+    .stat-card-item .number { font-size: 32px; font-weight: 700; line-height: 1.2; }
+    .stat-card-item .label { font-size: 13px; color: #64748b; margin-top: 4px; }
+    .stat-card-item.total .number { color: #1e293b; }
+    .stat-card-item.read .number { color: #10b981; }
+    .stat-card-item.unread .number { color: #ef4444; }
+    .stat-card-item.percent .number { color: #3b82f6; }
+    .progress-bar-wrap { height: 12px; border-radius: 6px; background: #e2e8f0; margin-bottom: 24px; overflow: hidden; }
+    .progress-bar-fill { height: 100%; border-radius: 6px; background: linear-gradient(90deg, #10b981, #34d399);
+        transition: width .5s ease; }
+    .section-title { font-size: 16px; font-weight: 600; margin-bottom: 12px; color: #1e293b; }
+    .back-link { font-size: 14px; color: #64748b; text-decoration: none; }
+    .back-link:hover { color: #3b82f6; }
+    #readTrendChart { width: 100%; height: 250px; margin-bottom: 24px; }
+    @media (max-width: 768px) { .stat-cards { grid-template-columns: repeat(2, 1fr); } }
+</style>
+{% endblock %}
+
+{% block content %}
+<a href="{{ url_for('notifications.notification_detail', notification_id=notification.id) }}"
+   class="back-link d-inline-flex align-items-center gap-1 mb-3">
+    <i class="bi bi-arrow-left"></i> 返回通知详情
+</a>
+
+<h5 class="fw-bold mb-1"><i class="bi bi-bar-chart-line"></i> 已读进度</h5>
+<p class="text-muted mb-4" style="font-size:14px;">{{ notification.title }}</p>
+
+{% if progress %}
+<div class="stat-cards">
+    <div class="stat-card-item total">
+        <div class="number">{{ progress.recipient_count }}</div>
+        <div class="label">应收</div>
+    </div>
+    <div class="stat-card-item read">
+        <div class="number">{{ progress.read_count }}</div>
+        <div class="label">已读</div>
+    </div>
+    <div class="stat-card-item unread">
+        <div class="number">{{ progress.unread_count }}</div>
+        <div class="label">未读</div>
+    </div>
+    <div class="stat-card-item percent">
+        <div class="number">{{ progress.percent }}%</div>
+        <div class="label">已读率</div>
+    </div>
+</div>
+
+<div class="progress-bar-wrap">
+    <div class="progress-bar-fill" style="width: {{ progress.percent }}%"></div>
+</div>
+
+{# ECharts 已读趋势（懒加载） #}
+<div id="readTrendChart" style="display:none;"></div>
+
+{% if progress.unread_users %}
+<div class="card mb-4">
+    <div class="card-body">
+        <div class="d-flex align-items-center justify-content-between mb-3">
+            <h6 class="section-title mb-0">未读名单 ({{ progress.unread_count }}人)</h6>
+            {% if progress.unread_users_truncated %}
+            <small class="text-muted">显示前 500 人</small>
+            {% endif %}
+        </div>
+        <div class="table-responsive">
+            <table class="table table-sm table-hover" style="font-size:13px;">
+                <thead>
+                    <tr>
+                        <th>#</th>
+                        <th>姓名</th>
+                        <th>UID</th>
+                        <th>年级</th>
+                        <th>班级</th>
+                        <th>账号</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for u in progress.unread_users %}
+                    <tr>
+                        <td>{{ loop.index }}</td>
+                        <td>{{ u.name }}</td>
+                        <td><code>{{ u.uid }}</code></td>
+                        <td>{{ u.grade }}</td>
+                        <td>{{ u.class_name }}</td>
+                        <td>
+                            {% if u.has_account %}
+                            <span class="badge bg-success" style="font-size:10px;">有</span>
+                            {% else %}
+                            <span class="badge bg-secondary" style="font-size:10px;">无</span>
+                            {% endif %}
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+{% endif %}
+
+{% else %}
+<div class="alert alert-warning">暂无进度数据</div>
+{% endif %}
+{% endblock %}
+
+{% block extra_js %}
+<script>
+// 懒加载 ECharts
+(function() {
+    var chartDom = document.getElementById('readTrendChart');
+    if (!chartDom) return;
+    // 尝试加载本地 ECharts
+    var script = document.createElement('script');
+    script.src = '{{ su("js/echarts.min.js") if su is defined else "/static/js/echarts.min.js" }}';
+    script.onload = function() {
+        if (typeof echarts === 'undefined') return;
+        chartDom.style.display = 'block';
+        var chart = echarts.init(chartDom);
+        var readCount = {{ progress.read_count if progress else 0 }};
+        var unreadCount = {{ progress.unread_count if progress else 0 }};
+        chart.setOption({
+            title: { text: '已读/未读分布', left: 'center', textStyle: { fontSize: 14 } },
+            tooltip: { trigger: 'item' },
+            series: [{
+                type: 'pie', radius: ['40%', '70%'],
+                data: [
+                    { value: readCount, name: '已读', itemStyle: { color: '#10b981' } },
+                    { value: unreadCount, name: '未读', itemStyle: { color: '#ef4444' } }
+                ],
+                label: { formatter: '{b}: {c} ({d}%)' }
+            }]
+        });
+        window.addEventListener('resize', function() { chart.resize(); });
+    };
+    script.onerror = function() { /* ECharts 不可用则静默跳过 */ };
+    document.head.appendChild(script);
+})();
+</script>
+{% endblock %}

@@ -38,168 +38,155 @@ def _get_user_class_links():
     return UserClassLink.query.filter_by(user_id=current_user.id).all()
 
 
-def _build_per_class_stats(filter_grade=None, filter_classes=None):
-    """按年级+班级统计"""
+def _load_stats_base():
+    """一次性载入统计基础数据（共 2 条 SQL），供三个 builder 内存聚合。
+
+    v1.16.0 性能改造：旧版每班 ~11 条查询（循环内重复调 get_graduated_grades、
+    qs.all() 取全部 id 后跨库大 IN 反模式），整页 400+ 条 SQL；
+    现在整页只查 2 次，用 defaultdict 内存分桶，口径与旧版完全一致。
+
+    返回 (students, acc_map)：
+    - students: [(id, grade, class_name, gender), ...]，已排除毕业年级
+    - acc_map: {student_id: boarding_type}（student_accommodation 全表，student_id 唯一）
+    """
     graduated = get_graduated_grades()
-    q = db.session.query(
-        Student.grade, Student.class_name
-    ).distinct().order_by(Student.grade, Student.class_name)
+    q = db.session.query(Student.id, Student.grade, Student.class_name, Student.gender)
     if graduated:
         q = q.filter(~Student.grade.in_(graduated))
-    if filter_grade:
-        q = q.filter(Student.grade == filter_grade)
+    students = q.all()
+    acc_map = {sid: bt for sid, bt in db.session.query(
+        StudentAccommodation.student_id, StudentAccommodation.boarding_type).all()}
+    return students, acc_map
 
-    results = q.all()
-    # 过滤非标准班级（未分班、不分班、转出等）
-    results = [r for r in results if _is_valid_class(r[1])]
-    if filter_classes:
-        allowed = {(g, c) for g, c in filter_classes}
-        results = [r for r in results if (r[0], r[1]) in allowed]
+
+def _build_per_class_stats(filter_grade=None, filter_classes=None, _base=None):
+    """按年级+班级统计（口径同旧版：排除毕业年级与非标准班级）
+
+    _base: 可选的 _load_stats_base() 结果，同一请求内多个 builder 共享，避免重复查询
+    """
+    students, acc_map = _base if _base is not None else _load_stats_base()
+    allowed = {(g, c) for g, c in filter_classes} if filter_classes else None
+
+    buckets = {}
+    for sid, grade, class_name, gender in students:
+        if filter_grade and grade != filter_grade:
+            continue
+        # 过滤非标准班级（未分班、不分班、转出等）
+        if not _is_valid_class(class_name):
+            continue
+        if allowed is not None and (grade, class_name) not in allowed:
+            continue
+        b = buckets.get((grade, class_name))
+        if b is None:
+            b = buckets[(grade, class_name)] = {
+                'total': 0, 'male': 0, 'female': 0,
+                'boarding': 0, 'male_boarding': 0, 'female_boarding': 0,
+                'day_student': 0, 'male_day': 0, 'female_day': 0,
+            }
+        b['total'] += 1
+        bt = acc_map.get(sid)
+        if gender == '男':
+            b['male'] += 1
+            if bt == '住校':
+                b['male_boarding'] += 1
+            elif bt == '走读':
+                b['male_day'] += 1
+        elif gender == '女':
+            b['female'] += 1
+            if bt == '住校':
+                b['female_boarding'] += 1
+            elif bt == '走读':
+                b['female_day'] += 1
+        if bt == '住校':
+            b['boarding'] += 1
+        elif bt == '走读':
+            b['day_student'] += 1
 
     stats = []
-    for grade, class_name in results:
-        graduated = get_graduated_grades()
-        qs = Student.query.filter_by(grade=grade, class_name=class_name)
-        if graduated:
-            qs = qs.filter(~Student.grade.in_(graduated))
-        total = qs.count()
-        male = qs.filter_by(gender='男').count()
-        female = qs.filter_by(gender='女').count()
-        
-        student_ids = [s.id for s in qs.all()]
-        boarding = StudentAccommodation.query.filter(
-            StudentAccommodation.student_id.in_(student_ids),
-            StudentAccommodation.boarding_type == '住校'
-        ).count()
-        day_student = StudentAccommodation.query.filter(
-            StudentAccommodation.student_id.in_(student_ids),
-            StudentAccommodation.boarding_type == '走读'
-        ).count()
-        
-        male_ids = [s.id for s in qs.filter_by(gender='男').all()]
-        male_boarding = StudentAccommodation.query.filter(
-            StudentAccommodation.student_id.in_(male_ids),
-            StudentAccommodation.boarding_type == '住校'
-        ).count()
-        male_day = StudentAccommodation.query.filter(
-            StudentAccommodation.student_id.in_(male_ids),
-            StudentAccommodation.boarding_type == '走读'
-        ).count()
-        
-        female_ids = [s.id for s in qs.filter_by(gender='女').all()]
-        female_boarding = StudentAccommodation.query.filter(
-            StudentAccommodation.student_id.in_(female_ids),
-            StudentAccommodation.boarding_type == '住校'
-        ).count()
-        female_day = StudentAccommodation.query.filter(
-            StudentAccommodation.student_id.in_(female_ids),
-            StudentAccommodation.boarding_type == '走读'
-        ).count()
-
+    for (grade, class_name) in sorted(buckets):
+        b = buckets[(grade, class_name)]
         stats.append({
             'grade': grade, 'class_name': class_name,
-            'total': total, 'male': male, 'female': female,
-            'boarding': boarding, 'male_boarding': male_boarding,
-            'female_boarding': female_boarding,
-            'day_student': day_student, 'male_day': male_day, 'female_day': female_day,
+            'total': b['total'], 'male': b['male'], 'female': b['female'],
+            'boarding': b['boarding'], 'male_boarding': b['male_boarding'],
+            'female_boarding': b['female_boarding'],
+            'day_student': b['day_student'], 'male_day': b['male_day'],
+            'female_day': b['female_day'],
         })
     return stats
 
 
-def _build_per_grade_stats(filter_grade=None):
-    """按年级汇总"""
-    graduated = get_graduated_grades()
-    q = db.session.query(Student.grade).distinct().order_by(Student.grade)
-    if graduated:
-        q = q.filter(~Student.grade.in_(graduated))
-    if filter_grade:
-        q = q.filter(Student.grade == filter_grade)
-    grades = [r[0] for r in q.all()]
+def _build_per_grade_stats(filter_grade=None, _base=None):
+    """按年级汇总（在校生口径：不包含“不分班”学生，与旧版一致）"""
+    students, acc_map = _base if _base is not None else _load_stats_base()
+
+    per = {}
+    for sid, grade, class_name, gender in students:
+        if filter_grade and grade != filter_grade:
+            continue
+        # 在校生口径：不包含“不分班”学生（其余非标准班级照旧计入，与旧版一致）
+        if (class_name or '') == '不分班':
+            continue
+        g = per.get(grade)
+        if g is None:
+            g = per[grade] = {
+                'classes': set(), 'total': 0, 'male': 0, 'female': 0,
+                'boarding': 0, 'male_boarding': 0, 'female_boarding': 0,
+            }
+        g['classes'].add(class_name)
+        g['total'] += 1
+        bt = acc_map.get(sid)
+        if gender == '男':
+            g['male'] += 1
+            if bt == '住校':
+                g['male_boarding'] += 1
+        elif gender == '女':
+            g['female'] += 1
+            if bt == '住校':
+                g['female_boarding'] += 1
+        if bt == '住校':
+            g['boarding'] += 1
 
     result = []
-    for grade in grades:
-        qs = Student.query.filter_by(grade=grade)
-        if graduated:
-            qs = qs.filter(~Student.grade.in_(graduated))
-        # 在校生口径：不包含“不分班”学生
-        qs = qs.filter(func.coalesce(Student.class_name, '') != '不分班')
-        total = qs.count()
-        male = qs.filter_by(gender='男').count()
-        female = qs.filter_by(gender='女').count()
-        
-        student_ids = [s.id for s in qs.all()]
-        boarding = StudentAccommodation.query.filter(
-            StudentAccommodation.student_id.in_(student_ids),
-            StudentAccommodation.boarding_type == '住校'
-        ).count()
-        
-        male_ids = [s.id for s in qs.filter_by(gender='男').all()]
-        male_boarding = StudentAccommodation.query.filter(
-            StudentAccommodation.student_id.in_(male_ids),
-            StudentAccommodation.boarding_type == '住校'
-        ).count()
-        
-        female_ids = [s.id for s in qs.filter_by(gender='女').all()]
-        female_boarding = StudentAccommodation.query.filter(
-            StudentAccommodation.student_id.in_(female_ids),
-            StudentAccommodation.boarding_type == '住校'
-        ).count()
-        
-        class_count = db.session.query(Student.class_name).filter(
-            Student.grade == grade,
-            func.coalesce(Student.class_name, '') != '不分班'
-        ).distinct().count()
-
+    for grade in sorted(per):
+        g = per[grade]
         result.append({
-            'grade': grade, 'class_count': class_count,
-            'total': total, 'male': male, 'female': female,
-            'boarding': boarding, 'male_boarding': male_boarding,
-            'female_boarding': female_boarding,
+            'grade': grade, 'class_count': len(g['classes']),
+            'total': g['total'], 'male': g['male'], 'female': g['female'],
+            'boarding': g['boarding'], 'male_boarding': g['male_boarding'],
+            'female_boarding': g['female_boarding'],
         })
     return result
 
 
-def _build_school_stats():
-    """全校汇总"""
-    graduated = get_graduated_grades()
-    qs = Student.query
-    if graduated:
-        qs = qs.filter(~Student.grade.in_(graduated))
-    # 在校生口径：不包含“不分班”学生
-    qs = qs.filter(func.coalesce(Student.class_name, '') != '不分班')
-    total = qs.count()
-    male = qs.filter_by(gender='男').count()
-    female = qs.filter_by(gender='女').count()
-    
-    student_ids = [s.id for s in qs.all()]
-    boarding = StudentAccommodation.query.filter(
-        StudentAccommodation.student_id.in_(student_ids),
-        StudentAccommodation.boarding_type == '住校'
-    ).count()
-    
-    male_ids = [s.id for s in qs.filter_by(gender='男').all()]
-    male_boarding = StudentAccommodation.query.filter(
-        StudentAccommodation.student_id.in_(male_ids),
-        StudentAccommodation.boarding_type == '住校'
-    ).count()
-    
-    female_ids = [s.id for s in qs.filter_by(gender='女').all()]
-    female_boarding = StudentAccommodation.query.filter(
-        StudentAccommodation.student_id.in_(female_ids),
-        StudentAccommodation.boarding_type == '住校'
-    ).count()
-    
-    # 年级数/班级数同样按在校生口径：排除已毕业年级
-    _exclude_graduated = ~Student.grade.in_(graduated) if graduated else True
-    grade_count = db.session.query(Student.grade).filter(
-        func.coalesce(Student.class_name, '') != '不分班'
-    ).filter(_exclude_graduated).distinct().count()
-    class_count = db.session.query(Student.grade, Student.class_name).filter(
-        func.coalesce(Student.class_name, '') != '不分班'
-    ).filter(_exclude_graduated).distinct().count()
+def _build_school_stats(_base=None):
+    """全校汇总（在校生口径：排除毕业年级与“不分班”学生，与旧版一致）"""
+    students, acc_map = _base if _base is not None else _load_stats_base()
+
+    total = male = female = 0
+    boarding = male_boarding = female_boarding = 0
+    grade_set = set()
+    class_set = set()
+    for sid, grade, class_name, gender in students:
+        if (class_name or '') == '不分班':
+            continue
+        total += 1
+        grade_set.add(grade)
+        class_set.add((grade, class_name))
+        bt = acc_map.get(sid)
+        if gender == '男':
+            male += 1
+            if bt == '住校':
+                male_boarding += 1
+        elif gender == '女':
+            female += 1
+            if bt == '住校':
+                female_boarding += 1
+        if bt == '住校':
+            boarding += 1
 
     return {
-        'grade_count': grade_count, 'class_count': class_count,
+        'grade_count': len(grade_set), 'class_count': len(class_set),
         'total': total, 'male': male, 'female': female,
         'boarding': boarding, 'male_boarding': male_boarding,
         'female_boarding': female_boarding,
@@ -230,12 +217,15 @@ def index():
         tab = 'school'
     sel_grade = request.args.get('grade', user_grade or '')
 
+    # 一次性载入基础数据（2 条 SQL），三个 builder 共享，避免整页 400+ 条查询
+    base = _load_stats_base()
+
     # 班主任：只允许看 class tab
     if scope_type == SCOPE_CLASS:
         tab = 'class'
         links = _get_user_class_links()
         allowed = [(l.grade, l.class_name) for l in links]
-        per_class_stats = _build_per_class_stats(filter_classes=allowed)
+        per_class_stats = _build_per_class_stats(filter_classes=allowed, _base=base)
         per_grade_stats = []
         school_stats = {}
         grade_options = list(set(l.grade for l in links))
@@ -245,15 +235,15 @@ def index():
             tab = 'class'
         if not sel_grade:
             sel_grade = user_grade or ''
-        per_class_stats = _build_per_class_stats(filter_grade=sel_grade)
-        per_grade_stats = _build_per_grade_stats(filter_grade=user_grade)
-        school_stats = _build_school_stats() if tab == 'school' else {}
+        per_class_stats = _build_per_class_stats(filter_grade=sel_grade, _base=base)
+        per_grade_stats = _build_per_grade_stats(filter_grade=user_grade, _base=base)
+        school_stats = _build_school_stats(_base=base) if tab == 'school' else {}
         grade_options = [user_grade] if user_grade else []
     else:
         # 全校组/admin：全部数据
-        per_class_stats = _build_per_class_stats(filter_grade=sel_grade if tab == 'class' and sel_grade else None)
-        per_grade_stats = _build_per_grade_stats()
-        school_stats = _build_school_stats()
+        per_class_stats = _build_per_class_stats(filter_grade=sel_grade if tab == 'class' and sel_grade else None, _base=base)
+        per_grade_stats = _build_per_grade_stats(_base=base)
+        school_stats = _build_school_stats(_base=base)
         grade_options = sorted(get_active_grades(), reverse=True)
 
     # 宿舍分配明细（原 /rooms/report）：年级 → 性别 → 房间列表（一房一行）

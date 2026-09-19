@@ -1,0 +1,120 @@
+{% extends "base.html" %}
+{% block title %}实时课表 · 查课核对{% endblock %}
+{% block extra_css %}
+<style>
+    .live-head { background: linear-gradient(135deg, #0f172a, #1e3a8a); color: #fff; border-radius: 14px; padding: 16px 18px; margin-bottom: 16px; }
+    .live-head .clock { font-variant-numeric: tabular-nums; font-weight: 700; font-size: 20px; letter-spacing: .5px; }
+    .live-head .clock small { font-weight: 500; opacity: .8; font-size: 12px; }
+    .period-bar { display: flex; gap: 6px; overflow-x: auto; padding: 4px 0 8px; }
+    .period-btn { flex: 0 0 auto; border: 1px solid #cbd5e1; background: #fff; border-radius: 10px; padding: 6px 10px;
+                  font-size: 12px; line-height: 1.2; cursor: pointer; text-align: center; min-width: 74px; transition: all .12s; position: relative; }
+    .period-btn:hover { border-color: #3b82f6; }
+    .period-btn .pn { font-weight: 700; color: #1e293b; display: block; }
+    .period-btn .pt { color: #94a3b8; font-size: 10px; display: block; }
+    .period-btn.active { background: #2563eb; border-color: #1d4ed8; }
+    .period-btn.active .pn, .period-btn.active .pt { color: #fff; }
+    .period-btn.is-now::after { content: '当前'; position: absolute; top: -8px; right: -6px; background: #ef4444; color: #fff;
+                                font-size: 9px; padding: 1px 5px; border-radius: 8px; font-weight: 700; }
+    .grade-block { border: 1px solid #e2e8f0; border-radius: 12px; overflow: hidden; margin-bottom: 16px; }
+    .grade-title { background: #f1f5f9; padding: 8px 14px; font-weight: 700; color: #334155; border-bottom: 1px solid #e2e8f0;
+                   display: flex; align-items: center; gap: 8px; }
+    .grade-title .cnt { font-size: 12px; font-weight: 500; color: #94a3b8; }
+    .live-table td, .live-table th { font-size: 13px; }
+    .live-table tr.row-empty td { background: #fafafa; color: #cbd5e1; }
+    .badge-swap { background: #ef4444; }
+    @media print {
+        .sidebar, .navbar, .no-print, footer { display: none !important; }
+        .main-content { margin-left: 0 !important; padding: 0 !important; }
+        body { padding-top: 0 !important; background: #fff !important; }
+        .live-head { background: #fff !important; color: #000 !important; border: 1px solid #000; }
+        .grade-block { break-inside: avoid; page-break-inside: avoid; border: 1px solid #000; }
+        .live-table td, .live-table th { border: 1px solid #666 !important; }
+    }
+</style>
+{% endblock %}
+{% block content %}
+<div class="live-head d-flex justify-content-between align-items-center flex-wrap gap-3">
+    <div>
+        <div class="fw-bold fs-5"><i class="bi bi-broadcast"></i> 实时课表 · 查课核对</div>
+        <div class="small opacity-75">{{ schedule.name }} · {{ target_date.strftime('%Y-%m-%d') }} {{ weekday_names.get(weekday) }} · 第 {{ period }} 节</div>
+    </div>
+    <div class="text-end">
+        <div class="clock" id="clockTime"><span id="clockHM">{{ now_str }}</span><small class="ms-2" id="clockPeriod">{% if current_period %}· 第{{ current_period }}节{% else %}· 课间{% endif %}</small></div>
+        <button class="btn btn-sm btn-light mt-1 no-print" id="btnPrint"><i class="bi bi-printer"></i> 打印</button>
+        <a class="btn btn-sm btn-outline-light mt-1 no-print" href="{{ url_for('academic.inspection_page') }}"><i class="bi bi-arrow-left"></i> 返回查课</a>
+    </div>
+</div>
+
+<div class="card mb-3 no-print">
+    <div class="card-body py-2">
+        <div class="d-flex align-items-center flex-wrap gap-3">
+            <div class="d-flex align-items-center gap-2">
+                <label class="form-label small mb-0 text-muted">日期</label>
+                <input type="date" id="datePick" class="form-control form-control-sm" style="width:160px" value="{{ target_date.isoformat() }}">
+            </div>
+            <div class="d-flex align-items-center gap-2">
+                <label class="form-label small mb-0 text-muted">年级</label>
+                <select id="gradePick" class="form-select form-select-sm" style="width:130px">
+                    <option value="">全部年级</option>
+                    {% for g in grade_opts %}<option value="{{ g }}" {% if grade == g %}selected{% endif %}>{{ g }}</option>{% endfor %}
+                </select>
+            </div>
+            <button class="btn btn-sm btn-outline-secondary" id="btnToday"><i class="bi bi-calendar-day"></i> 今天</button>
+        </div>
+        <div class="period-bar mt-2" id="periodBar">
+            {% for p in periods %}
+            <button type="button" class="period-btn {% if p.period_number == period %}active{% endif %} {% if p.period_number == current_period %}is-now{% endif %}"
+                    data-period="{{ p.period_number }}">
+                <span class="pn">{{ p.period_name }}</span>
+                <span class="pt">{{ p.start_time }}-{{ p.end_time }}</span>
+            </button>
+            {% endfor %}
+        </div>
+    </div>
+</div>
+
+<div id="liveContainer">
+    {% for g, rows in data.items() %}
+    <div class="grade-block">
+        <div class="grade-title"><i class="bi bi-mortarboard"></i> {{ g }}
+            <span class="cnt">共 {{ rows|length }} 个班</span></div>
+        <div class="table-responsive">
+            <table class="table table-sm table-bordered align-middle mb-0 live-table">
+                <thead class="table-light">
+                    <tr><th style="width:90px">班级</th><th>学科</th><th style="width:130px">授课教师</th><th style="width:150px">教室</th><th style="width:90px">备注</th></tr>
+                </thead>
+                <tbody>
+                    {% for r in rows %}
+                    <tr class="{% if not r.subject %}row-empty{% endif %}">
+                        <td class="fw-semibold">{{ r.class_name }}</td>
+                        <td>{% if r.subject %}{{ r.subject }}{% else %}无课{% endif %}</td>
+                        <td>{{ r.teacher_name or ('—' if not r.subject else '') }}</td>
+                        <td>{{ r.room or '—' }}</td>
+                        <td>{% if r.is_temp_swap %}<span class="badge badge-swap">调课</span>{% endif %}</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+    {% else %}
+    <div class="card"><div class="card-body text-center text-muted py-5">
+        <i class="bi bi-calendar-x" style="font-size:38px"></i>
+        <p class="mt-2 mb-0">该节次暂无课表数据</p>
+    </div></div>
+    {% endfor %}
+</div>
+
+<script id="liveData" type="application/json">
+{
+    "apiUrl": {{ url_for('academic.api_inspection_live_schedule')|tojson }},
+    "pageUrl": {{ url_for('academic.inspection_live_schedule')|tojson }},
+    "periods": [{% for p in periods %}{"number": {{ p.period_number }}, "name": {{ p.period_name|tojson }}, "start": {{ p.start_time|tojson }}, "end": {{ p.end_time|tojson }}}{% if not loop.last %},{% endif %}{% endfor %}],
+    "currentPeriod": {{ current_period if current_period else 'null' }}
+}
+</script>
+{% endblock %}
+
+{% block extra_js %}
+<script src="{{ su('js/inspection_live.js') }}"></script>
+{% endblock %}

@@ -1,0 +1,168 @@
+{% extends "base.html" %}
+{% block title %}班级概览 - 教师工作台{% endblock %}
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
+    <div>
+        <h4 class="fw-bold mb-0"><i class="bi bi-grid-3x3-gap"></i> 班级概览</h4>
+        <nav aria-label="breadcrumb">
+            <ol class="breadcrumb small mb-0">
+                <li class="breadcrumb-item"><a href="{{ url_for('workbench.index') }}">工作台</a></li>
+                <li class="breadcrumb-item active">班级概览</li>
+            </ol>
+        </nav>
+    </div>
+    <div class="d-flex gap-2 align-items-center">
+        <input type="month" class="form-control form-control-sm" id="monthPicker"
+               value="{{ current_month or '' }}" style="width: 160px;">
+    </div>
+</div>
+
+{% if not classes %}
+<div class="card">
+    <div class="card-body text-center text-muted py-5">
+        <i class="bi bi-inbox" style="font-size: 48px;"></i>
+        <p class="mt-3 mb-1">暂无管辖班级数据</p>
+        <p class="small">请联系管理员在「系统管理 - 用户班级关联」中为您分配班级</p>
+    </div>
+</div>
+{% else %}
+
+<div class="row g-3 mb-4">
+    {% for c in classes %}
+    <div class="col-md-6 col-xl-4">
+        <div class="card h-100 border-start border-primary border-3 class-card"
+             style="cursor: pointer;"
+             onclick="location.href='{{ url_for('overview.students_page', grade=c.grade, class_name=c.class_name) }}'">
+            <div class="card-body">
+                <div class="d-flex justify-content-between align-items-start mb-3">
+                    <div>
+                        <h5 class="card-title fw-bold mb-0">{{ c.full_class }}</h5>
+                        <small class="text-muted">{{ c.grade }}</small>
+                    </div>
+                    <span class="badge bg-primary bg-opacity-10 text-primary">
+                        <i class="bi bi-people"></i> {{ c.student_count }} 人
+                    </span>
+                </div>
+
+                <div class="row g-2 small">
+                    <div class="col-6">
+                        <div class="d-flex align-items-center gap-1">
+                            <i class="bi bi-arrow-up-circle text-success"></i>
+                            <span class="text-muted">加分</span>
+                            <span class="fw-bold text-success ms-auto">+{{ c.points_plus }}</span>
+                        </div>
+                    </div>
+                    <div class="col-6">
+                        <div class="d-flex align-items-center gap-1">
+                            <i class="bi bi-arrow-down-circle text-danger"></i>
+                            <span class="text-muted">减分</span>
+                            <span class="fw-bold text-danger ms-auto">-{{ c.points_minus }}</span>
+                        </div>
+                    </div>
+                    <div class="col-6">
+                        <div class="d-flex align-items-center gap-1">
+                            <i class="bi bi-journal-text text-info"></i>
+                            <span class="text-muted">均分</span>
+                            <span class="fw-bold ms-auto">
+                                {% if c.latest_exam_avg is not none %}
+                                    {{ c.latest_exam_avg }}
+                                {% else %}
+                                    <span class="text-muted">-</span>
+                                {% endif %}
+                            </span>
+                        </div>
+                    </div>
+                    <div class="col-6">
+                        <div class="d-flex align-items-center gap-1">
+                            <i class="bi bi-calendar-check text-warning"></i>
+                            <span class="text-muted">出勤</span>
+                            <span class="fw-bold ms-auto">
+                                {% if c.attendance_rate is not none %}
+                                    {{ c.attendance_rate }}%
+                                {% else %}
+                                    <span class="text-muted">-</span>
+                                {% endif %}
+                            </span>
+                        </div>
+                    </div>
+                </div>
+
+                {% if c.attendance_rate is not none %}
+                <div class="mt-2">
+                    <div class="progress" style="height: 4px;">
+                        <div class="progress-bar {% if c.attendance_rate >= 95 %}bg-success{% elif c.attendance_rate >= 85 %}bg-warning{% else %}bg-danger{% endif %}"
+                             style="width: {{ c.attendance_rate }}%"></div>
+                    </div>
+                </div>
+                {% endif %}
+
+                {% if c.latest_exam_name %}
+                <div class="mt-2 pt-2 border-top">
+                    <small class="text-muted">
+                        <i class="bi bi-clipboard-data"></i> {{ c.latest_exam_name }}
+                    </small>
+                </div>
+                {% endif %}
+            </div>
+            <div class="card-footer bg-transparent border-top-0 small">
+                <a href="{{ url_for('overview.students_page', grade=c.grade, class_name=c.class_name) }}"
+                   class="text-decoration-none">
+                    查看学生 <i class="bi bi-arrow-right"></i>
+                </a>
+            </div>
+        </div>
+    </div>
+    {% endfor %}
+</div>
+
+<!-- 快捷导航 -->
+<div class="row g-3">
+    <div class="col-md-4">
+        <a href="{{ url_for('overview.grades_page') }}" class="card text-decoration-none">
+            <div class="card-body d-flex align-items-center gap-3">
+                <div class="stat-icon bg-info bg-opacity-10 text-info">
+                    <i class="bi bi-bar-chart-line"></i>
+                </div>
+                <div>
+                    <div class="fw-bold">成绩概览</div>
+                    <small class="text-muted">查看各考试班级均分与及格率</small>
+                </div>
+            </div>
+        </a>
+    </div>
+    <div class="col-md-4">
+        <a href="{{ url_for('overview.points_page') }}" class="card text-decoration-none">
+            <div class="card-body d-flex align-items-center gap-3">
+                <div class="stat-icon bg-success bg-opacity-10 text-success">
+                    <i class="bi bi-star"></i>
+                </div>
+                <div>
+                    <div class="fw-bold">积分概览</div>
+                    <small class="text-muted">本月加减分统计与排行</small>
+                </div>
+            </div>
+        </a>
+    </div>
+    <div class="col-md-4">
+        <a href="{{ url_for('overview.students_page') }}" class="card text-decoration-none">
+            <div class="card-body d-flex align-items-center gap-3">
+                <div class="stat-icon bg-primary bg-opacity-10 text-primary">
+                    <i class="bi bi-people"></i>
+                </div>
+                <div>
+                    <div class="fw-bold">学生信息</div>
+                    <small class="text-muted">查看管辖班级学生名单</small>
+                </div>
+            </div>
+        </a>
+    </div>
+</div>
+{% endif %}
+{% endblock %}
+
+{% block extra_css_head %}
+<style>
+    .class-card { transition: transform .15s, box-shadow .15s; }
+    .class-card:hover { transform: translateY(-2px); box-shadow: 0 4px 12px rgba(0,0,0,.1); }
+</style>
+{% endblock %}

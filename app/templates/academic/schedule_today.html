@@ -1,0 +1,157 @@
+{% extends "base.html" %}
+{% import "academic/_schedule_parts.html" as parts %}
+{% block title %}今日课表{% endblock %}
+{% block extra_css %}
+<style>
+.today-period-row { border-left: 4px solid transparent; }
+.today-period-row.is-current { border-left-color: #10b981; background: #ecfdf5;
+                               box-shadow: 0 0 0 1px #10b981 inset; }
+.today-period-head { min-width: 150px; }
+.badge-current { animation: pulseCur 1.6s ease-in-out infinite; }
+@keyframes pulseCur { 0%,100% { opacity: 1; } 50% { opacity: .55; } }
+</style>
+{% endblock %}
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
+    <div class="d-flex align-items-center gap-3 flex-wrap">
+        <h4 class="fw-bold mb-0"><i class="bi bi-sun"></i> 今日课表</h4>
+        <span class="text-muted">
+            <span class="fw-bold text-dark">{{ data.date }}</span>
+            <span class="badge bg-primary ms-1">{{ data.weekday_text }}</span>
+            {% if data.current_period_number %}
+            <span class="badge bg-success badge-current ms-1">
+                当前：第 {{ data.current_period_number }} 节
+            </span>
+            {% else %}
+            <span class="badge bg-secondary ms-1">当前无课节次</span>
+            {% endif %}
+            <span class="ms-2 small" id="clockText"></span>
+        </span>
+    </div>
+    <div class="d-flex gap-2 flex-wrap align-items-center">
+        {{ parts.term_selector(schedules, ts, query_mode='today_schedule', week=week) }}
+        {% if ts %}{{ parts.week_selector(ts.total_weeks, ts.get_current_week(), week) }}{% endif %}
+        <div class="form-check form-switch mb-0">
+            <input class="form-check-input" type="checkbox" id="autoRefresh" checked>
+            <label class="form-check-label small" for="autoRefresh">30秒自动刷新</label>
+        </div>
+        <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('academic.inspection_live_schedule') }}">
+            <i class="bi bi-clipboard2-check"></i> 查课视图
+        </a>
+    </div>
+</div>
+
+{% if not ts %}
+<div class="card">
+    <div class="card-body text-center py-5 text-muted">
+        <i class="bi bi-calendar-x" style="font-size:40px;"></i>
+        <p class="mt-3 mb-1">尚未创建学期课表</p>
+    </div>
+</div>
+{% else %}
+{{ parts.readonly_banner(ts) }}
+
+{# Task#27：当前学期/周次上下文条（初值服务端渲染，schedule_term.js 从 current-context 接口刷新） #}
+<div id="termContextBar" class="alert alert-light border py-2 d-flex align-items-center gap-2 flex-wrap small mb-3"
+     data-current-context-url="{{ url_for('academic.api_schedule_current_context') }}">
+    <i class="bi bi-calendar-check text-primary"></i>
+    <span id="termContextText">
+        {% if ts %}{{ ts.name }}{% if ts.get_current_week() %} · 第 {{ ts.get_current_week() }} 周{% endif %} · {{ data.date }} {{ data.weekday_text }}{% else %}尚未配置学期{% endif %}
+    </span>
+</div>
+
+<div class="card mb-3">
+    <div class="card-body py-2">
+        <form class="row g-2 align-items-center" method="get">
+            {% if request.args.get('sid') %}<input type="hidden" name="sid" value="{{ request.args.get('sid') }}">{% endif %}
+            {% if week %}<input type="hidden" name="week" value="{{ week }}">{% endif %}
+            <div class="col-auto">
+                <select name="grade" class="form-select form-select-sm" style="width:140px">
+                    <option value="">全部年级</option>
+                    {% for g in grade_opts %}
+                    <option value="{{ g }}" {% if f_grade == g %}selected{% endif %}>{{ g }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="col-auto">
+                <input name="class" class="form-control form-control-sm" style="width:110px"
+                       value="{{ f_class }}" placeholder="班级，如 01班">
+            </div>
+            <div class="col-auto">
+                <button class="btn btn-sm btn-primary"><i class="bi bi-funnel"></i> 筛选</button>
+                <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('academic.today_schedule') }}">重置</a>
+            </div>
+            <div class="col-auto ms-auto text-muted small">
+                共 {{ data.total }} 节课
+                {% if ts %}· {{ ts.name }}{% endif %}
+            </div>
+        </form>
+    </div>
+</div>
+
+{# 节次时间轴（当前节次高亮） #}
+{% set period_map = {} %}
+{% for p in data.periods %}{% set _ = period_map.update({p.period_number: p}) %}{% endfor %}
+
+{% if not data.entries %}
+<div class="card">
+    <div class="card-body text-center py-5 text-muted">
+        <i class="bi bi-cup-hot" style="font-size:40px;"></i>
+        <p class="mt-3 mb-1">今天（{{ data.weekday_text }}）没有排课</p>
+    </div>
+</div>
+{% else %}
+{% for pn in period_map.keys()|sort %}
+{% set p = period_map[pn] %}
+{% set rows = [] %}
+{% for g, cls_map in grouped.items() %}
+    {% for cn, elist in cls_map.items() %}
+        {% for e in elist %}{% if e.period_number == pn %}{% set _ = rows.append((g, cn, e)) %}{% endif %}{% endfor %}
+    {% endfor %}
+{% endfor %}
+{% if rows %}
+<div class="card mb-2 today-period-row {{ 'is-current' if data.current_period_number == pn else '' }}">
+    <div class="card-body py-2">
+        <div class="d-flex align-items-center gap-2 mb-2 today-period-head">
+            <span class="fw-bold">{{ p.period_name }}</span>
+            <span class="text-muted small">{{ p.start_time }} - {{ p.end_time }}</span>
+            {% if data.current_period_number == pn %}
+            <span class="badge bg-success badge-current">当前</span>
+            {% endif %}
+            <span class="badge bg-light text-dark border ms-auto">{{ rows|length }} 个班</span>
+        </div>
+        <div class="row g-2">
+            {% for g, cn, e in rows|sort(attribute='0,1') %}
+            <div class="col-6 col-md-4 col-lg-3 col-xxl-2">
+                <div class="border rounded px-2 py-1 h-100 {{ 'border-success-subtle bg-white' if data.current_period_number == pn else 'bg-light' }}">
+                    <div class="d-flex justify-content-between align-items-center">
+                        <span class="small fw-bold text-primary">{{ g }}{{ cn }}</span>
+                        {% if e.entry_type == 'swap' %}<span class="badge" style="background:#f59e0b">调</span>{% endif %}
+                    </div>
+                    <div class="fw-bold">{{ e.subject }}</div>
+                    <div class="small text-muted">
+                        <i class="bi bi-person"></i> {{ e.teacher_name or '未指定' }}
+                        {% if e.room %}<i class="bi bi-geo-alt ms-1"></i>{{ e.room }}{% endif %}
+                    </div>
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+    </div>
+</div>
+{% endif %}
+{% endfor %}
+{% endif %}
+{% endif %}
+
+<script id="scheduleData" type="application/json">
+{
+    "pageType": "today",
+    "sid": {{ ts.id if ts else 'null' }},
+    "todayUrl": {{ url_for('academic.today_schedule')|tojson }},
+    "todayDataUrl": {{ url_for('academic.api_schedule_today_data')|tojson }}
+}
+</script>
+<script src="{{ su('js/schedule.js') }}"></script>
+<script src="{{ su('js/schedule_term.js') }}"></script>
+{% endblock %}

@@ -3,18 +3,30 @@
 {% block content %}
 <div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
     <h4 class="fw-bold mb-0"><i class="bi bi-calendar3"></i> 课表</h4>
-    {% if timetables %}
-    <form class="d-flex gap-2" method="get">
-        <select name="id" class="form-select form-select-sm" style="width:220px"
-                onchange="this.form.submit()">
-            {% for tt in timetables %}
-            <option value="{{ tt.id }}" {% if current and current.id == tt.id %}selected{% endif %}>
-                {{ tt.name }}{% if tt.grade %} · {{ tt.grade }}{% endif %}
-            </option>
-            {% endfor %}
-        </select>
-    </form>
-    {% endif %}
+    <div class="d-flex gap-2">
+        {% if current_user.has_perm('academic.edit') %}
+        <a class="btn btn-sm btn-primary" href="{{ url_for('academic.timetable_import_page') }}">
+            <i class="bi bi-calendar-plus"></i> 导入课表
+        </a>
+        {% if current and entries %}
+        <button class="btn btn-sm btn-outline-success" data-bs-toggle="modal" data-bs-target="#addEntryModal">
+            <i class="bi bi-plus-lg"></i> 新增条目
+        </button>
+        {% endif %}
+        {% endif %}
+        {% if timetables %}
+        <form class="d-flex gap-2" method="get">
+            <select name="id" class="form-select form-select-sm" style="width:220px"
+                    onchange="this.form.submit()">
+                {% for tt in timetables %}
+                <option value="{{ tt.id }}" {% if current and current.id == tt.id %}selected{% endif %}>
+                    {{ tt.name }}{% if tt.grade %} · {{ tt.grade }}{% endif %}
+                </option>
+                {% endfor %}
+            </select>
+        </form>
+        {% endif %}
+    </div>
 </div>
 
 {% if not current %}
@@ -22,7 +34,11 @@
     <div class="card-body text-center py-5 text-muted">
         <i class="bi bi-calendar-x" style="font-size:40px;"></i>
         <p class="mt-3 mb-1">尚未建立课表数据</p>
-        <p class="small mb-0">课表导入功能将在后续版本开放；当前版本已预置课表数据结构与查看页面。</p>
+        {% if current_user.has_perm('academic.edit') %}
+        <p class="small mb-0">
+            点击 <a href="{{ url_for('academic.timetable_import_page') }}">导入课表</a> 开始添加课表数据
+        </p>
+        {% endif %}
     </div>
 </div>
 {% elif not entries %}
@@ -30,13 +46,32 @@
     <div class="card-body text-center py-5 text-muted">
         <i class="bi bi-calendar-x" style="font-size:40px;"></i>
         <p class="mt-3 mb-1">{{ current.name }} 暂无课表明细</p>
-        <p class="small mb-0">课表导入功能将在后续版本开放。</p>
+        {% if current_user.has_perm('academic.edit') %}
+        <p class="small mb-0">
+            <a href="{{ url_for('academic.timetable_import_page') }}">重新导入</a> 或
+            <a href="#" data-bs-toggle="modal" data-bs-target="#editModal{{ current.id }}">编辑课表信息</a>
+        </p>
+        {% endif %}
     </div>
 </div>
 {% else %}
 <div class="card">
-    <div class="card-header">{{ current.name }}{% if current.grade %} · {{ current.grade }}{% endif %}
-        <span class="text-muted small ms-2">共 {{ entries|length }} 节课</span>
+    <div class="card-header d-flex justify-content-between align-items-center">
+        <span>{{ current.name }}{% if current.grade %} · {{ current.grade }}{% endif %}
+            <span class="text-muted small ms-2">共 {{ entries|length }} 节课</span>
+        </span>
+        {% if current_user.has_perm('academic.edit') %}
+        <div class="d-flex gap-1">
+            <button class="btn btn-sm btn-outline-primary" data-bs-toggle="modal"
+                    data-bs-target="#editModal{{ current.id }}">
+                <i class="bi bi-pencil"></i> 编辑
+            </button>
+            <button class="btn btn-sm btn-outline-danger" data-bs-toggle="modal"
+                    data-bs-target="#deleteModal{{ current.id }}">
+                <i class="bi bi-trash"></i> 删除
+            </button>
+        </div>
+        {% endif %}
     </div>
     <div class="table-responsive">
         <table class="table table-bordered table-sm align-middle mb-0 text-center">
@@ -55,10 +90,34 @@
                     {% for wd in range(1, 8) %}
                     <td class="small" style="min-width:110px">
                         {% for e in grid.get((wd, p), []) %}
-                        <div class="mb-1">
+                        <div class="mb-1 position-relative">
                             <div class="fw-bold">{{ e.subject or '—' }}</div>
                             <div class="text-muted">{{ e.class_name or '' }} {{ e.room or '' }}</div>
                             {% if e.teacher_name %}<div>{{ e.teacher_name }}</div>{% endif %}
+                            {% if current_user.has_perm('academic.edit') %}
+                            <div class="mt-1 d-flex gap-1 justify-content-center">
+                                <button class="btn btn-outline-primary btn-sm px-1 py-0 edit-entry-btn"
+                                        style="font-size:11px;line-height:1.4"
+                                        data-bs-toggle="modal" data-bs-target="#editEntryModal"
+                                        data-eid="{{ e.id }}"
+                                        data-teacher-uid="{{ e.teacher_uid or '' }}"
+                                        data-teacher-name="{{ e.teacher_name or '' }}"
+                                        data-subject="{{ e.subject or '' }}"
+                                        data-class-name="{{ e.class_name or '' }}"
+                                        data-weekday="{{ e.weekday or '' }}"
+                                        data-period="{{ e.period or '' }}"
+                                        data-week-range="{{ e.week_range or '' }}"
+                                        data-room="{{ e.room or '' }}"
+                                        title="编辑"><i class="bi bi-pencil-square"></i></button>
+                                <form method="POST" style="display:inline"
+                                      action="{{ url_for('academic.timetable_entry_delete', tid=current.id, eid=e.id) }}"
+                                      onsubmit="return confirm('确定删除这条课表条目？')">
+                                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                                    <button class="btn btn-outline-danger btn-sm px-1 py-0" style="font-size:11px;line-height:1.4"
+                                            title="删除"><i class="bi bi-trash"></i></button>
+                                </form>
+                            </div>
+                            {% endif %}
                         </div>
                         {% endfor %}
                     </td>
@@ -69,5 +128,203 @@
         </table>
     </div>
 </div>
+{% endif %}
+
+{# ====== 编辑 / 删除模态框（每个课表） ====== #}
+{% if current and current_user.has_perm('academic.edit') %}
+{# 编辑模态框 #}
+<div class="modal fade" id="editModal{{ current.id }}" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <form method="POST" action="{{ url_for('academic.timetable_edit', tid=current.id) }}">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <div class="modal-header">
+                    <h5 class="modal-title"><i class="bi bi-pencil"></i> 编辑课表</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="mb-3">
+                        <label class="form-label">课表名称 <span class="text-danger">*</span></label>
+                        <input type="text" name="name" class="form-control" required
+                               value="{{ current.name }}">
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">适用年级</label>
+                        <input type="text" name="grade" class="form-control"
+                               value="{{ current.grade or '' }}" placeholder="选填">
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">取消</button>
+                    <button type="submit" class="btn btn-primary">保存</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+{# 删除确认模态框 #}
+<div class="modal fade" id="deleteModal{{ current.id }}" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <form method="POST" action="{{ url_for('academic.timetable_delete', tid=current.id) }}">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <div class="modal-header">
+                    <h5 class="modal-title text-danger"><i class="bi bi-exclamation-triangle"></i> 确认删除</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <p>确定要删除课表 <strong>「{{ current.name }}」</strong> 吗？</p>
+                    <p class="text-danger small mb-0">此操作将同时删除全部 {{ entries|length }} 节课的明细数据，且不可恢复。</p>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">取消</button>
+                    <button type="submit" class="btn btn-danger">确认删除</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+{# ====== 新增条目模态框 ====== #}
+<div class="modal fade" id="addEntryModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <form method="POST" action="{{ url_for('academic.timetable_entry_add', tid=current.id) }}">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <div class="modal-header">
+                    <h5 class="modal-title"><i class="bi bi-plus-lg"></i> 新增课表条目</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="row g-2">
+                        <div class="col-6">
+                            <label class="form-label">教师编号 <span class="text-danger">*</span></label>
+                            <input name="teacher_uid" class="form-control" required placeholder="如 T12345678">
+                        </div>
+                        <div class="col-6">
+                            <label class="form-label">学科 <span class="text-danger">*</span></label>
+                            <input name="subject" class="form-control" required maxlength="20">
+                        </div>
+                    </div>
+                    <div class="row g-2 mt-1">
+                        <div class="col-6">
+                            <label class="form-label">班级</label>
+                            <input name="class_name" class="form-control" maxlength="10" placeholder="如 01班">
+                        </div>
+                        <div class="col-6">
+                            <label class="form-label">教室</label>
+                            <input name="room" class="form-control" maxlength="30">
+                        </div>
+                    </div>
+                    <div class="row g-2 mt-1">
+                        <div class="col-4">
+                            <label class="form-label">星期 <span class="text-danger">*</span></label>
+                            <select name="weekday" class="form-select" required>
+                                <option value="">--</option>
+                                {% for i in range(1, 8) %}
+                                <option value="{{ i }}">{{ weekday_names[i-1] }}</option>
+                                {% endfor %}
+                            </select>
+                        </div>
+                        <div class="col-4">
+                            <label class="form-label">节次 <span class="text-danger">*</span></label>
+                            <input type="number" name="period" class="form-control" min="1" max="12" required>
+                        </div>
+                        <div class="col-4">
+                            <label class="form-label">周次范围</label>
+                            <input name="week_range" class="form-control" maxlength="20" placeholder="如 1-16">
+                        </div>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">取消</button>
+                    <button type="submit" class="btn btn-primary"><i class="bi bi-check-lg"></i> 添加</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+{# ====== 编辑条目模态框 ====== #}
+<div class="modal fade" id="editEntryModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <form id="editEntryForm" method="POST" action="">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <div class="modal-header">
+                    <h5 class="modal-title"><i class="bi bi-pencil-square"></i> 编辑课表条目</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="row g-2">
+                        <div class="col-6">
+                            <label class="form-label">教师编号</label>
+                            <input name="teacher_uid" id="editTeacherUid" class="form-control" placeholder="如 T12345678">
+                        </div>
+                        <div class="col-6">
+                            <label class="form-label">学科</label>
+                            <input name="subject" id="editSubject" class="form-control" maxlength="20">
+                        </div>
+                    </div>
+                    <div class="row g-2 mt-1">
+                        <div class="col-6">
+                            <label class="form-label">班级</label>
+                            <input name="class_name" id="editClassName" class="form-control" maxlength="10">
+                        </div>
+                        <div class="col-6">
+                            <label class="form-label">教室</label>
+                            <input name="room" id="editRoom" class="form-control" maxlength="30">
+                        </div>
+                    </div>
+                    <div class="row g-2 mt-1">
+                        <div class="col-4">
+                            <label class="form-label">星期</label>
+                            <select name="weekday" id="editWeekday" class="form-select">
+                                <option value="">--</option>
+                                {% for i in range(1, 8) %}
+                                <option value="{{ i }}">{{ weekday_names[i-1] }}</option>
+                                {% endfor %}
+                            </select>
+                        </div>
+                        <div class="col-4">
+                            <label class="form-label">节次</label>
+                            <input type="number" name="period" id="editPeriod" class="form-control" min="1" max="12">
+                        </div>
+                        <div class="col-4">
+                            <label class="form-label">周次范围</label>
+                            <input name="week_range" id="editWeekRange" class="form-control" maxlength="20">
+                        </div>
+                    </div>
+                    <div class="form-text mt-2">当前教师：<span id="editTeacherName" class="fw-bold"></span></div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">取消</button>
+                    <button type="submit" class="btn btn-primary"><i class="bi bi-check-lg"></i> 保存</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    document.querySelectorAll('.edit-entry-btn').forEach(function(btn) {
+        btn.addEventListener('click', function() {
+            const eid = this.dataset.eid;
+            const form = document.getElementById('editEntryForm');
+            form.action = '/academic/timetable/{{ current.id }}/entry/' + eid + '/edit';
+            document.getElementById('editTeacherUid').value = this.dataset.teacherUid || '';
+            document.getElementById('editSubject').value = this.dataset.subject || '';
+            document.getElementById('editClassName').value = this.dataset.className || '';
+            document.getElementById('editWeekday').value = this.dataset.weekday || '';
+            document.getElementById('editPeriod').value = this.dataset.period || '';
+            document.getElementById('editWeekRange').value = this.dataset.weekRange || '';
+            document.getElementById('editRoom').value = this.dataset.room || '';
+            document.getElementById('editTeacherName').textContent = this.dataset.teacherName || '';
+        });
+    });
+});
+</script>
 {% endif %}
 {% endblock %}

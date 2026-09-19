@@ -1,0 +1,169 @@
+{% extends "base.html" %}
+{% import "academic/_schedule_parts.html" as parts %}
+{% import "academic/_schedule_grid.html" as gridm %}
+{% block title %}{{ '我的课表' if my_mode else (teacher.name if teacher else uid) ~ ' 课表' }}{% endblock %}
+{% block extra_css %}{{ gridm.schedule_grid_css() }}{% endblock %}
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
+    <div class="d-flex align-items-center gap-3 flex-wrap">
+        <h4 class="fw-bold mb-0">
+            <i class="bi bi-person-workspace"></i>
+            {% if my_mode %}我的课表{% if teacher %} · {{ teacher.name }}{% endif %}
+            {% else %}教师课表 · {{ teacher.name if teacher else uid }}{% endif %}
+        </h4>
+        {% if ts %}
+        {{ parts.term_selector(schedules, ts,
+                               base_endpoint=('academic.my_schedule' if my_mode else 'academic.schedule_teacher'),
+                               base_kwargs=({} if my_mode else {'uid': uid}),
+                               query_mode=('my_schedule' if my_mode else None), week=week) }}
+        {{ parts.week_selector(ts.total_weeks, ts.get_current_week(), week) }}
+        {% endif %}
+    </div>
+    <div class="d-flex gap-2 flex-wrap">
+        {% if not my_mode %}
+        {% if can_edit and uid %}
+        <a class="btn btn-sm btn-outline-info text-white"
+           href="{{ url_for('academic.schedule_export', sid=ts.id, view_type='teacher', teacher=uid, week=week) }}">
+            <i class="bi bi-download"></i> 导出
+        </a>
+        {% endif %}
+        <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('academic.schedule_manage') }}">
+            <i class="bi bi-house"></i> 学期管理
+        </a>
+        {% else %}
+        <a class="btn btn-sm btn-outline-info text-white" href="{{ url_for('academic.today_schedule') }}">
+            <i class="bi bi-sun"></i> 今日课表
+        </a>
+        {% endif %}
+    </div>
+</div>
+
+{% if not ts %}
+<div class="card">
+    <div class="card-body text-center py-5 text-muted">
+        <i class="bi bi-calendar-x" style="font-size:40px;"></i>
+        <p class="mt-3 mb-1">尚未创建学期课表</p>
+    </div>
+</div>
+{% elif my_mode and not teacher %}
+<div class="card">
+    <div class="card-body text-center py-5 text-muted">
+        <i class="bi bi-person-x" style="font-size:40px;"></i>
+        <p class="mt-3 mb-1">当前账号未关联教师名单</p>
+        <p class="small mb-0">请联系教务管理员在「教师名单」中为你建档并关联账号</p>
+    </div>
+</div>
+{% else %}
+
+{{ parts.readonly_banner(ts) }}
+
+{% if not my_mode and teachers %}
+<div class="card mb-3">
+    <div class="card-body py-2">
+        <div class="row g-2 align-items-center">
+            <div class="col-md-5">
+                <div class="input-group input-group-sm">
+                    <span class="input-group-text"><i class="bi bi-search"></i></span>
+                    <select class="form-select form-select-sm" id="teacherJump">
+                        <option value="">切换教师（共 {{ teachers|length }} 人）…</option>
+                        {% for t in teachers %}
+                        <option value="{{ t.uid }}" {% if t.uid == uid %}selected{% endif %}>
+                            {{ t.name }}（{{ t.uid }}{% if t.subject %} · {{ t.subject }}{% endif %}）
+                        </option>
+                        {% endfor %}
+                    </select>
+                </div>
+            </div>
+            <div class="col-md-7 text-muted small">
+                {% if teacher %}
+                <i class="bi bi-person-badge"></i> {{ teacher.name }} · {{ teacher.teacher_uid }}
+                {% if teacher.subject %} · {{ teacher.subject }}{% endif %}
+                {% if teacher.phone %} · {{ teacher.phone }}{% endif %}
+                {% else %}
+                <i class="bi bi-exclamation-triangle text-warning"></i> 教师编号 {{ uid }} 不在教师名单中（课表数据仍按编号展示）
+                {% endif %}
+            </div>
+        </div>
+    </div>
+</div>
+{% endif %}
+
+<div class="row g-3">
+    <div class="col-lg-9">
+        <div class="card h-100">
+            <div class="card-header py-2">
+                <span class="fw-bold">{{ ts.name }} · {{ teacher.name if teacher else uid }}
+                    <span class="text-muted small ms-2">共 {{ view.total }} 节/周</span>
+                    {% if week %}<span class="badge bg-info ms-1">第 {{ week }} 周</span>{% endif %}
+                </span>
+            </div>
+            <div class="card-body p-2" id="gridContainer">
+                {% if view.total %}
+                {{ gridm.schedule_grid(view.periods, view.grid, can_edit=False) }}
+                {% else %}
+                <div class="text-center text-muted py-5">
+                    <i class="bi bi-calendar-x" style="font-size:36px"></i>
+                    <p class="small mt-2 mb-0">该教师本学期暂无排课</p>
+                </div>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+    <div class="col-lg-3">
+        <div class="card mb-3">
+            <div class="card-header py-2"><i class="bi bi-bar-chart"></i> 每周课时统计</div>
+            <div class="card-body py-2">
+                {% if view.stats %}
+                <div class="d-flex flex-wrap gap-1 mb-2">
+                    {% for subj, cnt in view.stats.items()|sort(attribute='1.value', reverse=True) %}
+                    <span class="badge bg-light text-dark border">{{ subj }} × {{ cnt }}</span>
+                    {% endfor %}
+                </div>
+                <div class="text-muted small">合计 <span class="fw-bold text-dark">{{ view.total }}</span> 节/周</div>
+                {% else %}
+                <div class="text-muted small text-center py-3">暂无课程</div>
+                {% endif %}
+            </div>
+        </div>
+        <div class="card mb-3">
+            <div class="card-header py-2"><i class="bi bi-pie-chart"></i> 学科课时占比</div>
+            <div class="card-body p-2">
+                <div id="chartSubjectPie" data-lazy-chart="pie" style="height:260px"></div>
+            </div>
+        </div>
+        {% if view.entries %}
+        <div class="card">
+            <div class="card-header py-2"><i class="bi bi-people"></i> 任教班级</div>
+            <div class="card-body py-2 d-flex flex-wrap gap-1">
+                {% set ns = namespace(pairs=[]) %}
+                {% for e in view.entries %}
+                {% set key = e.grade ~ e.class_name %}
+                {% if key not in ns.pairs %}{% set ns.pairs = ns.pairs + [key] %}
+                <span class="badge bg-primary-subtle text-primary-emphasis border">{{ key }}</span>
+                {% endif %}
+                {% endfor %}
+            </div>
+        </div>
+        {% endif %}
+    </div>
+</div>
+{% endif %}
+
+<script id="scheduleData" type="application/json">
+{
+    "pageType": "teacher",
+    "sid": {{ ts.id if ts else 'null' }},
+    "canEdit": false,
+    "myMode": {{ 'true' if my_mode else 'false' }},
+    "uid": {{ uid|tojson }},
+    "week": {{ week|tojson }},
+    "stats": {{ view.stats|tojson if view else '{}'|tojson }},
+    "teacherUrlTpl": {{ (url_for('academic.schedule_teacher', sid=ts.id, uid='__UID__') if ts and not my_mode else '')|tojson }},
+    "myUrl": {{ url_for('academic.my_schedule')|tojson }},
+    "urls": {}
+}
+</script>
+<script src="{{ su('js/echarts.min.js') }}"></script>
+<script src="{{ su('js/schedule.js') }}"></script>
+<script src="{{ su('js/schedule_term.js') }}"></script>
+{% endblock %}

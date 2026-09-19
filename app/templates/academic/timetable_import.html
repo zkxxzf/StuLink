@@ -1,0 +1,165 @@
+{% extends "base.html" %}
+{% block title %}{% if preview %}导入预览{% else %}导入课表{% endif %}{% endblock %}
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
+    <h4 class="fw-bold mb-0">
+        <i class="bi bi-calendar-plus"></i>
+        {% if preview %}导入预览{% else %}导入课表{% endif %}
+    </h4>
+    <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('academic.timetable_page') }}">
+        <i class="bi bi-arrow-left"></i> 返回课表
+    </a>
+</div>
+
+{% if not preview %}
+{# ====== 上传表单 ====== #}
+<div class="card mb-3">
+    <div class="card-header">
+        <i class="bi bi-info-circle"></i> 导入说明
+    </div>
+    <div class="card-body">
+        <ul class="mb-0 small text-muted">
+            <li>请先 <a href="{{ url_for('academic.timetable_template') }}">下载模板</a> 并按格式填写课表数据。</li>
+            <li>支持字段：班级、学科、教师编号、星期（1-5）、节次（1-10）、周次范围、教室。</li>
+            <li>教师编号须在教师名单中已存在；同一教师同一时间不得安排多个班级。</li>
+            <li>上传后将进入预览页面，确认无误后再写入数据库。</li>
+        </ul>
+    </div>
+</div>
+
+<div class="card">
+    <div class="card-header">上传课表 Excel</div>
+    <div class="card-body">
+        <form method="POST" action="{{ url_for('academic.timetable_import_upload') }}" enctype="multipart/form-data">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <div class="row g-3">
+                <div class="col-md-4">
+                    <label class="form-label">课表名称 <span class="text-danger">*</span></label>
+                    <input type="text" name="name" class="form-control" required
+                           placeholder="如 2026-2027学年第一学期">
+                </div>
+                <div class="col-md-3">
+                    <label class="form-label">适用年级</label>
+                    <input type="text" name="grade" class="form-control"
+                           placeholder="选填，如 高一">
+                </div>
+                <div class="col-md-5">
+                    <label class="form-label">Excel 文件 <span class="text-danger">*</span></label>
+                    <input type="file" name="file" class="form-control" accept=".xlsx,.xls" required>
+                </div>
+            </div>
+            <div class="mt-3 d-flex gap-2 align-items-center">
+                <button type="submit" class="btn btn-primary">
+                    <i class="bi bi-upload"></i> 上传预览
+                </button>
+                <a class="btn btn-outline-success" href="{{ url_for('academic.timetable_template') }}">
+                    <i class="bi bi-download"></i> 下载模板
+                </a>
+            </div>
+        </form>
+    </div>
+</div>
+
+{% else %}
+{# ====== 预览模式 ====== #}
+<div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
+    <span class="text-muted small">文件：{{ fname }}</span>
+</div>
+
+<div class="row g-2 mb-3">
+    <div class="col-4 col-md-2">
+        <div class="card text-center">
+            <div class="card-body py-2">
+                <div class="fw-bold fs-5 text-primary">{{ plan.total }}</div>
+                <div class="text-muted small">总行数</div>
+            </div>
+        </div>
+    </div>
+    <div class="col-4 col-md-2">
+        <div class="card text-center">
+            <div class="card-body py-2">
+                <div class="fw-bold fs-5 text-success">{{ plan.valid_count }}</div>
+                <div class="text-muted small">有效行</div>
+            </div>
+        </div>
+    </div>
+    <div class="col-4 col-md-2">
+        <div class="card text-center">
+            <div class="card-body py-2">
+                <div class="fw-bold fs-5 text-danger">{{ plan.invalid_count }}</div>
+                <div class="text-muted small">错误行</div>
+            </div>
+        </div>
+    </div>
+</div>
+
+{% if plan.invalid %}
+<div class="alert alert-warning">
+    <strong><i class="bi bi-exclamation-triangle"></i> 以下行存在错误，将被跳过：</strong>
+    <ul class="mb-0 mt-1 small">
+        {% for e in plan.invalid %}
+        <li>第 {{ e.row_no }} 行：{{ e.errors | join('；') }}</li>
+        {% endfor %}
+    </ul>
+</div>
+{% endif %}
+
+{% if plan.valid %}
+<form method="POST" action="{{ url_for('academic.timetable_import_confirm') }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <input type="hidden" name="token" value="{{ token }}">
+
+    <div class="card mb-3">
+        <div class="card-header">
+            课表：{{ plan.name }}{% if plan.grade %} · {{ plan.grade }}{% endif %}
+            <span class="text-muted small ms-2">有效 {{ plan.valid_count }} 节课</span>
+        </div>
+        <div class="table-responsive">
+            <table class="table table-sm align-middle mb-0">
+                <thead class="table-light">
+                    <tr>
+                        <th>行号</th><th>班级</th><th>学科</th><th>教师编号</th>
+                        <th>教师</th><th>星期</th><th>节次</th><th>周次</th><th>教室</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for e in plan.valid %}
+                    <tr>
+                        <td class="text-muted">{{ e.row_no }}</td>
+                        <td>{{ e.class_name }}</td>
+                        <td>{{ e.subject }}</td>
+                        <td><code>{{ e.teacher_uid }}</code></td>
+                        <td>{{ e.get('teacher_name', '-') }}</td>
+                        <td>{{ weekday_names[e.weekday - 1] if e.weekday and e.weekday <= 7 else e.weekday_raw }}</td>
+                        <td>第 {{ e.period }} 节</td>
+                        <td>{{ e.week_range or '-' }}</td>
+                        <td>{{ e.room or '-' }}</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <div class="d-flex gap-2">
+        <button type="submit" class="btn btn-success">
+            <i class="bi bi-check-lg"></i> 确认导入
+        </button>
+        <a class="btn btn-outline-secondary" href="{{ url_for('academic.timetable_import_page') }}">取消返回</a>
+        <span class="text-muted small align-self-center">
+            确认后将写入 {{ plan.valid_count }} 节课到课表「{{ plan.name }}」
+        </span>
+    </div>
+</form>
+{% else %}
+<div class="card">
+    <div class="card-body text-center py-5 text-muted">
+        <i class="bi bi-exclamation-circle" style="font-size:40px;"></i>
+        <p class="mt-3 mb-1">无有效数据可导入</p>
+        <p class="small mb-0">请检查错误信息后重新上传</p>
+        <a class="btn btn-outline-primary mt-2" href="{{ url_for('academic.timetable_import_page') }}">重新上传</a>
+    </div>
+</div>
+{% endif %}
+{% endif %}
+{% endblock %}

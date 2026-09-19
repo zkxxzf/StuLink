@@ -8,7 +8,7 @@ from flask_login import login_required, current_user
 from app.extensions import db
 from app.models import Room, BedAssignment, Student, GradeSetting, DictCategory, DictItem
 from app.utils.decorators import perm_required
-from app.utils.helpers import log_operation, write_change_log, get_dict_values
+from app.utils.helpers import log_operation, write_change_log, get_dict_values, clear_graduated_grades_cache
 from app.utils.crypto import decrypt
 
 
@@ -265,6 +265,9 @@ def graduate():
     gs.backup_path = backup_path
     gs.graduated_by = current_user.id
     db.session.commit()
+
+    # v1.16.0：年级毕业状态变更，主动失效已毕业年级缓存（避免统计/搜索页 600s 内用到陈旧名单）
+    clear_graduated_grades_cache()
 
     log_operation(current_user, '毕业', '年级', None, f'{grade} 毕业，归档{student_count}名学生、{room_archived}间房、{bed_archived}个床位，清空{rooms_updated}间房、{beds_cleared}个床位')
 

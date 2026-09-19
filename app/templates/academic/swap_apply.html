@@ -1,0 +1,253 @@
+{% extends "base.html" %}
+{% block title %}个人调课申请{% endblock %}
+{% block extra_css %}
+<style>
+    .step-head { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; }
+    .step-num { width: 28px; height: 28px; border-radius: 50%; background: #1e293b; color: #fff;
+                display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: 14px; flex: 0 0 auto; }
+    .step-title { font-weight: 700; font-size: 15px; }
+    .step-card { border: 1px solid #e2e8f0; border-radius: 12px; padding: 18px; margin-bottom: 18px; background: #fff; }
+    .entry-pick { border: 1px solid #e2e8f0; border-radius: 10px; padding: 10px 12px; cursor: pointer; transition: all .15s; background: #fff; }
+    .entry-pick:hover { border-color: #93c5fd; background: #f8fbff; }
+    .entry-pick.selected { border-color: #2563eb; background: #eff6ff; box-shadow: 0 0 0 2px rgba(37,99,235,.15); }
+    .entry-pick .ep-subj { font-weight: 700; color: #1e293b; }
+    .orig-card { background: linear-gradient(135deg,#eff6ff,#f5f3ff); border: 1px solid #dbeafe; border-radius: 10px; padding: 14px; }
+    .slot-grid { width: 100%; border-collapse: separate; border-spacing: 4px; table-layout: fixed; }
+    .slot-grid th { font-size: 12px; color: #64748b; font-weight: 600; text-align: center; padding: 4px; }
+    .slot-grid td.period-label { font-size: 11px; color: #475569; text-align: right; padding-right: 6px; white-space: nowrap; }
+    .slot-cell { height: 40px; border-radius: 8px; text-align: center; font-size: 12px; cursor: pointer;
+                 display: flex; align-items: center; justify-content: center; border: 1px solid #d1fae5;
+                 background: #ecfdf5; color: #065f46; transition: all .12s; user-select: none; }
+    .slot-cell:hover { transform: translateY(-1px); box-shadow: 0 2px 6px rgba(0,0,0,.1); }
+    .slot-cell.conflict { background: #fef2f2; border-color: #fecaca; color: #b91c1c; cursor: not-allowed; opacity: .75; }
+    .slot-cell.conflict:hover { transform: none; box-shadow: none; }
+    .slot-cell.selected { background: #2563eb; border-color: #1d4ed8; color: #fff; font-weight: 700; box-shadow: 0 0 0 3px rgba(37,99,235,.25); }
+    .slot-legend span { display: inline-flex; align-items: center; gap: 5px; margin-right: 16px; font-size: 12px; color: #64748b; }
+    .slot-legend i { width: 14px; height: 14px; border-radius: 4px; display: inline-block; }
+    .muted-tip { color: #94a3b8; font-size: 13px; }
+</style>
+{% endblock %}
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+    <h4 class="fw-bold mb-0"><i class="bi bi-person-plus"></i> 个人调课申请</h4>
+    <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('academic.swap_page') }}">
+        <i class="bi bi-arrow-left"></i> 返回列表
+    </a>
+</div>
+
+<form method="POST" action="{{ url_for('academic.swap_apply') }}" id="applyForm">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <input type="hidden" name="entry_id" id="hEntryId">
+    <input type="hidden" name="new_weekday" id="hWeekday">
+    <input type="hidden" name="new_period" id="hPeriod">
+
+    {# ── 步骤 1：选择原课程 ── #}
+    <div class="step-card">
+        <div class="step-head"><div class="step-num">1</div><div class="step-title">选择原课程</div></div>
+        <div class="row g-2 mb-3">
+            <div class="col-6 col-md-3">
+                <label class="form-label small mb-1">年级</label>
+                <select id="selGrade" class="form-select form-select-sm">
+                    <option value="">全部年级</option>
+                    {% for g in class_opts.grades %}<option value="{{ g }}">{{ g }}</option>{% endfor %}
+                </select>
+            </div>
+            <div class="col-6 col-md-3">
+                <label class="form-label small mb-1">班级</label>
+                <select id="selClass" class="form-select form-select-sm">
+                    <option value="">全部班级</option>
+                </select>
+            </div>
+            <div class="col-6 col-md-3">
+                <label class="form-label small mb-1">星期</label>
+                <select id="selWeekday" class="form-select form-select-sm">
+                    <option value="">全部</option>
+                    {% for k in range(1, 8) %}<option value="{{ k }}">{{ weekdays.get(k) }}</option>{% endfor %}
+                </select>
+            </div>
+            <div class="col-6 col-md-3 d-flex align-items-end">
+                <button type="button" class="btn btn-sm btn-primary w-100" id="btnLoadEntries">
+                    <i class="bi bi-search"></i> 查询课程
+                </button>
+            </div>
+        </div>
+        <div id="entryList" class="row g-2"><div class="col-12 muted-tip">请选择条件后点击「查询课程」。</div></div>
+        <div id="origCard" class="mt-3" style="display:none"></div>
+    </div>
+
+    {# ── 步骤 2：选择目标时段 ── #}
+    <div class="step-card">
+        <div class="step-head"><div class="step-num">2</div><div class="step-title">选择目标时段</div></div>
+        <div class="slot-legend mb-2">
+            <span><i style="background:#ecfdf5;border:1px solid #d1fae5"></i>可选</span>
+            <span><i style="background:#fef2f2;border:1px solid #fecaca"></i>冲突（禁用）</span>
+            <span><i style="background:#2563eb"></i>已选</span>
+        </div>
+        <div id="slotArea" class="muted-tip">请先在步骤 1 选择一节原课程。</div>
+    </div>
+
+    {# ── 步骤 3：调课信息 ── #}
+    <div class="step-card">
+        <div class="step-head"><div class="step-num">3</div><div class="step-title">填写调课信息</div></div>
+        <div class="row g-3">
+            <div class="col-md-4">
+                <div class="form-check form-switch mt-4">
+                    <input class="form-check-input" type="checkbox" role="switch" id="swPermanent" name="is_permanent" value="1">
+                    <label class="form-check-label fw-semibold" for="swPermanent">永久调课</label>
+                </div>
+                <div class="form-text">开启：审核执行后长期修改课表；关闭：仅调整指定日期当天（临时调课）。</div>
+            </div>
+            <div class="col-md-4" id="dateWrap">
+                <label class="form-label small mb-1">调课日期 <span class="text-danger" id="dateReq">*</span></label>
+                <input type="date" name="swap_date" id="swapDate" class="form-control form-control-sm">
+            </div>
+            <div class="col-md-4">
+                <label class="form-label small mb-1">新教室（选填）</label>
+                <input name="new_room" class="form-control form-control-sm" maxlength="30" placeholder="留空则沿用原教室">
+            </div>
+            <div class="col-12">
+                <label class="form-label small mb-1">调课理由 <span class="text-danger">*</span></label>
+                <textarea name="reason" class="form-control form-control-sm" rows="2" maxlength="200" required placeholder="必填，如：参加区教研活动 / 身体不适请假"></textarea>
+            </div>
+        </div>
+        <div class="mt-4 d-flex gap-2">
+            <button type="submit" class="btn btn-primary"><i class="bi bi-send"></i> 提交申请</button>
+            <a href="{{ url_for('academic.swap_page') }}" class="btn btn-outline-secondary">取消</a>
+        </div>
+    </div>
+</form>
+
+<script id="applyData" type="application/json">
+{
+    "entriesUrl": {{ url_for('academic.api_swap_entries')|tojson }},
+    "slotsUrl": {{ url_for('academic.api_swap_available_slots')|tojson }},
+    "gradeClasses": {{ class_opts.grade_classes|tojson }},
+    "weekdays": {{ weekdays|tojson }}
+}
+</script>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+(function () {
+    'use strict';
+    var cfg = JSON.parse($('#applyData').text());
+    var selectedEntry = null;
+
+    function esc(v) { return String(v == null ? '' : v).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+
+    // 年级 → 班级级联
+    $('#selGrade').on('change', function () {
+        var g = $(this).val(), $c = $('#selClass');
+        $c.html('<option value="">全部班级</option>');
+        (cfg.gradeClasses[g] || []).forEach(function (cn) {
+            $c.append('<option value="' + esc(cn) + '">' + esc(cn) + '</option>');
+        });
+    });
+
+    // 查询课程条目
+    $('#btnLoadEntries').on('click', function () {
+        var params = { grade: $('#selGrade').val(), class_name: $('#selClass').val(), weekday: $('#selWeekday').val() };
+        $('#entryList').html('<div class="col-12 muted-tip">加载中…</div>');
+        $.getJSON(cfg.entriesUrl, params).done(function (res) {
+            var list = (res && res.data) || [];
+            if (!list.length) { $('#entryList').html('<div class="col-12 muted-tip">没有匹配的课程条目。</div>'); return; }
+            var html = '';
+            list.forEach(function (e) {
+                html += '<div class="col-6 col-md-4 col-lg-3">'
+                    + '<div class="entry-pick" data-id="' + e.id + '" data-entry=\'' + esc(JSON.stringify(e)) + '\'>'
+                    + '<div class="ep-subj">' + esc(e.subject) + ' <span class="text-muted fw-normal">' + esc(e.grade) + esc(e.class_name) + '</span></div>'
+                    + '<div class="small text-muted">' + esc(e.weekday_text) + '第' + e.period_number + '节 · ' + esc(e.teacher_name || '-') + '</div>'
+                    + '<div class="small text-muted">' + esc(e.room || '') + '</div>'
+                    + '</div></div>';
+            });
+            $('#entryList').html(html);
+        }).fail(function () { $('#entryList').html('<div class="col-12 text-danger small">加载失败</div>'); });
+    });
+
+    // 选中原课程 → 加载目标时段
+    $(document).on('click', '.entry-pick', function () {
+        $('.entry-pick').removeClass('selected');
+        $(this).addClass('selected');
+        selectedEntry = JSON.parse($(this).attr('data-entry'));
+        $('#hEntryId').val(selectedEntry.id);
+        $('#hWeekday').val(''); $('#hPeriod').val('');
+        $('#origCard').show().html(
+            '<div class="orig-card"><div class="small text-muted mb-1">已选原课程</div>'
+            + '<div class="fw-bold fs-6">' + esc(selectedEntry.subject) + ' · ' + esc(selectedEntry.grade) + esc(selectedEntry.class_name) + '</div>'
+            + '<div class="small text-muted">' + esc(selectedEntry.weekday_text) + '第' + selectedEntry.period_number + '节 · '
+            + esc(selectedEntry.teacher_name || '-') + ' · ' + esc(selectedEntry.room || '无教室') + '</div></div>');
+        loadSlots(selectedEntry.id);
+    });
+
+    function loadSlots(entryId) {
+        $('#slotArea').html('<div class="muted-tip">加载可用时段…</div>');
+        $.getJSON(cfg.slotsUrl, { entry_id: entryId }).done(function (res) {
+            var slots = (res && res.data && res.data.slots) || [];
+            renderGrid(slots);
+        }).fail(function () { $('#slotArea').html('<div class="text-danger small">加载时段失败</div>'); });
+    }
+
+    function renderGrid(slots) {
+        var byKey = {}, periods = {}, weekdays = [1,2,3,4,5,6,7];
+        slots.forEach(function (s) {
+            byKey[s.weekday + '_' + s.period_number] = s;
+            periods[s.period_number] = s;
+        });
+        var pnums = Object.keys(periods).map(Number).sort(function (a,b){return a-b;});
+        var html = '<div class="table-responsive"><table class="slot-grid"><thead><tr><th style="width:90px"></th>';
+        weekdays.forEach(function (w) { html += '<th>' + (cfg.weekdays[w] || ('周'+w)) + '</th>'; });
+        html += '</tr></thead><tbody>';
+        pnums.forEach(function (p) {
+            var meta = periods[p];
+            html += '<tr><td class="period-label">' + esc(meta.period_name)
+                 + (meta.start_time ? ('<br>' + esc(meta.start_time) + '-' + esc(meta.end_time)) : '') + '</td>';
+            weekdays.forEach(function (w) {
+                var s = byKey[w + '_' + p];
+                if (!s) { html += '<td></td>'; return; }
+                if (s.available) {
+                    html += '<td><div class="slot-cell" data-w="' + w + '" data-p="' + p + '" title="可选">可</div></td>';
+                } else {
+                    html += '<td><div class="slot-cell conflict" title="' + esc(s.conflict_desc || '冲突') + '">✕</div></td>';
+                }
+            });
+            html += '</tr>';
+        });
+        html += '</tbody></table></div>';
+        $('#slotArea').html(html);
+    }
+
+    $(document).on('click', '.slot-cell:not(.conflict)', function () {
+        $('.slot-cell').removeClass('selected');
+        $(this).addClass('selected').text('✓');
+        $('.slot-cell:not(.selected)').each(function(){ if(!$(this).hasClass('conflict')) $(this).text('可'); });
+        $('#hWeekday').val($(this).data('w'));
+        $('#hPeriod').val($(this).data('p'));
+    });
+
+    // 永久 / 临时切换
+    function syncPermanent() {
+        var perm = $('#swPermanent').is(':checked');
+        $('#dateWrap').toggle(!perm);
+        $('#swapDate').prop('required', !perm);
+        $('#dateReq').toggle(!perm);
+    }
+    $('#swPermanent').on('change', syncPermanent);
+    syncPermanent();
+
+    // 提交前二次确认
+    $('#applyForm').on('submit', function (e) {
+        if (!$('#hEntryId').val()) { e.preventDefault(); alert('请在步骤 1 选择一节原课程'); return; }
+        if (!$('#hWeekday').val() || !$('#hPeriod').val()) { e.preventDefault(); alert('请在步骤 2 选择目标时段'); return; }
+        var perm = $('#swPermanent').is(':checked');
+        if (!perm && !$('#swapDate').val()) { e.preventDefault(); alert('临时调课请选择具体日期'); return; }
+        var reason = ($('textarea[name=reason]').val() || '').trim();
+        if (!reason) { e.preventDefault(); alert('请填写调课理由'); return; }
+        if (!confirm('确认提交调课申请？\n原课程：' + selectedEntry.subject + '（' + selectedEntry.weekday_text + '第' + selectedEntry.period_number + '节）\n目标：'
+            + cfg.weekdays[$('#hWeekday').val()] + '第' + $('#hPeriod').val() + '节\n方式：' + (perm ? '永久调课' : ('临时调课 ' + $('#swapDate').val())))) {
+            e.preventDefault();
+        }
+    });
+})();
+</script>
+{% endblock %}

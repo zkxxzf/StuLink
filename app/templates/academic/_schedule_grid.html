@@ -1,0 +1,81 @@
+{# StuLink v1.16.0 课表网格宏：13行(节次) x 7列(星期)，供 master/grade/class/teacher 模板复用。
+   JS 端 schedule.js 用同样的 class 约定重渲染（AJAX 切换班级/年级时）。 #}
+{% macro schedule_grid_css() %}
+<style>
+.sch-grid-wrap { overflow-x: auto; }
+.sch-grid { width: 100%; min-width: 860px; border-collapse: separate; border-spacing: 0;
+            table-layout: fixed; font-size: 13px; }
+.sch-grid th, .sch-grid td { border: 1px solid #e2e8f0; padding: 4px; text-align: center;
+                             vertical-align: middle; }
+.sch-grid thead th { background: #1e293b; color: #e2e8f0; font-weight: 600; font-size: 12px;
+                     padding: 8px 4px; position: sticky; top: 56px; z-index: 5; }
+.sch-grid .sch-period-col { width: 118px; background: #f8fafc; }
+.sch-grid .sch-period-head { text-align: left; padding: 5px 8px; }
+.sch-period-name { font-weight: 700; color: #334155; font-size: 12.5px; }
+.sch-period-time { color: #94a3b8; font-size: 10.5px; margin-top: 1px; }
+.sch-grid tr.sch-break .sch-period-head { background: #f1f5f9; }
+.sch-grid tr.sch-break td { background: repeating-linear-gradient(45deg, #f8fafc, #f8fafc 6px, #f1f5f9 6px, #f1f5f9 12px);
+                            color: #cbd5e1; }
+.sch-cell { cursor: default; height: 52px; transition: box-shadow .12s; }
+.sch-cell.sch-has:hover { box-shadow: inset 0 0 0 2px #3b82f6; }
+.sch-cell.sch-editable { cursor: pointer; }
+.sch-subject { font-weight: 700; color: #0f172a; line-height: 1.3; }
+.sch-teacher { color: #64748b; font-size: 11px; line-height: 1.3; }
+.sch-room { color: #94a3b8; font-size: 10px; }
+.sch-cell.sch-normal { background: #eff6ff; }
+.sch-cell.sch-swap { background: #fff7ed; box-shadow: inset 3px 0 0 #f59e0b; }
+.sch-badge-swap { display: inline-block; background: #f59e0b; color: #fff; border-radius: 3px;
+                  font-size: 9px; padding: 0 4px; margin-left: 3px; vertical-align: 1px; }
+.sch-cell.sch-empty .sch-add { color: #cbd5e1; font-size: 16px; line-height: 1; }
+.sch-cell.sch-empty.sch-editable:hover { background: #ecfdf5; }
+.sch-cell.sch-empty.sch-editable:hover .sch-add { color: #10b981; }
+.sch-cell.sch-current-col { outline: 2px solid #10b981; outline-offset: -2px; }
+</style>
+{% endmacro %}
+
+{# 网格主体
+   - periods: list[dict]（period_number/period_name/start_time/end_time/period_type）
+   - grid: {period_number: {weekday: entry_dict|None}}
+   - can_edit: 是否可点击编辑（空档 "+" / 有课单元格点击弹窗）
+   - current_period: 当前节次号（今日课表高亮，可为 None）
+   - grid_id: 容器 id（AJAX 重渲染定位用）
+#}
+{% macro schedule_grid(periods, grid, can_edit=False, current_period=None, grid_id='schGrid') %}
+<div class="sch-grid-wrap" id="{{ grid_id }}">
+    <table class="sch-grid">
+        <thead>
+            <tr>
+                <th class="sch-period-col">节次</th>
+                {% for wd in range(1, 8) %}
+                <th>{{ ['周一','周二','周三','周四','周五','周六','周日'][wd-1] }}</th>
+                {% endfor %}
+            </tr>
+        </thead>
+        <tbody>
+            {% for p in periods %}
+            <tr class="{{ 'sch-break' if p.period_type == 'break' else '' }}">
+                <th class="sch-period-head">
+                    <div class="sch-period-name">{{ p.period_name }}
+                        <span class="text-muted fw-normal" style="font-size:10px">#{{ p.period_number }}</span>
+                    </div>
+                    <div class="sch-period-time">{{ p.start_time or '--:--' }} - {{ p.end_time or '--:--' }}</div>
+                </th>
+                {% for wd in range(1, 8) %}
+                {% set e = (grid.get(p.period_number) or {}).get(wd) %}
+                <td class="sch-cell {{ 'sch-has sch-' ~ (e.entry_type or 'normal') if e else 'sch-empty' }}{{ ' sch-editable' if can_edit else '' }}{{ ' sch-current-col' if current_period == p.period_number else '' }}"
+                    data-period="{{ p.period_number }}" data-weekday="{{ wd }}"{{ (' data-entry-id="%d"'|format(e.id)) if e else '' }}>
+                    {% if e %}
+                    <div class="sch-subject">{{ e.subject }}{% if e.entry_type == 'swap' %}<span class="sch-badge-swap">调</span>{% endif %}</div>
+                    <div class="sch-teacher">{{ e.teacher_name or '未指定' }}</div>
+                    {% if e.room %}<div class="sch-room"><i class="bi bi-geo-alt"></i> {{ e.room }}</div>{% endif %}
+                    {% elif can_edit %}
+                    <span class="sch-add">+</span>
+                    {% endif %}
+                </td>
+                {% endfor %}
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% endmacro %}

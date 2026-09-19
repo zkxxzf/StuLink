@@ -334,13 +334,13 @@ def search():
     if gender:
         query = query.filter_by(gender=gender)
     if boarding_type:
-        acc_ids = [sa.student_id for sa in StudentAccommodation.query.filter_by(boarding_type=boarding_type).all()]
+        acc_ids = [r[0] for r in db.session.query(StudentAccommodation.student_id).filter_by(boarding_type=boarding_type).all()]
         if acc_ids:
             query = query.filter(Student.id.in_(acc_ids))
         else:
             query = query.filter(Student.id == -1)
     if day_student_type:
-        acc_ids = [sa.student_id for sa in StudentAccommodation.query.filter_by(day_student_type=day_student_type).all()]
+        acc_ids = [r[0] for r in db.session.query(StudentAccommodation.student_id).filter_by(day_student_type=day_student_type).all()]
         if acc_ids:
             query = query.filter(Student.id.in_(acc_ids))
         else:
@@ -349,7 +349,8 @@ def search():
         query = query.filter_by(subject_selection=subject_selection)
     # 宿舍号筛选
     if room_number:
-        from app.models import BedAssignment
+        # BedAssignment / Room 已在模块顶部导入，勿在此局部 import（否则会使
+        # BedAssignment 在整个函数内被视为局部变量，导致前面批量预查处 UnboundLocalError）
         bed_sub = db.session.query(BedAssignment.student_id).join(BedAssignment.room).filter(
             Room.room_number.contains(room_number)
         ).filter(BedAssignment.student_id.isnot(None)).all()
@@ -368,7 +369,32 @@ def search():
         page=page, per_page=per_page, error_out=False
     )
     students = pagination.items
-    
+
+    # v1.16.0 性能改造：批量预查当前页学生的住宿/床位信息，避免模板内逐行懒加载（N+1）。
+    # 跨库不能 JOIN：StudentAccommodation(dormitory) 与 Student(system) 分库查；
+    # BedAssignment 与 Room 同库(dormitory) 可 JOIN。固定 2 条查询代替原来每行 2~3 条。
+    acc_map = {}
+    bed_map = {}
+    page_ids = [s.id for s in students]
+    if page_ids:
+        for sa in StudentAccommodation.query.filter(
+                StudentAccommodation.student_id.in_(page_ids)).all():
+            acc_map[sa.student_id] = {
+                'boarding_type': sa.boarding_type,
+                'day_student_type': sa.day_student_type,
+            }
+        for sid, bed_number, rid, building, room_number in db.session.query(
+                BedAssignment.student_id, BedAssignment.bed_number,
+                Room.id, Room.building, Room.room_number
+        ).outerjoin(Room, BedAssignment.room_id == Room.id).filter(
+                BedAssignment.student_id.in_(page_ids)).all():
+            bed_map[sid] = {
+                'bed_number': bed_number,
+                'building': building,
+                'room_number': room_number,
+                'has_room': rid is not None,
+            }
+
     grades = get_dict_values('grade')
     grades = [g for g in grades if g not in graduated]
     classes = get_dict_values('class')
@@ -378,6 +404,8 @@ def search():
     buildings = get_dict_values('building')
     return render_template('system/students/search.html', 
                          students=students, 
+                         acc_map=acc_map,
+                         bed_map=bed_map,
                          grades=grades, 
                          classes=classes,
                          boarding_types=boarding_types, 
