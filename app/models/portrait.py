@@ -1,5 +1,10 @@
+<<<<<<< HEAD
 # StuLink v1.17.0 2026-09-20
 # 学生画像模块模型（独立库 portrait.db）
+=======
+# StuLink v1.9.3 2026-09-19
+# 学生画像模块模型（占位骨架）：独立库 portrait.db
+>>>>>>> 4934b4a0230dda5c541daf86b4b3dcc06612141c
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 """学生画像数据模型
 

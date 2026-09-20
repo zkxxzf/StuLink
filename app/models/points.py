@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 # StuLink v1.17.0 2026-09-20
+=======
+# StuLink v1.9.3 2026-09-19
+>>>>>>> 4934b4a0230dda5c541daf86b4b3dcc06612141c
 # 积分管理：数据模型（独立库 points.db）
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 from datetime import datetime, date

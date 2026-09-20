@@ -1,5 +1,10 @@
+<<<<<<< HEAD
 # StuLink v1.17.0 2026-09-20
 # 积分管理：单页记录（独立库 points.db）+ 范围权限过滤 + 批量导入导出 + 可视化
+=======
+# StuLink v1.9.3 2026-09-19
+# 积分管理：单页记录（独立库 points.db）+ 范围权限过滤
+>>>>>>> 4934b4a0230dda5c541daf86b4b3dcc06612141c
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 import io
 from datetime import date, datetime

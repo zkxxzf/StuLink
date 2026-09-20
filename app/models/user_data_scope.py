@@ -1,4 +1,4 @@
-# StuLink v1.9.2 2026-09-16
+# StuLink v1.9.3 2026-09-19
 # 用户数据范围授权（system.db）：限定用户在已获权限内可见数据的年级/班级范围
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 """用户数据范围授权
