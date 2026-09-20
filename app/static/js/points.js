@@ -1,10 +1,11 @@
-/* StuLink 积分管理：筛选/列表/汇总/录入 */
+/* StuLink 积分管理：筛选/列表/汇总/录入/可视化 */
 (function () {
 'use strict';
 var opts = null;
 var pickedStudent = null;
 var curTab = 'records';
 var modal = null;
+var charts = { trend: null, category: null, ranking: null };
 
 function esc(v) {
     return String(v == null ? '' : v).replace(/&/g, '&amp;').replace(/</g, '&lt;')
@@ -36,7 +37,16 @@ function loadOptions() {
         fillClass();
         var $c = $('#mCategory').empty();
         opts.categories.forEach(function (c) { $c.append('<option value="' + esc(c) + '">' + esc(c) + '</option>'); });
-        if (opts.can_edit) $('#btnAdd').removeClass('d-none');
+        if (opts.can_edit) {
+            $('#btnAdd').removeClass('d-none');
+        }
+        // v1.17.0：导入/导出按钮各自按权限显示（与路由 points.import / points.export 对齐）
+        if (opts.can_import) {
+            $('#btnImport').removeClass('d-none');
+        }
+        if (opts.can_export) {
+            $('#btnExport').removeClass('d-none');
+        }
         var scopeText = {school: '范围：全校', grade: '范围：本年级 ' + (opts.grades[0] || ''),
                          class: '范围：所辖班级', none: '未关联管理范围，仅可查看空数据'}[opts.scope] || '';
         $('#scopeHint').text(scopeText);
@@ -72,7 +82,9 @@ function fillClass() {
 }
 
 function load() {
-    if (curTab === 'records') loadRecords(); else loadSummary();
+    if (curTab === 'records') loadRecords();
+    else if (curTab === 'summary') loadSummary();
+    else if (curTab === 'charts') loadCharts();
 }
 
 function loadRecords() {
@@ -207,6 +219,93 @@ function save() {
     });
 }
 
+/* ---------- 图表 ---------- */
+function loadCharts() {
+    loadTrendChart();
+    loadCategoryChart();
+    loadRankingChart();
+}
+
+function loadTrendChart() {
+    if (!charts.trend) {
+        charts.trend = echarts.init(document.getElementById('chartTrend'));
+    }
+    $.getJSON('/points/api/trend' + qs(), function(res) {
+        var data = res.data || [];
+        var dates = data.map(function(d) { return d.date; });
+        var totals = data.map(function(d) { return d.total; });
+        charts.trend.setOption({
+            tooltip: { trigger: 'axis' },
+            grid: { left: 50, right: 20, top: 20, bottom: 30 },
+            xAxis: { type: 'category', data: dates, axisLabel: { fontSize: 11 } },
+            yAxis: { type: 'value', axisLabel: { fontSize: 11 } },
+            series: [{
+                type: 'line',
+                data: totals,
+                smooth: true,
+                lineStyle: { color: '#3b82f6', width: 2 },
+                areaStyle: { color: 'rgba(59,130,246,0.1)' },
+                itemStyle: { color: '#3b82f6' }
+            }]
+        });
+    });
+}
+
+function loadCategoryChart() {
+    if (!charts.category) {
+        charts.category = echarts.init(document.getElementById('chartCategory'));
+    }
+    $.getJSON('/points/api/category-distribution' + qs(), function(res) {
+        var data = res.data || [];
+        var pieData = data.map(function(d) {
+            return { name: d.category, value: Math.abs(d.total) };
+        });
+        charts.category.setOption({
+            tooltip: { trigger: 'item', formatter: '{b}: {c} ({d}%)' },
+            legend: { orient: 'vertical', right: 10, top: 'center', textStyle: { fontSize: 11 } },
+            series: [{
+                type: 'pie',
+                radius: ['40%', '70%'],
+                center: ['35%', '50%'],
+                data: pieData,
+                label: { show: false },
+                emphasis: { label: { show: true, fontSize: 12 } }
+            }]
+        });
+    });
+}
+
+function loadRankingChart() {
+    if (!charts.ranking) {
+        charts.ranking = echarts.init(document.getElementById('chartRanking'));
+    }
+    $.getJSON('/points/api/class-ranking' + qs(), function(res) {
+        var data = res.data || [];
+        var names = data.map(function(d) { return d.grade + d.class_name; });
+        var totals = data.map(function(d) { return d.total; });
+        charts.ranking.setOption({
+            tooltip: { trigger: 'axis' },
+            grid: { left: 50, right: 20, top: 20, bottom: 60 },
+            xAxis: {
+                type: 'category',
+                data: names,
+                axisLabel: { rotate: 30, fontSize: 11 }
+            },
+            yAxis: { type: 'value', axisLabel: { fontSize: 11 } },
+            series: [{
+                type: 'bar',
+                data: totals,
+                itemStyle: {
+                    color: function(params) {
+                        return params.value >= 0 ? '#10b981' : '#ef4444';
+                    }
+                },
+                barMaxWidth: 40
+            }]
+        });
+    });
+}
+
 $(function () {
     modal = new bootstrap.Modal(document.getElementById('recModal'));
     loadOptions();
@@ -221,12 +320,16 @@ $(function () {
         load();
     });
     $('#tabRecords').on('click', function () {
-        curTab = 'records'; $(this).addClass('active'); $('#tabSummary').removeClass('active');
-        $('#cardRecords').removeClass('d-none'); $('#cardSummary').addClass('d-none'); load();
+        curTab = 'records'; $(this).addClass('active'); $('#tabSummary,#tabCharts').removeClass('active');
+        $('#cardRecords').removeClass('d-none'); $('#cardSummary,#cardCharts').addClass('d-none'); load();
     });
     $('#tabSummary').on('click', function () {
-        curTab = 'summary'; $(this).addClass('active'); $('#tabRecords').removeClass('active');
-        $('#cardSummary').removeClass('d-none'); $('#cardRecords').addClass('d-none'); load();
+        curTab = 'summary'; $(this).addClass('active'); $('#tabRecords,#tabCharts').removeClass('active');
+        $('#cardSummary').removeClass('d-none'); $('#cardRecords,#cardCharts').addClass('d-none'); load();
+    });
+    $('#tabCharts').on('click', function () {
+        curTab = 'charts'; $(this).addClass('active'); $('#tabRecords,#tabSummary').removeClass('active');
+        $('#cardCharts').removeClass('d-none'); $('#cardRecords,#cardSummary').addClass('d-none'); load();
     });
     $('#btnAdd').on('click', function () { openRec(null); });
     $('#btnSave').on('click', save);

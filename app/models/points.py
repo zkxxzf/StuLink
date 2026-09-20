@@ -1,4 +1,4 @@
-# StuLink v1.9.2 2026-09-16
+# StuLink v1.17.0 2026-09-20
 # 积分管理：数据模型（独立库 points.db）
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 from datetime import datetime, date
@@ -44,5 +44,31 @@ class PointRecord(db.Model):
             'remark': self.remark or '',
             'recorded_at': self.recorded_at.strftime('%Y-%m-%d') if self.recorded_at else '',
             'operator_name': self.operator_name or '',
+            'created_at': self.created_at.strftime('%Y-%m-%d %H:%M') if self.created_at else '',
+        }
+
+
+class PointRuleTemplate(db.Model):
+    """积分规则模板：预设的常用积分规则"""
+    __bind_key__ = 'points'
+    __tablename__ = 'point_rule_templates'
+
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(50), nullable=False)           # 规则名称
+    category = db.Column(db.String(20), nullable=False)       # 类别
+    default_points = db.Column(db.Integer, nullable=False)    # 默认分值
+    description = db.Column(db.String(200))                   # 规则说明
+    is_active = db.Column(db.Boolean, default=True)           # 是否启用
+    created_at = db.Column(db.DateTime, default=datetime.now)
+    updated_at = db.Column(db.DateTime, default=datetime.now, onupdate=datetime.now)
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'name': self.name,
+            'category': self.category,
+            'default_points': self.default_points,
+            'description': self.description or '',
+            'is_active': self.is_active,
             'created_at': self.created_at.strftime('%Y-%m-%d %H:%M') if self.created_at else '',
         }

@@ -3,45 +3,162 @@
 {% block content %}
 <div class="d-flex justify-content-between align-items-center mb-3">
     <h4 class="fw-bold mb-0">
-        <i class="bi bi-person-bounding-box"></i> 学生画像
-        <span class="badge bg-secondary ms-2">规划中</span>
+        <i class="bi bi-person-vcard"></i> 学生画像
     </h4>
+    <small class="text-muted">共 {{ total }} 名学生</small>
 </div>
 
-<div class="card">
-    <div class="card-body text-center py-5 text-muted">
-        <i class="bi bi-person-bounding-box" style="font-size:48px;"></i>
-        <h5 class="mt-3 text-dark">学生画像模块建设中</h5>
-        <p class="mb-4">独立数据库（portrait.db）已就绪，功能将在后续版本逐步开放。</p>
-
-        <div class="row justify-content-center g-3" style="max-width:760px;margin:0 auto;">
-            <div class="col-md-4">
-                <div class="border rounded p-3 h-100">
-                    <i class="bi bi-graph-up-arrow" style="font-size:24px;"></i>
-                    <div class="fw-bold text-dark mt-2">学习画像</div>
-                    <small>成绩趋势 · 学科均衡 · 进退步分析</small>
-                </div>
+<!-- 筛选栏 -->
+<div class="card mb-3">
+    <div class="card-body py-2">
+        <form method="get" class="row g-2 align-items-center">
+            <div class="col-auto">
+                <select name="grade" class="form-select form-select-sm">
+                    <option value="">全部年级</option>
+                    {% for g in options.grades %}
+                    <option value="{{ g }}" {% if grade == g %}selected{% endif %}>{{ g }}</option>
+                    {% endfor %}
+                </select>
             </div>
-            <div class="col-md-4">
-                <div class="border rounded p-3 h-100">
-                    <i class="bi bi-activity" style="font-size:24px;"></i>
-                    <div class="fw-bold text-dark mt-2">行为画像</div>
-                    <small>积分表现 · 宿舍行为 · 综合表现</small>
-                </div>
+            <div class="col-auto">
+                <select name="class_name" class="form-select form-select-sm">
+                    <option value="">全部班级</option>
+                    {% for c in options.classes %}
+                    <option value="{{ c }}" {% if class_name == c %}selected{% endif %}>{{ c }}</option>
+                    {% endfor %}
+                </select>
             </div>
-            <div class="col-md-4">
-                <div class="border rounded p-3 h-100">
-                    <i class="bi bi-journal-bookmark" style="font-size:24px;"></i>
-                    <div class="fw-bold text-dark mt-2">成长档案</div>
-                    <small>荣誉记录 · 教师评语 · 关键事件</small>
-                </div>
+            <div class="col-auto">
+                <select name="level" class="form-select form-select-sm">
+                    <option value="">全部评级</option>
+                    <option value="A" {% if level == 'A' %}selected{% endif %}>A级（优秀）</option>
+                    <option value="B" {% if level == 'B' %}selected{% endif %}>B级（良好）</option>
+                    <option value="C" {% if level == 'C' %}selected{% endif %}>C级（合格）</option>
+                    <option value="D" {% if level == 'D' %}selected{% endif %}>D级（待提升）</option>
+                </select>
             </div>
-        </div>
-
-        <p class="small mb-0 mt-4">
-            <i class="bi bi-info-circle"></i>
-            画像数据将按学号从各模块（成绩 / 积分 / 宿舍）只读汇聚，不改变各模块独立存储的设计。
-        </p>
+            <div class="col-auto">
+                <button type="submit" class="btn btn-sm btn-primary">
+                    <i class="bi bi-search"></i> 筛选
+                </button>
+                <a href="{{ url_for('portrait.index') }}" class="btn btn-sm btn-outline-secondary">
+                    <i class="bi bi-arrow-counterclockwise"></i> 重置
+                </a>
+            </div>
+        </form>
     </div>
 </div>
+
+<!-- 学生卡片网格 -->
+{% if rows %}
+<div class="row g-3">
+    {% for row in rows %}
+    {% set s = row.student %}
+    {% set p = row.portrait %}
+    <div class="col-xxl-3 col-xl-4 col-lg-6">
+        <a href="{{ url_for('portrait.detail', student_no=s.student_number) }}" class="text-decoration-none">
+            <div class="card h-100 portrait-card">
+                <div class="card-body">
+                    <div class="d-flex justify-content-between align-items-start mb-2">
+                        <div>
+                            <h6 class="mb-0 fw-bold text-dark">{{ s.name }}</h6>
+                            <small class="text-muted">{{ s.student_number }}</small>
+                        </div>
+                        {% if p and p.overall_level %}
+                        <span class="badge bg-{{ 'success' if p.overall_level == 'A' else 'primary' if p.overall_level == 'B' else 'warning' if p.overall_level == 'C' else 'danger' }} fs-6">
+                            {{ p.overall_level }}
+                        </span>
+                        {% else %}
+                        <span class="badge bg-secondary">未评估</span>
+                        {% endif %}
+                    </div>
+                    <div class="small text-muted mb-2">
+                        {{ s.grade }} {{ s.class_name }}
+                        {% if s.subject_selection %}
+                        <span class="badge bg-light text-dark border ms-1">{{ s.subject_selection }}</span>
+                        {% endif %}
+                    </div>
+                    {% if p %}
+                    <div class="portrait-scores">
+                        <div class="d-flex justify-content-between small mb-1">
+                            <span class="text-muted">学业</span>
+                            <span>{{ p.academic_score|round(0)|int }}</span>
+                        </div>
+                        <div class="progress mb-2" style="height: 4px;">
+                            <div class="progress-bar bg-primary" style="width: {{ p.academic_score }}%"></div>
+                        </div>
+                        <div class="d-flex justify-content-between small mb-1">
+                            <span class="text-muted">行为</span>
+                            <span>{{ p.behavior_score|round(0)|int }}</span>
+                        </div>
+                        <div class="progress mb-2" style="height: 4px;">
+                            <div class="progress-bar bg-success" style="width: {{ p.behavior_score }}%"></div>
+                        </div>
+                        <div class="d-flex justify-content-between small mb-1">
+                            <span class="text-muted">宿舍</span>
+                            <span>{{ p.dormitory_score|round(0)|int }}</span>
+                        </div>
+                        <div class="progress mb-2" style="height: 4px;">
+                            <div class="progress-bar bg-info" style="width: {{ p.dormitory_score }}%"></div>
+                        </div>
+                        <div class="d-flex justify-content-between small mb-1">
+                            <span class="text-muted">出勤</span>
+                            <span>{{ p.attendance_rate|round(0)|int }}%</span>
+                        </div>
+                        <div class="progress" style="height: 4px;">
+                            <div class="progress-bar bg-warning" style="width: {{ p.attendance_rate }}%"></div>
+                        </div>
+                    </div>
+                    {% else %}
+                    <div class="text-center text-muted small py-3">
+                        <i class="bi bi-info-circle"></i> 点击查看详情并生成画像
+                    </div>
+                    {% endif %}
+                </div>
+            </div>
+        </a>
+    </div>
+    {% endfor %}
+</div>
+
+<!-- 分页 -->
+{% if pages > 1 %}
+<nav class="mt-4">
+    <ul class="pagination justify-content-center">
+        <li class="page-item {% if page <= 1 %}disabled{% endif %}">
+            <a class="page-link" href="{{ url_for('portrait.index', page=page-1, grade=grade, class_name=class_name, level=level) }}">上一页</a>
+        </li>
+        {% for p in range(1, pages + 1) %}
+        <li class="page-item {% if p == page %}active{% endif %}">
+            <a class="page-link" href="{{ url_for('portrait.index', page=p, grade=grade, class_name=class_name, level=level) }}">{{ p }}</a>
+        </li>
+        {% endfor %}
+        <li class="page-item {% if page >= pages %}disabled{% endif %}">
+            <a class="page-link" href="{{ url_for('portrait.index', page=page+1, grade=grade, class_name=class_name, level=level) }}">下一页</a>
+        </li>
+    </ul>
+</nav>
+{% endif %}
+
+{% else %}
+<div class="card">
+    <div class="card-body text-center py-5 text-muted">
+        <i class="bi bi-inbox" style="font-size: 48px;"></i>
+        <p class="mt-3 mb-0">暂无符合条件的学生</p>
+    </div>
+</div>
+{% endif %}
+{% endblock %}
+
+{% block extra_css %}
+<style>
+.portrait-card {
+    transition: transform 0.2s, box-shadow 0.2s;
+    cursor: pointer;
+}
+.portrait-card:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+}
+</style>
 {% endblock %}

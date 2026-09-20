@@ -1,0 +1,124 @@
+{% extends "base.html" %}
+{% import "academic/_schedule_parts.html" as parts %}
+{% block title %}节次配置 · {{ ts.name }}{% endblock %}
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
+    <div class="d-flex align-items-center gap-3 flex-wrap">
+        <h4 class="fw-bold mb-0"><i class="bi bi-clock-history"></i> 节次配置</h4>
+        {{ parts.term_selector(schedules, ts, base_endpoint='academic.schedule_periods') }}
+    </div>
+    <div class="d-flex gap-2 flex-wrap">
+        <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('academic.schedule_master', sid=ts.id) }}">
+            <i class="bi bi-grid-3x3"></i> 大课表
+        </a>
+        <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('academic.schedule_manage') }}">
+            <i class="bi bi-house"></i> 学期管理
+        </a>
+    </div>
+</div>
+
+{{ parts.readonly_banner(ts) }}
+
+<div class="card">
+    <div class="card-header py-2 d-flex justify-content-between align-items-center">
+        <span>{{ ts.name }} · 作息时间（一天最多 13 节）</span>
+        {% if can_edit %}
+        <div class="d-flex gap-2">
+            <form method="POST" action="{{ url_for('academic.schedule_periods_reset', sid=ts.id) }}"
+                  onsubmit="return confirm('重置为默认 13 节作息模板？当前自定义配置将被覆盖。')">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <button class="btn btn-sm btn-outline-warning py-0">
+                    <i class="bi bi-arrow-counterclockwise"></i> 重置默认模板
+                </button>
+            </form>
+            <button type="button" class="btn btn-sm btn-outline-primary py-0" id="btnAddPeriodRow">
+                <i class="bi bi-plus-lg"></i> 添加节次
+            </button>
+        </div>
+        {% endif %}
+    </div>
+    <form method="POST" id="periodsForm">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <div class="table-responsive">
+            <table class="table table-sm table-bordered align-middle mb-0">
+                <thead class="table-light">
+                    <tr>
+                        <th style="width:90px">节次编号</th>
+                        <th>节次名称</th>
+                        <th style="width:130px">开始时间</th>
+                        <th style="width:130px">结束时间</th>
+                        <th style="width:140px">类型</th>
+                        {% if can_edit %}<th style="width:60px"></th>{% endif %}
+                    </tr>
+                </thead>
+                <tbody id="periodsBody">
+                    {% for p in periods %}
+                    <tr data-period-row>
+                        <td>
+                            <input type="number" name="period_number" class="form-control form-control-sm"
+                                   min="1" max="13" value="{{ p.period_number }}" {{ '' if can_edit else 'disabled' }} required>
+                        </td>
+                        <td>
+                            <input name="period_name" class="form-control form-control-sm" maxlength="20"
+                                   value="{{ p.period_name }}" {{ '' if can_edit else 'disabled' }} required>
+                        </td>
+                        <td>
+                            <input type="time" name="start_time" class="form-control form-control-sm"
+                                   value="{{ p.start_time or '' }}" {{ '' if can_edit else 'disabled' }}>
+                        </td>
+                        <td>
+                            <input type="time" name="end_time" class="form-control form-control-sm"
+                                   value="{{ p.end_time or '' }}" {{ '' if can_edit else 'disabled' }}>
+                        </td>
+                        <td>
+                            <select name="period_type" class="form-select form-select-sm" {{ '' if can_edit else 'disabled' }}>
+                                {% for k, label in period_types.items() %}
+                                <option value="{{ k }}" {% if p.period_type == k %}selected{% endif %}>{{ label }}</option>
+                                {% endfor %}
+                            </select>
+                        </td>
+                        {% if can_edit %}
+                        <td class="text-center">
+                            <button type="button" class="btn btn-sm btn-outline-danger py-0 px-1 btn-del-period"
+                                    title="移除此节次（保存后生效；不会删除已排课程）">
+                                <i class="bi bi-x-lg"></i>
+                            </button>
+                        </td>
+                        {% endif %}
+                    </tr>
+                    {% endfor %}
+                    {% if not periods %}
+                    <tr><td colspan="{{ 6 if can_edit else 5 }}" class="text-center text-muted py-4">
+                        暂无节次定义，点击「添加节次」或「重置默认模板」
+                    </td></tr>
+                    {% endif %}
+                </tbody>
+            </table>
+        </div>
+        {% if can_edit %}
+        <div class="card-footer py-2 d-flex justify-content-between align-items-center">
+            <span class="text-muted small">
+                <i class="bi bi-info-circle"></i> 「课间/午休」类型节次在课表网格中以灰色斜纹显示（也可排课）；
+                移除节次行并保存后，该节次定义将被删除；若该节次仍有课程安排，系统会保留并提示。
+            </span>
+            <button type="submit" class="btn btn-sm btn-primary">
+                <i class="bi bi-check-lg"></i> 保存配置
+            </button>
+        </div>
+        {% endif %}
+    </form>
+</div>
+
+<script id="scheduleData" type="application/json">
+{
+    "pageType": "periods",
+    "sid": {{ ts.id }},
+    "canEdit": {{ 'true' if can_edit else 'false' }},
+    "periodTypes": {{ period_types|tojson }}
+}
+</script>
+{% endblock %}
+
+{% block extra_js %}
+<script src="{{ su('js/schedule.js') }}"></script>
+{% endblock %}

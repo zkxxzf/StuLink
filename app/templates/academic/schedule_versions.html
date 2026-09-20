@@ -1,0 +1,114 @@
+{% extends "base.html" %}
+{% import "academic/_schedule_parts.html" as parts %}
+{% block title %}课表变更历史 · {{ ts.name }}{% endblock %}
+{% block extra_css %}
+<style>
+.vtl { list-style: none; margin: 0; padding: 0 0 0 8px; }
+.vtl-item { position: relative; padding: 0 0 18px 26px; border-left: 2px solid #e2e8f0; }
+.vtl-item:last-child { border-left-color: transparent; padding-bottom: 4px; }
+.vtl-dot { position: absolute; left: -9px; top: 2px; width: 16px; height: 16px; border-radius: 50%;
+    background: #fff; border: 3px solid #94a3b8; }
+.vtl-dot.create { border-color: #10b981; }
+.vtl-dot.update { border-color: #3b82f6; }
+.vtl-dot.delete { border-color: #ef4444; }
+.vtl-dot.swap { border-color: #f59e0b; }
+.vtl-time { font-size: 12px; color: #64748b; }
+.vtl-summary { font-size: 13px; }
+</style>
+{% endblock %}
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
+    <div class="d-flex align-items-center gap-3 flex-wrap">
+        <h4 class="fw-bold mb-0"><i class="bi bi-journal-text"></i> 课表变更历史</h4>
+        {{ parts.term_selector(schedules, ts, base_endpoint='academic.schedule_versions') }}
+    </div>
+    <div class="d-flex gap-2 flex-wrap">
+        <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('academic.schedule_master', sid=ts.id) }}">
+            <i class="bi bi-grid-3x3"></i> 大课表
+        </a>
+        <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('academic.schedule_manage') }}">
+            <i class="bi bi-house"></i> 学期管理
+        </a>
+    </div>
+</div>
+
+<div class="card">
+    <div class="card-header py-2">
+        {{ ts.name }} · 共 {{ pagination.total }} 条变更记录
+    </div>
+    {% set action_map = {'create': ('新增', 'success'), 'update': ('编辑', 'primary'),
+                         'delete': ('删除', 'danger'), 'swap': ('调课', 'warning')} %}
+    <div class="card-body" style="max-height:640px;overflow:auto">
+        <ul class="vtl">
+            {% for v in versions %}
+            {% set a = action_map.get(v.action, (v.action or '-', 'secondary')) %}
+            <li class="vtl-item">
+                <span class="vtl-dot {{ v.action }}"></span>
+                <div class="d-flex align-items-center gap-2 flex-wrap">
+                    <span class="badge bg-{{ a[1] }}{{ ' text-dark' if a[1] == 'warning' else '' }}">{{ a[0] }}</span>
+                    <span class="vtl-time">{{ v.operated_at.strftime('%Y-%m-%d %H:%M:%S') if v.operated_at else '-' }}</span>
+                    <span class="small text-muted"><i class="bi bi-person"></i> {{ v.operator_name or '系统' }}</span>
+                    {% if v.entry_id %}<span class="small text-muted">· 条目 #{{ v.entry_id }}</span>{% endif %}
+                    {% if v.snapshot_json %}
+                    <button class="btn btn-sm btn-outline-secondary py-0 px-1 ms-auto btn-snapshot"
+                            data-snapshot="{{ v.snapshot_json|e }}" title="查看修改前数据快照">
+                        <i class="bi bi-braces"></i> 查看快照
+                    </button>
+                    {% endif %}
+                </div>
+                {% if v.remark %}<div class="vtl-summary mt-1">{{ v.remark }}</div>{% endif %}
+            </li>
+            {% else %}
+            <li class="text-center text-muted py-4">暂无变更记录</li>
+            {% endfor %}
+        </ul>
+    </div>
+    {% if pagination.pages > 1 %}
+    <div class="card-footer py-2">
+        <nav>
+            <ul class="pagination pagination-sm mb-0 justify-content-center">
+                <li class="page-item {{ 'disabled' if not pagination.has_prev else '' }}">
+                    <a class="page-link" href="{{ url_for('academic.schedule_versions', sid=ts.id, page=pagination.prev_num) }}">上一页</a>
+                </li>
+                {% for pg in pagination.iter_pages(left_edge=1, right_edge=1, left_current=2, right_current=2) %}
+                    {% if pg %}
+                    <li class="page-item {{ 'active' if pg == pagination.page else '' }}">
+                        <a class="page-link" href="{{ url_for('academic.schedule_versions', sid=ts.id, page=pg) }}">{{ pg }}</a>
+                    </li>
+                    {% else %}
+                    <li class="page-item disabled"><span class="page-link">…</span></li>
+                    {% endif %}
+                {% endfor %}
+                <li class="page-item {{ 'disabled' if not pagination.has_next else '' }}">
+                    <a class="page-link" href="{{ url_for('academic.schedule_versions', sid=ts.id, page=pagination.next_num) }}">下一页</a>
+                </li>
+            </ul>
+        </nav>
+    </div>
+    {% endif %}
+</div>
+
+{# ===== 快照详情弹窗 ===== #}
+<div class="modal fade" id="snapshotModal" tabindex="-1">
+    <div class="modal-dialog modal-lg modal-dialog-scrollable">
+        <div class="modal-content">
+            <div class="modal-header py-2">
+                <h6 class="modal-title"><i class="bi bi-braces"></i> 数据快照（修改前）</h6>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <pre id="snapshotContent" class="bg-light border rounded p-2 small mb-0"
+                     style="max-height:60vh;overflow:auto;white-space:pre-wrap"></pre>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script id="scheduleData" type="application/json">
+{ "pageType": "versions", "sid": {{ ts.id }} }
+</script>
+{% endblock %}
+
+{% block extra_js %}
+<script src="{{ su('js/schedule.js') }}"></script>
+{% endblock %}

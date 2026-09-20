@@ -1,0 +1,315 @@
+{% extends "base.html" %}
+{% block title %}班主任工作记录{% endblock %}
+
+{% block content %}
+{# ── 页头 ─────────────────────────────────────────────────────────── #}
+<div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
+    <div>
+        <h4 class="fw-bold mb-1">
+            <i class="bi bi-journal-text"></i> 班主任工作记录
+        </h4>
+        <div class="text-muted small">
+            {{ teacher.name }} · {{ today.strftime('%Y年%m月%d日') }}
+        </div>
+    </div>
+    <button class="btn btn-primary btn-sm" data-bs-toggle="modal" data-bs-target="#recordModal"
+            onclick="resetForm()">
+        <i class="bi bi-plus-lg"></i> 新增记录
+    </button>
+</div>
+
+{# ── 筛选标签页 ───────────────────────────────────────────────────── #}
+<ul class="nav nav-pills mb-3 flex-nowrap overflow-auto gap-1">
+    <li class="nav-item">
+        <a class="nav-link {% if not current_type %}active{% endif %}"
+           href="{{ url_for('records.records_page', class=current_class) }}">全部</a>
+    </li>
+    {% for key, label in record_types %}
+    <li class="nav-item">
+        <a class="nav-link {% if current_type == key %}active{% endif %}"
+           href="{{ url_for('records.records_page', type=key, class=current_class) }}">{{ label }}</a>
+    </li>
+    {% endfor %}
+</ul>
+
+{# ── 班级筛选下拉（可选） ─────────────────────────────────────────── #}
+{% if classes %}
+<div class="mb-3 d-flex flex-wrap align-items-center gap-2">
+    <span class="text-muted small">班级：</span>
+    <a href="{{ url_for('records.records_page', type=current_type) }}"
+       class="btn btn-outline-secondary btn-sm {% if not current_class %}active{% endif %}">全部</a>
+    {% for cls in classes %}
+    <a href="{{ url_for('records.records_page', type=current_type, class=cls.class_name) }}"
+       class="btn btn-outline-secondary btn-sm {% if current_class == cls.class_name %}active{% endif %}">
+        {{ cls.label }}
+    </a>
+    {% endfor %}
+</div>
+{% endif %}
+
+{# ── 记录卡片列表 ─────────────────────────────────────────────────── #}
+{% if records %}
+<div class="d-flex flex-column gap-2">
+    {% for rec in records %}
+    <div class="card border-start border-4
+        {% if rec.record_type == 'meeting' %}border-primary
+        {% elif rec.record_type == 'visit' %}border-success
+        {% else %}border-warning{% endif %}">
+        <div class="card-body py-2 px-3">
+            <div class="d-flex justify-content-between align-items-start flex-wrap gap-1">
+                {# 左侧：日期 + 类型 + 标题 #}
+                <div class="flex-grow-1">
+                    <div class="d-flex align-items-center gap-2 flex-wrap mb-1">
+                        <span class="text-muted small fw-mono">
+                            <i class="bi bi-calendar3"></i>
+                            {{ rec.date.strftime('%Y-%m-%d') if rec.date else '—' }}
+                        </span>
+                        {% if rec.record_type == 'meeting' %}
+                            <span class="badge bg-primary">班会</span>
+                        {% elif rec.record_type == 'visit' %}
+                            <span class="badge bg-success">家访</span>
+                        {% else %}
+                            <span class="badge bg-warning text-dark">谈话</span>
+                        {% endif %}
+                        <span class="text-muted small">
+                            <i class="bi bi-building"></i> {{ rec.class_name or '—' }}
+                        </span>
+                        {% if rec.student_name %}
+                        <span class="text-muted small">
+                            <i class="bi bi-person"></i> {{ rec.student_name }}
+                            {% if rec.student_no %}<code class="small">{{ rec.student_no }}</code>{% endif %}
+                        </span>
+                        {% endif %}
+                    </div>
+                    <div class="fw-bold mb-1">{{ rec.title }}</div>
+                    {% if rec.content %}
+                    <p class="text-muted small mb-1" style="max-height:3em;overflow:hidden;text-overflow:ellipsis;">
+                        {{ rec.content[:120] }}{% if rec.content|length > 120 %}…{% endif %}
+                    </p>
+                    {% endif %}
+                    {% if rec.follow_up %}
+                    <div class="small text-info mt-1">
+                        <i class="bi bi-arrow-repeat"></i> 跟进：{{ rec.follow_up[:80] }}{% if rec.follow_up|length > 80 %}…{% endif %}
+                    </div>
+                    {% endif %}
+                </div>
+                {# 右侧：操作按钮 #}
+                <div class="d-flex gap-1 flex-shrink-0">
+                    <button class="btn btn-outline-primary btn-sm"
+                            onclick="openEditModal({{ rec.id }})"
+                            title="编辑">
+                        <i class="bi bi-pencil"></i>
+                    </button>
+                    <form method="POST"
+                          action="{{ url_for('records.record_delete', record_id=rec.id) }}"
+                          onsubmit="return confirm('确认删除这条记录？此操作不可恢复。')"
+                          class="d-inline">
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                        <button class="btn btn-outline-danger btn-sm" title="删除">
+                            <i class="bi bi-trash"></i>
+                        </button>
+                    </form>
+                </div>
+            </div>
+        </div>
+    </div>
+    {% endfor %}
+</div>
+
+{# ── 分页 ──────────────────────────────────────────────────────────── #}
+{% if pag.pages > 1 %}
+<nav class="mt-3">
+    <ul class="pagination pagination-sm justify-content-center mb-0">
+        {% if pag.has_prev %}
+        <li class="page-item">
+            <a class="page-link"
+               href="{{ url_for('records.records_page', page=pag.prev_num, type=current_type, class=current_class) }}">
+                ‹
+            </a>
+        </li>
+        {% endif %}
+        {% for p in pag.iter_pages(left_edge=1, right_edge=1, left_current=2, right_current=2) %}
+            {% if p %}
+            <li class="page-item {% if p == pag.page %}active{% endif %}">
+                <a class="page-link"
+                   href="{{ url_for('records.records_page', page=p, type=current_type, class=current_class) }}">
+                    {{ p }}
+                </a>
+            </li>
+            {% else %}
+            <li class="page-item disabled"><span class="page-link">…</span></li>
+            {% endif %}
+        {% endfor %}
+        {% if pag.has_next %}
+        <li class="page-item">
+            <a class="page-link"
+               href="{{ url_for('records.records_page', page=pag.next_num, type=current_type, class=current_class) }}">
+                ›
+            </a>
+        </li>
+        {% endif %}
+    </ul>
+</nav>
+{% endif %}
+
+{% else %}
+{# ── 空状态 ────────────────────────────────────────────────────────── #}
+<div class="text-center py-5 text-muted">
+    <i class="bi bi-journal-x" style="font-size:48px;"></i>
+    <p class="mt-2 mb-1">暂无工作记录</p>
+    <p class="small mb-0">点击右上角「新增记录」添加班会 / 家访 / 谈话记录</p>
+</div>
+{% endif %}
+
+{# ── 新增 / 编辑模态框 ─────────────────────────────────────────────── #}
+<div class="modal fade" id="recordModal" tabindex="-1">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="recordModalTitle">新增工作记录</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <form id="recordForm" method="POST">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <input type="hidden" id="recordId" value="">
+                <div class="modal-body">
+                    <div class="row g-3">
+                        {# 记录类型 #}
+                        <div class="col-md-4">
+                            <label class="form-label">记录类型 <span class="text-danger">*</span></label>
+                            <select name="record_type" id="recordType" class="form-select" required>
+                                {% for key, label in record_types %}
+                                <option value="{{ key }}">{{ label }}</option>
+                                {% endfor %}
+                            </select>
+                        </div>
+                        {# 班级 #}
+                        <div class="col-md-4">
+                            <label class="form-label">班级 <span class="text-danger">*</span></label>
+                            <select name="class_name" id="classSelect" class="form-select" required>
+                                <option value="">请选择班级</option>
+                                {% for cls in classes %}
+                                <option value="{{ cls.class_name }}">{{ cls.label }}</option>
+                                {% endfor %}
+                            </select>
+                        </div>
+                        {# 日期 #}
+                        <div class="col-md-4">
+                            <label class="form-label">日期 <span class="text-danger">*</span></label>
+                            <input type="date" name="date" id="recordDate" class="form-control"
+                                   value="{{ today.isoformat() }}" required>
+                        </div>
+                        {# 标题 #}
+                        <div class="col-12">
+                            <label class="form-label">标题 <span class="text-danger">*</span></label>
+                            <input type="text" name="title" id="recordTitle" class="form-control"
+                                   maxlength="100" placeholder="如：2026年秋季学期第一次班会" required>
+                        </div>
+                        {# 关联学生（家访/谈话时显示） #}
+                        <div class="col-md-6 student-field">
+                            <label class="form-label">关联学生学号</label>
+                            <input type="text" name="student_no" id="studentNo" class="form-control"
+                                   placeholder="选填，如：202501001" maxlength="30">
+                        </div>
+                        <div class="col-md-6 student-field">
+                            <label class="form-label">学生姓名（自动填充）</label>
+                            <input type="text" id="studentName" class="form-control" readonly
+                                   placeholder="填写学号后自动显示">
+                        </div>
+                        {# 内容 #}
+                        <div class="col-12">
+                            <label class="form-label">内容记录</label>
+                            <textarea name="content" id="recordContent" class="form-control" rows="4"
+                                      placeholder="详细记录本次班会/家访/谈话的内容…"></textarea>
+                        </div>
+                        {# 跟进计划 #}
+                        <div class="col-12">
+                            <label class="form-label">后续跟进计划</label>
+                            <textarea name="follow_up" id="recordFollowUp" class="form-control" rows="2"
+                                      placeholder="需要后续关注或跟进的事项…"></textarea>
+                        </div>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">取消</button>
+                    <button type="submit" class="btn btn-primary" id="recordSubmitBtn">保存</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+{# ── 脚本 ──────────────────────────────────────────────────────────── #}
+<script>
+(function () {
+    const typeSelect = document.getElementById('recordType');
+    const studentFields = document.querySelectorAll('.student-field');
+
+    // 根据记录类型切换"关联学生"字段可见性
+    function toggleStudentFields() {
+        const show = typeSelect.value === 'visit' || typeSelect.value === 'talk';
+        studentFields.forEach(el => el.style.display = show ? '' : 'none');
+    }
+    typeSelect.addEventListener('change', toggleStudentFields);
+    toggleStudentFields();
+
+    // 重置表单（新增模式）
+    window.resetForm = function () {
+        document.getElementById('recordModalTitle').textContent = '新增工作记录';
+        document.getElementById('recordForm').action = "{{ url_for('records.record_add') }}";
+        document.getElementById('recordId').value = '';
+        document.getElementById('recordType').value = 'meeting';
+        document.getElementById('classSelect').value = '';
+        document.getElementById('recordDate').value = '{{ today.isoformat() }}';
+        document.getElementById('recordTitle').value = '';
+        document.getElementById('studentNo').value = '';
+        document.getElementById('studentName').value = '';
+        document.getElementById('recordContent').value = '';
+        document.getElementById('recordFollowUp').value = '';
+        document.getElementById('recordSubmitBtn').textContent = '保存';
+        toggleStudentFields();
+    };
+
+    // 打开编辑模态框（从 API 加载数据）
+    window.openEditModal = function (recordId) {
+        fetch("{{ url_for('records.record_detail_api', record_id=0) }}".replace('/0', '/' + recordId))
+            .then(r => r.json())
+            .then(data => {
+                if (data.error) { alert(data.error); return; }
+                document.getElementById('recordModalTitle').textContent = '编辑工作记录';
+                document.getElementById('recordForm').action =
+                    "{{ url_for('records.record_edit', record_id=0) }}".replace('/0', '/' + recordId);
+                document.getElementById('recordId').value = data.id;
+                document.getElementById('recordType').value = data.record_type;
+                document.getElementById('classSelect').value = data.class_name;
+                document.getElementById('recordDate').value = data.date;
+                document.getElementById('recordTitle').value = data.title;
+                document.getElementById('studentNo').value = data.student_no || '';
+                document.getElementById('studentName').value = data.student_name || '';
+                document.getElementById('recordContent').value = data.content || '';
+                document.getElementById('recordFollowUp').value = data.follow_up || '';
+                document.getElementById('recordSubmitBtn').textContent = '更新';
+                toggleStudentFields();
+                new bootstrap.Modal(document.getElementById('recordModal')).show();
+            })
+            .catch(() => alert('加载记录失败，请重试'));
+    };
+
+    // 学号输入时自动查学生姓名
+    const studentNoInput = document.getElementById('studentNo');
+    let debounceTimer;
+    studentNoInput.addEventListener('input', function () {
+        clearTimeout(debounceTimer);
+        const no = this.value.trim();
+        const nameField = document.getElementById('studentName');
+        if (!no) { nameField.value = ''; return; }
+        debounceTimer = setTimeout(() => {
+            fetch("{{ url_for('records.student_lookup') }}?no=" + encodeURIComponent(no))
+                .then(r => r.json())
+                .then(d => { nameField.value = d.name || '未找到'; })
+                .catch(() => {});
+        }, 400);
+    });
+})();
+</script>
+{% endblock %}

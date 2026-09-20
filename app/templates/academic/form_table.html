@@ -1,0 +1,111 @@
+{% extends "base.html" %}
+{% block title %}汇总表格 - {{ tpl.title }}{% endblock %}
+{% block extra_css %}{% include "academic/_fx_style.html" %}{% endblock %}
+{% block content %}
+{% set fx_active = 'table' %}
+<div class="fx-wrap">
+    {% include "academic/_fx_hero.html" %}
+
+    <div class="fx-panel">
+        <div class="fx-panel-head">
+            <div class="fx-seclabel"><span class="fx-tag">Matrix</span><i class="bi bi-table"></i>横向汇总表格</div>
+            <div class="fx-hint">一人一行 · 一题一列 · 首列与学号姓名固定</div>
+        </div>
+        <div class="fx-panel-body">
+            {# ── 筛选工具栏 ── #}
+            <div class="fx-toolbar mb-3">
+                <select id="fxGrade" class="form-select form-select-sm" style="width:130px">
+                    <option value="">全部年级</option>
+                    {% for g in scope_options %}<option value="{{ g.grade }}">{{ g.grade }}</option>{% endfor %}
+                </select>
+                <select id="fxClass" class="form-select form-select-sm" style="width:120px">
+                    <option value="">全部班级</option>
+                </select>
+                <select id="fxStatus" class="form-select form-select-sm" style="width:120px">
+                    <option value="">全部状态</option>
+                    <option value="submitted">待审核</option>
+                    <option value="approved">已通过</option>
+                    <option value="rejected">已驳回</option>
+                </select>
+                <div class="fx-search">
+                    <i class="bi bi-search"></i>
+                    <input id="fxKeyword" class="form-control form-control-sm" style="width:180px" placeholder="搜索姓名 / 学号">
+                </div>
+                <select id="fxPerPage" class="form-select form-select-sm" style="width:110px">
+                    <option value="20">20 条/页</option>
+                    <option value="50">50 条/页</option>
+                    <option value="100">100 条/页</option>
+                </select>
+                <button id="fxApply" class="btn btn-sm btn-primary"><i class="bi bi-funnel"></i> 筛选</button>
+                <button id="fxReset" class="btn btn-sm btn-outline-secondary"><i class="bi bi-arrow-counterclockwise"></i> 重置</button>
+                <div class="ms-auto d-flex gap-2">
+                    <button id="fxExport" class="btn btn-sm btn-success"><i class="bi bi-file-earmark-excel"></i> 导出当前筛选</button>
+                </div>
+            </div>
+
+            {# ── 表格 ── #}
+            <div class="fx-tablewrap">
+                <table class="fx-table">
+                    <thead>
+                        <tr>
+                            <th class="fx-sticky-1" rowspan="2">#</th>
+                            <th class="fx-sticky-2" rowspan="2">学号</th>
+                            <th class="fx-sticky-3" rowspan="2">姓名</th>
+                            <th rowspan="2">班级</th>
+                            <th rowspan="2">提交时间</th>
+                            <th rowspan="2">审核状态</th>
+                            {% for q in questions %}
+                            <th title="{{ q.title }}">{{ q.title }}</th>
+                            {% endfor %}
+                        </tr>
+                        <tr class="fx-subhead">
+                            {% for q in questions %}
+                            <th>{{ {'text':'文本','textarea':'多行','single_choice':'单选','multi_choice':'多选','file':'文件','date':'日期','number':'数字'}.get(q.question_type, q.question_type) }}</th>
+                            {% endfor %}
+                        </tr>
+                    </thead>
+                    <tbody id="fxTbody">
+                        <tr><td colspan="{{ questions|length + 6 }}" class="text-center py-4 text-muted">加载中…</td></tr>
+                    </tbody>
+                </table>
+            </div>
+
+            {# ── 分页 ── #}
+            <div class="d-flex justify-content-between align-items-center mt-3 flex-wrap gap-2">
+                <div class="fx-hint" id="fxPageInfo">—</div>
+                <nav><ul class="pagination pagination-sm mb-0" id="fxPager"></ul></nav>
+            </div>
+        </div>
+    </div>
+</div>
+
+{# ── 单元格全文 / 文件预览弹窗 ── #}
+<div class="modal fade" id="fxCellModal" tabindex="-1">
+    <div class="modal-dialog modal-lg modal-dialog-centered">
+        <div class="modal-content" style="border-radius:14px;border:none">
+            <div class="modal-header" style="border-bottom:1px solid var(--fx-line,#eee)">
+                <h5 class="modal-title" id="fxCellTitle" style="font-weight:700">详情</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body" id="fxCellBody"></div>
+        </div>
+    </div>
+</div>
+
+<script>
+window.FX_CTX = {
+    formId: {{ tpl.id }},
+    page: 'table',
+    scopeOptions: {{ scope_options | tojson }},
+    questions: {{ questions | map(attribute='id') | list | tojson }},
+    urls: {
+        tableData: '{{ url_for("academic.api_form_table_data", form_id=tpl.id) }}',
+        submissionFiles: '{{ url_for("academic.form_submission_files", form_id=tpl.id, sid=0) }}',
+        exportSummary: '{{ url_for("academic.form_export_summary", form_id=tpl.id) }}'
+    }
+};
+</script>
+{% endblock %}
+{% block extra_js %}
+<script src="{{ su('js/form_summary.js') }}"></script>
+{% endblock %}

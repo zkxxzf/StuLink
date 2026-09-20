@@ -1,0 +1,94 @@
+{% extends "base.html" %}
+{% import "academic/_schedule_parts.html" as parts %}
+{% block title %}学期校历 · {{ ts.name }}{% endblock %}
+{% block extra_css %}
+<style>
+.cal-table td, .cal-table th { text-align: center; vertical-align: middle; font-size: 13px; }
+.cal-week-col { width: 92px; font-weight: 700; }
+.cal-weekend { background: #f8fafc; color: #94a3b8; }
+.cal-row-current { background: #ecfdf5 !important; box-shadow: 0 0 0 1px #10b981 inset; }
+.cal-today { background: #10b981; color: #fff; border-radius: 6px; font-weight: 700; }
+.cal-day { display: inline-block; min-width: 26px; }
+.cal-range { font-size: 11px; color: #64748b; }
+</style>
+{% endblock %}
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
+    <div class="d-flex align-items-center gap-3 flex-wrap">
+        <h4 class="fw-bold mb-0"><i class="bi bi-calendar3"></i> 学期校历</h4>
+        {{ parts.term_selector(schedules, ts, base_endpoint='academic.schedule_calendar') }}
+    </div>
+    <div class="d-flex gap-2 flex-wrap">
+        <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('academic.schedule_dates', sid=ts.id) }}">
+            <i class="bi bi-calendar-range"></i> 日期配置
+        </a>
+        <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('academic.schedule_master', sid=ts.id) }}">
+            <i class="bi bi-grid-3x3"></i> 大课表
+        </a>
+    </div>
+</div>
+
+<div class="card mb-3">
+    <div class="card-body py-2 d-flex flex-wrap gap-3 align-items-center small">
+        <span><i class="bi bi-mortarboard"></i> <strong>{{ ts.name }}</strong></span>
+        <span class="text-muted"><i class="bi bi-clock-history"></i> {{ ts.period_text() }}</span>
+        <span class="badge bg-primary">共 {{ cal.total_weeks }} 教学周</span>
+        {% if cal.current_week %}
+        <span class="badge bg-success">当前第 {{ cal.current_week }} 周</span>
+        {% else %}
+        <span class="badge bg-secondary">当前不在本学期教学周内</span>
+        {% endif %}
+        <span class="ms-auto text-muted">点击某周「课表」查看该周实际生效课程（单双周随之变化）</span>
+    </div>
+</div>
+
+<div class="card">
+    <div class="table-responsive">
+        <table class="table table-bordered cal-table mb-0">
+            <thead class="table-light">
+                <tr>
+                    <th class="cal-week-col">周次</th>
+                    <th>周一</th><th>周二</th><th>周三</th><th>周四</th><th>周五</th>
+                    <th class="cal-weekend">周六</th><th class="cal-weekend">周日</th>
+                    <th style="width:180px">日期范围</th>
+                    <th style="width:80px">课表</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for w in cal.weeks %}
+                <tr class="{{ 'cal-row-current' if w.is_current else '' }}">
+                    <td class="cal-week-col">
+                        第 {{ w.week }} 周
+                        {% if w.is_current %}<span class="badge bg-success ms-1">本周</span>{% endif %}
+                    </td>
+                    {% for d in w.days %}
+                    <td class="{{ 'cal-weekend' if d.is_weekend else '' }}">
+                        {% if d.date %}
+                        <span class="cal-day {{ 'cal-today' if d.is_today else '' }}">{{ d.day }}</span>
+                        {% else %}<span class="text-muted">-</span>{% endif %}
+                    </td>
+                    {% endfor %}
+                    <td class="cal-range">{{ w.start_date or '-' }} ~ {{ w.end_date or '-' }}</td>
+                    <td>
+                        <a class="btn btn-sm btn-outline-primary py-0 px-1"
+                           href="{{ url_for('academic.schedule_master', sid=ts.id, week=w.week) }}">查看</a>
+                    </td>
+                </tr>
+                {% else %}
+                <tr><td colspan="11" class="text-center text-muted py-4">
+                    未配置学期起止日期，无法生成校历。请先到「日期配置」设置。
+                </td></tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<script id="scheduleData" type="application/json">
+{ "pageType": "calendar", "sid": {{ ts.id }}, "currentWeek": {{ cal.current_week|tojson }} }
+</script>
+{% endblock %}
+
+{% block extra_js %}
+<script src="{{ su('js/schedule_term.js') }}"></script>
+{% endblock %}

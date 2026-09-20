@@ -15,6 +15,7 @@ from flask_login import current_user
 
 from app.extensions import db
 from app.models import PermissionGroup, User, DictCategory, UserDataScope
+from app.models.permission_group import invalidate_group_menu_cache
 from app.utils.decorators import perm_required
 from app.utils.permission_map import (MODULES, PROTECTED_GROUP_NAMES,
                                       item_levels_to_keys, keys_to_item_levels)
@@ -111,6 +112,7 @@ def save_perms():
     data = request.get_json() or {}
     items = data.get('items') or []
     updated = skipped = 0
+    updated_ids = []
     for it in items:
         group = PermissionGroup.query.get(it.get('id'))
         if not group:
@@ -120,8 +122,12 @@ def save_perms():
             continue
         levels = {k: str(v) for k, v in (it.get('levels') or {}).items()}
         group.set_menu_keys(item_levels_to_keys(levels))
+        updated_ids.append(group.id)
         updated += 1
     db.session.commit()
+    # v1.16.0：权限配置变更后主动失效菜单缓存（set_menu_keys 已逐组失效，此处再保险）
+    for gid in updated_ids:
+        invalidate_group_menu_cache(gid)
     msg = f'已保存 {updated} 个身份的权限'
     if skipped:
         msg += f'（{skipped} 个系统保留身份已跳过）'
@@ -167,6 +173,8 @@ def delete(id):
                         'message': f'该身份下还有 {user_count} 个用户，请先移走用户'}), 400
     db.session.delete(group)
     db.session.commit()
+    # v1.16.0：删除权限组后失效其菜单缓存
+    invalidate_group_menu_cache(id)
     return jsonify({'success': True, 'message': '身份已删除'})
 
 

@@ -63,8 +63,18 @@ logs_dev_err.txt
 scripts/_t_*.py
 scripts/seed_*_certs.py
 scripts/tmp_*
+# mock 测试数据脚本（含虚构演示数据，禁止提交）
+scripts/import_mock_data.py
+scripts/import_mock_forms_data.py
 docs/.js
 # 含真实考号姓名的参考表格（隐私，勿提交）
 docs/*.xlsm
 # 临时部署打包文件（不提交）
 _deploy_*.tar.gz
+*.pdf
+# 用户上传的表单附件（含学生材料，禁止提交）
+# 注意：规则相对本 .gitignore 所在目录书写，此前写成 StuLink/app/static/uploads
+# 导致规则失效（实测 check-ignore 不命中）。
+app/static/uploads/
+# 迁移脚本产生的数据库备份（scripts 下的 .bak-<时间戳>）
+*.bak-*

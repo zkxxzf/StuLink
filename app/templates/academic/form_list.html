@@ -1,0 +1,154 @@
+{% extends "base.html" %}
+{% block title %}表单管理{% endblock %}
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
+    <h4 class="fw-bold mb-0">
+        <i class="bi bi-ui-checks-grid"></i> 表单管理
+    </h4>
+    <a class="btn btn-sm btn-primary" href="{{ url_for('academic.form_create') }}">
+        <i class="bi bi-plus-lg"></i> 创建新表单
+    </a>
+</div>
+
+<div class="card mb-3">
+    <div class="card-body py-2">
+        <form class="row g-2 align-items-center" method="get">
+            <div class="col-auto">
+                <select name="status" class="form-select form-select-sm" style="width:140px">
+                    <option value="">全部状态</option>
+                    {% for k, label in status_map.items() %}
+                    <option value="{{ k }}" {% if f_status == k %}selected{% endif %}>{{ label }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="col-auto">
+                <select name="category" class="form-select form-select-sm" style="width:140px">
+                    <option value="">全部分类</option>
+                    {% for cat in categories %}
+                    <option value="{{ cat.name }}" {% if f_category == cat.name %}selected{% endif %}>{{ cat.name }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="col-auto">
+                <button class="btn btn-sm btn-primary"><i class="bi bi-funnel"></i> 筛选</button>
+                <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('academic.form_list') }}">重置</a>
+            </div>
+        </form>
+    </div>
+</div>
+
+<div class="card">
+    <div class="table-responsive">
+        <table class="table table-hover align-middle mb-0">
+            <thead class="table-light">
+                <tr>
+                    <th>标题</th>
+                    <th>分类</th>
+                    <th>目标群体</th>
+                    <th>状态</th>
+                    <th>截止时间</th>
+                    <th>提交数</th>
+                    <th>创建时间</th>
+                    <th>操作</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for tpl in pagination.items %}
+                <tr>
+                    <td class="fw-bold">
+                        {{ tpl.title }}
+                        {% if tpl.description %}
+                        <div class="text-muted small text-truncate" style="max-width:200px">{{ tpl.description[:50] }}</div>
+                        {% endif %}
+                    </td>
+                    <td><span class="badge bg-secondary">{{ tpl.category or '未分类' }}</span></td>
+                    <td>
+                        {% if tpl.target_type == 'all' %}全体
+                        {% elif tpl.target_type == 'teachers' %}教师
+                        {% elif tpl.target_type == 'students' %}学生
+                        {% elif tpl.target_type and tpl.target_type.startswith('grade') %}指定年级
+                        {% else %}{{ tpl.target_type }}
+                        {% endif %}
+                    </td>
+                    <td>
+                        {% if tpl.status == 'draft' %}
+                        <span class="badge bg-secondary">草稿</span>
+                        {% elif tpl.status == 'open' %}
+                        <span class="badge bg-success">进行中</span>
+                        {% elif tpl.status == 'closed' %}
+                        <span class="badge bg-danger">已关闭</span>
+                        {% else %}
+                        <span class="badge bg-dark">{{ status_map.get(tpl.status, tpl.status) }}</span>
+                        {% endif %}
+                    </td>
+                    <td class="small">
+                        {% if tpl.deadline %}
+                        {{ tpl.deadline.strftime('%m-%d %H:%M') }}
+                        {% else %}
+                        <span class="text-muted">无限制</span>
+                        {% endif %}
+                    </td>
+                    <td><span class="badge bg-primary">{{ sub_counts.get(tpl.id, 0) }}</span></td>
+                    <td class="small text-muted">{{ tpl.created_at.strftime('%m-%d %H:%M') if tpl.created_at else '-' }}</td>
+                    <td class="text-nowrap">
+                        {% if tpl.status == 'draft' %}
+                        <a class="btn btn-sm btn-outline-primary" href="{{ url_for('academic.form_edit', form_id=tpl.id) }}" title="编辑">
+                            <i class="bi bi-pencil"></i>
+                        </a>
+                        <form method="POST" style="display:inline" action="{{ url_for('academic.form_publish', form_id=tpl.id) }}">
+                            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                            <button class="btn btn-sm btn-outline-success" title="发布"><i class="bi bi-send"></i></button>
+                        </form>
+                        <form method="POST" style="display:inline"
+                              action="{{ url_for('academic.form_delete', form_id=tpl.id) }}"
+                              onsubmit="return confirm('确定删除此表单？')">
+                            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                            <button class="btn btn-sm btn-outline-danger" title="删除"><i class="bi bi-trash"></i></button>
+                        </form>
+                        {% elif tpl.status == 'open' %}
+                        <form method="POST" style="display:inline" action="{{ url_for('academic.form_close', form_id=tpl.id) }}">
+                            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                            <button class="btn btn-sm btn-outline-warning" title="关闭"><i class="bi bi-x-circle"></i></button>
+                        </form>
+                        {% endif %}
+                       <a class="btn btn-sm btn-outline-info" href="{{ url_for('academic.form_submissions', form_id=tpl.id) }}" title="查看提交">
+                            <i class="bi bi-list-check"></i>
+                        </a>
+                        <a class="btn btn-sm btn-outline-primary" href="{{ url_for('academic.form_summary_page', form_id=tpl.id) }}" title="汇总看板">
+                            <i class="bi bi-speedometer2"></i>
+                        </a>
+                        <a class="btn btn-sm btn-outline-warning" href="{{ url_for('academic.form_package_page', form_id=tpl.id) }}" title="材料包下载">
+                            <i class="bi bi-file-earmark-zip"></i>
+                        </a>
+                    </td>
+                </tr>
+                {% else %}
+                <tr><td colspan="8" class="text-center text-muted py-4">暂无表单</td></tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+
+{% if pagination.pages > 1 %}
+<nav class="mt-3">
+    <ul class="pagination pagination-sm justify-content-center">
+        {% if pagination.has_prev %}
+        <li class="page-item"><a class="page-link" href="?page={{ pagination.prev_num }}&status={{ f_status }}&category={{ f_category }}">上一页</a></li>
+        {% endif %}
+        {% for p in pagination.iter_pages(left_edge=1, right_edge=1, left_current=2, right_current=2) %}
+        {% if p %}
+        <li class="page-item {% if p == pagination.page %}active{% endif %}">
+            <a class="page-link" href="?page={{ p }}&status={{ f_status }}&category={{ f_category }}">{{ p }}</a>
+        </li>
+        {% else %}
+        <li class="page-item disabled"><span class="page-link">…</span></li>
+        {% endif %}
+        {% endfor %}
+        {% if pagination.has_next %}
+        <li class="page-item"><a class="page-link" href="?page={{ pagination.next_num }}&status={{ f_status }}&category={{ f_category }}">下一页</a></li>
+        {% endif %}
+    </ul>
+</nav>
+{% endif %}
+{% endblock %}
