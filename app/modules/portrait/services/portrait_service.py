@@ -1,4 +1,4 @@
-# StuLink v1.15.0 2026-09-18
+# StuLink v1.17.0 2026-09-20
 # 学生画像计算服务：评分标准化、综合评级计算
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 """画像计算服务
@@ -279,6 +279,47 @@ def get_student_detail(student_no):
     }
 
 
+def _is_portrait_manager(user_id):
+    """是否校级画像管理员：admin，或「全校范围 + portrait.edit」权限组。
+
+    v1.17.0（PR#5 安全审查 S2）：仅这类账号可跨作者处理评语/事件，
+    其余账号只能改删自己撰写的内容。
+    """
+    from app.models import User
+    u = db.session.get(User, user_id) if user_id else None
+    if not u:
+        return False
+    if u.role == 'admin':
+        return True
+    pg = u.permission_group
+    return bool(pg and getattr(pg, 'scope_type', '') == 'school'
+                and pg.has_menu('portrait.edit'))
+
+
+def can_manage_comment(comment_id, operator_id):
+    """评语归属校验 → (ok, comment, message)"""
+    comment = db.session.get(PortraitComment, comment_id)
+    if not comment:
+        return False, None, '评语不存在'
+    if comment.teacher_id and comment.teacher_id == operator_id:
+        return True, comment, ''
+    if _is_portrait_manager(operator_id):
+        return True, comment, ''
+    return False, comment, '只能修改/删除本人撰写的评语（他人记录需校级管理员处理）'
+
+
+def can_manage_event(event_id, operator_id):
+    """事件归属校验 → (ok, event, message)"""
+    event = db.session.get(PortraitEvent, event_id)
+    if not event:
+        return False, None, '事件不存在'
+    if event.created_by and event.created_by == operator_id:
+        return True, event, ''
+    if _is_portrait_manager(operator_id):
+        return True, event, ''
+    return False, event, '只能删除本人创建的事件（他人记录需校级管理员处理）'
+
+
 def add_comment(student_no, teacher_id, comment_type, content, term):
     """添加评语"""
     comment = PortraitComment(
@@ -293,11 +334,20 @@ def add_comment(student_no, teacher_id, comment_type, content, term):
     return comment.to_dict()
 
 
-def edit_comment(comment_id, content, comment_type=None, term=None):
-    """编辑评语"""
-    comment = db.session.get(PortraitComment, comment_id)
-    if not comment:
-        return None
+def edit_comment(comment_id, content, comment_type=None, term=None, operator_id=None):
+    """编辑评语
+
+    v1.17.0：operator_id 非空时做归属校验——非本人且非校级管理员返回 None
+    （路由层另用 can_manage_comment 给出 403 提示）。
+    """
+    if operator_id is not None:
+        ok, comment, _msg = can_manage_comment(comment_id, operator_id)
+        if not ok:
+            return None
+    else:
+        comment = db.session.get(PortraitComment, comment_id)
+        if not comment:
+            return None
     comment.content = content
     if comment_type:
         comment.comment_type = comment_type
@@ -307,11 +357,16 @@ def edit_comment(comment_id, content, comment_type=None, term=None):
     return comment.to_dict()
 
 
-def delete_comment(comment_id):
-    """删除评语"""
-    comment = db.session.get(PortraitComment, comment_id)
-    if not comment:
-        return False
+def delete_comment(comment_id, operator_id=None):
+    """删除评语（v1.17.0：operator_id 非空时校验归属）"""
+    if operator_id is not None:
+        ok, comment, _msg = can_manage_comment(comment_id, operator_id)
+        if not ok:
+            return False
+    else:
+        comment = db.session.get(PortraitComment, comment_id)
+        if not comment:
+            return False
     db.session.delete(comment)
     db.session.commit()
     return True
@@ -336,11 +391,16 @@ def add_event(student_no, event_type, title, description, event_date, evidence=N
     return event.to_dict()
 
 
-def delete_event(event_id):
-    """删除事件记录"""
-    event = db.session.get(PortraitEvent, event_id)
-    if not event:
-        return False
+def delete_event(event_id, operator_id=None):
+    """删除事件记录（v1.17.0：operator_id 非空时校验归属）"""
+    if operator_id is not None:
+        ok, event, _msg = can_manage_event(event_id, operator_id)
+        if not ok:
+            return False
+    else:
+        event = db.session.get(PortraitEvent, event_id)
+        if not event:
+            return False
     db.session.delete(event)
     db.session.commit()
     return True

@@ -98,7 +98,8 @@
         {% if can_edit %}
         <div class="card-footer py-2 d-flex justify-content-between align-items-center">
             <span class="text-muted small">
-                <i class="bi bi-info-circle"></i> 「课间/午休」类型节次在课表网格中以灰色斜纹显示；移除节次行并保存后，该节次定义将被替换为新配置。
+                <i class="bi bi-info-circle"></i> 「课间/午休」类型节次在课表网格中以灰色斜纹显示（也可排课）；
+                移除节次行并保存后，该节次定义将被删除；若该节次仍有课程安排，系统会保留并提示。
             </span>
             <button type="submit" class="btn btn-sm btn-primary">
                 <i class="bi bi-check-lg"></i> 保存配置
@@ -116,5 +117,8 @@
     "periodTypes": {{ period_types|tojson }}
 }
 </script>
+{% endblock %}
+
+{% block extra_js %}
 <script src="{{ su('js/schedule.js') }}"></script>
 {% endblock %}

@@ -307,13 +307,20 @@
     </div>
 </div>
 
+{% endif %}
+{% endblock %}
+
+{% block extra_js %}
+{% if current and current_user.has_perm('academic.edit') %}
 <script>
 document.addEventListener('DOMContentLoaded', function() {
+    // 用模板变量生成 URL 模板，避免硬编码路径（部署前缀变更时不会失效）
+    var editTpl = '{{ url_for("academic.timetable_entry_edit", tid=current.id, eid=0) }}';
     document.querySelectorAll('.edit-entry-btn').forEach(function(btn) {
         btn.addEventListener('click', function() {
             const eid = this.dataset.eid;
             const form = document.getElementById('editEntryForm');
-            form.action = '/academic/timetable/{{ current.id }}/entry/' + eid + '/edit';
+            form.action = editTpl.replace(/\/entry\/\d+\/edit$/, '/entry/' + eid + '/edit');
             document.getElementById('editTeacherUid').value = this.dataset.teacherUid || '';
             document.getElementById('editSubject').value = this.dataset.subject || '';
             document.getElementById('editClassName').value = this.dataset.className || '';

@@ -287,6 +287,9 @@
     "results": [{% for k, label in results %}{"key":{{ k|tojson }},"label":{{ label|tojson }}}{% if not loop.last %},{% endif %}{% endfor %}]
 }
 </script>
+{% endblock %}
+
+{% block extra_js %}
 <script src="{{ su('js/echarts.min.js') }}"></script>
 <script src="{{ su('js/inspection.js') }}"></script>
 {% endblock %}

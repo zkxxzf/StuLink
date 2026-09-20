@@ -12,6 +12,9 @@ import os
 import sys
 
 BASE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from _db_backup import backup_db  # noqa: E402  改库前先备份（项目约定）
+
 portrait_db = os.path.join(BASE, 'data', 'portrait.db')
 
 
@@ -31,6 +34,10 @@ def main():
 
     # 确保数据库文件存在
     os.makedirs(os.path.dirname(portrait_db), exist_ok=True)
+
+    # 改库前先备份：出错可直接用同名 .bak-<时间戳> 还原
+    backup_db(portrait_db)
+    print()
 
     conn = sqlite3.connect(portrait_db)
     try:

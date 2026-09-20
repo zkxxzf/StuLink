@@ -87,5 +87,8 @@
 <script id="scheduleData" type="application/json">
 { "pageType": "calendar", "sid": {{ ts.id }}, "currentWeek": {{ cal.current_week|tojson }} }
 </script>
+{% endblock %}
+
+{% block extra_js %}
 <script src="{{ su('js/schedule_term.js') }}"></script>
 {% endblock %}

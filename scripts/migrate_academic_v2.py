@@ -14,6 +14,9 @@ import os
 import sys
 
 BASE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from _db_backup import backup_db  # noqa: E402  改库前先备份（项目约定）
+
 academic_db = os.path.join(BASE, 'data', 'academic.db')
 
 
@@ -32,6 +35,10 @@ def main():
     print()
 
     os.makedirs(os.path.dirname(academic_db), exist_ok=True)
+
+    # 改库前先备份：本脚本会新建 6 张表
+    backup_db(academic_db)
+    print()
 
     conn = sqlite3.connect(academic_db)
     try:

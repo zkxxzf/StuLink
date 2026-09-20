@@ -1,4 +1,4 @@
-# StuLink v1.15.0 2026-09-18
+# StuLink v1.17.0 2026-09-20
 # 学生画像路由：列表页 / 详情页 / 评语管理 / 事件管理 / 数据API
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 from flask import Blueprint, render_template, request, jsonify, abort, flash, redirect, url_for
@@ -105,11 +105,17 @@ def edit_comment(comment_id):
     if not content:
         return jsonify(success=False, message='评语内容不能为空')
 
+    # v1.17.0（S2）：归属校验——只能改自己撰写的评语
+    ok, _comment, msg = portrait_service.can_manage_comment(comment_id, current_user.id)
+    if not ok:
+        return jsonify(success=False, message=msg), 403
+
     result = portrait_service.edit_comment(
         comment_id=comment_id,
         content=content,
         comment_type=comment_type or None,
         term=term or None,
+        operator_id=current_user.id,
     )
     if not result:
         return jsonify(success=False, message='评语不存在')
@@ -124,7 +130,12 @@ def edit_comment(comment_id):
 @perm_required('portrait.edit')
 def delete_comment(comment_id):
     """删除评语"""
-    success = portrait_service.delete_comment(comment_id)
+    # v1.17.0（S2）：归属校验——只能删自己撰写的评语
+    ok, _comment, msg = portrait_service.can_manage_comment(comment_id, current_user.id)
+    if not ok:
+        return jsonify(success=False, message=msg), 403
+
+    success = portrait_service.delete_comment(comment_id, operator_id=current_user.id)
     if not success:
         return jsonify(success=False, message='评语不存在')
     log_operation(current_user, '删除', '评语', comment_id, '', module='portrait')
@@ -177,7 +188,12 @@ def add_event():
 @perm_required('portrait.edit')
 def delete_event(event_id):
     """删除事件"""
-    success = portrait_service.delete_event(event_id)
+    # v1.17.0（S2）：归属校验——只能删自己创建的事件
+    ok, _event, msg = portrait_service.can_manage_event(event_id, current_user.id)
+    if not ok:
+        return jsonify(success=False, message=msg), 403
+
+    success = portrait_service.delete_event(event_id, operator_id=current_user.id)
     if not success:
         return jsonify(success=False, message='事件不存在')
     log_operation(current_user, '删除', '事件', event_id, '', module='portrait')

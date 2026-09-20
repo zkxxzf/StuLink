@@ -77,9 +77,18 @@
                     <a class="btn btn-sm btn-outline-primary py-0" href="{{ url_for('academic.schedule_master', sid=ts.id) }}">
                         <i class="bi bi-grid-3x3"></i> 大课表
                     </a>
-                    <a class="btn btn-sm btn-outline-primary py-0" href="{{ url_for('academic.schedule_grade', sid=ts.id, grade='高一') }}">
-                        <i class="bi bi-layers"></i> 年级课表
+                    {% set grades = (grade_map.get(ts.id) or {}).keys()|list %}
+                    {% if grades %}
+                    <a class="btn btn-sm btn-outline-primary py-0"
+                       href="{{ url_for('academic.schedule_grade', sid=ts.id, grade=grades[0]) }}"
+                       title="已排课年级：{{ grades|join('、') }}">
+                        <i class="bi bi-layers"></i> 年级课表（{{ grades[0] }}）
                     </a>
+                    {% else %}
+                    <span class="btn btn-sm btn-outline-secondary py-0 disabled" title="暂无班级课表数据">
+                        <i class="bi bi-layers"></i> 年级课表
+                    </span>
+                    {% endif %}
                     <a class="btn btn-sm btn-outline-secondary py-0" href="{{ url_for('academic.schedule_periods', sid=ts.id) }}">
                         <i class="bi bi-clock-history"></i> 节次配置
                     </a>
@@ -99,13 +108,13 @@
                     </a>
                     {% if ts.status != 'active' %}
                     <form method="POST" class="d-inline" action="{{ url_for('academic.schedule_activate', sid=ts.id) }}"
-                          onsubmit="return confirm('激活「{{ ts.name }}」？当前启用中的学期将自动归档。')">
+                          onsubmit="return confirm('{{ '重新启用' if archived else '激活' }}「{{ ts.name }}」？当前启用中的学期将自动归档（含快照）。')">
                         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                        <button class="btn btn-sm btn-success py-0"><i class="bi bi-broadcast"></i> 激活</button>
+                        <button class="btn btn-sm btn-success py-0"><i class="bi bi-broadcast"></i> {{ '重新启用' if archived else '激活' }}</button>
                     </form>
-                    {% else %}
-                    <form method="POST" class="d-inline" action="{{ url_for('academic.schedule_archive', sid=ts.id) }}"
-                          onsubmit="return confirm('归档「{{ ts.name }}」？归档后课表只读。')">
+                    {% elif ts.status == 'active' %}
+                    <form method="POST" class="d-inline" action="{{ url_for('academic.schedule_archive_term', sid=ts.id) }}"
+                          onsubmit="return confirm('归档「{{ ts.name }}」？将生成归档快照，归档后课表只读。')">
                         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                         <button class="btn btn-sm btn-outline-warning py-0"><i class="bi bi-archive"></i> 归档</button>
                     </form>
@@ -137,13 +146,6 @@
                           onsubmit="return confirm('将「{{ ts.name }}」设为当前学期？其他学期将取消当前标记。')">
                         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                         <button class="btn btn-sm btn-outline-success py-0"><i class="bi bi-broadcast"></i> 设为当前</button>
-                    </form>
-                    {% endif %}
-                    {% if ts.status != 'archived' %}
-                    <form method="POST" class="d-inline" action="{{ url_for('academic.schedule_archive_term', sid=ts.id) }}"
-                          onsubmit="return confirm('归档「{{ ts.name }}」？将生成归档快照，课表转为只读。')">
-                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                        <button class="btn btn-sm btn-outline-warning py-0"><i class="bi bi-archive"></i> 归档留快照</button>
                     </form>
                     {% endif %}
                 </div>

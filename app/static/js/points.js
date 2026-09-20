@@ -39,7 +39,12 @@ function loadOptions() {
         opts.categories.forEach(function (c) { $c.append('<option value="' + esc(c) + '">' + esc(c) + '</option>'); });
         if (opts.can_edit) {
             $('#btnAdd').removeClass('d-none');
+        }
+        // v1.17.0：导入/导出按钮各自按权限显示（与路由 points.import / points.export 对齐）
+        if (opts.can_import) {
             $('#btnImport').removeClass('d-none');
+        }
+        if (opts.can_export) {
             $('#btnExport').removeClass('d-none');
         }
         var scopeText = {school: '范围：全校', grade: '范围：本年级 ' + (opts.grades[0] || ''),

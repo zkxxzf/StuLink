@@ -1,4 +1,4 @@
-# StuLink v1.16.0 2026-09-18
+# StuLink v1.17.0 2026-09-20
 # 教务 · 调课管理（重构版，基于 timetable.db）：
 #   个人调课 / 统一调课 / 审核 / 执行 / 撤销 / 详情 / 统计 / 联动 API
 # Copyright (c) 2026 zkxxzf. Apache License 2.0

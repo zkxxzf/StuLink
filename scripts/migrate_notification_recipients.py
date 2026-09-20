@@ -30,6 +30,9 @@ import sys
 from datetime import datetime
 
 BASE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from _db_backup import backup_db  # noqa: E402  改库前先备份（项目约定）
+
 system_db = os.path.join(BASE, 'data', 'system.db')
 
 NEW_COLUMNS = [
@@ -220,6 +223,10 @@ def main():
     if not os.path.exists(system_db):
         print('[ERROR] system.db 不存在，请先初始化数据库')
         sys.exit(1)
+    # 改库前先备份：本脚本会建表 + 回填历史通知收件人
+    backup_db(system_db)
+    print()
+
     conn = sqlite3.connect(system_db)
     try:
         print('\n-- 1) 建表 --')

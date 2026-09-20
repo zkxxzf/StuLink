@@ -158,5 +158,8 @@
 <script id="scheduleData" type="application/json">
 { "pageType": "compare", "compareUrl": {{ url_for('academic.api_schedule_compare_data')|tojson }} }
 </script>
+{% endblock %}
+
+{% block extra_js %}
 <script src="{{ su('js/schedule_term.js') }}"></script>
 {% endblock %}

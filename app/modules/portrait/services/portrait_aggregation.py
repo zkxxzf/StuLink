@@ -1,4 +1,4 @@
-# StuLink v1.15.0 2026-09-18
+# StuLink v1.17.0 2026-09-20
 # 学生画像数据汇聚服务：从各数据库只读汇聚学生数据
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 """跨库数据汇聚服务

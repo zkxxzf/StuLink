@@ -62,19 +62,48 @@
      * 网格渲染（master 页 AJAX 切换班级时用；class/grade 页为服务端渲染）
      * 结构与 _schedule_grid.html 宏保持一致
      * ══════════════════════════════════════════════════════════════ */
-    function cellHtml(p, wd, e, canEdit, currentPeriod) {
+    function entryHtml(e) {
+        return '<div class="sch-item' + (e.entry_type === 'swap' ? ' sch-item-swap' : '')
+            + '" data-entry-id="' + e.id + '">'
+            + '<div class="sch-subject">' + esc(e.subject)
+            + (e.entry_type === 'swap' ? '<span class="sch-badge-swap">调</span>' : '')
+            + (e.week_badge ? '<span class="sch-badge-week">' + esc(e.week_badge) + '</span>' : '')
+            + '</div>'
+            + '<div class="sch-teacher">' + esc(e.teacher_name || '未指定') + '</div>'
+            + (e.room ? '<div class="sch-room"><i class="bi bi-geo-alt"></i> ' + esc(e.room) + '</div>' : '')
+            + '</div>';
+    }
+
+    /* 有课格子右上角的「再排一门」按钮（单/双周交替用） */
+    function addMiniHtml(canEdit) {
+        return canEdit
+            ? '<span class="sch-add-mini" title="在此格再排一门（如单/双周交替）">+</span>'
+            : '';
+    }
+
+    /* 取格子内的条目数组：兼容后端返回数组（单双周多条）或单个对象 */
+    function cellItems(grid, pn, wd) {
+        var v = ((grid || {})[pn] || {})[wd];
+        if (!v) { return []; }
+        return (Object.prototype.toString.call(v) === '[object Array]') ? v : [v];
+    }
+
+    function cellHtml(p, wd, items, canEdit, currentPeriod) {
+        items = items || [];
         var cls = 'sch-cell ';
-        cls += e ? ('sch-has sch-' + (e.entry_type || 'normal')) : 'sch-empty';
+        if (items.length) {
+            cls += 'sch-has sch-' + (items[0].entry_type || 'normal');
+            if (items.length > 1) { cls += ' sch-multi'; }
+        } else {
+            cls += 'sch-empty';
+        }
         if (canEdit) { cls += ' sch-editable'; }
         if (currentPeriod && currentPeriod === p.period_number) { cls += ' sch-current-col'; }
         var attrs = ' class="' + cls + '" data-period="' + p.period_number + '" data-weekday="' + wd + '"';
-        if (e && e.id) { attrs += ' data-entry-id="' + e.id + '"'; }
         var inner = '';
-        if (e) {
-            inner = '<div class="sch-subject">' + esc(e.subject)
-                + (e.entry_type === 'swap' ? '<span class="sch-badge-swap">调</span>' : '') + '</div>'
-                + '<div class="sch-teacher">' + esc(e.teacher_name || '未指定') + '</div>'
-                + (e.room ? '<div class="sch-room"><i class="bi bi-geo-alt"></i> ' + esc(e.room) + '</div>' : '');
+        if (items.length) {
+            items.forEach(function (e) { inner += entryHtml(e); });
+            inner += addMiniHtml(canEdit);
         } else if (canEdit) {
             inner = '<span class="sch-add">+</span>';
         }
@@ -96,8 +125,9 @@
                 + '<div class="sch-period-time">' + esc(p.start_time || '--:--') + ' - ' + esc(p.end_time || '--:--') + '</div>'
                 + '</th>';
             for (var wd = 1; wd <= 7; wd++) {
-                var e = ((grid || {})[p.period_number] || {})[wd] || null;
-                body += cellHtml(p, wd, e, canEdit && !isBreak, currentPeriod);
+                // 「课间/午休」节次同样可排课（如午自习），不排除可编辑
+                body += cellHtml(p, wd, cellItems(grid, p.period_number, wd),
+                    canEdit, currentPeriod);
             }
             body += '</tr>';
         });
@@ -191,14 +221,28 @@
         if (!$('#entryModal').length) { return; }
         $('#btnAddEntry').on('click', function () { openAdd(STATE.grade, STATE.className, null, null); });
         // 网格单元格点击（事件委托，兼容 AJAX 重渲染）
-        $(document).on('click', '.sch-cell.sch-editable', function () {
+        // 同一格子可能有多条（单周/双周交替）：点条目即编辑该条；
+        // 单条格子点空白处仍编辑该条（保持旧习惯）；空格或"多条+点空白"则新增。
+        $(document).on('click', '.sch-cell.sch-editable', function (ev) {
             var $c = $(this);
-            var eid = $c.data('entry-id');
+            if ($(ev.target).hasClass('sch-add-mini')) {
+                openAdd(STATE.grade, STATE.className, $c.data('weekday'), $c.data('period'));
+                return;
+            }
+            var eid = $(ev.target).closest('.sch-item').data('entry-id');
+            if (!eid) {
+                var ids = $c.find('.sch-item').map(function () {
+                    return $(this).data('entry-id');
+                }).get();
+                if (ids.length === 1) { eid = ids[0]; }
+            }
             if (eid) { openEdit(eid); }
             else { openAdd(STATE.grade, STATE.className, $c.data('weekday'), $c.data('period')); }
         });
         $('#entryGrade').on('change', function () { fillClasses($(this).val(), ''); checkConflict(); });
         $('#entryClass, #entryWeekday, #entryPeriod, #entryTeacher').on('change', checkConflict);
+        // 周次改动会影响冲突判定（单周课与双周课同格不算冲突）
+        $('#entryWeekRange').on('change blur', checkConflict);
         $('#entrySaveBtn').on('click', saveEntry);
         $('#entryDeleteBtn').on('click', deleteEntry);
     }
@@ -265,13 +309,16 @@
 
     function fillPeriods(selected) {
         var $p = $('#entryPeriod').empty();
-        var list = (STATE.periods || []).filter(function (p) { return p.period_type !== 'break'; });
+        // 不过滤「课间/午休」：该类型节次同样可以排课（如午自习），仅加上类型提示
+        var list = (STATE.periods || []).slice();
         if (!list.length) {
             for (var i = 1; i <= 13; i++) { list.push({ period_number: i, period_name: '第' + i + '节' }); }
         }
         list.forEach(function (p) {
+            var isBreak = p.period_type === 'break';
             var label = p.period_name + ' (#' + p.period_number + ')'
-                + (p.start_time ? ' ' + p.start_time : '');
+                + (p.start_time ? ' ' + p.start_time : '')
+                + (isBreak ? '（课间/午休）' : '');
             $p.append('<option value="' + p.period_number + '"'
                 + (selected && Number(selected) === p.period_number ? ' selected' : '') + '>'
                 + esc(label) + '</option>');
@@ -338,9 +385,11 @@
         var tuid = $('#entryTeacher').val();
         if (!wd || !pn) { return; }
         var params = { sid: CFG.sid, weekday: wd, period_number: pn };
+        var wr = $.trim($('#entryWeekRange').val() || '');
         if (grade) { params.grade = grade; }
         if (cn) { params.class_name = cn; }
         if (tuid) { params.teacher_uid = tuid; }
+        if (wr) { params.week_range = wr; }
         if (STATE.editingId) { params.exclude_entry_id = STATE.editingId; }
         $.getJSON(CFG.urls.checkConflict, params).done(function (res) {
             if (res && res.success && res.data && res.data.has_conflict) {
@@ -470,13 +519,25 @@
     function initPeriods() {
         if (!CFG.canEdit) { return; }
         var pt = CFG.periodTypes || {};
+        var MAXP = 13;
+
+        function refreshAddBtn() {
+            var count = $('#periodsBody tr[data-period-row]').length;
+            $('#btnAddPeriodRow').prop('disabled', count >= MAXP)
+                .attr('title', count >= MAXP ? '一天最多 ' + MAXP + ' 节' : '');
+        }
+
         $('#btnAddPeriodRow').on('click', function () {
-            var maxn = 0;
+            var used = {}, maxn = 0;
             $('#periodsBody tr[data-period-row]').each(function () {
                 var n = parseInt($(this).find('[name=period_number]').val(), 10) || 0;
+                if (n > 0) { used[n] = true; }
                 if (n > maxn) { maxn = n; }
             });
-            var n = Math.min(13, maxn + 1);
+            // 取「未占用的最小可用编号」，避免新增行与已有行重号（重号会互相覆盖）
+            var n = 0;
+            for (var i = 1; i <= MAXP; i++) { if (!used[i]) { n = i; break; } }
+            if (!n) { window.alert('一天最多 ' + MAXP + ' 节，无法再添加'); return; }
             var opts = '';
             Object.keys(pt).forEach(function (k) { opts += '<option value="' + esc(k) + '">' + esc(pt[k]) + '</option>'; });
             var row = '<tr data-period-row>'
@@ -485,12 +546,17 @@
                 + '<td><input type="time" name="start_time" class="form-control form-control-sm"></td>'
                 + '<td><input type="time" name="end_time" class="form-control form-control-sm"></td>'
                 + '<td><select name="period_type" class="form-select form-select-sm">' + opts + '</select></td>'
-                + '<td class="text-center"><button type="button" class="btn btn-sm btn-outline-danger py-0 px-1 btn-del-period" title="移除此节次"><i class="bi bi-x-lg"></i></button></td>'
+                + '<td class="text-center"><button type="button" class="btn btn-sm btn-outline-danger py-0 px-1 btn-del-period" title="移除此节次（保存后生效）"><i class="bi bi-x-lg"></i></button></td>'
                 + '</tr>';
             $('#periodsBody tr').not('[data-period-row]').remove();
             $('#periodsBody').append(row);
+            refreshAddBtn();
         });
-        $('#periodsBody').on('click', '.btn-del-period', function () { $(this).closest('tr').remove(); });
+        $('#periodsBody').on('click', '.btn-del-period', function () {
+            $(this).closest('tr').remove();
+            refreshAddBtn();
+        });
+        refreshAddBtn();
     }
 
     /* ══════════════════════════════════════════════════════════════

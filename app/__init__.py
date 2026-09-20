@@ -1,9 +1,9 @@
-# StuLink v1.8.0 2026-08-02
+# StuLink v1.17.0 2026-09-20
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 import os
 import sqlite3 as _sqlite3
 
-from flask import Flask, render_template, request, url_for
+from flask import Flask, render_template, request, url_for, abort
 from sqlalchemy import event as _sa_event
 from sqlalchemy.engine import Engine as _SAEngine
 
@@ -150,7 +150,9 @@ PERMISSION_GROUPS = [
             'portrait.view', 'portrait.edit',
             'points.import', 'points.rules',
             'academic.view', 'academic.forms_view',
-            'workbench.class_view', 'workbench.notifications_view',
+            # v1.17.0：年级长按年级只读工作台（班级概览/考勤查看）
+            'workbench.class_view', 'workbench.attendance_view',
+            'workbench.notifications_view',
         ],
     },
     {
@@ -169,8 +171,10 @@ PERMISSION_GROUPS = [
             'portrait.view', 'portrait.edit',
             'points.import',
             'academic.view', 'academic.swap', 'academic.forms_view',
+            # v1.17.0：写权限必须配套只读权限，否则「有考勤录入权却打不开考勤页」
             'workbench.records', 'workbench.class_view',
-            'workbench.attendance', 'workbench.notifications',
+            'workbench.attendance_view', 'workbench.attendance',
+            'workbench.notifications',
         ],
     },
     {
@@ -263,6 +267,13 @@ PERMISSION_GROUPS = [
             ('students', 'read'), ('points', 'write'), ('portrait', 'write')),
     },
 ]
+
+# v1.17.0（PR#5 审查 M1）：通知收件箱是「看自己的通知」，属所有登录身份的基础能力，
+# 与数据范围无关，故所有身份默认具备 workbench.notifications_view（只读），
+# 避免出现「铃铛点进去 403」。发布/删除另需写权限 workbench.notifications 或 system.settings。
+for _g in PERMISSION_GROUPS:
+    if 'workbench.notifications_view' not in _g['menu_keys']:
+        _g['menu_keys'].append('workbench.notifications_view')
 
 
 def _init_system_data():
@@ -473,6 +484,18 @@ def create_app():
             pass  # 压缩失败则返回原始数据
         
         return response
+
+    # 上传附件目录禁止通过 /static/... 直链访问（PR#5 安全审查 M4）。
+    # 历史实现把用户上传的表单材料落在 app/static/uploads 下，任何拿到
+    # /static/uploads/forms/<id>/<sid>/<file> 的人（含未登录）都能抓取学生材料。
+    # 现在应用内部生成的下载链接一律走带鉴权的 academic.form_file 路由，
+    # 这里再把 /static/uploads/ 直链整体封掉，杜绝「猜路径」式越权读取。
+    # TODO(后续)：uploads 目录仍在 Flask 静态目录下，最彻底的做法是迁移到
+    # instance/uploads 等静态目录之外，并同步迁移 DB 里的 FormAnswer.file_path。
+    @app.before_request
+    def _block_static_uploads():
+        if request.path.startswith('/static/uploads'):
+            abort(404)
 
     # CSRF 错误友好提示（Edge 等浏览器 cookie 策略较严时可能触发）
     @app.errorhandler(400)

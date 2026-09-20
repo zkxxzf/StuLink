@@ -384,7 +384,9 @@
                href="{{ url_for('workbench.index') }}">
                 <i class="bi bi-person-workspace"></i>工作台首页
             </a>
-            {% if current_user.role == 'homeroom_teacher' %}
+            {# v1.17.0：菜单可见性改为按权限 key 判断，与路由 perm_required 保持一致，
+                避免「菜单能看见、点进去 403」（PR#5 审查 M1） #}
+            {% if current_user.has_perm('workbench.class_view') %}
             <a class="nav-link {% if request.blueprint == 'overview' and request.endpoint == 'overview.class_overview_page' %}active{% endif %}"
                href="{{ url_for('overview.class_overview_page') }}">
                 <i class="bi bi-grid-3x3-gap"></i>班级概览
@@ -402,11 +404,13 @@
                 <i class="bi bi-star"></i>积分概览
             </a>
             {% endif %}
+            {% if current_user.has_perm('workbench.attendance_view') %}
             <a class="nav-link {% if request.blueprint == 'attendance' %}active{% endif %}"
                href="{{ url_for('attendance.attendance_page') }}">
                 <i class="bi bi-calendar-check"></i>考勤管理
             </a>
-            {% if current_user.role == 'homeroom_teacher' %}
+            {% endif %}
+            {% if current_user.has_perm('workbench.records') %}
             <a class="nav-link {% if request.blueprint == 'records' %}active{% endif %}"
                href="{{ url_for('records.records_page') }}">
                 <i class="bi bi-journal-text"></i>工作记录

@@ -1,13 +1,17 @@
 """考勤管理路由"""
+# StuLink v1.17.0 2026-09-20：补权限校验与班级归属校验（PR#5 安全审查 S1）
 from datetime import date
 
-from flask import Blueprint, render_template, request, jsonify, flash, redirect, url_for, send_file
+from flask import (Blueprint, render_template, request, jsonify, flash,
+                   redirect, url_for, send_file, abort)
 from flask_login import login_required, current_user
 
+from app.utils.decorators import perm_required
 from app.modules.workbench.services.attendance_service import (
     record_attendance, get_attendance, get_attendance_stats,
-    get_class_students, get_teacher_classes, export_attendance,
+    get_class_students, export_attendance,
 )
+from app.modules.workbench.services import scope as wb_scope
 from app.models.academic import ATTENDANCE_STATUS
 
 bp = Blueprint('attendance', __name__, url_prefix='/workbench/attendance')
@@ -15,14 +19,18 @@ bp = Blueprint('attendance', __name__, url_prefix='/workbench/attendance')
 
 @bp.route('/')
 @login_required
+@perm_required('workbench.attendance_view')
 def attendance_page():
     """考勤管理页面"""
-    classes = get_teacher_classes(current_user.id)
+    # 可见班级按数据范围解析（原仅 UserClassLink，年级长/管理员看不到自己的范围）
+    classes = wb_scope.managed_class_pairs(current_user)
     default_grade = classes[0][0] if classes else ''
     default_class = classes[0][1] if classes else ''
 
-    sel_grade = request.args.get('grade', default_grade)
-    sel_class = request.args.get('class_name', default_class)
+    sel_grade = request.args.get('grade') or default_grade
+    sel_class = request.args.get('class_name') or default_class
+    if sel_grade and sel_class and not wb_scope.class_allowed(current_user, sel_grade, sel_class):
+        abort(403)
     date_from = request.args.get('date_from', '')
     date_to = request.args.get('date_to', '')
     page = request.args.get('page', 1, type=int)
@@ -51,6 +59,7 @@ def attendance_page():
 
 @bp.route('/record', methods=['POST'])
 @login_required
+@perm_required('workbench.attendance')
 def attendance_record():
     """批量记录考勤"""
     attend_date = request.form.get('attend_date', '')
@@ -61,6 +70,9 @@ def attendance_record():
     if not attend_date or not class_name:
         flash('请选择日期和班级', 'danger')
         return redirect(url_for('attendance.attendance_page'))
+    # 越权防护：只能给本班学生记录考勤（原先可给任意学号写记录）
+    if not wb_scope.class_allowed(current_user, grade, class_name):
+        abort(403)
 
     records_list = []
     for key, value in request.form.items():
@@ -80,8 +92,11 @@ def attendance_record():
             })
 
     if records_list:
-        record_attendance(records_list, current_user.id)
-        flash(f'已记录 {len(records_list)} 条考勤', 'success')
+        created, skipped = record_attendance(records_list, current_user.id)
+        msg = f'已记录 {len(created)} 条考勤'
+        if skipped:
+            msg += f'；{skipped} 条因学号不属于该班被忽略'
+        flash(msg, 'success' if created else 'warning')
     else:
         flash('未找到考勤数据', 'warning')
 
@@ -91,6 +106,7 @@ def attendance_record():
 
 @bp.route('/export')
 @login_required
+@perm_required('workbench.attendance_view')
 def attendance_export():
     """导出考勤 Excel"""
     class_name = request.args.get('class_name', '')
@@ -101,6 +117,9 @@ def attendance_export():
     if not class_name:
         flash('请选择班级后再导出', 'warning')
         return redirect(url_for('attendance.attendance_page'))
+    # 越权防护：不能导出非管辖班级的考勤
+    if not wb_scope.class_allowed(current_user, grade, class_name):
+        abort(403)
 
     out = export_attendance(
         class_name=class_name,
@@ -115,6 +134,7 @@ def attendance_export():
 
 @bp.route('/stats')
 @login_required
+@perm_required('workbench.attendance_view')
 def attendance_stats_api():
     """考勤统计 JSON 接口"""
     class_name = request.args.get('class_name', '')
@@ -123,6 +143,8 @@ def attendance_stats_api():
 
     if not class_name:
         return jsonify({'error': '请选择班级'}), 400
+    if not wb_scope.class_allowed(current_user, grade, class_name):
+        return jsonify({'error': '无权访问该班级数据'}), 403
 
     stats = get_attendance_stats(class_name, grade=grade, month=month or None)
     return jsonify(stats)

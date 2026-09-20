@@ -181,6 +181,15 @@ def build_pptx(tables):
 
     if tpl_path is None:
         # 无任何模板：全新空白演示文稿（无母版装饰，仅保证可导出）
+        # 注：母版文件本身不在仓库里（体积/版权原因），需先用原始母版执行
+        # scripts/make_pptx_clean_template.py 制备 report_template_clean.pptx。
+        try:
+            from flask import current_app
+            current_app.logger.warning(
+                'PPT 母版缺失（%s / %s 都不存在），本次导出退化为无装饰空白稿',
+                _TPL_CLEAN, _TPL_ORIG)
+        except Exception:
+            pass
         prs = Presentation()
         prs.slide_width = Inches(13.333)
         prs.slide_height = Inches(7.5)

@@ -1,4 +1,4 @@
-# StuLink v1.16.0 2026-09-18
+# StuLink v1.17.0 2026-09-20
 # 课表服务层：学期管理 / 节次配置 / 视图查询 / 条目CRUD / 冲突检测 / Excel导入导出 / 版本快照
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 """课表核心服务（独立库 timetable.db）。
@@ -20,6 +20,11 @@ from app.models.timetable import (
     TermSchedule, PeriodDef, ScheduleEntry, ScheduleVersion,
     get_default_periods, SCHEDULE_STATUS, WEEKDAY_NAMES, MAX_PERIOD,
     PERIOD_TYPES, ENTRY_TYPES,
+)
+# 公共辅助（学期定位 / 节次查询 / 周次解析）：schedule_common 不反向依赖本模块，无循环导入风险
+from app.modules.academic.services.schedule_common import (
+    get_active_schedule, get_periods, pick_conflict, temp_target_ids,
+    week_range_covers as _week_range_covers,
 )
 
 # ─── 内部工具 ──────────────────────────────────────────────────────────────
@@ -48,66 +53,26 @@ def _record_version(schedule_id, entry_id, action, snapshot_str, operator=None, 
 
 
 def _base_entry_query(schedule_id):
-    """基础条目查询（过滤软删除）"""
-    return ScheduleEntry.query.filter_by(
-        term_schedule_id=schedule_id, is_deleted=False)
+    """基础条目查询：过滤软删除 + 排除**临时调课产生的目标条目**。
 
-
-def _week_range_covers(week_range_str, week):
-    """判断周次范围字符串是否覆盖指定周（预留钩子，供学期周期任务扩展）。
-
-    支持写法："1-18"、"1-9,11-18"、"5"（单周）、"单周"、"双周"、"全周"、
-    "1-18(单)"、空值/None（视为全周覆盖）；解析失败时保守地视为覆盖。
+    临时调课只在调课当天生效（见 swap_service.resolve_effective_entry），
+    不应出现在常规周课表/导出/统计里（否则会出现"原课与调课重叠、跨周次也显示"）。
+    今日课表由 get_today_schedule 单独叠加当天临时调课。
     """
-    if week is None:
-        return True
-    try:
-        week = int(week)
-    except (ValueError, TypeError):
-        return True
-    s = (week_range_str or '').strip()
-    if not s or s in ('全周', '全部', '每周'):
-        return True
-    # 单/双周标记（兼容 "单周"、"1-18(单)"、"1-18（双）" 等写法）
-    parity = None
-    if '单' in s:
-        parity = 'odd'
-    elif '双' in s:
-        parity = 'even'
-    if parity:
-        if s in ('单周', '双周'):
-            return (week % 2 == 1) if parity == 'odd' else (week % 2 == 0)
-        # 带范围+奇偶标记：先继续解析范围，最后叠加奇偶过滤
-    # 去括号内容后按逗号/顿号分段解析范围
-    body = re.sub(r'[（(][^）)]*[）)]', '', s)
-    covered = False
-    parsed_any = False
-    for seg in re.split(r'[,，、;；]', body):
-        seg = seg.strip()
-        if not seg:
-            continue
-        m = re.match(r'^(\d{1,2})\s*[-–—~～]\s*(\d{1,2})$', seg)
-        if m:
-            lo, hi = int(m.group(1)), int(m.group(2))
-            if lo > hi:
-                lo, hi = hi, lo
-            parsed_any = True
-            if lo <= week <= hi:
-                covered = True
-            continue
-        m = re.match(r'^(\d{1,2})$', seg)
-        if m:
-            parsed_any = True
-            if int(m.group(1)) == week:
-                covered = True
-            continue
-        # 无法解析的片段：保守视为覆盖
-        return True
-    if not parsed_any:
-        return True  # 整串都解析失败，保守视为覆盖
-    if parity and covered:
-        return (week % 2 == 1) if parity == 'odd' else (week % 2 == 0)
-    return covered
+    q = ScheduleEntry.query.filter_by(
+        term_schedule_id=schedule_id, is_deleted=False)
+    temp_ids = temp_target_ids(schedule_id)
+    if temp_ids:
+        q = q.filter(~ScheduleEntry.id.in_(temp_ids))
+    return q
+
+
+def _pick_conflict(entries, week_range=None, week=None):
+    """从候选条目中挑出真正冲突的一条（周次无交集不算冲突）。
+
+    实现委托 schedule_common.pick_conflict，保持与调课模块同一套判定口径。
+    """
+    return pick_conflict(entries, week_range=week_range, week=week)
 
 
 def _filter_by_week(entries, week):
@@ -115,6 +80,20 @@ def _filter_by_week(entries, week):
     if week is None:
         return list(entries)
     return [e for e in entries if _week_range_covers(e.week_range, week)]
+
+
+def _week_hint(week_range_str):
+    """冲突提示里的周次后缀（默认 1-18 / 全周时不显示，避免噪音）"""
+    s = (week_range_str or '').strip()
+    if not s or s in ('全周', '全部', '每周', '1-18'):
+        return ''
+    return f'，周次 {s}'
+
+
+def _conflict_msg(kind, who, weekday, period_number, conflict):
+    """统一的冲突提示文案（带周次，便于判断单双周冲突）"""
+    return (f'{kind}冲突：{who} {WEEKDAY_NAMES.get(weekday,"")}第{period_number}节 '
+            f'已有「{conflict.subject}」{_week_hint(conflict.week_range)}')
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -235,13 +214,23 @@ def delete_schedule(schedule_id):
 # get_periods 已由 schedule_common 提供（见文件顶部导入）
 
 
-def save_periods(schedule_id, periods_data):
-    """批量保存节次配置（按 period_number upsert）"""
+def save_periods(schedule_id, periods_data, remove_missing=False):
+    """批量保存节次配置（按 period_number upsert）。
+
+    remove_missing=True 时，未出现在提交列表中的节次会被**删除**
+    （修复此前"删掉的行保存后又复活"的问题）；
+    若该节次仍被课表条目引用，则保留不删，并通过 kept_in_use 返回提示，
+    避免出现"有课但没有节次定义"的孤儿数据。
+
+    返回 {'removed': [节次号...], 'kept_in_use': [节次号...]}
+    """
     existing = {p.period_number: p for p in get_periods(schedule_id)}
+    submitted = set()
     for item in periods_data:
         pn = item.get('period_number')
         if not pn or not isinstance(pn, int) or pn < 1 or pn > MAX_PERIOD:
             continue
+        submitted.add(pn)
         if pn in existing:
             p = existing[pn]
             p.period_name = item.get('period_name', p.period_name)
@@ -256,7 +245,23 @@ def save_periods(schedule_id, periods_data):
                 if k in item
             })
             db.session.add(p)
+    removed, kept_in_use = [], []
+    if remove_missing:
+        candidates = sorted(set(existing) - submitted)
+        if candidates:
+            used = {r[0] for r in db.session.query(ScheduleEntry.period_number)
+                    .filter(ScheduleEntry.term_schedule_id == schedule_id,
+                            ScheduleEntry.is_deleted.is_(False),
+                            ScheduleEntry.period_number.in_(candidates))
+                    .distinct().all()}
+            for pn in candidates:
+                if pn in used:
+                    kept_in_use.append(pn)
+                    continue
+                db.session.delete(existing[pn])
+                removed.append(pn)
     db.session.commit()
+    return {'removed': removed, 'kept_in_use': kept_in_use}
 
 
 def reset_default_periods(schedule_id):
@@ -272,13 +277,17 @@ def reset_default_periods(schedule_id):
 # ═══════════════════════════════════════════════════════════════════════════════
 
 def _build_grid(entries, periods):
-    """构建 {period_number: {weekday: entry_dict}} 网格"""
+    """构建 {period_number: {weekday: [entry_dict, ...]}} 网格。
+
+    同一格子允许多条（如"单周语文 / 双周数学"交替上课），按周次先后排序，
+    便于前端逐条渲染与点击编辑。
+    """
     grid = {}
     for p in periods:
-        grid[p.period_number] = {wd: None for wd in range(1, 8)}
+        grid[p.period_number] = {wd: [] for wd in range(1, 8)}
     for e in entries:
         if e.period_number in grid:
-            grid[e.period_number][e.weekday] = e.to_dict()
+            grid[e.period_number][e.weekday].append(e.to_dict())
     return grid
 
 
@@ -354,12 +363,7 @@ def get_teacher_view(schedule_id, teacher_uid, weekday=None, week=None):
     if weekday:
         q = q.filter_by(weekday=weekday)
     entries = _filter_by_week(q.all(), week)
-    grid = {}
-    for p in periods:
-        grid[p.period_number] = {wd: None for wd in range(1, 8)}
-    for e in entries:
-        if e.period_number in grid:
-            grid[e.period_number][e.weekday] = e.to_dict()
+    grid = _build_grid(entries, periods)
     stats = {}
     for e in entries:
         stats[e.subject] = stats.get(e.subject, 0) + 1
@@ -402,6 +406,31 @@ def get_today_schedule(schedule_id=None, grade=None, class_name=None, week=None)
         q.order_by(ScheduleEntry.grade, ScheduleEntry.class_name,
                    ScheduleEntry.period_number).all(), week)
 
+    # 叠加"当天临时调课"：调入的显示、被调走的不显示（常规周课表已排除临时条目）
+    moved_away, temp_dicts = set(), []
+    try:
+        from app.modules.academic.services import swap_service
+        for sw in swap_service.get_temp_swaps_by_date(schedule_id, now.date()):
+            oe = sw.get('original_entry')
+            te = sw.get('target_entry')
+            if oe:
+                moved_away.add(oe['id'])
+            if te and te.get('weekday') == wd:
+                if grade and te.get('grade') != grade:
+                    continue
+                if class_name and te.get('class_name') != class_name:
+                    continue
+                d = dict(te)
+                d['is_temp_swap'] = True
+                temp_dicts.append(d)
+    except Exception:
+        pass  # 调课模块异常不影响今日课表基础展示
+    entry_dicts = [e.to_dict() for e in entries if e.id not in moved_away]
+    has_ids = {d['id'] for d in entry_dicts}
+    entry_dicts += [d for d in temp_dicts if d['id'] not in has_ids]
+    entry_dicts.sort(key=lambda d: (d.get('grade', ''), d.get('class_name', ''),
+                                    d.get('period_number', 0)))
+
     # 确定当前节次
     current_period = None
     cur_minutes = now.hour * 60 + now.minute
@@ -417,13 +446,13 @@ def get_today_schedule(schedule_id=None, grade=None, class_name=None, week=None)
                 pass
 
     return {
-        'entries': [e.to_dict() for e in entries],
+        'entries': entry_dicts,
         'current_period_number': current_period,
         'weekday': wd,
         'weekday_text': WEEKDAY_NAMES.get(wd, ''),
         'periods': [p.to_dict() for p in periods],
         'date': now.strftime('%Y-%m-%d'),
-        'total': len(entries),
+        'total': len(entry_dicts),
         'schedule_id': schedule_id,
         'week': week,
     }
@@ -477,26 +506,30 @@ def get_entry_detail(entry_id):
 # ═══════════════════════════════════════════════════════════════════════════════
 
 def check_class_conflict(schedule_id, grade, class_name, weekday, period_number,
-                         exclude_entry_id=None):
-    """检测同班同时段冲突，返回冲突 entry 或 None"""
+                         exclude_entry_id=None, week_range=None, week=None):
+    """检测同班同时段冲突，返回冲突 entry 或 None。
+
+    week_range / week 用于周次维度过滤：周次无交集的条目不算冲突
+    （同一格子可以是"单周语文 / 双周数学"）。
+    """
     q = _base_entry_query(schedule_id).filter_by(
         grade=grade, class_name=class_name,
         weekday=weekday, period_number=period_number)
     if exclude_entry_id:
         q = q.filter(ScheduleEntry.id != exclude_entry_id)
-    return q.first()
+    return _pick_conflict(q.all(), week_range=week_range, week=week)
 
 
 def check_teacher_conflict(schedule_id, teacher_uid, weekday, period_number,
-                           exclude_entry_id=None):
-    """检测同教师同时段冲突，返回冲突 entry 或 None"""
+                           exclude_entry_id=None, week_range=None, week=None):
+    """检测同教师同时段冲突，返回冲突 entry 或 None（周次维度同上）"""
     if not teacher_uid:
         return None
     q = _base_entry_query(schedule_id).filter_by(
         teacher_uid=teacher_uid, weekday=weekday, period_number=period_number)
     if exclude_entry_id:
         q = q.filter(ScheduleEntry.id != exclude_entry_id)
-    return q.first()
+    return _pick_conflict(q.all(), week_range=week_range, week=week)
 
 
 def add_entry(schedule_id, grade, class_name, weekday, period_number, subject,
@@ -510,15 +543,22 @@ def add_entry(schedule_id, grade, class_name, weekday, period_number, subject,
                                    period_number=period_number).first()
     if not pd:
         return False, f'该学期未定义第 {period_number} 节'
-    # 班级冲突
-    conflict = check_class_conflict(schedule_id, grade, class_name, weekday, period_number)
+    week_range = week_range or '1-18'
+    # 班级冲突（按周次交集判定）
+    conflict = check_class_conflict(schedule_id, grade, class_name, weekday,
+                                    period_number, week_range=week_range)
     if conflict:
-        return False, f'班级冲突：{grade}{class_name} {WEEKDAY_NAMES.get(weekday,"")}第{period_number}节 已有「{conflict.subject}」'
+        return False, _conflict_msg('班级', f'{grade}{class_name}', weekday,
+                                    period_number, conflict)
     # 教师冲突
     if teacher_uid:
-        tc = check_teacher_conflict(schedule_id, teacher_uid, weekday, period_number)
+        tc = check_teacher_conflict(schedule_id, teacher_uid, weekday, period_number,
+                                    week_range=week_range)
         if tc:
-            return False, f'教师冲突：{teacher_name or teacher_uid} {WEEKDAY_NAMES.get(weekday,"")}第{period_number}节 已有「{tc.subject}」({tc.grade}{tc.class_name})'
+            return False, (f'教师冲突：{teacher_name or teacher_uid} '
+                           f'{WEEKDAY_NAMES.get(weekday,"")}第{period_number}节 '
+                           f'已有「{tc.subject}」({tc.grade}{tc.class_name}'
+                           f'{_week_hint(tc.week_range)})')
 
     entry = ScheduleEntry(
         term_schedule_id=schedule_id, grade=grade, class_name=class_name,
@@ -547,17 +587,24 @@ def edit_entry(entry_id, operator=None, **fields):
     new_class = fields.get('class_name', entry.class_name)
     new_teacher_uid = fields.get('teacher_uid', entry.teacher_uid)
     new_teacher_name = fields.get('teacher_name', entry.teacher_name)
+    new_week_range = fields.get('week_range', entry.week_range)
 
-    # 冲突校验
+    # 冲突校验（按周次交集判定：单周课与双周课同格不冲突）
     conflict = check_class_conflict(entry.term_schedule_id, new_grade, new_class,
-                                    new_weekday, new_period, exclude_entry_id=entry_id)
+                                    new_weekday, new_period, exclude_entry_id=entry_id,
+                                    week_range=new_week_range)
     if conflict:
-        return False, f'班级冲突：{new_grade}{new_class} 该时段已有「{conflict.subject}」'
+        return False, _conflict_msg('班级', f'{new_grade}{new_class}', new_weekday,
+                                    new_period, conflict)
     if new_teacher_uid:
         tc = check_teacher_conflict(entry.term_schedule_id, new_teacher_uid,
-                                    new_weekday, new_period, exclude_entry_id=entry_id)
+                                    new_weekday, new_period, exclude_entry_id=entry_id,
+                                    week_range=new_week_range)
         if tc:
-            return False, f'教师冲突：{new_teacher_name or new_teacher_uid} 该时段已有课({tc.grade}{tc.class_name})'
+            return False, (f'教师冲突：{new_teacher_name or new_teacher_uid} '
+                           f'{WEEKDAY_NAMES.get(new_weekday,"")}第{new_period}节 '
+                           f'已有课({tc.grade}{tc.class_name}'
+                           f'{_week_hint(tc.week_range)})')
 
     # 快照旧数据
     old_snapshot = _snapshot(entry)
@@ -801,6 +848,24 @@ def export_schedule(schedule_id, view_type='class', grade=None, class_name=None,
     return buf
 
 
+def _cell_lines(items, with_class=False):
+    """把格子里的多条条目整理成 Excel 单元格文本（单双周交替课分行显示）
+
+    末尾做公式注入转义：科目/教师名由用户维护，理论上可被写成 =cmd|... 之类的文本。
+    """
+    lines = []
+    for e in items or []:
+        who = (f"{e.get('grade','')}{e.get('class_name','')}" if with_class
+               else (e.get('teacher_name') or ''))
+        head = e.get('subject', '')
+        badge = e.get('week_badge') or ''
+        if badge:
+            head += f'（{badge}）'
+        lines.append(f'{head}\n{who}' if who else head)
+    from app.utils.export_helpers import xl_safe
+    return xl_safe('\n'.join(lines))
+
+
 def _export_class_sheet(wb, schedule_id, grade, class_name, periods, sheet_title,
                         week=None):
     """导出单个班级课表工作表"""
@@ -832,11 +897,8 @@ def _export_class_sheet(wb, schedule_id, grade, class_name, periods, sheet_title
         c.border = tb
         c.font = Font(bold=True, size=10)
         for wd in range(1, 8):
-            entry = grid.get(p.period_number, {}).get(wd)
-            val = ''
-            if entry:
-                val = f"{entry['subject']}\n{entry.get('teacher_name') or ''}"
-            c = ws.cell(row=ri, column=wd + 1, value=val)
+            items = grid.get(p.period_number, {}).get(wd) or []
+            c = ws.cell(row=ri, column=wd + 1, value=_cell_lines(items))
             c.alignment = center
             c.border = tb
 
@@ -873,11 +935,9 @@ def _export_teacher_sheet(wb, schedule_id, teacher_uid, periods, sheet_title,
         c.border = tb
         c.font = Font(bold=True, size=10)
         for wd in range(1, 8):
-            entry = grid.get(p.period_number, {}).get(wd)
-            val = ''
-            if entry:
-                val = f"{entry['subject']}\n{entry.get('grade','')}{entry.get('class_name','')}"
-            c = ws.cell(row=ri, column=wd + 1, value=val)
+            items = grid.get(p.period_number, {}).get(wd) or []
+            c = ws.cell(row=ri, column=wd + 1,
+                        value=_cell_lines(items, with_class=True))
             c.alignment = center
             c.border = tb
 
@@ -949,6 +1009,27 @@ def get_grade_class_list(schedule_id=None):
     for g, cn in rows:
         result.setdefault(g, set()).add(cn)
     return {g: sorted(cs) for g, cs in sorted(result.items())}
+
+
+def grade_class_map(schedule_ids=None):
+    """一次查询返回 {schedule_id: {grade: [class_name, ...]}}。
+
+    供学期管理卡片（年级课表入口）等场景使用，避免逐学期查一次。
+    """
+    q = ScheduleEntry.query.filter(ScheduleEntry.is_deleted.is_(False))
+    if schedule_ids is not None:
+        ids = list(schedule_ids)
+        if not ids:
+            return {}
+        q = q.filter(ScheduleEntry.term_schedule_id.in_(ids))
+    rows = (q.with_entities(ScheduleEntry.term_schedule_id,
+                            ScheduleEntry.grade, ScheduleEntry.class_name)
+            .distinct().all())
+    out = {}
+    for sid, g, cn in rows:
+        out.setdefault(sid, {}).setdefault(g, set()).add(cn)
+    return {sid: {g: sorted(cs) for g, cs in sorted(gm.items())}
+            for sid, gm in out.items()}
 
 
 def get_all_teachers():

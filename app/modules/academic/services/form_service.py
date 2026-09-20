@@ -1,4 +1,4 @@
-# StuLink v1.9.2 2026-09-18
+# StuLink v1.17.0 2026-09-20
 # 表单收集服务：创建/编辑/发布/提交/审核/导出/文件上传
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 import json
@@ -248,6 +248,7 @@ def export_submissions(form_id):
     import io
     import openpyxl
     from openpyxl.styles import Font, Alignment, PatternFill, Border, Side
+    from app.utils.export_helpers import xl_safe
 
     tpl = db.session.get(FormTemplate, form_id)
     if not tpl:
@@ -295,7 +296,7 @@ def export_submissions(form_id):
             row.append(answers_map.get(q.id, '-'))
 
         for ci, v in enumerate(row, 1):
-            c = ws.cell(row=ri, column=ci, value=v)
+            c = ws.cell(row=ri, column=ci, value=xl_safe(v))
             c.border = tb
 
     # 列宽

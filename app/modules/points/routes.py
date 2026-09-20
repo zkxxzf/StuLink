@@ -1,4 +1,4 @@
-# StuLink v1.9.2 2026-09-18
+# StuLink v1.17.0 2026-09-20
 # 积分管理：单页记录（独立库 points.db）+ 范围权限过滤 + 批量导入导出 + 可视化
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 import io
@@ -110,10 +110,14 @@ def api_options():
             class_map[g].sort(key=lambda c: int(c[:-1]) if c[:-1].isdigit() else 99)
     else:
         grades, class_map = [], {}
+    # v1.17.0：导入/导出按钮按各自权限显示（路由已分别要求 points.import / points.export，
+    # 否则会出现"按钮可见、点进去 403"）
     return jsonify(success=True, data={
         'scope': scope, 'grades': grades, 'classes': class_map,
         'categories': CATEGORIES,
         'can_edit': current_user.has_perm('points.edit'),
+        'can_import': current_user.has_perm('points.import'),
+        'can_export': current_user.has_perm('points.export'),
         'today': date.today().strftime('%Y-%m-%d'),
     })
 
@@ -301,14 +305,14 @@ def api_record_delete(rid):
 
 @bp.route('/import')
 @login_required
-@perm_required('points.edit')
+@perm_required('points.import')
 def import_page():
     return render_template('points/import.html')
 
 
 @bp.route('/template')
 @login_required
-@perm_required('points.edit')
+@perm_required('points.import')
 def download_template():
     from app.modules.points.services.import_service import generate_template
     out = generate_template()
@@ -319,7 +323,7 @@ def download_template():
 
 @bp.route('/import/upload', methods=['POST'])
 @login_required
-@perm_required('points.edit')
+@perm_required('points.import')
 def import_upload():
     from app.modules.points.services.import_service import parse_points_excel, validate_records
     f = request.files.get('file')
@@ -347,27 +351,49 @@ def import_upload():
 
 @bp.route('/import/confirm', methods=['POST'])
 @login_required
-@perm_required('points.edit')
+@perm_required('points.import')
 def import_confirm():
-    from app.modules.points.services.import_service import import_records
+    """确认导入
+
+    v1.17.0（PR#5 安全审查 M2）：前端提交的 rows 一律不信任，
+    写入前用 sanitize_rows 重校验分值/类别/学号与数据范围。
+    """
+    from app.modules.points.services.import_service import import_records, sanitize_rows
     payload = request.get_json(silent=True) or {}
     rows = payload.get('rows', [])
     if not rows:
         return jsonify(success=False, message='没有可导入的数据'), 400
-    count = import_records(rows, current_user.id, current_user.real_name)
+
+    scope, grade, classes = _scope()
+    clean, errors, skipped = sanitize_rows(
+        rows, in_scope=lambda s: _in_scope(s, scope, grade, classes))
+    if not clean:
+        return jsonify(success=False,
+                       message='没有通过校验的合法数据',
+                       data={'errors': errors, 'skipped': skipped}), 400
+
+    count = import_records(clean, current_user.id, current_user.real_name)
     log_operation(current_user, '批量导入', '积分', None,
-                  f'导入 {count} 条积分记录', module='points')
-    return jsonify(success=True, message=f'成功导入 {count} 条记录')
+                  f'导入 {count} 条积分记录（跳过越权 {skipped} 行、'
+                  f'校验失败 {len(errors)} 行）', module='points')
+    msg = f'成功导入 {count} 条记录'
+    if errors:
+        msg += f'；{len(errors)} 行未通过校验'
+    if skipped:
+        msg += f'；{skipped} 行不在您的管理范围内已跳过'
+    return jsonify(success=True, message=msg,
+                   data={'errors': errors, 'skipped': skipped})
 
 
 # ==================== 导出 ====================
 
 @bp.route('/export')
 @login_required
-@perm_required('points.view')
+@perm_required('points.export')
 def export_excel():
     import openpyxl
     from openpyxl.styles import Font, Alignment, PatternFill, Border, Side
+    from app.utils.export_helpers import xl_safe
     q = _filter_query()
     rows = q.order_by(PointRecord.recorded_at.desc(), PointRecord.id.desc()).limit(5000).all()
     wb = openpyxl.Workbook()
@@ -389,7 +415,7 @@ def export_excel():
                 r.student_no, r.student_name, r.grade, r.class_name,
                 r.points, r.category or '', r.reason, r.remark or '', r.operator_name or '']
         for ci, v in enumerate(vals, 1):
-            c = ws.cell(row=ri, column=ci, value=v)
+            c = ws.cell(row=ri, column=ci, value=xl_safe(v))
             c.border = tb
     widths = [12, 15, 10, 8, 10, 8, 8, 25, 20, 10]
     for i, w in enumerate(widths, 1):
@@ -423,7 +449,7 @@ def api_rules_list():
 
 @bp.route('/api/rules', methods=['POST'])
 @login_required
-@perm_required('points.edit')
+@perm_required('points.rules')
 def api_rules_create():
     data = request.get_json(silent=True) or {}
     name = (data.get('name') or '').strip()[:50]
@@ -445,7 +471,7 @@ def api_rules_create():
 
 @bp.route('/api/rules/<int:rule_id>/edit', methods=['POST'])
 @login_required
-@perm_required('points.edit')
+@perm_required('points.rules')
 def api_rules_edit(rule_id):
     rule = PointRuleTemplate.query.get_or_404(rule_id)
     data = request.get_json(silent=True) or {}
@@ -469,7 +495,7 @@ def api_rules_edit(rule_id):
 
 @bp.route('/api/rules/<int:rule_id>/toggle', methods=['POST'])
 @login_required
-@perm_required('points.edit')
+@perm_required('points.rules')
 def api_rules_toggle(rule_id):
     rule = PointRuleTemplate.query.get_or_404(rule_id)
     rule.is_active = not rule.is_active
@@ -480,7 +506,7 @@ def api_rules_toggle(rule_id):
 
 @bp.route('/api/rules/<int:rule_id>/delete', methods=['POST'])
 @login_required
-@perm_required('points.edit')
+@perm_required('points.rules')
 def api_rules_delete(rule_id):
     rule = PointRuleTemplate.query.get_or_404(rule_id)
     db.session.delete(rule)

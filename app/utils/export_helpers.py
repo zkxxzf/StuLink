@@ -1,10 +1,46 @@
-"""学生列表导出工具"""
+"""学生列表导出工具 + Excel 导出公共工具"""
 import io
+import re
 from datetime import datetime
 from flask import send_file
 from app.models import Student, Room, BedAssignment, StudentAccommodation, OperationLog
 from app.utils.helpers import get_graduated_grades
 from app.extensions import db
+
+# ── Excel / WPS 公式注入防护 ─────────────────────────────────
+# 单元格内容以这些字符开头时，表格软件会把它当成公式求值（= + - @）
+# 或触发 DDE/外部链接调用，故前置一个半角单引号强制转为文本。
+# 单引号是表格软件的「文本指示符」，打开时不会显示出来。
+_FORMULA_RISK_CHARS = ('=', '+', '-', '@', '\t', '\r', '\n')
+# 控制字符（Excel 会忽略 \x00-\x08 等，留着只会干扰排查）
+_CTRL_RE = re.compile(r'[\x00-\x08\x0b\x0c\x0e-\x1f]')
+
+
+def xl_safe(value):
+    """把待写入单元格的值转为安全值。
+
+    - 非 str（int/float/date/None 等）原样返回，统计列仍可被求和/排序；
+    - str 先去控制字符，若以 = + - @ / Tab / CR / LF 开头则前置半角单引号。
+    """
+    if not isinstance(value, str) or not value:
+        return value
+    value = _CTRL_RE.sub('', value)
+    if value and value[0] in _FORMULA_RISK_CHARS:
+        return "'" + value
+    return value
+
+
+def xl_row(values):
+    """整行转义，返回新 list（配合 ws.append(...) 使用）"""
+    return [xl_safe(v) for v in values]
+
+
+def xl_write_row(ws, row_idx, values, start_col=1):
+    """写一行并做公式注入转义，返回写入的 cell 列表（便于调用方继续设样式）"""
+    cells = []
+    for ci, v in enumerate(values, start_col):
+        cells.append(ws.cell(row=row_idx, column=ci, value=xl_safe(v)))
+    return cells
 
 BASE_COLUMNS = [
     ('student_number', '学号'),

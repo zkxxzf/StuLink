@@ -60,6 +60,13 @@
 {% endif %}
 {% endmacro %}
 
+{# ===== 打印按钮（课表页统一入口，样式见 _schedule_grid.html 的 @media print） ===== #}
+{% macro print_button(label='打印课表') %}
+<button type="button" class="btn btn-sm btn-outline-dark no-print" onclick="window.print()">
+    <i class="bi bi-printer"></i> {{ label }}
+</button>
+{% endmacro %}
+
 {# ===== 归档学期只读提示条 ===== #}
 {% macro readonly_banner(ts) %}
 {% if ts and ts.status == 'archived' %}
@@ -144,6 +151,13 @@
                             <label class="form-label small mb-1">周次</label>
                             <input id="entryWeekRange" class="form-control form-control-sm" maxlength="20"
                                    value="1-18" placeholder="如 1-18">
+                        </div>
+                        <div class="col-12">
+                            <div class="form-text small mt-0">
+                                周次支持：<code>1-18</code>、<code>1-9,11-18</code>、<code>单周</code>、
+                                <code>双周</code>、<code>5</code>。
+                                <span class="text-muted">单周课与双周课可放在同一格（互不冲突，网格内分行显示）。</span>
+                            </div>
                         </div>
                         <div class="col-4">
                             <label class="form-label small mb-1">备注</label>

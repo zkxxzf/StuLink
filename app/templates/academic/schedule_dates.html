@@ -91,5 +91,8 @@
 <script id="scheduleData" type="application/json">
 { "pageType": "dates", "sid": {{ ts.id }} }
 </script>
+{% endblock %}
+
+{% block extra_js %}
 <script src="{{ su('js/schedule_term.js') }}"></script>
 {% endblock %}

@@ -21,6 +21,7 @@
            href="{{ url_for('academic.schedule_export', sid=ts.id, view_type='class', grade=grade, week=week, **{'class': class_name}) }}">
             <i class="bi bi-download"></i> 导出本班
         </a>
+        {{ parts.print_button('打印本班') }}
         <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('academic.schedule_grade', sid=ts.id, grade=grade, week=week) }}">
             <i class="bi bi-layers"></i> 年级课表
         </a>
@@ -50,7 +51,7 @@
             </div>
         </div>
     </div>
-    <div class="col-lg-3">
+    <div class="col-lg-3 no-print">
         <div class="card mb-3">
             <div class="card-header py-2"><i class="bi bi-bar-chart"></i> 本周课时统计</div>
             <div class="card-body py-2">
@@ -99,6 +100,9 @@
     }
 }
 </script>
+{% endblock %}
+
+{% block extra_js %}
 <script src="{{ su('js/echarts.min.js') }}"></script>
 <script src="{{ su('js/schedule.js') }}"></script>
 <script src="{{ su('js/schedule_term.js') }}"></script>

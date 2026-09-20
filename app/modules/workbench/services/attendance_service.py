@@ -9,13 +9,30 @@ from app.extensions import db
 from app.models.academic import AttendanceRecord, ATTENDANCE_STATUS
 from app.models.student import Student
 from app.models.user_class_link import UserClassLink
+from app.utils.export_helpers import xl_safe
 
 
 def record_attendance(records_list, recorded_by):
-    """批量记录考勤
+    """批量记录考勤 → (created, skipped)
+
     records_list: [{student_no, student_name, grade, class_name, attend_date, period, status, remark}, ...]
+
+    v1.17.0：服务层兜底校验——学号必须属于该 (grade, class_name)，
+    否则丢弃并计入 skipped（路由层另做班级归属校验，防止为任意学生写入考勤）。
     """
-    created = []
+    # 一次性取出相关班级的学号集合（避免逐条查询）
+    pairs = {(r.get('grade', ''), r.get('class_name', '')) for r in records_list}
+    members = {}
+    for g, cn in pairs:
+        if not cn:
+            continue
+        q = Student.query.filter_by(class_name=cn)
+        if g:
+            q = q.filter_by(grade=g)
+        members[(g, cn)] = {s.student_number for s in
+                            q.with_entities(Student.student_number).all()}
+
+    created, skipped = [], 0
     for r in records_list:
         attend_date = r.get('attend_date')
         if isinstance(attend_date, str):
@@ -23,6 +40,10 @@ def record_attendance(records_list, recorded_by):
                 attend_date = date.fromisoformat(attend_date)
             except ValueError:
                 continue
+        allowed = members.get((r.get('grade', ''), r.get('class_name', '')))
+        if allowed is not None and r.get('student_no', '') not in allowed:
+            skipped += 1  # 学号不属于该班：拒绝写入
+            continue
         rec = AttendanceRecord(
             student_no=r.get('student_no', ''),
             student_name=r.get('student_name', ''),
@@ -37,7 +58,7 @@ def record_attendance(records_list, recorded_by):
         db.session.add(rec)
         created.append(rec)
     db.session.commit()
-    return created
+    return created, skipped
 
 
 def get_attendance(class_name=None, grade=None, date_from=None, date_to=None,
@@ -189,7 +210,7 @@ def export_attendance(class_name, date_from, date_to, grade=None):
             r.remark or '',
         ]
         for ci, v in enumerate(row, 1):
-            c = ws.cell(row=ri, column=ci, value=v)
+            c = ws.cell(row=ri, column=ci, value=xl_safe(v))
             c.border = tb
 
     out = io.BytesIO()

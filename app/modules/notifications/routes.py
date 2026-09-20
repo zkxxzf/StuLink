@@ -1,10 +1,15 @@
-# StuLink v1.9.3 2026-09-18
+# StuLink v1.17.0 2026-09-20
 # 通知公告路由（独立蓝图，url_prefix=/notifications）
 # v2.0 收件人表改造：列表筛选/已读进度/用户搜索/分类字典
+# v1.17.0 PR#5 安全审查（M1）：补齐 workbench.notifications_view / workbench.notifications
+#   两个声明却未强制的权限 key：
+#   - 查看自己的收件箱 / 标记已读 → workbench.notifications_view
+#   - 发布、删除通知、检索收件人 → workbench.notifications（system.settings 亦可通过，
+#     保持管理员既有能力不变，不新增越权面）
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 import json
 
-from flask import Blueprint, render_template, request, redirect, url_for, flash, jsonify
+from flask import Blueprint, render_template, request, redirect, url_for, flash, jsonify, abort
 from flask_login import login_required, current_user
 
 from app.extensions import db
@@ -52,8 +57,19 @@ GRADE_OPTIONS = ['2025级', '2024级', '2023级']
 CLASS_OPTIONS = [f'{i:02d}班' for i in range(1, 11)]
 
 
+def _can_publish():
+    """是否可发布/删除通知（写权限）
+
+    workbench.notifications 为「班主任工作台-通知管理」写权限；
+    system.settings 为历史管理员通道，两者任一即可，保持既有行为不变。
+    """
+    return (current_user.has_perm('workbench.notifications')
+            or current_user.has_perm('system.settings'))
+
+
 @bp.route('/')
 @login_required
+@perm_required('workbench.notifications_view')
 def notifications_page():
     """通知列表页"""
     page = request.args.get('page', 1, type=int)
@@ -75,15 +91,17 @@ def notifications_page():
         category_labels=CATEGORY_LABELS,
         current_category=category or '',
         only_unread=only_unread,
-        can_create=current_user.has_perm('system.settings'),
+        can_create=_can_publish(),
     )
 
 
 @bp.route('/create', methods=['POST'])
 @login_required
-@perm_required('system.settings')
+@perm_required('workbench.notifications_view')
 def notification_create():
-    """创建通知（仅管理员/有 system.settings 权限的用户）"""
+    """创建通知（需通知管理写权限 workbench.notifications 或 system.settings）"""
+    if not _can_publish():
+        abort(403)
     title = (request.form.get('title') or '').strip()
     content = (request.form.get('content') or '').strip()
     target_type = (request.form.get('target_type') or 'all').strip()
@@ -93,6 +111,13 @@ def notification_create():
 
     if not title or not content:
         flash('标题和内容不能为空', 'danger')
+        return redirect(url_for('notifications.notifications_page'))
+
+    # v1.17.0：仅持 workbench.notifications（无 system.settings）的发布者，
+    # 不允许面向「全体人员 / 指定角色」群发，避免越权广播到全校。
+    if (target_type in ('all', 'role')
+            and not current_user.has_perm('system.settings')):
+        flash('当前权限仅支持面向指定年级、班级或人员发布通知', 'danger')
         return redirect(url_for('notifications.notifications_page'))
 
     # 构建 target_scope JSON
@@ -129,6 +154,7 @@ def notification_create():
 
 @bp.route('/<int:notification_id>/read', methods=['POST'])
 @login_required
+@perm_required('workbench.notifications_view')
 def notification_read(notification_id):
     """标记单条通知为已读"""
     mark_read(notification_id, current_user.id)
@@ -137,6 +163,7 @@ def notification_read(notification_id):
 
 @bp.route('/read-all', methods=['POST'])
 @login_required
+@perm_required('workbench.notifications_view')
 def notification_read_all():
     """全部标记已读"""
     count = mark_all_read(current_user.id)
@@ -146,9 +173,11 @@ def notification_read_all():
 
 @bp.route('/<int:notification_id>/delete', methods=['POST'])
 @login_required
-@perm_required('system.settings')
+@perm_required('workbench.notifications_view')
 def notification_delete(notification_id):
-    """删除通知（仅管理员）"""
+    """删除通知（需通知管理写权限 workbench.notifications 或 system.settings）"""
+    if not _can_publish():
+        abort(403)
     delete_notification(notification_id)
     flash('通知已删除', 'success')
     return redirect(url_for('notifications.notifications_page'))
@@ -164,6 +193,7 @@ def unread_count_api():
 
 @bp.route('/<int:notification_id>')
 @login_required
+@perm_required('workbench.notifications_view')
 def notification_detail(notification_id):
     """通知详情页"""
     result = get_notification_detail(notification_id, user=current_user)
@@ -190,6 +220,7 @@ def notification_detail(notification_id):
 
 @bp.route('/<int:nid>/progress')
 @login_required
+@perm_required('workbench.notifications_view')
 def notification_progress(nid):
     """已读进度页（发布者/管理员可见）"""
     notif = db.session.get(Notification, nid)
@@ -197,7 +228,7 @@ def notification_progress(nid):
         flash('通知不存在', 'warning')
         return redirect(url_for('notifications.notifications_page'))
     can_manage = bool(current_user.role == 'admin'
-                      or current_user.has_perm('system.settings')
+                      or _can_publish()
                       or notif.published_by == current_user.id)
     if not can_manage:
         flash('您没有权限查看此通知的已读进度', 'warning')
@@ -212,7 +243,11 @@ def notification_progress(nid):
 def api_search_users():
     """用户搜索（供「指定人员」多选用）
     返回 JSON: [{uid, name, role, grade, class_name}, ...]
+
+    v1.17.0：仅通知发布权限者可用，避免任意登录账号枚举全校教师名单。
     """
+    if not _can_publish():
+        abort(403)
     keyword = (request.args.get('keyword') or '').strip()
     if not keyword or len(keyword) < 1:
         return jsonify([])

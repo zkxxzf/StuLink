@@ -1,4 +1,4 @@
-# StuLink v1.9.2 2026-09-18
+# StuLink v1.17.0 2026-09-20
 # 积分导入服务：Excel 解析 / 校验 / 批量写入 / 模板生成
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 import io
@@ -174,9 +174,88 @@ def validate_records(rows):
     return valid, invalid
 
 
+def sanitize_rows(rows, in_scope=None, max_rows=MAX_IMPORT_ROWS):
+    """服务端重校验导入行 → (clean, errors, skipped)
+
+    v1.17.0（PR#5 安全审查 M2）：确认导入请求由前端提交，**不可直接信任**，
+    本函数在写入前重新走一遍全部约束：
+
+    - 行数上限 MAX_IMPORT_ROWS（超出部分丢弃）；
+    - 分值必须是整数、非 0、|points| <= 100；
+    - 类别必须在 VALID_CATEGORIES 内（空则记「其他」）；事由必填；
+    - 学号必须匹配主库学生，**姓名/年级/班级一律以主库为准**（不采信提交值）；
+    - in_scope(student) 为 False 的行跳过并计入 skipped（越权数据不入库）。
+    """
+    clean, errors, skipped = [], [], 0
+    if not rows:
+        return clean, errors, skipped
+    if len(rows) > max_rows:
+        errors.append({'line': max_rows, 'student_no': '',
+                       'reason': f'数据超过 {max_rows} 行上限，多余行已丢弃'})
+        rows = rows[:max_rows]
+
+    # 1) 纯字段校验（不查库）
+    candidates = []
+    for i, r in enumerate(rows, 1):
+        if not isinstance(r, dict):
+            errors.append({'line': i, 'student_no': '', 'reason': '数据格式不正确'})
+            continue
+        no = str(r.get('student_no') or '').strip()
+        if not no:
+            errors.append({'line': i, 'student_no': '', 'reason': '缺少学号'})
+            continue
+        try:
+            points = int(r.get('points'))
+        except (TypeError, ValueError):
+            errors.append({'line': i, 'student_no': no, 'reason': '积分值不是整数'})
+            continue
+        if points == 0 or abs(points) > 100:
+            errors.append({'line': i, 'student_no': no,
+                           'reason': f'积分值{points}需在-100~100之间且不为0'})
+            continue
+        cat = str(r.get('category') or '').strip()
+        if cat and cat not in VALID_CATEGORIES:
+            errors.append({'line': i, 'student_no': no, 'reason': f'类别"{cat}"不合法'})
+            continue
+        reason = str(r.get('reason') or '').strip()[:200]
+        if not reason:
+            errors.append({'line': i, 'student_no': no, 'reason': '原因/事由不能为空'})
+            continue
+        candidates.append((i, no, points, cat or '其他', reason))
+
+    # 2) 批量匹配学生（避免逐行查询）
+    stu_map = {}
+    nos = list({c[1] for c in candidates})
+    for i in range(0, len(nos), 800):
+        chunk = nos[i:i + 800]
+        for s in Student.query.filter(Student.student_number.in_(chunk)).all():
+            stu_map[str(s.student_number)] = s
+
+    for i, no, points, cat, reason in candidates:
+        stu = stu_map.get(no)
+        if stu is None:
+            errors.append({'line': i, 'student_no': no, 'reason': '学号未匹配到学生'})
+            continue
+        if in_scope is not None and not in_scope(stu):
+            skipped += 1
+            continue
+        clean.append({
+            'student_no': no,
+            'student_name': stu.name,
+            'grade': stu.grade,
+            'class_name': stu.class_name,
+            'points': points,
+            'category': cat,
+            'reason': reason,
+        })
+    return clean, errors, skipped
+
+
 def import_records(valid_rows, operator_id, operator_name):
     """批量写入 point_records 表
     返回导入数量
+
+    注意：调用方必须先过 sanitize_rows / validate_records，本函数不再重复校验。
     """
     if not valid_rows:
         return 0

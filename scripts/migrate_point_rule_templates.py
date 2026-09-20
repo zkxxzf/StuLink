@@ -6,6 +6,9 @@ import os
 import sys
 
 BASE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from _db_backup import backup_db  # noqa: E402  改库前先备份（项目约定）
+
 points_db = os.path.join(BASE, 'data', 'points.db')
 
 DEFAULT_RULES = [
@@ -33,6 +36,10 @@ def main():
     if not os.path.exists(points_db):
         print('错误: 积分数据库不存在')
         sys.exit(1)
+
+    # 改库前先备份：本脚本会建表并写入 12 条默认规则模板
+    backup_db(points_db)
+    print()
 
     conn = sqlite3.connect(points_db)
     try:

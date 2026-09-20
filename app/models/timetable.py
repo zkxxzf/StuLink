@@ -1,6 +1,7 @@
-# StuLink v1.16.0 2026-09-18
+# StuLink v1.17.0 2026-09-20
 # 课表模块模型：学期课表 / 节次定义 / 课表明细 / 调课记录 / 变更版本（独立库 timetable.db）
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
+import re
 from datetime import datetime, date, timedelta
 
 from app.extensions import db
@@ -248,6 +249,28 @@ class ScheduleEntry(db.Model):
         db.Index('idx_entry_teacher', 'term_schedule_id', 'teacher_uid', 'weekday', 'period_number'),
     )
 
+    def week_badge(self):
+        """周次角标：只在"值得标注"时返回文字，否则空串（避免满屏角标）。
+
+        - 空 / 全周 / 整学期范围（如 1-18、1-20）→ 不标注；
+        - 单周 / 双周 / 含奇偶标记 → '单周' / '双周'；
+        - 其它（跳周、部分周次、单周次）→ '周次 x'。
+        """
+        s = (self.week_range or '').strip()
+        if not s or s in ('全周', '全部', '每周', '1-18'):
+            return ''
+        if s in ('单周', '双周'):
+            return s
+        if '单' in s:
+            return '单周'
+        if '双' in s:
+            return '双周'
+        # 1-N 且 N>=15 视为整学期（各校周数不同，18/20/22 都可能），不标注
+        m = re.match(r'^1\s*[-–—~～]\s*(\d{1,2})$', s)
+        if m and int(m.group(1)) >= 15:
+            return ''
+        return f'周次 {s}'
+
     def to_dict(self):
         return {
             'id': self.id,
@@ -258,6 +281,7 @@ class ScheduleEntry(db.Model):
             'weekday_text': WEEKDAY_NAMES.get(self.weekday, ''),
             'period_number': self.period_number,
             'week_range': self.week_range,
+            'week_badge': self.week_badge(),
             'subject': self.subject,
             'teacher_uid': self.teacher_uid,
             'teacher_name': self.teacher_name,

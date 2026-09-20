@@ -21,6 +21,7 @@
            href="{{ url_for('academic.schedule_export', sid=ts.id, view_type='grade', grade=grade, week=week) }}">
             <i class="bi bi-download"></i> 导出本年级
         </a>
+        {{ parts.print_button('打印当前班级') }}
         <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('academic.schedule_master', sid=ts.id, week=week) }}">
             <i class="bi bi-grid-3x3"></i> 大课表
         </a>
@@ -103,6 +104,9 @@
     }
 }
 </script>
+{% endblock %}
+
+{% block extra_js %}
 <script src="{{ su('js/schedule.js') }}"></script>
 <script src="{{ su('js/schedule_term.js') }}"></script>
 {% endblock %}

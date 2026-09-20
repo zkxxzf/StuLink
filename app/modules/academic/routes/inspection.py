@@ -1,4 +1,4 @@
-# StuLink v1.9.2 2026-09-18
+# StuLink v1.17.0 2026-09-20
 # 教务 · 查课统计：记录录入 / 列表筛选 / 月度统计 / 批量录入 / 导出 / 图表API
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 import io
@@ -224,6 +224,7 @@ def inspection_export():
     import openpyxl
     from openpyxl.styles import Font, Alignment, PatternFill, Border, Side
     from app.modules.grades.services.scope import user_grade_scope
+    from app.utils.export_helpers import xl_safe
 
     ug = user_grade_scope(current_user)
     teacher_uid = (request.args.get('teacher_uid') or '').strip()
@@ -294,7 +295,7 @@ def inspection_export():
             r.note or '',
         ]
         for ci, v in enumerate(row_data, 1):
-            c = ws.cell(row=ri, column=ci, value=v)
+            c = ws.cell(row=ri, column=ci, value=xl_safe(v))
             c.border = tb
 
     for i, w in enumerate(widths, 1):

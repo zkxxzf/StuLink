@@ -23,6 +23,7 @@
            href="{{ url_for('academic.schedule_export', sid=ts.id, view_type='master', week=week) }}">
             <i class="bi bi-download"></i> 导出
         </a>
+        {{ parts.print_button('打印当前班级') }}
         <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('academic.schedule_periods', sid=ts.id) }}">
             <i class="bi bi-clock-history"></i> 节次配置
         </a>
@@ -110,6 +111,9 @@
     "gridCssClass": "sch-grid"
 }
 </script>
+{% endblock %}
+
+{% block extra_js %}
 <script src="{{ su('js/schedule.js') }}"></script>
 <script src="{{ su('js/schedule_term.js') }}"></script>
 {% endblock %}

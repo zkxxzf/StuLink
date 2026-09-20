@@ -1,4 +1,4 @@
-# StuLink v1.9.3 2026-09-18
+# StuLink v1.17.0 2026-09-20
 # 表单收集「汇总服务层」：应交名单 / 提交统计 / 横向汇总矩阵 / Excel 导出
 #                        / 材料清单与打包下载 / 未交催交
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
@@ -34,6 +34,7 @@ from app.models.academic import (
     FormTemplate, FormQuestion, FormSubmission, FormAnswer, Teacher,
 )
 from app.models.student import Student
+from app.utils.export_helpers import xl_row, xl_safe
 
 
 SUBMISSION_STATUS_TEXT = {'submitted': '待审核', 'approved': '已通过', 'rejected': '已驳回'}
@@ -120,10 +121,23 @@ def _static_abspath(rel_path):
 
 
 def _file_url(rel_path):
-    try:
-        return url_for('static', filename=rel_path)
-    except Exception:
-        return '/static/' + rel_path
+    """附件下载 URL —— 必须走带鉴权的 academic.form_file 路由。
+
+    历史上这里返回 /static/uploads/forms/... 的静态直链，任何拿到链接的人
+    （含未登录用户）都能下载学生上传的材料。详情见
+    app/modules/academic/routes/forms.py 的 form_file 路由。
+    """
+    parts = (rel_path or '').split('/')
+    form_id = None
+    if len(parts) >= 4 and parts[0] == 'uploads' and parts[1] == 'forms':
+        if parts[2].isdigit():
+            form_id = int(parts[2])
+    if form_id:
+        try:
+            return url_for('academic.form_file', form_id=form_id, rel_path=rel_path)
+        except Exception:
+            pass
+    return '#'
 
 
 def _query_submissions(form_id, status=None, grade=None, class_name=None,
@@ -600,7 +614,7 @@ def export_summary_excel(form_id, status=None, grade=None, class_name=None,
     col = len(fixed) + 1
     qcol = {}
     for q in questions:
-        c1 = ws.cell(row=1, column=col, value=q.title)
+        c1 = ws.cell(row=1, column=col, value=xl_safe(q.title))
         c1.font = hf; c1.fill = hfill; c1.alignment = center; c1.border = tb
         c2 = ws.cell(row=2, column=col,
                      value=QUESTION_TYPE_TEXT.get(q.question_type, q.question_type))
@@ -612,10 +626,10 @@ def export_summary_excel(form_id, status=None, grade=None, class_name=None,
     r = 3
     for row in matrix['rows']:
         ws.cell(row=r, column=1, value=row['index']).border = tb
-        ws.cell(row=r, column=2, value=row['uid'] or '').border = tb
-        ws.cell(row=r, column=3, value=row['name'] or '').border = tb
-        ws.cell(row=r, column=4, value=row['grade']).border = tb
-        ws.cell(row=r, column=5, value=row['class_name']).border = tb
+        ws.cell(row=r, column=2, value=xl_safe(row['uid'] or '')).border = tb
+        ws.cell(row=r, column=3, value=xl_safe(row['name'] or '')).border = tb
+        ws.cell(row=r, column=4, value=xl_safe(row['grade'])).border = tb
+        ws.cell(row=r, column=5, value=xl_safe(row['class_name'])).border = tb
         ws.cell(row=r, column=6, value=row['submitted_at']).border = tb
         sc = ws.cell(row=r, column=7, value=row['status_text']); sc.border = tb
         if row['status'] == 'rejected':
@@ -630,12 +644,12 @@ def export_summary_excel(form_id, status=None, grade=None, class_name=None,
             if q.question_type == 'file':
                 files = cell.get('files') or []
                 names = '、'.join(f['filename'] for f in files)
-                cc.value = names or '-'
+                cc.value = xl_safe(names or '-')
                 if files:
                     cc.hyperlink = files[0]['url']
                     cc.font = link_font
             else:
-                cc.value = cell.get('display') or ''
+                cc.value = xl_safe(cell.get('display') or '')
         r += 1
 
     for i in range(1, len(fixed) + 1):
@@ -666,8 +680,8 @@ def export_summary_excel(form_id, status=None, grade=None, class_name=None,
     for c in ws2[hdr_row]:
         c.font = hf; c.fill = hfill; c.alignment = center; c.border = tb
     for b in breakdown:
-        ws2.append([b['grade'], b['class_name'], b['expected'],
-                    b['submitted'], b['not_submitted'], b['rate']])
+        ws2.append(xl_row([b['grade'], b['class_name'], b['expected'],
+                           b['submitted'], b['not_submitted'], b['rate']]))
     for col_i in range(1, 7):
         ws2.column_dimensions[get_column_letter(col_i)].width = 14
 
@@ -687,8 +701,8 @@ def export_summary_excel(form_id, status=None, grade=None, class_name=None,
             detail = f"文件 {qs.get('file_count',0)} 个 / {qs.get('file_size_text','0B')} / 缺失 {qs.get('file_missing',0)} 人"
         else:
             detail = f"平均字数 {qs.get('avg_len',0)}"
-        ws3.append([i, qs['title'], qs['type_text'], qs['answered_count'],
-                    qs['blank_count'], detail])
+        ws3.append(xl_row([i, qs['title'], qs['type_text'], qs['answered_count'],
+                           qs['blank_count'], detail]))
     ws3.column_dimensions['B'].width = 30
     ws3.column_dimensions['F'].width = 60
     for col_i in ('A', 'C', 'D', 'E'):
@@ -700,8 +714,8 @@ def export_summary_excel(form_id, status=None, grade=None, class_name=None,
     for c in ws4[1]:
         c.font = hf; c.fill = hfill; c.alignment = center; c.border = tb
     for m in missing:
-        ws4.append([m.get('grade', ''), m.get('class_name', ''),
-                    m.get('uid', ''), m.get('name', '')])
+        ws4.append(xl_row([m.get('grade', ''), m.get('class_name', ''),
+                           m.get('uid', ''), m.get('name', '')]))
     for col_i in ('A', 'B', 'C', 'D'):
         ws4.column_dimensions[col_i].width = 14
 
@@ -730,8 +744,8 @@ def export_missing_list_excel(form_id, grade=None, class_name=None):
     for c in ws[1]:
         c.font = hf; c.fill = hfill; c.alignment = center; c.border = tb
     for i, m in enumerate(missing, 1):
-        ws.append([i, m.get('grade', ''), m.get('class_name', ''),
-                   m.get('uid', ''), m.get('name', '')])
+        ws.append(xl_row([i, m.get('grade', ''), m.get('class_name', ''),
+                          m.get('uid', ''), m.get('name', '')]))
         for c in ws[ws.max_row]:
             c.border = tb
     for col_i in range(1, 6):

@@ -27,6 +27,7 @@
             <i class="bi bi-download"></i> 导出
         </a>
         {% endif %}
+        {{ parts.print_button('打印课表') }}
         <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('academic.schedule_manage') }}">
             <i class="bi bi-house"></i> 学期管理
         </a>
@@ -109,7 +110,7 @@
             </div>
         </div>
     </div>
-    <div class="col-lg-3">
+    <div class="col-lg-3 no-print">
         <div class="card mb-3">
             <div class="card-header py-2"><i class="bi bi-bar-chart"></i> 每周课时统计</div>
             <div class="card-body py-2">
@@ -163,6 +164,9 @@
     "urls": {}
 }
 </script>
+{% endblock %}
+
+{% block extra_js %}
 <script src="{{ su('js/echarts.min.js') }}"></script>
 <script src="{{ su('js/schedule.js') }}"></script>
 <script src="{{ su('js/schedule_term.js') }}"></script>

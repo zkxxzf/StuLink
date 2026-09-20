@@ -1,4 +1,4 @@
-# StuLink v1.16.0 2026-09-18
+# StuLink v1.17.0 2026-09-20
 # 调课服务（基于 timetable.db 新模型）：申请 / 批量 / 审核 / 执行 / 撤销 / 统计 / 实时生效
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 #
@@ -55,6 +55,34 @@ from app.modules.academic.services.schedule_common import get_active_schedule  #
 _get_active_schedule = get_active_schedule
 
 
+def _week_of_date(schedule_id, target_date):
+    """返回日期所属教学周（未配置学期起止日期时返回 None，此时不做周次过滤）。"""
+    ts = db.session.get(TermSchedule, schedule_id) if schedule_id else None
+    if not ts or not target_date:
+        return None
+    try:
+        return ts.get_week_number(target_date)
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def _week_ctx(schedule_id, entry, is_permanent, swap_date=None):
+    """冲突判定用的周次上下文 → (week_range, week)。
+
+    - 永久调课：沿用原条目的周次范围（两者同范围，比对交集）；
+    - 临时调课：只关心"调课日期所属教学周"，避免与别周的课误判冲突。
+    """
+    if is_permanent:
+        return (entry.week_range, None)
+    return (None, _week_of_date(schedule_id, swap_date))
+
+
+# 周次交集判定 / 冲突挑选统一由 schedule_common 提供（与排课模块同一套口径）
+from app.modules.academic.services.schedule_common import (  # noqa: E402
+    pick_conflict as _pick_conflict,
+    temp_target_ids as _temp_target_ids_common,
+)
+
 # get_periods 由 schedule_common 提供（委托包装）
 from app.modules.academic.services.schedule_common import get_periods as _gp_common  # noqa: E402
 
@@ -88,8 +116,12 @@ def _period_label(schedule_id, period_number):
 
 
 def _check_class_conflict(schedule_id, grade, class_name, weekday,
-                          period_number, exclude_entry_id=None):
-    """同班同时段冲突：返回冲突的 ScheduleEntry 或 None（过滤软删除）。"""
+                          period_number, exclude_entry_id=None,
+                          week_range=None, week=None):
+    """同班同时段冲突：返回冲突的 ScheduleEntry 或 None（过滤软删除）。
+
+    week_range / week：按周次判断——无周次交集的条目不算冲突（单双周交替课）。
+    """
     q = ScheduleEntry.query.filter(
         ScheduleEntry.term_schedule_id == schedule_id,
         ScheduleEntry.grade == grade,
@@ -100,11 +132,11 @@ def _check_class_conflict(schedule_id, grade, class_name, weekday,
     )
     if exclude_entry_id:
         q = q.filter(ScheduleEntry.id != exclude_entry_id)
-    return q.first()
+    return _pick_conflict(q.all(), week_range=week_range, week=week)
 
 
 def _check_teacher_conflict(schedule_id, teacher_uid, weekday, period_number,
-                            exclude_entry_id=None):
+                            exclude_entry_id=None, week_range=None, week=None):
     """同教师同时段冲突：返回冲突的 ScheduleEntry 或 None（过滤软删除）。"""
     if not teacher_uid:
         return None
@@ -117,7 +149,7 @@ def _check_teacher_conflict(schedule_id, teacher_uid, weekday, period_number,
     )
     if exclude_entry_id:
         q = q.filter(ScheduleEntry.id != exclude_entry_id)
-    return q.first()
+    return _pick_conflict(q.all(), week_range=week_range, week=week)
 
 
 def get_available_slots(schedule_id, grade, class_name, teacher_uid,
@@ -272,13 +304,16 @@ def apply_swap(applicant_uid, applicant_name, original_entry_id, new_weekday,
         return False, '临时调课请选择具体日期', None
 
     schedule_id = entry.term_schedule_id
+    week_range, week = _week_ctx(schedule_id, entry, is_permanent, swap_date)
     cc = _check_class_conflict(schedule_id, entry.grade, entry.class_name,
-                               new_weekday, new_period, exclude_entry_id=entry.id)
+                               new_weekday, new_period, exclude_entry_id=entry.id,
+                               week_range=week_range, week=week)
     if cc:
         return False, (f'目标时段本班已有课程（{WEEKDAY_NAMES.get(new_weekday, "")}'
                        f'第{new_period}节 {cc.subject}），存在冲突'), None
     tc = _check_teacher_conflict(schedule_id, entry.teacher_uid,
-                                 new_weekday, new_period, exclude_entry_id=entry.id)
+                                 new_weekday, new_period, exclude_entry_id=entry.id,
+                                 week_range=week_range, week=week)
     if tc:
         return False, (f'目标时段授课教师已有课程（{tc.grade}{tc.class_name} '
                        f'{tc.subject}），存在冲突'), None
@@ -339,10 +374,13 @@ def bulk_apply_swap(applicant_uid, applicant_name, entry_ids, new_weekday,
                               'class': f'{entry.grade}{entry.class_name}',
                               'desc': '跨学期条目不允许一起调课'})
             continue
+        wr, wk = _week_ctx(schedule_id, entry, is_permanent, swap_date)
         cc = _check_class_conflict(schedule_id, entry.grade, entry.class_name,
-                                   new_weekday, new_period, exclude_entry_id=entry.id)
+                                   new_weekday, new_period, exclude_entry_id=entry.id,
+                                   week_range=wr, week=wk)
         tc = _check_teacher_conflict(schedule_id, entry.teacher_uid,
-                                     new_weekday, new_period, exclude_entry_id=entry.id)
+                                     new_weekday, new_period, exclude_entry_id=entry.id,
+                                     week_range=wr, week=wk)
         if cc:
             conflicts.append({'entry_id': eid, 'subject': entry.subject,
                               'class': f'{entry.grade}{entry.class_name}',
@@ -539,12 +577,15 @@ def review_swap(swap_id, reviewer_id, reviewer_name, action, review_note=''):
     if not entry or entry.is_deleted:
         return False, '原课表条目不存在或已删除，无法通过', None
     if sw.new_weekday and sw.new_period:
+        wr, wk = _week_ctx(sw.term_schedule_id, entry, sw.is_permanent, sw.swap_date)
         cc = _check_class_conflict(sw.term_schedule_id, entry.grade, entry.class_name,
-                                   sw.new_weekday, sw.new_period, exclude_entry_id=entry.id)
+                                   sw.new_weekday, sw.new_period, exclude_entry_id=entry.id,
+                                   week_range=wr, week=wk)
         if cc:
             return False, f'目标时段本班已有课程（{cc.subject}），课表已变化，无法通过', None
         tc = _check_teacher_conflict(sw.term_schedule_id, entry.teacher_uid,
-                                     sw.new_weekday, sw.new_period, exclude_entry_id=entry.id)
+                                     sw.new_weekday, sw.new_period, exclude_entry_id=entry.id,
+                                     week_range=wr, week=wk)
         if tc:
             return False, (f'目标时段教师已有课程（{tc.grade}{tc.class_name} '
                            f'{tc.subject}），无法通过'), None
@@ -601,12 +642,14 @@ def execute_swap(swap_id, operator_id, operator_name):
 def _execute_permanent(sw, entry, operator_id, operator_name):
     """永久调课执行（在 execute_swap 的事务内调用）。"""
     cc = _check_class_conflict(sw.term_schedule_id, entry.grade, entry.class_name,
-                               sw.new_weekday, sw.new_period, exclude_entry_id=entry.id)
+                               sw.new_weekday, sw.new_period, exclude_entry_id=entry.id,
+                               week_range=entry.week_range)
     if cc:
         db.session.rollback()
         return False, f'目标时段本班已有课程（{cc.subject}），无法执行', None
     tc = _check_teacher_conflict(sw.term_schedule_id, entry.teacher_uid,
-                                 sw.new_weekday, sw.new_period, exclude_entry_id=entry.id)
+                                 sw.new_weekday, sw.new_period, exclude_entry_id=entry.id,
+                                 week_range=entry.week_range)
     if tc:
         db.session.rollback()
         return False, (f'目标时段教师已有课程（{tc.grade}{tc.class_name} '
@@ -659,13 +702,16 @@ def _execute_temp(sw, entry, operator_id, operator_name):
         return False, '临时调课缺少具体日期，无法执行', None
     target_weekday = swap_date.isoweekday()
     target_period = sw.new_period or entry.period_number
+    target_week = _week_of_date(sw.term_schedule_id, swap_date)  # 只校验调课当周
     cc = _check_class_conflict(sw.term_schedule_id, entry.grade, entry.class_name,
-                               target_weekday, target_period, exclude_entry_id=entry.id)
+                               target_weekday, target_period, exclude_entry_id=entry.id,
+                               week=target_week)
     if cc:
         db.session.rollback()
         return False, f'{swap_date} 目标时段本班已有课程（{cc.subject}），无法执行', None
     tc = _check_teacher_conflict(sw.term_schedule_id, entry.teacher_uid,
-                                 target_weekday, target_period, exclude_entry_id=entry.id)
+                                 target_weekday, target_period, exclude_entry_id=entry.id,
+                                 week=target_week)
     if tc:
         db.session.rollback()
         return False, (f'{swap_date} 目标时段教师已有课程（{tc.grade}{tc.class_name} '
@@ -793,13 +839,11 @@ def resolve_effective_entry(schedule_id, grade, class_name, weekday, period_numb
 
 
 def _temp_target_ids(schedule_id):
-    """所有临时调课产生的目标条目 id 集合（这些条目不进常规周课表）。"""
-    rows = ScheduleSwap.query.filter(
-        ScheduleSwap.term_schedule_id == schedule_id,
-        ScheduleSwap.is_permanent.is_(False),
-        ScheduleSwap.target_entry_id.isnot(None),
-    ).with_entities(ScheduleSwap.target_entry_id).all()
-    return {r[0] for r in rows if r[0]}
+    """所有临时调课产生的目标条目 id 集合（这些条目不进常规周课表）。
+
+    实现已上收到 schedule_common，与排课模块共用同一份口径。
+    """
+    return _temp_target_ids_common(schedule_id)
 
 
 def build_live_schedule(schedule_id, target_date, period_number, grade_filter=None):

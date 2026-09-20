@@ -1,4 +1,4 @@
-# StuLink v1.16.0 2026-09-18
+# StuLink v1.17.0 2026-09-20
 # 教务 · 学期课表（timetable.db）：管理 / 视图 / 条目CRUD / 导入导出 / 查课联动 / JSON API
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 """新课表系统路由。
@@ -14,6 +14,7 @@ import io
 from flask import (render_template, request, redirect, url_for, flash,
                    send_file, abort, jsonify)
 from flask_login import login_required, current_user
+from sqlalchemy import func
 
 from app.extensions import db
 from app.models.timetable import (TermSchedule, ScheduleEntry, WEEKDAY_NAMES,
@@ -22,6 +23,7 @@ from app.modules.academic import bp
 from app.modules.academic.services import schedule_service as svc
 from app.modules.academic.services import term_service as tsvc
 from app.utils.decorators import perm_required
+from app.utils.export_helpers import xl_row, xl_safe
 from app.utils.helpers import log_operation
 
 _XLSX_MIME = ('application/vnd.openxmlformats-officedocument'
@@ -98,13 +100,21 @@ def _readonly_guard(ts, back_endpoint, **back_kwargs):
 def schedule_manage():
     """学期课表管理首页：学期列表 + 创建/激活/归档/删除入口"""
     schedules = svc.list_schedules()
-    # 每个学期的条目数（含软删除的不计）
+    ids = [ts.id for ts in schedules]
+    # 条目数一次聚合（原为逐学期 count，N 次查询）
     counts = {}
-    for ts in schedules:
-        counts[ts.id] = ScheduleEntry.query.filter_by(
-            term_schedule_id=ts.id, is_deleted=False).count()
+    if ids:
+        counts = dict(
+            db.session.query(ScheduleEntry.term_schedule_id,
+                             func.count(ScheduleEntry.id))
+            .filter(ScheduleEntry.is_deleted.is_(False),
+                    ScheduleEntry.term_schedule_id.in_(ids))
+            .group_by(ScheduleEntry.term_schedule_id).all())
+    # 各学期的年级/班级（用于「年级课表」入口，不再硬编码高一）
+    grade_map = svc.grade_class_map(ids)
     return render_template('academic/schedule_manage.html',
-                           schedules=schedules, counts=counts)
+                           schedules=schedules, counts=counts,
+                           grade_map=grade_map)
 
 
 @bp.route('/schedule/create', methods=['POST'])
@@ -152,12 +162,19 @@ def schedule_activate(sid):
 @login_required
 @perm_required('academic.timetable')
 def schedule_archive(sid):
-    """归档学期"""
+    """归档学期（与 archive-term 同一实现：写归档快照，避免两套语义）"""
     ts = _get_schedule_or_404(sid)
-    ts.status = 'archived'
-    db.session.commit()
+    try:
+        ok, msg = tsvc.archive_term(sid, operator=current_user)
+    except Exception:
+        db.session.rollback()
+        flash('归档失败，请重试', 'danger')
+        return redirect(url_for('academic.schedule_manage'))
+    if not ok:
+        flash(msg, 'danger')
+        return redirect(url_for('academic.schedule_manage'))
     log_operation(current_user, '归档', '学期课表', sid, ts.name, module='academic')
-    flash(f'学期「{ts.name}」已归档', 'success')
+    flash(msg + '（已生成归档快照，可追溯）', 'success')
     return redirect(url_for('academic.schedule_manage'))
 
 
@@ -284,14 +301,23 @@ def schedule_periods(sid):
                 'sort_order': i + 1,
             })
         try:
-            svc.save_periods(sid, periods_data)
+            result = svc.save_periods(sid, periods_data, remove_missing=True)
         except Exception:
             db.session.rollback()
             flash('保存失败，请检查时间格式', 'danger')
             return redirect(url_for('academic.schedule_periods', sid=sid))
         log_operation(current_user, '更新', '节次配置', sid,
-                      f'{ts.name}：{len(periods_data)} 节', module='academic')
-        flash('节次配置已保存', 'success')
+                      f'{ts.name}：{len(periods_data)} 节'
+                      f"{'，移除 ' + '、'.join(str(n) for n in result['removed']) if result['removed'] else ''}"
+                      f"{'，保留在用 ' + '、'.join(str(n) for n in result['kept_in_use']) if result['kept_in_use'] else ''}",
+                      module='academic')
+        msg = '节次配置已保存'
+        if result['removed']:
+            msg += f"；已移除第 {'、'.join(str(n) for n in result['removed'])} 节"
+        flash(msg, 'success')
+        if result['kept_in_use']:
+            nums = '、'.join(str(n) for n in result['kept_in_use'])
+            flash(f'第 {nums} 节仍有课程安排，未移除（请先调整这些课，再删除节次）', 'warning')
         return redirect(url_for('academic.schedule_periods', sid=sid))
 
     periods = svc.get_periods(sid)
@@ -694,7 +720,10 @@ def api_schedule_classes():
 @login_required
 @perm_required('academic.view')
 def api_schedule_check_conflict():
-    """冲突检测 JSON（query: sid/teacher_uid/grade/class_name/weekday/period_number）"""
+    """冲突检测 JSON（query: sid/teacher_uid/grade/class_name/weekday/period_number/week_range）
+
+    week_range 参与判定：周次无交集的条目不算冲突（单周课与双周课可同格）。
+    """
     sid = request.args.get('sid', type=int)
     if not sid:
         return _json_err('缺少 sid 参数')
@@ -704,18 +733,20 @@ def api_schedule_check_conflict():
     weekday = request.args.get('weekday', type=int)
     period_number = request.args.get('period_number', type=int)
     exclude = request.args.get('exclude_entry_id', type=int)
+    week_range = (request.args.get('week_range') or '').strip() or None
     if not weekday or not period_number:
         return _json_err('缺少 weekday / period_number 参数')
 
     data = {'class_conflict': None, 'teacher_conflict': None}
     if grade and class_name:
         c = svc.check_class_conflict(sid, grade, class_name, weekday,
-                                     period_number, exclude_entry_id=exclude)
+                                     period_number, exclude_entry_id=exclude,
+                                     week_range=week_range)
         if c:
             data['class_conflict'] = c.to_dict()
     if teacher_uid:
         t = svc.check_teacher_conflict(sid, teacher_uid, weekday, period_number,
-                                       exclude_entry_id=exclude)
+                                       exclude_entry_id=exclude, week_range=week_range)
         if t:
             data['teacher_conflict'] = t.to_dict()
     data['has_conflict'] = bool(data['class_conflict'] or data['teacher_conflict'])
@@ -1062,7 +1093,7 @@ def _build_compare_workbook(result):
             c.font = hf; c.fill = fill; c.alignment = center
         for ri, row in enumerate(rows, 2):
             for ci, v in enumerate(row, 1):
-                ws.cell(row=ri, column=ci, value=v)
+                ws.cell(row=ri, column=ci, value=xl_safe(v))
         return ws
 
     ta = (result.get('term_a') or {}).get('name', 'A')
@@ -1102,10 +1133,10 @@ def _build_usage_workbook(ts, report):
             c.font = hf; c.fill = fill; c.alignment = center
         for ri, row in enumerate(rows, 2):
             for ci, v in enumerate(row, 1):
-                ws.cell(row=ri, column=ci, value=v)
+                ws.cell(row=ri, column=ci, value=xl_safe(v))
 
     ws0 = wb.create_sheet('概览')
-    ws0.append(['学期', ts.name])
+    ws0.append(xl_row(['学期', ts.name]))
     ws0.append(['日期区间', ts.period_text()])
     ws0.append(['条目总数', report['total_entries']])
     ws0.append(['班级数', report['total_classes']])

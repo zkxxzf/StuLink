@@ -1,17 +1,20 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
-"""迁移脚本（Task#27）：为 term_schedules 补齐学期周期维度字段 + 历史学期演示数据
+"""迁移脚本（Task#27）：为 term_schedules 补齐学期周期维度字段
 
 功能：
 1. 幂等补列：ALTER TABLE term_schedules ADD COLUMN start_date/end_date/total_weeks/
    week_start_offset/is_current（先 PRAGMA table_info 判断列是否已存在）
 2. 为已有学期回填合理起止日期（按 school_year/term 推断，start_date 对齐到最近周一），
    total_weeks 默认 20；把当前日期落在区间内的学期设 is_current=True
-3. 额外造 2 个历史学期作为演示数据（幂等，已存在则跳过），各带 13 条 PeriodDef，
-   并生成一批与当前学期明显不同的 ScheduleEntry
-4. 打印清晰的迁移统计
+3. 打印清晰的迁移统计
 
-不删除/篡改已有的 12 条课表条目与 2 条调课记录（只新增历史学期与其条目）。
+说明（PR#5 安全审查 M5）：
+- 本脚本早前还会额外造 2 个历史学期 + 26 条演示课表条目，在生产库上执行会凭空生成
+  虚构数据，已被移除。需要演示数据时请用专门的 mock 脚本（见 scripts/import_mock_*.py）。
+- 执行前自动备份 timetable.db（同目录 .bak-<时间戳>），与项目其他迁移脚本一致。
+
+不删除/篡改已有的课表条目与调课记录（只补列、回填日期）。
 
 用法：python scripts/migrate_term_schedule_dates.py
 """
@@ -22,6 +25,8 @@ from datetime import date, datetime, timedelta
 
 BASE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, BASE)
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from _db_backup import backup_db  # noqa: E402  改库前先备份（项目约定）
 
 DATA_DIR = os.path.join(BASE, 'data')
 TIMETABLE_DB = os.path.join(DATA_DIR, 'timetable.db')
@@ -34,57 +39,6 @@ _NEW_COLUMNS = [
     ('week_start_offset', 'INTEGER DEFAULT 0'),
     ('is_current', 'BOOLEAN DEFAULT 0'),
 ]
-
-# 历史学期演示数据：name / school_year / term / start / end / total_weeks
-_HISTORY_TERMS = [
-    {
-        'name': '2025-2026学年第一学期', 'school_year': '2025-2026', 'term': '第一学期',
-        'start_date': date(2025, 9, 1), 'end_date': date(2026, 1, 16),
-        'total_weeks': 20, 'status': 'archived',
-        'description': '历史演示学期（Task#27 迁移脚本创建）',
-    },
-    {
-        'name': '2025-2026学年第二学期', 'school_year': '2025-2026', 'term': '第二学期',
-        'start_date': date(2026, 2, 23), 'end_date': date(2026, 7, 10),
-        'total_weeks': 20, 'status': 'archived',
-        'description': '历史演示学期（Task#27 迁移脚本创建）',
-    },
-]
-
-# 各历史学期的课表条目（grade/class_name/weekday/period_number/subject/teacher_name/room）
-# 与当前学期明显不同：同学段但学科/教师/时段重排，让用户直观看到"每学期课表不一样"
-_HISTORY_ENTRIES = {
-    '2025-2026学年第一学期': [
-        ('01', '01班', 1, 1, '语文', '王志明', 'A101'),
-        ('01', '01班', 1, 2, '英语', '李秀英', 'A101'),
-        ('01', '01班', 2, 1, '数学', '张建国', 'A101'),
-        ('01', '01班', 2, 3, '物理', '陈海燕', 'A101'),
-        ('01', '01班', 3, 2, '化学', '刘德芳', 'A101'),
-        ('01', '01班', 4, 1, '历史', '赵春华', 'A101'),
-        ('01', '01班', 5, 3, '地理', '孙立军', 'A101'),
-        ('02', '02班', 1, 1, '数学', '张建国', 'A102'),
-        ('02', '02班', 2, 2, '语文', '王志明', 'A102'),
-        ('02', '02班', 3, 3, '英语', '李秀英', 'A102'),
-        ('02', '02班', 4, 4, '生物', '周美玲', 'A102'),
-        ('02', '02班', 5, 1, '政治', '吴国强', 'A102'),
-        ('03', '03班', 1, 3, '物理', '陈海燕', 'A103'),
-        ('03', '03班', 2, 1, '化学', '刘德芳', 'A103'),
-        ('03', '03班', 3, 1, '语文', '王志明', 'A103'),
-        ('03', '03班', 5, 2, '数学', '张建国', 'A103'),
-    ],
-    '2025-2026学年第二学期': [
-        ('01', '01班', 1, 2, '英语', '李秀英', 'A101'),
-        ('01', '01班', 2, 2, '语文', '王志明', 'A101'),
-        ('01', '01班', 3, 1, '数学', '张建国', 'A101'),
-        ('01', '01班', 4, 3, '化学', '刘德芳', 'A101'),
-        ('02', '02班', 1, 4, '物理', '陈海燕', 'A102'),
-        ('02', '02班', 2, 1, '数学', '张建国', 'A102'),
-        ('02', '02班', 3, 2, '英语', '李秀英', 'A102'),
-        ('02', '02班', 5, 4, '政治', '吴国强', 'A102'),
-        ('03', '03班', 1, 1, '语文', '王志明', 'A103'),
-        ('03', '03班', 4, 2, '生物', '周美玲', 'A103'),
-    ],
-}
 
 
 def _column_names(conn, table_name):
@@ -103,6 +57,8 @@ def add_columns():
     if not os.path.exists(TIMETABLE_DB):
         print(f'[FAIL] 未找到 {TIMETABLE_DB}，请先运行 migrate_timetable_db.py')
         return False
+    # 补列前先备份：后续回填会写库
+    backup_db(TIMETABLE_DB)
     conn = sqlite3.connect(TIMETABLE_DB)
     added, skipped = [], []
     try:
@@ -144,19 +100,20 @@ def _infer_dates(school_year, term):
 
 
 def seed():
-    """回填已有学期日期 + 创建历史学期演示数据（幂等）"""
+    """回填已有学期的日期字段 + 设置当前学期（幂等）。
+
+    注意：这里只补全「已有学期」缺失的元数据，绝不新建学期或课表条目。
+    """
     from flask import Flask
     from config import Config
     from app.extensions import db
-    from app.models.timetable import (TermSchedule, PeriodDef, ScheduleEntry,
-                                      get_default_periods)
+    from app.models.timetable import TermSchedule
 
     app = Flask(__name__)
     app.config.from_object(Config)
     db.init_app(app)
 
-    stats = {'dates_backfilled': 0, 'terms_created': 0,
-             'periods_created': 0, 'entries_created': 0, 'is_current_set': None}
+    stats = {'dates_backfilled': 0, 'is_current_set': None}
     today = date.today()
 
     with app.app_context():
@@ -174,54 +131,7 @@ def seed():
                 print(f'[BACKFILL] {ts.name}: {sd} ~ {ed}, total_weeks={ts.total_weeks}')
         db.session.commit()
 
-        # 2) 创建历史学期演示数据（幂等，按 name 判断）
-        for spec in _HISTORY_TERMS:
-            term = TermSchedule.query.filter_by(name=spec['name']).first()
-            if term is None:
-                term = TermSchedule(
-                    name=spec['name'], school_year=spec['school_year'],
-                    term=spec['term'], status=spec['status'],
-                    description=spec['description'],
-                    start_date=spec['start_date'], end_date=spec['end_date'],
-                    total_weeks=spec['total_weeks'], week_start_offset=0,
-                    is_current=False,
-                    created_at=datetime.now(), updated_at=datetime.now(),
-                )
-                db.session.add(term)
-                db.session.flush()
-                stats['terms_created'] += 1
-                print(f'[CREATE] 历史学期: {term.name} (id={term.id}, '
-                      f'{term.start_date} ~ {term.end_date}, {term.total_weeks}周)')
-                # 13 条节次
-                for p in get_default_periods():
-                    db.session.add(PeriodDef(term_schedule_id=term.id, **p))
-                    stats['periods_created'] += 1
-                db.session.flush()
-                # 课表条目
-                for (grade, cn, wd, pn, subj, tname, room) in _HISTORY_ENTRIES.get(spec['name'], []):
-                    db.session.add(ScheduleEntry(
-                        term_schedule_id=term.id, grade=grade, class_name=cn,
-                        weekday=wd, period_number=pn, week_range='1-20',
-                        subject=subj, teacher_name=tname, room=room,
-                        entry_type='normal', is_deleted=False,
-                        note='历史演示数据（迁移脚本）',
-                    ))
-                    stats['entries_created'] += 1
-                db.session.commit()
-            else:
-                # 已存在：补齐可能缺失的日期字段（不覆盖已有）
-                changed = False
-                if term.start_date is None:
-                    term.start_date = spec['start_date']; changed = True
-                if term.end_date is None:
-                    term.end_date = spec['end_date']; changed = True
-                if not term.total_weeks:
-                    term.total_weeks = spec['total_weeks']; changed = True
-                if changed:
-                    db.session.commit()
-                print(f'[SKIP] 历史学期已存在: {term.name} (id={term.id})')
-
-        # 3) 设置 is_current：当前日期落在区间内的学期（互斥，只设一个）
+        # 2) 设置 is_current：当前日期落在区间内的学期（互斥，只设一个）
         TermSchedule.query.update({TermSchedule.is_current: False},
                                   synchronize_session=False)
         db.session.commit()
@@ -266,7 +176,7 @@ def verify():
 
 
 def main():
-    print('=== 迁移脚本（Task#27）：学期周期维度 + 历史课表演示数据 ===')
+    print('=== 迁移脚本（Task#27）：学期周期维度字段 ===')
     print(f'课表库: {TIMETABLE_DB}')
     print()
     if not add_columns():
@@ -277,8 +187,7 @@ def main():
     ok = verify()
     print()
     print('=== 迁移完成 ===' if ok else '=== 迁移结束（验证未通过，请检查） ===')
-    print(f'统计: 补列后回填日期={stats["dates_backfilled"]}, 新建历史学期={stats["terms_created"]}, '
-          f'新增节次={stats["periods_created"]}, 新增条目={stats["entries_created"]}, '
+    print(f'统计: 回填日期={stats["dates_backfilled"]}, '
           f'当前学期={stats["is_current_set"]}')
     if not ok:
         sys.exit(1)

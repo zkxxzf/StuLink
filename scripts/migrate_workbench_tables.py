@@ -14,6 +14,9 @@ import os
 import sys
 
 BASE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from _db_backup import backup_db  # noqa: E402  改库前先备份（项目约定）
+
 academic_db = os.path.join(BASE, 'data', 'academic.db')
 system_db = os.path.join(BASE, 'data', 'system.db')
 
@@ -35,6 +38,10 @@ def main():
     print('=== 迁移脚本：工作台模块表 ===')
     print(f'academic 库: {academic_db}')
     print(f'system   库: {system_db}')
+    print()
+
+    # 改库前先备份：出错可直接用同名 .bak-<时间戳> 还原
+    backup_db([academic_db, system_db])
     print()
 
     # ── academic.db：work_records + attendance_records ──────────────────────

@@ -1,16 +1,18 @@
-# StuLink v1.9.2 2026-09-18
+# StuLink v1.17.0 2026-09-20
 # 教务 · 表单收集：管理端（创建/编辑/发布/关闭/提交列表/审核/导出）
 #                 填写端（可填列表/填写/提交/我的提交）
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 import json
+import os
 from datetime import datetime
 
-from flask import render_template, request, redirect, url_for, flash, abort, send_file
+from flask import (render_template, request, redirect, url_for, flash, abort,
+                   send_file, send_from_directory, current_app)
 from flask_login import login_required, current_user
 
 from app.extensions import db
 from app.models.academic import (
-    FormTemplate, FormQuestion, FormSubmission, FormCategory,
+    FormTemplate, FormQuestion, FormSubmission, FormCategory, FormAnswer,
     FORM_STATUS, FORM_TARGET_TYPES, QUESTION_TYPES, SUBMISSION_STATUS,
 )
 from app.modules.academic import bp
@@ -456,6 +458,52 @@ def form_submit(form_id):
     except ValueError as e:
         flash(str(e), 'danger')
         return redirect(url_for('academic.form_fill', form_id=form_id))
+
+
+# ── 附件下载（带鉴权） ────────────────────────────────────────
+
+@bp.route('/forms/<int:form_id>/file/<path:rel_path>')
+@login_required
+def form_file(form_id, rel_path):
+    """表单附件下载（替代 /static/uploads/... 无鉴权直链）。
+
+    原来 FormAnswer.file_path 直接拼 /static/ 对外暴露：任何未登录用户拿到链接
+    都能下载学生上传的材料。改为受控路由后，仅以下两类人可下载：
+      1) 有 academic.edit（教务管理端）权限者；
+      2) 该条提交的提交者本人（FormSubmission.submitter_id）。
+    rel_path 格式固定为 uploads/forms/<form_id>/<submission_id>/<file>，
+    取出 submission_id 后再用 basename 定位，天然阻断了 ../ 目录穿越。
+    """
+    tpl = db.session.get(FormTemplate, form_id)
+    if not tpl:
+        abort(404)
+
+    parts = (rel_path or '').split('/')
+    if not (len(parts) >= 5 and parts[0] == 'uploads' and parts[1] == 'forms'
+            and parts[2] == str(form_id)):
+        abort(404)
+    sub_id = parts[3]
+    if not sub_id.isdigit():
+        abort(404)
+    sub = db.session.get(FormSubmission, int(sub_id))
+    if sub is None or sub.template_id != form_id:
+        abort(404)
+
+    if not (current_user.has_perm('academic.edit') or sub.submitter_id == current_user.id):
+        abort(403)
+
+    root = os.path.abspath(os.path.join(current_app.static_folder, 'uploads',
+                                        'forms', str(form_id), sub_id))
+    fname = os.path.basename(parts[-1])
+    target = os.path.abspath(os.path.join(root, fname))
+    if os.path.commonpath([root, target]) != root or not os.path.isfile(target):
+        abort(404)
+
+    ans = (FormAnswer.query.filter_by(submission_id=sub.id, file_path=rel_path)
+           .first())
+    download_name = (ans.file_name if ans and ans.file_name else fname)
+    return send_from_directory(root, fname, as_attachment=True,
+                               download_name=download_name)
 
 
 # ── 填写端：我的提交记录 ──────────────────────────────────────

@@ -21,6 +21,8 @@ from datetime import datetime
 
 BASE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, BASE)
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from _db_backup import backup_db  # noqa: E402  改库前先备份（项目约定）
 
 DATA_DIR = os.path.join(BASE, 'data')
 TIMETABLE_DB = os.path.join(DATA_DIR, 'timetable.db')
@@ -278,6 +280,10 @@ def main():
     print()
 
     os.makedirs(DATA_DIR, exist_ok=True)
+
+    # 0) 改库前先备份：建库/迁移出错可直接还原
+    backup_db([TIMETABLE_DB, ACADEMIC_DB])
+    print()
 
     # 1) 建表
     create_tables_via_sqlalchemy()
