@@ -1,8 +1,4 @@
-<<<<<<< HEAD:app/modules/workbench/routes/__init__.py
 # StuLink v1.17.0 2026-09-20
-=======
-# StuLink v1.9.3 2026-09-19
->>>>>>> 4934b4a0230dda5c541daf86b4b3dcc06612141c:app/modules/workbench/routes.py
 # 教师工作台：我的信息 / 今日课程 / 我的课表 / 我的业绩 / 手机号修改
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 import re

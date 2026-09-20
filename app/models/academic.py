@@ -1,8 +1,4 @@
-<<<<<<< HEAD
 # StuLink v1.17.0 2026-09-20
-=======
-# StuLink v1.9.3 2026-09-19
->>>>>>> 4934b4a0230dda5c541daf86b4b3dcc06612141c
 # 教务模块模型：教师名单 / 课表 / 查课记录 / 教师业绩（独立库 academic.db）
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 from datetime import datetime

@@ -1,8 +1,4 @@
-<<<<<<< HEAD
 # StuLink v1.13.0 2026-09-14
-=======
-# StuLink v1.9.3 2026-09-19
->>>>>>> 4934b4a0230dda5c541daf86b4b3dcc06612141c
 # 成绩汇报区路由（板块三/四）：单班各科、单科各班
 # 权限/缓存口径与 report.py 完全一致；缓存随 invalidate_exam_cache 全量失效
 # Copyright (c) 2026 zkxxzf. Apache License 2.0

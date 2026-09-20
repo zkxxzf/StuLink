@@ -1,8 +1,4 @@
-<<<<<<< HEAD
 # StuLink v1.13.0 2026-09-14
-=======
-# StuLink v1.9.3 2026-09-19
->>>>>>> 4934b4a0230dda5c541daf86b4b3dcc06612141c
 # 成绩汇报区指标引擎（板块三/四）：单班各科分析、单科各班分析（含任课教师）
 # 口径与 report_service 完全一致，复用其层线/去差/百分比公共函数
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
