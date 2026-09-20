@@ -130,9 +130,18 @@
                 <div class="modal-header"><h6 class="modal-title">删除考试</h6>
                     <button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
                 <div class="modal-body">
-                    <p>将删除「{{ exam.name }}」及其全部成绩，不可恢复。</p>
-                    <input type="text" name="confirm_name" class="form-control"
-                           placeholder="请输入考试名称确认：{{ exam.name }}" required>
+                    <p>将删除「{{ exam.name }}」及其全部成绩、划线分层与 AI 报告，<span class="text-danger">不可恢复</span>。</p>
+                    <p class="text-muted small mb-2">请输入当前登录账号和密码进行二次确认：</p>
+                    <div class="mb-2">
+                        <label class="form-label small mb-1">账号</label>
+                        <input type="text" name="username" class="form-control form-control-sm"
+                               autocomplete="off" required>
+                    </div>
+                    <div class="mb-2">
+                        <label class="form-label small mb-1">密码</label>
+                        <input type="password" name="password" class="form-control form-control-sm"
+                               autocomplete="new-password" required>
+                    </div>
                 </div>
                 <div class="modal-footer">
                     <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">取消</button>
