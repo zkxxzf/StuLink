@@ -1,0 +1,248 @@
+{% extends "base.html" %}
+{% block title %}调课管理{% endblock %}
+{% block extra_css %}
+<style>
+    .swap-toolbar .nav-pills .nav-link { padding: 5px 14px; font-size: 13px; border-radius: 20px; color: #475569; }
+    .swap-toolbar .nav-pills .nav-link.active { background: #1e293b; color: #fff; }
+    .swap-toolbar .nav-pills .nav-link .badge { font-size: 11px; }
+    .swap-row { cursor: pointer; }
+    .swap-row:hover { background: #f8fafc !important; }
+    .pill { display: inline-block; padding: 2px 10px; border-radius: 12px; font-size: 12px; font-weight: 600; }
+    .pill-pending { background: #fef3c7; color: #92400e; }
+    .pill-approved { background: #dbeafe; color: #1e40af; }
+    .pill-rejected { background: #fee2e2; color: #991b1b; }
+    .pill-executed { background: #d1fae5; color: #065f46; }
+    .tag-perm { background: #ede9fe; color: #5b21b6; }
+    .tag-temp { background: #ffedd5; color: #9a3412; }
+    .orig-course .subj { font-weight: 600; color: #1e293b; }
+    .arrow-slot { color: #64748b; font-size: 12px; }
+    .execute-hint { font-size: 11px; color: #dc2626; }
+</style>
+{% endblock %}
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
+    <h4 class="fw-bold mb-0">
+        <i class="bi bi-arrow-left-right"></i> 调课管理
+        {% if pending %}<span class="badge bg-warning text-dark ms-1">待审核 {{ pending }}</span>{% endif %}
+        {% if schedule %}<span class="text-muted small fw-normal ms-2">{{ schedule.name }}</span>{% endif %}
+    </h4>
+    <div class="d-flex gap-2 flex-wrap">
+        <a class="btn btn-sm btn-primary" href="{{ url_for('academic.swap_apply') }}">
+            <i class="bi bi-person-plus"></i> 个人调课
+        </a>
+        <a class="btn btn-sm btn-outline-primary" href="{{ url_for('academic.swap_bulk') }}">
+            <i class="bi bi-collection"></i> 统一调课
+        </a>
+        <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('academic.swap_stats') }}">
+            <i class="bi bi-bar-chart"></i> 统计
+        </a>
+    </div>
+</div>
+
+{% if not schedule %}
+<div class="card"><div class="card-body text-center py-5 text-muted">
+    <i class="bi bi-calendar-x" style="font-size:40px"></i>
+    <p class="mt-3 mb-0">尚未建立学期课表，请先在课表管理中创建并启用学期。</p>
+</div></div>
+{% else %}
+
+<div class="card mb-3">
+    <div class="card-body py-2 swap-toolbar">
+        <div class="d-flex justify-content-between align-items-center flex-wrap gap-2">
+            <ul class="nav nav-pills gap-1">
+                {% set tabs = [('', '全部'), ('pending', '待审核'), ('approved', '已通过'), ('rejected', '已驳回'), ('executed', '已执行')] %}
+                {% for key, label in tabs %}
+                <li class="nav-item">
+                    <a class="nav-link {% if status == key %}active{% endif %}"
+                       href="{{ url_for('academic.swap_page', status=key or None, swap_type=swap_type or None) }}">
+                        {{ label }}{% if key == 'pending' and pending %} <span class="badge bg-warning text-dark">{{ pending }}</span>{% endif %}
+                    </a>
+                </li>
+                {% endfor %}
+            </ul>
+            <form class="d-flex gap-2 align-items-center" method="get">
+                {% if status %}<input type="hidden" name="status" value="{{ status }}">{% endif %}
+                <select name="swap_type" class="form-select form-select-sm" style="width:130px" onchange="this.form.submit()">
+                    <option value="">全部类型</option>
+                    {% for k, label in type_map.items() %}
+                    <option value="{{ k }}" {% if swap_type == k %}selected{% endif %}>{{ label }}</option>
+                    {% endfor %}
+                </select>
+                <button class="btn btn-sm btn-outline-secondary" type="submit"><i class="bi bi-funnel"></i></button>
+            </form>
+        </div>
+    </div>
+</div>
+
+<div class="card">
+    <div class="table-responsive">
+        <table class="table table-hover table-sm align-middle mb-0">
+            <thead class="table-light">
+                <tr>
+                    <th>申请人</th><th>类型</th><th>原课程</th><th>目标时段</th>
+                    <th>方式</th><th>理由</th><th>状态</th><th>申请时间</th>
+                    <th class="text-end">操作</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for s in items %}
+                <tr class="swap-row" data-id="{{ s.id }}">
+                    <td class="fw-bold">{{ s.applicant_name or '-' }}
+                        <div class="text-muted small fw-normal">{{ s.applicant_uid }}</div>
+                    </td>
+                    <td><span class="badge bg-{% if s.swap_type == 'personal' %}info text-dark{% else %}secondary{% endif %}">{{ s.swap_type_text }}</span></td>
+                    <td class="orig-course small">
+                        <span class="subj">{{ s.original_subject or '（原条目已删）' }}</span>
+                        <span class="text-muted">{{ s.original_class or '' }}</span>
+                        <div class="arrow-slot">{{ s.original_slot or '' }}{% if s.original_teacher %} · {{ s.original_teacher }}{% endif %}</div>
+                    </td>
+                    <td class="small">
+                        <i class="bi bi-arrow-right text-muted"></i>
+                        <span class="fw-semibold">{{ s.target_slot or '-' }}</span>
+                        {% if s.new_room %}<div class="text-muted">{{ s.new_room }}</div>{% endif %}
+                        {% if s.swap_date %}<div class="text-muted">{{ s.swap_date }}</div>{% endif %}
+                    </td>
+                    <td>
+                        {% if s.is_permanent %}<span class="pill tag-perm">永久</span>
+                        {% else %}<span class="pill tag-temp">临时</span>{% endif %}
+                    </td>
+                    <td class="small text-muted" style="max-width:150px">{{ s.reason or '' }}</td>
+                    <td><span class="pill pill-{{ s.status }}">{{ s.status_text }}</span></td>
+                    <td class="small text-muted text-nowrap">{{ s.created_at or '' }}</td>
+                    <td class="text-end text-nowrap" onclick="event.stopPropagation()">
+                        <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('academic.swap_detail', swap_id=s.id) }}" title="详情"><i class="bi bi-eye"></i></a>
+                        {% if s.status == 'pending' %}
+                            {% if is_reviewer %}
+                            <button class="btn btn-sm btn-outline-success btn-approve" data-id="{{ s.id }}" title="通过"><i class="bi bi-check-lg"></i></button>
+                            <button class="btn btn-sm btn-outline-warning btn-reject" data-id="{{ s.id }}" title="驳回"><i class="bi bi-x-lg"></i></button>
+                            {% endif %}
+                            {% if s.applicant_uid == current_uid %}
+                            <button class="btn btn-sm btn-outline-danger btn-cancel" data-id="{{ s.id }}" title="撤销"><i class="bi bi-arrow-counterclockwise"></i></button>
+                            {% endif %}
+                        {% elif s.status == 'approved' and is_reviewer %}
+                            <button class="btn btn-sm btn-danger btn-execute" data-id="{{ s.id }}" title="执行调课"><i class="bi bi-lightning-charge"></i> 执行</button>
+                        {% endif %}
+                    </td>
+                </tr>
+                {% else %}
+                <tr><td colspan="9" class="text-center text-muted py-4">暂无调课记录</td></tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% if pagination.pages > 1 %}
+    <div class="card-footer bg-white d-flex justify-content-between align-items-center py-2">
+        <span class="text-muted small">共 {{ pagination.total }} 条 · 第 {{ pagination.page }}/{{ pagination.pages }} 页</span>
+        <nav>
+            <ul class="pagination pagination-sm mb-0">
+                <li class="page-item {% if not pagination.has_prev %}disabled{% endif %}">
+                    <a class="page-link" href="{{ url_for('academic.swap_page', status=status or None, swap_type=swap_type or None, page=pagination.prev_num) }}">上一页</a>
+                </li>
+                {% for p in pagination.iter_pages() %}
+                    {% if p %}
+                    <li class="page-item {% if p == pagination.page %}active{% endif %}">
+                        <a class="page-link" href="{{ url_for('academic.swap_page', status=status or None, swap_type=swap_type or None, page=p) }}">{{ p }}</a>
+                    </li>
+                    {% else %}<li class="page-item disabled"><span class="page-link">…</span></li>{% endif %}
+                {% endfor %}
+                <li class="page-item {% if not pagination.has_next %}disabled{% endif %}">
+                    <a class="page-link" href="{{ url_for('academic.swap_page', status=status or None, swap_type=swap_type or None, page=pagination.next_num) }}">下一页</a>
+                </li>
+            </ul>
+        </nav>
+    </div>
+    {% endif %}
+</div>
+{% endif %}
+
+{# 驳回理由模态框 #}
+<div class="modal fade" id="rejectModal" tabindex="-1">
+    <div class="modal-dialog modal-sm">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h6 class="modal-title text-warning"><i class="bi bi-x-circle"></i> 驳回调课</h6>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <label class="form-label small">驳回理由 <span class="text-danger">*</span></label>
+                <textarea id="rejectNote" class="form-control form-control-sm" rows="3" maxlength="200" placeholder="必填"></textarea>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">取消</button>
+                <button type="button" class="btn btn-warning btn-sm" id="rejectConfirm">确认驳回</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script id="swapListData" type="application/json">
+{
+    "approveUrl": {{ url_for('academic.swap_approve', swap_id=0)|tojson }},
+    "rejectUrl": {{ url_for('academic.swap_reject', swap_id=0)|tojson }},
+    "executeUrl": {{ url_for('academic.swap_execute', swap_id=0)|tojson }},
+    "cancelUrl": {{ url_for('academic.swap_cancel', swap_id=0)|tojson }},
+    "detailUrl": {{ url_for('academic.swap_detail', swap_id=0)|tojson }}
+}
+</script>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+(function () {
+    'use strict';
+    var cfg = JSON.parse($('#swapListData').text());
+    function urlFor(tpl, id) { return tpl.replace(/\/0(?=\/|$)/, '/' + id); }
+
+    // 行点击进入详情（操作按钮已 stopPropagation）
+    $(document).on('click', '.swap-row', function () {
+        window.location.href = urlFor(cfg.detailUrl, $(this).data('id'));
+    });
+
+    function post(url, data, okMsg) {
+        $.post(url, data || {}).done(function (res) {
+            if (res && res.success) {
+                alert(res.message || okMsg || '操作成功');
+                window.location.reload();
+            } else {
+                alert((res && res.message) || '操作失败');
+            }
+        }).fail(function (xhr) {
+            var m = '操作失败';
+            try { m = (xhr.responseJSON && xhr.responseJSON.message) || m; } catch (e) {}
+            alert(m);
+        });
+    }
+
+    $(document).on('click', '.btn-approve', function () {
+        var id = $(this).data('id');
+        if (!confirm('确认通过该调课申请？通过后可执行以真正修改课表。')) return;
+        post(urlFor(cfg.approveUrl, id), { review_note: '' }, '已通过');
+    });
+
+    var rejectId = null;
+    $(document).on('click', '.btn-reject', function () {
+        rejectId = $(this).data('id');
+        $('#rejectNote').val('');
+        new bootstrap.Modal('#rejectModal').show();
+    });
+    $('#rejectConfirm').on('click', function () {
+        var note = ($('#rejectNote').val() || '').trim();
+        if (!note) { alert('请填写驳回理由'); return; }
+        bootstrap.Modal.getInstance(document.getElementById('rejectModal')).hide();
+        post(urlFor(cfg.rejectUrl, rejectId), { review_note: note }, '已驳回');
+    });
+
+    $(document).on('click', '.btn-execute', function () {
+        var id = $(this).data('id');
+        if (!confirm('执行后将真正修改课表（永久调课会软删除原条目并生成新条目，临时调课会新增当天安排），且不可重复执行。确认执行？')) return;
+        post(urlFor(cfg.executeUrl, id), {}, '已执行');
+    });
+
+    $(document).on('click', '.btn-cancel', function () {
+        var id = $(this).data('id');
+        if (!confirm('确认撤销这条调课申请？')) return;
+        post(urlFor(cfg.cancelUrl, id), {}, '已撤销');
+    });
+})();
+</script>
+{% endblock %}

@@ -44,7 +44,13 @@ class Room(db.Model):
 
     @property
     def occupancy(self):
-        """当前入住人数"""
+        """当前入住人数
+
+        ⚠ 性能警示（v1.16.0）：本属性每次访问都会触发一次 COUNT 查询。
+        在循环中逐个房间调用（如 for room in rooms: room.occupancy）会产生
+        N+1 查询。批量场景请改用一次 GROUP BY 聚合（参见 rooms.list_rooms 中
+        的 occupancy_map 写法），不要在循环/模板列表里直接依赖本属性。
+        """
         return self.beds.filter(
             db.and_(BedAssignment.student_id.isnot(None))
         ).count()

@@ -45,12 +45,22 @@ def register_blueprints(app):
     # 教务模块与教师工作台（v1.14.0）
     from app.modules.academic import bp as academic_bp
     from app.modules.workbench.routes import bp as workbench_bp
+    from app.modules.workbench.routes.overview import bp as overview_bp
+    from app.modules.workbench.routes.attendance import bp as attendance_bp
+    from app.modules.workbench.routes.records import bp as records_bp
     app.register_blueprint(academic_bp)
     app.register_blueprint(workbench_bp)
+    app.register_blueprint(overview_bp)
+    app.register_blueprint(attendance_bp)
+    app.register_blueprint(records_bp)
 
-    # 学生画像模块（v1.15.0 占位，规划中）
+    # 学生画像模块（v1.15.0）
     from app.modules.portrait import bp as portrait_bp
     app.register_blueprint(portrait_bp)
+
+    # 通知公告模块（v1.9.3，独立模块）
+    from app.modules.notifications.routes import bp as notifications_bp
+    app.register_blueprint(notifications_bp)
 
 # StuLink v1.7.0 2026-08-02
 # Copyright (c) 2026 zkxxzf. Apache License 2.0

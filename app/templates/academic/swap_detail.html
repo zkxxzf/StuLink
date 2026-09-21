@@ -1,0 +1,205 @@
+{% extends "base.html" %}
+{% block title %}调课详情 #{{ d.id }}{% endblock %}
+{% block extra_css %}
+<style>
+    .pill { display:inline-block; padding:3px 12px; border-radius:12px; font-size:12px; font-weight:600; }
+    .pill-pending{background:#fef3c7;color:#92400e;} .pill-approved{background:#dbeafe;color:#1e40af;}
+    .pill-rejected{background:#fee2e2;color:#991b1b;} .pill-executed{background:#d1fae5;color:#065f46;}
+    .cmp-card { border-radius:12px; padding:16px; height:100%; }
+    .cmp-orig { background:#f8fafc; border:1px solid #e2e8f0; }
+    .cmp-tgt { background:linear-gradient(135deg,#eff6ff,#f5f3ff); border:1px solid #dbeafe; }
+    .cmp-label { font-size:12px; color:#94a3b8; margin-bottom:2px; }
+    .cmp-val { font-size:14px; color:#1e293b; }
+    .cmp-big { font-size:18px; font-weight:700; color:#1e293b; }
+    .arrow-mid { display:flex; align-items:center; justify-content:center; font-size:26px; color:#2563eb; }
+    /* 时间线 */
+    .timeline { position:relative; padding-left:28px; }
+    .timeline::before { content:''; position:absolute; left:9px; top:4px; bottom:4px; width:2px; background:#e2e8f0; }
+    .tl-item { position:relative; padding-bottom:18px; }
+    .tl-dot { position:absolute; left:-24px; top:2px; width:16px; height:16px; border-radius:50%; background:#fff; border:3px solid #cbd5e1; }
+    .tl-dot.done { border-color:#10b981; background:#10b981; }
+    .tl-dot.active { border-color:#2563eb; background:#2563eb; }
+    .tl-dot.reject { border-color:#ef4444; background:#ef4444; }
+    .tl-title { font-weight:600; font-size:14px; }
+    .tl-meta { font-size:12px; color:#94a3b8; }
+    .ver-item { border-left:3px solid #cbd5e1; padding:6px 12px; margin-bottom:8px; background:#f8fafc; border-radius:0 8px 8px 0; }
+</style>
+{% endblock %}
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
+    <h4 class="fw-bold mb-0">
+        <i class="bi bi-arrow-left-right"></i> 调课详情 #{{ d.id }}
+        <span class="pill pill-{{ d.status }} ms-2">{{ d.status_text }}</span>
+        <span class="badge bg-{% if d.swap_type == 'personal' %}info text-dark{% else %}secondary{% endif %} ms-1">{{ d.swap_type_text }}</span>
+    </h4>
+    <div class="d-flex gap-2">
+        <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('academic.swap_page') }}"><i class="bi bi-arrow-left"></i> 返回列表</a>
+        {% if d.status == 'pending' %}
+            {% if is_reviewer %}
+            <button class="btn btn-sm btn-success btn-approve"><i class="bi bi-check-lg"></i> 通过</button>
+            <button class="btn btn-sm btn-outline-warning btn-reject"><i class="bi bi-x-lg"></i> 驳回</button>
+            {% endif %}
+            {% if is_owner %}<button class="btn btn-sm btn-outline-danger btn-cancel"><i class="bi bi-arrow-counterclockwise"></i> 撤销</button>{% endif %}
+        {% elif d.status == 'approved' and is_reviewer %}
+            <button class="btn btn-sm btn-danger btn-execute"><i class="bi bi-lightning-charge"></i> 执行调课</button>
+        {% endif %}
+    </div>
+</div>
+
+{% if d.status == 'approved' and is_reviewer %}
+<div class="alert alert-warning py-2 small"><i class="bi bi-exclamation-triangle"></i> 该申请已通过审核，<b>执行后将真正修改课表</b>（永久调课会软删除原条目并生成新条目；临时调课会新增当天安排），且不可重复执行。</div>
+{% endif %}
+
+<div class="row g-3 mb-3">
+    {# 原课程 #}
+    <div class="col-md-5">
+        <div class="cmp-card cmp-orig">
+            <div class="cmp-label">原课程</div>
+            {% set oe = d.original_entry %}
+            {% if oe %}
+            <div class="cmp-big">{{ oe.subject }}</div>
+            <div class="cmp-val mt-1">{{ oe.grade }}{{ oe.class_name }}</div>
+            <div class="cmp-val">{{ weekday_names.get(oe.weekday) }} · 第{{ oe.period_number }}节{% if d.original_period %} {{ d.original_period.start_time }}-{{ d.original_period.end_time }}{% endif %}</div>
+            <div class="cmp-val text-muted">教师：{{ oe.teacher_name or '-' }}　教室：{{ oe.room or '-' }}</div>
+            <div class="cmp-val text-muted small">周次：{{ oe.week_range or '-' }}</div>
+            {% else %}
+            <div class="text-muted">原课表条目已不存在（可能已被删除）</div>
+            {% endif %}
+        </div>
+    </div>
+    <div class="col-md-2 arrow-mid"><i class="bi bi-arrow-right-circle-fill"></i></div>
+    {# 目标 #}
+    <div class="col-md-5">
+        <div class="cmp-card cmp-tgt">
+            <div class="cmp-label">调整目标</div>
+            <div class="cmp-big">{{ d.target_slot or '-' }}</div>
+            {% if d.target_period %}<div class="cmp-val">{{ d.target_period.period_name }} {{ d.target_period.start_time }}-{{ d.target_period.end_time }}</div>{% endif %}
+            <div class="cmp-val text-muted">教室：{{ d.new_room or '（沿用原教室）' }}</div>
+            <div class="cmp-val mt-1">
+                {% if d.is_permanent %}<span class="pill" style="background:#ede9fe;color:#5b21b6">永久调课</span>
+                {% else %}<span class="pill" style="background:#ffedd5;color:#9a3412">临时调课</span>{% endif %}
+                {% if d.swap_date %}<span class="ms-1 text-muted">日期：{{ d.swap_date }}</span>{% endif %}
+            </div>
+            {% if d.target_entry %}
+            <div class="cmp-val text-success small mt-2"><i class="bi bi-check-circle"></i> 已生成课表条目 #{{ d.target_entry.id }}（{{ d.target_entry.note or '' }}）</div>
+            {% endif %}
+        </div>
+    </div>
+</div>
+
+<div class="row g-3">
+    <div class="col-md-7">
+        <div class="card mb-3">
+            <div class="card-header py-2"><i class="bi bi-info-circle"></i> 申请信息</div>
+            <div class="card-body py-2">
+                <table class="table table-sm mb-0">
+                    <tr><th style="width:110px" class="text-muted fw-normal">申请人</th><td>{{ d.applicant_name or '-' }}（{{ d.applicant_uid }}）</td></tr>
+                    <tr><th class="text-muted fw-normal">调课理由</th><td>{{ d.reason or '（未填写）' }}</td></tr>
+                    <tr><th class="text-muted fw-normal">申请时间</th><td>{{ d.created_at or '-' }}</td></tr>
+                    {% if d.reviewed_at %}
+                    <tr><th class="text-muted fw-normal">审核人</th><td>{{ d.reviewer_name or ('#' ~ d.reviewed_by) }}</td></tr>
+                    <tr><th class="text-muted fw-normal">审核时间</th><td>{{ d.reviewed_at }}</td></tr>
+                    <tr><th class="text-muted fw-normal">审核意见</th><td>{{ d.review_note or '—' }}</td></tr>
+                    {% endif %}
+                </table>
+            </div>
+        </div>
+
+        {% if d.versions %}
+        <div class="card">
+            <div class="card-header py-2"><i class="bi bi-clock-history"></i> 课表变更记录（{{ d.versions|length }}）</div>
+            <div class="card-body py-2">
+                {% for v in d.versions %}
+                <div class="ver-item">
+                    <div class="small">
+                        <span class="badge bg-{% if v.action == 'swap' %}warning text-dark{% elif v.action == 'create' %}success{% elif v.action == 'delete' %}danger{% else %}secondary{% endif %}">{{ v.action }}</span>
+                        条目 #{{ v.entry_id }} · {{ v.operator_name or '系统' }} · {{ v.operated_at }}
+                    </div>
+                    {% if v.remark %}<div class="small text-muted">{{ v.remark }}</div>{% endif %}
+                </div>
+                {% endfor %}
+            </div>
+        </div>
+        {% endif %}
+    </div>
+
+    <div class="col-md-5">
+        <div class="card">
+            <div class="card-header py-2"><i class="bi bi-diagram-3"></i> 处理时间线</div>
+            <div class="card-body">
+                <div class="timeline">
+                    <div class="tl-item">
+                        <div class="tl-dot done"></div>
+                        <div class="tl-title">提交申请</div>
+                        <div class="tl-meta">{{ d.applicant_name or '-' }} · {{ d.created_at or '-' }}</div>
+                    </div>
+                    <div class="tl-item">
+                        {% if d.status in ['approved', 'executed'] %}<div class="tl-dot done"></div>
+                        {% elif d.status == 'rejected' %}<div class="tl-dot reject"></div>
+                        {% else %}<div class="tl-dot active"></div>{% endif %}
+                        <div class="tl-title">审核 {{ '通过' if d.status in ['approved','executed'] else ('驳回' if d.status == 'rejected' else '待审核') }}</div>
+                        <div class="tl-meta">{% if d.reviewed_at %}{{ d.reviewer_name or '' }} · {{ d.reviewed_at }}{% else %}等待审核中…{% endif %}</div>
+                        {% if d.review_note %}<div class="tl-meta text-muted">意见：{{ d.review_note }}</div>{% endif %}
+                    </div>
+                    <div class="tl-item">
+                        {% if d.status == 'executed' %}<div class="tl-dot done"></div>{% else %}<div class="tl-dot"></div>{% endif %}
+                        <div class="tl-title">执行调课</div>
+                        <div class="tl-meta">{% if d.status == 'executed' %}课表已更新{% elif d.status == 'approved' %}已通过，待执行{% else %}—{% endif %}</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+{# 驳回理由模态框 #}
+<div class="modal fade" id="rejectModal" tabindex="-1">
+    <div class="modal-dialog modal-sm"><div class="modal-content">
+        <div class="modal-header"><h6 class="modal-title text-warning"><i class="bi bi-x-circle"></i> 驳回调课</h6>
+            <button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
+        <div class="modal-body"><label class="form-label small">驳回理由 <span class="text-danger">*</span></label>
+            <textarea id="rejectNote" class="form-control form-control-sm" rows="3" maxlength="200"></textarea></div>
+        <div class="modal-footer"><button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">取消</button>
+            <button type="button" class="btn btn-warning btn-sm" id="rejectConfirm">确认驳回</button></div>
+    </div></div>
+</div>
+
+<script id="detailData" type="application/json">
+{
+    "id": {{ d.id }},
+    "approveUrl": {{ url_for('academic.swap_approve', swap_id=d.id)|tojson }},
+    "rejectUrl": {{ url_for('academic.swap_reject', swap_id=d.id)|tojson }},
+    "executeUrl": {{ url_for('academic.swap_execute', swap_id=d.id)|tojson }},
+    "cancelUrl": {{ url_for('academic.swap_cancel', swap_id=d.id)|tojson }}
+}
+</script>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+(function () {
+    'use strict';
+    var cfg = JSON.parse($('#detailData').text());
+    function post(url, data) {
+        $.post(url, data || {}).done(function (res) {
+            if (res && res.success) { alert(res.message || '操作成功'); window.location.reload(); }
+            else { alert((res && res.message) || '操作失败'); }
+        }).fail(function (xhr) {
+            var m = '操作失败'; try { m = (xhr.responseJSON && xhr.responseJSON.message) || m; } catch (e) {}
+            alert(m);
+        });
+    }
+    $('.btn-approve').on('click', function () { if (confirm('确认通过该调课申请？')) post(cfg.approveUrl, { review_note: '' }); });
+    $('.btn-execute').on('click', function () { if (confirm('执行后将真正修改课表且不可重复执行，确认执行？')) post(cfg.executeUrl, {}); });
+    $('.btn-cancel').on('click', function () { if (confirm('确认撤销这条调课申请？')) post(cfg.cancelUrl, {}); });
+    var rj = null;
+    $('.btn-reject').on('click', function () { $('#rejectNote').val(''); rj = new bootstrap.Modal('#rejectModal'); rj.show(); });
+    $('#rejectConfirm').on('click', function () {
+        var note = ($('#rejectNote').val() || '').trim();
+        if (!note) { alert('请填写驳回理由'); return; }
+        if (rj) rj.hide();
+        post(cfg.rejectUrl, { review_note: note });
+    });
+})();
+</script>
+{% endblock %}

@@ -1,0 +1,83 @@
+{% extends "base.html" %}
+{% block title %}材料清单 - {{ tpl.title }}{% endblock %}
+{% block extra_css %}{% include "academic/_fx_style.html" %}{% endblock %}
+{% block content %}
+{% set fx_active = 'files' %}
+<div class="fx-wrap">
+    {% include "academic/_fx_hero.html" %}
+
+    <div class="fx-statgrid fx-stagger" style="grid-template-columns:repeat(auto-fit,minmax(180px,1fr))">
+        <div class="fx-stat ink"><div class="fx-label">文件总数</div><div class="fx-value" id="fxFileTotal">—</div><div class="fx-sub">当前筛选范围内</div></div>
+        <div class="fx-stat ok"><div class="fx-label">文件总大小</div><div class="fx-value" id="fxFileSize" style="font-size:26px">—</div><div class="fx-sub">磁盘实际占用</div></div>
+        <div class="fx-stat bad"><div class="fx-label">缺失文件</div><div class="fx-value" id="fxFileMissing">—</div><div class="fx-sub">记录存在但物理文件丢失</div></div>
+    </div>
+
+    <div class="fx-panel">
+        <div class="fx-panel-head">
+            <div class="fx-seclabel"><span class="fx-tag">Files</span><i class="bi bi-folder2-open"></i>材料清单</div>
+            <div class="fx-toolbar">
+                <select id="fxGrade" class="form-select form-select-sm" style="width:120px">
+                    <option value="">全部年级</option>
+                    {% for g in scope_options %}<option value="{{ g.grade }}">{{ g.grade }}</option>{% endfor %}
+                </select>
+                <select id="fxClass" class="form-select form-select-sm" style="width:110px"><option value="">全部班级</option></select>
+                <select id="fxQuestion" class="form-select form-select-sm" style="width:160px">
+                    <option value="">全部材料题</option>
+                    {% for q in questions %}<option value="{{ q.id }}">{{ q.title }}</option>{% endfor %}
+                </select>
+                <label class="d-flex align-items-center gap-1 fx-hint mb-0"><input type="checkbox" id="fxOnlyMissing"> 仅看缺失</label>
+                <button id="fxApply" class="btn btn-sm btn-primary"><i class="bi bi-funnel"></i> 筛选</button>
+                <a id="fxPackageLink" class="btn btn-sm btn-outline-warning" href="{{ url_for('academic.form_package_page', form_id=tpl.id) }}"><i class="bi bi-file-earmark-zip"></i> 打包下载当前筛选</a>
+            </div>
+        </div>
+        <div class="fx-panel-body">
+            <div class="fx-tablewrap" style="max-height:64vh">
+                <table class="fx-table">
+                    <thead>
+                        <tr>
+                            <th>类型</th><th>文件名</th><th>大小</th><th>学号</th><th>姓名</th>
+                            <th>年级</th><th>班级</th><th>所属题目</th><th>状态</th><th>操作</th>
+                        </tr>
+                    </thead>
+                    <tbody id="fxTbody">
+                        <tr><td colspan="10" class="text-center py-4 text-muted">加载中…</td></tr>
+                    </tbody>
+                </table>
+            </div>
+            <div class="fx-hint mt-2" id="fxFileInfo">—</div>
+        </div>
+    </div>
+</div>
+
+{# ── 预览弹窗 ── #}
+<div class="modal fade" id="fxPreviewModal" tabindex="-1">
+    <div class="modal-dialog modal-lg modal-dialog-centered">
+        <div class="modal-content" style="border-radius:14px;border:none">
+            <div class="modal-header">
+                <h5 class="modal-title" id="fxPreviewTitle" style="font-weight:700">预览</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body text-center" id="fxPreviewBody"></div>
+            <div class="modal-footer">
+                <a id="fxPreviewDownload" class="btn btn-sm btn-primary" href="#" target="_blank"><i class="bi bi-download"></i> 下载原文件</a>
+                <button type="button" class="btn btn-sm btn-secondary" data-bs-dismiss="modal">关闭</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+window.FX_CTX = {
+    formId: {{ tpl.id }},
+    page: 'files',
+    scopeOptions: {{ scope_options | tojson }},
+    urls: {
+        filesData: '{{ url_for("academic.api_form_files_data", form_id=tpl.id) }}',
+        packagePage: '{{ url_for("academic.form_package_page", form_id=tpl.id) }}'
+    }
+};
+</script>
+{% endblock %}
+{% block extra_js %}
+<script src="{{ su('js/form_summary.js') }}"></script>
+{% endblock %}

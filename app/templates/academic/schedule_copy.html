@@ -1,0 +1,106 @@
+{% extends "base.html" %}
+{% import "academic/_schedule_parts.html" as parts %}
+{% block title %}学期交接 · 以「{{ ts.name }}」为底版{% endblock %}
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
+    <div>
+        <h4 class="fw-bold mb-1"><i class="bi bi-files"></i> 学期交接 · 复制课表为新学期草稿</h4>
+        <span class="text-muted small">以现有学期为底版创建新学期草稿，可沿用节次作息与课表条目，再逐周微调</span>
+    </div>
+    <div class="d-flex gap-2 flex-wrap">
+        <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('academic.schedule_history') }}">
+            <i class="bi bi-clock-history"></i> 历史课表
+        </a>
+        <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('academic.schedule_manage') }}">
+            <i class="bi bi-house"></i> 学期管理
+        </a>
+    </div>
+</div>
+
+<div class="row g-3">
+    <div class="col-lg-5">
+        <div class="card h-100">
+            <div class="card-header py-2"><i class="bi bi-box-arrow-in-right"></i> 底版学期（源）</div>
+            <div class="card-body small">
+                <h6 class="fw-bold mb-2">{{ ts.name }}</h6>
+                <ul class="list-unstyled mb-0 text-muted">
+                    <li><i class="bi bi-calendar-range"></i> {{ ts.period_text() if ts.start_date else '未配置起止日期' }}</li>
+                    <li><i class="bi bi-tag"></i> 状态：
+                        {% set st = {'draft':('草稿','secondary'),'active':('使用中','success'),'archived':('已归档','dark')} %}
+                        {% set s = st.get(ts.status, (ts.status,'secondary')) %}
+                        <span class="badge bg-{{ s[1] }}">{{ s[0] }}</span>
+                    </li>
+                    <li><i class="bi bi-clock"></i> 教学周：{{ ts.total_weeks or 20 }} 周</li>
+                </ul>
+                <hr>
+                <div class="alert alert-light border py-2 mb-0">
+                    <i class="bi bi-info-circle text-primary"></i>
+                    复制不会修改源学期任何数据；新学期为<strong>草稿</strong>状态，复制的条目会强制为常规课（清除调课来源标记），并在备注追加「由 {{ ts.name }} 复制」。
+                </div>
+            </div>
+        </div>
+    </div>
+    <div class="col-lg-7">
+        <div class="card">
+            <div class="card-header py-2"><i class="bi bi-box-arrow-in-left"></i> 新学期信息</div>
+            <div class="card-body">
+                <form method="POST" id="copyForm">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                    <div class="row g-2">
+                        <div class="col-12">
+                            <label class="form-label small mb-1">新学期名称 <span class="text-danger">*</span></label>
+                            <input name="new_name" class="form-control form-control-sm" required
+                                   placeholder="如 2026-2027学年第二学期"
+                                   value="{{ suggest_year }}{{ suggest_term }}">
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label small mb-1">学年 <span class="text-danger">*</span></label>
+                            <input name="new_school_year" class="form-control form-control-sm" required
+                                   value="{{ suggest_year }}" placeholder="如 2026-2027">
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label small mb-1">学期 <span class="text-danger">*</span></label>
+                            <input name="new_term" class="form-control form-control-sm" required
+                                   value="{{ suggest_term }}" placeholder="如 第二学期">
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label small mb-1">开学第一天</label>
+                            <input type="date" name="start_date" class="form-control form-control-sm">
+                            <div class="form-text">建议对齐到周一，可稍后在「日期配置」调整。</div>
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label small mb-1">学期最后一天</label>
+                            <input type="date" name="end_date" class="form-control form-control-sm">
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label small mb-1">教学周总数</label>
+                            <input type="number" name="total_weeks" min="1" max="30"
+                                   class="form-control form-control-sm" value="{{ ts.total_weeks or 20 }}">
+                        </div>
+                        <div class="col-md-6 d-flex align-items-end">
+                            <div class="w-100">
+                                <div class="form-check form-switch">
+                                    <input class="form-check-input" type="checkbox" name="copy_periods"
+                                           id="copyPeriods" value="1" checked>
+                                    <label class="form-check-label small" for="copyPeriods">复制节次作息定义</label>
+                                </div>
+                                <div class="form-check form-switch">
+                                    <input class="form-check-input" type="checkbox" name="copy_entries"
+                                           id="copyEntries" value="1" checked>
+                                    <label class="form-check-label small" for="copyEntries">复制课表条目</label>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="d-flex gap-2 mt-3">
+                        <button type="submit" class="btn btn-sm btn-primary">
+                            <i class="bi bi-check-lg"></i> 创建新学期草稿
+                        </button>
+                        <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('academic.schedule_manage') }}">取消</a>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

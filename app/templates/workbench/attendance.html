@@ -1,0 +1,317 @@
+{% extends "base.html" %}
+{% block title %}考勤管理{% endblock %}
+{% block extra_css %}
+<style>
+    .att-status-select { min-width: 90px; }
+    .att-table td { vertical-align: middle; }
+    .stat-box { background: #f8f9fa; border-radius: 8px; padding: 12px 16px; text-align: center; }
+    .stat-box .stat-num { font-size: 24px; font-weight: 700; }
+    .stat-box .stat-label { font-size: 12px; color: #64748b; }
+    .stat-present .stat-num { color: #10b981; }
+    .stat-absent .stat-num { color: #ef4444; }
+    .stat-late .stat-num { color: #f59e0b; }
+    .stat-leave .stat-num { color: #6366f1; }
+    .stat-rate .stat-num { color: #3b82f6; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
+    <h4 class="fw-bold mb-0"><i class="bi bi-calendar-check"></i> 考勤管理</h4>
+    <a href="{{ url_for('workbench.index') }}" class="btn btn-sm btn-outline-secondary">
+        <i class="bi bi-arrow-left"></i> 返回工作台
+    </a>
+</div>
+
+{% if not classes %}
+<div class="alert alert-warning">
+    <i class="bi bi-exclamation-triangle"></i>
+    当前账号未关联任何班级，无法进行考勤操作。请联系管理员在「系统管理 - 教师管理」中为您分配班级。
+</div>
+{% else %}
+
+<!-- 筛选栏 -->
+<div class="card mb-3">
+    <div class="card-body py-2">
+        <form method="GET" action="{{ url_for('attendance.attendance_page') }}" class="row g-2 align-items-center">
+            <div class="col-auto">
+                <select name="grade" class="form-select form-select-sm" id="gradeSelect">
+                    {% for g, c in classes %}
+                    <option value="{{ g }}" {% if g == sel_grade %}selected{% endif %}>{{ g }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="col-auto">
+                <select name="class_name" class="form-select form-select-sm" id="classSelect">
+                    {% for g, c in classes %}
+                    <option value="{{ c }}" data-grade="{{ g }}" {% if c == sel_class %}selected{% endif %}>{{ c }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="col-auto">
+                <input type="date" name="date_from" class="form-control form-control-sm" value="{{ date_from }}" placeholder="开始日期">
+            </div>
+            <div class="col-auto">
+                <input type="date" name="date_to" class="form-control form-control-sm" value="{{ date_to }}" placeholder="结束日期">
+            </div>
+            <div class="col-auto">
+                <button type="submit" class="btn btn-sm btn-primary"><i class="bi bi-search"></i> 查询</button>
+                <a href="{{ url_for('attendance.attendance_export', grade=sel_grade, class_name=sel_class, date_from=date_from, date_to=date_to) }}"
+                   class="btn btn-sm btn-outline-success"><i class="bi bi-download"></i> 导出</a>
+            </div>
+        </form>
+    </div>
+</div>
+
+<!-- 考勤录入区域 -->
+<div class="card mb-3">
+    <div class="card-header d-flex justify-content-between align-items-center">
+        <span><i class="bi bi-pencil-square"></i> 考勤录入</span>
+        <button type="button" class="btn btn-sm btn-success" id="btnAllPresent">
+            <i class="bi bi-check-all"></i> 全部出勤
+        </button>
+    </div>
+    <div class="card-body">
+        {% if students %}
+        <form method="POST" action="{{ url_for('attendance.attendance_record') }}" id="attendanceForm">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <input type="hidden" name="grade" value="{{ sel_grade }}">
+            <input type="hidden" name="class_name" value="{{ sel_class }}">
+            <div class="row g-2 mb-3">
+                <div class="col-auto">
+                    <label class="form-label small mb-0">日期</label>
+                    <input type="date" name="attend_date" class="form-control form-control-sm" value="{{ today.strftime('%Y-%m-%d') if today is defined else '' }}" required>
+                </div>
+                <div class="col-auto">
+                    <label class="form-label small mb-0">节次</label>
+                    <select name="period" class="form-select form-select-sm">
+                        <option value="">全天</option>
+                        {% for i in range(1, 11) %}
+                        <option value="{{ i }}">第{{ i }}节</option>
+                        {% endfor %}
+                    </select>
+                </div>
+            </div>
+            <div class="table-responsive">
+                <table class="table table-sm table-hover att-table">
+                    <thead class="table-light">
+                        <tr>
+                            <th style="width:50px;">#</th>
+                            <th style="width:100px;">学号</th>
+                            <th style="width:80px;">姓名</th>
+                            <th style="width:120px;">状态</th>
+                            <th>备注</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for s in students %}
+                        <tr>
+                            <td>{{ loop.index }}</td>
+                            <td><code class="small">{{ s.student_number }}</code></td>
+                            <td>{{ s.name }}</td>
+                            <td>
+                                <select name="status_{{ s.student_number }}" class="form-select form-select-sm att-status-select">
+                                    {% for val, label in status_options %}
+                                    <option value="{{ val }}" {% if val == 'present' %}selected{% endif %}>{{ label }}</option>
+                                    {% endfor %}
+                                </select>
+                                <input type="hidden" name="name_{{ s.student_number }}" value="{{ s.name }}">
+                            </td>
+                            <td>
+                                <input type="text" name="remark_{{ s.student_number }}" class="form-control form-control-sm" placeholder="备注（可选）" maxlength="200">
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+            <button type="submit" class="btn btn-primary">
+                <i class="bi bi-save"></i> 保存考勤
+            </button>
+        </form>
+        {% else %}
+        <div class="text-muted text-center py-4">
+            <i class="bi bi-inbox" style="font-size:32px;"></i>
+            <p class="mb-0 mt-2">该班级暂无学生数据</p>
+        </div>
+        {% endif %}
+    </div>
+</div>
+
+<!-- 统计图表区域 -->
+<div class="row g-3 mb-3">
+    <div class="col-lg-4">
+        <div class="card h-100">
+            <div class="card-header"><i class="bi bi-pie-chart"></i> 状态分布</div>
+            <div class="card-body">
+                <div id="pieChart" style="height: 250px;"></div>
+            </div>
+        </div>
+    </div>
+    <div class="col-lg-8">
+        <div class="card h-100">
+            <div class="card-header"><i class="bi bi-bar-chart"></i> 月度统计</div>
+            <div class="card-body">
+                <div class="row g-2 mb-3" id="statsBoxes">
+                    <div class="col stat-box stat-present">
+                        <div class="stat-num" id="statPresent">-</div>
+                        <div class="stat-label">出勤</div>
+                    </div>
+                    <div class="col stat-box stat-absent">
+                        <div class="stat-num" id="statAbsent">-</div>
+                        <div class="stat-label">缺勤</div>
+                    </div>
+                    <div class="col stat-box stat-late">
+                        <div class="stat-num" id="statLate">-</div>
+                        <div class="stat-label">迟到</div>
+                    </div>
+                    <div class="col stat-box stat-leave">
+                        <div class="stat-num" id="statLeave">-</div>
+                        <div class="stat-label">请假</div>
+                    </div>
+                    <div class="col stat-box stat-rate">
+                        <div class="stat-num" id="statRate">-</div>
+                        <div class="stat-label">出勤率</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- 考勤记录表格 -->
+<div class="card">
+    <div class="card-header"><i class="bi bi-list-ul"></i> 考勤记录</div>
+    <div class="table-responsive">
+        <table class="table table-hover table-sm align-middle mb-0">
+            <thead class="table-light">
+                <tr>
+                    <th>日期</th>
+                    <th>学号</th>
+                    <th>姓名</th>
+                    <th>班级</th>
+                    <th>节次</th>
+                    <th>状态</th>
+                    <th>备注</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for r in records %}
+                <tr>
+                    <td>{{ r.attend_date.strftime('%Y-%m-%d') if r.attend_date else '-' }}</td>
+                    <td><code class="small">{{ r.student_no }}</code></td>
+                    <td>{{ r.student_name }}</td>
+                    <td>{{ r.grade }}{{ r.class_name }}</td>
+                    <td>{% if r.period %}第{{ r.period }}节{% else %}全天{% endif %}</td>
+                    <td>
+                        {% if r.status == 'present' %}<span class="badge bg-success">出勤</span>
+                        {% elif r.status == 'absent' %}<span class="badge bg-danger">缺勤</span>
+                        {% elif r.status == 'late' %}<span class="badge bg-warning text-dark">迟到</span>
+                        {% elif r.status == 'leave' %}<span class="badge bg-info text-dark">请假</span>
+                        {% else %}<span class="badge bg-secondary">{{ r.status }}</span>
+                        {% endif %}
+                    </td>
+                    <td>{{ r.remark or '-' }}</td>
+                </tr>
+                {% else %}
+                <tr><td colspan="7" class="text-center text-muted py-4">暂无考勤记录</td></tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% if pagination.pages > 1 %}
+    <div class="card-footer">
+        <nav>
+            <ul class="pagination pagination-sm mb-0 justify-content-center">
+                {% if pagination.has_prev %}
+                <li class="page-item">
+                    <a class="page-link" href="{{ url_for('attendance.attendance_page', page=pagination.prev_num, grade=sel_grade, class_name=sel_class, date_from=date_from, date_to=date_to) }}">上一页</a>
+                </li>
+                {% endif %}
+                {% for p in pagination.iter_pages(left_edge=1, right_edge=1, left_current=2, right_current=2) %}
+                {% if p %}
+                <li class="page-item {% if p == pagination.page %}active{% endif %}">
+                    <a class="page-link" href="{{ url_for('attendance.attendance_page', page=p, grade=sel_grade, class_name=sel_class, date_from=date_from, date_to=date_to) }}">{{ p }}</a>
+                </li>
+                {% else %}
+                <li class="page-item disabled"><span class="page-link">...</span></li>
+                {% endif %}
+                {% endfor %}
+                {% if pagination.has_next %}
+                <li class="page-item">
+                    <a class="page-link" href="{{ url_for('attendance.attendance_page', page=pagination.next_num, grade=sel_grade, class_name=sel_class, date_from=date_from, date_to=date_to) }}">下一页</a>
+                </li>
+                {% endif %}
+            </ul>
+        </nav>
+    </div>
+    {% endif %}
+</div>
+{% endif %}
+{% endblock %}
+
+{% block extra_js %}
+<script src="{{ su('js/echarts.min.js') }}"></script>
+<script>
+$(function() {
+    // 全部出勤按钮
+    $('#btnAllPresent').click(function() {
+        $('select[name^="status_"]').val('present');
+    });
+
+    // 班级联动
+    $('#gradeSelect').change(function() {
+        var grade = $(this).val();
+        $('#classSelect option').each(function() {
+            $(this).toggle($(this).data('grade') == grade);
+        });
+        var first = $('#classSelect option[data-grade="' + grade + '"]:first').val();
+        if (first) $('#classSelect').val(first);
+    });
+
+    // 加载统计数据
+    function loadStats() {
+        var cls = '{{ sel_class }}';
+        var grade = '{{ sel_grade }}';
+        if (!cls) return;
+        $.getJSON('{{ url_for("attendance.attendance_stats_api") }}', {
+            class_name: cls, grade: grade
+        }, function(data) {
+            if (data.error) return;
+            $('#statPresent').text(data.present_days);
+            $('#statAbsent').text(data.absent_days);
+            $('#statLate').text(data.late_days);
+            $('#statLeave').text(data.leave_days);
+            $('#statRate').text(data.rate + '%');
+
+            // 饼图
+            var pieDom = document.getElementById('pieChart');
+            if (pieDom) {
+                var chart = echarts.init(pieDom);
+                chart.setOption({
+                    tooltip: { trigger: 'item', formatter: '{b}: {c} ({d}%)' },
+                    legend: { bottom: 0, textStyle: { fontSize: 11 } },
+                    series: [{
+                        type: 'pie',
+                        radius: ['40%', '65%'],
+                        center: ['50%', '45%'],
+                        avoidLabelOverlap: true,
+                        itemStyle: { borderRadius: 4, borderColor: '#fff', borderWidth: 2 },
+                        label: { show: false },
+                        emphasis: { label: { show: true, fontSize: 13, fontWeight: 'bold' } },
+                        data: [
+                            { value: data.present_days, name: '出勤', itemStyle: { color: '#10b981' } },
+                            { value: data.absent_days, name: '缺勤', itemStyle: { color: '#ef4444' } },
+                            { value: data.late_days, name: '迟到', itemStyle: { color: '#f59e0b' } },
+                            { value: data.leave_days, name: '请假', itemStyle: { color: '#6366f1' } }
+                        ]
+                    }]
+                });
+                $(window).resize(function() { chart.resize(); });
+            }
+        });
+    }
+    loadStats();
+});
+</script>
+{% endblock %}

@@ -1,0 +1,121 @@
+{% extends "base.html" %}
+{% block title %}调课统计{% endblock %}
+{% block extra_css %}
+<style>
+    .kpi { border-radius:12px; padding:16px 18px; color:#fff; position:relative; overflow:hidden; }
+    .kpi .kpi-num { font-size:30px; font-weight:800; line-height:1; }
+    .kpi .kpi-label { font-size:13px; opacity:.9; margin-top:6px; }
+    .kpi i.bg-ico { position:absolute; right:12px; top:12px; font-size:38px; opacity:.22; }
+    .kpi-total{background:linear-gradient(135deg,#334155,#1e293b);}
+    .kpi-pending{background:linear-gradient(135deg,#f59e0b,#d97706);}
+    .kpi-approved{background:linear-gradient(135deg,#3b82f6,#2563eb);}
+    .kpi-rejected{background:linear-gradient(135deg,#ef4444,#dc2626);}
+    .kpi-executed{background:linear-gradient(135deg,#10b981,#059669);}
+    .chart-box { height:300px; width:100%; }
+    .chart-card .card-header { font-weight:600; }
+</style>
+{% endblock %}
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+    <h4 class="fw-bold mb-0"><i class="bi bi-bar-chart"></i> 调课统计
+        {% if schedule %}<span class="text-muted small fw-normal ms-2">{{ schedule.name }}</span>{% endif %}
+    </h4>
+    <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('academic.swap_page') }}"><i class="bi bi-arrow-left"></i> 返回列表</a>
+</div>
+
+{% set sc = stats.status_counts %}
+<div class="row g-3 mb-3">
+    <div class="col-6 col-md-2"><div class="kpi kpi-total"><i class="bi bi-stack bg-ico"></i><div class="kpi-num">{{ stats.total }}</div><div class="kpi-label">调课总数</div></div></div>
+    <div class="col-6 col-md-2"><div class="kpi kpi-pending"><i class="bi bi-hourglass-split bg-ico"></i><div class="kpi-num">{{ sc.pending }}</div><div class="kpi-label">待审核</div></div></div>
+    <div class="col-6 col-md-2"><div class="kpi kpi-approved"><i class="bi bi-check2-circle bg-ico"></i><div class="kpi-num">{{ sc.approved }}</div><div class="kpi-label">已通过</div></div></div>
+    <div class="col-6 col-md-2"><div class="kpi kpi-rejected"><i class="bi bi-x-circle bg-ico"></i><div class="kpi-num">{{ sc.rejected }}</div><div class="kpi-label">已驳回</div></div></div>
+    <div class="col-12 col-md-4"><div class="kpi kpi-executed"><i class="bi bi-lightning-charge bg-ico"></i><div class="kpi-num">{{ sc.executed }}</div><div class="kpi-label">已执行（真正改动课表）· 近 {{ stats.days }} 天趋势见下</div></div></div>
+</div>
+
+<div class="row g-3">
+    <div class="col-md-5">
+        <div class="card chart-card"><div class="card-header py-2"><i class="bi bi-pie-chart"></i> 状态分布</div>
+            <div class="card-body p-2"><div id="chartStatus" class="chart-box" data-chart="status"></div></div></div>
+    </div>
+    <div class="col-md-7">
+        <div class="card chart-card"><div class="card-header py-2"><i class="bi bi-bar-chart-line"></i> 按学科分布 Top10</div>
+            <div class="card-body p-2"><div id="chartSubject" class="chart-box" data-chart="subject"></div></div></div>
+    </div>
+    <div class="col-12">
+        <div class="card chart-card"><div class="card-header py-2"><i class="bi bi-graph-up"></i> 近 {{ stats.days }} 天调课趋势</div>
+            <div class="card-body p-2"><div id="chartTrend" class="chart-box" data-chart="trend" style="height:280px"></div></div></div>
+    </div>
+</div>
+
+<script id="statsData" type="application/json">{{ stats|tojson }}</script>
+{% endblock %}
+
+{% block extra_js %}
+<script src="{{ su('js/echarts.min.js') }}"></script>
+<script>
+(function () {
+    'use strict';
+    var stats = JSON.parse($('#statsData').text());
+    var charts = {};
+    var statusColors = { pending:'#f59e0b', approved:'#3b82f6', rejected:'#ef4444', executed:'#10b981' };
+
+    function optStatus() {
+        var labels = stats.status_labels || {};
+        var data = Object.keys(stats.status_counts).map(function (k) {
+            return { name: labels[k] || k, value: stats.status_counts[k], itemStyle: { color: statusColors[k] } };
+        });
+        return {
+            tooltip: { trigger: 'item', formatter: '{b}: {c} ({d}%)' },
+            legend: { bottom: 0, textStyle: { fontSize: 12 } },
+            series: [{ type: 'pie', radius: ['42%', '70%'], center: ['50%', '45%'], data: data,
+                label: { formatter: '{b}\n{c}' }, emphasis: { label: { fontWeight: 'bold' } } }]
+        };
+    }
+    function optSubject() {
+        var sd = stats.subject_dist || [];
+        return {
+            tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' } },
+            grid: { left: 50, right: 20, top: 20, bottom: 40 },
+            xAxis: { type: 'category', data: sd.map(function (d) { return d.name; }), axisLabel: { interval: 0, rotate: sd.length > 6 ? 30 : 0, fontSize: 11 } },
+            yAxis: { type: 'value', minInterval: 1 },
+            series: [{ type: 'bar', data: sd.map(function (d) { return d.value; }), barMaxWidth: 40,
+                itemStyle: { color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [{ offset: 0, color: '#6366f1' }, { offset: 1, color: '#a5b4fc' }]), borderRadius: [6, 6, 0, 0] } }]
+        };
+    }
+    function optTrend() {
+        var tr = stats.trend || [];
+        return {
+            tooltip: { trigger: 'axis' },
+            grid: { left: 45, right: 20, top: 20, bottom: 50 },
+            xAxis: { type: 'category', data: tr.map(function (d) { return d.date; }), axisLabel: { fontSize: 10, rotate: 40 } },
+            yAxis: { type: 'value', minInterval: 1 },
+            series: [{ type: 'line', smooth: true, data: tr.map(function (d) { return d.count; }),
+                lineStyle: { color: '#2563eb', width: 2 }, itemStyle: { color: '#2563eb' },
+                areaStyle: { color: 'rgba(37,99,235,0.10)' } }]
+        };
+    }
+    var builders = { status: optStatus, subject: optSubject, trend: optTrend };
+
+    function initChart(el) {
+        var key = el.getAttribute('data-chart');
+        if (charts[key]) { return; }
+        charts[key] = echarts.init(el);
+        charts[key].setOption(builders[key]());
+    }
+
+    // 懒加载：进入视口才 init（避免一次性渲染全部图表）
+    var boxes = document.querySelectorAll('.chart-box');
+    if ('IntersectionObserver' in window) {
+        var io = new IntersectionObserver(function (entries) {
+            entries.forEach(function (en) {
+                if (en.isIntersecting) { initChart(en.target); io.unobserve(en.target); }
+            });
+        }, { rootMargin: '80px' });
+        boxes.forEach(function (b) { io.observe(b); });
+    } else {
+        boxes.forEach(initChart);
+    }
+    $(window).on('resize', function () { Object.keys(charts).forEach(function (k) { charts[k].resize(); }); });
+})();
+</script>
+{% endblock %}

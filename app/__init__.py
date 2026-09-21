@@ -1,11 +1,39 @@
-# StuLink v1.8.0 2026-08-02
+# StuLink v1.17.0 2026-09-20
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
-from flask import Flask, render_template, request, url_for
+import os
+import sqlite3 as _sqlite3
+
+from flask import Flask, render_template, request, url_for, abort
+from sqlalchemy import event as _sa_event
+from sqlalchemy.engine import Engine as _SAEngine
+
 from config import Config
 from app.extensions import db, login_manager, csrf
 from app.utils.permission_map import default_keys as _module_keys
 from markupsafe import escape, Markup
 import gzip
+
+
+# ---- SQLite 连接级 PRAGMA（对主库与全部 bind 库的每个新连接生效） ----
+# synchronous=NORMAL：写入吞吐明显提升，配合非 WAL 仍是安全档位（断电最多丢末尾事务）
+# busy_timeout=5000：多线程写入冲突时等待 5s 而非立即报 database is locked
+# foreign_keys=ON：开启前已对全部 8 库执行 PRAGMA foreign_key_check（2026-09-18，
+#   0 孤儿引用）；跨库引用本就不设 FK，风险仅在库内，新增脏数据会被及时拦截
+# WAL：默认关闭。取舍与开启方法见 config.py 的 SQLITE_ENABLE_WAL 注释
+#   （data 目录在同步盘，WAL 伴生文件有被同步工具损坏的风险）
+@_sa_event.listens_for(_SAEngine, 'connect')
+def _set_sqlite_pragma(dbapi_conn, _connection_record):
+    if not isinstance(dbapi_conn, _sqlite3.Connection):
+        return  # 非 SQLite 连接直接跳过
+    cur = dbapi_conn.cursor()
+    try:
+        cur.execute('PRAGMA synchronous=NORMAL')
+        cur.execute('PRAGMA busy_timeout=5000')
+        cur.execute('PRAGMA foreign_keys=ON')
+        if getattr(Config, 'SQLITE_ENABLE_WAL', False):
+            cur.execute('PRAGMA journal_mode=WAL')
+    finally:
+        cur.close()
 
 DICT_DATA = {
     'grade': ('年级', ['2025级', '2024级', '2023级']),
@@ -90,10 +118,17 @@ PERMISSION_GROUPS = [
             'system.users', 'system.dictionary', 'system.class_profile',
             'system.perm_groups', 'system.grade_mgmt', 'system.settings',
             'points.view', 'points.edit',
+            'points.import', 'points.export', 'points.rules',
             'grades.view', 'grades.edit',
             'grades.import', 'grades.settings', 'grades.teachers', 'grades.student_query',
+            # v1.9.2 合并：master 新增选科维护页权限 + first 学术/画像/工作台权限（取并集）
             'grades.subject_mgmt',
-            'academic.view',
+            'academic.view', 'academic.timetable', 'academic.swap',
+            'academic.inspection_export', 'academic.forms', 'academic.forms_view',
+            'portrait.view', 'portrait.edit',
+            'workbench.records', 'workbench.class_view',
+            'workbench.attendance_view', 'workbench.attendance',
+            'workbench.notifications_view', 'workbench.notifications',
         ],
     },
     {
@@ -110,7 +145,14 @@ PERMISSION_GROUPS = [
             'statistics.view',
             'points.view', 'grades.view',
             'grades.edit', 'grades.import', 'grades.settings', 'grades.student_query',
+            # v1.9.2 合并：master 新增选科维护页权限 + first 画像/学术/工作台权限（取并集）
             'grades.subject_mgmt',
+            'portrait.view', 'portrait.edit',
+            'points.import', 'points.rules',
+            'academic.view', 'academic.forms_view',
+            # v1.17.0：年级长按年级只读工作台（班级概览/考勤查看）
+            'workbench.class_view', 'workbench.attendance_view',
+            'workbench.notifications_view',
         ],
     },
     {
@@ -126,6 +168,13 @@ PERMISSION_GROUPS = [
             'dormitory.view', 'dormitory.beds',
             'statistics.view',
             'points.view', 'grades.view', 'grades.student_query',
+            'portrait.view', 'portrait.edit',
+            'points.import',
+            'academic.view', 'academic.swap', 'academic.forms_view',
+            # v1.17.0：写权限必须配套只读权限，否则「有考勤录入权却打不开考勤页」
+            'workbench.records', 'workbench.class_view',
+            'workbench.attendance_view', 'workbench.attendance',
+            'workbench.notifications',
         ],
     },
     {
@@ -148,7 +197,10 @@ PERMISSION_GROUPS = [
         'menu_keys': [
             'students.view',
             'points.view', 'points.edit',
+            'points.import',
             'grades.view', 'grades.student_query',
+            'academic.view', 'academic.swap', 'academic.forms_view',
+            'workbench.class_view',
         ],
     },
     # ===== v1.9.2 新增身份（身份不写死，可在权限页随时新增/调整） =====
@@ -210,11 +262,18 @@ PERMISSION_GROUPS = [
         'name': '学生发展中心',
         'role': 'staff',
         'scope_type': 'none',
-        'description': '学生发展中心：仅积分写入 + 学生只读（数据范围按用户勾选）',
+        'description': '学生发展中心：积分/画像写入 + 学生只读（数据范围按用户勾选）',
         'menu_keys': _module_keys(
-            ('students', 'read'), ('points', 'write')),
+            ('students', 'read'), ('points', 'write'), ('portrait', 'write')),
     },
 ]
+
+# v1.17.0（PR#5 审查 M1）：通知收件箱是「看自己的通知」，属所有登录身份的基础能力，
+# 与数据范围无关，故所有身份默认具备 workbench.notifications_view（只读），
+# 避免出现「铃铛点进去 403」。发布/删除另需写权限 workbench.notifications 或 system.settings。
+for _g in PERMISSION_GROUPS:
+    if 'workbench.notifications_view' not in _g['menu_keys']:
+        _g['menu_keys'].append('workbench.notifications_view')
 
 
 def _init_system_data():
@@ -296,14 +355,18 @@ def create_app():
                                    TeacherSubjectLink, AiKey,
                                    AiGlobalKey, AiReport, AiChatMessage, Certificate)
     from app.models.academic import (Teacher, Timetable, TimetableEntry,
-                                     InspectionRecord, TeacherAchievement)
-    from app.models.portrait import StudentProfile  # noqa: F401 占位模块注册
+                                     InspectionRecord, TeacherAchievement,
+                                     FormCategory, FormTemplate, FormQuestion,
+                                     FormSubmission, FormAnswer)
+    from app.models.portrait import StudentPortrait, PortraitComment, PortraitEvent  # noqa: F401
+    from app.models.timetable import (TermSchedule, PeriodDef, ScheduleEntry,  # noqa: F401
+                                      ScheduleSwap, ScheduleVersion)
     with app.app_context():
         # v1.15.0 模块故障隔离：逐库建表，单个模块库异常不阻塞系统启动。
         # system 为根基库最先建；其他模块库失败仅告警（对应模块暂不可用），
         # 系统管理与基础数据不受影响。
         for _bind in (None, 'dormitory', 'history', 'grades', 'points',
-                      'academic', 'portrait'):
+                      'academic', 'portrait', 'system', 'timetable'):
             try:
                 db.create_all(bind_key=_bind)
             except Exception as _e:  # noqa: BLE001
@@ -317,10 +380,25 @@ def create_app():
         
         _init_system_data()
 
+        # 启动时建好 history.db 变迁日志表：write_change_log 不再每次新建连接建表
+        from app.utils.helpers import init_history_tables
+        init_history_tables()
+
     # 安全过滤器：先转义 HTML 再将 \n 转为 <br>（替代危险的 |safe）
     @app.template_filter('nl2br')
     def nl2br_filter(text):
         return Markup(escape(str(text)).replace('\n', '<br>'))
+
+    # JSON 字符串安全解析（表单题目选项渲染用）
+    import json as _json
+    @app.template_filter('load_json_safe')
+    def load_json_safe_filter(text):
+        if not text:
+            return []
+        try:
+            return _json.loads(text)
+        except Exception:
+            return []
 
     # 静态资源版本号：按「单个文件」的修改时间生成 ?v=，模板里用 {{ su('js/x.js') }}。
     # 改动某文件后浏览器自动拉新，根治「改了代码但浏览器用旧缓存」导致的
@@ -330,12 +408,38 @@ def create_app():
     # 未变更的资源二次访问零请求。
     import os as _os
 
+    # v1.16.1 su() 缓存优化：启动时扫描 static 目录一次，把 mtime 存进 dict，
+    # 避免每次请求每个资源都调 os.path.getmtime（高并发下 syscall 开销明显）。
+    # dev 模式下可通过 ?_su_refresh=1 触发重新扫描（仅对当前请求生效一次）。
+    _mtime_cache = {}
+
+    def _build_mtime_cache():
+        """遍历 static 目录，把每个文件的 mtime 存入 _mtime_cache。"""
+        base = app.static_folder
+        if not base or not _os.path.isdir(base):
+            return
+        for dirpath, _dirs, files in _os.walk(base):
+            for fn in files:
+                full = _os.path.join(dirpath, fn)
+                rel = _os.path.relpath(full, base).replace(_os.sep, '/')
+                try:
+                    _mtime_cache[rel] = int(_os.path.getmtime(full))
+                except OSError:
+                    _mtime_cache[rel] = 0
+
+    with app.app_context():
+        _build_mtime_cache()
+
     def _asset_mtime(filename):
-        p = _os.path.join(app.static_folder, filename.replace('/', _os.sep))
-        try:
-            return int(_os.path.getmtime(p))
-        except OSError:
-            return 0
+        if request.args.get('_su_refresh'):
+            p = _os.path.join(app.static_folder, filename.replace('/', _os.sep))
+            try:
+                v = int(_os.path.getmtime(p))
+                _mtime_cache[filename] = v
+                return v
+            except OSError:
+                return 0
+        return _mtime_cache.get(filename, 0)
 
     @app.context_processor
     def inject_asset_version():
@@ -380,6 +484,18 @@ def create_app():
             pass  # 压缩失败则返回原始数据
         
         return response
+
+    # 上传附件目录禁止通过 /static/... 直链访问（PR#5 安全审查 M4）。
+    # 历史实现把用户上传的表单材料落在 app/static/uploads 下，任何拿到
+    # /static/uploads/forms/<id>/<sid>/<file> 的人（含未登录）都能抓取学生材料。
+    # 现在应用内部生成的下载链接一律走带鉴权的 academic.form_file 路由，
+    # 这里再把 /static/uploads/ 直链整体封掉，杜绝「猜路径」式越权读取。
+    # TODO(后续)：uploads 目录仍在 Flask 静态目录下，最彻底的做法是迁移到
+    # instance/uploads 等静态目录之外，并同步迁移 DB 里的 FormAnswer.file_path。
+    @app.before_request
+    def _block_static_uploads():
+        if request.path.startswith('/static/uploads'):
+            abort(404)
 
     # CSRF 错误友好提示（Edge 等浏览器 cookie 策略较严时可能触发）
     @app.errorhandler(400)

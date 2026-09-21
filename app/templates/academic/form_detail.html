@@ -1,0 +1,191 @@
+{% extends "base.html" %}
+{% block title %}提交列表 - {{ tpl.title }}{% endblock %}
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
+    <div>
+        <h4 class="fw-bold mb-1">
+            <i class="bi bi-list-check"></i> {{ tpl.title }}
+            <span class="badge bg-{% if tpl.status == 'open' %}success{% elif tpl.status == 'draft' %}secondary{% else %}danger{% endif %} ms-1">
+                {{ {'draft':'草稿','open':'进行中','closed':'已关闭','archived':'已归档'}.get(tpl.status, tpl.status) }}
+            </span>
+        </h4>
+        {% if tpl.description %}
+        <div class="text-muted small">{{ tpl.description }}</div>
+        {% endif %}
+    </div>
+    <div class="d-flex gap-2">
+        <a class="btn btn-sm btn-outline-success" href="{{ url_for('academic.form_export', form_id=tpl.id) }}">
+            <i class="bi bi-download"></i> 导出 Excel
+        </a>
+        <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('academic.form_list') }}">
+            <i class="bi bi-arrow-left"></i> 返回
+        </a>
+    </div>
+</div>
+
+<!-- 统计卡片 -->
+<div class="row g-2 mb-3">
+    <div class="col-6 col-md-3">
+        <div class="card text-center py-2">
+            <div class="card-body p-2">
+                <div class="fs-4 fw-bold text-primary">{{ total }}</div>
+                <div class="small text-muted">总提交</div>
+            </div>
+        </div>
+    </div>
+    <div class="col-6 col-md-3">
+        <div class="card text-center py-2">
+            <div class="card-body p-2">
+                <div class="fs-4 fw-bold text-warning">{{ pending }}</div>
+                <div class="small text-muted">待审核</div>
+            </div>
+        </div>
+    </div>
+    <div class="col-6 col-md-3">
+        <div class="card text-center py-2">
+            <div class="card-body p-2">
+                <div class="fs-4 fw-bold text-success">{{ approved }}</div>
+                <div class="small text-muted">已通过</div>
+            </div>
+        </div>
+    </div>
+    <div class="col-6 col-md-3">
+        <div class="card text-center py-2">
+            <div class="card-body p-2">
+                <div class="fs-4 fw-bold text-danger">{{ rejected }}</div>
+                <div class="small text-muted">已驳回</div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- 筛选 -->
+<div class="card mb-3">
+    <div class="card-body py-2">
+        <form class="row g-2 align-items-center" method="get">
+            <div class="col-auto">
+                <select name="status" class="form-select form-select-sm" style="width:140px">
+                    <option value="">全部状态</option>
+                    {% for k, label in status_map.items() %}
+                    <option value="{{ k }}" {% if f_status == k %}selected{% endif %}>{{ label }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="col-auto">
+                <button class="btn btn-sm btn-primary"><i class="bi bi-funnel"></i> 筛选</button>
+                <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('academic.form_submissions', form_id=tpl.id) }}">重置</a>
+            </div>
+        </form>
+    </div>
+</div>
+
+<!-- 提交列表 -->
+<div class="card">
+    <div class="table-responsive">
+        <table class="table table-hover align-middle mb-0">
+            <thead class="table-light">
+                <tr>
+                    <th>提交人</th>
+                    <th>类型</th>
+                    <th>年级/班级</th>
+                    <th>提交时间</th>
+                    <th>状态</th>
+                    <th>审核备注</th>
+                    <th>操作</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for sub in pagination.items %}
+                <tr>
+                    <td class="fw-bold">{{ sub.submitter_name or '-' }}</td>
+                    <td>
+                        {% if sub.submitter_type == 'teacher' %}
+                        <span class="badge bg-info text-dark">教师</span>
+                        {% else %}
+                        <span class="badge bg-primary">学生</span>
+                        {% endif %}
+                    </td>
+                    <td class="small">{{ (sub.submitter_grade or '') ~ (sub.submitter_class or '') or '-' }}</td>
+                    <td class="small">{{ sub.submitted_at.strftime('%Y-%m-%d %H:%M') if sub.submitted_at else '-' }}</td>
+                    <td>
+                        {% if sub.status == 'submitted' %}
+                        <span class="badge bg-warning text-dark">待审核</span>
+                        {% elif sub.status == 'approved' %}
+                        <span class="badge bg-success">已通过</span>
+                        {% else %}
+                        <span class="badge bg-danger">已驳回</span>
+                        {% endif %}
+                    </td>
+                    <td class="small text-muted">{{ sub.review_note or '-' }}</td>
+                    <td class="text-nowrap">
+                        {% if sub.status == 'submitted' %}
+                        <button class="btn btn-sm btn-outline-success" data-bs-toggle="modal"
+                                data-bs-target="#reviewModal{{ sub.id }}" title="审核">
+                            <i class="bi bi-check-circle"></i>
+                        </button>
+                        {% endif %}
+                    </td>
+                </tr>
+
+                <!-- 审核模态框 -->
+                <div class="modal fade" id="reviewModal{{ sub.id }}" tabindex="-1">
+                    <div class="modal-dialog">
+                        <div class="modal-content">
+                            <div class="modal-header">
+                                <h5 class="modal-title">审核提交 - {{ sub.submitter_name }}</h5>
+                                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                            </div>
+                            <form method="POST" action="{{ url_for('academic.form_review', sid=sub.id) }}">
+                                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                                <div class="modal-body">
+                                    <div class="mb-3">
+                                        <label class="form-label">审核结果 <span class="text-danger">*</span></label>
+                                        <select name="status" class="form-select" required>
+                                            <option value="approved">通过</option>
+                                            <option value="rejected">驳回</option>
+                                        </select>
+                                    </div>
+                                    <div class="mb-3">
+                                        <label class="form-label">备注</label>
+                                        <textarea name="note" class="form-control" rows="3" maxlength="200"
+                                                  placeholder="驳回原因（通过时可留空）"></textarea>
+                                    </div>
+                                </div>
+                                <div class="modal-footer">
+                                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">取消</button>
+                                    <button type="submit" class="btn btn-primary">确认审核</button>
+                                </div>
+                            </form>
+                        </div>
+                    </div>
+                </div>
+                {% else %}
+                <tr><td colspan="7" class="text-center text-muted py-4">暂无提交记录</td></tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+
+{% if pagination.pages > 1 %}
+<nav class="mt-3">
+    <ul class="pagination pagination-sm justify-content-center">
+        {% if pagination.has_prev %}
+        <li class="page-item"><a class="page-link" href="?page={{ pagination.prev_num }}&status={{ f_status }}">上一页</a></li>
+        {% endif %}
+        {% for p in pagination.iter_pages(left_edge=1, right_edge=1, left_current=2, right_current=2) %}
+        {% if p %}
+        <li class="page-item {% if p == pagination.page %}active{% endif %}">
+            <a class="page-link" href="?page={{ p }}&status={{ f_status }}">{{ p }}</a>
+        </li>
+        {% else %}
+        <li class="page-item disabled"><span class="page-link">…</span></li>
+        {% endif %}
+        {% endfor %}
+        {% if pagination.has_next %}
+        <li class="page-item"><a class="page-link" href="?page={{ pagination.next_num }}&status={{ f_status }}">下一页</a></li>
+        {% endif %}
+    </ul>
+</nav>
+{% endif %}
+{% endblock %}
