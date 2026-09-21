@@ -13,6 +13,8 @@ from app.modules.workbench.services.attendance_service import (
 )
 from app.modules.workbench.services import scope as wb_scope
 from app.models.academic import ATTENDANCE_STATUS
+from app.modules.workbench.services import scope_service
+from app.utils.decorators import perm_required
 
 bp = Blueprint('attendance', __name__, url_prefix='/workbench/attendance')
 
@@ -74,10 +76,17 @@ def attendance_record():
     if not wb_scope.class_allowed(current_user, grade, class_name):
         abort(403)
 
+    if not scope_service.is_class_in_scope(current_user, grade, class_name):
+        flash('无该班级的操作权限（超出管辖范围）', 'danger')
+        return redirect(url_for('attendance.attendance_page'))
+
     records_list = []
+    valid_nos = {s.student_number for s in get_class_students(class_name, grade)}
     for key, value in request.form.items():
         if key.startswith('status_'):
             student_no = key[7:]
+            if student_no not in valid_nos:
+                continue
             student_name = request.form.get(f'name_{student_no}', '')
             remark = request.form.get(f'remark_{student_no}', '').strip()
             records_list.append({
@@ -121,6 +130,10 @@ def attendance_export():
     if not wb_scope.class_allowed(current_user, grade, class_name):
         abort(403)
 
+    if not scope_service.is_class_in_scope(current_user, grade, class_name):
+        flash('无该班级的导出权限（超出管辖范围）', 'danger')
+        return redirect(url_for('attendance.attendance_page'))
+
     out = export_attendance(
         class_name=class_name,
         date_from=date.fromisoformat(date_from) if date_from else None,
@@ -145,6 +158,9 @@ def attendance_stats_api():
         return jsonify({'error': '请选择班级'}), 400
     if not wb_scope.class_allowed(current_user, grade, class_name):
         return jsonify({'error': '无权访问该班级数据'}), 403
+
+    if not scope_service.is_class_in_scope(current_user, grade, class_name):
+        return jsonify({'error': '无该班级的访问权限（超出管辖范围）'}), 403
 
     stats = get_attendance_stats(class_name, grade=grade, month=month or None)
     return jsonify(stats)

@@ -433,14 +433,14 @@ def export_excel():
 
 @bp.route('/rules')
 @login_required
-@perm_required('points.view')
+@perm_required('points.rules')
 def rules_page():
     return render_template('points/rules.html')
 
 
 @bp.route('/api/rules')
 @login_required
-@perm_required('points.view')
+@perm_required('points.rules')
 def api_rules_list():
     rules = PointRuleTemplate.query.order_by(PointRuleTemplate.category,
                                               PointRuleTemplate.default_points.desc()).all()
