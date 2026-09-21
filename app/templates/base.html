@@ -378,7 +378,8 @@
             {% endif %}
 
             {# ========= 教师工作台侧边栏（v1.9.3 全量子导航） ========= #}
-            {% if request.blueprint in ('academic', 'workbench', 'overview', 'attendance', 'records') %}
+            {# v1.17.0：个人工作菜单仅在教师工作台及其子页面显示，不在教务管理等其他模块出现 #}
+            {% if request.blueprint in ('workbench', 'overview', 'attendance', 'records') %}
             <div class="nav-section">个人工作</div>
             <a class="nav-link {% if request.endpoint == 'workbench.index' %}active{% endif %}"
                href="{{ url_for('workbench.index') }}">
