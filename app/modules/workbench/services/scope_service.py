@@ -1,4 +1,4 @@
-# StuLink v1.9.2 2026-09-19
+# StuLink v1.17.0 2026-09-21
 # 工作台数据范围校验：班级归属白名单（admin 全放行）
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 from app.models import UserClassLink

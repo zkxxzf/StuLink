@@ -1,4 +1,4 @@
-# StuLink v1.17.0 2026-09-20
+# StuLink v1.17.0 2026-09-21
 # 课表模块模型：学期课表 / 节次定义 / 课表明细 / 调课记录 / 变更版本（独立库 timetable.db）
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 import re

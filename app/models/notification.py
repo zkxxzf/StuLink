@@ -1,4 +1,4 @@
-# StuLink v1.17.0 2026-09-20
+# StuLink v1.17.0 2026-09-21
 # 通知公告模型（system.db）
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 from datetime import datetime

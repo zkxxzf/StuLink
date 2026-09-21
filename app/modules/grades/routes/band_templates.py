@@ -1,4 +1,4 @@
-# StuLink v1.9.3 2026-09-19
+# StuLink v1.17.0 2026-09-21
 # 分层模板管理：自定义模板 + 考试与模板绑定
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 from flask import render_template, request, jsonify, abort

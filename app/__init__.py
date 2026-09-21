@@ -1,4 +1,4 @@
-# StuLink v1.17.0 2026-09-20
+# StuLink v1.17.0 2026-09-21
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 import os
 import sqlite3 as _sqlite3

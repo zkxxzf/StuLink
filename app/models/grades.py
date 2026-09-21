@@ -1,4 +1,4 @@
-# StuLink v1.9.3 2026-09-19
+# StuLink v1.17.0 2026-09-21
 # 成绩管理与可视化分析系统：数据模型（独立库 grades.db）
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 import json

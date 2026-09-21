@@ -1,4 +1,4 @@
-# StuLink v1.17.0 2026-09-20
+# StuLink v1.17.0 2026-09-21
 # 教务 · 学期课表（timetable.db）：管理 / 视图 / 条目CRUD / 导入导出 / 查课联动 / JSON API
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 """新课表系统路由。

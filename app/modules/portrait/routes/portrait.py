@@ -1,4 +1,4 @@
-# StuLink v1.17.0 2026-09-20
+# StuLink v1.17.0 2026-09-21
 # 学生画像路由：列表页 / 详情页 / 评语管理 / 事件管理 / 数据API
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 from flask import Blueprint, render_template, request, jsonify, abort, flash, redirect, url_for

@@ -1,4 +1,4 @@
-# StuLink v1.9.3 2026-09-19
+# StuLink v1.17.0 2026-09-21
 # 模块权限映射：功能权限表格（身份 × 子功能 × 三档）与细粒度 menu_keys 的转换层
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 """模块权限映射（转换层）

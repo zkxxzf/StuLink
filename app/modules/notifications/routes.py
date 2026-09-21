@@ -1,4 +1,4 @@
-# StuLink v1.17.0 2026-09-20
+# StuLink v1.17.0 2026-09-21
 # 通知公告路由（独立蓝图，url_prefix=/notifications）
 # v2.0 收件人表改造：列表筛选/已读进度/用户搜索/分类字典
 # v1.17.0 PR#5 安全审查（M1）：补齐 workbench.notifications_view / workbench.notifications

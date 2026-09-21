@@ -1,4 +1,4 @@
-# StuLink v1.9.3 2026-09-19
+# StuLink v1.17.0 2026-09-21
 # 成绩模块数据范围解析（复用现有角色/权限组体系，参照宿舍统计模块范式）
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 from app.models import UserClassLink, Student
