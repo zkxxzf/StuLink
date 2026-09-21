@@ -1,4 +1,4 @@
-# StuLink v1.9.2 2026-09-16
+# StuLink v1.9.3 2026-09-19
 # 任课教师映射：矩阵维护（按年级）+ 教师安排表批量导入 + 自动开户
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 import io
@@ -58,7 +58,9 @@ def _matrix_users(grade):
 @perm_required('grades.teachers')
 def teachers_page():
     grades = _all_active_grades()
-    grade = request.args.get('grade', '') or (grades[0] if grades else '')
+    grade = request.args.get('grade', '')
+    if grade not in grades:
+        grade = grades[0] if grades else ''
     return render_template('grades/teachers.html', grade_options=grades, grade=grade)
 
 
@@ -67,7 +69,11 @@ def teachers_page():
 @perm_required('grades.teachers')
 def teachers_get():
     grade = request.args.get('grade', '').strip()
-    if grade not in _all_active_grades():
+    active = _all_active_grades()
+    if grade not in active:
+        # 防御：年级缺失或参数异常时回退到第一个活跃年级（前端下拉固定有值，正常不会触发）
+        grade = active[0] if active else ''
+    if not grade:
         return jsonify(success=False, message='年级无效'), 400
     links = TeacherSubjectLink.query.filter_by(grade=grade, active=True).all()
     cells = {}
@@ -89,7 +95,11 @@ def teachers_save():
     data = request.get_json(silent=True) or {}
     grade = (data.get('grade') or '').strip()
     cells = data.get('cells') or {}    # {'01班|语文': user_id 或 ''}
-    if grade not in _all_active_grades():
+    active = _all_active_grades()
+    if grade not in active:
+        # 防御：年级缺失或参数异常时回退到第一个活跃年级（前端下拉固定有值，正常不会触发）
+        grade = active[0] if active else ''
+    if not grade:
         return jsonify(success=False, message='年级无效'), 400
     # 校验 user_id 存在
     user_ids = {int(v) for v in cells.values() if v}

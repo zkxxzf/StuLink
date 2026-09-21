@@ -1,4 +1,4 @@
-# StuLink v1.9.2 2026-09-16
+# StuLink v1.9.3 2026-09-19
 # 成绩管理：考试管理 + 成绩导入向导路由
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 import io
@@ -222,18 +222,42 @@ def exam_recalc(exam_id):
 @login_required
 @perm_required('grades.edit')
 def exam_delete(exam_id):
+    """删除考试：需当前账号+密码二次确认；级联清理成绩/分层/AI报告/缓存"""
+    from app.models.grades import ExamBand, AiReport
     exam = Exam.query.get_or_404(exam_id)
-    confirm_name = (request.form.get('confirm_name') or '').strip()
-    if confirm_name != exam.name:
-        flash('确认输入的名称与考试名称不一致', 'danger')
+    is_json = request.is_json
+    if is_json:
+        data = request.get_json(silent=True) or {}
+        username = (data.get('username') or '').strip()
+        password = data.get('password') or ''
+    else:
+        username = (request.form.get('username') or '').strip()
+        password = request.form.get('password') or ''
+
+    def _fail(msg, code=400):
+        if is_json:
+            return jsonify(success=False, message=msg), code
+        flash(msg, 'danger')
         return redirect(url_for('grades.exam_detail', exam_id=exam_id))
-    ExamScore.query.filter_by(exam_id=exam_id).delete()
-    exam_name = exam.name
+
+    if not username or not password:
+        return _fail('请输入账号和密码后再删除')
+    if username != current_user.username:
+        return _fail('账号与当前登录账号不一致')
+    if not current_user.check_password(password):
+        return _fail('密码不正确')
+
+    exam_name = f'{exam.grade} {exam.name}'
+    n_scores = ExamScore.query.filter_by(exam_id=exam_id).delete()
+    n_bands = ExamBand.query.filter_by(exam_id=exam_id).delete()
+    n_ai = AiReport.query.filter_by(exam_id=exam_id).delete()
     db.session.delete(exam)
     db.session.commit()
-    # 修复：删除考试后按其 id 清除分析页 grades_tab_ 缓存（原前缀无人写入，等于没清）
-    tab_service.clear_exam_cache(exam_id)
-    log_operation(current_user, '删除', '考试', exam_id, f'{exam_name}', module='grades')
+    invalidate_exam_cache(exam_id)
+    log_operation(current_user, '删除', '考试', exam_id,
+                  f'{exam_name}（成绩{n_scores}条/分层{n_bands}条/AI报告{n_ai}条）', module='grades')
+    if is_json:
+        return jsonify(success=True, message=f'已删除《{exam_name}》：成绩 {n_scores} 条、分层 {n_bands} 条')
     flash(f'考试「{exam_name}」及全部成绩已删除', 'success')
     return redirect(url_for('grades.exams_list'))
 

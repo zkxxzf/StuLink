@@ -1,4 +1,4 @@
-# StuLink v1.9.2 2026-09-16
+# StuLink v1.9.3 2026-09-19
 # 身份证号工具：格式与校验码验证、脱敏展示、确定性加密存取
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 """身份证号工具

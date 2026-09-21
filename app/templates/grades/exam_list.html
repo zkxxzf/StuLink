@@ -53,6 +53,9 @@
                 <td class="text-end">
                     <a href="{{ url_for('grades.exam_detail', exam_id=e.id) }}" class="btn btn-sm btn-outline-primary">详情</a>
                     <a href="{{ url_for('grades.bands_page', exam_id=e.id) }}" class="btn btn-sm btn-outline-info">划线分层</a>
+                    <button type="button" class="btn btn-sm btn-outline-danger btn-del-exam"
+                            data-id="{{ e.id }}" data-name="{{ e.grade }} {{ e.name }}"
+                            data-count="{{ counts.get(e.id, 0) }}">删除</button>
                 </td>
             </tr>
             {% else %}
@@ -64,4 +67,76 @@
         </table>
     </div>
 </div>
+
+<!-- 删除考试：账号密码二次确认 -->
+<div class="modal fade" id="delExamModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title text-danger"><i class="bi bi-exclamation-triangle"></i> 删除考试</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <p>将删除考试 <strong id="delExamName"></strong>（含 <strong id="delExamCount">0</strong> 条成绩、划线分层与 AI 报告），<span class="text-danger">删除后不可恢复</span>。</p>
+                <p class="text-muted small mb-2">请输入当前登录账号和密码进行二次确认：</p>
+                <div class="mb-2">
+                    <label class="form-label small mb-1">账号</label>
+                    <input id="delExamUser" class="form-control form-control-sm" autocomplete="off">
+                </div>
+                <div class="mb-2">
+                    <label class="form-label small mb-1">密码</label>
+                    <input id="delExamPwd" type="password" class="form-control form-control-sm"
+                           autocomplete="new-password"
+                           onkeydown="if(event.key==='Enter')doDelExam()">
+                </div>
+                <div id="delExamErr" class="text-danger small" style="display:none;"></div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">取消</button>
+                <button type="button" class="btn btn-danger btn-sm" onclick="doDelExam()">
+                    <i class="bi bi-trash"></i> 确认删除
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+{% block extra_js %}
+<script>
+var delExamId = null;
+var delExamModalObj = null;
+
+$(function(){
+    $('.btn-del-exam').on('click', function(){
+        delExamId = $(this).data('id');
+        $('#delExamName').text($(this).data('name'));
+        $('#delExamCount').text($(this).data('count'));
+        $('#delExamUser').val('');
+        $('#delExamPwd').val('');
+        $('#delExamErr').hide();
+        delExamModalObj = new bootstrap.Modal(document.getElementById('delExamModal'));
+        delExamModalObj.show();
+    });
+});
+
+function doDelExam(){
+    var u = ($('#delExamUser').val() || '').trim();
+    var p = $('#delExamPwd').val() || '';
+    if (!u || !p){ $('#delExamErr').text('请输入账号和密码').show(); return; }
+    $.ajax({
+        url: '/grades/exams/' + delExamId + '/delete',
+        method: 'POST',
+        contentType: 'application/json',
+        data: JSON.stringify({username: u, password: p}),
+        success: function(res){
+            alert(res.message || '已删除');
+            location.reload();
+        },
+        error: function(x){
+            var m = (x.responseJSON && x.responseJSON.message) || '删除失败';
+            $('#delExamErr').text(m).show();
+        }
+    });
+}
+</script>
 {% endblock %}
