@@ -78,7 +78,6 @@ $(function(){
                 '<i class="bi bi-arrow-down"></i></button></div>');
             $head.append(th);
         });
-        $head.append('<th style="width:170px;">整行设为（如带 01-05 班同科）</th>');
         var $tb = $('#tcTable tbody').empty();
         d.subjects.forEach(function(sub){
             var tr = $('<tr>').append('<td><strong>' + sub + '</strong></td>');
@@ -89,22 +88,12 @@ $(function(){
                 var sel = buildUserOptions($('<select class="form-select form-select-sm tcell" data-key="' + key + '"></select>'), cur);
                 tr.append($('<td class="text-center">').append(sel));
             });
-            var rowSel = buildUserOptions($('<select class="form-select form-select-sm rowfill"></select>'), '');
-            tr.append($('<td class="text-center">').append(rowSel));
             $tb.append(tr);
         });
     }
     // 单元格改动（委托，避免重复绑定）
     $('#tcTable').on('change', '.tcell', function(){
         cells[$(this).data('key')] = $(this).val();
-    });
-    // 整行填充：把该科目（一行）所有班级设为同一教师
-    $('#tcTable').on('change', '.rowfill', function(){
-        var v = $(this).val();
-        $(this).closest('tr').find('.tcell').each(function(){
-            $(this).val(v);
-            cells[$(this).data('key')] = v;
-        });
     });
     // 整列填充：为该班全部科目指定同一教师（按姓名/账号匹配）
     $('#tcTable').on('click', '.colfill', function(){
@@ -130,6 +119,7 @@ $(function(){
     $('#tcGrade').change(load);
     $('#tcSave').on('click', function(){
         var grade = $('#tcGrade').val();
+        if (!grade) { alert('请先选择年级'); return; }
         $('#tcMsg').text('保存中…');
         $.post('/grades/api/teachers/save', JSON.stringify({grade: grade, cells: cells}),
             function(res){

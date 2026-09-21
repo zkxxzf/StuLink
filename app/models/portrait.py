@@ -1,4 +1,4 @@
-# StuLink v1.9.2 2026-09-16
+# StuLink v1.9.3 2026-09-19
 # 学生画像模块模型（占位骨架）：独立库 portrait.db
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 """学生画像（规划中，当前为占位骨架）

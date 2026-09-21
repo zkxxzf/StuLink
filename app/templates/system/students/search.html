@@ -163,6 +163,17 @@
             <div class="modal-body">
                 <p class="text-muted small">已选择 <strong id="editSearchCount">0</strong> 名学生。留空的字段不修改。</p>
                 <div class="row g-2">
+                    {% if current_user.has_perm('students.edit') %}
+                    <div class="col-6">
+                        <label class="form-label small">选科</label>
+                        <select class="form-select form-select-sm" id="batchSubject">
+                            <option value="">不修改</option>
+                            {% for s in subjects %}
+                            <option value="{{ s }}">{{ s }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    {% endif %}
                     <div class="col-6">
                         <label class="form-label small">住校/走读</label>
                         <select class="form-select form-select-sm" id="batchBoarding">
@@ -240,15 +251,18 @@ function doBatchEditSearch() {
     var building = document.getElementById('batchBuilding').value;
     var roomNumber = document.getElementById('batchRoom').value.trim();
     var bedNumber = document.getElementById('batchBed').value.trim();
+    var subjectEl = document.getElementById('batchSubject');
+    var subject = subjectEl ? subjectEl.value : '';
     var errDiv = document.getElementById('batchSearchError');
 
-    if (!boarding && !dayType && !building && !roomNumber && !bedNumber) {
+    if (!subject && !boarding && !dayType && !building && !roomNumber && !bedNumber) {
         errDiv.textContent = '请至少选择一项修改内容';
         errDiv.style.display = ''; return;
     }
 
     var data = { student_ids: ids, boarding_type: boarding, day_student_type: dayType,
-                 building: building, room_number: roomNumber, bed_number: bedNumber };
+                 building: building, room_number: roomNumber, bed_number: bedNumber,
+                 subject_selection: subject };
 
     fetch("{{ url_for('students.batch_edit_search') }}", {
         method: 'POST', headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrfToken },

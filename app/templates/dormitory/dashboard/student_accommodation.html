@@ -93,7 +93,7 @@
                         <option value="{{ dst }}" {{ 'selected' if request.args.get('day_student_type')==dst }}>{{ dst }}</option>
                         {% endfor %}
                     </select></th>
-                    <th><input type="text" name="room_number" placeholder="房间号"
+                    <th><input type="text" name="room_number" placeholder="宿舍（如 西201）"
                            value="{{ request.args.get('room_number','') }}" onchange="document.getElementById('filterForm').submit()"></th>
                     <th></th><th></th><th></th>
                 </tr>
@@ -169,15 +169,6 @@
                     <p class="text-muted small">已选择 <strong id="editSelectedCount">0</strong> 名学生。留空的字段不修改。</p>
                     <div class="row">
                         <div class="col-6 mb-3">
-                            <label class="form-label">选科</label>
-                            <select class="form-select" name="subject_selection">
-                                <option value="">不修改</option>
-                                {% for s in subjects %}
-                                <option value="{{ s }}">{{ s }}</option>
-                                {% endfor %}
-                            </select>
-                        </div>
-                        <div class="col-6 mb-3">
                             <label class="form-label">住校/走读</label>
                             <select class="form-select" name="boarding_type">
                                 <option value="">不修改</option>
@@ -193,14 +184,6 @@
                                 {% for d in day_student_types %}
                                 <option value="{{ d }}">{{ d }}</option>
                                 {% endfor %}
-                            </select>
-                        </div>
-                        <div class="col-6 mb-3">
-                            <label class="form-label">课本</label>
-                            <select class="form-select" name="textbook">
-                                <option value="">不修改</option>
-                                <option value="领">领</option>
-                                <option value="未领">未领</option>
                             </select>
                         </div>
                         <div class="col-12 mb-3">

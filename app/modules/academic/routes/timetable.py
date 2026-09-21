@@ -1,4 +1,4 @@
-# StuLink v1.9.2 2026-09-16
+# StuLink v1.9.3 2026-09-19
 # 教务 · 课表：查看页（导入功能后续版本开放）
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 from flask import render_template, request
