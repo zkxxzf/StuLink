@@ -51,6 +51,7 @@
                 </td>
                 <td class="text-end">{{ counts.get(e.id, 0) }}</td>
                 <td class="text-end">
+                    <a href="{{ url_for('grades.exam_affair_go', exam_id=e.id) }}" class="btn btn-sm btn-outline-success">考务安排</a>
                     <a href="{{ url_for('grades.exam_detail', exam_id=e.id) }}" class="btn btn-sm btn-outline-primary">详情</a>
                     <a href="{{ url_for('grades.bands_page', exam_id=e.id) }}" class="btn btn-sm btn-outline-info">划线分层</a>
                     <button type="button" class="btn btn-sm btn-outline-danger btn-del-exam"

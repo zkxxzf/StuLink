@@ -226,18 +226,12 @@
             {% if request.blueprint == 'grades' %}
             <div class="nav-section">成绩管理</div>
             {% if current_user.has_perm('grades.edit') %}
-            <a class="nav-link {% if request.endpoint in ('grades.exams_list','grades.exam_new','grades.exam_detail','grades.exam_import') %}active{% endif %}"
+            <a class="nav-link {% if request.endpoint in ('grades.exams_list','grades.exam_new','grades.exam_detail','grades.exam_import') or (request.endpoint and request.endpoint.startswith('grades.affair')) %}active{% endif %}"
                href="{{ url_for('grades.exams_list') }}">
                 <i class="bi bi-journal-text"></i>考试管理
             </a>
             {% endif %}
-            {% if current_user.has_perm('grades.edit') %}
-            {# v1.12.1 考务入口简化：折叠菜单+双子菜单合并为单个入口，向导页由详情页面包屑返回 #}
-            <a class="nav-link {% if request.endpoint and request.endpoint.startswith('grades.affair') %}active{% endif %}"
-               href="{{ url_for('grades.affairs_list') }}">
-                <i class="bi bi-clipboard-check"></i>考务管理
-            </a>
-            {% endif %}
+            {# v1.17.0 考务管理已并入考试管理：统一从考试列表「考务安排」按钮进入，按原流程编排 #}
             <a class="nav-link {% if request.endpoint == 'grades.index' %}active{% endif %}"
                href="{{ url_for('grades.index') }}">
                 <i class="bi bi-graph-up"></i>成绩分析

@@ -90,8 +90,8 @@ def exam_new():
         db.session.commit()
         log_operation(current_user, '新建', '考试', exam.id,
                       f'{grade}{name}（{exam_date}）', module='grades')
-        flash('考试已创建，接下来导入成绩', 'success')
-        return redirect(url_for('grades.exam_detail', exam_id=exam.id))
+        flash('考试已创建', 'success')
+        return redirect(url_for('grades.exams_list'))
     return render_template('grades/exam_form.html', grade_options=_grade_options(),
                            grade='', exam_date=date.today().isoformat(), name='',
                            exam_type='月考', default_date=date.today().isoformat())

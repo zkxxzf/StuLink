@@ -102,6 +102,34 @@ def affair_create():
     return redirect(url_for('grades.affair_detail', aid=affair.id))
 
 
+@bp.route('/exams/<int:exam_id>/affair')
+@login_required
+@perm_required('grades.edit')
+def exam_affair_go(exam_id):
+    """考试列表「考务安排」入口：已有批次→进详情；无→按原流程创建（预填考试信息）后进向导"""
+    exam = Exam.query.get_or_404(exam_id)
+    if exam.grade not in _grade_options():
+        flash('无该年级的操作权限', 'danger')
+        return redirect(url_for('grades.exams_list'))
+    affair = (ExamAffair.query.filter_by(exam_id=exam_id)
+              .order_by(ExamAffair.id.desc()).first())
+    if affair:
+        return redirect(url_for('grades.affair_detail', aid=affair.id))
+    affair = ExamAffair(name=f'{exam.name} 考务',
+                        grade=exam.grade,
+                        exam_date=exam.exam_date,
+                        exam_id=exam_id,
+                        default_prefix='1701',
+                        selection_mode='selected',
+                        operator_id=current_user.id)
+    db.session.add(affair)
+    db.session.commit()
+    log_operation(current_user, '新建', '考务批次', affair.id,
+                  f'{exam.grade} {affair.name}（自考试列表）', module='grades')
+    flash('已为该考试创建考务安排，请按原流程编排', 'success')
+    return redirect(url_for('grades.affair_detail', aid=affair.id))
+
+
 @bp.route('/affairs/<int:aid>/delete', methods=['POST'])
 @login_required
 @perm_required('grades.edit')
