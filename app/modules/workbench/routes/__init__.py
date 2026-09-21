@@ -1,4 +1,4 @@
-# StuLink v1.9.3 2026-09-19
+# StuLink v1.17.0 2026-09-20
 # 教师工作台：我的信息 / 今日课程 / 我的课表 / 我的业绩 / 手机号修改
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 import re
@@ -11,7 +11,7 @@ from app.extensions import db
 from app.models import User
 from app.models.academic import (TimetableEntry, TeacherAchievement, Teacher,
                                  ACHIEVEMENT_CATEGORIES, ACHIEVEMENT_LEVELS,
-                                 ACHIEVEMENT_STATUS)
+                                 ACHIEVEMENT_STATUS, CourseSwap)
 from app.modules.academic.services import teacher_service
 from app.utils.helpers import log_operation
 
@@ -36,6 +36,7 @@ def index():
     teacher = teacher_service.teacher_of_user(current_user)
 
     entries, today_entries, achievements = [], [], []
+    pending_swaps = []
     if teacher:
         entries = (TimetableEntry.query.filter_by(teacher_uid=teacher.teacher_uid)
                    .order_by(TimetableEntry.weekday, TimetableEntry.period).all())
@@ -44,6 +45,11 @@ def index():
         achievements = (TeacherAchievement.query
                         .filter_by(teacher_uid=teacher.teacher_uid)
                         .order_by(TeacherAchievement.created_at.desc()).all())
+        # 调课：当前教师 pending 状态的记录
+        pending_swaps = (CourseSwap.query
+                         .filter_by(applicant_uid=teacher.teacher_uid, status='pending')
+                         .order_by(CourseSwap.created_at.desc())
+                         .limit(10).all())
 
     return render_template('workbench/index.html', teacher=teacher,
                            entries=entries, today_entries=today_entries,
@@ -53,7 +59,8 @@ def index():
                            status_map=ACHIEVEMENT_STATUS,
                            weekday_names=_WEEKDAYS,
                            is_head=(current_user.role == 'homeroom_teacher'),
-                           today=date.today())
+                           today=date.today(),
+                           pending_swaps=pending_swaps)
 
 
 @bp.route('/phone', methods=['POST'])
@@ -98,7 +105,7 @@ def achievement_add():
     """教师提交业绩（进入待审核，由教务审核）"""
     teacher = teacher_service.teacher_of_user(current_user)
     if not teacher:
-        flash('当前账号尚未关联教师名单，请联系管理员在教务模块中关联', 'warning')
+        flash('当前账号尚未关联教务教师名单，请联系管理员在教务模块中关联', 'warning')
         return redirect(url_for('workbench.index'))
 
     category = (request.form.get('category') or '').strip()

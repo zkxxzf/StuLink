@@ -1,0 +1,205 @@
+{% extends "base.html" %}
+{% import "academic/_schedule_parts.html" as parts %}
+{% block title %}学期使用情况报告 · {{ ts.name }}{% endblock %}
+{% block extra_css %}
+<style>
+.usage-num { font-size: 30px; font-weight: 800; line-height: 1; }
+.chart-box { width: 100%; height: 300px; }
+.kpi-card { border-top: 3px solid #6366f1; }
+</style>
+{% endblock %}
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
+    <div class="d-flex align-items-center gap-3 flex-wrap">
+        <h4 class="fw-bold mb-0"><i class="bi bi-bar-chart-line"></i> 学期使用情况报告</h4>
+        {{ parts.term_selector(schedules, ts, base_endpoint='academic.schedule_usage') }}
+    </div>
+    <div class="d-flex gap-2 flex-wrap">
+        <a class="btn btn-sm btn-outline-info text-white"
+           href="{{ url_for('academic.schedule_usage_export', sid=ts.id) }}">
+            <i class="bi bi-download"></i> 导出报告 Excel
+        </a>
+        <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('academic.schedule_master', sid=ts.id) }}">
+            <i class="bi bi-grid-3x3"></i> 大课表
+        </a>
+        <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('academic.schedule_manage') }}">
+            <i class="bi bi-house"></i> 学期管理
+        </a>
+    </div>
+</div>
+
+{{ parts.readonly_banner(ts) }}
+
+<div class="card mb-3">
+    <div class="card-body py-2 d-flex flex-wrap gap-3 align-items-center small">
+        <span><i class="bi bi-mortarboard"></i> <strong>{{ ts.name }}</strong></span>
+        <span class="text-muted"><i class="bi bi-clock-history"></i> {{ ts.period_text() }}</span>
+        <span class="ms-auto text-muted">归档前核对：课时/学科/教师分布是否合理</span>
+    </div>
+</div>
+
+<div class="row g-3 mb-3">
+    {% set kpis = [('课表条目', report.total_entries, 'bi-list-ul'),
+                   ('班级数', report.total_classes, 'bi-people'),
+                   ('学科数', report.total_subjects, 'bi-book'),
+                   ('任课教师', report.total_teachers, 'bi-person-video3')] %}
+    {% for label, val, icon in kpis %}
+    <div class="col-6 col-md-3">
+        <div class="card kpi-card"><div class="card-body text-center py-3">
+            <div class="usage-num text-primary">{{ val }}</div>
+            <div class="text-muted small mt-1"><i class="bi {{ icon }}"></i> {{ label }}</div>
+        </div></div>
+    </div>
+    {% endfor %}
+</div>
+
+<div class="row g-3 mb-3">
+    <div class="col-lg-7">
+        <div class="card h-100">
+            <div class="card-header py-2"><i class="bi bi-bar-chart"></i> 各班级周课时总数</div>
+            <div class="card-body"><div class="chart-box" data-chart="class"></div></div>
+        </div>
+    </div>
+    <div class="col-lg-5">
+        <div class="card h-100">
+            <div class="card-header py-2"><i class="bi bi-pie-chart"></i> 各学科总节数</div>
+            <div class="card-body"><div class="chart-box" data-chart="subject"></div></div>
+        </div>
+    </div>
+</div>
+
+<div class="row g-3 mb-3">
+    <div class="col-lg-7">
+        <div class="card h-100">
+            <div class="card-header py-2"><i class="bi bi-person-video3"></i> 教师课时 Top {{ report.teacher_top|length }}</div>
+            <div class="card-body"><div class="chart-box" data-chart="teacher"></div></div>
+        </div>
+    </div>
+    <div class="col-lg-5">
+        <div class="card h-100">
+            <div class="card-header py-2"><i class="bi bi-clock"></i> 节次类型分布</div>
+            <div class="card-body"><div class="chart-box" data-chart="type"></div></div>
+        </div>
+    </div>
+</div>
+
+<div class="row g-3">
+    <div class="col-lg-6">
+        <div class="card h-100">
+            <div class="card-header py-2">各班级课时明细</div>
+            <div class="table-responsive" style="max-height:360px;overflow:auto">
+                <table class="table table-sm table-hover align-middle mb-0">
+                    <thead class="table-light"><tr><th>班级</th><th class="text-end">周课时</th></tr></thead>
+                    <tbody>
+                        {% for r in report.class_hours %}
+                        <tr><td>{{ r['class'] }}</td><td class="text-end">{{ r.hours }}</td></tr>
+                        {% else %}<tr><td colspan="2" class="text-center text-muted py-3">无数据</td></tr>{% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+    <div class="col-lg-6">
+        <div class="card h-100">
+            <div class="card-header py-2">各学科节数明细</div>
+            <div class="table-responsive" style="max-height:360px;overflow:auto">
+                <table class="table table-sm table-hover align-middle mb-0">
+                    <thead class="table-light"><tr><th>学科</th><th class="text-end">总节数</th></tr></thead>
+                    <tbody>
+                        {% for r in report.subject_counts %}
+                        <tr><td>{{ r.subject }}</td><td class="text-end">{{ r.count }}</td></tr>
+                        {% else %}<tr><td colspan="2" class="text-center text-muted py-3">无数据</td></tr>{% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script id="usageData" type="application/json">{{ report|tojson }}</script>
+{% endblock %}
+
+{% block extra_js %}
+<script src="{{ su('js/echarts.min.js') }}"></script>
+<script>
+(function () {
+    'use strict';
+    if (typeof echarts === 'undefined') { return; }
+    var raw = document.getElementById('usageData');
+    var R = {};
+    try { R = JSON.parse(raw.textContent || '{}'); } catch (e) { R = {}; }
+    var charts = {};
+    var typeLabels = { morning: '上午', afternoon: '下午', evening: '晚自习', break: '早读/课间', other: '其他' };
+
+    function optClass() {
+        var d = R.class_hours || [];
+        return {
+            tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' } },
+            grid: { left: 50, right: 20, top: 20, bottom: 60 },
+            xAxis: { type: 'category', data: d.map(function (x) { return x['class']; }),
+                axisLabel: { interval: 0, rotate: d.length > 6 ? 40 : 0, fontSize: 11 } },
+            yAxis: { type: 'value', minInterval: 1 },
+            series: [{ type: 'bar', data: d.map(function (x) { return x.hours; }), barMaxWidth: 34,
+                itemStyle: { color: new echarts.graphic.LinearGradient(0, 0, 0, 1,
+                    [{ offset: 0, color: '#6366f1' }, { offset: 1, color: '#a5b4fc' }]), borderRadius: [6, 6, 0, 0] } }]
+        };
+    }
+    function optSubject() {
+        var d = R.subject_counts || [];
+        return {
+            tooltip: { trigger: 'item', formatter: '{b}: {c} ({d}%)' },
+            legend: { type: 'scroll', bottom: 0, textStyle: { fontSize: 11 } },
+            series: [{ type: 'pie', radius: ['40%', '68%'], center: ['50%', '44%'],
+                data: d.map(function (x) { return { name: x.subject, value: x.count }; }),
+                label: { formatter: '{b}\n{c}', fontSize: 11 }, emphasis: { label: { fontWeight: 'bold' } } }]
+        };
+    }
+    function optTeacher() {
+        var d = (R.teacher_top || []).slice().reverse();
+        return {
+            tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' } },
+            grid: { left: 80, right: 30, top: 15, bottom: 25 },
+            xAxis: { type: 'value', minInterval: 1 },
+            yAxis: { type: 'category', data: d.map(function (x) { return x.teacher; }), axisLabel: { fontSize: 11 } },
+            series: [{ type: 'bar', data: d.map(function (x) { return x.count; }), barMaxWidth: 20,
+                itemStyle: { color: '#10b981', borderRadius: [0, 6, 6, 0] }, label: { show: true, position: 'right', fontSize: 11 } }]
+        };
+    }
+    function optType() {
+        var t = R.type_dist || {};
+        var keys = ['morning', 'afternoon', 'evening', 'break', 'other'];
+        var colors = { morning: '#f59e0b', afternoon: '#3b82f6', evening: '#8b5cf6', break: '#10b981', other: '#94a3b8' };
+        var data = keys.filter(function (k) { return (t[k] || 0) > 0; })
+            .map(function (k) { return { name: typeLabels[k] || k, value: t[k], itemStyle: { color: colors[k] } }; });
+        return {
+            tooltip: { trigger: 'item', formatter: '{b}: {c} ({d}%)' },
+            legend: { bottom: 0, textStyle: { fontSize: 11 } },
+            series: [{ type: 'pie', radius: '62%', center: ['50%', '44%'], data: data,
+                label: { formatter: '{b}\n{c}', fontSize: 11 } }]
+        };
+    }
+    var builders = { 'class': optClass, subject: optSubject, teacher: optTeacher, type: optType };
+
+    function initChart(el) {
+        var key = el.getAttribute('data-chart');
+        if (charts[key] || !builders[key]) { return; }
+        charts[key] = echarts.init(el);
+        charts[key].setOption(builders[key]());
+    }
+    var boxes = document.querySelectorAll('.chart-box');
+    if ('IntersectionObserver' in window) {
+        var io = new IntersectionObserver(function (entries) {
+            entries.forEach(function (en) {
+                if (en.isIntersecting) { initChart(en.target); io.unobserve(en.target); }
+            });
+        }, { rootMargin: '80px' });
+        boxes.forEach(function (b) { io.observe(b); });
+    } else {
+        boxes.forEach(initChart);
+    }
+    window.addEventListener('resize', function () {
+        Object.keys(charts).forEach(function (k) { charts[k].resize(); });
+    });
+})();
+</script>
+{% endblock %}

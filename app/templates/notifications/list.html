@@ -1,0 +1,454 @@
+{% extends "base.html" %}
+{% block title %}通知公告 - StuLink{% endblock %}
+
+{% block extra_css %}
+<style>
+    .notif-card {
+        border-left: 4px solid #e2e8f0;
+        transition: all .2s;
+        cursor: pointer;
+    }
+    .notif-card:hover { box-shadow: 0 2px 8px rgba(0,0,0,.1); transform: translateY(-1px); }
+    .notif-card.unread { border-left-color: #3b82f6; background: #f0f7ff; }
+    .notif-card.urgent { border-left-color: #ef4444; }
+    .notif-card.urgent.unread { background: #fef2f2; }
+    .priority-badge { font-size: 11px; padding: 2px 8px; border-radius: 10px; font-weight: 600; }
+    .priority-urgent { background: #fef2f2; color: #dc2626; border: 1px solid #fecaca; }
+    .priority-normal { background: #eff6ff; color: #2563eb; border: 1px solid #bfdbfe; }
+    .read-dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
+    .read-dot.unread { background: #3b82f6; }
+    .read-dot.read { background: #cbd5e1; }
+    .notif-content-preview {
+        color: #64748b; font-size: 13px;
+        max-height: 40px; overflow: hidden; text-overflow: ellipsis;
+        display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
+    }
+    .notif-actions { opacity: 0; transition: opacity .2s; }
+    .notif-card:hover .notif-actions { opacity: 1; }
+    .target-tag { font-size: 11px; background: #f1f5f9; color: #475569; padding: 2px 6px; border-radius: 4px; }
+    .category-badge { font-size: 10px; padding: 1px 6px; border-radius: 8px; font-weight: 600; }
+    .cat-system { background: #eff6ff; color: #2563eb; }
+    .cat-reminder { background: #fef3c7; color: #b45309; }
+    .cat-academic { background: #ecfdf5; color: #059669; }
+    .cat-workbench { background: #f5f3ff; color: #7c3aed; }
+    .cat-other { background: #f1f5f9; color: #475569; }
+    .create-btn { border-radius: 8px; font-weight: 600; }
+    .page-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 20px; }
+    .pagination-info { color: #64748b; font-size: 13px; }
+    /* 分类筛选标签 */
+    .filter-bar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 16px; }
+    .filter-tab { font-size: 12px; padding: 4px 12px; border-radius: 16px; border: 1px solid #e2e8f0;
+        color: #475569; text-decoration: none; transition: all .15s; background: #fff; }
+    .filter-tab:hover { border-color: #93c5fd; color: #2563eb; }
+    .filter-tab.active { background: #2563eb; color: #fff; border-color: #2563eb; }
+    .filter-switch { font-size: 12px; display: flex; align-items: center; gap: 4px; }
+    /* 创建通知模态框 */
+    .modal-content { border-radius: 12px; border: none; }
+    .modal-header { border-bottom: 1px solid #f1f5f9; padding: 16px 20px; }
+    .modal-body { padding: 20px; }
+    .scope-group { display: none; }
+    .scope-group.active { display: block; }
+    .checkbox-grid { display: flex; flex-wrap: wrap; gap: 8px; }
+    .checkbox-grid .form-check { min-width: 80px; }
+    /* 人员多选控件 */
+    .user-picker { border: 1px solid #dee2e6; border-radius: 8px; padding: 8px; min-height: 42px; }
+    .user-picker .selected-tag { display: inline-flex; align-items: center; gap: 4px; background: #eff6ff;
+        color: #2563eb; border-radius: 12px; padding: 2px 8px; font-size: 12px; margin: 2px; }
+    .user-picker .selected-tag .remove { cursor: pointer; font-weight: bold; color: #94a3b8; }
+    .user-picker .selected-tag .remove:hover { color: #dc2626; }
+    .search-dropdown { position: absolute; z-index: 1050; background: #fff; border: 1px solid #dee2e6;
+        border-radius: 8px; max-height: 200px; overflow-y: auto; width: 100%; box-shadow: 0 4px 12px rgba(0,0,0,.1); }
+    .search-dropdown .item { padding: 8px 12px; cursor: pointer; font-size: 13px; border-bottom: 1px solid #f1f5f9; }
+    .search-dropdown .item:hover { background: #f0f7ff; }
+    .search-dropdown .item .meta { color: #94a3b8; font-size: 11px; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <div>
+        <h5 class="mb-1"><i class="bi bi-megaphone"></i> 通知公告</h5>
+        <span class="pagination-info">共 {{ total }} 条通知</span>
+    </div>
+    <div class="d-flex gap-2">
+        {% if total > 0 %}
+        <form method="POST" action="{{ url_for('notifications.notification_read_all') }}" class="d-inline">
+            <button type="submit" class="btn btn-sm btn-outline-secondary" style="border-radius:8px;">
+                <i class="bi bi-check2-all"></i> 全部已读
+            </button>
+        </form>
+        {% endif %}
+        {% if can_create %}
+        <button type="button" class="btn btn-sm btn-primary create-btn" data-bs-toggle="modal" data-bs-target="#createModal">
+            <i class="bi bi-plus-lg"></i> 发布通知
+        </button>
+        {% endif %}
+    </div>
+</div>
+
+{# 分类筛选栏 #}
+<div class="filter-bar">
+    <a class="filter-tab {% if not current_category %}active{% endif %}"
+       href="{{ url_for('notifications.notifications_page', only_unread='1' if only_unread else None) }}">全部</a>
+    {% for key, label in category_labels.items() %}
+    <a class="filter-tab {% if current_category == key %}active{% endif %}"
+       href="{{ url_for('notifications.notifications_page', category=key, only_unread='1' if only_unread else None) }}">{{ label }}</a>
+    {% endfor %}
+    <span class="ms-3 filter-switch">
+        <input type="checkbox" class="form-check-input" id="onlyUnreadSwitch"
+               {% if only_unread %}checked{% endif %}
+               onchange="toggleUnread()">
+        <label for="onlyUnreadSwitch">只看未读</label>
+    </span>
+</div>
+
+{% if notifications %}
+<div class="d-flex flex-column gap-2">
+    {% for n in notifications %}
+    <div class="card notif-card {% if not n.is_read %}unread{% endif %} {% if n.priority == 'urgent' %}urgent{% endif %}"
+         onclick="window.location.href='{{ url_for('notifications.notification_detail', notification_id=n.id) }}'">
+        <div class="card-body py-3 px-3">
+            <div class="d-flex align-items-start justify-content-between">
+                <div class="d-flex align-items-center gap-2 flex-grow-1 min-w-0">
+                    <span class="read-dot {% if n.is_read %}read{% else %}unread{% endif %}"></span>
+                    <h6 class="mb-0 fw-semibold text-truncate" style="font-size:14px;">
+                        {{ n.title }}
+                    </h6>
+                    <span class="priority-badge {% if n.priority == 'urgent' %}priority-urgent{% else %}priority-normal{% endif %}">
+                        {% if n.priority == 'urgent' %}紧急{% else %}普通{% endif %}
+                    </span>
+                </div>
+                <div class="notif-actions d-flex gap-1 ms-2 flex-shrink-0">
+                    {% if n.link_url %}
+                    <a href="{{ n.link_url }}" class="btn btn-sm btn-outline-success"
+                       style="font-size:12px;border-radius:6px;" title="前往处理"
+                       onclick="event.stopPropagation();">
+                        <i class="bi bi-box-arrow-up-right"></i>
+                    </a>
+                    {% endif %}
+                    {% if not n.is_read %}
+                    <button class="btn btn-sm btn-outline-primary btn-mark-read"
+                            style="font-size:12px;border-radius:6px;"
+                            onclick="event.stopPropagation(); markRead({{ n.id }}, this)"
+                            title="标记已读">
+                        <i class="bi bi-check2"></i>
+                    </button>
+                    {% endif %}
+                    {% if can_create %}
+                    <form method="POST" action="{{ url_for('notifications.notification_delete', notification_id=n.id) }}"
+                          onclick="event.stopPropagation();" onsubmit="return confirm('确定删除此通知？')">
+                        <button type="submit" class="btn btn-sm btn-outline-danger"
+                                style="font-size:12px;border-radius:6px;" title="删除">
+                            <i class="bi bi-trash3"></i>
+                        </button>
+                    </form>
+                    {% endif %}
+                </div>
+            </div>
+            <div class="notif-content-preview mt-1 ms-3">{{ n.content[:80] }}{% if n.content|length > 80 %}…{% endif %}</div>
+            <div class="d-flex align-items-center gap-2 mt-2 ms-3">
+                <small class="text-muted">
+                    <i class="bi bi-clock"></i>
+                    {{ n.published_at.strftime('%m-%d %H:%M') if n.published_at else '' }}
+                </small>
+                <span class="target-tag">
+                    {% if n.target_type == 'all' %}全体
+                    {% elif n.target_type == 'grade' %}指定年级
+                    {% elif n.target_type == 'class' %}指定班级
+                    {% elif n.target_type == 'role' %}指定角色
+                    {% elif n.target_type == 'users' %}指定人员
+                    {% endif %}
+                </span>
+                {% set cat = n.category or 'system' %}
+                <span class="category-badge cat-{{ cat }}">{{ n.category_label or '系统公告' }}</span>
+                {% if not n.is_read %}
+                <span class="badge bg-primary" style="font-size:10px;">未读</span>
+                {% else %}
+                <span class="badge bg-secondary" style="font-size:10px;">已读</span>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+    {% endfor %}
+</div>
+
+{# 分页 #}
+{% if total_pages > 1 %}
+<nav class="mt-3">
+    <ul class="pagination pagination-sm justify-content-center">
+        {% if page > 1 %}
+        <li class="page-item">
+            <a class="page-link" href="{{ url_for('notifications.notifications_page', page=page-1, category=current_category, only_unread='1' if only_unread else None) }}">«</a>
+        </li>
+        {% endif %}
+        {% for p in range(1, total_pages + 1) %}
+        {% if p == page %}
+        <li class="page-item active"><span class="page-link">{{ p }}</span></li>
+        {% elif (p - page)|abs <= 2 or p == 1 or p == total_pages %}
+        <li class="page-item">
+            <a class="page-link" href="{{ url_for('notifications.notifications_page', page=p, category=current_category, only_unread='1' if only_unread else None) }}">{{ p }}</a>
+        </li>
+        {% elif (p - page)|abs == 3 %}
+        <li class="page-item disabled"><span class="page-link">…</span></li>
+        {% endif %}
+        {% endfor %}
+        {% if page < total_pages %}
+        <li class="page-item">
+            <a class="page-link" href="{{ url_for('notifications.notifications_page', page=page+1, category=current_category, only_unread='1' if only_unread else None) }}">»</a>
+        </li>
+        {% endif %}
+    </ul>
+</nav>
+{% endif %}
+
+{% else %}
+<div class="card">
+    <div class="card-body text-center py-5">
+        <i class="bi bi-inbox" style="font-size:48px;color:#cbd5e1;"></i>
+        <p class="text-muted mt-3 mb-0">暂无通知</p>
+    </div>
+</div>
+{% endif %}
+
+{# 创建通知模态框 #}
+{% if can_create %}
+<div class="modal fade" id="createModal" tabindex="-1">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title"><i class="bi bi-megaphone"></i> 发布通知</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <form method="POST" action="{{ url_for('notifications.notification_create') }}">
+                <div class="modal-body">
+                    <div class="mb-3">
+                        <label class="form-label fw-semibold">标题 <span class="text-danger">*</span></label>
+                        <input type="text" name="title" class="form-control" required maxlength="100"
+                               placeholder="请输入通知标题">
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label fw-semibold">内容 <span class="text-danger">*</span></label>
+                        <textarea name="content" class="form-control" rows="5" required
+                                  placeholder="请输入通知内容"></textarea>
+                    </div>
+                    <div class="row">
+                        <div class="col-md-4 mb-3">
+                            <label class="form-label fw-semibold">发送范围</label>
+                            <select name="target_type" id="targetTypeSelect" class="form-select"
+                                    onchange="toggleScope()">
+                                {% for val, label in target_types %}
+                                <option value="{{ val }}">{{ label }}</option>
+                                {% endfor %}
+                            </select>
+                        </div>
+                        <div class="col-md-4 mb-3">
+                            <label class="form-label fw-semibold">分类</label>
+                            <select name="category" class="form-select">
+                                {% for key, label in category_labels.items() %}
+                                <option value="{{ key }}">{{ label }}</option>
+                                {% endfor %}
+                            </select>
+                        </div>
+                        <div class="col-md-4 mb-3">
+                            <label class="form-label fw-semibold">优先级</label>
+                            <select name="priority" class="form-select">
+                                <option value="normal">普通</option>
+                                <option value="urgent">紧急</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    {# 指定年级 #}
+                    <div class="mb-3 scope-group" id="scopeGrade">
+                        <label class="form-label fw-semibold">选择年级</label>
+                        <div class="checkbox-grid">
+                            {% for g in grade_options %}
+                            <div class="form-check">
+                                <input class="form-check-input" type="checkbox" name="target_grades"
+                                       value="{{ g }}" id="grade_{{ loop.index }}">
+                                <label class="form-check-label" for="grade_{{ loop.index }}">{{ g }}</label>
+                            </div>
+                            {% endfor %}
+                        </div>
+                    </div>
+
+                    {# 指定班级 #}
+                    <div class="mb-3 scope-group" id="scopeClass">
+                        <label class="form-label fw-semibold">选择班级</label>
+                        <div class="checkbox-grid">
+                            {% for c in class_options %}
+                            <div class="form-check">
+                                <input class="form-check-input" type="checkbox" name="target_classes"
+                                       value="{{ c }}" id="class_{{ loop.index }}">
+                                <label class="form-check-label" for="class_{{ loop.index }}">{{ c }}</label>
+                            </div>
+                            {% endfor %}
+                        </div>
+                    </div>
+
+                    {# 指定角色 #}
+                    <div class="mb-3 scope-group" id="scopeRole">
+                        <label class="form-label fw-semibold">选择角色</label>
+                        <div class="checkbox-grid">
+                            {% for val, label in role_options %}
+                            <div class="form-check">
+                                <input class="form-check-input" type="checkbox" name="target_roles"
+                                       value="{{ val }}" id="role_{{ loop.index }}">
+                                <label class="form-check-label" for="role_{{ loop.index }}">{{ label }}</label>
+                            </div>
+                            {% endfor %}
+                        </div>
+                    </div>
+
+                    {# 指定人员 #}
+                    <div class="mb-3 scope-group" id="scopeUsers">
+                        <label class="form-label fw-semibold">选择人员</label>
+                        <div class="position-relative">
+                            <input type="text" id="userSearchInput" class="form-control"
+                                   placeholder="输入姓名或工号搜索..." autocomplete="off">
+                            <div id="userSearchDropdown" class="search-dropdown" style="display:none;"></div>
+                        </div>
+                        <div class="user-picker mt-2" id="userPicker">
+                            <span class="text-muted" id="pickerPlaceholder" style="font-size:12px;">已选人员将显示在此处</span>
+                        </div>
+                        <input type="hidden" name="target_uids" id="targetUidsHidden" value="">
+                    </div>
+
+                    <div class="mb-3">
+                        <label class="form-label fw-semibold">跳转链接 <small class="text-muted">(可选)</small></label>
+                        <input type="text" name="link_url" class="form-control"
+                               placeholder="如 /academic/forms/1/fill">
+                    </div>
+                </div>
+                <div class="modal-footer border-0 pt-0">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal" style="border-radius:8px;">取消</button>
+                    <button type="submit" class="btn btn-primary" style="border-radius:8px;">
+                        <i class="bi bi-send"></i> 发布
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+{% endif %}
+{% endblock %}
+
+{% block extra_js %}
+<script>
+function toggleScope() {
+    const v = document.getElementById('targetTypeSelect').value;
+    document.querySelectorAll('.scope-group').forEach(el => el.classList.remove('active'));
+    if (v === 'grade') document.getElementById('scopeGrade').classList.add('active');
+    else if (v === 'class') document.getElementById('scopeClass').classList.add('active');
+    else if (v === 'role') document.getElementById('scopeRole').classList.add('active');
+    else if (v === 'users') document.getElementById('scopeUsers').classList.add('active');
+}
+
+function toggleUnread() {
+    const checked = document.getElementById('onlyUnreadSwitch').checked;
+    const url = new URL(window.location);
+    if (checked) {
+        url.searchParams.set('only_unread', '1');
+    } else {
+        url.searchParams.delete('only_unread');
+    }
+    window.location = url.toString();
+}
+
+function markRead(notifId, btn) {
+    fetch('/notifications/' + notifId + '/read', {
+        method: 'POST',
+        headers: { 'X-CSRFToken': csrfToken, 'Content-Type': 'application/json' }
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.ok) {
+            const card = btn.closest('.notif-card');
+            card.classList.remove('unread');
+            const dot = card.querySelector('.read-dot');
+            if (dot) dot.classList.remove('unread');
+            const badge = card.querySelector('.badge.bg-primary');
+            if (badge) { badge.classList.remove('bg-primary'); badge.classList.add('bg-secondary'); badge.textContent = '已读'; }
+            btn.remove();
+            if (typeof updateNotificationBadge === 'function') updateNotificationBadge();
+        }
+    });
+}
+
+// 人员多选控件
+const selectedUsers = [];
+let searchTimer = null;
+
+document.addEventListener('DOMContentLoaded', function() {
+    const input = document.getElementById('userSearchInput');
+    if (!input) return;
+    input.addEventListener('input', function() {
+        clearTimeout(searchTimer);
+        const kw = this.value.trim();
+        if (!kw) { document.getElementById('userSearchDropdown').style.display = 'none'; return; }
+        searchTimer = setTimeout(() => {
+            fetch('/notifications/api/search-users?keyword=' + encodeURIComponent(kw))
+                .then(r => r.json())
+                .then(data => {
+                    const dd = document.getElementById('userSearchDropdown');
+                    if (!data.length) { dd.style.display = 'none'; return; }
+                    dd.innerHTML = data.map(u =>
+                        '<div class="item" data-uid="' + u.uid + '" data-name="' + u.name + '">' +
+                        '<strong>' + u.name + '</strong> <span class="meta">' + u.uid +
+                        (u.grade ? ' · ' + u.grade : '') +
+                        (u.class_name ? ' ' + u.class_name : '') +
+                        ' · ' + u.role + '</span></div>'
+                    ).join('');
+                    dd.style.display = 'block';
+                    dd.querySelectorAll('.item').forEach(el => {
+                        el.addEventListener('click', function() {
+                            addUser(this.dataset.uid, this.dataset.name);
+                            input.value = '';
+                            dd.style.display = 'none';
+                        });
+                    });
+                });
+        }, 300);
+    });
+});
+
+function addUser(uid, name) {
+    if (selectedUsers.find(u => u.uid === uid)) return;
+    selectedUsers.push({uid, name});
+    renderPicker();
+}
+
+function removeUser(uid) {
+    const idx = selectedUsers.findIndex(u => u.uid === uid);
+    if (idx >= 0) selectedUsers.splice(idx, 1);
+    renderPicker();
+}
+
+function renderPicker() {
+    const picker = document.getElementById('userPicker');
+    const placeholder = document.getElementById('pickerPlaceholder');
+    const hidden = document.getElementById('targetUidsHidden');
+    // Remove old tags
+    picker.querySelectorAll('.selected-tag').forEach(el => el.remove());
+    if (!selectedUsers.length) {
+        placeholder.style.display = '';
+    } else {
+        placeholder.style.display = 'none';
+        selectedUsers.forEach(u => {
+            const tag = document.createElement('span');
+            tag.className = 'selected-tag';
+            tag.innerHTML = u.name + ' <span class="remove" onclick="removeUser(\'' + u.uid + '\')">&times;</span>';
+            picker.appendChild(tag);
+        });
+    }
+    hidden.value = selectedUsers.map(u => u.uid).join(',');
+    // Also set as form list
+    picker.querySelectorAll('input[name="target_uids"]').forEach(el => el.remove());
+    selectedUsers.forEach(u => {
+        const inp = document.createElement('input');
+        inp.type = 'hidden'; inp.name = 'target_uids'; inp.value = u.uid;
+        picker.appendChild(inp);
+    });
+}
+</script>
+{% endblock %}

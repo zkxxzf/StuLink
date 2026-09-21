@@ -18,6 +18,70 @@ def _layer_names(data, direction):
     return [name for name, _lower in data.band_list(direction)]
 
 
+def _layer_online_counts(data, subject, class_name=None, direction=None):
+    """按累计口径统计某班/某方向 每科各层的「单上线 / 双上线」人数。
+
+    口径（与汇报区/自由表一致）：
+    - 单上线：单科 ≥ 该层单科线
+    - 双上线：单科 ≥ 该层单科线 AND 学生总分 ≥ 同名层总分线
+
+    返回 {层名: {'single_n': int, 'dual_n': int}}；
+    未划线/该层无单科线或无同名总分线的科目不返回该层。
+
+    注：不传 class_name 时返回全年级合计；A3/A4 热路径请在外层按班级分组后一次性遍历
+    total_rows 避免 O(班级数 × n) 重复扫描。"""
+    out = {}
+    for t in data.totals_of(class_name=class_name, direction=direction):
+        subj_score = data.subj.get((t['no'], subject))
+        if subj_score is None:
+            continue
+        total_score = t['score']
+        dir_key = t['direction'] or ''
+        subj_bands = data.band_list(dir_key, subject)
+        total_bands = data.band_list(dir_key, TOTAL_SUBJECT)
+        total_map = {n: lo for n, lo in total_bands}
+        for name, lower in subj_bands:
+            d = out.setdefault(name, {'single_n': 0, 'dual_n': 0})
+            if subj_score >= lower:
+                d['single_n'] += 1
+                tlo = total_map.get(name)
+                if tlo is not None and total_score is not None and total_score >= tlo:
+                    d['dual_n'] += 1
+    return out
+
+
+def _layer_online_counts_by_class(data, subject, direction=None):
+    """遍历 total_rows 一次，按班级分组返回 {class_name: _layer_online_counts(...)}。
+
+    替代在班级循环里反复调 _layer_online_counts → totals_of（每次都 O(n) 过滤），
+    把 O(班级数 × n) 降到 O(n)。"""
+    by_cls = {}
+    for t in data.totals_of(direction=direction):
+        cls = t['class_name'] or '—'
+        subj_score = data.subj.get((t['no'], subject))
+        if subj_score is None:
+            continue
+        total_score = t['score']
+        dir_key = t['direction'] or ''
+        subj_bands = data.band_list(dir_key, subject)
+        total_bands = data.band_list(dir_key, TOTAL_SUBJECT)
+        total_map = {n: lo for n, lo in total_bands}
+        out = by_cls.setdefault(cls, {})
+        for name, lower in subj_bands:
+            d = out.setdefault(name, {'single_n': 0, 'dual_n': 0})
+            if subj_score >= lower:
+                d['single_n'] += 1
+                tlo = total_map.get(name)
+                if tlo is not None and total_score is not None and total_score >= tlo:
+                    d['dual_n'] += 1
+    return by_cls
+
+
+def _fmt_pct(n, d):
+    """分母为 0 时返回 None（前端渲染成 ---）"""
+    return st.fmt_rate(n, d) if d else None
+
+
 # ==================== A1 年级分析 ====================
 
 def grade_tab(exam_id, direction=''):
@@ -420,7 +484,7 @@ def subject_tab(exam_id, subject, direction=''):
                 layer_names.append(name)
 
     def _layer_counts(cls):
-        """该班学生在本学科各层的人数（按学生自身方向的单科线判定）"""
+        """该班学生在本学科各层的人数（按学生自身方向的单科线判定，落入层/互斥）"""
         counts = {name: 0 for name in layer_names}
         for t in data.totals_of(class_name=cls, direction=dr):
             s = data.subj.get((t['no'], subject))
@@ -434,6 +498,9 @@ def subject_tab(exam_id, subject, direction=''):
                 counts[bl[idx][0]] = counts.get(bl[idx][0], 0) + 1
         return counts
 
+    # v1.13.2 双上线：预算一次按班级分组，班级循环里直接查（O(n) 而非 O(班级数 × n)）
+    online_by_cls = (_layer_online_counts_by_class(data, subject, direction=dr)
+                     if layer_names else {})
     t1 = []
     for cls in data.classes:
         cls_s = data.scores_of_subject(subject, class_name=cls, direction=dr)
@@ -451,8 +518,15 @@ def subject_tab(exam_id, subject, direction=''):
         }
         if layer_names:
             lc = _layer_counts(cls)
+            online = online_by_cls.get(cls, {})
             for i, name in enumerate(layer_names):
                 row['l_%d' % i] = lc.get(name, 0)
+                od = online.get(name, {})
+                sn = od.get('single_n', 0)
+                dn = od.get('dual_n', 0)
+                row['lo_%d_n' % i] = sn
+                row['lo_%d_dn' % i] = dn
+                row['lo_%d_dr' % i] = _fmt_pct(dn, len(cls_s))
         t1.append(row)
     t1.sort(key=lambda r: -(r['avg'] or 0))
     cmp_cols = [{'key': 'subject', 'label': '科目', 'type': 'text'},
@@ -465,8 +539,16 @@ def subject_tab(exam_id, subject, direction=''):
                 {'key': 'low_count', 'label': '低分人数', 'type': 'int'},
                 {'key': 'diff', 'label': '与年级均分差', 'type': 'num'}]
     if layer_names:
-        cmp_cols += [{'key': 'l_%d' % i, 'label': f'{name}人数', 'type': 'int'}
-                     for i, name in enumerate(layer_names)]
+        # v1.13.2 双上线：每层 4 列（落层人数 / 单上线人数 / 双上线人数 / 双上线率%）
+        # 落层人数：该科实际分数落入该层的学生数（互斥，每人只属一层）
+        # 单/双上线：累计口径（达该层下界及以上），双上线=单科+总分双过同层线
+        for i, name in enumerate(layer_names):
+            cmp_cols += [
+                {'key': 'l_%d' % i, 'label': f'{name}人数', 'type': 'int'},
+                {'key': 'lo_%d_n' % i, 'label': f'{name}单上', 'type': 'int'},
+                {'key': 'lo_%d_dn' % i, 'label': f'{name}双上', 'type': 'int'},
+                {'key': 'lo_%d_dr' % i, 'label': f'{name}双上率%', 'type': 'num'},
+            ]
     tables['class_compare'] = {
         'title': f'{subject}学科各班对比表',
         'columns': cmp_cols,
@@ -616,6 +698,25 @@ def teacher_tab(exam_id, subject=None, links=None, grade=None):
         User.id.in_([l.user_id for l in links] or [0])).all()}
 
     t1 = []
+    # v1.13.2 双上线：预算一次按 (class_name, subject) 分组，避免每个 link 都 O(n) 过滤
+    # subject_layer_names 仅用于决定是否显示分层列；真正的线上统计按 link.subject 各自的划线
+    # 列层名取自「默认首个方向 + 首个有数据的科目」——仅用于表头展示，不影响计算
+    _first_subj = None
+    for l in links:
+        if not subject or l.subject == subject:
+            _first_subj = l.subject
+            break
+    if not _first_subj:
+        _first_subj = subject or SUBJECTS[0]
+    _first_dir = (data.directions or [''])[0]
+    subject_layer_names = [n for n, _ in data.band_list(_first_dir, _first_subj)]
+    all_subjects = sorted({l.subject for l in links if not subject or l.subject == subject})
+    online_cache = {}  # (class_name, subject) -> online_counts
+    if subject_layer_names:
+        for s in all_subjects:
+            by_cls = _layer_online_counts_by_class(data, s)
+            for cls, od in by_cls.items():
+                online_cache[(cls, s)] = od
     for link in links:
         if subject and link.subject != subject:
             continue
@@ -625,7 +726,7 @@ def teacher_tab(exam_id, subject=None, links=None, grade=None):
         grd_s = data.scores_of_subject(link.subject)
         grd_avg = st.mean(grd_s)
         l2 = data.subject_lines(link.subject)
-        t1.append({
+        row = {
             'teacher': users.get(link.user_id, f'#{link.user_id}'),
             'class_name': link.class_name, 'subject': link.subject,
             'grade': link.grade,
@@ -635,19 +736,40 @@ def teacher_tab(exam_id, subject=None, links=None, grade=None):
             'diff': round(st.mean(cls_s) - grd_avg, 1) if grd_avg is not None else None,
             'pass_rate': st.fmt_rate(sum(1 for s in cls_s if s >= l2['pass']), len(cls_s)),
             'good_rate': st.fmt_rate(sum(1 for s in cls_s if s >= l2['excellent']), len(cls_s)),
-        })
+        }
+        if subject_layer_names:
+            online = online_cache.get((link.class_name, link.subject), {})
+            for i, name in enumerate(subject_layer_names):
+                od = online.get(name, {})
+                sn = od.get('single_n', 0)
+                dn = od.get('dual_n', 0)
+                row['t_lo_%d_n' % i] = sn
+                row['t_lo_%d_dn' % i] = dn
+                row['t_lo_%d_dr' % i] = _fmt_pct(dn, len(cls_s))
+        t1.append(row)
+    # 列定义
+    teacher_cols = [
+        {'key': 'teacher', 'label': '教师姓名', 'type': 'text'},
+        {'key': 'grade', 'label': '年级', 'type': 'text'},
+        {'key': 'class_name', 'label': '班级', 'type': 'text'},
+        {'key': 'subject', 'label': '科目', 'type': 'text'},
+        {'key': 'count', 'label': '参考人数', 'type': 'int'},
+        {'key': 'avg', 'label': '科目平均分', 'type': 'num'},
+        {'key': 'grd_avg', 'label': '年级该科平均分', 'type': 'num'},
+        {'key': 'diff', 'label': '分差', 'type': 'num'},
+        {'key': 'pass_rate', 'label': '及格率%', 'type': 'num'},
+        {'key': 'good_rate', 'label': '优秀率%', 'type': 'num'},
+    ]
+    if subject_layer_names:
+        for i, name in enumerate(subject_layer_names):
+            teacher_cols += [
+                {'key': 't_lo_%d_n' % i, 'label': f'{name}单上', 'type': 'int'},
+                {'key': 't_lo_%d_dn' % i, 'label': f'{name}双上', 'type': 'int'},
+                {'key': 't_lo_%d_dr' % i, 'label': f'{name}双上率%', 'type': 'num'},
+            ]
     tables['teacher_data'] = {
         'title': '教师教学数据表',
-        'columns': [{'key': 'teacher', 'label': '教师姓名', 'type': 'text'},
-                    {'key': 'grade', 'label': '年级', 'type': 'text'},
-                    {'key': 'class_name', 'label': '班级', 'type': 'text'},
-                    {'key': 'subject', 'label': '科目', 'type': 'text'},
-                    {'key': 'count', 'label': '参考人数', 'type': 'int'},
-                    {'key': 'avg', 'label': '科目平均分', 'type': 'num'},
-                    {'key': 'grd_avg', 'label': '年级该科平均分', 'type': 'num'},
-                    {'key': 'diff', 'label': '分差', 'type': 'num'},
-                    {'key': 'pass_rate', 'label': '及格率%', 'type': 'num'},
-                    {'key': 'good_rate', 'label': '优秀率%', 'type': 'num'}],
+        'columns': teacher_cols,
         'rows': t1,
     }
     # 任课组合（供前端选择器）

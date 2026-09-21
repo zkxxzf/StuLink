@@ -64,6 +64,11 @@ class User(UserMixin, db.Model):
 
 @login_manager.user_loader
 def load_user(user_id):
-    return db.session.get(User, int(user_id))
+    # v1.16.0 性能改造：joinedload 预加载权限组，避免每个请求访问
+    # current_user.permission_group 时额外触发一次懒加载查询（每请求省 1 条 SQL）。
+    from sqlalchemy.orm import joinedload
+    return db.session.query(User).options(
+        joinedload(User.permission_group)
+    ).filter(User.id == int(user_id)).first()
 
 

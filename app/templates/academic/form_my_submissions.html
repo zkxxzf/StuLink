@@ -1,0 +1,47 @@
+{% extends "base.html" %}
+{% block title %}我的提交记录{% endblock %}
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+    <h4 class="fw-bold mb-0">
+        <i class="bi bi-clock-history"></i> 我的提交记录
+    </h4>
+    <a class="btn btn-sm btn-outline-primary" href="{{ url_for('academic.form_fill_list') }}">
+        <i class="bi bi-pencil-square"></i> 可填写表单
+    </a>
+</div>
+
+<div class="card">
+    <div class="table-responsive">
+        <table class="table table-hover align-middle mb-0">
+            <thead class="table-light">
+                <tr>
+                    <th>表单标题</th>
+                    <th>提交时间</th>
+                    <th>状态</th>
+                    <th>审核备注</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for item in sub_data %}
+                <tr>
+                    <td class="fw-bold">{{ item.form_title }}</td>
+                    <td class="small">{{ item.submission.submitted_at.strftime('%Y-%m-%d %H:%M') if item.submission.submitted_at else '-' }}</td>
+                    <td>
+                        {% if item.submission.status == 'submitted' %}
+                        <span class="badge bg-warning text-dark">待审核</span>
+                        {% elif item.submission.status == 'approved' %}
+                        <span class="badge bg-success">已通过</span>
+                        {% else %}
+                        <span class="badge bg-danger">已驳回</span>
+                        {% endif %}
+                    </td>
+                    <td class="small text-muted">{{ item.submission.review_note or '-' }}</td>
+                </tr>
+                {% else %}
+                <tr><td colspan="4" class="text-center text-muted py-4">暂无提交记录</td></tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+{% endblock %}

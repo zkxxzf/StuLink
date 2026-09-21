@@ -1,9 +1,29 @@
-"""初始化预设权限组（模块化权限系统）"""
+"""初始化预设权限组（模块化权限系统）
+
+v1.17.0（PR#5 审查 M6）：workbench.* 权限以 app/__init__.py 的 PERMISSION_GROUPS 为
+唯一来源，脚本按组名合并，避免脚本预设与代码种子两处漂移。
+"""
 import sys, os
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from app import create_app
+from app import create_app, PERMISSION_GROUPS
 from app.extensions import db
 from app.models import PermissionGroup, User
+
+# 组名 → 该组应具备的 workbench.* 权限（取 app/__init__.py 种子，含 notifications_view 兜底）
+_WORKBENCH_KEYS_BY_NAME = {
+    p['name']: [k for k in p['menu_keys'] if k.startswith('workbench.')]
+    for p in PERMISSION_GROUPS
+}
+
+
+def _with_workbench(name, keys):
+    """合并该组的 workbench.* 权限（去重、保持原有顺序）"""
+    merged = list(keys)
+    for k in _WORKBENCH_KEYS_BY_NAME.get(name, []):
+        if k not in merged:
+            merged.append(k)
+    return merged
+
 
 PRESETS = [
     {
@@ -20,7 +40,10 @@ PRESETS = [
             'system.users', 'system.dictionary', 'system.class_profile',
             'system.perm_groups', 'system.grade_mgmt',
             'points.view', 'points.edit',
+            'points.import', 'points.export', 'points.rules',
             'grades.view', 'grades.edit',
+            'academic.view', 'academic.timetable',
+            'portrait.view', 'portrait.edit',
         ],
     },
     {
@@ -34,6 +57,8 @@ PRESETS = [
             'dormitory.view', 'dormitory.beds',
             'statistics.view',
             'points.view', 'grades.view',
+            'portrait.view', 'portrait.edit',
+            'points.import', 'points.rules',
         ],
     },
     {
@@ -47,6 +72,8 @@ PRESETS = [
             'dormitory.view', 'dormitory.beds',
             'statistics.view',
             'points.view', 'grades.view',
+            'portrait.view', 'portrait.edit',
+            'points.import',
         ],
     },
     {
@@ -69,6 +96,7 @@ PRESETS = [
         'menu_keys': [
             'students.view',
             'points.view', 'points.edit',
+            'points.import',
             'grades.view', 'grades.edit',
         ],
     },
@@ -77,21 +105,22 @@ PRESETS = [
 app = create_app()
 with app.app_context():
     for p in PRESETS:
+        menu_keys = _with_workbench(p['name'], p['menu_keys'])
         existing = PermissionGroup.query.filter_by(name=p['name']).first()
         if existing:
             existing.scope_type = p['scope_type']
             existing.role = p['role']
             existing.description = p['description']
-            existing.set_menu_keys(p['menu_keys'])
+            existing.set_menu_keys(menu_keys)
             print(f'Updated: {p["name"]}')
         else:
             g = PermissionGroup(
                 name=p['name'],
                 role=p['role'],
                 scope_type=p['scope_type'],
-                description=p['description'],
+                description=p.get('description', ''),
             )
-            g.set_menu_keys(p['menu_keys'])
+            g.set_menu_keys(menu_keys)
             db.session.add(g)
             print(f'Created: {p["name"]}')
     db.session.commit()

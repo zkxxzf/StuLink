@@ -55,11 +55,20 @@ class Config:
     CACHE_DEFAULT_TIMEOUT = 300  # 5分钟缓存
     
     # SQLAlchemy 优化配置
+    # connect_args.timeout=15：SQLite  busy 等待 15s（多线程写入时避免立即报 database is locked）
     SQLALCHEMY_ENGINE_OPTIONS = {
         'pool_size': 10,
         'pool_recycle': 3600,
         'pool_pre_ping': True,
+        'connect_args': {'timeout': 15},
     }
+
+    # SQLite WAL 开关：默认关闭。
+    # 取舍说明：本项目 data 目录位于同步盘（路径含「00同步文件」），WAL 产生的
+    # -wal/-shm 伴生文件可能被同步工具锁定或半同步，存在损坏数据库的真实风险。
+    # 如需开启（写入并发高的部署环境）：设置环境变量 STULINK_ENABLE_WAL=1 后重启，
+    # 并确认 data 目录不在同步范围内或同步工具已排除 *.db-wal / *.db-shm。
+    SQLITE_ENABLE_WAL = os.environ.get('STULINK_ENABLE_WAL', '0').strip() == '1'
 
     # 学校名称：成绩证明等对外文书抬头
     # 优先级：环境变量 SCHOOL_NAME > 数据库 system_settings（系统设置页）> 化名占位
@@ -74,6 +83,8 @@ class Config:
         'points': 'sqlite:///' + os.path.join(BASE_DIR, 'data', 'points.db'),
         'academic': 'sqlite:///' + os.path.join(BASE_DIR, 'data', 'academic.db'),
         'portrait': 'sqlite:///' + os.path.join(BASE_DIR, 'data', 'portrait.db'),
+        'system': 'sqlite:///' + os.path.join(BASE_DIR, 'data', 'system.db'),
+        'timetable': 'sqlite:///' + os.path.join(BASE_DIR, 'data', 'timetable.db'),
     }
 
 

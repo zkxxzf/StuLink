@@ -1,0 +1,33 @@
+{# 表单收集汇总套件 · 共享页头与子导航
+   期望变量：tpl（FormTemplate）、fx_active（当前页标识）、stats（可选，含提交率）
+   在 {% block content %} 顶部 include。 #}
+{% set fx_status_map = {'draft':'草稿','open':'进行中','closed':'已关闭','archived':'已归档'} %}
+{% set fx_st_cls = {'open':'ok','draft':'warn','closed':'bad','archived':''} %}
+<div class="fx-hero">
+    <div class="d-flex justify-content-between align-items-start flex-wrap gap-3" style="position:relative;z-index:2">
+        <div style="min-width:0">
+            <div class="fx-eyebrow">COLLECTION CONSOLE · 收集汇总控制台</div>
+            <h1 class="text-truncate">{{ tpl.title }}</h1>
+            <div class="fx-meta">
+                <span><span class="fx-pill {{ fx_st_cls.get(tpl.status,'') }}">{{ fx_status_map.get(tpl.status, tpl.status) }}</span></span>
+                {% if tpl.category %}<span><i class="bi bi-tag"></i>{{ tpl.category }}</span>{% endif %}
+                <span><i class="bi bi-bullseye"></i>
+                    {% if tpl.target_type == 'teachers' %}教师{% elif tpl.target_type and tpl.target_type.startswith('grade') %}指定年级{% elif tpl.target_type == 'students' %}学生{% else %}全体学生{% endif %}
+                </span>
+                <span><i class="bi bi-clock-history"></i>截止 {{ tpl.deadline.strftime('%Y-%m-%d %H:%M') if tpl.deadline else '无限制' }}</span>
+                {% if stats %}<span><i class="bi bi-check2-circle"></i>提交率 <b class="fx-num">{{ stats.rate }}%</b>（{{ stats.submitted }}/{{ stats.expected }}）</span>{% endif %}
+            </div>
+        </div>
+        <div class="fx-actions">
+            <a class="fx-btn solid" href="{{ url_for('academic.form_export_summary', form_id=tpl.id) }}"><i class="bi bi-file-earmark-excel"></i>导出汇总</a>
+            <a class="fx-btn" href="{{ url_for('academic.form_list') }}"><i class="bi bi-arrow-left"></i>返回列表</a>
+        </div>
+    </div>
+    <div class="fx-tabs mt-3" style="position:relative;z-index:2">
+        <a class="fx-tab {{ 'active' if fx_active=='summary' }}" href="{{ url_for('academic.form_summary_page', form_id=tpl.id) }}"><i class="bi bi-speedometer2"></i> 汇总看板</a>
+        <a class="fx-tab {{ 'active' if fx_active=='table' }}" href="{{ url_for('academic.form_table_page', form_id=tpl.id) }}"><i class="bi bi-table"></i> 汇总表格</a>
+        <a class="fx-tab {{ 'active' if fx_active=='missing' }}" href="{{ url_for('academic.form_missing_page', form_id=tpl.id) }}"><i class="bi bi-person-exclamation"></i> 未交名单</a>
+        <a class="fx-tab {{ 'active' if fx_active=='files' }}" href="{{ url_for('academic.form_files_page', form_id=tpl.id) }}"><i class="bi bi-folder2-open"></i> 材料清单</a>
+        <a class="fx-tab {{ 'active' if fx_active=='package' }}" href="{{ url_for('academic.form_package_page', form_id=tpl.id) }}"><i class="bi bi-file-earmark-zip"></i> 材料包下载</a>
+    </div>
+</div>

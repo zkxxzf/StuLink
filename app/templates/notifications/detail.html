@@ -1,0 +1,94 @@
+{% extends "base.html" %}
+{% block title %}{{ notification.title }} - 通知公告 - StuLink{% endblock %}
+
+{% block extra_css %}
+<style>
+    .detail-card { border-radius: 12px; }
+    .detail-header { border-bottom: 1px solid #f1f5f9; padding-bottom: 16px; margin-bottom: 20px; }
+    .detail-meta { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+    .priority-badge { font-size: 12px; padding: 3px 10px; border-radius: 10px; font-weight: 600; }
+    .priority-urgent { background: #fef2f2; color: #dc2626; border: 1px solid #fecaca; }
+    .priority-normal { background: #eff6ff; color: #2563eb; border: 1px solid #bfdbfe; }
+    .target-tag { font-size: 12px; background: #f1f5f9; color: #475569; padding: 3px 8px; border-radius: 6px; }
+    .category-badge { font-size: 11px; padding: 2px 8px; border-radius: 8px; font-weight: 600; }
+    .cat-system { background: #eff6ff; color: #2563eb; }
+    .cat-reminder { background: #fef3c7; color: #b45309; }
+    .cat-academic { background: #ecfdf5; color: #059669; }
+    .cat-workbench { background: #f5f3ff; color: #7c3aed; }
+    .cat-other { background: #f1f5f9; color: #475569; }
+    .detail-content { font-size: 15px; line-height: 1.8; color: #1e293b; white-space: pre-wrap; }
+    .back-link { font-size: 14px; color: #64748b; text-decoration: none; }
+    .back-link:hover { color: #3b82f6; }
+    .progress-mini { height: 6px; border-radius: 3px; background: #e2e8f0; }
+    .progress-mini .bar { height: 100%; border-radius: 3px; background: #10b981; transition: width .3s; }
+    .scope-text { font-size: 12px; color: #64748b; }
+</style>
+{% endblock %}
+
+{% block content %}
+<a href="{{ url_for('notifications.notifications_page') }}" class="back-link d-inline-flex align-items-center gap-1 mb-3">
+    <i class="bi bi-arrow-left"></i> 返回通知列表
+</a>
+
+<div class="card detail-card">
+    <div class="card-body p-4">
+        <div class="detail-header">
+            <h4 class="fw-bold mb-3">{{ notification.title }}</h4>
+            <div class="detail-meta">
+                <span class="priority-badge {% if notification.priority == 'urgent' %}priority-urgent{% else %}priority-normal{% endif %}">
+                    {% if notification.priority == 'urgent' %}紧急{% else %}普通{% endif %}
+                </span>
+                {% set cat = notification.category or 'system' %}
+                <span class="category-badge cat-{{ cat }}">{{ notification.category_label or '系统公告' }}</span>
+                <span class="target-tag">
+                    {% if notification.target_type == 'all' %}全体通知
+                    {% elif notification.target_type == 'grade' %}指定年级
+                    {% elif notification.target_type == 'class' %}指定班级
+                    {% elif notification.target_type == 'role' %}指定角色
+                    {% elif notification.target_type == 'users' %}指定人员
+                    {% endif %}
+                </span>
+                {% if notification.recipient_count %}
+                <span class="scope-text">
+                    {% if notification.target_type == 'users' %}指定人员{% else %}
+                        {% if notification.target_scope %}
+                            {% set scope = notification.target_scope | tojson | default('{}') %}
+                        {% endif %}
+                    {% endif %}
+                    · {{ notification.recipient_count }}人
+                </span>
+                {% endif %}
+                <small class="text-muted">
+                    <i class="bi bi-clock"></i>
+                    {{ notification.published_at.strftime('%Y-%m-%d %H:%M') if notification.published_at else '' }}
+                </small>
+                <span class="badge bg-success" style="font-size:11px;">已读</span>
+            </div>
+            {% if meta and meta.can_manage and meta.progress %}
+            <div class="mt-3">
+                <div class="d-flex align-items-center gap-2 mb-1">
+                    <small class="text-muted">已读进度</small>
+                    <small class="fw-semibold">{{ meta.progress.read_count }}/{{ meta.progress.recipient_count }}</small>
+                    <small class="text-muted">({{ meta.progress.percent }}%)</small>
+                    <a href="{{ url_for('notifications.notification_progress', nid=notification.id) }}"
+                       class="btn btn-sm btn-outline-primary ms-auto" style="font-size:11px;border-radius:6px;">
+                        <i class="bi bi-bar-chart"></i> 查看已读进度
+                    </a>
+                </div>
+                <div class="progress-mini">
+                    <div class="bar" style="width: {{ meta.progress.percent }}%"></div>
+                </div>
+            </div>
+            {% endif %}
+        </div>
+        <div class="detail-content">{{ notification.content }}</div>
+        {% if notification.link_url %}
+        <div class="mt-3 pt-3 border-top">
+            <a href="{{ notification.link_url }}" class="btn btn-success" style="border-radius:8px;">
+                <i class="bi bi-box-arrow-up-right"></i> 前往处理
+            </a>
+        </div>
+        {% endif %}
+    </div>
+</div>
+{% endblock %}

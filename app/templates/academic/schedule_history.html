@@ -1,0 +1,113 @@
+{% extends "base.html" %}
+{% block title %}历史课表总览{% endblock %}
+{% block extra_css %}
+<style>
+.hist-year-label { position: relative; padding-left: 26px; }
+.hist-year-label::before { content: ''; position: absolute; left: 8px; top: 6px; bottom: -18px;
+    width: 2px; background: linear-gradient(#cbd5e1, #e2e8f0); }
+.hist-card { border-left: 4px solid #cbd5e1; transition: transform .12s, box-shadow .12s; }
+.hist-card:hover { transform: translateY(-2px); box-shadow: 0 6px 18px rgba(15,23,42,.08); }
+.hist-card.is-current { border-left-color: #ef4444; }
+.hist-card.is-active { border-left-color: #10b981; }
+.hist-card.is-archived { border-left-color: #94a3b8; opacity: .92; }
+.hist-dot { position: absolute; left: -5px; top: 18px; width: 12px; height: 12px; border-radius: 50%;
+    background: #fff; border: 3px solid #94a3b8; }
+.hist-card.is-current .hist-dot { border-color: #ef4444; }
+</style>
+{% endblock %}
+{% block content %}
+{% set ns = namespace(cur_id=None) %}
+{% for y in years %}{% for t in grouped[y] %}{% if t.is_current %}{% set ns.cur_id = t.id %}{% endif %}{% endfor %}{% endfor %}
+
+<div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
+    <div>
+        <h4 class="fw-bold mb-1"><i class="bi bi-clock-history"></i> 历史课表总览</h4>
+        <span class="text-muted small">课表是按学期存在的时序数据资产 · 共 {{ total }} 个学期 · 历史学期仅供查阅（只读）</span>
+    </div>
+    <div class="d-flex gap-2 flex-wrap">
+        {% if ns.cur_id %}
+        <a class="btn btn-sm btn-primary" href="{{ url_for('academic.schedule_copy', sid=ns.cur_id) }}">
+            <i class="bi bi-files"></i> 学期交接：复制当前学期课表
+        </a>
+        {% endif %}
+        <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('academic.schedule_compare') }}">
+            <i class="bi bi-arrow-left-right"></i> 跨学期对比
+        </a>
+        <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('academic.schedule_manage') }}">
+            <i class="bi bi-house"></i> 学期管理
+        </a>
+    </div>
+</div>
+
+{% if not total %}
+<div class="card"><div class="card-body text-center py-5 text-muted">
+    <i class="bi bi-inbox" style="font-size:40px;"></i>
+    <p class="mt-3 mb-0">暂无学期数据</p>
+</div></div>
+{% endif %}
+
+{% for y in years %}
+<div class="mb-4">
+    <div class="hist-year-label mb-3">
+        <span class="badge bg-dark fs-6">{{ y }} 学年</span>
+        <span class="text-muted small ms-2">{{ grouped[y]|length }} 个学期</span>
+    </div>
+    <div class="row g-3">
+        {% for t in grouped[y] %}
+        <div class="col-md-6 col-xl-4">
+            <div class="card h-100 hist-card position-relative {{ 'is-current' if t.is_current else ('is-active' if t.status == 'active' else ('is-archived' if t.status == 'archived' else '')) }}">
+                <span class="hist-dot"></span>
+                <div class="card-header py-2 d-flex justify-content-between align-items-center bg-transparent">
+                    <span class="fw-bold text-truncate" title="{{ t.name }}">{{ t.name }}</span>
+                    <span class="text-nowrap">
+                        {% if t.is_current %}<span class="badge bg-danger"><i class="bi bi-star-fill"></i> 当前</span>{% endif %}
+                        {% if t.status == 'archived' %}<span class="badge bg-secondary">历史</span>{% endif %}
+                        <span class="badge bg-{{ 'success' if t.status == 'active' else ('secondary' if t.status == 'archived' else 'warning text-dark') }}">{{ t.status_text }}</span>
+                    </span>
+                </div>
+                <div class="card-body py-2 small">
+                    <div class="d-flex justify-content-between mb-1">
+                        <span class="text-muted">学期</span><span>{{ t.term }}</span>
+                    </div>
+                    <div class="d-flex justify-content-between mb-1">
+                        <span class="text-muted">日期区间</span>
+                        <span class="text-truncate ms-2" style="max-width:62%">{{ t.date_range }}</span>
+                    </div>
+                    <div class="d-flex justify-content-between mb-1">
+                        <span class="text-muted">教学周</span>
+                        <span>共 {{ t.total_weeks or '-' }} 周{% if t.current_week %} · <span class="text-primary fw-bold">第 {{ t.current_week }} 周</span>{% endif %}</span>
+                    </div>
+                    <div class="d-flex justify-content-between">
+                        <span class="text-muted">课程条目</span>
+                        <span class="fw-bold">{{ t.entry_count }} 节</span>
+                    </div>
+                </div>
+                <div class="card-footer py-2 bg-transparent">
+                    <div class="d-flex flex-wrap gap-1">
+                        {% if t.status == 'archived' %}
+                        <a class="btn btn-sm btn-outline-primary py-0" href="{{ url_for('academic.schedule_history_detail', sid=t.id) }}">
+                            <i class="bi bi-eye"></i> 查看课表
+                        </a>
+                        {% else %}
+                        <a class="btn btn-sm btn-outline-primary py-0" href="{{ url_for('academic.schedule_master', sid=t.id) }}">
+                            <i class="bi bi-grid-3x3"></i> 查看课表
+                        </a>
+                        {% endif %}
+                        <a class="btn btn-sm btn-outline-secondary py-0" href="{{ url_for('academic.schedule_compare', sid_a=t.id) }}">
+                            <i class="bi bi-arrow-left-right"></i> 对比
+                        </a>
+                        <a class="btn btn-sm btn-outline-secondary py-0" href="{{ url_for('academic.schedule_usage', sid=t.id) }}">
+                            <i class="bi bi-graph-up"></i> 使用情况
+                        </a>
+                        <a class="btn btn-sm btn-outline-success py-0" href="{{ url_for('academic.schedule_copy', sid=t.id) }}">
+                            <i class="bi bi-files"></i> 以此为底版
+                        </a>
+                    </div>
+                </div>
+            </div>
+        </div>
+        {% endfor %}
+    </div>
+</div>
+{% endfor %}
+{% endblock %}

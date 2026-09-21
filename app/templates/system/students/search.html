@@ -100,7 +100,7 @@
                     <td class="text-center">
                         <input type="checkbox" class="form-check-input student-check-search" value="{{ s.id }}"
                                data-name="{{ s.name }}" data-grade="{{ s.grade }}" data-class="{{ s.class_name }}"
-                               data-boarding="{{ s.accommodation.boarding_type if s.accommodation else '' }}" data-day-type="{{ s.accommodation.day_student_type if s.accommodation else '' }}">
+                               data-boarding="{{ acc_map[s.id]['boarding_type'] if s.id in acc_map else '' }}" data-day-type="{{ acc_map[s.id]['day_student_type'] if s.id in acc_map else '' }}">
                     </td>
                     {% endif %}
                     <td>{{ s.student_number }}</td>
@@ -109,10 +109,10 @@
                     <td>{{ s.grade }}</td>
                     <td>{{ s.class_name }}</td>
                     <td>{% if s.subject_selection %}<span class="{{ subject_badge_class(s.subject_selection) }}">{{ s.subject_selection }}</span>{% else %}-{% endif %}</td>
-                    <td>{% if s.accommodation %}{{ s.accommodation.boarding_type }}{% else %}-{% endif %}</td>
-                    <td>{% if s.accommodation and s.accommodation.day_student_type %}<span class="badge bg-info">{{ s.accommodation.day_student_type }}</span>{% else %}-{% endif %}</td>
-                    <td>{% if s.bed_assignment and s.bed_assignment.room %}{{ s.bed_assignment.room.building }}{{ s.bed_assignment.room.room_number }}{% else %}-{% endif %}</td>
-                    <td>{% if s.bed_assignment %}{{ s.bed_assignment.bed_number }}床{% else %}-{% endif %}</td>
+                    <td>{% if s.id in acc_map %}{{ acc_map[s.id]['boarding_type'] }}{% else %}-{% endif %}</td>
+                    <td>{% if s.id in acc_map and acc_map[s.id]['day_student_type'] %}<span class="badge bg-info">{{ acc_map[s.id]['day_student_type'] }}</span>{% else %}-{% endif %}</td>
+                    <td>{% if s.id in bed_map and bed_map[s.id]['has_room'] %}{{ bed_map[s.id]['building'] }}{{ bed_map[s.id]['room_number'] }}{% else %}-{% endif %}</td>
+                    <td>{% if s.id in bed_map %}{{ bed_map[s.id]['bed_number'] }}床{% else %}-{% endif %}</td>
                     <td>{{ s.phone1 or '-' }}</td>
                     <td>{{ s.phone2 or '-' }}</td>
                     <td><a href="{{ url_for('students.detail', id=s.id) }}" class="btn btn-sm btn-outline-primary"><i class="bi bi-eye"></i></a></td>

@@ -1,0 +1,203 @@
+{% extends "base.html" %}
+{% block title %}学期课表管理{% endblock %}
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
+    <h4 class="fw-bold mb-0"><i class="bi bi-calendar3"></i> 学期课表管理</h4>
+    <div class="d-flex gap-2 flex-wrap">
+        <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('academic.timetable_page') }}">
+            <i class="bi bi-arrow-clockwise"></i> 旧版课表
+        </a>
+        <a class="btn btn-sm btn-outline-dark" href="{{ url_for('academic.schedule_history') }}">
+            <i class="bi bi-clock-history"></i> 历史课表
+        </a>
+        <a class="btn btn-sm btn-outline-info text-white" href="{{ url_for('academic.today_schedule') }}">
+            <i class="bi bi-sun"></i> 今日课表
+        </a>
+        <button class="btn btn-sm btn-primary" data-bs-toggle="modal" data-bs-target="#createModal">
+            <i class="bi bi-plus-lg"></i> 创建学期
+        </button>
+    </div>
+</div>
+
+{% if not schedules %}
+<div class="card">
+    <div class="card-body text-center py-5 text-muted">
+        <i class="bi bi-calendar-x" style="font-size:40px;"></i>
+        <p class="mt-3 mb-1">尚未创建学期课表</p>
+        <p class="small mb-0">点击「创建学期」开始，新学期会自动带 13 节默认作息模板</p>
+    </div>
+</div>
+{% endif %}
+
+<div class="row g-3">
+    {% for ts in schedules %}
+    {% set archived = ts.status == 'archived' %}
+    <div class="col-md-6 col-xl-4">
+        <div class="card h-100 {{ 'border-secondary-subtle' if archived else '' }}"
+             style="{{ 'opacity:.72;border:1px dashed #cbd5e1 !important;' if archived else '' }}">
+            <div class="card-header py-2 d-flex justify-content-between align-items-center
+                        {{ 'bg-light' if archived else ('bg-success-subtle' if ts.status == 'active' else '') }}">
+                <span class="fw-bold text-truncate" title="{{ ts.name }}">
+                    {% if archived %}<i class="bi bi-archive text-secondary"></i>{% elif ts.status == 'active' %}<i class="bi bi-broadcast text-success"></i>{% else %}<i class="bi bi-pencil-square text-secondary"></i>{% endif %}
+                    {{ ts.name }}
+                </span>
+                <span>
+                    {% if ts.is_current %}<span class="badge bg-danger"><i class="bi bi-star-fill"></i> 当前</span>{% endif %}
+                    {% if archived %}<span class="badge bg-secondary">历史</span>{% endif %}
+                    <span class="badge bg-{{ 'success' if ts.status == 'active' else ('secondary' if archived else 'warning text-dark') }}">
+                        {{ {'draft':'草稿','active':'启用中','archived':'已归档'}[ts.status] }}
+                    </span>
+                </span>
+            </div>
+            <div class="card-body py-2 small">
+                <div class="d-flex justify-content-between mb-1">
+                    <span class="text-muted">学年 / 学期</span>
+                    <span>{{ ts.school_year }} · {{ ts.term }}</span>
+                </div>
+                <div class="d-flex justify-content-between mb-1">
+                    <span class="text-muted">课程条目</span>
+                    <span class="fw-bold">{{ counts.get(ts.id, 0) }} 节</span>
+                </div>
+                <div class="d-flex justify-content-between mb-1">
+                    <span class="text-muted">创建时间</span>
+                    <span>{{ ts.created_at.strftime('%Y-%m-%d') if ts.created_at else '-' }}</span>
+                </div>
+                <div class="d-flex justify-content-between mb-1">
+                    <span class="text-muted">日期 / 周次</span>
+                    <span class="text-truncate ms-2" style="max-width:62%" title="{{ ts.period_text() }}">{{ ts.period_text() }}</span>
+                </div>
+                {% if ts.description %}
+                <div class="text-muted text-truncate" title="{{ ts.description }}">
+                    <i class="bi bi-info-circle"></i> {{ ts.description }}
+                </div>
+                {% endif %}
+            </div>
+            <div class="card-footer py-2 bg-transparent">
+                <div class="d-flex flex-wrap gap-1 mb-2">
+                    <a class="btn btn-sm btn-outline-primary py-0" href="{{ url_for('academic.schedule_master', sid=ts.id) }}">
+                        <i class="bi bi-grid-3x3"></i> 大课表
+                    </a>
+                    {% set grades = (grade_map.get(ts.id) or {}).keys()|list %}
+                    {% if grades %}
+                    <a class="btn btn-sm btn-outline-primary py-0"
+                       href="{{ url_for('academic.schedule_grade', sid=ts.id, grade=grades[0]) }}"
+                       title="已排课年级：{{ grades|join('、') }}">
+                        <i class="bi bi-layers"></i> 年级课表（{{ grades[0] }}）
+                    </a>
+                    {% else %}
+                    <span class="btn btn-sm btn-outline-secondary py-0 disabled" title="暂无班级课表数据">
+                        <i class="bi bi-layers"></i> 年级课表
+                    </span>
+                    {% endif %}
+                    <a class="btn btn-sm btn-outline-secondary py-0" href="{{ url_for('academic.schedule_periods', sid=ts.id) }}">
+                        <i class="bi bi-clock-history"></i> 节次配置
+                    </a>
+                    <a class="btn btn-sm btn-outline-secondary py-0" href="{{ url_for('academic.schedule_versions', sid=ts.id) }}">
+                        <i class="bi bi-journal-text"></i> 变更历史
+                    </a>
+                </div>
+                <div class="d-flex flex-wrap gap-1">
+                    {% if not archived %}
+                    <a class="btn btn-sm btn-outline-success py-0" href="{{ url_for('academic.schedule_import', sid=ts.id) }}">
+                        <i class="bi bi-upload"></i> 导入
+                    </a>
+                    {% endif %}
+                    <a class="btn btn-sm btn-outline-info py-0 text-white"
+                       href="{{ url_for('academic.schedule_export', sid=ts.id, view_type='master') }}">
+                        <i class="bi bi-download"></i> 导出
+                    </a>
+                    {% if ts.status != 'active' %}
+                    <form method="POST" class="d-inline" action="{{ url_for('academic.schedule_activate', sid=ts.id) }}"
+                          onsubmit="return confirm('{{ '重新启用' if archived else '激活' }}「{{ ts.name }}」？当前启用中的学期将自动归档（含快照）。')">
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                        <button class="btn btn-sm btn-success py-0"><i class="bi bi-broadcast"></i> {{ '重新启用' if archived else '激活' }}</button>
+                    </form>
+                    {% elif ts.status == 'active' %}
+                    <form method="POST" class="d-inline" action="{{ url_for('academic.schedule_archive_term', sid=ts.id) }}"
+                          onsubmit="return confirm('归档「{{ ts.name }}」？将生成归档快照，归档后课表只读。')">
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                        <button class="btn btn-sm btn-outline-warning py-0"><i class="bi bi-archive"></i> 归档</button>
+                    </form>
+                    {% endif %}
+                    {% if ts.status == 'draft' %}
+                    <form method="POST" class="d-inline" action="{{ url_for('academic.schedule_delete', sid=ts.id) }}"
+                          onsubmit="return confirm('删除草稿学期「{{ ts.name }}」？其节次与课表条目将一并删除，不可恢复。')">
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                        <button class="btn btn-sm btn-outline-danger py-0"><i class="bi bi-trash"></i> 删除</button>
+                    </form>
+                    {% endif %}
+                </div>
+                {# Task#27：学期周期维度操作入口 #}
+                <div class="d-flex flex-wrap gap-1 mt-1 pt-1 border-top">
+                    <a class="btn btn-sm btn-outline-secondary py-0" href="{{ url_for('academic.schedule_dates', sid=ts.id) }}">
+                        <i class="bi bi-calendar-range"></i> 配置日期
+                    </a>
+                    <a class="btn btn-sm btn-outline-secondary py-0" href="{{ url_for('academic.schedule_calendar', sid=ts.id) }}">
+                        <i class="bi bi-calendar3"></i> 校历
+                    </a>
+                    <a class="btn btn-sm btn-outline-secondary py-0" href="{{ url_for('academic.schedule_usage', sid=ts.id) }}">
+                        <i class="bi bi-graph-up"></i> 使用情况
+                    </a>
+                    <a class="btn btn-sm btn-outline-primary py-0" href="{{ url_for('academic.schedule_copy', sid=ts.id) }}">
+                        <i class="bi bi-files"></i> 以此为底版新建
+                    </a>
+                    {% if not ts.is_current %}
+                    <form method="POST" class="d-inline" action="{{ url_for('academic.schedule_set_current', sid=ts.id) }}"
+                          onsubmit="return confirm('将「{{ ts.name }}」设为当前学期？其他学期将取消当前标记。')">
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                        <button class="btn btn-sm btn-outline-success py-0"><i class="bi bi-broadcast"></i> 设为当前</button>
+                    </form>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+    </div>
+    {% endfor %}
+</div>
+
+{# ===== 创建学期弹窗 ===== #}
+<div class="modal fade" id="createModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <form method="POST" action="{{ url_for('academic.schedule_create') }}">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <div class="modal-header py-2">
+                    <h6 class="modal-title"><i class="bi bi-calendar-plus"></i> 创建学期课表</h6>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="mb-2">
+                        <label class="form-label small mb-1">学期名称 <span class="text-danger">*</span></label>
+                        <input name="name" class="form-control form-control-sm" required maxlength="50"
+                               placeholder="如 2026-2027学年第二学期">
+                    </div>
+                    <div class="row g-2 mb-2">
+                        <div class="col-6">
+                            <label class="form-label small mb-1">学年 <span class="text-danger">*</span></label>
+                            <input name="school_year" class="form-control form-control-sm" required maxlength="20"
+                                   placeholder="如 2026-2027">
+                        </div>
+                        <div class="col-6">
+                            <label class="form-label small mb-1">学期 <span class="text-danger">*</span></label>
+                            <select name="term" class="form-select form-select-sm" required>
+                                <option value="第一学期">第一学期</option>
+                                <option value="第二学期">第二学期</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div class="mb-2">
+                        <label class="form-label small mb-1">说明</label>
+                        <input name="description" class="form-control form-control-sm" maxlength="200"
+                               placeholder="选填，如 高二选科走班版本">
+                    </div>
+                    <div class="form-text">创建后自动写入 13 节默认作息模板（早读 + 上午4节 + 午休 + 下午4节 + 晚自习3节），可在「节次配置」中修改。</div>
+                </div>
+                <div class="modal-footer py-2">
+                    <button type="button" class="btn btn-sm btn-secondary" data-bs-dismiss="modal">取消</button>
+                    <button type="submit" class="btn btn-sm btn-primary"><i class="bi bi-check-lg"></i> 创建</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+{% endblock %}

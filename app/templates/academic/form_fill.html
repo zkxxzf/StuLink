@@ -1,0 +1,185 @@
+{% extends "base.html" %}
+{% block title %}填写 - {{ tpl.title }}{% endblock %}
+{% block content %}
+<div class="mb-3">
+    <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('academic.form_fill_list') }}">
+        <i class="bi bi-arrow-left"></i> 返回列表
+    </a>
+</div>
+
+<div class="card mb-3">
+    <div class="card-header">
+        <h4 class="mb-0 fw-bold">{{ tpl.title }}</h4>
+    </div>
+    <div class="card-body">
+        {% if tpl.description %}
+        <p class="mb-2">{{ tpl.description }}</p>
+        {% endif %}
+        <div class="small text-muted">
+            {% if tpl.deadline %}
+            <i class="bi bi-clock"></i> 截止时间：{{ tpl.deadline.strftime('%Y年%m月%d日 %H:%M') }}
+            {% else %}
+            <i class="bi bi-infinity"></i> 无截止时间
+            {% endif %}
+            {% if tpl.allow_multiple %}
+            <span class="ms-3 text-info"><i class="bi bi-arrow-repeat"></i> 允许多次提交</span>
+            {% endif %}
+        </div>
+    </div>
+</div>
+
+<form method="POST" action="{{ url_for('academic.form_submit', form_id=tpl.id) }}" enctype="multipart/form-data" id="fillForm">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+
+    {% for q in questions %}
+    <div class="card mb-3 question-card">
+        <div class="card-body">
+            <label class="form-label fw-bold">
+                {{ loop.index }}. {{ q.title }}
+                {% if q.required %}<span class="text-danger">*</span>{% endif %}
+            </label>
+            {% if q.description %}
+            <div class="text-muted small mb-2">{{ q.description }}</div>
+            {% endif %}
+
+            {% if q.question_type == 'text' %}
+            <input type="text" name="q_{{ q.id }}" class="form-control" maxlength="200"
+                   {% if q.required %}required{% endif %} placeholder="请输入">
+
+            {% elif q.question_type == 'textarea' %}
+            <textarea name="q_{{ q.id }}" class="form-control" rows="3" maxlength="1000"
+                      {% if q.required %}required{% endif %} placeholder="请输入"></textarea>
+
+            {% elif q.question_type == 'number' %}
+            <input type="number" name="q_{{ q.id }}" class="form-control"
+                   {% if q.required %}required{% endif %} placeholder="请输入数字">
+
+            {% elif q.question_type == 'date' %}
+            <input type="date" name="q_{{ q.id }}" class="form-control"
+                   {% if q.required %}required{% endif %}>
+
+            {% elif q.question_type == 'single_choice' %}
+            {% set opts = q.options_json|tojson if q.options_json else '[]' %}
+            <div class="mt-1">
+                {% if q.options_json %}
+                {% for opt in q.options_json|load_json_safe %}
+                <div class="form-check">
+                    <input class="form-check-input" type="radio" name="q_{{ q.id }}" value="{{ opt }}"
+                           id="q{{ q.id }}_{{ loop.index0 }}" {% if q.required %}required{% endif %}>
+                    <label class="form-check-label" for="q{{ q.id }}_{{ loop.index0 }}">{{ opt }}</label>
+                </div>
+                {% endfor %}
+                {% endif %}
+            </div>
+
+            {% elif q.question_type == 'multi_choice' %}
+            <div class="mt-1">
+                {% if q.options_json %}
+                {% for opt in q.options_json|load_json_safe %}
+                <div class="form-check">
+                    <input class="form-check-input" type="checkbox" name="q_{{ q.id }}" value="{{ opt }}"
+                           id="q{{ q.id }}_{{ loop.index0 }}">
+                    <label class="form-check-label" for="q{{ q.id }}_{{ loop.index0 }}">{{ opt }}</label>
+                </div>
+                {% endfor %}
+                {% endif %}
+            </div>
+
+            {% elif q.question_type == 'file' %}
+            <div>
+                <input type="file" name="q_{{ q.id }}" class="form-control"
+                       {% if q.required %}required{% endif %}
+                       data-max-size="{{ q.max_file_size_mb or tpl.max_file_size_mb or 10 }}"
+                       data-file-types="{{ q.file_types or '' }}">
+                <div class="form-text">
+                    {% if q.file_types %}允许类型：{{ q.file_types }}{% endif %}
+                    {% if q.max_file_size_mb %}大小限制：{{ q.max_file_size_mb }}MB
+                    {% elif tpl.max_file_size_mb %}大小限制：{{ tpl.max_file_size_mb }}MB{% endif %}
+                </div>
+                <div class="file-preview mt-1"></div>
+            </div>
+            {% endif %}
+        </div>
+    </div>
+    {% endfor %}
+
+    {% if not questions %}
+    <div class="text-center text-muted py-4">此表单暂无题目</div>
+    {% endif %}
+
+    <div class="d-grid">
+        <button type="submit" class="btn btn-primary btn-lg" id="submitBtn">
+            <i class="bi bi-send"></i> 提交答案
+        </button>
+    </div>
+</form>
+
+<script>
+// 文件上传前端校验
+document.addEventListener('DOMContentLoaded', function() {
+    const form = document.getElementById('fillForm');
+    const fileInputs = form.querySelectorAll('input[type="file"]');
+
+    fileInputs.forEach(input => {
+        input.addEventListener('change', function() {
+            const preview = this.closest('.card-body').querySelector('.file-preview');
+            preview.innerHTML = '';
+            if (this.files.length > 0) {
+                const file = this.files[0];
+                const maxSize = parseInt(this.dataset.maxSize || 10) * 1024 * 1024;
+                const allowedTypes = (this.dataset.fileTypes || '').split(',').map(t => t.trim().toLowerCase());
+
+                if (file.size > maxSize) {
+                    preview.innerHTML = '<div class="alert alert-danger py-1 small">文件过大，超过限制</div>';
+                    this.value = '';
+                    return;
+                }
+
+                if (allowedTypes.length > 0 && allowedTypes[0] !== '') {
+                    const ext = file.name.split('.').pop().toLowerCase();
+                    if (!allowedTypes.includes(ext)) {
+                        preview.innerHTML = '<div class="alert alert-danger py-1 small">文件类型不允许</div>';
+                        this.value = '';
+                        return;
+                    }
+                }
+
+                const sizeMB = (file.size / 1024 / 1024).toFixed(2);
+                preview.innerHTML = `<div class="alert alert-info py-1 small"><i class="bi bi-file-earmark"></i> ${file.name} (${sizeMB}MB)</div>`;
+            }
+        });
+    });
+
+    form.addEventListener('submit', function(e) {
+        // 必填检查
+        const requiredFields = form.querySelectorAll('[required]');
+        let valid = true;
+        requiredFields.forEach(field => {
+            if (field.type === 'radio') {
+                const group = form.querySelectorAll(`[name="${field.name}"]`);
+                const checked = Array.from(group).some(r => r.checked);
+                if (!checked) {
+                    valid = false;
+                    field.closest('.card-body').classList.add('border', 'border-danger');
+                } else {
+                    field.closest('.card-body').classList.remove('border', 'border-danger');
+                }
+            } else if (!field.value.trim()) {
+                valid = false;
+                field.classList.add('is-invalid');
+            } else {
+                field.classList.remove('is-invalid');
+            }
+        });
+
+        if (!valid) {
+            e.preventDefault();
+            alert('请填写所有必填项');
+        } else {
+            document.getElementById('submitBtn').disabled = true;
+            document.getElementById('submitBtn').innerHTML = '<span class="spinner-border spinner-border-sm"></span> 提交中...';
+        }
+    });
+});
+</script>
+{% endblock %}
