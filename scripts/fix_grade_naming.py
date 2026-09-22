@@ -1,4 +1,4 @@
-# StuLink v1.16.0 2026-09-18
+# StuLink v1.17.0 2026-09-21
 # 幂等脚本：把 grade='01'/'02'/'03' 修正为 '高一'/'高二'/'高三'
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 """修正课表条目的年级命名格式。
