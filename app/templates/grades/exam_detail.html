@@ -5,7 +5,10 @@
     <a href="{{ url_for('grades.exams_list') }}" class="btn btn-sm btn-outline-secondary">
         <i class="bi bi-arrow-left"></i>
     </a>
-    <h5 class="mb-0 me-2"><i class="bi bi-journal-text"></i> {{ exam.name }}</h5>
+    <h5 class="mb-0 me-2" id="examName" role="button" title="点击修改考试名称">
+        <i class="bi bi-journal-text"></i> {{ exam.name }}
+        <i class="bi bi-pencil-square small text-muted"></i>
+    </h5>
     {% if exam.status == 'imported' %}
     <span class="badge bg-success">已导入</span>
     {% elif exam.status == 'dirty' %}
@@ -156,6 +159,25 @@
 <script>
 $(function(){
     var examId = $('#examToolbar').data('examId');
+
+    /* ---------- 点击考试名称：就地改名（同年级内需唯一） ---------- */
+    $('#examName').on('click', function(){
+        var cur = $.trim($(this).text());
+        var input = prompt('修改考试名称（同年级内不能重名）：', cur);
+        if(input === null){ return; }
+        var v = $.trim(input);
+        if(!v || v === cur){ return; }
+        $.post('/grades/exams/' + examId + '/rename', {name: v})
+            .done(function(res){
+                if(res && res.success){ location.reload(); }
+                else { alert((res && res.message) || '修改失败'); }
+            })
+            .fail(function(xhr){
+                var m = '修改失败';
+                try { m = JSON.parse(xhr.responseText).message || m; } catch(e){}
+                alert(m);
+            });
+    });
 
     /* ---------- 成绩单分页（客户端，按页显隐；编辑后 location.reload 用 sessionStorage 保留位置） ---------- */
     var PAGE_KEY = 'examPage_' + examId;

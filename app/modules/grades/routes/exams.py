@@ -146,6 +146,31 @@ def exam_detail(exam_id):
                            import_info=info)
 
 
+@bp.route('/exams/<int:exam_id>/rename', methods=['POST'])
+@login_required
+@perm_required('grades.edit')
+def exam_rename(exam_id):
+    """考试名称就地改名：同年级内唯一（与新建考试的重名规则一致）"""
+    exam = Exam.query.get_or_404(exam_id)
+    name = (request.form.get('name') or '').strip()
+    if not name:
+        return jsonify(success=False, message='考试名称不能为空'), 400
+    if name == exam.name:
+        return jsonify(success=True, message='名称未变化')
+    dup = Exam.query.filter(Exam.grade == exam.grade,
+                            Exam.name == name, Exam.id != exam.id).first()
+    if dup:
+        return jsonify(success=False,
+                       message=f'同年级已存在同名考试「{name}」（{dup.exam_date}），请换一个名称'), 400
+    old = exam.name
+    exam.name = name
+    db.session.commit()
+    invalidate_exam_cache(exam_id)
+    log_operation(current_user, '修改', '考试', exam_id,
+                  f'名称「{old}」→「{name}」', module='grades')
+    return jsonify(success=True, message=f'考试名称已更新为「{name}」')
+
+
 @bp.route('/exams/<int:exam_id>/score/<int:score_id>', methods=['POST'])
 @login_required
 @perm_required('grades.edit')

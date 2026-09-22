@@ -81,3 +81,5 @@ _deploy_*.tar.gz
 app/static/uploads/
 # 迁移脚本产生的数据库备份（scripts 下的 .bak-<时间戳>）
 *.bak-*
+*.bat
+*.err
