@@ -78,10 +78,25 @@
         .subj-physics { background: #e7f1ff; color: #0b5ed7; border-color: #b6d4fe; }
         .subj-history { background: #fff3e0; color: #b45309; border-color: #ffd8a8; }
         .table th { font-weight: 600; font-size: 13px; color: #64748b; white-space: nowrap; }
+        /* 表格冻结窗格：表头行 + 第一列 sticky */
+        .table-responsive table { border-collapse: separate; border-spacing: 0; }
+        .table-responsive thead th {
+            position: sticky; top: 0; z-index: 2; background: #f8f9fa;
+        }
+        .table-responsive thead tr:nth-child(2) th { top: 38px; }
+        .table-responsive td:first-child,
+        .table-responsive th:first-child {
+            position: sticky; left: 0; z-index: 1;
+        }
+        .table-responsive thead th:first-child { z-index: 3; }
+        .table-responsive tbody td:first-child { background: var(--bs-body-bg, #fff); }
+        /* 手机端导航栏紧凑 */
         @media (max-width: 768px) {
             .sidebar { transform: translateX(-100%); }
             .sidebar.show { transform: translateX(0); }
             .main-content { margin-left: 0; }
+            .navbar { padding-left: 8px; padding-right: 8px; }
+            .navbar .ms-auto { gap: 4px; }
         }
     </style>
     {% block extra_css %}{% endblock %}
@@ -103,15 +118,15 @@
                     0
                 </span>
             </a>
-            <span class="text-light me-3" style="font-size:14px;">
+            <span class="text-light me-3 d-none d-md-inline" style="font-size:14px;">
                 <i class="bi bi-person-circle"></i> {{ current_user.real_name }}
                 <span class="badge bg-primary badge-role ms-1">{{ current_user.display_role }}</span>
             </span>
-            <a href="{{ url_for('auth.change_password') }}" class="btn btn-sm btn-outline-light me-2">
-                <i class="bi bi-key"></i> 改密码
+            <a href="{{ url_for('auth.change_password') }}" class="btn btn-sm btn-outline-light me-2" title="改密码">
+                <i class="bi bi-key"></i> <span class="d-none d-md-inline">改密码</span>
             </a>
-            <a href="{{ url_for('auth.logout') }}" class="btn btn-sm btn-outline-danger">
-                <i class="bi bi-box-arrow-right"></i> 退出
+            <a href="{{ url_for('auth.logout') }}" class="btn btn-sm btn-outline-danger" title="退出">
+                <i class="bi bi-box-arrow-right"></i> <span class="d-none d-md-inline">退出</span>
             </a>
             {% endif %}
         </div>

@@ -776,9 +776,13 @@ function boxOption(c){
 }
 
 function lineOption(c){
-    var sel = c.selected || {};
+    // selected 是后端可选的「默认勾选哪几条系列」映射（如年级多科折线只默认显示总分+主科）。
+    // 未提供该字段时，所有系列必须默认全部显示——否则 !!undefined=false 会把折线全隐藏，
+    // 图例变灰、画布空白，需手动点图例才出图（班级走势/教师走势即属此列）。
+    var sel = c.selected;
+    var hasSel = !!(sel && Object.keys(sel).length);
     var selected = {};
-    (c.series || []).forEach(function(s){ selected[s.name] = !!sel[s.name]; });
+    (c.series || []).forEach(function(s){ selected[s.name] = hasSel ? !!sel[s.name] : true; });
     return {color: PALETTE, tooltip: {trigger: 'axis'},
         legend: {top: 0, type: 'scroll', selected: selected},
         grid: gridOf(c), xAxis: catAxisOf(c), dataZoom: zoomOf(c),
