@@ -1,4 +1,4 @@
-# StuLink v1.17.1 2026-09-23
+# StuLink v1.18.0.0 2026-09-23
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 """出站 URL 守卫（H-9 BYOK SSRF 的唯一实现）。
 

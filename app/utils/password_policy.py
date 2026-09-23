@@ -1,4 +1,4 @@
-# StuLink v1.17.1 2026-09-23
+# StuLink v1.18.0.0 2026-09-23
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 """口令强度策略（清单 H-1④ / M-15 的**唯一实现**）。
 
