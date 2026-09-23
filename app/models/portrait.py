@@ -1,4 +1,4 @@
-# StuLink v1.18.0.0 2026-09-23
+# StuLink v1.18.1.0 2026-09-23
 # 学生画像模块模型（独立库 portrait.db）
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 """学生画像数据模型

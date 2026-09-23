@@ -1,4 +1,4 @@
-# StuLink v1.18.0.0 2026-09-23
+# StuLink v1.18.1.0 2026-09-23
 # 教务 · 教师业绩库：录入 / 列表筛选 / 审核（教师工作台提交的待审核业绩）
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 from datetime import date, datetime

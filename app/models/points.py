@@ -1,4 +1,4 @@
-# StuLink v1.18.0.0 2026-09-23
+# StuLink v1.18.1.0 2026-09-23
 # 德育管理：数据模型（独立库 points.db）
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 from datetime import datetime, date
