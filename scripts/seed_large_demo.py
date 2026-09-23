@@ -66,6 +66,12 @@ EXAM_TYPES = ['月考', '单元测', '期中', '期末', '模拟']
 BAND_TEMPLATE = [('优秀', 20), ('良好', 60), ('及格', 95), ('待提升', 0)]
 
 
+def _grade_year():
+    """从年级名（如 '2024级'）取 4 位入学年份，用作学号/教师账号前缀，避免跨年级冲突"""
+    digits = ''.join(ch for ch in str(GRADE) if ch.isdigit())[:4]
+    return digits or '0000'
+
+
 def _full(sub):
     return 150 if sub in ('语文', '数学', '外语') else 100
 
@@ -138,7 +144,7 @@ def build_students(n_stu, rnd):
         name = rnd.choice(SURNAMES) + rnd.choice(GIVEN) + \
             (rnd.choice(GIVEN) if rnd.random() < 0.45 else '')
         rows.append({
-            'no': f'2026{i + 1:04d}', 'name': name, 'class_name': cls, 'sel': sel,
+            'no': f'{_grade_year()}{i + 1:04d}', 'name': name, 'class_name': cls, 'sel': sel,
             'gender': '男' if i % 2 == 0 else '女',
         })
     # 班型
@@ -166,11 +172,13 @@ def build_teachers(students):
     g_teach = ensure_group('任课教师组', 'class', 'teacher')
     g_home = ensure_group('班主任组', 'class', 'homeroom_teacher')
     users = {}
-    for uname, name, sub in TEACHERS:
-        users[sub] = ensure_user(uname, name, 'teacher', g_teach, grade=GRADE)
-    for uname, name, cls in HOMEROOMS:
-        u = ensure_user(uname, name, 'homeroom_teacher', g_home, grade=GRADE,
-                        class_name=cls)
+    gy = _grade_year()   # 教师账号按年级前缀隔离，避免多年级共用同一账号互相覆盖
+    for uname0, name, sub in TEACHERS:
+        users[sub] = ensure_user(f'{gy}{uname0}', f'{GRADE}{name}', 'teacher',
+                                 g_teach, grade=GRADE)
+    for uname0, name, cls in HOMEROOMS:
+        u = ensure_user(f'{gy}{uname0}', f'{GRADE}{name}', 'homeroom_teacher',
+                        g_home, grade=GRADE, class_name=cls)
         if not UserClassLink.query.filter_by(user_id=u.id, grade=GRADE,
                                              class_name=cls).first():
             db.session.add(UserClassLink(user_id=u.id, grade=GRADE, class_name=cls))
@@ -297,12 +305,15 @@ def build_bands(exam_ids):
 
 
 def main():
+    global GRADE
     ap = argparse.ArgumentParser()
+    ap.add_argument('--grade', default='2026级', help='年级名，如 2024级')
     ap.add_argument('--students', type=int, default=1500)
     ap.add_argument('--exams', type=int, default=30)
     ap.add_argument('--clean', action='store_true', help='仅清空演示数据')
     ap.add_argument('--seed', type=int, default=20260913)
     args = ap.parse_args()
+    GRADE = args.grade
 
     rnd = random.Random(args.seed)
     with app.app_context():

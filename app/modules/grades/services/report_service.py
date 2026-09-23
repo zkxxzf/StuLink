@@ -174,8 +174,10 @@ def _subject_layer_row(data, direction, sub, layer_name, layer_lower, trimmed):
             'trim_avg': _avg(trim_vals)}
 
 
-def subject_layer_report(exam_id, direction, layer_name='', compare_exam_id=None):
+def subject_layer_report(exam_id, direction, layer_name='', compare_exam_id=None, no_compare=False):
     """图1：某方向各学科层上线表，含对比考试同口径（默认上一场，可指定 compare_exam_id）。
+
+    no_compare=True 时不做任何对比（不取 compare_exam_id 也不回退到上一场）。
 
     返回 rows 顺序 = 该方向实际有成绩的科目（按系统科目序）。
     teachers：{科目展示名: '姓名、姓名'}，任课教师列（不依赖划线，修复未划线考试显示「—」）。
@@ -202,14 +204,15 @@ def subject_layer_report(exam_id, direction, layer_name='', compare_exam_id=None
         cur = _subject_layer_row(data, direction, sub, sub_layer[0], sub_layer[1], trimmed)
         subj_rows.append(cur)
 
-    # 对比考试：显式指定优先（须同年级），否则默认最近一场同年级考试
+    # 对比考试：no_compare 时不对比；否则显式指定优先（须同年级），再否则默认最近一场同年级考试
     cmp_exam = None
-    if compare_exam_id:
-        cmp_exam = Exam.query.get(compare_exam_id)
-        if cmp_exam and cmp_exam.grade != data.exam.grade:
-            cmp_exam = None
-    elif data.prev_exam:
-        cmp_exam = data.prev_exam
+    if not no_compare:
+        if compare_exam_id:
+            cmp_exam = Exam.query.get(compare_exam_id)
+            if cmp_exam and cmp_exam.grade != data.exam.grade:
+                cmp_exam = None
+        elif data.prev_exam:
+            cmp_exam = data.prev_exam
     prev_block = None
     if cmp_exam:
         prev = st.cached_exam_data(cmp_exam.id)

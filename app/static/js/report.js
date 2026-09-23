@@ -124,6 +124,7 @@
         var cur = state.exams[curExam()];
         var grade = cur && cur.grade;
         sel.append('<option value="">上一场（默认）</option>');
+        sel.append('<option value="none">不对比</option>');
         Object.keys(state.exams).forEach(function (id) {
             var e = state.exams[id];
             if (String(id) === String(curExam())) return;
@@ -198,6 +199,11 @@
             }
             return th;
         }
+        // 名次列的表头单元格：勾选后 tbody 会多一列，表头必须同步补一列，
+        // 否则表头比数据行短 → 整行右移 + 末尾留白（表头错位）
+        function rankHead() {
+            return el('th', S.th + 'background:#dbe7f5;color:#1f4e79;font-size:13px;', '名次');
+        }
         (cfg.cols || []).forEach(function (col) {
             var rankable = !col.fixed && col.rankable !== false;
             if (hasGroups) {
@@ -206,6 +212,7 @@
                 tr1.appendChild(th);
             } else {
                 tr1.appendChild(headOf(col, rankable));
+                if (rankable && checked.indexOf(col.key) >= 0) tr1.appendChild(rankHead());
             }
             flat.push({col: col, rankable: hasGroups ? false : rankable});
         });
@@ -218,6 +225,7 @@
                 tr1.appendChild(gh);
                 g.cols.forEach(function (col) {
                     tr2.appendChild(headOf(col, true));
+                    if (checked.indexOf(col.key) >= 0) tr2.appendChild(rankHead());
                     flat.push({col: col, rankable: true});
                 });
             });
@@ -268,8 +276,9 @@
     /* ---------- 板块一：年级各科层上线 ---------- */
     function loadSubjectLayer() {
         var qs = '?exam_id=' + examId + '&direction=' + encodeURIComponent(curDir())
-            + '&layer=' + encodeURIComponent(curLayer())
-            + (state.cmp ? '&compare_exam_id=' + encodeURIComponent(state.cmp) : '');
+            + '&layer=' + encodeURIComponent(curLayer());
+        if (state.cmp === 'none') qs += '&compare=none';
+        else if (state.cmp) qs += '&compare_exam_id=' + encodeURIComponent(state.cmp);
         $.getJSON('/grades/api/report/subject-layer' + qs, function (res) {
             var box = $('#rpSl');
             if (!box.length) box = $('<div class="rp-section" id="rpSl">').appendTo('#rpBody');

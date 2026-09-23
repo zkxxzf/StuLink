@@ -29,7 +29,7 @@ def _get_classes():
     v1.17.0：改用统一的数据范围解析（原仅 UserClassLink，年级长/管理员取不到自己的范围）。
     """
     classes_info = wb_scope.managed_class_pairs(current_user)
-    return [{'class_name': c[1], 'label': f'{c[0]} {c[1]}'} for c in (classes_info or [])]
+    return [{'class_name': c[1], 'grade': c[0], 'label': f'{c[0]} {c[1]}'} for c in (classes_info or [])]
 
 
 def _check_class(class_name):

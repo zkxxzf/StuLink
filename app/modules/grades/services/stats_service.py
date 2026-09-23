@@ -32,6 +32,11 @@ _exam_data_cache = OrderedDict()
 # 构建（全量拉取，耗时）也在锁内，配合双重检查使并发冷启动只算一次。
 _exam_data_lock = threading.Lock()
 
+# 趋势均值聚合（exam_score_means）进程级缓存：key=(grade, frozenset(subjects),
+# direction, class_name)，与 ExamData 同 TTL；LRU 上限 200 覆盖全年级各考试复用。
+_EXAM_MEANS_MAX = 200
+_exam_means_cache = OrderedDict()
+
 
 def cached_exam_data(exam_id):
     """取共享 ExamData；过期/超限自动重建。
@@ -70,6 +75,9 @@ def _detach_shared(data):
 def clear_exam_data_cache():
     """成绩/划线变更后清空，防止读到旧快照（由 invalidate_exam_cache 调用）"""
     _exam_data_cache.clear()
+    # 趋势均值聚合按年级缓存，与具体考试无关；成绩/划线变动同样使其失效，
+    # 否则重导后年级趋势图会残留旧均值（与 ExamData 同样 900s TTL 口径）
+    _exam_means_cache.clear()
 
 
 class ExamData:
@@ -94,6 +102,12 @@ class ExamData:
                          key=lambda c: int(''.join(filter(str.isdigit, c)) or 0))
         self.classes = classes
         self.directions = sorted({r.direction for r in self.total_rows if r.direction})
+        # v1.17.x 性能：按班级预分组 snap，使 totals_of(class_name=...) 由
+        # O(人数) 全量扫描降为 O(1) 查表；年级/班级/学科/教师各 tab 反复按班级取数
+        # （平均上百个班 × 8000 人）是分析页计算慢的主因之一。
+        self._by_class = {}
+        for sn in self.snap.values():
+            self._by_class.setdefault(sn['class_name'], []).append(sn)
         # 上一场同年级考试（趋势/进退步对比基准）
         self.prev_exam = (Exam.query
                           .filter(Exam.grade == self.exam.grade,
@@ -123,10 +137,15 @@ class ExamData:
         return self.exam.full_marks()
 
     def totals_of(self, class_name=None, direction=None):
+        if class_name:
+            rows = self._by_class.get(class_name)
+            if rows is None:
+                return []
+            if direction:
+                return [t for t in rows if t['direction'] == direction]
+            return rows
         out = []
         for r in self.total_rows:
-            if class_name and r.class_name != class_name:
-                continue
             if direction and r.direction != direction:
                 continue
             out.append(self.snap[r.student_no])
@@ -383,7 +402,25 @@ def exam_score_means(grade, subjects, direction=None, class_name=None):
     返回 {exam_id: {'name', 'date', 'means': {subject: avg|None},
                      'counts': {subject: int}}}，键按 trend_exams 顺序。
     direction / class_name 过滤被聚合的分数行。
+
+    v1.17.x 性能：趋势聚合按「年级+科目+方向(+班级)」计算，与当前看哪场考试无关，
+    却被每个考试的 grade/class 分析重复扫描全年级历史（25 场 × 8000 人 ≈ 22 万行）。
+    进程级 LRU 缓存一次后，同年级所有考试的分析页直接复用，冷启动趋势段几乎瞬出。
     """
+    key = (grade, frozenset(subjects), direction, class_name)
+    with _exam_data_lock:
+        ent = _exam_means_cache.get(key)
+        if ent is not None and time.time() - ent[0] < _EXAM_DATA_TTL:
+            return ent[1]
+    result = _exam_score_means_uncached(grade, subjects, direction, class_name)
+    with _exam_data_lock:
+        _exam_means_cache[key] = (time.time(), result)
+        while len(_exam_means_cache) > _EXAM_MEANS_MAX:
+            _exam_means_cache.popitem(last=False)
+    return result
+
+
+def _exam_score_means_uncached(grade, subjects, direction=None, class_name=None):
     exams = trend_exams(grade)
     out = {e.id: {'name': e.name, 'date': e.exam_date.strftime('%Y-%m-%d')}
            for e in exams}

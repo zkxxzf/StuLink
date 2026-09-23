@@ -24,39 +24,30 @@
 </div>
 {% else %}
 
-<!-- 班级切换标签 -->
-<div class="card mb-3">
-    <div class="card-body pb-2">
-        <div class="d-flex flex-wrap gap-2 align-items-center">
-            <span class="text-muted small me-1"><i class="bi bi-funnel"></i> 班级：</span>
-            {% for g, cn in classes_info %}
-            <a href="{{ url_for('overview.students_page', grade=g, class_name=cn, search=search) }}"
-               class="btn btn-sm {% if g == selected_grade and cn == selected_class %}btn-primary{% else %}btn-outline-secondary{% endif %}">
-                {{ g }}{{ cn }}
-            </a>
-            {% endfor %}
-        </div>
-        <div class="mt-2">
-            <form class="row g-2 align-items-center" method="GET">
-                <input type="hidden" name="grade" value="{{ selected_grade }}">
-                <input type="hidden" name="class_name" value="{{ selected_class }}">
-                <div class="col-auto">
-                    <input type="text" name="search" class="form-control form-control-sm"
-                           placeholder="搜索姓名或学号..." value="{{ search }}" style="width: 200px;">
-                </div>
-                <div class="col-auto">
-                    <button type="submit" class="btn btn-sm btn-outline-primary">
-                        <i class="bi bi-search"></i> 搜索
-                    </button>
-                    {% if search %}
-                    <a href="{{ url_for('overview.students_page', grade=selected_grade, class_name=selected_class) }}"
-                       class="btn btn-sm btn-outline-secondary">清除</a>
-                    {% endif %}
-                </div>
-            </form>
-        </div>
-    </div>
-</div>
+<!-- 筛选栏（紧凑下拉风格，对齐成绩分析页） -->
+<form class="d-flex flex-wrap gap-2 align-items-center mb-3" method="GET" id="stuFilter">
+    <select name="grade" class="form-select form-select-sm w-auto" title="年级" id="selGrade">
+        {% for g in grades %}
+        <option value="{{ g }}" {% if g == selected_grade %}selected{% endif %}>{{ g }}</option>
+        {% endfor %}
+    </select>
+    <select name="class_name" class="form-select form-select-sm w-auto" title="班级" id="selClass" style="min-width:90px;">
+        {% for g, cn in classes_info if g == selected_grade %}
+        <option value="{{ cn }}" {% if cn == selected_class %}selected{% endif %}>{{ cn }}</option>
+        {% endfor %}
+    </select>
+    <input type="text" name="search" class="form-control form-control-sm" style="width:180px;"
+           placeholder="搜索姓名或学号..." value="{{ search }}">
+    <button type="submit" class="btn btn-sm btn-outline-primary"><i class="bi bi-search"></i> 搜索</button>
+    {% if search %}
+    <a href="{{ url_for('overview.students_page', grade=selected_grade, class_name=selected_class) }}"
+       class="btn btn-sm btn-outline-secondary">清除</a>
+    {% endif %}
+</form>
+<script>
+document.getElementById('selGrade').addEventListener('change', function(){ document.getElementById('stuFilter').submit(); });
+document.getElementById('selClass').addEventListener('change', function(){ document.getElementById('stuFilter').submit(); });
+</script>
 
 {% if result and result.students %}
 <div class="card">
