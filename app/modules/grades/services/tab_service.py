@@ -370,6 +370,22 @@ def class_tab(exam_id, class_name):
                     {'key': 'rank_move', 'label': '排名变动', 'type': 'int'}],
         'rows': t3,
     }
+    # A2-T3b 班级学生各科成绩表（每生 × 应考科目分数，排名同明细表序）
+    t3b = []
+    for t in sorted(totals, key=lambda x: x['rank_dir'] or 99999):
+        row = {'no': t['no'], 'name': t['name']}
+        for sub in subs:
+            row[sub] = data.subj.get((t['no'], sub))
+        row['total'] = t['score']
+        t3b.append(row)
+    tables['student_scores'] = {
+        'title': '班级学生各科成绩表',
+        'columns': [{'key': 'no', 'label': '学号', 'type': 'text'},
+                    {'key': 'name', 'label': '姓名', 'type': 'text'}]
+                   + [{'key': s, 'label': s, 'type': 'num'} for s in subs]
+                   + [{'key': 'total', 'label': '总分', 'type': 'num'}],
+        'rows': t3b,
+    }
     # A2-T4 分层统计（按本班学生自身方向判定）
     t4 = []
     layers_map = {}
