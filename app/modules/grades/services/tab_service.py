@@ -297,14 +297,17 @@ def class_tab(exam_id, class_name):
 
     # A2-T1 班级概况
     segs, rows = st.segment_table(data, class_name=class_name)
+    _ov_row = {'k': '各分数段人数', **{'s%d' % i: r['counts'].get(class_name, 0)
+                                   for i, r in enumerate(rows)}}
     tables['class_overview'] = {
         'title': '班级各分数段人数',
         'columns': [{'key': 'k', 'label': '项目', 'type': 'text'}] +
                    [{'key': 's%d' % i, 'label': s[0], 'type': 'int'} for i, s in enumerate(segs)],
-        'rows': [
-            {'k': '各分数段人数', **{'s%d' % i: r['counts'].get(class_name, 0)
-                                  for i, r in enumerate(rows)}},
-        ],
+        'rows': [_ov_row],
+        # 单行 × 多分数段：自动推断会画成 1 根柱，显式转置为「分数段 → 人数」
+        'chartHint': {'type': 'bar', 'xAxis': [s[0] for s in segs],
+                      'series': [{'name': '人数', 'data': [_ov_row.get('s%d' % i)
+                                                          for i in range(len(segs))]}]},
     }
     tables['class_meta'] = {
         'title': '班级基本指标',
@@ -318,6 +321,11 @@ def class_tab(exam_id, class_name):
             {'k': '与年级均值差', 'v': (round(cls_avg - grade_avg, 1)
                                      if cls_avg is not None and grade_avg is not None else '—')},
         ],
+        # 键值表无法被前端自动推断（第二列是混合量纲的文本）→ 显式给图：仅画可比的 4 个数值项
+        'chartHint': {'type': 'bar',
+                      'xAxis': ['总分均值', '年级均值', '参考人数', '年级参考人数'],
+                      'series': [{'name': '本班', 'data': [cls_avg, grade_avg,
+                                                          len(totals), len(data.total_rows)]}]},
     }
     # A2-T2 班级-年级科目对标
     subs = data.class_subjects(class_name)
@@ -373,7 +381,26 @@ def class_tab(exam_id, class_name):
                       {'key': 'score_move', 'label': '分数变动', 'type': 'num'},
                       {'key': 'rank_move', 'label': '排名变动', 'type': 'int'}],
         'rows': t3,
+        # 明细表行=学生：图表取排名靠前的若干人画「各科分数」，避免几十上百根柱挤在一起
+        'chartHint': {'type': 'groupbar', 'xKey': 'name', 'topN': 25,
+                      'seriesKeys': list(subs)},
         'link': 'student-query',
+    }
+    # A2-T3b 班级学生各科成绩表（每生 × 应考科目分数，排名同明细表序）
+    t3b = []
+    for t in sorted(totals, key=lambda x: x['rank_dir'] or 99999):
+        row = {'no': t['no'], 'name': t['name']}
+        for sub in subs:
+            row[sub] = data.subj.get((t['no'], sub))
+        row['total'] = t['score']
+        t3b.append(row)
+    tables['student_scores'] = {
+        'title': '班级学生各科成绩表',
+        'columns': [{'key': 'no', 'label': '学号', 'type': 'text'},
+                    {'key': 'name', 'label': '姓名', 'type': 'text'}]
+                   + [{'key': s, 'label': s, 'type': 'num'} for s in subs]
+                   + [{'key': 'total', 'label': '总分', 'type': 'num'}],
+        'rows': t3b,
     }
     # A2-T4 分层统计（按本班学生自身方向判定）
     t4 = []

@@ -81,7 +81,9 @@ with app.test_client() as c:
     r = c.post('/grades/exams/new', data={
         'csrf_token': csrf, 'grade': '2025级', 'exam_date': '2026-01-15',
         'name': '2025级2026-01-15', 'exam_type': '期末'}, follow_redirects=True)
-    check('新建考试', r.status_code == 200 and '导入成绩' in r.get_data(as_text=True))
+    _ce = r.get_data(as_text=True)
+    check('新建考试', r.status_code == 200 and '导入成绩' in _ce,
+          f'status={r.status_code} html={_ce[:200]!r}')
 
     with app.app_context():
         exam = Exam.query.first()
@@ -171,6 +173,40 @@ with app.test_client() as c:
     js = r.get_json()
     check('学科分析 API（含热力）',
           'class_compare' in js['data']['tables'] and 'heatmap' in js['data']['charts'])
+
+    # ---- 班级对比分析（第五 tab） ----
+    from urllib.parse import quote
+    pair = quote('01班') + ',' + quote('02班')
+    r = c.get(f'/grades/api/analysis/compare?exam_id={eid}&classes={pair}')
+    js = r.get_json()
+    ct = js.get('data', {}).get('tables', {}) if js.get('success') else {}
+    check('班级对比 API（两班）', r.status_code == 200 and 'cmp_overview' in ct
+          and len(ct['cmp_overview']['rows']) == 2, str(r.get_data(as_text=True)[:200]))
+    check('班级对比：各班核心指标含极差/分差',
+          ct.get('cmp_overview', {}).get('rows') and
+          'range' in ct['cmp_overview']['rows'][0] and 'diff' in ct['cmp_overview']['rows'][0])
+    check('班级对比：科目/及格率/优秀率三张横表 + 图表规格',
+          all(k in ct for k in ('cmp_subject', 'cmp_pass', 'cmp_good'))
+          and bool(ct['cmp_subject'].get('chartHint')), str(list(ct.keys())))
+    check('班级对比：堆叠分段表图表规格',
+          bool(ct.get('cmp_score_seg', {}).get('chartHint'))
+          and ct['cmp_score_seg']['chartHint']['type'] == 'stack')
+    check('班级对比：五数概括 + 箱线图规格',
+          'cmp_box' in ct and bool(ct['cmp_box'].get('chartHint'))
+          and ct['cmp_box']['chartHint']['type'] == 'boxplot')
+    # 01班只考史政地、02班只考物化生 → 科目对比表中未考班级该科应为空
+    rows_s = ct.get('cmp_subject', {}).get('rows', [])
+    hist_row = next((x for x in rows_s if x['subject'] == '历史'), None)
+    check('班级对比：未考科目置空（历史仅01班有分）',
+          hist_row is not None and hist_row['c0'] is not None and hist_row['c1'] is None,
+          str(hist_row))
+    r = c.get(f'/grades/api/analysis/compare?exam_id={eid}&classes={quote("01班")}')
+    check('班级对比：不足两个班返回 400', r.status_code == 400)
+    r = c.get(f'/grades/api/analysis/compare?exam_id={eid}'
+              f'&classes={quote("01班")},{quote("不存在的班")}')
+    check('班级对比：过滤不存在班级后 400', r.status_code == 400)
+    r = c.get(f'/grades/export/compare?exam_id={eid}&classes={pair}')
+    check('导出班级对比 Excel', r.status_code == 200 and r.data[:2] == b'PK')
 
     # ---- 分层模板应用 ----
     r = c.post('/grades/api/bands/apply', json={'exam_id': eid, 'template': '4',
@@ -376,13 +412,19 @@ with app.test_client() as c:
     r = c.get('/grades/api/options')
     tabs = r.get_json()['data']['tabs']
     check('班主任 tabs 仅班级', tabs == {'grade': False, 'class': True,
-                                        'subject': False, 'teacher': False})
+                                        'subject': False, 'teacher': False,
+                                        'compare': False})
     r = c.get(f'/grades/api/analysis/class?exam_id={eid}&class_name=01%E7%8F%AD')
     check('班主任可看本班分析', r.status_code == 200)
     r = c.get(f'/grades/api/analysis/class?exam_id={eid}&class_name=02%E7%8F%AD')
     check('班主任不可看别班（403）', r.status_code == 403)
     r = c.get(f'/grades/api/analysis/grade?exam_id={eid}')
     check('班主任不可看年级分析（403）', r.status_code == 403)
+    _pair2 = quote('01班') + ',' + quote('02班')
+    r = c.get(f'/grades/api/analysis/compare?exam_id={eid}&classes={_pair2}')
+    check('班主任不可看班级对比（403）', r.status_code == 403)
+    r = c.get(f'/grades/export/compare?exam_id={eid}&classes={_pair2}')
+    check('班主任不可导出班级对比（403）', r.status_code == 403)
     r = c.get(f'/grades/export/grade?exam_id={eid}')
     check('班主任不可导出年级分析（403）', r.status_code == 403)
     logout()
@@ -392,7 +434,8 @@ with app.test_client() as c:
     r = c.get('/grades/api/options')
     tabs = r.get_json()['data']['tabs']
     check('教师 tabs 仅任课教师', tabs == {'grade': False, 'class': False,
-                                          'subject': False, 'teacher': True})
+                                          'subject': False, 'teacher': True,
+                                          'compare': False})
     r = c.get(f'/grades/api/analysis/teacher?exam_id={eid}&subject=%E6%95%B0%E5%AD%A6')
     js = r.get_json()['data']['tables']['teacher_data']
     check('教师仅见本人数据', js['rows'] and js['rows'][0]['teacher'] == '测试任课教师'
@@ -420,7 +463,8 @@ with app.test_client() as c:
     r = c.get('/grades/api/options')
     tabs = r.get_json()['data']['tabs']
     check('导入班主任 tabs 仅班级', tabs == {'grade': False, 'class': True,
-                                             'subject': False, 'teacher': False},
+                                             'subject': False, 'teacher': False,
+                                             'compare': False},
           str(tabs))
     r = c.get(f'/grades/api/analysis/class?exam_id={eid}&class_name=01%E7%8F%AD')
     check('导入班主任可看本班全部科目（200）', r.status_code == 200)

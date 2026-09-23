@@ -198,6 +198,11 @@
             }
             return th;
         }
+        // 名次列的表头单元格：勾选后 tbody 会多一列，表头必须同步补一列，
+        // 否则表头比数据行短 → 整行右移 + 末尾留白（表头错位）
+        function rankHead() {
+            return el('th', S.th + 'background:#dbe7f5;color:#1f4e79;font-size:13px;', '名次');
+        }
         (cfg.cols || []).forEach(function (col) {
             var rankable = !col.fixed && col.rankable !== false;
             if (hasGroups) {
@@ -206,6 +211,7 @@
                 tr1.appendChild(th);
             } else {
                 tr1.appendChild(headOf(col, rankable));
+                if (rankable && checked.indexOf(col.key) >= 0) tr1.appendChild(rankHead());
             }
             flat.push({col: col, rankable: hasGroups ? false : rankable});
         });
@@ -218,6 +224,7 @@
                 tr1.appendChild(gh);
                 g.cols.forEach(function (col) {
                     tr2.appendChild(headOf(col, true));
+                    if (checked.indexOf(col.key) >= 0) tr2.appendChild(rankHead());
                     flat.push({col: col, rankable: true});
                 });
             });
