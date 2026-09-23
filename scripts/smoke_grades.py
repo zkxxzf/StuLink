@@ -97,8 +97,9 @@ with app.test_client() as c:
         'name': '2025级2026-01-15', 'exam_type': '期末'}, follow_redirects=True)
     _ce = r.get_data(as_text=True)
     # 说明：原断言检查空列表文案「再导入成绩」，列表非空时反而不含该文案（断言写反了）；
-    # 改为断言新考试名出现在考试列表中。
-    check('新建考试', r.status_code == 200 and '2025级2026-01-15' in _ce,
+    # 改为断言「考试已创建」提示 + 新考试名出现在考试列表中（与 master 的修正保持一致）。
+    check('新建考试', r.status_code == 200 and '考试已创建' in _ce
+          and '2025级2026-01-15' in _ce,
           f'status={r.status_code} html={_ce[:200]!r}')
 
     with app.app_context():

@@ -1,4 +1,6 @@
 # 作者身份映射：把早期误填的提交身份映射为真实作者
-# 生效范围：git log / git shortlog 以及 GitHub 提交历史页面
+# 生效范围：git log / git shortlog 以及仓库主页提交历史（GitHub / Gitee 均支持）
 # 说明：无需改写历史、无需 force push，不影响协作者
-zkxxzf <298106223+zkxxzf@users.noreply.github.com> 123 <123@321.com>
+# 当前主邮箱：Gitee noreply（仓库迁移后新 commit 使用），早期 GitHub noreply 同步归一到同一人
+zkxxzf <10908200+zkxxzf@user.noreply.gitee.com> <298106223+zkxxzf@users.noreply.github.com>
+zkxxzf <10908200+zkxxzf@user.noreply.gitee.com> 123 <123@321.com>

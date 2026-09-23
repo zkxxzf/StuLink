@@ -81,7 +81,16 @@
 .tbl-wrap { max-height: 480px; overflow: auto; }
 
 /* 分析页 tab 面板 */
-.tab-pane-loading { padding: 60px 0; text-align: center; color: #94a3b8; }.empty-state { padding: 50px 20px; text-align: center; color: #64748b; }
+.tab-pane-loading {
+    padding: 60px 0;
+    text-align: center;
+    color: #94a3b8;
+}
+.empty-state {
+    padding: 50px 20px;
+    text-align: center;
+    color: #64748b;
+}
 .empty-state .bi { font-size: 40px; color: #cbd5e1; }
 
 /* ================= AI 分析：对话 / 思维链 / 图表 ================= */

@@ -1,4 +1,4 @@
-# StuLink v1.17.0 2026-09-21
+# StuLink v1.18.0.0 2026-09-23
 # 课表公共辅助函数（schedule_service 与 swap_service 共享）
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 """课表模块公共辅助层。

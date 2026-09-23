@@ -1,4 +1,4 @@
-# StuLink v1.17.0 2026-09-21
+# StuLink v1.18.0.0 2026-09-23
 # 成绩统计分析服务：一次载入考试成绩数据，提供各 tab 需要的聚合（纯函数 + 内存计算）
 # 口径遵循设计文档第 8 章：参考学生=有总分行（至少一应考科有分），不分学籍状态
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
@@ -73,11 +73,16 @@ def _detach_shared(data):
 
 
 def clear_exam_data_cache():
-    """成绩/划线变更后清空，防止读到旧快照（由 invalidate_exam_cache 调用）"""
-    _exam_data_cache.clear()
-    # 趋势均值聚合按年级缓存，与具体考试无关；成绩/划线变动同样使其失效，
-    # 否则重导后年级趋势图会残留旧均值（与 ExamData 同样 900s TTL 口径）
-    _exam_means_cache.clear()
+    """成绩/划线变更后清空，防止读到旧快照（由 invalidate_exam_cache 调用）
+
+    v1.18.0.0 审核修正：两个缓存都受 _exam_data_lock 保护，清空时同样持锁，
+    避免与 cached_exam_data / exam_score_means 的读写产生 LRU 一致性问题（
+    OrderedDict.clear() 在 CPython GIL 下虽安全，但与 move_to_end/popitem 无锁读写同存时仍不严谨）。"""
+    with _exam_data_lock:
+        _exam_data_cache.clear()
+        # 趋势均值聚合按年级缓存，与具体考试无关；成绩/划线变动同样使其失效，
+        # 否则重导后年级趋势图会残留旧均值（与 ExamData 同样 900s TTL 口径）
+        _exam_means_cache.clear()
 
 
 class ExamData:
@@ -143,7 +148,10 @@ class ExamData:
                 return []
             if direction:
                 return [t for t in rows if t['direction'] == direction]
-            return rows
+            # v1.18.0.0 审核修正：不直接返回内部共享 list（_by_class 值），
+            # 防止 caller 一旦 append/sort/pop 就会污染进程级 ExamData 缓存 900s。
+            # list(rows) 仅拷贝外层引用，内层 snap 字典依旧只读共享，开销 O(班人数) 仍可接受。
+            return list(rows)
         out = []
         for r in self.total_rows:
             if direction and r.direction != direction:
@@ -411,7 +419,13 @@ def exam_score_means(grade, subjects, direction=None, class_name=None):
     with _exam_data_lock:
         ent = _exam_means_cache.get(key)
         if ent is not None and time.time() - ent[0] < _EXAM_DATA_TTL:
-            return ent[1]
+            # v1.18.0.0 审核修正：返回时拷贝外层与 means/counts 内层，
+            # 避免 caller 就地修改污染进程级缓存（当前 caller 均为只读，修修正防未来变更）。
+            cached = ent[1]
+            return {eid: {**info,
+                          'means': dict(info.get('means') or {}),
+                          'counts': dict(info.get('counts') or {})}
+                    for eid, info in cached.items()}
     result = _exam_score_means_uncached(grade, subjects, direction, class_name)
     with _exam_data_lock:
         _exam_means_cache[key] = (time.time(), result)

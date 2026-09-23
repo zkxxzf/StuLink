@@ -1,4 +1,4 @@
-# StuLink v1.17.0 2026-09-21
+# StuLink v1.18.0.0 2026-09-23
 # 表单收集「汇总服务层」：应交名单 / 提交统计 / 横向汇总矩阵 / Excel 导出
 #                        / 材料清单与打包下载 / 未交催交
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
