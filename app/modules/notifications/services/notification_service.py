@@ -1,4 +1,4 @@
-# StuLink v1.17.0 2026-09-21
+# StuLink v1.18.0 2026-09-23
 # 通知公告服务层
 # v2.0 收件人表改造：发布时将可见范围展开为 notification_recipients 行，
 # 列表/未读数/已读进度全部走单表索引查询；新增 target_type='users' 精确到人。

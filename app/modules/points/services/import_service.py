@@ -1,4 +1,4 @@
-# StuLink v1.17.0 2026-09-21
+# StuLink v1.18.0 2026-09-23
 # 积分导入服务：Excel 解析 / 校验 / 批量写入 / 模板生成
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 import io
