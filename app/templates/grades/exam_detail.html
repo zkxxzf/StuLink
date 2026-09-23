@@ -242,6 +242,9 @@ $(function(){
         var v = $(this).val();
         pageSize = (v === '全部') ? 500 : parseInt(v, 10);
         if (pageSize > 500) pageSize = 500;   // 单页上限，防止「全部」拖垮
+        // v1.18.0 审核修正：切页大小时同步重算 totalPages，
+        // 否则“第 X / Y 页”的 Y 仍为旧值，导致 Next 能翻到实际不存在的页，服务端 clamp 后回回重页
+        totalPages = Math.max(1, Math.ceil(total / pageSize));
         sessionStorage.setItem(PAGE_KEY, 1);
         loadPage(1);
     });
