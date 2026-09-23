@@ -1,10 +1,18 @@
-flask>=3.0
-flask-sqlalchemy>=3.1
-flask-login>=0.6
-flask-wtf>=1.2
-openpyxl>=3.1
-reportlab>=4.0  # v1.12.2 考务 A4 打印版 PDF 导出（桌签/名单）
-python-pptx>=1.0  # v1.13.1 汇报区导出 PPTX 交付物
-waitress>=3.0
-cryptography>=41.0
-pypinyin>=0.5
+# StuLink 依赖（L-6：锁定下限与上限，避免 CI/部署拉到不兼容的大版本）
+# 版本取自 2026-09-23 本机实际运行环境（pip freeze），用 ~= 允许补丁/次版本修复，
+# 但不允许跨次版本升级（防止 SQLAlchemy 2.x→3.x、Flask-WTF 行为变更等）。
+# 升级依赖时：先在测试环境 pip install -U，再回来改这里的下限并跑 scripts/smoke_*.py。
+Flask~=3.1.1
+Flask-SQLAlchemy~=3.1.1
+Flask-Login~=0.6.3
+Flask-WTF~=1.3.0
+WTForms~=3.2.1
+SQLAlchemy~=2.0.23
+Werkzeug~=3.1.3
+Jinja2~=3.1.6
+openpyxl~=3.1.5
+reportlab~=5.0.0        # v1.12.2 考务 A4 打印版 PDF 导出（桌签/名单）
+python-pptx~=1.0.2      # v1.13.1 汇报区导出 PPTX 交付物
+waitress~=3.0.2
+cryptography~=50.0.1
+pypinyin~=0.55.0

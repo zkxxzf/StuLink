@@ -50,10 +50,17 @@ def encrypt_id_card(value):
 
 
 def decrypt_id_card(cipher):
-    """密文 → 身份证号；解密失败返回空串（旧明文数据兼容）"""
+    """密文 → 身份证号；解密失败返回空串（旧明文数据兼容）。
+
+    M-5：crypto.decrypt 现在对"无法解密"抛 DecryptError（不再把密文当明文返回），
+    展示侧降级为空串；真正的失败原因由 crypto 侧日志留痕。
+    """
     if not cipher:
         return ''
-    return normalize(decrypt(cipher))
+    try:
+        return normalize(decrypt(cipher))
+    except Exception:
+        return ''
 
 
 def masked_from_cipher(cipher):

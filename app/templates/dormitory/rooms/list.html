@@ -162,7 +162,8 @@
                 <div class="col-6 col-md-4 room-col">
                     <div class="card h-100 room-card {% if room.gender == '男' %}male{% else %}female{% endif %}" 
                          data-room-id="{{ room.id }}"
-                         onclick="window.location.href='{{ url_for('rooms.detail', id=room.id) }}'">
+                         {# M-10：内联处理器里的 URL 同样用 |tojson #}
+                         onclick="window.location.href={{ url_for('rooms.detail', id=room.id)|tojson }}">
                         {% if current_user.has_role('admin', 'dorm_manager') %}
                         <input type="checkbox" name="room_ids" value="{{ room.id }}"
                                form="batchForm" class="form-check-input card-check room-check"

@@ -62,6 +62,14 @@ def _normalize_config(data, old=None):
         return None, '接口地址需以 http(s):// 开头'
     if base_url and len(base_url) > 200:
         return None, '接口地址过长'
+    if base_url:
+        # H-9：保存阶段即校验（域名白名单 + 私网/环回/元数据地址拒绝），
+        # 避免"保存成功、一点测试连接就打到内网"。
+        try:
+            from app.utils.url_guard import assert_outbound_url_allowed
+            assert_outbound_url_allowed(base_url)
+        except ValueError as e:
+            return None, str(e)
     model = (data.get('model') or '').strip()
     if len(model) > 100:
         return None, '模型名过长'

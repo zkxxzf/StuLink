@@ -11,5 +11,7 @@ csrf = CSRFProtect()
 login_manager.login_view = 'auth.login'
 login_manager.login_message = '请先登录'
 login_manager.login_message_category = 'warning'
+# M-2：会话保护（标识符不匹配时降级/登出）；不改数据库结构
+login_manager.session_protection = 'strong'
 
 

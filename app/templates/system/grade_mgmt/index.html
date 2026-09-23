@@ -29,7 +29,8 @@
                     {% endif %}
                 </p>
                 <button class="btn {% if gs.is_graduated %}btn-outline-secondary{% else %}btn-outline-danger{% endif %} btn-sm"
-                        onclick="graduate('{{ grade }}')"
+                        {# M-10：年级字符串统一 |tojson #}
+                        onclick="graduate({{ grade|tojson }})"
                         {% if gs.is_graduated %}disabled{% endif %}>
                     {% if gs.is_graduated %}
                     <i class="bi bi-check-circle"></i> 已毕业

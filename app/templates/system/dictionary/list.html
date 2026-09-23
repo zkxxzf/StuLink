@@ -66,7 +66,8 @@
                         </button>
                         {% else %}
                         <form method="POST" action="{{ url_for('dictionary.delete_item', item_id=item.id) }}" style="display:inline;"
-                              onsubmit="return confirm('确定要删除「{{ item.value }}」吗？')">
+                              {# M-10：confirm 文本中的字典值必须 |tojson #}
+                              onsubmit="return confirm({{ ('确定要删除「' ~ item.value ~ '」吗？')|tojson }})">
                             <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                             <button type="submit" class="btn btn-sm btn-outline-danger" title="删除">
                                 <i class="bi bi-trash"></i>

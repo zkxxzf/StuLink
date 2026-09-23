@@ -83,10 +83,12 @@ def create_table(conn):
 def add_columns(conn):
     have = _existing_columns(conn, 'notifications')
     added = 0
+    from _ddl_guard import assert_ident   # R-11
     for col, ddl in NEW_COLUMNS:
         if col in have:
             print(f'[SKIP] notifications.{col} 列已存在')
             continue
+        assert_ident(col, '列名')
         conn.execute(f'ALTER TABLE notifications ADD COLUMN {col} {ddl}')
         added += 1
         print(f'[ADD]  notifications.{col} {ddl}')

@@ -15,7 +15,7 @@ bp = Blueprint('dashboard', __name__, url_prefix='/dashboard')
 
 
 @bp.route('/')
-@login_required
+@perm_required('dormitory.view')   # H-2：此前只有 @login_required
 def index():
     graduated = get_graduated_grades()
     base_q = db.session.query(
@@ -179,7 +179,7 @@ def index():
 
 
 @bp.route('/search')
-@login_required
+@perm_required('dormitory.view')   # H-2
 def search_student_accommodation():
     query = Student.query
     graduated = get_graduated_grades()
@@ -273,7 +273,7 @@ def search_student_accommodation():
 
 @bp.route('/search/export', methods=['GET', 'POST'])
 @bp.route('/export', methods=['GET', 'POST'])
-@login_required
+@perm_required('dormitory.view')   # H-2：全校住宿分布导出
 def export_student_accommodation():
     from app.utils.export_helpers import do_export_student_accommodation
     if request.method == 'POST':
@@ -331,7 +331,7 @@ def batch_edit_dormitory():
 
 
 @bp.route('/search/import-template')
-@login_required
+@perm_required('dormitory.import')  # H-2
 def download_dorm_import_template():
     """下载宿舍信息导入模板"""
     import openpyxl

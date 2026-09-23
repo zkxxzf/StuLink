@@ -82,7 +82,9 @@ if os.path.exists(HIST_DB):
 
 # ===== Step 4: 清理 dormitory.db =====
 print('\n[Step 4] 清理 dormitory.db 基础表')
+from _ddl_guard import assert_ident   # R-11
 for name in SYSTEM_TABLES:
+    assert_ident(name, '表名')
     src.execute(f"DROP TABLE IF EXISTS {name}")
     log(f'删除: {name}')
 src.commit()

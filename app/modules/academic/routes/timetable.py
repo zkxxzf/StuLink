@@ -16,17 +16,30 @@ from app.modules.academic.services import timetable_import_service
 from app.utils.decorators import perm_required
 from app.utils.helpers import log_operation
 
+import threading   # L-4：草稿并发保护
+
 _WEEKDAYS = ['周一', '周二', '周三', '周四', '周五', '周六', '周日']
 
 # 导入草稿（内存级，服务重启后自动失效，与教师导入同模式）
+# L-4：进程内 dict 在多线程（waitress 多线程）下并发读写会互相覆盖/丢失，这里加锁。
 _DRAFT = {}
 _DRAFT_TTL = 1800
+_DRAFT_LOCK = threading.RLock()
+
+# L-4：草稿条目数量上限，避免被反复上传刷爆内存
+_DRAFT_MAX = 200
 
 
 def _purge_expired_drafts():
     now = time.time()
-    for key in [k for k, v in _DRAFT.items() if now - v.get('_ts', 0) > _DRAFT_TTL]:
-        _DRAFT.pop(key, None)
+    with _DRAFT_LOCK:
+        for key in [k for k, v in _DRAFT.items() if now - v.get('_ts', 0) > _DRAFT_TTL]:
+            _DRAFT.pop(key, None)
+        if len(_DRAFT) > _DRAFT_MAX:
+            # 按时间淘汰最旧的，保留最近 _DRAFT_MAX 个
+            for key in sorted(_DRAFT, key=lambda k: _DRAFT[k].get('_ts', 0))[:
+                              len(_DRAFT) - _DRAFT_MAX]:
+                _DRAFT.pop(key, None)
 
 
 @bp.route('/timetable')
@@ -117,8 +130,9 @@ def timetable_import_upload():
     plan = timetable_import_service.build_import_plan(name, grade, entries)
     token = uuid.uuid4().hex
     _purge_expired_drafts()
-    _DRAFT[token] = {'plan': plan, 'entries': entries, 'fname': file.filename,
-                     '_ts': time.time()}
+    with _DRAFT_LOCK:   # L-4
+        _DRAFT[token] = {'plan': plan, 'entries': entries, 'fname': file.filename,
+                         '_ts': time.time()}
     return render_template('academic/timetable_import.html',
                            token=token, plan=plan, fname=file.filename,
                            preview=True)
@@ -131,7 +145,8 @@ def timetable_import_confirm():
     """确认导入：写入数据库"""
     token = (request.form.get('token') or '').strip()
     _purge_expired_drafts()
-    draft = _DRAFT.get(token)
+    with _DRAFT_LOCK:   # L-4
+        draft = _DRAFT.get(token)
     if not draft:
         flash('导入批次已失效，请重新上传文件', 'danger')
         return redirect(url_for('academic.timetable_import_page'))
@@ -151,7 +166,8 @@ def timetable_import_confirm():
     log_operation(current_user, '导入', '课表', tt.id,
                   f'{tt.name}：写入 {valid_count} 节课', module='academic')
     flash(f'课表「{tt.name}」导入成功，共 {valid_count} 节课', 'success')
-    _DRAFT.pop(token, None)
+    with _DRAFT_LOCK:   # L-4
+        _DRAFT.pop(token, None)
     return redirect(url_for('academic.timetable_page', id=tt.id))
 
 

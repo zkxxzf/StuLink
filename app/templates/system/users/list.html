@@ -18,6 +18,31 @@
     </div>
 </div>
 
+{% if one_time_passwords %}
+<!-- L-7 / H-1③：初始或重置后的口令在此一次性展示，刷新即失效，不再经 flash 明文回显 -->
+<div class="card mb-3 border-warning">
+    <div class="card-header bg-warning-subtle text-warning-emphasis fw-bold">
+        <i class="bi bi-key"></i> 初始口令（仅显示这一次，请立即转交本人并提醒首次登录改密）
+    </div>
+    <div class="table-responsive">
+        <table class="table table-sm mb-0 align-middle">
+            <thead class="table-light">
+                <tr><th>登录名</th><th>姓名</th><th>初始口令</th></tr>
+            </thead>
+            <tbody>
+                {% for p in one_time_passwords %}
+                <tr>
+                    <td>{{ p.username }}</td>
+                    <td>{{ p.real_name }}</td>
+                    <td><code class="user-select-all">{{ p.password }}</code></td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+{% endif %}
+
 <div class="card mb-3">
     <div class="card-body py-2">
         <div class="row g-2 align-items-center">

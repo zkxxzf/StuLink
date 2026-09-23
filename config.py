@@ -24,6 +24,11 @@ def _get_secret_key():
     try:
         with open(key_file, 'w') as f:
             f.write(new_key)
+        # L-11：密钥文件权限收敛（Windows 下 chmod 支持有限，best-effort）
+        try:
+            os.chmod(key_file, 0o600)
+        except Exception:
+            pass
     except Exception:
         pass
     return new_key
@@ -42,11 +47,18 @@ class Config:
 
     # Session 配置 - 兼容 Edge/Chrome 等各浏览器
     SESSION_COOKIE_HTTPONLY = True
-    SESSION_COOKIE_SECURE = False        # HTTP 环境必须为 False
+    # M-2：局域网 HTTP 下必须为 False（硬开会导致全站掉登录），
+    # 生产启用 HTTPS 后设置环境变量 STULINK_SESSION_COOKIE_SECURE=1 即可打开。
+    SESSION_COOKIE_SECURE = os.environ.get(
+        'STULINK_SESSION_COOKIE_SECURE', '0').strip() == '1'
+    # M-2：服务端会话过期（默认 8 小时），配合 session.permanent=True 生效
+    PERMANENT_SESSION_LIFETIME = int(os.environ.get('STULINK_SESSION_LIFETIME', '28800'))
+    SESSION_REFRESH_EACH_REQUEST = True
     SESSION_COOKIE_SAMESITE = 'Lax'
     SESSION_COOKIE_PATH = '/'
     WTF_CSRF_ENABLED = True
-    WTF_CSRF_TIME_LIMIT = None           # CSRF token 不过期
+    # M-7：CSRF token 有效期（默认 8 小时；None=永不过期，泄露后长期可用）
+    WTF_CSRF_TIME_LIMIT = int(os.environ.get('STULINK_CSRF_TIME_LIMIT', '28800'))
     WTF_CSRF_SSL_STRICT = False          # 非 HTTPS 环境关闭严格检查
     TEMPLATES_AUTO_RELOAD = False         # 生产环境关闭模板自动重载以提升性能
     

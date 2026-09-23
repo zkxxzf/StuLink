@@ -1,6 +1,7 @@
 # StuLink v1.17.0 2026-09-21
 # 个人成绩查询与分析：页面 + 数据API + 学生搜索 + 成绩证明生成/公开核验
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
+import hashlib
 import json
 from datetime import datetime, timedelta
 
@@ -80,10 +81,19 @@ def cert_verify(code):
         abort(429, description='核验请求过于频繁，请稍后再试')
 
     cert = Certificate.query.filter_by(code=code).first()
-    content = json.loads(load_content(cert.content_json) or '{}') if cert else None
     sig_ok = verify(cert) if cert else False
-    return render_template('grades/cert_verify.html', cert=cert, content=content,
-                           sig_ok=sig_ok, legacy=cert is not None and is_legacy(cert))
+    # M-14：公开端点不再解密/传递证明快照（此前未登录即可看到成绩明细），
+    # 只提供真伪 + 作废状态 + 内容摘要；完整打印走登录后的 cert_print。
+    content_hash = None
+    if cert and sig_ok:
+        try:
+            content_hash = hashlib.sha256(
+                (load_content(cert.content_json) or '').encode('utf-8')).hexdigest()[:32]
+        except Exception:  # noqa: BLE001
+            content_hash = None
+    return render_template('grades/cert_verify.html', cert=cert, content=None,
+                           content_hash=content_hash, sig_ok=sig_ok,
+                           legacy=cert is not None and is_legacy(cert))
 
 
 # ============ v1.12.2 成绩证明生成记录（台账） ============

@@ -5,6 +5,7 @@
 """
 # StuLink v1.7.0 2026-08-02
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
+import logging
 import os
 import hashlib
 import base64
@@ -38,6 +39,15 @@ def _get_encryption_key():
 
 # 全局密钥（模块加载时初始化）
 _ENCRYPTION_KEY = _get_encryption_key()
+_log = logging.getLogger('stulink.crypto')
+
+
+class DecryptError(ValueError):
+    """M-5：密文无法解密（密钥不匹配 / 数据损坏）。
+
+    旧实现「解密失败静默返回密文原文」会把密文当明文流向页面与导出，
+    语义上等同于泄露；现在改为抛错，由调用方决定降级展示。
+    """
 
 
 def encrypt(plaintext):
@@ -95,8 +105,11 @@ def decrypt(ciphertext_b64):
         unpadder = padding.PKCS7(128).unpadder()
         plaintext = unpadder.update(padded) + unpadder.finalize()
         return plaintext.decode()
-    except Exception:
-        # 解密失败，可能是旧数据明文，直接返回
-        return ciphertext_b64
+    except Exception as e:
+        # M-5：解密失败不再"静默当明文返回"（此前会把密文直接流进页面/导出）。
+        # 记录脱敏日志后抛错，由调用方降级为掩码展示。
+        _log.error('[M-5] 解密失败（密钥不匹配或数据损坏），已拒绝返回密文原文：%s',
+                   type(e).__name__)
+        raise DecryptError('数据解密失败（密文损坏或密钥不匹配），已拒绝返回原文')
 
 

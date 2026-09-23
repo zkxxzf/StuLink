@@ -65,14 +65,28 @@ with app.app_context():
     db.session.commit()
     print('== 学生就绪 ==')
 
+with app.app_context():
+    # H-1 之后内置 admin 的初始口令是随机生成的（不再有 admin123），
+    # 冒烟脚本改为自建一个管理员账号，避免依赖默认口令。
+    if not User.query.filter_by(username='smokeadm').first():
+        _adm = User(username='smokeadm', real_name='冒烟管理员', role='admin',
+                    must_change_pwd=False)
+        _adm.set_password('SmokeAdm#2026')
+        db.session.add(_adm)
+        db.session.commit()
+
 with app.test_client() as c:
-    # ---- 登录 admin（先取 CSRF token） ----
+    # ---- 登录管理员（先取 CSRF token） ----
     r0 = c.get('/login')
     import re
     m = re.search(r'name="csrf_token"[^>]*value="([^"]+)"', r0.get_data(as_text=True))
     csrf = m.group(1) if m else ''
-    r = c.post('/login', data={'csrf_token': csrf, 'username': 'admin',
-                               'password': 'admin123'}, follow_redirects=True)
+    r = c.post('/login', data={'csrf_token': csrf, 'username': 'smokeadm',
+                               'password': 'SmokeAdm#2026'}, follow_redirects=True)
+    # M-2：登录后会话重建，登录前取的 token 已失效，需重新取
+    m2 = re.search(r'var\s+csrfToken\s*=\s*"([^"]+)"', r.get_data(as_text=True))
+    if m2:
+        csrf = m2.group(1)
     _html = r.get_data(as_text=True)
     check('admin 登录', r.status_code == 200 and '退出' in _html
           and '登录失败' not in _html, f'csrf={csrf!r} html={_html[:300]!r}')
@@ -82,7 +96,9 @@ with app.test_client() as c:
         'csrf_token': csrf, 'grade': '2025级', 'exam_date': '2026-01-15',
         'name': '2025级2026-01-15', 'exam_type': '期末'}, follow_redirects=True)
     _ce = r.get_data(as_text=True)
-    check('新建考试', r.status_code == 200 and '导入成绩' in _ce,
+    # 说明：原断言检查空列表文案「再导入成绩」，列表非空时反而不含该文案（断言写反了）；
+    # 改为断言新考试名出现在考试列表中。
+    check('新建考试', r.status_code == 200 and '2025级2026-01-15' in _ce,
           f'status={r.status_code} html={_ce[:200]!r}')
 
     with app.app_context():
@@ -375,28 +391,35 @@ with app.test_client() as c:
         c.get('/logout', follow_redirects=True)
         r0 = c.get('/login')
         m = re.search(r'name="csrf_token"[^>]*value="([^"]+)"', r0.get_data(as_text=True))
-        c.post('/login', data={'csrf_token': m.group(1) if m else '',
-                               'username': username, 'password': 'pw123456'},
-               follow_redirects=True)
+        rr = c.post('/login', data={'csrf_token': m.group(1) if m else '',
+                                    'username': username, 'password': 'pw123456'},
+                    follow_redirects=True)
+        # M-2：会话在登录时重建，写操作前需重新取 token
+        mm = re.search(r'var\s+csrfToken\s*=\s*"([^"]+)"', rr.get_data(as_text=True))
+        return mm.group(1) if mm else ''
 
     def logout():
         c.get('/logout', follow_redirects=True)
 
     with app.app_context():
         grp = {g.name: g for g in PermissionGroup.query.all()}
+        # H-1：新建账号默认 must_change_pwd=True（会被强制改密拦截），
+        # 冒烟脚本里这些账号要直接参与业务验证，显式置为 False。
         h = User(username='banzhu01', real_name='测试班主任', role='homeroom_teacher',
-                 grade='2025级', class_name='01班', permission_group=grp['班主任组'])
+                 grade='2025级', class_name='01班', permission_group=grp['班主任组'],
+                 must_change_pwd=False)
         h.set_password('pw123456')
         db.session.add(h)
         db.session.flush()
         db.session.add(UserClassLink(user_id=h.id, grade='2025级', class_name='01班'))
         t = User(username='renke01', real_name='测试任课教师', role='teacher',
-                 permission_group=grp['任课教师组'])
+                 permission_group=grp['任课教师组'], must_change_pwd=False)
         t.set_password('pw123456')
         db.session.add(t)
         db.session.flush()
         gld = User(username='nianji01', real_name='测试年级长', role='grade_leader',
-                   grade='2025级', permission_group=grp['年级长组'])
+                   grade='2025级', permission_group=grp['年级长组'],
+                   must_change_pwd=False)
         gld.set_password('pw123456')
         db.session.add(gld)
         db.session.flush()
@@ -459,6 +482,11 @@ with app.test_client() as c:
     with app.app_context():
         bzu = User.query.filter_by(real_name='班正师').first()
         bz_name = bzu.username
+        # H-1：导入教师现在使用随机一次性口令 + 强制改密，
+        # 脚本需要已知口令才能登录，这里显式重置。
+        bzu.set_password('pw123456')
+        bzu.must_change_pwd = False
+        db.session.commit()
     login_as(bz_name)
     r = c.get('/grades/api/options')
     tabs = r.get_json()['data']['tabs']
@@ -477,10 +505,12 @@ with app.test_client() as c:
         c.get('/logout', follow_redirects=True)
         r0 = c.get('/login')
         m2 = re.search(r'name="csrf_token"[^>]*value="([^"]+)"', r0.get_data(as_text=True))
-        c.post('/login', data={'csrf_token': m2.group(1) if m2 else '',
-                               'username': 'admin', 'password': 'admin123'},
-               follow_redirects=True)
-        return m2.group(1) if m2 else ''
+        rr = c.post('/login', data={'csrf_token': m2.group(1) if m2 else '',
+                                    'username': 'smokeadm', 'password': 'SmokeAdm#2026'},
+                    follow_redirects=True)
+        # M-2：登录后会话重建，需重新取 token
+        mm = re.search(r'var\s+csrfToken\s*=\s*"([^"]+)"', rr.get_data(as_text=True))
+        return mm.group(1) if mm else (m2.group(1) if m2 else '')
 
     acsrf = login_admin()
     wb4 = openpyxl.Workbook()
@@ -516,6 +546,11 @@ with app.test_client() as c:
     # ==================== AI 分析（mock 转发，不真外呼） ====================
     import json as _json
     from app.modules.grades.services import ai_service as ai_svc
+    # M-2：前面切换过登录身份（会话重建），写操作前重新取 CSRF token
+    _rr = c.get('/grades/exams')
+    _mm = re.search(r'var\s+csrfToken\s*=\s*"([^"]+)"', _rr.get_data(as_text=True))
+    if _mm:
+        csrf = _mm.group(1)
     ai_calls = []
 
     def fake_call_llm(cfg, messages):
@@ -576,7 +611,7 @@ with app.test_client() as c:
         db.session.commit()
 
     # 6) 任课教师：仅本人班科（01班·数学），payload 科目仅数学
-    login_as('renke01')
+    csrf = login_as('renke01') or csrf   # M-2：登录后会话重建，token 需换新
     r = c.get(f'/grades/ai/scope?exam_id={eid}')
     s = r.get_json()['data']
     check('AI：教师范围=01班', s['scope_students'] == 6

@@ -1,7 +1,8 @@
 # StuLink v1.7.0 2026-08-02
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 import re
-from flask import Blueprint, render_template, request, flash, redirect, url_for, send_file
+from flask import (Blueprint, render_template, request, flash, redirect,
+                   url_for, send_file, abort)
 from markupsafe import Markup
 from flask_login import login_required, current_user
 from app.models import Student, Room, BedAssignment, UserClassLink, StudentAccommodation
@@ -26,10 +27,16 @@ def _is_valid_class(class_name):
 
 
 def _get_scope():
-    """获取当前用户的权限范围"""
+    """获取当前用户的权限范围
+
+    H-2：此前「无权限组」回落 SCOPE_SCHOOL（全校可读），等于给未配置身份的账号
+    开了全校后门；现在一律 403，由权限组显式授予范围。
+    """
+    if current_user.role == 'admin':
+        return SCOPE_SCHOOL, None
     pg = current_user.permission_group
     if not pg:
-        return SCOPE_SCHOOL, None
+        abort(403)
     return pg.scope_type, current_user.grade
 
 
@@ -207,7 +214,7 @@ def _dorm_stats():
 
 
 @bp.route('/')
-@login_required
+@perm_required('statistics.view')  # H-2：此前只有 @login_required
 def index():
     scope_type, user_grade = _get_scope()
     tab = request.args.get('tab', scope_type)  # 默认选用户范围对应的tab

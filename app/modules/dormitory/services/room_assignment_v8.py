@@ -480,8 +480,12 @@ def auto_assign_preview(selected_keys, selected_room_ids, mode='keep_existing',
     except Exception as e:
         db.session.rollback()
         logs.append(f"[ERROR] 分配异常: {str(e)}")
+        # M-12：堆栈不再随响应回传（rooms.py 把 logs 直接 jsonify 给前端，
+        # 会泄露绝对路径/源码行/表结构）。完整堆栈只进服务端日志。
+        import logging
         import traceback
-        logs.append(f"[TRACE] {traceback.format_exc()}")
+        logging.getLogger('stulink.dormitory').error(
+            '自动分配异常：%s\n%s', e, traceback.format_exc())
         return {'success': False, 'error': str(e), 'logs': logs}
 
 

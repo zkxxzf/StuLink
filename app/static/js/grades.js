@@ -312,12 +312,13 @@ function loadCurrent(){
     });
 }
 
-// 修复：拼接进 HTML 的服务端字符串统一转义，防止存储型 XSS（考试名/班级/科目等）
-function escHtml(s){
-    return String(s == null ? '' : s).replace(/[&<>"']/g, function(c){
-        return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];
+// R-2：转义统一复用公共实现（static/js/common.js，base.html 全局引入），
+// 此处仅在页面未加载 common.js 时兜底，避免多份实现漂移。
+var escHtml = window.escHtml || function (s) {
+    return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
+        return {'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'}[c];
     });
-}
+};
 
 function buildExamInfo(data){
     if (!data.exam) return null;

@@ -106,7 +106,7 @@
 <div class="d-flex flex-column gap-2">
     {% for n in notifications %}
     <div class="card notif-card {% if not n.is_read %}unread{% endif %} {% if n.priority == 'urgent' %}urgent{% endif %}"
-         onclick="window.location.href='{{ url_for('notifications.notification_detail', notification_id=n.id) }}'">
+         onclick="window.location.href={{ url_for('notifications.notification_detail', notification_id=n.id)|tojson }}">
         <div class="card-body py-3 px-3">
             <div class="d-flex align-items-start justify-content-between">
                 <div class="d-flex align-items-center gap-2 flex-grow-1 min-w-0">
@@ -392,12 +392,14 @@ document.addEventListener('DOMContentLoaded', function() {
                 .then(data => {
                     const dd = document.getElementById('userSearchDropdown');
                     if (!data.length) { dd.style.display = 'none'; return; }
+                    // H-6：姓名/学号等来自用户表（可由 system.users 权限者创建），
+                    // 直接拼 innerHTML 构成跨用户存储型 XSS → 统一 escHtml。
                     dd.innerHTML = data.map(u =>
-                        '<div class="item" data-uid="' + u.uid + '" data-name="' + u.name + '">' +
-                        '<strong>' + u.name + '</strong> <span class="meta">' + u.uid +
-                        (u.grade ? ' · ' + u.grade : '') +
-                        (u.class_name ? ' ' + u.class_name : '') +
-                        ' · ' + u.role + '</span></div>'
+                        '<div class="item" data-uid="' + escHtml(u.uid) + '" data-name="' + escHtml(u.name) + '">' +
+                        '<strong>' + escHtml(u.name) + '</strong> <span class="meta">' + escHtml(u.uid) +
+                        (u.grade ? ' · ' + escHtml(u.grade) : '') +
+                        (u.class_name ? ' ' + escHtml(u.class_name) : '') +
+                        ' · ' + escHtml(u.role) + '</span></div>'
                     ).join('');
                     dd.style.display = 'block';
                     dd.querySelectorAll('.item').forEach(el => {
@@ -437,7 +439,17 @@ function renderPicker() {
         selectedUsers.forEach(u => {
             const tag = document.createElement('span');
             tag.className = 'selected-tag';
-            tag.innerHTML = u.name + ' <span class="remove" onclick="removeUser(\'' + u.uid + '\')">&times;</span>';
+            // H-6：不再把 uid 拼进 onclick 的单引号字符串（含引号即打断），
+            // 改为 DOM 构建 + textContent + 事件监听。
+            const nameSpan = document.createElement('span');
+            nameSpan.textContent = u.name;
+            const removeBtn = document.createElement('span');
+            removeBtn.className = 'remove';
+            removeBtn.textContent = '\u00d7';
+            removeBtn.addEventListener('click', function () { removeUser(u.uid); });
+            tag.appendChild(nameSpan);
+            tag.appendChild(document.createTextNode(' '));
+            tag.appendChild(removeBtn);
             picker.appendChild(tag);
         });
     }

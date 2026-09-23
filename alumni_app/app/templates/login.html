@@ -7,6 +7,8 @@
             <div class="card-body p-4">
                 <h4 class="text-center mb-4"><i class="bi bi-archive"></i> 往届生查询系统</h4>
                 <form method="POST">
+                    <!-- M-7：往届站此前完全未启用 CSRF 防护，唯一 POST 即 /login -->
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                     <div class="mb-3">
                         <label class="form-label">用户名</label>
                         <input type="text" name="username" class="form-control" required autofocus>

@@ -66,10 +66,12 @@ def add_columns():
             print('[FAIL] term_schedules 表不存在，请先运行 migrate_timetable_db.py')
             return False
         existing = _column_names(conn, 'term_schedules')
+        from _ddl_guard import assert_ident   # R-11
         for col, ddl in _NEW_COLUMNS:
             if col in existing:
                 skipped.append(col)
                 continue
+            assert_ident(col, '列名')
             conn.execute(f'ALTER TABLE term_schedules ADD COLUMN {col} {ddl}')
             added.append(col)
         conn.commit()

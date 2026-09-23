@@ -78,8 +78,11 @@ with app.app_context():
     
     print("\n4. 删除旧字段...")
     
+    from _ddl_guard import assert_ident, assert_table   # R-11
     for col in old_columns:
         if col in column_names:
+            assert_table('students')
+            assert_ident(col, '列名')
             drop_sql = text(f"ALTER TABLE students DROP COLUMN {col};")
             db.session.execute(drop_sql)
             db.session.commit()

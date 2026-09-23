@@ -57,13 +57,25 @@ def get_csrf(c, url='/login'):
 
 def login(c, username, password):
     csrf = get_csrf(c)
-    return c.post('/login', data={'csrf_token': csrf, 'username': username,
-                                  'password': password}, follow_redirects=True), csrf
+    r = c.post('/login', data={'csrf_token': csrf, 'username': username,
+                               'password': password}, follow_redirects=True)
+    # M-2：登录时服务端会清空并重建会话，登录前取的 token 已失效 → 重新取
+    m = re.search(r'var\s+csrfToken\s*=\s*"([^"]+)"', r.get_data(as_text=True))
+    return r, (m.group(1) if m else csrf)
 
+
+# H-1：内置 admin 初始口令已改为随机生成，冒烟脚本自建管理员账号
+with app.app_context():
+    if not User.query.filter_by(username='smokeadm').first():
+        _adm = User(username='smokeadm', real_name='冒烟管理员', role='admin',
+                    must_change_pwd=False)
+        _adm.set_password('SmokeAdm#2026')
+        db.session.add(_adm)
+        db.session.commit()
 
 with app.test_client() as c:
     # ---- admin 登录 ----
-    r, csrf = login(c, 'admin', 'admin123')
+    r, csrf = login(c, 'smokeadm', 'SmokeAdm#2026')
     check('admin 登录', r.status_code == 200 and '退出' in r.get_data(as_text=True))
 
     # ---- 1) 新页面可访问 ----
@@ -183,16 +195,18 @@ with app.test_client() as c:
               Teacher.query.filter_by(name='张老师').first().phone == '13900000009')
     c.get('/logout', follow_redirects=True)
 
-    # ---- 9) 权限：任课教师访问教务 403，工作台 200 ----
+    # ---- 9) 权限：无 academic 权限的身份访问教务 403，工作台 200 ----
+    # 说明：原用例用「任课教师组」，但该组本身具备 academic.view（设计如此），
+    # 断言应为 200；这里改用不含 academic.* 的「宿管组」来验证真正的越权拦截。
     with app.app_context():
-        pg_teacher = PermissionGroup.query.filter_by(name='任课教师组').first()
-        t2 = User(username='renke_x', real_name='任课测试', role='teacher',
-                  permission_group_id=pg_teacher.id)
+        pg_dorm = PermissionGroup.query.filter_by(name='宿管组').first()
+        t2 = User(username='suguan_x', real_name='宿管测试', role='dorm_manager',
+                  permission_group_id=pg_dorm.id)
         t2.set_password('pw123456')
         t2.must_change_pwd = False
         db.session.add(t2)
         db.session.commit()
-    r, _ = login(c, 'renke_x', 'pw123456')
+    r, _ = login(c, 'suguan_x', 'pw123456')
     r = c.get('/academic/teachers')
     check('无权限角色访问教务（403）', r.status_code == 403, f'status={r.status_code}')
     r = c.get('/workbench/')

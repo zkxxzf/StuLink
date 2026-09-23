@@ -6,6 +6,7 @@ from app.extensions import db
 from app.models import Room, BedAssignment, Student, StudentAccommodation
 from app.utils.decorators import perm_required
 from app.utils.helpers import get_dict_values, get_active_grades, get_class_options, log_operation
+from app.utils.err_safe import safe_error   # M-12
 from sqlalchemy import func
 import json
 import re
@@ -20,7 +21,7 @@ def _class_sort_key(name):
 
 
 @bp.route('/')
-@login_required
+@perm_required('dormitory.view')   # H-2
 def list_rooms():
     query = Room.query.filter_by(is_active=True)
 
@@ -102,7 +103,7 @@ def list_rooms():
 
 
 @bp.route('/<int:id>')
-@login_required
+@perm_required('dormitory.view')   # H-2
 def detail(id):
     room = Room.query.get_or_404(id)
     beds = BedAssignment.query.filter_by(room_id=room.id).order_by(
@@ -278,7 +279,7 @@ def assign_visual():
 
 
 @bp.route('/assign-data')
-@login_required
+@perm_required('dormitory.manage')  # H-2：分配页数据源
 def assign_data():
     """获取宿舍分配页面所需的所有数据"""
     from flask import jsonify
@@ -358,7 +359,7 @@ def assign_data():
     except Exception as e:
         from flask import current_app
         current_app.logger.error(f'assign-data error: {e}', exc_info=True)
-        return jsonify({'error': str(e)}), 500
+        return jsonify({'error': safe_error(e)}), 500   # M-12
 
 
 @bp.route('/assign-room', methods=['POST'])
@@ -519,7 +520,7 @@ def save_assignments():
 
 
 @bp.route('/class-bed-requirement')
-@login_required
+@perm_required('dormitory.view')   # H-2
 def class_bed_requirement():
     """获取某个班级的床位需求和已分配情况"""
     from flask import jsonify
@@ -858,7 +859,7 @@ def assign_auto():
 
 
 @bp.route('/assign-auto/stats')
-@login_required
+@perm_required('dormitory.manage')  # H-2
 def assign_auto_stats():
     """
     获取班级选择统计数据（后端计算，防止篡改）
@@ -1061,7 +1062,7 @@ def assign_auto_execute():
 
 
 @bp.route('/available-rooms-data')
-@login_required
+@perm_required('dormitory.manage')  # H-2
 def available_rooms_data():
     """获取可用房间数据（用于自动分配页面）"""
     # 获取所有激活的房间
@@ -1099,7 +1100,7 @@ def available_rooms_data():
 
 
 @bp.route('/assign-auto/room-stats', methods=['POST'])
-@login_required
+@perm_required('dormitory.manage')  # H-2
 def assign_auto_room_stats():
     """
     获取房间选择统计数据（后端计算，防止篡改）
@@ -1257,7 +1258,7 @@ def assign_auto_room_stats():
 
 
 @bp.route('/report')
-@login_required
+@perm_required('dormitory.view')   # H-2：全校住宿分布报表
 def report():
     """宿舍报表 → 已合并到 /statistics/?tab=rooms"""
     grade = request.args.get('grade', '')
@@ -1268,7 +1269,7 @@ def report():
 
 
 @bp.route('/report/export')
-@login_required
+@perm_required('dormitory.view')   # H-2
 def report_export():
     """导出宿舍报表为Excel（保持原路由，由 statistics 页面调用）"""
     from io import BytesIO
@@ -1471,7 +1472,7 @@ def report_export():
 
 
 @bp.route('/swap-data')
-@login_required
+@perm_required('dormitory.manage')  # H-2
 def swap_data():
     """获取宿舍互换所需的房间列表数据"""
     rooms = Room.query.filter_by(is_active=True).order_by(
@@ -1596,6 +1597,6 @@ def swap_rooms():
         })
     except Exception as e:
         db.session.rollback()
-        return jsonify({'success': False, 'message': f'互换失败：{str(e)}'}), 500
+        return jsonify({'success': False, 'message': f'互换失败：{safe_error(e)}'}), 500  # M-12
 
 

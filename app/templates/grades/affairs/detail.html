@@ -452,8 +452,9 @@ function openPick(){
         // 填充班级/选科筛选下拉
         var clss = [...new Set(_pickAll_.map(s=>s.class_name).filter(Boolean))].sort();
         var sels = [...new Set(_pickAll_.map(s=>s.subject_selection).filter(Boolean))].sort();
-        document.getElementById('pkCls').innerHTML = '<option value="">全部班级</option>'+clss.map(c=>'<option>'+c+'</option>').join('');
-        document.getElementById('pkSel').innerHTML = '<option value="">全部选科</option>'+sels.map(c=>'<option>'+c+'</option>').join('');
+        // H-5：班级/选科来自服务端，统一转义后再拼（公共 escHtml 见 static/js/common.js）
+        document.getElementById('pkCls').innerHTML = '<option value="">全部班级</option>'+clss.map(c=>'<option>'+escHtml(c)+'</option>').join('');
+        document.getElementById('pkSel').innerHTML = '<option value="">全部选科</option>'+sels.map(c=>'<option>'+escHtml(c)+'</option>').join('');
         renderPick();
         new bootstrap.Modal(document.getElementById('pickModal')).show();
     });
@@ -476,10 +477,11 @@ function _pickFiltered(){
 function renderPick(){
     var list = _pickFiltered();
     document.getElementById('pkBody').innerHTML = list.map(s=>
-        '<tr><td><input class="form-check-input pkChk" type="checkbox" value="'+s.student_no+'"'+
+        // H-5：学号/姓名/班级/选科均为服务端可控数据（姓名可经 Excel 导入），须转义
+        '<tr><td><input class="form-check-input pkChk" type="checkbox" value="'+escHtml(s.student_no)+'"'+
         (s.in_batch?' disabled checked':'')+' onchange="updPickCount()"></td>'+
-        '<td>'+s.student_no+'</td><td>'+s.name+'</td><td>'+(s.class_name||'')+'</td>'+
-        '<td>'+(s.subject_selection||'')+'</td>'+
+        '<td>'+escHtml(s.student_no)+'</td><td>'+escHtml(s.name)+'</td><td>'+escHtml(s.class_name||'')+'</td>'+
+        '<td>'+escHtml(s.subject_selection||'')+'</td>'+
         '<td>'+(s.in_batch?'<span class="badge bg-success">已加入</span>':'<span class="text-muted small">—</span>')+'</td></tr>'
     ).join('') || '<tr><td colspan="6" class="text-center text-muted py-3">无符合条件的学生</td></tr>';
     updPickCount();
@@ -553,9 +555,10 @@ function renderRooms(){
         return;
     }
     tb.innerHTML = _batchRooms.map(r=>
-        '<tr><td>'+r.room_no+'</td><td>'+r.location+'</td>'+
-        '<td>'+r.subject+' <span class="badge bg-light text-dark">通用</span></td>'+
-        '<td class="text-end">'+r.capacity+'</td><td>'+(r.prefix||'')+'</td><td>'+(r.note||'')+'</td>'+
+        // H-5：location / prefix / note 由用户填写（服务端仅 strip），必须转义
+        '<tr><td>'+escHtml(r.room_no)+'</td><td>'+escHtml(r.location)+'</td>'+
+        '<td>'+escHtml(r.subject)+' <span class="badge bg-light text-dark">通用</span></td>'+
+        '<td class="text-end">'+escHtml(r.capacity)+'</td><td>'+escHtml(r.prefix||'')+'</td><td>'+escHtml(r.note||'')+'</td>'+
         '<td class="text-end">'+
         '<button class="btn btn-sm btn-outline-primary py-0" onclick="openRoomModal('+r.id+')">编辑</button> '+
         '<button class="btn btn-sm btn-outline-danger py-0" onclick="delRoom('+r.id+')">删</button></td></tr>'
@@ -568,9 +571,9 @@ function loadLib(){
         var used = _locSet();
         var html = _libData.map(r=>{
             var u = used.has(r.location);
-            return '<tr class="'+(u?'table-success':'')+'" data-loc="'+r.location+'">'+
-                '<td>'+r.location+(u?' <span class="badge bg-success">已选</span>':'')+'</td>'+
-                '<td class="text-end">'+r.capacity+'</td>'+
+            return '<tr class="'+(u?'table-success':'')+'" data-loc="'+escHtml(r.location)+'">'+
+                '<td>'+escHtml(r.location)+(u?' <span class="badge bg-success">已选</span>':'')+'</td>'+
+                '<td class="text-end">'+escHtml(r.capacity)+'</td>'+
                 '<td class="text-end">'+
                 (u?'<span class="text-muted small">—</span>':
                  '<button class="btn btn-sm btn-outline-primary py-0" onclick="pickLib('+r.id+')">加入</button>')+
@@ -610,7 +613,7 @@ function _markLibUsed(loc, used){
     if(!tr) return;
     var lib = _libData.find(r=>r.location===loc);
     var td0 = tr.querySelector('td');
-    td0.innerHTML = loc + (used?' <span class="badge bg-success">已选</span>':'');
+    td0.innerHTML = escHtml(loc) + (used?' <span class="badge bg-success">已选</span>':'');
     tr.className = used ? 'table-success' : '';
     var opTd = tr.querySelector('td:last-child');
     opTd.innerHTML = (used?'<span class="text-muted small">—</span>':

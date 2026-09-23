@@ -290,8 +290,13 @@
 
     // ── 工具 ───────────────────────────────────────────────────
 
+    // L-10：原实现只转义 " < >，漏掉 & 与 '（自 XSS）。改复用公共 escAttr（全量转义）。
     function escapeAttr(str) {
-        return (str || '').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+        return (window.escAttr || function (s) {
+            return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
+                return {'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'}[c];
+            });
+        })(str);
     }
 
     // ── 启动 ───────────────────────────────────────────────────

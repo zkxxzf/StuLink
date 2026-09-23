@@ -20,18 +20,23 @@ def init_database():
         db.create_all()
         print('数据库表已创建')
 
-        # 创建默认管理员
+        # 创建默认管理员（H-1：不再使用硬编码默认口令，随机生成 + 首次登录强制改密）
         if not User.query.filter_by(username='admin').first():
+            import secrets
+            _pwd = secrets.token_urlsafe(12)
             admin = User(
                 username='admin',
                 real_name='系统管理员',
                 role='admin',
-                must_change_pwd=False,
+                must_change_pwd=True,
             )
-            # ⚠️ 生产环境请修改默认密码！或者部署后立即通过系统界面修改
-            admin.set_password('admin123')
+            admin.set_password(_pwd)
             db.session.add(admin)
-            print('默认管理员已创建 (用户名: admin, 密码: admin123) ⚠️ 请立即修改！')
+            print('=' * 66)
+            print('默认管理员已创建：admin')
+            print(f'初始随机口令（仅显示这一次）：{_pwd}')
+            print('首次登录后必须修改密码')
+            print('=' * 66)
 
         # 导入字典数据
         for code, (name, values) in DICT_DATA.items():
