@@ -141,10 +141,13 @@ def grade_tab(exam_id, direction=''):
     # A1-T3 分数段 / A1-T4 名次段（一次算出，分段结果同时供 G2 堆叠图复用）
     segs, seg_rows = _segment_tables(data, tables, direction=dr, classes=shown_classes,
                                      ret=True)
-    # A1-T5 历次考试总览（聚合查询，避免逐场构造 ExamData）
+    # A1-T5 历次考试总览 + G4 折线：共用一次聚合查询（避免对全部历史考试重复扫描）。
+    # v1.17.x 性能：原先 trend_overview 只查总分、_trend_lines 又查 10 个科目，等于把
+    # 全年级 25 场约 22 万行扫描两遍；此处一次查回 (总分+9 科) 均值，两处复用。
+    _full_means = st.exam_score_means(exam.grade, [TOTAL_SUBJECT] + list(SUBJECTS),
+                                       direction=dr)
     rows = []
-    _tm = st.exam_score_means(exam.grade, [TOTAL_SUBJECT], direction=dr)
-    for _eid, _info in _tm.items():
+    for _eid, _info in _full_means.items():
         _m = _info.get('means', {}).get(TOTAL_SUBJECT)
         _c = _info.get('counts', {}).get(TOTAL_SUBJECT)
         if _m is None:
@@ -181,8 +184,8 @@ def grade_tab(exam_id, direction=''):
                                                                             direction=dr)])
                              for c in shown_classes]}],
     }
-    # G4 历次多折线
-    trends = _trend_lines(exam.grade, direction=dr)
+    # G4 历次多折线（复用上面已算好的 _full_means，不再重复聚合查询）
+    trends = _trend_lines(exam.grade, means=_full_means, direction=dr)
     charts['trend_line'] = {
         'type': 'line', 'title': '年级历次考试平均分变化趋势',
         'xAxis': trends['x'],
@@ -259,10 +262,14 @@ def _stack_series(rows, cls):
     return {'name': cls, 'data': [r['counts'].get(cls, 0) for r in rows]}
 
 
-def _trend_lines(grade, direction=None):
-    """历次考试折线数据；direction 过滤时只统计该方向（聚合查询，避免逐场构造 ExamData）"""
+def _trend_lines(grade, means=None, direction=None):
+    """历次考试折线数据；direction 过滤时只统计该方向（聚合查询，避免逐场构造 ExamData）。
+
+    means: 预计算的 exam_score_means(grade, [总分]+SUBJECTS, direction) 结果；
+    传入则直接复用，避免 grade_tab 已算过一遍又重复扫描历史考试。"""
     x, series_map = [], {}
-    _means = st.exam_score_means(grade, [TOTAL_SUBJECT] + list(SUBJECTS), direction=direction)
+    _means = means if means is not None else st.exam_score_means(
+        grade, [TOTAL_SUBJECT] + list(SUBJECTS), direction=direction)
     for _eid, _info in _means.items():
         _m = _info.get('means', {})
         if _m.get(TOTAL_SUBJECT) is None:
