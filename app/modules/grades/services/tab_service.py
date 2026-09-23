@@ -141,10 +141,13 @@ def grade_tab(exam_id, direction=''):
     # A1-T3 分数段 / A1-T4 名次段（一次算出，分段结果同时供 G2 堆叠图复用）
     segs, seg_rows = _segment_tables(data, tables, direction=dr, classes=shown_classes,
                                      ret=True)
-    # A1-T5 历次考试总览（聚合查询，避免逐场构造 ExamData）
+    # A1-T5 历次考试总览 + G4 折线：共用一次聚合查询（避免对全部历史考试重复扫描）。
+    # v1.17.x 性能：原先 trend_overview 只查总分、_trend_lines 又查 10 个科目，等于把
+    # 全年级 25 场约 22 万行扫描两遍；此处一次查回 (总分+9 科) 均值，两处复用。
+    _full_means = st.exam_score_means(exam.grade, [TOTAL_SUBJECT] + list(SUBJECTS),
+                                       direction=dr)
     rows = []
-    _tm = st.exam_score_means(exam.grade, [TOTAL_SUBJECT], direction=dr)
-    for _eid, _info in _tm.items():
+    for _eid, _info in _full_means.items():
         _m = _info.get('means', {}).get(TOTAL_SUBJECT)
         _c = _info.get('counts', {}).get(TOTAL_SUBJECT)
         if _m is None:
@@ -181,8 +184,8 @@ def grade_tab(exam_id, direction=''):
                                                                             direction=dr)])
                              for c in shown_classes]}],
     }
-    # G4 历次多折线
-    trends = _trend_lines(exam.grade, direction=dr)
+    # G4 历次多折线（复用上面已算好的 _full_means，不再重复聚合查询）
+    trends = _trend_lines(exam.grade, means=_full_means, direction=dr)
     charts['trend_line'] = {
         'type': 'line', 'title': '年级历次考试平均分变化趋势',
         'xAxis': trends['x'],
@@ -259,10 +262,14 @@ def _stack_series(rows, cls):
     return {'name': cls, 'data': [r['counts'].get(cls, 0) for r in rows]}
 
 
-def _trend_lines(grade, direction=None):
-    """历次考试折线数据；direction 过滤时只统计该方向（聚合查询，避免逐场构造 ExamData）"""
+def _trend_lines(grade, means=None, direction=None):
+    """历次考试折线数据；direction 过滤时只统计该方向（聚合查询，避免逐场构造 ExamData）。
+
+    means: 预计算的 exam_score_means(grade, [总分]+SUBJECTS, direction) 结果；
+    传入则直接复用，避免 grade_tab 已算过一遍又重复扫描历史考试。"""
     x, series_map = [], {}
-    _means = st.exam_score_means(grade, [TOTAL_SUBJECT] + list(SUBJECTS), direction=direction)
+    _means = means if means is not None else st.exam_score_means(
+        grade, [TOTAL_SUBJECT] + list(SUBJECTS), direction=direction)
     for _eid, _info in _means.items():
         _m = _info.get('means', {})
         if _m.get(TOTAL_SUBJECT) is None:
@@ -290,14 +297,17 @@ def class_tab(exam_id, class_name):
 
     # A2-T1 班级概况
     segs, rows = st.segment_table(data, class_name=class_name)
+    _ov_row = {'k': '各分数段人数', **{'s%d' % i: r['counts'].get(class_name, 0)
+                                   for i, r in enumerate(rows)}}
     tables['class_overview'] = {
         'title': '班级各分数段人数',
         'columns': [{'key': 'k', 'label': '项目', 'type': 'text'}] +
                    [{'key': 's%d' % i, 'label': s[0], 'type': 'int'} for i, s in enumerate(segs)],
-        'rows': [
-            {'k': '各分数段人数', **{'s%d' % i: r['counts'].get(class_name, 0)
-                                  for i, r in enumerate(rows)}},
-        ],
+        'rows': [_ov_row],
+        # 单行 × 多分数段：自动推断会画成 1 根柱，显式转置为「分数段 → 人数」
+        'chartHint': {'type': 'bar', 'xAxis': [s[0] for s in segs],
+                      'series': [{'name': '人数', 'data': [_ov_row.get('s%d' % i)
+                                                          for i in range(len(segs))]}]},
     }
     tables['class_meta'] = {
         'title': '班级基本指标',
@@ -311,6 +321,11 @@ def class_tab(exam_id, class_name):
             {'k': '与年级均值差', 'v': (round(cls_avg - grade_avg, 1)
                                      if cls_avg is not None and grade_avg is not None else '—')},
         ],
+        # 键值表无法被前端自动推断（第二列是混合量纲的文本）→ 显式给图：仅画可比的 4 个数值项
+        'chartHint': {'type': 'bar',
+                      'xAxis': ['总分均值', '年级均值', '参考人数', '年级参考人数'],
+                      'series': [{'name': '本班', 'data': [cls_avg, grade_avg,
+                                                          len(totals), len(data.total_rows)]}]},
     }
     # A2-T2 班级-年级科目对标
     subs = data.class_subjects(class_name)
@@ -339,29 +354,53 @@ def class_tab(exam_id, class_name):
                     {'key': 'grd_pass', 'label': '年级及格率%', 'type': 'num'}],
         'rows': t2,
     }
-    # A2-T3 学生明细（本次/上次）
+    # A2-T3 学生明细（每生 × 应考科目分数 + 本次/上次总分排名；前端点行跳个人成绩查询）
     t3 = []
     for t in sorted(totals, key=lambda x: x['rank_dir'] or 99999):
         prev = data.prev_totals.get(t['no'])
         cur_score = t['score']
         prev_score = prev[0] if prev else None
         prev_rank = prev[1] if prev else None
-        t3.append({'no': t['no'], 'name': t['name'], 'class_name': t['class_name'],
-                   'total': cur_score, 'rank': t['rank_dir'],
-                   'prev_total': prev_score, 'prev_rank': prev_rank,
-                   'score_move': round(cur_score - prev_score, 1) if prev_score is not None else None,
-                   'rank_move': (t['rank_dir'] - prev_rank) if prev_rank else None})
+        row = {'no': t['no'], 'name': t['name'], 'class_name': t['class_name']}
+        for sub in subs:
+            row[sub] = data.subj.get((t['no'], sub))
+        row.update({'total': cur_score, 'rank': t['rank_dir'],
+                    'prev_total': prev_score, 'prev_rank': prev_rank,
+                    'score_move': round(cur_score - prev_score, 1) if prev_score is not None else None,
+                    'rank_move': (t['rank_dir'] - prev_rank) if prev_rank else None})
+        t3.append(row)
     tables['student_detail'] = {
         'title': '班级学生历次成绩明细表',
         'columns': [{'key': 'no', 'label': '学号', 'type': 'text'},
-                    {'key': 'name', 'label': '姓名', 'type': 'text'},
-                    {'key': 'total', 'label': '本次总分', 'type': 'num'},
-                    {'key': 'rank', 'label': '本次排名', 'type': 'int'},
-                    {'key': 'prev_total', 'label': '上次总分', 'type': 'num'},
-                    {'key': 'prev_rank', 'label': '上次排名', 'type': 'int'},
-                    {'key': 'score_move', 'label': '分数变动', 'type': 'num'},
-                    {'key': 'rank_move', 'label': '排名变动', 'type': 'int'}],
+                    {'key': 'name', 'label': '姓名', 'type': 'text'}]
+                   + [{'key': s, 'label': s, 'type': 'num'} for s in subs]
+                   + [{'key': 'total', 'label': '本次总分', 'type': 'num'},
+                      {'key': 'rank', 'label': '本次排名', 'type': 'int'},
+                      {'key': 'prev_total', 'label': '上次总分', 'type': 'num'},
+                      {'key': 'prev_rank', 'label': '上次排名', 'type': 'int'},
+                      {'key': 'score_move', 'label': '分数变动', 'type': 'num'},
+                      {'key': 'rank_move', 'label': '排名变动', 'type': 'int'}],
         'rows': t3,
+        # 明细表行=学生：图表取排名靠前的若干人画「各科分数」，避免几十上百根柱挤在一起
+        'chartHint': {'type': 'groupbar', 'xKey': 'name', 'topN': 25,
+                      'seriesKeys': list(subs)},
+        'link': 'student-query',
+    }
+    # A2-T3b 班级学生各科成绩表（每生 × 应考科目分数，排名同明细表序）
+    t3b = []
+    for t in sorted(totals, key=lambda x: x['rank_dir'] or 99999):
+        row = {'no': t['no'], 'name': t['name']}
+        for sub in subs:
+            row[sub] = data.subj.get((t['no'], sub))
+        row['total'] = t['score']
+        t3b.append(row)
+    tables['student_scores'] = {
+        'title': '班级学生各科成绩表',
+        'columns': [{'key': 'no', 'label': '学号', 'type': 'text'},
+                    {'key': 'name', 'label': '姓名', 'type': 'text'}]
+                   + [{'key': s, 'label': s, 'type': 'num'} for s in subs]
+                   + [{'key': 'total', 'label': '总分', 'type': 'num'}],
+        'rows': t3b,
     }
     # A2-T4 分层统计（按本班学生自身方向判定）
     t4 = []

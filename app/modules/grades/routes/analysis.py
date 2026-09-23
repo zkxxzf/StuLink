@@ -1,12 +1,15 @@
 # StuLink v1.17.0 2026-09-21
 # 成绩分析：主页（四 tab）+ options/analysis API + AI 预留
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
+import hashlib
+
 from flask import render_template, request, jsonify, abort
 from flask_login import login_required, current_user
 from app.models.grades import Exam, TeacherSubjectLink
 from app.models import Student
 from app.modules.grades import bp
 from app.modules.grades.services import tab_service, scope as scope_service
+from app.modules.grades.services import compare_service
 from app.modules.grades.utils import numeric_classes
 from app.utils.decorators import perm_required
 from app.utils.cache import cache
@@ -64,16 +67,21 @@ def api_options():
     for g in grades:
         st_rows = Student.query.filter_by(grade=g).with_entities(Student.class_name).distinct().all()
         classes_by_grade[g] = numeric_classes([r[0] for r in st_rows])
-    # tab 可见性（恒返回 4 键，前端据此显隐）
-    tabs = {'grade': False, 'class': False, 'subject': False, 'teacher': False}
+    # tab 可见性（恒返回 5 键，前端据此显隐）
+    tabs = {'grade': False, 'class': False, 'subject': False, 'teacher': False,
+            'compare': False}
     if current_user.role == 'admin' or scope_type == 'school':
-        tabs = {'grade': True, 'class': True, 'subject': True, 'teacher': True}
+        tabs = {'grade': True, 'class': True, 'subject': True, 'teacher': True,
+                'compare': True}
     elif scope_type == 'grade':
-        tabs = {'grade': True, 'class': True, 'subject': True, 'teacher': True}
+        tabs = {'grade': True, 'class': True, 'subject': True, 'teacher': True,
+                'compare': True}
     elif current_user.has_role('homeroom_teacher'):
-        tabs = {'grade': False, 'class': True, 'subject': False, 'teacher': False}
+        tabs = {'grade': False, 'class': True, 'subject': False, 'teacher': False,
+                'compare': False}
     elif current_user.has_role('teacher'):
-        tabs = {'grade': False, 'class': False, 'subject': False, 'teacher': True}
+        tabs = {'grade': False, 'class': False, 'subject': False, 'teacher': True,
+                'compare': False}
     # 班主任/教师锁定范围
     locked = {'grade': '', 'classes': []}
     if scope_type == 'grade':
@@ -112,8 +120,8 @@ def api_options():
 # ==================== 分析 API ====================
 
 TAB_BY_ROLE = {
-    'admin': {'grade', 'class', 'subject', 'teacher'},
-    'grade_leader': {'grade', 'class', 'subject', 'teacher'},
+    'admin': {'grade', 'class', 'subject', 'teacher', 'compare'},
+    'grade_leader': {'grade', 'class', 'subject', 'teacher', 'compare'},
     'homeroom_teacher': {'class'},
     'teacher': {'teacher'},
 }
@@ -124,18 +132,19 @@ def _guard_tab(tab):
 
     说明：除以 role 判定外，必须同时认可「全校范围」权限组（校级领导），
     否则 school_viewer 等角色会被 TAB_BY_ROLE 漏掉而全部 403。
+    compare（班级对比）与年级分析同口径：班主任/任课教师仅限本班范围，不开放跨班对比。
     """
     if current_user.role == 'admin':
-        allowed = {'grade', 'class', 'subject', 'teacher'}
+        allowed = {'grade', 'class', 'subject', 'teacher', 'compare'}
     else:
         scope_type, _grade = scope_service.get_scope(current_user)
         if scope_type == 'school':                 # 校级领导：与管理员同范围
-            allowed = {'grade', 'class', 'subject', 'teacher'}
+            allowed = {'grade', 'class', 'subject', 'teacher', 'compare'}
         elif scope_service.has_user_scope(current_user):
             # v1.9.2 用户级数据范围（如教务员按年级）：数据已限授权年级，tab 全开
-            allowed = {'grade', 'class', 'subject', 'teacher'}
+            allowed = {'grade', 'class', 'subject', 'teacher', 'compare'}
         elif current_user.role == 'grade_leader' or scope_type == 'grade':
-            allowed = {'grade', 'class', 'subject', 'teacher'}
+            allowed = {'grade', 'class', 'subject', 'teacher', 'compare'}
         elif current_user.has_role('homeroom_teacher'):
             allowed = {'class'}
         elif current_user.has_role('teacher'):
@@ -214,6 +223,37 @@ def api_subject_tab():
     return jsonify(success=True, data=_fetch(
         f'grades_tab_{exam_id}_subject_{subject}_{direction}',
         lambda: tab_service.subject_tab(exam_id, subject, direction)))
+
+
+@bp.route('/api/analysis/compare')
+@login_required
+@perm_required('grades.view')
+def api_compare_tab():
+    """班级对比：多班横向对比（班级名单用逗号分隔，顺序=对比展示顺序）"""
+    _guard_tab('compare')
+    exam_id = request.args.get('exam_id', type=int)
+    direction = (request.args.get('direction') or '').strip()
+    raw = (request.args.get('classes') or '').strip()
+    exam = _get_exam(exam_id)
+    classes = [c.strip() for c in raw.split(',') if c.strip()]
+
+    # 班级可见性过滤：班主任/受限用户对未授权班级静默剔除，其余用户直接放行
+    limited = scope_service.visible_classes(current_user)
+    if limited:
+        allowed = {c for g, c in limited if g == exam.grade}
+        classes = [c for c in classes if c in allowed]
+    if len(classes) < 2:
+        return jsonify(success=False, message='请至少选择 2 个班级进行对比'), 400
+    # 上限保护：最多 20 个班，避免缓存键与结果集失控
+    classes = classes[:20]
+    # 班级名单可能很长 → 用摘要做缓存键（前缀仍为 grades_tab_{id}_，命中现有失效钩子）
+    digest = hashlib.md5(','.join(classes).encode('utf-8')).hexdigest()[:10]
+    payload = _fetch(f'grades_tab_{exam_id}_compare_{digest}_{direction}',
+                     lambda: compare_service.compare_tab(exam_id, classes, direction))
+    # 传入的班级在本场可能全部无效（如已停考班级）→ 与前端「至少 2 个班」校验同一口径
+    if len(((payload.get('meta') or {}).get('selected')) or []) < 2:
+        return jsonify(success=False, message='有效班级不足 2 个，请重新选择'), 400
+    return jsonify(success=True, data=payload)
 
 
 @bp.route('/api/analysis/teacher')

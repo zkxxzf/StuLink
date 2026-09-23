@@ -8,12 +8,41 @@
     position: sticky;
     top: 0;
     z-index: 2;
+    padding: .4rem .55rem;              /* 紧凑：压缩纵向留白 */
+    border-bottom: none;
 }
 .g-table thead th.num { text-align: right; }
-.g-table tbody td { font-size: 13px; }
+.g-table tbody td {
+    font-size: 12.5px;
+    padding: .3rem .55rem;
+    white-space: nowrap;                /* 不换行，避免列宽被内容撑爆 */
+    /* 行间虚线：横向阅读时明确「这一行的内容到此为止」 */
+    border-bottom: 1px dashed #dbe3ec;
+}
+.g-table tbody tr:last-child td { border-bottom: none; }
 .g-table tbody tr:nth-child(even) { background: #f8fafc; }
 .g-table .num { text-align: right; font-variant-numeric: tabular-nums; }
+/* 数值列再压缩左右留白：列数多的宽表能少滚一屏 */
+.g-table thead th.num, .g-table tbody td.num { padding-left: .35rem; padding-right: .35rem; }
 .g-table .center { text-align: center; }
+
+/* 宽表横向滚动时首列冻结（如每生一行的明细表）：标签列始终可见 */
+.g-table thead th:first-child,
+.g-table tbody td:first-child { position: sticky; left: 0; background: #fff; }
+.g-table thead th:first-child { z-index: 3; background: #1e293b !important; }
+.g-table tbody td:first-child { z-index: 1; }
+.g-table tbody tr:nth-child(even) td:first-child { background: #f8fafc; }
+.g-table tbody tr.stu-link:hover td:first-child { background: #e0ecff !important; }
+
+/* 表头排序（点击表头切换 升序 → 降序 → 还原） */
+.g-table thead th.sortable { cursor: pointer; user-select: none; }
+.g-table thead th.sortable:hover { color: #93c5fd !important; }
+.g-table thead th .th-sort {
+    margin-left: 4px; font-size: 10px; opacity: .3; vertical-align: 1px;
+}
+.g-table thead th.sortable:hover .th-sort { opacity: .6; }
+.g-table thead th.sorted-asc .th-sort,
+.g-table thead th.sorted-desc .th-sort { opacity: 1; color: #fbbf24; }
 
 /* 分析页图表卡片 */
 .chart-card { border: none; border-radius: 10px; box-shadow: 0 1px 3px rgba(0,0,0,.08); }
@@ -21,14 +50,38 @@
 .chart-box { width: 100%; height: 360px; }
 .chart-box.short { height: 300px; }
 
+/* ================= 指标卡：表格 / 图表 双视图切换 ================= */
+.view-switch .btn {
+    --bs-btn-padding-y: .15rem; --bs-btn-padding-x: .6rem;
+    --bs-btn-font-size: 12px; --bs-btn-border-radius: 20px;
+}
+.view-switch .btn.active { pointer-events: none; }
+.view-pane { animation: viewFade .16s ease-out; }
+.view-pane[hidden] { display: none !important; }
+@keyframes viewFade { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
+.tbl-chart { width: 100%; height: 360px; }
+.tbl-chart.tall { height: 460px; }
+.chart-tip { color: #64748b; font-size: 12px; }
+
+/* 班级多选下拉 */
+#gCmList .cm-item {
+    display: flex; align-items: center; gap: 6px; padding: 3px 6px;
+    border-radius: 6px; cursor: pointer; white-space: nowrap;
+}
+#gCmList .cm-item:hover { background: #f1f5f9; }
+#gCmList .cm-item input { cursor: pointer; }
+
+/* 可点击跳转个人成绩查询的学生明细行 */
+.g-table tbody tr.stu-link { cursor: pointer; }
+.g-table tbody tr.stu-link:hover { background: #e0ecff !important; }
+
 /* 表格卡片 */
 .tbl-card { border: none; border-radius: 10px; box-shadow: 0 1px 3px rgba(0,0,0,.08); }
 .tbl-card .card-header { background: #fff; border-bottom: 1px solid #f1f5f9; padding: 8px 14px; }
 .tbl-wrap { max-height: 480px; overflow: auto; }
 
 /* 分析页 tab 面板 */
-.tab-pane-loading { padding: 60px 0; text-align: center; color: #94a3b8; }
-.empty-state { padding: 50px 20px; text-align: center; color: #64748b; }
+.tab-pane-loading { padding: 60px 0; text-align: center; color: #94a3b8; }.empty-state { padding: 50px 20px; text-align: center; color: #64748b; }
 .empty-state .bi { font-size: 40px; color: #cbd5e1; }
 
 /* ================= AI 分析：对话 / 思维链 / 图表 ================= */
@@ -119,6 +172,10 @@
     .tab-pane.active { display: block !important; }
     .tbl-card, .chart-card { box-shadow: none !important; border: 1px solid #e2e8f0;
         break-inside: avoid; page-break-inside: avoid; }
+    /* 打印只输出每张卡当前激活的视图（表格或图表），隐藏交互控件 */
+    .view-switch, #gClassMulti, #gViewToggle { display: none !important; }
+    .view-pane[hidden] { display: none !important; }
+    .tbl-chart { height: 300px !important; }
     .chart-box { height: 260px !important; }
     .g-table thead th { position: static; }
     table { page-break-inside: auto; }

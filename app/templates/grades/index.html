@@ -22,6 +22,31 @@
     </select>
     <select id="gSubject" class="form-select form-select-sm w-auto d-none" title="科目">
     </select>
+    {# 班级多选（仅「班级对比」显示）：下拉里勾选若干班，默认约班级总数的 1/3 #}
+    <div class="dropdown d-none" id="gClassMulti">
+        <button class="btn btn-sm btn-outline-secondary dropdown-toggle" type="button"
+                id="gCmBtn" data-bs-toggle="dropdown" data-bs-auto-close="outside"
+                aria-expanded="false" title="选择要对比的班级">
+            <i class="bi bi-collection"></i> 选择对比班级 <span id="gCmCount" class="badge bg-primary">0</span>
+        </button>
+        <div class="dropdown-menu shadow p-2" id="gCmMenu" style="min-width:220px;max-height:320px;overflow:auto;">
+            <div class="d-flex gap-1 mb-2 pb-2 border-bottom">
+                <button class="btn btn-sm btn-outline-primary flex-fill" id="gCmDefault">默认</button>
+                <button class="btn btn-sm btn-outline-secondary flex-fill" id="gCmAll">全选</button>
+                <button class="btn btn-sm btn-outline-secondary flex-fill" id="gCmClear">清空</button>
+            </div>
+            <div id="gCmList" class="small"></div>
+        </div>
+    </div>
+    {# 表格/图表总开关：一键批量切换当前模块所有指标卡 #}
+    <div class="btn-group btn-group-sm" role="group" aria-label="视图总开关" id="gViewToggle">
+        <input type="radio" class="btn-check" name="gView" id="gViewTable" value="table" checked>
+        <label class="btn btn-outline-primary" for="gViewTable" title="所有指标显示表格">
+            <i class="bi bi-table"></i> 表格</label>
+        <input type="radio" class="btn-check" name="gView" id="gViewChart" value="chart">
+        <label class="btn btn-outline-primary" for="gViewChart" title="所有指标显示图表">
+            <i class="bi bi-bar-chart"></i> 图表</label>
+    </div>
     <div class="ms-auto g-actions">
         <button class="btn btn-sm btn-outline-secondary" id="gAi" title="AI 分析（需配置个人 API Key 或使用管理员公共 Key）">
             <i class="bi bi-stars"></i> AI 分析
@@ -44,10 +69,11 @@
     <li class="nav-item" data-tab="class"><a class="nav-link" data-bs-toggle="tab" href="#pane-class">班级分析</a></li>
     <li class="nav-item" data-tab="subject"><a class="nav-link" data-bs-toggle="tab" href="#pane-subject">学科分析</a></li>
     <li class="nav-item" data-tab="teacher"><a class="nav-link" data-bs-toggle="tab" href="#pane-teacher">任课教师</a></li>
+    <li class="nav-item" data-tab="compare"><a class="nav-link" data-bs-toggle="tab" href="#pane-compare">班级对比</a></li>
 </ul>
 
 <div class="tab-content" id="gTabContent">
-{% for t in ['grade', 'class', 'subject', 'teacher'] %}
+{% for t in ['grade', 'class', 'subject', 'teacher', 'compare'] %}
 <div class="tab-pane fade" id="pane-{{ t }}" data-tab="{{ t }}">
     <div class="tab-pane-loading d-none"><div class="spinner-border text-primary"></div><div>加载中…</div></div>
     <div class="empty-state d-none"><i class="bi bi-inbox"></i><p class="mt-2 mb-0"></p></div>

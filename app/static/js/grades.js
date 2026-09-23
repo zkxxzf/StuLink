@@ -1,13 +1,14 @@
-/* StuLink 成绩管理：分析页前端 v1.9.2
- * 四 tab 联动加载 / 统一表格渲染 / ECharts 图表渲染（无文字报告）
+/* StuLink 成绩管理：分析页前端 v1.18.0
+ * 五 tab 联动加载 / 统一表格渲染 / 每张指标卡「表格 | 图表」双视图 / ECharts 图表渲染
  */
 (function(){
 var PALETTE = ['#3b82f6', '#8b5cf6', '#10b981', '#f59e0b', '#ef4444',
                '#06b6d4', '#ec4899', '#84cc16', '#f97316', '#6366f1'];
-var state = {grade: '', examId: '', tab: 'grade', class_name: '', subject: '', direction: ''};
+var state = {grade: '', examId: '', tab: 'grade', class_name: '', subject: '', direction: '',
+             classes: []};   // classes：班级对比 Tab 选中的班级
 // tab 业务顺序。注意：Flask jsonify 默认按键名排序，Object.keys(opts.tabs) 的首项会是
 // 'class' 而不是 'grade'，因此不能用它决定默认 tab，必须按此固定顺序取第一个可见项。
-var TAB_ORDER = ['grade', 'class', 'subject', 'teacher'];
+var TAB_ORDER = ['grade', 'class', 'subject', 'teacher', 'compare'];
 var opts = null;
 var charts = {};
 
@@ -28,6 +29,9 @@ function init(){
         fillGrades();
         bindTabs();
         bindFilters();
+        bindClassMulti();
+        bindViewToggle();
+        syncClassCandidate();
         // 可见 tab
         Object.keys(opts.tabs).forEach(function(t){
             if (!opts.tabs[t]) $('li[data-tab="'+t+'"]').hide();
@@ -140,14 +144,108 @@ function bindTabs(){
     });
 }
 
+/* ============ 班级对比：多选控件 ============ */
+var MAX_COMPARE = 20;   // 与后端 api_compare_tab 的截断上限一致
+// 当前年级的候选班级（opts.classes[grade]，与班级分析下拉同源）
+function classCandidates(){
+    var grade = $('#gGrade').val() || state.grade;
+    var list = (opts && opts.classes && opts.classes[grade]) ? opts.classes[grade].slice() : [];
+    if (opts.locked.classes && opts.locked.classes.length){
+        list = list.filter(function(c){
+            return opts.locked.classes.some(function(l){ return l.grade === grade && l.class_name === c; });
+        });
+    }
+    return list;
+}
+
+// 默认对比班：约班级总数的 1/3（至少 2 个，且不超过后端 20 班上限）
+function defaultClasses(){
+    var list = classCandidates();
+    if (list.length <= 2) return list.slice();
+    var n = Math.min(MAX_COMPARE, Math.max(2, Math.ceil(list.length / 3)));
+    return list.slice(0, n);
+}
+
+// 年级变化时同步候选列表，并把选中值收敛到仍存在的班级
+function syncClassCandidate(){
+    state.classes = (state.classes || []).filter(function(c){ return classCandidates().indexOf(c) >= 0; });
+    if (state.classes.length < 2) state.classes = defaultClasses();
+    renderClassList();
+}
+
+function renderClassList(){
+    var list = classCandidates();
+    var $box = $('#gCmList').empty();
+    if (!list.length){
+        $box.append('<div class="text-muted px-1">本年级暂无班级</div>');
+    }
+    list.forEach(function(c){
+        var checked = state.classes.indexOf(c) >= 0;
+        $box.append('<label class="cm-item"><input type="checkbox" value="' + escHtml(c) + '"'
+            + (checked ? ' checked' : '') + '><span>' + escHtml(c) + '</span></label>');
+    });
+    updateClassCount();
+}
+
+function updateClassCount(){
+    $('#gCmCount').text(state.classes.length);
+}
+
+function bindClassMulti(){
+    // 复选框变更：保持「候选列表顺序」，避免勾选顺序影响对比表列序；超上限时截断并提示
+    $('#gCmList').on('change', 'input[type="checkbox"]', function(){
+        var list = classCandidates();
+        state.classes = list.filter(function(c){
+            return $('#gCmList input[value="' + c + '"]').is(':checked');
+        });
+        if (state.classes.length > MAX_COMPARE){
+            state.classes = state.classes.slice(0, MAX_COMPARE);
+            renderClassList();
+            alert('一次最多对比 ' + MAX_COMPARE + ' 个班级，已按候选顺序截断');
+            return;
+        }
+        updateClassCount();
+        if (state.tab === 'compare') loadCurrent();
+    });
+    // 快捷操作：只在对比 tab 生效时重新拉数据，避免在其他 tab 触发无意义请求
+    [['#gCmDefault', function(){ return defaultClasses(); }],
+     ['#gCmAll', function(){ return classCandidates().slice(0, MAX_COMPARE); }],
+     ['#gCmClear', function(){ return []; }]].forEach(function(pair){
+        $(pair[0]).on('click', function(){
+            state.classes = pair[1]();
+            renderClassList();
+            if (state.tab === 'compare') loadCurrent();
+        });
+    });
+    // 年级切换后候选班变化
+    $('#gGrade').on('change', function(){ syncClassCandidate(); });
+}
+
+/* ============ 页顶表格 / 图表 总开关 ============ */
+function bindViewToggle(){
+    try {
+        var saved = sessionStorage.getItem('gradesMasterView');
+        if (saved === 'chart' || saved === 'table'){
+            masterView = saved;
+            $('#gViewTable').prop('checked', saved === 'table');
+            $('#gViewChart').prop('checked', saved === 'chart');
+        }
+    } catch (e) {}
+    $('#gViewToggle input[name="gView"]').on('change', function(){
+        if (this.checked) applyMasterView(this.value);
+    });
+}
+
 function activateTab(tab, fromClick){
     state.tab = tab;
-    // 筛选器显隐：方向仅年级/学科分析可用；班级仅班级分析；科目按 tab
+    // 筛选器显隐：方向仅年级/学科分析可用；班级仅班级分析；科目按 tab；班级多选仅对比 tab
     $('#gClass').toggleClass('d-none', tab !== 'class');
+    $('#gClassMulti').toggleClass('d-none', tab !== 'compare');
     $('#gDir').toggleClass('d-none', tab !== 'grade' && tab !== 'subject');
     // 修复：原条件写反——学科/教师分析 tab 需要显示科目筛选器，年级/班级 tab 隐藏
     $('#gSubject').toggleClass('d-none', tab !== 'subject' && tab !== 'teacher');
     if (tab === 'subject' || tab === 'teacher') fillSubject();
+    if (tab === 'compare') renderClassList();
     $('#gTabs a[href="#pane-'+tab+'"]').tab('show');
     // 班级下拉只随 tab 显隐，**绝不清空其值**：一旦清空，切回班级分析时
     // state.class_name 读到空 → 后端查不到班级 → 前端误报"该考试尚未导入成绩"。
@@ -157,13 +255,36 @@ function activateTab(tab, fromClick){
 }
 
 /* ---------------- 数据加载与渲染 ---------------- */
+// 重新渲染某 tab 前释放其图表实例：该 tab 的 DOM 已被 empty() 移除，实例留着只会泄漏 + resize 报错
+function disposePaneCharts(tab){
+    var pane = $('#pane-' + tab);
+    var root = pane[0];
+    Object.keys(charts).forEach(function(k){
+        var inst = charts[k];
+        if (!inst) { delete charts[k]; return; }
+        try {
+            var dom = inst.getDom ? inst.getDom() : null;
+            if (!dom || (root && $.contains(root, dom))){
+                if (!inst.isDisposed()) inst.dispose();
+                delete charts[k];
+            }
+        } catch (e) { delete charts[k]; }
+    });
+}
+
 function loadCurrent(){
     var pane = $('#pane-' + state.tab);
+    disposePaneCharts(state.tab);
     pane.find('.tab-content-area').empty().addClass('d-none');
     pane.find('.empty-state').addClass('d-none');
     // 班级分析未选班级时直接提示，不发无意义请求（否则后端返回空，会误报成"未导入成绩"）
     if (state.tab === 'class' && !state.class_name){
         showEmpty(state.tab, '请先在顶部筛选栏选择班级');
+        return;
+    }
+    // 班级对比至少要有 2 个班
+    if (state.tab === 'compare' && state.classes.length < 2){
+        showEmpty(state.tab, '请至少选择 2 个班级：点击顶部「选择对比班级」勾选');
         return;
     }
     pane.find('.tab-pane-loading').removeClass('d-none');
@@ -173,7 +294,9 @@ function loadCurrent(){
         var data = res.data || {};
         var area = pane.find('.tab-content-area').removeClass('d-none');
         if (!data || data.meta && data.meta.empty || !Object.keys(data.tables || {}).length){
-            showEmpty(state.tab, '暂无数据：该考试尚未导入成绩（或本场无参考学生）');
+            showEmpty(state.tab, state.tab === 'compare'
+                ? '所选班级暂无成绩数据（或本场该班无参考学生）'
+                : '暂无数据：该考试尚未导入成绩（或本场无参考学生）');
             return;
         }
         area.empty();
@@ -181,9 +304,11 @@ function loadCurrent(){
         if (info) area.append(info);
         renderTables(area, data.tables || {});
         renderCharts(area, data.charts || {});
-    }).fail(function(){
+    }).fail(function(xhr){
         pane.find('.tab-pane-loading').addClass('d-none');
-        showEmpty(state.tab, '数据加载失败（或无权查看该数据）');
+        var msg = (xhr && xhr.responseJSON && xhr.responseJSON.message)
+            || '数据加载失败（或无权查看该数据）';
+        showEmpty(state.tab, msg);
     });
 }
 
@@ -202,6 +327,7 @@ function buildExamInfo(data){
         '当前考试：<strong>' + escHtml(data.exam.name) + '</strong> · ' +
         escHtml(data.exam.grade) + ' · ' + escHtml(data.exam.date) +
         (data.class_name ? ' · 班级：' + escHtml(data.class_name) : '') +
+        ((data.classes || []).length ? ' · 对比班级：' + escHtml(data.classes.join('、')) : '') +
         (data.subject ? ' · 科目：' + escHtml(data.subject) : '')
     ));
     // 分批导入（一次导一科）时，总分只是「已导入科目合计」，必须显式提示避免误读
@@ -229,49 +355,302 @@ function showEmpty(tab, msg){
     pane.find('.empty-state').removeClass('d-none');
 }
 
+/* ============ 指标卡双视图：表格 / 图表 ============ */
+// 每张指标卡默认视图（可被页顶总开关批量改写，也可单卡覆盖）
+var masterView = 'table';
+
+function isNumVal(v){
+    if (v === null || v === undefined || v === '') return false;
+    return !isNaN(Number(v));
+}
+
+/* 由表格的 columns+rows 推导图表规格；无法成图返回 null（此时卡片只显示「表格」Tab）。
+   优先级：后端 chartHint（完整规格） > chartHint 部分字段 > 自动推断。 */
+function autoChartSpec(t, key){
+    var hint = t.chartHint || null;
+    // hint 带 xAxis+series（或 indicators）= 完整规格，直接用
+    if (hint && ((hint.xAxis && hint.series) || hint.indicators)){
+        return $.extend({title: t.title || key}, hint);
+    }
+    var cols = t.columns || [], rows = t.rows || [];
+    if (!cols.length || !rows.length) return null;
+    // xKey / seriesKeys 优先取后端 hint，其次自动推断（所有含数值的列）
+    var xKey = hint && hint.xKey ? hint.xKey : cols[0].key;
+    var topN = (hint && hint.topN) || 0;
+    var seriesKeys = (hint && hint.seriesKeys) || null;
+    if (!seriesKeys){
+        seriesKeys = [];
+        cols.forEach(function(c){
+            if (c.key === xKey) return;
+            // 分层人数列（l_0…）、单/双上线人数列（lo_0_n…）与均分口径不同，
+            // 混在同一张图里量级差太大，不自动入图（这些指标各自另有表/图）
+            if (/^l_\d+$/.test(c.key) || /^lo_\d+/.test(c.key)) return;
+            if (c.type === 'num' || c.type === 'int' || rows.some(function(r){ return isNumVal(r[c.key]); })){
+                seriesKeys.push(c.key);
+            }
+        });
+    }
+    if (!seriesKeys.length) return null;
+    // 行数过多（如每生一行的明细表）只画前 N 行，避免柱子挤成一片
+    var view = rows;
+    if (topN && rows.length > topN) view = rows.slice(0, topN);
+    var labels = {}, byKey = {};
+    cols.forEach(function(c){ labels[c.key] = c.label || c.key; });
+    var limit = (hint && hint.maxSeries) || 12;
+    var useKeys = seriesKeys.slice(0, limit);
+    seriesKeys.forEach(function(k){ byKey[k] = []; });
+    view.forEach(function(r){
+        seriesKeys.forEach(function(k){ byKey[k].push(isNumVal(r[k]) ? Number(r[k]) : null); });
+    });
+    var xAxis = view.map(function(r){ return fmt(r[xKey]); });
+    var type = (hint && hint.type) || (useKeys.length === 1 ? 'bar' : 'groupbar');
+    // 分段表（分数段/名次段：每班一列 c_xxx）自动改堆叠，并把合计/占比小数列排除在堆叠之外
+    var segKeys = seriesKeys.filter(function(k){ return /^c\d/.test(k) || /^c_/.test(k); });
+    if (!hint || !hint.type){
+        if (segKeys.length >= 2){
+            useKeys = segKeys.slice(0, limit);
+            seriesKeys = segKeys;
+            type = 'stack';
+        }
+    }
+    var spec = {
+        title: t.title || key,
+        type: type,
+        xAxis: xAxis,
+        series: useKeys.map(function(k){ return {name: labels[k] || k, data: byKey[k]}; })
+    };
+    if (seriesKeys.length > limit) spec.note = '仅显示前 ' + limit + ' 个数据列';
+    return spec;
+}
+
+function buildTbody(t, rows){
+    var tbody = $('<tbody>');
+    (rows || []).forEach(function(r){
+        var tr = $('<tr>');
+        if (t.link && r.no !== null && r.no !== undefined){
+            tr.addClass('stu-link').attr('data-no', r.no);
+        }
+        (t.columns || []).forEach(function(c){
+            var val = r[c.key];
+            var td = $('<td' + (c.type !== 'text' ? ' class="num"' : '') + '>').text(fmt(val));
+            // 变动列着色（客观展示，无文字评价）
+            if (c.key === 'rank_move' || c.key === 'score_move' || c.key === 'diff'){
+                var n = Number(val);
+                if (!isNaN(n)){
+                    td.addClass(n > 0 ? 'text-danger' : n < 0 ? 'text-success' : '');
+                }
+            }
+            tr.append(td);
+        });
+        tbody.append(tr);
+    });
+    if (t.link){
+        tbody.on('click', 'tr.stu-link', function(){
+            var no = $(this).data('no');
+            if (no !== null && no !== undefined){
+                window.open('/grades/' + t.link + '?student_no=' + encodeURIComponent(no), '_blank');
+            }
+        });
+    }
+    return tbody;
+}
+
+/* 按列排序；空值（—）恒排末尾，文本按中文排序；返回新数组 */
+function sortRows(rows, key, type, dir){
+    var numeric = (type === 'num' || type === 'int');
+    var arr = (rows || []).slice();
+    arr.sort(function(a, b){
+        if (numeric){
+            var va = a[key], vb = b[key];
+            var na = (va === null || va === undefined || va === '') ? null : Number(va);
+            var nb = (vb === null || vb === undefined || vb === '') ? null : Number(vb);
+            if (na === null && nb === null) return 0;
+            if (na === null) return 1;
+            if (nb === null) return -1;
+            return dir === 'asc' ? na - nb : nb - na;
+        }
+        var sa = fmt(a[key]), sb = fmt(b[key]);
+        return dir === 'asc' ? sa.localeCompare(sb, 'zh-Hans-CN')
+                             : sb.localeCompare(sa, 'zh-Hans-CN');
+    });
+    return arr;
+}
+
+/* 刷新整张卡：表格行重排 + 排序图标更新 + 图表按同一份行数据重绘（保持表图同源） */
+function applyCardRows(card, rows){
+    var t = card.data('table');
+    var key = card.data('tableKey');
+    card.data('rows', rows);
+    var spec = autoChartSpec($.extend({}, t, {rows: rows}), key);
+    card.data('spec', spec);
+    card.find('.tbl-wrap table tbody').replaceWith(buildTbody(t, rows));
+    updateSortHead(card);
+    var tip = spec ? (spec.title + (spec.note ? '（' + spec.note + '）' : '')) : '';
+    card.find('.chart-tip').text(tip ? '图表数据同上表：' + tip : '');
+    if (card.data('chartReady')){
+        var inst = charts[card.data('chartKey')];
+        if (inst && spec){
+            try { inst.setOption(chartOption(spec), true); } catch (e) {}
+        }
+    }
+}
+
+function updateSortHead(card){
+    var key = card.data('sortKey'), dir = card.data('sortDir');
+    card.find('.tbl-wrap thead th.sortable').each(function(){
+        var isThis = $(this).data('key') === key;
+        $(this).removeClass('sorted-asc sorted-desc');
+        if (isThis && dir) $(this).addClass(dir === 'asc' ? 'sorted-asc' : 'sorted-desc');
+        $(this).find('.th-sort').attr('class', 'bi th-sort ' + (
+            !isThis || !dir ? 'bi-arrow-down-up'
+            : dir === 'asc' ? 'bi-sort-up-alt' : 'bi-sort-down'));
+    });
+}
+
+function buildTableHtml(t){
+    var table = $('<table class="table table-hover g-table mb-0">');
+    var thead = $('<thead><tr></tr></thead>');
+    (t.columns || []).forEach(function(c){
+        thead.find('tr').append(
+            '<th class="sortable' + (c.type !== 'text' ? ' num' : '') + '" data-key="'
+            + escHtml(c.key) + '" data-type="' + escHtml(c.type || 'text') + '">'
+            + escHtml(c.label) + '<i class="bi bi-arrow-down-up th-sort"></i></th>');
+    });
+    table.append(thead);
+    table.append(buildTbody(t, t.rows || []));
+    return table;
+}
+
+/* 切换单卡的视图：'table' | 'chart'。图表首次切到时才初始化，之后仅显隐。 */
+function setCardView(card, view){
+    var spec = card.data('spec');
+    var tPane = card.find('.view-pane[data-view="table"]');
+    var cPane = card.find('.view-pane[data-view="chart"]');
+    card.find('.view-switch .btn').each(function(){
+        $(this).toggleClass('active', $(this).data('view') === view);
+    });
+    if (view === 'chart'){
+        tPane.attr('hidden', 'hidden');
+        cPane.removeAttr('hidden');
+        card.data('view', 'chart');
+        if (spec && !card.data('chartReady')){
+            // 先占位防止重复排队；初始化延迟到容器完成布局（渲染首帧容器宽高可能仍为 0，
+            // echarts 会把 canvas 画成 0×0），每帧复查尺寸，就绪后才 init
+            card.data('chartReady', true);
+            var tries = 0;
+            var tryInit = function(){
+                var box = cPane.find('.tbl-chart')[0];
+                if (!box || !box.isConnected || typeof echarts === 'undefined') return;
+                if ((!box.clientWidth || !box.clientHeight) && ++tries < 30){
+                    requestAnimationFrame(tryInit);
+                    return;
+                }
+                var ck = card.data('chartKey');
+                if (charts[ck]){ try { charts[ck].dispose(); } catch (e) {} }
+                renderChart(box, ck, spec);   // 内部完成 echarts.init 并登记到 charts
+                var inst = charts[ck];
+                if (inst) inst.resize();
+            };
+            if (typeof requestAnimationFrame === 'function'){
+                requestAnimationFrame(tryInit);
+            } else {
+                setTimeout(tryInit, 0);
+            }
+        } else if (card.data('chartReady')){
+            var inst = charts[card.data('chartKey')];
+            if (inst) inst.resize();
+        }
+    } else {
+        cPane.attr('hidden', 'hidden');
+        tPane.removeAttr('hidden');
+        card.data('view', 'table');
+    }
+}
+
 function renderTables(area, tables){
     var wrap = $('<div>');
     Object.keys(tables).forEach(function(key){
         var t = tables[key];
+        var spec = autoChartSpec(t, key);
         var card = $('<div class="card tbl-card mb-3">');
-        var head = $('<div class="card-header d-flex justify-content-between align-items-center">')
-            .append('<h6 class="mb-0"><i class="bi bi-table me-1"></i>' + escHtml(t.title || key) + '</h6>')
-            .append('<button class="btn btn-sm btn-outline-secondary tbl-fold">折叠</button>');
-        card.append(head);
-        var body = $('<div class="card-body p-0 tbl-wrap">');
-        var table = $('<table class="table table-hover g-table mb-0">');
-        var thead = $('<thead><tr></tr></thead>');
-        (t.columns || []).forEach(function(c){
-            thead.find('tr').append('<th' + (c.type !== 'text' ? ' class="num"' : '') + '>' + c.label + '</th>');
-        });
-        table.append(thead);
-        var tbody = $('<tbody>');
-        (t.rows || []).forEach(function(r){
-            var tr = $('<tr>');
-            (t.columns || []).forEach(function(c){
-                var val = r[c.key];
-                var td = $('<td' + (c.type !== 'text' ? ' class="num"' : '') + '>').text(fmt(val));
-                // 变动列着色（客观展示，无文字评价）
-                if (c.key === 'rank_move' || c.key === 'score_move' || c.key === 'diff'){
-                    var n = Number(val);
-                    if (!isNaN(n)){
-                        td.addClass(n > 0 ? 'text-danger' : n < 0 ? 'text-success' : '');
-                    }
-                }
-                tr.append(td);
-            });
-            tbody.append(tr);
-        });
-        table.append(tbody);
-        body.append(table);
+        var ck = state.tab + '::' + key;
+        card.data({view: masterView, spec: spec, chartKey: ck, chartReady: false,
+                   table: t, tableKey: key, rows: t.rows || [],
+                   baseRows: (t.rows || []).slice(), sortKey: null, sortDir: null});
+
+        var titleHtml = '<h6 class="mb-0"><i class="bi bi-table me-1"></i>' + escHtml(t.title || key);
+        // 带 link 的表（如学生明细表）：整行可点击跳转个人成绩查询
+        if (t.link){
+            titleHtml += ' <span class="text-muted small fw-normal ms-2">'
+                + '<i class="bi bi-box-arrow-up-right"></i> 点击行查看学生个人成绩</span>';
+        }
+        titleHtml += '</h6>';
+
+        var controls = $('<div class="d-flex align-items-center gap-2">');
+        if (spec){
+            controls.append(
+                '<div class="btn-group btn-group-sm view-switch" role="group">'
+                + '<button type="button" class="btn btn-outline-primary' + (masterView === 'table' ? ' active' : '')
+                + '" data-view="table"><i class="bi bi-table"></i> 表格</button>'
+                + '<button type="button" class="btn btn-outline-primary' + (masterView === 'chart' ? ' active' : '')
+                + '" data-view="chart"><i class="bi bi-bar-chart"></i> 图表</button></div>');
+        }
+        controls.append('<button class="btn btn-sm btn-outline-secondary tbl-fold">折叠</button>');
+        card.append($('<div class="card-header d-flex justify-content-between align-items-center">')
+            .append(titleHtml).append(controls));
+
+        var body = $('<div class="card-body p-0">');
+        body.append($('<div class="tbl-wrap view-pane" data-view="table">').append(buildTableHtml(t)));
+        if (spec){
+            body.append($('<div class="view-pane chart-pane" data-view="chart" hidden>')
+                .append('<div class="chart-tip px-3 pt-2 pb-1">图表数据同上表：' + escHtml(t.title || key)
+                    + (spec.note ? '（' + escHtml(spec.note) + '）' : '') + '</div>')
+                .append('<div class="tbl-chart"></div>'));
+        }
         card.append(body);
-        head.find('.tbl-fold').on('click', function(){
+
+        card.find('.view-switch .btn').on('click', function(){
+            setCardView(card, $(this).data('view'));
+        });
+        // 表头排序：升序 → 降序 → 还原原始顺序（数据、图表同份，导出仍取后端原序）
+        card.find('.tbl-wrap thead th.sortable').on('click', function(){
+            var ckey = $(this).data('key'), ctype = $(this).data('type');
+            var curKey = card.data('sortKey'), curDir = card.data('sortDir');
+            var dir = (curKey === ckey && curDir === 'asc') ? 'desc' : 'asc';
+            if (curKey === ckey && curDir === 'desc'){
+                card.data('sortKey', null).data('sortDir', null);
+                applyCardRows(card, card.data('baseRows').slice());
+                return;
+            }
+            card.data('sortKey', ckey).data('sortDir', dir);
+            applyCardRows(card, sortRows(card.data('baseRows'), ckey, ctype, dir));
+        });
+        if (masterView === 'chart') setCardView(card, 'chart');
+        card.find('.tbl-fold').on('click', function(){
+            var visible = body.is(':visible');
             body.toggle();
-            $(this).text(body.is(':visible') ? '折叠' : '展开');
+            if (!visible && card.data('view') === 'chart'){
+                var inst = charts[ck];
+                if (inst) inst.resize();
+            }
+            $(this).text(visible ? '展开' : '折叠');
         });
         wrap.append(card);
     });
     area.append(wrap);
+}
+
+/* 页顶总开关：批量切换当前模块所有指标卡（图表仍为首次可见时才初始化） */
+function applyMasterView(view){
+    masterView = view;
+    try { sessionStorage.setItem('gradesMasterView', view); } catch (e) {}
+    var pane = $('#pane-' + state.tab);
+    pane.find('.tbl-card').each(function(){
+        var card = $(this);
+        var spec = card.data('spec');
+        if (view === 'chart' && spec) setCardView(card, 'chart');
+        else setCardView(card, 'table');
+    });
 }
 
 function renderCharts(area, chartsData){
@@ -291,27 +670,67 @@ function renderCharts(area, chartsData){
     area.append(wrap);
 }
 
+function chartOption(c){
+    switch (c.type) {
+        case 'bar': return barOption(c, false);
+        case 'groupbar': return barOption(c, true);
+        case 'stack': return stackOption(c);
+        case 'boxplot': return boxOption(c);
+        case 'line': return lineOption(c);
+        case 'dual': return dualOption(c);
+        case 'radar': return radarOption(c);
+        case 'heatmap': return heatOption(c);
+        default: return {};
+    }
+}
+
 function renderChart(dom, key, c){
     var chart = echarts.init(dom);
     charts[key] = chart;
-    var option;
-    switch (c.type) {
-        case 'bar': option = barOption(c, false); break;
-        case 'groupbar': option = barOption(c, true); break;
-        case 'stack': option = stackOption(c); break;
-        case 'boxplot': option = boxOption(c); break;
-        case 'line': option = lineOption(c); break;
-        case 'dual': option = dualOption(c); break;
-        case 'radar': option = radarOption(c); break;
-        case 'heatmap': option = heatOption(c); break;
-        default: option = {};
-    }
-    chart.setOption(option, true);
+    chart.setOption(chartOption(c), true);
 }
 
 function baseGrid(){ return {left: 60, right: 40, top: 50, bottom: 40, containLabel: true}; }
 function colorOf(i){ return PALETTE[i % PALETTE.length]; }
 function yFmt(){ return {type: 'value', axisLabel: {formatter: '{value}'}}; }
+
+/* 横轴类目多时倾斜标签（班级/科目/日期一多就会糊成一片） */
+function axisRotate(c){
+    var n = (c.xAxis || []).length;
+    if (n <= 8) return 0;
+    return n <= 20 ? 30 : 45;
+}
+
+function hasZoom(c){ return (c.xAxis || []).length > 8; }
+
+/* 类目轴：倾斜 + 全部显示（配合 hideOverlap 兜底） */
+function catAxisOf(c){
+    return {type: 'category', data: c.xAxis || [],
+        axisLabel: {interval: 0, rotate: axisRotate(c), fontSize: 11, hideOverlap: true},
+        axisTick: {alignWithLabel: true}};
+}
+
+/* 缩放：滚轮/双指缩放 + 类目多时给底部滑块（可拖动平移）；初始展示约 24 个类目 */
+function zoomOf(c){
+    var n = (c.xAxis || []).length;
+    if (n <= 8) return [];
+    var end = Math.round(100 * Math.min(n, 24) / n);
+    var dz = [{type: 'inside', xAxisIndex: 0, start: 0, end: end,
+               zoomOnMouseWheel: true, moveOnMouseMove: true, moveOnMouseWheel: false}];
+    if (n > 15){
+        dz.push({type: 'slider', xAxisIndex: 0, height: 14, bottom: 4,
+                 start: 0, end: end, brushSelect: false, showDetail: false});
+    }
+    return dz;
+}
+
+/* 旋转 + 滑块都要占用底部空间，避免标签/滑块被裁掉 */
+function gridOf(c){
+    var rot = axisRotate(c);
+    var base = rot >= 45 ? 72 : (rot ? 56 : 40);
+    return {left: 60, right: 40, top: 50, containLabel: true,
+            bottom: base + ((c.xAxis || []).length > 15 ? 24 : 0)};
+}
 
 function barOption(c, grouped){
     var series = (c.series || []).map(function(s, i){
@@ -332,14 +751,13 @@ function barOption(c, grouped){
         return item;
     });
     return {color: PALETTE, tooltip: {trigger: 'axis'}, legend: grouped ? {top: 0} : undefined,
-        grid: baseGrid(), xAxis: {type: 'category', data: c.xAxis || [], axisLabel: {interval: 0}},
+        grid: gridOf(c), xAxis: catAxisOf(c), dataZoom: zoomOf(c),
         yAxis: yFmt(), series: series};
 }
 
 function stackOption(c){
     return {tooltip: {trigger: 'axis'}, legend: {top: 0, type: 'scroll'},
-        grid: baseGrid(),
-        xAxis: {type: 'category', data: c.xAxis || []},
+        grid: gridOf(c), xAxis: catAxisOf(c), dataZoom: zoomOf(c),
         yAxis: yFmt(),
         series: (c.series || []).map(function(s, i){
             return {name: s.name, type: 'bar', stack: 'total', data: s.data,
@@ -348,8 +766,8 @@ function stackOption(c){
 }
 
 function boxOption(c){
-    return {tooltip: {trigger: 'item'}, grid: baseGrid(),
-        xAxis: {type: 'category', data: c.xAxis || []},
+    return {tooltip: {trigger: 'item'}, grid: gridOf(c), xAxis: catAxisOf(c),
+        dataZoom: zoomOf(c),
         yAxis: yFmt(),
         series: (c.series || []).map(function(s){
             return {name: s.name || '总分分布', type: 'boxplot', data: s.data || [],
@@ -358,13 +776,16 @@ function boxOption(c){
 }
 
 function lineOption(c){
-    var sel = c.selected || {};
+    // selected 是后端可选的「默认勾选哪几条系列」映射（如年级多科折线只默认显示总分+主科）。
+    // 未提供该字段时，所有系列必须默认全部显示——否则 !!undefined=false 会把折线全隐藏，
+    // 图例变灰、画布空白，需手动点图例才出图（班级走势/教师走势即属此列）。
+    var sel = c.selected;
+    var hasSel = !!(sel && Object.keys(sel).length);
     var selected = {};
-    (c.series || []).forEach(function(s){ selected[s.name] = !!sel[s.name]; });
+    (c.series || []).forEach(function(s){ selected[s.name] = hasSel ? !!sel[s.name] : true; });
     return {color: PALETTE, tooltip: {trigger: 'axis'},
         legend: {top: 0, type: 'scroll', selected: selected},
-        grid: baseGrid(),
-        xAxis: {type: 'category', data: c.xAxis || []},
+        grid: gridOf(c), xAxis: catAxisOf(c), dataZoom: zoomOf(c),
         yAxis: yFmt(),
         series: (c.series || []).map(function(s){
             return {name: s.name, type: 'line', data: s.data, connectNulls: false,
@@ -375,8 +796,7 @@ function lineOption(c){
 function dualOption(c){
     return {color: PALETTE, tooltip: {trigger: 'axis'},
         legend: {top: 0},
-        grid: baseGrid(),
-        xAxis: {type: 'category', data: c.xAxis || []},
+        grid: gridOf(c), xAxis: catAxisOf(c), dataZoom: zoomOf(c),
         yAxis: [{type: 'value', name: '均分'}, {type: 'value', name: '%', max: 100}],
         series: (c.series || []).map(function(s){
             return {name: s.name, type: 'line', data: s.data, yAxisIndex: s.yAxis || 0,
@@ -405,12 +825,18 @@ function heatOption(c){
         });
     });
     if (min === max){ max = min + 1; }
+    // 热力图底部被 visualMap 占用，故只开滚轮/拖拽缩放，不加滑块；标签按列数倾斜
+    var rot = xs.length > 20 ? 45 : (xs.length > 8 ? 30 : 0);
+    var hz = xs.length > 8 ? [{type: 'inside', xAxisIndex: 0, zoomOnMouseWheel: true,
+                               moveOnMouseMove: true}] : [];
     return {tooltip: {position: 'top',
                 formatter: function(p){ return xs[p.value[0]] + ' · ' + ys[p.value[1]]
                     + '<br/>平均分：' + p.value[2]; }},
-        grid: {left: 60, right: 40, top: 40, bottom: 80},
-        xAxis: {type: 'category', data: xs, axisLabel: {interval: 0, rotate: 30}},
+        grid: {left: 60, right: 40, top: 40, bottom: rot >= 45 ? 110 : 88},
+        xAxis: {type: 'category', data: xs,
+                axisLabel: {interval: 0, rotate: rot, fontSize: 10, hideOverlap: true}},
         yAxis: {type: 'category', data: ys},
+        dataZoom: hz,
         visualMap: {min: Math.floor(min), max: Math.ceil(max), calculable: true,
             orient: 'horizontal', left: 'center', bottom: 0,
             inRange: {color: ['#eff6ff', '#93c5fd', '#3b82f6', '#1d4ed8']}},
@@ -421,6 +847,8 @@ function buildQuery(){
     var qs = [];
     if (state.examId) qs.push('exam_id=' + state.examId);
     if (state.tab === 'class' && state.class_name) qs.push('class_name=' + encodeURIComponent(state.class_name));
+    if (state.tab === 'compare' && state.classes.length)
+        qs.push('classes=' + encodeURIComponent(state.classes.join(',')));
     if ((state.tab === 'subject' || state.tab === 'teacher') && state.subject)
         qs.push('subject=' + encodeURIComponent(state.subject));
     if ((state.tab === 'grade' || state.tab === 'subject') && state.direction)

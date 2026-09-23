@@ -11,14 +11,15 @@ from flask_login import login_required, current_user
 from app.models.grades import Exam
 from app.modules.grades import bp
 from app.modules.grades.services import tab_service, scope as scope_service
+from app.modules.grades.services import compare_service
 from app.utils.decorators import perm_required
 from app.utils.helpers import log_operation
 
 _TAB_LABEL = {'grade': '年级分析', 'class': '班级分析', 'subject': '学科分析',
-              'teacher': '任课教师分析'}
+              'teacher': '任课教师分析', 'compare': '班级对比分析'}
 _TAB_BY_ROLE = {
-    'admin': {'grade', 'class', 'subject', 'teacher'},
-    'grade_leader': {'grade', 'class', 'subject', 'teacher'},
+    'admin': {'grade', 'class', 'subject', 'teacher', 'compare'},
+    'grade_leader': {'grade', 'class', 'subject', 'teacher', 'compare'},
     'homeroom_teacher': {'class'},
     'teacher': {'teacher'},
 }
@@ -84,6 +85,9 @@ def export_tab(tab):
     class_name = request.args.get('class_name', '').strip()
     subject = request.args.get('subject', '').strip()
     direction = (request.args.get('direction') or '').strip()
+    # 班级对比：classes=01班,02班…（顺序=对比展示顺序）
+    raw_classes = (request.args.get('classes') or '').strip()
+    compare_classes = [c.strip() for c in raw_classes.split(',') if c.strip()]
     if current_user.has_role('homeroom_teacher'):
         allowed = {(g, c) for g, c in (scope_service.visible_classes(current_user) or [])}
         if tab != 'class' or (exam.grade, class_name) not in allowed:
@@ -95,6 +99,15 @@ def export_tab(tab):
             payload = tab_service.class_tab(exam_id, class_name)
         elif tab == 'subject':
             payload = tab_service.subject_tab(exam_id, subject, direction)
+        elif tab == 'compare':
+            # 多班对比：班级可见性过滤与 API 端点同口径
+            limited = scope_service.visible_classes(current_user)
+            if limited:
+                allowed = {c for g, c in limited if g == exam.grade}
+                compare_classes = [c for c in compare_classes if c in allowed]
+            if len(compare_classes) < 2:
+                abort(400, description='请至少选择 2 个班级进行对比')
+            payload = compare_service.compare_tab(exam_id, compare_classes[:20], direction)
         else:
             # 教师分析：与 analysis API 同权限
             scope_type, _ = scope_service.get_scope(current_user)
