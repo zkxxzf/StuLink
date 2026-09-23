@@ -18,7 +18,7 @@ def _get_secret_key():
                 return f.read().strip()
     except Exception:
         pass
-    # 自动生成并持久 化
+    # 自动生成加上持久化
     new_key = secrets.token_hex(32)
     os.makedirs(os.path.dirname(key_file), exist_ok=True)
     try:
