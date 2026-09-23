@@ -45,7 +45,13 @@
     {% endif %}
 </form>
 <script>
-document.getElementById('selGrade').addEventListener('change', function(){ document.getElementById('stuFilter').submit(); });
+// 年级切换时：禁用班级下拉，不携带旧年级的 class_name（避免与新一级不匹配触发 403）
+// 服务端 overview.students_page 在 class_name 为空时会自动选新一级首个班
+document.getElementById('selGrade').addEventListener('change', function(){
+    var cls = document.getElementById('selClass');
+    if (cls) cls.disabled = true;
+    document.getElementById('stuFilter').submit();
+});
 document.getElementById('selClass').addEventListener('change', function(){ document.getElementById('stuFilter').submit(); });
 </script>
 
