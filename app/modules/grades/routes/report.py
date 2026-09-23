@@ -1,4 +1,4 @@
-# StuLink v1.18.1.0 2026-09-23
+# StuLink v1.18.1.0 2026-09-24
 # 成绩汇报区：对标年级汇报 PPT 的网页表格（可框选复制粘贴进 PPT）
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 from flask import render_template, request, jsonify, abort

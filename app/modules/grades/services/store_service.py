@@ -1,4 +1,4 @@
-# StuLink v1.18.1.0 2026-09-23
+# StuLink v1.18.1.0 2026-09-24
 # 成绩落库服务：解析结果按 模式A(增量覆盖)/模式B(整场重置) 合并写入 exam_scores
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 from app.extensions import db

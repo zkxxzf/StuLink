@@ -1,6 +1,6 @@
 """线程安全的内存缓存工具（TTL + LRU 容量上限）
 
-# StuLink v1.18.1.0 2026-09-23
+# StuLink v1.18.1.0 2026-09-24
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 
 设计参照 app/modules/grades/services/stats_service.py 的 ExamData 缓存范式：
