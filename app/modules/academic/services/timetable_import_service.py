@@ -1,4 +1,4 @@
-# StuLink v1.17.0 2026-09-21
+# StuLink v1.18.0 2026-09-23
 # 课表 Excel 导入：模板生成 / 解析校验 / 冲突检测 / 确认写入
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 import io

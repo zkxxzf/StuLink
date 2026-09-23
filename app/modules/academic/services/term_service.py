@@ -1,4 +1,4 @@
-# StuLink v1.17.0 2026-09-21
+# StuLink v1.18.0 2026-09-23
 # 学期周期服务（Task#27）：日期→学期/教学周定位、校历、学期交接、归档、跨学期对比、使用报告
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 """学期周期维度服务层（独立库 timetable.db）。
