@@ -67,7 +67,7 @@ MODULES = [
     },
     {
         'key': 'points',
-        'name': '积分管理',
+        'name': '德育管理',
         'icon': 'bi-star',
         'items': [
             {'key': 'view', 'name': '查看', 'read': ['points.view'], 'write': []},
