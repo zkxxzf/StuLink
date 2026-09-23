@@ -234,20 +234,30 @@ function renderTables(area, tables){
     Object.keys(tables).forEach(function(key){
         var t = tables[key];
         var card = $('<div class="card tbl-card mb-3">');
+        var titleHtml = '<h6 class="mb-0"><i class="bi bi-table me-1"></i>' + escHtml(t.title || key);
+        // 带 link 的表（如学生明细表）：整行可点击跳转个人成绩查询
+        if (t.link){
+            titleHtml += ' <span class="text-muted small fw-normal ms-2">'
+                + '<i class="bi bi-box-arrow-up-right"></i> 点击行查看学生个人成绩</span>';
+        }
+        titleHtml += '</h6>';
         var head = $('<div class="card-header d-flex justify-content-between align-items-center">')
-            .append('<h6 class="mb-0"><i class="bi bi-table me-1"></i>' + escHtml(t.title || key) + '</h6>')
+            .append(titleHtml)
             .append('<button class="btn btn-sm btn-outline-secondary tbl-fold">折叠</button>');
         card.append(head);
         var body = $('<div class="card-body p-0 tbl-wrap">');
         var table = $('<table class="table table-hover g-table mb-0">');
         var thead = $('<thead><tr></tr></thead>');
         (t.columns || []).forEach(function(c){
-            thead.find('tr').append('<th' + (c.type !== 'text' ? ' class="num"' : '') + '>' + c.label + '</th>');
+            thead.find('tr').append('<th' + (c.type !== 'text' ? ' class="num"' : '') + '>' + escHtml(c.label) + '</th>');
         });
         table.append(thead);
         var tbody = $('<tbody>');
         (t.rows || []).forEach(function(r){
             var tr = $('<tr>');
+            if (t.link && r.no !== null && r.no !== undefined){
+                tr.addClass('stu-link').attr('data-no', r.no);
+            }
             (t.columns || []).forEach(function(c){
                 var val = r[c.key];
                 var td = $('<td' + (c.type !== 'text' ? ' class="num"' : '') + '>').text(fmt(val));
@@ -262,6 +272,14 @@ function renderTables(area, tables){
             });
             tbody.append(tr);
         });
+        if (t.link){
+            tbody.on('click', 'tr.stu-link', function(){
+                var no = $(this).data('no');
+                if (no !== null && no !== undefined){
+                    window.open('/grades/' + t.link + '?student_no=' + encodeURIComponent(no), '_blank');
+                }
+            });
+        }
         table.append(tbody);
         body.append(table);
         card.append(body);

@@ -346,29 +346,34 @@ def class_tab(exam_id, class_name):
                     {'key': 'grd_pass', 'label': '年级及格率%', 'type': 'num'}],
         'rows': t2,
     }
-    # A2-T3 学生明细（本次/上次）
+    # A2-T3 学生明细（每生 × 应考科目分数 + 本次/上次总分排名；前端点行跳个人成绩查询）
     t3 = []
     for t in sorted(totals, key=lambda x: x['rank_dir'] or 99999):
         prev = data.prev_totals.get(t['no'])
         cur_score = t['score']
         prev_score = prev[0] if prev else None
         prev_rank = prev[1] if prev else None
-        t3.append({'no': t['no'], 'name': t['name'], 'class_name': t['class_name'],
-                   'total': cur_score, 'rank': t['rank_dir'],
-                   'prev_total': prev_score, 'prev_rank': prev_rank,
-                   'score_move': round(cur_score - prev_score, 1) if prev_score is not None else None,
-                   'rank_move': (t['rank_dir'] - prev_rank) if prev_rank else None})
+        row = {'no': t['no'], 'name': t['name'], 'class_name': t['class_name']}
+        for sub in subs:
+            row[sub] = data.subj.get((t['no'], sub))
+        row.update({'total': cur_score, 'rank': t['rank_dir'],
+                    'prev_total': prev_score, 'prev_rank': prev_rank,
+                    'score_move': round(cur_score - prev_score, 1) if prev_score is not None else None,
+                    'rank_move': (t['rank_dir'] - prev_rank) if prev_rank else None})
+        t3.append(row)
     tables['student_detail'] = {
         'title': '班级学生历次成绩明细表',
         'columns': [{'key': 'no', 'label': '学号', 'type': 'text'},
-                    {'key': 'name', 'label': '姓名', 'type': 'text'},
-                    {'key': 'total', 'label': '本次总分', 'type': 'num'},
-                    {'key': 'rank', 'label': '本次排名', 'type': 'int'},
-                    {'key': 'prev_total', 'label': '上次总分', 'type': 'num'},
-                    {'key': 'prev_rank', 'label': '上次排名', 'type': 'int'},
-                    {'key': 'score_move', 'label': '分数变动', 'type': 'num'},
-                    {'key': 'rank_move', 'label': '排名变动', 'type': 'int'}],
+                    {'key': 'name', 'label': '姓名', 'type': 'text'}]
+                   + [{'key': s, 'label': s, 'type': 'num'} for s in subs]
+                   + [{'key': 'total', 'label': '本次总分', 'type': 'num'},
+                      {'key': 'rank', 'label': '本次排名', 'type': 'int'},
+                      {'key': 'prev_total', 'label': '上次总分', 'type': 'num'},
+                      {'key': 'prev_rank', 'label': '上次排名', 'type': 'int'},
+                      {'key': 'score_move', 'label': '分数变动', 'type': 'num'},
+                      {'key': 'rank_move', 'label': '排名变动', 'type': 'int'}],
         'rows': t3,
+        'link': 'student-query',
     }
     # A2-T4 分层统计（按本班学生自身方向判定）
     t4 = []
