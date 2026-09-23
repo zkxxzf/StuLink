@@ -99,42 +99,70 @@ def exam_new():
 
 # ==================== 考试详情 / 成绩浏览 / 修正 / 重算 / 删除 ====================
 
-@bp.route('/exams/<int:exam_id>')
-@login_required
-@perm_required('grades.edit')
-def exam_detail(exam_id):
-    exam = Exam.query.get_or_404(exam_id)
+def _exam_page_rows(exam_id, page, size):
+    """服务端分页：仅查询当前页的学生成绩，避免整场 8000 人一次性载入。
+
+    返回 (students, page, total_pages, total)：
+      - 先用「总分行」做分页元数据（每生 1 行，远小于全部科目行），
+        按 (班级, 方向排名) 排序并 LIMIT/OFFSET 取出本页学号；
+      - 再仅查本页学号的全部科目成绩行（约 50×7=350 行）；
+      - 学籍状态一次性 IN 查询（1 次，而非逐批 10 次）。
+    """
+    total = ExamScore.query.filter_by(exam_id=exam_id, subject=TOTAL_SUBJECT).count()
+    if total == 0:
+        return [], 1, 0, 0
+    size = max(1, min(int(size or 50), 500))   # 单页上限 500，避免「全部」拖垮
+    page = max(1, int(page or 1))
+    total_pages = (total + size - 1) // size
+    if page > total_pages:
+        page = total_pages
+    meta = (ExamScore.query.filter_by(exam_id=exam_id, subject=TOTAL_SUBJECT)
+            .order_by(ExamScore.class_name,
+                      db.func.coalesce(ExamScore.rank_dir, 99999))
+            .limit(size).offset((page - 1) * size).all())
+    nos = [r.student_no for r in meta]
+    if not nos:
+        return [], page, total_pages, total
     rows = (ExamScore.query.filter_by(exam_id=exam_id)
+            .filter(ExamScore.student_no.in_(nos))
             .order_by(ExamScore.subject == TOTAL_SUBJECT, ExamScore.subject,
                       ExamScore.rank_dir).all())
-    # 学籍状态（徽标用，运行时以主库为准）
+    # 学籍状态：一次 IN 查询取回本页学生（性能关键，原实现按 800 人分批 10 次）
     st_map = {}
-    nos = {r.student_no for r in rows}
-    for i in range(0, len(nos), 800):
-        chunk = list(nos)[i:i + 800]
-        for s in Student.query.filter(Student.student_number.in_(chunk)).all():
-            st_map[str(s.student_number)] = s.enrollment_status or ''
+    for s in Student.query.filter(Student.student_number.in_(nos)).all():
+        st_map[str(s.student_number)] = s.enrollment_status or ''
     data = {}
     for r in rows:
-        data.setdefault(r.student_no, {
+        d = data.setdefault(r.student_no, {
             'no': r.student_no, 'name': r.student_name, 'class_name': r.class_name,
             'direction': r.direction, 'selection': r.subject_selection,
             'status': st_map.get(r.student_no, ''),
             'total': None, 'total_sid': None, 'rank': None, 'move': None, 'subjects': {},
         })
-        item = data[r.student_no]
         if r.subject == TOTAL_SUBJECT:
-            item['total'] = r.score
-            item['total_sid'] = r.id
-            item['rank'] = r.rank_dir
-            item['rank_class'] = r.rank_class
-            item['move'] = r.move_rank
+            d['total'] = r.score
+            d['total_sid'] = r.id
+            d['rank'] = r.rank_dir
+            d['rank_class'] = r.rank_class
+            d['move'] = r.move_rank
         else:
-            item['subjects'][r.subject] = {
+            d['subjects'][r.subject] = {
                 'id': r.id, 'score': r.score, 'rank': r.rank_dir,
                 'rank_class': r.rank_class,
             }
-    students = sorted(data.values(), key=lambda x: (x['class_name'], x['rank'] or 99999))
+    # 严格按分页顺序（nos）输出，保证翻页稳定
+    students = [data[n] for n in nos if n in data]
+    return students, page, total_pages, total
+
+
+@bp.route('/exams/<int:exam_id>')
+@login_required
+@perm_required('grades.edit')
+def exam_detail(exam_id):
+    exam = Exam.query.get_or_404(exam_id)
+    page = _safe_int(request.args.get('page'), 1)
+    size = _safe_int(request.args.get('size'), 50)
+    students, page, total_pages, total = _exam_page_rows(exam_id, page, size)
     info = None
     if exam.import_info:
         try:
@@ -143,7 +171,28 @@ def exam_detail(exam_id):
             info = None
     return render_template('grades/exam_detail.html', exam=exam, students=students,
                            subjects=SUBJECTS, status_label=EXAM_STATUS_LABEL,
-                           import_info=info)
+                           import_info=info,
+                           page=page, total_pages=total_pages, total=total, size=size)
+
+
+@bp.route('/exams/<int:exam_id>/scores')
+@login_required
+@perm_required('grades.edit')
+def exam_scores_page(exam_id):
+    """成绩单分页片段：仅返回 <tr> 行，供前端 AJAX 翻页时局部替换 tbody。"""
+    exam = Exam.query.get_or_404(exam_id)
+    page = _safe_int(request.args.get('page'), 1)
+    size = _safe_int(request.args.get('size'), 50)
+    students, _page, _total_pages, _total = _exam_page_rows(exam_id, page, size)
+    return render_template('grades/exam_detail_rows.html',
+                           students=students, subjects=SUBJECTS)
+
+
+def _safe_int(val, default):
+    try:
+        return int(val)
+    except (TypeError, ValueError):
+        return default
 
 
 @bp.route('/exams/<int:exam_id>/rename', methods=['POST'])

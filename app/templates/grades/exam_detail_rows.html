@@ -1,0 +1,34 @@
+{# 考试详情「成绩单」分页片段：仅渲染 <tr> 行，供 AJAX 翻页局部替换 tbody #}
+{% for stu in students %}
+<tr data-no="{{ stu.no }}">
+    <td class="small">{{ stu.no }}</td>
+    <td>{{ stu.name }}
+        {% if stu.status %}
+        <span class="badge bg-secondary-subtle text-secondary small" title="学籍状态">籍</span>
+        {% endif %}
+    </td>
+    <td>{{ stu.class_name }}</td>
+    <td>{{ stu.direction }}</td>
+    <td class="small text-muted">{{ stu.selection }}</td>
+    <td class="text-end fw-bold score-cell" data-sid="{{ stu.total_sid or '' }}" title="点击修改">
+        {{ stu.total if stu.total is not none else '—' }}
+    </td>
+    <td class="text-end">{{ stu.rank if stu.rank else '—' }}</td>
+    <td class="text-end">{{ stu.rank_class if stu.rank_class else '—' }}</td>
+    <td class="text-end {{ 'text-success' if stu.move is not none and stu.move < 0 else 'text-danger' if stu.move is not none and stu.move > 0 }}">
+        {{ ('%+d' % stu.move) if stu.move is not none else '—' }}
+    </td>
+    {% for s in subjects %}
+    {% set cell = stu.subjects.get(s) %}
+    <td class="text-end score-cell small {{ 'table-warning' if cell is none else '' }}"
+        data-sid="{{ cell.id if cell else '' }}"
+        title="{{ '缺考' if cell is none else '点击修改' }}">
+        {{ cell.score if cell else '缺' }}
+    </td>
+    {% endfor %}
+</tr>
+{% else %}
+<tr><td colspan="{{ 9 + subjects|length }}" class="text-center text-muted py-5">
+    暂无成绩。点击右上角「导入成绩」，从 Excel 模板导入本场考试成绩。
+</td></tr>
+{% endfor %}
