@@ -52,9 +52,13 @@ def students_page():
                                classes_info=[], selected_grade='', selected_class='',
                                result=None, search='', teacher=teacher)
 
-    # 默认选中第一个班级
+    # 默认选中第一个班级（或所选年级的第一个班）
     grade = request.args.get('grade') or classes_info[0][0]
-    class_name = request.args.get('class_name') or classes_info[0][1]
+    class_name = request.args.get('class_name')
+    if not class_name:
+        class_name = next((c for g, c in classes_info if g == grade), classes_info[0][1])
+    # 年级列表（去重排序，供模板渲染年级按钮行）
+    grades = sorted(set(g for g, _ in classes_info))
     # 越权防护：URL 参数指向非管辖班级时拒绝（原先可拉任意班名单）
     if not wb_scope.class_allowed(current_user, grade, class_name):
         abort(403)
@@ -63,7 +67,7 @@ def students_page():
 
     result = svc.get_students_by_class(grade, class_name, search=search or None, page=page)
     return render_template('workbench/students.html',
-                           classes_info=classes_info,
+                           classes_info=classes_info, grades=grades,
                            selected_grade=grade, selected_class=class_name,
                            result=result, search=search, teacher=teacher)
 

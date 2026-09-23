@@ -67,10 +67,13 @@ def api_report_subject_layer():
     direction = (request.args.get('direction') or '').strip()
     layer = (request.args.get('layer') or '').strip()
     compare_exam_id = request.args.get('compare_exam_id', type=int)
+    # compare=none 为显式「不对比」哨兵（compare_exam_id 是 int 不能承载非数字值）
+    no_compare = (request.args.get('compare') or '').strip() == 'none'
     _visible_exam(exam_id)
-    key = f'grades_report_sl_{exam_id}_{direction}_{layer}_{compare_exam_id or ""}'
+    key = (f'grades_report_sl_{exam_id}_{direction}_{layer}'
+           f'_{compare_exam_id or ""}_{"nc" if no_compare else "c"}')
     data = _cached(key, lambda: report_service.subject_layer_report(
-        exam_id, direction, layer, compare_exam_id))
+        exam_id, direction, layer, compare_exam_id, no_compare))
     return jsonify(success='error' not in data, data=data,
                    message=data.get('error') if 'error' in data else '')
 

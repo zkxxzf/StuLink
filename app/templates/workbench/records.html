@@ -32,18 +32,23 @@
     {% endfor %}
 </ul>
 
-{# ── 班级筛选下拉（可选） ─────────────────────────────────────────── #}
+{# ── 年级 + 班级筛选（紧凑下拉风格） ───────────────────────────────── #}
 {% if classes %}
-<div class="mb-3 d-flex flex-wrap align-items-center gap-2">
-    <span class="text-muted small">班级：</span>
-    <a href="{{ url_for('records.records_page', type=current_type) }}"
-       class="btn btn-outline-secondary btn-sm {% if not current_class %}active{% endif %}">全部</a>
-    {% for cls in classes %}
-    <a href="{{ url_for('records.records_page', type=current_type, class=cls.class_name) }}"
-       class="btn btn-outline-secondary btn-sm {% if current_class == cls.class_name %}active{% endif %}">
-        {{ cls.label }}
-    </a>
-    {% endfor %}
+{% set grade_list = classes | map(attribute='grade') | unique | sort | list %}
+<div class="d-flex flex-wrap gap-2 align-items-center mb-3">
+    <select id="rbGradeSel" class="form-select form-select-sm w-auto" title="年级">
+        <option value="">全部年级</option>
+        {% for g in grade_list %}
+        <option value="{{ g }}">{{ g }}</option>
+        {% endfor %}
+    </select>
+    <select id="rbClassSel" class="form-select form-select-sm w-auto" title="班级" style="min-width:120px;">
+        <option value="">全部班级</option>
+        {% for cls in classes %}
+        <option value="{{ cls.class_name }}" data-grade="{{ cls.grade }}"
+                {% if current_class == cls.class_name %}selected{% endif %}>{{ cls.label }}</option>
+        {% endfor %}
+    </select>
 </div>
 {% endif %}
 
@@ -240,6 +245,31 @@
 </div>
 
 {# ── 脚本 ──────────────────────────────────────────────────────────── #}
+<script>
+// 年级/班级下拉筛选
+(function () {
+    var gradeSel = document.getElementById('rbGradeSel');
+    var classSel = document.getElementById('rbClassSel');
+    if (!gradeSel || !classSel) return;
+    var base = "{{ url_for('records.records_page', type=current_type) }}";
+    function filterByGrade() {
+        var g = gradeSel.value;
+        Array.from(classSel.options).forEach(function (opt) {
+            if (!opt.value) return;
+            opt.hidden = g && opt.dataset.grade !== g;
+        });
+    }
+    gradeSel.addEventListener('change', filterByGrade);
+    classSel.addEventListener('change', function () {
+        var v = this.value;
+        location.href = v ? base + '&class=' + encodeURIComponent(v) : base;
+    });
+    // 初始：如果已选班级，自动定位年级
+    var sel = classSel.options[classSel.selectedIndex];
+    if (sel && sel.dataset.grade) gradeSel.value = sel.dataset.grade;
+    filterByGrade();
+})();
+</script>
 <script>
 (function () {
     const typeSelect = document.getElementById('recordType');
