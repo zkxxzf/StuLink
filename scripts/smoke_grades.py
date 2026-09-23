@@ -82,7 +82,7 @@ with app.test_client() as c:
         'csrf_token': csrf, 'grade': '2025级', 'exam_date': '2026-01-15',
         'name': '2025级2026-01-15', 'exam_type': '期末'}, follow_redirects=True)
     _ce = r.get_data(as_text=True)
-    check('新建考试', r.status_code == 200 and '导入成绩' in _ce,
+    check('新建考试', r.status_code == 200 and '考试已创建' in _ce,
           f'status={r.status_code} html={_ce[:200]!r}')
 
     with app.app_context():
