@@ -51,7 +51,7 @@
 
 - **后端**: Python 3.11+ / Flask 3.x / Flask-Login / SQLAlchemy / Waitress
 - **前端**: Bootstrap 5 / jQuery / Jinja2 / ECharts（成绩可视化）
-- **安全**: AES-256 身份证与 AI Key 加密 / CSRF 防护 / 登录频率限制 / 审计日志
+- **安全**: AES-256 身份证与 AI Key 加密 / CSRF 防护 / 登录限流（IP + 账号锁定）/ 审计日志 / 强制首登改密 / CSP / 统一数据范围校验
 - **部署**: 支持 Docker Compose（独立容器）/ 阿里云 ECS / 绿联 NAS / Windows 本地
 
 ## 快速开始
@@ -70,7 +70,21 @@ docker build -t stulink-alumni:v1.0.0 ./alumni_app
 docker-compose up -d
 ```
 
-默认管理员：`admin` / `admin123`（首次登录请立即修改）
+### 首次启动与安全基线（H-1 / R-7，必读）
+
+- **默认管理员口令已不再是 `admin/admin123`**：首次启动在系统库里创建 `admin` 时，
+  会生成**随机初始口令**并只在控制台打印一次，且该账号 `must_change_pwd=True`，
+  登录后会被强制跳转到改密页，未改密前无法访问任何功能页。
+  若控制台输出已滚动过去，请删除 `data/system.db` 中的 admin 记录后重启，
+  或由其他管理员在「用户管理」里为其重置口令。
+- **存量部署**：若 `admin` 仍是历史默认口令，启动时会打印显著告警，请立即修改。
+- 批量导入的教师账号不再使用「手机号即密码」，改为一次性随机口令（页面一次性展示）。
+- 生产启用 HTTPS 后，建议设置环境变量：
+  - `STULINK_SESSION_COOKIE_SECURE=1`（会话 cookie 加 `Secure`）
+  - `STULINK_CSP_MODE=enforce`（CSP 由只上报切换为强制拦截，需先确认无违规）
+  - `STULINK_SESSION_LIFETIME=28800`、`STULINK_CSRF_TIME_LIMIT=28800`（8 小时）
+- 提交前自检：`python tests/sec_regression.py`（安全回归）与
+  `python scripts/scan_security_patterns.py`（禁用模式扫描）。
 
 > 💡 生产部署推荐直接使用发布包：镜像托管于 [GitHub Releases](https://github.com/zkxxzf/StuLink/releases) 附件（详见 [部署文档](docs/部署文档.md)）
 

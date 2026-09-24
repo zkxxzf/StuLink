@@ -52,5 +52,8 @@ class Config:
     SYSTEM_DB = get_data_path('system.db')
     SESSION_COOKIE_NAME = 'alumni_session'
     SESSION_COOKIE_HTTPONLY = True
+    # M-7：CSRF token 有效期（与主应用一致，8 小时；None=永不过期）
+    WTF_CSRF_ENABLED = True
+    WTF_CSRF_TIME_LIMIT = int(os.environ.get('ALUMNI_CSRF_TIME_LIMIT', '28800'))
     
     print(f'[ALUMNI] Config.SECRET_KEY set (len={len(SECRET_KEY)})')

@@ -16,6 +16,7 @@ from app.models.grades import Exam, ExamScore, SUBJECTS, TOTAL_SUBJECT
 from app.models import Student
 from app.modules.grades import bp
 from app.modules.grades.services import import_service, store_service, ranking, tab_service
+from app.modules.grades.services.exam_guard import assert_exam_visible
 from app.modules.grades.services.import_service import ParseError
 from app.modules.grades.utils import term_of_date, invalidate_exam_cache
 from app.utils.decorators import perm_required
@@ -159,7 +160,7 @@ def _exam_page_rows(exam_id, page, size):
 @login_required
 @perm_required('grades.edit')
 def exam_detail(exam_id):
-    exam = Exam.query.get_or_404(exam_id)
+    exam = assert_exam_visible(exam_id)   # H-4：校验考试所属年级范围
     page = _safe_int(request.args.get('page'), 1)
     size = _safe_int(request.args.get('size'), 50)
     students, page, total_pages, total = _exam_page_rows(exam_id, page, size)
@@ -180,7 +181,7 @@ def exam_detail(exam_id):
 @perm_required('grades.edit')
 def exam_scores_page(exam_id):
     """成绩单分页片段：仅返回 <tr> 行，供前端 AJAX 翻页时局部替换 tbody。"""
-    exam = Exam.query.get_or_404(exam_id)
+    exam = assert_exam_visible(exam_id)   # H-4：校验考试所属年级范围
     page = _safe_int(request.args.get('page'), 1)
     size = _safe_int(request.args.get('size'), 50)
     students, _page, _total_pages, _total = _exam_page_rows(exam_id, page, size)
@@ -200,7 +201,7 @@ def _safe_int(val, default):
 @perm_required('grades.edit')
 def exam_rename(exam_id):
     """考试名称就地改名：同年级内唯一（与新建考试的重名规则一致）"""
-    exam = Exam.query.get_or_404(exam_id)
+    exam = assert_exam_visible(exam_id)   # H-4：校验考试所属年级范围
     name = (request.form.get('name') or '').strip()
     if not name:
         return jsonify(success=False, message='考试名称不能为空'), 400
@@ -224,6 +225,7 @@ def exam_rename(exam_id):
 @login_required
 @perm_required('grades.edit')
 def score_update(exam_id, score_id):
+    assert_exam_visible(exam_id)          # H-4
     row = ExamScore.query.filter_by(id=score_id, exam_id=exam_id).first_or_404()
     try:
         val = (request.form.get('score') or '').strip()
@@ -263,6 +265,7 @@ def score_update(exam_id, score_id):
 @login_required
 @perm_required('grades.edit')
 def score_delete(exam_id, score_id):
+    assert_exam_visible(exam_id)          # H-4
     row = ExamScore.query.filter_by(id=score_id, exam_id=exam_id).first_or_404()
     no = row.student_no
     is_total = row.subject == TOTAL_SUBJECT
@@ -281,7 +284,7 @@ def score_delete(exam_id, score_id):
 @login_required
 @perm_required('grades.edit')
 def exam_recalc(exam_id):
-    exam = Exam.query.get_or_404(exam_id)
+    exam = assert_exam_visible(exam_id)   # H-4：校验考试所属年级范围
     n = ranking.recalc_exam(exam_id)
     exam.status = 'imported'
     db.session.commit()
@@ -298,7 +301,7 @@ def exam_recalc(exam_id):
 def exam_delete(exam_id):
     """删除考试：需当前账号+密码二次确认；级联清理成绩/分层/AI报告/缓存"""
     from app.models.grades import ExamBand, AiReport
-    exam = Exam.query.get_or_404(exam_id)
+    exam = assert_exam_visible(exam_id)   # H-4：校验考试所属年级范围
     is_json = request.is_json
     if is_json:
         data = request.get_json(silent=True) or {}
@@ -348,7 +351,7 @@ def _mark_dirty(exam_id):
 @login_required
 @perm_required('grades.import')
 def exam_import(exam_id):
-    exam = Exam.query.get_or_404(exam_id)
+    exam = assert_exam_visible(exam_id)   # H-4：校验考试所属年级范围
     return render_template('grades/import_wizard.html', exam=exam,
                            step='upload', mode='A', status_label=EXAM_STATUS_LABEL)
 
@@ -357,7 +360,7 @@ def exam_import(exam_id):
 @login_required
 @perm_required('grades.import')
 def exam_import_upload(exam_id):
-    exam = Exam.query.get_or_404(exam_id)
+    exam = assert_exam_visible(exam_id)   # H-4：校验考试所属年级范围
     mode = request.form.get('mode', 'A')
     remove_missing = request.form.get('remove_missing') == '1'
     file = request.files.get('file')
@@ -429,7 +432,7 @@ def _preview_diff(exam, parsed, mode):
 @login_required
 @perm_required('grades.import')
 def exam_import_confirm(exam_id):
-    exam = Exam.query.get_or_404(exam_id)
+    exam = assert_exam_visible(exam_id)   # H-4：校验考试所属年级范围
     token = request.form.get('token', '')
     if not exam.import_draft or not exam.import_token or exam.import_token != token:
         flash('导入批次已失效，请重新上传', 'danger')
@@ -474,7 +477,7 @@ def exam_import_confirm(exam_id):
 @perm_required('grades.import')
 def exam_import_errors(exam_id):
     """导出最近一次预检的错误明细 xlsx"""
-    exam = Exam.query.get_or_404(exam_id)
+    exam = assert_exam_visible(exam_id)   # H-4：校验考试所属年级范围
     if not exam.import_draft:
         abort(404)
     try:

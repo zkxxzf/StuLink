@@ -4,12 +4,13 @@ from flask import Blueprint, render_template, request
 from flask_login import login_required, current_user
 from app.models import OperationLog, User
 from app.extensions import db
+from app.utils.decorators import perm_required
 
 bp = Blueprint('operation_logs', __name__, url_prefix='/operation-logs')
 
 
 @bp.route('/')
-@login_required
+@perm_required('system.users')   # M-1：审计日志不再对全体登录用户开放
 def list_logs():
     page = request.args.get('page', 1, type=int)
     per_page = 20

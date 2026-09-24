@@ -16,7 +16,9 @@ from app.modules.academic import bp
 from app.modules.academic.services import form_summary_service as svc
 from app.utils.decorators import perm_required
 from app.utils.helpers import log_operation
+from app.utils.err_safe import safe_error   # M-12
 
+import logging
 import os
 
 _XLSX_MIME = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
@@ -111,11 +113,43 @@ def form_package_page(form_id):
                            tpl=tpl, questions=questions, scope_options=scope_options)
 
 
+def cleanup_stale_packages(max_age_hours=24):
+    """M-6：清扫残留的材料包临时目录。
+
+    原实现只在响应结束后 best-effort 删除，下载中断（关页面/断网）即残留，
+    stulink_pkg_* 目录会在系统临时目录里越堆越多。这里按进程启动时清扫一次 +
+    每次打包前顺带清扫，删除超过 max_age_hours 小时的残留。
+    """
+    import glob
+    import time
+    import tempfile
+    removed = 0
+    cutoff = time.time() - max_age_hours * 3600
+    pattern = os.path.join(tempfile.gettempdir(), 'stulink_pkg_*')
+    for d in glob.glob(pattern):
+        try:
+            if not os.path.isdir(d):
+                continue
+            if os.path.getmtime(d) > cutoff:
+                continue        # 可能是其它进程正在使用，跳过
+            for root, _dirs, files in os.walk(d, topdown=False):
+                for fn in files:
+                    os.remove(os.path.join(root, fn))
+                os.rmdir(root)
+            os.rmdir(d)
+            removed += 1
+        except Exception as _ce:  # noqa: BLE001
+            logging.getLogger('stulink.academic').warning(
+                '残留材料包清理失败：%s %s', d, _ce)
+    return removed
+
+
 @bp.route('/forms/<int:form_id>/package/download')
 @login_required
 @perm_required('academic.edit')
 def form_package_download(form_id):
     """执行打包并 send_file"""
+    cleanup_stale_packages()   # M-6：顺带清扫残留临时包
     tpl = _tpl_or_404(form_id)
     f = _filters()
     structure = (request.args.get('structure') or 'class_student').strip()
@@ -139,8 +173,10 @@ def form_package_download(form_id):
                         os.remove(buffer_or_path)
                     if os.path.isdir(d) and 'stulink_pkg_' in d:
                         os.rmdir(d)
-                except Exception:
-                    pass
+                except Exception as _ce:
+                    # L-5/M-6：临时包清理失败不再静默吞掉，记日志便于追踪残留
+                    logging.getLogger('stulink.academic').warning(
+                        '材料包临时文件清理失败：%s', _ce)
                 return resp
             return send_file(buffer_or_path, as_attachment=True,
                              download_name=dname, mimetype='application/zip')
@@ -150,7 +186,7 @@ def form_package_download(form_id):
         return _json(False, str(e)), 400
     except Exception as e:
         db.session.rollback()
-        return _json(False, f'打包失败：{e}'), 500
+        return _json(False, f'打包失败：{safe_error(e)}'), 500   # M-12
 
 
 @bp.route('/forms/<int:form_id>/export/summary')
@@ -246,7 +282,7 @@ def api_form_stats(form_id):
         stats['trend'] = svc.get_submission_trend(form_id)
         return _json(True, '', stats)
     except Exception as e:
-        return _json(False, str(e)), 500
+        return _json(False, safe_error(e)), 500   # M-12：内部异常不再原文回传
 
 
 @bp.route('/api/forms/<int:form_id>/class-breakdown')
@@ -259,7 +295,7 @@ def api_form_class_breakdown(form_id):
         totals = svc.class_breakdown_totals(rows)
         return _json(True, '', {'rows': rows, **totals})
     except Exception as e:
-        return _json(False, str(e)), 500
+        return _json(False, safe_error(e)), 500   # M-12：内部异常不再原文回传
 
 
 @bp.route('/api/forms/<int:form_id>/question-stats')
@@ -271,7 +307,7 @@ def api_form_question_stats(form_id):
         matrix = svc.build_summary_matrix(form_id, include_rejected=True)
         return _json(True, '', {'question_stats': matrix['question_stats']})
     except Exception as e:
-        return _json(False, str(e)), 500
+        return _json(False, safe_error(e)), 500   # M-12：内部异常不再原文回传
 
 
 @bp.route('/api/forms/<int:form_id>/table-data')
@@ -323,7 +359,7 @@ def api_form_missing_data(form_id):
         return _json(True, '', {'items': items, 'pagination': pagination,
                                 'groups': list(groups.values())})
     except Exception as e:
-        return _json(False, str(e)), 500
+        return _json(False, safe_error(e)), 500   # M-12：内部异常不再原文回传
 
 
 @bp.route('/api/forms/<int:form_id>/files-data')
@@ -347,7 +383,7 @@ def api_form_files_data(form_id):
                                 'total_size_text': inv['total_size_text'],
                                 'missing_count': inv['missing_count']})
     except Exception as e:
-        return _json(False, str(e)), 500
+        return _json(False, safe_error(e)), 500   # M-12：内部异常不再原文回传
 
 
 @bp.route('/api/forms/<int:form_id>/package-preview')
@@ -363,4 +399,4 @@ def api_form_package_preview(form_id):
                                           structure=structure, approved_only=f['approved_only'])
         return _json(True, '', preview)
     except Exception as e:
-        return _json(False, str(e)), 500
+        return _json(False, safe_error(e)), 500   # M-12：内部异常不再原文回传

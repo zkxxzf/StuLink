@@ -108,7 +108,8 @@
                     </a>
                     {% if ts.status != 'active' %}
                     <form method="POST" class="d-inline" action="{{ url_for('academic.schedule_activate', sid=ts.id) }}"
-                          onsubmit="return confirm('{{ '重新启用' if archived else '激活' }}「{{ ts.name }}」？当前启用中的学期将自动归档（含快照）。')">
+                          {# M-10：学期名可能含引号，confirm 文本整体走 |tojson #}
+                          onsubmit="return confirm({{ ('重新启用' if archived else '激活') ~ '「' ~ ts.name ~ '」？当前启用中的学期将自动归档（含快照）。' | tojson }})">
                         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                         <button class="btn btn-sm btn-success py-0"><i class="bi bi-broadcast"></i> {{ '重新启用' if archived else '激活' }}</button>
                     </form>

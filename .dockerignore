@@ -33,3 +33,7 @@ DEPLOY_NAS.md
 _tmp_*
 data
 logs
+# M-8：不要把用户上传的学生材料打进镜像（此前只排除了 data/logs，
+# `COPY app/ ./app/` 会把 app/static/uploads 一并打进镜像层 → 镜像分发即泄露）。
+app/static/uploads
+app/static/uploads/**

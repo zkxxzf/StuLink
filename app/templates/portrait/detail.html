@@ -186,7 +186,14 @@
                     </div>
                     {% if current_user.has_perm('portrait.edit') %}
                     <div>
-                        <button class="btn btn-sm btn-outline-secondary" onclick="editComment({{ c.id }}, `{{ c.content|e }}`, '{{ c.comment_type }}', '{{ c.term }}')">
+                        <!-- H-10：原先把用户可控内容直接拼进 onclick 的 JS 字符串上下文
+                             （`{{ c.content|e }}` 不转义反引号/${}，`'{{ c.comment_type }}'` 的
+                             &#39; 交 JS 引擎前会还原为单引号），改为 data-* + tojson + 事件委托 -->
+                        <button class="btn btn-sm btn-outline-secondary edit-comment-btn"
+                                data-id="{{ c.id }}"
+                                data-content="{{ c.content|tojson }}"
+                                data-type="{{ c.comment_type|tojson }}"
+                                data-term="{{ c.term|tojson }}">
                             <i class="bi bi-pencil"></i>
                         </button>
                         <button class="btn btn-sm btn-outline-danger" onclick="deleteComment({{ c.id }})">
@@ -468,6 +475,15 @@ function editComment(id, content, type, term) {
     document.getElementById('commentModalTitle').textContent = '编辑评语';
     new bootstrap.Modal(document.getElementById('commentModal')).show();
 }
+
+// H-10：事件委托 + JSON 解析取值，杜绝把用户数据拼进 JS 字符串上下文
+document.addEventListener('click', function (e) {
+    var btn = e.target.closest ? e.target.closest('.edit-comment-btn') : null;
+    if (!btn) return;
+    var d = btn.dataset;
+    function _j(v) { try { return JSON.parse(v || '""'); } catch (err) { return ''; } }
+    editComment(parseInt(d.id, 10), _j(d.content), _j(d.type), _j(d.term));
+});
 
 function saveComment() {
     const id = document.getElementById('commentId').value;

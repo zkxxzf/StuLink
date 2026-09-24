@@ -144,8 +144,13 @@ def process_db(dbfile, specs):
         bak = backup(path)
         print(f'  备份 -> {os.path.basename(bak) if bak else "(无)"}')
 
+    from _ddl_guard import assert_ident   # R-11：标识符白名单（DDL 无法绑定参数）
     for spec in pending:
         name, table, columns = spec['name'], spec['table'], spec['columns']
+        assert_ident(name, '索引名')
+        assert_ident(table, '表名')
+        for _c in columns:
+            assert_ident(_c, '列名')
         col_sql = ', '.join(f'"{c}"' for c in columns)
         conn.execute(f'CREATE INDEX IF NOT EXISTS "{name}" ON "{table}" ({col_sql})')
         created.append((name, f'{table}({", ".join(columns)})'))

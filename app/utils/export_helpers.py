@@ -5,6 +5,7 @@ from datetime import datetime
 from flask import send_file
 from app.models import Student, Room, BedAssignment, StudentAccommodation, OperationLog
 from app.utils.helpers import get_graduated_grades
+from app.utils.student_scope import apply_student_scope
 from app.extensions import db
 
 # ── Excel / WPS 公式注入防护 ─────────────────────────────────
@@ -14,6 +15,15 @@ from app.extensions import db
 _FORMULA_RISK_CHARS = ('=', '+', '-', '@', '\t', '\r', '\n')
 # 控制字符（Excel 会忽略 \x00-\x08 等，留着只会干扰排查）
 _CTRL_RE = re.compile(r'[\x00-\x08\x0b\x0c\x0e-\x1f]')
+
+
+def _client_ip():
+    """L-1：导出日志的来源 IP 统一取请求真实地址（此前可由调用方参数伪造）"""
+    try:
+        from flask import request
+        return request.remote_addr or ''
+    except Exception:  # noqa: BLE001  非请求上下文（脚本/任务）时留空
+        return ''
 
 
 def xl_safe(value):
@@ -101,8 +111,8 @@ def do_export_students(args):
     gds = get_graduated_grades()
     if gds:
         q = q.filter(~Student.grade.in_(gds))
-    if current_user.role == 'homeroom_teacher':
-        q = q.filter_by(grade=current_user.grade, class_name=current_user.class_name)
+    # H-2：统一数据范围口径（此前只处理班主任，任课教师/年级长/无范围账号可导出全校）
+    q = apply_student_scope(q)
     # 班级必须与年级成对使用：只按班级名筛选会串到其他年级的同名班级
     if args.get('class_name') and not args.get('grade'):
         args = args.copy()
@@ -167,7 +177,7 @@ def do_export_students(args):
                 value = getattr(s, field, '') or ''
             row_data.append(value)
         for ci, v in enumerate(row_data, 1):
-            c = ws.cell(row=ri, column=ci, value=v)
+            c = ws.cell(row=ri, column=ci, value=xl_safe(v))   # M-4：公式注入防护
             c.border = tb
 
     for i, w in enumerate(selected_widths, 1):
@@ -200,7 +210,7 @@ def do_export_students(args):
             target_type='学生',
             module='system',
             detail=json.dumps(log_detail, ensure_ascii=False),
-            ip_address=args.get('ip_address', '')
+            ip_address=_client_ip()
         )
         db.session.add(log)
         db.session.commit()
@@ -248,6 +258,8 @@ def do_export_student_accommodation(args):
     gds = get_graduated_grades()
     if gds:
         q = q.filter(~Student.grade.in_(gds))
+    # H-2：住宿导出同样收敛到可见范围
+    q = apply_student_scope(q)
 
     # 班级必须与年级成对使用：只按班级名筛选会串到其他年级的同名班级
     if args.get('class_name') and not args.get('grade'):
@@ -355,7 +367,7 @@ def do_export_student_accommodation(args):
             row_data.append(value)
 
         for ci, v in enumerate(row_data, 1):
-            c = ws.cell(row=ri, column=ci, value=v)
+            c = ws.cell(row=ri, column=ci, value=xl_safe(v))   # M-4：公式注入防护
             c.border = tb
 
     for i, w in enumerate(selected_widths, 1):
@@ -391,7 +403,7 @@ def do_export_student_accommodation(args):
             target_type='学生住宿',
             module='dormitory',
             detail=json.dumps(log_detail, ensure_ascii=False),
-            ip_address=args.get('ip_address', '')
+            ip_address=_client_ip()
         )
         db.session.add(log)
         db.session.commit()

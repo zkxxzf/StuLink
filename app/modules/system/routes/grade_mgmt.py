@@ -12,6 +12,39 @@ from app.utils.helpers import log_operation, write_change_log, get_dict_values, 
 from app.utils.crypto import decrypt
 
 
+def _prune_backups(backups_dir, keep=20, max_age_days=180):
+    """M-6：毕业备份保留策略。
+
+    此前 `data/backups/` 只增不清理，明文整库副本（含口令哈希、身份证密文）
+    会长期累积并随同步盘扩散。这里只清理 .db 备份：按时间保留最近 keep 份，
+    并删除超过 max_age_days 天的旧备份。
+    """
+    import time
+    try:
+        files = [os.path.join(backups_dir, f) for f in os.listdir(backups_dir)
+                 if f.endswith('.db')]
+    except Exception:  # noqa: BLE001
+        return 0
+    files = [(p, os.path.getmtime(p)) for p in files if os.path.isfile(p)]
+    files.sort(key=lambda x: x[1], reverse=True)
+    removed = 0
+    cutoff = time.time() - max_age_days * 86400
+    for p, mtime in files[keep:]:
+        try:
+            os.remove(p)
+            removed += 1
+        except Exception:  # noqa: BLE001
+            pass
+    for p, mtime in files[:keep]:
+        if mtime < cutoff:
+            try:
+                os.remove(p)
+                removed += 1
+            except Exception:  # noqa: BLE001
+                pass
+    return removed
+
+
 def _mask_id_card(id_card):
     """身份证号脱敏：显示前6位和后4位，中间用*替换"""
     if not id_card:
@@ -83,6 +116,9 @@ def graduate():
         history_backup_name = f'history_{grade}_{timestamp}.db'
         history_backup_path = os.path.join(backups_dir, history_backup_name)
         shutil.copy2(history_db_path, history_backup_path)
+    # M-6：备份保留策略（此前只增不清理，明文整库副本会长期累积并随同步盘扩散）。
+    # 只清理本函数产生的 *.db 备份，保留最近 N 份；不动其它文件。
+    _prune_backups(backups_dir, keep=20)
     
     # 1.5 归档学生数据到历史库
     try:
@@ -328,7 +364,11 @@ def history():
             for row in rows:
                 r = dict(row)
                 if r.get('id_card_number'):
-                    r['id_card_decrypted'] = decrypt(r['id_card_number'])
+                    # M-5：解密失败不再把密文当明文展示，降级为空串
+                    try:
+                        r['id_card_decrypted'] = decrypt(r['id_card_number'])
+                    except Exception:
+                        r['id_card_decrypted'] = ''
                     r['id_card_masked'] = _mask_id_card(r['id_card_decrypted'])
                 else:
                     r['id_card_decrypted'] = ''
@@ -412,7 +452,11 @@ def alumni():
             for row in rows:
                 r = dict(row)
                 if r.get('id_card_number'):
-                    r['id_card_decrypted'] = decrypt(r['id_card_number'])
+                    # M-5：解密失败不再把密文当明文展示，降级为空串
+                    try:
+                        r['id_card_decrypted'] = decrypt(r['id_card_number'])
+                    except Exception:
+                        r['id_card_decrypted'] = ''
                     r['id_card_masked'] = _mask_id_card(r['id_card_decrypted'])
                 else:
                     r['id_card_decrypted'] = ''

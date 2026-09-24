@@ -12,11 +12,12 @@ function fmt(v) {
     if (v === null || v === undefined || v === '') return '—';
     return String(v);
 }
-function escHtml(s) {
+// R-2：复用公共实现（static/js/common.js），此处仅兜底
+var escHtml = window.escHtml || function (s) {
     return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
         return {'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'}[c];
     });
-}
+};
 
 /* ---------- 表格 / 图表渲染（与 grades.js 一致） ---------- */
 function renderTables(area, tables) {

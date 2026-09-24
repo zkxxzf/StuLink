@@ -10,6 +10,35 @@ from app.modules.portrait.services import portrait_service
 
 bp = Blueprint('portrait', __name__, url_prefix='/portrait')
 
+# H-10：评语类型枚举白名单（与模板下拉一致，后端不接受其它取值）
+COMMENT_TYPES = ('学期评语', '操行评语', '班主任评语')
+MAX_TERM_LEN = 32      # L-12：学期输入长度上限
+MAX_CONTENT_LEN = 2000  # L-12：评语内容长度上限
+
+
+def _assert_student_in_scope(student_no):
+    """H-3：画像所有入口统一校验学号归属（越界 403）。
+
+    此前画像模块只有 perm_required，不校验学号归属 → 改 URL/POST 学号即可
+    读取甚至写入范围外学生的画像、评语、事件、积分、宿舍、考勤。
+    """
+    from app.modules.grades.services.scope import student_in_scope
+    try:
+        student_in_scope(current_user, student_no)
+    except PermissionError:
+        abort(403)
+    return True
+
+
+def _clean_comment_fields(data):
+    """统一清洗评语字段：类型枚举白名单 + 长度上限（H-10 / L-12）"""
+    ctype = (data.get('comment_type') or '').strip()
+    if ctype not in COMMENT_TYPES:
+        ctype = COMMENT_TYPES[0]
+    term = (data.get('term') or '').strip()[:MAX_TERM_LEN]
+    content = (data.get('content') or '').strip()[:MAX_CONTENT_LEN]
+    return ctype, term, content
+
 
 # ============ 页面路由 ============
 
@@ -48,6 +77,7 @@ def index():
 @perm_required('portrait.view')
 def detail(student_no):
     """画像详情页"""
+    _assert_student_in_scope(student_no)     # H-3
     data = portrait_service.get_student_detail(student_no)
     if not data:
         abort(404)
@@ -61,6 +91,7 @@ def detail(student_no):
 @perm_required('portrait.view')
 def comments_list(student_no):
     """获取评语列表（JSON）"""
+    _assert_student_in_scope(student_no)     # H-3
     from app.modules.portrait.services import portrait_aggregation as agg
     comments = agg.get_portrait_comments(student_no)
     return jsonify(success=True, data=comments)
@@ -73,12 +104,15 @@ def add_comment():
     """添加评语"""
     data = request.get_json(force=True, silent=True) or {}
     student_no = (data.get('student_no') or '').strip()
-    comment_type = (data.get('comment_type') or '学期评语').strip()
-    content = (data.get('content') or '').strip()
-    term = (data.get('term') or '').strip()
+    # L-12：评语正文长度上限 2000 字
+    if isinstance(data.get('content'), str):
+        from app.utils.text_guard import clamp_text
+        data['content'] = clamp_text(data.get('content'), 2000)
+    comment_type, term, content = _clean_comment_fields(data)
 
     if not student_no or not content:
         return jsonify(success=False, message='学号和评语内容不能为空')
+    _assert_student_in_scope(student_no)     # H-3：写接口同样校验范围
 
     result = portrait_service.add_comment(
         student_no=student_no,
@@ -98,9 +132,7 @@ def add_comment():
 def edit_comment(comment_id):
     """编辑评语"""
     data = request.get_json(force=True, silent=True) or {}
-    content = (data.get('content') or '').strip()
-    comment_type = (data.get('comment_type') or '').strip()
-    term = (data.get('term') or '').strip()
+    comment_type, term, content = _clean_comment_fields(data)
 
     if not content:
         return jsonify(success=False, message='评语内容不能为空')
@@ -149,6 +181,7 @@ def delete_comment(comment_id):
 @perm_required('portrait.view')
 def events_list(student_no):
     """获取事件列表（JSON）"""
+    _assert_student_in_scope(student_no)     # H-3
     from app.modules.portrait.services import portrait_aggregation as agg
     events = agg.get_portrait_events(student_no)
     return jsonify(success=True, data=events)
@@ -168,6 +201,7 @@ def add_event():
 
     if not student_no or not title or not event_date:
         return jsonify(success=False, message='学号、标题和日期不能为空')
+    _assert_student_in_scope(student_no)     # H-3：写接口同样校验范围
 
     result = portrait_service.add_event(
         student_no=student_no,
@@ -207,6 +241,7 @@ def delete_event(event_id):
 @perm_required('portrait.view')
 def api_portrait_data(student_no):
     """画像完整数据（JSON，用于前端图表）"""
+    _assert_student_in_scope(student_no)     # H-3
     data = portrait_service.get_student_detail(student_no)
     if not data:
         return jsonify(success=False, message='学生不存在')
@@ -260,6 +295,7 @@ def api_list():
 @perm_required('portrait.edit')
 def api_refresh(student_no):
     """重新计算画像"""
+    _assert_student_in_scope(student_no)     # H-3
     result = portrait_service.calculate_portrait(student_no)
     if not result:
         return jsonify(success=False, message='学生不存在')

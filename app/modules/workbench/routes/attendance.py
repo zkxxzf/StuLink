@@ -141,6 +141,9 @@ def attendance_export():
         grade=grade,
     )
     filename = f'考勤记录_{class_name}_{date.today().strftime("%Y%m%d")}.xlsx'
+    # L-9：班级名来自数据库，清洗后再进 Content-Disposition（防 CRLF 头注入）
+    from app.utils.text_guard import safe_download_name
+    filename = safe_download_name(filename, '考勤记录.xlsx')
     return send_file(out, as_attachment=True, download_name=filename,
                      mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
 

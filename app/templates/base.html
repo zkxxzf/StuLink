@@ -458,6 +458,8 @@
     {# 本地文件优先：不依赖外网 CDN。
        此前 jQuery 走 unpkg.com，国内网络经常加载失败导致 "$ is not defined"；
        而 document.write 兜底在 Chrome 慢速/失败网络下会被拦截，同样不可靠。 #}
+    <!-- R-2：公共转义工具（escHtml / escAttr）先于所有页面脚本加载 -->
+    <script src="{{ su('js/common.js') }}"></script>
     <script src="{{ su('js/jquery-3.7.1.min.js') }}"></script>
     <script src="{{ su('js/bootstrap.bundle.min.js') }}"></script>
     <script>

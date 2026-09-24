@@ -413,12 +413,15 @@ def upload_file(file, form_id, submission_id, question):
     if size > max_bytes:
         raise ValueError(f'文件大小超过限制（最大 {max_mb}MB）')
 
-    # 类型校验
+    # 类型校验（H-8：统一走 upload_guard。此前「未配置 file_types 就任意后缀可传」，
+    # 可上传 .html/.svg 构成未登录即可触发的存储型 XSS）
+    from app.utils.upload_guard import validate_upload
+    allowed = None
     if question.file_types:
         allowed = [t.strip().lower().lstrip('.') for t in question.file_types.split(',')]
-        ext = file.filename.rsplit('.', 1)[-1].lower() if '.' in file.filename else ''
-        if ext not in allowed:
-            raise ValueError(f'不允许的文件类型（允许：{", ".join(allowed)}）')
+    ok, msg = validate_upload(file.filename, allowed_exts=allowed, stream=file.stream)
+    if not ok:
+        raise ValueError(msg)
 
     # 安全文件名
     original = secure_filename(file.filename or 'upload')

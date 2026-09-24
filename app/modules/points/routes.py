@@ -4,7 +4,7 @@
 import io
 from datetime import date, datetime
 
-from flask import Blueprint, render_template, request, jsonify, abort, send_file
+from flask import Blueprint, render_template, request, jsonify, abort, send_file, current_app
 from flask_login import login_required, current_user
 from sqlalchemy import func
 
@@ -329,12 +329,17 @@ def import_upload():
     f = request.files.get('file')
     if not f or not f.filename:
         return jsonify(success=False, message='请选择文件'), 400
-    if not f.filename.endswith(('.xlsx', '.xls')):
-        return jsonify(success=False, message='仅支持 .xlsx / .xls 格式'), 400
+    # H-8/L-8：统一走上传校验（含危险类型拒绝 + 扩展名与内容 magic 比对）
+    from app.utils.upload_guard import validate_upload
+    ok, msg = validate_upload(f.filename, allowed_exts=['xlsx', 'xls'], stream=f.stream)
+    if not ok:
+        return jsonify(success=False, message=msg), 400
     try:
         result = parse_points_excel(f.stream)
-    except Exception as e:
-        return jsonify(success=False, message=f'解析失败：{str(e)}'), 400
+    except Exception:
+        # M-12：异常文本（含路径/SQL 片段）不再回传前端
+        current_app.logger.exception('points import 解析失败')
+        return jsonify(success=False, message='解析失败，请检查文件内容是否符合模板'), 400
     valid, invalid = validate_records(result['rows'])
     errors = result['errors'] + [{'line': r.get('line'), 'student_no': r.get('student_no'),
                                   'reason': r.get('error')} for r in invalid]

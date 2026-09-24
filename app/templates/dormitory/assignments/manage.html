@@ -203,14 +203,15 @@
                                  ondragover="dragOver(event)"
                                  ondragleave="dragLeave(event)"
                                  ondrop="dropStudent(event, {{ bd.bed.id }}, {{ bd.student.id if bd.student else 0 }}, '{{ bd.student.name if bd.student else '' }}')"
-                                 onclick="{% if bd.student %}removeBed({{ bd.bed.id }}, '{{ bd.student.name }}'){% endif %}"><!-- 空床点击无反应，等待拖放 -->
+                                 {# M-10：学生姓名可能含单引号，必须 |tojson #}
+                                 onclick="{% if bd.student %}removeBed({{ bd.bed.id }}, {{ bd.student.name|tojson }}){% endif %}"><!-- 空床点击无反应，等待拖放 -->
                                 <div class="bed-number">{{ bd.bed.bed_number }}床 {% if bd.bed.bed_number % 2 == 1 %}(下铺){% else %}(上铺){% endif %}</div>
                                 {% if bd.student %}
                                 <div class="bed-student" style="cursor:grab;">{{ bd.student.name }}</div>
                                 {% if rd.room.combined_class and rd.room.combined_class.strip() %}
                                 <div style="font-size:10px;color:#6366f1;font-weight:500;">{{ bd.student.class_name }}</div>
                                 {% endif %}
-                                <div style="font-size:10px;color:#ef4444;cursor:pointer;" title="点击移除" onclick="event.stopPropagation();removeBed({{ bd.bed.id }}, '{{ bd.student.name }}')"><i class="bi bi-x-circle"></i> 移除</div>
+                                <div style="font-size:10px;color:#ef4444;cursor:pointer;" title="点击移除" onclick="event.stopPropagation();removeBed({{ bd.bed.id }}, {{ bd.student.name|tojson }})"><i class="bi bi-x-circle"></i> 移除</div>
                                 <div style="font-size:9px;color:#9ca3af;">按住拖拽可换位</div>
                                 {% else %}
                                 <div class="text-muted small"><i class="bi bi-arrow-down-circle"></i> 拖放学生</div>

@@ -41,8 +41,22 @@
                 该证明为早期版本防伪码（无签名校验），内容以数据库快照为准。
             </div>
             {% endif %}
-            {# 公开页：身份证号脱敏 + 学籍号隐藏，其余内容与打印件一致 #}
-            {{ cert_doc(content, cert, true, true) }}
+            {# M-14：公开核验页不再渲染成绩明细快照（此前未登录即可看到完整成绩）。
+                这里只给出真伪结论 + 不可逆摘要，完整打印件走登录后的 cert_print。 #}
+            <div class="table-responsive mt-3">
+                <table class="table table-sm mb-0">
+                    <tbody>
+                        <tr><th style="width:9rem">防伪码</th><td><code>{{ cert.code }}</code></td></tr>
+                        <tr><th>出具时间</th><td>{{ cert.created_at }}</td></tr>
+                        <tr><th>状态</th><td>{{ '已作废' if cert.invalid else '有效' }}</td></tr>
+                        <tr><th>内容摘要</th><td><code class="small">{{ cert.content_hash or '—' }}</code></td></tr>
+                    </tbody>
+                </table>
+            </div>
+            <div class="alert alert-light small mt-3 mb-0">
+                <i class="bi bi-info-circle"></i>
+                公开核验仅提供真伪与摘要；证明完整明细由出具人登录后查看/打印。
+            </div>
             {% endif %}
         </div>
     </div>

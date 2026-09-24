@@ -1,15 +1,20 @@
 # StuLink v1.18.2.0 2026-09-24
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
+import logging
 import os
+import re as _re
+import secrets
 import sqlite3 as _sqlite3
 
-from flask import Flask, render_template, request, url_for, abort
+from flask import (Flask, render_template, request, url_for, abort, redirect,
+                   session, flash)
 from sqlalchemy import event as _sa_event
 from sqlalchemy.engine import Engine as _SAEngine
 
 from config import Config
 from app.extensions import db, login_manager, csrf
 from app.utils.permission_map import default_keys as _module_keys
+from app.utils.upload_guard import is_static_uploads_path
 from markupsafe import escape, Markup
 import gzip
 
@@ -372,11 +377,29 @@ def create_app():
             except Exception as _e:  # noqa: BLE001
                 print(f'[WARN] 数据库 {_bind or "system"} 初始化失败（该模块暂不可用）：{_e}')
         
-        if not User.query.filter_by(username='admin').first():
-            admin = User(username='admin', real_name='系统管理员', role='admin', must_change_pwd=False)
-            admin.set_password('admin123')
+        # H-1：内置 admin 不再使用硬编码默认口令。
+        # 首启：生成随机口令，仅在控制台打印一次，并置 must_change_pwd=True 强制首登改密。
+        # 存量：若 admin 仍是 admin123（旧部署升级而来），同样置为强制改密并打印显著告警。
+        admin = User.query.filter_by(username='admin').first()
+        if not admin:
+            _initial_pwd = secrets.token_urlsafe(12)
+            admin = User(username='admin', real_name='系统管理员', role='admin',
+                         must_change_pwd=True)
+            admin.set_password(_initial_pwd)
             db.session.add(admin)
             db.session.commit()
+            print('=' * 70)
+            print('[安全] 已创建内置管理员账号：admin')
+            print(f'[安全] 初始随机口令（仅此一次显示，请妥善保存）：{_initial_pwd}')
+            print('[安全] 首次登录后必须修改密码')
+            print('=' * 70)
+        elif admin.check_password('admin123'):
+            admin.must_change_pwd = True
+            db.session.commit()
+            print('=' * 70)
+            print('[安全警告] 内置 admin 仍在使用默认口令 admin123！')
+            print('[安全警告] 已置为「首次登录强制改密」，请立即登录并修改密码。')
+            print('=' * 70)
         
         _init_system_data()
 
@@ -430,7 +453,24 @@ def create_app():
     with app.app_context():
         _build_mtime_cache()
 
+    _app_logger = logging.getLogger('stulink.app')
+
+    # R-10（纵深防御）：静态资源名白名单。`_asset_mtime` 会用 filename 拼磁盘路径，
+    # 一旦将来改为接收请求参数，就可能变成「任意文件信息探测」。这里显式校验：
+    # 必须是相对路径、不含 ..、不含反斜杠与盘符，且只含安全字符。
+    _ASSET_NAME_RE = _re.compile(r'^[A-Za-z0-9_\-./]+$')
+
+    def _is_safe_asset_name(filename):
+        if not filename or '..' in filename or '\\' in filename:
+            return False
+        if filename.startswith('/') or ':' in filename or '\x00' in filename:
+            return False
+        return bool(_ASSET_NAME_RE.match(filename))
+
     def _asset_mtime(filename):
+        if not _is_safe_asset_name(filename):
+            _app_logger.warning('[R-10] 拒绝非法的静态资源名：%r', filename)
+            return 0
         if request.args.get('_su_refresh'):
             p = _os.path.join(app.static_folder, filename.replace('/', _os.sep))
             try:
@@ -494,8 +534,47 @@ def create_app():
     # instance/uploads 等静态目录之外，并同步迁移 DB 里的 FormAnswer.file_path。
     @app.before_request
     def _block_static_uploads():
-        if request.path.startswith('/static/uploads'):
+        # H-8：原实现 `request.path.startswith('/static/uploads')` 大小写敏感，
+        # 而 Windows 文件系统大小写不敏感 + Werkzeug 静态前缀大小写敏感 +
+        # <path:filename> 原样透传 → `/static/Uploads/...` 可绕过守卫直取学生材料。
+        # 改用统一判定（normcase + 反斜杠/多斜杠归一）。
+        if is_static_uploads_path(request.path):
             abort(404)
+
+    # M-2：会话有效性。口令摘要不匹配（改密/重置）或账号被禁用 → 立即登出并清会话。
+    # 在此之前「改密不停旧会话、禁用不踢会话」，权限撤销形同虚设。
+    @app.before_request
+    def _enforce_session_validity():
+        from flask_login import current_user, logout_user
+        from app.utils.session_guard import is_valid
+        if not current_user.is_authenticated:
+            return
+        if is_valid(current_user):
+            return
+        logout_user()
+        session.clear()
+        flash('登录状态已失效，请重新登录', 'warning')
+        return redirect(url_for('auth.login'))
+
+    # H-1：强制改密。must_change_pwd 字段此前「只写不读」（全库 15 处命中全为写入方），
+    # 导致新导入教师「手机号即密码」可长期直接登录。这里补上唯一的读取方：
+    # 除改密、登出、静态资源外一律 302 到改密页。
+    @app.before_request
+    def _force_password_change():
+        from flask_login import current_user
+        if not current_user.is_authenticated:
+            return
+        try:
+            must_change = bool(current_user.must_change_pwd)
+        except Exception:  # noqa: BLE001  # 会话用户对象异常时不阻断请求
+            return
+        if not must_change:
+            return
+        if request.endpoint in {'auth.change_password', 'auth.logout', 'static'}:
+            return
+        if request.path.startswith('/static/'):
+            return
+        return redirect(url_for('auth.change_password'))
 
     # CSRF 错误友好提示（Edge 等浏览器 cookie 策略较严时可能触发）
     @app.errorhandler(400)
@@ -516,13 +595,45 @@ def create_app():
     def internal_error(e):
         return render_template('error.html', code=500, message='服务器内部错误，请联系管理员'), 500
 
+    # M-9：为后续切换到 enforcing CSP 预留 nonce（每请求一个，模板可用 {{ csp_nonce }}）
+    @app.before_request
+    def _assign_csp_nonce():
+        request.csp_nonce = secrets.token_urlsafe(16)
+
+    @app.context_processor
+    def _inject_csp_nonce():
+        return {'csp_nonce': getattr(request, 'csp_nonce', '')}
+
     # 安全响应头
     @app.after_request
     def add_security_headers(response):
         response.headers['X-Content-Type-Options'] = 'nosniff'
         response.headers['X-Frame-Options'] = 'DENY'
-        response.headers['X-XSS-Protection'] = '1; mode=block'
+        # M-9：X-XSS-Protection 已被现代浏览器废弃（且旧实现本身可被利用），移除
         response.headers['Referrer-Policy'] = 'strict-origin-when-cross-origin'
+
+        # M-9：CSP。项目内联 <script>/onclick 数量大，直接 enforcing 会白屏，
+        # 因此默认 Report-Only（只上报不拦截），收集一轮违规后再切换：
+        #   STULINK_CSP_MODE=enforce → 直接下发 CSP（script-src 带 nonce、允许内联样式）
+        #   STULINK_CSP_MODE=off     → 不下发
+        mode = os.environ.get('STULINK_CSP_MODE', 'report').strip().lower()
+        if mode != 'off':
+            nonce = getattr(request, 'csp_nonce', '') or ''
+            script_src = "'self'"
+            if nonce:
+                script_src += f" 'nonce-{nonce}'"
+            policy = ("default-src 'self'; "
+                      f"script-src {script_src} 'unsafe-inline'; "
+                      "style-src 'self' 'unsafe-inline'; "
+                      "img-src 'self' data:; "
+                      "font-src 'self' data:; "
+                      "connect-src 'self'; "
+                      "frame-ancestors 'none'; "
+                      "object-src 'none'; "
+                      "base-uri 'self'")
+            header = ('Content-Security-Policy' if mode == 'enforce'
+                      else 'Content-Security-Policy-Report-Only')
+            response.headers[header] = policy
         return response
 
     # 注册蓝图（模块化架构）

@@ -22,6 +22,10 @@ from app.models.grades import (ExamAffair, AffairRoom, AffairRoomLib, AffairStud
 from app.modules.grades import bp
 from app.utils.decorators import perm_required
 from app.utils.helpers import log_operation
+from app.utils.text_guard import (sanitize_label, sanitize_prefix,
+                                  safe_download_name)
+from app.utils.upload_guard import validate_upload   # L-8：导入文件类型校验
+from app.utils.export_helpers import xl_row   # M-4：公式注入防护
 
 MODE_LABEL = {0: '模式0：前缀+考场号+座号', 1: '模式1：学号即考号', 2: '模式2：自定义考号'}
 
@@ -30,6 +34,18 @@ _HFL = PatternFill(start_color='4472C4', end_color='4472C4', fill_type='solid')
 _TB = Border(left=Side(style='thin'), right=Side(style='thin'),
              top=Side(style='thin'), bottom=Side(style='thin'))
 _CENTER = Alignment(horizontal='center', vertical='center')
+
+
+def _get_affair_checked(aid):
+    """H-4：取考务批次并校验年级范围（越界 403）。
+
+    此前 20 余处直接 `ExamAffair.query.get_or_404(aid)`，只验存在不验归属，
+    任何有 grades.edit 的人都能操作其它年级的考务批次。
+    """
+    from app.modules.grades.services.exam_guard import assert_grade_visible
+    affair = ExamAffair.query.get_or_404(aid)
+    assert_grade_visible(affair.grade)
+    return affair
 
 
 def _pad2(v):
@@ -82,6 +98,9 @@ def affair_create():
     if not name or not grade:
         flash('批次名与年级必填', 'danger')
         return redirect(url_for('grades.affairs_list'))
+    # H-4：创建时同样校验年级范围（不能为其它年级建考务批次）
+    from app.modules.grades.services.exam_guard import assert_grade_visible
+    assert_grade_visible(grade)
     exam_date = None
     try:
         exam_date = date.fromisoformat(request.form.get('exam_date'))
@@ -92,7 +111,7 @@ def affair_create():
     if selection_mode not in ('selected', 'plain'):
         selection_mode = 'selected'
     affair = ExamAffair(name=name, grade=grade, exam_date=exam_date,
-                        default_prefix=(request.form.get('default_prefix') or '1701').strip() or '1701',
+                        default_prefix=sanitize_prefix(request.form.get('default_prefix')) or '1701',
                         selection_mode=selection_mode,
                         operator_id=current_user.id)
     db.session.add(affair)
@@ -107,10 +126,9 @@ def affair_create():
 @perm_required('grades.edit')
 def exam_affair_go(exam_id):
     """考试列表「考务安排」入口：已有批次→进详情；无→按原流程创建（预填考试信息）后进向导"""
-    exam = Exam.query.get_or_404(exam_id)
-    if exam.grade not in _grade_options():
-        flash('无该年级的操作权限', 'danger')
-        return redirect(url_for('grades.exams_list'))
+    # H-4：统一走考试年级范围校验（原先只比对下拉选项，不校验数据范围）
+    from app.modules.grades.services.exam_guard import assert_exam_visible
+    exam = assert_exam_visible(exam_id)
     affair = (ExamAffair.query.filter_by(exam_id=exam_id)
               .order_by(ExamAffair.id.desc()).first())
     if affair:
@@ -134,7 +152,7 @@ def exam_affair_go(exam_id):
 @login_required
 @perm_required('grades.edit')
 def affair_delete(aid):
-    affair = ExamAffair.query.get_or_404(aid)
+    affair = _get_affair_checked(aid)
     db.session.delete(affair)
     db.session.commit()
     log_operation(current_user, '删除', '考务批次', aid, affair.name, module='grades')
@@ -148,7 +166,7 @@ def affair_delete(aid):
 @login_required
 @perm_required('grades.edit')
 def affair_detail(aid):
-    affair = ExamAffair.query.get_or_404(aid)
+    affair = _get_affair_checked(aid)
     students = (AffairStudent.query.filter_by(affair_id=aid)
                 .order_by(AffairStudent.class_name, AffairStudent.student_no).all())
     rooms = (AffairRoom.query.filter_by(affair_id=aid)
@@ -193,7 +211,7 @@ def affair_detail(aid):
 @login_required
 @perm_required('grades.edit')
 def affair_students_template(aid):
-    affair = ExamAffair.query.get_or_404(aid)
+    affair = _get_affair_checked(aid)
     wb = openpyxl.Workbook()
     ws = wb.active
     ws.title = '学生信息表'
@@ -236,10 +254,14 @@ def _header_index(ws, names):
 @login_required
 @perm_required('grades.edit')
 def affair_students_import(aid):
-    affair = ExamAffair.query.get_or_404(aid)
+    affair = _get_affair_checked(aid)
     f = request.files.get('file')
     if not f or not f.filename:
         return jsonify({'ok': False, 'msg': '请选择 Excel 文件'})
+    # L-8：统一上传校验（白名单 + 危险类型 + magic），不再只看扩展名
+    ok, msg = validate_upload(f.filename, allowed_exts=['xlsx', 'xls'], stream=f.stream)
+    if not ok:
+        return jsonify({'ok': False, 'msg': msg})
     try:
         wb = openpyxl.load_workbook(f.stream, read_only=True, data_only=True)
     except Exception as e:
@@ -295,7 +317,7 @@ def affair_students_import(aid):
 @perm_required('grades.edit')
 def affair_students_sync(aid):
     """v1.12.1 从学生学籍库同步本年级学生到考务名单（增量：新增+补全信息，可选拨除已删学籍）"""
-    affair = ExamAffair.query.get_or_404(aid)
+    affair = _get_affair_checked(aid)
     sys_stus = (Student.query.filter_by(grade=affair.grade)
                 .order_by(Student.class_name, Student.student_number).all())
     exist = {s.student_no: s for s in AffairStudent.query.filter_by(affair_id=aid).all()}
@@ -332,7 +354,7 @@ def affair_students_sync(aid):
 def affair_students_pick(aid):
     """v1.12.2 「加入学生」选择器数据源：返回本年级学籍学生，
     带 in_batch 标记（是否已在当前考务名单），供前端筛选/排序/搜索。"""
-    affair = ExamAffair.query.get_or_404(aid)
+    affair = _get_affair_checked(aid)
     have = {s.student_no for s in AffairStudent.query.filter_by(affair_id=aid).all()}
     rows = (Student.query.filter_by(grade=affair.grade)
             .order_by(Student.class_name, Student.student_number).all())
@@ -348,7 +370,7 @@ def affair_students_pick(aid):
 @perm_required('grades.edit')
 def affair_students_batch_add(aid):
     """v1.12.2 从选择器批量加入：按学号从学籍库带出信息写入考务名单"""
-    affair = ExamAffair.query.get_or_404(aid)
+    affair = _get_affair_checked(aid)
     nos = [n for n in (request.form.get('student_nos') or '').split(',') if n.strip()]
     if not nos:
         return jsonify({'ok': False, 'msg': '未选择学生'})
@@ -404,7 +426,7 @@ def affair_student_detail(aid, sid):
 @login_required
 @perm_required('grades.edit')
 def affair_student_save(aid):
-    affair = ExamAffair.query.get_or_404(aid)
+    affair = _get_affair_checked(aid)
     sid = request.form.get('sid')
     no = (request.form.get('student_no') or '').strip()
     if not no:
@@ -498,10 +520,14 @@ def affair_rooms_template(aid):
 @login_required
 @perm_required('grades.edit')
 def affair_rooms_import(aid):
-    affair = ExamAffair.query.get_or_404(aid)
+    affair = _get_affair_checked(aid)
     f = request.files.get('file')
     if not f or not f.filename:
         return jsonify({'ok': False, 'msg': '请选择 Excel 文件'})
+    # L-8：统一上传校验（白名单 + 危险类型 + magic），不再只看扩展名
+    ok, msg = validate_upload(f.filename, allowed_exts=['xlsx', 'xls'], stream=f.stream)
+    if not ok:
+        return jsonify({'ok': False, 'msg': msg})
     try:
         wb = openpyxl.load_workbook(f.stream, read_only=True, data_only=True)
     except Exception as e:
@@ -527,8 +553,9 @@ def affair_rooms_import(aid):
             m = ''.join(ch for ch in str(row[idx['考场容量']]) if ch.isdigit())
             cap = int(m) if m else 0
         room.capacity = cap or 30
-        room.prefix = (str(row[idx['考号前缀']]).strip() if '考号前缀' in idx and idx['考号前缀'] < len(row) and row[idx['考号前缀']] else '') or None
-        room.note = (str(row[idx['备注']]).strip() if '备注' in idx and idx['备注'] < len(row) and row[idx['备注']] else '') or ''
+        # H-5：导入路径同样清洗（Excel 内容可被任意构造）
+        room.prefix = (sanitize_prefix(str(row[idx['考号前缀']])) if '考号前缀' in idx and idx['考号前缀'] < len(row) and row[idx['考号前缀']] else '') or None
+        room.note = (sanitize_label(str(row[idx['备注']]), 100) if '备注' in idx and idx['备注'] < len(row) and row[idx['备注']] else '') or ''
     db.session.commit()
     wb.close()
     return jsonify({'ok': True, 'added': added})
@@ -551,7 +578,7 @@ def affair_room_detail(aid, rid):
 @login_required
 @perm_required('grades.edit')
 def affair_room_save(aid):
-    affair = ExamAffair.query.get_or_404(aid)
+    affair = _get_affair_checked(aid)
     rid = request.form.get('rid')
     no = _norm_room_no(request.form.get('room_no') or '')  # v1.12.2 编号补零
     if rid:
@@ -572,10 +599,11 @@ def affair_room_save(aid):
             room.capacity = int(request.form.get('capacity') or 30)
         except (TypeError, ValueError):
             room.capacity = 30
-    room.location = (request.form.get('location') or '').strip()
-    room.subject = (request.form.get('subject') or '默认').strip() or '默认'
-    room.prefix = (request.form.get('prefix') or '').strip() or None
-    room.note = (request.form.get('note') or '').strip()
+    # H-5：服务端字符白名单（前端转义之外的第二道防线）
+    room.location = sanitize_label(request.form.get('location'), 50)
+    room.subject = sanitize_label(request.form.get('subject') or '默认', 20) or '默认'
+    room.prefix = sanitize_prefix(request.form.get('prefix')) or None
+    room.note = sanitize_label(request.form.get('note'), 100)
     # v1.12.1 可选：把该房间位置/容量存入考场库，供后续批次直接选取
     if request.form.get('save_to_lib') == '1' and room.location:
         lib_row = AffairRoomLib.query.filter_by(location=room.location).first()
@@ -618,7 +646,7 @@ def affair_room_lib_list():
 def affair_room_lib_save():
     """库中新增/编辑房间；同位置自动去重（唯一约束兜底）"""
     lid = request.form.get('lid')
-    location = (request.form.get('location') or '').strip()
+    location = sanitize_label(request.form.get('location'), 50)   # H-5
     if not location:
         return jsonify({'ok': False, 'msg': '房间位置必填'})
     if lid:
@@ -633,7 +661,7 @@ def affair_room_lib_save():
         row.capacity = int(request.form.get('capacity') or 30)
     except (TypeError, ValueError):
         row.capacity = 30
-    row.note = (request.form.get('note') or '').strip()
+    row.note = sanitize_label(request.form.get('note'), 100)      # H-5
     db.session.commit()
     return jsonify({'ok': True, 'id': row.id, 'location': row.location,
                     'capacity': row.capacity})
@@ -684,7 +712,7 @@ def affair_room_from_lib(aid):
 @login_required
 @perm_required('grades.edit')
 def affair_settings(aid):
-    affair = ExamAffair.query.get_or_404(aid)
+    affair = _get_affair_checked(aid)
     sm = request.form.get('selection_mode')
     if sm in ('selected', 'plain'):
         affair.selection_mode = sm
@@ -702,8 +730,8 @@ def affair_settings(aid):
             sel = str(sel).strip()
             if not sel:
                 continue
-            p = (request.form.get(f'prefix_{sel}') or '').strip()
-            sfx = (request.form.get(f'suffix_{sel}') or '').strip()
+            p = sanitize_prefix(request.form.get(f'prefix_{sel}'), 16)    # H-5
+            sfx = sanitize_prefix(request.form.get(f'suffix_{sel}'), 16)  # H-5
             if p or sfx:
                 cfg[sel] = {'prefix': p, 'suffix': sfx}
         affair.subject_prefixes = json.dumps(cfg, ensure_ascii=False) if cfg else None
@@ -841,7 +869,7 @@ def _arrange(affair, students, rooms, mode, log):
 @login_required
 @perm_required('grades.edit')
 def affair_arrange(aid):
-    affair = ExamAffair.query.get_or_404(aid)
+    affair = _get_affair_checked(aid)
     try:
         mode = int(request.form.get('mode', affair.mode))
     except (TypeError, ValueError):
@@ -875,6 +903,8 @@ def _arranged_sorted(affair):
 
 
 def _write_sheet(ws, headers, rows):
+    # M-4：学生姓名/班级/考场位置来自导入数据，统一做公式注入转义
+    rows = [xl_row(r) for r in rows]
     ws.append(headers)
     for ci in range(1, len(headers) + 1):
         c = ws.cell(row=1, column=ci)
@@ -883,7 +913,7 @@ def _write_sheet(ws, headers, rows):
         c.alignment = _CENTER
         c.border = _TB
     for r in rows:
-        ws.append(r)
+        ws.append(xl_row(r))   # M-4
         for ci in range(1, len(headers) + 1):
             ws.cell(row=ws.max_row, column=ci).border = _TB
 
@@ -892,7 +922,7 @@ def _write_sheet(ws, headers, rows):
 @login_required
 @perm_required('grades.edit')
 def affair_export_class(aid):
-    affair = ExamAffair.query.get_or_404(aid)
+    affair = _get_affair_checked(aid)
     stus = sorted(_arranged_sorted(affair),
                   key=lambda s: (s.class_name or '', s.name or '', s.seat_no or 0))
     wb = openpyxl.Workbook()
@@ -905,7 +935,8 @@ def affair_export_class(aid):
     wb.save(out)
     out.seek(0)
     return send_file(out, as_attachment=True,
-                     download_name=f'按班级学生信息_{affair.name}.xlsx',
+                     download_name=safe_download_name(   # L-9
+                         f'按班级学生信息_{affair.name}.xlsx', '按班级学生信息.xlsx'),
                      mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
 
 
@@ -913,7 +944,7 @@ def affair_export_class(aid):
 @login_required
 @perm_required('grades.edit')
 def affair_export_room(aid):
-    affair = ExamAffair.query.get_or_404(aid)
+    affair = _get_affair_checked(aid)
     stus = sorted(_arranged_sorted(affair),
                   key=lambda s: (s.room_no or '', s.seat_no or 0))
     wb = openpyxl.Workbook()
@@ -926,7 +957,8 @@ def affair_export_room(aid):
     wb.save(out)
     out.seek(0)
     return send_file(out, as_attachment=True,
-                     download_name=f'按考场学生信息_{affair.name}.xlsx',
+                     download_name=safe_download_name(   # L-9
+                         f'按考场学生信息_{affair.name}.xlsx', '按考场学生信息.xlsx'),
                      mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
 
 
@@ -953,7 +985,7 @@ def _room_loc_map(affair):
 def affair_cards_pdf(aid):
     """考试桌签 PDF：一页 A4 排 3 栏 × 15 行 = 45 张小标签，裁开贴桌"""
     from app.utils.affair_pdf import desk_cards_pdf
-    affair = ExamAffair.query.get_or_404(aid)
+    affair = _get_affair_checked(aid)
     stus = sorted(_arranged_sorted(affair),
                   key=lambda s: (s.room_no or '', s.seat_no or 0))
     if not stus:
@@ -970,7 +1002,7 @@ def affair_cards_pdf(aid):
 def affair_export_class_pdf(aid):
     """按班级学生名单 A4 打印版 PDF：v1.12.2 一个班从新的一页开始"""
     from app.utils.affair_pdf import seating_list_sections
-    affair = ExamAffair.query.get_or_404(aid)
+    affair = _get_affair_checked(aid)
     stus = sorted(_arranged_sorted(affair),
                   key=lambda s: (s.class_name or '', s.name or '', s.seat_no or 0))
     loc_map = _room_loc_map(affair)
@@ -994,7 +1026,7 @@ def affair_export_class_pdf(aid):
 def affair_export_room_pdf(aid):
     """按考场学生名单 A4 打印版 PDF（监考教师用）：v1.12.2 一个考场从新的一页开始"""
     from app.utils.affair_pdf import seating_list_sections
-    affair = ExamAffair.query.get_or_404(aid)
+    affair = _get_affair_checked(aid)
     stus = sorted(_arranged_sorted(affair),
                   key=lambda s: (s.room_no or '', s.seat_no or 0))
     loc_map = _room_loc_map(affair)
@@ -1020,7 +1052,7 @@ def affair_export_room_pdf(aid):
 @perm_required('grades.edit')
 def affair_cards_export(aid):
     """竖版桌签导出（三栏布局，对应 Excel 竖版桌签（可打印））"""
-    affair = ExamAffair.query.get_or_404(aid)
+    affair = _get_affair_checked(aid)
     stus = sorted(_arranged_sorted(affair),
                   key=lambda s: (s.room_no or '', s.seat_no or 0))
     wb = openpyxl.Workbook()
@@ -1047,7 +1079,7 @@ def affair_cards_export(aid):
             row += ['', '', '', '']
         rows.append(row)
     for r in rows:
-        ws.append(r)
+        ws.append(xl_row(r))   # M-4
     # 列宽
     for ci in range(1, len(headers) + 1):
         ws.column_dimensions[openpyxl.utils.get_column_letter(ci)].width = 14
@@ -1055,7 +1087,8 @@ def affair_cards_export(aid):
     wb.save(out)
     out.seek(0)
     return send_file(out, as_attachment=True,
-                     download_name=f'竖版桌签_{affair.name}.xlsx',
+                     download_name=safe_download_name(   # L-9
+                         f'竖版桌签_{affair.name}.xlsx', '竖版桌签.xlsx'),
                      mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
 
 
@@ -1065,7 +1098,7 @@ def affair_cards_export(aid):
 @login_required
 @perm_required('grades.edit')
 def affair_link_exam(aid):
-    affair = ExamAffair.query.get_or_404(aid)
+    affair = _get_affair_checked(aid)
     exam_id = request.form.get('exam_id')
     if exam_id:
         exam = Exam.query.get(int(exam_id))

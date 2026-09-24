@@ -13,6 +13,7 @@ from app.modules.grades import bp
 from app.modules.grades.services import tab_service, scope as scope_service
 from app.modules.grades.services import compare_service
 from app.utils.decorators import perm_required
+from app.utils.export_helpers import xl_row   # M-4：公式注入防护
 from app.utils.helpers import log_operation
 
 _TAB_LABEL = {'grade': '年级分析', 'class': '班级分析', 'subject': '学科分析',
@@ -58,7 +59,8 @@ def _build_workbook(tab_label, exam_name, tables):
             c.alignment = _CENTER
             c.border = _TB
         for row in table['rows']:
-            ws.append([row.get(c['key']) for c in table['columns']])
+            # M-4：单元格值统一走 xl_row（防 Excel/WPS 公式注入）
+            ws.append(xl_row([row.get(c['key']) for c in table['columns']]))
         for row_cells in ws.iter_rows(min_row=2):
             for c in row_cells:
                 c.border = _TB

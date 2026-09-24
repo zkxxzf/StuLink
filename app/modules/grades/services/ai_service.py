@@ -13,6 +13,7 @@ from app.models.grades import Exam, ExamScore, AiKey, AiGlobalKey, SUBJECTS, TOT
 from app.modules.grades.services import scope as scope_service
 from app.modules.grades.services import ai_providers
 from app.utils.crypto import encrypt_rand, decrypt
+from app.utils.url_guard import assert_outbound_url_allowed
 
 DEEPSEEK_BASE = ai_providers.PROVIDERS['deepseek']['base_url']
 DEFAULT_MODEL = ai_providers.PROVIDERS['deepseek']['default_model']
@@ -224,6 +225,11 @@ def _chat_completions(cfg, messages, timeout=None, max_tokens=None, temperature=
     if not base:
         return False, '未配置接口地址（服务商为「自定义」时必须填写接口地址）', 0
     url = base + '/chat/completions'
+    # H-9：出站前统一校验（域名白名单 + DNS 解析后拦私网/环回/链路本地/云元数据）
+    try:
+        assert_outbound_url_allowed(url)
+    except ValueError as e:
+        return False, str(e), 0
     body = {'model': ai_providers.resolve_model(provider, cfg.get('model')),
             'messages': messages,
             'temperature': DEFAULT_TEMPERATURE if temperature is None else temperature,
@@ -465,6 +471,12 @@ def stream_chat(cfg, messages):
         yield {'type': 'error', 'text': '未配置接口地址（服务商为「自定义」时必须填写接口地址）'}
         return
     url = base + '/chat/completions'
+    # H-9：与 _chat_completions 同一道守卫（流式生成同样会把 Key 与成绩数据发往该地址）
+    try:
+        assert_outbound_url_allowed(url)
+    except ValueError as e:
+        yield {'type': 'error', 'text': str(e)}
+        return
     body = {'model': ai_providers.resolve_model(provider, cfg.get('model')),
             'messages': messages, 'temperature': DEFAULT_TEMPERATURE,
             'stream': True}

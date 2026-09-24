@@ -3,6 +3,7 @@
 #   - seating_list_sections：v1.12.2 分组版名单——一个班/一个考场从新的一页开始
 # 目标：替代网页版桌签预览（1500 人渲染会卡死），浏览器 PDF 查看器可直接打印/另存
 from io import BytesIO
+from xml.sax.saxutils import escape as xml_escape   # L-3
 
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.units import mm
@@ -147,17 +148,22 @@ def seating_list_sections(doc_title, headers, sections, widths_mm=None):
                             fontSize=11, spaceBefore=2, spaceAfter=4)
     cell_st = ParagraphStyle('c2', parent=styles['Normal'], fontName=_FONT,
                              fontSize=9, leading=12)
-    story = [Paragraph(doc_title, title_st)]
+    # L-3：reportlab 的 Paragraph 会解释类 HTML 标签（姓名/班级含 <img src=...> 会被解析），
+    # 因此所有进入 Paragraph 的文本先做 XML 转义。
+    def _p(text, style):
+        return Paragraph(xml_escape(str(text) if text is not None else ''), style)
+
+    story = [_p(doc_title, title_st)]
     for i, (sec_title, rows) in enumerate(sections):
         if i:
             story.append(PageBreak())     # 每组从新的一页开始
-        story.append(Paragraph(sec_title, sec_st))
+        story.append(_p(sec_title, sec_st))
         if not rows:
-            story.append(Paragraph('（本组无学生）', cell_st))
+            story.append(_p('（本组无学生）', cell_st))
             continue
-        data = [[Paragraph(str(h), cell_st) for h in headers]]
+        data = [[_p(h, cell_st) for h in headers]]
         for r in rows:
-            data.append([Paragraph(str(x) if x is not None else '', cell_st) for x in r])
+            data.append([_p(x, cell_st) for x in r])
         if widths_mm:
             col_w = [w * mm for w in widths_mm]
         else:

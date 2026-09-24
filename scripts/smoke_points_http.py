@@ -49,8 +49,10 @@ CSRF = re.search(rb'name="csrf_token"[^>]*value="([^"]+)"', html).group(1).decod
 # 表单登录（urlencoded）
 resp = op.open(urllib.request.Request(
     BASE + '/login',
-    data=urllib.parse.urlencode({'csrf_token': CSRF, 'username': 'admin',
-                                 'password': 'admin123'}).encode(),
+    # H-1：内置 admin 初始口令已随机化，脚本改用环境变量传入账号口令
+    data=urllib.parse.urlencode({'csrf_token': CSRF,
+                                 'username': os.environ.get('STULINK_ADMIN_USER', 'admin'),
+                                 'password': os.environ.get('STULINK_ADMIN_PWD', '')}).encode(),
     headers={'User-Agent': 't'}), timeout=30)
 check('admin 登录', b'\xe9\x80\x80\xe5\x87\xba' in resp.read())
 

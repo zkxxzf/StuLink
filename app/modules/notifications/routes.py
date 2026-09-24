@@ -67,6 +67,20 @@ def _can_publish():
             or current_user.has_perm('system.settings'))
 
 
+def _is_safe_link(url):
+    """M-11：通知链接协议白名单，只允许 http/https。
+
+    模板以 `href="{{ n.link_url }}"` 直接渲染，此前只做 strip()，
+    发布者可填 `javascript:alert(document.cookie)`，他人点击即执行。
+    """
+    from urllib.parse import urlparse
+    try:
+        p = urlparse(url)
+    except Exception:  # noqa: BLE001
+        return False
+    return p.scheme in ('http', 'https') and bool(p.netloc)
+
+
 @bp.route('/')
 @login_required
 @perm_required('workbench.notifications_view')
@@ -102,15 +116,22 @@ def notification_create():
     """创建通知（需通知管理写权限 workbench.notifications 或 system.settings）"""
     if not _can_publish():
         abort(403)
-    title = (request.form.get('title') or '').strip()
-    content = (request.form.get('content') or '').strip()
+    # L-12：用户输入长度上限（标题/正文/链接），避免超大内容入库与刷屏
+    from app.utils.text_guard import clamp_text
+    title = clamp_text((request.form.get('title') or '').strip(), 100)
+    content = clamp_text((request.form.get('content') or '').strip(), 5000)
     target_type = (request.form.get('target_type') or 'all').strip()
     priority = (request.form.get('priority') or 'normal').strip()
     category = (request.form.get('category') or 'system').strip()
-    link_url = (request.form.get('link_url') or '').strip() or None
+    link_url = clamp_text((request.form.get('link_url') or '').strip(), 500) or None
 
     if not title or not content:
         flash('标题和内容不能为空', 'danger')
+        return redirect(url_for('notifications.notifications_page'))
+
+    # M-11：链接协议白名单（此前只 strip()，可填 javascript: 构成存储型 XSS）
+    if link_url and not _is_safe_link(link_url):
+        flash('通知链接只允许 http:// 或 https:// 开头的地址', 'danger')
         return redirect(url_for('notifications.notifications_page'))
 
     # v1.17.0：仅持 workbench.notifications（无 system.settings）的发布者，

@@ -56,7 +56,8 @@
                 </td>
                 <td class="text-end">
                     <a href="{{ url_for('grades.affair_detail', aid=a.id) }}" class="btn btn-sm btn-outline-primary">进入</a>
-                    <button class="btn btn-sm btn-outline-danger" onclick="delAffair({{ a.id }}, '{{ a.name }}')">删除</button>
+                    <button class="btn btn-sm btn-outline-danger" {# M-10：'|e' 产生的 &#39; 交 JS 引擎前会还原为 '，姓名含单引号即注入 → 改用 |tojson #}
+                    <button class="btn btn-sm btn-outline-danger" onclick="delAffair({{ a.id }}, {{ a.name|tojson }})">删除</button>
                 </td>
             </tr>
             {% else %}

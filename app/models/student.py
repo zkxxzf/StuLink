@@ -48,7 +48,13 @@ class Student(db.Model):
     # 身份证号透明加解密（确定性加密，支持等值查询）
     @property
     def id_card_number(self):
-        return decrypt(self._id_card_encrypted) if self._id_card_encrypted else None
+        # M-5：解密失败不再回传密文原文，展示侧降级为 None（原因见 crypto 日志）
+        if not self._id_card_encrypted:
+            return None
+        try:
+            return decrypt(self._id_card_encrypted)
+        except Exception:
+            return None
 
     @id_card_number.setter
     def id_card_number(self, value):

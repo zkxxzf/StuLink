@@ -15,16 +15,34 @@ bp = Blueprint('users', __name__, url_prefix='/users')
 
 
 def _generate_password():
-    """生成随机安全密码（10位字母数字）"""
+    """生成随机一次性口令（12 位字母数字，保证同时含字母与数字以符合
+    app/utils/password_policy.py 的策略）"""
     import string
     alphabet = string.ascii_letters + string.digits
-    return ''.join(secrets.choice(alphabet) for _ in range(10))
+    while True:
+        pwd = ''.join(secrets.choice(alphabet) for _ in range(12))
+        if any(c.isdigit() for c in pwd) and any(c.isalpha() for c in pwd):
+            return pwd
+
+
+def _store_one_time_password(username, real_name, password):
+    """L-7：初始/重置口令不再写进 flash（会进响应 HTML 与签名 cookie），
+    改为放进 session 的一次性展示区，在用户列表页显示一次即失效。"""
+    from flask import session
+    items = session.get('_pwd_once', [])
+    items.append({'username': username, 'real_name': real_name,
+                  'password': password})
+    session['_pwd_once'] = items[-50:]
+    session.modified = True
 
 
 @bp.route('/')
 @perm_required('system.users')
 def list_users():
+    from flask import session
     users = User.query.order_by(User.role, User.username).all()
+    # L-7：取出一次性初始口令（显示后立即失效）
+    one_time_passwords = session.pop('_pwd_once', []) if users is not None else []
     # v1.14.0：按权限组分组展示（组内按角色/用户名排序），支持分组折叠与搜索
     from collections import OrderedDict
     grouped = OrderedDict()
@@ -34,7 +52,8 @@ def list_users():
     group_order = {g.name: g.id for g in PermissionGroup.query.all()}
     groups = OrderedDict(
         (g, grouped[g]) for g in sorted(grouped, key=lambda x: (group_order.get(x, 9999), x)))
-    return render_template('system/users/list.html', users=users, groups=groups)
+    return render_template('system/users/list.html', users=users, groups=groups,
+                           one_time_passwords=one_time_passwords)
 
 
 @bp.route('/create', methods=['GET', 'POST'])
@@ -83,8 +102,13 @@ def create():
         _sync_state, _ = teacher_sync.sync_from_user(user)
         db.session.commit()
         log_operation(current_user, '创建', '用户', user.id, f'{user.real_name} ({user.role_display})')
-        pwd_hint = f'，初始密码：{generated_pwd}' if not form.password.data else ''
-        flash(f'用户 {user.real_name} 已创建{pwd_hint}', 'success')
+        # L-7：初始口令不再经 flash 明文回显（会进响应 HTML 与签名 cookie）
+        auto_pwd = not form.password.data
+        if auto_pwd:
+            _store_one_time_password(user.username, user.real_name, generated_pwd)
+        flash(f'用户 {user.real_name} 已创建'
+              + ('，初始口令已在本页一次性显示（仅此一次，请立即转交本人）' if auto_pwd else ''),
+              'success')
         return redirect(url_for('users.list_users'))
     return render_template('system/users/form.html', form=form, title='新建用户')
 
@@ -173,11 +197,14 @@ def toggle(id):
 @perm_required('system.users')
 def reset_password(id):
     user = User.query.get_or_404(id)
-    user.set_password(_generate_password())
+    new_pwd = _generate_password()
+    user.set_password(new_pwd)
     user.must_change_pwd = True
     db.session.commit()
     log_operation(current_user, '更新', '用户', user.id, f'{user.real_name} 密码已重置')
-    flash(f'{user.real_name} 的密码已重置', 'success')
+    # L-7：重置后的口令一次性展示（此前生成后直接丢弃，管理员无法交付）
+    _store_one_time_password(user.username, user.real_name, new_pwd)
+    flash(f'{user.real_name} 的密码已重置，新口令已在本页一次性显示（仅此一次）', 'success')
     return redirect(url_for('users.list_users'))
 
 
@@ -214,7 +241,7 @@ def download_teacher_template():
 
     # instruction row
     ws.merge_cells('A4:C4')
-    instr = ws.cell(row=4, column=1, value='说明：手机号即登录名，默认密码=手机号，首次登录需改密 | 权限组填写系统已有权限组名称 | 第 2 行起填数据，删除本行和示例')
+    instr = ws.cell(row=4, column=1, value='说明：手机号即登录名，初始口令由系统随机生成（导入后在本页一次性展示），首次登录需改密 | 权限组填写系统已有权限组名称 | 第 2 行起填数据，删除本行和示例')
     instr.font = Font(color='FF0000', bold=True, size=10)
 
     buf = io.BytesIO()
@@ -228,10 +255,18 @@ def download_teacher_template():
 @bp.route('/import-teachers', methods=['POST'])
 @perm_required('system.users')
 def import_teachers():
-    """批量导入教师：手机号=登录名，默认密码=手机号，首次登录强制改密"""
+    """批量导入教师：手机号=登录名，初始口令为随机一次性口令（H-1③），
+    首次登录强制改密（由 app/__init__.py 的 _force_password_change 兜底）"""
     file = request.files.get('file')
-    if not file or not file.filename.endswith(('.xlsx', '.xls')):
+    # L-8：统一上传校验（白名单 + 危险类型 + magic），不再只看扩展名
+    from app.utils.upload_guard import validate_upload
+    if not file:
         flash('请上传 .xlsx 格式的Excel文件', 'danger')
+        return redirect(url_for('users.list_users'))
+    ok, msg = validate_upload(file.filename, allowed_exts=['xlsx', 'xls'],
+                              stream=file.stream)
+    if not ok:
+        flash(msg, 'danger')
         return redirect(url_for('users.list_users'))
 
     try:
@@ -288,8 +323,12 @@ def import_teachers():
             user = User(username=phone, real_name=name, role='teacher',
                         permission_group_id=pg.id,
                         must_change_pwd=True, is_active=True)
-            user.set_password(phone)
+            # H-1③：不再用手机号当口令（半公开信息 = 批量可登录），改随机一次性口令
+            one_time_pwd = _generate_password()
+            user.set_password(one_time_pwd)
             db.session.add(user)
+            db.session.flush()
+            _store_one_time_password(phone, name, one_time_pwd)
             _new_users.append(user)
             existing_phones.add(phone)
             created += 1
@@ -302,7 +341,7 @@ def import_teachers():
 
         if created:
             log_operation(current_user, '导入', '教师', None, f'批量导入 {created} 名教师')
-        msg = f'成功导入 {created} 名教师'
+        msg = f'成功导入 {created} 名教师，初始口令已在本页一次性显示（仅此一次）'
         if errors:
             msg += f'，{len(errors)} 条失败：' + '；'.join(errors[:20])
             if len(errors) > 20:

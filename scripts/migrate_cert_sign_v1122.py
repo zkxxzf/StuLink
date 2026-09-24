@@ -27,10 +27,12 @@ def main():
     if not cols:
         print('certificates 表不存在，create_all 首次启动会按模型建表')
     else:
+        from _ddl_guard import assert_ident   # R-11
         for name, ddl in NEW_COLS:
             if name in cols:
                 print(f'{name} 已存在，跳过')
             else:
+                assert_ident(name, '列名')
                 c.execute(f'ALTER TABLE certificates ADD COLUMN {name} {ddl}')
                 print(f'已添加 {name} 列')
     c.commit()

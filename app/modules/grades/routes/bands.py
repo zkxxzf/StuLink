@@ -12,6 +12,7 @@ from app.extensions import db
 from app.models.grades import Exam, ExamBand, BandTemplate, SUBJECTS, TOTAL_SUBJECT
 from app.modules.grades import bp
 from app.modules.grades.services import stats_service as st
+from app.modules.grades.services.exam_guard import assert_exam_visible
 from app.modules.grades.utils import delete_cache_prefix, invalidate_exam_cache
 from app.utils.decorators import perm_required
 from app.utils.helpers import log_operation
@@ -30,6 +31,10 @@ def _log():
         Get-Content StuLink\\logs\\bands.log -Tail 50 -Wait
     """
     lg = logging.getLogger('stulink.bands')
+    # L-2：日志落盘前统一脱敏（身份证/手机号/邮箱）
+    from app.utils.log_mask import MaskingFilter
+    if not any(isinstance(f, MaskingFilter) for f in lg.filters):
+        lg.addFilter(MaskingFilter())
     if not lg.handlers:
         lg.setLevel(logging.INFO)
         lg.propagate = True          # 同时走 Flask 默认日志（控制台 / startup_err.log）
@@ -116,7 +121,7 @@ def _band_counts(data, direction, subject, bands):
 @login_required
 @perm_required('grades.settings')
 def bands_page(exam_id):
-    exam = Exam.query.get_or_404(exam_id)
+    exam = assert_exam_visible(exam_id)   # H-4：分档线页同样校验考试年级范围
     data = st.cached_exam_data(exam_id)
     # 选科后为 ['物理','历史']；选科前无方向 → ['']（空串=全体，不分方向）
     directions = data.directions or ['']
@@ -172,7 +177,7 @@ def bands_get():
     exam_id = request.args.get('exam_id', type=int)
     direction = request.args.get('direction', '').strip()
     subject = request.args.get('subject', '').strip() or TOTAL_SUBJECT
-    Exam.query.get_or_404(exam_id)
+    assert_exam_visible(exam_id)          # H-4
     if not _is_subject(subject):
         return jsonify(success=False, message='学科无效'), 400
     return jsonify(success=True, data=_bands_payload(exam_id, direction, subject))
@@ -189,7 +194,7 @@ def bands_matrix():
     改为单次请求、全程共用一份 ExamData。
     """
     exam_id = request.args.get('exam_id', type=int)
-    Exam.query.get_or_404(exam_id)
+    assert_exam_visible(exam_id)          # H-4
     data = st.cached_exam_data(exam_id)
     directions = data.directions or ['']
     out = {}
@@ -258,7 +263,7 @@ def bands_save():
     exam_id = int(data.get('exam_id') or 0)
     direction = (data.get('direction') or '').strip()
     subject = (data.get('subject') or '').strip() or TOTAL_SUBJECT
-    exam = Exam.query.get_or_404(exam_id)
+    exam = assert_exam_visible(exam_id)   # H-4
     if direction not in ('物理', '历史'):
         return jsonify(success=False, message='方向无效'), 400
     if not _is_subject(subject):
@@ -293,7 +298,7 @@ def bands_batch():
     """
     data = request.get_json(silent=True) or {}
     exam_id = int(data.get('exam_id') or 0)
-    exam = Exam.query.get_or_404(exam_id)
+    exam = assert_exam_visible(exam_id)   # H-4
     mode = data.get('mode') if data.get('mode') in ('score', 'ratio', 'rank') else 'score'
     scope = 'all' if data.get('scope') == 'all' else 'per_subject'
     include_total = bool(data.get('include_total'))
@@ -388,7 +393,7 @@ def bands_apply():
     tpl = data.get('template') or '4'
     both = bool(data.get('both'))
     all_subjects = bool(data.get('all_subjects'))
-    exam = Exam.query.get_or_404(exam_id)
+    exam = assert_exam_visible(exam_id)   # H-4
     if tpl not in TEMPLATES:
         return jsonify(success=False, message='模板不存在'), 400
     edata = st.ExamData(exam_id)

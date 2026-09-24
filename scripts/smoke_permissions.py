@@ -52,10 +52,17 @@ def check(name, cond, extra=''):
         print(f'[FAIL] {name} {extra}')
 
 
-def get_csrf(c):
-    r0 = c.get('/login')
-    m = re.search(r'name="csrf_token"[^>]*value="([^"]+)"',
-                  r0.get_data(as_text=True))
+def get_csrf(c, path='/login'):
+    """取 CSRF token：优先表单隐藏域，其次 base.html 注入的 var csrfToken。
+
+    注意（M-2）：登录后服务端会清空并重建会话，登录前取的 token 将失效，
+    因此登录后的写操作必须重新取一次。
+    """
+    html = c.get(path).get_data(as_text=True)
+    m = re.search(r'name="csrf_token"[^>]*value="([^"]+)"', html)
+    if m:
+        return m.group(1)
+    m = re.search(r'var\s+csrfToken\s*=\s*"([^"]+)"', html)
     return m.group(1) if m else ''
 
 
@@ -103,6 +110,12 @@ with app.app_context():
     db.session.add(xz)
     db.session.flush()
     db.session.add(UserDataScope(user_id=zs.id, grade='2025级'))
+    # H-1 之后内置 admin 的初始口令是随机生成的（不再有 admin123），
+    # 冒烟脚本改为自建一个管理员账号，避免依赖默认口令。
+    adm = User(username='smokeadm', real_name='冒烟管理员', role='admin',
+               must_change_pwd=False)
+    adm.set_password('SmokeAdm#2026')
+    db.session.add(adm)
     e25 = Exam(name='2025级期中', grade='2025级', exam_date=date(2026, 4, 1))
     e26 = Exam(name='2026级期中', grade='2026级', exam_date=date(2026, 4, 1))
     db.session.add_all([e25, e26])
@@ -134,9 +147,10 @@ with app.app_context():
 # ---------- 3. 权限管理页面与 API ----------
 with app.test_client() as c:
     csrf = get_csrf(c)
-    r = c.post('/login', data={'csrf_token': csrf, 'username': 'admin',
-                               'password': 'admin123'}, follow_redirects=True)
+    r = c.post('/login', data={'csrf_token': csrf, 'username': 'smokeadm',
+                               'password': 'SmokeAdm#2026'}, follow_redirects=True)
     check('admin 登录', r.status_code == 200)
+    csrf = get_csrf(c, '/perm-groups/')   # M-2：登录后会话重建，需重新取 token
 
     r = c.get('/perm-groups/')
     html = r.get_data(as_text=True)

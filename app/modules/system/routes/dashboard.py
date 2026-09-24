@@ -12,7 +12,7 @@ bp = Blueprint('system_dashboard', __name__, url_prefix='/system')
 
 
 @bp.route('/')
-@login_required
+@perm_required('system.users')   # M-1：系统概览（含操作轨迹）同样收敛
 def index():
     return render_template('system/dashboard.html')
 

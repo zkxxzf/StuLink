@@ -8,6 +8,7 @@ from app.models import Student, BedAssignment, StudentAccommodation, Room
 from app.utils.crypto import encrypt as _encrypt_id
 from app.forms.student_forms import StudentForm
 from app.utils.decorators import perm_required
+from app.utils.student_scope import apply_student_scope
 from app.utils.helpers import get_dict_values, log_operation, get_graduated_grades, write_change_log
 import io
 import uuid
@@ -17,7 +18,7 @@ bp = Blueprint('students', __name__, url_prefix='/students')
 
 
 @bp.route('/export', methods=['GET', 'POST'])
-@login_required
+@perm_required('students.export')   # H-2：此前只有 @login_required
 def export_students():
     from app.utils.export_helpers import do_export_students
     if request.method == 'POST':
@@ -43,18 +44,15 @@ def _clean_expired_errors():
 
 
 @bp.route('/')
-@login_required
+@perm_required('students.view')    # H-2：此前只有 @login_required
 def list_students():
     query = Student.query
     # 排除已毕业年级
     graduated = get_graduated_grades()
     if graduated:
         query = query.filter(~Student.grade.in_(graduated))
-    # 权限范围限制
-    if current_user.role == 'homeroom_teacher':
-        query = query.filter_by(grade=current_user.grade, class_name=current_user.class_name)
-    elif current_user.role == 'grade_leader':
-        query = query.filter_by(grade=current_user.grade)
+    # H-2：数据范围统一走 apply_student_scope（此前 role=='teacher' 不命中任何分支 → 全校可见）
+    query = apply_student_scope(query)
 
     # 筛选参数
     filter_gender = request.args.get('gender', '')
@@ -164,7 +162,7 @@ def create():
 
 
 @bp.route('/<int:id>')
-@login_required
+@perm_required('students.view')    # H-2
 def detail(id):
     student = Student.query.get_or_404(id)
     # 权限控制：宿管教师不能查看学生隐私数据
@@ -301,13 +299,15 @@ def delete(id):
 
 
 @bp.route('/search')
-@login_required
+@perm_required('students.view')    # H-2：此前只有 @login_required
 def search():
     query = Student.query
     # 排除已毕业年级
     graduated = get_graduated_grades()
     if graduated:
         query = query.filter(~Student.grade.in_(graduated))
+    # H-2：与列表页同一套范围口径
+    query = apply_student_scope(query)
     # 获取搜索条件
     name = request.args.get('name', '').strip()
     student_number = request.args.get('student_number', '').strip()
@@ -416,7 +416,7 @@ def search():
 
 
 @bp.route('/batch-edit-search', methods=['POST'])
-@login_required
+@perm_required('students.edit')    # H-2：批量改的前提是有编辑权
 def batch_edit_search():
     """批量修改学生宿舍信息（搜索页）"""
     if not current_user.has_perm('dormitory.manage') and not current_user.has_perm('students.edit'):
@@ -618,8 +618,12 @@ def import_students():
         flash('请选择要上传的Excel文件', 'danger')
         return redirect(url_for('students.list_students'))
     
-    if not file.filename.endswith(('.xlsx', '.xls')):
-        flash(f'文件格式不正确，请上传 .xlsx 格式的Excel文件（当前文件：{file.filename}）', 'danger')
+    # L-8：仅校验扩展名 → 改为统一上传校验（白名单 + 危险类型 + magic 字节）
+    from app.utils.upload_guard import validate_upload
+    ok, msg = validate_upload(file.filename, allowed_exts=['xlsx', 'xls'],
+                              stream=file.stream)
+    if not ok:
+        flash(f'{msg}（当前文件：{file.filename}）', 'danger')
         return redirect(url_for('students.list_students'))
 
     try:
@@ -929,7 +933,7 @@ def import_students():
 
 
 @bp.route('/download-errors/<key>')
-@login_required
+@perm_required('students.import')  # H-2：导入错误日志只给导入者看
 def download_import_errors(key):
     """下载导入错误日志"""
     _clean_expired_errors()
@@ -1164,8 +1168,14 @@ def batch_transfer():
     file = request.files.get('file')
     tpl_type = request.form.get('tpl_type', 'student_number')
 
-    if not file or not file.filename.endswith(('.xlsx', '.xls')):
+    from app.utils.upload_guard import validate_upload   # L-8
+    if not file:
         flash('请上传 .xlsx 格式的Excel文件', 'danger')
+        return redirect(url_for('students.list_students'))
+    ok, msg = validate_upload(file.filename, allowed_exts=['xlsx', 'xls'],
+                              stream=file.stream)
+    if not ok:
+        flash(msg, 'danger')
         return redirect(url_for('students.list_students'))
 
     try:
