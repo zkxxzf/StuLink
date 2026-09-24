@@ -17,6 +17,7 @@ from app.models import User
 from app.models.academic import Teacher
 from app.modules.academic import bp
 from app.modules.academic.services import teacher_import_service
+from app.modules.academic.services import teacher_sync
 from app.utils import id_card as id_card_util
 from app.utils.decorators import perm_required
 from app.utils.helpers import log_operation
@@ -216,6 +217,10 @@ def teacher_edit(tid):
         if status in ('active', 'left') and status != t.status:
             t.status = status
             changes.append('状态变更')
+        # v1.18.2.0：教师档案变更 → 同步回写到关联的 users 账号（admin 自动 skip）
+        back_changes = teacher_sync.sync_from_teacher(t, renamed_from=None)
+        if back_changes:
+            changes.extend(back_changes)
         db.session.commit()
         log_operation(current_user, '更新', '教师', t.id,
                       f'{t.name}：' + ('；'.join(changes) or '无字段变化'),

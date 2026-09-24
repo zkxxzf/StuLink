@@ -8,6 +8,7 @@ from app.models import User, PermissionGroup
 from app.forms.user_forms import UserForm
 from app.utils.decorators import perm_required
 from app.utils.helpers import log_operation
+from app.modules.academic.services import teacher_sync
 import io
 
 bp = Blueprint('users', __name__, url_prefix='/users')
@@ -78,6 +79,9 @@ def create():
         user.set_password(generated_pwd)
         db.session.add(user)
         db.session.commit()
+        # v1.18.2.0：非管理员自动同步创建教师档案（admin 不写入）
+        _sync_state, _ = teacher_sync.sync_from_user(user)
+        db.session.commit()
         log_operation(current_user, '创建', '用户', user.id, f'{user.real_name} ({user.role_display})')
         pwd_hint = f'，初始密码：{generated_pwd}' if not form.password.data else ''
         flash(f'用户 {user.real_name} 已创建{pwd_hint}', 'success')
@@ -134,6 +138,9 @@ def edit(id):
         if form.password.data:
             user.set_password(form.password.data)
         db.session.commit()
+        # v1.18.2.0：教师角色变更 → 同步到 academic.teachers（admin 自动 skip）
+        teacher_sync.sync_from_user(user)
+        db.session.commit()
         log_operation(current_user, '更新', '用户', user.id, f'{user.real_name} 信息已更新')
         flash('用户信息已更新', 'success')
         return redirect(url_for('users.list_users'))
@@ -152,6 +159,9 @@ def toggle(id):
         flash('不能禁用当前登录的账号', 'danger')
         return redirect(url_for('users.list_users'))
     user.is_active = not user.is_active
+    db.session.commit()
+    # v1.18.2.0：启禁变更 → 同步 Teacher.status (active/left)
+    teacher_sync.sync_from_user(user)
     db.session.commit()
     status = '启用' if user.is_active else '禁用'
     log_operation(current_user, '更新', '用户', user.id, f'{user.real_name} {status}')
@@ -256,6 +266,7 @@ def import_teachers():
 
         created = 0
         errors = []
+        _new_users = []                          # v1.18.2.0：导入后同步至 teachers
 
         for row_idx in range(2, ws.max_row + 1):
             phone = str(ws.cell(row=row_idx, column=phone_col).value or '').strip()
@@ -279,9 +290,14 @@ def import_teachers():
                         must_change_pwd=True, is_active=True)
             user.set_password(phone)
             db.session.add(user)
+            _new_users.append(user)
             existing_phones.add(phone)
             created += 1
 
+        db.session.commit()
+        # v1.18.2.0：批量导入后同步到 academic.teachers
+        for u in _new_users:
+            teacher_sync.sync_from_user(u)
         db.session.commit()
 
         if created:

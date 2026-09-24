@@ -59,8 +59,10 @@ def manage():
     class_type_options = get_dict_values('class_type')
     direction_options = get_dict_values('subject_direction')
     subject_options = get_dict_values('subject')
+    # v1.18.2.0：管理员不是教师，不进入教师候选下拉
     teacher_options = User.query.filter(
-        User.role.in_(['homeroom_teacher', 'admin', 'grade_leader']),
+        User.role.in_(['homeroom_teacher', 'grade_leader', 'teacher',
+                       'dorm_manager', 'school_viewer', 'staff']),
         User.is_active == True
     ).order_by(User.real_name).all()
 

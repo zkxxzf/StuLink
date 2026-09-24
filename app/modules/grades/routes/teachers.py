@@ -41,14 +41,32 @@ def _grade_classes(grade):
     return numeric_classes([r[0] for r in rows])
 
 
+def _teacher_roles_filter():
+    """v1.18.2.0：教师候选的合法角色集合（明确排除 admin）"""
+    return ('teacher', 'homeroom_teacher', 'grade_leader',
+            'dorm_manager', 'school_viewer', 'staff')
+
+
+def _teacher_candidates():
+    """v1.18.2.0：所有启用且属于教师类角色的账号 id 集合"""
+    rows = db.session.query(User.id).filter(
+        User.role.in_(_teacher_roles_filter()),
+        User.is_active.is_(True)
+    ).all()
+    return {r[0] for r in rows}
+
+
 def _matrix_users(grade):
-    """下拉候选教师：绑定教师 + teacher/班主任角色启用账号"""
-    uids = {l.user_id for l in TeacherSubjectLink.query.filter_by(grade=grade, active=True).all()}
-    users = []
-    for u in User.query.filter(User.is_active.is_(True)).order_by(User.real_name).all():
-        if u.has_role('teacher', 'homeroom_teacher') or u.id in uids:
-            users.append({'id': u.id, 'name': u.real_name, 'username': u.username})
-    return users
+    """下拉候选教师：启用 + 教师类角色（明确排除 admin）。
+
+    v1.18.2.0：历史逻辑“已绑定 user_id 即可入选”会导致 admin 错配后一直显示在下拉里，
+    现改为仅按角色过滤；已绑定但非教师类的行依旧可在矩阵中显示历史名字（由 _build_matrix 侧），
+    但下拉中不再提供 admin 作为新选择。"""
+    valid = _teacher_candidates()
+    if not valid:
+        return []
+    rows = User.query.filter(User.id.in_(valid)).order_by(User.real_name).all()
+    return [{'id': u.id, 'name': u.real_name, 'username': u.username} for u in rows]
 
 
 # ==================== 矩阵维护 ====================
