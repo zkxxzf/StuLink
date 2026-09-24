@@ -1,4 +1,4 @@
-# StuLink v1.18.0.0 2026-09-23
+# StuLink v1.18.1.0 2026-09-24
 # 个人成绩查询与分析：教职工在自身权限范围内查询单个学生
 # 聚合口径复用 stats_service（排名等已落库 exam_scores，不重算）
 # Copyright (c) 2026 zkxxzf. Apache License 2.0

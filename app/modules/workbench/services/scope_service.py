@@ -1,5 +1,5 @@
-# StuLink v1.18.0.0 2026-09-23
-# 工作台数据范围校验：班级归属白名单（admin 全放行）— 判定统一委托 workbench/services/scope.py
+# StuLink v1.18.1.1 2026-09-24
+# 工作台数据范围校验：班级归属白名单（admin 全放行）
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 """⚠️ 本模块已降级为**转发层**，请勿在此新增判定逻辑（R-1）。
 

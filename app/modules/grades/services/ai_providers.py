@@ -1,4 +1,4 @@
-# StuLink v1.18.0.0 2026-09-23
+# StuLink v1.18.1.0 2026-09-24
 # AI 服务商注册表：统一维护 base_url / 可选模型 / 默认模型 / 鉴权方式
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 """支持的 AI 服务商（全部为 OpenAI 兼容的 /chat/completions 协议）

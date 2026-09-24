@@ -1,4 +1,4 @@
-# StuLink v1.18.0.0 2026-09-23
+# StuLink v1.18.1.0 2026-09-24
 # 四大分析模块数据组装（供 /api/analysis/* 与 Excel 导出共用）
 # 表/图编号与设计文档 2.3 对应：A1(年级) A2(班级) A3(学科) A4(任课教师)
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
