@@ -134,6 +134,14 @@ def change_password():
         if not current_user.check_password(form.old_password.data):
             flash('原密码不正确', 'danger')
         else:
+            # v1.18.2.1 M-15：新口令必须过弱口令黑名单与强度校验，防止把弱口令写入库
+            from app.utils.password_policy import validate_password
+            ok, msg = validate_password(form.new_password.data,
+                                        username=current_user.username,
+                                        real_name=current_user.real_name)
+            if not ok:
+                flash(msg, 'danger')
+                return render_template('auth/change_password.html', form=form)
             current_user.set_password(form.new_password.data)
             current_user.must_change_pwd = False
             from app.extensions import db

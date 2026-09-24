@@ -174,6 +174,11 @@ def check_M15():
          not validate_password('张三12345', real_name='张三')[0])
     case('M-15 符合策略的强口令通过', validate_password(TEST_PWD)[0])
 
+    # v1.18.2.1：清除历史失败计数，避免 M-3 预先锁定 sec_teacher
+    from app.utils.cache import cache as _c
+    _c.delete('login_fail_sec_teacher')
+    _c.delete('login_lock_sec_teacher')
+
     # 表单层：弱口令无法改密成功
     with app.test_client() as c:
         login_ok(c, 'sec_teacher', TEST_PWD)
@@ -310,16 +315,26 @@ def check_M6():
     import time as _time
     d = tempfile.mkdtemp(prefix='stulink_backup_test_')
     _now = _time.time()
+    # v1.18.2.1 S-5 后：_prune_backups 仅清理名字匹配 (graduate|system|history)_<年级>_YYYYMMDD_HHMMSS.db 的自动备份
     for i in range(25):
-        p = os.path.join(d, f'b{i:02d}.db')
+        p = os.path.join(d, f'graduate_2023级_2026010{i % 9 + 1:01d}_{i:02d}00{i % 60:02d}.db')
         with open(p, 'wb') as fh:
             fh.write(b'x')
         # 越靠前的文件越新：0 号最新，24 号最旧（均在保留天数内）
         os.utime(p, (_now - i * 60, _now - i * 60))
+    # 额外放 3 个手工备份：不应被清理
+    for name in ('academic.db.bak-20260101_000000', 'local_manual_snapshot.db', 'README.txt'):
+        with open(os.path.join(d, name), 'wb') as fh:
+            fh.write(b'x')
     removed = _prune_backups(d, keep=20)
-    left = [f for f in os.listdir(d) if f.endswith('.db')]
+    left = [f for f in os.listdir(d)
+            if f.startswith('graduate_') and f.endswith('.db')]
+    left_all = set(os.listdir(d))
     case('M-6 备份按保留窗口清理', len(left) == 20 and removed == 5,
          f'left={len(left)} removed={removed}')
+    case('M-6 手工备份不误删（S-5）',
+         {'academic.db.bak-20260101_000000', 'local_manual_snapshot.db', 'README.txt'} <= left_all,
+         f'剩余非自动备份文件={sorted(left_all - set(left))}')
     shutil.rmtree(d, ignore_errors=True)
     case('M-6 残留材料包清扫函数存在', callable(cleanup_stale_packages))
 
