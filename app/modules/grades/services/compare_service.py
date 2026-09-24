@@ -1,4 +1,4 @@
-# StuLink v1.18.2.0 2026-09-24
+# StuLink v1.18.2.1 2026-09-24
 # 班级对比分析：多班横向对比的数据组装（供 /api/analysis/compare 与 Excel 导出共用）
 # 输出结构与 tab_service 四模块完全一致：{exam, tables, charts, meta}
 # 口径沿用 tab_service：全部基于 stats_service.cached_exam_data 的内存视图，所选班一次遍历分组，

@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-# StuLink v1.18.2.0 2026-09-24
+# StuLink v1.18.2.1 2026-09-24
 # 一次性回填：把 system.users 中的"教师类账号"同步进 academic.teachers
 #   （使 /users/ 教师管理 与 /academic/teachers 教师名单 数据一致）
 # Copyright (c) 2026 zkxxzf. Apache License 2.0

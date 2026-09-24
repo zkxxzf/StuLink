@@ -1,4 +1,4 @@
-# StuLink v1.18.2.0 2026-09-24
+# StuLink v1.18.2.1 2026-09-24
 # 任课教师映射：矩阵维护（按年级）+ 教师安排表批量导入 + 自动开户
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 import io
@@ -42,13 +42,13 @@ def _grade_classes(grade):
 
 
 def _teacher_roles_filter():
-    """v1.18.2.0：教师候选的合法角色集合（明确排除 admin）"""
+    """v1.18.2.1：教师候选的合法角色集合（明确排除 admin）"""
     return ('teacher', 'homeroom_teacher', 'grade_leader',
             'dorm_manager', 'school_viewer', 'staff')
 
 
 def _teacher_candidates():
-    """v1.18.2.0：所有启用且属于教师类角色的账号 id 集合"""
+    """v1.18.2.1：所有启用且属于教师类角色的账号 id 集合"""
     rows = db.session.query(User.id).filter(
         User.role.in_(_teacher_roles_filter()),
         User.is_active.is_(True)
@@ -59,7 +59,7 @@ def _teacher_candidates():
 def _matrix_users(grade):
     """下拉候选教师：启用 + 教师类角色（明确排除 admin）。
 
-    v1.18.2.0：历史逻辑“已绑定 user_id 即可入选”会导致 admin 错配后一直显示在下拉里，
+    v1.18.2.1：历史逻辑“已绑定 user_id 即可入选”会导致 admin 错配后一直显示在下拉里，
     现改为仅按角色过滤；已绑定但非教师类的行依旧可在矩阵中显示历史名字（由 _build_matrix 侧），
     但下拉中不再提供 admin 作为新选择。"""
     valid = _teacher_candidates()

@@ -1,4 +1,4 @@
-# StuLink v1.18.2.0 2026-09-24
+# StuLink v1.18.2.1 2026-09-24
 # 班级概览服务：聚合班主任管辖班级数据（跨库查询）
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 from datetime import date, datetime
