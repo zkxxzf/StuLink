@@ -1,4 +1,4 @@
-# StuLink v1.18.1.0 2026-09-24
+# StuLink v1.18.2.0 2026-09-24
 # 教师名单服务：唯一编号生成 / 账号匹配与建号 / 任课映射统计
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 import secrets

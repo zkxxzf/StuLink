@@ -65,7 +65,7 @@ python run.py --dev
 cd alumni_app && python run.py
 
 # Docker 部署（两个容器）
-docker build -t stulink:v1.18.1.0 .
+docker build -t stulink:v1.18.2.0 .
 docker build -t stulink-alumni:v1.0.0 ./alumni_app
 docker-compose up -d
 ```

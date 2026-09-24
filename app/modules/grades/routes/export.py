@@ -1,4 +1,4 @@
-# StuLink v1.18.1.0 2026-09-24
+# StuLink v1.18.2.0 2026-09-24
 # 成绩分析导出：四大模块表格 → Excel（openpyxl，与页面所见一致）
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 import io

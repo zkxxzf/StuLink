@@ -1,4 +1,4 @@
-# StuLink v1.18.1.0 2026-09-24
+# StuLink v1.18.2.0 2026-09-24
 # 教务 · 课表：查看 / 导入 / 编辑 / 删除
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 import io

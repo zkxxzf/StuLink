@@ -1,4 +1,4 @@
-# StuLink v1.18.1.0 2026-09-24
+# StuLink v1.18.2.0 2026-09-24
 # 成绩管理：考试管理 + 成绩导入向导路由
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 import io

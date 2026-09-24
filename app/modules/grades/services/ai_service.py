@@ -1,4 +1,4 @@
-# StuLink v1.18.1.0 2026-09-24
+# StuLink v1.18.2.0 2026-09-24
 # AI 分析服务：权限收敛取数（本次+上次原始成绩）→ payload 组装 → LLM 转发
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 import json

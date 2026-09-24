@@ -1,4 +1,4 @@
-# StuLink v1.18.1.0 2026-09-24
+# StuLink v1.18.2.0 2026-09-24
 # 班级概览 / 学生查看 / 成绩整合 / 积分概览 路由
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 from flask import Blueprint, render_template, request, jsonify, abort

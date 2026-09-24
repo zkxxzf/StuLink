@@ -1,4 +1,4 @@
-# StuLink v1.18.1.0 2026-09-24
+# StuLink v1.18.2.0 2026-09-24
 # 成绩汇报区 · 压线提醒：总分层线上下浮动范围内的临界生名单（含各科成绩与方向排名）
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 from app.models.grades import SUBJECTS, TOTAL_SUBJECT, subject_display
