@@ -16,13 +16,18 @@ def _prune_backups(backups_dir, keep=20, max_age_days=180):
     """M-6：毕业备份保留策略。
 
     此前 `data/backups/` 只增不清理，明文整库副本（含口令哈希、身份证密文）
-    会长期累积并随同步盘扩散。这里只清理 .db 备份：按时间保留最近 keep 份，
-    并删除超过 max_age_days 天的旧备份。
+    会长期累积并随同步盘扩散。
+
+    v1.18.2.1 S-5：仅清理自动生成的、名字严格匹配
+    `(graduate|system|history)_<年级>_YYYYMMDD_HHMMSS.db` 的文件，
+    不误删手工改名的历史备份（如 `_local_before_repro/` 、`academic.db.bak-*` 等）。
     """
+    import re
     import time
+    pat = re.compile(r'^(?:graduate|system|history)_[^/\\]+_\d{8}_\d{6}\.db$')
     try:
         files = [os.path.join(backups_dir, f) for f in os.listdir(backups_dir)
-                 if f.endswith('.db')]
+                 if pat.match(f)]
     except Exception:  # noqa: BLE001
         return 0
     files = [(p, os.path.getmtime(p)) for p in files if os.path.isfile(p)]

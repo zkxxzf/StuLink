@@ -26,7 +26,10 @@ def _print_keep_running_notice(url):
 
 
 if __name__ == '__main__':
-    print('往届生查询系统已启动')
+    # v1.18.2.1 H-7 P0 修复：debug=True 会开启 Werkzeug 交互式调试器，PIN 可爆破 => RCE
+    # 默认生产模式；开发时显式传 --dev 才开 debug（且仅限本地）
+    debug_mode = '--dev' in sys.argv
+    print('往届生查询系统已启动' + (' (开发模式 - 仅限本地)' if debug_mode else ' (生产模式)'))
     print('请在浏览器访问: http://localhost:5001')
     _print_keep_running_notice('http://localhost:5001')
-    app.run(debug=True, host='0.0.0.0', port=5001)
+    app.run(debug=debug_mode, host='0.0.0.0', port=5001, use_reloader=False)

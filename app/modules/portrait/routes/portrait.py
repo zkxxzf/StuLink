@@ -141,6 +141,13 @@ def edit_comment(comment_id):
     ok, _comment, msg = portrait_service.can_manage_comment(comment_id, current_user.id)
     if not ok:
         return jsonify(success=False, message=msg), 403
+    # v1.18.2.1 S-2：反查所属学生并校验数据范围（避免持 portrait.edit 但无该生范围权限的管理、
+    # 或学生已转班/退校时跨权限写入）
+    if _comment is not None and getattr(_comment, 'student_no', None):
+        try:
+            _assert_student_in_scope(_comment.student_no)
+        except Exception:
+            return jsonify(success=False, message='无权修改该学生评语'), 403
 
     result = portrait_service.edit_comment(
         comment_id=comment_id,
@@ -166,6 +173,12 @@ def delete_comment(comment_id):
     ok, _comment, msg = portrait_service.can_manage_comment(comment_id, current_user.id)
     if not ok:
         return jsonify(success=False, message=msg), 403
+    # v1.18.2.1 S-2：同 edit_comment，反查 student_no 确认范围
+    if _comment is not None and getattr(_comment, 'student_no', None):
+        try:
+            _assert_student_in_scope(_comment.student_no)
+        except Exception:
+            return jsonify(success=False, message='无权删除该学生评语'), 403
 
     success = portrait_service.delete_comment(comment_id, operator_id=current_user.id)
     if not success:

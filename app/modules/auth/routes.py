@@ -63,7 +63,8 @@ def login():
             return render_template('auth/login.html', form=form)
 
         # M-3：账号维度锁定（多 IP 分布式爆破时，IP 限流形同虚设）
-        username_typed = (form.username.data or '').strip()
+        # v1.18.2.1 S-7：归一化 —— strip().lower() 避免“ Admin”“ADMIN” 重置计数绕过锁定
+        username_typed = (form.username.data or '').strip().lower()
         acct_fail_key = f'login_fail_{username_typed}'
         acct_lock_key = f'login_lock_{username_typed}'
         locked_until = cache.get(acct_lock_key)
@@ -72,7 +73,7 @@ def login():
             flash(f'该账号连续登录失败次数过多，已临时锁定，请 {left} 分钟后再试', 'danger')
             return render_template('auth/login.html', form=form)
 
-        user = User.query.filter_by(username=form.username.data).first()
+        user = User.query.filter_by(username=(form.username.data or '').strip()).first()
         if user and user.is_active and user.check_password(form.password.data):
             # 登录成功，清除尝试记录
             cache.delete(cache_key)

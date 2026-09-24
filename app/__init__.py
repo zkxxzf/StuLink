@@ -574,6 +574,17 @@ def create_app():
             return
         if request.path.startswith('/static/'):
             return
+        # v1.18.2.1 S-1：AJAX/Fetch/JSON 客户端不能处理 302 到 HTML 页面，
+        # 否则前端 fetch().json() 会抛异常、无“请先改密”提示。改为 401 JSON。
+        wants_json = (request.accept_mimetypes.best == 'application/json'
+                      or request.is_json
+                      or request.headers.get('X-Requested-With') == 'XMLHttpRequest'
+                      or (request.path.startswith('/api/') or request.path.startswith('/grades/api/')))
+        if wants_json:
+            from flask import jsonify
+            return jsonify(success=False,
+                           message='请先修改初始密码后再使用系统',
+                           must_change_pwd=True, next=url_for('auth.change_password')), 401
         return redirect(url_for('auth.change_password'))
 
     # CSRF 错误友好提示（Edge 等浏览器 cookie 策略较严时可能触发）

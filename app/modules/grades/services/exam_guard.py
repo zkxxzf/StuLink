@@ -54,5 +54,13 @@ def assert_grade_visible(grade):
         if grade != g:
             abort(403)
         return True
+    # v1.18.2.1 S-3：班主任/任课教师 scope=SCOPE_CLASS 时兜底放行——
+    # 只要本年级内存在他管辖的班级，就可创建/查看本年级的考务批次；
+    # 否则他会被默认 abort(403) 完全阻断。
+    if scope == 'class' or current_user.has_role('homeroom_teacher', 'grade_leader'):
+        from app.models import UserClassLink
+        if UserClassLink.query.filter_by(user_id=current_user.id,
+                                         grade=grade).first():
+            return True
     # 无有效数据范围（如未配置范围的身份）一律拒绝
     abort(403)

@@ -20,6 +20,20 @@ DEFAULT_MODEL = ai_providers.PROVIDERS['deepseek']['default_model']
 DEFAULT_TEMPERATURE = 0.4
 DEFAULT_TIMEOUT = 180
 
+# v1.18.2.1 S-4：不自动跟随 3xx，防 SSRF 以 approved.com → 302 → 169.254.169.254 绕过 url_guard
+
+class _NoRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        return None
+
+
+_NO_REDIRECT_OPENER = urllib.request.build_opener(_NoRedirect())
+
+
+def _safe_urlopen(req, timeout):
+    """经 opener.open 的封装；3xx 抛 HTTPError（因 redirect_request 返回 None）"""
+    return _NO_REDIRECT_OPENER.open(req, timeout=timeout)
+
 SYSTEM_PROMPT = (
     '你是一名严谨的中学考试成绩数据分析助手。你将收到一次（或两次）考试的 JSON 原始成绩数据'
     '（学号、姓名、班级、方向、选科、总分、方向内排名、班内排名、进退步、各科分数）。\n'
@@ -243,7 +257,7 @@ def _chat_completions(cfg, messages, timeout=None, max_tokens=None, temperature=
                  'Authorization': 'Bearer ' + (cfg.get('api_key') or '')})
     started = time.time()
     try:
-        with urllib.request.urlopen(req, timeout=timeout or DEFAULT_TIMEOUT) as resp:
+        with _safe_urlopen(req, timeout=timeout or DEFAULT_TIMEOUT) as resp:
             payload = json.loads(resp.read().decode('utf-8', 'replace'))
         return True, payload, round(time.time() - started, 2)
     except urllib.error.HTTPError as e:
@@ -488,7 +502,7 @@ def stream_chat(cfg, messages):
                  'Accept': 'text/event-stream'})
 
     try:
-        with urllib.request.urlopen(req, timeout=DEFAULT_TIMEOUT) as resp:
+        with _safe_urlopen(req, timeout=DEFAULT_TIMEOUT) as resp:
             yield {'type': 'stage', 'text': '已连接服务商，正在生成…'}
             for raw in resp:
                 line = raw.decode('utf-8', 'replace').strip()
