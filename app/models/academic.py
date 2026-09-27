@@ -110,10 +110,15 @@ class TeacherAchievement(db.Model):
     obtain_date = db.Column(db.Date)                       # 取得时间
     issuer = db.Column(db.String(100))                     # 颁发单位
     note = db.Column(db.String(200))
+    # 标签（2026-09-26 新增）：逗号分隔，如「课题,省级,数学」。
+    # 业绩库原来只有类别/级别两个维度，教务还需要按"做什么用的"打标签检索
+    # （如 竞赛辅导/论文发表/继续教育），一库多用。
+    tags = db.Column(db.String(200))
     status = db.Column(db.String(10), default='approved')  # pending/approved/rejected
     submitted_by = db.Column(db.Integer)                   # 提交人 users.id
     reviewed_by = db.Column(db.Integer)                    # 审核人 users.id
     reviewed_at = db.Column(db.DateTime)
+    review_note = db.Column(db.String(200))                # 审核意见（驳回原因等，2026-09-26 新增）
     created_at = db.Column(db.DateTime, default=datetime.now)
 
     def __repr__(self):
@@ -121,6 +126,47 @@ class TeacherAchievement(db.Model):
 
 
 # 业绩类别与查课结果的统一文案（模板与页面渲染共用）
+class AchievementAttachment(db.Model):
+    """业绩附件（证书扫描件、获奖照片、PDF/Word 材料等，2026-09-26 新增）。
+
+    文件落在 `app/static/uploads/achievements/<achievement_id>/`，与表单材料同一套
+    存放策略：`/static/uploads` 直链已被全局封禁，只能通过带鉴权的
+    `academic.achievement_file_view` / `achievement_file_download` 访问。
+
+    一条业绩可以有多个附件（证书正反面、红头文件 + 照片很常见）。
+    """
+    __bind_key__ = 'academic'
+    __tablename__ = 'achievement_attachments'
+
+    id = db.Column(db.Integer, primary_key=True)
+    achievement_id = db.Column(db.Integer, index=True, nullable=False)
+    file_name = db.Column(db.String(200))       # 原始文件名（展示与下载名）
+    stored_name = db.Column(db.String(80))      # 落盘名（uuid.ext，杜绝穿越/覆盖）
+    ext = db.Column(db.String(10))
+    mime = db.Column(db.String(60))
+    size = db.Column(db.Integer)                # 字节
+    uploaded_by = db.Column(db.Integer)         # users.id
+    uploaded_name = db.Column(db.String(50))
+    created_at = db.Column(db.DateTime, default=datetime.now)
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'achievement_id': self.achievement_id,
+            'file_name': self.file_name,
+            'ext': self.ext,
+            'mime': self.mime,
+            'size': self.size,
+            'size_text': (f'{self.size / 1024 / 1024:.1f} MB' if (self.size or 0) >= 1024 * 1024
+                          else f'{max(1, (self.size or 0) // 1024)} KB'),
+            'uploaded_name': self.uploaded_name,
+            'created_at': self.created_at.strftime('%Y-%m-%d %H:%M') if self.created_at else '',
+        }
+
+    def __repr__(self):
+        return f'<AchievementAttachment {self.achievement_id} {self.file_name}>'
+
+
 ACHIEVEMENT_CATEGORIES = [
     ('certificate', '证书'), ('course', '课题'), ('paper', '论文'),
     ('honor', '荣誉'), ('training', '培训'), ('other', '其他'),
@@ -333,3 +379,81 @@ class AttendanceRecord(db.Model):
 
 
 ATTENDANCE_STATUS = [('present', '出勤'), ('absent', '缺勤'), ('late', '迟到'), ('leave', '请假')]
+
+
+# ── 任课安排 / 备课组长（2026-09-25）─────────────────────────────────────────
+# 任课安排表本身不落库：它由课表条目（timetable.db 的 schedule_entries）聚合而来，
+# 保证"课表一改，任课表立刻跟着变"，避免两处数据打架。这里只落库无法自动推导的
+# 备课组长信息。
+
+class SubjectLeader(db.Model):
+    """备课组长登记（按 学年 × 学期 × 年级 × 学科 唯一）
+
+    - `term=''` 表示"整学年"；`grade=''` 表示全校/综合组（如信息技术、心理）；
+    - `leader_uid` 关联 academic.db 的 teachers.teacher_uid（快照式，跨库不建外键）；
+    - `members` 备课组范围或成员；`duty` 主要职责（可套用 DUTY_TEMPLATES 预设）。
+    """
+    __bind_key__ = 'academic'
+    __tablename__ = 'subject_leaders'
+
+    id = db.Column(db.Integer, primary_key=True)
+    school_year = db.Column(db.String(20), nullable=False, index=True)  # 如 2026-2027
+    term = db.Column(db.String(10), default='')          # ''=整学年 / 第一学期 / 第二学期
+    grade = db.Column(db.String(10), default='')         # ''=全校/综合组
+    subject = db.Column(db.String(20), nullable=False, index=True)
+    leader_uid = db.Column(db.String(16))                # Teacher.teacher_uid
+    leader_name = db.Column(db.String(50), nullable=False)
+    members = db.Column(db.String(300))                  # 备课组范围/成员
+    duty = db.Column(db.String(500))                     # 主要职责
+    sort_order = db.Column(db.Integer, default=0)
+    updated_by = db.Column(db.Integer)                   # users.id
+    created_at = db.Column(db.DateTime, default=datetime.now)
+    updated_at = db.Column(db.DateTime, default=datetime.now, onupdate=datetime.now)
+
+    __table_args__ = (
+        db.UniqueConstraint('school_year', 'term', 'grade', 'subject',
+                            name='uq_subject_leader'),
+        db.Index('idx_leader_year_subject', 'school_year', 'subject'),
+    )
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'school_year': self.school_year,
+            'term': self.term or '',
+            'term_text': self.term or '整学年',
+            'grade': self.grade or '',
+            'grade_text': self.grade or '全校',
+            'subject': self.subject,
+            'leader_uid': self.leader_uid or '',
+            'leader_name': self.leader_name,
+            'members': self.members or '',
+            'duty': self.duty or '',
+            'sort_order': self.sort_order or 0,
+            'updated_at': self.updated_at.strftime('%Y-%m-%d %H:%M') if self.updated_at else '',
+        }
+
+    def __repr__(self):
+        return f'<SubjectLeader {self.school_year} {self.grade}{self.subject} {self.leader_name}>'
+
+
+# 学科固定展示顺序（任课表列序、备课组长分组顺序都用它；未列入的学科排在后面）
+SUBJECT_ORDER = ['语文', '数学', '英语', '物理', '化学', '生物', '政治', '历史',
+                 '地理', '体育', '音乐', '美术', '信息技术', '通用技术', '心理',
+                 '劳动', '班会', '自习', '晚自习']
+
+# 备课组长职责预设（前端「填入常用职责」按钮用；可按校情自行修改）
+DUTY_TEMPLATES = {
+    'default': ('① 统筹本年级本学科教学进度，组织每周集体备课并留存记录；'
+                '② 组织单元主备、公开课与听评课，指导青年教师；'
+                '③ 统一作业量、命题与阅卷标准，汇总月考质量分析；'
+                '④ 建设与维护本学科教学资源库，及时传达教研通知。'),
+    '毕业年级': ('① 牵头制定备考方案与复习进度表，组织命题与模拟考试；'
+                 '② 组织考纲研读、专题突破与错题归因分析；'
+                 '③ 关注临界生与学科短板，配合年级组制定补弱措施；'
+                 '④ 汇总每次考试质量分析，动态调整复习策略。'),
+    '综合组': ('① 统筹全校本学科课程开设与活动安排；'
+               '② 组织跨年级教研与器材/场地管理；'
+               '③ 负责校内外竞赛、展演与社团指导；'
+               '④ 完成学校交办的其他教研任务。'),
+}

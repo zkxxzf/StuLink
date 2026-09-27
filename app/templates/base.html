@@ -311,9 +311,21 @@
             {# ========= 教务管理模块侧边栏（v1.14.0） ========= #}
             {% if request.blueprint == 'academic' and current_user.has_perm('academic.view') %}
             <div class="nav-section">教务管理</div>
+            <a class="nav-link {% if request.endpoint == 'academic.academic_home' %}active{% endif %}"
+               href="{{ url_for('academic.academic_home') }}">
+                <i class="bi bi-speedometer2"></i>教务工作台
+            </a>
             <a class="nav-link {% if request.endpoint == 'academic.teachers_page' %}active{% endif %}"
                href="{{ url_for('academic.teachers_page') }}">
                 <i class="bi bi-person-vcard"></i>教师名单
+            </a>
+            <a class="nav-link {% if request.endpoint == 'academic.duty_table' %}active{% endif %}"
+               href="{{ url_for('academic.duty_table') }}">
+                <i class="bi bi-person-lines-fill"></i>任课安排
+            </a>
+            <a class="nav-link {% if request.endpoint == 'academic.subject_leaders' %}active{% endif %}"
+               href="{{ url_for('academic.subject_leaders') }}">
+                <i class="bi bi-people"></i>备课组长
             </a>
             <a class="nav-link {% if request.endpoint == 'academic.timetable_page' %}active{% endif %}"
                href="{{ url_for('academic.timetable_page') }}">
@@ -334,10 +346,40 @@
                 <i class="bi bi-calendar-range"></i>学期课表管理
             </a>
             {% endif %}
+            <a class="nav-link {% if request.endpoint in ['academic.schedule_overview', 'academic.schedule_overview_index'] %}active{% endif %}"
+               href="{{ url_for('academic.schedule_overview_index') }}">
+                <i class="bi bi-list-columns-reverse"></i>全校总课表
+            </a>
+            {% if current_user.has_perm('academic.view') %}
+            <a class="nav-link {% if request.endpoint in ['academic.night_duty', 'academic.night_duty_index'] %}active{% endif %}"
+               href="{{ url_for('academic.night_duty_index') }}">
+                <i class="bi bi-moon-stars"></i>晚自习值班
+            </a>
+            {% endif %}
+            <a class="nav-link {% if request.endpoint in ['academic.schedule_timetable', 'academic.schedule_timetable_index'] %}active{% endif %}"
+               href="{{ url_for('academic.schedule_timetable_index') }}">
+                <i class="bi bi-clock-history"></i>作息时间表
+            </a>
             <a class="nav-link {% if request.endpoint == 'academic.my_schedule' %}active{% endif %}"
                href="{{ url_for('academic.my_schedule') }}">
                 <i class="bi bi-calendar-week"></i>我的课表
             </a>
+            {% if current_user.has_perm('academic.timetable') %}
+            <a class="nav-link {% if request.endpoint in ['academic.schedule_room', 'academic.schedule_room_index'] %}active{% endif %}"
+               href="{{ url_for('academic.schedule_room_index') }}">
+                <i class="bi bi-door-open"></i>教室课表
+            </a>
+            {% endif %}
+            {% if current_user.has_perm('academic.view') %}
+            <a class="nav-link {% if request.endpoint in ['academic.schedule_teaching', 'academic.schedule_teaching_index'] %}active{% endif %}"
+               href="{{ url_for('academic.schedule_teaching_index') }}">
+                <i class="bi bi-diagram-3"></i>走班教学班
+            </a>
+            <a class="nav-link {% if request.endpoint == 'academic.schedule_student' %}active{% endif %}"
+               href="{{ url_for('academic.schedule_student_index') }}">
+                <i class="bi bi-person-badge"></i>学生课表
+            </a>
+            {% endif %}
             <a class="nav-link {% if request.endpoint == 'academic.today_schedule' %}active{% endif %}"
                href="{{ url_for('academic.today_schedule') }}">
                 <i class="bi bi-clock"></i>今日课表

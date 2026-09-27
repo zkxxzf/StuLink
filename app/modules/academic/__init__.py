@@ -6,5 +6,6 @@ from flask import Blueprint
 bp = Blueprint('academic', __name__, url_prefix='/academic')
 
 # 各子模块通过 @bp.route 注册（延迟 import，保证 bp 已定义）
-from app.modules.academic.routes import (teachers, timetable,  # noqa: E402,F401
-                                         inspection, achievements, swap, forms)
+from app.modules.academic.routes import (home, teachers, timetable,  # noqa: E402,F401
+                                         inspection, achievements, swap, forms,
+                                         duty)

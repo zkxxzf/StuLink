@@ -237,6 +237,10 @@ class ScheduleEntry(db.Model):
     teacher_uid = db.Column(db.String(16))                  # 教师编号（逻辑键）
     teacher_name = db.Column(db.String(50))                 # 教师姓名快照
     room = db.Column(db.String(30))                         # 教室
+    # 走班教学班（新高考 3+1+2，2026-09-26 迁移 migrate_teaching_class.py）：
+    # 空＝行政班课（全班在本班教室上）；非空＝走班课，只有属于该教学班的学生来上，
+    # 如「物化生1」。对不走班的学校该列恒为空，所有既有逻辑不受影响。
+    teaching_class = db.Column(db.String(30))
     entry_type = db.Column(db.String(10), default='normal') # normal / swap
     original_entry_id = db.Column(db.Integer)               # 调课来源条目 id
     note = db.Column(db.String(100))
@@ -247,6 +251,7 @@ class ScheduleEntry(db.Model):
     __table_args__ = (
         db.Index('idx_entry_class', 'term_schedule_id', 'grade', 'class_name', 'weekday', 'period_number'),
         db.Index('idx_entry_teacher', 'term_schedule_id', 'teacher_uid', 'weekday', 'period_number'),
+        db.Index('idx_entry_teaching', 'term_schedule_id', 'grade', 'teaching_class'),
     )
 
     def week_badge(self):
@@ -286,6 +291,7 @@ class ScheduleEntry(db.Model):
             'teacher_uid': self.teacher_uid,
             'teacher_name': self.teacher_name,
             'room': self.room,
+            'teaching_class': self.teaching_class,
             'entry_type': self.entry_type,
             'entry_type_text': ENTRY_TYPES.get(self.entry_type, self.entry_type),
             'original_entry_id': self.original_entry_id,
@@ -298,6 +304,56 @@ class ScheduleEntry(db.Model):
     def __repr__(self):
         return (f'<ScheduleEntry {self.id} {self.grade}{self.class_name} '
                 f'{WEEKDAY_NAMES.get(self.weekday, "")}第{self.period_number}节 {self.subject}>')
+
+
+class NightDuty(db.Model):
+    """晚自习值班（2026-09-26 新增，高中教务刚需）。
+
+    高中晚自习（通常第 11~13 节）不排学科课，而是安排教师**值班看班/巡楼**。
+    教务处每学期要出一张「年级 × 星期 × 节次」的值班表，排班时要保证：
+    - 同一位教师**同一天**不重复值班（一晚只值一节，值完就走）；
+    - 每位教师**一周**值班次数均衡（默认上限 2 次）；
+    - 优先用在校任课教师，行政人员作为兜底。
+
+    与课表的关系：只读课表（取年级、避开当天课多的教师），不写入课表条目 ——
+    值班不是课，不该出现在班级课表的网格里。
+    """
+    __bind_key__ = 'timetable'
+    __tablename__ = 'night_duties'
+
+    id = db.Column(db.Integer, primary_key=True)
+    term_schedule_id = db.Column(db.Integer, db.ForeignKey('term_schedules.id'),
+                                 nullable=False)
+    grade = db.Column(db.String(10), nullable=False)        # 如 "2024级"
+    weekday = db.Column(db.Integer, nullable=False)         # 1=周一 ... 7=周日
+    period_number = db.Column(db.Integer, nullable=False)   # 晚自习节次（如 11/12/13）
+    teacher_uid = db.Column(db.String(16))                  # 逻辑键（跨库不建外键）
+    teacher_name = db.Column(db.String(50))
+    note = db.Column(db.String(100))
+    created_at = db.Column(db.DateTime, default=datetime.now)
+
+    __table_args__ = (
+        # 同一学期、同一年级、同一时段只允许一位值班教师
+        db.UniqueConstraint('term_schedule_id', 'grade', 'weekday', 'period_number',
+                            name='uq_night_duty_slot'),
+        db.Index('idx_night_duty_teacher', 'term_schedule_id', 'teacher_uid', 'weekday'),
+    )
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'grade': self.grade,
+            'weekday': self.weekday,
+            'weekday_text': WEEKDAY_NAMES.get(self.weekday, ''),
+            'period_number': self.period_number,
+            'teacher_uid': self.teacher_uid,
+            'teacher_name': self.teacher_name,
+            'note': self.note,
+        }
+
+    def __repr__(self):
+        return (f'<NightDuty {self.grade} {WEEKDAY_NAMES.get(self.weekday, "")}'
+                f'第{self.period_number}节 {self.teacher_name}>')
 
 
 class ScheduleSwap(db.Model):

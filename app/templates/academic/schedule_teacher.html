@@ -28,6 +28,7 @@
         </a>
         {% endif %}
         {{ parts.print_button('打印课表') }}
+        {{ parts.export_tools() }}
         <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('academic.schedule_manage') }}">
             <i class="bi bi-house"></i> 学期管理
         </a>
@@ -161,7 +162,9 @@
     "stats": {{ view.stats|tojson if view else '{}'|tojson }},
     "teacherUrlTpl": {{ (url_for('academic.schedule_teacher', sid=ts.id, uid='__UID__') if ts and not my_mode else '')|tojson }},
     "myUrl": {{ url_for('academic.my_schedule')|tojson }},
-    "urls": {}
+    "urls": {
+        "share": {{ (url_for('academic.schedule_share', sid=ts.id) if ts else '')|tojson }}
+    }
 }
 </script>
 {% endblock %}

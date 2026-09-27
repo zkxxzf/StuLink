@@ -1,47 +1,119 @@
-{# StuLink v1.16.0 课表网格宏：13行(节次) x 7列(星期)，供 master/grade/class/teacher 模板复用。
-   JS 端 schedule.js 用同样的 class 约定重渲染（AJAX 切换班级/年级时）。 #}
+{# StuLink v1.18.2.1 课表网格宏：13行(节次) x 7列(星期)，供 master/grade/class/teacher 模板复用。
+   视觉：学科配色 + 卡片化条目 + 节次列吸附 + 移动端压缩 + 打印黑白化。
+   JS 端 schedule.js 用同样的 class/结构约定重渲染（AJAX 切换班级/年级时），改结构时两处同步。 #}
 {% macro schedule_grid_css() %}
 <style>
-.sch-grid-wrap { overflow-x: auto; }
-.sch-grid { width: 100%; min-width: 860px; border-collapse: separate; border-spacing: 0;
+/* ── 容器与网格骨架 ─────────────────────────────────────────────
+   2026-09-27 修复"表头与课程重叠"：
+   原实现把表头 sticky 到 top:56px（相对**页面**吸附），而容器又因 overflow-x:auto
+   被浏览器计算成纵向 overflow:auto —— 表头与表格内容分属两层吸附，滚动时单元格
+   会从表头位置穿过、与新排的早读/晚自习底色叠在一起。
+   现在改为**容器自身纵向滚动 + 表头在容器内吸附(top:0)**：表头永远盖在内容之上，
+   不会与页面导航栏或表格行互相穿插；并给单元格建独立层级，彻底压住内容。 */
+.sch-grid-wrap { position: relative; isolation: isolate;
+                 overflow: auto; max-height: calc(100vh - 200px);
+                 -webkit-overflow-scrolling: touch;
+                 border-radius: 10px; border: 1px solid #e2e8f0; background: #fff; }
+.sch-grid { width: 100%; min-width: 900px; border-collapse: separate; border-spacing: 0;
             table-layout: fixed; font-size: 13px; }
-.sch-grid th, .sch-grid td { border: 1px solid #e2e8f0; padding: 4px; text-align: center;
-                             vertical-align: middle; }
-.sch-grid thead th { background: #1e293b; color: #e2e8f0; font-weight: 600; font-size: 12px;
-                     padding: 8px 4px; position: sticky; top: 56px; z-index: 5; }
-.sch-grid .sch-period-col { width: 118px; background: #f8fafc; }
+.sch-grid th, .sch-grid td { border-right: 1px solid #eef2f7; border-bottom: 1px solid #eef2f7;
+                             padding: 3px; text-align: center; vertical-align: middle; }
+.sch-grid th:last-child, .sch-grid td:last-child { border-right: none; }
+.sch-grid tbody tr:last-child th, .sch-grid tbody tr:last-child td { border-bottom: none; }
+
+/* ── 表头（星期）＋ 节次列吸附（横向滚动时左侧节次列不动） ───────
+   z-index 分层：表头 30/31 > 节次列 20 > 单元格 1，保证吸附时永远压住内容。 */
+.sch-grid thead th { background: linear-gradient(180deg, #1e293b, #273549); color: #e2e8f0;
+                     font-weight: 600; font-size: 12px; letter-spacing: .3px; padding: 9px 4px;
+                     position: sticky; top: 0; z-index: 30;
+                     box-shadow: inset 0 -1px 0 #0f172a, 0 2px 6px rgba(15, 23, 42, .16); }
+.sch-grid thead th.sch-period-col { z-index: 31; left: 0; }
+.sch-grid tbody .sch-period-head { position: sticky; left: 0; z-index: 20;
+                                   background: #f8fafc; border-right: 1px solid #e2e8f0; }
+.sch-grid .sch-period-col { width: 120px; }
 .sch-grid .sch-period-head { text-align: left; padding: 5px 8px; }
 .sch-period-name { font-weight: 700; color: #334155; font-size: 12.5px; }
-.sch-period-time { color: #94a3b8; font-size: 10.5px; margin-top: 1px; }
+.sch-period-time { color: #94a3b8; font-size: 10.5px; margin-top: 1px; font-variant-numeric: tabular-nums; }
+.sch-period-dot { display: inline-block; width: 6px; height: 6px; border-radius: 50%;
+                  margin-right: 4px; vertical-align: 1px; }
+.sch-dot-morning { background: #0ea5e9; }
+.sch-dot-afternoon { background: #f59e0b; }
+.sch-dot-evening { background: #6366f1; }
+.sch-dot-break { background: #cbd5e1; }
 .sch-grid tr.sch-break .sch-period-head { background: #f1f5f9; }
-.sch-grid tr.sch-break td { background: repeating-linear-gradient(45deg, #f8fafc, #f8fafc 6px, #f1f5f9 6px, #f1f5f9 12px);
+.sch-grid tr.sch-break td { background: repeating-linear-gradient(45deg, #fbfdff, #fbfdff 6px, #f1f5f9 6px, #f1f5f9 12px);
                             color: #cbd5e1; }
-.sch-cell { cursor: default; height: 52px; transition: box-shadow .12s; }
+
+/* ── 高中作息语义：早读 / 晚自习 与正课要一眼分得开 ─────────────────
+   早读＝暖色（教师跟班、不按正课排），晚自习＝冷色（多是值班或限时练），
+   打印时统一转白底，避免浪费墨。 */
+.sch-grid tr.sch-reading .sch-period-head { background: #fffbeb; }
+.sch-grid tr.sch-reading td { background: #fffdf5; }
+.sch-grid tr.sch-evening .sch-period-head { background: #eef2ff; }
+.sch-grid tr.sch-evening td { background: #f7f8ff; }
+.sch-grid tr.sch-evening .sch-item { opacity: .95; }
+.sch-tag-period { display: inline-block; font-size: 9px; line-height: 1; padding: 1px 3px;
+                  border-radius: 3px; margin-left: 4px; vertical-align: 1px;
+                  background: #e0e7ff; color: #3730a3; }
+.sch-tag-reading { background: #fef3c7; color: #92400e; }
+
+/* ── 单元格 ───────────────────────────────────────────────────── */
+/* z-index:1 让每个单元格自成层级（低于粘性表头 30 / 节次列 20），
+   否则卡片（position:relative）会盖到表头上，出现"表头与课程重叠"。 */
+.sch-cell { cursor: default; height: 58px; position: relative; z-index: 1;
+           transition: background .12s, box-shadow .12s; }
 .sch-cell.sch-multi { height: auto; }
+.sch-cell.sch-has { background: #fcfdff; }
 .sch-cell.sch-has:hover { box-shadow: inset 0 0 0 2px #3b82f6; }
 .sch-cell.sch-editable { cursor: pointer; }
-.sch-subject { font-weight: 700; color: #0f172a; line-height: 1.3; }
-.sch-teacher { color: #64748b; font-size: 11px; line-height: 1.3; }
-.sch-room { color: #94a3b8; font-size: 10px; }
-.sch-cell.sch-normal { background: #eff6ff; }
-.sch-cell.sch-swap { background: #fff7ed; box-shadow: inset 3px 0 0 #f59e0b; }
-/* 同一格子的多条（单周/双周交替）：逐条分块，便于分别点击编辑 */
-.sch-cell { position: relative; }
-.sch-item { border-radius: 4px; padding: 1px 2px; }
-/* 有课格子右上角的「再排一门」入口（悬停显示）：用于单/双周交替课 */
-.sch-add-mini { position: absolute; top: 0; right: 3px; font-size: 13px; line-height: 1;
-                color: #cbd5e1; opacity: 0; transition: opacity .12s; }
-.sch-cell.sch-has.sch-editable:hover .sch-add-mini { opacity: 1; color: #10b981; }
-.sch-item + .sch-item { margin-top: 2px; border-top: 1px dashed #cbd5e1; padding-top: 3px; }
-.sch-item.sch-item-swap { background: rgba(245, 158, 11, .10); }
+.sch-cell.sch-current-col { background: #f0fdf4; box-shadow: inset 3px 0 0 #10b981; }
+.sch-cell.sch-empty .sch-add { color: #cbd5e1; font-size: 16px; line-height: 1;
+                               opacity: 0; transition: opacity .12s; }
+.sch-cell.sch-empty.sch-editable:hover { background: #f0fdf4; }
+.sch-cell.sch-empty.sch-editable:hover .sch-add { opacity: 1; color: #10b981; }
+
+/* ── 课表条目卡片（学科配色由 --sch/--sch-bg/--sch-fg 注入） ──── */
+.sch-item { position: relative; border-radius: 6px; padding: 2px 5px 2px 7px;
+            background: var(--sch-bg, #f1f5f9); box-shadow: inset 3px 0 0 var(--sch, #94a3b8);
+            text-align: left; }
+.sch-item + .sch-item { margin-top: 3px; }
+.sch-subject { font-weight: 700; color: var(--sch-fg, #0f172a); line-height: 1.25;
+               font-size: 12.5px; }
+.sch-teacher { color: #64748b; font-size: 11px; line-height: 1.3; margin-top: 1px; }
+.sch-room { color: #94a3b8; font-size: 10px; line-height: 1.3; }
+.sch-item.sch-item-swap { outline: 1px dashed #f59e0b; outline-offset: -1px; }
 .sch-badge-swap { display: inline-block; background: #f59e0b; color: #fff; border-radius: 3px;
                   font-size: 9px; padding: 0 4px; margin-left: 3px; vertical-align: 1px; }
 .sch-badge-week { display: inline-block; background: #0ea5e9; color: #fff; border-radius: 3px;
                   font-size: 9px; padding: 0 4px; margin-left: 3px; vertical-align: 1px; }
-.sch-cell.sch-empty .sch-add { color: #cbd5e1; font-size: 16px; line-height: 1; }
-.sch-cell.sch-empty.sch-editable:hover { background: #ecfdf5; }
-.sch-cell.sch-empty.sch-editable:hover .sch-add { color: #10b981; }
-.sch-cell.sch-current-col { outline: 2px solid #10b981; outline-offset: -2px; }
+/* 走班课角标：这门课要去教学班上（新高考选考走班） */
+.sch-badge-tc { display: inline-block; background: #7c3aed; color: #fff; border-radius: 3px;
+                font-size: 9px; padding: 0 4px; margin-left: 3px; vertical-align: 1px; }
+
+/* 有课格子右上角的「再排一门」入口（悬停显示）：用于单/双周交替课 */
+.sch-add-mini { position: absolute; top: 0; right: 3px; font-size: 13px; line-height: 1;
+                color: #cbd5e1; opacity: 0; transition: opacity .12s; z-index: 2; }
+.sch-cell.sch-has.sch-editable:hover .sch-add-mini { opacity: 1; color: #10b981; }
+
+/* ── 拖拽换格调课（batch B） ──────────────────────────────────── */
+.sch-item[draggable="true"] { cursor: grab; }
+.sch-item.sch-dragging { opacity: .4; }
+.sch-cell.sch-drop-hover { box-shadow: inset 0 0 0 2px #10b981; background: #f0fdf4; }
+.sch-cell.sch-drop-blocked { box-shadow: inset 0 0 0 2px #ef4444; background: #fef2f2; }
+
+/* ── 移动端：压缩列宽、隐藏次要信息、节次列更窄 ────────────────── */
+@media (max-width: 768px) {
+    .sch-grid { min-width: 640px; font-size: 11.5px; }
+    .sch-grid .sch-period-col { width: 78px; }
+    .sch-grid .sch-period-head { padding: 4px 5px; }
+    .sch-period-name { font-size: 11px; }
+    .sch-period-time { font-size: 9.5px; }
+    .sch-cell { height: 48px; }
+    .sch-subject { font-size: 11.5px; }
+    .sch-teacher { display: none; }        /* 手机只留学科+教室，点开弹窗看详情 */
+    .sch-room { font-size: 9.5px; }
+    .sch-badge-week { display: none; }     /* 周次徽章手机上省略，避免挤爆 */
+}
 
 /* ── 打印：只输出课表本体（A4 横向，黑白友好），配合 parts.print_button() ── */
 @media print {
@@ -52,29 +124,36 @@
     body { background: #fff !important; }
     .card { border: none !important; box-shadow: none !important; }
     .card-header { border-bottom: 2px solid #000 !important; background: #fff !important; }
-    .sch-grid-wrap { overflow: visible !important; }
+    .sch-grid-wrap { overflow: visible !important; max-height: none !important;
+                     border: none !important; }
     .sch-grid { min-width: 0 !important; width: 100% !important; font-size: 10.5px; }
     .sch-grid thead th { background: #e5e7eb !important; color: #000 !important;
                         position: static !important; }
+    .sch-grid thead th.sch-period-col, .sch-grid tbody .sch-period-head { position: static !important; }
     .sch-grid th, .sch-grid td { border-color: #6b7280 !important; }
-    .sch-cell.sch-normal, .sch-cell.sch-swap, .sch-grid tr.sch-break td,
-    .sch-grid tr.sch-break .sch-period-head { background: #fff !important;
-                                             box-shadow: none !important; }
+    .sch-cell.sch-normal, .sch-cell.sch-swap, .sch-cell.sch-has, .sch-cell.sch-current-col,
+    .sch-grid tr.sch-break td, .sch-grid tr.sch-break .sch-period-head {
+        background: #fff !important; box-shadow: none !important; }
+    .sch-item { background: #fff !important; box-shadow: inset 3px 0 0 #6b7280 !important;
+                outline: none !important; }
+    .sch-subject { color: #000 !important; }
     .sch-badge-swap, .sch-badge-week { background: #fff !important; color: #000 !important;
                                       border: 1px solid #6b7280; }
-    .sch-cell.sch-empty .sch-add { display: none !important; }
+    .sch-cell.sch-empty .sch-add, .sch-add-mini { display: none !important; }
 }
 </style>
 {% endmacro %}
 
 {# 网格主体
    - periods: list[dict]（period_number/period_name/start_time/end_time/period_type）
-   - grid: {period_number: {weekday: entry_dict|None}}
-   - can_edit: 是否可点击编辑（空档 "+" / 有课单元格点击弹窗）
+   - grid: {period_number: {weekday: entry_dict | [entry_dict,...]}}
+   - can_edit: 是否可点击编辑（空格 "+" / 有课单元格点击弹窗 / 拖拽换格）
    - current_period: 当前节次号（今日课表高亮，可为 None）
    - grid_id: 容器 id（AJAX 重渲染定位用）
 #}
 {% macro schedule_grid(periods, grid, can_edit=False, current_period=None, grid_id='schGrid') %}
+{% set dot_cls = {'morning': 'sch-dot-morning', 'afternoon': 'sch-dot-afternoon',
+                  'evening': 'sch-dot-evening', 'break': 'sch-dot-break'} %}
 <div class="sch-grid-wrap" id="{{ grid_id }}">
     <table class="sch-grid">
         <thead>
@@ -87,10 +166,12 @@
         </thead>
         <tbody>
             {% for p in periods %}
-            <tr class="{{ 'sch-break' if p.period_type == 'break' else '' }}">
+            <tr class="{{ 'sch-break' if p.period_type == 'break' else '' }}{{ ' sch-evening' if p.period_type == 'evening' else '' }}{{ ' sch-reading' if p.period_name and ('早读' in p.period_name or '晨读' in p.period_name) else '' }}">
                 <th class="sch-period-head">
-                    <div class="sch-period-name">{{ p.period_name }}
-                        <span class="text-muted fw-normal" style="font-size:10px">#{{ p.period_number }}</span>
+                    <div class="sch-period-name">
+                        <span class="sch-period-dot {{ dot_cls.get(p.period_type, 'sch-dot-break') }}"></span>{{ p.period_name }}
+                        {% if p.period_type == 'evening' %}<span class="sch-tag-period">晚</span>
+                        {% elif p.period_name and ('早读' in p.period_name or '晨读' in p.period_name) %}<span class="sch-tag-period sch-tag-reading">读</span>{% endif %}
                     </div>
                     <div class="sch-period-time">{{ p.start_time or '--:--' }} - {{ p.end_time or '--:--' }}</div>
                 </th>
@@ -99,8 +180,12 @@
                 <td class="sch-cell {{ 'sch-has sch-' ~ (items[0].entry_type or 'normal') if items else 'sch-empty' }}{{ ' sch-editable' if can_edit else '' }}{{ ' sch-current-col' if current_period == p.period_number else '' }}{{ ' sch-multi' if items|length > 1 else '' }}"
                     data-period="{{ p.period_number }}" data-weekday="{{ wd }}">
                     {% for e in items %}
-                    <div class="sch-item{{ ' sch-item-' ~ (e.entry_type or 'normal') }}" data-entry-id="{{ e.id }}">
-                        <div class="sch-subject">{{ e.subject }}{% if e.entry_type == 'swap' %}<span class="sch-badge-swap">调</span>{% endif %}{% if e.week_badge %}<span class="sch-badge-week">{{ e.week_badge }}</span>{% endif %}</div>
+                    {% set tone = subject_tone(e.subject) %}
+                    <div class="sch-item{{ ' sch-item-' ~ (e.entry_type or 'normal') }}"
+                         data-entry-id="{{ e.id }}"
+                         {% if can_edit %}draggable="true" title="拖到别的格子可换课（点击可编辑）"{% endif %}
+                         style="--sch:{{ tone.c }};--sch-bg:{{ tone.bg }};--sch-fg:{{ tone.fg }}">
+                        <div class="sch-subject">{{ e.subject }}{% if e.entry_type == 'swap' %}<span class="sch-badge-swap">调</span>{% endif %}{% if e.teaching_class %}<span class="sch-badge-tc" title="走班课：{{ e.teaching_class }}">走</span>{% endif %}{% if e.week_badge %}<span class="sch-badge-week">{{ e.week_badge }}</span>{% endif %}</div>
                         <div class="sch-teacher">{{ e.teacher_name or '未指定' }}</div>
                         {% if e.room %}<div class="sch-room"><i class="bi bi-geo-alt"></i> {{ e.room }}</div>{% endif %}
                     </div>

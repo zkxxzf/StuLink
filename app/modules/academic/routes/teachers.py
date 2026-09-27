@@ -35,20 +35,46 @@ def _purge_expired_drafts():
         _DRAFT.pop(key, None)
 
 
-@bp.route('/teachers')
-@login_required
-@perm_required('academic.view')
-def teachers_page():
-    """教师名单（教务基础数据）"""
-    from app.models.grades import TeacherSubjectLink
+def _teacher_filters():
+    """教师名单筛选条件（列表与导出共用，保证"导出即所见"）"""
+    return {
+        'kw': (request.args.get('kw') or '').strip(),
+        'status': (request.args.get('status') or '').strip(),
+        'subject': (request.args.get('subject') or '').strip(),
+    }
 
-    kw = (request.args.get('kw') or '').strip()
+
+def _teacher_query(filters):
     q = Teacher.query
+    kw = filters.get('kw')
     if kw:
         like = f'%{kw}%'
         q = q.filter(or_(Teacher.name.like(like), Teacher.teacher_uid.like(like),
                          Teacher.phone.like(like), Teacher.subject.like(like)))
-    teachers = q.order_by(Teacher.teacher_uid).all()
+    if filters.get('status') in ('active', 'left'):
+        q = q.filter_by(status=filters['status'])
+    if filters.get('subject'):
+        q = q.filter_by(subject=filters['subject'])
+    return q
+
+
+def _subject_options():
+    rows = db.session.query(Teacher.subject).distinct().all()
+    return sorted({r[0] for r in rows if r[0]})
+
+
+@bp.route('/teachers')
+@login_required
+@perm_required('academic.view')
+def teachers_page():
+    """教师名单（教务基础数据）：关键词 + 状态 + 学科筛选，分页展示。"""
+    from app.models.grades import TeacherSubjectLink
+
+    filters = _teacher_filters()
+    page = request.args.get('page', 1, type=int)
+    pagination = (_teacher_query(filters).order_by(Teacher.teacher_uid)
+                  .paginate(page=page, per_page=30, error_out=False))
+    teachers = pagination.items
 
     user_ids = [t.user_id for t in teachers if t.user_id]
     users = ({u.id: u for u in User.query.filter(User.id.in_(user_ids)).all()}
@@ -69,7 +95,65 @@ def teachers_page():
             'lesson_count': counts.get(t.user_id, 0),
             'id_masked': id_card_util.masked_from_cipher(t.id_card_enc),
         })
-    return render_template('academic/teachers.html', rows=rows, kw=kw)
+    return render_template('academic/teachers.html', rows=rows, pagination=pagination,
+                           subjects=_subject_options(), **filters)
+
+
+@bp.route('/teachers/export')
+@login_required
+@perm_required('academic.view')
+def teachers_export():
+    """导出教师名单 Excel（遵循当前筛选条件：关键词/状态/学科）"""
+    from datetime import datetime
+
+    from openpyxl import Workbook
+    from openpyxl.styles import Alignment, Font, PatternFill
+    from openpyxl.utils import get_column_letter
+
+    from app.utils.export_helpers import xl_safe
+
+    filters = _teacher_filters()
+    teachers = _teacher_query(filters).order_by(Teacher.teacher_uid).all()
+    user_ids = [t.user_id for t in teachers if t.user_id]
+    users = ({u.id: u for u in User.query.filter(User.id.in_(user_ids)).all()}
+             if user_ids else {})
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = '教师名单'
+    headers = ['序号', '教师编号', '姓名', '学科', '手机号', '身份证号(掩码)',
+               '登录账号', '状态', '备注']
+    for ci, h in enumerate(headers, 1):
+        c = ws.cell(row=1, column=ci, value=h)
+        c.font = Font(bold=True, color='FFFFFF')
+        c.fill = PatternFill(start_color='4472C4', end_color='4472C4', fill_type='solid')
+        c.alignment = Alignment(horizontal='center', vertical='center')
+    for i, t in enumerate(teachers, 1):
+        account = users.get(t.user_id) if t.user_id else None
+        values = [
+            i, t.teacher_uid, t.name, t.subject or '', t.phone or '',
+            id_card_util.masked_from_cipher(t.id_card_enc) or '',
+            account.username if account else '',
+            '在职' if t.status == 'active' else '离职', t.note or '',
+        ]
+        for ci, v in enumerate(values, 1):
+            cell = ws.cell(row=i + 1, column=ci,
+                           value=xl_safe(v) if isinstance(v, str) else v)
+            cell.alignment = Alignment(horizontal='center', vertical='center',
+                                       wrap_text=(ci == 9))
+    for ci, w in enumerate([6, 14, 12, 10, 14, 22, 14, 8, 30], 1):
+        ws.column_dimensions[get_column_letter(ci)].width = w
+
+    buf = io.BytesIO()
+    wb.save(buf)
+    buf.seek(0)
+    stamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+    log_operation(current_user, '导出', '教师名单', None, f'{len(teachers)} 条',
+                  module='academic')
+    return send_file(buf, as_attachment=True,
+                     download_name=f'教师名单_{stamp}.xlsx',
+                     mimetype='application/vnd.openxmlformats-officedocument'
+                              '.spreadsheetml.sheet')
 
 
 @bp.route('/teachers/template.xlsx')

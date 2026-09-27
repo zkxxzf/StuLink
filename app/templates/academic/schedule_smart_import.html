@@ -1,0 +1,224 @@
+{% extends "base.html" %}
+{% import "academic/_schedule_parts.html" as parts %}
+{% block title %}学校原样课表导入 · {{ ts.name }}{% endblock %}
+{% block extra_css %}
+<style>
+.si-demo { font-family: Consolas, "Courier New", monospace; font-size: 12px;
+           background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 6px;
+           padding: 10px 12px; white-space: pre; overflow-x: auto; color: #334155; }
+.si-sheet { border: 1px solid #e2e8f0; border-radius: 8px; }
+.si-sheet .card-header { background: #f8fafc; border-bottom: 1px solid #e2e8f0;
+                         border-radius: 8px 8px 0 0; }
+.si-warn { max-height: 150px; overflow: auto; font-size: 12px; }
+</style>
+{% endblock %}
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
+    <div class="d-flex align-items-center gap-3 flex-wrap">
+        <h4 class="fw-bold mb-0"><i class="bi bi-magic"></i> 学校原样课表导入</h4>
+        {{ parts.term_selector(schedules, ts, base_endpoint='academic.schedule_smart_import') }}
+    </div>
+    <div class="d-flex gap-2 flex-wrap">
+        <a class="btn btn-sm btn-outline-dark"
+           href="{{ url_for('academic.schedule_smart_template', sid=ts.id) }}">
+            <i class="bi bi-download"></i> 下载原样模板
+        </a>
+        <a class="btn btn-sm btn-outline-secondary"
+           href="{{ url_for('academic.schedule_import', sid=ts.id) }}">
+            <i class="bi bi-table"></i> 长表导入（标准模板）
+        </a>
+        <a class="btn btn-sm btn-outline-secondary"
+           href="{{ url_for('academic.schedule_master', sid=ts.id) }}">
+            <i class="bi bi-grid-3x3"></i> 大课表
+        </a>
+    </div>
+</div>
+
+{{ parts.readonly_banner(ts) }}
+
+{% if result %}
+<div class="alert alert-{{ 'success' if result.success else 'warning' }}">
+    <div class="fw-bold mb-1"><i class="bi bi-check2-circle"></i> 上次导入结果</div>
+    <div class="small">
+        成功 <b>{{ result.success }}</b> 条，跳过 <b>{{ result.failed }}</b> 条。
+        {% for s in result.sheets %}
+        <span class="badge bg-light text-dark border ms-1">{{ s.sheet }} → {{ s.grade }}{{ s.class_name }}（{{ s.count }}）</span>
+        {% endfor %}
+    </div>
+    {% if result.errors %}
+    <div class="si-warn mt-2">
+        {% for e in result.errors %}<div>· 第 {{ e.row }} 行：{{ e.message }}</div>{% endfor %}
+    </div>
+    {% endif %}
+</div>
+{% endif %}
+
+{% if not preview %}
+<div class="row g-3">
+    <div class="col-lg-7">
+        <div class="card">
+            <div class="card-header py-2"><i class="bi bi-upload"></i> 上传课表（学校发的原样即可）</div>
+            <div class="card-body">
+                <form method="post" enctype="multipart/form-data">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                    <div class="mb-2">
+                        <input class="form-control" type="file" name="file" accept=".xlsx,.xlsm" required>
+                        <div class="form-text">支持 .xlsx / .xlsm；一个文件可含多个 sheet（每班一张）。</div>
+                    </div>
+                    <button class="btn btn-primary btn-sm" type="submit">
+                        <i class="bi bi-search"></i> 解析并预览
+                    </button>
+                </form>
+                <hr>
+                <div class="small text-muted mb-1">认识的形态（行＝节次，列＝星期，格内学科/教师）：</div>
+                <div class="si-demo">┌────────┬──────┬──────┬──────┐
+│  节次  │ 周一 │ 周二 │ 周三 │
+├────────┼──────┼──────┼──────┤
+│  早读  │ 语文 │ 英语 │ 语文 │
+│  第1节 │ 数学 │ 语文 │ 数学 │
+│        │ 张伟 │ 李娜 │ 张伟 │  ← 格内第二行写教师（可省略）
+└────────┴──────┴──────┴──────┘</div>
+                <ul class="small text-muted mt-2 mb-0">
+                    <li>班级从 <b>sheet 名</b> 或表格上方标题识别：<code>高三1班</code>、<code>2024级01班</code>、<code>01班</code></li>
+                    <li>学科可简写：语/数/英/物/化/生/政/史/地/体/音/美/班/自习</li>
+                    <li>空值写 <code>—</code>、<code>/</code>、<code>无</code> 都可以；单双周写 <code>语文(单周)</code></li>
+                    <li>教师按姓名自动匹配教师名单（找不到的按原样记录并提示）</li>
+                </ul>
+            </div>
+        </div>
+    </div>
+    <div class="col-lg-5">
+        <div class="card">
+            <div class="card-header py-2"><i class="bi bi-info-circle"></i> 导入前须知</div>
+            <div class="card-body small text-muted">
+                <div>1. 解析结果先预览，<b>确认后才写库</b>；写库时同班/同教师冲突的条目自动跳过并报告。</div>
+                <div class="mt-1">2. 节次名称要与本学期的作息一致（如表格写「第一节」，系统叫「第1节」也可以，会自动对齐）。</div>
+                <div class="mt-1">3. 如果课表里就是学校实行的课表，导入后即可用于班级/教师/教室/总分课表与学生课表。</div>
+                <div class="mt-1">4. 已有的课不会自动清空；重复导入前建议先到
+                    <a href="{{ url_for('academic.schedule_master', sid=ts.id) }}">大课表</a> 确认现有数据。</div>
+            </div>
+        </div>
+    </div>
+</div>
+{% else %}
+<div class="alert alert-info py-2">
+    <i class="bi bi-info-circle"></i> 文件 <b>{{ fname }}</b> 已解析：共 {{ data.sheets|length }} 张表。
+    请核对下方班级后点击「确认导入」。
+</div>
+
+{% if data.errors %}
+<div class="alert alert-warning">
+    <div class="fw-bold mb-1">以下表被跳过</div>
+    {% for e in data.errors %}<div class="small">· {{ e.sheet or '（工作簿）' }}：{{ e.message }}</div>{% endfor %}
+</div>
+{% endif %}
+
+<form method="post" action="{{ url_for('academic.schedule_smart_import_confirm', sid=ts.id) }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <input type="hidden" name="token" value="{{ token }}">
+
+    {% set total = {'n': 0} %}
+    {% for sh in data.sheets %}
+    <div class="card si-sheet mb-3">
+        <div class="card-header py-2 d-flex justify-content-between align-items-center flex-wrap gap-2">
+            <span class="fw-bold"><i class="bi bi-file-earmark-spreadsheet"></i> {{ sh.sheet }}</span>
+            <span class="d-flex align-items-center gap-2 flex-wrap">
+                <span class="text-muted small">导入到</span>
+                <select class="form-select form-select-sm si-grade" name="grade_{{ loop.index0 }}"
+                        style="width:auto" data-idx="{{ loop.index0 }}">
+                    <option value="">-- 年级 --</option>
+                    {% for g in grades %}
+                    <option value="{{ g }}" {% if g == sh.grade %}selected{% endif %}>{{ g }}</option>
+                    {% endfor %}
+                </select>
+                <input class="form-control form-control-sm" name="class_{{ loop.index0 }}"
+                       value="{{ sh.class_name }}" list="cls_{{ loop.index0 }}"
+                       style="width:110px" placeholder="如 01班">
+                <datalist id="cls_{{ loop.index0 }}">
+                    {% for g, cls_list in grade_classes.items() %}
+                    {% for c in cls_list %}<option value="{{ c }}">{{ g }}{{ c }}</option>{% endfor %}
+                    {% endfor %}
+                </datalist>
+                <span class="badge bg-light text-dark border">{{ sh.entries|length }} 条</span>
+            </span>
+        </div>
+        <div class="card-body py-2">
+            {% if sh.unknown_subjects %}
+            <div class="small mb-1">未识别学科（按原文导入，请确认）：
+                {% for s in sh.unknown_subjects %}<span class="badge bg-warning-subtle text-warning-emphasis border">{{ s }}</span>{% endfor %}
+            </div>
+            {% endif %}
+            {% if sh.matched_teachers %}
+            <div class="small text-muted mb-1">匹配到教师 {{ sh.matched_teachers|length }} 人：
+                {{ sh.matched_teachers[:12]|join('、') }}{% if sh.matched_teachers|length > 12 %}…{% endif %}
+            </div>
+            {% endif %}
+            {% if sh.warnings %}
+            <details class="small">
+                <summary class="text-warning-emphasis">解析提示 {{ sh.warnings|length }} 条</summary>
+                <div class="si-warn mt-1">
+                    {% for w in sh.warnings %}<div>· {{ w }}</div>{% endfor %}
+                </div>
+            </details>
+            {% endif %}
+            {% if sh.entries %}
+            <div class="table-responsive si-warn mt-1" style="max-height:180px">
+                <table class="table table-sm table-borderless mb-0" style="font-size:12px">
+                    <tbody>
+                    {% for e in sh.entries[:40] %}
+                    <tr>
+                        <td style="width:70px">{{ e.weekday_text if e.weekday_text else ['周一','周二','周三','周四','周五','周六','周日'][e.weekday-1] }}</td>
+                        <td style="width:60px">第{{ e.period_number }}节</td>
+                        <td style="width:90px"><b>{{ e.subject }}</b></td>
+                        <td class="text-muted">{{ e.teacher_name or '—' }}</td>
+                        <td class="text-muted">{{ e.week_range }}</td>
+                    </tr>
+                    {% endfor %}
+                    </tbody>
+                </table>
+                {% if sh.entries|length > 40 %}
+                <div class="text-muted small">…另有 {{ sh.entries|length - 40 }} 条</div>
+                {% endif %}
+            </div>
+            {% endif %}
+        </div>
+    </div>
+    {% if total.update({'n': total.n + sh.entries|length}) %}{% endif %}
+    {% endfor %}
+
+    <div class="d-flex align-items-center gap-3 mb-4">
+        <button class="btn btn-success" type="submit">
+            <i class="bi bi-check2-circle"></i> 确认导入 {{ total.n }} 条
+        </button>
+        <a class="btn btn-outline-secondary" href="{{ url_for('academic.schedule_smart_import', sid=ts.id) }}">
+            重新上传
+        </a>
+        <span class="text-muted small">冲突条目会被跳过并在结果里列出</span>
+    </div>
+</form>
+{% endif %}
+{% endblock %}
+
+{% block extra_js %}
+{% if preview %}
+<script>
+// 选年级时把该年级的班级填进对应输入框的候选（不强制，可手输）
+(function () {
+    var CLS = {{ grade_classes|tojson }};
+    document.querySelectorAll('.si-grade').forEach(function (sel) {
+        sel.addEventListener('change', function () {
+            var idx = sel.getAttribute('data-idx');
+            var list = document.getElementById('cls_' + idx);
+            if (!list) { return; }
+            list.innerHTML = '';
+            (CLS[sel.value] || []).forEach(function (c) {
+                var o = document.createElement('option');
+                o.value = c;
+                list.appendChild(o);
+            });
+        });
+    });
+})();
+</script>
+{% endif %}
+{% endblock %}

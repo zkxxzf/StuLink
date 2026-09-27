@@ -1,0 +1,250 @@
+{% extends "base.html" %}
+{% import "academic/_schedule_parts.html" as parts %}
+{% block title %}全校总课表 · {{ ts.name }}{% endblock %}
+{% block extra_css %}
+<style>
+/* ── 全校总课表（2026-09-25）：按年级分块、班级并列、一纸总览 ───────────── */
+.ov-block { margin-bottom: 14px; border: 1px solid #e2e8f0; border-radius: 10px;
+            overflow: hidden; background: #fff; }
+.ov-block-head { background: linear-gradient(90deg, #1e293b, #334155); color: #f1f5f9;
+                 padding: 6px 10px; display: flex; justify-content: space-between;
+                 align-items: center; font-weight: 700; font-size: 13px; }
+/* 2026-09-27 修复"表头与课程重叠"（同网格）：容器自身纵向滚动，表头在容器内吸附；
+   双行表头只让第一行（班级名）吸附，第二行（班型/选科）随内容滚动，避免两行
+   都贴在同一个位置互相盖住。 */
+.ov-scroll { position: relative; isolation: isolate; overflow: auto;
+            max-height: calc(100vh - 240px); -webkit-overflow-scrolling: touch; }
+table.ov-table { border-collapse: separate; border-spacing: 0; width: 100%; font-size: 11.5px; }
+table.ov-table th, table.ov-table td { border: 1px solid #e5eaf1; padding: 1px 3px;
+                                       text-align: center; vertical-align: middle; }
+table.ov-table tbody td, table.ov-table tbody th { position: relative; z-index: 1; }
+table.ov-table thead th { background: #f1f5f9; color: #1e293b; font-weight: 700;
+                          font-size: 11px; padding: 4px 3px; position: sticky; top: 0;
+                          z-index: 30; box-shadow: inset 0 -1px 0 #cbd5e1; }
+table.ov-table thead tr.ov-class-head th { top: 0; z-index: 31; }
+/* 表头第二行（班型/选科徽章）不吸附，跟随内容滚动，避免与第一行叠在一起 */
+table.ov-table thead tr:not(.ov-class-head) th { position: static; }
+/* 左侧「星期」「节次」列横向滚动时冻结 */
+table.ov-table tbody th.ov-weekday { position: sticky; left: 0; z-index: 20; }
+table.ov-table tbody th.ov-period { position: sticky; left: 34px; z-index: 20; }
+.ov-weekday { background: #f8fafc; font-weight: 700; width: 34px; font-size: 11px; }
+.ov-period { background: #fbfdff; width: 54px; font-size: 10px; color: #475569;
+             line-height: 1.15; padding: 2px 2px; }
+.ov-period small { display: block; color: #94a3b8; font-size: 9px;
+                   font-variant-numeric: tabular-nums; }
+.ov-cell { min-width: 62px; }
+.ov-item { border-radius: 3px; padding: 0 3px; margin: 1px 0; background: var(--sch-bg, #f1f5f9);
+           box-shadow: inset 2px 0 0 var(--sch, #94a3b8); text-align: left;
+           white-space: nowrap; line-height: 1.35; }
+.ov-subj { font-weight: 700; color: var(--sch-fg, #0f172a); }
+.ov-teacher { color: #64748b; font-size: 9.5px; margin-left: 3px; }
+.ov-room { color: #94a3b8; font-size: 9px; margin-left: 3px; }
+.ov-swap { color: #b45309; font-size: 9px; margin-left: 2px; }
+tr.ov-break td, tr.ov-break th { background: #fafbfd; }
+/* 高中作息语义：晚自习冷色、早读暖色，和正课区分（打印时转白底） */
+tr.ov-evening td, tr.ov-evening th { background: #f5f7ff; }
+tr.ov-reading td, tr.ov-reading th { background: #fffdf3; }
+.ov-legend { font-size: 11.5px; color: #64748b; }
+
+/* ── 打印：A3 横向一纸总览，黑白友好 ─────────────────────────────── */
+@media print {
+    @page { size: A3 landscape; margin: 6mm; }
+    .ov-scroll { overflow: visible !important; max-height: none !important; }
+    .ov-table { font-size: 9.5px; }
+    .ov-table thead th { position: static !important; }
+    .ov-table tbody th.ov-weekday, .ov-table tbody th.ov-period { position: static !important; }
+    .ov-weekday, .ov-period { background: #f1f5f9 !important; }
+    .ov-item { background: #fff !important; box-shadow: inset 2px 0 0 #9ca3af !important; }
+    .ov-subj { color: #000 !important; }
+    .ov-block { break-inside: avoid; page-break-inside: avoid; border-color: #9ca3af; }
+    .ov-block-head { background: #e5e7eb !important; color: #000 !important; }
+}
+</style>
+{% endblock %}
+{% block content %}
+{% set query_keep = {} %}
+{% if not include_break %}{% set _ = query_keep.update({'main': '1'}) %}{% endif %}
+{% if show_room %}{% set _ = query_keep.update({'room': '1'}) %}{% endif %}
+
+<div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
+    <div class="d-flex align-items-center gap-3 flex-wrap">
+        <h4 class="fw-bold mb-0"><i class="bi bi-list-columns-reverse"></i> 全校总课表</h4>
+        {{ parts.term_selector(schedules, ts, base_endpoint='academic.schedule_overview', week=week) }}
+        {{ parts.week_selector(ts.total_weeks, ts.get_current_week(), week) }}
+    </div>
+    <div class="d-flex gap-2 flex-wrap">
+        <a class="btn btn-sm btn-outline-info text-white no-print"
+           href="{{ url_for('academic.schedule_export', sid=ts.id, view_type='overview', week=week) }}">
+            <i class="bi bi-file-earmark-excel"></i> 导出 Excel
+        </a>
+        {{ parts.print_button('打印总课表（A3）') }}
+        {{ parts.export_tools() }}
+        <a class="btn btn-sm btn-outline-secondary no-print"
+           href="{{ url_for('academic.schedule_master', sid=ts.id, week=week) }}">
+            <i class="bi bi-grid-3x3"></i> 大课表
+        </a>
+        <a class="btn btn-sm btn-outline-secondary no-print"
+           href="{{ url_for('academic.schedule_manage') }}">
+            <i class="bi bi-house"></i> 学期管理
+        </a>
+    </div>
+</div>
+
+{{ parts.readonly_banner(ts) }}
+
+<div class="card mb-3 no-print">
+    <div class="card-body py-2 d-flex align-items-center gap-2 flex-wrap">
+        <span class="text-muted small"><i class="bi bi-funnel"></i> 年级</span>
+        <a class="btn btn-sm {{ 'btn-primary' if not grades else 'btn-outline-primary' }}"
+           href="{{ url_for('academic.schedule_overview', sid=ts.id, week=week, **query_keep) }}">全部</a>
+        {% for g in view.all_grades %}
+        <a class="btn btn-sm {{ 'btn-primary' if grades == [g] else 'btn-outline-primary' }}"
+           href="{{ url_for('academic.schedule_overview', sid=ts.id, week=week, grades=g, **query_keep) }}">{{ view.labels.get(g, g) or g }}</a>
+        {% endfor %}
+        {% if view.directions %}
+        <span class="vr mx-1"></span>
+        <span class="text-muted small"><i class="bi bi-signpost-split"></i> 选科</span>
+        <a class="btn btn-sm {{ 'btn-primary' if not direction else 'btn-outline-primary' }}"
+           href="{{ url_for('academic.schedule_overview', sid=ts.id, week=week, grades=(grades|join(',')) or none, **query_keep) }}">全部</a>
+        {% for d in view.directions %}
+        <a class="btn btn-sm {{ 'btn-primary' if direction == d else 'btn-outline-primary' }}"
+           href="{{ url_for('academic.schedule_overview', sid=ts.id, week=week, grades=(grades|join(',')) or none, direction=d, **query_keep) }}">{{ d }}类</a>
+        {% endfor %}
+        {% endif %}
+        {% if view.class_types %}
+        <span class="vr mx-1"></span>
+        <span class="text-muted small"><i class="bi bi-bookmark"></i> 班型</span>
+        <a class="btn btn-sm {{ 'btn-primary' if not class_type else 'btn-outline-primary' }}"
+           href="{{ url_for('academic.schedule_overview', sid=ts.id, week=week, grades=(grades|join(',')) or none, direction=direction, **query_keep) }}">全部</a>
+        {% for ct in view.class_types %}
+        <a class="btn btn-sm {{ 'btn-primary' if class_type == ct else 'btn-outline-primary' }}"
+           href="{{ url_for('academic.schedule_overview', sid=ts.id, week=week, grades=(grades|join(',')) or none, direction=direction, class_type=ct, **query_keep) }}">{{ ct }}</a>
+        {% endfor %}
+        {% endif %}
+        <span class="vr mx-1"></span>
+        {% if include_break %}
+        <a class="btn btn-sm btn-outline-secondary"
+           href="{{ url_for('academic.schedule_overview', sid=ts.id, week=week, grades=(grades|join(',')) or none, main='1', room=('1' if show_room else none)) }}">
+            只看正课
+        </a>
+        {% else %}
+        <a class="btn btn-sm btn-success"
+           href="{{ url_for('academic.schedule_overview', sid=ts.id, week=week, grades=(grades|join(',')) or none, room=('1' if show_room else none)) }}">
+            已隐藏午休/课间
+        </a>
+        {% endif %}
+        {% if show_room %}
+        <a class="btn btn-sm btn-success"
+           href="{{ url_for('academic.schedule_overview', sid=ts.id, week=week, grades=(grades|join(',')) or none, main=('1' if not include_break else none)) }}">
+            已显示教室
+        </a>
+        {% else %}
+        <a class="btn btn-sm btn-outline-secondary"
+           href="{{ url_for('academic.schedule_overview', sid=ts.id, week=week, grades=(grades|join(',')) or none, main=('1' if not include_break else none), room='1') }}">
+            显示教室
+        </a>
+        {% endif %}
+        <span class="ms-auto ov-legend">
+            {{ view.blocks|length }} 个年级 · {{ view.total }} 节/周{% if week %} · 第 {{ week }} 周{% endif %}
+        </span>
+    </div>
+</div>
+
+{% if not view.blocks %}
+<div class="card">
+    <div class="card-body text-center py-5 text-muted">
+        <i class="bi bi-inbox" style="font-size:40px;"></i>
+        <p class="mt-3 mb-1">{{ ts.name }} 暂无课表数据</p>
+        <p class="small mb-0">
+            {% if can_edit %}先 <a href="{{ url_for('academic.schedule_import', sid=ts.id) }}">导入课表</a>
+            或在大课表中逐条录入。{% else %}请联系教务导入课表。{% endif %}
+        </p>
+    </div>
+</div>
+{% else %}
+<div id="ovContainer">
+    {% for b in view.blocks %}
+    <div class="ov-block" data-grade="{{ b.grade }}">
+        <div class="ov-block-head">
+            <span><i class="bi bi-mortarboard"></i> {{ b.grade_label or b.grade }}
+                <span class="fw-normal small ms-2">{{ b.classes|length }} 个班 · {{ b.total }} 节/周</span>
+            </span>
+            <span class="fw-normal small">{{ ts.name }}{% if week %} · 第 {{ week }} 周{% endif %}</span>
+        </div>
+        <div class="ov-scroll">
+            <table class="ov-table">
+                <thead>
+                    <tr class="ov-class-head">
+                        <th class="ov-weekday" rowspan="2">星期</th>
+                        <th rowspan="2" style="width:54px">节次</th>
+                        {% for cn in b.classes %}<th>{{ cn }}</th>{% endfor %}
+                    </tr>
+                    <tr>
+                        {% for cn in b.classes %}
+                        {% set meta = b.class_meta.get(cn, {}) %}
+                        <th class="fw-normal small" style="background:#e8eef5">
+                            {{ b.grade }}{{ cn }}
+                            {% if meta.get('class_type') %}
+                            <div><span class="badge bg-light text-dark border" style="font-size:9px">{{ meta.class_type }}</span></div>
+                            {% endif %}
+                            {% if meta.get('direction') %}
+                            <div><span class="badge" style="font-size:9px;background:#dbeafe;color:#1e40af">{{ meta.direction }}类</span></div>
+                            {% endif %}
+                            {% if meta.get('combo_short') %}
+                            <div class="text-muted" style="font-size:9px" title="{{ meta.combo }}">{{ meta.combo_short }}</div>
+                            {% endif %}
+                        </th>
+                        {% endfor %}
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for wd in range(1, view.max_weekday + 1) %}
+                    {% for p in view.periods %}
+                    <tr class="{{ 'ov-break' if p.period_type == 'break' else '' }}{{ ' ov-evening' if p.period_type == 'evening' else '' }}{{ ' ov-reading' if p.period_name and ('早读' in p.period_name or '晨读' in p.period_name) else '' }}">
+                        {% if loop.first %}
+                        <th class="ov-weekday" rowspan="{{ view.periods|length }}">
+                            {{ ['周一','周二','周三','周四','周五','周六','周日'][wd-1] }}
+                        </th>
+                        {% endif %}
+                        <th class="ov-period">{{ p.period_name }}<small>{{ p.start_time or '' }}</small></th>
+                        {% for cn in b.classes %}
+                        {% set items = (b.grids[cn].get(p.period_number) or {}).get(wd) or [] %}
+                        <td class="ov-cell">
+                            {% for e in items %}
+                            {% set tone = subject_tone(e.subject) %}
+                            <div class="ov-item" style="--sch:{{ tone.c }};--sch-bg:{{ tone.bg }};--sch-fg:{{ tone.fg }}">
+                                <span class="ov-subj">{{ e.subject }}</span>{% if e.entry_type == 'swap' %}<span class="ov-swap">调</span>{% endif %}{% if e.week_badge %}<span class="ov-swap">{{ e.week_badge }}</span>{% endif %}{% if e.teacher_name %}<span class="ov-teacher">{{ e.teacher_name }}</span>{% endif %}{% if show_room and e.room %}<span class="ov-room">{{ e.room }}</span>{% endif %}
+                            </div>
+                            {% endfor %}
+                        </td>
+                        {% endfor %}
+                    </tr>
+                    {% endfor %}
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+    {% endfor %}
+</div>
+
+<script id="scheduleData" type="application/json">
+{
+    "pageType": "overview",
+    "sid": {{ ts.id }},
+    "canEdit": false,
+    "week": {{ week|tojson }},
+    "urls": {
+        "share": {{ url_for('academic.schedule_share', sid=ts.id)|tojson }}
+    }
+}
+</script>
+{% endif %}
+{% endblock %}
+
+{% block extra_js %}
+{% if view.blocks %}
+<script src="{{ su('js/schedule.js') }}"></script>
+<script src="{{ su('js/schedule_term.js') }}"></script>
+{% endif %}
+{% endblock %}

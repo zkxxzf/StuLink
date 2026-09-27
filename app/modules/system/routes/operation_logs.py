@@ -50,8 +50,12 @@ def list_logs():
 
     users = User.query.all()
 
-    actions = ['创建', '更新', '删除', '导入', '导出', '登录']
-    modules = ['system', 'dormitory', 'points', 'grades']
+    # 审计加固：module 下拉不再硬编码 4 个值（academic/workbench/portrait/auth
+    # 等模块的日志此前在页面上筛不出来），改为按库中实际值动态列出。
+    actions = db.session.query(OperationLog.action).distinct().all()
+    actions = sorted({a[0] for a in actions if a[0]})
+    modules = db.session.query(OperationLog.module).distinct().all()
+    modules = sorted({m[0] for m in modules if m[0]})
 
     target_types = db.session.query(OperationLog.target_type).distinct().all()
     target_types = [t[0] for t in target_types if t[0]]

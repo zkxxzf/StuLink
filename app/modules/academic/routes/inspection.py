@@ -33,6 +33,15 @@ def _grade_options():
             .order_by('sort_order').all()]
 
 
+def _inspector_names(records):
+    """{user_id: 姓名}：列表与导出统一把"检查人"从数字 id 显示成姓名"""
+    ids = {r.inspector_id for r in records if r.inspector_id}
+    if not ids:
+        return {}
+    from app.models import User
+    return {u.id: u.real_name for u in User.query.filter(User.id.in_(ids)).all()}
+
+
 @bp.route('/inspection')
 @login_required
 @perm_required('academic.view')
@@ -42,6 +51,7 @@ def inspection_page():
     ug = user_grade_scope(current_user)
     teacher_uid = (request.args.get('teacher_uid') or '').strip()
     result_f = (request.args.get('result') or '').strip()
+    grade_f = (request.args.get('grade') or '').strip()
     d_from = (request.args.get('date_from') or '').strip()
     d_to = (request.args.get('date_to') or '').strip()
 
@@ -52,6 +62,8 @@ def inspection_page():
         q = q.filter_by(teacher_uid=teacher_uid)
     if result_f in _RESULT_KEYS:
         q = q.filter_by(result=result_f)
+    if grade_f:
+        q = q.filter_by(grade=grade_f)
     if d_from:
         try:
             q = q.filter(InspectionRecord.inspect_date >= date.fromisoformat(d_from))
@@ -62,8 +74,13 @@ def inspection_page():
             q = q.filter(InspectionRecord.inspect_date <= date.fromisoformat(d_to))
         except ValueError:
             pass
-    records = (q.order_by(InspectionRecord.inspect_date.desc(),
-                          InspectionRecord.id.desc()).limit(300).all())
+    # 分页（此前硬上限 300 条且无法翻页，历史记录一多就"看不全也翻不到"）
+    page = request.args.get('page', 1, type=int)
+    pagination = (q.order_by(InspectionRecord.inspect_date.desc(),
+                             InspectionRecord.id.desc())
+                  .paginate(page=page, per_page=30, error_out=False))
+    records = pagination.items
+    inspectors = _inspector_names(records)
 
     # 本月统计（同样按数据范围）
     today = date.today()
@@ -86,12 +103,51 @@ def inspection_page():
     if ug is not None:
         grade_opts = [g for g in grade_opts if g in ug]
     return render_template('academic/inspection.html',
-                           records=records, teachers=_active_teachers(),
+                           records=records, pagination=pagination, inspectors=inspectors,
+                           teachers=_active_teachers(),
                            results=INSPECTION_RESULTS, grade_opts=grade_opts,
-                           f_teacher=teacher_uid, f_result=result_f,
+                           f_teacher=teacher_uid, f_result=result_f, f_grade=grade_f,
                            f_from=d_from, f_to=d_to,
                            month_total=month_total, month_abnormal=month_abnormal,
-                           by_teacher=by_teacher, today=today.isoformat())
+                           by_teacher=by_teacher, today=today.isoformat(),
+                           can_edit=current_user.has_perm('academic.edit'))
+
+
+@bp.route('/inspection/<int:rid>/edit', methods=['POST'])
+@login_required
+@perm_required('academic.edit')
+def inspection_edit(rid):
+    """修改查课记录（结果 / 班级 / 科目 / 节次 / 备注）。
+
+    此前查课记录只能"删了重录"，改一个备注都得丢掉原始记录（含录入人与时间），
+    这里补上就地编辑；仍受用户数据范围约束。
+    """
+    rec = db.session.get(InspectionRecord, rid)
+    if not rec:
+        abort(404)
+    from app.modules.grades.services.scope import user_grade_scope
+    ug = user_grade_scope(current_user)
+    if ug is not None and (rec.grade or '') not in ug:
+        flash('该记录不在你的可见范围内', 'danger')
+        return redirect(url_for('academic.inspection_page'))
+
+    before = rec.result
+    result = (request.form.get('result') or '').strip()
+    if result in _RESULT_KEYS:
+        rec.result = result
+    rec.class_name = (request.form.get('class_name') or '').strip() or None
+    subject = (request.form.get('subject') or '').strip()
+    if subject:
+        rec.subject = subject
+    rec.period = request.form.get('period', type=int)
+    rec.note = (request.form.get('note') or '').strip() or None
+    db.session.commit()
+    log_operation(current_user, '更新', '查课记录', rid,
+                  f'{rec.teacher_name} 结果 {before}→{rec.result}', module='academic')
+    flash('查课记录已更新', 'success')
+    return redirect(url_for('academic.inspection_page',
+                            grade=(request.form.get('back_grade') or None),
+                            teacher_uid=(request.form.get('back_teacher') or None)))
 
 
 @bp.route('/inspection/add', methods=['POST'])
@@ -261,6 +317,7 @@ def inspection_export():
                                 teacher_uid=teacher_uid, result=result_f,
                                 date_from=d_from, date_to=d_to, grade=grade_f))
 
+    inspectors = _inspector_names(records)
     result_map = dict(INSPECTION_RESULTS)
     columns = ['日期', '年级', '节次', '教师编号', '教师姓名',
                '班级', '科目', '结果', '检查人', '备注']
@@ -291,7 +348,7 @@ def inspection_export():
             r.class_name or '',
             r.subject or '',
             result_map.get(r.result, r.result),
-            r.inspector_id or '',
+            inspectors.get(r.inspector_id) or (r.inspector_id or ''),
             r.note or '',
         ]
         for ci, v in enumerate(row_data, 1):
@@ -379,6 +436,12 @@ def inspection_delete(rid):
     rec = db.session.get(InspectionRecord, rid)
     if not rec:
         abort(404)
+    # 与 inspection_edit 一致：受年级数据范围约束，避免受限用户删除范围外记录
+    from app.modules.grades.services.scope import user_grade_scope
+    ug = user_grade_scope(current_user)
+    if ug is not None and (rec.grade or '') not in ug:
+        flash('该记录不在你的可见范围内', 'danger')
+        return redirect(url_for('academic.inspection_page'))
     db.session.delete(rec)
     db.session.commit()
     log_operation(current_user, '删除', '查课记录', rid,

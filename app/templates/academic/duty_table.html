@@ -1,0 +1,286 @@
+{% extends "base.html" %}
+{% import "academic/_schedule_parts.html" as parts %}
+{% block title %}任课安排{% endblock %}
+{% block extra_css %}
+<style>
+/* ── 任课安排表（2026-09-25）：按年级分块，班级行 × 学科列 ─────────────── */
+.duty-block { margin-bottom: 14px; border: 1px solid #e2e8f0; border-radius: 10px;
+              overflow: hidden; background: #fff; }
+.duty-head { background: linear-gradient(90deg, #1e293b, #334155); color: #f1f5f9;
+             padding: 6px 10px; display: flex; justify-content: space-between;
+             align-items: center; font-weight: 700; font-size: 13px; }
+.duty-scroll { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+table.duty-table { border-collapse: collapse; width: 100%; font-size: 11.5px; }
+table.duty-table th, table.duty-table td { border: 1px solid #e5eaf1; padding: 2px 4px;
+                                           text-align: center; vertical-align: middle; }
+table.duty-table thead th { background: #f1f5f9; color: #1e293b; font-weight: 700;
+                            font-size: 11px; white-space: nowrap; }
+table.duty-table tbody tr:nth-child(even) td { background: #fcfdff; }
+table.duty-table td.duty-class { font-weight: 700; white-space: nowrap; }
+table.duty-table td.duty-teacher { text-align: left; white-space: nowrap; }
+.duty-name { color: #0f172a; }
+.duty-hours { color: #2563eb; font-weight: 700; margin-left: 3px; font-size: 10.5px; }
+tr.duty-total td, tr.duty-total th { background: #eef2f7 !important; font-weight: 700; }
+tr.duty-teachers td { background: #f8fafc !important; color: #475569; font-size: 10.5px;
+                      text-align: left; }
+.duty-empty { color: #cbd5e1; }
+.duty-chip { display: inline-block; background: #eef2ff; color: #3730a3; border-radius: 3px;
+             padding: 0 4px; margin: 1px 2px 1px 0; font-size: 10.5px; }
+@media print {
+    @page { size: A3 landscape; margin: 6mm; }
+    table.duty-table { font-size: 9.5px; }
+    .duty-block { break-inside: avoid; page-break-inside: avoid; border-color: #9ca3af; }
+    .duty-head { background: #e5e7eb !important; color: #000 !important; }
+    .duty-hours { color: #000; }
+}
+</style>
+{% endblock %}
+{% block content %}
+{% set keep = {'sid': ts.id if ts else none, 'week': week, 'grade': grade,
+               'class_type': class_type, 'direction': direction} %}
+<div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
+    <div class="d-flex align-items-center gap-3 flex-wrap">
+        <h4 class="fw-bold mb-0"><i class="bi bi-person-vcard"></i> 任课安排</h4>
+        {% if ts %}{{ parts.term_selector(schedules, ts, query_mode='duty', week=week) }}{% endif %}
+        {{ parts.week_selector(ts.total_weeks if ts else 0, ts.get_current_week() if ts else None, week) }}
+    </div>
+    <div class="d-flex gap-2 flex-wrap">
+        <div class="btn-group btn-group-sm" role="group">
+            <a class="btn {{ 'btn-primary' if view == 'class' else 'btn-outline-primary' }}"
+               href="{{ url_for('academic.duty_table', view='class', **keep) }}">按班级</a>
+            <a class="btn {{ 'btn-primary' if view == 'teacher' else 'btn-outline-primary' }}"
+               href="{{ url_for('academic.duty_table', view='teacher', **keep) }}">按教师</a>
+            <a class="btn {{ 'btn-primary' if view == 'subject' else 'btn-outline-primary' }}"
+               href="{{ url_for('academic.duty_table', view='subject', **keep) }}">按学科</a>
+        </div>
+        {# keep 已含 sid/week/grade/class_type，勿再显式重复传参（Jinja 会报重复关键字） #}
+        <a class="btn btn-sm btn-outline-info text-white no-print"
+           href="{{ url_for('academic.duty_export', view=view, **keep) }}">
+            <i class="bi bi-file-earmark-excel"></i> 导出 Excel
+        </a>
+        {{ parts.print_button('打印任课表（A3）') }}
+        <a class="btn btn-sm btn-outline-secondary no-print"
+           href="{{ url_for('academic.subject_leaders') }}">
+            <i class="bi bi-people"></i> 备课组长名单
+        </a>
+    </div>
+</div>
+
+{% if not ts %}
+<div class="card">
+    <div class="card-body text-center py-5 text-muted">
+        <i class="bi bi-calendar-x" style="font-size:40px;"></i>
+        <p class="mt-3 mb-1">尚未建立学期课表</p>
+        <p class="small mb-0">任课安排由课表实时汇总，请先
+            <a href="{{ url_for('academic.schedule_manage') }}">创建学期并导入课表</a>。</p>
+    </div>
+</div>
+{% elif view == 'class' %}
+    {# 筛选栏放在数据判断之外：否则筛选出空结果时按钮组一起消失，用户无法点回"全部" #}
+    <div class="d-flex align-items-center gap-2 mb-2 flex-wrap no-print">
+        <span class="text-muted small"><i class="bi bi-funnel"></i> 年级</span>
+        <a class="btn btn-sm {{ 'btn-primary' if not grade else 'btn-outline-primary' }} py-0"
+           href="{{ url_for('academic.duty_table', view='class', sid=ts.id, week=week, class_type=class_type, direction=direction) }}">全部</a>
+        {% for g in data.all_grades %}
+        <a class="btn btn-sm {{ 'btn-primary' if grade == g else 'btn-outline-primary' }} py-0"
+           href="{{ url_for('academic.duty_table', view='class', sid=ts.id, week=week, grade=g, class_type=class_type, direction=direction) }}">{{ data.labels.get(g, g) or g }}</a>
+        {% endfor %}
+        {% if data.directions %}
+        <span class="vr mx-1"></span>
+        <span class="text-muted small"><i class="bi bi-signpost-split"></i> 选科</span>
+        <a class="btn btn-sm {{ 'btn-primary' if not direction else 'btn-outline-primary' }} py-0"
+           href="{{ url_for('academic.duty_table', view='class', sid=ts.id, week=week, grade=grade, class_type=class_type) }}">全部</a>
+        {% for d in data.directions %}
+        <a class="btn btn-sm {{ 'btn-primary' if direction == d else 'btn-outline-primary' }} py-0"
+           href="{{ url_for('academic.duty_table', view='class', sid=ts.id, week=week, grade=grade, class_type=class_type, direction=d) }}">{{ d }}类</a>
+        {% endfor %}
+        {% endif %}
+        {% if class_types %}
+        <span class="vr mx-1"></span>
+        <span class="text-muted small"><i class="bi bi-bookmark"></i> 班型</span>
+        <a class="btn btn-sm {{ 'btn-primary' if not class_type else 'btn-outline-primary' }} py-0"
+           href="{{ url_for('academic.duty_table', view='class', sid=ts.id, week=week, grade=grade, direction=direction) }}">全部</a>
+        {% for ct in class_types %}
+        <a class="btn btn-sm {{ 'btn-primary' if class_type == ct else 'btn-outline-primary' }} py-0"
+           href="{{ url_for('academic.duty_table', view='class', sid=ts.id, week=week, grade=grade, class_type=ct, direction=direction) }}">{{ ct }}</a>
+        {% endfor %}
+        {% endif %}
+        <span class="ms-auto text-muted small">
+            共 {{ data.blocks|length }} 个年级 · {{ data.total }} 节/周{% if week %} · 第 {{ week }} 周{% endif %}
+            {% if class_type %} · 班型：{{ class_type }}{% endif %}
+        </span>
+    </div>
+    {% if not data.blocks %}
+    <div class="card"><div class="card-body text-center py-5 text-muted">
+        <i class="bi bi-inbox" style="font-size:40px;"></i>
+        <p class="mt-3 mb-1">
+            {% if grade or class_type %}当前筛选（{% if grade %}{{ grade }}{% endif %}{% if class_type %} {{ class_type }}{% endif %}）下没有任课数据{% else %}{{ ts.name }} 暂无可统计的任课数据{% endif %}
+        </p>
+        <p class="small mb-0">
+            {% if grade or class_type %}
+            <a href="{{ url_for('academic.duty_table', view='class', sid=ts.id, week=week) }}">清除筛选</a>，
+            {% else %}
+            <a href="{{ url_for('academic.schedule_import', sid=ts.id) }}">导入课表</a>
+            或在大课表中录入课程后这里会自动汇总；
+            {% endif %}
+            也可以切换学期或周次再查看。
+        </p>
+    </div></div>
+    {% else %}
+    {% for b in data.blocks %}
+    <div class="duty-block">
+        <div class="duty-head">
+            <span><i class="bi bi-mortarboard"></i> {{ b.grade_label or b.grade }} 任课安排
+                <span class="fw-normal small ms-2">{{ b.class_count }} 个班 · 文化课 {{ b.core_total }} 节 · 合计 {{ b.grand_total }} 节/周</span>
+            </span>
+            <span class="fw-normal small">{{ ts.name }}{% if week %} · 第 {{ week }} 周{% endif %}</span>
+        </div>
+        <div class="duty-scroll">
+            <table class="duty-table">
+                <thead>
+                    <tr>
+                        <th>年级</th>
+                        <th>班级</th>
+                        <th>班型</th>
+                        <th>选科</th>
+                        <th>班主任</th>
+                        {% for s in b.subjects %}<th>{{ s }}</th>{% endfor %}
+                        <th>文化课总</th>
+                        <th>周课时</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for row in b.rows %}
+                    <tr>
+                        <td>{{ row.grade }}</td>
+                        <td class="duty-class">{{ row.class_name }}</td>
+                        <td>{{ row.class_type or '—' }}</td>
+                        <td class="small">
+                            {% if row.direction %}<span class="badge" style="background:#dbeafe;color:#1e40af;font-size:10px">{{ row.direction }}类</span>{% endif %}
+                            {% if row.combo_short %}<div class="text-muted" style="font-size:10px" title="{{ row.combo }}">{{ row.combo_short }}</div>{% endif %}
+                            {% if not row.direction and not row.combo %}—{% endif %}
+                        </td>
+                        <td>{{ row.head_teacher or '—' }}</td>
+                        {% for s in b.subjects %}
+                        {% set cell = row.cells.get(s) %}
+                        <td class="duty-teacher">
+                            {% if cell %}
+                            <span class="duty-name">{{ cell.teachers|join('、') }}</span><span class="duty-hours">{{ cell.hours }}</span>
+                            {% else %}<span class="duty-empty">—</span>{% endif %}
+                        </td>
+                        {% endfor %}
+                        <td class="fw-bold">{{ row.core_total }}</td>
+                        <td class="fw-bold">{{ row.row_total }}</td>
+                    </tr>
+                    {% endfor %}
+                    <tr class="duty-total">
+                        <td colspan="5">学科合计（{{ b.class_count }} 个班）</td>
+                        {% for s in b.subjects %}<td>{{ b.subject_totals.get(s, 0) }}</td>{% endfor %}
+                        <td>{{ b.core_total }}</td>
+                        <td>{{ b.grand_total }}</td>
+                    </tr>
+                    <tr class="duty-teachers">
+                        <td colspan="5">本年级学科教师</td>
+                        {% for s in b.subjects %}
+                        <td>{{ b.subject_teachers.get(s, [])|join('、') }}</td>
+                        {% endfor %}
+                        <td colspan="2"></td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+    {% endfor %}
+    {% endif %}
+{% elif view == 'teacher' %}
+    {% if not data.teachers %}
+    <div class="card"><div class="card-body text-center py-5 text-muted">
+        <i class="bi bi-inbox" style="font-size:40px;"></i>
+        <p class="mt-3 mb-1">暂无可统计的任课数据</p>
+    </div></div>
+    {% else %}
+    <div class="card">
+        <div class="card-header py-2 d-flex justify-content-between align-items-center">
+            <span class="fw-bold">教师任课一览（{{ data.teachers|length }} 位教师）</span>
+            <span class="text-muted small">按周课时数排序 · 超过 {{ warn_hours }} 节/周标红预警{% if week %} · 第 {{ week }} 周{% endif %}</span>
+        </div>
+        <div class="table-responsive">
+            <table class="table table-sm table-hover align-middle mb-0">
+                <thead class="table-light">
+                    <tr>
+                        <th style="width:70px">序号</th>
+                        <th>教师</th>
+                        <th>教师编号</th>
+                        <th>所授学科</th>
+                        <th>授课班级</th>
+                        <th style="width:80px">班级数</th>
+                        <th style="width:90px">周课时数</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for t in data.teachers %}
+                    <tr {% if t.warn %}class="table-warning"{% endif %}>
+                        <td class="text-muted">{{ loop.index }}</td>
+                        <td class="fw-bold">{{ t.name }}{% if t.warn %}
+                            <i class="bi bi-exclamation-triangle-fill text-danger" title="周课时超过 {{ warn_hours }} 节"></i>{% endif %}</td>
+                        <td class="text-muted small">{{ t.uid or '—' }}</td>
+                        <td>{{ t.subject_text }}</td>
+                        <td class="small">{{ t.class_text }}</td>
+                        <td>{{ t.class_count }}</td>
+                        <td class="fw-bold {{ 'text-danger' if t.warn else 'text-primary' }}">{{ t.hours }}</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+    {% endif %}
+{% else %}
+    {% if not data.subjects %}
+    <div class="card"><div class="card-body text-center py-5 text-muted">
+        <i class="bi bi-inbox" style="font-size:40px;"></i>
+        <p class="mt-3 mb-1">暂无可统计的任课数据</p>
+    </div></div>
+    {% else %}
+    <div class="row g-3">
+        {% for grp in data.subjects %}
+        <div class="col-md-6 col-xl-4">
+            <div class="card h-100">
+                <div class="card-header py-2 d-flex justify-content-between align-items-center">
+                    <span class="fw-bold">{{ grp.subject }}</span>
+                    <span class="text-muted small">{{ grp.teacher_count }} 位教师 · {{ grp.hours }} 节/周</span>
+                </div>
+                <div class="card-body py-2">
+                    {% for t in grp.teachers %}
+                    <div class="d-flex justify-content-between align-items-start mb-1">
+                        <div class="small">
+                            <span class="fw-bold">{{ t.name }}</span>
+                            <span class="text-muted">（{{ t.uid or '无编号' }}）</span>
+                            <div class="text-muted" style="font-size:11px">{{ t.class_text }}</div>
+                        </div>
+                        <span class="badge bg-primary-subtle text-primary border border-primary-subtle">{{ t.hours }} 节</span>
+                    </div>
+                    {% endfor %}
+                </div>
+            </div>
+        </div>
+        {% endfor %}
+    </div>
+    {% endif %}
+{% endif %}
+
+<div class="alert alert-light border small mt-3 mb-0 no-print">
+    <i class="bi bi-info-circle"></i>
+    任课安排由<b>课表条目实时汇总</b>（按其所在学期与周次），不在本页单独维护；
+    调整课程请到
+    {% if ts %}<a href="{{ url_for('academic.schedule_master', sid=ts.id) }}">大课表</a>{% else %}大课表{% endif %}
+    或 <a href="{{ url_for('academic.schedule_import', sid=ts.id) if ts else '#' }}">导入课表</a>。
+    周课时＝该周次下该教师/班级/学科的条目数（1 条目＝1 节/周）。
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script id="scheduleData" type="application/json">{ "pageType": "duty" }</script>
+<script src="{{ su('js/schedule.js') }}"></script>
+<script src="{{ su('js/schedule_term.js') }}"></script>
+{% endblock %}

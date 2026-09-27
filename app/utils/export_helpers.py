@@ -3,8 +3,8 @@ import io
 import re
 from datetime import datetime
 from flask import send_file
-from app.models import Student, Room, BedAssignment, StudentAccommodation, OperationLog
-from app.utils.helpers import get_graduated_grades
+from app.models import Student, Room, BedAssignment, StudentAccommodation
+from app.utils.helpers import get_graduated_grades, log_operation
 from app.utils.student_scope import apply_student_scope
 from app.extensions import db
 
@@ -191,7 +191,6 @@ def do_export_students(args):
     out.seek(0)
 
     try:
-        import json
         log_detail = {
             'columns': [label for _, label in selected_columns],
             'record_count': len(students),
@@ -204,18 +203,10 @@ def do_export_students(args):
                 'student_number': args.get('student_number'),
             }
         }
-        log = OperationLog(
-            user_id=current_user.id,
-            action='导出',
-            target_type='学生',
-            module='system',
-            detail=json.dumps(log_detail, ensure_ascii=False),
-            ip_address=_client_ip()
-        )
-        db.session.add(log)
-        db.session.commit()
-    except Exception:
-        db.session.rollback()
+        # C：收敛到统一 helper（独立子事务写日志，不连带提交业务数据）
+        log_operation(current_user, '导出', '学生', module='system', detail=log_detail)
+    except Exception:  # noqa: BLE001  导出日志失败不影响下载
+        pass
 
     return send_file(out, as_attachment=True, download_name=download_name,
                      mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
@@ -381,7 +372,6 @@ def do_export_student_accommodation(args):
     out.seek(0)
 
     try:
-        import json
         log_detail = {
             'columns': [label for _, label in selected_columns],
             'record_count': len(students),
@@ -397,18 +387,10 @@ def do_export_student_accommodation(args):
                 'room_number': args.get('room_number'),
             }
         }
-        log = OperationLog(
-            user_id=current_user.id,
-            action='导出',
-            target_type='学生住宿',
-            module='dormitory',
-            detail=json.dumps(log_detail, ensure_ascii=False),
-            ip_address=_client_ip()
-        )
-        db.session.add(log)
-        db.session.commit()
-    except Exception:
-        db.session.rollback()
+        # C：收敛到统一 helper（独立子事务写日志，不连带提交业务数据）
+        log_operation(current_user, '导出', '学生住宿', module='dormitory', detail=log_detail)
+    except Exception:  # noqa: BLE001  导出日志失败不影响下载
+        pass
 
     return send_file(out, as_attachment=True, download_name=download_name,
                      mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')

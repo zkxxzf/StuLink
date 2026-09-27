@@ -17,7 +17,8 @@ from app.models.system_setting import SystemSetting
 from app.models.academic import Teacher, Timetable, TimetableEntry, \
     InspectionRecord, TeacherAchievement, CourseSwap, \
     FormCategory, FormTemplate, FormQuestion, FormSubmission, FormAnswer, \
-    WorkRecord, AttendanceRecord, RECORD_TYPES, ATTENDANCE_STATUS
+    WorkRecord, AttendanceRecord, RECORD_TYPES, ATTENDANCE_STATUS, \
+    SubjectLeader, SUBJECT_ORDER, DUTY_TEMPLATES
 from app.models.notification import Notification, NotificationRead, \
     NotificationRecipient, CATEGORY_LABELS
 from app.models.portrait import StudentPortrait, PortraitComment, PortraitEvent

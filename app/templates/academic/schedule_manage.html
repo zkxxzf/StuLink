@@ -77,6 +77,9 @@
                     <a class="btn btn-sm btn-outline-primary py-0" href="{{ url_for('academic.schedule_master', sid=ts.id) }}">
                         <i class="bi bi-grid-3x3"></i> 大课表
                     </a>
+                    <a class="btn btn-sm btn-outline-dark py-0" href="{{ url_for('academic.schedule_overview', sid=ts.id) }}">
+                        <i class="bi bi-list-columns-reverse"></i> 全校总课表
+                    </a>
                     {% set grades = (grade_map.get(ts.id) or {}).keys()|list %}
                     {% if grades %}
                     <a class="btn btn-sm btn-outline-primary py-0"
