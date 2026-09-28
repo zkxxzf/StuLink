@@ -10,7 +10,7 @@
 - **在校生系统（主应用 :5000）**：宿舍自动分配 · 合班管理 · 床位管理 · 学生信息管理 · 批量导入/调班 · 二维权限（功能三档 × 数据范围）· 成绩管理与四大分析（ECharts）· 班级横向对比 · AI 分析（BYOK）· 德育管理 · 教务（教师名单/课表/查课/调课/表单/业绩）· 教师工作台（班级概览/工作记录/考勤/积分/画像）· 通知中心
 - **往届生查询（独立应用 :5001）**：毕业生数据快照查询 · 学习经历变迁 · 宿舍历史
 
-## 功能模块（v1.18.2.1）
+## 功能模块（v1.18.2.2）
 
 | 模块 | 站点 | 状态 | 说明 |
 |------|------|------|------|
@@ -57,7 +57,7 @@
 
 - **后端**：Python 3.11+ / Flask 3.x / Flask-Login / Flask-SQLAlchemy 2.x（多库 binds）/ Waitress / openpyxl / reportlab / python-pptx
 - **前端**：Bootstrap 5 / jQuery / Jinja2 / ECharts（成绩可视化与班级对比）/ Chart.js（画像）
-- **安全（v1.18.2.1）**：
+- **安全（v1.18.2.2）**：
   - **身份**：管理员首启随机口令 + 强制改密 · 一次性初始口令展示 · 会话口令摘要（改密即踢）· IP + 账号双维限流
   - **数据**：AES-256-GCM 身份证与 AI Key 加密 · CSRF 8h 时效 · 二维权限（功能三档 × 数据范围）· 白名单式教师候选过滤
   - **传输**：`url_guard` 出站白名单 + DNS 解析 + 禁 302 跟随 · CSP（Report-Only 起步，可切 enforce）· HTTPS Cookie Secure
@@ -76,7 +76,7 @@ python run.py --dev
 cd alumni_app && python run.py
 
 # Docker 部署（两个容器）
-docker build -t stulink:v1.18.2.1 .
+docker build -t stulink:v1.18.2.2 .
 docker build -t stulink-alumni:v1.0.0 ./alumni_app
 docker-compose up -d
 ```
@@ -172,7 +172,7 @@ StuLink/
 
 | 版本 | 日期 | 亮点 |
 |---|---|---|
-| **v1.18.2.1** | 2026-09-24 | sakay 大规模安全加固：8 utils + 60 处权限收敛 + 1274 行 sec_regression；管理员首启随机口令 + 强制改密；SSRF 白名单 + 302 阻断；upload_guard 4 层校验；CSP Report-Only 起步 |
+| **v1.18.2.2** | 2026-09-24 | sakay 大规模安全加固：8 utils + 60 处权限收敛 + 1274 行 sec_regression；管理员首启随机口令 + 强制改密；SSRF 白名单 + 302 阻断；upload_guard 4 层校验；CSP Report-Only 起步 |
 | **v1.18.2.0** | 2026-09-24 | users ↔ academic.teachers 双向同步（admin 不属教师，白名单式过滤）；一次性回填 94 条教师档案 |
 | **v1.18.1.0** | 2026-09-24 | 积分管理 → 德育管理（用户可见文本层，`points.*` 技术标识保留不动）|
 | **v1.18.0.0** | 2026-09-23 | 主仓库迁移至 Gitee（HTTPS + 私人令牌 + Windows 凭据管理器）；sakay 分支 PR#2 成绩分析班级对比 + workbench 年级/班级联动下拉；4 段版本号规范落地；`bump_version.py` 工具 |
@@ -187,7 +187,7 @@ Copyright (c) 2026 zkxxzf
 ## 致谢
 
 感谢 [@飒龘 / Sakaay](https://gitee.com/sakay) 深度协作：
-- **v1.18.2.1**：安全加固大版（46 项清单闭环 · 8 utils · 1274 行回归测试）
+- **v1.18.2.2**：安全加固大版（46 项清单闭环 · 8 utils · 1274 行回归测试）
 - **v1.18.0.0**：成绩分析班级对比 · workbench 联动筛选 · 演示数据脚本增强 · PR 协作流程
 - **v1.17.0**：教务 / 工作台 / 画像 / 通知四大模块 + 两轮安全整改
 - **v1.13.x**：成绩汇报区 · 成绩证明快照加密 · 全局性能优化
