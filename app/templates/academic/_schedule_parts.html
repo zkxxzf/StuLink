@@ -67,6 +67,19 @@
 </button>
 {% endmacro %}
 
+{# ===== 输出工具（批次 D，2026-09-25）：网格导出 PNG + 分享链接 =====
+   两个按钮都由 schedule.js 处理：#btnExportPng 把当前网格画成 PNG 下载，
+   #btnShareSchedule 调后端签发短链（打开时仍需登录且有查看权限）。
+   页面需在 #scheduleData 的 urls 里提供 "share"（生成接口地址）。 #}
+{% macro export_tools() %}
+<button type="button" class="btn btn-sm btn-outline-dark no-print" id="btnExportPng">
+    <i class="bi bi-image"></i> 导出图片
+</button>
+<button type="button" class="btn btn-sm btn-outline-dark no-print" id="btnShareSchedule">
+    <i class="bi bi-link-45deg"></i> 分享链接
+</button>
+{% endmacro %}
+
 {# ===== 归档学期只读提示条 ===== #}
 {% macro readonly_banner(ts) %}
 {% if ts and ts.status == 'archived' %}
@@ -158,6 +171,13 @@
                                 <code>双周</code>、<code>5</code>。
                                 <span class="text-muted">单周课与双周课可放在同一格（互不冲突，网格内分行显示）。</span>
                             </div>
+                        </div>
+                        <div class="col-4">
+                            <label class="form-label small mb-1">教学班
+                                <span class="text-muted" style="font-weight:400">（走班）</span>
+                            </label>
+                            <input id="entryTeachingClass" class="form-control form-control-sm" maxlength="30"
+                                   placeholder="如 物化生1，留空＝行政班课">
                         </div>
                         <div class="col-4">
                             <label class="form-label small mb-1">备注</label>

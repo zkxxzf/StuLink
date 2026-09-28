@@ -22,6 +22,8 @@ _IDENT_RE = re.compile(r'^[A-Za-z_][A-Za-z0-9_]*$')
 ALLOWED_TABLES = {
     'students', 'notifications', 'certificates', 'exam_affairs',
     'term_schedules', 'graduated_students', 'classes',
+    'schedule_entries',   # 走班教学班列迁移（migrate_teaching_class.py）
+    'teacher_achievements',   # 业绩标签列迁移（migrate_achievement_tags_files.py）
 }
 
 

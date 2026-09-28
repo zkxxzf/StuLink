@@ -1,0 +1,121 @@
+{% extends "base.html" %}
+{% import "academic/_schedule_parts.html" as parts %}
+{% block title %}作息时间表 · {{ ts.name }}{% endblock %}
+{% block extra_css %}
+<style>
+/* ── 作息时间表（2026-09-26）：高中贴墙/打印用 ─────────────────── */
+.tt-wrap { max-width: 720px; }
+table.tt { border-collapse: collapse; width: 100%; font-size: 13.5px; }
+table.tt th, table.tt td { border: 1px solid #e2e8f0; padding: 7px 10px; text-align: center; }
+table.tt thead th { background: linear-gradient(180deg, #1e293b, #273549); color: #f1f5f9;
+                    font-weight: 600; font-size: 12.5px; }
+.tt-kind { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 6px; }
+.tt-k-class { background: #0ea5e9; }
+.tt-k-reading { background: #f59e0b; }
+.tt-k-evening { background: #6366f1; }
+.tt-k-break { background: #cbd5e1; }
+table.tt tr.tt-row-reading td { background: #fffdf3; }
+table.tt tr.tt-row-evening td { background: #f5f7ff; }
+table.tt tr.tt-row-break td { background: #fafbfd; color: #94a3b8; }
+.tt-dur { color: #64748b; font-size: 12px; }
+.tt-now td { background: #fff7ed !important; font-weight: 700; }
+.tt-now td:first-child::after { content: ' ◀ 当前'; color: #ea580c; font-size: 11px; }
+.tt-sum { font-size: 12.5px; color: #475569; }
+@media print {
+    @page { size: A4 portrait; margin: 14mm; }
+    .tt-wrap { max-width: none; }
+    table.tt { font-size: 13px; }
+    table.tt thead th { background: #e5e7eb !important; color: #000 !important; }
+    .tt-now td { background: #fff !important; }
+}
+</style>
+{% endblock %}
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
+    <div class="d-flex align-items-center gap-3 flex-wrap">
+        <h4 class="fw-bold mb-0"><i class="bi bi-clock-history"></i> 作息时间表</h4>
+        {{ parts.term_selector(schedules, ts, base_endpoint='academic.schedule_timetable') }}
+    </div>
+    <div class="d-flex gap-2 flex-wrap">
+        {{ parts.print_button('打印作息表（A4）') }}
+        {% if can_edit %}
+        <a class="btn btn-sm btn-outline-primary no-print"
+           href="{{ url_for('academic.schedule_periods', sid=ts.id) }}">
+            <i class="bi bi-gear"></i> 调整节次
+        </a>
+        {% endif %}
+        <a class="btn btn-sm btn-outline-secondary no-print"
+           href="{{ url_for('academic.schedule_overview', sid=ts.id) }}">
+            <i class="bi bi-list-columns-reverse"></i> 全校总课表
+        </a>
+    </div>
+</div>
+
+{{ parts.readonly_banner(ts) }}
+
+<div class="card tt-wrap">
+    <div class="card-header py-2 d-flex justify-content-between align-items-center flex-wrap gap-2">
+        <span class="fw-bold">{{ ts.name }} · 作息时间表</span>
+        <span class="text-muted small">共 {{ rows|length }} 节</span>
+    </div>
+    <div class="card-body p-0">
+        <table class="tt mb-0">
+            <thead>
+                <tr>
+                    <th style="width:64px">节次</th>
+                    <th style="width:110px">名称</th>
+                    <th style="width:130px">时间</th>
+                    <th style="width:80px">时长</th>
+                    <th>类别</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for r in rows %}
+                <tr class="tt-row-{{ r.kind }}" data-start="{{ r.p.start_time or '' }}" data-end="{{ r.p.end_time or '' }}">
+                    <td>{{ r.p.period_number }}</td>
+                    <td class="fw-bold">{{ r.p.period_name }}</td>
+                    <td style="font-variant-numeric: tabular-nums">
+                        {{ r.p.start_time or '--:--' }} – {{ r.p.end_time or '--:--' }}
+                    </td>
+                    <td class="tt-dur">{{ r.dur ~ ' 分钟' if r.dur else '—' }}</td>
+                    <td>
+                        <span class="tt-kind tt-k-{{ r.kind }}"></span>{{ stats.class_text.get(r.kind, r.kind) }}
+                    </td>
+                </tr>
+                {% else %}
+                <tr><td colspan="5" class="text-center text-muted py-4">该学期尚未配置节次</td></tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    <div class="card-footer tt-sum d-flex flex-wrap gap-3">
+        <span>正课 <b>{{ stats.class }}</b> 节（{{ (stats.class_min / 60)|round(1) }} 小时）</span>
+        <span>早读 <b>{{ stats.reading }}</b> 节</span>
+        <span>晚自习 <b>{{ stats.evening }}</b> 节（{{ (stats.evening_min / 60)|round(1) }} 小时）</span>
+        <span>课间/午休 <b>{{ stats.break }}</b> 段</span>
+    </div>
+</div>
+
+<div class="alert alert-light border small mt-3 mb-0 no-print">
+    <i class="bi bi-info-circle"></i>
+    高中作息常见口径：早读 + 上午 4 节 + 午休 + 下午 4 节 + 晚自习（1~3 节）。
+    这里的类别由节次的「类型」与名称判定；若本校作息不同，到「调整节次」里改名称/类型即可，
+    课表网格与总课表会同步显示早读/晚自习的底色。
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+document.addEventListener('DOMContentLoaded', function () {
+    var now = new Date();
+    var mins = now.getHours() * 60 + now.getMinutes();
+    var rows = document.querySelectorAll('table.tt tbody tr[data-start]');
+    rows.forEach(function (tr) {
+        var s = tr.getAttribute('data-start'), e = tr.getAttribute('data-end');
+        if (!s || !e) { return; }
+        function toMin(v) { var a = v.split(':'); return (+a[0]) * 60 + (+a[1]); }
+        if (mins >= toMin(s) && mins <= toMin(e)) { tr.classList.add('tt-now'); }
+    });
+});
+</script>
+{% endblock %}

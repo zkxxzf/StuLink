@@ -24,6 +24,7 @@
             <i class="bi bi-download"></i> 导出
         </a>
         {{ parts.print_button('打印当前班级') }}
+        {{ parts.export_tools() }}
         <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('academic.schedule_periods', sid=ts.id) }}">
             <i class="bi bi-clock-history"></i> 节次配置
         </a>
@@ -96,6 +97,7 @@
     "week": {{ week|tojson }},
     "gradeClasses": {{ grade_classes|tojson }},
     "initGrade": {{ init_grade|tojson }},
+    "periods": {{ periods|tojson }},
     "gradeUrlTpl": {{ url_for('academic.schedule_grade', sid=ts.id, grade='__G__')|tojson }},
     "urls": {
         "gradeData": {{ url_for('academic.api_schedule_grade_data', sid=ts.id)|tojson }},
@@ -104,6 +106,7 @@
         "entryDetail": {{ url_for('academic.api_schedule_entry_detail', eid=0)|tojson }},
         "entryEditTpl": {{ url_for('academic.schedule_entry_edit', sid=ts.id, eid=0)|tojson }},
         "entryDeleteTpl": {{ url_for('academic.schedule_entry_delete', sid=ts.id, eid=0)|tojson }},
+        "share": {{ url_for('academic.schedule_share', sid=ts.id)|tojson }},
         "checkConflict": {{ url_for('academic.api_schedule_check_conflict')|tojson }},
         "teachers": {{ url_for('academic.api_schedule_teachers')|tojson }},
         "classes": {{ url_for('academic.api_schedule_classes', sid=ts.id)|tojson }}

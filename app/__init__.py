@@ -5,9 +5,10 @@ import os
 import re as _re
 import secrets
 import sqlite3 as _sqlite3
+import uuid
 
 from flask import (Flask, render_template, request, url_for, abort, redirect,
-                   session, flash)
+                   session, flash, g)
 from sqlalchemy import event as _sa_event
 from sqlalchemy.engine import Engine as _SAEngine
 
@@ -611,9 +612,20 @@ def create_app():
     def _assign_csp_nonce():
         request.csp_nonce = secrets.token_urlsafe(16)
 
+    # 审计 request_id：同一次请求产生的多条 operation_logs 可据此串联
+    @app.before_request
+    def _assign_request_id():
+        g.request_id = uuid.uuid4().hex
+
     @app.context_processor
     def _inject_csp_nonce():
         return {'csp_nonce': getattr(request, 'csp_nonce', '')}
+
+    # 学科配色：模板里 subject_tone('数学') → {c/bg/fg}，课表网格按学科着色。
+    # 注册为 jinja 全局（而非 context processor）：{% import %} 的宏默认不带 context，
+    # 只有全局名字在宏内部才可见。
+    from app.utils.subject_color import subject_tone as _subject_tone
+    app.jinja_env.globals['subject_tone'] = _subject_tone
 
     # 安全响应头
     @app.after_request
@@ -645,6 +657,20 @@ def create_app():
             header = ('Content-Security-Policy' if mode == 'enforce'
                       else 'Content-Security-Policy-Report-Only')
             response.headers[header] = policy
+        return response
+
+    # 审计兜底网（2026-09-25）：所有写请求（POST/PUT/PATCH/DELETE）自动落
+    # operation_logs，业务代码已手工埋点的（log_operation 置 g._audit_logged）
+    # 跳过以免重复。全库 322 处写操作仅 1/3 有埋点，这里补上兜底，无需改造路由。
+    # 注册在最后 → after_request 逆序执行，它最先跑，能在 gzip/缓存改写响应前
+    # 拿到真实状态码。
+    @app.after_request
+    def audit_write_requests(response):
+        try:
+            from app.utils.audit import record_request_audit
+            record_request_audit(response)
+        except Exception:  # noqa: BLE001  审计失败绝不能影响正常响应
+            app.logger.warning('[audit] 请求审计写入失败', exc_info=True)
         return response
 
     # 注册蓝图（模块化架构）

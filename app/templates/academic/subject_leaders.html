@@ -1,0 +1,310 @@
+{% extends "base.html" %}
+{% block title %}备课组长名单{% endblock %}
+{% block extra_css %}
+<style>
+.ld-block { margin-bottom: 14px; border: 1px solid #e2e8f0; border-radius: 10px;
+            overflow: hidden; background: #fff; }
+.ld-head { background: linear-gradient(90deg, #1e293b, #334155); color: #f1f5f9;
+           padding: 6px 10px; font-weight: 700; font-size: 13px;
+           display: flex; justify-content: space-between; align-items: center; }
+.ld-duty { white-space: pre-wrap; text-align: left !important; font-size: 11.5px;
+           color: #334155; line-height: 1.45; }
+.ld-members { text-align: left !important; font-size: 11.5px; color: #475569; }
+@media print {
+    @page { size: A4 portrait; margin: 12mm; }
+    .ld-block { break-inside: avoid; page-break-inside: avoid; border-color: #9ca3af; }
+    .ld-head { background: #e5e7eb !important; color: #000 !important; }
+    .ld-duty, .ld-members { color: #000; }
+}
+</style>
+{% endblock %}
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
+    <div class="d-flex align-items-center gap-2 flex-wrap">
+        <h4 class="fw-bold mb-0"><i class="bi bi-people"></i> 备课组长名单</h4>
+        <form class="d-flex gap-2 flex-wrap align-items-center" method="get">
+            <input name="school_year" class="form-control form-control-sm" style="width:130px"
+                   list="yearList" value="{{ school_year }}" placeholder="学年 2026-2027">
+            <datalist id="yearList">{% for y in years %}<option value="{{ y }}"></option>{% endfor %}</datalist>
+            <select name="term" class="form-select form-select-sm" style="width:120px">
+                <option value="">全部学期</option>
+                <option value="第一学期" {% if f.term == '第一学期' %}selected{% endif %}>第一学期</option>
+                <option value="第二学期" {% if f.term == '第二学期' %}selected{% endif %}>第二学期</option>
+            </select>
+            <select name="subject" class="form-select form-select-sm" style="width:120px">
+                <option value="">全部学科</option>
+                {% for s in subjects %}
+                <option value="{{ s }}" {% if f.subject == s %}selected{% endif %}>{{ s }}</option>
+                {% endfor %}
+            </select>
+            <input name="q" class="form-control form-control-sm" style="width:150px"
+                   value="{{ f.keyword }}" placeholder="组长/职责关键词">
+            <button class="btn btn-sm btn-outline-primary"><i class="bi bi-search"></i> 筛选</button>
+        </form>
+    </div>
+    <div class="d-flex gap-2 flex-wrap">
+        {% if can_edit %}
+        <button class="btn btn-sm btn-primary no-print" data-bs-toggle="modal" data-bs-target="#leaderModal"
+                id="btnNewLeader">
+            <i class="bi bi-plus-lg"></i> 新增组长
+        </button>
+        {% endif %}
+        <a class="btn btn-sm btn-outline-info text-white"
+           href="{{ url_for('academic.subject_leader_export', school_year=school_year, term=f.term, subject=f.subject, q=f.keyword) }}">
+            <i class="bi bi-file-earmark-excel"></i> 导出 Excel
+        </a>
+        <button class="btn btn-sm btn-outline-dark no-print" onclick="window.print()">
+            <i class="bi bi-printer"></i> 打印
+        </button>
+        <a class="btn btn-sm btn-outline-secondary no-print" href="{{ url_for('academic.duty_table') }}">
+            <i class="bi bi-person-vcard"></i> 任课安排
+        </a>
+    </div>
+</div>
+
+{% if not groups %}
+<div class="card">
+    <div class="card-body text-center py-5 text-muted">
+        <i class="bi bi-people" style="font-size:40px;"></i>
+        <p class="mt-3 mb-1">{% if school_year %}{{ school_year }} {% endif %}暂无备课组长记录</p>
+        <p class="small mb-0">
+            {% if can_edit %}点右上「新增组长」按 学科 × 年级 登记，同一学科可在不同年级设不同组长。{% else %}请联系教务维护。{% endif %}
+        </p>
+    </div>
+</div>
+{% else %}
+<div class="text-muted small mb-2">
+    共 {{ leaders|length }} 条记录 · {{ groups|length }} 个学科
+    {% if school_year %} · 学年 {{ school_year }}{% endif %}{% if f.term %} · {{ f.term }}{% endif %}
+</div>
+{% for subject, rows in groups %}
+<div class="ld-block">
+    <div class="ld-head">
+        <span><i class="bi bi-bookmark-star"></i> {{ subject }}
+            <span class="fw-normal small ms-2">{{ rows|length }} 个年级组</span>
+        </span>
+        <span class="fw-normal small">共 {{ rows|length }} 条记录</span>
+    </div>
+    <div class="table-responsive">
+        <table class="table table-sm align-middle mb-0">
+            <thead class="table-light">
+                <tr>
+                    <th style="width:80px">年级</th>
+                    <th style="width:90px">学期</th>
+                    <th style="width:100px">组长</th>
+                    <th style="width:90px">教师编号</th>
+                    <th style="width:200px">备课组范围</th>
+                    <th>主要职责</th>
+                    {% if can_edit %}<th style="width:110px" class="no-print">操作</th>{% endif %}
+                </tr>
+            </thead>
+            <tbody>
+                {% for ld in rows %}
+                <tr>
+                    <td class="fw-bold">{{ ld.grade or '全校' }}</td>
+                    <td class="text-muted small">{{ ld.term or '整学年' }}</td>
+                    <td class="fw-bold">{{ ld.leader_name }}</td>
+                    <td class="text-muted small">{{ ld.leader_uid or '—' }}</td>
+                    <td class="ld-members">{{ ld.members or '—' }}</td>
+                    <td class="ld-duty">{{ ld.duty or '—' }}</td>
+                    {% if can_edit %}
+                    <td class="no-print">
+                        <button class="btn btn-sm btn-outline-primary py-0 btn-edit-leader"
+                                data-id="{{ ld.id }}" data-school-year="{{ ld.school_year }}"
+                                data-term="{{ ld.term }}" data-grade="{{ ld.grade }}"
+                                data-subject="{{ ld.subject }}" data-leader-name="{{ ld.leader_name }}"
+                                data-leader-uid="{{ ld.leader_uid or '' }}"
+                                data-members="{{ ld.members or '' }}" data-duty="{{ ld.duty or '' }}"
+                                data-sort-order="{{ ld.sort_order }}">编辑</button>
+                        <form method="post" class="d-inline"
+                              action="{{ url_for('academic.subject_leader_delete') }}"
+                              onsubmit="return confirm('删除「{{ ld.grade or '全校' }}{{ ld.subject }} · {{ ld.leader_name }}」这条备课组长记录？')">
+                            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                            <input type="hidden" name="id" value="{{ ld.id }}">
+                            <input type="hidden" name="school_year" value="{{ school_year }}">
+                            <button class="btn btn-sm btn-outline-danger py-0">删除</button>
+                        </form>
+                    </td>
+                    {% endif %}
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+{% endfor %}
+{% endif %}
+
+<div class="alert alert-light border small mb-0 no-print">
+    <i class="bi bi-info-circle"></i>
+    同名学年 × 学期 × 年级 × 学科重复保存会自动更新（不会产生重复行）；
+    「整学年」表示该学年通用，若某学期单独设置，请把学期选到具体学期。
+    职责可点「填入常用职责」套用模板后自行修改。
+</div>
+
+{% if can_edit %}
+<div class="modal fade" id="leaderModal" tabindex="-1">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <form method="post" action="{{ url_for('academic.subject_leader_save') }}" id="leaderForm">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <div class="modal-header py-2">
+                    <h6 class="modal-title"><i class="bi bi-person-badge"></i> <span id="leaderModalTitle">新增备课组长</span></h6>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="row g-2">
+                        <div class="col-md-4">
+                            <label class="form-label small mb-1">学年 <span class="text-danger">*</span></label>
+                            <input name="school_year" id="ldYear" class="form-control form-control-sm"
+                                   list="yearList" value="{{ school_year }}" required
+                                   placeholder="如 2026-2027">
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label small mb-1">学期</label>
+                            <select name="term" id="ldTerm" class="form-select form-select-sm">
+                                <option value="">整学年</option>
+                                <option value="第一学期">第一学期</option>
+                                <option value="第二学期">第二学期</option>
+                            </select>
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label small mb-1">年级</label>
+                            <input name="grade" id="ldGrade" class="form-control form-control-sm"
+                                   list="gradeList" placeholder="留空＝全校/综合组">
+                            <datalist id="gradeList">
+                                {% for g in grades %}<option value="{{ g }}"></option>{% endfor %}
+                            </datalist>
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label small mb-1">学科 <span class="text-danger">*</span></label>
+                            <input name="subject" id="ldSubject" class="form-control form-control-sm"
+                                   list="subjectList" required>
+                            <datalist id="subjectList">
+                                {% for s in subjects %}<option value="{{ s }}"></option>{% endfor %}
+                            </datalist>
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label small mb-1">组长姓名 <span class="text-danger">*</span></label>
+                            <input name="leader_name" id="ldName" class="form-control form-control-sm"
+                                   list="teacherNameList" required>
+                            <datalist id="teacherNameList"></datalist>
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label small mb-1">教师编号</label>
+                            <input name="leader_uid" id="ldUid" class="form-control form-control-sm"
+                                   placeholder="选择教师后自动带出">
+                        </div>
+                        <div class="col-12">
+                            <label class="form-label small mb-1">备课组范围 / 成员</label>
+                            <input name="members" id="ldMembers" class="form-control form-control-sm"
+                                   maxlength="300" placeholder="如：高一语文备课组（6 人）">
+                        </div>
+                        <div class="col-12">
+                            <label class="form-label small mb-1 d-flex justify-content-between">
+                                <span>主要职责</span>
+                                <button type="button" class="btn btn-sm btn-outline-secondary py-0"
+                                        id="btnFillDuty">填入常用职责</button>
+                            </label>
+                            <textarea name="duty" id="ldDuty" class="form-control form-control-sm"
+                                      rows="4" maxlength="500"></textarea>
+                        </div>
+                        <div class="col-md-3">
+                            <label class="form-label small mb-1">排序</label>
+                            <input name="sort_order" id="ldSort" type="number" value="0"
+                                   class="form-control form-control-sm">
+                        </div>
+                        <input type="hidden" name="id" id="ldId" value="">
+                    </div>
+                    <div class="form-text mt-2">
+                        同一 学年 + 学期 + 年级 + 学科 重复保存会更新已有记录（不会重复）。
+                    </div>
+                </div>
+                <div class="modal-footer py-2">
+                    <button type="button" class="btn btn-sm btn-secondary" data-bs-dismiss="modal">取消</button>
+                    <button type="submit" class="btn btn-sm btn-primary"><i class="bi bi-check-lg"></i> 保存</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+{% endif %}
+{% endblock %}
+
+{% block extra_js %}
+<script>
+(function () {
+    'use strict';
+    var DUTY_TPL = {{ duty_templates|tojson }};
+    var TEACHERS = [];
+    var teachersUrl = {{ url_for('academic.api_schedule_teachers')|tojson }};
+
+    // 教师名/编号自动匹配
+    fetch(teachersUrl, { headers: { 'X-Requested-With': 'XMLHttpRequest' } })
+        .then(function (r) { return r.json(); })
+        .then(function (res) {
+            if (!res || !res.success) { return; }
+            TEACHERS = res.data || [];
+            var dl = document.getElementById('teacherNameList');
+            if (dl) {
+                dl.innerHTML = TEACHERS.map(function (t) {
+                    return '<option value="' + t.name + '"></option>';
+                }).join('');
+            }
+        }).catch(function () { });
+
+    var $name = document.getElementById('ldName');
+    if ($name) {
+        $name.addEventListener('blur', function () {
+            var val = $name.value.trim();
+            var hit = null;
+            TEACHERS.forEach(function (t) { if (t.name === val) { hit = t; } });
+            document.getElementById('ldUid').value = hit ? hit.uid : '';
+        });
+    }
+
+    // 新增
+    var btnNew = document.getElementById('btnNewLeader');
+    if (btnNew) {
+        btnNew.addEventListener('click', function () {
+            document.getElementById('leaderModalTitle').textContent = '新增备课组长';
+            document.getElementById('leaderForm').reset();
+            document.getElementById('ldYear').value = {{ school_year|tojson }};
+            document.getElementById('ldId').value = '';
+        });
+    }
+
+    // 编辑：把行数据填回表单
+    document.querySelectorAll('.btn-edit-leader').forEach(function (btn) {
+        btn.addEventListener('click', function () {
+            var d = this.dataset;
+            document.getElementById('leaderModalTitle').textContent =
+                '编辑：' + (d.grade || '全校') + d.subject + ' · ' + d.leaderName;
+            document.getElementById('ldYear').value = d.schoolYear || '';
+            document.getElementById('ldTerm').value = d.term || '';
+            document.getElementById('ldGrade').value = d.grade || '';
+            document.getElementById('ldSubject').value = d.subject || '';
+            document.getElementById('ldName').value = d.leaderName || '';
+            document.getElementById('ldUid').value = d.leaderUid || '';
+            document.getElementById('ldMembers').value = d.members || '';
+            document.getElementById('ldDuty').value = d.duty || '';
+            document.getElementById('ldSort').value = d.sortOrder || '0';
+            bootstrap.Modal.getOrCreateInstance(document.getElementById('leaderModal')).show();
+        });
+    });
+
+    // 常用职责模板
+    var btnFill = document.getElementById('btnFillDuty');
+    if (btnFill) {
+        btnFill.addEventListener('click', function () {
+            var grade = (document.getElementById('ldGrade').value || '').trim();
+            var key = grade.indexOf('高三') >= 0 ? '毕业年级' : (grade ? 'default' : '综合组');
+            var text = DUTY_TPL[key] || DUTY_TPL['default'] || '';
+            var box = document.getElementById('ldDuty');
+            if (box.value.trim() && !window.confirm('会覆盖当前已填职责，确定继续？')) { return; }
+            box.value = text;
+        });
+    }
+})();
+</script>
+{% endblock %}

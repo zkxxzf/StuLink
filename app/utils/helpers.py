@@ -1,29 +1,89 @@
 # StuLink v1.7.0 2026-08-02
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
+import json
 import os
 import re
 from app.models import DictCategory, Student, Room, ClassProfile, ClassSubject
 from app.utils.cache import cache
-from flask import request
+from flask import request, g
 
 
-def log_operation(user, action, target_type, target_id=None, detail=None, module='system', severity='INFO'):
-    """记录操作审计日志（静默失败，不阻塞主流程）"""
+def _insert_log_row(values):
+    """用**独立连接**写审计日志。
+
+    为什么不用 db.session：审计日志既要「立即落库」又「不能连带提交业务数据」，
+    这两点在同一会话里无法兼得（session.commit 会把别人未提交的数据一起提交；
+    不 commit 则请求结束时被 teardown rollback 掉）。独立连接两者都满足：
+    业务 rollback 也不会把日志带走。
+
+    SQLite 下若业务正持有写锁，PRAGMA busy_timeout=300 最多等 0.3s，冲突时抛错，
+    由调用方回退到业务会话内的 SAVEPOINT 写法（尽最大努力，不阻断业务）。
+    """
+    from app.extensions import db
+    from app.models.operation_log import OperationLog
+
+    table = OperationLog.__table__
+    with db.engine.connect() as conn:
+        try:
+            conn.exec_driver_sql('PRAGMA busy_timeout=300')
+        except Exception:  # noqa: BLE001  非 SQLite（或不支持该 PRAGMA）忽略
+            pass
+        conn.execute(table.insert().values(**values))
+        conn.commit()
+
+
+def log_operation(user, action, target_type=None, target_id=None, detail=None,
+                  module='system', severity='INFO', endpoint=None, method=None,
+                  status_code=None):
+    """记录操作审计日志（静默失败，不阻塞主流程）。
+
+    2026-09-25 审计加固：
+    - **不再无条件 db.session.commit()**：旧实现会把调用点尚未提交的业务数据
+      一并落库，业务随后 rollback 也撤不回来。现在改为独立连接写入（见
+      `_insert_log_row`），锁冲突时回退到业务会话内的 SAVEPOINT（只 add 不 commit，
+      随业务事务一起落库）。
+    - detail 支持 dict/list，自动序列化为 JSON（ensure_ascii=False）。
+    - 写入后在 g 上打 `_audit_logged` 标记，after_request 兜底网据此去重。
+    """
     try:
-        from app.models.operation_log import OperationLog
+        from datetime import datetime
         from app.extensions import db
-        log = OperationLog(
-            user_id=user.id if user else None,
-            action=action,
-            target_type=target_type,
-            target_id=target_id,
-            detail=str(detail)[:2000] if detail else None,
-            ip_address=request.remote_addr if request else None,
-            module=module,
-            severity=severity,
-        )
-        db.session.add(log)
-        db.session.commit()
+        from app.models.operation_log import OperationLog
+
+        if isinstance(detail, (dict, list, tuple)):
+            try:
+                detail = json.dumps(detail, ensure_ascii=False, default=str)
+            except Exception:  # noqa: BLE001  序列化失败退化为 str
+                detail = str(detail)
+
+        try:
+            ip_address = request.remote_addr if request else None
+        except Exception:  # noqa: BLE001  非请求上下文（脚本/任务）
+            ip_address = None
+
+        values = {
+            'user_id': user.id if user else None,
+            'action': str(action)[:20] if action else None,
+            'target_type': str(target_type)[:30] if target_type else None,
+            'target_id': target_id,
+            'detail': str(detail)[:2000] if detail else None,
+            'ip_address': ip_address,
+            'module': str(module)[:30] if module else 'system',
+            'severity': severity or 'INFO',
+            'endpoint': str(endpoint)[:120] if endpoint else None,
+            'method': str(method)[:10] if method else None,
+            'status_code': status_code,
+            'request_id': getattr(g, 'request_id', None),
+            'created_at': datetime.now(),
+        }
+
+        try:
+            _insert_log_row(values)
+        except Exception:  # noqa: BLE001  锁冲突等 → 退回业务会话内 SAVEPOINT
+            with db.session.begin_nested():
+                db.session.add(OperationLog(**values))
+
+        g._audit_logged = True  # 供 after_request 兜底网去重
     except Exception:
         pass  # 日志记录失败不阻塞业务
 

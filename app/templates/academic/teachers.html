@@ -4,9 +4,13 @@
 <div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
     <h4 class="fw-bold mb-0">
         <i class="bi bi-person-vcard"></i> 教师名单
-        <span class="text-muted small fw-normal ms-2">共 {{ rows|length }} 人</span>
+        <span class="text-muted small fw-normal ms-2">共 {{ pagination.total }} 人</span>
     </h4>
-    <div class="d-flex gap-2">
+    <div class="d-flex gap-2 flex-wrap">
+        <a class="btn btn-sm btn-outline-info text-white"
+           href="{{ url_for('academic.teachers_export', kw=kw, status=status, subject=subject) }}">
+            <i class="bi bi-file-earmark-excel"></i> 导出名单
+        </a>
         <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('academic.teachers_template') }}">
             <i class="bi bi-download"></i> 下载导入模板
         </a>
@@ -21,7 +25,22 @@
         <form class="row g-2 align-items-center" method="get">
             <div class="col-auto">
                 <input name="kw" value="{{ kw }}" class="form-control form-control-sm"
-                       style="width:260px" placeholder="姓名 / 教师编号 / 手机号 / 学科">
+                       style="width:230px" placeholder="姓名 / 教师编号 / 手机号 / 学科">
+            </div>
+            <div class="col-auto">
+                <select name="status" class="form-select form-select-sm" style="width:110px">
+                    <option value="">全部状态</option>
+                    <option value="active" {% if status == 'active' %}selected{% endif %}>在职</option>
+                    <option value="left" {% if status == 'left' %}selected{% endif %}>离职</option>
+                </select>
+            </div>
+            <div class="col-auto">
+                <select name="subject" class="form-select form-select-sm" style="width:120px">
+                    <option value="">全部学科</option>
+                    {% for s in subjects %}
+                    <option value="{{ s }}" {% if subject == s %}selected{% endif %}>{{ s }}</option>
+                    {% endfor %}
+                </select>
             </div>
             <div class="col-auto">
                 <button class="btn btn-sm btn-primary"><i class="bi bi-search"></i> 搜索</button>
@@ -74,13 +93,37 @@
                 {% else %}
                 <tr>
                     <td colspan="9" class="text-center text-muted py-5">
-                        暂无教师数据，请先点击右上角「批量导入」建立教师名单
+                        {% if kw or status or subject %}当前筛选条件下没有匹配的教师{% else %}暂无教师数据，请先点击右上角「批量导入」建立教师名单{% endif %}
                     </td>
                 </tr>
                 {% endfor %}
             </tbody>
         </table>
     </div>
+    {% if pagination.pages > 1 %}
+    <div class="d-flex justify-content-between align-items-center px-3 py-2 border-top flex-wrap gap-2">
+        <span class="text-muted small">
+            第 {{ pagination.page }} / {{ pagination.pages }} 页 · 共 {{ pagination.total }} 人
+        </span>
+        <ul class="pagination pagination-sm mb-0">
+            <li class="page-item {{ 'disabled' if not pagination.has_prev }}">
+                <a class="page-link" href="{{ url_for('academic.teachers_page', page=pagination.prev_num, kw=kw, status=status, subject=subject) }}">上一页</a>
+            </li>
+            {% for p in pagination.iter_pages(left_edge=1, right_edge=1, left_current=2, right_current=2) %}
+                {% if p %}
+                <li class="page-item {{ 'active' if p == pagination.page }}">
+                    <a class="page-link" href="{{ url_for('academic.teachers_page', page=p, kw=kw, status=status, subject=subject) }}">{{ p }}</a>
+                </li>
+                {% else %}
+                <li class="page-item disabled"><span class="page-link">…</span></li>
+                {% endif %}
+            {% endfor %}
+            <li class="page-item {{ 'disabled' if not pagination.has_next }}">
+                <a class="page-link" href="{{ url_for('academic.teachers_page', page=pagination.next_num, kw=kw, status=status, subject=subject) }}">下一页</a>
+            </li>
+        </ul>
+    </div>
+    {% endif %}
 </div>
 
 <div class="modal fade" id="importModal" tabindex="-1">

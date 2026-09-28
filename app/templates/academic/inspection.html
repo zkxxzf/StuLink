@@ -10,13 +10,15 @@
         <button class="btn btn-sm btn-outline-primary" data-bs-toggle="collapse" data-bs-target="#chartArea">
             <i class="bi bi-bar-chart"></i> 图表
         </button>
+        {% if can_edit %}
         <button class="btn btn-sm btn-success" data-bs-toggle="modal" data-bs-target="#batchModal">
             <i class="bi bi-list-check"></i> 批量录入
         </button>
         <a class="btn btn-sm btn-info text-white" id="btnExport"
-           href="{{ url_for('academic.inspection_export', teacher_uid=f_teacher, result=f_result, date_from=f_from, date_to=f_to) }}">
+           href="{{ url_for('academic.inspection_export', teacher_uid=f_teacher, result=f_result, grade=f_grade, date_from=f_from, date_to=f_to) }}">
             <i class="bi bi-file-earmark-excel"></i> 导出 Excel
         </a>
+        {% endif %}
     </div>
 </div>
 
@@ -156,6 +158,14 @@
                 </select>
             </div>
             <div class="col-auto">
+                <select name="grade" class="form-select form-select-sm" style="width:110px">
+                    <option value="">全部年级</option>
+                    {% for g in grade_opts %}
+                    <option value="{{ g }}" {% if f_grade == g %}selected{% endif %}>{{ g }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="col-auto">
                 <select name="result" class="form-select form-select-sm" style="width:130px">
                     <option value="">全部情况</option>
                     {% for k, label in results %}
@@ -183,14 +193,15 @@
         <table class="table table-hover table-sm align-middle mb-0">
             <thead class="table-light">
                 <tr>
-                    <th>日期</th><th>节次</th><th>教师</th><th>班级</th>
-                    <th>科目</th><th>情况</th><th>备注</th><th>操作</th>
+                    <th>日期</th><th>年级</th><th>节次</th><th>教师</th><th>班级</th>
+                    <th>科目</th><th>情况</th><th>检查人</th><th>备注</th><th>操作</th>
                 </tr>
             </thead>
             <tbody>
                 {% for r in records %}
                 <tr>
                     <td>{{ r.inspect_date.strftime('%Y-%m-%d') }}</td>
+                    <td>{{ r.grade or '-' }}</td>
                     <td>{{ r.period or '-' }}</td>
                     <td class="fw-bold">{{ r.teacher_name }}</td>
                     <td>{{ r.class_name or '-' }}</td>
@@ -202,6 +213,7 @@
                         {% endif %}
                         {% endfor %}
                     </td>
+                    <td class="small text-muted">{{ inspectors.get(r.inspector_id) or '—' }}</td>
                     <td class="small text-muted">{{ r.note or '' }}</td>
                     <td class="text-nowrap">
                         {% if r.period %}
@@ -209,6 +221,14 @@
                            href="{{ url_for('academic.inspection_live_schedule', date=r.inspect_date.strftime('%Y-%m-%d'), period=r.period, grade=r.grade or '') }}">
                             <i class="bi bi-broadcast"></i>
                         </a>
+                        {% endif %}
+                        {% if can_edit %}
+                        <button type="button" class="btn btn-sm btn-outline-warning py-0" title="编辑"
+                                data-bs-toggle="modal" data-bs-target="#editInspModal"
+                                data-id="{{ r.id }}" data-teacher="{{ r.teacher_name or '' }}"
+                                data-result="{{ r.result }}" data-class-name="{{ r.class_name or '' }}"
+                                data-subject="{{ r.subject or '' }}" data-period="{{ r.period or '' }}"
+                                data-note="{{ r.note or '' }}"><i class="bi bi-pencil"></i></button>
                         {% endif %}
                         <form method="POST" style="display:inline"
                               action="{{ url_for('academic.inspection_delete', rid=r.id) }}"
@@ -219,12 +239,103 @@
                     </td>
                 </tr>
                 {% else %}
-                <tr><td colspan="8" class="text-center text-muted py-4">暂无查课记录</td></tr>
+                <tr><td colspan="10" class="text-center text-muted py-4">暂无查课记录</td></tr>
                 {% endfor %}
             </tbody>
         </table>
     </div>
+    {% if pagination.pages > 1 %}
+    <div class="d-flex justify-content-between align-items-center px-3 py-2 border-top flex-wrap gap-2">
+        <span class="text-muted small">第 {{ pagination.page }} / {{ pagination.pages }} 页 · 共 {{ pagination.total }} 条</span>
+        <ul class="pagination pagination-sm mb-0">
+            <li class="page-item {{ 'disabled' if not pagination.has_prev }}">
+                <a class="page-link" href="{{ url_for('academic.inspection_page', page=pagination.prev_num, teacher_uid=f_teacher, result=f_result, grade=f_grade, date_from=f_from, date_to=f_to) }}">上一页</a>
+            </li>
+            {% for p in pagination.iter_pages(left_edge=1, right_edge=1, left_current=2, right_current=2) %}
+                {% if p %}
+                <li class="page-item {{ 'active' if p == pagination.page }}">
+                    <a class="page-link" href="{{ url_for('academic.inspection_page', page=p, teacher_uid=f_teacher, result=f_result, grade=f_grade, date_from=f_from, date_to=f_to) }}">{{ p }}</a>
+                </li>
+                {% else %}
+                <li class="page-item disabled"><span class="page-link">…</span></li>
+                {% endif %}
+            {% endfor %}
+            <li class="page-item {{ 'disabled' if not pagination.has_next }}">
+                <a class="page-link" href="{{ url_for('academic.inspection_page', page=pagination.next_num, teacher_uid=f_teacher, result=f_result, grade=f_grade, date_from=f_from, date_to=f_to) }}">下一页</a>
+            </li>
+        </ul>
+    </div>
+    {% endif %}
 </div>
+
+{# ===== 编辑查课记录模态框（此前只能删了重录） ===== #}
+{% if can_edit %}
+<div class="modal fade" id="editInspModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <form method="post" id="editInspForm" action="{{ url_for('academic.inspection_edit', rid=0) }}">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <input type="hidden" name="back_grade" value="{{ f_grade }}">
+                <input type="hidden" name="back_teacher" value="{{ f_teacher }}">
+                <div class="modal-header py-2">
+                    <h6 class="modal-title"><i class="bi bi-pencil-square"></i> 编辑查课记录 · <span id="eiTeacher"></span></h6>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="row g-2">
+                        <div class="col-6">
+                            <label class="form-label small mb-1">查课情况</label>
+                            <select name="result" id="eiResult" class="form-select form-select-sm">
+                                {% for k, label in results %}
+                                <option value="{{ k }}">{{ label }}</option>
+                                {% endfor %}
+                            </select>
+                        </div>
+                        <div class="col-6">
+                            <label class="form-label small mb-1">节次</label>
+                            <input name="period" id="eiPeriod" type="number" min="1" max="13"
+                                   class="form-control form-control-sm">
+                        </div>
+                        <div class="col-6">
+                            <label class="form-label small mb-1">班级</label>
+                            <input name="class_name" id="eiClass" class="form-control form-control-sm" maxlength="10">
+                        </div>
+                        <div class="col-6">
+                            <label class="form-label small mb-1">科目</label>
+                            <input name="subject" id="eiSubject" class="form-control form-control-sm" maxlength="20">
+                        </div>
+                        <div class="col-12">
+                            <label class="form-label small mb-1">备注</label>
+                            <textarea name="note" id="eiNote" class="form-control form-control-sm" rows="2" maxlength="200"></textarea>
+                        </div>
+                    </div>
+                </div>
+                <div class="modal-footer py-2">
+                    <button type="button" class="btn btn-sm btn-secondary" data-bs-dismiss="modal">取消</button>
+                    <button type="submit" class="btn btn-sm btn-primary"><i class="bi bi-check-lg"></i> 保存</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+<script>
+document.addEventListener('DOMContentLoaded', function () {
+    var tpl = {{ url_for('academic.inspection_edit', rid=0)|tojson }};
+    document.querySelectorAll('[data-bs-target="#editInspModal"]').forEach(function (btn) {
+        btn.addEventListener('click', function () {
+            var d = this.dataset;
+            document.getElementById('editInspForm').action = tpl.replace(/\/\d+\/edit$/, '/' + d.id + '/edit');
+            document.getElementById('eiTeacher').textContent = d.teacher || '';
+            document.getElementById('eiResult').value = d.result || 'normal';
+            document.getElementById('eiPeriod').value = d.period || '';
+            document.getElementById('eiClass').value = d.className || '';
+            document.getElementById('eiSubject').value = d.subject || '';
+            document.getElementById('eiNote').value = d.note || '';
+        });
+    });
+});
+</script>
+{% endif %}
 
 {# ===== 批量录入模态框 ===== #}
 <div class="modal fade" id="batchModal" tabindex="-1">
