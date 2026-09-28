@@ -359,6 +359,9 @@ def achievement_attachment_delete(fid):
 
 @bp.route('/achievements/attachment/<int:fid>/view')
 @login_required
+# v1.18.2.2 审核（S2）：本路由有意不用 @perm_required('academic.view')——
+# 教师工作台“我的业绩”需允许无 academic.view 权限的提交者本人预览自己上传的附件；
+# 权限由 ach_svc.can_view(rec, att, current_user) 收敛（academic.view 持有者 OR 提交者本人 OR 审核人）。
 def achievement_file_view(fid):
     """附件预览：图片/PDF 内联打开，其它类型强制下载（避免浏览器渲染意外内容）。
 
@@ -383,6 +386,8 @@ def achievement_file_view(fid):
 
 @bp.route('/achievements/attachment/<int:fid>/download')
 @login_required
+# v1.18.2.2 审核（S2）：同 achievement_file_view，权限由 ach_svc.can_view 收敛，
+# 豁免 @perm_required 是为保留“提交者本人下载自己附件”路径（与工作台协作）。
 def achievement_file_download(fid):
     """附件下载（与预览同一套权限）"""
     att = db.session.get(AchievementAttachment, fid)

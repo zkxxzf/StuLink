@@ -22,6 +22,7 @@ from app.extensions import db
 from app.models.timetable import (WEEKDAY_NAMES, NightDuty, PeriodDef,
                                   ScheduleEntry)
 from app.modules.academic.services.schedule_service import _base_entry_query
+from app.utils.export_helpers import xl_safe
 
 WEEKDAYS = (1, 2, 3, 4, 5)
 WEEKLY_CAP = 2          # 每位教师每周值班上限（高中惯例 1~2 次）
@@ -254,11 +255,12 @@ def export_workbook(schedule_id, grades=None):
     ri = 3
     for b in data['blocks']:
         for pn in periods:
-            ws.cell(row=ri, column=1, value=f"{b['grade']} 第{pn}节").border = border
+            ws.cell(row=ri, column=1,
+                    value=xl_safe(f"{b['grade']} 第{pn}节")).border = border
             for i, wd in enumerate(WEEKDAYS):
                 cell = ws.cell(row=ri, column=2 + i,
-                               value=(b['grid'].get(wd, {}) or {}).get(pn, {})
-                               .get('teacher_name') or '')
+                               value=xl_safe((b['grid'].get(wd, {}) or {})
+                                             .get(pn, {}).get('teacher_name') or ''))
                 cell.alignment = Alignment(horizontal='center')
                 cell.border = border
             ri += 1

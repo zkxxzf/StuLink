@@ -247,8 +247,13 @@
             TEACHERS = res.data || [];
             var dl = document.getElementById('teacherNameList');
             if (dl) {
+                // v1.18.2.2 审核（🟡-2）：教师名经 innerHTML 注入前转义，防 XSS
                 dl.innerHTML = TEACHERS.map(function (t) {
-                    return '<option value="' + t.name + '"></option>';
+                    var safe = String(t.name == null ? '' : t.name)
+                        .replace(/&/g, '&amp;').replace(/</g, '&lt;')
+                        .replace(/>/g, '&gt;').replace(/"/g, '&quot;')
+                        .replace(/'/g, '&#39;');
+                    return '<option value="' + safe + '"></option>';
                 }).join('');
             }
         }).catch(function () { });

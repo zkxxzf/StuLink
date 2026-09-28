@@ -20,6 +20,7 @@ from app.extensions import db
 from app.models.academic import SUBJECT_ORDER, SubjectLeader
 from app.models.timetable import ScheduleEntry, TermSchedule
 from app.modules.academic.services.schedule_common import week_range_covers
+from app.utils.export_helpers import xl_safe
 
 # 文化课（图片里「文化课总」列的口径：语数英 + 理科 + 文科）
 CORE_SUBJECTS = ['语文', '数学', '英语', '物理', '化学', '生物', '政治', '历史', '地理']
@@ -60,8 +61,14 @@ def _head_teacher_map(pairs):
     result = {}
     try:
         from app.models import User, UserClassLink
-        for link in UserClassLink.query.all():
-            u = db.session.get(User, link.user_id)
+        # v1.18.2.2 审核（🟡-3）：原实现对每条 UserClassLink 逐个 db.session.get(User)（N+1），
+        # 改为一次 IN 查询预取，避免班数多时上百次往返。
+        links = UserClassLink.query.all()
+        uids = {lk.user_id for lk in links if lk.user_id}
+        umap = ({u.id: u for u in User.query.filter(User.id.in_(uids)).all()}
+                if uids else {})
+        for link in links:
+            u = umap.get(link.user_id)
             if u and u.is_active:
                 result.setdefault((link.grade, link.class_name), []).append(u.real_name)
         for u in User.query.filter_by(role='homeroom_teacher').all():
@@ -397,7 +404,7 @@ def export_duty_workbook(schedule_id, week=None, grade=None, view='class',
         for ri, t in enumerate(build_teacher_duty(schedule_id, week=week, grade=grade), 2):
             for ci, v in enumerate([t['name'], t['uid'], t['subject_text'],
                                     t['class_text'], t['class_count'], t['hours']], 1):
-                c = ws.cell(row=ri, column=ci, value=v)
+                c = ws.cell(row=ri, column=ci, value=xl_safe(v))
                 c.border = tb
                 c.alignment = center
     elif view == 'subject':
@@ -409,7 +416,7 @@ def export_duty_workbook(schedule_id, week=None, grade=None, view='class',
             for t in grp['teachers']:
                 for ci, v in enumerate([grp['subject'], t['name'], t['uid'],
                                         t['class_text'], t['hours']], 1):
-                    c = ws.cell(row=ri, column=ci, value=v)
+                    c = ws.cell(row=ri, column=ci, value=xl_safe(v))
                     c.border = tb
                     c.alignment = center
                 ri += 1
@@ -443,7 +450,7 @@ def export_duty_workbook(schedule_id, week=None, grade=None, view='class',
                         vals.append(f'{label} {cell["hours"]}')
                 vals.extend([row['core_total'], row['row_total']])
                 for ci, v in enumerate(vals, 1):
-                    c = ws.cell(row=ri, column=ci, value=v)
+                    c = ws.cell(row=ri, column=ci, value=xl_safe(v))
                     c.border = tb
                     c.alignment = center
                 ri += 1
@@ -452,7 +459,7 @@ def export_duty_workbook(schedule_id, week=None, grade=None, view='class',
             totals += [b['subject_totals'].get(s, 0) for s in b['subjects']]
             totals += [b['core_total'], b['grand_total']]
             for ci, v in enumerate(totals, 1):
-                c = ws.cell(row=ri, column=ci, value=v)
+                c = ws.cell(row=ri, column=ci, value=xl_safe(v))
                 c.border = tb
                 c.alignment = center
                 c.font = Font(bold=True, size=10)
@@ -461,7 +468,7 @@ def export_duty_workbook(schedule_id, week=None, grade=None, view='class',
                 '、'.join(b['subject_teachers'].get(s, [])) for s in b['subjects']]
             teachers_row += ['', '']
             for ci, v in enumerate(teachers_row, 1):
-                c = ws.cell(row=ri, column=ci, value=v)
+                c = ws.cell(row=ri, column=ci, value=xl_safe(v))
                 c.border = tb
                 c.alignment = Alignment(horizontal='center', vertical='center',
                                         wrap_text=True)
@@ -486,7 +493,7 @@ def export_leaders_workbook(leaders, school_year=None):
     left = Alignment(horizontal='left', vertical='center', wrap_text=True)
 
     ws.cell(row=1, column=1,
-            value=f'{school_year or ""} 备课组长名单'.strip()).font = Font(bold=True, size=13)
+            value=xl_safe(f'{school_year or ""} 备课组长名单'.strip())).font = Font(bold=True, size=13)
     ws.merge_cells(start_row=1, start_column=1, end_row=1, end_column=7)
     headers = ['学科', '年级', '学期', '组长', '教师编号', '备课组范围', '主要职责']
     for ci, h in enumerate(headers, 1):
@@ -504,7 +511,7 @@ def export_leaders_workbook(leaders, school_year=None):
             for ci, v in enumerate([ld.subject, ld.grade or '全校', ld.term or '整学年',
                                     ld.leader_name, ld.leader_uid or '',
                                     ld.members or '', ld.duty or ''], 1):
-                c = ws.cell(row=ri, column=ci, value=v)
+                c = ws.cell(row=ri, column=ci, value=xl_safe(v))
                 c.border = tb
                 c.alignment = center if ci <= 5 else left
             ri += 1

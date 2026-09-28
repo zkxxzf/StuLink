@@ -66,10 +66,15 @@ def academic_home():
             ScheduleEntry.term_schedule_id == ts.id,
             ScheduleEntry.is_deleted.is_(False)).distinct().all()
         timetable['classes'] = len([r for r in rows if r[1]])
-        timetable['teachers'] = _count(db.session.query(
-            func.count(func.distinct(ScheduleEntry.teacher_uid))).filter(
-                ScheduleEntry.term_schedule_id == ts.id,
-                ScheduleEntry.is_deleted.is_(False)))
+        # v1.18.2.2 审核（🟡-1）：原实现用 _count(聚合查询) 会对“已聚合的 1 行”再 .count()，
+        # 结果恒为 1；改为 .scalar() 取 distinct teacher_uid 真实去重数。
+        try:
+            timetable['teachers'] = db.session.query(
+                func.count(func.distinct(ScheduleEntry.teacher_uid))).filter(
+                    ScheduleEntry.term_schedule_id == ts.id,
+                    ScheduleEntry.is_deleted.is_(False)).scalar() or 0
+        except Exception:  # noqa: BLE001
+            timetable['teachers'] = 0
 
     insp_month = _count(InspectionRecord.query.filter(
         InspectionRecord.inspect_date >= month_start))
