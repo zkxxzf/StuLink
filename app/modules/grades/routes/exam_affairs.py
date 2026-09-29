@@ -67,10 +67,35 @@ def _grade_options():
 
 # ==================== 考务批次列表 / 新建 / 删除 ====================
 
+
+def delete_affair_cascade(aid):
+    """v1.18.3.0：删除考务批次并级联清理其考场与学生名单。
+
+    AffairRoom / AffairStudent 的 affair_id 无外键约束（多库快照式设计，不建跨表外键），
+    直接 `db.session.delete(affair)` 会留下孤儿行；此处显式按 affair_id 批量删除。
+    调用方负责 commit。返回 (考场数, 名单数)。
+    """
+    n_rooms = AffairRoom.query.filter_by(affair_id=aid).delete()
+    n_stus = AffairStudent.query.filter_by(affair_id=aid).delete()
+    n_aff = ExamAffair.query.filter_by(id=aid).delete()
+    return n_rooms, n_stus + n_aff
+
+
 @bp.route('/affairs')
 @login_required
 @perm_required('grades.edit')
 def affairs_list():
+    """v1.17.0 考试/考务合并收尾（v1.18.3.0）：考务批次列表已并入考试管理，
+    本页保留为兼容入口（旧书签/外链），统一重定向到考试列表；
+    未关联考试的孤儿批次由考试列表底部“待处理的考务批次”区兑底展示。"""
+    return redirect(url_for('grades.exams_list'))
+
+
+@bp.route('/affairs/overview')
+@login_required
+@perm_required('grades.edit')
+def affairs_overview():
+    """考务批次总览（跳考试）：从考试列表“待处理批次”区进入，不按年级过滤。"""
     grade = request.args.get('grade', '')
     q = ExamAffair.query
     if grade:
@@ -98,7 +123,7 @@ def affair_create():
     grade = (request.form.get('grade') or '').strip()
     if not name or not grade:
         flash('批次名与年级必填', 'danger')
-        return redirect(url_for('grades.affairs_list'))
+        return redirect(url_for('grades.exams_list'))
     # H-4：创建时同样校验年级范围（不能为其它年级建考务批次）
     from app.modules.grades.services.exam_guard import assert_grade_visible
     assert_grade_visible(grade)
@@ -154,11 +179,14 @@ def exam_affair_go(exam_id):
 @perm_required('grades.edit')
 def affair_delete(aid):
     affair = _get_affair_checked(aid)
-    db.session.delete(affair)
+    name = affair.name
+    # v1.18.3.0：级联清理考场与名单（无外键约束，不显式删会留孤儿行）
+    n_rooms, n_stus = delete_affair_cascade(aid)
     db.session.commit()
-    log_operation(current_user, '删除', '考务批次', aid, affair.name, module='grades')
+    log_operation(current_user, '删除', '考务批次', aid,
+                  f'{name}（含考场{n_rooms}个/名单{n_stus}人）', module='grades')
     flash('考务批次已删除', 'success')
-    return redirect(url_for('grades.affairs_list'))
+    return redirect(url_for('grades.exams_list'))
 
 
 # ==================== 考务向导详情（含 5 个步骤 + 成绩关联） ====================

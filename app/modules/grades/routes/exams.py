@@ -12,7 +12,8 @@ from flask import (Blueprint, render_template, request, jsonify, flash,
                    redirect, url_for, send_file, current_app, abort)
 from flask_login import login_required, current_user
 from app.extensions import db
-from app.models.grades import Exam, ExamScore, SUBJECTS, TOTAL_SUBJECT
+from app.models.grades import (Exam, ExamScore, SUBJECTS, TOTAL_SUBJECT,
+                              ExamAffair, AffairRoom, AffairStudent)
 from app.models import Student
 from app.modules.grades import bp
 from app.modules.grades.services import import_service, store_service, ranking, tab_service
@@ -57,8 +58,23 @@ def exams_list():
                     .group_by(ExamScore.exam_id).all())
         for eid, cnt in rows_cnt:
             counts[eid] = cnt
+    # v1.18.3.0：孤儿考务批次兜底（exam_id 为空，或指向已删除的考试）
+    # 这类批次从考试列表无法进入，以前只能直连 /grades/affairs 才能看到，现在底部统一列出
+    live_exam_ids = {e.id for e in Exam.query.with_entities(Exam.id).all()}
+    orphan_affairs = []
+    for a in ExamAffair.query.order_by(ExamAffair.id.desc()).all():
+        if a.exam_id is None or a.exam_id not in live_exam_ids:
+            if grade and a.grade != grade:
+                continue
+            orphan_affairs.append({
+                'a': a,
+                'students': AffairStudent.query.filter_by(affair_id=a.id).count(),
+                'rooms': AffairRoom.query.filter_by(affair_id=a.id).count(),
+                'exam_gone': a.exam_id is not None,
+            })
     return render_template('grades/exam_list.html', exams=exams, counts=counts,
                            grade=grade, grade_options=_grade_options(),
+                           orphan_affairs=orphan_affairs,
                            status_label=EXAM_STATUS_LABEL)
 
 
@@ -328,13 +344,25 @@ def exam_delete(exam_id):
     n_scores = ExamScore.query.filter_by(exam_id=exam_id).delete()
     n_bands = ExamBand.query.filter_by(exam_id=exam_id).delete()
     n_ai = AiReport.query.filter_by(exam_id=exam_id).delete()
+    # v1.18.3.0：级联删除本考试的考务批次（含其考场与名单），避免产生孤儿批次
+    # 旧逻辑只删考试，导致 affair 的 exam_id 指向已删考试，从考试列表无法再进入
+    from app.modules.grades.routes.exam_affairs import delete_affair_cascade
+    from app.models.grades import ExamAffair
+    n_affair = 0
+    for aff in ExamAffair.query.filter_by(exam_id=exam_id).all():
+        delete_affair_cascade(aff.id)
+        n_affair += 1
     db.session.delete(exam)
     db.session.commit()
     invalidate_exam_cache(exam_id)
     log_operation(current_user, '删除', '考试', exam_id,
-                  f'{exam_name}（成绩{n_scores}条/分层{n_bands}条/AI报告{n_ai}条）', module='grades')
+                  f'{exam_name}（成绩{n_scores}条/分层{n_bands}条/AI报告{n_ai}条'
+                  + (f'/考务批次{n_affair}个' if n_affair else '') + '）', module='grades')
     if is_json:
-        return jsonify(success=True, message=f'已删除《{exam_name}》：成绩 {n_scores} 条、分层 {n_bands} 条')
+        msg = f'已删除《{exam_name}》：成绩 {n_scores} 条、分层 {n_bands} 条'
+        if n_affair:
+            msg += f'、关联考务批次 {n_affair} 个'
+        return jsonify(success=True, message=msg)
     flash(f'考试「{exam_name}」及全部成绩已删除', 'success')
     return redirect(url_for('grades.exams_list'))
 

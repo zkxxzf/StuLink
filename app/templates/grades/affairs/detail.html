@@ -3,8 +3,9 @@
 {% block content %}
 <div class="d-flex justify-content-between align-items-center mb-2 flex-wrap gap-2">
     <div>
-        <a href="{{ url_for('grades.affairs_list') }}" class="text-decoration-none text-muted small">
-            <i class="bi bi-arrow-left"></i> 考务批次</a>
+        {# v1.18.3.0：考务已并入考试管理，面包屑直接返回考试列表 #}
+        <a href="{{ url_for('grades.exams_list') }}" class="text-decoration-none text-muted small">
+            <i class="bi bi-arrow-left"></i> 返回考试管理</a>
         <h5 class="mb-0 mt-1"><i class="bi bi-clipboard-check"></i> {{ affair.name }}
             <span class="badge bg-secondary ms-1">{{ affair.grade }}</span>
             {% if affair.status == 'linked' %}<span class="badge bg-info">已关联成绩</span>
