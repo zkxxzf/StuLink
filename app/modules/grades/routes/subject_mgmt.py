@@ -1,4 +1,4 @@
-# StuLink v1.18.2.2 2026-09-28
+# StuLink v1.18.3.0 2026-09-29
 # 选科维护：按班级快速查看/批量修改学生选科组合
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 from flask import render_template, request, redirect, url_for, flash

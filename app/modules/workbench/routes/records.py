@@ -1,4 +1,4 @@
-# StuLink v1.18.2.2 2026-09-28
+# StuLink v1.18.3.0 2026-09-29
 # 班主任工作记录路由（班会 / 家访 / 谈话）
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 from datetime import date

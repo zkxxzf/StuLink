@@ -1,4 +1,4 @@
-# StuLink v1.18.2.2 2026-09-28
+# StuLink v1.18.3.0 2026-09-29
 # 教师工作台：我的信息 / 今日课程 / 我的课表 / 我的业绩 / 手机号修改
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 import re

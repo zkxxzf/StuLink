@@ -83,3 +83,6 @@ app/static/uploads/
 *.bak-*
 *.bat
 *.err
+
+# 轻量部署临时打包产物（禁止入库）
+_stulink_*.tar.gz

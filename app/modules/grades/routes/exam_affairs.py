@@ -1,4 +1,4 @@
-# StuLink v1.18.2.2 2026-09-28
+# StuLink v1.18.3.0 2026-09-29
 # 考务管理：完整考务流程（对应 Excel 宏工作簿 2025考场学生考号与考场信息编排v1.2）
 #   步骤：① 学生名单（学生信息表） → ② 考场设置（考场信息表）
 #        → ③ 编排与考号生成（三种模式，镜像宏 编排考场考号2）
@@ -22,6 +22,7 @@ from app.models.grades import (ExamAffair, AffairRoom, AffairRoomLib, AffairStud
 from app.modules.grades import bp
 from app.utils.decorators import perm_required
 from app.utils.helpers import log_operation
+from app.modules.grades.utils import is_teaching_class
 from app.utils.text_guard import (sanitize_label, sanitize_prefix,
                                   safe_download_name)
 from app.utils.upload_guard import validate_upload   # L-8：导入文件类型校验
@@ -225,8 +226,13 @@ def affair_students_template(aid):
         c.alignment = _CENTER
         c.border = _TB
     # 预填系统该年级学生（与 Excel「学生信息表」口径一致，考务人员可直接编辑）
+    # v1.18.3.0：只预填数字教学班且年级未毕业的学生（不分班/已转出/已毕业不进入成绩模板）
+    from app.utils.helpers import get_graduated_grades
+    _graduated = set(get_graduated_grades() or [])
+    _grade_ok = affair.grade not in _graduated
     sys_stus = (Student.query.filter_by(grade=affair.grade)
                 .order_by(Student.class_name, Student.student_number).all())
+    sys_stus = [st for st in sys_stus if _grade_ok and is_teaching_class(st.class_name)]
     for st in sys_stus:
         ws.append([st.student_number, st.name, st.class_name,
                    st.subject_selection or '', '是', '', '', '', ''])
@@ -273,6 +279,7 @@ def affair_students_import(aid):
         return jsonify({'ok': False, 'msg': '缺少「学号」列，请使用模板'})
     added = 0
     skipped = 0
+    skipped_no_class = 0
     sys_map = {s.student_number: s for s in Student.query.filter_by(grade=affair.grade).all()}
     for row in ws.iter_rows(min_row=2, values_only=True):
         no = str(row[idx['学号']]).strip() if idx['学号'] < len(row) and row[idx['学号']] is not None else ''
@@ -300,6 +307,10 @@ def affair_students_import(aid):
             name = name or sys_stu.name
             cls = cls or sys_stu.class_name
             sel = sel or (sys_stu.subject_selection or '')
+        # v1.18.3.0：补全后仍无数字教学班的学生不导入成绩名单
+        if not is_teaching_class(cls):
+            skipped_no_class += 1
+            continue
         st = AffairStudent(affair_id=aid, student_no=no, name=name, class_name=cls,
                            subject_selection=sel, subject=sel or '默认',
                            is_attend=(attend != '否'), fixed_room=fixed_room,
@@ -308,7 +319,10 @@ def affair_students_import(aid):
         added += 1
     db.session.commit()
     wb.close()
-    log_operation(current_user, '导入', '考务学生', aid, f'新增{added}条/跳过{skipped}条', module='grades')
+    log_operation(current_user, '导入', '考务学生', aid,
+                  f'新增{added}条/跳过{skipped}条'
+                  + (f'/无班级{skipped_no_class}条' if skipped_no_class else ''),
+                  module='grades')
     return jsonify({'ok': True, 'added': added, 'skipped': skipped})
 
 
@@ -316,12 +330,25 @@ def affair_students_import(aid):
 @login_required
 @perm_required('grades.edit')
 def affair_students_sync(aid):
-    """v1.12.1 从学生学籍库同步本年级学生到考务名单（增量：新增+补全信息，可选拨除已删学籍）"""
+    """v1.12.1 从学生学籍库同步本年级学生到考务名单（增量：新增+补全信息）
+
+    v1.18.3.0 口径调整（用户明确）：
+    - 无班级学生（不分班 / 已转出 / 离校 等非数字班级）与已毕业年级学生
+      **不进入成绩治理模块**，同步时直接过滤掉；
+    - 原「同时移除学籍已删的学生」复选框取消，改为**默认自动移除**：
+      名单中任何不再属于“本年级 + 在读未毕业 + 数字班级”的学生（学籍已删、
+      转入不分班、年级已毕业等）均同步剔除，无需手动勾选。
+    """
     affair = _get_affair_checked(aid)
-    sys_stus = (Student.query.filter_by(grade=affair.grade)
+    from app.utils.helpers import get_graduated_grades
+    graduated = set(get_graduated_grades() or [])
+    all_stus = (Student.query.filter_by(grade=affair.grade)
                 .order_by(Student.class_name, Student.student_number).all())
+    # 有效学生：年级未毕业 + 数字教学班（不分班/已转出/离校等自然被排除）
+    grade_ok = affair.grade not in graduated
+    sys_stus = [st for st in all_stus if grade_ok and is_teaching_class(st.class_name)]
     exist = {s.student_no: s for s in AffairStudent.query.filter_by(affair_id=aid).all()}
-    added = removed = 0
+    added = removed = skipped = 0
     for st in sys_stus:
         row = exist.get(st.student_number)
         if not row:
@@ -335,17 +362,19 @@ def affair_students_sync(aid):
         row.subject = row.subject_selection or '默认'
         if row.is_attend is None:
             row.is_attend = True
-    if request.form.get('remove_missing') == '1':  # 可选：学籍已删除的学生同步移除
-        sys_nos = {st.student_number for st in sys_stus}
-        for no, row in exist.items():
-            if no not in sys_nos:
-                db.session.delete(row)
-                removed += 1
+    # 默认移除：名单中已不属于有效集合的学生（学籍已删/无班级/年级已毕业）
+    sys_nos = {st.student_number for st in sys_stus}
+    for no, row in exist.items():
+        if no not in sys_nos:
+            db.session.delete(row)
+            removed += 1
+    skipped = len(all_stus) - len(sys_stus)   # 因无班级/已毕业而未导入的学籍数
     db.session.commit()
     log_operation(current_user, '同步', '考务学生', aid,
-                  f'新增{added}人/移除{removed}人/共{len(sys_stus)}人', module='grades')
+                  f'新增{added}人/移除{removed}人/有效{len(sys_stus)}人/跳过无班{skipped}人',
+                  module='grades')
     return jsonify({'ok': True, 'added': added, 'removed': removed,
-                    'total': len(sys_stus)})
+                    'total': len(sys_stus), 'skipped_no_class': skipped})
 
 
 @bp.route('/affairs/<int:aid>/students/pick')
@@ -353,8 +382,13 @@ def affair_students_sync(aid):
 @perm_required('grades.edit')
 def affair_students_pick(aid):
     """v1.12.2 「加入学生」选择器数据源：返回本年级学籍学生，
-    带 in_batch 标记（是否已在当前考务名单），供前端筛选/排序/搜索。"""
+    带 in_batch 标记（是否已在当前考务名单），供前端筛选/排序/搜索。
+
+    v1.18.3.0：与 sync 同口径，只列数字教学班且年级未毕业的学生（无班级/已毕业不展示）。"""
     affair = _get_affair_checked(aid)
+    from app.utils.helpers import get_graduated_grades
+    graduated = set(get_graduated_grades() or [])
+    grade_ok = affair.grade not in graduated
     have = {s.student_no for s in AffairStudent.query.filter_by(affair_id=aid).all()}
     rows = (Student.query.filter_by(grade=affair.grade)
             .order_by(Student.class_name, Student.student_number).all())
@@ -362,7 +396,7 @@ def affair_students_pick(aid):
         {'student_no': st.student_number, 'name': st.name, 'class_name': st.class_name,
          'subject_selection': st.subject_selection or '', 'gender': st.gender or '',
          'in_batch': st.student_number in have}
-        for st in rows]})
+        for st in rows if grade_ok and is_teaching_class(st.class_name)]})
 
 
 @bp.route('/affairs/<int:aid>/students/batch-add', methods=['POST'])
@@ -375,9 +409,13 @@ def affair_students_batch_add(aid):
     if not nos:
         return jsonify({'ok': False, 'msg': '未选择学生'})
     exist = {s.student_no for s in AffairStudent.query.filter_by(affair_id=aid).all()}
-    added = 0
+    added = skipped = 0
     for st in Student.query.filter(Student.student_number.in_(nos)).all():
         if st.student_number in exist:
+            continue
+        # v1.18.3.0：无班级学生（不分班/已转出/离校等）不加入成绩治理名单
+        if not is_teaching_class(st.class_name):
+            skipped += 1
             continue
         db.session.add(AffairStudent(
             affair_id=aid, student_no=st.student_number, name=st.name,
@@ -385,8 +423,10 @@ def affair_students_batch_add(aid):
             subject=st.subject_selection or '默认', is_attend=True))
         added += 1
     db.session.commit()
-    log_operation(current_user, '加入', '考务学生', aid, f'选择器加入{added}人', module='grades')
-    return jsonify({'ok': True, 'added': added})
+    log_operation(current_user, '加入', '考务学生', aid,
+                  f'选择器加入{added}人' + (f'/跳过无班级{skipped}人' if skipped else ''),
+                  module='grades')
+    return jsonify({'ok': True, 'added': added, 'skipped_no_class': skipped})
 
 
 @bp.route('/affairs/<int:aid>/students/<int:sid>/fixed', methods=['POST'])

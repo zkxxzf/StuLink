@@ -1,4 +1,4 @@
-# StuLink v1.18.2.2 2026-09-28
+# StuLink v1.18.3.0 2026-09-29
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 """任课安排 / 备课组长（2026-09-25）。
 
@@ -61,7 +61,7 @@ def _head_teacher_map(pairs):
     result = {}
     try:
         from app.models import User, UserClassLink
-        # v1.18.2.2 审核（🟡-3）：原实现对每条 UserClassLink 逐个 db.session.get(User)（N+1），
+        # v1.18.3.0 审核（🟡-3）：原实现对每条 UserClassLink 逐个 db.session.get(User)（N+1），
         # 改为一次 IN 查询预取，避免班数多时上百次往返。
         links = UserClassLink.query.all()
         uids = {lk.user_id for lk in links if lk.user_id}

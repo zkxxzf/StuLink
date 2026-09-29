@@ -65,19 +65,19 @@
     <!-- ===== 步骤① 学生名单 ===== -->
     <div class="tab-pane fade show active" id="t1">
         {# v1.12.1 学生名单改为从学生库同步导入，不再走 Excel 重复导入；新增学生可直接写入学籍库 #}
+        {# v1.18.3.0 取消「同时移除学籍已删的学生」复选框：无班级/已转出/已毕业学生一律不进入成绩模块，且同步时默认自动剔除 #}
         <div class="d-flex gap-2 mb-2 flex-wrap align-items-center">
-            <button class="btn btn-primary btn-sm" onclick="syncStudents(false)">
+            <button class="btn btn-primary btn-sm" onclick="syncStudents()">
                 <i class="bi bi-cloud-download"></i> 从学生库导入</button>
-            <div class="form-check ms-1">
-                <input class="form-check-input" type="checkbox" id="syncRemove">
-                <label class="form-check-label small text-muted" for="syncRemove">同时移除学籍已删的学生</label>
-            </div>
             <button class="btn btn-outline-success btn-sm" onclick="openPick()">
                 <i class="bi bi-person-plus"></i> 加入学生</button>
             <button class="btn btn-outline-secondary btn-sm" onclick="openStuModal()">
                 <i class="bi bi-pencil-square"></i> 手动新增</button>
             <button class="btn btn-outline-danger btn-sm" onclick="clearStudents()">
                 <i class="bi bi-trash"></i> 清空名单</button>
+            <span class="small text-muted ms-1">
+                <i class="bi bi-info-circle"></i> 不分班/已转出/已毕业等无班级学生不进入成绩名单
+            </span>
         </div>
         <div class="card"><div class="table-responsive" style="max-height:60vh;overflow:auto">
             <table class="table table-sm table-hover align-middle mb-0" id="stuTable">
@@ -423,13 +423,18 @@ if(location.hash){
     if(triggerEl) new bootstrap.Tab(triggerEl).show();
 }
 
-// v1.12.1 学生名单从学籍库同步导入（增量：新增+刷新基本信息；可选移除学籍已删学生）
+// v1.12.1 学生名单从学籍库同步导入（增量：新增+刷新基本信息）
+// v1.18.3.0 取消 remove_missing 参数：无班级/已转出/已毕业学生一律不进入成绩模块，
+// 名单中不再符合条件的学生（学籍已删等）由服务端默认自动剔除。
 function syncStudents(){
     var fd = new FormData();
-    if(document.getElementById('syncRemove').checked) fd.append('remove_missing','1');
     fetch('/grades/affairs/'+AID+'/students/sync', {method:'POST', body:fd, headers:{'X-CSRFToken':csrf()}})
         .then(r=>r.json()).then(d=>{
-            if(d.ok){ alert('同步完成：新增 '+d.added+' 人，移除 '+d.removed+' 人，学籍共 '+d.total+' 人'); location.reload(); }
+            if(d.ok){
+                var msg = '同步完成：新增 '+d.added+' 人，移除 '+d.removed+' 人，有效学籍共 '+d.total+' 人';
+                if(d.skipped_no_class){ msg += '\n（已跳过无班级学生 '+d.skipped_no_class+' 人：不分班/已转出/已毕业等）'; }
+                alert(msg); location.reload();
+            }
             else alert(d.msg);
         });
 }
