@@ -1,4 +1,4 @@
-# StuLink v1.18.3.0 2026-09-29
+# StuLink v1.18.4.0 2026-09-29
 # 成绩管理：通用小工具
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 import re
@@ -17,7 +17,7 @@ def numeric_classes(class_names):
 
 
 def is_teaching_class(class_name):
-    """v1.18.3.0：单个班级是否为教学班（01班~99班）。
+    """v1.18.4.0：单个班级是否为教学班（01班~99班）。
 
     不分班 / 已转出 / 离校 等非数字班级返回 False。
     与 numeric_classes 同一正则口径，供成绩治理模块统一过滤无班级学生。

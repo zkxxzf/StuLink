@@ -1,4 +1,4 @@
-# StuLink v1.18.3.0 2026-09-29
+# StuLink v1.18.4.0 2026-09-29
 # 学生画像路由：列表页 / 详情页 / 评语管理 / 事件管理 / 数据API
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 from flask import Blueprint, render_template, request, jsonify, abort, flash, redirect, url_for
@@ -141,7 +141,7 @@ def edit_comment(comment_id):
     ok, _comment, msg = portrait_service.can_manage_comment(comment_id, current_user.id)
     if not ok:
         return jsonify(success=False, message=msg), 403
-    # v1.18.3.0 S-2：反查所属学生并校验数据范围（避免持 portrait.edit 但无该生范围权限的管理、
+    # v1.18.4.0 S-2：反查所属学生并校验数据范围（避免持 portrait.edit 但无该生范围权限的管理、
     # 或学生已转班/退校时跨权限写入）
     if _comment is not None and getattr(_comment, 'student_no', None):
         try:
@@ -173,7 +173,7 @@ def delete_comment(comment_id):
     ok, _comment, msg = portrait_service.can_manage_comment(comment_id, current_user.id)
     if not ok:
         return jsonify(success=False, message=msg), 403
-    # v1.18.3.0 S-2：同 edit_comment，反查 student_no 确认范围
+    # v1.18.4.0 S-2：同 edit_comment，反查 student_no 确认范围
     if _comment is not None and getattr(_comment, 'student_no', None):
         try:
             _assert_student_in_scope(_comment.student_no)

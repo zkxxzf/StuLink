@@ -1,4 +1,4 @@
-# StuLink v1.18.3.0 2026-09-29
+# StuLink v1.18.4.0 2026-09-29
 # 教务 · 查课统计：记录录入 / 列表筛选 / 月度统计 / 批量录入 / 导出 / 图表API
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 import io

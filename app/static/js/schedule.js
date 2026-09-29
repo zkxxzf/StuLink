@@ -1,4 +1,4 @@
-/* StuLink v1.18.3.0 学期课表前端
+/* StuLink v1.18.4.0 学期课表前端
  * 统一入口：各课表页底部注入 <script id="scheduleData" type="application/json"> 配置块。
  * 依赖：jQuery 3.7 + Bootstrap 5 bundle（base.html 已全局加载）；图表页额外加载 echarts.min.js。
  * CSRF：base.html 已 $.ajaxSetup 注入 X-CSRFToken，本文件的 $.ajax/$.getJSON 自动携带。

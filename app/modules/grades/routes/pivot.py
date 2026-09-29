@@ -1,4 +1,4 @@
-# StuLink v1.18.3.0 2026-09-29
+# StuLink v1.18.4.0 2026-09-29
 # 自由表：行维度 / 列维度 / 指标 自由组合的交叉分析
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 from flask import render_template, request, jsonify, abort
