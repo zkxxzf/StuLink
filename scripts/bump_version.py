@@ -108,6 +108,12 @@ def bump_files(new_ver: str, dry: bool = False) -> list[str]:
         new_content = old_pat.sub(f'v{new_ver}', content)
         if new_content != content:
             changed.append(rel_str)
+            # v1.18.3.0 防误改：同一文件内当前版本出现 ≥2 次，很可能是“历史里程碑/
+            # 致谢表”里的历史记录，全局替换会把它们一并改掉。提醒人工核对。
+            hits = len(old_pat.findall(content))
+            if hits >= 2:
+                print(f'  [警告] {rel_str} 命中 {hits} 处当前版本，可能含历史里程碑记录，'
+                      f'请核对是否应保留旧版本号（建议历史表写法不带 v 前缀）')
             if not dry:
                 try:
                     raw = p.read_bytes()

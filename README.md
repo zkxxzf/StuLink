@@ -3,7 +3,7 @@
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
 [![Python](https://img.shields.io/badge/python-3.11+-green.svg)](https://python.org)
 [![Flask](https://img.shields.io/badge/flask-3.x-lightgrey.svg)](https://flask.palletsprojects.com/)
-[![Version](https://img.shields.io/badge/version-1.18.2.1-orange.svg)](https://gitee.com/zkxxzf/StuLink)
+[![Version](https://img.shields.io/badge/version-1.18.3.0-orange.svg)](https://gitee.com/zkxxzf/StuLink)
 
 面向中学的综合学生管理平台，采用双站点 + 七模块 + 多库故障隔离架构：
 
@@ -168,15 +168,19 @@ StuLink/
   - [安全审计报告](docs/安全审计报告_20260807.md) · [安全整改清单](00-security-todo-merged.md)
   - [测试报告 v1.7.1](docs/测试报告_20260808.md) · [成绩模块测试与修复](docs/成绩管理模块测试与修复总结报告.md)
 
-## 技术里程碑（近三期）
+## 技术里程碑（近六期）
+
+> 下表版本号故意不带 `v` 前缀，以免 `bump_version.py` 全局替换时误改历史记录。
 
 | 版本 | 日期 | 亮点 |
 |---|---|---|
-| **v1.18.3.0** | 2026-09-24 | sakay 大规模安全加固：8 utils + 60 处权限收敛 + 1274 行 sec_regression；管理员首启随机口令 + 强制改密；SSRF 白名单 + 302 阻断；upload_guard 4 层校验；CSP Report-Only 起步 |
-| **v1.18.2.0** | 2026-09-24 | users ↔ academic.teachers 双向同步（admin 不属教师，白名单式过滤）；一次性回填 94 条教师档案 |
-| **v1.18.1.0** | 2026-09-24 | 积分管理 → 德育管理（用户可见文本层，`points.*` 技术标识保留不动）|
-| **v1.18.0.0** | 2026-09-23 | 主仓库迁移至 Gitee（HTTPS + 私人令牌 + Windows 凭据管理器）；sakay 分支 PR#2 成绩分析班级对比 + workbench 年级/班级联动下拉；4 段版本号规范落地；`bump_version.py` 工具 |
-| v1.17.0 | 2026-09-21 | 教务管理 + 教师工作台 + 学生画像 + 通知中心（PR#5 合并）+ 安全审查两轮整改 + 考试/考务管理合并 |
+| **1.18.3.0** | 2026-09-29 | 成绩治理统一过滤无班级学生（不分班/已转出/已毕业）；考务名单 5 个入口同口径；取消手动“移除已删学籍”开关改为默认自动清理 |
+| **1.18.2.2** | 2026-09-28 | 教务模块大扩展：教务工作台 / 任课安排 / 备课组长 / 晚自习值班 / 总课表 / 教室与走班教学班课表；业绩库标签与附件；HTTP 审计兜底网 |
+| **1.18.2.1** | 2026-09-24 | sakay 大规模安全加固：8 utils + 60 处权限收敛 + 1274 行 sec_regression；管理员首启随机口令 + 强制改密；SSRF 白名单 + 302 阻断；upload_guard 4 层校验；CSP Report-Only 起步 |
+| **1.18.2.0** | 2026-09-24 | users ↔ academic.teachers 双向同步（admin 不属教师，白名单式过滤）；历史账号一次性归集至教师名单 |
+| **1.18.1.0** | 2026-09-24 | 积分管理 → 德育管理（用户可见文本层，`points.*` 技术标识保留不动）|
+| **1.18.0.0** | 2026-09-23 | 主仓库迁移至 Gitee（HTTPS + 凭据管理器）；sakay 分支 PR#2 成绩分析班级对比 + workbench 年级/班级联动下拉；4 段版本号规范落地；`bump_version.py` 工具 |
+| 1.17.0 | 2026-09-21 | 教务管理 + 教师工作台 + 学生画像 + 通知中心（PR#5 合并）+ 安全审查两轮整改 + 考试/考务管理合并 |
 
 ## 许可证
 
@@ -186,9 +190,10 @@ Copyright (c) 2026 zkxxzf
 
 ## 致谢
 
-感谢 [@飒龘 / Sakaay](https://gitee.com/sakay) 深度协作：
-- **v1.18.3.0**：安全加固大版（46 项清单闭环 · 8 utils · 1274 行回归测试）
-- **v1.18.0.0**：成绩分析班级对比 · workbench 联动筛选 · 演示数据脚本增强 · PR 协作流程
-- **v1.17.0**：教务 / 工作台 / 画像 / 通知四大模块 + 两轮安全整改
-- **v1.13.x**：成绩汇报区 · 成绩证明快照加密 · 全局性能优化
+感谢 [@飒龘 / Sakaay](https://gitee.com/sakay) 深度协作（下表版本号不带 `v` 前缀，防被 bump 脚本误改）：
+- **1.18.2.2**：教务模块大扩展（工作台/任课安排/备课组长/晚自习值班/课表系列/业绩附件）+ HTTP 审计兜底网
+- **1.18.2.1**：安全加固大版（46 项清单闭环 · 8 utils · 1274 行回归测试）
+- **1.18.0.0**：成绩分析班级对比 · workbench 联动筛选 · 演示数据脚本增强 · PR 协作流程
+- **1.17.0**：教务 / 工作台 / 画像 / 通知四大模块 + 两轮安全整改
+- **1.13.x**：成绩汇报区 · 成绩证明快照加密 · 全局性能优化
 - 早期：协作指南共建 · 成绩模块测试与修复 · 前端资源本地化
