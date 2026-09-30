@@ -31,7 +31,7 @@ from app.models import User                                        # noqa: E402
 from app.models.grades import Exam, ExamTeacherLink                # noqa: E402
 from app.modules.grades.utils import normalize_class_name          # noqa: E402
 
-D24 = r'd:\Users\lenovo\Desktop\2024级历次考试成绩'
+D24 = os.environ.get('STULINK_EXCEL_DIR') or r'd:\Users\lenovo\Desktop\2024级历次考试成绩'
 SUBJ_ORDER = ['语文', '数学', '英语', '物理', '化学', '生物', '政治', '历史', '地理']
 SKIP_SUBJ = {'总分', '合计', '平均分', '人数', ''}
 

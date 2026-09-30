@@ -35,11 +35,14 @@ from app.utils.helpers import (write_change_log, location_desc,   # noqa: E402
                                student_location_desc)
 
 # 旧名单 → 年级 / 调班日期 / 来源标记
+_D24 = os.environ.get('STULINK_EXCEL_DIR') or r'd:\Users\lenovo\Desktop\2024级历次考试成绩'
+_ROST = os.environ.get('STULINK_ROSTER_DIR') or r'd:\Users\lenovo\Desktop'
+
 SOURCES = [
-    {'path': r'd:\Users\lenovo\Desktop\20250107分班2024级-借读一人.xlsx',
+    {'path': os.path.join(_ROST, '20250107分班2024级-借读一人.xlsx'),
      'sheet': '111', 'grade': '2024级',
      'date': '2025-02-13 08:00:00', 'src': '20250107分班名单'},
-    {'path': r'd:\Users\lenovo\Desktop\2025级20251219核对人员1人未入班.xlsx',
+    {'path': os.path.join(_ROST, '2025级20251219核对人员1人未入班.xlsx'),
      'sheet': None, 'grade': '2025级',
      'date': '2026-03-05 08:00:00', 'src': '20251219核对名单'},
 ]

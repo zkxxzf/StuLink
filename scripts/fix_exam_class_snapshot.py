@@ -37,8 +37,10 @@ from app.extensions import db                                      # noqa: E402
 from app.models.grades import Exam, ExamScore                      # noqa: E402
 from app.modules.grades.utils import normalize_class_name          # noqa: E402
 
-D24 = r'd:\Users\lenovo\Desktop\2024级历次考试成绩'
-ROSTER_25 = r'd:\Users\lenovo\Desktop\2025级20251219核对人员1人未入班.xlsx'
+# 路径可用环境变量覆盖（便于在服务器上跑）
+D24 = os.environ.get('STULINK_EXCEL_DIR') or r'd:\Users\lenovo\Desktop\2024级历次考试成绩'
+_ROST = os.environ.get('STULINK_ROSTER_DIR') or r'd:\Users\lenovo\Desktop'
+ROSTER_25 = os.path.join(_ROST, '2025级20251219核对人员1人未入班.xlsx')
 
 # 2024级 高一上 5 场（分班前）：(考试日期前缀, 文件名)
 SRC_2024_UP = [
