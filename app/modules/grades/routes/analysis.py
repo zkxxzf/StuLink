@@ -1,4 +1,4 @@
-# StuLink v1.18.6.0 2026-09-30
+# StuLink v1.18.7.0 2026-09-30
 # 成绩分析：主页（四 tab）+ options/analysis API + AI 预留
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 import hashlib
@@ -62,11 +62,33 @@ def api_options():
             'id': e.id, 'name': e.name, 'date': e.exam_date.strftime('%Y-%m-%d'),
             'type': e.exam_type or '', 'status': e.status, 'banded': e.id in banded_ids,
         })
-    # 班级（年级下的数字教学班 + 锁定范围）
+    # 班级（年级下的数字教学班 + 锁定范围）——仅作“未选考试时”的兑底
     classes_by_grade = {}
     for g in grades:
         st_rows = Student.query.filter_by(grade=g).with_entities(Student.class_name).distinct().all()
         classes_by_grade[g] = numeric_classes([r[0] for r in st_rows])
+    # v1.18.7.0 每场考试自己的班级：**班级筛选仅限本场考试**
+    # 来源 = 该场考试的学生名册（exam_scores.class_name）∪ 任课教师表（exam_teacher_links）
+    # 不能用主库当前班级：考试是自包含的独立单元，其参与者是整个年级、且班级为考试当时
+    classes_by_exam = {}
+    try:
+        from app.models.grades import ExamScore, ExamTeacherLink
+        from app.extensions import db
+        tmp = {}
+        for eid, cn in (db.session.query(ExamScore.exam_id, ExamScore.class_name)
+                        .distinct().all()):
+            tmp.setdefault(eid, set()).add(cn)
+        try:
+            for eid, cn in (db.session.query(ExamTeacherLink.exam_id,
+                                              ExamTeacherLink.class_name)
+                            .distinct().all()):
+                tmp.setdefault(eid, set()).add(cn)
+        except Exception:
+            pass        # 旧库无任课快照表时只靠学生名册
+        classes_by_exam = {str(k): numeric_classes(list(v)) for k, v in tmp.items()}
+    except Exception as e:
+        current_app.logger.warning(f'按考试取班级失败: {e}')
+        classes_by_exam = {}
     # tab 可见性（恒返回 5 键，前端据此显隐）
     tabs = {'grade': False, 'class': False, 'subject': False, 'teacher': False,
             'compare': False}
@@ -108,6 +130,7 @@ def api_options():
         'grades': grades,
         'exams': by_grade,
         'classes': classes_by_grade,
+        'classes_by_exam': classes_by_exam,
         'subjects': subjects,
         'tabs': tabs,
         'locked': locked,

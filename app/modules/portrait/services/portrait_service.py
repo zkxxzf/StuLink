@@ -1,4 +1,4 @@
-# StuLink v1.18.6.0 2026-09-30
+# StuLink v1.18.7.0 2026-09-30
 # 学生画像计算服务：评分标准化、综合评级计算
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 """画像计算服务

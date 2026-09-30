@@ -1,4 +1,4 @@
-# StuLink v1.18.6.0 2026-09-30
+# StuLink v1.18.7.0 2026-09-30
 # 成绩落库服务：解析结果按 模式A(增量覆盖)/模式B(整场重置) 合并写入 exam_scores
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 from app.extensions import db
@@ -149,6 +149,6 @@ def _refresh_snapshot(existing, r, skip_deleted=False):
         row.student_name = r.get('name', row.student_name)
         row.grade = r.get('grade', row.grade)
         row.class_name = r.get('class_name', row.class_name)
-        row.class_type = r.get('class_type', row.class_type)   # v1.18.6.0 班型快照
+        row.class_type = r.get('class_type', row.class_type)   # v1.18.7.0 班型快照
         row.direction = r.get('direction', row.direction)
         row.subject_selection = r.get('subject_selection', row.subject_selection)

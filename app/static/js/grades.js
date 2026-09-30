@@ -1,4 +1,4 @@
-/* StuLink 成绩管理：分析页前端 v1.18.6.0
+/* StuLink 成绩管理：分析页前端 v1.18.7.0
  * 五 tab 联动加载 / 统一表格渲染 / 每张指标卡「表格 | 图表」双视图 / ECharts 图表渲染
  */
 (function(){
@@ -78,9 +78,18 @@ function fillExams(){
     fillClasses();
 }
 
+/* v1.18.7.0 班级筛选仅限本场考试：优先用该场考试自己的班级
+   （该场学生名册 ∪ 该场任课教师表）；未选考试/旧库无快照时回落年级班级 */
+function classListFor(grade){
+    var eid = state.examId || $('#gExam').val() || '';
+    var m = (opts && opts.classes_by_exam) ? opts.classes_by_exam[String(eid)] : null;
+    if (m && m.length) return m.slice();
+    return (opts && opts.classes && opts.classes[grade]) ? opts.classes[grade].slice() : [];
+}
+
 function fillClasses(){
     var grade = $('#gGrade').val() || state.grade;
-    var list = (opts.classes[grade] || []).slice();
+    var list = classListFor(grade);
     if (opts.locked.classes && opts.locked.classes.length){
         list = list.filter(function(c){
             return opts.locked.classes.some(function(l){ return l.grade === grade && l.class_name === c; });
@@ -117,6 +126,7 @@ function bindFilters(){
     $('#gGrade').on('change', fillExams);
     $('#gExam').on('change', function(){
         state.examId = $(this).val();
+        fillClasses();          // v1.18.7.0 班级随考试变：仅列本场考试的班级
         loadCurrent();
     });
     $('#gClass').on('change', function(){ state.class_name = $(this).val(); loadCurrent(); });
@@ -146,10 +156,10 @@ function bindTabs(){
 
 /* ============ 班级对比：多选控件 ============ */
 var MAX_COMPARE = 20;   // 与后端 api_compare_tab 的截断上限一致
-// 当前年级的候选班级（opts.classes[grade]，与班级分析下拉同源）
+// 当前年级的候选班级（优先级同班级分析下拉：本场考试班级）
 function classCandidates(){
     var grade = $('#gGrade').val() || state.grade;
-    var list = (opts && opts.classes && opts.classes[grade]) ? opts.classes[grade].slice() : [];
+    var list = classListFor(grade);
     if (opts.locked.classes && opts.locked.classes.length){
         list = list.filter(function(c){
             return opts.locked.classes.some(function(l){ return l.grade === grade && l.class_name === c; });

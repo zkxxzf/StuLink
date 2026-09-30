@@ -1,4 +1,4 @@
-# StuLink v1.18.6.0 2026-09-30
+# StuLink v1.18.7.0 2026-09-30
 # 成绩汇报区指标引擎（板块三/四）：单班各科分析、单科各班分析（含任课教师）
 # 口径与 report_service 完全一致，复用其层线/去差/百分比公共函数
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
@@ -15,7 +15,7 @@ def _teacher_names(grade, class_name=None, subject=None, exam_id=None):
     """任课教师姓名映射：(班级,科目)→'姓名'；可只传班级或只传科目。
 
     同班同科多任教师（换师记录）按教师去重顿号连接。
-    v1.18.6.0：传 exam_id 时优先读**本场考试的任课快照**（考试当时）。
+    v1.18.7.0：传 exam_id 时优先读**本场考试的任课快照**（考试当时）。
     """
     pairs = []          # [(class_name, subject, 姓名)]
     if exam_id:

@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-# StuLink v1.18.6.0 2026-09-30
+# StuLink v1.18.7.0 2026-09-30
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 """学籍驱动的班级归置（幂等，默认 dry-run）
 

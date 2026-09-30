@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-# StuLink v1.18.6.0 2026-09-30
+# StuLink v1.18.7.0 2026-09-30
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 """修正历史考试的「考试当时班级」快照（t4，幂等 + dry-run）
 
