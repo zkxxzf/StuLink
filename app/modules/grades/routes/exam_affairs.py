@@ -708,33 +708,6 @@ def affair_room_lib_list():
         for r in rows]})
 
 
-@bp.route('/affairs/room-lib/save', methods=['POST'])
-@login_required
-@perm_required('grades.edit')
-def affair_room_lib_save():
-    """库中新增/编辑房间；同位置自动去重（唯一约束兜底）"""
-    lid = request.form.get('lid')
-    location = sanitize_label(request.form.get('location'), 50)   # H-5
-    if not location:
-        return jsonify({'ok': False, 'msg': '房间位置必填'})
-    if lid:
-        row = AffairRoomLib.query.get_or_404(int(lid))
-        row.location = location
-    else:
-        row = AffairRoomLib.query.filter_by(location=location).first()
-        if not row:
-            row = AffairRoomLib(location=location)
-            db.session.add(row)
-    try:
-        row.capacity = int(request.form.get('capacity') or 30)
-    except (TypeError, ValueError):
-        row.capacity = 30
-    row.note = sanitize_label(request.form.get('note'), 100)      # H-5
-    db.session.commit()
-    return jsonify({'ok': True, 'id': row.id, 'location': row.location,
-                    'capacity': row.capacity})
-
-
 @bp.route('/affairs/room-lib/<int:lid>/delete', methods=['POST'])
 @login_required
 @perm_required('grades.edit')

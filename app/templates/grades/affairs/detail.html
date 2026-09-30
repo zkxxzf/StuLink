@@ -138,13 +138,6 @@
                             <tbody id="libBody"></tbody>
                         </table>
                     </div>
-                    <div class="card-footer p-2">
-                        <div class="row g-1">
-                            <div class="col-7"><input id="libLoc" class="form-control form-control-sm" placeholder="位置，如 教学楼A-104"></div>
-                            <div class="col-2"><input id="libCap" type="number" class="form-control form-control-sm" value="30"></div>
-                            <div class="col-3"><button class="btn btn-primary btn-sm w-100" onclick="libSave()">入库</button></div>
-                        </div>
-                    </div>
                 </div>
             </div>
             {# 右：本批次已选考场 #}
@@ -584,7 +577,7 @@ function loadLib(){
                 (u?'<span class="text-muted small">—</span>':
                  '<button class="btn btn-sm btn-outline-primary py-0" onclick="pickLib('+r.id+')">加入</button>')+
                 ' <button class="btn btn-sm btn-outline-danger py-0" onclick="libDel('+r.id+')">删</button></td></tr>';
-        }).join('') || '<tr><td colspan="3" class="text-center text-muted py-3">考场库为空，在下方输入位置入库</td></tr>';
+        }).join('') || '<tr><td colspan="3" class="text-center text-muted py-3">考场库为空（请用 scripts/seed_exam_rooms.py 导入）</td></tr>';
         document.getElementById('libBody').innerHTML = html;
         document.getElementById('libCount').textContent = _libData.length + ' 个房间';
     });
@@ -625,17 +618,6 @@ function _markLibUsed(loc, used){
     opTd.innerHTML = (used?'<span class="text-muted small">—</span>':
         '<button class="btn btn-sm btn-outline-primary py-0" onclick="pickLib('+lib.id+')">加入</button>')+
         ' <button class="btn btn-sm btn-outline-danger py-0" onclick="libDel('+lib.id+')">删</button>';
-}
-function libSave(){
-    var fd = new FormData();
-    fd.append('location', document.getElementById('libLoc').value.trim());
-    fd.append('capacity', document.getElementById('libCap').value.trim());
-    if(!fd.get('location')){ alert('房间位置必填'); return; }
-    fetch('/grades/affairs/room-lib/save', {method:'POST', body:fd, headers:{'X-CSRFToken':csrf()}})
-        .then(r=>r.json()).then(d=>{
-            if(d.ok){ document.getElementById('libLoc').value=''; loadLib(); }
-            else alert(d.msg);
-        });
 }
 function libDel(id){
     if(!confirm('从考场库删除该房间？不影响已生成的考场。')) return;
