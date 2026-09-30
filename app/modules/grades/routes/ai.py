@@ -1,4 +1,4 @@
-# StuLink v1.18.4.0 2026-09-29
+# StuLink v1.18.5.0 2026-09-29
 # AI 分析：服务商注册表 / 个人与全局 Key 管理 / 连通性测试 / 发送范围预览 /
 #          分析生成 / 报告历史
 # Copyright (c) 2026 zkxxzf. Apache License 2.0

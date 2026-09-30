@@ -1,4 +1,4 @@
-# StuLink v1.18.4.0 2026-09-29
+# StuLink v1.18.5.0 2026-09-29
 # 成绩分析：主页（四 tab）+ options/analysis API + AI 预留
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 import hashlib
