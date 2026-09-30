@@ -1,4 +1,4 @@
-# StuLink v1.18.5.0 2026-09-30
+# StuLink v1.18.6.0 2026-09-30
 # 成绩汇报区指标引擎（板块三/四）：单班各科分析、单科各班分析（含任课教师）
 # 口径与 report_service 完全一致，复用其层线/去差/百分比公共函数
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
@@ -11,25 +11,34 @@ from app.modules.grades.services import report_service as rs
 DISPLAY_TO_SYS = {subject_display(s): s for s in SUBJECTS}
 
 
-def _teacher_names(grade, class_name=None, subject=None):
+def _teacher_names(grade, class_name=None, subject=None, exam_id=None):
     """任课教师姓名映射：(班级,科目)→'姓名'；可只传班级或只传科目。
-    同班同科多任教师（换师记录）按 user_id 去重顿号连接。"""
-    q = TeacherSubjectLink.query.filter_by(grade=grade, active=True)
-    links = q.all()
-    uids = {lk.user_id for lk in links}
-    users = User.query.filter(User.id.in_(uids), User.is_active.is_(True)).all() if uids else []
-    names = {u.id: u.real_name for u in users}
+
+    同班同科多任教师（换师记录）按教师去重顿号连接。
+    v1.18.6.0：传 exam_id 时优先读**本场考试的任课快照**（考试当时）。
+    """
+    pairs = []          # [(class_name, subject, 姓名)]
+    if exam_id:
+        from app.modules.grades.services import teacher_snapshot_service as _tss
+        nm_map = _tss.name_map_of(exam_id, grade=grade)
+        pairs = [(c, s, nm) for (c, s), nm in nm_map.items() if nm]
+    if not pairs:
+        # 无快照 → 回落当前映射
+        links = TeacherSubjectLink.query.filter_by(grade=grade, active=True).all()
+        uids = {lk.user_id for lk in links}
+        users = User.query.filter(User.id.in_(uids), User.is_active.is_(True)).all() if uids else []
+        names = {u.id: u.real_name for u in users}
+        pairs = [(lk.class_name, lk.subject, names.get(lk.user_id)) for lk in links]
     out, seen = {}, {}
-    for lk in links:
-        key = (lk.class_name, lk.subject)
-        if class_name and lk.class_name != class_name:
+    for cls, subj, nm in pairs:
+        key = (cls, subj)
+        if class_name and cls != class_name:
             continue
-        if subject and lk.subject != subject:
+        if subject and subj != subject:
             continue
-        nm = names.get(lk.user_id)
         bag = seen.setdefault(key, set())
-        if nm and lk.user_id not in bag:
-            bag.add(lk.user_id)
+        if nm and nm not in bag:
+            bag.add(nm)
             out[key] = (out[key] + '、' + nm) if key in out else nm
     return out
 
@@ -63,7 +72,8 @@ def class_subject_report(exam_id, class_name):
     t_low1 = total_l1[1] if total_l1 else None
     t_low2 = total_l2[1] if total_l2 else None
     trimmed = rs.trimmed_nos(data)
-    teachers = _teacher_names(data.exam.grade, class_name=class_name)
+    teachers = _teacher_names(data.exam.grade, class_name=class_name,
+                              exam_id=data.exam.id)
     ht = rs.headteacher_map(data.exam.grade).get((data.exam.grade, class_name), '')
 
     def subject_row(sub):
@@ -132,7 +142,7 @@ def subject_class_report(exam_id, direction, subject_disp):
     t2 = rs.pick_layer(data, direction, TOTAL_SUBJECT, l2) if l2 else None
     t_low1, t_low2 = (t1[1] if t1 else None), (t2[1] if t2 else None)
     trimmed = rs.trimmed_nos(data)
-    teachers = _teacher_names(data.exam.grade, subject=sub)
+    teachers = _teacher_names(data.exam.grade, subject=sub, exam_id=data.exam.id)
 
     by_class = {}
     for r in data.total_rows:

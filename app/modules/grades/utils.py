@@ -1,4 +1,4 @@
-# StuLink v1.18.5.0 2026-09-30
+# StuLink v1.18.6.0 2026-09-30
 # 成绩管理：通用小工具
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 import re
@@ -17,12 +17,37 @@ def numeric_classes(class_names):
 
 
 def is_teaching_class(class_name):
-    """v1.18.5.0：单个班级是否为教学班（01班~99班）。
+    """v1.18.6.0：单个班级是否为教学班（01班~99班）。
 
     不分班 / 已转出 / 离校 等非数字班级返回 False。
     与 numeric_classes 同一正则口径，供成绩治理模块统一过滤无班级学生。
     """
     return bool(class_name and _NUM_CLASS_RE.match(str(class_name).strip()))
+
+
+# v1.18.6.0 班级名归一化：把外部 Excel 的各种写法统一成系统口径
+_CLS_TAIL_RE = re.compile(r'(\d{1,2})\s*班')
+_SPECIAL_CLASSES = ('不分班', '已转出', '离校')
+
+
+def normalize_class_name(value):
+    """把外部/历史写法归一化为系统班级名（v1.18.6.0）
+
+    支持：
+        '高一03班' / '2024级01班' / '高三10班' → '03班' / '01班' / '10班'
+        '03班' / '3班'                          → '03班' / '03班'（统一两位）
+        '不分班' / '已转出' / '离校'              → 原值
+    无法识别返回 ''（调用方应回落主库班级）。
+    """
+    s = str(value).strip() if value is not None else ''
+    if not s:
+        return ''
+    if s in _SPECIAL_CLASSES:
+        return s
+    m = _CLS_TAIL_RE.search(s)
+    if m:
+        return '%02d班' % int(m.group(1))
+    return ''
 
 
 def term_of_date(d):

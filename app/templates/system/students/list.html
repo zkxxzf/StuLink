@@ -18,6 +18,10 @@
         <button class="btn btn-info" data-bs-toggle="modal" data-bs-target="#batchTransferModal">
             <i class="bi bi-arrow-left-right"></i> 批量调班
         </button>
+        {# v1.18.6.0 调班记录总览 #}
+        <a href="{{ url_for('students.class_changes') }}" class="btn btn-outline-info">
+            <i class="bi bi-clock-history"></i> 调班记录
+        </a>
         {% if current_user.has_role('admin') %}
         <button class="btn btn-danger" id="btnBatchDelete" style="display:none;" onclick="submitBatchDelete()">
             <i class="bi bi-trash"></i> 批量删除 (<span id="selectedCount">0</span>)
@@ -59,6 +63,7 @@
                     <th>性别</th>
                     <th>年级</th>
                     <th>班级</th>
+                    <th class="text-center" style="width:60px;">调班</th>
                     <th>选科</th>
                     <th>毕业学校</th>
                     <th>联系方式 1</th>
@@ -92,6 +97,7 @@
                         <option value="{{ c }}" {% if filter_class == c %}selected{% endif %}>{{ c }}</option>
                         {% endfor %}
                     </select></th>
+                    <th></th>
                     <th><select name="subject_selection" onchange="this.form.submit()">
                         <option value="">全部</option>
                         {% for s in subjects %}
@@ -142,6 +148,17 @@
                     </td>
                     <td>{{ s.grade }}</td>
                     <td>{{ s.class_name }}</td>
+                    {# v1.18.6.0 调班次数：点击跳到调班记录（按学号筛选） #}
+                    <td class="text-center">
+                        {% set cc = change_counts.get(s.id, 0) %}
+                        {% if cc %}
+                        <a href="{{ url_for('students.class_changes', keyword=(s.student_number or s.name)) }}"
+                           class="badge bg-info text-dark text-decoration-none"
+                           title="查看调班记录（入校分班/重新分班/个别调班/修正班级）">{{ cc }}</a>
+                        {% else %}
+                        <span class="text-muted small">—</span>
+                        {% endif %}
+                    </td>
                     <td>{% if s.subject_selection %}<span class="{{ subject_badge_class(s.subject_selection) }}">{{ s.subject_selection }}</span>{% else %}-{% endif %}</td>
                     <td>
                         {% if s.graduation_school %}
@@ -299,6 +316,21 @@
                                 <option value="{{ c }}">{{ c }}</option>
                                 {% endfor %}
                             </select>
+                        </div>
+                    </div>
+                    {# v1.18.6.0 调班记录：变更性质（写入变迁日志，用于区分真实换班与改错） #}
+                    <div class="mb-2">
+                        <label for="transferKind" class="form-label">变更性质</label>
+                        <select class="form-select" id="transferKind" name="class_change_kind">
+                            <option value="transfer">个别调班（学生真实换班）</option>
+                            <option value="correct">修正班级（此前录入有误，非真实换班）</option>
+                        </select>
+                        <div class="form-text small">
+                            两者都会自动记入
+                            <a href="{{ url_for('students.class_changes') }}" target="_blank">调班记录</a>；
+                            记录格式为 <code>年级班级·班型·方向·选科</code>
+                            （如 <code>2024级01班·强基班·物理·物化生</code>），便于与各次考试对应。
+                            “修正班级”不改变历史开班归属的判断。
                         </div>
                     </div>
                 </div>

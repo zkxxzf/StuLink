@@ -147,8 +147,20 @@
         </div>
         {% endif %}
 
-        {# 变迁记录 #}
+        {# 变迁记录（v1.18.6.0 增强：班级类变更细分中文标签 + 旧→新 + 操作人） #}
         {% if change_logs %}
+        {% set TYPE_LABELS = {'enroll': ('入校分班', 'primary'),
+                              'reassign': ('重新分班', 'warning'),
+                              'transfer': ('个别调班', 'info'),
+                              'correct': ('修正班级', 'secondary'),
+                              'direction': ('转科', 'danger'),
+                              'subject_selection': ('选科变更', 'info'),
+                              'withdraw': ('转出', 'dark'),
+                              'enrollment': ('学籍变更', 'warning'),
+                              'number': ('学号变更', 'secondary'),
+                              'class': ('调班', 'info'),
+                              'dormitory': ('宿舍', 'warning'),
+                              'graduate': ('毕业', 'success')} %}
         <div class="card">
             <div class="card-header py-2" data-bs-toggle="collapse" data-bs-target="#changeLogBody"
                  style="cursor:pointer;">
@@ -162,22 +174,24 @@
                 <div class="card-body py-2">
                     <ul class="list-group list-group-flush small">
                         {% for log in change_logs %}
+                        {% set lab, color = TYPE_LABELS.get(log.change_type, (log.change_type, 'secondary')) %}
                         <li class="list-group-item py-2 px-0 border-0">
                             <span class="text-muted me-2">{{ log.changed_at or '' }}</span>
-                            {% if log.change_type == 'class' %}
-                            <span class="badge bg-info me-1">调班</span>
+                            <span class="badge bg-{{ color }} me-1">{{ lab }}</span>
+                            {% if log.change_type in ('enroll', 'reassign', 'transfer', 'correct', 'class', 'direction', 'subject_selection', 'withdraw') %}
+                            {# 班级类变更：#}
+                            {% if log.old_value %}
                             <span class="text-decoration-line-through text-muted">{{ log.old_value }}</span>
                             <i class="bi bi-arrow-right mx-1"></i>
-                            <strong>{{ log.new_value }}</strong>
+                            {% endif %}
+                            <strong>{{ log.new_value or '—' }}</strong>
                             {% elif log.change_type == 'dormitory' %}
-                            <span class="badge bg-warning me-1">宿舍</span>
                             {{ log.detail or (log.old_value + ' → ' + log.new_value) }}
-                            {% elif log.change_type == 'graduate' %}
-                            <span class="badge bg-success me-1">毕业</span>
-                            {{ log.detail }}
                             {% else %}
-                            <span class="badge bg-secondary me-1">{{ log.change_type }}</span>
-                            {{ log.old_value }} → {{ log.new_value }}
+                            {{ log.detail or (log.old_value ~ ' → ' ~ log.new_value) }}
+                            {% endif %}
+                            {% if log.detail and log.change_type != 'dormitory' %}
+                            <span class="text-muted ms-1">· {{ log.detail }}</span>
                             {% endif %}
                             <small class="text-muted ms-2">({{ log.operator or '系统' }})</small>
                         </li>

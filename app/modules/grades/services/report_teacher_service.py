@@ -1,4 +1,4 @@
-# StuLink v1.18.5.0 2026-09-30
+# StuLink v1.18.6.0 2026-09-30
 # 成绩汇报区 · 教师排名引擎：同方向同科目全体任课教师按指标聚合后排名
 # 口径：同一位老师教多个班时，所教学生合并计算（率/去差均分才公平）；
 #       去差仍按学生所在行政班的班型规则剔除；并列同名次，竞赛排名（1,2,2,4）。
@@ -32,9 +32,15 @@ def _aggregate(data, direction, rows, layer_name):
     total_lower = total_line[1] if total_line else None
     trimmed = rs.trimmed_nos(data)
     # 班级×科目 → 教师（表上有唯一约束，一班一科一师）
-    links = TeacherSubjectLink.query.filter_by(grade=data.exam.grade, active=True).all()
-    teacher_of = {(lk.class_name, lk.subject): lk.user_id for lk in links}
-    uids = {lk.user_id for lk in links}
+    # v1.18.6.0 优先读**本场考试的任课快照**（考试当时），而不是当前映射：
+    # 教师调动/重新分班后，历史考试仍归属到当时的教师名下
+    from app.modules.grades.services import teacher_snapshot_service as _tss
+    teacher_of = _tss.teacher_user_map(data.exam.id, grade=data.exam.grade)
+    if not teacher_of:
+        # 快照为空且无法惰性生成（如旧库）→ 回落当前映射，保证功能可用
+        links = TeacherSubjectLink.query.filter_by(grade=data.exam.grade, active=True).all()
+        teacher_of = {(lk.class_name, lk.subject): lk.user_id for lk in links}
+    uids = set(teacher_of.values())
     users = User.query.filter(User.id.in_(uids), User.is_active.is_(True)).all() if uids else []
     name_of = {u.id: u.real_name for u in users}
     # 各科该层单科线下界（预算一次，band_list 有实例缓存但避免循环内重复排序）

@@ -1,4 +1,4 @@
-# StuLink v1.18.5.0 2026-09-30
+# StuLink v1.18.6.0 2026-09-30
 # 成绩管理与可视化分析系统：数据模型（独立库 grades.db）
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 import json
@@ -213,6 +213,9 @@ class ExamScore(db.Model):
     student_name = db.Column(db.String(50))                 # 姓名快照
     grade = db.Column(db.String(10))
     class_name = db.Column(db.String(10))                   # 班级快照（换班不影响历史）
+    # v1.18.6.0 班型快照（强基班/卓越班…）：导入时取自班型设置，使去差均分等分析
+    # 永远用「考试当时」的班型；此前实时读 ClassProfile，班型一改历史全部失真
+    class_type = db.Column(db.String(20))
     direction = db.Column(db.String(4))                     # 物理/历史 快照
     subject_selection = db.Column(db.String(10))            # 选科组合快照
     subject = db.Column(db.String(10), nullable=False)      # 9 科之一 或 总分
@@ -328,6 +331,35 @@ class TeacherSubjectLink(db.Model):
         db.UniqueConstraint('grade', 'class_name', 'subject', name='uq_link_class_subject'),
         db.Index('idx_link_user', 'user_id'),
         db.Index('idx_link_grade', 'grade'),
+    )
+
+
+class ExamTeacherLink(db.Model):
+    """v1.18.6.0 考试任课快照：考试 × 班级 × 科目的**当时**任课教师
+
+    为什么需要：TeacherSubjectLink 只存"当前"映射，教师一换（尤其分班后）
+    历史考试的教师维度分析会全部错位。本表把每场考试的任课安排定格，
+    分析读快照而非当前映射，保证「不重新分班时才可比」的口径可落地。
+
+    source 可信度：import=成绩导入时快照（可信）｜excel=从旧成绩 Excel 任课表提取
+                 ｜backfill=用当前映射回填（推测）｜manual=人工修订
+    """
+    __bind_key__ = 'grades'
+    __tablename__ = 'exam_teacher_links'
+
+    id = db.Column(db.Integer, primary_key=True)
+    exam_id = db.Column(db.Integer, nullable=False)
+    grade = db.Column(db.String(10), nullable=False)
+    class_name = db.Column(db.String(10), nullable=False)
+    subject = db.Column(db.String(10), nullable=False)
+    user_id = db.Column(db.Integer)                 # 关联 users.id（可空：历史教师已离职/未建号）
+    teacher_name = db.Column(db.String(50))         # 姓名快照（防改名/删号后显示为空）
+    source = db.Column(db.String(10), default='import')
+    snapshot_at = db.Column(db.DateTime, default=datetime.now)
+
+    __table_args__ = (
+        db.UniqueConstraint('exam_id', 'class_name', 'subject', name='uq_exam_cls_subj'),
+        db.Index('idx_exam_teacher_exam', 'exam_id'),
     )
 
 

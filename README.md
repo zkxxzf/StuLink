@@ -10,7 +10,7 @@
 - **在校生系统（主应用 :5000）**：宿舍自动分配 · 合班管理 · 床位管理 · 学生信息管理 · 批量导入/调班 · 二维权限（功能三档 × 数据范围）· 成绩管理与四大分析（ECharts）· 班级横向对比 · AI 分析（BYOK）· 德育管理 · 教务（教师名单/课表/查课/调课/表单/业绩）· 教师工作台（班级概览/工作记录/考勤/积分/画像）· 通知中心
 - **往届生查询（独立应用 :5001）**：毕业生数据快照查询 · 学习经历变迁 · 宿舍历史
 
-## 功能模块（v1.18.5.0）
+## 功能模块（v1.18.6.0）
 
 | 模块 | 站点 | 状态 | 说明 |
 |------|------|------|------|
@@ -57,7 +57,7 @@
 
 - **后端**：Python 3.11+ / Flask 3.x / Flask-Login / Flask-SQLAlchemy 2.x（多库 binds）/ Waitress / openpyxl / reportlab / python-pptx
 - **前端**：Bootstrap 5 / jQuery / Jinja2 / ECharts（成绩可视化与班级对比）/ Chart.js（画像）
-- **安全（v1.18.5.0）**：
+- **安全（v1.18.6.0）**：
   - **身份**：管理员首启随机口令 + 强制改密 · 一次性初始口令展示 · 会话口令摘要（改密即踢）· IP + 账号双维限流
   - **数据**：AES-256-GCM 身份证与 AI Key 加密 · CSRF 8h 时效 · 二维权限（功能三档 × 数据范围）· 白名单式教师候选过滤
   - **传输**：`url_guard` 出站白名单 + DNS 解析 + 禁 302 跟随 · CSP（Report-Only 起步，可切 enforce）· HTTPS Cookie Secure
@@ -76,7 +76,7 @@ python run.py --dev
 cd alumni_app && python run.py
 
 # Docker 部署（两个容器）
-docker build -t stulink:v1.18.5.0 .
+docker build -t stulink:v1.18.6.0 .
 docker build -t stulink-alumni:v1.0.0 ./alumni_app
 docker-compose up -d
 ```

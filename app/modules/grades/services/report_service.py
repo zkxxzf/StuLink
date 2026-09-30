@@ -1,4 +1,4 @@
-# StuLink v1.18.5.0 2026-09-30
+# StuLink v1.18.6.0 2026-09-30
 # 成绩汇报区指标引擎：对标年级汇报 PPT 口径
 #  - 单上线：单科（或总分）≥ 对应层下界
 #  - 双上线：单科过该科层线 且 总分过同层线（如一本双上线）
@@ -61,16 +61,38 @@ def pick_layer(data, direction, subject=TOTAL_SUBJECT, layer_name=''):
 
 
 def trimmed_nos(data):
-    """去差学生学号集合：各班按班型规则剔除总分末尾 N 人（班型取自 ClassProfile）"""
-    profiles = ClassProfile.query.filter_by(grade=data.exam.grade).all()
-    trim_n = {p.class_name: TRIM_RULES.get(p.class_type or '', DEFAULT_TRIM)
-              for p in profiles}
+    """去差学生学号集合：各班按班型规则剔除总分末尾 N 人
+
+    v1.18.6.0 班型取数改为**快照优先**：
+      ① 优先用成绩行上的 class_type（该场考试导入时的「当时班型」）；
+      ② 快照为空（迁移前导入的历史考试）→ 回落读 ClassProfile（过渡兼容）。
+    这样班型一旦调整（强基↔卓越），历史考试的去差口径不会跟着变。
+    """
+    # ① 快照班型：同班内一致，取首个非空值
+    snap_ct = {}
+    for r in data.total_rows:
+        cls = r.class_name or '—'
+        if cls not in snap_ct and getattr(r, 'class_type', None):
+            snap_ct[cls] = r.class_type
+    # ② 回落：当前班型设置
+    live_ct = {}
+    try:
+        for p in ClassProfile.query.filter_by(grade=data.exam.grade).all():
+            live_ct[p.class_name] = p.class_type or ''
+    except Exception:
+        pass
+
     by_class = {}
     for r in data.total_rows:
         by_class.setdefault(r.class_name or '—', []).append(r)
+
+    def _trim_of(cls):
+        ct = snap_ct.get(cls) or live_ct.get(cls, '')
+        return TRIM_RULES.get(ct, DEFAULT_TRIM)
+
     out = set()
     for cls, rows in by_class.items():
-        n = trim_n.get(cls, DEFAULT_TRIM)
+        n = _trim_of(cls)
         if n and n > 0:
             # 末 N 名同分并列时按成绩记录 id 确定性截断（固定剔除 N 人，不随统计顺序波动）
             lows = sorted(rows, key=lambda r: (r.score if r.score is not None else -1,
@@ -79,22 +101,33 @@ def trimmed_nos(data):
     return out
 
 
-def subject_teacher_map(grade):
+def subject_teacher_map(grade, exam_id=None):
     """{科目展示名: '教师A、教师B'}：该年级各班任课教师按科目去重合并。
-    板块一「任课教师」列数据源——不依赖划线，教师未配置/停用则科目对应空串。"""
-    links = TeacherSubjectLink.query.filter_by(grade=grade, active=True).all()
-    uids = {lk.user_id for lk in links}
-    users = User.query.filter(User.id.in_(uids), User.is_active.is_(True)).all() if uids else []
-    names = {u.id: u.real_name for u in users}
+
+    板块一「任课教师」列数据源——不依赖划线，教师未配置/停用则科目对应空串。
+    v1.18.6.0：传入 exam_id 时优先读**本场考试的任课快照**（考试当时），
+    教师调动/重新分班后历史考试的展示不会跟着变。
+    """
+    pairs = []          # [(subject, 姓名)]
+    if exam_id:
+        from app.modules.grades.services import teacher_snapshot_service as _tss
+        nm_map = _tss.name_map_of(exam_id, grade=grade)
+        pairs = [(subj, nm) for (_cls, subj), nm in nm_map.items() if nm]
+    if not pairs:
+        # 无快照（或教师姓名全部缺失）→ 回落当前映射
+        links = TeacherSubjectLink.query.filter_by(grade=grade, active=True).all()
+        uids = {lk.user_id for lk in links}
+        users = User.query.filter(User.id.in_(uids), User.is_active.is_(True)).all() if uids else []
+        names = {u.id: u.real_name for u in users}
+        pairs = [(lk.subject, names.get(lk.user_id)) for lk in links]
     out, seen = {}, {}
-    for lk in links:
-        nm = names.get(lk.user_id)
+    for subject, nm in pairs:
         if not nm:
             continue
-        disp = subject_display(lk.subject)
+        disp = subject_display(subject)
         bag = seen.setdefault(disp, set())
-        if lk.user_id not in bag:
-            bag.add(lk.user_id)
+        if nm not in bag:
+            bag.add(nm)
             out[disp] = (out[disp] + '、' + nm) if disp in out else nm
     return out
 
@@ -234,7 +267,7 @@ def subject_layer_report(exam_id, direction, layer_name='', compare_exam_id=None
                      'date': data.exam.exam_date.strftime('%Y-%m-%d')},
             'direction': direction or '全部', 'layer': layer_name,
             'layers': layer_names, 'rows': subj_rows, 'prev': prev_block,
-            'teachers': subject_teacher_map(data.exam.grade),
+            'teachers': subject_teacher_map(data.exam.grade, exam_id=data.exam.id),
             'prev_exam': (cmp_exam.name if cmp_exam else None),
             'prev_exam_id': (cmp_exam.id if cmp_exam else None)}
 

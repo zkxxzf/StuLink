@@ -11,7 +11,8 @@ from app.models.permission_group import PermissionGroup
 from app.models.user_class_link import UserClassLink
 from app.models.grade_setting import GradeSetting
 from app.models.grades import Exam, ExamScore, ExamBand, TeacherSubjectLink, \
-    AiKey, AiGlobalKey, AiReport, AiChatMessage, AffairRoomLib  # v1.12.1 考场房间库
+    AiKey, AiGlobalKey, AiReport, AiChatMessage, AffairRoomLib, \
+    ExamTeacherLink, ExamAffair, AffairRoom, AffairStudent  # v1.18.6.0 考试任课快照 / 考务
 from app.models.points import PointRecord, PointRuleTemplate
 from app.models.system_setting import SystemSetting
 from app.models.academic import Teacher, Timetable, TimetableEntry, \
@@ -34,7 +35,8 @@ __all__ = ['User', 'Student', 'Room', 'BedAssignment', 'StudentAccommodation',
            'DictCategory', 'DictItem', 'OperationLog', 'AssignmentHistory',
            'ClassProfile', 'ClassSubject',
            'PermissionGroup', 'UserClassLink', 'GradeSetting',
-           'Exam', 'ExamScore', 'ExamBand', 'TeacherSubjectLink',
+           'Exam', 'ExamScore', 'ExamBand', 'TeacherSubjectLink', 'ExamTeacherLink',
+           'ExamAffair', 'AffairRoom', 'AffairStudent',
            'AiKey', 'AiGlobalKey', 'AiReport', 'AiChatMessage',
            'AffairRoomLib', 'PointRecord', 'PointRuleTemplate',
            'SystemSetting',

@@ -1,4 +1,4 @@
-# StuLink v1.18.5.0 2026-09-30
+# StuLink v1.18.6.0 2026-09-30
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 """教务 · 教师业绩库：录入 / 列表筛选分页 / 审核（含审核意见）/ 统计 / 导出。
 
@@ -359,7 +359,7 @@ def achievement_attachment_delete(fid):
 
 @bp.route('/achievements/attachment/<int:fid>/view')
 @login_required
-# v1.18.5.0 审核（S2）：本路由有意不用 @perm_required('academic.view')——
+# v1.18.6.0 审核（S2）：本路由有意不用 @perm_required('academic.view')——
 # 教师工作台“我的业绩”需允许无 academic.view 权限的提交者本人预览自己上传的附件；
 # 权限由 ach_svc.can_view(rec, att, current_user) 收敛（academic.view 持有者 OR 提交者本人 OR 审核人）。
 def achievement_file_view(fid):
@@ -386,7 +386,7 @@ def achievement_file_view(fid):
 
 @bp.route('/achievements/attachment/<int:fid>/download')
 @login_required
-# v1.18.5.0 审核（S2）：同 achievement_file_view，权限由 ach_svc.can_view 收敛，
+# v1.18.6.0 审核（S2）：同 achievement_file_view，权限由 ach_svc.can_view 收敛，
 # 豁免 @perm_required 是为保留“提交者本人下载自己附件”路径（与工作台协作）。
 def achievement_file_download(fid):
     """附件下载（与预览同一套权限）"""

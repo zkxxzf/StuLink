@@ -9,7 +9,12 @@ from app.utils.crypto import encrypt as _encrypt_id
 from app.forms.student_forms import StudentForm
 from app.utils.decorators import perm_required
 from app.utils.student_scope import apply_student_scope
-from app.utils.helpers import get_dict_values, log_operation, get_graduated_grades, write_change_log
+from app.utils.helpers import (get_dict_values, log_operation, get_graduated_grades,
+                               write_change_log, class_change_counts,
+                               class_change_logs, change_type_label,
+                               CLASS_CHANGE_TYPES, student_location_desc,
+                               resolve_direction, location_desc, get_class_type,
+                               student_change_logs)
 import io
 import uuid
 import time
@@ -106,6 +111,8 @@ def list_students():
                    .filter(Student.graduation_school.isnot(None), Student.graduation_school != '')
                    .distinct().order_by(Student.graduation_school).all()
                    if s[0]]
+    # v1.18.6.0 调班记录：当前页学生的班级变更次数（列表「调班」列用）
+    change_counts = class_change_counts([s.id for s in students])
     return render_template('system/students/list.html', 
                          students=students, 
                          grades=grades, 
@@ -115,6 +122,7 @@ def list_students():
                          day_student_types=day_student_types,
                          enrollment_statuses=enrollment_statuses,
                          pagination=pagination,
+                         change_counts=change_counts,
                          filter_gender=filter_gender,
                          filter_grade=filter_grade,
                          filter_class=filter_class,
@@ -122,6 +130,56 @@ def list_students():
                          filter_school=filter_school,
                          filter_enrollment=filter_enrollment,
                          school_list=school_list)
+
+
+@bp.route('/class-changes')
+@perm_required('students.view')
+def class_changes():
+    """v1.18.6.0 调班记录总览：入校分班/重新分班/个别调班/修正班级
+
+    按当前用户数据范围过滤（apply_student_scope），支持年级/班级/类型/日期/关键字筛选。
+    """
+    filter_grade = request.args.get('grade', '').strip()
+    filter_class = request.args.get('class_name', '').strip()
+    filter_type = request.args.get('change_type', '').strip()
+    filter_keyword = request.args.get('keyword', '').strip()
+    filter_from = request.args.get('date_from', '').strip()
+    filter_to = request.args.get('date_to', '').strip()
+
+    # 班级必须与年级成对：与列表页同口径
+    if filter_class and not filter_grade:
+        filter_class = ''
+
+    # 数据范围：先取可见学生 ID（与列表页一致）
+    scope_q = apply_student_scope(Student.query)
+    scope_ids = [r[0] for r in scope_q.with_entities(Student.id).all()]
+
+    types = [filter_type] if filter_type in CLASS_CHANGE_TYPES else None
+    logs = class_change_logs(student_ids=scope_ids, change_types=types,
+                             grade=filter_grade,
+                             class_name=(f'{filter_class}' if filter_class else ''),
+                             date_from=filter_from, date_to=filter_to, limit=1000)
+    if filter_keyword:
+        kw = filter_keyword.lower()
+        logs = [l for l in logs
+                if kw in str(l.get('student_name') or '').lower()
+                or kw in str(l.get('student_number') or '').lower()]
+
+    # 统计各类型数量（基于当前筛选结果）
+    type_counts = {}
+    for l in logs:
+        type_counts[l['change_type']] = type_counts.get(l['change_type'], 0) + 1
+
+    graduated = get_graduated_grades()
+    grades = [g for g in get_dict_values('grade') if g not in graduated]
+    classes = get_dict_values('class')
+    return render_template('system/students/class_changes.html',
+                           logs=logs, type_counts=type_counts,
+                           grades=grades, classes=classes,
+                           type_labels=CHANGE_TYPE_LABELS,
+                           filter_grade=filter_grade, filter_class=filter_class,
+                           filter_type=filter_type, filter_keyword=filter_keyword,
+                           filter_from=filter_from, filter_to=filter_to)
 
 
 
@@ -152,6 +210,17 @@ def create():
         db.session.add(student)
         db.session.commit()
         log_operation(current_user, '创建', '学生', student.id, f'{student.name} {student.grade}{student.class_name}')
+        # v1.18.6.0 调班记录：新增学生 = 入校分班（含班型·方向）
+        try:
+            if student.class_name:
+                write_change_log('enroll', [{'id': student.id,
+                                             'student_number': student.student_number or '',
+                                             'name': student.name}],
+                                 old_value='', new_value=student_location_desc(student),
+                                 detail='新增学生（入校分班）',
+                                 operator_name=current_user.real_name)
+        except Exception:
+            pass
         flash('学生信息已添加', 'success')
         return redirect(url_for('students.list_students'))
     # 班主任默认填入自己管理的年级班级
@@ -181,37 +250,8 @@ def detail(id):
     elif current_user.role not in ('admin', 'school_viewer'):
         flash('无权查看学生详细信息', 'danger')
         return redirect(url_for('students.list_students'))
-    # 查询变迁记录
-    change_logs = []
-    try:
-        import sqlite3, os
-        from config import BASE_DIR
-        history_path = os.path.join(BASE_DIR, 'data', 'history.db')
-        if os.path.exists(history_path):
-            conn = sqlite3.connect(history_path)
-            conn.row_factory = sqlite3.Row
-            conn.execute('''
-                CREATE TABLE IF NOT EXISTS student_change_log (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    student_id INTEGER NOT NULL,
-                    student_number TEXT,
-                    student_name TEXT NOT NULL,
-                    change_type TEXT NOT NULL,
-                    old_value TEXT,
-                    new_value TEXT,
-                    detail TEXT,
-                    operator TEXT,
-                    changed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                )
-            ''')
-            rows = conn.execute(
-                'SELECT * FROM student_change_log WHERE student_id=? ORDER BY changed_at DESC',
-                (student.id,)
-            ).fetchall()
-            change_logs = [dict(r) for r in rows]
-            conn.close()
-    except Exception:
-        pass
+    # v1.18.6.0 变更记录：调班 / 转科 / 转出 / 学籍变更 / 毕业 全量（调班记录页与详情页同源）
+    change_logs = student_change_logs(student.id)
     return render_template('system/students/detail.html', student=student, change_logs=change_logs)
 
 
@@ -232,6 +272,11 @@ def edit(id):
         flash('无权编辑学生', 'danger')
         return redirect(url_for('students.list_students'))
     form = StudentForm(obj=student)
+    # v1.18.6.0 选科/方向留痕：旧值需在填充前取
+    _old_sel = (student.subject_selection or '')
+    # v1.18.6.0 学籍驱动班级联动：旧学籍与旧位置需在填充前取
+    _old_status = (student.enrollment_status or '').strip()
+    _old_loc = student_location_desc(student)
     if form.validate_on_submit():
         # 1. 验证身份证号格式
         id_card = form.id_card_number.data
@@ -260,11 +305,61 @@ def edit(id):
                 return render_template('system/students/form.html', form=form, title='编辑学生')
         
         _populate_student_for_edit(student, form)
+        # v1.18.6.0 学籍驱动的班级自动联动（用户口径）：
+        #   学籍已转出 → 班级自动置「已转出」；在籍不在校 → 班级自动置「不分班」
+        _new_status = (student.enrollment_status or '').strip()
+        _auto_kind = _auto_desc = None
+        if _new_status != _old_status:
+            if _new_status == '学籍已转出':
+                student.class_name = '已转出'
+                _auto_kind = 'withdraw'
+                _auto_desc = '学籍已转出 → 班级自动归置为「已转出」'
+            elif _new_status == '在籍不在校':
+                student.class_name = '不分班'
+                _auto_kind = 'transfer'
+                _auto_desc = '学籍为「在籍不在校」→ 班级自动归置为「不分班」'
         db.session.commit()
         log_operation(current_user, '更新', '学生', student.id, f'{student.name} {student.grade}{student.class_name}')
+        # 注：年级/班级在本页不可改（never_update_fields），调班请走「调班」弹窗 /students/<id>/transfer
+        # v1.18.6.0 变更留痕：① 学籍情况变更 ② 学籍驱动的班级归置 ③ 选科/方向变更
+        _logs = []
+        if _new_status != _old_status:
+            _logs.append(('enrollment', _old_status or '（空）', _new_status,
+                          '学籍情况变更'))
+        if _auto_kind:
+            _logs.append((_auto_kind, _old_loc, student_location_desc(student),
+                          _auto_desc))
+        try:
+            _new_sel = (student.subject_selection or '')
+            if _new_sel != _old_sel:
+                _grade, _cls = student.grade, student.class_name
+                _od = resolve_direction(_old_sel, _cls, _grade)
+                _nd = resolve_direction(_new_sel, _cls, _grade)
+                _kind = 'direction' if _od != _nd else 'subject_selection'
+                _ct = get_class_type(_grade, _cls)
+                # 位置描述含 班型·方向·选科（如 2024级01班·强基班·物理·物化生）
+                _old_desc = location_desc(_grade, _cls, _ct, _od, _old_sel or '')
+                _new_desc = location_desc(_grade, _cls, _ct, _nd, _new_sel or '')
+                _det = (f'方向 {_od or "—"} → {_nd or "—"}' if _kind == 'direction'
+                        else '选科组合调整')
+                _logs.append((_kind, _old_desc, _new_desc, _det))
+        except Exception:
+            pass
+        for _t, _ov, _nv, _det in _logs:
+            try:
+                write_change_log(_t,
+                                 [{'id': student.id,
+                                   'student_number': student.student_number or '',
+                                   'name': student.name}],
+                                 old_value=_ov, new_value=_nv, detail=_det,
+                                 operator_name=current_user.real_name)
+            except Exception:
+                pass
         flash('学生信息已更新', 'success')
         return redirect(url_for('students.detail', id=student.id))
-    return render_template('system/students/form.html', form=form, title='编辑学生')
+    # v1.18.6.0 编辑页也展示变更记录（调班/转科/转出/学籍变更），避免打开编辑页看不到历史
+    return render_template('system/students/form.html', form=form, title='编辑学生',
+                           student=student, change_logs=student_change_logs(student.id))
 
 
 @bp.route('/<int:id>/delete', methods=['POST'])
@@ -875,6 +970,20 @@ def import_students():
                     )
                     db.session.add(acc)
             db.session.commit()
+            # v1.18.6.0 调班记录：导入新生 = 入校分班（逐人写入带班级）
+            try:
+                for _st, _acc in students_to_add:
+                    if _st.class_name:
+                        write_change_log('enroll',
+                                         [{'id': _st.id,
+                                           'student_number': _st.student_number or '',
+                                           'name': _st.name}],
+                                         old_value='',
+                                         new_value=student_location_desc(_st),
+                                         detail='导入新生（入校分班）',
+                                         operator_name=current_user.real_name)
+            except Exception:
+                pass
             log_operation(current_user, '导入', '学生', None, f'部分导入 {len(students_to_add)} 名，{len(errors)} 条失败')
             error_summary = f'成功导入 {len(students_to_add)} 名学生，但有 {len(errors)} 条数据未导入'
             ek = _save_import_errors(errors)
@@ -907,6 +1016,20 @@ def import_students():
                     )
                     db.session.add(acc)
             db.session.commit()
+            # v1.18.6.0 调班记录：导入新生 = 入校分班（逐人写入带班级）
+            try:
+                for _st, _acc in students_to_add:
+                    if _st.class_name:
+                        write_change_log('enroll',
+                                         [{'id': _st.id,
+                                           'student_number': _st.student_number or '',
+                                           'name': _st.name}],
+                                         old_value='',
+                                         new_value=student_location_desc(_st),
+                                         detail='导入新生（入校分班）',
+                                         operator_name=current_user.real_name)
+            except Exception:
+                pass
             log_operation(current_user, '导入', '学生', None, f'批量导入 {len(students_to_add)} 名学生')
             flash(f'成功导入 {len(students_to_add)} 名学生', 'success')
 
@@ -1012,10 +1135,29 @@ def transfer(id):
         return redirect(url_for('students.list_students'))
 
     old_info = f'{student.grade} {student.class_name}'
+    # v1.18.6.0 调班记录：变更性质由操作人声明
+    #   transfer 个别调班（学生真实换班，默认）｜correct 修正班级（此前录入有误）
+    change_kind = (request.form.get('class_change_kind') or 'transfer').strip()
+    if change_kind not in ('transfer', 'correct'):
+        change_kind = 'transfer'
+    # 旧位置需在改班前取（含当时的班型·方向）
+    old_loc = student_location_desc(student)
     student.grade = new_grade
     student.class_name = new_class
     db.session.commit()
     log_operation(current_user, '更新', '学生', student.id, f'{student.name} {old_info}→{new_grade}{new_class}')
+    try:
+        new_loc = student_location_desc(student)
+        if old_loc != new_loc:
+            write_change_log(change_kind,
+                             [{'id': student.id,
+                               'student_number': student.student_number or '',
+                               'name': student.name}],
+                             old_value=old_loc, new_value=new_loc,
+                             detail='修正班级录入' if change_kind == 'correct' else '个别调班',
+                             operator_name=current_user.real_name)
+    except Exception:
+        pass
     flash(f'学生 {student.name} 已从 {old_info} 调至 {new_grade} {new_class}', 'success')
     return redirect(url_for('students.list_students'))
 
@@ -1080,28 +1222,6 @@ def download_transfer_template():
     return send_file(buf, as_attachment=True,
                      download_name=filename,
                      mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
-
-
-def _get_changed_students(ws, match_col, grade_col, class_col, header_map, tpl_type):
-    """从已处理的Excel中提取成功调班的学生列表"""
-    from app.utils.crypto import encrypt as _enc
-    students = []
-    seen = set()
-    for row_idx in range(2, ws.max_row + 1):
-        match_val = ws.cell(row=row_idx, column=match_col).value
-        if not match_val:
-            continue
-        match_val = str(match_val).strip()
-        if not match_val or match_val in seen:
-            continue
-        seen.add(match_val)
-        if tpl_type == 'id_card':
-            student = Student.query.filter_by(_id_card_encrypted=_enc(match_val)).first()
-        else:
-            student = Student.query.filter_by(student_number=match_val).first()
-        if student:
-            students.append(student)
-    return students
 
 
 @bp.route('/download-class-transfer-template')
@@ -1216,6 +1336,8 @@ def batch_transfer():
 
         errors = []
         updated_count = 0
+        # v1.18.6.0 调班记录：循环内收集变更（含旧/新位置），供 reassign 日志使用
+        changed_rows = []
 
         for row_idx in range(2, ws.max_row + 1):
             match_val = ws.cell(row=row_idx, column=match_col).value
@@ -1247,9 +1369,25 @@ def batch_transfer():
                 errors.append(f'{row_label}（{match_val}）：未找到该学生')
                 continue
 
+            old_loc = student_location_desc(student)
             student.grade = new_grade
             student.class_name = new_class
+            new_loc = student_location_desc(student)
             updated_count += 1
+            if old_loc != new_loc:
+                changed_rows.append({'id': student.id,
+                                     'student_number': student.student_number or '',
+                                     'name': student.name, 'old': old_loc, 'new': new_loc})
+
+        def _log_reassign():
+            """v1.18.6.0 批量调班 → 重新分班；逐人记录旧→新位置（含班型·方向）"""
+            for c in changed_rows:
+                write_change_log('reassign',
+                                 [{'id': c['id'], 'student_number': c['student_number'],
+                                   'name': c['name']}],
+                                 old_value=c['old'], new_value=c['new'],
+                                 detail='批量调班（重新分班）',
+                                 operator_name=current_user.real_name)
 
         if errors:
             error_summary = f'调班完成，但有 {len(errors)} 条未处理：\n' + '\n'.join(errors[:20])
@@ -1257,12 +1395,8 @@ def batch_transfer():
                 error_summary += f'\n...还有 {len(errors) - 20} 条'
             if updated_count > 0:
                 db.session.commit()
-                # 写入变迁日志
                 try:
-                    changed = [{'id': s.id, 'student_number': s.student_number or '', 'name': s.name}
-                              for s in _get_changed_students(ws, match_col, grade_col, class_col, header_map, tpl_type)]
-                    if changed:
-                        write_change_log('class', changed, detail='批量调班', operator_name=current_user.real_name)
+                    _log_reassign()
                 except Exception:
                     pass
                 flash(f'成功调班 {updated_count} 名学生。{error_summary}', 'warning')
@@ -1271,12 +1405,8 @@ def batch_transfer():
                 flash(error_summary, 'danger')
         elif updated_count > 0:
             db.session.commit()
-            # 写入变迁日志
             try:
-                changed = [{'id': s.id, 'student_number': s.student_number or '', 'name': s.name}
-                          for s in _get_changed_students(ws, match_col, grade_col, class_col, header_map, tpl_type)]
-                if changed:
-                    write_change_log('class', changed, detail='批量调班', operator_name=current_user.real_name)
+                _log_reassign()
             except Exception:
                 pass
             flash(f'成功调班 {updated_count} 名学生', 'success')

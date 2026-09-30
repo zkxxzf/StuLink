@@ -21,6 +21,8 @@ class StudentForm(FlaskForm):
     enrollment_notes = StringField('学籍备注', validators=[Optional()])
     graduation_school_code = StringField('毕业学校代码', validators=[Optional(), Length(max=10)])
     graduation_school = StringField('毕业学校', validators=[Optional(), Length(max=100)])
+    # 注：年级/班级不可在本表单修改（编辑路由 never_update_fields），
+    #     调班请走学生列表的「调班」弹窗（POST /students/<id>/transfer）。
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)

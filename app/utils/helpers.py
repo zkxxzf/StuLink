@@ -343,11 +343,14 @@ def init_history_tables():
         logging.getLogger(__name__).warning(f'初始化变迁日志表失败: {e}')
 
 
-def write_change_log(change_type, students_data, old_value='', new_value='', detail='', operator_name=''):
+def write_change_log(change_type, students_data, old_value='', new_value='', detail='',
+                     operator_name='', changed_at=None):
     """写入学生变迁日志到 history.db（复用 history bind 的连接池，不再每次新建连接）
     students_data: list of dicts with keys id, student_number, name
     函数签名与调用方式与旧版完全一致；表已在 create_app 启动时建好，
     若表缺失（如绕过启动初始化直接调脚本）则自动补建一次后重试。
+    changed_at: v1.18.6.0 新增，指定历史时间（'YYYY-MM-DD HH:MM:SS'）；
+                None = 用当前时间（表默认值）
     """
     from sqlalchemy import text
     from sqlalchemy.exc import OperationalError
@@ -360,10 +363,18 @@ def write_change_log(change_type, students_data, old_value='', new_value='', det
     ]
     if not rows:
         return
-    insert_sql = text(
-        'INSERT INTO student_change_log (student_id,student_number,student_name,change_type,old_value,new_value,detail,operator) '
-        'VALUES (:sid,:sno,:sname,:ctype,:old,:new,:detail,:operator)'
-    )
+    if changed_at:
+        insert_sql = text(
+            'INSERT INTO student_change_log (student_id,student_number,student_name,change_type,old_value,new_value,detail,operator,changed_at) '
+            'VALUES (:sid,:sno,:sname,:ctype,:old,:new,:detail,:operator,:cat)'
+        )
+        for r in rows:
+            r['cat'] = changed_at
+    else:
+        insert_sql = text(
+            'INSERT INTO student_change_log (student_id,student_number,student_name,change_type,old_value,new_value,detail,operator) '
+            'VALUES (:sid,:sno,:sname,:ctype,:old,:new,:detail,:operator)'
+        )
     try:
         engine = db.engines.get('history')
         if engine is None:
@@ -379,5 +390,263 @@ def write_change_log(change_type, students_data, old_value='', new_value='', det
     except Exception as e:
         import logging
         logging.getLogger(__name__).error(f'写入变迁日志异常: {e}', exc_info=True)
+
+
+# ==================== v1.18.6.0 调班记录（学生班级变更） ====================
+
+#: 班级类变更类型 → (中文标签, Bootstrap 颜色)
+#: enroll  入校分班：新增学生 / 导入新生时带班级
+#: reassign 重新分班：Excel 批量调班（多人同时重排）
+#: transfer 个别调班：转班弹窗 / 因学籍状态归置班级
+#: correct  修正班级：此前录入有误，改对而已（非真实换班）
+#: direction 转科：物理 ↔ 历史（方向变了）
+#: subject_selection 选科组合变更：方向不变，只换组合（物化生 → 物化地）
+#: withdraw 转出：学籍已转出 → 班级归置为「已转出」
+#: enrollment 学籍变更：学籍情况字段本身发生变化
+#: number  学号变更：修正学生学号
+#: class    旧版批量调班（历史数据兼容，仅读不写）
+CLASS_CHANGE_TYPES = ('enroll', 'reassign', 'transfer', 'correct',
+                      'direction', 'subject_selection', 'withdraw',
+                      'enrollment', 'number', 'class')
+
+CHANGE_TYPE_LABELS = {
+    'enroll': ('入校分班', 'primary'),
+    'reassign': ('重新分班', 'warning'),
+    'transfer': ('个别调班', 'info'),
+    'correct': ('修正班级', 'secondary'),
+    'direction': ('转科', 'danger'),
+    'subject_selection': ('选科变更', 'info'),
+    'withdraw': ('转出', 'dark'),
+    'enrollment': ('学籍变更', 'warning'),
+    'number': ('学号变更', 'secondary'),
+    'class': ('调班', 'info'),          # 旧数据
+    'graduate': ('毕业', 'success'),
+    'dormitory': ('宿舍', 'warning'),
+}
+
+
+def change_type_label(change_type):
+    """变更类型 → (中文标签, 颜色)；未知名原样返回"""
+    return CHANGE_TYPE_LABELS.get(change_type, (change_type or '', 'secondary'))
+
+
+# ==================== v1.18.6.0 方向推导与就读位置描述 ====================
+
+_DIR_RULES = (
+    ('物', '物理'), ('史', '历史'),
+    ('理科', '物理'), ('理', '物理'),
+    ('文科', '历史'), ('文', '历史'),
+)
+
+
+def resolve_direction(subject_selection, class_name=None, grade=None):
+    """由选科组合推导方向（物理/历史）。
+
+    与 import_service 同口径：优先本人选科，无则回落班级档（ClassProfile.subject_direction）。
+    subject_selection 形如 '物化生' / '史政地' / '理科'。无法识别返回 ''。
+    """
+    sel = (subject_selection or '').strip()
+    if sel:
+        for prefix, d in _DIR_RULES:
+            if sel.startswith(prefix):
+                return d
+    if class_name:
+        try:
+            from app.models.class_profile import ClassProfile
+            q = ClassProfile.query.filter_by(class_name=class_name)
+            if grade:
+                q = q.filter_by(grade=grade)
+            cp = q.first()
+            if cp and cp.subject_direction:
+                return cp.subject_direction
+        except Exception:
+            pass
+    return ''
+
+
+def get_class_type(grade, class_name):
+    """取该班当前班型（强基班/卓越班…）；无则返回 ''"""
+    if not (grade and class_name):
+        return ''
+    try:
+        from app.models.class_profile import ClassProfile
+        cp = ClassProfile.query.filter_by(grade=grade, class_name=class_name).first()
+        return (cp.class_type or '') if cp else ''
+    except Exception:
+        return ''
+
+
+def get_class_selection(grade, class_name):
+    """取该班在班型设置中登记的选科组合（可能多个，顿号连接）；无则 ''
+
+    仅作学生本人选科缺失时的回落展示（如 03班 登记为“物化政、物化地”）。
+    """
+    if not (grade and class_name):
+        return ''
+    try:
+        from app.models.class_profile import ClassProfile
+        cp = ClassProfile.query.filter_by(grade=grade, class_name=class_name).first()
+        if not cp:
+            return ''
+        lst = cp.subject_list
+        return '、'.join(lst) if lst else ''
+    except Exception:
+        return ''
+
+
+def location_desc(grade, class_name, class_type=None, direction=None, selection=None):
+    """构造“就读位置”描述：`2024级01班·强基班·物理·物化生`
+
+    班型 / 方向 / 选科为空时自动省略对应段，保证旧数据与无班型场景可兼。
+    方向与选科同时保留：同一方向下组合可能不同（物化生 / 物化地），需能区分。
+    **非教学班**（已转出 / 不分班等）只返回“年级+班级”，不挂属性（它们不参与教学与考试）。
+    """
+    base = f'{grade or ""}{class_name or ""}'
+    if not _is_teaching_class(class_name):
+        return base
+    parts = [p for p in (class_type, direction, selection) if p]
+    return base + (''.join('·' + p for p in parts) if parts else '')
+
+
+def _is_teaching_class(class_name):
+    """本模块内轻量判断：数字教学班（01班~99班）。与 grades.utils.is_teaching_class 同口径，
+    此处就地实现以避免 utils → modules 的早期导入依赖。"""
+    import re as _re
+    return bool(class_name and _re.match(r'^\d{1,2}班$', str(class_name).strip()))
+
+
+def student_location_desc(student, extra_class_type=None, extra_direction=None,
+                          extra_selection=None):
+    """由 Student 对象构造位置描述：`2024级01班·强基班·物理·物化生`
+
+    选科优先取学生本人 subject_selection；为空时回落读该班登记的选科组合。
+    """
+    grade = getattr(student, 'grade', '') or ''
+    cls = getattr(student, 'class_name', '') or ''
+    ct = extra_class_type if extra_class_type is not None else get_class_type(grade, cls)
+    own_sel = (getattr(student, 'subject_selection', '') or '').strip()
+    sel = extra_selection if extra_selection is not None else own_sel
+    if not sel:
+        sel = get_class_selection(grade, cls)
+    dr = extra_direction
+    if dr is None:
+        dr = resolve_direction(own_sel, cls, grade)
+    return location_desc(grade, cls, ct, dr, sel)
+
+
+def student_change_logs(student_id, limit=200):
+    """v1.18.6.0 取单个学生的全部变迁记录（时间倒序）
+
+    学生详情页与编辑页共用，异常时返回 []。
+    """
+    from sqlalchemy import text
+    from app.extensions import db
+    try:
+        engine = db.engines.get('history')
+        if engine is None:
+            return []
+        sql = text('SELECT id, student_id, student_number, student_name, change_type, '
+                   'old_value, new_value, detail, operator, changed_at '
+                   'FROM student_change_log WHERE student_id=:sid '
+                   'ORDER BY changed_at DESC, id DESC LIMIT :lim')
+        with engine.connect() as conn:
+            return [dict(r._mapping) for r in
+                    conn.execute(sql, {'sid': int(student_id),
+                                       'lim': int(limit)}).fetchall()]
+    except Exception:
+        return []
+
+
+def class_change_counts(student_ids):
+    """v1.18.6.0 学生列表用：批量取学生 → 调班次数
+
+    只统计班级类变更（enroll/reassign/transfer/correct/direction/
+    subject_selection/withdraw/class）。
+    返回 {student_id: 次数}；异常时返回空 dict（静默失败，不阻塞列表页）。
+    """
+    ids = [int(i) for i in (student_ids or []) if i]
+    if not ids:
+        return {}
+    from sqlalchemy import text
+    from app.extensions import db
+    try:
+        engine = db.engines.get('history')
+        if engine is None:
+            return {}
+        ph = ','.join(f':p{i}' for i in range(len(ids)))
+        params = {f'p{i}': v for i, v in enumerate(ids)}
+        ctypes = ','.join(f"'{t}'" for t in CLASS_CHANGE_TYPES)
+        sql = text(f'SELECT student_id, COUNT(*) AS n FROM student_change_log '
+                   f'WHERE student_id IN ({ph}) AND change_type IN ({ctypes}) '
+                   f'GROUP BY student_id')
+        with engine.connect() as conn:
+            return {row[0]: row[1] for row in conn.execute(sql, params).fetchall()}
+    except Exception:
+        return {}
+
+
+def class_change_logs(student_ids=None, change_types=None, grade='', class_name='',
+                      date_from='', date_to='', limit=500):
+    """v1.18.6.0 调班记录查询（总览页用）
+
+    student_ids: 限定学生范围（权限过滤用）；None=不限
+    change_types: 类型列表；None=全部班级类
+    返回 list[dict]，按时间倒序。异常时返回 []。
+
+    注：student_ids 可能上千（全校范围），因此分块查询后合并，
+    避开 SQLite 的 SQLITE_MAX_VARIABLE_NUMBER 上限。
+    """
+    from sqlalchemy import text
+    from app.extensions import db
+    types = list(change_types or CLASS_CHANGE_TYPES)
+    type_sql = ','.join("'" + t + "'" for t in types)
+
+    extra_conds = []
+    extra_params = {}
+    if grade:
+        extra_conds.append('new_value LIKE :g')
+        extra_params['g'] = f'{grade}%'
+    if class_name:
+        extra_conds.append('(new_value LIKE :c OR old_value LIKE :c)')
+        extra_params['c'] = f'%{class_name}%'
+    if date_from:
+        extra_conds.append('changed_at >= :df')
+        extra_params['df'] = date_from
+    if date_to:
+        extra_conds.append('changed_at <= :dt')
+        extra_params['dt'] = date_to + ' 23:59:59'
+    tail = (' AND ' + ' AND '.join(extra_conds)) if extra_conds else ''
+    order = f' ORDER BY changed_at DESC, id DESC LIMIT {int(limit)}'
+    base_where = f'change_type IN ({type_sql})' + tail
+    select_cols = ('SELECT id, student_id, student_number, student_name, change_type, '
+                   'old_value, new_value, detail, operator, changed_at '
+                   'FROM student_change_log WHERE ')
+
+    try:
+        engine = db.engines.get('history')
+        if engine is None:
+            return []
+        if student_ids is None:
+            sql = text(select_cols + base_where + order)
+            with engine.connect() as conn:
+                return [dict(r._mapping) for r in conn.execute(sql, extra_params).fetchall()]
+
+        ids = [int(i) for i in student_ids if i]
+        if not ids:
+            return []
+        out = []
+        CHUNK = 800
+        with engine.connect() as conn:
+            for i in range(0, len(ids), CHUNK):
+                chunk = ids[i:i + CHUNK]
+                ph = ','.join(f':s{k}' for k in range(len(chunk)))
+                params = dict(extra_params)
+                params.update({f's{k}': v for k, v in enumerate(chunk)})
+                sql = text(select_cols + f'student_id IN ({ph}) AND ' + base_where + order)
+                out.extend(dict(r._mapping) for r in conn.execute(sql, params).fetchall())
+        out.sort(key=lambda r: (str(r.get('changed_at') or ''), r.get('id') or 0), reverse=True)
+        return out[:int(limit)]
+    except Exception:
+        return []
 
 

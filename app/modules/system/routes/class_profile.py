@@ -5,9 +5,39 @@ from flask_login import login_required
 from app.extensions import db
 from app.models import DictCategory, DictItem, ClassProfile, ClassSubject, User, UserClassLink
 from app.utils.decorators import perm_required
-from app.utils.helpers import get_dict_values, get_graduated_grades
+from app.utils.helpers import (get_dict_values, get_graduated_grades,
+                               subject_direction as _subj_dir)
 
 bp = Blueprint('class_profile', __name__, url_prefix='/class-profile')
+
+
+# v1.18.6.0 方向与选科组合的对应关系（物理→物XX，历史→史XX），供校验复用
+DIR_TO_SUBJECT_DIR = {'物理': 'physics', '历史': 'history'}
+
+
+def check_direction_subjects(direction, subjects):
+    """校验「选科方向」与「选科组合」是否匹配（v1.18.6.0）
+
+    规则（用户口径）：
+      - 物理方向 → 只能选物理类组合（物XX）
+      - 历史方向 → 只能选历史类组合（史XX）
+      - 「全科」  → 仅方向为空时可选
+      - 方向为空 → 不可选具体组合（可选「全科」或不选）
+    返回错误消息列表；空列表=通过。
+    """
+    want = DIR_TO_SUBJECT_DIR.get((direction or '').strip(), '')
+    bad = []
+    for sv in (subjects or []):
+        sv_dir = _subj_dir(sv)
+        if sv == '全科':
+            if want:
+                bad.append(f'「全科」仅方向为空时可选（当前方向：{direction}）')
+        elif want:
+            if sv_dir != want:
+                bad.append(f'「{sv}」不属于{direction}方向')
+        else:
+            bad.append(f'方向为空时不可选具体组合「{sv}」（可选「全科」）')
+    return bad
 
 
 @bp.route('/')
@@ -59,7 +89,7 @@ def manage():
     class_type_options = get_dict_values('class_type')
     direction_options = get_dict_values('subject_direction')
     subject_options = get_dict_values('subject')
-    # v1.18.5.0：管理员不是教师，不进入教师候选下拉
+    # v1.18.6.0：管理员不是教师，不进入教师候选下拉
     teacher_options = User.query.filter(
         User.role.in_(['homeroom_teacher', 'grade_leader', 'teacher',
                        'dorm_manager', 'school_viewer', 'staff']),
@@ -148,6 +178,12 @@ def batch_save():
             new_subjects = []
         # 过滤无效值
         new_subjects = [s for s in new_subjects if s in valid_subjects]
+
+        # v1.18.6.0 方向与组合挂钩（服务端兑底，前端已置灰拦截）
+        _bad = check_direction_subjects(subject_direction, new_subjects)
+        if _bad:
+            errors.append(f'{grade}{class_name}: ' + '；'.join(_bad))
+            continue
 
         if profile.id:
             old_subjects = profile.subject_list

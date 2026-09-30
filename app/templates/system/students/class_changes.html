@@ -1,0 +1,142 @@
+{% extends "base.html" %}
+{% block title %}调班记录{% endblock %}
+{% block content %}
+{# v1.18.6.0 展示顺序与范围（不含旧 class 兼容类型时也不丢失） #}
+{% set CT_LIST = ('enroll', 'reassign', 'transfer', 'correct', 'direction', 'subject_selection', 'withdraw', 'enrollment', 'number', 'class') %}
+<style>
+.filter-bar select, .filter-bar input { font-size: 12px; padding: 3px 6px; border: 1px solid #dee2e6; border-radius: 3px; }
+.filter-bar select:focus, .filter-bar input:focus { border-color: #86b7fe; outline: none; box-shadow: 0 0 0.15rem rgba(13,110,253,.25); }
+.type-card { border-radius: 6px; padding: 8px 12px; }
+</style>
+
+<div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
+    <div>
+        <h4 class="fw-bold mb-0"><i class="bi bi-clock-history"></i> 调班记录</h4>
+        <small class="text-muted">入校分班 · 重新分班 · 个别调班 · 修正班级 · 转科 · 选科变更 · 转出 · 学籍变更 · 学号变更 全量留痕</small>
+    </div>
+    <a href="{{ url_for('students.list_students') }}" class="btn btn-sm btn-outline-secondary">
+        <i class="bi bi-arrow-left"></i> 返回学生列表
+    </a>
+</div>
+
+{# 各类型计数 #}
+<div class="row g-2 mb-3">
+    {% for t in CT_LIST %}
+    {% set lab, color = type_labels.get(t, (t, 'secondary')) %}
+    <div class="col-6 col-md-4 col-lg">
+        <a href="{{ url_for('students.class_changes', change_type=t, grade=filter_grade, class_name=filter_class, keyword=filter_keyword, date_from=filter_from, date_to=filter_to) }}"
+           class="text-decoration-none">
+            <div class="card type-card {{ 'border-' + color if filter_type == t else '' }}">
+                <div class="small text-muted">{{ lab }}</div>
+                <div class="fs-5 fw-bold text-{{ color }}">{{ type_counts.get(t, 0) }}</div>
+            </div>
+        </a>
+    </div>
+    {% endfor %}
+    <div class="col-6 col-md-4 col-lg">
+        <a href="{{ url_for('students.class_changes', grade=filter_grade, class_name=filter_class, keyword=filter_keyword, date_from=filter_from, date_to=filter_to) }}"
+           class="text-decoration-none">
+            <div class="card type-card {{ 'border-dark' if not filter_type else '' }}">
+                <div class="small text-muted">全部类型</div>
+                <div class="fs-5 fw-bold">{{ logs|length }}</div>
+            </div>
+        </a>
+    </div>
+</div>
+
+<div class="card">
+    <div class="card-body">
+        <form method="GET" class="filter-bar d-flex flex-wrap gap-2 align-items-center mb-3">
+            <select name="grade" onchange="onGradeChange(this)">
+                <option value="">全部年级</option>
+                {% for g in grades %}
+                <option value="{{ g }}" {% if filter_grade == g %}selected{% endif %}>{{ g }}</option>
+                {% endfor %}
+            </select>
+            <select name="class_name">
+                <option value="">全部班级</option>
+                {% for c in classes %}
+                <option value="{{ c }}" {% if filter_class == c %}selected{% endif %}>{{ c }}</option>
+                {% endfor %}
+            </select>
+            <select name="change_type">
+                <option value="">全部类型</option>
+                {% for t in CT_LIST %}
+                {% set lab, color = type_labels.get(t, (t, 'secondary')) %}
+                <option value="{{ t }}" {% if filter_type == t %}selected{% endif %}>{{ lab }}</option>
+                {% endfor %}
+            </select>
+            <input type="text" name="keyword" value="{{ filter_keyword }}" placeholder="姓名 / 学号" style="width:130px">
+            <input type="date" name="date_from" value="{{ filter_from }}" title="起始日期">
+            <span class="text-muted small">至</span>
+            <input type="date" name="date_to" value="{{ filter_to }}" title="结束日期">
+            <button type="submit" class="btn btn-sm btn-primary"><i class="bi bi-search"></i> 筛选</button>
+            <a href="{{ url_for('students.class_changes') }}" class="btn btn-sm btn-outline-secondary">清除</a>
+        </form>
+
+        <div class="table-responsive">
+            <table class="table table-sm table-hover align-middle mb-0">
+                <thead class="table-light">
+                    <tr>
+                        <th style="width:150px">时间</th>
+                        <th style="width:90px">学号</th>
+                        <th style="width:80px">姓名</th>
+                        <th style="width:90px">类型</th>
+                        <th style="width:200px">变更</th>
+                        <th>说明</th>
+                        <th style="width:90px">操作人</th>
+                    </tr>
+                </thead>
+                <tbody>
+                {% for l in logs %}
+                    {% set lab, color = type_labels.get(l.change_type, (l.change_type, 'secondary')) %}
+                    <tr>
+                        <td class="text-muted small">{{ l.changed_at or '' }}</td>
+                        <td class="small">{{ l.student_number or '' }}</td>
+                        <td>
+                            {% if l.student_id %}
+                            <a href="{{ url_for('students.detail', id=l.student_id) }}"
+                               class="text-decoration-none fw-bold">{{ l.student_name }}</a>
+                            {% else %}{{ l.student_name }}{% endif %}
+                        </td>
+                        <td><span class="badge bg-{{ color }}">{{ lab }}</span></td>
+                        <td class="small">
+                            {% if l.old_value %}
+                            <span class="text-decoration-line-through text-muted">{{ l.old_value }}</span>
+                            <i class="bi bi-arrow-right mx-1"></i>
+                            {% endif %}
+                            <strong>{{ l.new_value or '—' }}</strong>
+                        </td>
+                        <td class="small text-muted">{{ l.detail or '' }}</td>
+                        <td class="small text-muted">{{ l.operator or '' }}</td>
+                    </tr>
+                {% else %}
+                    <tr><td colspan="7" class="text-center text-muted py-4">
+                        暂无调班记录。调班、修正班级、导入新生等操作会自动留痕。
+                    </td></tr>
+                {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% if logs|length >= 1000 %}
+        <div class="alert alert-warning small mt-3 mb-0 py-2">
+            <i class="bi bi-info-circle"></i> 已达显示上限 1000 条，请用上方筛选缩小范围（如限定年级或日期区间）。
+        </div>
+        {% endif %}
+    </div>
+</div>
+
+<script>
+// 班级必须与年级成对使用：未选年级时禁用班级下拉
+function onGradeChange(sel) {
+    var cls = document.querySelector('.filter-bar select[name=class_name]');
+    if (!sel.value) { cls.value = ''; }
+    sel.form.submit();
+}
+document.querySelectorAll('.filter-bar select[name=grade], .filter-bar select[name=change_type]')
+    .forEach(function (el) { el.addEventListener('change', function () { this.form.submit(); }); });
+{% if filter_class and not filter_grade %}
+alert('请先选择年级，再选择班级');
+{% endif %}
+</script>
+{% endblock %}

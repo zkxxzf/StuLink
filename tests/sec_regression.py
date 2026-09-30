@@ -174,7 +174,7 @@ def check_M15():
          not validate_password('张三12345', real_name='张三')[0])
     case('M-15 符合策略的强口令通过', validate_password(TEST_PWD)[0])
 
-    # v1.18.5.0：清除历史失败计数，避免 M-3 预先锁定 sec_teacher
+    # v1.18.6.0：清除历史失败计数，避免 M-3 预先锁定 sec_teacher
     from app.utils.cache import cache as _c
     _c.delete('login_fail_sec_teacher')
     _c.delete('login_lock_sec_teacher')
@@ -315,7 +315,7 @@ def check_M6():
     import time as _time
     d = tempfile.mkdtemp(prefix='stulink_backup_test_')
     _now = _time.time()
-    # v1.18.5.0 S-5 后：_prune_backups 仅清理名字匹配 (graduate|system|history)_<年级>_YYYYMMDD_HHMMSS.db 的自动备份
+    # v1.18.6.0 S-5 后：_prune_backups 仅清理名字匹配 (graduate|system|history)_<年级>_YYYYMMDD_HHMMSS.db 的自动备份
     for i in range(25):
         p = os.path.join(d, f'graduate_2023级_2026010{i % 9 + 1:01d}_{i:02d}00{i % 60:02d}.db')
         with open(p, 'wb') as fh:
