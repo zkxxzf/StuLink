@@ -117,7 +117,7 @@ def global_compare_report(exam_id, direction=''):
     # 科目列：本场实际有成绩的科目按系统顺序（全科=9 科；分科=各方向并集，缺科显示 —）
     subjects = list(data.imported_subjects)
     trimmed = rs.trimmed_nos(data)
-    # v1.18.7.1 班主任取**本场考试当时**的快照（与任课教师同一机制）：
+    # v1.18.8.0 班主任取**本场考试当时**的快照（与任课教师同一机制）：
     # 历史考试不能再显示现在的班主任；快照缺失时自动回落当前关联
     from app.modules.grades.services import teacher_snapshot_service as _tss
     ht = _tss.headteacher_map_of(data.exam.id, grade=data.exam.grade)

@@ -12,7 +12,7 @@ from app.models.user_class_link import UserClassLink
 from app.models.grade_setting import GradeSetting
 from app.models.grades import Exam, ExamScore, ExamBand, TeacherSubjectLink, \
     AiKey, AiGlobalKey, AiReport, AiChatMessage, AffairRoomLib, \
-    ExamTeacherLink, ExamAffair, AffairRoom, AffairStudent  # v1.18.7.1 考试任课快照 / 考务
+    ExamTeacherLink, ExamAffair, AffairRoom, AffairStudent  # v1.18.8.0 考试任课快照 / 考务
 from app.models.points import PointRecord, PointRuleTemplate
 from app.models.system_setting import SystemSetting
 from app.models.academic import Teacher, Timetable, TimetableEntry, \

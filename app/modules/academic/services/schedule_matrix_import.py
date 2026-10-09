@@ -1,4 +1,4 @@
-# StuLink v1.18.7.1 2026-10-09
+# StuLink v1.18.8.0 2026-10-09
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 """学校原样课表导入（矩阵式，2026-09-26）。
 

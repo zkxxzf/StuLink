@@ -1,4 +1,4 @@
-# StuLink v1.18.7.1 2026-10-09
+# StuLink v1.18.8.0 2026-10-09
 # 考务管理：完整考务流程（对应 Excel 宏工作簿 2025考场学生考号与考场信息编排v1.2）
 #   步骤：① 学生名单（学生信息表） → ② 考场设置（考场信息表）
 #        → ③ 编排与考号生成（三种模式，镜像宏 编排考场考号2）
@@ -69,7 +69,7 @@ def _grade_options():
 
 
 def delete_affair_cascade(aid):
-    """v1.18.7.1：删除考务批次并级联清理其考场与学生名单。
+    """v1.18.8.0：删除考务批次并级联清理其考场与学生名单。
 
     AffairRoom / AffairStudent 的 affair_id 无外键约束（多库快照式设计，不建跨表外键），
     直接 `db.session.delete(affair)` 会留下孤儿行；此处显式按 affair_id 批量删除。
@@ -85,7 +85,7 @@ def delete_affair_cascade(aid):
 @login_required
 @perm_required('grades.edit')
 def affairs_list():
-    """v1.17.0 考试/考务合并收尾（v1.18.7.1）：考务批次列表已并入考试管理，
+    """v1.17.0 考试/考务合并收尾（v1.18.8.0）：考务批次列表已并入考试管理，
     本页保留为兼容入口（旧书签/外链），统一重定向到考试列表；
     未关联考试的孤儿批次由考试列表底部“待处理的考务批次”区兑底展示。"""
     return redirect(url_for('grades.exams_list'))
@@ -180,7 +180,7 @@ def exam_affair_go(exam_id):
 def affair_delete(aid):
     affair = _get_affair_checked(aid)
     name = affair.name
-    # v1.18.7.1：级联清理考场与名单（无外键约束，不显式删会留孤儿行）
+    # v1.18.8.0：级联清理考场与名单（无外键约束，不显式删会留孤儿行）
     n_rooms, n_stus = delete_affair_cascade(aid)
     db.session.commit()
     log_operation(current_user, '删除', '考务批次', aid,
@@ -254,7 +254,7 @@ def affair_students_template(aid):
         c.alignment = _CENTER
         c.border = _TB
     # 预填系统该年级学生（与 Excel「学生信息表」口径一致，考务人员可直接编辑）
-    # v1.18.7.1：只预填数字教学班且年级未毕业的学生（不分班/已转出/已毕业不进入成绩模板）
+    # v1.18.8.0：只预填数字教学班且年级未毕业的学生（不分班/已转出/已毕业不进入成绩模板）
     from app.utils.helpers import get_graduated_grades
     _graduated = set(get_graduated_grades() or [])
     _grade_ok = affair.grade not in _graduated
@@ -335,7 +335,7 @@ def affair_students_import(aid):
             name = name or sys_stu.name
             cls = cls or sys_stu.class_name
             sel = sel or (sys_stu.subject_selection or '')
-        # v1.18.7.1：补全后仍无数字教学班的学生不导入成绩名单
+        # v1.18.8.0：补全后仍无数字教学班的学生不导入成绩名单
         if not is_teaching_class(cls):
             skipped_no_class += 1
             continue
@@ -360,7 +360,7 @@ def affair_students_import(aid):
 def affair_students_sync(aid):
     """v1.12.1 从学生学籍库同步本年级学生到考务名单（增量：新增+补全信息）
 
-    v1.18.7.1 口径调整（用户明确）：
+    v1.18.8.0 口径调整（用户明确）：
     - 无班级学生（不分班 / 已转出 / 离校 等非数字班级）与已毕业年级学生
       **不进入成绩治理模块**，同步时直接过滤掉；
     - 原「同时移除学籍已删的学生」复选框取消，改为**默认自动移除**：
@@ -412,7 +412,7 @@ def affair_students_pick(aid):
     """v1.12.2 「加入学生」选择器数据源：返回本年级学籍学生，
     带 in_batch 标记（是否已在当前考务名单），供前端筛选/排序/搜索。
 
-    v1.18.7.1：与 sync 同口径，只列数字教学班且年级未毕业的学生（无班级/已毕业不展示）。"""
+    v1.18.8.0：与 sync 同口径，只列数字教学班且年级未毕业的学生（无班级/已毕业不展示）。"""
     affair = _get_affair_checked(aid)
     from app.utils.helpers import get_graduated_grades
     graduated = set(get_graduated_grades() or [])
@@ -441,7 +441,7 @@ def affair_students_batch_add(aid):
     for st in Student.query.filter(Student.student_number.in_(nos)).all():
         if st.student_number in exist:
             continue
-        # v1.18.7.1：无班级学生（不分班/已转出/离校等）不加入成绩治理名单
+        # v1.18.8.0：无班级学生（不分班/已转出/离校等）不加入成绩治理名单
         if not is_teaching_class(st.class_name):
             skipped += 1
             continue

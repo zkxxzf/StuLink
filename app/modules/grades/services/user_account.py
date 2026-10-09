@@ -1,4 +1,4 @@
-# StuLink v1.18.7.1 2026-10-09
+# StuLink v1.18.8.0 2026-10-09
 # 教师账号服务：姓名核对 / 自动开户（拼音账号 + 随机初始密码）
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 import random

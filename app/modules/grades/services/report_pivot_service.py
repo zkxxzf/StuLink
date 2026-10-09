@@ -1,4 +1,4 @@
-# StuLink v1.18.7.1 2026-10-09
+# StuLink v1.18.8.0 2026-10-09
 # 成绩汇报区指标引擎（板块三/四）：单班各科分析、单科各班分析（含任课教师）
 # 口径与 report_service 完全一致，复用其层线/去差/百分比公共函数
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
@@ -15,7 +15,7 @@ def _teacher_names(grade, class_name=None, subject=None, exam_id=None):
     """任课教师姓名映射：(班级,科目)→'姓名'；可只传班级或只传科目。
 
     同班同科多任教师（换师记录）按教师去重顿号连接。
-    v1.18.7.1：传 exam_id 时优先读**本场考试的任课快照**（考试当时）。
+    v1.18.8.0：传 exam_id 时优先读**本场考试的任课快照**（考试当时）。
     """
     pairs = []          # [(class_name, subject, 姓名)]
     if exam_id:
@@ -75,7 +75,7 @@ def class_subject_report(exam_id, class_name):
     teachers = _teacher_names(data.exam.grade, class_name=class_name,
                               exam_id=data.exam.id)
     from app.modules.grades.services import teacher_snapshot_service as _tss
-    # v1.18.7.1 班主任与任课均取本场考试当时快照（快照优先、缺则回落当前）
+    # v1.18.8.0 班主任与任课均取本场考试当时快照（快照优先、缺则回落当前）
     ht = _tss.headteacher_map_of(data.exam.id, grade=data.exam.grade).get(
         (data.exam.grade, class_name), '')
 
