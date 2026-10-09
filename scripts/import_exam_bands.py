@@ -126,10 +126,13 @@ def read_custom_params(path):
     if hi is None:
         return [], ''
     hdr = rows[hi]
+    # ❶ 该 sheet 内容不是从第 0 列开始（本例从第 5 列起），必须先找到标签列，
+    #    否则用 cells[0] 判断会全部为空 → 一行都取不到
+    i_lab = next((j for j, c in enumerate(hdr) if c == '学科分数线'), 0)
     # 列 -> 层名（只收能映射到系统层的列；「未上线」是兜底文本，不导入）
     lay_cols = []
     for j, c in enumerate(hdr):
-        if c == '学科分数线' or not c:
+        if j <= i_lab or not c:
             continue
         if c in LAYER_MAP:
             lay, keep = LAYER_MAP[c]
@@ -138,10 +141,10 @@ def read_custom_params(path):
         return [], ''
     out = []
     for cells in rows[hi + 1:]:
-        if not cells or not cells[0]:
+        if not cells or i_lab >= len(cells) or not cells[i_lab]:
             continue
-        lab = cells[0]
-        if lab in ('目标设定', '班级分类') or '目标' in lab:
+        lab = cells[i_lab]
+        if '目标' in lab or lab in ('班级分类', '合计'):
             break                                  # 离开分数线区
         if lab == TOTAL_SUBJECT or '总分' in lab:
             subj = TOTAL_SUBJECT
@@ -255,11 +258,23 @@ def main():
             n_exam += 1
             n_band += len(keep)
             if args.apply:
-                # 只清掉本次要写入的层，保留其它层；划线数据只属于本场考试
-                ExamBand.query.filter(ExamBand.exam_id == ex.id,
-                                      ExamBand.name.in_([r['layer'] for r in keep])).delete()
+                # 按「考试 × 方向 × 科目」整体覆盖：避免与用户手工划线已占的 seq 撞
+                # UNIQUE(exam_id,direction,subject,seq)；不涉及其他方向/科目的已有线。
+                cells = {(r['direction'] or '', r['subject']) for r in keep}
+                for dd, ss in cells:
+                    ExamBand.query.filter_by(exam_id=ex.id, direction=dd,
+                                             subject=ss).delete()
                 db.session.flush()
-                for r in keep:
+                # 同一 (direction, subject, seq) 只保留一条（防历史/物理两文件归一时重复）
+                seen_cell = set()
+                rows_ins = []
+                for r in sorted(keep, key=lambda x: CANON_SEQ.get(x['layer'], 9)):
+                    key = (r['direction'] or '', r['subject'], CANON_SEQ.get(r['layer'], 9))
+                    if key in seen_cell:
+                        continue
+                    seen_cell.add(key)
+                    rows_ins.append(r)
+                for r in rows_ins:
                     db.session.add(ExamBand(
                         exam_id=ex.id, direction=r['direction'] or '',
                         subject=r['subject'], seq=CANON_SEQ.get(r['layer'], 9),
