@@ -126,6 +126,26 @@
                     {% endfor %}
                 </select>
             </div>
+            {# 2026-10-10：按来源 / 某次表单收集筛选 #}
+            <div class="col-auto">
+                <select name="source" class="form-select form-select-sm" style="width:140px">
+                    <option value="">全部来源</option>
+                    {% for k, label in sources.items() %}
+                    <option value="{{ k }}" {% if f_source == k %}selected{% endif %}>{{ label }}</option>
+                    {% endfor %}
+                    <option value="unknown" {% if f_source == 'unknown' %}selected{% endif %}>历史数据（未标注）</option>
+                </select>
+            </div>
+            {% if ach_rounds %}
+            <div class="col-auto">
+                <select name="round" class="form-select form-select-sm" style="width:220px">
+                    <option value="">全部收集轮次</option>
+                    {% for r in ach_rounds %}
+                    <option value="{{ r.id }}" {% if f_round == r.id %}selected{% endif %}>{{ r.label() }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            {% endif %}
             <div class="col-auto">
                 <button class="btn btn-sm btn-primary"><i class="bi bi-funnel"></i> 筛选</button>
                 <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('academic.achievements_page') }}">重置</a>
@@ -164,6 +184,14 @@
                         </div>
                         {% endif %}
                         {% if a.note %}<div class="text-muted small">{{ a.note }}</div>{% endif %}
+                        {% if a.source_type == 'form' and a.source_label %}
+                        <div class="mt-1">
+                            <span class="badge bg-light text-dark border" style="font-size:10px"
+                                  title="来自表单收集，审核通过后自动入账">
+                                <i class="bi bi-ui-checks-grid"></i> {{ a.source_label }}
+                            </span>
+                        </div>
+                        {% endif %}
                     </td>
                     <td>{{ a.level or '-' }}</td>
                     <td>{{ a.obtain_date.strftime('%Y-%m-%d') if a.obtain_date else '-' }}</td>
@@ -186,6 +214,13 @@
                                 data-id="{{ a.id }}" title="查看详情">
                             <i class="bi bi-eye"></i>
                         </button>
+                        {% if can_edit %}
+                        {# 2026-10-10：编辑业绩（此前录错只能删了重录）#}
+                        <button type="button" class="btn btn-sm btn-outline-secondary py-0 btn-ach-edit"
+                                data-id="{{ a.id }}" title="编辑">
+                            <i class="bi bi-pencil"></i>
+                        </button>
+                        {% endif %}
                         {% if a.status == 'pending' and can_edit %}
                         <button type="button" class="btn btn-sm btn-outline-success py-0" title="通过"
                                 data-bs-toggle="modal" data-bs-target="#reviewModal"
@@ -201,12 +236,11 @@
                         </button>
                         {% endif %}
                         {% if can_edit %}
-                        <form method="POST" style="display:inline"
-                              action="{{ url_for('academic.achievements_delete', aid=a.id) }}"
-                              onsubmit="return confirm('确定删除这条业绩记录？')">
-                            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                            <button class="btn btn-sm btn-outline-danger" title="删除"><i class="bi bi-trash"></i></button>
-                        </form>
+                        {# 2026-10-10：删除改走页面底部单一隐藏表单（原每行一个 form+csrf，改为 data-url 按钮） #}
+                        <button type="button" class="btn btn-sm btn-outline-danger js-ach-del"
+                                title="删除" data-url="{{ url_for('academic.achievements_delete', aid=a.id) }}">
+                            <i class="bi bi-trash"></i>
+                        </button>
                         {% endif %}
                     </td>
                 </tr>
@@ -223,24 +257,31 @@
         <span class="text-muted small">第 {{ pagination.page }} / {{ pagination.pages }} 页 · 共 {{ pagination.total }} 条</span>
         <ul class="pagination pagination-sm mb-0">
             <li class="page-item {{ 'disabled' if not pagination.has_prev }}">
-                <a class="page-link" href="{{ url_for('academic.achievements_page', page=pagination.prev_num, teacher_uid=f_teacher, category=f_category, status=f_status, year=f_year, tag=f_tag) }}">上一页</a>
+                <a class="page-link" href="{{ url_for('academic.achievements_page', page=pagination.prev_num, teacher_uid=f_teacher, category=f_category, status=f_status, year=f_year, tag=f_tag, source=f_source, round=f_round) }}">上一页</a>
             </li>
             {% for p in pagination.iter_pages(left_edge=1, right_edge=1, left_current=2, right_current=2) %}
                 {% if p %}
                 <li class="page-item {{ 'active' if p == pagination.page }}">
-                    <a class="page-link" href="{{ url_for('academic.achievements_page', page=p, teacher_uid=f_teacher, category=f_category, status=f_status, year=f_year, tag=f_tag) }}">{{ p }}</a>
+                    <a class="page-link" href="{{ url_for('academic.achievements_page', page=p, teacher_uid=f_teacher, category=f_category, status=f_status, year=f_year, tag=f_tag, source=f_source, round=f_round) }}">{{ p }}</a>
                 </li>
                 {% else %}
                 <li class="page-item disabled"><span class="page-link">…</span></li>
                 {% endif %}
             {% endfor %}
             <li class="page-item {{ 'disabled' if not pagination.has_next }}">
-                <a class="page-link" href="{{ url_for('academic.achievements_page', page=pagination.next_num, teacher_uid=f_teacher, category=f_category, status=f_status, year=f_year, tag=f_tag) }}">下一页</a>
+                <a class="page-link" href="{{ url_for('academic.achievements_page', page=pagination.next_num, teacher_uid=f_teacher, category=f_category, status=f_status, year=f_year, tag=f_tag, source=f_source, round=f_round) }}">下一页</a>
             </li>
         </ul>
     </div>
     {% endif %}
 </div>
+
+{# 2026-10-10：列表行「删除」共用的隐藏表单（action 由 .js-ach-del 的 data-url 动态设置） #}
+{% if can_edit %}
+<form method="POST" id="achDeleteForm" class="d-none">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+</form>
+{% endif %}
 
 {# ===== 审核模态框（可填审核意见；驳回必填） ===== #}
 {% if can_edit %}
@@ -274,27 +315,7 @@
         </div>
     </div>
 </div>
-<script>
-document.addEventListener('DOMContentLoaded', function () {
-    var tpl = {{ url_for('academic.achievements_review', aid=0)|tojson }};
-    document.querySelectorAll('[data-bs-target="#reviewModal"]').forEach(function (btn) {
-        btn.addEventListener('click', function () {
-            var d = this.dataset;
-            var isReject = d.action === 'reject';
-            document.getElementById('reviewForm').action = tpl.replace(/\/\d+\/review$/, '/' + d.id + '/review');
-            document.getElementById('rvAction').value = d.action || 'approve';
-            document.getElementById('rvTitle').textContent = isReject ? '驳回业绩' : '通过业绩';
-            document.getElementById('rvTeacher').textContent = d.teacher || '';
-            document.getElementById('rvAch').textContent = d.title || '';
-            document.getElementById('rvNote').value = '';
-            document.getElementById('rvNote').required = isReject;
-            document.getElementById('rvReq').style.visibility = isReject ? 'visible' : 'hidden';
-            document.getElementById('rvSubmit').className =
-                'btn btn-sm ' + (isReject ? 'btn-warning' : 'btn-success');
-        });
-    });
-});
-</script>
+{# 2026-10-10：审核弹窗脚本已迁至 static/js/academic_achievements.js（缓存复用） #}
 {% endif %}
 
 <div class="modal fade" id="addModal" tabindex="-1">
@@ -304,7 +325,8 @@ document.addEventListener('DOMContentLoaded', function () {
                 <h5 class="modal-title"><i class="bi bi-award"></i> 录入教师业绩</h5>
                 <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
             </div>
-            <form method="POST" action="{{ url_for('academic.achievements_add') }}">
+            <form method="POST" action="{{ url_for('academic.achievements_add') }}"
+                  enctype="multipart/form-data" id="addAchForm">
                 <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                 <div class="modal-body">
                     <div class="mb-3">
@@ -319,7 +341,7 @@ document.addEventListener('DOMContentLoaded', function () {
                     <div class="row">
                         <div class="col-6 mb-3">
                             <label class="form-label">类别 <span class="text-danger">*</span></label>
-                            <select name="category" class="form-select" required>
+                            <select name="category" id="addCategory" class="form-select" required>
                                 {% for k, label in categories %}
                                 <option value="{{ k }}">{{ label }}</option>
                                 {% endfor %}
@@ -327,7 +349,7 @@ document.addEventListener('DOMContentLoaded', function () {
                         </div>
                         <div class="col-6 mb-3">
                             <label class="form-label">级别</label>
-                            <select name="level" class="form-select">
+                            <select name="level" id="addLevel" class="form-select">
                                 <option value="">--</option>
                                 {% for lv in levels %}
                                 <option value="{{ lv }}">{{ lv }}</option>
@@ -335,6 +357,8 @@ document.addEventListener('DOMContentLoaded', function () {
                             </select>
                         </div>
                     </div>
+                    {# 2026-10-09：按类别动态显示的字段（课题编号/立项结题/期刊刊号/学时…）#}
+                    <div class="row" id="dynFields"></div>
                     <div class="mb-3">
                         <label class="form-label">名称 <span class="text-danger">*</span></label>
                         <input name="title" class="form-control" maxlength="100" required>
@@ -368,10 +392,23 @@ document.addEventListener('DOMContentLoaded', function () {
                         </div>
                     </div>
                     <div class="mb-3">
+                        <label class="form-label">附件材料
+                            <span class="text-muted small">（统一 PDF，可多选）</span>
+                        </label>
+                        <div class="d-flex gap-2 flex-wrap align-items-center">
+                            <select name="doc_type" id="addDocType" class="form-select form-select-sm" style="width:auto"></select>
+                            <input type="file" name="files" id="addFiles" multiple accept=".pdf"
+                                   class="form-control form-control-sm" style="width:auto;max-width:280px">
+                        </div>
+                        <div class="form-text">
+                            扫描件 / 立项通知书 / 中期材料 / 结题证书等先转成 PDF 再传，单个 ≤10MB；
+                            录入后还能在列表点「附件」继续补充其它材料。
+                        </div>
+                    </div>
+                    <div class="mb-3">
                         <label class="form-label">备注</label>
                         <input name="note" class="form-control" maxlength="200">
                     </div>
-                    <div class="form-text">录入后可在列表点「附件」按钮上传证书扫描件/照片/PDF（图片与 PDF 可直接预览）。</div>
                     <div class="form-text">教务录入的业绩直接生效；教师工作台提交的业绩需在此页审核。</div>
                 </div>
                 <div class="modal-footer">
@@ -398,6 +435,8 @@ document.addEventListener('DOMContentLoaded', function () {
                 </div>
                 <div id="adBody" class="d-none">
                     <dl class="row small mb-3" id="adInfo"></dl>
+                    {# 2026-10-10：来源=表单收集时，这里直接看该次提交的答案与附件原件 #}
+                    <div id="adSubmission" class="mb-3"></div>
 
                     <div class="mb-3">
                         <label class="form-label small mb-1"><i class="bi bi-bookmark-star"></i> 标签</label>
@@ -418,9 +457,10 @@ document.addEventListener('DOMContentLoaded', function () {
                             <span class="text-muted" id="adAttCount"></span></span>
                         {% if can_edit %}
                         <div class="d-flex gap-2 align-items-center">
+                            {# 2026-10-09：附件统一 PDF，并可选"材料分类"（立项/中期/结题…）#}
+                            <select id="adDocType" class="form-select form-select-sm" style="width:auto"></select>
                             <input type="file" id="adFiles" multiple class="form-control form-control-sm"
-                                   style="width:auto;max-width:280px"
-                                   accept=".pdf,.jpg,.jpeg,.png,.gif,.bmp,.webp,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.zip">
+                                   style="width:auto;max-width:280px" accept=".pdf">
                             <button class="btn btn-sm btn-primary text-nowrap" id="adUpload">
                                 <i class="bi bi-upload"></i> 上传
                             </button>
@@ -434,172 +474,98 @@ document.addEventListener('DOMContentLoaded', function () {
             </div>
             <div class="modal-footer py-2">
                 <span class="text-muted small me-auto" id="adHint"></span>
+                {% if can_edit %}
+                {# 2026-10-10：详情抽屉里也能直接进编辑（data-id 由 renderDetail 回填）#}
+                <button type="button" class="btn btn-sm btn-outline-secondary btn-ach-edit" id="adEditBtn"
+                        title="编辑"><i class="bi bi-pencil"></i> 编辑</button>
+                {% endif %}
                 <button type="button" class="btn btn-sm btn-secondary" data-bs-dismiss="modal">关闭</button>
             </div>
         </div>
     </div>
 </div>
 
-<script>
-(function () {
-    var CAN_EDIT = {{ 'true' if can_edit else 'false' }};
-    var DETAIL_TPL = {{ url_for('academic.achievement_detail', aid=0)|tojson }};
-    var TAGS_TPL = {{ url_for('academic.achievement_set_tags', aid=0)|tojson }};
-    var UP_TPL = {{ url_for('academic.achievement_attachment_upload', aid=0)|tojson }};
-    var DEL_TPL = {{ url_for('academic.achievement_attachment_delete', fid=0)|tojson }};
-    var VIEW_TPL = {{ url_for('academic.achievement_file_view', fid=0)|tojson }};
-    var DL_TPL = {{ url_for('academic.achievement_file_download', fid=0)|tojson }};
-    var modalEl = document.getElementById('achDetailModal');
-    if (!modalEl) { return; }
-    var modal = new bootstrap.Modal(modalEl);
-    var csrf = (typeof csrfToken !== 'undefined') ? csrfToken : '';
+{# 2026-10-10：编辑业绩（此前只能新增/删除，录错就得删了重录 + 重传附件）#}
+<div class="modal fade" id="editModal" tabindex="-1">
+    <div class="modal-dialog modal-dialog-centered">
+        <form method="POST" id="editForm" action="">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <div class="modal-content">
+                <div class="modal-header py-2">
+                    <h6 class="modal-title">编辑业绩
+                        <span class="text-muted small" id="editTeacher"></span></h6>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="row g-2">
+                        <div class="col-6">
+                            <label class="form-label small mb-1">类别</label>
+                            <select name="category" id="editCategory" class="form-select form-select-sm"></select>
+                        </div>
+                        <div class="col-6">
+                            <label class="form-label small mb-1">级别</label>
+                            <select name="level" id="editLevel" class="form-select form-select-sm"></select>
+                        </div>
+                        <div class="col-12">
+                            <label class="form-label small mb-1">名称 <span class="text-danger">*</span></label>
+                            <input name="title" id="editTitle" class="form-control form-control-sm"
+                                   maxlength="200" required>
+                        </div>
+                        <div class="col-6">
+                            <label class="form-label small mb-1">获得时间</label>
+                            <input type="date" name="obtain_date" id="editObtain"
+                                   class="form-control form-control-sm">
+                        </div>
+                        <div class="col-6">
+                            <label class="form-label small mb-1">授予 / 批准单位</label>
+                            <input name="issuer" id="editIssuer" class="form-control form-control-sm"
+                                   maxlength="100">
+                        </div>
+                    </div>
+                    {# 按类别动态出现的字段（课题编号 / 立项结题 / 期刊刊号 / 学时…）#}
+                    <div class="row" id="editFields"></div>
+                    <div class="mt-2">
+                        <label class="form-label small mb-1">标签（逗号分隔）</label>
+                        <input name="tags" id="editTags" class="form-control form-control-sm">
+                    </div>
+                    <div class="mt-2">
+                        <label class="form-label small mb-1">备注</label>
+                        <input name="note" id="editNote" class="form-control form-control-sm"
+                               maxlength="200">
+                    </div>
+                    <div class="form-text">附件请在列表点「附件」按钮单独管理（统一 PDF，可补充 / 删除）。</div>
+                </div>
+                <div class="modal-footer py-2">
+                    <button type="button" class="btn btn-sm btn-light" data-bs-dismiss="modal">取消</button>
+                    <button type="submit" class="btn btn-sm btn-primary">
+                        <i class="bi bi-check-lg"></i> 保存
+                    </button>
+                </div>
+            </div>
+        </form>
+    </div>
+</div>
+{% endblock %}
 
-    function withId(tpl, id) { return tpl.replace(/\/0(?=\/|$)/, '/' + id); }
-    function esc(s) {
-        return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;')
-            .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
-    }
-    function currentId() { return modalEl.dataset.aid; }
-
-    function attHtml(a) {
-        var v = withId(VIEW_TPL, a.id), d = withId(DL_TPL, a.id);
-        var head = a.is_image
-            ? '<img src="' + v + '" class="img-fluid rounded w-100" style="height:96px;object-fit:cover" alt="">'
-            : '<div class="text-center" style="font-size:30px;padding:22px 0">'
-              + (a.ext === 'pdf' ? '<i class="bi bi-file-earmark-pdf text-danger"></i>'
-                                 : '<i class="bi bi-file-earmark-text text-secondary"></i>') + '</div>';
-        return '<div class="col-6 col-md-3"><div class="border rounded p-1 h-100 d-flex flex-column">'
-            + head
-            + '<div class="small text-truncate mt-1" title="' + esc(a.file_name) + '">' + esc(a.file_name) + '</div>'
-            + '<div class="text-muted" style="font-size:10px">' + esc(a.size_text)
-            + (a.uploaded_name ? ' · ' + esc(a.uploaded_name) : '') + '</div>'
-            + '<div class="d-flex gap-1 mt-auto pt-1">'
-            + (a.previewable ? '<a class="btn btn-sm btn-outline-primary py-0 flex-fill" target="_blank" href="' + v + '">预览</a>' : '')
-            + '<a class="btn btn-sm btn-outline-secondary py-0 flex-fill" href="' + d + '">下载</a>'
-            + (CAN_EDIT ? '<button type="button" class="btn btn-sm btn-outline-danger py-0 ad-del" data-id="' + a.id + '">×</button>' : '')
-            + '</div></div></div>';
-    }
-
-    function renderAtts(list) {
-        document.getElementById('adAttCount').textContent = list.length ? '（' + list.length + '）' : '（暂无）';
-        var box = document.getElementById('adAttach');
-        box.innerHTML = list.length ? list.map(attHtml).join('')
-            : '<div class="col-12 text-muted small py-2">还没有附件'
-              + (CAN_EDIT ? '，可上传证书扫描件、获奖照片或 PDF 材料' : '') + '</div>';
-    }
-
-    function renderDetail(d) {
-        modalEl.dataset.aid = d.id;
-        document.getElementById('adSub').textContent = d.teacher_name + ' · ' + d.title;
-        var rows = [
-            ['教师', esc(d.teacher_name) + (d.teacher_uid ? '（' + esc(d.teacher_uid) + '）' : '')],
-            ['类别 / 级别', esc(d.category_text) + (d.level ? ' · ' + esc(d.level) : '')],
-            ['取得时间', esc(d.obtain_date) || '-'],
-            ['颁发单位', esc(d.issuer) || '-'],
-            ['状态', esc(d.status_text) + (d.review_note ? '（' + esc(d.review_note) + '）' : '')],
-            ['备注', esc(d.note) || '-'],
-        ];
-        document.getElementById('adInfo').innerHTML = rows.map(function (r) {
-            return '<dt class="col-3 text-muted">' + r[0] + '</dt><dd class="col-9">' + r[1] + '</dd>';
-        }).join('');
-        document.getElementById('adTags').value = (d.tags || []).join(',');
-        var preset = document.getElementById('adTagPresets');
-        if (preset && !preset.dataset.filled) {
-            (d.tag_presets || []).forEach(function (t) {
-                var o = document.createElement('option'); o.value = t; preset.appendChild(o);
-            });
-            preset.dataset.filled = '1';
-        }
-        renderAtts(d.attachments || []);
-    }
-
-    function loadDetail(id) {
-        document.getElementById('adLoading').classList.remove('d-none');
-        document.getElementById('adBody').classList.add('d-none');
-        document.getElementById('adHint').textContent = '';
-        fetch(withId(DETAIL_TPL, id)).then(function (r) { return r.json(); }).then(function (res) {
-            document.getElementById('adLoading').classList.add('d-none');
-            if (!res || !res.success) { alert((res && res.message) || '加载失败'); return; }
-            renderDetail(res.data);
-            document.getElementById('adBody').classList.remove('d-none');
-        }).catch(function () {
-            document.getElementById('adLoading').classList.add('d-none');
-            alert('网络错误，加载失败');
-        });
-    }
-
-    document.querySelectorAll('.btn-ach-detail').forEach(function (btn) {
-        btn.addEventListener('click', function () {
-            loadDetail(this.dataset.id);
-            modal.show();
-        });
-    });
-
-    var saveTagsBtn = document.getElementById('adSaveTags');
-    if (saveTagsBtn) {
-        saveTagsBtn.addEventListener('click', function () {
-            var id = currentId();
-            var fd = new FormData();
-            fd.append('tags', document.getElementById('adTags').value);
-            fetch(withId(TAGS_TPL, id), {method: 'POST', headers: {'X-CSRFToken': csrf}, body: fd})
-                .then(function (r) { return r.json(); }).then(function (res) {
-                    document.getElementById('adHint').textContent = (res && res.message) || '';
-                    if (res && res.success) { setTimeout(function () { window.location.reload(); }, 600); }
-                });
-        });
-    }
-
-    var upBtn = document.getElementById('adUpload');
-    if (upBtn) {
-        upBtn.addEventListener('click', function () {
-            var files = document.getElementById('adFiles').files;
-            if (!files || !files.length) { alert('请先选择文件'); return; }
-            var fd = new FormData();
-            for (var i = 0; i < files.length; i++) { fd.append('files', files[i]); }
-            upBtn.disabled = true;
-            fetch(withId(UP_TPL, currentId()), {method: 'POST', headers: {'X-CSRFToken': csrf}, body: fd})
-                .then(function (r) { return r.json(); }).then(function (res) {
-                    upBtn.disabled = false;
-                    document.getElementById('adFiles').value = '';
-                    if (!res) { alert('上传失败'); return; }
-                    document.getElementById('adHint').textContent = res.message || '';
-                    if (res.errors && res.errors.length) { alert(res.errors.join('\n')); }
-                    if (res.attachments) { renderAtts(res.attachments); }
-                    if (res.uploaded) { window.__achChanged = true; }
-                }).catch(function () { upBtn.disabled = false; alert('网络错误，上传失败'); });
-        });
-    }
-
-    document.getElementById('adAttach').addEventListener('click', function (ev) {
-        var btn = ev.target.closest('.ad-del');
-        if (!btn) { return; }
-        if (!confirm('删除这个附件？文件会一并删除。')) { return; }
-        fetch(withId(DEL_TPL, btn.dataset.id), {method: 'POST', headers: {'X-CSRFToken': csrf}})
-            .then(function (r) { return r.json(); }).then(function (res) {
-                if (res && res.success) {
-                    window.__achChanged = true;
-                    loadDetail(currentId());
-                } else { alert((res && res.message) || '删除失败'); }
-            });
-    });
-
-    modalEl.addEventListener('hidden.bs.modal', function () {
-        if (window.__achChanged) { window.location.reload(); }
-    });
-})();
-
-// 录入表单：点常用标签快速追加
-document.addEventListener('DOMContentLoaded', function () {
-    var quick = document.getElementById('quickTags');
-    if (!quick) { return; }
-    quick.addEventListener('click', function (ev) {
-        var tag = ev.target.dataset && ev.target.dataset.tag;
-        if (!tag) { return; }
-        var input = quick.closest('form').querySelector('input[name="tags"]');
-        var cur = (input.value || '').split(/[,，\s]+/).filter(Boolean);
-        if (cur.indexOf(tag) < 0) { cur.push(tag); }
-        input.value = cur.join(',');
-    });
-});
+{% block extra_js %}
+{# 2026-10-10 性能优化：页面脚本抽到 static/js/academic_achievements.js（可缓存），
+   运行时数据（模板 URL / 字段映射 / 材料分类）改由本 JSON 块注入。
+   注：必须留在 extra_js（在 base.html 的 jQuery/bootstrap 之后），否则 $ / bootstrap 未定义。 #}
+<script id="achievementData" type="application/json">
+{
+    "canEdit": {{ can_edit|tojson }},
+    "reviewTpl": {{ url_for('academic.achievements_review', aid=0)|tojson }},
+    "detailTpl": {{ url_for('academic.achievement_detail', aid=0)|tojson }},
+    "detailUrl": {{ url_for('academic.achievement_detail', aid=0)|tojson }},
+    "editUrl": {{ url_for('academic.achievements_edit', aid=0)|tojson }},
+    "tagsTpl": {{ url_for('academic.achievement_set_tags', aid=0)|tojson }},
+    "upTpl": {{ url_for('academic.achievement_attachment_upload', aid=0)|tojson }},
+    "delTpl": {{ url_for('academic.achievement_attachment_delete', fid=0)|tojson }},
+    "viewTpl": {{ url_for('academic.achievement_file_view', fid=0)|tojson }},
+    "dlTpl": {{ url_for('academic.achievement_file_download', fid=0)|tojson }},
+    "fieldsMap": {{ fields_map|tojson }},
+    "docTypes": {{ doc_types|tojson }}
+}
 </script>
+<script src="{{ su('js/academic_achievements.js') }}"></script>
 {% endblock %}

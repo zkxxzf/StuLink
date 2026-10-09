@@ -130,6 +130,7 @@ PERMISSION_GROUPS = [
             # v1.9.2 合并：master 新增选科维护页权限 + first 学术/画像/工作台权限（取并集）
             'grades.subject_mgmt',
             'academic.view', 'academic.timetable', 'academic.swap',
+            'academic.swap_approve',
             'academic.inspection_export', 'academic.forms', 'academic.forms_view',
             'portrait.view', 'portrait.edit',
             'workbench.records', 'workbench.class_view',
@@ -156,6 +157,8 @@ PERMISSION_GROUPS = [
             'portrait.view', 'portrait.edit',
             'points.import', 'points.rules',
             'academic.view', 'academic.forms_view',
+            # v1.18.8.0：年级长是调课审批第一级（审本年级教师提交的调课）
+            'academic.swap_approve',
             # v1.17.0：年级长按年级只读工作台（班级概览/考勤查看）
             'workbench.class_view', 'workbench.attendance_view',
             'workbench.notifications_view',
@@ -360,8 +363,7 @@ def create_app():
     from app.models.grades import (Exam, ExamScore, ExamBand, BandTemplate,
                                    TeacherSubjectLink, AiKey,
                                    AiGlobalKey, AiReport, AiChatMessage, Certificate)
-    from app.models.academic import (Teacher, Timetable, TimetableEntry,
-                                     InspectionRecord, TeacherAchievement,
+    from app.models.academic import (Teacher, InspectionRecord, TeacherAchievement,
                                      FormCategory, FormTemplate, FormQuestion,
                                      FormSubmission, FormAnswer)
     from app.models.portrait import StudentPortrait, PortraitComment, PortraitEvent  # noqa: F401
@@ -371,8 +373,11 @@ def create_app():
         # v1.15.0 模块故障隔离：逐库建表，单个模块库异常不阻塞系统启动。
         # system 为根基库最先建；其他模块库失败仅告警（对应模块暂不可用），
         # 系统管理与基础数据不受影响。
+        # 2026-10-10：教务分库后新增 inspection / achievement / forms 三个模块库
+        # （漏在此列表里会让新库的表建不出来 —— 页面报 no such table）
         for _bind in (None, 'dormitory', 'history', 'grades', 'points',
-                      'academic', 'portrait', 'system', 'timetable'):
+                      'academic', 'inspection', 'achievement', 'forms',
+                      'portrait', 'system', 'timetable'):
             try:
                 db.create_all(bind_key=_bind)
             except Exception as _e:  # noqa: BLE001

@@ -23,6 +23,12 @@ config_mod.Config.SQLALCHEMY_BINDS = {
     'grades': 'sqlite:///' + os.path.join(_TMP, 'grades.db'),
     'points': 'sqlite:///' + os.path.join(_TMP, 'points.db'),
     'academic': 'sqlite:///' + os.path.join(_TMP, 'academic.db'),
+    # 2026-10-10：教务分库——查课 / 业绩 / 表单 各自独立库
+    'inspection': 'sqlite:///' + os.path.join(_TMP, 'inspection.db'),
+    'achievement': 'sqlite:///' + os.path.join(_TMP, 'achievement.db'),
+    'forms': 'sqlite:///' + os.path.join(_TMP, 'forms.db'),
+    # 2026-10-10：补 system 绑定 —— 启动建表会遍历 'system'，缺它会有 WARN 噪音
+    'system': 'sqlite:///' + os.path.join(_TMP, 'system.db'),
     'portrait': 'sqlite:///' + os.path.join(_TMP, 'portrait.db'),
 }
 # config._get_secret_key 基于 BASE_DIR 读取密钥文件，临时目录下会自动生成

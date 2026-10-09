@@ -5,7 +5,7 @@
     <h4 class="fw-bold mb-0"><i class="bi bi-clipboard2-check"></i> 查课统计</h4>
     <div class="d-flex gap-2 flex-wrap">
         <a class="btn btn-sm btn-primary" href="{{ url_for('academic.inspection_live_schedule') }}">
-            <i class="bi bi-broadcast"></i> 查看当天课表
+            <i class="bi bi-broadcast"></i> 查课核对（点格子标记）
         </a>
         <button class="btn btn-sm btn-outline-primary" data-bs-toggle="collapse" data-bs-target="#chartArea">
             <i class="bi bi-bar-chart"></i> 图表
@@ -47,6 +47,26 @@
             <div class="text-muted small">正常率</div>
         </div></div>
     </div>
+    {# ===== 查课进度与覆盖率（2026-10-09 新增：由统计接口填充）===== #}
+    <div class="col-6 col-md-3">
+        <div class="card text-center"><div class="card-body py-2">
+            <div class="fw-bold fs-5"><span id="statTodayChecked">-</span><span
+                    class="text-muted fs-6"> / <span id="statTodayExpected">-</span></span></div>
+            <div class="text-muted small">今日已标 / 应查（有课格子）</div>
+        </div></div>
+    </div>
+    <div class="col-6 col-md-3">
+        <div class="card text-center"><div class="card-body py-2">
+            <div class="fw-bold fs-5 text-info" id="statTodayRate">-</div>
+            <div class="text-muted small">今日覆盖率</div>
+        </div></div>
+    </div>
+    <div class="col-6 col-md-3" title="应查按周课表估算（不区分单双周）">
+        <div class="card text-center"><div class="card-body py-2">
+            <div class="fw-bold fs-5 text-info" id="statMonthRate">-</div>
+            <div class="text-muted small">本月覆盖率</div>
+        </div></div>
+    </div>
     {% if month_total %}
     <div class="col-12 col-md-6">
         <div class="card"><div class="card-body py-2 small">
@@ -81,6 +101,27 @@
                 <div class="card-body p-2">
                     <div id="chartLine" style="height:280px"></div>
                 </div>
+            </div>
+        </div>
+    </div>
+    {# ===== 2026-10-09 新增：班级 / 节次 / 检查人 三个维度 ===== #}
+    <div class="row g-3 mb-3">
+        <div class="col-md-5">
+            <div class="card">
+                <div class="card-header py-2"><i class="bi bi-bar-chart"></i> 异常最多的班级（Top10）</div>
+                <div class="card-body p-2"><div id="chartClass" style="height:280px"></div></div>
+            </div>
+        </div>
+        <div class="col-md-3">
+            <div class="card">
+                <div class="card-header py-2"><i class="bi bi-clock-history"></i> 各节次已查 / 异常</div>
+                <div class="card-body p-2"><div id="chartPeriod" style="height:280px"></div></div>
+            </div>
+        </div>
+        <div class="col-md-4">
+            <div class="card">
+                <div class="card-header py-2"><i class="bi bi-person-check"></i> 检查人工作量（谁在查）</div>
+                <div class="card-body p-2"><div id="tableInspector" class="small text-muted">加载中…</div></div>
             </div>
         </div>
     </div>
@@ -230,12 +271,11 @@
                                 data-subject="{{ r.subject or '' }}" data-period="{{ r.period or '' }}"
                                 data-note="{{ r.note or '' }}"><i class="bi bi-pencil"></i></button>
                         {% endif %}
-                        <form method="POST" style="display:inline"
-                              action="{{ url_for('academic.inspection_delete', rid=r.id) }}"
-                              onsubmit="return confirm('确定删除这条查课记录？')">
-                            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                            <button class="btn btn-sm btn-outline-danger"><i class="bi bi-trash"></i></button>
-                        </form>
+                        {# 2026-10-10：删除改走页面底部单一隐藏表单（原每行一个 form+csrf，改为 data-url 按钮） #}
+                        <button type="button" class="btn btn-sm btn-outline-danger js-insp-del"
+                                title="删除" data-url="{{ url_for('academic.inspection_delete', rid=r.id) }}">
+                            <i class="bi bi-trash"></i>
+                        </button>
                     </td>
                 </tr>
                 {% else %}
@@ -389,11 +429,17 @@ document.addEventListener('DOMContentLoaded', function () {
     </div>
 </div>
 
+{# 2026-10-10：列表行「删除」共用的隐藏表单（action 由 .js-insp-del 的 data-url 动态设置） #}
+<form method="POST" id="inspDeleteForm" class="d-none">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+</form>
+
 {# 模板变量供 JS 使用 #}
 <script id="inspectionData" type="application/json">
 {
     "statsUrl": {{ url_for('academic.inspection_stats')|tojson }},
-    "teachers": [{% for t in teachers %}{"uid":{{ t.teacher_uid|tojson }},"name":{{ t.name|tojson }}}{% if not loop.last %},{% endif %}{% endfor %}],
+    {# 2026-10-10：教师表改紧凑二元组 [uid,name]，省去每项 ~14 字节的键名（inspection.js 同步读取） #}
+    "teachers": [{% for t in teachers %}[{{ t.teacher_uid|tojson }},{{ t.name|tojson }}]{% if not loop.last %},{% endif %}{% endfor %}],
     "grades": [{% for g in grade_opts %}{{ g|tojson }}{% if not loop.last %},{% endif %}{% endfor %}],
     "results": [{% for k, label in results %}{"key":{{ k|tojson }},"label":{{ label|tojson }}}{% if not loop.last %},{% endif %}{% endfor %}]
 }

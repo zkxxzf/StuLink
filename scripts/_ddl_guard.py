@@ -24,6 +24,14 @@ ALLOWED_TABLES = {
     'term_schedules', 'graduated_students', 'classes',
     'schedule_entries',   # 走班教学班列迁移（migrate_teaching_class.py）
     'teacher_achievements',   # 业绩标签列迁移（migrate_achievement_tags_files.py）
+    'schedule_swaps',     # 调课分级审批 + 调休列迁移（migrate_swap_approval_20261009.py）
+    'class_profiles',     # 班级启用标记迁移（migrate_class_active_20261009.py）
+    'achievement_attachments',  # 业绩附件分类列迁移（migrate_achievement_pdf_20261009.py）
+    'form_rounds',          # 表单收集轮次（migrate_form_achievement_20261010.py）
+    'form_templates',       # 表单→业绩映射列迁移（同上）
+    'form_submissions',     # 提交归属轮次列迁移（同上）
+    'timetables',           # 旧版课表下线删表（migrate_drop_legacy_timetable_20261010.py）
+    'timetable_entries',    # 旧课表明细删表（同上）
 }
 
 

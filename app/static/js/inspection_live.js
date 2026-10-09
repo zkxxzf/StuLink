@@ -1,176 +1,183 @@
-/* ============================================================
- * 实时课表 · 查课核对（v1.16.0）
- * 节次切换 / 日期年级切换 / AJAX 局部刷新 / 当前节次高亮 / 实时时钟 / 打印
- * 依赖 jQuery（在 {% block extra_js %} 中加载，jQuery 已就绪）
- * ============================================================ */
+/* StuLink v1.18.8.0 · 查课核对页（2026-10-09 改版）
+ * 页面版式：与全校总课表同款矩阵 —— 行＝班级、列＝节次，一天所有节次一次铺开。
+ * 交互：点格子弹出标记面板（正常/迟到/缺课/调课/其他 + 备注）→
+ *       POST /inspection/mark 写回 inspection_records，就地更新徽标与"覆盖率"。
+ *       支持"未标记的全部正常"一键巡课；筛选（日期/年级）走服务端渲染整页刷新。
+ */
 (function () {
     'use strict';
+    var cfg = {};
+    try { cfg = JSON.parse(document.getElementById('liveData').textContent || '{}'); } catch (e) { cfg = {}; }
+    var $ = window.jQuery;
+    if (!$) { return; }
 
-    var cfg = null;
-    var periods = [];          // [{number,name,start,end}]
-    var timerClock = null;
-    var timerNow = null;
-    var loading = false;
+    var RESULT_TEXT = { normal: '正常', late: '迟到', absent: '缺课', swap: '调课', other: '其他' };
 
-    /* ---------- 工具 ---------- */
-    function esc(s) {
-        if (s === null || s === undefined) { return ''; }
-        return String(s).replace(/[&<>"']/g, function (c) {
-            return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
-        });
+    function notify(msg, type) {
+        if (typeof window.toast === 'function') { window.toast(msg, type || 'success'); }
+        else { window.alert(msg); }
     }
+
+    /* ── 时钟 ── */
     function pad(n) { return (n < 10 ? '0' : '') + n; }
-    function hhmm(d) { return pad(d.getHours()) + ':' + pad(d.getMinutes()); }
-    function todayISO() {
-        var d = new Date();
-        return d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate());
-    }
-    // 依据起止时间计算当前节次号；无匹配返回 null
-    function calcCurrentPeriod(now) {
-        var hm = hhmm(now);
-        var started = null;
-        for (var i = 0; i < periods.length; i++) {
-            var p = periods[i];
-            if (p.start && p.end) {
-                if (p.start <= hm && hm <= p.end) { return p.number; }
-                if (p.start <= hm) { started = p.number; }
-            }
-        }
-        return started;
-    }
-
-    /* ---------- 渲染 ---------- */
-    function renderRow(r) {
-        var empty = !r.subject;
-        var cls = empty ? ' class="row-empty"' : '';
-        var teacher = r.subject ? esc(r.teacher_name) : '—';
-        var room = esc(r.room) || '—';
-        var note = r.is_temp_swap ? '<span class="badge badge-swap">调课</span>' : '';
-        return '<tr' + cls + '>'
-            + '<td class="fw-semibold">' + esc(r.class_name) + '</td>'
-            + '<td>' + (empty ? '无课' : esc(r.subject)) + '</td>'
-            + '<td>' + teacher + '</td>'
-            + '<td>' + room + '</td>'
-            + '<td>' + note + '</td>'
-            + '</tr>';
-    }
-
-    function renderGrades(grades) {
-        var keys = Object.keys(grades || {});
-        if (!keys.length) {
-            return '<div class="card"><div class="card-body text-center text-muted py-5">'
-                + '<i class="bi bi-calendar-x" style="font-size:38px"></i>'
-                + '<p class="mt-2 mb-0">该节次暂无课表数据</p></div></div>';
-        }
-        var html = '';
-        keys.forEach(function (g) {
-            var rows = grades[g] || [];
-            html += '<div class="grade-block">'
-                + '<div class="grade-title"><i class="bi bi-mortarboard"></i> ' + esc(g)
-                + ' <span class="cnt">共 ' + rows.length + ' 个班</span></div>'
-                + '<div class="table-responsive">'
-                + '<table class="table table-sm table-bordered align-middle mb-0 live-table">'
-                + '<thead class="table-light"><tr>'
-                + '<th style="width:90px">班级</th><th>学科</th><th style="width:130px">授课教师</th>'
-                + '<th style="width:150px">教室</th><th style="width:90px">备注</th>'
-                + '</tr></thead><tbody>';
-            rows.forEach(function (r) { html += renderRow(r); });
-            html += '</tbody></table></div></div>';
-        });
-        return html;
-    }
-
-    function updateHeadMeta(d) {
-        // 顶部日期/星期/节次文案
-        var sub = $('.live-head .small').first();
-        if (sub.length && d) {
-            var txt = sub.text();
-            // 保留学期名，替换日期与节次段
-            var termName = (txt.split(' · ')[0] || '').trim();
-            var wk = d.weekday_text ? (' ' + d.weekday_text) : '';
-            sub.text(termName + ' · ' + d.date + wk + ' · 第 ' + d.period + ' 节');
-        }
-    }
-
-    /* ---------- 数据加载 ---------- */
-    function load(keepPeriod) {
-        if (!cfg || loading) { return; }
-        loading = true;
-        var params = {
-            date: $('#datePick').val() || todayISO(),
-            period: keepPeriod || $('.period-btn.active').data('period') || cfg.currentPeriod || 1
-        };
-        var grade = $('#gradePick').val();
-        if (grade) { params.grade = grade; }
-
-        $('#liveContainer').css('opacity', 0.45);
-        $.getJSON(cfg.apiUrl, params).done(function (res) {
-            if (res && res.success && res.data) {
-                $('#liveContainer').html(renderGrades(res.data.grades));
-                updateHeadMeta(res.data);
-                // 同步激活态到实际返回节次
-                setActivePeriod(res.data.period);
-            } else {
-                $('#liveContainer').html('<div class="alert alert-warning m-3">'
-                    + esc((res && res.message) || '加载失败') + '</div>');
-            }
-        }).fail(function () {
-            $('#liveContainer').html('<div class="alert alert-danger m-3">加载实时课表失败，请重试</div>');
-        }).always(function () {
-            $('#liveContainer').css('opacity', 1);
-            loading = false;
-        });
-    }
-
-    function setActivePeriod(pn) {
-        $('.period-btn').removeClass('active');
-        $('.period-btn[data-period="' + pn + '"]').addClass('active');
-    }
-
-    /* ---------- 时钟与当前节次高亮 ---------- */
     function tickClock() {
-        var now = new Date();
-        $('#clockHM').text(hhmm(now));
-        var cp = calcCurrentPeriod(now);
-        $('#clockPeriod').text(cp ? ('· 第' + cp + '节') : '· 课间');
-        // 当前节次按钮高亮（is-now）
-        $('.period-btn').removeClass('is-now');
-        if (cp) { $('.period-btn[data-period="' + cp + '"]').addClass('is-now'); }
+        var el = document.getElementById('clockHM');
+        if (el) {
+            var d = new Date();
+            el.textContent = pad(d.getHours()) + ':' + pad(d.getMinutes());
+        }
+    }
+    tickClock();
+    window.setInterval(tickClock, 30000);
+
+    /* ── 筛选：日期 / 年级（服务端渲染，页面本身只有几条 SQL）── */
+    function nav(params) {
+        var q = [];
+        Object.keys(params).forEach(function (k) {
+            if (params[k] !== '' && params[k] !== null && params[k] !== undefined) {
+                q.push(encodeURIComponent(k) + '=' + encodeURIComponent(params[k]));
+            }
+        });
+        window.location.href = cfg.pageUrl + (q.length ? '?' + q.join('&') : '');
+    }
+    function navNow(extra) {
+        var p = { date: $('#datePick').val() || cfg.today, grade: $('#gradePick').val() || '' };
+        if (extra) { Object.keys(extra).forEach(function (k) { p[k] = extra[k]; }); }
+        nav(p);
+    }
+    $('#datePick').on('change', function () { navNow(); });
+    $('#gradePick').on('change', function () { navNow(); });
+    $('#btnToday').on('click', function () { navNow({ date: cfg.today }); });
+    $('#btnPrint').on('click', function () { window.print(); });
+
+    /* ── 覆盖率计数 ── */
+    function recount() {
+        var total = $('#liveContainer .ovw-item[data-check]').length;
+        var done = $('#liveContainer .ovw-item[data-check!=""]').length;
+        $('#statChecked').text(done);
+        $('#statExpected').text(total);
+        $('#statRate').text(total ? Math.floor(done * 100 / total) + '%' : '0%');
     }
 
-    /* ---------- 事件绑定 ---------- */
-    function bindEvents() {
-        $('#periodBar').on('click', '.period-btn', function () {
-            var pn = $(this).data('period');
-            if ($(this).hasClass('active')) { return; }
-            setActivePeriod(pn);
-            load(pn);
-        });
-        $('#gradePick').on('change', function () { load(); });
-        $('#datePick').on('change', function () { load(); });
-        $('#btnToday').on('click', function () {
-            $('#datePick').val(todayISO());
-            load();
-        });
-        $('#btnPrint').on('click', function () { window.print(); });
+    /* ── 就地更新一格 ── */
+    function cellSelector(c) {
+        return '#liveContainer .ovw-item[data-grade="' + c.grade + '"]'
+            + '[data-class="' + c.class_name + '"]'
+            + '[data-period="' + c.period_number + '"]';
+    }
+    function applyResult($el, result, note) {
+        var label = RESULT_TEXT[result] || '';
+        $el.attr('data-check', result || '');
+        $el.find('.ovw-chk').attr('class', 'ovw-chk ovw-chk-' + (result || 'none'))
+            .text(label || '未查');
+        var t = ($el.data('subject') || '') + ' ' + ($el.data('teacher') || '');
+        t += result ? (' · 已标记' + label + (note ? '（' + note + '）' : ''))
+            : ' · 点此标记查课结果';
+        $el.attr('title', t);
     }
 
-    /* ---------- 初始化 ---------- */
-    $(function () {
-        var raw = $('#liveData').text();
-        if (!raw) { return; }
-        try { cfg = JSON.parse(raw); } catch (e) { cfg = null; }
-        if (!cfg) { return; }
-        periods = cfg.periods || [];
+    function post(cells, ok) {
+        if (!cells || !cells.length) { return; }
+        $.ajax({
+            url: cfg.markUrl,
+            type: 'POST',
+            contentType: 'application/json',
+            data: JSON.stringify({ inspect_date: cfg.date, cells: cells })
+        }).done(function (res) {
+            if (res && res.success) {
+                (res.cells || []).forEach(function (c) {
+                    var $el = $(cellSelector(c));
+                    if ($el.length) { applyResult($el, c.result, c.note); }
+                });
+                recount();
+                if (ok) { ok(res); }
+            } else {
+                notify((res && res.message) || '标记失败', 'danger');
+            }
+        }).fail(function (xhr) {
+            var msg = '标记失败';
+            try { msg = JSON.parse(xhr.responseText).message || msg; } catch (e) { /* 忽略解析失败 */ }
+            notify(msg, 'danger');
+        });
+    }
 
-        bindEvents();
-        tickClock();
-        // 实时时钟：每 30s 更新时间与当前节次高亮
-        timerClock = setInterval(tickClock, 30000);
+    /* ── 标记面板 ── */
+    var $current = null;
+    function openMark($el) {
+        $current = $el;
+        var meta = ($el.data('subject') || '未填学科') + ' · ' + ($el.data('teacher') || '未指定教师');
+        $('#markMeta').html('<div class="fw-bold">' + $el.data('grade') + $el.data('class')
+            + ' · 第 ' + $el.data('period') + ' 节</div><div class="text-muted">' + meta + '</div>');
+        var cur = $el.attr('data-check') || '';
+        $('#markHint').text(cur ? ('当前：' + RESULT_TEXT[cur] + '（点下面按钮可改）')
+            : '把这次巡课看到的实际情况点一下即可');
+        if (String($el.data('temp')) === '1') {
+            $('#markHint').append(' · 该节课表上是当天临时调课');
+        }
+        $('#markNote').val($el.data('note') || '');
+        var el = document.getElementById('markModal');
+        if (el && window.bootstrap && window.bootstrap.Modal) {
+            window.bootstrap.Modal.getOrCreateInstance(el).show();
+        }
+    }
+
+    $('#liveContainer').on('click', '.ovw-item[data-check]', function () { openMark($(this)); });
+
+    $('#markModal .mark-btn').on('click', function () {
+        if (!$current || !$current.length) { return; }
+        var result = $(this).data('result');
+        var note = ($('#markNote').val() || '').trim();
+        var cell = {
+            grade: $current.data('grade'), class_name: $current.data('class'),
+            period_number: $current.data('period'), entry_id: $current.data('entry'),
+            subject: $current.data('subject'), teacher_uid: $current.data('uid'),
+            teacher_name: $current.data('teacher'), result: result, note: note
+        };
+        post([cell], function () {
+            $current.data('note', note);
+            var el = document.getElementById('markModal');
+            if (el && window.bootstrap && window.bootstrap.Modal) {
+                window.bootstrap.Modal.getOrCreateInstance(el).hide();
+            }
+            notify('已标记：' + (RESULT_TEXT[result] || result));
+        });
     });
 
-    $(window).on('beforeunload', function () {
-        if (timerClock) { clearInterval(timerClock); }
-        if (timerNow) { clearInterval(timerNow); }
+    $('#btnClearMark').on('click', function () {
+        if (!$current || !$current.length) { return; }
+        var cell = {
+            grade: $current.data('grade'), class_name: $current.data('class'),
+            period_number: $current.data('period'), entry_id: $current.data('entry'),
+            result: ''
+        };
+        post([cell], function () {
+            $current.data('note', '');
+            var el = document.getElementById('markModal');
+            if (el && window.bootstrap && window.bootstrap.Modal) {
+                window.bootstrap.Modal.getOrCreateInstance(el).hide();
+            }
+            notify('已撤销该格标记', 'warning');
+        });
     });
+
+    /* ── 一键：当前页面未标记的全部正常（巡课一圈点一下）── */
+    $('#btnMarkAllNormal').on('click', function () {
+        var cells = [];
+        $('#liveContainer .ovw-item[data-check=""]').each(function () {
+            var $el = $(this);
+            cells.push({
+                grade: $el.data('grade'), class_name: $el.data('class'),
+                period_number: $el.data('period'), entry_id: $el.data('entry'),
+                subject: $el.data('subject'), teacher_uid: $el.data('uid'),
+                teacher_name: $el.data('teacher'), result: 'normal'
+            });
+        });
+        if (!cells.length) { notify('当前页面上没有未标记的格子', 'secondary'); return; }
+        if (!window.confirm('把当前页面上 ' + cells.length + ' 个未标记格子全部标为「正常」？')) { return; }
+        post(cells, function (res) {
+            notify('已标记 ' + (res.updated || 0) + ' 格为正常');
+        });
+    });
+
+    recount();
 })();

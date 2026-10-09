@@ -121,6 +121,9 @@ def global_compare_report(exam_id, direction=''):
     # 历史考试不能再显示现在的班主任；快照缺失时自动回落当前关联
     from app.modules.grades.services import teacher_snapshot_service as _tss
     ht = _tss.headteacher_map_of(data.exam.id, grade=data.exam.grade)
+    # 各科任课教师（v1.18.9.0）：同样读本场考试快照（缺则惰性回填），
+    # 供每班每科「成绩下方」展示「这科当时谁教的」——与班主任同一套快照机制
+    teachers = _tss.name_map_of(data.exam.id, grade=data.exam.grade)
 
     # 班型快照优先、当前设置为回落（与 trimmed_nos 同口径）
     snap_ct, live_ct = {}, {}
@@ -148,12 +151,19 @@ def global_compare_report(exam_id, direction=''):
     def class_row(cls):
         rows = [r for r in data.total_rows if (r.class_name or '—') == cls]
         d = _row_dir(data, cls)
+        cells = _cells(data, rows, d, subjects, l1_name, l2_name, trimmed)
+        # 每科成绩下方显示该班该科任课教师（v1.18.9.0）。
+        # 总分列不加：班主任已独立成列，避免同格重复展示两个人。
+        for sub in subjects:
+            nm = teachers.get((cls, sub))
+            if nm:
+                cells[sub]['teacher'] = nm
         return {
             'grade': data.exam.grade, 'class_name': cls,
             'count': len(rows), 'direction': d,
             'class_type': snap_ct.get(cls) or live_ct.get(cls, ''),
             'headteacher': ht.get((data.exam.grade, cls), ''),
-            'cells': _cells(data, rows, d, subjects, l1_name, l2_name, trimmed),
+            'cells': cells,
         }
 
     def subtotal_row(d):

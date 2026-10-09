@@ -1,8 +1,8 @@
 {% extends "base.html" %}
-{% block title %}课表{% endblock %}
+{% block title %}旧版课表（历史库）{% endblock %}
 {% block content %}
 <div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
-    <h4 class="fw-bold mb-0"><i class="bi bi-calendar3"></i> 课表</h4>
+    <h4 class="fw-bold mb-0"><i class="bi bi-archive"></i> 旧版课表 <span class="text-muted fs-6 fw-normal">历史库</span></h4>
     <div class="d-flex gap-2">
         {% if current_user.has_perm('academic.edit') %}
         <a class="btn btn-sm btn-primary" href="{{ url_for('academic.timetable_import_page') }}">
@@ -27,6 +27,11 @@
         </form>
         {% endif %}
     </div>
+</div>
+
+<div class="alert alert-info py-2 small">
+    这是早期课表数据入口，与“学期课表”分开保存。新学期排课、查课和调课请使用
+    <a class="alert-link" href="{{ url_for('academic.schedule_overview_index') }}">新版学期课表</a>。
 </div>
 
 {% if not current %}

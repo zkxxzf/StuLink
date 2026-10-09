@@ -44,15 +44,18 @@
   :5000 — StuLink   在校生管理系统（读写）
   :5001 — Alumni    往届生查询系统（只读 history.db）
 
-八库分离（故障隔离，快照字段关联，不建跨库外键）：
-  data/system.db     基础库（用户/权限组/字典/学生/班级档案/年级/操作日志）
-  data/dormitory.db  宿舍库（房间/床位/分配历史）
-  data/history.db    历史库（毕业生快照 + 学习经历变迁 + 归档日志）
-  data/grades.db     成绩库（考试/成绩/分层/任课映射/考务批次/AI Key 与报告/证明快照）
-  data/points.db     德育库（加减分记录/规则模板/汇总）
-  data/academic.db   教务库（教师名单/课表/查课/调课/业绩/表单/工作记录/考勤）
-  data/portrait.db   画像库（多维聚合/评语/事件）
-  data/timetable.db  课表库（跨学期课表条目）
+十一库分离（按「一个功能一个库」隔离，快照字段关联，不建跨库外键）：
+  data/system.db       基础库（用户/权限组/字典/学生/班级档案/年级/操作日志）
+  data/dormitory.db    宿舍库（房间/床位/分配历史）
+  data/history.db      历史库（毕业生快照 + 学习经历变迁 + 归档日志）
+  data/grades.db       成绩库（考试/成绩/分层/任课映射/考务批次/AI Key 与报告/证明快照）
+  data/points.db       德育库（加减分记录/规则模板/汇总）
+  data/academic.db     教务基础库（教师名单/备课组长/班主任工作记录/考勤）
+  data/timetable.db    课表库（学期课表/节次/调课/晚自习值班）
+  data/inspection.db   查课库（巡课检查记录）
+  data/achievement.db  业绩库（教师业绩 + 附件材料）
+  data/forms.db        问卷库（表单模板/轮次/题目/提交/答案）
+  data/portrait.db     画像库（多维聚合/评语/事件）
 ```
 
 - **后端**：Python 3.11+ / Flask 3.x / Flask-Login / Flask-SQLAlchemy 2.x（多库 binds）/ Waitress / openpyxl / reportlab / python-pptx
@@ -92,6 +95,7 @@ docker-compose up -d
 - 批量导入的教师账号不再使用「手机号即密码」，改为一次性随机口令（页面一次性展示）。
 - **密码复杂度**：`password_policy` 强制 ≥8 位 + 含字母与数字 + 非弱口令黑名单 + 不等于用户名/姓名/手机号。
 - **升级即全站掉登录**（session_guard 引入会话口令摘要，旧会话缺 `_pwd_fp` 视为无效）。
+- **升级到教务分库版本（2026-10-10）需依次执行两条幂等脚本**：`py -3.12 scripts/migrate_split_academic_20261010.py`（教务分库 + 搬数据）与 `py -3.12 scripts/add_performance_indexes.py`（补齐历史漏建索引）——两者改动数据库前都会自动备份（`<库文件>.bak-时间戳`）。事后可用 `py -3.12 scripts/check_indexes.py` 只读自检模型/脚本/现网三处索引是否对齐（`--fix` 可幂等补建）。
 - 生产启用 HTTPS 后，建议设置环境变量：
   - `STULINK_SESSION_COOKIE_SECURE=1`（会话 cookie 加 `Secure`）
   - `STULINK_CSP_MODE=enforce`（CSP 由只上报切换为强制拦截，需先确认无违规）
@@ -117,7 +121,7 @@ StuLink/
 │   │   ├── portrait/          # 学生画像（多维聚合/评语/事件）
 │   │   ├── points/            # 德育管理（原积分，加减分记录/规则模板）
 │   │   └── notifications/     # 通知中心（收件人筛选/已读/撤回）
-│   ├── models/                # 数据模型（八库 binds）
+│   ├── models/                # 数据模型（十一库 binds）
 │   ├── forms/                 # WTForms
 │   ├── templates/             # Jinja2 模板
 │   ├── services/              # 业务逻辑（跨模块共享）

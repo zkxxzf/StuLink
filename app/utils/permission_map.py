@@ -93,6 +93,9 @@ MODULES = [
              'read': [], 'write': ['academic.timetable']},
             {'key': 'swap', 'name': '调课管理',
              'read': [], 'write': ['academic.swap']},
+            # v1.18.8.0：调课分级审批的第一级（年级长审本年级调课，教务课表管理终审+执行）
+            {'key': 'swap_approve', 'name': '调课审批（一级）',
+             'read': [], 'write': ['academic.swap_approve']},
             {'key': 'inspection_export', 'name': '查课导出',
              'read': [], 'write': ['academic.inspection_export']},
             {'key': 'forms', 'name': '问卷收集',

@@ -120,6 +120,11 @@ class BedAssignment(db.Model):
 class StudentAccommodation(db.Model):
     __bind_key__ = 'dormitory'
     __tablename__ = 'student_accommodation'
+    # 2026-10-10：住宿类型筛选的索引进模型声明（原先只写在 add_performance_indexes.py，
+    # 新装环境 create_all 拿不到）。索引名与现网一致，避免同表重复索引。
+    __table_args__ = (
+        db.Index('idx_acc_boarding_type', 'boarding_type'),
+    )
 
     id = db.Column(db.Integer, primary_key=True)
     student_id = db.Column(db.Integer, nullable=False, unique=True, index=True)

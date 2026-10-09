@@ -38,8 +38,10 @@
 {% endif %}
 
 <div class="d-flex gap-2">
-    <a href="{{ url_for('grades.teachers_page') }}" class="btn btn-primary">返回映射管理</a>
-    <a href="{{ url_for('grades.index') }}" class="btn btn-outline-secondary">前往成绩分析</a>
+    <a href="{{ url_for(ep('teachers_page')) }}" class="btn btn-primary">返回映射管理</a>
+    <a href="{{ url_for(ep('index')) }}" class="btn btn-outline-secondary">
+        {{ '返回教务工作台' if request.blueprint == 'academic' else '前往成绩分析' }}
+    </a>
 </div>
 {% endblock %}
 {% block extra_js %}

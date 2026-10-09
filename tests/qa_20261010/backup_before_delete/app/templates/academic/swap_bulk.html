@@ -1,0 +1,256 @@
+{% extends "base.html" %}
+{% block title %}统一调课{% endblock %}
+{% block extra_css %}
+<style>
+    .bulk-card { border: 1px solid #e2e8f0; border-radius: 12px; padding: 18px; margin-bottom: 18px; background: #fff; }
+    .bulk-card h6 { font-weight: 700; }
+    .entry-row td { vertical-align: middle; }
+    .st-ok { color: #059669; font-size: 12px; font-weight: 600; }
+    .st-bad { color: #dc2626; font-size: 12px; font-weight: 600; }
+    .st-idle { color: #94a3b8; font-size: 12px; }
+    .sel-summary { background: #eff6ff; border: 1px solid #bfdbfe; border-radius: 8px; padding: 8px 12px; font-size: 13px; color: #1e40af; }
+    .conflict-table td { font-size: 13px; }
+</style>
+{% endblock %}
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+    <h4 class="fw-bold mb-0"><i class="bi bi-collection"></i> 统一调课</h4>
+    <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('academic.swap_page') }}">
+        <i class="bi bi-arrow-left"></i> 返回列表
+    </a>
+</div>
+
+{% if bulk_error %}
+<div class="alert alert-danger">
+    <div class="fw-bold mb-1"><i class="bi bi-exclamation-triangle"></i> {{ bulk_error }}</div>
+    {% if bulk_conflicts %}
+    <div class="table-responsive mt-2">
+        <table class="table table-sm table-bordered bg-white conflict-table mb-0">
+            <thead class="table-light"><tr><th>课程</th><th>班级</th><th>冲突说明</th></tr></thead>
+            <tbody>
+                {% for c in bulk_conflicts %}
+                <tr><td>{{ c.subject or ('#' ~ c.entry_id) }}</td><td>{{ c.class or '-' }}</td><td class="text-danger">{{ c.desc }}</td></tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% endif %}
+</div>
+{% endif %}
+
+<form method="POST" action="{{ url_for('academic.swap_bulk') }}" id="bulkForm">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+
+    {# 选择课程 #}
+    <div class="bulk-card">
+        <h6 class="mb-3"><i class="bi bi-list-check"></i> ① 选择要调整的课程</h6>
+        <div class="row g-2 mb-3">
+            <div class="col-6 col-md-3">
+                <label class="form-label small mb-1">年级</label>
+                <select id="selGrade" name="grade" class="form-select form-select-sm">
+                    <option value="">全部年级</option>
+                    {% for g in class_opts.grades %}<option value="{{ g }}" {% if f_grade == g %}selected{% endif %}>{{ g }}</option>{% endfor %}
+                </select>
+            </div>
+            <div class="col-6 col-md-3">
+                <label class="form-label small mb-1">班级</label>
+                <select id="selClass" name="class_name" class="form-select form-select-sm">
+                    <option value="">全部班级</option>
+                </select>
+            </div>
+            <div class="col-6 col-md-3">
+                <label class="form-label small mb-1">星期</label>
+                <select id="selWeekday" name="weekday" class="form-select form-select-sm">
+                    <option value="">全部</option>
+                    {% for k in range(1, 8) %}<option value="{{ k }}" {% if f_weekday == k|string %}selected{% endif %}>{{ weekdays.get(k) }}</option>{% endfor %}
+                </select>
+            </div>
+            <div class="col-6 col-md-3 d-flex align-items-end">
+                <button type="button" class="btn btn-sm btn-primary w-100" id="btnLoad"><i class="bi bi-search"></i> 加载课程</button>
+            </div>
+        </div>
+        <div class="table-responsive">
+            <table class="table table-sm table-hover align-middle mb-0" id="entryTable" style="display:none">
+                <thead class="table-light">
+                    <tr>
+                        <th style="width:40px"><input type="checkbox" class="form-check-input" id="chkAll"></th>
+                        <th>星期节次</th><th>学科</th><th>班级</th><th>教师</th><th>教室</th><th>目标冲突</th>
+                    </tr>
+                </thead>
+                <tbody id="entryBody"></tbody>
+            </table>
+        </div>
+        <div id="entryEmpty" class="text-muted small">请选择条件后点击「加载课程」，勾选需要统一调整的条目。</div>
+        <div class="sel-summary mt-2" id="selSummary" style="display:none"></div>
+    </div>
+
+    {# 目标时段 #}
+    <div class="bulk-card">
+        <h6 class="mb-3"><i class="bi bi-bullseye"></i> ② 统一调整到</h6>
+        <div class="row g-3">
+            <div class="col-6 col-md-3">
+                <label class="form-label small mb-1">目标星期 <span class="text-danger">*</span></label>
+                <select name="new_weekday" id="tgtWeekday" class="form-select form-select-sm" required>
+                    <option value="">--</option>
+                    {% for k in range(1, 8) %}<option value="{{ k }}">{{ weekdays.get(k) }}</option>{% endfor %}
+                </select>
+            </div>
+            <div class="col-6 col-md-3">
+                <label class="form-label small mb-1">目标节次 <span class="text-danger">*</span></label>
+                <select name="new_period" id="tgtPeriod" class="form-select form-select-sm" required>
+                    <option value="">--</option>
+                    {% for p in periods %}<option value="{{ p.period_number }}">{{ p.period_name }} {{ p.start_time }}-{{ p.end_time }}</option>{% endfor %}
+                </select>
+            </div>
+            <div class="col-6 col-md-3">
+                <div class="form-check form-switch mt-4">
+                    <input class="form-check-input" type="checkbox" role="switch" id="swPermanent" name="is_permanent" value="1">
+                    <label class="form-check-label fw-semibold" for="swPermanent">永久调课</label>
+                </div>
+            </div>
+            <div class="col-6 col-md-3" id="dateWrap">
+                <label class="form-label small mb-1">调课日期 <span class="text-danger" id="dateReq">*</span></label>
+                <input type="date" name="swap_date" id="swapDate" class="form-control form-control-sm">
+            </div>
+            <div class="col-md-4">
+                <label class="form-label small mb-1">新教室（选填）</label>
+                <input name="new_room" class="form-control form-control-sm" maxlength="30" placeholder="留空则沿用各自原教室">
+            </div>
+            <div class="col-md-8">
+                <label class="form-label small mb-1">调课理由 <span class="text-danger">*</span></label>
+                <input name="reason" class="form-control form-control-sm" maxlength="200" required placeholder="如：期中考试安排 / 全年级教研活动">
+            </div>
+        </div>
+        <div class="mt-4 d-flex gap-2">
+            <button type="submit" class="btn btn-primary"><i class="bi bi-send"></i> 提交统一调课</button>
+            <a href="{{ url_for('academic.swap_page') }}" class="btn btn-outline-secondary">取消</a>
+        </div>
+    </div>
+</form>
+
+<script id="bulkData" type="application/json">
+{
+    "entriesUrl": {{ url_for('academic.api_swap_entries')|tojson }},
+    "slotsUrl": {{ url_for('academic.api_swap_available_slots')|tojson }},
+    "gradeClasses": {{ class_opts.grade_classes|tojson }},
+    "weekdays": {{ weekdays|tojson }}
+}
+</script>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+(function () {
+    'use strict';
+    var cfg = JSON.parse($('#bulkData').text());
+    var entriesCache = [];
+
+    function esc(v){ return String(v==null?'':v).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+
+    // 年级 → 班级（若服务端预选了班级，填充后选中）
+    function fillClasses(grade, selected) {
+        var $c = $('#selClass');
+        $c.html('<option value="">全部班级</option>');
+        (cfg.gradeClasses[grade] || []).forEach(function (cn) {
+            $c.append('<option value="' + esc(cn) + '"' + (cn === selected ? ' selected' : '') + '>' + esc(cn) + '</option>');
+        });
+        if (!grade) { $c.html('<option value="">全部班级</option>'); }
+    }
+    $('#selGrade').on('change', function () { fillClasses($(this).val(), ''); });
+    fillClasses($('#selGrade').val(), {{ (f_class or '')|tojson }});
+
+    // 加载课程条目
+    $('#btnLoad').on('click', function () {
+        var params = { grade: $('#selGrade').val(), class_name: $('#selClass').val(), weekday: $('#selWeekday').val() };
+        $('#entryEmpty').text('加载中…').show();
+        $('#entryTable').hide();
+        $.getJSON(cfg.entriesUrl, params).done(function (res) {
+            entriesCache = (res && res.data) || [];
+            if (!entriesCache.length) { $('#entryEmpty').text('没有匹配的课程条目。').show(); return; }
+            var html = '';
+            entriesCache.forEach(function (e) {
+                html += '<tr class="entry-row" data-id="' + e.id + '" data-teacher="' + esc(e.teacher_uid || '') + '" data-class="' + esc(e.grade + e.class_name) + '">'
+                    + '<td><input type="checkbox" class="form-check-input row-chk" name="entry_ids" value="' + e.id + '"></td>'
+                    + '<td class="small">' + esc(e.weekday_text) + '第' + e.period_number + '节</td>'
+                    + '<td class="fw-semibold">' + esc(e.subject) + '</td>'
+                    + '<td class="small">' + esc(e.grade) + esc(e.class_name) + '</td>'
+                    + '<td class="small">' + esc(e.teacher_name || '-') + '</td>'
+                    + '<td class="small">' + esc(e.room || '') + '</td>'
+                    + '<td class="st-idle" data-st>—</td></tr>';
+            });
+            $('#entryBody').html(html);
+            $('#entryEmpty').hide();
+            $('#entryTable').show();
+            updateSummary();
+        }).fail(function () { $('#entryEmpty').text('加载失败').show(); });
+    });
+
+    $('#chkAll').on('change', function () {
+        $('.row-chk').prop('checked', $(this).is(':checked'));
+        updateSummary(); checkConflicts();
+    });
+    $(document).on('change', '.row-chk', function () { updateSummary(); checkConflicts(); });
+
+    function selectedRows() { return $('.row-chk:checked').closest('tr'); }
+    function updateSummary() {
+        var n = selectedRows().length;
+        if (n) { $('#selSummary').show().html('已选择 <b>' + n + '</b> 条课程，将统一调整到指定时段。'); }
+        else { $('#selSummary').hide(); }
+    }
+
+    // 实时冲突检测（对每个已选条目查询其目标时段可用性；防抖）
+    var debounceTimer = null;
+    function checkConflicts() {
+        clearTimeout(debounceTimer);
+        debounceTimer = setTimeout(runCheck, 350);
+    }
+    function runCheck() {
+        var w = $('#tgtWeekday').val(), p = $('#tgtPeriod').val();
+        var $rows = selectedRows();
+        $rows.find('[data-st]').attr('class', 'st-idle').data('st', '—').text('—');
+        if (!w || !p || !$rows.length) { return; }
+        $rows.each(function () {
+            var $tr = $(this), id = $tr.data('id'), $st = $tr.find('[data-st]');
+            $st.attr('class', 'st-idle').text('检测中…');
+            $.getJSON(cfg.slotsUrl, { entry_id: id }).done(function (res) {
+                var slots = (res && res.data && res.data.slots) || [];
+                var hit = null;
+                for (var i = 0; i < slots.length; i++) {
+                    if (String(slots[i].weekday) === String(w) && String(slots[i].period_number) === String(p)) { hit = slots[i]; break; }
+                }
+                if (!hit) { $st.attr('class', 'st-idle').text('—'); return; }
+                if (hit.available) { $st.attr('class', 'st-ok').text('✓ 可用'); }
+                else { $st.attr('class', 'st-bad').text('✕ ' + (hit.conflict_desc || '冲突')); }
+            }).fail(function () { $st.attr('class', 'st-idle').text('—'); });
+        });
+        // 批量内部提示：同班 / 同教师选中多条到同一时段
+        var seenClass = {}, seenTeacher = {}, warn = [];
+        $rows.each(function () {
+            var c = $(this).data('class'), t = $(this).data('teacher');
+            if (seenClass[c]) { warn.push('同班「' + c + '」选中多条到同一时段，将冲突'); }
+            if (t && seenTeacher[t]) { warn.push('同教师选中多条到同一时段，将冲突'); }
+            seenClass[c] = 1; if (t) { seenTeacher[t] = 1; }
+        });
+        if (warn.length) { $('#selSummary').addClass('text-danger').html('⚠ ' + warn.join('；')); }
+    }
+    $('#tgtWeekday, #tgtPeriod').on('change', checkConflicts);
+
+    // 永久 / 临时
+    function syncPermanent() {
+        var perm = $('#swPermanent').is(':checked');
+        $('#dateWrap').toggle(!perm);
+        $('#swapDate').prop('required', !perm);
+        $('#dateReq').toggle(!perm);
+    }
+    $('#swPermanent').on('change', syncPermanent);
+    syncPermanent();
+
+    $('#bulkForm').on('submit', function (e) {
+        if (!selectedRows().length) { e.preventDefault(); alert('请至少勾选一条课程'); return; }
+        if (!$('#tgtWeekday').val() || !$('#tgtPeriod').val()) { e.preventDefault(); alert('请选择目标星期和节次'); return; }
+        if (!$('#swPermanent').is(':checked') && !$('#swapDate').val()) { e.preventDefault(); alert('临时调课请选择具体日期'); return; }
+        if (!confirm('确认为选中的 ' + selectedRows().length + ' 条课程提交统一调课申请？')) { e.preventDefault(); }
+    });
+})();
+</script>
+{% endblock %}

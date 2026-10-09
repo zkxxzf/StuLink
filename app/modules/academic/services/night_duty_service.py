@@ -4,13 +4,14 @@
 
 高中晚自习不排学科课，而是排教师**值班看班/巡楼**。这里负责：
 - 取晚自习节次（PeriodDef 里 period_type='evening'）；
-- **均衡自动排班**：同一位教师同一天只值一节、一周次数均衡、白天课多的少排；
-- 手工调整 / 清空单个班次；
-- 冲突检查（同一教师同天多节、单周次数超标）；
+- 手工指定 / 清空单个班次；
 - 今日值班（给门卫/巡楼用）与教师值班次数统计；
 - 导出 Excel（贴墙用）。
 
 值班只读课表，不写课表条目 —— 值班不是课，不该出现在班级课表网格里。
+
+2026-10-10：系统不再提供「一键均衡排班」与「同天只值一节 / 周次数上限」检查 ——
+值班由教务自行安排，系统只做登记、统计与导出；旧地址 /night-duty/auto 已下线。
 """
 from collections import defaultdict
 from datetime import date, datetime
@@ -25,7 +26,6 @@ from app.modules.academic.services.schedule_service import _base_entry_query
 from app.utils.export_helpers import xl_safe
 
 WEEKDAYS = (1, 2, 3, 4, 5)
-WEEKLY_CAP = 2          # 每位教师每周值班上限（高中惯例 1~2 次）
 
 
 def evening_period_numbers(schedule_id):
@@ -54,11 +54,8 @@ def teacher_pool():
             for t in rows if t.teacher_uid]
 
 
-def get_roster(schedule_id, grades=None):
-    """值班表数据：按年级分块，每块 {weekday: {period: duty}}。"""
-    grades = grades or grades_of(schedule_id)
-    periods = evening_period_numbers(schedule_id)
-    rows = NightDuty.query.filter_by(term_schedule_id=schedule_id).all()
+def _roster_from(rows, grades, periods):
+    """（内部）由已取出的值班行构造值班表数据：年级分块 + {weekday: {period: duty}}。"""
     grid = {g: {wd: {} for wd in WEEKDAYS} for g in grades}
     for d in rows:
         if d.grade in grid:
@@ -66,6 +63,37 @@ def get_roster(schedule_id, grades=None):
     blocks = [{'grade': g, 'grid': grid[g]} for g in grades]
     return {'blocks': blocks, 'periods': periods, 'grades': grades,
             'total': len(rows)}
+
+
+def _today_from(rows, weekday):
+    """（内部）今日值班清单（按年级、节次升序）。"""
+    picked = [d for d in rows if d.weekday == weekday]
+    picked.sort(key=lambda d: ((d.grade or ''), (d.period_number or 0)))
+    return [d.to_dict() for d in picked]
+
+
+def _stats_from(rows):
+    """（内部）教师值班次数统计（按次数降序）。"""
+    stat = {}
+    for d in rows:
+        if not d.teacher_uid:
+            continue
+        item = stat.setdefault(d.teacher_uid, {
+            'uid': d.teacher_uid, 'name': d.teacher_name or d.teacher_uid,
+            'count': 0, 'days': []})
+        item['count'] += 1
+        wd = WEEKDAY_NAMES.get(d.weekday, '')
+        if wd not in item['days']:
+            item['days'].append(wd)
+    return sorted(stat.values(), key=lambda x: (-x['count'], x['name']))
+
+
+def get_roster(schedule_id, grades=None):
+    """值班表数据：按年级分块，每块 {weekday: {period: duty}}。"""
+    grades = grades or grades_of(schedule_id)
+    periods = evening_period_numbers(schedule_id)
+    rows = NightDuty.query.filter_by(term_schedule_id=schedule_id).all()
+    return _roster_from(rows, grades, periods)
 
 
 def set_duty(schedule_id, grade, weekday, period_number, teacher_uid=None,
@@ -98,137 +126,31 @@ def set_duty(schedule_id, grade, weekday, period_number, teacher_uid=None,
     return True, '已保存'
 
 
-def auto_assign(schedule_id, max_per_week=WEEKLY_CAP, grades=None, weekdays=None,
-                replace=True, operator=None):
-    """均衡自动排班 → (ok, message)。
+def get_page_data(schedule_id, grades=None, weekday=None):
+    """值班页一次取数 → (roster, today, stats)。
 
-    规则（贴近高中教务的排班习惯）：
-    1. 同一位教师**同一天**只值一节（值完就走，不连轴）；
-    2. 每位教师**一周**不超过 max_per_week 次；
-    3. 同等条件下，优先选**当天课少**的教师（避免白天满课还要值晚自习）；
-    4. 教师实在不够时放宽周上限，仍不够才留空（页面会提示哪些班次空着）。
+    2026-10-10 优化：值班页原先依次调用 get_roster / today_duties / teacher_stats，
+    同一张 night_duties 表被全查 3 遍；改为一次全查 + 内存分组，页面输出完全不变。
     """
-    periods = evening_period_numbers(schedule_id)
-    if not periods:
-        return False, '该学期没有「晚自习」节次：请先到节次配置里把晚自习的类型设为 evening'
     grades = grades or grades_of(schedule_id)
-    if not grades:
-        return False, '该学期还没有课表数据，无法确定要值班的年级'
-    pool = teacher_pool()
-    if not pool:
-        return False, '教师表为空，无法排班'
-
-    if replace:
-        NightDuty.query.filter_by(term_schedule_id=schedule_id).delete()
-        db.session.flush()
-
-    week_count = {}
-    day_used = set()
-    for d in NightDuty.query.filter_by(term_schedule_id=schedule_id).all():
-        if d.teacher_uid:
-            week_count[d.teacher_uid] = week_count.get(d.teacher_uid, 0) + 1
-            day_used.add((d.teacher_uid, d.weekday))
-
-    # 教师当天课量：同分时优先排白天课少的
-    day_load = defaultdict(int)
-    for e in _base_entry_query(schedule_id).all():
-        if e.teacher_uid and e.weekday:
-            day_load[(e.teacher_uid, e.weekday)] += 1
-
-    filled = skipped = 0
-    for grade in grades:
-        for wd in weekdays or WEEKDAYS:
-            for pn in periods:
-                slot = NightDuty.query.filter_by(
-                    term_schedule_id=schedule_id, grade=grade, weekday=wd,
-                    period_number=pn).first()
-                if slot and not replace:
-                    continue
-                cands = [t for t in pool
-                         if (t['uid'], wd) not in day_used
-                         and week_count.get(t['uid'], 0) < max_per_week]
-                if not cands:      # 放宽周上限，尽量不留空
-                    cands = [t for t in pool if (t['uid'], wd) not in day_used]
-                if not cands:
-                    skipped += 1
-                    continue
-                pick = min(cands, key=lambda t: (week_count.get(t['uid'], 0),
-                                                 day_load.get((t['uid'], wd), 0),
-                                                 t['uid']))
-                if slot is None:
-                    slot = NightDuty(term_schedule_id=schedule_id, grade=grade,
-                                     weekday=wd, period_number=pn)
-                    db.session.add(slot)
-                slot.teacher_uid = pick['uid']
-                slot.teacher_name = pick['name']
-                week_count[pick['uid']] = week_count.get(pick['uid'], 0) + 1
-                day_used.add((pick['uid'], wd))
-                filled += 1
-    db.session.commit()
-
-    if operator is not None:
-        try:
-            from app.utils.helpers import log_operation
-            log_operation(operator, '更新', '晚自习值班', schedule_id,
-                          f'自动排班 {filled} 个班次', module='academic')
-        except Exception:  # noqa: BLE001
-            pass
-    msg = f'已排 {filled} 个班次'
-    if skipped:
-        msg += f'，教师不足有 {skipped} 个班次留空'
-    return True, msg
-
-
-def check_conflicts(schedule_id):
-    """值班冲突：同一教师同一天多节、单周次数较多。"""
+    periods = evening_period_numbers(schedule_id)
     rows = NightDuty.query.filter_by(term_schedule_id=schedule_id).all()
-    by_day = defaultdict(list)
-    week_count = defaultdict(int)
-    name_of = {}
-    for d in rows:
-        if not d.teacher_uid:
-            continue
-        name_of[d.teacher_uid] = d.teacher_name or d.teacher_uid
-        week_count[d.teacher_uid] += 1
-        by_day[(d.teacher_uid, d.weekday)].append(d)
-    out = []
-    for (uid, wd), ds in sorted(by_day.items()):
-        if len(ds) > 1:
-            out.append({'type': 'same_day', 'level': 'warning',
-                        'teacher': name_of.get(uid, uid),
-                        'weekday': wd, 'weekday_text': WEEKDAY_NAMES.get(wd, ''),
-                        'count': len(ds),
-                        'slots': [f'{x.grade}第{x.period_number}节' for x in ds]})
-    for uid, cnt in sorted(week_count.items()):
-        if cnt > max(WEEKLY_CAP, 3):
-            out.append({'type': 'over_week', 'level': 'info',
-                        'teacher': name_of.get(uid, uid), 'count': cnt})
-    return out
+    wd = weekday or date.today().isoweekday()
+    return (_roster_from(rows, grades, periods),
+            _today_from(rows, wd), _stats_from(rows))
 
 
 def today_duties(schedule_id, weekday=None):
     """今日值班清单（默认取系统当天星期；周末返回空表）。"""
     wd = weekday or date.today().isoweekday()
-    rows = (NightDuty.query.filter_by(term_schedule_id=schedule_id, weekday=wd)
-            .order_by(NightDuty.grade, NightDuty.period_number).all())
-    return [d.to_dict() for d in rows]
+    rows = NightDuty.query.filter_by(term_schedule_id=schedule_id).all()
+    return _today_from(rows, wd)
 
 
 def teacher_stats(schedule_id):
     """教师值班次数统计（按次数降序）。"""
     rows = NightDuty.query.filter_by(term_schedule_id=schedule_id).all()
-    stat = {}
-    for d in rows:
-        if not d.teacher_uid:
-            continue
-        item = stat.setdefault(d.teacher_uid, {
-            'uid': d.teacher_uid, 'name': d.teacher_name or d.teacher_uid,
-            'count': 0, 'days': []})
-        item['count'] += 1
-        wd = WEEKDAY_NAMES.get(d.weekday, '')
-        if wd not in item['days']:
-            item['days'].append(wd)
-    return sorted(stat.values(), key=lambda x: (-x['count'], x['name']))
+    return _stats_from(rows)
 
 
 def export_workbook(schedule_id, grades=None):

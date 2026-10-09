@@ -24,6 +24,9 @@ from app.models.academic import (FormTemplate, InspectionRecord, SubjectLeader,
                                  Teacher, TeacherAchievement)
 from app.models.timetable import ScheduleEntry, ScheduleSwap, TermSchedule
 from app.modules.academic import bp
+from app.modules.academic.services.access_scope import (
+    apply_academic_scope,
+)
 from app.modules.academic.services import schedule_service as sch_svc
 from app.modules.academic.services.schedule_common import get_active_schedule
 from app.utils.decorators import perm_required
@@ -51,7 +54,6 @@ def academic_home():
     """教务工作台：KPI + 待办 + 快捷入口 + 最近动态。"""
     today = date.today()
     month_start = _first_day_of_month()
-
     ts = get_active_schedule()
     timetable = {
         'ts': ts,
@@ -60,53 +62,81 @@ def academic_home():
         'teachers': 0,
     }
     if ts:
-        timetable['entries'] = _count(ScheduleEntry.query.filter_by(
-            term_schedule_id=ts.id, is_deleted=False))
-        rows = db.session.query(ScheduleEntry.grade, ScheduleEntry.class_name).filter(
+        entry_q = ScheduleEntry.query.filter_by(
+            term_schedule_id=ts.id, is_deleted=False)
+        entry_q = apply_academic_scope(entry_q, current_user, ScheduleEntry)
+        class_q = db.session.query(ScheduleEntry.grade, ScheduleEntry.class_name).filter(
             ScheduleEntry.term_schedule_id == ts.id,
-            ScheduleEntry.is_deleted.is_(False)).distinct().all()
-        timetable['classes'] = len([r for r in rows if r[1]])
+            ScheduleEntry.is_deleted.is_(False))
+        class_q = apply_academic_scope(class_q, current_user,
+                                       ScheduleEntry).distinct()
+        class_rows = class_q.all()
+        timetable['entries'] = _count(entry_q)
+        timetable['classes'] = len([r for r in class_rows if r[1]])
         # v1.18.8.0 审核（🟡-1）：原实现用 _count(聚合查询) 会对“已聚合的 1 行”再 .count()，
         # 结果恒为 1；改为 .scalar() 取 distinct teacher_uid 真实去重数。
         try:
-            timetable['teachers'] = db.session.query(
+            teacher_q = db.session.query(
                 func.count(func.distinct(ScheduleEntry.teacher_uid))).filter(
                     ScheduleEntry.term_schedule_id == ts.id,
-                    ScheduleEntry.is_deleted.is_(False)).scalar() or 0
+                    ScheduleEntry.is_deleted.is_(False))
+            teacher_q = apply_academic_scope(teacher_q, current_user,
+                                             ScheduleEntry)
+            timetable['teachers'] = teacher_q.scalar() or 0
         except Exception:  # noqa: BLE001
             timetable['teachers'] = 0
 
-    insp_month = _count(InspectionRecord.query.filter(
-        InspectionRecord.inspect_date >= month_start))
-    insp_abnormal = _count(InspectionRecord.query.filter(
-        InspectionRecord.inspect_date >= month_start,
-        InspectionRecord.result != 'normal'))
-
-    class_rows = db.session.query(Student.grade, Student.class_name).distinct().all()
+    insp_q = apply_academic_scope(
+        InspectionRecord.query.filter(InspectionRecord.inspect_date >= month_start),
+        current_user, InspectionRecord)
+    insp_today_q = apply_academic_scope(
+        InspectionRecord.query.filter(InspectionRecord.inspect_date == today),
+        current_user, InspectionRecord)
+    students_q = apply_academic_scope(Student.query, current_user, Student)
+    class_rows_q = db.session.query(Student.grade, Student.class_name)
+    class_rows_q = apply_academic_scope(class_rows_q, current_user, Student)
+    class_rows = class_rows_q.distinct().all()
+    insp_month = _count(insp_q)
+    insp_abnormal = _count(insp_q.filter(InspectionRecord.result != 'normal'))
 
     kpi = {
-        'students': _count(Student.query),
+        'students': _count(students_q),
         'classes': len([r for r in class_rows if r[1]]),
         'teachers_active': _count(Teacher.query.filter_by(status='active')),
         'teachers_total': _count(Teacher.query),
         'insp_month': insp_month,
         'insp_abnormal': insp_abnormal,
-        'insp_today': _count(InspectionRecord.query.filter(
-            InspectionRecord.inspect_date == today)),
+        'insp_today': _count(insp_today_q),
         'leaders': _count(SubjectLeader.query),
     }
-
+    is_reviewer = (current_user.role == 'admin' or
+                   current_user.has_perm('academic.timetable'))
+    swap_q = ScheduleSwap.query.filter_by(status='pending')
+    if not is_reviewer:
+        if current_user.has_perm('academic.swap'):
+            from app.modules.academic.services.teacher_service import teacher_of_user
+            teacher = teacher_of_user(current_user)
+            applicant_uid = (teacher.teacher_uid if teacher else
+                             (current_user.username or str(current_user.id))[:16])
+            swap_q = swap_q.filter_by(applicant_uid=applicant_uid)
+        else:
+            swap_q = swap_q.filter(False)
     todo = {
-        'swaps': _count(ScheduleSwap.query.filter_by(status='pending')),
-        'achievements': _count(TeacherAchievement.query.filter_by(status='pending')),
-        'forms': _count(FormTemplate.query.filter_by(status='open')),
+        'swaps': _count(swap_q),
+        'achievements': (_count(TeacherAchievement.query.filter_by(status='pending'))
+                         if current_user.has_perm('academic.edit') else 0),
+        'forms': (_count(FormTemplate.query.filter_by(status='open'))
+                  if current_user.has_perm('academic.edit') else 0),
     }
 
     # 最近动态（审计日志，取 academic 模块最近若干条）
     recent = []
     try:
-        logs = (OperationLog.query.filter_by(module='academic')
-                .order_by(OperationLog.id.desc()).limit(RECENT_LIMIT).all())
+        logs_q = OperationLog.query.filter_by(module='academic')
+        if not (current_user.role == 'admin' or
+                current_user.has_perm('academic.timetable')):
+            logs_q = logs_q.filter_by(user_id=current_user.id)
+        logs = logs_q.order_by(OperationLog.id.desc()).limit(RECENT_LIMIT).all()
         user_ids = {l.user_id for l in logs if l.user_id}
         names = {}
         if user_ids:

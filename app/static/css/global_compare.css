@@ -64,6 +64,15 @@ table.ld-table {
 .ld-online .r { color: #64748b; }
 .ld-none { color: #cbd5e1; }
 .ld-avg { font-variant-numeric: tabular-nums; }
+/* 成绩下方的任课教师：小字弱化，不与分数抢焦点（小计/总计行不输出） */
+.ld-table .ld-teacher {
+    font-size: 11px;
+    font-weight: 400;
+    color: #7b8794;
+    line-height: 1.25;
+    margin-top: 1px;
+    white-space: nowrap;
+}
 /* 打印：隐藏工具条、放开滚动区、A3 横向 */
 @media print {
     .no-print { display: none !important; }

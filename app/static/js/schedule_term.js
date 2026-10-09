@@ -109,28 +109,6 @@
         });
     }
 
-    /* ── 今日课表：刷新当前学期/周次上下文条 ────────────────────── */
-    function initTodayContext() {
-        var bar = document.getElementById('termContextBar');
-        var txt = document.getElementById('termContextText');
-        if (!bar || !txt) { return; }
-        var url = bar.getAttribute('data-current-context-url');
-        if (!url || typeof fetch !== 'function') { return; }
-        fetch(url, { headers: { 'Accept': 'application/json' } })
-            .then(function (r) { return r.json(); })
-            .then(function (res) {
-                if (!res || !res.success || !res.data) { return; }
-                var d = res.data;
-                var segs = [];
-                if (d.schedule_name) { segs.push(d.schedule_name); }
-                if (d.week) { segs.push('第 ' + d.week + ' 周'); }
-                if (d.date) { segs.push(d.date); }
-                if (d.weekday_text) { segs.push(d.weekday_text); }
-                if (segs.length) { txt.textContent = segs.join(' · '); }
-            })
-            .catch(function () { /* 静默失败，保留服务端初值 */ });
-    }
-
     function boot() {
         var cfg = readCfg();
         initWeekSwitcher();
@@ -138,7 +116,6 @@
             case 'dates': initDatesPreview(); break;
             case 'calendar': initCalendar(); break;
             case 'compare': initCompare(); break;
-            case 'today': initTodayContext(); break;
             default: break;
         }
     }

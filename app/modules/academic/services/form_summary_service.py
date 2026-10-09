@@ -5,8 +5,8 @@
 """表单收集之后的能力（只读汇总，不改动 form_service 已有函数）。
 
 跨库说明：
-- FormTemplate/FormQuestion/FormSubmission/FormAnswer/Teacher 绑定 academic.db；
-- Student 无 bind_key，落默认主库 system.db；Notification 绑定 system.db。
+- FormTemplate/FormQuestion/FormSubmission/FormAnswer 绑定 forms.db（2026-10-10 表单收集独立成库）；
+- Teacher 绑定 academic.db；Student 无 bind_key，落默认主库 system.db；Notification 绑定 system.db。
   Flask-SQLAlchemy 会按 bind 自动路由，故分别用各自的 .query 取数后在 Python 侧
   按 uid（学生=student_number / 教师=teacher_uid）匹配，绝不跨库 JOIN。
 
@@ -26,8 +26,9 @@ import tempfile
 import zipfile
 from datetime import datetime
 
-from flask import current_app, url_for
+from flask import current_app, g, has_request_context, url_for
 from sqlalchemy import or_, func
+from sqlalchemy.orm import selectinload
 
 from app.extensions import db
 from app.models.academic import (
@@ -181,12 +182,25 @@ def get_expected_submitters(form_id, scope=None):
 
     scope: 可选 dict(grade=?, class_name=?) 用于收窄范围。
     返回 list[dict(uid, name, grade, class_name, role)]，按 年级→班级→uid 排序。
+
+    2026-10-10 优化：汇总页一次请求里会调多次（提交统计 + 班级拆分），
+    而学生应交名单要读全表（两三万人）；这里加请求内缓存，避免重复加载。
     """
-    tpl = _load_template(form_id)
-    tt = (tpl.target_type or 'all').strip()
     scope = scope or {}
     s_grade = scope.get('grade')
     s_class = scope.get('class_name')
+    cache = None
+    if has_request_context():
+        cache = getattr(g, '_form_expected_cache', None)
+        if cache is None:
+            cache = {}
+            g._form_expected_cache = cache
+        ck = (form_id, s_grade, s_class)
+        if ck in cache:
+            return cache[ck]
+
+    tpl = _load_template(form_id)
+    tt = (tpl.target_type or 'all').strip()
 
     result = []
     if tt == 'teachers':
@@ -212,14 +226,30 @@ def get_expected_submitters(form_id, scope=None):
             result.append({'uid': s.student_number, 'name': s.name,
                            'grade': s.grade or '', 'class_name': s.class_name or '',
                            'role': 'student'})
+    if cache is not None:
+        cache[(form_id, s_grade, s_class)] = result
     return result
 
 
 def _submitted_uid_set(form_id):
-    """该表单所有提交的 submitter_uid 集合（去重）"""
+    """该表单所有提交的 submitter_uid 集合（去重）。
+
+    2026-10-10 优化：汇总页一次请求里「提交统计 / 班级拆分 / 未交名单」可能各调
+    一次，这里按 form_id 在请求内缓存，避免对 form_submissions 重复扫描去重。
+    """
+    if has_request_context():
+        cache = getattr(g, '_form_submitted_cache', None)
+        if cache is None:
+            cache = {}
+            g._form_submitted_cache = cache
+        if form_id in cache:
+            return cache[form_id]
     rows = (FormSubmission.query.filter_by(template_id=form_id)
             .with_entities(FormSubmission.submitter_uid).distinct().all())
-    return {r[0] for r in rows if r[0]}
+    result = {r[0] for r in rows if r[0]}
+    if has_request_context():
+        g._form_submitted_cache[form_id] = result
+    return result
 
 
 def get_submission_stats(form_id):
@@ -436,8 +466,11 @@ def build_summary_matrix(form_id, status=None, grade=None, class_name=None,
         'is_file': q.question_type == 'file', 'sort_order': q.sort_order or 0,
     } for q in questions]
 
+    # 2026-10-10 优化：预加载 answers（selectinload 一次批量取），
+    # 否则下面逐条 _answers_by_question 会触发 N+1（每条提交一次查询）
     subs = _query_submissions(form_id, status=status, grade=grade, class_name=class_name,
                               keyword=keyword, include_rejected=include_rejected) \
+        .options(selectinload(FormSubmission.answers)) \
         .order_by(FormSubmission.submitter_grade, FormSubmission.submitter_class,
                   FormSubmission.submitter_uid).all()
 
@@ -773,6 +806,8 @@ def get_file_inventory(form_id, grade=None, class_name=None, question_id=None,
                            include_rejected=not approved_only)
     if approved_only:
         q = q.filter(FormSubmission.status == 'approved')
+    # 2026-10-10 优化：预加载 answers，避免下面逐条 s.answers 触发 N+1
+    q = q.options(selectinload(FormSubmission.answers))
     subs = q.all()
     if submitter_uid:
         subs = [s for s in subs if s.submitter_uid == submitter_uid]

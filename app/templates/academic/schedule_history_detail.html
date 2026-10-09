@@ -59,8 +59,10 @@
             </div>
         </a>
     </div>
+    {# 2026-10-10：入口改指教师工作台的「我的课表」（教务端 /academic/my-schedule 已下线） #}
+    {% if current_user.has_perm('workbench.class_view') %}
     <div class="col-6 col-xl-3">
-        <a class="card text-decoration-none h-100" href="{{ url_for('academic.my_schedule', sid=ts.id) }}">
+        <a class="card text-decoration-none h-100" href="{{ url_for('workbench.my_schedule', sid=ts.id) }}">
             <div class="card-body text-center py-4">
                 <i class="bi bi-person-video2 text-warning" style="font-size:32px;"></i>
                 <div class="fw-bold mt-2">教师课表</div>
@@ -68,6 +70,7 @@
             </div>
         </a>
     </div>
+    {% endif %}
 </div>
 
 <div class="row g-3">

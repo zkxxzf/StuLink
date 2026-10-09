@@ -13,10 +13,13 @@ from flask_login import login_required, current_user
 from app.extensions import db
 from app.models.academic import (
     FormTemplate, FormQuestion, FormSubmission, FormCategory, FormAnswer,
+    FormRound,
     FORM_STATUS, FORM_TARGET_TYPES, QUESTION_TYPES, SUBMISSION_STATUS,
+    ROUND_STATUS, ACHIEVEMENT_CATEGORIES, ACHIEVEMENT_LEVELS,
 )
 from app.modules.academic import bp
 from app.modules.academic.services import form_service
+from app.modules.academic.services import achievement_service as ach_svc
 from app.utils.decorators import perm_required
 from app.utils.helpers import log_operation
 
@@ -49,6 +52,22 @@ def _parse_questions_from_form():
         return json.loads(raw)
     except json.JSONDecodeError:
         return []
+
+
+def _parse_achievement_mapping():
+    """发起收集时配的「计入教师业绩库」规则（2026-10-10）。
+
+    业绩名称取自某题时，前端提交的是题目序号（题目此刻可能还没有 id），
+    由 service 在题目写库后换算成真实 question_id。
+    """
+    return {
+        'to_achievement': request.form.get('to_achievement') == '1',
+        'ach_category': (request.form.get('ach_category') or '').strip(),
+        'ach_level': (request.form.get('ach_level') or '').strip(),
+        'ach_title_mode': (request.form.get('ach_title_mode') or 'template').strip(),
+        'ach_title_question_index': request.form.get('ach_title_question_index'),
+        'ach_tags': (request.form.get('ach_tags') or '').strip(),
+    }
 
 
 # ── 管理端：表单列表 ──────────────────────────────────────────
@@ -106,6 +125,7 @@ def form_create():
         allow_multiple = request.form.get('allow_multiple') == '1'
 
         questions_data = _parse_questions_from_form()
+        ach = _parse_achievement_mapping()
 
         try:
             tpl = form_service.create_form(
@@ -113,7 +133,8 @@ def form_create():
                 target_type=target_type, target_scope=target_scope,
                 start_time=start_time, deadline=deadline,
                 max_file_size=max_file_size, allow_multiple=allow_multiple,
-                questions_data=questions_data, created_by=current_user.id)
+                questions_data=questions_data, created_by=current_user.id,
+                ach=ach)
 
             log_operation(current_user, '新增', '表单', tpl.id,
                           f'创建表单：{title}', module='academic')
@@ -138,6 +159,9 @@ def form_create():
                            status_map=FORM_STATUS,
                            target_map=FORM_TARGET_TYPES,
                            question_types=QUESTION_TYPES,
+                           ach_categories=ACHIEVEMENT_CATEGORIES,
+                           ach_levels=ACHIEVEMENT_LEVELS,
+                           tag_presets=ach_svc.TAG_PRESETS,
                            edit_mode=False)
 
 
@@ -170,6 +194,7 @@ def form_edit(form_id):
         max_file_size = request.form.get('max_file_size', 10, type=int)
         allow_multiple = request.form.get('allow_multiple') == '1'
         questions_data = _parse_questions_from_form()
+        ach = _parse_achievement_mapping()
 
         try:
             form_service.update_form(
@@ -177,7 +202,8 @@ def form_edit(form_id):
                 category=category, target_type=target_type,
                 target_scope=target_scope, start_time=start_time,
                 deadline=deadline, max_file_size=max_file_size,
-                allow_multiple=allow_multiple, questions_data=questions_data)
+                allow_multiple=allow_multiple, questions_data=questions_data,
+                ach=ach)
 
             log_operation(current_user, '编辑', '表单', form_id,
                           f'编辑表单：{title}', module='academic')
@@ -196,7 +222,9 @@ def form_edit(form_id):
 
     # GET：填充已有数据
     categories = _get_categories()
+    _sorted_q = sorted(tpl.questions, key=lambda x: x.sort_order)
     questions_list = [{
+        'id': q.id,
         'question_type': q.question_type,
         'title': q.title,
         'description': q.description or '',
@@ -204,7 +232,12 @@ def form_edit(form_id):
         'required': q.required,
         'file_types': q.file_types or '',
         'max_file_size_mb': q.max_file_size_mb or '',
-    } for q in sorted(tpl.questions, key=lambda x: x.sort_order)]
+    } for q in _sorted_q]
+
+    # 业绩名称取自某题时，前端下拉按「第几题」回显
+    _qids = [q.id for q in _sorted_q]
+    _ach_idx = (_qids.index(tpl.ach_title_question_id)
+                if tpl.ach_title_question_id in _qids else None)
 
     form_data = {
         'id': tpl.id,
@@ -218,6 +251,13 @@ def form_edit(form_id):
         'max_file_size_mb': tpl.max_file_size_mb or 10,
         'allow_multiple': tpl.allow_multiple,
         'questions': questions_list,
+        # 2026-10-10：计入教师业绩库的映射
+        'to_achievement': bool(tpl.to_achievement),
+        'ach_category': tpl.ach_category or '',
+        'ach_level': tpl.ach_level or '',
+        'ach_title_mode': tpl.ach_title_mode or 'template',
+        'ach_title_question_index': _ach_idx,
+        'ach_tags': tpl.ach_tags or '',
     }
 
     return render_template('academic/form_create.html',
@@ -226,6 +266,9 @@ def form_edit(form_id):
                            status_map=FORM_STATUS,
                            target_map=FORM_TARGET_TYPES,
                            question_types=QUESTION_TYPES,
+                           ach_categories=ACHIEVEMENT_CATEGORIES,
+                           ach_levels=ACHIEVEMENT_LEVELS,
+                           tag_presets=ach_svc.TAG_PRESETS,
                            edit_mode=True)
 
 
@@ -282,15 +325,28 @@ def form_submissions(form_id):
         abort(404)
 
     status = (request.args.get('status') or '').strip()
+    round_id = request.args.get('round', type=int)
     page = request.args.get('page', 1, type=int)
-    pagination = form_service.get_submissions(form_id, status=status or None,
-                                              page=page, per_page=20)
 
-    # 统计
-    total = FormSubmission.query.filter_by(template_id=form_id).count()
-    pending = FormSubmission.query.filter_by(template_id=form_id, status='submitted').count()
-    approved = FormSubmission.query.filter_by(template_id=form_id, status='approved').count()
-    rejected = FormSubmission.query.filter_by(template_id=form_id, status='rejected').count()
+    # 2026-10-10：一次收集 = 一轮；历史模板没有轮次时补一条第 1 轮
+    rounds = form_service.list_rounds(form_id)
+    if not rounds:
+        form_service.ensure_default_round(tpl)
+        rounds = form_service.list_rounds(form_id)
+    cur_round = next((r for r in rounds if r.id == round_id), None)
+
+    pagination = form_service.get_submissions(
+        form_id, status=status or None, page=page, per_page=20,
+        round_id=(cur_round.id if cur_round else None))
+
+    # 统计（跟随当前轮次；未选轮次时统计全部）
+    base = FormSubmission.query.filter_by(template_id=form_id)
+    if cur_round:
+        base = base.filter(FormSubmission.round_id == cur_round.id)
+    total = base.count()
+    pending = base.filter(FormSubmission.status == 'submitted').count()
+    approved = base.filter(FormSubmission.status == 'approved').count()
+    rejected = base.filter(FormSubmission.status == 'rejected').count()
 
     return render_template('academic/form_detail.html',
                            tpl=tpl,
@@ -298,7 +354,53 @@ def form_submissions(form_id):
                            status_map=SUBMISSION_STATUS,
                            total=total, pending=pending,
                            approved=approved, rejected=rejected,
-                           f_status=status)
+                           f_status=status,
+                           rounds=rounds, cur_round=cur_round,
+                           round_status_map=ROUND_STATUS)
+
+
+@bp.route('/forms/<int:form_id>/rounds/new', methods=['POST'])
+@login_required
+@perm_required('academic.edit')
+def form_round_new(form_id):
+    """发起新一轮收集（上一轮自动结束，新提交落进新轮）"""
+    try:
+        rnd = form_service.start_new_round(
+            form_id,
+            name=(request.form.get('name') or '').strip(),
+            term=(request.form.get('term') or '').strip(),
+            deadline=_parse_datetime(request.form.get('deadline')),
+            created_by=current_user.id)
+        log_operation(current_user, '发起', '表单轮次', rnd.id,
+                      rnd.label(), module='academic')
+        flash(f'已发起第 {rnd.round_no} 轮收集（上一轮已自动结束）', 'success')
+        return redirect(url_for('academic.form_submissions', form_id=form_id,
+                                round=rnd.id))
+    except ValueError as e:
+        flash(str(e), 'danger')
+    except Exception as e:  # noqa: BLE001
+        db.session.rollback()
+        flash(f'发起失败：{e}', 'danger')
+    return redirect(url_for('academic.form_submissions', form_id=form_id))
+
+
+@bp.route('/forms/round/<int:round_id>/close', methods=['POST'])
+@login_required
+@perm_required('academic.edit')
+def form_round_close(round_id):
+    """结束某一轮收集（不影响模板继续开放，可再发起新一轮）"""
+    rnd = db.session.get(FormRound, round_id)
+    if not rnd:
+        abort(404)
+    try:
+        form_service.close_round(round_id)
+        log_operation(current_user, '结束', '表单轮次', round_id,
+                      rnd.label(), module='academic')
+        flash(f'已结束本轮：{rnd.label()}', 'success')
+    except ValueError as e:
+        flash(str(e), 'danger')
+    return redirect(url_for('academic.form_submissions',
+                            form_id=rnd.template_id, round=round_id))
 
 
 # ── 管理端：导出 ──────────────────────────────────────────────

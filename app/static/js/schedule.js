@@ -17,7 +17,6 @@
     var STATE = {                 // 运行期状态
         grade: '', className: '',
         room: '',                 // 教室视图当前教室
-        teachingClass: '',        // 教学班视图当前教学班（走班）
         periods: [],              // 当前上下文节次定义（供弹窗节次下拉/网格渲染）
         teachers: null,           // 教师列表缓存 [{uid,name,subject}]
         classes: null,            // 年级班级缓存 {grade:[class_name]}
@@ -391,9 +390,7 @@
         $('#entryForm')[0].reset();
         $('#entryId').val('');
         $('#entryRoom').val('');
-        // 教学班页新增时默认带上当前教学班（走班课）；其它页留空＝行政班课
-        $('#entryTeachingClass').val(CFG.pageType === 'teaching'
-            ? (STATE.teachingClass || CFG.teachingClass || '') : '');
+        $('#entryTeachingClass').val('');   // 走班教学班视图已删（2026-10-10），留空＝行政班课
         $('#entryWeekRange').val('1-18');
         $('#entryNote').val('');
         $('#entrySubject').val('');
@@ -576,9 +573,6 @@
         var t = CFG.pageType;
         if (t === 'master') { loadClass(STATE.grade, STATE.className); return; }
         if (t === 'room' && CFG.urls.roomData) { loadRoom(STATE.room || CFG.room); return; }
-        if (t === 'teaching' && CFG.urls.teachingData) {
-            loadTeaching(STATE.teachingClass || CFG.teachingClass); return;
-        }
         if ((t === 'class' || t === 'grade') && CFG.urls.classData) {
             var params = withWeek({
                 grade: CFG.grade || STATE.grade,
@@ -612,36 +606,6 @@
                 }
             })
             .fail(function () { box.html(gridEmpty('网络错误，加载失败')); });
-    }
-
-    /* 教学班视图（teaching）：切换教学班 → AJAX 换网格 */
-    function loadTeaching(tc) {
-        if (!tc || !CFG.urls.teachingData) { return; }
-        STATE.teachingClass = tc;
-        var box = $('#gridContainer');
-        box.html(gridSpinner());
-        $.getJSON(CFG.urls.teachingData, withWeek({ tc: tc }))
-            .done(function (res) {
-                if (res && res.success) {
-                    applyView(res.data);
-                    $('#tcTitle').text(tc);
-                } else {
-                    box.html(gridEmpty((res && res.message) || '该教学班暂无课表'));
-                }
-            })
-            .fail(function () { box.html(gridEmpty('网络错误，加载失败')); });
-    }
-
-    function initTeachingSwitcher() {
-        STATE.teachingClass = CFG.teachingClass || '';
-        $('#tcSelect').on('change', function () {
-            var tc = $(this).val();
-            if (tc) { loadTeaching(tc); }
-        });
-        // 「排一节走班课」：默认把当前教学班填进弹窗
-        $('#btnAddEntry').on('click', function () {
-            if (STATE.teachingClass) { $('#entryTeachingClass').val(STATE.teachingClass); }
-        });
     }
 
     function initRoomSwitcher() {
@@ -829,44 +793,65 @@
         }, 'image/png');
     }
 
-    /* ── 全校总课表导出 PNG：按年级分块、班级并列，纵向堆叠到一张图 ── */
-    function parseOverviewDom() {
+    /* ── 全校总课表 / 今日课表导出 PNG（2026-10-09 定版）：一个年级一张表 ——
+         行＝班级、列＝节次（早读 + 上午/下午 + 晚自习），表头只有作息分组与节次 ── */
+    function parseOverviewMatrix() {
         var blocks = [];
-        $('#ovContainer .ov-block').each(function () {
+        $('#ovContainer .ovw-block, #todayContainer .ovw-block').each(function () {
             var $b = $(this);
-            var b = { grade: $b.data('grade') || '', classes: [], rows: [] };
-            $b.find('thead tr.ov-class-head th').each(function (i) {
-                if (i >= 2) { b.classes.push($(this).text().trim()); }
+            var b = {
+                grade: $b.data('grade') || '',
+                title: $b.find('.ovw-block-head').text().replace(/\s+/g, ' ').trim(),
+                groups: [],
+                periods: [],
+                classes: []
+            };
+            // 表头第一行：作息分组（colspan 展开为"每列属于哪一组"）
+            $b.find('thead tr.ovw-grp-row th.ovw-grp').each(function () {
+                var span = parseInt($(this).attr('colspan') || '1', 10);
+                var label = $(this).text().trim();
+                for (var i = 0; i < span; i++) { b.groups.push(label); }
             });
-            var curWeekday = '';
+            // 表头第二行：节次列（名称 + 起始时间 + 是否空档/当前节次）
+            $b.find('thead tr.ovw-per-row th.ovw-per-col').each(function () {
+                var $th = $(this);
+                b.periods.push({
+                    name: $th.find('.ovw-period-name').first().text().trim(),
+                    time: ($th.find('small').first().text() || '').trim(),
+                    brk: $th.hasClass('ovw-break-col'),
+                    cur: $th.hasClass('ovw-cur-col')
+                });
+            });
+            // 每班一行：班名（+ 班型/选科小字）与各节次格
             $b.find('tbody tr').each(function () {
                 var $tr = $(this);
-                var $wd = $tr.find('.ov-weekday');
-                if ($wd.length) { curWeekday = $wd.text().trim(); }
-                var $p = $tr.find('.ov-period').clone();
-                $p.find('small').remove();
-                var row = {
-                    weekday: curWeekday,
-                    period: $p.text().trim(),
-                    time: ($tr.find('.ov-period small').first().text() || '').trim(),
-                    brk: $tr.hasClass('ov-break'),
+                var $ch = $tr.find('th.ovw-class-cell');
+                var cls = {
+                    name: $ch.clone().find('.ovw-cmeta').remove().end().text().trim(),
+                    meta: ($ch.find('.ovw-cmeta').first().text() || '').trim(),
                     cells: []
                 };
-                $tr.find('td.ov-cell').each(function () {
+                $tr.find('td.ovw-cell').each(function () {
                     var items = [];
-                    $(this).find('.ov-item').each(function () {
+                    $(this).find('.ovw-item').each(function () {
                         var st = this.getAttribute('style') || '';
                         var c = /--sch:\s*([^;]+)/.exec(st);
+                        var bg = /--sch-bg:\s*([^;]+)/.exec(st);
+                        var fg = /--sch-fg:\s*([^;]+)/.exec(st);
+                        var $sub = $(this).find('.ovw-subj').clone();
+                        $sub.find('.ovw-flag').remove();
                         items.push({
-                            subject: $(this).find('.ov-subj').text().trim(),
-                            teacher: $(this).find('.ov-teacher').text().trim(),
-                            room: $(this).find('.ov-room').text().trim(),
-                            c: c ? c[1].trim() : '#94a3b8'
+                            subject: $sub.text().trim(),
+                            swap: $(this).find('.ovw-flag-swap').length > 0,
+                            teacher: $(this).find('.ovw-teacher').text().trim(),
+                            c: c ? c[1].trim() : '#94a3b8',
+                            bg: bg ? bg[1].trim() : '#f1f5f9',
+                            fg: fg ? fg[1].trim() : '#0f172a'
                         });
                     });
-                    row.cells.push(items);
+                    cls.cells.push(items);
                 });
-                b.rows.push(row);
+                b.classes.push(cls);
             });
             blocks.push(b);
         });
@@ -874,14 +859,34 @@
     }
 
     function exportOverviewPng() {
-        var blocks = parseOverviewDom();
+        var blocks = parseOverviewMatrix();
         if (!blocks.length) { toast('当前页面没有可导出的总课表', 'danger'); return; }
-        var W1 = 34, W2 = 56, WC = 74, headH = 24, rowH = 20, gap = 18, pad = 14, titleH = 44;
-        var maxClasses = blocks.reduce(function (m, b) { return Math.max(m, b.classes.length); }, 1);
-        var W = pad * 2 + W1 + W2 + WC * maxClasses;
-        var H = pad * 2 + titleH + blocks.reduce(function (acc, b) {
-            return acc + 26 + headH + b.rows.length * rowH + gap;
+
+        var pad = 16, titleH = 40, blockH = 24, grpRowH = 22, perRowH = 36,
+            rowH = 46, itemH = 30, gapY = 14, footH = 26;
+        var classW = 118, perW = 92, brkW = 46;
+
+        function colW(p) { return p.brk ? brkW : perW; }
+        function colX(b, pi) {
+            return pad + classW + b.periods.slice(0, pi)
+                .reduce(function (a, q) { return a + colW(q); }, 0);
+        }
+        function blockW(b) {
+            return classW + b.periods.reduce(function (a, p) { return a + colW(p); }, 0);
+        }
+        function rowHeight(cls) {
+            var n = cls.cells.reduce(function (m, its) { return Math.max(m, its.length); }, 0);
+            return Math.max(rowH, n * (itemH + 3) + 8);
+        }
+        function blockHeight(b) {
+            return blockH + grpRowH + perRowH
+                + b.classes.reduce(function (a, cls) { return a + rowHeight(cls); }, 0);
+        }
+        var W = pad * 2 + blocks.reduce(function (m, b) { return Math.max(m, blockW(b)); }, 480);
+        var H = pad * 2 + titleH + footH + blocks.reduce(function (a, b) {
+            return a + blockHeight(b) + gapY;
         }, 0);
+
         var dpr = window.devicePixelRatio || 1;
         var cv = document.createElement('canvas');
         cv.width = W * dpr; cv.height = H * dpr;
@@ -891,68 +896,145 @@
         ctx.fillRect(0, 0, W, H);
         ctx.textBaseline = 'middle';
 
-        var title = '全校总课表 · ' + $('.card-header').first().text().replace(/\s+/g, ' ').trim();
+        var dayLabel = ($('#ovContainer').data('dayLabel') || '').toString();
+        var title = (document.title || '全校总课表').trim()
+            + (dayLabel ? ' · ' + dayLabel : '')
+            + (CFG.week ? ' · 第 ' + CFG.week + ' 周' : '');
         ctx.fillStyle = '#0f172a';
-        ctx.font = 'bold 16px "Microsoft YaHei", "PingFang SC", sans-serif';
-        ctx.fillText(fitText(ctx, title, W - pad * 2), pad, pad + 14);
+        ctx.font = 'bold 18px "Microsoft YaHei", "PingFang SC", sans-serif';
+        ctx.fillText(fitText(ctx, title, W - pad * 2), pad, pad + 16);
+
+        var GROUP_BG = { '早读': '#fef3c7', '上午': '#e0f2fe', '下午': '#ffedd5',
+                         '晚自习': '#e0e7ff' };
 
         var y = pad + titleH;
         blocks.forEach(function (b) {
-            // 年级标题
+            var bw = blockW(b);
+            var top = y;
+            // 块标题条
             ctx.fillStyle = '#1e293b';
-            ctx.font = 'bold 13px "Microsoft YaHei", "PingFang SC", sans-serif';
-            ctx.fillText(fitText(ctx, b.grade + '（' + b.classes.length + ' 个班）', W - pad * 2),
-                pad, y + 12);
-            y += 26;
-
-            // 表头
+            ctx.fillRect(pad, y, bw, blockH);
+            ctx.fillStyle = '#f1f5f9';
+            ctx.font = 'bold 12.5px "Microsoft YaHei", "PingFang SC", sans-serif';
+            ctx.fillText(fitText(ctx, b.title, bw - 16), pad + 8, y + blockH / 2);
+            y += blockH;
+            // 表头底色（班级占两行 + 节次两行）
             ctx.fillStyle = '#eef2f7';
-            ctx.fillRect(pad, y, W1 + W2 + WC * b.classes.length, headH);
+            ctx.fillRect(pad, y, bw, grpRowH + perRowH);
             ctx.fillStyle = '#334155';
-            ctx.font = 'bold 11px "Microsoft YaHei", "PingFang SC", sans-serif';
+            ctx.font = 'bold 11.5px "Microsoft YaHei", "PingFang SC", sans-serif';
             ctx.textAlign = 'center';
-            ctx.fillText('星期', pad + W1 / 2, y + headH / 2);
-            ctx.fillText('节次', pad + W1 + W2 / 2, y + headH / 2);
-            b.classes.forEach(function (cn, i) {
-                ctx.fillText(fitText(ctx, cn, WC - 6), pad + W1 + W2 + WC * i + WC / 2, y + headH / 2);
-            });
-            y += headH;
-
-            // 数据行
-            b.rows.forEach(function (r) {
-                ctx.fillStyle = r.brk ? '#fafbfd' : '#fff';
-                ctx.fillRect(pad, y, W1 + W2 + WC * b.classes.length, rowH);
-                ctx.textAlign = 'center';
-                ctx.fillStyle = '#475569';
+            ctx.fillText('班级', pad + classW / 2, y + (grpRowH + perRowH) / 2);
+            // 第一行：作息分组（连续同组合并成一格）
+            b.periods.forEach(function (p, pi) {
+                var label = b.groups[pi] || '';
+                var prev = pi > 0 ? (b.groups[pi - 1] || '') : null;
+                if (!label || prev === label) { return; }
+                var span = 1;
+                for (var k = pi + 1; k < b.periods.length; k++) {
+                    if ((b.groups[k] || '') === label) { span++; } else { break; }
+                }
+                var gw = 0;
+                for (var j = pi; j < pi + span; j++) { gw += colW(b.periods[j]); }
+                var gx = colX(b, pi);
+                ctx.fillStyle = GROUP_BG[label] || '#f1f5f9';
+                ctx.fillRect(gx, y, gw, grpRowH);
+                ctx.fillStyle = '#334155';
                 ctx.font = 'bold 10.5px "Microsoft YaHei", "PingFang SC", sans-serif';
-                ctx.fillText(fitText(ctx, r.weekday, W1 - 4), pad + W1 / 2, y + rowH / 2);
-                ctx.font = '9.5px "Microsoft YaHei", "PingFang SC", sans-serif';
-                ctx.fillStyle = '#64748b';
-                ctx.fillText(fitText(ctx, r.period, W2 - 4), pad + W1 + W2 / 2, y + rowH / 2);
-                ctx.textAlign = 'left';
-                r.cells.forEach(function (items, ci) {
-                    var cx = pad + W1 + W2 + WC * ci;
-                    var label = items.map(function (it) {
-                        return it.subject + (it.teacher ? ' ' + it.teacher : '');
-                    }).join(' / ');
-                    if (label) {
-                        ctx.fillStyle = items[0].c;
-                        ctx.fillRect(cx + 2, y + 3, 2, rowH - 6);
-                        ctx.fillStyle = '#0f172a';
-                        ctx.font = '10px "Microsoft YaHei", "PingFang SC", sans-serif';
-                        ctx.fillText(fitText(ctx, label, WC - 10), cx + 8, y + rowH / 2);
+                ctx.fillText(fitText(ctx, label, gw - 6), gx + gw / 2, y + grpRowH / 2);
+            });
+            // 第二行：节次名 + 起始时间
+            b.periods.forEach(function (p, pi) {
+                var cx = colX(b, pi);
+                var w = colW(p);
+                ctx.fillStyle = p.brk ? '#f1f5f9' : (p.cur ? '#d1fae5' : '#f8fafc');
+                ctx.fillRect(cx, y + grpRowH, w, perRowH);
+                ctx.fillStyle = '#334155';
+                ctx.font = 'bold 11px "Microsoft YaHei", "PingFang SC", sans-serif';
+                ctx.fillText(fitText(ctx, p.name, w - 6), cx + w / 2, y + grpRowH + 12);
+                if (p.time) {
+                    ctx.fillStyle = '#94a3b8';
+                    ctx.font = '9px "Microsoft YaHei", "PingFang SC", sans-serif';
+                    ctx.fillText(fitText(ctx, p.time, w - 6), cx + w / 2, y + grpRowH + 25);
+                }
+            });
+            ctx.textAlign = 'left';
+            y += grpRowH + perRowH;
+            // 数据行：一班一行
+            b.classes.forEach(function (cls) {
+                var rh = rowHeight(cls);
+                ctx.fillStyle = '#f8fafc';
+                ctx.fillRect(pad, y, classW, rh);
+                ctx.fillStyle = '#1d4ed8';
+                ctx.font = 'bold 11.5px "Microsoft YaHei", "PingFang SC", sans-serif';
+                ctx.fillText(fitText(ctx, cls.name, classW - 12), pad + 6,
+                    y + (cls.meta ? 14 : rh / 2));
+                if (cls.meta) {
+                    ctx.fillStyle = '#94a3b8';
+                    ctx.font = '9px "Microsoft YaHei", "PingFang SC", sans-serif';
+                    ctx.fillText(fitText(ctx, cls.meta, classW - 12), pad + 6, y + 27);
+                }
+                cls.cells.forEach(function (items, pi) {
+                    var p = b.periods[pi] || {};
+                    var cx = colX(b, pi);
+                    var w = colW(p);
+                    if (p.brk) {
+                        ctx.fillStyle = '#f1f5f9';
+                        ctx.fillRect(cx, y, w, rh);
+                    } else if (p.cur) {
+                        ctx.fillStyle = '#ecfdf5';
+                        ctx.fillRect(cx, y, w, rh);
                     }
+                    var iy = y + 4;
+                    items.forEach(function (it) {
+                        var ih = Math.min(itemH,
+                            Math.floor((rh - 8) / Math.max(items.length, 1)) - 3);
+                        ctx.fillStyle = it.bg;
+                        ctx.fillRect(cx + 3, iy, w - 6, ih);
+                        ctx.fillStyle = it.c;
+                        ctx.fillRect(cx + 3, iy, 2, ih);
+                        ctx.fillStyle = it.fg;
+                        ctx.font = 'bold 10.5px "Microsoft YaHei", "PingFang SC", sans-serif';
+                        ctx.fillText(fitText(ctx, it.subject + (it.swap ? '（调）' : ''), w - 14),
+                            cx + 9, iy + 10);
+                        if (it.teacher) {
+                            ctx.fillStyle = '#64748b';
+                            ctx.font = '9.5px "Microsoft YaHei", "PingFang SC", sans-serif';
+                            ctx.fillText(fitText(ctx, it.teacher, w - 14), cx + 9, iy + 21);
+                        }
+                        iy += ih + 3;
+                    });
                 });
-                ctx.strokeStyle = '#e5eaf1';
+                ctx.strokeStyle = '#eef2f7';
                 ctx.lineWidth = 1;
                 ctx.beginPath();
-                ctx.moveTo(pad, y + rowH + .5);
-                ctx.lineTo(pad + W1 + W2 + WC * b.classes.length, y + rowH + .5);
+                ctx.moveTo(pad, y + rh + .5);
+                ctx.lineTo(pad + bw, y + rh + .5);
                 ctx.stroke();
-                y += rowH;
+                y += rh;
             });
-            y += gap;
+            // 竖线：班级列右界 + 每个节次列
+            ctx.strokeStyle = '#e2e8f0';
+            ctx.beginPath();
+            ctx.moveTo(pad + classW + .5, top + blockH);
+            ctx.lineTo(pad + classW + .5, y);
+            var lx = pad + classW;
+            b.periods.forEach(function (p) {
+                lx += colW(p);
+                ctx.moveTo(lx + .5, top + blockH);
+                ctx.lineTo(lx + .5, y);
+            });
+            ctx.stroke();
+            // 块边框
+            ctx.strokeStyle = '#cbd5e1';
+            ctx.strokeRect(pad + .5, top + .5, bw, y - top);
+            y += gapY;
         });
+
+        ctx.fillStyle = '#94a3b8';
+        ctx.font = '11px "Microsoft YaHei", "PingFang SC", sans-serif';
+        ctx.fillText('导出时间：' + new Date().toLocaleString('zh-CN', { hour12: false }),
+            pad, H - pad - 6);
 
         cv.toBlob(function (blob) {
             var a = document.createElement('a');
@@ -966,7 +1048,7 @@
         }, 'image/png');
     }
 
-    /* ══════════════════════════════════════════════════════════════
+/* ══════════════════════════════════════════════════════════════
      * 分享链接（批次 D）：后端签名短链，7 天有效；打开仍需登录+查看权限
      * ══════════════════════════════════════════════════════════════ */
     function shareSchedule() {
@@ -1111,27 +1193,6 @@
     }
 
     /* ══════════════════════════════════════════════════════════════
-     * 今日课表：时钟 + 30 秒自动刷新
-     * ══════════════════════════════════════════════════════════════ */
-    function initToday() {
-        function tick() {
-            var d = new Date();
-            var pad = function (n) { return n < 10 ? '0' + n : '' + n; };
-            $('#clockText').text(pad(d.getHours()) + ':' + pad(d.getMinutes()) + ':' + pad(d.getSeconds()));
-        }
-        if ($('#clockText').length) { tick(); setInterval(tick, 1000); }
-        var timer = null;
-        function schedule() {
-            if (timer) { clearInterval(timer); timer = null; }
-            if ($('#autoRefresh').is(':checked')) {
-                timer = setInterval(function () { window.location.reload(); }, 30000);
-            }
-        }
-        $('#autoRefresh').on('change', schedule);
-        schedule();
-    }
-
-    /* ══════════════════════════════════════════════════════════════
      * 节次配置：动态增删行
      * ══════════════════════════════════════════════════════════════ */
     function initPeriods() {
@@ -1220,7 +1281,7 @@
     function initInspection() {
         function nav() {
             var date = $('#inspDate').val(), grade = $('#inspGrade').val();
-            var base = CFG.periodUrlBase || CFG.todayUrl;
+            var base = CFG.periodUrlBase;
             if (!base) { return; }
             var u = new URL(base, window.location.origin);
             if (date) { u.searchParams.set('date', date); } else { u.searchParams.delete('date'); }
@@ -1250,9 +1311,7 @@
             case 'grade': initEntryModal(); initCharts(); initDragMove(); break;
             case 'class': initEntryModal(); initCharts(); initDragMove(); break;
             case 'room': initEntryModal(); initDragMove(); initRoomSwitcher(); break;
-            case 'teaching': initEntryModal(); initDragMove(); initTeachingSwitcher(); break;
             case 'teacher': initTeacher(); initCharts(); break;
-            case 'today': initToday(); break;
             case 'periods': initPeriods(); break;
             case 'versions': initVersions(); break;
             case 'import': initImport(); break;

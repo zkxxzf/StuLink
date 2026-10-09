@@ -58,7 +58,7 @@ def _current_headteacher_rows(grade):
 
 
 def snapshot_exam(exam, source='import', rows=None, replace=False):
-    """把任课安排写入某场考试的快照。
+    """把任课教师映射（当时状态）写入某场考试的快照。
 
     rows=None  ：从当前 TeacherSubjectLink（该年级 active）复制
     rows=[...] ：显式给定 [{class_name, subject, teacher_name, user_id?}]（Excel 回填用）

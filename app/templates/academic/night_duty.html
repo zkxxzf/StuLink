@@ -32,22 +32,6 @@
                                base_kwargs={'grade': grade} if grade else {}) }}
     </div>
     <div class="d-flex gap-2 flex-wrap">
-        {% if can_edit and data.periods %}
-        <form method="post" action="{{ url_for('academic.night_duty_auto', sid=ts.id) }}"
-              class="d-flex gap-2 align-items-center no-print"
-              onsubmit="return confirm('一键均衡排班将覆盖现有值班安排，继续？');">
-            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-            {% if grade %}<input type="hidden" name="grade" value="{{ grade }}">{% endif %}
-            <select class="form-select form-select-sm" name="max_per_week" style="width:auto">
-                <option value="1">每人每周 ≤1 次</option>
-                <option value="2" selected>每人每周 ≤2 次</option>
-                <option value="3">每人每周 ≤3 次</option>
-            </select>
-            <button class="btn btn-sm btn-success" type="submit">
-                <i class="bi bi-magic"></i> 一键均衡排班
-            </button>
-        </form>
-        {% endif %}
         <a class="btn btn-sm btn-outline-dark no-print"
            href="{{ url_for('academic.night_duty_export', sid=ts.id, grade=grade or none) }}">
             <i class="bi bi-file-earmark-excel"></i> 导出 Excel
@@ -67,22 +51,6 @@
        href="{{ url_for('academic.night_duty', sid=ts.id, grade=g) }}">{{ g }}</a>
     {% endfor %}
 </div>
-
-{% if conflicts %}
-<div class="alert alert-warning border-warning-subtle no-print">
-    <div class="fw-bold mb-1"><i class="bi bi-exclamation-triangle-fill"></i> 值班提醒</div>
-    <div class="small">
-        {% for c in conflicts[:8] %}
-        {% if c.type == 'same_day' %}
-        <div>· {{ c.teacher }} 在 {{ c.weekday_text }} 被排了 {{ c.count }} 节
-            （{{ c.slots|join('、') }}）—— 一晚应只值一节</div>
-        {% else %}
-        <div>· {{ c.teacher }} 本周值班 {{ c.count }} 次，偏多，注意均衡</div>
-        {% endif %}
-        {% endfor %}
-    </div>
-</div>
-{% endif %}
 
 {% if not data.periods %}
 <div class="card">

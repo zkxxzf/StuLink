@@ -1,11 +1,12 @@
 # StuLink v1.18.8.0 2026-10-09
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
-"""任课安排 / 备课组长（2026-09-25）。
+"""备课组长（2026-09-25）。
 
-- `/academic/duty`：任课安排表（按班级 / 按教师 / 按学科 三种视角，支持周次与年级过滤）
-- `/academic/leaders`：备课组长名单（按学科分组维护，含职责与备课组范围）
+`/academic/leaders`：备课组长名单（按学科分组维护，含职责与备课组范围），
+落库在 academic.db.subject_leaders。
 
-任课安排由课表实时聚合、不落库；备课组长落库在 academic.db.subject_leaders。
+任课安排（原 `/academic/duty`）已于 2026-10-10 下线，教师-学科关系以
+「任课教师映射」（TeacherSubjectLink）为唯一依据。
 """
 import io
 from datetime import datetime
@@ -27,101 +28,6 @@ from app.utils.helpers import log_operation
 
 _XLSX_MIME = ('application/vnd.openxmlformats-officedocument'
               '.spreadsheetml.sheet')
-
-DUTY_VIEWS = ('class', 'teacher', 'subject')
-
-
-def _pick_schedule():
-    """选定学期：?sid= 优先，其次当前启用中的学期。"""
-    sid = request.args.get('sid', type=int) or request.form.get('sid', type=int)
-    if sid:
-        ts = db.session.get(TermSchedule, sid)
-        if ts:
-            return ts
-    return get_active_schedule()
-
-
-def _filters():
-    week = request.args.get('week', type=int) or None
-    grade = (request.args.get('grade') or '').strip() or None
-    class_type = (request.args.get('class_type') or '').strip() or None
-    direction = (request.args.get('direction') or '').strip() or None
-    view = (request.args.get('view') or 'class').strip()
-    if view not in DUTY_VIEWS:
-        view = 'class'
-    return week, grade, view, class_type, direction
-
-
-def _warn_hours():
-    """周课时预警阈值（默认 16 节/周，可用 ?warn= 覆盖）"""
-    return request.args.get('warn', type=int) or 16
-
-
-# ── 任课安排 ───────────────────────────────────────────────────────────────
-
-@bp.route('/duty')
-@login_required
-@perm_required('academic.view')
-def duty_table():
-    """任课安排表：按年级分块列出各班的学科、任课教师与周课时数。"""
-    ts = _pick_schedule()
-    week, grade, view, class_type, direction = _filters()
-    warn_hours = _warn_hours()
-    data = None
-    if ts:
-        if view == 'teacher':
-            data = {'teachers': svc.build_teacher_duty(ts.id, week=week, grade=grade,
-                                                       warn_hours=warn_hours)}
-        elif view == 'subject':
-            data = {'subjects': svc.build_subject_duty(ts.id, week=week, grade=grade)}
-        else:
-            data = svc.build_class_duty(ts.id, week=week, grade=grade,
-                                        class_type=class_type, direction=direction)
-    return render_template('academic/duty_table.html',
-                           ts=ts, data=data, week=week, grade=grade, view=view,
-                           class_type=class_type, direction=direction,
-                           warn_hours=warn_hours,
-                           class_types=svc.class_type_options(),
-                           schedules=sch_svc.list_schedules())
-
-
-@bp.route('/duty/export')
-@login_required
-@perm_required('academic.view')
-def duty_export():
-    """导出任课安排 Excel（与页面三种视角口径一致）"""
-    ts = _pick_schedule()
-    if not ts:
-        flash('尚未建立学期课表，无法导出任课安排', 'warning')
-        return redirect(url_for('academic.schedule_manage'))
-    week, grade, view, class_type, direction = _filters()
-    buf = svc.export_duty_workbook(ts.id, week=week, grade=grade, view=view,
-                                   class_type=class_type, direction=direction)
-    stamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-    suffix = {'class': '按班级', 'teacher': '按教师', 'subject': '按学科'}[view]
-    return send_file(buf, as_attachment=True,
-                     download_name=f'{ts.name}_任课安排_{suffix}_{stamp}.xlsx',
-                     mimetype=_XLSX_MIME)
-
-
-@bp.route('/api/duty')
-@login_required
-@perm_required('academic.view')
-def api_duty():
-    """任课安排 JSON（供其它页面/大屏复用）"""
-    ts = _pick_schedule()
-    if not ts:
-        return jsonify({'success': False, 'message': '尚未建立学期课表', 'data': None}), 400
-    week, grade, view, class_type, direction = _filters()
-    if view == 'teacher':
-        data = {'teachers': svc.build_teacher_duty(ts.id, week=week, grade=grade,
-                                                   warn_hours=_warn_hours())}
-    elif view == 'subject':
-        data = {'subjects': svc.build_subject_duty(ts.id, week=week, grade=grade)}
-    else:
-        data = svc.build_class_duty(ts.id, week=week, grade=grade)
-    return jsonify({'success': True, 'message': 'ok', 'data': data})
-
 
 # ── 备课组长名单 ───────────────────────────────────────────────────────────
 
@@ -263,12 +169,13 @@ def night_duty(sid):
     if not ts:
         abort(404)
     grade = (request.args.get('grade') or '').strip() or None
-    data = nd.get_roster(sid, grades=[grade] if grade else None)
+    # 2026-10-10 优化：原 get_roster / today_duties / teacher_stats 各全查一次
+    # night_duties 表（3 条 SQL），改为一次取数 + 内存分组，页面输出不变
+    data, today, stats = nd.get_page_data(sid, grades=[grade] if grade else None)
     return render_template('academic/night_duty.html',
                            ts=ts, data=data, grade=grade or '',
-                           conflicts=nd.check_conflicts(sid),
-                           today=nd.today_duties(sid),
-                           stats=nd.teacher_stats(sid),
+                           today=today,
+                           stats=stats,
                            teachers=nd.teacher_pool(),
                            can_edit=_night_editable(ts),
                            schedules=sch_svc.list_schedules(),
@@ -276,24 +183,8 @@ def night_duty(sid):
                            weekday_names=WEEKDAY_NAMES)
 
 
-@bp.route('/schedule/<int:sid>/night-duty/auto', methods=['POST'])
-@login_required
-@perm_required('academic.timetable')
-def night_duty_auto(sid):
-    """一键均衡排班"""
-    ts = db.session.get(TermSchedule, sid)
-    if not ts:
-        abort(404)
-    if not _night_editable(ts):
-        flash('该学期已归档，不能修改值班表', 'warning')
-        return redirect(url_for('academic.night_duty', sid=sid))
-    max_per_week = request.form.get('max_per_week', type=int) or 2
-    grade = (request.form.get('grade') or '').strip() or None
-    ok, msg = nd.auto_assign(sid, max_per_week=max_per_week,
-                             grades=[grade] if grade else None,
-                             operator=current_user)
-    flash(msg, 'success' if ok else 'warning')
-    return redirect(url_for('academic.night_duty', sid=sid, grade=grade or ''))
+# 2026-10-10：/schedule/<sid>/night-duty/auto（一键均衡排班）已下线 ——
+# 值班由教务自行安排，系统只保留手工指定/清空、今日值班、统计与导出。
 
 
 @bp.route('/schedule/<int:sid>/night-duty/set', methods=['POST'])
