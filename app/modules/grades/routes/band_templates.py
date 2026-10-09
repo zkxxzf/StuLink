@@ -3,6 +3,7 @@
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 from flask import render_template, request, jsonify, abort
 from flask_login import login_required, current_user
+import json
 
 from app.extensions import db
 from app.models import DictCategory
@@ -10,29 +11,64 @@ from app.models.grades import Exam, BandTemplate
 from app.modules.grades import bp
 from app.utils.decorators import perm_required
 
-# 内置模板：首次访问时自动写入（幂等），保证「四层 / 高考线」一直在
+# 内置模板：首次访问时自动写入（幂等），保证「四层 / 默认模板」一直在
+# v1.18.7.1 用户口径：默认模板改为 985线 / 211线 / 特控线 / 本科线 四层，
+# 低于本科线即「未上线」（不单列一层，由“不落任何层”自然得出）。
+BUILTIN_LAYERS_NAME = '默认模板'      # 默认模板名（内置不可删）
 BUILTIN_TEMPLATES = [
     {'name': '四层', 'lower_mode': 'ratio', 'sort_order': 1, 'remark': '常用：按比例分层',
      'layers': [{'name': '优秀', 'ratio': 20}, {'name': '良好', 'ratio': 60},
                 {'name': '及格', 'ratio': 95}, {'name': '待提升', 'ratio': 0}]},
-    {'name': '高考线', 'lower_mode': 'score', 'sort_order': 2, 'remark': '按分数线分层',
-     'layers': [{'name': '清北', 'ratio': None}, {'name': '985', 'ratio': None},
-                {'name': '211', 'ratio': None}, {'name': '特控', 'ratio': None},
-                {'name': '本科', 'ratio': None}, {'name': '未上线', 'ratio': None}]},
+    # seq=1 最高：985线 → 211线 → 特控线 → 本科线；本科线以下 = 未上线
+    {'name': BUILTIN_LAYERS_NAME, 'lower_mode': 'score', 'sort_order': 2,
+     'remark': '默认：985/211/特控/本科 四层，本科线以下即未上线',
+     'layers': [{'name': '985线', 'ratio': None}, {'name': '211线', 'ratio': None},
+                {'name': '特控线', 'ratio': None}, {'name': '本科线', 'ratio': None}]},
 ]
+# 旧版内置名 → 新名（历史上叫「高考线」，含清北/未上线六层）：就地迁移，不丢绑定
+LEGACY_RENAME = {'高考线': BUILTIN_LAYERS_NAME}
 
 
 def ensure_builtin_templates():
-    """写入/补齐内置模板（幂等；已存在的同名模板不改动，避免覆盖用户改名）"""
+    """写入/补齐内置模板（幂等）
+
+    - 同名不存在 → 新建
+    - 旧名「高考线」→ 重命名为「默认模板」并刷新为四层（保留 id，考试绑定不断）
+    - 已是内置同名模板 → 层级与用户自定义可能不同，不强制覆盖；
+      但默认模板必须是四层，所以只对它做结构校正（层名按规范重写）。
+    """
+    for old, new in LEGACY_RENAME.items():
+        obj = BandTemplate.query.filter_by(name=old).first()
+        if obj and not BandTemplate.query.filter_by(name=new).first():
+            obj.name = new
+            obj.is_builtin = True
+            obj.layers_json = json.dumps(
+                BUILTIN_TEMPLATES[1]['layers'], ensure_ascii=False)
+            obj.lower_mode = BUILTIN_TEMPLATES[1]['lower_mode']
+            obj.remark = BUILTIN_TEMPLATES[1]['remark']
     for t in BUILTIN_TEMPLATES:
         obj = BandTemplate.query.filter_by(name=t['name']).first()
         if obj:
+            # 默认模板被改坏（层数/层名不符）时校正回规范四层
+            if (t['name'] == BUILTIN_LAYERS_NAME
+                    and [x.get('name') for x in obj.get_layers()] !=
+                        [x['name'] for x in t['layers']]):
+                obj.set_layers(t['layers'])
+                obj.lower_mode = t['lower_mode']
+                obj.is_builtin = True
             continue
         obj = BandTemplate(name=t['name'], lower_mode=t['lower_mode'],
                            remark=t['remark'], is_builtin=True,
                            sort_order=t['sort_order'])
         obj.set_layers(t['layers'])
         db.session.add(obj)
+    # v1.18.7.1 修正 bug：历史上给 is_builtin 加字段时，迁移把已有行全标成了内置，
+    # 导致用户手工建的模板也没有删除按钮。内置与否以**名字**为唯一依据：
+    # 不在规范定义（含旧内置名）里的-list 全部归为可删。
+    builtin_names = {t['name'] for t in BUILTIN_TEMPLATES} | set(LEGACY_RENAME)
+    for obj in BandTemplate.query.all():
+        if obj.name not in builtin_names and obj.is_builtin:
+            obj.is_builtin = False
     db.session.commit()
 
 

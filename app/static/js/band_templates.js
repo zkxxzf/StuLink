@@ -156,6 +156,38 @@ $(function () {
         renderLayers(readLayers().concat([{name: '', ratio: null}]));
         $('#tplLayers tbody tr').last().find('.tl-name').focus();
     });
+    /* v1.18.7.1 支持从 Markdown / Excel / 纯文本直接粘贴多行层名
+       （表格形式：一行一层；自动去掉 | - 等表格符号与表头行）*/
+    $('#tplLayers').on('paste', '.tl-name', function (e) {
+        var txt = (e.originalEvent && e.originalEvent.clipboardData
+                   ? e.originalEvent.clipboardData.getData('text') : '');
+        if (!txt) return;
+        var lines = String(txt).replace(/\r/g, '').split('\n');
+        if (lines.length < 2 && txt.indexOf('\t') < 0 && txt.indexOf('|') < 0) return;
+        e.preventDefault();
+        var rows = readLayers(), added = 0;
+        lines.forEach(function (ln) {
+            var s = ln.trim();
+            if (!s) return;
+            var cells = (s.indexOf('|') >= 0 ? s.split('|') : s.split('\t'))
+                .map(function (x) { return x.trim(); })
+                .filter(function (x) { return x !== ''; });
+            if (!cells.length) return;
+            var nm = cells[0].replace(/^[\-*#>]\s*/, '').trim();
+            if (!nm || /^[-: ]+$/.test(nm)) return;                 // 分隔行 |---|---|
+            if (/^(层名|名称|序号|层级|line|name)$/i.test(nm)) return;  // 表头行
+            var num = null;
+            if (cells.length > 1) {
+                var v = parseFloat(String(cells[cells.length - 1]).replace(/[=%]/g, ''));
+                if (!isNaN(v)) num = v;
+            }
+            rows.push({name: nm, ratio: num});
+            added++;
+        });
+        if (!added) { $(this).val(txt.split('\n')[0]); return; }
+        renderLayers(rows);
+        alert('已粘贴 ' + added + ' 个层（请核对层名与顺序，第 1 层最高）');
+    });
     $('#tplLayers').on('keydown', '.tl-name', function (e) {
         // 末行按回车 = 再新增一行，连续录入不用反复点按钮
         if (e.key === 'Enter'){

@@ -63,8 +63,10 @@ EXAM_FILES = [
 
 # 层名映射：源名 → (系统层名, 是否导入)
 LAYER_MAP = {
-    '一本线': ('特控', True), '特控线': ('特控', True), '特控': ('特控', True),
-    '二本线': ('本科', True), '本科线': ('本科', True), '本科': ('本科', True),
+    '一本线': ('特控', True), '一本': ('特控', True),
+    '特控线': ('特控', True), '特控': ('特控', True),
+    '二本线': ('本科', True), '二本': ('本科', True),
+    '本科线': ('本科', True), '本科': ('本科', True),
     '211线': ('211', False), '211': ('211', False),
 }
 SUBJECTS_SET = set(SUBJECTS) | {'英语'}     # 兼容 Excel 写「英语」而系统内部叫「外语」
@@ -92,6 +94,64 @@ def detect_direction(fname):
     if '物理' in fname:
         return '物理'
     return ''
+
+
+def read_custom_params(path):
+    """版式 B（主流，16/17 个文件都是这布局）：「自定义参数」的「学科分数线」区
+
+    r21  学科分数线 | 211   | 一本/特控 | 二本/本科 | 未上线   ← 表头（列=层名）
+    r22  总分      | 841   | 759     | 655
+    r23… 语文/数学/英语/物理/…  → 各科单科线
+    遇到「目标设定」或其它区则停（目标设定是班级目标人数，不是线）。
+    """
+    wb = openpyxl.load_workbook(path, read_only=True, data_only=True)
+    cand = [n for n in wb.sheetnames if '自定义参数' in n]
+    if not cand:
+        wb.close()
+        return [], ''
+    ws = wb[cand[0]]
+    rows = [[s_of(c) for c in (r or [])]
+            for r in ws.iter_rows(min_row=1, max_row=min(ws.max_row or 1, 60),
+                                  values_only=True)]
+    wb.close()
+    hi = None
+    for i, cells in enumerate(rows):
+        if any(c == '学科分数线' for c in cells):
+            hi = i
+            break
+    if hi is None:
+        return [], ''
+    hdr = rows[hi]
+    # 列 -> 层名（只收能映射到系统层的列；「未上线」是兜底文本，不导入）
+    lay_cols = []
+    for j, c in enumerate(hdr):
+        if c == '学科分数线' or not c:
+            continue
+        if c in LAYER_MAP:
+            lay, keep = LAYER_MAP[c]
+            lay_cols.append((j, lay, keep))
+    if not lay_cols:
+        return [], ''
+    out = []
+    for cells in rows[hi + 1:]:
+        if not cells or not cells[0]:
+            continue
+        lab = cells[0]
+        if lab in ('目标设定', '班级分类') or '目标' in lab:
+            break                                  # 离开分数线区
+        if lab == TOTAL_SUBJECT or '总分' in lab:
+            subj = TOTAL_SUBJECT
+        else:
+            key = SUBJECT_ALIAS.get(lab, lab)
+            subj = key if key in set(SUBJECTS) else ''
+        if not subj:
+            continue
+        for j, lay, keep in lay_cols:
+            v = num_of(cells[j]) if j < len(cells) else None
+            if v is None:
+                continue
+            out.append({'layer': lay, 'keep': keep, 'subject': subj, 'value': v})
+    return out, cand[0]
 
 
 def scan_workbook(path):
@@ -169,7 +229,10 @@ def main():
                 if not os.path.exists(p):
                     skipped.append('%s 文件缺失' % fn[:24])
                     continue
-                got, sheet = scan_workbook(p)
+                # 优先用「自定义参数」的「学科分数线」区（覆盖绝大多数文件）
+                got, sheet = read_custom_params(p)
+                if not got:
+                    got, sheet = scan_workbook(p)          # 再试「参数设置」区
                 d = detect_direction(fn)
                 for r in got:
                     r['direction'] = d

@@ -9,8 +9,11 @@
 <div class="alert alert-light border small">
     模板只定义「<b>有哪些层</b>」（层名与顺序，第 1 层最高），以及可选的各层默认比例。
     一场考试选定模板后，它的划线与<b>成绩分析</b>（分层人数、各班上线人数 / 上线率、自由表里的「层」维度）
-    都按这个模板的层来算；<b>换一场考试可以选另一个模板</b>（如期末用「高考线」、限时练用「四层」）。
-    没绑定模板或没划线的考试，分析只做基础数据展示，不会出分层与上线类指标。
+    都按这个模板的层来算；<b>换一场考试可以选另一个模板</b>。
+    没绑定模板或没划线的考试，分析只做基础数据展示，不会出分层与上线类指标。<br>
+    <b>默认模板</b>（内置）为四层：<b>985线 → 211线 → 特控线 → 本科线</b>，
+    <b>低于本科线即「未上线」</b>（不单列一层）。默认模板与其他内置模板<b>不可删除</b>，
+    你手工新建的模板可点「删除」移除（已绑定的考试会自动解除绑定）。
 </div>
 
 <div class="card">
@@ -64,6 +67,7 @@
         </div>
         <div class="d-flex align-items-center mb-2">
           <span class="small fw-semibold">层（从上到下，第 1 层最高）</span>
+          <span class="text-muted small ms-2">可直接粘贴 Markdown / Excel 表格（一行一层）</span>
           <button class="btn btn-sm btn-outline-success ms-auto" id="tplLayerAdd"><i class="bi bi-plus"></i> 新增层</button>
         </div>
         <table class="table table-sm align-middle" id="tplLayers">
