@@ -1,4 +1,4 @@
-# StuLink v1.18.7.1 2026-09-30
+# StuLink v1.18.7.1 2026-10-09
 # 任课教师映射：矩阵维护（按年级）+ 教师安排表批量导入 + 自动开户
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 import io

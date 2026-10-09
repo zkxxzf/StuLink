@@ -1,4 +1,4 @@
-# StuLink v1.18.7.1 2026-09-30
+# StuLink v1.18.7.1 2026-10-09
 # 成绩导入服务：Excel 解析（模板 A/B 识别 / 年级列校验 / 学号匹配主库 / 分批行集规范化）
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 import openpyxl

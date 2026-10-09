@@ -1,4 +1,4 @@
-# StuLink v1.18.7.1 2026-09-30
+# StuLink v1.18.7.1 2026-10-09
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 """教务 · 教师业绩库：录入 / 列表筛选分页 / 审核（含审核意见）/ 统计 / 导出。
 

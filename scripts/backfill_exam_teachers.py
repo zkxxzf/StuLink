@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-# StuLink v1.18.7.1 2026-09-30
+# StuLink v1.18.7.1 2026-10-09
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 """从旧成绩 Excel 回填「考试当时任课快照」（t5，幂等 + dry-run）
 
