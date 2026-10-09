@@ -60,8 +60,13 @@ _TB = Border(left=Side(style='thin'), right=Side(style='thin'),
 _CENTER = Alignment(horizontal='center', vertical='center', wrap_text=True)
 
 
-def _fmt_avg(v):
-    return v if v is not None else '—'
+def _fmt_avg(c):
+    """成绩单元格：去差均分；有任课教师时换行附在下方（与页面所见一致）。
+    c 为 cell dict（含 trim_avg / teacher），总分列无 teacher 时保持单行。"""
+    v = c.get('trim_avg')
+    s = v if v is not None else '—'
+    t = c.get('teacher')
+    return f'{s}\n{t}' if t else s
 
 
 def _fmt_online(n, rate):
@@ -76,7 +81,7 @@ def _row_values(row, subjects):
             row.get('direction', ''), row.get('class_type', ''), row.get('headteacher', '')]
     for sub in subjects:
         c = (row.get('cells') or {}).get(sub) or {}
-        vals.append(_fmt_avg(c.get('trim_avg')))
+        vals.append(_fmt_avg(c))
         vals.append(_fmt_online(c.get('l1_n'), c.get('l1_rate')))
         vals.append(_fmt_online(c.get('l2_n'), c.get('l2_rate')))
     return vals
@@ -134,6 +139,10 @@ def _build_workbook(data):
             if fill is not None:
                 c.fill = fill
                 c.font = Font(bold=True)
+        # 班级行带任课教师（成绩下方换行）→ 加高行，避免教师名被截断
+        cells = r.get('cells') or {}
+        if any((cells.get(s) or {}).get('teacher') for s in subjects):
+            ws.row_dimensions[ri].height = 30
     ws.freeze_panes = 'G3'
     widths = [8, 12, 10, 8, 10, 14]
     for i, w in enumerate(widths, start=1):
