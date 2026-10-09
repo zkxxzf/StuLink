@@ -1,4 +1,4 @@
-# StuLink v1.18.7.0 2026-09-30
+# StuLink v1.18.7.1 2026-09-30
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 """教务工作台首页（2026-09-26）。
 
@@ -66,7 +66,7 @@ def academic_home():
             ScheduleEntry.term_schedule_id == ts.id,
             ScheduleEntry.is_deleted.is_(False)).distinct().all()
         timetable['classes'] = len([r for r in rows if r[1]])
-        # v1.18.7.0 审核（🟡-1）：原实现用 _count(聚合查询) 会对“已聚合的 1 行”再 .count()，
+        # v1.18.7.1 审核（🟡-1）：原实现用 _count(聚合查询) 会对“已聚合的 1 行”再 .count()，
         # 结果恒为 1；改为 .scalar() 取 distinct teacher_uid 真实去重数。
         try:
             timetable['teachers'] = db.session.query(

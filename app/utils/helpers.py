@@ -349,7 +349,7 @@ def write_change_log(change_type, students_data, old_value='', new_value='', det
     students_data: list of dicts with keys id, student_number, name
     函数签名与调用方式与旧版完全一致；表已在 create_app 启动时建好，
     若表缺失（如绕过启动初始化直接调脚本）则自动补建一次后重试。
-    changed_at: v1.18.7.0 新增，指定历史时间（'YYYY-MM-DD HH:MM:SS'）；
+    changed_at: v1.18.7.1 新增，指定历史时间（'YYYY-MM-DD HH:MM:SS'）；
                 None = 用当前时间（表默认值）
     """
     from sqlalchemy import text
@@ -392,7 +392,7 @@ def write_change_log(change_type, students_data, old_value='', new_value='', det
         logging.getLogger(__name__).error(f'写入变迁日志异常: {e}', exc_info=True)
 
 
-# ==================== v1.18.7.0 调班记录（学生班级变更） ====================
+# ==================== v1.18.7.1 调班记录（学生班级变更） ====================
 
 #: 班级类变更类型 → (中文标签, Bootstrap 颜色)
 #: enroll  入校分班：新增学生 / 导入新生时带班级
@@ -430,7 +430,7 @@ def change_type_label(change_type):
     return CHANGE_TYPE_LABELS.get(change_type, (change_type or '', 'secondary'))
 
 
-# ==================== v1.18.7.0 方向推导与就读位置描述 ====================
+# ==================== v1.18.7.1 方向推导与就读位置描述 ====================
 
 _DIR_RULES = (
     ('物', '物理'), ('史', '历史'),
@@ -535,7 +535,7 @@ def student_location_desc(student, extra_class_type=None, extra_direction=None,
 
 
 def student_change_logs(student_id, limit=200):
-    """v1.18.7.0 取单个学生的全部变迁记录（时间倒序）
+    """v1.18.7.1 取单个学生的全部变迁记录（时间倒序）
 
     学生详情页与编辑页共用，异常时返回 []。
     """
@@ -558,7 +558,7 @@ def student_change_logs(student_id, limit=200):
 
 
 def class_change_counts(student_ids):
-    """v1.18.7.0 学生列表用：批量取学生 → 调班次数
+    """v1.18.7.1 学生列表用：批量取学生 → 调班次数
 
     只统计班级类变更（enroll/reassign/transfer/correct/direction/
     subject_selection/withdraw/class）。
@@ -587,7 +587,7 @@ def class_change_counts(student_ids):
 
 def class_change_logs(student_ids=None, change_types=None, grade='', class_name='',
                       date_from='', date_to='', limit=500):
-    """v1.18.7.0 调班记录查询（总览页用）
+    """v1.18.7.1 调班记录查询（总览页用）
 
     student_ids: 限定学生范围（权限过滤用）；None=不限
     change_types: 类型列表；None=全部班级类

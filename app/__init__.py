@@ -1,4 +1,4 @@
-# StuLink v1.18.7.0 2026-09-30
+# StuLink v1.18.7.1 2026-09-30
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 import logging
 import os
@@ -575,7 +575,7 @@ def create_app():
             return
         if request.path.startswith('/static/'):
             return
-        # v1.18.7.0 S-1：AJAX/Fetch/JSON 客户端不能处理 302 到 HTML 页面，
+        # v1.18.7.1 S-1：AJAX/Fetch/JSON 客户端不能处理 302 到 HTML 页面，
         # 否则前端 fetch().json() 会抛异常、无“请先改密”提示。改为 401 JSON。
         wants_json = (request.accept_mimetypes.best == 'application/json'
                       or request.is_json

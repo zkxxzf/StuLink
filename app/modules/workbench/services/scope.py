@@ -1,4 +1,4 @@
-# StuLink v1.18.7.0 2026-09-30
+# StuLink v1.18.7.1 2026-09-30
 # 班主任工作台：班级/学生归属校验（越权防护，PR#5 安全审查 S1）
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 """工作台数据范围判定。

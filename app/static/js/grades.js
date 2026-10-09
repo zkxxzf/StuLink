@@ -1,4 +1,4 @@
-/* StuLink 成绩管理：分析页前端 v1.18.7.0
+/* StuLink 成绩管理：分析页前端 v1.18.7.1
  * 五 tab 联动加载 / 统一表格渲染 / 每张指标卡「表格 | 图表」双视图 / ECharts 图表渲染
  */
 (function(){
@@ -78,7 +78,7 @@ function fillExams(){
     fillClasses();
 }
 
-/* v1.18.7.0 班级筛选仅限本场考试：优先用该场考试自己的班级
+/* v1.18.7.1 班级筛选仅限本场考试：优先用该场考试自己的班级
    （该场学生名册 ∪ 该场任课教师表）；未选考试/旧库无快照时回落年级班级 */
 function classListFor(grade){
     var eid = state.examId || $('#gExam').val() || '';
@@ -126,7 +126,7 @@ function bindFilters(){
     $('#gGrade').on('change', fillExams);
     $('#gExam').on('change', function(){
         state.examId = $(this).val();
-        fillClasses();          // v1.18.7.0 班级随考试变：仅列本场考试的班级
+        fillClasses();          // v1.18.7.1 班级随考试变：仅列本场考试的班级
         loadCurrent();
     });
     $('#gClass').on('change', function(){ state.class_name = $(this).val(); loadCurrent(); });
