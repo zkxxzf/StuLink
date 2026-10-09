@@ -1,0 +1,33 @@
+{% extends "base.html" %}
+{% block title %}领导视图{% endblock %}
+{% block extra_css_head %}
+<link href="{{ su('css/report.css') }}" rel="stylesheet">
+<link href="{{ su('css/leadership.css') }}" rel="stylesheet">
+{% endblock %}
+{% block content %}
+{# 领导视图：班级 × 学科宽表（去差均分 / 特优线 / 本科线）
+   入口条件与「成绩汇报区」一致（管理员/校级领导/年级长），后端 _guard_report 硬校验 #}
+<div class="container-fluid py-3" id="ldApp" data-exam-id="{{ request.args.get('exam_id', '') }}">
+    <div class="d-flex flex-wrap align-items-center gap-2 mb-2 no-print">
+        <a href="{{ url_for('grades.index') }}" class="btn btn-sm btn-outline-secondary">
+            <i class="bi bi-arrow-left"></i> 返回成绩分析</a>
+        <h5 class="mb-0"><i class="bi bi-person-badge text-primary"></i> 领导视图</h5>
+        <select id="ldExam" class="form-select form-select-sm w-auto" title="考试"></select>
+        <select id="ldDir" class="form-select form-select-sm w-auto" title="方向"></select>
+        <span class="ms-auto"></span>
+        <button class="btn btn-sm btn-outline-dark" onclick="window.print()">
+            <i class="bi bi-printer"></i> 打印</button>
+        <button class="btn btn-sm btn-outline-success" id="ldExport">
+            <i class="bi bi-file-earmark-excel"></i> 导出 Excel</button>
+    </div>
+    <div id="ldMeta" class="text-muted small mb-2"></div>
+    <div id="ldBody">
+        <div class="text-center text-muted py-5"><div class="spinner-border"></div>
+            <div class="mt-2">加载中…</div></div>
+    </div>
+</div>
+{% endblock %}
+{# 脚本放在 base.html 底部 jQuery 引入之后 #}
+{% block extra_js %}
+<script src="{{ su('js/leadership.js') }}"></script>
+{% endblock %}

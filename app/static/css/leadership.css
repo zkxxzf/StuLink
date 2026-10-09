@@ -1,0 +1,74 @@
+/* StuLink v1.18.8.0 2026-10-09 领导视图：多级表头宽表
+ * 结构：固定列（年级/班级/人数/方向/属性/班主任）+ 每科目组 3 列（去差均分/特优线/本科线）
+ * 交互：横向滚动 + 表头两级吸顶 + 前两列冻结；打印按 A3 横向输出。
+ * 窄屏/宽表：容器内滚动，页面不产生横向溢出。 */
+.ld-wrap {
+    overflow: auto;
+    max-height: calc(100vh - 168px);
+    border: 1px solid #cbd5e1;
+    border-radius: 8px;
+    background: #fff;
+}
+table.ld-table {
+    border-collapse: separate;
+    border-spacing: 0;
+    width: max-content;
+    min-width: 100%;
+    font-size: 12.5px;
+}
+.ld-table th, .ld-table td {
+    border-right: 1px solid #d8e0ea;
+    border-bottom: 1px solid #d8e0ea;
+    padding: 5px 8px;
+    text-align: center;
+    white-space: nowrap;
+}
+/* 两级表头吸顶：第二行 top 由 JS 按第一行实测高度写入 --ld-h1 */
+.ld-table thead th {
+    position: sticky;
+    background: #1e293b;
+    color: #fff;
+    font-weight: 600;
+    z-index: 3;
+}
+.ld-table thead tr:nth-child(1) th { top: 0; }
+.ld-table thead tr:nth-child(2) th { top: var(--ld-h1, 30px); background: #334155; font-size: 12px; }
+.ld-table thead th.grp { font-size: 13px; letter-spacing: .5px; }
+/* 前两列冻结（年级/班级）：宽度实测写入 --ld-f0w，班级列 left 随之偏移 */
+.ld-table th.c-year, .ld-table td.c-year {
+    position: sticky; left: 0; z-index: 2; background: #fff; text-align: left;
+}
+.ld-table th.c-cls, .ld-table td.c-cls {
+    position: sticky; left: var(--ld-f0w, 62px); z-index: 2; background: #fff; text-align: left;
+}
+/* 冻结列表头必须显式回写深色底：th.c-year 的背景规则特异性高于 thead th，
+   否则表头变白底 + 白字（不可见） */
+.ld-table thead th.c-year, .ld-table thead th.c-cls {
+    z-index: 5; text-align: center; background: #1e293b;
+}
+/* 方向/属性 彩标 */
+.ld-dir { padding: 1px 6px; border-radius: 4px; font-size: 11.5px; }
+.ld-dir-phy { background: #dbeafe; color: #1e40af; }
+.ld-dir-his { background: #fde8e8; color: #9b1c1c; }
+.ld-dir-all { background: #e2e8f0; color: #334155; }
+.ld-type { font-size: 11.5px; color: #475569; }
+/* 小计 / 总计行 */
+.ld-table tbody tr.sub td { background: #eef4fb !important; font-weight: 700; }
+.ld-table tbody tr.grand td { background: #dbe7f5 !important; font-weight: 700; }
+.ld-table tbody tr:hover td { background: #f6f9ff !important; }
+.ld-table tbody tr.sub:hover td { background: #e6efff !important; }
+.ld-table tbody tr.grand:hover td { background: #d2e2f7 !important; }
+/* 上线单元格：人数 / 率 */
+.ld-online { font-variant-numeric: tabular-nums; }
+.ld-online .n { color: #1f4e79; font-weight: 600; }
+.ld-online .r { color: #64748b; }
+.ld-none { color: #cbd5e1; }
+.ld-avg { font-variant-numeric: tabular-nums; }
+/* 打印：隐藏工具条、放开滚动区、A3 横向 */
+@media print {
+    .no-print { display: none !important; }
+    .ld-wrap { max-height: none; overflow: visible; border: none; border-radius: 0; }
+    .ld-table { font-size: 10px; }
+    .ld-table th, .ld-table td { padding: 3px 5px; }
+    @page { size: A3 landscape; margin: 8mm; }
+}
