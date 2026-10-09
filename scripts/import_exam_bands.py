@@ -62,13 +62,17 @@ EXAM_FILES = [
 ]
 
 # 层名映射：源名 → (系统层名, 是否导入)
+# v1.18.7.1 用户口径：文件里有哪一档就导入哪一档；没有 985线 就不导入（不编造、不留空占位）
 LAYER_MAP = {
     '一本线': ('特控', True), '一本': ('特控', True),
     '特控线': ('特控', True), '特控': ('特控', True),
     '二本线': ('本科', True), '二本': ('本科', True),
     '本科线': ('本科', True), '本科': ('本科', True),
-    '211线': ('211', False), '211': ('211', False),
+    '211线': ('211', True), '211': ('211', True),
 }
+# 规范层序（与默认模板一致）：缺档时不占用 seq，后续补录也能插到正确位置
+# 用户原则：划线是考试的内置数据（像任课教师一样），seq/层名自带，不依赖模板
+CANON_SEQ = {'985': 1, '211': 2, '特控': 3, '本科': 4}
 SUBJECTS_SET = set(SUBJECTS) | {'英语'}     # 兼容 Excel 写「英语」而系统内部叫「外语」
 SUBJECT_ALIAS = {'英语': '外语'}
 LINE_ROW_RE = re.compile(r'^(211|一本|二本|特控|本科)\s*线?$')
@@ -251,17 +255,14 @@ def main():
             n_exam += 1
             n_band += len(keep)
             if args.apply:
-                # 只清掉本次要写入的层（特控/本科[/211]），保留其它层
+                # 只清掉本次要写入的层，保留其它层；划线数据只属于本场考试
                 ExamBand.query.filter(ExamBand.exam_id == ex.id,
                                       ExamBand.name.in_([r['layer'] for r in keep])).delete()
                 db.session.flush()
-                seq_of = {}
-                for lay in layers:
-                    seq_of[lay] = layers.index(lay) + 1
                 for r in keep:
                     db.session.add(ExamBand(
                         exam_id=ex.id, direction=r['direction'] or '',
-                        subject=r['subject'], seq=seq_of[r['layer']],
+                        subject=r['subject'], seq=CANON_SEQ.get(r['layer'], 9),
                         name=r['layer'], lower_mode='score',
                         lower_value=r['value']))
                 db.session.commit()
