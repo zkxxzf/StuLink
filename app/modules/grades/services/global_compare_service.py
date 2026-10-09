@@ -1,5 +1,5 @@
 # StuLink v1.18.8.0 2026-10-09
-# 领导视图指标引擎：班级 × 学科「去差均分 + 特优线 + 本科线」宽表
+# 全局对比指标引擎：班级 × 学科「去差均分 + 特优线 + 本科线」宽表
 #
 # 口径与 report_service / report_pivot_service 完全一致（复用其公共函数）：
 #  - 去差均分：按班型剔除各班总分末尾 N 人（卓越班去 2 人）后再均分；
@@ -96,8 +96,8 @@ def _cells(data, rows, direction, subjects, l1_name, l2_name, trimmed):
     return out
 
 
-def leadership_report(exam_id, direction=''):
-    """领导视图主入口。
+def global_compare_report(exam_id, direction=''):
+    """全局对比主入口。
 
     返回 {exam, mode, subjects, l1_name, l2_name, groups, grand, partial}；
     未划线/无成绩返回 {'error': '...'}（前端按提示展示）。
@@ -117,7 +117,10 @@ def leadership_report(exam_id, direction=''):
     # 科目列：本场实际有成绩的科目按系统顺序（全科=9 科；分科=各方向并集，缺科显示 —）
     subjects = list(data.imported_subjects)
     trimmed = rs.trimmed_nos(data)
-    ht = rs.headteacher_map(data.exam.grade)
+    # v1.18.7.0 班主任取**本场考试当时**的快照（与任课教师同一机制）：
+    # 历史考试不能再显示现在的班主任；快照缺失时自动回落当前关联
+    from app.modules.grades.services import teacher_snapshot_service as _tss
+    ht = _tss.headteacher_map_of(data.exam.id, grade=data.exam.grade)
 
     # 班型快照优先、当前设置为回落（与 trimmed_nos 同口径）
     snap_ct, live_ct = {}, {}
@@ -194,7 +197,7 @@ def leadership_report(exam_id, direction=''):
                  'grade': data.exam.grade,
                  'grade_label': grade_level_label(data.exam.grade, data.exam.term)},
         'mode': mode,
-        # 列顺序：总分在科目之前（领导视图按「先看总分，再看各科」阅读）
+        # 列顺序：总分在科目之前（全局对比按「先看总分，再看各科」阅读）
         'subjects': [TOTAL_SUBJECT] + subjects,
         'subject_count': len(subjects),
         'l1_name': l1_name,

@@ -1,14 +1,14 @@
-/* StuLink v1.18.8.0 2026-10-09 领导视图
+/* StuLink v1.18.8.0 2026-10-09 全局对比
  * 班级 × 学科宽表：固定列（年级/班级/人数/方向/属性/班主任）+ 每科 3 列
  * （去差均分 / 特优线 / 本科线），分科时按方向分组并出「○○全年级」小计。
- * 依赖：jQuery（base.html 全局）；数据源 /grades/api/leadership/report。
+ * 依赖：jQuery（base.html 全局）；数据源 /grades/api/global-compare/report。
  * 渲染后实测表头高度与冻结列宽度，回写 CSS 变量（吸顶偏移/粘性列 left），
  * 避免写死像素在字体/缩放变化时错位。 */
 (function () {
     'use strict';
     var examId = $('#ldApp').data('exam-id');
-    var API = '/grades/api/leadership/report';
-    var EXPORT_API = '/grades/api/leadership/export';
+    var API = '/grades/api/global-compare/report';
+    var EXPORT_API = '/grades/api/global-compare/export';
     var $body = $('#ldBody');
 
     function esc(v) {
@@ -57,7 +57,7 @@
         load();
     }).fail(function (x) {
         $body.html(emptyHtml(x.status === 403
-            ? '您没有领导视图的查看权限（仅管理员/校级领导/年级长可访问）'
+            ? '您没有全局对比的查看权限（仅管理员/校级领导/年级长可访问）'
             : '考试列表加载失败（' + x.status + '），请刷新重试'));
     });
 
@@ -82,7 +82,7 @@
             })
             .fail(function (x) {
                 $body.html(emptyHtml(x.status === 403
-                    ? '您没有领导视图的查看权限（仅管理员/校级领导/年级长可访问）'
+                    ? '您没有全局对比的查看权限（仅管理员/校级领导/年级长可访问）'
                     : '数据加载失败（' + x.status + '），请刷新重试'));
             });
     }

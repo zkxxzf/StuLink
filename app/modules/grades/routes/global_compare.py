@@ -1,7 +1,7 @@
 # StuLink v1.18.8.0 2026-10-09
-# 领导视图：班级 × 学科宽表（去差均分 / 特优线 / 本科线），全科与分科自适配
+# 全局对比：班级 × 学科宽表（去差均分 / 特优线 / 本科线），全科与分科自适配
 #  - 页面/接口门槛与「成绩汇报区」一致（_guard_report：管理员/校领导/年级长）
-#  - Excel 导出与页面同口径（复用 leadership_service 的同一份缓存数据）
+#  - Excel 导出与页面同口径（复用 global_compare_service 的同一份缓存数据）
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 import io
 from datetime import datetime
@@ -13,7 +13,7 @@ from flask_login import current_user, login_required
 
 from app.modules.grades import bp
 from app.modules.grades.routes.report import _cached, _guard_report, _visible_exam
-from app.modules.grades.services import leadership_service as ld
+from app.modules.grades.services import global_compare_service as ld
 from app.utils.decorators import perm_required
 from app.utils.export_helpers import xl_row   # M-4：公式注入防护
 from app.utils.helpers import log_operation
@@ -23,26 +23,26 @@ _BASE_HEADS = ['年级', '班级', '班级人数', '方向', '属性', '班主�
 _PER_SUBJECT = 3   # 去差均分 / 特优线 / 本科线
 
 
-@bp.route('/leadership')
+@bp.route('/global-compare')
 @login_required
 @perm_required('grades.view')
-def leadership_page():
-    """领导视图页（从成绩分析页或侧边栏进入，可携 exam_id）"""
+def global_compare_page():
+    """全局对比页（从成绩分析页或侧边栏进入，可携 exam_id）"""
     _guard_report()
-    return render_template('grades/leadership.html')
+    return render_template('grades/global_compare.html')
 
 
-@bp.route('/api/leadership/report')
+@bp.route('/api/global-compare/report')
 @login_required
 @perm_required('grades.view')
-def api_leadership_report():
-    """领导视图数据 JSON（direction 为空 = 全部方向）"""
+def api_global_compare_report():
+    """全局对比数据 JSON（direction 为空 = 全部方向）"""
     _guard_report()
     exam_id = request.args.get('exam_id', type=int)
     direction = (request.args.get('direction') or '').strip()
     _visible_exam(exam_id)
     data = _cached(f'grades_report_ld_{exam_id}_{direction}',
-                   lambda: ld.leadership_report(exam_id, direction))
+                   lambda: ld.global_compare_report(exam_id, direction))
     return jsonify(success='error' not in data, data=data,
                    message=data.get('error') if 'error' in data else '')
 
@@ -85,7 +85,7 @@ def _row_values(row, subjects):
 def _build_workbook(data):
     wb = openpyxl.Workbook()
     ws = wb.active
-    ws.title = '领导视图'
+    ws.title = '全局对比'
     subjects = data['subjects']
     l1, l2 = data['l1_name'], data['l2_name']
 
@@ -143,25 +143,25 @@ def _build_workbook(data):
     return wb
 
 
-@bp.route('/api/leadership/export')
+@bp.route('/api/global-compare/export')
 @login_required
 @perm_required('grades.view')
-def api_leadership_export():
-    """导出领导视图 xlsx（与页面同口径；复用同一份缓存数据）"""
+def api_global_compare_export():
+    """导出全局对比 xlsx（与页面同口径；复用同一份缓存数据）"""
     _guard_report()
     exam_id = request.args.get('exam_id', type=int)
     direction = (request.args.get('direction') or '').strip()
     exam = _visible_exam(exam_id)
     data = _cached(f'grades_report_ld_{exam_id}_{direction}',
-                   lambda: ld.leadership_report(exam_id, direction))
+                   lambda: ld.global_compare_report(exam_id, direction))
     if 'error' in data:
         return jsonify(success=False, message=data['error']), 400
     buf = io.BytesIO()
     _build_workbook(data).save(buf)
     buf.seek(0)
-    log_operation(current_user, '导出', '领导视图', exam_id,
+    log_operation(current_user, '导出', '全局对比', exam_id,
                   f'{exam.name} {direction or "全部"}', module='grades')
-    fname = f'领导视图_{exam.name}.xlsx'.replace('/', '_')
+    fname = f'全局对比_{exam.name}.xlsx'.replace('/', '_')
     return send_file(buf, as_attachment=True, download_name=fname,
                      mimetype='application/vnd.openxmlformats-officedocument'
                               '.spreadsheetml.sheet')

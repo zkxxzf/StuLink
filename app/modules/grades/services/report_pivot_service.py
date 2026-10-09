@@ -74,7 +74,10 @@ def class_subject_report(exam_id, class_name):
     trimmed = rs.trimmed_nos(data)
     teachers = _teacher_names(data.exam.grade, class_name=class_name,
                               exam_id=data.exam.id)
-    ht = rs.headteacher_map(data.exam.grade).get((data.exam.grade, class_name), '')
+    from app.modules.grades.services import teacher_snapshot_service as _tss
+    # v1.18.7.0 班主任与任课均取本场考试当时快照（快照优先、缺则回落当前）
+    ht = _tss.headteacher_map_of(data.exam.id, grade=data.exam.grade).get(
+        (data.exam.grade, class_name), '')
 
     def subject_row(sub):
         sl1 = rs.pick_layer(data, direction, sub, l1)

@@ -34,6 +34,11 @@ from app.modules.grades.utils import normalize_class_name          # noqa: E402
 D24 = os.environ.get('STULINK_EXCEL_DIR') or r'd:\Users\lenovo\Desktop\2024级历次考试成绩'
 SUBJ_ORDER = ['语文', '数学', '英语', '物理', '化学', '生物', '政治', '历史', '地理']
 SKIP_SUBJ = {'总分', '合计', '平均分', '人数', ''}
+# v1.18.7.0 班主任一并快照（与任课同表，伪科目名 '班主任'）
+HEAD_SUBJECT = '班主任'
+# 格式 B 里「总分」列下写的就是班主任（已验证：202503 物理 03班 总分=王金仁，
+# 与当前库 03班 班主任=王金仁、郃文哲 吻合；202409 任课表也有独立「班主任」列）
+HEAD_ALIAS = {'总分': HEAD_SUBJECT, '班主任': HEAD_SUBJECT}
 
 # (考试日期前缀, 文件列表) —— 与导入时的场次定义一致
 EXAM_FILES = [
@@ -110,7 +115,7 @@ def read_tch_sheet(path):
     hdr = rows[hi]
     i_cls = hdr.index('班级')
     subj_cols = [(j, h) for j, h in enumerate(hdr)
-                 if h in SUBJ_ORDER and j != i_cls]
+                 if (h in SUBJ_ORDER or h in HEAD_ALIAS) and j != i_cls]
     out = []
     for r in rows[hi + 1:]:
         if len(r) <= i_cls:
@@ -118,10 +123,19 @@ def read_tch_sheet(path):
         cls = normalize_class_name(r[i_cls])
         if not cls or cls in ('不分班', '已转出'):
             continue
-        for j, sub in subj_cols:
+        for j, h in subj_cols:
             nm = s_of(r[j]) if j < len(r) else ''
-            if is_name(nm):
-                out.append((cls, sub, nm))
+            if not is_name(nm):
+                continue
+            sub = HEAD_ALIAS.get(h, h)
+            if sub == HEAD_SUBJECT:                 # 主/副合并（唯一约束）
+                exist = next((x for x in out if x[0] == cls and x[1] == HEAD_SUBJECT), None)
+                if exist:
+                    idx = out.index(exist)
+                    if nm not in exist[2]:
+                        out[idx] = (cls, HEAD_SUBJECT, exist[2] + '、' + nm)
+                    continue
+            out.append((cls, sub, nm))
     return out
 
 
@@ -147,7 +161,8 @@ def read_pivot_sheet(path):
     out = []
     for i in range(len(rows) - 1):
         a, b = rows[i], rows[i + 1]
-        if not (any(looks_like_class(x) for x in a) and any(x in SUBJ_ORDER for x in b)):
+        if not (any(looks_like_class(x) for x in a) and any(
+                x in SUBJ_ORDER or x in HEAD_ALIAS for x in b)):
             continue
         cur_cls = None
         for j in range(min(len(a), len(b))):
@@ -157,8 +172,15 @@ def read_pivot_sheet(path):
                 continue
             if not cur_cls or cur_cls in ('不分班', '已转出'):
                 continue
-            sub = c2 if c2 in SUBJ_ORDER else ''
-            if sub and sub not in SKIP_SUBJ and is_name(c1):
+            sub = HEAD_ALIAS.get(c2, c2) if c2 in SUBJ_ORDER or c2 in HEAD_ALIAS else ''
+            if sub and is_name(c1):
+                if sub == HEAD_SUBJECT:
+                    exist = next((x for x in out if x[0] == cur_cls and x[1] == HEAD_SUBJECT), None)
+                    if exist:
+                        if c1 not in exist[2]:
+                            out[out.index(exist)] = (cur_cls, HEAD_SUBJECT,
+                                                     exist[2] + '、' + c1)
+                        continue
                 out.append((cur_cls, sub, c1))
     return out
 

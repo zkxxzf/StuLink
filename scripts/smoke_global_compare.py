@@ -1,10 +1,10 @@
 # -*- coding: utf-8 -*-
-"""领导视图回归冒烟（脚本级）：
+"""全局对比回归冒烟（脚本级）：
 - 分科考试：物理方向 01(强基)/02(卓越) + 历史方向 03(卓越) → 去差/小计/总计口径
 - 全科考试：无方向 3 班 9 科 → 单组 + 全年级行（无方向小计）
 - 方向筛选、未划线报错、Excel 导出、页面与导航入口可达
 口径断言按手算值逐项核对（去差剔卓越班总分末尾 2 人、上线按全体参考人数）。
-用法：python scripts/smoke_leadership.py
+用法：python scripts/smoke_global_compare.py
 """
 import io
 import os
@@ -72,7 +72,7 @@ def mk_bands(exam_id, rows):
 
 with app.app_context():
     # 建表由 create_app() 内部初始化完成（与 smoke_grades 同一模式）
-    adm = User(username='ldadm', real_name='领导视图管理员', role='admin',
+    adm = User(username='ldadm', real_name='全局对比管理员', role='admin',
                must_change_pwd=False)
     adm.set_password('LdAdm#2026')
     db.session.add(adm)
@@ -167,9 +167,9 @@ with app.app_context():
     print('== 数据就绪 ==', e1, e2, e3)
 
     # ================= 服务层直算断言 =================
-    from app.modules.grades.services import leadership_service as ld
+    from app.modules.grades.services import global_compare_service as ld
 
-    d1 = ld.leadership_report(e1)
+    d1 = ld.global_compare_report(e1)
     check('分科：无 error', 'error' not in d1, str(d1.get('error')))
     check('分科：mode=split', d1.get('mode') == 'split', str(d1.get('mode')))
     check('分科：列=总分+语文/数学/物理/历史并集',
@@ -254,12 +254,12 @@ with app.app_context():
           f"{gr['cells'][TOTAL_SUBJECT]['l2_n']}/{gr['cells'][TOTAL_SUBJECT]['l2_rate']}")
 
     # 方向筛选
-    dp = ld.leadership_report(e1, '物理')
+    dp = ld.global_compare_report(e1, '物理')
     check('筛选物理：仅 1 组 2 班', len(dp['groups']) == 1 and len(dp['groups'][0]['rows']) == 2)
     check('筛选物理：不出全年级行', dp['grand'] is None)
 
     # 全科考试
-    d2 = ld.leadership_report(e2)
+    d2 = ld.global_compare_report(e2)
     check('全科：mode=all', d2.get('mode') == 'all', str(d2.get('mode')))
     check('全科：1 组 3 班', len(d2['groups']) == 1 and len(d2['groups'][0]['rows']) == 3)
     check('全科：不出方向小计', d2['groups'][0]['subtotal'] is None)
@@ -276,7 +276,7 @@ with app.app_context():
     check('全科 全年级 人数=5', d2['grand']['count'] == 5, str(d2['grand']['count']))
 
     # 未划线
-    d3 = ld.leadership_report(e3)
+    d3 = ld.global_compare_report(e3)
     check('未划线：返回 error 提示', 'error' in d3 and '划线' in d3['error'],
           str(d3.get('error')))
 
@@ -289,18 +289,18 @@ with app.test_client() as c:
                                'password': 'LdAdm#2026'}, follow_redirects=False)
     check('管理员登录成功', r.status_code in (301, 302), str(r.status_code))
 
-    rp = c.get('/grades/leadership')
-    check('页面 /grades/leadership 200', rp.status_code == 200, str(rp.status_code))
-    check('页面含标题「领导视图」', '领导视图' in rp.get_data(as_text=True))
+    rp = c.get('/grades/global-compare')
+    check('页面 /grades/global-compare 200', rp.status_code == 200, str(rp.status_code))
+    check('页面含标题「全局对比」', '全局对比' in rp.get_data(as_text=True))
 
-    ra = c.get(f'/grades/api/leadership/report?exam_id={e1}')
+    ra = c.get(f'/grades/api/global-compare/report?exam_id={e1}')
     j = ra.get_json() or {}
     check('接口 200 且 success', ra.status_code == 200 and j.get('success') is True,
           f'{ra.status_code} {str(j)[:120]}')
     check('接口返回 groups/grand', bool(j.get('data', {}).get('groups'))
           and bool(j.get('data', {}).get('grand')))
 
-    rn = c.get(f'/grades/api/leadership/report?exam_id={e3}')
+    rn = c.get(f'/grades/api/global-compare/report?exam_id={e3}')
     jn = rn.get_json() or {}
     check('未划线考试接口 success=false 且有提示',
           jn.get('success') is False and '划线' in (jn.get('message') or ''),
@@ -308,10 +308,10 @@ with app.test_client() as c:
 
     # 导航入口
     rh = c.get('/')
-    check('侧边栏含「领导视图」入口', '领导视图' in rh.get_data(as_text=True))
+    check('侧边栏含「全局对比」入口', '全局对比' in rh.get_data(as_text=True))
 
     # Excel 导出
-    rx = c.get(f'/grades/api/leadership/export?exam_id={e1}')
+    rx = c.get(f'/grades/api/global-compare/export?exam_id={e1}')
     check('导出 xlsx 200', rx.status_code == 200, str(rx.status_code))
     check('导出 Content-Type xlsx',
           'spreadsheetml' in (rx.headers.get('Content-Type') or ''),
@@ -331,5 +331,5 @@ with app.test_client() as c:
     except Exception as e:  # noqa: BLE001
         check('导出文件可被 openpyxl 打开', False, str(e))
 
-print(f'\n===== 领导视图验证：{ok} 通过 / {fail} 失败 =====')
+print(f'\n===== 全局对比验证：{ok} 通过 / {fail} 失败 =====')
 sys.exit(1 if fail else 0)

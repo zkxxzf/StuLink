@@ -264,9 +264,9 @@
                href="{{ url_for('grades.report_page') }}">
                 <i class="bi bi-megaphone"></i>成绩汇报区
             </a>
-            <a class="nav-link {% if request.endpoint == 'grades.leadership_page' %}active{% endif %}"
-               href="{{ url_for('grades.leadership_page') }}">
-                <i class="bi bi-person-badge"></i>领导视图
+            <a class="nav-link {% if request.endpoint == 'grades.global_compare_page' %}active{% endif %}"
+               href="{{ url_for('grades.global_compare_page') }}">
+                <i class="bi bi-person-badge"></i>全局对比
             </a>
             {% endif %}
             {% if current_user.has_perm('grades.student_query') %}

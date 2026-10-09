@@ -20,6 +20,10 @@ from __future__ import annotations
 from app.extensions import db
 from app.models.grades import ExamTeacherLink, TeacherSubjectLink
 
+# v1.18.7.0 班主任也归入同一张快照表：它和任课教师一样是“本场考试该班的老师”，
+# 区别仅在于任课老师看单科成绩、班主任看总分。用伪科目名占位，不污染 SUBJECTS。
+HEAD_SUBJECT = '班主任'
+
 # 快照来源说明
 SOURCE_DESC = {
     'import': '导入时快照',
@@ -27,6 +31,30 @@ SOURCE_DESC = {
     'backfill': '用当前映射回填（推测）',
     'manual': '人工修订',
 }
+
+
+def _current_headteacher_rows(grade):
+    """从当前 UserClassLink 取该年级各班班主任（作为快照源）
+
+    ⚠ 同班常有主/副两位班主任，而表上 `UNIQUE(exam_id, class_name, subject)`，
+    所以合并为一行（姓名顿号连接，与 headteacher_map 输出口径一致）；
+    user_id 置空（多师无法对应单个账号，班主任也不参与分数聚合）。
+    """
+    from app.models import User, UserClassLink
+    links = UserClassLink.query.filter_by(grade=grade).all()
+    uids = {lk.user_id for lk in links}
+    names = {u.id: u.real_name for u in
+             User.query.filter(User.id.in_(uids), User.is_active.is_(True)).all()} if uids else {}
+    per_cls = {}
+    for lk in links:
+        nm = names.get(lk.user_id)
+        if nm and lk.class_name:
+            bag = per_cls.setdefault(lk.class_name, [])
+            if nm not in bag:
+                bag.append(nm)
+    return [{'class_name': c, 'subject': HEAD_SUBJECT,
+             'teacher_name': '、'.join(v), 'user_id': None}
+            for c, v in per_cls.items()]
 
 
 def snapshot_exam(exam, source='import', rows=None, replace=False):
@@ -51,6 +79,8 @@ def snapshot_exam(exam, source='import', rows=None, replace=False):
             for l in TeacherSubjectLink.query.filter_by(
                 grade=exam.grade, active=True).all()
         ]
+        # v1.18.7.0 班主任一并快照（以前只存了任课老师，历史考试的班主任会跟到现在）
+        rows += _current_headteacher_rows(exam.grade)
 
     # 姓名补全（无 user_id 时留空，由调用方给 teacher_name）
     need_uid = {r['user_id'] for r in rows if r.get('user_id')}
@@ -72,6 +102,7 @@ def snapshot_exam(exam, source='import', rows=None, replace=False):
             continue
         uid = r.get('user_id')
         name = (r.get('teacher_name') or name_of.get(uid) or '').strip() or None
+        existing.add((cls, subj))
         db.session.add(ExamTeacherLink(
             exam_id=exam.id, grade=getattr(exam, 'grade', '') or '',
             class_name=cls, subject=subj,
@@ -128,6 +159,22 @@ def name_map_of(exam_id, grade=''):
                    User.query.filter(User.id.in_(need)).all()}
     return {(r.class_name, r.subject): (r.teacher_name or name_of.get(r.user_id, ''))
             for r in rows}
+
+
+def headteacher_map_of(exam_id, grade=''):
+    """{(grade, class_name): '班主任A、班主任B'}：取**本场考试当时**的班主任
+
+    快照优先；快照缺失（旧库未回填）则回落当前 UserClassLink，保证不空白。
+    返回的键形状与 report_service.headteacher_map(grade) 一致，可直接替用。
+    """
+    out = {}
+    for r in links_of(exam_id, grade=grade):
+        if r.subject == HEAD_SUBJECT and r.teacher_name:
+            out[(r.grade or grade, r.class_name)] = r.teacher_name
+    if out:
+        return out
+    from app.modules.grades.services import report_service as _rs
+    return _rs.headteacher_map(grade)
 
 
 def has_snapshot(exam_id):
