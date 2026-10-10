@@ -931,40 +931,49 @@ def _read(rel):
 # ======================================================================
 @item('R-1')
 def check_R1():
-    from app.utils.decorators import scope_required
-    from werkzeug.exceptions import Forbidden
+    # 2026-10-10 架构审计调整：原先这里验证 `app.utils.decorators.scope_required`，
+    # 但该装饰器自定义后**从未被任何路由调用**（全仓库零命中），已于本次审计删除。
+    # 真正生效的数据范围判定是 grades/services/scope.py，故 R-1 改为验证它 ——
+    # 断言从「装饰器自身行为」升级为「实际生效的口径」，测试价值更高。
+    from app.modules.grades.services import scope as scope_mod
     with app.app_context():
         teacher = db.session.get(User, IDS['teacher'])
+        admin = db.session.get(User, IDS['admin'])
 
-    with app.test_request_context('/x'):
-        from flask_login import login_user
-        login_user(teacher)
+        # ① 可见年级返回列表（统一口径的核心出口）
+        vis = scope_mod.visible_grades(teacher)
+        case('R-1 任课教师可见年级返回列表', isinstance(vis, list))
 
-        @scope_required(checker=lambda: False)
-        def _denied():
-            return 'ok'
+        # ② 无有效数据范围的账号：考试判定一律拒绝（不回落全校）
+        class _FakeExam:
+            grade = '__NOT_A_REAL_GRADE__'
+
+        class _NoScopeUser:
+            """模拟「无任何数据范围配置」的账号（无 permission_group / 无映射）"""
+            role = 'noperm'
+            id = -1
+            permission_group = None
+            grade = None
+
+            def has_role(self, *_a, **_k):
+                return False
+
         try:
-            _denied()
-            case('R-1 checker 返回 False → 403', False, '未拦截')
-        except Forbidden:
-            case('R-1 checker 返回 False → 403', True)
+            scope_mod.check_exam_visible(_NoScopeUser(), _FakeExam())
+            case('R-1 无数据范围账号访问考试被拒', False, '未拒绝')
+        except PermissionError:
+            case('R-1 无数据范围账号访问考试被拒', True)
 
-        @scope_required(checker=lambda: True)
-        def _allowed():
-            return 'ok'
-        case('R-1 checker 放行 → 正常执行', _allowed() == 'ok')
-
-        def _raise():
-            raise PermissionError
-
-        @scope_required(checker=_raise)
-        def _denied2():
-            return 'ok'
+        # ③ admin 恒不受限（各口径一致的最高层约定）
         try:
-            _denied2()
-            case('R-1 checker 抛 PermissionError → 403', False, '未拦截')
-        except Forbidden:
-            case('R-1 checker 抛 PermissionError → 403', True)
+            scope_mod.check_exam_visible(admin, _FakeExam())
+            case('R-1 admin 不受数据范围限制', True)
+        except PermissionError:
+            case('R-1 admin 不受数据范围限制', False, 'admin 被误拒')
+
+    # ④ 统一口径必须存在可被路由调用的函数（防止"机制被删但无人知晓"）
+    for fn in ('visible_grades', 'check_exam_visible', 'user_grade_scope'):
+        case(f'R-1 统一口径提供 {fn}', callable(getattr(scope_mod, fn, None)))
 
     # 历史实现已降级为转发层，不再有独立判定逻辑
     src = _read('app/modules/workbench/services/scope_service.py')

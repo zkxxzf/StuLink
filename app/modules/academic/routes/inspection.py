@@ -23,6 +23,12 @@ from app.modules.notifications.services import notification_service
 from app.utils.decorators import perm_required
 from app.utils.helpers import log_operation
 
+# 2026-10-10 架构审计修复：本文件原有静默 `except Exception: pass`，失败不可观测。
+# 统一加 logger 记录 warning（仅留痕，不改变任何降级行为与返回值）。
+import logging
+
+logger = logging.getLogger(__name__)
+
 _RESULT_KEYS = {k for k, _ in INSPECTION_RESULTS}
 
 
@@ -535,8 +541,8 @@ def inspection_stats():
                 want += per_wd.get(d.isoweekday(), 0)
                 d = d + timedelta(days=1)
             coverage['month_expected'] = want
-    except Exception:  # noqa: BLE001  统计接口不因课表缺失而挂掉
-        pass
+    except Exception as _e:  # noqa: BLE001  统计接口不因课表缺失而挂掉
+        logger.warning('inspection.py::inspection_stats 异常（已降级处理）: %s', _e)
 
     return jsonify({
         'result_distribution': result_distribution,

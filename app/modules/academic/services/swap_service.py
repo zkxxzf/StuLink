@@ -93,6 +93,12 @@ from app.modules.academic.services.schedule_common import (  # noqa: E402
 # get_periods 由 schedule_common 提供（委托包装）
 from app.modules.academic.services.schedule_common import get_periods as _gp_common  # noqa: E402
 
+# 2026-10-10 架构审计修复：本文件原有静默 `except Exception: pass`，失败不可观测。
+# 统一加 logger 记录 warning（仅留痕，不改变任何降级行为与返回值）。
+import logging
+
+logger = logging.getLogger(__name__)
+
 
 def _get_periods(schedule_id):
     """节次列表（按 sort_order 升序，委托 schedule_common）。"""
@@ -778,8 +784,8 @@ def get_approval_mode():
         v = (row.value or '').strip().lower() if row and row.value else ''
         if v in ('one', 'two'):
             mode = v
-    except Exception:  # noqa: BLE001  设置表不可用时退回默认，不影响审批
-        pass
+    except Exception as _e:  # noqa: BLE001  设置表不可用时退回默认，不影响审批
+        logger.warning('swap_service.py::get_approval_mode 异常（已降级处理）: %s', _e)
     if ctx:
         g._swap_approval_mode = mode
     return mode

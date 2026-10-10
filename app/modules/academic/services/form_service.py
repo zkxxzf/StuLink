@@ -731,8 +731,8 @@ def _format_answer(answer):
             items = json.loads(answer.answer_json)
             if isinstance(items, list):
                 return '、'.join(str(i) for i in items)
-        except Exception:
-            pass
+        except Exception as _e:  # noqa: BLE001
+            logger.warning('form_service.py::_format_answer 异常（已降级处理）: %s', _e)
         return answer.answer_json
     return answer.answer_text or '-'
 

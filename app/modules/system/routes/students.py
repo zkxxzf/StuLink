@@ -17,8 +17,14 @@ from app.utils.helpers import (get_dict_values, log_operation, get_graduated_gra
                                resolve_direction, location_desc, get_class_type,
                                student_change_logs)
 import io
+import logging
 import uuid
 import time
+
+# 2026-10-10 架构审计修复：调班/导入等写路径曾用 `except Exception: pass` 静默吞掉
+# 变迁日志写入失败 —— 结果是「学生已调班但调班记录丢失」且运维无从察觉。
+# 此处统一记录 warning（不改变降级行为：主流程仍继续，仅留痕）。
+logger = logging.getLogger(__name__)
 
 bp = Blueprint('students', __name__, url_prefix='/students')
 
@@ -220,8 +226,8 @@ def create():
                                  old_value='', new_value=student_location_desc(student),
                                  detail='新增学生（入校分班）',
                                  operator_name=current_user.real_name)
-        except Exception:
-            pass
+        except Exception as _e:  # noqa: BLE001
+            logger.warning('新增学生的入校分班记录写入失败(学生 %s): %s', student.id, _e)
         flash('学生信息已添加', 'success')
         return redirect(url_for('students.list_students'))
     # 班主任默认填入自己管理的年级班级
@@ -344,8 +350,8 @@ def edit(id):
                 _det = (f'方向 {_od or "—"} → {_nd or "—"}' if _kind == 'direction'
                         else '选科组合调整')
                 _logs.append((_kind, _old_desc, _new_desc, _det))
-        except Exception:
-            pass
+        except Exception as _e:  # noqa: BLE001
+            logger.warning('编辑学生：推导方向/选科变迁记录失败(学生 %s): %s', student.id, _e)
         for _t, _ov, _nv, _det in _logs:
             try:
                 write_change_log(_t,
@@ -354,8 +360,9 @@ def edit(id):
                                    'name': student.name}],
                                  old_value=_ov, new_value=_nv, detail=_det,
                                  operator_name=current_user.real_name)
-            except Exception:
-                pass
+            except Exception as _e:  # noqa: BLE001
+                logger.warning('编辑学生：变迁记录写入失败(学生 %s, 类型 %s): %s',
+                               student.id, _t, _e)
         flash('学生信息已更新', 'success')
         return redirect(url_for('students.detail', id=student.id))
     # v1.18.9.2 编辑页也展示变更记录（调班/转科/转出/学籍变更），避免打开编辑页看不到历史
@@ -723,23 +730,11 @@ def import_students():
         return redirect(url_for('students.list_students'))
 
     try:
-        import openpyxl.worksheet.datavalidation as dv
-        _orig_init = dv.DataValidation.__init__
-        def _patched_init(self, *a, **kw):
-            kw.pop('id', None)
-            _orig_init(self, *a, **kw)
-        dv.DataValidation.__init__ = _patched_init
-
-        import openpyxl
-        wb = openpyxl.load_workbook(file, data_only=True)
-        ws = wb.active
-
+        # 2026-10-10：改用公共 excel 读取层（含 openpyxl 兼容性 patch，幂等）
+        from app.utils.excel_patch import load_sheet, read_header_map
+        ws = load_sheet(file)
         # 读取表头映射
-        header_map = {}
-        for col in range(1, ws.max_column + 1):
-            val = ws.cell(row=1, column=col).value
-            if val:
-                header_map[str(val).strip()] = col
+        header_map = read_header_map(ws)
         
         if not header_map:
             flash('Excel文件表头为空，请确保第一行为表头', 'danger')
@@ -983,8 +978,8 @@ def import_students():
                                          new_value=student_location_desc(_st),
                                          detail='导入新生（入校分班）',
                                          operator_name=current_user.real_name)
-            except Exception:
-                pass
+            except Exception as _e:  # noqa: BLE001
+                logger.warning('导入新生：入校分班记录写入失败: %s', _e)
             log_operation(current_user, '导入', '学生', None, f'部分导入 {len(students_to_add)} 名，{len(errors)} 条失败')
             error_summary = f'成功导入 {len(students_to_add)} 名学生，但有 {len(errors)} 条数据未导入'
             ek = _save_import_errors(errors)
@@ -1029,8 +1024,8 @@ def import_students():
                                          new_value=student_location_desc(_st),
                                          detail='导入新生（入校分班）',
                                          operator_name=current_user.real_name)
-            except Exception:
-                pass
+            except Exception as _e:  # noqa: BLE001
+                logger.warning('批量导入：入校分班记录写入失败: %s', _e)
             log_operation(current_user, '导入', '学生', None, f'批量导入 {len(students_to_add)} 名学生')
             flash(f'成功导入 {len(students_to_add)} 名学生', 'success')
 
@@ -1143,22 +1138,29 @@ def transfer(id):
         change_kind = 'transfer'
     # 旧位置需在改班前取（含当时的班型·方向）
     old_loc = student_location_desc(student)
-    student.grade = new_grade
-    student.class_name = new_class
-    db.session.commit()
-    log_operation(current_user, '更新', '学生', student.id, f'{student.name} {old_info}→{new_grade}{new_class}')
+    # 2026-10-10 架构审计修复：变迁日志写 history 库（独立连接，无法与业务同事务），
+    # 原先「先 commit 业务 → 再写日志」的顺序下，日志失败会造成「学生已调班但无记录」
+    # 且无从回滚。改为**先落日志再提交业务**：日志失败则业务不提交（可整体回滚），
+    # 日志成功后业务提交即便失败，记录也保留（人工可核对，不会出现"改了没痕"）。
     try:
-        new_loc = student_location_desc(student)
-        if old_loc != new_loc:
+        new_loc_preview = f'{new_grade}{new_class}'
+        if old_loc != new_loc_preview:
             write_change_log(change_kind,
                              [{'id': student.id,
                                'student_number': student.student_number or '',
                                'name': student.name}],
-                             old_value=old_loc, new_value=new_loc,
+                             old_value=old_loc, new_value=new_loc_preview,
                              detail='修正班级录入' if change_kind == 'correct' else '个别调班',
                              operator_name=current_user.real_name)
-    except Exception:
-        pass
+    except Exception as _e:  # noqa: BLE001
+        logger.error('调班记录写入失败，已中止本次调班(学生 %s): %s', student.id, _e)
+        flash('调班失败：变迁记录写入异常，未做任何改动', 'danger')
+        return redirect(url_for('students.list_students'))
+
+    student.grade = new_grade
+    student.class_name = new_class
+    db.session.commit()
+    log_operation(current_user, '更新', '学生', student.id, f'{student.name} {old_info}→{new_grade}{new_class}')
     flash(f'学生 {student.name} 已从 {old_info} 调至 {new_grade} {new_class}', 'success')
     return redirect(url_for('students.list_students'))
 
@@ -1300,22 +1302,10 @@ def batch_transfer():
         return redirect(url_for('students.list_students'))
 
     try:
-        import openpyxl.worksheet.datavalidation as dv
-        _orig_init = dv.DataValidation.__init__
-        def _patched_init(self, *a, **kw):
-            kw.pop('id', None)
-            _orig_init(self, *a, **kw)
-        dv.DataValidation.__init__ = _patched_init
-
-        import openpyxl
-        wb = openpyxl.load_workbook(file, data_only=True)
-        ws = wb.active
-
-        header_map = {}
-        for col in range(1, ws.max_column + 1):
-            val = ws.cell(row=1, column=col).value
-            if val:
-                header_map[str(val).strip()] = col
+        # 2026-10-10：改用公共 excel 读取层（含 openpyxl 兼容性 patch，幂等）
+        from app.utils.excel_patch import load_sheet, read_header_map
+        ws = load_sheet(file)
+        header_map = read_header_map(ws)
 
         # 确定匹配列
         if tpl_type == 'id_card':
@@ -1398,8 +1388,8 @@ def batch_transfer():
                 db.session.commit()
                 try:
                     _log_reassign()
-                except Exception:
-                    pass
+                except Exception as _e:  # noqa: BLE001
+                    logger.warning('批量调班(部分失败)：调班记录写入失败: %s', _e)
                 flash(f'成功调班 {updated_count} 名学生。{error_summary}', 'warning')
             else:
                 db.session.rollback()
@@ -1408,8 +1398,8 @@ def batch_transfer():
             db.session.commit()
             try:
                 _log_reassign()
-            except Exception:
-                pass
+            except Exception as _e:  # noqa: BLE001
+                logger.warning('批量调班：调班记录写入失败: %s', _e)
             flash(f'成功调班 {updated_count} 名学生', 'success')
         else:
             flash('Excel中没有有效的调班数据', 'warning')

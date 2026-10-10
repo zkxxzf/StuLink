@@ -4,6 +4,12 @@
 import re
 from datetime import date
 
+# 2026-10-10 架构审计修复：本文件原有静默 `except Exception: pass`，失败不可观测。
+# 统一加 logger 记录 warning（仅留痕，不改变任何降级行为与返回值）。
+import logging
+
+logger = logging.getLogger(__name__)
+
 
 _NUM_CLASS_RE = re.compile(r'^\d{1,2}班$')
 
@@ -77,8 +83,8 @@ def delete_cache_prefix(prefix):
         for key in list(cache._cache.keys()):
             if key.startswith(prefix):
                 cache.delete(key)
-    except Exception:
-        pass
+    except Exception as _e:  # noqa: BLE001
+        logger.warning('utils.py::delete_cache_prefix 异常（已降级处理）: %s', _e)
 
 
 def invalidate_exam_cache(exam_id):
@@ -90,5 +96,5 @@ def invalidate_exam_cache(exam_id):
     try:
         from app.modules.grades.services.stats_service import clear_exam_data_cache
         clear_exam_data_cache()
-    except Exception:
-        pass
+    except Exception as _e:  # noqa: BLE001
+        logger.warning('utils.py::invalidate_exam_cache 异常（已降级处理）: %s', _e)

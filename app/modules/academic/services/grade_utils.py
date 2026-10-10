@@ -17,6 +17,12 @@ import re
 
 from flask import g, has_request_context
 
+# 2026-10-10 架构审计修复：本文件原有静默 `except Exception: pass`，失败不可观测。
+# 统一加 logger 记录 warning（仅留痕，不改变任何降级行为与返回值）。
+import logging
+
+logger = logging.getLogger(__name__)
+
 _HIGH_LABELS = {1: '高一', 2: '高二', 3: '高三'}
 
 # 选科组合的高中口头简称：物化生 / 史政地 / 政史地 …
@@ -108,8 +114,8 @@ def class_profile_map():
                 'combo': combo,
                 'combo_short': short or combo,
             }
-    except Exception:  # noqa: BLE001
-        pass
+    except Exception as _e:  # noqa: BLE001
+        logger.warning('grade_utils.py::class_profile_map 异常（已降级处理）: %s', _e)
     if cache is not None:          # 请求内缓存（见函数 docstring）
         g._class_profile_map = out
     return out

@@ -15,6 +15,12 @@ from app.modules.grades import bp
 from app.modules.grades.services import student_service, scope as scope_service
 from app.utils.decorators import perm_required
 
+# 2026-10-10 架构审计修复：本文件原有静默 `except Exception: pass`，失败不可观测。
+# 统一加 logger 记录 warning（仅留痕，不改变任何降级行为与返回值）。
+import logging
+
+logger = logging.getLogger(__name__)
+
 
 # ============ 范围过滤（复用现有角色/权限组体系，不新增角色） ============
 
@@ -75,8 +81,8 @@ def cert_verify(code):
     hits = (cache.get(rate_key) or 0) + 1
     try:
         cache.set(rate_key, hits, timeout=60)
-    except Exception:
-        pass
+    except Exception as _e:  # noqa: BLE001
+        logger.warning('student_query.py::cert_verify 异常（已降级处理）: %s', _e)
     if hits > 30:
         abort(429, description='核验请求过于频繁，请稍后再试')
 

@@ -22,6 +22,12 @@ from app.extensions import db
 from app.models.academic import AchievementAttachment, TeacherAchievement
 from app.utils.upload_guard import ext_of, validate_upload
 
+# 2026-10-10 架构审计修复：本文件原有静默 `except Exception: pass`，失败不可观测。
+# 统一加 logger 记录 warning（仅留痕，不改变任何降级行为与返回值）。
+import logging
+
+logger = logging.getLogger(__name__)
+
 # 常用标签（录入时下拉建议；仍可自由输入）
 TAG_PRESETS = ['教学成果', '课题立项', '论文发表', '竞赛辅导', '荣誉表彰',
                '继续教育', '公开课', '指导学生', '校本课程', '教学能手',
@@ -235,8 +241,8 @@ def can_view(rec, att, user):
     try:
         if user.has_perm('academic.view'):
             return True
-    except Exception:  # noqa: BLE001
-        pass
+    except Exception as _e:  # noqa: BLE001
+        logger.warning('achievement_service.py::can_view 异常（已降级处理）: %s', _e)
     if rec is not None and rec.submitted_by and rec.submitted_by == getattr(user, 'id', None):
         return True
     return False

@@ -37,6 +37,12 @@ from app.models.academic import (
 from app.models.student import Student
 from app.utils.export_helpers import xl_row, xl_safe
 
+# 2026-10-10 架构审计修复：本文件原有静默 `except Exception: pass`，失败不可观测。
+# 统一加 logger 记录 warning（仅留痕，不改变任何降级行为与返回值）。
+import logging
+
+logger = logging.getLogger(__name__)
+
 
 SUBMISSION_STATUS_TEXT = {'submitted': '待审核', 'approved': '已通过', 'rejected': '已驳回'}
 QUESTION_TYPE_TEXT = {
@@ -184,8 +190,8 @@ def _file_url(rel_path):
     if form_id:
         try:
             return url_for('academic.form_file', form_id=form_id, rel_path=rel_path)
-        except Exception:
-            pass
+        except Exception as _e:  # noqa: BLE001
+            logger.warning('form_summary_service.py::_file_url 异常（已降级处理）: %s', _e)
     return '#'
 
 

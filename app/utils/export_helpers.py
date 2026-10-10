@@ -8,6 +8,12 @@ from app.utils.helpers import get_graduated_grades, log_operation
 from app.utils.student_scope import apply_student_scope
 from app.extensions import db
 
+# 2026-10-10 架构审计修复：本文件原有静默 `except Exception: pass`，失败不可观测。
+# 统一加 logger 记录 warning（仅留痕，不改变任何降级行为与返回值）。
+import logging
+
+logger = logging.getLogger(__name__)
+
 # ── Excel / WPS 公式注入防护 ─────────────────────────────────
 # 单元格内容以这些字符开头时，表格软件会把它当成公式求值（= + - @）
 # 或触发 DDE/外部链接调用，故前置一个半角单引号强制转为文本。
@@ -205,8 +211,8 @@ def do_export_students(args):
         }
         # C：收敛到统一 helper（独立子事务写日志，不连带提交业务数据）
         log_operation(current_user, '导出', '学生', module='system', detail=log_detail)
-    except Exception:  # noqa: BLE001  导出日志失败不影响下载
-        pass
+    except Exception as _e:  # noqa: BLE001  导出日志失败不影响下载
+        logger.warning('export_helpers.py::do_export_students 异常（已降级处理）: %s', _e)
 
     return send_file(out, as_attachment=True, download_name=download_name,
                      mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
@@ -389,8 +395,8 @@ def do_export_student_accommodation(args):
         }
         # C：收敛到统一 helper（独立子事务写日志，不连带提交业务数据）
         log_operation(current_user, '导出', '学生住宿', module='dormitory', detail=log_detail)
-    except Exception:  # noqa: BLE001  导出日志失败不影响下载
-        pass
+    except Exception as _e:  # noqa: BLE001  导出日志失败不影响下载
+        logger.warning('export_helpers.py::do_export_student_accommodation 异常（已降级处理）: %s', _e)
 
     return send_file(out, as_attachment=True, download_name=download_name,
                      mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')

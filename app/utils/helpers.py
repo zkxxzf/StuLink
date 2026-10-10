@@ -1,11 +1,17 @@
 # StuLink v1.7.0 2026-08-02
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 import json
+import logging
 import os
 import re
 from app.models import DictCategory, Student, Room, ClassProfile, ClassSubject
 from app.utils.cache import cache
 from flask import request, g
+
+# 2026-10-10 架构审计修复：本模块多处 except 用于「降级兜底」（返回空列表/默认值），
+# 原先静默 pass 导致查询失败时页面照常渲染但数据为空，排查无从下手。
+# 现统一经此 logger 记录 warning —— **只加可观测性，不改变任何降级行为与返回值**。
+logger = logging.getLogger(__name__)
 
 
 def _insert_log_row(values):
@@ -84,8 +90,8 @@ def log_operation(user, action, target_type=None, target_id=None, detail=None,
                 db.session.add(OperationLog(**values))
 
         g._audit_logged = True  # 供 after_request 兜底网去重
-    except Exception:
-        pass  # 日志记录失败不阻塞业务
+    except Exception as _e:  # noqa: BLE001
+        logger.warning('操作日志记录失败（不阻塞业务）: %s', _e)  # 2026-10-10 改为留痕
 
 
 def is_dict_value_in_use(category_code, value):
@@ -99,8 +105,8 @@ def is_dict_value_in_use(category_code, value):
             try:
                 if ClassProfile.query.filter_by(grade=value).first():
                     return True
-            except Exception:
-                pass
+            except Exception as _e:  # noqa: BLE001
+                logger.warning('字典引用检查(grade)跳过 ClassProfile 校验: %s', _e)
         elif category_code == 'class':
             if Student.query.filter_by(class_name=value).first():
                 return True
@@ -109,8 +115,8 @@ def is_dict_value_in_use(category_code, value):
             try:
                 if ClassProfile.query.filter_by(class_name=value).first():
                     return True
-            except Exception:
-                pass
+            except Exception as _e:  # noqa: BLE001
+                logger.warning('字典引用检查(class)跳过 ClassProfile 校验: %s', _e)
         elif category_code == 'building':
             if Room.query.filter_by(building=value).first():
                 return True
@@ -136,16 +142,16 @@ def is_dict_value_in_use(category_code, value):
             try:
                 if ClassProfile.query.filter_by(class_type=value).first():
                     return True
-            except Exception:
-                pass
+            except Exception as _e:  # noqa: BLE001
+                logger.warning('字典引用检查(class_type)跳过校验: %s', _e)
         elif category_code == 'subject_direction':
             try:
                 if ClassProfile.query.filter_by(subject_direction=value).first():
                     return True
-            except Exception:
-                pass
-    except Exception:
-        pass
+            except Exception as _e:  # noqa: BLE001
+                logger.warning('字典引用检查(subject_direction)跳过校验: %s', _e)
+    except Exception as _e:  # noqa: BLE001
+        logger.warning('字典引用检查整体失败，按「未被引用」处理: %s', _e)
     return False
 
 
@@ -196,7 +202,9 @@ def get_graduated_grades():
     try:
         from app.models.grade_setting import GradeSetting
         grades = [gs.grade for gs in GradeSetting.query.filter_by(is_graduated=True).all()]
-    except Exception:
+    except Exception as _e:  # noqa: BLE001
+        # 降级返回空列表（行为不变），但留痕便于定位「年级莫名全部在校」
+        logger.warning('读取已毕业年级失败，本次按「无毕业年级」处理: %s', _e)
         return []  # 异常不写缓存，下次重试
     cache.set(cache_key, grades, timeout=600)
     return grades
@@ -256,8 +264,8 @@ def get_school_name():
         db_name = (SystemSetting.get(SCHOOL_NAME_KEY) or '').strip()
         if db_name:
             return db_name
-    except Exception:
-        pass
+    except Exception as _e:  # noqa: BLE001
+        logger.warning('读取学校名称失败，回落默认名: %s', _e)
     return DEFAULT_SCHOOL_NAME
 
 
@@ -459,8 +467,8 @@ def resolve_direction(subject_selection, class_name=None, grade=None):
             cp = q.first()
             if cp and cp.subject_direction:
                 return cp.subject_direction
-        except Exception:
-            pass
+        except Exception as _e:  # noqa: BLE001
+            logger.warning('按班名推导选科方向失败(%s/%s): %s', grade, class_name, _e)
     return ''
 
 
@@ -472,7 +480,8 @@ def get_class_type(grade, class_name):
         from app.models.class_profile import ClassProfile
         cp = ClassProfile.query.filter_by(grade=grade, class_name=class_name).first()
         return (cp.class_type or '') if cp else ''
-    except Exception:
+    except Exception as _e:  # noqa: BLE001
+        logger.warning('读取班型失败(%s/%s): %s', grade, class_name, _e)
         return ''
 
 
@@ -490,7 +499,8 @@ def get_class_selection(grade, class_name):
             return ''
         lst = cp.subject_list
         return '、'.join(lst) if lst else ''
-    except Exception:
+    except Exception as _e:  # noqa: BLE001
+        logger.warning('读取班级选科组合失败(%s/%s): %s', grade, class_name, _e)
         return ''
 
 
@@ -553,7 +563,8 @@ def student_change_logs(student_id, limit=200):
             return [dict(r._mapping) for r in
                     conn.execute(sql, {'sid': int(student_id),
                                        'lim': int(limit)}).fetchall()]
-    except Exception:
+    except Exception as _e:  # noqa: BLE001
+        logger.warning('读取学生变迁日志失败(student_id=%s): %s', student_id, _e)
         return []
 
 
@@ -581,7 +592,8 @@ def class_change_counts(student_ids):
                    f'GROUP BY student_id')
         with engine.connect() as conn:
             return {row[0]: row[1] for row in conn.execute(sql, params).fetchall()}
-    except Exception:
+    except Exception as _e:  # noqa: BLE001
+        logger.warning('批量统计调班次数失败(%d 个学生): %s', len(ids), _e)
         return {}
 
 
@@ -646,7 +658,8 @@ def class_change_logs(student_ids=None, change_types=None, grade='', class_name=
                 out.extend(dict(r._mapping) for r in conn.execute(sql, params).fetchall())
         out.sort(key=lambda r: (str(r.get('changed_at') or ''), r.get('id') or 0), reverse=True)
         return out[:int(limit)]
-    except Exception:
+    except Exception as _e:  # noqa: BLE001
+        logger.warning('查询变迁日志列表失败: %s', _e)
         return []
 
 

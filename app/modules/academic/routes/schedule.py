@@ -35,6 +35,12 @@ from app.utils.decorators import perm_required
 from app.utils.export_helpers import xl_row, xl_safe
 from app.utils.helpers import log_operation
 
+# 2026-10-10 架构审计修复：本文件原有静默 `except Exception: pass`，失败不可观测。
+# 统一加 logger 记录 warning（仅留痕，不改变任何降级行为与返回值）。
+import logging
+
+logger = logging.getLogger(__name__)
+
 _XLSX_MIME = ('application/vnd.openxmlformats-officedocument'
               '.spreadsheetml.sheet')
 
@@ -64,8 +70,8 @@ def _resolve_teacher(teacher_uid, teacher_name):
             t = Teacher.query.filter_by(teacher_uid=teacher_uid).first()
             if t:
                 teacher_name = t.name
-        except Exception:
-            pass
+        except Exception as _e:  # noqa: BLE001
+            logger.warning('schedule.py::_resolve_teacher 异常（已降级处理）: %s', _e)
     return teacher_uid or None, teacher_name or None
 
 
@@ -320,8 +326,8 @@ def schedule_teacher(sid, uid):
     try:
         from app.models.academic import Teacher
         teacher = Teacher.query.filter_by(teacher_uid=uid).first()
-    except Exception:
-        pass
+    except Exception as _e:  # noqa: BLE001
+        logger.warning('schedule.py::schedule_teacher 异常（已降级处理）: %s', _e)
     teachers = svc.get_all_teachers()
     return render_template('academic/schedule_teacher.html',
                            ts=ts, uid=uid, teacher=teacher, view=view,
@@ -911,8 +917,8 @@ def schedule_smart_import_confirm(sid):
         log_operation(current_user, '导入', '课表', sid,
                       f'学校原样课表导入：成功 {result["success"]} 条，'
                       f'跳过 {result["failed"]} 条', module='academic')
-    except Exception:  # noqa: BLE001
-        pass
+    except Exception as _e:  # noqa: BLE001
+        logger.warning('schedule.py::schedule_smart_import_confirm 异常（已降级处理）: %s', _e)
     flash(f'导入完成：成功 {result["success"]} 条，跳过 {result["failed"]} 条',
           'success' if result['success'] else 'warning')
     return redirect(url_for('academic.schedule_smart_import', sid=sid))
@@ -1283,8 +1289,8 @@ def api_schedule_classes():
             for g, cn in student_q.distinct().all():
                 if g and cn and cn not in skip:
                     filtered.setdefault(g, set()).add(cn)
-        except Exception:  # noqa: BLE001
-            pass
+        except Exception as _e:  # noqa: BLE001
+            logger.warning('schedule.py::api_schedule_classes 异常（已降级处理）: %s', _e)
     data = {g: sorted(cs) for g, cs in sorted(filtered.items())}
     return _json_ok(data)
 

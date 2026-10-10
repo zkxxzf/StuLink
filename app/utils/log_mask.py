@@ -8,6 +8,9 @@
 import logging
 import re
 
+# 2026-10-10 审计说明：本文件的 `except: pass` 经评估**保持静默**（见下方 filter 注释），
+# 原因是脱敏器内部打日志会递归且绕过脱敏。此处不引入 logger，避免残留无用代码。
+
 _ID_CARD = re.compile(r'\b\d{17}[\dXx]\b')
 _PHONE = re.compile(r'\b1[3-9]\d{9}\b')
 _EMAIL = re.compile(r'\b[\w.+-]+@[\w-]+\.[\w.-]+\b')
@@ -39,7 +42,11 @@ class MaskingFilter(logging.Filter):
                 record.args = ()
             if record.exc_text:
                 record.exc_text = mask_text(record.exc_text)
-        except Exception:  # noqa: BLE001  脱敏失败不应阻断日志
+        except Exception:  # noqa: BLE001
+            # 2026-10-10：**此处禁止打日志** —— ① 本 Filter 被装到各 logger 上，
+            # 内部 logger.warning 会触发 filter 重入（递归风险）；
+            # ② 脱敏器自身输出的日志不经过脱敏，反而可能泄露未掩码的敏感串。
+            # 维持原「静默降级」（返回 True 让日志照常输出），仅加说明。
             pass
         return True
 

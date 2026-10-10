@@ -38,15 +38,15 @@ def _prune_backups(backups_dir, keep=20, max_age_days=180):
         try:
             os.remove(p)
             removed += 1
-        except Exception:  # noqa: BLE001
-            pass
+        except Exception as _e:  # noqa: BLE001
+            logger.warning('grade_mgmt.py::_prune_backups 异常（已降级处理）: %s', _e)
     for p, mtime in files[:keep]:
         if mtime < cutoff:
             try:
                 os.remove(p)
                 removed += 1
-            except Exception:  # noqa: BLE001
-                pass
+            except Exception as _e:  # noqa: BLE001
+                logger.warning('grade_mgmt.py::_prune_backups 异常（已降级处理）: %s', _e)
     return removed
 
 
@@ -339,8 +339,8 @@ def history():
             ).fetchall()
             graduated_grades = [g[0] for g in grades if g[0]]
             conn.close()
-        except Exception:
-            pass
+        except Exception as _e:  # noqa: BLE001
+            logger.warning('grade_mgmt.py::history 异常（已降级处理）: %s', _e)
 
     search_grade = request.args.get('grade', '')
     search_name = request.args.get('name', '').strip()
@@ -409,8 +409,8 @@ def alumni():
             ).fetchall()
             graduated_grades = [g[0] for g in grades if g[0]]
             conn.close()
-        except Exception:
-            pass
+        except Exception as _e:  # noqa: BLE001
+            logger.warning('grade_mgmt.py::alumni 异常（已降级处理）: %s', _e)
 
     search_grade = request.args.get('grade', '')
     search_name = request.args.get('name', '').strip()

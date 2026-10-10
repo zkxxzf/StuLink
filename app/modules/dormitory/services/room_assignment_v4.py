@@ -36,6 +36,12 @@ from collections import defaultdict
 from app.models import Room, Student, ClassProfile, StudentAccommodation, BedAssignment
 from app.extensions import db
 
+# 2026-10-10 架构审计修复：本文件原有静默 `except Exception: pass`，失败不可观测。
+# 统一加 logger 记录 warning（仅留痕，不改变任何降级行为与返回值）。
+import logging
+
+logger = logging.getLogger(__name__)
+
 
 # ============================================================================
 # 防御性工具函数
@@ -878,8 +884,8 @@ def _load_class_profiles(classes):
         ).all()
         for p in results:
             profiles[f"{p.grade}:{p.class_name}"] = p
-    except Exception:
-        pass
+    except Exception as _e:  # noqa: BLE001
+        logger.warning('room_assignment_v4.py::_load_class_profiles 异常（已降级处理）: %s', _e)
     return profiles
 
 

@@ -23,6 +23,12 @@ from app.modules.academic.services import duty_service as svc
 from app.utils.decorators import perm_required
 from app.utils.helpers import log_operation
 
+# 2026-10-10 架构审计修复：本文件原有静默 `except Exception: pass`，失败不可观测。
+# 统一加 logger 记录 warning（仅留痕，不改变任何降级行为与返回值）。
+import logging
+
+logger = logging.getLogger(__name__)
+
 _XLSX_MIME = ('application/vnd.openxmlformats-officedocument'
               '.spreadsheetml.sheet')
 
@@ -65,8 +71,8 @@ def _grade_options():
     try:
         from app.models import ClassProfile
         grades = sorted({cp.grade for cp in ClassProfile.query.all() if cp.grade})
-    except Exception:  # noqa: BLE001
-        pass
+    except Exception as _e:  # noqa: BLE001
+        logger.warning('duty.py::_grade_options 异常（已降级处理）: %s', _e)
     for g in ('高一', '高二', '高三'):
         if g not in grades:
             grades.append(g)

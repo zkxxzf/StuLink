@@ -922,18 +922,27 @@ def auto_assign_all():
         for bed in available_beds:
             bed_groups.setdefault(bed.room_id, []).append(bed)
 
+        # 按性别分房间
+        # 2026-10-10 架构审计修复：原实现在循环内逐个 Room.query.get(rid)（N+1），
+        # 房间规模下是首屏慢的主因之一。改为一次性批量取出，行为完全一致。
         male_rooms = []
         female_rooms = []
         unisex_rooms = []
+        room_ids = list(bed_groups.keys())
+        room_gender = {}
+        if room_ids:
+            rows = (db.session.query(Room.id, Room.gender)
+                    .filter(Room.id.in_(room_ids)).all())
+            room_gender = {rid: gender for rid, gender in rows}
         for rid, beds in bed_groups.items():
-            room = Room.query.get(rid)
-            if room:
-                if room.gender == '男':
-                    male_rooms.append(beds)
-                elif room.gender == '女':
-                    female_rooms.append(beds)
-                else:
-                    unisex_rooms.append(beds)
+            if rid not in room_gender:
+                unisex_rooms.append(beds)
+                continue
+            gender = room_gender[rid]
+            if gender == '男':
+                male_rooms.append(beds)
+            elif gender == '女':
+                female_rooms.append(beds)
             else:
                 unisex_rooms.append(beds)
 

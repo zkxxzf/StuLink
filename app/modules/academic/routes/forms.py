@@ -862,13 +862,22 @@ def form_my_submissions():
     submissions = form_service.get_my_submissions(current_user.id)
 
     # 附加表单标题
+    # 2026-10-10 架构审计修复：原实现在循环内逐个 db.session.get(FormTemplate)（N+1），
+    # 改为一次性批量取出模板，行为完全一致（缺失的模板仍显示「(已删除)」）。
     sub_data = []
+    tpl_ids = list({sub.template_id for sub in submissions if sub.template_id})
+    tpl_map = {}
+    if tpl_ids:
+        rows = (db.session.query(FormTemplate.id, FormTemplate.title,
+                                 FormTemplate.status)
+                .filter(FormTemplate.id.in_(tpl_ids)).all())
+        tpl_map = {r[0]: (r[1], r[2]) for r in rows}
     for sub in submissions:
-        tpl = db.session.get(FormTemplate, sub.template_id)
+        tpl_info = tpl_map.get(sub.template_id)
         sub_data.append({
             'submission': sub,
-            'form_title': tpl.title if tpl else '(已删除)',
-            'form_status': tpl.status if tpl else None,
+            'form_title': tpl_info[0] if tpl_info else '(已删除)',
+            'form_status': tpl_info[1] if tpl_info else None,
         })
 
     return render_template('academic/form_my_submissions.html',

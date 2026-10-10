@@ -7,6 +7,7 @@
 两个 service 均从此处导入，避免逻辑分叉。
 """
 import json
+import logging
 import re
 from datetime import datetime
 
@@ -16,6 +17,11 @@ from app.extensions import db
 from app.models.timetable import (
     TermSchedule, PeriodDef, ScheduleEntry, ScheduleVersion, ScheduleSwap,
 )
+
+# 2026-10-10 架构审计修复：本文件原有静默 `except Exception: pass`（学期定位失败会
+# 悄悄回落到"取最新学期"，页面照常显示但可能对应错学期）。统一加 logger 留痕，
+# **降级行为与返回值完全不变**。
+logger = logging.getLogger(__name__)
 
 # 周次探针上限：用于把"周次字符串"展开成周集合做交集判断（覆盖一学期的合理范围）
 WEEK_PROBE_MAX = 40
@@ -105,8 +111,9 @@ def get_active_schedule():
         sched, _week = term_service.resolve_schedule_by_date()
         if sched is not None:
             return sched
-    except Exception:
-        pass
+    except Exception as _e:  # noqa: BLE001
+        # 按日期定位失败 → 回落到"取 active/最新学期"（行为与原来一致），仅留痕
+        logger.warning('按日期定位当前学期失败，回落 status=active 口径: %s', _e)
     sched = (TermSchedule.query.filter_by(status='active')
              .order_by(TermSchedule.id.desc()).first())
     if sched:
