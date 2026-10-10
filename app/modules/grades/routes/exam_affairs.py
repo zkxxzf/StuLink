@@ -784,10 +784,38 @@ def affair_settings(aid):
 
 # ==================== 步骤③ 编排与考号生成（镜像宏 编排考场考号2） ====================
 
-def _arrange(affair, students, rooms, mode, log):
+def _prev_stage_rank_map(affair):
+    """上一场**同阶段**考试的校内排名 → {学号: 方向排名}，供考场分层排序
+
+    口径（用户 2026-10-10）：同一场同阶段考试（同年级 + 同 exam_type）中
+    日期早于本场、取最近一场；用「总分行」的 rank_dir（文理各自排，选科组合之间可比）。
+    找不到（首次考试）→ 返回 ({}, '')，分配自然退化为随机，不报错。
+    """
+    from app.models.grades import Exam, ExamScore, TOTAL_SUBJECT
+    if not affair.exam_id:
+        return {}, ''
+    cur = Exam.query.get(affair.exam_id)
+    if cur is None:
+        return {}, ''
+    prev = (Exam.query.filter(Exam.grade == cur.grade,
+                              Exam.exam_type == cur.exam_type,
+                              Exam.exam_date < cur.exam_date)
+            .order_by(Exam.exam_date.desc()).first())
+    if prev is None:
+        return {}, ''
+    rows = (ExamScore.query.filter_by(exam_id=prev.id)
+            .filter(ExamScore.subject == TOTAL_SUBJECT).all())
+    return ({r.student_no: (r.rank_dir or 10 ** 9) for r in rows}, prev.name)
+
+
+def _arrange(affair, students, rooms, mode, log, layered=False, rank_map=None):
     """镜像 Excel 宏的编排逻辑：固定座位优先 → 同班邻座限制 → 随机分配。
     v1.12.1：支持不选科模式、非参考学生尾场处理、选科考号前后缀。
+    v1.19.0：**分层分配**（layered=True）—— 同一选科组内按上一场同阶段考试的
+    校内排名升序填座，考场按房间号顺序、座位按号从前往后依次填满，
+    即“前 N 个考场共 M 座 → 第 1~M 名填这几个考场”；无排名数据则退化随机。
     返回 (assigned_count, failed_count)"""
+    rank_map = rank_map or {}
     room_by_no = {r.room_no: r for r in rooms}
     # 座位占用表
     seats = {r.room_no: [None] * r.capacity for r in rooms}
@@ -846,10 +874,16 @@ def _arrange(affair, students, rooms, mode, log):
 
     MAX_SAME_CLASS = 1
     for key, group in groups.items():
+        # v1.19.0 分层分配：同一选科组内按上一场同阶段考试排名升序（无排名排最后）
+        if layered:
+            group.sort(key=lambda s: (rank_map.get(s.student_no, 10 ** 9),
+                                      s.student_no or ''))
         # v1.12.1 不选科模式：全体一组，考场全部通用；选科模式按科目匹配
-        avail = [(r.room_no, r) for r in rooms
-                 if len(used[r.room_no]) < r.capacity
-                 and (plain or r.is_universal or r.subject == key)]
+        # v1.19.0 固定按房间号排序，保证分层填充“从第一考场往后”可预期
+        avail = sorted([(r.room_no, r) for r in rooms
+                        if len(used[r.room_no]) < r.capacity
+                        and (plain or r.is_universal or r.subject == key)],
+                       key=lambda t: t[0])
         for s in group:
             candidates = []
             for rno, r in avail:
@@ -874,7 +908,12 @@ def _arrange(affair, students, rooms, mode, log):
                 log.append(f'【分配失败】[{s.name}] 无可用座位（选科 {key}）')
                 failed += 1
                 continue
-            rno, seat = random.choice(candidates)
+            if layered:
+                # 分层：取“考场号→座号”最靠前的空位，实现容量累积分段
+                candidates.sort(key=lambda x: (x[0], x[1]))
+                rno, seat = candidates[0]
+            else:
+                rno, seat = random.choice(candidates)
             seats[rno][seat - 1] = s
             used[rno].add(seat)
             s.room_no = rno
@@ -926,8 +965,19 @@ def affair_arrange(aid):
     if not rooms:
         return jsonify({'ok': False, 'msg': '请先在「考场设置」中添加考场'})
     scope = [s for s in students if s.is_attend]
+    # v1.19.0 分层分配：同一选科组内按上一场同阶段考试的校内排名填座
+    # （首次考试无历史成绩 → 自然退化为随机，不阻断）
+    layered = request.form.get('layered') in ('1', 'true', 'on')
+    rank_map, prev_name = ({}, '')
+    if layered:
+        rank_map, prev_name = _prev_stage_rank_map(affair)
     log = [f'当前模式：{MODE_LABEL[mode]}']
-    assigned, failed = _arrange(affair, students, rooms, mode, log)
+    if layered:
+        log.append('分层依据：' + (
+            f'上一场同阶段考试「{prev_name}」的校内排名（{len(rank_map)} 人有排名）'
+            if rank_map else '无上一场同阶段成绩，本次退化为随机编排'))
+    assigned, failed = _arrange(affair, students, rooms, mode, log,
+                                layered=layered, rank_map=rank_map)
     affair.status = 'arranged' if assigned else 'draft'
     db.session.commit()
     log_operation(current_user, '编排', '考务批次', aid,
