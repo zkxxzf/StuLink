@@ -1,0 +1,151 @@
+{% extends "base.html" %}
+{% block title %}用户设置{% endblock %}
+{% block content %}
+<div class="d-flex align-items-center mb-3 flex-wrap gap-2">
+    <h5 class="mb-0"><i class="bi bi-person-gear"></i> 用户设置</h5>
+    <span class="text-muted small">右上角用户名入口 · 账号与个人配置都在这里</span>
+</div>
+
+{# ① 账号信息 + 改密码 #}
+<div class="card mb-3">
+    <div class="card-header py-2"><i class="bi bi-person-badge"></i> 账号</div>
+    <div class="card-body">
+        <div class="row g-3">
+            <div class="col-md-6">
+                <table class="table table-sm mb-0">
+                    <tr><th style="width:110px">用户名</th><td>{{ current_user.username }}</td></tr>
+                    <tr><th>姓名</th><td>{{ current_user.real_name }}</td></tr>
+                    <tr><th>身份</th><td>{{ current_user.display_role }}
+                        {% if is_admin %}<span class="badge bg-danger ms-1">管理员</span>{% endif %}</td></tr>
+                    <tr><th>权限组</th><td>{{ pg.name if pg else '（未分配）' }}</td></tr>
+                    <tr><th>数据范围</th><td><span class="badge bg-info-subtle text-info-emphasis">{{ scope_label }}</span></td></tr>
+                </table>
+            </div>
+            <div class="col-md-6">
+                <div class="alert alert-light border small mb-0">
+                    <b>密码安全</b><br>
+                    修改密码后，<b>其它设备的登录状态会立即失效</b>（本设备保持登录）。<br>
+                    首次登录被要求改密的账号，改密前其它功能会受限。
+                </div>
+                <a href="{{ url_for('auth.change_password') }}" class="btn btn-outline-primary btn-sm mt-2">
+                    <i class="bi bi-key"></i> 修改密码
+                </a>
+            </div>
+        </div>
+    </div>
+</div>
+
+{# ② 我的 AI：Key 只存本机浏览器，不上服务器 #}
+<div class="card mb-3">
+    <div class="card-header py-2 d-flex align-items-center">
+        <span><i class="bi bi-robot"></i> 我的 AI 配置</span>
+        <span class="badge bg-success-subtle text-success-emphasis ms-2">仅存本机浏览器</span>
+        <span class="text-muted small ms-2">不会上传到服务器，换电脑/清缓存需要重新填</span>
+    </div>
+    <div class="card-body">
+        <div class="row g-3">
+            <div class="col-md-3">
+                <label class="form-label small mb-1">服务商</label>
+                <select id="aiProvider" class="form-select form-select-sm"></select>
+                <div class="form-text">选「自定义」可填任意标准 OpenAI 兼容地址</div>
+            </div>
+            <div class="col-md-5">
+                <label class="form-label small mb-1">接口地址（base_url）</label>
+                <input id="aiBase" class="form-control form-control-sm" placeholder="https://api.deepseek.com">
+                <div class="form-text">到 <code>/v1</code> 为止，不要带 <code>/chat/completions</code></div>
+            </div>
+            <div class="col-md-4">
+                <label class="form-label small mb-1">模型</label>
+                <input id="aiModel" class="form-control form-control-sm" list="aiModelList"
+                       placeholder="deepseek-chat">
+                <datalist id="aiModelList"></datalist>
+            </div>
+            <div class="col-md-8">
+                <label class="form-label small mb-1">API Key</label>
+                <div class="input-group input-group-sm">
+                    <input id="aiKey" type="password" class="form-control" autocomplete="off"
+                           placeholder="sk-xxxxxxxx">
+                    <button class="btn btn-outline-secondary" type="button" id="aiKeyToggle"
+                            title="显示/隐藏">显示</button>
+                </div>
+                <div class="form-text" id="aiKeyHint"></div>
+            </div>
+            <div class="col-md-4 d-flex align-items-end gap-2">
+                <button class="btn btn-primary btn-sm" id="aiSave"><i class="bi bi-save"></i> 保存到本机</button>
+                <button class="btn btn-outline-info btn-sm" id="aiTest"><i class="bi bi-plug"></i> 测试连接</button>
+                <button class="btn btn-outline-danger btn-sm" id="aiClear"><i class="bi bi-trash"></i> 清除</button>
+            </div>
+        </div>
+        <div id="aiMsg" class="small mt-2"></div>
+        <div class="text-muted small mt-2">
+            <i class="bi bi-info-circle"></i> 未配置 Key 时，AI 相关功能（智能导入、AI 分析、AI 对话）会提示先来本页配置。
+        </div>
+    </div>
+</div>
+
+{# ③ 我的权限（只读） #}
+<div class="card mb-3">
+    <div class="card-header py-2">
+        <i class="bi bi-shield-check"></i> 我的权限
+        <span class="text-muted small ms-2">只读展示；如需调整请联系管理员改权限组</span>
+    </div>
+    <div class="card-body">
+        <div class="row g-3">
+            {% for m in modules %}
+            <div class="col-md-6 col-xl-4">
+                <div class="border rounded p-2 h-100">
+                    <div class="d-flex align-items-center mb-2">
+                        <i class="bi {{ m.icon }} me-1"></i>
+                        <b class="small">{{ m.name }}</b>
+                        <span class="badge ms-auto {{ 'bg-success-subtle text-success-emphasis' if m.any else 'bg-secondary-subtle text-secondary-emphasis' }}">
+                            {{ m.allowed_n }}/{{ m.perms|length }}
+                        </span>
+                    </div>
+                    <div class="d-flex flex-wrap gap-1">
+                        {% for it in m.perms %}
+                        <span class="badge {{ 'bg-success-subtle text-success-emphasis' if it.allowed else 'bg-light text-muted border' }}">
+                            {% if it.allowed %}<i class="bi bi-check-lg"></i>{% endif %} {{ it.name }}
+                        </span>
+                        {% endfor %}
+                    </div>
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+    </div>
+</div>
+
+{# ④ 其他（界面偏好，存本机） #}
+<div class="card mb-3">
+    <div class="card-header py-2"><i class="bi bi-sliders"></i> 其他设置</div>
+    <div class="card-body">
+        <div class="row g-3 align-items-end">
+            <div class="col-md-4">
+                <label class="form-label small mb-1">列表每页条数（默认值）</label>
+                <select id="pfSize" class="form-select form-select-sm">
+                    <option value="20">20</option>
+                    <option value="50">50</option>
+                    <option value="100">100</option>
+                </select>
+                <div class="form-text">本机偏好，仅影响你自己的浏览体验</div>
+            </div>
+            <div class="col-md-8">
+                <button class="btn btn-outline-secondary btn-sm" id="pfSave">
+                    <i class="bi bi-save"></i> 保存偏好
+                </button>
+                <button class="btn btn-outline-danger btn-sm" id="localClear">
+                    <i class="bi bi-eraser"></i> 清除本机全部本地配置
+                </button>
+                <div class="form-text">清除范围：AI Key、界面偏好（不影响服务器上的任何数据）</div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+{% block extra_js %}
+<script>
+window.STULINK_PROVIDERS = {{ providers|tojson }};
+window.STULINK_DEFAULT_PROVIDER = {{ default_provider|tojson }};
+</script>
+<script src="{{ su('js/my_settings.js') }}"></script>
+{% endblock %}

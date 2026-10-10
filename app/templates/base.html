@@ -118,16 +118,43 @@
                     0
                 </span>
             </a>
-            <span class="text-light me-3 d-none d-md-inline" style="font-size:14px;">
-                <i class="bi bi-person-circle"></i> {{ current_user.real_name }}
-                <span class="badge bg-primary badge-role ms-1">{{ current_user.display_role }}</span>
-            </span>
-            <a href="{{ url_for('auth.change_password') }}" class="btn btn-sm btn-outline-light me-2" title="改密码">
-                <i class="bi bi-key"></i> <span class="d-none d-md-inline">改密码</span>
-            </a>
-            <a href="{{ url_for('auth.logout') }}" class="btn btn-sm btn-outline-danger" title="退出">
-                <i class="bi bi-box-arrow-right"></i> <span class="d-none d-md-inline">退出</span>
-            </a>
+            {# v1.19.0 右上角统一入口：点用户名 → 用户设置 / 改密码 / AI 配置 / 退出 #}
+            <div class="dropdown me-2">
+                <button class="btn btn-sm btn-outline-light dropdown-toggle" type="button"
+                        id="userMenuBtn" data-bs-toggle="dropdown" aria-expanded="false">
+                    <i class="bi bi-person-circle"></i> {{ current_user.real_name }}
+                    <span class="badge bg-primary badge-role ms-1 d-none d-md-inline">{{ current_user.display_role }}</span>
+                </button>
+                <ul class="dropdown-menu dropdown-menu-end shadow" aria-labelledby="userMenuBtn"
+                    style="min-width:230px;">
+                    <li class="px-3 py-2 small text-muted">
+                        {{ current_user.username }} · {{ current_user.display_role }}
+                    </li>
+                    <li><hr class="dropdown-divider my-1"></li>
+                    <li>
+                        <a class="dropdown-item" href="{{ url_for('auth.my_settings') }}">
+                            <i class="bi bi-gear"></i> 用户设置
+                        </a>
+                    </li>
+                    <li>
+                        <a class="dropdown-item" href="{{ url_for('auth.my_settings') }}#ai">
+                            <i class="bi bi-robot"></i> 我的 AI 配置
+                            <span class="badge bg-light text-muted border ms-1" id="navAiState">未配置</span>
+                        </a>
+                    </li>
+                    <li>
+                        <a class="dropdown-item" href="{{ url_for('auth.change_password') }}">
+                            <i class="bi bi-key"></i> 修改密码
+                        </a>
+                    </li>
+                    <li><hr class="dropdown-divider my-1"></li>
+                    <li>
+                        <a class="dropdown-item text-danger" href="{{ url_for('auth.logout') }}">
+                            <i class="bi bi-box-arrow-right"></i> 退出登录
+                        </a>
+                    </li>
+                </ul>
+            </div>
             {% endif %}
         </div>
     </nav>
@@ -518,6 +545,8 @@
         });
     </script>
     {% if current_user.is_authenticated %}
+    <!-- v1.19.0 浏览器本地 AI 配置（私人 Key 不上服务器）+ 右上角配置状态 -->
+    <script src="{{ su('js/ai_local.js') }}"></script>
     <script>
         // 通知铃铛：轮询未读数量（30秒间隔）
         function updateNotificationBadge() {
