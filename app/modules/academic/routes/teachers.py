@@ -1,4 +1,4 @@
-# StuLink v1.18.9.1 2026-10-09
+# StuLink v1.18.9.1 2026-10-10
 # 教务 · 教师名单：列表 / Excel 导入（模板-预览-确认-密码清单）/ 编辑
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 import io
