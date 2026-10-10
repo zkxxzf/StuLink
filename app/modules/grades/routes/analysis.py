@@ -26,6 +26,60 @@ def index_legacy():
     return redirect(url_for('grades.exams_list'))
 
 
+@bp.route('/exams/<int:exam_id>/near-line')
+@login_required
+@perm_required('grades.view')
+def exam_near_line(exam_id):
+    """临界生对比（v1.19.0）
+
+    口径：总分线**线上 above 分内**（危险：可能掉下来）/ **线下 below 分内**（希望：可能冲上去）
+    默认 10 / 20 分，可在页面上调；复用 report_warning_service.near_line_report 的计算。
+    本页在“考试上下文”内（侧栏会切成该场考试的悬浮流程栏）。
+    """
+    from app.modules.grades.services.exam_guard import assert_exam_visible
+    from app.modules.grades.services import (report_warning_service as rws,
+                                             report_service as rs)
+    from app.models.grades import ExamBand, TOTAL_SUBJECT
+    exam = assert_exam_visible(exam_id)
+
+    cfg_max = rs.NEAR_LINE_MAX
+    direction = (request.args.get('direction') or '').strip()
+    layer = (request.args.get('layer') or '').strip()
+    above = request.args.get('above', default=rs.NEAR_LINE_ABOVE, type=int)
+    below = request.args.get('below', default=rs.NEAR_LINE_BELOW, type=int)
+    above = max(0, min(above or 0, cfg_max))
+    below = max(0, min(below or 0, cfg_max))
+
+    # 可选层级（本场总分划线）——不依赖缓存服务，直接查分数线表
+    lq = ExamBand.query.filter_by(exam_id=exam_id, subject=TOTAL_SUBJECT)
+    if direction:
+        lq = lq.filter_by(direction=direction)
+    layers = []
+    for row in lq.order_by(ExamBand.seq).all():
+        if row.name and row.name not in layers:
+            layers.append(row.name)
+
+    data = rws.near_line_report(exam_id, direction, layer, above, below)
+    err = data.get('error') if isinstance(data, dict) else '计算失败'
+    by_class = []
+    if not err:
+        agg = {}
+        for r in data['rows']:
+            b = agg.setdefault(r['class_name'], {'class_name': r['class_name'],
+                                                 'headteacher': r.get('headteacher') or '',
+                                                 'above': 0, 'below': 0})
+            b['above' if r['status'] == '线上' else 'below'] += 1
+            if not b['headteacher'] and r.get('headteacher'):
+                b['headteacher'] = r['headteacher']
+        by_class = sorted(agg.values(),
+                          key=lambda x: (-(x['above'] + x['below']), x['class_name']))
+    return render_template('grades/near_line.html', exam=exam, data=data, error=err,
+                           layers=layers, direction=direction, layer=layer,
+                           above=above, below=below, cfg_max=cfg_max,
+                           by_class=by_class,
+                           title='临界生对比')
+
+
 @bp.route('/analysis')
 @login_required
 @perm_required('grades.view')
