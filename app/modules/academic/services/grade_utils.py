@@ -15,6 +15,8 @@
 """
 import re
 
+from flask import g, has_request_context
+
 _HIGH_LABELS = {1: '高一', 2: '高二', 3: '高三'}
 
 # 选科组合的高中口头简称：物化生 / 史政地 / 政史地 …
@@ -73,24 +75,41 @@ def class_profile_map():
 
     读取班级档案里的班型与选科（新高考 3+1+2：direction=物理/历史，combo=物化生）。
     班级档案不可用（模块未启用/表缺失）时返回空 dict，调用方按"未设置"处理。
+
+    2026-10-10 优化：同一请求内多个视图/模板会重复调用（总课表、班级课表、
+    查课实时课表各一次），每次固定 2 条 SQL；这里加请求内缓存。
+    调用方均为只读渲染，请求内不会改班级档案，故缓存安全。
     """
+    cache = None
+    if has_request_context():
+        cache = getattr(g, '_class_profile_map', None)
+        if cache is not None:
+            return cache
     out = {}
     try:
-        from app.models import ClassProfile
+        from app.models import ClassProfile, ClassSubject
+        # 性能（2026-10-09）：原来走 cp.subject_display / cp.subject_list —— 它们是
+        # lazy='dynamic' 关系上的属性，**每访问一次就发一条 SQL**，480 个班级 ≈ 976 条
+        # 语句/次（全校总课表、今日课表每次渲染都调本函数，且今日课表 30 秒整页刷新，
+        # 于是"一直在读库"）。改成一次把 class_subjects 全取回、内存里按班级归并：2 条。
+        subs = {}
+        for cs in ClassSubject.query.order_by(ClassSubject.class_profile_id,
+                                              ClassSubject.id).all():
+            if cs.subject_value:
+                subs.setdefault(cs.class_profile_id, []).append(cs.subject_value)
         for cp in ClassProfile.query.all():
-            try:
-                combo = cp.subject_display or ''
-                # 高中口头习惯叫"物化生/史政地"，这里再给一份缩写
-                short = ''.join(_SUBJECT_SHORT.get(s, s[0] if s else '')
-                                for s in cp.subject_list if s)
-            except Exception:  # noqa: BLE001  关联表异常时退化为不显示
-                combo, short = '', ''
+            names = subs.get(cp.id) or []
+            combo = '、'.join(names)
+            # 高中口头习惯叫"物化生/史政地"，这里再给一份缩写
+            short = ''.join(_SUBJECT_SHORT.get(s, s[0] if s else '') for s in names)
             out[(cp.grade, cp.class_name)] = {
                 'class_type': cp.class_type or '',
                 'direction': cp.subject_direction or '',
-                'combo': combo if combo not in ('—', '') else '',
-                'combo_short': short or (combo if combo not in ('—', '') else ''),
+                'combo': combo,
+                'combo_short': short or combo,
             }
     except Exception:  # noqa: BLE001
         pass
+    if cache is not None:          # 请求内缓存（见函数 docstring）
+        g._class_profile_map = out
     return out

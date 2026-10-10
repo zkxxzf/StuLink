@@ -151,10 +151,10 @@ def edit(id):
             return render_template('system/users/form.html', form=form, title='编辑用户')
 
         user.username = form.username.data
-        # 姓名锁定：真实姓名与任课安排/成绩归属绑定，一经创建不可修改（成绩模块约定）
+        # 姓名锁定：真实姓名与任课教师映射/成绩归属绑定，一经创建不可修改（成绩模块约定）
         new_name = (form.real_name.data or '').strip()
         if new_name and new_name != user.real_name:
-            flash('真实姓名不可修改（与任课安排/成绩归属绑定），已保留原姓名', 'warning')
+            flash('真实姓名不可修改（与任课教师映射/成绩归属绑定），已保留原姓名', 'warning')
         user.role = role
         user.grade = grade
         user.class_name = class_name

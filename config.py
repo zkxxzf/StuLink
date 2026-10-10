@@ -94,6 +94,11 @@ class Config:
         'grades': 'sqlite:///' + os.path.join(BASE_DIR, 'data', 'grades.db'),
         'points': 'sqlite:///' + os.path.join(BASE_DIR, 'data', 'points.db'),
         'academic': 'sqlite:///' + os.path.join(BASE_DIR, 'data', 'academic.db'),
+        # 2026-10-10：教务按「一个功能一个库」拆分（原 academic.db 一库混装四件事）——
+        # 查课 / 教师业绩 / 表单收集各自独立成库，academic.db 只留师资基础资料。
+        'inspection': 'sqlite:///' + os.path.join(BASE_DIR, 'data', 'inspection.db'),
+        'achievement': 'sqlite:///' + os.path.join(BASE_DIR, 'data', 'achievement.db'),
+        'forms': 'sqlite:///' + os.path.join(BASE_DIR, 'data', 'forms.db'),
         'portrait': 'sqlite:///' + os.path.join(BASE_DIR, 'data', 'portrait.db'),
         'system': 'sqlite:///' + os.path.join(BASE_DIR, 'data', 'system.db'),
         'timetable': 'sqlite:///' + os.path.join(BASE_DIR, 'data', 'timetable.db'),

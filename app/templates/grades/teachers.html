@@ -1,24 +1,24 @@
 {% extends "base.html" %}
-{% block title %}任课教师映射 - 成绩管理{% endblock %}
+{% block title %}任课教师映射 - {{ '教务管理' if request.blueprint == 'academic' else '成绩管理' }}{% endblock %}
 {% block content %}
 <div class="d-flex align-items-center mb-3 flex-wrap gap-2">
-    <a href="{{ url_for('grades.index') }}" class="btn btn-sm btn-outline-secondary">
+    <a href="{{ url_for(ep('index')) }}" class="btn btn-sm btn-outline-secondary">
         <i class="bi bi-arrow-left"></i>
     </a>
     <h5 class="mb-0"><i class="bi bi-person-workspace"></i> 任课教师映射</h5>
     <span class="text-muted small">按年级维护：科目 × 班级 → 任课教师（账号制，同一教师可跨年级/跨班带课）</span>
     <div class="ms-auto d-flex gap-2">
-        <a href="{{ url_for('grades.teachers_import_page') }}" class="btn btn-primary btn-sm">
+        <a href="{{ url_for(ep('teachers_import_page')) }}" class="btn btn-primary btn-sm">
             <i class="bi bi-upload"></i> 批量导入教师安排表
         </a>
-        <a href="{{ url_for('grades.teacher_template_download') }}" class="btn btn-outline-primary btn-sm">
+        <a href="{{ url_for(ep('teacher_template_download')) }}" class="btn btn-outline-primary btn-sm">
             <i class="bi bi-download"></i> 下载模板
         </a>
     </div>
 </div>
 
-<div class="card" id="tcApp" data-url="{{ url_for('grades.teachers_get') }}"
-     data-save-url="{{ url_for('grades.teachers_save') }}">
+<div class="card" id="tcApp" data-url="{{ url_for(ep('teachers_get')) }}"
+     data-save-url="{{ url_for(ep('teachers_save')) }}">
     <div class="card-body">
         <div class="d-flex align-items-center mb-2 flex-wrap gap-2">
             <label class="form-label mb-0 me-1">年级</label>
@@ -50,7 +50,7 @@ $(function(){
         var grade = $('#tcGrade').val();
         cells = {};
         $('#tcMsg').text('加载中…');
-        $.getJSON('/grades/api/teachers', {grade: grade}, function(res){
+        $.getJSON(app.data('url'), {grade: grade}, function(res){
             var d = res.data;
             renderMatrix(d);
             $('#tcMsg').text('');
@@ -121,7 +121,7 @@ $(function(){
         var grade = $('#tcGrade').val();
         if (!grade) { alert('请先选择年级'); return; }
         $('#tcMsg').text('保存中…');
-        $.post('/grades/api/teachers/save', JSON.stringify({grade: grade, cells: cells}),
+        $.post(app.data('saveUrl'), JSON.stringify({grade: grade, cells: cells}),
             function(res){
                 $('#tcMsg').text(res.message + '（' + (res.changes ? ('绑定' + res.changes.bound +
                     ' / 变更' + res.changes.changed + ' / 停用' + res.changes.released) : '') + '）');

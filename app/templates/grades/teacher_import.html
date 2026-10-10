@@ -1,8 +1,8 @@
 {% extends "base.html" %}
-{% block title %}批量导入任课教师 - 成绩管理{% endblock %}
+{% block title %}批量导入任课教师 - {{ '教务管理' if request.blueprint == 'academic' else '成绩管理' }}{% endblock %}
 {% block content %}
 <div class="d-flex align-items-center mb-3">
-    <a href="{{ url_for('grades.teachers_page') }}" class="btn btn-sm btn-outline-secondary me-2">
+    <a href="{{ url_for(ep('teachers_page')) }}" class="btn btn-sm btn-outline-secondary me-2">
         <i class="bi bi-arrow-left"></i>
     </a>
     <h5 class="mb-0"><i class="bi bi-upload"></i> 批量导入《教师安排表》</h5>
@@ -13,10 +13,10 @@
             <i class="bi bi-info-circle"></i> 支持直接上传教务排课的<b>总任课表</b>（一行一个班级、科目为列，可含多个年级区段；
             "英语"自动对应系统"外语"科目；体育/音乐/美术/信息/心理/正副班主任/教室位置/班型等列自动忽略）。
             也可先
-            <a href="{{ url_for('grades.teacher_template_download') }}">下载模板</a> 参考格式。
+            <a href="{{ url_for(ep('teacher_template_download')) }}">下载模板</a> 参考格式。
         </div>
         <form method="post" enctype="multipart/form-data"
-              action="{{ url_for('grades.teachers_import_upload') }}">
+              action="{{ url_for(ep('teachers_import_upload')) }}">
             <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
             <div class="mb-3">
                 <label class="form-label fw-semibold">教师安排表 Excel 文件</label>

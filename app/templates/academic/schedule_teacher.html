@@ -13,7 +13,7 @@
         </h4>
         {% if ts %}
         {{ parts.term_selector(schedules, ts,
-                               base_endpoint=('academic.my_schedule' if my_mode else 'academic.schedule_teacher'),
+                               base_endpoint=('workbench.my_schedule' if my_mode else 'academic.schedule_teacher'),
                                base_kwargs=({} if my_mode else {'uid': uid}),
                                query_mode=('my_schedule' if my_mode else None), week=week) }}
         {{ parts.week_selector(ts.total_weeks, ts.get_current_week(), week) }}
@@ -31,10 +31,6 @@
         {{ parts.export_tools() }}
         <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('academic.schedule_manage') }}">
             <i class="bi bi-house"></i> 学期管理
-        </a>
-        {% else %}
-        <a class="btn btn-sm btn-outline-info text-white" href="{{ url_for('academic.today_schedule') }}">
-            <i class="bi bi-sun"></i> 今日课表
         </a>
         {% endif %}
     </div>
@@ -161,7 +157,6 @@
     "week": {{ week|tojson }},
     "stats": {{ view.stats|tojson if view else '{}'|tojson }},
     "teacherUrlTpl": {{ (url_for('academic.schedule_teacher', sid=ts.id, uid='__UID__') if ts and not my_mode else '')|tojson }},
-    "myUrl": {{ url_for('academic.my_schedule')|tojson }},
     "urls": {
         "share": {{ (url_for('academic.schedule_share', sid=ts.id) if ts else '')|tojson }}
     }

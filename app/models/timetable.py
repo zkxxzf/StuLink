@@ -24,19 +24,20 @@ def get_default_periods():
     """返回 13 节默认节次配置列表（dict 形式），用于新建学期时批量写入 PeriodDef。
 
     结构：period_number / period_name / start_time / end_time / period_type / sort_order
-    节次安排符合国内高中典型作息：早读 + 上午 4 节 + 午休 + 下午 4 节 + 晚自习 3 节。
+    适配早读 + 上午 5 节 + 下午 4 节 + 晚自习 3 节；午休作为时间空档，
+    不占用课表节次编号。早操和课间操是值守活动，由独立值班表维护。
     """
     return [
         {'period_number': 1,  'period_name': '早读',    'start_time': '07:00', 'end_time': '07:40', 'period_type': 'morning',   'sort_order': 1},
         {'period_number': 2,  'period_name': '第1节',   'start_time': '08:00', 'end_time': '08:45', 'period_type': 'morning',   'sort_order': 2},
         {'period_number': 3,  'period_name': '第2节',   'start_time': '08:55', 'end_time': '09:40', 'period_type': 'morning',   'sort_order': 3},
-        {'period_number': 4,  'period_name': '第3节',   'start_time': '10:00', 'end_time': '10:45', 'period_type': 'morning',   'sort_order': 4},
-        {'period_number': 5,  'period_name': '第4节',   'start_time': '10:55', 'end_time': '11:40', 'period_type': 'morning',   'sort_order': 5},
-        {'period_number': 6,  'period_name': '午休',    'start_time': '12:30', 'end_time': '14:00', 'period_type': 'break',     'sort_order': 6},
-        {'period_number': 7,  'period_name': '第5节',   'start_time': '14:00', 'end_time': '14:45', 'period_type': 'afternoon', 'sort_order': 7},
-        {'period_number': 8,  'period_name': '第6节',   'start_time': '14:55', 'end_time': '15:40', 'period_type': 'afternoon', 'sort_order': 8},
-        {'period_number': 9,  'period_name': '第7节',   'start_time': '16:00', 'end_time': '16:45', 'period_type': 'afternoon', 'sort_order': 9},
-        {'period_number': 10, 'period_name': '第8节',   'start_time': '16:55', 'end_time': '17:40', 'period_type': 'afternoon', 'sort_order': 10},
+        {'period_number': 4,  'period_name': '第3节',   'start_time': '10:10', 'end_time': '10:55', 'period_type': 'morning',   'sort_order': 4},
+        {'period_number': 5,  'period_name': '第4节',   'start_time': '11:05', 'end_time': '11:50', 'period_type': 'morning',   'sort_order': 5},
+        {'period_number': 6,  'period_name': '第5节',   'start_time': '12:00', 'end_time': '12:45', 'period_type': 'morning',   'sort_order': 6},
+        {'period_number': 7,  'period_name': '第6节',   'start_time': '14:00', 'end_time': '14:45', 'period_type': 'afternoon', 'sort_order': 7},
+        {'period_number': 8,  'period_name': '第7节',   'start_time': '14:55', 'end_time': '15:40', 'period_type': 'afternoon', 'sort_order': 8},
+        {'period_number': 9,  'period_name': '第8节',   'start_time': '16:00', 'end_time': '16:45', 'period_type': 'afternoon', 'sort_order': 9},
+        {'period_number': 10, 'period_name': '第9节',   'start_time': '16:55', 'end_time': '17:40', 'period_type': 'afternoon', 'sort_order': 10},
         {'period_number': 11, 'period_name': '晚自习1', 'start_time': '19:00', 'end_time': '20:00', 'period_type': 'evening',   'sort_order': 11},
         {'period_number': 12, 'period_name': '晚自习2', 'start_time': '20:10', 'end_time': '21:10', 'period_type': 'evening',   'sort_order': 12},
         {'period_number': 13, 'period_name': '晚自习3', 'start_time': '21:20', 'end_time': '22:20', 'period_type': 'evening',   'sort_order': 13},
@@ -156,8 +157,11 @@ class TermSchedule(db.Model):
             'status_text': SCHEDULE_STATUS.get(self.status, self.status),
             'description': self.description,
             'created_by': self.created_by,
-            'created_at': self.created_at.strftime('%Y-%m-%d %H:%M:%S') if self.created_at else None,
-            'updated_at': self.updated_at.strftime('%Y-%m-%d %H:%M:%S') if self.updated_at else None,
+            # 2026-10-10：同 ScheduleEntry.to_dict，isoformat 等价更快
+            'created_at': (self.created_at.isoformat(sep=' ', timespec='seconds')
+                           if self.created_at else None),
+            'updated_at': (self.updated_at.isoformat(sep=' ', timespec='seconds')
+                           if self.updated_at else None),
             # ── 学期周期维度（Task#27） ──
             'start_date': self.start_date.strftime('%Y-%m-%d') if self.start_date else None,
             'end_date': self.end_date.strftime('%Y-%m-%d') if self.end_date else None,
@@ -297,8 +301,12 @@ class ScheduleEntry(db.Model):
             'original_entry_id': self.original_entry_id,
             'note': self.note,
             'is_deleted': self.is_deleted,
-            'created_at': self.created_at.strftime('%Y-%m-%d %H:%M:%S') if self.created_at else None,
-            'updated_at': self.updated_at.strftime('%Y-%m-%d %H:%M:%S') if self.updated_at else None,
+            # 2026-10-10：isoformat(timespec='seconds') 与 strftime('%Y-%m-%d %H:%M:%S')
+            # 输出逐字符一致但更快；总课表等热路径每条 to_dict 要算 2 次时间戳
+            'created_at': (self.created_at.isoformat(sep=' ', timespec='seconds')
+                           if self.created_at else None),
+            'updated_at': (self.updated_at.isoformat(sep=' ', timespec='seconds')
+                           if self.updated_at else None),
         }
 
     def __repr__(self):
@@ -378,16 +386,22 @@ class ScheduleSwap(db.Model):
     target_entry_id = db.Column(db.Integer)                   # 审核后新生成的条目 id
     applicant_uid = db.Column(db.String(16), nullable=False)  # 教师编号
     applicant_name = db.Column(db.String(50))
-    new_weekday = db.Column(db.Integer)                       # 目标星期
+    new_weekday = db.Column(db.Integer)                       # 目标星期（目标那天按周几的课表上课）
     new_period = db.Column(db.Integer)                        # 目标节次
     new_room = db.Column(db.String(30))                       # 目标教室
-    swap_date = db.Column(db.Date)                            # 临时调课的具体日期
+    swap_date = db.Column(db.Date)                            # 目标日期（调过去的这一天）
+    # 2026-10-09：调休场景（如周六上周三的课）——原课所在日期 + 那天实际按周几的课表上课
+    source_date = db.Column(db.Date)
+    source_weekday = db.Column(db.Integer)
     is_permanent = db.Column(db.Boolean, default=False)       # True=永久改课表
     reason = db.Column(db.String(200))
     status = db.Column(db.String(10), default='pending')      # pending/approved/rejected/executed
     reviewed_by = db.Column(db.Integer)                       # 审核人 users.id（跨库逻辑键）
     review_note = db.Column(db.String(200))
     reviewed_at = db.Column(db.DateTime)
+    # 分级审批：当前停在第几级（0 起）+ 每一级谁审的、什么意见（JSON 数组）
+    approval_step = db.Column(db.Integer, default=0)
+    approvals_json = db.Column(db.Text)
     created_at = db.Column(db.DateTime, default=datetime.now)
 
     __table_args__ = (
@@ -410,6 +424,12 @@ class ScheduleSwap(db.Model):
             'new_period': self.new_period,
             'new_room': self.new_room,
             'swap_date': self.swap_date.strftime('%Y-%m-%d') if self.swap_date else None,
+            'source_date': self.source_date.strftime('%Y-%m-%d') if self.source_date else None,
+            'source_weekday': self.source_weekday,
+            'source_weekday_text': (WEEKDAY_NAMES.get(self.source_weekday, '')
+                                    if self.source_weekday else ''),
+            'approval_step': self.approval_step or 0,
+            'approvals': self.approvals(),
             'is_permanent': self.is_permanent,
             'reason': self.reason,
             'status': self.status,
@@ -419,6 +439,39 @@ class ScheduleSwap(db.Model):
             'reviewed_at': self.reviewed_at.strftime('%Y-%m-%d %H:%M:%S') if self.reviewed_at else None,
             'created_at': self.created_at.strftime('%Y-%m-%d %H:%M:%S') if self.created_at else None,
         }
+
+    # ── 分级审批轨迹 ──────────────────────────────────────────────────
+    def approvals(self):
+        """审批轨迹列表（每项 {step, role, role_text, user_id, user_name,
+        action, action_text, note, at}），解析失败返回 []。"""
+        import json
+        raw = self.approvals_json
+        if not raw:
+            return []
+        try:
+            data = json.loads(raw)
+            return data if isinstance(data, list) else []
+        except (ValueError, TypeError):
+            return []
+
+    def add_approval(self, step, role, role_text, user_id, user_name, action,
+                     action_text, note=''):
+        """追加一条审批记录（step 从 0 起）并写回 JSON。"""
+        import json
+        from datetime import datetime as _dt
+        rows = self.approvals()
+        rows.append({
+            'step': step or 0,
+            'role': role or '',
+            'role_text': role_text or '',
+            'user_id': user_id,
+            'user_name': user_name or '',
+            'action': action,
+            'action_text': action_text or action,
+            'note': note or '',
+            'at': _dt.now().strftime('%Y-%m-%d %H:%M'),
+        })
+        self.approvals_json = json.dumps(rows, ensure_ascii=False)
 
     def __repr__(self):
         return f'<ScheduleSwap {self.id} {self.applicant_name} {self.swap_type} [{self.status}]>'

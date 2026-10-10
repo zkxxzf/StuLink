@@ -15,8 +15,8 @@ from app.models.grades import Exam, ExamScore, ExamBand, TeacherSubjectLink, \
     ExamTeacherLink, ExamAffair, AffairRoom, AffairStudent  # v1.18.9.1 考试任课快照 / 考务
 from app.models.points import PointRecord, PointRuleTemplate
 from app.models.system_setting import SystemSetting
-from app.models.academic import Teacher, Timetable, TimetableEntry, \
-    InspectionRecord, TeacherAchievement, CourseSwap, \
+from app.models.academic import Teacher, \
+    InspectionRecord, TeacherAchievement, \
     FormCategory, FormTemplate, FormQuestion, FormSubmission, FormAnswer, \
     WorkRecord, AttendanceRecord, RECORD_TYPES, ATTENDANCE_STATUS, \
     SubjectLeader, SUBJECT_ORDER, DUTY_TEMPLATES
@@ -40,8 +40,8 @@ __all__ = ['User', 'Student', 'Room', 'BedAssignment', 'StudentAccommodation',
            'AiKey', 'AiGlobalKey', 'AiReport', 'AiChatMessage',
            'AffairRoomLib', 'PointRecord', 'PointRuleTemplate',
            'SystemSetting',
-           'Teacher', 'Timetable', 'TimetableEntry',
-           'InspectionRecord', 'TeacherAchievement', 'CourseSwap',
+           'Teacher',
+           'InspectionRecord', 'TeacherAchievement',
            'FormCategory', 'FormTemplate', 'FormQuestion', 'FormSubmission', 'FormAnswer',
            'WorkRecord', 'AttendanceRecord', 'RECORD_TYPES', 'ATTENDANCE_STATUS',
            'Notification', 'NotificationRead', 'NotificationRecipient',

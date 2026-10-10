@@ -27,12 +27,14 @@
         {% if schedule %}<span class="text-muted small fw-normal ms-2">{{ schedule.name }}</span>{% endif %}
     </h4>
     <div class="d-flex gap-2 flex-wrap">
+        {% if can_apply and schedule %}
         <a class="btn btn-sm btn-primary" href="{{ url_for('academic.swap_apply') }}">
             <i class="bi bi-person-plus"></i> 个人调课
         </a>
         <a class="btn btn-sm btn-outline-primary" href="{{ url_for('academic.swap_bulk') }}">
             <i class="bi bi-collection"></i> 统一调课
         </a>
+        {% endif %}
         <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('academic.swap_stats') }}">
             <i class="bi bi-bar-chart"></i> 统计
         </a>
@@ -42,7 +44,7 @@
 {% if not schedule %}
 <div class="card"><div class="card-body text-center py-5 text-muted">
     <i class="bi bi-calendar-x" style="font-size:40px"></i>
-    <p class="mt-3 mb-0">尚未建立学期课表，请先在课表管理中创建并启用学期。</p>
+    <p class="mt-3 mb-0">当前没有启用中的学期课表。启用学期后，这里会显示调课申请与审批进度。</p>
 </div></div>
 {% else %}
 
@@ -99,6 +101,7 @@
                     <td class="small">
                         <i class="bi bi-arrow-right text-muted"></i>
                         <span class="fw-semibold">{{ s.target_slot or '-' }}</span>
+                        {% if s.target_keep_text %}<span class="badge bg-light text-dark border ms-1" style="font-size:10px">{{ s.target_keep_text }}</span>{% endif %}
                         {% if s.new_room %}<div class="text-muted">{{ s.new_room }}</div>{% endif %}
                         {% if s.swap_date %}<div class="text-muted">{{ s.swap_date }}</div>{% endif %}
                     </td>
@@ -107,14 +110,19 @@
                         {% else %}<span class="pill tag-temp">临时</span>{% endif %}
                     </td>
                     <td class="small text-muted" style="max-width:150px">{{ s.reason or '' }}</td>
-                    <td><span class="pill pill-{{ s.status }}">{{ s.status_text }}</span></td>
+                    <td><span class="pill pill-{{ s.status }}">{{ s.status_text }}</span>
+                        {% if s.status == 'pending' and s.review_step_name %}
+                        <div class="small mt-1 {% if s.can_review %}text-danger fw-semibold{% else %}text-muted{% endif %}">
+                            {% if s.can_review %}待我审 · {% endif %}{{ s.review_step_name }}
+                        </div>{% endif %}</td>
                     <td class="small text-muted text-nowrap">{{ s.created_at or '' }}</td>
                     <td class="text-end text-nowrap" onclick="event.stopPropagation()">
                         <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('academic.swap_detail', swap_id=s.id) }}" title="详情"><i class="bi bi-eye"></i></a>
                         {% if s.status == 'pending' %}
-                            {% if is_reviewer %}
-                            <button class="btn btn-sm btn-outline-success btn-approve" data-id="{{ s.id }}" title="通过"><i class="bi bi-check-lg"></i></button>
-                            <button class="btn btn-sm btn-outline-warning btn-reject" data-id="{{ s.id }}" title="驳回"><i class="bi bi-x-lg"></i></button>
+                            {# 分级审批：只有"当前这一级"的审批人看得到通过/驳回按钮 #}
+                            {% if s.can_review %}
+                            <button class="btn btn-sm btn-outline-success btn-approve" data-id="{{ s.id }}" title="通过（{{ s.review_step_name }}）"><i class="bi bi-check-lg"></i></button>
+                            <button class="btn btn-sm btn-outline-warning btn-reject" data-id="{{ s.id }}" title="驳回（{{ s.review_step_name }}）"><i class="bi bi-x-lg"></i></button>
                             {% endif %}
                             {% if s.applicant_uid == current_uid %}
                             <button class="btn btn-sm btn-outline-danger btn-cancel" data-id="{{ s.id }}" title="撤销"><i class="bi bi-arrow-counterclockwise"></i></button>

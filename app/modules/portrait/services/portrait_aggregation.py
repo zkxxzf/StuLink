@@ -184,7 +184,7 @@ def get_dormitory_info(student_no):
 def get_attendance_records(student_no):
     """获取考勤/查课相关记录
 
-    注：academic.db 的 InspectionRecord 是查课记录（检查教师上课情况），
+    注：inspection.db 的 InspectionRecord 是查课记录（检查教师上课情况；2026-10-10 起查课独立成库），
     不是学生考勤记录。这里通过积分中的纪律类记录作为考勤参考。
 
     返回：{total_records, records: [{date, category, reason, points}]}

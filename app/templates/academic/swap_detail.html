@@ -35,8 +35,9 @@
     <div class="d-flex gap-2">
         <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('academic.swap_page') }}"><i class="bi bi-arrow-left"></i> 返回列表</a>
         {% if d.status == 'pending' %}
-            {% if is_reviewer %}
-            <button class="btn btn-sm btn-success btn-approve"><i class="bi bi-check-lg"></i> 通过</button>
+            {# 分级审批：只有当前这一级的审批人能看到通过/驳回 #}
+            {% if d.can_review %}
+            <button class="btn btn-sm btn-success btn-approve"><i class="bi bi-check-lg"></i> 通过（{{ d.review_step_name }}）</button>
             <button class="btn btn-sm btn-outline-warning btn-reject"><i class="bi bi-x-lg"></i> 驳回</button>
             {% endif %}
             {% if is_owner %}<button class="btn btn-sm btn-outline-danger btn-cancel"><i class="bi bi-arrow-counterclockwise"></i> 撤销</button>{% endif %}
@@ -62,6 +63,10 @@
             <div class="cmp-val">{{ weekday_names.get(oe.weekday) }} · 第{{ oe.period_number }}节{% if d.original_period %} {{ d.original_period.start_time }}-{{ d.original_period.end_time }}{% endif %}</div>
             <div class="cmp-val text-muted">教师：{{ oe.teacher_name or '-' }}　教室：{{ oe.room or '-' }}</div>
             <div class="cmp-val text-muted small">周次：{{ oe.week_range or '-' }}</div>
+            {% if d.source_date %}
+            <div class="cmp-val text-muted small">原课日期：{{ d.source_date }}
+                （这天按{{ weekday_names.get(d.source_weekday) or ('第' ~ d.source_weekday ~ '天') }}的课表上课）</div>
+            {% endif %}
             {% else %}
             <div class="text-muted">原课表条目已不存在（可能已被删除）</div>
             {% endif %}
@@ -72,18 +77,70 @@
     <div class="col-md-5">
         <div class="cmp-card cmp-tgt">
             <div class="cmp-label">调整目标</div>
-            <div class="cmp-big">{{ d.target_slot or '-' }}</div>
+            <div class="cmp-big">{{ d.target_slot or '-' }}
+                {% if d.target_keep_text %}<span class="badge bg-light text-dark border ms-1" style="font-size:11px">{{ d.target_keep_text }}</span>{% endif %}
+            </div>
             {% if d.target_period %}<div class="cmp-val">{{ d.target_period.period_name }} {{ d.target_period.start_time }}-{{ d.target_period.end_time }}</div>{% endif %}
             <div class="cmp-val text-muted">教室：{{ d.new_room or '（沿用原教室）' }}</div>
             <div class="cmp-val mt-1">
                 {% if d.is_permanent %}<span class="pill" style="background:#ede9fe;color:#5b21b6">永久调课</span>
                 {% else %}<span class="pill" style="background:#ffedd5;color:#9a3412">临时调课</span>{% endif %}
                 {% if d.swap_date %}<span class="ms-1 text-muted">日期：{{ d.swap_date }}</span>{% endif %}
+                {% if d.new_weekday %}<span class="ms-1 text-muted">（按{{ weekday_names.get(d.new_weekday) }}的课表）</span>{% endif %}
             </div>
             {% if d.target_entry %}
             <div class="cmp-val text-success small mt-2"><i class="bi bi-check-circle"></i> 已生成课表条目 #{{ d.target_entry.id }}（{{ d.target_entry.note or '' }}）</div>
             {% endif %}
         </div>
+    </div>
+</div>
+
+{# ── 审批链路（分级审批：经过谁、谁审了、什么意见）── #}
+<div class="card mb-3">
+    <div class="card-header py-2 d-flex justify-content-between align-items-center flex-wrap gap-2">
+        <span><i class="bi bi-diagram-3"></i> 审批链路</span>
+        <span class="small text-muted">
+            {% if d.status == 'pending' and d.review_step_name %}
+                第 {{ (d.approval_step or 0) + 1 }} / {{ chain|length }} 级 · 待「{{ d.review_step_name }}」处理
+                {% if not d.can_review %}（不轮到你审批）{% endif %}
+            {% elif d.status == 'pending' %}待处理
+            {% else %}流程已结束{% endif %}
+        </span>
+    </div>
+    <div class="card-body py-2">
+        <div class="d-flex flex-wrap gap-2 mb-2">
+            {% for st in chain %}
+            {% set done = ((d.approval_step or 0) > loop.index0) or d.status in ['approved', 'executed'] %}
+            {% set cur = d.status == 'pending' and (d.approval_step or 0) == loop.index0 %}
+            <span class="badge {% if done %}bg-success{% elif cur %}bg-warning text-dark{% else %}bg-light text-dark border{% endif %}">
+                {{ loop.index }}. {{ st.name }}{% if done %} ✓{% elif cur %} · 处理中{% endif %}
+            </span>
+            {% endfor %}
+        </div>
+        {% if approvals %}
+        <div class="table-responsive">
+            <table class="table table-sm mb-0 small">
+                <thead class="table-light">
+                    <tr><th style="width:110px">环节</th><th style="width:110px">审批人</th>
+                        <th style="width:130px">时间</th><th>结果 / 意见</th></tr>
+                </thead>
+                <tbody>
+                {% for a in approvals %}
+                <tr>
+                    <td>{{ a.role_text or a.role }}</td>
+                    <td>{{ a.user_name or ('#' ~ a.user_id) }}</td>
+                    <td class="text-muted">{{ a.at }}</td>
+                    <td>{% if a.action == 'approve' %}<span class="text-success">通过</span>
+                        {% else %}<span class="text-danger">{{ a.action_text or '驳回' }}</span>{% endif %}
+                        {{ (' · ' ~ a.note) if a.note else '' }}</td>
+                </tr>
+                {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% else %}
+        <div class="text-muted small">还没有审批动作。</div>
+        {% endif %}
     </div>
 </div>
 

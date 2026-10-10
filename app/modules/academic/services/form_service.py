@@ -13,6 +13,7 @@ from flask import current_app
 from app.extensions import db
 from app.models.academic import (
     FormTemplate, FormQuestion, FormSubmission, FormAnswer, FormCategory,
+    FormRound, Teacher,
 )
 
 
@@ -20,10 +21,11 @@ from app.models.academic import (
 
 def create_form(title, description, category, target_type, target_scope,
                 start_time, deadline, max_file_size, allow_multiple,
-                questions_data, created_by):
+                questions_data, created_by, ach=None):
     """创建表单 + 题目（保存为草稿）
     questions_data: list[dict]  每项包含 question_type/title/description/
         options_json/required/file_types/max_file_size_mb
+    ach: 2026-10-10 计入业绩库映射（见 _apply_achievement_mapping）
     """
     tpl = FormTemplate(
         title=title,
@@ -42,13 +44,15 @@ def create_form(title, description, category, target_type, target_scope,
     db.session.flush()          # 获取 tpl.id
 
     _save_questions(tpl.id, questions_data)
+    db.session.flush()
+    _apply_achievement_mapping(tpl, ach)
     db.session.commit()
     return tpl
 
 
 def update_form(form_id, title, description, category, target_type,
                 target_scope, start_time, deadline, max_file_size,
-                allow_multiple, questions_data):
+                allow_multiple, questions_data, ach=None):
     """编辑表单（仅 draft 状态）"""
     tpl = db.session.get(FormTemplate, form_id)
     if not tpl:
@@ -69,7 +73,44 @@ def update_form(form_id, title, description, category, target_type,
     # 重建题目
     FormQuestion.query.filter_by(template_id=form_id).delete()
     _save_questions(form_id, questions_data)
+    db.session.flush()
+    _apply_achievement_mapping(tpl, ach)
     db.session.commit()
+    return tpl
+
+
+def _question_id_by_index(template_id, index):
+    """按题目序号（0 起）取真实 question_id（业绩名称取自某题时用）。"""
+    try:
+        idx = int(index)
+    except (TypeError, ValueError):
+        return None
+    q = (FormQuestion.query.filter_by(template_id=template_id)
+         .order_by(FormQuestion.sort_order).offset(idx).first())
+    return q.id if q else None
+
+
+def _apply_achievement_mapping(tpl, ach):
+    """把发起收集时配的「计入教师业绩库」规则落到模板上。
+
+    ach: dict(to_achievement / ach_category / ach_level / ach_title_mode /
+              ach_title_question_index / ach_tags)
+    名称取自「第几题」时，这里在题目写库之后换算成真实 question_id。
+    """
+    if not ach:
+        return tpl
+    tpl.to_achievement = bool(ach.get('to_achievement'))
+    tpl.ach_category = (ach.get('ach_category') or '').strip() or None
+    tpl.ach_level = (ach.get('ach_level') or '').strip() or None
+    tpl.ach_title_mode = (ach.get('ach_title_mode') or 'template').strip()
+    tpl.ach_tags = (ach.get('ach_tags') or '').strip() or None
+    if tpl.ach_title_mode == 'question':
+        tpl.ach_title_question_id = _question_id_by_index(
+            tpl.id, ach.get('ach_title_question_index'))
+        if not tpl.ach_title_question_id:      # 选了但没这题，退回模板标题
+            tpl.ach_title_mode = 'template'
+    else:
+        tpl.ach_title_question_id = None
     return tpl
 
 
@@ -90,6 +131,69 @@ def _save_questions(template_id, questions_data):
         db.session.add(q)
 
 
+# ── 收集轮次（2026-10-10）：一次收集 = 一轮，同模板可发起多轮 ─────────────────
+
+def list_rounds(form_id):
+    """该模板的轮次（按 round_no 升序）。"""
+    return (FormRound.query.filter_by(template_id=form_id)
+            .order_by(FormRound.round_no).all())
+
+
+def ensure_default_round(tpl):
+    """没有轮次时补一条第 1 轮（历史模板/直接建库场景的兜底）。"""
+    if list_rounds(tpl.id):
+        return None
+    rnd = FormRound(
+        template_id=tpl.id, round_no=1,
+        start_time=tpl.start_time, deadline=tpl.deadline,
+        status='closed' if tpl.status == 'closed' else 'open',
+        created_by=tpl.created_by, created_at=datetime.now(),
+    )
+    db.session.add(rnd)
+    db.session.commit()
+    return rnd
+
+
+def start_new_round(form_id, name=None, term=None, deadline=None,
+                    created_by=None):
+    """发起新一轮：先把上一轮收尾（否则新的提交会落进旧轮）。"""
+    tpl = db.session.get(FormTemplate, form_id)
+    if not tpl:
+        raise ValueError('表单不存在')
+    if tpl.status != 'open':
+        raise ValueError('仅进行中的表单可发起新一轮')
+    rounds = list_rounds(form_id)
+    for r in rounds:
+        if r.status == 'open':
+            r.status = 'closed'
+    rnd = FormRound(
+        template_id=form_id,
+        round_no=(max(r.round_no for r in rounds) + 1) if rounds else 1,
+        name=(name or '').strip() or None,
+        term=(term or '').strip() or None,
+        start_time=datetime.now(),
+        deadline=deadline or None,
+        status='open',
+        created_by=created_by,
+        created_at=datetime.now(),
+    )
+    db.session.add(rnd)
+    db.session.commit()
+    return rnd
+
+
+def close_round(round_id):
+    """结束某一轮（该轮不再接受提交，但不影响模板本身继续开放）。"""
+    rnd = db.session.get(FormRound, round_id)
+    if not rnd:
+        raise ValueError('轮次不存在')
+    if rnd.status != 'open':
+        raise ValueError('该轮次已结束')
+    rnd.status = 'closed'
+    db.session.commit()
+    return rnd
+
+
 def publish_form(form_id):
     """draft -> open"""
     tpl = db.session.get(FormTemplate, form_id)
@@ -99,6 +203,7 @@ def publish_form(form_id):
         raise ValueError('仅草稿状态可发布')
     tpl.status = 'open'
     db.session.commit()
+    ensure_default_round(tpl)      # 发布即开启第一轮
     return tpl
 
 
@@ -143,10 +248,39 @@ def get_forms_list(status=None, category=None, page=1, per_page=20):
 
 # ── 提交 ─────────────────────────────────────────────────────
 
+def resolve_teacher_uid(user_id, real_name=None):
+    """users.id → Teacher.user_id → teacher_uid（回退：名单内唯一同名）。
+
+    历史 bug：`form_submit` 取 `getattr(current_user,'teacher_uid')`，而 User 模型
+    没有这个属性 → 教师提交恒存为 str(users.id)，与应交名单用的 teacher_uid
+    对不上，导致「已交/未交/提交率」恒为 0、催交误催、业绩无法归属。
+    """
+    if not user_id:
+        return None
+    t = Teacher.query.filter_by(user_id=user_id).first()
+    if t:
+        return t.teacher_uid
+    if real_name:
+        rows = Teacher.query.filter_by(name=real_name).all()
+        if len(rows) == 1:
+            return rows[0].teacher_uid
+    return None
+
+
+def current_round(tpl):
+    """当前可提交的轮次：open 中 round_no 最大的；没有 open 则取最新一轮。"""
+    rounds = (FormRound.query.filter_by(template_id=tpl.id)
+              .order_by(FormRound.round_no).all())
+    if not rounds:
+        return None
+    opened = [r for r in rounds if r.status == 'open']
+    return (opened or rounds[-1:])[-1]
+
+
 def submit_form(form_id, submitter_info, answers_dict, files):
     """提交表单
     submitter_info: dict(submitter_type/submitter_id/submitter_name/
-                         submitter_uid/submitter_grade/submitter_class)
+                         submitter_uid/submitter_grade/submitter_class/round_id?)
     answers_dict: {question_id_str: answer_value}
     files: request.files MultiDict  {question_id_str: file_storage}
     """
@@ -156,25 +290,43 @@ def submit_form(form_id, submitter_info, answers_dict, files):
     if tpl.status != 'open':
         raise ValueError('该表单当前不可提交')
 
+    # 2026-10-10：归属轮次（不传则自动取当前开放轮次）
+    rnd = None
+    if submitter_info.get('round_id'):
+        rnd = db.session.get(FormRound, submitter_info['round_id'])
+        if rnd and rnd.template_id != form_id:
+            rnd = None
+    if rnd is None:
+        rnd = current_round(tpl)
+
     now = datetime.now()
-    if tpl.deadline and now > tpl.deadline:
+    deadline = (rnd.deadline if rnd and rnd.deadline else tpl.deadline)
+    if deadline and now > deadline:
         raise ValueError('已超过截止时间')
 
-    # 检查是否已提交（不允许重复时）
+    # 教师提交统一归一到教师名单的 teacher_uid（否则统计与业绩归属都会错）
+    uid = submitter_info.get('submitter_uid')
+    if submitter_info.get('submitter_type') == 'teacher':
+        uid = resolve_teacher_uid(submitter_info.get('submitter_id'),
+                                  submitter_info.get('submitter_name')) or uid
+
+    # 检查是否已提交（不允许重复时）——同一轮次内不可重复，跨轮次可以再交
     if not tpl.allow_multiple:
         existing = FormSubmission.query.filter_by(
             template_id=form_id,
             submitter_id=submitter_info.get('submitter_id'),
+            round_id=(rnd.id if rnd else None),
         ).first()
         if existing:
-            raise ValueError('您已提交过此表单，不可重复提交')
+            raise ValueError('您已提交过本轮收集，不可重复提交')
 
     sub = FormSubmission(
         template_id=form_id,
+        round_id=(rnd.id if rnd else None),
         submitter_type=submitter_info.get('submitter_type'),
         submitter_id=submitter_info.get('submitter_id'),
         submitter_name=submitter_info.get('submitter_name'),
-        submitter_uid=submitter_info.get('submitter_uid'),
+        submitter_uid=uid,
         submitter_grade=submitter_info.get('submitter_grade'),
         submitter_class=submitter_info.get('submitter_class'),
         status='submitted',
@@ -229,12 +381,26 @@ def review_submission(submission_id, new_status, reviewer_id, note=None):
     sub.reviewed_at = datetime.now()
     sub.review_note = (note or '').strip() or None
     db.session.commit()
+
+    # 2026-10-10：审核通过 → 按模板上的映射自动计入教师业绩库（幂等）。
+    # 入账失败不能影响审核结果本身，因此这里只记日志（教务可在业绩库手工补录）。
+    if new_status == 'approved':
+        from app.modules.academic.services import achievement_service as ach_svc
+        try:
+            _rec, msg = ach_svc.create_from_submission(sub, reviewer_id=reviewer_id)
+            if _rec is None:
+                current_app.logger.info('[表单入账] 提交#%s 未生成业绩：%s',
+                                        sub.id, msg)
+        except Exception:  # noqa: BLE001
+            current_app.logger.exception('[表单入账] 提交#%s 入账失败', sub.id)
     return sub
 
 
-def get_submissions(form_id, status=None, page=1, per_page=20):
-    """提交列表（分页）"""
+def get_submissions(form_id, status=None, page=1, per_page=20, round_id=None):
+    """提交列表（分页）。round_id 为空表示全部轮次。"""
     q = FormSubmission.query.filter_by(template_id=form_id)
+    if round_id:
+        q = q.filter(FormSubmission.round_id == round_id)
     if status and status in ('submitted', 'approved', 'rejected'):
         q = q.filter_by(status=status)
     return q.order_by(FormSubmission.submitted_at.desc()).paginate(

@@ -18,8 +18,9 @@ from sqlalchemy import func
 
 from app.extensions import db
 from app.models.academic import (AchievementAttachment, TeacherAchievement, Teacher,
+                                 FormRound,
                                  ACHIEVEMENT_CATEGORIES, ACHIEVEMENT_LEVELS,
-                                 ACHIEVEMENT_STATUS)
+                                 ACHIEVEMENT_STATUS, ACHIEVEMENT_SOURCE, DOC_TYPES)
 from app.modules.academic import bp
 from app.modules.academic.services import achievement_service as ach_svc
 from app.utils.decorators import perm_required
@@ -37,6 +38,9 @@ def _filters():
         'status': (request.args.get('status') or '').strip(),
         'year': (request.args.get('year') or '').strip(),
         'tag': (request.args.get('tag') or '').strip()[:12],      # 标签筛选
+        # 2026-10-10：来源（教务录入 / 教师提交 / 表单收集）与所属收集轮次
+        'source': (request.args.get('source') or '').strip(),
+        'round': request.args.get('round', type=int),
     }
 
 
@@ -51,6 +55,13 @@ def _achievement_query(f):
         q = q.filter_by(status=f['status'])
     if (f.get('year') or '').isdigit():
         q = q.filter(func.strftime('%Y', TeacherAchievement.obtain_date) == f['year'])
+    # 2026-10-10：来源筛选（'unknown' = 迁移前没有来源列的旧数据）
+    if f.get('source') == 'unknown':
+        q = q.filter(TeacherAchievement.source_type.is_(None))
+    elif f.get('source') in ACHIEVEMENT_SOURCE:
+        q = q.filter_by(source_type=f['source'])
+    if f.get('round'):
+        q = q.filter_by(source_round_id=f['round'])
     if f.get('tag'):
         # 标签以逗号分隔存储，这里用 LIKE 包住分隔符做整词匹配
         # （避免「数学」命中「数学竞赛辅导」这类长标签的部分匹配歧义）
@@ -78,11 +89,15 @@ def achievements_page():
     items = pagination.items
 
     # 全量统计（不受筛选影响，用于看清整体结构）
+    # 2026-10-10 优化：原为 4 条独立 count(*)，合并为 1 条 group_by(status)（数值等价）
+    status_rows = (db.session.query(TeacherAchievement.status, func.count())
+                   .group_by(TeacherAchievement.status).all())
+    by_status = {k: n for k, n in status_rows}
     stats = {
-        'total': TeacherAchievement.query.count(),
-        'pending': TeacherAchievement.query.filter_by(status='pending').count(),
-        'approved': TeacherAchievement.query.filter_by(status='approved').count(),
-        'rejected': TeacherAchievement.query.filter_by(status='rejected').count(),
+        'total': sum(by_status.values()),
+        'pending': by_status.get('pending', 0),
+        'approved': by_status.get('approved', 0),
+        'rejected': by_status.get('rejected', 0),
     }
     cat_map = dict(ACHIEVEMENT_CATEGORIES)
     cat_rows = (db.session.query(TeacherAchievement.category, func.count())
@@ -99,6 +114,15 @@ def achievements_page():
 
     teachers = Teacher.query.filter_by(status='active').order_by(
         Teacher.teacher_uid).all()
+    # 2026-10-10：来源下拉 + 有业绩的收集轮次（按轮次筛选/分组用）
+    # 分库适配：业绩在 achievement 库、轮次在 forms 库，跨库不能写成 IN (SELECT ...)
+    # 子查询（SQL 会整体发往一个库而另一库没有该表），改为先取轮次 id 再按列表查。
+    round_ids = [r[0] for r in db.session.query(TeacherAchievement.source_round_id)
+                 .filter(TeacherAchievement.source_round_id.isnot(None))
+                 .distinct().all()]
+    ach_rounds = (FormRound.query.filter(FormRound.id.in_(round_ids))
+                  .order_by(FormRound.template_id, FormRound.round_no.desc()).all()
+                  if round_ids else [])
     return render_template('academic/achievements.html',
                            items=items, pagination=pagination, teachers=teachers,
                            categories=ACHIEVEMENT_CATEGORIES,
@@ -112,8 +136,13 @@ def achievements_page():
                            tags_of=ach_svc.tags_of,
                            f_teacher=f['teacher_uid'], f_category=f['category'],
                            f_status=f['status'], f_year=f['year'], f_tag=f['tag'],
+                           sources=ACHIEVEMENT_SOURCE, ach_rounds=ach_rounds,
+                           f_source=f['source'], f_round=f['round'],
                            can_edit=current_user.has_perm('academic.edit'),
-                           today=date.today().isoformat())
+                           today=date.today().isoformat(),
+                           # 2026-10-09：填表时的动态字段定义 + 附件材料分类
+                           fields_map=ach_svc.fields_map(),
+                           doc_types=DOC_TYPES)
 
 
 @bp.route('/achievements/export')
@@ -140,7 +169,8 @@ def achievements_export():
     ws = wb.active
     ws.title = '教师业绩'
     headers = ['序号', '教师', '教师编号', '类别', '业绩名称', '级别',
-               '取得时间', '颁发单位', '标签', '状态', '审核意见', '备注', '附件数']
+               '取得时间', '颁发单位', '标签', '状态', '来源', '收集轮次',
+               '审核意见', '备注', '附件数']
     for ci, h in enumerate(headers, 1):
         c = ws.cell(row=1, column=ci, value=h)
         c.font = Font(bold=True, color='FFFFFF')
@@ -156,6 +186,8 @@ def achievements_export():
             r.issuer or '',
             '、'.join(ach_svc.tags_of(r)),
             ACHIEVEMENT_STATUS.get(r.status, r.status or ''),
+            ACHIEVEMENT_SOURCE.get(r.source_type, r.source_type or '—'),
+            r.source_label or '',
             r.review_note or '', r.note or '',
             counts.get(r.id, 0),
         ]
@@ -163,8 +195,9 @@ def achievements_export():
             cell = ws.cell(row=i + 1, column=ci,
                            value=xl_safe(v) if isinstance(v, str) else v)
             cell.alignment = Alignment(horizontal='center', vertical='center',
-                                       wrap_text=(ci in (5, 9, 11, 12)))
-    for ci, w in enumerate([6, 12, 14, 8, 30, 10, 12, 24, 18, 10, 24, 24, 8], 1):
+                                       wrap_text=(ci in (5, 9, 13, 14)))
+    for ci, w in enumerate([6, 12, 14, 8, 30, 10, 12, 24, 18, 10,
+                            12, 22, 24, 24, 8], 1):
         ws.column_dimensions[get_column_letter(ci)].width = w
 
     buf = io.BytesIO()
@@ -215,11 +248,31 @@ def achievements_add():
         tags=(','.join(ach_svc.parse_tags(request.form.get('tags'))) or None),
         status='approved', submitted_by=current_user.id,
     )
+    # 2026-10-09：按类别的动态字段（课题编号/立项结题时间/期刊刊号/学时…）
+    ach_svc.set_extra(rec, request.form)
     db.session.add(rec)
     db.session.commit()
+
+    # 2026-10-09：填表时直接上传 PDF 附件（可多选，材料分类可选）
+    files = [f for f in (request.files.getlist('files') or request.files.getlist('file'))
+             if f and (f.filename or '').strip()]
+    doc_type = (request.form.get('doc_type') or '').strip()
+    ok_n, bad = 0, []
+    for f in files:
+        good, msg, _att = ach_svc.save_attachment(rec, f, current_user, doc_type=doc_type)
+        if good:
+            ok_n += 1
+        else:
+            bad.append(f'{f.filename}：{msg}')
+    if ok_n:
+        log_operation(current_user, '上传', '业绩附件', rec.id,
+                      f'{t.name} {title} 上传 {ok_n} 个 PDF', module='academic')
     log_operation(current_user, '新增', '教师业绩', rec.id,
                   f'{t.name} {title}', module='academic')
-    flash(f'已录入 {t.name} 的业绩：{title}', 'success')
+    flash(f'已录入 {t.name} 的业绩：{title}' + (f'，并上传 {ok_n} 个 PDF 附件' if ok_n else ''),
+          'success')
+    for msg in bad[:3]:
+        flash(f'附件未保存：{msg}（附件统一为 PDF，≤10MB）', 'warning')
     return back
 
 
@@ -277,6 +330,54 @@ def achievements_delete(aid):
 # 附件走带鉴权路由（/static/uploads 直链已全局封禁），图片与 PDF 可内联预览。
 # ══════════════════════════════════════════════════════════════════════════════
 
+@bp.route('/achievements/<int:aid>/edit', methods=['POST'])
+@login_required
+@perm_required('academic.edit')
+def achievements_edit(aid):
+    """编辑业绩（2026-10-10 新增）：改基本信息 + 按类别的动态字段 + 标签。
+
+    此前业绩库只能"新增 / 删除"，录错了只能删了重录（还得重新传附件）。
+    """
+    rec = db.session.get(TeacherAchievement, aid)
+    if not rec:
+        abort(404)
+    # 权限：装饰器已确保 academic.edit（教务）。教师本人只能改自己提交且仍待审的。
+    is_admin = (current_user.role == 'admin' or current_user.has_perm('academic.edit'))
+    if not is_admin:
+        from app.modules.academic.services import teacher_service
+        t = teacher_service.teacher_of_user(current_user)
+        if not (t and rec.teacher_uid == t.teacher_uid and rec.status == 'pending'):
+            flash('没有权限编辑该业绩记录（只能改自己提交且待审核的）', 'danger')
+            return redirect(url_for('academic.achievements_page'))
+    back = request.referrer or url_for('academic.achievements_page')
+    title = (request.form.get('title') or '').strip()
+    if not title:
+        flash('名称不能为空', 'danger')
+        return redirect(back)
+    rec.title = title[:200]
+    category = (request.form.get('category') or '').strip()
+    if category:
+        rec.category = category
+    rec.level = (request.form.get('level') or '').strip() or None
+    od = (request.form.get('obtain_date') or '').strip()
+    try:
+        from datetime import datetime as _dt
+        rec.obtain_date = _dt.strptime(od, '%Y-%m-%d').date() if od else None
+    except ValueError:      # 日期格式不对就清掉，别把脏数据写进 Date 列
+        rec.obtain_date = None
+    rec.issuer = (request.form.get('issuer') or '').strip() or None
+    rec.note = (request.form.get('note') or '').strip() or None
+    # 按类别的动态字段（x_<key>）与标签
+    ach_svc.set_extra(rec, request.form)
+    # 传原始字符串交给 parse_tags 拆分去重：传 list 会被 str() 成 "['课题', '省级']" 脏值
+    ach_svc.set_tags(rec, request.form.get('tags') or '')
+    db.session.commit()
+    log_operation(current_user, '编辑', '教师业绩', aid,
+                  f'{rec.teacher_name} {rec.title}', module='academic')
+    flash(f'已保存修改：{rec.title}', 'success')
+    return redirect(back)
+
+
 def _ach_or_404(aid):
     rec = db.session.get(TeacherAchievement, aid)
     if not rec:
@@ -323,8 +424,9 @@ def achievement_attachment_upload(aid):
         return jsonify({'success': False, 'message': '没有选择文件'}), 400
 
     uploaded, errors = 0, []
+    doc_type = (request.form.get('doc_type') or '').strip()
     for f in files:
-        ok, msg, _att = ach_svc.save_attachment(rec, f, current_user)
+        ok, msg, _att = ach_svc.save_attachment(rec, f, current_user, doc_type=doc_type)
         if ok:
             uploaded += 1
         else:

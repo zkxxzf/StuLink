@@ -86,13 +86,13 @@
 <div class="alert alert-warning py-2 d-flex align-items-center gap-2 mb-3">
     <i class="bi bi-lock-fill"></i>
     <span class="small mb-0"><strong>历史学期课表 · 只读</strong> —— 「{{ ts.name }}」已归档，仅供回看，不能添加/编辑/删除/导入。
-    <a href="{{ url_for('academic.schedule_manage') }}" class="alert-link ms-1">返回学期管理</a></span>
+    {% if current_user.has_perm('academic.timetable') %}<a href="{{ url_for('academic.schedule_manage') }}" class="alert-link ms-1">返回学期管理</a>{% endif %}</span>
 </div>
 {% elif ts and ts.status == 'draft' %}
 <div class="alert alert-secondary py-2 d-flex align-items-center gap-2 mb-3">
     <i class="bi bi-pencil-square"></i>
-    <span class="small mb-0">「{{ ts.name }}」为<strong>草稿</strong>状态，尚未激活。排课完成后请在
-    <a href="{{ url_for('academic.schedule_manage') }}" class="alert-link">学期管理</a>中激活。</span>
+    <span class="small mb-0">「{{ ts.name }}」为<strong>草稿</strong>状态，尚未激活。{% if current_user.has_perm('academic.timetable') %}排课完成后请在
+    <a href="{{ url_for('academic.schedule_manage') }}" class="alert-link">学期管理</a>中激活。{% else %}该学期尚未发布。{% endif %}</span>
 </div>
 {% endif %}
 {% endmacro %}

@@ -2,7 +2,8 @@
 # 教务 · 查课统计：记录录入 / 列表筛选 / 月度统计 / 批量录入 / 导出 / 图表API
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 import io
-from datetime import date, datetime
+import json
+from datetime import date, datetime, timedelta
 
 from flask import render_template, request, redirect, url_for, flash, abort, jsonify, send_file
 from flask_login import login_required, current_user
@@ -12,6 +13,11 @@ from app.extensions import db
 from app.models.academic import (InspectionRecord, Teacher, INSPECTION_RESULTS)
 from app.models.timetable import WEEKDAY_NAMES
 from app.modules.academic import bp
+from app.modules.academic.services.access_scope import (
+    academic_class_authorizer, academic_class_is_visible,
+    academic_has_class_restrictions, apply_academic_scope,
+    visible_academic_class_scope, visible_academic_grades,
+)
 from app.modules.academic.services import swap_service
 from app.utils.decorators import perm_required
 from app.utils.helpers import log_operation
@@ -21,6 +27,25 @@ _RESULT_KEYS = {k for k, _ in INSPECTION_RESULTS}
 
 def _active_teachers():
     return Teacher.query.filter_by(status='active').order_by(Teacher.teacher_uid).all()
+
+
+def _visible_active_teachers(user):
+    """Keep the teacher picker useful while respecting class-scoped accounts."""
+    if not academic_has_class_restrictions(user):
+        return _active_teachers()
+    from app.models.timetable import ScheduleEntry
+    entry_rows = apply_academic_scope(
+        ScheduleEntry.query.filter_by(is_deleted=False), user, ScheduleEntry).with_entities(
+        ScheduleEntry.teacher_uid).distinct().all()
+    record_rows = apply_academic_scope(
+        InspectionRecord.query, user, InspectionRecord).with_entities(
+            InspectionRecord.teacher_uid).distinct().all()
+    teacher_uids = {row[0] for row in entry_rows + record_rows if row[0]}
+    if not teacher_uids:
+        return []
+    return (Teacher.query.filter(Teacher.status == 'active',
+                                 Teacher.teacher_uid.in_(teacher_uids))
+            .order_by(Teacher.teacher_uid).all())
 
 
 def _grade_options():
@@ -47,17 +72,15 @@ def _inspector_names(records):
 @perm_required('academic.view')
 def inspection_page():
     """查课记录与统计（按用户数据范围过滤年级）"""
-    from app.modules.grades.services.scope import user_grade_scope
-    ug = user_grade_scope(current_user)
+    ug = visible_academic_grades(current_user)
     teacher_uid = (request.args.get('teacher_uid') or '').strip()
     result_f = (request.args.get('result') or '').strip()
     grade_f = (request.args.get('grade') or '').strip()
     d_from = (request.args.get('date_from') or '').strip()
     d_to = (request.args.get('date_to') or '').strip()
 
-    q = InspectionRecord.query
-    if ug is not None:
-        q = q.filter(InspectionRecord.grade.in_(ug))
+    q = apply_academic_scope(InspectionRecord.query, current_user,
+                             InspectionRecord)
     if teacher_uid:
         q = q.filter_by(teacher_uid=teacher_uid)
     if result_f in _RESULT_KEYS:
@@ -85,17 +108,18 @@ def inspection_page():
     # 本月统计（同样按数据范围）
     today = date.today()
     month_start = today.replace(day=1)
-    month_q = InspectionRecord.query.filter(
-        InspectionRecord.inspect_date >= month_start)
-    if ug is not None:
-        month_q = month_q.filter(InspectionRecord.grade.in_(ug))
+    month_q = apply_academic_scope(
+        InspectionRecord.query.filter(InspectionRecord.inspect_date >= month_start),
+        current_user, InspectionRecord)
     month_total = month_q.count()
     month_abnormal = month_q.filter(
         InspectionRecord.result != 'normal').count()
-    by_teacher = (InspectionRecord.query.with_entities(
+    teacher_month_q = apply_academic_scope(
+        InspectionRecord.query.filter(InspectionRecord.inspect_date >= month_start),
+        current_user, InspectionRecord)
+    by_teacher = (teacher_month_q.with_entities(
         InspectionRecord.teacher_uid, InspectionRecord.teacher_name,
         func.count(InspectionRecord.id))
-        .filter(InspectionRecord.inspect_date >= month_start)
         .group_by(InspectionRecord.teacher_uid, InspectionRecord.teacher_name)
         .order_by(func.count(InspectionRecord.id).desc()).limit(10).all())
 
@@ -104,7 +128,7 @@ def inspection_page():
         grade_opts = [g for g in grade_opts if g in ug]
     return render_template('academic/inspection.html',
                            records=records, pagination=pagination, inspectors=inspectors,
-                           teachers=_active_teachers(),
+                           teachers=_visible_active_teachers(current_user),
                            results=INSPECTION_RESULTS, grade_opts=grade_opts,
                            f_teacher=teacher_uid, f_result=result_f, f_grade=grade_f,
                            f_from=d_from, f_to=d_to,
@@ -125,9 +149,7 @@ def inspection_edit(rid):
     rec = db.session.get(InspectionRecord, rid)
     if not rec:
         abort(404)
-    from app.modules.grades.services.scope import user_grade_scope
-    ug = user_grade_scope(current_user)
-    if ug is not None and (rec.grade or '') not in ug:
+    if not academic_class_is_visible(current_user, rec.grade, rec.class_name):
         flash('该记录不在你的可见范围内', 'danger')
         return redirect(url_for('academic.inspection_page'))
 
@@ -135,7 +157,11 @@ def inspection_edit(rid):
     result = (request.form.get('result') or '').strip()
     if result in _RESULT_KEYS:
         rec.result = result
-    rec.class_name = (request.form.get('class_name') or '').strip() or None
+    class_name = (request.form.get('class_name') or '').strip() or None
+    if not academic_class_is_visible(current_user, rec.grade, class_name):
+        flash('所选班级不在你的可见范围内', 'danger')
+        return redirect(url_for('academic.inspection_page'))
+    rec.class_name = class_name
     subject = (request.form.get('subject') or '').strip()
     if subject:
         rec.subject = subject
@@ -155,7 +181,6 @@ def inspection_edit(rid):
 @perm_required('academic.edit')
 def inspection_add():
     """录入一条查课记录（年级必选；用户级数据范围时仅限授权年级）"""
-    from app.modules.grades.services.scope import user_grade_scope
     back = redirect(url_for('academic.inspection_page'))
     date_str = (request.form.get('inspect_date') or '').strip()
     grade = (request.form.get('grade') or '').strip()
@@ -169,10 +194,19 @@ def inspection_add():
     if not grade:
         flash('请选择年级', 'danger')
         return back
-    ug = user_grade_scope(current_user)
+    ug = visible_academic_grades(current_user)
     if ug is not None and grade not in ug:
         flash('该年级不在你的可见范围内', 'danger')
         return back
+    class_name = (request.form.get('class_name') or '').strip() or None
+    if not academic_class_is_visible(current_user, grade, class_name):
+        flash('请选择你负责范围内的班级', 'danger')
+        return back
+    if academic_has_class_restrictions(current_user):
+        allowed_teacher_uids = {t.teacher_uid for t in _visible_active_teachers(current_user)}
+        if teacher_uid not in allowed_teacher_uids:
+            flash('请选择你负责范围内的任课教师', 'danger')
+            return back
     t = Teacher.query.filter_by(teacher_uid=teacher_uid).first()
     if not t:
         flash('请选择被查课的教师', 'danger')
@@ -187,7 +221,7 @@ def inspection_add():
         period=period,
         teacher_uid=t.teacher_uid,
         teacher_name=t.name,
-        class_name=(request.form.get('class_name') or '').strip() or None,
+        class_name=class_name,
         subject=(request.form.get('subject') or '').strip() or t.subject,
         result=result,
         inspector_id=current_user.id,
@@ -207,7 +241,6 @@ def inspection_add():
 @perm_required('academic.edit')
 def inspection_batch():
     """批量录入查课记录"""
-    from app.modules.grades.services.scope import user_grade_scope
     back = redirect(url_for('academic.inspection_page'))
     date_str = (request.form.get('inspect_date') or '').strip()
     try:
@@ -215,7 +248,7 @@ def inspection_batch():
     except ValueError:
         flash('请选择正确的查课日期', 'danger')
         return back
-    ug = user_grade_scope(current_user)
+    ug = visible_academic_grades(current_user)
 
     rows = request.form.getlist('row_teacher_uid')
     grades = request.form.getlist('row_grade')
@@ -224,6 +257,10 @@ def inspection_batch():
     subjects = request.form.getlist('row_subject')
     results_list = request.form.getlist('row_result')
     notes = request.form.getlist('row_note')
+    allowed_teacher_uids = None
+    class_visible = academic_class_authorizer(current_user)
+    if academic_has_class_restrictions(current_user):
+        allowed_teacher_uids = {t.teacher_uid for t in _visible_active_teachers(current_user)}
 
     added = 0
     for i, t_uid in enumerate(rows):
@@ -234,6 +271,11 @@ def inspection_batch():
         if not grade:
             continue
         if ug is not None and grade not in ug:
+            continue
+        class_name = (class_names[i] if i < len(class_names) else '').strip() or None
+        if not class_visible(grade, class_name):
+            continue
+        if allowed_teacher_uids is not None and t_uid not in allowed_teacher_uids:
             continue
         t = Teacher.query.filter_by(teacher_uid=t_uid).first()
         if not t:
@@ -253,7 +295,7 @@ def inspection_batch():
             period=period,
             teacher_uid=t.teacher_uid,
             teacher_name=t.name,
-            class_name=(class_names[i] if i < len(class_names) else '').strip() or None,
+            class_name=class_name,
             subject=(subjects[i] if i < len(subjects) else '').strip() or t.subject,
             result=result,
             inspector_id=current_user.id,
@@ -279,19 +321,17 @@ def inspection_export():
     """导出查课记录 Excel"""
     import openpyxl
     from openpyxl.styles import Font, Alignment, PatternFill, Border, Side
-    from app.modules.grades.services.scope import user_grade_scope
     from app.utils.export_helpers import xl_safe
 
-    ug = user_grade_scope(current_user)
+    ug = visible_academic_grades(current_user)
     teacher_uid = (request.args.get('teacher_uid') or '').strip()
     result_f = (request.args.get('result') or '').strip()
     d_from = (request.args.get('date_from') or '').strip()
     d_to = (request.args.get('date_to') or '').strip()
     grade_f = (request.args.get('grade') or '').strip()
 
-    q = InspectionRecord.query
-    if ug is not None:
-        q = q.filter(InspectionRecord.grade.in_(ug))
+    q = apply_academic_scope(InspectionRecord.query, current_user,
+                             InspectionRecord)
     if teacher_uid:
         q = q.filter_by(teacher_uid=teacher_uid)
     if result_f in _RESULT_KEYS:
@@ -372,59 +412,143 @@ def inspection_export():
 @login_required
 @perm_required('academic.view')
 def inspection_stats():
-    """返回查课统计数据 JSON（供 ECharts 图表使用）"""
-    from app.modules.grades.services.scope import user_grade_scope
-    ug = user_grade_scope(current_user)
+    """返回查课统计数据 JSON（供 ECharts 图表使用）。
+
+    2026-10-10 优化：原实现按各维度分别发 15 条聚合查询（同一张 inspection_records
+    被反复全表扫描），改为「一次取数 + 内存聚合」：输出保持一致，且不随数据量放大。
+    """
     year = request.args.get('year', type=int)
 
-    base_q = InspectionRecord.query
-    if ug is not None:
-        base_q = base_q.filter(InspectionRecord.grade.in_(ug))
+    base_q = apply_academic_scope(InspectionRecord.query, current_user,
+                                  InspectionRecord)
     if year:
         base_q = base_q.filter(
             func.strftime('%Y', InspectionRecord.inspect_date) == str(year))
+    rows = base_q.with_entities(
+        InspectionRecord.result, InspectionRecord.inspect_date,
+        InspectionRecord.grade, InspectionRecord.class_name,
+        InspectionRecord.inspector_id, InspectionRecord.period).all()
 
-    # 结果分布
-    dist_rows = (base_q.with_entities(InspectionRecord.result,
-                                      func.count(InspectionRecord.id))
-                 .group_by(InspectionRecord.result).all())
     result_map = dict(INSPECTION_RESULTS)
-    result_distribution = [
-        {'name': result_map.get(k, k), 'value': cnt}
-        for k, cnt in dist_rows
-    ]
-
-    # 月度趋势
-    month_rows = (base_q.with_entities(
-        func.strftime('%Y-%m', InspectionRecord.inspect_date).label('month'),
-        InspectionRecord.result, func.count(InspectionRecord.id))
-        .group_by('month', InspectionRecord.result)
-        .order_by('month').all())
-    monthly_map = {}
-    for m, res, cnt in month_rows:
-        if m not in monthly_map:
-            monthly_map[m] = {'month': m, 'normal': 0, 'late': 0,
-                              'absent': 0, 'swap': 0, 'other': 0}
-        if res in monthly_map[m]:
-            monthly_map[m][res] = cnt
-    monthly_trend = sorted(monthly_map.values(), key=lambda x: x['month'])
-
-    # 汇总
-    total = base_q.count()
-    normal_cnt = base_q.filter_by(result='normal').count()
-    normal_rate = round(normal_cnt * 100.0 / total, 1) if total else 0
     today = date.today()
     this_month_start = today.replace(day=1)
-    this_month_q = base_q.filter(InspectionRecord.inspect_date >= this_month_start)
-    this_month = this_month_q.count()
+    total = len(rows)
+    normal_cnt = this_month = today_checked = month_checked = 0
+    by_result = {}
+    monthly_map = {}
+    class_cnt = {}
+    insp_total, insp_bad = {}, {}
+    per_total, per_bad = {}, {}
+    for res, d, g, cn, iid, pn in rows:
+        by_result[res] = by_result.get(res, 0) + 1
+        if res == 'normal':
+            normal_cnt += 1
+        # 与 SQL 的 result != 'normal' 语义一致：NULL 不算异常
+        abnormal = res is not None and res != 'normal'
+        m = d.strftime('%Y-%m') if d else None
+        mm = monthly_map.setdefault(m, {'month': m, 'normal': 0, 'late': 0,
+                                        'absent': 0, 'swap': 0, 'other': 0})
+        if res in mm:
+            mm[res] = mm[res] + 1
+        if abnormal:
+            class_cnt[(g, cn)] = class_cnt.get((g, cn), 0) + 1
+            insp_bad[iid] = insp_bad.get(iid, 0) + 1
+            per_bad[pn] = per_bad.get(pn, 0) + 1
+        insp_total[iid] = insp_total.get(iid, 0) + 1
+        per_total[pn] = per_total.get(pn, 0) + 1
+        if d:
+            if d == today:
+                today_checked += 1
+            if this_month_start <= d <= today:
+                month_checked += 1
+            if d >= this_month_start:
+                this_month += 1
+
+    normal_rate = round(normal_cnt * 100.0 / total, 1) if total else 0
+    abnormal_cnt = total - normal_cnt
+
+    # 结果分布
+    result_distribution = [{'name': result_map.get(k, k), 'value': cnt}
+                           for k, cnt in by_result.items()]
+
+    # 月度趋势
+    monthly_trend = sorted(monthly_map.values(), key=lambda x: x['month'] or '')
+
+    # ── 2026-10-09 扩充：班级 / 检查人 / 节次 / 覆盖率（原来只有结果分布 + 月度趋势）──
+    # ① 班级维度：异常最多的班级（巡课重点班）
+    by_class = [
+        {'grade': g or '', 'class_name': cn or '未填班级',
+         'label': f'{g or ""}{cn or "未填班级"}', 'count': cnt}
+        for (g, cn), cnt in sorted(
+            class_cnt.items(),
+            key=lambda kv: (-kv[1], kv[0][0] or '', kv[0][1] or ''))[:10]
+    ]
+
+    # ② 检查人维度：谁查得多、查出多少异常（巡课工作量）
+    insp_ids = [i for i in insp_total if i]
+    insp_names = {}
+    if insp_ids:
+        from app.models import User
+        insp_names = {u.id: (u.real_name or u.username)
+                      for u in User.query.filter(User.id.in_(insp_ids)).all()}
+    by_inspector = [
+        {'inspector_id': i, 'name': insp_names.get(i, f'#{i}' if i else '未知'),
+         'count': c, 'abnormal': insp_bad.get(i, 0)}
+        for i, c in sorted(insp_total.items(),
+                           key=lambda kv: (-kv[1], kv[0] or 0))[:10]
+    ]
+
+    # ③ 节次维度：每节次已查 / 异常（看哪个时段最容易出问题）
+    by_period = [{'period': p, 'count': per_total.get(p, 0),
+                  'abnormal': per_bad.get(p, 0)}
+                 for p in sorted(k for k in per_total if k)]
+
+    # ④ 覆盖率：已查 / 应查（应查 = 当天课表里的"有课格子数"，按周课表估算，不分单双周）
+    coverage = {'today_checked': 0, 'today_expected': 0,
+                'month_checked': 0, 'month_expected': 0}
+    try:
+        from app.models.timetable import ScheduleEntry
+        from app.modules.academic.services import term_service
+        sched, _wk = term_service.resolve_schedule_by_date(today)
+        if sched:
+            if year:
+                # 指定年份时覆盖率口径不受 year 过滤影响（与旧实现一致），单独查询
+                checked_q = apply_academic_scope(InspectionRecord.query,
+                                                 current_user, InspectionRecord)
+                coverage['today_checked'] = checked_q.filter(
+                    InspectionRecord.inspect_date == today).count()
+                coverage['month_checked'] = checked_q.filter(
+                    InspectionRecord.inspect_date >= this_month_start,
+                    InspectionRecord.inspect_date <= today).count()
+            else:
+                coverage['today_checked'] = today_checked
+                coverage['month_checked'] = month_checked
+            per_wd = dict(db.session.query(ScheduleEntry.weekday,
+                                           func.count(ScheduleEntry.id))
+                          .filter(ScheduleEntry.term_schedule_id == sched.id,
+                                  ScheduleEntry.is_deleted.is_(False))
+                          .group_by(ScheduleEntry.weekday).all())
+            coverage['today_expected'] = per_wd.get(today.isoweekday(), 0)
+            want, d = 0, this_month_start
+            while d <= today:
+                want += per_wd.get(d.isoweekday(), 0)
+                d = d + timedelta(days=1)
+            coverage['month_expected'] = want
+    except Exception:  # noqa: BLE001  统计接口不因课表缺失而挂掉
+        pass
 
     return jsonify({
         'result_distribution': result_distribution,
         'monthly_trend': monthly_trend,
+        'by_class': by_class,
+        'by_inspector': by_inspector,
+        'by_period': by_period,
+        'coverage': coverage,
         'summary': {
             'total': total,
             'normal_rate': normal_rate,
             'this_month': this_month,
+            'abnormal': abnormal_cnt,
         }
     })
 
@@ -436,10 +560,8 @@ def inspection_delete(rid):
     rec = db.session.get(InspectionRecord, rid)
     if not rec:
         abort(404)
-    # 与 inspection_edit 一致：受年级数据范围约束，避免受限用户删除范围外记录
-    from app.modules.grades.services.scope import user_grade_scope
-    ug = user_grade_scope(current_user)
-    if ug is not None and (rec.grade or '') not in ug:
+    # 与 inspection_edit 一致：受年级与班级范围约束，避免删除范围外记录
+    if not academic_class_is_visible(current_user, rec.grade, rec.class_name):
         flash('该记录不在你的可见范围内', 'danger')
         return redirect(url_for('academic.inspection_page'))
     db.session.delete(rec)
@@ -475,24 +597,82 @@ def _parse_iso_date(value):
         return None
 
 
+def _attach_checks(data, target_date, user):
+    """把当天已有的查课标记写进矩阵格子（entry dict 增加 'check'），并统计已查/应查。
+
+    查课页的"标记"落在 inspection_records（同一格 = 同一天 + 同班 + 同节次）。
+    """
+    labels = dict(INSPECTION_RESULTS)
+    rows = apply_academic_scope(
+        InspectionRecord.query.filter(InspectionRecord.inspect_date == target_date),
+        user, InspectionRecord).all()
+    marks = {(r.grade, r.class_name, r.period): r for r in rows}
+    checked, expected = 0, 0
+    wd = data.get('weekday')
+    for b in (data.get('blocks') or []):
+        for cn, grid in (b.get('grids') or {}).items():
+            for pn, by_day in grid.items():
+                for e in (by_day.get(wd) or []):
+                    expected += 1
+                    rec = marks.get((b['grade'], cn, pn))
+                    if rec:
+                        checked += 1
+                        e['check'] = {
+                            'id': rec.id, 'result': rec.result,
+                            'label': labels.get(rec.result, rec.result),
+                            'note': rec.note or '',
+                            'inspector_id': rec.inspector_id,
+                        }
+                    else:
+                        e['check'] = None
+    data['checked_total'] = checked
+    data['expected_total'] = expected
+    return data
+
+
 @bp.route('/inspection/live-schedule')
 @login_required
 @perm_required('academic.view')
 def inspection_live_schedule():
-    """查课实时课表页：某天某节次全校（或指定年级）课表，叠加当天临时调课。"""
-    sched, periods, target_date, period, grade, current_period = _resolve_live_params()
+    """查课核对页：某天全校「行＝班级、列＝节次」矩阵，格内可直接标记查课结果。
+
+    2026-10-09 改版：原来是"先选节次、再看一张单节次的班级列表"，巡课要反复切节次，
+    看完还得回记录页手工补录（没法标记 正常/迟到/缺课/调课）。现在与全校总课表
+    同款版式 —— 一天所有节次一次铺开、班级占第一列、格内上学科下教师，点格子即
+    弹出标记面板（正常/迟到/缺课/调课/其他 + 备注），状态写回 inspection_records，
+    顶部实时显示"已查/应查"。
+    """
+    from app.modules.academic.services import schedule_service, term_service
+
+    target_date = _parse_iso_date(request.args.get('date')) or date.today()
+    grade = (request.args.get('grade') or '').strip()
+    sched, week = term_service.resolve_schedule_by_date(target_date)
     if not sched:
-        flash('尚未建立学期课表，无法查看实时课表', 'warning')
+        flash('尚未建立学期课表，无法查课', 'warning')
         return redirect(url_for('academic.inspection_page'))
-    class_opts = swap_service.get_class_options(sched.id)
-    data = swap_service.build_live_schedule(sched.id, target_date, period, grade or None)
+    visible = visible_academic_grades(current_user)
+    class_scope = visible_academic_class_scope(current_user)
+    if visible is not None and grade and grade not in visible:
+        abort(403)
+    grade_filter = grade or (sorted(visible) if visible is not None else None)
+    data = schedule_service.get_day_matrix(
+        sched.id, target_date, week=week, grade=grade_filter,
+        allowed_classes=class_scope)
+    _attach_checks(data, target_date, current_user)
+
+    grade_opts = swap_service.get_class_options(sched.id)['grades']
+    if visible is not None:
+        grade_opts = [g for g in grade_opts if g in visible]
     return render_template('academic/inspection_live.html',
-                           schedule=sched, periods=periods, target_date=target_date,
-                           period=period, current_period=current_period,
-                           grade=grade, grade_opts=class_opts['grades'], data=data,
+                           schedule=sched, data=data, target_date=target_date,
+                           week=week, grade=grade, grade_opts=grade_opts,
                            weekday_names=WEEKDAY_NAMES,
-                           now_str=datetime.now().strftime('%H:%M'),
-                           weekday=target_date.isoweekday())
+                           weekday=target_date.isoweekday(),
+                           is_today=(target_date == date.today()),
+                           today_iso=date.today().isoformat(),
+                           results=INSPECTION_RESULTS,
+                           can_mark=current_user.has_perm('academic.edit'),
+                           now_str=datetime.now().strftime('%H:%M'))
 
 
 @bp.route('/api/inspection/live-schedule')
@@ -503,7 +683,14 @@ def api_inspection_live_schedule():
     sched, periods, target_date, period, grade, current_period = _resolve_live_params()
     if not sched:
         return jsonify({'success': False, 'message': '尚未建立学期课表'}), 400
-    data = swap_service.build_live_schedule(sched.id, target_date, period, grade or None)
+    visible = visible_academic_grades(current_user)
+    class_scope = visible_academic_class_scope(current_user)
+    if visible is not None and grade and grade not in visible:
+        abort(403)
+    grade_filter = grade or (sorted(visible) if visible is not None else None)
+    data = swap_service.build_live_schedule(
+        sched.id, target_date, period, grade_filter,
+        allowed_classes=class_scope)
     return jsonify({'success': True, 'message': 'ok', 'data': {
         'date': target_date.isoformat(),
         'period': period,
@@ -512,3 +699,118 @@ def api_inspection_live_schedule():
         'weekday_text': WEEKDAY_NAMES.get(target_date.isoweekday(), ''),
         'grades': data,
     }})
+
+
+@bp.route('/inspection/mark', methods=['POST'])
+@login_required
+@perm_required('academic.edit')
+def inspection_mark():
+    """查课标记（v1.18.8.0 新增）：给「某天 + 某班 + 某节次」写查课结果，同格覆盖更新。
+
+    请求体（JSON，兼容表单）：
+      inspect_date: '2026-10-09'
+      cells: [{grade, class_name, period_number, subject, teacher_uid, teacher_name,
+               entry_id, result, note}]
+      - result ∈ normal/late/absent/swap/other；传空串 = 撤销该格标记
+    一次可传多格（巡课"一键全部正常"就是一次几十格），返回更新/撤销/跳过条数。
+    """
+    payload = request.get_json(silent=True)
+    if not isinstance(payload, dict):
+        payload = request.form.to_dict(flat=True)
+        cells = request.form.get('cells')
+        if cells:
+            try:
+                payload['cells'] = json.loads(cells)
+            except ValueError:
+                payload['cells'] = None
+    cells = payload.get('cells')
+    if not cells and payload.get('class_name'):
+        cells = [dict(payload)]          # 兼容"单格 + 平铺字段"的老式提交
+    if not isinstance(cells, list) or not cells:
+        return jsonify({'success': False, 'message': '没有要标记的格子'}), 400
+    target_date = _parse_iso_date(payload.get('inspect_date'))
+    if not target_date:
+        return jsonify({'success': False, 'message': '日期不正确'}), 400
+
+    ug = visible_academic_grades(current_user)
+    class_visible = academic_class_authorizer(current_user)
+    updated = cleared = skipped = 0
+    touched = []
+    for cell in cells[:500]:             # 单次上限：挡住异常/恶意的大批量提交
+        if not isinstance(cell, dict):
+            skipped += 1
+            continue
+        grade = (cell.get('grade') or '').strip()
+        class_name = (cell.get('class_name') or '').strip() or None
+        try:
+            period = int(cell.get('period_number'))
+        except (TypeError, ValueError):
+            period = None
+        if not grade or not period:
+            skipped += 1
+            continue
+        if ug is not None and grade not in ug:
+            skipped += 1
+            continue
+        if not class_visible(grade, class_name):
+            skipped += 1
+            continue
+        result = (cell.get('result') or '').strip()
+        if result and result not in _RESULT_KEYS:
+            skipped += 1
+            continue
+
+        teacher_uid = (cell.get('teacher_uid') or '').strip()
+        teacher_name = (cell.get('teacher_name') or '').strip()
+        subject = (cell.get('subject') or '').strip()
+        entry_id = str(cell.get('entry_id') or '').strip()
+        if entry_id.isdigit():
+            # 教师/学科以课表条目为准（前端只传 entry_id），避免标记与课表对不上
+            from app.models.timetable import ScheduleEntry
+            be = db.session.get(ScheduleEntry, int(entry_id))
+            if be:
+                teacher_uid = be.teacher_uid or teacher_uid
+                teacher_name = be.teacher_name or teacher_name
+                subject = be.subject or subject
+                class_name = be.class_name or class_name
+                period = be.period_number or period
+
+        rec = (InspectionRecord.query
+               .filter_by(inspect_date=target_date, grade=grade,
+                          class_name=class_name, period=period)
+               .order_by(InspectionRecord.id.desc()).first())
+        if not result:
+            if rec:
+                db.session.delete(rec)
+                cleared += 1
+                touched.append({'grade': grade, 'class_name': class_name,
+                                'period_number': period, 'result': ''})
+            continue
+        if rec:
+            rec.result = result
+            rec.teacher_uid = teacher_uid or rec.teacher_uid
+            rec.teacher_name = teacher_name or rec.teacher_name
+            rec.subject = subject or rec.subject
+            rec.inspector_id = current_user.id
+            if 'note' in cell:
+                rec.note = (cell.get('note') or '').strip() or None
+        else:
+            db.session.add(InspectionRecord(
+                inspect_date=target_date, grade=grade, period=period,
+                teacher_uid=teacher_uid or None, teacher_name=teacher_name or None,
+                class_name=class_name, subject=subject or None, result=result,
+                inspector_id=current_user.id,
+                note=(cell.get('note') or '').strip() or None))
+        updated += 1
+        touched.append({'grade': grade, 'class_name': class_name,
+                        'period_number': period, 'result': result,
+                        'label': dict(INSPECTION_RESULTS).get(result, result)})
+    db.session.commit()
+    if updated or cleared:
+        log_operation(current_user, '查课标记', '查课记录', 0,
+                      f'{target_date} 标记 {updated} 格 / 撤销 {cleared} 格',
+                      module='academic')
+    return jsonify({'success': True, 'updated': updated, 'cleared': cleared,
+                    'skipped': skipped, 'cells': touched,
+                    'message': f'已标记 {updated} 格' + (f'，撤销 {cleared} 格' if cleared else '')
+                               + (f'，忽略 {skipped} 格' if skipped else '')})

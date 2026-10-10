@@ -89,16 +89,17 @@
         <h6 class="mb-3"><i class="bi bi-bullseye"></i> ② 统一调整到</h6>
         <div class="row g-3">
             <div class="col-6 col-md-3">
-                <label class="form-label small mb-1">目标星期 <span class="text-danger">*</span></label>
-                <select name="new_weekday" id="tgtWeekday" class="form-select form-select-sm" required>
-                    <option value="">--</option>
+                {# 2026-10-10：目标星期/节次改为选填——留空即沿用原值，只换教室或只调日期 #}
+                <label class="form-label small mb-1">目标星期</label>
+                <select name="new_weekday" id="tgtWeekday" class="form-select form-select-sm">
+                    <option value="">-- 沿用原星期 --</option>
                     {% for k in range(1, 8) %}<option value="{{ k }}">{{ weekdays.get(k) }}</option>{% endfor %}
                 </select>
             </div>
             <div class="col-6 col-md-3">
-                <label class="form-label small mb-1">目标节次 <span class="text-danger">*</span></label>
-                <select name="new_period" id="tgtPeriod" class="form-select form-select-sm" required>
-                    <option value="">--</option>
+                <label class="form-label small mb-1">目标节次</label>
+                <select name="new_period" id="tgtPeriod" class="form-select form-select-sm">
+                    <option value="">-- 沿用原节次 --</option>
                     {% for p in periods %}<option value="{{ p.period_number }}">{{ p.period_name }} {{ p.start_time }}-{{ p.end_time }}</option>{% endfor %}
                 </select>
             </div>
@@ -247,7 +248,11 @@
 
     $('#bulkForm').on('submit', function (e) {
         if (!selectedRows().length) { e.preventDefault(); alert('请至少勾选一条课程'); return; }
-        if (!$('#tgtWeekday').val() || !$('#tgtPeriod').val()) { e.preventDefault(); alert('请选择目标星期和节次'); return; }
+        // 2026-10-10：星期/节次可留空（沿用原值），但三者不能全空
+        var room = $.trim($('input[name="new_room"]').val() || '');
+        if (!$('#tgtWeekday').val() && !$('#tgtPeriod').val() && !room) {
+            e.preventDefault(); alert('请至少指定目标星期、目标节次或新教室中的一项'); return;
+        }
         if (!$('#swPermanent').is(':checked') && !$('#swapDate').val()) { e.preventDefault(); alert('临时调课请选择具体日期'); return; }
         if (!confirm('确认为选中的 ' + selectedRows().length + ' 条课程提交统一调课申请？')) { e.preventDefault(); }
     });

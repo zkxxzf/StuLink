@@ -55,6 +55,12 @@ def manage():
     profile_map = {}
     for p in profiles:
         profile_map[(p.grade, p.class_name)] = p
+    # 选科明细一次性取回（subject_list 是 dynamic 关系，逐个访问会 N+1）
+    subj_map = {}
+    for cs in ClassSubject.query.order_by(ClassSubject.class_profile_id,
+                                          ClassSubject.id).all():
+        if cs.subject_value:
+            subj_map.setdefault(cs.class_profile_id, []).append(cs.subject_value)
 
     # 构建完整班级-年级矩阵
     matrix = {}
@@ -81,7 +87,7 @@ def manage():
                 'profile_id': p.id if p else None,
                 'class_type': p.class_type or '' if p else '',
                 'subject_direction': p.subject_direction or '' if p else '',
-                'subjects': p.subject_list if p else [],
+                'subjects': (subj_map.get(p.id) or []) if p else [],
                 'teachers': teachers,
             })
 
@@ -191,6 +197,7 @@ def batch_save():
                 profile.subjects.delete()
                 for sv in new_subjects:
                     profile.subjects.append(ClassSubject(subject_value=sv))
+                profile.invalidate_subjects()   # 选科变了：清掉 subject_list 实例缓存
                 has_changes = True
 
         if has_changes and profile.id:

@@ -55,7 +55,8 @@ def _table_exists(conn, table_name):
 def add_columns():
     """幂等补列：为 term_schedules 增加学期周期维度字段"""
     if not os.path.exists(TIMETABLE_DB):
-        print(f'[FAIL] 未找到 {TIMETABLE_DB}，请先运行 migrate_timetable_db.py')
+        print(f'[FAIL] 未找到 {TIMETABLE_DB}，请先在系统中创建学期课表'
+              '（教务 → 学期课表管理）')
         return False
     # 补列前先备份：后续回填会写库
     backup_db(TIMETABLE_DB)
@@ -63,7 +64,8 @@ def add_columns():
     added, skipped = [], []
     try:
         if not _table_exists(conn, 'term_schedules'):
-            print('[FAIL] term_schedules 表不存在，请先运行 migrate_timetable_db.py')
+            print('[FAIL] term_schedules 表不存在，请先在系统中创建学期课表'
+                  '（教务 → 学期课表管理）')
             return False
         existing = _column_names(conn, 'term_schedules')
         from _ddl_guard import assert_ident   # R-11

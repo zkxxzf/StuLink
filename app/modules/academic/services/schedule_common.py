@@ -10,6 +10,8 @@ import json
 import re
 from datetime import datetime
 
+from flask import g, has_request_context
+
 from app.extensions import db
 from app.models.timetable import (
     TermSchedule, PeriodDef, ScheduleEntry, ScheduleVersion, ScheduleSwap,
@@ -115,9 +117,25 @@ def get_active_schedule():
 
 
 def get_periods(schedule_id):
-    """按 sort_order 返回该学期全部节次。"""
-    return (PeriodDef.query.filter_by(term_schedule_id=schedule_id)
+    """按 sort_order 返回该学期全部节次。
+
+    2026-10-10 优化：同一请求内多处会重复调用（总课表、年级课表、班级课表、
+    实时课表各查一遍），这里加请求内缓存。返回值约定**只读**（调用方不得原地改）；
+    写节次配置的路由都是"保存 → redirect"，不存在同请求内改后读。
+    """
+    cache = None
+    if has_request_context():
+        cache = getattr(g, '_periods_cache', None)
+        if cache is None:
+            cache = {}
+            g._periods_cache = cache
+        if schedule_id in cache:
+            return cache[schedule_id]
+    rows = (PeriodDef.query.filter_by(term_schedule_id=schedule_id)
             .order_by(PeriodDef.sort_order, PeriodDef.period_number).all())
+    if cache is not None:
+        cache[schedule_id] = rows
+    return rows
 
 
 def pick_conflict(entries, week_range=None, week=None):
@@ -141,13 +159,28 @@ def temp_target_ids(schedule_id):
 
     这些条目只在"调课当天"生效（见 swap_service.resolve_effective_entry /
     build_live_schedule），**不进常规周课表**，因此周课表/导出/统计统一排除它们。
+
+    2026-10-10 优化：`_base_entry_query` 几乎每个课表视图都会调一次（年级课表页会连调
+    两次 = 同参重复），这里加请求内缓存。它只被课表/查课的**读路径**使用；
+    调课写入后都是 redirect 或 AJAX，不存在同请求内"写完再读"。
     """
+    cache = None
+    if has_request_context():
+        cache = getattr(g, '_temp_target_ids_cache', None)
+        if cache is None:
+            cache = {}
+            g._temp_target_ids_cache = cache
+        if schedule_id in cache:
+            return cache[schedule_id]
     rows = (ScheduleSwap.query
             .filter(ScheduleSwap.term_schedule_id == schedule_id,
                     ScheduleSwap.is_permanent.is_(False),
                     ScheduleSwap.target_entry_id.isnot(None))
             .with_entities(ScheduleSwap.target_entry_id).all())
-    return {r[0] for r in rows if r[0]}
+    out = {r[0] for r in rows if r[0]}
+    if cache is not None:
+        cache[schedule_id] = out
+    return out
 
 
 def snapshot_entry(entry):

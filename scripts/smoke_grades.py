@@ -23,6 +23,12 @@ config_mod.Config.SQLALCHEMY_BINDS = {
     'grades': 'sqlite:///' + os.path.join(_TMP, 'grades.db'),
     'points': 'sqlite:///' + os.path.join(_TMP, 'points.db'),
     'academic': 'sqlite:///' + os.path.join(_TMP, 'academic.db'),
+    # 2026-10-10：教务分库——查课 / 业绩 / 表单 各自独立库
+    'inspection': 'sqlite:///' + os.path.join(_TMP, 'inspection.db'),
+    'achievement': 'sqlite:///' + os.path.join(_TMP, 'achievement.db'),
+    'forms': 'sqlite:///' + os.path.join(_TMP, 'forms.db'),
+    # 2026-10-10：补 system 绑定 —— 启动建表会遍历 'system'，缺它会有 WARN 噪音
+    'system': 'sqlite:///' + os.path.join(_TMP, 'system.db'),
     'portrait': 'sqlite:///' + os.path.join(_TMP, 'portrait.db'),
 }
 # config._get_secret_key 基于 BASE_DIR 读取密钥文件，临时目录下会自动生成
@@ -378,7 +384,12 @@ with app.test_client() as c:
     check('导出年级分析 Excel', r.status_code == 200 and r.data[:2] == b'PK')
 
     # ---- 页面可访问 ----
-    for url in ('/grades/', '/grades/exams', f'/grades/exams/{eid}',
+    # 2026-10-10 合并 master（v1.19.0）：/grades/ 落地页改为「历次考试列表」，
+    # 原成绩分析页迁走、旧链接保留为重定向 —— 断言随之更新。
+    r = c.get('/grades/')
+    check('页面 /grades/（重定向到考试列表）', r.status_code in (301, 302),
+          str(r.status_code))
+    for url in ('/grades/exams', f'/grades/exams/{eid}',
                 f'/grades/exams/{eid}/import', f'/grades/exams/{eid}/bands',
                 '/grades/teachers', '/grades/teachers/import'):
         r = c.get(url)

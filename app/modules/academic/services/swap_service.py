@@ -7,7 +7,7 @@
 import json
 from datetime import datetime, date, timedelta
 
-from sqlalchemy import func
+from sqlalchemy import func, select
 
 from app.extensions import db
 from app.models.timetable import (
@@ -102,12 +102,19 @@ def _period_map(schedule_id):
     return {p.period_number: p for p in _get_periods(schedule_id)}
 
 
-def _period_label(schedule_id, period_number):
-    """节次显示文案，如 '第3节 10:00-10:45'。"""
+def _period_label(schedule_id, period_number, period_map=None):
+    """节次显示文案，如 '第3节 10:00-10:45'。
+
+    period_map（{period_number: PeriodDef}）可选：批量场景由调用方一次取好，
+    避免逐行查 PeriodDef（2026-10-10 N+1 优化，行为不变）。
+    """
     if not period_number:
         return None
-    pd = PeriodDef.query.filter_by(term_schedule_id=schedule_id,
-                                   period_number=period_number).first()
+    if period_map is not None:
+        pd = period_map.get(period_number)
+    else:
+        pd = PeriodDef.query.filter_by(term_schedule_id=schedule_id,
+                                       period_number=period_number).first()
     if not pd:
         return f'第{period_number}节'
     if pd.start_time and pd.end_time:
@@ -223,26 +230,19 @@ def get_available_slots(schedule_id, grade, class_name, teacher_uid,
 
 
 def get_class_options(schedule_id=None):
-    """从现有课表条目派生年级/班级选项，供申请表单级联下拉。
+    """年级/班级选项，供申请表单与查课筛选级联下拉。
+
+    2026-10-09：原来只从课表条目派生（课表没排到的班在下拉里就消失了）。现在统一走
+    teaching_scope_service —— 以班级档案的"在用班级"为准，课表里出现过的班兜底，
+    与学生管理 / 成绩管理共用同一套班级基础数据。
 
     返回 {'grades': [...], 'grade_classes': {grade: [class_name, ...]}}。
     """
+    from app.modules.academic.services import teaching_scope_service
     if schedule_id is None:
         sched = _get_active_schedule()
         schedule_id = sched.id if sched else None
-    q = ScheduleEntry.query.filter(ScheduleEntry.is_deleted.is_(False))
-    if schedule_id:
-        q = q.filter(ScheduleEntry.term_schedule_id == schedule_id)
-    rows = (q.with_entities(ScheduleEntry.grade, ScheduleEntry.class_name)
-            .distinct().order_by(ScheduleEntry.grade, ScheduleEntry.class_name).all())
-    grades, grade_classes = [], {}
-    for g, c in rows:
-        if g not in grade_classes:
-            grade_classes[g] = []
-            grades.append(g)
-        if c and c not in grade_classes[g]:
-            grade_classes[g].append(c)
-    return {'grades': grades, 'grade_classes': grade_classes}
+    return teaching_scope_service.class_candidates(schedule_id)
 
 
 def query_entries(schedule_id=None, grade=None, class_name=None, weekday=None,
@@ -283,9 +283,13 @@ def get_entry_detail(entry_id):
 
 def apply_swap(applicant_uid, applicant_name, original_entry_id, new_weekday,
                new_period, new_room=None, swap_date=None, is_permanent=False,
-               reason='', swap_type='personal'):
+               reason='', swap_type='personal', source_date=None,
+               source_weekday=None):
     """创建个人调课申请（status='pending'）。
 
+    swap_date   = 目标日期（调到哪天上）；
+    new_weekday = 目标那天按"周几的课表"上课（调休时≠日期的星期，如周六上周三的课 → 3）；
+    source_date / source_weekday = 原课所在日期与那天按周几上课（跨天/调休场景留痕）。
     返回 (success: bool, message: str, swap: ScheduleSwap|None)。
     """
     entry = db.session.get(ScheduleEntry, original_entry_id) if original_entry_id else None
@@ -328,9 +332,12 @@ def apply_swap(applicant_uid, applicant_name, original_entry_id, new_weekday,
         new_period=new_period,
         new_room=(new_room or '').strip() or None,
         swap_date=swap_date,
+        source_date=source_date,
+        source_weekday=(int(source_weekday) if source_weekday else None),
         is_permanent=bool(is_permanent),
         reason=(reason or '').strip() or None,
         status='pending',
+        approval_step=0,
     )
     try:
         db.session.add(swap)
@@ -353,11 +360,17 @@ def bulk_apply_swap(applicant_uid, applicant_name, entry_ids, new_weekday,
     result = {'created': 0, 'conflicts': []}
     if not entry_ids:
         return False, '请至少选择一条课程', result
-    if not new_weekday or not new_period:
-        return False, '请选择目标星期和节次', result
-    if not (1 <= int(new_weekday) <= 7) or not (1 <= int(new_period) <= MAX_PERIOD):
-        return False, '目标星期或节次无效', result
-    new_weekday, new_period = int(new_weekday), int(new_period)
+    # 2026-10-10：目标星期/节次改为选填——留空即沿用各自原值（只换教室、或只调日期）。
+    # 但三者不能全空，否则这次调课没有任何实际变化。
+    new_room = (new_room or '').strip() or None
+    if new_weekday is None and new_period is None and not new_room:
+        return False, '请至少指定目标星期、目标节次或新教室中的一项', result
+    if new_weekday is not None and not (1 <= int(new_weekday) <= 7):
+        return False, '目标星期无效', result
+    if new_period is not None and not (1 <= int(new_period) <= MAX_PERIOD):
+        return False, '目标节次无效', result
+    new_weekday = int(new_weekday) if new_weekday else None
+    new_period = int(new_period) if new_period else None
 
     conflicts = []
     valid_entries = []
@@ -374,13 +387,21 @@ def bulk_apply_swap(applicant_uid, applicant_name, entry_ids, new_weekday,
                               'class': f'{entry.grade}{entry.class_name}',
                               'desc': '跨学期条目不允许一起调课'})
             continue
-        wr, wk = _week_ctx(schedule_id, entry, is_permanent, swap_date)
-        cc = _check_class_conflict(schedule_id, entry.grade, entry.class_name,
-                                   new_weekday, new_period, exclude_entry_id=entry.id,
-                                   week_range=wr, week=wk)
-        tc = _check_teacher_conflict(schedule_id, entry.teacher_uid,
-                                     new_weekday, new_period, exclude_entry_id=entry.id,
-                                     week_range=wr, week=wk)
+        # 留空的维度沿用该条目原值，冲突检测也按「实际会落到哪一格」来判
+        tgt_weekday = new_weekday or entry.weekday
+        tgt_period = new_period or entry.period_number
+        moved = (tgt_weekday != entry.weekday or tgt_period != entry.period_number)
+        if is_permanent and not moved:
+            # 永久调课且时段原地不动（只换教室）→ 无需时段冲突检测
+            cc = tc = None
+        else:
+            wr, wk = _week_ctx(schedule_id, entry, is_permanent, swap_date)
+            cc = _check_class_conflict(schedule_id, entry.grade, entry.class_name,
+                                       tgt_weekday, tgt_period, exclude_entry_id=entry.id,
+                                       week_range=wr, week=wk)
+            tc = _check_teacher_conflict(schedule_id, entry.teacher_uid,
+                                         tgt_weekday, tgt_period, exclude_entry_id=entry.id,
+                                         week_range=wr, week=wk)
         if cc:
             conflicts.append({'entry_id': eid, 'subject': entry.subject,
                               'class': f'{entry.grade}{entry.class_name}',
@@ -392,11 +413,14 @@ def bulk_apply_swap(applicant_uid, applicant_name, entry_ids, new_weekday,
         else:
             valid_entries.append(entry)
 
-    # 批量内部互相冲突：同班 / 同教师 调到同一目标时段
+    # 批量内部互相冲突：同一目标时段出现同班 / 同教师
+    # （留空的维度按各自原值算，所以 key 必须带上目标星期与节次）
     seen_class, seen_teacher, final_valid = {}, {}, []
     for entry in valid_entries:
-        ckey = (entry.grade, entry.class_name)
-        tkey = entry.teacher_uid
+        twd = new_weekday or entry.weekday
+        tpd = new_period or entry.period_number
+        ckey = (twd, tpd, entry.grade, entry.class_name)
+        tkey = (twd, tpd, entry.teacher_uid) if entry.teacher_uid else None
         if ckey in seen_class:
             conflicts.append({'entry_id': entry.id, 'subject': entry.subject,
                               'class': f'{entry.grade}{entry.class_name}',
@@ -427,7 +451,7 @@ def bulk_apply_swap(applicant_uid, applicant_name, entry_ids, new_weekday,
                 applicant_name=applicant_name,
                 new_weekday=new_weekday,
                 new_period=new_period,
-                new_room=(new_room or '').strip() or None,
+                new_room=new_room,
                 swap_date=swap_date,
                 is_permanent=bool(is_permanent),
                 reason=(reason or '').strip() or None,
@@ -446,10 +470,39 @@ def bulk_apply_swap(applicant_uid, applicant_name, entry_ids, new_weekday,
 # 列表 / 详情
 # ══════════════════════════════════════════════════════════════════════
 
-def _decorate_swap(sw):
-    """把 ScheduleSwap 转为 dict 并附带原条目信息与目标时段文案。"""
+def _build_entry_map(entry_ids):
+    """一次取回一批 ScheduleEntry，返回 {id: 对象}（2026-10-10 N+1 优化）。"""
+    ids = {i for i in entry_ids if i}
+    if not ids:
+        return {}
+    rows = ScheduleEntry.query.filter(ScheduleEntry.id.in_(ids)).all()
+    return {e.id: e for e in rows}
+
+
+def _build_period_maps(swaps):
+    """按学期一次性取节次定义，返回 {schedule_id: {period_number: PeriodDef}}。
+
+    2026-10-10 N+1 优化：同一批 swap 不再逐行查 PeriodDef；同学期只取一次。
+    """
+    out = {}
+    for sw in swaps:
+        sid = sw.term_schedule_id
+        if sid and sid not in out:
+            out[sid] = _period_map(sid)
+    return out
+
+
+def _decorate_swap(sw, entry_map=None, period_maps=None):
+    """把 ScheduleSwap 转为 dict 并附带原条目信息与目标时段文案。
+
+    entry_map / period_maps 可选：批量场景由调用方一次取好（2026-10-10 N+1 优化）；
+    不传时退回逐行查询，返回结构与字段完全一致。
+    """
     d = sw.to_dict()
-    orig = db.session.get(ScheduleEntry, sw.original_entry_id) if sw.original_entry_id else None
+    if entry_map is not None:
+        orig = entry_map.get(sw.original_entry_id) if sw.original_entry_id else None
+    else:
+        orig = db.session.get(ScheduleEntry, sw.original_entry_id) if sw.original_entry_id else None
     if orig:
         d['original_subject'] = orig.subject
         d['original_class'] = f'{orig.grade}{orig.class_name}'
@@ -459,17 +512,33 @@ def _decorate_swap(sw):
     else:
         d.update({'original_subject': None, 'original_class': None,
                   'original_slot': None, 'original_teacher': None, 'original_room': None})
-    d['target_slot'] = (f'{WEEKDAY_NAMES.get(sw.new_weekday, "")}第{sw.new_period}节'
-                        if sw.new_weekday and sw.new_period else None)
-    d['target_period_label'] = _period_label(sw.term_schedule_id, sw.new_period)
+    # 2026-10-10：目标星期/节次可留空（沿用原值），展示时按「实际会落到哪一格」并标注沿用项
+    target_wd = sw.new_weekday or (orig.weekday if orig else None)
+    target_pd = sw.new_period or (orig.period_number if orig else None)
+    d['target_slot'] = (f'{WEEKDAY_NAMES.get(target_wd, "")}第{target_pd}节'
+                        if target_wd and target_pd else None)
+    _keep = []
+    if sw.new_weekday is None:
+        _keep.append('星期')
+    if sw.new_period is None:
+        _keep.append('节次')
+    d['target_keep_text'] = ('沿用原' + '与'.join(_keep)) if _keep else ''
+    _pmap = period_maps.get(sw.term_schedule_id) if period_maps is not None else None
+    d['target_period_label'] = _period_label(sw.term_schedule_id, target_pd, _pmap)
     d['is_temp'] = not sw.is_permanent
     return d
 
 
 def get_swap_list(status=None, applicant_uid=None, schedule_id=None, page=1,
-                  per_page=20, is_reviewer=False, swap_type=None):
+                  per_page=20, is_reviewer=False, swap_type=None,
+                  review_step=None, visible_grades=None):
     """分页调课列表。普通教师只看自己的，审核者可看全部。
 
+    review_step（分级审批）：一级审批人（如年级长）看不到全校全部，只看到
+    "轮到自己这一级"的待审 + 自己提交的记录。
+    visible_grades（数据范围）：一级审批人的可见年级集合，None 表示不限
+    （管理员 / 课表终审）。非 None 时，待审队列只保留本年级的调课，
+    避免年级长看到外年级申请。
     返回 (items: list[dict], pagination)。
     """
     q = ScheduleSwap.query
@@ -480,10 +549,28 @@ def get_swap_list(status=None, applicant_uid=None, schedule_id=None, page=1,
     if swap_type and swap_type in SWAP_TYPES:
         q = q.filter(ScheduleSwap.swap_type == swap_type)
     if not is_reviewer and applicant_uid:
-        q = q.filter(ScheduleSwap.applicant_uid == applicant_uid)
+        if review_step is not None:
+            my_step = db.and_(ScheduleSwap.status == 'pending',
+                              ScheduleSwap.approval_step == review_step)
+            if visible_grades is not None:
+                # 一级审批人只看本年级：按原课表条目的年级收敛（同库子查询）
+                my_step = db.and_(
+                    my_step,
+                    ScheduleSwap.original_entry_id.in_(
+                        select(ScheduleEntry.id).where(
+                            ScheduleEntry.grade.in_(list(visible_grades)))))
+            q = q.filter(db.or_(ScheduleSwap.applicant_uid == applicant_uid,
+                                my_step))
+        else:
+            q = q.filter(ScheduleSwap.applicant_uid == applicant_uid)
     q = q.order_by(ScheduleSwap.created_at.desc(), ScheduleSwap.id.desc())
     pagination = q.paginate(page=page, per_page=per_page, error_out=False)
-    items = [_decorate_swap(sw) for sw in pagination.items]
+    # 2026-10-10 N+1 优化：原条目一次 in_ 取回、节次按学期一次取好，再无逐行查询
+    swaps = pagination.items
+    entry_map = _build_entry_map([s.original_entry_id for s in swaps])
+    period_maps = _build_period_maps(swaps)
+    items = [_decorate_swap(sw, entry_map=entry_map, period_maps=period_maps)
+             for sw in swaps]
     return items, pagination
 
 
@@ -502,23 +589,25 @@ def get_swap_detail(swap_id):
     sw = db.session.get(ScheduleSwap, swap_id)
     if not sw:
         return None
-    d = _decorate_swap(sw)
     schedule_id = sw.term_schedule_id
-    orig = db.session.get(ScheduleEntry, sw.original_entry_id) if sw.original_entry_id else None
+    # 2026-10-10 N+1 优化：原/目标条目一次 in_ 取回；节次定义（原 + 目标）一次取好，
+    # 不在 _decorate_swap 之后重复查 PeriodDef（原实现同表同学期共查 3 次）。
+    entry_ids = [x for x in (sw.original_entry_id, sw.target_entry_id) if x]
+    entry_map = _build_entry_map(entry_ids)
+    period_map = _period_map(schedule_id) if schedule_id else {}
+    d = _decorate_swap(sw, entry_map=entry_map,
+                       period_maps={schedule_id: period_map} if schedule_id else {})
+    orig = entry_map.get(sw.original_entry_id) if sw.original_entry_id else None
     d['original_entry'] = orig.to_dict() if orig else None
-    tgt = db.session.get(ScheduleEntry, sw.target_entry_id) if sw.target_entry_id else None
+    tgt = entry_map.get(sw.target_entry_id) if sw.target_entry_id else None
     d['target_entry'] = tgt.to_dict() if tgt else None
     # 原/目标节次定义
-    opd = (PeriodDef.query.filter_by(term_schedule_id=schedule_id,
-                                     period_number=orig.period_number).first()
-           if orig else None)
+    opd = period_map.get(orig.period_number) if orig else None
     d['original_period'] = opd.to_dict() if opd else None
-    npd = (PeriodDef.query.filter_by(term_schedule_id=schedule_id,
-                                     period_number=sw.new_period).first()
-           if sw.new_period else None)
+    _tgt_pd = sw.new_period or (orig.period_number if orig else None)
+    npd = period_map.get(_tgt_pd) if _tgt_pd else None
     d['target_period'] = npd.to_dict() if npd else None
     # 版本记录（原条目 + 目标条目）
-    entry_ids = [x for x in (sw.original_entry_id, sw.target_entry_id) if x]
     versions = []
     if entry_ids:
         vq = (ScheduleVersion.query
@@ -535,16 +624,114 @@ def get_my_swaps(applicant_uid, status=None):
     if status and status in SWAP_STATUS:
         q = q.filter(ScheduleSwap.status == status)
     swaps = q.order_by(ScheduleSwap.created_at.desc(), ScheduleSwap.id.desc()).all()
-    return [_decorate_swap(sw) for sw in swaps]
+    # 2026-10-10 N+1 优化：原条目一次 in_ 取回、节次按学期一次取好
+    entry_map = _build_entry_map([s.original_entry_id for s in swaps])
+    period_maps = _build_period_maps(swaps)
+    return [_decorate_swap(sw, entry_map=entry_map, period_maps=period_maps)
+            for sw in swaps]
 
 
 # ══════════════════════════════════════════════════════════════════════
 # 审核 / 执行 / 撤销
 # ══════════════════════════════════════════════════════════════════════
 
-def review_swap(swap_id, reviewer_id, reviewer_name, action, review_note=''):
-    """审核调课：action='approve'/'reject'。仅 pending 可审。
+# ── 分级审批链路（2026-10-09）──────────────────────────────────────────
+# 默认两级：① 调课审批（academic.swap_approve，年级/教务干事）→
+#          ② 课表管理（academic.timetable，终审 + 执行，教务主任）
+# 想改成一级审批：在 system_setting 里加 swap_approval_mode = one（只走课表管理）。
+APPROVAL_STEPS = [
+    {'key': 'swap_approve', 'name': '调课审批', 'perm': 'academic.swap_approve'},
+    {'key': 'timetable', 'name': '课表管理（终审 / 执行）', 'perm': 'academic.timetable'},
+]
 
+
+def get_approval_mode():
+    """调课审批级数：'two'（默认两级）或 'one'（仅课表管理一级）。
+
+    2026-10-10 N+1 优化：同一请求内结果缓存到 flask.g，列表页逐行判权限与模板
+    多次调用不再重复查 system_setting；无请求上下文（CLI/测试）时退回直查，行为不变。
+    """
+    from flask import g, has_request_context
+    ctx = has_request_context()
+    if ctx:
+        cached = getattr(g, '_swap_approval_mode', None)
+        if cached is not None:
+            return cached
+    mode = 'two'
+    try:
+        from app.models.system_setting import SystemSetting
+        row = SystemSetting.query.filter_by(key='swap_approval_mode').first()
+        v = (row.value or '').strip().lower() if row and row.value else ''
+        if v in ('one', 'two'):
+            mode = v
+    except Exception:  # noqa: BLE001  设置表不可用时退回默认，不影响审批
+        pass
+    if ctx:
+        g._swap_approval_mode = mode
+    return mode
+
+
+def approval_chain():
+    """当前生效的审批链路（step 从 0 起）。"""
+    steps = list(APPROVAL_STEPS)
+    if get_approval_mode() == 'one':
+        steps = [s for s in steps if s['key'] == 'timetable'] or steps
+    return steps
+
+
+def review_step_of(sw):
+    """该申请当前停在哪一级（仅 pending 有意义）。"""
+    steps = approval_chain()
+    cur = sw.approval_step or 0
+    return steps[cur] if cur < len(steps) else None
+
+
+def swap_grade(sw):
+    """调课记录对应课表条目的年级（数据范围判定用；取不到返回 None）。"""
+    if not sw or not sw.original_entry_id:
+        return None
+    entry = db.session.get(ScheduleEntry, sw.original_entry_id)
+    return entry.grade if entry else None
+
+
+def review_visible_grades(user):
+    """审批人可见的年级集合；None 表示不限（管理员 / 课表终审为全校口径）。
+
+    分级审批下，持「调课审批」的年级长只应审**本年级**（与 permission_map 的
+    说明一致），不能跨年级查看/审批；管理员与课表终审仍为全校范围。
+    """
+    if not user or getattr(user, 'role', None) == 'admin':
+        return None
+    if user.has_perm('academic.timetable'):
+        return None
+    from app.modules.academic.services.access_scope import visible_academic_grades
+    return visible_academic_grades(user)
+
+
+def can_review(sw, user):
+    """当前用户能否审批这条申请的"当前这一级"（管理员可审任何一级）。"""
+    if not sw or sw.status != 'pending':
+        return False
+    step = review_step_of(sw)
+    if not step:
+        return False
+    if not (getattr(user, 'role', None) == 'admin' or user.has_perm(step['perm'])):
+        return False
+    # 数据范围：非全校口径的审批人（如年级长）只能审本年级的调课
+    grades = review_visible_grades(user)
+    if grades is None:
+        return True
+    grade = swap_grade(sw)
+    return bool(grade) and grade in grades
+
+
+def review_swap(swap_id, reviewer_id, reviewer_name, action, review_note='',
+                user=None):
+    """审核调课：action='approve'/'reject'。仅 pending 可审，按审批级逐级推进。
+
+    - approve：当前级通过 → 还有下一级就停在下一级（仍 pending）；最后一级通过 → status='approved'。
+    - reject：任意一级驳回 → status='rejected'。
+    每步都写进 approvals_json（谁、哪一级、什么时间、什么意见），详情页直接展示。
     approve 时再次校验目标时段冲突（申请后课表可能已变）。
     返回 (success, message, swap)。
     """
@@ -559,7 +746,11 @@ def review_swap(swap_id, reviewer_id, reviewer_name, action, review_note=''):
     if action == 'reject':
         if not (review_note or '').strip():
             return False, '驳回必须填写理由', None
+        step = review_step_of(sw) or APPROVAL_STEPS[-1]
         sw.status = 'rejected'
+        sw.add_approval(sw.approval_step or 0, step['key'], step['name'],
+                        reviewer_id, reviewer_name, 'reject', '驳回',
+                        review_note.strip()[:200])
         sw.reviewed_by = reviewer_id
         sw.review_note = review_note.strip()[:200]
         sw.reviewed_at = datetime.now()
@@ -570,7 +761,7 @@ def review_swap(swap_id, reviewer_id, reviewer_name, action, review_note=''):
             return False, f'操作失败：{e}', None
         # 通知申请人：已驳回
         _notify_swap_result(sw, 'reject', review_note=sw.review_note)
-        return True, '已驳回该调课申请', sw
+        return True, f'已在「{step["name"]}」环节驳回该调课申请', sw
 
     # approve
     entry = db.session.get(ScheduleEntry, sw.original_entry_id) if sw.original_entry_id else None
@@ -589,10 +780,26 @@ def review_swap(swap_id, reviewer_id, reviewer_name, action, review_note=''):
         if tc:
             return False, (f'目标时段教师已有课程（{tc.grade}{tc.class_name} '
                            f'{tc.subject}），无法通过'), None
-    sw.status = 'approved'
+    steps = approval_chain()
+    cur = sw.approval_step or 0
+    step = steps[cur] if cur < len(steps) else steps[-1]
+    sw.add_approval(cur, step['key'], step['name'], reviewer_id, reviewer_name,
+                    'approve', '通过', (review_note or '').strip()[:200])
     sw.reviewed_by = reviewer_id
     sw.review_note = (review_note or '').strip()[:200] or None
     sw.reviewed_at = datetime.now()
+    if cur + 1 < len(steps):
+        # 还有下一级：保持 pending，推进到下一级
+        sw.approval_step = cur + 1
+        nxt = steps[cur + 1]['name']
+        try:
+            db.session.commit()
+        except Exception as e:  # noqa: BLE001
+            db.session.rollback()
+            return False, f'操作失败：{e}', None
+        _notify_swap_result(sw, 'approve')
+        return True, f'「{step["name"]}」已通过，待「{nxt}」审批', sw
+    sw.status = 'approved'
     try:
         db.session.commit()
     except Exception as e:  # noqa: BLE001
@@ -600,7 +807,7 @@ def review_swap(swap_id, reviewer_id, reviewer_name, action, review_note=''):
         return False, f'操作失败：{e}', None
     # 通知申请人：已通过
     _notify_swap_result(sw, 'approve')
-    return True, '已通过审核，可执行调课', sw
+    return True, '审批流程已完成（终审通过），可执行调课', sw
 
 
 def _snapshot_str(entry):
@@ -640,15 +847,20 @@ def execute_swap(swap_id, operator_id, operator_name):
 
 
 def _execute_permanent(sw, entry, operator_id, operator_name):
-    """永久调课执行（在 execute_swap 的事务内调用）。"""
+    """永久调课执行（在 execute_swap 的事务内调用）。
+
+    2026-10-10：目标星期/节次可留空（只换教室/只调日期），留空的维度沿用原条目值。
+    """
+    target_weekday = sw.new_weekday or entry.weekday
+    target_period = sw.new_period or entry.period_number
     cc = _check_class_conflict(sw.term_schedule_id, entry.grade, entry.class_name,
-                               sw.new_weekday, sw.new_period, exclude_entry_id=entry.id,
+                               target_weekday, target_period, exclude_entry_id=entry.id,
                                week_range=entry.week_range)
     if cc:
         db.session.rollback()
         return False, f'目标时段本班已有课程（{cc.subject}），无法执行', None
     tc = _check_teacher_conflict(sw.term_schedule_id, entry.teacher_uid,
-                                 sw.new_weekday, sw.new_period, exclude_entry_id=entry.id,
+                                 target_weekday, target_period, exclude_entry_id=entry.id,
                                  week_range=entry.week_range)
     if tc:
         db.session.rollback()
@@ -658,7 +870,7 @@ def _execute_permanent(sw, entry, operator_id, operator_name):
     # 1) 原条目旧数据快照 → version(action='swap')
     remark = (f'调课#{sw.id}：{sw.reason or "无原因"}'
               f'（{WEEKDAY_NAMES.get(entry.weekday, "")}第{entry.period_number}节 → '
-              f'{WEEKDAY_NAMES.get(sw.new_weekday, "")}第{sw.new_period}节）')[:200]
+              f'{WEEKDAY_NAMES.get(target_weekday, "")}第{target_period}节）')[:200]
     db.session.add(ScheduleVersion(
         term_schedule_id=sw.term_schedule_id, entry_id=entry.id, action='swap',
         snapshot_json=_snapshot_str(entry), operator_id=operator_id,
@@ -670,8 +882,8 @@ def _execute_permanent(sw, entry, operator_id, operator_name):
     # 3) 新建 swap 条目
     new_entry = ScheduleEntry(
         term_schedule_id=entry.term_schedule_id, grade=entry.grade,
-        class_name=entry.class_name, weekday=sw.new_weekday,
-        period_number=sw.new_period, week_range=entry.week_range,
+        class_name=entry.class_name, weekday=target_weekday,
+        period_number=target_period, week_range=entry.week_range,
         subject=entry.subject, teacher_uid=entry.teacher_uid,
         teacher_name=entry.teacher_name, room=(sw.new_room or entry.room),
         entry_type='swap', original_entry_id=entry.id,
@@ -775,18 +987,30 @@ def cancel_swap(swap_id, applicant_uid):
 # ══════════════════════════════════════════════════════════════════════
 
 def get_temp_swaps_by_date(schedule_id, target_date):
-    """某天已执行的临时调课列表（含原/目标条目 dict），供课表视图叠加显示。"""
+    """某天已执行的临时调课列表（含原/目标条目 dict），供课表视图叠加显示。
+
+    两类都算"这天要处理的调课"：
+    - swap_date == 这天：调过来的课（target_entry 在这天生效）；
+    - source_date == 这天：调走的课（原课这天不上，target 在另一天）——跨天调课时
+      原课在该日应显示为"无课"，因此只回 original_entry、不回 target_entry。
+    """
     swaps = ScheduleSwap.query.filter(
         ScheduleSwap.term_schedule_id == schedule_id,
-        ScheduleSwap.swap_date == target_date,
         ScheduleSwap.is_permanent.is_(False),
         ScheduleSwap.status == 'executed',
+        db.or_(ScheduleSwap.swap_date == target_date,
+               ScheduleSwap.source_date == target_date),
     ).all()
     result = []
+    # 2026-10-10 N+1 优化：当天全部原/目标条目一次 in_ 取回，替代循环内逐条 get
+    entry_map = _build_entry_map(
+        [i for sw in swaps for i in (sw.original_entry_id, sw.target_entry_id)])
     for sw in swaps:
         d = sw.to_dict()
-        orig = db.session.get(ScheduleEntry, sw.original_entry_id) if sw.original_entry_id else None
-        tgt = db.session.get(ScheduleEntry, sw.target_entry_id) if sw.target_entry_id else None
+        is_source_day = (sw.source_date == target_date and sw.swap_date != target_date)
+        orig = entry_map.get(sw.original_entry_id) if sw.original_entry_id else None
+        tgt = None if is_source_day else (
+            entry_map.get(sw.target_entry_id) if sw.target_entry_id else None)
         d['original_entry'] = orig.to_dict() if orig else None
         d['target_entry'] = tgt.to_dict() if tgt else None
         result.append(d)
@@ -821,10 +1045,12 @@ def resolve_effective_entry(schedule_id, grade, class_name, weekday, period_numb
     ).all()
 
     # 1) 临时调入本时段？
+    # 2026-10-10 N+1 优化：当天临时调课的目标条目一次 in_ 取回，替代循环内逐条 get
+    tgt_map = _build_entry_map([sw.target_entry_id for sw in temp_swaps])
     for sw in temp_swaps:
         if not sw.target_entry_id:
             continue
-        te = db.session.get(ScheduleEntry, sw.target_entry_id)
+        te = tgt_map.get(sw.target_entry_id)
         if (te and not te.is_deleted and te.grade == grade
                 and te.class_name == class_name and te.weekday == weekday
                 and te.period_number == period_number):
@@ -846,7 +1072,8 @@ def _temp_target_ids(schedule_id):
     return _temp_target_ids_common(schedule_id)
 
 
-def build_live_schedule(schedule_id, target_date, period_number, grade_filter=None):
+def build_live_schedule(schedule_id, target_date, period_number, grade_filter=None,
+                        allowed_classes=None):
     """构建某天某节次全校（或指定年级）实时课表，按年级分区。
 
     返回 {grade: [ {class_name, grade, subject, teacher_name, room,
@@ -854,15 +1081,30 @@ def build_live_schedule(schedule_id, target_date, period_number, grade_filter=No
     叠加当天临时调课：调入标记 is_temp_swap=True，被调走的常规课显示为无课。
     """
     weekday = target_date.isoweekday()
+    if grade_filter is None:
+        grade_filters = None
+    elif isinstance(grade_filter, str):
+        grade_filters = {grade_filter} if grade_filter else set()
+    else:
+        grade_filters = {grade for grade in grade_filter if grade}
+
+    def class_visible(grade, class_name):
+        if allowed_classes is None:
+            return True
+        classes = allowed_classes.get(grade, set())
+        return classes is None or (class_name or '') in classes
+
     # 全部班级（未删除条目派生）
     cq = ScheduleEntry.query.filter(
         ScheduleEntry.term_schedule_id == schedule_id,
         ScheduleEntry.is_deleted.is_(False),
     )
-    if grade_filter:
-        cq = cq.filter(ScheduleEntry.grade == grade_filter)
+    if grade_filters is not None:
+        cq = cq.filter(ScheduleEntry.grade.in_(grade_filters))
     classes = (cq.with_entities(ScheduleEntry.grade, ScheduleEntry.class_name)
                .distinct().order_by(ScheduleEntry.grade, ScheduleEntry.class_name).all())
+    classes = [(grade, class_name) for grade, class_name in classes
+               if class_visible(grade, class_name)]
 
     # 本时段常规条目（排除临时调课目标条目）
     temp_ids = _temp_target_ids(schedule_id)
@@ -872,10 +1114,12 @@ def build_live_schedule(schedule_id, target_date, period_number, grade_filter=No
         ScheduleEntry.period_number == period_number,
         ScheduleEntry.is_deleted.is_(False),
     )
-    if grade_filter:
-        bq = bq.filter(ScheduleEntry.grade == grade_filter)
+    if grade_filters is not None:
+        bq = bq.filter(ScheduleEntry.grade.in_(grade_filters))
     base_map = {}
     for e in bq.all():
+        if not class_visible(e.grade, e.class_name):
+            continue
         if e.id not in temp_ids:
             base_map[(e.grade, e.class_name)] = e
 
@@ -884,12 +1128,13 @@ def build_live_schedule(schedule_id, target_date, period_number, grade_filter=No
     moved_away, temp_in = set(), {}
     for ts in temp_swaps:
         oe = ts.get('original_entry')
-        if oe:
+        if oe and class_visible(oe.get('grade'), oe.get('class_name')):
             moved_away.add(oe['id'])
         te = ts.get('target_entry')
         if te and te['weekday'] == weekday and te['period_number'] == period_number:
-            if not grade_filter or te['grade'] == grade_filter:
-                temp_in[(te['grade'], te['class_name'])] = te
+            if grade_filters is None or te['grade'] in grade_filters:
+                if class_visible(te.get('grade'), te.get('class_name')):
+                    temp_in[(te['grade'], te['class_name'])] = te
 
     data = {}
     for grade, class_name in classes:
@@ -932,11 +1177,13 @@ def current_period_number(periods, now=None):
 # 统计
 # ══════════════════════════════════════════════════════════════════════
 
-def get_swap_stats(schedule_id=None, days=30):
+def get_swap_stats(schedule_id=None, days=30, applicant_uid=None):
     """调课统计：状态计数 / 类型分布 / 学科 Top / 近 N 天趋势（可 JSON 序列化）。"""
     base = ScheduleSwap.query
     if schedule_id:
         base = base.filter(ScheduleSwap.term_schedule_id == schedule_id)
+    if applicant_uid:
+        base = base.filter(ScheduleSwap.applicant_uid == applicant_uid)
 
     status_counts = {'pending': 0, 'approved': 0, 'rejected': 0, 'executed': 0}
     for st, cnt in (base.with_entities(ScheduleSwap.status, func.count(ScheduleSwap.id))
@@ -955,6 +1202,8 @@ def get_swap_stats(schedule_id=None, days=30):
               .join(ScheduleEntry, ScheduleSwap.original_entry_id == ScheduleEntry.id))
     if schedule_id:
         subj_q = subj_q.filter(ScheduleSwap.term_schedule_id == schedule_id)
+    if applicant_uid:
+        subj_q = subj_q.filter(ScheduleSwap.applicant_uid == applicant_uid)
     subj_rows = (subj_q.group_by(ScheduleEntry.subject)
                  .order_by(func.count(ScheduleSwap.id).desc()).limit(10).all())
     subject_dist = [{'name': (s or '未知'), 'value': int(c)} for s, c in subj_rows]

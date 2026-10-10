@@ -570,10 +570,23 @@ def seed(commit: bool, classes_per_grade: int, seed_no: int):
         print(f'     备课组长 {leader_count} 条 · 查课 {insp_count} 条 · 业绩 {ach_count} 条')
 
         # ── 晚自习值班表（高中刚需：晚自习排值班教师，不排学科课）──
+        # 2026-10-10：系统不再提供自动排班，演示数据改为按"每天一节、轮流值"手工登记
         try:
             from app.modules.academic.services import night_duty_service as nd_svc
-            ok_n, msg_n = nd_svc.auto_assign(ts.id, max_per_week=2, operator=None)
-            print(f'     晚自习值班 {"：" + msg_n if ok_n else "未生成（" + msg_n + "）"}')
+            nd_periods = nd_svc.evening_period_numbers(ts.id)
+            nd_pool = nd_svc.teacher_pool()
+            nd_grades = nd_svc.grades_of(ts.id)
+            if nd_periods and nd_pool and nd_grades:
+                n = 0
+                for gi, g in enumerate(nd_grades):
+                    for wd in nd_svc.WEEKDAYS:
+                        t = nd_pool[(gi * 5 + wd) % len(nd_pool)]
+                        ok_d, _msg = nd_svc.set_duty(ts.id, g, wd, nd_periods[0],
+                                                     t['uid'], t['name'], operator=None)
+                        n += 1 if ok_d else 0
+                print(f'     晚自习值班 {n} 个班次（手工登记）')
+            else:
+                print('     晚自习值班 未生成（缺晚自习节次/教师/课表）')
         except Exception as exc:  # noqa: BLE001  值班生成失败不影响课表
             print(f'     [WARN] 晚自习值班未生成：{exc}')
         return 0
