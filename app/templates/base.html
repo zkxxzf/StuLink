@@ -168,9 +168,9 @@
                 <i class="bi bi-house"></i>宿舍管理
             </a>
             {% elif request.blueprint == 'grades' %}
-            <a class="nav-link" href="{{ url_for('grades.index') }}">
-                <i class="bi bi-house"></i>成绩管理
-            </a>
+            {# v1.19.0：成绩模块落地页＝「历次考试」列表，不再单列「成绩管理」入口。
+               原入口 url_for('grades.index') 指向的是 /grades/analysis（分析页）而非考试列表，
+               且与下方同名小节标题重复；入口统一由下方「历次考试」承担。 #}
             {% elif request.blueprint == 'points' %}
             <a class="nav-link" href="{{ url_for('points.index') }}">
                 <i class="bi bi-house"></i>德育管理
@@ -351,8 +351,8 @@
                 {% endif %}
             </div>
             {% else %}
-            {# ---------- 全局态：精简菜单 ---------- #}
-            <div class="nav-section">成绩管理</div>
+            {# ---------- 全局态：精简菜单 ----------
+               不再重复「成绩管理」小节标题（与模块入口同名），首项「历次考试」即模块入口 #}
             <a class="nav-link {% if request.endpoint in ('grades.exams_list','grades.exam_new') %}active{% endif %}"
                href="{{ url_for('grades.exams_list') }}">
                 <i class="bi bi-journals"></i>历次考试
