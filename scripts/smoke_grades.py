@@ -384,7 +384,12 @@ with app.test_client() as c:
     check('导出年级分析 Excel', r.status_code == 200 and r.data[:2] == b'PK')
 
     # ---- 页面可访问 ----
-    for url in ('/grades/', '/grades/exams', f'/grades/exams/{eid}',
+    # 2026-10-10 合并 master（v1.19.0）：/grades/ 落地页改为「历次考试列表」，
+    # 原成绩分析页迁走、旧链接保留为重定向 —— 断言随之更新。
+    r = c.get('/grades/')
+    check('页面 /grades/（重定向到考试列表）', r.status_code in (301, 302),
+          str(r.status_code))
+    for url in ('/grades/exams', f'/grades/exams/{eid}',
                 f'/grades/exams/{eid}/import', f'/grades/exams/{eid}/bands',
                 '/grades/teachers', '/grades/teachers/import'):
         r = c.get(url)
