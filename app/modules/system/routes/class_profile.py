@@ -11,12 +11,12 @@ from app.utils.helpers import (get_dict_values, get_graduated_grades,
 bp = Blueprint('class_profile', __name__, url_prefix='/class-profile')
 
 
-# v1.18.8.0 方向与选科组合的对应关系（物理→物XX，历史→史XX），供校验复用
+# v1.18.9.0 方向与选科组合的对应关系（物理→物XX，历史→史XX），供校验复用
 DIR_TO_SUBJECT_DIR = {'物理': 'physics', '历史': 'history'}
 
 
 def check_direction_subjects(direction, subjects):
-    """校验「选科方向」与「选科组合」是否匹配（v1.18.8.0）
+    """校验「选科方向」与「选科组合」是否匹配（v1.18.9.0）
 
     规则（用户口径）：
       - 物理方向 → 只能选物理类组合（物XX）
@@ -89,7 +89,7 @@ def manage():
     class_type_options = get_dict_values('class_type')
     direction_options = get_dict_values('subject_direction')
     subject_options = get_dict_values('subject')
-    # v1.18.8.0：管理员不是教师，不进入教师候选下拉
+    # v1.18.9.0：管理员不是教师，不进入教师候选下拉
     teacher_options = User.query.filter(
         User.role.in_(['homeroom_teacher', 'grade_leader', 'teacher',
                        'dorm_manager', 'school_viewer', 'staff']),
@@ -179,7 +179,7 @@ def batch_save():
         # 过滤无效值
         new_subjects = [s for s in new_subjects if s in valid_subjects]
 
-        # v1.18.8.0 方向与组合挂钩（服务端兑底，前端已置灰拦截）
+        # v1.18.9.0 方向与组合挂钩（服务端兑底，前端已置灰拦截）
         _bad = check_direction_subjects(subject_direction, new_subjects)
         if _bad:
             errors.append(f'{grade}{class_name}: ' + '；'.join(_bad))

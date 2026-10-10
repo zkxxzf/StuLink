@@ -1,4 +1,4 @@
-# StuLink v1.18.8.0 2026-10-09
+# StuLink v1.18.9.0 2026-10-09
 # 成绩管理：考试管理 + 成绩导入向导路由
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 import io
@@ -67,7 +67,7 @@ def exams_list():
                     .group_by(ExamScore.exam_id).all())
         for eid, cnt in rows_cnt:
             counts[eid] = cnt
-    # v1.18.8.0：孤儿考务批次兜底（exam_id 为空，或指向已删除的考试）
+    # v1.18.9.0：孤儿考务批次兜底（exam_id 为空，或指向已删除的考试）
     # 这类批次从考试列表无法进入，以前只能直连 /grades/affairs 才能看到，现在底部统一列出
     live_exam_ids = {e.id for e in Exam.query.with_entities(Exam.id).all()}
     orphan_affairs = []
@@ -241,7 +241,7 @@ def _exam_page_rows(exam_id, page, size):
             }
     for d in data.values():
         d['unselected'] = unselected_subjects(d.get('selection'), d.get('direction'))
-        # v1.18.8.0 只对“以前在学校、现在人不在学校”的学籍状态给提示（比对当前学生表）；
+        # v1.18.9.0 只对“以前在学校、现在人不在学校”的学籍状态给提示（比对当前学生表）；
         # 分配生/一批一志/一批二志/补录/借读/借读后学籍转入/复学/休学 等一律不显示
         d['status_badge'] = OFF_SCHOOL_BADGE.get((d.get('status') or '').strip(), '')
     # 严格按分页顺序（nos）输出，保证翻页稳定
@@ -253,7 +253,7 @@ def _exam_page_rows(exam_id, page, size):
 _SUBJ_SHORT = {'物理': '物', '化学': '化', '生物': '生',
                '政治': '政', '历史': '史', '地理': '地'}
 
-# v1.18.8.0 “人现在不在学校”的学籍状态 → 成绩单上的短标签
+# v1.18.9.0 “人现在不在学校”的学籍状态 → 成绩单上的短标签
 # 用户口径（2026-10-10 补充）：只展示“已转走 / 离校 / 休学”这类现在人不在校的情况，
 # 其他学籍状态（分配生/一批志愿/补录/借读/复学等）不提示。
 # 注意：本场考试参考名单必须完整保留（考试是自包含独立数据包），
@@ -490,7 +490,7 @@ def exam_delete(exam_id):
     n_scores = ExamScore.query.filter_by(exam_id=exam_id).delete()
     n_bands = ExamBand.query.filter_by(exam_id=exam_id).delete()
     n_ai = AiReport.query.filter_by(exam_id=exam_id).delete()
-    # v1.18.8.0：级联删除本考试的考务批次（含其考场与名单），避免产生孤儿批次
+    # v1.18.9.0：级联删除本考试的考务批次（含其考场与名单），避免产生孤儿批次
     # 旧逻辑只删考试，导致 affair 的 exam_id 指向已删考试，从考试列表无法再进入
     from app.modules.grades.routes.exam_affairs import delete_affair_cascade
     from app.models.grades import ExamAffair
@@ -623,7 +623,7 @@ def exam_import_confirm(exam_id):
         summary = store_service.apply_import(exam, parsed, mode=mode,
                                              remove_missing=remove_missing)
         ranking.recalc_exam(exam_id)
-        # v1.18.8.0 任课快照：把本次导入时的任课安排定格到本场考试（教师维度分析读它，
+        # v1.18.9.0 任课快照：把本次导入时的任课安排定格到本场考试（教师维度分析读它，
         # 以后教师调整/重新分班都不会把历史成绩归到新教师名下）
         from app.modules.grades.services import teacher_snapshot_service as tss
         n_tch = tss.snapshot_exam(exam, source='import')
