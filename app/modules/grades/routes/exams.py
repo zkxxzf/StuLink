@@ -84,7 +84,28 @@ def exams_list():
     return render_template('grades/exam_list.html', exams=exams, counts=counts,
                            grade=grade, grade_options=_grade_options(),
                            orphan_affairs=orphan_affairs,
+                           steps_map=_list_steps_map(exams),
                            status_label=EXAM_STATUS_LABEL)
+
+
+def _list_steps_map(exams):
+    """v1.19.0 列表页四步进度（建考试 / 考务 / 导入 / 划线）
+
+    批量两条聚合查询算出，避免逐行 N+1；口径与考试详情页 _four_step_status 一致。
+    返回 {exam_id: (s1, s2, s3, s4)}（s1 恒为 True）
+    """
+    ids = [e.id for e in exams]
+    affair_ids, band_ids = set(), set()
+    if ids:
+        try:
+            affair_ids = {r[0] for r in db.session.query(ExamAffair.exam_id)
+                          .filter(ExamAffair.exam_id.in_(ids)).distinct().all()}
+            band_ids = {r[0] for r in db.session.query(ExamBand.exam_id)
+                        .filter(ExamBand.exam_id.in_(ids)).distinct().all()}
+        except Exception:                  # 进度只是展示信息，失败不影响列表
+            affair_ids, band_ids = set(), set()
+    return {e.id: (True, e.id in affair_ids, e.status == 'imported',
+                   e.id in band_ids) for e in exams}
 
 
 def _exam_form_ctx(**kw):

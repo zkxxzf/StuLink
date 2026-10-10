@@ -19,7 +19,10 @@ from app.utils.cache import cache
 @login_required
 @perm_required('grades.view')
 def index():
-    return render_template('grades/index.html')
+    # v1.19.0 考试上下文：?exam=<id> 让本页进入“考试态”（侧栏切换到本场流程，并默认选中该场）
+    raw = (request.args.get('exam') or '').strip()
+    initial_exam_id = int(raw) if raw.isdigit() else None
+    return render_template('grades/index.html', initial_exam_id=initial_exam_id)
 
 
 @bp.route('/history')
