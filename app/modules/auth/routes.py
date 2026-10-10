@@ -199,15 +199,46 @@ def my_settings():
     # 供应商清单（含自定义 OpenAI 兼容）：前端下拉用，避免在模板里再维护一份
     from app.modules.grades.services import ai_providers as _ap
     providers = [dict(key=k, **v) for k, v in _ap.PROVIDERS.items()]
+    # v1.19.0 管理员可见：AI 出站域名白名单（自定义 OpenAI 兼容地址需先批准）
+    from app.utils import url_guard as _ug
+    is_admin = (current_user.role == 'admin')
     return render_template(
         'auth/my_settings.html',
         modules=_my_permission_rows(),
         pg=pg,
         providers=providers,
         default_provider=_ap.DEFAULT_PROVIDER,
+        approved_hosts=_ug.list_approved_hosts() if is_admin else [],
+        builtin_hosts=_ug.builtin_hosts() if is_admin else [],
+        whitelist_file=_ug.APPROVED_FILE if is_admin else '',
         scope_label=SCOPE_LABELS.get(scope, scope),
-        is_admin=(current_user.role == 'admin'),
+        is_admin=is_admin,
     )
+
+
+@bp.route('/my/ai/whitelist', methods=['POST'])
+@login_required
+def my_ai_whitelist():
+    """AI 出站域名白名单（仅管理员）：批准/撤销自定义 OpenAI 兼容地址
+
+    背景：自定义 base_url 会带着用户的 Key 出站，为防 SSRF/内网探测必须有白名单。
+    本接口让管理员在页面上直接批准，写入 data/ai_approved_base_urls.txt（不重启即生效）。
+    """
+    if current_user.role != 'admin':
+        return jsonify(success=False, message='仅管理员可管理出站域名白名单')
+    data = request.get_json(silent=True) or {}
+    action = (data.get('action') or 'add').strip()
+    host = (data.get('host') or '').strip()
+    from app.utils import url_guard
+    if action == 'remove':
+        ok, msg = url_guard.remove_approved_host(host)
+    else:
+        ok, msg = url_guard.add_approved_host(host)
+    if ok:
+        log_operation(current_user, '配置', 'AI出站白名单', 0,
+                      '%s %s' % (action, host), module='grades')
+    return jsonify(success=ok, message=msg,
+                   hosts=url_guard.list_approved_hosts())
 
 
 @bp.route('/my/ai/test', methods=['POST'])

@@ -76,6 +76,68 @@ def host_approved(host):
     return host in _builtin_hosts() or host in _explicitly_approved_hosts()
 
 
+def _norm_host(value):
+    """把用户输入的“地址/域名”统一成 host"""
+    v = (value or '').strip()
+    if not v:
+        return ''
+    host = urlparse(v if '//' in v else 'https://' + v).hostname or ''
+    return host.lower()
+
+
+def list_approved_hosts():
+    """管理员显式审批的域名清单（不含内置服务商），供设置页展示"""
+    return sorted(_explicitly_approved_hosts())
+
+
+def builtin_hosts():
+    """内置服务商域名（只读展示用）"""
+    return sorted(_builtin_hosts())
+
+
+def add_approved_host(value):
+    """管理员审批一个域名（写入 data/ai_approved_base_urls.txt，幂等）
+
+    返回 (ok, message)。校验规则与出站守卫一致：必须是合法主机名。
+    """
+    host = _norm_host(value)
+    if not host or '.' not in host or len(host) > 200:
+        return False, '域名格式不正确（示例：api.openai.com 或 https://api.moonshot.cn/v1）'
+    if host in _builtin_hosts():
+        return True, '%s 属内置服务商，本来就允许出站' % host
+    if host in _explicitly_approved_hosts():
+        return True, '%s 已在白名单中' % host
+    try:
+        os.makedirs(os.path.dirname(APPROVED_FILE), exist_ok=True)
+        with open(APPROVED_FILE, 'a', encoding='utf-8') as f:
+            f.write(host + '\n')
+    except OSError as e:
+        return False, '写入白名单文件失败：%s' % e
+    _log.info('AI 出站域名已审批 host=%s', host)
+    return True, '已批准 %s，可直接使用该地址' % host
+
+
+def remove_approved_host(value):
+    """撤销审批（从文件中移除该行）"""
+    host = _norm_host(value)
+    if not host:
+        return False, '域名格式不正确'
+    if not os.path.isfile(APPROVED_FILE):
+        return False, '白名单文件不存在'
+    try:
+        with open(APPROVED_FILE, 'r', encoding='utf-8') as f:
+            lines = f.readlines()
+        kept = [ln for ln in lines if _norm_host(ln) != host]
+        if len(kept) == len(lines):
+            return False, '%s 不在白名单中' % host
+        with open(APPROVED_FILE, 'w', encoding='utf-8') as f:
+            f.writelines(kept)
+    except OSError as e:
+        return False, '更新白名单文件失败：%s' % e
+    _log.info('AI 出站域名已撤销 host=%s', host)
+    return True, '已移除 %s' % host
+
+
 def _is_blocked_ip(ip_str):
     try:
         ip = ipaddress.ip_address(ip_str)
@@ -103,8 +165,10 @@ def assert_outbound_url_allowed(url):
     explicit = host.lower() in _explicitly_approved_hosts()
     if not (host_approved(host)):
         raise ValueError(
-            '接口地址域名未获批准：自定义（OpenAI 兼容）地址需由管理员审批后写入 '
-            'data/ai_approved_base_urls.txt 或环境变量 AI_ALLOWED_BASE_URLS')
+            '接口地址域名未获批准：%s\n'
+            '自定义（OpenAI 兼容）地址需管理员审批。管理员可在「用户设置 → AI 出站域名白名单」'
+            '一键批准，或写入 data/ai_approved_base_urls.txt / 环境变量 AI_ALLOWED_BASE_URLS。'
+            % host)
     if parsed.scheme != 'https' and not explicit:
         raise ValueError('接口地址需使用 https（明文 http 只能用于管理员显式审批的地址）')
 

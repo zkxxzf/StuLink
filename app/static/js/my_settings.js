@@ -142,6 +142,38 @@
             location.reload();
         });
 
+        // v1.19.0 管理员：AI 出站域名白名单（自定义 OpenAI 兼容地址需先批准）
+        function wlMsg(ok, text) {
+            $('#wlMsg').html($('<span>').addClass('text-' + (ok ? 'success' : 'danger')).text(text || ''));
+        }
+        function wlPost(action, host) {
+            $.ajax({url: '/my/ai/whitelist', type: 'POST',
+                    contentType: 'application/json',
+                    headers: {'X-CSRFToken': window.csrfToken || ''},
+                    data: JSON.stringify({action: action, host: host})
+            }).done(function (res) {
+                if (!res.success) { wlMsg(false, res.message || '操作失败'); return; }
+                wlMsg(true, res.message + '（正在刷新…）');
+                setTimeout(function () { location.reload(); }, 600);
+            }).fail(function (x) {
+                wlMsg(false, (x.responseJSON && x.responseJSON.message) || '请求失败');
+            });
+        }
+        $('#wlAdd').on('click', function () {
+            var h = $.trim($('#wlHost').val() || '');
+            if (!h) { wlMsg(false, '请填写要批准的域名'); return; }
+            wlPost('add', h);
+        });
+        $('#wlHost').on('keydown', function (e) {
+            if (e.key === 'Enter') { e.preventDefault(); $('#wlAdd').click(); }
+        });
+        $(document).on('click', '.wl-del', function (e) {
+            e.preventDefault();
+            var h = $(this).data('host');
+            if (!confirm('移除白名单域名 ' + h + ' ？移除后该地址将被拦截。')) return;
+            wlPost('remove', h);
+        });
+
         if (location.hash === '#ai') { $('#aiProvider').focus(); }
     });
 })();
