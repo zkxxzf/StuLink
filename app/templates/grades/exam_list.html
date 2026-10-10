@@ -1,23 +1,47 @@
 {% extends "base.html" %}
 {% block title %}考试管理 - 成绩管理{% endblock %}
 {% block content %}
-<div class="d-flex justify-content-between align-items-center mb-3">
-    <h5 class="mb-0"><i class="bi bi-journal-text"></i> 考试管理</h5>
-    <a href="{{ url_for('grades.exam_new') }}" class="btn btn-primary btn-sm">
+{# v1.19.0 成绩模块落地页（第一屏）：历次考试看板 #}
+<div class="d-flex justify-content-between align-items-start mb-3 flex-wrap gap-2">
+    <div>
+        <h4 class="mb-0"><i class="bi bi-journals"></i> 历次考试</h4>
+        <div class="text-muted small mt-1">
+            点任意一场考试进入它的工作台：<b>考务安排 → 成绩导入 → 成绩分析</b>
+        </div>
+    </div>
+    <a href="{{ url_for('grades.exam_new') }}" class="btn btn-primary">
         <i class="bi bi-plus-lg"></i> 新建考试
     </a>
 </div>
 
-<form class="row g-2 mb-3" method="get">
-    <div class="col-auto">
-        <select name="grade" class="form-select form-select-sm" onchange="this.form.submit()">
-            <option value="">全部年级</option>
-            {% for g in grade_options %}
-            <option value="{{ g }}" {% if g == grade %}selected{% endif %}>{{ g }}</option>
-            {% endfor %}
-        </select>
+{# 概览卡片（当前筛选范围内） #}
+<div class="row g-2 mb-3">
+    {% for k, lbl, cls in [('total', '考试场次', 'primary'),
+                           ('imported', '已导入成绩', 'success'),
+                           ('pending', '待导入', 'warning'),
+                           ('affair', '已有考务', 'info'),
+                           ('banded', '已划线', 'secondary')] %}
+    <div class="col-6 col-md">
+        <div class="card h-100 border-0 shadow-sm">
+            <div class="card-body py-2 px-3">
+                <div class="text-muted small">{{ lbl }}</div>
+                <div class="fs-4 fw-semibold text-{{ cls }}">{{ stats[k] }}</div>
+            </div>
+        </div>
     </div>
-</form>
+    {% endfor %}
+</div>
+
+{# 年级筛选（胶囊） #}
+<div class="d-flex flex-wrap gap-1 mb-3 align-items-center">
+    <span class="text-muted small me-1"><i class="bi bi-funnel"></i> 年级</span>
+    <a class="btn btn-sm {{ 'btn-primary' if not grade else 'btn-outline-secondary' }}"
+       href="{{ url_for('grades.exams_list') }}">全部</a>
+    {% for g in grade_options %}
+    <a class="btn btn-sm {{ 'btn-primary' if g == grade else 'btn-outline-secondary' }}"
+       href="{{ url_for('grades.exams_list') }}?grade={{ g }}">{{ g }}</a>
+    {% endfor %}
+</div>
 
 <div class="card">
     <div class="table-responsive">
@@ -37,7 +61,9 @@
             </thead>
             <tbody>
             {% for e in exams %}
-            <tr>
+            {# v1.19.0 整行可点：直接进本场考试工作台（不再需要“详情”按钮） #}
+            <tr class="exam-row" data-href="{{ url_for('grades.exam_detail', exam_id=e.id) }}"
+                style="cursor:pointer" title="点击进入本场考试工作台">
                 <td>{{ e.name }}</td>
                 <td>{{ e.exam_type or '—' }}</td>
                 <td>{{ e.grade }}</td>
@@ -61,12 +87,9 @@
                     {% else %}<span class="text-muted small">—</span>{% endif %}
                 </td>
                 <td class="text-end">{{ counts.get(e.id, 0) }}</td>
-                <td class="text-end">
+                <td class="text-end" onclick="event.stopPropagation()">
                     <a href="{{ url_for('grades.exam_affair_go', exam_id=e.id) }}" class="btn btn-sm btn-outline-success">考务安排</a>
                     <a href="{{ url_for('grades.exam_import', exam_id=e.id) }}" class="btn btn-sm btn-outline-warning">成绩导入</a>
-                    <a href="{{ url_for('grades.exam_ai_import', exam_id=e.id) }}" class="btn btn-sm btn-outline-dark"
-                       title="AI 智能导入（任意格式表，需本机配置 AI Key）"><i class="bi bi-stars"></i></a>
-                    <a href="{{ url_for('grades.exam_detail', exam_id=e.id) }}" class="btn btn-sm btn-outline-primary">详情</a>
                     <a href="{{ url_for('grades.bands_page', exam_id=e.id) }}" class="btn btn-sm btn-outline-info">划线分层</a>
                     <button type="button" class="btn btn-sm btn-outline-danger btn-del-exam"
                             data-id="{{ e.id }}" data-name="{{ e.grade }} {{ e.name }}"
@@ -202,5 +225,14 @@ function doDelExam(){
         }
     });
 }
+
+// v1.19.0 整行可点：直接进本场考试工作台（按钮/链接/输入框不触发）
+$(function(){
+    $(document).on('click', 'tr.exam-row', function(ev){
+        if ($(ev.target).closest('a, button, input, select, label').length) return;
+        var href = $(this).data('href');
+        if (href) window.location.href = href;
+    });
+});
 </script>
 {% endblock %}
