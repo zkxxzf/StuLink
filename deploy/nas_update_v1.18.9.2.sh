@@ -121,6 +121,15 @@ print('  academic.db 已迁出表仍在?:', sorted(t for t in (ac or set()) if t
 
 echo "清理临时解包目录"
 rm -rf "$WORK"
+
+# 记录"已部署提交"，供 deploy/hot_update.ps1 增量更新时做差异基准：
+#   ssh NAS 'bash -s -- <commit>' < deploy/nas_update_v1.18.9.2.sh
+COMMIT="${1:-}"
+if [ -n "$COMMIT" ]; then
+    printf '%s\n' "$COMMIT" > "$DIR/.deployed_commit"
+    echo "已记录已部署提交：$COMMIT"
+fi
+
 echo "==================== 部署完成 v1.18.9.2 ===================="
 echo "回滚方式（如需）："
 echo "  代码：docker cp $DIR/code_backup_v11892_$TS/. $CT:/app/ && docker restart $CT"
