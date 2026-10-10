@@ -135,12 +135,15 @@ def swap_page():
     applicant_uid = None if is_reviewer else uid
     # 一级审批人（年级长）：看得到"轮到自己这一级"的待审 + 自己提交的，不是全校全部
     review_step = None if is_reviewer else _my_review_step()
+    # 数据范围：一级审批人再按本年级收敛（管理员 / 课表终审为全校口径）
+    visible_grades = (None if is_reviewer
+                      else swap_service.review_visible_grades(current_user))
 
     items, pagination = swap_service.get_swap_list(
         status=status or None, swap_type=swap_type or None,
         schedule_id=schedule_id, applicant_uid=applicant_uid,
         page=page, per_page=20, is_reviewer=is_reviewer,
-        review_step=review_step)
+        review_step=review_step, visible_grades=visible_grades)
     _decorate_review(items)
     pending = swap_service.count_pending(schedule_id, applicant_uid)
 
@@ -315,6 +318,13 @@ def swap_detail(swap_id):
     # 一级审批人（年级长）也要能打开详情，否则点不进去审批
     if not (is_reviewer or _can_approve()) and d.get('applicant_uid') != uid:
         abort(403)
+    # 数据范围：非全校口径的审批人（如年级长）不得打开外年级的调课详情
+    if not is_reviewer and d.get('applicant_uid') != uid:
+        grades = swap_service.review_visible_grades(current_user)
+        if grades is not None:
+            sw = db.session.get(ScheduleSwap, swap_id)
+            if swap_service.swap_grade(sw) not in grades:
+                abort(403)
     # 审核人姓名（跨库解析，放在路由层避免服务层依赖 User）
     d['reviewer_name'] = None
     if d.get('reviewed_by'):

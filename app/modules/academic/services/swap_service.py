@@ -7,7 +7,7 @@
 import json
 from datetime import datetime, date, timedelta
 
-from sqlalchemy import func
+from sqlalchemy import func, select
 
 from app.extensions import db
 from app.models.timetable import (
@@ -531,11 +531,14 @@ def _decorate_swap(sw, entry_map=None, period_maps=None):
 
 def get_swap_list(status=None, applicant_uid=None, schedule_id=None, page=1,
                   per_page=20, is_reviewer=False, swap_type=None,
-                  review_step=None):
+                  review_step=None, visible_grades=None):
     """分页调课列表。普通教师只看自己的，审核者可看全部。
 
     review_step（分级审批）：一级审批人（如年级长）看不到全校全部，只看到
     "轮到自己这一级"的待审 + 自己提交的记录。
+    visible_grades（数据范围）：一级审批人的可见年级集合，None 表示不限
+    （管理员 / 课表终审）。非 None 时，待审队列只保留本年级的调课，
+    避免年级长看到外年级申请。
     返回 (items: list[dict], pagination)。
     """
     q = ScheduleSwap.query
@@ -547,10 +550,17 @@ def get_swap_list(status=None, applicant_uid=None, schedule_id=None, page=1,
         q = q.filter(ScheduleSwap.swap_type == swap_type)
     if not is_reviewer and applicant_uid:
         if review_step is not None:
-            q = q.filter(db.or_(
-                ScheduleSwap.applicant_uid == applicant_uid,
-                db.and_(ScheduleSwap.status == 'pending',
-                        ScheduleSwap.approval_step == review_step)))
+            my_step = db.and_(ScheduleSwap.status == 'pending',
+                              ScheduleSwap.approval_step == review_step)
+            if visible_grades is not None:
+                # 一级审批人只看本年级：按原课表条目的年级收敛（同库子查询）
+                my_step = db.and_(
+                    my_step,
+                    ScheduleSwap.original_entry_id.in_(
+                        select(ScheduleEntry.id).where(
+                            ScheduleEntry.grade.in_(list(visible_grades)))))
+            q = q.filter(db.or_(ScheduleSwap.applicant_uid == applicant_uid,
+                                my_step))
         else:
             q = q.filter(ScheduleSwap.applicant_uid == applicant_uid)
     q = q.order_by(ScheduleSwap.created_at.desc(), ScheduleSwap.id.desc())
@@ -676,6 +686,28 @@ def review_step_of(sw):
     return steps[cur] if cur < len(steps) else None
 
 
+def swap_grade(sw):
+    """调课记录对应课表条目的年级（数据范围判定用；取不到返回 None）。"""
+    if not sw or not sw.original_entry_id:
+        return None
+    entry = db.session.get(ScheduleEntry, sw.original_entry_id)
+    return entry.grade if entry else None
+
+
+def review_visible_grades(user):
+    """审批人可见的年级集合；None 表示不限（管理员 / 课表终审为全校口径）。
+
+    分级审批下，持「调课审批」的年级长只应审**本年级**（与 permission_map 的
+    说明一致），不能跨年级查看/审批；管理员与课表终审仍为全校范围。
+    """
+    if not user or getattr(user, 'role', None) == 'admin':
+        return None
+    if user.has_perm('academic.timetable'):
+        return None
+    from app.modules.academic.services.access_scope import visible_academic_grades
+    return visible_academic_grades(user)
+
+
 def can_review(sw, user):
     """当前用户能否审批这条申请的"当前这一级"（管理员可审任何一级）。"""
     if not sw or sw.status != 'pending':
@@ -683,7 +715,14 @@ def can_review(sw, user):
     step = review_step_of(sw)
     if not step:
         return False
-    return bool(getattr(user, 'role', None) == 'admin' or user.has_perm(step['perm']))
+    if not (getattr(user, 'role', None) == 'admin' or user.has_perm(step['perm'])):
+        return False
+    # 数据范围：非全校口径的审批人（如年级长）只能审本年级的调课
+    grades = review_visible_grades(user)
+    if grades is None:
+        return True
+    grade = swap_grade(sw)
+    return bool(grade) and grade in grades
 
 
 def review_swap(swap_id, reviewer_id, reviewer_name, action, review_note='',

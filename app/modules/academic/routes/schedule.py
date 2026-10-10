@@ -210,6 +210,11 @@ def schedule_master(sid):
     """大课表（全校总览）：年级标签 + AJAX 按需加载班级网格"""
     ts = _get_schedule_or_404(sid)
     grade_classes = svc.get_grade_class_list(sid)
+    # 数据范围：受限账号只看到本范围内的年级（管理员 / 全校口径不受限）
+    allowed_grades = visible_academic_grades(current_user)
+    if allowed_grades is not None:
+        grade_classes = {g: c for g, c in grade_classes.items()
+                         if g in allowed_grades}
     init_grade = (request.args.get('grade') or '').strip()
     if init_grade not in grade_classes:
         init_grade = next(iter(grade_classes), '')
@@ -229,6 +234,10 @@ def schedule_master(sid):
 def schedule_grade(sid, grade):
     """年级课表：年级内班级标签切换（?class= 指定班级）"""
     ts = _get_schedule_or_404(sid)
+    # 数据范围：受限账号不得查看本范围外年级的课表
+    allowed_grades = visible_academic_grades(current_user)
+    if allowed_grades is not None and grade not in allowed_grades:
+        abort(403)
     week = _week_param()
     data = svc.get_grade_view(sid, grade, week=week)
     classes = data['classes']
@@ -250,6 +259,9 @@ def schedule_grade(sid, grade):
 def schedule_class(sid, grade, class_name):
     """班级课表：13x7 网格 + 学科课时统计"""
     ts = _get_schedule_or_404(sid)
+    # 数据范围：受限账号不得查看本范围外班级的课表
+    if not academic_class_is_visible(current_user, grade, class_name):
+        abort(403)
     week = _week_param()
     view = svc.get_class_view(sid, grade, class_name, week=week)
     # 高中：班型 + 选科方向 + 选科组合（新高考 3+1+2），班级档案里有就显示
@@ -271,6 +283,14 @@ def schedule_class(sid, grade, class_name):
 def schedule_teacher(sid, uid):
     """教师个人课表：搜索选择 + 网格 + 课时统计"""
     ts = _get_schedule_or_404(sid)
+    # 数据范围：受限账号只能查看"在本范围内有课"的教师课表
+    allowed_grades = visible_academic_grades(current_user)
+    if allowed_grades is not None:
+        in_scope = ScheduleEntry.query.filter_by(
+            term_schedule_id=sid, teacher_uid=uid, is_deleted=False).filter(
+            ScheduleEntry.grade.in_(list(allowed_grades))).first()
+        if in_scope is None:
+            abort(403)
     view = svc.get_teacher_view(sid, uid, week=_week_param())
     teacher = None
     try:

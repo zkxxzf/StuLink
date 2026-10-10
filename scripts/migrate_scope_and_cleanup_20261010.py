@@ -9,8 +9,9 @@
 
 二、历史 / 批量导入的膨胀数据清理（**默认 dry-run，加 --apply 才真删**）
     - 未启用班级（class_profiles.is_active=0）
-    - 落在未启用班级里的学生（students）
     - 2099级 测试残留账号（users / 关联的 teachers）
+    - 落在未启用班级里的学生（students）：**只统计、不删除**（跨库无外键约束，
+      删学生属不可逆的数据破坏，见下方 ① 处说明）
     执行前会再次整目录备份。
 
 用法：
@@ -99,18 +100,13 @@ def cleanup_report(apply_now):
     if not apply_now:
         print('   → 确认无误后执行：python scripts/migrate_scope_and_cleanup_20261010.py --apply')
         return
-    # ① 学生：被考勤/成绩/宿舍/积分等业务表外键引用，**不删**（删了会毁业务数据）。
-    #    它们所在班级已"未启用"，下拉里不会出现，不影响使用。
-    try:
-        with sys_eng.begin() as c:
-            c.exec_driver_sql(
-                'DELETE FROM students WHERE rowid IN ('
-                'SELECT s.rowid FROM students s WHERE NOT EXISTS ('
-                'SELECT 1 FROM class_profiles p WHERE p.grade=s.grade '
-                'AND p.class_name=s.class_name AND COALESCE(p.is_active,1)=1))')
-    except Exception as e:  # noqa: BLE001
-        print('[WARN] 学生记录被业务表外键引用，已保留（此乃数据保护，非错误）：',
-              str(e)[:70])
+    # ① 学生：**一律保留，绝不删除**。
+    #    原实现直接 DELETE 未启用班级里的学生，并假设"会被业务表外键拦住从而保留"——
+    #    但本项目按设计文档 2.2「跨库快照关联、不建跨库外键」，students 属 system.db，
+    #    考勤/成绩/宿舍/积分分属各库，SQLite 跨库外键本就不生效，该假设不成立，
+    #    一旦 --apply 会真删学生并留下孤儿数据。删学生属不可逆的数据破坏，
+    #    此处只报告不删除；确需清理请先人工核对引用清单。
+    print('   [SKIP] 学生记录一律保留（跨库无外键约束，删除会毁业务数据）')
     # ② 班级关联里指向未启用班的，先清掉（避免外键挡住删班级）
     try:
         with sys_eng.begin() as c:
