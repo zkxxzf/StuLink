@@ -75,6 +75,31 @@
                 <button class="btn btn-outline-info btn-sm" id="aiTest"><i class="bi bi-plug"></i> 测试连接</button>
                 <button class="btn btn-outline-danger btn-sm" id="aiClear"><i class="bi bi-trash"></i> 清除</button>
             </div>
+
+            {# v1.19.0 可选高级参数：不填 = 完全不传，按服务商默认 #}
+            <div class="col-md-4">
+                <label class="form-label small mb-1">输入上限（tokens，选填）</label>
+                <input id="aiMaxIn" type="number" min="0" step="1000"
+                       class="form-control form-control-sm" placeholder="如 1000000（不填=服务商默认）">
+                <div class="form-text">超出时系统会成比例截断提示词并标注，不会直接报错。</div>
+            </div>
+            <div class="col-md-4">
+                <label class="form-label small mb-1">输出上限（tokens，选填）</label>
+                <input id="aiMaxOut" type="number" min="0" step="1000"
+                       class="form-control form-control-sm" placeholder="如 393216（不填=服务商默认）">
+                <div class="form-text">作为 <code>max_tokens</code> 发送，优先于系统默认值。</div>
+            </div>
+            <div class="col-md-4">
+                <label class="form-label small mb-1">思考强度（选填）</label>
+                <select id="aiEffort" class="form-select form-select-sm">
+                    <option value="">不设置（按服务商默认）</option>
+                    <option value="low">低（low）</option>
+                    <option value="medium">中（medium）</option>
+                    <option value="high">高（high）</option>
+                </select>
+                <div class="form-text">按 OpenAI 兼容的 <code>reasoning_effort</code> 发送；
+                    若服务商不支持会自动去掉该参数重试一次。</div>
+            </div>
         </div>
         <div id="aiMsg" class="small mt-2"></div>
         <div class="text-muted small mt-2">

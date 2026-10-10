@@ -56,7 +56,11 @@ def _ai_cfg_from_request():
         return None
     return {'api_key': key, 'base_url': (ai.get('base_url') or '').strip(),
             'model': (ai.get('model') or '').strip(),
-            'provider': (ai.get('provider') or '').strip()}
+            'provider': (ai.get('provider') or '').strip(),
+            # v1.19.0 可选：输出上限 / 输入上限 / 思考强度（本机设置，不落库）
+            'max_tokens': ai.get('max_tokens') or '',
+            'max_input': ai.get('max_input') or '',
+            'reasoning_effort': ai.get('reasoning_effort') or ''}
 
 
 @bp.route('/exams/<int:exam_id>/ai-import')
