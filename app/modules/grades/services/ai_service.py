@@ -211,10 +211,27 @@ def mask_key(enc):
     return plain[:3] + '****' + plain[-4:]
 
 
-def resolve_key(user):
-    """选择调用配置：个人 Key 优先，其次全局；返回 cfg dict 或 None
+def resolve_key(user, client_cfg=None):
+    """选择调用配置，优先级：**浏览器本地 Key** → 个人（服务器存量）→ 全局
+
     cfg: {'api_key','base_url','model','source','provider','provider_name'}
+
+    client_cfg：由前端从 **localStorage** 随请求带上，形如
+        {'api_key','base_url','model','provider'}
+    用户要求：**私人 Key 只存浏览器本地，服务器不留存** —— 这里仅作当次调用使用，
+    不写入数据库、不记日志（且支持任意标准 OpenAI 兼容地址：base_url + model 自定义）。
     """
+    cc = client_cfg or {}
+    ckey = (cc.get('api_key') or '').strip()
+    if ckey:
+        provider = (cc.get('provider') or 'custom').strip() or 'custom'
+        return {'api_key': ckey, 'provider': provider,
+                'provider_name': ai_providers.get_provider(provider)['name'],
+                'base_url': ai_providers.resolve_base_url(
+                    provider, (cc.get('base_url') or '').strip()),
+                'model': ai_providers.resolve_model(
+                    provider, (cc.get('model') or '').strip()),
+                'source': 'local'}      # 本地 Key：不落库
     k = AiKey.query.filter_by(user_id=user.id).first()
     if k and k.api_key_enc:
         provider = k.provider or ai_providers.DEFAULT_PROVIDER
