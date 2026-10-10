@@ -486,7 +486,15 @@ def save_assignments():
     # 保存新的分配数据（按房间聚合：同一房间多个班级自动组成合班名，不分主次）
     room_assign = {}
     for assign in assignments:
-        rid = assign.get('room_id')
+        raw_rid = assign.get('room_id')
+        # 2026-10-10：统一归一为 int。原实现直接用原始值当 dict key，并逐个
+        # Room.query.get(rid) —— JSON 里 1 与 '1' 会被当成两个不同房间，
+        # 明明是同一间却聚合不到一起。归一后既可批量查询，语义也更正确。
+        try:
+            rid = int(raw_rid)
+        except (TypeError, ValueError) as _e:
+            logger.debug('分配数据中的 room_id 非法(%r)，已跳过: %s', raw_rid, _e)
+            continue
         if not rid:
             continue
         cn = (assign.get('class_name') or '').strip()
@@ -501,9 +509,15 @@ def save_assignments():
             if part and part not in info['classes']:
                 info['classes'].append(part)
 
+    # 2026-10-10 架构审计修复：原实现在循环内逐个 Room.query.get(rid)（N+1），
+    # 保存整栋宿舍楼时是明显瓶颈。改为一次性批量取出，赋值逻辑与顺序完全不变。
     count = 0
+    room_map = {}
+    if room_assign:
+        room_map = {r.id: r for r in
+                    Room.query.filter(Room.id.in_(list(room_assign.keys()))).all()}
     for rid, info in room_assign.items():
-        room = Room.query.get(rid)
+        room = room_map.get(rid)
         if not room:
             continue
         # 合班名按班号升序，保证显示规范（不分主次）
@@ -579,11 +593,22 @@ def class_bed_requirement():
     assigned_female_rooms = 0
     assigned_female_beds = 0
     
+    # 2026-10-10 架构审计修复：原实现每个房间 count 一次床位（N+1）。
+    # 改为一次性 group_by 统计 —— 计数口径与分支逻辑完全不变。
+    occupancy_by_room = {}
+    _assigned_ids = [r.id for r in assigned_rooms]
+    if _assigned_ids:
+        occupancy_by_room = {
+            row[0]: row[1] for row in db.session.query(
+                BedAssignment.room_id, func.count(BedAssignment.id)
+            ).filter(
+                BedAssignment.room_id.in_(_assigned_ids),
+                BedAssignment.student_id.isnot(None),
+            ).group_by(BedAssignment.room_id).all()
+        }
+
     for room in assigned_rooms:
-        occupancy = BedAssignment.query.filter(
-            BedAssignment.room_id == room.id,
-            BedAssignment.student_id.isnot(None)
-        ).count()
+        occupancy = occupancy_by_room.get(room.id, 0)
         
         if room.gender == '男':
             assigned_male_rooms += 1
@@ -651,17 +676,36 @@ def batch_setting():
             flash('请至少选择一项要修改的内容（性别或床位数）', 'warning')
             return redirect(url_for('rooms.list_rooms'))
 
+        # 2026-10-10 架构审计修复：原实现在循环内逐个 Room.query.get + 每间房 count 一次
+        # 床位（双重 N+1）。批量改上百间宿舍时是明显瓶颈。改为先一次性取出房间与
+        # 「已有床位的房间 id 集合」，循环内只做内存判断 —— 判定结果与顺序完全不变。
+        wanted_ids = []
+        for rid in room_ids:
+            try:
+                wanted_ids.append(int(rid))
+            except (TypeError, ValueError) as _e:
+                # 表单里混入了非数字 id（异常请求）→ 跳过该项（行为不变）
+                logger.debug('批量设置的房间 id 非数字(%r)，已跳过: %s', rid, _e)
+        room_map = {}
+        occupied_room_ids = set()
+        if wanted_ids:
+            room_map = {r.id: r for r in
+                        Room.query.filter(Room.id.in_(wanted_ids)).all()}
+            occupied_room_ids = {
+                row[0] for row in db.session.query(BedAssignment.room_id).filter(
+                    BedAssignment.room_id.in_(wanted_ids),
+                    BedAssignment.student_id.isnot(None),
+                ).distinct().all()
+            }
+
         blocked_rooms = []
         count = 0
-        for rid in room_ids:
-            room = Room.query.get(int(rid))
+        for rid in wanted_ids:
+            room = room_map.get(rid)
             if not room:
                 continue
             has_assignment = room.class_name and room.class_name.strip()
-            has_beds = BedAssignment.query.filter(
-                BedAssignment.room_id == room.id,
-                BedAssignment.student_id.isnot(None)
-            ).count() > 0
+            has_beds = room.id in occupied_room_ids
             if has_assignment or has_beds:
                 blocked_rooms.append(room.display_name)
                 continue
@@ -987,16 +1031,36 @@ def assign_auto_preview():
     from app.models import Room as RoomModel, BedAssignment
     rooms_with_assignments = []
     rooms_with_beds = []
+    # 2026-10-10 架构审计修复：原实现在循环内逐个 get 房间 + 每间 count 一次床位
+    # （双重 N+1）。删除前检查涉及房间可能上百，改为一次性批量查询，
+    # 提示文案与判定逻辑完全不变。
+    _sel_ids = []
     for rid in selected_room_ids:
-        room = RoomModel.query.get(rid)
+        try:
+            _sel_ids.append(int(rid))
+        except (TypeError, ValueError) as _e:
+            logger.debug('待删除的房间 id 非数字(%r)，已跳过: %s', rid, _e)
+    _room_map = {}
+    _bed_count_by_room = {}
+    if _sel_ids:
+        _room_map = {r.id: r for r in
+                     RoomModel.query.filter(RoomModel.id.in_(_sel_ids)).all()}
+        _bed_count_by_room = {
+            row[0]: row[1] for row in db.session.query(
+                BedAssignment.room_id, func.count(BedAssignment.id)
+            ).filter(
+                BedAssignment.room_id.in_(_sel_ids),
+                BedAssignment.student_id.isnot(None),
+            ).group_by(BedAssignment.room_id).all()
+        }
+
+    for rid in _sel_ids:
+        room = _room_map.get(rid)
         if not room:
             continue
         if room.class_name and room.class_name.strip():
             rooms_with_assignments.append(f"{room.building} {room.room_number}({room.grade} {room.class_name})")
-        bed_count = BedAssignment.query.filter(
-            BedAssignment.room_id == rid,
-            BedAssignment.student_id.isnot(None)
-        ).count()
+        bed_count = _bed_count_by_room.get(rid, 0)
         if bed_count > 0:
             rooms_with_beds.append(f"{room.building} {room.room_number}({bed_count}床已分配)")
     

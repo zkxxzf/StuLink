@@ -150,13 +150,30 @@ def manage():
     beds_insufficient = (not no_rooms) and total_capacity < total_students_needed
 
     # 构建宿舍和床位数据
+    # 2026-10-10 架构审计修复：原实现「每房间查床位 → 每床位再查学生」（双重 N+1），
+    # 一栋楼几百间房时是首屏慢的主因。改为：一次性取全部床位 + 一次性取涉及学生，
+    # 组装结果与原来完全一致（bed 顺序按 bed_number，student 为 None 仍保留）。
+    _room_ids = [r.id for r in rooms]
+    _beds_by_room = {}
+    if _room_ids:
+        _all_beds = BedAssignment.query.filter(
+            BedAssignment.room_id.in_(_room_ids)
+        ).order_by(BedAssignment.bed_number).all()
+        for _b in _all_beds:
+            _beds_by_room.setdefault(_b.room_id, []).append(_b)
+        _student_ids = {_b.student_id for _b in _all_beds if _b.student_id}
+        _student_map = {}
+        if _student_ids:
+            _student_map = {s.id: s for s in
+                            Student.query.filter(Student.id.in_(_student_ids)).all()}
+    else:
+        _student_map = {}
+
     rooms_data = []
     for room in rooms:
-        beds = BedAssignment.query.filter_by(room_id=room.id).order_by(
-            BedAssignment.bed_number).all()
         bed_list = []
-        for bed in beds:
-            student = Student.query.get(bed.student_id) if bed.student_id else None
+        for bed in _beds_by_room.get(room.id, []):
+            student = _student_map.get(bed.student_id) if bed.student_id else None
             bed_list.append({'bed': bed, 'student': student})
         rooms_data.append({'room': room, 'beds': bed_list})
 
@@ -247,9 +264,18 @@ def clear_class():
         BedAssignment.student_id.in_(student_ids)
     ).all()
     count = len(cleared_beds)
+    # 2026-10-10 架构审计修复：原实现每个床位都查一次 Student + Room（双重 N+1）。
+    # 清空一个班（几十人）就会几十次往返。改为一次性批量取出，
+    # record_assignment 的调用对象与顺序完全不变。
+    _stu_ids = {b.student_id for b in cleared_beds if b.student_id}
+    _room_ids = {b.room_id for b in cleared_beds if b.room_id}
+    _stu_map = {s.id: s for s in
+                Student.query.filter(Student.id.in_(_stu_ids)).all()} if _stu_ids else {}
+    _room_map = {r.id: r for r in
+                 Room.query.filter(Room.id.in_(_room_ids)).all()} if _room_ids else {}
     for bed in cleared_beds:
-        student = Student.query.get(bed.student_id)
-        room = Room.query.get(bed.room_id)
+        student = _stu_map.get(bed.student_id)
+        room = _room_map.get(bed.room_id)
         if student and room:
             record_assignment('clear', student, room, bed.bed_number, current_user)
     if cleared_beds:
