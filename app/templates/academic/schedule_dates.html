@@ -8,9 +8,6 @@
         {{ parts.term_selector(schedules, ts, base_endpoint='academic.schedule_dates') }}
     </div>
     <div class="d-flex gap-2 flex-wrap">
-        <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('academic.schedule_calendar', sid=ts.id) }}">
-            <i class="bi bi-calendar3"></i> 查看校历
-        </a>
         <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('academic.schedule_manage') }}">
             <i class="bi bi-house"></i> 学期管理
         </a>
@@ -39,7 +36,9 @@
                             <input type="date" name="start_date" id="startDate" class="form-control form-control-sm"
                                    value="{{ ts.start_date.strftime('%Y-%m-%d') if ts.start_date else '' }}"
                                    {{ 'disabled' if not can_edit else '' }}>
-                            <div class="form-text">建议对齐到周一。</div>
+                            {# 2026-10-10：周次按自然周（周一~周日）划分，开学非周一也不会偏移，
+                               第 1 周就是「开学日 ~ 该周周日」，无需强行对齐到周一 #}
+                            <div class="form-text">开学当天即可，不必是周一：第 1 周到该周周日结束。</div>
                         </div>
                         <div class="col-6">
                             <label class="form-label small mb-1">学期最后一天（end_date）</label>

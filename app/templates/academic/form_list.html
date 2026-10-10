@@ -66,6 +66,7 @@
                         {% if tpl.target_type == 'all' %}全体
                         {% elif tpl.target_type == 'teachers' %}教师
                         {% elif tpl.target_type == 'students' %}学生
+                        {% elif tpl.target_type == 'subject' %}指定学科
                         {% elif tpl.target_type and tpl.target_type.startswith('grade') %}指定年级
                         {% else %}{{ tpl.target_type }}
                         {% endif %}
@@ -81,8 +82,15 @@
                         <span class="badge bg-dark">{{ status_map.get(tpl.status, tpl.status) }}</span>
                         {% endif %}
                     </td>
+                    {# 2026-10-10：显示「当前轮」的时间窗状态（未开始/进行中/已截止） #}
+                    {% set ri = (round_info or {}).get(tpl.id) %}
                     <td class="small">
-                        {% if tpl.deadline %}
+                        {% if ri and ri.text %}
+                        {{ ri.text }}
+                        {% if tpl.status == 'open' and ri.state == 'expired' %}
+                        <span class="badge bg-warning text-dark ms-1">本轮已截止</span>
+                        {% endif %}
+                        {% elif tpl.deadline %}
                         {{ tpl.deadline.strftime('%m-%d %H:%M') }}
                         {% else %}
                         <span class="text-muted">无限制</span>
@@ -110,6 +118,16 @@
                             <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                             <button class="btn btn-sm btn-outline-warning" title="关闭"><i class="bi bi-x-circle"></i></button>
                         </form>
+                        {% elif tpl.status == 'closed' %}
+                        {# 2026-10-10：重新开放（data-* 回填页面底部唯一 modal，避免每行一个 modal）#}
+                        <button type="button" class="btn btn-sm btn-outline-success reopen-btn" title="重新开放"
+                                data-bs-toggle="modal" data-bs-target="#reopenFormModal"
+                                data-action="{{ url_for('academic.form_reopen', form_id=tpl.id) }}"
+                                data-title="{{ tpl.title }}"
+                                data-start="{{ tpl.start_time.strftime('%Y-%m-%dT%H:%M') if tpl.start_time else '' }}"
+                                data-deadline="{{ tpl.deadline.strftime('%Y-%m-%dT%H:%M') if tpl.deadline else '' }}">
+                            <i class="bi bi-arrow-counterclockwise"></i>
+                        </button>
                         {% endif %}
                        <a class="btn btn-sm btn-outline-info" href="{{ url_for('academic.form_submissions', form_id=tpl.id) }}" title="查看提交">
                             <i class="bi bi-list-check"></i>
@@ -151,4 +169,68 @@
     </ul>
 </nav>
 {% endif %}
+
+{# 共享「重新开放」弹窗（各行的按钮用 data-* 回填） #}
+<div class="modal fade" id="reopenFormModal" tabindex="-1">
+    <div class="modal-dialog modal-dialog-centered">
+        <form method="post" id="reopenForm">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <div class="modal-content">
+                <div class="modal-header py-2">
+                    <h6 class="modal-title"><i class="bi bi-arrow-counterclockwise"></i> 重新开放收集
+                        <span class="text-muted small" id="reopenFormTitle"></span></h6>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="mb-2">
+                        <label class="form-label small mb-1">开始时间</label>
+                        <input type="datetime-local" name="start_time" id="reopenStart" class="form-control form-control-sm">
+                        <div class="form-text">留空 = 立即开放。</div>
+                    </div>
+                    <div class="mb-2">
+                        <label class="form-label small mb-1">截止时间</label>
+                        <input type="datetime-local" name="deadline" id="reopenDeadline" class="form-control form-control-sm">
+                        <div class="form-text">原截止时间已过请填新值；留空 = 不设截止。</div>
+                    </div>
+                    <div class="mb-2">
+                        <label class="form-label small mb-1">新一轮名称（可选）</label>
+                        <input name="name" id="reopenName" class="form-control form-control-sm" maxlength="100"
+                               placeholder="如 2026-2027学年第二学期">
+                    </div>
+                    <div class="form-check">
+                        {# checkbox 在前：勾选时 mode 取到 new；未勾选只提交 hidden 的 reuse #}
+                        <input class="form-check-input" type="checkbox" name="mode" value="new" id="reopenAsNew">
+                        <input type="hidden" name="mode" value="reuse">
+                        <label class="form-check-label" for="reopenAsNew">作为新一轮收集（历史轮次保留）</label>
+                    </div>
+                    <div class="form-text">不勾选则重新开放最近一轮（不新增轮次）。</div>
+                </div>
+                <div class="modal-footer py-2">
+                    <button type="button" class="btn btn-sm btn-light" data-bs-dismiss="modal">取消</button>
+                    <button type="submit" class="btn btn-sm btn-success"><i class="bi bi-arrow-counterclockwise"></i> 重新开放</button>
+                </div>
+            </div>
+        </form>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+(function () {
+    var form = document.getElementById('reopenForm');
+    if (!form) { return; }
+    document.querySelectorAll('.reopen-btn').forEach(function (btn) {
+        btn.addEventListener('click', function () {
+            form.action = btn.dataset.action || '';
+            document.getElementById('reopenFormTitle').textContent =
+                btn.dataset.title ? ('· ' + btn.dataset.title) : '';
+            document.getElementById('reopenStart').value = btn.dataset.start || '';
+            document.getElementById('reopenDeadline').value = btn.dataset.deadline || '';
+            document.getElementById('reopenName').value = '';
+            document.getElementById('reopenAsNew').checked = false;
+        });
+    });
+})();
+</script>
 {% endblock %}

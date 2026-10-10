@@ -1041,9 +1041,11 @@ def check_L3():
 # ======================================================================
 @item('L-4')
 def check_L4():
-    src = _read('app/modules/academic/routes/timetable.py')
-    case('L-4 草稿加锁', '_DRAFT_LOCK' in src and 'threading' in src)
-    case('L-4 草稿数量上限', '_DRAFT_MAX' in src)
+    # 2026-10-10：旧课表导入（timetable.py）已整体下线，草稿安全要求转移到
+    # 现存的「原样课表导入」草稿（schedule.py 的 _SMART_DRAFT）。
+    src = _read('app/modules/academic/routes/schedule.py')
+    case('L-4 草稿加锁', '_SMART_DRAFT_LOCK' in src and 'threading' in src)
+    case('L-4 草稿数量上限', '_SMART_DRAFT_MAX' in src)
     from app.modules.academic.routes.form_summary import cleanup_stale_packages
     case('L-4 材料包清扫可调用', callable(cleanup_stale_packages))
 
@@ -1269,6 +1271,36 @@ def check_R11():
                         'scripts/migrate_split_db.py')
             if '_ddl_guard' in _read(f)]
     case('R-11 拼接 DDL 的脚本已接入守卫', len(used) >= 6, str(len(used)))
+
+
+# ======================================================================
+# CSRF-TPL 模板 POST 表单必须带 CSRF 防护（2026-10-10 新增）
+# 背景：通知中心「全部已读」表单漏了 csrf_token，CSRFProtect 直接 400
+# （用户实测报障）。这里做全站静态扫描，再有人漏就本项变红。
+# ======================================================================
+@item('CSRF-TPL')
+def check_csrf_tpl():
+    import glob as _glob
+    form_re = re.compile(r'<form\b[^>]*>.*?</form>', re.S | re.I)
+    tag_re = re.compile(r'<form\b[^>]*>', re.I)
+    bad = []
+    for path in _glob.glob(os.path.join(BASE, 'app', 'templates', '**', '*.html'),
+                           recursive=True):
+        rel = os.path.relpath(path, BASE).replace('\\', '/')
+        src = _read(rel)
+        for m in form_re.finditer(src):
+            block = m.group(0)
+            if not re.search(r'method\s*=\s*[\'"]?post',
+                             tag_re.search(block).group(0), re.I):
+                continue
+            # Flask-WTF 表单用 form.hidden_tag()，等价于注入 csrf_token 隐藏域
+            if 'csrf_token' in block or 'hidden_tag' in block:
+                continue
+            bad.append(f'{rel}:{src[:m.start()].count(chr(10)) + 1}')
+    case('CSRF-TPL 所有 POST 表单带 CSRF 防护（csrf_token / hidden_tag）',
+         not bad, '、'.join(bad[:8]))
+    case('CSRF-TPL 通知中心表单已带 token',
+         'csrf_token' in _read('app/templates/notifications/list.html'))
 
 
 def main(argv):

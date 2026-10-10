@@ -30,6 +30,10 @@
             color: #94a3b8; font-size: 11px; text-transform: uppercase;
             padding: 15px 20px 5px; letter-spacing: .5px;
         }
+        /* 分组栏目（课表/查课/调课/教师/表单）：标题行带箭头，展开时箭头翻转 */
+        .sidebar .aca-group .aca-caret { transition: transform .15s ease; }
+        .sidebar .aca-group[aria-expanded="true"] .aca-caret { transform: rotate(180deg); }
+        .sidebar .aca-group[aria-expanded="true"] { color: #e2e8f0; }
         .main-content { margin-left: var(--sidebar-width); padding: 20px 24px 24px; min-height: 100vh; }
         .navbar { z-index: 200; }
         .stat-card { border: none; border-radius: 10px; box-shadow: 0 1px 3px rgba(0,0,0,.08); }
@@ -411,104 +415,169 @@
             </a>
             {% endif %}
 
-            {# ========= 教务管理模块侧边栏（v1.14.0） ========= #}
+            {# ========= 教务管理模块侧边栏（v1.14.0；2026-10-10 重构为分组层级）=========
+               用户要求把「课表 / 查课 / 调课 / 教师 / 表单」做成可折叠的分组栏目：
+               课表 → 学期课表 / 全校总课表 / 历史课表 / 跨学期对比；
+               查课 → 实时查课 / 查课统计；调课 → 申请 / 统一调课 / 审批 / 统计；
+               教师 → 教师名单 / 任课教师映射 / 备课组长；
+               表单 → 表单管理 / 填写问卷 / 我的提交 / 教师业绩库。 #}
             {% if request.blueprint == 'academic' and current_user.has_perm('academic.view') %}
+            {# 2026-10-10：菜单高亮用的当前端点变量命名为 aca_ep —— 不能用 ep！
+               任课教师映射等页面模板（grades/teachers.html 等）用 url_for(ep('x'))，
+               其 ep 是后端传入的**函数**；base.html 若用 {% set ep %} 会把它覆盖成
+               字符串 → TypeError: 'str' object is not callable（/academic/teacher-links 打不开）。 #}
+            {% set aca_ep = request.endpoint or '' %}
+            {% set sch_eps = ['academic.schedule_manage', 'academic.schedule_overview',
+                              'academic.schedule_overview_index', 'academic.schedule_history',
+                              'academic.schedule_history_detail', 'academic.schedule_compare',
+                              'academic.schedule_grade', 'academic.schedule_class',
+                              'academic.schedule_teacher', 'academic.schedule_dates',
+                              'academic.schedule_versions', 'academic.schedule_periods',
+                              'academic.schedule_copy', 'academic.schedule_smart_import'] %}
+            {% set chk_eps = ['academic.inspection_live_schedule', 'academic.inspection_page'] %}
+            {% set tch_eps = ['academic.teachers_page', 'academic.teacher_links_page',
+                              'academic.subject_leaders'] %}
+            {% set form_eps = ['academic.form_list', 'academic.form_fill_list',
+                               'academic.form_my_submissions', 'academic.achievements_page'] %}
             <div class="nav-section">教务管理</div>
-            <a class="nav-link {% if request.endpoint == 'academic.academic_home' %}active{% endif %}"
+            <a class="nav-link {% if aca_ep == 'academic.academic_home' %}active{% endif %}"
                href="{{ url_for('academic.academic_home') }}">
                 <i class="bi bi-speedometer2"></i>教务工作台
             </a>
-            <div class="nav-section">课表与查课</div>
-            {% if current_user.has_perm('academic.timetable') %}
-            <a class="nav-link {% if request.endpoint == 'academic.schedule_manage' %}active{% endif %}"
-               href="{{ url_for('academic.schedule_manage') }}">
-                <i class="bi bi-calendar-range"></i>学期课表管理
+            {# 2026-10-10：原「晚自习值班」独立入口已删除 —— 晚自习在「全校总课表」里
+               本就按节次列出并带值班教师，独立页面重复，不再保留。 #}
+
+            {# ── 课表 ── #}
+            <a class="nav-link d-flex align-items-center aca-group" data-bs-toggle="collapse"
+               href="#navAcaSch" role="button"
+               aria-expanded="{{ 'true' if aca_ep in sch_eps else 'false' }}">
+                <i class="bi bi-calendar-range"></i>课表
+                <i class="bi bi-chevron-down small ms-auto aca-caret"></i>
             </a>
+            <div class="collapse {% if aca_ep in sch_eps %}show{% endif %}" id="navAcaSch">
+                {% if current_user.has_perm('academic.timetable') %}
+                <a class="nav-link ps-4 {% if aca_ep == 'academic.schedule_manage' %}active{% endif %}"
+                   href="{{ url_for('academic.schedule_manage') }}">
+                    <i class="bi bi-calendar-week"></i>学期课表
+                </a>
+                {% endif %}
+                <a class="nav-link ps-4 {% if aca_ep in ['academic.schedule_overview', 'academic.schedule_overview_index'] %}active{% endif %}"
+                   href="{{ url_for('academic.schedule_overview_index') }}">
+                    <i class="bi bi-list-columns-reverse"></i>全校总课表
+                </a>
+                {% if current_user.has_perm('academic.timetable') %}
+                <a class="nav-link ps-4 {% if aca_ep in ['academic.schedule_history', 'academic.schedule_history_detail'] %}active{% endif %}"
+                   href="{{ url_for('academic.schedule_history') }}">
+                    <i class="bi bi-clock-history"></i>历史课表
+                </a>
+                <a class="nav-link ps-4 {% if aca_ep == 'academic.schedule_compare' %}active{% endif %}"
+                   href="{{ url_for('academic.schedule_compare') }}">
+                    <i class="bi bi-arrow-left-right"></i>跨学期对比
+                </a>
+                {% endif %}
+            </div>
+
+            {# ── 查课 ── #}
+            <a class="nav-link d-flex align-items-center aca-group" data-bs-toggle="collapse"
+               href="#navAcaChk" role="button"
+               aria-expanded="{{ 'true' if aca_ep in chk_eps else 'false' }}">
+                <i class="bi bi-clipboard2-check"></i>查课
+                <i class="bi bi-chevron-down small ms-auto aca-caret"></i>
+            </a>
+            <div class="collapse {% if aca_ep in chk_eps %}show{% endif %}" id="navAcaChk">
+                <a class="nav-link ps-4 {% if aca_ep == 'academic.inspection_live_schedule' %}active{% endif %}"
+                   href="{{ url_for('academic.inspection_live_schedule') }}">
+                    <i class="bi bi-broadcast"></i>实时查课
+                </a>
+                <a class="nav-link ps-4 {% if aca_ep == 'academic.inspection_page' %}active{% endif %}"
+                   href="{{ url_for('academic.inspection_page') }}">
+                    <i class="bi bi-bar-chart-line"></i>查课统计
+                </a>
+            </div>
+
+            {# ── 调课 ── #}
+            {% if current_user.has_perm('academic.swap') or current_user.has_perm('academic.timetable')
+                  or current_user.has_perm('academic.swap_approve') %}
+            {% set swap_open = aca_ep.startswith('academic.swap') %}
+            <a class="nav-link d-flex align-items-center aca-group" data-bs-toggle="collapse"
+               href="#navAcaSwap" role="button"
+               aria-expanded="{{ 'true' if swap_open else 'false' }}">
+                <i class="bi bi-arrow-repeat"></i>调课
+                <i class="bi bi-chevron-down small ms-auto aca-caret"></i>
+            </a>
+            <div class="collapse {% if swap_open %}show{% endif %}" id="navAcaSwap">
+                {% if current_user.has_perm('academic.swap') %}
+                <a class="nav-link ps-4 {% if aca_ep == 'academic.swap_apply' %}active{% endif %}"
+                   href="{{ url_for('academic.swap_apply') }}">
+                    <i class="bi bi-pencil-square"></i>调课申请
+                </a>
+                <a class="nav-link ps-4 {% if aca_ep == 'academic.swap_bulk' %}active{% endif %}"
+                   href="{{ url_for('academic.swap_bulk') }}">
+                    <i class="bi bi-collection"></i>统一调课
+                </a>
+                {% endif %}
+                <a class="nav-link ps-4 {% if aca_ep == 'academic.swap_page' %}active{% endif %}"
+                   href="{{ url_for('academic.swap_page') }}">
+                    <i class="bi bi-list-check"></i>{{ '调课审批' if current_user.has_perm('academic.timetable') or current_user.has_perm('academic.swap_approve') else '我的调课' }}
+                </a>
+                <a class="nav-link ps-4 {% if aca_ep == 'academic.swap_stats' %}active{% endif %}"
+                   href="{{ url_for('academic.swap_stats') }}">
+                    <i class="bi bi-bar-chart"></i>调课统计
+                </a>
+            </div>
             {% endif %}
-            <a class="nav-link {% if request.endpoint in ['academic.schedule_overview', 'academic.schedule_overview_index'] %}active{% endif %}"
-               href="{{ url_for('academic.schedule_overview_index') }}">
-                <i class="bi bi-list-columns-reverse"></i>全校总课表
+
+            {# ── 教师 ── #}
+            <a class="nav-link d-flex align-items-center aca-group" data-bs-toggle="collapse"
+               href="#navAcaTch" role="button"
+               aria-expanded="{{ 'true' if aca_ep in tch_eps else 'false' }}">
+                <i class="bi bi-person-vcard"></i>教师
+                <i class="bi bi-chevron-down small ms-auto aca-caret"></i>
             </a>
-            <a class="nav-link {% if request.endpoint == 'academic.inspection_page' %}active{% endif %}"
-               href="{{ url_for('academic.inspection_page') }}">
-                <i class="bi bi-clipboard2-check"></i>查课记录与统计
+            <div class="collapse {% if aca_ep in tch_eps %}show{% endif %}" id="navAcaTch">
+                <a class="nav-link ps-4 {% if aca_ep == 'academic.teachers_page' %}active{% endif %}"
+                   href="{{ url_for('academic.teachers_page') }}">
+                    <i class="bi bi-people"></i>教师名单
+                </a>
+                {% if current_user.has_perm('grades.teachers') %}
+                <a class="nav-link ps-4 {% if aca_ep == 'academic.teacher_links_page' %}active{% endif %}"
+                   href="{{ url_for('academic.teacher_links_page') }}">
+                    <i class="bi bi-person-workspace"></i>任课教师映射
+                </a>
+                {% endif %}
+                <a class="nav-link ps-4 {% if aca_ep == 'academic.subject_leaders' %}active{% endif %}"
+                   href="{{ url_for('academic.subject_leaders') }}">
+                    <i class="bi bi-people-fill"></i>备课组长
+                </a>
+            </div>
+
+            {# ── 表单 ── #}
+            <a class="nav-link d-flex align-items-center aca-group" data-bs-toggle="collapse"
+               href="#navAcaForm" role="button"
+               aria-expanded="{{ 'true' if aca_ep in form_eps else 'false' }}">
+                <i class="bi bi-ui-checks-grid"></i>表单
+                <i class="bi bi-chevron-down small ms-auto aca-caret"></i>
             </a>
-            <a class="nav-link {% if request.endpoint == 'academic.inspection_live_schedule' %}active{% endif %}"
-               href="{{ url_for('academic.inspection_live_schedule') }}">
-                <i class="bi bi-broadcast"></i>查课实时课表
-            </a>
-            {# 2026-10-10：教务管理侧的「任课教师映射」—— 与成绩管理同款页面、同一份源数据
-               （TeacherSubjectLink），URL 归教务（academic.teacher_links_page），不跳成绩模块。
-               可见性按路由实际权限 grades.teachers，避免「菜单可见、点进去 403」 #}
-            {% if current_user.has_perm('grades.teachers') %}
-            <a class="nav-link {% if request.endpoint == 'academic.teacher_links_page' %}active{% endif %}"
-               href="{{ url_for('academic.teacher_links_page') }}">
-                <i class="bi bi-person-workspace"></i>任课教师映射
-            </a>
-            {% endif %}
-            <a class="nav-link {% if request.endpoint in ['academic.schedule_timetable', 'academic.schedule_timetable_index'] %}active{% endif %}"
-               href="{{ url_for('academic.schedule_timetable_index') }}">
-                <i class="bi bi-clock-history"></i>作息时间表
-            </a>
-            {% if current_user.has_perm('academic.view') %}
-            <a class="nav-link {% if request.endpoint in ['academic.night_duty', 'academic.night_duty_index'] %}active{% endif %}"
-               href="{{ url_for('academic.night_duty_index') }}">
-                <i class="bi bi-moon-stars"></i>晚自习值班
-            </a>
-            {% endif %}
-            {% if current_user.has_perm('academic.timetable') %}
-            <a class="nav-link {% if request.endpoint == 'academic.schedule_history' %}active{% endif %}"
-               href="{{ url_for('academic.schedule_history') }}">
-                <i class="bi bi-clock-history"></i>历史课表
-            </a>
-            {% endif %}
-            {% if current_user.has_perm('academic.timetable') %}
-            <a class="nav-link {% if request.endpoint == 'academic.schedule_compare' %}active{% endif %}"
-               href="{{ url_for('academic.schedule_compare') }}">
-                <i class="bi bi-arrow-left-right"></i>跨学期对比
-            </a>
-            {% endif %}
-            <div class="nav-section">调课与审批</div>
-            {% if current_user.has_perm('academic.swap') or current_user.has_perm('academic.timetable') %}
-            <a class="nav-link {% if request.endpoint and request.endpoint.startswith('academic.swap') %}active{% endif %}"
-               href="{{ url_for('academic.swap_page') }}">
-                <i class="bi bi-arrow-left-right"></i>{{ '调课审批' if current_user.has_perm('academic.timetable') else '我的调课' }}
-            </a>
-            <a class="nav-link {% if request.endpoint == 'academic.swap_stats' %}active{% endif %}"
-               href="{{ url_for('academic.swap_stats') }}">
-                <i class="bi bi-bar-chart"></i>调课统计
-            </a>
-            {% endif %}
-            <div class="nav-section">教务资料</div>
-            <a class="nav-link {% if request.endpoint == 'academic.teachers_page' %}active{% endif %}"
-               href="{{ url_for('academic.teachers_page') }}">
-                <i class="bi bi-person-vcard"></i>教师名单
-            </a>
-            <a class="nav-link {% if request.endpoint == 'academic.subject_leaders' %}active{% endif %}"
-               href="{{ url_for('academic.subject_leaders') }}">
-                <i class="bi bi-people"></i>备课组长
-            </a>
-            <a class="nav-link {% if request.endpoint == 'academic.achievements_page' %}active{% endif %}"
-               href="{{ url_for('academic.achievements_page') }}">
-                <i class="bi bi-award"></i>教师业绩库
-            </a>
-            <div class="nav-section">问卷收集</div>
-            {% if current_user.has_perm('academic.edit') %}
-            <a class="nav-link {% if request.endpoint == 'academic.form_list' %}active{% endif %}"
-               href="{{ url_for('academic.form_list') }}">
-                <i class="bi bi-ui-checks-grid"></i>表单管理
-            </a>
-            {% endif %}
-            {% if current_user.has_perm('academic.view') %}
-            <a class="nav-link {% if request.endpoint == 'academic.form_fill_list' %}active{% endif %}"
-               href="{{ url_for('academic.form_fill_list') }}">
-                <i class="bi bi-pencil-square"></i>填写问卷
-            </a>
-            <a class="nav-link {% if request.endpoint == 'academic.form_my_submissions' %}active{% endif %}"
-               href="{{ url_for('academic.form_my_submissions') }}">
-                <i class="bi bi-list-check"></i>我的提交
-            </a>
-            {% endif %}
+            <div class="collapse {% if aca_ep in form_eps %}show{% endif %}" id="navAcaForm">
+                {% if current_user.has_perm('academic.edit') %}
+                <a class="nav-link ps-4 {% if aca_ep == 'academic.form_list' %}active{% endif %}"
+                   href="{{ url_for('academic.form_list') }}">
+                    <i class="bi bi-ui-checks-grid"></i>表单管理
+                </a>
+                {% endif %}
+                <a class="nav-link ps-4 {% if aca_ep == 'academic.form_fill_list' %}active{% endif %}"
+                   href="{{ url_for('academic.form_fill_list') }}">
+                    <i class="bi bi-pencil-square"></i>填写问卷
+                </a>
+                <a class="nav-link ps-4 {% if aca_ep == 'academic.form_my_submissions' %}active{% endif %}"
+                   href="{{ url_for('academic.form_my_submissions') }}">
+                    <i class="bi bi-list-check"></i>我的提交
+                </a>
+                <a class="nav-link ps-4 {% if aca_ep == 'academic.achievements_page' %}active{% endif %}"
+                   href="{{ url_for('academic.achievements_page') }}">
+                    <i class="bi bi-award"></i>教师业绩库
+                </a>
+            </div>
             {% endif %}
 
             {# ========= 教师工作台侧边栏（v1.9.3 全量子导航） ========= #}

@@ -38,7 +38,7 @@ from app.extensions import db
 from app.models import Student, User
 from app.models.academic import (DUTY_TEMPLATES, InspectionRecord, SubjectLeader,
                                  Teacher, TeacherAchievement)
-from app.models.timetable import (NightDuty, PeriodDef, ScheduleEntry,
+from app.models.timetable import (PeriodDef, ScheduleEntry,
                                   ScheduleSwap, ScheduleVersion, TermSchedule,
                                   get_default_periods)
 from app.modules.academic.services.schedule_common import week_ranges_overlap
@@ -172,7 +172,6 @@ def purge(commit: bool):
         for ts in terms:
             ScheduleVersion.query.filter_by(term_schedule_id=ts.id).delete()
             ScheduleSwap.query.filter_by(term_schedule_id=ts.id).delete()
-            NightDuty.query.filter_by(term_schedule_id=ts.id).delete()
             ScheduleEntry.query.filter_by(term_schedule_id=ts.id).delete()
             PeriodDef.query.filter_by(term_schedule_id=ts.id).delete()
             db.session.delete(ts)
@@ -569,26 +568,8 @@ def seed(commit: bool, classes_per_grade: int, seed_no: int):
         print(f'     单双周交替 {merged} 组 · 调课演示 {swaps} 条')
         print(f'     备课组长 {leader_count} 条 · 查课 {insp_count} 条 · 业绩 {ach_count} 条')
 
-        # ── 晚自习值班表（高中刚需：晚自习排值班教师，不排学科课）──
-        # 2026-10-10：系统不再提供自动排班，演示数据改为按"每天一节、轮流值"手工登记
-        try:
-            from app.modules.academic.services import night_duty_service as nd_svc
-            nd_periods = nd_svc.evening_period_numbers(ts.id)
-            nd_pool = nd_svc.teacher_pool()
-            nd_grades = nd_svc.grades_of(ts.id)
-            if nd_periods and nd_pool and nd_grades:
-                n = 0
-                for gi, g in enumerate(nd_grades):
-                    for wd in nd_svc.WEEKDAYS:
-                        t = nd_pool[(gi * 5 + wd) % len(nd_pool)]
-                        ok_d, _msg = nd_svc.set_duty(ts.id, g, wd, nd_periods[0],
-                                                     t['uid'], t['name'], operator=None)
-                        n += 1 if ok_d else 0
-                print(f'     晚自习值班 {n} 个班次（手工登记）')
-            else:
-                print('     晚自习值班 未生成（缺晚自习节次/教师/课表）')
-        except Exception as exc:  # noqa: BLE001  值班生成失败不影响课表
-            print(f'     [WARN] 晚自习值班未生成：{exc}')
+        # 2026-10-10：晚自习值班功能已整体删除（晚自习在「全校总课表」里按节次呈现），
+        # 演示数据不再生成值班记录。
         return 0
 
 

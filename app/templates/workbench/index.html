@@ -208,7 +208,11 @@
                 <tbody>
                     {% for s in pending_swaps %}
                     <tr>
-                        <td>{% if s.swap_type == 'personal' %}个人{% else %}统一{% endif %}</td>
+                        <td>{% if s.swap_type == 'personal' %}个人{% else %}统一{% endif %}
+                            {% if s.batch_count and s.batch_count > 1 %}
+                            <div class="small text-muted">共 {{ s.batch_count }} 门 · 一次审批</div>
+                            {% endif %}
+                        </td>
                         <td>{{ s.original_subject or '-' }} {{ s.original_class or '' }}</td>
                         <td>{{ s.original_date.strftime('%m-%d') if s.original_date else '-' }}</td>
                         <td>{% if s.original_period %}第{{ s.original_period }}节{% else %}-{% endif %}</td>

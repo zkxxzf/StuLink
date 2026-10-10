@@ -18,7 +18,7 @@ from sqlalchemy import func
 
 from app.extensions import db
 from app.models.academic import (AchievementAttachment, TeacherAchievement, Teacher,
-                                 FormRound,
+                                 FormRound, FormTemplate, FormSubmission,
                                  ACHIEVEMENT_CATEGORIES, ACHIEVEMENT_LEVELS,
                                  ACHIEVEMENT_STATUS, ACHIEVEMENT_SOURCE, DOC_TYPES)
 from app.modules.academic import bp
@@ -123,6 +123,49 @@ def achievements_page():
     ach_rounds = (FormRound.query.filter(FormRound.id.in_(round_ids))
                   .order_by(FormRound.template_id, FormRound.round_no.desc()).all()
                   if round_ids else [])
+
+    # 2026-10-10：进行中的业绩收集（收集 → 提交 → 审核 → 入账 的闭环入口）
+    # 只用 forms 库的表（分库，禁止 join 业绩表），轮次一次取回本地挑当前轮。
+    now = datetime.now()
+    open_tpls = (FormTemplate.query.filter_by(status='open', to_achievement=True)
+                 .order_by(FormTemplate.created_at.desc()).all())
+    active_collections = []
+    collections_more = len(open_tpls) > 5
+    shown = open_tpls[:5]
+    rnd_by_tpl = {}
+    if shown:
+        for r in (FormRound.query.filter(FormRound.template_id.in_([t.id for t in shown]))
+                  .order_by(FormRound.round_no).all()):
+            rnd_by_tpl.setdefault(r.template_id, []).append(r)
+    for t in shown:
+        rounds_of = rnd_by_tpl.get(t.id) or []
+        opened = [r for r in rounds_of if r.status == 'open']
+        rnd = (opened or rounds_of[-1:])[-1] if rounds_of else None
+        start = (rnd.start_time if rnd and rnd.start_time else None) or t.start_time
+        deadline = (rnd.deadline if rnd and rnd.deadline else None) or t.deadline
+        if deadline and now > deadline:
+            state, state_text = 'expired', '本轮已截止'
+        elif start and now < start:
+            state, state_text = 'before', '未开始'
+        else:
+            state, state_text = 'open', '进行中'
+        if deadline:
+            state_text += f" · 截止 {deadline.strftime('%m-%d %H:%M')}"
+        cnt_q = FormSubmission.query.filter_by(template_id=t.id)
+        if rnd:
+            cnt_q = cnt_q.filter(FormSubmission.round_id == rnd.id)
+        by = dict(cnt_q.with_entities(FormSubmission.status, func.count())
+                  .group_by(FormSubmission.status).all())
+        active_collections.append({
+            'id': t.id, 'title': t.title,
+            'round_no': rnd.round_no if rnd else None,
+            'round_label': (rnd.label() if rnd else '（未建轮次）'),
+            'state': state, 'state_text': state_text,
+            'total': sum(by.values()), 'pending': by.get('submitted', 0),
+            'submissions_url': url_for('academic.form_submissions', form_id=t.id),
+            'summary_url': url_for('academic.form_summary_page', form_id=t.id),
+        })
+
     return render_template('academic/achievements.html',
                            items=items, pagination=pagination, teachers=teachers,
                            categories=ACHIEVEMENT_CATEGORIES,
@@ -138,6 +181,8 @@ def achievements_page():
                            f_status=f['status'], f_year=f['year'], f_tag=f['tag'],
                            sources=ACHIEVEMENT_SOURCE, ach_rounds=ach_rounds,
                            f_source=f['source'], f_round=f['round'],
+                           active_collections=active_collections,
+                           collections_more=collections_more,
                            can_edit=current_user.has_perm('academic.edit'),
                            today=date.today().isoformat(),
                            # 2026-10-09：填表时的动态字段定义 + 附件材料分类

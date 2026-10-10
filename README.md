@@ -96,6 +96,7 @@ docker-compose up -d
 - **密码复杂度**：`password_policy` 强制 ≥8 位 + 含字母与数字 + 非弱口令黑名单 + 不等于用户名/姓名/手机号。
 - **升级即全站掉登录**（session_guard 引入会话口令摘要，旧会话缺 `_pwd_fp` 视为无效）。
 - **升级到教务分库版本（2026-10-10）需依次执行两条幂等脚本**：`py -3.12 scripts/migrate_split_academic_20261010.py`（教务分库 + 搬数据）与 `py -3.12 scripts/add_performance_indexes.py`（补齐历史漏建索引）——两者改动数据库前都会自动备份（`<库文件>.bak-时间戳`）。事后可用 `py -3.12 scripts/check_indexes.py` 只读自检模型/脚本/现网三处索引是否对齐（`--fix` 可幂等补建）。
+- **模型加了新字段后，存量库必须补列（`create_all` 只建缺表、从不为老表加列）**：跑 `py -3.12 scripts/check_columns.py` 只读自检缺列，`--fix` 幂等补列（改前自动备份、非空列自动降级为可空）。2026-10-10 现场：考试四段式重构（`79ef3d8`）给 `exams`/`exam_scores` 新增 4 列未同步到 `data/grades.db`，成绩分析页一进就 500（`no such column: exams.exam_kind`）——自动化测试全绿是因为冒烟跑临时库现建、列齐全。**每次同步代码后建议跑一次本自检。**
 - 生产启用 HTTPS 后，建议设置环境变量：
   - `STULINK_SESSION_COOKIE_SECURE=1`（会话 cookie 加 `Secure`）
   - `STULINK_CSP_MODE=enforce`（CSP 由只上报切换为强制拦截，需先确认无违规）

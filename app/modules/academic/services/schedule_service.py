@@ -19,7 +19,7 @@ from sqlalchemy import and_, false, or_
 from app.extensions import db
 from app.models.timetable import (
     TermSchedule, PeriodDef, ScheduleEntry, ScheduleVersion,
-    get_default_periods, SCHEDULE_STATUS, WEEKDAY_NAMES, MAX_PERIOD,
+    get_default_periods, SCHEDULE_STATUS, WEEKDAY_NAMES, PERIOD_NUMBER_CEILING,
     PERIOD_TYPES, ENTRY_TYPES,
 )
 # 公共辅助（学期定位 / 节次查询 / 周次解析）：schedule_common 不反向依赖本模块，无循环导入风险
@@ -146,18 +146,33 @@ def create_schedule(name, school_year, term, description=None,
     db.session.add(ts)
     db.session.flush()  # 获取 id
     if with_default_periods:
-        for p in get_default_periods():
+        # 2026-10-10：优先套用「全局作息模板」（学校作息一般全校固定，配一次各处复用），
+        # 没有全局模板时才用内置的 13 节默认值
+        for p in (get_global_periods() or get_default_periods()):
             db.session.add(PeriodDef(term_schedule_id=ts.id, **p))
     db.session.commit()
     return ts
 
 
 def activate_schedule(schedule_id):
-    """把该学期设为 active，同时把其他所有 active 改为 archived"""
+    """把该学期设为 active；其他 active 学期归档并写快照（进入「历史课表」）。
+
+    2026-10-10：原实现直接 `update(status='archived')` 不留快照，与「归档」语义
+    不一致（历史课表里看不到归档记录）；改为复用 term_service.archive_term，
+    让"自动归档"与"手动归档"完全同源、可追溯。
+    """
     target = db.session.get(TermSchedule, schedule_id)
     if not target:
         raise ValueError('学期不存在')
-    TermSchedule.query.filter_by(status='active').update({'status': 'archived'})
+    from app.modules.academic.services import term_service
+    for other in TermSchedule.query.filter_by(status='active').all():
+        if other.id == schedule_id:
+            continue
+        try:
+            term_service.archive_term(other.id)
+        except Exception:  # noqa: BLE001  归档失败不阻断激活，退化为原行为
+            other.status = 'archived'
+            other.is_current = False
     target.status = 'active'
     db.session.commit()
     return target
@@ -195,28 +210,36 @@ def update_schedule(schedule_id, return_warnings=False, **fields):
 def set_current_term(schedule_id):
     """把指定学期设为 is_current=True 并清除其他学期的 is_current（互斥）。
 
-    若该学期 status='draft' 则自动转 'active' 并把原 active 转 archived
-    （复用 activate_schedule 的互斥逻辑）。返回该学期对象。
+    2026-10-10 语义拆分（与「归档」区分开）：
+    - 本操作只管「当前学期」标记，不再隐式激活/归档其他学期；
+    - 未启用的学期请先「激活」；历史（归档）学期请先「重新启用」。
+    返回该学期对象。
     """
     target = db.session.get(TermSchedule, schedule_id)
     if not target:
         raise ValueError('学期不存在')
+    if target.status == 'draft':
+        raise ValueError('该学期未启用，不能直接设为当前，请先「激活」')
+    if target.status == 'archived':
+        raise ValueError('历史学期不能设为当前，请先「重新启用」')
     TermSchedule.query.filter(TermSchedule.id != schedule_id)\
         .update({'is_current': False}, synchronize_session=False)
     target.is_current = True
     db.session.commit()
-    if target.status == 'draft':
-        activate_schedule(schedule_id)
     return target
 
 
 def delete_schedule(schedule_id):
-    """删除学期（仅限 draft 状态，cascade 清掉节次和条目）"""
+    """删除学期（仅限未启用 draft 状态，cascade 清掉节次和条目）。
+
+    2026-10-10：删除是**不可恢复**的物理删除，只对"还没启用过"的学期开放；
+    启用中 / 已归档的学期走「归档进历史课表」（留快照、仍可回看），不提供删除。
+    """
     ts = db.session.get(TermSchedule, schedule_id)
     if not ts:
         raise ValueError('学期不存在')
     if ts.status != 'draft':
-        raise ValueError('只能删除草稿状态的学期，请先归档')
+        raise ValueError('只能删除未启用的学期；已启用或已归档的课表请归档进「历史课表」保留')
     # 物理删除条目（含已软删除的）
     ScheduleEntry.query.filter_by(term_schedule_id=schedule_id).delete()
     ScheduleVersion.query.filter_by(term_schedule_id=schedule_id).delete()
@@ -245,7 +268,8 @@ def save_periods(schedule_id, periods_data, remove_missing=False):
     submitted = set()
     for item in periods_data:
         pn = item.get('period_number')
-        if not pn or not isinstance(pn, int) or pn < 1 or pn > MAX_PERIOD:
+        # 2026-10-10：原为 1..13 业务上限；现在只挡非法编号（节次数由学校自定义）
+        if not pn or not isinstance(pn, int) or pn < 1 or pn > PERIOD_NUMBER_CEILING:
             continue
         submitted.add(pn)
         if pn in existing:
@@ -282,7 +306,7 @@ def save_periods(schedule_id, periods_data, remove_missing=False):
 
 
 def reset_default_periods(schedule_id):
-    """重置为空课表使用的 13 节默认模板。已有条目时拒绝，以免节次号改义。"""
+    """重置为内置默认模板（早读 + 上午5 + 下午4 + 晚自习3 = 13 节）。已有条目时拒绝，以免节次号改义。"""
     if ScheduleEntry.query.filter_by(term_schedule_id=schedule_id).first():
         raise ValueError(
             '该学期已有课表条目，不能重置默认节次；请手动调整名称和时间，避免已有课程错位')
@@ -290,6 +314,103 @@ def reset_default_periods(schedule_id):
     for p in get_default_periods():
         db.session.add(PeriodDef(term_schedule_id=schedule_id, **p))
     db.session.commit()
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# 全局作息模板（2026-10-10 新增）
+#
+# 学校的作息时间一般是全校固定的（同一套铃声），但 PeriodDef 是按学期存的（不同学期
+# 可能微调，如冬夏作息）。于是提供一份**全局模板**：在任意学期把作息「存为全局作息」，
+# 新建学期默认套用、其它学期也能一键「套用全局作息」，避免每建一个学期就重配一遍。
+# 存在 system_settings 的 KV 表（key=global_periods，值为 JSON），不新增表/迁移。
+# ═══════════════════════════════════════════════════════════════════════════════
+
+GLOBAL_PERIODS_KEY = 'global_periods'
+_GLOBAL_PERIOD_KEYS = ('period_number', 'period_name', 'start_time', 'end_time',
+                       'period_type', 'sort_order')
+
+
+def get_global_periods():
+    """读全局作息模板 → list[dict]（可直接 PeriodDef(**row)）；没有/坏了返回 None。"""
+    from app.models.system_setting import SystemSetting
+    raw = SystemSetting.get(GLOBAL_PERIODS_KEY)
+    if not raw:
+        return None
+    try:
+        data = json.loads(raw)
+    except (ValueError, TypeError):
+        return None
+    rows = (data.get('periods') if isinstance(data, dict) else data) or []
+    out = []
+    for i, row in enumerate(rows):
+        if not isinstance(row, dict):
+            continue
+        try:
+            pn = int(row.get('period_number'))
+        except (TypeError, ValueError):
+            continue
+        if pn < 1:
+            continue
+        out.append({
+            'period_number': pn,
+            'period_name': str(row.get('period_name') or f'第{pn}节')[:20],
+            'start_time': row.get('start_time') or None,
+            'end_time': row.get('end_time') or None,
+            'period_type': row.get('period_type') or 'morning',
+            'sort_order': int(row.get('sort_order') or i + 1),
+        })
+    return sorted(out, key=lambda r: (r['sort_order'], r['period_number'])) or None
+
+
+def get_global_periods_info():
+    """全局作息模板摘要（给页面显示）：{count, updated_at} 或 None。"""
+    from app.models.system_setting import SystemSetting
+    raw = SystemSetting.get(GLOBAL_PERIODS_KEY)
+    if not raw:
+        return None
+    try:
+        data = json.loads(raw)
+    except (ValueError, TypeError):
+        return None
+    rows = get_global_periods() or []
+    if not rows:
+        return None
+    return {'count': len(rows),
+            'updated_at': (data.get('updated_at') if isinstance(data, dict) else None)}
+
+
+def save_global_periods(schedule_id, operator=None):
+    """把指定学期的作息存为全局模板 → (success, message)。"""
+    periods = get_periods(schedule_id)
+    if not periods:
+        return False, '该学期还没有节次定义，无法存为全局作息'
+    from app.models.system_setting import SystemSetting
+    payload = {'updated_at': datetime.now().strftime('%Y-%m-%d %H:%M'),
+               'periods': [{k: getattr(p, k) for k in _GLOBAL_PERIOD_KEYS}
+                           for p in periods]}
+    SystemSetting.set(GLOBAL_PERIODS_KEY,
+                      json.dumps(payload, ensure_ascii=False),
+                      user_id=getattr(operator, 'id', None),
+                      description='全局作息模板（节次名称与时间）：新建学期默认套用，'
+                                  '也可在节次配置页套用到任意学期')
+    db.session.commit()
+    return True, f'已把本学期的 {len(periods)} 节作息存为全局模板（新建学期将默认套用）'
+
+
+def apply_global_periods(schedule_id):
+    """把全局作息模板套用到指定学期 → (success, message, result|None)。
+
+    复用 save_periods：按节次号 upsert + 移除模板里没有的节次；仍被课程引用的节次
+    会保留（kept_in_use），避免出现"有课却没有节次定义"的孤儿数据。
+    """
+    rows = get_global_periods()
+    if not rows:
+        return False, '还没有全局作息模板：请先在某个学期点「存为全局作息」', None
+    result = save_periods(schedule_id, [dict(r) for r in rows], remove_missing=True)
+    msg = f'已套用全局作息（{len(rows)} 节）'
+    if result['removed']:
+        msg += f"；移除了模板里没有的第 {'、'.join(str(n) for n in result['removed'])} 节"
+    return True, msg, result
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -366,28 +487,8 @@ def get_grade_view(schedule_id, grade, weekday=None, week=None,
     }
 
 
-def get_master_view(schedule_id, weekday=None, week=None):
-    """大课表（全校）：按年级分组"""
-    periods = get_periods(schedule_id)
-    q = _base_entry_query(schedule_id)
-    if weekday:
-        q = q.filter_by(weekday=weekday)
-    entries = _filter_by_week(q.all(), week)
-    grade_classes = {}
-    for e in entries:
-        grade_classes.setdefault(e.grade, set()).add(e.class_name)
-    grade_classes = {g: sorted(cs) for g, cs in sorted(grade_classes.items())}
-    grids = {}
-    for g, cls_list in grade_classes.items():
-        for cn in cls_list:
-            cls_entries = [e for e in entries if e.grade == g and e.class_name == cn]
-            grids[f'{g}_{cn}'] = _build_grid(cls_entries, periods)
-    return {
-        'grade_classes': grade_classes,
-        'grids': grids,
-        'periods': [p.to_dict() for p in periods],
-        'total': len(entries),
-    }
+# 2026-10-10：get_master_view()（大课表：按年级分组返回全校网格）已删——随大课表页下线，
+# 且早已无调用者（页面后来走 get_grade_class_list + get_class_view 的 AJAX 链路）。
 
 
 def get_teacher_view(schedule_id, teacher_uid, weekday=None, week=None,
@@ -442,6 +543,67 @@ def _period_groups(period_dicts):
             groups.append({'label': label, 'span': 1})
             p['group_start'] = True
     return groups
+
+
+def _build_vertical_matrix(blocks, period_dicts, day):
+    """把「行＝班级、列＝节次」的分块转置成**一张竖版表**（2026-10-10 改版）。
+
+        ┌──────┬────────┬────────┬────────┬────────┐
+        │ 作息 │  节次  │ 高三1班 │ 高三2班 │ 高二1班 │  ← 表头＝班级（按年级分组）
+        ├──────┼────────┼────────┼────────┼────────┤
+        │ 早读 │  早读  │ 语文   │ 英语   │ 英语   │
+        │ 上午 │  第1节 │ 数学   │ 语文   │ 数学   │
+        └──────┴────────┴────────┴────────┴────────┘
+
+    行＝节次（左列作息分组、次列节次名），列＝班级。三个年级的班并排放在**同一张表**里，
+    节次行只出现一次 —— 比"一个年级一张表"省掉两张重复表头，也才能一屏容下全校班级。
+    返回 {grade_groups, columns, rows, grade_starts}；cells 与 columns 按下标对齐。
+    """
+    usable = [b for b in blocks if b.get('classes')]
+    columns = []
+    grade_groups = []
+    grade_starts = []
+    for b in usable:
+        grade_groups.append({'grade': b['grade'],
+                             'label': b['grade_label'] or b['grade'],
+                             'span': len(b['classes']),
+                             'total': b['total']})
+        grade_starts.append(len(columns))
+        short = (b['grade_label'] or b['grade']).split('(')[0]   # 高三(2024级) → 高三
+        for cn in b['classes']:
+            columns.append({
+                'grade': b['grade'],
+                'grade_label': b['grade_label'] or b['grade'],
+                'grade_short': short,
+                'class_name': cn,
+                'meta': b['class_meta'].get(cn, {}),
+                'total': b['class_totals'].get(cn, 0),
+            })
+
+    rows = []
+    for p in period_dicts:
+        pn = p['period_number']
+        cells = []
+        for b in usable:
+            for cn in b['classes']:
+                cells.append(((b['grids'].get(cn) or {}).get(pn) or {}).get(day) or [])
+        rows.append({'period': p,
+                     'group_label': p.get('group_label') or _period_label(p),
+                     'group_start': False, 'group_span': 1, 'cells': cells})
+
+    # 作息分组（早读/上午/下午/晚自习）：连续同组只在首行出一格，用 rowspan 跨行
+    i = 0
+    while i < len(rows):
+        label = rows[i]['group_label']
+        span = 1
+        while i + span < len(rows) and rows[i + span]['group_label'] == label:
+            span += 1
+        rows[i]['group_start'] = True
+        rows[i]['group_span'] = span
+        i += span
+
+    return {'grade_groups': grade_groups, 'columns': columns, 'rows': rows,
+            'grade_starts': grade_starts}
 
 
 def get_overview_view(schedule_id, week=None, grades=None, include_break=True,
@@ -521,10 +683,15 @@ def get_overview_view(schedule_id, week=None, grades=None, include_break=True,
             'total': sum(len(v) for v in class_map.values()),
         })
     period_dicts = [p.to_dict() for p in periods]
+    period_groups = _period_groups(period_dicts)   # 给每个节次标 group_label
+    # 竖版（2026-10-10）：行＝节次、列＝班级，三个年级并到一张表；blocks 保留给
+    # Excel 导出等旧消费方，页面走 ovv
+    ovv = _build_vertical_matrix(blocks, period_dicts, build_weekday)
     return {
         'blocks': blocks,
+        'ovv': ovv,
         'periods': period_dicts,
-        'period_groups': _period_groups(period_dicts),
+        'period_groups': period_groups,
         'grades': [b['grade'] for b in blocks],
         'all_grades': all_grades,   # 未过滤的年级全集（供筛选控件渲染，避免过滤后无法切回）
         'labels': labels,
@@ -771,9 +938,10 @@ def add_entry(schedule_id, grade, class_name, weekday, period_number, subject,
               teacher_uid=None, teacher_name=None, room=None,
               week_range='1-18', note=None, operator=None, teaching_class=None):
     """添加课条目 → (success, message_or_entry)"""
-    # 校验节次
-    if not (1 <= period_number <= MAX_PERIOD):
-        return False, f'节次超出范围（1-{MAX_PERIOD}）'
+    # 校验节次：2026-10-10 去掉"一天最多 13 节"的业务上限，只挡非法编号；
+    # 真正的约束是下一句的"该节次必须在本学期定义过"
+    if not (1 <= period_number <= PERIOD_NUMBER_CEILING):
+        return False, '节次编号无效'
     pd = PeriodDef.query.filter_by(term_schedule_id=schedule_id,
                                    period_number=period_number).first()
     if not pd:
@@ -920,151 +1088,8 @@ def get_schedule_versions(schedule_id, page=1, per_page=50):
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# Excel 导入导出
+# Excel 导出
 # ═══════════════════════════════════════════════════════════════════════════════
-
-_IMPORT_HEADERS = ['年级', '班级', '星期', '节次', '学科', '教师姓名', '教师编号', '教室', '周次', '备注']
-
-
-def _parse_weekday(raw):
-    """解析星期 → 1-7 整数，失败返回 None"""
-    if not raw:
-        return None
-    raw = str(raw).strip()
-    if raw in _WEEKDAY_MAP:
-        return _WEEKDAY_MAP[raw]
-    try:
-        v = int(raw)
-        return v if 1 <= v <= 7 else None
-    except (ValueError, TypeError):
-        return None
-
-
-def _parse_period(raw, periods_map):
-    """解析节次：支持数字/名称（如 '第1节'/'早读'/'晚自习1'）→ int"""
-    if not raw:
-        return None
-    raw = str(raw).strip()
-    # 纯数字
-    try:
-        v = int(raw)
-        if 1 <= v <= MAX_PERIOD:
-            return v
-    except (ValueError, TypeError):
-        pass
-    # "第N节" 格式
-    m = re.match(r'第(\d+)节', raw)
-    if m:
-        v = int(m.group(1))
-        if 1 <= v <= MAX_PERIOD:
-            return v
-    # 按名称匹配
-    if raw in periods_map:
-        return periods_map[raw]
-    return None
-
-
-def import_from_excel(schedule_id, file_storage, operator=None,
-                      entry_authorizer=None):
-    """解析 Excel 导入课表 → {success, failed, errors}"""
-    periods = get_periods(schedule_id)
-    periods_map = {p.period_name: p.period_number for p in periods}
-
-    stream = io.BytesIO(file_storage.read())
-    file_storage.seek(0)
-    try:
-        wb = load_workbook(stream, data_only=True)
-    except Exception:
-        return {'success': 0, 'failed': 0, 'errors': [{'row': 0, 'message': '无法解析 Excel 文件'}]}
-
-    ws = wb.active
-    iter_rows = ws.iter_rows(values_only=True)
-    try:
-        header = next(iter_rows)
-    except StopIteration:
-        return {'success': 0, 'failed': 0, 'errors': [{'row': 0, 'message': '文件为空'}]}
-
-    # 列索引映射
-    col = {}
-    for idx, cell in enumerate(header):
-        h = str(cell or '').strip()
-        if h in _IMPORT_HEADERS:
-            col[h] = idx
-
-    if '班级' not in col or '学科' not in col:
-        return {'success': 0, 'failed': 0,
-                'errors': [{'row': 0, 'message': '缺少必要列（班级、学科），请使用标准模板'}]}
-
-    entries_list = []
-    parse_errors = []
-    for rn, raw in enumerate(iter_rows, start=2):
-        def cell(key):
-            i = col.get(key)
-            if i is None or i >= len(raw) or raw[i] is None:
-                return ''
-            return str(raw[i]).strip()
-
-        grade_val = cell('年级')
-        class_name = cell('班级')
-        weekday_raw = cell('星期')
-        period_raw = cell('节次')
-        subject = cell('学科')
-        teacher_name = cell('教师姓名')
-        teacher_uid = cell('教师编号')
-        room = cell('教室')
-        week_range = cell('周次')
-        note = cell('备注')
-
-        if not any((grade_val, class_name, subject, weekday_raw, period_raw)):
-            continue  # 跳过空行
-
-        errors = []
-        weekday = _parse_weekday(weekday_raw)
-        if not weekday:
-            errors.append(f'星期格式无效：{weekday_raw}')
-        period_number = _parse_period(period_raw, periods_map)
-        if not period_number:
-            errors.append(f'节次格式无效：{period_raw}')
-        if not class_name:
-            errors.append('班级为空')
-        if not subject:
-            errors.append('学科为空')
-        if not grade_val:
-            # 尝试从 class_name 推断年级
-            grade_val = class_name[:2] if len(class_name) >= 2 else ''
-
-        if errors:
-            parse_errors.append({'row': rn, 'message': '；'.join(errors)})
-        else:
-            entries_list.append({
-                'grade': grade_val, 'class_name': class_name,
-                'row_no': rn,
-                'weekday': weekday, 'period_number': period_number,
-                'subject': subject, 'teacher_uid': teacher_uid or None,
-                'teacher_name': teacher_name or None,
-                'room': room or None, 'week_range': week_range or '1-18',
-                'note': note or None,
-            })
-
-    # Refuse the entire import if any row falls outside the caller's scope.
-    if entry_authorizer:
-        unauthorized = [
-            {'row': item.get('row_no', idx + 2),
-             'message': '年级或班级不在你的管理范围内'}
-            for idx, item in enumerate(entries_list)
-            if not entry_authorizer(item)
-        ]
-        if unauthorized:
-            return {'success': 0, 'failed': len(entries_list) + len(parse_errors),
-                    'errors': parse_errors + unauthorized}
-
-    # 批量添加
-    result = batch_add_entries(schedule_id, entries_list, operator)
-    # 合并解析错误（调整行号偏移）
-    all_errors = parse_errors + [{'row': e['row'], 'message': e['message']} for e in result['errors']]
-    return {'success': result['success'], 'failed': result['failed'] + len(parse_errors),
-            'errors': all_errors}
-
 
 def export_schedule(schedule_id, view_type='class', grade=None, class_name=None,
                     teacher_uid=None, week=None, allowed_grades=None,
@@ -1091,11 +1116,10 @@ def export_schedule(schedule_id, view_type='class', grade=None, class_name=None,
     elif view_type == 'teacher' and teacher_uid:
         _export_teacher_sheet(wb, schedule_id, teacher_uid, periods, title, week,
                               allowed_grades, allowed_classes)
-    elif view_type == 'overview':
-        _export_overview_sheet(wb, schedule_id, periods, title, week,
-                               allowed_grades, allowed_classes)
-    else:
-        # master：按班级分 sheet
+    elif view_type == 'all':
+        # 整校：一个班一张 sheet（2026-10-10 由原 `else`/master 分支改名而来）。
+        # 大课表页已下线，但"整校分班导出"这个能力仍被「学期管理」卡片的导出按钮使用，
+        # 所以只把名字与页面解耦，不删功能。
         grade_classes = get_grade_class_list(
             schedule_id, allowed_grades=allowed_grades,
             allowed_classes=allowed_classes)
@@ -1103,6 +1127,10 @@ def export_schedule(schedule_id, view_type='class', grade=None, class_name=None,
             for cn in cls_list:
                 _export_class_sheet(wb, schedule_id, g, cn, periods, f'{g}{cn}',
                                     week, allowed_grades, allowed_classes)
+    else:
+        # 'overview' 及任何未知 view_type（含旧分享短链里的 'master'）→ 全校总课表一张表
+        _export_overview_sheet(wb, schedule_id, periods, title, week,
+                               allowed_grades, allowed_classes)
 
     if not wb.sheetnames:
         ws = wb.create_sheet('空')
@@ -1279,51 +1307,6 @@ def _export_teacher_sheet(wb, schedule_id, teacher_uid, periods, sheet_title,
     ws.column_dimensions['A'].width = 16
     for i in range(2, 9):
         ws.column_dimensions[get_column_letter(i)].width = 14
-
-
-def generate_import_template(schedule_id):
-    """生成导入模板 BytesIO（含表头 + 示例 + 节次说明 sheet）"""
-    wb = Workbook()
-    ws = wb.active
-    ws.title = '课表数据'
-
-    hf = Font(bold=True, color='FFFFFF')
-    hfl = PatternFill(start_color='4472C4', end_color='4472C4', fill_type='solid')
-    for ci, h in enumerate(_IMPORT_HEADERS, 1):
-        c = ws.cell(row=1, column=ci, value=h)
-        c.font = hf
-        c.fill = hfl
-        c.alignment = Alignment(horizontal='center')
-
-    # 示例行
-    sample = ['高一', '01班', '周一', '第1节', '语文', '张老师', 'T20260001', 'A101', '1-18', '']
-    for ci, v in enumerate(sample, 1):
-        ws.cell(row=2, column=ci, value=v)
-
-    widths = [8, 8, 8, 10, 10, 10, 14, 10, 8, 12]
-    for i, w in enumerate(widths, 1):
-        ws.column_dimensions[get_column_letter(i)].width = w
-    ws.freeze_panes = 'A2'
-
-    # 节次说明 sheet
-    ps = wb.create_sheet('节次说明')
-    ps.append(['节次编号', '节次名称', '开始时间', '结束时间', '类型'])
-    for c in ps[1]:
-        c.font = Font(bold=True)
-    periods = get_periods(schedule_id)
-    for p in periods:
-        ps.append([p.period_number, p.period_name, p.start_time, p.end_time,
-                   PERIOD_TYPES.get(p.period_type, p.period_type)])
-    ps.column_dimensions['A'].width = 10
-    ps.column_dimensions['B'].width = 12
-    ps.column_dimensions['C'].width = 10
-    ps.column_dimensions['D'].width = 10
-    ps.column_dimensions['E'].width = 12
-
-    buf = io.BytesIO()
-    wb.save(buf)
-    buf.seek(0)
-    return buf
 
 
 # ═══════════════════════════════════════════════════════════════════════════════

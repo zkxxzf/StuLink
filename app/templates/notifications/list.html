@@ -30,6 +30,7 @@
     .cat-system { background: #eff6ff; color: #2563eb; }
     .cat-reminder { background: #fef3c7; color: #b45309; }
     .cat-academic { background: #ecfdf5; color: #059669; }
+    .cat-collect { background: #fff7ed; color: #c2410c; }
     .cat-workbench { background: #f5f3ff; color: #7c3aed; }
     .cat-other { background: #f1f5f9; color: #475569; }
     .create-btn { border-radius: 8px; font-weight: 600; }
@@ -73,6 +74,8 @@
     <div class="d-flex gap-2">
         {% if total > 0 %}
         <form method="POST" action="{{ url_for('notifications.notification_read_all') }}" class="d-inline">
+            {# 2026-10-10 修复：POST 表单必须带 CSRF token，否则 CSRFProtect 直接 400 #}
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
             <button type="submit" class="btn btn-sm btn-outline-secondary" style="border-radius:8px;">
                 <i class="bi bi-check2-all"></i> 全部已读
             </button>
@@ -137,11 +140,19 @@
                     {% if can_create %}
                     <form method="POST" action="{{ url_for('notifications.notification_delete', notification_id=n.id) }}"
                           onclick="event.stopPropagation();" onsubmit="return confirm('确定删除此通知？')">
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                         <button type="submit" class="btn btn-sm btn-outline-danger"
                                 style="font-size:12px;border-radius:6px;" title="删除">
                             <i class="bi bi-trash3"></i>
                         </button>
                     </form>
+                    {% else %}
+                    {# 2026-10-10：普通用户可从自己的收件箱移除（软删自己的收件人行，不影响他人）#}
+                    <button type="button" class="btn btn-sm btn-outline-danger"
+                            style="font-size:12px;border-radius:6px;" title="从我的收件箱移除"
+                            onclick="event.stopPropagation(); removeNotification({{ n.id }}, this)">
+                        <i class="bi bi-x-lg"></i>
+                    </button>
                     {% endif %}
                 </div>
             </div>
@@ -220,6 +231,7 @@
                 <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
             </div>
             <form method="POST" action="{{ url_for('notifications.notification_create') }}">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                 <div class="modal-body">
                     <div class="mb-3">
                         <label class="form-label fw-semibold">标题 <span class="text-danger">*</span></label>
@@ -371,6 +383,25 @@ function markRead(notifId, btn) {
             if (badge) { badge.classList.remove('bg-primary'); badge.classList.add('bg-secondary'); badge.textContent = '已读'; }
             btn.remove();
             if (typeof updateNotificationBadge === 'function') updateNotificationBadge();
+        }
+    });
+}
+
+// 2026-10-10：从我的收件箱移除（软删自己的收件人行，卡片即时消失）
+function removeNotification(notifId, btn) {
+    if (!confirm('从我的收件箱移除这条通知？')) { return; }
+    fetch('/notifications/' + notifId + '/delete-mine', {
+        method: 'POST',
+        headers: { 'X-CSRFToken': csrfToken }
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.ok) {
+            const card = btn.closest('.notif-card');
+            if (card) { card.remove(); }
+            if (typeof updateNotificationBadge === 'function') updateNotificationBadge();
+        } else {
+            alert(data.message || '移除失败');
         }
     });
 }

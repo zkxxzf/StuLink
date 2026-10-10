@@ -15,11 +15,21 @@
         {% if tpl.description %}
         <p class="mb-2">{{ tpl.description }}</p>
         {% endif %}
+        {# 2026-10-10：显示「当前轮」的时间窗（轮次优先、模板兜底） #}
         <div class="small text-muted">
-            {% if tpl.deadline %}
-            <i class="bi bi-clock"></i> 截止时间：{{ tpl.deadline.strftime('%Y年%m月%d日 %H:%M') }}
+            {% set _rnd = eligibility.round if eligibility else none %}
+            {% set _st = (eligibility.start if eligibility else none) %}
+            {% set _dl = (eligibility.deadline if eligibility else none) or tpl.deadline %}
+            {% if _rnd %}
+            <span class="me-3"><i class="bi bi-collection"></i> 第{{ _rnd.round_no }}轮{% if _rnd.name %}·{{ _rnd.name }}{% endif %}</span>
+            {% endif %}
+            {% if _st %}
+            <span class="me-3"><i class="bi bi-play-circle"></i> 开始：{{ _st.strftime('%m月%d日 %H:%M') }}</span>
+            {% endif %}
+            {% if _dl %}
+            <i class="bi bi-clock"></i> 截止时间：{{ _dl.strftime('%Y年%m月%d日 %H:%M') }}
             {% else %}
-            <i class="bi bi-infinity"></i> 无截止时间
+            <i class="bi bi-infinity"></i> 不设截止时间
             {% endif %}
             {% if tpl.allow_multiple %}
             <span class="ms-3 text-info"><i class="bi bi-arrow-repeat"></i> 允许多次提交</span>
@@ -107,8 +117,15 @@
     <div class="text-center text-muted py-4">此表单暂无题目</div>
     {% endif %}
 
-    <div class="d-grid">
-        <button type="submit" class="btn btn-primary btn-lg" id="submitBtn">
+    <div class="d-grid gap-2">
+        {% if eligibility and eligibility.state == 'before' %}
+        {# 限时收集未开始：按钮禁用并说明开放时间（后端提交时也会二次校验）#}
+        <div class="alert alert-warning py-2 text-center mb-0">
+            <i class="bi bi-hourglass-split"></i> 收集尚未开始{% if eligibility.start %}，将于 {{ eligibility.start.strftime('%Y-%m-%d %H:%M') }} 开放{% endif %}
+        </div>
+        {% endif %}
+        <button type="submit" class="btn btn-primary btn-lg" id="submitBtn"
+                {% if eligibility and eligibility.state == 'before' %}disabled{% endif %}>
             <i class="bi bi-send"></i> 提交答案
         </button>
     </div>

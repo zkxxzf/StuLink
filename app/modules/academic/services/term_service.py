@@ -1,5 +1,5 @@
 # StuLink v1.18.9.1 2026-10-10
-# 学期周期服务（Task#27）：日期→学期/教学周定位、校历、学期交接、归档、跨学期对比、使用报告
+# 学期周期服务（Task#27）：日期→学期/教学周定位、学期交接、归档、跨学期对比、使用报告
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 """学期周期维度服务层（独立库 timetable.db）。
 
@@ -34,20 +34,33 @@ _ACTION_TEXT = {'create': '新增', 'update': '编辑', 'delete': '删除', 'swa
 def resolve_schedule_by_date(target_date=None):
     """返回该日期所属的 (TermSchedule, week_number)。
 
-    定位优先级：
-    1. is_current=True 且 contains_date 命中；
-    2. start_date <= d <= end_date 的学期（取 start_date 最近的一个）；
-    3. 退回 status='active' 的学期；再无则退回最新创建的学期。
+    定位优先级（2026-10-10 修正）：
+    1. **当前生效**：status='active' 的学期（业务上唯一）；这是"现在用的是哪张课表"
+       唯一权威口径，查课 / 调课 / 工作台都必须以它为依据；
+    2. 退一步用 is_current=True 的学期（只标了"当前"但没激活的情况）；
+    3. 完全没有生效中学期时才按起止日期区间回看命中；
+    4. 再兜底最新创建的学期。
     week_number 由学期的 get_week_number 计算，未配置起止日期时为 None。
+
+    **Why**：老实现把"日期区间命中"排在 status 之前，于是**已归档**的学期只要填了
+    起止日期、又恰好覆盖今天，就会抢走"当前学期"——查课/调课/工作台全部在操作旧学期的
+    课表（用户实测：调课页显示的是历史学期的课，导入的新课表怎么都看不到）。
     """
     d = target_date or date.today()
 
-    # 1) 当前学期且日期命中
-    for s in TermSchedule.query.filter_by(is_current=True).all():
-        if s.contains_date(d):
-            return s, s.get_week_number(d)
+    # 1) 当前生效中的学期 —— 唯一权威口径
+    s = (TermSchedule.query.filter_by(status='active')
+         .order_by(TermSchedule.id.desc()).first())
+    if s:
+        return s, s.get_week_number(d)
 
-    # 2) 按起止日期区间匹配
+    # 2) 只标了「当前」但未激活
+    s = (TermSchedule.query.filter_by(is_current=True)
+         .order_by(TermSchedule.id.desc()).first())
+    if s:
+        return s, s.get_week_number(d)
+
+    # 3) 没有生效中学期（纯历史回看）：按起止日期区间匹配
     q = TermSchedule.query.filter(
         TermSchedule.start_date.isnot(None),
         TermSchedule.start_date <= d,
@@ -58,11 +71,9 @@ def resolve_schedule_by_date(target_date=None):
     if s:
         return s, s.get_week_number(d)
 
-    # 3) 退回 active / 最新学期
-    s = TermSchedule.query.filter_by(status='active').first()
-    if not s:
-        s = TermSchedule.query.order_by(
-            TermSchedule.created_at.desc(), TermSchedule.id.desc()).first()
+    # 4) 兜底：最新创建的学期
+    s = TermSchedule.query.order_by(
+        TermSchedule.created_at.desc(), TermSchedule.id.desc()).first()
     return s, (s.get_week_number(d) if s else None)
 
 
@@ -109,48 +120,6 @@ def get_week_calendar(schedule_id):
     return result
 
 
-def get_school_calendar(schedule_id):
-    """校历数据：周次 x 星期 的矩阵，每格含日期/是否周末/是否今天。
-
-    返回 {'term', 'total_weeks', 'current_week', 'weeks': [{week, is_current,
-    start_date, end_date, days: [{weekday, date, is_weekend, is_today}]}]}。
-    """
-    ts = db.session.get(TermSchedule, schedule_id)
-    if not ts:
-        return {'term': None, 'total_weeks': 0, 'current_week': None, 'weeks': []}
-    tw = ts.total_weeks or 20
-    cur = ts.get_current_week()
-    today = date.today()
-    weeks = []
-    for w in range(1, tw + 1):
-        rng = ts.get_week_date_range(w)
-        days = []
-        for wd in range(1, 8):
-            if rng:
-                dd = rng[0] + timedelta(days=wd - 1)
-                days.append({
-                    'weekday': wd,
-                    'weekday_text': WEEKDAY_NAMES.get(wd, ''),
-                    'date': dd.strftime('%Y-%m-%d'),
-                    'day': dd.day,
-                    'month': dd.month,
-                    'is_weekend': wd >= 6,
-                    'is_today': dd == today,
-                })
-            else:
-                days.append({'weekday': wd, 'weekday_text': WEEKDAY_NAMES.get(wd, ''),
-                             'date': None, 'day': None, 'month': None,
-                             'is_weekend': wd >= 6, 'is_today': False})
-        weeks.append({
-            'week': w,
-            'is_current': (w == cur),
-            'start_date': rng[0].strftime('%Y-%m-%d') if rng else None,
-            'end_date': rng[1].strftime('%Y-%m-%d') if rng else None,
-            'days': days,
-        })
-    return {'term': ts.to_dict(), 'total_weeks': tw, 'current_week': cur, 'weeks': weeks}
-
-
 def validate_term_dates(start_date, end_date, total_weeks):
     """校验学期日期配置，返回警告文案列表（不抛异常）。
 
@@ -169,7 +138,14 @@ def validate_term_dates(start_date, end_date, total_weeks):
         except (ValueError, TypeError):
             warnings.append('教学周总数格式无效')
     if start_date and start_date.weekday() != 0:
-        warnings.append('开学第一天不是周一，建议对齐到周一（如含军训/预备周可用「周偏移」微调）')
+        # 2026-10-10：周次改为「自然周（周一~周日）」口径后，开学非周一不再造成偏移，
+        # 只在第 1 周体现为不完整的一周，这里改成说明性提示（不是警告）。
+        first_sunday = start_date + timedelta(days=7 - start_date.isoweekday())
+        cn = '一二三四五六日'[start_date.isoweekday() - 1]
+        warnings.append(
+            f'开学第一天是周{cn}，第 1 周按自然周计算：'
+            f'{start_date:%m-%d} ~ {first_sunday:%m-%d}（周日）结束，'
+            f'第 2 周从 {first_sunday + timedelta(days=1):%m-%d}（周一）开始')
     if (start_date and end_date and end_date > start_date
             and total_weeks and int(total_weeks) > 0):
         span_weeks = ((end_date - start_date).days // 7) + 1
@@ -272,11 +248,15 @@ def copy_term_as_new_draft(source_schedule_id, new_name, new_school_year, new_te
                 note=note[:100], is_deleted=False))
             stats['entries'] += 1
     db.session.commit()
-    return True, f'已复制创建草稿学期「{new_name}」', new, stats
+    return True, f'已复制创建未启用学期「{new_name}」', new, stats
 
 
 def archive_term(schedule_id, operator=None):
     """归档学期：status→archived、is_current→False，并写一条学期归档快照版本记录。
+
+    **不要求先启用**（2026-10-10）：归档只是"收进历史课表只读"，与有没有启用无关。
+    老 UI 只在 status='active' 时给归档入口，导致想归档一张没启用的课表必须先「激活」，
+    而激活会把当前启用中的课表顶掉归档 —— 属于误伤，已在页面拆开。
 
     返回 (success, message)。
     """
@@ -441,45 +421,3 @@ def compare_term_versions(schedule_id, entry_id=None, limit=100):
 # ═══════════════════════════════════════════════════════════════════════════════
 # 学期课表使用情况报告
 # ═══════════════════════════════════════════════════════════════════════════════
-
-def get_term_usage_report(schedule_id, top_n=10):
-    """学期课表使用情况报告，用于学期末归档前核对。
-
-    返回：各班级周课时总数、各学科总节数、教师课时 Top N、按节次类型分布。
-    注：条目为「每周模板」，周课时按未删除条目计数（单双周课程按其条目计 1 节/周近似）。
-    """
-    ts = db.session.get(TermSchedule, schedule_id)
-    entries = ScheduleEntry.query.filter_by(
-        term_schedule_id=schedule_id, is_deleted=False).all()
-    pmap = {p.period_number: p for p in
-            PeriodDef.query.filter_by(term_schedule_id=schedule_id).all()}
-
-    class_hours, subject_counts, teacher_counts = {}, {}, {}
-    type_dist = {'morning': 0, 'afternoon': 0, 'evening': 0, 'break': 0, 'other': 0}
-    for e in entries:
-        ck = f'{e.grade}{e.class_name}'
-        class_hours[ck] = class_hours.get(ck, 0) + 1
-        subject_counts[e.subject] = subject_counts.get(e.subject, 0) + 1
-        if e.teacher_name:
-            teacher_counts[e.teacher_name] = teacher_counts.get(e.teacher_name, 0) + 1
-        pd = pmap.get(e.period_number)
-        pt = pd.period_type if pd else None
-        type_dist[pt if pt in type_dist else 'other'] += 1
-
-    return {
-        'term': ts.to_dict() if ts else None,
-        'total_entries': len(entries),
-        'total_classes': len(class_hours),
-        'total_subjects': len(subject_counts),
-        'total_teachers': len(teacher_counts),
-        'class_hours': sorted(
-            [{'class': k, 'hours': v} for k, v in class_hours.items()],
-            key=lambda x: x['class']),
-        'subject_counts': sorted(
-            [{'subject': k, 'count': v} for k, v in subject_counts.items()],
-            key=lambda x: -x['count']),
-        'teacher_top': sorted(
-            [{'teacher': k, 'count': v} for k, v in teacher_counts.items()],
-            key=lambda x: -x['count'])[:top_n],
-        'type_dist': type_dist,
-    }

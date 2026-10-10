@@ -123,3 +123,192 @@ td.ovw-cur-col { background: #ecfdf5 !important; }
     .ovw-flag { background: #fff !important; color: #000 !important;
                border: 1px solid #6b7280; }
 }
+
+/* ══════════════════════════════════════════════════════════════════════════
+   竖版总课表（2026-10-10 改版）：行＝节次（左列作息分组、次列节次名），列＝班级
+   只服务「全校总课表」页（schedule_overview.html）。查课实时课表与导入预览仍用
+   上面的横版 .ovw-*。字号整体放大，行高与留白重排，竖屏/大屏展示友好。
+   ══════════════════════════════════════════════════════════════════════════ */
+
+/* ── 页头 ──────────────────────────────────────────────────────────── */
+.ovv-head { display: flex; justify-content: space-between; align-items: center;
+           gap: 14px; flex-wrap: wrap; margin-bottom: 14px; }
+.ovv-head-l { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
+.ovv-title { font-size: 21px; font-weight: 800; margin: 0; letter-spacing: .5px;
+            color: #0f172a; }
+.ovv-title i { color: #1d4ed8; margin-right: 4px; }
+.ovv-head-r { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.ovv-head-r .btn { font-size: 13px; padding: 6px 13px; border-radius: 9px;
+                  font-weight: 600; }
+.ovv-head-term .form-select { font-size: 13px; padding: 5px 30px 5px 11px;
+                             border-radius: 9px; height: auto; }
+
+/* ── 筛选栏（分段控件，比一排零散小按钮更好点、更整齐）──────────────── */
+.ovv-filters { background: #fff; border: 1px solid #e6ebf2; border-radius: 14px;
+              padding: 9px 16px; margin-bottom: 14px;
+              box-shadow: 0 1px 2px rgba(15, 23, 42, .04); }
+.ovv-frow { display: flex; align-items: center; gap: 11px; flex-wrap: wrap;
+           padding: 6px 0; }
+.ovv-frow + .ovv-frow { border-top: 1px dashed #eef2f7; }
+.ovv-flabel { font-size: 13px; color: #64748b; font-weight: 700; letter-spacing: .3px;
+             display: inline-flex; align-items: center; gap: 5px; white-space: nowrap; }
+.ovv-flabel i { color: #94a3b8; }
+.ovv-seg { display: inline-flex; flex-wrap: wrap; gap: 3px; background: #f1f5f9;
+          border-radius: 10px; padding: 3px; }
+.ovv-seg-item { font-size: 13.5px; line-height: 1.55; padding: 5px 13px;
+               border-radius: 8px; color: #475569; text-decoration: none;
+               white-space: nowrap; transition: background .15s, color .15s,
+               box-shadow .15s; }
+.ovv-seg-item:hover { background: #e2e8f0; color: #0f172a; }
+.ovv-seg-item.is-on { background: #fff; color: #1d4ed8; font-weight: 700;
+                     box-shadow: 0 1px 3px rgba(15, 23, 42, .13); }
+.ovv-seg-item em { font-style: normal; font-size: 10.5px; margin-left: 5px;
+                  padding: 1px 5px; border-radius: 6px; background: #f59e0b;
+                  color: #fff; vertical-align: 1px; }
+.ovv-fdiv { width: 1px; height: 22px; background: #e2e8f0; }
+.ovv-stat { font-size: 12.5px; color: #94a3b8; font-weight: 600;
+           font-variant-numeric: tabular-nums; }
+
+/* ── 表体 ──────────────────────────────────────────────────────────── */
+.ovv-block { background: #fff; border: 1px solid #e2e8f0; border-radius: 14px;
+            overflow: hidden; box-shadow: 0 1px 3px rgba(15, 23, 42, .05); }
+.ovv-scroll { overflow: auto; max-height: calc(100vh - 250px);
+             -webkit-overflow-scrolling: touch; isolation: isolate; }
+
+table.ovv-table { width: auto; min-width: 100%; border-collapse: separate;
+                 border-spacing: 0; font-size: 13.5px; }
+table.ovv-table th, table.ovv-table td { border-right: 1px solid #eef2f7;
+                                        border-bottom: 1px solid #eef2f7;
+                                        text-align: center; vertical-align: middle; }
+
+/* 表头两级：年级（跨列，深色）→ 班级列；左侧两列在两级表头上都吸附 */
+.ovv-grade-row th.ovv-grade { position: sticky; top: 0; z-index: 4; height: 40px;
+                             font-size: 14.5px; font-weight: 800; letter-spacing: .6px;
+                             color: #fff; border-right: 1px solid rgba(255,255,255,.25); }
+.ovv-grade.ovv-g0 { background: linear-gradient(180deg, #1e3a8a, #1d4ed8); }
+.ovv-grade.ovv-g1 { background: linear-gradient(180deg, #334155, #475569); }
+.ovv-grade.ovv-g2 { background: linear-gradient(180deg, #0f766e, #0d9488); }
+.ovv-grade-sub { display: inline-block; margin-left: 9px; font-size: 11.5px;
+                font-weight: 500; opacity: .78; }
+.ovv-class-row th.ovv-class { position: sticky; top: 40px; z-index: 4; height: 48px;
+                             width: 106px; min-width: 106px; background: #f8fafc;
+                             font-size: 14.5px; font-weight: 800; color: #1d4ed8;
+                             padding: 4px 6px; }
+.ovv-class a { color: inherit; text-decoration: none; }
+.ovv-class a:hover { text-decoration: underline; }
+.ovv-cmeta { display: block; margin-top: 2px; font-size: 11px; font-weight: 500;
+            color: #94a3b8; letter-spacing: normal; }
+.ovv-grade-start { border-left: 2px solid #cbd5e1 !important; }
+
+/* 左侧两列：作息分组（纵向文字）+ 节次名与起止时间 */
+th.ovv-axis { position: sticky; top: 0; z-index: 6; background: #eef2f7;
+             color: #475569; font-size: 12.5px; font-weight: 800; letter-spacing: 1px; }
+th.ovv-axis-g { left: 0; width: 36px; min-width: 36px; }
+th.ovv-axis-p { left: 36px; width: 96px; min-width: 96px; }
+
+th.ovv-period { position: sticky; left: 36px; z-index: 3; width: 96px; min-width: 96px;
+               height: 54px; background: #f8fafc; padding: 6px 4px !important; }
+.ovv-pname { display: block; font-size: 13.5px; font-weight: 800; color: #334155;
+            white-space: nowrap; }
+.ovv-ptime { display: block; margin-top: 3px; font-size: 11px; font-weight: 500;
+            color: #94a3b8; font-variant-numeric: tabular-nums; }
+.ovv-ptime i { font-style: normal; margin: 0 1px; }
+th.ovv-p-reading { background: #fffbeb; }
+th.ovv-p-evening { background: #eef2ff; }
+
+th.ovv-group { width: 36px; min-width: 36px; padding: 0 !important;
+              background: var(--grp-bg, #f1f5f9) !important; position: sticky;
+              left: 0; z-index: 2; }
+.ovv-group-t { display: block; writing-mode: vertical-rl; text-orientation: upright;
+              letter-spacing: 3px; font-size: 12.5px; font-weight: 800; color: #475569;
+              margin: 0 auto; }
+
+/* 数据行：一班一格，行高统一、条目多时自动长高 */
+.ovv-row > td.ovv-cell { height: 54px; padding: 5px 6px !important; background: #fff; }
+.ovv-row > td.ovv-cell.ovv-multi { height: auto; }
+.ovv-row.ovv-group-start > th, .ovv-row.ovv-group-start > td {
+    border-top: 1px solid #dde4ec; }
+
+/* 午休/课间：斜纹空档行（时间空档，不是课） */
+.ovv-row.ovv-break-row > td.ovv-cell {
+    background: repeating-linear-gradient(45deg, #fbfdff, #fbfdff 6px,
+                                          #f1f5f9 6px, #f1f5f9 12px); }
+.ovv-row.ovv-break-row > th.ovv-period { height: 34px; background: #f1f5f9; }
+.ovv-row.ovv-break-row .ovv-pname { font-size: 12px; font-weight: 600; color: #94a3b8; }
+.ovv-row.ovv-break-row .ovv-ptime { font-size: 10.5px; }
+
+/* 当前节次（查课实时课表复用）：整行高亮 */
+.ovv-row.ovv-cur-row > th.ovv-period { background: #d1fae5 !important;
+                                      color: #065f46 !important; }
+.ovv-row.ovv-cur-row > td.ovv-cell { background: #f0fdf4; }
+.ovv-cur-flag { display: inline-block; font-size: 10px; line-height: 1.5; padding: 0 5px;
+               border-radius: 5px; background: #10b981; color: #fff; margin-right: 4px;
+               font-weight: 600; vertical-align: 1px; }
+
+/* 格内条目：字号放大（学科 14.5px / 教师 12px），左侧学科色条更粗 */
+.ovv-cell .ovw-item { padding: 6px 8px 6px 11px; border-radius: 8px;
+                     box-shadow: inset 3px 0 0 var(--sch, #94a3b8); }
+.ovv-cell .ovw-item + .ovw-item { margin-top: 4px; }
+.ovv-cell .ovw-subj { font-size: 14.5px; line-height: 1.35; }
+.ovv-cell .ovw-teacher { font-size: 12px; line-height: 1.35; margin-top: 1px; }
+.ovv-cell .ovw-flag { font-size: 10px; padding: 0 4px; border-radius: 4px;
+                     vertical-align: 1.5px; }
+.ovv-cell .ovw-chk { font-size: 10px; padding: 0 4px; }
+
+/* ── 窄屏 / 竖屏 ───────────────────────────────────────────────────── */
+@media (max-width: 1100px) {
+    .ovv-title { font-size: 18px; }
+    .ovv-filters { padding: 8px 12px; }
+    .ovv-seg-item { font-size: 13px; padding: 4px 10px; }
+    .ovv-class-row th.ovv-class { width: 92px; min-width: 92px; font-size: 13.5px; }
+    .ovv-row > td.ovv-cell { min-width: 92px; }
+    .ovv-cell .ovw-subj { font-size: 13.5px; }
+    .ovv-cell .ovw-teacher { font-size: 11.5px; }
+}
+@media (max-width: 768px) {
+    .ovv-scroll { max-height: calc(100vh - 200px); }
+    th.ovv-axis-p, th.ovv-period { width: 76px; min-width: 76px; }
+    .ovv-row > td.ovv-cell { min-width: 80px; height: 46px; }
+    .ovv-cell .ovw-teacher, .ovv-cmeta { display: none; }
+}
+/* 竖屏展示（走廊/教务办竖屏大屏）：保持大字、行高再放大，靠横向滚动看更多班 */
+@media (orientation: portrait) and (min-width: 700px) {
+    .ovv-scroll { max-height: calc(100vh - 220px); }
+    .ovv-row > td.ovv-cell, th.ovv-period { height: 62px; }
+    .ovv-cell .ovw-subj { font-size: 15.5px; }
+    .ovv-cell .ovw-teacher { font-size: 12.5px; }
+    .ovv-class-row th.ovv-class { font-size: 15px; }
+}
+
+/* ── 编辑模式（全校总课表「编辑」按钮）：可点、可拖 ──────────────────
+   只在 #ovContainer.ovv-edit-mode 下生效；只读态无这些样式，也无点击/拖拽绑定。 */
+.ovv-edit-mode td.ovv-cell.ovv-editable { cursor: pointer; }
+.ovv-edit-mode td.ovv-cell.ovv-editable:hover {
+    outline: 2px solid #2563eb; outline-offset: -2px;
+    background: #f0f7ff !important;
+}
+.ovv-edit-mode .ovw-item { cursor: grab; }
+.ovv-edit-mode .ovw-item:hover { box-shadow: inset 3px 0 0 var(--sch, #94a3b8), 0 0 0 2px #93c5fd; }
+.ovv-edit-mode .ovw-item.ovv-dragging { opacity: .45; cursor: grabbing; }
+.ovv-edit-mode td.ovv-cell.ovv-drop-hover {
+    outline: 2px dashed #10b981; outline-offset: -2px; background: #ecfdf5 !important;
+}
+
+/* ── 打印：竖版表按纸张铺开，表头每页重复 ─────────────────────────── */
+@media print {
+    .ovv-block { border-color: #9ca3af; box-shadow: none; border-radius: 0;
+                break-inside: auto; }
+    .ovv-scroll { overflow: visible !important; max-height: none !important; }
+    .ovv-table { min-width: 0 !important; font-size: 10.5px; }
+    .ovv-table thead { display: table-header-group; }
+    .ovv-grade-row th.ovv-grade { background: #e5e7eb !important; color: #000 !important; }
+    th.ovv-axis, th.ovv-period, th.ovv-group, th.ovv-class {
+        position: static !important; background: #f3f4f6 !important; color: #000 !important; }
+    th.ovv-p-reading, th.ovv-p-evening { background: #f3f4f6 !important; }
+    .ovv-row.ovv-break-row > td.ovv-cell { background: #fff !important; }
+    .ovv-cell .ovw-item { background: #fff !important;
+                         box-shadow: inset 3px 0 0 #6b7280 !important; }
+    .ovv-cell .ovw-subj { color: #000 !important; font-size: 10.5px; }
+    .ovv-cell .ovw-teacher { color: #374151 !important; font-size: 9px; }
+    .ovv-cmeta, .ovv-cur-flag, .ovv-grade-sub { display: none !important; }
+}

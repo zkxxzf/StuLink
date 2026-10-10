@@ -29,7 +29,7 @@
             <div class="small" style="opacity:.85">
                 {% if ts %}
                 当前学期：<strong>{{ ts.name }}</strong>
-                <span class="badge bg-light text-dark ms-1">{{ {'draft':'草稿','active':'启用中','archived':'已归档'}.get(ts.status, ts.status) }}</span>
+                <span class="badge bg-light text-dark ms-1">{{ {'draft':'未启用','active':'启用中','archived':'已归档'}.get(ts.status, ts.status) }}</span>
                 {% if ts.period_text() %} · {{ ts.period_text() }}{% endif %}
                 {% else %}尚未建立学期课表{% endif %}
                 · 今天 {{ today.strftime('%Y-%m-%d') }}

@@ -14,6 +14,11 @@
         {% endif %}
     </div>
     <div class="d-flex gap-2">
+        {% if tpl.status == 'closed' %}
+        <button type="button" class="btn btn-sm btn-success" data-bs-toggle="modal" data-bs-target="#reopenFormModal">
+            <i class="bi bi-arrow-counterclockwise"></i> 重新开放收集
+        </button>
+        {% endif %}
         <a class="btn btn-sm btn-outline-success" href="{{ url_for('academic.form_export', form_id=tpl.id) }}">
             <i class="bi bi-download"></i> 导出 Excel
         </a>
@@ -88,19 +93,7 @@
                 <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('academic.form_submissions', form_id=tpl.id) }}">重置</a>
             </div>
         </form>
-        <div class="d-flex gap-2 mt-2 flex-wrap">
-            {% if tpl.status == 'open' %}
-            <button type="button" class="btn btn-sm btn-outline-primary" data-bs-toggle="modal" data-bs-target="#newRoundModal">
-                <i class="bi bi-plus-circle"></i> 发起新一轮
-            </button>
-            {% endif %}
-            {% if cur_round and cur_round.status == 'open' %}
-            <form method="post" action="{{ url_for('academic.form_round_close', round_id=cur_round.id) }}"
-                  onsubmit="return confirm('结束本轮后不再接受本轮提交（不影响已入账业绩），确定？')">
-                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                <button class="btn btn-sm btn-outline-warning"><i class="bi bi-lock"></i> 结束本轮</button>
-            </form>
-            {% endif %}
+        <div class="d-flex gap-2 mt-2 flex-wrap align-items-center">
             {% if tpl.to_achievement %}
             <span class="badge bg-success align-self-center">
                 <i class="bi bi-award"></i> 审核通过自动计入业绩（{{ tpl.ach_category or '未设类别' }}{% if tpl.ach_level %}·{{ tpl.ach_level }}{% endif %}）
@@ -110,6 +103,75 @@
                 <i class="bi bi-graph-up"></i> 汇总看板
             </a>
         </div>
+    </div>
+</div>
+
+{# 2026-10-10：轮次操作区 —— 一次收集 = 一轮；限时（开始/截止）、延长、重开都在这里 #}
+<div class="card mb-3">
+    <div class="card-header d-flex justify-content-between align-items-center py-2">
+        <span class="fw-bold small"><i class="bi bi-collection"></i> 收集轮次</span>
+        <div class="d-flex gap-2">
+            {% if tpl.status == 'open' %}
+            <button type="button" class="btn btn-sm btn-outline-primary" data-bs-toggle="modal" data-bs-target="#newRoundModal">
+                <i class="bi bi-plus-circle"></i> 发起新一轮
+            </button>
+            {% elif tpl.status == 'closed' %}
+            <button type="button" class="btn btn-sm btn-success" data-bs-toggle="modal" data-bs-target="#reopenFormModal">
+                <i class="bi bi-arrow-counterclockwise"></i> 重新开放收集
+            </button>
+            {% endif %}
+        </div>
+    </div>
+    <div class="table-responsive">
+        <table class="table table-sm table-hover align-middle mb-0">
+            <thead class="table-light">
+                <tr>
+                    <th>轮次</th><th>状态</th><th>时间窗</th>
+                    <th class="text-center">提交 / 待审</th><th class="text-end">操作</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for r in rounds %}
+                {% set st = ((round_stats or {}).get(r.id) or {}) %}
+                <tr {% if cur_round and cur_round.id == r.id %}class="table-primary"{% endif %}>
+                    <td class="small fw-bold">第{{ r.round_no }}轮{% if r.name %}·{{ r.name }}{% endif %}</td>
+                    <td>
+                        {% if r.status == 'open' %}<span class="badge bg-success">进行中</span>
+                        {% else %}<span class="badge bg-secondary">已结束</span>{% endif %}
+                    </td>
+                    <td class="small">
+                        {{ r.start_time.strftime('%m-%d %H:%M') if r.start_time else '不限' }}
+                        ~ {{ r.deadline.strftime('%m-%d %H:%M') if r.deadline else '不限' }}
+                    </td>
+                    <td class="small text-center">{{ st.total or 0 }} / <span class="text-warning fw-bold">{{ st.pending or 0 }}</span></td>
+                    <td class="text-end text-nowrap">
+                        {% if r.status == 'open' %}
+                        <button type="button" class="btn btn-sm btn-outline-primary"
+                                data-bs-toggle="modal" data-bs-target="#roundWindowModal{{ r.id }}">
+                            <i class="bi bi-clock-history"></i> 调整时间
+                        </button>
+                        <form method="post" class="d-inline"
+                              action="{{ url_for('academic.form_round_close', round_id=r.id) }}"
+                              onsubmit="return confirm('结束本轮后不再接受本轮提交（不影响已入账业绩），确定？')">
+                            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                            <button class="btn btn-sm btn-outline-warning"><i class="bi bi-lock"></i> 结束本轮</button>
+                        </form>
+                        {% else %}
+                        <button type="button" class="btn btn-sm btn-outline-success"
+                                data-bs-toggle="modal" data-bs-target="#roundReopenModal{{ r.id }}">
+                            <i class="bi bi-arrow-counterclockwise"></i> 重新开放
+                        </button>
+                        {% endif %}
+                    </td>
+                </tr>
+                {% else %}
+                <tr><td colspan="5" class="text-center text-muted py-3">暂无轮次</td></tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    <div class="px-3 py-2 small text-muted border-top">
+        限时收集：开始时间到点自动开放；「调整时间」改本轮起止；「重新开放」恢复已结束轮次（可改截止）；「发起新一轮」保留历史轮次与已入账业绩。
     </div>
 </div>
 
@@ -240,8 +302,14 @@
                                placeholder="如 2026-2027学年第二学期">
                     </div>
                     <div class="mb-2">
+                        <label class="form-label small mb-1">本轮开始时间（可选）</label>
+                        <input type="datetime-local" name="start_time" class="form-control form-control-sm">
+                        <div class="form-text">留空 = 立即开始；到点后自动开放。</div>
+                    </div>
+                    <div class="mb-2">
                         <label class="form-label small mb-1">本轮截止时间（可选）</label>
                         <input type="datetime-local" name="deadline" class="form-control form-control-sm">
+                        <div class="form-text">留空 = 不设截止。</div>
                     </div>
                     <div class="form-text">
                         发起后上一轮自动结束，教师的新提交归入新一轮；已计入业绩库的记录仍标记原轮次。
@@ -257,6 +325,132 @@
         </form>
     </div>
 </div>
+
+{# 2026-10-10：每轮弹窗（open → 调整时间；closed → 重新开放），表单 action 各自内联 #}
+{% for r in rounds %}
+{% if r.status == 'open' %}
+<div class="modal fade" id="roundWindowModal{{ r.id }}" tabindex="-1">
+    <div class="modal-dialog modal-dialog-centered">
+        <form method="post" action="{{ url_for('academic.form_round_window', round_id=r.id) }}">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <div class="modal-content">
+                <div class="modal-header py-2">
+                    <h6 class="modal-title"><i class="bi bi-clock-history"></i> 调整时间 - 第{{ r.round_no }}轮{% if r.name %}·{{ r.name }}{% endif %}</h6>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="mb-2">
+                        <label class="form-label small mb-1">开始时间</label>
+                        <input type="datetime-local" name="start_time" class="form-control form-control-sm"
+                               value="{{ r.start_time.strftime('%Y-%m-%dT%H:%M') if r.start_time else '' }}">
+                        <div class="form-text">到点后自动开放；留空 = 立即开放。</div>
+                    </div>
+                    <div class="mb-2">
+                        <label class="form-label small mb-1">截止时间</label>
+                        <input type="datetime-local" name="deadline" class="form-control form-control-sm"
+                               value="{{ r.deadline.strftime('%Y-%m-%dT%H:%M') if r.deadline else '' }}">
+                        <div class="form-text">留空 = 不设截止。</div>
+                    </div>
+                    <div class="d-flex gap-3">
+                        <div class="form-check">
+                            <input class="form-check-input" type="checkbox" name="clear_start" value="1" id="clearStart{{ r.id }}">
+                            <label class="form-check-label small" for="clearStart{{ r.id }}">清除开始时间</label>
+                        </div>
+                        <div class="form-check">
+                            <input class="form-check-input" type="checkbox" name="clear_deadline" value="1" id="clearDl{{ r.id }}">
+                            <label class="form-check-label small" for="clearDl{{ r.id }}">清除截止时间</label>
+                        </div>
+                    </div>
+                </div>
+                <div class="modal-footer py-2">
+                    <button type="button" class="btn btn-sm btn-light" data-bs-dismiss="modal">取消</button>
+                    <button type="submit" class="btn btn-sm btn-primary"><i class="bi bi-check-lg"></i> 保存</button>
+                </div>
+            </div>
+        </form>
+    </div>
+</div>
+{% else %}
+<div class="modal fade" id="roundReopenModal{{ r.id }}" tabindex="-1">
+    <div class="modal-dialog modal-dialog-centered">
+        <form method="post" action="{{ url_for('academic.form_round_reopen', round_id=r.id) }}">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <div class="modal-content">
+                <div class="modal-header py-2">
+                    <h6 class="modal-title"><i class="bi bi-arrow-counterclockwise"></i> 重新开放 - 第{{ r.round_no }}轮{% if r.name %}·{{ r.name }}{% endif %}</h6>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="mb-2">
+                        <label class="form-label small mb-1">开始时间</label>
+                        <input type="datetime-local" name="start_time" class="form-control form-control-sm"
+                               value="{{ r.start_time.strftime('%Y-%m-%dT%H:%M') if r.start_time else '' }}">
+                    </div>
+                    <div class="mb-2">
+                        <label class="form-label small mb-1">截止时间</label>
+                        <input type="datetime-local" name="deadline" class="form-control form-control-sm"
+                               value="{{ r.deadline.strftime('%Y-%m-%dT%H:%M') if r.deadline else '' }}">
+                        <div class="form-text text-warning">
+                            <i class="bi bi-exclamation-triangle"></i> 原截止时间已过请填新值；留空 = 沿用原值。
+                        </div>
+                    </div>
+                </div>
+                <div class="modal-footer py-2">
+                    <button type="button" class="btn btn-sm btn-light" data-bs-dismiss="modal">取消</button>
+                    <button type="submit" class="btn btn-sm btn-success"><i class="bi bi-arrow-counterclockwise"></i> 重新开放</button>
+                </div>
+            </div>
+        </form>
+    </div>
+</div>
+{% endif %}
+{% endfor %}
+
+{% if tpl.status == 'closed' %}
+{# 已关闭的收集：重新开放（可沿用原轮次，或作为新一轮收集保留历史） #}
+<div class="modal fade" id="reopenFormModal" tabindex="-1">
+    <div class="modal-dialog modal-dialog-centered">
+        <form method="post" action="{{ url_for('academic.form_reopen', form_id=tpl.id) }}">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <div class="modal-content">
+                <div class="modal-header py-2">
+                    <h6 class="modal-title"><i class="bi bi-arrow-counterclockwise"></i> 重新开放收集</h6>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="mb-2">
+                        <label class="form-label small mb-1">开始时间</label>
+                        <input type="datetime-local" name="start_time" class="form-control form-control-sm"
+                               value="{{ tpl.start_time.strftime('%Y-%m-%dT%H:%M') if tpl.start_time else '' }}">
+                    </div>
+                    <div class="mb-2">
+                        <label class="form-label small mb-1">截止时间</label>
+                        <input type="datetime-local" name="deadline" class="form-control form-control-sm"
+                               value="{{ tpl.deadline.strftime('%Y-%m-%dT%H:%M') if tpl.deadline else '' }}">
+                        <div class="form-text">留空 = 不设截止。</div>
+                    </div>
+                    <div class="mb-2">
+                        <label class="form-label small mb-1">新一轮名称（可选）</label>
+                        <input name="name" class="form-control form-control-sm" maxlength="100"
+                               placeholder="如 2026-2027学年第二学期">
+                    </div>
+                    <div class="form-check">
+                        {# checkbox 在前：勾选时 mode 取到 new；未勾选只提交 hidden 的 reuse #}
+                        <input class="form-check-input" type="checkbox" name="mode" value="new" id="reopenAsNew">
+                        <input type="hidden" name="mode" value="reuse">
+                        <label class="form-check-label" for="reopenAsNew">作为新一轮收集（历史轮次保留）</label>
+                    </div>
+                    <div class="form-text">不勾选则重新开放最近一轮（不新增轮次）。</div>
+                </div>
+                <div class="modal-footer py-2">
+                    <button type="button" class="btn btn-sm btn-light" data-bs-dismiss="modal">取消</button>
+                    <button type="submit" class="btn btn-sm btn-success"><i class="bi bi-arrow-counterclockwise"></i> 重新开放</button>
+                </div>
+            </div>
+        </form>
+    </div>
+</div>
+{% endif %}
 {% endblock %}
 
 {% block extra_js %}

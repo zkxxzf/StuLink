@@ -4,13 +4,20 @@
    参数：
    - schedules: 全部学期列表（含 archived，TermSchedule 对象）
    - ts: 当前学期（可为 None）
-   - base_endpoint: 带 sid 的页面跳转 endpoint（如 'academic.schedule_master'）
+   - base_endpoint: 带 sid 的页面跳转 endpoint（如 'academic.schedule_overview'）
    - base_kwargs: 附加 url_for 参数 dict（如 {'grade': grade}）
    - query_mode: 无 sid 页面的模式（today / my_schedule），切换时带 ?sid=
    - week: 当前周次过滤参数（透传保留）
 #}
 {% macro term_selector(schedules, ts, base_endpoint=None, base_kwargs=None, query_mode=None, week=None) %}
-{% if schedules and schedules|length > 0 %}
+{# 2026-10-10：**已归档（历史）学期不再出现在切换列表里** —— 成了历史就归「历史课表」页，
+   不在这里重复出现。万一当前正看某个归档学期（如历史详情），仍把它放到首位，
+   避免下拉里连当前学期都没有。 #}
+{% set live = (schedules or [])|rejectattr('status', 'equalto', 'archived')|list %}
+{% if ts and ts.status == 'archived' and ts.id not in (live|map(attribute='id')|list) %}
+{% set live = [ts] + live %}
+{% endif %}
+{% if live %}
 <div class="d-flex align-items-center gap-2" id="termSwitcher"
      data-mode="{{ 'query' if query_mode else 'path' }}"
      data-endpoint="{{ base_endpoint or request.endpoint }}"
@@ -19,10 +26,10 @@
      data-week="{{ week or '' }}">
     <span class="text-muted small text-nowrap"><i class="bi bi-calendar-range"></i> 学期</span>
     <select class="form-select form-select-sm" id="termSelect" style="width:auto;min-width:230px">
-        {% for s in schedules %}
+        {% for s in live %}
         <option value="{{ s.id }}" data-status="{{ s.status }}"
                 {% if ts and s.id == ts.id %}selected{% endif %}>
-            {{ s.name }}{% if s.status == 'archived' %}（历史）{% elif s.status == 'draft' %}（草稿）{% endif %}
+            {{ s.name }}{% if s.status == 'archived' %}（历史）{% elif s.status == 'draft' %}（未启用）{% endif %}
         </option>
         {% endfor %}
     </select>
@@ -40,18 +47,20 @@
    参数：
    - total_weeks: 学期教学周总数（为空/0 时不渲染）
    - current_week: 当前周（用于标记「本周」）
-   - selected_week: 当前选中的周次过滤值（None=全部周）
-   JS 见 schedule_term.js：切换时在当前 URL 上设置 ?week=N 并刷新
+   - selected_week: 当前选中的周次（None=取当前周）
+   2026-10-10：**去掉「全部周」选项** —— 周次直接定位到当前周，不再默认铺开整学期；
+   无法判断当前周（未配学期日期/今天不在学期内）时整个下拉不渲染，避免与数据口径不一致。
+   JS 见 schedule_term.js：切换时在当前 URL 上设置 ?week=N 并刷新。
 #}
 {% macro week_selector(total_weeks, current_week=None, selected_week=None) %}
-{% if total_weeks and total_weeks > 0 %}
+{% set sel_week = selected_week if selected_week else current_week %}
+{% if total_weeks and total_weeks > 0 and sel_week %}
 <div class="d-flex align-items-center gap-1" id="weekSwitcher"
      data-total="{{ total_weeks }}" data-current="{{ current_week or '' }}">
     <span class="text-muted small text-nowrap"><i class="bi bi-calendar-week"></i> 周次</span>
     <select class="form-select form-select-sm" id="weekSelect" style="width:auto;min-width:130px">
-        <option value="">全部周</option>
         {% for w in range(1, total_weeks + 1) %}
-        <option value="{{ w }}" {% if selected_week == w %}selected{% endif %}>
+        <option value="{{ w }}" {% if sel_week == w %}selected{% endif %}>
             第 {{ w }} 周{% if current_week == w %}（本周）{% endif %}
         </option>
         {% endfor %}
@@ -91,13 +100,13 @@
 {% elif ts and ts.status == 'draft' %}
 <div class="alert alert-secondary py-2 d-flex align-items-center gap-2 mb-3">
     <i class="bi bi-pencil-square"></i>
-    <span class="small mb-0">「{{ ts.name }}」为<strong>草稿</strong>状态，尚未激活。{% if current_user.has_perm('academic.timetable') %}排课完成后请在
-    <a href="{{ url_for('academic.schedule_manage') }}" class="alert-link">学期管理</a>中激活。{% else %}该学期尚未发布。{% endif %}</span>
+    <span class="small mb-0">「{{ ts.name }}」<strong>未启用</strong>（尚未生效）。{% if current_user.has_perm('academic.timetable') %}排完课后可在
+    <a href="{{ url_for('academic.schedule_manage') }}" class="alert-link">学期管理</a>中「激活」；不需要它时也可直接归档进「历史课表」，不必先激活。{% else %}该学期尚未发布。{% endif %}</span>
 </div>
 {% endif %}
 {% endmacro %}
 
-{# ===== 课表条目 添加/编辑 弹窗（供 master/grade/class/teacher 复用，JS 见 schedule.js） =====
+{# ===== 课表条目 添加/编辑 弹窗（供 grade/class/room 复用，JS 见 schedule.js） =====
    需要页面提供 #scheduleData JSON 配置块（含 sid / entryAddUrl / entryEditUrl / teachers / gradeClasses） #}
 {% macro entry_modal() %}
 <div class="modal fade" id="entryModal" tabindex="-1">

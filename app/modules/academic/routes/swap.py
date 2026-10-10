@@ -10,7 +10,7 @@ from flask_login import login_required, current_user
 
 from app.extensions import db
 from app.models.timetable import (ScheduleEntry, ScheduleSwap, SWAP_STATUS,
-                                  SWAP_TYPES, WEEKDAY_NAMES, MAX_PERIOD)
+                                  SWAP_TYPES, WEEKDAY_NAMES)
 from app.modules.academic.services.access_scope import swap_entry_authorizer
 from app.modules.academic import bp
 from app.modules.academic.services import swap_service, teaching_scope_service
@@ -218,7 +218,7 @@ def swap_apply():
     class_opts = _swap_class_options(sched.id)
     return render_template('academic/swap_apply.html',
                            schedule=sched, periods=periods, class_opts=class_opts,
-                           weekdays=WEEKDAY_NAMES, max_period=MAX_PERIOD,
+                           weekdays=WEEKDAY_NAMES,
                            applicant_uid=uid, applicant_name=name,
                            today=date.today().isoformat(),
                            chain=swap_service.approval_chain())
@@ -251,7 +251,6 @@ def swap_bulk():
             return render_template('academic/swap_bulk.html',
                                    schedule=sched, class_opts=class_opts,
                                    periods=periods, weekdays=WEEKDAY_NAMES,
-                                   max_period=MAX_PERIOD,
                                    bulk_error='请只选择本人任教课程或负责班级的课程',
                                    bulk_conflicts=[],
                                    f_grade=request.form.get('grade', ''),
@@ -272,7 +271,7 @@ def swap_bulk():
             db.session.rollback()
             return render_template('academic/swap_bulk.html',
                                    schedule=sched, class_opts=class_opts, periods=periods,
-                                   weekdays=WEEKDAY_NAMES, max_period=MAX_PERIOD,
+                                   weekdays=WEEKDAY_NAMES,
                                    bulk_error=msg, bulk_conflicts=result.get('conflicts', []),
                                    f_grade=request.form.get('grade', ''),
                                    f_class=request.form.get('class_name', ''),
@@ -284,7 +283,7 @@ def swap_bulk():
 
     return render_template('academic/swap_bulk.html',
                            schedule=sched, class_opts=class_opts, periods=periods,
-                           weekdays=WEEKDAY_NAMES, max_period=MAX_PERIOD,
+                           weekdays=WEEKDAY_NAMES,
                            bulk_error=None, bulk_conflicts=[])
 
 
@@ -366,8 +365,13 @@ def swap_approve(swap_id):
         return err
     step = swap_service.review_step_of(sw)
     review_note = (request.form.get('review_note') or '').strip()
-    ok, msg, sw = swap_service.review_swap(
-        swap_id, current_user.id, current_user.real_name, 'approve', review_note)
+    # 2026-10-10：统一调课批次 —— 一次审批，整批一起推进（不再逐条点）
+    if getattr(sw, 'batch_id', None):
+        ok, msg, sw = swap_service.review_swap_batch(
+            swap_id, current_user.id, current_user.real_name, 'approve', review_note)
+    else:
+        ok, msg, sw = swap_service.review_swap(
+            swap_id, current_user.id, current_user.real_name, 'approve', review_note)
     if not ok:
         db.session.rollback()
         return jsonify({'success': False, 'message': msg}), 400
@@ -388,8 +392,13 @@ def swap_reject(swap_id):
     review_note = (request.form.get('review_note') or '').strip()
     if not review_note:
         return jsonify({'success': False, 'message': '驳回必须填写理由'}), 400
-    ok, msg, sw = swap_service.review_swap(
-        swap_id, current_user.id, current_user.real_name, 'reject', review_note)
+    # 2026-10-10：统一调课批次 —— 一次驳回，整批一起处理
+    if getattr(sw, 'batch_id', None):
+        ok, msg, sw = swap_service.review_swap_batch(
+            swap_id, current_user.id, current_user.real_name, 'reject', review_note)
+    else:
+        ok, msg, sw = swap_service.review_swap(
+            swap_id, current_user.id, current_user.real_name, 'reject', review_note)
     if not ok:
         db.session.rollback()
         return jsonify({'success': False, 'message': msg}), 400
@@ -403,7 +412,32 @@ def swap_reject(swap_id):
 @login_required
 @perm_required('academic.timetable')
 def swap_execute(swap_id):
-    """执行调课——真正修改课表（仅 approved 可执行，含幂等保护）。"""
+    """执行调课——真正修改课表（仅 approved 可执行，含幂等保护）。
+
+    2026-10-10：统一调课批次 —— 点一次「执行」把整批 approved 记录一起执行。
+    """
+    sw0 = db.session.get(ScheduleSwap, swap_id)
+    if sw0 and getattr(sw0, 'batch_id', None):
+        sibs = swap_service.batch_pending_siblings(sw0, status='approved')
+        if not sibs:
+            return jsonify({'success': False, 'message': '该批次没有可执行的记录'}), 400
+        done, fails = 0, []
+        for s in sibs:
+            ok, msg, _ = swap_service.execute_swap(
+                s.id, current_user.id, current_user.real_name)
+            if ok:
+                done += 1
+            else:
+                fails.append(f'#{s.id}：{msg}')
+        if not done:
+            return jsonify({'success': False,
+                            'message': '；'.join(fails[:3]) or '执行失败'}), 400
+        log_operation(current_user, '执行', '调课记录', swap_id,
+                      f'执行统一调课批次 {done} 门', module='academic')
+        m = f'已执行该批次 {done} 门课'
+        if fails:
+            m += f'；{len(fails)} 条未执行：' + '；'.join(fails[:3])
+        return jsonify({'success': True, 'message': m, 'data': None})
     ok, msg, sw = swap_service.execute_swap(
         swap_id, current_user.id, current_user.real_name)
     if not ok:

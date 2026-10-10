@@ -32,7 +32,7 @@ from sqlalchemy.orm import selectinload
 
 from app.extensions import db
 from app.models.academic import (
-    FormTemplate, FormQuestion, FormSubmission, FormAnswer, Teacher,
+    FormTemplate, FormQuestion, FormSubmission, FormAnswer, Teacher, FormRound,
 )
 from app.models.student import Student
 from app.utils.export_helpers import xl_row, xl_safe
@@ -77,6 +77,54 @@ def _load_template(form_id):
     if not tpl:
         raise ValueError('表单不存在')
     return tpl
+
+
+# ── 轮次口径（2026-10-10：已交/未交/统计按「当前轮」，与业绩入账口径统一） ──
+
+def _current_round(tpl):
+    """当前轮次（延迟 import form_service，服务层互引安全；异常/无轮次 → None）。"""
+    try:
+        from app.modules.academic.services import form_service
+        return form_service.current_round(tpl)
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def _current_round_id(form_id):
+    """当前轮 id；无轮次 → None（调用方按全表单处理，兼容迁移前数据）。"""
+    tpl = db.session.get(FormTemplate, form_id)
+    if not tpl:
+        return None
+    rnd = _current_round(tpl)
+    return rnd.id if rnd else None
+
+
+def _round_deadline(rnd, tpl):
+    """轮次截止时间：轮次优先、模板兜底（走 form_service.round_window）。"""
+    if rnd is None:
+        return tpl.deadline
+    try:
+        from app.modules.academic.services import form_service
+        return form_service.round_window(rnd, tpl)[1]
+    except Exception:  # noqa: BLE001
+        return rnd.deadline or tpl.deadline
+
+
+def _parse_subject_scope(raw):
+    """解析「指定学科」scope，兼容 {"subjects":[...]} 与裸 list。"""
+    if not raw:
+        return []
+    try:
+        data = json.loads(raw)
+    except (json.JSONDecodeError, TypeError):
+        return []
+    if isinstance(data, dict):
+        items = data.get('subjects') or []
+    elif isinstance(data, list):
+        items = data
+    else:
+        return []
+    return [str(x).strip() for x in items if str(x).strip()]
 
 
 def _load_questions(form_id):
@@ -142,8 +190,8 @@ def _file_url(rel_path):
 
 
 def _query_submissions(form_id, status=None, grade=None, class_name=None,
-                       keyword=None, include_rejected=True):
-    """构造提交查询（可按审核状态/年级/班级/关键词筛选）"""
+                       keyword=None, include_rejected=True, round_id=None):
+    """构造提交查询（可按审核状态/年级/班级/关键词/轮次筛选）"""
     q = FormSubmission.query.filter_by(template_id=form_id)
     if status and status in SUBMISSION_STATUS_TEXT:
         q = q.filter(FormSubmission.status == status)
@@ -157,6 +205,8 @@ def _query_submissions(form_id, status=None, grade=None, class_name=None,
         kw = f'%{keyword}%'
         q = q.filter(or_(FormSubmission.submitter_name.like(kw),
                          FormSubmission.submitter_uid.like(kw)))
+    if round_id is not None:
+        q = q.filter(FormSubmission.round_id == round_id)
     return q
 
 
@@ -208,6 +258,15 @@ def get_expected_submitters(form_id, scope=None):
         for t in q.all():
             result.append({'uid': t.teacher_uid, 'name': t.name,
                            'grade': '', 'class_name': '', 'role': 'teacher'})
+    elif tt == 'subject':
+        # 指定学科（2026-10-10）：应交名单 = 在职教师中 subject 命中 target_scope.subjects
+        subjects = _parse_subject_scope(tpl.target_scope)
+        q = Teacher.query.filter(Teacher.status == 'active')
+        if subjects:                 # 未配学科 → 退化为全部在职教师（宽容口径）
+            q = q.filter(Teacher.subject.in_(subjects))
+        for t in q.order_by(Teacher.subject, Teacher.teacher_uid).all():
+            result.append({'uid': t.teacher_uid, 'name': t.name,
+                           'grade': '', 'class_name': '', 'role': 'teacher'})
     else:
         # students / all / grade*  → 学生名单
         q = Student.query
@@ -231,39 +290,50 @@ def get_expected_submitters(form_id, scope=None):
     return result
 
 
-def _submitted_uid_set(form_id):
-    """该表单所有提交的 submitter_uid 集合（去重）。
+def _submitted_uid_set(form_id, round_id=None):
+    """已提交 submitter_uid 集合（去重）——口径=当前轮（2026-10-10 起）。
 
-    2026-10-10 优化：汇总页一次请求里「提交统计 / 班级拆分 / 未交名单」可能各调
-    一次，这里按 form_id 在请求内缓存，避免对 form_submissions 重复扫描去重。
+    round_id 为 None → 默认当前轮（form_service.current_round）；
+    该表单无任何轮次时退化为全表单（兼容迁移前数据）。
+    请求内缓存 key=(form_id, round_id)，避免对 form_submissions 重复扫描去重。
     """
     if has_request_context():
         cache = getattr(g, '_form_submitted_cache', None)
         if cache is None:
             cache = {}
             g._form_submitted_cache = cache
-        if form_id in cache:
-            return cache[form_id]
-    rows = (FormSubmission.query.filter_by(template_id=form_id)
-            .with_entities(FormSubmission.submitter_uid).distinct().all())
+        if (form_id, round_id) in cache:
+            return cache[(form_id, round_id)]
+    rid = round_id if round_id is not None else _current_round_id(form_id)
+    q = FormSubmission.query.filter_by(template_id=form_id)
+    if rid is not None:
+        q = q.filter(FormSubmission.round_id == rid)
+    # 2026-10-10：被驳回（rejected）不算「已交」——材料被打回需要重交，
+    # 所以未交名单/催交必须覆盖到他们（与提交侧「驳回可重交」口径一致）。
+    q = q.filter(FormSubmission.status.in_(('submitted', 'approved')))
+    rows = q.with_entities(FormSubmission.submitter_uid).distinct().all()
     result = {r[0] for r in rows if r[0]}
     if has_request_context():
-        g._form_submitted_cache[form_id] = result
+        g._form_submitted_cache[(form_id, round_id)] = result
     return result
 
 
-def get_submission_stats(form_id):
-    """汇总统计（expected == submitted + not_submitted 自洽）"""
+def get_submission_stats(form_id, round_id=None):
+    """汇总统计（expected == submitted + not_submitted 自洽）——口径=当前轮（2026-10-10 起）。"""
+    rid = round_id if round_id is not None else _current_round_id(form_id)
     expected_list = get_expected_submitters(form_id)
     expected_uids = {e['uid'] for e in expected_list if e['uid']}
-    submitted_uids = _submitted_uid_set(form_id)
+    submitted_uids = _submitted_uid_set(form_id, rid)
 
     expected = len(expected_uids)
     submitted = len(expected_uids & submitted_uids)
     not_submitted = expected - submitted
     rate = round(submitted * 100.0 / expected, 1) if expected else 0.0
 
-    subs = FormSubmission.query.filter_by(template_id=form_id).all()
+    q = FormSubmission.query.filter_by(template_id=form_id)
+    if rid is not None:
+        q = q.filter(FormSubmission.round_id == rid)
+    subs = q.all()
     sub_ids = [s.id for s in subs]
     approved = sum(1 for s in subs if s.status == 'approved')
     pending = sum(1 for s in subs if s.status == 'submitted')
@@ -283,20 +353,20 @@ def get_submission_stats(form_id):
     return {
         'expected': expected, 'submitted': submitted, 'not_submitted': not_submitted,
         'rate': rate, 'approved': approved, 'pending': pending, 'rejected': rejected,
-        'total_submissions': len(subs),
+        'total_submissions': len(subs), 'round_id': rid,
         'total_answers': total_answers, 'total_files': total_files,
         'total_file_size': total_file_size,
         'total_file_size_text': _human_size(total_file_size),
     }
 
 
-def get_class_breakdown(form_id):
+def get_class_breakdown(form_id, round_id=None):
     """按班级拆分提交情况（按 年级→班级 排序）。
 
     返回 list[dict(grade, class_name, expected, submitted, not_submitted, rate)]。
     """
     expected_list = get_expected_submitters(form_id)
-    submitted_uids = _submitted_uid_set(form_id)
+    submitted_uids = _submitted_uid_set(form_id, round_id)
 
     groups = {}
     for e in expected_list:
@@ -349,37 +419,43 @@ def get_submission_trend(form_id, days=14):
     return [{'date': k, 'count': v} for k, v in sorted(buckets.items())][-days:]
 
 
-def get_missing_submitters(form_id, grade=None, class_name=None, page=1, per_page=50):
-    """未提交名单（应交但没交），分页 → (items, pagination)"""
+def get_missing_submitters(form_id, grade=None, class_name=None, page=1,
+                           per_page=50, round_id=None):
+    """未提交名单（应交但没交，按当前轮口径），分页 → (items, pagination)"""
     scope = {}
     if grade:
         scope['grade'] = grade
     if class_name:
         scope['class_name'] = class_name
     expected_list = get_expected_submitters(form_id, scope=scope or None)
-    submitted_uids = _submitted_uid_set(form_id)
+    submitted_uids = _submitted_uid_set(form_id, round_id)
     missing = [e for e in expected_list if e.get('uid') not in submitted_uids]
     missing.sort(key=lambda x: (x.get('grade') or '', x.get('class_name') or '', str(x.get('uid') or '')))
     return _paginate(missing, page, per_page)
 
 
-def get_all_missing(form_id, grade=None, class_name=None):
-    """未提交名单全量（催交用，不分页）"""
+def get_all_missing(form_id, grade=None, class_name=None, round_id=None):
+    """未提交名单全量（催交用，不分页；按当前轮口径）"""
     scope = {}
     if grade:
         scope['grade'] = grade
     if class_name:
         scope['class_name'] = class_name
     expected_list = get_expected_submitters(form_id, scope=scope or None)
-    submitted_uids = _submitted_uid_set(form_id)
+    submitted_uids = _submitted_uid_set(form_id, round_id)
     return [e for e in expected_list if e.get('uid') not in submitted_uids]
 
 
 def get_submitter_list(form_id, status=None, grade=None, class_name=None,
-                       keyword=None, page=1, per_page=50):
-    """已提交名单（按审核状态/班级筛选、姓名或学号搜索、分页）→ (items, pagination)"""
+                       keyword=None, page=1, per_page=50, round_id=None):
+    """已提交名单（按审核状态/班级筛选、姓名或学号搜索、分页）→ (items, pagination)
+
+    口径=当前轮（2026-10-10 起）：多轮收集时只显示本轮提交（与未交名单保持一致）。
+    """
+    rid = round_id if round_id is not None else _current_round_id(form_id)
     q = _query_submissions(form_id, status=status, grade=grade,
-                           class_name=class_name, keyword=keyword)
+                           class_name=class_name, keyword=keyword,
+                           round_id=rid)
     subs = q.order_by(FormSubmission.submitter_grade, FormSubmission.submitter_class,
                       FormSubmission.submitter_uid).all()
     items = []
@@ -1016,17 +1092,23 @@ def get_remind_rounds(form_id):
     """
     try:
         from app.models.notification import Notification
-        # 精确路径：biz_type + biz_id
-        cnt = Notification.query.filter_by(
-            biz_type='form_remind', biz_id=form_id).count()
+        # 精确路径：biz_type + biz_id（2026-10-10 起 biz_id 存轮次 id，同时兼容旧的 form_id）
+        try:
+            rnd_ids = [r.id for r in
+                       FormRound.query.filter_by(template_id=form_id).all()]
+        except Exception:  # noqa: BLE001
+            rnd_ids = []
+        cnt = Notification.query.filter(
+            Notification.biz_type == 'form_remind',
+            Notification.biz_id.in_(rnd_ids + [form_id])).count()
         if cnt:
             return cnt
-        # 兜底：旧数据按标题匹配
+        # 兜底：旧数据按标题匹配（现标题带轮次后缀，改为前缀匹配）
         tpl = db.session.get(FormTemplate, form_id)
         if not tpl:
             return 0
-        title = f'【催交】{tpl.title}'
-        return Notification.query.filter_by(title=title).count()
+        return Notification.query.filter(
+            Notification.title.like(f'【催交】{tpl.title}%')).count()
     except Exception:
         return 0
 
@@ -1042,7 +1124,11 @@ def remind_submitters(form_id, uids=None, all_missing=False, operator=None,
     from app.modules.notifications.services import notification_service
 
     tpl = _load_template(form_id)
-    missing = get_all_missing(form_id, grade=grade, class_name=class_name)
+    # 2026-10-10：催交按「当前轮」口径（上一轮已交、本轮未交的人必须催到）
+    rnd = _current_round(tpl)
+    rid = rnd.id if rnd else None
+    missing = get_all_missing(form_id, grade=grade, class_name=class_name,
+                              round_id=rid)
 
     if uids:
         uid_set = {str(u) for u in uids}
@@ -1056,25 +1142,46 @@ def remind_submitters(form_id, uids=None, all_missing=False, operator=None,
     if not targets:
         return False, '没有可催交的未提交人员', {'notified': 0, 'notifications_created': 0}
 
-    # 填写链接
+    # 2026-10-10：同一轮次里「仍有未读催交通知」的人不再重复推送（防教务连点刷屏）；
+    # biz_id 用轮次 id（无轮次退回表单 id），比一律 biz_id=form_id 更精确。
+    biz_id = rid or form_id
+    skipped = 0
     try:
-        fill_url = url_for('academic.form_fill', form_id=form_id, _external=True)
-    except Exception:
+        pending_ids = notification_service.unread_recipient_ids('form_remind', biz_id)
+        if pending_ids:
+            resolved = notification_service.resolve_recipients(
+                'users', target_uids=[t['uid'] for t in targets if t.get('uid')])
+            pend_uids = {str(r.get('user_uid')) for r in resolved
+                         if r.get('user_id') in pending_ids}
+            if pend_uids:
+                keep = [t for t in targets if str(t.get('uid')) not in pend_uids]
+                skipped = len(targets) - len(keep)
+                targets = keep
+    except Exception:  # noqa: BLE001  去重失败不影响催交本身
+        skipped = 0
+    rounds = get_remind_rounds(form_id)
+    if not targets:
+        return False, f'未交的 {skipped} 人当前仍有未读的催交通知，本次未重复推送', {
+            'notified': 0, 'notifications_created': 0, 'skipped': skipped,
+            'rounds': rounds}
+
+    # 站内相对链接（原 _external=True 把域名写死进通知，换环境即失效）
+    try:
+        fill_url = url_for('academic.form_fill', form_id=form_id)
+    except Exception:  # noqa: BLE001
         fill_url = f'/academic/forms/{form_id}/fill'
-    deadline_txt = tpl.deadline.strftime('%Y-%m-%d %H:%M') if tpl.deadline else '无'
+    deadline_dt = _round_deadline(rnd, tpl)
+    deadline_txt = deadline_dt.strftime('%Y-%m-%d %H:%M') if deadline_dt else '不限'
+    round_txt = f'第{rnd.round_no}轮' if rnd else ''
+    if rnd and rnd.name:
+        round_txt += f'（{rnd.name}）'
 
-    # 收集未交者 uid 列表
     target_uids = [t['uid'] for t in targets if t.get('uid')]
-    names = '、'.join(f"{m.get('class_name','')}{m.get('name','')}"
-                      for m in targets[:40])
-    if len(targets) > 40:
-        names += f' 等 {len(targets)} 人'
-
-    title = f'【催交】{tpl.title}'
-    content = (f'尚有 {len(targets)} 人未提交「{tpl.title}」。\n'
-               f'未交名单：{names}\n'
+    # 个人化文案：不再把他人名单塞进同一份通知（隐私 + 相关性）
+    title = f'【催交】{tpl.title}·{round_txt}'
+    content = (f'你在「{tpl.title}」{round_txt}中还未提交材料。\n'
                f'截止时间：{deadline_txt}\n'
-               f'请尽快完成提交。')
+               f'请点击通知上的按钮尽快完成提交。')
 
     success, msg, info = notification_service.notify_users(
         uids=target_uids,
@@ -1082,14 +1189,18 @@ def remind_submitters(form_id, uids=None, all_missing=False, operator=None,
         content=content,
         category='reminder',
         biz_type='form_remind',
-        biz_id=form_id,
+        biz_id=biz_id,
         link_url=fill_url,
         creator_id=(operator.id if operator else None),
         priority='urgent',
     )
     notified = info.get('notified', 0) if info else 0
-    rounds = get_remind_rounds(form_id)
+    accountless = info.get('accountless', 0) if info else 0
     if not success:
         return False, msg, {'notified': 0, 'notifications_created': 0, 'rounds': rounds}
-    return True, f'已向 {notified} 名未提交者发出催交通知', {
-        'notified': notified, 'notifications_created': 1, 'rounds': rounds}
+    tail = f'（{skipped} 人已有未读催交，跳过）' if skipped else ''
+    if accountless:
+        tail += f'（{accountless} 人无登录账号，收不到通知，请线下告知）'
+    return True, f'已向 {notified} 名未提交者发出催交通知{tail}', {
+        'notified': notified, 'notifications_created': 1, 'rounds': rounds,
+        'skipped': skipped, 'accountless': accountless}

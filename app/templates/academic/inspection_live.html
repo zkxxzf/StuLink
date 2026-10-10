@@ -13,6 +13,13 @@
     .live-stat .item .t { font-size: 11px; opacity: .8; }
     .chk-legend { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; font-size: 11px; color: #64748b; }
     .chk-legend i { display: inline-block; width: 10px; height: 10px; border-radius: 3px; margin-right: 3px; vertical-align: -1px; }
+    /* 2026-10-10：右键快捷菜单（缺课/调课/迟到说明/其他/撤销） */
+    .chk-menu { position: absolute; z-index: 3000; background: #fff; border: 1px solid #e2e8f0;
+                border-radius: 8px; box-shadow: 0 8px 24px rgba(15, 23, 42, .16); padding: 4px;
+                min-width: 200px; }
+    .chk-menu-item { display: block; width: 100%; text-align: left; border: 0; background: transparent;
+                     padding: 6px 10px; font-size: 13px; border-radius: 6px; }
+    .chk-menu-item:hover { background: #f1f5f9; }
     @media print {
         .sidebar, .navbar, .no-print, footer { display: none !important; }
         .main-content { margin-left: 0 !important; padding: 0 !important; }
@@ -63,6 +70,19 @@
             <button class="btn btn-sm btn-success" id="btnMarkAllNormal" title="把当前页面上还没标记的格子一次性标为正常">
                 <i class="bi bi-check2-all"></i> 未标记的全部正常
             </button>
+            {# 2026-10-10：本节保存 —— 本节班都查完直接保存；未查完则询问是否通知领导 #}
+            <div class="d-flex align-items-center gap-2 ms-2">
+                <label class="form-label small mb-0 text-muted">本节</label>
+                <select id="periodPick" class="form-select form-select-sm" style="width:120px">
+                    {% for p in data.periods %}
+                    <option value="{{ p.period_number }}" {% if data.current_period_number and p.period_number == data.current_period_number %}selected{% endif %}>{{ p.period_name }}</option>
+                    {% endfor %}
+                </select>
+                <button class="btn btn-sm btn-primary" id="btnSavePeriod"
+                        title="保存本节次查课结果；若还有班级未查，可选择是否通知领导">
+                    <i class="bi bi-save"></i> 保存本节
+                </button>
+            </div>
             {% endif %}
             <span class="ms-auto chk-legend">
                 <span><i style="background:#e2e8f0"></i>未查</span>
@@ -70,7 +90,7 @@
                 <span><i style="background:#fef3c7"></i>迟到</span>
                 <span><i style="background:#fee2e2"></i>缺课</span>
                 <span><i style="background:#e0e7ff"></i>调课</span>
-                {% if can_mark %}<span class="text-muted">（点格子即可标记）</span>{% endif %}
+                {% if can_mark %}<span class="text-muted">（单击=正常 · 双击=迟到 · 右键=缺课/调课/迟到说明）</span>{% endif %}
             </span>
         </div>
     </div>
@@ -101,29 +121,21 @@
 </div>
 
 {% if can_mark %}
-<div class="modal fade" id="markModal" tabindex="-1">
+{# 2026-10-10：原「标记面板」弹窗已随交互改版移除 —— 现在单击=正常、双击=迟到、
+   右键=缺课/调课/迟到说明。此处改为「本节保存」的确认弹窗（未查完时询问是否通知领导）。 #}
+<div class="modal fade" id="savePeriodModal" tabindex="-1">
     <div class="modal-dialog modal-dialog-centered modal-sm">
         <div class="modal-content">
             <div class="modal-header py-2">
-                <h6 class="modal-title">标记查课结果</h6>
+                <h6 class="modal-title"><i class="bi bi-send"></i> 保存本节</h6>
                 <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
             </div>
             <div class="modal-body">
-                <div class="small mb-2" id="markMeta">—</div>
-                <div class="d-grid gap-2">
-                    <button type="button" class="btn btn-sm btn-success mark-btn" data-result="normal">正常</button>
-                    <button type="button" class="btn btn-sm btn-warning mark-btn" data-result="late">迟到</button>
-                    <button type="button" class="btn btn-sm btn-danger mark-btn" data-result="absent">缺课</button>
-                    <button type="button" class="btn btn-sm btn-primary mark-btn" data-result="swap">调课</button>
-                    <button type="button" class="btn btn-sm btn-outline-secondary mark-btn" data-result="other">其他</button>
-                </div>
-                <input type="text" class="form-control form-control-sm mt-2" id="markNote"
-                       maxlength="200" placeholder="备注（可选，如：迟到5分钟）">
-                <div class="small text-muted mt-2" id="markHint"></div>
+                <div class="small" id="savePeriodText">—</div>
             </div>
             <div class="modal-footer py-2 justify-content-between">
-                <button type="button" class="btn btn-sm btn-outline-secondary" id="btnClearMark">撤销标记</button>
-                <button type="button" class="btn btn-sm btn-light" data-bs-dismiss="modal">关闭</button>
+                <button type="button" class="btn btn-sm btn-outline-secondary" id="btnSaveNoNotify">暂存（不通知）</button>
+                <button type="button" class="btn btn-sm btn-warning" id="btnSaveNotify">通知领导</button>
             </div>
         </div>
     </div>
@@ -134,6 +146,7 @@
 {
     "pageUrl": {{ url_for('academic.inspection_live_schedule')|tojson }},
     "markUrl": {{ url_for('academic.inspection_mark')|tojson }},
+    "notifyUrl": {{ url_for('academic.inspection_notify')|tojson }},
     "date": {{ target_date.isoformat()|tojson }},
     "today": {{ today_iso|tojson }},
     "canMark": {{ (can_mark|string|lower) }},

@@ -19,6 +19,7 @@ from app.modules.academic.services.access_scope import (
     visible_academic_class_scope, visible_academic_grades,
 )
 from app.modules.academic.services import swap_service
+from app.modules.notifications.services import notification_service
 from app.utils.decorators import perm_required
 from app.utils.helpers import log_operation
 
@@ -814,3 +815,87 @@ def inspection_mark():
                     'skipped': skipped, 'cells': touched,
                     'message': f'已标记 {updated} 格' + (f'，撤销 {cleared} 格' if cleared else '')
                                + (f'，忽略 {skipped} 格' if skipped else '')})
+
+
+# ══════════════════════════════════════════════════════════════════════
+# 查课「本节保存」+ 通知领导（2026-10-10 新增）
+# ══════════════════════════════════════════════════════════════════════
+
+def _timetable_leaders():
+    """拥有「课表管理(academic.timetable)」权限的账号（含管理员），返回 uid（登录名）列表。
+
+    站内通知按 uid 精确推送（notify_users → target_type='users'），所以这里返回
+    账号的 username（= uid），而不是 users.id。
+    """
+    from app.models import User
+    from app.models.permission_group import PermissionGroup
+    groups = PermissionGroup.query.filter(
+        PermissionGroup.menu_keys.like('%"academic.timetable"%')).all()
+    gids = [g.id for g in groups if g.id]
+    conds = [User.role == 'admin']
+    if gids:
+        conds.append(User.permission_group_id.in_(gids))
+    users = User.query.filter(User.is_active.is_(True), db.or_(*conds)).all()
+    return [u.username for u in users if getattr(u, 'username', None)]
+
+
+@bp.route('/inspection/notify', methods=['POST'])
+@login_required
+@perm_required('academic.edit')
+def inspection_notify():
+    """把「本节次查课情况」以站内通知推送给课表管理员（领导）。
+
+    请求体（JSON）：
+      inspect_date: 'YYYY-MM-DD'
+      period:       节次编号
+      grade:        年级（可空，空=全部年级）
+      expected:     应有课（应查）格数
+      checked:      已查格数
+      unchecked:    [{grade, class_name}] 未查班级清单（可空）
+    返回 {success, message, data:{notified,...}}。
+    """
+    payload = request.get_json(silent=True) or request.form.to_dict()
+    target_date = _parse_iso_date(payload.get('inspect_date')) or date.today()
+    try:
+        period = int(payload.get('period'))
+    except (TypeError, ValueError):
+        period = None
+    if not period:
+        return jsonify({'success': False, 'message': '缺少节次'}), 400
+    grade = (payload.get('grade') or '').strip()
+    try:
+        expected = int(payload.get('expected') or 0)
+    except (TypeError, ValueError):
+        expected = 0
+    try:
+        checked = int(payload.get('checked') or 0)
+    except (TypeError, ValueError):
+        checked = 0
+    unchecked = payload.get('unchecked') or []
+    if not isinstance(unchecked, list):
+        unchecked = []
+    names = [f"{c.get('grade') or ''}{c.get('class_name') or ''}".strip()
+             for c in unchecked if isinstance(c, dict)]
+    names = [n for n in names if n]
+
+    uids = _timetable_leaders()
+    if not uids:
+        return jsonify({'success': False,
+                        'message': '没有找到具备「课表管理」权限的领导账号，无法通知'}), 400
+
+    grade_text = f'（{grade}）' if grade else ''
+    miss_text = ('；未查：' + '、'.join(names[:30]) + ('等' if len(names) > 30 else '')) if names else ''
+    title = f'查课提醒：{target_date} 第{period}节{grade_text}有 {len(names) or (expected - checked)} 个班未查'
+    content = (f'{current_user.real_name} 于 {datetime.now().strftime("%Y-%m-%d %H:%M")} 提交查课：'
+               f'{target_date} 第{period}节{grade_text}，应查 {expected} 个班，已查 {checked} 个，'
+               f'未查 {len(names) if names else (expected - checked)} 个{miss_text}。')
+    ok, msg, data = notification_service.notify_users(
+        uids, title, content, category='academic', biz_type='inspection',
+        creator_id=current_user.id, creator_name=current_user.real_name,
+        priority='high')
+    if not ok:
+        return jsonify({'success': False, 'message': msg}), 400
+    log_operation(current_user, '通知', '查课提醒', 0,
+                  f'{target_date} 第{period}节：通知 {data.get("notified", 0)} 人',
+                  module='academic')
+    return jsonify({'success': True, 'message': msg, 'data': data})

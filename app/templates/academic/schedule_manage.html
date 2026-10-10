@@ -1,11 +1,19 @@
 {% extends "base.html" %}
 {% block title %}学期课表管理{% endblock %}
 {% block content %}
+{# 2026-10-10（用户报障）：本页只列「在用 / 待启用」的学期（draft + active）。
+   已归档的学期不再混在这里（原来 4 个归档学期占 4 张卡，这页就成了历史列表），
+   统一到「历史课表」页管理；这里只提示归档数量 + 入口。
+   下面对 archived 的分支（历史徽标 / 重新启用 / 灰化样式）保留为兜底，路由已不下发。 #}
 <div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
-    <h4 class="fw-bold mb-0"><i class="bi bi-calendar3"></i> 学期课表管理</h4>
+    <div>
+        <h4 class="fw-bold mb-0"><i class="bi bi-calendar3"></i> 学期课表管理</h4>
+        <span class="text-muted small">在用 / 待启用的学期：创建、导入、激活、归档、删除</span>
+    </div>
     <div class="d-flex gap-2 flex-wrap">
         <a class="btn btn-sm btn-outline-dark" href="{{ url_for('academic.schedule_history') }}">
             <i class="bi bi-clock-history"></i> 历史课表
+            {% if archived_count %}<span class="badge bg-secondary ms-1">{{ archived_count }}</span>{% endif %}
         </a>
         <button class="btn btn-sm btn-primary" data-bs-toggle="modal" data-bs-target="#createModal">
             <i class="bi bi-plus-lg"></i> 创建学期
@@ -17,8 +25,15 @@
 <div class="card">
     <div class="card-body text-center py-5 text-muted">
         <i class="bi bi-calendar-x" style="font-size:40px;"></i>
+        {% if archived_count %}
+        <p class="mt-3 mb-1">当前没有在用 / 待启用的学期</p>
+        <p class="small mb-0">{{ archived_count }} 个学期已归档，在
+            <a href="{{ url_for('academic.schedule_history') }}">历史课表</a>中查阅或重新启用；
+            也可以点右上角「创建学期」新建。</p>
+        {% else %}
         <p class="mt-3 mb-1">尚未创建学期课表</p>
         <p class="small mb-0">点击「创建学期」开始，新学期会自动带 13 节默认作息模板</p>
+        {% endif %}
     </div>
 </div>
 {% endif %}
@@ -31,15 +46,29 @@
              style="{{ 'opacity:.72;border:1px dashed #cbd5e1 !important;' if archived else '' }}">
             <div class="card-header py-2 d-flex justify-content-between align-items-center
                         {{ 'bg-light' if archived else ('bg-success-subtle' if ts.status == 'active' else '') }}">
-                <span class="fw-bold text-truncate" title="{{ ts.name }}">
+                <span class="fw-bold text-truncate d-flex align-items-center gap-1" style="min-width:0"
+                      title="{{ ts.name }}">
                     {% if archived %}<i class="bi bi-archive text-secondary"></i>{% elif ts.status == 'active' %}<i class="bi bi-broadcast text-success"></i>{% else %}<i class="bi bi-pencil-square text-secondary"></i>{% endif %}
-                    {{ ts.name }}
+                    <span class="text-truncate">{{ ts.name }}</span>
+                    {# 2026-10-10 新增：学期名称写错没法改（用户报障「没办法编辑」）→ 名字旁给支铅笔 #}
+                    {% if not archived %}
+                    <button type="button" class="btn btn-sm btn-link p-0 ms-1 text-secondary btn-edit-term"
+                            data-bs-toggle="modal" data-bs-target="#editTermModal"
+                            data-id="{{ ts.id }}" data-name="{{ ts.name }}"
+                            data-year="{{ ts.school_year }}" data-term="{{ ts.term }}"
+                            data-desc="{{ ts.description or '' }}"
+                            title="编辑学期名称 / 学年 / 学期 / 说明">
+                        <i class="bi bi-pencil"></i>
+                    </button>
+                    {% endif %}
                 </span>
                 <span>
                     {% if ts.is_current %}<span class="badge bg-danger"><i class="bi bi-star-fill"></i> 当前</span>{% endif %}
                     {% if archived %}<span class="badge bg-secondary">历史</span>{% endif %}
+                    {# 2026-10-10：非启用状态统一叫「未启用」——「草稿」容易被理解成"还没做完"，
+                       而实际语义是"这张课表还没生效"，与「是否排完课」无关 #}
                     <span class="badge bg-{{ 'success' if ts.status == 'active' else ('secondary' if archived else 'warning text-dark') }}">
-                        {{ {'draft':'草稿','active':'启用中','archived':'已归档'}[ts.status] }}
+                        {{ {'draft':'未启用','active':'启用中','archived':'已归档'}[ts.status] }}
                     </span>
                 </span>
             </div>
@@ -68,19 +97,20 @@
             </div>
             <div class="card-footer py-2 bg-transparent">
                 <div class="d-flex flex-wrap gap-1 mb-2">
-                    <a class="btn btn-sm btn-outline-primary py-0" href="{{ url_for('academic.schedule_master', sid=ts.id) }}">
-                        <i class="bi bi-grid-3x3"></i> 大课表
-                    </a>
-                    <a class="btn btn-sm btn-outline-dark py-0" href="{{ url_for('academic.schedule_overview', sid=ts.id) }}">
+                    {# 2026-10-10：「大课表」入口随该页下线（与「全校总课表」用途重叠） #}
+                    <a class="btn btn-sm btn-outline-primary py-0" href="{{ url_for('academic.schedule_overview', sid=ts.id) }}">
                         <i class="bi bi-list-columns-reverse"></i> 全校总课表
                     </a>
                     {% set grades = (grade_map.get(ts.id) or {}).keys()|list %}
                     {% if grades %}
+                    {# 2026-10-10：每个年级一个入口（页内还可继续切换），不再只给第一个年级 #}
+                    {% for g in grades %}
                     <a class="btn btn-sm btn-outline-primary py-0"
-                       href="{{ url_for('academic.schedule_grade', sid=ts.id, grade=grades[0]) }}"
-                       title="已排课年级：{{ grades|join('、') }}">
-                        <i class="bi bi-layers"></i> 年级课表（{{ grades[0] }}）
+                       href="{{ url_for('academic.schedule_grade', sid=ts.id, grade=g) }}"
+                       title="{{ g }} 年级课表（页内可切换其它年级）">
+                        <i class="bi bi-layers"></i> {{ g }}
                     </a>
+                    {% endfor %}
                     {% else %}
                     <span class="btn btn-sm btn-outline-secondary py-0 disabled" title="暂无班级课表数据">
                         <i class="bi bi-layers"></i> 年级课表
@@ -95,31 +125,45 @@
                 </div>
                 <div class="d-flex flex-wrap gap-1">
                     {% if not archived %}
-                    <a class="btn btn-sm btn-outline-success py-0" href="{{ url_for('academic.schedule_import', sid=ts.id) }}">
-                        <i class="bi bi-upload"></i> 导入
+                    <a class="btn btn-sm btn-outline-success py-0" href="{{ url_for('academic.schedule_smart_import', sid=ts.id) }}">
+                        <i class="bi bi-upload"></i> 导入课表
                     </a>
                     {% endif %}
-                    <a class="btn btn-sm btn-outline-info py-0 text-white"
-                       href="{{ url_for('academic.schedule_export', sid=ts.id, view_type='master') }}">
+                    <a class="btn btn-sm btn-outline-info py-0"
+                       title="导出 Excel：整校一个班一张 sheet"
+                       href="{{ url_for('academic.schedule_export', sid=ts.id, view_type='all') }}">
                         <i class="bi bi-download"></i> 导出
                     </a>
                     {% if ts.status != 'active' %}
                     <form method="POST" class="d-inline" action="{{ url_for('academic.schedule_activate', sid=ts.id) }}"
                           {# M-10：学期名可能含引号，confirm 文本整体走 |tojson #}
-                          onsubmit="return confirm({{ ('重新启用' if archived else '激活') ~ '「' ~ ts.name ~ '」？当前启用中的学期将自动归档（含快照）。' | tojson }})">
+                          onsubmit="return confirm({{ ('重新启用' if archived else '激活') ~ '「' ~ ts.name ~ '」？' ~ ('该学期将从历史课表恢复为启用中；' if archived else '') ~ '当前启用中的学期将归档进「历史课表」（含快照）。' | tojson }})">
                         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                         <button class="btn btn-sm btn-success py-0"><i class="bi bi-broadcast"></i> {{ '重新启用' if archived else '激活' }}</button>
                     </form>
-                    {% elif ts.status == 'active' %}
+                    {% endif %}
+                    {# 2026-10-10（用户报障修正）：归档 = 「把没在用的课表收进历史」，
+                       所以手动归档入口**只给未启用（draft）的学期**：
+                       - 未启用：可以「激活」启用它，也可以直接「归档进历史课表」（不必先激活）；
+                       - 启用中：**不给手动归档**（正用着呢）；它会在"切换启用别的学期"时
+                         由 activate_schedule 自动归档并写快照，不需要也没道理手动点。
+                       前一版把入口开给了"所有未归档状态"，结果正在使用的学期上也挂了归档按钮，
+                       被用户指为反了。 #}
+                    {% if ts.status == 'draft' %}
                     <form method="POST" class="d-inline" action="{{ url_for('academic.schedule_archive_term', sid=ts.id) }}"
-                          onsubmit="return confirm('归档「{{ ts.name }}」？将生成归档快照，归档后课表只读。')">
+                          onsubmit="return confirm({{ ('归档未启用学期「' ~ ts.name ~ '」并移入「历史课表」？将生成归档快照，归档后只读回看，需要时还能重新启用。') | tojson }})">
                         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                        <button class="btn btn-sm btn-outline-warning py-0"><i class="bi bi-archive"></i> 归档</button>
+                        <button class="btn btn-sm btn-outline-warning py-0"><i class="bi bi-archive"></i> 归档进历史课表</button>
                     </form>
+                    {% elif ts.status == 'active' %}
+                    <span class="badge bg-light text-secondary border fw-normal py-0 px-2"
+                          title="正在使用的课表不提供手动归档；切换到启用其他学期时，本表会自动归档进「历史课表」（含快照）">
+                        <i class="bi bi-info-circle"></i> 切换启用其他学期时自动归档
+                    </span>
                     {% endif %}
                     {% if ts.status == 'draft' %}
                     <form method="POST" class="d-inline" action="{{ url_for('academic.schedule_delete', sid=ts.id) }}"
-                          onsubmit="return confirm('删除草稿学期「{{ ts.name }}」？其节次与课表条目将一并删除，不可恢复。')">
+                          onsubmit="return confirm({{ ('删除未启用学期「' ~ ts.name ~ '」？其节次与课表条目将一并删除，不可恢复。') | tojson }})">
                         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                         <button class="btn btn-sm btn-outline-danger py-0"><i class="bi bi-trash"></i> 删除</button>
                     </form>
@@ -130,20 +174,16 @@
                     <a class="btn btn-sm btn-outline-secondary py-0" href="{{ url_for('academic.schedule_dates', sid=ts.id) }}">
                         <i class="bi bi-calendar-range"></i> 配置日期
                     </a>
-                    <a class="btn btn-sm btn-outline-secondary py-0" href="{{ url_for('academic.schedule_calendar', sid=ts.id) }}">
-                        <i class="bi bi-calendar3"></i> 校历
-                    </a>
-                    <a class="btn btn-sm btn-outline-secondary py-0" href="{{ url_for('academic.schedule_usage', sid=ts.id) }}">
-                        <i class="bi bi-graph-up"></i> 使用情况
-                    </a>
+                    {# 2026-10-10：校历 / 使用情况功能已下线 #}
                     <a class="btn btn-sm btn-outline-primary py-0" href="{{ url_for('academic.schedule_copy', sid=ts.id) }}">
                         <i class="bi bi-files"></i> 以此为底版新建
                     </a>
-                    {% if not ts.is_current %}
+                    {# 2026-10-10：与「归档 / 激活」区分开——只切「当前学期」标记，且仅对启用中的学期开放 #}
+                    {% if ts.status == 'active' and not ts.is_current %}
                     <form method="POST" class="d-inline" action="{{ url_for('academic.schedule_set_current', sid=ts.id) }}"
-                          onsubmit="return confirm('将「{{ ts.name }}」设为当前学期？其他学期将取消当前标记。')">
+                          onsubmit="return confirm('将「{{ ts.name }}」设为当前学期？其他学期将取消当前标记（不影响各自的启用 / 归档状态）。')">
                         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                        <button class="btn btn-sm btn-outline-success py-0"><i class="bi bi-broadcast"></i> 设为当前</button>
+                        <button class="btn btn-sm btn-outline-success py-0"><i class="bi bi-star"></i> 设为当前</button>
                     </form>
                     {% endif %}
                 </div>
@@ -198,4 +238,87 @@
         </div>
     </div>
 </div>
+
+{# ===== 编辑学期信息弹窗（2026-10-10 新增：名称 / 学年 / 学期 / 说明） =====
+   单个弹窗复用：点哪张卡的铅笔，就由 JS 把该学期数据灌进来、并把表单 action 指到该学期。 #}
+<div class="modal fade" id="editTermModal" tabindex="-1"
+     data-action-tpl="{{ url_for('academic.schedule_edit', sid=0) }}">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <form method="POST" id="editTermForm" action="">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <div class="modal-header py-2">
+                    <h6 class="modal-title"><i class="bi bi-pencil-square"></i> 编辑学期信息</h6>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="mb-2">
+                        <label class="form-label small mb-1">学期名称 <span class="text-danger">*</span></label>
+                        <input name="name" id="etName" class="form-control form-control-sm" required maxlength="50">
+                    </div>
+                    <div class="row g-2 mb-2">
+                        <div class="col-6">
+                            <label class="form-label small mb-1">学年 <span class="text-danger">*</span></label>
+                            <input name="school_year" id="etYear" class="form-control form-control-sm"
+                                   required maxlength="20" placeholder="如 2026-2027">
+                        </div>
+                        <div class="col-6">
+                            <label class="form-label small mb-1">学期 <span class="text-danger">*</span></label>
+                            <select name="term" id="etTerm" class="form-select form-select-sm" required>
+                                <option value="第一学期">第一学期</option>
+                                <option value="第二学期">第二学期</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div class="mb-2">
+                        <label class="form-label small mb-1">说明</label>
+                        <input name="description" id="etDesc" class="form-control form-control-sm" maxlength="200"
+                               placeholder="选填，如 高二选科走班版本">
+                    </div>
+                    <div class="form-text">只改基本信息（名称 / 学年 / 学期 / 说明），不影响课表条目、节次与周次配置。</div>
+                </div>
+                <div class="modal-footer py-2">
+                    <button type="button" class="btn btn-sm btn-secondary" data-bs-dismiss="modal">取消</button>
+                    <button type="submit" class="btn btn-sm btn-primary"><i class="bi bi-check-lg"></i> 保存</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+(function () {
+    'use strict';
+    var modal = document.getElementById('editTermModal');
+    if (!modal) { return; }
+    var actionTpl = modal.getAttribute('data-action-tpl') || '';
+
+    // 点铅笔：把该学期的数据灌进弹窗，并把 action 指向 /schedule/<id>/edit
+    modal.addEventListener('show.bs.modal', function (ev) {
+        var b = ev.relatedTarget;
+        if (!b) { return; }
+        var id = b.getAttribute('data-id');
+        document.getElementById('etName').value = b.getAttribute('data-name') || '';
+        document.getElementById('etYear').value = b.getAttribute('data-year') || '';
+        document.getElementById('etDesc').value = b.getAttribute('data-desc') || '';
+        var termVal = b.getAttribute('data-term') || '';
+        var sel = document.getElementById('etTerm');
+        // 学期值不在下拉里（历史自定义值）时补一个选项，避免保存时被悄悄改掉
+        var found = false;
+        for (var i = 0; i < sel.options.length; i++) {
+            if (sel.options[i].value === termVal) { found = true; break; }
+        }
+        if (termVal && !found) {
+            var opt = document.createElement('option');
+            opt.value = termVal; opt.textContent = termVal;
+            sel.appendChild(opt);
+        }
+        sel.value = termVal;
+        var form = document.getElementById('editTermForm');
+        form.setAttribute('action', actionTpl.replace(/\/0\/edit$/, '/' + id + '/edit'));
+    });
+})();
+</script>
 {% endblock %}

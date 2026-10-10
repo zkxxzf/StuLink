@@ -6,6 +6,19 @@
 <div class="fx-wrap">
     {% include "academic/_fx_hero.html" %}
 
+    {# 2026-10-10：未交名单按「当前轮」口径（上一轮已交、本轮未交的人会计入并催交）#}
+    {% set _cr = cur_round if (cur_round is defined and cur_round) else none %}
+    <div class="fx-hint" style="margin:-6px 0 6px">
+        <i class="bi bi-collection"></i>
+        {% if _cr %}
+        本轮：第{{ _cr.round_no }}轮{% if _cr.name %}·{{ _cr.name }}{% endif %}（时间窗
+        {{ _cr.start_time.strftime('%m-%d %H:%M') if _cr.start_time else '不限' }} ~
+        {{ _cr.deadline.strftime('%m-%d %H:%M') if _cr.deadline else '不限' }}）· 未交名单按本轮计算（含被驳回需重交的人）
+        {% else %}
+        全部轮次（尚未建立轮次）
+        {% endif %}
+    </div>
+
     <div class="fx-statgrid fx-stagger" style="grid-template-columns:repeat(auto-fit,minmax(180px,1fr))">
         <div class="fx-stat bad">
             <div class="fx-label">未交人数</div>
@@ -36,7 +49,7 @@
 
     <div class="fx-panel">
         <div class="fx-panel-head">
-            <div class="fx-seclabel"><span class="fx-tag">Missing</span><i class="bi bi-person-exclamation"></i>未提交名单</div>
+            <div class="fx-seclabel"><span class="fx-tag">Missing</span><i class="bi bi-person-exclamation"></i>本轮未提交名单</div>
             <div class="fx-toolbar">
                 <select id="fxGrade" class="form-select form-select-sm" style="width:130px">
                     <option value="">全部年级</option>

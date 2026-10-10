@@ -6,6 +6,19 @@
 <div class="fx-wrap">
     {% include "academic/_fx_hero.html" %}
 
+    {# 2026-10-10：下列统计均按「当前轮」口径 #}
+    {% set _cr = cur_round if (cur_round is defined and cur_round) else none %}
+    <div class="fx-hint" style="margin:-6px 0 6px">
+        <i class="bi bi-collection"></i>
+        {% if _cr %}
+        本轮：第{{ _cr.round_no }}轮{% if _cr.name %}·{{ _cr.name }}{% endif %}（时间窗
+        {{ _cr.start_time.strftime('%m-%d %H:%M') if _cr.start_time else '不限' }} ~
+        {{ _cr.deadline.strftime('%m-%d %H:%M') if _cr.deadline else '不限' }}）· 下列统计按本轮计算
+        {% else %}
+        全部轮次（尚未建立轮次）
+        {% endif %}
+    </div>
+
     {# ── 统计卡片 ── #}
     <div class="fx-statgrid fx-stagger">
         <div class="fx-stat ink">

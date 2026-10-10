@@ -9,11 +9,12 @@ from datetime import datetime
 from flask import (render_template, request, redirect, url_for, flash, abort,
                    send_file, send_from_directory, current_app)
 from flask_login import login_required, current_user
+from sqlalchemy import func
 
 from app.extensions import db
 from app.models.academic import (
     FormTemplate, FormQuestion, FormSubmission, FormCategory, FormAnswer,
-    FormRound,
+    FormRound, Teacher,
     FORM_STATUS, FORM_TARGET_TYPES, QUESTION_TYPES, SUBMISSION_STATUS,
     ROUND_STATUS, ACHIEVEMENT_CATEGORIES, ACHIEVEMENT_LEVELS,
 )
@@ -41,6 +42,92 @@ def _get_categories():
     """获取分类列表（含默认分类）"""
     cats = FormCategory.query.order_by(FormCategory.sort_order).all()
     return cats
+
+
+def _subject_options():
+    """在职教师档案里去重后的学科列表（按学科定向收集的候选）。"""
+    rows = (Teacher.query.filter_by(status='active')
+            .with_entities(Teacher.subject).distinct().all())
+    return sorted({(r[0] or '').strip() for r in rows if (r[0] or '').strip()})
+
+
+def _current_user_subject():
+    """当前登录账号的任教学科（非教师/未绑定 → None，取不到不抛异常）。"""
+    try:
+        from app.modules.academic.services import teacher_service
+        t = teacher_service.teacher_of_user(current_user)
+        return (t.subject or None) if t else None
+    except Exception:  # noqa: BLE001  学科取不到不阻断填写/提交
+        return None
+
+
+def _notify_collection_opened(tpl, rnd, only_missing=False, extra_note=None,
+                              kind='open'):
+    """收集开启 / 新一轮 / 重新开放 / 延期 → 通知应填人员（2026-10-10 新增）。
+
+    - 收件人取自「应交名单」（与未交统计同一口径，不漏也不误发）；
+      only_missing=True 时只通知本轮尚未提交的人（重开/延期场景）。
+    - link_url 存站内相对路径（历史催交用 _external 绝对地址，换域名即失效）。
+    返回 (notified, accountless, accountless_names)。
+    """
+    from app.modules.academic.services import form_summary_service as sum_svc
+    from app.modules.notifications.services import notification_service as notif_svc
+    try:
+        expected = sum_svc.get_expected_submitters(tpl.id)
+        uids = [e.get('uid') for e in expected if e.get('uid')]
+        if only_missing:
+            missing = {m.get('uid') for m in sum_svc.get_all_missing(tpl.id)}
+            uids = [u for u in uids if u in missing]
+        if not uids:
+            return 0, 0, []
+    except Exception:  # noqa: BLE001  名单取不到就不发，不影响主流程
+        return 0, 0, []
+
+    start, deadline = form_service.round_window(rnd, tpl)
+    dl_txt = deadline.strftime('%Y-%m-%d %H:%M') if deadline else '不限'
+    round_txt = f'第{rnd.round_no}轮' if rnd else ''
+    if rnd and rnd.name:
+        round_txt += f'（{rnd.name}）'
+
+    head = {'open': '已开始', 'reopen': '已重新开放', 'extend': '截止时间已延长'}.get(
+        kind, '已开始')
+    title = f'【材料收集】{tpl.title}·{round_txt}{head}'
+    lines = []
+    if extra_note:
+        lines.append(extra_note)
+    lines.append(f'《{tpl.title}》{round_txt} {head}，请及时提交材料。')
+    lines.append(f'截止时间：{dl_txt}')
+    if tpl.description:
+        lines.append(f'说明：{tpl.description[:100]}')
+    lines.append('请点击通知上的按钮前往填写。')
+
+    try:
+        fill_url = url_for('academic.form_fill', form_id=tpl.id)
+    except Exception:  # noqa: BLE001
+        fill_url = f'/academic/forms/{tpl.id}/fill'
+
+    ok, _msg, info = notif_svc.notify_users(
+        uids, title=title, content='\n'.join(lines), category='collect',
+        biz_type='form_open', biz_id=tpl.id, link_url=fill_url,
+        creator_id=(current_user.id if current_user else None),
+        priority='urgent' if kind in ('reopen', 'extend') else 'normal')
+    if not ok:
+        return 0, 0, []
+    return (info.get('notified', 0), info.get('accountless', 0),
+            info.get('accountless_names') or [])
+
+
+def _flash_collection_notice(notified, accountless, samples):
+    """把通知结果告诉教务（含"无账号收不到"的提醒，避免以为已通知到）。"""
+    if not notified:
+        return
+    msg = f'已通知 {notified} 名应填人员（可在通知公告中查看送达情况）'
+    if accountless:
+        names = '、'.join([n for n in samples if n][:5])
+        msg += f'；其中 {accountless} 人无登录账号收不到通知，请线下告知'
+        if names:
+            msg += f'：{names}'
+    flash(msg, 'info')
 
 
 def _parse_questions_from_form():
@@ -91,6 +178,17 @@ def form_list():
     for tpl in pagination.items:
         sub_counts[tpl.id] = FormSubmission.query.filter_by(template_id=tpl.id).count()
 
+    # 2026-10-10：每个表单「当前轮」的窗口状态（列表页展示进行中/未开始/已截止）
+    round_info = {}
+    for tpl in pagination.items:
+        rnd = form_service.current_round(tpl)
+        if not rnd:
+            round_info[tpl.id] = {'round': None, 'state': 'none', 'text': '未发起轮次'}
+            continue
+        win = form_service.window_state(rnd, tpl)
+        round_info[tpl.id] = {'round': rnd, 'state': win['state'],
+                              'text': win['text']}
+
     categories = _get_categories()
 
     return render_template('academic/form_list.html',
@@ -99,6 +197,7 @@ def form_list():
                            target_map=FORM_TARGET_TYPES,
                            categories=categories,
                            sub_counts=sub_counts,
+                           round_info=round_info,
                            f_status=status, f_category=category)
 
 
@@ -162,6 +261,9 @@ def form_create():
                            ach_categories=ACHIEVEMENT_CATEGORIES,
                            ach_levels=ACHIEVEMENT_LEVELS,
                            tag_presets=ach_svc.TAG_PRESETS,
+                           # 2026-10-10：按学科定向收集的学科候选；业绩库"发起收集"预置勾选
+                           subject_options=_subject_options(),
+                           preset_ach=request.args.get('to_achievement') == '1',
                            edit_mode=False)
 
 
@@ -269,6 +371,8 @@ def form_edit(form_id):
                            ach_categories=ACHIEVEMENT_CATEGORIES,
                            ach_levels=ACHIEVEMENT_LEVELS,
                            tag_presets=ach_svc.TAG_PRESETS,
+                           subject_options=_subject_options(),
+                           preset_ach=False,
                            edit_mode=True)
 
 
@@ -279,9 +383,12 @@ def form_edit(form_id):
 @perm_required('academic.edit')
 def form_publish(form_id):
     try:
-        form_service.publish_form(form_id)
+        tpl = form_service.publish_form(form_id)
         log_operation(current_user, '发布', '表单', form_id, '', module='academic')
         flash('表单已发布', 'success')
+        # 2026-10-10：发布即通知应填人员（教师收集精确到人；无账号者提示线下告知）
+        _flash_collection_notice(*_notify_collection_opened(
+            tpl, form_service.current_round(tpl)))
     except ValueError as e:
         flash(str(e), 'danger')
     return redirect(url_for('academic.form_list'))
@@ -348,6 +455,21 @@ def form_submissions(form_id):
     approved = base.filter(FormSubmission.status == 'approved').count()
     rejected = base.filter(FormSubmission.status == 'rejected').count()
 
+    # 2026-10-10：各轮次统计（一次 group by 出全部轮次，避免每轮 4 次 count）
+    round_stats = {}
+    stat_rows = (db.session.query(FormSubmission.round_id, FormSubmission.status,
+                                  func.count(FormSubmission.id))
+                 .filter(FormSubmission.template_id == form_id)
+                 .group_by(FormSubmission.round_id, FormSubmission.status).all())
+    for rid, st, cnt in stat_rows:
+        d = round_stats.setdefault(rid or 0, {'total': 0, 'pending': 0,
+                                              'approved': 0, 'rejected': 0})
+        d['total'] += cnt or 0
+        if st == 'submitted':
+            d['pending'] += cnt or 0
+        elif st in ('approved', 'rejected'):
+            d[st] += cnt or 0
+
     return render_template('academic/form_detail.html',
                            tpl=tpl,
                            pagination=pagination,
@@ -356,6 +478,7 @@ def form_submissions(form_id):
                            approved=approved, rejected=rejected,
                            f_status=status,
                            rounds=rounds, cur_round=cur_round,
+                           round_stats=round_stats,
                            round_status_map=ROUND_STATUS)
 
 
@@ -369,11 +492,16 @@ def form_round_new(form_id):
             form_id,
             name=(request.form.get('name') or '').strip(),
             term=(request.form.get('term') or '').strip(),
+            start_time=_parse_datetime(request.form.get('start_time')),
             deadline=_parse_datetime(request.form.get('deadline')),
             created_by=current_user.id)
         log_operation(current_user, '发起', '表单轮次', rnd.id,
                       rnd.label(), module='academic')
         flash(f'已发起第 {rnd.round_no} 轮收集（上一轮已自动结束）', 'success')
+        # 2026-10-10：新一轮开启即通知应填人员（含本轮时间窗与截止时间）
+        tpl = form_service.get_form_detail(form_id)
+        if tpl:
+            _flash_collection_notice(*_notify_collection_opened(tpl, rnd))
         return redirect(url_for('academic.form_submissions', form_id=form_id,
                                 round=rnd.id))
     except ValueError as e:
@@ -401,6 +529,112 @@ def form_round_close(round_id):
         flash(str(e), 'danger')
     return redirect(url_for('academic.form_submissions',
                             form_id=rnd.template_id, round=round_id))
+
+
+@bp.route('/forms/round/<int:round_id>/reopen', methods=['POST'])
+@login_required
+@perm_required('academic.edit')
+def form_round_reopen(round_id):
+    """重新开放已结束的轮次（同模板其它进行中轮次自动结束）"""
+    rnd = db.session.get(FormRound, round_id)
+    if not rnd:
+        abort(404)
+    form_id = rnd.template_id
+    try:
+        form_service.reopen_round(
+            round_id,
+            start_time=_parse_datetime(request.form.get('start_time')),
+            deadline=_parse_datetime(request.form.get('deadline')),
+            clear_deadline=request.form.get('clear_deadline') == '1')
+        log_operation(current_user, '重开', '表单轮次', round_id, rnd.label(),
+                      module='academic')
+        flash(f'已重新开放：{rnd.label()}', 'success')
+        # 2026-10-10：重开后只提醒本轮尚未提交的人（已交者不打扰）
+        tpl = form_service.get_form_detail(form_id)
+        if tpl:
+            _flash_collection_notice(*_notify_collection_opened(
+                tpl, rnd, only_missing=True, kind='reopen'))
+    except ValueError as e:
+        db.session.rollback()
+        flash(str(e), 'danger')
+    except Exception as e:  # noqa: BLE001
+        db.session.rollback()
+        flash(f'重新开放失败：{e}', 'danger')
+    return redirect(url_for('academic.form_submissions', form_id=form_id,
+                            round=round_id))
+
+
+@bp.route('/forms/round/<int:round_id>/window', methods=['POST'])
+@login_required
+@perm_required('academic.edit')
+def form_round_window(round_id):
+    """调整进行中轮次的时间窗（延长截止 / 设置开始时间 / 清除）"""
+    rnd = db.session.get(FormRound, round_id)
+    if not rnd:
+        abort(404)
+    form_id = rnd.template_id
+    old_deadline = rnd.deadline
+    try:
+        form_service.update_round_window(
+            round_id,
+            start_time=_parse_datetime(request.form.get('start_time')),
+            deadline=_parse_datetime(request.form.get('deadline')),
+            clear_start=request.form.get('clear_start') == '1',
+            clear_deadline=request.form.get('clear_deadline') == '1')
+        log_operation(current_user, '调整', '表单轮次', round_id,
+                      f'调整时间窗：{rnd.label()}', module='academic')
+        flash('时间窗已更新', 'success')
+        # 2026-10-10：截止时间被延长时，只提醒本轮尚未提交的人（无变化则不发）
+        new_deadline = rnd.deadline
+        if new_deadline and (old_deadline is None or new_deadline > old_deadline):
+            tpl = form_service.get_form_detail(form_id)
+            if tpl:
+                _flash_collection_notice(*_notify_collection_opened(
+                    tpl, rnd, only_missing=True, kind='extend'))
+    except ValueError as e:
+        db.session.rollback()
+        flash(str(e), 'danger')
+    except Exception as e:  # noqa: BLE001
+        db.session.rollback()
+        flash(f'调整失败：{e}', 'danger')
+    return redirect(url_for('academic.form_submissions', form_id=form_id,
+                            round=round_id))
+
+
+@bp.route('/forms/<int:form_id>/reopen', methods=['POST'])
+@login_required
+@perm_required('academic.edit')
+def form_reopen(form_id):
+    """重开收集：mode=reuse 重开最近一轮 / mode=new 发起新一轮"""
+    tpl = form_service.get_form_detail(form_id)
+    if not tpl:
+        abort(404)
+    mode = (request.form.get('mode') or 'reuse').strip()
+    try:
+        rnd = form_service.reopen_form(
+            form_id,
+            start_time=_parse_datetime(request.form.get('start_time')),
+            deadline=_parse_datetime(request.form.get('deadline')),
+            mode=mode,
+            round_name=(request.form.get('name') or '').strip(),
+            created_by=current_user.id)
+        log_operation(current_user, '重开', '表单', form_id, rnd.label(),
+                      module='academic')
+        flash(f'已重新开放收集（第 {rnd.round_no} 轮）', 'success')
+        # 2026-10-10：沿用原轮次 → 只提醒未交者；作为新一轮 → 通知全体应填
+        tpl = form_service.get_form_detail(form_id)
+        if tpl:
+            _flash_collection_notice(*_notify_collection_opened(
+                tpl, rnd, only_missing=(mode != 'new'), kind='reopen'))
+        return redirect(url_for('academic.form_submissions', form_id=form_id,
+                                round=rnd.id))
+    except ValueError as e:
+        db.session.rollback()
+        flash(str(e), 'danger')
+    except Exception as e:  # noqa: BLE001
+        db.session.rollback()
+        flash(f'重开失败：{e}', 'danger')
+    return redirect(url_for('academic.form_submissions', form_id=form_id))
 
 
 # ── 管理端：导出 ──────────────────────────────────────────────
@@ -458,26 +692,27 @@ def form_review(sid):
 @login_required
 @perm_required('academic.view')
 def form_fill_list():
-    """获取当前用户可填写的表单列表"""
+    """获取当前用户可填写的表单列表（按当前轮时间窗 + 定向范围）"""
     submitter_type = 'teacher' if current_user.role in ('teacher', 'admin') else 'student'
-    submitter_grade = getattr(current_user, 'grade', None)
 
-    templates = form_service.get_available_forms(
+    items = form_service.fill_items(
+        current_user.id,
         submitter_type=submitter_type,
-        submitter_grade=submitter_grade)
+        submitter_grade=getattr(current_user, 'grade', None),
+        submitter_class=getattr(current_user, 'class_name', None),
+        submitter_subject=_current_user_subject())
 
-    # 检查每个表单是否已提交
-    submitted_ids = set()
-    for tpl in templates:
-        existing = FormSubmission.query.filter_by(
-            template_id=tpl.id, submitter_id=current_user.id).first()
-        if existing and not tpl.allow_multiple:
-            submitted_ids.add(tpl.id)
+    # 旧变量保留（兼容外部引用）；已交判定按「当前轮」
+    templates = [it['tpl'] for it in items]
+    submitted_ids = {it['tpl'].id for it in items
+                     if it['submitted'] and not it['tpl'].allow_multiple}
 
     return render_template('academic/form_fill_list.html',
                            templates=templates,
                            submitted_ids=submitted_ids,
-                           status_map=FORM_STATUS)
+                           fill_items=items,
+                           status_map=FORM_STATUS,
+                           now=datetime.now())
 
 
 # ── 填写端：填写表单 ──────────────────────────────────────────
@@ -494,14 +729,22 @@ def form_fill(form_id):
         flash('该表单当前不可填写', 'warning')
         return redirect(url_for('academic.form_fill_list'))
 
-    # 资格检查
-    eligibility = form_service.check_eligibility(form_id, current_user.id)
-    if not eligibility['eligible'] and not tpl.allow_multiple:
-        if eligibility['already_submitted']:
-            flash('您已提交过此表单', 'info')
-            return redirect(url_for('academic.form_my_submissions'))
-        flash('当前不在填写时间内', 'warning')
-        return redirect(url_for('academic.form_fill_list'))
+    # 资格检查（窗口按当前轮次判定：未开始/已截止/不在定向范围/本轮已交）
+    submitter_type = 'teacher' if current_user.role in ('teacher', 'admin') else 'student'
+    eligibility = form_service.check_eligibility(
+        form_id, current_user.id,
+        submitter_type=submitter_type,
+        submitter_grade=getattr(current_user, 'grade', None),
+        submitter_class=getattr(current_user, 'class_name', None),
+        submitter_subject=_current_user_subject())
+    if not eligibility['eligible']:
+        if eligibility['reason'] == 'already' and tpl.allow_multiple:
+            pass                        # 允许多次提交 → 放行（不拦已交）
+        else:
+            flash(eligibility['message'] or '当前不可填写', 'warning')
+            if eligibility['already_submitted']:
+                return redirect(url_for('academic.form_my_submissions'))
+            return redirect(url_for('academic.form_fill_list'))
 
     questions = sorted(tpl.questions, key=lambda q: q.sort_order)
 
@@ -532,6 +775,7 @@ def form_submit(form_id):
                          getattr(current_user, 'student_number', None) or str(current_user.id),
         'submitter_grade': getattr(current_user, 'grade', None),
         'submitter_class': getattr(current_user, 'class_name', None),
+        'submitter_subject': _current_user_subject(),
     }
 
     # 收集答案

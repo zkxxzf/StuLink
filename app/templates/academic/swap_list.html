@@ -88,15 +88,27 @@
             </thead>
             <tbody>
                 {% for s in items %}
-                <tr class="swap-row" data-id="{{ s.id }}">
+                <tr class="swap-row" data-id="{{ s.id }}"
+                    {% if s.batch_count and s.batch_count > 1 %}data-batch="{{ s.batch_count }}"{% endif %}>
                     <td class="fw-bold">{{ s.applicant_name or '-' }}
                         <div class="text-muted small fw-normal">{{ s.applicant_uid }}</div>
                     </td>
-                    <td><span class="badge bg-{% if s.swap_type == 'personal' %}info text-dark{% else %}secondary{% endif %}">{{ s.swap_type_text }}</span></td>
+                    <td><span class="badge bg-{% if s.swap_type == 'personal' %}info text-dark{% else %}secondary{% endif %}">{{ s.swap_type_text }}</span>
+                        {# 2026-10-10：统一调课按批次折叠成一条记录 —— 一批课整批一次审批/执行 #}
+                        {% if s.batch_count and s.batch_count > 1 %}
+                        <div class="small text-secondary mt-1"
+                             title="同一次统一调课的 {{ s.batch_count }} 门课合成一条记录，通过/驳回/执行一次即整批生效（课程明细见详情）">
+                            <i class="bi bi-collection"></i> 共 {{ s.batch_count }} 门 · 一次审批
+                        </div>
+                        {% endif %}
+                    </td>
                     <td class="orig-course small">
                         <span class="subj">{{ s.original_subject or '（原条目已删）' }}</span>
                         <span class="text-muted">{{ s.original_class or '' }}</span>
                         <div class="arrow-slot">{{ s.original_slot or '' }}{% if s.original_teacher %} · {{ s.original_teacher }}{% endif %}</div>
+                        {% if s.batch_count and s.batch_count > 1 %}
+                        <div class="text-secondary">等共 {{ s.batch_count }} 门课（明细见详情）</div>
+                        {% endif %}
                     </td>
                     <td class="small">
                         <i class="bi bi-arrow-right text-muted"></i>
@@ -116,19 +128,27 @@
                             {% if s.can_review %}待我审 · {% endif %}{{ s.review_step_name }}
                         </div>{% endif %}</td>
                     <td class="small text-muted text-nowrap">{{ s.created_at or '' }}</td>
-                    <td class="text-end text-nowrap" onclick="event.stopPropagation()">
-                        <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('academic.swap_detail', swap_id=s.id) }}" title="详情"><i class="bi bi-eye"></i></a>
+                    {# 2026-10-10：操作列**不能**用内联 onclick="event.stopPropagation()" ——
+                       通过/驳回/撤销/执行是绑在 document 上的委托事件，冒泡被拦掉按钮就没反应；
+                       改由下面 .swap-row 的行点击自己排除本列（closest('.row-actions')）。 #}
+                    <td class="text-end text-nowrap row-actions">
+                        <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('academic.swap_detail', swap_id=s.id) }}"
+                           title="{% if s.batch_count and s.batch_count > 1 %}本批 {{ s.batch_count }} 门课明细{% else %}详情{% endif %}"><i class="bi bi-eye"></i></a>
                         {% if s.status == 'pending' %}
                             {# 分级审批：只有"当前这一级"的审批人看得到通过/驳回按钮 #}
                             {% if s.can_review %}
-                            <button class="btn btn-sm btn-outline-success btn-approve" data-id="{{ s.id }}" title="通过（{{ s.review_step_name }}）"><i class="bi bi-check-lg"></i></button>
-                            <button class="btn btn-sm btn-outline-warning btn-reject" data-id="{{ s.id }}" title="驳回（{{ s.review_step_name }}）"><i class="bi bi-x-lg"></i></button>
+                            <button class="btn btn-sm btn-outline-success btn-approve" data-id="{{ s.id }}"
+                                    title="{% if s.batch_count and s.batch_count > 1 %}整批 {{ s.batch_count }} 门一起通过{% else %}通过{% endif %}（{{ s.review_step_name }}）"><i class="bi bi-check-lg"></i></button>
+                            <button class="btn btn-sm btn-outline-warning btn-reject" data-id="{{ s.id }}"
+                                    title="{% if s.batch_count and s.batch_count > 1 %}整批 {{ s.batch_count }} 门一起驳回{% else %}驳回{% endif %}（{{ s.review_step_name }}）"><i class="bi bi-x-lg"></i></button>
                             {% endif %}
                             {% if s.applicant_uid == current_uid %}
-                            <button class="btn btn-sm btn-outline-danger btn-cancel" data-id="{{ s.id }}" title="撤销"><i class="bi bi-arrow-counterclockwise"></i></button>
+                            <button class="btn btn-sm btn-outline-danger btn-cancel" data-id="{{ s.id }}"
+                                    title="{% if s.batch_count and s.batch_count > 1 %}撤销整批 {{ s.batch_count }} 门{% else %}撤销{% endif %}"><i class="bi bi-arrow-counterclockwise"></i></button>
                             {% endif %}
                         {% elif s.status == 'approved' and is_reviewer %}
-                            <button class="btn btn-sm btn-danger btn-execute" data-id="{{ s.id }}" title="执行调课"><i class="bi bi-lightning-charge"></i> 执行</button>
+                            <button class="btn btn-sm btn-danger btn-execute" data-id="{{ s.id }}"
+                                    title="{% if s.batch_count and s.batch_count > 1 %}整批 {{ s.batch_count }} 门一起执行{% else %}执行调课{% endif %}"><i class="bi bi-lightning-charge"></i> {% if s.batch_count and s.batch_count > 1 %}执行整批{% else %}执行{% endif %}</button>
                         {% endif %}
                     </td>
                 </tr>
@@ -168,7 +188,7 @@
     <div class="modal-dialog modal-sm">
         <div class="modal-content">
             <div class="modal-header">
-                <h6 class="modal-title text-warning"><i class="bi bi-x-circle"></i> 驳回调课</h6>
+                <h6 class="modal-title text-warning" id="rejectTitle"><i class="bi bi-x-circle"></i> 驳回调课</h6>
                 <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
             </div>
             <div class="modal-body">
@@ -201,8 +221,9 @@
     var cfg = JSON.parse($('#swapListData').text());
     function urlFor(tpl, id) { return tpl.replace(/\/0(?=\/|$)/, '/' + id); }
 
-    // 行点击进入详情（操作按钮已 stopPropagation）
-    $(document).on('click', '.swap-row', function () {
+    // 行点击进入详情；操作列（.row-actions：详情/通过/驳回/撤销/执行）自己处理，不跟着跳
+    $(document).on('click', '.swap-row', function (e) {
+        if ($(e.target).closest('a, button, .row-actions').length) return;
         window.location.href = urlFor(cfg.detailUrl, $(this).data('id'));
     });
 
@@ -221,15 +242,23 @@
         });
     }
 
+    // 统一调课批次在列表里只占一条：按钮作用于整批，确认文案带上"整批 N 门"
+    function batchWhat($btn) {
+        var n = parseInt($btn.closest('tr').data('batch'), 10) || 0;
+        return n > 1 ? ('该统一调课批次（共 ' + n + ' 门课）') : '该调课申请';
+    }
+
     $(document).on('click', '.btn-approve', function () {
         var id = $(this).data('id');
-        if (!confirm('确认通过该调课申请？通过后可执行以真正修改课表。')) return;
+        if (!confirm('确认通过' + batchWhat($(this)) + '？通过后可执行以真正修改课表。')) return;
         post(urlFor(cfg.approveUrl, id), { review_note: '' }, '已通过');
     });
 
-    var rejectId = null;
+    var rejectId = null, rejectWhat = '该调课申请';
     $(document).on('click', '.btn-reject', function () {
         rejectId = $(this).data('id');
+        rejectWhat = batchWhat($(this));
+        $('#rejectTitle').text('驳回' + rejectWhat);
         $('#rejectNote').val('');
         new bootstrap.Modal('#rejectModal').show();
     });
@@ -242,13 +271,13 @@
 
     $(document).on('click', '.btn-execute', function () {
         var id = $(this).data('id');
-        if (!confirm('执行后将真正修改课表（永久调课会软删除原条目并生成新条目，临时调课会新增当天安排），且不可重复执行。确认执行？')) return;
+        if (!confirm('确认执行' + batchWhat($(this)) + '？执行后将真正修改课表（永久调课会软删除原条目并生成新条目，临时调课会新增当天安排），且不可重复执行。')) return;
         post(urlFor(cfg.executeUrl, id), {}, '已执行');
     });
 
     $(document).on('click', '.btn-cancel', function () {
         var id = $(this).data('id');
-        if (!confirm('确认撤销这条调课申请？')) return;
+        if (!confirm('确认撤销' + batchWhat($(this)) + '？')) return;
         post(urlFor(cfg.cancelUrl, id), {}, '已撤销');
     });
 })();

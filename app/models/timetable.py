@@ -9,16 +9,26 @@ from app.extensions import db
 
 # ── 模块级常量（路由/服务/模板共用） ──────────────────────────────────────
 
-SCHEDULE_STATUS = {'draft': '草稿', 'active': '启用中', 'archived': '已归档'}
+# 2026-10-10：draft 的对外文案统一为「未启用」（原「草稿」容易被理解成"还没做完"，
+# 而它的语义是"这张课表还没生效"，与是否排完课无关）。三处渲染点共用本表。
+SCHEDULE_STATUS = {'draft': '未启用', 'active': '启用中', 'archived': '已归档'}
 ENTRY_TYPES = {'normal': '正常', 'swap': '调课'}
 SWAP_STATUS = {'pending': '待审核', 'approved': '已通过', 'rejected': '已驳回', 'executed': '已执行'}
 SWAP_TYPES = {'personal': '个人调课', 'bulk': '统一调课'}
 PERIOD_TYPES = {'morning': '上午', 'afternoon': '下午', 'evening': '晚自习', 'break': '课间/午休'}
 WEEKDAY_NAMES = {1: '周一', 2: '周二', 3: '周三', 4: '周四', 5: '周五', 6: '周六', 7: '周日'}
-MAX_PERIOD = 13
+# 2026-10-10：原 `MAX_PERIOD = 13`（"一天最多 13 节"）已删除 —— **一天几节由学校自己定，
+# 系统不设业务上限**（用户报障：凭什么限制我）。下面这个是**编号合法性上界**，
+# 只用来挡住手滑输入（如 999），正常排课永远碰不到；真实约束是"节次必须在本学期定义过"。
+PERIOD_NUMBER_CEILING = 99
 
 
-# ── 默认节次模板（高中作息，一天最多 13 节） ─────────────────────────────
+# ── 默认节次模板（高中作息：早读 + 上午5 + 下午4 + 晚自习3 = 13 节，仅新建学期的初始值，
+#    不是上限；学校可自由增删，也可存成全局模板复用）
+#
+#    时长口径（2026-10-10 用户给定）：**早读 40 分钟 / 正课 45 分钟 / 晚自习 50 分钟**，
+#    课间 10 分钟。一句话：每节课一般是 40、45 或 50 分钟，晚自习按 50 分钟排
+#    （原来默认给的是 60 分钟，已改）。 ──────────────────────────────────
 
 def get_default_periods():
     """返回 13 节默认节次配置列表（dict 形式），用于新建学期时批量写入 PeriodDef。
@@ -26,6 +36,8 @@ def get_default_periods():
     结构：period_number / period_name / start_time / end_time / period_type / sort_order
     适配早读 + 上午 5 节 + 下午 4 节 + 晚自习 3 节；午休作为时间空档，
     不占用课表节次编号。早操和课间操是值守活动，由独立值班表维护。
+
+    时长口径（2026-10-10 用户给定）：早读 40、正课 45、晚自习 50 分钟，课间 10 分钟。
     """
     return [
         {'period_number': 1,  'period_name': '早读',    'start_time': '07:00', 'end_time': '07:40', 'period_type': 'morning',   'sort_order': 1},
@@ -38,9 +50,10 @@ def get_default_periods():
         {'period_number': 8,  'period_name': '第7节',   'start_time': '14:55', 'end_time': '15:40', 'period_type': 'afternoon', 'sort_order': 8},
         {'period_number': 9,  'period_name': '第8节',   'start_time': '16:00', 'end_time': '16:45', 'period_type': 'afternoon', 'sort_order': 9},
         {'period_number': 10, 'period_name': '第9节',   'start_time': '16:55', 'end_time': '17:40', 'period_type': 'afternoon', 'sort_order': 10},
-        {'period_number': 11, 'period_name': '晚自习1', 'start_time': '19:00', 'end_time': '20:00', 'period_type': 'evening',   'sort_order': 11},
-        {'period_number': 12, 'period_name': '晚自习2', 'start_time': '20:10', 'end_time': '21:10', 'period_type': 'evening',   'sort_order': 12},
-        {'period_number': 13, 'period_name': '晚自习3', 'start_time': '21:20', 'end_time': '22:20', 'period_type': 'evening',   'sort_order': 13},
+        # 晚自习按 50 分钟排（2026-10-10 口径：早读 40 / 正课 45 / 晚自习 50；原来默认给的是 60 分钟）
+        {'period_number': 11, 'period_name': '晚自习1', 'start_time': '19:00', 'end_time': '19:50', 'period_type': 'evening',   'sort_order': 11},
+        {'period_number': 12, 'period_name': '晚自习2', 'start_time': '20:00', 'end_time': '20:50', 'period_type': 'evening',   'sort_order': 12},
+        {'period_number': 13, 'period_name': '晚自习3', 'start_time': '21:00', 'end_time': '21:50', 'period_type': 'evening',   'sort_order': 13},
     ]
 
 
@@ -95,27 +108,45 @@ class TermSchedule(db.Model):
             return False
         return True
 
-    def get_week_number(self, target_date=None):
-        """返回该日期属于第几周（int），或 None（日期不在学期范围/未配置起止日期）。
+    def week1_monday(self):
+        """第 1 周所属自然周的周一（开学日往前退到本周一）。
 
-        计算方式：((target_date - start_date).days // 7) + 1 - week_start_offset，
-        并校验 1 <= week <= total_weeks。
+        2026-10-10：周次一律按**自然周（周一~周日）**划分 —— 开学第一天不是周一时，
+        第 1 周就是「开学日 ~ 该周周日」这个不完整周，**不从开学日往后数 7 天**。
+        老口径（开学=周首、每周跨到下周同一天）会让周次整体"漂移"，周四开学就出现
+        "第 1 周 = 09-03~09-09"这种既非自然周、也对不上校历的区间。
+        """
+        if not self.start_date:
+            return None
+        return self.start_date - timedelta(days=self.start_date.isoweekday() - 1)
+
+    def get_week_number(self, target_date=None):
+        """返回该日期属于第几周（int），或 None（不在学期范围/未配置起止日期）。
+
+        计算方式（自然周口径）：((target_date - 第1周周一).days // 7) + 1
+        - week_start_offset，并校验 1 <= week <= total_weeks。
         """
         if not self.start_date:
             return None
         d = target_date or date.today()
         if not self.contains_date(d):
             return None
+        anchor = self.week1_monday()
         offset = self.week_start_offset or 0
-        week = ((d - self.start_date).days // 7) + 1 - offset
+        week = ((d - anchor).days // 7) + 1 - offset
         tw = self.total_weeks or 20
         if week < 1 or week > tw:
             return None
         return week
 
     def get_week_date_range(self, week):
-        """返回该教学周的 (周一日期, 周日日期) 元组，或 None"""
-        if not self.start_date or week is None:
+        """返回该教学周的 (周一日期, 周日日期) 元组，或 None。
+
+        第 1 周从**开学日**算起（开学不是周一时，前面的工作日还没开始）；
+        最后一周不越过学期结束日。
+        """
+        anchor = self.week1_monday()
+        if anchor is None or week is None:
             return None
         try:
             week = int(week)
@@ -125,8 +156,14 @@ class TermSchedule(db.Model):
         if week < 1 or week > tw:
             return None
         offset = self.week_start_offset or 0
-        monday = self.start_date + timedelta(days=(week - 1 + offset) * 7)
-        return (monday, monday + timedelta(days=6))
+        monday = anchor + timedelta(days=(week - 1 + offset) * 7)
+        start = monday
+        if self.start_date and start < self.start_date:
+            start = self.start_date          # 第 1 周：开学前那几天不算
+        end = monday + timedelta(days=6)
+        if self.end_date and end > self.end_date:
+            end = self.end_date              # 最后一周：不越过学期结束日
+        return (start, end)
 
     def get_current_week(self):
         """等价 get_week_number(date.today())"""
@@ -177,7 +214,7 @@ class TermSchedule(db.Model):
 
 
 class PeriodDef(db.Model):
-    """节次定义：一天最多 13 节，每节含名称/时间/类型
+    """节次定义：每节含名称/时间/类型，**数量不限**（由学校自定义，见 save_periods）
 
     唯一约束 (term_schedule_id, period_number) 保证同一学期内节次号不重复。
     period_type: morning / afternoon / evening / break
@@ -187,7 +224,7 @@ class PeriodDef(db.Model):
 
     id = db.Column(db.Integer, primary_key=True)
     term_schedule_id = db.Column(db.Integer, db.ForeignKey('term_schedules.id'), nullable=False)
-    period_number = db.Column(db.Integer, nullable=False)   # 1-13
+    period_number = db.Column(db.Integer, nullable=False)   # 1..N（N 由学校自定义）
     period_name = db.Column(db.String(20), nullable=False)  # 如 "早读" / "第1节" / "晚自习1"
     start_time = db.Column(db.String(5))                    # "07:00"
     end_time = db.Column(db.String(5))                      # "07:40"
@@ -314,56 +351,6 @@ class ScheduleEntry(db.Model):
                 f'{WEEKDAY_NAMES.get(self.weekday, "")}第{self.period_number}节 {self.subject}>')
 
 
-class NightDuty(db.Model):
-    """晚自习值班（2026-09-26 新增，高中教务刚需）。
-
-    高中晚自习（通常第 11~13 节）不排学科课，而是安排教师**值班看班/巡楼**。
-    教务处每学期要出一张「年级 × 星期 × 节次」的值班表，排班时要保证：
-    - 同一位教师**同一天**不重复值班（一晚只值一节，值完就走）；
-    - 每位教师**一周**值班次数均衡（默认上限 2 次）；
-    - 优先用在校任课教师，行政人员作为兜底。
-
-    与课表的关系：只读课表（取年级、避开当天课多的教师），不写入课表条目 ——
-    值班不是课，不该出现在班级课表的网格里。
-    """
-    __bind_key__ = 'timetable'
-    __tablename__ = 'night_duties'
-
-    id = db.Column(db.Integer, primary_key=True)
-    term_schedule_id = db.Column(db.Integer, db.ForeignKey('term_schedules.id'),
-                                 nullable=False)
-    grade = db.Column(db.String(10), nullable=False)        # 如 "2024级"
-    weekday = db.Column(db.Integer, nullable=False)         # 1=周一 ... 7=周日
-    period_number = db.Column(db.Integer, nullable=False)   # 晚自习节次（如 11/12/13）
-    teacher_uid = db.Column(db.String(16))                  # 逻辑键（跨库不建外键）
-    teacher_name = db.Column(db.String(50))
-    note = db.Column(db.String(100))
-    created_at = db.Column(db.DateTime, default=datetime.now)
-
-    __table_args__ = (
-        # 同一学期、同一年级、同一时段只允许一位值班教师
-        db.UniqueConstraint('term_schedule_id', 'grade', 'weekday', 'period_number',
-                            name='uq_night_duty_slot'),
-        db.Index('idx_night_duty_teacher', 'term_schedule_id', 'teacher_uid', 'weekday'),
-    )
-
-    def to_dict(self):
-        return {
-            'id': self.id,
-            'grade': self.grade,
-            'weekday': self.weekday,
-            'weekday_text': WEEKDAY_NAMES.get(self.weekday, ''),
-            'period_number': self.period_number,
-            'teacher_uid': self.teacher_uid,
-            'teacher_name': self.teacher_name,
-            'note': self.note,
-        }
-
-    def __repr__(self):
-        return (f'<NightDuty {self.grade} {WEEKDAY_NAMES.get(self.weekday, "")}'
-                f'第{self.period_number}节 {self.teacher_name}>')
-
-
 class ScheduleSwap(db.Model):
     """调课记录
 
@@ -402,6 +389,9 @@ class ScheduleSwap(db.Model):
     # 分级审批：当前停在第几级（0 起）+ 每一级谁审的、什么意见（JSON 数组）
     approval_step = db.Column(db.Integer, default=0)
     approvals_json = db.Column(db.Text)
+    # 2026-10-10：统一调课批次号 —— 同一次「统一调课」生成的多条记录共享同一 batch_id，
+    # 列表按批次展示、整批一次性审批/执行，避免几十条一个个点。
+    batch_id = db.Column(db.String(32), index=True)
     created_at = db.Column(db.DateTime, default=datetime.now)
 
     __table_args__ = (
@@ -430,6 +420,7 @@ class ScheduleSwap(db.Model):
                                     if self.source_weekday else ''),
             'approval_step': self.approval_step or 0,
             'approvals': self.approvals(),
+            'batch_id': self.batch_id,
             'is_permanent': self.is_permanent,
             'reason': self.reason,
             'status': self.status,

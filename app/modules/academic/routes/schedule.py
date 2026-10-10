@@ -12,6 +12,7 @@
 from datetime import date, datetime
 
 import io
+import threading   # L-4：智能导入草稿的多线程保护
 
 from flask import (render_template, request, redirect, url_for, flash,
                    send_file, abort, jsonify, session)
@@ -20,7 +21,7 @@ from sqlalchemy import func
 
 from app.extensions import db
 from app.models.timetable import (TermSchedule, ScheduleEntry, WEEKDAY_NAMES,
-                                  MAX_PERIOD, PERIOD_TYPES)
+                                  PERIOD_NUMBER_CEILING, PERIOD_TYPES)
 from app.modules.academic import bp
 from app.modules.academic.services import schedule_service as svc
 from app.modules.academic.services import term_service as tsvc
@@ -79,15 +80,37 @@ def _can_edit():
     return current_user.has_perm('academic.timetable')
 
 
-def _week_param():
-    """解析 ?week=N 周次参数（预留钩子，透传给 service 视图函数）"""
+def _week_param(ts=None):
+    """解析 ?week=N 周次参数。
+
+    2026-10-10：周次选择器已去掉「全部周」——用户未指定周次时，**默认取当前教学周**
+    （与页面顶部「第 N 周」一致），不再默认铺开整学期。
+    ts 不传（如导出接口）时保持旧行为：返回 None = 不过滤，导出的仍是整学期。
+    """
     w = request.args.get('week', type=int)
-    return w if w and w > 0 else None
+    if w and w > 0:
+        return w
+    if ts is not None:
+        try:
+            return ts.get_current_week()   # 无法判断当前周（未配日期/不在学期内）时返回 None
+        except Exception:  # noqa: BLE001  取值失败不影响页面，退回"不过滤"
+            return None
+    return None
 
 
 def _editable(ts):
     """页面编辑态：有课表管理权限且学期未归档（archived 只读回看）"""
     return _can_edit() and ts.status != 'archived'
+
+
+def _view_scope():
+    """查看类页面的数据范围：统一放开为「全部年级 / 全部班级」（2026-10-10）。
+
+    背景：用户要求「移除按年级筛选的限制，确保所有年级的课表均可显示」。
+    写操作（录课 / 导入 / 调课 / 审批）的范围校验不受影响，仍在各自入口把关。
+    返回 (allowed_grades, allowed_classes)，None = 不过滤。
+    """
+    return None, None
 
 
 def _readonly_guard(ts, back_endpoint, **back_kwargs):
@@ -106,8 +129,16 @@ def _readonly_guard(ts, back_endpoint, **back_kwargs):
 @login_required
 @perm_required('academic.timetable')
 def schedule_manage():
-    """学期课表管理首页：学期列表 + 创建/激活/归档/删除入口"""
-    schedules = svc.list_schedules()
+    """学期课表管理首页：只列「在用 / 待启用」的学期 + 创建/激活/归档/删除入口。
+
+    2026-10-10（用户报障）：原实现把**全部学期**都列出来，于是 4 个已归档学期占了
+    4 张卡，这一页看起来就是个历史列表 —— 而页面右上角本来就有「历史课表」入口。
+    现在归档的学期不再在这里出现，统一到「历史课表」页（回看 / 快照 / 重新启用 /
+    作为底版），本页只提示归档数量 + 入口，职责分干净。
+    """
+    all_terms = svc.list_schedules()
+    schedules = [ts for ts in all_terms if ts.status != 'archived']
+    archived_count = len(all_terms) - len(schedules)
     ids = [ts.id for ts in schedules]
     # 条目数一次聚合（原为逐学期 count，N 次查询）
     counts = {}
@@ -146,7 +177,47 @@ def schedule_create():
         flash('创建失败，请重试', 'danger')
         return redirect(url_for('academic.schedule_manage'))
     log_operation(current_user, '新增', '学期课表', ts.id, ts.name, module='academic')
-    flash(f'学期「{ts.name}」已创建（草稿状态，含 13 节默认作息）', 'success')
+    flash(f'学期「{ts.name}」已创建（未启用状态，含 13 节默认作息）', 'success')
+    return redirect(url_for('academic.schedule_manage'))
+
+
+@bp.route('/schedule/<int:sid>/edit', methods=['POST'])
+@login_required
+@perm_required('academic.timetable')
+def schedule_edit(sid):
+    """编辑学期基本信息（名称 / 学年 / 学期 / 说明）。
+
+    2026-10-10 新增：学期卡片此前只能建、激活、归档、删，**名称写错了没法改**
+    （用户报障「没办法编辑」）。这里补上基本信息编辑；归档学期仍只读。
+    """
+    ts = _get_schedule_or_404(sid)
+    guard = _readonly_guard(ts, 'academic.schedule_manage')
+    if guard:
+        return guard
+    name = (request.form.get('name') or '').strip()
+    school_year = (request.form.get('school_year') or '').strip()
+    term = (request.form.get('term') or '').strip()
+    description = (request.form.get('description') or '').strip()
+    if not name or not school_year or not term:
+        flash('名称、学年、学期为必填项', 'danger')
+        return redirect(url_for('academic.schedule_manage'))
+    # 同名学期会让顶部切换下拉分不清，这里挡掉（改回自己原名不算重复）
+    dup = TermSchedule.query.filter(TermSchedule.id != sid,
+                                    TermSchedule.name == name).first()
+    if dup:
+        flash(f'已存在同名学期「{name}」，请换一个名称', 'danger')
+        return redirect(url_for('academic.schedule_manage'))
+    old_name = ts.name
+    try:
+        svc.update_schedule(sid, name=name, school_year=school_year,
+                            term=term, description=description or None)
+    except Exception:
+        db.session.rollback()
+        flash('保存失败，请重试', 'danger')
+        return redirect(url_for('academic.schedule_manage'))
+    log_operation(current_user, '更新', '学期课表', sid,
+                  f'{old_name} → {name}', module='academic')
+    flash(f'学期信息已更新：{old_name} → {name}', 'success')
     return redirect(url_for('academic.schedule_manage'))
 
 
@@ -162,27 +233,7 @@ def schedule_activate(sid):
         flash(str(e), 'danger')
         return redirect(url_for('academic.schedule_manage'))
     log_operation(current_user, '激活', '学期课表', sid, ts.name, module='academic')
-    flash(f'学期「{ts.name}」已激活', 'success')
-    return redirect(url_for('academic.schedule_manage'))
-
-
-@bp.route('/schedule/<int:sid>/archive', methods=['POST'])
-@login_required
-@perm_required('academic.timetable')
-def schedule_archive(sid):
-    """归档学期（与 archive-term 同一实现：写归档快照，避免两套语义）"""
-    ts = _get_schedule_or_404(sid)
-    try:
-        ok, msg = tsvc.archive_term(sid, operator=current_user)
-    except Exception:
-        db.session.rollback()
-        flash('归档失败，请重试', 'danger')
-        return redirect(url_for('academic.schedule_manage'))
-    if not ok:
-        flash(msg, 'danger')
-        return redirect(url_for('academic.schedule_manage'))
-    log_operation(current_user, '归档', '学期课表', sid, ts.name, module='academic')
-    flash(msg + '（已生成归档快照，可追溯）', 'success')
+    flash(f'学期「{ts.name}」已激活；原启用学期的课表已归档进「历史课表」', 'success')
     return redirect(url_for('academic.schedule_manage'))
 
 
@@ -203,24 +254,10 @@ def schedule_delete(sid):
     return redirect(url_for('academic.schedule_manage'))
 
 
-@bp.route('/schedule/<int:sid>/master')
-@login_required
-@perm_required('academic.timetable')
-def schedule_master(sid):
-    """大课表（全校总览）：年级标签 + AJAX 按需加载班级网格"""
-    ts = _get_schedule_or_404(sid)
-    grade_classes = svc.get_grade_class_list(sid)
-    init_grade = (request.args.get('grade') or '').strip()
-    if init_grade not in grade_classes:
-        init_grade = next(iter(grade_classes), '')
-    return render_template('academic/schedule_master.html',
-                           ts=ts, grade_classes=grade_classes,
-                           init_grade=init_grade, week=_week_param(),
-                           # 首屏即带上节次定义：否则弹窗节次下拉会退回默认 13 节，
-                           # 与学期自定义作息不一致（编辑/AJAX 切班后同样依赖它）
-                           periods=[p.to_dict() for p in svc.get_periods(sid)],
-                           schedules=svc.list_schedules(),
-                           can_edit=_editable(ts))
+# 2026-10-10：原「大课表」页（GET /schedule/<sid>/master）已整体下线。
+# 它做的事 = 年级标签 + 班级 pills + AJAX 换班加载"行=节次、列=星期"的班级网格，
+# 与「全校总课表」（schedule_overview：行=节次、列=班级，一屏看全校）重叠；
+# 编辑能力（条目弹窗、拖拽换格）在「年级课表 / 班级课表」里同样具备，删除无功能损失。
 
 
 @bp.route('/schedule/<int:sid>/grade/<grade>')
@@ -229,7 +266,7 @@ def schedule_master(sid):
 def schedule_grade(sid, grade):
     """年级课表：年级内班级标签切换（?class= 指定班级）"""
     ts = _get_schedule_or_404(sid)
-    week = _week_param()
+    week = _week_param(ts)
     data = svc.get_grade_view(sid, grade, week=week)
     classes = data['classes']
     cur_class = (request.args.get('class') or '').strip()
@@ -237,8 +274,13 @@ def schedule_grade(sid, grade):
         cur_class = classes[0] if classes else ''
     view = svc.get_class_view(sid, grade, cur_class, week=week) if cur_class else \
         {'grid': {}, 'periods': data['periods'], 'stats': {}, 'total': 0}
+    # 2026-10-10：页内年级切换（所有年级均可显示，不再只有入口那一个年级）
+    all_grades = sorted(svc.get_grade_class_list(sid))
+    if grade and grade not in all_grades:
+        all_grades = sorted(all_grades + [grade])
     return render_template('academic/schedule_grade.html',
                            ts=ts, grade=grade, classes=classes,
+                           all_grades=all_grades,
                            cur_class=cur_class, view=view, week=week,
                            schedules=svc.list_schedules(),
                            can_edit=_editable(ts))
@@ -250,7 +292,7 @@ def schedule_grade(sid, grade):
 def schedule_class(sid, grade, class_name):
     """班级课表：13x7 网格 + 学科课时统计"""
     ts = _get_schedule_or_404(sid)
-    week = _week_param()
+    week = _week_param(ts)
     view = svc.get_class_view(sid, grade, class_name, week=week)
     # 高中：班型 + 选科方向 + 选科组合（新高考 3+1+2），班级档案里有就显示
     from app.modules.academic.services.grade_utils import (class_profile_map,
@@ -271,7 +313,8 @@ def schedule_class(sid, grade, class_name):
 def schedule_teacher(sid, uid):
     """教师个人课表：搜索选择 + 网格 + 课时统计"""
     ts = _get_schedule_or_404(sid)
-    view = svc.get_teacher_view(sid, uid, week=_week_param())
+    week = _week_param(ts)
+    view = svc.get_teacher_view(sid, uid, week=week)
     teacher = None
     try:
         from app.models.academic import Teacher
@@ -281,7 +324,7 @@ def schedule_teacher(sid, uid):
     teachers = svc.get_all_teachers()
     return render_template('academic/schedule_teacher.html',
                            ts=ts, uid=uid, teacher=teacher, view=view,
-                           teachers=teachers, week=_week_param(),
+                           teachers=teachers, week=week,
                            schedules=svc.list_schedules(),
                            can_edit=_editable(ts), my_mode=False)
 
@@ -308,8 +351,9 @@ def schedule_share(sid):
     """
     _get_schedule_or_404(sid)
     data = _payload()
-    view_type = (data.get('view') or 'master').strip()
-    if view_type not in ('master', 'grade', 'class', 'teacher', 'room', 'overview'):
+    # 2026-10-10：'master' 随大课表页下线，默认视图改 'overview'（全校总课表）
+    view_type = (data.get('view') or 'overview').strip()
+    if view_type not in ('overview', 'grade', 'class', 'teacher', 'room'):
         return _json_err('不支持的视图类型')
     payload = {
         'sid': sid,
@@ -361,7 +405,8 @@ def schedule_shared(token):
                                 uid=payload['uid'], week=week))
     if view_type == 'overview':
         return redirect(url_for('academic.schedule_overview', sid=sid, week=week))
-    return redirect(url_for('academic.schedule_master', sid=sid, week=week))
+    # 未知视图 / 无 grade 上下文的旧 'master' 短链 → 兜底到全校总课表
+    return redirect(url_for('academic.schedule_overview', sid=sid, week=week))
 
 
 @bp.route('/schedule/overview')
@@ -381,26 +426,26 @@ def schedule_overview_index():
 @login_required
 @perm_required('academic.view')
 def schedule_overview(sid):
-    """全校总课表（2026-09-25 新增；2026-10-09 定版）：一个年级一张总表。
+    """全校总课表（2026-09-25 新增；2026-10-10 三改为**竖版**）：三个年级并进一张表。
 
-    版式：**行＝班级、列＝节次**，表头只有作息分组（早读/上午/下午/晚自习）
-    与节次名；星期用顶部标签切换，每次只渲染一天（默认今天）。
+    版式：**行＝节次**（左列作息分组 + 节次名/时间）、**列＝班级**（两级表头：
+    年级跨列 → 班级）；星期用顶部标签切换，每次只渲染一天（默认今天）。
+    顶部筛选只保留「星期 / 年级 / 只看正课」——「选科方向 / 班型」筛选与
+    「显示教室」开关已按用户要求去掉（使用率低、占空间）。
 
     query 参数：
     - week=N       只看第 N 周（单双周课表不会串）
     - grades=a,b   只看指定年级（默认全部）
     - day=N        看星期几（1-7，缺省=今天，周末退回周一）
     - main=1       隐藏「课间/午休」节次（打印常用）
-    - room=1       格内追加显示教室
     """
     ts = _get_schedule_or_404(sid)
-    week = _week_param()
+    week = _week_param(ts)   # 2026-10-10：缺省 = 当前教学周（已去掉「全部周」）
     grades = [g.strip() for g in (request.args.get('grades') or '').split(',') if g.strip()]
-    allowed_grades = visible_academic_grades(current_user)
-    allowed_classes = visible_academic_class_scope(current_user)
-    if allowed_grades is not None:
-        if grades and any(g not in allowed_grades for g in grades):
-            abort(403)
+    # 2026-10-10：查看类页面不再按年级限制可见范围（用户要求「所有年级的课表均可显示」）。
+    # grades= 仍作为「自己选看哪个年级」的筛选参数；写操作/导入的范围校验保持不变。
+    allowed_grades = None
+    allowed_classes = None
     include_break = request.args.get('main') != '1'
     # 高中场景：按选科方向（物理/历史）与班型（强基班等）看总课表
     direction = (request.args.get('direction') or '').strip() or None
@@ -430,7 +475,6 @@ def schedule_overview(sid):
                            ts=ts, view=view, week=week, day=day, today_wd=today_wd,
                            grades=grades, include_break=include_break,
                            direction=direction, class_type=class_type,
-                           show_room=request.args.get('room') == '1',
                            schedules=svc.list_schedules(),
                            can_edit=_editable(ts))
 
@@ -440,13 +484,16 @@ def schedule_overview(sid):
 @login_required
 @perm_required('academic.view')
 def schedule_timetable_index():
-    """作息时间表入口（侧栏导航用）：解析当前学期后跳转。"""
+    """（2026-10-10）作息时间表已并入「节次配置」：旧入口解析学期后重定向。
+
+    侧栏导航不再提供独立入口，保留本端点只为兼容旧书签/旧链接。
+    """
     from app.modules.academic.services.schedule_common import get_active_schedule
     ts = get_active_schedule()
     if not ts:
         flash('尚未建立学期课表，请先创建学期', 'warning')
         return redirect(url_for('academic.schedule_manage'))
-    return redirect(url_for('academic.schedule_timetable', sid=ts.id))
+    return redirect(url_for('academic.schedule_periods', sid=ts.id))
 
 
 def _minutes(hhmm):
@@ -457,16 +504,13 @@ def _minutes(hhmm):
         return None
 
 
-@bp.route('/schedule/<int:sid>/timetable')
-@login_required
-@perm_required('academic.view')
-def schedule_timetable(sid):
-    """作息时间表（2026-09-26，高中场景）：一页看清每天几点上什么、多久。
+def _timetable_rows(sid):
+    """作息表视图数据（2026-10-10 并入节次配置页）：几点上什么、多久。
 
+    返回 (rows, stats)：rows 元素 {p, kind, dur}，kind ∈ reading/class/evening/break。
     高中教务的刚需是"贴墙的一张作息表"——早读几点、正课几节、午休多长、
-    晚自习到几点。这里把 period_defs 按高中语义归类统计，并支持 A4 打印。
+    晚自习到几点；这里把 period_defs 按高中语义归类统计。
     """
-    ts = _get_schedule_or_404(sid)
     periods = [p.to_dict() for p in svc.get_periods(sid)]
 
     def _cls(p):
@@ -494,10 +538,16 @@ def schedule_timetable(sid):
             stats['evening_min'] += dur
     stats['class_text'] = {'class': '正课', 'reading': '早读', 'evening': '晚自习',
                            'break': '课间/午休'}
-    return render_template('academic/schedule_timetable.html',
-                           ts=ts, rows=rows, stats=stats,
-                           schedules=svc.list_schedules(),
-                           can_edit=_editable(ts))
+    return rows, stats
+
+
+@bp.route('/schedule/<int:sid>/timetable')
+@login_required
+@perm_required('academic.view')
+def schedule_timetable(sid):
+    """（2026-10-10）作息时间表已并入「节次配置」页 → 重定向（旧链接保持可用）"""
+    ts = _get_schedule_or_404(sid)
+    return redirect(url_for('academic.schedule_periods', sid=ts.id))
 
 
 @bp.route('/schedule/<int:sid>/periods', methods=['GET', 'POST'])
@@ -516,12 +566,17 @@ def schedule_periods(sid):
         ends = request.form.getlist('end_time')
         types = request.form.getlist('period_type')
         periods_data = []
+        dropped = []      # 2026-10-10：编号非法的行不再静默丢弃，保存后给出提示
         for i, n in enumerate(nums):
             try:
                 pn = int(n)
             except (ValueError, TypeError):
+                dropped.append(str(n))
                 continue
-            if not (1 <= pn <= MAX_PERIOD):
+            # 2026-10-10：原来是 1..13 的业务上限（"一天最多 13 节"），现只挡非法编号 ——
+            # 一天几节由学校自己定，系统不设上限
+            if not (1 <= pn <= PERIOD_NUMBER_CEILING):
+                dropped.append(str(pn))
                 continue
             periods_data.append({
                 'period_number': pn,
@@ -531,6 +586,9 @@ def schedule_periods(sid):
                 'period_type': (types[i] if i < len(types) else '').strip() or 'morning',
                 'sort_order': i + 1,
             })
+        if dropped:
+            flash(f'有 {len(dropped)} 行的节次编号不合法（{"、".join(dropped[:5])}），已忽略；'
+                  f'编号需为 1~{PERIOD_NUMBER_CEILING} 的整数', 'warning')
         try:
             result = svc.save_periods(sid, periods_data, remove_missing=True)
         except Exception:
@@ -553,10 +611,14 @@ def schedule_periods(sid):
 
     periods = svc.get_periods(sid)
     has_entries = ScheduleEntry.query.filter_by(term_schedule_id=sid).first() is not None
+    # 2026-10-10：作息表视图随本页一起展示（原「作息时间表」独立页面已合并进来）
+    tt_rows, tt_stats = _timetable_rows(sid)
     return render_template('academic/schedule_periods.html',
                            ts=ts, periods=periods, period_types=PERIOD_TYPES,
+                           tt_rows=tt_rows, tt_stats=tt_stats,
                            schedules=svc.list_schedules(),
                            can_reset_defaults=not has_entries,
+                           global_info=svc.get_global_periods_info(),
                            can_edit=_editable(ts))
 
 
@@ -564,7 +626,7 @@ def schedule_periods(sid):
 @login_required
 @perm_required('academic.timetable')
 def schedule_periods_reset(sid):
-    """重置为空课表使用的默认 13 节"""
+    """重置为内置默认作息（早读 + 上午5 + 下午4 + 晚自习3）"""
     ts = _get_schedule_or_404(sid)
     guard = _readonly_guard(ts, 'academic.schedule_periods', sid=sid)
     if guard:
@@ -576,6 +638,47 @@ def schedule_periods_reset(sid):
         return redirect(url_for('academic.schedule_periods', sid=sid))
     log_operation(current_user, '重置', '节次配置', sid, ts.name, module='academic')
     flash('已重置为默认作息：早读、上午5节、下午4节、晚自习3节', 'success')
+    return redirect(url_for('academic.schedule_periods', sid=sid))
+
+
+@bp.route('/schedule/<int:sid>/periods/global-save', methods=['POST'])
+@login_required
+@perm_required('academic.timetable')
+def schedule_periods_global_save(sid):
+    """把本学期的作息存为「全局作息模板」（2026-10-10 新增）。
+
+    学校作息一般全校固定，存一次之后：新建学期默认套用，任意学期可一键套用。
+    """
+    ts = _get_schedule_or_404(sid)
+    guard = _readonly_guard(ts, 'academic.schedule_periods', sid=sid)
+    if guard:
+        return guard
+    ok, msg = svc.save_global_periods(sid, operator=current_user)
+    flash(msg, 'success' if ok else 'warning')
+    if ok:
+        log_operation(current_user, '更新', '全局作息模板', sid, ts.name,
+                      module='academic')
+    return redirect(url_for('academic.schedule_periods', sid=sid))
+
+
+@bp.route('/schedule/<int:sid>/periods/global-apply', methods=['POST'])
+@login_required
+@perm_required('academic.timetable')
+def schedule_periods_global_apply(sid):
+    """把「全局作息模板」套用到本学期（2026-10-10 新增）。"""
+    ts = _get_schedule_or_404(sid)
+    guard = _readonly_guard(ts, 'academic.schedule_periods', sid=sid)
+    if guard:
+        return guard
+    ok, msg, result = svc.apply_global_periods(sid)
+    flash(msg, 'success' if ok else 'warning')
+    if ok:
+        log_operation(current_user, '更新', '节次配置', sid,
+                      f'{ts.name}：套用全局作息', module='academic')
+        if result and result['kept_in_use']:
+            nums = '、'.join(str(n) for n in result['kept_in_use'])
+            flash(f'第 {nums} 节仍有课程安排，未移除（请先调整这些课，再删除节次）',
+                  'warning')
     return redirect(url_for('academic.schedule_periods', sid=sid))
 
 
@@ -599,14 +702,44 @@ def schedule_versions(sid):
 # ═══════════════════════════════════════════════════════════════════════════════
 _SMART_DRAFT = {}
 _SMART_TTL = 3600
+# L-4：waitress 多线程下并发读写 dict 会互相覆盖/丢失，这里加锁（同教师导入的做法）
+_SMART_DRAFT_LOCK = threading.RLock()
+# L-4：草稿数量上限，避免被反复上传刷爆内存
+_SMART_DRAFT_MAX = 50
 
 
 def _smart_purge():
+    """按 TTL 清理过期草稿；超过上限时淘汰最旧的（加锁，多线程安全）。"""
     import time as _time
     now = _time.time()
-    for k in [k for k, v in list(_SMART_DRAFT.items())
-              if now - v.get('_ts', 0) > _SMART_TTL]:
-        _SMART_DRAFT.pop(k, None)
+    with _SMART_DRAFT_LOCK:
+        for k in [k for k, v in list(_SMART_DRAFT.items())
+                  if now - v.get('_ts', 0) > _SMART_TTL]:
+            _SMART_DRAFT.pop(k, None)
+        if len(_SMART_DRAFT) > _SMART_DRAFT_MAX:
+            for k in sorted(_SMART_DRAFT,
+                            key=lambda k: _SMART_DRAFT[k].get('_ts', 0))[
+                                :len(_SMART_DRAFT) - _SMART_DRAFT_MAX]:
+                _SMART_DRAFT.pop(k, None)
+
+
+def _smart_draft_set(token, payload):
+    """写入导入草稿（先清理过期，再加锁写入）"""
+    _smart_purge()
+    with _SMART_DRAFT_LOCK:
+        _SMART_DRAFT[token] = payload
+
+
+def _smart_draft_get(token):
+    """读取导入草稿（加锁）"""
+    with _SMART_DRAFT_LOCK:
+        return _SMART_DRAFT.get(token)
+
+
+def _smart_draft_pop(token):
+    """取出并移除导入草稿（加锁，确认导入时用）"""
+    with _SMART_DRAFT_LOCK:
+        return _SMART_DRAFT.pop(token, None)
 
 
 def _smart_context(ts, user):
@@ -676,8 +809,7 @@ def schedule_smart_import(sid):
     # 回看草稿（切换星期几时不用重新上传）
     draft_token = (request.args.get('draft') or '').strip()
     if draft_token and request.method == 'GET':
-        _smart_purge()
-        draft = _SMART_DRAFT.get(draft_token)
+        draft = _smart_draft_get(draft_token)
         if not draft or draft.get('owner_id') != current_user.id:
             flash('预览草稿已过期，请重新上传', 'warning')
             return redirect(url_for('academic.schedule_smart_import', sid=sid))
@@ -688,6 +820,7 @@ def schedule_smart_import(sid):
                                fname=draft.get('fname'), grades=grades,
                                grade_classes=grade_classes, preview=True, result=None,
                                matrix=mx, pday=day, flat_count=flat_n,
+                               week_range=draft.get('week_range') or '',
                                weekday_names=WEEKDAY_NAMES)
 
     if request.method == 'POST':
@@ -698,24 +831,29 @@ def schedule_smart_import(sid):
         if not file or not file.filename:
             flash('请选择课表 Excel 文件', 'danger')
             return redirect(url_for('academic.schedule_smart_import', sid=sid))
+        # 2026-10-10：整批周次（按周次为单位批量导入）——如 5 / 1-9 / 单周；
+        # 留空 = 按格内标注（缺省 1-18）
+        week_range = (request.form.get('week_range') or '').strip()
         try:
             data = sheet_parser.parse_school_workbook(
-                _io.BytesIO(file.read()), svc.get_periods(sid), grades, teachers)
+                _io.BytesIO(file.read()), svc.get_periods(sid), grades, teachers,
+                default_week_range=week_range or None)
         except Exception as exc:  # noqa: BLE001
             flash(f'文件解析失败：{exc}', 'danger')
             return redirect(url_for('academic.schedule_smart_import', sid=sid))
 
         token = _uuid.uuid4().hex
-        _smart_purge()
-        _SMART_DRAFT[token] = {'data': data, 'fname': file.filename,
-                               'owner_id': current_user.id,
-                               '_ts': _time.time()}
+        _smart_draft_set(token, {'data': data, 'fname': file.filename,
+                                 'owner_id': current_user.id,
+                                 'week_range': week_range,
+                                 '_ts': _time.time()})
         mx, day, flat_n = _smart_matrix(ts, data, request.args.get('pday', type=int))
         return render_template('academic/schedule_smart_import.html',
                                ts=ts, token=token, data=data, fname=file.filename,
                                grades=grades, grade_classes=grade_classes,
                                preview=True, result=None,
                                matrix=mx, pday=day, flat_count=flat_n,
+                               week_range=week_range,
                                weekday_names=WEEKDAY_NAMES)
 
     return render_template('academic/schedule_smart_import.html',
@@ -733,13 +871,13 @@ def schedule_smart_import_confirm(sid):
     if guard:
         return guard
     token = (request.form.get('token') or '').strip()
-    draft = _SMART_DRAFT.get(token)
+    draft = _smart_draft_get(token)
     if not draft:
         flash('导入批次已失效，请重新上传文件', 'danger')
         return redirect(url_for('academic.schedule_smart_import', sid=sid))
     if draft.get('owner_id') != current_user.id:
         abort(403)
-    _SMART_DRAFT.pop(token, None)
+    _smart_draft_pop(token)
 
     data = draft['data']
     entries = []
@@ -783,52 +921,55 @@ def schedule_smart_import_confirm(sid):
 @login_required
 @perm_required('academic.view')
 def schedule_smart_template(sid):
-    """下载「学校原样」矩阵模板（行=节次、列=星期、格内学科+教师）"""
+    """下载课表导入模板（两种版式，导入时自动识别）。
+
+    query：
+      layout=class（默认）「整班矩阵」：一个 sheet 一个班，行=节次、列=星期；
+      layout=full           「全校总课表」：一张表放全校，行=星期×节次、列=班级；
+      grade / class_name    版式 A 的 sheet 名与标题；
+      blank=1               不带示例数据（空白模板）；
+      week                  在标题里标注周次（版式 A）。
+    """
     from app.modules.academic.services import schedule_matrix_import as sheet_parser
     ts = _get_schedule_or_404(sid)
+    blank = request.args.get('blank') in ('1', 'true', 'yes')
+    suffix = '空白' if blank else '示例'
+    periods = svc.get_periods(sid)
+    mime = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+
+    if (request.args.get('layout') or 'class').strip() == 'full':
+        # 列 =(该学期已有的年级/班级)；新学期限 30 列以内，没有就退回示例 3 个班
+        gc = svc.get_grade_class_list(sid) or {}
+        classes = [(g, c) for g in sorted(gc) for c in sorted(gc[g] or [])][:30]
+        buf = sheet_parser.build_full_school_template(
+            periods, classes=classes or None, sample=not blank)
+        return send_file(buf, as_attachment=True,
+                         download_name=f'全校总课表模板_{ts.name}_{suffix}.xlsx',
+                         mimetype=mime)
+
+    grade = (request.args.get('grade') or '高三').strip()
+    class_name = (request.args.get('class_name') or '01班').strip()
     buf = sheet_parser.build_school_template(
-        svc.get_periods(sid), grade=(request.args.get('grade') or '高三'),
-        class_name=(request.args.get('class_name') or '01班'))
+        periods, grade=grade, class_name=class_name,
+        sample=not blank,
+        week_range=(request.args.get('week') or '').strip() or None)
     return send_file(buf, as_attachment=True,
-                     download_name=f'课表模板_{ts.name}_学校原样.xlsx',
-                     mimetype=('application/vnd.openxmlformats-officedocument'
-                               '.spreadsheetml.sheet'))
+                     download_name=(f'整班课表模板_{ts.name}_{grade}{class_name}'
+                                    f'_{suffix}.xlsx'),
+                     mimetype=mime)
 
 
 @bp.route('/schedule/<int:sid>/import', methods=['GET', 'POST'])
 @login_required
 @perm_required('academic.timetable')
 def schedule_import(sid):
-    """Excel 批量导入页面 + 上传处理"""
+    """（2026-10-10 起）逐行记录的长表导入已下线，统一走「整班 · 原样课表导入」。
+
+    保留端点只为兼容旧书签/旧链接：直接 302 到原样导入页。
+    """
     ts = _get_schedule_or_404(sid)
-    # 导入结果一次性取出展示：POST 后改走 PRG（redirect），避免浏览器刷新重复提交
-    result = session.pop('schedule_import_result', None)
-    if request.method == 'POST':
-        guard = _readonly_guard(ts, 'academic.schedule_import', sid=sid)
-        if guard:
-            return guard
-        file = request.files.get('file')
-        if not file or not file.filename:
-            flash('请选择 Excel 文件', 'danger')
-            return redirect(url_for('academic.schedule_import', sid=sid))
-        try:
-            class_visible = academic_class_authorizer(current_user)
-            result = svc.import_from_excel(
-                sid, file, operator=current_user,
-                entry_authorizer=lambda item: class_visible(
-                    item.get('grade'), item.get('class_name')))
-        except Exception:
-            db.session.rollback()
-            flash('导入失败：文件解析异常，请使用标准模板', 'danger')
-            return redirect(url_for('academic.schedule_import', sid=sid))
-        log_operation(current_user, '导入', '学期课表', sid,
-                      f'{ts.name}：成功 {result["success"]} 条，失败 {result["failed"]} 条',
-                      module='academic')
-        flash(f'导入完成：成功 {result["success"]} 条，失败 {result["failed"]} 条',
-              'success' if result['success'] else 'warning')
-        session['schedule_import_result'] = result
-        return redirect(url_for('academic.schedule_import', sid=sid))
-    return render_template('academic/schedule_import.html', ts=ts, result=result)
+    flash('课表导入已统一为「原样课表导入」（一个 sheet 一个班，可按班级/周次批量导入）', 'info')
+    return redirect(url_for('academic.schedule_smart_import', sid=ts.id))
 
 
 @bp.route('/schedule/<int:sid>/export')
@@ -837,7 +978,8 @@ def schedule_import(sid):
 def schedule_export(sid):
     """导出 Excel（query: view_type/grade/class/teacher）"""
     ts = _get_schedule_or_404(sid)
-    view_type = (request.args.get('view_type') or 'master').strip()
+    # 默认导「全校总课表」；整校分班（一个班一张 sheet）用 view_type=all
+    view_type = (request.args.get('view_type') or 'overview').strip()
     grade = (request.args.get('grade') or '').strip() or None
     class_name = (request.args.get('class') or '').strip() or None
     teacher_uid = (request.args.get('teacher') or '').strip() or None
@@ -857,7 +999,7 @@ def schedule_export(sid):
     except Exception:
         db.session.rollback()
         flash('导出失败，请重试', 'danger')
-        return redirect(url_for('academic.schedule_master', sid=sid))
+        return redirect(url_for('academic.schedule_manage'))
     stamp = datetime.now().strftime('%Y%m%d_%H%M%S')
     suffix = {'class': f'_{grade or ""}{class_name or ""}',
               'grade': f'_{grade or ""}',
@@ -871,11 +1013,9 @@ def schedule_export(sid):
 @login_required
 @perm_required('academic.timetable')
 def schedule_template(sid):
-    """下载导入模板"""
-    _get_schedule_or_404(sid)
-    buf = svc.generate_import_template(sid)
-    return send_file(buf, as_attachment=True,
-                     download_name='课表导入模板.xlsx', mimetype=_XLSX_MIME)
+    """（2026-10-10 起）逐行记录的长表模板已下线 → 统一下载「整班 · 原样」模板"""
+    ts = _get_schedule_or_404(sid)
+    return redirect(url_for('academic.schedule_smart_template', sid=ts.id))
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -1022,7 +1162,8 @@ def inspection_schedule():
 @perm_required('academic.view')
 def inspection_schedule_period(n):
     """查课联动：指定节次 → 重定向到实时课表（带 period 参数）。"""
-    if not (1 <= n <= MAX_PERIOD):
+    # 2026-10-10：原为 1..13 上限，导致第 14 节起的查课链接 404；现在只挡非法编号
+    if not (1 <= n <= PERIOD_NUMBER_CEILING):
         abort(404)
     d = (request.args.get('date') or '').strip()
     grade = (request.args.get('grade') or '').strip()
@@ -1045,35 +1186,16 @@ def api_schedule_class_data(sid):
     weekday = request.args.get('weekday', type=int)
     if not grade or not class_name:
         return _json_err('缺少 grade / class_name 参数')
-    allowed_grades = visible_academic_grades(current_user)
-    allowed_classes = visible_academic_class_scope(current_user)
-    if allowed_grades is not None and grade not in allowed_grades:
-        abort(403)
-    if not academic_class_is_visible(current_user, grade, class_name):
-        abort(403)
+    # 2026-10-10：查看类数据不再按年级限制（「所有年级的课表均可显示」）
+    allowed_grades, allowed_classes = _view_scope()
     view = svc.get_class_view(sid, grade, class_name, weekday=weekday,
                               week=_week_param(), allowed_grades=allowed_grades,
                               allowed_classes=allowed_classes)
     return _json_ok(view)
 
 
-@bp.route('/api/schedule/<int:sid>/grade-data')
-@login_required
-@perm_required('academic.view')
-def api_schedule_grade_data(sid):
-    """年级各班数据 JSON（大课表切换年级时按需加载）"""
-    _get_schedule_or_404(sid)
-    grade = (request.args.get('grade') or '').strip()
-    if not grade:
-        return _json_err('缺少 grade 参数')
-    allowed_grades = visible_academic_grades(current_user)
-    allowed_classes = visible_academic_class_scope(current_user)
-    if allowed_grades is not None and grade not in allowed_grades:
-        abort(403)
-    data = svc.get_grade_view(sid, grade, week=_week_param(),
-                              allowed_grades=allowed_grades,
-                              allowed_classes=allowed_classes)
-    return _json_ok(data)
+# 2026-10-10：/api/schedule/<sid>/grade-data（原给大课表切换年级用）已删。
+# 它在大课表页里只是配置块中的一个 URL 键，前端 JS 从未请求过——大课表一下线就是纯孤儿接口。
 
 
 @bp.route('/api/schedule/entry/<int:eid>')
@@ -1084,10 +1206,6 @@ def api_schedule_entry_detail(eid):
     detail = svc.get_entry_detail(eid)
     if not detail:
         return _json_err('条目不存在', 404)
-    allowed_grades = visible_academic_grades(current_user)
-    if not academic_class_is_visible(current_user, detail.get('grade'),
-                                     detail.get('class_name')):
-        abort(403)
     versions = [v.to_dict() for v in svc.get_entry_versions(eid, limit=20)]
     return _json_ok({'entry': detail, 'versions': versions})
 
@@ -1121,22 +1239,6 @@ def api_schedule_teachers():
                                 'subject': subj or ''})
         if ordered:
             teachers = ordered
-    if visible_academic_class_scope(current_user) is not None:
-        sid = request.args.get('sid', type=int)
-        if not sid:
-            active = svc.get_active_schedule()
-            sid = active.id if active else None
-        if sid:
-            teacher_rows = apply_academic_scope(
-                ScheduleEntry.query.filter_by(term_schedule_id=sid,
-                                               is_deleted=False),
-                current_user, ScheduleEntry).with_entities(
-                    ScheduleEntry.teacher_uid).distinct().all()
-            visible_uids = {row[0] for row in teacher_rows}
-            teachers = [teacher for teacher in teachers
-                        if teacher.get('uid') in visible_uids]
-        else:
-            teachers = []
     kw = (request.args.get('q') or '').strip()
     if kw:
         teachers = [t for t in teachers
@@ -1156,8 +1258,8 @@ def api_schedule_classes():
     的班兜底；学籍库只在上述结果为空（新系统还没排课）时兜底，保证不丢班。
     """
     merged = {}
-    allowed_grades = visible_academic_grades(current_user)
-    allowed_classes = visible_academic_class_scope(current_user)
+    # 2026-10-10：下拉候选不再按年级/班级限制（与「所有年级的课表均可显示」一致）
+    allowed_grades, allowed_classes = _view_scope()
     sid = request.args.get('sid', type=int)
 
     for g, cs in svc.get_grade_class_list(
@@ -1167,23 +1269,15 @@ def api_schedule_classes():
     for g, cs in teaching_scope_service.class_candidates(sid)['grade_classes'].items():
         merged.setdefault(g, set()).update(cs)
 
-    # 统一按数据范围过滤（年级 + 班级）
     filtered = {}
     for g, cs in merged.items():
-        if allowed_grades is not None and g not in allowed_grades:
-            continue
-        keep = allowed_classes.get(g) if allowed_classes is not None else None
-        if keep is not None:
-            cs = {c for c in cs if c in keep}
         if cs:
             filtered.setdefault(g, set()).update(cs)
 
     if not filtered:        # 兜底：还没排课的新系统，退回学籍库
         try:
             from app.models.student import Student
-            student_q = apply_academic_scope(
-                db.session.query(Student.grade, Student.class_name),
-                current_user, Student)
+            student_q = db.session.query(Student.grade, Student.class_name)
             skip = {'已转出', '离校', '不分班', '已毕业', ''}
             for g, cn in student_q.distinct().all():
                 if g and cn and cn not in skip:
@@ -1298,19 +1392,6 @@ def schedule_dates(sid):
                            can_edit=_editable(ts))
 
 
-@bp.route('/schedule/<int:sid>/calendar')
-@login_required
-@perm_required('academic.view')
-def schedule_calendar(sid):
-    """学期校历页（周次 x 日期矩阵，标记当前周/周末）"""
-    ts = _get_schedule_or_404(sid)
-    cal = tsvc.get_school_calendar(sid)
-    return render_template('academic/schedule_calendar.html',
-                           ts=ts, cal=cal,
-                           schedules=svc.list_schedules(),
-                           can_edit=_editable(ts))
-
-
 @bp.route('/schedule/<int:sid>/copy', methods=['GET', 'POST'])
 @login_required
 @perm_required('academic.timetable')
@@ -1364,13 +1445,13 @@ def schedule_copy(sid):
 @login_required
 @perm_required('academic.timetable')
 def schedule_set_current(sid):
-    """设为当前学期（互斥；draft 自动转 active）"""
+    """设为当前学期（仅切「当前」标记；激活 / 归档是另外两个独立操作）"""
     ts = _get_schedule_or_404(sid)
     try:
         svc.set_current_term(sid)
     except ValueError as e:
         flash(str(e), 'danger')
-        return redirect(url_for('academic.schedule_manage'))
+        return redirect(request.referrer or url_for('academic.schedule_manage'))
     log_operation(current_user, '更新', '当前学期', sid, ts.name, module='academic')
     flash(f'已将「{ts.name}」设为当前学期', 'success')
     return redirect(request.referrer or url_for('academic.schedule_manage'))
@@ -1380,7 +1461,10 @@ def schedule_set_current(sid):
 @login_required
 @perm_required('academic.timetable')
 def schedule_archive_term(sid):
-    """归档学期（含快照记录，写一条 ScheduleVersion）"""
+    """归档学期：写归档快照 → 移入「历史课表」（只读回看）
+
+    2026-10-10：归档后直接落到「历史课表」页，与「设为当前」彻底分开。
+    """
     ts = _get_schedule_or_404(sid)
     try:
         ok, msg = tsvc.archive_term(sid, operator=current_user)
@@ -1392,62 +1476,39 @@ def schedule_archive_term(sid):
         flash(msg, 'danger')
         return redirect(url_for('academic.schedule_manage'))
     log_operation(current_user, '归档', '学期课表', sid, ts.name, module='academic')
-    flash(msg + '（已生成归档快照，可追溯）', 'success')
-    return redirect(url_for('academic.schedule_manage'))
-
-
-@bp.route('/schedule/<int:sid>/usage')
-@login_required
-@perm_required('academic.timetable')
-def schedule_usage(sid):
-    """学期课表使用情况报告页"""
-    ts = _get_schedule_or_404(sid)
-    report = tsvc.get_term_usage_report(sid)
-    return render_template('academic/schedule_usage.html',
-                           ts=ts, report=report,
-                           schedules=svc.list_schedules(),
-                           can_edit=_editable(ts))
-
-
-@bp.route('/schedule/<int:sid>/usage/export')
-@login_required
-@perm_required('academic.timetable')
-def schedule_usage_export(sid):
-    """导出学期使用情况报告 Excel"""
-    ts = _get_schedule_or_404(sid)
-    report = tsvc.get_term_usage_report(sid)
-    try:
-        buf = _build_usage_workbook(ts, report)
-    except Exception:
-        db.session.rollback()
-        flash('导出失败，请重试', 'danger')
-        return redirect(url_for('academic.schedule_usage', sid=sid))
-    stamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-    return send_file(buf, as_attachment=True,
-                     download_name=f'{ts.name}_使用情况报告_{stamp}.xlsx',
-                     mimetype=_XLSX_MIME)
+    flash(msg + '：已生成归档快照并移入「历史课表」', 'success')
+    return redirect(url_for('academic.schedule_history'))
 
 
 @bp.route('/schedule/history')
 @login_required
 @perm_required('academic.timetable')
 def schedule_history():
-    """历史课表总览：按学年分组列出全部学期（含 archived）"""
-    terms = tsvc.list_terms_with_stats()
+    """历史课表总览：按学年分组列出**已归档**的学期（2026-10-10 与「学期管理」分工）。
+
+    - 学期管理：在用 / 待启用（draft + active），创建、导入、激活、归档、删除；
+    - 历史课表（本页）：已归档，只读回看 + 归档快照 + 重新启用 + 作为底版复制。
+    原实现列「全部学期」，归档的在两个页面重复出现（用户报障：别老在学期管理里
+    显示，直接放历史课表）。
+    """
+    all_terms = tsvc.list_terms_with_stats()
+    terms = [t for t in all_terms if t['status'] == 'archived']
     grouped = {}
     for t in terms:
         grouped.setdefault(t['school_year'] or '未分学年', []).append(t)
     # 学年倒序
     years = sorted(grouped.keys(), reverse=True)
+    # 当前启用中的学期不在本页列表里，「学期交接」入口单独取一次
     return render_template('academic/schedule_history.html',
-                           grouped=grouped, years=years, total=len(terms))
+                           grouped=grouped, years=years, total=len(terms),
+                           current_term=svc.get_active_schedule())
 
 
 @bp.route('/schedule/history/<int:sid>')
 @login_required
 @perm_required('academic.timetable')
 def schedule_history_detail(sid):
-    """历史学期课表入口页（大课表/年级/班级/教师 视图导航，只读）"""
+    """历史学期课表入口页（全校总课表/年级/班级/教师 视图导航，只读）"""
     ts = _get_schedule_or_404(sid)
     periods = svc.get_periods(sid)
     grade_classes = svc.get_grade_class_list(sid)
@@ -1590,46 +1651,6 @@ def _build_compare_workbook(result):
              r['field'], r['old'] or '', r['new'] or '']
             for r in result['changed']],
            ['年级', '班级', '星期', '节次', '字段', '原值', '新值'], 'F9A825')
-    buf = io.BytesIO()
-    wb.save(buf)
-    buf.seek(0)
-    return buf
-
-
-def _build_usage_workbook(ts, report):
-    from openpyxl import Workbook
-    from openpyxl.styles import Font, PatternFill, Alignment
-    wb = Workbook()
-    hf = Font(bold=True, color='FFFFFF')
-    fill = PatternFill(start_color='4472C4', end_color='4472C4', fill_type='solid')
-    center = Alignment(horizontal='center', vertical='center')
-
-    def _sheet(name, headers, rows):
-        ws = wb.create_sheet(name[:31])
-        for ci, h in enumerate(headers, 1):
-            c = ws.cell(row=1, column=ci, value=h)
-            c.font = hf; c.fill = fill; c.alignment = center
-        for ri, row in enumerate(rows, 2):
-            for ci, v in enumerate(row, 1):
-                ws.cell(row=ri, column=ci, value=xl_safe(v))
-
-    ws0 = wb.create_sheet('概览')
-    ws0.append(xl_row(['学期', ts.name]))
-    ws0.append(['日期区间', ts.period_text()])
-    ws0.append(['条目总数', report['total_entries']])
-    ws0.append(['班级数', report['total_classes']])
-    ws0.append(['学科数', report['total_subjects']])
-    ws0.append(['教师数', report['total_teachers']])
-    for c in ws0['A']:
-        c.font = Font(bold=True)
-    _sheet('班级周课时', ['班级', '周课时数'],
-           [[r['class'], r['hours']] for r in report['class_hours']])
-    _sheet('学科节数', ['学科', '总节数'],
-           [[r['subject'], r['count']] for r in report['subject_counts']])
-    _sheet('教师课时Top', ['教师', '总节数'],
-           [[r['teacher'], r['count']] for r in report['teacher_top']])
-    _sheet('节次类型分布', ['类型', '节数'],
-           [[k, v] for k, v in report['type_dist'].items()])
     buf = io.BytesIO()
     wb.save(buf)
     buf.seek(0)

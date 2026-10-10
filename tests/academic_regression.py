@@ -52,7 +52,8 @@ from app.extensions import db  # noqa: E402
 from app.models import ClassProfile, ClassSubject, PermissionGroup, User  # noqa: E402
 from app.models.academic import (InspectionRecord, SubjectLeader,  # noqa: E402
                                  Teacher, TeacherAchievement)
-from app.models.timetable import (PeriodDef, ScheduleEntry, TermSchedule,  # noqa: E402
+from app.models.timetable import (PeriodDef, ScheduleEntry, ScheduleSwap,  # noqa: E402
+                                  ScheduleVersion, SCHEDULE_STATUS, TermSchedule,
                                   get_default_periods)
 
 app = create_app()
@@ -193,7 +194,7 @@ with app.app_context():
 def _urls():
     from flask import url_for
     return {
-        'master': url_for('academic.schedule_master', sid=TS_ID),
+        # 2026-10-10：'master'（大课表）已下线，不再入表
         'grade': url_for('academic.schedule_grade', sid=TS_ID, grade='高一'),
         'class': url_for('academic.schedule_class', sid=TS_ID, grade='高一',
                          class_name='01班'),
@@ -204,9 +205,6 @@ def _urls():
         'overview_index': url_for('academic.schedule_overview_index'),
         'timetable': url_for('academic.schedule_timetable', sid=TS_ID),
         'timetable_index': url_for('academic.schedule_timetable_index'),
-        'night': url_for('academic.night_duty', sid=TS_ID),
-        'night_index': url_for('academic.night_duty_index'),
-        'night_export': url_for('academic.night_duty_export', sid=TS_ID),
         'smart_import': url_for('academic.schedule_smart_import', sid=TS_ID),
         'smart_template': url_for('academic.schedule_smart_template', sid=TS_ID),
         'achievements': url_for('academic.achievements_page'),
@@ -243,9 +241,14 @@ def check_sched():
         u = _urls()
     with app.test_client() as c:
         login(c, 'ac_admin', TEST_PWD)
-        for key in ('master', 'grade', 'class', 'teacher'):
+        for key in ('grade', 'class', 'teacher'):
             r = c.get(u[key])
             case(f'课表 {key} 页 200', r.status_code == 200, str(r.status_code))
+        # 2026-10-10：大课表页与其年级数据接口已下线（见下方 404 断言）
+        r = c.get(f'/academic/schedule/{TS_ID}/master')
+        case('大课表页已下线 404', r.status_code == 404, str(r.status_code))
+        r = c.get(f'/academic/api/schedule/{TS_ID}/grade-data')
+        case('大课表年级数据接口已下线 404', r.status_code == 404, str(r.status_code))
 
         html = c.get(u['class']).get_data(as_text=True)
         case('学科配色变量注入', '--sch:' in html)
@@ -261,15 +264,16 @@ def check_sched():
              'class_type/direction/combo')
         case('晚自习行有专用底色（与正课区分）', 'sch-evening' in html)
 
-        token = get_csrf(c, u['master'])
+        token = get_csrf(c, u['grade'])
         hdrs = {'X-CSRFToken': token}
         r = c.post(u['edit'], json={'grade': '高一', 'class_name': '01班', 'weekday': 6,
                                     'period_number': 8, 'subject': '语文',
                                     'teacher_uid': 'T900001', 'teacher_name': '张语文',
                                     'room': '101', 'week_range': '1-20', 'note': ''},
                    headers=hdrs)
-        case('大课表配置块含节次定义（弹窗节次不回退默认）',
-             '"periods"' in c.get(u['master']).get_data(as_text=True))
+        # 2026-10-10：原断言取的是大课表页，该页下线后改在年级课表页校验同一件事
+        case('课表页配置块含节次定义（弹窗节次不回退默认）',
+             '"periods"' in c.get(u['grade']).get_data(as_text=True))
         case('拖拽换格接口成功', bool((r.get_json() or {}).get('success')),
              f'{r.status_code} {r.get_data(as_text=True)[:120]}')
         with app.app_context():
@@ -302,45 +306,59 @@ def check_overview():
         case('矩阵样式走静态文件（不再内联 ~8KB style）',
              'css/schedule_matrix.css' in html and '.ovw-block {' not in html,
              '内联样式残留' if '.ovw-block {' in html else '未引用静态 CSS')
-        case('按年级分块', html.count('data-grade="') == 2, str(html.count('data-grade="')))
+        # 2026-10-10：竖版后 data-grade 落在"每个班级列/格"上（不再一块一个），
+        # 所以按"表里出现的年级集合"断言，而不是计数
+        grades_in_page = sorted({g for g in re.findall(r'data-grade="([^"]*)"', html) if g})
+        case('按年级分块（两个年级进同一张竖版表）',
+             grades_in_page == ['高一', '高二'], str(grades_in_page))
         # 高中习惯：毕业年级在前（高二 → 高一）
         case('总课表年级按毕业年级优先排序',
              '高二' in html and html.index('高二') < html.index('高一)')
              if '高一)' in html else '高二' in html, '排序未按高三→高二→高一')
         case('总课表带班型/选科徽章', '物理类' in html and '强基班' in html)
-        case('总课表提供选科筛选', 'direction=%E7%89%A9%E7%90%86' in html
-             or 'direction=物理' in html, '选科筛选缺失')
-        case('总课表改为「年级一张总表」（行=班级、列=节次）',
-             html.count('ovw-block"') == 2 and 'ovw-table' in html,
-             '年级块=%d' % html.count('ovw-block"'))
-        case('表头只留节次：第一列班级 + 节次列（旧版班级表头已消失）',
-             'ovw-class-col' in html and 'ovw-class-cell' in html
-             and 'ovw-per-col' in html and 'ovw-class-head' not in html,
-             '旧版班级表头残留' if 'ovw-class-head' in html else '')
+        # 2026-10-10 用户要求：移除「选科方向 / 班型」筛选（使用率低、占空间），
+        # 只保留「星期 / 年级 / 只看正课」
+        case('选科/班型筛选已下线（保留星期·年级·只看正课）',
+             'direction=' not in html and 'class_type=' not in html
+             and 'ovv-seg' in html and '只看正课' in html)
+        # 2026-10-10 三改：竖版布局 —— 行＝节次、列＝班级，三个年级并进同一张表
+        case('总课表改为竖版：行=节次、列=班级（三个年级一张表）',
+             html.count('ovv-table') == 1 and html.count('ovv-grade-row') == 1
+             and 'ovv-class-row' in html and 'ovv-axis-g' in html,
+             'ovv-table=%d 年级行=%d' % (html.count('ovv-table'),
+                                         html.count('ovv-grade-row')))
+        case('左侧两列＝作息分组 + 节次名（旧版横版表头消失）',
+             'ovv-group-t' in html and 'ovv-pname' in html and 'ovv-class' in html
+             and 'ovw-class-col' not in html,
+             '旧版横版表头残留' if 'ovw-class-col' in html else '')
+        case('班级列表头带年级前缀（截图/打印不歧义）',
+             '高二01班' in html and 'ovv-grade-start' in html)
         case('格内学科+教师（上行学科、下行教师）', '高二01班' in html and '张语文' in html)
         case('新作息节次渲染（早读 + 晚自习）', '早读' in html and '晚自习' in html)
-        case('作息二级表头（早读 / 上午 / 下午 / 晚自习分组）',
-             'ovw-grp-row' in html and 'ovw-grp' in html
-             and '上午' in html and '晚自习' in html)
+        case('作息分组在左列（上午/下午/晚自习，跨行合并）',
+             html.count('ovv-group-t') >= 2 and '上午' in html and '晚自习' in html
+             and 'ovv-group-start' in html)
         case('星期标签切换（可切到周二，不再有整周表）',
              ('day=2' in html or 'day%3D2' in html) and '>整周<' not in html)
         case('导出/打印入口', 'view_type=overview' in html and '打印总课表' in html)
-        # 节次列只数页面里的 <th class="ovw-per-col …">，避免把样式表里的类名算进来
-        full_cols = html.count('class="ovw-per-col')
-        brk_cols = html.count(' ovw-break-col')
+        # 竖版下空档（午休/课间）是"行"，main=1 时整行不渲染
+        full_rows = html.count('ovv-row')
+        full_break_rows = html.count('ovv-break-row')
         r = c.get(u['overview'], query_string={'main': '1'})
         mh = r.get_data(as_text=True)
-        main_cols = mh.count('class="ovw-per-col')
-        case('main=1 隐藏午休等空档节次（空档列整列消失）',
-             ' ovw-break-col' not in mh and main_cols == full_cols - brk_cols,
-             '列 %d/空档 %d → main=1 列 %d' % (full_cols, brk_cols, main_cols))
+        case('main=1 隐藏午休等空档节次（空档行整行消失）',
+             'ovv-break-row' not in mh and mh.count('ovv-row') <= full_rows,
+             '空档行 %d → main=1 %d' % (full_break_rows, mh.count('ovv-break-row')))
         r = c.get(u['overview'], query_string={'grades': '高一'})
         mh = r.get_data(as_text=True)
-        case('年级过滤 + 仍可切回', mh.count('data-grade="') == 1
+        mh_grades = sorted({g for g in re.findall(r'data-grade="([^"]*)"', mh) if g})
+        case('年级过滤 + 仍可切回', mh_grades == ['高一']
              and ('grades=高二' in mh or 'grades=%E9%AB%98%E4%BA%8C' in mh),
-             f'块数={mh.count(chr(34) + ">")} 含切回={("grades=" in mh)}')
+             f'年级={mh_grades} 含切回={("grades=" in mh)}')
+        # 2026-10-10 用户要求：总课表不再显示教室（原 room=1 开关已去掉）
         r = c.get(u['overview'], query_string={'room': '1'})
-        case('显示教室开关', '101' in r.get_data(as_text=True))
+        case('总课表不显示教室（room=1 也不渲染）',
+             '101' not in r.get_data(as_text=True))
         r = c.get(u['overview_index'], follow_redirects=False)
         case('总课表入口重定向', r.status_code in (301, 302)
              and '/overview' in r.headers.get('Location', ''))
@@ -370,20 +388,539 @@ def check_overview():
 # ══════════════════════════════════════════════════════════════════════════════
 @item('TIMETABLE')
 def check_timetable():
+    """2026-10-10：作息表已并入「节次配置」——旧地址重定向，视图内容在节次配置页。"""
     with app.app_context():
         u = _urls()
+        from flask import url_for
+        periods_url = url_for('academic.schedule_periods', sid=TS_ID)
     with app.test_client() as c:
         login(c, 'ac_admin', TEST_PWD)
-        r = c.get(u['timetable'])
+        r = c.get(u['timetable'], follow_redirects=False)
+        case('旧作息表地址重定向到节次配置', r.status_code in (301, 302)
+             and r.headers.get('Location', '').endswith(f'/schedule/{TS_ID}/periods'),
+             f"{r.status_code} {r.headers.get('Location')}")
+        r = c.get(periods_url)
         html = r.get_data(as_text=True)
-        case('作息时间表页 200', r.status_code == 200, str(r.status_code))
+        case('节次配置页 200（含作息表视图）', r.status_code == 200, str(r.status_code))
         case('含正课/早读/晚自习分类',
              '正课' in html and '晚自习' in html and '早读' in html)
         case('含时长与统计', '分钟' in html and '小时' in html)
+        case('内嵌作息表视图', '作息时间表' in html)
         r = c.get(u['timetable_index'], follow_redirects=False)
-        case('作息表入口重定向到当前学期', r.status_code in (301, 302)
-             and '/timetable' in r.headers.get('Location', ''),
+        case('作息表入口重定向到节次配置', r.status_code in (301, 302)
+             and r.headers.get('Location', '').endswith(f'/schedule/{TS_ID}/periods'),
              f"{r.status_code} {r.headers.get('Location')}")
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# 节次数量不限 + 全局作息模板（2026-10-10 用户报障：「谁让你限制 13 节的」）
+# ══════════════════════════════════════════════════════════════════════════════
+@item('PERIODS')
+def check_periods_unlimited_and_global():
+    """① 一天几节不设上限（能存到第 15 节）；② 作息可存为全局模板并复用到其它学期。"""
+    from flask import url_for
+    from app.modules.academic.services import schedule_service as svc
+    from app.modules.academic.services.schedule_service import (
+        apply_global_periods, get_global_periods_info, save_global_periods)
+    from app.models.system_setting import SystemSetting
+
+    with app.app_context():
+        # 页面文案：不再出现「一天最多 13 节」
+        periods_url = url_for('academic.schedule_periods', sid=TS_ID)
+        dump = svc.create_schedule('回归节次学期', '2099-2100', '第二学期')
+        dump_id = dump.id
+        inherited = svc.create_schedule('回归继承作息学期', '2099-2100', '第二学期')
+        inherited_id = inherited.id
+
+        # ① 造 15 节（原上限 13 会被静默丢掉第 14/15 节）
+        data = [{'period_number': i, 'period_name': f'第{i}节',
+                 'start_time': f'{6 + i:02d}:00', 'end_time': f'{6 + i:02d}:40',
+                 'period_type': 'morning' if i <= 7 else 'afternoon', 'sort_order': i}
+                for i in range(1, 16)]
+        svc.save_periods(dump_id, data, remove_missing=True)
+        got = {p.period_number for p in svc.get_periods(dump_id)}
+        case('节次数量不设上限：15 节全部保存', len(got) == 15, str(sorted(got)))
+        case('第 14 / 15 节确实入库（原 13 上限会丢）', got >= {14, 15})
+
+        # ② 存为全局模板 → 新建学期默认套用
+        ok, msg = save_global_periods(dump_id)
+        case('作息可存为全局模板', ok, msg)
+        info = get_global_periods_info()
+        case('全局作息模板可读（15 节）', bool(info) and info['count'] == 15, str(info))
+
+        # ③ 套用到另一个学期（先压成 3 节，再套回 15 节）
+        svc.save_periods(inherited_id, [{'period_number': i, 'period_name': f'第{i}节',
+                                         'period_type': 'morning', 'sort_order': i}
+                                        for i in (1, 2, 3)], remove_missing=True)
+        case('（前置）该学期被压到 3 节',
+             len(svc.get_periods(inherited_id)) == 3)
+        ok2, msg2, _res = apply_global_periods(inherited_id)
+        case('套用全局作息：该学期恢复到 15 节',
+             ok2 and len(svc.get_periods(inherited_id)) == 15, f'{ok2} {msg2}')
+
+        # ④ 时长口径（2026-10-10 用户给定）：早读 40 / 正课 45 / 晚自习 50 分钟
+        def _dur(p):
+            h1, m1 = p['start_time'].split(':')
+            h2, m2 = p['end_time'].split(':')
+            return (int(h2) * 60 + int(m2)) - (int(h1) * 60 + int(m1))
+
+        tpl = get_default_periods()
+        reading = [p for p in tpl if '早读' in p['period_name']]
+        evening = [p for p in tpl if p['period_type'] == 'evening']
+        normal = [p for p in tpl if p['period_type'] in ('morning', 'afternoon')
+                  and '早读' not in p['period_name']]
+        case('默认作息：早读 40 分钟',
+             bool(reading) and all(_dur(p) == 40 for p in reading),
+             str([_dur(p) for p in reading]))
+        case('默认作息：正课 45 分钟',
+             bool(normal) and all(_dur(p) == 45 for p in normal),
+             str(sorted({_dur(p) for p in normal})))
+        case('默认作息：晚自习 50 分钟（原默认是 60）',
+             bool(evening) and all(_dur(p) == 50 for p in evening),
+             str(sorted({_dur(p) for p in evening})))
+
+        # ⑤ 清场：删全局模板与两个临时学期（否则会影响后面的建学期用例）
+        row = SystemSetting.query.filter_by(key='global_periods').first()
+        if row:
+            db.session.delete(row)
+            db.session.commit()
+        svc.delete_schedule(inherited_id)
+        svc.delete_schedule(dump_id)
+        case('清场：全局作息模板已移除', get_global_periods_info() is None)
+
+    # 页面级：节次配置页不再出现「一天最多」字样，且给出全局作息入口
+    with app.test_client() as c:
+        login(c, 'ac_admin', TEST_PWD)
+        html = c.get(periods_url).get_data(as_text=True)
+        case('节次配置页不再写「一天最多 13 节」',
+             '一天最多' not in html and '数量不限' in html)
+        case('节次配置页给出「存为全局作息」入口',
+             '/periods/global-save' in html)
+        case('节次配置页有「时长」列与 40/45/50 快捷设置',
+             'period-dur-sel' in html and '改时长' in html)
+        case('节次配置页写明常规时长口径（早读40/正课45/晚自习50）',
+             '常规时长' in html and '早读 40' in html and '晚自习 50' in html)
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# 课表二期改造（2026-10-10）：导入统一 / 使用情况&校历下线 / 归档语义 / 草稿学期不 500
+# ══════════════════════════════════════════════════════════════════════════════
+@item('SCHED2')
+def check_sched_v2():
+    from flask import url_for
+    from app.modules.academic.services import schedule_service as svc
+    from app.modules.academic.services import term_service as tsvc
+
+    with app.app_context():
+        smart_url = url_for('academic.schedule_smart_import', sid=TS_ID)
+        smart_tpl_url = url_for('academic.schedule_smart_template', sid=TS_ID)
+        overview_url = url_for('academic.schedule_overview', sid=TS_ID)
+        # 全新草稿学期：模拟「新建学期后立即点导入」
+        draft = svc.create_schedule('回归草稿学期', '2099-2100', '第一学期')
+        draft_sid = draft.id
+        draft_import_url = url_for('academic.schedule_smart_import', sid=draft_sid)
+        draft_periods_url = url_for('academic.schedule_periods', sid=draft_sid)
+        manage_url = url_for('academic.schedule_manage')
+        draft_error = ''
+        try:
+            svc.set_current_term(draft_sid)
+        except ValueError as e:
+            draft_error = str(e)
+
+    with app.test_client() as c:
+        login(c, 'ac_admin', TEST_PWD)
+
+        # 1) 「创建新课后导入直接报错」修复：草稿学期页面不再 500
+        r = c.get(draft_import_url)
+        case('草稿学期：导入页 200（原 500）', r.status_code == 200, str(r.status_code))
+        r = c.get(draft_periods_url)
+        case('草稿学期：节次配置页 200（草稿提示条可渲染）',
+             r.status_code == 200, str(r.status_code))
+        case('未启用提示条可见', '未启用' in r.get_data(as_text=True))
+
+        # 2) 逐行长表导入下线：统一到「整班 · 原样导入」
+        # Location 是相对路径（/academic/...），按后缀断言
+        r = c.get(f'/academic/schedule/{TS_ID}/import', follow_redirects=False)
+        case('旧长表导入地址 → 原样导入',
+             r.status_code in (301, 302)
+             and r.headers.get('Location', '').endswith(
+                 f'/schedule/{TS_ID}/smart-import'),
+             f"{r.status_code} {r.headers.get('Location')}")
+        r = c.get(f'/academic/schedule/{TS_ID}/template', follow_redirects=False)
+        case('旧长表模板下载 → 整班模板',
+             r.status_code in (301, 302)
+             and r.headers.get('Location', '').endswith(
+                 f'/schedule/{TS_ID}/smart-import/template.xlsx'),
+             f"{r.status_code} {r.headers.get('Location')}")
+        r = c.get(smart_url)
+        html = r.get_data(as_text=True)
+        case('导入页主推原样/整班（含整批周次）',
+             '整批周次' in html and '整班矩阵' in html)
+        case('导入页说明两种版式（全校总课表 + 整班矩阵）',
+             '全校总课表' in html and '形态 ①' in html and '形态 ②' in html)
+        r = c.get(smart_tpl_url + '?layout=full')
+        case('全校总课表模板可下载',
+             r.status_code == 200
+             and 'attachment' in r.headers.get('Content-Disposition', ''),
+             str(r.status_code))
+        r = c.get(smart_tpl_url + '?blank=1')
+        case('整班模板（空白）可下载',
+             r.status_code == 200
+             and 'attachment' in r.headers.get('Content-Disposition', ''),
+             str(r.status_code))
+
+        # 3) 使用情况 / 校历 下线
+        for path, label in ((f'/academic/schedule/{TS_ID}/usage', '使用情况'),
+                            (f'/academic/schedule/{TS_ID}/usage/export', '使用情况导出'),
+                            (f'/academic/schedule/{TS_ID}/calendar', '校历')):
+            r = c.get(path)
+            case(f'{label}已下线 404', r.status_code == 404, str(r.status_code))
+
+        # 4) 全校总课表：信息提示条已删
+        html = c.get(overview_url).get_data(as_text=True)
+        case('全校总课表不再显示说明提示条', '每个年级一张总表' not in html)
+
+        # 5) 归档语义：与「设为当前」区分开
+        case('未启用学期不能设为当前（提示先激活）', '未启用' in draft_error, draft_error)
+
+        # 6) 2026-10-10 状态口径：未启用要显示「未启用」；归档不再要求先「激活」
+        html = c.get(manage_url).get_data(as_text=True)
+        # 注意：夹具学期名本身叫「回归草稿学期」，所以只能断言标签文案，不能断言页面无「草稿」二字
+        case('学期管理页：未启用状态显示为「未启用」', '未启用' in html)
+        case('状态标签映射 draft → 未启用（不再对外叫「草稿」）',
+             SCHEDULE_STATUS.get('draft') == '未启用', str(SCHEDULE_STATUS))
+        case('学期管理页：未启用学期直接给「归档」入口（不必先激活）',
+             f'/schedule/{draft_sid}/archive-term' in html,
+             '未启用学期缺少归档入口')
+        # 反向：正在使用的学期不该有手动归档入口（由"激活别的学期"自动归档）
+        case('学期管理页：启用中的学期不给手动归档入口',
+             f'/schedule/{TS_ID}/archive-term' not in html,
+             '启用中的学期仍挂着归档按钮')
+        case('学期管理页：启用中的学期说明"自动归档"机制',
+             '切换启用其他学期时自动归档' in html)
+
+    # 归档临时未启用学期（写快照）→ 出现在历史课表
+    with app.app_context():
+        ok, _msg = tsvc.archive_term(draft_sid)
+        ts2 = db.session.get(TermSchedule, draft_sid)
+        case('归档：写快照并置 archived（移入历史课表）',
+             ok and ts2.status == 'archived', f'{ok} {ts2.status}')
+        case('归档后取消当前标记', not ts2.is_current)
+        history_url = url_for('academic.schedule_history')
+    with app.test_client() as c:
+        login(c, 'ac_admin', TEST_PWD)
+        html = c.get(history_url).get_data(as_text=True)
+        case('历史课表页列出归档学期', '回归草稿学期' in html)
+        # 2026-10-10：页面分工 —— 归档的只进「历史课表」，学期管理只管在用/待启用
+        case('历史课表页给出「重新启用」入口（归档可回退）',
+             f'/schedule/{draft_sid}/activate' in html,
+             '归档学期没有重新启用入口')
+        m_html = c.get(manage_url).get_data(as_text=True)
+        case('学期管理页不再列已归档学期', '回归草稿学期' not in m_html)
+        case('学期管理页仍列启用中的学期（入口为全校总课表）',
+             f'/schedule/{TS_ID}/overview' in m_html)
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# 学期定位 / 周次口径 / 统一调课冲突（2026-10-10 三处用户实测报障的回归）
+# ══════════════════════════════════════════════════════════════════════════════
+@item('TERMWK')
+def check_term_week_bulk_swap():
+    """① 学期定位以「当前生效学期」为准（不被归档学期的日期区间抢走）；
+    ② 周次按自然周（周一~周日）；③ 统一调课冲突按周次交集判定。"""
+    from app.modules.academic.services import swap_service, term_service
+
+    with app.app_context():
+        # ① 一个"日期覆盖今天"的已归档学期，不能抢走当前生效学期
+        arch = TermSchedule(name='回归归档学期', school_year='2020-2021',
+                            term='第一学期', status='archived',
+                            start_date=date(2020, 9, 1), end_date=date(2030, 6, 30),
+                            total_weeks=20)
+        db.session.add(arch)
+        db.session.commit()
+        got, _week = term_service.resolve_schedule_by_date(date.today())
+        case('学期定位：日期命中的已归档学期不抢当前生效学期',
+             got is not None and got.id == TS_ID,
+             f'取到 {got.id if got else None}，应为生效学期 {TS_ID}')
+        case('调课/查课同一口径 get_active_schedule()',
+             getattr(swap_service.get_active_schedule(), 'id', None) == TS_ID)
+
+        # ② 周次：周二开学 → 第 1 周到周日结束，第 2 周从周一起（不漂移）
+        t = TermSchedule(name='周次校验', school_year='2026-2027', term='第一学期',
+                         start_date=date(2026, 9, 1), end_date=date(2027, 1, 22),
+                         total_weeks=20)
+        case('周次：第 1 周 = 开学日 ~ 该周周日（不往后漂 7 天）',
+             t.get_week_date_range(1) == (date(2026, 9, 1), date(2026, 9, 6)),
+             str(t.get_week_date_range(1)))
+        case('周次：第 2 周从周一开始（自然周）',
+             t.get_week_date_range(2) == (date(2026, 9, 7), date(2026, 9, 13)),
+             str(t.get_week_date_range(2)))
+        case('周次：周日算本周、周一进下一周',
+             t.get_week_number(date(2026, 9, 6)) == 1
+             and t.get_week_number(date(2026, 9, 7)) == 2,
+             f'{t.get_week_number(date(2026, 9, 6))}/'
+             f'{t.get_week_number(date(2026, 9, 7))}')
+        case('周次：开学前一天 / 未配置起止日期 → None',
+             t.get_week_number(date(2026, 8, 30)) is None
+             and TermSchedule(name='x', school_year='x',
+                              term='x').get_week_number() is None)
+
+        # ③ 统一调课：单双周同格（周次不交集）不该被判冲突
+        made = []
+        for subj, wr in (('语文', '单周'), ('数学', '双周')):
+            e = ScheduleEntry(term_schedule_id=TS_ID, grade='高一', class_name='01班',
+                              weekday=6, period_number=12, subject=subj,
+                              week_range=wr, entry_type='normal')
+            db.session.add(e)
+            made.append(e)
+        db.session.commit()
+        ok, msg, res = swap_service.bulk_apply_swap(
+            applicant_uid='regress', applicant_name='回归',
+            entry_ids=[e.id for e in made], new_weekday=7, new_period=12,
+            is_permanent=True, reason='回归')
+        case('统一调课：单双周同格一起调不误报冲突',
+             ok and res.get('created') == 2, f'{msg} {res.get("conflicts")}')
+        for s in ScheduleSwap.query.filter_by(applicant_uid='regress').all():
+            db.session.delete(s)
+        for e in made:
+            db.session.delete(e)
+        db.session.commit()
+
+        # ③b 原课表同一格本就重复（周次重叠）→ 调课时点名"原课表本就有两门课"
+        made2 = []
+        for subj in ('语文', '数学'):
+            e = ScheduleEntry(term_schedule_id=TS_ID, grade='高一', class_name='01班',
+                              weekday=6, period_number=11, subject=subj,
+                              week_range='1-20', entry_type='normal')
+            db.session.add(e)
+            made2.append(e)
+        db.session.commit()
+        ok2, msg2, res2 = swap_service.bulk_apply_swap(
+            applicant_uid='regress', applicant_name='回归',
+            entry_ids=[e.id for e in made2], new_weekday=7, new_period=11,
+            is_permanent=True, reason='回归')
+        descs = ' '.join(c.get('desc', '') for c in (res2.get('conflicts') or []))
+        case('统一调课：原课表同格重复时给出可操作提示（点名重复条目）',
+             (not ok2) and '本就有' in descs, f'{msg2} {descs}')
+        for e in made2:
+            db.session.delete(e)
+        db.session.delete(arch)
+        db.session.commit()
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# 统一调课 = 一条记录（2026-10-10 用户要求：整批一次审批，别让我一条条点）
+# ══════════════════════════════════════════════════════════════════════════════
+@item('SWAPBATCH')
+def check_swap_batch_one_record():
+    """统一调课在列表里折叠成一条：计数按批、详情列全本批课程、
+    点一次审批/执行/撤销即整批生效（不再逐条点）。"""
+    from app.modules.academic.services import swap_service
+
+    with app.app_context():
+        made = []
+        for g, cn, pn, subj in (('高一', '01班', 5, '语文'),
+                                ('高一', '02班', 5, '数学'),
+                                ('高二', '01班', 6, '英语')):
+            e = ScheduleEntry(term_schedule_id=TS_ID, grade=g, class_name=cn,
+                              weekday=2, period_number=pn, subject=subj,
+                              week_range='1-20', entry_type='normal')
+            db.session.add(e)
+            made.append(e)
+        db.session.commit()
+        eids = [e.id for e in made]
+        ok, msg, res = swap_service.bulk_apply_swap(
+            applicant_uid='batchreg', applicant_name='批次回归',
+            entry_ids=eids, new_weekday=7, new_period=13,
+            is_permanent=True, reason='批次回归')
+        bid = res.get('batch_id')
+        case('统一调课：整批共享一个批次号', ok and bid, f'{msg} {res}')
+        if not (ok and bid):
+            return
+        # ── 列表 / 计数：整批只算一条 ──
+        items, _pg = swap_service.get_swap_list(schedule_id=TS_ID, is_reviewer=True,
+                                                per_page=100)
+        rows = [it for it in items if it.get('batch_id') == bid]
+        case('列表：一次统一调课只出现一条记录', len(rows) == 1, f'{len(rows)} 条')
+        case('列表：该条记录带批次规模（共 3 门）',
+             bool(rows) and rows[0].get('batch_count') == 3,
+             str(rows[0].get('batch_count') if rows else None))
+        rep_id = rows[0]['id'] if rows else 0
+        pend, _p2 = swap_service.get_swap_list(status='pending', schedule_id=TS_ID,
+                                              is_reviewer=True, per_page=100)
+        case('待审计数与列表同口径（徽章不按 3 条虚高）',
+             swap_service.count_pending(schedule_id=TS_ID) == len(pend),
+             f'{swap_service.count_pending(schedule_id=TS_ID)} vs {len(pend)}')
+        d = swap_service.get_swap_detail(rep_id)
+        case('详情：列出本批全部课程并标出当前记录',
+             d['is_batch'] and d['batch_count'] == 3 and len(d['batch_members']) == 3
+             and sum(1 for m in d['batch_members'] if m['is_current']) == 1,
+             f"batch={d['batch_count']} members={len(d['batch_members'])}")
+        chain_len = len(swap_service.approval_chain())
+
+    # ── 页面：整批只渲染一行；审批/执行一次点完整批 ──
+    with app.test_client() as c:
+        login(c, 'ac_admin', TEST_PWD)
+        html = c.get('/academic/swap').get_data(as_text=True)
+        case('列表页：该批次只渲染一行（整批一条记录）',
+             html.count('data-batch="3"') == 1, str(html.count('data-batch="3"')))
+        case('列表页：标注「共 3 门 · 一次审批」', '共 3 门 · 一次审批' in html)
+        # 操作列曾用内联 onclick="event.stopPropagation()" 拦冒泡，而通过/驳回/执行是
+        # document 上的委托事件 → 四个按钮全点不动（用户实测报障）。
+        case('列表页：操作列不再吞掉点击（委托事件能触发）',
+             'event.stopPropagation()' not in html
+             and "closest('a, button, .row-actions')" in html,
+             '操作列仍有内联 stopPropagation 或行点击未排除操作列')
+        hdrs = {'X-CSRFToken': get_csrf(c, '/academic/swap')}
+        r = c.post(f'/academic/swap/{rep_id}/approve', data={'review_note': ''},
+                   headers=hdrs)
+        body = r.get_json() or {}
+        with app.app_context():
+            sibs = ScheduleSwap.query.filter_by(batch_id=bid).all()
+            first = 'pending' if chain_len > 1 else 'approved'
+            case('一次审批：整批同级推进（不是只推进一条）',
+                 bool(body.get('success')) and len(sibs) == 3
+                 and all(s.status == first and (s.approval_step or 0) == (1 if chain_len > 1 else 0)
+                         for s in sibs),
+                 f'{body.get("message")} {[(s.status, s.approval_step) for s in sibs]}')
+        for _ in range(chain_len - 1):
+            c.post(f'/academic/swap/{rep_id}/approve', data={'review_note': ''},
+                   headers=hdrs)
+        with app.app_context():
+            case('终审：整批一起 approved',
+                 all(s.status == 'approved' for s in
+                     ScheduleSwap.query.filter_by(batch_id=bid).all()))
+        r = c.post(f'/academic/swap/{rep_id}/execute', data={}, headers=hdrs)
+        body = r.get_json() or {}
+        with app.app_context():
+            st = {s.status for s in ScheduleSwap.query.filter_by(batch_id=bid).all()}
+            newn = ScheduleEntry.query.filter(
+                ScheduleEntry.original_entry_id.in_(eids),
+                ScheduleEntry.is_deleted.is_(False)).count()
+            case('一次执行：整批 3 门课全部落到新课表',
+                 bool(body.get('success')) and st == {'executed'} and newn == 3,
+                 f'status={st} new={newn} {body.get("message")}')
+
+    # ── 撤销整批 ──
+    with app.app_context():
+        made2 = []
+        for g, cn, subj in (('高一', '01班', '化学'), ('高一', '02班', '生物')):
+            e = ScheduleEntry(term_schedule_id=TS_ID, grade=g, class_name=cn,
+                              weekday=3, period_number=6, subject=subj,
+                              week_range='1-20', entry_type='normal')
+            db.session.add(e)
+            made2.append(e)
+        db.session.commit()
+        eids2 = [e.id for e in made2]
+        # 目标避开上一段执行后已经占了 (周日,13) 的那三条
+        ok2, msg2, res2 = swap_service.bulk_apply_swap(
+            applicant_uid='batchreg', applicant_name='批次回归',
+            entry_ids=eids2, new_weekday=7, new_period=12,
+            is_permanent=True, reason='批次回归撤销')
+        bid2 = res2.get('batch_id')
+        rep2 = ScheduleSwap.query.filter_by(batch_id=bid2).order_by(ScheduleSwap.id).first()
+        rep2_id = rep2.id if rep2 else 0
+        ok3, msg3, _ = swap_service.cancel_swap(rep2_id, 'batchreg')
+        left = ScheduleSwap.query.filter_by(batch_id=bid2,
+                                           status='pending').count()
+        case('撤销：一条记录撤掉整批（不是只撤第一条）',
+             ok3 and left == 0 and '2 门课' in msg3, f'{msg3} 剩余 {left}')
+        # 清理（含执行产生的条目与版本记录，别影响其它用例）
+        new_ids = [e.id for e in ScheduleEntry.query.filter(
+            ScheduleEntry.original_entry_id.in_(eids + eids2)).all()]
+        ScheduleVersion.query.filter(
+            ScheduleVersion.entry_id.in_(eids + eids2 + new_ids)).delete(
+                synchronize_session=False)
+        ScheduleEntry.query.filter(
+            ScheduleEntry.id.in_(eids + eids2 + new_ids)).delete(
+                synchronize_session=False)
+        ScheduleSwap.query.filter(
+            ScheduleSwap.batch_id.in_([bid, bid2])).delete(
+                synchronize_session=False)
+        db.session.commit()
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# 「全校总课表」版式（2026-10-10 新增）：行 = 星期×节次、列 = 班级
+# ══════════════════════════════════════════════════════════════════════════════
+@item('FULLSCH')
+def check_full_school_layout():
+    """学校教务手上的总课表（一张表放全校）能直接解析 + 生成同版式模板。"""
+    import io as _io
+
+    from openpyxl import Workbook, load_workbook
+
+    from app.models.timetable import get_default_periods
+    from app.modules.academic.services import schedule_matrix_import as mi
+
+    class _P:
+        def __init__(self, d):
+            self.period_name = d['period_name']
+            self.period_number = d['period_number']
+            self.period_type = d.get('period_type')
+
+    periods = [_P(d) for d in get_default_periods()]
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = '全校总课表'
+    ws.append(['星期', '节次', '高三1班', '高三2班'])
+    ws.append(['星期一', '1节', '历史\n郭艳静', '英语\n王一楠'])
+    ws.append([None, '2节', '语文\n刘稳', '数学\n朱丹丽'])
+    ws.append(['星期二', '1节', '数学\n朱丹丽', '语文\n刘稳'])
+    ws.append([None, '午休', None, None])            # 空行不该产生条目
+    buf = _io.BytesIO()
+    wb.save(buf)
+    buf.seek(0)
+
+    data = mi.parse_school_workbook(buf, periods, ['2024级', '2025级', '2026级'], [])
+    case('全校总课表：无错误', not data['errors'], str(data['errors']))
+    case('全校总课表：按列拆成 2 个班', len(data['sheets']) == 2,
+         str(len(data['sheets'])))
+    if len(data['sheets']) == 2:
+        a, b = data['sheets']
+        case('全校总课表：班级名取自表头列', a['class_name'] == '01班'
+             and b['class_name'] == '02班', f"{a['class_name']}/{b['class_name']}")
+        case('全校总课表：年级与学期年级对齐（高三→2024级）',
+             a['grade'] == '2024级', a['grade'])
+        case('全校总课表：星期向下继承（合并单元格）+ 条目数正确',
+             len(a['entries']) == 3, str(len(a['entries'])))
+        case('全校总课表：格内两行＝学科+教师',
+             a['entries'][0]['subject'] == '历史'
+             and a['entries'][0]['teacher_name'] == '郭艳静',
+             str(a['entries'][0]))
+        case('全校总课表：「1节」→ 系统「第1节」（period_number=2）',
+             a['entries'][0]['period_number'] == 2,
+             str(a['entries'][0]['period_number']))
+        case('全校总课表：默认周次 1-18',
+             a['entries'][0]['week_range'] == '1-18',
+             a['entries'][0]['week_range'])
+
+    # 一格「学科并列 + 教师并列」两行写法 → 配成两条
+    items = mi.parse_cell_content('地/政\n陈/邓')
+    case('一格多科多师：配对成 2 条',
+         len(items) == 2 and {i['subject'] for i in items} == {'地理', '政治'}
+         and {i['teacher_name'] for i in items} == {'陈', '邓'}, str(items))
+    case('学科带考试类型后缀归一（生物学考→生物）',
+         mi.parse_cell_content('生物学考')[0]['subject'] == '生物')
+
+    # 模板：生成的表头与解析器自洽（写进去再读回来）
+    tpl = mi.build_full_school_template(periods, classes=[('高三', '01班')],
+                                        sample=False)
+    wb2 = load_workbook(tpl)
+    ws2 = wb2['全校总课表']
+    case('全校总课表模板：表头 = 星期|节次|班级列',
+         ws2.cell(row=1, column=1).value == '星期'
+         and ws2.cell(row=1, column=2).value == '节次'
+         and ws2.cell(row=1, column=3).value == '高三01班',
+         f'{ws2.cell(row=1, column=1).value}/{ws2.cell(row=1, column=2).value}/'
+         f'{ws2.cell(row=1, column=3).value}')
+    case('全校总课表模板：含填写说明表', '填写说明' in wb2.sheetnames,
+         str(wb2.sheetnames))
+    tpl2 = mi.build_full_school_template(periods, classes=[('高三', '01班')])
+    wb3 = load_workbook(tpl2)
+    case('全校总课表模板（示例）：格子有示例内容',
+         bool(wb3['全校总课表'].cell(row=2, column=3).value))
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -474,69 +1011,6 @@ def check_matrix_import():
             case('单双周徽标在预览里可见（周二那节）',
                  'ovw-flag-week' in html_day2 and '单周' in html_day2,
                  'pday=2 未找到徽标元素')
-
-
-# ══════════════════════════════════════════════════════════════════════════════
-# 晚自习值班（高中刚需）
-# ══════════════════════════════════════════════════════════════════════════════
-@item('NIGHT')
-def check_night_duty():
-    from app.modules.academic.services import night_duty_service as nd
-    with app.app_context():
-        from app.extensions import db
-        from app.models.academic import Teacher
-        # 临时库教师很少，先补一批（幂等），否则排班只能靠放宽上限
-        if Teacher.query.filter_by(status='active').count() < 12:
-            for i in range(12):
-                uid = f'NDT{i:03d}'
-                if not Teacher.query.filter_by(teacher_uid=uid).first():
-                    db.session.add(Teacher(
-                        teacher_uid=uid, name=f'值班教师{i + 1}',
-                        subject='语文' if i % 2 else '数学', status='active'))
-            db.session.commit()
-
-        periods = nd.evening_period_numbers(TS_ID)
-        case('识别晚自习节次', len(periods) >= 1, str(periods))
-        grades = nd.grades_of(TS_ID)
-        case('不再提供自动排班/冲突检查',
-             not hasattr(nd, 'auto_assign') and not hasattr(nd, 'check_conflicts'))
-        # 2026-10-10：系统不排班，值班表由手工指定 —— 铺两条再校验登记/统计/导出链路
-        pool = nd.teacher_pool()
-        t = pool[0]
-        ok_set, _ = nd.set_duty(TS_ID, grades[0], 1, periods[0], t['uid'],
-                                t['name'], operator=None)
-        got = (nd.get_roster(TS_ID, grades=[grades[0]])['blocks'][0]['grid']
-               .get(1, {}).get(periods[0], {}).get('teacher_uid'))
-        case('手工指定值班教师', ok_set and got == t['uid'], str(got))
-        if len(pool) > 1:
-            nd.set_duty(TS_ID, grades[0], 2, periods[0], pool[1]['uid'],
-                        pool[1]['name'], operator=None)
-        data = nd.get_roster(TS_ID)
-        rows = [d for b in data['blocks'] for wd in b['grid'].values()
-                for d in wd.values()]
-        case('值班登记写入值班表', len(rows) == 2, f'{len(rows)} 条')
-        case('教师值班统计覆盖参与者', len(nd.teacher_stats(TS_ID)) == 2)
-        case('导出工作簿可生成',
-             nd.export_workbook(TS_ID).active.title == '晚自习值班表')
-        # 清空
-        nd.set_duty(TS_ID, grades[0], 1, periods[0], None, None, operator=None)
-        gone = (nd.get_roster(TS_ID, grades=[grades[0]])['blocks'][0]['grid']
-                .get(1, {}).get(periods[0]))
-        case('清空值班班次', not gone, str(gone))
-
-    with app.app_context():
-        u = _urls()
-    with app.test_client() as c:
-        login(c, 'ac_admin', TEST_PWD)
-        r = c.get(u['night'])
-        html = r.get_data(as_text=True)
-        case('值班表页面 200', r.status_code == 200, str(r.status_code))
-        case('页面含值班网格与统计',
-             'nd-cell' in html and '教师值班次数' in html and '今日值班' in html)
-        r = c.get(u['night_export'])
-        case('值班表导出 200', r.status_code == 200, str(r.status_code))
-        r = c.get(u['night_index'], follow_redirects=False)
-        case('值班入口重定向', r.status_code in (301, 302), str(r.status_code))
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -700,7 +1174,7 @@ def check_home():
         html = r.get_data(as_text=True)
         case('教务工作台 200', r.status_code == 200, str(r.status_code))
         case('含 KPI / 待办 / 入口 / 动态', all(k in html for k in
-             ('教务工作台', '待办事项', '常用入口', '最近动态')))
+             ('教务工作台', '待办事项', '教务主流程', '最近动态')))
         case('显示当前学期', '2026-2027学年第一学期' in html)
 
 
@@ -788,9 +1262,11 @@ def check_inspection_mark():
         case('顶部有 已标记 / 应查 / 覆盖率 计数',
              all(k in html for k in ('id="statChecked"', 'id="statExpected"',
                                      'id="statRate"')))
-        case('标记面板含五种结果按钮',
-             all(f'data-result="{k}"' in html for k in ('normal', 'late', 'absent',
-                                                        'swap', 'other')))
+        # 2026-10-10 用户改版：原「标记面板」弹窗整体移除，改为 单击=正常 / 双击=迟到 /
+        # 右键=缺课·调课·迟到说明（快捷直达，页面顶部写明操作方式）
+        case('标记改版：页面写明 单击/双击/右键',
+             '单击=正常' in html and '双击=迟到' in html and '右键=缺课' in html)
+        case('原「标记面板」五大结果按钮已移除', 'data-result=' not in html)
 
         token = get_csrf(c, u['insp_live'])
         hdrs = {'X-CSRFToken': token}
@@ -1417,8 +1893,124 @@ def check_form_to_achievement():
              TeacherAchievement.query.filter_by(source_type='form',
                                                 source_id=sub3.id).count() == 0)
 
+        # 6) 驳回后本轮可重交（重交产生新提交，原记录保留审核意见）
+        tpl3 = form_service.create_form(
+            title='荣誉证书收集', description='', category=None,
+            target_type='teachers', target_scope=None, start_time=None,
+            deadline=None, max_file_size=10, allow_multiple=False,
+            questions_data=[{'question_type': 'text', 'title': '荣誉名称'}],
+            created_by=admin_id,
+            ach={'to_achievement': True, 'ach_category': 'honor'})
+        form_service.publish_form(tpl3.id)
+        sub4 = _submit(tpl3.id, admin_id, tname)
+        form_service.review_submission(sub4.id, 'rejected', admin_id, '材料不全')
+        el_r = form_service.check_eligibility(tpl3.id, admin_id, 'teacher')
+        case('被驳回后可重交（资格检查放行）',
+             el_r['eligible'] and not el_r['already_submitted'],
+             str(el_r.get('reason')))
+        sub5 = _submit(tpl3.id, admin_id, tname)
+        case('重交生成新提交且归本轮',
+             sub5.id != sub4.id and sub5.round_id == sub4.round_id)
+
+        # 7) 限时收集：未开始不可交 / 已截止不可交 / 轮次时间窗优先于模板
+        from datetime import datetime as _dt, timedelta as _td
+        _now = _dt.now()
+        tpl4 = form_service.create_form(
+            title='限时材料收集', description='', category=None,
+            target_type='teachers', target_scope=None,
+            start_time=_now + _td(days=1), deadline=None, max_file_size=10,
+            allow_multiple=False,
+            questions_data=[{'question_type': 'text', 'title': '材料'}],
+            created_by=admin_id, ach={'to_achievement': False})
+        form_service.publish_form(tpl4.id)
+        el4 = form_service.check_eligibility(tpl4.id, admin_id, 'teacher')
+        case('未开始的收集不可填写（reason=before）', el4['reason'] == 'before',
+             str(el4.get('reason')))
+        case('未开始的收集在填写列表标注「未开始」',
+             any(it['tpl'].id == tpl4.id and it['state'] == 'before'
+                 for it in form_service.fill_items(admin_id, 'teacher')))
+        try:
+            _submit(tpl4.id, admin_id, tname)
+            case('未开始提交被拒', False, '未抛错')
+        except ValueError as e:
+            case('未开始提交被拒', '尚未开始' in str(e), str(e))
+
+        r4 = form_service.list_rounds(tpl4.id)[0]
+        form_service.update_round_window(r4.id, start_time=_now - _td(hours=1))
+        el4b = form_service.check_eligibility(tpl4.id, admin_id, 'teacher')
+        case('轮次时间窗覆盖模板（调整后即可交）', el4b['eligible'] is True,
+             str(el4b.get('reason')))
+
+        form_service.update_round_window(r4.id, deadline=_now - _td(hours=1))
+        el5 = form_service.check_eligibility(tpl4.id, admin_id, 'teacher')
+        case('已截止的收集不可填写（reason=expired）', el5['reason'] == 'expired',
+             str(el5.get('reason')))
+        case('已截止的收集不出现在填写列表',
+             all(it['tpl'].id != tpl4.id
+                 for it in form_service.fill_items(admin_id, 'teacher')))
+        form_service.update_round_window(r4.id, deadline=_now + _td(days=3))
+        case('延长截止后恢复可填',
+             form_service.check_eligibility(tpl4.id, admin_id, 'teacher')['eligible'] is True)
+
+        # 8) 关闭收集 → 重新开放（沿用原轮次 / 作为新一轮）
+        form_service.close_round(r4.id)
+        try:
+            form_service.update_round_window(r4.id, deadline=_now + _td(days=1))
+            case('已结束轮次不可直接调整时间', False, '未抛错')
+        except ValueError as e:
+            case('已结束轮次不可直接调整时间', '先重新开放' in str(e), str(e))
+        form_service.reopen_round(r4.id, deadline=_now + _td(days=1))
+        case('重新开放已结束轮次', db.session.get(FormRound, r4.id).status == 'open')
+        form_service.close_round(r4.id)
+        form_service.close_form(tpl4.id)
+        case('收集可关闭（模板状态）',
+             form_service.get_form_detail(tpl4.id).status == 'closed')
+        rnd_re = form_service.reopen_form(tpl4.id, deadline=_now + _td(days=2))
+        case('重新开放（沿用原轮次）同时放开模板',
+             rnd_re.id == r4.id
+             and form_service.get_form_detail(tpl4.id).status == 'open'
+             and rnd_re.status == 'open')
+        rnd_new = form_service.reopen_form(tpl4.id, mode='new', round_name='补充轮',
+                                           deadline=_now + _td(days=5))
+        case('重开为新一轮：轮号递增且上一轮自动结束',
+             rnd_new.round_no == r4.round_no + 1
+             and db.session.get(FormRound, r4.id).status == 'closed')
+
+        # 9) 定向学科收集：只对指定学科教师开放（可见性与提交双重拦截）
+        db.session.add(Teacher(teacher_uid='TFORM02', name='数学教师',
+                               subject='数学', status='active'))
+        db.session.add(Teacher(teacher_uid='TFORM03', name='语文教师',
+                               subject='语文', status='active'))
+        db.session.commit()
+        tpl5 = form_service.create_form(
+            title='数学组材料收集', description='', category=None,
+            target_type='subject', target_scope='{"subjects": ["数学"]}',
+            start_time=None, deadline=None, max_file_size=10,
+            allow_multiple=False,
+            questions_data=[{'question_type': 'text', 'title': '材料'}],
+            created_by=admin_id, ach={'to_achievement': False})
+        form_service.publish_form(tpl5.id)
+        case('定向学科：数学教师可见',
+             any(i['tpl'].id == tpl5.id
+                 for i in form_service.fill_items(admin_id, 'teacher',
+                                                  submitter_subject='数学')))
+        case('定向学科：其它学科教师不可见',
+             all(i['tpl'].id != tpl5.id
+                 for i in form_service.fill_items(admin_id, 'teacher',
+                                                  submitter_subject='语文')))
+        try:
+            form_service.submit_form(
+                tpl5.id,
+                {'submitter_type': 'teacher', 'submitter_id': admin_id,
+                 'submitter_name': tname, 'submitter_uid': tuid,
+                 'submitter_subject': '语文'}, {}, {})
+            case('定向学科：范围外提交被拒', False, '未抛错')
+        except ValueError as e:
+            case('定向学科：范围外提交被拒', '不在本次收集范围内' in str(e), str(e))
+
         rec_id = rec.id if rec else 0
         r2_id = r2.id
+        tpl4_id = tpl4.id
         ach_url = url_for('academic.achievements_page')
         detail_url = url_for('academic.achievement_detail', aid=rec_id)
         create_url = url_for('academic.form_create')
@@ -1441,6 +2033,192 @@ def check_form_to_achievement():
         case('业绩详情带来源与「该次提交」回看',
              js.get('source_type') == 'form'
              and (js.get('submission') or {}).get('items') is not None)
+        # 2026-10-10 新增：收集侧轮次操作区 / 重开入口 / 业绩库「发起收集」闭环
+        detail_html = c.get(subs_url).get_data(as_text=True)
+        case('提交列表页含轮次操作区（收集轮次/调整时间）',
+             '收集轮次' in detail_html and '调整时间' in detail_html)
+        list_html = c.get(url_for('academic.form_list')).get_data(as_text=True)
+        case('表单列表含重新开放弹窗与当前轮时间窗', 'reopenFormModal' in list_html)
+        fill_html = c.get(url_for('academic.form_fill_list')).get_data(as_text=True)
+        case('填写列表按本轮呈现（已提交徽章）', '已提交' in fill_html)
+        ach_html = c.get(ach_url).get_data(as_text=True)
+        case('业绩库含「发起收集」与进行中收集区',
+             '发起收集' in ach_html and '进行中的业绩收集' in ach_html,
+             '发起收集' if '发起收集' not in ach_html else '进行中的业绩收集 缺失')
+        # 按轮口径的三个页面渲染（汇总/未交/填写）
+        summary_html = c.get(url_for('academic.form_summary_page',
+                                     form_id=tpl_id)).get_data(as_text=True)
+        case('汇总看板按本轮口径渲染', '本轮：' in summary_html)
+        miss_html = c.get(url_for('academic.form_missing_page',
+                                  form_id=tpl_id)).get_data(as_text=True)
+        case('未交名单页按本轮口径渲染', '本轮未提交名单' in miss_html)
+        fill_page = c.get(url_for('academic.form_fill',
+                                  form_id=tpl4_id)).get_data(as_text=True)
+        case('填写页渲染当前轮时间窗', '提交答案' in fill_page and '第2轮' in fill_page,
+             str(len(fill_page)))
+
+
+@item('FORM_NOTIFY')
+def check_form_notify():
+    """收集通知闭环（2026-10-10）：
+
+    发布收集 / 发起新一轮 → 应填教师收到通知（站内相对链接、材料收集分类）；
+    审核通过 / 驳回 → 提交人收到通知（含原因与重交入口）；
+    催交个人化、按轮归属、未读不重复推送、无账号教师明确提示；
+    通知中心可按「材料收集」筛选，并可把通知从自己的收件箱移除。
+    """
+    from flask import url_for
+    from app.models.notification import (Notification, NotificationRecipient,
+                                         CATEGORY_LABELS)
+    from app.modules.academic.services import form_service, form_summary_service
+
+    with app.app_context():
+        admin = User.query.filter_by(username='ac_admin').first()
+        if not Teacher.query.filter_by(teacher_uid='TNT01').first():
+            db.session.add(Teacher(teacher_uid='TNT01', name='通知教师甲',
+                                   status='active', user_id=admin.id))
+        if not Teacher.query.filter_by(teacher_uid='TNT02').first():
+            db.session.add(Teacher(teacher_uid='TNT02', name='通知教师乙',
+                                   status='active'))
+        db.session.commit()
+
+        tpl = form_service.create_form(
+            title='通知联动材料收集', description='请提交证明材料', category=None,
+            target_type='teachers', target_scope=None, start_time=None,
+            deadline=None, max_file_size=10, allow_multiple=False,
+            questions_data=[{'question_type': 'text', 'title': '材料名称',
+                             'required': True}],
+            created_by=admin.id,
+            ach={'to_achievement': True, 'ach_category': 'honor'})
+        tpl_id = tpl.id
+
+    with app.test_client() as c:
+        login(c, 'ac_admin', TEST_PWD)
+        token = get_csrf(c, '/academic/forms')
+        r = c.post(url_for('academic.form_publish', form_id=tpl_id),
+                   data={'csrf_token': token}, follow_redirects=True)
+        page = r.get_data(as_text=True)
+        case('发布收集后提示已通知应填人员', '已通知' in page, page[-160:])
+        case('无登录账号的教师被提示线下告知', '无登录账号' in page)
+
+    with app.app_context():
+        admin = User.query.filter_by(username='ac_admin').first()  # 重新绑定会话
+        n_open = (Notification.query.filter_by(biz_type='form_open', biz_id=tpl_id)
+                  .order_by(Notification.id.desc()).first())
+        open_rows = (NotificationRecipient.query
+                     .filter_by(notification_id=(n_open.id if n_open else 0)).all())
+        open_ids = {x.user_id for x in open_rows}
+        case('发布通知覆盖应填教师（有账号投账号、无账号投名单）',
+             n_open is not None and admin.id in open_ids and any(i < 0 for i in open_ids),
+             f'{len(open_rows)} 人 / {sorted(open_ids)[:6]}')
+        case('发布通知归入「材料收集」分类且链接为站内相对路径',
+             n_open is not None and n_open.category == 'collect'
+             and (n_open.link_url or '').startswith('/academic/forms/'),
+             f'{getattr(n_open, "category", None)}|{getattr(n_open, "link_url", None)}')
+        case('分类字典含「材料收集」', CATEGORY_LABELS.get('collect') == '材料收集')
+
+        # 甲：提交 → 审核通过 → 收到通知（含入账说明）
+        sub = form_service.submit_form(
+            tpl_id, {'submitter_type': 'teacher', 'submitter_id': admin.id,
+                     'submitter_name': '通知教师甲', 'submitter_uid': 'TNT01'}, {}, {})
+        form_service.review_submission(sub.id, 'approved', admin.id, '材料齐全')
+        n_ok = Notification.query.filter_by(biz_type='form_review',
+                                            biz_id=sub.id).first()
+        case('审核通过后通知提交人且写明已入账',
+             n_ok is not None and '通过' in (n_ok.title or '')
+             and '业绩库' in (n_ok.content or ''),
+             (n_ok.content if n_ok else '无通知'))
+
+        # 乙（无账号）：提交 → 驳回 → 收到通知，且计入「未交（待重交）」
+        sub2 = form_service.submit_form(
+            tpl_id, {'submitter_type': 'teacher', 'submitter_id': 999999,
+                     'submitter_name': '通知教师乙', 'submitter_uid': 'TNT02'}, {}, {})
+        form_service.review_submission(sub2.id, 'rejected', admin.id,
+                                       '证书扫描件不清晰')
+        n_rej = Notification.query.filter_by(biz_type='form_review',
+                                             biz_id=sub2.id).first()
+        case('驳回后通知提交人（含原因与重新提交提示）',
+             n_rej is not None and '不清晰' in (n_rej.content or '')
+             and '重新提交' in (n_rej.content or ''),
+             (n_rej.content if n_rej else '无通知'))
+        missing_uids = {m['uid'] for m in form_summary_service.get_all_missing(tpl_id)}
+        case('被驳回的人计入未交（需重交）', 'TNT02' in missing_uids,
+             str(sorted(missing_uids))[:160])
+
+        # 催交：按轮归属 + 个人化 + 未读去重 + 无账号提示
+        ok, msg, info = form_summary_service.remind_submitters(
+            tpl_id, all_missing=True, operator=admin)
+        rnd_now = form_service.current_round(form_service.get_form_detail(tpl_id))
+        n_rem = (Notification.query.filter_by(biz_type='form_remind',
+                                              biz_id=rnd_now.id)
+                 .order_by(Notification.id.desc()).first())
+        rem_rows = (NotificationRecipient.query
+                    .filter_by(notification_id=(n_rem.id if n_rem else 0)).all())
+        rem_uids = {x.user_uid for x in rem_rows}
+        case('催交通知按轮次归属（biz_id=轮次 id）', n_rem is not None and ok, msg)
+        case('催交覆盖被驳回待重交的教师', 'TNT02' in rem_uids, str(sorted(rem_uids))[:160])
+        case('催交文案个人化（不列他人名单）',
+             n_rem is not None and '通知教师甲' not in (n_rem.content or '')
+             and '通知教师乙' not in (n_rem.content or ''))
+        # 注：service 层测试无请求上下文，Flask 会用 SERVER_NAME 生成绝对地址；
+        # 真实请求内（教务点催交）生成的是站内相对路径，这里只校验指向填写页。
+        case('催交链接指向站内填写页',
+             n_rem is not None and '/academic/forms/' in (n_rem.link_url or ''),
+             str(getattr(n_rem, 'link_url', None)))
+        case('无账号收件人计数随通知结果返回', info.get('accountless', 0) >= 1,
+             str(info.get('accountless')))
+        ok2, msg2, info2 = form_summary_service.remind_submitters(
+            tpl_id, all_missing=True, operator=admin)
+        case('同一轮次未读催交不重复推送',
+             (not ok2) and info2.get('skipped', 0) >= 1, msg2)
+
+        nid = n_ok.id if n_ok else (n_open.id if n_open else 0)
+        rnd_id = rnd_now.id
+
+    with app.test_client() as c:
+        login(c, 'ac_admin', TEST_PWD)
+        token = get_csrf(c, '/academic/forms')
+        r2 = c.post(url_for('academic.form_round_new', form_id=tpl_id),
+                    data={'csrf_token': token, 'name': '第二学期'},
+                    follow_redirects=True)
+        case('发起新一轮后再次通知应填人员', '已通知' in r2.get_data(as_text=True))
+        nlist = c.get(url_for('notifications.notifications_page'),
+                      query_string={'category': 'collect'}).get_data(as_text=True)
+        case('通知中心可按「材料收集」筛选',
+             '材料收集' in nlist and '通知联动材料收集' in nlist)
+        case('通知中心提供「从我的收件箱移除」入口', 'removeNotification' in nlist)
+        cnt0 = (c.get(url_for('notifications.unread_count_api')).get_json()
+                or {}).get('count')
+        rr = c.post(url_for('notifications.notification_delete_mine',
+                            notification_id=nid), data={'csrf_token': token})
+        body = rr.get_json() or {}
+        case('可从我的收件箱移除通知',
+             rr.status_code == 200 and body.get('ok') is True, str(rr.status_code))
+        cnt1 = (c.get(url_for('notifications.unread_count_api')).get_json()
+                or {}).get('count')
+        case('移除后未读数下降', (cnt1 or 0) < (cnt0 or 0), f'{cnt0} -> {cnt1}')
+
+        # 路由层通知路径：结束本轮 → 重新开放（提醒未交者）；延长截止（提醒未交者）
+        c.post(url_for('academic.form_round_close', round_id=rnd_id),
+               data={'csrf_token': token})
+        rr2 = c.post(url_for('academic.form_round_reopen', round_id=rnd_id),
+                     data={'csrf_token': token, 'deadline': '2030-01-01T00:00'},
+                     follow_redirects=True)
+        case('重新开放轮次后提醒本轮未交者',
+             rr2.status_code == 200 and '已通知' in rr2.get_data(as_text=True))
+        rr3 = c.post(url_for('academic.form_round_window', round_id=rnd_id),
+                     data={'csrf_token': token, 'deadline': '2030-06-01T00:00'},
+                     follow_redirects=True)
+        case('延长截止时间后提醒本轮未交者',
+             rr3.status_code == 200 and '已通知' in rr3.get_data(as_text=True))
+
+        # 用户实测报障回归：通知中心「全部已读」曾因表单缺 CSRF token 直接 400
+        r_all = c.post(url_for('notifications.notification_read_all'),
+                       data={'csrf_token': token}, follow_redirects=True)
+        case('全部已读不再报 400', r_all.status_code == 200, str(r_all.status_code))
+        cnt_all = (c.get(url_for('notifications.unread_count_api')).get_json()
+                   or {}).get('count')
+        case('全部已读后未读数归零', cnt_all == 0, str(cnt_all))
 
 
 # ── 入口 ────────────────────────────────────────────────────────────────────

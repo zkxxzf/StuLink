@@ -23,6 +23,7 @@ from app.modules.notifications.services.notification_service import (
     mark_all_read,
     get_unread_count_accurate,
     delete_notification,
+    delete_for_user,
     get_notification_detail,
     get_read_progress,
     resolve_recipients,
@@ -202,6 +203,16 @@ def notification_delete(notification_id):
     delete_notification(notification_id)
     flash('通知已删除', 'success')
     return redirect(url_for('notifications.notifications_page'))
+
+
+@bp.route('/<int:notification_id>/delete-mine', methods=['POST'])
+@login_required
+@perm_required('workbench.notifications_view')
+def notification_delete_mine(notification_id):
+    """从我的收件箱移除（收件人侧软删，不影响其他收件人；2026-10-10 新增）"""
+    ok = delete_for_user(notification_id, current_user.id)
+    return jsonify({'ok': bool(ok),
+                    'message': '已从收件箱移除' if ok else '未找到该通知'})
 
 
 @bp.route('/api/unread-count')

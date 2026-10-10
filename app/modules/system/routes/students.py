@@ -12,7 +12,8 @@ from app.utils.student_scope import apply_student_scope
 from app.utils.helpers import (get_dict_values, log_operation, get_graduated_grades,
                                write_change_log, class_change_counts,
                                class_change_logs, change_type_label,
-                               CLASS_CHANGE_TYPES, student_location_desc,
+                               CLASS_CHANGE_TYPES, CHANGE_TYPE_LABELS,
+                               student_location_desc,
                                resolve_direction, location_desc, get_class_type,
                                student_change_logs)
 import io

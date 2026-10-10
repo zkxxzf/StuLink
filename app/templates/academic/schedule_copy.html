@@ -4,8 +4,8 @@
 {% block content %}
 <div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
     <div>
-        <h4 class="fw-bold mb-1"><i class="bi bi-files"></i> 学期交接 · 复制课表为新学期草稿</h4>
-        <span class="text-muted small">以现有学期为底版创建新学期草稿，可沿用节次作息与课表条目，再逐周微调</span>
+        <h4 class="fw-bold mb-1"><i class="bi bi-files"></i> 学期交接 · 复制课表为新学期（未启用）</h4>
+        <span class="text-muted small">以现有学期为底版创建新学期的未启用课表，可沿用节次作息与课表条目，再逐周微调</span>
     </div>
     <div class="d-flex gap-2 flex-wrap">
         <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('academic.schedule_history') }}">
@@ -26,7 +26,7 @@
                 <ul class="list-unstyled mb-0 text-muted">
                     <li><i class="bi bi-calendar-range"></i> {{ ts.period_text() if ts.start_date else '未配置起止日期' }}</li>
                     <li><i class="bi bi-tag"></i> 状态：
-                        {% set st = {'draft':('草稿','secondary'),'active':('使用中','success'),'archived':('已归档','dark')} %}
+                        {% set st = {'draft':('未启用','secondary'),'active':('启用中','success'),'archived':('已归档','dark')} %}
                         {% set s = st.get(ts.status, (ts.status,'secondary')) %}
                         <span class="badge bg-{{ s[1] }}">{{ s[0] }}</span>
                     </li>
@@ -35,7 +35,7 @@
                 <hr>
                 <div class="alert alert-light border py-2 mb-0">
                     <i class="bi bi-info-circle text-primary"></i>
-                    复制不会修改源学期任何数据；新学期为<strong>草稿</strong>状态，复制的条目会强制为常规课（清除调课来源标记），并在备注追加「由 {{ ts.name }} 复制」。
+                    复制不会修改源学期任何数据；新学期为<strong>未启用</strong>状态（启用后才生效），复制的条目会强制为常规课（清除调课来源标记），并在备注追加「由 {{ ts.name }} 复制」。
                 </div>
             </div>
         </div>
@@ -66,7 +66,7 @@
                         <div class="col-md-6">
                             <label class="form-label small mb-1">开学第一天</label>
                             <input type="date" name="start_date" class="form-control form-control-sm">
-                            <div class="form-text">建议对齐到周一，可稍后在「日期配置」调整。</div>
+                            <div class="form-text">开学当天即可（不必是周一），可稍后在「日期配置」调整。</div>
                         </div>
                         <div class="col-md-6">
                             <label class="form-label small mb-1">学期最后一天</label>
@@ -94,7 +94,7 @@
                     </div>
                     <div class="d-flex gap-2 mt-3">
                         <button type="submit" class="btn btn-sm btn-primary">
-                            <i class="bi bi-check-lg"></i> 创建新学期草稿
+                            <i class="bi bi-check-lg"></i> 创建新学期（未启用）
                         </button>
                         <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('academic.schedule_manage') }}">取消</a>
                     </div>

@@ -332,10 +332,16 @@ def notify_users(uids, title, content, category='system', biz_type=None,
     if not success or notif is None:
         return False, msg, {'notified': 0, 'missing_uids': missing,
                             'notification_id': None}
+    # 2026-10-10：无登录账号的收件人（负数哨兵 user_id：无账号学生 / 未绑定账号教师）
+    # 只能"账面上收到"，实际看不到——调用方据此提示教务线下告知。
+    accountless_names = [r.get('user_name') for r in _probe
+                         if (r.get('user_id') or 0) < 0]
     return True, f'已推送给 {notif.recipient_count or 0} 人', {
         'notified': notif.recipient_count or 0,
         'missing_uids': missing,
         'notification_id': notif.id,
+        'accountless': len(accountless_names),
+        'accountless_names': accountless_names[:20],
     }
 
 
@@ -528,6 +534,26 @@ def get_unread_count(user):
 
 
 # ── 已读 / 删除 ──────────────────────────────────────────────
+
+def unread_recipient_ids(biz_type, biz_id):
+    """某业务（biz_type+biz_id）下「仍有未读通知」的收件人 user_id 集合。
+
+    2026-10-10：催交去重用——同一收集同一轮次里已有未读催交通知的人，
+    教务再点「催交」时不重复推送（收件人已读后即可再次催）。
+    """
+    if not biz_type or biz_id is None:
+        return set()
+    rows = (db.session.query(NotificationRecipient.user_id)
+            .join(Notification,
+                  NotificationRecipient.notification_id == Notification.id)
+            .filter(Notification.biz_type == biz_type,
+                    Notification.biz_id == biz_id,
+                    Notification.is_active.is_(True),
+                    NotificationRecipient.is_read.is_(False),
+                    NotificationRecipient.is_deleted.is_(False))
+            .distinct().all())
+    return {r[0] for r in rows}
+
 
 def mark_read(notification_id, user_id):
     """标记为已读（幂等）。

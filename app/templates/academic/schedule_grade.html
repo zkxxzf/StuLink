@@ -23,8 +23,9 @@
         </a>
         {{ parts.print_button('打印当前班级') }}
         {{ parts.export_tools() }}
-        <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('academic.schedule_master', sid=ts.id, week=week) }}">
-            <i class="bi bi-grid-3x3"></i> 大课表
+        {# 2026-10-10：原「大课表」入口改指「全校总课表」（该页已下线） #}
+        <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('academic.schedule_overview', sid=ts.id, week=week) }}">
+            <i class="bi bi-list-columns-reverse"></i> 全校总课表
         </a>
         <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('academic.schedule_manage') }}">
             <i class="bi bi-house"></i> 学期管理
@@ -34,13 +35,32 @@
 
 {{ parts.readonly_banner(ts) }}
 
+{# 2026-10-10：年级切换 —— 所有年级的课表都可在此显示（不再受入口年级限制） #}
+{% if all_grades and all_grades|length > 1 %}
+<div class="card mb-2">
+    <div class="card-body py-2">
+        <ul class="nav nav-pills flex-wrap gap-1 align-items-center">
+            <li class="nav-item d-flex align-items-center pe-1">
+                <span class="text-muted small"><i class="bi bi-mortarboard"></i> 年级</span>
+            </li>
+            {% for g in all_grades %}
+            <li class="nav-item">
+                <a class="nav-link py-1 px-3 {{ 'active' if g == grade else '' }}"
+                   href="{{ url_for('academic.schedule_grade', sid=ts.id, grade=g, week=week) }}">{{ g }}</a>
+            </li>
+            {% endfor %}
+        </ul>
+    </div>
+</div>
+{% endif %}
+
 {% if not classes %}
 <div class="card">
     <div class="card-body text-center py-5 text-muted">
         <i class="bi bi-inbox" style="font-size:40px;"></i>
         <p class="mt-3 mb-1">{{ grade }} 暂无课表数据</p>
         {% if can_edit %}
-        <p class="small mb-0"><a href="{{ url_for('academic.schedule_import', sid=ts.id) }}">导入课表</a>
+        <p class="small mb-0"><a href="{{ url_for('academic.schedule_smart_import', sid=ts.id) }}">导入课表</a>
             或点击「添加课程」录入</p>
         {% endif %}
     </div>

@@ -23,8 +23,9 @@
         {{ parts.term_selector(schedules, ts, base_endpoint='academic.schedule_versions') }}
     </div>
     <div class="d-flex gap-2 flex-wrap">
-        <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('academic.schedule_master', sid=ts.id) }}">
-            <i class="bi bi-grid-3x3"></i> 大课表
+        {# 2026-10-10：原「大课表」入口改指「全校总课表」（该页已下线） #}
+        <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('academic.schedule_overview', sid=ts.id) }}">
+            <i class="bi bi-list-columns-reverse"></i> 全校总课表
         </a>
         <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('academic.schedule_manage') }}">
             <i class="bi bi-house"></i> 学期管理

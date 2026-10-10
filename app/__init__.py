@@ -635,6 +635,13 @@ def create_app():
     from app.utils.subject_color import subject_tone as _subject_tone
     app.jinja_env.globals['subject_tone'] = _subject_tone
 
+    # current_user 同理：Flask-Login 走 context processor 注入，{% import %} 的宏
+    # 默认拿不到；而 academic/_schedule_parts.html 的 readonly_banner 要在宏里判
+    # 权限，否则渲染「草稿 / 归档」学期页面时 UndefinedError → 500
+    # （2026-10-10 修复：新建学期后在导入页直接报错即此因）。
+    from flask_login import current_user as _current_user
+    app.jinja_env.globals['current_user'] = _current_user
+
     # 安全响应头
     @app.after_request
     def add_security_headers(response):
