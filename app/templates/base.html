@@ -98,15 +98,78 @@
             .navbar { padding-left: 8px; padding-right: 8px; }
             .navbar .ms-auto { gap: 4px; }
         }
+        /* ===== v1.19.0 考试态：左侧深色侧栏 → 独立悬浮卡片（风格参考轻量描边菜单） ===== */
+        .sidebar.sidebar-float {
+            top: 68px; left: 10px; bottom: auto;
+            width: calc(var(--sidebar-width) - 20px);
+            max-height: calc(100vh - 84px);
+            background: #fff; border: 1px solid #e5e7eb; border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(15, 23, 42, .08);
+            padding: 6px 0; overflow-y: auto;
+        }
+        .sidebar-float .nav.flex-column { padding-top: 0 !important; }
+        .sidebar-float .exam-flow-nav { position: static; }
+        .sidebar-float a { text-decoration: none; }
+        .sidebar-float .efn-back {
+            display: block; padding: 6px 12px; color: #64748b; font-size: 12.5px;
+        }
+        .sidebar-float .efn-back:hover { color: #2563eb; }
+        .sidebar-float .efn-title {
+            padding: 2px 12px 6px; color: #0f172a; font-weight: 600; font-size: 12.5px;
+            white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+        }
+        .sidebar-float .efn-steps {
+            display: flex; align-items: center; gap: 4px; padding: 0 12px 8px;
+        }
+        .sidebar-float .efn-dot {
+            width: 16px; height: 16px; line-height: 16px; text-align: center;
+            border-radius: 50%; font-size: 10px; background: #e2e8f0; color: #64748b;
+        }
+        .sidebar-float .efn-dot.on { background: #16a34a; color: #fff; }
+        .sidebar-float .efn-count { color: #94a3b8; font-size: 11.5px; margin-left: 4px; }
+        .sidebar-float .efn-item {
+            display: block; padding: 6px 12px; color: #374151; font-size: 13px;
+            border-left: 2px solid transparent;
+        }
+        .sidebar-float .efn-item:hover { background: #f8fafc; color: #1d4ed8; }
+        .sidebar-float .efn-item.active {
+            color: #2563eb; font-weight: 600; border-left-color: #2563eb;
+        }
+        .sidebar-float .efn-tag {
+            font-size: 10.5px; color: #b45309; background: #fef3c7;
+            border-radius: 3px; padding: 0 4px; margin-left: 4px;
+        }
+        .sidebar-float .efn-group {
+            display: flex; align-items: center; justify-content: space-between;
+            padding: 7px 12px; margin-top: 4px; background: #f1f5f9;
+            color: #334155; font-size: 12.5px; font-weight: 600;
+        }
+        .sidebar-float .efn-group:hover { background: #e2e8f0; }
+        .sidebar-float .efn-group .bi { font-size: 11px; color: #94a3b8; }
+        .sidebar-float .efn-next {
+            padding: 8px 12px; margin-top: 6px; border-top: 1px solid #f1f5f9;
+            color: #64748b; font-size: 11.5px;
+        }
+        .sidebar-float .efn-next.ok { color: #16a34a; }
+        @media (max-width: 767.98px) {
+            .sidebar.sidebar-float { display: none; }
+        }
     </style>
     {% block extra_css %}{% endblock %}
 </head>
 <body>
+    {# v1.19.0：进入某场考试（考试态）后，左侧深色侧栏改为「独立悬浮栏」——
+       侧栏元素保留（仅此页含本场考试菜单），套 .sidebar-float 变成描边白卡浮在左槽位。
+       考试态由 exam_nav() 判定（本请求内已缓存，重复调用无额外查询）。 #}
+    {% set EN = exam_nav() if request.blueprint == 'grades' else None %}
+    {% set exam_mode = (request.blueprint == 'grades' and EN) %}
     <!-- 顶部导航 -->
     <nav class="navbar navbar-expand-lg navbar-dark bg-dark fixed-top px-3" style="height:56px;">
+        {% if not exam_mode %}
         <button class="btn btn-dark d-md-none me-2" onclick="document.querySelector('.sidebar').classList.toggle('show')" aria-label="切换菜单">
             <i class="bi bi-list"></i>
         </button>
+        {% endif %}
         <a class="navbar-brand fw-bold" href="{{ url_for('welcome.index') if current_user.is_authenticated else '#' }}">
             <i class="bi bi-building"></i> StuLink
         </a>
@@ -160,8 +223,8 @@
     </nav>
 
     {% if current_user.is_authenticated and request.blueprint != 'welcome' %}
-    <!-- 侧边栏：按模块显示对应菜单 -->
-    <div class="sidebar">
+    <!-- 侧边栏：按模块显示对应菜单；考试态套 .sidebar-float 变为独立悬浮卡片 -->
+    <div class="sidebar{% if exam_mode %} sidebar-float{% endif %}">
         <nav class="nav flex-column pt-2">
             {% if request.blueprint in ('dashboard','rooms','assignments','statistics') or request.endpoint == 'students.search' %}
             <a class="nav-link" href="{{ url_for('dashboard.index') }}">
@@ -267,87 +330,64 @@
                全局态：历次考试 + 全局分析入口 + 基础配置（折叠）
                考试态：切换为本场考试的悬浮流程栏（概览 / 考务 / 导入 / 分析） #}
             {% if request.blueprint == 'grades' %}
-            {% set EN = exam_nav() %}
-            {# 悬浮流程栏：页面滚动时保持在视口内（v1.19.0） #}
-            <style>
-                .exam-flow-nav { position: sticky; top: .5rem; }
-                .exam-flow-nav .nav-link { padding-top: .35rem; padding-bottom: .35rem; }
-            </style>
             {% if EN %}
             {# ---------- 考试态：悬浮流程栏 ---------- #}
             <div class="exam-flow-nav">
-                <a class="nav-link" href="{{ url_for('grades.exams_list') }}">
+                <a class="efn-back" href="{{ url_for('grades.exams_list') }}">
                     <i class="bi bi-arrow-left"></i>返回考试列表
                 </a>
-                <div class="nav-section">本场考试</div>
-                <div class="px-3 small text-muted mb-1" title="{{ EN.exam.name }}">
-                    {{ EN.exam.title_with_dimensions() }}
-                </div>
-                <div class="px-3 mb-2 d-flex align-items-center flex-wrap gap-1">
+                <div class="efn-title" title="{{ EN.exam.name }}">{{ EN.exam.title_with_dimensions() }}</div>
+                <div class="efn-steps">
                     {% for s in EN.steps %}
-                    <span class="badge {{ 'bg-success' if s.done else 'bg-secondary-subtle text-secondary-emphasis' }}"
+                    <span class="efn-dot {{ 'on' if s.done }}"
                           title="{{ s.label }}{{ '（已完成）' if s.done else '（未完成）' }}">{{ loop.index }}</span>
                     {% endfor %}
-                    <span class="small text-muted">
-                        {{ EN.steps | selectattr('done') | list | length }}/4 步
-                    </span>
+                    <span class="efn-count">{{ EN.steps | selectattr('done') | list | length }}/4 步</span>
                 </div>
-                <a class="nav-link {% if EN.section == 'overview' %}active{% endif %}" data-nav="detail"
-                   href="{{ url_for('grades.exam_detail', exam_id=EN.exam_id) }}">
-                    <i class="bi bi-journal-text"></i>考试概览·成绩单
+                <a class="efn-item {% if EN.section == 'overview' %}active{% endif %}" data-nav="detail"
+                   href="{{ url_for('grades.exam_detail', exam_id=EN.exam_id) }}">考试概览·成绩单</a>
+                <a class="efn-item {% if EN.section == 'affair' %}active{% endif %}" data-nav="affair"
+                   href="{{ url_for('grades.exam_affair_go', exam_id=EN.exam_id) }}">考务安排{% if not EN.steps[1].done %}<span class="efn-tag">待做</span>{% endif %}</a>
+                <a class="efn-item {% if EN.section == 'import' %}active{% endif %}" data-nav="import"
+                   href="{{ url_for('grades.exam_import', exam_id=EN.exam_id) }}">成绩导入{% if not EN.steps[2].done %}<span class="efn-tag">待做</span>{% endif %}</a>
+                <a class="efn-item {% if EN.section == 'analysis' %}active{% endif %}" data-nav="analysis"
+                   href="{{ url_for('grades.index') }}?exam={{ EN.exam_id }}">成绩分析{% if not EN.steps[3].done %}<span class="efn-tag">待划线</span>{% endif %}</a>
+                {# v1.19.0 分析子模块：收在本场考试下，做成可折叠分组（风格同参考图） #}
+                {% if current_user.has_perm('grades.view') or current_user.role == 'admin' or
+                     (current_user.permission_group and current_user.permission_group.scope_type in ('school', 'grade')) %}
+                <a class="efn-group" data-bs-toggle="collapse" href="#efnAnalysis" role="button"
+                   aria-expanded="{{ 'true' if EN.section == 'analysis' else 'false' }}">
+                    <span>分析子模块</span><i class="bi bi-chevron-down"></i>
                 </a>
-                <a class="nav-link {% if EN.section == 'affair' %}active{% endif %}" data-nav="affair"
-                   href="{{ url_for('grades.exam_affair_go', exam_id=EN.exam_id) }}">
-                    <i class="bi bi-people"></i>考务安排
-                    {% if not EN.steps[1].done %}<span class="badge bg-warning-subtle text-warning-emphasis ms-1">待做</span>{% endif %}
-                </a>
-                <a class="nav-link {% if EN.section == 'import' %}active{% endif %}" data-nav="import"
-                   href="{{ url_for('grades.exam_import', exam_id=EN.exam_id) }}">
-                    <i class="bi bi-upload"></i>成绩导入
-                    {% if not EN.steps[2].done %}<span class="badge bg-warning-subtle text-warning-emphasis ms-1">待做</span>{% endif %}
-                </a>
-                <a class="nav-link {% if EN.section == 'analysis' %}active{% endif %}" data-nav="analysis"
-                   href="{{ url_for('grades.index') }}?exam={{ EN.exam_id }}">
-                    <i class="bi bi-graph-up"></i>成绩分析
-                    {% if not EN.steps[3].done %}<span class="badge bg-warning-subtle text-warning-emphasis ms-1">待划线</span>{% endif %}
-                </a>
-                {# v1.19.0 分析子模块：不再占用全局侧栏，收在本场考试的分析段下 #}
-                {% if current_user.has_perm('grades.view') %}
-                <a class="nav-link ps-4 small {% if request.endpoint == 'grades.pivot_page' %}active{% endif %}" data-nav="pivot"
-                   href="{{ url_for('grades.pivot_page') }}?exam={{ EN.exam_id }}">
-                    <i class="bi bi-grid-1x2"></i>成绩分析自由表
-                </a>
-                <a class="nav-link ps-4 small {% if request.endpoint == 'grades.exam_near_line' %}active{% endif %}" data-nav="near"
-                   href="{{ url_for('grades.exam_near_line', exam_id=EN.exam_id) }}">
-                    <i class="bi bi-bullseye"></i>临界生对比
-                </a>
+                <div class="collapse {% if EN.section == 'analysis' %}show{% endif %}" id="efnAnalysis">
+                    {% if current_user.has_perm('grades.view') %}
+                    <a class="efn-item ps-4 {% if request.endpoint == 'grades.pivot_page' %}active{% endif %}" data-nav="pivot"
+                       href="{{ url_for('grades.pivot_page') }}?exam={{ EN.exam_id }}">成绩分析自由表</a>
+                    <a class="efn-item ps-4 {% if request.endpoint == 'grades.exam_near_line' %}active{% endif %}" data-nav="near"
+                       href="{{ url_for('grades.exam_near_line', exam_id=EN.exam_id) }}">临界生对比</a>
+                    {% endif %}
+                    {% if current_user.role == 'admin' or (current_user.permission_group and
+                         current_user.permission_group.scope_type in ('school', 'grade')) %}
+                    <a class="efn-item ps-4 {% if request.endpoint == 'grades.report_page' %}active{% endif %}" data-nav="report"
+                       href="{{ url_for('grades.report_page') }}?exam={{ EN.exam_id }}">成绩汇报区</a>
+                    <a class="efn-item ps-4 {% if request.endpoint == 'grades.global_compare_page' %}active{% endif %}" data-nav="global"
+                       href="{{ url_for('grades.global_compare_page') }}?exam={{ EN.exam_id }}">全局对比</a>
+                    {% endif %}
+                </div>
                 {% endif %}
-                {% if current_user.role == 'admin' or (current_user.permission_group and
-                     current_user.permission_group.scope_type in ('school', 'grade')) %}
-                <a class="nav-link ps-4 small {% if request.endpoint == 'grades.report_page' %}active{% endif %}" data-nav="report"
-                   href="{{ url_for('grades.report_page') }}?exam={{ EN.exam_id }}">
-                    <i class="bi bi-megaphone"></i>成绩汇报区
+                <a class="efn-group" data-bs-toggle="collapse" href="#efnQuick" role="button" aria-expanded="false">
+                    <span>本场快捷</span><i class="bi bi-chevron-down"></i>
                 </a>
-                <a class="nav-link ps-4 small {% if request.endpoint == 'grades.global_compare_page' %}active{% endif %}" data-nav="global"
-                   href="{{ url_for('grades.global_compare_page') }}?exam={{ EN.exam_id }}">
-                    <i class="bi bi-person-badge"></i>全局对比
-                </a>
-                {% endif %}
-                <div class="nav-section">本场快捷</div>
-                <a class="nav-link {% if request.endpoint and request.endpoint.startswith('grades.exam_ai_import') %}active{% endif %}" data-nav="ai"
-                   href="{{ url_for('grades.exam_ai_import', exam_id=EN.exam_id) }}">
-                    <i class="bi bi-stars"></i>AI 智能导入
-                </a>
-                <a class="nav-link {% if request.endpoint == 'grades.bands_page' %}active{% endif %}" data-nav="bands"
-                   href="{{ url_for('grades.bands_page', exam_id=EN.exam_id) }}">
-                    <i class="bi bi-bar-chart"></i>划线分层
-                </a>
+                <div class="collapse" id="efnQuick">
+                    <a class="efn-item ps-4 {% if request.endpoint and request.endpoint.startswith('grades.exam_ai_import') %}active{% endif %}" data-nav="ai"
+                       href="{{ url_for('grades.exam_ai_import', exam_id=EN.exam_id) }}">AI 智能导入</a>
+                    <a class="efn-item ps-4 {% if request.endpoint == 'grades.bands_page' %}active{% endif %}" data-nav="bands"
+                       href="{{ url_for('grades.bands_page', exam_id=EN.exam_id) }}">划线分层</a>
+                </div>
                 {% if EN.next_step %}
-                <div class="px-3 mt-2 small text-muted">
-                    <i class="bi bi-signpost-2"></i> 下一步：{{ EN.next_step.label }}
-                </div>
+                <div class="efn-next">下一步：{{ EN.next_step.label }}</div>
                 {% else %}
-                <div class="px-3 mt-2 small text-success"><i class="bi bi-check2-all"></i> 四步已走完</div>
+                <div class="efn-next ok">四步已走完</div>
                 {% endif %}
             </div>
             {% else %}
