@@ -1,4 +1,4 @@
-# StuLink v1.18.9.1 2026-10-10
+# StuLink v1.18.9.2 2026-10-10
 # 调课服务（基于 timetable.db 新模型）：申请 / 批量 / 审核 / 执行 / 撤销 / 统计 / 实时生效
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 #

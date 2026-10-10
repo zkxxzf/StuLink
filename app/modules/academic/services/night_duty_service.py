@@ -1,4 +1,4 @@
-# StuLink v1.18.9.1 2026-10-10
+# StuLink v1.18.9.2 2026-10-10
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 """晚自习值班服务（2026-09-26，高中教务）。
 

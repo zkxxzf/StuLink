@@ -1,4 +1,4 @@
-# StuLink v1.18.9.1 2026-10-10
+# StuLink v1.18.9.2 2026-10-10
 # 成绩分析：主页（四 tab）+ options/analysis API + AI 预留
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 import hashlib
@@ -135,7 +135,7 @@ def api_options():
     for g in grades:
         st_rows = Student.query.filter_by(grade=g).with_entities(Student.class_name).distinct().all()
         classes_by_grade[g] = numeric_classes([r[0] for r in st_rows])
-    # v1.18.9.1 每场考试自己的班级：**班级筛选仅限本场考试**
+    # v1.18.9.2 每场考试自己的班级：**班级筛选仅限本场考试**
     # 来源 = 该场考试的学生名册（exam_scores.class_name）∪ 任课教师表（exam_teacher_links）
     # 不能用主库当前班级：考试是自包含的独立单元，其参与者是整个年级、且班级为考试当时
     classes_by_exam = {}
