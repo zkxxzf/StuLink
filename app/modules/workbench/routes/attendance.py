@@ -14,6 +14,7 @@ from app.modules.workbench.services.attendance_service import (
 from app.modules.workbench.services import scope as wb_scope
 from app.models.academic import ATTENDANCE_STATUS
 from app.modules.workbench.services import scope_service
+from app.utils.helpers import to_date
 from app.utils.decorators import perm_required
 
 bp = Blueprint('attendance', __name__, url_prefix='/workbench/attendance')
@@ -39,8 +40,8 @@ def attendance_page():
 
     pagination = get_attendance(
         class_name=sel_class, grade=sel_grade,
-        date_from=date.fromisoformat(date_from) if date_from else None,
-        date_to=date.fromisoformat(date_to) if date_to else None,
+        date_from=to_date(date_from),
+        date_to=to_date(date_to),
         page=page, per_page=30,
     )
 
@@ -136,8 +137,8 @@ def attendance_export():
 
     out = export_attendance(
         class_name=class_name,
-        date_from=date.fromisoformat(date_from) if date_from else None,
-        date_to=date.fromisoformat(date_to) if date_to else None,
+        date_from=to_date(date_from),
+        date_to=to_date(date_to),
         grade=grade,
     )
     filename = f'考勤记录_{class_name}_{date.today().strftime("%Y%m%d")}.xlsx'

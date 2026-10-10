@@ -128,10 +128,16 @@ def cert_records_page():
     d_from = (request.args.get('date_from') or '').strip()
     d_to = (request.args.get('date_to') or '').strip()
     if d_from:
-        q = q.filter(Certificate.generated_at >= datetime.strptime(d_from, '%Y-%m-%d'))
+        try:
+            q = q.filter(Certificate.generated_at >= datetime.strptime(d_from, '%Y-%m-%d'))
+        except ValueError:
+            pass  # 2026-10-11 审计：非法日期参数忽略该过滤条件，不再 500
     if d_to:
-        q = q.filter(Certificate.generated_at <
-                     datetime.strptime(d_to, '%Y-%m-%d') + timedelta(days=1))
+        try:
+            q = q.filter(Certificate.generated_at <
+                         datetime.strptime(d_to, '%Y-%m-%d') + timedelta(days=1))
+        except ValueError:
+            pass  # 2026-10-11 审计：同上
     certs = q.order_by(Certificate.generated_at.desc()).limit(500).all()
     # 生成人姓名：跨库不 JOIN，单独取 map（Certificate 在 grades 库，User 在主库）
     uids = {c.generated_by for c in certs if c.generated_by}

@@ -4,6 +4,7 @@ import json
 import logging
 import os
 import re
+from datetime import date
 from app.models import DictCategory, Student, Room, ClassProfile, ClassSubject
 from app.utils.cache import cache
 from flask import request, g
@@ -23,6 +24,21 @@ def to_int(value, default=0):
     """
     try:
         return int(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def to_date(value, default=None):
+    """安全解析日期的取参工具：None / 空 / 非法（如 ?date_from=abc）一律回落 default。
+
+    2026-10-11 审计修复：多处 `date.fromisoformat(request.args.get(...))` 仅判空未判格式，
+    传入非日期字符串会抛 ValueError 变 500；本函数统一消除该缺口。
+    正常 YYYY-MM-DD 输入行为与原来完全一致。
+    """
+    if not value:
+        return default
+    try:
+        return date.fromisoformat(str(value).strip()[:10])
     except (TypeError, ValueError):
         return default
 
