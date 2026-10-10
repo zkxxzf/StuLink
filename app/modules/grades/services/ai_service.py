@@ -138,25 +138,32 @@ def build_payload(user, exam):
         if ex is None:
             return None
         rows = ExamScore.query.filter_by(exam_id=ex.id).all()
-        stu_map = {}
+        # v1.19.0 修复：原先“总分行直接替换整张卡”，若总分行在科目行之后被处理，
+        # 会把已收集的 subjects 整片覆盖掉（payload 里出现 subjects:{}）。
+        # 改为两趟收集：先各自归集总分行卡与科目分，再合并。
+        cards, subs = {}, {}
         for r in rows:
             if r.student_no not in nos:
                 continue
             if r.subject == TOTAL_SUBJECT:
-                stu_map[r.student_no] = _student_card(r)
+                cards[r.student_no] = _student_card(r)
             else:
                 if restrict and r.subject not in restrict:
                     continue  # 任课教师只发本人任教科目列
-                card = stu_map.setdefault(r.student_no, {})
-                card.setdefault('subjects', {})[r.subject] = r.score
+                subs.setdefault(r.student_no, {})[r.subject] = r.score
         students = []
-        for card in stu_map.values():
-            card['subjects'] = sorted(
-                (card.get('subjects') or {}).items())
-            # 仅保留有分数的科目
-            card['subjects'] = {k: v for k, v in card['subjects'] if v is not None}
+        for no, card in cards.items():
+            card['subjects'] = {k: v for k, v in (subs.get(no) or {}).items()
+                                if v is not None}
             students.append(card)
-        students.sort(key=lambda c: (c['class'] or '', c['no'] or ''))
+        # 只有科目行、没有总分行的学生也补一张最小卡（不丢人）
+        for no, sv in subs.items():
+            if no in cards:
+                continue
+            sv = {k: v for k, v in sv.items() if v is not None}
+            if sv:
+                students.append({'no': no, 'subjects': sv})
+        students.sort(key=lambda c: (c.get('class') or '', c.get('no') or ''))
         return {'id': ex.id, 'name': ex.name, 'grade': ex.grade,
                 'date': ex.exam_date.strftime('%Y-%m-%d'),
                 'students': students}
