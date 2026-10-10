@@ -272,9 +272,8 @@ def _exam_page_rows(exam_id, page, size, class_name=None):
             }
     for d in data.values():
         d['unselected'] = unselected_subjects(d.get('selection'), d.get('direction'))
-        # v1.18.9.2 只对“以前在学校、现在人不在学校”的学籍状态给提示（比对当前学生表）；
-        # 分配生/一批一志/一批二志/补录/借读/借读后学籍转入/复学/休学 等一律不显示
-        d['status_badge'] = OFF_SCHOOL_BADGE.get((d.get('status') or '').strip(), '')
+        # “现在人不在校”的学籍状态给徽标：只认 已转出 / 休学 / 离校 三类（见 off_school_badge）
+        d['status_badge'] = off_school_badge(d.get('status'))
     # 严格按分页顺序（nos）输出，保证翻页稳定
     students = [data[n] for n in nos if n in data]
     return students, page, total_pages, total
@@ -285,16 +284,34 @@ _SUBJ_SHORT = {'物理': '物', '化学': '化', '生物': '生',
                '政治': '政', '历史': '史', '地理': '地'}
 
 # v1.18.9.2 “人现在不在学校”的学籍状态 → 成绩单上的短标签
-# 用户口径（2026-10-10 补充）：只展示“已转走 / 离校 / 休学”这类现在人不在校的情况，
-# 其他学籍状态（分配生/一批志愿/补录/借读/复学等）不提示。
+# 用户口径（2026-10-10，二次确认）：只标注三类 —— ① 已转出 ② 休学 ③ 离校；
+# 其它学籍状态（分配生 / 一批志愿 / 补录 / 借读 / 借读后学籍转入 / 复学 等）不提示。
 # 注意：本场考试参考名单必须完整保留（考试是自包含独立数据包），
-# 徽标只负责告知“这个学生现在是什么情况”，不把人从历史名单里剔掉。
-OFF_SCHOOL_BADGE = {
-    '学籍已转出': '转出',
-    '在籍不在校': '离校',
-    '借读又走了': '离校',
-    '休学': '休学',
-}
+# 徽标只说明“这个学生现在是什么情况”，不把人从历史名单里剔掉。
+#
+# 实现用**关键字匹配**而非精确枚举：学籍状态的写法在校际/历史数据里不统一
+# （如“学籍已转出”“已转出”“转出”），精确枚举会漏标——这正是 2026-10-10
+# 反馈“只标出一个转出”的隐患之一。
+_BADGE_RULES = (
+    ('转出', '转出'),      # 学籍已转出 / 已转出 / 转出…
+    ('休学', '休学'),      # 休学 / 已休学…
+    ('离校', '离校'),      # 离校 / 已离校…
+    ('在籍不在校', '离校'),
+    ('借读又走了', '离校'),
+)
+# 明确**不**标注的写法（即使含关键字也排除，避免误伤）
+_BADGE_EXCLUDE = ('借读后学籍转入',)
+
+
+def off_school_badge(status):
+    """学籍状态 → 成绩单徽标（''=不显示）。只认「已转出 / 休学 / 离校」三类。"""
+    s = (status or '').strip()
+    if not s or any(x in s for x in _BADGE_EXCLUDE):
+        return ''
+    for key, label in _BADGE_RULES:
+        if key in s:
+            return label
+    return ''
 
 
 def unselected_subjects(selection, direction):
