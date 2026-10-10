@@ -776,8 +776,9 @@ def get_day_matrix(schedule_id, target_date, week=None, grade=None, class_name=N
                 d = dict(te)
                 d['is_temp_swap'] = True
                 temp_dicts.append(d)
-    except Exception:
-        pass  # 调课模块异常不影响课表基础展示
+    except Exception as _e:  # noqa: BLE001
+        # 2026-10-11 审计：调课叠加失败退化为基础课表，但需留痕（原为静默 pass）
+        logger.warning('叠加当天临时调课失败，退化为基础课表: %s', _e)
     entry_dicts = [e.to_dict() for e in entries if e.id not in moved_away]
     has_ids = {d['id'] for d in entry_dicts}
     entry_dicts += [d for d in temp_dicts if d['id'] not in has_ids]

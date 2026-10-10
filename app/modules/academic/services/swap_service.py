@@ -46,8 +46,9 @@ def _notify_swap_result(sw, action, review_note='', count=1):
             biz_id=sw.id,
             link_url='/academic/swap',
         )
-    except Exception:
-        pass  # 通知失败不影响主流程
+    except Exception as _e:  # noqa: BLE001
+        # 2026-10-11 审计：通知失败不阻断主流程，但需留痕以便排查（原为静默 pass）
+        logger.warning('调课结果通知发送失败（不阻断主流程）: %s', _e)
 
 
 # ══════════════════════════════════════════════════════════════════════
