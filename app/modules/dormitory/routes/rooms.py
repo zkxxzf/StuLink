@@ -1,4 +1,4 @@
-﻿# StuLink v1.8.0 2026-08-02
+# StuLink v1.8.0 2026-08-02
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 from flask import Blueprint, render_template, redirect, url_for, flash, request, jsonify
 from flask_login import login_required, current_user
@@ -9,7 +9,12 @@ from app.utils.helpers import get_dict_values, get_active_grades, get_class_opti
 from app.utils.err_safe import safe_error   # M-12
 from sqlalchemy import func
 import json
+import logging
 import re
+
+# 2026-10-10 架构审计修复：筛选参数解析原为静默 except。
+# 用户输入非法属预期情况，用 debug 级留痕（不污染生产日志），行为不变。
+logger = logging.getLogger(__name__)
 
 bp = Blueprint('rooms', __name__, url_prefix='/rooms')
 
@@ -42,8 +47,9 @@ def list_rooms():
     if capacity:
         try:
             query = query.filter_by(capacity=int(capacity))
-        except ValueError:
-            pass
+        except ValueError as _e:
+            # 容量参数非数字 → 忽略该筛选（行为不变）
+            logger.debug('房间容量筛选参数非数字(%r)，已忽略: %s', capacity, _e)
 
     rooms = query.order_by(Room.building, Room.floor, Room.room_number).all()
 

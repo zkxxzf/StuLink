@@ -32,8 +32,9 @@ def _insert_log_row(values):
     with db.engine.connect() as conn:
         try:
             conn.exec_driver_sql('PRAGMA busy_timeout=300')
-        except Exception:  # noqa: BLE001  非 SQLite（或不支持该 PRAGMA）忽略
-            pass
+        except Exception as _e:  # noqa: BLE001  非 SQLite（或不支持该 PRAGMA）忽略
+            # 非 SQLite 或不认识该 PRAGMA 属预期兼容情况，行为不变（继续写日志）
+            logger.debug('设置 busy_timeout 失败（非 SQLite 环境，可忽略）: %s', _e)
         conn.execute(table.insert().values(**values))
         conn.commit()
 
@@ -125,8 +126,9 @@ def is_dict_value_in_use(category_code, value):
                 floor_num = int(value.replace(' 层', '').replace('层', '').strip())
                 if Room.query.filter_by(floor=floor_num).first():
                     return True
-            except (ValueError, AttributeError):
-                pass
+            except (ValueError, AttributeError) as _e:
+                # 楼层值不是数字（如"未知"）属字典脏数据，回落"未引用"（行为不变）
+                logger.debug('楼层字典值无法解析为数字（%r）: %s', value, _e)
         elif category_code == 'boarding_type':
             from app.models import StudentAccommodation
             if StudentAccommodation.query.filter_by(boarding_type=value).first():

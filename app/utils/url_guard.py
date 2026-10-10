@@ -38,7 +38,11 @@ def _builtin_hosts():
             if host:
                 hosts.add(host.lower())
         return hosts
-    except Exception:  # noqa: BLE001  导入失败时退化为「仅显式审批」
+    except Exception as _e:  # noqa: BLE001
+        # 2026-10-10：导入失败会退化为「仅显式审批」，即内置服务商域名全部不可达。
+        # 这是安全收紧方向的降级，但若因代码错误导致，运维只会看到"AI 全部连不上"
+        # 而不知原因，故必须留痕。
+        _log.warning('读取内置服务商注册表失败，本次仅放行管理员显式审批域名: %s', _e)
         return set()
 
 
@@ -63,8 +67,10 @@ def _explicitly_approved_hosts():
                     host = urlparse(line if '//' in line else 'https://' + line).hostname
                     if host:
                         hosts.add(host.lower())
-    except OSError:
-        pass
+    except OSError as _e:
+        # 2026-10-10：审批清单读不出来 → 已审批的域名全部失效，用户只会看到
+        # "地址被拒绝"而无从排查，故留痕（安全方向不变，仍拒绝）。
+        _log.warning('读取管理员审批域名清单失败(%s): %s', APPROVED_FILE, _e)
     return hosts
 
 

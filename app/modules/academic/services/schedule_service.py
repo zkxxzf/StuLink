@@ -8,6 +8,7 @@
 """
 import io
 import json
+import logging
 import re
 from datetime import datetime, date
 
@@ -15,6 +16,10 @@ from openpyxl import Workbook, load_workbook
 from openpyxl.styles import Font, Alignment, PatternFill, Border, Side
 from openpyxl.utils import get_column_letter
 from sqlalchemy import and_, false, or_
+
+# 2026-10-10 架构审计修复：本文件的静默 except 会掩盖节次/配置数据异常。
+# 数据损坏类用 warning，用户输入类用 debug；降级行为一律不变。
+logger = logging.getLogger(__name__)
 
 from app.extensions import db
 from app.models.timetable import (
@@ -792,8 +797,13 @@ def get_day_matrix(schedule_id, target_date, week=None, grade=None, class_name=N
                     if sh * 60 + sm <= cur_minutes <= eh * 60 + em:
                         current_period = p.period_number
                         break
-                except (ValueError, AttributeError):
-                    pass
+                except (ValueError, AttributeError) as _e:
+                    # 节次时间字段格式异常（脏数据）→ 该节次不参与"当前节次"判定。
+                    # 属配置数据问题，用 warning 便于发现后修数据。
+                    logger.warning('节次时间格式异常，已跳过该节次(id=%s, start=%r, end=%r): %s',
+                                   getattr(p, 'id', '?'),
+                                   getattr(p, 'start_time', None),
+                                   getattr(p, 'end_time', None), _e)
 
     # ── 按年级分块：与「全校总课表」同款矩阵（行=班级、列=节次）──
     # 这一天的格子只填 weekday=wd 那一列；临时调课（当天调入）已并入 entry_dicts。

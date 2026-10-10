@@ -190,8 +190,9 @@ def api_data():
     if ceids:
         try:
             filters['cert_exam_ids'] = [int(x) for x in ceids.split(',') if x.strip()]
-        except ValueError:
-            pass
+        except ValueError as _e:
+            # 参数含非数字 → 不带该筛选（行为不变）
+            logger.debug('cert_exam_ids 含非数字(%r)，已忽略该筛选: %s', ceids, _e)
     try:
         result = student_service.build_data(current_user, student_no, filters)
     except PermissionError:

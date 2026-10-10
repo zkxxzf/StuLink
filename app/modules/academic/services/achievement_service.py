@@ -192,8 +192,9 @@ def save_attachment(rec, storage, user=None, doc_type=None):
     if size > MAX_PER_FILE:
         try:
             os.remove(path)
-        except OSError:
-            pass
+        except OSError as _e:
+            # 超限文件的清理失败 → 磁盘残留垃圾文件（行为不变：仍拒绝本次上传）
+            logger.warning('超限附件清理失败，磁盘残留文件 %s: %s', path, _e)
         return False, f'文件超过 {MAX_MB}MB（当前 {size / 1024 / 1024:.1f}MB）', None
 
     att = AchievementAttachment(
@@ -216,8 +217,9 @@ def delete_attachment(att):
     if stored and os.path.commonpath([root, target]) == root and os.path.isfile(target):
         try:
             os.remove(target)
-        except OSError:
-            pass
+        except OSError as _e:
+            # 记录会照常删除（行为不变），但磁盘文件残留 → 需告警以便清理
+            logger.warning('附件记录已删但磁盘文件残留 %s: %s', target, _e)
     db.session.delete(att)
     db.session.commit()
 

@@ -97,13 +97,14 @@ def inspection_page():
     if d_from:
         try:
             q = q.filter(InspectionRecord.inspect_date >= date.fromisoformat(d_from))
-        except ValueError:
-            pass
+        except ValueError as _e:
+            # 用户填了非法日期（如 2026-13-45）→ 忽略该筛选条件（行为不变）
+            logger.debug('查课日期下界非法(%r)，已忽略该条件: %s', d_from, _e)
     if d_to:
         try:
             q = q.filter(InspectionRecord.inspect_date <= date.fromisoformat(d_to))
-        except ValueError:
-            pass
+        except ValueError as _e:
+            logger.debug('查课日期上界非法(%r)，已忽略该条件: %s', d_to, _e)
     # 分页（此前硬上限 300 条且无法翻页，历史记录一多就"看不全也翻不到"）
     page = request.args.get('page', 1, type=int)
     pagination = (q.order_by(InspectionRecord.inspect_date.desc(),
@@ -294,8 +295,9 @@ def inspection_batch():
         if i < len(periods) and periods[i]:
             try:
                 period = int(periods[i])
-            except (ValueError, TypeError):
-                pass
+            except (ValueError, TypeError) as _e:
+                # 节次不是数字 → 记为 None（行为不变）
+                logger.debug('查课节次非法(%r)，记为未知: %s', periods[i], _e)
         rec = InspectionRecord(
             inspect_date=inspect_date,
             grade=grade,
@@ -346,13 +348,13 @@ def inspection_export():
     if d_from:
         try:
             q = q.filter(InspectionRecord.inspect_date >= date.fromisoformat(d_from))
-        except ValueError:
-            pass
+        except ValueError as _e:
+            logger.debug('查课统计日期下界非法(%r)，已忽略该条件: %s', d_from, _e)
     if d_to:
         try:
             q = q.filter(InspectionRecord.inspect_date <= date.fromisoformat(d_to))
-        except ValueError:
-            pass
+        except ValueError as _e:
+            logger.debug('查课统计日期上界非法(%r)，已忽略该条件: %s', d_to, _e)
     if grade_f:
         q = q.filter(InspectionRecord.grade == grade_f)
 

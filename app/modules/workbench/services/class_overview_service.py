@@ -11,6 +11,12 @@ from app.models.points import PointRecord
 from app.models.grades import Exam, ExamScore, TeacherSubjectLink
 from app.models.academic import AttendanceRecord
 
+# 2026-10-10 架构审计修复：月份参数解析原为静默 except，非法值会悄悄回落本月。
+# 用户输入非法属预期情况，故用 debug 级留痕（不污染生产日志），行为不变。
+import logging
+
+logger = logging.getLogger(__name__)
+
 
 def _month_range(month_str=None):
     """解析 YYYY-MM 格式，返回 (start_date, end_date)；默认本月"""
@@ -24,8 +30,9 @@ def _month_range(month_str=None):
             else:
                 end = date(y, m + 1, 1)
             return start, end
-        except (ValueError, IndexError):
-            pass
+        except (ValueError, IndexError) as _e:
+            # 月份格式非法（如 2026-13 / abc）→ 回落本月（行为不变）
+            logger.debug('班级概览月份参数非法(%r)，回落本月: %s', month_str, _e)
     today = date.today()
     start = today.replace(day=1)
     if today.month == 12:

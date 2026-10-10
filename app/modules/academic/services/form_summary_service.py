@@ -147,8 +147,9 @@ def _question_options(q):
         opts = json.loads(q.options_json)
         if isinstance(opts, list):
             return [str(o) for o in opts]
-    except (json.JSONDecodeError, TypeError):
-        pass
+    except (json.JSONDecodeError, TypeError) as _e:
+        # 题目选项 JSON 损坏 → 该选择题选项为空（行为不变），debug 留痕
+        logger.debug('题目 %s 的 options_json 解析失败: %s', q.id, _e)
     return []
 
 
@@ -669,8 +670,10 @@ def _accumulate_question_stat(acc, q, cell, answers):
             acc['answered_count'] += 1
             try:
                 acc['numbers'].append(float(display))
-            except ValueError:
-                pass
+            except ValueError as _e:
+                # 非数字填写 → 不计入数值统计（行为不变）；debug 留痕便于发现脏数据
+                logger.debug('数值题填写非数字，未计入统计（题目 %s，值 %r）: %s',
+                             q.id, display, _e)
         else:
             acc['blank_count'] += 1
         return
