@@ -2,6 +2,7 @@
 """积分模块 HTTP 冒烟：登录 → 页面 → options → 搜索学生 → 新增 → 列表 → 汇总 → 编辑 → 删除"""
 import http.cookiejar
 import json
+import os  # 2026-10-10 修复：下方读 STULINK_ADMIN_USER/PWD 环境变量，缺 import 会 NameError
 import re
 import urllib.parse
 import urllib.request
