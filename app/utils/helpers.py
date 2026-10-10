@@ -14,6 +14,19 @@ from flask import request, g
 logger = logging.getLogger(__name__)
 
 
+def to_int(value, default=0):
+    """安全转 int 的取参工具：None / 空串 / 非数字（如 ?page=abc）一律回落 default。
+
+    2026-10-11 审计修复：路由里多处 `int(request.args.get(...))` 未兜底，
+    传入非数字参数会抛 ValueError 变 500；本函数统一消除该缺口。
+    正常数字输入的行为与原来完全一致（仅收敛非法输入）。
+    """
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
+
+
 def _insert_log_row(values):
     """用**独立连接**写审计日志。
 

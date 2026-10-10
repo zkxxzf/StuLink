@@ -5,7 +5,7 @@ from flask_login import login_required, current_user
 from app.extensions import db
 from app.models import Room, BedAssignment, Student, StudentAccommodation
 from app.utils.decorators import perm_required
-from app.utils.helpers import get_dict_values, get_active_grades, get_class_options, log_operation
+from app.utils.helpers import get_dict_values, get_active_grades, get_class_options, log_operation, to_int
 from app.utils.err_safe import safe_error   # M-12
 from sqlalchemy import func
 import json
@@ -135,7 +135,7 @@ def edit(id):
     room = Room.query.get_or_404(id)
     if request.method == 'POST':
         new_gender = request.form.get('gender', room.gender)
-        new_capacity = int(request.form.get('capacity', room.capacity))
+        new_capacity = to_int(request.form.get('capacity'), room.capacity)
         new_grade = request.form.get('grade', '') or None
         # 分配班级（可多选）：按勾选顺序拼接为 "01班+02班"
         raw_classes = [c.strip() for c in request.form.getlist('class_names') if c and c.strip()]
@@ -205,7 +205,7 @@ def create():
         room_number = request.form.get('room_number', '').strip()
         floor = request.form.get('floor', '').strip()
         gender = request.form.get('gender', '男')
-        capacity = int(request.form.get('capacity', 8))
+        capacity = to_int(request.form.get('capacity'), 8)
         notes = request.form.get('notes', '') or None
 
         if not room_number or not building:

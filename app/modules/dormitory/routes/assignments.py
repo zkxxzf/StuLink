@@ -127,7 +127,7 @@ def manage():
 
     # 确保这些房间的 BedAssignment 记录完整
     if rooms:
-        from app.modules.dormitory.services.room_assignment_v4 import _ensure_room_beds
+        from app.modules.dormitory.services.room_assignment_v7 import _ensure_room_beds
         _ensure_room_beds([r.id for r in rooms])
 
     # 检查班级是否有宿舍分配
@@ -611,7 +611,7 @@ def auto_assign():
         return jsonify({'success': False, 'message': '该班级尚未分配宿舍房间'}), 400
     
     # 1.1 确保这些房间的 BedAssignment 记录完整
-    from app.modules.dormitory.services.room_assignment_v4 import _ensure_room_beds
+    from app.modules.dormitory.services.room_assignment_v7 import _ensure_room_beds
     _ensure_room_beds([r.id for r in rooms])
 
     # 2. 收集所有空床位（合班宿舍按 combined_details 份额过滤，防止抢占其他班床位）
@@ -790,7 +790,7 @@ def auto_assign_all():
     graduated = get_graduated_grades()
 
     # 0. 确保所有已分配宿舍的房间都有 BedAssignment 记录
-    from app.modules.dormitory.services.room_assignment_v4 import _ensure_room_beds
+    from app.modules.dormitory.services.room_assignment_v7 import _ensure_room_beds
     all_assigned_rooms = Room.query.filter(
         Room.class_name.isnot(None),
         Room.class_name != ''

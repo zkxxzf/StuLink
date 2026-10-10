@@ -5,7 +5,7 @@ from flask import Blueprint, render_template, request, jsonify, abort, flash, re
 from flask_login import login_required, current_user
 
 from app.utils.decorators import perm_required
-from app.utils.helpers import log_operation
+from app.utils.helpers import log_operation, to_int
 from app.modules.portrait.services import portrait_service
 
 bp = Blueprint('portrait', __name__, url_prefix='/portrait')
@@ -50,7 +50,7 @@ def index():
     grade = (request.args.get('grade') or '').strip()
     class_name = (request.args.get('class_name') or '').strip()
     level = (request.args.get('level') or '').strip()
-    page = int(request.args.get('page') or 1)
+    page = to_int(request.args.get('page'), 1)
 
     result = portrait_service.get_student_list(
         grade=grade or None,
@@ -269,8 +269,8 @@ def api_list():
     grade = (request.args.get('grade') or '').strip()
     class_name = (request.args.get('class_name') or '').strip()
     level = (request.args.get('level') or '').strip()
-    page = int(request.args.get('page') or 1)
-    per_page = int(request.args.get('per_page') or 20)
+    page = to_int(request.args.get('page'), 1)
+    per_page = to_int(request.args.get('per_page'), 20)
 
     result = portrait_service.get_student_list(
         grade=grade or None,
