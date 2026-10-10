@@ -370,6 +370,49 @@ def _chat_completions(cfg, messages, timeout=None, max_tokens=None, temperature=
     return ok, out, sec
 
 
+# v1.19.0 截图导入：图片 → 结构化数据（OpenAI 兼容的多模态 vision 调用）
+VISION_PROMPT_AFFAIR = (
+    '这是一张考场安排表（可能是推荐名单/纸质表格的照片或截图）。'
+    '请把表格内容读出来，只输出一个 JSON（不要任何解释）：\n'
+    '{"students":[{"name":"姓名","class_name":"班级","room_no":"考场号","seat_no":1}],'
+    '"rooms":[{"room_no":"考场号","location":"位置","capacity":30,"subject":"选科"}],'
+    '"notes":"看不清或需要提醒的地方"}\n'
+    '规则：看不清的字段留空字符串或 null，不要猜测；seat_no 必须是整数。'
+)
+VISION_PROMPT_BANDS = (
+    '这是一张考试成绩分数线表（截图或照片）。请读出分数线，只输出一个 JSON（不要任何解释）：\n'
+    '{"bands":[{"layer":"层级名（如特控线/本科线）","direction":"物理|历史|空",'
+    '"subject":"科目名或空表示总分","score":123.5}],"notes":"提醒"}\n'
+    '规则：层级名原样保留；每个层级至少给出总分线（subject 留空）；看不清的行不要输出。'
+)
+
+
+def chat_with_image(cfg, prompt, image_bytes, mime='image/png',
+                    timeout=None, max_tokens=None):
+    """把图片作为**多模态消息**发给 OpenAI 兼容接口，返回 (ok, 文本或错误, 秒)
+
+    H-9 口径不变：仍走出站白名单与 DNS 校验（均在 _chat_completions 内），
+    Key 依旧只由调用方传入、不落库。图片以 data URI 内联（base64），
+    避免再引入对象存储；单张控制在调用方限流（建议 ≤ 4MB）。
+    """
+    import base64
+    b64 = base64.b64encode(image_bytes).decode('ascii')
+    messages = [{'role': 'user', 'content': [
+        {'type': 'text', 'text': prompt},
+        {'type': 'image_url',
+         'image_url': {'url': 'data:%s;base64,%s' % (mime or 'image/png', b64)}},
+    ]}]
+    ok, payload, sec = _chat_completions(cfg, messages, timeout=timeout,
+                                        max_tokens=max_tokens)
+    if not ok:
+        return False, payload, sec
+    try:
+        text = payload['choices'][0]['message']['content']
+    except (KeyError, IndexError, TypeError):
+        return False, '服务商返回内容无法解析（可能不支持图片输入）', sec
+    return True, text, sec
+
+
 def _http_error_text(code, detail, cfg):
     """把厂商 HTTP 错误码翻译为中文化提示"""
     provider_name = cfg.get('provider_name') or ai_providers.get_provider(
