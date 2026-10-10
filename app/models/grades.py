@@ -109,14 +109,35 @@ def _default_config():
     }, ensure_ascii=False)
 
 
+# ============ 考试两个维度（字典 code ）============
+# 性质：谁组织的、比对范围多大 —— 决定有没有外部（全市/多校）数据
+EXAM_KINDS = ('联考', '本校考', '小测验')
+# 阶段：教学进度节点 —— 用于“上一场同阶段考试”的定位（分层依据）
+EXAM_STAGES = ('期末考', '期中考', '月考', '限时练', '高三一测', '高三二测')
+# 分数口径：本场划线/排名用哪一套
+DEFAULT_SCORE_MODE = 'converted'          # converted=赋分优先 / raw=原始分
+SCORE_MODES = ('converted', 'raw')
+SCORE_MODE_LABELS = {'converted': '赋分', 'raw': '原始分'}
+
+
 class Exam(db.Model):
-    """考试主档：一场考试 = 一个年级 × 一次"""
+    """考试主档：一场考试 = 一个年级 × 一次
+
+    v1.19.0 四段式重构：新增两个维度
+      exam_kind  考试性质（联考 / 本校考 / 小测验）
+      exam_type  考试阶段（期末考 / 期中考 / 月考 / 限时练 / 高三一测 / 高三二测）
+    以及 score_mode（本场划线、排名、分析用赋分还是原始分）。
+    """
     __bind_key__ = 'grades'
     __tablename__ = 'exams'
 
     id = db.Column(db.Integer, primary_key=True)
     name = db.Column(db.String(100), nullable=False)
-    exam_type = db.Column(db.String(20))            # 字典 exam_type（月考/期中/期末…）
+    exam_type = db.Column(db.String(20))            # 字典 exam_type（阶段：月考/期中/期末/限时练…）
+    # v1.19.0 考试性质（字典 exam_kind：联考/本校考/小测验）
+    exam_kind = db.Column(db.String(20))
+    # v1.19.0 分数口径：converted=赋分（默认，划线排名用 score）/ raw=原始分
+    score_mode = db.Column(db.String(10), default=DEFAULT_SCORE_MODE)
     grade = db.Column(db.String(10), nullable=False)  # 2024级/2025级…（与字典一致）
     exam_date = db.Column(db.Date, nullable=False)
     term = db.Column(db.String(20))                  # 学年 2025-2026，由日期推导或登记选择
@@ -128,6 +149,29 @@ class Exam(db.Model):
     operator_id = db.Column(db.Integer)
     created_at = db.Column(db.DateTime, default=datetime.now)
     updated_at = db.Column(db.DateTime, default=datetime.now, onupdate=datetime.now)
+
+    def kind_label(self):
+        """性质展示名（未填返回空）"""
+        return (self.exam_kind or '').strip()
+
+    def stage_label(self):
+        """阶段展示名（回落到旧的 exam_type）"""
+        return (self.exam_type or '').strip()
+
+    def score_mode_label(self):
+        """分数口径展示名：赋分 / 原始分"""
+        return SCORE_MODE_LABELS.get(self.score_mode or DEFAULT_SCORE_MODE, '赋分')
+
+    def uses_converted(self):
+        """本场是否以赋分为准（划线、排名、分析取 score）"""
+        return (self.score_mode or DEFAULT_SCORE_MODE) != 'raw'
+
+    def title_with_dimensions(self):
+        """“2024级·联考·月考·2026-10-10”式完整标识（缺项自动跳过）"""
+        parts = [self.grade, self.kind_label(), self.stage_label()]
+        if self.exam_date:
+            parts.append(self.exam_date.strftime('%Y-%m-%d'))
+        return '·'.join(p for p in parts if p)
 
     def get_config(self):
         try:
@@ -213,13 +257,18 @@ class ExamScore(db.Model):
     student_name = db.Column(db.String(50))                 # 姓名快照
     grade = db.Column(db.String(10))
     class_name = db.Column(db.String(10))                   # 班级快照（换班不影响历史）
+    # v1.19.0 考号快照（联考等第三方编排的号，第三方未给时为空）
+    exam_no = db.Column(db.String(20))
     # v1.18.8.0 班型快照（强基班/卓越班…）：导入时取自班型设置，使去差均分等分析
     # 永远用「考试当时」的班型；此前实时读 ClassProfile，班型一改历史全部失真
     class_type = db.Column(db.String(20))
     direction = db.Column(db.String(4))                     # 物理/历史 快照
     subject_selection = db.Column(db.String(10))            # 选科组合快照
     subject = db.Column(db.String(10), nullable=False)      # 9 科之一 或 总分
+    # v1.19.0 score=本场口径分（赋分优先；无赋分时就是原始分），划线/排名/分析均用它
     score = db.Column(db.Float)                             # NULL=无成绩
+    # v1.19.0 原始分：仅在“赋分与原始两者都给”时填入，供查看原始分，不参与排名
+    raw_score = db.Column(db.Float)
     rank_class = db.Column(db.Integer)                      # 班排名（同方向）
     rank_dir = db.Column(db.Integer)                        # 方向排名
     move_rank = db.Column(db.Integer)                       # 仅总分行：进退步
@@ -231,6 +280,8 @@ class ExamScore(db.Model):
         db.Index('idx_scores_exam_subject_class', 'exam_id', 'subject', 'class_name'),
         db.Index('idx_scores_exam_class_subject', 'exam_id', 'class_name', 'subject'),
         db.Index('idx_scores_exam_stu', 'exam_id', 'student_no'),
+        # v1.19.0 考号查询（准考证/考场表回溯）
+        db.Index('idx_scores_exam_no', 'exam_id', 'exam_no'),
         # v1.13.2 性能：学生维度查询（查该生全部总分考试，不带 exam_id）此前全表扫描
         # 31 万行；覆盖索引 (student_no, subject, exam_id) 让查询只走索引
         db.Index('idx_scores_stu_subject_exam', 'student_no', 'subject', 'exam_id'),
