@@ -67,19 +67,13 @@ def academic_home():
         entry_q = apply_academic_scope(entry_q, current_user, ScheduleEntry)
         class_q = db.session.query(ScheduleEntry.grade, ScheduleEntry.class_name).filter(
             ScheduleEntry.term_schedule_id == ts.id,
-<<<<<<< HEAD
             ScheduleEntry.is_deleted.is_(False))
         class_q = apply_academic_scope(class_q, current_user,
                                        ScheduleEntry).distinct()
         class_rows = class_q.all()
         timetable['entries'] = _count(entry_q)
         timetable['classes'] = len([r for r in class_rows if r[1]])
-        # v1.18.8.0 审核（🟡-1）：原实现用 _count(聚合查询) 会对“已聚合的 1 行”再 .count()，
-=======
-            ScheduleEntry.is_deleted.is_(False)).distinct().all()
-        timetable['classes'] = len([r for r in rows if r[1]])
         # v1.18.9.1 审核（🟡-1）：原实现用 _count(聚合查询) 会对“已聚合的 1 行”再 .count()，
->>>>>>> origin/master
         # 结果恒为 1；改为 .scalar() 取 distinct teacher_uid 真实去重数。
         try:
             teacher_q = db.session.query(
