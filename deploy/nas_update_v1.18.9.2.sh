@@ -44,18 +44,20 @@ echo "[1/9] 备份容器内代码 → code_backup_v11892_$TS"
 docker cp "$CT":/app "$DIR/code_backup_v11892_$TS" || fail "代码备份失败"
 du -sh "$DIR/code_backup_v11892_$TS" 2>/dev/null
 
-echo "[2/9] 备份数据目录 → stulink-data-backup-v11892-$TS"
-cp -a "$DATA" "$DIR/stulink-data-backup-v11892-$TS" || fail "数据备份失败"
-du -sh "$DIR/stulink-data-backup-v11892-$TS" 2>/dev/null
-
-echo "[3/9] 解包新代码"
+echo "[2/9] 解包新代码"
 rm -rf "$WORK"; mkdir -p "$WORK"
 tar -xzf "$PKG" -C "$WORK" || fail "解包失败"
 ls "$WORK" | head -n 6
 
-echo "[4/9] 停止应用容器（迁移期间必须停应用）"
+echo "[3/9] 停止应用容器（迁移期间必须停应用）"
 docker stop "$CT" >/dev/null || fail "停止容器失败"
 echo "      stopped"
+
+echo "[4/9] 备份数据目录 → stulink-data-backup-v11892-$TS"
+# 必须放在停容器之后：SQLite 开启 WAL 后，运行中 cp -a 可能拿到主库与 -wal 不一致的
+# 快照（回滚时数据缺损）。停容器后主库/-wal/-shm 一起复制即为一致快照。
+cp -a "$DATA" "$DIR/stulink-data-backup-v11892-$TS" || fail "数据备份失败"
+du -sh "$DIR/stulink-data-backup-v11892-$TS" 2>/dev/null
 
 echo "[5/9] 复制新代码进容器 /app（容器已停，docker cp 依然可用）"
 docker cp "$WORK/." "$CT":/app/ || fail "复制代码失败"

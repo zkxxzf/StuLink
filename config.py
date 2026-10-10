@@ -67,12 +67,14 @@ class Config:
     CACHE_DEFAULT_TIMEOUT = 300  # 5分钟缓存
     
     # SQLAlchemy 优化配置
-    # connect_args.timeout=15：SQLite  busy 等待 15s（多线程写入时避免立即报 database is locked）
+    # busy 等待：真正生效的是 app/__init__.py 连接事件里的 `PRAGMA busy_timeout=5000`（5s），
+    # 它以 PRAGMA 覆盖本项的 connect_args.timeout。两处数字保持一致，避免"文档写 15s、
+    # 实际 5s"的漂移（2026-10-10 实测发现并修正）。
     SQLALCHEMY_ENGINE_OPTIONS = {
         'pool_size': 10,
         'pool_recycle': 3600,
         'pool_pre_ping': True,
-        'connect_args': {'timeout': 15},
+        'connect_args': {'timeout': 5},
     }
 
     # SQLite WAL 开关：默认关闭。
@@ -80,6 +82,12 @@ class Config:
     # -wal/-shm 伴生文件可能被同步工具锁定或半同步，存在损坏数据库的真实风险。
     # 如需开启（写入并发高的部署环境）：设置环境变量 STULINK_ENABLE_WAL=1 后重启，
     # 并确认 data 目录不在同步范围内或同步工具已排除 *.db-wal / *.db-shm。
+    # ⚠️ 两点生产实测结论（2026-10-10）：
+    #   1) journal_mode=WAL 会写进库文件头、**持久生效**，本开关为 0 也不会被改回 delete。
+    #      因此也可不开环境变量，直接对数据目录里的 *.db 执行 `PRAGMA journal_mode=WAL`。
+    #   2) WAL 库**无法在只读挂载下打开**（读取也需要写 -shm，实测报
+    #      "unable to open database file"）。alumni 容器以 :ro 挂载同一 data 目录，
+    #      故 history.db 必须保持非 WAL。
     SQLITE_ENABLE_WAL = os.environ.get('STULINK_ENABLE_WAL', '0').strip() == '1'
 
     # 学校名称：成绩证明等对外文书抬头
