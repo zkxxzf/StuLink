@@ -1,4 +1,4 @@
-# StuLink v1.18.9.1 2026-10-10
+# StuLink v1.18.9.2 2026-10-10
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 """请求级审计兜底网（after_request）。
 

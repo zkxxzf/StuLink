@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-# StuLink v1.18.9.1 2026-10-10
+# StuLink v1.18.9.2 2026-10-10
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 """从旧成绩 Excel 回填「考试当时任课快照」（t5，幂等 + dry-run）
 
@@ -34,7 +34,7 @@ from app.modules.grades.utils import normalize_class_name          # noqa: E402
 D24 = os.environ.get('STULINK_EXCEL_DIR') or r'd:\Users\lenovo\Desktop\2024级历次考试成绩'
 SUBJ_ORDER = ['语文', '数学', '英语', '物理', '化学', '生物', '政治', '历史', '地理']
 SKIP_SUBJ = {'总分', '合计', '平均分', '人数', ''}
-# v1.18.9.1 班主任一并快照（与任课同表，伪科目名 '班主任'）
+# v1.18.9.2 班主任一并快照（与任课同表，伪科目名 '班主任'）
 HEAD_SUBJECT = '班主任'
 # 格式 B 里「总分」列下写的就是班主任（已验证：202503 物理 03班 总分=王金仁，
 # 与当前库 03班 班主任=王金仁、郃文哲 吻合；202409 任课表也有独立「班主任」列）

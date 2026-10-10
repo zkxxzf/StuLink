@@ -3,7 +3,7 @@
 {% block content %}
 <div class="d-flex justify-content-between align-items-center mb-2 flex-wrap gap-2">
     <div>
-        {# v1.18.9.1：考务已并入考试管理，面包屑直接返回考试列表 #}
+        {# v1.18.9.2：考务已并入考试管理，面包屑直接返回考试列表 #}
         <a href="{{ url_for('grades.exams_list') }}" class="text-decoration-none text-muted small">
             <i class="bi bi-arrow-left"></i> 返回考试管理</a>
         <h5 class="mb-0 mt-1"><i class="bi bi-clipboard-check"></i> {{ affair.name }}
@@ -66,7 +66,7 @@
     <!-- ===== 步骤① 学生名单 ===== -->
     <div class="tab-pane fade show active" id="t1">
         {# v1.12.1 学生名单改为从学生库同步导入，不再走 Excel 重复导入；新增学生可直接写入学籍库 #}
-        {# v1.18.9.1 取消「同时移除学籍已删的学生」复选框：无班级/已转出/已毕业学生一律不进入成绩模块，且同步时默认自动剔除 #}
+        {# v1.18.9.2 取消「同时移除学籍已删的学生」复选框：无班级/已转出/已毕业学生一律不进入成绩模块，且同步时默认自动剔除 #}
         <div class="d-flex gap-2 mb-2 flex-wrap align-items-center">
             <button class="btn btn-primary btn-sm" onclick="syncStudents()">
                 <i class="bi bi-cloud-download"></i> 从学生库导入</button>
@@ -430,7 +430,7 @@ if(location.hash){
 }
 
 // v1.12.1 学生名单从学籍库同步导入（增量：新增+刷新基本信息）
-// v1.18.9.1 取消 remove_missing 参数：无班级/已转出/已毕业学生一律不进入成绩模块，
+// v1.18.9.2 取消 remove_missing 参数：无班级/已转出/已毕业学生一律不进入成绩模块，
 // 名单中不再符合条件的学生（学籍已删等）由服务端默认自动剔除。
 function syncStudents(){
     var fd = new FormData();

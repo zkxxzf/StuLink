@@ -1,4 +1,4 @@
-# StuLink v1.18.9.1 2026-10-10
+# StuLink v1.18.9.2 2026-10-10
 # 分层模板管理：自定义模板 + 考试与模板绑定
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 from flask import render_template, request, jsonify, abort
@@ -12,7 +12,7 @@ from app.modules.grades import bp
 from app.utils.decorators import perm_required
 
 # 内置模板：首次访问时自动写入（幂等），保证「四层 / 默认模板」一直在
-# v1.18.9.1 用户口径：默认模板改为 985线 / 211线 / 特控线 / 本科线 四层，
+# v1.18.9.2 用户口径：默认模板改为 985线 / 211线 / 特控线 / 本科线 四层，
 # 低于本科线即「未上线」（不单列一层，由“不落任何层”自然得出）。
 BUILTIN_LAYERS_NAME = '默认模板'      # 默认模板名（内置不可删）
 BUILTIN_TEMPLATES = [
@@ -62,7 +62,7 @@ def ensure_builtin_templates():
                            sort_order=t['sort_order'])
         obj.set_layers(t['layers'])
         db.session.add(obj)
-    # v1.18.9.1 修正 bug：历史上给 is_builtin 加字段时，迁移把已有行全标成了内置，
+    # v1.18.9.2 修正 bug：历史上给 is_builtin 加字段时，迁移把已有行全标成了内置，
     # 导致用户手工建的模板也没有删除按钮。内置与否以**名字**为唯一依据：
     # 不在规范定义（含旧内置名）里的-list 全部归为可删。
     builtin_names = {t['name'] for t in BUILTIN_TEMPLATES} | set(LEGACY_RENAME)

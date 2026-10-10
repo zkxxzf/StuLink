@@ -1,4 +1,4 @@
-# StuLink v1.18.9.1 2026-10-10
+# StuLink v1.18.9.2 2026-10-10
 # 成绩管理与可视化分析系统 模块入口（单蓝图多模块注册，url_prefix=/grades）
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 from flask import Blueprint

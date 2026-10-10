@@ -1,4 +1,4 @@
-# StuLink v1.18.9.1 2026-10-10
+# StuLink v1.18.9.2 2026-10-10
 # 成绩导入服务：Excel 解析（模板 A/B 识别 / 年级列校验 / 学号匹配主库 / 分批行集规范化）
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 import openpyxl
@@ -268,7 +268,7 @@ def _attach_student_info(exam, rows):
             for s in Student.query.filter(
                     db.func.cast(Student.student_number, db.Integer).in_(ints)).all():
                 stu_map.setdefault(_norm_no(s.student_number), s)
-    # 该年级班型方向（兜底）与班型（v1.18.9.1 快照）
+    # 该年级班型方向（兜底）与班型（v1.18.9.2 快照）
     cp_map = {}
     ct_map = {}
     try:
@@ -290,14 +290,14 @@ def _attach_student_info(exam, rows):
         # 修复：学号以主库原值为准（归一化仅用于匹配），保证成绩行与主库键一致
         r['no'] = stu.student_number
         r['grade'] = stu.grade
-        # v1.18.9.1 班级以 Excel「班级」列为准（= 考试当时），无法识别才回落主库当前值；
+        # v1.18.9.2 班级以 Excel「班级」列为准（= 考试当时），无法识别才回落主库当前值；
         # 否则拖到分班后才补导的历史考试会被记成新班级（换班后历史失真）
         _excel_cls = normalize_class_name(r.get('class_name'))
         r['class_name'] = _excel_cls or stu.class_name
         r['class_src'] = 'excel' if _excel_cls else 'db'
         r['subject_selection'] = stu.subject_selection or ''
         r['enrollment_status'] = stu.enrollment_status or ''
-        # v1.18.9.1 班型快照（强基班/卓越班…），供去差均分等分析用「当时班型」
+        # v1.18.9.2 班型快照（强基班/卓越班…），供去差均分等分析用「当时班型」
         r['class_type'] = ct_map.get(r['class_name'], '') or ''
         direction = ''
         sel = (r['subject_selection'] or '').strip()
