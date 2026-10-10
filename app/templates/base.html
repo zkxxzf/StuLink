@@ -311,6 +311,28 @@
                     <i class="bi bi-graph-up"></i>成绩分析
                     {% if not EN.steps[3].done %}<span class="badge bg-warning-subtle text-warning-emphasis ms-1">待划线</span>{% endif %}
                 </a>
+                {# v1.19.0 分析子模块：不再占用全局侧栏，收在本场考试的分析段下 #}
+                {% if current_user.has_perm('grades.view') %}
+                <a class="nav-link ps-4 small {% if request.endpoint == 'grades.pivot_page' %}active{% endif %}" data-nav="pivot"
+                   href="{{ url_for('grades.pivot_page') }}?exam={{ EN.exam_id }}">
+                    <i class="bi bi-grid-1x2"></i>成绩分析自由表
+                </a>
+                <a class="nav-link ps-4 small" data-nav="near"
+                   href="{{ url_for('grades.index') }}?exam={{ EN.exam_id }}&tab=near">
+                    <i class="bi bi-bullseye"></i>临界生对比
+                </a>
+                {% endif %}
+                {% if current_user.role == 'admin' or (current_user.permission_group and
+                     current_user.permission_group.scope_type in ('school', 'grade')) %}
+                <a class="nav-link ps-4 small {% if request.endpoint == 'grades.report_page' %}active{% endif %}" data-nav="report"
+                   href="{{ url_for('grades.report_page') }}?exam={{ EN.exam_id }}">
+                    <i class="bi bi-megaphone"></i>成绩汇报区
+                </a>
+                <a class="nav-link ps-4 small {% if request.endpoint == 'grades.global_compare_page' %}active{% endif %}" data-nav="global"
+                   href="{{ url_for('grades.global_compare_page') }}?exam={{ EN.exam_id }}">
+                    <i class="bi bi-person-badge"></i>全局对比
+                </a>
+                {% endif %}
                 <div class="nav-section">本场快捷</div>
                 <a class="nav-link {% if request.endpoint and request.endpoint.startswith('grades.exam_ai_import') %}active{% endif %}" data-nav="ai"
                    href="{{ url_for('grades.exam_ai_import', exam_id=EN.exam_id) }}">
@@ -335,28 +357,7 @@
                href="{{ url_for('grades.exams_list') }}">
                 <i class="bi bi-journals"></i>历次考试
             </a>
-            {% if current_user.has_perm('grades.view') %}
-            <a class="nav-link {% if request.endpoint == 'grades.index' %}active{% endif %}"
-               href="{{ url_for('grades.index') }}">
-                <i class="bi bi-graph-up"></i>成绩分析
-            </a>
-            <a class="nav-link {% if request.endpoint == 'grades.pivot_page' %}active{% endif %}"
-               href="{{ url_for('grades.pivot_page') }}">
-                <i class="bi bi-grid-1x2"></i>成绩分析自由表
-            </a>
-            {% endif %}
-            {# v1.13.0 汇报区入口移入侧边栏（与后端 _guard_report 口径一致：仅管理员/校级/年级长可见） #}
-            {% if current_user.role == 'admin' or (current_user.permission_group and
-                 current_user.permission_group.scope_type in ('school', 'grade')) %}
-            <a class="nav-link {% if request.endpoint == 'grades.report_page' %}active{% endif %}"
-               href="{{ url_for('grades.report_page') }}">
-                <i class="bi bi-megaphone"></i>成绩汇报区
-            </a>
-            <a class="nav-link {% if request.endpoint == 'grades.global_compare_page' %}active{% endif %}"
-               href="{{ url_for('grades.global_compare_page') }}">
-                <i class="bi bi-person-badge"></i>全局对比
-            </a>
-            {% endif %}
+            {# v1.19.0 全局态只放“跨多次考试”的内容；分析类子模块已收进本场考试的分析段 #}
             {% if current_user.has_perm('grades.student_query') %}
             <a class="nav-link {% if request.endpoint == 'grades.student_query_page' %}active{% endif %}"
                href="{{ url_for('grades.student_query_page') }}">

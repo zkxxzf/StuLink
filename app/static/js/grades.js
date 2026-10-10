@@ -92,9 +92,13 @@ function syncExamNav(){
         detail: '/grades/exams/' + eid,
         affair: '/grades/exams/' + eid + '/affair',
         import: '/grades/exams/' + eid + '/import',
-        analysis: '/grades/?exam=' + eid,
+        analysis: '/grades/analysis?exam=' + eid,
         ai: '/grades/exams/' + eid + '/ai-import',
-        bands: '/grades/exams/' + eid + '/bands'
+        bands: '/grades/exams/' + eid + '/bands',
+        pivot: '/grades/pivot?exam=' + eid,
+        near: '/grades/analysis?exam=' + eid + '&tab=near',
+        report: '/grades/report?exam=' + eid,
+        global: '/grades/global-compare?exam=' + eid
     };
     Object.keys(urls).forEach(function(k){
         $nav.find('a[data-nav="' + k + '"]').attr('href', urls[k]);
