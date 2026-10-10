@@ -248,6 +248,15 @@ def _exam_page_rows(exam_id, page, size, class_name=None):
             d['rank'] = r.rank_dir
             d['rank_class'] = r.rank_class
             d['move'] = r.move_rank
+            # v1.19.0 身份字段以「总分行」为准：个别历史数据的**科目行** class_name
+            # 快照存在漂移（同一学号各科目行分属不同班级），若沿用第一行会把班级显示错，
+            # 也让「按班级查看」看起来没生效（计数按总分行已过滤）。总分是本生汇总行，
+            # 与划线/排名/分析口径一致，作为权威来源。
+            d['class_name'] = r.class_name
+            d['direction'] = r.direction
+            d['selection'] = r.subject_selection
+            if r.exam_no:
+                d['exam_no'] = r.exam_no
         else:
             d['subjects'][r.subject] = {
                 'id': r.id, 'score': r.score, 'raw': r.raw_score,   # v1.19.0 原始分
