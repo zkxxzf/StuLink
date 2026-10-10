@@ -185,11 +185,26 @@ def exam_new():
 
 # ==================== 考试详情 / 成绩浏览 / 修正 / 重算 / 删除 ====================
 
+def _exam_roster_subq(exam_id):
+    """本场「学生 → 班级」的权威映射（子查询）。
+
+    取自**科目行**（subject<>'总分'）：生产实测该值与学生名册一致（513/517 = 99.2%），
+    而**总分行**的 class_name 在部分历史考试（1-5、18-20 等，约 90% 学生）存在快照漂移
+    ——同一学号的科目行说 A 班、总分行说 B 班。故本场班级一律以科目行为准：
+    筛选、排序、展示三者同源，避免「按班级查看」筛选对了、显示却串班。
+    """
+    return (db.session.query(ExamScore.student_no.label('sno'),
+                             db.func.min(ExamScore.class_name).label('cls'))
+            .filter(ExamScore.exam_id == exam_id,
+                    ExamScore.subject != TOTAL_SUBJECT)
+            .group_by(ExamScore.student_no).subquery())
+
+
 def _exam_classes(exam_id):
     """本场考试出现过的班级（按班级名排序），供成绩单「按班级查看」筛选。"""
     rows = (db.session.query(ExamScore.class_name)
             .filter(ExamScore.exam_id == exam_id,
-                    ExamScore.subject == TOTAL_SUBJECT,
+                    ExamScore.subject != TOTAL_SUBJECT,
                     ExamScore.class_name.isnot(None),
                     ExamScore.class_name != '')
             .distinct().all())
@@ -207,9 +222,15 @@ def _exam_page_rows(exam_id, page, size, class_name=None):
 
     class_name（v1.19.0）：按班级查看成绩单，只统计/展示该班学生（None=全部）。
     """
-    q = ExamScore.query.filter_by(exam_id=exam_id, subject=TOTAL_SUBJECT)
+    # 班级取自科目行（见 _exam_roster_subq 说明），筛选/排序与展示同源
+    cls_sub = _exam_roster_subq(exam_id)
+    cls_expr = db.func.coalesce(cls_sub.c.cls, ExamScore.class_name)
+    q = (db.session.query(ExamScore)
+         .outerjoin(cls_sub, cls_sub.c.sno == ExamScore.student_no)
+         .filter(ExamScore.exam_id == exam_id,
+                 ExamScore.subject == TOTAL_SUBJECT))
     if class_name:
-        q = q.filter(ExamScore.class_name == class_name)
+        q = q.filter(cls_expr == class_name)
     total = q.count()
     if total == 0:
         return [], 1, 0, 0
@@ -218,8 +239,7 @@ def _exam_page_rows(exam_id, page, size, class_name=None):
     total_pages = (total + size - 1) // size
     if page > total_pages:
         page = total_pages
-    meta = (q.order_by(ExamScore.class_name,
-                       db.func.coalesce(ExamScore.rank_dir, 99999))
+    meta = (q.order_by(cls_expr, db.func.coalesce(ExamScore.rank_dir, 99999))
             .limit(size).offset((page - 1) * size).all())
     nos = [r.student_no for r in meta]
     if not nos:
@@ -248,21 +268,24 @@ def _exam_page_rows(exam_id, page, size, class_name=None):
             d['rank'] = r.rank_dir
             d['rank_class'] = r.rank_class
             d['move'] = r.move_rank
-            # v1.19.0 身份字段以「总分行」为准：个别历史数据的**科目行** class_name
-            # 快照存在漂移（同一学号各科目行分属不同班级），若沿用第一行会把班级显示错，
-            # 也让「按班级查看」看起来没生效（计数按总分行已过滤）。总分是本生汇总行，
-            # 与划线/排名/分析口径一致，作为权威来源。
-            d['class_name'] = r.class_name
-            d['direction'] = r.direction
-            d['selection'] = r.subject_selection
-            if r.exam_no:
-                d['exam_no'] = r.exam_no
+            # 注意：**不用**总分行的 class_name/direction/selection 覆盖身份字段——
+            # 部分历史考试（1-5、18-20 等）总分行的 class_name 存在快照漂移
+            # （与本人科目行、学生名册都不符，约 90% 学生命中）。身份以此处的科目行为准。
         else:
             d['subjects'][r.subject] = {
                 'id': r.id, 'score': r.score, 'raw': r.raw_score,   # v1.19.0 原始分
                 'rank': r.rank_dir,
                 'rank_class': r.rank_class,
             }
+            # v1.19.0 身份字段以「科目行」为准（与 _exam_roster_subq 筛选口径一致）
+            if r.class_name:
+                d['class_name'] = r.class_name
+            if r.direction:
+                d['direction'] = r.direction
+            if r.subject_selection:
+                d['selection'] = r.subject_selection
+            if r.exam_no:
+                d['exam_no'] = r.exam_no
     for d in data.values():
         d['unselected'] = unselected_subjects(d.get('selection'), d.get('direction'))
         # v1.18.9.2 只对“以前在学校、现在人不在学校”的学籍状态给提示（比对当前学生表）；
