@@ -1,35 +1,35 @@
 #!/bin/bash
-# StuLink v1.18.9.0 轻量部署脚本（在 NAS 上执行）
+# StuLink v1.18.9.1 轻量部署脚本（在 NAS 上执行）
 #
 # 用法（本地机器执行，会提示输入 NAS 的 sudo 密码一次）：
-#   ssh -t 17752560383@10.193.191.210 "sudo -v && bash -s" < deploy/nas_update_v1.18.9.0.sh
+#   ssh -t 17752560383@10.193.191.210 "sudo -v && bash -s" < deploy/nas_update_v1.18.9.1.sh
 #
-# 前置：代码包已上传到 /volume1/docker/stulink/_v11890.tar.gz（MD5 b8735374a9870861822da8568d838671）
+# 前置：代码包已上传到 /volume1/docker/stulink/_v11891.tar.gz（MD5 f0ef6e796fe24ce8d432393d0e1ffe37）
 # 流程：备份代码 → 备份数据 → 解包 → docker cp 进容器 → 容器内跑迁移 → 重启 → 验证
 
 set -u
 DIR=/volume1/docker/stulink
 CT=stulink
-PKG="$DIR/_v11890.tar.gz"
+PKG="$DIR/_v11891.tar.gz"
 TS=$(date +%Y%m%d_%H%M%S)
-WORK="$DIR/_unpack_v11890_$TS"
+WORK="$DIR/_unpack_v11891_$TS"
 
-echo "==================== StuLink v1.18.9.0 部署开始 ===================="
+echo "==================== StuLink v1.18.9.1 部署开始 ===================="
 echo "[0/7] 校验代码包"
 if [ ! -f "$PKG" ]; then echo "!! 找不到 $PKG"; exit 1; fi
 md5sum "$PKG"
-EXPECT=b8735374a9870861822da8568d838671
+EXPECT=f0ef6e796fe24ce8d432393d0e1ffe37
 GOT=$(md5sum "$PKG" | awk '{print $1}')
 if [ "$GOT" != "$EXPECT" ]; then echo "!! MD5 不匹配（期望 $EXPECT）"; exit 1; fi
 echo "      MD5 OK"
 
-echo "[1/7] 备份当前容器内代码 → code_backup_v11890_$TS"
-sudo docker cp "$CT":/app "$DIR/code_backup_v11890_$TS" || { echo "!! 代码备份失败，中止"; exit 1; }
-du -sh "$DIR/code_backup_v11890_$TS" 2>/dev/null
+echo "[1/7] 备份当前容器内代码 → code_backup_v11891_$TS"
+sudo docker cp "$CT":/app "$DIR/code_backup_v11891_$TS" || { echo "!! 代码备份失败，中止"; exit 1; }
+du -sh "$DIR/code_backup_v11891_$TS" 2>/dev/null
 
-echo "[2/7] 备份数据目录 → stulink-data-backup-v11890-$TS"
-cp -a "$DIR/stulink-data" "$DIR/stulink-data-backup-v11890-$TS" || { echo "!! 数据备份失败，中止"; exit 1; }
-du -sh "$DIR/stulink-data-backup-v11890-$TS" 2>/dev/null
+echo "[2/7] 备份数据目录 → stulink-data-backup-v11891-$TS"
+cp -a "$DIR/stulink-data" "$DIR/stulink-data-backup-v11891-$TS" || { echo "!! 数据备份失败，中止"; exit 1; }
+du -sh "$DIR/stulink-data-backup-v11891-$TS" 2>/dev/null
 
 echo "[3/7] 解包新代码"
 rm -rf "$WORK"; mkdir -p "$WORK"
@@ -71,6 +71,6 @@ PY
 
 echo "清理临时解包目录"
 rm -rf "$WORK"
-echo "==================== 部署完成 v1.18.9.0 ===================="
+echo "==================== 部署完成 v1.18.9.1 ===================="
 echo "回滚方式（如需）："
-echo "  sudo docker cp $DIR/code_backup_v11890_$TS/. $CT:/app/ && sudo docker restart $CT"
+echo "  sudo docker cp $DIR/code_backup_v11891_$TS/. $CT:/app/ && sudo docker restart $CT"
