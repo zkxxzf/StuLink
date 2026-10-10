@@ -1,4 +1,4 @@
-# StuLink v1.18.8.0 2026-10-09
+# StuLink v1.18.9.0 2026-10-09
 # 成绩汇报区 · 教师排名引擎：同方向同科目全体任课教师按指标聚合后排名
 # 口径：同一位老师教多个班时，所教学生合并计算（率/去差均分才公平）；
 #       去差仍按学生所在行政班的班型规则剔除；并列同名次，竞赛排名（1,2,2,4）。
@@ -32,7 +32,7 @@ def _aggregate(data, direction, rows, layer_name):
     total_lower = total_line[1] if total_line else None
     trimmed = rs.trimmed_nos(data)
     # 班级×科目 → 教师（表上有唯一约束，一班一科一师）
-    # v1.18.8.0 优先读**本场考试的任课快照**（考试当时），而不是当前映射：
+    # v1.18.9.0 优先读**本场考试的任课快照**（考试当时），而不是当前映射：
     # 教师调动/重新分班后，历史考试仍归属到当时的教师名下
     from app.modules.grades.services import teacher_snapshot_service as _tss
     teacher_of = _tss.teacher_user_map(data.exam.id, grade=data.exam.grade)

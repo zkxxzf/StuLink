@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-# StuLink v1.18.8.0 2026-10-09
+# StuLink v1.18.9.0 2026-10-09
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 """历史「高一选科分班」记录回填（幂等，默认 dry-run）
 
