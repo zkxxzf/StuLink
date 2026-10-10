@@ -93,6 +93,14 @@ if __name__ == '__main__':
         lan = _lan_ip()
         lan_url = f'http://{lan}:5000' if lan else 'http://本机IP:5000（未能自动获取，请在网络设置中查看）'
         _print_keep_running_notice(f'http://localhost:5000  或  {lan_url}')
-        serve(app, host='0.0.0.0', port=5000)
+        # 并发调优：waitress 默认只开 4 个线程，成绩分析各 tab / 全局对比（班级×学科宽表）
+        # / Excel 导入导出 / AI 分析这类慢请求会长时间占住线程，第 5 个并发请求就开始排队
+        # （表现为后台反复刷 “WARNING:waitress.queue:Task queue depth is N”、页面转圈久）。
+        # Web 请求多为 I/O 等待，16 足够；不建议再调高——底层是 SQLite，写操作整库串行，
+        # 线程过多只会把等待从“网络层”挪到“数据库锁”上，反而容易触发 database is locked。
+        # 可用环境变量临时覆盖（本地压测/特殊场景）。
+        serve(app, host='0.0.0.0', port=5000,
+              threads=int(os.environ.get('STULINK_THREADS', '16')),
+              channel_timeout=int(os.environ.get('STULINK_CHANNEL_TIMEOUT', '120')))
 
 
