@@ -167,9 +167,46 @@ def _exam_page_rows(exam_id, page, size):
                 'id': r.id, 'score': r.score, 'rank': r.rank_dir,
                 'rank_class': r.rank_class,
             }
+    for d in data.values():
+        d['unselected'] = unselected_subjects(d.get('selection'), d.get('direction'))
+        # v1.18.8.0 只对“以前在学校、现在人不在学校”的学籍状态给提示（比对当前学生表）；
+        # 分配生/一批一志/一批二志/补录/借读/借读后学籍转入/复学/休学 等一律不显示
+        d['status_badge'] = OFF_SCHOOL_BADGE.get((d.get('status') or '').strip(), '')
     # 严格按分页顺序（nos）输出，保证翻页稳定
     students = [data[n] for n in nos if n in data]
     return students, page, total_pages, total
+
+
+# 选科简称 → 科目名（判断“未选”还是“缺考”用）
+_SUBJ_SHORT = {'物理': '物', '化学': '化', '生物': '生',
+               '政治': '政', '历史': '史', '地理': '地'}
+
+# v1.18.8.0 “人现在不在学校”的学籍状态 → 成绩单上的短标签
+# 用户口径：只展示“已转走 / 离校”这类情况，其他学籍状态不提示
+OFF_SCHOOL_BADGE = {
+    '学籍已转出': '转出',
+    '在籍不在校': '离校',
+    '借读又走了': '离校',
+}
+
+
+def unselected_subjects(selection, direction):
+    """返回该生“**未选**”的科目集合（与“缺考”区分）。
+
+    用户口径（2026-10-10）：选科为「物化政」的学生，历史/生物/地理应显示「未选」，
+    只有所选科目（含语数外）确实没分数时才显示「缺」。
+    高一全科 / 不分科 / 选科为空 → 不存在“未选”概念，全部按缺考处理。
+    方向科（物理或历史）总是被选的，按 direction 兼容一下。
+    """
+    sel = (selection or '').strip()
+    if not sel or sel in ('全科', '不分科'):
+        return set()
+    out = set()
+    for subj, ch in _SUBJ_SHORT.items():
+        if ch in sel or subj == (direction or '').strip():
+            continue
+        out.add(subj)
+    return out
 
 
 @bp.route('/exams/<int:exam_id>')
