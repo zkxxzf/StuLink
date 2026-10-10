@@ -118,16 +118,43 @@
                     0
                 </span>
             </a>
-            <span class="text-light me-3 d-none d-md-inline" style="font-size:14px;">
-                <i class="bi bi-person-circle"></i> {{ current_user.real_name }}
-                <span class="badge bg-primary badge-role ms-1">{{ current_user.display_role }}</span>
-            </span>
-            <a href="{{ url_for('auth.change_password') }}" class="btn btn-sm btn-outline-light me-2" title="改密码">
-                <i class="bi bi-key"></i> <span class="d-none d-md-inline">改密码</span>
-            </a>
-            <a href="{{ url_for('auth.logout') }}" class="btn btn-sm btn-outline-danger" title="退出">
-                <i class="bi bi-box-arrow-right"></i> <span class="d-none d-md-inline">退出</span>
-            </a>
+            {# v1.19.0 右上角统一入口：点用户名 → 用户设置 / 改密码 / AI 配置 / 退出 #}
+            <div class="dropdown me-2">
+                <button class="btn btn-sm btn-outline-light dropdown-toggle" type="button"
+                        id="userMenuBtn" data-bs-toggle="dropdown" aria-expanded="false">
+                    <i class="bi bi-person-circle"></i> {{ current_user.real_name }}
+                    <span class="badge bg-primary badge-role ms-1 d-none d-md-inline">{{ current_user.display_role }}</span>
+                </button>
+                <ul class="dropdown-menu dropdown-menu-end shadow" aria-labelledby="userMenuBtn"
+                    style="min-width:230px;">
+                    <li class="px-3 py-2 small text-muted">
+                        {{ current_user.username }} · {{ current_user.display_role }}
+                    </li>
+                    <li><hr class="dropdown-divider my-1"></li>
+                    <li>
+                        <a class="dropdown-item" href="{{ url_for('auth.my_settings') }}">
+                            <i class="bi bi-gear"></i> 用户设置
+                        </a>
+                    </li>
+                    <li>
+                        <a class="dropdown-item" href="{{ url_for('auth.my_settings') }}#ai">
+                            <i class="bi bi-robot"></i> 我的 AI 配置
+                            <span class="badge bg-light text-muted border ms-1" id="navAiState">未配置</span>
+                        </a>
+                    </li>
+                    <li>
+                        <a class="dropdown-item" href="{{ url_for('auth.change_password') }}">
+                            <i class="bi bi-key"></i> 修改密码
+                        </a>
+                    </li>
+                    <li><hr class="dropdown-divider my-1"></li>
+                    <li>
+                        <a class="dropdown-item text-danger" href="{{ url_for('auth.logout') }}">
+                            <i class="bi bi-box-arrow-right"></i> 退出登录
+                        </a>
+                    </li>
+                </ul>
+            </div>
             {% endif %}
         </div>
     </nav>
@@ -236,70 +263,142 @@
             </a>
             {% endif %}
 
-            {# ========= 成绩管理模块侧边栏 ========= #}
-            
+            {# ========= 成绩管理模块侧边栏（v1.19.0 考试上下文驱动） =========
+               全局态：历次考试 + 全局分析入口 + 基础配置（折叠）
+               考试态：切换为本场考试的悬浮流程栏（概览 / 考务 / 导入 / 分析） #}
             {% if request.blueprint == 'grades' %}
+            {% set EN = exam_nav() %}
+            {# 悬浮流程栏：页面滚动时保持在视口内（v1.19.0） #}
+            <style>
+                .exam-flow-nav { position: sticky; top: .5rem; }
+                .exam-flow-nav .nav-link { padding-top: .35rem; padding-bottom: .35rem; }
+            </style>
+            {% if EN %}
+            {# ---------- 考试态：悬浮流程栏 ---------- #}
+            <div class="exam-flow-nav">
+                <a class="nav-link" href="{{ url_for('grades.exams_list') }}">
+                    <i class="bi bi-arrow-left"></i>返回考试列表
+                </a>
+                <div class="nav-section">本场考试</div>
+                <div class="px-3 small text-muted mb-1" title="{{ EN.exam.name }}">
+                    {{ EN.exam.title_with_dimensions() }}
+                </div>
+                <div class="px-3 mb-2 d-flex align-items-center flex-wrap gap-1">
+                    {% for s in EN.steps %}
+                    <span class="badge {{ 'bg-success' if s.done else 'bg-secondary-subtle text-secondary-emphasis' }}"
+                          title="{{ s.label }}{{ '（已完成）' if s.done else '（未完成）' }}">{{ loop.index }}</span>
+                    {% endfor %}
+                    <span class="small text-muted">
+                        {{ EN.steps | selectattr('done') | list | length }}/4 步
+                    </span>
+                </div>
+                <a class="nav-link {% if EN.section == 'overview' %}active{% endif %}" data-nav="detail"
+                   href="{{ url_for('grades.exam_detail', exam_id=EN.exam_id) }}">
+                    <i class="bi bi-journal-text"></i>考试概览·成绩单
+                </a>
+                <a class="nav-link {% if EN.section == 'affair' %}active{% endif %}" data-nav="affair"
+                   href="{{ url_for('grades.exam_affair_go', exam_id=EN.exam_id) }}">
+                    <i class="bi bi-people"></i>考务安排
+                    {% if not EN.steps[1].done %}<span class="badge bg-warning-subtle text-warning-emphasis ms-1">待做</span>{% endif %}
+                </a>
+                <a class="nav-link {% if EN.section == 'import' %}active{% endif %}" data-nav="import"
+                   href="{{ url_for('grades.exam_import', exam_id=EN.exam_id) }}">
+                    <i class="bi bi-upload"></i>成绩导入
+                    {% if not EN.steps[2].done %}<span class="badge bg-warning-subtle text-warning-emphasis ms-1">待做</span>{% endif %}
+                </a>
+                <a class="nav-link {% if EN.section == 'analysis' %}active{% endif %}" data-nav="analysis"
+                   href="{{ url_for('grades.index') }}?exam={{ EN.exam_id }}">
+                    <i class="bi bi-graph-up"></i>成绩分析
+                    {% if not EN.steps[3].done %}<span class="badge bg-warning-subtle text-warning-emphasis ms-1">待划线</span>{% endif %}
+                </a>
+                {# v1.19.0 分析子模块：不再占用全局侧栏，收在本场考试的分析段下 #}
+                {% if current_user.has_perm('grades.view') %}
+                <a class="nav-link ps-4 small {% if request.endpoint == 'grades.pivot_page' %}active{% endif %}" data-nav="pivot"
+                   href="{{ url_for('grades.pivot_page') }}?exam={{ EN.exam_id }}">
+                    <i class="bi bi-grid-1x2"></i>成绩分析自由表
+                </a>
+                <a class="nav-link ps-4 small {% if request.endpoint == 'grades.exam_near_line' %}active{% endif %}" data-nav="near"
+                   href="{{ url_for('grades.exam_near_line', exam_id=EN.exam_id) }}">
+                    <i class="bi bi-bullseye"></i>临界生对比
+                </a>
+                {% endif %}
+                {% if current_user.role == 'admin' or (current_user.permission_group and
+                     current_user.permission_group.scope_type in ('school', 'grade')) %}
+                <a class="nav-link ps-4 small {% if request.endpoint == 'grades.report_page' %}active{% endif %}" data-nav="report"
+                   href="{{ url_for('grades.report_page') }}?exam={{ EN.exam_id }}">
+                    <i class="bi bi-megaphone"></i>成绩汇报区
+                </a>
+                <a class="nav-link ps-4 small {% if request.endpoint == 'grades.global_compare_page' %}active{% endif %}" data-nav="global"
+                   href="{{ url_for('grades.global_compare_page') }}?exam={{ EN.exam_id }}">
+                    <i class="bi bi-person-badge"></i>全局对比
+                </a>
+                {% endif %}
+                <div class="nav-section">本场快捷</div>
+                <a class="nav-link {% if request.endpoint and request.endpoint.startswith('grades.exam_ai_import') %}active{% endif %}" data-nav="ai"
+                   href="{{ url_for('grades.exam_ai_import', exam_id=EN.exam_id) }}">
+                    <i class="bi bi-stars"></i>AI 智能导入
+                </a>
+                <a class="nav-link {% if request.endpoint == 'grades.bands_page' %}active{% endif %}" data-nav="bands"
+                   href="{{ url_for('grades.bands_page', exam_id=EN.exam_id) }}">
+                    <i class="bi bi-bar-chart"></i>划线分层
+                </a>
+                {% if EN.next_step %}
+                <div class="px-3 mt-2 small text-muted">
+                    <i class="bi bi-signpost-2"></i> 下一步：{{ EN.next_step.label }}
+                </div>
+                {% else %}
+                <div class="px-3 mt-2 small text-success"><i class="bi bi-check2-all"></i> 四步已走完</div>
+                {% endif %}
+            </div>
+            {% else %}
+            {# ---------- 全局态：精简菜单 ---------- #}
             <div class="nav-section">成绩管理</div>
-            {% if current_user.has_perm('grades.edit') %}
-            <a class="nav-link {% if request.endpoint in ('grades.exams_list','grades.exam_new','grades.exam_detail','grades.exam_import') or (request.endpoint and request.endpoint.startswith('grades.affair')) %}active{% endif %}"
+            <a class="nav-link {% if request.endpoint in ('grades.exams_list','grades.exam_new') %}active{% endif %}"
                href="{{ url_for('grades.exams_list') }}">
-                <i class="bi bi-journal-text"></i>考试管理
+                <i class="bi bi-journals"></i>历次考试
             </a>
-            {% endif %}
-            {# v1.17.0 考务管理已并入考试管理：统一从考试列表「考务安排」按钮进入，按原流程编排 #}
-            <a class="nav-link {% if request.endpoint == 'grades.index' %}active{% endif %}"
-               href="{{ url_for('grades.index') }}">
-                <i class="bi bi-graph-up"></i>成绩分析
-            </a>
-            {% if current_user.has_perm('grades.view') %}
-            <a class="nav-link {% if request.endpoint == 'grades.pivot_page' %}active{% endif %}"
-               href="{{ url_for('grades.pivot_page') }}">
-                <i class="bi bi-grid-1x2"></i>成绩分析自由表
-            </a>
-            {% endif %}
-            {# v1.13.0 汇报区入口移入侧边栏（与后端 _guard_report 口径一致：仅管理员/校级/年级长可见） #}
-            {% if current_user.role == 'admin' or (current_user.permission_group and
-                 current_user.permission_group.scope_type in ('school', 'grade')) %}
-            <a class="nav-link {% if request.endpoint == 'grades.report_page' %}active{% endif %}"
-               href="{{ url_for('grades.report_page') }}">
-                <i class="bi bi-megaphone"></i>成绩汇报区
-            </a>
-            <a class="nav-link {% if request.endpoint == 'grades.global_compare_page' %}active{% endif %}"
-               href="{{ url_for('grades.global_compare_page') }}">
-                <i class="bi bi-person-badge"></i>全局对比
-            </a>
-            {% endif %}
+            {# v1.19.0 全局态只放“跨多次考试”的内容；分析类子模块已收进本场考试的分析段 #}
             {% if current_user.has_perm('grades.student_query') %}
             <a class="nav-link {% if request.endpoint == 'grades.student_query_page' %}active{% endif %}"
                href="{{ url_for('grades.student_query_page') }}">
                 <i class="bi bi-person-vcard"></i>个人成绩查询
             </a>
             {% endif %}
-            
-            {% if current_user.has_perm('grades.subject_mgmt') %}
-            <a class="nav-link {% if request.endpoint == 'grades.subject_mgmt' %}active{% endif %}"
-               href="{{ url_for('grades.subject_mgmt') }}">
-                <i class="bi bi-bookmark-check"></i>选科维护
-            </a>
-            {% endif %}
-             {% if current_user.has_perm('grades.settings') %}
-            <a class="nav-link {% if request.endpoint == 'grades.band_templates_page' %}active{% endif %}"
-               href="{{ url_for('grades.band_templates_page') }}">
-                <i class="bi bi-collection"></i>分层模板
-            </a>
-            {% endif %}
-            {% if current_user.has_perm('grades.teachers') %}
-            <a class="nav-link {% if request.endpoint in ('grades.teachers_page','grades.teachers_import_page') %}active{% endif %}"
-               href="{{ url_for('grades.teachers_page') }}">
-                <i class="bi bi-person-workspace"></i>任课教师映射
-            </a>
-            {% endif %}
-           
             {% if current_user.has_perm('grades.view') %}
             <a class="nav-link {% if request.endpoint == 'grades.history' %}active{% endif %}"
                href="{{ url_for('grades.history') }}">
                 <i class="bi bi-mortarboard"></i>毕业生成绩（二期）
             </a>
+            {% endif %}
+
+            {# v1.19.0 基础配置：长期基础数据，不属于四段流程，默认折叠 #}
+            {% set _cfg_eps = ('grades.subject_mgmt', 'grades.band_templates_page',
+                               'grades.teachers_page', 'grades.teachers_import_page') %}
+            <a class="nav-link d-flex align-items-center" data-bs-toggle="collapse" href="#navCfg"
+               role="button" aria-expanded="{{ 'true' if request.endpoint in _cfg_eps else 'false' }}">
+                <i class="bi bi-sliders"></i>基础配置
+                <i class="bi bi-chevron-down small ms-auto"></i>
+            </a>
+            <div class="collapse {% if request.endpoint in _cfg_eps %}show{% endif %}" id="navCfg">
+                {% if current_user.has_perm('grades.subject_mgmt') %}
+                <a class="nav-link ps-4 {% if request.endpoint == 'grades.subject_mgmt' %}active{% endif %}"
+                   href="{{ url_for('grades.subject_mgmt') }}">
+                    <i class="bi bi-bookmark-check"></i>选科维护
+                </a>
+                {% endif %}
+                {% if current_user.has_perm('grades.settings') %}
+                <a class="nav-link ps-4 {% if request.endpoint == 'grades.band_templates_page' %}active{% endif %}"
+                   href="{{ url_for('grades.band_templates_page') }}">
+                    <i class="bi bi-collection"></i>分层模板
+                </a>
+                {% endif %}
+                {% if current_user.has_perm('grades.teachers') %}
+                <a class="nav-link ps-4 {% if request.endpoint in ('grades.teachers_page','grades.teachers_import_page') %}active{% endif %}"
+                   href="{{ url_for('grades.teachers_page') }}">
+                    <i class="bi bi-person-workspace"></i>任课教师映射
+                </a>
+                {% endif %}
+            </div>
             {% endif %}
             {% endif %}
 
@@ -483,7 +582,7 @@
 
         {% if current_user.is_authenticated %}
         <footer class="text-center text-muted small mt-4 pt-3 border-top">
-            StuLink v1.18.8.0（2026-10-09） · © 2026 @zkxxzf · 感谢协作开发 @Sakaay
+            StuLink v1.18.9.1（2026-10-09） · © 2026 @zkxxzf · 感谢协作开发 @Sakaay
         </footer>
         {% endif %}
     </div>
@@ -505,6 +604,8 @@
         });
     </script>
     {% if current_user.is_authenticated %}
+    <!-- v1.19.0 浏览器本地 AI 配置（私人 Key 不上服务器）+ 右上角配置状态 -->
+    <script src="{{ su('js/ai_local.js') }}"></script>
     <script>
         // 通知铃铛：轮询未读数量（30秒间隔）
         function updateNotificationBadge() {

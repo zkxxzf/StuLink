@@ -76,16 +76,92 @@ def host_approved(host):
     return host in _builtin_hosts() or host in _explicitly_approved_hosts()
 
 
-def _is_blocked_ip(ip_str):
+def _norm_host(value):
+    """把用户输入的“地址/域名”统一成 host"""
+    v = (value or '').strip()
+    if not v:
+        return ''
+    host = urlparse(v if '//' in v else 'https://' + v).hostname or ''
+    return host.lower()
+
+
+def list_approved_hosts():
+    """管理员显式审批的域名清单（不含内置服务商），供设置页展示"""
+    return sorted(_explicitly_approved_hosts())
+
+
+def builtin_hosts():
+    """内置服务商域名（只读展示用）"""
+    return sorted(_builtin_hosts())
+
+
+def add_approved_host(value):
+    """管理员审批一个域名（写入 data/ai_approved_base_urls.txt，幂等）
+
+    返回 (ok, message)。校验规则与出站守卫一致：必须是合法主机名。
+    """
+    host = _norm_host(value)
+    if not host or '.' not in host or len(host) > 200:
+        return False, '域名格式不正确（示例：api.openai.com 或 https://api.moonshot.cn/v1）'
+    if host in _builtin_hosts():
+        return True, '%s 属内置服务商，本来就允许出站' % host
+    if host in _explicitly_approved_hosts():
+        return True, '%s 已在白名单中' % host
+    try:
+        os.makedirs(os.path.dirname(APPROVED_FILE), exist_ok=True)
+        with open(APPROVED_FILE, 'a', encoding='utf-8') as f:
+            f.write(host + '\n')
+    except OSError as e:
+        return False, '写入白名单文件失败：%s' % e
+    _log.info('AI 出站域名已审批 host=%s', host)
+    return True, '已批准 %s，可直接使用该地址' % host
+
+
+def remove_approved_host(value):
+    """撤销审批（从文件中移除该行）"""
+    host = _norm_host(value)
+    if not host:
+        return False, '域名格式不正确'
+    if not os.path.isfile(APPROVED_FILE):
+        return False, '白名单文件不存在'
+    try:
+        with open(APPROVED_FILE, 'r', encoding='utf-8') as f:
+            lines = f.readlines()
+        kept = [ln for ln in lines if _norm_host(ln) != host]
+        if len(kept) == len(lines):
+            return False, '%s 不在白名单中' % host
+        with open(APPROVED_FILE, 'w', encoding='utf-8') as f:
+            f.writelines(kept)
+    except OSError as e:
+        return False, '更新白名单文件失败：%s' % e
+    _log.info('AI 出站域名已撤销 host=%s', host)
+    return True, '已移除 %s' % host
+
+
+def _is_blocked_ip(ip_str, allow_private=False):
+    """IP 是否禁止出站
+
+    v1.19.0 口径调整（自建 AI 网关场景）：
+      · **链路本地 / 组播 / 保留 / 未指定** —— 任何情况都拦（如 169.254.169.254 云元数据）；
+      · **私网 / 环回**（10.x、192.168.x、127.x…）—— 默认拦；
+        但若该地址已由**管理员显式批准**（allow_private=True，例如局域网内的自建
+        OpenAI 兼容网关），则放行：这是管理员的有意决定，不是越权探测。
+    """
     try:
         ip = ipaddress.ip_address(ip_str)
     except ValueError:
         return True
     if ip.version == 6 and ip.ipv4_mapped is not None:
         ip = ip.ipv4_mapped
-    return (not ip.is_global) or ip.is_private or ip.is_loopback \
-        or ip.is_link_local or ip.is_multicast or ip.is_reserved \
-        or ip.is_unspecified
+    # 永远拦截：链路本地（云元数据）、组播、保留、未指定
+    if ip.is_link_local or ip.is_multicast or ip.is_reserved or ip.is_unspecified:
+        return True
+    if ip.is_loopback:
+        # 环回只允许在“管理员显式批准”时走（自建网关常见 http://127.0.0.1:xxxx）
+        return not allow_private
+    if ip.is_private:
+        return not allow_private
+    return not ip.is_global
 
 
 def assert_outbound_url_allowed(url):
@@ -103,8 +179,10 @@ def assert_outbound_url_allowed(url):
     explicit = host.lower() in _explicitly_approved_hosts()
     if not (host_approved(host)):
         raise ValueError(
-            '接口地址域名未获批准：自定义（OpenAI 兼容）地址需由管理员审批后写入 '
-            'data/ai_approved_base_urls.txt 或环境变量 AI_ALLOWED_BASE_URLS')
+            '接口地址域名未获批准：%s\n'
+            '自定义（OpenAI 兼容）地址需管理员审批。管理员可在「用户设置 → AI 出站域名白名单」'
+            '一键批准，或写入 data/ai_approved_base_urls.txt / 环境变量 AI_ALLOWED_BASE_URLS。'
+            % host)
     if parsed.scheme != 'https' and not explicit:
         raise ValueError('接口地址需使用 https（明文 http 只能用于管理员显式审批的地址）')
 
@@ -115,9 +193,12 @@ def assert_outbound_url_allowed(url):
         raise ValueError('接口地址域名解析失败，请检查地址是否正确')
     for info in infos:
         ip_str = info[4][0]
-        if _is_blocked_ip(ip_str):
+        if _is_blocked_ip(ip_str, allow_private=explicit):
             raise ValueError(
-                f'接口地址解析到内网/保留地址（{ip_str}），已拒绝（防 SSRF）')
+                '接口地址解析到内网/保留地址（%s），已拒绝（防 SSRF）。\n'
+                '如确是局域网内的自建 AI 网关（如 http://10.x.x.x:xxxx/v1），'
+                '可由管理员在「用户设置 → AI 出站域名白名单」中把该地址加入后重试；'
+                '云元数据等链路本地地址永远不允许。' % ip_str)
 
     _log.info('AI 出站请求已放行 host=%s scheme=%s', host, parsed.scheme)
     return host.lower()

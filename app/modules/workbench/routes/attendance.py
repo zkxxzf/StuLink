@@ -1,5 +1,5 @@
 """考勤管理路由"""
-# StuLink v1.18.8.0 2026-10-09：补权限校验与班级归属校验（PR#5 安全审查 S1）
+# StuLink v1.18.9.1 2026-10-10：补权限校验与班级归属校验（PR#5 安全审查 S1）
 from datetime import date
 
 from flask import (Blueprint, render_template, request, jsonify, flash,

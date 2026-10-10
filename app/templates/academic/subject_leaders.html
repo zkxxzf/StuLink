@@ -244,7 +244,7 @@
             TEACHERS = res.data || [];
             var dl = document.getElementById('teacherNameList');
             if (dl) {
-                // v1.18.8.0 审核（🟡-2）：教师名经 innerHTML 注入前转义，防 XSS
+                // v1.18.9.1 审核（🟡-2）：教师名经 innerHTML 注入前转义，防 XSS
                 dl.innerHTML = TEACHERS.map(function (t) {
                     var safe = String(t.name == null ? '' : t.name)
                         .replace(/&/g, '&amp;').replace(/</g, '&lt;')

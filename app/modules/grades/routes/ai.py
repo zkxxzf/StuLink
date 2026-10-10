@@ -1,4 +1,4 @@
-# StuLink v1.18.8.0 2026-10-09
+# StuLink v1.18.9.1 2026-10-10
 # AI 分析：服务商注册表 / 个人与全局 Key 管理 / 连通性测试 / 发送范围预览 /
 #          分析生成 / 报告历史
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
@@ -18,6 +18,34 @@ from app.utils.decorators import perm_required
 from app.utils.helpers import log_operation
 
 MAX_KEY_LEN = 300
+
+
+def _client_ai_cfg():
+    """读取前端**浏览器本地（localStorage）**传来的 AI 配置。
+
+    用户要求：私人 Key 只存本地、**服务器不留存**。故这里只在“当次请求”里
+    透传给调用层，不写库、不记日志。
+    支持两种携带方式：
+      - JSON body: {"ai": {"api_key":…, "base_url":…, "model":…, "provider":…}}
+      - 请求头:    X-AI-Key / X-AI-Base / X-AI-Model / X-AI-Provider
+    多个文件/多次请求各自带各自的，互不影响。
+    """
+    d = request.get_json(silent=True) or {}
+    ai = d.get('ai') if isinstance(d.get('ai'), dict) else {}
+    key = (ai.get('api_key') or request.headers.get('X-AI-Key') or '').strip()
+    if not key:
+        return None
+    return {
+        'api_key': key[:MAX_KEY_LEN],
+        'base_url': (ai.get('base_url') or request.headers.get('X-AI-Base') or '').strip(),
+        'model': (ai.get('model') or request.headers.get('X-AI-Model') or '').strip(),
+        'provider': (ai.get('provider') or request.headers.get('X-AI-Provider') or '').strip(),
+        # v1.19.0 可选：输出上限 / 输入上限 / 思考强度（本机设置，服务器不落库）
+        'max_tokens': (ai.get('max_tokens') or request.headers.get('X-AI-Max-Tokens') or ''),
+        'max_input': (ai.get('max_input') or request.headers.get('X-AI-Max-Input') or ''),
+        'reasoning_effort': (ai.get('reasoning_effort')
+                             or request.headers.get('X-AI-Reasoning') or ''),
+    }
 
 
 def _sse(obj):
@@ -284,7 +312,7 @@ def ai_scope():
         abort(403)
     payload = ai_service.build_payload(current_user, exam)
     try:
-        cfg = ai_service.resolve_key(current_user)
+        cfg = ai_service.resolve_key(current_user, _client_ai_cfg())
     except ValueError as e:
         # 本地解密异常：明确提示，避免误判为「Key 无效」
         return jsonify(success=False, message=str(e)), 400
@@ -319,7 +347,7 @@ def ai_analyze():
     except PermissionError:
         abort(403)
     try:
-        cfg = ai_service.resolve_key(current_user)
+        cfg = ai_service.resolve_key(current_user, _client_ai_cfg())
     except ValueError as e:
         return jsonify(success=False, message=str(e)), 400
     if not cfg:
@@ -423,7 +451,7 @@ def ai_chat():
     except PermissionError:
         abort(403)
     try:
-        cfg = ai_service.resolve_key(current_user)
+        cfg = ai_service.resolve_key(current_user, _client_ai_cfg())
     except ValueError as e:
         return jsonify(success=False, message=str(e)), 400
     if not cfg:

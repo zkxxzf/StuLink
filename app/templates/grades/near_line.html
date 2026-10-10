@@ -1,0 +1,181 @@
+{% extends "base.html" %}
+{% block title %}临界生对比 - {{ exam.name }}{% endblock %}
+{% block content %}
+<div class="d-flex align-items-center mb-3 flex-wrap gap-2">
+    <h5 class="mb-0"><i class="bi bi-bullseye"></i> 临界生对比</h5>
+    <span class="text-muted small">{{ exam.title_with_dimensions() }}</span>
+    {% if not error %}
+    <span class="badge bg-primary ms-1">{{ data.direction }} · {{ data.layer }}线 {{ data.line }}</span>
+    {% endif %}
+</div>
+
+{# 参数：线上/线下分数阈值（默认 10 / 20，上限 {{ cfg_max }}） #}
+<form class="card mb-3" method="get">
+    <div class="card-body py-2">
+        <div class="row g-2 align-items-end">
+            <div class="col-auto">
+                <label class="form-label small mb-1">方向</label>
+                <select name="direction" class="form-select form-select-sm">
+                    <option value="">自动（物理优先）</option>
+                    <option value="物理" {% if direction == '物理' %}selected{% endif %}>物理</option>
+                    <option value="历史" {% if direction == '历史' %}selected{% endif %}>历史</option>
+                </select>
+            </div>
+            <div class="col-auto">
+                <label class="form-label small mb-1">层级（总分线）</label>
+                <select name="layer" class="form-select form-select-sm" style="min-width:150px;">
+                    <option value="">默认（最高层级）</option>
+                    {% for l in layers %}
+                    <option value="{{ l }}" {% if l == layer %}selected{% endif %}>{{ l }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="col-auto">
+                <label class="form-label small mb-1">线上 N 分内（可能掉下）</label>
+                <input type="number" name="above" class="form-control form-control-sm" style="width:110px;"
+                       min="0" max="{{ cfg_max }}" value="{{ above }}">
+            </div>
+            <div class="col-auto">
+                <label class="form-label small mb-1">线下 M 分内（可能冲上）</label>
+                <input type="number" name="below" class="form-control form-control-sm" style="width:110px;"
+                       min="0" max="{{ cfg_max }}" value="{{ below }}">
+            </div>
+            <div class="col-auto">
+                <button class="btn btn-primary btn-sm"><i class="bi bi-funnel"></i> 应用</button>
+            </div>
+        </div>
+    </div>
+</form>
+
+{% if error %}
+<div class="alert alert-warning">
+    <i class="bi bi-exclamation-triangle"></i> {{ error }}
+</div>
+{% else %}
+<div class="row g-2 mb-3">
+    <div class="col-6 col-md-3">
+        <div class="card border-0 shadow-sm h-100"><div class="card-body py-2 px-3">
+            <div class="text-muted small">当前层级线</div>
+            <div class="fs-4 fw-semibold">{{ data.line }}</div>
+        </div></div>
+    </div>
+    <div class="col-6 col-md-3">
+        <div class="card border-0 shadow-sm h-100"><div class="card-body py-2 px-3">
+            <div class="text-muted small">线下临界（{{ data.below }} 分内）</div>
+            <div class="fs-4 fw-semibold text-warning">{{ data.below_n }} 人</div>
+        </div></div>
+    </div>
+    <div class="col-6 col-md-3">
+        <div class="card border-0 shadow-sm h-100"><div class="card-body py-2 px-3">
+            <div class="text-muted small">线上临界（{{ data.above }} 分内）</div>
+            <div class="fs-4 fw-semibold text-danger">{{ data.above_n }} 人</div>
+        </div></div>
+    </div>
+    <div class="col-6 col-md-3">
+        <div class="card border-0 shadow-sm h-100"><div class="card-body py-2 px-3">
+            <div class="text-muted small">临界生合计</div>
+            <div class="fs-4 fw-semibold text-primary">{{ data.below_n + data.above_n }} 人</div>
+        </div></div>
+    </div>
+</div>
+
+{# 班级对比矩阵 #}
+<div class="card mb-3">
+    <div class="card-header py-2">
+        <i class="bi bi-people"></i> 班级对比（按临界生人数降序）
+        <span class="text-muted small ms-2">线下 = {{ data.line - data.below }} ~ {{ data.line }} 分；线上 = {{ data.line }} ~ {{ data.line + data.above }} 分</span>
+    </div>
+    <div class="table-responsive">
+        <table class="table table-sm table-hover align-middle mb-0">
+            <thead>
+            <tr>
+                <th>班级</th><th>班主任</th>
+                <th class="text-end">线下临界</th>
+                <th class="text-end">线上临界</th>
+                <th class="text-end">合计</th>
+                <th style="width:38%">占比条</th>
+            </tr>
+            </thead>
+            <tbody>
+            {% set tot_above = data.above_n or 1 %}
+            {% for c in by_class %}
+            <tr>
+                <td>{{ c.class_name }}</td>
+                <td class="text-muted small">{{ c.headteacher or '—' }}</td>
+                <td class="text-end text-warning">{{ c.below }}</td>
+                <td class="text-end text-danger">{{ c.above }}</td>
+                <td class="text-end fw-semibold">{{ c.above + c.below }}</td>
+                <td>
+                    <div class="progress" style="height:14px;">
+                        <div class="progress-bar bg-warning" style="width:{{ (c.below * 100 / (c.above + c.below)) if (c.above + c.below) else 0 }}%"></div>
+                        <div class="progress-bar bg-danger" style="width:{{ (c.above * 100 / (c.above + c.below)) if (c.above + c.below) else 0 }}%"></div>
+                    </div>
+                </td>
+            </tr>
+            {% else %}
+            <tr><td colspan="6" class="text-center text-muted py-3">该范围内没有临界生</td></tr>
+            {% endfor %}
+            </tbody>
+            <tfoot>
+            <tr class="table-light">
+                <th colspan="2" class="text-end">合计</th>
+                <th class="text-end text-warning">{{ data.below_n }}</th>
+                <th class="text-end text-danger">{{ data.above_n }}</th>
+                <th class="text-end">{{ data.below_n + data.above_n }}</th>
+                <th></th>
+            </tr>
+            </tfoot>
+        </table>
+    </div>
+</div>
+
+{# 临界生明细 #}
+<div class="card">
+    <div class="card-header py-2">
+        <i class="bi bi-list-ul"></i> 临界生明细
+        <span class="text-muted small ms-2">线下组按总分降序（最接近线的在前）· 线上组按总分升序（最危险的在前）</span>
+    </div>
+    <div class="table-responsive">
+        <table class="table table-sm table-hover align-middle mb-0">
+            <thead>
+            <tr>
+                <th>状态</th><th>班级</th><th>班主任</th><th>姓名</th>
+                <th class="text-end">总分</th>
+                <th class="text-end">距线</th>
+                <th class="text-end">方向排名</th>
+                {% for s in data.subjects %}<th class="text-end">{{ s.label }}</th>{% endfor %}
+            </tr>
+            </thead>
+            <tbody>
+            {% for r in data.rows %}
+            <tr>
+                <td>
+                    {% if r.status == '线上' %}
+                    <span class="badge bg-danger-subtle text-danger-emphasis">线上</span>
+                    {% else %}
+                    <span class="badge bg-warning-subtle text-warning-emphasis">线下</span>
+                    {% endif %}
+                </td>
+                <td>{{ r.class_name }}</td>
+                <td class="text-muted small">{{ r.headteacher or '—' }}</td>
+                <td>{{ r.name }}</td>
+                <td class="text-end fw-semibold">{{ r.score }}</td>
+                <td class="text-end {{ 'text-danger' if r.gap >= 0 else 'text-warning' }}">
+                    {{ '+' if r.gap > 0 }}{{ r.gap }}
+                </td>
+                <td class="text-end text-muted">{{ r.rank_dir or '—' }}</td>
+                {% for s in data.subjects %}
+                <td class="text-end text-muted">{{ r[s.key] if r[s.key] is not none else '—' }}</td>
+                {% endfor %}
+            </tr>
+            {% else %}
+            <tr><td colspan="{{ 7 + data.subjects|length }}" class="text-center text-muted py-3">
+                该范围内没有临界生（可放宽线上/线下分数）
+            </td></tr>
+            {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+{% endif %}
+{% endblock %}

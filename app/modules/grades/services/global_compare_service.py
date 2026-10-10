@@ -1,4 +1,4 @@
-# StuLink v1.18.8.0 2026-10-09
+# StuLink v1.18.9.1 2026-10-10
 # 全局对比指标引擎：班级 × 学科「去差均分 + 特优线 + 本科线」宽表
 #
 # 口径与 report_service / report_pivot_service 完全一致（复用其公共函数）：
@@ -117,7 +117,7 @@ def global_compare_report(exam_id, direction=''):
     # 科目列：本场实际有成绩的科目按系统顺序（全科=9 科；分科=各方向并集，缺科显示 —）
     subjects = list(data.imported_subjects)
     trimmed = rs.trimmed_nos(data)
-    # v1.18.8.0 班主任取**本场考试当时**的快照（与任课教师同一机制）：
+    # v1.18.9.1 班主任取**本场考试当时**的快照（与任课教师同一机制）：
     # 历史考试不能再显示现在的班主任；快照缺失时自动回落当前关联
     from app.modules.grades.services import teacher_snapshot_service as _tss
     ht = _tss.headteacher_map_of(data.exam.id, grade=data.exam.grade)

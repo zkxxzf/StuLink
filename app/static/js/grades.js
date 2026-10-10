@@ -1,4 +1,4 @@
-/* StuLink 成绩管理：分析页前端 v1.18.8.0
+/* StuLink 成绩管理：分析页前端 v1.18.9.1
  * 五 tab 联动加载 / 统一表格渲染 / 每张指标卡「表格 | 图表」双视图 / ECharts 图表渲染
  */
 (function(){
@@ -71,14 +71,41 @@ function fillExams(){
                      e.status === 'dirty' ? '·待重算' : '·未导入');
         sel.append('<option value="'+e.id+'" data-status="'+e.status+'">'+label+'</option>');
     });
-    var pick = list.filter(function(e){ return e.status === 'imported'; })[0] || list[0];
+    // v1.19.0 优先用侧栏带进来的本场考试（?exam=），否则按原逻辑默认选最近一场已导入
+    var want = ($('#gInitialExam').text() || '').trim();
+    var pick = want ? list.filter(function(e){ return String(e.id) === want; })[0] : null;
+    if (!pick) pick = list.filter(function(e){ return e.status === 'imported'; })[0] || list[0];
     if (pick){ sel.val(String(pick.id)); }
     state.examId = sel.val() || '';
     state.grade = grade;
+    syncExamNav();
     fillClasses();
 }
 
-/* v1.18.8.0 班级筛选仅限本场考试：优先用该场考试自己的班级
+/* v1.19.0 侧栏“本场流程”链接跟随当前选中的考试（悬浮流程栏在考试态页面显示时生效）*/
+function syncExamNav(){
+    var eid = state.examId;
+    if (!eid) return;
+    var $nav = $('.exam-flow-nav');
+    if (!$nav.length) return;
+    var urls = {
+        detail: '/grades/exams/' + eid,
+        affair: '/grades/exams/' + eid + '/affair',
+        import: '/grades/exams/' + eid + '/import',
+        analysis: '/grades/analysis?exam=' + eid,
+        ai: '/grades/exams/' + eid + '/ai-import',
+        bands: '/grades/exams/' + eid + '/bands',
+        pivot: '/grades/pivot?exam=' + eid,
+        near: '/grades/exams/' + eid + '/near-line',
+        report: '/grades/report?exam=' + eid,
+        global: '/grades/global-compare?exam=' + eid
+    };
+    Object.keys(urls).forEach(function(k){
+        $nav.find('a[data-nav="' + k + '"]').attr('href', urls[k]);
+    });
+}
+
+/* v1.18.9.1 班级筛选仅限本场考试：优先用该场考试自己的班级
    （该场学生名册 ∪ 该场任课教师表）；未选考试/旧库无快照时回落年级班级 */
 function classListFor(grade){
     var eid = state.examId || $('#gExam').val() || '';
@@ -126,7 +153,8 @@ function bindFilters(){
     $('#gGrade').on('change', fillExams);
     $('#gExam').on('change', function(){
         state.examId = $(this).val();
-        fillClasses();          // v1.18.8.0 班级随考试变：仅列本场考试的班级
+        syncExamNav();          // v1.19.0 同步侧栏本场流程链接
+        fillClasses();          // v1.18.9.1 班级随考试变：仅列本场考试的班级
         loadCurrent();
     });
     $('#gClass').on('change', function(){ state.class_name = $(this).val(); loadCurrent(); });
@@ -970,6 +998,23 @@ $(function(){
         return $('#aiCanGlobal').text().trim() === '1';
     }
 
+    // v1.19.0 个人 Key 已统一到「用户设置」（只存本机浏览器，不上服务器）；
+    // 这里不再提供个人 Key 表单，只展示本机配置状态 + 跳转入口。
+    function personalKeyNotice(){
+        var api = window.StuLinkAI || null;
+        var ok = api && api.has();
+        var c = (api && api.get()) || {};
+        return '<div class="alert ' + (ok ? 'alert-success' : 'alert-warning')
+            + ' small py-2"><i class="bi '
+            + (ok ? 'bi-check-circle' : 'bi-exclamation-triangle') + '"></i> '
+            + (ok ? ('已配置本机 AI：' + esc(c.model || '（默认模型）'))
+                  : '未配置 AI Key，AI 功能不可用')
+            + '　<a href="/my/settings#ai" class="btn btn-sm btn-outline-primary ms-1 py-0">'
+            + '去用户设置配置</a>'
+            + '<div class="text-muted mt-1">为保护隐私，个人 Key 只保存在你自己的浏览器，'
+            + '不上传服务器；换电脑或清缓存后需重新填写。</div></div>';
+    }
+
     // Key 配置表单（支持全部服务商）
     function keyFormHtml(keyData, isGlobal){
         var k = keyData || {};
@@ -1069,7 +1114,7 @@ $(function(){
                     + '<button class="btn btn-sm btn-secondary" data-bs-dismiss="modal">取消</button>'
                     + '<button class="btn btn-sm btn-primary" id="aiKeySave">保存</button>';
                 showAi(isGlobal ? '配置全局公共 AI Key（管理员）' : '配置个人 AI API Key',
-                    keyFormHtml(k, isGlobal), foot);
+                    isGlobal ? keyFormHtml(k, isGlobal) : personalKeyNotice(), foot);
                 bindKeyForm(isGlobal);
             });
         });
@@ -1117,6 +1162,13 @@ $(function(){
 
     // ---- SSE 流式请求（fetch + ReadableStream；EventSource 不支持 POST）----
     function streamPost(url, payload, handlers){
+        // v1.19.0 所有 AI 链路统一入口：
+        // ① 未配置“本机浏览器里的 Key”时先提醒并引导去用户设置（不再用服务器存的私人 Key）
+        // ② 已配置则把 Key 随请求带上（服务器只用不存）
+        if (url.indexOf('/grades/ai/') === 0){
+            if (!window.StuLinkAI || !window.StuLinkAI.ensure()) return;
+            payload = $.extend({}, payload, {ai: window.StuLinkAI.payload()});
+        }
         fetch(url, {
             method: 'POST',
             headers: {'Content-Type': 'application/json',
@@ -1270,7 +1322,7 @@ $(function(){
                     showAi('配置 AI API Key',
                         '<p class="small text-muted">进行 AI 分析需要 API Key：可任选一家服务商（DeepSeek / 通义千问 / 智谱 GLM / '
                         + 'Kimi / 豆包 / 混元 / 文心一言，或自定义 OpenAI 兼容接口），费用走您自己的账户；'
-                        + '也可联系管理员配置公共 Key 后免填。</p>' + keyFormHtml(null, false),
+                        + '也可联系管理员配置公共 Key 后免填。</p>' + personalKeyNotice(),
                         '<button class="btn btn-sm btn-outline-secondary me-auto" id="aiKeyTest">'
                         + '<i class="bi bi-plug"></i> 测试连接</button>'
                         + '<button class="btn btn-sm btn-secondary" data-bs-dismiss="modal">暂不</button>'

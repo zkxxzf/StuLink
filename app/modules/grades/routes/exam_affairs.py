@@ -1,4 +1,4 @@
-# StuLink v1.18.8.0 2026-10-09
+# StuLink v1.18.9.1 2026-10-10
 # 考务管理：完整考务流程（对应 Excel 宏工作簿 2025考场学生考号与考场信息编排v1.2）
 #   步骤：① 学生名单（学生信息表） → ② 考场设置（考场信息表）
 #        → ③ 编排与考号生成（三种模式，镜像宏 编排考场考号2）
@@ -69,7 +69,7 @@ def _grade_options():
 
 
 def delete_affair_cascade(aid):
-    """v1.18.8.0：删除考务批次并级联清理其考场与学生名单。
+    """v1.18.9.1：删除考务批次并级联清理其考场与学生名单。
 
     AffairRoom / AffairStudent 的 affair_id 无外键约束（多库快照式设计，不建跨表外键），
     直接 `db.session.delete(affair)` 会留下孤儿行；此处显式按 affair_id 批量删除。
@@ -85,7 +85,7 @@ def delete_affair_cascade(aid):
 @login_required
 @perm_required('grades.edit')
 def affairs_list():
-    """v1.17.0 考试/考务合并收尾（v1.18.8.0）：考务批次列表已并入考试管理，
+    """v1.17.0 考试/考务合并收尾（v1.18.9.1）：考务批次列表已并入考试管理，
     本页保留为兼容入口（旧书签/外链），统一重定向到考试列表；
     未关联考试的孤儿批次由考试列表底部“待处理的考务批次”区兑底展示。"""
     return redirect(url_for('grades.exams_list'))
@@ -180,7 +180,7 @@ def exam_affair_go(exam_id):
 def affair_delete(aid):
     affair = _get_affair_checked(aid)
     name = affair.name
-    # v1.18.8.0：级联清理考场与名单（无外键约束，不显式删会留孤儿行）
+    # v1.18.9.1：级联清理考场与名单（无外键约束，不显式删会留孤儿行）
     n_rooms, n_stus = delete_affair_cascade(aid)
     db.session.commit()
     log_operation(current_user, '删除', '考务批次', aid,
@@ -254,7 +254,7 @@ def affair_students_template(aid):
         c.alignment = _CENTER
         c.border = _TB
     # 预填系统该年级学生（与 Excel「学生信息表」口径一致，考务人员可直接编辑）
-    # v1.18.8.0：只预填数字教学班且年级未毕业的学生（不分班/已转出/已毕业不进入成绩模板）
+    # v1.18.9.1：只预填数字教学班且年级未毕业的学生（不分班/已转出/已毕业不进入成绩模板）
     from app.utils.helpers import get_graduated_grades
     _graduated = set(get_graduated_grades() or [])
     _grade_ok = affair.grade not in _graduated
@@ -335,7 +335,7 @@ def affair_students_import(aid):
             name = name or sys_stu.name
             cls = cls or sys_stu.class_name
             sel = sel or (sys_stu.subject_selection or '')
-        # v1.18.8.0：补全后仍无数字教学班的学生不导入成绩名单
+        # v1.18.9.1：补全后仍无数字教学班的学生不导入成绩名单
         if not is_teaching_class(cls):
             skipped_no_class += 1
             continue
@@ -360,7 +360,7 @@ def affair_students_import(aid):
 def affair_students_sync(aid):
     """v1.12.1 从学生学籍库同步本年级学生到考务名单（增量：新增+补全信息）
 
-    v1.18.8.0 口径调整（用户明确）：
+    v1.18.9.1 口径调整（用户明确）：
     - 无班级学生（不分班 / 已转出 / 离校 等非数字班级）与已毕业年级学生
       **不进入成绩治理模块**，同步时直接过滤掉；
     - 原「同时移除学籍已删的学生」复选框取消，改为**默认自动移除**：
@@ -412,7 +412,7 @@ def affair_students_pick(aid):
     """v1.12.2 「加入学生」选择器数据源：返回本年级学籍学生，
     带 in_batch 标记（是否已在当前考务名单），供前端筛选/排序/搜索。
 
-    v1.18.8.0：与 sync 同口径，只列数字教学班且年级未毕业的学生（无班级/已毕业不展示）。"""
+    v1.18.9.1：与 sync 同口径，只列数字教学班且年级未毕业的学生（无班级/已毕业不展示）。"""
     affair = _get_affair_checked(aid)
     from app.utils.helpers import get_graduated_grades
     graduated = set(get_graduated_grades() or [])
@@ -441,7 +441,7 @@ def affair_students_batch_add(aid):
     for st in Student.query.filter(Student.student_number.in_(nos)).all():
         if st.student_number in exist:
             continue
-        # v1.18.8.0：无班级学生（不分班/已转出/离校等）不加入成绩治理名单
+        # v1.18.9.1：无班级学生（不分班/已转出/离校等）不加入成绩治理名单
         if not is_teaching_class(st.class_name):
             skipped += 1
             continue
@@ -784,10 +784,38 @@ def affair_settings(aid):
 
 # ==================== 步骤③ 编排与考号生成（镜像宏 编排考场考号2） ====================
 
-def _arrange(affair, students, rooms, mode, log):
+def _prev_stage_rank_map(affair):
+    """上一场**同阶段**考试的校内排名 → {学号: 方向排名}，供考场分层排序
+
+    口径（用户 2026-10-10）：同一场同阶段考试（同年级 + 同 exam_type）中
+    日期早于本场、取最近一场；用「总分行」的 rank_dir（文理各自排，选科组合之间可比）。
+    找不到（首次考试）→ 返回 ({}, '')，分配自然退化为随机，不报错。
+    """
+    from app.models.grades import Exam, ExamScore, TOTAL_SUBJECT
+    if not affair.exam_id:
+        return {}, ''
+    cur = Exam.query.get(affair.exam_id)
+    if cur is None:
+        return {}, ''
+    prev = (Exam.query.filter(Exam.grade == cur.grade,
+                              Exam.exam_type == cur.exam_type,
+                              Exam.exam_date < cur.exam_date)
+            .order_by(Exam.exam_date.desc()).first())
+    if prev is None:
+        return {}, ''
+    rows = (ExamScore.query.filter_by(exam_id=prev.id)
+            .filter(ExamScore.subject == TOTAL_SUBJECT).all())
+    return ({r.student_no: (r.rank_dir or 10 ** 9) for r in rows}, prev.name)
+
+
+def _arrange(affair, students, rooms, mode, log, layered=False, rank_map=None):
     """镜像 Excel 宏的编排逻辑：固定座位优先 → 同班邻座限制 → 随机分配。
     v1.12.1：支持不选科模式、非参考学生尾场处理、选科考号前后缀。
+    v1.19.0：**分层分配**（layered=True）—— 同一选科组内按上一场同阶段考试的
+    校内排名升序填座，考场按房间号顺序、座位按号从前往后依次填满，
+    即“前 N 个考场共 M 座 → 第 1~M 名填这几个考场”；无排名数据则退化随机。
     返回 (assigned_count, failed_count)"""
+    rank_map = rank_map or {}
     room_by_no = {r.room_no: r for r in rooms}
     # 座位占用表
     seats = {r.room_no: [None] * r.capacity for r in rooms}
@@ -846,10 +874,16 @@ def _arrange(affair, students, rooms, mode, log):
 
     MAX_SAME_CLASS = 1
     for key, group in groups.items():
+        # v1.19.0 分层分配：同一选科组内按上一场同阶段考试排名升序（无排名排最后）
+        if layered:
+            group.sort(key=lambda s: (rank_map.get(s.student_no, 10 ** 9),
+                                      s.student_no or ''))
         # v1.12.1 不选科模式：全体一组，考场全部通用；选科模式按科目匹配
-        avail = [(r.room_no, r) for r in rooms
-                 if len(used[r.room_no]) < r.capacity
-                 and (plain or r.is_universal or r.subject == key)]
+        # v1.19.0 固定按房间号排序，保证分层填充“从第一考场往后”可预期
+        avail = sorted([(r.room_no, r) for r in rooms
+                        if len(used[r.room_no]) < r.capacity
+                        and (plain or r.is_universal or r.subject == key)],
+                       key=lambda t: t[0])
         for s in group:
             candidates = []
             for rno, r in avail:
@@ -874,7 +908,12 @@ def _arrange(affair, students, rooms, mode, log):
                 log.append(f'【分配失败】[{s.name}] 无可用座位（选科 {key}）')
                 failed += 1
                 continue
-            rno, seat = random.choice(candidates)
+            if layered:
+                # 分层：取“考场号→座号”最靠前的空位，实现容量累积分段
+                candidates.sort(key=lambda x: (x[0], x[1]))
+                rno, seat = candidates[0]
+            else:
+                rno, seat = random.choice(candidates)
             seats[rno][seat - 1] = s
             used[rno].add(seat)
             s.room_no = rno
@@ -926,8 +965,19 @@ def affair_arrange(aid):
     if not rooms:
         return jsonify({'ok': False, 'msg': '请先在「考场设置」中添加考场'})
     scope = [s for s in students if s.is_attend]
+    # v1.19.0 分层分配：同一选科组内按上一场同阶段考试的校内排名填座
+    # （首次考试无历史成绩 → 自然退化为随机，不阻断）
+    layered = request.form.get('layered') in ('1', 'true', 'on')
+    rank_map, prev_name = ({}, '')
+    if layered:
+        rank_map, prev_name = _prev_stage_rank_map(affair)
     log = [f'当前模式：{MODE_LABEL[mode]}']
-    assigned, failed = _arrange(affair, students, rooms, mode, log)
+    if layered:
+        log.append('分层依据：' + (
+            f'上一场同阶段考试「{prev_name}」的校内排名（{len(rank_map)} 人有排名）'
+            if rank_map else '无上一场同阶段成绩，本次退化为随机编排'))
+    assigned, failed = _arrange(affair, students, rooms, mode, log,
+                                layered=layered, rank_map=rank_map)
     affair.status = 'arranged' if assigned else 'draft'
     db.session.commit()
     log_operation(current_user, '编排', '考务批次', aid,

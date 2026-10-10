@@ -1,6 +1,6 @@
-# StuLink v1.18.8.0 2026-10-09
+# StuLink v1.18.9.1 2026-10-10
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
-"""考试任课快照服务（v1.18.8.0）
+"""考试任课快照服务（v1.18.9.1）
 
 背景：`TeacherSubjectLink` 只存"当前"任课映射。教师一换（尤其重新分班后），
 历史考试的教师维度分析会全部归到现在的教师名下，上线率/去差均分排名失真。
@@ -20,7 +20,7 @@ from __future__ import annotations
 from app.extensions import db
 from app.models.grades import ExamTeacherLink, TeacherSubjectLink
 
-# v1.18.8.0 班主任也归入同一张快照表：它和任课教师一样是“本场考试该班的老师”，
+# v1.18.9.1 班主任也归入同一张快照表：它和任课教师一样是“本场考试该班的老师”，
 # 区别仅在于任课老师看单科成绩、班主任看总分。用伪科目名占位，不污染 SUBJECTS。
 HEAD_SUBJECT = '班主任'
 
@@ -79,7 +79,7 @@ def snapshot_exam(exam, source='import', rows=None, replace=False):
             for l in TeacherSubjectLink.query.filter_by(
                 grade=exam.grade, active=True).all()
         ]
-        # v1.18.8.0 班主任一并快照（以前只存了任课老师，历史考试的班主任会跟到现在）
+        # v1.18.9.1 班主任一并快照（以前只存了任课老师，历史考试的班主任会跟到现在）
         rows += _current_headteacher_rows(exam.grade)
 
     # 姓名补全（无 user_id 时留空，由调用方给 teacher_name）

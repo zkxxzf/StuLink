@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 # StuLink v1.18.8.0 2026-10-09
 # 教务模块模型（2026-10-10 按「一个功能一个库」分库）：
 #   academic.db    师资基础（教师名单 / 备课组长 / 班主任记录 / 考勤）
@@ -5,6 +6,10 @@
 #   inspection.db  查课记录
 #   achievement.db 教师业绩 + 附件
 #   forms.db       问卷收集（模板/轮次/题目/提交/答案）
+=======
+# StuLink v1.18.9.1 2026-10-10
+# 教务模块模型：教师名单 / 课表 / 查课记录 / 教师业绩（独立库 academic.db）
+>>>>>>> origin/master
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 from datetime import datetime
 

@@ -18,7 +18,7 @@
         <button class="btn btn-info" data-bs-toggle="modal" data-bs-target="#batchTransferModal">
             <i class="bi bi-arrow-left-right"></i> 批量调班
         </button>
-        {# v1.18.8.0 调班记录总览 #}
+        {# v1.18.9.1 调班记录总览 #}
         <a href="{{ url_for('students.class_changes') }}" class="btn btn-outline-info">
             <i class="bi bi-clock-history"></i> 调班记录
         </a>
@@ -148,7 +148,7 @@
                     </td>
                     <td>{{ s.grade }}</td>
                     <td>{{ s.class_name }}</td>
-                    {# v1.18.8.0 调班次数：点击跳到调班记录（按学号筛选） #}
+                    {# v1.18.9.1 调班次数：点击跳到调班记录（按学号筛选） #}
                     <td class="text-center">
                         {% set cc = change_counts.get(s.id, 0) %}
                         {% if cc %}
@@ -318,7 +318,7 @@
                             </select>
                         </div>
                     </div>
-                    {# v1.18.8.0 调班记录：变更性质（写入变迁日志，用于区分真实换班与改错） #}
+                    {# v1.18.9.1 调班记录：变更性质（写入变迁日志，用于区分真实换班与改错） #}
                     <div class="mb-2">
                         <label for="transferKind" class="form-label">变更性质</label>
                         <select class="form-select" id="transferKind" name="class_change_kind">

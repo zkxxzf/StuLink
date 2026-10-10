@@ -1,4 +1,4 @@
-# StuLink v1.18.8.0 2026-10-09
+# StuLink v1.18.9.1 2026-10-10
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 """备课组长（2026-09-25）。
 
@@ -28,6 +28,251 @@ def _subject_key(subject):
         return (len(SUBJECT_ORDER), subject or '')
 
 
+<<<<<<< HEAD
+=======
+def order_subjects(subjects):
+    """按学科固定顺序排序（未列入 SUBJECT_ORDER 的按名称排在后面）"""
+    return sorted({s for s in subjects if s}, key=_subject_key)
+
+
+def _entries(schedule_id, week=None, grade=None):
+    q = ScheduleEntry.query.filter_by(term_schedule_id=schedule_id, is_deleted=False)
+    if grade:
+        q = q.filter_by(grade=grade)
+    rows = q.all()
+    if week:
+        rows = [e for e in rows if week_range_covers(e.week_range, week)]
+    return rows
+
+
+def _head_teacher_map(pairs):
+    """{(grade, class_name): 班主任姓名} —— 优先多对多关联表，其次 users 上的班级字段。
+
+    pairs: 需要查询的 (grade, class_name) 集合；查询失败（如非班主任角色表未初始化）静默返回空。
+    """
+    result = {}
+    try:
+        from app.models import User, UserClassLink
+        # v1.18.9.1 审核（🟡-3）：原实现对每条 UserClassLink 逐个 db.session.get(User)（N+1），
+        # 改为一次 IN 查询预取，避免班数多时上百次往返。
+        links = UserClassLink.query.all()
+        uids = {lk.user_id for lk in links if lk.user_id}
+        umap = ({u.id: u for u in User.query.filter(User.id.in_(uids)).all()}
+                if uids else {})
+        for link in links:
+            u = umap.get(link.user_id)
+            if u and u.is_active:
+                result.setdefault((link.grade, link.class_name), []).append(u.real_name)
+        for u in User.query.filter_by(role='homeroom_teacher').all():
+            if u.grade and u.class_name:
+                names = result.setdefault((u.grade, u.class_name), [])
+                if u.real_name not in names:
+                    names.append(u.real_name)
+    except Exception:  # noqa: BLE001  班主任信息缺失不影响任课表
+        pass
+    return {k: '、'.join(v) for k, v in result.items() if v}
+
+
+# ── 视角一：按班级（图片主形态） ───────────────────────────────────────────
+
+def class_type_options():
+    """班级档案里出现过的班型（强基班/卓越班…），供任课表按班型筛选。"""
+    try:
+        from app.models import ClassProfile
+        rows = db.session.query(ClassProfile.class_type).distinct().all()
+        return sorted({r[0] for r in rows if r[0]})
+    except Exception:  # noqa: BLE001
+        return []
+
+
+def build_class_duty(schedule_id, week=None, grade=None, class_type=None,
+                     direction=None):
+    """任课安排（按班级）：年级分块 → 班级行 × 学科列。
+
+    每格：{teachers: [姓名], hours: 周课时}；行尾给「文化课总」「周课时合计」；
+    表尾给「学科合计」与「学科教师清单」。
+    class_type：按班型筛选（只看"强基班"）；direction：按选科方向筛选
+    （新高考 3+1+2 的"物理/历史"），两者都读班级档案 ClassProfile。
+    """
+    from app.modules.academic.services.grade_utils import (class_profile_map,
+                                                           grade_labels,
+                                                           grade_sort_key)
+
+    rows = _entries(schedule_id, week, grade)
+    # 年级候选集取「未按年级过滤」的全量（只受周次影响）：否则筛出某个年级后
+    # 按钮组只剩该年级，用户无法切回其它年级
+    all_grades = sorted({e.grade for e in _entries(schedule_id, week, None) if e.grade})
+    profiles = class_profile_map()
+    labels = grade_labels(all_grades)
+    all_grades.sort(key=lambda g: (-grade_sort_key(g, labels), g))
+
+    if class_type:
+        rows = [e for e in rows
+                if profiles.get((e.grade, e.class_name), {}).get('class_type') == class_type]
+    if direction:
+        rows = [e for e in rows
+                if profiles.get((e.grade, e.class_name), {}).get('direction') == direction]
+
+    by_grade = OrderedDict()
+    for e in rows:
+        by_grade.setdefault(e.grade, []).append(e)
+
+    head_map = _head_teacher_map(by_grade.keys())
+
+    blocks = []
+    # 高中习惯：毕业年级在前（高三 → 高二 → 高一）
+    for g in sorted(by_grade, key=lambda x: (-grade_sort_key(x, labels), x)):
+        grade_entries = by_grade[g]
+        subjects = order_subjects(e.subject for e in grade_entries)
+        class_names = sorted({e.class_name for e in grade_entries})
+
+        cls_rows = []
+        for cn in class_names:
+            cells = {}
+            row_hours = 0
+            core_hours = 0
+            for subj in subjects:
+                matched = [e for e in grade_entries
+                           if e.class_name == cn and e.subject == subj]
+                if not matched:
+                    continue
+                teachers = []
+                for e in matched:
+                    name = (e.teacher_name or '').strip() or '未指定'
+                    if name not in teachers:
+                        teachers.append(name)
+                cells[subj] = {'teachers': teachers, 'hours': len(matched)}
+                row_hours += len(matched)
+                if subj in CORE_SUBJECTS:
+                    core_hours += len(matched)
+            cls_rows.append({
+                'grade': g,
+                'class_name': cn,
+                'class_type': profiles.get((g, cn), {}).get('class_type', ''),
+                'direction': profiles.get((g, cn), {}).get('direction', ''),
+                'combo': profiles.get((g, cn), {}).get('combo', ''),
+                'combo_short': profiles.get((g, cn), {}).get('combo_short', ''),
+                'head_teacher': head_map.get((g, cn), ''),
+                'cells': cells,
+                'row_total': row_hours,
+                'core_total': core_hours,
+            })
+
+        subject_totals = {}
+        subject_teachers = {}
+        for subj in subjects:
+            matched = [e for e in grade_entries if e.subject == subj]
+            subject_totals[subj] = len(matched)
+            names = []
+            for e in sorted(matched, key=lambda x: (x.teacher_name or '')):
+                name = (e.teacher_name or '').strip() or '未指定'
+                if name not in names:
+                    names.append(name)
+            subject_teachers[subj] = names
+
+        blocks.append({
+            'grade': g,
+            'grade_label': labels.get(g, g),
+            'subjects': subjects,
+            'rows': cls_rows,
+            'subject_totals': subject_totals,
+            'subject_teachers': subject_teachers,
+            'grand_total': len(grade_entries),
+            'core_total': sum(subject_totals.get(s, 0) for s in CORE_SUBJECTS),
+            'class_count': len(class_names),
+        })
+
+    return {
+        'blocks': blocks,
+        'grades': [b['grade'] for b in blocks],
+        'all_grades': all_grades,
+        'labels': labels,
+        'class_type': class_type or '',
+        'direction': direction or '',
+        'directions': sorted({v.get('direction') for v in profiles.values()
+                              if v.get('direction')}),
+        'grade_filter': grade or '',
+        'total': len(rows),
+    }
+
+
+# ── 视角二：按教师 ─────────────────────────────────────────────────────────
+
+def build_teacher_duty(schedule_id, week=None, grade=None, warn_hours=None):
+    """任课安排（按教师）：每位教师的姓名/学科/授课班级/周课时数。
+
+    满足"按学科或教师查看"的需求；与按班级视角同源，数据不会不一致。
+    warn_hours：周课时超过该值时在结果里标 `warn=True`（用于超课时预警，None=不预警）。
+    """
+    rows = _entries(schedule_id, week, grade)
+    agg = {}
+    for e in rows:
+        key = e.teacher_uid or f'name:{e.teacher_name or "未指定"}'
+        node = agg.setdefault(key, {
+            'uid': e.teacher_uid or '',
+            'name': (e.teacher_name or '').strip() or '未指定',
+            'subjects': set(),
+            'classes': set(),
+            'grades': set(),
+            'hours': 0,
+        })
+        node['subjects'].add(e.subject)
+        node['classes'].add(f'{e.grade}{e.class_name}')
+        node['grades'].add(e.grade)
+        node['hours'] += 1
+
+    items = []
+    for node in agg.values():
+        items.append({
+            'uid': node['uid'],
+            'name': node['name'],
+            'subjects': order_subjects(node['subjects']),
+            'subject_text': '、'.join(order_subjects(node['subjects'])),
+            'classes': sorted(node['classes']),
+            'class_text': '、'.join(sorted(node['classes'])),
+            'class_count': len(node['classes']),
+            'grades': sorted(node['grades']),
+            'hours': node['hours'],
+            'warn': bool(warn_hours and node['hours'] > warn_hours),
+        })
+    items.sort(key=lambda x: (-x['hours'], x['name']))
+    return items
+
+
+# ── 视角三：按学科 ─────────────────────────────────────────────────────────
+
+def build_subject_duty(schedule_id, week=None, grade=None):
+    """任课安排（按学科）：学科 → 教师 → 授课班级 + 周课时。"""
+    rows = _entries(schedule_id, week, grade)
+    by_subject = {}
+    for e in rows:
+        by_subject.setdefault(e.subject, {}).setdefault(
+            e.teacher_uid or e.teacher_name or '未指定', []).append(e)
+
+    result = []
+    for subj in order_subjects(by_subject):
+        teachers = []
+        for items in by_subject[subj].values():
+            sample = items[0]
+            teachers.append({
+                'uid': sample.teacher_uid or '',
+                'name': (sample.teacher_name or '').strip() or '未指定',
+                'classes': sorted({f'{e.grade}{e.class_name}' for e in items}),
+                'class_text': '、'.join(sorted({f'{e.grade}{e.class_name}' for e in items})),
+                'grades': sorted({e.grade for e in items}),
+                'hours': len(items),
+            })
+        teachers.sort(key=lambda x: (-x['hours'], x['name']))
+        result.append({
+            'subject': subj,
+            'teachers': teachers,
+            'hours': sum(t['hours'] for t in teachers),
+            'teacher_count': len(teachers),
+        })
+    return result
+
+
+>>>>>>> origin/master
 # ── 备课组长 ───────────────────────────────────────────────────────────────
 
 def leader_years():

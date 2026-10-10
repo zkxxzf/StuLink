@@ -1,0 +1,220 @@
+{% extends "base.html" %}
+{% block title %}用户设置{% endblock %}
+{% block content %}
+<div class="d-flex align-items-center mb-3 flex-wrap gap-2">
+    <h5 class="mb-0"><i class="bi bi-person-gear"></i> 用户设置</h5>
+    <span class="text-muted small">右上角用户名入口 · 账号与个人配置都在这里</span>
+</div>
+
+{# ① 账号信息 + 改密码 #}
+<div class="card mb-3">
+    <div class="card-header py-2"><i class="bi bi-person-badge"></i> 账号</div>
+    <div class="card-body">
+        <div class="row g-3">
+            <div class="col-md-6">
+                <table class="table table-sm mb-0">
+                    <tr><th style="width:110px">用户名</th><td>{{ current_user.username }}</td></tr>
+                    <tr><th>姓名</th><td>{{ current_user.real_name }}</td></tr>
+                    <tr><th>身份</th><td>{{ current_user.display_role }}
+                        {% if is_admin %}<span class="badge bg-danger ms-1">管理员</span>{% endif %}</td></tr>
+                    <tr><th>权限组</th><td>{{ pg.name if pg else '（未分配）' }}</td></tr>
+                    <tr><th>数据范围</th><td><span class="badge bg-info-subtle text-info-emphasis">{{ scope_label }}</span></td></tr>
+                </table>
+            </div>
+            <div class="col-md-6">
+                <div class="alert alert-light border small mb-0">
+                    <b>密码安全</b><br>
+                    修改密码后，<b>其它设备的登录状态会立即失效</b>（本设备保持登录）。<br>
+                    首次登录被要求改密的账号，改密前其它功能会受限。
+                </div>
+                <a href="{{ url_for('auth.change_password') }}" class="btn btn-outline-primary btn-sm mt-2">
+                    <i class="bi bi-key"></i> 修改密码
+                </a>
+            </div>
+        </div>
+    </div>
+</div>
+
+{# ② 我的 AI：Key 只存本机浏览器，不上服务器 #}
+<div class="card mb-3">
+    <div class="card-header py-2 d-flex align-items-center">
+        <span><i class="bi bi-robot"></i> 我的 AI 配置</span>
+        <span class="badge bg-success-subtle text-success-emphasis ms-2">仅存本机浏览器</span>
+        <span class="text-muted small ms-2">不会上传到服务器，换电脑/清缓存需要重新填</span>
+    </div>
+    <div class="card-body">
+        <div class="row g-3">
+            <div class="col-md-3">
+                <label class="form-label small mb-1">服务商</label>
+                <select id="aiProvider" class="form-select form-select-sm"></select>
+                <div class="form-text">选「自定义」可填任意标准 OpenAI 兼容地址</div>
+            </div>
+            <div class="col-md-5">
+                <label class="form-label small mb-1">接口地址（base_url）</label>
+                <input id="aiBase" class="form-control form-control-sm" placeholder="https://api.deepseek.com">
+                <div class="form-text">到 <code>/v1</code> 为止，不要带 <code>/chat/completions</code></div>
+            </div>
+            <div class="col-md-4">
+                <label class="form-label small mb-1">模型</label>
+                <input id="aiModel" class="form-control form-control-sm" list="aiModelList"
+                       placeholder="deepseek-chat">
+                <datalist id="aiModelList"></datalist>
+            </div>
+            <div class="col-md-8">
+                <label class="form-label small mb-1">API Key</label>
+                <div class="input-group input-group-sm">
+                    <input id="aiKey" type="password" class="form-control" autocomplete="off"
+                           placeholder="sk-xxxxxxxx">
+                    <button class="btn btn-outline-secondary" type="button" id="aiKeyToggle"
+                            title="显示/隐藏">显示</button>
+                </div>
+                <div class="form-text" id="aiKeyHint"></div>
+            </div>
+            <div class="col-md-4 d-flex align-items-end gap-2">
+                <button class="btn btn-primary btn-sm" id="aiSave"><i class="bi bi-save"></i> 保存到本机</button>
+                <button class="btn btn-outline-info btn-sm" id="aiTest"><i class="bi bi-plug"></i> 测试连接</button>
+                <button class="btn btn-outline-danger btn-sm" id="aiClear"><i class="bi bi-trash"></i> 清除</button>
+            </div>
+
+            {# v1.19.0 可选高级参数：不填 = 完全不传，按服务商默认 #}
+            <div class="col-md-4">
+                <label class="form-label small mb-1">输入上限（tokens，选填）</label>
+                <input id="aiMaxIn" type="number" min="0" step="1000"
+                       class="form-control form-control-sm" placeholder="如 1000000（不填=服务商默认）">
+                <div class="form-text">超出时系统会成比例截断提示词并标注，不会直接报错。</div>
+            </div>
+            <div class="col-md-4">
+                <label class="form-label small mb-1">输出上限（tokens，选填）</label>
+                <input id="aiMaxOut" type="number" min="0" step="1000"
+                       class="form-control form-control-sm" placeholder="如 393216（不填=服务商默认）">
+                <div class="form-text">作为 <code>max_tokens</code> 发送，优先于系统默认值。</div>
+            </div>
+            <div class="col-md-4">
+                <label class="form-label small mb-1">思考强度（选填）</label>
+                <select id="aiEffort" class="form-select form-select-sm">
+                    <option value="">不设置（按服务商默认）</option>
+                    <option value="low">低（low）</option>
+                    <option value="medium">中（medium）</option>
+                    <option value="high">高（high）</option>
+                </select>
+                <div class="form-text">按 OpenAI 兼容的 <code>reasoning_effort</code> 发送；
+                    若服务商不支持会自动去掉该参数重试一次。</div>
+            </div>
+        </div>
+        <div id="aiMsg" class="small mt-2"></div>
+        <div class="text-muted small mt-2">
+            <i class="bi bi-info-circle"></i> 未配置 Key 时，AI 相关功能（智能导入、AI 分析、AI 对话）会提示先来本页配置。
+        </div>
+    </div>
+</div>
+
+{# ②b AI 出站域名白名单（仅管理员） #}
+{% if is_admin %}
+<div class="card mb-3">
+    <div class="card-header py-2 d-flex align-items-center">
+        <span><i class="bi bi-shield-lock"></i> AI 出站域名白名单</span>
+        <span class="badge bg-secondary-subtle text-secondary-emphasis ms-2">仅管理员</span>
+        <span class="text-muted small ms-2">自定义 OpenAI 兼容地址必须先批准，否则调用会被拦下</span>
+    </div>
+    <div class="card-body">
+        <div class="alert alert-light border small py-2">
+            安全说明：自定义接口地址会带着用户的 Key 出站，为防止「内网探测 / 云元数据窃取」这类
+            SSRF 攻击，系统默认只放行内置服务商域名；其他域名需在此批准（写入白名单文件，即时生效，无需重启）。
+        </div>
+        <div class="input-group input-group-sm mb-3" style="max-width:620px;">
+            <input id="wlHost" class="form-control"
+                   placeholder="填域名或完整地址，如 api.openai.com 或 https://api.moonshot.cn/v1">
+            <button class="btn btn-primary" id="wlAdd"><i class="bi bi-plus-lg"></i> 批准该域名</button>
+        </div>
+        <div id="wlMsg" class="small mb-2"></div>
+
+        <div class="small fw-semibold mb-1">已批准的自定义域名（{{ approved_hosts|length }} 个）</div>
+        <div id="wlList" class="d-flex flex-wrap gap-1 mb-3">
+            {% for h in approved_hosts %}
+            <span class="badge bg-success-subtle text-success-emphasis border">
+                {{ h }}
+                <a href="#" class="text-danger ms-1 wl-del" data-host="{{ h }}" title="移除">×</a>
+            </span>
+            {% else %}
+            <span class="text-muted small">（暂无）</span>
+            {% endfor %}
+        </div>
+
+        <details class="small text-muted">
+            <summary>内置服务商域名（{{ builtin_hosts|length }} 个，天然放行，不需批准）</summary>
+            <div class="mt-1">{{ builtin_hosts|join('、') }}</div>
+        </details>
+        <div class="text-muted small mt-2">
+            <i class="bi bi-info-circle"></i> 白名单文件：<code>{{ whitelist_file }}</code>
+            （也可用环境变量 <code>AI_ALLOWED_BASE_URLS</code>，逗号分隔）
+        </div>
+    </div>
+</div>
+{% endif %}
+
+{# ③ 我的权限（只读） #}
+<div class="card mb-3">
+    <div class="card-header py-2">
+        <i class="bi bi-shield-check"></i> 我的权限
+        <span class="text-muted small ms-2">只读展示；如需调整请联系管理员改权限组</span>
+    </div>
+    <div class="card-body">
+        <div class="row g-3">
+            {% for m in modules %}
+            <div class="col-md-6 col-xl-4">
+                <div class="border rounded p-2 h-100">
+                    <div class="d-flex align-items-center mb-2">
+                        <i class="bi {{ m.icon }} me-1"></i>
+                        <b class="small">{{ m.name }}</b>
+                        <span class="badge ms-auto {{ 'bg-success-subtle text-success-emphasis' if m.any else 'bg-secondary-subtle text-secondary-emphasis' }}">
+                            {{ m.allowed_n }}/{{ m.perms|length }}
+                        </span>
+                    </div>
+                    <div class="d-flex flex-wrap gap-1">
+                        {% for it in m.perms %}
+                        <span class="badge {{ 'bg-success-subtle text-success-emphasis' if it.allowed else 'bg-light text-muted border' }}">
+                            {% if it.allowed %}<i class="bi bi-check-lg"></i>{% endif %} {{ it.name }}
+                        </span>
+                        {% endfor %}
+                    </div>
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+    </div>
+</div>
+
+{# ④ 其他（界面偏好，存本机） #}
+<div class="card mb-3">
+    <div class="card-header py-2"><i class="bi bi-sliders"></i> 其他设置</div>
+    <div class="card-body">
+        <div class="row g-3 align-items-end">
+            <div class="col-md-4">
+                <label class="form-label small mb-1">列表每页条数（默认值）</label>
+                <select id="pfSize" class="form-select form-select-sm">
+                    <option value="20">20</option>
+                    <option value="50">50</option>
+                    <option value="100">100</option>
+                </select>
+                <div class="form-text">本机偏好，仅影响你自己的浏览体验</div>
+            </div>
+            <div class="col-md-8">
+                <button class="btn btn-outline-secondary btn-sm" id="pfSave">
+                    <i class="bi bi-save"></i> 保存偏好
+                </button>
+                <button class="btn btn-outline-danger btn-sm" id="localClear">
+                    <i class="bi bi-eraser"></i> 清除本机全部本地配置
+                </button>
+                <div class="form-text">清除范围：AI Key、界面偏好（不影响服务器上的任何数据）</div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+{% block extra_js %}
+<script>
+window.STULINK_PROVIDERS = {{ providers|tojson }};
+window.STULINK_DEFAULT_PROVIDER = {{ default_provider|tojson }};
+</script>
+<script src="{{ su('js/my_settings.js') }}"></script>
+{% endblock %}

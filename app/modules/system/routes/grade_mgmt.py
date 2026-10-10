@@ -18,7 +18,7 @@ def _prune_backups(backups_dir, keep=20, max_age_days=180):
     此前 `data/backups/` 只增不清理，明文整库副本（含口令哈希、身份证密文）
     会长期累积并随同步盘扩散。
 
-    v1.18.8.0 S-5：仅清理自动生成的、名字严格匹配
+    v1.18.9.1 S-5：仅清理自动生成的、名字严格匹配
     `(graduate|system|history)_<年级>_YYYYMMDD_HHMMSS.db` 的文件，
     不误删手工改名的历史备份（如 `_local_before_repro/` 、`academic.db.bak-*` 等）。
     """

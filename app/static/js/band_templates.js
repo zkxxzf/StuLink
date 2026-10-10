@@ -156,7 +156,7 @@ $(function () {
         renderLayers(readLayers().concat([{name: '', ratio: null}]));
         $('#tplLayers tbody tr').last().find('.tl-name').focus();
     });
-    /* v1.18.8.0 支持从 Markdown / Excel / 纯文本直接粘贴多行层名
+    /* v1.18.9.1 支持从 Markdown / Excel / 纯文本直接粘贴多行层名
        （表格形式：一行一层；自动去掉 | - 等表格符号与表头行）*/
     $('#tplLayers').on('paste', '.tl-name', function (e) {
         var txt = (e.originalEvent && e.originalEvent.clipboardData

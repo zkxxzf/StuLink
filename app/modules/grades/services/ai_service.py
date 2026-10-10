@@ -1,4 +1,4 @@
-# StuLink v1.18.8.0 2026-10-09
+# StuLink v1.18.9.1 2026-10-10
 # AI 分析服务：权限收敛取数（本次+上次原始成绩）→ payload 组装 → LLM 转发
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 import json
@@ -20,7 +20,7 @@ DEFAULT_MODEL = ai_providers.PROVIDERS['deepseek']['default_model']
 DEFAULT_TEMPERATURE = 0.4
 DEFAULT_TIMEOUT = 180
 
-# v1.18.8.0 S-4：不自动跟随 3xx，防 SSRF 以 approved.com → 302 → 169.254.169.254 绕过 url_guard
+# v1.18.9.1 S-4：不自动跟随 3xx，防 SSRF 以 approved.com → 302 → 169.254.169.254 绕过 url_guard
 
 class _NoRedirect(urllib.request.HTTPRedirectHandler):
     def redirect_request(self, req, fp, code, msg, headers, newurl):
@@ -138,25 +138,32 @@ def build_payload(user, exam):
         if ex is None:
             return None
         rows = ExamScore.query.filter_by(exam_id=ex.id).all()
-        stu_map = {}
+        # v1.19.0 修复：原先“总分行直接替换整张卡”，若总分行在科目行之后被处理，
+        # 会把已收集的 subjects 整片覆盖掉（payload 里出现 subjects:{}）。
+        # 改为两趟收集：先各自归集总分行卡与科目分，再合并。
+        cards, subs = {}, {}
         for r in rows:
             if r.student_no not in nos:
                 continue
             if r.subject == TOTAL_SUBJECT:
-                stu_map[r.student_no] = _student_card(r)
+                cards[r.student_no] = _student_card(r)
             else:
                 if restrict and r.subject not in restrict:
                     continue  # 任课教师只发本人任教科目列
-                card = stu_map.setdefault(r.student_no, {})
-                card.setdefault('subjects', {})[r.subject] = r.score
+                subs.setdefault(r.student_no, {})[r.subject] = r.score
         students = []
-        for card in stu_map.values():
-            card['subjects'] = sorted(
-                (card.get('subjects') or {}).items())
-            # 仅保留有分数的科目
-            card['subjects'] = {k: v for k, v in card['subjects'] if v is not None}
+        for no, card in cards.items():
+            card['subjects'] = {k: v for k, v in (subs.get(no) or {}).items()
+                                if v is not None}
             students.append(card)
-        students.sort(key=lambda c: (c['class'] or '', c['no'] or ''))
+        # 只有科目行、没有总分行的学生也补一张最小卡（不丢人）
+        for no, sv in subs.items():
+            if no in cards:
+                continue
+            sv = {k: v for k, v in sv.items() if v is not None}
+            if sv:
+                students.append({'no': no, 'subjects': sv})
+        students.sort(key=lambda c: (c.get('class') or '', c.get('no') or ''))
         return {'id': ex.id, 'name': ex.name, 'grade': ex.grade,
                 'date': ex.exam_date.strftime('%Y-%m-%d'),
                 'students': students}
@@ -204,10 +211,34 @@ def mask_key(enc):
     return plain[:3] + '****' + plain[-4:]
 
 
-def resolve_key(user):
-    """选择调用配置：个人 Key 优先，其次全局；返回 cfg dict 或 None
+def resolve_key(user, client_cfg=None):
+    """选择调用配置，优先级：**浏览器本地 Key** → 个人（服务器存量）→ 全局
+
     cfg: {'api_key','base_url','model','source','provider','provider_name'}
+
+    client_cfg：由前端从 **localStorage** 随请求带上，形如
+        {'api_key','base_url','model','provider'}
+    用户要求：**私人 Key 只存浏览器本地，服务器不留存** —— 这里仅作当次调用使用，
+    不写入数据库、不记日志（且支持任意标准 OpenAI 兼容地址：base_url + model 自定义）。
     """
+    cc = client_cfg or {}
+    ckey = (cc.get('api_key') or '').strip()
+    if ckey:
+        provider = (cc.get('provider') or 'custom').strip() or 'custom'
+        out = {'api_key': ckey, 'provider': provider,
+               'provider_name': ai_providers.get_provider(provider)['name'],
+               'base_url': ai_providers.resolve_base_url(
+                   provider, (cc.get('base_url') or '').strip()),
+               'model': ai_providers.resolve_model(
+                   provider, (cc.get('model') or '').strip()),
+               'source': 'local'}      # 本地 Key：不落库
+        # v1.19.0 本机可选参数（不填 = 不传，由服务商决定）：
+        #   max_tokens=输出上限  reasoning_effort=思考强度(low/medium/high)  max_input=输入上限
+        for _k in ('max_tokens', 'max_input', 'reasoning_effort'):
+            _v = cc.get(_k)
+            if _v not in (None, '', 0, '0'):
+                out[_k] = _v
+        return out
     k = AiKey.query.filter_by(user_id=user.id).first()
     if k and k.api_key_enc:
         provider = k.provider or ai_providers.DEFAULT_PROVIDER
@@ -229,10 +260,79 @@ def resolve_key(user):
 
 # ==================== LLM 转发（OpenAI 兼容；可被测试 mock） ====================
 
+# 思考强度：仅接受 OpenAI 兼容的标准三档（空 = 不传，按服务商默认）
+REASONING_EFFORTS = ('low', 'medium', 'high')
+# 输入预算估算：中文约 1.6 字符/token（保守估），英文/数字约 4 字符/token
+_CHARS_PER_TOKEN = 1.6
+
+
+def _cap_prompt(messages, max_input):
+    """按用户设置的「输入上限」守护提示词
+
+    超过时**成比例截断最长的一条内容**并附上说明标记（而不是报错阻断）：
+    长文本主要是成绩/名册等结构化数据，截尾还能用；报错则完全用不了。
+    """
+    try:
+        limit = int(max_input or 0)
+    except (TypeError, ValueError):
+        limit = 0
+    if limit <= 0 or not messages:
+        return messages
+    total_chars = sum(len(str(m.get('content') or '')) for m in messages)
+    est_tokens = int(total_chars / _CHARS_PER_TOKEN)
+    if est_tokens <= limit:
+        return messages
+    # 成比例缩到 92%，留出余量
+    keep = int(total_chars * limit * 0.92 / est_tokens)
+    out, budget = [], max(keep, 400)
+    for m in sorted(messages, key=lambda x: -len(str(x.get('content') or ''))):
+        c = str(m.get('content') or '')
+        take = c[:budget]
+        if take != c:
+            take += '\n\n[提示：内容超出你设置的输入上限，已截断；如需完整数据请调高输入上限或缩小分析范围]'
+        out.append(dict(m, content=take))
+        budget -= len(take)
+        if budget <= 0:
+            break
+    # 保持原有角色顺序关系（至少保留 system 与最后一条）
+    for m in messages:
+        if m.get('role') == 'system' and all(o.get('role') != 'system' for o in out):
+            out.insert(0, m)
+    return out
+
+
+def _send_once(url, cfg, body, timeout):
+    """发一次请求；返回 (ok, payload_or_msg, 秒, http_code)"""
+    data = json.dumps(body).encode('utf-8')
+    req = urllib.request.Request(
+        url, data=data, method='POST',
+        headers={'Content-Type': 'application/json',
+                 'Authorization': 'Bearer ' + (cfg.get('api_key') or '')})
+    started = time.time()
+    try:
+        with _safe_urlopen(req, timeout=timeout or DEFAULT_TIMEOUT) as resp:
+            return True, json.loads(resp.read().decode('utf-8', 'replace')), \
+                round(time.time() - started, 2), 200
+    except urllib.error.HTTPError as e:
+        try:
+            detail = e.read().decode('utf-8', 'replace')[:200]
+        except Exception:
+            detail = ''
+        return False, _http_error_text(e.code, detail, cfg), \
+            round(time.time() - started, 2), e.code
+    except urllib.error.URLError:
+        return False, ('无法连接 AI 服务商（网络异常或超时），请检查服务器出网、'
+                       '接口地址是否正确'), round(time.time() - started, 2), 0
+    except Exception as e:
+        return False, f'调用失败：{e}', round(time.time() - started, 2), 0
+
+
 def _chat_completions(cfg, messages, timeout=None, max_tokens=None, temperature=None):
     """统一的 OpenAI 兼容 chat/completions 调用，返回 (ok, payload_or_error, 秒)
 
     payload 为厂商原始 JSON；调用方按需取用。
+    v1.19.0：用户在“用户设置”里填的 **输出上限 / 思考强度 / 输入上限** 优先于代码默认值；
+    三者都不填时完全不传，由服务商自行决定（与以前行为一致）。
     """
     provider = cfg.get('provider') or ai_providers.DEFAULT_PROVIDER
     base = (cfg.get('base_url') or ai_providers.resolve_base_url(provider)).rstrip('/')
@@ -244,33 +344,73 @@ def _chat_completions(cfg, messages, timeout=None, max_tokens=None, temperature=
         assert_outbound_url_allowed(url)
     except ValueError as e:
         return False, str(e), 0
+    # 用户本机设置优先：输出上限 / 思考强度 / 输入上限（三者都不填 = 交给服务商默认）
+    mt = cfg.get('max_tokens') or max_tokens
+    effort = (cfg.get('reasoning_effort') or '').strip().lower()
+    messages = _cap_prompt(messages, cfg.get('max_input'))
     body = {'model': ai_providers.resolve_model(provider, cfg.get('model')),
             'messages': messages,
             'temperature': DEFAULT_TEMPERATURE if temperature is None else temperature,
             'stream': False}
-    if max_tokens:
-        body['max_tokens'] = max_tokens
-    data = json.dumps(body).encode('utf-8')
-    req = urllib.request.Request(
-        url, data=data, method='POST',
-        headers={'Content-Type': 'application/json',
-                 'Authorization': 'Bearer ' + (cfg.get('api_key') or '')})
-    started = time.time()
-    try:
-        with _safe_urlopen(req, timeout=timeout or DEFAULT_TIMEOUT) as resp:
-            payload = json.loads(resp.read().decode('utf-8', 'replace'))
-        return True, payload, round(time.time() - started, 2)
-    except urllib.error.HTTPError as e:
+    if mt:
         try:
-            detail = e.read().decode('utf-8', 'replace')[:200]
-        except Exception:
-            detail = ''
-        return False, _http_error_text(e.code, detail, cfg), round(time.time() - started, 2)
-    except urllib.error.URLError:
-        return False, ('无法连接 AI 服务商（网络异常或超时），请检查服务器出网、'
-                       '接口地址是否正确'), round(time.time() - started, 2)
-    except Exception as e:
-        return False, f'调用失败：{e}', round(time.time() - started, 2)
+            body['max_tokens'] = int(mt)
+        except (TypeError, ValueError):
+            if max_tokens:
+                body['max_tokens'] = max_tokens
+    if effort in REASONING_EFFORTS:
+        body['reasoning_effort'] = effort
+
+    ok, out, sec, code = _send_once(url, cfg, body, timeout)
+    if (not ok) and effort and code == 400:
+        # 部分服务商/模型不认 reasoning_effort → 去掉后重试一次，
+        # 不因一个可选设置项把整个 AI 功能卡死
+        body.pop('reasoning_effort', None)
+        ok, out, sec, code = _send_once(url, cfg, body, timeout)
+    return ok, out, sec
+
+
+# v1.19.0 截图导入：图片 → 结构化数据（OpenAI 兼容的多模态 vision 调用）
+VISION_PROMPT_AFFAIR = (
+    '这是一张考场安排表（可能是推荐名单/纸质表格的照片或截图）。'
+    '请把表格内容读出来，只输出一个 JSON（不要任何解释）：\n'
+    '{"students":[{"name":"姓名","class_name":"班级","room_no":"考场号","seat_no":1}],'
+    '"rooms":[{"room_no":"考场号","location":"位置","capacity":30,"subject":"选科"}],'
+    '"notes":"看不清或需要提醒的地方"}\n'
+    '规则：看不清的字段留空字符串或 null，不要猜测；seat_no 必须是整数。'
+)
+VISION_PROMPT_BANDS = (
+    '这是一张考试成绩分数线表（截图或照片）。请读出分数线，只输出一个 JSON（不要任何解释）：\n'
+    '{"bands":[{"layer":"层级名（如特控线/本科线）","direction":"物理|历史|空",'
+    '"subject":"科目名或空表示总分","score":123.5}],"notes":"提醒"}\n'
+    '规则：层级名原样保留；每个层级至少给出总分线（subject 留空）；看不清的行不要输出。'
+)
+
+
+def chat_with_image(cfg, prompt, image_bytes, mime='image/png',
+                    timeout=None, max_tokens=None):
+    """把图片作为**多模态消息**发给 OpenAI 兼容接口，返回 (ok, 文本或错误, 秒)
+
+    H-9 口径不变：仍走出站白名单与 DNS 校验（均在 _chat_completions 内），
+    Key 依旧只由调用方传入、不落库。图片以 data URI 内联（base64），
+    避免再引入对象存储；单张控制在调用方限流（建议 ≤ 4MB）。
+    """
+    import base64
+    b64 = base64.b64encode(image_bytes).decode('ascii')
+    messages = [{'role': 'user', 'content': [
+        {'type': 'text', 'text': prompt},
+        {'type': 'image_url',
+         'image_url': {'url': 'data:%s;base64,%s' % (mime or 'image/png', b64)}},
+    ]}]
+    ok, payload, sec = _chat_completions(cfg, messages, timeout=timeout,
+                                        max_tokens=max_tokens)
+    if not ok:
+        return False, payload, sec
+    try:
+        text = payload['choices'][0]['message']['content']
+    except (KeyError, IndexError, TypeError):
+        return False, '服务商返回内容无法解析（可能不支持图片输入）', sec
+    return True, text, sec
 
 
 def _http_error_text(code, detail, cfg):

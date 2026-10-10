@@ -1,4 +1,4 @@
-# StuLink v1.18.8.0 2026-10-09
+# StuLink v1.18.9.1 2026-10-10
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 import logging
 import os
@@ -348,10 +348,13 @@ def create_app():
     app.jinja_env.auto_reload = app.config.get('TEMPLATES_AUTO_RELOAD', False)
     # 模板全局函数：选科方向判断与配色
     from app.utils.helpers import subject_direction, subject_badge_class, normalize_subject
+    # v1.19.0 成绩模块“考试上下文”导航（点进某场考试后侧栏切换为本场流程）
+    from app.utils.exam_nav import exam_nav
     app.jinja_env.globals.update(
         subject_direction=subject_direction,
         subject_badge_class=subject_badge_class,
         normalize_subject=normalize_subject,
+        exam_nav=exam_nav,
     )
 
     db.init_app(app)
@@ -580,7 +583,7 @@ def create_app():
             return
         if request.path.startswith('/static/'):
             return
-        # v1.18.8.0 S-1：AJAX/Fetch/JSON 客户端不能处理 302 到 HTML 页面，
+        # v1.18.9.1 S-1：AJAX/Fetch/JSON 客户端不能处理 302 到 HTML 页面，
         # 否则前端 fetch().json() 会抛异常、无“请先改密”提示。改为 401 JSON。
         wants_json = (request.accept_mimetypes.best == 'application/json'
                       or request.is_json

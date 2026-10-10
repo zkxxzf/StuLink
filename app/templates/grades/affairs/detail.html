@@ -3,7 +3,7 @@
 {% block content %}
 <div class="d-flex justify-content-between align-items-center mb-2 flex-wrap gap-2">
     <div>
-        {# v1.18.8.0：考务已并入考试管理，面包屑直接返回考试列表 #}
+        {# v1.18.9.1：考务已并入考试管理，面包屑直接返回考试列表 #}
         <a href="{{ url_for('grades.exams_list') }}" class="text-decoration-none text-muted small">
             <i class="bi bi-arrow-left"></i> 返回考试管理</a>
         <h5 class="mb-0 mt-1"><i class="bi bi-clipboard-check"></i> {{ affair.name }}
@@ -66,7 +66,7 @@
     <!-- ===== 步骤① 学生名单 ===== -->
     <div class="tab-pane fade show active" id="t1">
         {# v1.12.1 学生名单改为从学生库同步导入，不再走 Excel 重复导入；新增学生可直接写入学籍库 #}
-        {# v1.18.8.0 取消「同时移除学籍已删的学生」复选框：无班级/已转出/已毕业学生一律不进入成绩模块，且同步时默认自动剔除 #}
+        {# v1.18.9.1 取消「同时移除学籍已删的学生」复选框：无班级/已转出/已毕业学生一律不进入成绩模块，且同步时默认自动剔除 #}
         <div class="d-flex gap-2 mb-2 flex-wrap align-items-center">
             <button class="btn btn-primary btn-sm" onclick="syncStudents()">
                 <i class="bi bi-cloud-download"></i> 从学生库导入</button>
@@ -182,7 +182,19 @@
                 <label class="form-check-label" for="m1"><b>模式1</b>：考号 = 学生学号（仅分配考场/座号）</label></div>
             <div class="form-check"><input class="form-check-input" type="radio" name="mode" id="m2" value="2" {% if affair.mode==2 %}checked{% endif %}>
                 <label class="form-check-label" for="m2"><b>模式2</b>：使用「自定义考号」列（仅分配考场/座号）</label></div>
-            <div class="text-muted small my-2">编排规则：先安置「固定考场/固定座号」学生，其余按选科分组、同班邻座≤1 随机分配（与 Excel 宏一致）。</div>
+            <div class="form-check border rounded p-2 ps-4 mb-2 bg-light">
+                <input class="form-check-input" type="checkbox" id="layeredChk">
+                <label class="form-check-label" for="layeredChk">
+                    <b>按成绩分层编排</b>（推荐）
+                </label>
+                <div class="text-muted small mt-1">
+                    开启后：同一<b>选科组合</b>内按<b>上一场同阶段考试</b>（同年级 + 同考试阶段）的
+                    <b>校内方向排名</b>升序填座——考场按房间号顺序、座位从前往后依次填满，
+                    即“前 N 个考场共 M 座 → 第 1~M 名填这几个考场”。<br>
+                    固定考场/固定座位优先，自动分配会跳过已占座位；<b>首次考试无历史成绩时自动退化为随机</b>。
+                </div>
+            </div>
+            <div class="text-muted small my-2">编排规则：先安置「固定考场/固定座号」学生，其余按选科分组（未勾选分层时：同班邻座≤1 随机分配）。</div>
             <button class="btn btn-primary btn-sm" onclick="runArrange()">
                 <i class="bi bi-shuffle"></i> 开始编排并生成考号</button>
             <span id="arrangeMsg" class="ms-2 small"></span>
@@ -418,7 +430,7 @@ if(location.hash){
 }
 
 // v1.12.1 学生名单从学籍库同步导入（增量：新增+刷新基本信息）
-// v1.18.8.0 取消 remove_missing 参数：无班级/已转出/已毕业学生一律不进入成绩模块，
+// v1.18.9.1 取消 remove_missing 参数：无班级/已转出/已毕业学生一律不进入成绩模块，
 // 名单中不再符合条件的学生（学籍已删等）由服务端默认自动剔除。
 function syncStudents(){
     var fd = new FormData();
@@ -729,6 +741,9 @@ function saveRoom(){
 function runArrange(){
     var mode = document.querySelector('input[name=mode]:checked').value;
     var fd = new FormData(); fd.append('mode', mode);
+    // v1.19.0 按成绩分层编排（勾选后按上一场同阶段考试排名分段填座）
+    var lc = document.getElementById('layeredChk');
+    fd.append('layered', (lc && lc.checked) ? '1' : '0');
     document.getElementById('arrangeMsg').textContent='编排中…';
     fetch('/grades/affairs/'+AID+'/arrange', {method:'POST', body:fd, headers:{'X-CSRFToken':csrf()}})
         .then(r=>r.json()).then(d=>{

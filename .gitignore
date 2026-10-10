@@ -86,3 +86,8 @@ app/static/uploads/
 
 # 轻量部署临时打包产物（禁止入库）
 _stulink_*.tar.gz
+
+# 临时上传产物（勿入库）
+_v*.tar.gz
+*.b64
+_v*.sh

@@ -1,4 +1,4 @@
-# StuLink v1.18.8.0 2026-10-09
+# StuLink v1.18.9.1 2026-10-10
 # 成绩导入服务：Excel 解析（模板 A/B 识别 / 年级列校验 / 学号匹配主库 / 分批行集规范化）
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 import openpyxl
@@ -12,10 +12,15 @@ _NAME_KEYS = ('姓名',)
 _CLASS_KEYS = ('班级',)
 _GRADE_KEYS = ('年级',)
 _TOTAL_KEYS = ('总分', '总成绩')
+# v1.19.0 考号（联考等第三方编排，可选列；导入后落到 exam_scores.exam_no）
+_EXAM_NO_KEYS = ('考号', '准考证号', '考试号')
+# v1.19.0 原始分列：表头 = 科目名/总分 + 下列后缀之一（如“语文原始分”“总分原始分”）
+# 命中时该列不进主分（主分仍是赋分），而写入 exam_scores.raw_score
+_RAW_SUFFIX = ('原始分', '原始成绩', '原始', '裸分')
 # 科目别名：文件里常见的"英语"对齐字典"外语"
 _SUBJECT_ALIAS = {'英语': '外语'}
 # 识别后忽略的列（粘贴参考 Excel 整表常见）
-_IGNORED_COLS = {'考号', '方向', '选科', '备注', '座位号'}
+_IGNORED_COLS = {'方向', '选科', '备注', '座位号'}
 
 SCAN_HEADER_MAX_ROW = 15
 MAX_IMPORT_ROWS = 6000
@@ -59,6 +64,8 @@ def parse_score_excel(stream, exam):
                 continue
             if cell in _NO_KEYS:
                 found['no'] = i
+            elif cell in _EXAM_NO_KEYS:
+                found['exam_no'] = i
             elif cell in _NAME_KEYS:
                 found['name'] = i
             elif cell in _CLASS_KEYS:
@@ -71,6 +78,18 @@ def parse_score_excel(stream, exam):
                 found.setdefault('subjects', {})[_SUBJECT_ALIAS[cell]] = i
             elif cell in SUBJECTS:
                 found.setdefault('subjects', {})[cell] = i
+            else:
+                # v1.19.0 原始分列：科目名/总分 + 原始分后缀
+                if not any(sfx in cell for sfx in _RAW_SUFFIX):
+                    continue
+                base = cell
+                for sfx in _RAW_SUFFIX:
+                    base = base.replace(sfx, '')
+                base = base.strip().strip('()（）-_')
+                base = _SUBJECT_ALIAS.get(base, base)
+                if base in SUBJECTS or base in _TOTAL_KEYS:
+                    key = TOTAL_SUBJECT if base in _TOTAL_KEYS else base
+                    found.setdefault('raw_subjects', {})[key] = i
         if 'no' in found or ('name' in found and 'subjects' in found):
             header_idx = found
             header_line = row_i
@@ -91,6 +110,7 @@ def parse_score_excel(stream, exam):
     errors = []
     line_no = header_line
     absent_rows = 0
+    raw_in_file = False     # 文件是否带原始分列（供导入摘要提示）
     for row in ws.iter_rows(min_row=header_line + 1, values_only=True):
         line_no += 1
         cells = [_cell_text(c) for c in row]
@@ -156,7 +176,27 @@ def parse_score_excel(stream, exam):
         if not row_has_score:
             absent_rows += 1
             continue  # 全行无分 = 未参加本场考试
-        rows.append({'no': no, 'line': line_no, 'subjects': subjects, 'total': total})
+        # v1.19.0 原始分（可选列）与考号：原始分只做数值校验，不参与“是否缺考”判定
+        raw_subjects = {}
+        for sub, ci in (header_idx.get('raw_subjects') or {}).items():
+            rval = cells[ci] if ci < len(cells) else ''
+            if rval == '':
+                continue
+            try:
+                raw_subjects[sub] = float(rval)
+            except (TypeError, ValueError):
+                bad = f'{sub}原始分列“{rval}”不是数值'
+                break
+        if bad:
+            errors.append({'line': line_no, 'no': no, 'reason': bad})
+            continue
+        exam_no = ''
+        if 'exam_no' in header_idx:
+            ei = header_idx['exam_no']
+            exam_no = (cells[ei] if ei < len(cells) else '').strip()
+        rows.append({'no': no, 'line': line_no, 'subjects': subjects, 'total': total,
+                     'raw_subjects': raw_subjects, 'exam_no': exam_no})
+        raw_in_file = raw_in_file or bool(raw_subjects)
 
     # 修复：文件内同一学号重复出现时仅保留最后一次出现并给出提示（原先静默后行覆盖前行）
     _seen = {}
@@ -184,6 +224,10 @@ def parse_score_excel(stream, exam):
             'no': True, 'name': 'name' in header_idx, 'grade': 'grade' in header_idx,
             'class_name': 'class_name' in header_idx, 'total': 'total' in header_idx,
             'subjects': subjects_in_file, 'ignored': ignored,
+            # v1.19.0 新增识别结果：考号列 / 原始分列（供导入预览提示）
+            'exam_no': 'exam_no' in header_idx,
+            'raw_in_file': bool(raw_in_file),
+            'raw_subjects': sorted((header_idx.get('raw_subjects') or {}).keys()),
         },
         'rows': rows,
         'errors': errors,
@@ -224,7 +268,7 @@ def _attach_student_info(exam, rows):
             for s in Student.query.filter(
                     db.func.cast(Student.student_number, db.Integer).in_(ints)).all():
                 stu_map.setdefault(_norm_no(s.student_number), s)
-    # 该年级班型方向（兜底）与班型（v1.18.8.0 快照）
+    # 该年级班型方向（兜底）与班型（v1.18.9.1 快照）
     cp_map = {}
     ct_map = {}
     try:
@@ -246,14 +290,14 @@ def _attach_student_info(exam, rows):
         # 修复：学号以主库原值为准（归一化仅用于匹配），保证成绩行与主库键一致
         r['no'] = stu.student_number
         r['grade'] = stu.grade
-        # v1.18.8.0 班级以 Excel「班级」列为准（= 考试当时），无法识别才回落主库当前值；
+        # v1.18.9.1 班级以 Excel「班级」列为准（= 考试当时），无法识别才回落主库当前值；
         # 否则拖到分班后才补导的历史考试会被记成新班级（换班后历史失真）
         _excel_cls = normalize_class_name(r.get('class_name'))
         r['class_name'] = _excel_cls or stu.class_name
         r['class_src'] = 'excel' if _excel_cls else 'db'
         r['subject_selection'] = stu.subject_selection or ''
         r['enrollment_status'] = stu.enrollment_status or ''
-        # v1.18.8.0 班型快照（强基班/卓越班…），供去差均分等分析用「当时班型」
+        # v1.18.9.1 班型快照（强基班/卓越班…），供去差均分等分析用「当时班型」
         r['class_type'] = ct_map.get(r['class_name'], '') or ''
         direction = ''
         sel = (r['subject_selection'] or '').strip()
