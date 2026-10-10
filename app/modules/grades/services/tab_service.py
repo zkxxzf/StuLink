@@ -1,4 +1,4 @@
-# StuLink v1.18.9.0 2026-10-09
+# StuLink v1.18.9.1 2026-10-09
 # 四大分析模块数据组装（供 /api/analysis/* 与 Excel 导出共用）
 # 表/图编号与设计文档 2.3 对应：A1(年级) A2(班级) A3(学科) A4(任课教师)
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
@@ -727,7 +727,7 @@ def teacher_tab(exam_id, subject=None, links=None, grade=None):
     if not data.total_rows:
         return _empty(exam)
     if links is None:
-        # v1.18.9.0 优先读本场考试的任课快照（考试当时）；无则惰性生成，
+        # v1.18.9.1 优先读本场考试的任课快照（考试当时）；无则惰性生成，
         # 生成失败（旧库无表）再从当前映射回落
         from app.modules.grades.services import teacher_snapshot_service as _tss
         _snap = _tss.links_of(exam_id, grade=grade)
