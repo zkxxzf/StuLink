@@ -135,25 +135,46 @@ def index():
     # 按年份降序（新年级在前）
     grade_query.sort(key=lambda g: int(''.join(filter(str.isdigit, g.grade or '')) or '0'), reverse=True)
 
+    # 2026-10-10 架构审计修复：原实现每个年级查 3 次（学生 id+gender、住校记录、
+    # 走读计数）——年级一多就是 N+1。改为：① 一次性取全部相关学生；② 一次性
+    # group_by 按 (student_id, boarding_type) 统计住宿；循环内只做内存聚合。
+    # 统计口径（住校男女数、走读数）完全不变。
+    _all_grades = [g.grade for g in grade_query]
+    _student_rows = (db.session.query(Student.id, Student.gender, Student.grade)
+                     .filter(Student.grade.in_(_all_grades)).all()
+                     if _all_grades else [])
+    _gender_map = {r[0]: r[1] for r in _student_rows}
+    _grade_of_student = {r[0]: r[2] for r in _student_rows}
+
+    # 按 (student_id, boarding_type) 计数，避免逐年级往返
+    _acc_counter = {}
+    if _student_rows:
+        _ids = [r[0] for r in _student_rows]
+        for _sid, _bt, _cnt in db.session.query(
+                StudentAccommodation.student_id,
+                StudentAccommodation.boarding_type,
+                func.count(StudentAccommodation.id)
+        ).filter(
+            StudentAccommodation.student_id.in_(_ids),
+            StudentAccommodation.boarding_type.in_(('住校', '走读')),
+        ).group_by(StudentAccommodation.student_id,
+                   StudentAccommodation.boarding_type).all():
+            _acc_counter[(_sid, _bt)] = _cnt
+
     grade_accomm_map = {}
-    for g in grade_query:
-        grade = g.grade
-        # 一次查出该年级所有学生的 id+gender
-        grade_students = db.session.query(Student.id, Student.gender).filter_by(grade=grade).all()
-        grade_student_ids = [s[0] for s in grade_students]
-        gender_map = {s[0]: s[1] for s in grade_students}
-
-        boarding_records = StudentAccommodation.query.filter(
-            StudentAccommodation.student_id.in_(grade_student_ids),
-            StudentAccommodation.boarding_type == '住校'
-        ).all() if grade_student_ids else []
-        day_count = StudentAccommodation.query.filter(
-            StudentAccommodation.student_id.in_(grade_student_ids),
-            StudentAccommodation.boarding_type == '走读'
-        ).count() if grade_student_ids else 0
-
-        boarding_male = sum(1 for r in boarding_records if gender_map.get(r.student_id) == '男')
-        boarding_female = sum(1 for r in boarding_records if gender_map.get(r.student_id) == '女')
+    for grade in _all_grades:
+        grade_student_ids = [sid for sid, g in _grade_of_student.items() if g == grade]
+        boarding_records = []      # 保持原语义：住校学生 id 列表
+        day_count = 0
+        for sid in grade_student_ids:
+            if _acc_counter.get((sid, '住校')):
+                boarding_records.append(sid)
+            if _acc_counter.get((sid, '走读')):
+                day_count += _acc_counter[(sid, '走读')]
+        boarding_male = sum(1 for sid in boarding_records
+                            if _gender_map.get(sid) == '男')
+        boarding_female = sum(1 for sid in boarding_records
+                              if _gender_map.get(sid) == '女')
         grade_accomm_map[grade] = {
             'boarding': len(boarding_records),
             'boarding_male': boarding_male,
