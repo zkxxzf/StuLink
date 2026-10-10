@@ -87,7 +87,12 @@ def index():
     # v1.19.0 考试上下文：?exam=<id> 让本页进入“考试态”（侧栏切换到本场流程，并默认选中该场）
     raw = (request.args.get('exam') or '').strip()
     initial_exam_id = int(raw) if raw.isdigit() else None
-    return render_template('grades/index.html', initial_exam_id=initial_exam_id)
+    # v1.19.0 三分栏深链：侧栏「班级分析 / 学科分析」等直接落到对应页签（?tab=class|subject|…）
+    tab = (request.args.get('tab') or '').strip()
+    if tab not in ('grade', 'class', 'subject', 'teacher', 'compare'):
+        tab = ''
+    return render_template('grades/index.html', initial_exam_id=initial_exam_id,
+                           initial_tab=tab)
 
 
 @bp.route('/history')

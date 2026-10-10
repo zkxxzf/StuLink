@@ -355,28 +355,38 @@
                    href="{{ url_for('grades.exam_ai_import', exam_id=EN.exam_id) }}">AI 智能导入</a>
                 <a class="efn-item {% if request.endpoint == 'grades.bands_page' %}active{% endif %}" data-nav="bands"
                    href="{{ url_for('grades.bands_page', exam_id=EN.exam_id) }}">划线分层</a>
-                <a class="efn-item {% if EN.section == 'analysis' %}active{% endif %}" data-nav="analysis"
-                   href="{{ url_for('grades.index') }}?exam={{ EN.exam_id }}">成绩分析{% if not EN.steps[3].done %}<span class="efn-tag">待划线</span>{% endif %}</a>
-                {# v1.19.0 分析子模块：收在本场考试下，做成可折叠分组（风格同参考图） #}
+                {# v1.19.0 成绩分析：折叠组 —— 总览（全年级对比）/ 班级分析（班主任）/ 学科分析（任课教师）
+                   + 分析类子模块（临界生对比 / 自由表 / 汇报区）。
+                   入口按角色分层：总览与汇报区同门槛（管理员/校领导/年级长）；其余按 grades.view，
+                   数据范围由后端 scope 过滤（班主任只见本班、任课教师只见任教班）。 #}
                 {% if current_user.has_perm('grades.view') or current_user.role == 'admin' or
                      (current_user.permission_group and current_user.permission_group.scope_type in ('school', 'grade')) %}
+                {% set _ana_ep = ('grades.index', 'grades.global_compare_page', 'grades.pivot_page',
+                                  'grades.report_page', 'grades.exam_near_line') %}
+                {% set _is_lead = current_user.role == 'admin' or (current_user.permission_group and
+                     current_user.permission_group.scope_type in ('school', 'grade')) %}
                 <a class="efn-group" data-bs-toggle="collapse" href="#efnAnalysis" role="button"
-                   aria-expanded="{{ 'true' if EN.section == 'analysis' else 'false' }}">
-                    <span>分析子模块</span><i class="bi bi-chevron-down"></i>
+                   aria-expanded="{{ 'true' if (EN.section == 'analysis' or request.endpoint in _ana_ep) else 'false' }}">
+                    <span>成绩分析</span><i class="bi bi-chevron-down"></i>
                 </a>
-                <div class="collapse {% if EN.section == 'analysis' %}show{% endif %}" id="efnAnalysis">
+                <div class="collapse {% if EN.section == 'analysis' or request.endpoint in _ana_ep %}show{% endif %}" id="efnAnalysis">
+                    {% if _is_lead %}
+                    <a class="efn-item ps-4 {% if request.endpoint == 'grades.global_compare_page' %}active{% endif %}" data-nav="global"
+                       href="{{ url_for('grades.global_compare_page') }}?exam={{ EN.exam_id }}">总览（全年级对比）</a>
+                    {% endif %}
                     {% if current_user.has_perm('grades.view') %}
-                    <a class="efn-item ps-4 {% if request.endpoint == 'grades.pivot_page' %}active{% endif %}" data-nav="pivot"
-                       href="{{ url_for('grades.pivot_page') }}?exam={{ EN.exam_id }}">成绩分析自由表</a>
+                    <a class="efn-item ps-4 {% if request.endpoint == 'grades.index' and request.args.get('tab') == 'class' %}active{% endif %}" data-nav="ana_class"
+                       href="{{ url_for('grades.index') }}?exam={{ EN.exam_id }}&tab=class">班级分析</a>
+                    <a class="efn-item ps-4 {% if request.endpoint == 'grades.index' and request.args.get('tab') == 'subject' %}active{% endif %}" data-nav="ana_subject"
+                       href="{{ url_for('grades.index') }}?exam={{ EN.exam_id }}&tab=subject">学科分析</a>
                     <a class="efn-item ps-4 {% if request.endpoint == 'grades.exam_near_line' %}active{% endif %}" data-nav="near"
                        href="{{ url_for('grades.exam_near_line', exam_id=EN.exam_id) }}">临界生对比</a>
+                    <a class="efn-item ps-4 {% if request.endpoint == 'grades.pivot_page' %}active{% endif %}" data-nav="pivot"
+                       href="{{ url_for('grades.pivot_page') }}?exam={{ EN.exam_id }}">成绩分析自由表</a>
                     {% endif %}
-                    {% if current_user.role == 'admin' or (current_user.permission_group and
-                         current_user.permission_group.scope_type in ('school', 'grade')) %}
+                    {% if _is_lead %}
                     <a class="efn-item ps-4 {% if request.endpoint == 'grades.report_page' %}active{% endif %}" data-nav="report"
                        href="{{ url_for('grades.report_page') }}?exam={{ EN.exam_id }}">成绩汇报区</a>
-                    <a class="efn-item ps-4 {% if request.endpoint == 'grades.global_compare_page' %}active{% endif %}" data-nav="global"
-                       href="{{ url_for('grades.global_compare_page') }}?exam={{ EN.exam_id }}">全局对比</a>
                     {% endif %}
                 </div>
                 {% endif %}

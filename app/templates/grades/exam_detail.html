@@ -125,12 +125,7 @@
             {% for stu in students %}
             <tr data-no="{{ stu.no }}">
                 <td class="small">{{ stu.no }}</td>
-                <td>{{ stu.name }}
-                    {% if stu.status_badge %}
-                    <span class="badge bg-danger-subtle text-danger small"
-                          title="当前学籍状态：{{ stu.status }}（人已不在校）">{{ stu.status_badge }}</span>
-                    {% endif %}
-                </td>
+                <td>{{ stu.name }}</td>
                 <td class="small text-muted">{{ stu.exam_no or '—' }}</td>
                 <td>{{ stu.class_name }}</td>
                 <td>{{ stu.direction }}</td>
