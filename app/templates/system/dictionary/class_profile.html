@@ -57,7 +57,7 @@
                         <td>
                             <div class="d-flex flex-wrap gap-1 subject-checks">
                                 {% for s in subject_options %}
-                                {# v1.18.8.0 方向与组合挂钩：data-dir 供 JS 置灰不匹配项；全科单独配色 #}
+                                {# v1.18.9.0 方向与组合挂钩：data-dir 供 JS 置灰不匹配项；全科单独配色 #}
                                 <label class="badge-subject {% if s == '全科' %}subj-general{% else %}{{ subject_badge_class(s) }}{% endif %} {% if s in row.subjects %}active{% endif %}"
                                        data-value="{{ s }}"
                                        data-dir="{{ subject_direction(s) }}"
@@ -109,7 +109,7 @@
 .badge-subject.subj-history { background: #fff3e0; color: #b45309; border-color: #ffd8a8; }
 .badge-subject.subj-physics.active { background: #0d6efd; color: #fff; border-color: #0d6efd; }
 .badge-subject.subj-history.active { background: #e8590c; color: #fff; border-color: #e8590c; }
-/* v1.18.8.0 全科：绿色系（仅方向为空时可选） */
+/* v1.18.9.0 全科：绿色系（仅方向为空时可选） */
 .badge-subject.subj-general { background: #e6f7ee; color: #0f7b4f; border-color: #a7e0c4; }
 .badge-subject.subj-general.active { background: #12b76a; color: #fff; border-color: #12b76a; }
 /* 与当前方向不匹配的组合：置灰不可点（防止选错） */
@@ -117,7 +117,7 @@
     opacity: .4; cursor: not-allowed; text-decoration: line-through;
     background: #f5f5f5 !important; color: #9ca3af !important; border-color: #e5e7eb !important;
 }
-/* v1.18.8.0 班型分色：强基班/卓越班/普通班 视觉区分 */
+/* v1.18.9.0 班型分色：强基班/卓越班/普通班 视觉区分 */
 .class-type-select.ct-strong { background: #fdecef; color: #b42318; border-color: #f5b5bf; font-weight: 600; }
 .class-type-select.ct-excellent { background: #e8f1ff; color: #1d4ed8; border-color: #bcd4fb; font-weight: 600; }
 .class-type-select.ct-regular { background: #f3f4f6; color: #4b5563; border-color: #d1d5db; }
@@ -138,7 +138,7 @@
 {% block extra_js %}
 <script>
 $(function() {
-    // v1.18.8.0 班型分色：按值给下拉上不同颜色（强基班/卓越班/普通班）
+    // v1.18.9.0 班型分色：按值给下拉上不同颜色（强基班/卓越班/普通班）
     var CT_COLOR = { '强基班': 'ct-strong', '卓越班': 'ct-excellent', '普通班': 'ct-regular' };
     function paintClassType($sel) {
         $sel.removeClass('ct-strong ct-excellent ct-regular');
@@ -146,7 +146,7 @@ $(function() {
         if (c) $sel.addClass(c);
     }
 
-    // v1.18.8.0 方向与选科组合挂钩：
+    // v1.18.9.0 方向与选科组合挂钩：
     //   物理方向 → 仅物XX可选；历史方向 → 仅史XX可选；“全科”仅方向为空时可选
     //   不匹配项置灰不可点，并自动取消其选中（防止选错）
     function applyDirConstraint($row) {

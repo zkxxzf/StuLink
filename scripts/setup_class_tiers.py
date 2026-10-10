@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-# StuLink v1.18.8.0 2026-10-09
+# StuLink v1.18.9.0 2026-10-09
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 """班型层次与高一「全科」初始化（幂等，默认 dry-run）
 
