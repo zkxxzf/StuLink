@@ -91,3 +91,6 @@ _stulink_*.tar.gz
 _v*.tar.gz
 *.b64
 _v*.sh
+
+# 数据备份目录（2026-10-10：曾误提交含 223MB grades.db 的备份目录，被 Gitee 单文件 100MB 限制拒收）
+data_backup_*/
