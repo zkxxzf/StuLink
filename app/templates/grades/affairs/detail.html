@@ -182,7 +182,19 @@
                 <label class="form-check-label" for="m1"><b>模式1</b>：考号 = 学生学号（仅分配考场/座号）</label></div>
             <div class="form-check"><input class="form-check-input" type="radio" name="mode" id="m2" value="2" {% if affair.mode==2 %}checked{% endif %}>
                 <label class="form-check-label" for="m2"><b>模式2</b>：使用「自定义考号」列（仅分配考场/座号）</label></div>
-            <div class="text-muted small my-2">编排规则：先安置「固定考场/固定座号」学生，其余按选科分组、同班邻座≤1 随机分配（与 Excel 宏一致）。</div>
+            <div class="form-check border rounded p-2 ps-4 mb-2 bg-light">
+                <input class="form-check-input" type="checkbox" id="layeredChk">
+                <label class="form-check-label" for="layeredChk">
+                    <b>按成绩分层编排</b>（推荐）
+                </label>
+                <div class="text-muted small mt-1">
+                    开启后：同一<b>选科组合</b>内按<b>上一场同阶段考试</b>（同年级 + 同考试阶段）的
+                    <b>校内方向排名</b>升序填座——考场按房间号顺序、座位从前往后依次填满，
+                    即“前 N 个考场共 M 座 → 第 1~M 名填这几个考场”。<br>
+                    固定考场/固定座位优先，自动分配会跳过已占座位；<b>首次考试无历史成绩时自动退化为随机</b>。
+                </div>
+            </div>
+            <div class="text-muted small my-2">编排规则：先安置「固定考场/固定座号」学生，其余按选科分组（未勾选分层时：同班邻座≤1 随机分配）。</div>
             <button class="btn btn-primary btn-sm" onclick="runArrange()">
                 <i class="bi bi-shuffle"></i> 开始编排并生成考号</button>
             <span id="arrangeMsg" class="ms-2 small"></span>
@@ -729,6 +741,9 @@ function saveRoom(){
 function runArrange(){
     var mode = document.querySelector('input[name=mode]:checked').value;
     var fd = new FormData(); fd.append('mode', mode);
+    // v1.19.0 按成绩分层编排（勾选后按上一场同阶段考试排名分段填座）
+    var lc = document.getElementById('layeredChk');
+    fd.append('layered', (lc && lc.checked) ? '1' : '0');
     document.getElementById('arrangeMsg').textContent='编排中…';
     fetch('/grades/affairs/'+AID+'/arrange', {method:'POST', body:fd, headers:{'X-CSRFToken':csrf()}})
         .then(r=>r.json()).then(d=>{
