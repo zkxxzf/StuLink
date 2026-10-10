@@ -88,6 +88,68 @@
         </div>
     </div>
 
+    {# 2026-10-10：计入教师业绩库（审核通过后按这里的映射自动入账） #}
+    <div class="card mb-3" id="achCard">
+        <div class="card-header"><i class="bi bi-award"></i> 计入教师业绩库</div>
+        <div class="card-body">
+            <div class="form-check form-switch mb-3">
+                <input class="form-check-input" type="checkbox" name="to_achievement" value="1"
+                       id="toAchievementSwitch"
+                       {% if form_data and form_data.to_achievement %}checked{% endif %}>
+                <label class="form-check-label" for="toAchievementSwitch">
+                    审核通过后，自动为每位教师生成一条业绩记录
+                </label>
+                <div class="form-text">不开启则本次收集只做统计与材料归档，不进业绩库。</div>
+            </div>
+            <div class="row" id="achFields">
+                <div class="col-md-3 mb-3">
+                    <label class="form-label">业绩类别</label>
+                    <select name="ach_category" class="form-select">
+                        <option value="">-- 选择类别 --</option>
+                        {% for k, label in ach_categories %}
+                        <option value="{{ k }}" {% if form_data and form_data.ach_category == k %}selected{% endif %}>{{ label }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div class="col-md-3 mb-3">
+                    <label class="form-label">业绩级别</label>
+                    <select name="ach_level" class="form-select">
+                        <option value="">-- 选择级别 --</option>
+                        {% for lv in ach_levels %}
+                        <option value="{{ lv }}" {% if form_data and form_data.ach_level == lv %}selected{% endif %}>{{ lv }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div class="col-md-6 mb-3">
+                    <label class="form-label">业绩名称来源</label>
+                    <div class="mt-1">
+                        <div class="form-check form-check-inline">
+                            <input class="form-check-input" type="radio" name="ach_title_mode" id="achModeTpl" value="template"
+                                   {% if not form_data or form_data.ach_title_mode != 'question' %}checked{% endif %}>
+                            <label class="form-check-label" for="achModeTpl">用表单标题</label>
+                        </div>
+                        <div class="form-check form-check-inline">
+                            <input class="form-check-input" type="radio" name="ach_title_mode" id="achModeQ" value="question"
+                                   {% if form_data and form_data.ach_title_mode == 'question' %}checked{% endif %}>
+                            <label class="form-check-label" for="achModeQ">取某题答案</label>
+                        </div>
+                    </div>
+                    <select name="ach_title_question_index" class="form-select mt-2" id="achTitleQuestionSelect">
+                        <option value="">-- 选择题目的答案作为业绩名称 --</option>
+                    </select>
+                    <div class="form-text">题目选项随下方题目列表自动同步（按题目序号）。</div>
+                </div>
+                <div class="col-md-12 mb-3">
+                    <label class="form-label">业绩标签</label>
+                    <input name="ach_tags" class="form-control" maxlength="100"
+                           value="{{ form_data.ach_tags if form_data else '' }}"
+                           placeholder="逗号分隔，如：课题, 省级">
+                    <div class="form-text">常用：{{ tag_presets|join(' / ') }}</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <!-- 题目编辑区 -->
     <div class="card mb-3">
         <div class="card-header d-flex justify-content-between align-items-center">
@@ -124,4 +186,52 @@ window.FORM_CONFIG = {
 };
 </script>
 <script src="{{ url_for('static', filename='js/academic_forms.js') }}"></script>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+(function () {
+    var sel = document.getElementById('achTitleQuestionSelect');
+    if (!sel) { return; }
+    var container = document.getElementById('questionsContainer');
+    var sw = document.getElementById('toAchievementSwitch');
+    var fields = document.getElementById('achFields');
+
+    // 业绩名称取自第几题：选项随题目列表实时同步（题目是 JS 动态渲染的）
+    function refresh() {
+        var keep = sel.value;
+        var inputs = container ? container.querySelectorAll('.q-title') : [];
+        sel.innerHTML = '<option value="">-- 选择题目的答案作为业绩名称 --</option>';
+        inputs.forEach(function (inp, i) {
+            var opt = document.createElement('option');
+            opt.value = String(i);
+            opt.textContent = '第' + (i + 1) + '题：'
+                + ((inp.value || '').trim() || '（未命名）');
+            sel.appendChild(opt);
+        });
+        if (keep) { sel.value = keep; }
+    }
+
+    function toggle() {
+        if (fields && sw) { fields.style.display = sw.checked ? '' : 'none'; }
+    }
+
+    if (sw) { sw.addEventListener('change', toggle); }
+    toggle();
+
+    if (container) {
+        if (window.MutationObserver) {
+            new MutationObserver(refresh).observe(container,
+                {childList: true, subtree: true});
+        }
+        container.addEventListener('input', function (ev) {
+            if (ev.target && ev.target.classList
+                && ev.target.classList.contains('q-title')) { refresh(); }
+        });
+    }
+    refresh();
+    var preset = {{ (form_data.ach_title_question_index if form_data else None)|tojson }};
+    if (preset !== null && preset !== undefined) { sel.value = String(preset); }
+})();
+</script>
 {% endblock %}

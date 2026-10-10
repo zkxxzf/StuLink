@@ -1,7 +1,9 @@
 {% extends "base.html" %}
 {% import "academic/_schedule_parts.html" as parts %}
+{% import "academic/_schedule_matrix.html" as mx %}
 {% block title %}学校原样课表导入 · {{ ts.name }}{% endblock %}
 {% block extra_css %}
+{{ mx.schedule_matrix_css() }}
 <style>
 .si-demo { font-family: Consolas, "Courier New", monospace; font-size: 12px;
            background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 6px;
@@ -110,6 +112,40 @@
 <div class="alert alert-warning">
     <div class="fw-bold mb-1">以下表被跳过</div>
     {% for e in data.errors %}<div class="small">· {{ e.sheet or '（工作簿）' }}：{{ e.message }}</div>{% endfor %}
+</div>
+{% endif %}
+
+{# ===== 矩阵预览（2026-10-09 新增）：行＝班级、列＝节次，与全校总课表/查课核对同版式 ===== #}
+{% if matrix and matrix.blocks %}
+<div class="card mb-3">
+    <div class="card-header py-2 d-flex justify-content-between align-items-center flex-wrap gap-2">
+        <span class="fw-bold"><i class="bi bi-grid-3x3-gap"></i> 矩阵预览
+            <span class="text-muted small ms-1 fw-normal">行＝班级、列＝节次（与全校总课表、查课核对页同版式）</span>
+        </span>
+        <span class="d-flex gap-1 flex-wrap">
+            {% for wd in matrix.days %}
+            <a class="btn btn-sm {{ 'btn-dark' if wd == pday else 'btn-outline-secondary' }}"
+               href="{{ url_for('academic.schedule_smart_import', sid=ts.id, draft=token, pday=wd) }}">{{ weekday_names[wd] }}</a>
+            {% endfor %}
+        </span>
+    </div>
+    <div class="card-body p-2">
+        <div class="small text-muted mb-1">
+            共解析 {{ flat_count }} 条 · {{ matrix.blocks|length }} 个年级 ·
+            下面是「确认导入后 {{ weekday_names[pday] }} 这天」的样子（切换上方星期几看其它天）
+        </div>
+        {% for b in matrix.blocks %}
+        <section class="ovw-block">
+            <div class="ovw-block-head">
+                <span><i class="bi bi-mortarboard"></i> {{ b.grade_label or b.grade }}
+                    <span class="ovw-sub ms-2">{{ b.classes|length }} 个班 · {{ b.total }} 条</span>
+                </span>
+                <span class="ovw-sub">{{ ts.name }} · {{ weekday_names[pday] }}</span>
+            </div>
+            {{ mx.schedule_matrix(matrix.periods, matrix.period_groups, b.classes, b.grids, day=pday) }}
+        </section>
+        {% endfor %}
+    </div>
 </div>
 {% endif %}
 

@@ -24,10 +24,10 @@
                             <label class="form-label">真实姓名 <span class="text-danger">*</span></label>
                             {% if title == '编辑用户' %}
                             {{ form.real_name(class="form-control", readonly=true) }}
-                            <div class="form-text text-muted">姓名与任课安排/成绩归属绑定，创建后不可修改</div>
+                            <div class="form-text text-muted">姓名与任课教师映射/成绩归属绑定，创建后不可修改</div>
                             {% else %}
                             {{ form.real_name(class="form-control") }}
-                            <div class="form-text text-muted">姓名将作为任课安排与成绩归属的身份标识，创建后不可修改</div>
+                            <div class="form-text text-muted">姓名将作为任课教师映射与成绩归属的身份标识，创建后不可修改</div>
                             {% endif %}
                             {% for e in form.real_name.errors %}<div class="text-danger small">{{ e }}</div>{% endfor %}
                         </div>

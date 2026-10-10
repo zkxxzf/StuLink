@@ -38,10 +38,21 @@ INDEX_SPECS = {
         {'name': 'idx_attend_stuno_date',
          'table': 'attendance_records',
          'columns': ['student_no', 'attend_date']},
+    ],
+    # 2026-10-10：查课独立成库（inspection.db）——inspection_records 已从 academic.db 迁出
+    'inspection.db': [
         # 查课记录：按 inspect_date + period 查询
         {'name': 'idx_inspect_date_period',
          'table': 'inspection_records',
          'columns': ['inspect_date', 'period']},
+    ],
+    # 2026-10-10：问卷独立成库（forms.db）——迁移只搬了旧库既有索引；
+    # 而表单轮次功能新增的 round_id 索引虽在模型里声明（index=True），
+    # create_all 不会给"已存在的表"补索引，故现网 forms.db 缺失，这里幂等补建。
+    'forms.db': [
+        {'name': 'ix_form_submissions_round_id',
+         'table': 'form_submissions',
+         'columns': ['round_id']},
     ],
     'system.db': [
         # 学生按 grade + class_name 筛选/统计。
@@ -62,8 +73,15 @@ VERIFY_PLANS = {
         ("SELECT status, COUNT(id) FROM attendance_records "
          "WHERE class_name='01班' AND attend_date>='2026-09-01' "
          "AND attend_date<'2026-10-01' GROUP BY status",),
+    ],
+    # 2026-10-10：查课独立成库（inspection.db）
+    'inspection.db': [
         ("SELECT * FROM inspection_records "
          "WHERE inspect_date='2026-09-01' AND period=1",),
+    ],
+    # 2026-10-10：问卷独立成库（forms.db）
+    'forms.db': [
+        ("SELECT COUNT(id) FROM form_submissions WHERE round_id=1",),
     ],
 }
 

@@ -1,0 +1,100 @@
+{# StuLink v1.18.8.0 课表矩阵宏（2026-10-09 改版：行＝班级、列＝节次）：
+   **第一列＝班级**（班型/选科小字放进班级格内），**其余列＝一天的各节次**
+   （早读 + 上午 5 节 + 下午 4 节 + 晚自习 3 节），格内上行学科、下行任课教师。
+   表头只保留两行：作息分组（早读/上午/下午/晚自习）+ 节次名与起始时间 —— 班级不再
+   挤在表头里，所以「表头很乱」的问题从结构上消失。星期由页面顶部标签切换，
+   每次只渲染一天（day=1..7）。
+   午休等 break 节次渲染成窄灰空档列（时间空档，不占节次编号语义）。
+   配套页面：app/templates/academic/schedule_overview.html（全校总课表）、
+   查课实时课表（当前节次整列高亮；今日课表页已删，2026-10-10）；
+   改结构时同步 app/static/js/schedule.js 的 parseOverviewMatrix()/exportOverviewPng()。 #}
+
+{% macro schedule_matrix_css() %}
+{# 2026-10-10：原为 ~8KB 内联 <style>（每页随 HTML 重传、浏览器不可缓存），
+   抽到静态文件 app/static/css/schedule_matrix.css；
+   调用点（全校总课表 / 查课实时课表 / 原样导入预览）的 extra_css 位置不变。 #}
+<link rel="stylesheet" href="{{ url_for('static', filename='css/schedule_matrix.css') }}">
+{% endmacro %}
+
+{# ── 课表矩阵（行＝班级，列＝节次；单天）──────────────────────────────
+   - periods: 节次 dict 列表（period_number/period_name/start_time/period_type）
+   - groups:  作息分组 [{'label': '早读', 'span': 1}, ...]（含「课间」组）
+   - classes: 班级名列表（行）
+   - grids:   {class_name: {period_number: {weekday: [entry...]}}}
+   - metas:   {class_name: {'class_type':…, 'direction':…, 'combo_short':…}}
+   - day:     渲染星期几（1..7）
+   - url_tpl: 班级格链接模板（含 __C__ 占位，可 None）
+   - show_room: 格内是否追加教室
+   - class_prefix: 班级名前缀（如「高二」）
+   - current_period: 当前节次编号（今日课表整列高亮，可 None）
+#}
+{% macro schedule_matrix(periods, groups, classes, grids, metas=None, url_tpl=None,
+                         show_room=False, class_prefix='', day=1, current_period=None,
+                         grade='', check_mode=False) %}
+{% set grps = groups if groups else [{'label': '', 'span': periods|length}] %}
+{% set gbg = {'早读': '#fef3c7', '上午': '#e0f2fe', '下午': '#ffedd5',
+              '晚自习': '#e0e7ff', '课间': '#f1f5f9', '其他': '#f1f5f9', '': '#f1f5f9'} %}
+<div class="ovw-scroll{{ ' ovw-check-mode' if check_mode else '' }}">
+    <table class="ovw-table{{ ' ovw-table-check' if check_mode else '' }}">
+        <thead>
+            <tr class="ovw-grp-row">
+                <th class="ovw-class-col" rowspan="2">班级</th>
+                {% set idx = namespace(n=0) %}
+                {% for g in grps %}
+                {% set gp = periods[idx.n] if idx.n < periods|length else None %}
+                <th colspan="{{ g.span }}" class="ovw-grp{{ ' ovw-grp-break' if g.label == '课间' else '' }}"
+                    style="background:{{ gbg.get(g.label, '#f1f5f9') }}">{{ g.label or (gp.period_name if gp else '') }}</th>
+                {% set idx.n = idx.n + g.span %}
+                {% endfor %}
+            </tr>
+            <tr class="ovw-per-row">
+                {% for p in periods %}
+                {% set sem = 'ovw-p-reading' if (p.period_name and ('早读' in p.period_name or '晨读' in p.period_name)) else ('ovw-p-evening' if p.period_type == 'evening' else '') %}
+                {% set is_cur = (current_period and p.period_number == current_period) %}
+                <th class="ovw-per-col {{ sem }}{{ ' ovw-break-col' if p.period_type == 'break' else '' }}{{ ' ovw-cur-col' if is_cur else '' }}">
+                    {% if is_cur %}<span class="ovw-cur-flag">当前</span>{% endif %}<span class="ovw-period-name">{{ p.period_name }}</span>
+                    {% if p.start_time %}<small>{{ p.start_time }}</small>{% endif %}
+                </th>
+                {% endfor %}
+            </tr>
+        </thead>
+        <tbody>
+            {% for cn in classes %}
+            {% set meta = (metas or {}).get(cn, {}) %}
+            {% set cm = [meta.get('class_type'), (meta.get('direction') ~ '类') if meta.get('direction') else None, meta.get('combo_short')]|select|join(' · ') %}
+            <tr>
+                <th class="ovw-class-cell">
+                    {% if url_tpl %}<a href="{{ url_tpl|replace('__C__', cn|urlencode) }}">{{ class_prefix }}{{ cn }}</a>
+                    {% else %}<span>{{ class_prefix }}{{ cn }}</span>{% endif %}
+                    {% if cm %}<span class="ovw-cmeta">{{ cm }}</span>{% endif %}
+                </th>
+                {% for p in periods %}
+                {% set items = ((grids.get(cn, {}).get(p.period_number) or {}).get(day)) or [] %}
+                {% set is_cur = (current_period and p.period_number == current_period) %}
+                <td class="ovw-cell{{ ' ovw-p-break' if p.period_type == 'break' else '' }}{{ ' ovw-cur-col' if is_cur else '' }}{{ ' ovw-multi' if items|length > 1 else '' }}">
+                    {% for e in items %}
+                    {% set tone = subject_tone(e.subject) %}
+                    {# 自习/自修本就没有任课教师，不再挂「未指定」，表内更干净 #}
+                    {% set tname = e.teacher_name or ('' if ('自习' in e.subject or '自修' in e.subject) else '未指定') %}
+                    <div class="ovw-item" style="--sch:{{ tone.c }};--sch-bg:{{ tone.bg }};--sch-fg:{{ tone.fg }}"
+                        {%- if check_mode %} role="button" tabindex="0"
+                         data-grade="{{ e.grade or grade }}" data-class="{{ e.class_name or cn }}"
+                         data-period="{{ e.period_number }}" data-entry="{{ e.id }}"
+                         data-subject="{{ e.subject or '' }}" data-teacher="{{ e.teacher_name or '' }}"
+                         data-uid="{{ e.teacher_uid or '' }}"
+                         data-temp="{{ 1 if e.is_temp_swap else 0 }}"
+                         data-check="{{ e.check.result if e.check else '' }}"
+                         title="{{ e.subject or '' }} {{ e.teacher_name or '' }}{% if e.check %} · 已标记{{ e.check.label }}{% if e.check.note %}（{{ e.check.note }}）{% endif %}{% else %} · 点此标记查课结果{% endif %}"{% endif %}>
+                        <span class="ovw-subj">{{ e.subject }}{% if e.entry_type == 'swap' %}<span class="ovw-flag ovw-flag-swap">调</span>{% endif %}{% if e.week_badge %}<span class="ovw-flag ovw-flag-week">{{ e.week_badge }}</span>{% endif %}</span>
+                        <span class="ovw-teacher">{{ tname }}{% if show_room and e.room %} · {{ e.room }}{% endif %}</span>
+                        {%- if check_mode %}<span class="ovw-chk ovw-chk-{{ e.check.result if e.check else 'none' }}">{{ e.check.label if e.check else '未查' }}</span>{% endif %}
+                    </div>
+                    {% endfor %}
+                </td>
+                {% endfor %}
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% endmacro %}

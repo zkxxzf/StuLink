@@ -32,6 +32,10 @@ config_mod.Config.SQLALCHEMY_BINDS = {
     'grades': 'sqlite:///' + os.path.join(_TMP, 'grades.db'),
     'points': 'sqlite:///' + os.path.join(_TMP, 'points.db'),
     'academic': 'sqlite:///' + os.path.join(_TMP, 'academic.db'),
+    # 2026-10-10：教务分库——查课 / 业绩 / 表单 各自独立库
+    'inspection': 'sqlite:///' + os.path.join(_TMP, 'inspection.db'),
+    'achievement': 'sqlite:///' + os.path.join(_TMP, 'achievement.db'),
+    'forms': 'sqlite:///' + os.path.join(_TMP, 'forms.db'),
     'portrait': 'sqlite:///' + os.path.join(_TMP, 'portrait.db'),
     'system': 'sqlite:///' + os.path.join(_TMP, 'system.db'),
     'timetable': 'sqlite:///' + os.path.join(_TMP, 'timetable.db'),

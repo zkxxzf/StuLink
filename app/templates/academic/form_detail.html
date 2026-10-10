@@ -63,6 +63,18 @@
 <div class="card mb-3">
     <div class="card-body py-2">
         <form class="row g-2 align-items-center" method="get">
+            {# 2026-10-10：一次收集 = 一轮，可按轮次切换统计与名单 #}
+            <div class="col-auto">
+                <select name="round" class="form-select form-select-sm" style="width:200px" id="roundSelect">
+                    <option value="">全部轮次</option>
+                    {% for r in rounds %}
+                    <option value="{{ r.id }}" {% if cur_round and cur_round.id == r.id %}selected{% endif %}>
+                        第{{ r.round_no }}轮{% if r.name %}·{{ r.name }}{% endif %}
+                        （{{ round_status_map.get(r.status, r.status) }}）
+                    </option>
+                    {% endfor %}
+                </select>
+            </div>
             <div class="col-auto">
                 <select name="status" class="form-select form-select-sm" style="width:140px">
                     <option value="">全部状态</option>
@@ -76,6 +88,28 @@
                 <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('academic.form_submissions', form_id=tpl.id) }}">重置</a>
             </div>
         </form>
+        <div class="d-flex gap-2 mt-2 flex-wrap">
+            {% if tpl.status == 'open' %}
+            <button type="button" class="btn btn-sm btn-outline-primary" data-bs-toggle="modal" data-bs-target="#newRoundModal">
+                <i class="bi bi-plus-circle"></i> 发起新一轮
+            </button>
+            {% endif %}
+            {% if cur_round and cur_round.status == 'open' %}
+            <form method="post" action="{{ url_for('academic.form_round_close', round_id=cur_round.id) }}"
+                  onsubmit="return confirm('结束本轮后不再接受本轮提交（不影响已入账业绩），确定？')">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <button class="btn btn-sm btn-outline-warning"><i class="bi bi-lock"></i> 结束本轮</button>
+            </form>
+            {% endif %}
+            {% if tpl.to_achievement %}
+            <span class="badge bg-success align-self-center">
+                <i class="bi bi-award"></i> 审核通过自动计入业绩（{{ tpl.ach_category or '未设类别' }}{% if tpl.ach_level %}·{{ tpl.ach_level }}{% endif %}）
+            </span>
+            {% endif %}
+            <a class="btn btn-sm btn-outline-info ms-auto" href="{{ url_for('academic.form_summary_page', form_id=tpl.id) }}">
+                <i class="bi bi-graph-up"></i> 汇总看板
+            </a>
+        </div>
     </div>
 </div>
 
@@ -171,21 +205,65 @@
 <nav class="mt-3">
     <ul class="pagination pagination-sm justify-content-center">
         {% if pagination.has_prev %}
-        <li class="page-item"><a class="page-link" href="?page={{ pagination.prev_num }}&status={{ f_status }}">上一页</a></li>
+        <li class="page-item"><a class="page-link" href="?page={{ pagination.prev_num }}&status={{ f_status }}&round={{ cur_round.id if cur_round else '' }}">上一页</a></li>
         {% endif %}
         {% for p in pagination.iter_pages(left_edge=1, right_edge=1, left_current=2, right_current=2) %}
         {% if p %}
         <li class="page-item {% if p == pagination.page %}active{% endif %}">
-            <a class="page-link" href="?page={{ p }}&status={{ f_status }}">{{ p }}</a>
+            <a class="page-link" href="?page={{ p }}&status={{ f_status }}&round={{ cur_round.id if cur_round else '' }}">{{ p }}</a>
         </li>
         {% else %}
         <li class="page-item disabled"><span class="page-link">…</span></li>
         {% endif %}
         {% endfor %}
         {% if pagination.has_next %}
-        <li class="page-item"><a class="page-link" href="?page={{ pagination.next_num }}&status={{ f_status }}">下一页</a></li>
+        <li class="page-item"><a class="page-link" href="?page={{ pagination.next_num }}&status={{ f_status }}&round={{ cur_round.id if cur_round else '' }}">下一页</a></li>
         {% endif %}
     </ul>
 </nav>
 {% endif %}
+
+{# 2026-10-10：发起新一轮收集 #}
+<div class="modal fade" id="newRoundModal" tabindex="-1">
+    <div class="modal-dialog modal-dialog-centered">
+        <form method="post" action="{{ url_for('academic.form_round_new', form_id=tpl.id) }}">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <div class="modal-content">
+                <div class="modal-header py-2">
+                    <h6 class="modal-title"><i class="bi bi-plus-circle"></i> 发起新一轮收集</h6>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="mb-2">
+                        <label class="form-label small mb-1">轮次名称（可选）</label>
+                        <input name="name" class="form-control form-control-sm" maxlength="100"
+                               placeholder="如 2026-2027学年第二学期">
+                    </div>
+                    <div class="mb-2">
+                        <label class="form-label small mb-1">本轮截止时间（可选）</label>
+                        <input type="datetime-local" name="deadline" class="form-control form-control-sm">
+                    </div>
+                    <div class="form-text">
+                        发起后上一轮自动结束，教师的新提交归入新一轮；已计入业绩库的记录仍标记原轮次。
+                    </div>
+                </div>
+                <div class="modal-footer py-2">
+                    <button type="button" class="btn btn-sm btn-light" data-bs-dismiss="modal">取消</button>
+                    <button type="submit" class="btn btn-sm btn-primary">
+                        <i class="bi bi-check-lg"></i> 发起
+                    </button>
+                </div>
+            </div>
+        </form>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+(function () {
+    var sel = document.getElementById('roundSelect');
+    if (sel) { sel.addEventListener('change', function () { sel.form.submit(); }); }
+})();
+</script>
 {% endblock %}

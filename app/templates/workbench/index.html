@@ -45,13 +45,21 @@
 
     <div class="col-lg-7">
         <div class="card h-100">
-            <div class="card-header"><i class="bi bi-alarm"></i> 今日课程</div>
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <span><i class="bi bi-alarm"></i> 今日课程</span>
+                <a href="{{ url_for('workbench.my_schedule') }}" class="btn btn-sm btn-outline-primary">
+                    查看完整课表 <i class="bi bi-arrow-right"></i>
+                </a>
+            </div>
             <div class="card-body">
                 {% if today_entries %}
                 <div class="d-flex flex-wrap gap-2">
                     {% for e in today_entries %}
                     <div class="border rounded px-3 py-2">
-                        <div class="fw-bold">第 {{ e.period }} 节 · {{ e.subject or '—' }}</div>
+                        <div class="fw-bold">
+                            第 {{ e.period_number }} 节 · {{ e.subject or '—' }}
+                            {% if e.week_badge %}<span class="badge bg-warning text-dark ms-1">{{ e.week_badge }}</span>{% endif %}
+                        </div>
                         <div class="text-muted small">{{ e.class_name or '' }} {{ e.room or '' }}</div>
                     </div>
                     {% endfor %}
@@ -60,7 +68,6 @@
                 <div class="text-muted text-center py-4">
                     <i class="bi bi-cup-hot" style="font-size:32px;"></i>
                     <p class="mb-0 mt-2">今天暂无课程安排</p>
-                    <p class="small mb-0">（课表数据接入后将自动展示每日课程）</p>
                 </div>
                 {% endif %}
             </div>
@@ -71,27 +78,49 @@
 <div class="row g-3 mb-3">
     <div class="col-lg-7">
         <div class="card h-100">
-            <div class="card-header"><i class="bi bi-calendar3"></i> 我的课表</div>
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <span>
+                    <i class="bi bi-calendar3"></i> 我的课表
+                    {% if active_term %}<span class="badge bg-light text-dark border ms-1">{{ active_term.name }}</span>{% endif %}
+                </span>
+                <div class="d-flex gap-1">
+                    <a href="{{ url_for('overview.grades_page') }}" class="btn btn-sm btn-outline-secondary">
+                        <i class="bi bi-graph-up"></i> 我的成绩
+                    </a>
+                    <a href="{{ url_for('workbench.my_schedule') }}" class="btn btn-sm btn-outline-primary">
+                        查看完整课表 <i class="bi bi-arrow-right"></i>
+                    </a>
+                </div>
+            </div>
             <div class="card-body">
                 {% if entries %}
                 {% for wd in range(1, 8) %}
                 {% set day_items = entries | selectattr('weekday', 'equalto', wd) | list %}
                 {% if day_items %}
-                <div class="mb-2">
-                    <span class="badge bg-light text-dark border">{{ weekday_names[wd - 1] }}</span>
-                    {% for e in day_items %}
-                    <span class="badge bg-white text-dark border me-1">
-                        第{{ e.period }}节 {{ e.subject or '—' }} {{ e.class_name or '' }}
-                    </span>
-                    {% endfor %}
+                <div class="d-flex mb-2">
+                    <span class="badge {{ 'bg-primary' if wd == today.isoweekday() else 'bg-light text-dark border' }} me-2 align-self-start"
+                          style="min-width:44px;">{{ weekday_names[wd - 1] }}</span>
+                    <div class="d-flex flex-wrap gap-1">
+                        {% for e in day_items %}
+                        <span class="badge {{ 'bg-warning-subtle text-dark border border-warning' if e.entry_type != 'normal' else 'bg-white text-dark border' }} fw-normal">
+                            第{{ e.period_number }}节 {{ e.subject or '—' }} {{ e.class_name or '' }}{% if e.room %} · {{ e.room }}{% endif %}
+                            {% if e.week_badge %}<span class="text-warning-emphasis">{{ e.week_badge }}</span>{% endif %}
+                        </span>
+                        {% endfor %}
+                    </div>
                 </div>
                 {% endif %}
                 {% endfor %}
                 {% else %}
                 <div class="text-muted text-center py-4">
                     <i class="bi bi-calendar-x" style="font-size:32px;"></i>
-                    <p class="mb-0 mt-2">暂无课表数据</p>
-                    <p class="small mb-0">（课表导入功能将在后续版本开放）</p>
+                    {% if active_term %}
+                    <p class="mb-0 mt-2">本学期暂无您的课表数据</p>
+                    <p class="small mb-0">（教务排课发布后会自动展示在这里）</p>
+                    {% else %}
+                    <p class="mb-0 mt-2">尚未建立学期课表</p>
+                    <p class="small mb-0">（请联系教务创建学期并排课后自动展示）</p>
+                    {% endif %}
                 </div>
                 {% endif %}
             </div>

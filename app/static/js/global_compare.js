@@ -108,7 +108,8 @@
             + ' · ' + (ex.name || '') + (ex.date ? ' · ' + ex.date : '')
             + ' · 共 ' + (d.subject_count != null ? d.subject_count
                 : Math.max(0, (d.subjects || []).length - 1)) + ' 科';
-        var note = '口径：去差均分＝按班型剔除总分末尾 N 人（卓越班 2 人）后均分；'
+        var note = '口径：去差均分＝按班型剔除总分末尾 N 人（卓越班 2 人）后均分'
+            + '（下方小字为该班该科任课教师，取本场考试当时的快照）；'
             + '特优/本科线＝各方向总分前两层的同名单科线；上线单元格＝人数 / 上线率。';
         if (d.partial) {
             note += ' ⚠ 本场为分批导入（缺 ' + (d.partial.missing || []).join('、')
@@ -147,7 +148,12 @@
             var cells = r.cells || {};
             subjects.forEach(function (s) {
                 var c = cells[s] || {};
-                tds.push('<td class="ld-avg">' + fmtAvg(c.trim_avg) + '</td>');
+                // v1.18.9.0：成绩（去差均分）下方显示该班该科任课教师（本场考试快照）
+                var t = c.teacher
+                    ? '<div class="ld-teacher" title="本场考试的任课教师">'
+                        + esc(c.teacher) + '</div>'
+                    : '';
+                tds.push('<td class="ld-avg">' + fmtAvg(c.trim_avg) + t + '</td>');
                 tds.push('<td>' + fmtOnline(c.l1_n, c.l1_rate) + '</td>');
                 tds.push('<td>' + fmtOnline(c.l2_n, c.l2_rate) + '</td>');
             });

@@ -27,7 +27,8 @@
             <form method="POST" action="{{ url_for('academic.schedule_periods_reset', sid=ts.id) }}"
                   onsubmit="return confirm('重置为默认 13 节作息模板？当前自定义配置将被覆盖。')">
                 <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                <button class="btn btn-sm btn-outline-warning py-0">
+                <button class="btn btn-sm btn-outline-warning py-0"
+                        {% if not can_reset_defaults %}disabled title="已有课程安排，不能重置节次编号"{% endif %}>
                     <i class="bi bi-arrow-counterclockwise"></i> 重置默认模板
                 </button>
             </form>
@@ -100,6 +101,7 @@
             <span class="text-muted small">
                 <i class="bi bi-info-circle"></i> 「课间/午休」类型节次在课表网格中以灰色斜纹显示（也可排课）；
                 移除节次行并保存后，该节次定义将被删除；若该节次仍有课程安排，系统会保留并提示。
+                已排课的学期不能重置默认编号，请手动调整名称和时间。
             </span>
             <button type="submit" class="btn btn-sm btn-primary">
                 <i class="bi bi-check-lg"></i> 保存配置

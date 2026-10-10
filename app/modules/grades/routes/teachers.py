@@ -69,6 +69,28 @@ def _matrix_users(grade):
     return [{'id': u.id, 'name': u.real_name, 'username': u.username} for u in rows]
 
 
+# 2026-10-10：教务管理侧复用同一批视图函数（见 app/modules/academic/routes/teacher_links.py），
+# 端点按当前蓝图自适应 —— 成绩管理里用 grades.*，教务管理里用 academic.teacher_links_*，
+# 这样页面内链接、表单与跳转都留在用户所在的模块，源数据仍是同一张 TeacherSubjectLink。
+_ACADEMIC_ENDPOINTS = {
+    'index': 'academic.academic_home',          # 返回按钮：教务里回教务工作台
+    'teachers_page': 'academic.teacher_links_page',
+    'teachers_get': 'academic.teacher_links_api',
+    'teachers_save': 'academic.teacher_links_save_api',
+    'teachers_import_page': 'academic.teacher_links_import_page',
+    'teachers_import_upload': 'academic.teacher_links_import_upload',
+    'teachers_import_confirm': 'academic.teacher_links_import_confirm',
+    'teacher_template_download': 'academic.teacher_links_template',
+}
+
+
+def _ep(name):
+    """端点名自适应：返回当前模块下该功能的端点全名（模板里以 url_for(ep('x')) 使用）。"""
+    if request.blueprint == 'academic':
+        return _ACADEMIC_ENDPOINTS[name]
+    return f'grades.{name}'
+
+
 # ==================== 矩阵维护 ====================
 
 @bp.route('/teachers')
@@ -79,7 +101,8 @@ def teachers_page():
     grade = request.args.get('grade', '')
     if grade not in grades:
         grade = grades[0] if grades else ''
-    return render_template('grades/teachers.html', grade_options=grades, grade=grade)
+    return render_template('grades/teachers.html', grade_options=grades, grade=grade,
+                           ep=_ep)
 
 
 @bp.route('/api/teachers')
@@ -162,7 +185,7 @@ def teachers_save():
 @login_required
 @perm_required('grades.teachers')
 def teachers_import_page():
-    return render_template('grades/teacher_import.html')
+    return render_template('grades/teacher_import.html', ep=_ep)
 
 
 @bp.route('/teachers/import/upload', methods=['POST'])
@@ -172,16 +195,16 @@ def teachers_import_upload():
     file = request.files.get('file')
     if not file or not file.filename:
         flash('请选择教师安排表 Excel 文件', 'danger')
-        return redirect(url_for('grades.teachers_import_page'))
+        return redirect(url_for(_ep('teachers_import_page')))
     try:
         stream = io.BytesIO(file.read())
         parsed = teacher_import.parse_teacher_excel(stream)
     except ValueError as e:
         flash(str(e), 'danger')
-        return redirect(url_for('grades.teachers_import_page'))
+        return redirect(url_for(_ep('teachers_import_page')))
     except Exception:
         flash('文件解析失败：请使用与《教师安排表》同构的格式（行=班级、科目为列）', 'danger')
-        return redirect(url_for('grades.teachers_import_page'))
+        return redirect(url_for(_ep('teachers_import_page')))
 
     # 账号核对（任课教师 + 班主任 两个来源的姓名并集）
     head_items = parsed.get('homerooms') or []
@@ -242,8 +265,7 @@ def teachers_import_upload():
     }
     return render_template('grades/teacher_import_report.html', token=token,
                            sections=parsed['sections'], errors=parsed['errors'],
-                           preview=preview,
-                           head_total=len(head_items))
+                           preview=preview, head_total=len(head_items), ep=_ep)
 
 
 @bp.route('/teachers/import/confirm', methods=['POST'])
@@ -255,7 +277,7 @@ def teachers_import_confirm():
     draft = _DRAFT.get(token)
     if not draft:
         flash('导入批次已失效（服务重启后需重新上传）', 'danger')
-        return redirect(url_for('grades.teachers_import_page'))
+        return redirect(url_for(_ep('teachers_import_page')))
     try:
         preview = draft['preview']
         created = []
@@ -368,7 +390,7 @@ def teachers_import_confirm():
     except Exception as e:
         db.session.rollback()
         flash(f'导入失败，已回滚：{e}', 'danger')
-        return redirect(url_for('grades.teachers_import_page'))
+        return redirect(url_for(_ep('teachers_import_page')))
     _DRAFT.pop(token, None)
     log_operation(current_user, '导入', '教师映射', None,
                   f'教师安排表导入：任课绑定 {bound} 条，班主任 {heads_added} 人，'
@@ -379,7 +401,7 @@ def teachers_import_confirm():
           'success')
     return render_template('grades/teacher_import_result.html', created=created,
                            sync={'heads_added': heads_added, 'removed_heads': removed_heads,
-                                 'demoted': demoted, 'bound': bound})
+                                 'demoted': demoted, 'bound': bound}, ep=_ep)
 
 
 @bp.route('/teacher-template.xlsx')

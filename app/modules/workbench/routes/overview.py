@@ -116,23 +116,26 @@ def students_api():
 @login_required
 @perm_required('workbench.class_view')
 def grades_page():
-    """成绩概览页：按考试展示任课班级成绩摘要"""
+    """我的成绩页：按考试展示本人任教班级×科目的成绩（口径收紧到任教映射）"""
     teacher = _teacher_or_none()
-    user_id = current_user.id
     if not teacher or not teacher.user_id:
-        return render_template('workbench/grades.html', exam_data=[], teacher=None)
+        return render_template('workbench/grades.html', exam_data=[], links=[],
+                               grade_options=[], selected_grade='', teacher=None)
 
+    links = svc.get_teaching_links(teacher.user_id)
     grade = request.args.get('grade', '')
     exam_data = svc.get_grade_summary(teacher.user_id, grade=grade or None)
     return render_template('workbench/grades.html',
-                           exam_data=exam_data, teacher=teacher)
+                           exam_data=exam_data, links=links,
+                           grade_options=sorted({lk['grade'] for lk in links}),
+                           selected_grade=grade or '', teacher=teacher)
 
 
 @bp.route('/api/grade-summary')
 @login_required
 @perm_required('workbench.class_view')
 def grade_summary_api():
-    """成绩摘要 JSON"""
+    """成绩摘要 JSON（与页面共用同一服务函数，语义一致）"""
     teacher = _teacher_or_none()
     if not teacher or not teacher.user_id:
         return jsonify({'data': []})
@@ -140,6 +143,54 @@ def grade_summary_api():
     grade = request.args.get('grade', '')
     exam_data = svc.get_grade_summary(teacher.user_id, grade=grade or None)
     return jsonify({'data': exam_data})
+
+
+@bp.route('/api/grade-detail')
+@login_required
+@perm_required('workbench.class_view')
+def grade_detail_api():
+    """某次考试某班某科的学生明细 JSON（仅本人任教范围，越权 403）"""
+    teacher = _teacher_or_none()
+    if not teacher or not teacher.user_id:
+        return jsonify({'error': '当前账号未关联教师名单'}), 403
+
+    exam_id = request.args.get('exam_id', type=int)
+    class_name = (request.args.get('class_name') or '').strip()
+    subject = (request.args.get('subject') or '').strip()
+    if not exam_id or not class_name or not subject:
+        return jsonify({'error': '缺少 exam_id / class_name / subject 参数'}), 400
+
+    try:
+        data = svc.get_grade_detail(teacher.user_id, exam_id, class_name, subject)
+    except PermissionError as e:
+        return jsonify({'error': str(e)}), 403
+    except ValueError as e:
+        return jsonify({'error': str(e)}), 404
+    return jsonify(data)
+
+
+@bp.route('/api/grade-trend')
+@login_required
+@perm_required('workbench.class_view')
+def grade_trend_api():
+    """某班某科历次考试走势 JSON（仅本人任教范围，越权 403）"""
+    teacher = _teacher_or_none()
+    if not teacher or not teacher.user_id:
+        return jsonify({'error': '当前账号未关联教师名单'}), 403
+
+    class_name = (request.args.get('class_name') or '').strip()
+    subject = (request.args.get('subject') or '').strip()
+    grade = (request.args.get('grade') or '').strip()
+    limit = request.args.get('limit', 8, type=int) or 8
+    if not class_name or not subject:
+        return jsonify({'error': '缺少 class_name / subject 参数'}), 400
+
+    try:
+        data = svc.get_grade_trend(teacher.user_id, class_name, subject,
+                                   grade=grade or None, limit=limit)
+    except PermissionError as e:
+        return jsonify({'error': str(e)}), 403
+    return jsonify(data)
 
 
 # ── 积分概览页 ──────────────────────────────────────────────

@@ -14,6 +14,7 @@ from datetime import datetime, date
 from openpyxl import Workbook, load_workbook
 from openpyxl.styles import Font, Alignment, PatternFill, Border, Side
 from openpyxl.utils import get_column_letter
+from sqlalchemy import and_, false, or_
 
 from app.extensions import db
 from app.models.timetable import (
@@ -57,7 +58,7 @@ def _base_entry_query(schedule_id):
 
     临时调课只在调课当天生效（见 swap_service.resolve_effective_entry），
     不应出现在常规周课表/导出/统计里（否则会出现"原课与调课重叠、跨周次也显示"）。
-    今日课表由 get_today_schedule 单独叠加当天临时调课。
+    查课实时课表由 get_day_matrix 单独叠加当天临时调课。
     """
     q = ScheduleEntry.query.filter_by(
         term_schedule_id=schedule_id, is_deleted=False)
@@ -65,6 +66,22 @@ def _base_entry_query(schedule_id):
     if temp_ids:
         q = q.filter(~ScheduleEntry.id.in_(temp_ids))
     return q
+
+
+def _apply_class_scope(query, allowed_grades, allowed_classes):
+    """Filter entries by per-grade class allowlists when a user has them."""
+    if allowed_classes is None:
+        return query
+    grades = set(allowed_grades or allowed_classes.keys())
+    clauses = []
+    for grade in grades:
+        classes = allowed_classes.get(grade, set())
+        if classes is None:
+            clauses.append(ScheduleEntry.grade == grade)
+        elif classes:
+            clauses.append(and_(ScheduleEntry.grade == grade,
+                                ScheduleEntry.class_name.in_(classes)))
+    return query.filter(or_(*clauses)) if clauses else query.filter(false())
 
 
 def _pick_conflict(entries, week_range=None, week=None):
@@ -265,7 +282,10 @@ def save_periods(schedule_id, periods_data, remove_missing=False):
 
 
 def reset_default_periods(schedule_id):
-    """重置为 13 节默认模板"""
+    """重置为空课表使用的 13 节默认模板。已有条目时拒绝，以免节次号改义。"""
+    if ScheduleEntry.query.filter_by(term_schedule_id=schedule_id).first():
+        raise ValueError(
+            '该学期已有课表条目，不能重置默认节次；请手动调整名称和时间，避免已有课程错位')
     PeriodDef.query.filter_by(term_schedule_id=schedule_id).delete()
     for p in get_default_periods():
         db.session.add(PeriodDef(term_schedule_id=schedule_id, **p))
@@ -276,25 +296,35 @@ def reset_default_periods(schedule_id):
 # 视图查询
 # ═══════════════════════════════════════════════════════════════════════════════
 
-def _build_grid(entries, periods):
+def _build_grid(entries, periods, weekday=None):
     """构建 {period_number: {weekday: [entry_dict, ...]}} 网格。
 
     同一格子允许多条（如"单周语文 / 双周数学"交替上课），按周次先后排序，
     便于前端逐条渲染与点击编辑。
+
+    weekday（1-7，可选）：只给这一天调用 to_dict 填格。2026-10-10 优化——全校总
+    课表一次只渲染一天（见模板 schedule_overview.html），其余 6 天的 to_dict 属于
+    白干（响应体里也渲染不出来）；不传＝全部星期都填，行为与优化前完全一致。
     """
     grid = {}
     for p in periods:
         grid[p.period_number] = {wd: [] for wd in range(1, 8)}
     for e in entries:
         if e.period_number in grid:
+            if weekday is not None and e.weekday != weekday:
+                continue
             grid[e.period_number][e.weekday].append(e.to_dict())
     return grid
 
 
-def get_class_view(schedule_id, grade, class_name, weekday=None, week=None):
+def get_class_view(schedule_id, grade, class_name, weekday=None, week=None,
+                   allowed_grades=None, allowed_classes=None):
     """班级课表视图：返回网格 + 节次列表 + 学科课时统计（week 为可选周次过滤）"""
     periods = get_periods(schedule_id)
     q = _base_entry_query(schedule_id).filter_by(grade=grade, class_name=class_name)
+    if allowed_grades is not None:
+        q = q.filter(ScheduleEntry.grade.in_(allowed_grades))
+    q = _apply_class_scope(q, allowed_grades, allowed_classes)
     if weekday:
         q = q.filter_by(weekday=weekday)
     entries = _filter_by_week(q.all(), week)
@@ -312,10 +342,14 @@ def get_class_view(schedule_id, grade, class_name, weekday=None, week=None):
     }
 
 
-def get_grade_view(schedule_id, grade, weekday=None, week=None):
+def get_grade_view(schedule_id, grade, weekday=None, week=None,
+                   allowed_grades=None, allowed_classes=None):
     """年级视图：该年级所有班级列表 + 每个班的网格"""
     periods = get_periods(schedule_id)
     q = _base_entry_query(schedule_id).filter_by(grade=grade)
+    if allowed_grades is not None:
+        q = q.filter(ScheduleEntry.grade.in_(allowed_grades))
+    q = _apply_class_scope(q, allowed_grades, allowed_classes)
     if weekday:
         q = q.filter_by(weekday=weekday)
     entries = _filter_by_week(q.all(), week)
@@ -356,12 +390,16 @@ def get_master_view(schedule_id, weekday=None, week=None):
     }
 
 
-def get_teacher_view(schedule_id, teacher_uid, weekday=None, week=None):
+def get_teacher_view(schedule_id, teacher_uid, weekday=None, week=None,
+                     allowed_grades=None, allowed_classes=None):
     """教师个人课表 + 学科课时统计"""
     periods = get_periods(schedule_id)
     q = _base_entry_query(schedule_id).filter_by(teacher_uid=teacher_uid)
     if weekday:
         q = q.filter_by(weekday=weekday)
+    if allowed_grades is not None:
+        q = q.filter(ScheduleEntry.grade.in_(allowed_grades))
+    q = _apply_class_scope(q, allowed_grades, allowed_classes)
     entries = _filter_by_week(q.all(), week)
     grid = _build_grid(entries, periods)
     stats = {}
@@ -376,206 +414,54 @@ def get_teacher_view(schedule_id, teacher_uid, weekday=None, week=None):
     }
 
 
-def list_teaching_classes(schedule_id, week=None):
-    """本学期走班教学班清单：{教学班名: 课时数}（按课时数倒序）。
 
-    只有填了 teaching_class 的条目才算走班课；不走班的学校这里恒为空集，
-    教学班入口会自动隐藏，不影响既有用法。
+def _period_label(p):
+    """节次所属的作息分组：早读 / 上午 / 下午 / 晚自习 / 课间（高中作息语义）。"""
+    name = p.get('period_name') or ''
+    if '早读' in name or '晨读' in name:
+        return '早读'
+    return {'morning': '上午', 'afternoon': '下午',
+            'evening': '晚自习', 'break': '课间'}.get(p.get('period_type'), '其他')
+
+
+def _period_groups(period_dicts):
+    """给每个节次标注作息分组，并返回连续分组表（供总课表表头/导出复用）。
+
+    总课表版式是「行＝班级、列＝节次」，作息分组直接做**二级表头**：
+    连续同组（早读/上午/下午/晚自习…）合并成一个跨列表头格；午休等 break
+    节次自成「课间」组，渲染成窄灰空档列。
     """
-    entries = _filter_by_week(_base_entry_query(schedule_id).all(), week)
-    counter = {}
-    for e in entries:
-        tc = (e.teaching_class or '').strip()
-        if tc:
-            counter[tc] = counter.get(tc, 0) + 1
-    return dict(sorted(counter.items(), key=lambda kv: (-kv[1], kv[0])))
-
-
-def get_teaching_class_view(schedule_id, teaching_class, weekday=None, week=None):
-    """教学班课表（2026-09-26 新增）：某教学班一周的课程。
-
-    结构与班级视图同构，可复用同一套网格宏。条目里保留 class_name，
-    方便看出这节课的学生主要来自哪个行政班。
-    """
-    periods = get_periods(schedule_id)
-    q = _base_entry_query(schedule_id).filter_by(teaching_class=teaching_class)
-    if weekday:
-        q = q.filter_by(weekday=weekday)
-    entries = _filter_by_week(q.all(), week)
-    stats = {}
-    for e in entries:
-        stats[e.subject] = stats.get(e.subject, 0) + 1
-    return {
-        'grid': _build_grid(entries, periods),
-        'periods': [p.to_dict() for p in periods],
-        'entries': [e.to_dict() for e in entries],
-        'stats': stats,
-        'total': len(entries),
-        'teaching_class': teaching_class,
-    }
-
-
-def _teaching_matches(teaching_class, combo_short, direction):
-    """教学班名是否属于某选科组合（如"物化生1" 属于 物化生 / 物理类）。"""
-    tc = (teaching_class or '').strip()
-    if not tc:
-        return False
-    if combo_short and combo_short in tc:
-        return True
-    if direction and tc.startswith(direction):
-        return True
-    return False
-
-
-def get_student_view(schedule_id, grade, class_name, week=None):
-    """学生个人课表（2026-09-26 新增）：行政班课 + 本人选科对应的走班课。
-
-    学生层面没有独立的选科字段，这里按**所属行政班的选科组合**推导
-    （ClassProfile.combo_short，如"物化生"）：
-    - teaching_class 为空的条目＝行政班课，本班全员上；
-    - teaching_class 非空的条目＝走班课，只有教学班名匹配本人组合的学生去上。
-    同一格可能同时有行政班课和走班课（例如同学去走班、其余人留班自习），
-    网格按多条目渲染。
-    """
-    from app.modules.academic.services.grade_utils import class_profile_map
-
-    meta = class_profile_map().get((grade, class_name), {})
-    combo = meta.get('combo_short') or ''
-    direction = meta.get('direction') or ''
-    periods = get_periods(schedule_id)
-    all_entries = _filter_by_week(
-        _base_entry_query(schedule_id).filter_by(grade=grade).all(), week)
-
-    mine = []
-    for e in all_entries:
-        tc = (e.teaching_class or '').strip()
-        if not tc:
-            if e.class_name == class_name:
-                mine.append(e)
-        elif _teaching_matches(tc, combo, direction):
-            mine.append(e)
-
-    stats = {}
-    for e in mine:
-        stats[e.subject] = stats.get(e.subject, 0) + 1
-    return {
-        'grid': _build_grid(mine, periods),
-        'periods': [p.to_dict() for p in periods],
-        'entries': [e.to_dict() for e in mine],
-        'stats': stats,
-        'total': len(mine),
-        'grade': grade,
-        'class_name': class_name,
-        'combo': meta.get('combo', ''),
-        'combo_short': combo,
-        'direction': direction,
-        'teaching_count': sum(1 for e in mine if (e.teaching_class or '').strip()),
-    }
-
-
-def check_teaching_conflicts(schedule_id, week=None):
-    """走班撞课检测：同一年级、同一时段，同一选科组合被排进两个以上教学班。
-
-    返回 [{grade, weekday, period_number, combo, classes:[教学班名]}]。
-    典型场景：周二第3节同时排了"物化生1"和"物化生2"，那么物化生组合的
-    学生无论去哪个班都会漏掉另一门 —— 教务排课时必须避免。
-    """
-    from app.modules.academic.services.grade_utils import (class_profile_map,
-                                                           grade_labels)
-
-    profiles = class_profile_map()
-    entries = _filter_by_week(_base_entry_query(schedule_id).all(), week)
-
-    # 年级 → 该年级出现过的选科组合（含简称与方向）
-    grade_combos = {}
-    for (g, _cn), meta in profiles.items():
-        bucket = grade_combos.setdefault(g, set())
-        if meta.get('combo_short'):
-            bucket.add(meta['combo_short'])
-        if meta.get('direction'):
-            bucket.add(meta['direction'])
-
-    by_slot = {}
-    for e in entries:
-        tc = (e.teaching_class or '').strip()
-        if not tc:
-            continue
-        key = (e.grade, e.weekday, e.period_number)
-        by_slot.setdefault(key, set()).add(tc)
-
-    labels = grade_labels(list({k[0] for k in by_slot}))
-    out = []
-    for (g, wd, pn), tcs in sorted(by_slot.items()):
-        if len(tcs) < 2:
-            continue
-        for combo in sorted(grade_combos.get(g, ())):
-            hit = sorted(tc for tc in tcs if _teaching_matches(tc, combo, combo))
-            if len(hit) >= 2:
-                out.append({
-                    'grade': g,
-                    'grade_label': labels.get(g, g),
-                    'weekday': wd,
-                    'weekday_text': WEEKDAY_NAMES.get(wd, ''),
-                    'period_number': pn,
-                    'combo': combo,
-                    'classes': hit,
-                })
-                break
-    return out
-
-
-def get_room_view(schedule_id, room, weekday=None, week=None):
-    """教室课表视图（2026-09-25 新增）：某教室一周内的占用情况。
-
-    与班级/教师视图同构（grid/periods/stats/total），便于复用同一套网格宏与
-    冲突提示；条目里保留 grade/class_name，方便直接看出"这节是谁在用"。
-    """
-    periods = get_periods(schedule_id)
-    q = _base_entry_query(schedule_id).filter_by(room=room)
-    if weekday:
-        q = q.filter_by(weekday=weekday)
-    entries = _filter_by_week(q.all(), week)
-    grid = _build_grid(entries, periods)
-    stats = {}
-    for e in entries:
-        stats[e.subject] = stats.get(e.subject, 0) + 1
-    return {
-        'grid': grid,
-        'periods': [p.to_dict() for p in periods],
-        'entries': [e.to_dict() for e in entries],
-        'stats': stats,
-        'total': len(entries),
-        'room': room,
-    }
-
-
-def list_rooms(schedule_id, week=None):
-    """本学期已排课的教室清单：{教室名: 课时数}（按课时数倒序）。
-
-    只统计填了教室的条目 —— 教室为空（如整班固定教室不填）不会出现在这里，
-    供教室视图的下拉/快速切换使用。
-    """
-    entries = _filter_by_week(_base_entry_query(schedule_id).all(), week)
-    counter = {}
-    for e in entries:
-        r = (e.room or '').strip()
-        if r:
-            counter[r] = counter.get(r, 0) + 1
-    return dict(sorted(counter.items(), key=lambda kv: (-kv[1], kv[0])))
+    groups = []
+    for p in period_dicts:
+        label = _period_label(p)
+        p['group_label'] = label
+        if groups and groups[-1]['label'] == label:
+            groups[-1]['span'] += 1
+            p['group_start'] = False
+        else:
+            groups.append({'label': label, 'span': 1})
+            p['group_start'] = True
+    return groups
 
 
 def get_overview_view(schedule_id, week=None, grades=None, include_break=True,
-                      max_weekday=5, direction=None, class_type=None):
-    """全校总课表（2026-09-25 新增）：按年级分块，块内班级并列 × 星期/节次。
+                      max_weekday=5, direction=None, class_type=None,
+                      allowed_grades=None, allowed_classes=None, weekday=None,
+                      prefer_weekday=None):
+    """全校总课表（2026-09-25 新增；2026-10-09 定版为「行=班级、列=节次」矩阵）。
 
-    对齐"一纸打印全校课表"的形态：每个年级一张大表，列＝该年级各班，
-    行＝星期 × 节次，格内显示"学科 + 教师"（可带教室）。
+    对齐"一纸打印全校课表"的形态：每个年级一张大表，第一列＝该年级各班，
+    其余列＝一天的各节次（早读 + 上午 5 节 + 下午 4 节 + 晚自习 3 节），
+    格内显示"学科 + 教师"（可带教室）；星期由页面顶部标签切换，每次只渲染一天。
     参数：
     - grades: 指定年级列表（None=全部）
     - include_break: 是否包含「课间/午休」节次（打印时常常去掉）
     - max_weekday: 显示到星期几（1-7，默认 5=周五；数据里有周六日的自动放宽）
     - direction/class_type: 按**选科方向**（物理/历史，新高考 3+1+2）与**班型**
       （强基班/卓越班…）筛选，读 ClassProfile；高中场景下教务常按这两维度看课表。
+    - weekday: 只构建/只填充这一天（1-7）的网格。2026-10-10 优化——页面一次只渲染
+      一天，其余 6 天不调用 to_dict；传 None 时构建全部 7 天，行为与优化前完全一致
+      （导出路径 _export_overview_sheet 仍走全周，故全周能力保留）。
     """
     from app.modules.academic.services.grade_utils import (class_profile_map,
                                                            grade_labels,
@@ -585,9 +471,17 @@ def get_overview_view(schedule_id, week=None, grades=None, include_break=True,
     if not include_break:
         periods = [p for p in periods if p.period_type != 'break']
     entries = _filter_by_week(_base_entry_query(schedule_id).all(), week)
+    if allowed_grades is not None:
+        entries = [e for e in entries if e.grade in allowed_grades]
+    if allowed_classes is not None:
+        entries = [e for e in entries
+                   if e.class_name in allowed_classes.get(e.grade, set())
+                   or allowed_classes.get(e.grade) is None]
     all_grades = sorted({e.grade for e in entries if e.grade})
     profiles = class_profile_map()
     labels = grade_labels(all_grades)
+    visible_pairs = {(e.grade, e.class_name) for e in entries}
+    visible_profiles = [profiles.get(pair, {}) for pair in visible_pairs]
     if grades:
         wanted = {g for g in grades if g}
         entries = [e for e in entries if e.grade in wanted]
@@ -600,6 +494,12 @@ def get_overview_view(schedule_id, week=None, grades=None, include_break=True,
     if entries:
         max_weekday = max(max_weekday, max((e.weekday or 1) for e in entries))
 
+    # 2026-10-10：缺省入口的"今天超出课表范围就退回周一"在这里一次决定 —— 原来路由要
+    # 先构建一遍才知道 max_weekday，周末（今天不在课表范围内）会白跑一整趟取数+建格。
+    build_weekday = weekday
+    if prefer_weekday is not None:
+        build_weekday = prefer_weekday if prefer_weekday <= max_weekday else 1
+
     by_grade = {}
     for e in entries:
         by_grade.setdefault(e.grade, {}).setdefault(e.class_name, []).append(e)
@@ -609,54 +509,74 @@ def get_overview_view(schedule_id, week=None, grades=None, include_break=True,
     for grade in sorted(by_grade, key=lambda g: (-grade_sort_key(g, labels), g)):
         class_map = by_grade[grade]
         classes = sorted(class_map)
-        grids = {cn: _build_grid(class_map[cn], periods) for cn in classes}
+        # 2026-10-10：weekday 有值时只为这一天建格（其余天的 to_dict 白干）
+        grids = {cn: _build_grid(class_map[cn], periods, build_weekday) for cn in classes}
         blocks.append({
             'grade': grade,
             'grade_label': labels.get(grade, grade),   # 如「高三(2024级)」
             'classes': classes,
             'class_meta': {cn: profiles.get((grade, cn), {}) for cn in classes},
             'grids': grids,
+            'class_totals': {cn: len(class_map[cn]) for cn in classes},  # 每班节数（卡片角标）
             'total': sum(len(v) for v in class_map.values()),
         })
+    period_dicts = [p.to_dict() for p in periods]
     return {
         'blocks': blocks,
-        'periods': [p.to_dict() for p in periods],
+        'periods': period_dicts,
+        'period_groups': _period_groups(period_dicts),
         'grades': [b['grade'] for b in blocks],
         'all_grades': all_grades,   # 未过滤的年级全集（供筛选控件渲染，避免过滤后无法切回）
         'labels': labels,
-        'directions': sorted({v.get('direction') for v in profiles.values()
+        'directions': sorted({v.get('direction') for v in visible_profiles
                               if v.get('direction')}),
-        'class_types': sorted({v.get('class_type') for v in profiles.values()
+        'class_types': sorted({v.get('class_type') for v in visible_profiles
                                if v.get('class_type')}),
         'max_weekday': max_weekday,
+        'day': build_weekday,       # 实际渲染的星期几（缺省入口由 prefer_weekday 决定）
         'total': len(entries),
     }
 
 
-def get_today_schedule(schedule_id=None, grade=None, class_name=None, week=None):
-    """今日全校课表：返回当天全部安排 + 当前节次标记（schedule_id 可为空=按日期自动定位）。
+def _grade_filter_values(grade):
+    if grade is None:
+        return None
+    if isinstance(grade, str):
+        return {grade} if grade else set()
+    return {g for g in grade if g}
 
-    Task#27：未显式传 schedule_id 时，通过 term_service.resolve_schedule_by_date() 定位学期，
-    并自动计算当天所属教学周传给 week 过滤（单双周课表不会串）；若学期未配置起止
-    日期则退回 week=None（不过滤），保证向后兼容不报错。
+
+def _empty_day_matrix(target_date=None):
+    """空矩阵（未建学期/无权限范围时的兜底结构，字段与 get_day_matrix 对齐）。"""
+    return {'entries': [], 'current_period_number': None, 'weekday': 0,
+            'weekday_text': '', 'periods': [], 'period_groups': [],
+            'blocks': [], 'labels': {}, 'max_weekday': 0, 'total': 0,
+            'date': (target_date or date.today()).isoformat(),
+            'schedule_id': None, 'week': None}
+
+
+def get_day_matrix(schedule_id, target_date, week=None, grade=None, class_name=None,
+                   allowed_classes=None, highlight_now=True):
+    """任意一天的「行=班级、列=节次」矩阵（全校总课表 / 查课实时课表共用）。
+
+    blocks/grids/periods/period_groups 可直接喂 `_schedule_matrix.html` 宏；
+    并叠加该日期的临时调课（调入的显示、被调走的不显示）。
+
+    :param target_date: 要看的日期（date 对象）——查课要按日期回查/补录历史，
+                        因此不再写死 now()。
+    :param highlight_now: 只有值为 True 且 target_date 就是今天时才给出
+                        current_period_number（"当前节次整列高亮"），否则为 None。
+    :param allowed_classes: {年级: {班级}} 数据范围（查课页复用同一套范围过滤）。
     """
-    if schedule_id is None:
-        from app.modules.academic.services import term_service
-        sched, resolved_week = term_service.resolve_schedule_by_date()
-        schedule_id = sched.id if sched else None
-        if week is None:
-            week = resolved_week
     if not schedule_id:
-        return {'entries': [], 'current_period_number': None, 'weekday': 0,
-                'periods': [], 'date': date.today().isoformat(),
-                'schedule_id': None, 'week': None}
-
-    now = datetime.now()
-    wd = now.isoweekday()  # 1=周一 ... 7=周日
+        return _empty_day_matrix(target_date)
+    wd = target_date.isoweekday()  # 1=周一 ... 7=周日
     periods = get_periods(schedule_id)
+    grade_values = _grade_filter_values(grade)
     q = _base_entry_query(schedule_id).filter_by(weekday=wd)
-    if grade:
-        q = q.filter_by(grade=grade)
+    if grade_values is not None:
+        q = q.filter(ScheduleEntry.grade.in_(grade_values))
+    q = _apply_class_scope(q, grade_values, allowed_classes)
     if class_name:
         q = q.filter_by(class_name=class_name)
     entries = _filter_by_week(
@@ -667,13 +587,17 @@ def get_today_schedule(schedule_id=None, grade=None, class_name=None, week=None)
     moved_away, temp_dicts = set(), []
     try:
         from app.modules.academic.services import swap_service
-        for sw in swap_service.get_temp_swaps_by_date(schedule_id, now.date()):
+        for sw in swap_service.get_temp_swaps_by_date(schedule_id, target_date):
             oe = sw.get('original_entry')
             te = sw.get('target_entry')
             if oe:
                 moved_away.add(oe['id'])
             if te and te.get('weekday') == wd:
-                if grade and te.get('grade') != grade:
+                if grade_values is not None and te.get('grade') not in grade_values:
+                    continue
+                if (allowed_classes is not None and
+                        (te.get('class_name') not in allowed_classes.get(te.get('grade'), set())
+                         and allowed_classes.get(te.get('grade')) is not None)):
                     continue
                 if class_name and te.get('class_name') != class_name:
                     continue
@@ -681,73 +605,116 @@ def get_today_schedule(schedule_id=None, grade=None, class_name=None, week=None)
                 d['is_temp_swap'] = True
                 temp_dicts.append(d)
     except Exception:
-        pass  # 调课模块异常不影响今日课表基础展示
+        pass  # 调课模块异常不影响课表基础展示
     entry_dicts = [e.to_dict() for e in entries if e.id not in moved_away]
     has_ids = {d['id'] for d in entry_dicts}
     entry_dicts += [d for d in temp_dicts if d['id'] not in has_ids]
     entry_dicts.sort(key=lambda d: (d.get('grade', ''), d.get('class_name', ''),
                                     d.get('period_number', 0)))
 
-    # 确定当前节次
+    # 确定当前节次（只在"看今天"时有意义）
     current_period = None
-    cur_minutes = now.hour * 60 + now.minute
-    for p in periods:
-        if p.start_time and p.end_time:
-            try:
-                sh, sm = map(int, p.start_time.split(':'))
-                eh, em = map(int, p.end_time.split(':'))
-                if sh * 60 + sm <= cur_minutes <= eh * 60 + em:
-                    current_period = p.period_number
-                    break
-            except (ValueError, AttributeError):
-                pass
+    if highlight_now and target_date == date.today():
+        now = datetime.now()
+        cur_minutes = now.hour * 60 + now.minute
+        for p in periods:
+            if p.start_time and p.end_time:
+                try:
+                    sh, sm = map(int, p.start_time.split(':'))
+                    eh, em = map(int, p.end_time.split(':'))
+                    if sh * 60 + sm <= cur_minutes <= eh * 60 + em:
+                        current_period = p.period_number
+                        break
+                except (ValueError, AttributeError):
+                    pass
 
+    # ── 按年级分块：与「全校总课表」同款矩阵（行=班级、列=节次）──
+    # 这一天的格子只填 weekday=wd 那一列；临时调课（当天调入）已并入 entry_dicts。
+    from app.modules.academic.services.grade_utils import (class_profile_map,
+                                                           grade_labels,
+                                                           grade_sort_key)
+    profiles = class_profile_map()
+    labels = grade_labels(sorted({d.get('grade') for d in entry_dicts if d.get('grade')}))
+    by_grade = {}
+    for d in entry_dicts:
+        by_grade.setdefault(d.get('grade'), {}).setdefault(d.get('class_name'), []).append(d)
+    blocks = []
+    for g in sorted(by_grade, key=lambda x: (-grade_sort_key(x, labels), x)):
+        cmap = by_grade[g]
+        classes = sorted(cmap)
+        grids = {}
+        for cn in classes:
+            grid = {p.period_number: {w: [] for w in range(1, 8)} for p in periods}
+            for d in cmap[cn]:
+                pn = d.get('period_number')
+                if pn in grid:
+                    grid[pn][wd].append(d)
+            grids[cn] = grid
+        blocks.append({
+            'grade': g,
+            'grade_label': labels.get(g, g),
+            'classes': classes,
+            'class_meta': {cn: profiles.get((g, cn), {}) for cn in classes},
+            'grids': grids,
+            'class_totals': {cn: len(cmap[cn]) for cn in classes},
+            'total': sum(len(v) for v in cmap.values()),
+        })
+    period_dicts = [p.to_dict() for p in periods]
     return {
         'entries': entry_dicts,
         'current_period_number': current_period,
         'weekday': wd,
         'weekday_text': WEEKDAY_NAMES.get(wd, ''),
-        'periods': [p.to_dict() for p in periods],
-        'date': now.strftime('%Y-%m-%d'),
+        'periods': period_dicts,
+        'period_groups': _period_groups(period_dicts),
+        'blocks': blocks,
+        'labels': labels,
+        'max_weekday': wd,
+        'date': target_date.isoformat(),
         'total': len(entry_dicts),
         'schedule_id': schedule_id,
         'week': week,
     }
 
 
-def get_period_schedule(period_number, schedule_id=None, date_str=None, grade=None,
-                        week=None):
-    """指定节次全校课表：{grade: [{class_name, subject, teacher_name, room, entry_type}]}
+def build_matrix_from_entries(entry_dicts, periods):
+    """把扁平条目列表整理成「行=班级、列=节次」矩阵（导入预览用，不查库）。
 
-    Task#27：未显式传 schedule_id 时按日期自动定位学期与教学周（同 get_today_schedule）。
+    与 get_day_matrix() 的 blocks/grids 同构，可直接喂 `_schedule_matrix.html`
+    宏 —— 导入前就能看到"导进去是什么样"，与全校总课表/查课核对页同版式。
+    entry_dicts 需含 grade/class_name/weekday/period_number/subject 等字段。
+    返回 {'blocks','periods','period_groups','days','total'}，days = 出现过的星期几。
     """
-    if schedule_id is None:
-        from app.modules.academic.services import term_service
-        sched, resolved_week = term_service.resolve_schedule_by_date()
-        schedule_id = sched.id if sched else None
-        if week is None:
-            week = resolved_week
-    if not schedule_id:
-        return {}
+    period_dicts = []
+    for p in (periods or []):
+        period_dicts.append(p.to_dict() if hasattr(p, 'to_dict') else dict(p))
+    numbers = [d.get('period_number') for d in period_dicts if d.get('period_number')]
+    by_grade = {}
+    for e in (entry_dicts or []):
+        g = e.get('grade') or '未分年级'
+        cn = e.get('class_name') or '未分班'
+        by_grade.setdefault(g, {}).setdefault(cn, []).append(e)
+    blocks = []
+    for g in sorted(by_grade):
+        cmap = by_grade[g]
+        classes = sorted(cmap)
+        grids = {}
+        for cn in classes:
+            grid = {pn: {w: [] for w in range(1, 8)} for pn in numbers}
+            for e in cmap[cn]:
+                pn, w = e.get('period_number'), e.get('weekday')
+                if pn in grid and 1 <= (w or 0) <= 7:
+                    grid[pn][w].append(e)
+            grids[cn] = grid
+        blocks.append({'grade': g, 'grade_label': g, 'classes': classes,
+                       'class_meta': {}, 'grids': grids,
+                       'class_totals': {cn: len(cmap[cn]) for cn in classes},
+                       'total': sum(len(v) for v in cmap.values())})
+    days = sorted({e.get('weekday') for e in (entry_dicts or []) if e.get('weekday')})
+    return {'blocks': blocks, 'periods': period_dicts,
+            'period_groups': _period_groups(period_dicts),
+            'days': days, 'total': len(entry_dicts or [])}
 
-    q = _base_entry_query(schedule_id).filter_by(period_number=period_number)
-    if grade:
-        q = q.filter_by(grade=grade)
-    entries = _filter_by_week(
-        q.order_by(ScheduleEntry.grade, ScheduleEntry.class_name).all(), week)
-
-    result = {}
-    for e in entries:
-        result.setdefault(e.grade, []).append({
-            'class_name': e.class_name,
-            'subject': e.subject,
-            'teacher_name': e.teacher_name,
-            'teacher_uid': e.teacher_uid,
-            'room': e.room,
-            'entry_type': e.entry_type,
-            'entry_type_text': ENTRY_TYPES.get(e.entry_type, ''),
-        })
-    return result
 
 
 def get_entry_detail(entry_id):
@@ -770,12 +737,11 @@ def check_class_conflict(schedule_id, grade, class_name, weekday, period_number,
     week_range / week 用于周次维度过滤：周次无交集的条目不算冲突
     （同一格子可以是"单周语文 / 双周数学"）。
 
-    teaching_class（走班，2026-09-26）：
-    - 待排的是**走班课**时，只与"同一教学班"的课判冲突。不同教学班在同一时段
-      并行开课是走班的正常形态（物化生1 与 物化生2 同时上），不能算班级冲突；
-      这种情况是否让学生撞课由 check_teaching_conflicts() 单独提示。
-    - 待排的是**行政班课**时，与全班所有课判冲突（含走班课）：行政班课要求全班
-      到齐，与走班时段重叠必然冲突。
+    teaching_class（教学班，2026-09-26）：
+    - 待排的条目若填了教学班，只与"同一教学班"的课判冲突。不同教学班在同一时段
+      并行开课是走班形态（物化生1 与 物化生2 同时上），不能算班级冲突。
+      注：走班教学班课表页已删（2026-10-10），但该列仍由排课编辑使用。
+    - 未填教学班的条目视为行政班课，与全班所有课判冲突（含填了教学班的课）。
     """
     q = _base_entry_query(schedule_id).filter_by(
         grade=grade, class_name=class_name,
@@ -998,7 +964,8 @@ def _parse_period(raw, periods_map):
     return None
 
 
-def import_from_excel(schedule_id, file_storage, operator=None):
+def import_from_excel(schedule_id, file_storage, operator=None,
+                      entry_authorizer=None):
     """解析 Excel 导入课表 → {success, failed, errors}"""
     periods = get_periods(schedule_id)
     periods_map = {p.period_name: p.period_number for p in periods}
@@ -1071,12 +1038,25 @@ def import_from_excel(schedule_id, file_storage, operator=None):
         else:
             entries_list.append({
                 'grade': grade_val, 'class_name': class_name,
+                'row_no': rn,
                 'weekday': weekday, 'period_number': period_number,
                 'subject': subject, 'teacher_uid': teacher_uid or None,
                 'teacher_name': teacher_name or None,
                 'room': room or None, 'week_range': week_range or '1-18',
                 'note': note or None,
             })
+
+    # Refuse the entire import if any row falls outside the caller's scope.
+    if entry_authorizer:
+        unauthorized = [
+            {'row': item.get('row_no', idx + 2),
+             'message': '年级或班级不在你的管理范围内'}
+            for idx, item in enumerate(entries_list)
+            if not entry_authorizer(item)
+        ]
+        if unauthorized:
+            return {'success': 0, 'failed': len(entries_list) + len(parse_errors),
+                    'errors': parse_errors + unauthorized}
 
     # 批量添加
     result = batch_add_entries(schedule_id, entries_list, operator)
@@ -1087,7 +1067,8 @@ def import_from_excel(schedule_id, file_storage, operator=None):
 
 
 def export_schedule(schedule_id, view_type='class', grade=None, class_name=None,
-                    teacher_uid=None, week=None):
+                    teacher_uid=None, week=None, allowed_grades=None,
+                    allowed_classes=None):
     """导出 Excel → BytesIO（week 为可选周次过滤，与视图口径一致）"""
     periods = get_periods(schedule_id)
     ts = db.session.get(TermSchedule, schedule_id)
@@ -1097,22 +1078,31 @@ def export_schedule(schedule_id, view_type='class', grade=None, class_name=None,
     wb.remove(wb.active)
 
     if view_type == 'class' and grade and class_name:
-        _export_class_sheet(wb, schedule_id, grade, class_name, periods, title, week)
+        _export_class_sheet(wb, schedule_id, grade, class_name, periods, title,
+                            week, allowed_grades, allowed_classes)
     elif view_type == 'grade' and grade:
-        data = get_grade_view(schedule_id, grade, week=week)
+        data = get_grade_view(schedule_id, grade, week=week,
+                              allowed_grades=allowed_grades,
+                              allowed_classes=allowed_classes)
         for cn in data['classes']:
             _export_class_sheet(wb, schedule_id, grade, cn, periods,
-                                f'{title} {grade}{cn}', week)
+                                f'{title} {grade}{cn}', week,
+                                allowed_grades, allowed_classes)
     elif view_type == 'teacher' and teacher_uid:
-        _export_teacher_sheet(wb, schedule_id, teacher_uid, periods, title, week)
+        _export_teacher_sheet(wb, schedule_id, teacher_uid, periods, title, week,
+                              allowed_grades, allowed_classes)
     elif view_type == 'overview':
-        _export_overview_sheet(wb, schedule_id, periods, title, week)
+        _export_overview_sheet(wb, schedule_id, periods, title, week,
+                               allowed_grades, allowed_classes)
     else:
         # master：按班级分 sheet
-        data = get_master_view(schedule_id, week=week)
-        for g, cls_list in data['grade_classes'].items():
+        grade_classes = get_grade_class_list(
+            schedule_id, allowed_grades=allowed_grades,
+            allowed_classes=allowed_classes)
+        for g, cls_list in grade_classes.items():
             for cn in cls_list:
-                _export_class_sheet(wb, schedule_id, g, cn, periods, f'{g}{cn}', week)
+                _export_class_sheet(wb, schedule_id, g, cn, periods, f'{g}{cn}',
+                                    week, allowed_grades, allowed_classes)
 
     if not wb.sheetnames:
         ws = wb.create_sheet('空')
@@ -1124,13 +1114,16 @@ def export_schedule(schedule_id, view_type='class', grade=None, class_name=None,
     return buf
 
 
-def _export_overview_sheet(wb, schedule_id, periods, title, week=None):
+def _export_overview_sheet(wb, schedule_id, periods, title, week=None,
+                           allowed_grades=None, allowed_classes=None):
     """全校总课表工作表（2026-09-25）：按年级分块、班级并列，一张表看全校。
 
     行＝星期 × 节次（星期列纵向合并），列＝年级内各班，格内「学科 + 教师」，
     与页面 /schedule/<sid>/overview 的形态一致，方便直接打印或二次编辑。
     """
-    view = get_overview_view(schedule_id, week=week)
+    view = get_overview_view(schedule_id, week=week,
+                             allowed_grades=allowed_grades,
+                             allowed_classes=allowed_classes)
     ws = wb.create_sheet('全校总课表'[:31])
 
     hf = Font(bold=True, color='FFFFFF', size=10)
@@ -1205,10 +1198,12 @@ def _cell_lines(items, with_class=False):
 
 
 def _export_class_sheet(wb, schedule_id, grade, class_name, periods, sheet_title,
-                        week=None):
+                        week=None, allowed_grades=None, allowed_classes=None):
     """导出单个班级课表工作表"""
     ws = wb.create_sheet(sheet_title[:31])  # Excel sheet名最长31字符
-    view = get_class_view(schedule_id, grade, class_name, week=week)
+    view = get_class_view(schedule_id, grade, class_name, week=week,
+                          allowed_grades=allowed_grades,
+                          allowed_classes=allowed_classes)
     grid = view['grid']
 
     # 表头样式
@@ -1246,10 +1241,12 @@ def _export_class_sheet(wb, schedule_id, grade, class_name, periods, sheet_title
 
 
 def _export_teacher_sheet(wb, schedule_id, teacher_uid, periods, sheet_title,
-                          week=None):
+                          week=None, allowed_grades=None, allowed_classes=None):
     """导出教师个人课表工作表"""
     ws = wb.create_sheet(sheet_title[:31])
-    view = get_teacher_view(schedule_id, teacher_uid, week=week)
+    view = get_teacher_view(schedule_id, teacher_uid, week=week,
+                            allowed_grades=allowed_grades,
+                            allowed_classes=allowed_classes)
     grid = view['grid']
 
     hf = Font(bold=True, color='FFFFFF', size=11)
@@ -1333,7 +1330,8 @@ def generate_import_template(schedule_id):
 # 辅助查询（供路由/API 使用）
 # ═══════════════════════════════════════════════════════════════════════════════
 
-def get_grade_class_list(schedule_id=None):
+def get_grade_class_list(schedule_id=None, allowed_grades=None,
+                         allowed_classes=None):
     """获取年级+班级列表（从课表条目中提取 distinct，供级联下拉）"""
     if schedule_id:
         q = _base_entry_query(schedule_id)
@@ -1342,6 +1340,9 @@ def get_grade_class_list(schedule_id=None):
         if not ts:
             return {}
         q = _base_entry_query(ts.id)
+    if allowed_grades is not None:
+        q = q.filter(ScheduleEntry.grade.in_(allowed_grades))
+    q = _apply_class_scope(q, allowed_grades, allowed_classes)
     rows = q.with_entities(ScheduleEntry.grade, ScheduleEntry.class_name).distinct().all()
     result = {}
     for g, cn in rows:

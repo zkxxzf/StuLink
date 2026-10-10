@@ -1,0 +1,268 @@
+{% extends "base.html" %}
+{% block title %}教务工作台{% endblock %}
+{% block extra_css %}
+<style>
+.ac-hero { background: linear-gradient(120deg, #1e293b, #334155 60%, #0f766e);
+           color: #f8fafc; border-radius: 12px; padding: 16px 18px; margin-bottom: 16px; }
+.ac-hero h4 { color: #fff; }
+.ac-kpi { border: 1px solid #e2e8f0; border-radius: 10px; background: #fff; height: 100%; }
+.ac-kpi .v { font-size: 26px; font-weight: 700; line-height: 1.1; }
+.ac-kpi .l { color: #64748b; font-size: 12px; }
+.ac-kpi .i { font-size: 20px; }
+.ac-tile { display: block; text-decoration: none; color: inherit; border: 1px solid #e2e8f0;
+           border-radius: 10px; padding: 10px 12px; background: #fff; height: 100%;
+           transition: box-shadow .15s, transform .15s; }
+.ac-tile:hover { box-shadow: 0 6px 18px rgba(15,23,42,.08); transform: translateY(-1px);
+                 color: inherit; }
+.ac-tile .t { font-weight: 700; font-size: 13.5px; }
+.ac-tile .d { color: #94a3b8; font-size: 11.5px; }
+.ac-todo-item { display: flex; justify-content: space-between; align-items: center;
+                padding: 8px 0; border-bottom: 1px dashed #e2e8f0; }
+.ac-todo-item:last-child { border-bottom: none; }
+</style>
+{% endblock %}
+{% block content %}
+<div class="ac-hero">
+    <div class="d-flex justify-content-between align-items-center flex-wrap gap-2">
+        <div>
+            <h4 class="fw-bold mb-1"><i class="bi bi-speedometer2"></i> 教务工作台</h4>
+            <div class="small" style="opacity:.85">
+                {% if ts %}
+                当前学期：<strong>{{ ts.name }}</strong>
+                <span class="badge bg-light text-dark ms-1">{{ {'draft':'草稿','active':'启用中','archived':'已归档'}.get(ts.status, ts.status) }}</span>
+                {% if ts.period_text() %} · {{ ts.period_text() }}{% endif %}
+                {% else %}尚未建立学期课表{% endif %}
+                · 今天 {{ today.strftime('%Y-%m-%d') }}
+            </div>
+        </div>
+        <div class="d-flex gap-2 flex-wrap">
+            {% if ts %}
+            <a class="btn btn-sm btn-light" href="{{ url_for('academic.schedule_overview', sid=ts.id) }}">
+                <i class="bi bi-list-columns-reverse"></i> 全校总课表
+            </a>
+            {% endif %}
+            <a class="btn btn-sm btn-light" href="{{ url_for('academic.inspection_page') }}">
+                <i class="bi bi-clipboard2-check"></i> 查课
+            </a>
+            {% if current_user.has_perm('academic.swap') or current_user.has_perm('academic.timetable') %}
+            <a class="btn btn-sm btn-light" href="{{ url_for('academic.swap_page', status='pending') if current_user.has_perm('academic.timetable') else url_for('academic.swap_page') }}">
+                <i class="bi bi-arrow-left-right"></i> {{ '调课审批' if current_user.has_perm('academic.timetable') else '我的调课' }}
+            </a>
+            {% endif %}
+        </div>
+    </div>
+</div>
+
+<div class="row g-2 mb-3">
+    <div class="col-6 col-md-3 col-xl-2">
+        <div class="ac-kpi p-3">
+            <div class="d-flex justify-content-between align-items-start">
+                <div class="v text-primary">{{ kpi.students }}</div>
+                <i class="bi bi-people i text-primary"></i>
+            </div>
+            <div class="l">在校学生 · {{ kpi.classes }} 个班</div>
+        </div>
+    </div>
+    <div class="col-6 col-md-3 col-xl-2">
+        <div class="ac-kpi p-3">
+            <div class="d-flex justify-content-between align-items-start">
+                <div class="v text-success">{{ kpi.teachers_active }}</div>
+                <i class="bi bi-person-vcard i text-success"></i>
+            </div>
+            <div class="l">在职教师（共 {{ kpi.teachers_total }}）</div>
+        </div>
+    </div>
+    <div class="col-6 col-md-3 col-xl-2">
+        <div class="ac-kpi p-3">
+            <div class="d-flex justify-content-between align-items-start">
+                <div class="v text-dark">{{ timetable.entries }}</div>
+                <i class="bi bi-calendar3 i text-dark"></i>
+            </div>
+            <div class="l">本学期课时 · {{ timetable.classes }} 个班</div>
+        </div>
+    </div>
+    <div class="col-6 col-md-3 col-xl-2">
+        <div class="ac-kpi p-3">
+            <div class="d-flex justify-content-between align-items-start">
+                <div class="v text-info">{{ kpi.insp_month }}</div>
+                <i class="bi bi-clipboard2-check i text-info"></i>
+            </div>
+            <div class="l">本月查课（今日 {{ kpi.insp_today }}）</div>
+        </div>
+    </div>
+    <div class="col-6 col-md-3 col-xl-2">
+        <div class="ac-kpi p-3">
+            <div class="d-flex justify-content-between align-items-start">
+                <div class="v {{ 'text-danger' if kpi.insp_abnormal else 'text-muted' }}">{{ kpi.insp_abnormal }}</div>
+                <i class="bi bi-exclamation-triangle i text-danger"></i>
+            </div>
+            <div class="l">本月异常（迟到/缺课等）</div>
+        </div>
+    </div>
+    <div class="col-6 col-md-3 col-xl-2">
+        <div class="ac-kpi p-3">
+            <div class="d-flex justify-content-between align-items-start">
+                <div class="v text-secondary">{{ kpi.leaders }}</div>
+                <i class="bi bi-bookmark-star i text-secondary"></i>
+            </div>
+            <div class="l">已登记备课组长</div>
+        </div>
+    </div>
+</div>
+
+<div class="row g-3">
+    <div class="col-xl-3">
+        <div class="card h-100">
+            <div class="card-header py-2"><i class="bi bi-bell"></i> 待办事项</div>
+            <div class="card-body py-2">
+                {% if current_user.has_perm('academic.swap') or current_user.has_perm('academic.timetable') %}
+                <div class="ac-todo-item">
+                    <div>
+                        <div class="fw-bold small">{{ '待审批调课申请' if current_user.has_perm('academic.timetable') else '我的待审核申请' }}</div>
+                        <div class="text-muted" style="font-size:11.5px">{{ '审批通过后还需执行，课表才会更新' if current_user.has_perm('academic.timetable') else '查看本人申请的审核进度' }}</div>
+                    </div>
+                    <div class="text-end">
+                        <span class="badge {{ 'bg-danger' if todo.swaps else 'bg-light text-dark border' }}">{{ todo.swaps }}</span>
+                        <div><a class="small" href="{{ url_for('academic.swap_page', status='pending') if current_user.has_perm('academic.timetable') else url_for('academic.swap_page') }}">{{ '去审批' if current_user.has_perm('academic.timetable') else '查看申请' }}</a></div>
+                    </div>
+                </div>
+                {% endif %}
+                {% if current_user.has_perm('academic.edit') %}
+                <div class="ac-todo-item">
+                    <div>
+                        <div class="fw-bold small">待审教师业绩</div>
+                        <div class="text-muted" style="font-size:11.5px">教师工作台提交的业绩待审核</div>
+                    </div>
+                    <div class="text-end">
+                        <span class="badge {{ 'bg-danger' if todo.achievements else 'bg-light text-dark border' }}">{{ todo.achievements }}</span>
+                        <div><a class="small" href="{{ url_for('academic.achievements_page', status='pending') }}">去审核</a></div>
+                    </div>
+                </div>
+                {% endif %}
+                {% if current_user.has_perm('academic.edit') %}
+                <div class="ac-todo-item">
+                    <div>
+                        <div class="fw-bold small">进行中的问卷/材料收集</div>
+                        <div class="text-muted" style="font-size:11.5px">已发布、尚未截止</div>
+                    </div>
+                    <div class="text-end">
+                        <span class="badge {{ 'bg-primary' if todo.forms else 'bg-light text-dark border' }}">{{ todo.forms }}</span>
+                        <div><a class="small" href="{{ url_for('academic.form_list') }}">去查看</a></div>
+                    </div>
+                </div>
+                {% endif %}
+                {% if not ts %}
+                <div class="alert alert-warning py-2 small mt-2 mb-0">
+                    还没有学期课表，
+                    {% if current_user.has_perm('academic.timetable') %}先
+                    <a href="{{ url_for('academic.schedule_manage') }}">创建学期并导入课表</a>，
+                    {% else %}请联系教务管理员创建并导入课表；
+                    {% endif %}
+                    任课安排/总课表才会自动生成。
+                </div>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+
+    <div class="col-xl-6">
+        <div class="card h-100">
+            <div class="card-header py-2"><i class="bi bi-diagram-3"></i> 教务主流程</div>
+            <div class="card-body">
+                <div class="row g-2">
+                    <div class="col-md-4">
+                        <div class="border rounded-3 p-3 h-100">
+                            <div class="fw-bold mb-1"><i class="bi bi-calendar3 text-primary"></i> 课表</div>
+                            {% if ts %}
+                            <a class="btn btn-sm btn-outline-primary w-100 mt-2" href="{{ url_for('academic.schedule_overview', sid=ts.id) }}">查看学期总课表</a>
+                            <div class="small mt-2 d-flex flex-column gap-1">
+                                <a href="{{ url_for('academic.today_schedule') }}">今日课表</a>
+                                <a href="{{ url_for('academic.schedule_teaching_index') }}">走班课表</a>
+                            </div>
+                            {% else %}
+                            <div class="text-muted small mt-2">当前没有启用中的学期课表。</div>
+                            {% endif %}
+                            {% if current_user.has_perm('academic.timetable') %}
+                            <a class="small d-inline-block mt-2" href="{{ url_for('academic.schedule_manage') }}">学期管理与排课</a>
+                            {% endif %}
+                        </div>
+                    </div>
+                    <div class="col-md-4">
+                        <div class="border rounded-3 p-3 h-100">
+                            <div class="fw-bold mb-1"><i class="bi bi-clipboard2-check text-info"></i> 查课</div>
+                            <a class="btn btn-sm btn-outline-info w-100 mt-2" href="{{ url_for('academic.inspection_page') }}">查课记录与统计</a>
+                            <div class="small mt-2 d-flex flex-column gap-1">
+                                <a href="{{ url_for('academic.inspection_live_schedule') }}">实时课表核对</a>
+                                <span class="text-muted">按日期、节次查看当堂课程</span>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-md-4">
+                        <div class="border rounded-3 p-3 h-100">
+                            <div class="fw-bold mb-1"><i class="bi bi-arrow-left-right text-success"></i> 调课与审批</div>
+                            {% if current_user.has_perm('academic.timetable') %}
+                            <a class="btn btn-sm btn-outline-success w-100 mt-2" href="{{ url_for('academic.swap_page', status='pending') }}">待审批申请（{{ todo.swaps }}）</a>
+                            <div class="small mt-2 d-flex flex-column gap-1">
+                                <a href="{{ url_for('academic.swap_page') }}">全部申请与执行记录</a>
+                                <a href="{{ url_for('academic.swap_stats') }}">调课统计</a>
+                            </div>
+                            {% elif current_user.has_perm('academic.swap') %}
+                            <a class="btn btn-sm btn-outline-success w-100 mt-2" href="{{ url_for('academic.swap_page') }}">我的申请（{{ todo.swaps }}）</a>
+                            {% else %}
+                            <div class="text-muted small mt-2">暂无调课申请权限。</div>
+                            {% endif %}
+                            {% if current_user.has_perm('academic.swap') and ts %}
+                            <div class="small mt-2 d-flex flex-column gap-1">
+                                <a href="{{ url_for('academic.swap_apply') }}">申请个人调课</a>
+                                <a href="{{ url_for('academic.swap_bulk') }}">申请统一调课</a>
+                            </div>
+                            {% elif current_user.has_perm('academic.swap') %}
+                            <div class="text-muted small mt-2">启用学期课表后可提交申请。</div>
+                            {% endif %}
+                        </div>
+                    </div>
+                </div>
+                <hr class="my-3">
+                <div class="small text-muted mb-2">其他教务工具</div>
+                <div class="d-flex gap-3 flex-wrap small">
+                    <a href="{{ url_for('academic.duty_table') }}">任课安排</a>
+                    <a href="{{ url_for('academic.subject_leaders') }}">备课组长</a>
+                    <a href="{{ url_for('academic.teachers_page') }}">教师名单</a>
+                    {% if current_user.has_perm('academic.edit') %}
+                    <a href="{{ url_for('academic.achievements_page') }}">教师业绩库</a>
+                    <a href="{{ url_for('academic.form_list') }}">问卷收集</a>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="col-xl-3">
+        <div class="card h-100">
+            <div class="card-header py-2 d-flex justify-content-between">
+                <span><i class="bi bi-clock-history"></i> 最近动态</span>
+                {% if current_user.has_perm('system.users') %}
+                <a class="small" href="{{ url_for('operation_logs.list_logs', module='academic') }}">全部</a>
+                {% endif %}
+            </div>
+            <div class="card-body py-2">
+                {% if recent %}
+                {% for r in recent %}
+                <div class="d-flex gap-2 py-1 border-bottom" style="border-color:#f1f5f9 !important">
+                    <div class="text-muted small text-nowrap">{{ r.time }}</div>
+                    <div class="small">
+                        <span class="fw-bold">{{ r.user }}</span>
+                        <span class="{{ 'text-danger' if r.severity == 'ERROR' else ('text-warning' if r.severity == 'WARNING' else '') }}">{{ r.action }}</span>
+                        {{ r.target }}
+                        {% if r.detail %}<div class="text-muted" style="font-size:11px">{{ r.detail }}</div>{% endif %}
+                    </div>
+                </div>
+                {% endfor %}
+                {% else %}
+                <div class="text-muted small text-center py-4">暂无动态</div>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

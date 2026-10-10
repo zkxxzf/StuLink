@@ -1,14 +1,13 @@
 {% extends "base.html" %}
-{% block title %}成绩概览 - 教师工作台{% endblock %}
+{% block title %}我的成绩 - 教师工作台{% endblock %}
 {% block content %}
 <div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
     <div>
-        <h4 class="fw-bold mb-0"><i class="bi bi-bar-chart-line"></i> 成绩概览</h4>
+        <h4 class="fw-bold mb-0"><i class="bi bi-graph-up"></i> 我的成绩</h4>
         <nav aria-label="breadcrumb">
             <ol class="breadcrumb small mb-0">
                 <li class="breadcrumb-item"><a href="{{ url_for('workbench.index') }}">工作台</a></li>
-                <li class="breadcrumb-item"><a href="{{ url_for('overview.class_overview_page') }}">班级概览</a></li>
-                <li class="breadcrumb-item active">成绩概览</li>
+                <li class="breadcrumb-item active">我的成绩</li>
             </ol>
         </nav>
     </div>
@@ -25,18 +24,47 @@
         <p class="small">请联系管理员关联您的教师账号以查看成绩数据</p>
     </div>
 </div>
-{% elif not exam_data %}
-<div class="card">
+{% else %}
+
+{# 任教范围 + 年级筛选：无论有没有成绩都渲染 ——
+   否则筛到"没有成绩的年级"时筛选项会一起消失、无法切回（2026-10-10 修复） #}
+<div class="card mb-3">
+    <div class="card-body py-2 d-flex justify-content-between align-items-center flex-wrap gap-2">
+        <div class="d-flex align-items-center flex-wrap gap-1">
+            <span class="text-muted small me-1"><i class="bi bi-person-check"></i> 本学期任教：</span>
+            {% for lk in links %}
+            <span class="badge bg-light text-dark border fw-normal">{{ lk.class_name_full }} · {{ lk.subject }}</span>
+            {% endfor %}
+        </div>
+        {% if grade_options|length > 1 or selected_grade %}
+        <div class="btn-group btn-group-sm" role="group" aria-label="年级筛选">
+            <a href="{{ url_for('overview.grades_page') }}"
+               class="btn btn-outline-secondary {% if not selected_grade %}active{% endif %}">全部年级</a>
+            {% for g in grade_options %}
+            <a href="{{ url_for('overview.grades_page', grade=g) }}"
+               class="btn btn-outline-secondary {% if selected_grade == g %}active{% endif %}">{{ g }}</a>
+            {% endfor %}
+        </div>
+        {% endif %}
+    </div>
+</div>
+
+{% if not exam_data %}
+<div class="card mb-3">
     <div class="card-body text-center text-muted py-5">
         <i class="bi bi-clipboard-data" style="font-size: 48px;"></i>
+        {% if selected_grade %}
+        <p class="mt-3 mb-1">{{ selected_grade }}暂无成绩数据</p>
+        <p class="small mb-2">该年级目前没有您任教班科的考试记录，可切回全部年级查看。</p>
+        <a href="{{ url_for('overview.grades_page') }}" class="btn btn-sm btn-outline-primary">
+            <i class="bi bi-arrow-left"></i> 查看全部年级
+        </a>
+        {% else %}
         <p class="mt-3 mb-1">暂无成绩数据</p>
-        <p class="small">
-            {% if teacher %}
-            您当前未任课或暂无考试数据。如需查看成绩，请联系管理员在「成绩管理 - 任课教师」中为您分配任课班级。
-            {% else %}
-            请先关联教师账号。
-            {% endif %}
+        <p class="small mb-0">
+            您的任教范围内暂无考试数据。如需查看，请联系管理员在「成绩管理 - 任课教师」中为您分配任课班级。
         </p>
+        {% endif %}
     </div>
 </div>
 {% else %}
@@ -49,6 +77,7 @@
             {% if exam.exam_type %}
             <span class="badge bg-light text-dark border ms-2">{{ exam.exam_type }}</span>
             {% endif %}
+            <span class="badge bg-primary-subtle text-primary-emphasis ms-1">{{ exam.classes|length }} 个班科</span>
         </div>
         <small class="text-muted"><i class="bi bi-calendar3"></i> {{ exam.exam_date }}</small>
     </div>
@@ -58,10 +87,13 @@
                 <tr>
                     <th>班级</th>
                     <th>科目</th>
-                    <th class="text-center">参考人数</th>
+                    <th class="text-center">参考</th>
                     <th class="text-center">平均分</th>
-                    <th class="text-center">最高分</th>
+                    <th class="text-center">最高</th>
+                    <th class="text-center">最低</th>
                     <th class="text-center">及格率</th>
+                    <th class="text-center">年级名次</th>
+                    <th class="text-center">学生明细</th>
                 </tr>
             </thead>
             <tbody>
@@ -71,12 +103,16 @@
                     <td>{{ c.subject }}</td>
                     <td class="text-center">{{ c.count }}</td>
                     <td class="text-center">
-                        <span class="fw-bold {% if c.avg >= 80 %}text-success{% elif c.avg >= 60 %}{% else %}text-warning{% endif %}">
+                        <span class="fw-bold {% if c.avg >= 80 %}text-success{% elif c.avg >= 60 %}text-body{% else %}text-danger{% endif %}">
                             {{ c.avg }}
                         </span>
+                        {% if c.grade_avg is not none %}
+                        <div class="small text-muted">年级 {{ c.grade_avg }}</div>
+                        {% endif %}
                     </td>
                     <td class="text-center">{{ c.max }}</td>
-                    <td class="text-center">
+                    <td class="text-center">{{ c.min }}</td>
+                    <td class="text-center" style="min-width:110px;">
                         <div class="d-flex align-items-center justify-content-center gap-2">
                             <div class="progress flex-grow-1" style="height: 6px; max-width: 80px;">
                                 <div class="progress-bar {% if c.pass_rate >= 80 %}bg-success{% elif c.pass_rate >= 60 %}bg-warning{% else %}bg-danger{% endif %}"
@@ -87,6 +123,25 @@
                             </span>
                         </div>
                     </td>
+                    <td class="text-center">
+                        {% if c.grade_rank %}
+                        <span class="badge {% if c.grade_class_count and c.grade_rank <= (c.grade_class_count / 3) %}bg-primary{% elif c.grade_class_count and c.grade_rank > (c.grade_class_count * 2 / 3) %}bg-secondary{% else %}bg-light text-dark border{% endif %}">
+                            第 {{ c.grade_rank }} / {{ c.grade_class_count }}
+                        </span>
+                        {% else %}<span class="text-muted">-</span>{% endif %}
+                    </td>
+                    <td class="text-center">
+                        <button type="button" class="btn btn-sm btn-outline-primary btn-grade-detail"
+                                data-exam-id="{{ exam.exam_id }}"
+                                data-exam-name="{{ exam.exam_name }}"
+                                data-class="{{ c.class_name_raw }}"
+                                data-class-full="{{ c.class_name }}"
+                                data-subject="{{ c.subject }}"
+                                data-grade-avg="{{ c.grade_avg }}"
+                                data-peers='{{ c.peers | tojson }}'>
+                            <i class="bi bi-list-ul"></i> 查看
+                        </button>
+                    </td>
                 </tr>
                 {% endfor %}
             </tbody>
@@ -94,5 +149,71 @@
     </div>
 </div>
 {% endfor %}
+
+{# 历次考试走势：每个任教班科一张曲线 #}
+<div class="card mb-3">
+    <div class="card-header">
+        <i class="bi bi-activity"></i> 历次考试走势
+        <span class="text-muted small ms-1">（平均分实线 / 及格率虚线）</span>
+    </div>
+    <div class="card-body">
+        <div class="row g-3">
+            {% for lk in links %}
+            <div class="col-lg-6">
+                <div class="border rounded p-2 h-100">
+                    <div class="small fw-bold mb-1">{{ lk.class_name_full }} · {{ lk.subject }}</div>
+                    <div class="trend-chart" style="height:200px;"
+                         data-class="{{ lk.class_name }}"
+                         data-grade="{{ lk.grade }}"
+                         data-subject="{{ lk.subject }}">
+                        <div class="text-muted small text-center pt-5">加载中…</div>
+                    </div>
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+    </div>
+</div>
 {% endif %}
+
+{# 学生明细抽屉：名单/分数/班内名次 + 同年级各班均分对比 #}
+<div class="offcanvas offcanvas-end" tabindex="-1" id="gradeDetailDrawer"
+     style="width: 680px; max-width: 96vw;" aria-labelledby="gdTitle">
+    <div class="offcanvas-header">
+        <div>
+            <h6 class="offcanvas-title mb-0" id="gdTitle">学生明细</h6>
+            <small class="text-muted" id="gdSub"></small>
+        </div>
+        <button type="button" class="btn-close" data-bs-dismiss="offcanvas" aria-label="关闭"></button>
+    </div>
+    <div class="offcanvas-body">
+        <div id="gdHint" class="small mb-2"></div>
+        <div id="gdStats" class="row g-2 mb-3"></div>
+        <div class="small text-muted mb-1">
+            同年级各班平均分（本班已高亮，虚线为年级均值）
+            <span id="gdPeersNote" class="text-muted"></span>
+        </div>
+        <div id="gdPeers" style="height: 180px;" class="mb-3"></div>
+        <div class="table-responsive" style="max-height: 46vh; overflow-y: auto;">
+            <table class="table table-sm table-hover align-middle mb-0">
+                <thead class="table-light" style="position: sticky; top: 0; z-index: 1;">
+                    <tr>
+                        <th style="width:64px;">名次</th>
+                        <th>姓名</th>
+                        <th>学号</th>
+                        <th class="text-end" style="width:88px;">分数</th>
+                    </tr>
+                </thead>
+                <tbody id="gdRows"></tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+{% endif %}
+{% endblock %}
+
+{% block extra_js %}
+<script src="{{ su('js/echarts.min.js') }}"></script>
+<script src="{{ su('js/workbench_grades.js') }}"></script>
 {% endblock %}

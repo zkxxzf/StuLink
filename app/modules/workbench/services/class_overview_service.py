@@ -160,13 +160,36 @@ def get_students_by_class(grade, class_name, search=None, page=1, per_page=30):
     }
 
 
-def get_grade_summary(user_id, grade=None):
-    """获取教师成绩摘要（按考试聚合班级均分/最高分/及格率）
+def get_teaching_links(user_id):
+    """本人任教的 (年级, 班级, 学科) 清单：成绩页的筛选选项、徽章与前端归属校验共用。
 
-    通过 TeacherSubjectLink 获取任课班级，再聚合 ExamScore。
-    返回: [{exam_name, exam_date, classes: [{class_name, avg, max, pass_rate}]}, ...]
+    返回: [{grade, class_name, class_name_full, subject}]，按年级/班级/学科排序。
     """
-    # 获取任课班级
+    links = (TeacherSubjectLink.query
+             .filter_by(user_id=user_id, active=True)
+             .order_by(TeacherSubjectLink.grade, TeacherSubjectLink.class_name,
+                       TeacherSubjectLink.subject).all())
+    return [{'grade': lk.grade,
+             'class_name': lk.class_name,
+             'class_name_full': f'{lk.grade}{lk.class_name}',
+             'subject': lk.subject} for lk in links]
+
+
+def get_grade_summary(user_id, grade=None):
+    """获取教师成绩摘要（按考试聚合本人任教班级×科目的均分/最高/最低/及格率/年级名次）
+
+    口径（2026-10-10 收紧）：只统计 TeacherSubjectLink(user_id, active=True) 中的
+    (年级, 班级, 学科) 组合 —— 即"本人任教"；同年级其它班只参与聚合对比
+    （年级均分与名次），不出现任何明细。
+
+    性能：每场考试一条 group_by(class_name, subject) 聚合查询（原实现是按
+    「班科 × 考试」逐组合查询），教师 6 个班科 × 10 场考试从约 60 次降到 20 次。
+
+    返回: [{exam_id, exam_name, exam_date, exam_type, classes: [{
+        grade, class_name, class_name_raw, subject, count, avg, max, min,
+        pass_rate, grade_avg, grade_rank, grade_class_count}]}, ...]
+    """
+    # 获取任课班级（唯一准入依据）
     links_q = TeacherSubjectLink.query.filter_by(user_id=user_id, active=True)
     if grade:
         links_q = links_q.filter_by(grade=grade)
@@ -174,50 +197,91 @@ def get_grade_summary(user_id, grade=None):
     if not links:
         return []
 
-    # 收集涉及的年级
-    grades = list({lk.grade for lk in links})
-    class_names = [lk.class_name for lk in links]
+    allowed = {(lk.grade, lk.class_name, lk.subject) for lk in links}
+    grades = sorted({lk.grade for lk in links})
 
-    # 获取相关考试
-    exams = Exam.query.filter(
-        Exam.grade.in_(grades)
-    ).order_by(Exam.exam_date.desc()).limit(10).all()
+    exams = (Exam.query.filter(Exam.grade.in_(grades))
+             .order_by(Exam.exam_date.desc(), Exam.id.desc()).limit(10).all())
 
     results = []
     for exam in exams:
-        exam_classes = []
-        for lk in links:
-            if lk.grade != exam.grade:
-                continue
-            # 班级统计
-            stats = db.session.query(
-                func.avg(ExamScore.score).label('avg_score'),
-                func.max(ExamScore.score).label('max_score'),
-                func.count(ExamScore.id).label('cnt'),
-                func.sum(case(
-                    (ExamScore.score >= exam.full_marks().get(lk.subject, 100) * 0.6, 1),
-                    else_=0
-                )).label('pass_cnt'),
-            ).filter(
-                ExamScore.exam_id == exam.id,
-                ExamScore.class_name == lk.class_name,
-                ExamScore.subject == lk.subject,
-            ).first()
+        fm = exam.full_marks() or {}
+        # 该考试出现的科目（用于按科目阈值判定及格，阈值缺失时与原逻辑一致按 100 分）
+        subjects = [r[0] for r in (db.session.query(ExamScore.subject)
+                                   .filter(ExamScore.exam_id == exam.id)
+                                   .distinct().all()) if r[0]]
+        if not subjects:
+            continue
+        pass_expr = func.sum(case(
+            *[((ExamScore.subject == s) & (ExamScore.score >= float(fm.get(s, 100)) * 0.6), 1)
+              for s in subjects],
+            else_=0))
 
-            if stats and stats.cnt and stats.cnt > 0:
-                avg_val = round(float(stats.avg_score or 0), 1)
-                max_val = float(stats.max_score or 0)
-                pass_rate = round(float(stats.pass_cnt or 0) / stats.cnt * 100, 1)
-                exam_classes.append({
-                    'class_name': f'{lk.grade}{lk.class_name}',
-                    'subject': lk.subject,
-                    'avg': avg_val,
-                    'max': max_val,
-                    'pass_rate': pass_rate,
-                    'count': stats.cnt,
-                })
+        rows = (db.session.query(
+                    ExamScore.class_name.label('class_name'),
+                    ExamScore.subject.label('subject'),
+                    func.count(ExamScore.id).label('cnt'),
+                    func.avg(ExamScore.score).label('avg_score'),
+                    func.max(ExamScore.score).label('max_score'),
+                    func.min(ExamScore.score).label('min_score'),
+                    pass_expr.label('pass_cnt'))
+                .filter(ExamScore.exam_id == exam.id)
+                .group_by(ExamScore.class_name, ExamScore.subject).all())
+
+        by_class_subject = {}
+        by_subject = {}
+        for r in rows:
+            cnt = int(r.cnt or 0)
+            if not cnt or r.class_name is None or not r.subject:
+                continue
+            raw_avg = float(r.avg_score or 0)
+            by_class_subject[(r.class_name, r.subject)] = {
+                'count': cnt,
+                'avg': round(raw_avg, 1),
+                'max': float(r.max_score or 0),
+                'min': float(r.min_score or 0),
+                'pass_rate': round(float(r.pass_cnt or 0) / cnt * 100, 1),
+            }
+            by_subject.setdefault(r.subject, []).append(
+                {'class_name': r.class_name, 'avg': raw_avg, 'count': cnt})
+
+        exam_classes = []
+        for g, cn, subj in sorted(allowed):
+            if g != exam.grade:
+                continue
+            stat = by_class_subject.get((cn, subj))
+            if not stat:
+                continue
+            # 年级对比：按均分降序取本班名次 + 年级加权均分（仅聚合值）
+            peers = by_subject.get(subj) or []
+            ordered = sorted(peers, key=lambda x: (-x['avg'], x['class_name']))
+            rank = next((i + 1 for i, x in enumerate(ordered)
+                         if x['class_name'] == cn), None)
+            total_cnt = sum(x['count'] for x in ordered)
+            grade_avg = (round(sum(x['avg'] * x['count'] for x in ordered) / total_cnt, 1)
+                         if total_cnt else None)
+            exam_classes.append({
+                'grade': g,
+                'class_name': f'{g}{cn}',
+                'class_name_raw': cn,
+                'subject': subj,
+                'count': stat['count'],
+                'avg': stat['avg'],
+                'max': stat['max'],
+                'min': stat['min'],
+                'pass_rate': stat['pass_rate'],
+                'grade_avg': grade_avg,
+                'grade_rank': rank,
+                'grade_class_count': len(ordered),
+                # 同年级各班均分（仅聚合值，供"我教的班 vs 同年级"对比图，不暴露他班明细）
+                'peers': [{'class_name': f'{g}{x["class_name"]}',
+                           'avg': round(x['avg'], 1),
+                           'mine': x['class_name'] == cn} for x in ordered],
+            })
+
         if exam_classes:
             results.append({
+                'exam_id': exam.id,
                 'exam_name': exam.name,
                 'exam_date': exam.exam_date.strftime('%Y-%m-%d') if exam.exam_date else '',
                 'exam_type': exam.exam_type or '',
@@ -225,6 +289,128 @@ def get_grade_summary(user_id, grade=None):
             })
 
     return results
+
+
+def _require_teaching_link(user_id, grade, class_name, subject):
+    """归属校验：该 (年级, 班级, 学科) 必须属于本人任课映射，否则 PermissionError。
+
+    工作台成绩页的唯一准入依据就是 TeacherSubjectLink(user_id, active=True)，
+    与 grades 模块「只到年级级」的宽口径解耦，避免越权看到别的班/别的科。
+    """
+    link = (TeacherSubjectLink.query
+            .filter_by(user_id=user_id, active=True, grade=grade,
+                       class_name=class_name, subject=subject).first())
+    if not link:
+        raise PermissionError('该班级学科不在您的任教范围内')
+    return link
+
+
+def get_grade_detail(user_id, exam_id, class_name, subject):
+    """某次考试某班某科的学生明细（含班内名次），仅限本人任教范围。
+
+    越权（不在 TeacherSubjectLink）抛 PermissionError，由路由转 403 JSON。
+    返回: {exam_id, exam_name, exam_date, grade, class_name, class_name_raw,
+           subject, rows: [{rank, student_no, student_name, score, rank_class}],
+           stats: {count, avg, max, min, pass_rate}}
+    """
+    exam = db.session.get(Exam, exam_id)
+    if not exam:
+        raise ValueError('考试不存在')
+    _require_teaching_link(user_id, exam.grade, class_name, subject)
+
+    scores = (ExamScore.query
+              .filter_by(exam_id=exam.id, class_name=class_name, subject=subject)
+              .order_by(ExamScore.score.desc(), ExamScore.student_no).all())
+
+    rows = []
+    for i, s in enumerate(scores, 1):
+        rows.append({
+            'rank': i,                       # 按分数降序的班内名次（库里 rank_class 可能缺）
+            'student_no': s.student_no or '',
+            'student_name': s.student_name or '',
+            'score': float(s.score) if s.score is not None else None,
+            'rank_class': s.rank_class,
+        })
+
+    vals = [r['score'] for r in rows if r['score'] is not None]
+    full = float((exam.full_marks() or {}).get(subject, 100))
+    threshold = full * 0.6
+    stats = {
+        'count': len(vals),
+        'avg': round(sum(vals) / len(vals), 1) if vals else None,
+        'max': max(vals) if vals else None,
+        'min': min(vals) if vals else None,
+        'pass_rate': (round(sum(1 for v in vals if v >= threshold) / len(vals) * 100, 1)
+                      if vals else None),
+    }
+    return {
+        'exam_id': exam.id,
+        'exam_name': exam.name,
+        'exam_date': exam.exam_date.strftime('%Y-%m-%d') if exam.exam_date else '',
+        'grade': exam.grade,
+        'class_name': f'{exam.grade}{class_name}',
+        'class_name_raw': class_name,
+        'subject': subject,
+        'full': full,       # 满分（前端按比例做分数颜色/分数段）
+        'rows': rows,
+        'stats': stats,
+    }
+
+
+def get_grade_trend(user_id, class_name, subject, grade=None, limit=8):
+    """同一班级+学科历次考试的走势（平均分、及格率、年级该科均值）。
+
+    仅限本人任教范围（越权抛 PermissionError）；按考试日期升序返回最近 limit 场。
+    """
+    lk_q = TeacherSubjectLink.query.filter_by(user_id=user_id, active=True,
+                                              class_name=class_name, subject=subject)
+    if grade:
+        lk_q = lk_q.filter_by(grade=grade)
+    links = lk_q.all()
+    if not links:
+        raise PermissionError('该班级学科不在您的任教范围内')
+    grades = sorted({lk.grade for lk in links})
+
+    exams = (Exam.query.filter(Exam.grade.in_(grades))
+             .order_by(Exam.exam_date.desc(), Exam.id.desc())
+             .limit(max(2, min(int(limit or 8), 20))).all())
+    exams.reverse()      # 图表按时间升序
+
+    points = []
+    for exam in exams:
+        row = (db.session.query(func.count(ExamScore.id),
+                                func.avg(ExamScore.score))
+               .filter(ExamScore.exam_id == exam.id,
+                       ExamScore.class_name == class_name,
+                       ExamScore.subject == subject).first())
+        cnt = int(row[0] or 0) if row else 0
+        if not cnt:
+            continue
+        threshold = float((exam.full_marks() or {}).get(subject, 100)) * 0.6
+        pass_cnt = (db.session.query(func.count(ExamScore.id))
+                    .filter(ExamScore.exam_id == exam.id,
+                            ExamScore.class_name == class_name,
+                            ExamScore.subject == subject,
+                            ExamScore.score >= threshold).scalar() or 0)
+        grade_avg = (db.session.query(func.avg(ExamScore.score))
+                     .filter(ExamScore.exam_id == exam.id,
+                             ExamScore.subject == subject).scalar())
+        points.append({
+            'exam_name': exam.name,
+            'exam_date': exam.exam_date.strftime('%Y-%m-%d') if exam.exam_date else '',
+            'avg': round(float(row[1] or 0), 1),
+            'pass_rate': round(pass_cnt / cnt * 100, 1),
+            'count': cnt,
+            'grade_avg': round(float(grade_avg), 1) if grade_avg is not None else None,
+        })
+
+    return {
+        'grade': links[0].grade,
+        'class_name': f'{links[0].grade}{class_name}',
+        'class_name_raw': class_name,
+        'subject': subject,
+        'points': points,
+    }
 
 
 def get_points_summary(user_id, month_str=None):

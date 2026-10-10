@@ -623,7 +623,7 @@ def exam_import_confirm(exam_id):
         summary = store_service.apply_import(exam, parsed, mode=mode,
                                              remove_missing=remove_missing)
         ranking.recalc_exam(exam_id)
-        # v1.18.9.1 任课快照：把本次导入时的任课安排定格到本场考试（教师维度分析读它，
+        # v1.18.9.1 任课快照：把本次导入时的任课教师映射定格到本场考试（教师维度分析读它，
         # 以后教师调整/重新分班都不会把历史成绩归到新教师名下）
         from app.modules.grades.services import teacher_snapshot_service as tss
         n_tch = tss.snapshot_exam(exam, source='import')

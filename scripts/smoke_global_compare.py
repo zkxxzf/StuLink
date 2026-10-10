@@ -26,6 +26,12 @@ config_mod.Config.SQLALCHEMY_BINDS = {
     'grades': 'sqlite:///' + os.path.join(_TMP, 'grades.db'),
     'points': 'sqlite:///' + os.path.join(_TMP, 'points.db'),
     'academic': 'sqlite:///' + os.path.join(_TMP, 'academic.db'),
+    # 2026-10-10：教务分库——查课 / 业绩 / 表单 各自独立库
+    'inspection': 'sqlite:///' + os.path.join(_TMP, 'inspection.db'),
+    'achievement': 'sqlite:///' + os.path.join(_TMP, 'achievement.db'),
+    'forms': 'sqlite:///' + os.path.join(_TMP, 'forms.db'),
+    # 2026-10-10：补 system 绑定 —— 启动建表会遍历 'system'，缺它会有 WARN 噪音
+    'system': 'sqlite:///' + os.path.join(_TMP, 'system.db'),
     'portrait': 'sqlite:///' + os.path.join(_TMP, 'portrait.db'),
     'system': 'sqlite:///' + os.path.join(_TMP, 'system.db'),
     'timetable': 'sqlite:///' + os.path.join(_TMP, 'timetable.db'),
@@ -35,7 +41,8 @@ config_mod.Config.SECRET_KEY = 'ld-check-secret'
 from app import create_app  # noqa: E402
 from app.extensions import db  # noqa: E402
 from app.models import Student, User  # noqa: E402
-from app.models.grades import Exam, ExamScore, ExamBand, TOTAL_SUBJECT  # noqa: E402
+from app.models.grades import (Exam, ExamScore, ExamBand, ExamTeacherLink,  # noqa: E402
+                               TOTAL_SUBJECT)
 
 app = create_app()
 ok = fail = 0
@@ -162,6 +169,21 @@ with app.app_context():
     mk_scores(ex3.id, [('2501', '全一', '01班', '', '', '全科',
                         {TOTAL_SUBJECT: 700, '语文': 95})], '2025级')
 
+    # ================= 任课教师快照（考试当时，source=import） =================
+    # v1.18.9.0：全局对比在各科成绩下方显示该班该科教师，取本场快照（不回落当前映射）
+    for _ex, _grade, _rows in ((ex1, '2024级', [
+            ('01班', '语文', '张语文'), ('01班', '数学', '李数学'), ('01班', '物理', '王物理'),
+            ('02班', '语文', '陈语文'), ('02班', '数学', '周数学'), ('02班', '物理', '吴物理'),
+            ('03班', '语文', '赵语文'), ('03班', '数学', '钱数学'), ('03班', '历史', '孙历史'),
+        ]), (ex2, '2025级', [
+            ('01班', '语文', '高一语文'), ('01班', '数学', '高一数学'),
+            ('02班', '语文', '高二语文'), ('03班', '语文', '高三语文'),
+        ])):
+        for _cls, _sub, _nm in _rows:
+            db.session.add(ExamTeacherLink(
+                exam_id=_ex.id, grade=_grade, class_name=_cls, subject=_sub,
+                teacher_name=_nm, source='import'))
+
     db.session.commit()
     e1, e2, e3 = ex1.id, ex2.id, ex3.id
     print('== 数据就绪 ==', e1, e2, e3)
@@ -253,6 +275,20 @@ with app.app_context():
           and gr['cells'][TOTAL_SUBJECT]['l2_rate'] == 82,
           f"{gr['cells'][TOTAL_SUBJECT]['l2_n']}/{gr['cells'][TOTAL_SUBJECT]['l2_rate']}")
 
+    # ================= 任课教师（v1.18.9.0：各科成绩下方，本场快照） =================
+    check('01班 语文 教师=张语文（取本场快照）',
+          c['语文'].get('teacher') == '张语文', str(c['语文'].get('teacher')))
+    check('02班 物理 教师=吴物理', c2['物理'].get('teacher') == '吴物理',
+          str(c2['物理'].get('teacher')))
+    check('03班 历史 教师=孙历史', r03['cells']['历史'].get('teacher') == '孙历史',
+          str(r03['cells']['历史'].get('teacher')))
+    check('03班 物理 无教师（该班不开物理课）',
+          r03['cells']['物理'].get('teacher') is None, str(r03['cells']['物理']))
+    check('总分列不带教师（班主任已独立成列）',
+          c[TOTAL_SUBJECT].get('teacher') is None, str(list(c[TOTAL_SUBJECT].keys())))
+    check('物理小计行不带教师', sub_phy['cells']['语文'].get('teacher') is None)
+    check('全年级行不带教师', gr['cells']['语文'].get('teacher') is None)
+
     # 方向筛选
     dp = ld.global_compare_report(e1, '物理')
     check('筛选物理：仅 1 组 2 班', len(dp['groups']) == 1 and len(dp['groups'][0]['rows']) == 2)
@@ -274,6 +310,12 @@ with app.app_context():
           rr01['cells']['语文']['l1_n'] == 1 and rr01['cells']['语文']['l1_rate'] == 50,
           f"{rr01['cells']['语文']['l1_n']}/{rr01['cells']['语文']['l1_rate']}")
     check('全科 全年级 人数=5', d2['grand']['count'] == 5, str(d2['grand']['count']))
+    check('全科 01班 语文 教师=高一语文',
+          rr01['cells']['语文'].get('teacher') == '高一语文',
+          str(rr01['cells']['语文'].get('teacher')))
+    check('全科 03班（无快照的科目）教师为空',
+          d2['groups'][0]['rows'][2]['cells']['数学'].get('teacher') is None,
+          str(d2['groups'][0]['rows'][2]['cells']['数学']))
 
     # 未划线
     d3 = ld.global_compare_report(e3)
@@ -328,6 +370,13 @@ with app.test_client() as c:
                                  for r in range(1, ws.max_row + 1)))
         check('导出含全年级行', any(ws.cell(row=r, column=2).value == '全年级'
                                    for r in range(1, ws.max_row + 1)))
+        all_vals = [ws.cell(row=r, column=cl).value
+                    for r in range(3, ws.max_row + 1)
+                    for cl in range(1, ws.max_column + 1)]
+        check('导出成绩格含任课教师（换行）',
+              any(isinstance(v, str) and '张语文' in v and '\n' in v
+                  for v in all_vals),
+              '未找到「均分\\n教师」单元格')
     except Exception as e:  # noqa: BLE001
         check('导出文件可被 openpyxl 打开', False, str(e))
 

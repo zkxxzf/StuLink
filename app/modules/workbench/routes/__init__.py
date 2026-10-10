@@ -4,15 +4,21 @@
 import re
 from datetime import date
 
-from flask import Blueprint, render_template, request, redirect, url_for, flash
+from flask import (Blueprint, render_template, request, redirect, url_for,
+                   flash, current_app)
 from flask_login import login_required, current_user
 
 from app.extensions import db
 from app.models import User
-from app.models.academic import (TimetableEntry, TeacherAchievement, Teacher,
+from app.models.academic import (TeacherAchievement, Teacher,
                                  ACHIEVEMENT_CATEGORIES, ACHIEVEMENT_LEVELS,
-                                 ACHIEVEMENT_STATUS, CourseSwap)
-from app.modules.academic.services import teacher_service
+                                 ACHIEVEMENT_STATUS)
+from app.models.timetable import (ScheduleEntry,  # 调课（2026-10-09：改读 timetable.db 的在用的表）
+                                  ScheduleSwap, TermSchedule)
+from app.modules.academic.services import schedule_service, teacher_service
+from app.modules.academic.services.access_scope import (
+    visible_academic_class_scope, visible_academic_grades)
+from app.utils.decorators import perm_required
 from app.utils.helpers import log_operation
 
 bp = Blueprint('workbench', __name__, url_prefix='/workbench')
@@ -37,22 +43,53 @@ def index():
 
     entries, today_entries, achievements = [], [], []
     pending_swaps = []
+    active_term = None
     if teacher:
-        entries = (TimetableEntry.query.filter_by(teacher_uid=teacher.teacher_uid)
-                   .order_by(TimetableEntry.weekday, TimetableEntry.period).all())
+        # 2026-10-10：课表改读 timetable.db 的 schedule_entries（与教务端「我的课表」同源）。
+        # 旧表 academic.timetable_entries 已停用，此前读旧表导致本卡片恒为空。
+        try:
+            active_term = schedule_service.get_active_schedule()
+            if active_term:
+                view = schedule_service.get_teacher_view(active_term.id,
+                                                         teacher.teacher_uid)
+                entries = sorted(view.get('entries') or [],
+                                 key=lambda e: (e.get('weekday') or 0,
+                                                e.get('period_number') or 0))
+        except Exception:   # 课表库异常（bind 未配置 / 表缺失）只降级为空态，不拖垮首页
+            db.session.rollback()
+            current_app.logger.exception('工作台课表加载失败 teacher_uid=%s',
+                                         teacher.teacher_uid)
         weekday_today = date.today().isoweekday()
-        today_entries = [e for e in entries if e.weekday == weekday_today]
+        today_entries = [e for e in entries if e['weekday'] == weekday_today]
         achievements = (TeacherAchievement.query
                         .filter_by(teacher_uid=teacher.teacher_uid)
                         .order_by(TeacherAchievement.created_at.desc()).all())
         # 调课：当前教师 pending 状态的记录
-        pending_swaps = (CourseSwap.query
-                         .filter_by(applicant_uid=teacher.teacher_uid, status='pending')
-                         .order_by(CourseSwap.created_at.desc())
-                         .limit(10).all())
+        # 2026-10-09：改读 timetable.db 的 ScheduleSwap —— 调课模块 2026-09 起已整表迁到
+        # timetable.db；旧的 CourseSwap 表（读它会一直显示"没有待审调课"）已废弃，
+        # 并已于 2026-10-10 随教务分库删除。
+        rows = (ScheduleSwap.query
+                .filter_by(applicant_uid=teacher.teacher_uid, status='pending')
+                .order_by(ScheduleSwap.created_at.desc())
+                .limit(10).all())
+        pending_swaps = []
+        for sw in rows:
+            orig = (db.session.get(ScheduleEntry, sw.original_entry_id)
+                    if sw.original_entry_id else None)
+            pending_swaps.append({
+                'id': sw.id,
+                'swap_type': sw.swap_type,
+                'original_subject': orig.subject if orig else '（原条目已删）',
+                'original_class': f'{orig.grade}{orig.class_name}' if orig else '',
+                'original_date': sw.source_date or sw.swap_date,
+                'original_period': orig.period_number if orig else sw.new_period,
+                'reason': sw.reason,
+                'created_at': sw.created_at,
+            })
 
     return render_template('workbench/index.html', teacher=teacher,
                            entries=entries, today_entries=today_entries,
+                           active_term=active_term,
                            achievements=achievements,
                            categories=ACHIEVEMENT_CATEGORIES,
                            levels=ACHIEVEMENT_LEVELS,
@@ -61,6 +98,38 @@ def index():
                            is_head=(current_user.role == 'homeroom_teacher'),
                            today=date.today(),
                            pending_swaps=pending_swaps)
+
+
+@bp.route('/my-schedule')
+@login_required
+@perm_required('workbench.class_view')
+def my_schedule():
+    """我的课表：教师本人视角的完整周课表（网格 + 课时统计 + 学科占比 + 任教班级）。
+
+    2026-10-10：把教务端 /academic/my-schedule 的版式整体搬进工作台，教师不必再跳到
+    教务模块。复用同一 service（schedule_service.get_teacher_view，数据源 timetable.db
+    的 schedule_entries）与同一模板（my_mode=True 时教务专属的导出/学期管理按钮不渲染）；
+    权限用 workbench.class_view —— 教务侧依赖的 academic.view 在两个权限种子里对教师组
+    不一致，而 class_view 在两处都有。?sid= 回看历史学期，?week=N 切换周次。
+    """
+    sid = request.args.get('sid', type=int)
+    ts = (db.session.get(TermSchedule, sid) if sid
+          else schedule_service.get_active_schedule())
+    teacher = teacher_service.teacher_of_user(current_user) if ts else None
+    week = request.args.get('week', type=int) or None
+
+    view = None
+    if ts and teacher:
+        view = schedule_service.get_teacher_view(
+            ts.id, teacher.teacher_uid, week=week,
+            allowed_grades=visible_academic_grades(current_user),
+            allowed_classes=visible_academic_class_scope(current_user))
+
+    return render_template('academic/schedule_teacher.html',
+                           ts=ts, uid=teacher.teacher_uid if teacher else '',
+                           teacher=teacher, view=view, teachers=[],
+                           week=week, schedules=schedule_service.list_schedules(),
+                           can_edit=False, my_mode=True)
 
 
 @bp.route('/phone', methods=['POST'])
