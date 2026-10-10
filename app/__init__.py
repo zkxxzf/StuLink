@@ -345,10 +345,13 @@ def create_app():
     app.jinja_env.auto_reload = app.config.get('TEMPLATES_AUTO_RELOAD', False)
     # 模板全局函数：选科方向判断与配色
     from app.utils.helpers import subject_direction, subject_badge_class, normalize_subject
+    # v1.19.0 成绩模块“考试上下文”导航（点进某场考试后侧栏切换为本场流程）
+    from app.utils.exam_nav import exam_nav
     app.jinja_env.globals.update(
         subject_direction=subject_direction,
         subject_badge_class=subject_badge_class,
         normalize_subject=normalize_subject,
+        exam_nav=exam_nav,
     )
 
     db.init_app(app)

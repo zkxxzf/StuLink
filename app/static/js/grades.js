@@ -71,11 +71,34 @@ function fillExams(){
                      e.status === 'dirty' ? '·待重算' : '·未导入');
         sel.append('<option value="'+e.id+'" data-status="'+e.status+'">'+label+'</option>');
     });
-    var pick = list.filter(function(e){ return e.status === 'imported'; })[0] || list[0];
+    // v1.19.0 优先用侧栏带进来的本场考试（?exam=），否则按原逻辑默认选最近一场已导入
+    var want = ($('#gInitialExam').text() || '').trim();
+    var pick = want ? list.filter(function(e){ return String(e.id) === want; })[0] : null;
+    if (!pick) pick = list.filter(function(e){ return e.status === 'imported'; })[0] || list[0];
     if (pick){ sel.val(String(pick.id)); }
     state.examId = sel.val() || '';
     state.grade = grade;
+    syncExamNav();
     fillClasses();
+}
+
+/* v1.19.0 侧栏“本场流程”链接跟随当前选中的考试（悬浮流程栏在考试态页面显示时生效）*/
+function syncExamNav(){
+    var eid = state.examId;
+    if (!eid) return;
+    var $nav = $('.exam-flow-nav');
+    if (!$nav.length) return;
+    var urls = {
+        detail: '/grades/exams/' + eid,
+        affair: '/grades/exams/' + eid + '/affair',
+        import: '/grades/exams/' + eid + '/import',
+        analysis: '/grades/?exam=' + eid,
+        ai: '/grades/exams/' + eid + '/ai-import',
+        bands: '/grades/exams/' + eid + '/bands'
+    };
+    Object.keys(urls).forEach(function(k){
+        $nav.find('a[data-nav="' + k + '"]').attr('href', urls[k]);
+    });
 }
 
 /* v1.18.8.0 班级筛选仅限本场考试：优先用该场考试自己的班级
@@ -126,6 +149,7 @@ function bindFilters(){
     $('#gGrade').on('change', fillExams);
     $('#gExam').on('change', function(){
         state.examId = $(this).val();
+        syncExamNav();          // v1.19.0 同步侧栏本场流程链接
         fillClasses();          // v1.18.8.0 班级随考试变：仅列本场考试的班级
         loadCurrent();
     });
