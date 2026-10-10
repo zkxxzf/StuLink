@@ -40,6 +40,11 @@ def _client_ai_cfg():
         'base_url': (ai.get('base_url') or request.headers.get('X-AI-Base') or '').strip(),
         'model': (ai.get('model') or request.headers.get('X-AI-Model') or '').strip(),
         'provider': (ai.get('provider') or request.headers.get('X-AI-Provider') or '').strip(),
+        # v1.19.0 可选：输出上限 / 输入上限 / 思考强度（本机设置，服务器不落库）
+        'max_tokens': (ai.get('max_tokens') or request.headers.get('X-AI-Max-Tokens') or ''),
+        'max_input': (ai.get('max_input') or request.headers.get('X-AI-Max-Input') or ''),
+        'reasoning_effort': (ai.get('reasoning_effort')
+                             or request.headers.get('X-AI-Reasoning') or ''),
     }
 
 

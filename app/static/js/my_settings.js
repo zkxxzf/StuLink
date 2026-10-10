@@ -69,6 +69,10 @@
         }
         var pref = lsGet(PREF_KEY, {});
         if (pref.size) $('#pfSize').val(String(pref.size));
+        // v1.19.0 可选高级参数回填（不填就留空 = 服务商默认）
+        if (cfg.max_input) $('#aiMaxIn').val(cfg.max_input);
+        if (cfg.max_tokens) $('#aiMaxOut').val(cfg.max_tokens);
+        if (cfg.reasoning_effort) $('#aiEffort').val(cfg.reasoning_effort);
 
         $p.on('change', function () { applyProvider($(this).val(), false); });
 
@@ -90,7 +94,11 @@
                 provider: $('#aiProvider').val() || '',
                 base_url: $.trim($('#aiBase').val() || ''),
                 model: $.trim($('#aiModel').val() || ''),
-                api_key: $.trim($('#aiKey').val() || '')
+                api_key: $.trim($('#aiKey').val() || ''),
+                // 可选高级参数：空字符串表示“不设置”
+                max_input: $.trim($('#aiMaxIn').val() || ''),
+                max_tokens: $.trim($('#aiMaxOut').val() || ''),
+                reasoning_effort: $('#aiEffort').val() || ''
             };
         }
 
@@ -125,6 +133,8 @@
             if (!confirm('清除本机保存的 AI 配置？（服务器上没有存，纯本地数据）')) return;
             lsDel(AI_KEY);
             $('#aiKey').val('');
+            $('#aiMaxIn, #aiMaxOut').val('');
+            $('#aiEffort').val('');
             applyProvider($p.val(), false);
             msg(true, '已清除本机的 AI 配置');
         });
