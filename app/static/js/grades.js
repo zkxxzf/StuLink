@@ -38,7 +38,9 @@ function init(){
         });
         var first = TAB_ORDER.filter(function(t){ return opts.tabs[t]; })[0];
         if (!first){ showEmpty('grade', '您没有成绩查看权限'); return; }
-        activateTab(first);
+        // v1.19.0 三分栏深链：侧栏「班级分析 / 学科分析」等带 ?tab= 进来的初始页签优先
+        var want = ($('#gInitialTab').text() || '').trim();
+        activateTab((want && opts.tabs[want]) ? want : first);
         window.addEventListener('resize', function(){ Object.keys(charts).forEach(function(k){ charts[k].resize(); }); });
     }).fail(function(){ showEmpty('grade', '加载失败，请刷新'); });
 }
@@ -93,6 +95,9 @@ function syncExamNav(){
         affair: '/grades/exams/' + eid + '/affair',
         import: '/grades/exams/' + eid + '/import',
         analysis: '/grades/analysis?exam=' + eid,
+        ana_grade: '/grades/analysis?exam=' + eid + '&tab=grade',
+        ana_class: '/grades/analysis?exam=' + eid + '&tab=class',
+        ana_subject: '/grades/analysis?exam=' + eid + '&tab=subject',
         ai: '/grades/exams/' + eid + '/ai-import',
         bands: '/grades/exams/' + eid + '/bands',
         pivot: '/grades/pivot?exam=' + eid,
