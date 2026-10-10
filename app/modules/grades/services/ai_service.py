@@ -225,13 +225,20 @@ def resolve_key(user, client_cfg=None):
     ckey = (cc.get('api_key') or '').strip()
     if ckey:
         provider = (cc.get('provider') or 'custom').strip() or 'custom'
-        return {'api_key': ckey, 'provider': provider,
-                'provider_name': ai_providers.get_provider(provider)['name'],
-                'base_url': ai_providers.resolve_base_url(
-                    provider, (cc.get('base_url') or '').strip()),
-                'model': ai_providers.resolve_model(
-                    provider, (cc.get('model') or '').strip()),
-                'source': 'local'}      # 本地 Key：不落库
+        out = {'api_key': ckey, 'provider': provider,
+               'provider_name': ai_providers.get_provider(provider)['name'],
+               'base_url': ai_providers.resolve_base_url(
+                   provider, (cc.get('base_url') or '').strip()),
+               'model': ai_providers.resolve_model(
+                   provider, (cc.get('model') or '').strip()),
+               'source': 'local'}      # 本地 Key：不落库
+        # v1.19.0 本机可选参数（不填 = 不传，由服务商决定）：
+        #   max_tokens=输出上限  reasoning_effort=思考强度(low/medium/high)  max_input=输入上限
+        for _k in ('max_tokens', 'max_input', 'reasoning_effort'):
+            _v = cc.get(_k)
+            if _v not in (None, '', 0, '0'):
+                out[_k] = _v
+        return out
     k = AiKey.query.filter_by(user_id=user.id).first()
     if k and k.api_key_enc:
         provider = k.provider or ai_providers.DEFAULT_PROVIDER
@@ -253,10 +260,79 @@ def resolve_key(user, client_cfg=None):
 
 # ==================== LLM 转发（OpenAI 兼容；可被测试 mock） ====================
 
+# 思考强度：仅接受 OpenAI 兼容的标准三档（空 = 不传，按服务商默认）
+REASONING_EFFORTS = ('low', 'medium', 'high')
+# 输入预算估算：中文约 1.6 字符/token（保守估），英文/数字约 4 字符/token
+_CHARS_PER_TOKEN = 1.6
+
+
+def _cap_prompt(messages, max_input):
+    """按用户设置的「输入上限」守护提示词
+
+    超过时**成比例截断最长的一条内容**并附上说明标记（而不是报错阻断）：
+    长文本主要是成绩/名册等结构化数据，截尾还能用；报错则完全用不了。
+    """
+    try:
+        limit = int(max_input or 0)
+    except (TypeError, ValueError):
+        limit = 0
+    if limit <= 0 or not messages:
+        return messages
+    total_chars = sum(len(str(m.get('content') or '')) for m in messages)
+    est_tokens = int(total_chars / _CHARS_PER_TOKEN)
+    if est_tokens <= limit:
+        return messages
+    # 成比例缩到 92%，留出余量
+    keep = int(total_chars * limit * 0.92 / est_tokens)
+    out, budget = [], max(keep, 400)
+    for m in sorted(messages, key=lambda x: -len(str(x.get('content') or ''))):
+        c = str(m.get('content') or '')
+        take = c[:budget]
+        if take != c:
+            take += '\n\n[提示：内容超出你设置的输入上限，已截断；如需完整数据请调高输入上限或缩小分析范围]'
+        out.append(dict(m, content=take))
+        budget -= len(take)
+        if budget <= 0:
+            break
+    # 保持原有角色顺序关系（至少保留 system 与最后一条）
+    for m in messages:
+        if m.get('role') == 'system' and all(o.get('role') != 'system' for o in out):
+            out.insert(0, m)
+    return out
+
+
+def _send_once(url, cfg, body, timeout):
+    """发一次请求；返回 (ok, payload_or_msg, 秒, http_code)"""
+    data = json.dumps(body).encode('utf-8')
+    req = urllib.request.Request(
+        url, data=data, method='POST',
+        headers={'Content-Type': 'application/json',
+                 'Authorization': 'Bearer ' + (cfg.get('api_key') or '')})
+    started = time.time()
+    try:
+        with _safe_urlopen(req, timeout=timeout or DEFAULT_TIMEOUT) as resp:
+            return True, json.loads(resp.read().decode('utf-8', 'replace')), \
+                round(time.time() - started, 2), 200
+    except urllib.error.HTTPError as e:
+        try:
+            detail = e.read().decode('utf-8', 'replace')[:200]
+        except Exception:
+            detail = ''
+        return False, _http_error_text(e.code, detail, cfg), \
+            round(time.time() - started, 2), e.code
+    except urllib.error.URLError:
+        return False, ('无法连接 AI 服务商（网络异常或超时），请检查服务器出网、'
+                       '接口地址是否正确'), round(time.time() - started, 2), 0
+    except Exception as e:
+        return False, f'调用失败：{e}', round(time.time() - started, 2), 0
+
+
 def _chat_completions(cfg, messages, timeout=None, max_tokens=None, temperature=None):
     """统一的 OpenAI 兼容 chat/completions 调用，返回 (ok, payload_or_error, 秒)
 
     payload 为厂商原始 JSON；调用方按需取用。
+    v1.19.0：用户在“用户设置”里填的 **输出上限 / 思考强度 / 输入上限** 优先于代码默认值；
+    三者都不填时完全不传，由服务商自行决定（与以前行为一致）。
     """
     provider = cfg.get('provider') or ai_providers.DEFAULT_PROVIDER
     base = (cfg.get('base_url') or ai_providers.resolve_base_url(provider)).rstrip('/')
@@ -268,33 +344,30 @@ def _chat_completions(cfg, messages, timeout=None, max_tokens=None, temperature=
         assert_outbound_url_allowed(url)
     except ValueError as e:
         return False, str(e), 0
+    # 用户本机设置优先：输出上限 / 思考强度 / 输入上限（三者都不填 = 交给服务商默认）
+    mt = cfg.get('max_tokens') or max_tokens
+    effort = (cfg.get('reasoning_effort') or '').strip().lower()
+    messages = _cap_prompt(messages, cfg.get('max_input'))
     body = {'model': ai_providers.resolve_model(provider, cfg.get('model')),
             'messages': messages,
             'temperature': DEFAULT_TEMPERATURE if temperature is None else temperature,
             'stream': False}
-    if max_tokens:
-        body['max_tokens'] = max_tokens
-    data = json.dumps(body).encode('utf-8')
-    req = urllib.request.Request(
-        url, data=data, method='POST',
-        headers={'Content-Type': 'application/json',
-                 'Authorization': 'Bearer ' + (cfg.get('api_key') or '')})
-    started = time.time()
-    try:
-        with _safe_urlopen(req, timeout=timeout or DEFAULT_TIMEOUT) as resp:
-            payload = json.loads(resp.read().decode('utf-8', 'replace'))
-        return True, payload, round(time.time() - started, 2)
-    except urllib.error.HTTPError as e:
+    if mt:
         try:
-            detail = e.read().decode('utf-8', 'replace')[:200]
-        except Exception:
-            detail = ''
-        return False, _http_error_text(e.code, detail, cfg), round(time.time() - started, 2)
-    except urllib.error.URLError:
-        return False, ('无法连接 AI 服务商（网络异常或超时），请检查服务器出网、'
-                       '接口地址是否正确'), round(time.time() - started, 2)
-    except Exception as e:
-        return False, f'调用失败：{e}', round(time.time() - started, 2)
+            body['max_tokens'] = int(mt)
+        except (TypeError, ValueError):
+            if max_tokens:
+                body['max_tokens'] = max_tokens
+    if effort in REASONING_EFFORTS:
+        body['reasoning_effort'] = effort
+
+    ok, out, sec, code = _send_once(url, cfg, body, timeout)
+    if (not ok) and effort and code == 400:
+        # 部分服务商/模型不认 reasoning_effort → 去掉后重试一次，
+        # 不因一个可选设置项把整个 AI 功能卡死
+        body.pop('reasoning_effort', None)
+        ok, out, sec, code = _send_once(url, cfg, body, timeout)
+    return ok, out, sec
 
 
 def _http_error_text(code, detail, cfg):

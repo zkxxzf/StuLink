@@ -32,10 +32,17 @@
         /** 组装为后端约定的 ai 参数（随请求体一起发，服务器不落库） */
         payload: function () {
             var c = read() || {};
-            return {
+            var out = {
                 provider: c.provider || '', base_url: c.base_url || '',
                 model: c.model || '', api_key: c.api_key || ''
             };
+            // v1.19.0 可选高级参数：不填就不传，由服务商自行决定
+            //   max_input=输入上限  max_tokens=输出上限  reasoning_effort=思考强度
+            ['max_input', 'max_tokens', 'reasoning_effort'].forEach(function (k) {
+                var v = c[k];
+                if (v !== undefined && v !== null && v !== '') { out[k] = v; }
+            });
+            return out;
         },
         /** 给带 AI 功能的按钮加提示：未配置时按钮变灰并提示去配置 */
         guard: function (selector) {

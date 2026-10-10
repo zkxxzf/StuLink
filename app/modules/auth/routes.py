@@ -269,9 +269,19 @@ def my_ai_test():
     except Exception as e:                     # 网络/解析异常都要给出可读提示
         return jsonify(success=False, message='连接异常：%s' % str(e)[:180])
     if ok:
+        # 回显本次实际生效的可选参数，方便用户核对
+        eff = []
+        if cfg.get('max_tokens'):
+            eff.append('输出上限 %s' % cfg['max_tokens'])
+        if cfg.get('max_input'):
+            eff.append('输入上限 %s' % cfg['max_input'])
+        if cfg.get('reasoning_effort'):
+            eff.append('思考强度 %s' % cfg['reasoning_effort'])
         return jsonify(success=True,
-                       message='连接成功（%.1fs）｜%s / %s'
-                               % (sec, cfg['provider_name'], cfg['model']))
+                       message='连接成功（%.1fs）｜%s / %s%s'
+                               % (sec, cfg['provider_name'], cfg['model'],
+                                  ('；生效参数：' + '、'.join(eff)) if eff else
+                                  '；未设置高级参数（按服务商默认）'))
     return jsonify(success=False, message='连接失败：%s' % str(payload)[:200])
 
 
