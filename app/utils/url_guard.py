@@ -138,16 +138,30 @@ def remove_approved_host(value):
     return True, '已移除 %s' % host
 
 
-def _is_blocked_ip(ip_str):
+def _is_blocked_ip(ip_str, allow_private=False):
+    """IP 是否禁止出站
+
+    v1.19.0 口径调整（自建 AI 网关场景）：
+      · **链路本地 / 组播 / 保留 / 未指定** —— 任何情况都拦（如 169.254.169.254 云元数据）；
+      · **私网 / 环回**（10.x、192.168.x、127.x…）—— 默认拦；
+        但若该地址已由**管理员显式批准**（allow_private=True，例如局域网内的自建
+        OpenAI 兼容网关），则放行：这是管理员的有意决定，不是越权探测。
+    """
     try:
         ip = ipaddress.ip_address(ip_str)
     except ValueError:
         return True
     if ip.version == 6 and ip.ipv4_mapped is not None:
         ip = ip.ipv4_mapped
-    return (not ip.is_global) or ip.is_private or ip.is_loopback \
-        or ip.is_link_local or ip.is_multicast or ip.is_reserved \
-        or ip.is_unspecified
+    # 永远拦截：链路本地（云元数据）、组播、保留、未指定
+    if ip.is_link_local or ip.is_multicast or ip.is_reserved or ip.is_unspecified:
+        return True
+    if ip.is_loopback:
+        # 环回只允许在“管理员显式批准”时走（自建网关常见 http://127.0.0.1:xxxx）
+        return not allow_private
+    if ip.is_private:
+        return not allow_private
+    return not ip.is_global
 
 
 def assert_outbound_url_allowed(url):
@@ -179,9 +193,12 @@ def assert_outbound_url_allowed(url):
         raise ValueError('接口地址域名解析失败，请检查地址是否正确')
     for info in infos:
         ip_str = info[4][0]
-        if _is_blocked_ip(ip_str):
+        if _is_blocked_ip(ip_str, allow_private=explicit):
             raise ValueError(
-                f'接口地址解析到内网/保留地址（{ip_str}），已拒绝（防 SSRF）')
+                '接口地址解析到内网/保留地址（%s），已拒绝（防 SSRF）。\n'
+                '如确是局域网内的自建 AI 网关（如 http://10.x.x.x:xxxx/v1），'
+                '可由管理员在「用户设置 → AI 出站域名白名单」中把该地址加入后重试；'
+                '云元数据等链路本地地址永远不允许。' % ip_str)
 
     _log.info('AI 出站请求已放行 host=%s scheme=%s', host, parsed.scheme)
     return host.lower()
