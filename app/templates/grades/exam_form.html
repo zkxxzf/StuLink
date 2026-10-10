@@ -5,49 +5,81 @@
     <a href="{{ url_for('grades.exams_list') }}" class="btn btn-sm btn-outline-secondary me-2">
         <i class="bi bi-arrow-left"></i>
     </a>
-    <h5 class="mb-0"><i class="bi bi-plus-circle"></i> 新建考试</h5>
+    <h5 class="mb-0"><i class="bi bi-plus-circle"></i> 新建考试（四段式第 1 步）</h5>
 </div>
-<div class="card" style="max-width:560px;">
+
+<div class="alert alert-light border small" style="max-width:760px;">
+    考试用<b>两个维度</b>描述：<b>性质</b>（谁组织的、比多大范围 —— 决定有没有全市/多校数据）
+    × <b>阶段</b>（教学进度节点 —— 用于找"上一场同阶段考试"作为考场分层依据）。
+    名称可留空，默认「年级 + 日期」。
+</div>
+
+<div class="card" style="max-width:760px;">
     <div class="card-body">
         <form method="post">
             <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-            <div class="mb-3">
-                <label class="form-label">年级 <span class="text-danger">*</span></label>
-                <select name="grade" id="f_grade" class="form-select" required>
-                    <option value="">请选择年级</option>
-                    {% for g in grade_options %}
-                    <option value="{{ g }}" {% if g == grade %}selected{% endif %}>{{ g }}</option>
-                    {% endfor %}
-                </select>
+            <div class="row g-3">
+                <div class="col-md-6">
+                    <label class="form-label">年级 <span class="text-danger">*</span></label>
+                    <select name="grade" id="f_grade" class="form-select" required>
+                        <option value="">请选择年级</option>
+                        {% for g in grade_options %}
+                        <option value="{{ g }}" {% if g == grade %}selected{% endif %}>{{ g }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div class="col-md-6">
+                    <label class="form-label">考试日期 <span class="text-danger">*</span></label>
+                    <input type="date" name="exam_date" id="f_date" class="form-control"
+                           value="{{ exam_date }}" required>
+                </div>
+
+                <div class="col-md-6">
+                    <label class="form-label">考试性质 <span class="text-danger">*</span></label>
+                    <select name="exam_kind" class="form-select" required>
+                        {% for k in kind_options %}
+                        <option value="{{ k }}" {% if k == exam_kind %}selected{% endif %}>{{ k }}</option>
+                        {% endfor %}
+                    </select>
+                    <div class="form-text">联考 = 有多校/全市数据可比；本校考 / 小测验 = 只做校内分析。</div>
+                </div>
+                <div class="col-md-6">
+                    <label class="form-label">考试阶段 <span class="text-danger">*</span></label>
+                    <select name="exam_type" class="form-select" required>
+                        {% for s in stage_options %}
+                        <option value="{{ s }}" {% if s == exam_type %}selected{% endif %}>{{ s }}</option>
+                        {% endfor %}
+                    </select>
+                    <div class="form-text">用于定位"上一场同阶段考试"，作为考场分层依据。</div>
+                </div>
+
+                <div class="col-12">
+                    <label class="form-label">分数口径 <span class="text-danger">*</span></label>
+                    <select name="score_mode" class="form-select">
+                        {% for v, label in mode_options %}
+                        <option value="{{ v }}" {% if v == score_mode %}selected{% endif %}>{{ label }}</option>
+                        {% endfor %}
+                    </select>
+                    <div class="form-text">
+                        决定本场<b>划线、排名、成绩分析</b>用哪一套分。两者都给时：赋分进主分（划线排名用它），
+                        原始分另存一列仅供查看；只给一套时按实际选。
+                    </div>
+                </div>
+
+                <div class="col-12">
+                    <label class="form-label">考试名称</label>
+                    <input type="text" name="name" id="f_name" class="form-control"
+                           placeholder="留空自动生成：年级 + 日期（如 2024级2026-10-10），可手工修改"
+                           value="{{ name }}">
+                    <div class="form-text">性质与阶段已单独保存，不必写进名称；留空即可。</div>
+                </div>
             </div>
-            <div class="mb-3">
-                <label class="form-label">考试日期 <span class="text-danger">*</span></label>
-                <input type="date" name="exam_date" id="f_date" class="form-control"
-                       value="{{ exam_date }}" required>
+            <div class="mt-3">
+                <button type="submit" class="btn btn-primary">
+                    <i class="bi bi-check-lg"></i> 创建考试
+                </button>
+                <a href="{{ url_for('grades.exams_list') }}" class="btn btn-outline-secondary ms-2">取消</a>
             </div>
-            <div class="mb-3">
-                <label class="form-label">考试名称 <span class="text-danger">*</span></label>
-                <input type="text" name="name" id="f_name" class="form-control"
-                       placeholder="默认：年级+考试日期（如 2025级2026-01-15），可修改"
-                       value="{{ name }}" required>
-                <div class="form-text">默认自动生成为「年级 + 考试日期」，可手工修改以便区分（如同日补考）。</div>
-            </div>
-            <div class="mb-3">
-                <label class="form-label">考试类型</label>
-                <select name="exam_type" class="form-select">
-                    <option value="">其他</option>
-                    <option value="月考" {% if exam_type == '月考' %}selected{% endif %}>月考</option>
-                    <option value="期中" {% if exam_type == '期中' %}selected{% endif %}>期中</option>
-                    <option value="期末" {% if exam_type == '期末' %}selected{% endif %}>期末</option>
-                    <option value="联考" {% if exam_type == '联考' %}selected{% endif %}>联考</option>
-                    <option value="开学考" {% if exam_type == '开学考' %}selected{% endif %}>开学考</option>
-                    <option value="模拟" {% if exam_type == '模拟' %}selected{% endif %}>模拟</option>
-                    <option value="其他" {% if exam_type == '其他' %}selected{% endif %}>其他</option>
-                </select>
-            </div>
-            <button type="submit" class="btn btn-primary">
-                <i class="bi bi-check-lg"></i> 创建考试
-            </button>
         </form>
     </div>
 </div>

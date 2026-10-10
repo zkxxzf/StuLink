@@ -8,11 +8,16 @@
               title="当前学籍状态：{{ stu.status }}（人已不在校）">{{ stu.status_badge }}</span>
         {% endif %}
     </td>
+    <td class="small text-muted">{{ stu.exam_no or '—' }}</td>
     <td>{{ stu.class_name }}</td>
     <td>{{ stu.direction }}</td>
     <td class="small text-muted">{{ stu.selection }}</td>
-    <td class="text-end fw-bold score-cell" data-sid="{{ stu.total_sid or '' }}" title="点击修改">
+    <td class="text-end fw-bold score-cell" data-sid="{{ stu.total_sid or '' }}"
+        title="点击修改{% if stu.total_raw is defined and stu.total_raw is not none %}｜原始分 {{ stu.total_raw }}{% endif %}">
         {{ stu.total if stu.total is not none else '—' }}
+        {% if stu.total_raw is defined and stu.total_raw is not none %}
+        <span class="d-block text-muted small fw-normal">原{{ stu.total_raw }}</span>
+        {% endif %}
     </td>
     <td class="text-end">{{ stu.rank if stu.rank else '—' }}</td>
     <td class="text-end">{{ stu.rank_class if stu.rank_class else '—' }}</td>
@@ -24,13 +29,16 @@
     {% set unsel = s in (stu.unselected or []) %}
     <td class="text-end small {{ 'text-muted' if unsel else ('score-cell table-warning' if cell is none else '') }}"
         data-sid="{{ cell.id if cell else '' }}"
-        title="{{ '未选（不在该生选科组合内）' if unsel else ('缺考，点击补录' if cell is none else '点击修改') }}">
+        title="{{ '未选（不在该生选科组合内）' if unsel else ('缺考，点击补录' if cell is none else '点击修改' + ('｜原始分 ' ~ cell.raw if cell.raw is not none else '')) }}">
         {{ cell.score if cell else ('未选' if unsel else '缺') }}
+        {% if cell and cell.raw is not none %}
+        <span class="d-block text-muted small">原{{ cell.raw }}</span>
+        {% endif %}
     </td>
     {% endfor %}
 </tr>
 {% else %}
-<tr><td colspan="{{ 9 + subjects|length }}" class="text-center text-muted py-5">
+<tr><td colspan="{{ 10 + subjects|length }}" class="text-center text-muted py-5">
     暂无成绩。点击右上角「导入成绩」，从 Excel 模板导入本场考试成绩。
 </td></tr>
 {% endfor %}

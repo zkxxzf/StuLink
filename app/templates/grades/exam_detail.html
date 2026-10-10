@@ -16,8 +16,11 @@
     {% else %}
     <span class="badge bg-secondary">未导入</span>
     {% endif %}
-    <span class="text-muted small">{{ exam.grade }} · {{ exam.exam_date.strftime('%Y-%m-%d') }}
-        · {{ exam.exam_type or '其他' }}</span>
+    <span class="text-muted small">{{ exam.grade }}
+        {% if exam.exam_kind %}· {{ exam.exam_kind }}{% endif %}
+        · {{ exam.exam_date.strftime('%Y-%m-%d') }}
+        · {{ exam.exam_type or '其他' }}
+        · <span class="badge bg-light text-dark border" title="本场划线/排名/分析采用的分数口径">{{ exam.score_mode_label() }}</span></span>
     <div class="ms-auto d-flex gap-2">
         {% if exam.status != 'imported' %}
         <a href="{{ url_for('grades.exam_import', exam_id=exam.id) }}" class="btn btn-primary btn-sm">
@@ -42,6 +45,35 @@
         </button>
     </div>
 </div>
+
+{# v1.19.0 四段式进度条：建立考试 → 考务安排 → 成绩导入 → 成绩分析 #}
+{% if steps %}
+<div class="card mb-3">
+  <div class="card-body py-2">
+    <div class="d-flex align-items-center flex-wrap gap-2">
+      {% for s in steps %}
+      <a href="{{ s.url }}"
+         class="text-decoration-none d-flex align-items-center gap-1 px-2 py-1 rounded
+                {{ 'bg-success-subtle text-success' if s.done else 'bg-light text-muted border' }}"
+         title="{{ s.hint }}">
+        <span class="badge {{ 'bg-success' if s.done else 'bg-secondary' }}">{{ loop.index }}</span>
+        <span class="small fw-semibold">{{ s.label }}</span>
+        {% if s.done %}<i class="bi bi-check-lg small"></i>{% endif %}
+      </a>
+      {% if not loop.last %}<i class="bi bi-chevron-right text-muted small"></i>{% endif %}
+      {% endfor %}
+      <span class="text-muted small ms-2">{{ steps[-1].hint }}</span>
+      {% if next_step %}
+      <a href="{{ next_step.url }}" class="btn btn-sm btn-primary ms-auto">
+        下一步：{{ next_step.label }} <i class="bi bi-arrow-right"></i>
+      </a>
+      {% else %}
+      <span class="badge bg-success ms-auto"><i class="bi bi-check2-all"></i> 四步已走完</span>
+      {% endif %}
+    </div>
+  </div>
+</div>
+{% endif %}
 
 {% if import_info %}
 <div class="alert alert-light border small py-2">
@@ -70,7 +102,7 @@
         <table class="table table-sm table-hover align-middle g-table mb-0" id="scoreTable">
             <thead class="sticky-top">
             <tr>
-                <th>学号</th><th>姓名</th><th>班级</th><th>方向</th><th>选科</th>
+                <th>学号</th><th>姓名</th><th>考号</th><th>班级</th><th>方向</th><th>选科</th>
                 <th class="text-end">总分</th>
                 <th class="text-end">方向排</th><th class="text-end">班排</th>
                 <th class="text-end">进退步</th>
@@ -87,11 +119,16 @@
                           title="当前学籍状态：{{ stu.status }}（人已不在校）">{{ stu.status_badge }}</span>
                     {% endif %}
                 </td>
+                <td class="small text-muted">{{ stu.exam_no or '—' }}</td>
                 <td>{{ stu.class_name }}</td>
                 <td>{{ stu.direction }}</td>
                 <td class="small text-muted">{{ stu.selection }}</td>
-                <td class="text-end fw-bold score-cell" data-sid="{{ stu.total_sid or '' }}" title="点击修改">
+                <td class="text-end fw-bold score-cell" data-sid="{{ stu.total_sid or '' }}"
+                    title="点击修改{% if stu.total_raw is defined and stu.total_raw is not none %}｜原始分 {{ stu.total_raw }}{% endif %}">
                     {{ stu.total if stu.total is not none else '—' }}
+                    {% if stu.total_raw is defined and stu.total_raw is not none %}
+                    <span class="d-block text-muted small fw-normal">原{{ stu.total_raw }}</span>
+                    {% endif %}
                 </td>
                 <td class="text-end">{{ stu.rank if stu.rank else '—' }}</td>
                 <td class="text-end">{{ stu.rank_class if stu.rank_class else '—' }}</td>
@@ -103,13 +140,16 @@
                 {% set unsel = s in (stu.unselected or []) %}
                 <td class="text-end small {{ 'text-muted' if unsel else ('score-cell ' + 'table-warning' if cell is none else '') }}"
                     data-sid="{{ cell.id if cell else '' }}"
-                    title="{{ '未选（不在该生选科组合内）' if unsel else ('缺考，点击补录' if cell is none else '点击修改') }}">
+                    title="{{ '未选（不在该生选科组合内）' if unsel else ('缺考，点击补录' if cell is none else '点击修改' + ('｜原始分 ' ~ cell.raw if cell.raw is not none else '')) }}">
                     {{ cell.score if cell else ('未选' if unsel else '缺') }}
+                    {% if cell and cell.raw is not none %}
+                    <span class="d-block text-muted small">原{{ cell.raw }}</span>
+                    {% endif %}
                 </td>
                 {% endfor %}
             </tr>
             {% else %}
-            <tr><td colspan="{{ 9 + subjects|length }}" class="text-center text-muted py-5">
+            <tr><td colspan="{{ 10 + subjects|length }}" class="text-center text-muted py-5">
                 暂无成绩。点击右上角「导入成绩」，从 Excel 模板导入本场考试成绩。
             </td></tr>
             {% endfor %}
