@@ -341,6 +341,136 @@ def _init_system_data():
         db.session.commit()
 
 
+def _register_template_filters(app):
+    """注册 Jinja2 模板过滤器（nl2br / load_json_safe）。
+
+    2026-10-10 从 create_app 提取：create_app 原 351 行，职责过多难维护。
+    本函数只做模板过滤器注册，行为与提取前完全一致。
+    """
+    @app.template_filter('nl2br')
+    def nl2br_filter(text):
+        return Markup(escape(str(text)).replace('\n', '<br>'))
+
+    # JSON 字符串安全解析（表单题目选项渲染用）
+    import json as _json
+
+    @app.template_filter('load_json_safe')
+    def load_json_safe_filter(text):
+        if not text:
+            return []
+        try:
+            return _json.loads(text)
+        except Exception:
+            return []
+
+
+def _build_static_mtime_cache(app):
+    """扫描 static 目录，返回 {相对路径: mtime}。
+
+    v1.16.1 su() 缓存优化：启动时扫描一次，避免每次请求调 os.path.getmtime
+    （高并发下 syscall 开销明显）。dev 模式可通过 ?_su_refresh=1 触发重扫。
+    2026-10-10 从 create_app 提取（原为嵌套函数 _build_mtime_cache）。
+    """
+    import os as _os
+    cache = {}
+    base = app.static_folder
+    if not base or not _os.path.isdir(base):
+        return cache
+    for dirpath, _dirs, files in _os.walk(base):
+        for fn in files:
+            full = _os.path.join(dirpath, fn)
+            rel = _os.path.relpath(full, base).replace(_os.sep, '/')
+            try:
+                cache[rel] = int(_os.path.getmtime(full))
+            except OSError:
+                cache[rel] = 0
+    return cache
+
+
+def _register_asset_version(app, mtime_cache):
+    """注册静态资源版本号（su()）与 immutable 强缓存。
+
+    URL 带 ?v=（内容变更即换 URL）→ 一年 immutable，浏览器零回源；
+    不带 ?v= 的（如 CSS 内相对路径字体）保持默认协商缓存。
+    2026-10-10 从 create_app 提取。
+    """
+    import os as _os
+    _app_logger = logging.getLogger('stulink.app')
+    # R-10（纵深防御）：静态资源名白名单，防止路径穿越/任意文件探测
+    _ASSET_NAME_RE = _re.compile(r'^[A-Za-z0-9_\-./]+$')
+
+    def _is_safe_asset_name(filename):
+        if not filename or '..' in filename or '\\' in filename:
+            return False
+        if filename.startswith('/') or ':' in filename or '\x00' in filename:
+            return False
+        return bool(_ASSET_NAME_RE.match(filename))
+
+    def _asset_mtime(filename):
+        if not _is_safe_asset_name(filename):
+            _app_logger.warning('[R-10] 拒绝非法的静态资源名：%r', filename)
+            return 0
+        if request.args.get('_su_refresh'):
+            p = _os.path.join(app.static_folder, filename.replace('/', _os.sep))
+            try:
+                v = int(_os.path.getmtime(p))
+                mtime_cache[filename] = v
+                return v
+            except OSError:
+                return 0
+        return mtime_cache.get(filename, 0)
+
+    @app.context_processor
+    def inject_asset_version():
+        def su(filename):
+            return url_for('static', filename=filename, v=_asset_mtime(filename))
+        return {'su': su}
+
+    @app.after_request
+    def cache_static_immutable(response):
+        if (response.status_code == 200
+                and request.path.startswith('/static/')
+                and request.args.get('v')):
+            response.headers['Cache-Control'] = 'public, max-age=31536000, immutable'
+        return response
+
+
+def _register_response_middleware(app):
+    """注册响应类中间件：Gzip 压缩。
+
+    2026-10-10 从 create_app 提取。压缩失败时返回原始数据（行为不变）。
+    """
+
+    @app.after_request
+    def compress_response(response):
+        accept_encoding = request.headers.get('Accept-Encoding', '')
+        if 'gzip' not in accept_encoding.lower():
+            return response
+
+        if (response.status_code < 200 or response.status_code >= 300 or
+                'Content-Encoding' in response.headers or
+                response.content_length is None or
+                response.content_length < 500):
+            return response
+
+        # 只压缩文本类型
+        content_type = response.headers.get('Content-Type', '').lower()
+        if not any(t in content_type for t in
+                   ['text/', 'application/json', 'application/javascript']):
+            return response
+
+        try:
+            compressed_data = gzip.compress(response.data)
+            response.data = compressed_data
+            response.headers['Content-Encoding'] = 'gzip'
+            response.headers['Content-Length'] = len(compressed_data)
+        except Exception as _e:
+            # 2026-10-10：压缩失败返回原始数据（行为不变），留痕便于排查
+            logging.getLogger('stulink.app').debug('Gzip 压缩失败，返回原始数据: %s', _e)
+
+        return response
+
+
 def create_app():
     app = Flask(__name__)
     app.config.from_object(Config)
@@ -416,123 +546,12 @@ def create_app():
         from app.utils.helpers import init_history_tables
         init_history_tables()
 
-    # 安全过滤器：先转义 HTML 再将 \n 转为 <br>（替代危险的 |safe）
-    @app.template_filter('nl2br')
-    def nl2br_filter(text):
-        return Markup(escape(str(text)).replace('\n', '<br>'))
-
-    # JSON 字符串安全解析（表单题目选项渲染用）
-    import json as _json
-    @app.template_filter('load_json_safe')
-    def load_json_safe_filter(text):
-        if not text:
-            return []
-        try:
-            return _json.loads(text)
-        except Exception:
-            return []
-
-    # 静态资源版本号：按「单个文件」的修改时间生成 ?v=，模板里用 {{ su('js/x.js') }}。
-    # 改动某文件后浏览器自动拉新，根治「改了代码但浏览器用旧缓存」导致的
-    # 汇报区持续 loading、下拉失效等问题（无需手动 Ctrl+F5）。
-    # v1.13.2：由「全局最大 mtime」改为「按文件 mtime」——避免任意小改动把
-    # echarts(1MB)/bootstrap 等大文件一起挤掉缓存；配合下方 immutable 强缓存，
-    # 未变更的资源二次访问零请求。
-    import os as _os
-
-    # v1.16.1 su() 缓存优化：启动时扫描 static 目录一次，把 mtime 存进 dict，
-    # 避免每次请求每个资源都调 os.path.getmtime（高并发下 syscall 开销明显）。
-    # dev 模式下可通过 ?_su_refresh=1 触发重新扫描（仅对当前请求生效一次）。
-    _mtime_cache = {}
-
-    def _build_mtime_cache():
-        """遍历 static 目录，把每个文件的 mtime 存入 _mtime_cache。"""
-        base = app.static_folder
-        if not base or not _os.path.isdir(base):
-            return
-        for dirpath, _dirs, files in _os.walk(base):
-            for fn in files:
-                full = _os.path.join(dirpath, fn)
-                rel = _os.path.relpath(full, base).replace(_os.sep, '/')
-                try:
-                    _mtime_cache[rel] = int(_os.path.getmtime(full))
-                except OSError:
-                    _mtime_cache[rel] = 0
-
-    with app.app_context():
-        _build_mtime_cache()
-
-    _app_logger = logging.getLogger('stulink.app')
-
-    # R-10（纵深防御）：静态资源名白名单。`_asset_mtime` 会用 filename 拼磁盘路径，
-    # 一旦将来改为接收请求参数，就可能变成「任意文件信息探测」。这里显式校验：
-    # 必须是相对路径、不含 ..、不含反斜杠与盘符，且只含安全字符。
-    _ASSET_NAME_RE = _re.compile(r'^[A-Za-z0-9_\-./]+$')
-
-    def _is_safe_asset_name(filename):
-        if not filename or '..' in filename or '\\' in filename:
-            return False
-        if filename.startswith('/') or ':' in filename or '\x00' in filename:
-            return False
-        return bool(_ASSET_NAME_RE.match(filename))
-
-    def _asset_mtime(filename):
-        if not _is_safe_asset_name(filename):
-            _app_logger.warning('[R-10] 拒绝非法的静态资源名：%r', filename)
-            return 0
-        if request.args.get('_su_refresh'):
-            p = _os.path.join(app.static_folder, filename.replace('/', _os.sep))
-            try:
-                v = int(_os.path.getmtime(p))
-                _mtime_cache[filename] = v
-                return v
-            except OSError:
-                return 0
-        return _mtime_cache.get(filename, 0)
-
-    @app.context_processor
-    def inject_asset_version():
-        def su(filename):
-            return url_for('static', filename=filename, v=_asset_mtime(filename))
-        return {'su': su}
-
-    # 静态资源强缓存：URL 带 ?v=（内容变更即换 URL）→ 一年 immutable，浏览器零回源；
-    # 不带 ?v= 的（如 CSS 内相对路径引用的字体）保持默认协商缓存，避免改文件读旧版。
-    @app.after_request
-    def cache_static_immutable(response):
-        if (response.status_code == 200
-                and request.path.startswith('/static/')
-                and request.args.get('v')):
-            response.headers['Cache-Control'] = 'public, max-age=31536000, immutable'
-        return response
-
-    # Gzip 压缩响应（提升传输速度）
-    @app.after_request
-    def compress_response(response):
-        accept_encoding = request.headers.get('Accept-Encoding', '')
-        if 'gzip' not in accept_encoding.lower():
-            return response
-        
-        if (response.status_code < 200 or response.status_code >= 300 or 
-            'Content-Encoding' in response.headers or
-            response.content_length is None or 
-            response.content_length < 500):
-            return response
-        
-        # 只压缩文本类型
-        content_type = response.headers.get('Content-Type', '').lower()
-        if not any(t in content_type for t in ['text/', 'application/json', 'application/javascript']):
-            return response
-        
-        try:
-            compressed_data = gzip.compress(response.data)
-            response.data = compressed_data
-            response.headers['Content-Encoding'] = 'gzip'
-            response.headers['Content-Length'] = len(compressed_data)
-        except Exception:
-            pass  # 压缩失败则返回原始数据
-        
-        return response
+    # 2026-10-10：模板过滤器 / 静态资源版本 / Gzip 中间件已提取为模块级函数，
+    # create_app 只负责按序调用（见上方 _register_* 系列）。
+    _register_template_filters(app)
+    _mtime_cache = _build_static_mtime_cache(app)
+    _register_asset_version(app, _mtime_cache)
+    _register_response_middleware(app)
 
     # 上传附件目录禁止通过 /static/... 直链访问（PR#5 安全审查 M4）。
     # 历史实现把用户上传的表单材料落在 app/static/uploads 下，任何拿到
@@ -575,7 +594,12 @@ def create_app():
             return
         try:
             must_change = bool(current_user.must_change_pwd)
-        except Exception:  # noqa: BLE001  # 会话用户对象异常时不阻断请求
+        except Exception as _e:  # noqa: BLE001  # 会话用户对象异常时不阻断请求
+            # 2026-10-10：会话里的用户对象异常（如已删除账号的残留会话）时，
+            # 原实现静默 return —— 用户会卡在"页面正常但功能不对"的状态。
+            # 降级行为不变（放行），但留痕便于定位。
+            logging.getLogger('stulink.app').debug(
+                '读取 must_change_pwd 失败，本次不强制改密: %s', _e)
             return
         if not must_change:
             return
