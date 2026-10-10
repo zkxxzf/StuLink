@@ -1,4 +1,4 @@
-# StuLink v1.18.9.1 2026-10-09
+# StuLink v1.18.9.1 2026-10-10
 # 全局对比指标引擎：班级 × 学科「去差均分 + 特优线 + 本科线」宽表
 #
 # 口径与 report_service / report_pivot_service 完全一致（复用其公共函数）：

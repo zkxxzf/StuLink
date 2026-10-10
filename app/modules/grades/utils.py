@@ -1,4 +1,4 @@
-# StuLink v1.18.9.1 2026-10-09
+# StuLink v1.18.9.1 2026-10-10
 # 成绩管理：通用小工具
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 import re
