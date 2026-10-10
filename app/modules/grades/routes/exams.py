@@ -186,7 +186,14 @@ def exam_new():
 # ==================== 考试详情 / 成绩浏览 / 修正 / 重算 / 删除 ====================
 
 def _exam_classes(exam_id):
-    """本场考试出现过的班级（按班级名排序），供成绩单「按班级查看」筛选。"""
+    """本场考试出现过的班级（按班级名排序），供成绩单「按班级查看」筛选。
+
+    取**总分行**的 class_name —— 它是「考试当时」的班级快照，与考试自包含设计
+    （v1.18.7.0：考试自带学生班级）以及班排/方向排的班级口径一致。
+    注意：科目行的 class_name 是**导入时的当前班级**（选科分班之后），对高一上等
+    「分班之前」的考试与总分行不一致（生产实测考试 1-5、18-20 约 90% 学生如此，
+    经调班记录 reassign 佐证），故本模块一律不用科目行判定班级。
+    """
     rows = (db.session.query(ExamScore.class_name)
             .filter(ExamScore.exam_id == exam_id,
                     ExamScore.subject == TOTAL_SUBJECT,
@@ -248,13 +255,13 @@ def _exam_page_rows(exam_id, page, size, class_name=None):
             d['rank'] = r.rank_dir
             d['rank_class'] = r.rank_class
             d['move'] = r.move_rank
-            # v1.19.0 身份字段以「总分行」为准：个别历史数据的**科目行** class_name
-            # 快照存在漂移（同一学号各科目行分属不同班级），若沿用第一行会把班级显示错，
-            # 也让「按班级查看」看起来没生效（计数按总分行已过滤）。总分是本生汇总行，
-            # 与划线/排名/分析口径一致，作为权威来源。
-            d['class_name'] = r.class_name
-            d['direction'] = r.direction
-            d['selection'] = r.subject_selection
+            # v1.19.0 身份字段以「总分行」为准：它是**考试当时**的班级/方向/选科快照，
+            # 与 _exam_classes() / _exam_page_rows() 的筛选口径、以及班排/方向排一致。
+            # （科目行的 class_name 是导入时的当前班级，高一上等「分班之前」的考试会与
+            #   考试快照不一致——生产实测约 90% 学生命中，经调班记录 reassign 佐证）
+            d['class_name'] = r.class_name or d['class_name']
+            d['direction'] = r.direction or d['direction']
+            d['selection'] = r.subject_selection or d['selection']
             if r.exam_no:
                 d['exam_no'] = r.exam_no
         else:

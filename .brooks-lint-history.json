@@ -1,0 +1,5 @@
+[
+  { "date": "2026-10-10", "mode": "Architecture Audit", "score": 52, "findings": { "critical": 2, "warning": 3, "suggestion": 3 }, "scope": "全项目 Round1（模块依赖图 + 六大风险采样）" },
+  { "date": "2026-10-10", "mode": "Architecture Audit", "score": 47, "findings": { "critical": 2, "warning": 4, "suggestion": 2 }, "scope": "Round2（数据范围/权限判定子系统、模型层贫血度、utils 边界）" },
+  { "date": "2026-10-10", "mode": "Architecture Audit", "score": 44, "findings": { "critical": 2, "warning": 3, "suggestion": 2 }, "scope": "Round3（数据访问模式、事务边界、缓存一致性、端点保护覆盖）" }
+]
