@@ -45,6 +45,9 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
+# git 输出按 UTF-8 解码：中文 Windows 上 PS5 默认按 GBK 解，含中文的路径会乱码
+try { [Console]::OutputEncoding = [System.Text.Encoding]::UTF8 } catch { }
+
 $NAS = '17752560383@10.193.191.210'
 $DIR = '/volume1/docker/stulink'
 $CT = 'stulink'
@@ -96,7 +99,8 @@ if ($From -eq $head) {
 }
 
 # ── 2. 取变更清单 ────────────────────────────────────────────────────────
-$raw = git -C $repo diff --name-status "$From..$head"
+# core.quotepath=false：否则 git 会把非 ASCII 路径转义成 "docs/\351\203\250..." 导致取不到文件
+$raw = git -C $repo -c core.quotepath=false diff --name-status "$From..$head"
 $changed = @(); $deleted = @()
 foreach ($line in $raw) {
     if (-not $line) { continue }
