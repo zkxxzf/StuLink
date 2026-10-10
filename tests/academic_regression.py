@@ -700,7 +700,7 @@ def check_home():
         html = r.get_data(as_text=True)
         case('教务工作台 200', r.status_code == 200, str(r.status_code))
         case('含 KPI / 待办 / 入口 / 动态', all(k in html for k in
-             ('教务工作台', '待办事项', '常用入口', '最近动态')))
+             ('教务工作台', '待办事项', '教务主流程', '最近动态')))
         case('显示当前学期', '2026-2027学年第一学期' in html)
 
 
