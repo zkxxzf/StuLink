@@ -31,6 +31,15 @@ def _grade_options():
     return visible_grades(current_user)
 
 
+def _dict_values(code, fallback=()):
+    """字典可见项（无字典/为空时兑底用 fallback），供两维下拉使用"""
+    from app.models import DictCategory
+    cat = DictCategory.query.filter_by(code=code).first()
+    vals = ([i.value for i in cat.items.filter_by(is_active=True)
+             .order_by('sort_order').all()] if cat else [])
+    return vals or list(fallback)
+
+
 def _exam_date_from(value):
     try:
         return date.fromisoformat(str(value))
@@ -78,6 +87,22 @@ def exams_list():
                            status_label=EXAM_STATUS_LABEL)
 
 
+def _exam_form_ctx(**kw):
+    """新建考试表单的公共上下文（两维下拉 + 分数口径）"""
+    from app.models.grades import EXAM_KINDS, EXAM_STAGES, DEFAULT_SCORE_MODE
+    ctx = {
+        'grade_options': _grade_options(),
+        'kind_options': _dict_values('exam_kind', EXAM_KINDS),
+        'stage_options': _dict_values('exam_type', EXAM_STAGES),
+        'mode_options': [('converted', '赋分（划线/排名按赋分）'),
+                         ('raw', '原始分（无赋分时选这个）')],
+        'default_date': date.today().isoformat(),
+        'default_mode': DEFAULT_SCORE_MODE,
+    }
+    ctx.update(kw)
+    return ctx
+
+
 @bp.route('/exams/new', methods=['GET', 'POST'])
 @login_required
 @perm_required('grades.edit')
@@ -86,32 +111,46 @@ def exam_new():
         grade = (request.form.get('grade') or '').strip()
         exam_date = _exam_date_from(request.form.get('exam_date'))
         name = (request.form.get('name') or '').strip()
+        exam_kind = (request.form.get('exam_kind') or '').strip()
         exam_type = (request.form.get('exam_type') or '').strip()
+        score_mode = (request.form.get('score_mode') or '').strip() or 'converted'
+        if score_mode not in ('converted', 'raw'):
+            score_mode = 'converted'
+        if not name:
+            # 名称留空 → 默认「年级 + 日期」（两维度已单独存列，不塞进名称）
+            name = f'{grade}{exam_date.isoformat()}'
         if not grade or not name:
             flash('请选择年级并填写考试名称', 'danger')
-            return render_template('grades/exam_form.html', grade_options=_grade_options(),
-                                   grade=grade, exam_date=exam_date.isoformat(), name=name,
-                                   exam_type=exam_type, default_date=date.today().isoformat())
+            return render_template('grades/exam_form.html', **_exam_form_ctx(
+                grade=grade, exam_date=exam_date.isoformat(), name=name,
+                exam_kind=exam_kind, exam_type=exam_type, score_mode=score_mode))
         dup = Exam.query.filter_by(grade=grade, name=name).first()
         if dup:
             # 修复：同名考试由“仅警告仍创建”改为阻断——避免成绩分散到两场同名考试混淆统计
             flash(f'同年级已存在同名考试「{name}」（{dup.exam_date}），请修改考试名称',
                   'danger')
-            return render_template('grades/exam_form.html', grade_options=_grade_options(),
-                                   grade=grade, exam_date=exam_date.isoformat(), name='',
-                                   exam_type=exam_type, default_date=date.today().isoformat())
+            return render_template('grades/exam_form.html', **_exam_form_ctx(
+                grade=grade, exam_date=exam_date.isoformat(), name='',
+                exam_kind=exam_kind, exam_type=exam_type, score_mode=score_mode))
         exam = Exam(grade=grade, name=name, exam_date=exam_date,
-                    exam_type=exam_type or '其他', term=term_of_date(exam_date),
+                    exam_kind=exam_kind, exam_type=exam_type or '其他',
+                    score_mode=score_mode, term=term_of_date(exam_date),
                     operator_id=current_user.id)
         db.session.add(exam)
         db.session.commit()
         log_operation(current_user, '新建', '考试', exam.id,
-                      f'{grade}{name}（{exam_date}）', module='grades')
-        flash('考试已创建', 'success')
-        return redirect(url_for('grades.exams_list'))
-    return render_template('grades/exam_form.html', grade_options=_grade_options(),
-                           grade='', exam_date=date.today().isoformat(), name='',
-                           exam_type='月考', default_date=date.today().isoformat())
+                      f'{exam.title_with_dimensions()}（{name}）', module='grades')
+        flash('考试已创建（%s）' % exam.title_with_dimensions(), 'success')
+        return redirect(url_for('grades.exam_detail', exam_id=exam.id))
+    # GET：性质/阶段默认取字典第一项
+    from app.models.grades import EXAM_KINDS, EXAM_STAGES
+    kinds = _dict_values('exam_kind', EXAM_KINDS)
+    stages = _dict_values('exam_type', EXAM_STAGES)
+    return render_template('grades/exam_form.html', **_exam_form_ctx(
+        grade='', exam_date=date.today().isoformat(), name='',
+        exam_kind=(kinds[0] if kinds else ''),
+        exam_type=('月考' if '月考' in stages else (stages[0] if stages else '')),
+        score_mode='converted'))
 
 
 # ==================== 考试详情 / 成绩浏览 / 修正 / 重算 / 删除 ====================
@@ -153,18 +192,21 @@ def _exam_page_rows(exam_id, page, size):
         d = data.setdefault(r.student_no, {
             'no': r.student_no, 'name': r.student_name, 'class_name': r.class_name,
             'direction': r.direction, 'selection': r.subject_selection,
+            'exam_no': r.exam_no,                    # v1.19.0 考号
             'status': st_map.get(r.student_no, ''),
             'total': None, 'total_sid': None, 'rank': None, 'move': None, 'subjects': {},
         })
         if r.subject == TOTAL_SUBJECT:
             d['total'] = r.score
+            d['total_raw'] = r.raw_score            # v1.19.0 总分原始分（可选）
             d['total_sid'] = r.id
             d['rank'] = r.rank_dir
             d['rank_class'] = r.rank_class
             d['move'] = r.move_rank
         else:
             d['subjects'][r.subject] = {
-                'id': r.id, 'score': r.score, 'rank': r.rank_dir,
+                'id': r.id, 'score': r.score, 'raw': r.raw_score,   # v1.19.0 原始分
+                'rank': r.rank_dir,
                 'rank_class': r.rank_class,
             }
     for d in data.values():
@@ -213,6 +255,38 @@ def unselected_subjects(selection, direction):
     return out
 
 
+def _four_step_status(exam):
+    """四段式进度（建立考试 → 考务安排 → 成绩导入 → 成绩分析）
+
+    每一步给出：是否完成、可点进去的地址、“下一步”提示。
+    - 建立考试：能打开本页即已完成
+    - 考务安排：该考试已生成考务批次（含名单/考场）
+    - 成绩导入：考试状态 = imported
+    - 成绩分析：已划过分层线（划线是考试自带的 exam_bands，与模板无关）
+    """
+    from app.models.grades import ExamBand
+    affair = ExamAffair.query.filter_by(exam_id=exam.id).first()
+    imported = (exam.status == 'imported')
+    banded = ExamBand.query.filter_by(exam_id=exam.id).count() > 0
+    steps = [
+        {'key': 'exam', 'label': '建立考试', 'done': True,
+         'url': url_for('grades.exam_detail', exam_id=exam.id),
+         'hint': exam.title_with_dimensions()},
+        {'key': 'affair', 'label': '考务安排', 'done': bool(affair),
+         'url': url_for('grades.exam_affair_go', exam_id=exam.id),
+         'hint': (affair.name if affair else '未创建考务批次')},
+        {'key': 'import', 'label': '成绩导入', 'done': imported,
+         'url': url_for('grades.exam_import', exam_id=exam.id),
+         'hint': (EXAM_STATUS_LABEL.get(exam.status, exam.status) if imported
+                  else '尚未导入成绩')},
+        {'key': 'analysis', 'label': '成绩分析', 'done': banded,
+         'url': url_for('grades.index'),
+         'hint': ('已划线，分析可用' if banded else '未划线，分层类指标不可用')},
+    ]
+    nxt = next((s for s in steps if not s['done']), None)
+    return steps, nxt
+
+
 @bp.route('/exams/<int:exam_id>')
 @login_required
 @perm_required('grades.edit')
@@ -227,9 +301,10 @@ def exam_detail(exam_id):
             info = json.loads(exam.import_info)
         except (json.JSONDecodeError, TypeError):
             info = None
+    steps, next_step = _four_step_status(exam)
     return render_template('grades/exam_detail.html', exam=exam, students=students,
                            subjects=SUBJECTS, status_label=EXAM_STATUS_LABEL,
-                           import_info=info,
+                           import_info=info, steps=steps, next_step=next_step,
                            page=page, total_pages=total_pages, total=total, size=size)
 
 

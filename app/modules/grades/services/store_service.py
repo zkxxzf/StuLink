@@ -35,6 +35,7 @@ def apply_import(exam, parsed, mode='A', remove_missing=False):
     nos_in_file = set()
     for r in rows:
         nos_in_file.add(r['no'])
+        raw_map = r.get('raw_subjects') or {}      # v1.19.0 原始分（可选）
         for sub in file_subjects:
             score = r['subjects'].get(sub)
             key = (r['no'], sub)
@@ -49,6 +50,7 @@ def apply_import(exam, parsed, mode='A', remove_missing=False):
                     db.session.add(old)
                     summary['created_rows'] += 1
                 old.score = score
+                old.raw_score = raw_map.get(sub)       # 无原始分列时置空
             else:
                 # 文件含该科列但为空 = 本次缺考：删除旧行
                 if old is not None:
@@ -90,6 +92,7 @@ def apply_import(exam, parsed, mode='A', remove_missing=False):
                 db.session.add(total_row)
                 summary['created_rows'] += 1
             total_row.score = total_score
+            total_row.raw_score = raw_map.get(TOTAL_SUBJECT)   # v1.19.0 总分原始分（可选）
         _refresh_snapshot(existing, r)
 
     # 未出现学生处理
@@ -152,3 +155,5 @@ def _refresh_snapshot(existing, r, skip_deleted=False):
         row.class_type = r.get('class_type', row.class_type)   # v1.18.8.0 班型快照
         row.direction = r.get('direction', row.direction)
         row.subject_selection = r.get('subject_selection', row.subject_selection)
+        if r.get('exam_no'):
+            row.exam_no = r['exam_no']                 # v1.19.0 考号快照（文件没给就不覆盖）
