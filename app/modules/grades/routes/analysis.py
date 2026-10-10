@@ -3,7 +3,8 @@
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 import hashlib
 
-from flask import render_template, request, redirect, url_for, jsonify, abort
+from flask import (render_template, request, redirect, url_for, jsonify, abort,
+                   current_app)  # current_app 为 2026-10-11 修复 L163 未定义引用所补
 from flask_login import login_required, current_user
 from app.models.grades import Exam, TeacherSubjectLink
 from app.models import Student

@@ -2,6 +2,7 @@
 import os
 import shutil
 import sqlite3
+import logging
 from datetime import datetime
 from flask import Blueprint, render_template, request, jsonify, flash, redirect, url_for
 from flask_login import login_required, current_user
@@ -10,6 +11,9 @@ from app.models import Room, BedAssignment, Student, GradeSetting, DictCategory,
 from app.utils.decorators import perm_required
 from app.utils.helpers import log_operation, write_change_log, get_dict_values, clear_graduated_grades_cache
 from app.utils.crypto import decrypt
+
+# 2026-10-11 修复：本文件 4 处静默异常降级日志误用裸 logger（未定义，触发即 NameError），在此补定义
+logger = logging.getLogger(__name__)
 
 
 def _prune_backups(backups_dir, keep=20, max_age_days=180):

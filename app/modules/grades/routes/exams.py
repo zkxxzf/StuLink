@@ -13,7 +13,8 @@ from flask import (Blueprint, render_template, request, jsonify, flash,
 from flask_login import login_required, current_user
 from app.extensions import db
 from app.models.grades import (Exam, ExamScore, SUBJECTS, TOTAL_SUBJECT,
-                              ExamAffair, AffairRoom, AffairStudent)
+                              ExamAffair, AffairRoom, AffairStudent,
+                              ExamBand)  # ExamBand 为 2026-10-11 修复 L111 未定义引用所补
 from app.modules.grades import bp
 from app.modules.grades.services import import_service, store_service, ranking, tab_service
 from app.modules.grades.services.exam_guard import assert_exam_visible

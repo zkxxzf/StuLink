@@ -732,7 +732,9 @@ def _format_answer(answer):
             if isinstance(items, list):
                 return '、'.join(str(i) for i in items)
         except Exception as _e:  # noqa: BLE001
-            logger.warning('form_service.py::_format_answer 异常（已降级处理）: %s', _e)
+            # 2026-10-11 修复：本文件只用 current_app.logger，此处原误用裸 logger（未定义）会抛 NameError
+            current_app.logger.warning(
+                'form_service.py::_format_answer 异常（已降级处理）: %s', _e)
         return answer.answer_json
     return answer.answer_text or '-'
 
