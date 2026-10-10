@@ -350,6 +350,11 @@
                    href="{{ url_for('grades.exam_affair_go', exam_id=EN.exam_id) }}">考务安排{% if not EN.steps[1].done %}<span class="efn-tag">待做</span>{% endif %}</a>
                 <a class="efn-item {% if EN.section == 'import' %}active{% endif %}" data-nav="import"
                    href="{{ url_for('grades.exam_import', exam_id=EN.exam_id) }}">成绩导入{% if not EN.steps[2].done %}<span class="efn-tag">待做</span>{% endif %}</a>
+                {# v1.19.0：AI 智能导入 / 划线分层 从「本场快捷」提上来，与「成绩导入」同级（贴近导入环节） #}
+                <a class="efn-item {% if request.endpoint and request.endpoint.startswith('grades.exam_ai_import') %}active{% endif %}" data-nav="ai"
+                   href="{{ url_for('grades.exam_ai_import', exam_id=EN.exam_id) }}">AI 智能导入</a>
+                <a class="efn-item {% if request.endpoint == 'grades.bands_page' %}active{% endif %}" data-nav="bands"
+                   href="{{ url_for('grades.bands_page', exam_id=EN.exam_id) }}">划线分层</a>
                 <a class="efn-item {% if EN.section == 'analysis' %}active{% endif %}" data-nav="analysis"
                    href="{{ url_for('grades.index') }}?exam={{ EN.exam_id }}">成绩分析{% if not EN.steps[3].done %}<span class="efn-tag">待划线</span>{% endif %}</a>
                 {# v1.19.0 分析子模块：收在本场考试下，做成可折叠分组（风格同参考图） #}
@@ -375,15 +380,6 @@
                     {% endif %}
                 </div>
                 {% endif %}
-                <a class="efn-group" data-bs-toggle="collapse" href="#efnQuick" role="button" aria-expanded="false">
-                    <span>本场快捷</span><i class="bi bi-chevron-down"></i>
-                </a>
-                <div class="collapse" id="efnQuick">
-                    <a class="efn-item ps-4 {% if request.endpoint and request.endpoint.startswith('grades.exam_ai_import') %}active{% endif %}" data-nav="ai"
-                       href="{{ url_for('grades.exam_ai_import', exam_id=EN.exam_id) }}">AI 智能导入</a>
-                    <a class="efn-item ps-4 {% if request.endpoint == 'grades.bands_page' %}active{% endif %}" data-nav="bands"
-                       href="{{ url_for('grades.bands_page', exam_id=EN.exam_id) }}">划线分层</a>
-                </div>
                 {% if EN.next_step %}
                 <div class="efn-next">下一步：{{ EN.next_step.label }}</div>
                 {% else %}

@@ -185,7 +185,18 @@ def exam_new():
 
 # ==================== 考试详情 / 成绩浏览 / 修正 / 重算 / 删除 ====================
 
-def _exam_page_rows(exam_id, page, size):
+def _exam_classes(exam_id):
+    """本场考试出现过的班级（按班级名排序），供成绩单「按班级查看」筛选。"""
+    rows = (db.session.query(ExamScore.class_name)
+            .filter(ExamScore.exam_id == exam_id,
+                    ExamScore.subject == TOTAL_SUBJECT,
+                    ExamScore.class_name.isnot(None),
+                    ExamScore.class_name != '')
+            .distinct().all())
+    return sorted({r[0] for r in rows})
+
+
+def _exam_page_rows(exam_id, page, size, class_name=None):
     """服务端分页：仅查询当前页的学生成绩，避免整场 8000 人一次性载入。
 
     返回 (students, page, total_pages, total)：
@@ -193,8 +204,13 @@ def _exam_page_rows(exam_id, page, size):
         按 (班级, 方向排名) 排序并 LIMIT/OFFSET 取出本页学号；
       - 再仅查本页学号的全部科目成绩行（约 50×7=350 行）；
       - 学籍状态一次性 IN 查询（1 次，而非逐批 10 次）。
+
+    class_name（v1.19.0）：按班级查看成绩单，只统计/展示该班学生（None=全部）。
     """
-    total = ExamScore.query.filter_by(exam_id=exam_id, subject=TOTAL_SUBJECT).count()
+    q = ExamScore.query.filter_by(exam_id=exam_id, subject=TOTAL_SUBJECT)
+    if class_name:
+        q = q.filter(ExamScore.class_name == class_name)
+    total = q.count()
     if total == 0:
         return [], 1, 0, 0
     size = max(1, min(int(size or 50), 500))   # 单页上限 500，避免「全部」拖垮
@@ -202,9 +218,8 @@ def _exam_page_rows(exam_id, page, size):
     total_pages = (total + size - 1) // size
     if page > total_pages:
         page = total_pages
-    meta = (ExamScore.query.filter_by(exam_id=exam_id, subject=TOTAL_SUBJECT)
-            .order_by(ExamScore.class_name,
-                      db.func.coalesce(ExamScore.rank_dir, 99999))
+    meta = (q.order_by(ExamScore.class_name,
+                       db.func.coalesce(ExamScore.rank_dir, 99999))
             .limit(size).offset((page - 1) * size).all())
     nos = [r.student_no for r in meta]
     if not nos:
@@ -324,7 +339,13 @@ def exam_detail(exam_id):
     exam = assert_exam_visible(exam_id)   # H-4：校验考试所属年级范围
     page = _safe_int(request.args.get('page'), 1)
     size = _safe_int(request.args.get('size'), 50)
-    students, page, total_pages, total = _exam_page_rows(exam_id, page, size)
+    # v1.19.0：成绩单支持按班级查看（cls=班级名，空/非法=全部）
+    classes = _exam_classes(exam_id)
+    cur_class = (request.args.get('cls') or '').strip()
+    if cur_class not in classes:
+        cur_class = ''
+    students, page, total_pages, total = _exam_page_rows(
+        exam_id, page, size, class_name=cur_class or None)
     info = None
     if exam.import_info:
         try:
@@ -335,6 +356,7 @@ def exam_detail(exam_id):
     return render_template('grades/exam_detail.html', exam=exam, students=students,
                            subjects=SUBJECTS, status_label=EXAM_STATUS_LABEL,
                            import_info=info, steps=steps, next_step=next_step,
+                           classes=classes, cur_class=cur_class,
                            page=page, total_pages=total_pages, total=total, size=size)
 
 
@@ -346,7 +368,9 @@ def exam_scores_page(exam_id):
     exam = assert_exam_visible(exam_id)   # H-4：校验考试所属年级范围
     page = _safe_int(request.args.get('page'), 1)
     size = _safe_int(request.args.get('size'), 50)
-    students, _page, _total_pages, _total = _exam_page_rows(exam_id, page, size)
+    cur_class = (request.args.get('cls') or '').strip()   # v1.19.0 按班级查看
+    students, _page, _total_pages, _total = _exam_page_rows(
+        exam_id, page, size, class_name=cur_class or None)
     return render_template('grades/exam_detail_rows.html',
                            students=students, subjects=SUBJECTS)
 

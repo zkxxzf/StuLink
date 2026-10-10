@@ -92,11 +92,23 @@
 
 <div class="card">
     <div class="card-header py-2">
-        <div class="d-flex align-items-center">
-            <h6 class="mb-0"><i class="bi bi-people"></i> 成绩单（{{ students|length }} 人）</h6>
-            <span class="text-muted small ms-3">点击任一分数可修改（输入数字保存，输入 del 删除该科=缺考）；
+        <div class="d-flex align-items-center flex-wrap gap-2">
+            <h6 class="mb-0"><i class="bi bi-people"></i> 成绩单
+                {% if cur_class %}（{{ cur_class }} · {{ total }} 人）{% else %}（{{ total }} 人）{% endif %}</h6>
+            <span class="text-muted small">点击任一分数可修改（输入数字保存，输入 del 删除该科=缺考）；
                 <span class="text-muted">「未选」= 不在该生选科组合内（不计缺考）</span></span>
         </div>
+        {# v1.19.0 按班级查看：服务端筛选（链接可分享/收藏），不选=全部 #}
+        {% if classes %}
+        <div class="d-flex flex-wrap gap-1 mt-2">
+            <a class="btn btn-sm {{ 'btn-primary' if not cur_class else 'btn-outline-secondary' }}"
+               href="{{ url_for('grades.exam_detail', exam_id=exam.id) }}">全部</a>
+            {% for c in classes %}
+            <a class="btn btn-sm {{ 'btn-primary' if cur_class == c else 'btn-outline-secondary' }}"
+               href="{{ url_for('grades.exam_detail', exam_id=exam.id, cls=c) }}">{{ c }}</a>
+            {% endfor %}
+        </div>
+        {% endif %}
     </div>
     <div class="table-responsive" style="max-height:70vh;">
         <table class="table table-sm table-hover align-middle g-table mb-0" id="scoreTable">
@@ -167,7 +179,8 @@
     {# 服务端分页元数据：供 JS 初始化翻页控件 #}
     <div id="pageMeta" class="d-none"
          data-page="{{ page }}" data-total-pages="{{ total_pages }}"
-         data-total="{{ total }}" data-size="{{ size }}"></div>
+         data-total="{{ total }}" data-size="{{ size }}"
+         data-cls="{{ cur_class }}"></div>
     </div>
     </div>
 
@@ -227,8 +240,9 @@ $(function(){
     });
 
     /* ---------- 成绩单：服务端分页（每次仅查当前页 50 人，不再整场载入） ---------- */
-    var PAGE_KEY = 'examPage_' + examId;
     var meta = $('#pageMeta').data();
+    var curCls = meta.cls || '';
+    var PAGE_KEY = 'examPage_' + examId + '|' + curCls;   // 按班级各记各的翻页位置
     var pageSize = parseInt(meta.size || 50, 10);
     var curPage = parseInt(meta.page || 1, 10);
     var totalPages = parseInt(meta.totalPages || 1, 10);
@@ -246,7 +260,8 @@ $(function(){
         curPage = p;
         sessionStorage.setItem(PAGE_KEY, p);
         $('#scoreTable tbody').html('<tr><td colspan="99" class="text-center text-muted py-4">加载中…</td></tr>');
-        $.get('/grades/exams/' + examId + '/scores', {page: p, size: pageSize})
+        $.get('/grades/exams/' + examId + '/scores',
+              {page: p, size: pageSize, cls: curCls})
             .done(function(html){
                 $('#scoreTable tbody').html(html);
                 bindScoreCells();
