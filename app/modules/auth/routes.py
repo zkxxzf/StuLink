@@ -64,7 +64,7 @@ def login():
             return render_template('auth/login.html', form=form)
 
         # M-3：账号维度锁定（多 IP 分布式爆破时，IP 限流形同虚设）
-        # v1.18.9.0 S-7：归一化 —— strip().lower() 避免“ Admin”“ADMIN” 重置计数绕过锁定
+        # v1.18.9.1 S-7：归一化 —— strip().lower() 避免“ Admin”“ADMIN” 重置计数绕过锁定
         username_typed = (form.username.data or '').strip().lower()
         acct_fail_key = f'login_fail_{username_typed}'
         acct_lock_key = f'login_lock_{username_typed}'
@@ -135,7 +135,7 @@ def change_password():
         if not current_user.check_password(form.old_password.data):
             flash('原密码不正确', 'danger')
         else:
-            # v1.18.9.0 M-15：新口令必须过弱口令黑名单与强度校验，防止把弱口令写入库
+            # v1.18.9.1 M-15：新口令必须过弱口令黑名单与强度校验，防止把弱口令写入库
             from app.utils.password_policy import validate_password
             ok, msg = validate_password(form.new_password.data,
                                         username=current_user.username,

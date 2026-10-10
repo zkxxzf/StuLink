@@ -1,4 +1,4 @@
-# StuLink v1.18.9.0 2026-10-09
+# StuLink v1.18.9.1 2026-10-09
 # 成绩管理与可视化分析系统：数据模型（独立库 grades.db）
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 import json
@@ -259,7 +259,7 @@ class ExamScore(db.Model):
     class_name = db.Column(db.String(10))                   # 班级快照（换班不影响历史）
     # v1.19.0 考号快照（联考等第三方编排的号，第三方未给时为空）
     exam_no = db.Column(db.String(20))
-    # v1.18.9.0 班型快照（强基班/卓越班…）：导入时取自班型设置，使去差均分等分析
+    # v1.18.9.1 班型快照（强基班/卓越班…）：导入时取自班型设置，使去差均分等分析
     # 永远用「考试当时」的班型；此前实时读 ClassProfile，班型一改历史全部失真
     class_type = db.Column(db.String(20))
     direction = db.Column(db.String(4))                     # 物理/历史 快照
@@ -386,7 +386,7 @@ class TeacherSubjectLink(db.Model):
 
 
 class ExamTeacherLink(db.Model):
-    """v1.18.9.0 考试任课快照：考试 × 班级 × 科目的**当时**任课教师
+    """v1.18.9.1 考试任课快照：考试 × 班级 × 科目的**当时**任课教师
 
     为什么需要：TeacherSubjectLink 只存"当前"映射，教师一换（尤其分班后）
     历史考试的教师维度分析会全部错位。本表把每场考试的任课安排定格，
