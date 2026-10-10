@@ -53,9 +53,19 @@ $repo = Split-Path -Parent $PSScriptRoot
 if (-not (Test-Path (Join-Path $repo '.git'))) { throw "不是 git 仓库：$repo" }
 
 function Invoke-Remote([string[]]$Lines) {
-    # 用 LF 拼接，避免 PowerShell here-string 带上 CRLF 导致远端 bash 报 $'\r'
-    $script = ($Lines -join "`n") + "`n"
-    $script | ssh -o BatchMode=yes -o ConnectTimeout=20 $NAS 'bash -s'
+    # 关键：不能把脚本文本直接管道给 ssh（PowerShell 5 的管道会引入 BOM/CR、
+    # 并把非 ASCII 变成 '?'）。改为写临时文件（UTF-8 无 BOM + LF），再用标准输入重定向。
+    $tmp = [System.IO.Path]::GetTempFileName()
+    try {
+        $script = ($Lines -join "`n") + "`n"
+        [System.IO.File]::WriteAllText($tmp, $script, (New-Object System.Text.UTF8Encoding($false)))
+        $p = Start-Process -FilePath 'ssh' -NoNewWindow -Wait -PassThru `
+            -RedirectStandardInput $tmp `
+            -ArgumentList @('-o', 'BatchMode=yes', '-o', 'ConnectTimeout=20', $NAS, 'bash -s')
+        if ($p.ExitCode -ne 0) { Write-Warning "远端脚本退出码 $($p.ExitCode)" }
+    } finally {
+        Remove-Item $tmp -Force -ErrorAction SilentlyContinue
+    }
 }
 
 function Invoke-Overview {
