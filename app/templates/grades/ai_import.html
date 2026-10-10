@@ -1,0 +1,81 @@
+{% extends "base.html" %}
+{% block title %}AI 智能导入 - {{ exam.name }}{% endblock %}
+{% block content %}
+<div class="d-flex align-items-center mb-3 flex-wrap gap-2">
+    <a href="{{ url_for('grades.exam_detail', exam_id=exam.id) }}" class="btn btn-sm btn-outline-secondary">
+        <i class="bi bi-arrow-left"></i>
+    </a>
+    <h5 class="mb-0"><i class="bi bi-stars"></i> AI 智能导入</h5>
+    <span class="text-muted small">{{ exam.title_with_dimensions() }}</span>
+    <span class="badge bg-light text-dark border ms-1">分数口径：{{ exam.score_mode_label() }}</span>
+    <a class="btn btn-sm btn-outline-secondary ms-auto" href="{{ url_for('grades.exam_import', exam_id=exam.id) }}">
+        <i class="bi bi-upload"></i> 改用标准模板导入
+    </a>
+</div>
+
+<div class="alert alert-light border small">
+    <b>怎么用</b>：把任意格式的成绩表直接拖进来（<b>不用改模板</b>）。
+    <ul class="mb-1 mt-1">
+        <li>AI 只负责识别「<b>哪列是什么</b>」，全部数据由系统按映射解析，不会漏行。</li>
+        <li>AI 会先问：这份是<b>赋分</b>、<b>原始</b>还是<b>两者都有</b>；如果是两个文件（赋分表 + 原始表），
+            <b>建议一并选择一起上传</b>，系统会自动合并成双轨（赋分进主分、原始分另存）。</li>
+        <li>没配置 AI Key 也能用：跳过后在下方<b>手工指定每列用途</b>即可。</li>
+    </ul>
+</div>
+
+{# ① 上传 #}
+<div class="card mb-3">
+    <div class="card-header py-2"><i class="bi bi-1-circle"></i> 选择文件</div>
+    <div class="card-body">
+        <input type="file" id="aiFiles" class="form-control form-control-sm" multiple
+               accept=".xlsx,.xlsm">
+        <div class="form-text">可多选（最多 4 个）；支持任意表头与多工作表。</div>
+        <button class="btn btn-primary btn-sm mt-2" id="aiAnalyze">
+            <i class="bi bi-magic"></i> 让 AI 识别
+        </button>
+        <span id="aiMsg" class="ms-2 small"></span>
+    </div>
+</div>
+
+{# ② AI 结论 + 待确认问题 #}
+<div class="card mb-3 d-none" id="aiBox">
+    <div class="card-header py-2"><i class="bi bi-2-circle"></i> AI 识别结果（请核对）</div>
+    <div class="card-body">
+        <div id="aiKind" class="mb-2"></div>
+        <div id="aiQuestions"></div>
+        <div id="aiNotes" class="text-muted small"></div>
+    </div>
+</div>
+
+{# ③ 列映射 #}
+<div class="card mb-3 d-none" id="mapBox">
+    <div class="card-header py-2"><i class="bi bi-3-circle"></i> 列映射（可修改）</div>
+    <div class="card-body" id="mapBody"></div>
+</div>
+
+{# ④ 预览 / 导入 #}
+<div class="card mb-3 d-none" id="runBox">
+    <div class="card-header py-2"><i class="bi bi-4-circle"></i> 预览与导入</div>
+    <div class="card-body">
+        <div class="form-check mb-2">
+            <input class="form-check-input" type="checkbox" id="aiModeB" checked>
+            <label class="form-check-label small" for="aiModeB">
+                <b>整场覆盖</b>（推荐：用本次文件的结果替换本场现有成绩）
+            </label>
+        </div>
+        <button class="btn btn-outline-info btn-sm" id="aiPreview"><i class="bi bi-eye"></i> 预览</button>
+        <button class="btn btn-primary btn-sm ms-1" id="aiApply"><i class="bi bi-check-lg"></i> 确认导入</button>
+        <span id="aiRunMsg" class="ms-2 small"></span>
+        <pre id="aiPreviewBox" class="small bg-light border rounded p-2 mt-2 mb-0 d-none"
+             style="max-height:260px;overflow:auto;"></pre>
+    </div>
+</div>
+{% endblock %}
+{% block extra_js %}
+<script>
+window.AI_IMPORT_EXAM = {{ exam.id }};
+window.AI_SUBJECTS = {{ subjects|tojson }};
+window.AI_KIND_LABEL = {{ score_kinds|tojson }};
+</script>
+<script src="{{ su('js/ai_import.js') }}"></script>
+{% endblock %}
