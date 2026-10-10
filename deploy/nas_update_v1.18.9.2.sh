@@ -51,7 +51,7 @@ du -sh "$DIR/stulink-data-backup-v11892-$TS" 2>/dev/null
 echo "[3/9] 解包新代码"
 rm -rf "$WORK"; mkdir -p "$WORK"
 tar -xzf "$PKG" -C "$WORK" || fail "解包失败"
-ls "$WORK" | head -6
+ls "$WORK" | head -n 6
 
 echo "[4/9] 停止应用容器（迁移期间必须停应用）"
 docker stop "$CT" >/dev/null || fail "停止容器失败"
@@ -60,11 +60,15 @@ echo "      stopped"
 echo "[5/9] 复制新代码进容器 /app（容器已停，docker cp 依然可用）"
 docker cp "$WORK/." "$CT":/app/ || fail "复制代码失败"
 
-echo "[6/9] 执行迁移（有序；一次性容器挂载数据卷，应用不参与读写）"
+echo "[6/9] 执行迁移（容器已停；先提交为临时镜像再跑，确保用的是新代码与镜像内依赖）"
+# 注：不能把新代码挂到 /app 再 docker run——那会盖掉镜像内已装的依赖（本机实测
+#     报 ModuleNotFoundError: pptx，因该依赖在容器可写层而非镜像里）。
+IMGT=stulink:mig_v11892
+docker commit "$CT" "$IMGT" >/dev/null || fail "提交临时镜像失败"
 run_mig() {
     echo "  --> $1"
-    docker run --rm -v "$DATA":/app/data -v "$WORK":/app -w /app \
-        --entrypoint python "$IMG" "$1" 2>&1 | tail -8
+    docker run --rm -v "$DATA":/app/data -w /app \
+        --entrypoint python "$IMGT" "$1" 2>&1 | tail -n 8
     rc=${PIPESTATUS[0]}
     [ "$rc" = "0" ] || fail "迁移失败：$1（rc=$rc）"
 }
@@ -85,6 +89,7 @@ for i in $(seq 1 40); do
     if [ "$code" = "200" ]; then echo "      就绪（第 ${i} 次探测 HTTP $code）"; break; fi
     sleep 3
 done
+docker rmi "$IMGT" >/dev/null 2>&1 && echo "      临时镜像已清理"
 
 echo "[8/9] 验收：容器 / 页面 / 版本号"
 docker ps --filter "name=^$CT$" --format '  {{.Names}} | {{.Status}}'
