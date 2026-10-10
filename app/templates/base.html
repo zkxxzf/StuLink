@@ -317,8 +317,8 @@
                    href="{{ url_for('grades.pivot_page') }}?exam={{ EN.exam_id }}">
                     <i class="bi bi-grid-1x2"></i>成绩分析自由表
                 </a>
-                <a class="nav-link ps-4 small" data-nav="near"
-                   href="{{ url_for('grades.index') }}?exam={{ EN.exam_id }}&tab=near">
+                <a class="nav-link ps-4 small {% if request.endpoint == 'grades.exam_near_line' %}active{% endif %}" data-nav="near"
+                   href="{{ url_for('grades.exam_near_line', exam_id=EN.exam_id) }}">
                     <i class="bi bi-bullseye"></i>临界生对比
                 </a>
                 {% endif %}

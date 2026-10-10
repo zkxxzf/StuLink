@@ -96,7 +96,7 @@ function syncExamNav(){
         ai: '/grades/exams/' + eid + '/ai-import',
         bands: '/grades/exams/' + eid + '/bands',
         pivot: '/grades/pivot?exam=' + eid,
-        near: '/grades/analysis?exam=' + eid + '&tab=near',
+        near: '/grades/exams/' + eid + '/near-line',
         report: '/grades/report?exam=' + eid,
         global: '/grades/global-compare?exam=' + eid
     };
