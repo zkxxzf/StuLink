@@ -29,6 +29,8 @@
                 <th>年级</th>
                 <th>考试日期</th>
                 <th>状态</th>
+                {# v1.19.0 四步进度：建立考试 → 考务安排 → 成绩导入 → 成绩分析 #}
+                <th title="建立考试 → 考务安排 → 成绩导入 → 成绩分析">进度</th>
                 <th class="text-end">参考人数</th>
                 <th class="text-end">操作</th>
             </tr>
@@ -49,9 +51,21 @@
                     <span class="badge bg-secondary">未导入</span>
                     {% endif %}
                 </td>
+                {% set st = steps_map.get(e.id) %}
+                <td class="text-nowrap">
+                    {% if st %}
+                    {% for nm in ['建立考试', '考务安排', '成绩导入', '成绩分析'] %}
+                    <span class="badge rounded-pill {{ 'bg-success' if st[loop.index0] else 'bg-secondary-subtle text-secondary-emphasis' }}"
+                          title="{{ nm }}{{ '（已完成）' if st[loop.index0] else '（未完成）' }}">{{ loop.index }}</span>
+                    {% endfor %}
+                    {% else %}<span class="text-muted small">—</span>{% endif %}
+                </td>
                 <td class="text-end">{{ counts.get(e.id, 0) }}</td>
                 <td class="text-end">
                     <a href="{{ url_for('grades.exam_affair_go', exam_id=e.id) }}" class="btn btn-sm btn-outline-success">考务安排</a>
+                    <a href="{{ url_for('grades.exam_import', exam_id=e.id) }}" class="btn btn-sm btn-outline-warning">成绩导入</a>
+                    <a href="{{ url_for('grades.exam_ai_import', exam_id=e.id) }}" class="btn btn-sm btn-outline-dark"
+                       title="AI 智能导入（任意格式表，需本机配置 AI Key）"><i class="bi bi-stars"></i></a>
                     <a href="{{ url_for('grades.exam_detail', exam_id=e.id) }}" class="btn btn-sm btn-outline-primary">详情</a>
                     <a href="{{ url_for('grades.bands_page', exam_id=e.id) }}" class="btn btn-sm btn-outline-info">划线分层</a>
                     <button type="button" class="btn btn-sm btn-outline-danger btn-del-exam"
@@ -60,7 +74,7 @@
                 </td>
             </tr>
             {% else %}
-            <tr><td colspan="7" class="text-center text-muted py-4">
+            <tr><td colspan="8" class="text-center text-muted py-4">
                 暂无考试。先 <a href="{{ url_for('grades.exam_new') }}">新建考试</a>，再导入成绩。
             </td></tr>
             {% endfor %}
