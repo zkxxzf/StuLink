@@ -11,8 +11,8 @@
 
 用法（在项目根或任意位置执行）：
     python -m scripts.bump_version show              # 打印当前版本
-    python -m scripts.bump_version zk                # 第三段 +1，第四段归零（v1.18.0.0 → v1.18.1.0）
-    python -m scripts.bump_version sakay             # 第四段 +1（v1.18.1.0 → v1.18.1.1）
+    python -m scripts.bump_version zk                # 第三段 +1，第四段不变（v1.18.7.1 → v1.18.8.1）
+    python -m scripts.bump_version sakay             # 第四段 +1（v1.18.8.1 → v1.18.8.2）
     python -m scripts.bump_version minor             # 次版本 +1，三四归零（v1.18.x.x → v1.19.0.0）
     python -m scripts.bump_version major             # 主版本 +1，其他归零
     python -m scripts.bump_version zk --dry          # 只列出将改的文件不写盘
@@ -62,11 +62,18 @@ def fmt(v: tuple[int, int, int, int]) -> str:
 
 
 def next_version(mode: str, cur: tuple[int, int, int, int]) -> tuple[int, int, int, int]:
+    """四段版本号推演（用户 2026-10-10 明确的规则）
+
+    第三段 = 主线维护者 zk 的改动计数；第四段 = 协助者 sakay 的改动计数。
+    - zk  改动：第三段 +1，**第四段保留不动**（1.18.7.1 → 1.18.8.1）
+    - sakay 改动：第四段 +1（1.18.7.1 → 1.18.7.2）
+    - **只有前两位（主/次）升级时，后两位才重置为 0**
+    """
     a, b, c, d = cur
-    if mode == 'zk':       return (a, b, c + 1, 0)
+    if mode == 'zk':       return (a, b, c + 1, d)     # 末位保留（不归零）
     if mode == 'sakay':    return (a, b, c, d + 1)
-    if mode == 'minor':    return (a, b + 1, 0, 0)
-    if mode == 'major':    return (a + 1, 0, 0, 0)
+    if mode == 'minor':    return (a, b + 1, 0, 0)     # 次版本升级 → 后两位重置
+    if mode == 'major':    return (a + 1, 0, 0, 0)     # 主版本升级 → 后三位重置
     raise SystemExit(f'未知模式：{mode}')
 
 

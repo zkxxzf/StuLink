@@ -3,8 +3,9 @@
 <tr data-no="{{ stu.no }}">
     <td class="small">{{ stu.no }}</td>
     <td>{{ stu.name }}
-        {% if stu.status %}
-        <span class="badge bg-secondary-subtle text-secondary small" title="学籍状态">籍</span>
+        {% if stu.status_badge %}
+        <span class="badge bg-danger-subtle text-danger small"
+              title="当前学籍状态：{{ stu.status }}（人已不在校）">{{ stu.status_badge }}</span>
         {% endif %}
     </td>
     <td>{{ stu.class_name }}</td>
@@ -20,10 +21,11 @@
     </td>
     {% for s in subjects %}
     {% set cell = stu.subjects.get(s) %}
-    <td class="text-end score-cell small {{ 'table-warning' if cell is none else '' }}"
+    {% set unsel = s in (stu.unselected or []) %}
+    <td class="text-end small {{ 'text-muted' if unsel else ('score-cell table-warning' if cell is none else '') }}"
         data-sid="{{ cell.id if cell else '' }}"
-        title="{{ '缺考' if cell is none else '点击修改' }}">
-        {{ cell.score if cell else '缺' }}
+        title="{{ '未选（不在该生选科组合内）' if unsel else ('缺考，点击补录' if cell is none else '点击修改') }}">
+        {{ cell.score if cell else ('未选' if unsel else '缺') }}
     </td>
     {% endfor %}
 </tr>
