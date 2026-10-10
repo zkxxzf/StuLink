@@ -3,7 +3,7 @@
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 import hashlib
 
-from flask import render_template, request, jsonify, abort
+from flask import render_template, request, redirect, url_for, jsonify, abort
 from flask_login import login_required, current_user
 from app.models.grades import Exam, TeacherSubjectLink
 from app.models import Student
@@ -16,6 +16,17 @@ from app.utils.cache import cache
 
 
 @bp.route('/')
+@login_required
+@perm_required('grades.view')
+def index_legacy():
+    """v1.19.0 成绩模块落地页改为「历次考试列表」（用户口径：进入模块先看考试列表）
+
+    原 /grades/ 是成绩分析页；现改为重定向，旧书签/旧链接仍可用。
+    """
+    return redirect(url_for('grades.exams_list'))
+
+
+@bp.route('/analysis')
 @login_required
 @perm_required('grades.view')
 def index():

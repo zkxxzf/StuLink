@@ -81,10 +81,19 @@ def exams_list():
                 'rooms': AffairRoom.query.filter_by(affair_id=a.id).count(),
                 'exam_gone': a.exam_id is not None,
             })
+    steps_map = _list_steps_map(exams)
+    # v1.19.0 第一屏概览统计（由 steps_map 派生，不额外查库）
+    stats = {
+        'total': len(exams),
+        'imported': sum(1 for e in exams if e.status == 'imported'),
+        'pending': sum(1 for e in exams if e.status != 'imported'),
+        'affair': sum(1 for v in steps_map.values() if v[1]),
+        'banded': sum(1 for v in steps_map.values() if v[3]),
+    }
     return render_template('grades/exam_list.html', exams=exams, counts=counts,
                            grade=grade, grade_options=_grade_options(),
                            orphan_affairs=orphan_affairs,
-                           steps_map=_list_steps_map(exams),
+                           steps_map=steps_map, stats=stats,
                            status_label=EXAM_STATUS_LABEL)
 
 
