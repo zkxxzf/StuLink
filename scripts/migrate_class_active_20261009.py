@@ -58,6 +58,18 @@ def main():
         used = {(g, cn) for g, cn in rows if g and cn}
         print(f'[INFO] 课表里有课的班级：{len(used)} 个')
 
+        # 安全闸（2026-10-10 生产事故后补）：课表里一个班都没有 ⇒ 无法据此判断在用班级
+        # （典型：学校尚未导入课表）。此时若按原逻辑回填，会把**所有**班级判为未启用，
+        # 并让下游 migrate_teaching_links 清空全部任课映射。故此时一律保持启用。
+        if not used:
+            with engine.begin() as conn:
+                total = conn.exec_driver_sql(
+                    f'SELECT COUNT(*) FROM {TABLE}').scalar()
+                conn.exec_driver_sql(f'UPDATE {TABLE} SET {COLUMN}=1')
+            print(f'[WARN] 课表为空，无法判定在用班级 → 保持全部启用（{total} 个）。'
+                  f'请在导入课表后重跑本脚本以对齐。')
+            return 0
+
         with engine.begin() as conn:
             all_rows = conn.exec_driver_sql(
                 f'SELECT id, grade, class_name FROM {TABLE}').fetchall()

@@ -50,6 +50,14 @@ def main():
         backup()
         active = set(ts.active_class_pairs())
         print('[INFO] 在用班级：%d 个' % len(active))
+        # 安全闸（2026-10-10 生产事故后补）：在用班级为 0 说明"班级启用状态"判定异常
+        # （典型：课表尚未导入 → class_profiles 全被判未启用），此时若继续执行会把
+        # **全部**任课映射清空（该表是"谁教哪班哪科"的唯一依据）。故一律不删。
+        if not active and '--force' not in sys.argv:
+            print('[ABORT] 在用班级为 0，判定为异常，已取消删除与补齐（未改动数据）。')
+            print('        请先排查班级启用状态（scripts/migrate_class_active_20261009.py）；')
+            print('        确需在零在用班级下执行时，显式加 --force。')
+            return 1
         eng = db.engines['grades']
 
         # 1) 删除落在未启用班级上的映射
