@@ -1,4 +1,4 @@
-# StuLink v1.18.9.1 2026-10-10
+# StuLink v1.18.9.2 2026-10-10
 # 教务 · 学期课表（timetable.db）：管理 / 视图 / 条目CRUD / 导入导出 / 查课联动 / JSON API
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 """新课表系统路由。
@@ -258,6 +258,7 @@ def schedule_delete(sid):
 # 它做的事 = 年级标签 + 班级 pills + AJAX 换班加载"行=节次、列=星期"的班级网格，
 # 与「全校总课表」（schedule_overview：行=节次、列=班级，一屏看全校）重叠；
 # 编辑能力（条目弹窗、拖拽换格）在「年级课表 / 班级课表」里同样具备，删除无功能损失。
+# 合并 origin/master 时保留本分支的删除（其模板 schedule_master.html 已一并删除）。
 
 
 @bp.route('/schedule/<int:sid>/grade/<grade>')

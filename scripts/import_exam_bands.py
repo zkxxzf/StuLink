@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-# StuLink v1.18.9.1 2026-10-10
+# StuLink v1.18.9.2 2026-10-10
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 """从历次考试 Excel 提取分数线并导入 exam_bands（幂等，默认 dry-run）
 

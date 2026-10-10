@@ -1,4 +1,4 @@
-# StuLink v1.18.9.1 2026-10-10
+# StuLink v1.18.9.2 2026-10-10
 # 成绩管理：考试管理 + 成绩导入向导路由
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 import io
@@ -67,7 +67,7 @@ def exams_list():
                     .group_by(ExamScore.exam_id).all())
         for eid, cnt in rows_cnt:
             counts[eid] = cnt
-    # v1.18.9.1：孤儿考务批次兜底（exam_id 为空，或指向已删除的考试）
+    # v1.18.9.2：孤儿考务批次兜底（exam_id 为空，或指向已删除的考试）
     # 这类批次从考试列表无法进入，以前只能直连 /grades/affairs 才能看到，现在底部统一列出
     live_exam_ids = {e.id for e in Exam.query.with_entities(Exam.id).all()}
     orphan_affairs = []
@@ -185,7 +185,18 @@ def exam_new():
 
 # ==================== 考试详情 / 成绩浏览 / 修正 / 重算 / 删除 ====================
 
-def _exam_page_rows(exam_id, page, size):
+def _exam_classes(exam_id):
+    """本场考试出现过的班级（按班级名排序），供成绩单「按班级查看」筛选。"""
+    rows = (db.session.query(ExamScore.class_name)
+            .filter(ExamScore.exam_id == exam_id,
+                    ExamScore.subject == TOTAL_SUBJECT,
+                    ExamScore.class_name.isnot(None),
+                    ExamScore.class_name != '')
+            .distinct().all())
+    return sorted({r[0] for r in rows})
+
+
+def _exam_page_rows(exam_id, page, size, class_name=None):
     """服务端分页：仅查询当前页的学生成绩，避免整场 8000 人一次性载入。
 
     返回 (students, page, total_pages, total)：
@@ -193,8 +204,13 @@ def _exam_page_rows(exam_id, page, size):
         按 (班级, 方向排名) 排序并 LIMIT/OFFSET 取出本页学号；
       - 再仅查本页学号的全部科目成绩行（约 50×7=350 行）；
       - 学籍状态一次性 IN 查询（1 次，而非逐批 10 次）。
+
+    class_name（v1.19.0）：按班级查看成绩单，只统计/展示该班学生（None=全部）。
     """
-    total = ExamScore.query.filter_by(exam_id=exam_id, subject=TOTAL_SUBJECT).count()
+    q = ExamScore.query.filter_by(exam_id=exam_id, subject=TOTAL_SUBJECT)
+    if class_name:
+        q = q.filter(ExamScore.class_name == class_name)
+    total = q.count()
     if total == 0:
         return [], 1, 0, 0
     size = max(1, min(int(size or 50), 500))   # 单页上限 500，避免「全部」拖垮
@@ -202,9 +218,8 @@ def _exam_page_rows(exam_id, page, size):
     total_pages = (total + size - 1) // size
     if page > total_pages:
         page = total_pages
-    meta = (ExamScore.query.filter_by(exam_id=exam_id, subject=TOTAL_SUBJECT)
-            .order_by(ExamScore.class_name,
-                      db.func.coalesce(ExamScore.rank_dir, 99999))
+    meta = (q.order_by(ExamScore.class_name,
+                       db.func.coalesce(ExamScore.rank_dir, 99999))
             .limit(size).offset((page - 1) * size).all())
     nos = [r.student_no for r in meta]
     if not nos:
@@ -233,6 +248,15 @@ def _exam_page_rows(exam_id, page, size):
             d['rank'] = r.rank_dir
             d['rank_class'] = r.rank_class
             d['move'] = r.move_rank
+            # v1.19.0 身份字段以「总分行」为准：个别历史数据的**科目行** class_name
+            # 快照存在漂移（同一学号各科目行分属不同班级），若沿用第一行会把班级显示错，
+            # 也让「按班级查看」看起来没生效（计数按总分行已过滤）。总分是本生汇总行，
+            # 与划线/排名/分析口径一致，作为权威来源。
+            d['class_name'] = r.class_name
+            d['direction'] = r.direction
+            d['selection'] = r.subject_selection
+            if r.exam_no:
+                d['exam_no'] = r.exam_no
         else:
             d['subjects'][r.subject] = {
                 'id': r.id, 'score': r.score, 'raw': r.raw_score,   # v1.19.0 原始分
@@ -241,7 +265,7 @@ def _exam_page_rows(exam_id, page, size):
             }
     for d in data.values():
         d['unselected'] = unselected_subjects(d.get('selection'), d.get('direction'))
-        # v1.18.9.1 只对“以前在学校、现在人不在学校”的学籍状态给提示（比对当前学生表）；
+        # v1.18.9.2 只对“以前在学校、现在人不在学校”的学籍状态给提示（比对当前学生表）；
         # 分配生/一批一志/一批二志/补录/借读/借读后学籍转入/复学/休学 等一律不显示
         d['status_badge'] = OFF_SCHOOL_BADGE.get((d.get('status') or '').strip(), '')
     # 严格按分页顺序（nos）输出，保证翻页稳定
@@ -253,7 +277,7 @@ def _exam_page_rows(exam_id, page, size):
 _SUBJ_SHORT = {'物理': '物', '化学': '化', '生物': '生',
                '政治': '政', '历史': '史', '地理': '地'}
 
-# v1.18.9.1 “人现在不在学校”的学籍状态 → 成绩单上的短标签
+# v1.18.9.2 “人现在不在学校”的学籍状态 → 成绩单上的短标签
 # 用户口径（2026-10-10 补充）：只展示“已转走 / 离校 / 休学”这类现在人不在校的情况，
 # 其他学籍状态（分配生/一批志愿/补录/借读/复学等）不提示。
 # 注意：本场考试参考名单必须完整保留（考试是自包含独立数据包），
@@ -324,7 +348,13 @@ def exam_detail(exam_id):
     exam = assert_exam_visible(exam_id)   # H-4：校验考试所属年级范围
     page = _safe_int(request.args.get('page'), 1)
     size = _safe_int(request.args.get('size'), 50)
-    students, page, total_pages, total = _exam_page_rows(exam_id, page, size)
+    # v1.19.0：成绩单支持按班级查看（cls=班级名，空/非法=全部）
+    classes = _exam_classes(exam_id)
+    cur_class = (request.args.get('cls') or '').strip()
+    if cur_class not in classes:
+        cur_class = ''
+    students, page, total_pages, total = _exam_page_rows(
+        exam_id, page, size, class_name=cur_class or None)
     info = None
     if exam.import_info:
         try:
@@ -335,6 +365,7 @@ def exam_detail(exam_id):
     return render_template('grades/exam_detail.html', exam=exam, students=students,
                            subjects=SUBJECTS, status_label=EXAM_STATUS_LABEL,
                            import_info=info, steps=steps, next_step=next_step,
+                           classes=classes, cur_class=cur_class,
                            page=page, total_pages=total_pages, total=total, size=size)
 
 
@@ -346,7 +377,9 @@ def exam_scores_page(exam_id):
     exam = assert_exam_visible(exam_id)   # H-4：校验考试所属年级范围
     page = _safe_int(request.args.get('page'), 1)
     size = _safe_int(request.args.get('size'), 50)
-    students, _page, _total_pages, _total = _exam_page_rows(exam_id, page, size)
+    cur_class = (request.args.get('cls') or '').strip()   # v1.19.0 按班级查看
+    students, _page, _total_pages, _total = _exam_page_rows(
+        exam_id, page, size, class_name=cur_class or None)
     return render_template('grades/exam_detail_rows.html',
                            students=students, subjects=SUBJECTS)
 
@@ -490,7 +523,7 @@ def exam_delete(exam_id):
     n_scores = ExamScore.query.filter_by(exam_id=exam_id).delete()
     n_bands = ExamBand.query.filter_by(exam_id=exam_id).delete()
     n_ai = AiReport.query.filter_by(exam_id=exam_id).delete()
-    # v1.18.9.1：级联删除本考试的考务批次（含其考场与名单），避免产生孤儿批次
+    # v1.18.9.2：级联删除本考试的考务批次（含其考场与名单），避免产生孤儿批次
     # 旧逻辑只删考试，导致 affair 的 exam_id 指向已删考试，从考试列表无法再进入
     from app.modules.grades.routes.exam_affairs import delete_affair_cascade
     from app.models.grades import ExamAffair
@@ -623,7 +656,7 @@ def exam_import_confirm(exam_id):
         summary = store_service.apply_import(exam, parsed, mode=mode,
                                              remove_missing=remove_missing)
         ranking.recalc_exam(exam_id)
-        # v1.18.9.1 任课快照：把本次导入时的任课教师映射定格到本场考试（教师维度分析读它，
+        # v1.18.9.2 任课快照：把本次导入时的任课教师映射定格到本场考试（教师维度分析读它，
         # 以后教师调整/重新分班都不会把历史成绩归到新教师名下）
         from app.modules.grades.services import teacher_snapshot_service as tss
         n_tch = tss.snapshot_exam(exam, source='import')

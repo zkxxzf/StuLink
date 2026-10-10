@@ -1372,11 +1372,15 @@ def check_swap_chain():
         g_leader = PermissionGroup.query.filter_by(name='年级长组').first()
         # 跨 app_context 复用：只留 id（ORM 对象出上下文后会 detached）
         g_teacher_id = g_teacher.id if g_teacher else None
+        g_leader_id = g_leader.id if g_leader else None
         applier = User(username='sw_teacher', real_name='张语文', role='teacher',
                        permission_group_id=g_teacher.id if g_teacher else None,
                        must_change_pwd=False)
         applier.set_password(TEST_PWD)
+        # 年级长组 scope_type='grade'：必须带年级才代表"审本年级"，
+        # 否则数据范围为空集（与成绩模块 visible_grades 口径一致，见 2026-10-10 加固）
         leader = User(username='sw_leader', real_name='年级长', role='grade_leader',
+                      grade='高一',
                       permission_group_id=g_leader.id if g_leader else None,
                       must_change_pwd=False)
         leader.set_password(TEST_PWD)
@@ -1431,6 +1435,19 @@ def check_swap_chain():
             case('新建申请停在第一级审批', bool(sw) and sw.status == 'pending'
                  and (sw.approval_step or 0) == 0,
                  f'{sw.status if sw else None}/{sw.approval_step if sw else None}')
+            # 数据范围加固（2026-10-10）：外年级的年级长不得审批本年级调课
+            from app.modules.academic.services import swap_service as _ss
+            other_leader = User(username='sw_leader2', real_name='高二年级长',
+                                role='grade_leader', grade='高二',
+                                permission_group_id=g_leader_id,
+                                must_change_pwd=False)
+            other_leader.set_password(TEST_PWD)
+            db.session.add(other_leader)
+            db.session.commit()
+            here_leader = User.query.filter_by(username='sw_leader').first()
+            case('本年级年级长可审批本年级调课', _ss.can_review(sw, here_leader))
+            case('外年级年级长不能审批本年级调课（数据范围）',
+                 not _ss.can_review(sw, other_leader))
             sid = sw.id if sw else 0
 
     with app.test_client() as c:
