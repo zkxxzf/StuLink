@@ -1,4 +1,4 @@
-# StuLink v1.18.9.0 2026-10-09
+# StuLink v1.18.9.1 2026-10-09
 # AI 分析服务：权限收敛取数（本次+上次原始成绩）→ payload 组装 → LLM 转发
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 import json
@@ -20,7 +20,7 @@ DEFAULT_MODEL = ai_providers.PROVIDERS['deepseek']['default_model']
 DEFAULT_TEMPERATURE = 0.4
 DEFAULT_TIMEOUT = 180
 
-# v1.18.9.0 S-4：不自动跟随 3xx，防 SSRF 以 approved.com → 302 → 169.254.169.254 绕过 url_guard
+# v1.18.9.1 S-4：不自动跟随 3xx，防 SSRF 以 approved.com → 302 → 169.254.169.254 绕过 url_guard
 
 class _NoRedirect(urllib.request.HTTPRedirectHandler):
     def redirect_request(self, req, fp, code, msg, headers, newurl):

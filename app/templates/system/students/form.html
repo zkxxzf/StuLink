@@ -106,7 +106,7 @@
                 <div class="col-md-3">
                     <label class="form-label small">学籍情况</label>
                     {{ form.enrollment_status(class="form-select") }}
-                    {# v1.18.9.0 学籍驱动班级联动提示 #}
+                    {# v1.18.9.1 学籍驱动班级联动提示 #}
                     <small class="text-muted" style="font-size:11px;">
                         选「学籍已转出」→ 班级自动置「已转出」<br>
                         选「在籍不在校」→ 班级自动置「不分班」
@@ -146,7 +146,7 @@
             <a href="{{ url_for('students.list_students') }}" class="btn btn-secondary">取消</a>
         </form>
 
-        {# v1.18.9.0 变更记录：调班 / 转科 / 转出 / 学籍变更 在编辑页也可见 #}
+        {# v1.18.9.1 变更记录：调班 / 转科 / 转出 / 学籍变更 在编辑页也可见 #}
         {% if title == '编辑学生' and change_logs %}
         {% set TYPE_LABELS = {'enroll': ('入校分班', 'primary'),
                               'reassign': ('重新分班', 'warning'),
