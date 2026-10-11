@@ -16,6 +16,23 @@
   .step-bar .step-pill.done .num { background: #16a34a; color: #fff; }
   /* v1.19.38.0 步骤①「参考」徽标：点一下切换参考状态 */
   .attend-toggle { cursor: pointer; user-select: none; }
+  /* v1.19.39.0 步骤② 双栏美化：统一卡片 / 表头 / 悬停 / 输入控件 */
+  #t2 .t2-card {
+    border: 1px solid #e5e7eb; border-radius: 10px; overflow: hidden;
+    box-shadow: 0 1px 2px rgba(15, 23, 42, .04);
+  }
+  #t2 .t2-card > .card-header {
+    background: linear-gradient(#fbfdff, #f1f5f9);
+    border-bottom: 1px solid #e8eef5; min-height: 40px;
+  }
+  #t2 .t2-card .bi { color: #64748b; }
+  #t2 tbody tr:hover { background: #f8fafc; }
+  #t2 table thead th {
+    background: #f8fafc; font-size: .76rem; color: #64748b; font-weight: 600;
+    border-bottom: 1px solid #e8eef5;
+  }
+  #t2 .rm-subj, #t2 .rm-cap, #t2 .rm-note { border-color: #e2e8f0; }
+  #t2 .rm-cap { max-width: 76px; }
 </style>
 {% endblock %}
 {% block content %}
@@ -180,9 +197,9 @@
         </div>
     </div>
 
-    <!-- ===== 步骤② 考场设置（v1.12.2 左右双列表：考场库 ↔ 本批次考场） ===== -->
+    <!-- ===== 步骤② 考场设置（左右双列表：考场库 ↔ 本批次考场） ===== -->
     <div class="tab-pane fade" id="t2">
-        <div class="d-flex gap-2 mb-2 flex-wrap">
+        <div class="d-flex gap-2 mb-3 flex-wrap align-items-center">
             {# v1.19.38.0：「导入考生安排 / 考场位置」入口下线 —— AI 导入统一走每场考试的
                「AI 智能导入」（/grades/exams/<id>/ai-import，同页已能写入本场考务批次） #}
             <button class="btn btn-outline-primary btn-sm" onclick="document.getElementById('roomFile').click()">
@@ -190,39 +207,48 @@
             <input type="file" id="roomFile" accept=".xlsx,.xls" style="display:none" onchange="importRooms(this)">
             <button class="btn btn-outline-success btn-sm" onclick="openRoomModal()">
                 <i class="bi bi-plus-lg"></i> 手动新增</button>
-            {# v1.19.38.0 容量批量操作：一键给全部考场设同一容量 / 沿用上一场同房间的容量 #}
-            <button class="btn btn-outline-secondary btn-sm" onclick="setAllCapacity()">
-                <i class="bi bi-123"></i> 批量设置容量</button>
-            <button class="btn btn-outline-secondary btn-sm" onclick="fillCapacityFromPrev()"
-                    title="同年级、同一房间（位置优先）沿用上一场考试的容量">
-                <i class="bi bi-clock-history"></i> 带入上次容量</button>
+            <span class="small text-muted ms-1">
+                <i class="bi bi-info-circle"></i> 从左侧「考场库」点「加入」选进本批次；
+                右侧可<b>直接修改</b>科目 / 容量 / 备注，改完自动保存
+            </span>
         </div>
-        <div class="row g-2">
+        <div class="row g-3">
             {# 左：考场库列表，可选取加入本批次 #}
             <div class="col-5">
-                <div class="card" style="max-height:65vh">
-                    <div class="card-header d-flex justify-content-between align-items-center py-1">
+                <div class="card t2-card" style="max-height:66vh">
+                    <div class="card-header d-flex justify-content-between align-items-center py-2">
                         <span class="small fw-bold"><i class="bi bi-collection"></i> 考场库</span>
-                        <span class="text-muted small" id="libCount">—</span>
+                        <span class="badge bg-light text-secondary border fw-normal" id="libCount">—</span>
                     </div>
-                    <div class="table-responsive" style="max-height:52vh;overflow:auto">
+                    <div class="table-responsive" style="max-height:53vh;overflow:auto">
                         <table class="table table-sm table-hover mb-0" id="libTable">
-                            <thead class="sticky-top bg-white"><tr>
+                            <thead class="sticky-top"><tr>
                                 <th>位置</th><th class="text-end">容量</th><th class="text-end">操作</th></tr></thead>
                             <tbody id="libBody"></tbody>
                         </table>
                     </div>
                 </div>
             </div>
-            {# 右：本批次已选考场 #}
+            {# 右：本批次已选考场（容量批量操作属于这一侧，按钮放本卡片右上角） #}
             <div class="col-7">
-                <div class="card">
-                    <div class="card-header d-flex justify-content-between align-items-center py-1">
-                        <span class="small fw-bold"><i class="bi bi-list-check"></i> 本批次考场（<span id="roomStat">{{ rooms|length }}</span> 个，容量 <span id="capStat">{{ stats.capacity }}</span> 座）</span>
+                <div class="card t2-card">
+                    <div class="card-header py-2 d-flex flex-wrap gap-2 justify-content-between align-items-center">
+                        <span class="small fw-bold"><i class="bi bi-list-check"></i> 本批次考场
+                            <span class="badge bg-primary ms-1" id="roomStat">{{ rooms|length }}</span> 个 ·
+                            容量 <span class="badge bg-info text-dark" id="capStat">{{ stats.capacity }}</span> 座</span>
+                        {# v1.19.39.0 由顶部工具栏移来：这两个功能服务的就是「本批次考场」 #}
+                        <span class="d-flex gap-1">
+                            <button class="btn btn-outline-secondary btn-sm py-0" onclick="setAllCapacity()"
+                                    title="给本批次全部考场设同一容量">
+                                <i class="bi bi-123"></i> 批量设置容量</button>
+                            <button class="btn btn-outline-secondary btn-sm py-0" onclick="fillCapacityFromPrev()"
+                                    title="同年级、同一房间（位置优先）沿用上一场考试的容量">
+                                <i class="bi bi-clock-history"></i> 带入上次容量</button>
+                        </span>
                     </div>
                     <div class="table-responsive" style="max-height:55vh;overflow:auto">
                         <table class="table table-sm table-hover align-middle mb-0" id="roomTable">
-                            <thead class="sticky-top bg-white"><tr><th>考场编号</th><th>位置</th>
+                            <thead class="sticky-top"><tr><th>考场编号</th><th>位置</th>
                                 <th style="min-width:110px">科目 / 适用选科</th>
                                 <th class="text-end" style="width:92px">容量</th>
                                 <th style="min-width:120px">备注</th>
