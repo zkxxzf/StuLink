@@ -156,13 +156,9 @@
                 {% if cur_class %}（{{ cur_class }} · {{ total }} 人）
                 {% elif cur_dir %}（{{ cur_dir }}方向 · {{ total }} 人）
                 {% else %}（{{ total }} 人）{% endif %}</h6>
-            <span class="text-muted small">
-                默认按<b>总分名次</b>排列（历史方向在前、物理在后）；点表头可按该列排序，再点切换升序。
-                {% if cur_sort %}<a class="ms-1" href="{{ url_for('grades.exam_detail', exam_id=exam.id, cls=(cur_class or none), dir=(cur_dir or none)) }}">恢复默认排序</a>{% endif %}
-                {% if can_edit_scores %}
-                点击<b>单科</b>分数可修改赋分/原始分（弹窗二次确认、按满分校验，改完自动重算排名）；总分由各科自动汇总，不可直接改；
-                {% endif %}
-                <span class="text-muted">「未选」= 不在该生选科组合内（不计缺考）</span></span>
+            {# v1.19.30.0 页头操作说明整行删除（用户：这一行字不需要）——
+               默认排序/改分/「未选」等口径不再在页面上写文字；
+               要回到默认次序：点左上「全部 / 历史方向 / 物理方向」或刷新即可（这些入口不带排序参数） #}
         </div>
         {# v1.19.29.0 改分结果提示（保存成功后在页面上短暂显示） #}
         <div id="scFlash" class="alert alert-success py-1 px-2 small d-none mt-2 mb-0"></div>

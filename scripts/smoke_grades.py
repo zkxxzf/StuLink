@@ -422,6 +422,9 @@ with app.test_client() as c:
           '#scoreTable th.text-end a.th-sort i { position: absolute;' in html)
     check('表头：表头与数据单元同宽预留三角位',
           'td.c-rank, #scoreTable td.c-total, #scoreTable td.c-sub { padding-right: 12px; }' in html)
+    check('页头：默认排序/改分说明整行已移除',
+          '默认按' not in html and '恢复默认排序' not in html
+          and '点击单科分数可修改' not in html)
 
     # ---- v1.19.29.0 表头/数字严格对齐 + 名次列次序 + 进退步悬浮说明 ----
     # th 内若残留空白，右对齐时行尾空格不会被折掉，会把表头文字往左推几个像素 → 与数字错开
