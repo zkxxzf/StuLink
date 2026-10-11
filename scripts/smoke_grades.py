@@ -92,7 +92,7 @@ with app.app_context():
     db.session.commit()
     db.session.add(AffairStudent(affair_id=_prev_af.id, student_no='20250001',
                                  name='历生01', class_name='01班', is_attend=False))
-    # v1.19.35.0 容量用例：上一场 东211=44；本场同房间初始 30
+    # v1.19.36.0 容量用例：上一场 东211=44；本场同房间初始 30
     db.session.add(AffairRoom(affair_id=_prev_af.id, room_no='01', location='东211',
                               subject='默认', capacity=44))
     db.session.add(AffairRoom(affair_id=_cur_af.id, room_no='01', location='东211',
@@ -414,7 +414,7 @@ with app.test_client() as c:
         r = c.get(url)
         check(f'页面 {url}', r.status_code == 200, str(r.status_code))
 
-    # ---- v1.19.35.0 排序三角：统一在文字后面 + 未点选也看得清 + 右对齐列仍与数字对齐 ----
+    # ---- v1.19.36.0 排序三角：统一在文字后面 + 未点选也看得清 + 右对齐列仍与数字对齐 ----
     html = c.get(f'/grades/exams/{eid}').get_data(as_text=True)
     check('表头：三角统一在文字后面',
           all((lbl + '<i') in html for lbl in
@@ -438,7 +438,7 @@ with app.test_client() as c:
     check('侧栏：分析组展开仍由箭头负责',
           'data-bs-toggle="collapse" href="#efnAnalysis"' in html)
 
-    # ---- v1.19.35.0 表头/数字严格对齐 + 名次列次序 + 进退步悬浮说明 ----
+    # ---- v1.19.36.0 表头/数字严格对齐 + 名次列次序 + 进退步悬浮说明 ----
     # th 内若残留空白，右对齐时行尾空格不会被折掉，会把表头文字往左推几个像素 → 与数字错开
     _thead = html.split('<thead')[1].split('</thead>')[0]
     check('表头：th 内部无空白', '</a></th>' in _thead and re.search(r'\s</th>', _thead) is None)
@@ -448,7 +448,7 @@ with app.test_client() as c:
           re.search(r'<td class="text-end c-rank">\d+</td>', html) is not None)
     check('进退步悬浮：写明同方向进退步', 'title="同方向进退步：' in html)
 
-    # ---- v1.19.35.0 导航高亮唯一性 + 分析子模块「考试态」锁本场 ----
+    # ---- v1.19.36.0 导航高亮唯一性 + 分析子模块「考试态」锁本场 ----
     hb = c.get(f'/grades/exams/{eid}/bands').get_data(as_text=True)
     check('导航：划线分层页只高亮「划线分层」',
           re.search(r'class="efn-item active" data-nav="bands"', hb) is not None
@@ -470,7 +470,7 @@ with app.test_client() as c:
     check('非考试态：年级下拉仍可选',
           'id="gGrade" class="form-select form-select-sm w-auto d-none"' not in hn)
 
-    # ---- v1.19.35.0 考务步骤① 名单维护：只读名单 + 沿用上一场不参考 + 不参考排最上 ----
+    # ---- v1.19.36.0 考务步骤① 名单维护：只读名单 + 沿用上一场不参考 + 不参考排最上 ----
     r = c.post(f'/grades/affairs/{_AFF_CUR}/students/sync', headers={'X-CSRFToken': csrf})
     d = r.get_json()
     check('考务同步：自动沿用上一场不参考 1 人',
@@ -487,13 +487,13 @@ with app.test_client() as c:
     check('考务步骤①：不参考的学生排最上面',
           re.findall(r'<td>(\d{8})</td>', tb2)[:1] == ['20250001'],
           re.findall(r'<td>(\d{8})</td>', tb2)[:3])
-    # v1.19.35.0 不参考 = 整行标黄（含首列学号）；首列 sticky 的背景必须跟随行状态
+    # v1.19.36.0 不参考 = 整行标黄（含首列学号）；首列 sticky 的背景必须跟随行状态
     check('考务步骤①：不参考学生整行标黄',
           '<tr class="table-warning">' in tb2, tb2[:200])
     check('首列 sticky 背景跟随行状态（整行标黄含学号列）',
           'var(--bs-table-bg, var(--bs-body-bg, #fff))' in h2)
 
-    # ---- v1.19.35.0 步骤② 考场容量：批量设置 / 沿用上一场（同房间）----
+    # ---- v1.19.36.0 步骤② 考场容量：批量设置 / 沿用上一场（同房间）----
     check('步骤② 有容量批量入口',
           '批量设置容量' in h2 and '带入上次容量' in h2)
     r = c.post(f'/grades/affairs/{_AFF_CUR}/rooms/capacity',
@@ -513,7 +513,7 @@ with app.test_client() as c:
                for x in AffairRoom.query.filter_by(affair_id=_AFF_CUR).all()}
         check('容量落库 = 上一场 44', got == {'东211': 44}, got)
 
-    # ---- v1.19.35.0 任课教师映射：下拉按姓名首字母排序 + 保存不再静默失效 ----
+    # ---- v1.19.36.0 任课教师映射：下拉按姓名首字母排序 + 保存不再静默失效 ----
     # 排序键与后端一致：(拼音首字母, 全拼, 姓名)；无 pypinyin 时后端退化为账号（本身即拼音）
     from app.modules.grades.services.user_account import pinyin_of as _py_of
 
