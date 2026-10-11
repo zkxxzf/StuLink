@@ -89,7 +89,12 @@
             position: sticky; left: 0; z-index: 1;
         }
         .table-responsive thead th:first-child { z-index: 3; }
-        .table-responsive tbody td:first-child { background: var(--bs-body-bg, #fff); }
+        /* v1.19.33.0 首列 sticky 的背景跟随「行状态」——用 --bs-table-bg（Bootstrap 的表变量）。
+           原先写死 var(--bs-body-bg)，导致 .table-warning 等"整行变黄"时首列仍是白底：
+           考务步骤①「不参加考试」的学生就是这么被看漏的（学号列不变色）。 */
+        .table-responsive tbody td:first-child {
+            background: var(--bs-table-bg, var(--bs-body-bg, #fff));
+        }
         /* 手机端导航栏紧凑 */
         @media (max-width: 768px) {
             .sidebar { transform: translateX(-100%); }

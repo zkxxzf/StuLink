@@ -475,6 +475,11 @@ with app.test_client() as c:
     check('考务步骤①：不参考的学生排最上面',
           re.findall(r'<td>(\d{8})</td>', tb2)[:1] == ['20250001'],
           re.findall(r'<td>(\d{8})</td>', tb2)[:3])
+    # v1.19.33.0 不参考 = 整行标黄（含首列学号）；首列 sticky 的背景必须跟随行状态
+    check('考务步骤①：不参考学生整行标黄',
+          '<tr class="table-warning">' in tb2, tb2[:200])
+    check('首列 sticky 背景跟随行状态（整行标黄含学号列）',
+          'var(--bs-table-bg, var(--bs-body-bg, #fff))' in h2)
 
     # ==================== 角色权限矩阵（9.2 后端强制） ====================
     from app.models import UserClassLink
