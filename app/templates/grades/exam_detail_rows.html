@@ -7,7 +7,7 @@
     <td>{{ stu.class_name }}</td>
     <td>{{ stu.direction }}</td>
     <td class="small text-muted">{{ stu.selection }}</td>
-    {# v1.19.6.0：总分由各科自动汇总，不可点击修改 #}
+    {# v1.19.7.0：总分由各科自动汇总，不可点击修改 #}
     <td class="text-end fw-bold"
         title="总分 = 各科成绩之和（自动汇总，不可直接修改）{% if stu.total_raw is defined and stu.total_raw is not none %}｜原始分 {{ stu.total_raw }}{% endif %}">
         {{ stu.total if stu.total is not none else '—' }}
@@ -23,7 +23,7 @@
     {% for s in subjects %}
     {% set cell = stu.subjects.get(s) %}
     {% set unsel = s in (stu.unselected or []) %}
-    {# v1.19.6.0：有成绩的单科才是可点的 score-cell；缺考黄色高亮但不可点；未选灰字 #}
+    {# v1.19.7.0：有成绩的单科才是可点的 score-cell；缺考黄色高亮但不可点；未选灰字 #}
     <td class="text-end small {{ 'text-muted' if unsel else ('table-warning' if cell is none else 'score-cell') }}"
         data-sid="{{ cell.id if cell else '' }}"
         title="{{ '未选（不在该生选科组合内）' if unsel else ('缺考（无该科成绩）' if cell is none else '点击修改' + ('｜原始分 ' ~ cell.raw if cell.raw is not none else '')) }}">

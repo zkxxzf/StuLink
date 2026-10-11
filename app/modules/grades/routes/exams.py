@@ -1,4 +1,4 @@
-# StuLink v1.19.6.0 2026-10-10
+# StuLink v1.19.7.0 2026-10-10
 # 成绩管理：考试管理 + 成绩导入向导路由
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 import io
@@ -66,7 +66,7 @@ def exams_list():
                     .group_by(ExamScore.exam_id).all())
         for eid, cnt in rows_cnt:
             counts[eid] = cnt
-    # v1.19.6.0：孤儿考务批次兜底（exam_id 为空，或指向已删除的考试）
+    # v1.19.7.0：孤儿考务批次兜底（exam_id 为空，或指向已删除的考试）
     # 这类批次从考试列表无法进入，以前只能直连 /grades/affairs 才能看到，现在底部统一列出
     live_exam_ids = {e.id for e in Exam.query.with_entities(Exam.id).all()}
     orphan_affairs = []
@@ -409,7 +409,7 @@ def exam_rename(exam_id):
 def score_update(exam_id, score_id):
     assert_exam_visible(exam_id)          # H-4
     row = ExamScore.query.filter_by(id=score_id, exam_id=exam_id).first_or_404()
-    # v1.19.6.0：总分由各科自动汇总，禁止直接改（避免总分与单科不一致）
+    # v1.19.7.0：总分由各科自动汇总，禁止直接改（避免总分与单科不一致）
     if row.subject == TOTAL_SUBJECT:
         flash('总分由各科成绩自动汇总，不能直接修改，请修改对应的单科成绩', 'danger')
         return redirect(url_for('grades.exam_detail', exam_id=exam_id))
@@ -450,7 +450,7 @@ def score_update(exam_id, score_id):
 def score_delete(exam_id, score_id):
     assert_exam_visible(exam_id)          # H-4
     row = ExamScore.query.filter_by(id=score_id, exam_id=exam_id).first_or_404()
-    # v1.19.6.0：总分不可单独删除（它随各科自动汇总）
+    # v1.19.7.0：总分不可单独删除（它随各科自动汇总）
     if row.subject == TOTAL_SUBJECT:
         flash('总分由各科成绩自动汇总，不能直接操作，请修改对应的单科成绩', 'danger')
         return redirect(url_for('grades.exam_detail', exam_id=exam_id))
@@ -512,7 +512,7 @@ def exam_delete(exam_id):
     n_scores = ExamScore.query.filter_by(exam_id=exam_id).delete()
     n_bands = ExamBand.query.filter_by(exam_id=exam_id).delete()
     n_ai = AiReport.query.filter_by(exam_id=exam_id).delete()
-    # v1.19.6.0：级联删除本考试的考务批次（含其考场与名单），避免产生孤儿批次
+    # v1.19.7.0：级联删除本考试的考务批次（含其考场与名单），避免产生孤儿批次
     # 旧逻辑只删考试，导致 affair 的 exam_id 指向已删考试，从考试列表无法再进入
     from app.modules.grades.routes.exam_affairs import delete_affair_cascade
     from app.models.grades import ExamAffair
@@ -645,7 +645,7 @@ def exam_import_confirm(exam_id):
         summary = store_service.apply_import(exam, parsed, mode=mode,
                                              remove_missing=remove_missing)
         ranking.recalc_exam(exam_id)
-        # v1.19.6.0 任课快照：把本次导入时的任课教师映射定格到本场考试（教师维度分析读它，
+        # v1.19.7.0 任课快照：把本次导入时的任课教师映射定格到本场考试（教师维度分析读它，
         # 以后教师调整/重新分班都不会把历史成绩归到新教师名下）
         from app.modules.grades.services import teacher_snapshot_service as tss
         n_tch = tss.snapshot_exam(exam, source='import')

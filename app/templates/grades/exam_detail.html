@@ -2,7 +2,7 @@
 {% block title %}{{ exam.name }} - 考试详情{% endblock %}
 {% block extra_css %}
 <style>
-  /* v1.19.6.0：仅单科分数可点击修改（总分由各科自动汇总，不可改） */
+  /* v1.19.7.0：仅单科分数可点击修改（总分由各科自动汇总，不可改） */
   #scoreTable td.score-cell { cursor: pointer; }
 </style>
 {% endblock %}
@@ -136,7 +136,7 @@
                 <td>{{ stu.class_name }}</td>
                 <td>{{ stu.direction }}</td>
                 <td class="small text-muted">{{ stu.selection }}</td>
-                {# v1.19.6.0：总分由各科自动汇总，不可点击修改 #}
+                {# v1.19.7.0：总分由各科自动汇总，不可点击修改 #}
                 <td class="text-end fw-bold"
                     title="总分 = 各科成绩之和（自动汇总，不可直接修改）{% if stu.total_raw is defined and stu.total_raw is not none %}｜原始分 {{ stu.total_raw }}{% endif %}">
                     {{ stu.total if stu.total is not none else '—' }}
@@ -152,7 +152,7 @@
                 {% for s in subjects %}
                 {% set cell = stu.subjects.get(s) %}
                 {% set unsel = s in (stu.unselected or []) %}
-                {# v1.19.6.0：有成绩的单科才是可点的 score-cell；缺考黄色高亮但不可点；未选灰字 #}
+                {# v1.19.7.0：有成绩的单科才是可点的 score-cell；缺考黄色高亮但不可点；未选灰字 #}
                 <td class="text-end small {{ 'text-muted' if unsel else ('table-warning' if cell is none else 'score-cell') }}"
                     data-sid="{{ cell.id if cell else '' }}"
                     title="{{ '未选（不在该生选科组合内）' if unsel else ('缺考（无该科成绩）' if cell is none else '点击修改' + ('｜原始分 ' ~ cell.raw if cell.raw is not none else '')) }}">
@@ -218,7 +218,7 @@
     </div>
 </div>
 
-{# v1.19.6.0 单科改分：弹窗二次确认 + 满分校验（总分不可改） #}
+{# v1.19.7.0 单科改分：弹窗二次确认 + 满分校验（总分不可改） #}
 <div class="modal fade" id="scoreModal" tabindex="-1">
     <div class="modal-dialog modal-dialog-centered modal-sm">
         <div class="modal-content">
@@ -363,7 +363,7 @@ $(function(){
         var v = $(this).val();
         pageSize = (v === '全部') ? 500 : parseInt(v, 10);
         if (pageSize > 500) pageSize = 500;   // 单页上限，防止「全部」拖垮
-        // v1.19.6.0 审核修正：切页大小时同步重算 totalPages，
+        // v1.19.7.0 审核修正：切页大小时同步重算 totalPages，
         // 否则“第 X / Y 页”的 Y 仍为旧值，导致 Next 能翻到实际不存在的页，服务端 clamp 后回回重页
         totalPages = Math.max(1, Math.ceil(total / pageSize));
         sessionStorage.setItem(PAGE_KEY, 1);
