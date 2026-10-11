@@ -93,7 +93,11 @@ def _resolve():
     exam = Exam.query.get(int(exam_id))
     if exam is None:
         return None
-    if affair is None and sec == 'affair':
+    if affair is None:
+        # v1.19.13.0：**任何**进入考试态的页面都要取本场考务批次。
+        # 此前只在 sec == 'affair' 时查，导致成绩导入/划线分层/分数修改记录等页面里
+        # affair 恒为 None → 侧栏「考务安排」永远挂「待做」、进度显示 3/4 步，
+        # 而本场考务其实早已编排完成（有考场·座号·考号）。
         affair = ExamAffair.query.filter_by(exam_id=exam.id).first()
 
     # 四步进度（与考试详情页同口径：建考试 / 考务 / 导入 / 划线）
