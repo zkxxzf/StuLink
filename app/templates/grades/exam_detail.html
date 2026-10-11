@@ -4,13 +4,18 @@
 <style>
   /* v1.19.18.0：仅单科分数可点击修改（总分由各科自动汇总，不可改） */
   #scoreTable td.score-cell { cursor: pointer; }
-  /* v1.19.18.0 压缩「学号→进退步」这些登记列的宽度，把横向空间让给各科成绩 */
+  /* v1.19.19.0 压缩「学号→进退步」这些登记列，把横向空间让给成绩 */
   #scoreTable th.c-meta, #scoreTable td.c-meta {
-      white-space: nowrap; font-size: .78rem; color: #475569;
-      padding-left: .25rem; padding-right: .25rem;
+      white-space: nowrap; font-size: .72rem; color: #475569;
+      padding-left: .16rem; padding-right: .16rem;
   }
-  /* 总分不在压缩之列：紧跟密集列但它是最重要的数，保持醒目 */
-  #scoreTable td.c-total { font-size: .95rem; font-weight: 700; color: #0f172a; }
+  /* 姓名列不跟着缩：加黑（font-size 覆盖上面的 .72rem），便于在密集信息里定位学生 */
+  #scoreTable td.c-name { font-size: .82rem; font-weight: 700; color: #111827; }
+  /* 总分：成绩区第一列，紧挨语文，保持醒目 */
+  #scoreTable th.c-total, #scoreTable td.c-total {
+      white-space: nowrap; font-size: .95rem; font-weight: 700; color: #0f172a;
+      padding-left: .3rem; padding-right: .3rem;
+  }
   /* 成绩列（各科）留出更多留白，字号略大 */
   #scoreTable th.c-sub, #scoreTable td.c-sub {
       font-size: .88rem; padding-left: .5rem; padding-right: .5rem;
@@ -171,15 +176,15 @@
             <thead class="sticky-top">
             <tr>
                 {{ th_sort('no', '学号', 'c-meta', 'text-start') }}
-                {{ th_sort('name', '姓名') }}
+                {{ th_sort('name', '姓名', 'c-meta c-name') }}
                 {{ th_sort('exam_no', '考号') }}
                 {{ th_sort('cls', '班级') }}
                 {{ th_sort('dir', '方向') }}
                 {{ th_sort('sel', '选科') }}
-                {{ th_sort('total', '总分', 'c-meta c-total', 'text-end') }}
                 {{ th_sort('rank_dir', '方向排', 'c-meta', 'text-end') }}
                 {{ th_sort('rank_class', '班排', 'c-meta', 'text-end') }}
                 {{ th_sort('move', '进退步', 'c-meta', 'text-end') }}
+                {{ th_sort('total', '总分', 'c-total', 'text-end') }}
                 {% for s in subjects %}{{ th_sort('s:' ~ s, s, 'c-sub', 'text-end') }}{% endfor %}
             </tr>
             </thead>
