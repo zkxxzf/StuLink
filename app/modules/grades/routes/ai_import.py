@@ -30,7 +30,7 @@ from app.modules.grades.services.exam_guard import assert_exam_visible
 from app.utils.decorators import perm_required
 from app.utils.helpers import log_operation
 
-MAX_AI_FILES = 4
+MAX_AI_FILES = 8
 MAX_FILE_MB = 20
 
 
@@ -69,7 +69,8 @@ def _ai_cfg_from_request():
 def exam_ai_import(exam_id):
     exam = assert_exam_visible(exam_id)
     return render_template('grades/ai_import.html', exam=exam,
-                           subjects=SUBJECTS, score_kinds=aisvc.SCORE_KIND_LABEL)
+                           subjects=SUBJECTS, score_kinds=aisvc.SCORE_KIND_LABEL,
+                           affair_fields=aisvc.AFFAIR_FIELD_LABELS)
 
 
 @bp.route('/exams/<int:exam_id>/ai-import/analyze', methods=['POST'])
@@ -122,7 +123,7 @@ def exam_ai_import_analyze(exam_id):
             ok, payload, _sec = ai_service._chat_completions(
                 resolved, [{'role': 'system', 'content': system},
                            {'role': 'user', 'content': user}],
-                timeout=60, max_tokens=1200)
+                timeout=90, max_tokens=3000)
             if ok:
                 text = ''
                 try:
@@ -139,10 +140,25 @@ def exam_ai_import_analyze(exam_id):
     else:
         ai_err = '未检测到本机 AI Key，已跳过 AI 识别，请在下方手工指定每列的用途'
 
+    # 工作表用途：成绩 / 分数线 / 考生安排 / 考场位置 / 不使用
+    # 考生安排只保留「字段最全」的一张（其余如桌签、粘贴用等打印表默认不使用，防串数据）
+    kinds = {s['name']: aisvc.guess_sheet_kind(s['headers']) for s in sheets}
+    stud = [s for s in sheets if kinds[s['name']] == 'affair_students']
+    best = (max(stud, key=lambda s: len(aisvc.classify_affair_headers(s['headers'])))
+            if stud else None)
+    for s in sheets:
+        if kinds[s['name']] == 'affair_students' and s is not best:
+            kinds[s['name']] = 'skip'
+
     return jsonify(success=True, token=token,
                    files=[f.filename for f in files],
                    sheets=[{'name': s['name'], 'file': s.get('file', ''),
-                            'header_row': s['header_row'], 'headers': s['headers'][:60],
+                            'header_row': s['header_row'],
+                            'header_rows': s.get('header_rows', []),
+                            'headers': s['headers'][:150],
+                            'auto': aisvc.classify_headers(s['headers']),
+                            'affair_auto': aisvc.classify_affair_headers(s['headers']),
+                            'kind': kinds.get(s['name'], 'skip'),
                             'sample': s['sample'][:2]} for s in sheets],
                    suggest=suggest, ai_error=ai_err, errors=errors)
 
@@ -160,6 +176,8 @@ def _merge_rows(sheets_payload, exam):
         if sh is None:
             continue
         kind = item.get('score_kind') or 'converted'
+        if kind == 'skip':          # 用户标记「不使用此工作表」（如分析表/打印表）
+            continue
         rows, errs = aisvc.rows_from_mapping(sh, item.get('mapping') or {}, kind, exam)
         errors.extend(errs)
         as_raw = (kind == 'raw')
@@ -169,7 +187,7 @@ def _merge_rows(sheets_payload, exam):
                 r['raw_subjects'] = dict(r['subjects'])
                 r['raw_total'], r['total'] = r['total'], None
                 r['subjects'] = {}
-            tgt = by_no.setdefault(r['no'], {
+            tgt = by_no.setdefault(r['no'] or ('@' + (r.get('exam_no') or '')), {
                 'no': r['no'], 'line': r['line'], 'subjects': {}, 'raw_subjects': {},
                 'total': None, 'raw_total': None,
                 'name': '', 'class_name': '', 'exam_no': ''})
@@ -195,6 +213,150 @@ def _merge_rows(sheets_payload, exam):
             if r['total'] is None:
                 r['total'] = r['raw_total']
     return rows, errors
+
+
+def _resolve_student_no(exam, rows):
+    """把「只有考号、没有学号」的行解析出学号（联考导出常见）
+
+    优先级：① 考号 → 学号（本场考务名单 exam_number / 本场已导入成绩的 exam_no）
+            ② 姓名 + 班级 → 学号（本场考务名单、本年级学籍）
+    仍解析不出的行剔除并进 errors。返回 (rows, errors)。
+    """
+    from app.models import Student
+    from app.models.grades import ExamAffair, AffairStudent, ExamScore
+    from app.modules.grades.utils import normalize_class_name
+    if not any(not (r.get('no') or '').strip() for r in rows):
+        return rows, []
+    no_map, name_map = {}, {}
+    aff = (ExamAffair.query.filter_by(exam_id=exam.id)
+           .order_by(ExamAffair.id.desc()).first())
+    if aff:
+        for s in AffairStudent.query.filter_by(affair_id=aff.id).all():
+            if s.exam_number:
+                no_map.setdefault(s.exam_number, s.student_no)
+            if s.name and s.class_name:
+                name_map.setdefault((s.name, normalize_class_name(s.class_name)),
+                                    s.student_no)
+    for r in ExamScore.query.filter(ExamScore.exam_id == exam.id,
+                                    ExamScore.exam_no.isnot(None)).all():
+        if r.exam_no:
+            no_map.setdefault(r.exam_no, r.student_no)
+    for st in Student.query.filter_by(grade=exam.grade).all():
+        if st.name and st.class_name:
+            name_map.setdefault((st.name, normalize_class_name(st.class_name)),
+                                st.student_number)
+    errs, miss = [], 0
+    for r in rows:
+        if (r.get('no') or '').strip():
+            continue
+        en = (r.get('exam_no') or '').strip()
+        cand = no_map.get(en) if en else None
+        if not cand:
+            nm = (r.get('name') or '').strip()
+            cls = normalize_class_name(r.get('class_name') or '')
+            cand = name_map.get((nm, cls)) if (nm and cls) else None
+        if cand:
+            r['no'] = cand
+        else:
+            miss += 1
+            errs.append({'line': r.get('line', 0), 'no': en or (r.get('name') or ''),
+                         'reason': '按考号/姓名+班级未匹配到学号（可先导入本场考务）'})
+    if miss:
+        rows[:] = [r for r in rows if (r.get('no') or '').strip()]
+    return rows, errs
+
+
+def _apply_affair(exam, items, dry=False):
+    """把「考生安排 / 考场位置」表写到本考试的考务批次（没有则自动创建）。
+
+    items: [{_sheet, mapping, kind: 'students'|'rooms'}]
+    返回 (info, errors)
+    """
+    from app.models.grades import ExamAffair
+    from app.modules.grades.services import affair_import_service as afs
+    affair = ExamAffair.query.filter_by(exam_id=exam.id).first()
+    created = False
+    if affair is None:
+        affair = ExamAffair(name='%s 考务' % exam.name, grade=exam.grade,
+                            exam_date=exam.exam_date, exam_id=exam.id)
+        db.session.add(affair)
+        db.session.flush()
+        created = True
+    arows, rooms, errors = afs.parse(items)
+    arows, rerr = afs.resolve_student_no(affair, arows)
+    errors.extend(rerr)
+    info = {'students': len(arows), 'attended': sum(1 for r in arows if r.get('attend') is not False),
+            'seated': sum(1 for r in arows if r.get('room')), 'rooms': len(rooms),
+            'created': created, 'affair_id': affair.id,
+            'affair_name': affair.name}
+    if dry:
+        return info, errors
+    if arows or rooms:
+        info['added'], info['updated'], info['removed'], info['rooms'] = \
+            afs.apply_arrangement(affair, arows, rooms, True)
+    else:
+        info['added'] = info['updated'] = info['removed'] = 0
+    return info, errors
+
+
+def _apply_bands(exam, band_items, dry=False):
+    """解析「各科分数线」表 → 写 ExamBand（按 方向×学科 覆盖），并按线名绑定分层模板。
+
+    返回 (info, errors)。info: {subjects, bands, lines, template, applied}
+    """
+    from app.models.grades import BandTemplate
+    from app.modules.grades.routes.bands import _save_bands
+    parsed, errors = {}, []
+    for it in band_items:
+        sh = it.get('_sheet')
+        if sh is None:
+            continue
+        got, errs = aisvc.parse_bands(sh)
+        errors.extend(errs or [])
+        for k, lst in (got or {}).items():
+            parsed[k] = (parsed.get(k) or []) + lst
+    if not parsed:
+        return None, errors
+    names = []
+    for _k, lst in parsed.items():
+        for nm, _v in lst:
+            if nm not in names:
+                names.append(nm)
+    info = {'subjects': len(parsed), 'bands': sum(len(v) for v in parsed.values()),
+            'lines': names, 'template': '', 'applied': []}
+    if dry:
+        info['applied'] = ['%s·%s' % (d or '全体', s) for (d, s) in parsed]
+        return info, errors
+    for (direction, subject), lst in parsed.items():
+        ordered = sorted(lst, key=lambda x: -x[1])       # 分数降序 → seq 1..n（seq1=最高线）
+        payload = [{'seq': i + 1, 'name': nm, 'lower_mode': 'score', 'lower_value': v}
+                   for i, (nm, v) in enumerate(ordered)]
+        _items, err = _save_bands(exam.id, direction, subject, payload)
+        if err:
+            errors.append({'line': 0, 'no': '',
+                           'reason': '%s·%s：%s' % (direction or '全体', subject, err)})
+            return None, errors
+        info['applied'].append('%s·%s' % (direction or '全体', subject))
+    # 分层模板：按线名序列 find-or-create 并绑定到本考试
+    tpl = next((t for t in BandTemplate.query.all() if t.names() == names), None)
+    if tpl is None:
+        base = ('、'.join(names) or '分数线')[:50]
+        nm = base
+        i = 1
+        while BandTemplate.query.filter_by(name=nm).first():
+            i += 1
+            nm = ('%s(%d)' % (base, i))[:50]
+        tpl = BandTemplate(name=nm, lower_mode='score',
+                           layers_json=json.dumps([{'name': n, 'ratio': None} for n in names],
+                                                  ensure_ascii=False),
+                           remark='由分数线文件导入', is_builtin=False)
+        db.session.add(tpl)
+        db.session.flush()
+    exam.set_band_template(tpl.id, tpl.name)
+    db.session.add(exam)
+    db.session.commit()
+    info['template'] = tpl.name
+    return info, errors
 
 
 @bp.route('/exams/<int:exam_id>/ai-import/apply', methods=['POST'])
@@ -226,15 +388,46 @@ def exam_ai_import_apply(exam_id):
     if not payload:
         return jsonify(success=False, message='请至少为一个工作表指定列映射')
 
-    rows, errors = _merge_rows(payload, exam)
-    if not rows:
+    # 按工作表用途分流：成绩 / 分数线（→分层） / 考生安排·考场位置（→本场考务）
+    score_items = [it for it in payload
+                   if (it.get('score_kind') or 'converted')
+                   not in ('bands', 'skip', 'affair_students', 'affair_rooms')]
+    band_items = [it for it in payload if (it.get('score_kind') or '') == 'bands']
+    aff_items = [{'_sheet': it['_sheet'], 'mapping': it.get('mapping'),
+                  'kind': 'students' if it.get('score_kind') == 'affair_students' else 'rooms'}
+                 for it in payload
+                 if (it.get('score_kind') or '') in ('affair_students', 'affair_rooms')]
+    dry = bool(data.get('dry_run'))
+
+    errors = []
+    band_info = None
+    affair_info = None
+    if band_items:
+        band_info, berr = _apply_bands(exam, band_items, dry=dry)
+        errors.extend(berr or [])
+        if berr and any('：' in (e.get('reason') or '') for e in berr):
+            db.session.rollback()
+            return jsonify(success=False, message='分数线写入失败：%s' % berr[0]['reason'],
+                           errors=errors[:20])
+    if aff_items:
+        affair_info, aerr = _apply_affair(exam, aff_items, dry=dry)
+        errors.extend(aerr or [])
+
+    rows = []
+    if score_items:
+        rows, e1 = _merge_rows(score_items, exam)
+        errors.extend(e1)
+        rows, rerr = _resolve_student_no(exam, rows)      # 只有考号时按考号/姓名反查学号
+        errors.extend(rerr)
+    if not rows and not band_info and not affair_info:
         return jsonify(success=False,
-                       message='未解析出任何成绩行，请检查列映射（或改用标准模板导入）',
+                       message='未解析出任何成绩/分数线/考务，请检查列映射与工作表用途',
                        errors=errors[:20])
 
     # 补齐学生快照（姓名/班级/班型/方向…）并统计
-    unmatched = import_service._attach_student_info(exam, rows)
-    errors.extend(unmatched)
+    if rows:
+        unmatched = import_service._attach_student_info(exam, rows)
+        errors.extend(unmatched)
     n_subj = sum(len(r['subjects']) for r in rows)
     n_raw = sum(len(r['raw_subjects']) for r in rows)
     preview = {
@@ -244,11 +437,41 @@ def exam_ai_import_apply(exam_id):
         'with_exam_no': sum(1 for r in rows if r.get('exam_no')),
         'errors': len(errors),
     }
-    if data.get('dry_run'):
+    if band_info:
+        preview['bands'] = band_info
+    if affair_info:
+        preview['affair'] = affair_info
+    if dry:
         return jsonify(success=True, preview=preview, errors=errors[:20])
+    if not rows:
+        # 只导入了分数线 / 考务（没有成绩可写）
+        exam.import_draft = None
+        exam.import_token = None
+        db.session.commit()
+        parts = []
+        if band_info:
+            parts.append('分数线 %d 方向×学科 / %d 条线（模板 %s）'
+                         % (band_info['subjects'], band_info['bands'], band_info['template']))
+        if affair_info:
+            parts.append('考务 考生%d（编排%d）考场%d%s'
+                         % (affair_info['students'], affair_info['seated'], affair_info['rooms'],
+                            '（新建批次）' if affair_info.get('created') else ''))
+        log_operation(current_user, '导入', '考试', exam_id,
+                      'AI 导入（无成绩）：' + '；'.join(parts), module='grades')
+        out = {'success': True, 'applied': True, 'summary': {'non_score_only': True},
+               'preview': preview, 'errors': errors[:20]}
+        if band_info:
+            out['bands'] = band_info
+        if affair_info:
+            out['affair'] = affair_info
+        return jsonify(**out)
 
     # 正式写入（复用既有导入管道；整场覆盖式，避免与旧数据混在一起）
-    parsed = {'headers': {'no': True}, 'rows': rows}
+    # store_service.apply_import 需要 headers['subjects']（它按这些科目列遍历写入），
+    # 之前只给了 {'no': True} → KeyError 'subjects'，导致导入阶段整批回滚。
+    file_subjects = [s for s in SUBJECTS
+                     if any(s in (r.get('subjects') or {}) for r in rows)]
+    parsed = {'headers': {'no': True, 'subjects': file_subjects}, 'rows': rows}
     mode = 'B' if (data.get('mode') or 'B') == 'B' else 'A'
     try:
         summary = store_service.apply_import(exam, parsed, mode=mode)
@@ -263,7 +486,7 @@ def exam_ai_import_apply(exam_id):
         exam.import_info = json.dumps({
             'fname': draft.get('fname', ''), 'mode': 'AI' + mode,
             'summary': summary, 'raw_cells': raw_updated,
-            'errors': len(errors), 'source': 'ai',
+            'bands': band_info, 'errors': len(errors), 'source': 'ai',
             'operator': current_user.real_name,
             'time': __import__('datetime').datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
         }, ensure_ascii=False)
@@ -273,11 +496,22 @@ def exam_ai_import_apply(exam_id):
         return jsonify(success=False, message='写入失败已回滚：%s' % str(e)[:160])
     tab_service.clear_exam_cache(exam_id)
     log_operation(current_user, '导入', '考试', exam_id,
-                  'AI 智能导入 %s：%s' % (draft.get('fname', ''),
-                                       json.dumps(summary, ensure_ascii=False)),
+                  'AI 智能导入 %s：%s%s%s' % (draft.get('fname', ''),
+                                          json.dumps(summary, ensure_ascii=False),
+                                          ('；分数线 %d 条（模板 %s）'
+                                           % (band_info['bands'], band_info['template']))
+                                          if band_info else '',
+                                          ('；考务 考生%d/考场%d'
+                                           % (affair_info['added'], affair_info['rooms']))
+                                          if affair_info else ''),
                   module='grades')
-    return jsonify(success=True, applied=True, summary=summary,
-                   raw_cells=raw_updated, errors=errors[:20])
+    out = {'success': True, 'applied': True, 'summary': summary,
+           'raw_cells': raw_updated, 'errors': errors[:20]}
+    if band_info:
+        out['bands'] = band_info
+    if affair_info:
+        out['affair'] = affair_info
+    return jsonify(**out)
 
 
 def _write_raw_scores(exam, rows):

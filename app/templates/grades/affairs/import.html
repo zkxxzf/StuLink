@@ -1,0 +1,67 @@
+{% extends "base.html" %}
+{% block title %}导入考生安排 - {{ affair.name }}{% endblock %}
+{% block content %}
+<div class="d-flex align-items-center mb-3 flex-wrap gap-2">
+    <a href="{{ url_for('grades.affair_detail', aid=affair.id) }}" class="btn btn-sm btn-outline-secondary">
+        <i class="bi bi-arrow-left"></i>
+    </a>
+    <h5 class="mb-0"><i class="bi bi-stars"></i> 导入考生安排 / 考场位置</h5>
+    <span class="text-muted small">{{ affair.grade }} · {{ affair.name }}</span>
+</div>
+
+<div class="alert alert-light border small">
+    <b>怎么用</b>：把学校考试系统导出的「考生安排 / 考场位置」表直接传进来（<b>不用改模板</b>）。
+    <ul class="mb-1 mt-1">
+        <li>可一次传多个文件；系统会自动判断每张是<b>学生信息表</b>还是<b>考场信息表</b>（也可在下方改）。</li>
+        <li><b>学生信息表 / 编排结果</b>（学号·姓名·班级·选科·考试科目·是否参加·固定考场·固定座号·自定义考号·
+            考场·座号·考号）写入本场考务名单，并按考场生成考场。</li>
+        <li><b>考场信息表</b>（考场编号·位置·考场科目·容量·考号前缀·备注）写入本批次考场；
+            只有「教室名称 ↔ 考场号」两列也可以（只补位置）。</li>
+        <li>没配置 AI Key 也能用：系统按列名自动识别，可在下方手工调整。</li>
+    </ul>
+</div>
+
+<div class="card mb-3">
+    <div class="card-header py-2"><i class="bi bi-1-circle"></i> 选择文件</div>
+    <div class="card-body">
+        <input type="file" id="afFiles" class="form-control form-control-sm" multiple accept=".xlsx,.xlsm">
+        <div class="form-text">可多选（最多 4 个）；支持任意表头与多工作表。</div>
+        <button class="btn btn-primary btn-sm mt-2" id="afAnalyze"><i class="bi bi-magic"></i> 识别</button>
+        <span id="afMsg" class="ms-2 small"></span>
+    </div>
+</div>
+
+<div class="card mb-3 d-none" id="afNotesBox">
+    <div class="card-header py-2"><i class="bi bi-info-circle"></i> 识别说明</div>
+    <div class="card-body"><div id="afNotes" class="small text-muted"></div></div>
+</div>
+
+<div class="card mb-3 d-none" id="afMapBox">
+    <div class="card-header py-2"><i class="bi bi-2-circle"></i> 工作表用途与列映射（可修改）</div>
+    <div class="card-body" id="afMapBody"></div>
+</div>
+
+<div class="card mb-3 d-none" id="afRunBox">
+    <div class="card-header py-2"><i class="bi bi-3-circle"></i> 预览与导入</div>
+    <div class="card-body">
+        <div class="form-check mb-2">
+            <input class="form-check-input" type="checkbox" id="afReplace" checked>
+            <label class="form-check-label small" for="afReplace">
+                <b>整场覆盖</b>（推荐：用本次名单替换本场现有考务名单）
+            </label>
+        </div>
+        <button class="btn btn-outline-info btn-sm" id="afPreview"><i class="bi bi-eye"></i> 预览</button>
+        <button class="btn btn-primary btn-sm ms-1" id="afApply"><i class="bi bi-check-lg"></i> 确认导入</button>
+        <span id="afRunMsg" class="ms-2 small"></span>
+        <pre id="afPreviewBox" class="small bg-light border rounded p-2 mt-2 mb-0 d-none"
+             style="max-height:300px;overflow:auto;"></pre>
+    </div>
+</div>
+{% endblock %}
+{% block extra_js %}
+<script>
+window.AFFAIR_ID = {{ affair.id }};
+window.AFFAIR_FIELDS = {{ fields|tojson }};
+</script>
+<script src="{{ su('js/affair_import.js') }}"></script>
+{% endblock %}
