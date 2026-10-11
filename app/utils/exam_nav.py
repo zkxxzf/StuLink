@@ -26,7 +26,7 @@ SECTION_LABELS = {
 _EP_SECTION = (
     ('grades.exam_ai_import', 'import'),
     ('grades.exam_import', 'import'),
-    # v1.19.29.0 划线分层单独一段：原先归到 'import' 导致侧栏「成绩导入」「划线分层」同时高亮
+    # v1.19.30.0 划线分层单独一段：原先归到 'import' 导致侧栏「成绩导入」「划线分层」同时高亮
     ('grades.bands_page', 'bands'),
     ('grades.exam_affair_go', 'affair'),
     ('grades.affair', 'affair'),
@@ -96,7 +96,7 @@ def _resolve():
     if exam is None:
         return None
     if affair is None:
-        # v1.19.29.0：**任何**进入考试态的页面都要取本场考务批次。
+        # v1.19.30.0：**任何**进入考试态的页面都要取本场考务批次。
         # 此前只在 sec == 'affair' 时查，导致成绩导入/划线分层/分数修改记录等页面里
         # affair 恒为 None → 侧栏「考务安排」永远挂「待做」、进度显示 3/4 步，
         # 而本场考务其实早已编排完成（有考场·座号·考号）。
