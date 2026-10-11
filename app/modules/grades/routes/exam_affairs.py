@@ -21,7 +21,7 @@ from app.models.grades import (ExamAffair, AffairRoom, AffairRoomLib, AffairStud
                                Exam)  # v1.12.1 加考场房间库；v1.12.2 移除成绩关联查询依赖
 from app.modules.grades import bp
 from app.utils.decorators import perm_required
-from app.utils.helpers import log_operation
+from app.utils.helpers import log_operation, get_dict_values
 from app.modules.grades.utils import is_teaching_class
 from app.utils.text_guard import (sanitize_label, sanitize_prefix,
                                   safe_download_name)
@@ -261,10 +261,22 @@ def affair_detail(aid):
             stats['per_sel'][r.subject] = {'students': 0, 'capacity': r.capacity or 0}
     # v1.12.1 选科选项（批次设置弹窗中按选科设前后缀）
     sel_options = sorted({s.subject_selection for s in students if s.subject_selection})
+    # v1.19.25.0 步骤③下方学生名单：已编排者按「考场 → 座号」升序（考场号已补零，可直接字符串比较）
+    arranged_sorted = sorted(arranged,
+                             key=lambda s: (str(s.room_no or ''), s.seat_no or 0,
+                                            s.student_no or ''))
+    # v1.19.25.0 步骤②科目下拉：系统字典「选科」12 种 + 「全科」（= 通用/不限），
+    # 再兜底补上本批次考场里出现过的历史值（如旧写法的「史政地」），避免下拉丢失当前值
+    room_subject_options = ['全科'] + list(get_dict_values('subject') or [])
+    for r in rooms:
+        if r.subject and not r.is_universal and r.subject not in room_subject_options:
+            room_subject_options.append(r.subject)
     return render_template('grades/affairs/detail.html',
                            affair=affair, students=students, rooms=rooms,
                            scope_students=scope_students, arranged=arranged,
                            numbered=numbered,
+                           arranged_sorted=arranged_sorted,
+                           room_subject_options=room_subject_options,
                            mode_label=MODE_LABEL,
                            stats=stats, sel_options=sel_options)
 
@@ -719,6 +731,40 @@ def affair_room_save(aid):
     return jsonify({'ok': True})
 
 
+@bp.route('/affairs/<int:aid>/rooms/<int:rid>/patch', methods=['POST'])
+@login_required
+@perm_required('grades.edit')
+def affair_room_patch(aid, rid):
+    """v1.19.25.0 步骤② 行内编辑：科目 / 容量 / 备注 就地修改（不再走「编辑」按钮弹窗）。
+
+    只更新提交上来的字段（部分更新），避免前端行内编辑互相覆盖。
+    科目「全科」等价于通用考场（存为「默认」，`is_universal` 为真）。
+    """
+    _get_affair_checked(aid)
+    room = AffairRoom.query.get_or_404(rid)
+    if room.affair_id != aid:
+        abort(403)
+    if 'subject' in request.form:
+        sub = sanitize_label(request.form.get('subject'), 20) or '默认'
+        room.subject = '默认' if sub in ('全科', '通用', '全部') else sub
+    if 'capacity' in request.form:
+        try:
+            cap = int(str(request.form.get('capacity') or '').strip())
+        except (TypeError, ValueError):
+            return jsonify({'ok': False, 'msg': '容量必须是整数'})
+        if cap < 1 or cap > 500:
+            return jsonify({'ok': False, 'msg': '容量需在 1~500 之间'})
+        room.capacity = cap
+    if 'note' in request.form:
+        room.note = sanitize_label(request.form.get('note'), 100)
+    db.session.commit()
+    log_operation(current_user, '修改', '考务考场', rid,
+                  f'考场{room.room_no} 科目={room.subject} 容量={room.capacity}',
+                  module='grades')
+    return jsonify({'ok': True, 'subject': room.subject, 'capacity': room.capacity,
+                    'is_universal': bool(room.is_universal), 'note': room.note or ''})
+
+
 @bp.route('/affairs/<int:aid>/rooms/<int:rid>/delete', methods=['POST'])
 @login_required
 @perm_required('grades.edit')
@@ -795,6 +841,9 @@ def affair_settings(aid):
     nm = request.form.get('non_attend_mode')
     if nm in ('skip', 'tail'):
         affair.non_attend_mode = nm
+    # v1.19.25.0 步骤② 去掉「考场前缀」列后，批次默认前缀成为唯一兜底 —— 允许在步骤③设置
+    if 'default_prefix' in request.form:
+        affair.default_prefix = sanitize_prefix(request.form.get('default_prefix'), 16) or None
     # 选科考号前后缀：前端以 prefix_<选科> / suffix_<选科> 成对提交，sels 为选科列表 JSON
     try:
         sel_list = json.loads(request.form.get('sels') or '[]')
@@ -1019,6 +1068,61 @@ def affair_arrange(aid):
                   f'{MODE_LABEL[mode]}，分配{assigned}人/失败{failed}人', module='grades')
     return jsonify({'ok': True, 'assigned': assigned, 'failed': failed,
                     'scope': len(scope), 'log': log})
+
+
+@bp.route('/affairs/<int:aid>/numbers/import', methods=['POST'])
+@login_required
+@perm_required('grades.edit')
+def affair_numbers_import(aid):
+    """v1.19.25.0 步骤③「自定义模式 → 使用自定义考号」的批量导入考号。
+
+    上传 Excel（表头需含「学号」与「考号」两列），把考号写入名单的 `custom_number`；
+    之后以「自定义考号」模式编排时，即用该值作为最终考号（`_arrange` 模式2）。
+    """
+    _get_affair_checked(aid)
+    f = request.files.get('file')
+    if not f or not f.filename:
+        return jsonify({'ok': False, 'msg': '请选择 Excel 文件'})
+    ok, msg = validate_upload(f.filename, allowed_exts=['xlsx', 'xls'], stream=f.stream)
+    if not ok:
+        return jsonify({'ok': False, 'msg': msg})
+    try:
+        wb = openpyxl.load_workbook(f.stream, read_only=True, data_only=True)
+    except Exception as e:
+        return jsonify({'ok': False, 'msg': f'Excel 解析失败：{e}'})
+    ws = wb.active
+    idx = _header_index(ws, {'学号', '考号', '自定义考号'})
+    if '学号' not in idx:
+        return jsonify({'ok': False, 'msg': '缺少「学号」列'})
+    num_key = '考号' if '考号' in idx else ('自定义考号' if '自定义考号' in idx else None)
+    if num_key is None:
+        return jsonify({'ok': False, 'msg': '缺少「考号」列（表头建议：学号 / 姓名 / 考号）'})
+    by_no = {s.student_no: s for s in AffairStudent.query.filter_by(affair_id=aid).all()}
+    updated = 0
+    missing = 0
+    empty = 0
+    for row in ws.iter_rows(min_row=2, values_only=True):
+        no = (str(row[idx['学号']]).strip()
+              if idx['学号'] < len(row) and row[idx['学号']] is not None else '')
+        if not no:
+            continue
+        num = (str(row[idx[num_key]]).strip()
+               if idx[num_key] < len(row) and row[idx[num_key]] is not None else '')
+        st = by_no.get(no)
+        if st is None:
+            missing += 1
+            continue
+        if not num:
+            empty += 1
+            continue
+        st.custom_number = num
+        updated += 1
+    db.session.commit()
+    wb.close()
+    log_operation(current_user, '导入', '考务考号', aid,
+                  f'写入考号 {updated} 条' + (f'/未匹配 {missing} 条' if missing else ''),
+                  module='grades')
+    return jsonify({'ok': True, 'updated': updated, 'missing': missing, 'empty': empty})
 
 
 # ==================== 步骤④ 导出：按班级 / 按考场 / 竖版桌签 ====================
