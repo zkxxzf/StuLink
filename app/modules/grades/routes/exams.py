@@ -233,7 +233,7 @@ def _exam_page_rows(exam_id, page, size, class_name=None, direction=None,
 
     返回 (students, page, total_pages, total)：
       - 先用「总分行」做分页元数据（每生 1 行，远小于全部科目行），
-        按 (班级, 方向排名) 排序并 LIMIT/OFFSET 取出本页学号；
+        按「方向 → 总分名次」排序并 LIMIT/OFFSET 取出本页学号；
       - 再仅查本页学号的全部科目成绩行（约 50×7=350 行）；
       - 学籍状态一次性 IN 查询（1 次，而非逐批 10 次）。
 
@@ -242,6 +242,8 @@ def _exam_page_rows(exam_id, page, size, class_name=None, direction=None,
     sort_key / order（v1.19.17.0）：表头排序。sort_key 取 _SORT_COLS 的键，
         或 's:科目名' 表示按该科成绩排；order 为 'asc'/'desc'（空 sort_key = 默认次序）。
         排序必须在**服务端**做：页面只加载当前页，前端排序只会排到本页 50 人。
+        排序状态只存在于 URL 参数里（v1.19.18.0 确认），服务端不保存"当前排序"，
+        因此**不会影响其他用户**；不传参数时回到「方向 → 总分名次」默认榜。
     """
     q = ExamScore.query.filter_by(exam_id=exam_id, subject=TOTAL_SUBJECT)
     if class_name:
@@ -279,8 +281,13 @@ def _exam_page_rows(exam_id, page, size, class_name=None, direction=None,
                 ExamScore.student_no]
         meta = q.order_by(*seqq).limit(size).offset((page - 1) * size).all()
     else:
-        meta = (q.order_by(ExamScore.class_name,
-                           db.func.coalesce(ExamScore.rank_dir, 99999))
+        # 默认次序（v1.19.18.0）：按**总分名次**排列 —— 先分方向（历史在前、物理在后），
+        # 方向内按方向排（= 该方向的总分名次）升序，缺考（无方向排）排在本方向最后，
+        # 末尾按学号定序保证翻页稳定。注意：不按班级分组（老师要看的是名次榜）。
+        dir_seq = db.case((ExamScore.direction == '历史', 0),
+                          (ExamScore.direction == '物理', 1), else_=2)
+        meta = (q.order_by(dir_seq, db.func.coalesce(ExamScore.rank_dir, 99999),
+                           ExamScore.student_no)
                 .limit(size).offset((page - 1) * size).all())
     nos = [r.student_no for r in meta]
     if not nos:
