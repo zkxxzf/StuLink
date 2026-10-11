@@ -81,6 +81,20 @@ with app.app_context():
         db.session.add(_adm)
         db.session.commit()
 
+    # ---- v1.19.28.0 考务名单用例：上一场（2025001 标记不参考）+ 本场 ----
+    from datetime import date as _date
+    from app.models.grades import ExamAffair, AffairStudent
+    _prev_af = ExamAffair(name='冒烟上一场', grade='2025级', exam_date=_date(2019, 1, 5),
+                          status='arranged')
+    _cur_af = ExamAffair(name='冒烟本场', grade='2025级', exam_date=_date(2019, 2, 5),
+                         status='draft')
+    db.session.add_all([_prev_af, _cur_af])
+    db.session.commit()
+    db.session.add(AffairStudent(affair_id=_prev_af.id, student_no='20250001',
+                                 name='历生01', class_name='01班', is_attend=False))
+    db.session.commit()
+    _AFF_CUR = _cur_af.id
+
 with app.test_client() as c:
     # ---- 登录管理员（先取 CSRF token） ----
     r0 = c.get('/login')
@@ -434,6 +448,24 @@ with app.test_client() as c:
     hn = c.get('/grades/analysis').get_data(as_text=True)
     check('非考试态：年级下拉仍可选',
           'id="gGrade" class="form-select form-select-sm w-auto d-none"' not in hn)
+
+    # ---- v1.19.28.0 考务步骤① 名单维护：只读名单 + 沿用上一场不参考 + 不参考排最上 ----
+    r = c.post(f'/grades/affairs/{_AFF_CUR}/students/sync', headers={'X-CSRFToken': csrf})
+    d = r.get_json()
+    check('考务同步：自动沿用上一场不参考 1 人',
+          d and d.get('ok') and d.get('matched_non_attend') == 1, d)
+    h2 = c.get(f'/grades/affairs/{_AFF_CUR}').get_data(as_text=True)
+    tb2 = h2.split('id="stuTable"')[1].split('</table>')[0]
+    hd2 = tb2.split('</thead>')[0]
+    check('考务步骤①：只显示名单列（无考号/座号）',
+          all(k in hd2 for k in ('学号', '姓名', '班级', '选科组合', '参考'))
+          and '考号' not in hd2 and '座号' not in hd2, hd2[:200])
+    check('考务步骤①：无手动新增/编辑',
+          'onclick="openStuModal' not in h2 and 'id="stuModal"' not in h2
+          and '>编辑</button>' not in h2)
+    check('考务步骤①：不参考的学生排最上面',
+          re.findall(r'<td>(\d{8})</td>', tb2)[:1] == ['20250001'],
+          re.findall(r'<td>(\d{8})</td>', tb2)[:3])
 
     # ==================== 角色权限矩阵（9.2 后端强制） ====================
     from app.models import UserClassLink

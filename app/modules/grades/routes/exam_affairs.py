@@ -230,6 +230,13 @@ def affair_detail(aid):
     affair = _get_affair_checked(aid)
     students = (AffairStudent.query.filter_by(affair_id=aid)
                 .order_by(AffairStudent.class_name, AffairStudent.student_no).all())
+    # v1.19.28.0 名单次序（用户口径）：不参加考试的排在最上面，其余按 班级 → 性别（男前女后）→ 姓名。
+    # AffairStudent 不存性别，按学号从学籍库取（本年级）。
+    _g_rank = {'男': 0, '女': 1}
+    gender_map = {s.student_number: _g_rank.get(s.gender or '', 2)
+                  for s in Student.query.filter_by(grade=affair.grade).all()}
+    students.sort(key=lambda s: (0 if not s.is_attend else 1, s.class_name or '',
+                                 gender_map.get(s.student_no, 2), s.name or ''))
     rooms = (AffairRoom.query.filter_by(affair_id=aid)
              .order_by(AffairRoom.room_no).all())
     scope_students = [s for s in students if s.is_attend]
@@ -444,12 +451,33 @@ def affair_students_sync(aid):
             db.session.delete(row)
             removed += 1
     skipped = len(all_stus) - len(sys_stus)   # 因无班级/已毕业而未导入的学籍数
+    # v1.19.28.0 自动匹配「上一场不参加考试的学生」：取本年级**日期早于本批次**的最近一场考务批次，
+    # 把其中标记为不参考的学号，在本批次一律同步为不参考（只 是→否；不反向把「否」改回「是」）。
+    prev_affair = (ExamAffair.query
+                   .filter(ExamAffair.grade == affair.grade,
+                           ExamAffair.id != affair.id,
+                           ExamAffair.exam_date < affair.exam_date)
+                   .order_by(ExamAffair.exam_date.desc(), ExamAffair.id.desc()).first())
+    non_attend_prev = set()
+    if prev_affair is not None:
+        non_attend_prev = {s.student_no for s in
+                           AffairStudent.query.filter_by(affair_id=prev_affair.id,
+                                                         is_attend=False).all()}
+    matched = 0
+    if non_attend_prev:
+        for row in AffairStudent.query.filter_by(affair_id=aid).all():
+            if row.student_no in non_attend_prev and row.is_attend:
+                row.is_attend = False
+                matched += 1
     db.session.commit()
     log_operation(current_user, '同步', '考务学生', aid,
-                  f'新增{added}人/移除{removed}人/有效{len(sys_stus)}人/跳过无班{skipped}人',
+                  f'新增{added}人/移除{removed}人/有效{len(sys_stus)}人/跳过无班{skipped}人'
+                  + (f'/沿用上一场不参考{matched}人' if matched else ''),
                   module='grades')
     return jsonify({'ok': True, 'added': added, 'removed': removed,
-                    'total': len(sys_stus), 'skipped_no_class': skipped})
+                    'total': len(sys_stus), 'skipped_no_class': skipped,
+                    'matched_non_attend': matched,
+                    'prev_affair': (prev_affair.name if prev_affair else '')})
 
 
 @bp.route('/affairs/<int:aid>/students/pick')
@@ -521,6 +549,23 @@ def affair_student_fixed(aid, sid):
     st.fixed_room, st.fixed_seat = room, seat
     db.session.commit()
     return jsonify({'ok': True})
+
+
+@bp.route('/affairs/<int:aid>/students/<int:sid>/attend', methods=['POST'])
+@login_required
+@perm_required('grades.edit')
+def affair_student_attend(aid, sid):
+    """v1.19.28.0 步骤①「参考」就地点一下切换（本页不再提供「编辑学生信息」弹窗，
+    但「是否参加本场考试」属考务信息，需要能手工修正，例如上一场缺考、本场恢复参考）。"""
+    st = AffairStudent.query.get_or_404(sid)
+    if st.affair_id != aid:
+        abort(403)
+    raw = (request.form.get('is_attend') or '').strip().lower()
+    st.is_attend = raw in ('1', 'true', 'yes', 'on')
+    db.session.commit()
+    log_operation(current_user, '修改', '考务学生', sid,
+                  f'[{st.name}] 参考={st.is_attend}', module='grades')
+    return jsonify({'ok': True, 'is_attend': bool(st.is_attend)})
 
 
 @bp.route('/affairs/<int:aid>/students/<int:sid>')
