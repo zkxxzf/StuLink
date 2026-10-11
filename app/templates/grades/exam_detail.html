@@ -183,16 +183,12 @@
         {% set active = (cur_sort == key) %}
         {% set nxt = 'asc' if (active and cur_order == 'desc') else 'desc' %}
         {% set caret %}{% if active %}<i class="bi {{ 'bi-caret-up-fill' if cur_order == 'asc' else 'bi-caret-down-fill' }}"></i>{% else %}<i class="bi bi-caret-down opacity-25"></i>{% endif %}{% endset %}
-        {# v1.19.25.0 表头与数字对齐：右对齐列（方向排/班排/进退步/总分/各科）把三角放到文字**左侧**。
-           三角在右侧时会占宽，把右对齐的文字往左挤，与下面的数字错开；放到左侧后文字右边缘
-           仍与数字右边缘对齐，三角正好落在该列左侧的空隙里（不撑宽、不溢出）。 #}
-        <th class="{{ ctype }} {{ align }}{{ ' th-active' if active else '' }}">
-            <a class="th-sort" title="按「{{ label }}」{{ '升序' if nxt == 'asc' else '从高到低' }}排序"
-               href="{{ url_for('grades.exam_detail', exam_id=exam.id, cls=(cur_class or none),
-                                dir=(cur_dir or none), sort=key, order=nxt) }}">
-                {%- if align == 'text-end' %}{{ caret }}{{ label }}{% else %}{{ label }}{{ caret }}{% endif -%}
-            </a>
-        </th>
+        {# v1.19.26.0 表头与数字对齐（根治）
+           ① 右对齐列的三角放文字**左侧**：三角在右侧会占宽，把右对齐的表头文字往左挤；
+              放左侧后文字右边缘＝内容盒右缘＝下面数字的右边缘（三角落在该列左侧空隙里）。
+           ② `<th>…</th>` 内部**不留任何空白**：行尾的空格不会被折叠掉，会把右对齐的文字
+              往左推 3~4px —— 这正是上一步改完仍看着没对齐的原因，故整段写成一行。 #}
+        <th class="{{ ctype }} {{ align }}{{ ' th-active' if active else '' }}"><a class="th-sort" title="按「{{ label }}」{{ '升序' if nxt == 'asc' else '从高到低' }}排序" href="{{ url_for('grades.exam_detail', exam_id=exam.id, cls=(cur_class or none), dir=(cur_dir or none), sort=key, order=nxt) }}">{% if align == 'text-end' %}{{ caret }}{{ label }}{% else %}{{ label }}{{ caret }}{% endif %}</a></th>
         {% endmacro %}
         <table class="table table-sm table-hover align-middle g-table mb-0" id="scoreTable">
             <thead class="sticky-top">
@@ -204,8 +200,9 @@
                 {{ th_sort('dir', '方向') }}
                 {{ th_sort('sel', '选科') }}
                 {{ th_sort('rank_dir', '方向排', 'c-rank', 'text-end') }}
-                {{ th_sort('rank_class', '班排', 'c-rank', 'text-end') }}
+                {# v1.19.26.0 进退步紧跟方向排（同为方向口径的名次列） #}
                 {{ th_sort('move', '进退步', 'c-rank', 'text-end') }}
+                {{ th_sort('rank_class', '班排', 'c-rank', 'text-end') }}
                 {{ th_sort('total', '总分', 'c-total', 'text-end') }}
                 {% for s in subjects %}{{ th_sort('s:' ~ s, s, 'c-sub', 'text-end') }}{% endfor %}
             </tr>

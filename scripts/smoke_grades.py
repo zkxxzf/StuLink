@@ -403,6 +403,16 @@ with app.test_client() as c:
     check('表头：方向排三角在文字左侧', '></i>方向排' in html and '方向排<i' not in html)
     check('表头：左对齐列三角仍在文字右侧', '学号<i' in html)
 
+    # ---- v1.19.26.0 表头/数字严格对齐 + 名次列次序 + 进退步悬浮说明 ----
+    # th 内若残留空白，右对齐时行尾空格不会被折掉，会把表头文字往左推几个像素 → 与数字错开
+    _thead = html.split('<thead')[1].split('</thead>')[0]
+    check('表头：th 内部无空白', '</a></th>' in _thead and re.search(r'\s</th>', _thead) is None)
+    check('名次列次序：方向排 → 进退步 → 班排',
+          _thead.index('>方向排<') < _thead.index('>进退步<') < _thead.index('>班排<'))
+    check('数据单元：右对齐名次为一行无空白',
+          re.search(r'<td class="text-end c-rank">\d+</td>', html) is not None)
+    check('进退步悬浮：写明同方向进退步', 'title="同方向进退步：' in html)
+
     # ==================== 角色权限矩阵（9.2 后端强制） ====================
     from app.models import UserClassLink
     from app.models.user import User as U
