@@ -413,6 +413,28 @@ with app.test_client() as c:
           re.search(r'<td class="text-end c-rank">\d+</td>', html) is not None)
     check('进退步悬浮：写明同方向进退步', 'title="同方向进退步：' in html)
 
+    # ---- v1.19.27.0 导航高亮唯一性 + 分析子模块「考试态」锁本场 ----
+    hb = c.get(f'/grades/exams/{eid}/bands').get_data(as_text=True)
+    check('导航：划线分层页只高亮「划线分层」',
+          re.search(r'class="efn-item active" data-nav="bands"', hb) is not None
+          and re.search(r'class="efn-item active" data-nav="import"', hb) is None)
+    ha = c.get(f'/grades/analysis?exam={eid}').get_data(as_text=True)
+    check('分析页（考试态）隐藏年级/考试下拉',
+          'id="gGrade" class="form-select form-select-sm w-auto d-none"' in ha
+          and 'id="gExam" class="form-select form-select-sm w-auto d-none"' in ha)
+    check('分析页（考试态）带入本场考试', f'id="gInitialExam" class="d-none">{eid}<' in ha)
+    hg = c.get(f'/grades/global-compare?exam={eid}').get_data(as_text=True)
+    check('总览页（考试态）认 ?exam 且隐藏考试下拉',
+          f'data-exam-id="{eid}"' in hg
+          and 'id="ldExam" class="form-select form-select-sm w-auto d-none"' in hg)
+    hp = c.get(f'/grades/pivot?exam={eid}').get_data(as_text=True)
+    check('自由表（考试态）带入本场考试且隐藏年级/考试',
+          f'id="pvInitialExam" class="d-none">{eid}<' in hp
+          and 'id="pvGrade" class="form-select form-select-sm w-auto d-none"' in hp)
+    hn = c.get('/grades/analysis').get_data(as_text=True)
+    check('非考试态：年级下拉仍可选',
+          'id="gGrade" class="form-select form-select-sm w-auto d-none"' not in hn)
+
     # ==================== 角色权限矩阵（9.2 后端强制） ====================
     from app.models import UserClassLink
     from app.models.user import User as U

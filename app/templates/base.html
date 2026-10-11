@@ -361,8 +361,8 @@
                    href="{{ url_for('grades.exam_affair_go', exam_id=EN.exam_id) }}">考务安排{% if not EN.steps[1].done %}<span class="efn-tag">待做</span>{% endif %}</a>
                 <a class="efn-item {% if EN.section == 'import' %}active{% endif %}" data-nav="import"
                    href="{{ url_for('grades.exam_import', exam_id=EN.exam_id) }}">成绩导入{% if not EN.steps[2].done %}<span class="efn-tag">待做</span>{% endif %}</a>
-                {# v1.19.0：划线分层紧贴「成绩导入」环节 #}
-                <a class="efn-item {% if request.endpoint == 'grades.bands_page' %}active{% endif %}" data-nav="bands"
+                {# v1.19.27.0：划线分层有自己的段位（'bands'），不再与「成绩导入」同时高亮 #}
+                <a class="efn-item {% if EN.section == 'bands' %}active{% endif %}" data-nav="bands"
                    href="{{ url_for('grades.bands_page', exam_id=EN.exam_id) }}">划线分层</a>
                 {# v1.19.0 成绩分析：折叠组 —— 总览（全年级对比）/ 班级分析（班主任）/ 学科分析（任课教师）
                    + 分析类子模块（临界生对比 / 自由表 / 汇报区）。

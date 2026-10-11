@@ -4,12 +4,16 @@
 <link href="{{ su('css/grades.css') }}" rel="stylesheet">
 {% endblock %}
 {% block content %}
+{# v1.19.27.0 考试态（从侧栏「班级分析 / 学科分析」进入，带 ?exam=<id>）：
+   本页只看这一场，顶部不再让用户选年级/考试 —— 直接按本场加载（initial_exam_id 已由服务端带入，
+   JS 会选中它；这里把两个下拉隐藏）。非考试态（全局成绩分析）保持原样。 #}
+{% set _en = exam_nav() %}
 <div id="gradeApp" class="no-print d-flex flex-wrap gap-2 align-items-center mb-3 g-filter-bar">
     <h5 class="mb-0 me-1"><i class="bi bi-graph-up"></i> 成绩分析</h5>
-    <select id="gGrade" class="form-select form-select-sm w-auto" title="年级">
+    <select id="gGrade" class="form-select form-select-sm w-auto{% if _en %} d-none{% endif %}" title="年级">
         <option value="">年级…</option>
     </select>
-    <select id="gExam" class="form-select form-select-sm w-auto" style="min-width:200px;" title="考试">
+    <select id="gExam" class="form-select form-select-sm w-auto{% if _en %} d-none{% endif %}" style="min-width:200px;" title="考试">
         <option value="">考试…</option>
     </select>
     <select id="gDir" class="form-select form-select-sm w-auto d-none" title="方向">

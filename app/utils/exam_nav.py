@@ -13,11 +13,12 @@ from __future__ import annotations
 
 from flask import g, request
 
-# 段位键：overview 概览 / affair 考务 / import 导入 / analysis 分析
+# 段位键：overview 概览 / affair 考务 / import 导入 / bands 划线 / analysis 分析
 SECTION_LABELS = {
     'overview': '考试概览',
     'affair': '考务安排',
     'import': '成绩导入',
+    'bands': '划线分层',
     'analysis': '成绩分析',
 }
 
@@ -25,7 +26,8 @@ SECTION_LABELS = {
 _EP_SECTION = (
     ('grades.exam_ai_import', 'import'),
     ('grades.exam_import', 'import'),
-    ('grades.bands_page', 'import'),          # 划线分层属“导入”环节
+    # v1.19.27.0 划线分层单独一段：原先归到 'import' 导致侧栏「成绩导入」「划线分层」同时高亮
+    ('grades.bands_page', 'bands'),
     ('grades.exam_affair_go', 'affair'),
     ('grades.affair', 'affair'),
     ('grades.affairs', 'affair'),
