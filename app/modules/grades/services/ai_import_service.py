@@ -439,6 +439,137 @@ def rows_from_mapping(sheet, mapping, score_kind, exam):
     return rows, errors
 
 
+# ==================== 考务「考生安排 / 考场位置」列识别（v1.19.0 P2） ====================
+
+AFFAIR_FIELD_LABELS = {
+    'no': '学号', 'name': '姓名', 'class_name': '班级', 'exam_no': '考号',
+    'room': '考场号', 'seat': '座号', 'room_seat': '考场-座号（合并列）',
+    'selection': '选科/组合', 'attend': '是否参加', 'room_loc': '教室/位置',
+}
+
+
+def classify_affair_headers(headers):
+    """按（可能合并的）列名归类考务字段 → {字段: 列号}
+
+    字段：no 学号 / name 姓名 / class_name 班级 / exam_no 考号 /
+          room 考场 / seat 座号 / room_seat 考场-座号(合并) / selection 选科 /
+          attend 是否参加 / room_loc 教室位置
+    """
+    out = {}
+    for j, h in enumerate(headers):
+        if not h:
+            continue
+        parent, child = _split_label(h)
+        L = parent if child else h
+        if '座号' in L and '考场' in L:
+            out.setdefault('room_seat', j)
+        elif '考场' in L or '试室' in L:
+            out.setdefault('room', j)
+        elif '座号' in L or '座位' in L:
+            out.setdefault('seat', j)
+        elif '学号' in L:
+            out.setdefault('no', j)
+        elif '考号' in L or '准考证' in L:
+            out.setdefault('exam_no', j)
+        elif '姓名' in L:
+            out.setdefault('name', j)
+        elif '班级' in L:
+            out.setdefault('class_name', j)
+        elif '是否参加' in L or '是否参考' in L or L in ('参加', '参考'):
+            out.setdefault('attend', j)
+        elif '选科' in L or '组合' in L:
+            out.setdefault('selection', j)
+        elif '教室' in L or '位置' in L or '地点' in L:
+            out.setdefault('room_loc', j)
+    return out
+
+
+def _clean_bad(v):
+    """过滤 Excel 错误值/空（#N/A 等）"""
+    t = _s(v)
+    return '' if not t or t.startswith('#') else t
+
+
+def rows_from_affair_mapping(sheet, mapping):
+    """按映射（手工/AI）＋自动归类，把 sheet 解析为考务行：
+
+    {no, name, class_name, exam_no, room, seat, selection, attend, room_loc, line}
+    返回 (rows, errors)
+    """
+    headers = sheet['headers']
+    auto = classify_affair_headers(headers)
+    m = mapping or {}
+
+    def idx(key):
+        v = m.get(key)
+        i = _col_index(headers, [v]) if v else None
+        return i if i is not None else auto.get(key)
+
+    i_no, i_name = idx('no'), idx('name')
+    i_cls, i_exam = idx('class_name'), idx('exam_no')
+    i_room, i_seat, i_rs = idx('room'), idx('seat'), idx('room_seat')
+    i_sel, i_att, i_loc = idx('selection'), idx('attend'), idx('room_loc')
+    if all(x is None for x in (i_no, i_name, i_exam, i_room, i_loc)):
+        return [], [{'line': sheet['header_row'], 'no': '',
+                     'reason': '未识别到任何可用列（学号/姓名/考号/考场/教室）'}]
+
+    rows, errors = [], []
+    for lineno, cells in sheet['rows']:
+        if lineno <= sheet['header_row']:
+            continue
+        if len(rows) >= MAX_SCAN_ROWS:
+            errors.append({'line': lineno, 'no': '', 'reason': '超出单表行数上限，已截断'})
+            break
+        get = lambda i: (cells[i] if i is not None and i < len(cells) else '')  # noqa: E731
+        no = _clean_bad(get(i_no))
+        name = _clean_bad(get(i_name))
+        exam_no = _clean_bad(get(i_exam))
+        room = _clean_bad(get(i_room))
+        seat = _clean_bad(get(i_seat))
+        rs = _clean_bad(get(i_rs))
+        loc = _clean_bad(get(i_loc))
+        if rs:
+            parts = rs.split('-')
+            if not room:
+                room = parts[0].strip()
+            if not seat and len(parts) > 1:
+                seat = parts[-1].strip()
+        if not (no or name or exam_no or room or loc):
+            continue                       # 空行/表尾说明行
+        att = _clean_bad(get(i_att))
+        rows.append({'line': lineno, 'no': no, 'name': name,
+                     'class_name': _clean_bad(get(i_cls)),
+                     'exam_no': exam_no, 'room': room, 'seat': seat,
+                     'selection': _clean_bad(get(i_sel)),
+                     'attend': (att != '否') if att else True,
+                     'room_loc': loc})
+    return rows, errors
+
+
+def build_affair_ai_prompt(probe_data, affair):
+    """考务列映射提示词（可选 AI 路径）"""
+    parts = []
+    for sh in probe_data['sheets'][:6]:
+        parts.append('【工作表：%s（表头在第 %s 行%s）】\n表头：%s\n样本：%s'
+                     % (sh['name'], sh.get('header_row'),
+                        ('，已合并多行表头' if len(sh.get('header_rows') or []) > 1 else ''),
+                        ' | '.join(sh['headers'][:80]),
+                        json.dumps(sh['sample'], ensure_ascii=False)[:900]))
+    system = (
+        '你是考场编排表结构识别助手。用户给你 Excel 的表头与样本，判断每列对应什么字段。\n'
+        '只输出一个 JSON，不要解释，格式：\n'
+        '{"sheets":[{"name":"表名","fields":{"no":"学号","name":"姓名","class_name":"班级",'
+        '"exam_no":"考号","room":"考场","seat":"座号","room_seat":"考场-座号","selection":"选科",'
+        '"attend":"是否参加","room_loc":"教室位置"}}],"notes":"补充说明"}\n'
+        '规则：值必须是原表头里的列名原文（多行表头已合并为「父·子」）；找不到就不要出现；'
+        '「考场-座号」这种合并列用 room_seat；名次/人数/统计类列不要映射。'
+    )
+    user = ('考务批次：年级=%s，名称=%s。\n%s'
+            % (affair.grade if affair else '', affair.name if affair else '',
+               '\n\n'.join(parts)))
+    return system, user
+
+
 def read_sheet_rows(stream, sheet_name, header_row, max_rows=MAX_SCAN_ROWS):
     """按需重读某个 sheet 的全量行（probe 只存样本，解析时再取全量）"""
     wb = _open_workbook(stream)

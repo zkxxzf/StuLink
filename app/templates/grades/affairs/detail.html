@@ -68,6 +68,8 @@
         {# v1.12.1 学生名单改为从学生库同步导入，不再走 Excel 重复导入；新增学生可直接写入学籍库 #}
         {# v1.19.0.0 取消「同时移除学籍已删的学生」复选框：无班级/已转出/已毕业学生一律不进入成绩模块，且同步时默认自动剔除 #}
         <div class="d-flex gap-2 mb-2 flex-wrap align-items-center">
+            <a class="btn btn-success btn-sm" href="{{ url_for('grades.affair_ai_import', aid=affair.id) }}">
+                <i class="bi bi-stars"></i> 导入考生安排 / 考场位置</a>
             <button class="btn btn-primary btn-sm" onclick="syncStudents()">
                 <i class="bi bi-cloud-download"></i> 从学生库导入</button>
             <button class="btn btn-outline-success btn-sm" onclick="openPick()">
