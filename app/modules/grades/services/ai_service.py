@@ -1,4 +1,4 @@
-# StuLink v1.19.21.0 2026-10-10
+# StuLink v1.19.22.0 2026-10-10
 # AI 分析服务：权限收敛取数（本次+上次原始成绩）→ payload 组装 → LLM 转发
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 import json
@@ -20,7 +20,7 @@ DEFAULT_MODEL = ai_providers.PROVIDERS['deepseek']['default_model']
 DEFAULT_TEMPERATURE = 0.4
 DEFAULT_TIMEOUT = 180
 
-# v1.19.21.0 S-4：不自动跟随 3xx，防 SSRF 以 approved.com → 302 → 169.254.169.254 绕过 url_guard
+# v1.19.22.0 S-4：不自动跟随 3xx，防 SSRF 以 approved.com → 302 → 169.254.169.254 绕过 url_guard
 
 class _NoRedirect(urllib.request.HTTPRedirectHandler):
     def redirect_request(self, req, fp, code, msg, headers, newurl):
@@ -521,21 +521,24 @@ def build_stats(payload):
                    'values': [_mean(subj[k]) for k in sorted(subj.keys())]}
 
     # 4) 进退步分布
-    moves = {'大幅进步(≥50)': 0, '进步': 0, '持平': 0, '退步': 0, '大幅退步(≤-50)': 0}
+    # v1.19.22.0 修复：move_rank = 本场方向排名 − 上一场方向排名，
+    # 负值 = 名次数字变小 = 进步、正值 = 退步（与成绩单、个人查询同口径）。
+    # 原实现把 ≥50 记成"大幅进步"、≤-50 记成"大幅退步"，饼图标签整体标反，此处纠正。
+    moves = {'大幅进步(≤-50)': 0, '进步': 0, '持平': 0, '退步': 0, '大幅退步(≥50)': 0}
     for c in students:
         m = c.get('move')
         if not isinstance(m, (int, float)):
             continue
-        if m >= 50:
-            moves['大幅进步(≥50)'] += 1
-        elif m > 0:
+        if m <= -50:
+            moves['大幅进步(≤-50)'] += 1
+        elif m < 0:
             moves['进步'] += 1
         elif m == 0:
             moves['持平'] += 1
-        elif m > -50:
+        elif m < 50:
             moves['退步'] += 1
         else:
-            moves['大幅退步(≤-50)'] += 1
+            moves['大幅退步(≥50)'] += 1
     move_dist = {'labels': list(moves.keys()), 'values': list(moves.values())}
 
     # 5) 与上次考试均分对比
