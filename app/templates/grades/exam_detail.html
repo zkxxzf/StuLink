@@ -40,6 +40,8 @@
   #scoreTable th a.th-sort { white-space: nowrap; color: inherit; text-decoration: none; }
   #scoreTable th a.th-sort:hover { color: #2563eb; }
   #scoreTable th a.th-sort i { font-size: .6rem; margin-left: 2px; vertical-align: .08em; }
+  /* v1.19.23.0 右对齐列三角在文字左侧：留白改到三角右侧，避免文字被挤离数字 */
+  #scoreTable th.text-end a.th-sort i { margin-left: 0; margin-right: 2px; }
   #scoreTable th.th-active { background: #eef2ff; color: #1d4ed8; }
   #scoreTable tbody tr { cursor: default; }
 </style>
@@ -180,11 +182,15 @@
         {% macro th_sort(key, label, ctype='c-meta', align='') %}
         {% set active = (cur_sort == key) %}
         {% set nxt = 'asc' if (active and cur_order == 'desc') else 'desc' %}
+        {% set caret %}{% if active %}<i class="bi {{ 'bi-caret-up-fill' if cur_order == 'asc' else 'bi-caret-down-fill' }}"></i>{% else %}<i class="bi bi-caret-down opacity-25"></i>{% endif %}{% endset %}
+        {# v1.19.23.0 表头与数字对齐：右对齐列（方向排/班排/进退步/总分/各科）把三角放到文字**左侧**。
+           三角在右侧时会占宽，把右对齐的文字往左挤，与下面的数字错开；放到左侧后文字右边缘
+           仍与数字右边缘对齐，三角正好落在该列左侧的空隙里（不撑宽、不溢出）。 #}
         <th class="{{ ctype }} {{ align }}{{ ' th-active' if active else '' }}">
             <a class="th-sort" title="按「{{ label }}」{{ '升序' if nxt == 'asc' else '从高到低' }}排序"
                href="{{ url_for('grades.exam_detail', exam_id=exam.id, cls=(cur_class or none),
                                 dir=(cur_dir or none), sort=key, order=nxt) }}">
-                {{ label }}{% if active %}<i class="bi {{ 'bi-caret-up-fill' if cur_order == 'asc' else 'bi-caret-down-fill' }}"></i>{% else %}<i class="bi bi-caret-down opacity-25"></i>{% endif %}
+                {%- if align == 'text-end' %}{{ caret }}{{ label }}{% else %}{{ label }}{{ caret }}{% endif -%}
             </a>
         </th>
         {% endmacro %}
