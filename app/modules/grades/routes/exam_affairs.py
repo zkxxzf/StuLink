@@ -60,6 +60,30 @@ def _norm_room_no(no):
     return s.zfill(2) if s.isdigit() else s
 
 
+def _inherit_rooms_from_prev(affair):
+    """v1.19.0：新建考务批次时，默认沿用**该年级上一次**批次的考场安排与容量。
+
+    容量不再存于基础数据（同一房间不同考试/年级容量可能不同），故新建考务时
+    从该年级最近一场「有考场」的批次复制位置/容量/科目/备注/编号；找不到则不处理。
+    返回复制的考场数。
+    """
+    cands = ExamAffair.query.filter(ExamAffair.grade == affair.grade,
+                                    ExamAffair.id != affair.id).all()
+    cands = [a for a in cands
+             if AffairRoom.query.filter_by(affair_id=a.id).first() is not None]
+    if not cands:
+        return 0
+    prev = max(cands, key=lambda a: (a.exam_date or date.min, a.id))
+    src = (AffairRoom.query.filter_by(affair_id=prev.id)
+           .order_by(AffairRoom.room_no).all())
+    for r in src:
+        db.session.add(AffairRoom(affair_id=affair.id, room_no=r.room_no,
+                                  location=r.location, subject=r.subject or '默认',
+                                  capacity=r.capacity or 30, prefix=r.prefix,
+                                  note=r.note))
+    return len(src)
+
+
 def _grade_options():
     from app.modules.grades.services.scope import visible_grades
     return visible_grades(current_user)
@@ -141,9 +165,13 @@ def affair_create():
                         selection_mode=selection_mode,
                         operator_id=current_user.id)
     db.session.add(affair)
+    db.session.flush()                          # 取 affair.id 以便继承上次考场
+    n_rooms = _inherit_rooms_from_prev(affair)
     db.session.commit()
-    log_operation(current_user, '新建', '考务批次', affair.id, f'{grade} {name}', module='grades')
-    flash('考务批次已创建', 'success')
+    log_operation(current_user, '新建', '考务批次', affair.id,
+                  f'{grade} {name}' + (f'（沿用上次考场{n_rooms}个）' if n_rooms else ''),
+                  module='grades')
+    flash('考务批次已创建' + (f'，已沿用上次 {n_rooms} 个考场' if n_rooms else ''), 'success')
     return redirect(url_for('grades.affair_detail', aid=affair.id))
 
 
@@ -167,10 +195,14 @@ def exam_affair_go(exam_id):
                         selection_mode='selected',
                         operator_id=current_user.id)
     db.session.add(affair)
+    db.session.flush()                          # 取 affair.id 以便继承上次考场
+    n_rooms = _inherit_rooms_from_prev(affair)
     db.session.commit()
     log_operation(current_user, '新建', '考务批次', affair.id,
-                  f'{exam.grade} {affair.name}（自考试列表）', module='grades')
-    flash('已为该考试创建考务安排，请按原流程编排', 'success')
+                  f'{exam.grade} {affair.name}（自考试列表）'
+                  + (f'（沿用上次考场{n_rooms}个）' if n_rooms else ''), module='grades')
+    flash('已为该考试创建考务安排，请按原流程编排'
+          + (f'（已沿用上次 {n_rooms} 个考场）' if n_rooms else ''), 'success')
     return redirect(url_for('grades.affair_detail', aid=affair.id))
 
 

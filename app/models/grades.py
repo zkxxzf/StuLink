@@ -637,3 +637,38 @@ class AffairRoomLib(db.Model):
     __table_args__ = (
         db.UniqueConstraint('location', name='uq_affair_room_lib_loc'),
     )
+
+
+class ExamRoomGroup(db.Model):
+    """v1.19.0 考场分组：把考场房间按年级区域归类（默认 高一/高二/高三考场）。
+
+    不同年级的考试时间通常错开，同一房间可同时归属多个分组；分组只影响
+    「考场维护」页面的归集与后续建场时的筛选，*不会*改动任何历史场次的考场
+    （`affair_rooms` 属于各自考务批次，彼此独立）。
+    """
+    __bind_key__ = 'grades'
+    __tablename__ = 'exam_room_groups'
+
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(50), nullable=False)
+    sort_order = db.Column(db.Integer, default=0)
+    created_at = db.Column(db.DateTime, default=datetime.now)
+
+    __table_args__ = (
+        db.UniqueConstraint('name', name='uq_exam_room_group_name'),
+    )
+
+
+class ExamRoomGroupMap(db.Model):
+    """v1.19.0 考场房间 ↔ 分组 关联（多对多）"""
+    __bind_key__ = 'grades'
+    __tablename__ = 'exam_room_group_map'
+
+    id = db.Column(db.Integer, primary_key=True)
+    group_id = db.Column(db.Integer, nullable=False)
+    lib_id = db.Column(db.Integer, nullable=False)     # → affair_room_libs.id
+
+    __table_args__ = (
+        db.UniqueConstraint('group_id', 'lib_id', name='uq_room_group_map'),
+        db.Index('idx_room_group_map_lib', 'lib_id'),
+    )

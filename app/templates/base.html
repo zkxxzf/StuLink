@@ -419,7 +419,8 @@
 
             {# v1.19.0 基础配置：长期基础数据，不属于四段流程，默认折叠 #}
             {% set _cfg_eps = ('grades.subject_mgmt', 'grades.band_templates_page',
-                               'grades.teachers_page', 'grades.teachers_import_page') %}
+                               'grades.teachers_page', 'grades.teachers_import_page',
+                               'grades.exam_rooms') %}
             <a class="nav-link d-flex align-items-center" data-bs-toggle="collapse" href="#navCfg"
                role="button" aria-expanded="{{ 'true' if request.endpoint in _cfg_eps else 'false' }}">
                 <i class="bi bi-sliders"></i>基础配置
@@ -442,6 +443,12 @@
                 <a class="nav-link ps-4 {% if request.endpoint in ('grades.teachers_page','grades.teachers_import_page') %}active{% endif %}"
                    href="{{ url_for('grades.teachers_page') }}">
                     <i class="bi bi-person-workspace"></i>任课教师映射
+                </a>
+                {% endif %}
+                {% if current_user.has_perm('grades.edit') %}
+                <a class="nav-link ps-4 {% if request.endpoint == 'grades.exam_rooms' %}active{% endif %}"
+                   href="{{ url_for('grades.exam_rooms') }}">
+                    <i class="bi bi-door-open"></i>考场维护
                 </a>
                 {% endif %}
             </div>

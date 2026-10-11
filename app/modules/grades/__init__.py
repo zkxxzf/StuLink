@@ -9,4 +9,4 @@ bp = Blueprint('grades', __name__, url_prefix='/grades')
 from app.modules.grades.routes import (exams, bands, teachers, analysis, export, ai,  # noqa: E402,F401
                                        student_query, pivot, band_templates, exam_affairs,
                                        report, report_pivot, subject_mgmt, global_compare,
-                                       ai_import)
+                                       ai_import, exam_rooms)
