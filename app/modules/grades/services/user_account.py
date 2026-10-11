@@ -33,6 +33,11 @@ def gen_username(real_name):
     return candidate
 
 
+def pinyin_of(name):
+    """v1.19.35.0 对外暴露的无调全拼（供「按姓名首字母排序」等复用）；无 pypinyin 时返回 None"""
+    return _pinyin(name)
+
+
 def random_password(length=8):
     chars = string.ascii_letters + string.digits
     return ''.join(random.SystemRandom().choice(chars) for _ in range(length))

@@ -61,12 +61,25 @@ def _matrix_users(grade):
 
     v1.19.34.0：历史逻辑“已绑定 user_id 即可入选”会导致 admin 错配后一直显示在下拉里，
     现改为仅按角色过滤；已绑定但非教师类的行依旧可在矩阵中显示历史名字（由 _build_matrix 侧），
-    但下拉中不再提供 admin 作为新选择。"""
+    但下拉中不再提供 admin 作为新选择。
+    v1.19.35.0：候选**按老师名字首字母排序**（拼音 A→Z；无姓名时用账号拼音兜底）。"""
     valid = _teacher_candidates()
     if not valid:
         return []
-    rows = User.query.filter(User.id.in_(valid)).order_by(User.real_name).all()
-    return [{'id': u.id, 'name': u.real_name, 'username': u.username} for u in rows]
+    rows = User.query.filter(User.id.in_(valid)).all()
+    out = [{'id': u.id, 'name': u.real_name, 'username': u.username} for u in rows]
+    out.sort(key=lambda x: _name_sort_key(x['name'], x['username']))
+    return out
+
+
+def _name_sort_key(name, username):
+    """姓名 → 拼音排序键：(首字母, 全拼, 姓名)。
+
+    v1.19.35.0：用 pypinyin 把「付冰洋」排到 f、把「何楠」排到 h；
+    没有姓名（real_name 为空）的账号退化为用账号（pinyin）排序，仍保证稳定有序。"""
+    py = user_account.pinyin_of(name) if name else None
+    py = (py or '').lower() or (username or '').lower() or (name or '')
+    return (py[:1], py, name or '')
 
 
 # 2026-10-10：教务管理侧复用同一批视图函数（见 app/modules/academic/routes/teacher_links.py），
@@ -129,11 +142,33 @@ def teachers_get():
     })
 
 
+def _json_body():
+    """请求体 → dict（v1.19.35.0 兼容两种提交方式）。
+
+    背景：前端历史上用 `$.post(url, JSON.stringify({...}))`，jQuery 会以
+    `application/x-www-form-urlencoded` 发送**JSON 文本**，而 Flask 的
+    `request.get_json(silent=True)` 只认 `application/json` → 取到 None →
+    `cells` 为空 → 保存**静默失效**（页面还提示"已保存"）。
+    这里先按标准 JSON 解析，失败再兜底解析原始请求体里的 JSON 文本。
+    """
+    data = request.get_json(silent=True)
+    if isinstance(data, dict):
+        return data
+    raw = (request.get_data(as_text=True) or '').strip()
+    if raw.startswith('{'):
+        try:
+            data = json.loads(raw)
+        except (ValueError, TypeError):
+            return {}
+        return data if isinstance(data, dict) else {}
+    return {}
+
+
 @bp.route('/api/teachers/save', methods=['POST'])
 @login_required
 @perm_required('grades.teachers')
 def teachers_save():
-    data = request.get_json(silent=True) or {}
+    data = _json_body()
     grade = (data.get('grade') or '').strip()
     cells = data.get('cells') or {}    # {'01班|语文': user_id 或 ''}
     active = _all_active_grades()

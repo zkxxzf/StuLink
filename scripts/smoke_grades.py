@@ -506,6 +506,30 @@ with app.test_client() as c:
                for x in AffairRoom.query.filter_by(affair_id=_AFF_CUR).all()}
         check('容量落库 = 上一场 44', got == {'东211': 44}, got)
 
+    # ---- v1.19.35.0 任课教师映射：下拉按姓名首字母排序 + 保存不再静默失效 ----
+    # 排序键与后端一致：(拼音首字母, 全拼, 姓名)；无 pypinyin 时后端退化为账号（本身即拼音）
+    from app.modules.grades.services.user_account import pinyin_of as _py_of
+
+    def _nkey(u):
+        p = (_py_of(u['name']) if u.get('name') else None)
+        p = (p or '').lower() or (u.get('username') or '').lower() or (u.get('name') or '')
+        return (p[:1], p, u.get('name') or '')
+
+    _t = c.get('/grades/api/teachers', query_string={'grade': '2025级'}).get_json()
+    _tusers = (_t.get('data') or {}).get('users') or []
+    _keys = [_nkey(u) for u in _tusers]
+    check('教师下拉：按姓名首字母（拼音）排序', bool(_keys) and _keys == sorted(_keys),
+          _keys[:6])
+    _b = json.dumps({'grade': '2025级', 'cells': {'02班|地理': str(_tusers[0]['id'])}})
+    r = c.post('/grades/api/teachers/save', data=_b, headers={'X-CSRFToken': csrf})
+    d = r.get_json()
+    check('教师映射保存：表单型 JSON 也生效（原静默失效）',
+          d.get('success') is True and (d.get('changes') or {}).get('bound') == 1, d)
+    # 还原（把刚绑定的单元格清空 → 停用），避免影响后续用例
+    c.post('/grades/api/teachers/save',
+           data=json.dumps({'grade': '2025级', 'cells': {'02班|地理': ''}}),
+           headers={'X-CSRFToken': csrf})
+
     # ==================== 角色权限矩阵（9.2 后端强制） ====================
     from app.models import UserClassLink
     from app.models.user import User as U
