@@ -45,7 +45,33 @@
 {% block extra_js %}
 <script>
 $(function(){
-    var app = $('#tcApp'), cells = {}, usersStore = [];
+    var app = $('#tcApp'), cells = {}, usersStore = [], optsHtml = '';
+    function esc(s){
+        return String(s == null ? '' : s).replace(/[&<>"']/g, function(ch){
+            return {'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'}[ch];
+        });
+    }
+    function userOptHtml(u){
+        return '<option value="' + u.id + '">' + esc(u.name) +
+            (u.username ? '（' + esc(u.username) + '）' : '') + '</option>';
+    }
+    // 完整下拉项（全部教师）只拼一次字符串，避免每格重复构造
+    function buildOptsHtml(){
+        var buf = ['<option value="">— 未指定 —</option>'];
+        usersStore.forEach(function(u){ buf.push(userOptHtml(u)); });
+        return buf.join('');
+    }
+    // 单元格"轻量态"只放当前值一项：初见页面时把 1440×49 个 option 降到 1440 个
+    function singleOptHtml(v){
+        var u = v ? usersStore.filter(function(x){ return String(x.id) === String(v); })[0] : null;
+        return u ? userOptHtml(u) : '<option value="">— 未指定 —</option>';
+    }
+    // 悬停/聚焦时才按需注入完整下拉项（一个单元格只注入一次）
+    function hydrate(sel){
+        if (sel.attr('data-hydrated') === '1'){ return; }
+        sel.html(optsHtml).val(String(cells[sel.data('key')] == null ? '' : cells[sel.data('key')]));
+        sel.attr('data-hydrated', '1');
+    }
     function load(){
         var grade = $('#tcGrade').val();
         cells = {};
@@ -56,45 +82,41 @@ $(function(){
             $('#tcMsg').text('');
         }).fail(function(){ $('#tcMsg').text('加载失败'); });
     }
-    function buildUserOptions(sel, selected){
-        sel.empty().append('<option value="">— 未指定 —</option>');
-        usersStore.forEach(function(u){
-            sel.append($('<option value="' + u.id + '">' + u.name +
-                (u.username ? '（' + u.username + '）' : '') + '</option>'));
-        });
-        if (selected) sel.val(String(selected));
-        return sel;
-    }
     function renderMatrix(d){
         usersStore = d.users || [];
+        optsHtml = buildOptsHtml();
         var $head = $('#tcTable thead tr').empty()
             .append('<th style="min-width:90px;">科目</th>');
         d.classes.forEach(function(c){
             var th = $('<th class="text-center" style="min-width:120px;"></th>');
             th.append('<div class="d-flex align-items-center justify-content-center gap-1">' +
-                '<span>' + c + '</span>' +
+                '<span>' + esc(c) + '</span>' +
                 '<button type="button" class="btn btn-sm btn-outline-secondary colfill px-1 py-0" ' +
-                'data-cls="' + c + '" title="为该班全部科目批量指定同一教师（整列填充）">' +
+                'data-cls="' + esc(c) + '" title="为该班全部科目批量指定同一教师（整列填充）">' +
                 '<i class="bi bi-arrow-down"></i></button></div>');
             $head.append(th);
         });
-        var $tb = $('#tcTable tbody').empty();
+        // 性能优化：整表 tbody 一次性拼 HTML 写入（单次解析），远快于逐格 jQuery 构建
+        var rows = [];
         d.subjects.forEach(function(sub){
-            var tr = $('<tr>').append('<td><strong>' + sub + '</strong></td>');
+            var tds = ['<td><strong>' + esc(sub) + '</strong></td>'];
             d.classes.forEach(function(cls){
                 var key = cls + '|' + sub;
-                var cur = d.cells[key] ? d.cells[key].user_id : '';
-                cells[key] = cur || '';
-                var sel = buildUserOptions($('<select class="form-select form-select-sm tcell" data-key="' + key + '"></select>'), cur);
-                tr.append($('<td class="text-center">').append(sel));
+                var cur = d.cells[key] && d.cells[key].user_id != null ? String(d.cells[key].user_id) : '';
+                cells[key] = cur;
+                tds.push('<td class="text-center"><select class="form-select form-select-sm tcell" ' +
+                    'data-key="' + esc(key) + '">' + singleOptHtml(cur) + '</select></td>');
             });
-            $tb.append(tr);
+            rows.push('<tr>' + tds.join('') + '</tr>');
         });
+        $('#tcTable tbody').html(rows.join(''));
     }
     // 单元格改动（委托，避免重复绑定）
     $('#tcTable').on('change', '.tcell', function(){
         cells[$(this).data('key')] = $(this).val();
     });
+    // 悬停/聚焦时补全下拉项（原生 select 点击才展开，故悬停即预热，展开时已是完整列表）
+    $('#tcTable').on('mouseenter focus', '.tcell', function(){ hydrate($(this)); });
     // 整列填充：为该班全部科目指定同一教师（按姓名/账号匹配）
     $('#tcTable').on('click', '.colfill', function(){
         var cls = $(this).data('cls');
@@ -109,9 +131,12 @@ $(function(){
         var v = u ? String(u.id) : '';
         $('#tcTable tbody tr').each(function(){
             $(this).find('.tcell').each(function(){
-                if ($(this).data('key').indexOf(cls + '|') === 0){
-                    $(this).val(v);
-                    cells[$(this).data('key')] = v;
+                var $c = $(this);
+                if ($c.data('key').indexOf(cls + '|') === 0){
+                    // 轻量态下没有完整 option，直接改写为"单一当前值"并复位 hydrated，
+                    // 待下次悬停/聚焦时再按最新值重新补全，避免 val() 落空
+                    $c.html(singleOptHtml(v)).attr('data-hydrated', '0');
+                    cells[$c.data('key')] = v;
                 }
             });
         });

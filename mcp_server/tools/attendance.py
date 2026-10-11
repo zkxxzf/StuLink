@@ -7,10 +7,33 @@ from ..core import guards, respond, toolkit
 _STATUS_CODES = [code for code, _label in ATTENDANCE_STATUS]
 
 
+def _resolve_grade(user, class_name):
+    """班级名反查年级（网页端由下拉带出 grade，AI 常只给班级名）。
+
+    先按账号可见年级收窄候选；仍无法唯一确定时给出明确提示，避免误报"权限不足"。
+    """
+    from app.extensions import db
+    from app.models.student import Student
+    rows = (db.session.query(Student.grade)
+            .filter(Student.class_name == class_name).distinct().all())
+    grades = sorted({g for (g,) in rows if g})
+    if not grades:
+        raise ValueError(f'班级不存在：{class_name}（可用 list_classes 核对班级名）')
+    if len(grades) == 1:
+        return grades[0]
+    from app.modules.grades.services import scope as scope_service
+    visible = set(scope_service.visible_grades(user) or [])
+    narrowed = [g for g in grades if g in visible]
+    if len(narrowed) == 1:
+        return narrowed[0]
+    raise ValueError(f'班级 {class_name} 在多个年级存在（{"、".join(grades)}），请同时指定 grade')
+
+
 def _records(user, class_name, grade, date_from, date_to, page, per_page):
     from app.modules.workbench.services import attendance_service
     if not class_name:
         raise ValueError('必须指定 class_name（可用 list_classes 查询班级名）')
+    grade = grade or _resolve_grade(user, class_name)
     guards.class_scope(user, grade, class_name)
     pagination = attendance_service.get_attendance(
         class_name=class_name, grade=grade or None,
@@ -27,6 +50,7 @@ def _stats(user, class_name, grade, month):
     from app.modules.workbench.services import attendance_service
     if not class_name:
         raise ValueError('必须指定 class_name')
+    grade = grade or _resolve_grade(user, class_name)
     guards.class_scope(user, grade, class_name)
     return attendance_service.get_attendance_stats(class_name, grade=grade or None,
                                                    month=month or None)
@@ -104,7 +128,8 @@ def register(server):
                   'date_to': date_to, 'page': page, 'per_page': per_page}
         return await toolkit.db_call(
             lambda u: _records(u, class_name, grade, date_from, date_to, page, per_page),
-            tool='get_attendance_records', params=params)
+            tool='get_attendance_records', params=params,
+            perm='workbench.attendance_view')
 
     @server.tool(name='get_attendance_stats',
                  description='班级考勤统计：应到人数、出勤/缺勤/迟到/请假天数与出勤率；'
@@ -114,14 +139,16 @@ def register(server):
         return await toolkit.db_call(lambda u: _stats(u, class_name, grade, month),
                                      tool='get_attendance_stats',
                                      params={'class_name': class_name, 'grade': grade,
-                                             'month': month})
+                                             'month': month},
+                                     perm='workbench.attendance_view')
 
     @server.tool(name='get_student_attendance',
                  description='查询单个学生的考勤明细；month 格式 YYYY-MM，留空为全部')
     async def get_student_attendance(student_no: str, month: str = '') -> str:
         return await toolkit.db_call(lambda u: _student_records(u, student_no, month),
                                      tool='get_student_attendance',
-                                     params={'student_no': student_no, 'month': month})
+                                     params={'student_no': student_no, 'month': month},
+                                     perm='workbench.attendance_view')
 
     @server.tool(name='record_attendance',
                  description='【写操作】批量记录考勤。records 为对象数组，每项至少含 '
@@ -131,4 +158,5 @@ def register(server):
     async def record_attendance(records: list) -> str:
         return await toolkit.db_write(lambda u: _record(u, records),
                                       tool='record_attendance',
-                                      params={'count': len(records) if isinstance(records, list) else 0})
+                                      params={'count': len(records) if isinstance(records, list) else 0},
+                                      perm='workbench.attendance')

@@ -19,6 +19,7 @@ if ROOT not in sys.path:
     sys.path.insert(0, ROOT)
 
 from mcp_server import config                                        # noqa: E402
+from mcp_server.core import bootstrap, db as core_db                   # noqa: E402
 from mcp_server.run import build_asgi_app                             # noqa: E402
 
 PASS, FAIL = [], []
@@ -41,6 +42,25 @@ def check(name, text, expect_ok=True, must_contain=None):
     else:
         PASS.append(name)
         print(f'PASS  {name}')
+
+
+def _pick_restricted_username():
+    """挑一个"角色受限"的账号：班主任/任课教师 + 权限组班级范围 + 无用户级授权。
+
+    这类账号在网页端只能看本人班级/任课范围，用于验证 MCP 侧的权限点与角色矩阵。
+    """
+    from app.models.user import User
+    from app.modules.grades.services import scope as scope_service
+    cands = (User.query.filter(User.is_active.is_(True),
+                               User.role.in_(['homeroom_teacher', 'teacher']))
+             .order_by(User.id).limit(20).all())
+    for u in cands:
+        if scope_service.user_grade_scope(u) is not None:
+            continue
+        scope_type, _g = scope_service.get_scope(u)
+        if scope_type == 'class':
+            return u.username
+    return None
 
 
 async def main():
@@ -131,8 +151,54 @@ async def main():
               await call('get_attendance_stats', {'class_name': cls, 'grade': grade}))
         check('get_attendance_records',
               await call('get_attendance_records', {'class_name': cls, 'grade': grade}))
+        no_grade_text = await call('get_attendance_records', {'class_name': cls})
+        if '"ok": true' in no_grade_text:
+            PASS.append('get_attendance_records(省略 grade 按可见范围确定年级)')
+            print('PASS  get_attendance_records(省略 grade 自动反查年级)')
+        else:
+            check('get_attendance_records(省略 grade 多义时明确提示)',
+                  no_grade_text, expect_ok=False, must_contain=['请同时指定 grade'])
     else:
         print('注意：库中没有学生数据，跳过学生类工具检查')
+
+    # ── 数据范围与功能权限（需要库中存在受限角色账号） ────────────
+    restricted = None
+    try:
+        restricted = core_db.run(_pick_restricted_username)
+    except Exception as exc:                       # noqa: BLE001
+        print(f'注意：受限角色用例准备失败（{type(exc).__name__}），已跳过')
+    if restricted:
+        bootstrap.warm_up(restricted)
+        exams_text_r = await call('list_exams', {'limit': 1})
+        exam_id_r = None
+        try:
+            rows_r = (json.loads(exams_text_r).get('data') or {}).get('exams') or []
+            exam_id_r = rows_r[0]['id'] if rows_r else None
+        except Exception:                          # noqa: BLE001
+            exam_id_r = None
+        if exam_id_r:
+            check('受限账号：学科分析被角色矩阵拒绝',
+                  await call('get_subject_analysis', {'exam_id': exam_id_r}),
+                  expect_ok=False, must_contain=['无权'])
+            check('受限账号：班级对比被角色矩阵拒绝',
+                  await call('compare_classes', {'exam_id': exam_id_r,
+                                                 'class_names': '01班,02班'}),
+                  expect_ok=False, must_contain=['无权'])
+        else:
+            print('注意：受限账号看不到任何考试，跳过分析维度用例')
+        can_view_dorm = core_db.run(
+            lambda: bool(bootstrap.load_bound_user().has_perm('statistics.view')))
+        dorm_text = await call('get_dorm_stats', {})
+        if can_view_dorm:
+            check('受限账号：宿舍统计（该账号有 statistics.view，应允许）', dorm_text)
+        else:
+            check('受限账号：宿舍统计被权限点拒绝', dorm_text,
+                  expect_ok=False, must_contain=['权限'])
+        bootstrap.warm_up('admin')
+        check('切回 admin：宿舍统计恢复可用', await call('get_dorm_stats', {}),
+              must_contain=['total_rooms'])
+    else:
+        print('注意：未找到"班主任/任课教师 + 班级范围"的受限账号，跳过受限角色用例')
 
     # ── 安全与容错 ─────────────────────────────────────────────
     check('写工具被禁用时拒绝',

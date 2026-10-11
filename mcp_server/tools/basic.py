@@ -79,13 +79,19 @@ def _system_overview(user):
     from app.models.student import Student
     from app.models.user import User
     from app.models.grades import Exam
+    from app.modules.grades.services import scope
     student_q = _scope_filters(user, Student.query)
     total_students = student_q.count()
     grades = [_list_grades(user)]
+    # 账号总数仅管理员可见；考试总数按账号可见年级统计（与 list_exams 同口径）
+    exam_q = Exam.query
+    visible = scope.visible_grades(user)
+    if visible is not None:
+        exam_q = exam_q.filter(Exam.grade.in_(visible))
     return {
         'student_total': total_students,
-        'user_total': User.query.count(),
-        'exam_total': Exam.query.count(),
+        'user_total': User.query.count() if user.role == 'admin' else None,
+        'exam_total': exam_q.count(),
         'grades': grades[0],
     }
 
@@ -96,13 +102,15 @@ def register(server):
     @server.tool(name='list_grades',
                  description='列出年级清单及各年级学生人数（受账号数据范围限制）')
     async def list_grades() -> str:
-        return await toolkit.db_call(_list_grades, tool='list_grades')
+        return await toolkit.db_call(_list_grades, tool='list_grades',
+                                     perm='students.view')
 
     @server.tool(name='list_classes',
                  description='列出班级清单及各班学生人数，可选按年级筛选；传 grade 如 "2025级"')
     async def list_classes(grade: str = '') -> str:
         return await toolkit.db_call(lambda u: _list_classes(u, grade),
-                                     tool='list_classes', params={'grade': grade})
+                                     tool='list_classes', params={'grade': grade},
+                                     perm='students.view')
 
     @server.tool(name='search_students',
                  description='按姓名或学号模糊检索学生；可选按年级、班级收窄，' 
@@ -114,16 +122,18 @@ def register(server):
                   'class_name': class_name, 'limit': limit}
         return await toolkit.db_call(
             lambda u: _search_students(u, keyword, grade, class_name, limit),
-            tool='search_students', params=params)
+            tool='search_students', params=params, perm='students.view')
 
     @server.tool(name='get_student',
                  description='按学号查询单个学生详情（身份证号、电话已脱敏），'
                              '含住宿床位信息')
     async def get_student(student_no: str) -> str:
         return await toolkit.db_call(lambda u: _get_student(u, student_no),
-                                     tool='get_student', params={'student_no': student_no})
+                                     tool='get_student', params={'student_no': student_no},
+                                     perm='students.view')
 
     @server.tool(name='get_system_overview',
                  description='系统总览：学生总数、账号数、考试场次数、各年级人数分布')
     async def get_system_overview() -> str:
-        return await toolkit.db_call(_system_overview, tool='get_system_overview')
+        return await toolkit.db_call(_system_overview, tool='get_system_overview',
+                                     perm='students.view')

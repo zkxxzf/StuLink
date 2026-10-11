@@ -53,7 +53,7 @@ def _day_view(_user, schedule_id, target_date, grade, class_name):
         'date': data.get('date'), 'weekday_text': data.get('weekday_text'),
         'week': data.get('week'), 'current_period_number': data.get('current_period_number'),
         'total': data.get('total'),
-        'entries': respond.limit_rows(_flatten_entries(data.get('entries')), 400),
+        'entries': respond.limit_rows(_flatten_entries(data.get('entries'))),
     }
 
 
@@ -61,7 +61,7 @@ def _condense(data, who):
     """把课表视图压缩成"节次×星期"的扁平条目列表，便于模型阅读。"""
     return {'who': who, 'total': data.get('total'),
             'statistics': data.get('stats'),
-            'entries': respond.limit_rows(_flatten_entries(data.get('entries')), 400)}
+            'entries': respond.limit_rows(_flatten_entries(data.get('entries')))}
 
 
 def _flatten_entries(entries):
@@ -83,7 +83,8 @@ def register(server):
     @server.tool(name='list_schedules',
                  description='列出所有学期课表（含 id、学年、学期、状态、是否为当前学期）')
     async def list_schedules() -> str:
-        return await toolkit.db_call(_schedules, tool='list_schedules')
+        return await toolkit.db_call(_schedules, tool='list_schedules',
+                                     perm='academic.view')
 
     @server.tool(name='get_class_schedule',
                  description='查询某学期某班级的课表；week 为教学周序号（留空为全部周），'
@@ -94,7 +95,7 @@ def register(server):
                   'week': week, 'weekday': weekday}
         return await toolkit.db_call(
             lambda u: _class_view(u, schedule_id, grade, class_name, week, weekday),
-            tool='get_class_schedule', params=params)
+            tool='get_class_schedule', params=params, perm='academic.view')
 
     @server.tool(name='get_teacher_schedule',
                  description='查询某教师在某学期课表的全部任课条目；teacher_uid 为账号 id，'
@@ -105,7 +106,7 @@ def register(server):
                   'week': week, 'weekday': weekday}
         return await toolkit.db_call(
             lambda u: _teacher_view(u, schedule_id, teacher_uid, week, weekday),
-            tool='get_teacher_schedule', params=params)
+            tool='get_teacher_schedule', params=params, perm='academic.view')
 
     @server.tool(name='get_daily_schedule',
                  description='查询某一天的全校课表矩阵（可按年级/班级筛选）；'
@@ -116,4 +117,4 @@ def register(server):
                   'grade': grade, 'class_name': class_name}
         return await toolkit.db_call(
             lambda u: _day_view(u, schedule_id, target_date, grade, class_name),
-            tool='get_daily_schedule', params=params)
+            tool='get_daily_schedule', params=params, perm='academic.view')

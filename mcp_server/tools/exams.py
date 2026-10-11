@@ -8,7 +8,7 @@
 """
 from app.models.grades import TOTAL_SUBJECT, Exam, ExamScore
 
-from ..core import guards, respond, toolkit
+from ..core import examdata, guards, respond, toolkit
 
 
 def _visible_exam_query(user):
@@ -32,10 +32,10 @@ def _list_exams(user, grade, limit):
 
 
 def _exam_overview(user, exam_id):
-    from app.modules.grades.services import stats_service
     exam = guards.exam_or_raise(exam_id)
     guards.exam_scope(user, exam)
-    data = stats_service.cached_exam_data(exam.id)
+    guards.tab_scope(user, 'grade')
+    data = examdata.get_exam_data(exam.id)
 
     totals = [s.get('score') for s in data.snap.values()
               if isinstance(s.get('score'), (int, float))]
@@ -60,8 +60,15 @@ def _class_scores(user, exam_id, class_name):
     from app.modules.grades.services import stats_service
     exam = guards.exam_or_raise(exam_id)
     guards.exam_scope(user, exam)
-    data = stats_service.cached_exam_data(exam.id)
+    guards.tab_scope(user, 'class')
+    # 班级可见性过滤：受限账号（如班主任）只能看到本人所辖班级
+    allowed = guards.visible_class_names(user, exam.grade)
+    if allowed is not None and class_name and class_name not in allowed:
+        raise PermissionError(f'无权查看班级 {class_name} 的成绩（仅限本人所辖班级）')
+    data = examdata.get_exam_data(exam.id)
     summary = stats_service.class_summary_table(data)
+    if allowed is not None:
+        summary = [row for row in summary if row.get('class_name') in allowed]
     if class_name:
         summary = [row for row in summary if row.get('class_name') == class_name]
         if not summary:
@@ -69,7 +76,7 @@ def _class_scores(user, exam_id, class_name):
     for row in summary:
         row['subject_avg'] = _subject_avgs(data, row.get('class_name'))
     return {'exam_id': exam.id, 'exam_name': exam.name,
-            'classes': respond.limit_rows(summary, 60)}
+            'classes': respond.limit_rows(summary)}
 
 
 def _subject_avgs(data, class_name):
@@ -87,7 +94,6 @@ def _subject_avgs(data, class_name):
 
 def _student_scores(user, student_no, exam_id):
     """单个学生在指定考试的成绩；exam_id 传 0 时返回该生有成绩的考试清单。"""
-    from app.modules.grades.services import stats_service
     guards.find_student(student_no)
     guards.student_scope(user, student_no)
 
@@ -95,22 +101,25 @@ def _student_scores(user, student_no, exam_id):
         rows = (ExamScore.query
                 .filter_by(student_no=student_no, subject=TOTAL_SUBJECT)
                 .order_by(ExamScore.exam_id.desc()).limit(50).all())
-        exams = {e.id: e for e in Exam.query.filter(
-            Exam.id.in_([r.exam_id for r in rows])).all()} if rows else {}
+        exam_ids = [r.exam_id for r in rows]
+        # 只返回账号可见年级的考试（越界场次静默跳过，不泄露考试存在性）
+        exams = {e.id: e for e in _visible_exam_query(user).filter(
+            Exam.id.in_(exam_ids)).all()} if exam_ids else {}
         items = []
         for r in rows:
             exam = exams.get(r.exam_id)
             if exam is None:
                 continue
             items.append({'exam_id': r.exam_id,
-                          'exam_name': exam.name, 'exam_date': exam.exam_date.isoformat(),
+                          'exam_name': exam.name,
+                          'exam_date': exam.exam_date.isoformat() if exam.exam_date else None,
                           'total_score': r.score, 'rank_class': r.rank_class,
                           'rank_dir': r.rank_dir, 'move_rank': r.move_rank})
         return {'student_no': student_no, 'count': len(items), 'exams': items}
 
     exam = guards.exam_or_raise(exam_id)
     guards.exam_scope(user, exam)
-    data = stats_service.cached_exam_data(exam.id)
+    data = examdata.get_exam_data(exam.id)
     snap = data.snap.get(student_no)
     if snap is None:
         raise ValueError(f'该学生在考试 {exam.name} 中没有成绩记录')
@@ -133,7 +142,8 @@ def register(server):
         limit = max(1, min(int(limit or 20), 100))
         return await toolkit.db_call(lambda u: _list_exams(u, grade, limit),
                                      tool='list_exams',
-                                     params={'grade': grade, 'limit': limit})
+                                     params={'grade': grade, 'limit': limit},
+                                     perm='grades.view')
 
     @server.tool(name='get_exam_overview',
                  description='查询某场考试的概览：参考人数、总分均分/最高/最低、'
@@ -141,7 +151,8 @@ def register(server):
     async def get_exam_overview(exam_id: int) -> str:
         return await toolkit.db_call(lambda u: _exam_overview(u, exam_id),
                                      tool='get_exam_overview',
-                                     params={'exam_id': exam_id})
+                                     params={'exam_id': exam_id},
+                                     perm='grades.view')
 
     @server.tool(name='get_class_score_summary',
                  description='查询某场考试的班级成绩概况（各班级人数、均分、标准差、'
@@ -149,7 +160,8 @@ def register(server):
     async def get_class_score_summary(exam_id: int, class_name: str = '') -> str:
         return await toolkit.db_call(lambda u: _class_scores(u, exam_id, class_name),
                                      tool='get_class_score_summary',
-                                     params={'exam_id': exam_id, 'class_name': class_name})
+                                     params={'exam_id': exam_id, 'class_name': class_name},
+                                     perm='grades.view')
 
     @server.tool(name='get_student_scores',
                  description='查询学生成绩：传 exam_id 返回该场各科分数与排名；'
@@ -157,4 +169,5 @@ def register(server):
     async def get_student_scores(student_no: str, exam_id: int = 0) -> str:
         return await toolkit.db_call(lambda u: _student_scores(u, student_no, exam_id),
                                      tool='get_student_scores',
-                                     params={'student_no': student_no, 'exam_id': exam_id})
+                                     params={'student_no': student_no, 'exam_id': exam_id},
+                                     perm='grades.view')

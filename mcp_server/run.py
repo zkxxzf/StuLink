@@ -93,6 +93,14 @@ def build_asgi_app(cfg):
     return auth.BearerAuth(starlette_app, cfg['token']), server
 
 
+def _mask_token(token):
+    """启动横幅只显示令牌首尾片段，避免截图/日志泄露完整令牌。"""
+    text = token or ''
+    if len(text) <= 12:
+        return '****'
+    return f'{text[:6]}…{text[-4:]}'
+
+
 def _print_banner(cfg, me):
     """启动横幅：把客户端需要的信息一次印全，省得翻文档。"""
     host = cfg['host'] or '127.0.0.1'
@@ -103,7 +111,7 @@ def _print_banner(cfg, me):
         '  StuLink MCP 服务已启动',
         '',
         f"  接入地址 : {url}",
-        f"  访问令牌 : {cfg['token']}",
+        f"  访问令牌 : {_mask_token(cfg['token'])}（完整值见 mcp_server/config.json）",
         f"  执行身份 : {me['real_name']}（{me['username']}，{me['role']}）",
         f"  写操作   : {'允许' if cfg.get('allow_write') else '已禁用（allow_write=false）'}",
         '',

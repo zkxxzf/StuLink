@@ -49,8 +49,22 @@ def mask_secret(value, keep_head=3, keep_tail=4):
     return text[:keep_head] + '*' * (len(text) - keep_head - keep_tail) + text[-keep_tail:]
 
 
-def limit_rows(rows, max_rows, note=None):
-    """行数截断：超出上限时截断并附提示，避免把超大结果塞给模型。"""
+def row_limit(default=200):
+    """单次返回行数上限：读 config.json 的 max_rows（配置异常时回落默认值）。"""
+    from .. import config
+    try:
+        return max(1, int(config.load_config().get('max_rows') or default))
+    except Exception:  # noqa: BLE001  配置异常不应阻断工具返回
+        return default
+
+
+def limit_rows(rows, max_rows=None, note=None):
+    """行数截断：超出上限时截断并附提示，避免把超大结果塞给模型。
+
+    max_rows 留空时取 config.json 的 max_rows（默认 200）。
+    """
+    if max_rows is None:
+        max_rows = row_limit()
     if not isinstance(rows, list) or len(rows) <= max_rows:
         return rows
     return {

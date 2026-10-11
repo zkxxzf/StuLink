@@ -16,6 +16,7 @@ if ROOT not in sys.path:
 _app = None
 _uid = None          # 绑定账号的 id（不缓存 ORM 实例，避免跨 app context 持有分离对象）
 _username = None
+_info = None         # 绑定账号的展示信息（普通 dict，warm_up 幂等复用）
 
 
 def get_app():
@@ -28,11 +29,13 @@ def get_app():
 
 
 def warm_up(username):
-    """启动时预热：建 app、校验绑定账号存在且启用、缓存其 id。
+    """启动时预热：建 app、校验绑定账号存在且启用、缓存其 id（幂等，重复调用只查一次库）。
 
-    提前失败好于运行期第一次调用工具才报错。
+    提前失败好于运行期第一次调用工具才报错。切换账号名时会重新校验并更新缓存。
     """
-    global _uid, _username
+    global _uid, _username, _info
+    if _uid is not None and _username == username and _info is not None:
+        return dict(_info)
     from app.models.user import User
     app = get_app()
     with app.app_context():
@@ -44,8 +47,9 @@ def warm_up(username):
             raise RuntimeError(f'绑定账号 "{username}" 已停用，请更换 bind_user')
         _uid = user.id
         _username = username
-        return {'id': user.id, 'username': user.username,
-                'real_name': user.real_name, 'role': user.role}
+        _info = {'id': user.id, 'username': user.username,
+                 'real_name': user.real_name, 'role': user.role}
+        return dict(_info)
 
 
 def load_bound_user():

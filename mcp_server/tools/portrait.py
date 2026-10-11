@@ -26,7 +26,7 @@ def _comments(user, student_no):
     guards.student_scope(user, student_no)
     rows = agg.get_portrait_comments(student_no)
     return {'student_no': student_no, 'count': len(rows or []),
-            'comments': respond.limit_rows(rows or [], 100)}
+            'comments': respond.limit_rows(rows or [])}
 
 
 def _events(user, student_no):
@@ -35,7 +35,7 @@ def _events(user, student_no):
     guards.student_scope(user, student_no)
     rows = agg.get_portrait_events(student_no)
     return {'student_no': student_no, 'count': len(rows or []),
-            'events': respond.limit_rows(rows or [], 100)}
+            'events': respond.limit_rows(rows or [])}
 
 
 def _add_comment(user, student_no, content, comment_type, term):
@@ -82,21 +82,21 @@ def register(server):
                              '考勤、评语、事件')
     async def get_student_portrait(student_no: str) -> str:
         return await toolkit.db_call(lambda u: _detail(u, student_no),
-                                     tool='get_student_portrait',
+                                     tool='get_student_portrait', perm='portrait.view',
                                      params={'student_no': student_no})
 
     @server.tool(name='list_portrait_comments',
                  description='查询学生的评语列表（含撰写教师与时间）')
     async def list_portrait_comments(student_no: str) -> str:
         return await toolkit.db_call(lambda u: _comments(u, student_no),
-                                     tool='list_portrait_comments',
+                                     tool='list_portrait_comments', perm='portrait.view',
                                      params={'student_no': student_no})
 
     @server.tool(name='list_portrait_events',
                  description='查询学生的画像事件列表（奖惩、活动、谈话记录等）')
     async def list_portrait_events(student_no: str) -> str:
         return await toolkit.db_call(lambda u: _events(u, student_no),
-                                     tool='list_portrait_events',
+                                     tool='list_portrait_events', perm='portrait.view',
                                      params={'student_no': student_no})
 
     @server.tool(name='add_portrait_comment',
@@ -108,7 +108,7 @@ def register(server):
         params = {'student_no': student_no, 'comment_type': comment_type, 'term': term}
         return await toolkit.db_write(
             lambda u: _add_comment(u, student_no, content, comment_type, term),
-            tool='add_portrait_comment', params=params)
+            tool='add_portrait_comment', params=params, perm='portrait.edit')
 
     @server.tool(name='add_portrait_event',
                  description='【写操作】给学生新增画像事件。event_date 格式 YYYY-MM-DD，'
@@ -120,4 +120,4 @@ def register(server):
                   'event_type': event_type, 'event_date': event_date}
         return await toolkit.db_write(
             lambda u: _add_event(u, student_no, title, event_type, description, event_date),
-            tool='add_portrait_event', params=params)
+            tool='add_portrait_event', params=params, perm='portrait.edit')

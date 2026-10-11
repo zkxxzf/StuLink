@@ -357,8 +357,11 @@ def check_overview():
              f'年级={mh_grades} 含切回={("grades=" in mh)}')
         # 2026-10-10 用户要求：总课表不再显示教室（原 room=1 开关已去掉）
         r = c.get(u['overview'], query_string={'room': '1'})
+        # 2026-10-11 合并回归发现：静态资源 ?v= 取自文件 mtime，数字串可能恰好含「101」
+        # （实测 ?v=1791705101）导致本断言假阳性；比对前剔除版本串，只查真实渲染内容
+        _room_html = re.sub(r'\?v=\d+', '', r.get_data(as_text=True))
         case('总课表不显示教室（room=1 也不渲染）',
-             '101' not in r.get_data(as_text=True))
+             '101' not in _room_html)
         r = c.get(u['overview_index'], follow_redirects=False)
         case('总课表入口重定向', r.status_code in (301, 302)
              and '/overview' in r.headers.get('Location', ''))
