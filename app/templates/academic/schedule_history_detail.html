@@ -31,11 +31,12 @@
 
 <div class="row g-3 mb-3">
     <div class="col-6 col-xl-3">
-        <a class="card text-decoration-none h-100" href="{{ url_for('academic.schedule_master', sid=ts.id) }}">
+        {# 2026-10-10：「大课表」已下线，这张卡改成「全校总课表」（同一用途，历史学期同样可只读查看） #}
+        <a class="card text-decoration-none h-100" href="{{ url_for('academic.schedule_overview', sid=ts.id) }}">
             <div class="card-body text-center py-4">
-                <i class="bi bi-grid-3x3-gap text-primary" style="font-size:32px;"></i>
-                <div class="fw-bold mt-2">大课表</div>
-                <div class="text-muted small">全校总览（按年级）</div>
+                <i class="bi bi-list-columns-reverse text-primary" style="font-size:32px;"></i>
+                <div class="fw-bold mt-2">全校总课表</div>
+                <div class="text-muted small">行＝节次 · 列＝班级</div>
             </div>
         </a>
     </div>

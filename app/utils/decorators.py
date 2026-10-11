@@ -31,31 +31,13 @@ def perm_required(perm_key):
     return decorator
 
 
-def scope_required(checker=None, perm=None):
-    """R-1：统一数据范围装饰器（H-2/H-3/H-4 及后续新路由的唯一入口）
-
-    同类校验不写两份（清单第 0 节铁律②）：路由层不再内联 `if role == 'teacher'`
-    或各自拼 `student_in_scope`，统一走本装饰器 + `grades/services/scope.py`。
-
-    :param perm: 可选的功能权限 key（先鉴权，再校验数据范围）
-    :param checker: `checker(*args, **kwargs)`；返回 False 或抛 PermissionError
-                    视为越界 → 403；返回 True/None 放行
-    """
-    def decorator(f):
-        @wraps(f)
-        @login_required
-        def decorated_function(*args, **kwargs):
-            if perm and not current_user.has_perm(perm):
-                abort(403)
-            if checker is not None:
-                try:
-                    allowed = checker(*args, **kwargs)
-                except PermissionError:
-                    allowed = False
-                if allowed is False:
-                    abort(403)
-            return f(*args, **kwargs)
-        return decorated_function
-    return decorator
+# 2026-10-10 架构审计：此处的 `scope_required(checker, perm)` 已删除。
+# 它自 2026-09 定义后**从未被任何路由调用**（全仓库 grep 零命中），却在注释里
+# 自称「H-2/H-3/H-4 及后续新路由的唯一入口」—— 这种"定义了却零调用的机制"
+# 比没有机制更糟：它给维护者一种"已有防线"的错觉，实际各路由仍在内联
+# `if current_user.role == ...`（全仓库 79 处）。
+#
+# 如需重建统一入口，请连同路由层的内联判断一起改造（见 docs/架构审计报告_20261010.md
+# 第 4.1 C2 项），不要只加装饰器。
 
 

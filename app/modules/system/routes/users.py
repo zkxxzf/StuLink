@@ -270,22 +270,10 @@ def import_teachers():
         return redirect(url_for('users.list_users'))
 
     try:
-        import openpyxl.worksheet.datavalidation as dv
-        _orig_init = dv.DataValidation.__init__
-        def _patched_init(self, *a, **kw):
-            kw.pop('id', None)
-            _orig_init(self, *a, **kw)
-        dv.DataValidation.__init__ = _patched_init
-
-        import openpyxl
-        wb = openpyxl.load_workbook(file, data_only=True)
-        ws = wb.active
-
-        header_map = {}
-        for col in range(1, ws.max_column + 1):
-            val = ws.cell(row=1, column=col).value
-            if val:
-                header_map[str(val).strip()] = col
+        # 2026-10-10：改用公共 excel 读取层（含 openpyxl 兼容性 patch，幂等）
+        from app.utils.excel_patch import load_sheet, read_header_map
+        ws = load_sheet(file)
+        header_map = read_header_map(ws)
 
         phone_col = header_map.get('手机号')
         name_col = header_map.get('真实姓名')

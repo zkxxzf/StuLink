@@ -188,8 +188,10 @@ def build_pptx(tables):
             current_app.logger.warning(
                 'PPT 母版缺失（%s / %s 都不存在），本次导出退化为无装饰空白稿',
                 _TPL_CLEAN, _TPL_ORIG)
-        except Exception:
-            pass
+        except Exception as _e:  # noqa: BLE001
+            # 2026-10-11 修复：此处原误用裸 logger（未定义）会抛 NameError；current_app 已在上方 import
+            current_app.logger.warning(
+                'report_export_service.py::build_pptx 异常（已降级处理）: %s', _e)
         prs = Presentation()
         prs.slide_width = Inches(13.333)
         prs.slide_height = Inches(7.5)

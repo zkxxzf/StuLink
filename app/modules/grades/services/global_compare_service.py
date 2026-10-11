@@ -19,6 +19,12 @@ from app.modules.grades.services import report_service as rs
 from app.modules.grades.services import stats_service as st
 from app.modules.grades.utils import numeric_classes
 
+# 2026-10-10 架构审计修复：本文件原有静默 `except Exception: pass`，失败不可观测。
+# 统一加 logger 记录 warning（仅留痕，不改变任何降级行为与返回值）。
+import logging
+
+logger = logging.getLogger(__name__)
+
 # 方向展示顺序（物理在前，与汇报区 _DIR_PREFER 口径一致；无方向（全科）排最后）
 _DIR_ORDER = {'物理': 0, '历史': 1, '': 2}
 
@@ -134,8 +140,8 @@ def global_compare_report(exam_id, direction=''):
     try:
         for p in ClassProfile.query.filter_by(grade=data.exam.grade).all():
             live_ct[p.class_name] = p.class_type or ''
-    except Exception:  # noqa: BLE001  模型/库缺失时属性列留空，不阻断报表
-        pass
+    except Exception as _e:  # noqa: BLE001  模型/库缺失时属性列留空，不阻断报表
+        logger.warning('global_compare_service.py::global_compare_report 异常（已降级处理）: %s', _e)
 
     # 行集合：数字班（过滤 不分班/离校 等非教学班），保持班号顺序
     classes = numeric_classes(data.classes)

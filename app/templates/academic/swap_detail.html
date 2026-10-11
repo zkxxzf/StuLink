@@ -31,24 +31,25 @@
         <i class="bi bi-arrow-left-right"></i> 调课详情 #{{ d.id }}
         <span class="pill pill-{{ d.status }} ms-2">{{ d.status_text }}</span>
         <span class="badge bg-{% if d.swap_type == 'personal' %}info text-dark{% else %}secondary{% endif %} ms-1">{{ d.swap_type_text }}</span>
+        {% if d.is_batch %}<span class="badge bg-dark bg-opacity-75 ms-1"><i class="bi bi-collection"></i> 本批共 {{ d.batch_count }} 门课 · 一次审批整批生效</span>{% endif %}
     </h4>
     <div class="d-flex gap-2">
         <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('academic.swap_page') }}"><i class="bi bi-arrow-left"></i> 返回列表</a>
         {% if d.status == 'pending' %}
             {# 分级审批：只有当前这一级的审批人能看到通过/驳回 #}
             {% if d.can_review %}
-            <button class="btn btn-sm btn-success btn-approve"><i class="bi bi-check-lg"></i> 通过（{{ d.review_step_name }}）</button>
-            <button class="btn btn-sm btn-outline-warning btn-reject"><i class="bi bi-x-lg"></i> 驳回</button>
+            <button class="btn btn-sm btn-success btn-approve"><i class="bi bi-check-lg"></i> 通过（{{ d.review_step_name }}）{% if d.is_batch %} · 整批 {{ d.batch_count }} 门{% endif %}</button>
+            <button class="btn btn-sm btn-outline-warning btn-reject"><i class="bi bi-x-lg"></i> 驳回{% if d.is_batch %}（整批）{% endif %}</button>
             {% endif %}
-            {% if is_owner %}<button class="btn btn-sm btn-outline-danger btn-cancel"><i class="bi bi-arrow-counterclockwise"></i> 撤销</button>{% endif %}
+            {% if is_owner %}<button class="btn btn-sm btn-outline-danger btn-cancel"><i class="bi bi-arrow-counterclockwise"></i> 撤销{% if d.is_batch %}（整批）{% endif %}</button>{% endif %}
         {% elif d.status == 'approved' and is_reviewer %}
-            <button class="btn btn-sm btn-danger btn-execute"><i class="bi bi-lightning-charge"></i> 执行调课</button>
+            <button class="btn btn-sm btn-danger btn-execute"><i class="bi bi-lightning-charge"></i> 执行调课{% if d.is_batch %}（整批 {{ d.batch_count }} 门）{% endif %}</button>
         {% endif %}
     </div>
 </div>
 
 {% if d.status == 'approved' and is_reviewer %}
-<div class="alert alert-warning py-2 small"><i class="bi bi-exclamation-triangle"></i> 该申请已通过审核，<b>执行后将真正修改课表</b>（永久调课会软删除原条目并生成新条目；临时调课会新增当天安排），且不可重复执行。</div>
+<div class="alert alert-warning py-2 small"><i class="bi bi-exclamation-triangle"></i> 该申请已通过审核，<b>执行后将真正修改课表</b>（永久调课会软删除原条目并生成新条目；临时调课会新增当天安排），且不可重复执行。{% if d.is_batch %}本批 {{ d.batch_count }} 门课会一起执行。{% endif %}</div>
 {% endif %}
 
 <div class="row g-3 mb-3">
@@ -94,6 +95,39 @@
         </div>
     </div>
 </div>
+
+{# ── 统一调课批次成员（列表里整批只占一条记录，明细在这里看）── #}
+{% if d.is_batch %}
+<div class="card mb-3">
+    <div class="card-header py-2 d-flex justify-content-between align-items-center flex-wrap gap-2">
+        <span><i class="bi bi-collection"></i> 统一调课批次：本批共 {{ d.batch_count }} 门课</span>
+        <span class="small text-muted">通过 / 驳回 / 撤销 / 执行一次即整批生效，不必逐条审批</span>
+    </div>
+    <div class="card-body py-2">
+        <div class="table-responsive" style="max-height:360px;overflow:auto">
+            <table class="table table-sm table-hover align-middle mb-0 small">
+                <thead class="table-light">
+                    <tr><th style="width:44px">#</th><th>学科</th><th>班级</th>
+                        <th>原时段</th><th>目标时段</th><th>状态</th></tr>
+                </thead>
+                <tbody>
+                {% for m in d.batch_members %}
+                <tr {% if m.is_current %}class="table-primary bg-opacity-25"{% endif %}>
+                    <td class="text-muted">{{ loop.index }}</td>
+                    <td class="fw-semibold">{{ m.subject or '（原条目已删）' }}</td>
+                    <td>{{ m.class or '-' }}{% if m.teacher %}<div class="text-muted">{{ m.teacher }}</div>{% endif %}</td>
+                    <td class="text-muted">{{ m.original_slot or '-' }}</td>
+                    <td>{{ m.target_slot or '-' }}{% if m.keep_text %}<span class="badge bg-light text-dark border ms-1" style="font-size:10px">{{ m.keep_text }}</span>{% endif %}</td>
+                    <td><span class="pill pill-{{ m.status }}">{{ m.status_text }}</span>
+                        {% if m.target_entry_id %}<div class="text-muted">条目 #{{ m.target_entry_id }}</div>{% endif %}</td>
+                </tr>
+                {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+{% endif %}
 
 {# ── 审批链路（分级审批：经过谁、谁审了、什么意见）── #}
 <div class="card mb-3">
@@ -227,7 +261,8 @@
     "approveUrl": {{ url_for('academic.swap_approve', swap_id=d.id)|tojson }},
     "rejectUrl": {{ url_for('academic.swap_reject', swap_id=d.id)|tojson }},
     "executeUrl": {{ url_for('academic.swap_execute', swap_id=d.id)|tojson }},
-    "cancelUrl": {{ url_for('academic.swap_cancel', swap_id=d.id)|tojson }}
+    "cancelUrl": {{ url_for('academic.swap_cancel', swap_id=d.id)|tojson }},
+    "batchCount": {{ d.batch_count }}
 }
 </script>
 {% endblock %}
@@ -246,9 +281,11 @@
             alert(m);
         });
     }
-    $('.btn-approve').on('click', function () { if (confirm('确认通过该调课申请？')) post(cfg.approveUrl, { review_note: '' }); });
-    $('.btn-execute').on('click', function () { if (confirm('执行后将真正修改课表且不可重复执行，确认执行？')) post(cfg.executeUrl, {}); });
-    $('.btn-cancel').on('click', function () { if (confirm('确认撤销这条调课申请？')) post(cfg.cancelUrl, {}); });
+    // 统一调课批次：一次操作即整批生效，确认文案带上"共 N 门"
+    var what = (cfg.batchCount > 1) ? ('该统一调课批次（共 ' + cfg.batchCount + ' 门课）') : '该调课申请';
+    $('.btn-approve').on('click', function () { if (confirm('确认通过' + what + '？')) post(cfg.approveUrl, { review_note: '' }); });
+    $('.btn-execute').on('click', function () { if (confirm('确认执行' + what + '？执行后将真正修改课表且不可重复执行。')) post(cfg.executeUrl, {}); });
+    $('.btn-cancel').on('click', function () { if (confirm('确认撤销' + what + '？')) post(cfg.cancelUrl, {}); });
     var rj = null;
     $('.btn-reject').on('click', function () { $('#rejectNote').val(''); rj = new bootstrap.Modal('#rejectModal'); rj.show(); });
     $('#rejectConfirm').on('click', function () {

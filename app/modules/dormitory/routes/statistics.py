@@ -15,6 +15,12 @@ import io
 import uuid
 import time
 
+# 2026-10-10 架构审计修复：本文件原有静默 `except Exception: pass`，失败不可观测。
+# 统一加 logger 记录 warning（仅留痕，不改变任何降级行为与返回值）。
+import logging
+
+logger = logging.getLogger(__name__)
+
 bp = Blueprint('statistics', __name__, url_prefix='/statistics')
 
 SCOPE_CLASS = 'class'    # 班主任：只看所管班级
@@ -346,8 +352,8 @@ def dormitory_history():
             ).fetchall()
             graduated_grades = [g[0] for g in grades if g[0]]
             conn.close()
-        except Exception:
-            pass
+        except Exception as _e:  # noqa: BLE001
+            logger.warning('statistics.py::dormitory_history 异常（已降级处理）: %s', _e)
 
     search_grade = request.args.get('grade', '')
     search_room = request.args.get('room_number', '').strip()
@@ -419,8 +425,8 @@ def alumni():
             ).fetchall()
             graduated_grades = [g[0] for g in grades if g[0]]
             conn.close()
-        except Exception:
-            pass
+        except Exception as _e:  # noqa: BLE001
+            logger.warning('statistics.py::alumni 异常（已降级处理）: %s', _e)
 
     search_grade = request.args.get('grade', '')
     search_room = request.args.get('room_number', '').strip()

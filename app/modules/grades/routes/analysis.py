@@ -3,7 +3,8 @@
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 import hashlib
 
-from flask import render_template, request, redirect, url_for, jsonify, abort
+from flask import (render_template, request, redirect, url_for, jsonify, abort,
+                   current_app)  # current_app 为 2026-10-11 修复 L163 未定义引用所补
 from flask_login import login_required, current_user
 from app.models.grades import Exam, TeacherSubjectLink
 from app.models import Student
@@ -148,8 +149,9 @@ def api_options():
                                               ExamTeacherLink.class_name)
                             .distinct().all()):
                 tmp.setdefault(eid, set()).add(cn)
-        except Exception:
-            pass        # 旧库无任课快照表时只靠学生名册
+        except Exception as _e:  # noqa: BLE001
+            # 旧库无任课快照表时只靠学生名册；留 debug 便于排查（2026-10-11 审计补）
+            current_app.logger.debug('任课快照表不可用，按学生名册取班级: %s', _e)
         classes_by_exam = {str(k): numeric_classes(list(v)) for k, v in tmp.items()}
     except Exception as e:
         current_app.logger.warning(f'按考试取班级失败: {e}')

@@ -17,6 +17,11 @@ from app.modules.grades.utils import delete_cache_prefix, invalidate_exam_cache
 from app.utils.decorators import perm_required
 from app.utils.helpers import log_operation
 
+# 2026-10-10 架构审计修复：本文件原有静默 `except Exception: pass`，失败不可观测。
+# 统一加 logger 记录 warning（仅留痕，不改变任何降级行为与返回值）。
+
+logger = logging.getLogger(__name__)
+
 # 模板定义：[(层名, ratio%)]
 TEMPLATES = {
     '4': [('优秀', 20), ('良好', 60), ('及格', 95), ('待提升', 0)],
@@ -46,8 +51,8 @@ def _log():
             fh.setFormatter(logging.Formatter('%(asctime)s [%(levelname)s] %(message)s',
                                               '%m-%d %H:%M:%S'))
             lg.addHandler(fh)
-        except Exception:            # 日志不可写不能影响业务
-            pass
+        except Exception as _e:  # noqa: BLE001  日志不可写不能影响业务
+            logger.warning('bands.py::_log 日志处理器初始化失败: %s', _e)
     return lg
 
 

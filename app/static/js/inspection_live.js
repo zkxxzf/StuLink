@@ -14,8 +14,18 @@
     var RESULT_TEXT = { normal: '正常', late: '迟到', absent: '缺课', swap: '调课', other: '其他' };
 
     function notify(msg, type) {
-        if (typeof window.toast === 'function') { window.toast(msg, type || 'success'); }
-        else { window.alert(msg); }
+        if (typeof window.toast === 'function') { window.toast(msg, type || 'success'); return; }
+        // 2026-10-10：轻量 toast（单击即标记会高频触发，不能用 alert 打断巡课）
+        var color = type === 'danger' ? '#dc2626' : (type === 'warning' ? '#b45309'
+            : (type === 'secondary' ? '#64748b' : '#059669'));
+        var $t = $('<div></div>').text(msg).css({
+            position: 'fixed', top: '72px', left: '50%', transform: 'translateX(-50%)',
+            zIndex: 3000, background: '#fff', color: color, border: '1px solid ' + color,
+            borderLeft: '4px solid ' + color, borderRadius: '8px', padding: '8px 14px',
+            boxShadow: '0 6px 20px rgba(15,23,42,.12)', fontSize: '13px', maxWidth: '80vw'
+        });
+        $('body').append($t);
+        setTimeout(function () { $t.fadeOut(220, function () { $(this).remove(); }); }, 1600);
     }
 
     /* ── 时钟 ── */
@@ -101,64 +111,86 @@
         });
     }
 
-    /* ── 标记面板 ── */
-    var $current = null;
-    function openMark($el) {
-        $current = $el;
-        var meta = ($el.data('subject') || '未填学科') + ' · ' + ($el.data('teacher') || '未指定教师');
-        $('#markMeta').html('<div class="fw-bold">' + $el.data('grade') + $el.data('class')
-            + ' · 第 ' + $el.data('period') + ' 节</div><div class="text-muted">' + meta + '</div>');
-        var cur = $el.attr('data-check') || '';
-        $('#markHint').text(cur ? ('当前：' + RESULT_TEXT[cur] + '（点下面按钮可改）')
-            : '把这次巡课看到的实际情况点一下即可');
-        if (String($el.data('temp')) === '1') {
-            $('#markHint').append(' · 该节课表上是当天临时调课');
-        }
-        $('#markNote').val($el.data('note') || '');
-        var el = document.getElementById('markModal');
-        if (el && window.bootstrap && window.bootstrap.Modal) {
-            window.bootstrap.Modal.getOrCreateInstance(el).show();
-        }
+    /* ── 快速标记（2026-10-10 改版）──────────────────────────────────
+       单击 = 正常；双击 = 迟到；右键 = 更多（缺课 / 调课 / 迟到说明 / 其他 / 撤销）。
+       原先每次都要"点格子 → 弹面板 → 再点按钮"，二次操作太慢；现在单/双击直达，
+       需要写原因的（如迟到几分钟）走右键。 */
+    function cellPayload($el, result, note) {
+        return {
+            grade: $el.data('grade'), class_name: $el.data('class'),
+            period_number: $el.data('period'), entry_id: $el.data('entry'),
+            subject: $el.data('subject'), teacher_uid: $el.data('uid'),
+            teacher_name: $el.data('teacher'), result: result, note: note || ''
+        };
     }
 
-    $('#liveContainer').on('click', '.ovw-item[data-check]', function () { openMark($(this)); });
-
-    $('#markModal .mark-btn').on('click', function () {
-        if (!$current || !$current.length) { return; }
-        var result = $(this).data('result');
-        var note = ($('#markNote').val() || '').trim();
-        var cell = {
-            grade: $current.data('grade'), class_name: $current.data('class'),
-            period_number: $current.data('period'), entry_id: $current.data('entry'),
-            subject: $current.data('subject'), teacher_uid: $current.data('uid'),
-            teacher_name: $current.data('teacher'), result: result, note: note
-        };
-        post([cell], function () {
-            $current.data('note', note);
-            var el = document.getElementById('markModal');
-            if (el && window.bootstrap && window.bootstrap.Modal) {
-                window.bootstrap.Modal.getOrCreateInstance(el).hide();
-            }
-            notify('已标记：' + (RESULT_TEXT[result] || result));
+    function markCell($el, result, note) {
+        if (!$el || !$el.length) { return; }
+        post([cellPayload($el, result, note)], function () {
+            $el.data('note', note || '');
+            applyResult($el, result, note || '');
+            if (result) { notify('已标记：' + (RESULT_TEXT[result] || result)); }
+            else { notify('已撤销该格标记', 'warning'); }
         });
+    }
+
+    // 单击 vs 双击：单击延迟 260ms 执行，期间若再来一击则判为双击（迟到）
+    var clickTimer = null;
+    $('#liveContainer').on('click', '.ovw-item[data-check]', function () {
+        var $el = $(this);
+        if (clickTimer) {
+            clearTimeout(clickTimer); clickTimer = null;
+            markCell($el, 'late', $el.data('note') || '');
+            return;
+        }
+        clickTimer = setTimeout(function () {
+            clickTimer = null;
+            markCell($el, 'normal', $el.data('note') || '');
+        }, 260);
     });
 
-    $('#btnClearMark').on('click', function () {
-        if (!$current || !$current.length) { return; }
-        var cell = {
-            grade: $current.data('grade'), class_name: $current.data('class'),
-            period_number: $current.data('period'), entry_id: $current.data('entry'),
-            result: ''
-        };
-        post([cell], function () {
-            $current.data('note', '');
-            var el = document.getElementById('markModal');
-            if (el && window.bootstrap && window.bootstrap.Modal) {
-                window.bootstrap.Modal.getOrCreateInstance(el).hide();
-            }
-            notify('已撤销该格标记', 'warning');
+    /* ── 右键菜单：缺课 / 调课 / 迟到说明 / 其他 / 撤销 ── */
+    var $menu = null;
+    function closeMenu() { if ($menu) { $menu.remove(); $menu = null; } }
+    function openMenu($el, x, y) {
+        closeMenu();
+        $menu = $('<div class="chk-menu"></div>').css({ left: x + 'px', top: y + 'px' });
+        var items = [
+            ['normal', '正常', 'success'],
+            ['late', '迟到', 'warning'],
+            ['late-note', '迟到说明…（如迟到 5 分钟）', 'warning'],
+            ['absent', '缺课', 'danger'],
+            ['swap', '调课', 'primary'],
+            ['other', '其他', 'secondary'],
+            ['clear', '撤销标记', 'secondary']
+        ];
+        items.forEach(function (it) {
+            $('<button type="button" class="chk-menu-item"></button>')
+                .addClass('text-' + it[2])
+                .text(it[1])
+                .on('click', function () {
+                    var key = it[0];
+                    closeMenu();
+                    if (key === 'clear') { markCell($el, '', ''); return; }
+                    if (key === 'late-note') {
+                        var n = window.prompt('迟到说明（如：迟到 5 分钟）', $el.data('note') || '');
+                        if (n === null) { return; }
+                        markCell($el, 'late', n);
+                        return;
+                    }
+                    markCell($el, key, $el.data('note') || '');
+                })
+                .appendTo($menu);
         });
+        $('body').append($menu);
+    }
+    $('#liveContainer').on('contextmenu', '.ovw-item[data-check]', function (ev) {
+        ev.preventDefault();
+        openMenu($(this), ev.pageX, ev.pageY);
     });
+    $(document).on('click', function () { closeMenu(); });
+    $(window).on('scroll', closeMenu);
+    $(document).on('keydown', function (e) { if (e.keyCode === 27) { closeMenu(); } });
 
     /* ── 一键：当前页面未标记的全部正常（巡课一圈点一下）── */
     $('#btnMarkAllNormal').on('click', function () {
@@ -177,6 +209,76 @@
         post(cells, function (res) {
             notify('已标记 ' + (res.updated || 0) + ' 格为正常');
         });
+    });
+
+    /* ── 本节保存 + 通知领导（2026-10-10）──
+       选中某一节次：本节所有班都查完 → 直接保存并提示；
+       还有未查的 → 弹窗让用户决定是否把情况站内通知课表管理员（领导）。 */
+    function periodCells(pn) {
+        return $('#liveContainer .ovw-item[data-check][data-period="' + pn + '"]');
+    }
+    function periodStat(pn) {
+        var $cells = periodCells(pn);
+        var unchecked = [];
+        $cells.each(function () {
+            var $el = $(this);
+            if (!($el.attr('data-check') || '')) {
+                unchecked.push({ grade: $el.data('grade'), class_name: $el.data('class') });
+            }
+        });
+        return { expected: $cells.length, unchecked: unchecked,
+                 checked: $cells.length - unchecked.length };
+    }
+
+    var saveTarget = null;
+    function doNotify(stat) {
+        $.ajax({ url: cfg.notifyUrl, type: 'POST', contentType: 'application/json',
+                 data: JSON.stringify({ inspect_date: cfg.date, period: saveTarget.pn,
+                                        grade: $('#gradePick').val() || '',
+                                        expected: stat.expected, checked: stat.checked,
+                                        unchecked: stat.unchecked }) })
+            .done(function (res) {
+                if (res && res.success) { notify(res.message || '已通知领导', 'warning'); }
+                else { notify((res && res.message) || '通知失败', 'danger'); }
+            })
+            .fail(function (xhr) {
+                var m = '通知失败';
+                try { m = (xhr.responseJSON && xhr.responseJSON.message) || m; } catch (e) { /* 忽略 */ }
+                notify(m, 'danger');
+            });
+    }
+
+    $('#btnSavePeriod').on('click', function () {
+        var pn = $('#periodPick').val();
+        if (!pn) { notify('请先选择节次', 'secondary'); return; }
+        var label = $('#periodPick option:selected').text();
+        var stat = periodStat(pn);
+        if (!stat.expected) { notify('本节没有排课，无需保存', 'secondary'); return; }
+        if (!stat.unchecked.length) {
+            notify('本节「' + label + '」' + stat.expected + ' 个班已全部查完，已保存', 'success');
+            return;
+        }
+        saveTarget = { pn: pn, label: label };
+        $('#savePeriodText').html('本节「' + label + '」共 <b>' + stat.expected + '</b> 个班，'
+            + '已查 <b>' + stat.checked + '</b> 个，还有 <b>' + stat.unchecked.length + '</b> 个未查。'
+            + '<div class="text-muted mt-1">是否把未查情况通知领导（有课表管理权限的账号）？</div>');
+        if (window.bootstrap && window.bootstrap.Modal) {
+            window.bootstrap.Modal.getOrCreateInstance(document.getElementById('savePeriodModal')).show();
+        } else { doNotify(stat); }
+    });
+    $('#btnSaveNoNotify').on('click', function () {
+        if (window.bootstrap && window.bootstrap.Modal) {
+            window.bootstrap.Modal.getOrCreateInstance(document.getElementById('savePeriodModal')).hide();
+        }
+        notify('已暂存（未通知领导）', 'secondary');
+    });
+    $('#btnSaveNotify').on('click', function () {
+        if (!saveTarget) { return; }
+        var stat = periodStat(saveTarget.pn);
+        if (window.bootstrap && window.bootstrap.Modal) {
+            window.bootstrap.Modal.getOrCreateInstance(document.getElementById('savePeriodModal')).hide();
+        }
+        doNotify(stat);
     });
 
     recount();

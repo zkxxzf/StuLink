@@ -2,6 +2,7 @@
 # 成绩统计分析服务：一次载入考试成绩数据，提供各 tab 需要的聚合（纯函数 + 内存计算）
 # 口径遵循设计文档第 8 章：参考学生=有总分行（至少一应考科有分），不分学籍状态
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
+import logging
 import math
 import statistics
 import threading
@@ -12,6 +13,9 @@ from sqlalchemy import func
 
 from app.models.grades import Exam, ExamScore, ExamBand, SUBJECTS, TOTAL_SUBJECT, \
     subjects_of_selection
+
+# 2026-10-11 审计：为缓存清理路径的异常留痕提供 logger
+logger = logging.getLogger(__name__)
 
 
 def _stddev(values):
@@ -68,8 +72,9 @@ def _detach_shared(data):
     for o in objs:
         try:
             db.session.expunge(o)
-        except InvalidRequestError:
-            pass  # 本就不在该会话中，忽略
+        except InvalidRequestError as _e:  # noqa: BLE001
+            # 2026-10-11 审计：对象本就不在会话中属预期，降为 debug 留痕（原为静默 pass）
+            logger.debug('expunge 跳过（对象不在当前会话）: %s', _e)
 
 
 def clear_exam_data_cache():

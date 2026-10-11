@@ -51,24 +51,46 @@
                 </div>
             </div>
 
+            {# 2026-10-10：目标群体=指定学科时的学科勾选（汇总为 target_scope JSON），只让所选学科的人可填 #}
+            <div class="mb-3" id="subjectBox" style="display:none">
+                <label class="form-label">指定学科</label>
+                <div class="border rounded p-2">
+                    {% for s in (subject_options or []) %}
+                    <div class="form-check form-check-inline">
+                        <input class="form-check-input subject-check" type="checkbox"
+                               value="{{ s }}" id="subjectOpt{{ loop.index }}">
+                        <label class="form-check-label" for="subjectOpt{{ loop.index }}">{{ s }}</label>
+                    </div>
+                    {% else %}
+                    <div class="text-muted small">暂无可选学科（教师档案中没有学科数据），请先维护教师名单。</div>
+                    {% endfor %}
+                </div>
+                <div class="form-text">仅所选学科的教师可填写；至少勾选一个。</div>
+            </div>
+            <input type="hidden" name="target_scope" id="targetScopeInput"
+                   value="{{ (form_data.target_scope or '') if form_data else '' }}">
+
             <div class="mb-3">
                 <label class="form-label">描述说明</label>
                 <textarea name="description" class="form-control" rows="2" maxlength="500"
                           placeholder="简要说明表单目的和填写要求">{{ form_data.description if form_data else '' }}</textarea>
             </div>
 
+            <div class="text-muted small fw-bold mb-1">
+                <i class="bi bi-calendar-range"></i> 收集时间窗（发布后作为第 1 轮的时间窗，可在提交列表页逐轮调整 / 重新开放）
+            </div>
             <div class="row">
                 <div class="col-md-3 mb-3">
                     <label class="form-label">开始时间</label>
                     <input type="datetime-local" name="start_time" class="form-control"
                            value="{{ form_data.start_time if form_data else '' }}">
-                    <div class="form-text">留空表示立即开始</div>
+                    <div class="form-text">留空 = 立即开始；到点后自动开放</div>
                 </div>
                 <div class="col-md-3 mb-3">
                     <label class="form-label">截止时间</label>
                     <input type="datetime-local" name="deadline" class="form-control"
                            value="{{ form_data.deadline if form_data else '' }}">
-                    <div class="form-text">留空表示无截止</div>
+                    <div class="form-text">留空 = 不设截止</div>
                 </div>
                 <div class="col-md-3 mb-3">
                     <label class="form-label">文件大小限制 (MB)</label>
@@ -95,7 +117,7 @@
             <div class="form-check form-switch mb-3">
                 <input class="form-check-input" type="checkbox" name="to_achievement" value="1"
                        id="toAchievementSwitch"
-                       {% if form_data and form_data.to_achievement %}checked{% endif %}>
+                       {% if (form_data and form_data.to_achievement) or (not form_data and preset_ach) %}checked{% endif %}>
                 <label class="form-check-label" for="toAchievementSwitch">
                     审核通过后，自动为每位教师生成一条业绩记录
                 </label>
@@ -190,6 +212,58 @@ window.FORM_CONFIG = {
 
 {% block extra_js %}
 <script>
+// 指定学科：勾选结果写入 hidden target_scope（{"subjects":[...]}），编辑模式回显；切换目标群体自动显隐
+(function () {
+    var sel = document.getElementById('targetTypeSelect');
+    var box = document.getElementById('subjectBox');
+    var hidden = document.getElementById('targetScopeInput');
+    if (!sel || !box || !hidden) { return; }
+    var checks = Array.prototype.slice.call(box.querySelectorAll('.subject-check'));
+    var preset = {{ ((form_data.target_scope if form_data else '') or '')|tojson }};
+
+    function subjectsOf(raw) {
+        try { var o = JSON.parse(raw || '{}'); return (o && o.subjects) ? o.subjects : []; }
+        catch (e) { return []; }
+    }
+    function isSubject() { return (sel.value || '') === 'subject'; }
+    function checkedVals() {
+        return checks.filter(function (c) { return c.checked; })
+                     .map(function (c) { return c.value; });
+    }
+    function sync() {
+        if (isSubject()) {
+            hidden.value = JSON.stringify({ subjects: checkedVals() });
+        } else if ((hidden.value || '').indexOf('"subjects"') >= 0) {
+            hidden.value = '';      // 从「指定学科」切走后不留脏数据
+        }
+    }
+    function toggle() {
+        var on = isSubject();
+        box.style.display = on ? '' : 'none';
+        if (on) { sync(); }
+    }
+
+    var presetVals = subjectsOf(preset);
+    if (presetVals.length) {
+        checks.forEach(function (c) { c.checked = presetVals.indexOf(c.value) >= 0; });
+    }
+    sel.addEventListener('change', toggle);
+    checks.forEach(function (c) { c.addEventListener('change', sync); });
+    toggle();
+
+    var form = document.getElementById('formBuilderForm');
+    if (form) {
+        form.addEventListener('submit', function (e) {
+            if (isSubject() && checkedVals().length === 0) {
+                e.preventDefault();
+                alert('已选择「指定学科」，请至少勾选一个学科');
+                return;
+            }
+            sync();
+        });
+    }
+})();
+
 (function () {
     var sel = document.getElementById('achTitleQuestionSelect');
     if (!sel) { return; }

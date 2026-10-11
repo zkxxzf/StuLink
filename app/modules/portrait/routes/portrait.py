@@ -5,7 +5,7 @@ from flask import Blueprint, render_template, request, jsonify, abort, flash, re
 from flask_login import login_required, current_user
 
 from app.utils.decorators import perm_required
-from app.utils.helpers import log_operation
+from app.utils.helpers import log_operation, to_int, to_date
 from app.modules.portrait.services import portrait_service
 
 bp = Blueprint('portrait', __name__, url_prefix='/portrait')
@@ -50,7 +50,7 @@ def index():
     grade = (request.args.get('grade') or '').strip()
     class_name = (request.args.get('class_name') or '').strip()
     level = (request.args.get('level') or '').strip()
-    page = int(request.args.get('page') or 1)
+    page = to_int(request.args.get('page'), 1)
 
     result = portrait_service.get_student_list(
         grade=grade or None,
@@ -214,6 +214,10 @@ def add_event():
 
     if not student_no or not title or not event_date:
         return jsonify(success=False, message='学号、标题和日期不能为空')
+    # 2026-10-11 审计：日期格式非法时返回明确错误，避免 strptime 抛 ValueError 变 500
+    parsed_date = to_date(event_date)
+    if not parsed_date:
+        return jsonify(success=False, message='事件日期格式不正确')
     _assert_student_in_scope(student_no)     # H-3：写接口同样校验范围
 
     result = portrait_service.add_event(
@@ -221,7 +225,7 @@ def add_event():
         event_type=event_type,
         title=title,
         description=description,
-        event_date=event_date,
+        event_date=parsed_date,
         evidence=data.get('evidence'),
         created_by=current_user.id,
     )
@@ -269,8 +273,8 @@ def api_list():
     grade = (request.args.get('grade') or '').strip()
     class_name = (request.args.get('class_name') or '').strip()
     level = (request.args.get('level') or '').strip()
-    page = int(request.args.get('page') or 1)
-    per_page = int(request.args.get('per_page') or 20)
+    page = to_int(request.args.get('page'), 1)
+    per_page = to_int(request.args.get('per_page'), 20)
 
     result = portrait_service.get_student_list(
         grade=grade or None,

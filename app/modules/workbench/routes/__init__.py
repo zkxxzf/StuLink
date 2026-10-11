@@ -15,7 +15,8 @@ from app.models.academic import (TeacherAchievement, Teacher,
                                  ACHIEVEMENT_STATUS)
 from app.models.timetable import (ScheduleEntry,  # 调课（2026-10-09：改读 timetable.db 的在用的表）
                                   ScheduleSwap, TermSchedule)
-from app.modules.academic.services import schedule_service, teacher_service
+from app.modules.academic.services import (schedule_service, swap_service,
+                                          teacher_service)
 from app.modules.academic.services.access_scope import (
     visible_academic_class_scope, visible_academic_grades)
 from app.utils.decorators import perm_required
@@ -68,10 +69,21 @@ def index():
         # 2026-10-09：改读 timetable.db 的 ScheduleSwap —— 调课模块 2026-09 起已整表迁到
         # timetable.db；旧的 CourseSwap 表（读它会一直显示"没有待审调课"）已废弃，
         # 并已于 2026-10-10 随教务分库删除。
+        # 2026-10-10：统一调课整批折叠成一条（与 /academic/swap 列表同口径），
+        # 否则一次批量申请就把这里刷成 10 条一模一样的记录。
         rows = (ScheduleSwap.query
                 .filter_by(applicant_uid=teacher.teacher_uid, status='pending')
+                .filter(swap_service.batch_rep_filter())
                 .order_by(ScheduleSwap.created_at.desc())
                 .limit(10).all())
+        batch_ids = [sw.batch_id for sw in rows if sw.batch_id]
+        if batch_ids:
+            _bc = dict(db.session.query(ScheduleSwap.batch_id,
+                                        db.func.count(ScheduleSwap.id))
+                       .filter(ScheduleSwap.batch_id.in_(batch_ids))
+                       .group_by(ScheduleSwap.batch_id).all())
+        else:
+            _bc = {}
         pending_swaps = []
         for sw in rows:
             orig = (db.session.get(ScheduleEntry, sw.original_entry_id)
@@ -79,6 +91,7 @@ def index():
             pending_swaps.append({
                 'id': sw.id,
                 'swap_type': sw.swap_type,
+                'batch_count': _bc.get(sw.batch_id, 1) if sw.batch_id else 1,
                 'original_subject': orig.subject if orig else '（原条目已删）',
                 'original_class': f'{orig.grade}{orig.class_name}' if orig else '',
                 'original_date': sw.source_date or sw.swap_date,

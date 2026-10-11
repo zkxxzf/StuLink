@@ -226,7 +226,9 @@ INSPECTION_RESULTS = [
 # ── 表单收集系统 ──────────────────────────────────────────────
 
 FORM_STATUS = {'draft': '草稿', 'open': '进行中', 'closed': '已关闭', 'archived': '已归档'}
-FORM_TARGET_TYPES = {'all': '全体', 'teachers': '教师', 'students': '学生', 'grade': '指定年级'}
+# 2026-10-10：新增 subject=按学科定向收集（target_scope 存 {"subjects": [...] } 或裸 list）
+FORM_TARGET_TYPES = {'all': '全体', 'teachers': '教师', 'students': '学生',
+                     'grade': '指定年级', 'subject': '指定学科'}
 QUESTION_TYPES = [
     ('text', '单行文本'), ('textarea', '多行文本'), ('single_choice', '单选'),
     ('multi_choice', '多选'), ('file', '文件上传'), ('date', '日期'), ('number', '数字'),

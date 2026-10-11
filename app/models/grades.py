@@ -2,9 +2,15 @@
 # 成绩管理与可视化分析系统：数据模型（独立库 grades.db）
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 import json
+import logging
 import re
 from datetime import datetime
 from app.extensions import db
+
+# 2026-10-10 架构审计：本模块解析 JSON 配置时原有静默 except，配置损坏时
+# 会悄悄回落到默认值（页面照常显示，但满分/配置其实没生效）。用 debug 级留痕
+# —— 属低频数据问题，不宜 warning 刷屏。
+logger = logging.getLogger(__name__)
 
 # ============ 科目常量（与字典 exam_subject 预置值保持一致） ============
 SUBJECTS = ['语文', '数学', '外语', '物理', '历史', '化学', '生物', '政治', '地理']
@@ -180,7 +186,12 @@ class Exam(db.Model):
     def get_config(self):
         try:
             cfg = json.loads(self.config_json or '{}')
-        except (json.JSONDecodeError, TypeError):
+        except (json.JSONDecodeError, TypeError) as _e:
+            # 2026-10-10：此处返回空 dict 会让**该考试的 band_width / full_marks /
+            # rank_bands 等全部配置静默失效**（页面照常渲染，数值却不是用户设的）。
+            # 属数据损坏，用 warning 留痕（降级行为不变）。
+            logger.warning('考试 %s 的 config_json 解析失败，本次全部配置回落默认值: %s',
+                           self.id, _e)
             cfg = {}
         return cfg
 
@@ -191,7 +202,9 @@ class Exam(db.Model):
         cfg = self.get_config()
         try:
             return int(cfg.get('band_width', 30))
-        except (TypeError, ValueError):
+        except (TypeError, ValueError) as _e:
+            logger.debug('考试 %s 的 band_width 配置非法（%r），沿用默认 30: %s',
+                         self.id, cfg.get('band_width'), _e)
             return 30
 
     def rank_bands(self):
@@ -206,7 +219,10 @@ class Exam(db.Model):
         fm = self.full_marks().get(subject, 100)
         try:
             sl = (self.get_config().get('subject_lines') or {}).get(subject) or {}
-        except AttributeError:
+        except AttributeError as _e:
+            # 配置结构异常（subject_lines 不是 dict 类型）→ 回落按满分比例（行为不变）
+            logger.debug('考试 %s 的 subject_lines 配置结构异常（科目 %s）: %s',
+                         self.id, subject, _e)
             sl = {}
         return {
             'excellent': sl.get('excellent', fm * 0.9),
@@ -241,8 +257,10 @@ class Exam(db.Model):
             if k in fm and v:
                 try:
                     fm[k] = float(v)
-                except (TypeError, ValueError):
-                    pass
+                except (TypeError, ValueError) as _e:
+                    # 配置值非法 → 保留默认满分（行为不变），仅 debug 留痕
+                    logger.debug('考试 %s 的科目满分配置非法（%s=%r），沿用默认值: %s',
+                                 self.id, k, v, _e)
         return fm
 
     __table_args__ = (

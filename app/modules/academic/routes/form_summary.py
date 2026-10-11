@@ -14,6 +14,7 @@ from app.extensions import db
 from app.models.academic import FormTemplate
 from app.modules.academic import bp
 from app.modules.academic.services import form_summary_service as svc
+from app.modules.academic.services import form_service
 from app.utils.decorators import perm_required
 from app.utils.helpers import log_operation
 from app.utils.err_safe import safe_error   # M-12
@@ -61,7 +62,8 @@ def form_summary_page(form_id):
     scope_options = svc.get_scope_options(form_id)
     return render_template('academic/form_summary.html',
                            tpl=tpl, stats=stats, scope_options=scope_options,
-                           rounds=svc.get_remind_rounds(form_id))
+                           rounds=svc.get_remind_rounds(form_id),
+                           cur_round=form_service.current_round(tpl))
 
 
 @bp.route('/forms/<int:form_id>/table')
@@ -80,13 +82,14 @@ def form_table_page(form_id):
 @login_required
 @perm_required('academic.edit')
 def form_missing_page(form_id):
-    """未提交名单页"""
+    """未提交名单页（按当前轮口径）"""
     tpl = _tpl_or_404(form_id)
     stats = svc.get_submission_stats(form_id)
     scope_options = svc.get_scope_options(form_id)
     return render_template('academic/form_missing.html',
                            tpl=tpl, stats=stats, scope_options=scope_options,
-                           rounds=svc.get_remind_rounds(form_id))
+                           rounds=svc.get_remind_rounds(form_id),
+                           cur_round=form_service.current_round(tpl))
 
 
 @bp.route('/forms/<int:form_id>/files')

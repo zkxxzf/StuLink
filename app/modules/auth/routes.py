@@ -12,6 +12,11 @@ from urllib.parse import urlparse
 import logging
 import time
 
+# 2026-10-10 架构审计修复：本文件原有静默 `except Exception: pass`，失败不可观测。
+# 统一加 logger 记录 warning（仅留痕，不改变任何降级行为与返回值）。
+
+logger = logging.getLogger(__name__)
+
 _sec_logger = logging.getLogger('stulink.auth')
 
 bp = Blueprint('auth', __name__)
@@ -25,11 +30,14 @@ _LOGIN_ACCT_LOCK_SECONDS = 900    # 触发后锁定时长（15 分钟）
 
 
 def _is_safe_redirect(target):
-    """验证重定向目标是否安全（M-13：只允许站内相对路径）
+    r"""验证重定向目标是否安全（M-13：只允许站内相对路径）
 
     旧实现问题：① 放行 `/\evil.com`（浏览器会把反斜杠当斜杠 → 外跳）；
     ② `netloc == ''` 时放行 `javascript:` / `data:` 等伪协议（无 netloc）。
     现在：必须是单个斜杠开头的相对路径、不含反斜杠、无 scheme、无 netloc。
+
+    2026-10-10：改为 raw docstring —— 原文 `/\evil.com` 里的 \e 会被解析成非法
+    转义序列，每次导入都刷 SyntaxWarning 污染日志；加 r 前缀后文本语义不变。
     """
     if not target:
         return False
@@ -88,8 +96,8 @@ def login():
             try:
                 from flask_wtf.csrf import generate_csrf
                 generate_csrf()
-            except Exception:  # noqa: BLE001
-                pass
+            except Exception as _e:  # noqa: BLE001
+                logger.warning('routes.py::login 异常（已降级处理）: %s', _e)
             log_operation(user, '登录', '用户', user.id, f'{user.real_name} 登录系统')
             flash(f'欢迎回来，{user.real_name}！', 'success')
             next_page = request.args.get('next')

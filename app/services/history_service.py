@@ -1,9 +1,13 @@
 """寝室分配历史记录服务 — 静默失败，不阻塞主业务"""
 import json
+import logging
 from datetime import datetime
 
 from app.models.assignment_history import AssignmentHistory
 from app.extensions import db
+
+# 2026-10-11 审计：为历史写入失败留痕提供 logger
+logger = logging.getLogger(__name__)
 
 
 def _current_semester():
@@ -47,8 +51,9 @@ def record_history(target_type, action_type, student, operator=None,
             detail=json.dumps(detail, ensure_ascii=False) if detail else None,
         )
         db.session.add(record)
-    except Exception:
-        pass  # 静默失败，绝不阻塞主业务
+    except Exception as _e:  # noqa: BLE001
+        # 2026-10-11 审计：写历史失败不阻塞主业务，但需留痕（原为静默 pass）
+        logger.warning('住宿变迁历史写入失败（不阻塞主业务）: %s', _e)
 
 
 def record_batch(records):

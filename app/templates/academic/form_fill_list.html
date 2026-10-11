@@ -10,34 +10,57 @@
     </a>
 </div>
 
+{# 2026-10-10：按「当前轮」呈现（轮次名 / 限时状态 / 本轮是否已交）；已截止的不再列出 #}
 <div class="row g-3">
-    {% for tpl in templates %}
+    {% for item in (fill_items or []) %}
+    {% set tpl = item.tpl %}
+    {% set rnd = item.rnd %}
+    {% set st = item.state or 'open' %}
+    {% set st_cls = {'open': 'bg-success', 'before': 'bg-primary', 'expired': 'bg-secondary'}.get(st, 'bg-success') %}
     <div class="col-md-6 col-lg-4">
-        <div class="card h-100 {% if tpl.id in submitted_ids %}border-success{% endif %}">
+        <div class="card h-100 {% if item.submitted and not tpl.allow_multiple %}border-success{% endif %}">
             <div class="card-body">
                 <div class="d-flex justify-content-between align-items-start mb-2">
                     <h5 class="card-title mb-0">{{ tpl.title }}</h5>
-                    {% if tpl.id in submitted_ids %}
+                    {% if item.submitted and not tpl.allow_multiple %}
                     <span class="badge bg-success">已提交</span>
                     {% endif %}
                 </div>
                 {% if tpl.description %}
                 <p class="card-text text-muted small">{{ tpl.description[:100] }}{% if tpl.description|length > 100 %}...{% endif %}</p>
                 {% endif %}
-                <div class="small text-muted mb-2">
+                <div class="small text-muted mb-2 d-flex flex-wrap align-items-center gap-2">
                     {% if tpl.category %}
-                    <span class="badge bg-secondary me-1">{{ tpl.category }}</span>
+                    <span class="badge bg-secondary">{{ tpl.category }}</span>
                     {% endif %}
-                    {% if tpl.deadline %}
-                    <i class="bi bi-clock"></i> 截止：{{ tpl.deadline.strftime('%m-%d %H:%M') }}
+                    <span class="badge {{ st_cls }}">{{ {'open': '进行中', 'before': '未开始', 'expired': '已截止'}.get(st, '进行中') }}</span>
+                    {# 2026-10-10：48 小时内截止且本轮未交 → 醒目标注，避免错过 #}
+                    {% if not item.submitted and item.deadline and now is defined and now
+                          and item.deadline > now and (item.deadline - now).total_seconds() <= 172800 %}
+                    <span class="badge bg-danger">即将截止</span>
+                    {% endif %}
+                    {% if rnd %}
+                    <span><i class="bi bi-collection"></i> 第{{ rnd.round_no }}轮{% if rnd.name %}·{{ rnd.name }}{% endif %}</span>
+                    {% endif %}
+                </div>
+                <div class="small text-muted">
+                    {% if item.start %}
+                    <div><i class="bi bi-play-circle"></i> 开始：{{ item.start.strftime('%m-%d %H:%M') }}</div>
+                    {% endif %}
+                    {% if item.deadline %}
+                    <div><i class="bi bi-clock"></i> 截止：{{ item.deadline.strftime('%m-%d %H:%M') }}</div>
                     {% else %}
-                    <i class="bi bi-infinity"></i> 无截止
+                    <div><i class="bi bi-infinity"></i> 不设截止</div>
                     {% endif %}
                 </div>
             </div>
             <div class="card-footer bg-transparent">
-                {% if tpl.id in submitted_ids and not tpl.allow_multiple %}
-                <span class="text-success small"><i class="bi bi-check-circle"></i> 您已提交此表单</span>
+                {% if item.submitted and not tpl.allow_multiple %}
+                <span class="text-success small"><i class="bi bi-check-circle"></i> 您已提交本轮收集</span>
+                {% elif st == 'before' %}
+                <button type="button" class="btn btn-sm btn-secondary w-100" disabled>
+                    <i class="bi bi-hourglass-split"></i> 未开始{% if item.start %}（{{ item.start.strftime('%m-%d %H:%M') }} 开放）{% endif %}
+                </button>
                 {% else %}
                 <a class="btn btn-sm btn-primary w-100" href="{{ url_for('academic.form_fill', form_id=tpl.id) }}">
                     <i class="bi bi-pencil"></i> 填写表单

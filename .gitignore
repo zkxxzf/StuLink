@@ -51,6 +51,8 @@ venv/
 .encryption_key
 data/.secret_key
 data/.encryption_key
+# MCP 服务配置（含访问令牌，禁止提交）
+mcp_server/config.json
 
 # 运行日志与测试缓存（勿提交）
 *.log

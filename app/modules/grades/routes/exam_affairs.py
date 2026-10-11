@@ -10,6 +10,8 @@ import random
 from datetime import date, datetime
 
 import openpyxl
+# 2026-10-10：批量统计房间数需要 func.count（消除 N+1）
+from sqlalchemy import func
 from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
 from flask import (render_template, request, jsonify, abort, redirect,
                    url_for, send_file, flash, current_app)
@@ -125,13 +127,32 @@ def affairs_overview():
     if grade:
         q = q.filter_by(grade=grade)
     affairs = q.order_by(ExamAffair.created_at.desc(), ExamAffair.id.desc()).all()
+    # 2026-10-10 架构审计修复：原实现每个批次都查一次 AffairStudent + 一次
+    # AffairRoom.count()（N+1）。批次一多就是首屏瓶颈。
+    # 改为一次性取出全部学生并按批次分组 + 一次性 group_by 统计房间数。
+    # stats 的字段与计算口径完全不变。
+    _affair_ids = [a.id for a in affairs]
+    _stus_by_affair = {}
+    if _affair_ids:
+        for _s in AffairStudent.query.filter(
+                AffairStudent.affair_id.in_(_affair_ids)).all():
+            _stus_by_affair.setdefault(_s.affair_id, []).append(_s)
+    _room_count_by_affair = {}
+    if _affair_ids:
+        _room_count_by_affair = {
+            row[0]: row[1] for row in db.session.query(
+                AffairRoom.affair_id, func.count(AffairRoom.id)
+            ).filter(AffairRoom.affair_id.in_(_affair_ids)
+                     ).group_by(AffairRoom.affair_id).all()
+        }
+
     stats = {}
     for a in affairs:
-        stus = AffairStudent.query.filter_by(affair_id=a.id).all()
+        stus = _stus_by_affair.get(a.id, [])
         stats[a.id] = {
             'students': len(stus),
             'attend': sum(1 for s in stus if s.is_attend),
-            'rooms': AffairRoom.query.filter_by(affair_id=a.id).count(),
+            'rooms': _room_count_by_affair.get(a.id, 0),
             'arranged': sum(1 for s in stus if s.room_no),
             'linked': bool(a.exam_id),
         }

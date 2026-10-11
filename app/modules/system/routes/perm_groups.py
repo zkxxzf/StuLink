@@ -13,6 +13,9 @@
 from flask import (Blueprint, render_template, request, jsonify)
 from flask_login import current_user
 
+# 2026-10-10：按权限组批量统计用户数需要 func.count（消除 N+1）
+from sqlalchemy import func
+
 from app.extensions import db
 from app.models import PermissionGroup, User, DictCategory, UserDataScope
 from app.models.permission_group import invalidate_group_menu_cache
@@ -38,12 +41,24 @@ def _all_grades():
 def manage():
     """权限管理主页（两张表格：功能权限 + 数据范围）"""
     groups = PermissionGroup.query.order_by(PermissionGroup.id).all()
+    # 2026-10-10 架构审计修复：原实现每个权限组都 count 一次用户（N+1）。
+    # 改为一次性 group_by 统计；user_count 语义完全不变。
+    _gid_list = [g.id for g in groups]
+    _ucount = {}
+    if _gid_list:
+        _ucount = {
+            row[0]: row[1] for row in db.session.query(
+                User.permission_group_id, func.count(User.id)
+            ).filter(
+                User.permission_group_id.in_(_gid_list)
+            ).group_by(User.permission_group_id).all()
+        }
     group_rows = []
     for g in groups:
         group_rows.append({
             'g': g,
             'levels': keys_to_item_levels(g.get_menu_keys()),
-            'user_count': User.query.filter_by(permission_group_id=g.id).count(),
+            'user_count': _ucount.get(g.id, 0),
             'protected': g.name in PROTECTED_GROUP_NAMES,
         })
 

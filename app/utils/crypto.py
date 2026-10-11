@@ -15,6 +15,12 @@ from cryptography.hazmat.primitives import padding
 from config import BASE_DIR
 
 
+# 2026-10-10：logger 必须先于 _get_encryption_key() 定义 ——
+# 该函数在模块加载时即被调用（下方 _ENCRYPTION_KEY 初始化），若 logger 在其后定义，
+# 密钥读写失败时记日志会触发 NameError，反而把「历史密文无法解密」的高危分支掩盖掉。
+_log = logging.getLogger('stulink.crypto')
+
+
 def _get_encryption_key():
     """获取加密密钥：环境变量 > 持久化文件 > 自动生成"""
     env_key = os.environ.get('ENCRYPTION_KEY', '').strip()
@@ -25,21 +31,24 @@ def _get_encryption_key():
         if os.path.exists(key_file):
             with open(key_file, 'rb') as f:
                 return f.read()
-    except Exception:
-        pass
+    except Exception as _e:  # noqa: BLE001
+        # 2026-10-10：绝不能在日志里打印密钥内容。此处失败将落到下方"生成新密钥"，
+        # 而新密钥会让**全部历史密文永久无法解密**，属高危分支，必须留痕告警。
+        _log.error('读取加密密钥文件失败(%s)：将生成新密钥，历史加密数据可能永久无法解密: %s',
+                   key_file, _e)
     new_key = secrets.token_bytes(32)
     os.makedirs(os.path.dirname(key_file), exist_ok=True)
     try:
         with open(key_file, 'wb') as f:
             f.write(new_key)
-    except Exception:
-        pass
+    except Exception as _e:  # noqa: BLE001
+        _log.error('写入加密密钥文件失败(%s)：进程重启后密钥将变化，历史密文可能无法解密: %s',
+                   key_file, _e)
     return new_key
 
 
 # 全局密钥（模块加载时初始化）
 _ENCRYPTION_KEY = _get_encryption_key()
-_log = logging.getLogger('stulink.crypto')
 
 
 class DecryptError(ValueError):

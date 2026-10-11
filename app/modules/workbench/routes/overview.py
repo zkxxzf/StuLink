@@ -5,6 +5,7 @@ from flask import Blueprint, render_template, request, jsonify, abort
 from flask_login import login_required, current_user
 
 from app.utils.decorators import perm_required
+from app.utils.helpers import to_int
 from app.modules.academic.services import teacher_service
 from app.modules.workbench.services import class_overview_service as svc
 from app.modules.workbench.services import scope as wb_scope
@@ -63,7 +64,7 @@ def students_page():
     if not wb_scope.class_allowed(current_user, grade, class_name):
         abort(403)
     search = request.args.get('search', '').strip()
-    page = int(request.args.get('page', 1))
+    page = to_int(request.args.get('page'), 1)
 
     result = svc.get_students_by_class(grade, class_name, search=search or None, page=page)
     return render_template('workbench/students.html',
@@ -85,8 +86,8 @@ def students_api():
         return jsonify({'error': '无权访问该班级数据'}), 403
 
     search = request.args.get('search', '').strip()
-    page = int(request.args.get('page', 1))
-    per_page = int(request.args.get('per_page', 30))
+    page = to_int(request.args.get('page'), 1)
+    per_page = to_int(request.args.get('per_page'), 30)
 
     result = svc.get_students_by_class(grade, class_name, search=search or None,
                                        page=page, per_page=per_page)

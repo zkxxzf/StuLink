@@ -329,13 +329,14 @@ with app.test_client() as c:
     r = c.get('/workbench/')
     check('无权限角色可访问工作台', r.status_code == 200)
 
-    # ---- 10) 已下线功能：教室课表 / 旧版课表 / 教务端我的课表 / 任课安排
-    #          （2026-10-10 整功能删除，地址应 404；我的课表搬到教师工作台，
-    #           教师-学科关系统一由「任课教师映射」维护） ----
+    # ---- 10) 已下线功能：教室课表 / 旧版课表 / 教务端我的课表 / 任课安排 /
+    #          晚自习值班（2026-10-10 整功能删除，晚自习在全校总课表里呈现；
+    #          我的课表搬到教师工作台，教师-学科关系统一由「任课教师映射」维护） ----
     for url in ('/academic/timetable', '/academic/timetable/import',
                 '/academic/schedule/rooms', '/academic/schedule/1/room',
                 '/academic/my-schedule',
                 '/academic/duty', '/academic/duty/export', '/academic/api/duty',
+                '/academic/night-duty', '/academic/schedule/1/night-duty',
                 '/academic/schedule/1/night-duty/auto'):
         r = c.get(url)
         check(f'已下线地址 404：{url}', r.status_code == 404, f'status={r.status_code}')

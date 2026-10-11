@@ -14,6 +14,12 @@
 """
 from app.extensions import db
 
+# 2026-10-10 架构审计修复：本文件原有静默 `except Exception: pass`，失败不可观测。
+# 统一加 logger 记录 warning（仅留痕，不改变任何降级行为与返回值）。
+import logging
+
+logger = logging.getLogger(__name__)
+
 
 # ── 班级 ────────────────────────────────────────────────────────────────────
 
@@ -96,8 +102,8 @@ def teacher_teaching_scope(teacher_uid, schedule_id=None):
             for g, c, s in rows:
                 if g and c and (not active or (g, c) in active):
                     out.append((g, c, s or ''))
-        except Exception:  # noqa: BLE001  grades 库不可用时回退课表
-            pass
+        except Exception as _e:  # noqa: BLE001  grades 库不可用时回退课表
+            logger.warning('teaching_scope_service.py::teacher_teaching_scope 异常（已降级处理）: %s', _e)
     if out:
         return sorted(set(out))
 
@@ -143,8 +149,8 @@ def teachers_of_class(grade, class_name, schedule_id=None):
             t = tmap.get(u)
             if t:
                 result[t.teacher_uid] = (t.teacher_uid, t.name, s or t.subject or '')
-    except Exception:  # noqa: BLE001
-        pass
+    except Exception as _e:  # noqa: BLE001
+        logger.warning('teaching_scope_service.py::teachers_of_class 异常（已降级处理）: %s', _e)
 
     from app.models.timetable import ScheduleEntry
     q = ScheduleEntry.query.filter(ScheduleEntry.grade == grade,

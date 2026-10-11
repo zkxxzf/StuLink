@@ -111,7 +111,10 @@ def academic_home():
     }
     is_reviewer = (current_user.role == 'admin' or
                    current_user.has_perm('academic.timetable'))
-    swap_q = ScheduleSwap.query.filter_by(status='pending')
+    # 2026-10-10：待审数按批次折叠（与 /academic/swap 列表、待审徽章同一口径）——
+    # 一次统一调课 260 门课在待办里也只能算 1 件，不能把审批人吓死
+    from app.modules.academic.services.swap_service import batch_rep_filter
+    swap_q = ScheduleSwap.query.filter_by(status='pending').filter(batch_rep_filter())
     if not is_reviewer:
         if current_user.has_perm('academic.swap'):
             from app.modules.academic.services.teacher_service import teacher_of_user

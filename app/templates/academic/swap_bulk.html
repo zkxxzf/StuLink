@@ -10,11 +10,22 @@
     .st-idle { color: #94a3b8; font-size: 12px; }
     .sel-summary { background: #eff6ff; border: 1px solid #bfdbfe; border-radius: 8px; padding: 8px 12px; font-size: 13px; color: #1e40af; }
     .conflict-table td { font-size: 13px; }
+    /* 2026-10-10：加载出的课程列表加滚动条（课程多时不再把整页撑得很长），表头吸附 */
+    .entry-scroll { max-height: 340px; overflow: auto; border: 1px solid #eef2f7; border-radius: 8px; }
+    .entry-scroll thead th { position: sticky; top: 0; z-index: 2; background: #f8f9fa; }
 </style>
 {% endblock %}
 {% block content %}
-<div class="d-flex justify-content-between align-items-center mb-3">
-    <h4 class="fw-bold mb-0"><i class="bi bi-collection"></i> 统一调课</h4>
+<div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
+    <div class="d-flex align-items-center gap-2 flex-wrap">
+        <h4 class="fw-bold mb-0"><i class="bi bi-collection"></i> 统一调课</h4>
+        {# 2026-10-10：显式标出"操作的是哪张课表"——避免页面悄悄绑到历史学期 #}
+        {% if schedule %}
+        <span class="badge bg-primary bg-opacity-75 fw-normal">
+            <i class="bi bi-calendar-check"></i> 当前生效学期：{{ schedule.name }}
+        </span>
+        {% endif %}
+    </div>
     <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('academic.swap_page') }}">
         <i class="bi bi-arrow-left"></i> 返回列表
     </a>
@@ -69,7 +80,7 @@
                 <button type="button" class="btn btn-sm btn-primary w-100" id="btnLoad"><i class="bi bi-search"></i> 加载课程</button>
             </div>
         </div>
-        <div class="table-responsive">
+        <div class="table-responsive entry-scroll">
             <table class="table table-sm table-hover align-middle mb-0" id="entryTable" style="display:none">
                 <thead class="table-light">
                     <tr>
@@ -81,6 +92,8 @@
             </table>
         </div>
         <div id="entryEmpty" class="text-muted small">请选择条件后点击「加载课程」，勾选需要统一调整的条目。</div>
+        <div class="form-text mt-1">课程来自<b>当前生效学期</b>{% if schedule %}（{{ schedule.name }}）{% endif %}；
+            某个星期没有课程，多半因为课表本身那天没排课（如周六），换个星期看看。</div>
         <div class="sel-summary mt-2" id="selSummary" style="display:none"></div>
     </div>
 
@@ -134,7 +147,8 @@
     "entriesUrl": {{ url_for('academic.api_swap_entries')|tojson }},
     "slotsUrl": {{ url_for('academic.api_swap_available_slots')|tojson }},
     "gradeClasses": {{ class_opts.grade_classes|tojson }},
-    "weekdays": {{ weekdays|tojson }}
+    "weekdays": {{ weekdays|tojson }},
+    "scheduleName": {{ (schedule.name if schedule else '')|tojson }}
 }
 </script>
 {% endblock %}
@@ -167,7 +181,14 @@
         $('#entryTable').hide();
         $.getJSON(cfg.entriesUrl, params).done(function (res) {
             entriesCache = (res && res.data) || [];
-            if (!entriesCache.length) { $('#entryEmpty').text('没有匹配的课程条目。').show(); return; }
+            if (!entriesCache.length) {
+                // 空结果必须把上一次的表格收起来，否则会"旧课程行 + 没有课程提示"同时出现
+                $('#entryBody').empty();
+                $('#entryTable').hide();
+                updateSummary();
+                $('#entryEmpty').text('当前生效学期' + (cfg.scheduleName ? '（' + cfg.scheduleName + '）' : '') + '在所选条件下没有课程：换个星期/班级，或确认该学期课表已导入。').show();
+                return;
+            }
             var html = '';
             entriesCache.forEach(function (e) {
                 html += '<tr class="entry-row" data-id="' + e.id + '" data-teacher="' + esc(e.teacher_uid || '') + '" data-class="' + esc(e.grade + e.class_name) + '">'
@@ -195,7 +216,8 @@
     function selectedRows() { return $('.row-chk:checked').closest('tr'); }
     function updateSummary() {
         var n = selectedRows().length;
-        if (n) { $('#selSummary').show().html('已选择 <b>' + n + '</b> 条课程，将统一调整到指定时段。'); }
+        if (n) { $('#selSummary').show().html('已选择 <b>' + n + '</b> 条课程，将统一调整到指定时段；' +
+            '提交后合成 <b>1 条</b>统一调课记录，审批一次整批生效。'); }
         else { $('#selSummary').hide(); }
     }
 
@@ -254,7 +276,7 @@
             e.preventDefault(); alert('请至少指定目标星期、目标节次或新教室中的一项'); return;
         }
         if (!$('#swPermanent').is(':checked') && !$('#swapDate').val()) { e.preventDefault(); alert('临时调课请选择具体日期'); return; }
-        if (!confirm('确认为选中的 ' + selectedRows().length + ' 条课程提交统一调课申请？')) { e.preventDefault(); }
+        if (!confirm('确认提交统一调课？\n选中的 ' + selectedRows().length + ' 条课程会合成 1 条记录，审批一次整批生效。')) { e.preventDefault(); }
     });
 })();
 </script>

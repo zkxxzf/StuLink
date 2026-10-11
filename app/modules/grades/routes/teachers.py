@@ -8,6 +8,8 @@ import uuid
 from datetime import date
 
 import openpyxl
+# 2026-10-10：批量按 (grade, class_name) 组合查询需要 tuple_ 构造复合列比对
+from sqlalchemy import tuple_
 from flask import render_template, request, jsonify, abort, redirect, url_for, flash, \
     send_file
 from flask_login import login_required, current_user
@@ -184,6 +186,14 @@ def teachers_save():
         if not user_ids <= valid:
             return jsonify(success=False, message='存在无效的教师账号'), 400
     changes = {'bound': 0, 'released': 0, 'changed': 0}
+    # 2026-10-10 架构审计修复：原实现每格（班级×学科，可达上百）都查一次
+    # TeacherSubjectLink（N+1）。改为**先按年级一次性取出**该年级全部映射建索引，
+    # 循环内只做内存查找；新增的 link 也同步写入索引，保证同一格不会重复 insert。
+    # 判定与计数逻辑完全不变。
+    _link_index = {}
+    for _l in TeacherSubjectLink.query.filter_by(grade=grade).all():
+        _link_index[(_l.class_name, _l.subject)] = _l
+
     for cls_sub, user_id in cells.items():
         try:
             class_name, subject = cls_sub.split('|', 1)
@@ -191,13 +201,14 @@ def teachers_save():
             continue
         if subject not in SUBJECTS or class_name not in _grade_classes(grade):
             continue
-        link = (TeacherSubjectLink.query
-                .filter_by(grade=grade, class_name=class_name, subject=subject).first())
+        link = _link_index.get((class_name, subject))
         if user_id:
             if link is None:
-                db.session.add(TeacherSubjectLink(grade=grade, class_name=class_name,
-                                                  subject=subject, user_id=int(user_id),
-                                                  active=True, created_by=current_user.id))
+                new_link = TeacherSubjectLink(grade=grade, class_name=class_name,
+                                              subject=subject, user_id=int(user_id),
+                                              active=True, created_by=current_user.id)
+                db.session.add(new_link)
+                _link_index[(class_name, subject)] = new_link
                 changes['bound'] += 1
             elif not link.active or link.user_id != int(user_id):
                 link.user_id = int(user_id)
@@ -395,21 +406,43 @@ def teachers_import_confirm():
         file_classes = {(it['grade'], it['class_name']) for it in preview}
         removed_heads = 0
         demoted = 0
+        # 2026-10-10 架构审计修复：原实现是**嵌套循环 + 双重 N+1** ——
+        #   外层每班查 UserClassLink；内层每个被删用户再查 User、再查一次
+        #   UserClassLink 判断是否还有别的班。
+        # 改为：① keep_ids 预计算（每班一次遍历 → 一次性建 map）；
+        #      ② 按 file_classes 批量取出全部 UserClassLink；
+        #      ③ 批量取涉及 User；④ 批量统计"每人还剩几条 UserClassLink"。
+        # 删除/降级判定与顺序完全不变。
+        keep_ids_by_class = {}
+        for it in preview:
+            if it['kind'] != 'head' or it['status'] not in ('bound', 'to_create'):
+                continue
+            uid = it['user_id'] or created_by_name.get(it['teacher_name'])
+            if uid:
+                keep_ids_by_class.setdefault((it['grade'], it['class_name']),
+                                             set()).add(uid)
+
+        _head_links = []
+        if file_classes:
+            # 按 (grade, class_name) 组合批量取：SQLite 支持元组 in_（复合列比对）
+            _head_links = UserClassLink.query.filter(
+                tuple_(UserClassLink.grade, UserClassLink.class_name)
+                .in_(list(file_classes))
+            ).all()
+        _uids = {lk.user_id for lk in _head_links}
+        _user_map = {u.id: u for u in
+                     User.query.filter(User.id.in_(_uids)).all()} if _uids else {}
+
         for (g, c) in file_classes:
-            keep_ids = set()
-            for it in preview:
-                if it['kind'] == 'head' and it['grade'] == g and it['class_name'] == c \
-                        and it['status'] in ('bound', 'to_create'):
-                    uid = it['user_id'] or created_by_name.get(it['teacher_name'])
-                    if uid:
-                        keep_ids.add(uid)
-            for link in UserClassLink.query.filter_by(grade=g, class_name=c).all():
+            keep_ids = keep_ids_by_class.get((g, c), set())
+            for link in [lk for lk in _head_links
+                         if lk.grade == g and lk.class_name == c]:
                 if link.user_id in keep_ids:
                     continue
                 db.session.delete(link)
                 removed_heads += 1
                 # 不再担任任何班主任 → 角色/组降级为任课教师
-                user = User.query.get(link.user_id)
+                user = _user_map.get(link.user_id)
                 if user and user.role == 'homeroom_teacher' and user.role != 'admin':
                     remain = (UserClassLink.query
                               .filter(UserClassLink.user_id == user.id).first())

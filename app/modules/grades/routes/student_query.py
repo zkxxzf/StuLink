@@ -15,6 +15,12 @@ from app.modules.grades import bp
 from app.modules.grades.services import student_service, scope as scope_service
 from app.utils.decorators import perm_required
 
+# 2026-10-10 架构审计修复：本文件原有静默 `except Exception: pass`，失败不可观测。
+# 统一加 logger 记录 warning（仅留痕，不改变任何降级行为与返回值）。
+import logging
+
+logger = logging.getLogger(__name__)
+
 
 # ============ 范围过滤（复用现有角色/权限组体系，不新增角色） ============
 
@@ -75,8 +81,8 @@ def cert_verify(code):
     hits = (cache.get(rate_key) or 0) + 1
     try:
         cache.set(rate_key, hits, timeout=60)
-    except Exception:
-        pass
+    except Exception as _e:  # noqa: BLE001
+        logger.warning('student_query.py::cert_verify 异常（已降级处理）: %s', _e)
     if hits > 30:
         abort(429, description='核验请求过于频繁，请稍后再试')
 
@@ -122,10 +128,16 @@ def cert_records_page():
     d_from = (request.args.get('date_from') or '').strip()
     d_to = (request.args.get('date_to') or '').strip()
     if d_from:
-        q = q.filter(Certificate.generated_at >= datetime.strptime(d_from, '%Y-%m-%d'))
+        try:
+            q = q.filter(Certificate.generated_at >= datetime.strptime(d_from, '%Y-%m-%d'))
+        except ValueError:
+            pass  # 2026-10-11 审计：非法日期参数忽略该过滤条件，不再 500
     if d_to:
-        q = q.filter(Certificate.generated_at <
-                     datetime.strptime(d_to, '%Y-%m-%d') + timedelta(days=1))
+        try:
+            q = q.filter(Certificate.generated_at <
+                         datetime.strptime(d_to, '%Y-%m-%d') + timedelta(days=1))
+        except ValueError:
+            pass  # 2026-10-11 审计：同上
     certs = q.order_by(Certificate.generated_at.desc()).limit(500).all()
     # 生成人姓名：跨库不 JOIN，单独取 map（Certificate 在 grades 库，User 在主库）
     uids = {c.generated_by for c in certs if c.generated_by}
@@ -184,8 +196,9 @@ def api_data():
     if ceids:
         try:
             filters['cert_exam_ids'] = [int(x) for x in ceids.split(',') if x.strip()]
-        except ValueError:
-            pass
+        except ValueError as _e:
+            # 参数含非数字 → 不带该筛选（行为不变）
+            logger.debug('cert_exam_ids 含非数字(%r)，已忽略该筛选: %s', ceids, _e)
     try:
         result = student_service.build_data(current_user, student_no, filters)
     except PermissionError:

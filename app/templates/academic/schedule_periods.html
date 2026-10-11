@@ -1,6 +1,36 @@
 {% extends "base.html" %}
 {% import "academic/_schedule_parts.html" as parts %}
-{% block title %}节次配置 · {{ ts.name }}{% endblock %}
+{% block title %}节次 · 作息配置 · {{ ts.name }}{% endblock %}
+{% block extra_css %}
+<style>
+/* ── 作息表视图（2026-10-10 由独立页面并入）：高中贴墙/打印用 ───────── */
+.tt-wrap { max-width: 860px; }
+table.tt { border-collapse: collapse; width: 100%; font-size: 13.5px; }
+table.tt th, table.tt td { border: 1px solid #e2e8f0; padding: 7px 10px; text-align: center; }
+table.tt thead th { background: linear-gradient(180deg, #1e293b, #273549); color: #f1f5f9;
+                    font-weight: 600; font-size: 12.5px; }
+.tt-kind { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 6px; }
+.tt-k-class { background: #0ea5e9; }
+.tt-k-reading { background: #f59e0b; }
+.tt-k-evening { background: #6366f1; }
+.tt-k-break { background: #cbd5e1; }
+table.tt tr.tt-row-reading td { background: #fffdf3; }
+table.tt tr.tt-row-evening td { background: #f5f7ff; }
+table.tt tr.tt-row-break td { background: #fafbfd; color: #94a3b8; }
+.tt-dur { color: #64748b; font-size: 12px; }
+.tt-now td { background: #fff7ed !important; font-weight: 700; }
+.tt-now td:first-child::after { content: ' ◀ 当前'; color: #ea580c; font-size: 11px; }
+.tt-sum { font-size: 12.5px; color: #475569; }
+@media print {
+    @page { size: A4 portrait; margin: 14mm; }
+    .tt-wrap { max-width: none; }
+    table.tt { font-size: 13px; }
+    table.tt thead th { background: #e5e7eb !important; color: #000 !important; }
+    .tt-now td { background: #fff !important; }
+    .no-print, .card:not(.tt-wrap) { display: none !important; }
+}
+</style>
+{% endblock %}
 {% block content %}
 <div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
     <div class="d-flex align-items-center gap-3 flex-wrap">
@@ -8,10 +38,12 @@
         {{ parts.term_selector(schedules, ts, base_endpoint='academic.schedule_periods') }}
     </div>
     <div class="d-flex gap-2 flex-wrap">
-        <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('academic.schedule_master', sid=ts.id) }}">
-            <i class="bi bi-grid-3x3"></i> 大课表
+        {{ parts.print_button('打印作息表（A4）') }}
+        {# 2026-10-10：原「大课表」入口改指「全校总课表」（该页已下线） #}
+        <a class="btn btn-sm btn-outline-secondary no-print" href="{{ url_for('academic.schedule_overview', sid=ts.id) }}">
+            <i class="bi bi-list-columns-reverse"></i> 全校总课表
         </a>
-        <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('academic.schedule_manage') }}">
+        <a class="btn btn-sm btn-outline-secondary no-print" href="{{ url_for('academic.schedule_manage') }}">
             <i class="bi bi-house"></i> 学期管理
         </a>
     </div>
@@ -21,15 +53,38 @@
 
 <div class="card">
     <div class="card-header py-2 d-flex justify-content-between align-items-center">
-        <span>{{ ts.name }} · 作息时间（一天最多 13 节）</span>
+        <span>{{ ts.name }} · 作息时间
+            {# 2026-10-10：删掉「一天最多 13 节」的表述 —— 一天几节由学校自己定，数量不限 #}
+            <span class="text-muted small fw-normal">
+                一天几节自定 · 数量不限{% if global_info %} · 全局模板 {{ global_info.count }} 节{% endif %}
+            </span>
+        </span>
         {% if can_edit %}
-        <div class="d-flex gap-2">
+        <div class="d-flex gap-2 flex-wrap">
             <form method="POST" action="{{ url_for('academic.schedule_periods_reset', sid=ts.id) }}"
-                  onsubmit="return confirm('重置为默认 13 节作息模板？当前自定义配置将被覆盖。')">
+                  onsubmit="return confirm('重置为内置默认作息模板（早读 + 上午5节 + 下午4节 + 晚自习3节）？当前自定义配置将被覆盖。')">
                 <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                 <button class="btn btn-sm btn-outline-warning py-0"
                         {% if not can_reset_defaults %}disabled title="已有课程安排，不能重置节次编号"{% endif %}>
                     <i class="bi bi-arrow-counterclockwise"></i> 重置默认模板
+                </button>
+            </form>
+            {# 2026-10-10：全局作息模板 —— 学校作息一般全校固定，存一次、各学期复用。
+               新建学期会默认套用；这里两端都留入口：套用到本学期 / 把本学期存为模板。 #}
+            {% if global_info %}
+            <form method="POST" action="{{ url_for('academic.schedule_periods_global_apply', sid=ts.id) }}"
+                  onsubmit="return confirm('套用全局作息模板（{{ global_info.count }} 节）到本学期？已有的课程条目不受影响。')">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <button class="btn btn-sm btn-outline-success py-0">
+                    <i class="bi bi-globe2"></i> 套用全局作息（{{ global_info.count }} 节）
+                </button>
+            </form>
+            {% endif %}
+            <form method="POST" action="{{ url_for('academic.schedule_periods_global_save', sid=ts.id) }}"
+                  onsubmit="return confirm('把本学期的节次与时间存为「全局作息模板」？新建学期将默认套用它，也可以随时套用到其它学期。')">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <button class="btn btn-sm btn-outline-secondary py-0" title="存为全局作息模板，供其它学期复用">
+                    <i class="bi bi-globe2"></i> 存为全局作息
                 </button>
             </form>
             <button type="button" class="btn btn-sm btn-outline-primary py-0" id="btnAddPeriodRow">
@@ -48,6 +103,7 @@
                         <th>节次名称</th>
                         <th style="width:130px">开始时间</th>
                         <th style="width:130px">结束时间</th>
+                        <th style="width:160px">时长</th>
                         <th style="width:140px">类型</th>
                         {% if can_edit %}<th style="width:60px"></th>{% endif %}
                     </tr>
@@ -56,8 +112,9 @@
                     {% for p in periods %}
                     <tr data-period-row>
                         <td>
+                            {# 2026-10-10：去掉 max="13"（节次数量不限） #}
                             <input type="number" name="period_number" class="form-control form-control-sm"
-                                   min="1" max="13" value="{{ p.period_number }}" {{ '' if can_edit else 'disabled' }} required>
+                                   min="1" value="{{ p.period_number }}" {{ '' if can_edit else 'disabled' }} required>
                         </td>
                         <td>
                             <input name="period_name" class="form-control form-control-sm" maxlength="20"
@@ -70,6 +127,23 @@
                         <td>
                             <input type="time" name="end_time" class="form-control form-control-sm"
                                    value="{{ p.end_time or '' }}" {{ '' if can_edit else 'disabled' }}>
+                        </td>
+                        {# 2026-10-10：时长口径 —— 正课 40/45 分钟、晚自习 50 分钟。
+                           左边是实时算出的时长（偏离常规且非课间时标黄提醒，不拦），
+                           右边「改时长…」按开始时间自动算结束时间，省得自己数分钟。 #}
+                        <td class="text-nowrap">
+                            <div class="d-flex align-items-center gap-1">
+                                <span class="badge period-dur bg-light text-dark border">—</span>
+                                {% if can_edit %}
+                                <select class="form-select form-select-sm period-dur-sel" style="width:94px"
+                                        title="快捷设置时长：按所选分钟数自动算出结束时间">
+                                    <option value="">改时长…</option>
+                                    <option value="40">40 分钟</option>
+                                    <option value="45">45 分钟</option>
+                                    <option value="50">50 分钟</option>
+                                </select>
+                                {% endif %}
+                            </div>
                         </td>
                         <td>
                             <select name="period_type" class="form-select form-select-sm" {{ '' if can_edit else 'disabled' }}>
@@ -89,7 +163,7 @@
                     </tr>
                     {% endfor %}
                     {% if not periods %}
-                    <tr><td colspan="{{ 6 if can_edit else 5 }}" class="text-center text-muted py-4">
+                    <tr><td colspan="{{ 7 if can_edit else 6 }}" class="text-center text-muted py-4">
                         暂无节次定义，点击「添加节次」或「重置默认模板」
                     </td></tr>
                     {% endif %}
@@ -97,18 +171,63 @@
             </table>
         </div>
         {% if can_edit %}
-        <div class="card-footer py-2 d-flex justify-content-between align-items-center">
+        <div class="card-footer py-2 d-flex justify-content-between align-items-center gap-3">
             <span class="text-muted small">
-                <i class="bi bi-info-circle"></i> 「课间/午休」类型节次在课表网格中以灰色斜纹显示（也可排课）；
-                移除节次行并保存后，该节次定义将被删除；若该节次仍有课程安排，系统会保留并提示。
-                已排课的学期不能重置默认编号，请手动调整名称和时间。
+                <i class="bi bi-info-circle"></i> 常规时长：<b>早读 40 / 正课 45 / 晚自习 50 分钟</b>
+                （每节课一般就是 40、45 或 50 分钟，课间 10 分钟）；与常规不同时行内标黄提醒，只提示不拦。
+                「课间/午休」节次在课表网格中以灰色斜纹显示（也可排课）。移除节次行并保存后定义即删除，
+                若仍有课程安排会保留并提示；已排课的学期不能重置编号，请手动调整。
             </span>
-            <button type="submit" class="btn btn-sm btn-primary">
+            <button type="submit" class="btn btn-sm btn-primary text-nowrap flex-shrink-0">
                 <i class="bi bi-check-lg"></i> 保存配置
             </button>
         </div>
         {% endif %}
     </form>
+</div>
+
+{# ===== 作息表视图（2026-10-10 由独立页并入）：几点上什么、多久，A4 可打印 ===== #}
+<div class="card mt-3 tt-wrap">
+    <div class="card-header py-2 d-flex justify-content-between align-items-center flex-wrap gap-2">
+        <span class="fw-bold">{{ ts.name }} · 作息时间表</span>
+        <span class="text-muted small no-print">共 {{ tt_rows|length }} 节 · 修改上方配置保存后同步生效</span>
+    </div>
+    <div class="card-body p-0">
+        <table class="tt mb-0">
+            <thead>
+                <tr>
+                    <th style="width:64px">节次</th>
+                    <th style="width:110px">名称</th>
+                    <th style="width:130px">时间</th>
+                    <th style="width:80px">时长</th>
+                    <th>类别</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for r in tt_rows %}
+                <tr class="tt-row-{{ r.kind }}" data-start="{{ r.p.start_time or '' }}" data-end="{{ r.p.end_time or '' }}">
+                    <td>{{ r.p.period_number }}</td>
+                    <td class="fw-bold">{{ r.p.period_name }}</td>
+                    <td style="font-variant-numeric: tabular-nums">
+                        {{ r.p.start_time or '--:--' }} – {{ r.p.end_time or '--:--' }}
+                    </td>
+                    <td class="tt-dur">{{ r.dur ~ ' 分钟' if r.dur else '—' }}</td>
+                    <td>
+                        <span class="tt-kind tt-k-{{ r.kind }}"></span>{{ tt_stats.class_text.get(r.kind, r.kind) }}
+                    </td>
+                </tr>
+                {% else %}
+                <tr><td colspan="5" class="text-center text-muted py-4">该学期尚未配置节次</td></tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    <div class="card-footer tt-sum d-flex flex-wrap gap-3">
+        <span>正课 <b>{{ tt_stats.class }}</b> 节（{{ (tt_stats.class_min / 60)|round(1) }} 小时）</span>
+        <span>早读 <b>{{ tt_stats.reading }}</b> 节</span>
+        <span>晚自习 <b>{{ tt_stats.evening }}</b> 节（{{ (tt_stats.evening_min / 60)|round(1) }} 小时）</span>
+        <span>课间/午休 <b>{{ tt_stats.break }}</b> 段</span>
+    </div>
 </div>
 
 <script id="scheduleData" type="application/json">
@@ -123,4 +242,17 @@
 
 {% block extra_js %}
 <script src="{{ su('js/schedule.js') }}"></script>
+<script>
+// 作息表视图：高亮「当前时段」（贴墙表一眼看到上到第几节）
+document.addEventListener('DOMContentLoaded', function () {
+    var now = new Date();
+    var mins = now.getHours() * 60 + now.getMinutes();
+    document.querySelectorAll('table.tt tbody tr[data-start]').forEach(function (tr) {
+        var s = tr.getAttribute('data-start'), e = tr.getAttribute('data-end');
+        if (!s || !e) { return; }
+        function toMin(v) { var a = v.split(':'); return (+a[0]) * 60 + (+a[1]); }
+        if (mins >= toMin(s) && mins <= toMin(e)) { tr.classList.add('tt-now'); }
+    });
+});
+</script>
 {% endblock %}

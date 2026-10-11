@@ -116,7 +116,7 @@
     }
 
     /* ══════════════════════════════════════════════════════════════
-     * 网格渲染（master 页 AJAX 切换班级时用；class/grade 页为服务端渲染）
+     * 网格渲染（class/grade 页 AJAX 换班/改周次时重绘时用）
      * 结构与 _schedule_grid.html 宏保持一致
      * ══════════════════════════════════════════════════════════════ */
     function entryHtml(e, canEdit) {
@@ -206,77 +206,12 @@
             + '<p class="small mb-0">正在加载课表…</p></div>';
     }
 
-    /* ══════════════════════════════════════════════════════════════
-     * 大课表（master）：年级标签 → 班级 pills → AJAX 加载网格
-     * ══════════════════════════════════════════════════════════════ */
-    function initMaster() {
-        var gc = CFG.gradeClasses || {};
-        selectGrade(CFG.initGrade || Object.keys(gc)[0] || '');
-        $('#gradeTabs').on('click', '.grade-tab', function () {
-            $('#gradeTabs .grade-tab').removeClass('active');
-            $(this).addClass('active');
-            selectGrade($(this).data('grade'));
-        });
-        $('#classPills').on('click', '.class-pill', function () {
-            $('#classPills .class-pill').removeClass('active').addClass('btn-outline-primary');
-            $(this).removeClass('btn-outline-primary').addClass('active');
-            loadClass($(this).data('grade'), $(this).data('class'));
-        });
-    }
-
-    function selectGrade(g) {
-        STATE.grade = g;
-        var classes = (CFG.gradeClasses || {})[g] || [];
-        var html = '';
-        classes.forEach(function (cn, i) {
-            html += '<button type="button" class="btn btn-sm py-0 class-pill '
-                + (i === 0 ? 'btn-primary active' : 'btn-outline-primary')
-                + '" data-grade="' + esc(g) + '" data-class="' + esc(cn) + '">' + esc(cn) + '</button>';
-        });
-        if (!classes.length) { html = '<span class="text-muted small">该年级暂无班级课表数据</span>'; }
-        $('#classPills').html(html);
-        updateGridTitle(g, classes.length ? classes[0] : '');
-        if (classes.length) {
-            loadClass(g, classes[0]);
-        } else {
-            STATE.className = '';
-            $('#gridContainer').html(gridEmpty('请选择其他年级，或先导入/添加课程'));
-        }
-    }
-
-    function updateGridTitle(g, cn) {
-        var html = esc(CFG.termName || '大课表');
-        if (g) { html += ' · ' + esc(g); }
-        if (cn) { html += ' · ' + esc(cn); }
-        if (CFG.week) { html += ' <span class="badge bg-info ms-1">第 ' + CFG.week + ' 周</span>'; }
-        $('#gridTitle').html(html);
-    }
-
-    function loadClass(g, cn) {
-        STATE.className = cn;
-        updateGridTitle(g, cn);
-        var box = $('#gridContainer');
-        box.html(gridSpinner());
-        if (!CFG.urls.classData) { box.html(gridEmpty()); return; }
-        $.getJSON(CFG.urls.classData, withWeek({ grade: g, class_name: cn }))
-            .done(function (res) {
-                if (res && res.success) {
-                    var d = res.data || {};
-                    if (d.periods) { STATE.periods = d.periods; }
-                    if (!d.total) {
-                        box.html(gridEmpty('该班级暂无课表' + (CFG.canEdit ? '，点击网格空档「+」可添加' : '')));
-                        return;
-                    }
-                    renderGrid(box[0], d.periods, d.grid, CFG.canEdit, null);
-                } else {
-                    box.html(gridEmpty((res && res.message) || '加载失败'));
-                }
-            })
-            .fail(function () { box.html(gridEmpty('网络错误，加载失败')); });
-    }
+    /* 2026-10-10：大课表（master）页已下线，其独占的 initMaster / selectGrade /
+       updateGridTitle / loadClass 一并删除。原职能（年级标签 → 班级 pills → AJAX 换班
+       加载网格）改由「全校总课表」看全校、「年级课表 / 班级课表」看单班并编辑。 */
 
     /* ══════════════════════════════════════════════════════════════
-     * 课表条目 添加/编辑 弹窗（master/grade/class 复用）
+     * 课表条目 添加/编辑 弹窗（grade/class 复用）
      * ══════════════════════════════════════════════════════════════ */
     function initEntryModal() {
         if (!$('#entryModal').length) { return; }
@@ -373,6 +308,8 @@
         // 不过滤「课间/午休」：该类型节次同样可以排课（如午自习），仅加上类型提示
         var list = (STATE.periods || []).slice();
         if (!list.length) {
+            // 兜底：该学期还没定义节次时，按内置默认模板的节数（13 = 早读+上午5+下午4+晚自习3）
+            // 占位。这不是"最多 13 节"的限制 —— 节次数量由学校自定义（2026-10-10 去上限）
             for (var i = 1; i <= 13; i++) { list.push({ period_number: i, period_name: '第' + i + '节' }); }
         }
         list.forEach(function (p) {
@@ -571,7 +508,6 @@
 
     function refreshGrid() {
         var t = CFG.pageType;
-        if (t === 'master') { loadClass(STATE.grade, STATE.className); return; }
         if (t === 'room' && CFG.urls.roomData) { loadRoom(STATE.room || CFG.room); return; }
         if ((t === 'class' || t === 'grade') && CFG.urls.classData) {
             var params = withWeek({
@@ -793,99 +729,86 @@
         }, 'image/png');
     }
 
-    /* ── 全校总课表 / 今日课表导出 PNG（2026-10-09 定版）：一个年级一张表 ——
-         行＝班级、列＝节次（早读 + 上午/下午 + 晚自习），表头只有作息分组与节次 ── */
+    /* ── 全校总课表导出 PNG（2026-10-10 竖版定版）：行＝节次（左列作息分组、
+         次列节次名）、列＝班级（按年级分组），与页面 .ovv-* 结构一致 ── */
     function parseOverviewMatrix() {
-        var blocks = [];
-        $('#ovContainer .ovw-block, #todayContainer .ovw-block').each(function () {
-            var $b = $(this);
-            var b = {
-                grade: $b.data('grade') || '',
-                title: $b.find('.ovw-block-head').text().replace(/\s+/g, ' ').trim(),
-                groups: [],
-                periods: [],
-                classes: []
-            };
-            // 表头第一行：作息分组（colspan 展开为"每列属于哪一组"）
-            $b.find('thead tr.ovw-grp-row th.ovw-grp').each(function () {
-                var span = parseInt($(this).attr('colspan') || '1', 10);
-                var label = $(this).text().trim();
-                for (var i = 0; i < span; i++) { b.groups.push(label); }
+        var $t = $('#ovContainer .ovv-table').first();
+        if (!$t.length) { return null; }
+        var m = { grades: [], columns: [], rows: [] };
+        // 年级分组表头（跨列）
+        $t.find('thead tr.ovv-grade-row th.ovv-grade').each(function () {
+            m.grades.push({
+                label: $(this).find('.ovv-grade-t').first().text().trim(),
+                span: parseInt($(this).attr('colspan') || '1', 10)
             });
-            // 表头第二行：节次列（名称 + 起始时间 + 是否空档/当前节次）
-            $b.find('thead tr.ovw-per-row th.ovw-per-col').each(function () {
-                var $th = $(this);
-                b.periods.push({
-                    name: $th.find('.ovw-period-name').first().text().trim(),
-                    time: ($th.find('small').first().text() || '').trim(),
-                    brk: $th.hasClass('ovw-break-col'),
-                    cur: $th.hasClass('ovw-cur-col')
-                });
-            });
-            // 每班一行：班名（+ 班型/选科小字）与各节次格
-            $b.find('tbody tr').each(function () {
-                var $tr = $(this);
-                var $ch = $tr.find('th.ovw-class-cell');
-                var cls = {
-                    name: $ch.clone().find('.ovw-cmeta').remove().end().text().trim(),
-                    meta: ($ch.find('.ovw-cmeta').first().text() || '').trim(),
-                    cells: []
-                };
-                $tr.find('td.ovw-cell').each(function () {
-                    var items = [];
-                    $(this).find('.ovw-item').each(function () {
-                        var st = this.getAttribute('style') || '';
-                        var c = /--sch:\s*([^;]+)/.exec(st);
-                        var bg = /--sch-bg:\s*([^;]+)/.exec(st);
-                        var fg = /--sch-fg:\s*([^;]+)/.exec(st);
-                        var $sub = $(this).find('.ovw-subj').clone();
-                        $sub.find('.ovw-flag').remove();
-                        items.push({
-                            subject: $sub.text().trim(),
-                            swap: $(this).find('.ovw-flag-swap').length > 0,
-                            teacher: $(this).find('.ovw-teacher').text().trim(),
-                            c: c ? c[1].trim() : '#94a3b8',
-                            bg: bg ? bg[1].trim() : '#f1f5f9',
-                            fg: fg ? fg[1].trim() : '#0f172a'
-                        });
-                    });
-                    cls.cells.push(items);
-                });
-                b.classes.push(cls);
-            });
-            blocks.push(b);
         });
-        return blocks;
+        // 班级列（名称 + 班型/选科小字）
+        $t.find('thead tr.ovv-class-row th.ovv-class').each(function () {
+            var $th = $(this);
+            m.columns.push({
+                name: $th.clone().find('.ovv-cmeta').remove().end().text().trim(),
+                meta: ($th.find('.ovv-cmeta').first().text() || '').trim()
+            });
+        });
+        // 节次行：首列作息分组是 rowspan，只在组首行出现 → 向下继承
+        var group = '', groupStart = false;
+        $t.find('tbody tr.ovv-row').each(function () {
+            var $tr = $(this);
+            var $g = $tr.find('th.ovv-group').first();
+            if ($g.length) { group = $g.text().replace(/\s+/g, ''); groupStart = true; }
+            var $p = $tr.find('th.ovv-period').first();
+            var $name = $p.find('.ovv-pname').clone();
+            $name.find('.ovv-cur-flag').remove();
+            var row = {
+                group: group,
+                groupStart: groupStart,
+                name: $name.text().trim(),
+                time: ($p.find('.ovv-ptime').text() || '').replace(/\s+/g, ' ').trim(),
+                brk: $tr.hasClass('ovv-break-row'),
+                cells: []
+            };
+            groupStart = false;
+            $tr.find('td.ovv-cell').each(function () {
+                var items = [];
+                $(this).find('.ovw-item').each(function () {
+                    var st = this.getAttribute('style') || '';
+                    var c = /--sch:\s*([^;]+)/.exec(st);
+                    var bg = /--sch-bg:\s*([^;]+)/.exec(st);
+                    var fg = /--sch-fg:\s*([^;]+)/.exec(st);
+                    var $sub = $(this).find('.ovw-subj').clone();
+                    $sub.find('.ovw-flag').remove();
+                    items.push({
+                        subject: $sub.text().trim(),
+                        swap: $(this).find('.ovw-flag-swap').length > 0,
+                        teacher: $(this).find('.ovw-teacher').text().trim(),
+                        c: c ? c[1].trim() : '#94a3b8',
+                        bg: bg ? bg[1].trim() : '#f1f5f9',
+                        fg: fg ? fg[1].trim() : '#0f172a'
+                    });
+                });
+                row.cells.push(items);
+            });
+            m.rows.push(row);
+        });
+        return m.columns.length ? m : null;
     }
 
     function exportOverviewPng() {
-        var blocks = parseOverviewMatrix();
-        if (!blocks.length) { toast('当前页面没有可导出的总课表', 'danger'); return; }
+        var m = parseOverviewMatrix();
+        if (!m || !m.rows.length) { toast('当前页面没有可导出的总课表', 'danger'); return; }
 
-        var pad = 16, titleH = 40, blockH = 24, grpRowH = 22, perRowH = 36,
-            rowH = 46, itemH = 30, gapY = 14, footH = 26;
-        var classW = 118, perW = 92, brkW = 46;
+        var pad = 18, titleH = 44, footH = 28;
+        var gradeRowH = 30, classRowH = 46, rowH = 46, itemH = 34;
+        var groupW = 28, perW = 86, classW = 104;
+        var axisW = groupW + perW;
 
-        function colW(p) { return p.brk ? brkW : perW; }
-        function colX(b, pi) {
-            return pad + classW + b.periods.slice(0, pi)
-                .reduce(function (a, q) { return a + colW(q); }, 0);
+        function rowHeight(row) {
+            var n = row.cells.reduce(function (a, its) { return Math.max(a, its.length); }, 0);
+            return Math.max(rowH, n * (itemH + 4) + 10);
         }
-        function blockW(b) {
-            return classW + b.periods.reduce(function (a, p) { return a + colW(p); }, 0);
-        }
-        function rowHeight(cls) {
-            var n = cls.cells.reduce(function (m, its) { return Math.max(m, its.length); }, 0);
-            return Math.max(rowH, n * (itemH + 3) + 8);
-        }
-        function blockHeight(b) {
-            return blockH + grpRowH + perRowH
-                + b.classes.reduce(function (a, cls) { return a + rowHeight(cls); }, 0);
-        }
-        var W = pad * 2 + blocks.reduce(function (m, b) { return Math.max(m, blockW(b)); }, 480);
-        var H = pad * 2 + titleH + footH + blocks.reduce(function (a, b) {
-            return a + blockHeight(b) + gapY;
-        }, 0);
+        var tableH = m.rows.reduce(function (a, r) { return a + rowHeight(r); }, 0);
+        var W = pad * 2 + axisW + m.columns.length * classW;
+        var H = pad * 2 + titleH + gradeRowH + classRowH + footH + tableH;
 
         var dpr = window.devicePixelRatio || 1;
         var cv = document.createElement('canvas');
@@ -901,136 +824,141 @@
             + (dayLabel ? ' · ' + dayLabel : '')
             + (CFG.week ? ' · 第 ' + CFG.week + ' 周' : '');
         ctx.fillStyle = '#0f172a';
-        ctx.font = 'bold 18px "Microsoft YaHei", "PingFang SC", sans-serif';
+        ctx.font = 'bold 19px "Microsoft YaHei", "PingFang SC", sans-serif';
+        ctx.textAlign = 'left';
         ctx.fillText(fitText(ctx, title, W - pad * 2), pad, pad + 16);
 
         var GROUP_BG = { '早读': '#fef3c7', '上午': '#e0f2fe', '下午': '#ffedd5',
-                         '晚自习': '#e0e7ff' };
+                         '晚自习': '#e0e7ff', '课间': '#f1f5f9' };
+        var GRADE_BG = ['#1d4ed8', '#475569', '#0d9488'];
 
-        var y = pad + titleH;
-        blocks.forEach(function (b) {
-            var bw = blockW(b);
-            var top = y;
-            // 块标题条
-            ctx.fillStyle = '#1e293b';
-            ctx.fillRect(pad, y, bw, blockH);
-            ctx.fillStyle = '#f1f5f9';
+        var top = pad + titleH;
+        // ── 表头：左轴（作息/节次）+ 年级行 + 班级行 ──
+        ctx.fillStyle = '#eef2f7';
+        ctx.fillRect(pad, top, axisW, gradeRowH + classRowH);
+        ctx.fillStyle = '#334155';
+        ctx.font = 'bold 12px "Microsoft YaHei", "PingFang SC", sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText('作息', pad + groupW / 2, top + (gradeRowH + classRowH) / 2 - 9);
+        ctx.fillText('节次', pad + groupW + perW / 2, top + (gradeRowH + classRowH) / 2 - 9);
+        var cx = pad + axisW;
+        m.grades.forEach(function (g, gi) {
+            var gw = g.span * classW;
+            ctx.fillStyle = GRADE_BG[gi % 3];
+            ctx.fillRect(cx, top, gw, gradeRowH);
+            ctx.fillStyle = '#fff';
+            ctx.font = 'bold 13px "Microsoft YaHei", "PingFang SC", sans-serif';
+            ctx.fillText(fitText(ctx, g.label, gw - 10), cx + gw / 2, top + gradeRowH / 2);
+            cx += gw;
+        });
+        m.columns.forEach(function (c, ci) {
+            var x = pad + axisW + ci * classW;
+            ctx.fillStyle = '#f8fafc';
+            ctx.fillRect(x, top + gradeRowH, classW, classRowH);
+            ctx.fillStyle = '#1d4ed8';
             ctx.font = 'bold 12.5px "Microsoft YaHei", "PingFang SC", sans-serif';
-            ctx.fillText(fitText(ctx, b.title, bw - 16), pad + 8, y + blockH / 2);
-            y += blockH;
-            // 表头底色（班级占两行 + 节次两行）
-            ctx.fillStyle = '#eef2f7';
-            ctx.fillRect(pad, y, bw, grpRowH + perRowH);
-            ctx.fillStyle = '#334155';
-            ctx.font = 'bold 11.5px "Microsoft YaHei", "PingFang SC", sans-serif';
-            ctx.textAlign = 'center';
-            ctx.fillText('班级', pad + classW / 2, y + (grpRowH + perRowH) / 2);
-            // 第一行：作息分组（连续同组合并成一格）
-            b.periods.forEach(function (p, pi) {
-                var label = b.groups[pi] || '';
-                var prev = pi > 0 ? (b.groups[pi - 1] || '') : null;
-                if (!label || prev === label) { return; }
+            ctx.fillText(fitText(ctx, c.name, classW - 10), x + classW / 2,
+                top + gradeRowH + (c.meta ? 15 : classRowH / 2));
+            if (c.meta) {
+                ctx.fillStyle = '#94a3b8';
+                ctx.font = '9.5px "Microsoft YaHei", "PingFang SC", sans-serif';
+                ctx.fillText(fitText(ctx, c.meta, classW - 10), x + classW / 2,
+                    top + gradeRowH + 29);
+            }
+        });
+        ctx.textAlign = 'left';
+        var y = top + gradeRowH + classRowH;
+
+        // ── 数据行：一节次一行，作息分组纵向合并 ──
+        m.rows.forEach(function (row, ri) {
+            var rh = rowHeight(row);
+            if (row.groupStart) {
                 var span = 1;
-                for (var k = pi + 1; k < b.periods.length; k++) {
-                    if ((b.groups[k] || '') === label) { span++; } else { break; }
+                for (var k = ri + 1; k < m.rows.length; k++) {
+                    if (m.rows[k].groupStart) { break; }
+                    span++;
                 }
-                var gw = 0;
-                for (var j = pi; j < pi + span; j++) { gw += colW(b.periods[j]); }
-                var gx = colX(b, pi);
-                ctx.fillStyle = GROUP_BG[label] || '#f1f5f9';
-                ctx.fillRect(gx, y, gw, grpRowH);
-                ctx.fillStyle = '#334155';
-                ctx.font = 'bold 10.5px "Microsoft YaHei", "PingFang SC", sans-serif';
-                ctx.fillText(fitText(ctx, label, gw - 6), gx + gw / 2, y + grpRowH / 2);
-            });
-            // 第二行：节次名 + 起始时间
-            b.periods.forEach(function (p, pi) {
-                var cx = colX(b, pi);
-                var w = colW(p);
-                ctx.fillStyle = p.brk ? '#f1f5f9' : (p.cur ? '#d1fae5' : '#f8fafc');
-                ctx.fillRect(cx, y + grpRowH, w, perRowH);
-                ctx.fillStyle = '#334155';
-                ctx.font = 'bold 11px "Microsoft YaHei", "PingFang SC", sans-serif';
-                ctx.fillText(fitText(ctx, p.name, w - 6), cx + w / 2, y + grpRowH + 12);
-                if (p.time) {
-                    ctx.fillStyle = '#94a3b8';
-                    ctx.font = '9px "Microsoft YaHei", "PingFang SC", sans-serif';
-                    ctx.fillText(fitText(ctx, p.time, w - 6), cx + w / 2, y + grpRowH + 25);
+                var gh = 0;
+                for (var j = ri; j < ri + span; j++) { gh += rowHeight(m.rows[j]); }
+                ctx.fillStyle = GROUP_BG[row.group] || '#f1f5f9';
+                ctx.fillRect(pad, y, groupW, gh);
+                if (row.group) {
+                    ctx.save();
+                    ctx.translate(pad + groupW / 2, y + gh / 2);
+                    ctx.rotate(-Math.PI / 2);
+                    ctx.fillStyle = '#475569';
+                    ctx.font = 'bold 12px "Microsoft YaHei", "PingFang SC", sans-serif';
+                    ctx.textAlign = 'center';
+                    ctx.fillText(row.group, 0, 0);
+                    ctx.restore();
+                    ctx.textAlign = 'left';
                 }
-            });
+            }
+            ctx.fillStyle = row.brk ? '#f1f5f9' : '#f8fafc';
+            ctx.fillRect(pad + groupW, y, perW, rh);
+            ctx.fillStyle = '#334155';
+            ctx.font = 'bold 12.5px "Microsoft YaHei", "PingFang SC", sans-serif';
+            ctx.textAlign = 'center';
+            ctx.fillText(fitText(ctx, row.name, perW - 8), pad + groupW + perW / 2, y + 14);
+            if (row.time) {
+                ctx.fillStyle = '#94a3b8';
+                ctx.font = '9.5px "Microsoft YaHei", "PingFang SC", sans-serif';
+                ctx.fillText(fitText(ctx, row.time, perW - 8), pad + groupW + perW / 2, y + 28);
+            }
             ctx.textAlign = 'left';
-            y += grpRowH + perRowH;
-            // 数据行：一班一行
-            b.classes.forEach(function (cls) {
-                var rh = rowHeight(cls);
-                ctx.fillStyle = '#f8fafc';
-                ctx.fillRect(pad, y, classW, rh);
-                ctx.fillStyle = '#1d4ed8';
-                ctx.font = 'bold 11.5px "Microsoft YaHei", "PingFang SC", sans-serif';
-                ctx.fillText(fitText(ctx, cls.name, classW - 12), pad + 6,
-                    y + (cls.meta ? 14 : rh / 2));
-                if (cls.meta) {
-                    ctx.fillStyle = '#94a3b8';
-                    ctx.font = '9px "Microsoft YaHei", "PingFang SC", sans-serif';
-                    ctx.fillText(fitText(ctx, cls.meta, classW - 12), pad + 6, y + 27);
+            row.cells.forEach(function (items, ci) {
+                var x = pad + axisW + ci * classW;
+                if (row.brk) {
+                    ctx.fillStyle = '#f8fafc';
+                    ctx.fillRect(x, y, classW, rh);
                 }
-                cls.cells.forEach(function (items, pi) {
-                    var p = b.periods[pi] || {};
-                    var cx = colX(b, pi);
-                    var w = colW(p);
-                    if (p.brk) {
-                        ctx.fillStyle = '#f1f5f9';
-                        ctx.fillRect(cx, y, w, rh);
-                    } else if (p.cur) {
-                        ctx.fillStyle = '#ecfdf5';
-                        ctx.fillRect(cx, y, w, rh);
+                var iy = y + 5;
+                items.forEach(function (it) {
+                    var ih = Math.min(itemH,
+                        Math.floor((rh - 10) / Math.max(items.length, 1)) - 4);
+                    ctx.fillStyle = it.bg;
+                    ctx.fillRect(x + 4, iy, classW - 8, ih);
+                    ctx.fillStyle = it.c;
+                    ctx.fillRect(x + 4, iy, 3, ih);
+                    ctx.fillStyle = it.fg;
+                    ctx.font = 'bold 12.5px "Microsoft YaHei", "PingFang SC", sans-serif';
+                    ctx.fillText(fitText(ctx, it.subject + (it.swap ? '（调）' : ''), classW - 20),
+                        x + 12, iy + 12);
+                    if (it.teacher) {
+                        ctx.fillStyle = '#64748b';
+                        ctx.font = '10.5px "Microsoft YaHei", "PingFang SC", sans-serif';
+                        ctx.fillText(fitText(ctx, it.teacher, classW - 20), x + 12, iy + 25);
                     }
-                    var iy = y + 4;
-                    items.forEach(function (it) {
-                        var ih = Math.min(itemH,
-                            Math.floor((rh - 8) / Math.max(items.length, 1)) - 3);
-                        ctx.fillStyle = it.bg;
-                        ctx.fillRect(cx + 3, iy, w - 6, ih);
-                        ctx.fillStyle = it.c;
-                        ctx.fillRect(cx + 3, iy, 2, ih);
-                        ctx.fillStyle = it.fg;
-                        ctx.font = 'bold 10.5px "Microsoft YaHei", "PingFang SC", sans-serif';
-                        ctx.fillText(fitText(ctx, it.subject + (it.swap ? '（调）' : ''), w - 14),
-                            cx + 9, iy + 10);
-                        if (it.teacher) {
-                            ctx.fillStyle = '#64748b';
-                            ctx.font = '9.5px "Microsoft YaHei", "PingFang SC", sans-serif';
-                            ctx.fillText(fitText(ctx, it.teacher, w - 14), cx + 9, iy + 21);
-                        }
-                        iy += ih + 3;
-                    });
+                    iy += ih + 4;
                 });
-                ctx.strokeStyle = '#eef2f7';
-                ctx.lineWidth = 1;
-                ctx.beginPath();
-                ctx.moveTo(pad, y + rh + .5);
-                ctx.lineTo(pad + bw, y + rh + .5);
-                ctx.stroke();
-                y += rh;
             });
-            // 竖线：班级列右界 + 每个节次列
-            ctx.strokeStyle = '#e2e8f0';
+            ctx.strokeStyle = '#eef2f7';
+            ctx.lineWidth = 1;
             ctx.beginPath();
-            ctx.moveTo(pad + classW + .5, top + blockH);
-            ctx.lineTo(pad + classW + .5, y);
-            var lx = pad + classW;
-            b.periods.forEach(function (p) {
-                lx += colW(p);
-                ctx.moveTo(lx + .5, top + blockH);
-                ctx.lineTo(lx + .5, y);
-            });
+            ctx.moveTo(pad, y + rh + .5);
+            ctx.lineTo(pad + axisW + m.columns.length * classW, y + rh + .5);
             ctx.stroke();
-            // 块边框
-            ctx.strokeStyle = '#cbd5e1';
-            ctx.strokeRect(pad + .5, top + .5, bw, y - top);
-            y += gapY;
+            y += rh;
         });
 
+        // ── 竖线 + 外框 ──
+        ctx.strokeStyle = '#e2e8f0';
+        ctx.beginPath();
+        ctx.moveTo(pad + groupW + .5, top);
+        ctx.lineTo(pad + groupW + .5, y);
+        ctx.moveTo(pad + axisW + .5, top);
+        ctx.lineTo(pad + axisW + .5, y);
+        m.columns.forEach(function (c, ci) {
+            if (ci === m.columns.length - 1) { return; }
+            var lx = pad + axisW + (ci + 1) * classW;
+            ctx.moveTo(lx + .5, top);
+            ctx.lineTo(lx + .5, y);
+        });
+        ctx.stroke();
+        ctx.strokeStyle = '#cbd5e1';
+        ctx.strokeRect(pad + .5, top + .5, axisW + m.columns.length * classW, y - top);
+
+        ctx.textAlign = 'left';
         ctx.fillStyle = '#94a3b8';
         ctx.font = '11px "Microsoft YaHei", "PingFang SC", sans-serif';
         ctx.fillText('导出时间：' + new Date().toLocaleString('zh-CN', { hour12: false }),
@@ -1198,44 +1126,107 @@
     function initPeriods() {
         if (!CFG.canEdit) { return; }
         var pt = CFG.periodTypes || {};
-        var MAXP = 13;
+        /* 2026-10-10：原 `MAXP = 13` 与"加满就禁用按钮 + 一天最多 13 节"的提示已删 ——
+           一天几节由学校自己定。新行取「未占用的最小可用编号」：有 N 行时 1..N+1 里
+           必然有空号，所以不需要任何上限，也不会与已有行重号（重号会互相覆盖）。 */
 
-        function refreshAddBtn() {
-            var count = $('#periodsBody tr[data-period-row]').length;
-            $('#btnAddPeriodRow').prop('disabled', count >= MAXP)
-                .attr('title', count >= MAXP ? '一天最多 ' + MAXP + ' 节' : '');
+        /* 时长口径（2026-10-10 用户给定）：一般每节课就是 40 / 45 / 50 分钟 ——
+           正课 40 或 45、晚自习 50，课间 10 分钟。这里做两件事：
+             ① 行内实时显示时长，偏离常规且不是「课间/午休」时标黄提醒（只提示，不拦）；
+             ② 「改时长…」= 开始时间 + 所选分钟数 → 自动算出结束时间，省得自己数。 */
+        var STD_MINS = [40, 45, 50];
+
+        function toMin(v) {
+            if (!v) { return null; }
+            var a = String(v).split(':');
+            if (a.length < 2) { return null; }
+            return (parseInt(a[0], 10) || 0) * 60 + (parseInt(a[1], 10) || 0);
         }
 
-        $('#btnAddPeriodRow').on('click', function () {
-            var used = {}, maxn = 0;
+        function fmtMin(m) {
+            m = Math.min(1439, Math.max(0, m));   // 跨天没意义，夹在当天 23:59
+            return (m < 600 ? '0' : '') + Math.floor(m / 60) + ':' + ((m % 60) < 10 ? '0' : '') + (m % 60);
+        }
+
+        function updateDur(row) {
+            var $r = $(row);
+            var a = toMin($r.find('[name=start_time]').val());
+            var b = toMin($r.find('[name=end_time]').val());
+            var badge = $r.find('.period-dur');
+            if (!badge.length) { return; }
+            if (a === null || b === null || b <= a) {
+                badge.text('—')
+                     .attr('class', 'badge period-dur bg-light text-dark border')
+                     .attr('title', (a !== null && b !== null) ? '结束时间要晚于开始时间' : '');
+                return;
+            }
+            var dur = b - a;
+            var isBreak = $r.find('[name=period_type]').val() === 'break';
+            var off = STD_MINS.indexOf(dur) < 0 && !isBreak;
+            badge.text(dur + ' 分钟')
+                 .attr('class', 'badge period-dur ' + (off ? 'bg-warning text-dark' : 'bg-light text-dark border'))
+                 .attr('title', off ? '常规时长是 40 / 45 / 50 分钟（正课 40 或 45、晚自习 50），'
+                                      + '当前 ' + dur + ' 分钟' : '');
+        }
+
+        function bindRow(row) {
+            var $r = $(row);
+            $r.find('[name=start_time],[name=end_time],[name=period_type]')
+              .on('input change', function () { updateDur(row); });
+            $r.find('.period-dur-sel').on('change', function () {
+                var v = parseInt($(this).val(), 10);
+                $(this).val('');
+                if (!v) { return; }
+                var a = toMin($r.find('[name=start_time]').val());
+                if (a === null) {
+                    window.alert('请先填这一节的开始时间，再选时长');
+                    $r.find('[name=start_time]').focus();
+                    return;
+                }
+                $r.find('[name=end_time]').val(fmtMin(a + v));
+                updateDur(row);
+            });
+            updateDur(row);
+        }
+
+        function nextFreeNumber() {
+            var used = {};
             $('#periodsBody tr[data-period-row]').each(function () {
                 var n = parseInt($(this).find('[name=period_number]').val(), 10) || 0;
                 if (n > 0) { used[n] = true; }
-                if (n > maxn) { maxn = n; }
             });
-            // 取「未占用的最小可用编号」，避免新增行与已有行重号（重号会互相覆盖）
-            var n = 0;
-            for (var i = 1; i <= MAXP; i++) { if (!used[i]) { n = i; break; } }
-            if (!n) { window.alert('一天最多 ' + MAXP + ' 节，无法再添加'); return; }
+            var i = 1;
+            while (used[i]) { i++; }
+            return i;
+        }
+
+        $('#periodsBody tr[data-period-row]').each(function () { bindRow(this); });
+
+        $('#btnAddPeriodRow').on('click', function () {
+            var n = nextFreeNumber();
             var opts = '';
             Object.keys(pt).forEach(function (k) { opts += '<option value="' + esc(k) + '">' + esc(pt[k]) + '</option>'; });
             var row = '<tr data-period-row>'
-                + '<td><input type="number" name="period_number" class="form-control form-control-sm" min="1" max="13" value="' + n + '" required></td>'
+                + '<td><input type="number" name="period_number" class="form-control form-control-sm" min="1" value="' + n + '" required></td>'
                 + '<td><input name="period_name" class="form-control form-control-sm" maxlength="20" value="第' + n + '节" required></td>'
                 + '<td><input type="time" name="start_time" class="form-control form-control-sm"></td>'
                 + '<td><input type="time" name="end_time" class="form-control form-control-sm"></td>'
+                + '<td class="text-nowrap"><div class="d-flex align-items-center gap-1">'
+                + '<span class="badge period-dur bg-light text-dark border">—</span>'
+                + '<select class="form-select form-select-sm period-dur-sel" style="width:94px" title="快捷设置时长：按所选分钟数自动算出结束时间">'
+                + '<option value="">改时长…</option><option value="40">40 分钟</option>'
+                + '<option value="45">45 分钟</option><option value="50">50 分钟</option></select>'
+                + '</div></td>'
                 + '<td><select name="period_type" class="form-select form-select-sm">' + opts + '</select></td>'
                 + '<td class="text-center"><button type="button" class="btn btn-sm btn-outline-danger py-0 px-1 btn-del-period" title="移除此节次（保存后生效）"><i class="bi bi-x-lg"></i></button></td>'
                 + '</tr>';
             $('#periodsBody tr').not('[data-period-row]').remove();
             $('#periodsBody').append(row);
-            refreshAddBtn();
+            bindRow($('#periodsBody tr[data-period-row]').last()[0]);
         });
         $('#periodsBody').on('click', '.btn-del-period', function () {
             $(this).closest('tr').remove();
-            refreshAddBtn();
         });
-        refreshAddBtn();
     }
 
     /* ══════════════════════════════════════════════════════════════
@@ -1295,6 +1286,120 @@
     }
 
     /* ══════════════════════════════════════════════════════════════
+     * 全校总课表：编辑模式切换（2026-10-10 新增）
+     * - 默认只读：不挂任何点击/拖拽，无法修改；
+     * - 点「编辑」进入可编辑态（点格加/改课程、拖动换班换节次），再点「完成编辑」退出；
+     * - 状态记忆在 URL（?edit=1），保存后整页回显仍在编辑态。
+     * ══════════════════════════════════════════════════════════════ */
+    function initOverviewEdit() {
+        var $btn = $('#btnToggleEdit');
+        // 无权限 / 无课表（空态无网格）时：不提供编辑入口
+        if (!$btn.length || !CFG.canEdit || !$('#ovContainer').length) { return; }
+        var editOn = false;
+
+        function setMode(on) {
+            editOn = !!on;
+            $('#ovContainer').toggleClass('ovv-edit-mode', editOn);
+            $btn.attr('data-edit', editOn ? '1' : '0')
+                .toggleClass('btn-primary', editOn)
+                .toggleClass('btn-outline-primary', !editOn)
+                .html(editOn
+                    ? '<i class="bi bi-check2-circle"></i> 完成编辑'
+                    : '<i class="bi bi-pencil-square"></i> 编辑');
+            // 只有编辑态才允许拖拽（只读态不可拖 → 无法修改）
+            $('#ovContainer .ovv-cell .ovw-item').attr('draggable', editOn ? 'true' : null);
+            try {   // 记住编辑态到 URL，保存后整页刷新仍停留编辑模式
+                var u = new URL(window.location.href);
+                if (editOn) { u.searchParams.set('edit', '1'); }
+                else { u.searchParams.delete('edit'); }
+                window.history.replaceState({}, '', u.toString());
+            } catch (e) { /* 老浏览器忽略 */ }
+        }
+
+        // 初始：URL 带 edit=1 且当前是只读页（?readonly）时仍进入编辑态
+        setMode(new URL(window.location.href).searchParams.get('edit') === '1');
+        $btn.on('click', function () { setMode(!editOn); });
+
+        // 点击格子：点到课程 → 编辑该课程；点空白 → 在该格新增课程
+        $('#ovContainer').on('click', 'td.ovv-cell.ovv-editable', function (ev) {
+            if (!editOn) { return; }
+            var $cell = $(this);
+            var $item = $(ev.target).closest('.ovw-item[data-entry-id]');
+            if ($item.length) { openEdit($item.data('entry-id')); return; }
+            openAdd(String($cell.data('grade') || ''), String($cell.data('class') || ''),
+                    CFG.day, Number($cell.data('period')));
+        });
+
+        // 拖拽换格：横向换班、纵向换节次（移动 = 改该条目的年级/班级/节次）
+        var dragged = null;
+        $('#ovContainer').on('dragstart', '.ovw-item[draggable="true"]', function (ev) {
+            if (!editOn) { ev.preventDefault(); return; }
+            dragged = $(this);
+            $(this).addClass('ovv-dragging');
+            var dt = ev.originalEvent && ev.originalEvent.dataTransfer;
+            if (dt) { dt.effectAllowed = 'move'; dt.setData('text/plain', String($(this).data('entry-id'))); }
+        });
+        $('#ovContainer').on('dragend', '.ovw-item', function () {
+            $(this).removeClass('ovv-dragging');
+            $('#ovContainer td.ovv-cell').removeClass('ovv-drop-hover');
+            dragged = null;
+        });
+        $('#ovContainer').on('dragover', 'td.ovv-cell.ovv-editable', function (ev) {
+            if (!editOn || !dragged) { return; }
+            ev.preventDefault();
+            $(this).addClass('ovv-drop-hover');
+            var dt = ev.originalEvent && ev.originalEvent.dataTransfer;
+            if (dt) { dt.dropEffect = 'move'; }
+        });
+        $('#ovContainer').on('dragleave', 'td.ovv-cell', function () {
+            $(this).removeClass('ovv-drop-hover');
+        });
+        $('#ovContainer').on('drop', 'td.ovv-cell.ovv-editable', function (ev) {
+            ev.preventDefault();
+            $(this).removeClass('ovv-drop-hover');
+            if (!editOn || !dragged) { return; }
+            var $cell = $(this);
+            var grade = String($cell.data('grade') || '');
+            var cn = String($cell.data('class') || '');
+            var pn = Number($cell.data('period'));
+            var $src = dragged.closest('td.ovv-cell');
+            // 拖回原格（同班同节次）不处理
+            if ($src.length && String($src.data('class')) === cn && Number($src.data('period')) === pn) { return; }
+            moveEntryTo(dragged.data('entry-id'), grade, cn, CFG.day, pn);
+        });
+    }
+
+    /* 把某条目整体移动到「年级+班级+星期+节次」（编辑接口一次写全，含换班） */
+    function moveEntryTo(eid, grade, className, weekday, period) {
+        var detailUrl = (CFG.urls.entryDetail || '').replace(/\/entry\/\d+(?=\/|$)/, '/entry/' + eid);
+        if (!detailUrl) { toast('当前页面不支持拖拽换课', 'danger'); return; }
+        $.getJSON(detailUrl).done(function (res) {
+            var e = res && res.success && res.data && res.data.entry;
+            if (!e) { toast((res && res.message) || '读取条目失败', 'danger'); return; }
+            var payload = {
+                grade: grade, class_name: className,
+                weekday: weekday, period_number: period,
+                subject: e.subject, teacher_uid: e.teacher_uid || '',
+                teacher_name: e.teacher_name || '', room: e.room || '',
+                teaching_class: e.teaching_class || '',
+                week_range: e.week_range || '1-18', note: e.note || ''
+            };
+            var url = (CFG.urls.entryEditTpl || '').replace(/\/entry\/\d+\//, '/entry/' + eid + '/');
+            $.ajax({ url: url, type: 'POST', contentType: 'application/json', dataType: 'json',
+                     data: JSON.stringify(payload) })
+                .done(function (r) {
+                    if (r && r.success) { toast('已移动课程', 'success'); refreshGrid(); }
+                    else { toast((r && r.message) || '移动失败（目标时段可能冲突）', 'danger'); }
+                })
+                .fail(function (xhr) {
+                    var m = '移动失败';
+                    try { m = (xhr.responseJSON && xhr.responseJSON.message) || m; } catch (err) { }
+                    toast(m, 'danger');
+                });
+        }).fail(function () { toast('读取条目失败', 'danger'); });
+    }
+
+    /* ══════════════════════════════════════════════════════════════
      * 入口分发
      * ══════════════════════════════════════════════════════════════ */
     $(function () {
@@ -1307,7 +1412,9 @@
         STATE.className = CFG.className || '';
         if (CFG.periods) { STATE.periods = CFG.periods; }
         switch (CFG.pageType) {
-            case 'master': initMaster(); initEntryModal(); initDragMove(); break;
+            /* 2026-10-10：'master'（大课表）分支已随该页下线删除 */
+            /* 2026-10-10：全校总课表可开启编辑模式（点格加/改课程、拖拽换格） */
+            case 'overview': initEntryModal(); initOverviewEdit(); break;
             case 'grade': initEntryModal(); initCharts(); initDragMove(); break;
             case 'class': initEntryModal(); initCharts(); initDragMove(); break;
             case 'room': initEntryModal(); initDragMove(); initRoomSwitcher(); break;

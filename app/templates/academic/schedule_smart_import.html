@@ -17,21 +17,42 @@
 {% block content %}
 <div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
     <div class="d-flex align-items-center gap-3 flex-wrap">
-        <h4 class="fw-bold mb-0"><i class="bi bi-magic"></i> 学校原样课表导入</h4>
+        <h4 class="fw-bold mb-0"><i class="bi bi-magic"></i> 课表导入（整班 · 原样）</h4>
         {{ parts.term_selector(schedules, ts, base_endpoint='academic.schedule_smart_import') }}
     </div>
     <div class="d-flex gap-2 flex-wrap">
         <a class="btn btn-sm btn-outline-dark"
+           href="{{ url_for('academic.schedule_smart_template', sid=ts.id, layout='full') }}">
+            <i class="bi bi-download"></i> 全校总课表模板
+        </a>
+        <a class="btn btn-sm btn-outline-dark"
            href="{{ url_for('academic.schedule_smart_template', sid=ts.id) }}">
-            <i class="bi bi-download"></i> 下载原样模板
+            <i class="bi bi-download"></i> 整班矩阵模板
         </a>
+        <div class="btn-group btn-group-sm">
+            <button type="button" class="btn btn-sm btn-outline-dark dropdown-toggle"
+                    data-bs-toggle="dropdown">
+                <i class="bi bi-file-earmark"></i> 空白模板
+            </button>
+            <ul class="dropdown-menu">
+                <li>
+                    <a class="dropdown-item"
+                       href="{{ url_for('academic.schedule_smart_template', sid=ts.id, layout='full', blank=1) }}">
+                        全校总课表（空白）
+                    </a>
+                </li>
+                <li>
+                    <a class="dropdown-item"
+                       href="{{ url_for('academic.schedule_smart_template', sid=ts.id, blank=1) }}">
+                        整班矩阵（空白）
+                    </a>
+                </li>
+            </ul>
+        </div>
+        {# 2026-10-10：原「大课表」入口改指「全校总课表」（该页已下线） #}
         <a class="btn btn-sm btn-outline-secondary"
-           href="{{ url_for('academic.schedule_import', sid=ts.id) }}">
-            <i class="bi bi-table"></i> 长表导入（标准模板）
-        </a>
-        <a class="btn btn-sm btn-outline-secondary"
-           href="{{ url_for('academic.schedule_master', sid=ts.id) }}">
-            <i class="bi bi-grid-3x3"></i> 大课表
+           href="{{ url_for('academic.schedule_overview', sid=ts.id) }}">
+            <i class="bi bi-list-columns-reverse"></i> 全校总课表
         </a>
     </div>
 </div>
@@ -65,23 +86,44 @@
                     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                     <div class="mb-2">
                         <input class="form-control" type="file" name="file" accept=".xlsx,.xlsm" required>
-                        <div class="form-text">支持 .xlsx / .xlsm；一个文件可含多个 sheet（每班一张）。</div>
+                        <div class="form-text">
+                            支持 <b>.xlsx / .xlsm</b>（Excel 2007+）；<code>.xls</code> / <code>.csv</code>
+                            请先用 Excel「另存为 .xlsx」。两种版式都能直接上传：<br>
+                            ① <b>全校总课表</b>（行＝星期 × 节次，列＝班级）② <b>整班矩阵</b>（一个 sheet 一个班）。
+                        </div>
+                    </div>
+                    <div class="mb-2">
+                        <label class="form-label small mb-1">整批周次（可选）</label>
+                        <input class="form-control form-control-sm" name="week_range" maxlength="20"
+                               value="{{ week_range or '' }}" placeholder="如 1-18 / 5 / 1-9 / 单周 / 双周">
+                        <div class="form-text">按「班级 + 周次」批量导入：填了就整批按该周次写入；
+                            留空 = 按格内标注（缺省 1-18）。格内写有 (单周)/(3-5) 的以格内为准。</div>
                     </div>
                     <button class="btn btn-primary btn-sm" type="submit">
                         <i class="bi bi-search"></i> 解析并预览
                     </button>
                 </form>
                 <hr>
-                <div class="small text-muted mb-1">认识的形态（行＝节次，列＝星期，格内学科/教师）：</div>
-                <div class="si-demo">┌────────┬──────┬──────┬──────┐
-│  节次  │ 周一 │ 周二 │ 周三 │
-├────────┼──────┼──────┼──────┤
-│  早读  │ 语文 │ 英语 │ 语文 │
-│  第1节 │ 数学 │ 语文 │ 数学 │
-│        │ 张伟 │ 李娜 │ 张伟 │  ← 格内第二行写教师（可省略）
-└────────┴──────┴──────┴──────┘</div>
+                <div class="small text-muted mb-1">形态 ① 全校总课表（行＝星期 × 节次，列＝班级）：</div>
+                <div class="si-demo">┌──────┬──────┬────────┬────────┐
+│ 星期 │ 节次 │ 高三1班 │ 高三2班 │
+├──────┼──────┼────────┼────────┤
+│星期一│  1节 │ 历史   │ 英语   │
+│      │      │ 郭艳静 │ 王一楠 │  ← 格内第二行写教师（可省略）
+│      │  2节 │ 语文   │ 语文   │
+└──────┴──────┴────────┴────────┘</div>
+                <div class="small text-muted mt-2 mb-1">形态 ② 整班矩阵（一个 sheet 一个班，行＝节次，列＝星期）：</div>
+                <div class="si-demo">┌────────┬──────┬──────┐
+│  节次  │ 周一 │ 周二 │
+├────────┼──────┼──────┤
+│  第1节 │ 数学 │ 语文 │
+│        │ 张伟 │ 李娜 │
+└────────┴──────┴──────┘</div>
                 <ul class="small text-muted mt-2 mb-0">
-                    <li>班级从 <b>sheet 名</b> 或表格上方标题识别：<code>高三1班</code>、<code>2024级01班</code>、<code>01班</code></li>
+                    <li>班级从 <b>表头列名</b>（形态 ①）或 <b>sheet 名 / 表格上方标题</b>（形态 ②）识别：
+                        <code>高三1班</code>、<code>2024级01班</code>、<code>01班</code></li>
+                    <li>节次写 <code>1节</code>、<code>第1节</code>、<code>早读</code>、
+                        <code>晚自习1</code> 都能认（须与学期「节次配置」对得上）</li>
                     <li>学科可简写：语/数/英/物/化/生/政/史/地/体/音/美/班/自习</li>
                     <li>空值写 <code>—</code>、<code>/</code>、<code>无</code> 都可以；单双周写 <code>语文(单周)</code></li>
                     <li>教师按姓名自动匹配教师名单（找不到的按原样记录并提示）</li>
@@ -97,7 +139,7 @@
                 <div class="mt-1">2. 节次名称要与本学期的作息一致（如表格写「第一节」，系统叫「第1节」也可以，会自动对齐）。</div>
                 <div class="mt-1">3. 如果课表里就是学校实行的课表，导入后即可用于班级/教师/教室/总分课表与学生课表。</div>
                 <div class="mt-1">4. 已有的课不会自动清空；重复导入前建议先到
-                    <a href="{{ url_for('academic.schedule_master', sid=ts.id) }}">大课表</a> 确认现有数据。</div>
+                    <a href="{{ url_for('academic.schedule_overview', sid=ts.id) }}">全校总课表</a> 确认现有数据。</div>
             </div>
         </div>
     </div>
@@ -105,6 +147,7 @@
 {% else %}
 <div class="alert alert-info py-2">
     <i class="bi bi-info-circle"></i> 文件 <b>{{ fname }}</b> 已解析：共 {{ data.sheets|length }} 张表。
+    {% if week_range %}整批周次：<b>{{ week_range }}</b>（格内标注优先）。{% endif %}
     请核对下方班级后点击「确认导入」。
 </div>
 

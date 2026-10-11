@@ -28,7 +28,8 @@ from app.models.timetable import (
     TermSchedule, PeriodDef, ScheduleEntry, ScheduleSwap, ScheduleVersion,
     get_default_periods,
     SCHEDULE_STATUS, ENTRY_TYPES, SWAP_STATUS as TT_SWAP_STATUS,
-    SWAP_TYPES as TT_SWAP_TYPES, PERIOD_TYPES, WEEKDAY_NAMES, MAX_PERIOD,
+    SWAP_TYPES as TT_SWAP_TYPES, PERIOD_TYPES, WEEKDAY_NAMES,
+    PERIOD_NUMBER_CEILING,
 )
 
 __all__ = ['User', 'Student', 'Room', 'BedAssignment', 'StudentAccommodation',
@@ -51,5 +52,5 @@ __all__ = ['User', 'Student', 'Room', 'BedAssignment', 'StudentAccommodation',
            'TermSchedule', 'PeriodDef', 'ScheduleEntry', 'ScheduleSwap', 'ScheduleVersion',
            'get_default_periods',
            'SCHEDULE_STATUS', 'ENTRY_TYPES', 'TT_SWAP_STATUS', 'TT_SWAP_TYPES',
-           'PERIOD_TYPES', 'WEEKDAY_NAMES', 'MAX_PERIOD']
+           'PERIOD_TYPES', 'WEEKDAY_NAMES', 'PERIOD_NUMBER_CEILING']
 

@@ -931,40 +931,49 @@ def _read(rel):
 # ======================================================================
 @item('R-1')
 def check_R1():
-    from app.utils.decorators import scope_required
-    from werkzeug.exceptions import Forbidden
+    # 2026-10-10 架构审计调整：原先这里验证 `app.utils.decorators.scope_required`，
+    # 但该装饰器自定义后**从未被任何路由调用**（全仓库零命中），已于本次审计删除。
+    # 真正生效的数据范围判定是 grades/services/scope.py，故 R-1 改为验证它 ——
+    # 断言从「装饰器自身行为」升级为「实际生效的口径」，测试价值更高。
+    from app.modules.grades.services import scope as scope_mod
     with app.app_context():
         teacher = db.session.get(User, IDS['teacher'])
+        admin = db.session.get(User, IDS['admin'])
 
-    with app.test_request_context('/x'):
-        from flask_login import login_user
-        login_user(teacher)
+        # ① 可见年级返回列表（统一口径的核心出口）
+        vis = scope_mod.visible_grades(teacher)
+        case('R-1 任课教师可见年级返回列表', isinstance(vis, list))
 
-        @scope_required(checker=lambda: False)
-        def _denied():
-            return 'ok'
+        # ② 无有效数据范围的账号：考试判定一律拒绝（不回落全校）
+        class _FakeExam:
+            grade = '__NOT_A_REAL_GRADE__'
+
+        class _NoScopeUser:
+            """模拟「无任何数据范围配置」的账号（无 permission_group / 无映射）"""
+            role = 'noperm'
+            id = -1
+            permission_group = None
+            grade = None
+
+            def has_role(self, *_a, **_k):
+                return False
+
         try:
-            _denied()
-            case('R-1 checker 返回 False → 403', False, '未拦截')
-        except Forbidden:
-            case('R-1 checker 返回 False → 403', True)
+            scope_mod.check_exam_visible(_NoScopeUser(), _FakeExam())
+            case('R-1 无数据范围账号访问考试被拒', False, '未拒绝')
+        except PermissionError:
+            case('R-1 无数据范围账号访问考试被拒', True)
 
-        @scope_required(checker=lambda: True)
-        def _allowed():
-            return 'ok'
-        case('R-1 checker 放行 → 正常执行', _allowed() == 'ok')
-
-        def _raise():
-            raise PermissionError
-
-        @scope_required(checker=_raise)
-        def _denied2():
-            return 'ok'
+        # ③ admin 恒不受限（各口径一致的最高层约定）
         try:
-            _denied2()
-            case('R-1 checker 抛 PermissionError → 403', False, '未拦截')
-        except Forbidden:
-            case('R-1 checker 抛 PermissionError → 403', True)
+            scope_mod.check_exam_visible(admin, _FakeExam())
+            case('R-1 admin 不受数据范围限制', True)
+        except PermissionError:
+            case('R-1 admin 不受数据范围限制', False, 'admin 被误拒')
+
+    # ④ 统一口径必须存在可被路由调用的函数（防止"机制被删但无人知晓"）
+    for fn in ('visible_grades', 'check_exam_visible', 'user_grade_scope'):
+        case(f'R-1 统一口径提供 {fn}', callable(getattr(scope_mod, fn, None)))
 
     # 历史实现已降级为转发层，不再有独立判定逻辑
     src = _read('app/modules/workbench/services/scope_service.py')
@@ -1041,9 +1050,11 @@ def check_L3():
 # ======================================================================
 @item('L-4')
 def check_L4():
-    src = _read('app/modules/academic/routes/timetable.py')
-    case('L-4 草稿加锁', '_DRAFT_LOCK' in src and 'threading' in src)
-    case('L-4 草稿数量上限', '_DRAFT_MAX' in src)
+    # 2026-10-10：旧课表导入（timetable.py）已整体下线，草稿安全要求转移到
+    # 现存的「原样课表导入」草稿（schedule.py 的 _SMART_DRAFT）。
+    src = _read('app/modules/academic/routes/schedule.py')
+    case('L-4 草稿加锁', '_SMART_DRAFT_LOCK' in src and 'threading' in src)
+    case('L-4 草稿数量上限', '_SMART_DRAFT_MAX' in src)
     from app.modules.academic.routes.form_summary import cleanup_stale_packages
     case('L-4 材料包清扫可调用', callable(cleanup_stale_packages))
 
@@ -1269,6 +1280,36 @@ def check_R11():
                         'scripts/migrate_split_db.py')
             if '_ddl_guard' in _read(f)]
     case('R-11 拼接 DDL 的脚本已接入守卫', len(used) >= 6, str(len(used)))
+
+
+# ======================================================================
+# CSRF-TPL 模板 POST 表单必须带 CSRF 防护（2026-10-10 新增）
+# 背景：通知中心「全部已读」表单漏了 csrf_token，CSRFProtect 直接 400
+# （用户实测报障）。这里做全站静态扫描，再有人漏就本项变红。
+# ======================================================================
+@item('CSRF-TPL')
+def check_csrf_tpl():
+    import glob as _glob
+    form_re = re.compile(r'<form\b[^>]*>.*?</form>', re.S | re.I)
+    tag_re = re.compile(r'<form\b[^>]*>', re.I)
+    bad = []
+    for path in _glob.glob(os.path.join(BASE, 'app', 'templates', '**', '*.html'),
+                           recursive=True):
+        rel = os.path.relpath(path, BASE).replace('\\', '/')
+        src = _read(rel)
+        for m in form_re.finditer(src):
+            block = m.group(0)
+            if not re.search(r'method\s*=\s*[\'"]?post',
+                             tag_re.search(block).group(0), re.I):
+                continue
+            # Flask-WTF 表单用 form.hidden_tag()，等价于注入 csrf_token 隐藏域
+            if 'csrf_token' in block or 'hidden_tag' in block:
+                continue
+            bad.append(f'{rel}:{src[:m.start()].count(chr(10)) + 1}')
+    case('CSRF-TPL 所有 POST 表单带 CSRF 防护（csrf_token / hidden_tag）',
+         not bad, '、'.join(bad[:8]))
+    case('CSRF-TPL 通知中心表单已带 token',
+         'csrf_token' in _read('app/templates/notifications/list.html'))
 
 
 def main(argv):

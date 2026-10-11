@@ -16,17 +16,17 @@
 </style>
 {% endblock %}
 {% block content %}
-{% set ns = namespace(cur_id=None) %}
-{% for y in years %}{% for t in grouped[y] %}{% if t.is_current %}{% set ns.cur_id = t.id %}{% endif %}{% endfor %}{% endfor %}
-
+{% set ns = namespace(dummy=None) %}
+{# 2026-10-10：本页只列已归档学期（学期管理只管在用/待启用），所以「当前学期」不在
+   这个列表里，交接入口直接用路由传进来的 current_term #}
 <div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
     <div>
         <h4 class="fw-bold mb-1"><i class="bi bi-clock-history"></i> 历史课表总览</h4>
-        <span class="text-muted small">课表是按学期存在的时序数据资产 · 共 {{ total }} 个学期 · 历史学期仅供查阅（只读）</span>
+        <span class="text-muted small">已归档的学期 · 共 {{ total }} 个 · 仅供查阅（只读），可重新启用或作为新学期底版</span>
     </div>
     <div class="d-flex gap-2 flex-wrap">
-        {% if ns.cur_id %}
-        <a class="btn btn-sm btn-primary" href="{{ url_for('academic.schedule_copy', sid=ns.cur_id) }}">
+        {% if current_term %}
+        <a class="btn btn-sm btn-primary" href="{{ url_for('academic.schedule_copy', sid=current_term.id) }}">
             <i class="bi bi-files"></i> 学期交接：复制当前学期课表
         </a>
         {% endif %}
@@ -42,7 +42,10 @@
 {% if not total %}
 <div class="card"><div class="card-body text-center py-5 text-muted">
     <i class="bi bi-inbox" style="font-size:40px;"></i>
-    <p class="mt-3 mb-0">暂无学期数据</p>
+    <p class="mt-3 mb-1">还没有归档学期</p>
+    <p class="small mb-0">对不再使用的学期，在
+        <a href="{{ url_for('academic.schedule_manage') }}">学期管理</a>
+        里点「归档进历史课表」，它就会出现在这里（只读回看，可重新启用）。</p>
 </div></div>
 {% endif %}
 
@@ -84,24 +87,27 @@
                 </div>
                 <div class="card-footer py-2 bg-transparent">
                     <div class="d-flex flex-wrap gap-1">
-                        {% if t.status == 'archived' %}
+                        {# 本页只列已归档学期，查看一律走只读详情页（原非归档分支指向的
+                           「大课表」页已于 2026-10-10 下线） #}
                         <a class="btn btn-sm btn-outline-primary py-0" href="{{ url_for('academic.schedule_history_detail', sid=t.id) }}">
                             <i class="bi bi-eye"></i> 查看课表
                         </a>
-                        {% else %}
-                        <a class="btn btn-sm btn-outline-primary py-0" href="{{ url_for('academic.schedule_master', sid=t.id) }}">
-                            <i class="bi bi-grid-3x3"></i> 查看课表
-                        </a>
-                        {% endif %}
                         <a class="btn btn-sm btn-outline-secondary py-0" href="{{ url_for('academic.schedule_compare', sid_a=t.id) }}">
                             <i class="bi bi-arrow-left-right"></i> 对比
-                        </a>
-                        <a class="btn btn-sm btn-outline-secondary py-0" href="{{ url_for('academic.schedule_usage', sid=t.id) }}">
-                            <i class="bi bi-graph-up"></i> 使用情况
                         </a>
                         <a class="btn btn-sm btn-outline-success py-0" href="{{ url_for('academic.schedule_copy', sid=t.id) }}">
                             <i class="bi bi-files"></i> 以此为底版
                         </a>
+                        {# 2026-10-10：归档学期不再列进「学期管理」，所以把「重新启用」搬到这里，
+                           否则归档就成了只进不出（用户报障两次：归档的要有地方回得来） #}
+                        {% if t.status == 'archived' %}
+                        <form method="POST" class="d-inline"
+                              action="{{ url_for('academic.schedule_activate', sid=t.id) }}"
+                              onsubmit="return confirm({{ ('重新启用「' ~ t.name ~ '」？该学期将从历史课表恢复为启用中；当前启用中的学期会自动归档进「历史课表」（含快照）。') | tojson }})">
+                            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                            <button class="btn btn-sm btn-success py-0"><i class="bi bi-broadcast"></i> 重新启用</button>
+                        </form>
+                        {% endif %}
                     </div>
                 </div>
             </div>

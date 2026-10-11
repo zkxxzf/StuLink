@@ -1,10 +1,18 @@
 # StuLink v1.7.0 2026-08-02
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
+import json
+import logging
+
 from flask import Blueprint, render_template, request
 from flask_login import login_required, current_user
 from app.models import OperationLog, User
 from app.extensions import db
 from app.utils.decorators import perm_required
+
+logger = logging.getLogger(__name__)
+# 2026-10-10 架构审计修复：审计日志 detail 解析原为**裸 except**（PEP 8 严禁，
+# 会连 KeyboardInterrupt/SystemExit 一起吞掉），且失败不可观测。
+# 现改为精确异常类型 + logger 留痕；降级行为不变（解析失败仍按 None 处理）。
 
 bp = Blueprint('operation_logs', __name__, url_prefix='/operation-logs')
 
@@ -65,10 +73,10 @@ def list_logs():
         detail_data = None
         if log.detail:
             try:
-                import json
                 detail_data = json.loads(log.detail)
-            except:
-                pass
+            except (ValueError, TypeError) as _e:
+                # detail 非 JSON（历史明文记录）属预期情况，debug 级即可，不刷屏
+                logger.debug('审计日志 detail 非 JSON（log id=%s）: %s', log.id, _e)
         logs_with_detail.append({
             'log': log,
             'detail_data': detail_data

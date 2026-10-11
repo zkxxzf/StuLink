@@ -9,6 +9,12 @@ from app.models.grades import (Exam, SUBJECTS, TOTAL_SUBJECT, subject_display,
 from app.models import ClassProfile, UserClassLink, User
 from app.modules.grades.services import stats_service as st
 
+# 2026-10-10 架构审计修复：本文件原有静默 `except Exception: pass`，失败不可观测。
+# 统一加 logger 记录 warning（仅留痕，不改变任何降级行为与返回值）。
+import logging
+
+logger = logging.getLogger(__name__)
+
 # ============ 可调口径配置（修改规则只改这里） ============
 # 班型 → 去差人数：计算「去差均分」时该班总分排名末尾剔除人数；未列出的班型为 0
 TRIM_RULES = {'卓越班': 2}
@@ -79,8 +85,8 @@ def trimmed_nos(data):
     try:
         for p in ClassProfile.query.filter_by(grade=data.exam.grade).all():
             live_ct[p.class_name] = p.class_type or ''
-    except Exception:
-        pass
+    except Exception as _e:  # noqa: BLE001
+        logger.warning('report_service.py::trimmed_nos 异常（已降级处理）: %s', _e)
 
     by_class = {}
     for r in data.total_rows:

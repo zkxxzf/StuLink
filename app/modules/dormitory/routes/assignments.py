@@ -127,7 +127,7 @@ def manage():
 
     # 确保这些房间的 BedAssignment 记录完整
     if rooms:
-        from app.modules.dormitory.services.room_assignment_v4 import _ensure_room_beds
+        from app.modules.dormitory.services.room_assignment_v7 import _ensure_room_beds
         _ensure_room_beds([r.id for r in rooms])
 
     # 检查班级是否有宿舍分配
@@ -150,13 +150,30 @@ def manage():
     beds_insufficient = (not no_rooms) and total_capacity < total_students_needed
 
     # 构建宿舍和床位数据
+    # 2026-10-10 架构审计修复：原实现「每房间查床位 → 每床位再查学生」（双重 N+1），
+    # 一栋楼几百间房时是首屏慢的主因。改为：一次性取全部床位 + 一次性取涉及学生，
+    # 组装结果与原来完全一致（bed 顺序按 bed_number，student 为 None 仍保留）。
+    _room_ids = [r.id for r in rooms]
+    _beds_by_room = {}
+    if _room_ids:
+        _all_beds = BedAssignment.query.filter(
+            BedAssignment.room_id.in_(_room_ids)
+        ).order_by(BedAssignment.bed_number).all()
+        for _b in _all_beds:
+            _beds_by_room.setdefault(_b.room_id, []).append(_b)
+        _student_ids = {_b.student_id for _b in _all_beds if _b.student_id}
+        _student_map = {}
+        if _student_ids:
+            _student_map = {s.id: s for s in
+                            Student.query.filter(Student.id.in_(_student_ids)).all()}
+    else:
+        _student_map = {}
+
     rooms_data = []
     for room in rooms:
-        beds = BedAssignment.query.filter_by(room_id=room.id).order_by(
-            BedAssignment.bed_number).all()
         bed_list = []
-        for bed in beds:
-            student = Student.query.get(bed.student_id) if bed.student_id else None
+        for bed in _beds_by_room.get(room.id, []):
+            student = _student_map.get(bed.student_id) if bed.student_id else None
             bed_list.append({'bed': bed, 'student': student})
         rooms_data.append({'room': room, 'beds': bed_list})
 
@@ -247,9 +264,18 @@ def clear_class():
         BedAssignment.student_id.in_(student_ids)
     ).all()
     count = len(cleared_beds)
+    # 2026-10-10 架构审计修复：原实现每个床位都查一次 Student + Room（双重 N+1）。
+    # 清空一个班（几十人）就会几十次往返。改为一次性批量取出，
+    # record_assignment 的调用对象与顺序完全不变。
+    _stu_ids = {b.student_id for b in cleared_beds if b.student_id}
+    _room_ids = {b.room_id for b in cleared_beds if b.room_id}
+    _stu_map = {s.id: s for s in
+                Student.query.filter(Student.id.in_(_stu_ids)).all()} if _stu_ids else {}
+    _room_map = {r.id: r for r in
+                 Room.query.filter(Room.id.in_(_room_ids)).all()} if _room_ids else {}
     for bed in cleared_beds:
-        student = Student.query.get(bed.student_id)
-        room = Room.query.get(bed.room_id)
+        student = _stu_map.get(bed.student_id)
+        room = _room_map.get(bed.room_id)
         if student and room:
             record_assignment('clear', student, room, bed.bed_number, current_user)
     if cleared_beds:
@@ -585,7 +611,7 @@ def auto_assign():
         return jsonify({'success': False, 'message': '该班级尚未分配宿舍房间'}), 400
     
     # 1.1 确保这些房间的 BedAssignment 记录完整
-    from app.modules.dormitory.services.room_assignment_v4 import _ensure_room_beds
+    from app.modules.dormitory.services.room_assignment_v7 import _ensure_room_beds
     _ensure_room_beds([r.id for r in rooms])
 
     # 2. 收集所有空床位（合班宿舍按 combined_details 份额过滤，防止抢占其他班床位）
@@ -764,7 +790,7 @@ def auto_assign_all():
     graduated = get_graduated_grades()
 
     # 0. 确保所有已分配宿舍的房间都有 BedAssignment 记录
-    from app.modules.dormitory.services.room_assignment_v4 import _ensure_room_beds
+    from app.modules.dormitory.services.room_assignment_v7 import _ensure_room_beds
     all_assigned_rooms = Room.query.filter(
         Room.class_name.isnot(None),
         Room.class_name != ''
@@ -922,18 +948,27 @@ def auto_assign_all():
         for bed in available_beds:
             bed_groups.setdefault(bed.room_id, []).append(bed)
 
+        # 按性别分房间
+        # 2026-10-10 架构审计修复：原实现在循环内逐个 Room.query.get(rid)（N+1），
+        # 房间规模下是首屏慢的主因之一。改为一次性批量取出，行为完全一致。
         male_rooms = []
         female_rooms = []
         unisex_rooms = []
+        room_ids = list(bed_groups.keys())
+        room_gender = {}
+        if room_ids:
+            rows = (db.session.query(Room.id, Room.gender)
+                    .filter(Room.id.in_(room_ids)).all())
+            room_gender = {rid: gender for rid, gender in rows}
         for rid, beds in bed_groups.items():
-            room = Room.query.get(rid)
-            if room:
-                if room.gender == '男':
-                    male_rooms.append(beds)
-                elif room.gender == '女':
-                    female_rooms.append(beds)
-                else:
-                    unisex_rooms.append(beds)
+            if rid not in room_gender:
+                unisex_rooms.append(beds)
+                continue
+            gender = room_gender[rid]
+            if gender == '男':
+                male_rooms.append(beds)
+            elif gender == '女':
+                female_rooms.append(beds)
             else:
                 unisex_rooms.append(beds)
 

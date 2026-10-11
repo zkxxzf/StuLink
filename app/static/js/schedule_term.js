@@ -5,7 +5,7 @@
  *   calendar —— 学期校历：自动滚动定位到当前周
  *   compare  —— 跨学期对比：A/B 同选校验
  *   today    —— 今日课表：从 current-context 接口刷新学期/周次上下文条
- * 另外全局处理 #weekSelect 周次选择器联动（master/grade/class/teacher/today 通用）。
+ * 另外全局处理 #weekSelect 周次选择器联动（grade/class/teacher/today/overview 通用）。
  */
 (function () {
     'use strict';
@@ -61,15 +61,20 @@
             var total = parseInt((weeksEl && weeksEl.value) || '20', 10) || 20;
             var off = parseInt((offEl && offEl.value) || '0', 10) || 0;
             if (total > 30) { total = 30; }
+            // 2026-10-10：周次按**自然周（周一~周日）**划分 —— 先退到开学日所在周的周一，
+            // 开学非周一时第 1 周就是不完整周（开学日 ~ 该周周日），不再整体漂移。
             var wd = start.getDay(); // 0=周日 1=周一
+            var anchor = addDays(start, -((wd === 0 ? 7 : wd) - 1));
             var tip = (wd !== 1)
-                ? '<div class="alert alert-warning py-1 small mb-2"><i class="bi bi-exclamation-triangle"></i> 开学第一天不是周一（星期' + '日一二三四五六'.charAt(wd) + '），周次划分可能偏移。</div>'
+                ? '<div class="alert alert-info py-1 small mb-2"><i class="bi bi-info-circle"></i> 开学第一天是星期' + '日一二三四五六'.charAt(wd) + '，第 1 周按自然周计算：到 ' + fmtDate(addDays(start, 7 - ((wd === 0 ? 7 : wd) - 1) - 1)) + '（周日）结束，第 2 周从下周一（' + fmtDate(addDays(anchor, 7)) + '）开始。</div>'
                 : '';
             var today = fmtDate(new Date());
             var html = [tip, '<table class="table table-sm mb-0"><thead><tr><th style="width:70px">周次</th><th>日期区间（周一 ~ 周日）</th></tr></thead><tbody>'];
             for (var w = 1; w <= total; w++) {
-                var monday = addDays(start, (w - 1 + off) * 7);
-                var sunday = addDays(monday, 6);
+                var rawMonday = addDays(anchor, (w - 1 + off) * 7);
+                // 第 1 周从开学日算起（开学前的几天还没开始上课）
+                var monday = (w === 1 && rawMonday < start) ? start : rawMonday;
+                var sunday = addDays(rawMonday, 6);
                 var isCur = (today >= fmtDate(monday) && today <= fmtDate(sunday));
                 html.push('<tr class="' + (isCur ? 'table-success' : '') + '">');
                 html.push('<td class="fw-bold">第 ' + w + ' 周' + (isCur ? ' <span class="badge bg-success">本周</span>' : '') + '</td>');

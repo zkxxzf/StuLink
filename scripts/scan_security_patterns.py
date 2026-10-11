@@ -84,7 +84,10 @@ def _is_third_party(rel):
 
 def iter_files():
     for root, dirs, files in os.walk(BASE):
-        dirs[:] = [d for d in dirs if d not in SKIP_DIRS]
+        # 备份快照（backup_* 目录）不属于现行代码：扫描目标是现网 .py/.html/.js，
+        # 备份里保留的历史写法不应计数（tests/qa_*/backup_before_delete 曾导致 R-8 假阳性）。
+        dirs[:] = [d for d in dirs
+                   if d not in SKIP_DIRS and not d.startswith('backup')]
         for fn in files:
             if fn.endswith(('.py', '.html', '.js')):
                 yield os.path.join(root, fn)

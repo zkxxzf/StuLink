@@ -9,6 +9,8 @@ CATEGORY_LABELS = {
     'system': '系统公告',
     'reminder': '催交提醒',
     'academic': '教务通知',
+    # 2026-10-10：材料/业绩收集专属分类（收集开启、审核结果、延期通知都归这里）
+    'collect': '材料收集',
     'workbench': '工作台',
     'other': '其他',
 }

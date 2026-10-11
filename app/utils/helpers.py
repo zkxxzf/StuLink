@@ -1,11 +1,46 @@
 # StuLink v1.7.0 2026-08-02
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 import json
+import logging
 import os
 import re
+from datetime import date
 from app.models import DictCategory, Student, Room, ClassProfile, ClassSubject
 from app.utils.cache import cache
 from flask import request, g
+
+# 2026-10-10 架构审计修复：本模块多处 except 用于「降级兜底」（返回空列表/默认值），
+# 原先静默 pass 导致查询失败时页面照常渲染但数据为空，排查无从下手。
+# 现统一经此 logger 记录 warning —— **只加可观测性，不改变任何降级行为与返回值**。
+logger = logging.getLogger(__name__)
+
+
+def to_int(value, default=0):
+    """安全转 int 的取参工具：None / 空串 / 非数字（如 ?page=abc）一律回落 default。
+
+    2026-10-11 审计修复：路由里多处 `int(request.args.get(...))` 未兜底，
+    传入非数字参数会抛 ValueError 变 500；本函数统一消除该缺口。
+    正常数字输入的行为与原来完全一致（仅收敛非法输入）。
+    """
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def to_date(value, default=None):
+    """安全解析日期的取参工具：None / 空 / 非法（如 ?date_from=abc）一律回落 default。
+
+    2026-10-11 审计修复：多处 `date.fromisoformat(request.args.get(...))` 仅判空未判格式，
+    传入非日期字符串会抛 ValueError 变 500；本函数统一消除该缺口。
+    正常 YYYY-MM-DD 输入行为与原来完全一致。
+    """
+    if not value:
+        return default
+    try:
+        return date.fromisoformat(str(value).strip()[:10])
+    except (TypeError, ValueError):
+        return default
 
 
 def _insert_log_row(values):
@@ -26,8 +61,9 @@ def _insert_log_row(values):
     with db.engine.connect() as conn:
         try:
             conn.exec_driver_sql('PRAGMA busy_timeout=300')
-        except Exception:  # noqa: BLE001  非 SQLite（或不支持该 PRAGMA）忽略
-            pass
+        except Exception as _e:  # noqa: BLE001  非 SQLite（或不支持该 PRAGMA）忽略
+            # 非 SQLite 或不认识该 PRAGMA 属预期兼容情况，行为不变（继续写日志）
+            logger.debug('设置 busy_timeout 失败（非 SQLite 环境，可忽略）: %s', _e)
         conn.execute(table.insert().values(**values))
         conn.commit()
 
@@ -84,8 +120,8 @@ def log_operation(user, action, target_type=None, target_id=None, detail=None,
                 db.session.add(OperationLog(**values))
 
         g._audit_logged = True  # 供 after_request 兜底网去重
-    except Exception:
-        pass  # 日志记录失败不阻塞业务
+    except Exception as _e:  # noqa: BLE001
+        logger.warning('操作日志记录失败（不阻塞业务）: %s', _e)  # 2026-10-10 改为留痕
 
 
 def is_dict_value_in_use(category_code, value):
@@ -99,8 +135,8 @@ def is_dict_value_in_use(category_code, value):
             try:
                 if ClassProfile.query.filter_by(grade=value).first():
                     return True
-            except Exception:
-                pass
+            except Exception as _e:  # noqa: BLE001
+                logger.warning('字典引用检查(grade)跳过 ClassProfile 校验: %s', _e)
         elif category_code == 'class':
             if Student.query.filter_by(class_name=value).first():
                 return True
@@ -109,8 +145,8 @@ def is_dict_value_in_use(category_code, value):
             try:
                 if ClassProfile.query.filter_by(class_name=value).first():
                     return True
-            except Exception:
-                pass
+            except Exception as _e:  # noqa: BLE001
+                logger.warning('字典引用检查(class)跳过 ClassProfile 校验: %s', _e)
         elif category_code == 'building':
             if Room.query.filter_by(building=value).first():
                 return True
@@ -119,8 +155,9 @@ def is_dict_value_in_use(category_code, value):
                 floor_num = int(value.replace(' 层', '').replace('层', '').strip())
                 if Room.query.filter_by(floor=floor_num).first():
                     return True
-            except (ValueError, AttributeError):
-                pass
+            except (ValueError, AttributeError) as _e:
+                # 楼层值不是数字（如"未知"）属字典脏数据，回落"未引用"（行为不变）
+                logger.debug('楼层字典值无法解析为数字（%r）: %s', value, _e)
         elif category_code == 'boarding_type':
             from app.models import StudentAccommodation
             if StudentAccommodation.query.filter_by(boarding_type=value).first():
@@ -136,16 +173,16 @@ def is_dict_value_in_use(category_code, value):
             try:
                 if ClassProfile.query.filter_by(class_type=value).first():
                     return True
-            except Exception:
-                pass
+            except Exception as _e:  # noqa: BLE001
+                logger.warning('字典引用检查(class_type)跳过校验: %s', _e)
         elif category_code == 'subject_direction':
             try:
                 if ClassProfile.query.filter_by(subject_direction=value).first():
                     return True
-            except Exception:
-                pass
-    except Exception:
-        pass
+            except Exception as _e:  # noqa: BLE001
+                logger.warning('字典引用检查(subject_direction)跳过校验: %s', _e)
+    except Exception as _e:  # noqa: BLE001
+        logger.warning('字典引用检查整体失败，按「未被引用」处理: %s', _e)
     return False
 
 
@@ -196,7 +233,9 @@ def get_graduated_grades():
     try:
         from app.models.grade_setting import GradeSetting
         grades = [gs.grade for gs in GradeSetting.query.filter_by(is_graduated=True).all()]
-    except Exception:
+    except Exception as _e:  # noqa: BLE001
+        # 降级返回空列表（行为不变），但留痕便于定位「年级莫名全部在校」
+        logger.warning('读取已毕业年级失败，本次按「无毕业年级」处理: %s', _e)
         return []  # 异常不写缓存，下次重试
     cache.set(cache_key, grades, timeout=600)
     return grades
@@ -256,8 +295,8 @@ def get_school_name():
         db_name = (SystemSetting.get(SCHOOL_NAME_KEY) or '').strip()
         if db_name:
             return db_name
-    except Exception:
-        pass
+    except Exception as _e:  # noqa: BLE001
+        logger.warning('读取学校名称失败，回落默认名: %s', _e)
     return DEFAULT_SCHOOL_NAME
 
 
@@ -459,8 +498,8 @@ def resolve_direction(subject_selection, class_name=None, grade=None):
             cp = q.first()
             if cp and cp.subject_direction:
                 return cp.subject_direction
-        except Exception:
-            pass
+        except Exception as _e:  # noqa: BLE001
+            logger.warning('按班名推导选科方向失败(%s/%s): %s', grade, class_name, _e)
     return ''
 
 
@@ -472,7 +511,8 @@ def get_class_type(grade, class_name):
         from app.models.class_profile import ClassProfile
         cp = ClassProfile.query.filter_by(grade=grade, class_name=class_name).first()
         return (cp.class_type or '') if cp else ''
-    except Exception:
+    except Exception as _e:  # noqa: BLE001
+        logger.warning('读取班型失败(%s/%s): %s', grade, class_name, _e)
         return ''
 
 
@@ -490,7 +530,8 @@ def get_class_selection(grade, class_name):
             return ''
         lst = cp.subject_list
         return '、'.join(lst) if lst else ''
-    except Exception:
+    except Exception as _e:  # noqa: BLE001
+        logger.warning('读取班级选科组合失败(%s/%s): %s', grade, class_name, _e)
         return ''
 
 
@@ -553,7 +594,8 @@ def student_change_logs(student_id, limit=200):
             return [dict(r._mapping) for r in
                     conn.execute(sql, {'sid': int(student_id),
                                        'lim': int(limit)}).fetchall()]
-    except Exception:
+    except Exception as _e:  # noqa: BLE001
+        logger.warning('读取学生变迁日志失败(student_id=%s): %s', student_id, _e)
         return []
 
 
@@ -581,7 +623,8 @@ def class_change_counts(student_ids):
                    f'GROUP BY student_id')
         with engine.connect() as conn:
             return {row[0]: row[1] for row in conn.execute(sql, params).fetchall()}
-    except Exception:
+    except Exception as _e:  # noqa: BLE001
+        logger.warning('批量统计调班次数失败(%d 个学生): %s', len(ids), _e)
         return {}
 
 
@@ -646,7 +689,8 @@ def class_change_logs(student_ids=None, change_types=None, grade='', class_name=
                 out.extend(dict(r._mapping) for r in conn.execute(sql, params).fetchall())
         out.sort(key=lambda r: (str(r.get('changed_at') or ''), r.get('id') or 0), reverse=True)
         return out[:int(limit)]
-    except Exception:
+    except Exception as _e:  # noqa: BLE001
+        logger.warning('查询变迁日志列表失败: %s', _e)
         return []
 
 
