@@ -37,3 +37,8 @@ logs
 # `COPY app/ ./app/` 会把 app/static/uploads 一并打进镜像层 → 镜像分发即泄露）。
 app/static/uploads
 app/static/uploads/**
+
+# MCP 服务：本地配置（含访问令牌）与虚拟环境不得打进镜像
+mcp_server/config.json
+mcp_server/.venv
+**/__pycache__

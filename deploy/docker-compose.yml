@@ -33,3 +33,29 @@
     environment:
       - TZ=Asia/Shanghai
 
+  # MCP 服务：独立容器，给 AI 客户端（IDE 插件 / 桌面应用 / 豆包等）提供 StuLink 数据能力。
+  # 镜像由 Dockerfile.mcp 构建：docker build -f Dockerfile.mcp -t stulink-mcp:v1.0.0 .
+  mcp:
+    image: stulink-mcp:v1.0.0
+    container_name: stulink-mcp
+    pull_policy: never
+    depends_on:
+      stulink:
+        condition: service_healthy
+    ports:
+      - "8765:8765"
+    volumes:
+      # MCP 直接读取主应用的 SQLite 库：读写挂载（WAL 库无法在只读挂载下打开）
+      - ./stulink-data:/app/data
+    restart: unless-stopped
+    environment:
+      - TZ=Asia/Shanghai
+      - DATABASE_URL=sqlite:////app/data/system.db
+      # 容器内必须监听 0.0.0.0 才能被外部访问；认证默认 account（每请求校验账号密码）
+      - STULINK_MCP_HOST=0.0.0.0
+      # 生产建议：固定服务令牌并设为必填（防端口被随意扫描）
+      # - STULINK_MCP_REQUIRE_TOKEN=true
+      # - STULINK_MCP_TOKEN=<用 secrets.token_urlsafe(32) 生成>
+      # 只读场景可关闭写工具
+      # - STULINK_MCP_ALLOW_WRITE=false
+

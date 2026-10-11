@@ -68,9 +68,9 @@
 
 ### 2.1 环境与依赖的通用要求
 
-- **运行时版本**：以安装脚本的显式声明为准。例：StuLink MCP 的
-  `mcp_server\start_mcp.bat` 要求 **Python 3.12**（`py -3.12 -m venv`），
-  不满意就在脚本里改，不要靠"系统默认 python"碰运气。
+- **运行时版本**：以依赖清单与镜像的显式声明为准。例：StuLink MCP 需要
+  **Python 3.11+**（与主应用一致；Docker 镜像为 `python:3.11-slim`），
+  不要靠"系统默认 python"碰运气。
 - **隔离环境**：Python 用 venv、Node 用本地 node_modules，**永远不要装进全局环境**。
   隔离的价值是"删掉目录 = 彻底卸载"，也是不同工具互不污染的保证。
 - **编码**：Windows 中文环境务必 UTF-8（脚本里 `chcp 65001` / `PYTHONUTF8=1`），
@@ -164,9 +164,9 @@
 
 | 组件 | 本项目取值 |
 |---|---|
-| 运行时 | Python **3.12**（安装脚本用 `py -3.12` 创建虚拟环境） |
+| 运行时 | Python **3.11+**（Docker 镜像 `python:3.11-slim`） |
 | 虚拟环境 | `mcp_server\.venv`（与主应用完全隔离） |
-| 依赖 | 主应用 `requirements.txt` + `mcp>=2.3.0,<3.0.0` |
+| 依赖 | `mcp_server/requirements.txt`（内含主应用依赖 + `mcp>=2.3.0,<3.0.0` + `uvicorn`） |
 | 服务端点 | 默认 `http://127.0.0.1:8765/mcp` |
 | 凭据 | StuLink 账号密码（`auth_mode=account`，默认）或静态令牌（`token` 模式） |
 | 配置文件 | `mcp_server\config.json`（首次启动自动生成，含逐键中文说明） |
@@ -175,15 +175,16 @@
 **② 安装与启动**
 
 ```bat
-:: 一键脚本（首次会自动建 venv 并装依赖，约 1-3 分钟）
-mcp_server\start_mcp.bat
+:: 建隔离环境并安装依赖（依赖清单见 mcp_server/requirements.txt，约 1-3 分钟）
+python -m venv mcp_server\.venv
+mcp_server\.venv\Scripts\python.exe -m pip install -r mcp_server\requirements.txt
 
-:: 等价的手动方式
-py -3.12 -m venv mcp_server\.venv
-mcp_server\.venv\Scripts\python.exe -m pip install -r requirements.txt
-mcp_server\.venv\Scripts\python.exe -m pip install "mcp>=2.3.0,<3.0.0"
+:: 启动服务（默认监听 127.0.0.1:8765，端点 /mcp）
 mcp_server\.venv\Scripts\python.exe mcp_server\run.py
 ```
+
+> Docker 部署（NAS / 服务器）：`docker build -f Dockerfile.mcp -t stulink-mcp:v1.0.0 .`，
+> 再由 `deploy/docker-compose.yml` 的 `mcp` 服务承载。详见 [MCP 服务技术文档](MCP服务技术文档.md)。
 
 **③ 关键配置项**（`config.json`，改完需重启服务）
 
@@ -658,6 +659,7 @@ mcp_server/config.json  ←──  各 AI 工具的接入配置
 
 ### D. 相关文档
 
+- [MCP 服务技术文档](MCP服务技术文档.md)：MCP 服务架构、工具清单、依赖、Docker 部署与验证
 - [MCP 服务认证与授权设计](MCP服务-认证与授权设计.md)：账号密码认证、权限一致性、拒绝策略
 - [部署文档](部署文档.md)：主应用 Docker/NAS/云服务器部署
 - [用户文档](用户文档.md)：系统功能使用说明
@@ -665,4 +667,4 @@ mcp_server/config.json  ←──  各 AI 工具的接入配置
 
 ---
 
-*文档版本：2026-10-11 · 对应 StuLink v1.19.5.0（MCP 服务：account 认证模式）*
+*文档版本：2026-10-11 · 对应 StuLink v1.19.41.2（MCP 服务：account 认证模式）*

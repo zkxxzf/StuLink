@@ -1,0 +1,41 @@
+# StuLink MCP 服务镜像（独立容器，与主应用容器共用数据目录）
+#
+# 构建（在仓库根目录执行，构建上下文必须为仓库根）：
+#   docker build -f Dockerfile.mcp -t stulink-mcp:v1.0.0 .
+#
+# 运行要点：
+#   · 必须挂载主应用的 data 目录（MCP 直接读取 app 的 SQLite 库）；
+#   · 容器内需监听 0.0.0.0 才能被外部访问（默认配置为 127.0.0.1，见下方 ENV）；
+#   · 认证默认 account 模式：每个客户端带自己的 StuLink 账号密码，权限与网页端一致。
+# 详见 docs/MCP服务技术文档.md 与 docs/MCP服务-认证与授权设计.md。
+FROM python:3.11-slim
+
+WORKDIR /app
+
+# 时区 + UTF-8（中文路径/输出） + 立即刷新日志
+ENV TZ=Asia/Shanghai \
+    PYTHONUNBUFFERED=1 \
+    PYTHONUTF8=1
+RUN ln -snf /usr/share/zoneinfo/$TZ /etc/localtime && echo $TZ > /etc/timezone
+
+# 依赖：mcp_server/requirements.txt 内含 `-r ../requirements.txt`（主应用依赖）
+#       + MCP SDK + uvicorn。两份清单分别 COPY，保证相对路径可解析。
+COPY requirements.txt ./
+COPY mcp_server/requirements.txt ./mcp_server/requirements.txt
+RUN pip install --no-cache-dir -r mcp_server/requirements.txt \
+        -i https://pypi.tuna.tsinghua.edu.cn/simple
+
+# 代码：MCP 复用主应用（app/ + config.py），只需再带上 mcp_server/
+COPY app/ ./app/
+COPY config.py ./
+COPY mcp_server/ ./mcp_server/
+
+# 数据目录（运行时通过卷挂载持久化，与主应用容器共享同一份）
+RUN mkdir -p /app/data /app/data/backups
+
+# 容器内必须监听 0.0.0.0 才能被宿主机/局域网访问
+ENV STULINK_MCP_HOST=0.0.0.0
+
+EXPOSE 8765
+
+CMD ["python", "mcp_server/run.py"]
