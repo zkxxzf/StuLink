@@ -1,4 +1,4 @@
-# StuLink v1.19.37.0 2026-10-10
+# StuLink v1.19.38.0 2026-10-10
 # 教师账号服务：姓名核对 / 自动开户（拼音账号 + 随机初始密码）
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 import random
@@ -34,7 +34,7 @@ def gen_username(real_name):
 
 
 def pinyin_of(name):
-    """v1.19.37.0 对外暴露的无调全拼（供「按姓名首字母排序」等复用）；无 pypinyin 时返回 None"""
+    """v1.19.38.0 对外暴露的无调全拼（供「按姓名首字母排序」等复用）；无 pypinyin 时返回 None"""
     return _pinyin(name)
 
 
