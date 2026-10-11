@@ -1,4 +1,4 @@
-# StuLink v1.19.31.0 2026-10-10
+# StuLink v1.19.32.0 2026-10-10
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 import logging
 import os
@@ -127,7 +127,7 @@ PERMISSION_GROUPS = [
             'points.import', 'points.export', 'points.rules',
             'grades.view', 'grades.edit',
             'grades.import', 'grades.settings', 'grades.teachers', 'grades.student_query',
-            'grades.score_edit',   # v1.19.31.0：成绩单改分（管理员天然可用；考务管理员另建组授予）
+            'grades.score_edit',   # v1.19.32.0：成绩单改分（管理员天然可用；考务管理员另建组授予）
             # v1.9.2 合并：master 新增选科维护页权限 + first 学术/画像/工作台权限（取并集）
             'grades.subject_mgmt',
             'academic.view', 'academic.timetable', 'academic.swap',
@@ -584,7 +584,7 @@ def create_app():
             return
         if request.path.startswith('/static/'):
             return
-        # v1.19.31.0 S-1：AJAX/Fetch/JSON 客户端不能处理 302 到 HTML 页面，
+        # v1.19.32.0 S-1：AJAX/Fetch/JSON 客户端不能处理 302 到 HTML 页面，
         # 否则前端 fetch().json() 会抛异常、无“请先改密”提示。改为 401 JSON。
         wants_json = (request.accept_mimetypes.best == 'application/json'
                       or request.is_json
