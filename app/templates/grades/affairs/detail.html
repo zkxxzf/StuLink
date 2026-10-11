@@ -1,5 +1,21 @@
 {% extends "base.html" %}
 {% block title %}考务向导 - 成绩管理{% endblock %}
+{% block extra_css %}
+<style>
+  /* v1.19.12.0 考务步骤条：按实际数据标出「已完成 / 待完成」（此前无任何状态与样式） */
+  .step-bar .step-pill {
+    display: inline-flex; align-items: center; gap: 6px;
+    padding: 2px 10px; border-radius: 999px;
+    border: 1px solid #e5e7eb; background: #f8fafc; color: #64748b;
+  }
+  .step-bar .step-pill .num {
+    width: 16px; height: 16px; line-height: 16px; text-align: center;
+    border-radius: 50%; background: #e2e8f0; color: #475569; font-size: 11px;
+  }
+  .step-bar .step-pill.done { border-color: #86efac; background: #dcfce7; color: #166534; }
+  .step-bar .step-pill.done .num { background: #16a34a; color: #fff; }
+</style>
+{% endblock %}
 {% block content %}
 <div class="d-flex justify-content-between align-items-center mb-2 flex-wrap gap-2">
     <div>
@@ -22,17 +38,24 @@
 </div>
 
 <!-- v1.12.2 移除步骤⑤成绩关联：功能使用率低，按考场查成绩走成绩模块自身入口即可 -->
+{# v1.19.12.0：步骤条按实际数据标出完成状态（AI 导入带上考场/考号时，②③ 也应显示已完成） #}
+{% set _s1 = stats.students > 0 %}
+{% set _s2 = rooms|length > 0 %}
+{% set _s3 = (arranged|length > 0) or (numbered > 0) %}
 <ol class="step-bar list-unstyled d-flex flex-wrap gap-2 mb-3 small">
-    <li class="step-pill"><span class="num">1</span> 学生名单</li>
-    <li class="step-pill"><span class="num">2</span> 考场设置</li>
-    <li class="step-pill"><span class="num">3</span> 编排与考号生成</li>
+    <li class="step-pill {{ 'done' if _s1 }}"><span class="num">1</span> 学生名单
+        {% if _s1 %}<i class="bi bi-check-lg"></i>{% endif %}</li>
+    <li class="step-pill {{ 'done' if _s2 }}"><span class="num">2</span> 考场设置
+        {% if _s2 %}<i class="bi bi-check-lg"></i>{% endif %}</li>
+    <li class="step-pill {{ 'done' if _s3 }}"><span class="num">3</span> 编排与考号生成
+        {% if _s3 %}<i class="bi bi-check-lg"></i>{% endif %}</li>
     <li class="step-pill"><span class="num">4</span> 导出</li>
 </ol>
 
 <ul class="nav nav-tabs mb-3" id="affairTabs" role="tablist">
-    <li class="nav-item"><button class="nav-link active" data-bs-toggle="tab" data-bs-target="#t1">① 学生名单</button></li>
-    <li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#t2">② 考场设置</button></li>
-    <li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#t3">③ 编排考号</button></li>
+    <li class="nav-item"><button class="nav-link active" data-bs-toggle="tab" data-bs-target="#t1">① 学生名单{% if _s1 %} <i class="bi bi-check-lg small text-success"></i>{% endif %}</button></li>
+    <li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#t2">② 考场设置{% if _s2 %} <i class="bi bi-check-lg small text-success"></i>{% endif %}</button></li>
+    <li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#t3">③ 编排考号{% if _s3 %} <i class="bi bi-check-lg small text-success"></i>{% endif %}</button></li>
     <li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#t4">④ 导出</button></li>
 </ul>
 
@@ -176,6 +199,15 @@
 
     <!-- ===== 步骤③ 编排与考号生成 ===== -->
     <div class="tab-pane fade" id="t3">
+        {# v1.19.12.0：已编排/已带考号（如 AI 导入）时明确标注「无需再执行」，并提示重排会覆盖 #}
+        {% if _s3 %}
+        <div class="alert alert-success py-2 small">
+            <i class="bi bi-check-circle"></i>
+            本批次<b>已完成编排</b>：已编排 <b>{{ arranged|length }}</b> 人{% if numbered %}，其中已有考号 <b>{{ numbered }}</b> 人{% endif %}。
+            <span class="text-muted">（用 Excel/AI 导入已带考场·座号·考号时，本步骤视为已完成，无需再点下方按钮；
+                若再次点击「开始编排并生成考号」会<b>覆盖</b>现有考场/座号/考号）</span>
+        </div>
+        {% endif %}
         <div class="card p-3">
             <h6 class="mb-2">考号生成模式（对应 Excel 宏三种模式）</h6>
             <div class="form-check"><input class="form-check-input" type="radio" name="mode" id="m0" value="0" {% if affair.mode==0 %}checked{% endif %}>

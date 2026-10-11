@@ -234,6 +234,8 @@ def affair_detail(aid):
              .order_by(AffairRoom.room_no).all())
     scope_students = [s for s in students if s.is_attend]
     arranged = [s for s in scope_students if s.room_no]
+    # v1.19.12.0：步骤条状态用 —— 已生成考号的人数（AI 导入会带考号，此时步骤③应显示已完成）
+    numbered = sum(1 for s in scope_students if s.exam_number)
 
     # v1.12.2 步骤⑤成绩关联 UI 已移除，不再查询考试与成绩（省去每次访问的无用查询）
 
@@ -262,6 +264,7 @@ def affair_detail(aid):
     return render_template('grades/affairs/detail.html',
                            affair=affair, students=students, rooms=rooms,
                            scope_students=scope_students, arranged=arranged,
+                           numbered=numbered,
                            mode_label=MODE_LABEL,
                            stats=stats, sel_options=sel_options)
 
