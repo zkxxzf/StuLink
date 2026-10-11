@@ -106,7 +106,9 @@
     <div class="card-header py-2">
         <div class="d-flex align-items-center flex-wrap gap-2">
             <h6 class="mb-0"><i class="bi bi-people"></i> 成绩单
-                {% if cur_class %}（{{ cur_class }} · {{ total }} 人）{% else %}（{{ total }} 人）{% endif %}</h6>
+                {% if cur_class %}（{{ cur_class }} · {{ total }} 人）
+                {% elif cur_dir %}（{{ cur_dir }}方向 · {{ total }} 人）
+                {% else %}（{{ total }} 人）{% endif %}</h6>
             <span class="text-muted small">
                 {% if can_edit_scores %}
                 点击<b>单科</b>分数可修改赋分/原始分（弹窗二次确认、按满分校验，改完自动重算排名）；总分由各科自动汇总，不可直接改；
@@ -116,10 +118,15 @@
         {# v1.19.14.0 改分结果提示（保存成功后在页面上短暂显示） #}
         <div id="scFlash" class="alert alert-success py-1 px-2 small d-none mt-2 mb-0"></div>
         {# v1.19.0 按班级查看：服务端筛选（链接可分享/收藏），不选=全部 #}
+        {# v1.19.15.0 新增两个方向分组（历史方向 / 物理方向），排在「全部」之后、班级之前；与班级互斥 #}
         {% if classes %}
         <div class="d-flex flex-wrap gap-1 mt-2">
-            <a class="btn btn-sm {{ 'btn-primary' if not cur_class else 'btn-outline-secondary' }}"
+            <a class="btn btn-sm {{ 'btn-primary' if not cur_class and not cur_dir else 'btn-outline-secondary' }}"
                href="{{ url_for('grades.exam_detail', exam_id=exam.id) }}">全部</a>
+            {% for d in ('历史', '物理') %}
+            <a class="btn btn-sm {{ 'btn-primary' if cur_dir == d else 'btn-outline-secondary' }}"
+               href="{{ url_for('grades.exam_detail', exam_id=exam.id, dir=d) }}">{{ d }}方向</a>
+            {% endfor %}
             {% for c in classes %}
             <a class="btn btn-sm {{ 'btn-primary' if cur_class == c else 'btn-outline-secondary' }}"
                href="{{ url_for('grades.exam_detail', exam_id=exam.id, cls=c) }}">{{ c }}</a>
@@ -197,7 +204,7 @@
     <div id="pageMeta" class="d-none"
          data-page="{{ page }}" data-total-pages="{{ total_pages }}"
          data-total="{{ total }}" data-size="{{ size }}"
-         data-cls="{{ cur_class }}"></div>
+         data-cls="{{ cur_class }}" data-dir="{{ cur_dir }}"></div>
     </div>
     </div>
 
@@ -305,7 +312,9 @@ $(function(){
     /* ---------- 成绩单：服务端分页（每次仅查当前页 50 人，不再整场载入） ---------- */
     var meta = $('#pageMeta').data();
     var curCls = meta.cls || '';
-    var PAGE_KEY = 'examPage_' + examId + '|' + curCls;   // 按班级各记各的翻页位置
+    var curDir = meta.dir || '';
+    // 按「班级 | 方向」各自记各的翻页位置
+    var PAGE_KEY = 'examPage_' + examId + '|' + curCls + '|' + curDir;
     var pageSize = parseInt(meta.size || 50, 10);
     var curPage = parseInt(meta.page || 1, 10);
     var totalPages = parseInt(meta.totalPages || 1, 10);
@@ -324,7 +333,7 @@ $(function(){
         sessionStorage.setItem(PAGE_KEY, p);
         $('#scoreTable tbody').html('<tr><td colspan="99" class="text-center text-muted py-4">加载中…</td></tr>');
         $.get('/grades/exams/' + examId + '/scores',
-              {page: p, size: pageSize, cls: curCls})
+              {page: p, size: pageSize, cls: curCls, dir: curDir})
             .done(function(html){
                 $('#scoreTable tbody').html(html);
                 bindScoreCells();

@@ -202,7 +202,7 @@ def _exam_classes(exam_id):
     return sorted({r[0] for r in rows})
 
 
-def _exam_page_rows(exam_id, page, size, class_name=None):
+def _exam_page_rows(exam_id, page, size, class_name=None, direction=None):
     """服务端分页：仅查询当前页的学生成绩，避免整场 8000 人一次性载入。
 
     返回 (students, page, total_pages, total)：
@@ -212,10 +212,13 @@ def _exam_page_rows(exam_id, page, size, class_name=None):
       - 学籍状态一次性 IN 查询（1 次，而非逐批 10 次）。
 
     class_name（v1.19.0）：按班级查看成绩单，只统计/展示该班学生（None=全部）。
+    direction（v1.19.15.0）：按方向查看（物理/历史），取**总分行**上的方向快照（None=全部）。
     """
     q = ExamScore.query.filter_by(exam_id=exam_id, subject=TOTAL_SUBJECT)
     if class_name:
         q = q.filter(ExamScore.class_name == class_name)
+    if direction:
+        q = q.filter(ExamScore.direction == direction)
     total = q.count()
     if total == 0:
         return [], 1, 0, 0
@@ -335,12 +338,18 @@ def exam_detail(exam_id):
     page = _safe_int(request.args.get('page'), 1)
     size = _safe_int(request.args.get('size'), 50)
     # v1.19.0：成绩单支持按班级查看（cls=班级名，空/非法=全部）
+    # v1.19.15.0：再支持按方向查看（dir=物理/历史）；两者互斥，传 cls 时忽略 dir
     classes = _exam_classes(exam_id)
     cur_class = (request.args.get('cls') or '').strip()
     if cur_class not in classes:
         cur_class = ''
+    cur_dir = (request.args.get('dir') or '').strip()
+    if cur_dir not in ('物理', '历史'):
+        cur_dir = ''
+    if cur_class:
+        cur_dir = ''
     students, page, total_pages, total = _exam_page_rows(
-        exam_id, page, size, class_name=cur_class or None)
+        exam_id, page, size, class_name=cur_class or None, direction=cur_dir or None)
     info = None
     if exam.import_info:
         try:
@@ -353,7 +362,7 @@ def exam_detail(exam_id):
                            import_info=info, steps=steps, next_step=next_step,
                            full_marks=exam.full_marks(),
                            can_edit_scores=current_user.has_perm('grades.score_edit'),
-                           classes=classes, cur_class=cur_class,
+                           classes=classes, cur_class=cur_class, cur_dir=cur_dir,
                            page=page, total_pages=total_pages, total=total, size=size)
 
 
@@ -366,8 +375,11 @@ def exam_scores_page(exam_id):
     page = _safe_int(request.args.get('page'), 1)
     size = _safe_int(request.args.get('size'), 50)
     cur_class = (request.args.get('cls') or '').strip()   # v1.19.0 按班级查看
+    cur_dir = (request.args.get('dir') or '').strip()     # v1.19.15.0 按方向查看
+    if cur_dir not in ('物理', '历史'):
+        cur_dir = ''
     students, _page, _total_pages, _total = _exam_page_rows(
-        exam_id, page, size, class_name=cur_class or None)
+        exam_id, page, size, class_name=cur_class or None, direction=cur_dir or None)
     return render_template('grades/exam_detail_rows.html',
                            students=students, subjects=SUBJECTS,
                            can_edit_scores=current_user.has_perm('grades.score_edit'))
