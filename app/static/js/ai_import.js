@@ -41,23 +41,47 @@
         return out;
     }
 
+    /** 服务端「自动归类」（按列号）→ {列名: 字段}，用于无 AI 时预填 */
+    function autoFlat(sh, headers) {
+        var out = {};
+        var a = sh.auto || {};
+        function put(idx, val) {
+            if (idx != null && headers[idx]) { out[headers[idx]] = val; }
+        }
+        Object.keys(a.cols || {}).forEach(function (f) { put(a.cols[f], f); });
+        Object.keys(a.subjects || {}).forEach(function (s) { put(a.subjects[s], s); });
+        Object.keys(a.raw_subjects || {}).forEach(function (s) {
+            put(a.raw_subjects[s], 'raw:' + s);
+        });
+        return out;
+    }
+
     function renderMaps() {
         var $box = $('#mapBody').empty();
         if (!SHEETS.length) { return; }
         SHEETS.forEach(function (sh, idx) {
             var flat = flatten(sh.map);
+            if (!Object.keys(flat).length) { flat = autoFlat(sh, sh.headers || []); }
+            var rowsInfo = (sh.header_rows && sh.header_rows.length > 1)
+                ? ('表头第 ' + sh.header_rows.join('+') + ' 行（已合并）')
+                : ('表头在第 ' + sh.header_row + ' 行');
             var card = $('<div>').addClass('border rounded p-2 mb-3');
             var head = $('<div>').addClass('d-flex align-items-center mb-2 flex-wrap gap-2')
                 .append($('<b>').addClass('small').text('[工作表] ' + sh.name))
                 .append($('<span>').addClass('text-muted small').text(
-                    sh.file ? ('文件：' + sh.file + '｜') : '' + '表头在第 ' + sh.header_row + ' 行'))
+                    (sh.file ? ('文件：' + sh.file + '｜') : '') + rowsInfo))
                 .append($('<select>').addClass('form-select form-select-sm ai-role')
                     .attr('data-idx', idx).css('width', '150px')
                     .append('<option value="converted">这份是：赋分成绩</option>')
                     .append('<option value="raw">这份是：原始成绩</option>')
-                    .append('<option value="both">同表内两者都有</option>'));
-            // AI 判断的整表角色作为默认值
-            var role = (SUGGEST.score_kind === 'raw') ? 'raw'
+                    .append('<option value="both">同表内两者都有</option>')
+                    .append('<option value="skip">不使用此工作表</option>'));
+            // 默认角色：AI 判断的整表角色；若该表没识别出任何科目（分析表/打印表）→ 默认不使用
+            var auto = sh.auto || {};
+            var hasSubj = Object.keys(auto.subjects || {}).length
+                       || Object.keys(auto.raw_subjects || {}).length;
+            var role = !hasSubj ? 'skip'
+                     : (SUGGEST.score_kind === 'raw') ? 'raw'
                      : (SUGGEST.score_kind === 'both') ? 'both' : 'converted';
             card.append(head.append($('<span>').addClass('ms-auto badge bg-light text-dark border')
                 .attr('id', 'roleHint' + idx).text(KIND_LABEL[SUGGEST.score_kind] || '')));

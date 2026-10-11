@@ -142,7 +142,10 @@ def exam_ai_import_analyze(exam_id):
     return jsonify(success=True, token=token,
                    files=[f.filename for f in files],
                    sheets=[{'name': s['name'], 'file': s.get('file', ''),
-                            'header_row': s['header_row'], 'headers': s['headers'][:60],
+                            'header_row': s['header_row'],
+                            'header_rows': s.get('header_rows', []),
+                            'headers': s['headers'][:150],
+                            'auto': aisvc.classify_headers(s['headers']),
                             'sample': s['sample'][:2]} for s in sheets],
                    suggest=suggest, ai_error=ai_err, errors=errors)
 
@@ -160,6 +163,8 @@ def _merge_rows(sheets_payload, exam):
         if sh is None:
             continue
         kind = item.get('score_kind') or 'converted'
+        if kind == 'skip':          # 用户标记「不使用此工作表」（如分析表/打印表）
+            continue
         rows, errs = aisvc.rows_from_mapping(sh, item.get('mapping') or {}, kind, exam)
         errors.extend(errs)
         as_raw = (kind == 'raw')
@@ -169,7 +174,7 @@ def _merge_rows(sheets_payload, exam):
                 r['raw_subjects'] = dict(r['subjects'])
                 r['raw_total'], r['total'] = r['total'], None
                 r['subjects'] = {}
-            tgt = by_no.setdefault(r['no'], {
+            tgt = by_no.setdefault(r['no'] or ('@' + (r.get('exam_no') or '')), {
                 'no': r['no'], 'line': r['line'], 'subjects': {}, 'raw_subjects': {},
                 'total': None, 'raw_total': None,
                 'name': '', 'class_name': '', 'exam_no': ''})
@@ -195,6 +200,57 @@ def _merge_rows(sheets_payload, exam):
             if r['total'] is None:
                 r['total'] = r['raw_total']
     return rows, errors
+
+
+def _resolve_student_no(exam, rows):
+    """把「只有考号、没有学号」的行解析出学号（联考导出常见）
+
+    优先级：① 考号 → 学号（本场考务名单 exam_number / 本场已导入成绩的 exam_no）
+            ② 姓名 + 班级 → 学号（本场考务名单、本年级学籍）
+    仍解析不出的行剔除并进 errors。返回 (rows, errors)。
+    """
+    from app.models import Student
+    from app.models.grades import ExamAffair, AffairStudent, ExamScore
+    from app.modules.grades.utils import normalize_class_name
+    if not any(not (r.get('no') or '').strip() for r in rows):
+        return rows, []
+    no_map, name_map = {}, {}
+    aff = (ExamAffair.query.filter_by(exam_id=exam.id)
+           .order_by(ExamAffair.id.desc()).first())
+    if aff:
+        for s in AffairStudent.query.filter_by(affair_id=aff.id).all():
+            if s.exam_number:
+                no_map.setdefault(s.exam_number, s.student_no)
+            if s.name and s.class_name:
+                name_map.setdefault((s.name, normalize_class_name(s.class_name)),
+                                    s.student_no)
+    for r in ExamScore.query.filter(ExamScore.exam_id == exam.id,
+                                    ExamScore.exam_no.isnot(None)).all():
+        if r.exam_no:
+            no_map.setdefault(r.exam_no, r.student_no)
+    for st in Student.query.filter_by(grade=exam.grade).all():
+        if st.name and st.class_name:
+            name_map.setdefault((st.name, normalize_class_name(st.class_name)),
+                                st.student_number)
+    errs, miss = [], 0
+    for r in rows:
+        if (r.get('no') or '').strip():
+            continue
+        en = (r.get('exam_no') or '').strip()
+        cand = no_map.get(en) if en else None
+        if not cand:
+            nm = (r.get('name') or '').strip()
+            cls = normalize_class_name(r.get('class_name') or '')
+            cand = name_map.get((nm, cls)) if (nm and cls) else None
+        if cand:
+            r['no'] = cand
+        else:
+            miss += 1
+            errs.append({'line': r.get('line', 0), 'no': en or (r.get('name') or ''),
+                         'reason': '按考号/姓名+班级未匹配到学号（可先导入本场考务）'})
+    if miss:
+        rows[:] = [r for r in rows if (r.get('no') or '').strip()]
+    return rows, errs
 
 
 @bp.route('/exams/<int:exam_id>/ai-import/apply', methods=['POST'])
@@ -227,6 +283,8 @@ def exam_ai_import_apply(exam_id):
         return jsonify(success=False, message='请至少为一个工作表指定列映射')
 
     rows, errors = _merge_rows(payload, exam)
+    rows, rerr = _resolve_student_no(exam, rows)      # 只有考号时按考号/姓名反查学号
+    errors.extend(rerr)
     if not rows:
         return jsonify(success=False,
                        message='未解析出任何成绩行，请检查列映射（或改用标准模板导入）',
