@@ -7,9 +7,9 @@
     <td class="c-meta">{{ stu.class_name }}</td>
     <td class="c-meta">{{ stu.direction }}</td>
     <td class="small text-muted c-meta">{{ stu.selection }}</td>
-    <td class="text-end c-meta">{{ stu.rank if stu.rank else '—' }}</td>
-    <td class="text-end c-meta">{{ stu.rank_class if stu.rank_class else '—' }}</td>
-    <td class="text-end c-meta {{ 'text-success' if stu.move is not none and stu.move < 0 else 'text-danger' if stu.move is not none and stu.move > 0 }}">
+    <td class="text-end c-rank">{{ stu.rank if stu.rank else '—' }}</td>
+    <td class="text-end c-rank">{{ stu.rank_class if stu.rank_class else '—' }}</td>
+    <td class="text-end c-rank {{ 'text-success' if stu.move is not none and stu.move < 0 else 'text-danger' if stu.move is not none and stu.move > 0 }}">
         {{ ('%+d' % stu.move) if stu.move is not none else '—' }}
     </td>
     {# v1.19.20.0：总分移到语文（成绩区）前面；总分由各科自动汇总，不可点击修改 #}

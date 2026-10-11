@@ -20,6 +20,15 @@
   #scoreTable th.c-sub, #scoreTable td.c-sub {
       font-size: .88rem; padding-left: .5rem; padding-right: .5rem;
   }
+  /* v1.19.21.0 名次类列（方向排/班排/进退步）内容就一个数字，收到最窄 */
+  #scoreTable th.c-rank, #scoreTable td.c-rank {
+      width: 1%; white-space: nowrap; font-size: .72rem; color: #475569;
+      padding-left: .12rem; padding-right: .12rem;
+  }
+  /* v1.19.21.0 表格两端留白：学号左侧、最后一列（地理）右侧；
+     放在 c-meta/c-rank 之后，用等特异性的后置规则覆盖它们的左右内边距 */
+  #scoreTable th:first-child, #scoreTable td:first-child { padding-left: .7rem; }
+  #scoreTable th:last-child, #scoreTable td:last-child { padding-right: .7rem; }
   /* v1.19.20.0 表头排序：点一下按该列从高到低，再点切换升序 */
   #scoreTable th a.th-sort { white-space: nowrap; color: inherit; text-decoration: none; }
   #scoreTable th a.th-sort:hover { color: #2563eb; }
@@ -181,9 +190,9 @@
                 {{ th_sort('cls', '班级') }}
                 {{ th_sort('dir', '方向') }}
                 {{ th_sort('sel', '选科') }}
-                {{ th_sort('rank_dir', '方向排', 'c-meta', 'text-end') }}
-                {{ th_sort('rank_class', '班排', 'c-meta', 'text-end') }}
-                {{ th_sort('move', '进退步', 'c-meta', 'text-end') }}
+                {{ th_sort('rank_dir', '方向排', 'c-rank', 'text-end') }}
+                {{ th_sort('rank_class', '班排', 'c-rank', 'text-end') }}
+                {{ th_sort('move', '进退步', 'c-rank', 'text-end') }}
                 {{ th_sort('total', '总分', 'c-total', 'text-end') }}
                 {% for s in subjects %}{{ th_sort('s:' ~ s, s, 'c-sub', 'text-end') }}{% endfor %}
             </tr>
