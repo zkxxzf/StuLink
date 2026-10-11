@@ -2,7 +2,7 @@
 {% block title %}考务向导 - 成绩管理{% endblock %}
 {% block extra_css %}
 <style>
-  /* v1.19.16.0 考务步骤条：按实际数据标出「已完成 / 待完成」（此前无任何状态与样式） */
+  /* v1.19.17.0 考务步骤条：按实际数据标出「已完成 / 待完成」（此前无任何状态与样式） */
   .step-bar .step-pill {
     display: inline-flex; align-items: center; gap: 6px;
     padding: 2px 10px; border-radius: 999px;
@@ -19,7 +19,7 @@
 {% block content %}
 <div class="d-flex justify-content-between align-items-center mb-2 flex-wrap gap-2">
     <div>
-        {# v1.19.16.0：考务已并入考试管理，面包屑直接返回考试列表 #}
+        {# v1.19.17.0：考务已并入考试管理，面包屑直接返回考试列表 #}
         <a href="{{ url_for('grades.exams_list') }}" class="text-decoration-none text-muted small">
             <i class="bi bi-arrow-left"></i> 返回考试管理</a>
         <h5 class="mb-0 mt-1"><i class="bi bi-clipboard-check"></i> {{ affair.name }}
@@ -38,7 +38,7 @@
 </div>
 
 <!-- v1.12.2 移除步骤⑤成绩关联：功能使用率低，按考场查成绩走成绩模块自身入口即可 -->
-{# v1.19.16.0：步骤条按实际数据标出完成状态（AI 导入带上考场/考号时，②③ 也应显示已完成） #}
+{# v1.19.17.0：步骤条按实际数据标出完成状态（AI 导入带上考场/考号时，②③ 也应显示已完成） #}
 {% set _s1 = stats.students > 0 %}
 {% set _s2 = rooms|length > 0 %}
 {% set _s3 = (arranged|length > 0) or (numbered > 0) %}
@@ -89,7 +89,7 @@
     <!-- ===== 步骤① 学生名单 ===== -->
     <div class="tab-pane fade show active" id="t1">
         {# v1.12.1 学生名单改为从学生库同步导入，不再走 Excel 重复导入；新增学生可直接写入学籍库 #}
-        {# v1.19.16.0 取消「同时移除学籍已删的学生」复选框：无班级/已转出/已毕业学生一律不进入成绩模块，且同步时默认自动剔除 #}
+        {# v1.19.17.0 取消「同时移除学籍已删的学生」复选框：无班级/已转出/已毕业学生一律不进入成绩模块，且同步时默认自动剔除 #}
         <div class="d-flex gap-2 mb-2 flex-wrap align-items-center">
             <a class="btn btn-success btn-sm" href="{{ url_for('grades.affair_ai_import', aid=affair.id) }}">
                 <i class="bi bi-stars"></i> 导入考生安排 / 考场位置</a>
@@ -199,7 +199,7 @@
 
     <!-- ===== 步骤③ 编排与考号生成 ===== -->
     <div class="tab-pane fade" id="t3">
-        {# v1.19.16.0：已编排/已带考号（如 AI 导入）时明确标注「无需再执行」，并提示重排会覆盖 #}
+        {# v1.19.17.0：已编排/已带考号（如 AI 导入）时明确标注「无需再执行」，并提示重排会覆盖 #}
         {% if _s3 %}
         <div class="alert alert-success py-2 small">
             <i class="bi bi-check-circle"></i>
@@ -464,7 +464,7 @@ if(location.hash){
 }
 
 // v1.12.1 学生名单从学籍库同步导入（增量：新增+刷新基本信息）
-// v1.19.16.0 取消 remove_missing 参数：无班级/已转出/已毕业学生一律不进入成绩模块，
+// v1.19.17.0 取消 remove_missing 参数：无班级/已转出/已毕业学生一律不进入成绩模块，
 // 名单中不再符合条件的学生（学籍已删等）由服务端默认自动剔除。
 function syncStudents(){
     var fd = new FormData();

@@ -1,4 +1,4 @@
-# StuLink v1.19.16.0 2026-10-10
+# StuLink v1.19.17.0 2026-10-10
 # 成绩管理：考试管理 + 成绩导入向导路由
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 import io
@@ -66,7 +66,7 @@ def exams_list():
                     .group_by(ExamScore.exam_id).all())
         for eid, cnt in rows_cnt:
             counts[eid] = cnt
-    # v1.19.16.0：孤儿考务批次兜底（exam_id 为空，或指向已删除的考试）
+    # v1.19.17.0：孤儿考务批次兜底（exam_id 为空，或指向已删除的考试）
     # 这类批次从考试列表无法进入，以前只能直连 /grades/affairs 才能看到，现在底部统一列出
     live_exam_ids = {e.id for e in Exam.query.with_entities(Exam.id).all()}
     orphan_affairs = []
@@ -123,7 +123,7 @@ def _exam_form_ctx(**kw):
         'grade_options': _grade_options(),
         'kind_options': _dict_values('exam_kind', EXAM_KINDS),
         'stage_options': _dict_values('exam_type', EXAM_STAGES),
-        # v1.19.16.0：分数口径可不选（默认不选）——口径在导入时按文件确定
+        # v1.19.17.0：分数口径可不选（默认不选）——口径在导入时按文件确定
         'mode_options': [('', '不设（导入时按文件确定）'),
                          ('converted', '赋分（划线/排名按赋分）'),
                          ('raw', '原始分（无赋分时选这个）')],
@@ -144,7 +144,7 @@ def exam_new():
         name = (request.form.get('name') or '').strip()
         exam_kind = (request.form.get('exam_kind') or '').strip()
         exam_type = (request.form.get('exam_type') or '').strip()
-        # v1.19.16.0：允许留空（=未指定，导入时按文件确定）；非法值一律按未指定处理
+        # v1.19.17.0：允许留空（=未指定，导入时按文件确定）；非法值一律按未指定处理
         score_mode = (request.form.get('score_mode') or '').strip()
         if score_mode not in ('converted', 'raw'):
             score_mode = ''
@@ -238,7 +238,7 @@ def _exam_page_rows(exam_id, page, size, class_name=None, direction=None,
       - 学籍状态一次性 IN 查询（1 次，而非逐批 10 次）。
 
     class_name（v1.19.0）：按班级查看成绩单，只统计/展示该班学生（None=全部）。
-    direction（v1.19.16.0）：按方向查看（物理/历史），取**总分行**上的方向快照（None=全部）。
+    direction（v1.19.17.0）：按方向查看（物理/历史），取**总分行**上的方向快照（None=全部）。
     sort_key / order（v1.19.17.0）：表头排序。sort_key 取 _SORT_COLS 的键，
         或 's:科目名' 表示按该科成绩排；order 为 'asc'/'desc'（空 sort_key = 默认次序）。
         排序必须在**服务端**做：页面只加载当前页，前端排序只会排到本页 50 人。
@@ -390,7 +390,7 @@ def exam_detail(exam_id):
     page = _safe_int(request.args.get('page'), 1)
     size = _safe_int(request.args.get('size'), 50)
     # v1.19.0：成绩单支持按班级查看（cls=班级名，空/非法=全部）
-    # v1.19.16.0：再支持按方向查看（dir=物理/历史）；两者互斥，传 cls 时忽略 dir
+    # v1.19.17.0：再支持按方向查看（dir=物理/历史）；两者互斥，传 cls 时忽略 dir
     classes = _exam_classes(exam_id)
     cur_class = (request.args.get('cls') or '').strip()
     if cur_class not in classes:
@@ -518,7 +518,7 @@ def _log_score_change(exam, row, action, old_score, new_score, old_raw, new_raw)
 @perm_required('grades.edit')
 @perm_required('grades.score_edit')
 def score_update(exam_id, score_id):
-    """单科改分（v1.19.16.0）
+    """单科改分（v1.19.17.0）
 
     · 赋分（score）与原始分（raw_score）都可改，提交哪个改哪个；
     · 两者都提交为空 = 该科缺考（删除该科）；
@@ -612,7 +612,7 @@ def score_delete(exam_id, score_id):
 @bp.route('/score-changes')
 @login_required
 def score_changes():
-    """分数修改记录（v1.19.16.0）：**只看某一场考试**
+    """分数修改记录（v1.19.17.0）：**只看某一场考试**
 
     该记录属于单场考试的数据，入口只有一处：成绩单页右上角「分数修改记录」按钮
     （带 ?exam=<id>）。不再提供跨考试视图，也不在左侧栏出现；缺 ?exam= 时回考试列表。
@@ -676,7 +676,7 @@ def exam_delete(exam_id):
     n_scores = ExamScore.query.filter_by(exam_id=exam_id).delete()
     n_bands = ExamBand.query.filter_by(exam_id=exam_id).delete()
     n_ai = AiReport.query.filter_by(exam_id=exam_id).delete()
-    # v1.19.16.0：级联删除本考试的考务批次（含其考场与名单），避免产生孤儿批次
+    # v1.19.17.0：级联删除本考试的考务批次（含其考场与名单），避免产生孤儿批次
     # 旧逻辑只删考试，导致 affair 的 exam_id 指向已删考试，从考试列表无法再进入
     from app.modules.grades.routes.exam_affairs import delete_affair_cascade
     from app.models.grades import ExamAffair
@@ -803,7 +803,7 @@ def exam_import_confirm(exam_id):
         summary = store_service.apply_import(exam, parsed, mode=mode,
                                              remove_missing=remove_missing)
         ranking.recalc_exam(exam_id)
-        # v1.19.16.0 任课快照：把本次导入时的任课教师映射定格到本场考试（教师维度分析读它，
+        # v1.19.17.0 任课快照：把本次导入时的任课教师映射定格到本场考试（教师维度分析读它，
         # 以后教师调整/重新分班都不会把历史成绩归到新教师名下）
         from app.modules.grades.services import teacher_snapshot_service as tss
         n_tch = tss.snapshot_exam(exam, source='import')
