@@ -117,18 +117,13 @@ def _list_steps_map(exams):
 
 
 def _exam_form_ctx(**kw):
-    """新建考试表单的公共上下文（两维下拉 + 分数口径）"""
+    """新建考试表单的公共上下文（年级 / 性质 / 阶段）"""
     from app.models.grades import EXAM_KINDS, EXAM_STAGES
     ctx = {
         'grade_options': _grade_options(),
         'kind_options': _dict_values('exam_kind', EXAM_KINDS),
         'stage_options': _dict_values('exam_type', EXAM_STAGES),
-        # v1.19.19.0：分数口径可不选（默认不选）——口径在导入时按文件确定
-        'mode_options': [('', '不设（导入时按文件确定）'),
-                         ('converted', '赋分（划线/排名按赋分）'),
-                         ('raw', '原始分（无赋分时选这个）')],
         'default_date': date.today().isoformat(),
-        'default_mode': '',
     }
     ctx.update(kw)
     return ctx
@@ -144,10 +139,8 @@ def exam_new():
         name = (request.form.get('name') or '').strip()
         exam_kind = (request.form.get('exam_kind') or '').strip()
         exam_type = (request.form.get('exam_type') or '').strip()
-        # v1.19.19.0：允许留空（=未指定，导入时按文件确定）；非法值一律按未指定处理
-        score_mode = (request.form.get('score_mode') or '').strip()
-        if score_mode not in ('converted', 'raw'):
-            score_mode = ''
+        # v1.19.20.0：不再有「分数口径」表单字段（口径在导入时按文件确定），
+        # 新考试 score_mode 一律留空（未指定），展示为「按导入确定」
         if not name:
             # 名称留空 → 默认「年级 + 日期」（两维度已单独存列，不塞进名称）
             name = f'{grade}{exam_date.isoformat()}'
@@ -155,7 +148,7 @@ def exam_new():
             flash('请选择年级并填写考试名称', 'danger')
             return render_template('grades/exam_form.html', **_exam_form_ctx(
                 grade=grade, exam_date=exam_date.isoformat(), name=name,
-                exam_kind=exam_kind, exam_type=exam_type, score_mode=score_mode))
+                exam_kind=exam_kind, exam_type=exam_type))
         dup = Exam.query.filter_by(grade=grade, name=name).first()
         if dup:
             # 修复：同名考试由“仅警告仍创建”改为阻断——避免成绩分散到两场同名考试混淆统计
@@ -163,10 +156,10 @@ def exam_new():
                   'danger')
             return render_template('grades/exam_form.html', **_exam_form_ctx(
                 grade=grade, exam_date=exam_date.isoformat(), name='',
-                exam_kind=exam_kind, exam_type=exam_type, score_mode=score_mode))
+                exam_kind=exam_kind, exam_type=exam_type))
         exam = Exam(grade=grade, name=name, exam_date=exam_date,
                     exam_kind=exam_kind, exam_type=exam_type or '其他',
-                    score_mode=score_mode, term=term_of_date(exam_date),
+                    term=term_of_date(exam_date),
                     operator_id=current_user.id)
         db.session.add(exam)
         db.session.commit()
@@ -181,8 +174,7 @@ def exam_new():
     return render_template('grades/exam_form.html', **_exam_form_ctx(
         grade='', exam_date=date.today().isoformat(), name='',
         exam_kind=(kinds[0] if kinds else ''),
-        exam_type=('月考' if '月考' in stages else (stages[0] if stages else '')),
-        score_mode=''))
+        exam_type=('月考' if '月考' in stages else (stages[0] if stages else ''))))
 
 
 # ==================== 考试详情 / 成绩浏览 / 修正 / 重算 / 删除 ====================
