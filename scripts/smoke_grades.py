@@ -508,9 +508,13 @@ with app.test_client() as c:
     check('首列 sticky 背景跟随行状态（整行标黄含学号列）',
           'var(--bs-table-bg, var(--bs-body-bg, #fff))' in h2)
 
-    # ---- v1.19.37.0 步骤② 考场容量：批量设置 / 沿用上一场（同房间）----
+    # ---- v1.19.36.0 步骤② 考场容量：批量设置 / 沿用上一场（同房间）----
     check('步骤② 有容量批量入口',
           '批量设置容量' in h2 and '带入上次容量' in h2)
+    # v1.19.38.0 考务页单独的 AI 导入入口已下线（统一走每场考试「AI 智能导入」）
+    check('步骤②：考务页 AI 导入入口已下线',
+          '导入考生安排' not in h2
+          and ('/grades/affairs/%d/ai-import' % _AFF_CUR) not in h2)
     r = c.post(f'/grades/affairs/{_AFF_CUR}/rooms/capacity',
                data={'mode': 'all', 'capacity': '36'}, headers={'X-CSRFToken': csrf})
     d = r.get_json()

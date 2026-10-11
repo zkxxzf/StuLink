@@ -183,9 +183,8 @@
     <!-- ===== 步骤② 考场设置（v1.12.2 左右双列表：考场库 ↔ 本批次考场） ===== -->
     <div class="tab-pane fade" id="t2">
         <div class="d-flex gap-2 mb-2 flex-wrap">
-            {# v1.19.37.0 由步骤①挪来：导入考生安排时会带出考场位置/座号/考号，属本步与步骤③的数据 #}
-            <a class="btn btn-success btn-sm" href="{{ url_for('grades.affair_ai_import', aid=affair.id) }}">
-                <i class="bi bi-stars"></i> 导入考生安排 / 考场位置</a>
+            {# v1.19.38.0：「导入考生安排 / 考场位置」入口下线 —— AI 导入统一走每场考试的
+               「AI 智能导入」（/grades/exams/<id>/ai-import，同页已能写入本场考务批次） #}
             <button class="btn btn-outline-primary btn-sm" onclick="document.getElementById('roomFile').click()">
                 <i class="bi bi-upload"></i> 导入 Excel</button>
             <input type="file" id="roomFile" accept=".xlsx,.xls" style="display:none" onchange="importRooms(this)">
