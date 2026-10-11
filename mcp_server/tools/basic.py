@@ -6,18 +6,47 @@ from ..core import guards, respond, toolkit
 
 
 def _scope_filters(user, query):
-    """按账号数据范围收窄学生查询（与网页端 visible_grades/visible_classes 同口径）。"""
-    from app.models.student import Student
-    from app.modules.grades.services import scope
-    grades = scope.visible_grades(user)
-    query = query.filter(Student.grade.in_(grades)) if grades is not None else query
-    classes = scope.visible_classes(user)
-    if classes:
-        pairs = set(classes)
-        query = query.filter(or_(*[
-            (Student.grade == g) & (Student.class_name == c) for g, c in sorted(pairs)
-        ]))
-    return query
+    """按账号数据范围收窄学生查询。
+
+    与网页端学生列表/检索同一口径：app/utils/student_scope.apply_student_scope
+    （安全清单 H-2 的唯一实现）——班主任仅本班（User.grade/class_name）、
+    年级长本年级、任课教师按 班级映射 > 任教年级、用户级授权按授权年级、
+    无任何范围则空集（而非放行全校）。
+
+    2026-10-11 二轮审计修正：此前自行用 grades 模块的 visible_grades/visible_classes
+    拼装，与网页端学生列表口径不一致——班主任会按其 UserClassLink/任教映射放宽到
+    跨年级多个班（实测 hteacher 网页 50 人 vs MCP 350 人），属越权。
+    """
+    from app.utils.student_scope import apply_student_scope
+    return apply_student_scope(query, user)
+
+
+def _assert_detail_visible(user, student):
+    """学生基础信息详情的口径：复刻网页端学生详情页 students.detail 的判定。
+
+    网页端（app/modules/system/routes/students.py 的 detail）：
+    admin/school_viewer 全校；班主任仅本班；年级长仅本年级；
+    其余角色（含任课教师、宿管）一律拒绝。
+
+    2026-10-11 二轮审计修正：此前用 grades 的 student_in_scope（按 UserClassLink/
+    任教映射），实测班主任可读到非本班学生的电话/身份证号/学籍备注，属越权。
+    注意：画像、成绩、考勤、住宿等工具仍按 student_scope（与网页端画像/成绩页
+    一致），本守卫只用于会带出联系方式与学籍备注的「学生详情」。
+    """
+    role = user.role
+    if role in ('admin', 'school_viewer'):
+        return
+    if role == 'homeroom_teacher':
+        if student.grade != user.grade or student.class_name != user.class_name:
+            raise PermissionError(
+                f'无权查看学生 {student.student_number} 的详细信息（班主任仅限本班）')
+        return
+    if role == 'grade_leader':
+        if student.grade != user.grade:
+            raise PermissionError(
+                f'无权查看学生 {student.student_number} 的详细信息（年级长仅限本年级）')
+        return
+    raise PermissionError('当前账号角色无权查看学生详细信息（仅管理员/校级/年级长/班主任）')
 
 
 def _list_grades(user):
@@ -61,7 +90,7 @@ def _search_students(user, keyword, grade, class_name, limit):
 def _get_student(user, student_no):
     from app.models.student import Student
     student = guards.find_student(student_no)
-    guards.student_scope(user, student_no)
+    _assert_detail_visible(user, student)
     data = respond.pick(student, (
         'student_number', 'name', 'gender', 'grade', 'class_name',
         'subject_selection', 'enrollment_status', 'enrollment_notes',

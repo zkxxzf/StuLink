@@ -1,12 +1,16 @@
 # -*- coding: utf-8 -*-
-"""StuLink MCP 服务入口：HTTP(Streamable HTTP) 传输 + Bearer 令牌鉴权。
+"""StuLink MCP 服务入口：HTTP(Streamable HTTP) 传输 + 接入认证。
 
 启动方式（二选一）：
   · 双击 mcp_server\\start_mcp.bat（首次会自动创建虚拟环境并装依赖）
   · 命令行：mcp_server\\.venv\\Scripts\\python.exe mcp_server\\run.py
 
-客户端接入：URL = http://<监听地址>:<端口><path>，请求头带
-            Authorization: Bearer <config.json 中的 token>
+客户端接入（默认 account 模式）：URL = http://<监听地址>:<端口><path>，
+请求头携带 StuLink 账号密码（任选其一）：
+  · X-StuLink-User: <账号> + X-StuLink-Password: <密码>
+  · Authorization: Basic base64(账号:密码)
+（require_token=true 时另加 X-StuLink-Token；token 兼容模式见 config.json。）
+完整设计见 docs/MCP服务-认证与授权设计.md。
 """
 import logging
 import os
@@ -31,7 +35,7 @@ INSTRUCTIONS = (
     '本服务提供 StuLink 教务管理系统的数据查询与操作能力，覆盖：基础信息（年级/班级/学生）、'
     '考试与成绩、统计分析（学科分析/分数段/上线率/班级对比）、考勤、课表、宿舍、学生画像。\n'
     '使用约定：\n'
-    '1. 所有操作以服务端配置的账号身份执行，越界数据会返回"权限不足"；\n'
+    '1. 所有操作以接入时认证的账号身份执行，越权数据会返回"权限不足"；\n'
     '2. 先用 list_grades / list_classes / search_students 拿到准确的年级、班级、学号，'
     '再用 list_exams 拿 exam_id，避免凭空猜测参数；\n'
     '3. 班级名如 "01班"、年级如 "2025级"，务必与 list_classes 返回一致；\n'
@@ -70,9 +74,17 @@ def _allowed_hosts(cfg):
     return out
 
 
+def _auth_mode(cfg):
+    """当前接入认证模式：account（账号密码，默认）| token（静态令牌，兼容）。"""
+    return (cfg.get('auth_mode') or 'account').strip().lower()
+
+
 def build_asgi_app(cfg):
-    """组装 ASGI 应用：MCP(Streamable HTTP) → Bearer 鉴权中间件。"""
-    bootstrap.warm_up(cfg['bind_user'])
+    """组装 ASGI 应用：MCP(Streamable HTTP) → 接入认证中间件。"""
+    if _auth_mode(cfg) == 'token':
+        bootstrap.warm_up(cfg['bind_user'])      # 兼容模式：固定执行身份（启动即校验）
+    else:
+        bootstrap.prepare_app()                  # 账号密码模式：多用户，每请求认证
     server = MCPServer(
         name='stulink',
         title='StuLink 教务系统',
@@ -90,7 +102,7 @@ def build_asgi_app(cfg):
         ),
         host=cfg['host'] or '127.0.0.1',
     )
-    return auth.BearerAuth(starlette_app, cfg['token']), server
+    return auth.AccessGuard(starlette_app, cfg), server
 
 
 def _mask_token(token):
@@ -101,30 +113,55 @@ def _mask_token(token):
     return f'{text[:6]}…{text[-4:]}'
 
 
+def _client_example(cfg, url, mode):
+    """客户端配置示例（按认证模式给出对应的 headers）。"""
+    lines = ['  客户端配置示例（Streamable HTTP）：', '  {', f'    "url": "{url}",']
+    if mode == 'account':
+        lines.append('    "headers": {')
+        if cfg.get('require_token'):
+            lines.append('      "X-StuLink-User": "<你的 StuLink 账号>",')
+            lines.append('      "X-StuLink-Password": "<你的账号密码>",')
+            lines.append('      "X-StuLink-Token": "<服务令牌，见 config.json>"')
+        else:
+            lines.append('      "X-StuLink-User": "<你的 StuLink 账号>",')
+            lines.append('      "X-StuLink-Password": "<你的账号密码>"')
+        lines.append('    }')
+    else:
+        lines.append('    "headers": { "Authorization": "Bearer <服务令牌>" }')
+    lines.append('  }')
+    return lines
+
+
 def _print_banner(cfg, me):
     """启动横幅：把客户端需要的信息一次印全，省得翻文档。"""
+    mode = _auth_mode(cfg)
     host = cfg['host'] or '127.0.0.1'
     shown = _lan_ip() if host == '0.0.0.0' else host
     url = f"http://{shown}:{cfg['port']}{cfg['path'] or '/mcp'}"
+    if mode == 'token':
+        identity_line = (f"  执行身份 : {me['real_name']}（{me['username']}，{me['role']}）"
+                         ' · 静态令牌模式')
+    else:
+        identity_line = '  执行身份 : 每个客户端用自己的 StuLink 账号密码（每请求认证）'
     lines = [
         '=' * 68,
         '  StuLink MCP 服务已启动',
         '',
         f"  接入地址 : {url}",
-        f"  访问令牌 : {_mask_token(cfg['token'])}（完整值见 mcp_server/config.json）",
-        f"  执行身份 : {me['real_name']}（{me['username']}，{me['role']}）",
+        f"  认证模式 : {'账号密码（每请求校验）' if mode == 'account' else '静态访问令牌（兼容模式）'}",
+        f"  服务令牌 : {_mask_token(cfg['token'])}（完整值见 mcp_server/config.json；"
+        + ('必填' if mode == 'token' or cfg.get('require_token') else '可选') + '）',
+        identity_line,
         f"  写操作   : {'允许' if cfg.get('allow_write') else '已禁用（allow_write=false）'}",
         '',
-        '  客户端配置示例（Streamable HTTP）：',
-        '  {',
-        f'    "url": "{url}",',
-        '    "headers": { "Authorization": "Bearer <上面的访问令牌>" }',
-        '  }',
+    ]
+    lines.extend(_client_example(cfg, url, mode))
+    lines.extend([
         '',
         f"  配置文件 : {config.CONFIG_PATH}",
         '  停止服务 : 在本窗口按 Ctrl+C',
         '=' * 68,
-    ]
+    ])
     try:
         print('\n'.join(lines), flush=True)
     except UnicodeEncodeError:  # 控制台编码异常时不阻塞启动
@@ -137,10 +174,11 @@ def main():
     cfg = config.load_config()
     try:
         app, _server = build_asgi_app(cfg)
+        me = (bootstrap.warm_up(cfg['bind_user'])
+              if _auth_mode(cfg) == 'token' else None)
     except Exception as exc:  # noqa: BLE001  启动期错误要打印清楚原因
         print(f'[MCP] 启动失败：{exc}', flush=True)
         return 1
-    me = bootstrap.warm_up(cfg['bind_user'])
     _print_banner(cfg, me)
     import uvicorn
     uvicorn.run(app, host=cfg['host'] or '127.0.0.1', port=int(cfg['port']),

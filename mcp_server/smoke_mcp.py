@@ -5,14 +5,24 @@
     mcp_server\\.venv\\Scripts\\python.exe mcp_server\\smoke_mcp.py
 
 覆盖：工具注册与 schema 生成、只读工具真实取数、权限/参数错误的中文提示、
-      写工具开关、写路径的入参校验（用不存在的学号触发，不写任何真实数据）。
+      写工具开关、写路径的入参校验（用不存在的学号触发，不写任何真实数据）、
+      接入认证端到端（account 模式的 401/429 拒绝策略、账号密码通过、权限仍受控）。
 
 运行前提：mcp_server/config.json 存在（首次启动服务会自动生成）。
 """
 import asyncio
+import base64
 import json
 import os
+import socket
 import sys
+import threading
+import time
+
+import uvicorn                                                       # noqa: E402
+from mcp.client.session import ClientSession                         # noqa: E402
+from mcp.client.streamable_http import (                             # noqa: E402
+    create_mcp_http_client, streamable_http_client)
 
 ROOT = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), '..'))
 if ROOT not in sys.path:
@@ -67,6 +77,8 @@ async def main():
     cfg = config.load_config()
     cfg['bind_user'] = 'admin'
     cfg['allow_write'] = False          # 自测不写真实数据
+    cfg['auth_mode'] = 'token'          # 第一段直接测工具层（token 模式固定身份）；
+    #                                     account 模式的接入认证在文件末尾单独端到端验证
     _app, server = build_asgi_app(cfg)
 
     tools = await server.list_tools()
@@ -226,10 +238,187 @@ async def main():
     cfg['allow_write'] = False
     config._cache = cfg
 
+    # ── 接入认证（account 模式：账号密码 + 拒绝策略，端到端） ──────
+    await _account_mode_cases()
+
     print(f'\n===== MCP 自测完成：通过 {len(PASS)} / 失败 {len(FAIL)} =====')
     for name, problem, _snippet in FAIL:
         print(f'  失败 {name}: {problem}')
     return 1 if FAIL else 0
+
+
+_SMOKE_PWD = 'SmokePwd!2345'
+
+
+def _free_port():
+    sock = socket.socket()
+    sock.bind(('127.0.0.1', 0))
+    port = sock.getsockname()[1]
+    sock.close()
+    return port
+
+
+def _start_http(cfg):
+    """起一个真实 HTTP 服务（uvicorn 线程），返回 (server, port, cfg)。"""
+    port = _free_port()
+    cfg = dict(cfg, host='127.0.0.1', port=port)   # 端口同时用于 DNS 重绑定白名单
+    app, _server = build_asgi_app(cfg)
+    http = uvicorn.Server(uvicorn.Config(app, host='127.0.0.1', port=port,
+                                         log_level='warning'))
+    threading.Thread(target=http.run, daemon=True).start()
+    for _ in range(200):
+        try:
+            with socket.create_connection(('127.0.0.1', port), timeout=0.3):
+                return http, port, cfg
+        except OSError:
+            time.sleep(0.05)
+    raise RuntimeError('HTTP 服务未在预期时间内就绪')
+
+
+async def _raw_post(port, headers):
+    """裸 HTTP 请求（不经 SDK 会话）：用于验证 401/429 这类连接层拒绝。"""
+    client = create_mcp_http_client(headers=headers or None)
+    try:
+        return await client.post(
+            f'http://127.0.0.1:{port}/mcp',
+            json={'jsonrpc': '2.0', 'id': 1, 'method': 'initialize',
+                  'params': {'protocolVersion': '2025-06-18', 'capabilities': {},
+                             'clientInfo': {'name': 'smoke', 'version': '1'}}},
+            headers={'accept': 'application/json, text/event-stream'})
+    finally:
+        await client.aclose()
+
+
+async def _sdk_session(port, headers, tool='list_grades', args=None):
+    """完整 SDK 会话：initialize + list_tools + 调用一次工具；返回 (工具数, 文本)。"""
+    client = create_mcp_http_client(headers=headers)
+    try:
+        async with streamable_http_client(f'http://127.0.0.1:{port}/mcp',
+                                          http_client=client) as transport:
+            async with ClientSession(transport[0], transport[1]) as session:
+                await session.initialize()
+                tools = await session.list_tools()
+                result = await session.call_tool(tool, args or {})
+                text = result.content[0].text if result.content else ''
+                return len(tools.tools), text
+    finally:
+        await client.aclose()
+
+
+def _check_status(name, status, expect):
+    if status == expect:
+        PASS.append(name)
+        print(f'PASS  {name}（HTTP {status}）')
+    else:
+        FAIL.append((name, f'期望 HTTP {expect}，实际 {status}', ''))
+        print(f'FAIL  {name}（期望 {expect}，实际 {status}）')
+
+
+def _pick_access_probe_user():
+    """挑一个"角色受限 + 班级范围"的账号（会被临时改密码用于认证测试）。"""
+    from app.models.user import User
+    from app.modules.grades.services import scope as scope_service
+    for user in (User.query.filter(User.is_active.is_(True),
+                                   User.role.in_(['homeroom_teacher', 'teacher']))
+                 .order_by(User.id).limit(30).all()):
+        if scope_service.user_grade_scope(user) is not None:
+            continue
+        if scope_service.get_scope(user)[0] == 'class':
+            return user
+    return None
+
+
+async def _account_mode_cases():
+    """account 模式端到端：401 / 429 拒绝策略 + 认证通过后的权限控制。"""
+    print('\n── 接入认证（account 模式） ──')
+    base_cfg = dict(config.load_config())
+    username, old_hash, http_server = None, None, None
+    try:
+        from app.extensions import db
+        with bootstrap.get_app().app_context():
+            target = _pick_access_probe_user()
+            if target is None:
+                print('注意：未找到受限账号，跳过接入认证用例')
+                return
+            username, old_hash = target.username, target.password_hash
+            target.set_password(_SMOKE_PWD)
+            db.session.commit()
+            perms = {k: target.has_perm(k) for k in
+                     ('students.view', 'statistics.view')}
+
+        cfg = dict(base_cfg, auth_mode='account', require_token=False,
+                   login_fail_limit=5, login_lock_seconds=30)
+        config._cache = cfg
+        http_server, port, _ = _start_http(cfg)
+
+        resp = await _raw_post(port, None)
+        _check_status('接入认证：无凭据被拒', resp.status_code, 401)
+        if 'unauthorized' not in resp.text:
+            FAIL.append(('接入认证：无凭据错误体', '缺少 unauthorized 错误码', resp.text[:200]))
+
+        resp = await _raw_post(port, {'x-stulink-user': username, 'x-stulink-password': 'x'})
+        _check_status('接入认证：错误密码被拒', resp.status_code, 401)
+
+        basic = base64.b64encode(f'{username}:{_SMOKE_PWD}'.encode()).decode()
+        count, text = await _sdk_session(port, {'Authorization': f'Basic {basic}'})
+        if count > 0 and '"ok": true' in text:
+            PASS.append('接入认证：正确凭据进入 MCP 并调用工具')
+            print(f'PASS  接入认证：正确凭据进入 MCP（工具 {count} 个，list_grades 成功）')
+        else:
+            FAIL.append(('接入认证：正确凭据进入 MCP', '会话或工具调用失败', text[:200]))
+            print('FAIL  接入认证：正确凭据进入 MCP')
+
+        count2, _ = await _sdk_session(port, {'X-StuLink-User': username,
+                                              'X-StuLink-Password': _SMOKE_PWD})
+        if count2 == count:
+            PASS.append('接入认证：X-StuLink-User/Password 头部方式')
+            print('PASS  接入认证：X-StuLink-User/Password 头部方式')
+        else:
+            FAIL.append(('接入认证：头部方式', f'工具数不一致 {count2} != {count}', ''))
+
+        if not perms.get('statistics.view'):
+            _, dorm_text = await _sdk_session(
+                port, {'X-StuLink-User': username, 'X-StuLink-Password': _SMOKE_PWD},
+                tool='get_dorm_stats')
+            if '"ok": false' in dorm_text and '权限' in dorm_text:
+                PASS.append('接入认证：越权工具按账号权限被拒')
+                print('PASS  接入认证：越权工具按账号权限被拒')
+            else:
+                FAIL.append(('接入认证：越权工具应被拒', '未返回权限不足', dorm_text[:200]))
+                print('FAIL  接入认证：越权工具应被拒')
+
+        codes = []
+        resp = None
+        for _ in range(6):
+            resp = await _raw_post(port, {'x-stulink-user': '__smoke_no_user__',
+                                          'x-stulink-password': 'x'})
+            codes.append(resp.status_code)
+        if codes[-1] == 429 and resp is not None and resp.headers.get('retry-after'):
+            PASS.append('接入认证：连续失败触发锁定 429')
+            print(f'PASS  接入认证：连续失败触发锁定（{codes}，'
+                  f'retry-after={resp.headers.get("retry-after")}）')
+        else:
+            FAIL.append(('接入认证：连续失败锁定', f'状态码序列 {codes}', ''))
+            print(f'FAIL  接入认证：连续失败锁定（{codes}）')
+    except Exception as exc:                                        # noqa: BLE001
+        FAIL.append(('接入认证：端到端用例执行', f'{type(exc).__name__}: {exc}', ''))
+        print(f'FAIL  接入认证：端到端用例执行异常 {type(exc).__name__}: {exc}')
+    finally:
+        if http_server is not None:
+            http_server.should_exit = True
+        config._cache = base_cfg
+        if username and old_hash:
+            try:
+                from app.extensions import db
+                from app.models.user import User
+                with bootstrap.get_app().app_context():
+                    user = User.query.filter_by(username=username).first()
+                    if user and user.password_hash != old_hash:
+                        user.password_hash = old_hash
+                        db.session.commit()
+                        print(f'      （已恢复 {username} 的原密码哈希）')
+            except Exception as exc:                                # noqa: BLE001
+                print(f'      警告：恢复 {username} 密码哈希失败：{exc}')
 
 
 if __name__ == '__main__':

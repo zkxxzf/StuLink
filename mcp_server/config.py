@@ -16,12 +16,23 @@ DEFAULTS = {
     'host': ('127.0.0.1', '监听地址；改为 0.0.0.0 可被局域网内其他设备访问'),
     'port': (8765, '监听端口'),
     'path': ('/mcp', 'MCP 端点路径（客户端填写的 URL 为 http://地址:端口 + 本路径）'),
-    'token': ('', '访问令牌；留空则自动生成。客户端在 Authorization: Bearer <令牌> 中携带'),
-    'bind_user': ('admin', '以哪个 StuLink 账号身份执行（决定权限与可见数据范围）'),
+    'auth_mode': ('account', '接入认证模式：account=每请求校验 StuLink 账号密码（推荐，'
+                             '客户端权限与网页端完全一致）；token=仅校验静态访问令牌、'
+                             '执行身份固定为 bind_user（兼容旧客户端，安全性较弱）'),
+    'require_token': (False, 'account 模式下是否额外要求 X-StuLink-Token（双重准入，'
+                             '防止端口被随意扫描）；false 时只认账号密码'),
+    'token': ('', '静态访问令牌（token 模式的唯一凭据；account 模式在 require_token=true 时'
+                  '作为第二道准入）；留空则自动生成'),
+    'bind_user': ('admin', 'token 模式的执行账号（例如 admin）；account 模式不生效——'
+                           '每个客户端用自己的账号密码登录'),
     'allow_write': (True, '是否允许写入类工具（录入/修改数据）；false 时写工具直接拒绝'),
     'audit_reads': (False, '是否把只读查询也写入操作日志（写操作始终记录）'),
     'max_rows': (200, '单次返回的最大行数，超出会截断并在结果中提示'),
     'exam_cache_ttl': (300, '成绩分析数据在 MCP 侧的缓存秒数：超过则主动重建（0=沿用主程序默认 900 秒）'),
+    'credential_cache_ttl': (300, '账号密码校验结果缓存秒数：0=每次请求都做完整密码校验（较慢）；'
+                                  '缓存命中仍会校验账号是否停用/是否改密（立即生效）'),
+    'login_fail_limit': (5, '同一账号连续认证失败达到该次数后临时锁定；0=不锁定'),
+    'login_lock_seconds': (300, '认证失败锁定时长（秒）'),
     'allowed_hosts': ([], '允许的 Host 头（DNS 重绑定防护）；留空则自动放行本机与监听地址'),
 }
 

@@ -20,7 +20,10 @@ _lock = threading.Lock()
 def get_exam_data(exam_id):
     """取该考试的全场分析数据；超出 exam_cache_ttl 时先清 MCP 进程内缓存再重建。"""
     from app.modules.grades.services import stats_service
-    ttl = int(config.load_config().get('exam_cache_ttl') or 0)
+    try:
+        ttl = int(config.load_config().get('exam_cache_ttl') or 0)
+    except (TypeError, ValueError):   # 配置非法时按默认 TTL 处理，避免所有成绩工具报错
+        ttl = 300
     if ttl > 0:
         now = time.time()
         with _lock:

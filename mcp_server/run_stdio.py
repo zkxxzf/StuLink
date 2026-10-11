@@ -39,7 +39,7 @@ sys.stdout = sys.stderr      # 初始化期间的一切输出走 stderr，绝不
 try:
     from mcp.server.mcpserver import MCPServer
     from mcp_server import config
-    from mcp_server.core import bootstrap
+    from mcp_server.core import auth, bootstrap, identity
     from mcp_server.run import INSTRUCTIONS
     from mcp_server.tools import register_all
 
@@ -47,7 +47,31 @@ try:
                         format='%(asctime)s %(levelname)s [%(name)s] %(message)s')
 
     cfg = config.load_config()
-    bootstrap.warm_up(cfg['bind_user'])
+    mode = (cfg.get('auth_mode') or 'account').strip().lower()
+
+    if mode == 'token':
+        # 兼容模式：固定 bind_user 身份（本地子进程模型）
+        me = bootstrap.warm_up(cfg['bind_user'])
+        identity_note = f"{me['real_name']}（{me['username']}）· 静态令牌模式"
+    else:
+        # 账号密码模式：stdio 没有 HTTP 头，凭据由客户端通过环境变量注入，
+        # 启动时校验一次并固化为进程级身份（否则拒绝启动 = 禁止未验证的随意调用）。
+        username = (os.environ.get('STULINK_MCP_USER') or '').strip()
+        password = os.environ.get('STULINK_MCP_PASSWORD') or ''
+        if not username or not password:
+            print('[MCP] stdio 模式需要账号密码：请在客户端配置的 env 中设置 '
+                  'STULINK_MCP_USER 与 STULINK_MCP_PASSWORD', file=sys.stderr)
+            sys.exit(2)
+        app = bootstrap.get_app()
+        with app.app_context():
+            user_id, error, message = auth.verify_credentials(username, password)
+            if error:
+                auth.audit_auth_failure(username, error, message, client='stdio')
+        if error:
+            print(f'[MCP] stdio 身份认证失败：{message}', file=sys.stderr)
+            sys.exit(3)
+        identity.set_static(user_id)
+        identity_note = f'{username}（启动时认证一次，进程级生效）'
 
     server = MCPServer(
         name='stulink',
@@ -56,7 +80,7 @@ try:
         version='1.0.0',
     )
     loaded = register_all(server)
-    print(f"[MCP] stdio 模式已就绪：执行身份 {cfg['bind_user']}，"
+    print(f"[MCP] stdio 模式已就绪：执行身份 {identity_note}，"
           f"写操作 {'允许' if cfg.get('allow_write') else '已禁用'}，"
           f"工具模块 {'、'.join(label for _n, label in loaded)}",
           file=sys.stderr, flush=True)
