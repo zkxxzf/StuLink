@@ -146,7 +146,7 @@
         }
         .sidebar-float .efn-group:hover { background: #e2e8f0; }
         .sidebar-float .efn-group .bi { font-size: 11px; color: #94a3b8; }
-        /* v1.19.11.0：AI 智能导入移到侧栏最下方（进阶入口），用分隔线区分 */
+        /* v1.19.12.0：AI 智能导入移到侧栏最下方（进阶入口），用分隔线区分 */
         .sidebar-float .efn-ai {
             margin-top: 6px; border-top: 1px solid #f1f5f9; padding-top: 8px;
         }
@@ -352,7 +352,7 @@
                 {# v1.19.0：划线分层紧贴「成绩导入」环节 #}
                 <a class="efn-item {% if request.endpoint == 'grades.bands_page' %}active{% endif %}" data-nav="bands"
                    href="{{ url_for('grades.bands_page', exam_id=EN.exam_id) }}">划线分层</a>
-                {# v1.19.11.0：分数修改记录（本场），任何登录用户可查 #}
+                {# v1.19.12.0：分数修改记录（本场），任何登录用户可查 #}
                 <a class="efn-item {% if request.endpoint == 'grades.score_changes' %}active{% endif %}" data-nav="changelog"
                    href="{{ url_for('grades.score_changes') }}?exam={{ EN.exam_id }}">分数修改记录</a>
                 {# v1.19.0 成绩分析：折叠组 —— 总览（全年级对比）/ 班级分析（班主任）/ 学科分析（任课教师）
@@ -390,7 +390,7 @@
                     {% endif %}
                 </div>
                 {% endif %}
-                {# v1.19.11.0：AI 智能导入移到侧栏最下方（进阶入口）；移除「下一步」提示（用户：无用） #}
+                {# v1.19.12.0：AI 智能导入移到侧栏最下方（进阶入口）；移除「下一步」提示（用户：无用） #}
                 <a class="efn-item efn-ai {% if request.endpoint and request.endpoint.startswith('grades.exam_ai_import') %}active{% endif %}" data-nav="ai"
                    href="{{ url_for('grades.exam_ai_import', exam_id=EN.exam_id) }}">AI 智能导入</a>
             </div>
@@ -408,12 +408,12 @@
                 <i class="bi bi-person-vcard"></i>个人成绩查询
             </a>
             {% endif %}
-            {# v1.19.11.0 分数修改记录：跨考试的改分留痕，任何登录用户都可查 #}
+            {# v1.19.12.0 分数修改记录：跨考试的改分留痕，任何登录用户都可查 #}
             <a class="nav-link {% if request.endpoint == 'grades.score_changes' and not request.args.get('exam') %}active{% endif %}"
                href="{{ url_for('grades.score_changes') }}">
                 <i class="bi bi-clock-history"></i>分数修改记录
             </a>
-            {# v1.19.11.0 移除「毕业生成绩（二期）」入口：暂无用处，后期单独做毕业生数据库 #}
+            {# v1.19.12.0 移除「毕业生成绩（二期）」入口：暂无用处，后期单独做毕业生数据库 #}
 
             {# v1.19.0 基础配置：长期基础数据，不属于四段流程，默认折叠 #}
             {% set _cfg_eps = ('grades.subject_mgmt', 'grades.band_templates_page',
@@ -633,7 +633,7 @@
 
         {% if current_user.is_authenticated %}
         <footer class="text-center text-muted small mt-4 pt-3 border-top">
-            StuLink v1.19.11.0（2026-10-09） · © 2026 @zkxxzf · 感谢协作开发 @Sakaay
+            StuLink v1.19.12.0（2026-10-09） · © 2026 @zkxxzf · 感谢协作开发 @Sakaay
         </footer>
         {% endif %}
     </div>
