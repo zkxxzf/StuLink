@@ -67,7 +67,8 @@
     }
 
     function isAffairRole(role) {
-        return role === 'affair_students' || role === 'affair_rooms';
+        return role === 'affair_students' || role === 'affair_rooms'
+            || role === 'affair_seats';
     }
 
     /** 服务端「考务自动归类」（{字段: 列号}）→ {列名: 字段} */
@@ -128,6 +129,7 @@
                     .append('<option value="bands">这份是：各科分数线</option>')
                     .append('<option value="affair_students">这份是：考生名单／编排结果（学生信息表）</option>')
                     .append('<option value="affair_rooms">这份是：考场设置（考场信息表）</option>')
+                    .append('<option value="affair_seats">这份是：座位表／桌签（仅用于考场容量）</option>')
                     .append('<option value="skip">不使用此工作表</option>'));
             // 默认角色：分数线 / 考生安排 / 考场位置 由服务端识别；成绩表按 AI 判断的整表角色
             var auto = sh.auto || {};
@@ -136,6 +138,7 @@
             var role = (sh.kind === 'bands') ? 'bands'
                      : (sh.kind === 'affair_students') ? 'affair_students'
                      : (sh.kind === 'affair_rooms') ? 'affair_rooms'
+                     : (sh.kind === 'affair_seats') ? 'affair_seats'
                      : (sh.kind === 'skip') ? 'skip'
                      : !hasSubj ? 'skip'
                      : (SUGGEST.score_kind === 'raw') ? 'raw'

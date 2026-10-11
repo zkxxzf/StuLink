@@ -56,6 +56,7 @@
                     .attr('data-idx', idx).css('width', '170px')
                     .append('<option value="students">考生名单 / 编排结果（学生信息表）</option>')
                     .append('<option value="rooms">考场设置（考场信息表）</option>')
+                    .append('<option value="seats">座位表 / 桌签（仅用于考场容量）</option>')
                     .append('<option value="skip">不使用此工作表</option>'));
             card.append(head);
             card.find('.af-kind').val(sh.kind || 'skip');

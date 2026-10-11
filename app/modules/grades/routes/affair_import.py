@@ -101,7 +101,8 @@ def affair_ai_import_analyze(aid):
     if not sheets:
         return jsonify(success=False, message='；'.join(errors) or '没有可用工作表')
 
-    # 默认只把「字段最多」的那张学生表设为 students，其余学生表默认跳过（避免桌签等重复表混入）
+    # 默认只把「字段最多」的那张学生表设为 students，其余学生表默认「座位表」（仅取容量）
+    # 或跳过（如粘贴用等无考场/座号的打印表，避免重复串数据）
     stud = [s for s in sheets if _guess_kind(s['headers']) == 'students']
     best = None
     if stud:
@@ -110,7 +111,7 @@ def affair_ai_import_analyze(aid):
     for s in sheets:
         k = _guess_kind(s['headers'])
         if k == 'students' and s is not best:
-            k = 'skip'
+            k = 'seats' if aisvc.has_seat_cols(s['headers']) else 'skip'
         kinds[s['name']] = k
 
     # 可选 AI 建议

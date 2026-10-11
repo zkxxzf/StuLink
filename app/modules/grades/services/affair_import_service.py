@@ -19,15 +19,33 @@ def norm_room(no):
     return s.zfill(2) if s.isdigit() else s
 
 
+def _seat_int(v):
+    """座号 → int（非数字返回 None）"""
+    s = str(v or '').strip()
+    return int(s) if s.isdigit() else None
+
+
+def _bump_seat(seat_max, row):
+    """记录某考场出现过的最大座号（用于推断考场容量）"""
+    rn = norm_room(row.get('room'))
+    st = _seat_int(row.get('seat'))
+    if rn and st and st > seat_max.get(rn, 0):
+        seat_max[rn] = st
+
+
 def parse(payload):
     """按工作表用途解析 → (students, rooms, errors)
 
-    payload: [{_sheet, mapping, kind}]，kind ∈ {'students','rooms','skip'}
+    payload: [{_sheet, mapping, kind}]，kind ∈ {'students','rooms','seats','skip'}
     students: [{no,name,class_name,selection,subject,attend,fixed_room,fixed_seat,
                 custom_number,room,seat,exam_no,...}]
     rooms:    {考场号: {location, subject, capacity, prefix, note}}
+
+    考场容量：优先用「考场信息表」里显式给出的容量；否则按座位表/名单里出现的
+    **最大座号**推断（座位表如桌签会把每间考场的座位排满，能反映真实容量）。
     """
     students, rooms, errors = {}, {}, []
+    seat_max = {}                                     # 考场号 → 出现过的最大座号
     for item in payload or []:
         kind = item.get('kind') or 'skip'
         sh = item.get('_sheet')
@@ -52,12 +70,23 @@ def parse(payload):
                     info['prefix'] = r['room_prefix']
                 if r.get('note'):
                     info['note'] = r['note']
-        else:                                       # students
+            continue
+        if kind == 'seats':                           # 座位表/桌签：只取座号 → 容量
             for r in rows:
-                key = (r.get('no') or r.get('exam_no')
-                       or (r.get('name') or '') + '|' + (r.get('class_name') or ''))
-                students[key] = r
+                _bump_seat(seat_max, r)
+            continue
+        for r in rows:                                # students
+            _bump_seat(seat_max, r)
+            key = (r.get('no') or r.get('exam_no')
+                   or (r.get('name') or '') + '|' + (r.get('class_name') or ''))
+            students[key] = r
+    # 没有显式容量时，用最大座号补上（房间来自名单/座位表）
+    for rn, mx in seat_max.items():
+        info = rooms.setdefault(rn, {})
+        if not info.get('capacity'):
+            info['capacity'] = mx
     return list(students.values()), rooms, errors
+
 
 
 def resolve_student_no(affair, rows):
