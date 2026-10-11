@@ -12,8 +12,7 @@
 
     function fieldOptions() {
         var o = [['', '（忽略此列）']];
-        ['no', 'name', 'class_name', 'exam_no', 'room', 'seat', 'room_seat',
-         'selection', 'attend', 'room_loc'].forEach(function (k) {
+        Object.keys(FIELDS).forEach(function (k) {
             if (FIELDS[k]) { o.push([k, FIELDS[k]]); }
         });
         return o;
@@ -55,8 +54,8 @@
                     (sh.file ? ('文件：' + sh.file + '｜') : '') + rowsInfo))
                 .append($('<select>').addClass('form-select form-select-sm af-kind')
                     .attr('data-idx', idx).css('width', '170px')
-                    .append('<option value="students">学生名单</option>')
-                    .append('<option value="rooms">考场位置</option>')
+                    .append('<option value="students">考生名单 / 编排结果（学生信息表）</option>')
+                    .append('<option value="rooms">考场设置（考场信息表）</option>')
                     .append('<option value="skip">不使用此工作表</option>'));
             card.append(head);
             card.find('.af-kind').val(sh.kind || 'skip');

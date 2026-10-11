@@ -69,7 +69,8 @@ def _ai_cfg_from_request():
 def exam_ai_import(exam_id):
     exam = assert_exam_visible(exam_id)
     return render_template('grades/ai_import.html', exam=exam,
-                           subjects=SUBJECTS, score_kinds=aisvc.SCORE_KIND_LABEL)
+                           subjects=SUBJECTS, score_kinds=aisvc.SCORE_KIND_LABEL,
+                           affair_fields=aisvc.AFFAIR_FIELD_LABELS)
 
 
 @bp.route('/exams/<int:exam_id>/ai-import/analyze', methods=['POST'])

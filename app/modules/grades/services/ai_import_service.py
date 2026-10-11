@@ -439,21 +439,31 @@ def rows_from_mapping(sheet, mapping, score_kind, exam):
     return rows, errors
 
 
-# ==================== 考务「考生安排 / 考场位置」列识别（v1.19.0 P2） ====================
+# ==================== 考务「学生信息表 / 考场信息表 / 编排结果」列识别（v1.19.5） ====================
 
 AFFAIR_FIELD_LABELS = {
-    'no': '学号', 'name': '姓名', 'class_name': '班级', 'exam_no': '考号',
-    'room': '考场号', 'seat': '座号', 'room_seat': '考场-座号（合并列）',
-    'selection': '选科/组合', 'attend': '是否参加', 'room_loc': '教室/位置',
+    # 学生（学生信息表 + 编排结果）
+    'no': '学号', 'name': '姓名', 'class_name': '班级', 'selection': '选科/组合',
+    'subject': '考试科目', 'attend': '是否参加',
+    'fixed_room': '固定考场', 'fixed_seat': '固定座号', 'custom_number': '自定义考号',
+    'room': '考场编号', 'seat': '座号', 'exam_no': '考号',
+    'room_seat': '考场-座号（合并列）',
+    # 考场（考场信息表）
+    'room_loc': '考场位置/教室', 'room_subject': '考场科目',
+    'capacity': '考场容量', 'room_prefix': '考号前缀', 'room_note': '备注',
 }
 
 
 def classify_affair_headers(headers):
     """按（可能合并的）列名归类考务字段 → {字段: 列号}
 
-    字段：no 学号 / name 姓名 / class_name 班级 / exam_no 考号 /
-          room 考场 / seat 座号 / room_seat 考场-座号(合并) / selection 选科 /
-          attend 是否参加 / room_loc 教室位置
+    学生：no 学号 / name 姓名 / class_name 班级 / selection 选科 / subject 考试科目 /
+          attend 是否参加 / fixed_room 固定考场 / fixed_seat 固定座号 /
+          custom_number 自定义考号 / room 考场 / seat 座号 / exam_no 考号 /
+          room_seat 考场-座号(合并)
+    考场：room_loc 位置 / room_subject 科目 / capacity 容量 / room_prefix 考号前缀 / room_note 备注
+
+    注意匹配顺序：先「固定/位置/编号/前缀/自定义」，再落到「考场/考号」通用词。
     """
     out = {}
     for j, h in enumerate(headers):
@@ -461,26 +471,45 @@ def classify_affair_headers(headers):
             continue
         parent, child = _split_label(h)
         L = parent if child else h
-        if '座号' in L and '考场' in L:
-            out.setdefault('room_seat', j)
-        elif '考场' in L or '试室' in L:
-            out.setdefault('room', j)
+        key = None
+        if '座号' in L and ('考场' in L or '试室' in L):
+            key = 'room_seat'
+        elif '固定考场' in L:
+            key = 'fixed_room'
+        elif '固定座号' in L or '固定座位' in L:
+            key = 'fixed_seat'
+        elif '自定义考号' in L:
+            key = 'custom_number'
+        elif '考号前缀' in L or '前缀' in L:
+            key = 'room_prefix'
+        elif '考场位置' in L or '教室' in L or '位置' in L or '地点' in L:
+            key = 'room_loc'
+        elif '考场科目' in L or '适用选科' in L or '考场选科' in L:
+            key = 'room_subject'
+        elif '考场容量' in L or '容量' in L:
+            key = 'capacity'
+        elif '考场编号' in L or '考场号' in L or '考场' in L or '试室' in L:
+            key = 'room'
         elif '座号' in L or '座位' in L:
-            out.setdefault('seat', j)
+            key = 'seat'
         elif '学号' in L:
-            out.setdefault('no', j)
+            key = 'no'
         elif '考号' in L or '准考证' in L:
-            out.setdefault('exam_no', j)
+            key = 'exam_no'
         elif '姓名' in L:
-            out.setdefault('name', j)
+            key = 'name'
         elif '班级' in L:
-            out.setdefault('class_name', j)
+            key = 'class_name'
         elif '是否参加' in L or '是否参考' in L or L in ('参加', '参考'):
-            out.setdefault('attend', j)
+            key = 'attend'
         elif '选科' in L or '组合' in L:
-            out.setdefault('selection', j)
-        elif '教室' in L or '位置' in L or '地点' in L:
-            out.setdefault('room_loc', j)
+            key = 'selection'
+        elif '考试科目' in L or L in ('科目', '学科'):
+            key = 'subject'
+        elif '备注' in L:
+            key = 'room_note'
+        if key:
+            out.setdefault(key, j)
     return out
 
 
@@ -493,7 +522,9 @@ def _clean_bad(v):
 def rows_from_affair_mapping(sheet, mapping):
     """按映射（手工/AI）＋自动归类，把 sheet 解析为考务行：
 
-    {no, name, class_name, exam_no, room, seat, selection, attend, room_loc, line}
+    学生行：{no, name, class_name, selection, subject, attend, fixed_room, fixed_seat,
+            custom_number, room, seat, exam_no}
+    考场行：{room, room_loc, room_subject, capacity, room_prefix, room_note}
     返回 (rows, errors)
     """
     headers = sheet['headers']
@@ -509,9 +540,11 @@ def rows_from_affair_mapping(sheet, mapping):
     i_cls, i_exam = idx('class_name'), idx('exam_no')
     i_room, i_seat, i_rs = idx('room'), idx('seat'), idx('room_seat')
     i_sel, i_att, i_loc = idx('selection'), idx('attend'), idx('room_loc')
-    if all(x is None for x in (i_no, i_name, i_exam, i_room, i_loc)):
+    i_subj, i_fr, i_fs, i_cn = idx('subject'), idx('fixed_room'), idx('fixed_seat'), idx('custom_number')
+    i_rsubj, i_cap, i_pre, i_note = idx('room_subject'), idx('capacity'), idx('room_prefix'), idx('room_note')
+    if all(x is None for x in (i_no, i_name, i_exam, i_room, i_loc, i_cap)):
         return [], [{'line': sheet['header_row'], 'no': '',
-                     'reason': '未识别到任何可用列（学号/姓名/考号/考场/教室）'}]
+                     'reason': '未识别到任何可用列（学号/姓名/考号/考场/位置/容量）'}]
 
     rows, errors = [], []
     for lineno, cells in sheet['rows']:
@@ -528,21 +561,30 @@ def rows_from_affair_mapping(sheet, mapping):
         seat = _clean_bad(get(i_seat))
         rs = _clean_bad(get(i_rs))
         loc = _clean_bad(get(i_loc))
+        cap = _num(get(i_cap))
         if rs:
             parts = rs.split('-')
             if not room:
                 room = parts[0].strip()
             if not seat and len(parts) > 1:
                 seat = parts[-1].strip()
-        if not (no or name or exam_no or room or loc):
+        if not (no or name or exam_no or room or loc or cap):
             continue                       # 空行/表尾说明行
         att = _clean_bad(get(i_att))
         rows.append({'line': lineno, 'no': no, 'name': name,
                      'class_name': _clean_bad(get(i_cls)),
                      'exam_no': exam_no, 'room': room, 'seat': seat,
                      'selection': _clean_bad(get(i_sel)),
+                     'subject': _clean_bad(get(i_subj)),
                      'attend': (att != '否') if att else True,
-                     'room_loc': loc})
+                     'fixed_room': _clean_bad(get(i_fr)),
+                     'fixed_seat': _clean_bad(get(i_fs)),
+                     'custom_number': _clean_bad(get(i_cn)),
+                     'room_loc': loc,
+                     'room_subject': _clean_bad(get(i_rsubj)),
+                     'capacity': int(cap) if cap else None,
+                     'room_prefix': _clean_bad(get(i_pre)),
+                     'note': _clean_bad(get(i_note))})
     return rows, errors
 
 
@@ -556,11 +598,15 @@ def build_affair_ai_prompt(probe_data, affair):
                         ' | '.join(sh['headers'][:80]),
                         json.dumps(sh['sample'], ensure_ascii=False)[:900]))
     system = (
-        '你是考场编排表结构识别助手。用户给你 Excel 的表头与样本，判断每列对应什么字段。\n'
+        '你是考试考务表结构识别助手（学生信息表 / 考场信息表 / 编排结果）。\n'
+        '用户给你 Excel 的表头与样本，判断每列对应什么字段。\n'
         '只输出一个 JSON，不要解释，格式：\n'
         '{"sheets":[{"name":"表名","fields":{"no":"学号","name":"姓名","class_name":"班级",'
-        '"exam_no":"考号","room":"考场","seat":"座号","room_seat":"考场-座号","selection":"选科",'
-        '"attend":"是否参加","room_loc":"教室位置"}}],"notes":"补充说明"}\n'
+        '"selection":"选科","subject":"考试科目","attend":"是否参加",'
+        '"fixed_room":"固定考场","fixed_seat":"固定座号","custom_number":"自定义考号",'
+        '"room":"考场","seat":"座号","exam_no":"考号","room_seat":"考场-座号",'
+        '"room_loc":"考场位置","room_subject":"考场科目","capacity":"考场容量",'
+        '"room_prefix":"考号前缀","room_note":"备注"}}],"notes":"补充说明"}\n'
         '规则：值必须是原表头里的列名原文（多行表头已合并为「父·子」）；找不到就不要出现；'
         '「考场-座号」这种合并列用 room_seat；名次/人数/统计类列不要映射。'
     )
@@ -674,7 +720,7 @@ def guess_sheet_kind(headers):
         return 'scores'
     af = classify_affair_headers(headers)
     has_id = any(k in af for k in ('no', 'name', 'exam_no'))
-    if af.get('room_loc') is not None and af.get('room') is not None and not has_id:
+    if not has_id and any(k in af for k in ('room', 'room_loc', 'capacity', 'room_prefix')):
         return 'affair_rooms'
     if has_id:
         return 'affair_students'

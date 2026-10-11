@@ -22,6 +22,9 @@
         <li>没配置 AI Key 也能用：跳过后在下方<b>手工指定每列用途</b>即可。</li>
         <li>「<b>各科分数线</b>」表（科目 × 清北/985/211/特控/本科线）也会自动识别，
             导入后成为本场考试的<b>分层划线</b>（并按线名绑定分层模板）。</li>
+        <li><b>考务也能在这里导</b>：<b>考生名单／编排结果</b>（学号/姓名/班级/选科/考场/座号/考号，
+            含固定考场、自定义考号）与<b>考场设置</b>（考场编号/位置/科目/容量/考号前缀）
+            都会自动识别并写入本场考试的<b>考务批次</b>（没有则自动创建）。</li>
     </ul>
 </div>
 
@@ -78,6 +81,7 @@
 window.AI_IMPORT_EXAM = {{ exam.id }};
 window.AI_SUBJECTS = {{ subjects|tojson }};
 window.AI_KIND_LABEL = {{ score_kinds|tojson }};
+window.AFFAIR_FIELDS = {{ affair_fields|tojson }};
 </script>
 <script src="{{ su('js/ai_import.js') }}"></script>
 {% endblock %}

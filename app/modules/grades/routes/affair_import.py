@@ -190,9 +190,12 @@ def affair_ai_import_apply(aid):
     errors.extend(rerr)
     n_attend = sum(1 for r in rows if r.get('attend') is not False)
     n_seat = sum(1 for r in rows if r.get('room'))
+    room_set = {afs.norm_room(r['room']) for r in rows if r.get('room')} | set(rooms or {})
     preview = {'students': len(rows), 'attend': n_attend, 'seated': n_seat,
-               'rooms': len({afs.norm_room(r['room']) for r in rows if r.get('room')}) or len(rooms),
-               'room_locations': len(rooms), 'errors': len(errors)}
+               'rooms': len(room_set),
+               'room_locations': sum(1 for v in (rooms or {}).values() if v.get('location')),
+               'room_caps': sum(1 for v in (rooms or {}).values() if v.get('capacity')),
+               'errors': len(errors)}
     if dry:
         return jsonify(success=True, preview=preview, errors=errors[:20])
     if not rows and not rooms:

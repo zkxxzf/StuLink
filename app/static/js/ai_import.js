@@ -7,6 +7,7 @@
     var EID = window.AI_IMPORT_EXAM;
     var SUBJECTS = window.AI_SUBJECTS || [];
     var KIND_LABEL = window.AI_KIND_LABEL || {};
+    var AFFAIR_FIELDS = window.AFFAIR_FIELDS || {};   // 考务字段：考生名单 / 考场信息表
     var TOKEN = '';
     var SHEETS = [];          // 服务端返回的 sheet 概要
     var SUGGEST = {};         // AI 建议
@@ -56,6 +57,55 @@
         return out;
     }
 
+    /** 考务字段选项（考生名单 / 考场信息表） */
+    function affairFieldOptions() {
+        var o = [['', '（忽略此列）']];
+        Object.keys(AFFAIR_FIELDS).forEach(function (k) {
+            if (AFFAIR_FIELDS[k]) { o.push([k, AFFAIR_FIELDS[k]]); }
+        });
+        return o;
+    }
+
+    function isAffairRole(role) {
+        return role === 'affair_students' || role === 'affair_rooms';
+    }
+
+    /** 服务端「考务自动归类」（{字段: 列号}）→ {列名: 字段} */
+    function affairAutoFlat(sh) {
+        var out = {}, a = sh.affair_auto || {}, heads = sh.headers || [];
+        Object.keys(a).forEach(function (f) {
+            if (a[f] != null && heads[a[f]]) { out[heads[a[f]]] = f; }
+        });
+        return out;
+    }
+
+    /** 列映射表：成绩角色 → 科目/字段；考务角色 → 考务字段 */
+    function buildColTable(sh, idx, role, scoreFlat) {
+        var affair = isAffairRole(role);
+        var flat = affair ? affairAutoFlat(sh) : (scoreFlat || {});
+        var opts = affair ? affairFieldOptions() : fieldOptions();
+        var tbl = $('<table>').addClass('table table-sm mb-0');
+        tbl.append($('<thead>').append($('<tr>').append(
+            '<th style="width:42%">原表列名</th>'
+            + '<th style="width:30%">样本值</th><th>对应字段</th>')));
+        var tbody = $('<tbody>');
+        (sh.headers || []).forEach(function (h, ci) {
+            if (!h) { return; }
+            var sample = ((sh.sample || [])[0] || [])[ci] || '';
+            var $sel = $('<select>').addClass('form-select form-select-sm ai-col')
+                .attr('data-idx', idx).attr('data-col', h);
+            opts.forEach(function (v) {
+                $sel.append($('<option>').val(v[0]).text(v[1]));
+            });
+            $sel.val(flat[h] || (!affair && SUBJECTS.indexOf(h) >= 0 ? h : ''));
+            tbody.append($('<tr>')
+                .append($('<td>').addClass('small').attr('title', h).text(h))
+                .append($('<td>').addClass('small text-muted').text(sample))
+                .append($('<td>').append($sel)));
+        });
+        return tbl.append(tbody);
+    }
+
     function renderMaps() {
         var $box = $('#mapBody').empty();
         if (!SHEETS.length) { return; }
@@ -76,8 +126,8 @@
                     .append('<option value="raw">这份是：原始成绩</option>')
                     .append('<option value="both">同表内两者都有</option>')
                     .append('<option value="bands">这份是：各科分数线</option>')
-                    .append('<option value="affair_students">这份是：考生安排（写入本场考务）</option>')
-                    .append('<option value="affair_rooms">这份是：考场位置（写入本场考务）</option>')
+                    .append('<option value="affair_students">这份是：考生名单／编排结果（学生信息表）</option>')
+                    .append('<option value="affair_rooms">这份是：考场设置（考场信息表）</option>')
                     .append('<option value="skip">不使用此工作表</option>'));
             // 默认角色：分数线 / 考生安排 / 考场位置 由服务端识别；成绩表按 AI 判断的整表角色
             var auto = sh.auto || {};
@@ -93,36 +143,24 @@
             card.append(head.append($('<span>').addClass('ms-auto badge bg-light text-dark border')
                 .attr('id', 'roleHint' + idx).text(KIND_LABEL[SUGGEST.score_kind] || '')));
             card.find('.ai-role').val(role);
-            var tbl = $('<table>').addClass('table table-sm mb-0');
-            var trh = $('<tr>').append('<th style="width:42%">原表列名</th>'
-                + '<th style="width:30%">样本值</th><th>对应字段</th>');
-            tbl.append($('<thead>').append(trh));
-            var tbody = $('<tbody>');
-            (sh.headers || []).forEach(function (h, ci) {
-                if (!h) { return; }
-                var sample = ((sh.sample || [])[0] || [])[ci] || '';
-                var $sel = $('<select>').addClass('form-select form-select-sm ai-col')
-                    .attr('data-idx', idx).attr('data-col', h);
-                fieldOptions().forEach(function (v) {
-                    $sel.append($('<option>').val(v[0]).text(v[1]));
-                });
-                $sel.val(flat[h] || (SUBJECTS.indexOf(h) >= 0 ? h : ''));
-                tbody.append($('<tr>')
-                    .append($('<td>').addClass('small').attr('title', h).text(h))
-                    .append($('<td>').addClass('small text-muted').text(sample))
-                    .append($('<td>').append($sel)));
+            var $cb = $('<div>').addClass('ai-colbox').attr('data-idx', idx)
+                .append(buildColTable(sh, idx, role, flat));
+            card.append($cb);
+            card.find('.ai-role').on('change', function () {   // 切换用途 → 换一套字段词表
+                var r = $(this).val();
+                $cb.empty().append(buildColTable(sh, idx, r, flat));
             });
-            card.append(tbl.append(tbody));
             $box.append(card);
         });
     }
 
     /** 收集映射 → 后端 sheets 参数 */
     function collectSheets() {
-        var byIdx = {};
+        var byIdx = {}, roles = {};
+        $('.ai-role').each(function () { roles[+$(this).data('idx')] = $(this).val() || 'converted'; });
         $('.ai-col').each(function () {
             var i = +$(this).data('idx'), col = $(this).data('col'), v = $(this).val();
-            if (!v) { return; }
+            if (!v || isAffairRole(roles[i])) { return; }   // 考务字段单独收集
             var b = byIdx[i] = byIdx[i] || {cols: {}, subjects: {}, raw_subjects: {}};
             if (v.indexOf('raw:') === 0) {
                 b.raw_subjects[v.slice(4)] = col;
@@ -133,11 +171,20 @@
             }
         });
         return SHEETS.map(function (sh, i) {
-            var role = $('.ai-role[data-idx=' + i + ']').val() || 'converted';
-            var m = byIdx[i] || {cols: {}, subjects: {}, raw_subjects: {}};
+            var role = roles[i] || 'converted';
+            if (isAffairRole(role)) {          // 考务：扁平 {字段: 列名}
+                var m = {};
+                $('.ai-col[data-idx=' + i + ']').each(function () {
+                    var v = $(this).val();
+                    if (v) { m[v] = $(this).data('col'); }
+                });
+                return {name: sh.name, mapping: m, score_kind: role};
+            }
             // 同一 sheet 内“两者都有” → 原始分列归 raw_subjects；
             // 若整表是原始表，则所有科目列按原始处理（后端会按 role 再处理一次）
-            return {name: sh.name, mapping: m, score_kind: role};
+            return {name: sh.name,
+                    mapping: byIdx[i] || {cols: {}, subjects: {}, raw_subjects: {}},
+                    score_kind: role};
         });
     }
 

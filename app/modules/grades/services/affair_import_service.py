@@ -20,11 +20,12 @@ def norm_room(no):
 
 
 def parse(payload):
-    """按工作表用途解析 → (students, room_locs, errors)
+    """按工作表用途解析 → (students, rooms, errors)
 
     payload: [{_sheet, mapping, kind}]，kind ∈ {'students','rooms','skip'}
-    students: [{no,name,class_name,exam_no,room,seat,selection,attend,...}]
-    room_locs: {考场号: 教室/位置}
+    students: [{no,name,class_name,selection,subject,attend,fixed_room,fixed_seat,
+                custom_number,room,seat,exam_no,...}]
+    rooms:    {考场号: {location, subject, capacity, prefix, note}}
     """
     students, rooms, errors = {}, {}, []
     for item in payload or []:
@@ -37,9 +38,20 @@ def parse(payload):
         if kind == 'rooms':
             for r in rows:
                 rn = norm_room(r.get('room') or r.get('no'))
+                if not rn:
+                    continue
+                info = rooms.setdefault(rn, {})
                 loc = r.get('room_loc') or r.get('name') or ''
-                if rn and loc:
-                    rooms[rn] = loc
+                if loc:
+                    info['location'] = loc
+                if r.get('room_subject'):
+                    info['subject'] = r['room_subject']
+                if r.get('capacity'):
+                    info['capacity'] = int(r['capacity'])
+                if r.get('room_prefix'):
+                    info['prefix'] = r['room_prefix']
+                if r.get('note'):
+                    info['note'] = r['note']
         else:                                       # students
             for r in rows:
                 key = (r.get('no') or r.get('exam_no')
@@ -82,25 +94,31 @@ def resolve_student_no(affair, rows):
     return rows, errs
 
 
-def apply_arrangement(affair, rows, room_locs, replace=True):
-    """写库：按考场生成 AffairRoom、名单 upsert 到 AffairStudent。
+def apply_arrangement(affair, rows, rooms, replace=True):
+    """写库：按考场/考场信息表生成 AffairRoom、名单 upsert 到 AffairStudent。
 
+    rooms: {考场号: {location, subject, capacity, prefix, note}}
     返回 (added, updated, removed, n_rooms)。调用方负责 commit。
     """
     exist_rooms = {r.room_no: r for r in AffairRoom.query.filter_by(affair_id=affair.id).all()}
     room_nos = {norm_room(r['room']) for r in rows if r.get('room')}
-    for rn in sorted(room_nos):
+    for rn in sorted(room_nos | set(rooms or {})):    # 名单里的考场 + 考场表里的考场
         row = exist_rooms.get(rn)
         if row is None:
             row = AffairRoom(affair_id=affair.id, room_no=rn, capacity=30, subject='默认')
             db.session.add(row)
             exist_rooms[rn] = row
-        if room_locs.get(rn):
-            row.location = room_locs[rn]
-    for rn, loc in (room_locs or {}).items():        # 位置表里、没人坐的考场也建出来
-        if rn not in exist_rooms:
-            db.session.add(AffairRoom(affair_id=affair.id, room_no=rn,
-                                      location=loc, capacity=30, subject='默认'))
+        spec = (rooms or {}).get(rn) or {}
+        if spec.get('location'):
+            row.location = spec['location']
+        if spec.get('subject'):
+            row.subject = spec['subject']
+        if spec.get('capacity'):
+            row.capacity = spec['capacity']
+        if spec.get('prefix'):
+            row.prefix = spec['prefix']
+        if spec.get('note'):
+            row.note = spec['note']
 
     exist = {s.student_no: s for s in AffairStudent.query.filter_by(affair_id=affair.id).all()}
     added = updated = 0
@@ -119,7 +137,7 @@ def apply_arrangement(affair, rows, room_locs, replace=True):
         st.name = r.get('name') or st.name
         st.class_name = normalize_class_name(r.get('class_name') or '') or st.class_name
         st.subject_selection = r.get('selection') or st.subject_selection or ''
-        st.subject = r.get('selection') or '默认'
+        st.subject = r.get('subject') or r.get('selection') or st.subject or '默认'
         st.is_attend = (r.get('attend') is not False)
         st.exam_number = r.get('exam_no') or st.exam_number
         st.room_no = norm_room(r.get('room')) or None
@@ -127,6 +145,15 @@ def apply_arrangement(affair, rows, room_locs, replace=True):
             st.seat_no = int(str(r.get('seat')).strip()) if str(r.get('seat') or '').strip() else None
         except ValueError:
             st.seat_no = None
+        if r.get('fixed_room'):                       # 编排输入：固定考场/座号、自定义考号
+            st.fixed_room = norm_room(r['fixed_room'])
+        if str(r.get('fixed_seat') or '').strip():
+            try:
+                st.fixed_seat = int(str(r['fixed_seat']).strip())
+            except ValueError:
+                pass
+        if r.get('custom_number'):
+            st.custom_number = r['custom_number']
     removed = 0
     if replace:
         for no, st in list(exist.items()):
