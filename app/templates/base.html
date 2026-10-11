@@ -100,7 +100,7 @@
         }
         /* ===== v1.19.0 考试态：左侧深色侧栏 → 独立悬浮卡片（风格参考轻量描边菜单） ===== */
         .sidebar.sidebar-float {
-            /* v1.19.22.0 垂直居中：top:50% + translateY(-50%)，不再贴顶也不掉底 */
+            /* v1.19.23.0 垂直居中：top:50% + translateY(-50%)，不再贴顶也不掉底 */
             top: 50%; transform: translateY(-50%); bottom: auto;
             left: 10px;
             width: calc(var(--sidebar-width) - 20px);
@@ -148,7 +148,7 @@
         }
         .sidebar-float .efn-group:hover { background: #e2e8f0; }
         .sidebar-float .efn-group .bi { font-size: 11px; color: #94a3b8; }
-        /* v1.19.22.0：AI 智能导入移到侧栏最下方（进阶入口），用分隔线区分 */
+        /* v1.19.23.0：AI 智能导入移到侧栏最下方（进阶入口），用分隔线区分 */
         .sidebar-float .efn-ai {
             margin-top: 6px; border-top: 1px solid #f1f5f9; padding-top: 8px;
         }
@@ -389,7 +389,7 @@
                     {% endif %}
                 </div>
                 {% endif %}
-                {# v1.19.22.0：AI 智能导入移到侧栏最下方（进阶入口）；移除「下一步」提示（用户：无用） #}
+                {# v1.19.23.0：AI 智能导入移到侧栏最下方（进阶入口）；移除「下一步」提示（用户：无用） #}
                 <a class="efn-item efn-ai {% if request.endpoint and request.endpoint.startswith('grades.exam_ai_import') %}active{% endif %}" data-nav="ai"
                    href="{{ url_for('grades.exam_ai_import', exam_id=EN.exam_id) }}">AI 智能导入</a>
             </div>
@@ -407,8 +407,8 @@
                 <i class="bi bi-person-vcard"></i>个人成绩查询
             </a>
             {% endif %}
-            {# v1.19.22.0 移除「分数修改记录」全局入口：它属于单场考试的数据，只在该场成绩单页右上角进入 #}
-            {# v1.19.22.0 移除「毕业生成绩（二期）」入口：暂无用处，后期单独做毕业生数据库 #}
+            {# v1.19.23.0 移除「分数修改记录」全局入口：它属于单场考试的数据，只在该场成绩单页右上角进入 #}
+            {# v1.19.23.0 移除「毕业生成绩（二期）」入口：暂无用处，后期单独做毕业生数据库 #}
 
             {# v1.19.0 基础配置：长期基础数据，不属于四段流程，默认折叠 #}
             {% set _cfg_eps = ('grades.subject_mgmt', 'grades.band_templates_page',
@@ -628,7 +628,7 @@
 
         {% if current_user.is_authenticated %}
         <footer class="text-center text-muted small mt-4 pt-3 border-top">
-            StuLink v1.19.22.0（2026-10-09） · © 2026 @zkxxzf · 感谢协作开发 @Sakaay
+            StuLink v1.19.23.0（2026-10-09） · © 2026 @zkxxzf · 感谢协作开发 @Sakaay
         </footer>
         {% endif %}
     </div>
