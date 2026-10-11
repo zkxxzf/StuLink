@@ -23,10 +23,13 @@
     {% for s in subjects %}
     {% set cell = stu.subjects.get(s) %}
     {% set unsel = s in (stu.unselected or []) %}
-    {# v1.19.7.0：有成绩的单科才是可点的 score-cell；缺考黄色高亮但不可点；未选灰字 #}
-    <td class="text-end small {{ 'text-muted' if unsel else ('table-warning' if cell is none else 'score-cell') }}"
+    {% set base = '点击修改（赋分/原始分）' if can_edit_scores else '赋分/原始分' %}
+    {# v1.19.7.0：有成绩且具改分权限的单科才是可点的 score-cell；缺考黄色高亮但不可点；未选灰字 #}
+    <td class="text-end small {{ 'text-muted' if unsel else ('table-warning' if cell is none else ('score-cell' if can_edit_scores else '')) }}"
         data-sid="{{ cell.id if cell else '' }}"
-        title="{{ '未选（不在该生选科组合内）' if unsel else ('缺考（无该科成绩）' if cell is none else '点击修改' + ('｜原始分 ' ~ cell.raw if cell.raw is not none else '')) }}">
+        data-score="{{ cell.score if cell and cell.score is not none else '' }}"
+        data-raw="{{ cell.raw if cell and cell.raw is not none else '' }}"
+        title="{{ '未选（不在该生选科组合内）' if unsel else ('缺考（无该科成绩）' if cell is none else (base + ('｜原始分 ' ~ cell.raw if cell.raw is not none else ''))) }}">
         {{ cell.score if cell else ('未选' if unsel else '缺') }}
         {% if cell and cell.raw is not none %}
         <span class="d-block text-muted small">原{{ cell.raw }}</span>

@@ -352,6 +352,7 @@ def exam_detail(exam_id):
                            subjects=SUBJECTS, status_label=EXAM_STATUS_LABEL,
                            import_info=info, steps=steps, next_step=next_step,
                            full_marks=exam.full_marks(),
+                           can_edit_scores=current_user.has_perm('grades.score_edit'),
                            classes=classes, cur_class=cur_class,
                            page=page, total_pages=total_pages, total=total, size=size)
 
@@ -368,7 +369,8 @@ def exam_scores_page(exam_id):
     students, _page, _total_pages, _total = _exam_page_rows(
         exam_id, page, size, class_name=cur_class or None)
     return render_template('grades/exam_detail_rows.html',
-                           students=students, subjects=SUBJECTS)
+                           students=students, subjects=SUBJECTS,
+                           can_edit_scores=current_user.has_perm('grades.score_edit'))
 
 
 def _safe_int(val, default):
@@ -403,64 +405,97 @@ def exam_rename(exam_id):
     return jsonify(success=True, message=f'考试名称已更新为「{name}」')
 
 
+def _recalc_after_edit(exam_id):
+    """改分后立即重算整场排名并把状态复位（不再留「待重算」）。返回重算行数。"""
+    n = ranking.recalc_exam(exam_id)
+    exam = Exam.query.get(exam_id)
+    if exam is not None:
+        exam.status = 'imported'
+    return n
+
+
 @bp.route('/exams/<int:exam_id>/score/<int:score_id>', methods=['POST'])
 @login_required
 @perm_required('grades.edit')
+@perm_required('grades.score_edit')
 def score_update(exam_id, score_id):
-    assert_exam_visible(exam_id)          # H-4
+    """单科改分（v1.19.7.0）
+
+    · 赋分（score）与原始分（raw_score）都可改，提交哪个改哪个；
+    · 两者都提交为空 = 该科缺考（删除该科）；
+    · 改完自动重算整场排名（不再让用户手点）。
+    """
+    exam = assert_exam_visible(exam_id)          # H-4
     row = ExamScore.query.filter_by(id=score_id, exam_id=exam_id).first_or_404()
-    # v1.19.7.0：总分由各科自动汇总，禁止直接改（避免总分与单科不一致）
+    # 总分由各科自动汇总，禁止直接改（避免总分与单科不一致）
     if row.subject == TOTAL_SUBJECT:
         flash('总分由各科成绩自动汇总，不能直接修改，请修改对应的单科成绩', 'danger')
         return redirect(url_for('grades.exam_detail', exam_id=exam_id))
+
+    limit = exam.full_marks().get(row.subject, 100)
+    changed = {}
     try:
-        val = (request.form.get('score') or '').strip()
-        if val == '':
-            # 空分数提交直接按缺考删除（与提示语一致），并联动重算总分行
-            no = row.student_no
-            db.session.delete(row)
-            store_service.refresh_student_total(Exam.query.get(exam_id), no)
-            _mark_dirty(exam_id)
-            db.session.commit()
-            invalidate_exam_cache(exam_id)
-            flash('该科成绩已删除（视为缺考），请点击“重新计算排名”', 'warning')
-            return redirect(url_for('grades.exam_detail', exam_id=exam_id))
-        score = float(val)
-        fm = Exam.query.get(exam_id).full_marks()
-        limit = fm.get(row.subject, 100)
-        if score < 0 or score > limit + 0.5:
-            flash(f'分数 {score} 超出范围(0~{limit})', 'danger')
-            return redirect(url_for('grades.exam_detail', exam_id=exam_id))
+        for field, label in (('score', '赋分'), ('raw_score', '原始分')):
+            if field not in request.form:
+                continue
+            raw = (request.form.get(field) or '').strip()
+            if raw == '':
+                changed[field] = None
+                continue
+            val = float(raw)
+            if val < 0 or val > limit + 0.5:
+                flash(f'{label} {val} 超出范围(0~{limit})', 'danger')
+                return redirect(url_for('grades.exam_detail', exam_id=exam_id))
+            changed[field] = val
     except ValueError:
         flash('分数格式不正确', 'danger')
         return redirect(url_for('grades.exam_detail', exam_id=exam_id))
-    row.score = score
-    # 单科改分后同步重算该生总分行（总分 = 各科之和）
-    store_service.refresh_student_total(Exam.query.get(exam_id), row.student_no)
-    _mark_dirty(exam_id)
+
+    # 赋分与原始分都清空 → 视为缺考，删除该科
+    if changed.get('score', 1) is None and changed.get('raw_score', 1) is None:
+        no = row.student_no
+        db.session.delete(row)
+        store_service.refresh_student_total(exam, no)
+        n = _recalc_after_edit(exam_id)
+        db.session.commit()
+        invalidate_exam_cache(exam_id)
+        tab_service.clear_exam_cache(exam_id)
+        flash(f'该科成绩已删除（视为缺考），排名已自动重算（{n} 条）', 'warning')
+        return redirect(url_for('grades.exam_detail', exam_id=exam_id))
+
+    for field, val in changed.items():
+        setattr(row, field, val)
+    store_service.refresh_student_total(exam, row.student_no)   # 总分 = 各科之和
+    n = _recalc_after_edit(exam_id)
     db.session.commit()
     invalidate_exam_cache(exam_id)
-    flash('成绩已修改，请点击“重新计算排名”', 'warning')
+    tab_service.clear_exam_cache(exam_id)
+    log_operation(current_user, '修改', '成绩', exam_id,
+                  f'{row.student_name or row.student_no} {row.subject} 改分（排名已重算）',
+                  module='grades')
+    flash(f'成绩已修改，排名已自动重算（{n} 条）', 'success')
     return redirect(url_for('grades.exam_detail', exam_id=exam_id))
 
 
 @bp.route('/exams/<int:exam_id>/score/<int:score_id>/delete', methods=['POST'])
 @login_required
 @perm_required('grades.edit')
+@perm_required('grades.score_edit')
 def score_delete(exam_id, score_id):
-    assert_exam_visible(exam_id)          # H-4
+    exam = assert_exam_visible(exam_id)          # H-4
     row = ExamScore.query.filter_by(id=score_id, exam_id=exam_id).first_or_404()
-    # v1.19.7.0：总分不可单独删除（它随各科自动汇总）
+    # 总分不可单独删除（它随各科自动汇总）
     if row.subject == TOTAL_SUBJECT:
         flash('总分由各科成绩自动汇总，不能直接操作，请修改对应的单科成绩', 'danger')
         return redirect(url_for('grades.exam_detail', exam_id=exam_id))
     no = row.student_no
     db.session.delete(row)
-    store_service.refresh_student_total(Exam.query.get(exam_id), no)
-    _mark_dirty(exam_id)
+    store_service.refresh_student_total(exam, no)
+    n = _recalc_after_edit(exam_id)
     db.session.commit()
     invalidate_exam_cache(exam_id)
-    flash('该科成绩已删除（视为缺考），请点击“重新计算排名”', 'warning')
+    tab_service.clear_exam_cache(exam_id)
+    flash(f'该科成绩已删除（视为缺考），排名已自动重算（{n} 条）', 'warning')
     return redirect(url_for('grades.exam_detail', exam_id=exam_id))
 
 
@@ -533,12 +568,6 @@ def exam_delete(exam_id):
         return jsonify(success=True, message=msg)
     flash(f'考试「{exam_name}」及全部成绩已删除', 'success')
     return redirect(url_for('grades.exams_list'))
-
-
-def _mark_dirty(exam_id):
-    exam = Exam.query.get(exam_id)
-    if exam and exam.status == 'imported':
-        exam.status = 'dirty'
 
 
 # ==================== 成绩导入向导 ====================

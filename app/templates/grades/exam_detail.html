@@ -28,7 +28,8 @@
         · {{ exam.exam_type or '其他' }}
         · <span class="badge bg-light text-dark border" title="本场划线/排名/分析采用的分数口径">{{ exam.score_mode_label() }}</span></span>
     <div class="ms-auto d-flex gap-2">
-        {% if exam.status != 'imported' %}
+        {# v1.19.7.0：已导入/待重算都要给「重新计算排名」，否则 dirty 状态下按钮消失找不着 #}
+        {% if exam.status not in ('imported', 'dirty') %}
         <a href="{{ url_for('grades.exam_import', exam_id=exam.id) }}" class="btn btn-primary btn-sm">
             <i class="bi bi-upload"></i> 导入成绩
         </a>
@@ -38,7 +39,8 @@
         </a>
         <form method="post" action="{{ url_for('grades.exam_recalc', exam_id=exam.id) }}">
             <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-            <button type="submit" class="btn btn-outline-warning btn-sm" title="单条修改后需重算">
+            <button type="submit" class="btn btn-outline-warning btn-sm"
+                    title="改分后系统会自动重算，此处用于手动补算">
                 <i class="bi bi-arrow-repeat"></i> 重新计算排名
             </button>
         </form>
@@ -101,7 +103,10 @@
         <div class="d-flex align-items-center flex-wrap gap-2">
             <h6 class="mb-0"><i class="bi bi-people"></i> 成绩单
                 {% if cur_class %}（{{ cur_class }} · {{ total }} 人）{% else %}（{{ total }} 人）{% endif %}</h6>
-            <span class="text-muted small">点击<b>单科</b>分数可修改（弹窗二次确认、按满分校验；总分由各科自动汇总，不可直接改）；
+            <span class="text-muted small">
+                {% if can_edit_scores %}
+                点击<b>单科</b>分数可修改赋分/原始分（弹窗二次确认、按满分校验，改完自动重算排名）；总分由各科自动汇总，不可直接改；
+                {% endif %}
                 <span class="text-muted">「未选」= 不在该生选科组合内（不计缺考）</span></span>
         </div>
         {# v1.19.0 按班级查看：服务端筛选（链接可分享/收藏），不选=全部 #}
@@ -152,10 +157,13 @@
                 {% for s in subjects %}
                 {% set cell = stu.subjects.get(s) %}
                 {% set unsel = s in (stu.unselected or []) %}
-                {# v1.19.7.0：有成绩的单科才是可点的 score-cell；缺考黄色高亮但不可点；未选灰字 #}
-                <td class="text-end small {{ 'text-muted' if unsel else ('table-warning' if cell is none else 'score-cell') }}"
+                {% set base = '点击修改（赋分/原始分）' if can_edit_scores else '赋分/原始分' %}
+                {# v1.19.7.0：有成绩且具改分权限的单科才是可点的 score-cell；缺考黄色高亮但不可点；未选灰字 #}
+                <td class="text-end small {{ 'text-muted' if unsel else ('table-warning' if cell is none else ('score-cell' if can_edit_scores else '')) }}"
                     data-sid="{{ cell.id if cell else '' }}"
-                    title="{{ '未选（不在该生选科组合内）' if unsel else ('缺考（无该科成绩）' if cell is none else '点击修改' + ('｜原始分 ' ~ cell.raw if cell.raw is not none else '')) }}">
+                    data-score="{{ cell.score if cell and cell.score is not none else '' }}"
+                    data-raw="{{ cell.raw if cell and cell.raw is not none else '' }}"
+                    title="{{ '未选（不在该生选科组合内）' if unsel else ('缺考（无该科成绩）' if cell is none else (base + ('｜原始分 ' ~ cell.raw if cell.raw is not none else ''))) }}">
                     {{ cell.score if cell else ('未选' if unsel else '缺') }}
                     {% if cell and cell.raw is not none %}
                     <span class="d-block text-muted small">原{{ cell.raw }}</span>
@@ -220,7 +228,7 @@
 
 {# v1.19.7.0 单科改分：弹窗二次确认 + 满分校验（总分不可改） #}
 <div class="modal fade" id="scoreModal" tabindex="-1">
-    <div class="modal-dialog modal-dialog-centered modal-sm">
+    <div class="modal-dialog modal-dialog-centered">
         <div class="modal-content">
             <div class="modal-header py-2">
                 <h6 class="modal-title" id="scTitle">修改单科分数</h6>
@@ -228,8 +236,17 @@
             </div>
             <div class="modal-body">
                 <div class="small text-muted mb-2" id="scWho"></div>
-                <label class="form-label small mb-1">新分数（0 ~ <span id="scLimit">100</span>）</label>
-                <input type="number" step="0.5" min="0" class="form-control form-control-sm" id="scInput">
+                <div class="row g-2">
+                    <div class="col-6">
+                        <label class="form-label small mb-1">赋分（主分，0~<span id="scLimit">100</span>）</label>
+                        <input type="number" step="0.5" min="0" class="form-control form-control-sm" id="scInput">
+                    </div>
+                    <div class="col-6">
+                        <label class="form-label small mb-1">原始分（可空）</label>
+                        <input type="number" step="0.5" min="0" class="form-control form-control-sm" id="scRaw">
+                    </div>
+                </div>
+                <div class="form-text text-muted mt-1">赋分与原始分都可修改；改完自动重算排名。</div>
                 <div class="form-text text-danger d-none" id="scErr"></div>
                 <div class="form-check mt-2">
                     <input class="form-check-input" type="checkbox" id="scAbsent">
@@ -303,7 +320,7 @@ $(function(){
             });
     }
 
-    /* ---------- 单科改分：弹窗二次确认 + 满分校验（总分由各科汇总，不可改） ---------- */
+    /* ---------- 单科改分：弹窗二次确认 + 满分校验（赋分/原始分都可改；总分不可改） ---------- */
     var scCell = null, scSid = null;
 
     // 事件委托绑在表上：AJAX 局部刷新 tbody 后依然有效，无需逐个重新绑定
@@ -314,13 +331,12 @@ $(function(){
             scCell = td; scSid = sid;
             var label = td.closest('table').find('th').eq(td.index()).text().trim() || '分数';
             var row = td.closest('tr');
-            var cur = td.clone().children().remove().end().text().trim();  // 去掉「原xx」小字
-            if(cur === '—' || cur === '缺'){ cur = ''; }
             var limit = FULL_MARKS[label];
             $('#scTitle').text('修改「' + label + '」分数');
             $('#scWho').text('学号 ' + (row.data('no') || '') + '　' + row.find('td').eq(1).text().trim());
             $('#scLimit').text(limit != null ? limit : '—');
-            $('#scInput').val(cur).attr('max', limit != null ? limit : '');
+            $('#scInput').val(td.attr('data-score') || '').attr('max', limit != null ? limit : '');
+            $('#scRaw').val(td.attr('data-raw') || '').attr('max', limit != null ? limit : '');
             $('#scAbsent').prop('checked', false);
             $('#scErr').addClass('d-none').text('');
             $('#scoreModal').modal('show');
@@ -328,6 +344,17 @@ $(function(){
     }
 
     function scShowErr(t){ $('#scErr').removeClass('d-none').text(t); }
+
+    // 校验一个输入：空 → 返回 null；非法/越界 → 抛错（由调用方提示）
+    function scRead(sel, label, limit){
+        var v = $.trim($(sel).val());
+        if(v === ''){ return null; }
+        var num = Number(v);
+        if(!isFinite(num)){ throw new Error(label + ' 请输入数字'); }
+        if(num < 0){ throw new Error(label + ' 不能小于 0'); }
+        if(limit != null && num > limit){ throw new Error(label + ' 不能超过满分 ' + limit); }
+        return num;
+    }
 
     $('#scSave').on('click', function(){
         if(!scSid){ return; }
@@ -344,18 +371,23 @@ $(function(){
                 .done(done).fail(function(){ reset(); scShowErr('操作失败，请重试'); });
             return;
         }
-        var v = $.trim($('#scInput').val());
-        if(v === ''){ reset(); scShowErr('请输入分数，或勾选“该科缺考”'); return; }
-        var num = Number(v);
-        if(!isFinite(num)){ reset(); scShowErr('请输入数字'); return; }
-        if(num < 0){ reset(); scShowErr('分数不能小于 0'); return; }
-        if(limit != null && num > limit){ reset(); scShowErr('分数不能超过满分 ' + limit); return; }
-        $.post('/grades/exams/' + examId + '/score/' + scSid, {score: v})
+        var sc, raw;
+        try {
+            sc = scRead('#scInput', '赋分', limit);
+            raw = scRead('#scRaw', '原始分', limit);
+        } catch(e) {
+            reset(); scShowErr(e.message); return;
+        }
+        if(sc === null && raw === null){
+            reset(); scShowErr('请至少填写赋分或原始分，或勾选“该科缺考”'); return;
+        }
+        $.post('/grades/exams/' + examId + '/score/' + scSid,
+               {score: (sc === null ? '' : sc), raw_score: (raw === null ? '' : raw)})
             .done(done).fail(function(){ reset(); scShowErr('保存失败，请重试'); });
     });
 
     // 弹窗内回车 = 保存
-    $('#scInput').on('keydown', function(e){
+    $('#scInput, #scRaw').on('keydown', function(e){
         if(e.key === 'Enter'){ e.preventDefault(); $('#scSave').trigger('click'); }
     });
 

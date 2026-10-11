@@ -57,6 +57,10 @@ MODULES = [
             {'key': 'manage', 'name': '教学管理',
              'read': [],
              'write': ['grades.edit', 'grades.import', 'grades.settings']},
+            # v1.19.7.0：成绩单改分单独授权（默认只给管理员与教务处/考务管理员，
+            # 避免年级长等「看得到成绩单」就能改分）
+            {'key': 'score_edit', 'name': '成绩修改（改分）',
+             'read': [], 'write': ['grades.score_edit']},
             {'key': 'teachers', 'name': '任课映射',
              'read': [], 'write': ['grades.teachers']},
             {'key': 'query', 'name': '个人成绩查询',
