@@ -1,0 +1,236 @@
+{% extends "base.html" %}
+{% block title %}考场维护{% endblock %}
+{% block content %}
+<div class="d-flex align-items-center justify-content-between mb-3">
+    <h4 class="fw-bold mb-0"><i class="bi bi-door-open"></i> 考场维护</h4>
+    <button class="btn btn-sm btn-primary" onclick="openRoom()">
+        <i class="bi bi-plus-lg"></i> 新增房间
+    </button>
+</div>
+
+<div class="alert alert-light border small mb-3">
+    房间来自「考场房间库」（跨批次共享，共 <strong>{{ rooms|length }}</strong> 个）。
+    分组只用于归集与后续建场筛选；<strong>改动不会影响任何历史场次的考场安排</strong>
+    （每场考试的考场彼此独立）。一个房间可同时归属多个分组（不同年级考试时间错开，可共用）。
+</div>
+
+{# ===== 分组卡片 ===== #}
+<div class="row g-3 mb-2">
+    {% for g in groups %}
+    <div class="col-md-4">
+        <div class="card h-100">
+            <div class="card-header d-flex justify-content-between align-items-center py-2">
+                <span class="fw-bold">
+                    <i class="bi bi-collection"></i> {{ g.name }}
+                    <span class="text-muted small">（{{ g.rooms|length }}）</span>
+                </span>
+                <span class="btn-group">
+                    <button class="btn btn-sm btn-outline-secondary py-0" title="重命名"
+                            onclick="renameGroup({{ g.id }}, '{{ g.name|e }}')">
+                        <i class="bi bi-pencil"></i>
+                    </button>
+                    <button class="btn btn-sm btn-outline-danger py-0" title="删除分组"
+                            onclick="delGroup({{ g.id }}, '{{ g.name|e }}')">
+                        <i class="bi bi-trash"></i>
+                    </button>
+                </span>
+            </div>
+            <div class="card-body p-2">
+                {% if g.rooms %}
+                {% for r in g.rooms %}
+                <span class="badge text-bg-light border me-1 mb-1">
+                    {{ r.location }}
+                    <a href="javascript:;" class="text-danger ms-1"
+                       onclick="removeFromGroup({{ r.id }}, {{ g.id }})" title="移出该分组">×</a>
+                </span>
+                {% endfor %}
+                {% else %}
+                <span class="text-muted small">该分组暂无房间</span>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+    {% endfor %}
+</div>
+
+<div class="mb-3">
+    <button class="btn btn-sm btn-outline-primary" onclick="addGroup()">
+        <i class="bi bi-plus-lg"></i> 新增分组
+    </button>
+</div>
+
+{# ===== 全部房间 ===== #}
+<div class="card">
+    <div class="card-header py-2 fw-bold">全部房间</div>
+    <div class="card-body p-0">
+        <table class="table table-sm table-hover mb-0">
+            <thead class="table-light">
+                <tr>
+                    <th style="width:140px;">位置</th>
+                    <th>备注</th>
+                    <th style="width:300px;">所属分组</th>
+                    <th style="width:160px;">操作</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for r in rooms %}
+                <tr>
+                    <td class="fw-bold">{{ r.location }}</td>
+                    <td class="text-muted small">{{ r.note }}</td>
+                    <td>
+                        {% for g in groups %}
+                        {% if g.id in r.group_ids %}
+                        <span class="badge text-bg-primary">{{ g.name }}</span>
+                        {% endif %}
+                        {% endfor %}
+                        {% if not r.group_ids %}<span class="text-muted small">未分组</span>{% endif %}
+                    </td>
+                    <td>
+                        <button class="btn btn-sm btn-outline-primary py-0" onclick="openRoom({{ r.id }})">编辑</button>
+                        <button class="btn btn-sm btn-outline-secondary py-0" onclick="openGroups({{ r.id }})">分组</button>
+                        <button class="btn btn-sm btn-outline-danger py-0" onclick="delRoom({{ r.id }})">删除</button>
+                    </td>
+                </tr>
+                {% endfor %}
+                {% if not rooms %}
+                <tr><td colspan="4" class="text-center text-muted py-4">考场房间库为空，点右上角「新增房间」添加。</td></tr>
+                {% endif %}
+            </tbody>
+        </table>
+    </div>
+</div>
+
+{# ===== 房间编辑弹窗 ===== #}
+<div class="modal fade" id="roomModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header py-2">
+                <h6 class="modal-title fw-bold" id="roomModalTitle">新增房间</h6>
+                <button class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <input type="hidden" id="roomId">
+                <div class="mb-2">
+                    <label class="form-label small mb-0">位置 <span class="text-danger">*</span></label>
+                    <input class="form-control form-control-sm" id="roomLoc" placeholder="如 北202 / 教学楼A-101">
+                </div>
+                <div class="mb-2">
+                    <label class="form-label small mb-0">备注</label>
+                    <input class="form-control form-control-sm" id="roomNote" placeholder="如 2楼·北侧">
+                </div>
+                <div class="form-text">容量不在这里设置，改在各场考试的「考务安排」里（同一房间不同考试容量可能不同）。</div>
+            </div>
+            <div class="modal-footer py-2">
+                <button class="btn btn-sm btn-secondary" data-bs-dismiss="modal">取消</button>
+                <button class="btn btn-sm btn-primary" onclick="saveRoom()">保存</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+{# ===== 分组设置弹窗 ===== #}
+<div class="modal fade" id="groupsModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header py-2">
+                <h6 class="modal-title fw-bold" id="groupsModalTitle">设置所属分组</h6>
+                <button class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body" id="groupsModalBody"></div>
+            <div class="modal-footer py-2">
+                <button class="btn btn-sm btn-secondary" data-bs-dismiss="modal">取消</button>
+                <button class="btn btn-sm btn-primary" onclick="saveGroups()">保存</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+var ROOMS = {{ rooms | tojson }};
+var GROUPS = {{ group_ids | tojson }};
+var GROUP_NAMES = {{ group_names | tojson }};
+var URL_ROOMS = '{{ url_for("grades.exam_rooms") }}';            // /grades/rooms
+var URL_ROOM_SAVE = '{{ url_for("grades.exam_room_save") }}';
+var URL_GROUP_SAVE = '{{ url_for("grades.exam_room_group_save") }}';
+
+function roomById(id){ return ROOMS.find(function(r){ return r.id === id; }); }
+
+function post(url, data, cb){
+    $.post(url, data).done(function(d){
+        if(d && d.ok){ if(cb) cb(d); }
+        else { alert((d && d.msg) || '操作失败'); }
+    }).fail(function(){ alert('请求失败'); });
+}
+
+// ---- 房间新增/编辑 ----
+var roomModal;
+function openRoom(id){
+    roomModal = roomModal || new bootstrap.Modal(document.getElementById('roomModal'));
+    var r = id ? roomById(id) : null;
+    document.getElementById('roomModalTitle').textContent = r ? '编辑房间' : '新增房间';
+    document.getElementById('roomId').value = r ? r.id : '';
+    document.getElementById('roomLoc').value = r ? r.location : '';
+    document.getElementById('roomNote').value = r ? r.note : '';
+    roomModal.show();
+}
+function saveRoom(){
+    post(URL_ROOM_SAVE, {
+        lib_id: document.getElementById('roomId').value,
+        location: document.getElementById('roomLoc').value,
+        note: document.getElementById('roomNote').value
+    }, function(){ location.reload(); });
+}
+function delRoom(id){
+    var r = roomById(id);
+    if(!confirm('删除房间「' + (r ? r.location : id) + '」？\n（只影响房间库，不影响历史场次考场）')) return;
+    post(URL_ROOMS + '/' + id + '/delete', {}, function(){ location.reload(); });
+}
+
+// ---- 分组设置（多选）----
+var groupsModal, curRoomId;
+function openGroups(id){
+    curRoomId = id;
+    var r = roomById(id);
+    groupsModal = groupsModal || new bootstrap.Modal(document.getElementById('groupsModal'));
+    document.getElementById('groupsModalTitle').textContent = '「' + (r ? r.location : '') + '」所属分组';
+    var html = '';
+    for(var i=0;i<GROUPS.length;i++){
+        var gid = GROUPS[i];
+        var checked = (r && r.group_ids.indexOf(gid) >= 0) ? ' checked' : '';
+        html += '<div class="form-check"><input class="form-check-input" type="checkbox" value="' + gid +
+                '" id="gchk' + gid + '"' + checked + '>' +
+                '<label class="form-check-label" for="gchk' + gid + '">' + GROUP_NAMES[i] + '</label></div>';
+    }
+    document.getElementById('groupsModalBody').innerHTML = html || '<span class="text-muted">暂无分组</span>';
+    groupsModal.show();
+}
+function saveGroups(){
+    var ids = [];
+    $('#groupsModalBody input:checked').each(function(){ ids.push(this.value); });
+    post(URL_ROOMS + '/' + curRoomId + '/groups', {group_ids: ids.join(',')},
+         function(){ location.reload(); });
+}
+function removeFromGroup(lid, gid){
+    var r = roomById(lid);
+    var ids = (r ? r.group_ids : []).filter(function(x){ return x !== gid; });
+    post(URL_ROOMS + '/' + lid + '/groups', {group_ids: ids.join(',')},
+         function(){ location.reload(); });
+}
+
+// ---- 分组增删改 ----
+function addGroup(){
+    var name = prompt('新分组名称（如 高三考场）');
+    if(!name) return;
+    post(URL_GROUP_SAVE, {name: name}, function(){ location.reload(); });
+}
+function renameGroup(gid, oldName){
+    var name = prompt('修改分组名称', oldName);
+    if(!name || name === oldName) return;
+    post(URL_GROUP_SAVE, {group_id: gid, name: name}, function(){ location.reload(); });
+}
+function delGroup(gid, name){
+    if(!confirm('删除分组「' + name + '」？\n（只解除归集关系，房间本身保留）')) return;
+    post(URL_ROOMS + '/groups/' + gid + '/delete', {}, function(){ location.reload(); });
+}
+</script>
+{% endblock %}
