@@ -1,4 +1,4 @@
-# StuLink v1.19.7.0 2026-10-10
+# StuLink v1.19.8.0 2026-10-10
 # 模块权限映射：功能权限表格（身份 × 子功能 × 三档）与细粒度 menu_keys 的转换层
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 """模块权限映射（转换层）
@@ -57,7 +57,7 @@ MODULES = [
             {'key': 'manage', 'name': '教学管理',
              'read': [],
              'write': ['grades.edit', 'grades.import', 'grades.settings']},
-            # v1.19.7.0：成绩单改分单独授权（默认只给管理员与教务处/考务管理员，
+            # v1.19.8.0：成绩单改分单独授权（默认只给管理员与教务处/考务管理员，
             # 避免年级长等「看得到成绩单」就能改分）
             {'key': 'score_edit', 'name': '成绩修改（改分）',
              'read': [], 'write': ['grades.score_edit']},
