@@ -543,17 +543,18 @@ def score_delete(exam_id, score_id):
 @bp.route('/score-changes')
 @login_required
 def score_changes():
-    """分数修改记录（v1.19.13.0）：只读，**任何登录用户**都可查（用户要求「所有人可以查到」）
+    """分数修改记录（v1.19.14.0）：**只看某一场考试**
 
-    ?exam=<id> 只看某一场；不传=全部考试（按时间倒序）。
+    该记录属于单场考试的数据，入口只有一处：成绩单页右上角「分数修改记录」按钮
+    （带 ?exam=<id>）。不再提供跨考试视图，也不在左侧栏出现；缺 ?exam= 时回考试列表。
     """
     raw = (request.args.get('exam') or '').strip()
-    exam_id = int(raw) if raw.isdigit() else None
-    exam = Exam.query.get(exam_id) if exam_id else None
-    q = ScoreChangeLog.query
-    if exam is not None:
-        q = q.filter_by(exam_id=exam.id)
-    logs = (q.order_by(ScoreChangeLog.operated_at.desc(), ScoreChangeLog.id.desc())
+    exam = Exam.query.get(int(raw)) if raw.isdigit() else None
+    if exam is None:
+        flash('请从「考试详情 → 分数修改记录」进入', 'warning')
+        return redirect(url_for('grades.exams_list'))
+    logs = (ScoreChangeLog.query.filter_by(exam_id=exam.id)
+            .order_by(ScoreChangeLog.operated_at.desc(), ScoreChangeLog.id.desc())
             .limit(3000).all())
     return render_template('grades/score_changes.html', exam=exam, logs=logs)
 

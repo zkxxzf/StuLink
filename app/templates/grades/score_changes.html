@@ -1,24 +1,21 @@
 {% extends "base.html" %}
-{% block title %}分数修改记录 - 成绩管理{% endblock %}
+{% block title %}分数修改记录 - {{ exam.name }}{% endblock %}
 {% block content %}
 <div class="d-flex align-items-center mb-2 flex-wrap gap-2">
+    <a href="{{ url_for('grades.exam_detail', exam_id=exam.id) }}" class="btn btn-sm btn-outline-secondary">
+        <i class="bi bi-arrow-left"></i>
+    </a>
     <h5 class="mb-0"><i class="bi bi-clock-history"></i> 分数修改记录</h5>
-    {% if exam %}
     <span class="badge bg-secondary">{{ exam.grade }}</span>
     <span class="text-muted small">{{ exam.name }}</span>
-    <a href="{{ url_for('grades.score_changes') }}" class="btn btn-sm btn-outline-secondary">
-        <i class="bi bi-x-circle"></i> 看全部考试
-    </a>
-    {% else %}
-    <span class="text-muted small">全部考试</span>
-    {% endif %}
     <span class="text-muted small ms-auto">共 {{ logs|length }} 条</span>
 </div>
 
+{# v1.19.14.0：本页只属于这一场考试，入口仅成绩单页右上角按钮 #}
 <div class="alert alert-light border small py-2">
     <i class="bi bi-info-circle"></i>
-    本页记录**每一次改分/标记缺考**：谁、什么时候、改了哪场考试哪个学生的哪一科、改前改后各是多少。
-    记录只增不删，全校可查。
+    本页记录<b>本场考试</b>的每一次改分 / 标记缺考：谁、什么时候、改了哪个学生的哪一科、改前改后各是多少。
+    记录只增不删。
 </div>
 
 <div class="card">
@@ -27,7 +24,6 @@
             <thead class="table-light sticky-top">
             <tr>
                 <th style="width:150px;">时间</th>
-                <th>考试</th>
                 <th>学号</th>
                 <th>姓名</th>
                 <th>班级</th>
@@ -42,10 +38,6 @@
             {% for g in logs %}
             <tr>
                 <td class="small text-muted">{{ g.operated_at.strftime('%Y-%m-%d %H:%M:%S') if g.operated_at else '—' }}</td>
-                <td class="small">
-                    <a href="{{ url_for('grades.score_changes') }}?exam={{ g.exam_id }}"
-                       class="text-decoration-none">{{ g.exam_name or ('考试#%d' % g.exam_id) }}</a>
-                </td>
                 <td class="small">{{ g.student_no }}</td>
                 <td>{{ g.student_name or '—' }}</td>
                 <td>{{ g.class_name or '—' }}</td>
@@ -70,8 +62,8 @@
                 <td>{{ g.operator_name or '—' }}</td>
             </tr>
             {% else %}
-            <tr><td colspan="10" class="text-center text-muted py-5">
-                暂无分数修改记录。{% if exam %}本场考试{% else %}系统内{% endif %}还没有人改过分。
+            <tr><td colspan="9" class="text-center text-muted py-5">
+                本场考试还没有人修改过分数。
             </td></tr>
             {% endfor %}
             </tbody>
