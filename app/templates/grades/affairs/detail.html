@@ -88,14 +88,10 @@
             </div>
         </div>
     </div>
-    <!-- ===== 步骤① 学生名单 ===== -->
+    <!-- ===== 步骤① 学生名单（v1.19.37.0：名单统计 + 左右分栏） ===== -->
     <div class="tab-pane fade show active" id="t1">
-        {# v1.12.1 学生名单改为从学生库同步导入，不再走 Excel 重复导入 #}
-        {# v1.19.36.0 本步只做「名单维护」（用户口径）：
-           - 只显示 学号/姓名/班级/选科组合/参考，其余列（自定义考号/座号/考号）属后续步骤；
-           - 只允许「从学生库导入 / 加入学生」，取消「手动新增」与「编辑」（不允许在此改学生信息）；
-           - 「导入考生安排 / 考场位置」挪到步骤②（它导入的是考场位置/编排结果）；
-           - 名单次序：不参加考试的排在最上面（服务端已按 不参考 → 班级 → 性别 → 姓名 排序）。 #}
+        {# 本步只做「名单维护」：只允许从学生库同步/选取，不允许编辑学生信息；
+           左=参加考试、右=不参加考试，两侧都按「班级 → 姓氏」排序；上方给年级与各班统计 #}
         <div class="d-flex gap-2 mb-2 flex-wrap align-items-center">
             <button class="btn btn-primary btn-sm" onclick="syncStudents()">
                 <i class="bi bi-cloud-download"></i> 从学生库导入</button>
@@ -105,35 +101,83 @@
                 <i class="bi bi-trash"></i> 清空名单</button>
             <span class="small text-muted ms-1">
                 <i class="bi bi-info-circle"></i> 名单只从学生库同步/选取；不分班、已转出、已毕业等无班级学生不进入；
-                同步时会自动沿用上一场「不参加考试」的学生
+                同步时会自动沿用上一场「不参加考试」的学生；两侧均按 <b>班级 · 姓氏</b> 排序
             </span>
         </div>
-        <div class="card"><div class="table-responsive" style="max-height:60vh;overflow:auto">
-            <table class="table table-sm table-hover align-middle mb-0" id="stuTable">
-                <thead class="sticky-top bg-white">
-                <tr><th>学号</th><th>姓名</th><th>班级</th><th>选科组合</th>
-                    <th style="width:70px">参考</th><th class="text-end">操作</th></tr>
-                </thead>
-                <tbody>
-                {% for s in students %}
-                <tr{% if not s.is_attend %} class="table-warning"{% endif %}>
-                    <td>{{ s.student_no }}</td><td>{{ s.name }}</td><td>{{ s.class_name }}</td>
-                    <td>{{ s.subject_selection }}</td>
-                    {# 参考：点一下切换（本页不提供编辑学生信息，但「是否参考」需能手工修正） #}
-                    <td><span class="badge attend-toggle {{ 'bg-success' if s.is_attend else 'bg-secondary' }}"
-                              role="button" title="点击切换该生是否参加本场考试"
-                              data-sid="{{ s.id }}" data-attend="{{ 1 if s.is_attend else 0 }}"
-                              onclick="toggleAttend(this)">{{ '是' if s.is_attend else '否' }}</span></td>
-                    <td class="text-end">
-                        <button class="btn btn-sm btn-outline-danger py-0" onclick="delStu({{ s.id }})">删</button>
-                    </td>
-                </tr>
-                {% else %}
-                <tr><td colspan="6" class="text-center text-muted py-4">尚未导入学生。点「从学生库导入」一键同步本年级学籍学生。</td></tr>
-                {% endfor %}
-                </tbody>
-            </table>
-        </div></div>
+        {# 名单统计：年级汇总（常显）+ 各班明细（折叠） #}
+        <div class="card px-3 py-2 mb-2 small">
+            <div class="d-flex flex-wrap align-items-center gap-3">
+                <span class="fw-bold text-nowrap"><i class="bi bi-bar-chart"></i> 名单统计</span>
+                <span class="text-nowrap">年级：实际 <b>{{ grade_stat.total }}</b> 人 ·
+                    参加 <b class="text-success">{{ grade_stat.join }}</b> ·
+                    不参加 <b class="text-secondary">{{ grade_stat.skip }}</b></span>
+                <button class="btn btn-link btn-sm p-0 ms-auto text-nowrap" data-bs-toggle="collapse"
+                        data-bs-target="#clsStat" aria-expanded="false">各班明细
+                    <i class="bi bi-chevron-down small"></i></button>
+            </div>
+            <div class="collapse" id="clsStat">
+                <div class="table-responsive mt-2">
+                    <table class="table table-sm mb-0" style="max-width:520px">
+                        <thead><tr><th>班级</th><th class="text-end">实际人数</th>
+                            <th class="text-end">参加考试</th><th class="text-end">不参加</th></tr></thead>
+                        <tbody>
+                        {% for c in class_stats %}
+                        <tr><td>{{ c.name }}</td><td class="text-end">{{ c.total }}</td>
+                            <td class="text-end text-success">{{ c.join }}</td>
+                            <td class="text-end text-secondary">{{ c.skip }}</td></tr>
+                        {% else %}
+                        <tr><td colspan="4" class="text-center text-muted py-3">暂无学生</td></tr>
+                        {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+        {# 左右分栏名单：左=参加考试，右=不参加考试（按钮即在两侧间移动） #}
+        {% macro roster(rows, tid, title, icon, badge_cls, count, target, btn_cls, btn_text, tip, empty_msg) %}
+        <div class="card h-100">
+            <div class="card-header py-2 d-flex justify-content-between align-items-center">
+                <span class="fw-bold"><i class="bi {{ icon }}"></i> {{ title }}
+                    <span class="badge {{ badge_cls }} ms-1">{{ count }}</span></span>
+                <span class="text-muted small d-none d-md-inline">班级 · 姓氏</span>
+            </div>
+            <div class="table-responsive" style="max-height:56vh;overflow:auto">
+                <table class="table table-sm table-hover align-middle mb-0" id="{{ tid }}">
+                    <thead class="sticky-top bg-white"><tr>
+                        <th>学号</th><th>姓名</th><th>班级</th><th>选科组合</th>
+                        <th class="text-end">操作</th></tr></thead>
+                    <tbody>
+                    {% for s in rows %}
+                    <tr{% if not s.is_attend %} class="table-warning"{% endif %}>
+                        <td>{{ s.student_no }}</td><td>{{ s.name }}</td><td>{{ s.class_name }}</td>
+                        <td class="small text-muted">{{ s.subject_selection }}</td>
+                        <td class="text-end text-nowrap">
+                            <button class="btn btn-sm {{ btn_cls }} py-0" title="{{ tip }}"
+                                    onclick="toggleAttend({{ s.id }}, {{ target }})">{{ btn_text }}</button>
+                            <button class="btn btn-sm btn-outline-danger py-0"
+                                    onclick="delStu({{ s.id }})">删</button>
+                        </td>
+                    </tr>
+                    {% else %}
+                    <tr><td colspan="5" class="text-center text-muted py-4">{{ empty_msg }}</td></tr>
+                    {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+        {% endmacro %}
+        <div class="row g-2">
+            <div class="col-lg-6">
+                {{ roster(join_students, 'stuTable', '参加考试', 'bi-check-circle-fill', 'bg-success',
+                          grade_stat.join, 0, 'btn-outline-secondary', '→ 不参加',
+                          '把该生移到右侧「不参加考试」', '暂无参加考试的学生（点上方「从学生库导入」）') }}
+            </div>
+            <div class="col-lg-6">
+                {{ roster(skip_students, 'stuSkipTable', '不参加考试', 'bi-dash-circle', 'bg-secondary',
+                          grade_stat.skip, 1, 'btn-outline-success', '← 参加',
+                          '把该生移回左侧「参加考试」', '暂无「不参加考试」的学生') }}
+            </div>
+        </div>
     </div>
 
     <!-- ===== 步骤② 考场设置（v1.12.2 左右双列表：考场库 ↔ 本批次考场） ===== -->
@@ -567,15 +611,13 @@ function syncStudents(){
             else alert(d.msg);
         });
 }
-// v1.19.36.0 步骤①「参考」就地点一下切换（本页不允许编辑学生信息，但参考状态需能手工修正）
-function toggleAttend(el){
-    var on = (el.dataset.attend === '1') ? '0' : '1';
-    var fd = new FormData(); fd.append('is_attend', on);
-    fetch('/grades/affairs/'+AID+'/students/'+el.dataset.sid+'/attend',
+// v1.19.37.0 步骤① 左右分栏：把学生移到「参加 / 不参加」一侧（保存后刷新以重排与更新统计）
+function toggleAttend(sid, toAttend){
+    var fd = new FormData(); fd.append('is_attend', toAttend ? '1' : '0');
+    fetch('/grades/affairs/'+AID+'/students/'+sid+'/attend',
           {method:'POST', body:fd, headers:{'X-CSRFToken':csrf()}})
         .then(r=>r.json()).then(d=>{
             if(!d.ok){ alert(d.msg||'保存失败'); return; }
-            // 参考状态影响排序（不参考排最上面），保存后刷新以呈现新次序
             location.reload();
         });
 }

@@ -478,18 +478,33 @@ with app.test_client() as c:
     h2 = c.get(f'/grades/affairs/{_AFF_CUR}').get_data(as_text=True)
     tb2 = h2.split('id="stuTable"')[1].split('</table>')[0]
     hd2 = tb2.split('</thead>')[0]
-    check('考务步骤①：只显示名单列（无考号/座号）',
-          all(k in hd2 for k in ('学号', '姓名', '班级', '选科组合', '参考'))
-          and '考号' not in hd2 and '座号' not in hd2, hd2[:200])
     check('考务步骤①：无手动新增/编辑',
           'onclick="openStuModal' not in h2 and 'id="stuModal"' not in h2
           and '>编辑</button>' not in h2)
-    check('考务步骤①：不参考的学生排最上面',
-          re.findall(r'<td>(\d{8})</td>', tb2)[:1] == ['20250001'],
-          re.findall(r'<td>(\d{8})</td>', tb2)[:3])
-    # v1.19.36.0 不参考 = 整行标黄（含首列学号）；首列 sticky 的背景必须跟随行状态
-    check('考务步骤①：不参考学生整行标黄',
-          '<tr class="table-warning">' in tb2, tb2[:200])
+    # ---- v1.19.37.0 考务步骤① 左右分栏（左=参加/右=不参加）+ 名单统计 ----
+    check('考务步骤①：左右分栏（参加 / 不参加 两张表）',
+          '参加考试' in h2 and '不参加考试' in h2
+          and 'id="stuTable"' in h2 and 'id="stuSkipTable"' in h2)
+    check('考务步骤①：左表只含名单列（无考号/座号/参考）',
+          all(k in hd2 for k in ('学号', '姓名', '班级', '选科组合'))
+          and '考号' not in hd2 and '座号' not in hd2 and '参考' not in hd2, hd2[:200])
+    ts2 = h2.split('id="stuSkipTable"')[1].split('</table>')[0]
+    check('考务步骤①：不参加的学生在右表（不在左表）',
+          '20250001' in ts2 and '20250001' not in tb2)
+    check('考务步骤①：不参加学生整行标黄',
+          '<tr class="table-warning">' in ts2, ts2[:200])
+    check('考务步骤①：两侧可按「参加/不参加」互移',
+          'toggleAttend(' in h2 and '→ 不参加' in h2 and '← 参加' in h2)
+    check('考务步骤①：名单统计（年级汇总 + 各班明细）',
+          '名单统计' in h2 and '各班明细' in h2 and '年级：实际' in h2
+          and '实际人数' in h2)
+    # 排序：两侧均按 班级 → 姓氏（拼音）；fixture 中班级与学号/姓名同序，故断言学号升序
+    _ln = re.findall(r'<td>(\d{8})</td>', tb2)
+    _rn = re.findall(r'<td>(\d{8})</td>', ts2)
+    check('考务步骤①：两侧按班级·姓氏排序（学号升序）',
+          _ln == sorted(_ln) and _rn == sorted(_rn)
+          and _rn[:1] == ['20250001'] and '20250001' not in _ln,
+          (_ln[:3], _rn[:3]))
     check('首列 sticky 背景跟随行状态（整行标黄含学号列）',
           'var(--bs-table-bg, var(--bs-body-bg, #fff))' in h2)
 

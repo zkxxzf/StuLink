@@ -223,6 +223,21 @@ def affair_delete(aid):
 
 # ==================== 考务向导详情（含 5 个步骤 + 成绩关联） ====================
 
+def _class_sort_key(name):
+    """班级排序键：'02班'→(0,2,'02班')；无班号的（未分班等）排最后"""
+    digits = ''.join(ch for ch in (name or '') if ch.isdigit())
+    return (0, int(digits), name or '') if digits else (1, 0, name or '')
+
+
+def _student_sort_key(s):
+    """v1.19.37.0 名单排序键：班级 → 姓氏（姓名以姓氏开头，故用姓名拼音）→ 学号。
+
+    拼音不可用时退化为汉字本身，仍保持稳定次序。
+    """
+    from app.modules.grades.services.user_account import pinyin_of
+    return (s.class_name or '', (pinyin_of(s.name) or (s.name or '')), s.student_no or '')
+
+
 @bp.route('/affairs/<int:aid>')
 @login_required
 @perm_required('grades.edit')
@@ -230,21 +245,31 @@ def affair_detail(aid):
     affair = _get_affair_checked(aid)
     students = (AffairStudent.query.filter_by(affair_id=aid)
                 .order_by(AffairStudent.class_name, AffairStudent.student_no).all())
-    # v1.19.36.0 名单次序（用户口径）：不参加考试的排在最上面，其余按 班级 → 性别（男前女后）→ 姓名。
-    # AffairStudent 不存性别，按学号从学籍库取（本年级）。
-    _g_rank = {'男': 0, '女': 1}
-    gender_map = {s.student_number: _g_rank.get(s.gender or '', 2)
-                  for s in Student.query.filter_by(grade=affair.grade).all()}
-    students.sort(key=lambda s: (0 if not s.is_attend else 1, s.class_name or '',
-                                 gender_map.get(s.student_no, 2), s.name or ''))
+    # v1.19.37.0 名单次序（用户口径）：按「班级 → 姓氏」排序（不再把不参考的提到最上，
+    # 而是左右分栏展示：左=参加考试，右=不参加考试）
+    students.sort(key=_student_sort_key)
     rooms = (AffairRoom.query.filter_by(affair_id=aid)
              .order_by(AffairRoom.room_no).all())
-    scope_students = [s for s in students if s.is_attend]
+    join_students = [s for s in students if s.is_attend]          # 左栏：参加考试
+    skip_students = [s for s in students if not s.is_attend]      # 右栏：不参加考试
+    scope_students = join_students
     arranged = [s for s in scope_students if s.room_no]
-    # v1.19.36.0：步骤条状态用 —— 已生成考号的人数（AI 导入会带考号，此时步骤③应显示已完成）
+    # v1.19.37.0：步骤条状态用 —— 已生成考号的人数（AI 导入会带考号，此时步骤③应显示已完成）
     numbered = sum(1 for s in scope_students if s.exam_number)
 
     # v1.12.2 步骤⑤成绩关联 UI 已移除，不再查询考试与成绩（省去每次访问的无用查询）
+
+    # v1.19.37.0 名单统计：年级汇总 + 各班（实际 / 参加 / 不参加）
+    grade_stat = {'total': len(students), 'join': len(join_students),
+                  'skip': len(skip_students)}
+    per_class = {}
+    for s in students:
+        d = per_class.setdefault(s.class_name or '未分班',
+                                 {'total': 0, 'join': 0, 'skip': 0})
+        d['total'] += 1
+        d['join' if s.is_attend else 'skip'] += 1
+    class_stats = [dict(name=k, **v) for k, v in
+                   sorted(per_class.items(), key=lambda kv: _class_sort_key(kv[0]))]
 
     # v1.12.1 编排容量统计：学生总数/参考数、考场总数/总容量、各选科人数与可用容量差额
     stats = {
@@ -282,6 +307,8 @@ def affair_detail(aid):
                            affair=affair, students=students, rooms=rooms,
                            scope_students=scope_students, arranged=arranged,
                            numbered=numbered,
+                           join_students=join_students, skip_students=skip_students,
+                           grade_stat=grade_stat, class_stats=class_stats,
                            arranged_sorted=arranged_sorted,
                            room_subject_options=room_subject_options,
                            mode_label=MODE_LABEL,
