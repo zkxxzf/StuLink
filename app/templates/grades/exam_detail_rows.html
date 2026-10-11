@@ -12,7 +12,7 @@
     <td class="text-end c-meta {{ 'text-success' if stu.move is not none and stu.move < 0 else 'text-danger' if stu.move is not none and stu.move > 0 }}">
         {{ ('%+d' % stu.move) if stu.move is not none else '—' }}
     </td>
-    {# v1.19.19.0：总分移到语文（成绩区）前面；总分由各科自动汇总，不可点击修改 #}
+    {# v1.19.20.0：总分移到语文（成绩区）前面；总分由各科自动汇总，不可点击修改 #}
     <td class="text-end c-total"
         title="总分 = 各科成绩之和（自动汇总，不可直接修改）{% if stu.total_raw is defined and stu.total_raw is not none %}｜原始分 {{ stu.total_raw }}{% endif %}">
         {{ stu.total if stu.total is not none else '—' }}
@@ -24,7 +24,7 @@
     {% set cell = stu.subjects.get(s) %}
     {% set unsel = s in (stu.unselected or []) %}
     {% set base = '点击修改（赋分/原始分）' if can_edit_scores else '赋分/原始分' %}
-    {# v1.19.19.0：有成绩且具改分权限的单科才是可点的 score-cell；缺考黄色高亮但不可点；未选灰字 #}
+    {# v1.19.20.0：有成绩且具改分权限的单科才是可点的 score-cell；缺考黄色高亮但不可点；未选灰字 #}
     <td class="text-end small c-sub {{ 'text-muted' if unsel else ('table-warning' if cell is none else ('score-cell' if can_edit_scores else '')) }}"
         data-sid="{{ cell.id if cell else '' }}"
         data-score="{{ cell.score if cell and cell.score is not none else '' }}"
