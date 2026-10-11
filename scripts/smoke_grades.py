@@ -430,6 +430,13 @@ with app.test_client() as c:
     check('页头：默认排序/改分说明整行已移除',
           '默认按' not in html and '恢复默认排序' not in html
           and '点击单科分数可修改' not in html)
+    # ---- v1.19.36.0 侧栏「成绩分析」标题本身即入口（直接进总览），展开/收起交给箭头 ----
+    check('侧栏：成绩分析标题指向总览（全年级对比）',
+          'class="efn-group-title"' in html
+          and ('/grades/global-compare?exam=%d' % eid) in html
+          and '<a class="efn-group"' not in html)
+    check('侧栏：分析组展开仍由箭头负责',
+          'data-bs-toggle="collapse" href="#efnAnalysis"' in html)
 
     # ---- v1.19.35.0 表头/数字严格对齐 + 名次列次序 + 进退步悬浮说明 ----
     # th 内若残留空白，右对齐时行尾空格不会被折掉，会把表头文字往左推几个像素 → 与数字错开

@@ -162,6 +162,10 @@
         }
         .sidebar-float .efn-group:hover { background: #eef2f7; }
         .sidebar-float .efn-group .bi { font-size: 11px; color: #94a3b8; }
+        /* v1.19.36.0：「成绩分析」标题本身是入口链接，右侧箭头单独负责展开/收起 */
+        .sidebar-float .efn-group-title { flex: 1 1 auto; color: inherit; }
+        .sidebar-float .efn-group-title:hover { color: #1d4ed8; }
+        .sidebar-float .efn-group .bi[data-bs-toggle] { cursor: pointer; }
         /* ---- v1.19.35.0：AI 智能导入移到侧栏最下方（进阶入口），用细线分隔 ---- */
         .sidebar-float .efn-ai { margin-top: 8px; }
         .sidebar-float .efn-ai::before {
@@ -379,10 +383,16 @@
                                   'grades.report_page', 'grades.exam_near_line') %}
                 {% set _is_lead = current_user.role == 'admin' or (current_user.permission_group and
                      current_user.permission_group.scope_type in ('school', 'grade')) %}
-                <a class="efn-group" data-bs-toggle="collapse" href="#efnAnalysis" role="button"
-                   aria-expanded="{{ 'true' if (EN.section == 'analysis' or request.endpoint in _ana_ep) else 'false' }}">
-                    <span>成绩分析</span><i class="bi bi-chevron-down"></i>
-                </a>
+                {# v1.19.36.0：点「成绩分析」文字直接进入本场分析（领导=总览（全年级对比），
+                   其他角色=班级分析，避免非领导点总览被 403）；展开/收起改由右侧箭头负责。 #}
+                <div class="efn-group">
+                    <a class="efn-group-title" data-nav="ana_home"
+                       href="{{ url_for('grades.global_compare_page', exam=EN.exam_id) if _is_lead
+                                 else url_for('grades.index', exam=EN.exam_id, tab='class') }}">成绩分析</a>
+                    <i class="bi bi-chevron-down" data-bs-toggle="collapse" href="#efnAnalysis"
+                       role="button" title="展开 / 收起"
+                       aria-expanded="{{ 'true' if (EN.section == 'analysis' or request.endpoint in _ana_ep) else 'false' }}"></i>
+                </div>
                 <div class="collapse {% if EN.section == 'analysis' or request.endpoint in _ana_ep %}show{% endif %}" id="efnAnalysis">
                     {% if _is_lead %}
                     <a class="efn-item ps-4 {% if request.endpoint == 'grades.global_compare_page' %}active{% endif %}" data-nav="global"
