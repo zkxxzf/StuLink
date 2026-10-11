@@ -409,20 +409,26 @@ with app.test_client() as c:
         r = c.get(url)
         check(f'页面 {url}', r.status_code == 200, str(r.status_code))
 
-    # ---- v1.19.28.0 表头与数字对齐：右对齐列的排序三角必须在文字左侧 ----
-    # 三角若在文字右侧会占宽、把右对齐的表头文字往左挤，与下面的数字错开。
+    # ---- v1.19.29.0 排序三角：统一在文字后面 + 未点选也看得清 + 右对齐列仍与数字对齐 ----
     html = c.get(f'/grades/exams/{eid}').get_data(as_text=True)
-    check('表头：总分列三角在文字左侧', '></i>总分' in html and '总分<i' not in html)
-    check('表头：各科列三角在文字左侧', '></i>语文' in html and '语文<i' not in html)
-    check('表头：方向排三角在文字左侧', '></i>方向排' in html and '方向排<i' not in html)
-    check('表头：左对齐列三角仍在文字右侧', '学号<i' in html)
+    check('表头：三角统一在文字后面',
+          all((lbl + '<i') in html for lbl in
+              ('学号', '姓名', '方向排', '进退步', '班排', '总分', '语文')))
+    check('表头：三角不再出现在文字左侧',
+          all(('></i>' + lbl) not in html for lbl in ('总分', '方向排', '班排', '语文')))
+    check('表头：未点选三角不再用极淡的 opacity-25',
+          'bi-caret-down opacity-25' not in html and 'bi-caret-down sort-off' in html)
+    check('表头：右对齐列三角绝对定位进预留位',
+          '#scoreTable th.text-end a.th-sort i { position: absolute;' in html)
+    check('表头：表头与数据单元同宽预留三角位',
+          'td.c-rank, #scoreTable td.c-total, #scoreTable td.c-sub { padding-right: 12px; }' in html)
 
     # ---- v1.19.28.0 表头/数字严格对齐 + 名次列次序 + 进退步悬浮说明 ----
     # th 内若残留空白，右对齐时行尾空格不会被折掉，会把表头文字往左推几个像素 → 与数字错开
     _thead = html.split('<thead')[1].split('</thead>')[0]
     check('表头：th 内部无空白', '</a></th>' in _thead and re.search(r'\s</th>', _thead) is None)
     check('名次列次序：方向排 → 进退步 → 班排',
-          _thead.index('>方向排<') < _thead.index('>进退步<') < _thead.index('>班排<'))
+          _thead.index('方向排') < _thead.index('进退步') < _thead.index('班排'))
     check('数据单元：右对齐名次为一行无空白',
           re.search(r'<td class="text-end c-rank">\d+</td>', html) is not None)
     check('进退步悬浮：写明同方向进退步', 'title="同方向进退步：' in html)
