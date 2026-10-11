@@ -410,12 +410,7 @@
                 <i class="bi bi-person-vcard"></i>个人成绩查询
             </a>
             {% endif %}
-            {% if current_user.has_perm('grades.view') %}
-            <a class="nav-link {% if request.endpoint == 'grades.history' %}active{% endif %}"
-               href="{{ url_for('grades.history') }}">
-                <i class="bi bi-mortarboard"></i>毕业生成绩（二期）
-            </a>
-            {% endif %}
+            {# v1.19.4.0 移除「毕业生成绩（二期）」入口：暂无用处，后期单独做毕业生数据库 #}
 
             {# v1.19.0 基础配置：长期基础数据，不属于四段流程，默认折叠 #}
             {% set _cfg_eps = ('grades.subject_mgmt', 'grades.band_templates_page',

@@ -41,7 +41,6 @@ _EP_SECTION = (
     ('grades.report_page', 'analysis'),
     ('grades.global_compare_page', 'analysis'),
     ('grades.student_query_page', 'analysis'),
-    ('grades.history', 'analysis'),
 )
 
 

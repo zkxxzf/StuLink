@@ -95,14 +95,6 @@ def index():
                            initial_tab=tab)
 
 
-@bp.route('/history')
-@login_required
-@perm_required('grades.view')
-def history():
-    """毕业生（往届学生）成绩查询（二期，预留占位）"""
-    return render_template('grades/history.html')
-
-
 @bp.route('/alumni')
 @login_required
 @perm_required('grades.view')
