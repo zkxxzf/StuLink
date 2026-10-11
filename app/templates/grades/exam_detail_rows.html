@@ -24,7 +24,7 @@
     {% set cell = stu.subjects.get(s) %}
     {% set unsel = s in (stu.unselected or []) %}
     {% set base = '点击修改（赋分/原始分）' if can_edit_scores else '赋分/原始分' %}
-    {# v1.19.18.0：有成绩且具改分权限的单科才是可点的 score-cell；缺考黄色高亮但不可点；未选灰字 #}
+    {# v1.19.19.0：有成绩且具改分权限的单科才是可点的 score-cell；缺考黄色高亮但不可点；未选灰字 #}
     <td class="text-end small c-sub {{ 'text-muted' if unsel else ('table-warning' if cell is none else ('score-cell' if can_edit_scores else '')) }}"
         data-sid="{{ cell.id if cell else '' }}"
         data-score="{{ cell.score if cell and cell.score is not none else '' }}"
