@@ -352,6 +352,9 @@
                 {# v1.19.0：划线分层紧贴「成绩导入」环节 #}
                 <a class="efn-item {% if request.endpoint == 'grades.bands_page' %}active{% endif %}" data-nav="bands"
                    href="{{ url_for('grades.bands_page', exam_id=EN.exam_id) }}">划线分层</a>
+                {# v1.19.11.0：分数修改记录（本场），任何登录用户可查 #}
+                <a class="efn-item {% if request.endpoint == 'grades.score_changes' %}active{% endif %}" data-nav="changelog"
+                   href="{{ url_for('grades.score_changes') }}?exam={{ EN.exam_id }}">分数修改记录</a>
                 {# v1.19.0 成绩分析：折叠组 —— 总览（全年级对比）/ 班级分析（班主任）/ 学科分析（任课教师）
                    + 分析类子模块（临界生对比 / 自由表 / 汇报区）。
                    入口按角色分层：总览与汇报区同门槛（管理员/校领导/年级长）；其余按 grades.view，
@@ -405,6 +408,11 @@
                 <i class="bi bi-person-vcard"></i>个人成绩查询
             </a>
             {% endif %}
+            {# v1.19.11.0 分数修改记录：跨考试的改分留痕，任何登录用户都可查 #}
+            <a class="nav-link {% if request.endpoint == 'grades.score_changes' and not request.args.get('exam') %}active{% endif %}"
+               href="{{ url_for('grades.score_changes') }}">
+                <i class="bi bi-clock-history"></i>分数修改记录
+            </a>
             {# v1.19.10.0 移除「毕业生成绩（二期）」入口：暂无用处，后期单独做毕业生数据库 #}
 
             {# v1.19.0 基础配置：长期基础数据，不属于四段流程，默认折叠 #}

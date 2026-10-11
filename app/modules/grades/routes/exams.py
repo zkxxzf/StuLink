@@ -13,7 +13,7 @@ from flask import (Blueprint, render_template, request, jsonify, flash,
 from flask_login import login_required, current_user
 from app.extensions import db
 from app.models.grades import (Exam, ExamScore, SUBJECTS, TOTAL_SUBJECT,
-                              ExamAffair, AffairRoom, AffairStudent)
+                              ExamAffair, AffairRoom, AffairStudent, ScoreChangeLog)
 from app.modules.grades import bp
 from app.modules.grades.services import import_service, store_service, ranking, tab_service
 from app.modules.grades.services.exam_guard import assert_exam_visible
@@ -414,23 +414,58 @@ def _recalc_after_edit(exam_id):
     return n
 
 
+def _verify_edit_password():
+    """改分二次确认：核对当前登录账号的密码。返回错误文案；通过返回 None。"""
+    pwd = request.form.get('password') or ''
+    if not pwd:
+        return '请输入当前登录账号的密码以确认本次修改'
+    if not current_user.check_password(pwd):
+        return '密码不正确，本次修改未生效'
+    return None
+
+
+def _score_edit_reply(exam_id, success, message):
+    """改分接口返回：AJAX → JSON（前端好提示）；非 AJAX → flash + 跳回成绩单"""
+    if request.headers.get('X-Requested-With') == 'XMLHttpRequest':
+        return jsonify(success=success, message=message)
+    flash(message, 'success' if success else 'danger')
+    return redirect(url_for('grades.exam_detail', exam_id=exam_id))
+
+
+def _log_score_change(exam, row, action, old_score, new_score, old_raw, new_raw):
+    """写一条「分数修改记录」（改分/标记缺考都留痕，供全校查询）"""
+    db.session.add(ScoreChangeLog(
+        exam_id=exam.id, exam_name=exam.name, score_id=row.id,
+        student_no=row.student_no, student_name=row.student_name,
+        class_name=row.class_name, subject=row.subject, action=action,
+        old_score=old_score, new_score=new_score,
+        old_raw=old_raw, new_raw=new_raw,
+        operator_id=current_user.id,
+        operator_name=current_user.real_name or current_user.username))
+
+
 @bp.route('/exams/<int:exam_id>/score/<int:score_id>', methods=['POST'])
 @login_required
 @perm_required('grades.edit')
 @perm_required('grades.score_edit')
 def score_update(exam_id, score_id):
-    """单科改分（v1.19.10.0）
+    """单科改分（v1.19.11.0）
 
     · 赋分（score）与原始分（raw_score）都可改，提交哪个改哪个；
     · 两者都提交为空 = 该科缺考（删除该科）；
-    · 改完自动重算整场排名（不再让用户手点）。
+    · 需要输入**当前登录账号的密码**二次确认；
+    · 每次修改写「分数修改记录」（全校可查）；
+    · 改完自动重算整场排名。
     """
     exam = assert_exam_visible(exam_id)          # H-4
     row = ExamScore.query.filter_by(id=score_id, exam_id=exam_id).first_or_404()
     # 总分由各科自动汇总，禁止直接改（避免总分与单科不一致）
     if row.subject == TOTAL_SUBJECT:
-        flash('总分由各科成绩自动汇总，不能直接修改，请修改对应的单科成绩', 'danger')
-        return redirect(url_for('grades.exam_detail', exam_id=exam_id))
+        return _score_edit_reply(exam_id, False,
+                                 '总分由各科成绩自动汇总，不能直接修改，请修改对应的单科成绩')
+    pwd_err = _verify_edit_password()
+    if pwd_err:
+        return _score_edit_reply(exam_id, False, pwd_err)
 
     limit = exam.full_marks().get(row.subject, 100)
     changed = {}
@@ -444,15 +479,16 @@ def score_update(exam_id, score_id):
                 continue
             val = float(raw)
             if val < 0 or val > limit + 0.5:
-                flash(f'{label} {val} 超出范围(0~{limit})', 'danger')
-                return redirect(url_for('grades.exam_detail', exam_id=exam_id))
+                return _score_edit_reply(exam_id, False, f'{label} {val} 超出范围(0~{limit})')
             changed[field] = val
     except ValueError:
-        flash('分数格式不正确', 'danger')
-        return redirect(url_for('grades.exam_detail', exam_id=exam_id))
+        return _score_edit_reply(exam_id, False, '分数格式不正确')
+
+    old_score, old_raw = row.score, row.raw_score
 
     # 赋分与原始分都清空 → 视为缺考，删除该科
     if changed.get('score', 1) is None and changed.get('raw_score', 1) is None:
+        _log_score_change(exam, row, 'delete', old_score, None, old_raw, None)
         no = row.student_no
         db.session.delete(row)
         store_service.refresh_student_total(exam, no)
@@ -460,21 +496,22 @@ def score_update(exam_id, score_id):
         db.session.commit()
         invalidate_exam_cache(exam_id)
         tab_service.clear_exam_cache(exam_id)
-        flash(f'该科成绩已删除（视为缺考），排名已自动重算（{n} 条）', 'warning')
-        return redirect(url_for('grades.exam_detail', exam_id=exam_id))
+        return _score_edit_reply(exam_id, True,
+                                 f'该科已标记缺考，排名已自动重算（{n} 条），并已记入分数修改记录')
 
     for field, val in changed.items():
         setattr(row, field, val)
     store_service.refresh_student_total(exam, row.student_no)   # 总分 = 各科之和
     n = _recalc_after_edit(exam_id)
+    _log_score_change(exam, row, 'update', old_score, row.score, old_raw, row.raw_score)
     db.session.commit()
     invalidate_exam_cache(exam_id)
     tab_service.clear_exam_cache(exam_id)
     log_operation(current_user, '修改', '成绩', exam_id,
                   f'{row.student_name or row.student_no} {row.subject} 改分（排名已重算）',
                   module='grades')
-    flash(f'成绩已修改，排名已自动重算（{n} 条）', 'success')
-    return redirect(url_for('grades.exam_detail', exam_id=exam_id))
+    return _score_edit_reply(exam_id, True,
+                             f'成绩已修改，排名已自动重算（{n} 条），并已记入分数修改记录')
 
 
 @bp.route('/exams/<int:exam_id>/score/<int:score_id>/delete', methods=['POST'])
@@ -486,8 +523,12 @@ def score_delete(exam_id, score_id):
     row = ExamScore.query.filter_by(id=score_id, exam_id=exam_id).first_or_404()
     # 总分不可单独删除（它随各科自动汇总）
     if row.subject == TOTAL_SUBJECT:
-        flash('总分由各科成绩自动汇总，不能直接操作，请修改对应的单科成绩', 'danger')
-        return redirect(url_for('grades.exam_detail', exam_id=exam_id))
+        return _score_edit_reply(exam_id, False,
+                                 '总分由各科成绩自动汇总，不能直接操作，请修改对应的单科成绩')
+    pwd_err = _verify_edit_password()
+    if pwd_err:
+        return _score_edit_reply(exam_id, False, pwd_err)
+    _log_score_change(exam, row, 'delete', row.score, None, row.raw_score, None)
     no = row.student_no
     db.session.delete(row)
     store_service.refresh_student_total(exam, no)
@@ -495,8 +536,26 @@ def score_delete(exam_id, score_id):
     db.session.commit()
     invalidate_exam_cache(exam_id)
     tab_service.clear_exam_cache(exam_id)
-    flash(f'该科成绩已删除（视为缺考），排名已自动重算（{n} 条）', 'warning')
-    return redirect(url_for('grades.exam_detail', exam_id=exam_id))
+    return _score_edit_reply(exam_id, True,
+                             f'该科已标记缺考，排名已自动重算（{n} 条），并已记入分数修改记录')
+
+
+@bp.route('/score-changes')
+@login_required
+def score_changes():
+    """分数修改记录（v1.19.11.0）：只读，**任何登录用户**都可查（用户要求「所有人可以查到」）
+
+    ?exam=<id> 只看某一场；不传=全部考试（按时间倒序）。
+    """
+    raw = (request.args.get('exam') or '').strip()
+    exam_id = int(raw) if raw.isdigit() else None
+    exam = Exam.query.get(exam_id) if exam_id else None
+    q = ScoreChangeLog.query
+    if exam is not None:
+        q = q.filter_by(exam_id=exam.id)
+    logs = (q.order_by(ScoreChangeLog.operated_at.desc(), ScoreChangeLog.id.desc())
+            .limit(3000).all())
+    return render_template('grades/score_changes.html', exam=exam, logs=logs)
 
 
 @bp.route('/exams/<int:exam_id>/recalc', methods=['POST'])

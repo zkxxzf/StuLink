@@ -48,6 +48,10 @@
         <a href="{{ url_for('grades.bands_page', exam_id=exam.id) }}" class="btn btn-outline-info btn-sm">
             <i class="bi bi-bar-chart"></i> 划线分层
         </a>
+        {# v1.19.11.0：分数修改记录（谁在什么时候改了谁的分），任何登录用户可查 #}
+        <a href="{{ url_for('grades.score_changes') }}?exam={{ exam.id }}" class="btn btn-outline-secondary btn-sm">
+            <i class="bi bi-clock-history"></i> 分数修改记录
+        </a>
         <button class="btn btn-outline-danger btn-sm" data-bs-toggle="modal" data-bs-target="#delModal">
             <i class="bi bi-trash"></i> 删除考试
         </button>
@@ -109,6 +113,8 @@
                 {% endif %}
                 <span class="text-muted">「未选」= 不在该生选科组合内（不计缺考）</span></span>
         </div>
+        {# v1.19.11.0 改分结果提示（保存成功后在页面上短暂显示） #}
+        <div id="scFlash" class="alert alert-success py-1 px-2 small d-none mt-2 mb-0"></div>
         {# v1.19.0 按班级查看：服务端筛选（链接可分享/收藏），不选=全部 #}
         {% if classes %}
         <div class="d-flex flex-wrap gap-1 mt-2">
@@ -236,6 +242,10 @@
             </div>
             <div class="modal-body">
                 <div class="small text-muted mb-2" id="scWho"></div>
+                <div class="alert alert-warning py-2 px-2 small mb-2">
+                    <i class="bi bi-exclamation-triangle"></i>
+                    请核实准确后再修改分数，修改分数后，学生排名会自动重新计算，本次修改计入分数修改记录。
+                </div>
                 <div class="row g-2">
                     <div class="col-6">
                         <label class="form-label small mb-1">赋分（主分，0~<span id="scLimit">100</span>）</label>
@@ -247,6 +257,11 @@
                     </div>
                 </div>
                 <div class="form-text text-muted mt-1">赋分与原始分都可修改；改完自动重算排名。</div>
+                <div class="mt-2">
+                    <label class="form-label small mb-1">当前账号密码（二次确认，必填）</label>
+                    <input type="password" class="form-control form-control-sm" id="scPwd"
+                           autocomplete="current-password" placeholder="请输入当前登录账号的密码">
+                </div>
                 <div class="form-text text-danger d-none" id="scErr"></div>
                 <div class="form-check mt-2">
                     <input class="form-check-input" type="checkbox" id="scAbsent">
@@ -339,6 +354,7 @@ $(function(){
             $('#scRaw').val(td.attr('data-raw') || '').attr('max', limit != null ? limit : '');
             $('#scAbsent').prop('checked', false);
             $('#scErr').addClass('d-none').text('');
+            $('#scPwd').val('');            // 密码不回填、不缓存
             $('#scoreModal').modal('show');
         });
     }
@@ -349,6 +365,14 @@ $(function(){
     // 修复：此前成功保存后没复位，按钮一直停在「保存中…」且被禁用，导致后续改不了分。
     function scResetBtn(){ $('#scSave').prop('disabled', false).text('保存修改'); }
     $('#scoreModal').on('hidden.bs.modal', scResetBtn);
+
+    // 改分成功后的页面提示（几秒后自动消失）
+    function scFlash(t){
+        var $f = $('#scFlash');
+        $f.removeClass('d-none').text(t);
+        clearTimeout(scFlash._t);
+        scFlash._t = setTimeout(function(){ $f.addClass('d-none'); }, 6000);
+    }
 
     // 校验一个输入：空 → 返回 null；非法/越界 → 抛错（由调用方提示）
     function scRead(sel, label, limit){
@@ -367,31 +391,46 @@ $(function(){
             ? (scCell.closest('table').find('th').eq(scCell.index()).text().trim() || '分数')
             : '分数';
         var limit = FULL_MARKS[label];
-        $(this).prop('disabled', true).text('保存中…');
-        function done(){ $('#scoreModal').modal('hide'); scResetBtn(); loadPage(curPage); }
+        var absent = $('#scAbsent').prop('checked');
+        var pwd = $.trim($('#scPwd').val());
+        if(!pwd){ scShowErr('请输入当前登录账号的密码以确认本次修改'); $('#scPwd').focus(); return; }
 
-        if($('#scAbsent').prop('checked')){          // 该科缺考 → 删除该科成绩
-            $.post('/grades/exams/' + examId + '/score/' + scSid + '/delete')
-                .done(done).fail(function(){ scResetBtn(); scShowErr('操作失败，请重试'); });
-            return;
+        var sc = null, raw = null;
+        if(!absent){
+            try {
+                sc = scRead('#scInput', '赋分', limit);
+                raw = scRead('#scRaw', '原始分', limit);
+            } catch(e) { scShowErr(e.message); return; }
+            if(sc === null && raw === null){
+                scShowErr('请至少填写赋分或原始分，或勾选“该科缺考”'); return;
+            }
         }
-        var sc, raw;
-        try {
-            sc = scRead('#scInput', '赋分', limit);
-            raw = scRead('#scRaw', '原始分', limit);
-        } catch(e) {
-            scResetBtn(); scShowErr(e.message); return;
+        var url = absent ? ('/grades/exams/' + examId + '/score/' + scSid + '/delete')
+                         : ('/grades/exams/' + examId + '/score/' + scSid);
+        var data = {password: pwd};
+        if(!absent){
+            data.score = (sc === null ? '' : sc);
+            data.raw_score = (raw === null ? '' : raw);
         }
-        if(sc === null && raw === null){
-            scResetBtn(); scShowErr('请至少填写赋分或原始分，或勾选“该科缺考”'); return;
-        }
-        $.post('/grades/exams/' + examId + '/score/' + scSid,
-               {score: (sc === null ? '' : sc), raw_score: (raw === null ? '' : raw)})
-            .done(done).fail(function(){ scResetBtn(); scShowErr('保存失败，请重试'); });
+        $(this).prop('disabled', true).text('保存中…');
+        $.post(url, data)
+            .done(function(res){
+                if(res && res.success){
+                    $('#scoreModal').modal('hide');
+                    scFlash(res.message || '成绩已修改');
+                    loadPage(curPage);
+                } else {
+                    scShowErr((res && res.message) || '保存失败，请重试');
+                }
+            })
+            .fail(function(x){
+                scShowErr((x.responseJSON && x.responseJSON.message) || '保存失败，请重试');
+            })
+            .always(scResetBtn);
     });
 
     // 弹窗内回车 = 保存
-    $('#scInput, #scRaw').on('keydown', function(e){
+    $('#scInput, #scRaw, #scPwd').on('keydown', function(e){
         if(e.key === 'Enter'){ e.preventDefault(); $('#scSave').trigger('click'); }
     });
 

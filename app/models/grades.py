@@ -672,3 +672,37 @@ class ExamRoomGroupMap(db.Model):
         db.UniqueConstraint('group_id', 'lib_id', name='uq_room_group_map'),
         db.Index('idx_room_group_map_lib', 'lib_id'),
     )
+
+
+class ScoreChangeLog(db.Model):
+    """v1.19.11.0 分数修改记录（改分/删分留痕）
+
+    每次在成绩单改分（含赋分/原始分、标记缺考）都写一条，供全校查询：
+    谁、什么时候、改了哪场考试哪个学生的哪一科、改前改后各是多少、什么动作。
+    只增不改不删（查询页只读）。
+    """
+    __bind_key__ = 'grades'
+    __tablename__ = 'score_change_logs'
+
+    id = db.Column(db.Integer, primary_key=True)
+    exam_id = db.Column(db.Integer, nullable=False)
+    exam_name = db.Column(db.String(100))                  # 快照，考试改名也不影响留痕
+    score_id = db.Column(db.Integer)                       # ExamScore.id（删分后可能已不存在）
+    student_no = db.Column(db.String(20), nullable=False)
+    student_name = db.Column(db.String(50))
+    class_name = db.Column(db.String(10))
+    subject = db.Column(db.String(10), nullable=False)
+    action = db.Column(db.String(10), nullable=False)      # update 修改 / delete 缺考
+    old_score = db.Column(db.Float)
+    new_score = db.Column(db.Float)
+    old_raw = db.Column(db.Float)
+    new_raw = db.Column(db.Float)
+    operator_id = db.Column(db.Integer)
+    operator_name = db.Column(db.String(50))
+    operated_at = db.Column(db.DateTime, default=datetime.now)
+    note = db.Column(db.String(200))
+
+    __table_args__ = (
+        db.Index('idx_scorelog_exam_time', 'exam_id', 'operated_at'),
+        db.Index('idx_scorelog_student', 'exam_id', 'student_no'),
+    )
