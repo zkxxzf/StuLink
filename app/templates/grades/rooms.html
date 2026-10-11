@@ -1,6 +1,21 @@
 {% extends "base.html" %}
 {% block title %}考场维护{% endblock %}
+{% block extra_css %}
+<style>
+  /* v1.19.31.0 考场维护：左（全部房间）— 中（箭头）— 右（分组）三栏，页面不再铺满全宽 */
+  .rm-list { max-height: 62vh; overflow: auto; padding: 4px; }
+  .rm-item {
+    display: flex; align-items: center; gap: 8px;
+    padding: 4px 6px; border-radius: 6px; cursor: pointer;
+  }
+  .rm-item:hover { background: #f1f5f9; }
+  .rm-item + .rm-item { border-top: 1px solid #f1f5f9; }
+  .rm-item .form-check-input { margin: 0; flex: none; }
+  .rm-item .badge { font-weight: 500; }
+</style>
+{% endblock %}
 {% block content %}
+<div class="container">
 <div class="d-flex align-items-center justify-content-between mb-3">
     <h4 class="fw-bold mb-0"><i class="bi bi-door-open"></i> 考场维护</h4>
     <button class="btn btn-sm btn-primary" onclick="openRoom()">
@@ -10,97 +25,51 @@
 
 <div class="alert alert-light border small mb-3">
     房间来自「考场房间库」（跨批次共享，共 <strong>{{ rooms|length }}</strong> 个）。
-    分组只用于归集与后续建场筛选；<strong>改动不会影响任何历史场次的考场安排</strong>
-    （每场考试的考场彼此独立）。一个房间可同时归属多个分组（不同年级考试时间错开，可共用）。
+    <b>左边勾选房间 → 点中间「加入 →」归入右边当前分组</b>；一个房间可同时属于多个分组
+    （不同年级考试时间错开，可共用）。分组只用于归集与后续建场筛选，
+    <strong>不会改动任何历史场次的考场安排</strong>。
 </div>
 
-{# ===== 分组卡片 ===== #}
-<div class="row g-3 mb-2">
-    {% for g in groups %}
-    <div class="col-md-4">
+<div class="row g-3">
+    {# ===== 左：全部房间 ===== #}
+    <div class="col-lg-5">
         <div class="card h-100">
-            <div class="card-header d-flex justify-content-between align-items-center py-2">
-                <span class="fw-bold">
-                    <i class="bi bi-collection"></i> {{ g.name }}
-                    <span class="text-muted small">（{{ g.rooms|length }}）</span>
-                </span>
-                <span class="btn-group">
-                    <button class="btn btn-sm btn-outline-secondary py-0" title="重命名"
-                            onclick="renameGroup({{ g.id }}, '{{ g.name|e }}')">
-                        <i class="bi bi-pencil"></i>
-                    </button>
-                    <button class="btn btn-sm btn-outline-danger py-0" title="删除分组"
-                            onclick="delGroup({{ g.id }}, '{{ g.name|e }}')">
-                        <i class="bi bi-trash"></i>
-                    </button>
-                </span>
+            <div class="card-header py-2 d-flex justify-content-between align-items-center">
+                <span class="fw-bold"><i class="bi bi-door-closed"></i> 全部房间</span>
+                <span class="text-muted small">共 {{ rooms|length }} 个</span>
             </div>
-            <div class="card-body p-2">
-                {% if g.rooms %}
-                {% for r in g.rooms %}
-                <span class="badge text-bg-light border me-1 mb-1">
-                    {{ r.location }}
-                    <a href="javascript:;" class="text-danger ms-1"
-                       onclick="removeFromGroup({{ r.id }}, {{ g.id }})" title="移出该分组">×</a>
-                </span>
-                {% endfor %}
-                {% else %}
-                <span class="text-muted small">该分组暂无房间</span>
-                {% endif %}
+            <div class="p-2 border-bottom">
+                <input id="rmSearch" class="form-control form-control-sm" placeholder="搜索位置 / 备注">
             </div>
+            <div class="rm-list" id="leftList"></div>
         </div>
     </div>
-    {% endfor %}
-</div>
 
-<div class="mb-3">
-    <button class="btn btn-sm btn-outline-primary" onclick="addGroup()">
-        <i class="bi bi-plus-lg"></i> 新增分组
-    </button>
-</div>
+    {# ===== 中：左右箭头 ===== #}
+    <div class="col-lg-2 d-flex flex-column justify-content-center align-items-center gap-2 py-3">
+        <button class="btn btn-primary btn-sm w-100" onclick="addSel()" title="把左边勾选的房间加入右边当前分组">加入 →</button>
+        <button class="btn btn-outline-secondary btn-sm w-100" onclick="removeSel()" title="把右边勾选的房间移出当前分组">← 移出</button>
+        <div class="text-muted small text-center">左侧勾选<br>点箭头移动</div>
+    </div>
 
-{# ===== 全部房间 ===== #}
-<div class="card">
-    <div class="card-header py-2 fw-bold">全部房间</div>
-    <div class="card-body p-0">
-        <table class="table table-sm table-hover mb-0">
-            <thead class="table-light">
-                <tr>
-                    <th style="width:140px;">位置</th>
-                    <th>备注</th>
-                    <th style="width:300px;">所属分组</th>
-                    <th style="width:160px;">操作</th>
-                </tr>
-            </thead>
-            <tbody>
-                {% for r in rooms %}
-                <tr>
-                    <td class="fw-bold">{{ r.location }}</td>
-                    <td class="text-muted small">{{ r.note }}</td>
-                    <td>
-                        {% for g in groups %}
-                        {% if g.id in r.group_ids %}
-                        <span class="badge text-bg-primary">{{ g.name }}</span>
-                        {% endif %}
-                        {% endfor %}
-                        {% if not r.group_ids %}<span class="text-muted small">未分组</span>{% endif %}
-                    </td>
-                    <td>
-                        <button class="btn btn-sm btn-outline-primary py-0" onclick="openRoom({{ r.id }})">编辑</button>
-                        <button class="btn btn-sm btn-outline-secondary py-0" onclick="openGroups({{ r.id }})">分组</button>
-                        <button class="btn btn-sm btn-outline-danger py-0" onclick="delRoom({{ r.id }})">删除</button>
-                    </td>
-                </tr>
-                {% endfor %}
-                {% if not rooms %}
-                <tr><td colspan="4" class="text-center text-muted py-4">考场房间库为空，点右上角「新增房间」添加。</td></tr>
-                {% endif %}
-            </tbody>
-        </table>
+    {# ===== 右：分组（下拉选择 + 增删改 + 组内房间） ===== #}
+    <div class="col-lg-5">
+        <div class="card h-100">
+            <div class="card-header py-2 d-flex align-items-center gap-1">
+                <span class="fw-bold text-nowrap"><i class="bi bi-collection"></i> 分组</span>
+                <select id="grpSel" class="form-select form-select-sm w-auto ms-auto"></select>
+                <button class="btn btn-sm btn-outline-primary py-0" onclick="addGroup()" title="新增分组">＋</button>
+                <button class="btn btn-sm btn-outline-secondary py-0" onclick="renameGroup()" title="重命名当前分组">✎</button>
+                <button class="btn btn-sm btn-outline-danger py-0" onclick="delGroup()" title="删除当前分组">✗</button>
+            </div>
+            <div class="px-2 py-1 border-bottom small text-muted" id="grpMeta"></div>
+            <div class="rm-list" id="rightList"></div>
+        </div>
     </div>
 </div>
+</div>
 
-{# ===== 房间编辑弹窗 ===== #}
+{# ===== 房间编辑弹窗（分组在右侧直接操作，不再需要「设置所属分组」弹窗） ===== #}
 <div class="modal fade" id="roomModal" tabindex="-1">
     <div class="modal-dialog">
         <div class="modal-content">
@@ -127,44 +96,169 @@
         </div>
     </div>
 </div>
+{% endblock %}
 
-{# ===== 分组设置弹窗 ===== #}
-<div class="modal fade" id="groupsModal" tabindex="-1">
-    <div class="modal-dialog">
-        <div class="modal-content">
-            <div class="modal-header py-2">
-                <h6 class="modal-title fw-bold" id="groupsModalTitle">设置所属分组</h6>
-                <button class="btn-close" data-bs-dismiss="modal"></button>
-            </div>
-            <div class="modal-body" id="groupsModalBody"></div>
-            <div class="modal-footer py-2">
-                <button class="btn btn-sm btn-secondary" data-bs-dismiss="modal">取消</button>
-                <button class="btn btn-sm btn-primary" onclick="saveGroups()">保存</button>
-            </div>
-        </div>
-    </div>
-</div>
-
+{% block extra_js %}
 <script>
-var ROOMS = {{ rooms | tojson }};
-var GROUPS = {{ group_ids | tojson }};
-var GROUP_NAMES = {{ group_names | tojson }};
 var URL_ROOMS = '{{ url_for("grades.exam_rooms") }}';            // /grades/rooms
 var URL_ROOM_SAVE = '{{ url_for("grades.exam_room_save") }}';
 var URL_GROUP_SAVE = '{{ url_for("grades.exam_room_group_save") }}';
 
-function roomById(id){ return ROOMS.find(function(r){ return r.id === id; }); }
+// v1.19.31.0 三栏式房间归集：状态全部放前端，增删改后就地重渲染（不再整页刷新）
+var state = {
+    rooms: {{ rooms|tojson }}.map(function (r) {
+        return {id: r.id, location: r.location, note: r.note || '',
+                group_ids: (r.group_ids || []).slice()};
+    }),
+    groups: (function () {
+        var ids = {{ group_ids|tojson }}, names = {{ group_names|tojson }};
+        return ids.map(function (id, i) { return {id: id, name: names[i]}; });
+    })(),
+    cur: null,     // 当前分组 id
+    kw: ''         // 左侧搜索词
+};
 
-function post(url, data, cb){
-    $.post(url, data).done(function(d){
-        if(d && d.ok){ if(cb) cb(d); }
+function post(url, data, cb) {
+    $.post(url, data).done(function (d) {
+        if (d && d.ok) { if (cb) cb(d); }
         else { alert((d && d.msg) || '操作失败'); }
-    }).fail(function(){ alert('请求失败'); });
+    }).fail(function () { alert('请求失败'); });
 }
 
-// ---- 房间新增/编辑 ----
+function esc(s) { return escHtml(s == null ? '' : String(s)); }
+function roomById(id) { return state.rooms.filter(function (r) { return r.id === id; })[0]; }
+function inGroup(r, gid) { return r.group_ids.indexOf(gid) >= 0; }
+function curGroup() { return state.groups.filter(function (g) { return g.id === state.cur; })[0]; }
+
+// ---- 渲染 ----
+function renderGroupOptions() {
+    var sel = $('#grpSel').empty();
+    if (!state.groups.length) {
+        sel.append('<option value="">（暂无分组）</option>');
+        return;
+    }
+    state.groups.forEach(function (g) {
+        var n = state.rooms.filter(function (r) { return inGroup(r, g.id); }).length;
+        sel.append('<option value="' + g.id + '">' + esc(g.name) + '（' + n + '）</option>');
+    });
+    if (state.cur == null) state.cur = state.groups[0].id;
+    sel.val(String(state.cur));
+}
+
+function renderLeft() {
+    var kw = state.kw.toLowerCase();
+    var list = state.rooms.filter(function (r) {
+        return !kw || (r.location || '').toLowerCase().indexOf(kw) >= 0
+                   || (r.note || '').toLowerCase().indexOf(kw) >= 0;
+    });
+    var html = list.map(function (r) {
+        var badges = state.groups.filter(function (g) { return inGroup(r, g.id); })
+            .map(function (g) { return '<span class="badge text-bg-light border">' + esc(g.name) + '</span>'; })
+            .join(' ');
+        return '<div class="rm-item" data-id="' + r.id + '">'
+            + '<input class="form-check-input rm-chk" type="checkbox" data-id="' + r.id + '">'
+            + '<span class="flex-grow-1 text-truncate"><b>' + esc(r.location) + '</b> '
+            + '<span class="text-muted small">' + esc(r.note) + '</span> ' + badges + '</span>'
+            + '<button class="btn btn-sm btn-outline-primary py-0" onclick="openRoom(' + r.id + ')">编辑</button>'
+            + '<button class="btn btn-sm btn-outline-danger py-0" onclick="delRoom(' + r.id + ')">删</button>'
+            + '</div>';
+    }).join('');
+    $('#leftList').html(html || '<div class="text-muted small p-2">没有匹配的房间</div>');
+}
+
+function renderRight() {
+    var g = curGroup();
+    if (!g) {
+        $('#grpMeta').text('');
+        $('#rightList').html('<div class="text-muted small p-2">暂无分组：点右上角 ＋ 新增</div>');
+        return;
+    }
+    var members = state.rooms.filter(function (r) { return inGroup(r, g.id); });
+    $('#grpMeta').html('当前分组「<b>' + esc(g.name) + '</b>」共 <b>' + members.length + '</b> 个房间'
+        + ' · 从左侧勾选后点「加入 →」');
+    var html = members.map(function (r) {
+        return '<div class="rm-item" data-id="' + r.id + '">'
+            + '<input class="form-check-input rm-chk-r" type="checkbox" data-id="' + r.id + '">'
+            + '<span class="flex-grow-1 text-truncate"><b>' + esc(r.location) + '</b> '
+            + '<span class="text-muted small">' + esc(r.note) + '</span></span>'
+            + '<button class="btn btn-sm btn-outline-danger py-0" title="移出该分组"'
+            + ' onclick="removeRoom(' + r.id + ')">×</button></div>';
+    }).join('');
+    $('#rightList').html(html || '<div class="text-muted small p-2">该分组暂无房间：从左侧勾选后点「加入 →」</div>');
+}
+
+function renderAll() { renderGroupOptions(); renderLeft(); renderRight(); }
+
+// ---- 归集：加入 / 移出 ----
+function checkedIds(sel) {
+    return $(sel).map(function () { return parseInt(this.dataset.id, 10); }).get();
+}
+function _setGroups(room, ids, done) {
+    post(URL_ROOMS + '/' + room.id + '/groups', {group_ids: ids.join(',')}, function () {
+        room.group_ids = ids; done();
+    });
+}
+function addSel() {
+    if (state.cur == null) { alert('请先在右上角选择或新增分组'); return; }
+    var ids = checkedIds('#leftList .rm-chk:checked');
+    if (!ids.length) { alert('请先在左边勾选房间'); return; }
+    var gid = state.cur, moved = 0;
+    ids.forEach(function (id) {
+        var r = roomById(id);
+        if (!r || inGroup(r, gid)) return;
+        moved++;
+        _setGroups(r, r.group_ids.concat([gid]), renderAll);
+    });
+    if (!moved) alert('勾选的房间已在当前分组里');
+}
+function removeSel() {
+    if (state.cur == null) return;
+    var ids = checkedIds('#rightList .rm-chk-r:checked');
+    if (!ids.length) { alert('请先在右边勾选房间'); return; }
+    ids.forEach(function (id) { removeRoom(id); });
+}
+function removeRoom(id) {
+    var gid = state.cur, r = roomById(id);
+    if (r == null || gid == null) return;
+    _setGroups(r, r.group_ids.filter(function (x) { return x !== gid; }), renderAll);
+}
+
+// ---- 分组增删改 ----
+function addGroup() {
+    var name = prompt('新分组名称（如 高一考场）');
+    if (!name) return;
+    post(URL_GROUP_SAVE, {name: name}, function (d) {
+        state.groups.push({id: d.id, name: name});
+        state.cur = d.id;
+        renderAll();
+    });
+}
+function renameGroup() {
+    var g = curGroup();
+    if (!g) { alert('暂无分组'); return; }
+    var name = prompt('修改分组名称', g.name);
+    if (!name || name === g.name) return;
+    post(URL_GROUP_SAVE, {group_id: g.id, name: name}, function () {
+        g.name = name; renderAll();
+    });
+}
+function delGroup() {
+    var g = curGroup();
+    if (!g) { alert('暂无分组'); return; }
+    if (!confirm('删除分组「' + g.name + '」？\n（只解除归集关系，房间本身保留）')) return;
+    post(URL_ROOMS + '/groups/' + g.id + '/delete', {}, function () {
+        state.groups = state.groups.filter(function (x) { return x.id !== g.id; });
+        state.rooms.forEach(function (r) {
+            r.group_ids = r.group_ids.filter(function (x) { return x !== g.id; });
+        });
+        state.cur = state.groups.length ? state.groups[0].id : null;
+        renderAll();
+    });
+}
+
+// ---- 房间新增/编辑/删除 ----
 var roomModal;
-function openRoom(id){
+function openRoom(id) {
     roomModal = roomModal || new bootstrap.Modal(document.getElementById('roomModal'));
     var r = id ? roomById(id) : null;
     document.getElementById('roomModalTitle').textContent = r ? '编辑房间' : '新增房间';
@@ -173,64 +267,51 @@ function openRoom(id){
     document.getElementById('roomNote').value = r ? r.note : '';
     roomModal.show();
 }
-function saveRoom(){
-    post(URL_ROOM_SAVE, {
-        lib_id: document.getElementById('roomId').value,
-        location: document.getElementById('roomLoc').value,
-        note: document.getElementById('roomNote').value
-    }, function(){ location.reload(); });
+function saveRoom() {
+    var lid = document.getElementById('roomId').value;
+    var loc = document.getElementById('roomLoc').value.trim();
+    var note = document.getElementById('roomNote').value.trim();
+    post(URL_ROOM_SAVE, {lib_id: lid, location: loc, note: note}, function (d) {
+        if (lid) {
+            var r = roomById(parseInt(lid, 10));
+            if (r) { r.location = loc; r.note = note; }
+        } else {
+            state.rooms.push({id: d.id, location: loc, note: note, group_ids: []});
+            state.rooms.sort(function (a, b) { return a.location.localeCompare(b.location, 'zh'); });
+        }
+        if (roomModal) roomModal.hide();
+        renderAll();
+    });
 }
-function delRoom(id){
+function delRoom(id) {
     var r = roomById(id);
-    if(!confirm('删除房间「' + (r ? r.location : id) + '」？\n（只影响房间库，不影响历史场次考场）')) return;
-    post(URL_ROOMS + '/' + id + '/delete', {}, function(){ location.reload(); });
+    if (!confirm('删除房间「' + (r ? r.location : id) + '」？\n（只影响房间库，不影响历史场次考场）')) return;
+    post(URL_ROOMS + '/' + id + '/delete', {}, function () {
+        state.rooms = state.rooms.filter(function (x) { return x.id !== id; });
+        renderAll();
+    });
 }
 
-// ---- 分组设置（多选）----
-var groupsModal, curRoomId;
-function openGroups(id){
-    curRoomId = id;
-    var r = roomById(id);
-    groupsModal = groupsModal || new bootstrap.Modal(document.getElementById('groupsModal'));
-    document.getElementById('groupsModalTitle').textContent = '「' + (r ? r.location : '') + '」所属分组';
-    var html = '';
-    for(var i=0;i<GROUPS.length;i++){
-        var gid = GROUPS[i];
-        var checked = (r && r.group_ids.indexOf(gid) >= 0) ? ' checked' : '';
-        html += '<div class="form-check"><input class="form-check-input" type="checkbox" value="' + gid +
-                '" id="gchk' + gid + '"' + checked + '>' +
-                '<label class="form-check-label" for="gchk' + gid + '">' + GROUP_NAMES[i] + '</label></div>';
-    }
-    document.getElementById('groupsModalBody').innerHTML = html || '<span class="text-muted">暂无分组</span>';
-    groupsModal.show();
-}
-function saveGroups(){
-    var ids = [];
-    $('#groupsModalBody input:checked').each(function(){ ids.push(this.value); });
-    post(URL_ROOMS + '/' + curRoomId + '/groups', {group_ids: ids.join(',')},
-         function(){ location.reload(); });
-}
-function removeFromGroup(lid, gid){
-    var r = roomById(lid);
-    var ids = (r ? r.group_ids : []).filter(function(x){ return x !== gid; });
-    post(URL_ROOMS + '/' + lid + '/groups', {group_ids: ids.join(',')},
-         function(){ location.reload(); });
-}
+// ---- 绑定 ----
+$('#grpSel').on('change', function () {
+    state.cur = parseInt(this.value, 10) || null;
+    renderRight();
+});
+$('#rmSearch').on('input', function () {
+    state.kw = this.value.trim(); renderLeft();
+});
+// 点整行即勾选（按钮区域除外）
+$('#leftList').on('click', '.rm-item', function (e) {
+    if ($(e.target).closest('button').length) return;
+    var c = $(this).find('.rm-chk');
+    c.prop('checked', !c.prop('checked'));
+});
+$('#rightList').on('click', '.rm-item', function (e) {
+    if ($(e.target).closest('button').length) return;
+    var c = $(this).find('.rm-chk-r');
+    c.prop('checked', !c.prop('checked'));
+});
 
-// ---- 分组增删改 ----
-function addGroup(){
-    var name = prompt('新分组名称（如 高三考场）');
-    if(!name) return;
-    post(URL_GROUP_SAVE, {name: name}, function(){ location.reload(); });
-}
-function renameGroup(gid, oldName){
-    var name = prompt('修改分组名称', oldName);
-    if(!name || name === oldName) return;
-    post(URL_GROUP_SAVE, {group_id: gid, name: name}, function(){ location.reload(); });
-}
-function delGroup(gid, name){
-    if(!confirm('删除分组「' + name + '」？\n（只解除归集关系，房间本身保留）')) return;
-    post(URL_ROOMS + '/groups/' + gid + '/delete', {}, function(){ location.reload(); });
-}
+renderAll();
 </script>
 {% endblock %}
