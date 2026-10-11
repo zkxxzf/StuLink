@@ -395,7 +395,7 @@ with app.test_client() as c:
         r = c.get(url)
         check(f'页面 {url}', r.status_code == 200, str(r.status_code))
 
-    # ---- v1.19.26.0 表头与数字对齐：右对齐列的排序三角必须在文字左侧 ----
+    # ---- v1.19.27.0 表头与数字对齐：右对齐列的排序三角必须在文字左侧 ----
     # 三角若在文字右侧会占宽、把右对齐的表头文字往左挤，与下面的数字错开。
     html = c.get(f'/grades/exams/{eid}').get_data(as_text=True)
     check('表头：总分列三角在文字左侧', '></i>总分' in html and '总分<i' not in html)
@@ -403,7 +403,7 @@ with app.test_client() as c:
     check('表头：方向排三角在文字左侧', '></i>方向排' in html and '方向排<i' not in html)
     check('表头：左对齐列三角仍在文字右侧', '学号<i' in html)
 
-    # ---- v1.19.26.0 表头/数字严格对齐 + 名次列次序 + 进退步悬浮说明 ----
+    # ---- v1.19.27.0 表头/数字严格对齐 + 名次列次序 + 进退步悬浮说明 ----
     # th 内若残留空白，右对齐时行尾空格不会被折掉，会把表头文字往左推几个像素 → 与数字错开
     _thead = html.split('<thead')[1].split('</thead>')[0]
     check('表头：th 内部无空白', '</a></th>' in _thead and re.search(r'\s</th>', _thead) is None)
