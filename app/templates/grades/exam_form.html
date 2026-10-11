@@ -54,15 +54,17 @@
                 </div>
 
                 <div class="col-12">
-                    <label class="form-label">分数口径 <span class="text-danger">*</span></label>
+                    <label class="form-label">分数口径</label>
                     <select name="score_mode" class="form-select">
                         {% for v, label in mode_options %}
                         <option value="{{ v }}" {% if v == score_mode %}selected{% endif %}>{{ label }}</option>
                         {% endfor %}
                     </select>
+                    {# v1.19.16.0：可不选 —— 它只是标记，不参与导入/排名/划线口径判断 #}
                     <div class="form-text">
-                        决定本场<b>划线、排名、成绩分析</b>用哪一套分。两者都给时：赋分进主分（划线排名用它），
-                        原始分另存一列仅供查看；只给一套时按实际选。
+                        <b>可不选</b>（默认不设）。这一项只作标记，<b>不影响</b>导入、排名与划线：
+                        分数口径在<b>导入时</b>按文件自动确定——有赋分按赋分（排名/划线用的就是它，
+                        给定的分数线也就是赋分线）；只有原始分时按原始分。不清楚就先不选。
                     </div>
                 </div>
 

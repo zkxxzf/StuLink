@@ -118,15 +118,17 @@ def _list_steps_map(exams):
 
 def _exam_form_ctx(**kw):
     """新建考试表单的公共上下文（两维下拉 + 分数口径）"""
-    from app.models.grades import EXAM_KINDS, EXAM_STAGES, DEFAULT_SCORE_MODE
+    from app.models.grades import EXAM_KINDS, EXAM_STAGES
     ctx = {
         'grade_options': _grade_options(),
         'kind_options': _dict_values('exam_kind', EXAM_KINDS),
         'stage_options': _dict_values('exam_type', EXAM_STAGES),
-        'mode_options': [('converted', '赋分（划线/排名按赋分）'),
+        # v1.19.16.0：分数口径可不选（默认不选）——口径在导入时按文件确定
+        'mode_options': [('', '不设（导入时按文件确定）'),
+                         ('converted', '赋分（划线/排名按赋分）'),
                          ('raw', '原始分（无赋分时选这个）')],
         'default_date': date.today().isoformat(),
-        'default_mode': DEFAULT_SCORE_MODE,
+        'default_mode': '',
     }
     ctx.update(kw)
     return ctx
@@ -142,9 +144,10 @@ def exam_new():
         name = (request.form.get('name') or '').strip()
         exam_kind = (request.form.get('exam_kind') or '').strip()
         exam_type = (request.form.get('exam_type') or '').strip()
-        score_mode = (request.form.get('score_mode') or '').strip() or 'converted'
+        # v1.19.16.0：允许留空（=未指定，导入时按文件确定）；非法值一律按未指定处理
+        score_mode = (request.form.get('score_mode') or '').strip()
         if score_mode not in ('converted', 'raw'):
-            score_mode = 'converted'
+            score_mode = ''
         if not name:
             # 名称留空 → 默认「年级 + 日期」（两维度已单独存列，不塞进名称）
             name = f'{grade}{exam_date.isoformat()}'
@@ -179,7 +182,7 @@ def exam_new():
         grade='', exam_date=date.today().isoformat(), name='',
         exam_kind=(kinds[0] if kinds else ''),
         exam_type=('月考' if '月考' in stages else (stages[0] if stages else '')),
-        score_mode='converted'))
+        score_mode=''))
 
 
 # ==================== 考试详情 / 成绩浏览 / 修正 / 重算 / 删除 ====================

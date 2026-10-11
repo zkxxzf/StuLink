@@ -114,10 +114,12 @@ def _default_config():
 EXAM_KINDS = ('联考', '本校考', '小测验')
 # 阶段：教学进度节点 —— 用于“上一场同阶段考试”的定位（分层依据）
 EXAM_STAGES = ('期末考', '期中考', '月考', '限时练', '高三一测', '高三二测')
-# 分数口径：本场划线/排名用哪一套
-DEFAULT_SCORE_MODE = 'converted'          # converted=赋分优先 / raw=原始分
+# 分数口径（v1.19.16.0）：**仅作标记**，不参与导入解析/排名/划线口径判断
+# （口径在导入时按数据确定：有赋分进主分，只给原始分时原始分顶上主分）。
+# 允许留空 = 未指定，由导入时的文件决定。
 SCORE_MODES = ('converted', 'raw')
 SCORE_MODE_LABELS = {'converted': '赋分', 'raw': '原始分'}
+SCORE_MODE_AUTO_LABEL = '按导入确定'      # 未指定（score_mode 为空）时的展示名
 
 
 class Exam(db.Model):
@@ -126,7 +128,7 @@ class Exam(db.Model):
     v1.19.0 四段式重构：新增两个维度
       exam_kind  考试性质（联考 / 本校考 / 小测验）
       exam_type  考试阶段（期末考 / 期中考 / 月考 / 限时练 / 高三一测 / 高三二测）
-    以及 score_mode（本场划线、排名、分析用赋分还是原始分）。
+    以及 score_mode（分数口径**标记**——v1.19.16.0 起允许不选；见字段注释）。
     """
     __bind_key__ = 'grades'
     __tablename__ = 'exams'
@@ -136,8 +138,10 @@ class Exam(db.Model):
     exam_type = db.Column(db.String(20))            # 字典 exam_type（阶段：月考/期中/期末/限时练…）
     # v1.19.0 考试性质（字典 exam_kind：联考/本校考/小测验）
     exam_kind = db.Column(db.String(20))
-    # v1.19.0 分数口径：converted=赋分（默认，划线排名用 score）/ raw=原始分
-    score_mode = db.Column(db.String(10), default=DEFAULT_SCORE_MODE)
+    # 分数口径标记：converted=赋分 / raw=原始分 / 空=未指定（默认，导入时按文件确定）
+    # v1.19.16.0 起允许留空。注意它只是"标记"：导入解析、排名、划线都不读它——
+    # exam_scores.score 在导入时已按「有赋分进主分、只给原始分则原始分顶上」定型。
+    score_mode = db.Column(db.String(10), default='')
     grade = db.Column(db.String(10), nullable=False)  # 2024级/2025级…（与字典一致）
     exam_date = db.Column(db.Date, nullable=False)
     term = db.Column(db.String(20))                  # 学年 2025-2026，由日期推导或登记选择
@@ -159,12 +163,12 @@ class Exam(db.Model):
         return (self.exam_type or '').strip()
 
     def score_mode_label(self):
-        """分数口径展示名：赋分 / 原始分"""
-        return SCORE_MODE_LABELS.get(self.score_mode or DEFAULT_SCORE_MODE, '赋分')
+        """分数口径展示名：赋分 / 原始分 / 按导入确定（未指定）
 
-    def uses_converted(self):
-        """本场是否以赋分为准（划线、排名、分析取 score）"""
-        return (self.score_mode or DEFAULT_SCORE_MODE) != 'raw'
+        v1.19.16.0：未指定显示「按导入确定」，不再回落成「赋分」——
+        否则老师没选却被显示成"赋分"，与本场实际口径不符。
+        """
+        return SCORE_MODE_LABELS.get((self.score_mode or '').strip(), SCORE_MODE_AUTO_LABEL)
 
     def title_with_dimensions(self):
         """“2024级·联考·月考·2026-10-10”式完整标识（缺项自动跳过）"""
