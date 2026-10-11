@@ -16,27 +16,34 @@
 {% endblock %}
 {% block content %}
 <div class="container">
-<div class="d-flex align-items-center justify-content-between mb-3">
-    <h4 class="fw-bold mb-0"><i class="bi bi-door-open"></i> 考场维护</h4>
-    <button class="btn btn-sm btn-primary" onclick="openRoom()">
-        <i class="bi bi-plus-lg"></i> 新增房间
-    </button>
-</div>
+<h4 class="fw-bold mb-3"><i class="bi bi-door-open"></i> 考场维护</h4>
 
 <div class="alert alert-light border small mb-3">
     房间来自「考场房间库」（跨批次共享，共 <strong>{{ rooms|length }}</strong> 个）。
     <b>左边勾选房间 → 点中间「加入 →」归入右边当前分组</b>；一个房间可同时属于多个分组
     （不同年级考试时间错开，可共用）。分组只用于归集与后续建场筛选，
     <strong>不会改动任何历史场次的考场安排</strong>。
+    批量导入 Excel 表头只需「<b>位置</b>」列（可选「<b>备注</b>」列）。
 </div>
 
 <div class="row g-3">
-    {# ===== 左：全部房间 ===== #}
+    {# ===== 左：全部房间（新增 / 批量导入也放在这里） ===== #}
     <div class="col-lg-5">
         <div class="card h-100">
-            <div class="card-header py-2 d-flex justify-content-between align-items-center">
-                <span class="fw-bold"><i class="bi bi-door-closed"></i> 全部房间</span>
-                <span class="text-muted small">共 {{ rooms|length }} 个</span>
+            <div class="card-header py-2 d-flex align-items-center gap-1 flex-wrap">
+                <span class="fw-bold me-1"><i class="bi bi-door-closed"></i> 全部房间</span>
+                <span class="text-muted small me-auto">共 {{ rooms|length }} 个</span>
+                <button class="btn btn-sm btn-primary py-0" onclick="openRoom()" title="新增一个房间">
+                    <i class="bi bi-plus-lg"></i> 新增房间</button>
+                <button class="btn btn-sm btn-outline-primary py-0"
+                        onclick="document.getElementById('roomImpFile').click()"
+                        title="Excel 批量导入学校房间（表头：位置 / 备注）">
+                    <i class="bi bi-upload"></i> 批量导入</button>
+                <input type="file" id="roomImpFile" accept=".xlsx,.xls" style="display:none"
+                       onchange="importRooms(this)">
+                <a class="btn btn-sm btn-outline-secondary py-0"
+                   href="{{ url_for('grades.exam_rooms_template') }}" title="下载导入模板（位置 / 备注）">
+                    <i class="bi bi-download"></i></a>
             </div>
             <div class="p-2 border-bottom">
                 <input id="rmSearch" class="form-control form-control-sm" placeholder="搜索位置 / 备注">
@@ -290,6 +297,22 @@ function delRoom(id) {
         state.rooms = state.rooms.filter(function (x) { return x.id !== id; });
         renderAll();
     });
+}
+
+// v1.19.32.0 批量导入学校房间（Excel：位置 / 备注；按位置去重，已有则更新备注）
+function importRooms(input) {
+    if (!input.files.length) return;
+    var fd = new FormData();
+    fd.append('file', input.files[0]);
+    $.ajax({url: URL_ROOMS + '/import', type: 'POST', data: fd,
+            processData: false, contentType: false})
+        .done(function (d) {
+            input.value = '';
+            if (!d || !d.ok) { alert((d && d.msg) || '导入失败'); return; }
+            alert('导入完成：新增 ' + d.added + ' 个，更新 ' + d.updated + ' 个，跳过 ' + d.skipped + ' 个');
+            location.reload();     // 批量导入后直接刷新，重新拉全量列表
+        })
+        .fail(function () { input.value = ''; alert('请求失败'); });
 }
 
 // ---- 绑定 ----

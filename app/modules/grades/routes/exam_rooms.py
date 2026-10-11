@@ -10,8 +10,13 @@
 注意：分组只影响本页归集与后续建场筛选，**不改动任何历史场次的考场**
 （`affair_rooms` 从属于各自考务批次，彼此独立）。
 """
-from flask import render_template, request, jsonify
+from flask import render_template, request, jsonify, send_file
 from flask_login import login_required, current_user
+
+import io
+
+import openpyxl
+from openpyxl.styles import Font
 
 from app.extensions import db
 from app.models.grades import AffairRoomLib, ExamRoomGroup, ExamRoomGroupMap
@@ -19,6 +24,7 @@ from app.modules.grades import bp
 from app.utils.decorators import perm_required
 from app.utils.helpers import log_operation
 from app.utils.text_guard import sanitize_label
+from app.utils.upload_guard import validate_upload
 
 DEFAULT_GROUPS = ('高一考场', '高二考场', '高三考场')
 
@@ -110,6 +116,91 @@ def exam_room_delete(lid):
     db.session.commit()
     log_operation(current_user, '删除', '考场房间', lid, loc, module='grades')
     return jsonify({'ok': True})
+
+
+@bp.route('/rooms/template')
+@login_required
+@perm_required('grades.edit')
+def exam_rooms_template():
+    """v1.19.32.0 房间库批量导入模板（只需「位置」列，「备注」可选）"""
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = '房间'
+    ws.append(['位置', '备注'])
+    ws.append(['东211', '2楼·东侧'])
+    for ci in (1, 2):
+        ws.cell(row=1, column=ci).font = Font(bold=True)
+    ws.column_dimensions['A'].width = 18
+    ws.column_dimensions['B'].width = 22
+    out = io.BytesIO()
+    wb.save(out)
+    out.seek(0)
+    return send_file(out, as_attachment=True, download_name='房间导入模板.xlsx',
+                     mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+
+
+@bp.route('/rooms/import', methods=['POST'])
+@login_required
+@perm_required('grades.edit')
+def exam_rooms_import():
+    """v1.19.32.0 批量导入学校房间（写入房间库 affair_room_libs）。
+
+    表头容错：位置/房间/地点/考场 任一即可，备注/说明 可选（大小写与空格不敏感）。
+    按「位置」去重：库里已有 → 仅更新备注；没有 → 新增。返回新增/更新/跳过条数。
+    """
+    f = request.files.get('file')
+    if not f or not f.filename:
+        return jsonify({'ok': False, 'msg': '请选择 Excel 文件'})
+    ok, msg = validate_upload(f.filename, allowed_exts=['xlsx', 'xls'], stream=f.stream)
+    if not ok:
+        return jsonify({'ok': False, 'msg': msg})
+    try:
+        wb = openpyxl.load_workbook(f.stream, read_only=True, data_only=True)
+    except Exception as e:
+        return jsonify({'ok': False, 'msg': f'Excel 解析失败：{e}'})
+    ws = wb.active
+    rows = list(ws.iter_rows(values_only=True))
+    if not rows:
+        return jsonify({'ok': False, 'msg': '文件为空'})
+    head = [str(c).strip() if c is not None else '' for c in rows[0]]
+
+    def _find(names):
+        for i, h in enumerate(head):
+            if h and any(n in h for n in names):
+                return i
+        return None
+
+    i_loc = _find(('位置', '房间', '地点', '考场'))
+    i_note = _find(('备注', '说明'))
+    if i_loc is None:
+        return jsonify({'ok': False, 'msg': '表头需包含「位置」列（可另加「备注」列）'})
+
+    exist = {r.location: r for r in AffairRoomLib.query.all()}
+    added = updated = skipped = 0
+    for r in rows[1:]:
+        loc = sanitize_label(str(r[i_loc]) if i_loc < len(r) and r[i_loc] is not None else '', 100)
+        if not loc:
+            skipped += 1
+            continue
+        note = ''
+        if i_note is not None and i_note < len(r) and r[i_note] is not None:
+            note = sanitize_label(str(r[i_note]), 100)
+        row = exist.get(loc)
+        if row is None:
+            row = AffairRoomLib(location=loc, note=note)
+            db.session.add(row)
+            exist[loc] = row
+            added += 1
+        elif note and note != (row.note or ''):
+            row.note = note
+            updated += 1
+        else:
+            skipped += 1          # 已存在且备注无变化
+    db.session.commit()
+    wb.close()
+    log_operation(current_user, '导入', '考场房间', 0,
+                  f'新增{added}个/更新{updated}个/跳过{skipped}个', module='grades')
+    return jsonify({'ok': True, 'added': added, 'updated': updated, 'skipped': skipped})
 
 
 @bp.route('/rooms/<int:lid>/groups', methods=['POST'])
