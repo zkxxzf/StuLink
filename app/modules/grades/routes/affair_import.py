@@ -21,11 +21,10 @@ from flask import render_template, request, jsonify
 from flask_login import login_required, current_user
 
 from app.extensions import db
-from app.models import Student
-from app.models.grades import ExamAffair, AffairRoom, AffairStudent
+from app.models.grades import ExamAffair
 from app.modules.grades import bp
 from app.modules.grades.services import ai_import_service as aisvc
-from app.modules.grades.utils import normalize_class_name
+from app.modules.grades.services import affair_import_service as afs
 from app.modules.grades.routes.exam_affairs import _get_affair_checked
 from app.utils.decorators import perm_required
 from app.utils.helpers import log_operation
@@ -33,21 +32,17 @@ from app.utils.helpers import log_operation
 MAX_FILES = 4
 MAX_FILE_MB = 20
 
+# 工作表用途（考务页口径）：成绩/分数线等不属于考务 → 不使用
+_KIND_MAP = {'affair_students': 'students', 'affair_rooms': 'rooms'}
+
 
 def _norm_room(no):
-    s = str(no or '').strip()
-    return s.zfill(2) if s.isdigit() else s
+    return afs.norm_room(no)
 
 
 def _guess_kind(headers):
-    """猜这个 sheet 是「学生名单」还是「考场位置」还是「不使用」"""
-    a = aisvc.classify_affair_headers(headers)
-    if (a.get('room_loc') is not None and a.get('room') is not None
-            and 'name' not in a and 'no' not in a and 'exam_no' not in a):
-        return 'rooms'
-    if any(k in a for k in ('no', 'name', 'exam_no')):
-        return 'students'
-    return 'skip'
+    """猜这个 sheet 是「学生名单」/「考场位置」/「不使用」"""
+    return _KIND_MAP.get(aisvc.guess_sheet_kind(headers), 'skip')
 
 
 def _ai_cfg():
@@ -162,64 +157,6 @@ def affair_ai_import_analyze(aid):
                    ai_error=ai_err, errors=errors)
 
 
-def _resolve_no(affair, rows):
-    """把只有考号/姓名的行解析出学号（考号→学号、姓名+班级）"""
-    need = [r for r in rows if not r.get('no')]
-    if not need:
-        return rows, []
-    no_map, name_map = {}, {}
-    for s in AffairStudent.query.filter_by(affair_id=affair.id).all():
-        if s.exam_number:
-            no_map.setdefault(s.exam_number, s.student_no)
-        if s.name and s.class_name:
-            name_map.setdefault((s.name, normalize_class_name(s.class_name)), s.student_no)
-    for st in Student.query.filter_by(grade=affair.grade).all():
-        if st.name and st.class_name:
-            name_map.setdefault((st.name, normalize_class_name(st.class_name)), st.student_number)
-    errs, miss = [], 0
-    for r in rows:
-        if r.get('no'):
-            continue
-        cand = no_map.get(r.get('exam_no')) if r.get('exam_no') else None
-        if not cand:
-            nm = r.get('name') or ''
-            cls = normalize_class_name(r.get('class_name') or '')
-            cand = name_map.get((nm, cls)) if (nm and cls) else None
-        if cand:
-            r['no'] = cand
-        else:
-            miss += 1
-            errs.append({'line': r.get('line', 0),
-                         'no': r.get('exam_no') or r.get('name') or '',
-                         'reason': '未匹配到学号（考号/姓名+班级）'})
-    if miss:
-        rows[:] = [r for r in rows if r.get('no')]
-    return rows, errs
-
-
-def _parse(payload):
-    """按前端提交的 sheets 解析 → (students, rooms, errors)"""
-    students, rooms, errors = {}, {}, []
-    for item in payload or []:
-        kind = (item.get('kind') or 'skip')
-        sh = item.get('_sheet')
-        if sh is None or kind == 'skip':
-            continue
-        rows, errs = aisvc.rows_from_affair_mapping(sh, item.get('mapping') or {})
-        errors.extend(errs)
-        if kind == 'rooms':
-            for r in rows:
-                rn = _norm_room(r.get('room') or r.get('no'))
-                loc = r.get('room_loc') or r.get('name') or ''
-                if rn and loc:
-                    rooms[rn] = loc
-        else:                                     # students
-            for r in rows:
-                key = r.get('no') or r.get('exam_no') or (r.get('name') or '') + '|' + (r.get('class_name') or '')
-                students[key] = r
-    return list(students.values()), rooms, errors
-
-
 @bp.route('/affairs/<int:aid>/ai-import/apply', methods=['POST'])
 @login_required
 @perm_required('grades.edit')
@@ -248,13 +185,13 @@ def affair_ai_import_apply(aid):
     if not payload:
         return jsonify(success=False, message='没有可用工作表')
 
-    rows, rooms, errors = _parse(payload)
-    rows, rerr = _resolve_no(affair, rows)
+    rows, rooms, errors = afs.parse(payload)
+    rows, rerr = afs.resolve_student_no(affair, rows)
     errors.extend(rerr)
     n_attend = sum(1 for r in rows if r.get('attend') is not False)
     n_seat = sum(1 for r in rows if r.get('room'))
     preview = {'students': len(rows), 'attend': n_attend, 'seated': n_seat,
-               'rooms': len({_norm_room(r['room']) for r in rows if r.get('room')}) or len(rooms),
+               'rooms': len({afs.norm_room(r['room']) for r in rows if r.get('room')}) or len(rooms),
                'room_locations': len(rooms), 'errors': len(errors)}
     if dry:
         return jsonify(success=True, preview=preview, errors=errors[:20])
@@ -263,60 +200,11 @@ def affair_ai_import_apply(aid):
                        errors=errors[:20])
 
     try:
-        # 1) 考场：先把已有批次考场建索引
-        exist_rooms = {r.room_no: r for r in AffairRoom.query.filter_by(affair_id=affair.id).all()}
-        room_nos = {_norm_room(r['room']) for r in rows if r.get('room')}
-        for rn in sorted(room_nos):
-            row = exist_rooms.get(rn)
-            if row is None:
-                row = AffairRoom(affair_id=affair.id, room_no=rn, capacity=30, subject='默认')
-                db.session.add(row)
-                exist_rooms[rn] = row
-            if rooms.get(rn):
-                row.location = rooms[rn]
-        for rn, loc in rooms.items():            # 位置表里、但没人坐的考场也建出来
-            if rn not in exist_rooms:
-                db.session.add(AffairRoom(affair_id=affair.id, room_no=rn,
-                                          location=loc, capacity=30, subject='默认'))
-
-        # 2) 名单：upsert
-        exist = {s.student_no: s for s in AffairStudent.query.filter_by(affair_id=affair.id).all()}
-        added = updated = 0
-        keep = set()
-        for r in rows:
-            no = r['no']
-            keep.add(no)
-            st = exist.get(no)
-            if st is None:
-                st = AffairStudent(affair_id=affair.id, student_no=no)
-                db.session.add(st)
-                exist[no] = st
-                added += 1
-            else:
-                updated += 1
-            st.name = r.get('name') or st.name
-            st.class_name = normalize_class_name(r.get('class_name') or '') or st.class_name
-            st.subject_selection = r.get('selection') or st.subject_selection or ''
-            st.subject = r.get('selection') or '默认'
-            st.is_attend = (r.get('attend') is not False)
-            st.exam_number = r.get('exam_no') or st.exam_number
-            st.room_no = _norm_room(r.get('room')) or None
-            try:
-                st.seat_no = int(str(r.get('seat')).strip()) if str(r.get('seat') or '').strip() else None
-            except ValueError:
-                st.seat_no = None
-        removed = 0
-        if replace:
-            for no, st in list(exist.items()):
-                if no not in keep:
-                    db.session.delete(st)
-                    removed += 1
-        if room_nos:
-            affair.status = 'arranged'
+        added, updated, removed, n_rooms = afs.apply_arrangement(affair, rows, rooms, replace)
         db.session.commit()
         log_operation(current_user, '导入', '考务批次', affair.id,
                       'AI导入考生安排：考生%d（参加%d/编排%d）考场%d 新增%d/更新%d/移除%d'
-                      % (len(rows), n_attend, n_seat, len(room_nos), added, updated, removed),
+                      % (len(rows), n_attend, n_seat, n_rooms, added, updated, removed),
                       module='grades')
     except Exception as e:  # noqa: BLE001
         db.session.rollback()

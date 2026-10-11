@@ -661,6 +661,26 @@ def parse_bands(sheet):
     return res, []
 
 
+def guess_sheet_kind(headers):
+    """猜一张工作表的用途（成绩页/考务页共用）：
+
+    'bands' 各科分数线 ｜ 'scores' 成绩 ｜ 'affair_students' 考生安排 ｜
+    'affair_rooms' 考场位置 ｜ 'skip' 不使用
+    """
+    if looks_like_band_sheet(headers):
+        return 'bands'
+    sc = classify_headers(headers)
+    if sc['subjects'] or sc['raw_subjects']:
+        return 'scores'
+    af = classify_affair_headers(headers)
+    has_id = any(k in af for k in ('no', 'name', 'exam_no'))
+    if af.get('room_loc') is not None and af.get('room') is not None and not has_id:
+        return 'affair_rooms'
+    if has_id:
+        return 'affair_students'
+    return 'skip'
+
+
 def read_sheet_rows(stream, sheet_name, header_row, max_rows=MAX_SCAN_ROWS):
     """按需重读某个 sheet 的全量行（probe 只存样本，解析时再取全量）"""
     wb = _open_workbook(stream)

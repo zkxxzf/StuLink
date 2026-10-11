@@ -76,12 +76,17 @@
                     .append('<option value="raw">这份是：原始成绩</option>')
                     .append('<option value="both">同表内两者都有</option>')
                     .append('<option value="bands">这份是：各科分数线</option>')
+                    .append('<option value="affair_students">这份是：考生安排（写入本场考务）</option>')
+                    .append('<option value="affair_rooms">这份是：考场位置（写入本场考务）</option>')
                     .append('<option value="skip">不使用此工作表</option>'));
-            // 默认角色：分数线表 → bands；AI 判断的整表角色；若该表没识别出任何科目 → 不使用
+            // 默认角色：分数线 / 考生安排 / 考场位置 由服务端识别；成绩表按 AI 判断的整表角色
             var auto = sh.auto || {};
             var hasSubj = Object.keys(auto.subjects || {}).length
                        || Object.keys(auto.raw_subjects || {}).length;
             var role = (sh.kind === 'bands') ? 'bands'
+                     : (sh.kind === 'affair_students') ? 'affair_students'
+                     : (sh.kind === 'affair_rooms') ? 'affair_rooms'
+                     : (sh.kind === 'skip') ? 'skip'
                      : !hasSubj ? 'skip'
                      : (SUGGEST.score_kind === 'raw') ? 'raw'
                      : (SUGGEST.score_kind === 'both') ? 'both' : 'converted';
