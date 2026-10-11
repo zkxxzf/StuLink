@@ -570,6 +570,97 @@ def build_affair_ai_prompt(probe_data, affair):
     return system, user
 
 
+# ==================== 各科分数线（→ 考试分层）（v1.19.1） ====================
+
+def _direction_of(text):
+    """从块标题里取方向（物理/历史）"""
+    t = text or ''
+    if '物理' in t or t.strip().startswith('理'):
+        return '物理'
+    if '历史' in t or t.strip().startswith('文'):
+        return '历史'
+    return ''
+
+
+def looks_like_band_sheet(headers):
+    """像「各科分数线」表：≥2 个以『线』结尾的列，且不含学号/姓名/考号"""
+    labels = []
+    for h in headers:
+        if not h:
+            continue
+        _p, c = _split_label(h)
+        labels.append(c or h)
+    n_line = sum(1 for L in labels if L.endswith('线'))
+    if n_line < 2:
+        return False
+    if any(('学号' in L) or ('姓名' in L) or ('考号' in L) for L in labels):
+        return False
+    return True
+
+
+def classify_band_headers(headers):
+    """把分数线表头拆成若干「块」（每块一个方向）：
+
+    [{'direction': '物理'|'历史'|'', 'subject_col': 列号, 'bands': [(线名, 列号)]}]
+    兼容：无块标题（单块）时方向为 ''；块标题形如「总分(物理)」。
+    """
+    blocks, order = {}, []
+    for j, h in enumerate(headers):
+        if not h:
+            continue
+        parent, child = _split_label(h)
+        label = child or parent
+        direction = _direction_of(parent) if child else ''
+        if direction not in blocks:
+            blocks[direction] = {'direction': direction, 'subject_col': None, 'bands': []}
+            order.append(direction)
+        b = blocks[direction]
+        if '科目' in label or '学科' in label:
+            b['subject_col'] = j
+        elif label.endswith('线'):
+            b['bands'].append((label, j))
+    out = []
+    for d in order:
+        b = blocks[d]
+        if not b['bands']:
+            continue
+        if b['subject_col'] is None:                 # 没有「科目」列：取最左侧分数线列的左边一列
+            b['subject_col'] = max(0, min(j for _n, j in b['bands']) - 1)
+        out.append(b)
+    return out
+
+
+def parse_bands(sheet):
+    """解析分数线表 → ({(方向, 科目): [(线名, 分数)]}, errors)
+
+    线名按文件里的列顺序；分值为空/≤0 视为「未划线」，跳过。
+    """
+    blocks = classify_band_headers(sheet['headers'])
+    if not blocks:
+        return {}, [{'line': sheet['header_row'], 'no': '',
+                     'reason': '未识别到分数线列（需含「科目」列与以「线」结尾的列）'}]
+    res = {}
+    for lineno, cells in sheet['rows']:
+        if lineno <= sheet['header_row']:
+            continue
+        for b in blocks:
+            sc = b['subject_col']
+            raw_sub = _clean_bad(cells[sc]) if (sc is not None and sc < len(cells)) else ''
+            if not raw_sub:
+                continue
+            subject = TOTAL_SUBJECT if raw_sub in ('总分', '总成绩') else SUBJ_ALIAS.get(raw_sub, raw_sub)
+            lst = res.setdefault((b['direction'], subject), [])
+            for name, j in b['bands']:
+                v = _num(cells[j] if j < len(cells) else None)
+                if v is None or v <= 0:
+                    continue
+                lst.append((name, v))
+    res = {k: v for k, v in res.items() if v}
+    if not res:
+        return {}, [{'line': sheet['header_row'], 'no': '', 'reason': '分数线表里没有有效数值'}]
+    return res, []
+
+
 def read_sheet_rows(stream, sheet_name, header_row, max_rows=MAX_SCAN_ROWS):
     """按需重读某个 sheet 的全量行（probe 只存样本，解析时再取全量）"""
     wb = _open_workbook(stream)

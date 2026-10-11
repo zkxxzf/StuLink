@@ -75,12 +75,14 @@
                     .append('<option value="converted">这份是：赋分成绩</option>')
                     .append('<option value="raw">这份是：原始成绩</option>')
                     .append('<option value="both">同表内两者都有</option>')
+                    .append('<option value="bands">这份是：各科分数线</option>')
                     .append('<option value="skip">不使用此工作表</option>'));
-            // 默认角色：AI 判断的整表角色；若该表没识别出任何科目（分析表/打印表）→ 默认不使用
+            // 默认角色：分数线表 → bands；AI 判断的整表角色；若该表没识别出任何科目 → 不使用
             var auto = sh.auto || {};
             var hasSubj = Object.keys(auto.subjects || {}).length
                        || Object.keys(auto.raw_subjects || {}).length;
-            var role = !hasSubj ? 'skip'
+            var role = (sh.kind === 'bands') ? 'bands'
+                     : !hasSubj ? 'skip'
                      : (SUGGEST.score_kind === 'raw') ? 'raw'
                      : (SUGGEST.score_kind === 'both') ? 'both' : 'converted';
             card.append(head.append($('<span>').addClass('ms-auto badge bg-light text-dark border')

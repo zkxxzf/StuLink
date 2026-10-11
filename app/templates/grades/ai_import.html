@@ -20,6 +20,8 @@
         <li>AI 会先问：这份是<b>赋分</b>、<b>原始</b>还是<b>两者都有</b>；如果是两个文件（赋分表 + 原始表），
             <b>建议一并选择一起上传</b>，系统会自动合并成双轨（赋分进主分、原始分另存）。</li>
         <li>没配置 AI Key 也能用：跳过后在下方<b>手工指定每列用途</b>即可。</li>
+        <li>「<b>各科分数线</b>」表（科目 × 清北/985/211/特控/本科线）也会自动识别，
+            导入后成为本场考试的<b>分层划线</b>（并按线名绑定分层模板）。</li>
     </ul>
 </div>
 
@@ -29,7 +31,7 @@
     <div class="card-body">
         <input type="file" id="aiFiles" class="form-control form-control-sm" multiple
                accept=".xlsx,.xlsm">
-        <div class="form-text">可多选（最多 4 个）；支持任意表头与多工作表。</div>
+        <div class="form-text">可多选（最多 8 个）；支持任意表头与多工作表。</div>
         <button class="btn btn-primary btn-sm mt-2" id="aiAnalyze">
             <i class="bi bi-magic"></i> 让 AI 识别
         </button>
