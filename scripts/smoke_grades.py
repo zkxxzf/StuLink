@@ -395,7 +395,7 @@ with app.test_client() as c:
         r = c.get(url)
         check(f'页面 {url}', r.status_code == 200, str(r.status_code))
 
-    # ---- v1.19.25.0 表头与数字对齐：右对齐列的排序三角必须在文字左侧 ----
+    # ---- v1.19.26.0 表头与数字对齐：右对齐列的排序三角必须在文字左侧 ----
     # 三角若在文字右侧会占宽、把右对齐的表头文字往左挤，与下面的数字错开。
     html = c.get(f'/grades/exams/{eid}').get_data(as_text=True)
     check('表头：总分列三角在文字左侧', '></i>总分' in html and '总分<i' not in html)
