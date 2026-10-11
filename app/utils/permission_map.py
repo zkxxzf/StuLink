@@ -57,9 +57,9 @@ MODULES = [
             {'key': 'manage', 'name': '教学管理',
              'read': [],
              'write': ['grades.edit', 'grades.import', 'grades.settings']},
-            # v1.19.8.0：成绩单改分单独授权（默认只给管理员与教务处/考务管理员，
-            # 避免年级长等「看得到成绩单」就能改分）
-            {'key': 'score_edit', 'name': '成绩修改（改分）',
+            # v1.19.8.0：成绩单改分单独授权。standalone=True 表示**不随模块「写入」批发**，
+            # 只能单独勾选（默认所有人不可见，管理员角色天然可用）；「考务管理员」另行建组授予。
+            {'key': 'score_edit', 'name': '成绩修改（改分）', 'standalone': True,
              'read': [], 'write': ['grades.score_edit']},
             {'key': 'teachers', 'name': '任课映射',
              'read': [], 'write': ['grades.teachers']},
@@ -206,13 +206,16 @@ def module_levels_to_item_levels(module_levels):
 
     规则：模块"只读"时仅有查看能力的子功能为只读，其余子功能不可见；
     模块"写入"时全部子功能写入；模块"不可见"时全部不可见。
+    例外：standalone=True 的子功能不随模块档位批发（只能单独勾选，默认不可见）。
     """
     out = {}
     for m in MODULES:
         ml = (module_levels or {}).get(m['key'], LEVEL_NONE)
         for it in m['items']:
             iid = item_id(m['key'], it['key'])
-            if ml == LEVEL_WRITE:
+            if it.get('standalone'):
+                out[iid] = LEVEL_NONE
+            elif ml == LEVEL_WRITE:
                 out[iid] = LEVEL_WRITE
             elif ml == LEVEL_READ:
                 out[iid] = LEVEL_READ if it.get('read') else LEVEL_NONE

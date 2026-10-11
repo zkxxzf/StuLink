@@ -127,7 +127,7 @@ PERMISSION_GROUPS = [
             'points.import', 'points.export', 'points.rules',
             'grades.view', 'grades.edit',
             'grades.import', 'grades.settings', 'grades.teachers', 'grades.student_query',
-            'grades.score_edit',   # v1.19.8.0：成绩单改分（管理员/教务处/考务管理员）
+            'grades.score_edit',   # v1.19.8.0：成绩单改分（管理员天然可用；考务管理员另建组授予）
             # v1.9.2 合并：master 新增选科维护页权限 + first 学术/画像/工作台权限（取并集）
             'grades.subject_mgmt',
             'academic.view', 'academic.timetable', 'academic.swap',
