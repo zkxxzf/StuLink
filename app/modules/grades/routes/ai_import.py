@@ -122,7 +122,7 @@ def exam_ai_import_analyze(exam_id):
             ok, payload, _sec = ai_service._chat_completions(
                 resolved, [{'role': 'system', 'content': system},
                            {'role': 'user', 'content': user}],
-                timeout=60, max_tokens=1200)
+                timeout=90, max_tokens=3000)
             if ok:
                 text = ''
                 try:
@@ -306,7 +306,11 @@ def exam_ai_import_apply(exam_id):
         return jsonify(success=True, preview=preview, errors=errors[:20])
 
     # 正式写入（复用既有导入管道；整场覆盖式，避免与旧数据混在一起）
-    parsed = {'headers': {'no': True}, 'rows': rows}
+    # store_service.apply_import 需要 headers['subjects']（它按这些科目列遍历写入），
+    # 之前只给了 {'no': True} → KeyError 'subjects'，导致导入阶段整批回滚。
+    file_subjects = [s for s in SUBJECTS
+                     if any(s in (r.get('subjects') or {}) for r in rows)]
+    parsed = {'headers': {'no': True, 'subjects': file_subjects}, 'rows': rows}
     mode = 'B' if (data.get('mode') or 'B') == 'B' else 'A'
     try:
         summary = store_service.apply_import(exam, parsed, mode=mode)
