@@ -55,7 +55,7 @@ def exam_nav():
     """当前请求的考试上下文；不在考试上下文时返回 None
 
     返回 dict：
-      exam / exam_id / section / affair_id / steps / next_step
+      exam / exam_id / section / affair_id / affair / steps
     """
     if request.blueprint != 'grades':
         return None
@@ -105,7 +105,6 @@ def _resolve():
         {'label': '成绩导入', 'done': imported, 'key': 'import'},
         {'label': '成绩分析', 'done': banded, 'key': 'analysis'},
     ]
-    nxt = next((s for s in steps if not s['done']), None)
     return {'exam': exam, 'exam_id': exam.id, 'section': sec or 'overview',
             'affair_id': (affair.id if affair else None),
-            'affair': affair, 'steps': steps, 'next_step': nxt}
+            'affair': affair, 'steps': steps}

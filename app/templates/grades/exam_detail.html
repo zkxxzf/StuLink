@@ -1,5 +1,11 @@
 {% extends "base.html" %}
 {% block title %}{{ exam.name }} - 考试详情{% endblock %}
+{% block extra_css %}
+<style>
+  /* v1.19.6.0：仅单科分数可点击修改（总分由各科自动汇总，不可改） */
+  #scoreTable td.score-cell { cursor: pointer; }
+</style>
+{% endblock %}
 {% block content %}
 <div class="d-flex align-items-center mb-3 flex-wrap gap-2" id="examToolbar" data-exam-id="{{ exam.id }}">
     <a href="{{ url_for('grades.exams_list') }}" class="btn btn-sm btn-outline-secondary">
@@ -95,7 +101,7 @@
         <div class="d-flex align-items-center flex-wrap gap-2">
             <h6 class="mb-0"><i class="bi bi-people"></i> 成绩单
                 {% if cur_class %}（{{ cur_class }} · {{ total }} 人）{% else %}（{{ total }} 人）{% endif %}</h6>
-            <span class="text-muted small">点击任一分数可修改（输入数字保存，输入 del 删除该科=缺考）；
+            <span class="text-muted small">点击<b>单科</b>分数可修改（弹窗二次确认、按满分校验；总分由各科自动汇总，不可直接改）；
                 <span class="text-muted">「未选」= 不在该生选科组合内（不计缺考）</span></span>
         </div>
         {# v1.19.0 按班级查看：服务端筛选（链接可分享/收藏），不选=全部 #}
@@ -130,8 +136,9 @@
                 <td>{{ stu.class_name }}</td>
                 <td>{{ stu.direction }}</td>
                 <td class="small text-muted">{{ stu.selection }}</td>
-                <td class="text-end fw-bold score-cell" data-sid="{{ stu.total_sid or '' }}"
-                    title="点击修改{% if stu.total_raw is defined and stu.total_raw is not none %}｜原始分 {{ stu.total_raw }}{% endif %}">
+                {# v1.19.6.0：总分由各科自动汇总，不可点击修改 #}
+                <td class="text-end fw-bold"
+                    title="总分 = 各科成绩之和（自动汇总，不可直接修改）{% if stu.total_raw is defined and stu.total_raw is not none %}｜原始分 {{ stu.total_raw }}{% endif %}">
                     {{ stu.total if stu.total is not none else '—' }}
                     {% if stu.total_raw is defined and stu.total_raw is not none %}
                     <span class="d-block text-muted small fw-normal">原{{ stu.total_raw }}</span>
@@ -145,9 +152,10 @@
                 {% for s in subjects %}
                 {% set cell = stu.subjects.get(s) %}
                 {% set unsel = s in (stu.unselected or []) %}
-                <td class="text-end small {{ 'text-muted' if unsel else ('score-cell ' + 'table-warning' if cell is none else '') }}"
+                {# v1.19.6.0：有成绩的单科才是可点的 score-cell；缺考黄色高亮但不可点；未选灰字 #}
+                <td class="text-end small {{ 'text-muted' if unsel else ('table-warning' if cell is none else 'score-cell') }}"
                     data-sid="{{ cell.id if cell else '' }}"
-                    title="{{ '未选（不在该生选科组合内）' if unsel else ('缺考，点击补录' if cell is none else '点击修改' + ('｜原始分 ' ~ cell.raw if cell.raw is not none else '')) }}">
+                    title="{{ '未选（不在该生选科组合内）' if unsel else ('缺考（无该科成绩）' if cell is none else '点击修改' + ('｜原始分 ' ~ cell.raw if cell.raw is not none else '')) }}">
                     {{ cell.score if cell else ('未选' if unsel else '缺') }}
                     {% if cell and cell.raw is not none %}
                     <span class="d-block text-muted small">原{{ cell.raw }}</span>
@@ -209,11 +217,39 @@
         </div>
     </div>
 </div>
+
+{# v1.19.6.0 单科改分：弹窗二次确认 + 满分校验（总分不可改） #}
+<div class="modal fade" id="scoreModal" tabindex="-1">
+    <div class="modal-dialog modal-dialog-centered modal-sm">
+        <div class="modal-content">
+            <div class="modal-header py-2">
+                <h6 class="modal-title" id="scTitle">修改单科分数</h6>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <div class="small text-muted mb-2" id="scWho"></div>
+                <label class="form-label small mb-1">新分数（0 ~ <span id="scLimit">100</span>）</label>
+                <input type="number" step="0.5" min="0" class="form-control form-control-sm" id="scInput">
+                <div class="form-text text-danger d-none" id="scErr"></div>
+                <div class="form-check mt-2">
+                    <input class="form-check-input" type="checkbox" id="scAbsent">
+                    <label class="form-check-label small text-danger" for="scAbsent">该科缺考（删除此科成绩）</label>
+                </div>
+            </div>
+            <div class="modal-footer py-2">
+                <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">取消</button>
+                <button type="button" class="btn btn-primary btn-sm" id="scSave">保存修改</button>
+            </div>
+        </div>
+    </div>
+</div>
 {% endblock %}
 {% block extra_js %}
 <script>
 $(function(){
     var examId = $('#examToolbar').data('examId');
+    // 各科满分（用于改分弹窗的范围校验）；总分不在此列，也不可改
+    var FULL_MARKS = {{ full_marks|tojson }};
 
     /* ---------- 点击考试名称：就地改名（同年级内需唯一） ---------- */
     $('#examName').on('click', function(){
@@ -267,29 +303,61 @@ $(function(){
             });
     }
 
-    /* 绑定分数单元格点击修分（每次局部刷新 tbody 后需重新绑定） */
+    /* ---------- 单科改分：弹窗二次确认 + 满分校验（总分由各科汇总，不可改） ---------- */
+    var scCell = null, scSid = null;
+
+    // 事件委托绑在表上：AJAX 局部刷新 tbody 后依然有效，无需逐个重新绑定
     function bindScoreCells(){
-        $('.score-cell[data-sid]').each(function(){
+        $('#scoreTable').off('click.sc').on('click.sc', 'td.score-cell[data-sid]', function(){
             var td = $(this), sid = td.data('sid');
             if(!sid){ return; }
-            td.css('cursor', 'pointer');
-            td.off('click').on('click', function(){
-                var label = td.closest('table').find('th').eq(td.index()).text() || '分数';
-                var cur = td.text().trim();
-                if(cur === '—' || cur === '缺'){ cur = ''; }
-                var input = prompt('修改「' + label + '」分数：\n输入数字保存；输入 del 删除该科（缺考）', cur);
-                if(input === null){ return; }
-                var v = input.trim();
-                if(v === ''){ return; }
-                if(v.toLowerCase() === 'del'){
-                    if(!confirm('删除该科成绩（视为缺考）？修改后需点击“重新计算排名”。')){ return; }
-                    $.post('/grades/exams/' + examId + '/score/' + sid + '/delete', function(){ loadPage(curPage); });
-                } else {
-                    $.post('/grades/exams/' + examId + '/score/' + sid, {score: v}, function(){ loadPage(curPage); });
-                }
-            });
+            scCell = td; scSid = sid;
+            var label = td.closest('table').find('th').eq(td.index()).text().trim() || '分数';
+            var row = td.closest('tr');
+            var cur = td.clone().children().remove().end().text().trim();  // 去掉「原xx」小字
+            if(cur === '—' || cur === '缺'){ cur = ''; }
+            var limit = FULL_MARKS[label];
+            $('#scTitle').text('修改「' + label + '」分数');
+            $('#scWho').text('学号 ' + (row.data('no') || '') + '　' + row.find('td').eq(1).text().trim());
+            $('#scLimit').text(limit != null ? limit : '—');
+            $('#scInput').val(cur).attr('max', limit != null ? limit : '');
+            $('#scAbsent').prop('checked', false);
+            $('#scErr').addClass('d-none').text('');
+            $('#scoreModal').modal('show');
         });
     }
+
+    function scShowErr(t){ $('#scErr').removeClass('d-none').text(t); }
+
+    $('#scSave').on('click', function(){
+        if(!scSid){ return; }
+        var label = scCell
+            ? (scCell.closest('table').find('th').eq(scCell.index()).text().trim() || '分数')
+            : '分数';
+        var limit = FULL_MARKS[label];
+        var $b = $(this).prop('disabled', true).text('保存中…');
+        function reset(){ $b.prop('disabled', false).text('保存修改'); }
+        function done(){ $('#scoreModal').modal('hide'); loadPage(curPage); }
+
+        if($('#scAbsent').prop('checked')){          // 该科缺考 → 删除该科成绩
+            $.post('/grades/exams/' + examId + '/score/' + scSid + '/delete')
+                .done(done).fail(function(){ reset(); scShowErr('操作失败，请重试'); });
+            return;
+        }
+        var v = $.trim($('#scInput').val());
+        if(v === ''){ reset(); scShowErr('请输入分数，或勾选“该科缺考”'); return; }
+        var num = Number(v);
+        if(!isFinite(num)){ reset(); scShowErr('请输入数字'); return; }
+        if(num < 0){ reset(); scShowErr('分数不能小于 0'); return; }
+        if(limit != null && num > limit){ reset(); scShowErr('分数不能超过满分 ' + limit); return; }
+        $.post('/grades/exams/' + examId + '/score/' + scSid, {score: v})
+            .done(done).fail(function(){ reset(); scShowErr('保存失败，请重试'); });
+    });
+
+    // 弹窗内回车 = 保存
+    $('#scInput').on('keydown', function(e){
+        if(e.key === 'Enter'){ e.preventDefault(); $('#scSave').trigger('click'); }
+    });
 
     $('#pgSize').on('change', function(){
         var v = $(this).val();

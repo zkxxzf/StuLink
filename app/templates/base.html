@@ -146,11 +146,10 @@
         }
         .sidebar-float .efn-group:hover { background: #e2e8f0; }
         .sidebar-float .efn-group .bi { font-size: 11px; color: #94a3b8; }
-        .sidebar-float .efn-next {
-            padding: 8px 12px; margin-top: 6px; border-top: 1px solid #f1f5f9;
-            color: #64748b; font-size: 11.5px;
+        /* v1.19.6.0：AI 智能导入移到侧栏最下方（进阶入口），用分隔线区分 */
+        .sidebar-float .efn-ai {
+            margin-top: 6px; border-top: 1px solid #f1f5f9; padding-top: 8px;
         }
-        .sidebar-float .efn-next.ok { color: #16a34a; }
         @media (max-width: 767.98px) {
             .sidebar.sidebar-float { display: none; }
         }
@@ -350,9 +349,7 @@
                    href="{{ url_for('grades.exam_affair_go', exam_id=EN.exam_id) }}">考务安排{% if not EN.steps[1].done %}<span class="efn-tag">待做</span>{% endif %}</a>
                 <a class="efn-item {% if EN.section == 'import' %}active{% endif %}" data-nav="import"
                    href="{{ url_for('grades.exam_import', exam_id=EN.exam_id) }}">成绩导入{% if not EN.steps[2].done %}<span class="efn-tag">待做</span>{% endif %}</a>
-                {# v1.19.0：AI 智能导入 / 划线分层 从「本场快捷」提上来，与「成绩导入」同级（贴近导入环节） #}
-                <a class="efn-item {% if request.endpoint and request.endpoint.startswith('grades.exam_ai_import') %}active{% endif %}" data-nav="ai"
-                   href="{{ url_for('grades.exam_ai_import', exam_id=EN.exam_id) }}">AI 智能导入</a>
+                {# v1.19.0：划线分层紧贴「成绩导入」环节 #}
                 <a class="efn-item {% if request.endpoint == 'grades.bands_page' %}active{% endif %}" data-nav="bands"
                    href="{{ url_for('grades.bands_page', exam_id=EN.exam_id) }}">划线分层</a>
                 {# v1.19.0 成绩分析：折叠组 —— 总览（全年级对比）/ 班级分析（班主任）/ 学科分析（任课教师）
@@ -390,11 +387,9 @@
                     {% endif %}
                 </div>
                 {% endif %}
-                {% if EN.next_step %}
-                <div class="efn-next">下一步：{{ EN.next_step.label }}</div>
-                {% else %}
-                <div class="efn-next ok">四步已走完</div>
-                {% endif %}
+                {# v1.19.6.0：AI 智能导入移到侧栏最下方（进阶入口）；移除「下一步」提示（用户：无用） #}
+                <a class="efn-item efn-ai {% if request.endpoint and request.endpoint.startswith('grades.exam_ai_import') %}active{% endif %}" data-nav="ai"
+                   href="{{ url_for('grades.exam_ai_import', exam_id=EN.exam_id) }}">AI 智能导入</a>
             </div>
             {% else %}
             {# ---------- 全局态：精简菜单 ----------

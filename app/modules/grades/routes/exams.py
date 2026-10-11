@@ -351,6 +351,7 @@ def exam_detail(exam_id):
     return render_template('grades/exam_detail.html', exam=exam, students=students,
                            subjects=SUBJECTS, status_label=EXAM_STATUS_LABEL,
                            import_info=info, steps=steps, next_step=next_step,
+                           full_marks=exam.full_marks(),
                            classes=classes, cur_class=cur_class,
                            page=page, total_pages=total_pages, total=total, size=size)
 
@@ -408,15 +409,17 @@ def exam_rename(exam_id):
 def score_update(exam_id, score_id):
     assert_exam_visible(exam_id)          # H-4
     row = ExamScore.query.filter_by(id=score_id, exam_id=exam_id).first_or_404()
+    # v1.19.6.0：总分由各科自动汇总，禁止直接改（避免总分与单科不一致）
+    if row.subject == TOTAL_SUBJECT:
+        flash('总分由各科成绩自动汇总，不能直接修改，请修改对应的单科成绩', 'danger')
+        return redirect(url_for('grades.exam_detail', exam_id=exam_id))
     try:
         val = (request.form.get('score') or '').strip()
         if val == '':
-            # 修复：空分数提交直接按缺考删除（与提示语一致），并联动重算总分行
+            # 空分数提交直接按缺考删除（与提示语一致），并联动重算总分行
             no = row.student_no
-            is_total = row.subject == TOTAL_SUBJECT
             db.session.delete(row)
-            if not is_total:
-                store_service.refresh_student_total(Exam.query.get(exam_id), no)
+            store_service.refresh_student_total(Exam.query.get(exam_id), no)
             _mark_dirty(exam_id)
             db.session.commit()
             invalidate_exam_cache(exam_id)
@@ -432,9 +435,8 @@ def score_update(exam_id, score_id):
         flash('分数格式不正确', 'danger')
         return redirect(url_for('grades.exam_detail', exam_id=exam_id))
     row.score = score
-    # 修复：单科改分后同步重算该生总分行（直接改总分行时不重算，保留手工修正值）
-    if row.subject != TOTAL_SUBJECT:
-        store_service.refresh_student_total(Exam.query.get(exam_id), row.student_no)
+    # 单科改分后同步重算该生总分行（总分 = 各科之和）
+    store_service.refresh_student_total(Exam.query.get(exam_id), row.student_no)
     _mark_dirty(exam_id)
     db.session.commit()
     invalidate_exam_cache(exam_id)
@@ -448,12 +450,13 @@ def score_update(exam_id, score_id):
 def score_delete(exam_id, score_id):
     assert_exam_visible(exam_id)          # H-4
     row = ExamScore.query.filter_by(id=score_id, exam_id=exam_id).first_or_404()
+    # v1.19.6.0：总分不可单独删除（它随各科自动汇总）
+    if row.subject == TOTAL_SUBJECT:
+        flash('总分由各科成绩自动汇总，不能直接操作，请修改对应的单科成绩', 'danger')
+        return redirect(url_for('grades.exam_detail', exam_id=exam_id))
     no = row.student_no
-    is_total = row.subject == TOTAL_SUBJECT
     db.session.delete(row)
-    # 修复：删除单科（缺考）后同步重算该生总分行（删除总分行本身时不重算）
-    if not is_total:
-        store_service.refresh_student_total(Exam.query.get(exam_id), no)
+    store_service.refresh_student_total(Exam.query.get(exam_id), no)
     _mark_dirty(exam_id)
     db.session.commit()
     invalidate_exam_cache(exam_id)
