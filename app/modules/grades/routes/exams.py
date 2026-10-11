@@ -205,7 +205,30 @@ def _exam_classes(exam_id):
     return sorted({r[0] for r in rows})
 
 
-def _exam_page_rows(exam_id, page, size, class_name=None, direction=None):
+# v1.19.17.0 成绩单表头可排序列 → 总分行（每生一行）字段名；
+# 各科成绩用 's:科目名' 前缀（见 _exam_page_rows），不在此表内。
+_SORT_COLS = {
+    'no': 'student_no', 'name': 'student_name', 'exam_no': 'exam_no',
+    'cls': 'class_name', 'dir': 'direction', 'sel': 'subject_selection',
+    'total': 'score', 'rank_dir': 'rank_dir', 'rank_class': 'rank_class',
+    'move': 'move_rank',
+}
+
+
+def _sort_args(args):
+    """解析 ?sort= / ?order=（白名单校验，非法一律回默认次序）"""
+    key = (args.get('sort') or '').strip()
+    order = 'asc' if (args.get('order') or '').strip().lower() == 'asc' else 'desc'
+    if key.startswith('s:'):
+        if not key[2:].strip() or key[2:].strip() == TOTAL_SUBJECT:
+            key = ''
+    elif key not in _SORT_COLS:
+        key = ''
+    return (key, order) if key else ('', 'desc')
+
+
+def _exam_page_rows(exam_id, page, size, class_name=None, direction=None,
+                    sort_key='', order='desc'):
     """服务端分页：仅查询当前页的学生成绩，避免整场 8000 人一次性载入。
 
     返回 (students, page, total_pages, total)：
@@ -216,6 +239,9 @@ def _exam_page_rows(exam_id, page, size, class_name=None, direction=None):
 
     class_name（v1.19.0）：按班级查看成绩单，只统计/展示该班学生（None=全部）。
     direction（v1.19.16.0）：按方向查看（物理/历史），取**总分行**上的方向快照（None=全部）。
+    sort_key / order（v1.19.17.0）：表头排序。sort_key 取 _SORT_COLS 的键，
+        或 's:科目名' 表示按该科成绩排；order 为 'asc'/'desc'（空 sort_key = 默认次序）。
+        排序必须在**服务端**做：页面只加载当前页，前端排序只会排到本页 50 人。
     """
     q = ExamScore.query.filter_by(exam_id=exam_id, subject=TOTAL_SUBJECT)
     if class_name:
@@ -230,9 +256,32 @@ def _exam_page_rows(exam_id, page, size, class_name=None, direction=None):
     total_pages = (total + size - 1) // size
     if page > total_pages:
         page = total_pages
-    meta = (q.order_by(ExamScore.class_name,
-                       db.func.coalesce(ExamScore.rank_dir, 99999))
-            .limit(size).offset((page - 1) * size).all())
+
+    # ---- 排序键解析（只认白名单/本场科目，避免拼接注入） ----
+    order_col = None
+    if sort_key.startswith('s:'):
+        subject = sort_key[2:].strip()
+        if subject and subject != TOTAL_SUBJECT:
+            sub = (db.session.query(ExamScore.student_no.label('sno'),
+                                    ExamScore.score.label('s_score'))
+                   .filter(ExamScore.exam_id == exam_id, ExamScore.subject == subject)
+                   .subquery())
+            q = q.outerjoin(sub, sub.c.sno == ExamScore.student_no)
+            order_col = sub.c.s_score
+    elif sort_key in _SORT_COLS:
+        order_col = getattr(ExamScore, _SORT_COLS[sort_key])
+
+    if order_col is not None:
+        # 空值（缺考/未考）恒排最后：SQLite 里 NULL 最小，DESC 天然最后，ASC 用 case 兜底；
+        # 末尾再按学号稳定次序，保证翻页不跳行/不重复
+        seqq = [db.case((order_col.is_(None), 1), else_=0),
+                order_col.asc() if order == 'asc' else order_col.desc(),
+                ExamScore.student_no]
+        meta = q.order_by(*seqq).limit(size).offset((page - 1) * size).all()
+    else:
+        meta = (q.order_by(ExamScore.class_name,
+                           db.func.coalesce(ExamScore.rank_dir, 99999))
+                .limit(size).offset((page - 1) * size).all())
     nos = [r.student_no for r in meta]
     if not nos:
         return [], page, total_pages, total
@@ -351,8 +400,10 @@ def exam_detail(exam_id):
         cur_dir = ''
     if cur_class:
         cur_dir = ''
+    cur_sort, cur_order = _sort_args(request.args)      # v1.19.17.0 表头排序
     students, page, total_pages, total = _exam_page_rows(
-        exam_id, page, size, class_name=cur_class or None, direction=cur_dir or None)
+        exam_id, page, size, class_name=cur_class or None, direction=cur_dir or None,
+        sort_key=cur_sort, order=cur_order)
     info = None
     if exam.import_info:
         try:
@@ -366,6 +417,7 @@ def exam_detail(exam_id):
                            full_marks=exam.full_marks(),
                            can_edit_scores=current_user.has_perm('grades.score_edit'),
                            classes=classes, cur_class=cur_class, cur_dir=cur_dir,
+                           cur_sort=cur_sort, cur_order=cur_order,
                            page=page, total_pages=total_pages, total=total, size=size)
 
 
@@ -378,11 +430,13 @@ def exam_scores_page(exam_id):
     page = _safe_int(request.args.get('page'), 1)
     size = _safe_int(request.args.get('size'), 50)
     cur_class = (request.args.get('cls') or '').strip()   # v1.19.0 按班级查看
-    cur_dir = (request.args.get('dir') or '').strip()     # v1.19.16.0 按方向查看
+    cur_dir = (request.args.get('dir') or '').strip()     # v1.19.15.0 按方向查看
     if cur_dir not in ('物理', '历史'):
         cur_dir = ''
+    cur_sort, cur_order = _sort_args(request.args)        # v1.19.17.0 表头排序
     students, _page, _total_pages, _total = _exam_page_rows(
-        exam_id, page, size, class_name=cur_class or None, direction=cur_dir or None)
+        exam_id, page, size, class_name=cur_class or None, direction=cur_dir or None,
+        sort_key=cur_sort, order=cur_order)
     return render_template('grades/exam_detail_rows.html',
                            students=students, subjects=SUBJECTS,
                            can_edit_scores=current_user.has_perm('grades.score_edit'))

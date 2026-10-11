@@ -2,8 +2,25 @@
 {% block title %}{{ exam.name }} - 考试详情{% endblock %}
 {% block extra_css %}
 <style>
-  /* v1.19.16.0：仅单科分数可点击修改（总分由各科自动汇总，不可改） */
+  /* v1.19.17.0：仅单科分数可点击修改（总分由各科自动汇总，不可改） */
   #scoreTable td.score-cell { cursor: pointer; }
+  /* v1.19.17.0 压缩「学号→进退步」这些登记列的宽度，把横向空间让给各科成绩 */
+  #scoreTable th.c-meta, #scoreTable td.c-meta {
+      white-space: nowrap; font-size: .78rem; color: #475569;
+      padding-left: .25rem; padding-right: .25rem;
+  }
+  /* 总分不在压缩之列：紧跟密集列但它是最重要的数，保持醒目 */
+  #scoreTable td.c-total { font-size: .95rem; font-weight: 700; color: #0f172a; }
+  /* 成绩列（各科）留出更多留白，字号略大 */
+  #scoreTable th.c-sub, #scoreTable td.c-sub {
+      font-size: .88rem; padding-left: .5rem; padding-right: .5rem;
+  }
+  /* v1.19.17.0 表头排序：点一下按该列从高到低，再点切换升序 */
+  #scoreTable th a.th-sort { white-space: nowrap; color: inherit; text-decoration: none; }
+  #scoreTable th a.th-sort:hover { color: #2563eb; }
+  #scoreTable th a.th-sort i { font-size: .6rem; margin-left: 2px; vertical-align: .08em; }
+  #scoreTable th.th-active { background: #eef2ff; color: #1d4ed8; }
+  #scoreTable tbody tr { cursor: default; }
 </style>
 {% endblock %}
 {% block content %}
@@ -135,60 +152,39 @@
         {% endif %}
     </div>
     <div class="table-responsive" style="max-height:70vh;">
+        {# v1.19.17.0 表头排序宏：点一下按该列从高到低，再点切换升序；
+           排序在服务端做（页面只加载当前页），筛选/翻页都带着 sort/order #}
+        {% macro th_sort(key, label, ctype='c-meta', align='') %}
+        {% set active = (cur_sort == key) %}
+        {% set nxt = 'asc' if (active and cur_order == 'desc') else 'desc' %}
+        <th class="{{ ctype }} {{ align }}{{ ' th-active' if active else '' }}">
+            <a class="th-sort" title="按「{{ label }}」{{ '升序' if nxt == 'asc' else '从高到低' }}排序"
+               href="{{ url_for('grades.exam_detail', exam_id=exam.id, cls=(cur_class or none),
+                                dir=(cur_dir or none), sort=key, order=nxt) }}">
+                {{ label }}{% if active %}<i class="bi {{ 'bi-caret-up-fill' if cur_order == 'asc' else 'bi-caret-down-fill' }}"></i>{% else %}<i class="bi bi-caret-down opacity-25"></i>{% endif %}
+            </a>
+        </th>
+        {% endmacro %}
         <table class="table table-sm table-hover align-middle g-table mb-0" id="scoreTable">
             <thead class="sticky-top">
             <tr>
-                <th>学号</th><th>姓名</th><th>考号</th><th>班级</th><th>方向</th><th>选科</th>
-                <th class="text-end">总分</th>
-                <th class="text-end">方向排</th><th class="text-end">班排</th>
-                <th class="text-end">进退步</th>
-                {% for s in subjects %}<th class="text-end">{{ s }}</th>{% endfor %}
+                {{ th_sort('no', '学号', 'c-meta', 'text-start') }}
+                {{ th_sort('name', '姓名') }}
+                {{ th_sort('exam_no', '考号') }}
+                {{ th_sort('cls', '班级') }}
+                {{ th_sort('dir', '方向') }}
+                {{ th_sort('sel', '选科') }}
+                {{ th_sort('total', '总分', 'c-meta c-total', 'text-end') }}
+                {{ th_sort('rank_dir', '方向排', 'c-meta', 'text-end') }}
+                {{ th_sort('rank_class', '班排', 'c-meta', 'text-end') }}
+                {{ th_sort('move', '进退步', 'c-meta', 'text-end') }}
+                {% for s in subjects %}{{ th_sort('s:' ~ s, s, 'c-sub', 'text-end') }}{% endfor %}
             </tr>
             </thead>
             <tbody>
-            {% for stu in students %}
-            <tr data-no="{{ stu.no }}">
-                <td class="small">{{ stu.no }}</td>
-                <td>{{ stu.name }}</td>
-                <td class="small text-muted">{{ stu.exam_no or '—' }}</td>
-                <td>{{ stu.class_name }}</td>
-                <td>{{ stu.direction }}</td>
-                <td class="small text-muted">{{ stu.selection }}</td>
-                {# v1.19.16.0：总分由各科自动汇总，不可点击修改 #}
-                <td class="text-end fw-bold"
-                    title="总分 = 各科成绩之和（自动汇总，不可直接修改）{% if stu.total_raw is defined and stu.total_raw is not none %}｜原始分 {{ stu.total_raw }}{% endif %}">
-                    {{ stu.total if stu.total is not none else '—' }}
-                    {% if stu.total_raw is defined and stu.total_raw is not none %}
-                    <span class="d-block text-muted small fw-normal">原{{ stu.total_raw }}</span>
-                    {% endif %}
-                </td>
-                <td class="text-end">{{ stu.rank if stu.rank else '—' }}</td>
-                <td class="text-end">{{ stu.rank_class if stu.rank_class else '—' }}</td>
-                <td class="text-end {{ 'text-success' if stu.move is not none and stu.move < 0 else 'text-danger' if stu.move is not none and stu.move > 0 }}">
-                    {{ ('%+d' % stu.move) if stu.move is not none else '—' }}
-                </td>
-                {% for s in subjects %}
-                {% set cell = stu.subjects.get(s) %}
-                {% set unsel = s in (stu.unselected or []) %}
-                {% set base = '点击修改（赋分/原始分）' if can_edit_scores else '赋分/原始分' %}
-                {# v1.19.16.0：有成绩且具改分权限的单科才是可点的 score-cell；缺考黄色高亮但不可点；未选灰字 #}
-                <td class="text-end small {{ 'text-muted' if unsel else ('table-warning' if cell is none else ('score-cell' if can_edit_scores else '')) }}"
-                    data-sid="{{ cell.id if cell else '' }}"
-                    data-score="{{ cell.score if cell and cell.score is not none else '' }}"
-                    data-raw="{{ cell.raw if cell and cell.raw is not none else '' }}"
-                    title="{{ '未选（不在该生选科组合内）' if unsel else ('缺考（无该科成绩）' if cell is none else (base + ('｜原始分 ' ~ cell.raw if cell.raw is not none else ''))) }}">
-                    {{ cell.score if cell else ('未选' if unsel else '缺') }}
-                    {% if cell and cell.raw is not none %}
-                    <span class="d-block text-muted small">原{{ cell.raw }}</span>
-                    {% endif %}
-                </td>
-                {% endfor %}
-            </tr>
-            {% else %}
-            <tr><td colspan="{{ 10 + subjects|length }}" class="text-center text-muted py-5">
-                暂无成绩。点击右上角「导入成绩」，从 Excel 模板导入本场考试成绩。
-            </td></tr>
-            {% endfor %}
+            {# v1.19.17.0：行片段改为**复用** AJAX 分页同一模板，避免「初始页内联副本」与
+               「翻页片段」两处各改一遍而漏改（本次就踩过：列宽类只加到了片段上） #}
+            {% include 'grades/exam_detail_rows.html' %}
             </tbody>
         </table>
     </div>
@@ -204,7 +200,8 @@
     <div id="pageMeta" class="d-none"
          data-page="{{ page }}" data-total-pages="{{ total_pages }}"
          data-total="{{ total }}" data-size="{{ size }}"
-         data-cls="{{ cur_class }}" data-dir="{{ cur_dir }}"></div>
+         data-cls="{{ cur_class }}" data-dir="{{ cur_dir }}"
+         data-sort="{{ cur_sort }}" data-order="{{ cur_order }}"></div>
     </div>
     </div>
 
@@ -313,8 +310,10 @@ $(function(){
     var meta = $('#pageMeta').data();
     var curCls = meta.cls || '';
     var curDir = meta.dir || '';
-    // 按「班级 | 方向」各自记各的翻页位置
-    var PAGE_KEY = 'examPage_' + examId + '|' + curCls + '|' + curDir;
+    var curSort = meta.sort || '';        // v1.19.17.0 表头排序（服务端）
+    var curOrder = meta.order || 'desc';
+    // 按「班级 | 方向 | 排序」各自记各的翻页位置（换排序=新列表，从第 1 页开始）
+    var PAGE_KEY = 'examPage_' + examId + '|' + curCls + '|' + curDir + '|' + curSort + '|' + curOrder;
     var pageSize = parseInt(meta.size || 50, 10);
     var curPage = parseInt(meta.page || 1, 10);
     var totalPages = parseInt(meta.totalPages || 1, 10);
@@ -333,7 +332,8 @@ $(function(){
         sessionStorage.setItem(PAGE_KEY, p);
         $('#scoreTable tbody').html('<tr><td colspan="99" class="text-center text-muted py-4">加载中…</td></tr>');
         $.get('/grades/exams/' + examId + '/scores',
-              {page: p, size: pageSize, cls: curCls, dir: curDir})
+              {page: p, size: pageSize, cls: curCls, dir: curDir,
+               sort: curSort, order: curOrder})
             .done(function(html){
                 $('#scoreTable tbody').html(html);
                 bindScoreCells();
