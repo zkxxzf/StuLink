@@ -810,6 +810,64 @@ def affair_room_patch(aid, rid):
                     'is_universal': bool(room.is_universal), 'note': room.note or ''})
 
 
+@bp.route('/affairs/<int:aid>/rooms/capacity', methods=['POST'])
+@login_required
+@perm_required('grades.edit')
+def affair_rooms_capacity(aid):
+    """v1.19.34.0 步骤② 考场容量批量操作。
+
+    - `mode=all`：把本批次**全部考场**容量设为 `capacity`（1~500）；
+    - `mode=prev`：按「同年级 + **同一房间**」沿用上一场（日期更早的最近一批次）的容量；
+      房间身份优先用「位置」匹配，位置为空时用「考场编号」兜底。
+    返回 `{ok, updated, total, src|capacity}`。
+    """
+    affair = _get_affair_checked(aid)
+    rooms = AffairRoom.query.filter_by(affair_id=aid).all()
+    if not rooms:
+        return jsonify({'ok': False, 'msg': '本批次还没有考场，先在左侧「考场库」加入'})
+
+    if (request.form.get('mode') or 'all').strip() == 'prev':
+        prev = (ExamAffair.query
+                .filter(ExamAffair.grade == affair.grade,
+                        ExamAffair.id != affair.id,
+                        ExamAffair.exam_date < affair.exam_date)
+                .order_by(ExamAffair.exam_date.desc(), ExamAffair.id.desc()).first())
+        if prev is None:
+            return jsonify({'ok': False, 'msg': '本年级没有更早的考务批次，无可沿用'})
+        prev_rooms = AffairRoom.query.filter_by(affair_id=prev.id).all()
+        by_loc = {r.location: (r.capacity or 30) for r in prev_rooms if r.location}
+        by_no = {r.room_no: (r.capacity or 30) for r in prev_rooms}
+        updated = unmatched = 0
+        for r in rooms:
+            cap = by_loc.get(r.location) if r.location else None
+            if cap is None:
+                cap = by_no.get(r.room_no)
+            if cap is None:
+                unmatched += 1
+                continue
+            if cap != (r.capacity or 0):
+                r.capacity = cap
+                updated += 1
+        db.session.commit()
+        log_operation(current_user, '设置', '考务考场容量', aid,
+                      f'沿用「{prev.name}」：更新{updated}个/未匹配{unmatched}个', module='grades')
+        return jsonify({'ok': True, 'updated': updated, 'unmatched': unmatched,
+                        'total': len(rooms), 'src': prev.name})
+
+    try:
+        cap = int(str(request.form.get('capacity') or '').strip())
+    except (TypeError, ValueError):
+        return jsonify({'ok': False, 'msg': '容量必须是整数'})
+    if cap < 1 or cap > 500:
+        return jsonify({'ok': False, 'msg': '容量需在 1~500 之间'})
+    for r in rooms:
+        r.capacity = cap
+    db.session.commit()
+    log_operation(current_user, '设置', '考务考场容量', aid,
+                  f'全部 {len(rooms)} 个考场容量设为 {cap}', module='grades')
+    return jsonify({'ok': True, 'updated': len(rooms), 'total': len(rooms), 'capacity': cap})
+
+
 @bp.route('/affairs/<int:aid>/rooms/<int:rid>/delete', methods=['POST'])
 @login_required
 @perm_required('grades.edit')

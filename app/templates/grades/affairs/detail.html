@@ -147,6 +147,12 @@
             <input type="file" id="roomFile" accept=".xlsx,.xls" style="display:none" onchange="importRooms(this)">
             <button class="btn btn-outline-success btn-sm" onclick="openRoomModal()">
                 <i class="bi bi-plus-lg"></i> 手动新增</button>
+            {# v1.19.34.0 容量批量操作：一键给全部考场设同一容量 / 沿用上一场同房间的容量 #}
+            <button class="btn btn-outline-secondary btn-sm" onclick="setAllCapacity()">
+                <i class="bi bi-123"></i> 批量设置容量</button>
+            <button class="btn btn-outline-secondary btn-sm" onclick="fillCapacityFromPrev()"
+                    title="同年级、同一房间（位置优先）沿用上一场考试的容量">
+                <i class="bi bi-clock-history"></i> 带入上次容量</button>
         </div>
         <div class="row g-2">
             {# 左：考场库列表，可选取加入本批次 #}
@@ -590,7 +596,36 @@ function saveRoomField(el){
             _roomCapStat();
         });
 }
-// v1.19.33.0 步骤③ 模式联动：学号模式 / 自定义模式（规则生成 或 批量导入考号）
+// v1.19.34.0 步骤② 容量批量操作：一键给全部考场设同一容量
+function setAllCapacity(){
+    if(!_batchRooms.length){ alert('本批次还没有考场'); return; }
+    var n = prompt('给本批次全部 ' + _batchRooms.length + ' 个考场设置容量：', '42');
+    if(n === null) return;
+    n = String(n).trim();
+    if(!/^\d+$/.test(n) || +n < 1 || +n > 500){ alert('请输入 1~500 的整数'); return; }
+    var fd = new FormData(); fd.append('mode', 'all'); fd.append('capacity', n);
+    fetch('/grades/affairs/'+AID+'/rooms/capacity', {method:'POST', body:fd, headers:{'X-CSRFToken':csrf()}})
+        .then(r=>r.json()).then(d=>{
+            if(!d.ok){ alert(d.msg||'设置失败'); return; }
+            _batchRooms.forEach(function(r){ r.capacity = d.capacity; });
+            renderRooms();
+        });
+}
+// v1.19.34.0 步骤② 沿用上一场（同年级 + 同一房间）的考场容量
+function fillCapacityFromPrev(){
+    if(!_batchRooms.length){ alert('本批次还没有考场'); return; }
+    if(!confirm('按「同年级 + 同一房间（位置优先）」把上一场考试的考场容量带入本批次？\n（会覆盖本批次现有容量）')) return;
+    var fd = new FormData(); fd.append('mode', 'prev');
+    fetch('/grades/affairs/'+AID+'/rooms/capacity', {method:'POST', body:fd, headers:{'X-CSRFToken':csrf()}})
+        .then(r=>r.json()).then(d=>{
+            if(!d.ok){ alert(d.msg||'带入失败'); return; }
+            alert('已沿用「' + (d.src || '上一场') + '」的容量：更新 '
+                  + d.updated + ' / ' + d.total + ' 个考场'
+                  + (d.unmatched ? ('（' + d.unmatched + ' 个房间在上一场没有对应）') : ''));
+            location.reload();
+        });
+}
+// v1.19.25.0 步骤③ 模式联动：学号模式 / 自定义模式（规则生成 或 批量导入考号）
 function syncModePanes(){
     var custom = document.getElementById('modeCustom').checked;
     document.getElementById('paneStudent').classList.toggle('d-none', custom);

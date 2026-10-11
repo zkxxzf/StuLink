@@ -81,9 +81,9 @@ with app.app_context():
         db.session.add(_adm)
         db.session.commit()
 
-    # ---- v1.19.33.0 考务名单用例：上一场（2025001 标记不参考）+ 本场 ----
+    # ---- v1.19.28.0 考务名单用例：上一场（2025001 标记不参考）+ 本场 ----
     from datetime import date as _date
-    from app.models.grades import ExamAffair, AffairStudent
+    from app.models.grades import ExamAffair, AffairStudent, AffairRoom
     _prev_af = ExamAffair(name='冒烟上一场', grade='2025级', exam_date=_date(2019, 1, 5),
                           status='arranged')
     _cur_af = ExamAffair(name='冒烟本场', grade='2025级', exam_date=_date(2019, 2, 5),
@@ -92,6 +92,11 @@ with app.app_context():
     db.session.commit()
     db.session.add(AffairStudent(affair_id=_prev_af.id, student_no='20250001',
                                  name='历生01', class_name='01班', is_attend=False))
+    # v1.19.34.0 容量用例：上一场 东211=44；本场同房间初始 30
+    db.session.add(AffairRoom(affair_id=_prev_af.id, room_no='01', location='东211',
+                              subject='默认', capacity=44))
+    db.session.add(AffairRoom(affair_id=_cur_af.id, room_no='01', location='东211',
+                              subject='默认', capacity=30))
     db.session.commit()
     _AFF_CUR = _cur_af.id
 
@@ -480,6 +485,26 @@ with app.test_client() as c:
           '<tr class="table-warning">' in tb2, tb2[:200])
     check('首列 sticky 背景跟随行状态（整行标黄含学号列）',
           'var(--bs-table-bg, var(--bs-body-bg, #fff))' in h2)
+
+    # ---- v1.19.34.0 步骤② 考场容量：批量设置 / 沿用上一场（同房间）----
+    check('步骤② 有容量批量入口',
+          '批量设置容量' in h2 and '带入上次容量' in h2)
+    r = c.post(f'/grades/affairs/{_AFF_CUR}/rooms/capacity',
+               data={'mode': 'all', 'capacity': '36'}, headers={'X-CSRFToken': csrf})
+    d = r.get_json()
+    check('容量批量设置（全 36）', d and d.get('ok') and d.get('capacity') == 36, d)
+    r = c.post(f'/grades/affairs/{_AFF_CUR}/rooms/capacity',
+               data={'mode': 'all', 'capacity': '0'}, headers={'X-CSRFToken': csrf})
+    check('容量越界被拒', r.get_json().get('ok') is False, r.get_json())
+    r = c.post(f'/grades/affairs/{_AFF_CUR}/rooms/capacity',
+               data={'mode': 'prev'}, headers={'X-CSRFToken': csrf})
+    d = r.get_json()
+    check('沿用上一场容量（同房间）',
+          d and d.get('ok') and d.get('updated') == 1 and d.get('src') == '冒烟上一场', d)
+    with app.app_context():
+        got = {x.location: x.capacity
+               for x in AffairRoom.query.filter_by(affair_id=_AFF_CUR).all()}
+        check('容量落库 = 上一场 44', got == {'东211': 44}, got)
 
     # ==================== 角色权限矩阵（9.2 后端强制） ====================
     from app.models import UserClassLink
