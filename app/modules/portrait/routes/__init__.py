@@ -1,3 +1,3 @@
-# StuLink v1.19.4.0 2026-10-10
+# StuLink v1.19.5.0 2026-10-10
 # 学生画像路由
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
