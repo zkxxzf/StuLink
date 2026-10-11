@@ -345,6 +345,11 @@ $(function(){
 
     function scShowErr(t){ $('#scErr').removeClass('d-none').text(t); }
 
+    // 按钮复位：保存成功 / 失败 / 关闭弹窗后都要复位。
+    // 修复：此前成功保存后没复位，按钮一直停在「保存中…」且被禁用，导致后续改不了分。
+    function scResetBtn(){ $('#scSave').prop('disabled', false).text('保存修改'); }
+    $('#scoreModal').on('hidden.bs.modal', scResetBtn);
+
     // 校验一个输入：空 → 返回 null；非法/越界 → 抛错（由调用方提示）
     function scRead(sel, label, limit){
         var v = $.trim($(sel).val());
@@ -362,13 +367,12 @@ $(function(){
             ? (scCell.closest('table').find('th').eq(scCell.index()).text().trim() || '分数')
             : '分数';
         var limit = FULL_MARKS[label];
-        var $b = $(this).prop('disabled', true).text('保存中…');
-        function reset(){ $b.prop('disabled', false).text('保存修改'); }
-        function done(){ $('#scoreModal').modal('hide'); loadPage(curPage); }
+        $(this).prop('disabled', true).text('保存中…');
+        function done(){ $('#scoreModal').modal('hide'); scResetBtn(); loadPage(curPage); }
 
         if($('#scAbsent').prop('checked')){          // 该科缺考 → 删除该科成绩
             $.post('/grades/exams/' + examId + '/score/' + scSid + '/delete')
-                .done(done).fail(function(){ reset(); scShowErr('操作失败，请重试'); });
+                .done(done).fail(function(){ scResetBtn(); scShowErr('操作失败，请重试'); });
             return;
         }
         var sc, raw;
@@ -376,14 +380,14 @@ $(function(){
             sc = scRead('#scInput', '赋分', limit);
             raw = scRead('#scRaw', '原始分', limit);
         } catch(e) {
-            reset(); scShowErr(e.message); return;
+            scResetBtn(); scShowErr(e.message); return;
         }
         if(sc === null && raw === null){
-            reset(); scShowErr('请至少填写赋分或原始分，或勾选“该科缺考”'); return;
+            scResetBtn(); scShowErr('请至少填写赋分或原始分，或勾选“该科缺考”'); return;
         }
         $.post('/grades/exams/' + examId + '/score/' + scSid,
                {score: (sc === null ? '' : sc), raw_score: (raw === null ? '' : raw)})
-            .done(done).fail(function(){ reset(); scShowErr('保存失败，请重试'); });
+            .done(done).fail(function(){ scResetBtn(); scShowErr('保存失败，请重试'); });
     });
 
     // 弹窗内回车 = 保存
