@@ -22,7 +22,7 @@ from app.models import Student
 from app.models.grades import (ExamAffair, AffairRoom, AffairRoomLib, AffairStudent,
                                Exam, AffairTeacher, AffairSchedule,
                                AffairInvigilator, AffairInvigilation)  # v1.12.1 加考场房间库；v1.12.2 移除成绩关联查询依赖
-#   v1.19.43.0 加环节④⑤⑥：任课核对 / 考试时间表 / 监考编排
+#   v1.19.43.2 加环节④⑤⑥：任课核对 / 考试时间表 / 监考编排
 from app.modules.grades import bp
 from app.utils.decorators import perm_required
 from app.utils.helpers import log_operation, get_dict_values
@@ -101,7 +101,7 @@ def delete_affair_cascade(aid):
 
     AffairRoom / AffairStudent 的 affair_id 无外键约束（多库快照式设计，不建跨表外键），
     直接 `db.session.delete(affair)` 会留下孤儿行；此处显式按 affair_id 批量删除。
-    v1.19.43.0：一并清理环节④⑤⑥ 的任课核对 / 考试时间表 / 其他监考员 / 监考安排。
+    v1.19.43.2：一并清理环节④⑤⑥ 的任课核对 / 考试时间表 / 其他监考员 / 监考安排。
     调用方负责 commit。返回 (考场数, 名单数)。
     """
     n_rooms = AffairRoom.query.filter_by(affair_id=aid).delete()
@@ -332,7 +332,7 @@ def affair_detail(aid):
     for r in rooms:
         if r.subject and not r.is_universal and r.subject not in room_subject_options:
             room_subject_options.append(r.subject)
-    # v1.19.43.0 考务环节④⑤⑥：任课核对 / 考试时间表 / 监考编排 的步骤条状态与时间表
+    # v1.19.43.2 考务环节④⑤⑥：任课核对 / 考试时间表 / 监考编排 的步骤条状态与时间表
     from app.modules.grades.routes import affair_invig as _ai
     _ai.ensure_teachers_synced(affair)        # 首次自动带入当前任课安排
     _t_scheds = (AffairSchedule.query.filter_by(affair_id=aid)

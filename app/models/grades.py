@@ -566,7 +566,7 @@ class ExamAffair(db.Model):
     selection_mode = db.Column(db.String(10), default='selected')  # 编排分组模式：selected 按选科分组 / plain 不选科（全体一组，考场全通用）
     non_attend_mode = db.Column(db.String(10), default='skip')     # 非参考学生处理：skip 不安排考场 / tail 安排到同选科考场尾场
     subject_prefixes = db.Column(db.Text)                          # 选科考号前后缀 JSON：{"物化生":{"prefix":"1701","suffix":""}}
-    # v1.19.43.0 监考编排：每考场默认监考人数（1/2/3，用户口径默认 1 人）
+    # v1.19.43.2 监考编排：每考场默认监考人数（1/2/3，用户口径默认 1 人）
     invig_slots = db.Column(db.Integer, default=1)
     status = db.Column(db.String(10), default='draft')     # draft / arranged / linked
     note = db.Column(db.Text)
@@ -732,7 +732,7 @@ class ScoreChangeLog(db.Model):
     )
 
 
-# ============ v1.19.43.0 考务环节④⑤⑥：任课核对 / 考试时间表 / 监考编排 ============
+# ============ v1.19.43.2 考务环节④⑤⑥：任课核对 / 考试时间表 / 监考编排 ============
 #
 # 设计口径（用户 2026-10-12 定案）：
 #   · 三者都是**本批次（本次考试）**的数据，不回写全局任课映射；
