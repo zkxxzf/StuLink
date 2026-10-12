@@ -1,5 +1,7 @@
 <!DOCTYPE html>
-<html lang="zh-CN">
+{# v1.19.48.0：主题挂在 <html> 上，Bootstrap 5.3.3 原生识别 data-bs-theme；
+   默认值由上面 head 内的脚本按「本地存储 → 系统偏好」改写，这里只是兜底。 #}
+<html lang="zh-CN" data-bs-theme="light">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -13,43 +15,62 @@
        打印规则全部不生效（这是"4 套表头风格并存"的根因之一）。
        成绩模块页面占全站相当比例，直接并入 base.html，一处引入全站生效。 #}
     <link href="{{ su('css/grades.css') }}" rel="stylesheet">
+    {# 2026-10-13（v1.19.48.0）：主题层必须在 bootstrap / grades.css **之后**加载，
+       才能覆盖业务 css 里的字面量颜色（同特异性，后来者胜）。 #}
+    <link href="{{ su('css/theme.css') }}" rel="stylesheet">
+    {# 主题提前应用：在 body 渲染前定好 data-bs-theme，避免深色下先闪一帧白屏（FOUC） #}
+    <script>
+    (function () {
+        try {
+            var saved = localStorage.getItem('stulink-theme');
+            var sysDark = window.matchMedia &&
+                          window.matchMedia('(prefers-color-scheme: dark)').matches;
+            document.documentElement.setAttribute('data-bs-theme',
+                saved ? saved : (sysDark ? 'dark' : 'light'));
+        } catch (e) {
+            document.documentElement.setAttribute('data-bs-theme', 'light');
+        }
+    })();
+    </script>
     {% block extra_css_head %}{% endblock %}
     <style>
         :root { --sidebar-width: 220px; }
-        body { font-family: -apple-system, "Microsoft YaHei", sans-serif; background: #f0f2f5; padding-top: 56px; }
+        /* 2026-10-13（v1.19.48.0）：颜色一律取主题变量（见 static/css/theme.css），
+           不再写字面量 —— 否则内联样式会压过主题层，深浅两模式切换不生效。 */
+        body { font-family: -apple-system, "Microsoft YaHei", sans-serif; background: var(--sl-bg); color: var(--sl-text); padding-top: 56px; }
         .sidebar {
             position: fixed; top: 56px; left: 0; bottom: 0;
-            width: var(--sidebar-width); background: #1e293b; overflow-y: auto; z-index: 100;
+            width: var(--sidebar-width); background: var(--sl-sidebar-bg); overflow-y: auto; z-index: 100;
             transition: transform .2s;
         }
         .sidebar .nav-link {
-            color: #cbd5e1; padding: 10px 20px; font-size: 14px;
+            color: var(--sl-sidebar-text); padding: 10px 20px; font-size: 14px;
             border-left: 3px solid transparent;
         }
-        .sidebar .nav-link:hover { color: #e2e8f0; background: rgba(255,255,255,.05); }
+        .sidebar .nav-link:hover { color: var(--sl-sidebar-text-hover); background: var(--sl-sidebar-hover); }
         .sidebar .nav-link.active {
-            color: #fff; background: rgba(255,255,255,.1);
-            border-left-color: #3b82f6;
+            color: #fff; background: var(--sl-sidebar-active);
+            border-left-color: var(--sl-sidebar-accent);
         }
         .sidebar .nav-link i { width: 20px; margin-right: 8px; text-align: center; }
         .sidebar .nav-section {
-            color: #94a3b8; font-size: 11px; text-transform: uppercase;
+            color: var(--sl-sidebar-muted); font-size: 11px; text-transform: uppercase;
             padding: 15px 20px 5px; letter-spacing: .5px;
         }
         /* 分组栏目（课表/查课/调课/教师/表单）：标题行带箭头，展开时箭头翻转 */
         .sidebar .aca-group .aca-caret { transition: transform .15s ease; }
         .sidebar .aca-group[aria-expanded="true"] .aca-caret { transform: rotate(180deg); }
-        .sidebar .aca-group[aria-expanded="true"] { color: #e2e8f0; }
+        .sidebar .aca-group[aria-expanded="true"] { color: var(--sl-sidebar-text-hover); }
         .main-content { margin-left: var(--sidebar-width); padding: 20px 24px 24px; min-height: 100vh; }
         /* 2026-10-13：考试态侧栏已改为**贴左全高**（与常规侧栏同位同宽），
            main-content 的 margin-left:220px 直接生效，原先给浮层让位的
            padding-left:252px 补偿不再需要 —— 那正是"侧栏与内容之间大空白"的来源。 */
         .navbar { z-index: 200; }
-        .stat-card { border: none; border-radius: 10px; box-shadow: 0 1px 3px rgba(0,0,0,.08); }
+        .stat-card { border: none; border-radius: 10px; box-shadow: var(--sl-shadow); }
         .stat-card .stat-icon { width: 48px; height: 48px; border-radius: 10px; display: flex; align-items: center; justify-content: center; font-size: 22px; }
         .stat-card .stat-number { font-size: 26px; font-weight: 700; }
-        .stat-card .stat-label { color: #64748b; font-size: 13px; font-weight: 500; }
-        .card { border: none; border-radius: 10px; box-shadow: 0 1px 3px rgba(0,0,0,.08); }
+        .stat-card .stat-label { color: var(--sl-text-muted); font-size: 13px; font-weight: 500; }
+        .card { border: none; border-radius: 10px; box-shadow: var(--sl-shadow); }
         .bed-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
         .bed-slot {
             border: 2px dashed #d1d5db; border-radius: 8px; padding: 10px;
@@ -90,11 +111,12 @@
         }
         .subj-physics { background: #e7f1ff; color: #0b5ed7; border-color: #b6d4fe; }
         .subj-history { background: #fff3e0; color: #b45309; border-color: #ffd8a8; }
-        .table th { font-weight: 600; font-size: 13px; color: #64748b; white-space: nowrap; }
+        .table th { font-weight: 600; font-size: 13px; color: var(--sl-th-text); white-space: nowrap; }
         /* 表格冻结窗格：表头行 + 第一列 sticky */
         .table-responsive table { border-collapse: separate; border-spacing: 0; }
         .table-responsive thead th {
-            position: sticky; top: 0; z-index: 2; background: #f8f9fa;
+            position: sticky; top: 0; z-index: 2; background: var(--sl-th-bg);
+            color: var(--sl-th-text);
         }
         .table-responsive thead tr:nth-child(2) th { top: 38px; }
         .table-responsive td:first-child,
@@ -106,7 +128,7 @@
            原先写死 var(--bs-body-bg)，导致 .table-warning 等"整行变黄"时首列仍是白底：
            考务步骤①「不参加考试」的学生就是这么被看漏的（学号列不变色）。 */
         .table-responsive tbody td:first-child {
-            background: var(--bs-table-bg, var(--bs-body-bg, #fff));
+            background: var(--bs-table-bg, var(--sl-surface));
         }
         /* 手机端导航栏紧凑 */
         @media (max-width: 768px) {
@@ -120,10 +142,12 @@
         .sidebar.sidebar-float {
             /* 2026-10-13：恢复**贴顶落底全高** —— 原先垂直居中浮卡（top:50% + max-height）
                上不到顶、下不到底，和主内容之间还空一大块（用户实测反馈）。
-               保留白底卡片外观，但贴左占满视口高，宽度与常规侧栏一致。 */
+               贴左占满视口高，宽度与常规侧栏一致。
+               v1.19.48.0：底色改用**与常规侧栏同一个变量** —— 原先是白卡，
+               与其它模块的深色侧栏不一致（用户反馈「成绩分析侧栏是白的」）。 */
             top: 56px; bottom: 0; transform: none;
             left: 0; width: var(--sidebar-width); max-height: none;
-            background: #fff; border: none; border-radius: 0;
+            background: var(--sl-sidebar-bg); border: none; border-radius: 0;
             box-shadow: 2px 0 8px rgba(15, 23, 42, .06);
             /* v1.19.47.20 横向间距统一：卡片左右各 8px、下面每一行左右各 10px，
                整张卡「左 18px = 右 18px」；旧版 efn-item 带 2px 左描边（左 14 / 右 12）不对称 */
@@ -138,11 +162,11 @@
         /* ---- 头部：返回 / 标题 / 步骤，与菜单同一左右内边距，底部细线分隔 ---- */
         .sidebar-float .efn-back {
             display: block; padding: 4px 10px; border-radius: 6px;
-            color: #64748b; font-size: 12.5px;
+            color: var(--sl-sidebar-muted); font-size: 12.5px;
         }
-        .sidebar-float .efn-back:hover { color: #2563eb; background: #f1f5f9; }
+        .sidebar-float .efn-back:hover { color: var(--sl-sidebar-accent-text); background: var(--sl-sidebar-hover); }
         .sidebar-float .efn-title {
-            padding: 4px 10px 6px; color: #0f172a; font-weight: 600; font-size: 12.5px;
+            padding: 4px 10px 6px; color: var(--sl-sidebar-title); font-weight: 600; font-size: 12.5px;
             /* v1.19.47.20：考试名可能很长 → 允许换行。
                原先 white-space:nowrap 会让该项的 min-content 超过卡片宽度，
                作为 flex 项又无法收缩 → 撑出底部横向滚动条（用户反馈）。 */
@@ -150,26 +174,27 @@
         }
         .sidebar-float .efn-steps {
             display: flex; align-items: center; gap: 4px;
-            padding: 0 10px 10px; margin-bottom: 6px; border-bottom: 1px solid #f1f5f9;
+            padding: 0 10px 10px; margin-bottom: 6px; border-bottom: 1px solid var(--sl-sidebar-line);
         }
         .sidebar-float .efn-dot {
             width: 16px; height: 16px; line-height: 16px; text-align: center;
-            border-radius: 50%; font-size: 10px; background: #e2e8f0; color: #64748b;
+            border-radius: 50%; font-size: 10px;
+            background: var(--sl-sidebar-chip); color: var(--sl-sidebar-text);
         }
         .sidebar-float .efn-dot.on { background: #16a34a; color: #fff; }
         /* v1.19.47.20 已完成但非当前的环节：浅绿底绿字（不与「当前」的深绿实心混淆） */
-        .sidebar-float .efn-dot.done { background: #dcfce7; color: #166534; }
-        .sidebar-float .efn-count { color: #94a3b8; font-size: 11.5px; margin-left: 4px; }
+        .sidebar-float .efn-dot.done { background: rgba(22, 163, 74, .25); color: #86efac; }
+        .sidebar-float .efn-count { color: var(--sl-sidebar-muted); font-size: 11.5px; margin-left: 4px; }
         /* ---- 菜单项：胶囊式，左右内边距一致；激活竖条改用内阴影（不占位，文字不偏移） ---- */
         .sidebar-float .efn-item {
             display: block; padding: 7px 10px; border-radius: 6px;
-            color: #374151; font-size: 13px;
+            color: var(--sl-sidebar-text); font-size: 13px;
             transition: background-color .12s ease, color .12s ease;
         }
-        .sidebar-float .efn-item:hover { background: #f1f5f9; color: #1d4ed8; }
+        .sidebar-float .efn-item:hover { background: var(--sl-sidebar-hover); color: var(--sl-sidebar-accent-text); }
         .sidebar-float .efn-item.active {
-            background: #eff6ff; color: #1d4ed8; font-weight: 600;
-            box-shadow: inset 3px 0 0 0 #2563eb;
+            background: var(--sl-sidebar-active); color: var(--sl-sidebar-accent-text); font-weight: 600;
+            box-shadow: inset 3px 0 0 0 var(--sl-sidebar-accent);
         }
         .sidebar-float .efn-tag {
             font-size: 10.5px; color: #b45309; background: #fef3c7;
@@ -178,19 +203,22 @@
         /* ---- 折叠组（成绩分析）：浅底胶囊，与菜单项同左右内边距 ---- */
         .sidebar-float .efn-group {
             display: flex; align-items: center; justify-content: space-between;
-            padding: 7px 10px; margin-top: 4px; border-radius: 6px; background: #f8fafc;
-            color: #334155; font-size: 12.5px; font-weight: 600;
+            padding: 7px 10px; margin-top: 4px; border-radius: 6px;
+            background: var(--sl-sidebar-group);
+            color: var(--sl-sidebar-text); font-size: 12.5px; font-weight: 600;
         }
-        .sidebar-float .efn-group:hover { background: #eef2f7; }
-        .sidebar-float .efn-group .bi { font-size: 11px; color: #94a3b8; }
+        .sidebar-float .efn-group:hover { background: var(--sl-sidebar-hover); }
+        .sidebar-float .efn-group .bi { font-size: 11px; color: var(--sl-sidebar-muted); }
         /* v1.19.47.20：「成绩分析」标题本身是入口链接，右侧箭头单独负责展开/收起 */
         .sidebar-float .efn-group-title { flex: 1 1 auto; color: inherit; }
-        .sidebar-float .efn-group-title:hover { color: #1d4ed8; }
+        .sidebar-float .efn-group-title:hover { color: var(--sl-sidebar-accent-text); }
         .sidebar-float .efn-group .bi[data-bs-toggle] { cursor: pointer; }
         /* ---- v1.19.47.20：AI 智能导入移到侧栏最下方（进阶入口），用细线分隔 ---- */
-        .sidebar-float .efn-ai { margin-top: 8px; }
+        .sidebar-float .efn-ai { margin-top: 8px; color: var(--sl-sidebar-text); }
+        .sidebar-float .efn-ai:hover { background: var(--sl-sidebar-hover); }
         .sidebar-float .efn-ai::before {
-            content: ''; display: block; height: 1px; margin: 0 2px 8px; background: #f1f5f9;
+            content: ''; display: block; height: 1px; margin: 0 2px 8px;
+            background: var(--sl-sidebar-line);
         }
         @media (max-width: 767.98px) {
             .sidebar.sidebar-float { display: none; }
@@ -235,6 +263,13 @@
         </a>
         <div class="ms-auto d-flex align-items-center">
             {% if current_user.is_authenticated %}
+            {# 2026-10-13（v1.19.48.0）：主题切换入口 —— 与铃铛/用户菜单同级，
+               图标与文案由底部脚本按当前主题同步（☀ 切深色 / 🌙 切浅色）。 #}
+            <button type="button" class="btn btn-sm btn-outline-light me-2" id="themeToggle"
+                    style="border-radius:8px;" title="切换深色 / 浅色模式" aria-label="切换主题">
+                <i class="bi bi-moon-stars" id="themeIcon"></i>
+                <span class="d-none d-lg-inline ms-1" id="themeLabel">深色模式</span>
+            </button>
             <a href="{{ url_for('notifications.notifications_page') }}" class="btn btn-sm btn-outline-light position-relative me-2" style="border-radius:8px;" title="通知公告">
                 <i class="bi bi-bell"></i>
                 <span id="notificationBadge" class="position-absolute top-0 start-100 translate-middle badge rounded-pill bg-danger" style="display:none;font-size:10px;">
@@ -268,6 +303,12 @@
                     <li>
                         <a class="dropdown-item" href="{{ url_for('auth.change_password') }}">
                             <i class="bi bi-key"></i> 修改密码
+                        </a>
+                    </li>
+                    {# 2026-10-13（v1.19.48.0）：主题切换的第二入口（顶栏按钮之外的备选） #}
+                    <li>
+                        <a class="dropdown-item" href="#" id="themeToggleItem">
+                            <i class="bi bi-moon-stars"></i> 切换为深色模式
                         </a>
                     </li>
                     <li><hr class="dropdown-divider my-1"></li>
@@ -751,6 +792,69 @@
     <script src="{{ su('js/common.js') }}"></script>
     <script src="{{ su('js/jquery-3.7.1.min.js') }}"></script>
     <script src="{{ su('js/bootstrap.bundle.min.js') }}"></script>
+    <script>
+        // ===== v1.19.48.0 主题切换（浅色 / 深色）=====
+        // 存储键 stulink-theme；切换只改 <html data-bs-theme>，Bootstrap 5.3.3 与
+        // theme.css 的变量表负责其余部分；head 内的脚本负责首屏不闪白。
+        (function () {
+            var KEY = 'stulink-theme';
+
+            function current() {
+                return document.documentElement.getAttribute('data-bs-theme') === 'dark'
+                    ? 'dark' : 'light';
+            }
+
+            function apply(theme) {
+                document.documentElement.setAttribute('data-bs-theme', theme);
+                try { localStorage.setItem(KEY, theme); } catch (e) {}
+                syncUI(theme);
+            }
+
+            function syncUI(theme) {
+                var dark = (theme === 'dark');
+                var icon = document.getElementById('themeIcon');
+                var label = document.getElementById('themeLabel');
+                var item = document.getElementById('themeToggleItem');
+                if (icon) {
+                    icon.className = 'bi ' + (dark ? 'bi-sun' : 'bi-moon-stars');
+                }
+                if (label) { label.textContent = dark ? '浅色模式' : '深色模式'; }
+                var btn = document.getElementById('themeToggle');
+                if (btn) {
+                    btn.title = dark ? '当前：深色模式（点击切换为浅色）'
+                                     : '当前：浅色模式（点击切换为深色）';
+                }
+                if (item) {
+                    item.innerHTML = '<i class="bi ' + (dark ? 'bi-sun' : 'bi-moon-stars')
+                                   + '"></i> ' + (dark ? '切换为浅色模式' : '切换为深色模式');
+                }
+            }
+
+            function toggle() { apply(current() === 'dark' ? 'light' : 'dark'); }
+
+            document.addEventListener('click', function (e) {
+                if (e.target.closest('#themeToggle') || e.target.closest('#themeToggleItem')) {
+                    e.preventDefault();
+                    toggle();
+                }
+            });
+
+            // 用户没手动选过时，跟随系统主题变化
+            if (window.matchMedia) {
+                var mq = window.matchMedia('(prefers-color-scheme: dark)');
+                var onChange = function (ev) {
+                    var saved = null;
+                    try { saved = localStorage.getItem(KEY); } catch (e) {}
+                    if (!saved) { apply(ev.matches ? 'dark' : 'light'); }
+                };
+                if (mq.addEventListener) { mq.addEventListener('change', onChange); }
+                else if (mq.addListener) { mq.addListener(onChange); }
+            }
+
+            syncUI(current());
+            window.StuLinkTheme = { toggle: toggle, apply: apply, current: current };
+        })();
+    </script>
     <script>
         // CSRF 令牌用于 AJAX 请求
         var csrfToken = "{{ csrf_token() }}";

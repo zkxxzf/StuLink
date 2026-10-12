@@ -1,0 +1,310 @@
+/* =============================================================================
+   StuLink 主题层（浅色 / 深色）—— v1.19.48.0（2026-10-13）
+   -----------------------------------------------------------------------------
+   背景：此前全站颜色是「字面量满天飞」——base.html 内联 56 处、业务 css 201 处、
+   模板内联 style 665 处；成绩分析（考试态 .sidebar-float）侧栏是白底卡，
+   其它模块侧栏是深色 #1e293b，风格不统一。
+
+   方案：Bootstrap 5.3.3 原生支持 data-bs-theme="dark"，但业务字面量优先级更高，
+   所以这里做两层：
+     L1 变量层：--sl-* 语义变量（两套值），并把 base.html 骨架改为引用变量；
+     L2 兜底层：对「改不到的」外部 css / 模板内联 style，用属性选择器 +
+        工具类覆盖（.bg-white / [style*="background:#fff"] …），深色下不再出现白块。
+
+   加载位置：必须在 bootstrap.min.css **之后**（base.html 中位于 grades.css 之后），
+   以便同特异性下由本文件胜出。
+   ============================================================================= */
+
+/* ============ 浅色（默认）：视觉保持与改造前一致，避免既有页面回归 ============ */
+:root,
+[data-bs-theme="light"] {
+    /* —— 页面与面板 —— */
+    --sl-bg: #f0f2f5;                  /* 页面底色 */
+    --sl-surface: #ffffff;             /* 卡片 / 面板 / 弹层 */
+    --sl-surface-2: #f8fafc;           /* 次级面：表头、卡片头、斑马行 */
+    --sl-surface-3: #f1f5f9;           /* hover / 分组头 */
+    --sl-border: #e2e8f0;              /* 分割线、边框 */
+    --sl-text: #1e293b;                /* 主文字 */
+    --sl-text-muted: #64748b;          /* 次要文字 */
+    --sl-text-subtle: #94a3b8;         /* 更弱文字 */
+    --sl-shadow: 0 1px 3px rgba(0, 0, 0, .08);
+
+    /* —— 侧栏（普通侧栏与考试态侧栏共用同一套，风格统一） —— */
+    --sl-sidebar-bg: #1e293b;
+    --sl-sidebar-text: #cbd5e1;
+    --sl-sidebar-text-hover: #e2e8f0;
+    --sl-sidebar-title: #f1f5f9;       /* 侧栏内标题/强调 */
+    --sl-sidebar-muted: #94a3b8;
+    --sl-sidebar-hover: rgba(255, 255, 255, .05);
+    --sl-sidebar-active: rgba(255, 255, 255, .10);
+    --sl-sidebar-accent: #3b82f6;      /* 激活竖条 */
+    --sl-sidebar-accent-text: #93c5fd; /* 激活/悬浮文字 */
+    --sl-sidebar-line: rgba(255, 255, 255, .10);
+    --sl-sidebar-group: rgba(255, 255, 255, .04);
+    --sl-sidebar-chip: rgba(255, 255, 255, .12);
+
+    /* —— 导航栏 —— */
+    --sl-navbar-bg: #212529;           /* 与 Bootstrap .bg-dark 一致 */
+    --sl-navbar-text: rgba(255, 255, 255, .85);
+
+    /* —— 表格 —— */
+    --sl-head-bg: #1e293b;             /* 成绩类表格深色表头 */
+    --sl-head-text: #ffffff;
+    --sl-th-bg: #f8f9fa;               /* 普通表格表头 */
+    --sl-th-text: #64748b;
+    --sl-row-hover: #e0ecff;
+
+    /* 同步 Bootstrap 变量（浅色下即为 Bootstrap 默认值，显式写出防被上游污染） */
+    --bs-body-bg: #f0f2f5;
+    --bs-body-color: #1e293b;
+    --bs-border-color: #dee2e6;
+    --bs-secondary-bg: #e9ecef;
+    --bs-tertiary-bg: #f8f9fa;
+    --bs-secondary-color: #64748b;
+    --bs-emphasis-color: #1e293b;
+}
+
+/* ============================ 深色 ============================ */
+[data-bs-theme="dark"] {
+    --sl-bg: #0f172a;
+    --sl-surface: #172033;
+    --sl-surface-2: #1c2739;
+    --sl-surface-3: #233047;
+    --sl-border: #2b3a52;
+    --sl-text: #e2e8f0;
+    --sl-text-muted: #94a3b8;
+    --sl-text-subtle: #64748b;
+    --sl-shadow: 0 1px 3px rgba(0, 0, 0, .45);
+
+    /* 深色下侧栏与页面底色同源（比卡片更深一档即可），与其它模块保持一致 */
+    --sl-sidebar-bg: #131c2e;
+    --sl-sidebar-text: #cbd5e1;
+    --sl-sidebar-text-hover: #f1f5f9;
+    --sl-sidebar-title: #f8fafc;
+    --sl-sidebar-muted: #8394ab;
+    --sl-sidebar-hover: rgba(255, 255, 255, .07);
+    --sl-sidebar-active: rgba(59, 130, 246, .20);
+    --sl-sidebar-accent: #60a5fa;
+    --sl-sidebar-accent-text: #93c5fd;
+    --sl-sidebar-line: rgba(255, 255, 255, .10);
+    --sl-sidebar-group: rgba(255, 255, 255, .05);
+    --sl-sidebar-chip: rgba(255, 255, 255, .14);
+
+    --sl-navbar-bg: #131c2e;
+    --sl-navbar-text: #e2e8f0;
+
+    --sl-head-bg: #233047;
+    --sl-head-text: #e2e8f0;
+    --sl-th-bg: #1c2739;
+    --sl-th-text: #94a3b8;
+    --sl-row-hover: #1e3a5f;
+
+    /* 同步 Bootstrap 变量：让 card / table / dropdown / modal / form 一起变暗 */
+    --bs-body-bg: #0f172a;
+    --bs-body-color: #e2e8f0;
+    --bs-border-color: #2b3a52;
+    --bs-secondary-bg: #1c2739;
+    --bs-tertiary-bg: #233047;
+    --bs-secondary-color: #94a3b8;
+    --bs-emphasis-color: #f1f5f9;
+    --bs-heading-color: #f1f5f9;
+    --bs-link-color: #7cb0f7;
+    --bs-link-hover-color: #a5c8fa;
+
+    color-scheme: dark;
+}
+
+[data-bs-theme="light"] { color-scheme: light; }
+
+/* =============================================================================
+   L1：骨架元素统一取变量（覆盖 base.html 内联与其它 css 的字面量）
+   ============================================================================= */
+body {
+    background: var(--sl-bg) !important;
+    color: var(--sl-text);
+}
+
+/* 导航栏：原来是写死的 navbar-dark bg-dark，两模式都跟随主题 */
+.navbar {
+    background-color: var(--sl-navbar-bg) !important;
+    color: var(--sl-navbar-text);
+    border-bottom: 1px solid var(--sl-border);
+}
+.navbar .navbar-brand,
+.navbar .nav-link,
+.navbar .btn-outline-light { color: var(--sl-navbar-text); }
+.navbar .btn-outline-light { border-color: rgba(255, 255, 255, .25); }
+.navbar .btn-outline-light:hover { background: rgba(255, 255, 255, .12); }
+
+/* 侧栏：普通侧栏 + 考试态 .sidebar-float（成绩分析）一律同源 —— 不再一黑一白 */
+.sidebar,
+.sidebar.sidebar-float {
+    background: var(--sl-sidebar-bg) !important;
+    color: var(--sl-sidebar-text);
+    border-color: var(--sl-border);
+}
+.sidebar .nav-link { color: var(--sl-sidebar-text); }
+.sidebar .nav-link:hover {
+    color: var(--sl-sidebar-text-hover);
+    background: var(--sl-sidebar-hover);
+}
+.sidebar .nav-link.active {
+    color: #fff;
+    background: var(--sl-sidebar-active);
+    border-left-color: var(--sl-sidebar-accent);
+}
+.sidebar .nav-section { color: var(--sl-sidebar-muted); }
+.sidebar .aca-group[aria-expanded="true"] { color: var(--sl-sidebar-text-hover); }
+
+/* 考试态侧栏内部（原白卡专属配色）→ 改为侧栏语义变量，深浅两模式都协调 */
+.sidebar-float .efn-back { color: var(--sl-sidebar-muted); }
+.sidebar-float .efn-back:hover {
+    color: var(--sl-sidebar-accent-text);
+    background: var(--sl-sidebar-hover);
+}
+.sidebar-float .efn-title { color: var(--sl-sidebar-title); }
+.sidebar-float .efn-steps { border-bottom: 1px solid var(--sl-sidebar-line); }
+.sidebar-float .efn-dot { background: var(--sl-sidebar-chip); color: var(--sl-sidebar-text); }
+.sidebar-float .efn-dot.on { background: #16a34a; color: #fff; }
+.sidebar-float .efn-dot.done { background: rgba(22, 163, 74, .25); color: #86efac; }
+.sidebar-float .efn-count,
+.sidebar-float .efn-item .text-muted { color: var(--sl-sidebar-muted) !important; }
+.sidebar-float .efn-item { color: var(--sl-sidebar-text); }
+.sidebar-float .efn-item:hover {
+    background: var(--sl-sidebar-hover);
+    color: var(--sl-sidebar-accent-text);
+}
+.sidebar-float .efn-item.active {
+    background: var(--sl-sidebar-active);
+    color: var(--sl-sidebar-accent-text);
+    box-shadow: inset 3px 0 0 0 var(--sl-sidebar-accent);
+}
+.sidebar-float .efn-group { background: var(--sl-sidebar-group); color: var(--sl-sidebar-text); }
+.sidebar-float .efn-group:hover { background: var(--sl-sidebar-hover); }
+.sidebar-float .efn-group .bi { color: var(--sl-sidebar-muted); }
+.sidebar-float .efn-ai::before { background: var(--sl-sidebar-line); }
+.sidebar-float .efn-ai { color: var(--sl-sidebar-text); }
+.sidebar-float .efn-ai:hover { background: var(--sl-sidebar-hover); }
+/* 激活项里的浅色 badge（如「未配置」）在深色侧栏下不必反白 */
+.sidebar-float .badge.bg-light { background: var(--sl-sidebar-chip) !important; color: var(--sl-sidebar-text) !important; }
+
+/* 卡片 / 统计卡 / 面板：Bootstrap 5.3 的 dark 已处理 .card，这里统一阴影与边框 */
+.card, .stat-card, .chart-card, .tbl-card,
+.modal-content, .offcanvas, .toast, .popover, .dropdown-menu {
+    background-color: var(--sl-surface);
+    color: var(--sl-text);
+    border-color: var(--sl-border);
+    box-shadow: var(--sl-shadow);
+}
+.card-header, .card-footer, .modal-header, .modal-footer, .offcanvas-header {
+    background-color: var(--sl-surface-2);
+    border-color: var(--sl-border);
+    color: var(--sl-text);
+}
+.list-group-item { background-color: var(--sl-surface); color: var(--sl-text); border-color: var(--sl-border); }
+.list-group-item:hover { background-color: var(--sl-surface-2); }
+.nav-tabs .nav-link { color: var(--sl-text-muted); }
+.nav-tabs .nav-link.active { background: var(--sl-surface); color: var(--sl-text); border-color: var(--sl-border) var(--sl-border) var(--sl-surface); }
+.nav-tabs { border-color: var(--sl-border); }
+.page-link { background: var(--sl-surface); border-color: var(--sl-border); color: var(--sl-text); }
+.page-link:hover { background: var(--sl-surface-2); color: var(--sl-text); }
+.page-item.disabled .page-link { background: var(--sl-surface-2); color: var(--sl-text-subtle); }
+.breadcrumb { --bs-breadcrumb-divider-color: var(--sl-text-subtle); }
+.text-muted { color: var(--sl-text-muted) !important; }
+
+/* 表格：表头 / 斑马 / 悬停用变量（Bootstrap dark 已改 --bs-table-*，这里补业务表） */
+.table > thead th { color: var(--sl-th-text); }
+.table-responsive thead th { background: var(--sl-th-bg) !important; }
+.table-striped > tbody > tr:nth-of-type(odd) > * { --bs-table-bg-type: var(--sl-surface-2); }
+
+/* —— 成绩类表格（grades.css 用 !important 写死深色表头，必须逐个顶掉） —— */
+.g-table thead th,
+.g-table thead th:first-child,
+.ld-table thead th {
+    background: var(--sl-head-bg) !important;
+    color: var(--sl-head-text) !important;
+}
+.g-table tbody tr:nth-child(even) { background: var(--sl-surface-2) !important; --bs-table-bg: var(--sl-surface-2) !important; }
+.g-table tbody tr:nth-child(even) td:first-child { background: var(--sl-surface-2) !important; }
+.g-table tbody tr.stu-link:hover { background: var(--sl-row-hover) !important; }
+.g-table tbody tr.stu-link:hover td:first-child { background: var(--sl-row-hover) !important; }
+.g-table thead th.sortable:hover { color: var(--sl-sidebar-accent-text) !important; }
+.g-table, .ld-table { color: var(--sl-text); border-color: var(--sl-border); }
+.chart-card .card-header, .tbl-card .card-header {
+    background: var(--sl-surface-2);
+    border-bottom: 1px solid var(--sl-border);
+}
+.empty-state { color: var(--sl-text-muted); }
+.empty-state .bi { color: var(--sl-text-subtle); }
+.chart-tip { color: var(--sl-text-muted); }
+#gCmList .cm-item:hover { background: var(--sl-surface-3); }
+
+/* —— 课表总览（schedule_matrix.css） —— */
+.ovw-block { border-color: var(--sl-border); }
+.ovw-block-head {
+    background: linear-gradient(90deg, var(--sl-sidebar-bg), var(--sl-surface-2)) !important;
+    color: var(--sl-sidebar-text-hover);
+}
+.ovw-block-head .ovw-sub { color: var(--sl-sidebar-muted); }
+.ovw-table thead th { background: var(--sl-surface-2); color: var(--sl-text); }
+.ovw-grp-row th, .ovw-per-row th { background: var(--sl-surface-2); color: var(--sl-text); }
+.ovw-period-name, .ovw-cmeta { color: var(--sl-text-muted); }
+.ovw-grp-break { color: var(--sl-text-muted) !important; }
+.ovw-teacher { color: var(--sl-text-muted); }
+.ovw-cell, .ovw-blank { border-color: var(--sl-border); }
+.ovw-chk-none { background: var(--sl-surface-3); color: var(--sl-text-muted); }
+
+/* =============================================================================
+   L2：兜底 —— 覆盖「改不到的」模板内联 style 与 Bootstrap 浅色工具类
+   （模板里有 665 行内联色，逐个改不现实；用属性选择器批量接管白底/深色字）
+   ============================================================================= */
+[data-bs-theme="dark"] .bg-white,
+[data-bs-theme="dark"] .bg-light,
+[data-bs-theme="dark"] [style*="background:#fff"],
+[data-bs-theme="dark"] [style*="background: #fff"],
+[data-bs-theme="dark"] [style*="background:#ffffff"],
+[data-bs-theme="dark"] [style*="background: #ffffff"],
+[data-bs-theme="dark"] [style*="background-color:#fff"],
+[data-bs-theme="dark"] [style*="background-color: #fff"] {
+    background: var(--sl-surface) !important;
+}
+[data-bs-theme="dark"] [style*="background:#f8f9fa"],
+[data-bs-theme="dark"] [style*="background: #f8f9fa"],
+[data-bs-theme="dark"] [style*="background:#f8fafc"],
+[data-bs-theme="dark"] [style*="background: #f8fafc"],
+[data-bs-theme="dark"] [style*="background:#f1f5f9"],
+[data-bs-theme="dark"] [style*="background: #f1f5f9"],
+[data-bs-theme="dark"] [style*="background:#f6f8fb"],
+[data-bs-theme="dark"] [style*="background: #f6f8fb"] {
+    background: var(--sl-surface-2) !important;
+}
+[data-bs-theme="dark"] [style*="color:#333"],
+[data-bs-theme="dark"] [style*="color: #333"],
+[data-bs-theme="dark"] [style*="color:#000"],
+[data-bs-theme="dark"] [style*="color: #000"],
+[data-bs-theme="dark"] [style*="color:#212529"],
+[data-bs-theme="dark"] [style*="color: #212529"],
+[data-bs-theme="dark"] .text-dark,
+[data-bs-theme="dark"] .text-black {
+    color: var(--sl-text) !important;
+}
+[data-bs-theme="dark"] [style*="background:#1e293b"],
+[data-bs-theme="dark"] [style*="background: #1e293b"] {
+    background: var(--sl-sidebar-bg) !important;
+}
+[data-bs-theme="dark"] ::-webkit-scrollbar { width: 10px; height: 10px; }
+[data-bs-theme="dark"] ::-webkit-scrollbar-track { background: var(--sl-bg); }
+[data-bs-theme="dark"] ::-webkit-scrollbar-thumb { background: #35465f; border-radius: 5px; }
+
+/* 图表中常见的浅色辅助线：深色下调暗，避免刺眼 */
+[data-bs-theme="dark"] .chartjs-render-monitor { filter: brightness(.9); }
+
+/* 打印时永远按浅色输出（成绩单/台账要能打印） */
+@media print {
+    :root, [data-bs-theme="dark"] {
+        --sl-bg: #fff; --sl-surface: #fff; --sl-surface-2: #fff;
+        --sl-surface-3: #f1f5f9; --sl-border: #e2e8f0;
+        --sl-text: #000; --sl-text-muted: #333; --sl-text-subtle: #666;
+    }
+    body { background: #fff !important; color: #000 !important; }
+}
