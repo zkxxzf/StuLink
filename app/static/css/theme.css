@@ -19,7 +19,8 @@
 :root,
 [data-bs-theme="light"] {
     /* —— 页面与面板 —— */
-    --sl-bg: #f0f2f5;                  /* 页面底色 */
+    /* 2026-10-13（v1.19.47.24）：页面底色原 #f0f2f5 偏灰，整体提亮一档 */
+    --sl-bg: #f6f8fb;                  /* 页面底色 */
     --sl-surface: #ffffff;             /* 卡片 / 面板 / 弹层 */
     --sl-surface-2: #f8fafc;           /* 次级面：表头、卡片头、斑马行 */
     --sl-surface-3: #f1f5f9;           /* hover / 分组头 */
@@ -54,9 +55,13 @@
     --sl-navbar-text: #1e293b;
     --sl-navbar-border: #e2e8f0;
 
-    /* —— 表格 —— */
-    --sl-head-bg: #1e293b;             /* 成绩类表格深色表头 */
-    --sl-head-text: #ffffff;
+    /* —— 表格 ——
+       2026-10-13（v1.19.47.24）：成绩类表头原是写死的深色 #1e293b + 白字
+       （grades.css 加了 !important）。页面整体主题化后这条黑表头就成了突兀的
+       「黑条」（用户反馈「页面区域还有黑色的，比如表头」）→ 改为跟随主题：
+       浅色 = 浅灰底深字，深色 = 深底浅字。 */
+    --sl-head-bg: #eef2f7;             /* 成绩类表格表头 */
+    --sl-head-text: #334155;
     --sl-th-bg: #f8f9fa;               /* 普通表格表头 */
     --sl-th-text: #64748b;
     --sl-row-hover: #e0ecff;
@@ -261,6 +266,25 @@ body {
 .g-table tbody tr.stu-link:hover td:first-child { background: var(--sl-row-hover) !important; }
 .g-table thead th.sortable:hover { color: var(--sl-sidebar-accent-text) !important; }
 .g-table, .ld-table { color: var(--sl-text); border-color: var(--sl-border); }
+/* 页面模板里内联写死的深色表头/横幅（内联优先级高于本文件，必须用 !important 顶掉）：
+   - academic/schedule_periods.html：table.tt thead th（节次表）
+   - academic/subject_leaders.html：.ld-head（备课组长分组头）
+   - academic/index.html：.ac-hero（教务工作台横幅，原本深色渐变 + 白字） */
+table.tt thead th {
+    background: var(--sl-head-bg) !important;
+    color: var(--sl-head-text) !important;
+}
+.ld-head {
+    background: var(--sl-head-bg) !important;
+    color: var(--sl-head-text) !important;
+}
+.ac-hero {
+    background: linear-gradient(120deg, var(--sl-head-bg),
+                var(--sl-surface-2) 60%, var(--sl-surface-3)) !important;
+    color: var(--sl-text) !important;
+}
+.ac-hero h4, .ac-hero .ac-hero-meta strong { color: var(--sl-text) !important; }
+.ac-hero .ac-hero-meta { opacity: .8; }
 .chart-card .card-header, .tbl-card .card-header {
     background: var(--sl-surface-2);
     border-bottom: 1px solid var(--sl-border);
@@ -329,6 +353,12 @@ body {
 
 /* 图表中常见的浅色辅助线：深色下调暗，避免刺眼 */
 [data-bs-theme="dark"] .chartjs-render-monitor { filter: brightness(.9); }
+
+/* 反向问题：模板里写死的「深色文字」（宿舍床位姓名、调课节次等）在深色卡片上看不清 */
+[data-bs-theme="dark"] .bed-student,
+[data-bs-theme="dark"] .ep-pn,
+[data-bs-theme="dark"] .ld-duty,
+[data-bs-theme="dark"] .ld-members { color: var(--sl-text) !important; }
 
 /* 打印时永远按浅色输出（成绩单/台账要能打印） */
 @media print {
