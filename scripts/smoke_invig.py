@@ -142,6 +142,8 @@ with app.test_client() as c:
     check('侧栏标题=考试名字（非「年级·性质·阶段·日期」串）',
           '2025级2026-2027学年第一学期期中考（冒烟）' in ph
           and '2025级·联考·期中考' not in ph)
+    # v1.19.46.2 点环节标签不滚动：改用 history.replaceState 写 hash（不再直接赋 location.hash）
+    check('点环节标签不滚动（用 history.replaceState）', 'history.replaceState' in ph)
 
     # ---- 环节④ ----
     r = c.get(f'/grades/affairs/{aid}/teachers')

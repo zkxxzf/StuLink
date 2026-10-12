@@ -731,12 +731,25 @@ const AID = {{ affair.id }};
 function csrf(){ return csrfToken; }
 
 // v1.12.1 记忆当前 tab：切换时写 URL hash，刷新后自动恢复（避免操作后跳回学生名单）
+// v1.19.46.2：改用 history.replaceState 写 hash —— 直接赋 location.hash 会让浏览器
+// 跳到该锚点（#t1~#t7），表现为「点环节标签时屏幕滚动」；replaceState 只改地址栏不滚动。
 document.querySelectorAll('#affairTabs button[data-bs-toggle="tab"]').forEach(function(btn){
-    btn.addEventListener('shown.bs.tab', function(){ location.hash = btn.dataset.bsTarget; });
+    btn.addEventListener('shown.bs.tab', function(){
+        try {
+            history.replaceState(null, '', btn.dataset.bsTarget);
+        } catch (e) {
+            location.hash = btn.dataset.bsTarget;   // 极老浏览器兜底
+        }
+    });
 });
 if(location.hash){
     var triggerEl = document.querySelector('#affairTabs button[data-bs-target="'+location.hash+'"]');
-    if(triggerEl) new bootstrap.Tab(triggerEl).show();
+    if(triggerEl){
+        new bootstrap.Tab(triggerEl).show();
+        // v1.19.46.2：带 #tN 打开/刷新时浏览器会自动跳到该锚点，落回顶部，
+        // 与「点环节标签不滚动」保持一致（目标元素在本脚本之前已解析，故直接滚即可）。
+        window.scrollTo(0, 0);
+    }
 }
 // v1.19.45.2 步骤③ 模式面板联动：初始按服务端保存的模式展示，切到该步骤时再同步一次
 syncModePanes();
