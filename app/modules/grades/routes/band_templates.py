@@ -7,7 +7,7 @@ import json
 
 from app.extensions import db
 from app.models import DictCategory
-from app.models.grades import Exam, BandTemplate
+from app.models.grades import Exam, ExamBand, BandTemplate
 from app.modules.grades import bp
 from app.utils.decorators import perm_required
 from app.utils.helpers import log_operation
@@ -94,11 +94,28 @@ def _exam_type_options():
     return opts
 
 
+def _norm_line(name):
+    """线名归一化：去首尾空白 + 去尾部「线」（「特控线」≈「特控」）
+
+    与划线分层页 bands.html 回填的 norm() 同口径 —— 导入的线名与模板层名
+    常差一个「线」字，精确比较会对不上。
+    """
+    t = str(name or '').strip()
+    return t[:-1] if t.endswith('线') else t
+
+
 @bp.route('/api/band-templates')
 @login_required
 @perm_required('grades.settings')
 def api_band_templates():
-    """模板列表；带 exam_id 时返回该考试已绑定的模板，未绑定则按考试类型推荐一个"""
+    """模板列表；带 exam_id 时返回该考试已绑定的模板，未绑定则推荐一个
+
+    推荐优先级（2026-10-13 口径："先知道是哪个模板，再填比例/数值"）：
+      ① 已绑定 → bound_id
+      ② 本场已保存划线的层名（归一化）与某模板层名重叠最多 → 按内容推荐
+      ③ 按考试适用类型推荐（原口径）
+    suggest_reason: 'lines' | 'exam_type' | ''（推荐依据，前端展示用）
+    """
     ensure_builtin_templates()
     exam_id = request.args.get('exam_id', type=int)
     rows = (BandTemplate.query.order_by(BandTemplate.sort_order, BandTemplate.id).all())
@@ -109,20 +126,38 @@ def api_band_templates():
     } for t in rows]
 
     bound = suggested = None
+    suggest_reason = ''
     exam_type = ''
     if exam_id:
         exam = Exam.query.get(exam_id)
         if exam:
             bound = exam.band_template_id()
             exam_type = exam.exam_type or ''
-            if not bound and exam_type:
-                # 未绑定时按「适用考试类型」推荐：取第一个声明适用该类型的模板
+            if not bound:
+                # ② 按本场已保存划线的层名推荐：重叠层最多者胜（要求至少命中 2 层，
+                #    避免「只共有一个泛化层名」的模板被误推荐）
+                saved = {_norm_line(n) for (n,) in
+                         db.session.query(ExamBand.name)
+                         .filter(ExamBand.exam_id == exam_id).all()}
+                saved.discard('')
+                if len(saved) >= 2:
+                    best, best_n = None, 0
+                    for t in rows:
+                        n = len(saved & {_norm_line(x.get('name'))
+                                         for x in t.get_layers()})
+                        if n > best_n:
+                            best, best_n = t.id, n
+                    if best:
+                        suggested, suggest_reason = best, 'lines'
+            if not suggested and not bound and exam_type:
+                # ③ 未绑定时按「适用考试类型」推荐：取第一个声明适用该类型的模板
                 for t in rows:
                     if exam_type in t.get_exam_types():
-                        suggested = t.id
+                        suggested, suggest_reason = t.id, 'exam_type'
                         break
     return jsonify(success=True, data={'templates': data, 'bound_id': bound,
                                        'suggested_id': suggested,
+                                       'suggest_reason': suggest_reason,
                                        'exam_type': exam_type,
                                        'exam_type_options': _exam_type_options()})
 

@@ -513,8 +513,12 @@ with app.test_client() as c:
           _ln == sorted(_ln) and _rn == sorted(_rn)
           and _rn[:1] == ['20250001'] and '20250001' not in _ln,
           (_ln[:3], _rn[:3]))
+    # 2026-10-13：断言改成**匹配规则形态**（是否用 --bs-table-bg 决定首列底色），
+    # 不再比对整条 fallback 字面量 —— 兜底值从 --bs-body-bg 改成 --sl-surface 后
+    # 这条断言就恒失败（表在白卡片上，兜底用面板色才不会让首列发灰）。
     check('首列 sticky 背景跟随行状态（整行标黄含学号列）',
-          'var(--bs-table-bg, var(--bs-body-bg, #fff))' in h2)
+          re.search(r'tbody\s+td:first-child\s*\{\s*background:\s*var\(--bs-table-bg', h2)
+          is not None)
 
     # ---- v1.19.36.0 步骤② 考场容量：批量设置 / 沿用上一场（同房间）----
     check('步骤② 有容量批量入口',

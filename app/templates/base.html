@@ -61,6 +61,14 @@
         .sidebar .aca-group .aca-caret { transition: transform .15s ease; }
         .sidebar .aca-group[aria-expanded="true"] .aca-caret { transform: rotate(180deg); }
         .sidebar .aca-group[aria-expanded="true"] { color: var(--sl-sidebar-text-hover); }
+        /* 2026-10-13：折叠项（基础配置等）的箭头方向反映状态 —— 原先恒为 ▾，
+           收起后看不出"这里还能展开"，也看不出当前是展开还是收起 */
+        .sidebar .nav-link[data-bs-toggle="collapse"] .bi-chevron-down {
+            transition: transform .15s ease;
+        }
+        .sidebar .nav-link[data-bs-toggle="collapse"][aria-expanded="false"] .bi-chevron-down {
+            transform: rotate(-90deg);
+        }
         .main-content { margin-left: var(--sidebar-width); padding: 20px 24px 24px; min-height: 100vh; }
         /* 2026-10-13：考试态侧栏已改为**贴左全高**（与常规侧栏同位同宽），
            main-content 的 margin-left:220px 直接生效，原先给浮层让位的
@@ -218,14 +226,17 @@
         /* v1.19.47.25：「成绩分析」标题本身是入口链接，右侧箭头单独负责展开/收起 */
         .sidebar-float .efn-group-title { flex: 1 1 auto; color: inherit; }
         .sidebar-float .efn-group-title:hover { color: var(--sl-sidebar-accent-text); }
-        .sidebar-float .efn-group .bi[data-bs-toggle] { cursor: pointer; }
-        /* ---- v1.19.47.25：AI 智能导入移到侧栏最下方（进阶入口），用细线分隔 ---- */
-        .sidebar-float .efn-ai { margin-top: 8px; color: var(--sl-sidebar-text); }
-        .sidebar-float .efn-ai:hover { background: var(--sl-sidebar-hover); }
-        .sidebar-float .efn-ai::before {
-            content: ''; display: block; height: 1px; margin: 0 2px 8px;
-            background: var(--sl-sidebar-line);
+        .sidebar-float .efn-group .bi[data-bs-toggle] {
+            cursor: pointer; transition: transform .15s ease;
         }
+        /* 2026-10-13：箭头方向反映展开状态（原来恒为 ▾，收起后看不出来） */
+        .sidebar-float .efn-group .bi[data-bs-toggle][aria-expanded="false"] {
+            transform: rotate(-90deg);
+        }
+        /* ---- 2026-10-13：AI 智能导入紧跟「成绩导入」（同一种事的两个入口），
+               不再放侧栏最下方、也不再用那条细线分隔 ---- */
+        .sidebar-float .efn-ai { color: var(--sl-sidebar-text); }
+        .sidebar-float .efn-ai .bi { margin-right: 4px; }
         @media (max-width: 767.98px) {
             .sidebar.sidebar-float { display: none; }
         }
@@ -485,6 +496,11 @@
                    href="{{ url_for('grades.exam_affair_go', exam_id=EN.exam_id) }}">考务安排{% if not EN.steps[1].done %}<span class="efn-tag">待做</span>{% endif %}</a>
                 <a class="efn-item {% if EN.section == 'import' %}active{% endif %}" data-nav="import"
                    href="{{ url_for('grades.exam_import', exam_id=EN.exam_id) }}">成绩导入{% if not EN.steps[2].done %}<span class="efn-tag">待做</span>{% endif %}</a>
+                {# 2026-10-13：AI 智能导入紧跟「成绩导入」—— 两者是同一种事（把成绩送进本场考试）的
+                   两个入口。原先放在侧栏最下方，中间隔着「划线分层」和整块「成绩分析」，
+                   导入时要往下找很久（用户反馈：放到成绩导入的下边或上边）。 #}
+                <a class="efn-item efn-ai {% if request.endpoint and request.endpoint.startswith('grades.exam_ai_import') %}active{% endif %}" data-nav="ai"
+                   href="{{ url_for('grades.exam_ai_import', exam_id=EN.exam_id) }}"><i class="bi bi-robot"></i>AI 智能导入</a>
                 {# v1.19.47.25：划线分层有自己的段位（'bands'），不再与「成绩导入」同时高亮 #}
                 <a class="efn-item {% if EN.section == 'bands' %}active{% endif %}" data-nav="bands"
                    href="{{ url_for('grades.bands_page', exam_id=EN.exam_id) }}">划线分层</a>
@@ -499,16 +515,18 @@
                 {% set _is_lead = current_user.role == 'admin' or (current_user.permission_group and
                      current_user.permission_group.scope_type in ('school', 'grade')) %}
                 {# v1.19.47.25：点「成绩分析」文字直接进入本场分析（领导=总览（全年级对比），
-                   其他角色=班级分析，避免非领导点总览被 403）；展开/收起改由右侧箭头负责。 #}
+                   其他角色=班级分析，避免非领导点总览被 403）；展开/收起改由右侧箭头负责。
+                   2026-10-13：**不再随当前页面自动展开 / 折叠** —— 原先进分析页自动展开、
+                   回到导入页又自动收起，每次导航侧栏高度都在变（用户反馈"画面跳动感"）。
+                   现在恒定展开；用户手动收起后记在本机 localStorage，跨页面保持，不再自己变。 #}
                 <div class="efn-group">
                     <a class="efn-group-title" data-nav="ana_home"
                        href="{{ url_for('grades.global_compare_page', exam=EN.exam_id) if _is_lead
                                  else url_for('grades.index', exam=EN.exam_id, tab='class') }}">成绩分析</a>
                     <i class="bi bi-chevron-down" data-bs-toggle="collapse" href="#efnAnalysis"
-                       role="button" title="展开 / 收起"
-                       aria-expanded="{{ 'true' if (EN.section == 'analysis' or request.endpoint in _ana_ep) else 'false' }}"></i>
+                       role="button" title="展开 / 收起" aria-expanded="true"></i>
                 </div>
-                <div class="collapse {% if EN.section == 'analysis' or request.endpoint in _ana_ep %}show{% endif %}" id="efnAnalysis">
+                <div class="collapse show" id="efnAnalysis">
                     {% if _is_lead %}
                     <a class="efn-item ps-4 {% if request.endpoint == 'grades.global_compare_page' %}active{% endif %}" data-nav="global"
                        href="{{ url_for('grades.global_compare_page') }}?exam={{ EN.exam_id }}">总览（全年级对比）</a>
@@ -528,10 +546,31 @@
                        href="{{ url_for('grades.report_page') }}?exam={{ EN.exam_id }}">成绩汇报区</a>
                     {% endif %}
                 </div>
+                <script>
+                {# 2026-10-13：分析组展开状态记在本机（键 stulink-efn-analysis），
+                   服务端不再按当前路由写死 show —— 跨页面导航时侧栏高度恒定，不跳动。
+                   脚本放在元素正后方：解析到即执行，先于首屏绘制，不会闪一下再收起。 #}
+                (function () {
+                    var box = document.getElementById('efnAnalysis');
+                    if (!box) { return; }
+                    var KEY = 'stulink-efn-analysis';
+                    var prev = box.previousElementSibling;
+                    var caret = prev ? prev.querySelector('[data-bs-toggle="collapse"]') : null;
+                    try {
+                        if (localStorage.getItem(KEY) === '0') {
+                            box.classList.remove('show');
+                            if (caret) { caret.setAttribute('aria-expanded', 'false'); }
+                        }
+                    } catch (e) { /* 隐私模式等读不到 → 保持默认展开 */ }
+                    box.addEventListener('hidden.bs.collapse', function () {
+                        try { localStorage.setItem(KEY, '0'); } catch (e) {}
+                    });
+                    box.addEventListener('shown.bs.collapse', function () {
+                        try { localStorage.setItem(KEY, '1'); } catch (e) {}
+                    });
+                })();
+                </script>
                 {% endif %}
-                {# v1.19.47.25：AI 智能导入移到侧栏最下方（进阶入口）；移除「下一步」提示（用户：无用） #}
-                <a class="efn-item efn-ai {% if request.endpoint and request.endpoint.startswith('grades.exam_ai_import') %}active{% endif %}" data-nav="ai"
-                   href="{{ url_for('grades.exam_ai_import', exam_id=EN.exam_id) }}">AI 智能导入</a>
             </div>
             {% else %}
             {# ---------- 全局态：精简菜单 ----------
@@ -550,16 +589,18 @@
             {# v1.19.47.25 移除「分数修改记录」全局入口：它属于单场考试的数据，只在该场成绩单页右上角进入 #}
             {# v1.19.47.25 移除「毕业生成绩（二期）」入口：暂无用处，后期单独做毕业生数据库 #}
 
-            {# v1.19.0 基础配置：长期基础数据，不属于四段流程，默认折叠 #}
+            {# v1.19.0 基础配置：长期基础数据，不属于四段流程，默认折叠
+               2026-10-13：同样**不再随当前页面自动展开**（进「选科维护」展开、离开又收起，
+               侧栏高度来回变 → 画面跳动）；状态记在本机 localStorage，用户手动展开后一直保持。 #}
             {% set _cfg_eps = ('grades.subject_mgmt', 'grades.band_templates_page',
                                'grades.teachers_page', 'grades.teachers_import_page',
                                'grades.exam_rooms') %}
             <a class="nav-link d-flex align-items-center" data-bs-toggle="collapse" href="#navCfg"
-               role="button" aria-expanded="{{ 'true' if request.endpoint in _cfg_eps else 'false' }}">
+               role="button" aria-expanded="false" data-nav="cfg">
                 <i class="bi bi-sliders"></i>基础配置
                 <i class="bi bi-chevron-down small ms-auto"></i>
             </a>
-            <div class="collapse {% if request.endpoint in _cfg_eps %}show{% endif %}" id="navCfg">
+            <div class="collapse" id="navCfg">
                 {% if current_user.has_perm('grades.subject_mgmt') %}
                 <a class="nav-link ps-4 {% if request.endpoint == 'grades.subject_mgmt' %}active{% endif %}"
                    href="{{ url_for('grades.subject_mgmt') }}">
@@ -585,6 +626,28 @@
                 </a>
                 {% endif %}
             </div>
+            <script>
+            {# 2026-10-13：「基础配置」展开状态记在本机（键 stulink-nav-cfg），默认折叠。
+               跟「成绩分析」同一套做法：服务端不再按路由自动展开，避免导航时侧栏跳动。 #}
+            (function () {
+                var box = document.getElementById('navCfg');
+                if (!box) { return; }
+                var KEY = 'stulink-nav-cfg';
+                var toggle = document.querySelector('[data-bs-toggle="collapse"][href="#navCfg"]');
+                try {
+                    if (localStorage.getItem(KEY) === '1') {
+                        box.classList.add('show');
+                        if (toggle) { toggle.setAttribute('aria-expanded', 'true'); }
+                    }
+                } catch (e) { /* 读不到本机存储 → 保持默认折叠 */ }
+                box.addEventListener('shown.bs.collapse', function () {
+                    try { localStorage.setItem(KEY, '1'); } catch (e) {}
+                });
+                box.addEventListener('hidden.bs.collapse', function () {
+                    try { localStorage.setItem(KEY, '0'); } catch (e) {}
+                });
+            })();
+            </script>
             {% endif %}
             {% endif %}
 

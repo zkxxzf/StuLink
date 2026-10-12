@@ -34,6 +34,15 @@ from app.utils.helpers import log_operation
 from app.utils.upload_guard import validate_upload, ext_of
 
 MAX_AI_FILES = 8
+
+
+def _norm_line(name):
+    """线名归一化：去首尾空白 + 去尾部「线」（「特控线」≈「特控」）
+
+    与划线分层页（bands.html 回填、band_templates 推荐）同口径。
+    """
+    t = str(name or '').strip()
+    return t[:-1] if t.endswith('线') else t
 # 2026-10-12 安全审计 M-6：原先这里是 20MB，而 Flask 层 MAX_CONTENT_LENGTH 只有 16MB，
 # 「len(raw) > 20MB」这个分支**永远走不到**（死代码），却给人"已设上限"的错觉。
 # 真正的风险是 MAX_AI_FILES 个文件同时进内存 + 全量行 json.dumps 写 import_draft。
@@ -468,8 +477,13 @@ def _apply_bands(exam, band_items, dry=False):
                            'reason': '%s·%s：%s' % (direction or '全体', subject, err)})
             return None, errors
         info['applied'].append('%s·%s' % (direction or '全体', subject))
-    # 分层模板：按线名序列 find-or-create 并绑定到本考试
-    tpl = next((t for t in BandTemplate.query.all() if t.names() == names), None)
+    # 分层模板：按线名序列 find-or-create 并绑定到本考试。
+    # 2026-10-13：匹配改「归一化」（去首尾空白 + 去尾部「线」，与划线分层页同口径）——
+    # 文件线名「985/211/特控/本科」与「默认模板」层名「985线/211线/特控线/本科线」
+    # 原先精确比较对不上，导致每次导入都新建一个重复模板。
+    want = [_norm_line(n) for n in names]
+    tpl = next((t for t in BandTemplate.query.all()
+                if [_norm_line(x) for x in t.names()] == want), None)
     if tpl is None:
         base = ('、'.join(names) or '分数线')[:50]
         nm = base

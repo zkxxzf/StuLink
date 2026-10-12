@@ -489,6 +489,48 @@ table.tt thead th {
 [data-bs-theme="dark"] [style*="background: #1e293b"] {
     background: var(--sl-sidebar-bg) !important;
 }
+
+/* —— 成绩汇报区（report.js 内联样式 + report.css）——
+   表格底色/文字是 JS 内联输出的（复制进 PPT 要保样式），只能靠属性选择器兜底。
+   此前 #f3f5f9 斑马行 / #1a1a1a·#222 深字不在兜底清单里：
+   深色下普通行「深底深字」→ 文字隐身，斑马行变成亮白条（用户反馈"颜色表格"）。 */
+[data-bs-theme="dark"] [style*="background:#f3f5f9"],
+[data-bs-theme="dark"] [style*="background: #f3f5f9"],
+[data-bs-theme="dark"] [style*="background:#eef3fa"],
+[data-bs-theme="dark"] [style*="background: #eef3fa"],
+[data-bs-theme="dark"] [style*="background:#dbe7f5"],
+[data-bs-theme="dark"] [style*="background: #dbe7f5"] {
+    background: var(--sl-surface-3) !important;
+}
+[data-bs-theme="dark"] [style*="color:#1a1a1a"],
+[data-bs-theme="dark"] [style*="color: #1a1a1a"],
+[data-bs-theme="dark"] [style*="color:#222"],
+[data-bs-theme="dark"] [style*="color: #222"] {
+    color: var(--sl-text) !important;
+}
+[data-bs-theme="dark"] [style*="color:#444"],
+[data-bs-theme="dark"] [style*="color: #444"],
+[data-bs-theme="dark"] [style*="color:#666"],
+[data-bs-theme="dark"] [style*="color: #666"],
+[data-bs-theme="dark"] [style*="color:#888"],
+[data-bs-theme="dark"] [style*="color: #888"],
+[data-bs-theme="dark"] [style*="color:#999"],
+[data-bs-theme="dark"] [style*="color: #999"] {
+    color: var(--sl-text-muted) !important;
+}
+/* 名次列的蓝字（#1f4e79）在深色下换成亮蓝；表头深蓝底保留（白字可读） */
+[data-bs-theme="dark"] [style*="color:#1f4e79"] {
+    color: var(--sl-sidebar-accent-text) !important;
+}
+/* 单元格 1.5px 深蓝描边在深色下调暗，避免整表"发蓝" */
+[data-bs-theme="dark"] [style*="solid #2b5f9e"] {
+    border-color: var(--sl-border) !important;
+}
+/* report.css（屏幕样式）里的深字标题 / 灰字说明 */
+[data-bs-theme="dark"] .rp-title h6 { color: var(--sl-text) !important; }
+[data-bs-theme="dark"] .rp-title .rp-sub,
+[data-bs-theme="dark"] .rp-hint,
+[data-bs-theme="dark"] .rp-rank-opt { color: var(--sl-text-muted) !important; }
 [data-bs-theme="dark"] ::-webkit-scrollbar { width: 10px; height: 10px; }
 [data-bs-theme="dark"] ::-webkit-scrollbar-track { background: var(--sl-bg); }
 [data-bs-theme="dark"] ::-webkit-scrollbar-thumb { background: #35465f; border-radius: 5px; }

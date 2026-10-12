@@ -2448,6 +2448,58 @@ def check_workbench_profile():
                  db.session.get(User, uid).check_password('New#Pwd2026'), 'new pwd')
 
 
+@item('BANDTPL')
+def check_band_template_suggest():
+    """划线分层「先定模板」（2026-10-13）：band-templates API 按**本场已保存划线的
+    层名（归一化，去尾「线」）**推荐模板；AI 导入绑定模板同口径，不再重复新建。"""
+    from datetime import date as _date
+    from app.models.grades import Exam, ExamBand, BandTemplate
+
+    with app.app_context():
+        exam = Exam.query.filter_by(name='BANDTPL划线模板测试').first()
+        if not exam:
+            exam = Exam(name='BANDTPL划线模板测试', grade='2024级',
+                        exam_date=_date(2026, 5, 20), exam_type='联考')  # 不命中任何模板的适用类型
+            db.session.add(exam)
+            db.session.flush()
+            for i, (nm, v) in enumerate([('985', 750), ('211', 700),
+                                         ('特控', 560), ('本科', 469)], start=1):
+                db.session.add(ExamBand(exam_id=exam.id, direction='', subject='总分',
+                                        seq=i, name=nm, lower_mode='score',
+                                        lower_value=float(v)))
+            db.session.commit()
+        exam_id = exam.id
+
+    with app.test_client() as c:
+        login(c, 'ac_admin', TEST_PWD)
+        r = c.get('/grades/api/band-templates', query_string={'exam_id': exam_id})
+        d = (r.get_json() or {}).get('data') or {}
+        case('划线模板：API 200 且带 suggest_reason', r.status_code == 200
+             and 'suggest_reason' in d, str(r.status_code))
+        case('划线模板：未绑定时按已保存划线层名推荐',
+             d.get('suggest_reason') == 'lines' and d.get('suggested_id'),
+             'reason=%s suggested=%s' % (d.get('suggest_reason'), d.get('suggested_id')))
+        with app.app_context():
+            default_tpl = BandTemplate.query.filter_by(name='默认模板').first()
+            case('划线模板：推荐命中的是「默认模板」（985/211/特控/本科 归一化对上）',
+                 default_tpl is not None and d.get('suggested_id') == default_tpl.id,
+                 'suggested=%s default=%s' % (d.get('suggested_id'),
+                                              default_tpl.id if default_tpl else None))
+        # AI 导入的模板归一化匹配：同一线名序列只认已有模板，不重复新建
+        with app.app_context():
+            from app.modules.grades.routes.ai_import import _norm_line
+            case('划线模板：线名归一化（去尾「线」）口径',
+                 _norm_line(' 特控线 ') == '特控' and _norm_line('本科') == '本科',
+                 _norm_line('特控线'))
+
+    with app.app_context():   # 清理，避免污染其它用例的考试列表
+        exam = Exam.query.filter_by(name='BANDTPL划线模板测试').first()
+        if exam:
+            ExamBand.query.filter_by(exam_id=exam.id).delete()
+            db.session.delete(exam)
+            db.session.commit()
+
+
 @item('SWAPCONFIRM')
 def check_swap_need_partner_confirm():
     """与同事对调时的「无需对方同意确认」选项：**默认勾选**（不勾选才需要对方答复）。"""

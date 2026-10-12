@@ -11,6 +11,7 @@
 
 <div class="card" id="bandApp"
      data-exam-id="{{ exam.id }}"
+     data-total-count="{{ total_count }}"
      data-dirs='{{ directions|tojson }}'
      data-dir-subjects='{{ dir_subjects|tojson }}'>
     <div class="card-body">
@@ -80,6 +81,7 @@ $(function(){
     var $app = $('#bandApp'), examId = $app.data('examId');
     var dirs = $app.data('dirs') || [''];
     var dirSubjects = $app.data('dirSubjects') || {};
+    var totalCount = parseInt($app.data('totalCount') || 0, 10) || 0;
     var layers = [];
 
     function mode(){ return $('#qMode').val(); }
@@ -124,7 +126,18 @@ $(function(){
         var $tb = $('#bandTable tbody').empty();
         layers.forEach(function(l){
             var tr = $('<tr>');
-            tr.append($('<td>').append($('<input class="form-control form-control-sm q-name" style="min-width:120px">').val(l.name)));
+            // 2026-10-13：模板层带比例定义时，层名下方展示「比例 x% · 约 N 人」
+            // （N = 参考人数 × 比例，估算值，帮助先对上模板再填数值）
+            var $name = $('<div>');
+            $name.append($('<input class="form-control form-control-sm q-name" style="min-width:120px">')
+                .val(l.name).attr('data-ratio', (l.ratio == null ? '' : l.ratio)));
+            if (l.ratio !== '' && l.ratio != null && !isNaN(parseFloat(l.ratio))){
+                var r = parseFloat(l.ratio);
+                var est = totalCount ? Math.round(totalCount * r / 100) : 0;
+                $name.append($('<div class="small text-muted">').text(
+                    '模板定义：比例 ' + r + '%' + (est ? ' · 约 ' + est + ' 人' : '')));
+            }
+            tr.append($('<td>').append($name));
             if (scope() === 'all'){
                 tr.append($('<td>').append($('<input type="number" step="0.5" class="form-control form-control-sm q-value">').val(l.value == null ? '' : l.value)));
             } else {
@@ -148,6 +161,9 @@ $(function(){
             var $r = $(this), o = {};
             o.seq = i + 1;   // 行序即层序，不再单独维护序号输入列
             o.name = $r.find('.q-name').val();
+            // 模板比例定义随行保存（重新 render 后提示不丢）
+            var ratio = $r.find('.q-name').attr('data-ratio');
+            if (ratio !== '' && ratio != null) o.ratio = ratio;
             if (scope() === 'all'){
                 o.value = $r.find('.q-value').val();
             } else {
@@ -226,10 +242,14 @@ $(function(){
                     if (key && !(key in lib)) lib[key] = {name: (b.name || '').trim(), seq: b.seq};
                 });
             });
+            // 2026-10-13：模板之外的层不再静默追加 —— 明确列出来提醒，
+            // 通常说明模板没选对（先选对模板，已保存的线才能对号入座）
+            var appended = [];
             Object.keys(lib).forEach(function(key){
                 var has = layers.some(function(l){ return norm(l.name) === key; });
-                if (!has) layers.push({seq: lib[key].seq, name: lib[key].name,
-                                        value: '', values: {}});
+                if (!has){ appended.push(lib[key].name);
+                    layers.push({seq: lib[key].seq, name: lib[key].name,
+                                 value: '', values: {}}); }
             });
             layers.sort(function(a, c){ return a.seq - c.seq; });
             colKeys().forEach(function(k){
@@ -240,7 +260,13 @@ $(function(){
                     if (b && b.lower_value != null) l.values[k] = b.lower_value;
                 });
             });
-            $('#qMsg').text('');
+            $('#qMsg').removeClass('text-success text-danger');
+            if (appended.length){
+                $('#qMsg').addClass('text-warning')
+                    .text('提示：已保存划线中有 ' + appended.length + ' 个层（'
+                          + appended.join('、') + '）不在当前模板的层名内，已追加为新行；'
+                          + '若与预期不符，请先在上方「分层模板」选择正确的模板再保存。');
+            } else { $('#qMsg').text(''); }
             render();
         }).fail(function(x){
             var m = (x.responseJSON && x.responseJSON.message) || '已保存的划线加载失败';
@@ -285,13 +311,18 @@ $(function(){
             var suggested = (res.data || {}).suggested_id;
             if (bound){ sel.val(String(bound)); applyTemplate(true); showBound(bound); }
             else if (suggested){
-                // 未绑定时按「模板适用考试类型」自动匹配：期末/月考/限时练各用各的
+                // 未绑定时自动匹配模板：优先按「本场已保存划线的层名」（归一化），
+                // 其次按考试适用类型 —— 先把模板定准，已保存的线才能对号入座
                 sel.val(String(suggested)); applyTemplate(true);
-                $('#qTplBound').text('按考试类型（' + ((res.data || {}).exam_type || '')
-                    + '）自动匹配模板：' + (tplById(suggested) || {}).name
+                var why = ((res.data || {}).suggest_reason === 'lines')
+                    ? '已按本场已保存划线的层名自动匹配模板：'
+                    : ('按考试类型（' + ((res.data || {}).exam_type || '') + '）自动匹配模板：');
+                $('#qTplBound').text(why + (tplById(suggested) || {}).name
                     + '（保存划线后正式绑定）');
             }
-            else { setLayers(['优秀', '良好', '及格', '待提升']); showBound(null); }
+            else {
+                setLayers(['优秀', '良好', '及格', '待提升']); showBound(null);
+            }
             if (cb) cb();
         }).fail(function(){
             // 2026-10-12 UI 审计 M4：模板加载失败也明确提示（原为静默回落默认四层）
@@ -321,7 +352,8 @@ $(function(){
             return (x.ratio === null || x.ratio === undefined) ? '' : x.ratio;
         });
         layers = (t.layers || []).map(function(x, i){
-            return {seq: i + 1, name: x.name, value: '', values: {}};
+            return {seq: i + 1, name: x.name, value: '', values: {},
+                    ratio: (x.ratio == null ? '' : x.ratio)};
         });
         // 比例/名次模板：把各层默认值预填进每个格子（分科时各科同值）
         if (t.lower_mode === 'ratio' || t.lower_mode === 'rank'){
