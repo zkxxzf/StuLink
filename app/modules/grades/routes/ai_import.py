@@ -15,8 +15,10 @@
 """
 from __future__ import annotations
 
+import io
 import json
 import uuid
+from datetime import date
 
 from flask import render_template, request, jsonify, redirect, url_for, flash, current_app
 from flask_login import login_required, current_user
@@ -29,6 +31,7 @@ from app.modules.grades.services import import_service, store_service, ranking, 
 from app.modules.grades.services.exam_guard import assert_exam_visible
 from app.utils.decorators import perm_required
 from app.utils.helpers import log_operation
+from app.utils.upload_guard import validate_upload, ext_of
 
 MAX_AI_FILES = 8
 # 2026-10-12 安全审计 M-6：原先这里是 20MB，而 Flask 层 MAX_CONTENT_LENGTH 只有 16MB，
@@ -38,6 +41,8 @@ MAX_AI_FILES = 8
 MAX_FILE_MB = 5
 MAX_TOTAL_MB = 40
 MAX_DRAFT_MB = 8          # import_draft（TEXT 列）落库上限，超出说明表太大，要求分批
+# v1.19.47.4 图片识别（考试时间表 / 监考表 → 划分场次）：只收常见位图，走视觉模型
+IMAGE_EXTS = ('jpg', 'jpeg', 'png', 'webp', 'bmp', 'gif')
 
 
 def _exam_has_scores(exam_id):
@@ -82,7 +87,9 @@ def exam_ai_import(exam_id):
     exam = assert_exam_visible(exam_id)
     return render_template('grades/ai_import.html', exam=exam,
                            subjects=SUBJECTS, score_kinds=aisvc.SCORE_KIND_LABEL,
-                           affair_fields=aisvc.AFFAIR_FIELD_LABELS)
+                           affair_fields=aisvc.AFFAIR_FIELD_LABELS,
+                           schedule_kind=aisvc.SCHEDULE_KIND,
+                           schedule_kind_label=aisvc.SCHEDULE_KIND_LABEL)
 
 
 @bp.route('/exams/<int:exam_id>/ai-import/analyze', methods=['POST'])
@@ -107,7 +114,12 @@ def exam_ai_import_analyze(exam_id):
                        message='文件总大小超过 %dMB，请分批导入' % MAX_TOTAL_MB)
 
     sheets, errors = [], []
+    img_files = []          # 图片（jpg/png/…）→ 走识图，用于划分场次
     for f in files:
+        ext = ext_of(f.filename)
+        if ext in IMAGE_EXTS:
+            img_files.append(f)
+            continue
         raw = f.read()
         if len(raw) > MAX_FILE_MB * 1024 * 1024:
             errors.append('%s 超过 %dMB，已跳过' % (f.filename, MAX_FILE_MB))
@@ -122,13 +134,68 @@ def exam_ai_import_analyze(exam_id):
             # 解析需要全量行：这里一次性读出并随草稿存好，apply 时无需再上传
             sh['rows'] = aisvc.read_sheet_rows(raw, sh['name'], sh['header_row'])
             sheets.append(sh)
-    if not sheets:
+
+    # ---- 图片：交视觉模型识别「考试场次」（划分场次用） ----
+    img_sessions, img_notes, img_pending = [], '', []
+    for f in img_files:
+        raw = f.read()
+        if len(raw) > MAX_FILE_MB * 1024 * 1024:
+            errors.append('%s 超过 %dMB，已跳过' % (f.filename, MAX_FILE_MB))
+            continue
+        ok, err = validate_upload(f.filename, allowed_exts=list(IMAGE_EXTS),
+                                  stream=io.BytesIO(raw))
+        if not ok:
+            errors.append('%s：%s' % (f.filename, err))
+            continue
+        img_pending.append((f.filename, raw))
+
+    if img_pending:
+        # 2026-10-12 审查修复 A：原条件 `and not sheets` 导致「Excel + 图片」混合上传时
+        # 图片既不识图也不报错（被静默忽略），用户以为场次也导了。
+        # 现改为：只要有图片就尝试识别；无 Key 时若同时有 Excel 则降级提示而非整体失败。
+        cfg0 = _ai_cfg_from_request()
+        if not cfg0:
+            if sheets:
+                errors.append('已上传图片但未配置本机 AI Key，图片未识别'
+                              '（图片场次需在「我的设置 → AI」配置 Key；Excel 部分已正常处理）')
+            else:
+                return jsonify(success=False,
+                               message='识别图片需要配置本机 AI Key（在「我的设置 → AI」里填写），'
+                                       '或改传 Excel 版考试时间表 / 监考表')
+        else:
+            from app.modules.grades.services import ai_service
+            resolved0 = ai_service.resolve_key(current_user, cfg0)
+            prompt0 = aisvc.build_schedule_image_prompt(exam)
+            for fname, raw in img_pending:
+                e = ext_of(fname)
+                mime = 'image/jpeg' if e in ('jpg', 'jpeg') else 'image/%s' % e
+                try:
+                    ok, text, _sec = ai_service.chat_with_image(
+                        resolved0, prompt0, raw, mime=mime, timeout=120, max_tokens=2000)
+                except Exception as e2:  # noqa: BLE001
+                    errors.append('%s 识图异常：%s' % (fname, str(e2)[:80]))
+                    continue
+                if not ok:
+                    errors.append('%s 识图失败：%s' % (fname, str(text)[:120]))
+                    continue
+                sess, notes = aisvc.parse_schedule_json(text)
+                if not sess:
+                    errors.append('%s 未识别出考试场次（可改传 Excel 版时间表）' % fname)
+                    continue
+                img_sessions.extend(sess)
+                img_notes = notes or img_notes
+            if not img_sessions and not sheets:
+                return jsonify(success=False,
+                               message='；'.join(errors) or '图片里未识别出考试场次')
+
+    if not sheets and not img_sessions:
         return jsonify(success=False, message='；'.join(errors) or '没有可用工作表')
 
     # 草稿落库（复用既有 import_draft/import_token 机制）
     token = str(uuid.uuid4())
     draft = {'mode': 'ai', 'sheets': sheets,
              'fname': '、'.join(f.filename for f in files),
+             'image_schedules': img_sessions, 'image_notes': img_notes,
              'errors': errors}
     # 2026-10-12 安全审计 M-6：草稿是 json.dumps 后写 TEXT 列，
     # 8 张大表可能产生数百 MB → 直接拖垮 SQLite。落库前先量长度。
@@ -144,7 +211,7 @@ def exam_ai_import_analyze(exam_id):
     # AI 建议（未配置 Key → 空建议 + 手工映射提示）
     suggest, ai_err = {}, ''
     cfg = _ai_cfg_from_request()
-    if cfg:
+    if sheets and cfg:
         from app.modules.grades.services import ai_service
         try:
             resolved = ai_service.resolve_key(current_user, cfg)
@@ -166,13 +233,14 @@ def exam_ai_import_analyze(exam_id):
                 ai_err = 'AI 调用失败：%s' % str(payload)[:160]
         except Exception as e:
             ai_err = 'AI 调用异常：%s' % str(e)[:160]
-    else:
+    elif sheets:
         ai_err = '未检测到本机 AI Key，已跳过 AI 识别，请在下方手工指定每列的用途'
 
-    # 工作表用途：成绩 / 分数线 / 考生安排 / 考场位置 / 座位表 / 不使用
+    # 工作表用途：成绩 / 分数线 / 考试时间表（场次）/ 考生安排 / 考场位置 / 座位表 / 不使用
     # 考生安排只保留「字段最全」的一张；其余学生表若带考场/座号 → 当座位表（仅取容量），
     # 否则（如粘贴用等打印表）不使用，防串数据
-    kinds = {s['name']: aisvc.guess_sheet_kind(s['headers']) for s in sheets}
+    kinds = {s['name']: aisvc.guess_sheet_kind(s['headers'], s.get('rows'))
+             for s in sheets}
     stud = [s for s in sheets if kinds[s['name']] == 'affair_students']
     best = (max(stud, key=lambda s: len(aisvc.classify_affair_headers(s['headers'])))
             if stud else None)
@@ -181,8 +249,22 @@ def exam_ai_import_analyze(exam_id):
             kinds[s['name']] = ('affair_seats' if aisvc.has_seat_cols(s['headers'])
                                 else 'skip')
 
+    # 考试时间表 / 监考表：给出解析出的场次预览（前端展示 + 用户确认/微调）
+    def _preview(sh):
+        if kinds.get(sh['name']) != aisvc.SCHEDULE_KIND:
+            return None
+        r = aisvc.parse_schedule_sheet(sh.get('rows') or [],
+                                       default_year=(exam.exam_date.year if exam.exam_date else None))
+        if not r['sessions']:
+            r2, _e2 = aisvc.parse_schedule_columns(sh)
+            if r2:
+                return {'sessions': r2, 'rooms': [], 'invigs': [], 'errors': r['errors']}
+        return {'sessions': r['sessions'], 'rooms': r['rooms'],
+                'invigs': r['invigs'], 'errors': r['errors']}
+
     return jsonify(success=True, token=token,
                    files=[f.filename for f in files],
+                   image_schedules=img_sessions, image_notes=img_notes,
                    sheets=[{'name': s['name'], 'file': s.get('file', ''),
                             'header_row': s['header_row'],
                             'header_rows': s.get('header_rows', []),
@@ -190,6 +272,7 @@ def exam_ai_import_analyze(exam_id):
                             'auto': aisvc.classify_headers(s['headers']),
                             'affair_auto': aisvc.classify_affair_headers(s['headers']),
                             'kind': kinds.get(s['name'], 'skip'),
+                            'schedule': _preview(s),
                             'sample': s['sample'][:2]} for s in sheets],
                    suggest=suggest, ai_error=ai_err, errors=errors)
 
@@ -407,6 +490,215 @@ def _apply_bands(exam, band_items, dry=False):
     return info, errors
 
 
+def _apply_schedules(exam, sheet_items, body_sessions, mode='replace', dry=False):
+    """把「考试时间表 / 监考表」写成本场考务的**场次**（环节⑤），
+    若表里带监考老师/考场，顺带写环节⑥ 监考安排与考场。
+
+    sheet_items:  [{'_sheet': {...}, 'mapping': {...}}]  # Excel（监考表多级表头 / 两列式时间表）
+    body_sessions: [{date,start,end,subject,selection}]  # 前端表格（图片识图 + 表格解析，用户可改）
+    mode: 'replace'（默认，先清空本批次场次与监考表再重建）| 'append'（追加）
+    返回 (info 或 None, errors)
+    """
+    from app.models.grades import (ExamAffair, AffairSchedule, AffairRoom,
+                                   AffairInvigilation)
+    from app.utils.text_guard import sanitize_label
+    default_year = exam.exam_date.year if exam.exam_date else None
+
+    def _subj(v):
+        """场次科目：先按「、」合并写法归一（保留多科语义），再走标签白名单"""
+        return sanitize_label(aisvc.normalize_schedule_subject(v), 20) or '待定'
+
+    sess_list, invig_src, room_src, errs = [], [], [], []
+    excel_sess = []
+    # 1) Excel 来源（监考表 / 时间表）：始终解析出**考场 + 监考安排**；
+    #    场次则视是否带回了 body 场次而定（body 为权威，见下）
+    for it in sheet_items or []:
+        sh = it['_sheet']
+        r = aisvc.parse_schedule_sheet(sh.get('rows') or [], default_year=default_year)
+        if not r['sessions']:
+            r2, _e2 = aisvc.parse_schedule_columns(sh, it.get('mapping'))
+            if r2:
+                r = {'sessions': r2, 'invigs': [], 'rooms': [], 'errors': r['errors']}
+        excel_sess.extend(r['sessions'])
+        room_src.extend(r['rooms'])
+        # 监考格绑定到「它所属的那条场次」，避免后续去重/合并导致下标漂移
+        for iv in r['invigs']:
+            idx = iv.get('session_index')
+            if isinstance(idx, int) and 0 <= idx < len(r['sessions']):
+                iv = dict(iv)
+                iv['sess'] = r['sessions'][idx]
+                invig_src.append(iv)
+        for e in (r.get('errors') or []):
+            errs.append(e if isinstance(e, dict)
+                        else {'line': 0, 'no': sh.get('name', ''), 'reason': e})
+
+    # 2) 场次来源：带回了 body 场次（前端表格，含用户在图片/表格结果上的修改）→
+    #    以 body 为**权威**（这样用户能给「四选二」这类空缺科目补全，或改时间段）；
+    #    否则用 Excel 解析出的场次。
+    body_norm = []
+    for s in (body_sessions or []):
+        if not isinstance(s, dict):
+            continue
+        subj = aisvc.normalize_schedule_subject(s.get('subject'))
+        d = aisvc.normalize_date(s.get('date'), default_year)
+        start = aisvc.normalize_time(s.get('start'))
+        end = aisvc.normalize_time(s.get('end'))
+        if not (subj or start):
+            continue
+        body_norm.append({'date': d, 'start': start, 'end': end, 'subject': subj,
+                          'selection': aisvc.normalize_subject(s.get('selection'))})
+    sess_list = body_norm if body_norm else excel_sess
+
+    if not sess_list:
+        return None, errs + [{'line': 0, 'no': '', 'reason': '没有解析出任何考试场次'}]
+
+    # 规范 + 去重（同一 日期+开始+科目 只留一条）
+    seen, ordered = set(), []
+    for s in sess_list:
+        key = (s.get('date') or '', s.get('start') or '',
+               _subj(s.get('subject')))
+        if key in seen:
+            continue
+        seen.add(key)
+        ordered.append(s)
+
+    affair = ExamAffair.query.filter_by(exam_id=exam.id).first()
+    created = False
+    if affair is None:
+        affair = ExamAffair(name='%s 考务' % exam.name, grade=exam.grade,
+                            exam_date=exam.exam_date, exam_id=exam.id)
+        db.session.add(affair)
+        db.session.flush()
+        created = True
+    elif affair.grade and exam.grade and affair.grade != exam.grade:
+        # 2026-10-12 审查修复 J①：考务批次年级与考试年级不一致时拒绝写入，
+        # 否则场次/监考会写进跨年级批次（ExamAffair.grade 与 Exam.grade 是两套独立字段）
+        return None, errs + [{'line': 0, 'no': '',
+                              'reason': '本场考试（%s）与已有考务批次（%s）年级不一致，已拒绝写入'
+                                        % (exam.grade, affair.grade)}]
+
+    # 覆盖前统计既有数据，供提示与日志（2026-10-12 审查修复 B：原实现静默清空）
+    old_sessions = old_invigs = 0
+    if mode == 'replace':
+        old_sessions = AffairSchedule.query.filter_by(affair_id=affair.id).count()
+        old_invigs = AffairInvigilation.query.filter_by(affair_id=affair.id).count()
+
+    info = {'sessions': len(ordered), 'rooms': len(room_src), 'invigs': len(invig_src),
+            'created': created, 'affair_id': affair.id, 'affair_name': affair.name,
+            'mode': mode, 'cleared_sessions': old_sessions,
+            'cleared_invigs': old_invigs}
+    if dry:
+        return info, errs
+
+    if mode == 'replace':
+        # 覆盖：先清空本批次全部场次与监考安排，再按新数据重建（口径可预测）
+        AffairInvigilation.query.filter_by(affair_id=affair.id).delete()
+        AffairSchedule.query.filter_by(affair_id=affair.id).delete()
+        db.session.flush()
+
+    base_order = AffairSchedule.query.filter_by(affair_id=affair.id).count()
+    key_exact = {}
+    key_ds, key_ss = {}, {}
+    for i, s in enumerate(ordered):
+        row = AffairSchedule(
+            affair_id=affair.id,
+            exam_date=(date.fromisoformat(s['date']) if s.get('date') else None),
+            start_time=(s.get('start') or '')[:10],
+            end_time=(s.get('end') or '')[:10],
+            subject=_subj(s.get('subject')),
+            selection=sanitize_label(s.get('selection'), 20),
+            sort_order=base_order + i)
+        db.session.add(row)
+        d, st, sj = (s.get('date') or '', s.get('start') or '', _subj(s.get('subject')))
+        key_exact.setdefault((d, st, sj), row)
+        key_ds.setdefault((d, st), []).append(row)
+        key_ss.setdefault((st, sj), []).append(row)
+    db.session.flush()
+
+    def _lookup(sess):
+        """定位监考格所属场次：精确优先；回退仅在**唯一命中**时使用。
+
+        2026-10-12 审查修复 E：原实现无条件回退到「日期+开始」，
+        当同一天同一时段并行多科（物理/历史）时会把 A 场的监考挂到 B 场；
+        现在回退要求该键只对应一条场次，否则放弃（宁可漏也不可错配）。
+        """
+        d, st, sj = (sess.get('date') or '', sess.get('start') or '',
+                     _subj(sess.get('subject')))
+        r = key_exact.get((d, st, sj))
+        if r is not None:
+            return r, ''
+        for cands, why in ((key_ds.get((d, st)), '日期+开始'), (key_ss.get((st, sj)), '开始+科目')):
+            if cands and len(cands) == 1:
+                return cands[0], '（按%s回退匹配）' % why
+        return None, ''
+
+    # 考场（有则补，不覆盖已存在的同号考场）
+    if room_src:
+        exist = {r.room_no for r in AffairRoom.query.filter_by(affair_id=affair.id).all()}
+        for r in room_src:
+            rn = _norm_room_no(str(r.get('room') or ''))
+            if not rn or rn in exist:
+                continue
+            db.session.add(AffairRoom(
+                affair_id=affair.id, room_no=rn,
+                location=sanitize_label(r.get('room_loc'), 30),
+                subject='默认', capacity=(r.get('capacity') or 30)))
+            exist.add(rn)
+    room_ok = {r.room_no for r in AffairRoom.query.filter_by(affair_id=affair.id).all()}
+
+    # 监考安排（监考表里带老师时才写）。
+    # 2026-10-12 审查修复 E：原实现用「精确 → 日期+开始 → 开始+科目」三级**模糊**匹配，
+    # 当同一天同一时段并行多科（物理/历史）或用户在前端删/改了某行时，
+    # key_ds 会把 A 场的监考挂到 B 场 → 张冠李戴，且同一格重复会触发
+    # uq_affair_invigilation 唯一约束 → 整批 IntegrityError 回滚。
+    # 现改为**只认精确匹配**（日期+开始+科目），匹配不到就跳过并回报，绝不猜。
+    if invig_src:
+        used_cells = set()
+        for iv in invig_src:
+            sess = iv.get('sess') or {}
+            row, _how = _lookup(sess)
+            nm = sanitize_label(iv.get('name'), 30)
+            if row is None:
+                errs.append({'line': 0, 'no': nm,
+                             'reason': '监考「%s」未能唯一匹配到场次（%s %s %s），已跳过'
+                                       % (nm, sess.get('date') or '', sess.get('start') or '',
+                                          _subj(sess.get('subject')))})
+                continue
+            if not nm:
+                continue
+            room_no = _norm_room_no(str(iv.get('room_no') or ''))
+            # 2026-10-12 审查修复 J②：监考格的考场必须存在于本批次考场表
+            # （图片/无考场列的监考表可能带出不存在的考场号，写进去会按 join 时消失）
+            if room_no and room_no not in room_ok:
+                errs.append({'line': 0, 'no': nm,
+                             'reason': '考场「%s」不在本批次考场表中，该监考格已跳过' % room_no})
+                continue
+            slot = int(iv.get('slot') or 1)
+            cell = (row.id, room_no, slot)
+            if cell in used_cells:
+                # 同格已被占用：说明该监考格其实属于另一场次（常见于用户删掉/改了某行场次），
+                # 跳过并回报，既避免张冠李戴，也避免触发 uq_affair_invigilation 唯一约束。
+                errs.append({'line': 0, 'no': nm,
+                             'reason': '考场「%s」第 %d 位已有监考，监考「%s」已跳过'
+                                       '（该格可能属于另一场次，请核对该场次老师）'
+                                       % (room_no, slot, nm)})
+                continue
+            used_cells.add(cell)
+            db.session.add(AffairInvigilation(
+                affair_id=affair.id, schedule_id=row.id,
+                room_no=room_no, slot=slot, name=nm))
+    return info, errs
+
+
+def _norm_room_no(raw):
+    """考场号规范化：去空白 + 纯数字补零到 2 位（与 exam_affairs._norm_room_no 同口径）"""
+    from app.utils.text_guard import sanitize_label
+    t = sanitize_label(str(raw or ''), 10).strip()
+    if t.isdigit() and len(t) < 2:
+        return t.zfill(2)
+    return t
+
+
 @bp.route('/exams/<int:exam_id>/ai-import/apply', methods=['POST'])
 @login_required
 @perm_required('grades.import')
@@ -433,25 +725,36 @@ def exam_ai_import_apply(exam_id):
         sh = dict(sh)
         payload.append({'_sheet': sh, 'mapping': item.get('mapping') or {},
                         'score_kind': item.get('score_kind') or 'converted'})
-    if not payload:
+    # v1.19.47.4：图片来源（识图结果，用户可在前端确认/微调后回传）
+    body_sessions = [s for s in (data.get('schedules') or []) if isinstance(s, dict)]
+    if not body_sessions:
+        body_sessions = [s for s in (draft.get('image_schedules') or [])
+                         if isinstance(s, dict)]
+    if not payload and not body_sessions:
         return jsonify(success=False, message='请至少为一个工作表指定列映射')
 
-    # 按工作表用途分流：成绩 / 分数线（→分层） / 考生安排·考场位置·座位表（→本场考务）
+    # 按工作表用途分流：成绩 / 分数线（→分层） / 考试时间表·监考表（→场次） /
+    #                考生安排·考场位置·座位表（→本场考务）
     _AFF_KINDS = ('affair_students', 'affair_rooms', 'affair_seats')
     score_items = [it for it in payload
                    if (it.get('score_kind') or 'converted')
-                   not in ('bands', 'skip') + _AFF_KINDS]
+                   not in ('bands', 'skip', aisvc.SCHEDULE_KIND) + _AFF_KINDS]
     band_items = [it for it in payload if (it.get('score_kind') or '') == 'bands']
+    sched_items = [{'_sheet': it['_sheet'], 'mapping': it.get('mapping')}
+                   for it in payload
+                   if (it.get('score_kind') or '') == aisvc.SCHEDULE_KIND]
     aff_items = [{'_sheet': it['_sheet'], 'mapping': it.get('mapping'),
                   'kind': {'affair_students': 'students', 'affair_rooms': 'rooms',
                            'affair_seats': 'seats'}.get(it.get('score_kind'))}
                  for it in payload
                  if (it.get('score_kind') or '') in _AFF_KINDS]
     dry = bool(data.get('dry_run'))
+    mode = 'B' if (data.get('mode') or 'B') == 'B' else 'A'   # 成绩写入模式（B=整场覆盖）
 
     errors = []
     band_info = None
     affair_info = None
+    schedule_info = None
     if band_items:
         band_info, berr = _apply_bands(exam, band_items, dry=dry)
         errors.extend(berr or [])
@@ -462,6 +765,11 @@ def exam_ai_import_apply(exam_id):
     if aff_items:
         affair_info, aerr = _apply_affair(exam, aff_items, dry=dry)
         errors.extend(aerr or [])
+    if sched_items or body_sessions:
+        sched_mode = 'append' if (data.get('schedule_mode') or '') == 'append' else 'replace'
+        schedule_info, serr = _apply_schedules(exam, sched_items, body_sessions,
+                                               mode=sched_mode, dry=dry)
+        errors.extend(serr or [])
 
     rows = []
     if score_items:
@@ -469,9 +777,9 @@ def exam_ai_import_apply(exam_id):
         errors.extend(e1)
         rows, rerr = _resolve_student_no(exam, rows)      # 只有考号时按考号/姓名反查学号
         errors.extend(rerr)
-    if not rows and not band_info and not affair_info:
+    if not rows and not band_info and not affair_info and not schedule_info:
         return jsonify(success=False,
-                       message='未解析出任何成绩/分数线/考务，请检查列映射与工作表用途',
+                       message='未解析出任何成绩/分数线/考务/场次，请检查列映射与工作表用途',
                        errors=errors[:20])
 
     # 补齐学生快照（姓名/班级/班型/方向…）并统计
@@ -491,6 +799,8 @@ def exam_ai_import_apply(exam_id):
         preview['bands'] = band_info
     if affair_info:
         preview['affair'] = affair_info
+    if schedule_info:
+        preview['schedule'] = schedule_info
     if dry:
         return jsonify(success=True, preview=preview, errors=errors[:20])
     # 2026-10-12 数据可信度审计（§3.4）：AI 导入默认 mode='B' **整场覆盖**，
@@ -507,7 +817,7 @@ def exam_ai_import_apply(exam_id):
             return jsonify(success=False, need_confirm=True,
                            message='账号或密码不正确，已取消整场重置')
     if not rows:
-        # 只导入了分数线 / 考务（没有成绩可写）
+        # 只导入了分数线 / 考务 / 场次（没有成绩可写）
         exam.import_draft = None
         exam.import_token = None
         db.session.commit()
@@ -519,6 +829,16 @@ def exam_ai_import_apply(exam_id):
             parts.append('考务 考生%d（编排%d）考场%d%s'
                          % (affair_info['students'], affair_info['seated'], affair_info['rooms'],
                             '（新建批次）' if affair_info.get('created') else ''))
+        if schedule_info:
+            parts.append('场次 %d 个（%s%s%s）'
+                         % (schedule_info['sessions'],
+                            '覆盖' if schedule_info.get('mode') == 'replace' else '追加',
+                            '，含监考 %d 格' % schedule_info['invigs']
+                            if schedule_info.get('invigs') else '',
+                            '，已清空原 %d 场次/%d 格监考'
+                            % (schedule_info.get('cleared_sessions', 0),
+                               schedule_info.get('cleared_invigs', 0))
+                            if schedule_info.get('cleared_sessions') else ''))
         log_operation(current_user, '导入', '考试', exam_id,
                       'AI 导入（无成绩）：' + '；'.join(parts), module='grades')
         out = {'success': True, 'applied': True, 'summary': {'non_score_only': True},
@@ -527,6 +847,8 @@ def exam_ai_import_apply(exam_id):
             out['bands'] = band_info
         if affair_info:
             out['affair'] = affair_info
+        if schedule_info:
+            out['schedule'] = schedule_info
         return jsonify(**out)
 
     # 正式写入（复用既有导入管道；整场覆盖式，避免与旧数据混在一起）
@@ -535,7 +857,6 @@ def exam_ai_import_apply(exam_id):
     file_subjects = [s for s in SUBJECTS
                      if any(s in (r.get('subjects') or {}) for r in rows)]
     parsed = {'headers': {'no': True, 'subjects': file_subjects}, 'rows': rows}
-    mode = 'B' if (data.get('mode') or 'B') == 'B' else 'A'
     try:
         summary = store_service.apply_import(exam, parsed, mode=mode)
         # 原始分单独回填（store_service 只处理主分/总分）
@@ -562,14 +883,21 @@ def exam_ai_import_apply(exam_id):
         return jsonify(success=False, message='写入失败已回滚：%s' % str(e)[:160])
     tab_service.clear_exam_cache(exam_id)
     log_operation(current_user, '导入', '考试', exam_id,
-                  'AI 智能导入 %s：%s%s%s' % (draft.get('fname', ''),
+                  'AI 智能导入 %s：%s%s%s%s' % (draft.get('fname', ''),
                                           json.dumps(summary, ensure_ascii=False),
                                           ('；分数线 %d 条（模板 %s）'
                                            % (band_info['bands'], band_info['template']))
                                           if band_info else '',
                                           ('；考务 考生%d/考场%d'
                                            % (affair_info['added'], affair_info['rooms']))
-                                          if affair_info else ''),
+                                          if affair_info else '',
+                                          ('；场次 %d（%s，清空原 %d 场/%d 格）'
+                                           % (schedule_info['sessions'],
+                                              '覆盖' if schedule_info.get('mode') == 'replace'
+                                              else '追加',
+                                              schedule_info.get('cleared_sessions', 0),
+                                              schedule_info.get('cleared_invigs', 0)))
+                                          if schedule_info else ''),
                   module='grades')
     out = {'success': True, 'applied': True, 'summary': summary,
            'raw_cells': raw_updated, 'errors': errors[:20]}
@@ -577,6 +905,8 @@ def exam_ai_import_apply(exam_id):
         out['bands'] = band_info
     if affair_info:
         out['affair'] = affair_info
+    if schedule_info:
+        out['schedule'] = schedule_info
     return jsonify(**out)
 
 

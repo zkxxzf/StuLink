@@ -10,8 +10,13 @@
 
 <div class="card">
     <div class="card-body">
-        <form method="POST">
+        {# v1.19.47.4 离校联动：data-old-status / data-has-bed 供前端判断是否需要
+           弹「该生离校，将自动清除床位」确认；clear_bed=1 由确认后写入。 #}
+        <form method="POST"
+              data-old-status="{{ (student.enrollment_status or '') if (student is defined and student) else '' }}"
+              data-has-bed="{{ '1' if (student is defined and student and student.bed_assignment) else '0' }}">
             {{ form.hidden_tag() }}
+            <input type="hidden" name="clear_bed" id="clearBedFlag" value="">
             
             <!-- 基本信息（录入后不可修改，空缺时可补充） -->
             <div class="card mb-3 bg-light">
@@ -106,10 +111,11 @@
                 <div class="col-md-3">
                     <label class="form-label small">学籍情况</label>
                     {{ form.enrollment_status(class="form-select") }}
-                    {# v1.19.47.3 学籍驱动班级联动提示 #}
+                    {# v1.19.47.4 学籍驱动班级联动提示 #}
                     <small class="text-muted" style="font-size:11px;">
                         选「学籍已转出」→ 班级自动置「已转出」<br>
-                        选「在籍不在校」→ 班级自动置「不分班」
+                        选「在籍不在校」→ 班级自动置「不分班」<br>
+                        离校（学籍已转出）确认后<b>自动清除床位</b>
                     </small>
                 </div>
                 <div class="col-md-9">
@@ -146,7 +152,7 @@
             <a href="{{ url_for('students.list_students') }}" class="btn btn-secondary">取消</a>
         </form>
 
-        {# v1.19.47.3 变更记录：调班 / 转科 / 转出 / 学籍变更 在编辑页也可见 #}
+        {# v1.19.47.4 变更记录：调班 / 转科 / 转出 / 学籍变更 在编辑页也可见 #}
         {% if title == '编辑学生' and change_logs %}
         {% set TYPE_LABELS = {'enroll': ('入校分班', 'primary'),
                               'reassign': ('重新分班', 'warning'),
@@ -199,4 +205,33 @@
         {% endif %}
     </div>
 </div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+/* v1.19.47.4 离校联动（用户口径 2026-10-12）：
+   把学生学籍改成「学籍已转出」＝离校，保存前**提示确认**，
+   确认后置 clear_bed=1 → 后端自动清除其床位。
+   （脚本必须放在 extra_js：base.html 的 jQuery 在 body 末尾加载） */
+(function () {
+    var form = document.querySelector('form[data-old-status]');
+    if (!form) { return; }
+    var oldStatus = form.getAttribute('data-old-status') || '';
+    var hasBed = form.getAttribute('data-has-bed') === '1';
+    var flag = document.getElementById('clearBedFlag');
+    form.addEventListener('submit', function (e) {
+        var sel = document.getElementById('enrollment_status');
+        if (!sel) { return; }
+        var now = sel.value || '';
+        if (now !== '学籍已转出' || now === oldStatus) { return; }
+        var msg = '该生将被标记为「学籍已转出」（离校）：\n'
+                + '· 班级自动归置为「已转出」\n'
+                + '· 住宿状态改为「离校」\n'
+                + (hasBed ? '· 自动清除其床位\n' : '')
+                + '\n确认继续？';
+        if (!window.confirm(msg)) { e.preventDefault(); return; }
+        if (flag) { flag.value = '1'; }
+    });
+})();
+</script>
 {% endblock %}

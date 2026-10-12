@@ -6,7 +6,11 @@
 .filter-row select { width: 100%; font-size: 11px; padding: 2px 4px; border: 1px solid #dee2e6; border-radius: 3px; background: #fff; }
 .filter-row select:focus { border-color: #86b7fe; outline: none; box-shadow: 0 0 0.15rem rgba(13,110,253,.25); }
 .filter-row input { width: 100%; font-size: 11px; padding: 2px 4px; border: 1px solid #dee2e6; border-radius: 3px; }
-.filter-row input:focus { border-color: #86b7fe; outline: none; box-shadow: 0 0 0 0.15rem rgba(13,110,253,.25); }
+.filter-row input:focus { border-color: #86b7fe; outline: none; box-shadow: 0 0 0.15rem rgba(13,110,253,.25); }
+/* v1.19.47.4 宿舍信息列（只读）：淡底色 + 锁定小图标，一眼看出"这里不能改" */
+.col-dorm { background: #f8fafc; }
+.col-dorm .bi-lock { color: #94a3b8; font-size: 10px; }
+th.col-dorm-head { background: #eef2f7 !important; }
 </style>
 <div class="d-flex justify-content-between align-items-center mb-3">
     <h4 class="fw-bold mb-0"><i class="bi bi-people"></i> 学生列表</h4>
@@ -18,7 +22,7 @@
         <button class="btn btn-info" data-bs-toggle="modal" data-bs-target="#batchTransferModal">
             <i class="bi bi-arrow-left-right"></i> 批量调班
         </button>
-        {# v1.19.47.3 调班记录总览 #}
+        {# v1.19.47.4 调班记录总览 #}
         <a href="{{ url_for('students.class_changes') }}" class="btn btn-outline-info">
             <i class="bi bi-clock-history"></i> 调班记录
         </a>
@@ -32,6 +36,16 @@
         </a>
     </div>
     {% endif %}
+</div>
+
+{# v1.19.47.4 宿舍信息只读提示：这几列由宿舍管理模块维护，本模块不可修改 #}
+<div class="alert alert-info py-2 small mb-2 d-flex align-items-center gap-2">
+    <i class="bi bi-building fs-6"></i>
+    <span>
+        标灰的 <strong>住校/走读、出门权限、宿舍、床位</strong> 四列为只读展示，数据由
+        <a href="{{ url_for('rooms.list_rooms') }}" class="alert-link">宿舍管理模块</a> 维护，
+        本页面不可修改；需要调整请到「宿舍管理」中操作。
+    </span>
 </div>
 
 {% if current_user.has_role('admin') %}
@@ -70,6 +84,11 @@
                     <th>联系方式 2</th>
                     <th>学籍情况</th>
                     <th>学籍备注</th>
+                    {# v1.19.47.4 宿舍信息（只读）：归宿舍管理模块维护，本模块仅展示 #}
+                    <th class="col-dorm-head text-nowrap" title="住校/走读（只读，宿舍管理模块维护）"><i class="bi bi-lock"></i> 住校/走读</th>
+                    <th class="col-dorm-head text-nowrap" title="出门权限（只读，宿舍管理模块维护）"><i class="bi bi-lock"></i> 出门权限</th>
+                    <th class="col-dorm-head text-nowrap" title="宿舍（只读，宿舍管理模块维护）"><i class="bi bi-lock"></i> 宿舍</th>
+                    <th class="col-dorm-head text-nowrap" title="床位（只读，宿舍管理模块维护）"><i class="bi bi-lock"></i> 床位</th>
                     <th>操作</th>
                 </tr>
                 <tr class="filter-row">
@@ -119,6 +138,11 @@
                         {% endfor %}
                     </select></th>
                     <th></th>
+                    {# v1.19.47.4 宿舍列只读，不提供筛选（筛选请到宿舍管理模块） #}
+                    <th class="col-dorm" title="只读列，不提供筛选"></th>
+                    <th class="col-dorm" title="只读列，不提供筛选"></th>
+                    <th class="col-dorm" title="只读列，不提供筛选"></th>
+                    <th class="col-dorm" title="只读列，不提供筛选"></th>
                     <th></th>
                 </tr>
             </thead>
@@ -148,7 +172,7 @@
                     </td>
                     <td>{{ s.grade }}</td>
                     <td>{{ s.class_name }}</td>
-                    {# v1.19.47.3 调班次数：点击跳到调班记录（按学号筛选） #}
+                    {# v1.19.47.4 调班次数：点击跳到调班记录（按学号筛选） #}
                     <td class="text-center">
                         {% set cc = change_counts.get(s.id, 0) %}
                         {% if cc %}
@@ -174,6 +198,29 @@
                     <td>{{ s.phone2 or '-' }}</td>
                     <td>{{ s.enrollment_status or '-' }}</td>
                     <td><small>{{ s.enrollment_notes or '-' }}</small></td>
+                    {# v1.19.47.4 宿舍信息（只读）：acc_map/bed_map 由路由批量预取，无需懒加载 #}
+                    <td class="col-dorm">
+                        {% if s.id in acc_map and acc_map[s.id]['boarding_type'] %}
+                            {% if acc_map[s.id]['boarding_type'] == '住校' %}
+                            <span class="badge bg-success">{{ acc_map[s.id]['boarding_type'] }}</span>
+                            {% else %}
+                            <span class="badge bg-secondary">{{ acc_map[s.id]['boarding_type'] }}</span>
+                            {% endif %}
+                        {% else %}<span class="text-muted">-</span>{% endif %}
+                    </td>
+                    <td class="col-dorm">
+                        {% if s.id in acc_map and acc_map[s.id]['day_student_type'] %}
+                        <span class="badge bg-info">{{ acc_map[s.id]['day_student_type'] }}</span>
+                        {% else %}<span class="text-muted">-</span>{% endif %}
+                    </td>
+                    <td class="col-dorm text-nowrap">
+                        {% if s.id in bed_map and bed_map[s.id]['has_room'] %}
+                        {{ bed_map[s.id]['building'] or '' }}{{ bed_map[s.id]['room_number'] }}
+                        {% else %}<span class="text-muted">-</span>{% endif %}
+                    </td>
+                    <td class="col-dorm">
+                        {% if s.id in bed_map and bed_map[s.id]['has_room'] %}{{ bed_map[s.id]['bed_number'] }} 床{% else %}<span class="text-muted">-</span>{% endif %}
+                    </td>
                     <td>
                         <a href="{{ url_for('students.detail', id=s.id) }}" class="btn btn-sm btn-outline-primary" title="查看">
                             <i class="bi bi-eye"></i>
@@ -318,7 +365,7 @@
                             </select>
                         </div>
                     </div>
-                    {# v1.19.47.3 调班记录：变更性质（写入变迁日志，用于区分真实换班与改错） #}
+                    {# v1.19.47.4 调班记录：变更性质（写入变迁日志，用于区分真实换班与改错） #}
                     <div class="mb-2">
                         <label for="transferKind" class="form-label">变更性质</label>
                         <select class="form-select" id="transferKind" name="class_change_kind">
@@ -486,6 +533,30 @@
                                 <label class="form-check">
                                     <input type="checkbox" class="form-check-input" name="columns" value="enrollment_notes" {% if not current_user.has_perm('students.export_enrollment') %}disabled{% endif %}>
                                     <span class="form-check-label">学籍备注{% if not current_user.has_perm('students.export_enrollment') %} <span class="text-danger small">(无权限)</span>{% endif %}</span>
+                                </label>
+                            </div>
+                        </div>
+                        {# v1.19.47.4 宿舍信息（只读）：由宿舍管理模块维护，可勾选导出 #}
+                        <div class="col-md-6">
+                            <h6 class="text-muted mb-2">
+                                <i class="bi bi-lock"></i> 宿舍信息（只读，宿舍管理模块维护）
+                            </h6>
+                            <div class="space-y-2">
+                                <label class="form-check">
+                                    <input type="checkbox" class="form-check-input" name="columns" value="boarding_type" checked>
+                                    <span class="form-check-label">住校/走读</span>
+                                </label>
+                                <label class="form-check">
+                                    <input type="checkbox" class="form-check-input" name="columns" value="day_student_type">
+                                    <span class="form-check-label">出门权限</span>
+                                </label>
+                                <label class="form-check">
+                                    <input type="checkbox" class="form-check-input" name="columns" value="room">
+                                    <span class="form-check-label">宿舍（楼栋+房间号）</span>
+                                </label>
+                                <label class="form-check">
+                                    <input type="checkbox" class="form-check-input" name="columns" value="bed">
+                                    <span class="form-check-label">床位</span>
                                 </label>
                             </div>
                         </div>

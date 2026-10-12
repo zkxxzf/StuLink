@@ -25,6 +25,10 @@
         <li><b>考务也能在这里导</b>：<b>考生名单／编排结果</b>（学号/姓名/班级/选科/考场/座号/考号，
             含固定考场、自定义考号）与<b>考场设置</b>（考场编号/位置/科目/容量/考号前缀）
             都会自动识别并写入本场考试的<b>考务批次</b>（没有则自动创建）。</li>
+        <li><b>考试场次也能在这里划分</b>：上传<b>考试时间表 / 监考表</b>（Excel）
+            或直接上传<b>图片</b>（jpg/png，需配置本机 AI Key 走识图），
+            系统会提取「日期 + 时间段 + 科目」写成本场考务的<b>场次</b>（环节⑤）；
+            监考表里的<b>考场与监考老师</b>也会一并导入（环节⑥）。</li>
     </ul>
 </div>
 
@@ -33,8 +37,9 @@
     <div class="card-header py-2"><i class="bi bi-1-circle"></i> 选择文件</div>
     <div class="card-body">
         <input type="file" id="aiFiles" class="form-control form-control-sm" multiple
-               accept=".xlsx,.xlsm">
-        <div class="form-text">可多选（最多 8 个）；支持任意表头与多工作表。</div>
+               accept=".xlsx,.xlsm,.xls,.jpg,.jpeg,.png,.webp,.bmp,.gif">
+        <div class="form-text">可多选（最多 8 个）；支持任意表头与多工作表；
+            也支持<b>图片</b>（考试时间表 / 监考表照片，需配置本机 AI Key）。</div>
         <button class="btn btn-primary btn-sm mt-2" id="aiAnalyze">
             <i class="bi bi-magic"></i> 让 AI 识别
         </button>
@@ -49,6 +54,34 @@
         <div id="aiKind" class="mb-2"></div>
         <div id="aiQuestions"></div>
         <div id="aiNotes" class="text-muted small"></div>
+    </div>
+</div>
+
+{# ②-2 考试场次（图片识图 / 监考表解析结果，用于划分场次） #}
+<div class="card mb-3 d-none" id="schedBox">
+    <div class="card-header py-2"><i class="bi bi-calendar3"></i> 识别出的考试场次（划分场次）</div>
+    <div class="card-body">
+        <div class="small text-muted mb-2">
+            以下场次将写入本场考务的<b>环节⑤ 考试时间表</b>；
+            识别结果<b>可直接修改</b>（例如给「四选二」这类没写科目的场次补上科目）。
+        </div>
+        <div class="table-responsive" style="max-height:320px;overflow:auto">
+            <table class="table table-sm align-middle mb-0" id="schedTable">
+                <thead class="table-light">
+                <tr><th style="width:34px">#</th><th>日期</th><th>开始</th><th>结束</th>
+                    <th>科目</th><th>选科/分场</th><th style="width:70px">来源</th>
+                    <th style="width:44px"></th></tr>
+                </thead>
+                <tbody></tbody>
+            </table>
+        </div>
+        <div class="form-check mt-2">
+            <input class="form-check-input" type="checkbox" id="schedReplace" checked>
+            <label class="form-check-label small" for="schedReplace">
+                <b>覆盖本场已有场次</b>（推荐：以本次文件为准重建场次；取消则追加）
+            </label>
+        </div>
+        <div id="schedWarn" class="small text-warning mt-1"></div>
     </div>
 </div>
 
@@ -82,6 +115,8 @@ window.AI_IMPORT_EXAM = {{ exam.id }};
 window.AI_SUBJECTS = {{ subjects|tojson }};
 window.AI_KIND_LABEL = {{ score_kinds|tojson }};
 window.AFFAIR_FIELDS = {{ affair_fields|tojson }};
+window.SCHEDULE_KIND = {{ schedule_kind|tojson }};
+window.SCHEDULE_KIND_LABEL = {{ schedule_kind_label|tojson }};
 </script>
 <script src="{{ su('js/ai_import.js') }}"></script>
 {% endblock %}

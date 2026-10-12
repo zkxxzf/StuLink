@@ -118,11 +118,36 @@ def list_students():
                    .filter(Student.graduation_school.isnot(None), Student.graduation_school != '')
                    .distinct().order_by(Student.graduation_school).all()
                    if s[0]]
-    # v1.19.47.3 调班记录：当前页学生的班级变更次数（列表「调班」列用）
+    # v1.19.47.4 调班记录：当前页学生的班级变更次数（列表「调班」列用）
     change_counts = class_change_counts([s.id for s in students])
-    return render_template('system/students/list.html', 
-                         students=students, 
-                         grades=grades, 
+    # v1.19.47.4 宿舍信息（只读展示）：宿舍号/住校走读等归宿舍管理模块维护，
+    # 本模块只读呈现，不允许在此修改。批量预取避免模板内逐行懒加载（N+1）。
+    # 跨库不能 JOIN：StudentAccommodation / BedAssignment 在 dormitory 库，
+    # Student 在 system 库；BedAssignment 与 Room 同库可 JOIN。固定 2 条查询。
+    acc_map = {}
+    bed_map = {}
+    page_ids = [s.id for s in students]
+    if page_ids:
+        for sa in StudentAccommodation.query.filter(
+                StudentAccommodation.student_id.in_(page_ids)).all():
+            acc_map[sa.student_id] = {
+                'boarding_type': sa.boarding_type,
+                'day_student_type': sa.day_student_type,
+            }
+        for sid, bed_number, rid, building, room_number in db.session.query(
+                BedAssignment.student_id, BedAssignment.bed_number,
+                Room.id, Room.building, Room.room_number
+        ).outerjoin(Room, BedAssignment.room_id == Room.id).filter(
+                BedAssignment.student_id.in_(page_ids)).all():
+            bed_map[sid] = {
+                'bed_number': bed_number,
+                'building': building,
+                'room_number': room_number,
+                'has_room': rid is not None,
+            }
+    return render_template('system/students/list.html',
+                         students=students,
+                         grades=grades,
                          classes=classes,
                          subjects=subjects,
                          boarding_types=boarding_types,
@@ -130,6 +155,8 @@ def list_students():
                          enrollment_statuses=enrollment_statuses,
                          pagination=pagination,
                          change_counts=change_counts,
+                         acc_map=acc_map,
+                         bed_map=bed_map,
                          filter_gender=filter_gender,
                          filter_grade=filter_grade,
                          filter_class=filter_class,
@@ -142,7 +169,7 @@ def list_students():
 @bp.route('/class-changes')
 @perm_required('students.view')
 def class_changes():
-    """v1.19.47.3 调班记录总览：入校分班/重新分班/个别调班/修正班级
+    """v1.19.47.4 调班记录总览：入校分班/重新分班/个别调班/修正班级
 
     按当前用户数据范围过滤（apply_student_scope），支持年级/班级/类型/日期/关键字筛选。
     """
@@ -217,7 +244,7 @@ def create():
         db.session.add(student)
         db.session.commit()
         log_operation(current_user, '创建', '学生', student.id, f'{student.name} {student.grade}{student.class_name}')
-        # v1.19.47.3 调班记录：新增学生 = 入校分班（含班型·方向）
+        # v1.19.47.4 调班记录：新增学生 = 入校分班（含班型·方向）
         try:
             if student.class_name:
                 write_change_log('enroll', [{'id': student.id,
@@ -257,7 +284,7 @@ def detail(id):
     elif current_user.role not in ('admin', 'school_viewer'):
         flash('无权查看学生详细信息', 'danger')
         return redirect(url_for('students.list_students'))
-    # v1.19.47.3 变更记录：调班 / 转科 / 转出 / 学籍变更 / 毕业 全量（调班记录页与详情页同源）
+    # v1.19.47.4 变更记录：调班 / 转科 / 转出 / 学籍变更 / 毕业 全量（调班记录页与详情页同源）
     change_logs = student_change_logs(student.id)
     return render_template('system/students/detail.html', student=student, change_logs=change_logs)
 
@@ -279,11 +306,13 @@ def edit(id):
         flash('无权编辑学生', 'danger')
         return redirect(url_for('students.list_students'))
     form = StudentForm(obj=student)
-    # v1.19.47.3 选科/方向留痕：旧值需在填充前取
+    # v1.19.47.4 选科/方向留痕：旧值需在填充前取
     _old_sel = (student.subject_selection or '')
     # v1.19.47.3 学籍驱动班级联动：旧学籍与旧位置需在填充前取
     _old_status = (student.enrollment_status or '').strip()
     _old_loc = student_location_desc(student)
+    # v1.19.47.4 离校联动：旧住宿状态需在变更前取（用于变更留痕）
+    _old_boarding = (student.accommodation.boarding_type if student.accommodation else '') or ''
     if form.validate_on_submit():
         # 1. 验证身份证号格式
         id_card = form.id_card_number.data
@@ -316,19 +345,31 @@ def edit(id):
         #   学籍已转出 → 班级自动置「已转出」；在籍不在校 → 班级自动置「不分班」
         _new_status = (student.enrollment_status or '').strip()
         _auto_kind = _auto_desc = None
+        _left_school = False
         if _new_status != _old_status:
             if _new_status == '学籍已转出':
                 student.class_name = '已转出'
                 _auto_kind = 'withdraw'
                 _auto_desc = '学籍已转出 → 班级自动归置为「已转出」'
+                _left_school = True
             elif _new_status == '在籍不在校':
                 student.class_name = '不分班'
                 _auto_kind = 'transfer'
                 _auto_desc = '学籍为「在籍不在校」→ 班级自动归置为「不分班」'
+        # v1.19.47.4 离校联动（用户口径 2026-10-12）：
+        #   学籍已转出 = 学生离校 → 住宿状态自动置「离校」；
+        #   前端确认（clear_bed=1，见 form.html）后自动清除其床位，
+        #   避免离校学生仍占用床位，导致宿舍入住率与分配算法算错空位。
+        _bed_released = False
+        if _left_school:
+            from app.utils.bed_ops import mark_boarding_left_school, release_student_bed
+            mark_boarding_left_school(student.id)
+            if (request.form.get('clear_bed') or '') == '1':
+                _bed_released = release_student_bed(student.id)
         db.session.commit()
         log_operation(current_user, '更新', '学生', student.id, f'{student.name} {student.grade}{student.class_name}')
         # 注：年级/班级在本页不可改（never_update_fields），调班请走「调班」弹窗 /students/<id>/transfer
-        # v1.19.47.3 变更留痕：① 学籍情况变更 ② 学籍驱动的班级归置 ③ 选科/方向变更
+        # v1.19.47.4 变更留痕：① 学籍情况变更 ② 学籍驱动的班级归置 ③ 选科/方向变更
         _logs = []
         if _new_status != _old_status:
             _logs.append(('enrollment', _old_status or '（空）', _new_status,
@@ -336,6 +377,10 @@ def edit(id):
         if _auto_kind:
             _logs.append((_auto_kind, _old_loc, student_location_desc(student),
                           _auto_desc))
+        if _left_school:
+            _logs.append(('dormitory', _old_boarding or '（空）', '离校',
+                          '离校联动：住宿状态置「离校」'
+                          + ('，并已清除床位' if _bed_released else '')))
         try:
             _new_sel = (student.subject_selection or '')
             if _new_sel != _old_sel:
@@ -365,7 +410,7 @@ def edit(id):
                                student.id, _t, _e)
         flash('学生信息已更新', 'success')
         return redirect(url_for('students.detail', id=student.id))
-    # v1.19.47.3 编辑页也展示变更记录（调班/转科/转出/学籍变更），避免打开编辑页看不到历史
+    # v1.19.47.4 编辑页也展示变更记录（调班/转科/转出/学籍变更），避免打开编辑页看不到历史
     return render_template('system/students/form.html', form=form, title='编辑学生',
                            student=student, change_logs=student_change_logs(student.id))
 
@@ -554,6 +599,8 @@ def batch_edit_search():
         return jsonify({'success': False, 'message': '无修改选科的权限（需学生编辑权限）'})
 
     updated = 0
+    # v1.19.47.4 离校联动：批量置「离校」时自动清除床位（计数用于回执）
+    released = 0
     # 批量修改床位
     if building and room_number and bed_number:
         try:
@@ -583,6 +630,11 @@ def batch_edit_search():
                 db.session.add(acc)
             if boarding_type:
                 acc.boarding_type = boarding_type
+                # v1.19.47.4 离校联动（用户口径 2026-10-12）：置「离校」→ 自动清除床位
+                if boarding_type == '离校':
+                    from app.utils.bed_ops import release_student_bed
+                    if release_student_bed(s.id):
+                        released += 1
             if day_student_type:
                 acc.day_student_type = day_student_type
         # 分配床位
@@ -603,8 +655,13 @@ def batch_edit_search():
         updated += 1
 
     db.session.commit()
-    log_operation(current_user, '批量修改', '学生', None, f'搜索页批量修改 {updated} 人')
-    return jsonify({'success': True, 'message': f'成功修改 {updated} 名学生'})
+    log_operation(current_user, '批量修改', '学生', None,
+                  f'搜索页批量修改 {updated} 人'
+                  + (f'（离校自动清床位 {released} 个）' if released else ''))
+    _msg = f'成功修改 {updated} 名学生'
+    if released:
+        _msg += f'，并自动清除 {released} 个床位'
+    return jsonify({'success': True, 'message': _msg, 'released': released})
 
 
 def _populate_student(student, form):
@@ -966,7 +1023,7 @@ def import_students():
                     )
                     db.session.add(acc)
             db.session.commit()
-            # v1.19.47.3 调班记录：导入新生 = 入校分班（逐人写入带班级）
+            # v1.19.47.4 调班记录：导入新生 = 入校分班（逐人写入带班级）
             try:
                 for _st, _acc in students_to_add:
                     if _st.class_name:
@@ -1012,7 +1069,7 @@ def import_students():
                     )
                     db.session.add(acc)
             db.session.commit()
-            # v1.19.47.3 调班记录：导入新生 = 入校分班（逐人写入带班级）
+            # v1.19.47.4 调班记录：导入新生 = 入校分班（逐人写入带班级）
             try:
                 for _st, _acc in students_to_add:
                     if _st.class_name:
@@ -1131,7 +1188,7 @@ def transfer(id):
         return redirect(url_for('students.list_students'))
 
     old_info = f'{student.grade} {student.class_name}'
-    # v1.19.47.3 调班记录：变更性质由操作人声明
+    # v1.19.47.4 调班记录：变更性质由操作人声明
     #   transfer 个别调班（学生真实换班，默认）｜correct 修正班级（此前录入有误）
     change_kind = (request.form.get('class_change_kind') or 'transfer').strip()
     if change_kind not in ('transfer', 'correct'):
@@ -1327,7 +1384,7 @@ def batch_transfer():
 
         errors = []
         updated_count = 0
-        # v1.19.47.3 调班记录：循环内收集变更（含旧/新位置），供 reassign 日志使用
+        # v1.19.47.4 调班记录：循环内收集变更（含旧/新位置），供 reassign 日志使用
         changed_rows = []
 
         for row_idx in range(2, ws.max_row + 1):
@@ -1371,7 +1428,7 @@ def batch_transfer():
                                      'name': student.name, 'old': old_loc, 'new': new_loc})
 
         def _log_reassign():
-            """v1.19.47.3 批量调班 → 重新分班；逐人记录旧→新位置（含班型·方向）"""
+            """v1.19.47.4 批量调班 → 重新分班；逐人记录旧→新位置（含班型·方向）"""
             for c in changed_rows:
                 write_change_log('reassign',
                                  [{'id': c['id'], 'student_number': c['student_number'],

@@ -1,4 +1,4 @@
-# StuLink v1.19.47.3 2026-10-12
+# StuLink v1.19.47.4 2026-10-12
 # 考务环节④⑤⑥⑦：核对任课教师 / 考试时间表 / 监考编排 / 监考表导出
 #
 # 用户口径（2026-10-12 定案）：
@@ -596,7 +596,10 @@ def _auto_arrange(affair):
     load = {p['name']: 0 for p in pool}
     rows = 0
     for sch in schedules:
-        avoid = {sch.subject} if sch.subject else set()
+        # 2026-10-12：一场可能同时考多科（如监考表里的「物理/历史」），
+        # 用 _split_subjects 拆成集合再回避，否则合并写法会导致回避静默失效
+        # （考物理/历史时，物理老师和历史老师都应回避）。
+        avoid = _split_subjects(sch.subject)
         used_this = set()          # 同一场次内，一人只监一个考场
         for room in rooms:
             for slot in range(1, slots + 1):
@@ -646,7 +649,7 @@ def affair_invig_set(aid):
     p = pool.get(name)
     if p is None:
         return jsonify({'ok': False, 'msg': '该老师不在监考池中'})
-    if sch.subject and (p['subjects'] & {sch.subject}):
+    if sch.subject and (p['subjects'] & _split_subjects(sch.subject)):
         return jsonify({'ok': False, 'msg': f'{name} 任教{sch.subject}，本场需回避'})
     if row is None:
         row = AffairInvigilation(affair_id=affair.id, schedule_id=sid,

@@ -106,6 +106,16 @@ SENSITIVE_COLUMNS = {
     },
 }
 
+# v1.19.47.4 宿舍信息列（只读导出）：数据归宿舍管理模块（dormitory 库）维护，
+# 学生管理模块只读呈现，因此这些列**不需要任何权限**即可勾选导出——
+# 能看学生列表（students.view + students.export）就该能看这些列，不额外设门槛。
+DORMITORY_COLUMNS = {
+    'boarding_type': {'label': '住校/走读', 'width': 10},
+    'day_student_type': {'label': '出门权限', 'width': 12},
+    'room': {'label': '宿舍', 'width': 16},
+    'bed': {'label': '床位', 'width': 8},
+}
+
 
 def do_export_students(args):
     import openpyxl
@@ -137,6 +147,26 @@ def do_export_students(args):
     if student_number:
         q = q.filter(Student.student_number.contains(student_number))
 
+    # v1.19.47.4 宿舍筛选：从「学生查询」页带 boarding_type / day_student_type /
+    # room_number 过来时，导出结果需与页面一致（此前这三个参数被静默忽略）。
+    _bt = args.get('boarding_type', '').strip()
+    if _bt:
+        _acc_ids = [r[0] for r in db.session.query(StudentAccommodation.student_id)
+                    .filter_by(boarding_type=_bt).all()]
+        q = q.filter(Student.id.in_(_acc_ids) if _acc_ids else Student.id == -1)
+    _dst = args.get('day_student_type', '').strip()
+    if _dst:
+        _acc_ids = [r[0] for r in db.session.query(StudentAccommodation.student_id)
+                    .filter_by(day_student_type=_dst).all()]
+        q = q.filter(Student.id.in_(_acc_ids) if _acc_ids else Student.id == -1)
+    _rn = args.get('room_number', '').strip()
+    if _rn:
+        _bed_ids = [b[0] for b in db.session.query(BedAssignment.student_id)
+                    .join(BedAssignment.room)
+                    .filter(Room.room_number.contains(_rn))
+                    .filter(BedAssignment.student_id.isnot(None)).all() if b[0]]
+        q = q.filter(Student.id.in_(_bed_ids) if _bed_ids else Student.id == -1)
+
     students = q.order_by(Student.grade, Student.class_name, Student.student_number).all()
 
     requested_columns = args.getlist('columns')
@@ -158,6 +188,31 @@ def do_export_students(args):
             if current_user.has_perm(config['perm']):
                 selected_columns.append((field, config['label']))
                 selected_widths.append(config['width'])
+        elif field in DORMITORY_COLUMNS:   # v1.19.47.4 宿舍信息列（只读，无额外权限）
+            selected_columns.append((field, DORMITORY_COLUMNS[field]['label']))
+            selected_widths.append(DORMITORY_COLUMNS[field]['width'])
+
+    # v1.19.47.4 宿舍信息列：跨库不能 JOIN，按当前页学生 ID 批量预取（固定 2 条查询）。
+    # 与列表页 / 住宿查询页同一套口径，避免模板/导出逐行懒加载。
+    _need_dorm = any(f in DORMITORY_COLUMNS for f, _ in selected_columns)
+    _acc_map = {}
+    _bed_map = {}
+    if _need_dorm and students:
+        _ids = [s.id for s in students]
+        for sa in StudentAccommodation.query.filter(
+                StudentAccommodation.student_id.in_(_ids)).all():
+            _acc_map[sa.student_id] = sa
+        for sid, bed_number, rid, building, room_number in db.session.query(
+                BedAssignment.student_id, BedAssignment.bed_number,
+                Room.id, Room.building, Room.room_number
+        ).outerjoin(Room, BedAssignment.room_id == Room.id).filter(
+                BedAssignment.student_id.in_(_ids)).all():
+            _bed_map[sid] = {
+                'bed_number': bed_number,
+                'building': building,
+                'room_number': room_number,
+                'has_room': rid is not None,
+            }
 
     wb = openpyxl.Workbook()
     ws = wb.active
@@ -176,9 +231,20 @@ def do_export_students(args):
 
     for ri, s in enumerate(students, 2):
         row_data = []
+        acc = _acc_map.get(s.id)
+        bed = _bed_map.get(s.id)
         for field, _ in selected_columns:
             if field == 'id_card_number':
                 value = s.id_card_number or ''
+            elif field == 'boarding_type':   # v1.19.47.4 宿舍列（只读来源）
+                value = (acc.boarding_type if acc else '') or ''
+            elif field == 'day_student_type':
+                value = (acc.day_student_type if acc else '') or ''
+            elif field == 'room':
+                value = (f"{bed['building']} {bed['room_number']}"
+                         if bed and bed['has_room'] else '')
+            elif field == 'bed':
+                value = (f"{bed['bed_number']}床" if bed and bed['has_room'] else '')
             else:
                 value = getattr(s, field, '') or ''
             row_data.append(value)
@@ -207,6 +273,9 @@ def do_export_students(args):
                 'class_name': args.get('class_name'),
                 'name': args.get('name'),
                 'student_number': args.get('student_number'),
+                'boarding_type': args.get('boarding_type'),
+                'day_student_type': args.get('day_student_type'),
+                'room_number': args.get('room_number'),
             }
         }
         # C：收敛到统一 helper（独立子事务写日志，不连带提交业务数据）
