@@ -93,7 +93,7 @@ with app.app_context():
     db.session.flush()
     aid = affair.id
 
-    # v1.19.45.2 页头「本场考试」信息：绑一场考试（名字 / 性质 / 阶段 / 时间）
+    # v1.19.46.2 页头「本场考试」信息：绑一场考试（名字 / 性质 / 阶段 / 时间）
     _exam = Exam(name='2025级2026-2027学年第一学期期中考（冒烟）', exam_kind='联考',
                  exam_type='期中考', grade='2025级', exam_date=date(2026, 10, 8),
                  term='2026-2027', status='imported')
@@ -134,7 +134,7 @@ with app.test_client() as c:
           all(x in ph for x in ['① 学生名单', '② 考场设置', '③ 编排考号',
                                 '④ 核对任课教师', '⑤ 考试时间表', '⑥ 编排监考表', '⑦ 导出']))
     check('页面含监考表导出入口', '导出监考表 Excel' in ph and '导出监考表 PDF' in ph)
-    # v1.19.45.2 页头与去重
+    # v1.19.46.2 页头与去重
     check('重复步骤条已删除（无 step-pill）', 'step-pill' not in ph)
     check('页头显示本场考试名字', '2025级2026-2027学年第一学期期中考（冒烟）' in ph)
     check('页头显示考试类型（性质/阶段）', '联考' in ph and '期中考' in ph)
