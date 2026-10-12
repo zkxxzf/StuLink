@@ -87,7 +87,7 @@ with app.app_context():
         db.session.add(TeacherSubjectLink(grade='2025级', class_name=cls,
                                           subject=sub, user_id=uid, active=True))
 
-    # v1.19.46.3 页头「本场考试」信息：绑一场考试（名字 / 性质 / 阶段 / 时间）
+    # v1.19.47.2 页头「本场考试」信息：绑一场考试（名字 / 性质 / 阶段 / 时间）
     # v1.19.47.2 侧栏 7 环节也依赖 affair.exam_id 反查考试 → 必须先建考试再建批次
     _exam = Exam(name='2025级2026-2027学年第一学期期中考（冒烟）', exam_kind='联考',
                  exam_type='期中考', grade='2025级', exam_date=date(2026, 10, 8),
@@ -134,7 +134,7 @@ with app.test_client() as c:
           all(x in ph for x in ['① 学生名单', '② 考场设置', '③ 编排考号',
                                 '④ 核对任课教师', '⑤ 考试时间表', '⑥ 编排监考表', '⑦ 导出']))
     check('页面含监考表导出入口', '导出监考表 Excel' in ph and '导出监考表 PDF' in ph)
-    # v1.19.46.3 页头与去重
+    # v1.19.47.2 页头与去重
     check('重复步骤条已删除（无 step-pill）', 'step-pill' not in ph)
     check('页头显示本场考试名字', '2025级2026-2027学年第一学期期中考（冒烟）' in ph)
     check('页头显示考试类型（性质/阶段）', '联考' in ph and '期中考' in ph)
@@ -142,7 +142,7 @@ with app.test_client() as c:
     check('侧栏标题=考试名字（非「年级·性质·阶段·日期」串）',
           '2025级2026-2027学年第一学期期中考（冒烟）' in ph
           and '2025级·联考·期中考' not in ph)
-    # v1.19.46.3 点环节标签不滚动：改用 history.replaceState 写 hash（不再直接赋 location.hash）
+    # v1.19.47.2 点环节标签不滚动：改用 history.replaceState 写 hash（不再直接赋 location.hash）
     check('点环节标签不滚动（用 history.replaceState）', 'history.replaceState' in ph)
     # v1.19.47.2 侧栏 7 环节：断言**渲染产物**（affair_steps 是 Jinja 变量名，
     # 不会出现在 HTML 里，故改数圆点 / 数「环节」文案）。

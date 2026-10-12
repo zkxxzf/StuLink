@@ -1,4 +1,4 @@
-# StuLink v1.19.46.3 2026-10-10
+# StuLink v1.19.47.2 2026-10-10
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 """教师业绩库：标签 + 附件（2026-09-26）。
 
