@@ -1,4 +1,4 @@
-# StuLink v1.19.5.0 2026-10-10
+# StuLink v1.19.41.2 2026-10-10
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 """教务 · 教师业绩库：录入 / 列表筛选分页 / 审核（含审核意见）/ 统计 / 导出。
 
@@ -272,30 +272,20 @@ def achievements_add():
     teacher_uid = (request.form.get('teacher_uid') or '').strip()
     category = (request.form.get('category') or '').strip()
     title = (request.form.get('title') or '').strip()
-    t = Teacher.query.filter_by(teacher_uid=teacher_uid).first()
-    if not t:
-        flash('请选择教师', 'danger')
+    # 2026-10-11：校验与落库下沉到 achievement_service（MCP 与网页端共用）
+    try:
+        rec = ach_svc.add_achievement(
+            current_user, teacher_uid=teacher_uid, category=category,
+            title=title, level=(request.form.get('level') or '').strip(),
+            obtain_date=_parse_date(request.form.get('obtain_date')),
+            issuer=(request.form.get('issuer') or '').strip(),
+            note=(request.form.get('note') or '').strip(),
+            tags=request.form.get('tags') or '')
+    except ValueError as exc:
+        flash(str(exc), 'danger')
         return back
-    if category not in _CATEGORY_KEYS:
-        flash('请选择有效的业绩类别', 'danger')
-        return back
-    if not title:
-        flash('请填写业绩名称', 'danger')
-        return back
-
-    rec = TeacherAchievement(
-        teacher_uid=t.teacher_uid, teacher_name=t.name,
-        category=category, title=title,
-        level=(request.form.get('level') or '').strip() or None,
-        obtain_date=_parse_date(request.form.get('obtain_date')),
-        issuer=(request.form.get('issuer') or '').strip() or None,
-        note=(request.form.get('note') or '').strip() or None,
-        tags=(','.join(ach_svc.parse_tags(request.form.get('tags'))) or None),
-        status='approved', submitted_by=current_user.id,
-    )
     # 2026-10-09：按类别的动态字段（课题编号/立项结题时间/期刊刊号/学时…）
     ach_svc.set_extra(rec, request.form)
-    db.session.add(rec)
     db.session.commit()
 
     # 2026-10-09：填表时直接上传 PDF 附件（可多选，材料分类可选）
@@ -311,11 +301,12 @@ def achievements_add():
             bad.append(f'{f.filename}：{msg}')
     if ok_n:
         log_operation(current_user, '上传', '业绩附件', rec.id,
-                      f'{t.name} {title} 上传 {ok_n} 个 PDF', module='academic')
+                      f'{rec.teacher_name} {rec.title} 上传 {ok_n} 个 PDF',
+                      module='academic')
     log_operation(current_user, '新增', '教师业绩', rec.id,
-                  f'{t.name} {title}', module='academic')
-    flash(f'已录入 {t.name} 的业绩：{title}' + (f'，并上传 {ok_n} 个 PDF 附件' if ok_n else ''),
-          'success')
+                  f'{rec.teacher_name} {rec.title}', module='academic')
+    flash(f'已录入 {rec.teacher_name} 的业绩：{rec.title}'
+          + (f'，并上传 {ok_n} 个 PDF 附件' if ok_n else ''), 'success')
     for msg in bad[:3]:
         flash(f'附件未保存：{msg}（附件统一为 PDF，≤10MB）', 'warning')
     return back
@@ -331,23 +322,20 @@ def achievements_review(aid):
         abort(404)
     action = (request.form.get('action') or '').strip()
     note = (request.form.get('review_note') or '').strip()
-    if action not in ('approve', 'reject'):
-        flash('无效的审核操作', 'danger')
-        return redirect(url_for('academic.achievements_page'))
-    if action == 'reject' and not note:
-        flash('驳回时请填写审核意见，教师可在工作台看到原因', 'danger')
-        return redirect(url_for('academic.achievements_page',
-                                status='pending'))
-    rec.status = 'approved' if action == 'approve' else 'rejected'
-    rec.review_note = note[:200] or None
-    rec.reviewed_by = current_user.id
-    rec.reviewed_at = datetime.now()
+    back_pending = redirect(url_for('academic.achievements_page', status='pending'))
+    try:
+        # 2026-10-11：校验下沉到 achievement_service（MCP 与网页端共用）
+        rec, status_text = ach_svc.review_achievement(
+            current_user, aid, action, note)
+    except ValueError as exc:
+        flash(str(exc), 'danger')
+        return back_pending if action == 'reject' else redirect(
+            url_for('academic.achievements_page'))
     db.session.commit()
     log_operation(current_user, '审核', '教师业绩', rec.id,
-                  f'{rec.teacher_name} {rec.title} → {ACHIEVEMENT_STATUS[rec.status]}'
-                  + (f'（{note[:40]}）' if note else ''),
-                  module='academic')
-    flash(f'已{ACHIEVEMENT_STATUS[rec.status]}：{rec.title}', 'success')
+                  f'{rec.teacher_name} {rec.title} → {status_text}'
+                  + (f'（{note[:40]}）' if note else ''), module='academic')
+    flash(f'已{status_text}：{rec.title}', 'success')
     return redirect(url_for('academic.achievements_page',
                             status=(request.form.get('back_status') or None)))
 
@@ -359,10 +347,12 @@ def achievements_delete(aid):
     rec = db.session.get(TeacherAchievement, aid)
     if not rec:
         abort(404)
-    # 一并清掉附件（记录 + 落盘文件），否则会留下孤儿文件
-    for att in ach_svc.list_attachments(rec):
-        ach_svc.delete_attachment(att)
-    db.session.delete(rec)
+    try:
+        # 2026-10-11：删除（含附件清理）下沉到 achievement_service（MCP 与网页端共用）
+        rec = ach_svc.delete_achievement(current_user, aid)
+    except ValueError as exc:
+        flash(str(exc), 'danger')
+        return redirect(url_for('academic.achievements_page'))
     db.session.commit()
     log_operation(current_user, '删除', '教师业绩', aid,
                   f'{rec.teacher_name} {rec.title}', module='academic')
@@ -386,41 +376,27 @@ def achievements_edit(aid):
     rec = db.session.get(TeacherAchievement, aid)
     if not rec:
         abort(404)
-    # 权限：装饰器已确保 academic.edit（教务）。教师本人只能改自己提交且仍待审的。
-    is_admin = (current_user.role == 'admin' or current_user.has_perm('academic.edit'))
-    if not is_admin:
-        from app.modules.academic.services import teacher_service
-        t = teacher_service.teacher_of_user(current_user)
-        if not (t and rec.teacher_uid == t.teacher_uid and rec.status == 'pending'):
-            flash('没有权限编辑该业绩记录（只能改自己提交且待审核的）', 'danger')
-            return redirect(url_for('academic.achievements_page'))
-    back = request.referrer or url_for('academic.achievements_page')
+    # 2026-10-11：校验与落库下沉到 achievement_service（MCP 与网页端共用）
     title = (request.form.get('title') or '').strip()
-    if not title:
-        flash('名称不能为空', 'danger')
-        return redirect(back)
-    rec.title = title[:200]
     category = (request.form.get('category') or '').strip()
-    if category:
-        rec.category = category
-    rec.level = (request.form.get('level') or '').strip() or None
-    od = (request.form.get('obtain_date') or '').strip()
     try:
-        from datetime import datetime as _dt
-        rec.obtain_date = _dt.strptime(od, '%Y-%m-%d').date() if od else None
-    except ValueError:      # 日期格式不对就清掉，别把脏数据写进 Date 列
-        rec.obtain_date = None
-    rec.issuer = (request.form.get('issuer') or '').strip() or None
-    rec.note = (request.form.get('note') or '').strip() or None
-    # 按类别的动态字段（x_<key>）与标签
+        rec = ach_svc.edit_achievement(
+            current_user, aid, title=title, category=category,
+            level=(request.form.get('level') or '').strip(),
+            obtain_date=_parse_date(request.form.get('obtain_date')),
+            issuer=(request.form.get('issuer') or '').strip(),
+            note=(request.form.get('note') or '').strip(),
+            tags=request.form.get('tags') or '')
+    except (ValueError, PermissionError) as exc:
+        flash(str(exc), 'danger')
+        return redirect(request.referrer or url_for('academic.achievements_page'))
+    # 按类别的动态字段（x_<key>）
     ach_svc.set_extra(rec, request.form)
-    # 传原始字符串交给 parse_tags 拆分去重：传 list 会被 str() 成 "['课题', '省级']" 脏值
-    ach_svc.set_tags(rec, request.form.get('tags') or '')
     db.session.commit()
     log_operation(current_user, '编辑', '教师业绩', aid,
                   f'{rec.teacher_name} {rec.title}', module='academic')
     flash(f'已保存修改：{rec.title}', 'success')
-    return redirect(back)
+    return redirect(request.referrer or url_for('academic.achievements_page'))
 
 
 def _ach_or_404(aid):
@@ -506,7 +482,7 @@ def achievement_attachment_delete(fid):
 
 @bp.route('/achievements/attachment/<int:fid>/view')
 @login_required
-# v1.19.5.0 审核（S2）：本路由有意不用 @perm_required('academic.view')——
+# v1.19.41.2 审核（S2）：本路由有意不用 @perm_required('academic.view')——
 # 教师工作台“我的业绩”需允许无 academic.view 权限的提交者本人预览自己上传的附件；
 # 权限由 ach_svc.can_view(rec, att, current_user) 收敛（academic.view 持有者 OR 提交者本人 OR 审核人）。
 def achievement_file_view(fid):
@@ -533,7 +509,7 @@ def achievement_file_view(fid):
 
 @bp.route('/achievements/attachment/<int:fid>/download')
 @login_required
-# v1.19.5.0 审核（S2）：同 achievement_file_view，权限由 ach_svc.can_view 收敛，
+# v1.19.41.2 审核（S2）：同 achievement_file_view，权限由 ach_svc.can_view 收敛，
 # 豁免 @perm_required 是为保留“提交者本人下载自己附件”路径（与工作台协作）。
 def achievement_file_download(fid):
     """附件下载（与预览同一套权限）"""

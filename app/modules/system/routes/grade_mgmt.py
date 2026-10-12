@@ -4,12 +4,14 @@ import shutil
 import sqlite3
 import logging
 from datetime import datetime
-from flask import Blueprint, render_template, request, jsonify, flash, redirect, url_for
+from flask import (Blueprint, render_template, request, jsonify, flash, redirect,
+                   url_for, abort)
 from flask_login import login_required, current_user
 from app.extensions import db
 from app.models import Room, BedAssignment, Student, GradeSetting, DictCategory, DictItem
 from app.utils.decorators import perm_required
 from app.utils.helpers import log_operation, write_change_log, get_dict_values, clear_graduated_grades_cache
+from app.utils.alumni_scope import filter_alumni_grades, assert_alumni_grade_visible
 from app.utils.crypto import decrypt
 
 # 2026-10-11 修复：本文件 4 处静默异常降级日志误用裸 logger（未定义，触发即 NameError），在此补定义
@@ -22,7 +24,7 @@ def _prune_backups(backups_dir, keep=20, max_age_days=180):
     此前 `data/backups/` 只增不清理，明文整库副本（含口令哈希、身份证密文）
     会长期累积并随同步盘扩散。
 
-    v1.19.5.0 S-5：仅清理自动生成的、名字严格匹配
+    v1.19.41.2 S-5：仅清理自动生成的、名字严格匹配
     `(graduate|system|history)_<年级>_YYYYMMDD_HHMMSS.db` 的文件，
     不误删手工改名的历史备份（如 `_local_before_repro/` 、`academic.db.bak-*` 等）。
     """
@@ -160,10 +162,28 @@ def graduate():
         ''')
         hist_conn.commit()
         sys_conn = sqlite3.connect(system_db_path)
+        # 2026-10-12 审计 P0-1：boarding_type/day_student_type/textbook/teacher_notes
+        # 已从 students 表迁至 dormitory 库 student_accommodation（cleanup_student_columns
+        # 删列），原 SELECT 仍引用这 4 列 → 必抛 no such column → 被裸 except 吞掉 →
+        # student_count=0 而流程继续清空在校数据并标记毕业（数据丢失链）。
+        # 裸 sqlite3 无法跨库 JOIN，ATTACH 后 LEFT JOIN；无住宿记录时四列为 NULL。
+        if not os.path.exists(db_path):
+            raise RuntimeError('dormitory.db 不存在，无法关联住宿信息，拒绝继续归档')
+        sys_conn.execute('ATTACH DATABASE ? AS dorm', (db_path,))
         students = sys_conn.execute(
-            'SELECT id,student_number,name,gender,ethnicity,grade,class_name,subject_selection,boarding_type,day_student_type,enrollment_status,textbook,teacher_notes,enrollment_notes,graduation_school_code,graduation_school,phone1,phone2,id_card_number FROM students WHERE grade=?',
+            '''SELECT s.id,s.student_number,s.name,s.gender,s.ethnicity,s.grade,
+                      s.class_name,s.subject_selection,a.boarding_type,
+                      a.day_student_type,s.enrollment_status,a.textbook,a.teacher_notes,
+                      s.enrollment_notes,s.graduation_school_code,s.graduation_school,
+                      s.phone1,s.phone2,s.id_card_number
+                 FROM students s
+                 LEFT JOIN dorm.student_accommodation a ON a.student_id = s.id
+                WHERE s.grade=?''',
             (grade,)
         ).fetchall()
+        if not students:
+            # 空归档同样是事故信号（年级无学生/年级名不匹配），一律硬中止
+            raise RuntimeError(f'students 表中没有 {grade} 的记录，拒绝空归档')
         for s in students:
             hist_conn.execute(
                 'INSERT INTO graduated_students (original_id,student_number,name,gender,ethnicity,grade,class_name,subject_selection,boarding_type,day_student_type,enrollment_status,textbook,teacher_notes,enrollment_notes,graduation_school_code,graduation_school,phone1,phone2,id_card_number,graduated_grade) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
@@ -174,9 +194,18 @@ def graduate():
         hist_conn.close()
         student_count = len(students)
     except Exception as e:
-        student_count = 0
-        from flask import current_app
-        current_app.logger.error(f'归档学生数据异常: {e}', exc_info=True)
+        # 2026-10-12 审计 P0-1：归档失败必须硬中止。原实现裸 except 记日志后继续，
+        # 后续仍会清空房间/床位并把 is_graduated 置真 → "归档 0 人 + 在校数据已清"。
+        logger.error(f'归档学生数据失败，毕业已中止（{grade}）: {e}', exc_info=True)
+        for _c in ('hist_conn', 'sys_conn'):
+            try:
+                locals()[_c].close()
+            except Exception:
+                pass
+        db.session.rollback()
+        return jsonify({'success': False,
+                        'message': f'归档学生数据失败，{grade} 毕业已中止。'
+                                   f'请检查服务端日志后重试；在校数据未做任何修改。'}), 500
     
     # 1.6 归档宿舍数据到历史库
     room_archived = 0
@@ -271,8 +300,20 @@ def graduate():
         hist_conn.commit()
         hist_conn.close()
     except Exception as e:
-        from flask import current_app
-        current_app.logger.error(f'归档宿舍数据异常: {e}', exc_info=True)
+        # 2026-10-12 审计 P0-1：宿舍归档失败同样硬中止——原实现记日志后继续，
+        # 后续仍会清空床位分配并标记毕业 → 往届住宿查询永久缺该年级数据。
+        logger.error(f'归档宿舍数据失败，毕业已中止（{grade}）: {e}', exc_info=True)
+        for _c in ('hist_conn', 'dorm_conn', 'sys_conn'):
+            _obj = locals().get(_c)
+            if _obj is not None:
+                try:
+                    _obj.close()
+                except Exception:
+                    pass
+        db.session.rollback()
+        return jsonify({'success': False,
+                        'message': f'归档宿舍数据失败，{grade} 毕业已中止。'
+                                   f'请检查服务端日志后重试；在校数据未做任何修改。'}), 500
 
     # 1.7 写入毕业变迁日志
     try:
@@ -282,8 +323,7 @@ def graduate():
             write_change_log('graduate', students_data, old_value='在校', new_value='毕业',
                            detail=f'{grade} 毕业归档', operator_name=current_user.real_name)
     except Exception as e:
-        from flask import current_app
-        current_app.logger.error(f'毕业变迁日志异常: {e}', exc_info=True)
+        logger.error(f'毕业变迁日志异常: {e}', exc_info=True)
 
     # 2. 获取该年级所有房间ID（清空前查）
     rooms = Room.query.filter(Room.grade == grade).all()
@@ -345,6 +385,8 @@ def history():
             conn.close()
         except Exception as _e:  # noqa: BLE001
             logger.warning('grade_mgmt.py::history 异常（已降级处理）: %s', _e)
+    # 2026-10-12 审计 P1：历史查询与 /alumni 同口径收敛（往届=已毕业年级）
+    graduated_grades = filter_alumni_grades(current_user, graduated_grades)
 
     search_grade = request.args.get('grade', '')
     search_name = request.args.get('name', '').strip()
@@ -353,6 +395,10 @@ def history():
 
     results = []
     if search_grade and os.path.exists(history_db_path):
+        try:
+            assert_alumni_grade_visible(current_user, search_grade)
+        except PermissionError:
+            abort(403)
         try:
             conn = sqlite3.connect(history_db_path)
             conn.row_factory = sqlite3.Row
@@ -415,6 +461,8 @@ def alumni():
             conn.close()
         except Exception as _e:  # noqa: BLE001
             logger.warning('grade_mgmt.py::alumni 异常（已降级处理）: %s', _e)
+    # 2026-10-12 审计 P1：往届生档案查询收敛数据范围（原先零校验，H-2 复活）
+    graduated_grades = filter_alumni_grades(current_user, graduated_grades)
 
     search_grade = request.args.get('grade', '')
     search_name = request.args.get('name', '').strip()
@@ -424,6 +472,10 @@ def alumni():
     results = []
     change_logs = {}
     if search_grade and os.path.exists(history_db_path):
+        try:
+            assert_alumni_grade_visible(current_user, search_grade)
+        except PermissionError:
+            abort(403)
         try:
             conn = sqlite3.connect(history_db_path)
             conn.row_factory = sqlite3.Row

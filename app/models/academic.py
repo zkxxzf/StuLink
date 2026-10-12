@@ -1,4 +1,4 @@
-# StuLink v1.19.5.0 2026-10-10
+# StuLink v1.19.41.2 2026-10-10
 # 教务模块模型（2026-10-10 按「一个功能一个库」分库）：
 #   academic.db    师资基础（教师名单 / 备课组长 / 班主任记录 / 考勤）
 #   timetable.db   课表与晚自习值班
@@ -22,6 +22,15 @@ class Teacher(db.Model):
     """
     __bind_key__ = 'academic'
     __tablename__ = 'teachers'
+    # 2026-10-12：教师名单高频筛选补索引。user_id（账号绑定反查）/ subject（任课学科）
+    # / status（在职过滤）三列此前无索引，教师映射矩阵与教师管理列表均为全表扫。
+    # 索引名与 scripts/add_teacher_indexes.py 保持一致：新装环境由 create_all 建，
+    # 存量 academic.db 由该脚本幂等补建，避免"模型有、库里没有"的静默缺口。
+    __table_args__ = (
+        db.Index('idx_teacher_user_id', 'user_id'),
+        db.Index('idx_teacher_subject', 'subject'),
+        db.Index('idx_teacher_status', 'status'),
+    )
 
     id = db.Column(db.Integer, primary_key=True)
     teacher_uid = db.Column(db.String(16), unique=True, nullable=False, index=True)

@@ -99,3 +99,8 @@ data_backup_*/
 
 # QA 过程产物（勿入库）：如 tests/qa_20261010/backup_before_delete 这类"删除前备份"副本目录
 tests/qa_*/
+
+# 误把 %VAR% 当字面路径（PowerShell 不展开 %VAR%）产生的 Windows 缓存目录（勿入库）
+%SystemDrive%/
+%SystemRoot%/
+%ProgramData%/

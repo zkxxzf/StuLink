@@ -53,18 +53,8 @@
                     <div class="form-text">用于定位"上一场同阶段考试"，作为考场分层依据。</div>
                 </div>
 
-                <div class="col-12">
-                    <label class="form-label">分数口径 <span class="text-danger">*</span></label>
-                    <select name="score_mode" class="form-select">
-                        {% for v, label in mode_options %}
-                        <option value="{{ v }}" {% if v == score_mode %}selected{% endif %}>{{ label }}</option>
-                        {% endfor %}
-                    </select>
-                    <div class="form-text">
-                        决定本场<b>划线、排名、成绩分析</b>用哪一套分。两者都给时：赋分进主分（划线排名用它），
-                        原始分另存一列仅供查看；只给一套时按实际选。
-                    </div>
-                </div>
+                {# v1.19.41.2：移除「分数口径」——口径在导入时按文件自动确定
+                   （有赋分按赋分、只给原始分按原始分），建考试时不需要也不该选 #}
 
                 <div class="col-12">
                     <label class="form-label">考试名称</label>

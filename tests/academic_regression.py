@@ -804,6 +804,24 @@ def check_swap_batch_one_record():
                  bool(body.get('success')) and st == {'executed'} and newn == 3,
                  f'status={st} new={newn} {body.get("message")}')
 
+        # 2026-10-11 新增：撤销执行（回退课表）—— 整批回退，原课恢复、生成条目移除
+        r = c.post(f'/academic/swap/{rep_id}/revoke', data={}, headers=hdrs)
+        body = r.get_json() or {}
+        with app.app_context():
+            st2 = {s.status for s in ScheduleSwap.query.filter_by(batch_id=bid).all()}
+            restored = ScheduleEntry.query.filter(
+                ScheduleEntry.id.in_(eids),
+                ScheduleEntry.is_deleted.is_(False)).count()
+            left_new = ScheduleEntry.query.filter(
+                ScheduleEntry.original_entry_id.in_(eids),
+                ScheduleEntry.is_deleted.is_(False)).count()
+            case('撤销执行：整批回到「已通过」可重执行',
+                 bool(body.get('success')) and st2 == {'approved'},
+                 f'status={st2} {body.get("message")}')
+            case('撤销执行：原 3 门课恢复、生成条目移除',
+                 restored == 3 and left_new == 0,
+                 f'restored={restored} new={left_new}')
+
     # ── 撤销整批 ──
     with app.app_context():
         made2 = []
@@ -2076,6 +2094,46 @@ def check_form_to_achievement():
                                   form_id=tpl4_id)).get_data(as_text=True)
         case('填写页渲染当前轮时间窗', '提交答案' in fill_page and '第2轮' in fill_page,
              str(len(fill_page)))
+
+
+@item('FORMHTTP')
+def check_form_submit_http():
+    """表单提交的 **HTTP 路由** 回归（2026-10-12 新增）。
+
+    背景：上面的 FORM2ACH 直接调 `form_service.submit_form`，绕过了 HTTP 路由，
+    于是 `forms.py` 里 `current_user.name`（User 模型无该字段）这类**只在路由层
+    才触发**的缺陷从未被覆盖——该 bug 会让提交表单直接 500。本项走真实路由。
+    """
+    from flask import url_for
+
+    from app.models.academic import FormSubmission
+    from app.modules.academic.services import form_service
+
+    with app.app_context():
+        admin = User.query.filter_by(username='ac_admin').first()
+        tpl = form_service.create_form(
+            title='HTTP 提交回归', description='', category=None,
+            target_type='all', target_scope=None, start_time=None,
+            deadline=None, max_file_size=10, allow_multiple=False,
+            questions_data=[{'question_type': 'text', 'title': '说明',
+                             'required': False}], created_by=admin.id)
+        form_service.publish_form(tpl.id)
+        tpl_id = tpl.id
+        qid = tpl.questions[0].id if tpl.questions else None
+
+    with app.test_client() as c:
+        login(c, 'ac_admin', TEST_PWD)
+        token = get_csrf(c, url_for('academic.form_fill', form_id=tpl_id))
+        r = c.post(url_for('academic.form_submit', form_id=tpl_id),
+                   data={'csrf_token': token, f'q_{qid}': 'HTTP 提交内容'})
+        case('HTTP 提交表单不报 500（路由层字段正确）',
+             r.status_code != 500, f'HTTP {r.status_code}')
+
+    with app.app_context():
+        sub = FormSubmission.query.filter_by(template_id=tpl_id).first()
+        case('HTTP 提交已落库且提交人姓名取自 real_name',
+             sub is not None and sub.submitter_name == '教务主任',
+             f'submitter_name={sub.submitter_name if sub else None}')
 
 
 @item('FORM_NOTIFY')

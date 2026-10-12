@@ -1,4 +1,4 @@
-# StuLink v1.19.5.0 2026-10-10
+# StuLink v1.19.41.2 2026-10-10
 # 教务 · 表单收集：管理端（创建/编辑/发布/关闭/提交列表/审核/导出）
 #                 填写端（可填列表/填写/提交/我的提交）
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
@@ -770,7 +770,9 @@ def form_submit(form_id):
     submitter_info = {
         'submitter_type': submitter_type,
         'submitter_id': current_user.id,
-        'submitter_name': current_user.name or current_user.username,
+        # 2026-10-12 修复：User 模型无 `name` 字段（只有 real_name），
+        # 原 `current_user.name` 会抛 AttributeError，导致提交表单直接 500。
+        'submitter_name': current_user.real_name or current_user.username,
         'submitter_uid': getattr(current_user, 'teacher_uid', None) or
                          getattr(current_user, 'student_number', None) or str(current_user.id),
         'submitter_grade': getattr(current_user, 'grade', None),

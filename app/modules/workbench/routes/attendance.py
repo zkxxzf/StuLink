@@ -1,5 +1,5 @@
 """考勤管理路由"""
-# StuLink v1.19.5.0 2026-10-10：补权限校验与班级归属校验（PR#5 安全审查 S1）
+# StuLink v1.19.41.2 2026-10-10：补权限校验与班级归属校验（PR#5 安全审查 S1）
 from datetime import date
 
 from flask import (Blueprint, render_template, request, jsonify, flash,
@@ -13,7 +13,6 @@ from app.modules.workbench.services.attendance_service import (
 )
 from app.modules.workbench.services import scope as wb_scope
 from app.models.academic import ATTENDANCE_STATUS
-from app.modules.workbench.services import scope_service
 from app.utils.helpers import to_date
 from app.utils.decorators import perm_required
 
@@ -77,7 +76,7 @@ def attendance_record():
     if not wb_scope.class_allowed(current_user, grade, class_name):
         abort(403)
 
-    if not scope_service.is_class_in_scope(current_user, grade, class_name):
+    if not wb_scope.class_allowed(current_user, grade, class_name):
         flash('无该班级的操作权限（超出管辖范围）', 'danger')
         return redirect(url_for('attendance.attendance_page'))
 
@@ -131,7 +130,7 @@ def attendance_export():
     if not wb_scope.class_allowed(current_user, grade, class_name):
         abort(403)
 
-    if not scope_service.is_class_in_scope(current_user, grade, class_name):
+    if not wb_scope.class_allowed(current_user, grade, class_name):
         flash('无该班级的导出权限（超出管辖范围）', 'danger')
         return redirect(url_for('attendance.attendance_page'))
 
@@ -163,7 +162,7 @@ def attendance_stats_api():
     if not wb_scope.class_allowed(current_user, grade, class_name):
         return jsonify({'error': '无权访问该班级数据'}), 403
 
-    if not scope_service.is_class_in_scope(current_user, grade, class_name):
+    if not wb_scope.class_allowed(current_user, grade, class_name):
         return jsonify({'error': '无该班级的访问权限（超出管辖范围）'}), 403
 
     stats = get_attendance_stats(class_name, grade=grade, month=month or None)

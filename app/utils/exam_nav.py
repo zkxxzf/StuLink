@@ -13,11 +13,12 @@ from __future__ import annotations
 
 from flask import g, request
 
-# 段位键：overview 概览 / affair 考务 / import 导入 / analysis 分析
+# 段位键：overview 概览 / affair 考务 / import 导入 / bands 划线 / analysis 分析
 SECTION_LABELS = {
     'overview': '考试概览',
     'affair': '考务安排',
     'import': '成绩导入',
+    'bands': '划线分层',
     'analysis': '成绩分析',
 }
 
@@ -25,7 +26,8 @@ SECTION_LABELS = {
 _EP_SECTION = (
     ('grades.exam_ai_import', 'import'),
     ('grades.exam_import', 'import'),
-    ('grades.bands_page', 'import'),          # 划线分层属“导入”环节
+    # v1.19.41.2 划线分层单独一段：原先归到 'import' 导致侧栏「成绩导入」「划线分层」同时高亮
+    ('grades.bands_page', 'bands'),
     ('grades.exam_affair_go', 'affair'),
     ('grades.affair', 'affair'),
     ('grades.affairs', 'affair'),
@@ -55,7 +57,7 @@ def exam_nav():
     """当前请求的考试上下文；不在考试上下文时返回 None
 
     返回 dict：
-      exam / exam_id / section / affair_id / steps / next_step
+      exam / exam_id / section / affair_id / affair / steps
     """
     if request.blueprint != 'grades':
         return None
@@ -93,7 +95,11 @@ def _resolve():
     exam = Exam.query.get(int(exam_id))
     if exam is None:
         return None
-    if affair is None and sec == 'affair':
+    if affair is None:
+        # v1.19.41.2：**任何**进入考试态的页面都要取本场考务批次。
+        # 此前只在 sec == 'affair' 时查，导致成绩导入/划线分层/分数修改记录等页面里
+        # affair 恒为 None → 侧栏「考务安排」永远挂「待做」、进度显示 3/4 步，
+        # 而本场考务其实早已编排完成（有考场·座号·考号）。
         affair = ExamAffair.query.filter_by(exam_id=exam.id).first()
 
     # 四步进度（与考试详情页同口径：建考试 / 考务 / 导入 / 划线）
@@ -105,7 +111,6 @@ def _resolve():
         {'label': '成绩导入', 'done': imported, 'key': 'import'},
         {'label': '成绩分析', 'done': banded, 'key': 'analysis'},
     ]
-    nxt = next((s for s in steps if not s['done']), None)
     return {'exam': exam, 'exam_id': exam.id, 'section': sec or 'overview',
             'affair_id': (affair.id if affair else None),
-            'affair': affair, 'steps': steps, 'next_step': nxt}
+            'affair': affair, 'steps': steps}

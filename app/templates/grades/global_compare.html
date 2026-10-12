@@ -7,12 +7,17 @@
 {% block content %}
 {# 全局对比：班级 × 学科宽表（去差均分 / 特优线 / 本科线）
    入口条件与「成绩汇报区」一致（管理员/校级领导/年级长），后端 _guard_report 硬校验 #}
-<div class="container-fluid py-3" id="ldApp" data-exam-id="{{ request.args.get('exam_id', '') }}">
+{# v1.19.41.2 考试态：侧栏入口带的是 ?exam=<id>（此前这里只认 exam_id，参数被丢掉 →
+   退化成下拉第一项并提示「该考试暂无成绩」）。改为统一先问 exam_nav()（认 ?exam / exam_id / 路径），
+   考试态下把「考试」下拉隐藏（只看本场），非考试态保持可选。 #}
+{% set _en = exam_nav() %}
+{% set _eid = _en.exam_id if _en else (request.args.get('exam') or request.args.get('exam_id') or '') %}
+<div class="container-fluid py-3" id="ldApp" data-exam-id="{{ _eid }}">
     <div class="d-flex flex-wrap align-items-center gap-2 mb-2 no-print">
-        <a href="{{ url_for('grades.index') }}" class="btn btn-sm btn-outline-secondary">
+        <a href="{{ url_for('grades.index') }}{% if _en %}?exam={{ _en.exam_id }}{% endif %}" class="btn btn-sm btn-outline-secondary">
             <i class="bi bi-arrow-left"></i> 返回成绩分析</a>
         <h5 class="mb-0"><i class="bi bi-person-badge text-primary"></i> 全局对比</h5>
-        <select id="ldExam" class="form-select form-select-sm w-auto" title="考试"></select>
+        <select id="ldExam" class="form-select form-select-sm w-auto{% if _en %} d-none{% endif %}" title="考试"></select>
         <select id="ldDir" class="form-select form-select-sm w-auto" title="方向"></select>
         <span class="ms-auto"></span>
         <button class="btn btn-sm btn-outline-dark" onclick="window.print()">

@@ -1,0 +1,73 @@
+{% extends "base.html" %}
+{% block title %}分数修改记录 - {{ exam.name }}{% endblock %}
+{% block content %}
+<div class="d-flex align-items-center mb-2 flex-wrap gap-2">
+    <a href="{{ url_for('grades.exam_detail', exam_id=exam.id) }}" class="btn btn-sm btn-outline-secondary">
+        <i class="bi bi-arrow-left"></i>
+    </a>
+    <h5 class="mb-0"><i class="bi bi-clock-history"></i> 分数修改记录</h5>
+    <span class="badge bg-secondary">{{ exam.grade }}</span>
+    <span class="text-muted small">{{ exam.name }}</span>
+    <span class="text-muted small ms-auto">共 {{ logs|length }} 条</span>
+</div>
+
+{# v1.19.41.2：本页只属于这一场考试，入口仅成绩单页右上角按钮 #}
+<div class="alert alert-light border small py-2">
+    <i class="bi bi-info-circle"></i>
+    本页记录<b>本场考试</b>的每一次改分 / 标记缺考：谁、什么时候、改了哪个学生的哪一科、改前改后各是多少。
+    记录只增不删。
+</div>
+
+<div class="card">
+    <div class="table-responsive" style="max-height:75vh;">
+        <table class="table table-sm table-hover align-middle mb-0">
+            <thead class="table-light sticky-top">
+            <tr>
+                <th style="width:150px;">时间</th>
+                <th>学号</th>
+                <th>姓名</th>
+                <th>班级</th>
+                <th>科目</th>
+                <th class="text-end">赋分（前 → 后）</th>
+                <th class="text-end">原始分（前 → 后）</th>
+                <th>类型</th>
+                <th>操作人</th>
+            </tr>
+            </thead>
+            <tbody>
+            {% for g in logs %}
+            <tr>
+                <td class="small text-muted">{{ g.operated_at.strftime('%Y-%m-%d %H:%M:%S') if g.operated_at else '—' }}</td>
+                <td class="small">{{ g.student_no }}</td>
+                <td>{{ g.student_name or '—' }}</td>
+                <td>{{ g.class_name or '—' }}</td>
+                <td>{{ g.subject }}</td>
+                <td class="text-end">
+                    {{ '—' if g.old_score is none else g.old_score }} →
+                    {% if g.action == 'delete' %}<span class="text-danger">缺考</span>
+                    {% else %}<b>{{ '—' if g.new_score is none else g.new_score }}</b>{% endif %}
+                </td>
+                <td class="text-end text-muted">
+                    {{ '—' if g.old_raw is none else g.old_raw }} →
+                    {% if g.action == 'delete' %}—
+                    {% else %}{{ '—' if g.new_raw is none else g.new_raw }}{% endif %}
+                </td>
+                <td>
+                    {% if g.action == 'delete' %}
+                    <span class="badge bg-warning text-dark">标记缺考</span>
+                    {% else %}
+                    <span class="badge bg-info text-dark">修改</span>
+                    {% endif %}
+                </td>
+                <td>{{ g.operator_name or '—' }}</td>
+            </tr>
+            {% else %}
+            <tr><td colspan="9" class="text-center text-muted py-5">
+                本场考试还没有人修改过分数。
+            </td></tr>
+            {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+{% endblock %}

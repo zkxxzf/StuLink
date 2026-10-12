@@ -1,4 +1,4 @@
-# StuLink v1.19.5.0 2026-10-10
+# StuLink v1.19.41.2 2026-10-10
 # 成绩模块数据范围解析（复用现有角色/权限组体系，参照宿舍统计模块范式）
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 from app.models import UserClassLink, Student
@@ -12,7 +12,15 @@ SCOPE_CLASS = 'class'
 
 
 def get_scope(user):
-    """返回 (scope_type, grade)，与宿舍统计模块一致"""
+    """返回 (scope_type, grade)，与宿舍统计模块一致
+
+    2026-10-12 审计修复（P0-2）：admin 无权限组时原返回 ('none', None)，
+    导致 visible_grades/visible_classes 把管理员关进空集（分析页考试下拉空、
+    班级对比被 fail-closed 挡死）。与 check_exam_visible/student_in_scope/
+    _guard_tab/access_scope 的特判同口径：admin 恒为全校。
+    """
+    if user.role == 'admin':
+        return SCOPE_SCHOOL, None
     pg = user.permission_group
     if not pg:
         return 'none', None
@@ -40,6 +48,8 @@ def has_user_scope(user):
 
 def visible_grades(user):
     """成绩分析可见年级列表（管理/分析页下拉用）"""
+    if user.role == 'admin':
+        return _all_active_grades()  # 管理员=全部未毕业年级（2026-10-12 P0-2）
     ug = user_grade_scope(user)
     if ug is not None:
         # v1.9.2 用户级数据范围：仅授权年级（剔除已毕业）
@@ -62,6 +72,8 @@ def visible_grades(user):
 
 def visible_classes(user):
     """可见 (grade, class_name) 列表"""
+    if user.role == 'admin':
+        return None  # 管理员不限班（2026-10-12 P0-2，与 get_scope 特判同口径）
     if user_grade_scope(user) is not None:
         return None  # 用户级授权：不限班（年级级过滤在上层完成）
     scope, grade = get_scope(user)

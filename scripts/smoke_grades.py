@@ -36,7 +36,7 @@ config_mod.Config.SECRET_KEY = 'smoke-test-secret'
 
 from app import create_app  # noqa: E402
 from app.extensions import db  # noqa: E402
-from app.models import Student, User, PermissionGroup  # noqa: E402
+from app.models import Student, User, PermissionGroup, UserClassLink, UserDataScope  # noqa: E402
 from app.models.grades import Exam, ExamScore, ExamBand, TeacherSubjectLink, SUBJECTS  # noqa: E402
 
 app = create_app()
@@ -74,12 +74,39 @@ with app.app_context():
 with app.app_context():
     # H-1 之后内置 admin 的初始口令是随机生成的（不再有 admin123），
     # 冒烟脚本改为自建一个管理员账号，避免依赖默认口令。
+    # 2026-10-12 P0-2：create_app 的 INIT 会灌演示 teacher_subject_links
+    # （user_id=1..7），恰好与首个新建账号 id 相撞 → visible_grades 非空、
+    # admin 范围用例"假绿"（曾掩盖 visible_classes 空集把 admin 关死的问题）。
+    # 冒烟账号必须是**无任何映射的裸 admin**，先清演示链接再建账号。
+    TeacherSubjectLink.query.delete()
+    UserClassLink.query.delete()
+    UserDataScope.query.delete()
+    db.session.commit()
     if not User.query.filter_by(username='smokeadm').first():
         _adm = User(username='smokeadm', real_name='冒烟管理员', role='admin',
                     must_change_pwd=False)
         _adm.set_password('SmokeAdm#2026')
         db.session.add(_adm)
         db.session.commit()
+
+    # ---- v1.19.28.0 考务名单用例：上一场（2025001 标记不参考）+ 本场 ----
+    from datetime import date as _date
+    from app.models.grades import ExamAffair, AffairStudent, AffairRoom
+    _prev_af = ExamAffair(name='冒烟上一场', grade='2025级', exam_date=_date(2019, 1, 5),
+                          status='arranged')
+    _cur_af = ExamAffair(name='冒烟本场', grade='2025级', exam_date=_date(2019, 2, 5),
+                         status='draft')
+    db.session.add_all([_prev_af, _cur_af])
+    db.session.commit()
+    db.session.add(AffairStudent(affair_id=_prev_af.id, student_no='20250001',
+                                 name='历生01', class_name='01班', is_attend=False))
+    # v1.19.41.2 容量用例：上一场 东211=44；本场同房间初始 30
+    db.session.add(AffairRoom(affair_id=_prev_af.id, room_no='01', location='东211',
+                              subject='默认', capacity=44))
+    db.session.add(AffairRoom(affair_id=_cur_af.id, room_no='01', location='东211',
+                              subject='默认', capacity=30))
+    db.session.commit()
+    _AFF_CUR = _cur_af.id
 
 with app.test_client() as c:
     # ---- 登录管理员（先取 CSRF token） ----
@@ -394,6 +421,153 @@ with app.test_client() as c:
                 '/grades/teachers', '/grades/teachers/import'):
         r = c.get(url)
         check(f'页面 {url}', r.status_code == 200, str(r.status_code))
+
+    # ---- v1.19.41.2 排序三角：统一在文字后面 + 未点选也看得清 + 右对齐列仍与数字对齐 ----
+    html = c.get(f'/grades/exams/{eid}').get_data(as_text=True)
+    check('表头：三角统一在文字后面',
+          all((lbl + '<i') in html for lbl in
+              ('学号', '姓名', '方向排', '进退步', '班排', '总分', '语文')))
+    check('表头：三角不再出现在文字左侧',
+          all(('></i>' + lbl) not in html for lbl in ('总分', '方向排', '班排', '语文')))
+    check('表头：未点选三角不再用极淡的 opacity-25',
+          'bi-caret-down opacity-25' not in html and 'bi-caret-down sort-off' in html)
+    check('表头：右对齐列三角绝对定位进预留位',
+          '#scoreTable th.text-end a.th-sort i { position: absolute;' in html)
+    check('表头：表头与数据单元同宽预留三角位',
+          'td.c-rank, #scoreTable td.c-total, #scoreTable td.c-sub { padding-right: 12px; }' in html)
+    check('页头：默认排序/改分说明整行已移除',
+          '默认按' not in html and '恢复默认排序' not in html
+          and '点击单科分数可修改' not in html)
+    # ---- v1.19.41.2 侧栏「成绩分析」标题本身即入口（直接进总览），展开/收起交给箭头 ----
+    check('侧栏：成绩分析标题指向总览（全年级对比）',
+          'class="efn-group-title"' in html
+          and ('/grades/global-compare?exam=%d' % eid) in html
+          and '<a class="efn-group"' not in html)
+    check('侧栏：分析组展开仍由箭头负责',
+          'data-bs-toggle="collapse" href="#efnAnalysis"' in html)
+
+    # ---- v1.19.41.2 表头/数字严格对齐 + 名次列次序 + 进退步悬浮说明 ----
+    # th 内若残留空白，右对齐时行尾空格不会被折掉，会把表头文字往左推几个像素 → 与数字错开
+    _thead = html.split('<thead')[1].split('</thead>')[0]
+    check('表头：th 内部无空白', '</a></th>' in _thead and re.search(r'\s</th>', _thead) is None)
+    check('名次列次序：方向排 → 进退步 → 班排',
+          _thead.index('方向排') < _thead.index('进退步') < _thead.index('班排'))
+    check('数据单元：右对齐名次为一行无空白',
+          re.search(r'<td class="text-end c-rank">\d+</td>', html) is not None)
+    check('进退步悬浮：写明同方向进退步', 'title="同方向进退步：' in html)
+
+    # ---- v1.19.41.2 导航高亮唯一性 + 分析子模块「考试态」锁本场 ----
+    hb = c.get(f'/grades/exams/{eid}/bands').get_data(as_text=True)
+    check('导航：划线分层页只高亮「划线分层」',
+          re.search(r'class="efn-item active" data-nav="bands"', hb) is not None
+          and re.search(r'class="efn-item active" data-nav="import"', hb) is None)
+    ha = c.get(f'/grades/analysis?exam={eid}').get_data(as_text=True)
+    check('分析页（考试态）隐藏年级/考试下拉',
+          'id="gGrade" class="form-select form-select-sm w-auto d-none"' in ha
+          and 'id="gExam" class="form-select form-select-sm w-auto d-none"' in ha)
+    check('分析页（考试态）带入本场考试', f'id="gInitialExam" class="d-none">{eid}<' in ha)
+    hg = c.get(f'/grades/global-compare?exam={eid}').get_data(as_text=True)
+    check('总览页（考试态）认 ?exam 且隐藏考试下拉',
+          f'data-exam-id="{eid}"' in hg
+          and 'id="ldExam" class="form-select form-select-sm w-auto d-none"' in hg)
+    hp = c.get(f'/grades/pivot?exam={eid}').get_data(as_text=True)
+    check('自由表（考试态）带入本场考试且隐藏年级/考试',
+          f'id="pvInitialExam" class="d-none">{eid}<' in hp
+          and 'id="pvGrade" class="form-select form-select-sm w-auto d-none"' in hp)
+    hn = c.get('/grades/analysis').get_data(as_text=True)
+    check('非考试态：年级下拉仍可选',
+          'id="gGrade" class="form-select form-select-sm w-auto d-none"' not in hn)
+
+    # ---- v1.19.41.2 考务步骤① 名单维护：只读名单 + 沿用上一场不参考 + 不参考排最上 ----
+    r = c.post(f'/grades/affairs/{_AFF_CUR}/students/sync', headers={'X-CSRFToken': csrf})
+    d = r.get_json()
+    check('考务同步：自动沿用上一场不参考 1 人',
+          d and d.get('ok') and d.get('matched_non_attend') == 1, d)
+    h2 = c.get(f'/grades/affairs/{_AFF_CUR}').get_data(as_text=True)
+    tb2 = h2.split('id="stuTable"')[1].split('</table>')[0]
+    hd2 = tb2.split('</thead>')[0]
+    check('考务步骤①：无手动新增/编辑',
+          'onclick="openStuModal' not in h2 and 'id="stuModal"' not in h2
+          and '>编辑</button>' not in h2)
+    # ---- v1.19.41.2 考务步骤① 左右分栏（左=参加/右=不参加）+ 名单统计 ----
+    check('考务步骤①：左右分栏（参加 / 不参加 两张表）',
+          '参加考试' in h2 and '不参加考试' in h2
+          and 'id="stuTable"' in h2 and 'id="stuSkipTable"' in h2)
+    check('考务步骤①：左表只含名单列（无考号/座号/参考）',
+          all(k in hd2 for k in ('学号', '姓名', '班级', '选科组合'))
+          and '考号' not in hd2 and '座号' not in hd2 and '参考' not in hd2, hd2[:200])
+    ts2 = h2.split('id="stuSkipTable"')[1].split('</table>')[0]
+    check('考务步骤①：不参加的学生在右表（不在左表）',
+          '20250001' in ts2 and '20250001' not in tb2)
+    check('考务步骤①：不参加学生整行标黄',
+          '<tr class="table-warning">' in ts2, ts2[:200])
+    check('考务步骤①：两侧可按「参加/不参加」互移',
+          'toggleAttend(' in h2 and '→ 不参加' in h2 and '← 参加' in h2)
+    check('考务步骤①：名单统计（年级汇总 + 各班明细）',
+          '名单统计' in h2 and '各班明细' in h2 and '年级：实际' in h2
+          and '实际人数' in h2)
+    # 排序：两侧均按 班级 → 姓氏（拼音）；fixture 中班级与学号/姓名同序，故断言学号升序
+    _ln = re.findall(r'<td>(\d{8})</td>', tb2)
+    _rn = re.findall(r'<td>(\d{8})</td>', ts2)
+    check('考务步骤①：两侧按班级·姓氏排序（学号升序）',
+          _ln == sorted(_ln) and _rn == sorted(_rn)
+          and _rn[:1] == ['20250001'] and '20250001' not in _ln,
+          (_ln[:3], _rn[:3]))
+    check('首列 sticky 背景跟随行状态（整行标黄含学号列）',
+          'var(--bs-table-bg, var(--bs-body-bg, #fff))' in h2)
+
+    # ---- v1.19.36.0 步骤② 考场容量：批量设置 / 沿用上一场（同房间）----
+    check('步骤② 有容量批量入口',
+          '批量设置容量' in h2 and '带入上次容量' in h2)
+    # v1.19.41.2：这两个按钮属于「本批次考场」侧 → 应在右卡片头内（不在顶部工具栏）
+    _rh = h2.split('id="roomStat"')[1][:900]
+    check('步骤②：容量按钮已移到「本批次考场」卡片头',
+          '批量设置容量' in _rh and '带入上次容量' in _rh
+          and 'setAllCapacity()' in _rh)
+    # v1.19.41.2 考务页单独的 AI 导入入口已下线（统一走每场考试「AI 智能导入」）
+    check('步骤②：考务页 AI 导入入口已下线',
+          '导入考生安排' not in h2
+          and ('/grades/affairs/%d/ai-import' % _AFF_CUR) not in h2)
+    r = c.post(f'/grades/affairs/{_AFF_CUR}/rooms/capacity',
+               data={'mode': 'all', 'capacity': '36'}, headers={'X-CSRFToken': csrf})
+    d = r.get_json()
+    check('容量批量设置（全 36）', d and d.get('ok') and d.get('capacity') == 36, d)
+    r = c.post(f'/grades/affairs/{_AFF_CUR}/rooms/capacity',
+               data={'mode': 'all', 'capacity': '0'}, headers={'X-CSRFToken': csrf})
+    check('容量越界被拒', r.get_json().get('ok') is False, r.get_json())
+    r = c.post(f'/grades/affairs/{_AFF_CUR}/rooms/capacity',
+               data={'mode': 'prev'}, headers={'X-CSRFToken': csrf})
+    d = r.get_json()
+    check('沿用上一场容量（同房间）',
+          d and d.get('ok') and d.get('updated') == 1 and d.get('src') == '冒烟上一场', d)
+    with app.app_context():
+        got = {x.location: x.capacity
+               for x in AffairRoom.query.filter_by(affair_id=_AFF_CUR).all()}
+        check('容量落库 = 上一场 44', got == {'东211': 44}, got)
+
+    # ---- v1.19.41.2 任课教师映射：下拉按姓名首字母排序 + 保存不再静默失效 ----
+    # 排序键与后端一致：(拼音首字母, 全拼, 姓名)；无 pypinyin 时后端退化为账号（本身即拼音）
+    from app.modules.grades.services.user_account import pinyin_of as _py_of
+
+    def _nkey(u):
+        p = (_py_of(u['name']) if u.get('name') else None)
+        p = (p or '').lower() or (u.get('username') or '').lower() or (u.get('name') or '')
+        return (p[:1], p, u.get('name') or '')
+
+    _t = c.get('/grades/api/teachers', query_string={'grade': '2025级'}).get_json()
+    _tusers = (_t.get('data') or {}).get('users') or []
+    _keys = [_nkey(u) for u in _tusers]
+    check('教师下拉：按姓名首字母（拼音）排序', bool(_keys) and _keys == sorted(_keys),
+          _keys[:6])
+    _b = json.dumps({'grade': '2025级', 'cells': {'02班|地理': str(_tusers[0]['id'])}})
+    r = c.post('/grades/api/teachers/save', data=_b, headers={'X-CSRFToken': csrf})
+    d = r.get_json()
+    check('教师映射保存：表单型 JSON 也生效（原静默失效）',
+          d.get('success') is True and (d.get('changes') or {}).get('bound') == 1, d)
+    # 还原（把刚绑定的单元格清空 → 停用），避免影响后续用例
+    c.post('/grades/api/teachers/save',
+           data=json.dumps({'grade': '2025级', 'cells': {'02班|地理': ''}}),
+           headers={'X-CSRFToken': csrf})
 
     # ==================== 角色权限矩阵（9.2 后端强制） ====================
     from app.models import UserClassLink

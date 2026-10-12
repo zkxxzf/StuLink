@@ -207,10 +207,10 @@ def search_student_accommodation():
     if graduated:
         query = query.filter(~Student.grade.in_(graduated))
 
-    if current_user.role == 'homeroom_teacher':
-        query = query.filter_by(grade=current_user.grade, class_name=current_user.class_name)
-    elif current_user.role == 'grade_leader':
-        query = query.filter_by(grade=current_user.grade)
+    # 2026-10-11 审计修复：原内联角色判断在 role=='teacher'（任课教师）时不命中任何
+    # 分支 → 全校学生住校信息可枚举（H-2 反模式复活）。统一走 apply_student_scope。
+    from app.utils.student_scope import apply_student_scope
+    query = apply_student_scope(query)
 
     name = request.args.get('name', '').strip()
     student_number = request.args.get('student_number', '').strip()

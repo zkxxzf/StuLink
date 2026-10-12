@@ -1,4 +1,4 @@
-# StuLink v1.19.5.0 2026-10-10
+# StuLink v1.19.41.2 2026-10-10
 # 调课服务（基于 timetable.db 新模型）：申请 / 批量 / 审核 / 执行 / 撤销 / 统计 / 实时生效
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 #
@@ -1201,6 +1201,70 @@ def cancel_swap(swap_id, applicant_uid):
     if len(targets) > 1:
         return True, f'已撤销该统一调课批次（{len(targets)} 门课）', sw
     return True, '已撤销该调课申请', sw
+
+
+def _revoke_one(sw, operator_id, operator_name):
+    """回退单条已执行调课（在 revoke_executed_swap 的事务内调用）。
+
+    - 撤销本次执行生成的条目（target_entry_id 指向的 swap 条目）→ 软删除；
+    - 永久调课：恢复被软删除的原条目；临时调课：原条目本就未动，无需恢复；
+    - 每条写一条 action='revoke' 的版本留痕；
+    - 清空 target_entry_id，状态回到「已通过」以便重新执行。
+    """
+    if sw.target_entry_id:
+        new_entry = db.session.get(ScheduleEntry, sw.target_entry_id)
+        if new_entry and not new_entry.is_deleted:
+            new_entry.is_deleted = True
+            new_entry.updated_at = datetime.now()
+            db.session.add(ScheduleVersion(
+                term_schedule_id=sw.term_schedule_id, entry_id=new_entry.id,
+                action='revoke', snapshot_json=_snapshot_str(new_entry),
+                operator_id=operator_id, operator_name=operator_name,
+                remark=f'撤销调课#{sw.id}执行：移除该次生成的课表条目'[:200],
+                operated_at=datetime.now(),
+            ))
+    if sw.is_permanent and sw.original_entry_id:
+        entry = db.session.get(ScheduleEntry, sw.original_entry_id)
+        if entry and entry.is_deleted:
+            entry.is_deleted = False
+            entry.updated_at = datetime.now()
+            db.session.add(ScheduleVersion(
+                term_schedule_id=sw.term_schedule_id, entry_id=entry.id,
+                action='revoke', snapshot_json=_snapshot_str(entry),
+                operator_id=operator_id, operator_name=operator_name,
+                remark=f'撤销调课#{sw.id}执行：恢复原课表条目'[:200],
+                operated_at=datetime.now(),
+            ))
+    sw.target_entry_id = None
+    sw.status = 'approved'
+    sw.review_note = '已撤销执行（回退课表）'
+    sw.reviewed_at = datetime.now()
+
+
+def revoke_executed_swap(swap_id, operator_id, operator_name):
+    """撤销已执行的调课（回退课表）。仅 executed 可撤销；统一调课批次整批回退。
+
+    2026-10-11 新增：执行后若发现调错，可回退——永久调课恢复原课程、临时调课删除
+    当天安排；记录回到「已通过」状态，可重新执行（或重新审批）。全过程单事务。
+    """
+    sw = db.session.get(ScheduleSwap, swap_id)
+    if not sw:
+        return False, '调课记录不存在', None
+    if sw.status != 'executed':
+        return False, (f'当前状态为「{SWAP_STATUS.get(sw.status, sw.status)}」，'
+                       f'仅已执行的调课可撤销执行'), None
+    targets = (batch_pending_siblings(sw, status='executed')
+               if getattr(sw, 'batch_id', None) else [sw])
+    for s in targets:
+        _revoke_one(s, operator_id, operator_name)
+    try:
+        db.session.commit()
+    except Exception as e:  # noqa: BLE001
+        db.session.rollback()
+        return False, f'撤销执行失败：{e}', None
+    if len(targets) > 1:
+        return True, f'已撤销该统一调课批次的执行（{len(targets)} 门课，课表已回退）', sw
+    return True, '已撤销执行，课表已回退', sw
 
 
 # ══════════════════════════════════════════════════════════════════════

@@ -210,7 +210,9 @@
                             {% if current_user.has_perm('academic.swap') and ts %}
                             <div class="small mt-2 d-flex flex-column gap-1">
                                 <a href="{{ url_for('academic.swap_apply') }}">申请个人调课</a>
+                                {% if current_user.has_perm('academic.swap_bulk') %}
                                 <a href="{{ url_for('academic.swap_bulk') }}">申请统一调课</a>
+                                {% endif %}
                             </div>
                             {% elif current_user.has_perm('academic.swap') %}
                             <div class="text-muted small mt-2">启用学期课表后可提交申请。</div>

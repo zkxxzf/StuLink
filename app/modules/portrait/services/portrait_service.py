@@ -1,4 +1,4 @@
-# StuLink v1.19.5.0 2026-10-10
+# StuLink v1.19.41.2 2026-10-10
 # 学生画像计算服务：评分标准化、综合评级计算
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 """画像计算服务
@@ -177,6 +177,12 @@ def get_student_list(grade=None, class_name=None, level=None, page=1, per_page=2
     从 system.db 获取学生列表，关联 portrait.db 的画像数据
     """
     q = Student.query
+
+    # 2026-10-11 审计修复：列表此前未做数据范围过滤，任何持 portrait.view 的账号
+    # （班主任/年级长）可分页枚举全校学生姓名+画像等级 → 统一走 apply_student_scope
+    # （H-2 唯一口径）；详情类入口另有 _assert_student_in_scope 守卫。
+    from app.utils.student_scope import apply_student_scope
+    q = apply_student_scope(q)
 
     # 过滤已转出/离校的学生
     q = q.filter(Student.enrollment_status.notin_(['已转出', '离校']))

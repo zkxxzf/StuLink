@@ -1,4 +1,4 @@
-# StuLink v1.19.5.0 2026-10-10
+# StuLink v1.19.41.2 2026-10-10
 # 教务 · 查课统计：记录录入 / 列表筛选 / 月度统计 / 批量录入 / 导出 / 图表API
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 import io
@@ -19,6 +19,7 @@ from app.modules.academic.services.access_scope import (
     visible_academic_class_scope, visible_academic_grades,
 )
 from app.modules.academic.services import swap_service
+from app.modules.academic.services import inspection_service  # 2026-10-11 抽出
 from app.modules.notifications.services import notification_service
 from app.utils.decorators import perm_required
 from app.utils.helpers import log_operation
@@ -157,27 +158,21 @@ def inspection_edit(rid):
     rec = db.session.get(InspectionRecord, rid)
     if not rec:
         abort(404)
-    if not academic_class_is_visible(current_user, rec.grade, rec.class_name):
-        flash('该记录不在你的可见范围内', 'danger')
+    try:
+        # 2026-10-11：校验与落库下沉到 inspection_service（MCP 与网页端共用）
+        rec = inspection_service.edit_record(
+            current_user, rid,
+            result=(request.form.get('result') or '').strip(),
+            class_name=request.form.get('class_name'),
+            subject=(request.form.get('subject') or '').strip(),
+            period=request.form.get('period', type=int),
+            note=request.form.get('note'))
+    except PermissionError as exc:
+        flash(str(exc), 'danger')
         return redirect(url_for('academic.inspection_page'))
-
-    before = rec.result
-    result = (request.form.get('result') or '').strip()
-    if result in _RESULT_KEYS:
-        rec.result = result
-    class_name = (request.form.get('class_name') or '').strip() or None
-    if not academic_class_is_visible(current_user, rec.grade, class_name):
-        flash('所选班级不在你的可见范围内', 'danger')
-        return redirect(url_for('academic.inspection_page'))
-    rec.class_name = class_name
-    subject = (request.form.get('subject') or '').strip()
-    if subject:
-        rec.subject = subject
-    rec.period = request.form.get('period', type=int)
-    rec.note = (request.form.get('note') or '').strip() or None
     db.session.commit()
-    log_operation(current_user, '更新', '查课记录', rid,
-                  f'{rec.teacher_name} 结果 {before}→{rec.result}', module='academic')
+    inspection_service.log_inspection(
+        current_user, '更新', rid, f'{rec.teacher_name} 结果→{rec.result}')
     flash('查课记录已更新', 'success')
     return redirect(url_for('academic.inspection_page',
                             grade=(request.form.get('back_grade') or None),
@@ -202,45 +197,24 @@ def inspection_add():
     if not grade:
         flash('请选择年级', 'danger')
         return back
-    ug = visible_academic_grades(current_user)
-    if ug is not None and grade not in ug:
-        flash('该年级不在你的可见范围内', 'danger')
+    try:
+        # 2026-10-11：校验与落库下沉到 inspection_service（MCP 与网页端共用）
+        rec = inspection_service.add_record(
+            current_user, inspect_date=date_str, grade=grade,
+            teacher_uid=teacher_uid,
+            class_name=(request.form.get('class_name') or '').strip(),
+            period=request.form.get('period', type=int),
+            subject=(request.form.get('subject') or '').strip(),
+            result=result, note=(request.form.get('note') or '').strip())
+    except (ValueError, PermissionError) as exc:
+        flash(str(exc), 'danger')
         return back
-    class_name = (request.form.get('class_name') or '').strip() or None
-    if not academic_class_is_visible(current_user, grade, class_name):
-        flash('请选择你负责范围内的班级', 'danger')
-        return back
-    if academic_has_class_restrictions(current_user):
-        allowed_teacher_uids = {t.teacher_uid for t in _visible_active_teachers(current_user)}
-        if teacher_uid not in allowed_teacher_uids:
-            flash('请选择你负责范围内的任课教师', 'danger')
-            return back
-    t = Teacher.query.filter_by(teacher_uid=teacher_uid).first()
-    if not t:
-        flash('请选择被查课的教师', 'danger')
-        return back
-    if result not in _RESULT_KEYS:
-        result = 'normal'
-    period = request.form.get('period', type=int)
-
-    rec = InspectionRecord(
-        inspect_date=inspect_date,
-        grade=grade,
-        period=period,
-        teacher_uid=t.teacher_uid,
-        teacher_name=t.name,
-        class_name=class_name,
-        subject=(request.form.get('subject') or '').strip() or t.subject,
-        result=result,
-        inspector_id=current_user.id,
-        note=(request.form.get('note') or '').strip() or None,
-    )
-    db.session.add(rec)
     db.session.commit()
-    log_operation(current_user, '新增', '查课记录', rec.id,
-                  f'{inspect_date} 第{period or "?"}节 {t.name} {rec.class_name or ""}',
-                  module='academic')
-    flash(f'已记录 {t.name} 的查课情况', 'success')
+    inspection_service.log_inspection(
+        current_user, '新增', rec.id,
+        f'{rec.inspect_date} 第{rec.period or "?"}节 {rec.teacher_name} '
+        f'{rec.class_name or ""}')
+    flash(f'已记录 {rec.teacher_name} 的查课情况', 'success')
     return back
 
 
@@ -256,69 +230,21 @@ def inspection_batch():
     except ValueError:
         flash('请选择正确的查课日期', 'danger')
         return back
-    ug = visible_academic_grades(current_user)
-
-    rows = request.form.getlist('row_teacher_uid')
-    grades = request.form.getlist('row_grade')
-    periods = request.form.getlist('row_period')
-    class_names = request.form.getlist('row_class_name')
-    subjects = request.form.getlist('row_subject')
-    results_list = request.form.getlist('row_result')
-    notes = request.form.getlist('row_note')
-    allowed_teacher_uids = None
-    class_visible = academic_class_authorizer(current_user)
-    if academic_has_class_restrictions(current_user):
-        allowed_teacher_uids = {t.teacher_uid for t in _visible_active_teachers(current_user)}
-
-    added = 0
-    for i, t_uid in enumerate(rows):
-        t_uid = (t_uid or '').strip()
-        if not t_uid:
-            continue
-        grade = (grades[i] if i < len(grades) else '').strip()
-        if not grade:
-            continue
-        if ug is not None and grade not in ug:
-            continue
-        class_name = (class_names[i] if i < len(class_names) else '').strip() or None
-        if not class_visible(grade, class_name):
-            continue
-        if allowed_teacher_uids is not None and t_uid not in allowed_teacher_uids:
-            continue
-        t = Teacher.query.filter_by(teacher_uid=t_uid).first()
-        if not t:
-            continue
-        result = (results_list[i] if i < len(results_list) else 'normal').strip()
-        if result not in _RESULT_KEYS:
-            result = 'normal'
-        period = None
-        if i < len(periods) and periods[i]:
-            try:
-                period = int(periods[i])
-            except (ValueError, TypeError) as _e:
-                # 节次不是数字 → 记为 None（行为不变）
-                logger.debug('查课节次非法(%r)，记为未知: %s', periods[i], _e)
-        rec = InspectionRecord(
-            inspect_date=inspect_date,
-            grade=grade,
-            period=period,
-            teacher_uid=t.teacher_uid,
-            teacher_name=t.name,
-            class_name=class_name,
-            subject=(subjects[i] if i < len(subjects) else '').strip() or t.subject,
-            result=result,
-            inspector_id=current_user.id,
-            note=(notes[i] if i < len(notes) else '').strip() or None,
-        )
-        db.session.add(rec)
-        added += 1
-
-    if added == 0:
-        flash('没有有效的记录被添加', 'warning')
+    # 2026-10-11：校验与落库下沉到 inspection_service（MCP 与网页端共用）
+    cols = {k: request.form.getlist('row_' + k) for k in
+            ('teacher_uid', 'grade', 'period', 'class_name', 'subject',
+             'result', 'note')}
+    total = len(cols['teacher_uid'])
+    rows = [{k: (cols[k][i] if i < len(cols[k]) else '') for k in cols}
+            for i in range(total)]
+    try:
+        added = inspection_service.add_records_batch(current_user, inspect_date, rows)
+    except (ValueError, PermissionError) as exc:
+        flash(str(exc), 'warning' if isinstance(exc, ValueError) else 'danger')
         return back
     db.session.commit()
-    log_operation(current_user, '批量新增', '查课记录', 0,
-                  f'{inspect_date} 共{added}条', module='academic')
+    inspection_service.log_inspection(
+        current_user, '批量新增', 0, f'{inspect_date} 共{added}条')
     flash(f'已批量录入 {added} 条查课记录', 'success')
     return back
 
@@ -570,13 +496,15 @@ def inspection_delete(rid):
     if not rec:
         abort(404)
     # 与 inspection_edit 一致：受年级与班级范围约束，避免删除范围外记录
-    if not academic_class_is_visible(current_user, rec.grade, rec.class_name):
-        flash('该记录不在你的可见范围内', 'danger')
+    try:
+        # 2026-10-11：校验下沉到 inspection_service（MCP 与网页端共用）
+        rec = inspection_service.delete_record(current_user, rid)
+    except PermissionError as exc:
+        flash(str(exc), 'danger')
         return redirect(url_for('academic.inspection_page'))
-    db.session.delete(rec)
     db.session.commit()
-    log_operation(current_user, '删除', '查课记录', rid,
-                  f'{rec.inspect_date} {rec.teacher_name}', module='academic')
+    inspection_service.log_inspection(
+        current_user, '删除', rid, f'{rec.inspect_date} {rec.teacher_name}')
     flash('查课记录已删除', 'success')
     return redirect(url_for('academic.inspection_page'))
 
@@ -741,84 +669,17 @@ def inspection_mark():
     if not target_date:
         return jsonify({'success': False, 'message': '日期不正确'}), 400
 
-    ug = visible_academic_grades(current_user)
-    class_visible = academic_class_authorizer(current_user)
-    updated = cleared = skipped = 0
-    touched = []
-    for cell in cells[:500]:             # 单次上限：挡住异常/恶意的大批量提交
-        if not isinstance(cell, dict):
-            skipped += 1
-            continue
-        grade = (cell.get('grade') or '').strip()
-        class_name = (cell.get('class_name') or '').strip() or None
-        try:
-            period = int(cell.get('period_number'))
-        except (TypeError, ValueError):
-            period = None
-        if not grade or not period:
-            skipped += 1
-            continue
-        if ug is not None and grade not in ug:
-            skipped += 1
-            continue
-        if not class_visible(grade, class_name):
-            skipped += 1
-            continue
-        result = (cell.get('result') or '').strip()
-        if result and result not in _RESULT_KEYS:
-            skipped += 1
-            continue
-
-        teacher_uid = (cell.get('teacher_uid') or '').strip()
-        teacher_name = (cell.get('teacher_name') or '').strip()
-        subject = (cell.get('subject') or '').strip()
-        entry_id = str(cell.get('entry_id') or '').strip()
-        if entry_id.isdigit():
-            # 教师/学科以课表条目为准（前端只传 entry_id），避免标记与课表对不上
-            from app.models.timetable import ScheduleEntry
-            be = db.session.get(ScheduleEntry, int(entry_id))
-            if be:
-                teacher_uid = be.teacher_uid or teacher_uid
-                teacher_name = be.teacher_name or teacher_name
-                subject = be.subject or subject
-                class_name = be.class_name or class_name
-                period = be.period_number or period
-
-        rec = (InspectionRecord.query
-               .filter_by(inspect_date=target_date, grade=grade,
-                          class_name=class_name, period=period)
-               .order_by(InspectionRecord.id.desc()).first())
-        if not result:
-            if rec:
-                db.session.delete(rec)
-                cleared += 1
-                touched.append({'grade': grade, 'class_name': class_name,
-                                'period_number': period, 'result': ''})
-            continue
-        if rec:
-            rec.result = result
-            rec.teacher_uid = teacher_uid or rec.teacher_uid
-            rec.teacher_name = teacher_name or rec.teacher_name
-            rec.subject = subject or rec.subject
-            rec.inspector_id = current_user.id
-            if 'note' in cell:
-                rec.note = (cell.get('note') or '').strip() or None
-        else:
-            db.session.add(InspectionRecord(
-                inspect_date=target_date, grade=grade, period=period,
-                teacher_uid=teacher_uid or None, teacher_name=teacher_name or None,
-                class_name=class_name, subject=subject or None, result=result,
-                inspector_id=current_user.id,
-                note=(cell.get('note') or '').strip() or None))
-        updated += 1
-        touched.append({'grade': grade, 'class_name': class_name,
-                        'period_number': period, 'result': result,
-                        'label': dict(INSPECTION_RESULTS).get(result, result)})
+    # 2026-10-11：校验与落库下沉到 inspection_service（MCP 与网页端共用）
+    try:
+        updated, cleared, skipped, touched = inspection_service.mark_cells(
+            current_user, target_date, cells)
+    except (ValueError, PermissionError) as exc:
+        return jsonify({'success': False, 'message': str(exc)}), 400
     db.session.commit()
     if updated or cleared:
-        log_operation(current_user, '查课标记', '查课记录', 0,
-                      f'{target_date} 标记 {updated} 格 / 撤销 {cleared} 格',
-                      module='academic')
+        inspection_service.log_inspection(
+            current_user, '查课标记', 0,
+            f'{target_date} 标记 {updated} 格 / 撤销 {cleared} 格')
     return jsonify({'success': True, 'updated': updated, 'cleared': cleared,
                     'skipped': skipped, 'cells': touched,
                     'message': f'已标记 {updated} 格' + (f'，撤销 {cleared} 格' if cleared else '')
@@ -886,24 +747,13 @@ def inspection_notify():
              for c in unchecked if isinstance(c, dict)]
     names = [n for n in names if n]
 
-    uids = _timetable_leaders()
-    if not uids:
-        return jsonify({'success': False,
-                        'message': '没有找到具备「课表管理」权限的领导账号，无法通知'}), 400
-
-    grade_text = f'（{grade}）' if grade else ''
-    miss_text = ('；未查：' + '、'.join(names[:30]) + ('等' if len(names) > 30 else '')) if names else ''
-    title = f'查课提醒：{target_date} 第{period}节{grade_text}有 {len(names) or (expected - checked)} 个班未查'
-    content = (f'{current_user.real_name} 于 {datetime.now().strftime("%Y-%m-%d %H:%M")} 提交查课：'
-               f'{target_date} 第{period}节{grade_text}，应查 {expected} 个班，已查 {checked} 个，'
-               f'未查 {len(names) if names else (expected - checked)} 个{miss_text}。')
-    ok, msg, data = notification_service.notify_users(
-        uids, title, content, category='academic', biz_type='inspection',
-        creator_id=current_user.id, creator_name=current_user.real_name,
-        priority='high')
+    # 2026-10-11：推送逻辑下沉到 inspection_service（MCP 与网页端共用）
+    ok, msg, data = inspection_service.notify_leaders(
+        current_user, target_date, period, grade=grade, expected=expected,
+        checked=checked, unchecked=unchecked)
     if not ok:
         return jsonify({'success': False, 'message': msg}), 400
-    log_operation(current_user, '通知', '查课提醒', 0,
-                  f'{target_date} 第{period}节：通知 {data.get("notified", 0)} 人',
-                  module='academic')
+    inspection_service.log_inspection(
+        current_user, '通知', 0,
+        f'{target_date} 第{period}节：通知 {data.get("notified", 0)} 人')
     return jsonify({'success': True, 'message': msg, 'data': data})

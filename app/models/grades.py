@@ -1,4 +1,4 @@
-# StuLink v1.19.5.0 2026-10-10
+# StuLink v1.19.41.2 2026-10-10
 # 成绩管理与可视化分析系统：数据模型（独立库 grades.db）
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 import json
@@ -120,10 +120,12 @@ def _default_config():
 EXAM_KINDS = ('联考', '本校考', '小测验')
 # 阶段：教学进度节点 —— 用于“上一场同阶段考试”的定位（分层依据）
 EXAM_STAGES = ('期末考', '期中考', '月考', '限时练', '高三一测', '高三二测')
-# 分数口径：本场划线/排名用哪一套
-DEFAULT_SCORE_MODE = 'converted'          # converted=赋分优先 / raw=原始分
+# 分数口径（v1.19.41.2）：**仅作标记**，不参与导入解析/排名/划线口径判断
+# （口径在导入时按数据确定：有赋分进主分，只给原始分时原始分顶上主分）。
+# 允许留空 = 未指定，由导入时的文件决定。
 SCORE_MODES = ('converted', 'raw')
 SCORE_MODE_LABELS = {'converted': '赋分', 'raw': '原始分'}
+SCORE_MODE_AUTO_LABEL = '按导入确定'      # 未指定（score_mode 为空）时的展示名
 
 
 class Exam(db.Model):
@@ -132,7 +134,7 @@ class Exam(db.Model):
     v1.19.0 四段式重构：新增两个维度
       exam_kind  考试性质（联考 / 本校考 / 小测验）
       exam_type  考试阶段（期末考 / 期中考 / 月考 / 限时练 / 高三一测 / 高三二测）
-    以及 score_mode（本场划线、排名、分析用赋分还是原始分）。
+    以及 score_mode（分数口径**标记**——v1.19.41.2 起允许不选；见字段注释）。
     """
     __bind_key__ = 'grades'
     __tablename__ = 'exams'
@@ -142,8 +144,10 @@ class Exam(db.Model):
     exam_type = db.Column(db.String(20))            # 字典 exam_type（阶段：月考/期中/期末/限时练…）
     # v1.19.0 考试性质（字典 exam_kind：联考/本校考/小测验）
     exam_kind = db.Column(db.String(20))
-    # v1.19.0 分数口径：converted=赋分（默认，划线排名用 score）/ raw=原始分
-    score_mode = db.Column(db.String(10), default=DEFAULT_SCORE_MODE)
+    # 分数口径标记：converted=赋分 / raw=原始分 / 空=未指定（默认，导入时按文件确定）
+    # v1.19.41.2 起允许留空。注意它只是"标记"：导入解析、排名、划线都不读它——
+    # exam_scores.score 在导入时已按「有赋分进主分、只给原始分则原始分顶上」定型。
+    score_mode = db.Column(db.String(10), default='')
     grade = db.Column(db.String(10), nullable=False)  # 2024级/2025级…（与字典一致）
     exam_date = db.Column(db.Date, nullable=False)
     term = db.Column(db.String(20))                  # 学年 2025-2026，由日期推导或登记选择
@@ -165,12 +169,12 @@ class Exam(db.Model):
         return (self.exam_type or '').strip()
 
     def score_mode_label(self):
-        """分数口径展示名：赋分 / 原始分"""
-        return SCORE_MODE_LABELS.get(self.score_mode or DEFAULT_SCORE_MODE, '赋分')
+        """分数口径展示名：赋分 / 原始分 / 按导入确定（未指定）
 
-    def uses_converted(self):
-        """本场是否以赋分为准（划线、排名、分析取 score）"""
-        return (self.score_mode or DEFAULT_SCORE_MODE) != 'raw'
+        v1.19.41.2：未指定显示「按导入确定」，不再回落成「赋分」——
+        否则老师没选却被显示成"赋分"，与本场实际口径不符。
+        """
+        return SCORE_MODE_LABELS.get((self.score_mode or '').strip(), SCORE_MODE_AUTO_LABEL)
 
     def title_with_dimensions(self):
         """“2024级·联考·月考·2026-10-10”式完整标识（缺项自动跳过）"""
@@ -277,7 +281,7 @@ class ExamScore(db.Model):
     class_name = db.Column(db.String(10))                   # 班级快照（换班不影响历史）
     # v1.19.0 考号快照（联考等第三方编排的号，第三方未给时为空）
     exam_no = db.Column(db.String(20))
-    # v1.19.5.0 班型快照（强基班/卓越班…）：导入时取自班型设置，使去差均分等分析
+    # v1.19.41.2 班型快照（强基班/卓越班…）：导入时取自班型设置，使去差均分等分析
     # 永远用「考试当时」的班型；此前实时读 ClassProfile，班型一改历史全部失真
     class_type = db.Column(db.String(20))
     direction = db.Column(db.String(4))                     # 物理/历史 快照
@@ -404,7 +408,7 @@ class TeacherSubjectLink(db.Model):
 
 
 class ExamTeacherLink(db.Model):
-    """v1.19.5.0 考试任课快照：考试 × 班级 × 科目的**当时**任课教师
+    """v1.19.41.2 考试任课快照：考试 × 班级 × 科目的**当时**任课教师
 
     为什么需要：TeacherSubjectLink 只存"当前"映射，教师一换（尤其分班后）
     历史考试的教师维度分析会全部错位。本表把每场考试的任课教师映射定格，
@@ -689,4 +693,38 @@ class ExamRoomGroupMap(db.Model):
     __table_args__ = (
         db.UniqueConstraint('group_id', 'lib_id', name='uq_room_group_map'),
         db.Index('idx_room_group_map_lib', 'lib_id'),
+    )
+
+
+class ScoreChangeLog(db.Model):
+    """v1.19.41.2 分数修改记录（改分/删分留痕）
+
+    每次在成绩单改分（含赋分/原始分、标记缺考）都写一条，供全校查询：
+    谁、什么时候、改了哪场考试哪个学生的哪一科、改前改后各是多少、什么动作。
+    只增不改不删（查询页只读）。
+    """
+    __bind_key__ = 'grades'
+    __tablename__ = 'score_change_logs'
+
+    id = db.Column(db.Integer, primary_key=True)
+    exam_id = db.Column(db.Integer, nullable=False)
+    exam_name = db.Column(db.String(100))                  # 快照，考试改名也不影响留痕
+    score_id = db.Column(db.Integer)                       # ExamScore.id（删分后可能已不存在）
+    student_no = db.Column(db.String(20), nullable=False)
+    student_name = db.Column(db.String(50))
+    class_name = db.Column(db.String(10))
+    subject = db.Column(db.String(10), nullable=False)
+    action = db.Column(db.String(10), nullable=False)      # update 修改 / delete 缺考
+    old_score = db.Column(db.Float)
+    new_score = db.Column(db.Float)
+    old_raw = db.Column(db.Float)
+    new_raw = db.Column(db.Float)
+    operator_id = db.Column(db.Integer)
+    operator_name = db.Column(db.String(50))
+    operated_at = db.Column(db.DateTime, default=datetime.now)
+    note = db.Column(db.String(200))
+
+    __table_args__ = (
+        db.Index('idx_scorelog_exam_time', 'exam_id', 'operated_at'),
+        db.Index('idx_scorelog_student', 'exam_id', 'student_no'),
     )

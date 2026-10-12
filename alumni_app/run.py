@@ -26,10 +26,13 @@ def _print_keep_running_notice(url):
 
 
 if __name__ == '__main__':
-    # v1.19.5.0 H-7 P0 修复：debug=True 会开启 Werkzeug 交互式调试器，PIN 可爆破 => RCE
+    # v1.19.41.2 H-7 P0 修复：debug=True 会开启 Werkzeug 交互式调试器，PIN 可爆破 => RCE
     # 默认生产模式；开发时显式传 --dev 才开 debug（且仅限本地）
     debug_mode = '--dev' in sys.argv
+    # 2026-10-12 H-7 收敛：--dev 只绑回环，调试器/源码回溯不再对局域网可达；
+    # 生产模式才对外（与主应用 run.py 的 dev/prod 分流口径一致）
+    host = '127.0.0.1' if debug_mode else '0.0.0.0'
     print('往届生查询系统已启动' + (' (开发模式 - 仅限本地)' if debug_mode else ' (生产模式)'))
-    print('请在浏览器访问: http://localhost:5001')
-    _print_keep_running_notice('http://localhost:5001')
-    app.run(debug=debug_mode, host='0.0.0.0', port=5001, use_reloader=False)
+    print(f'请在浏览器访问: http://{host}:5001')
+    _print_keep_running_notice(f'http://{host}:5001')
+    app.run(debug=debug_mode, host=host, port=5001, use_reloader=False)

@@ -513,6 +513,16 @@ def classify_affair_headers(headers):
     return out
 
 
+# 座位信号：带这些列的表可当「座位表/桌签」用，用来推断每间考场的容量（最大座号）
+_SEAT_FIELDS = ('room', 'seat', 'room_seat')
+
+
+def has_seat_cols(headers):
+    """这张表带「考场 / 座号」信息吗（→ 可作为座位表推断考场容量）"""
+    af = classify_affair_headers(headers)
+    return any(k in af for k in _SEAT_FIELDS)
+
+
 def _clean_bad(v):
     """过滤 Excel 错误值/空（#N/A 等）"""
     t = _s(v)

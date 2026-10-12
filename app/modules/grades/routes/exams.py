@@ -1,4 +1,4 @@
-# StuLink v1.19.5.0 2026-10-10
+# StuLink v1.19.41.2 2026-10-10
 # 成绩管理：考试管理 + 成绩导入向导路由
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 import io
@@ -13,11 +13,11 @@ from flask import (Blueprint, render_template, request, jsonify, flash,
 from flask_login import login_required, current_user
 from app.extensions import db
 from app.models.grades import (Exam, ExamScore, SUBJECTS, TOTAL_SUBJECT,
-                              ExamAffair, AffairRoom, AffairStudent,
-                              ExamBand)  # ExamBand 为 2026-10-11 修复 L111 未定义引用所补
+                              ExamAffair, AffairRoom, AffairStudent, ScoreChangeLog)
 from app.modules.grades import bp
 from app.modules.grades.services import import_service, store_service, ranking, tab_service
-from app.modules.grades.services.exam_guard import assert_exam_visible
+from app.modules.grades.services.exam_guard import (assert_exam_visible,
+                                                   assert_grade_visible)
 from app.modules.grades.services.import_service import ParseError
 from app.modules.grades.utils import term_of_date, invalidate_exam_cache
 from app.utils.decorators import perm_required
@@ -54,9 +54,16 @@ def _exam_date_from(value):
 @perm_required('grades.edit')
 def exams_list():
     grade = request.args.get('grade', '')
-    q = Exam.query
+    # 2026-10-12 P1：年级可见性校验 + 默认只列可见年级（原先罗列全部年级，
+    # 2025 级年级长不传 grade 即可枚举 2024 级考试名称/人数/考务状态）。
     if grade:
-        q = q.filter_by(grade=grade)
+        assert_grade_visible(grade)
+        allowed_grades = {grade}
+        q = Exam.query.filter_by(grade=grade)
+    else:
+        allowed_grades = set(_grade_options() or [])
+        q = (Exam.query.filter(Exam.grade.in_(allowed_grades))
+             if allowed_grades else Exam.query.filter(Exam.id == -1))
     exams = q.order_by(Exam.exam_date.desc(), Exam.id.desc()).all()
     counts = {}
     # 修复：人数统计改 GROUP BY 聚合（原先把全部总分行载入内存逐条计数）
@@ -67,13 +74,21 @@ def exams_list():
                     .group_by(ExamScore.exam_id).all())
         for eid, cnt in rows_cnt:
             counts[eid] = cnt
-    # v1.19.5.0：孤儿考务批次兜底（exam_id 为空，或指向已删除的考试）
+    # v1.19.41.2：孤儿考务批次兜底（exam_id 为空，或指向已删除的考试）
     # 这类批次从考试列表无法进入，以前只能直连 /grades/affairs 才能看到，现在底部统一列出
     live_exam_ids = {e.id for e in Exam.query.with_entities(Exam.id).all()}
     orphan_affairs = []
     for a in ExamAffair.query.order_by(ExamAffair.id.desc()).all():
         if a.exam_id is None or a.exam_id not in live_exam_ids:
-            if grade and a.grade != grade:
+            # 2026-10-12 P1：孤儿批次同样按可见年级收敛；
+            # 无年级归属（grade 为空）的批次仅管理员可见。
+            if a.grade is None:
+                if current_user.role != 'admin':
+                    continue
+            elif grade:
+                if a.grade != grade:
+                    continue
+            elif a.grade not in allowed_grades:
                 continue
             orphan_affairs.append({
                 'a': a,
@@ -118,16 +133,13 @@ def _list_steps_map(exams):
 
 
 def _exam_form_ctx(**kw):
-    """新建考试表单的公共上下文（两维下拉 + 分数口径）"""
-    from app.models.grades import EXAM_KINDS, EXAM_STAGES, DEFAULT_SCORE_MODE
+    """新建考试表单的公共上下文（年级 / 性质 / 阶段）"""
+    from app.models.grades import EXAM_KINDS, EXAM_STAGES
     ctx = {
         'grade_options': _grade_options(),
         'kind_options': _dict_values('exam_kind', EXAM_KINDS),
         'stage_options': _dict_values('exam_type', EXAM_STAGES),
-        'mode_options': [('converted', '赋分（划线/排名按赋分）'),
-                         ('raw', '原始分（无赋分时选这个）')],
         'default_date': date.today().isoformat(),
-        'default_mode': DEFAULT_SCORE_MODE,
     }
     ctx.update(kw)
     return ctx
@@ -143,9 +155,8 @@ def exam_new():
         name = (request.form.get('name') or '').strip()
         exam_kind = (request.form.get('exam_kind') or '').strip()
         exam_type = (request.form.get('exam_type') or '').strip()
-        score_mode = (request.form.get('score_mode') or '').strip() or 'converted'
-        if score_mode not in ('converted', 'raw'):
-            score_mode = 'converted'
+        # v1.19.41.2：不再有「分数口径」表单字段（口径在导入时按文件确定），
+        # 新考试 score_mode 一律留空（未指定），展示为「按导入确定」
         if not name:
             # 名称留空 → 默认「年级 + 日期」（两维度已单独存列，不塞进名称）
             name = f'{grade}{exam_date.isoformat()}'
@@ -153,7 +164,10 @@ def exam_new():
             flash('请选择年级并填写考试名称', 'danger')
             return render_template('grades/exam_form.html', **_exam_form_ctx(
                 grade=grade, exam_date=exam_date.isoformat(), name=name,
-                exam_kind=exam_kind, exam_type=exam_type, score_mode=score_mode))
+                exam_kind=exam_kind, exam_type=exam_type))
+        # 2026-10-12 P1：目标年级可见性校验（防止为未授权年级创建考试后导入成绩，
+        # 构成跨年级写入；与 H-4 的 assert_grade_visible 同一入口）
+        assert_grade_visible(grade)
         dup = Exam.query.filter_by(grade=grade, name=name).first()
         if dup:
             # 修复：同名考试由“仅警告仍创建”改为阻断——避免成绩分散到两场同名考试混淆统计
@@ -161,10 +175,10 @@ def exam_new():
                   'danger')
             return render_template('grades/exam_form.html', **_exam_form_ctx(
                 grade=grade, exam_date=exam_date.isoformat(), name='',
-                exam_kind=exam_kind, exam_type=exam_type, score_mode=score_mode))
+                exam_kind=exam_kind, exam_type=exam_type))
         exam = Exam(grade=grade, name=name, exam_date=exam_date,
                     exam_kind=exam_kind, exam_type=exam_type or '其他',
-                    score_mode=score_mode, term=term_of_date(exam_date),
+                    term=term_of_date(exam_date),
                     operator_id=current_user.id)
         db.session.add(exam)
         db.session.commit()
@@ -179,8 +193,7 @@ def exam_new():
     return render_template('grades/exam_form.html', **_exam_form_ctx(
         grade='', exam_date=date.today().isoformat(), name='',
         exam_kind=(kinds[0] if kinds else ''),
-        exam_type=('月考' if '月考' in stages else (stages[0] if stages else '')),
-        score_mode='converted'))
+        exam_type=('月考' if '月考' in stages else (stages[0] if stages else ''))))
 
 
 # ==================== 考试详情 / 成绩浏览 / 修正 / 重算 / 删除 ====================
@@ -203,20 +216,51 @@ def _exam_classes(exam_id):
     return sorted({r[0] for r in rows})
 
 
-def _exam_page_rows(exam_id, page, size, class_name=None):
+# v1.19.41.2 成绩单表头可排序列 → 总分行（每生一行）字段名；
+# 各科成绩用 's:科目名' 前缀（见 _exam_page_rows），不在此表内。
+_SORT_COLS = {
+    'no': 'student_no', 'name': 'student_name', 'exam_no': 'exam_no',
+    'cls': 'class_name', 'dir': 'direction', 'sel': 'subject_selection',
+    'total': 'score', 'rank_dir': 'rank_dir', 'rank_class': 'rank_class',
+    'move': 'move_rank',
+}
+
+
+def _sort_args(args):
+    """解析 ?sort= / ?order=（白名单校验，非法一律回默认次序）"""
+    key = (args.get('sort') or '').strip()
+    order = 'asc' if (args.get('order') or '').strip().lower() == 'asc' else 'desc'
+    if key.startswith('s:'):
+        if not key[2:].strip() or key[2:].strip() == TOTAL_SUBJECT:
+            key = ''
+    elif key not in _SORT_COLS:
+        key = ''
+    return (key, order) if key else ('', 'desc')
+
+
+def _exam_page_rows(exam_id, page, size, class_name=None, direction=None,
+                    sort_key='', order='desc'):
     """服务端分页：仅查询当前页的学生成绩，避免整场 8000 人一次性载入。
 
     返回 (students, page, total_pages, total)：
       - 先用「总分行」做分页元数据（每生 1 行，远小于全部科目行），
-        按 (班级, 方向排名) 排序并 LIMIT/OFFSET 取出本页学号；
+        按「方向 → 总分名次」排序并 LIMIT/OFFSET 取出本页学号；
       - 再仅查本页学号的全部科目成绩行（约 50×7=350 行）；
       - 学籍状态一次性 IN 查询（1 次，而非逐批 10 次）。
 
     class_name（v1.19.0）：按班级查看成绩单，只统计/展示该班学生（None=全部）。
+    direction（v1.19.41.2）：按方向查看（物理/历史），取**总分行**上的方向快照（None=全部）。
+    sort_key / order（v1.19.41.2）：表头排序。sort_key 取 _SORT_COLS 的键，
+        或 's:科目名' 表示按该科成绩排；order 为 'asc'/'desc'（空 sort_key = 默认次序）。
+        排序必须在**服务端**做：页面只加载当前页，前端排序只会排到本页 50 人。
+        排序状态只存在于 URL 参数里（v1.19.41.2 确认），服务端不保存"当前排序"，
+        因此**不会影响其他用户**；不传参数时回到「方向 → 总分名次」默认榜。
     """
     q = ExamScore.query.filter_by(exam_id=exam_id, subject=TOTAL_SUBJECT)
     if class_name:
         q = q.filter(ExamScore.class_name == class_name)
+    if direction:
+        q = q.filter(ExamScore.direction == direction)
     total = q.count()
     if total == 0:
         return [], 1, 0, 0
@@ -225,9 +269,37 @@ def _exam_page_rows(exam_id, page, size, class_name=None):
     total_pages = (total + size - 1) // size
     if page > total_pages:
         page = total_pages
-    meta = (q.order_by(ExamScore.class_name,
-                       db.func.coalesce(ExamScore.rank_dir, 99999))
-            .limit(size).offset((page - 1) * size).all())
+
+    # ---- 排序键解析（只认白名单/本场科目，避免拼接注入） ----
+    order_col = None
+    if sort_key.startswith('s:'):
+        subject = sort_key[2:].strip()
+        if subject and subject != TOTAL_SUBJECT:
+            sub = (db.session.query(ExamScore.student_no.label('sno'),
+                                    ExamScore.score.label('s_score'))
+                   .filter(ExamScore.exam_id == exam_id, ExamScore.subject == subject)
+                   .subquery())
+            q = q.outerjoin(sub, sub.c.sno == ExamScore.student_no)
+            order_col = sub.c.s_score
+    elif sort_key in _SORT_COLS:
+        order_col = getattr(ExamScore, _SORT_COLS[sort_key])
+
+    if order_col is not None:
+        # 空值（缺考/未考）恒排最后：SQLite 里 NULL 最小，DESC 天然最后，ASC 用 case 兜底；
+        # 末尾再按学号稳定次序，保证翻页不跳行/不重复
+        seqq = [db.case((order_col.is_(None), 1), else_=0),
+                order_col.asc() if order == 'asc' else order_col.desc(),
+                ExamScore.student_no]
+        meta = q.order_by(*seqq).limit(size).offset((page - 1) * size).all()
+    else:
+        # 默认次序（v1.19.41.2）：按**总分名次**排列 —— 先分方向（历史在前、物理在后），
+        # 方向内按方向排（= 该方向的总分名次）升序，缺考（无方向排）排在本方向最后，
+        # 末尾按学号定序保证翻页稳定。注意：不按班级分组（老师要看的是名次榜）。
+        dir_seq = db.case((ExamScore.direction == '历史', 0),
+                          (ExamScore.direction == '物理', 1), else_=2)
+        meta = (q.order_by(dir_seq, db.func.coalesce(ExamScore.rank_dir, 99999),
+                           ExamScore.student_no)
+                .limit(size).offset((page - 1) * size).all())
     nos = [r.student_no for r in meta]
     if not nos:
         return [], page, total_pages, total
@@ -336,12 +408,20 @@ def exam_detail(exam_id):
     page = _safe_int(request.args.get('page'), 1)
     size = _safe_int(request.args.get('size'), 50)
     # v1.19.0：成绩单支持按班级查看（cls=班级名，空/非法=全部）
+    # v1.19.41.2：再支持按方向查看（dir=物理/历史）；两者互斥，传 cls 时忽略 dir
     classes = _exam_classes(exam_id)
     cur_class = (request.args.get('cls') or '').strip()
     if cur_class not in classes:
         cur_class = ''
+    cur_dir = (request.args.get('dir') or '').strip()
+    if cur_dir not in ('物理', '历史'):
+        cur_dir = ''
+    if cur_class:
+        cur_dir = ''
+    cur_sort, cur_order = _sort_args(request.args)      # v1.19.41.2 表头排序
     students, page, total_pages, total = _exam_page_rows(
-        exam_id, page, size, class_name=cur_class or None)
+        exam_id, page, size, class_name=cur_class or None, direction=cur_dir or None,
+        sort_key=cur_sort, order=cur_order)
     info = None
     if exam.import_info:
         try:
@@ -352,7 +432,10 @@ def exam_detail(exam_id):
     return render_template('grades/exam_detail.html', exam=exam, students=students,
                            subjects=SUBJECTS, status_label=EXAM_STATUS_LABEL,
                            import_info=info, steps=steps, next_step=next_step,
-                           classes=classes, cur_class=cur_class,
+                           full_marks=exam.full_marks(),
+                           can_edit_scores=current_user.has_perm('grades.score_edit'),
+                           classes=classes, cur_class=cur_class, cur_dir=cur_dir,
+                           cur_sort=cur_sort, cur_order=cur_order,
                            page=page, total_pages=total_pages, total=total, size=size)
 
 
@@ -365,10 +448,16 @@ def exam_scores_page(exam_id):
     page = _safe_int(request.args.get('page'), 1)
     size = _safe_int(request.args.get('size'), 50)
     cur_class = (request.args.get('cls') or '').strip()   # v1.19.0 按班级查看
+    cur_dir = (request.args.get('dir') or '').strip()     # v1.19.15.0 按方向查看
+    if cur_dir not in ('物理', '历史'):
+        cur_dir = ''
+    cur_sort, cur_order = _sort_args(request.args)        # v1.19.41.2 表头排序
     students, _page, _total_pages, _total = _exam_page_rows(
-        exam_id, page, size, class_name=cur_class or None)
+        exam_id, page, size, class_name=cur_class or None, direction=cur_dir or None,
+        sort_key=cur_sort, order=cur_order)
     return render_template('grades/exam_detail_rows.html',
-                           students=students, subjects=SUBJECTS)
+                           students=students, subjects=SUBJECTS,
+                           can_edit_scores=current_user.has_perm('grades.score_edit'))
 
 
 def _safe_int(val, default):
@@ -403,63 +492,163 @@ def exam_rename(exam_id):
     return jsonify(success=True, message=f'考试名称已更新为「{name}」')
 
 
+def _recalc_after_edit(exam_id):
+    """改分后立即重算整场排名并把状态复位（不再留「待重算」）。返回重算行数。"""
+    n = ranking.recalc_exam(exam_id)
+    exam = Exam.query.get(exam_id)
+    if exam is not None:
+        exam.status = 'imported'
+    return n
+
+
+def _verify_edit_password():
+    """改分二次确认：核对当前登录账号的密码。返回错误文案；通过返回 None。"""
+    pwd = request.form.get('password') or ''
+    if not pwd:
+        return '请输入当前登录账号的密码以确认本次修改'
+    if not current_user.check_password(pwd):
+        return '密码不正确，本次修改未生效'
+    return None
+
+
+def _score_edit_reply(exam_id, success, message):
+    """改分接口返回：AJAX → JSON（前端好提示）；非 AJAX → flash + 跳回成绩单"""
+    if request.headers.get('X-Requested-With') == 'XMLHttpRequest':
+        return jsonify(success=success, message=message)
+    flash(message, 'success' if success else 'danger')
+    return redirect(url_for('grades.exam_detail', exam_id=exam_id))
+
+
+def _log_score_change(exam, row, action, old_score, new_score, old_raw, new_raw):
+    """写一条「分数修改记录」（改分/标记缺考都留痕，供全校查询）"""
+    db.session.add(ScoreChangeLog(
+        exam_id=exam.id, exam_name=exam.name, score_id=row.id,
+        student_no=row.student_no, student_name=row.student_name,
+        class_name=row.class_name, subject=row.subject, action=action,
+        old_score=old_score, new_score=new_score,
+        old_raw=old_raw, new_raw=new_raw,
+        operator_id=current_user.id,
+        operator_name=current_user.real_name or current_user.username))
+
+
 @bp.route('/exams/<int:exam_id>/score/<int:score_id>', methods=['POST'])
 @login_required
 @perm_required('grades.edit')
+@perm_required('grades.score_edit')
 def score_update(exam_id, score_id):
-    assert_exam_visible(exam_id)          # H-4
+    """单科改分（v1.19.41.2）
+
+    · 赋分（score）与原始分（raw_score）都可改，提交哪个改哪个；
+    · 两者都提交为空 = 该科缺考（删除该科）；
+    · 需要输入**当前登录账号的密码**二次确认；
+    · 每次修改写「分数修改记录」（全校可查）；
+    · 改完自动重算整场排名。
+    """
+    exam = assert_exam_visible(exam_id)          # H-4
     row = ExamScore.query.filter_by(id=score_id, exam_id=exam_id).first_or_404()
+    # 总分由各科自动汇总，禁止直接改（避免总分与单科不一致）
+    if row.subject == TOTAL_SUBJECT:
+        return _score_edit_reply(exam_id, False,
+                                 '总分由各科成绩自动汇总，不能直接修改，请修改对应的单科成绩')
+    pwd_err = _verify_edit_password()
+    if pwd_err:
+        return _score_edit_reply(exam_id, False, pwd_err)
+
+    limit = exam.full_marks().get(row.subject, 100)
+    changed = {}
     try:
-        val = (request.form.get('score') or '').strip()
-        if val == '':
-            # 修复：空分数提交直接按缺考删除（与提示语一致），并联动重算总分行
-            no = row.student_no
-            is_total = row.subject == TOTAL_SUBJECT
-            db.session.delete(row)
-            if not is_total:
-                store_service.refresh_student_total(Exam.query.get(exam_id), no)
-            _mark_dirty(exam_id)
-            db.session.commit()
-            invalidate_exam_cache(exam_id)
-            flash('该科成绩已删除（视为缺考），请点击“重新计算排名”', 'warning')
-            return redirect(url_for('grades.exam_detail', exam_id=exam_id))
-        score = float(val)
-        fm = Exam.query.get(exam_id).full_marks()
-        limit = fm.get(row.subject, 100)
-        if score < 0 or score > limit + 0.5:
-            flash(f'分数 {score} 超出范围(0~{limit})', 'danger')
-            return redirect(url_for('grades.exam_detail', exam_id=exam_id))
+        for field, label in (('score', '赋分'), ('raw_score', '原始分')):
+            if field not in request.form:
+                continue
+            raw = (request.form.get(field) or '').strip()
+            if raw == '':
+                changed[field] = None
+                continue
+            val = float(raw)
+            if val < 0 or val > limit + 0.5:
+                return _score_edit_reply(exam_id, False, f'{label} {val} 超出范围(0~{limit})')
+            changed[field] = val
     except ValueError:
-        flash('分数格式不正确', 'danger')
-        return redirect(url_for('grades.exam_detail', exam_id=exam_id))
-    row.score = score
-    # 修复：单科改分后同步重算该生总分行（直接改总分行时不重算，保留手工修正值）
-    if row.subject != TOTAL_SUBJECT:
-        store_service.refresh_student_total(Exam.query.get(exam_id), row.student_no)
-    _mark_dirty(exam_id)
+        return _score_edit_reply(exam_id, False, '分数格式不正确')
+
+    old_score, old_raw = row.score, row.raw_score
+
+    # 赋分与原始分都清空 → 视为缺考，删除该科
+    if changed.get('score', 1) is None and changed.get('raw_score', 1) is None:
+        _log_score_change(exam, row, 'delete', old_score, None, old_raw, None)
+        no = row.student_no
+        db.session.delete(row)
+        store_service.refresh_student_total(exam, no)
+        n = _recalc_after_edit(exam_id)
+        db.session.commit()
+        invalidate_exam_cache(exam_id)
+        tab_service.clear_exam_cache(exam_id)
+        return _score_edit_reply(exam_id, True,
+                                 f'该科已标记缺考，排名已自动重算（{n} 条），并已记入分数修改记录')
+
+    for field, val in changed.items():
+        setattr(row, field, val)
+    store_service.refresh_student_total(exam, row.student_no)   # 总分 = 各科之和
+    n = _recalc_after_edit(exam_id)
+    _log_score_change(exam, row, 'update', old_score, row.score, old_raw, row.raw_score)
     db.session.commit()
     invalidate_exam_cache(exam_id)
-    flash('成绩已修改，请点击“重新计算排名”', 'warning')
-    return redirect(url_for('grades.exam_detail', exam_id=exam_id))
+    tab_service.clear_exam_cache(exam_id)
+    log_operation(current_user, '修改', '成绩', exam_id,
+                  f'{row.student_name or row.student_no} {row.subject} 改分（排名已重算）',
+                  module='grades')
+    return _score_edit_reply(exam_id, True,
+                             f'成绩已修改，排名已自动重算（{n} 条），并已记入分数修改记录')
 
 
 @bp.route('/exams/<int:exam_id>/score/<int:score_id>/delete', methods=['POST'])
 @login_required
 @perm_required('grades.edit')
+@perm_required('grades.score_edit')
 def score_delete(exam_id, score_id):
-    assert_exam_visible(exam_id)          # H-4
+    exam = assert_exam_visible(exam_id)          # H-4
     row = ExamScore.query.filter_by(id=score_id, exam_id=exam_id).first_or_404()
+    # 总分不可单独删除（它随各科自动汇总）
+    if row.subject == TOTAL_SUBJECT:
+        return _score_edit_reply(exam_id, False,
+                                 '总分由各科成绩自动汇总，不能直接操作，请修改对应的单科成绩')
+    pwd_err = _verify_edit_password()
+    if pwd_err:
+        return _score_edit_reply(exam_id, False, pwd_err)
+    _log_score_change(exam, row, 'delete', row.score, None, row.raw_score, None)
     no = row.student_no
-    is_total = row.subject == TOTAL_SUBJECT
     db.session.delete(row)
-    # 修复：删除单科（缺考）后同步重算该生总分行（删除总分行本身时不重算）
-    if not is_total:
-        store_service.refresh_student_total(Exam.query.get(exam_id), no)
-    _mark_dirty(exam_id)
+    store_service.refresh_student_total(exam, no)
+    n = _recalc_after_edit(exam_id)
     db.session.commit()
     invalidate_exam_cache(exam_id)
-    flash('该科成绩已删除（视为缺考），请点击“重新计算排名”', 'warning')
-    return redirect(url_for('grades.exam_detail', exam_id=exam_id))
+    tab_service.clear_exam_cache(exam_id)
+    return _score_edit_reply(exam_id, True,
+                             f'该科已标记缺考，排名已自动重算（{n} 条），并已记入分数修改记录')
+
+
+@bp.route('/score-changes')
+@login_required
+@perm_required('grades.view')
+def score_changes():
+    """分数修改记录（v1.19.41.2）：**只看某一场考试**
+
+    该记录属于单场考试的数据，入口只有一处：成绩单页右上角「分数修改记录」按钮
+    （带 ?exam=<id>）。不再提供跨考试视图，也不在左侧栏出现；缺 ?exam= 时回考试列表。
+
+    2026-10-12 P0-3：原先只有 @login_required，任意登录账号（宿管/通知-only）
+    传 ?exam=<任意id> 即可读任意年级考试的改分审计（改分前后值/操作人）。
+    现补 @perm_required('grades.view') + assert_exam_visible（越界 403）。
+    """
+    raw = (request.args.get('exam') or '').strip()
+    if not raw.isdigit():
+        flash('请从「考试详情 → 分数修改记录」进入', 'warning')
+        return redirect(url_for('grades.exams_list'))
+    exam = assert_exam_visible(int(raw))
+    logs = (ScoreChangeLog.query.filter_by(exam_id=exam.id)
+            .order_by(ScoreChangeLog.operated_at.desc(), ScoreChangeLog.id.desc())
+            .limit(3000).all())
+    return render_template('grades/score_changes.html', exam=exam, logs=logs)
 
 
 @bp.route('/exams/<int:exam_id>/recalc', methods=['POST'])
@@ -510,7 +699,7 @@ def exam_delete(exam_id):
     n_scores = ExamScore.query.filter_by(exam_id=exam_id).delete()
     n_bands = ExamBand.query.filter_by(exam_id=exam_id).delete()
     n_ai = AiReport.query.filter_by(exam_id=exam_id).delete()
-    # v1.19.5.0：级联删除本考试的考务批次（含其考场与名单），避免产生孤儿批次
+    # v1.19.41.2：级联删除本考试的考务批次（含其考场与名单），避免产生孤儿批次
     # 旧逻辑只删考试，导致 affair 的 exam_id 指向已删考试，从考试列表无法再进入
     from app.modules.grades.routes.exam_affairs import delete_affair_cascade
     from app.models.grades import ExamAffair
@@ -531,12 +720,6 @@ def exam_delete(exam_id):
         return jsonify(success=True, message=msg)
     flash(f'考试「{exam_name}」及全部成绩已删除', 'success')
     return redirect(url_for('grades.exams_list'))
-
-
-def _mark_dirty(exam_id):
-    exam = Exam.query.get(exam_id)
-    if exam and exam.status == 'imported':
-        exam.status = 'dirty'
 
 
 # ==================== 成绩导入向导 ====================
@@ -643,7 +826,7 @@ def exam_import_confirm(exam_id):
         summary = store_service.apply_import(exam, parsed, mode=mode,
                                              remove_missing=remove_missing)
         ranking.recalc_exam(exam_id)
-        # v1.19.5.0 任课快照：把本次导入时的任课教师映射定格到本场考试（教师维度分析读它，
+        # v1.19.41.2 任课快照：把本次导入时的任课教师映射定格到本场考试（教师维度分析读它，
         # 以后教师调整/重新分班都不会把历史成绩归到新教师名下）
         from app.modules.grades.services import teacher_snapshot_service as tss
         n_tch = tss.snapshot_exam(exam, source='import')

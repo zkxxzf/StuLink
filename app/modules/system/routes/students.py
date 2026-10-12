@@ -29,6 +29,18 @@ logger = logging.getLogger(__name__)
 bp = Blueprint('students', __name__, url_prefix='/students')
 
 
+def _student_in_scope(student):
+    """单个学生是否对当前用户可见（H-2 唯一口径）。
+
+    2026-10-12 审计 P1：detail/edit/transfer 原先各自内联
+    `role == 'homeroom_teacher' / 'grade_leader' / not in ('admin', ...)`，
+    既漏用户级数据范围，又把 staff 系（教务主任等，scope='school'）误拦。
+    统一收敛到 apply_student_scope（与学生列表/搜索/导出同源）。
+    """
+    return (apply_student_scope(Student.query)
+            .filter(Student.id == student.id).first() is not None)
+
+
 @bp.route('/export', methods=['GET', 'POST'])
 @perm_required('students.export')   # H-2：此前只有 @login_required
 def export_students():
@@ -118,7 +130,7 @@ def list_students():
                    .filter(Student.graduation_school.isnot(None), Student.graduation_school != '')
                    .distinct().order_by(Student.graduation_school).all()
                    if s[0]]
-    # v1.19.5.0 调班记录：当前页学生的班级变更次数（列表「调班」列用）
+    # v1.19.41.2 调班记录：当前页学生的班级变更次数（列表「调班」列用）
     change_counts = class_change_counts([s.id for s in students])
     return render_template('system/students/list.html', 
                          students=students, 
@@ -142,7 +154,7 @@ def list_students():
 @bp.route('/class-changes')
 @perm_required('students.view')
 def class_changes():
-    """v1.19.5.0 调班记录总览：入校分班/重新分班/个别调班/修正班级
+    """v1.19.41.2 调班记录总览：入校分班/重新分班/个别调班/修正班级
 
     按当前用户数据范围过滤（apply_student_scope），支持年级/班级/类型/日期/关键字筛选。
     """
@@ -217,7 +229,7 @@ def create():
         db.session.add(student)
         db.session.commit()
         log_operation(current_user, '创建', '学生', student.id, f'{student.name} {student.grade}{student.class_name}')
-        # v1.19.5.0 调班记录：新增学生 = 入校分班（含班型·方向）
+        # v1.19.41.2 调班记录：新增学生 = 入校分班（含班型·方向）
         try:
             if student.class_name:
                 write_change_log('enroll', [{'id': student.id,
@@ -242,22 +254,15 @@ def create():
 def detail(id):
     student = Student.query.get_or_404(id)
     # 权限控制：宿管教师不能查看学生隐私数据
-    # 仅允许：管理员、班主任(仅本班)、年级长(仅本年级)
     if current_user.role == 'dorm_manager':
         flash('无权查看学生详细信息', 'danger')
         return redirect(url_for('students.list_students'))
-    if current_user.role == 'homeroom_teacher':
-        if student.grade != current_user.grade or student.class_name != current_user.class_name:
-            flash('无权查看该学生信息', 'danger')
-            return redirect(url_for('students.list_students'))
-    elif current_user.role == 'grade_leader':
-        if student.grade != current_user.grade:
-            flash('无权查看该年级学生信息', 'danger')
-            return redirect(url_for('students.list_students'))
-    elif current_user.role not in ('admin', 'school_viewer'):
-        flash('无权查看学生详细信息', 'danger')
+    # 2026-10-12 P1：数据范围统一走 apply_student_scope（收敛原 4 分支内联判断；
+    # 原判断漏用户级范围、误拦 staff 系校级账号）
+    if not _student_in_scope(student):
+        flash('无权查看该学生信息', 'danger')
         return redirect(url_for('students.list_students'))
-    # v1.19.5.0 变更记录：调班 / 转科 / 转出 / 学籍变更 / 毕业 全量（调班记录页与详情页同源）
+    # v1.19.41.2 变更记录：调班 / 转科 / 转出 / 学籍变更 / 毕业 全量（调班记录页与详情页同源）
     change_logs = student_change_logs(student.id)
     return render_template('system/students/detail.html', student=student, change_logs=change_logs)
 
@@ -266,22 +271,15 @@ def detail(id):
 @perm_required('students.edit')
 def edit(id):
     student = Student.query.get_or_404(id)
-    # 权限控制：检查用户是否有权限编辑该学生
-    if current_user.role == 'homeroom_teacher':
-        if student.grade != current_user.grade or student.class_name != current_user.class_name:
-            flash('无权编辑该学生', 'danger')
-            return redirect(url_for('students.list_students'))
-    elif current_user.role == 'grade_leader':
-        if student.grade != current_user.grade:
-            flash('无权编辑该年级学生', 'danger')
-            return redirect(url_for('students.list_students'))
-    elif current_user.role not in ('admin',):
-        flash('无权编辑学生', 'danger')
+    # 2026-10-12 P1：编辑权限同样收敛到 apply_student_scope（原内联把教务主任等
+    # staff 系账号误拦；任课教师按任课年级放行，与列表口径一致）
+    if not _student_in_scope(student):
+        flash('无权编辑该学生', 'danger')
         return redirect(url_for('students.list_students'))
     form = StudentForm(obj=student)
-    # v1.19.5.0 选科/方向留痕：旧值需在填充前取
+    # v1.19.41.2 选科/方向留痕：旧值需在填充前取
     _old_sel = (student.subject_selection or '')
-    # v1.19.5.0 学籍驱动班级联动：旧学籍与旧位置需在填充前取
+    # v1.19.41.2 学籍驱动班级联动：旧学籍与旧位置需在填充前取
     _old_status = (student.enrollment_status or '').strip()
     _old_loc = student_location_desc(student)
     if form.validate_on_submit():
@@ -312,7 +310,7 @@ def edit(id):
                 return render_template('system/students/form.html', form=form, title='编辑学生')
         
         _populate_student_for_edit(student, form)
-        # v1.19.5.0 学籍驱动的班级自动联动（用户口径）：
+        # v1.19.41.2 学籍驱动的班级自动联动（用户口径）：
         #   学籍已转出 → 班级自动置「已转出」；在籍不在校 → 班级自动置「不分班」
         _new_status = (student.enrollment_status or '').strip()
         _auto_kind = _auto_desc = None
@@ -328,7 +326,7 @@ def edit(id):
         db.session.commit()
         log_operation(current_user, '更新', '学生', student.id, f'{student.name} {student.grade}{student.class_name}')
         # 注：年级/班级在本页不可改（never_update_fields），调班请走「调班」弹窗 /students/<id>/transfer
-        # v1.19.5.0 变更留痕：① 学籍情况变更 ② 学籍驱动的班级归置 ③ 选科/方向变更
+        # v1.19.41.2 变更留痕：① 学籍情况变更 ② 学籍驱动的班级归置 ③ 选科/方向变更
         _logs = []
         if _new_status != _old_status:
             _logs.append(('enrollment', _old_status or '（空）', _new_status,
@@ -365,7 +363,7 @@ def edit(id):
                                student.id, _t, _e)
         flash('学生信息已更新', 'success')
         return redirect(url_for('students.detail', id=student.id))
-    # v1.19.5.0 编辑页也展示变更记录（调班/转科/转出/学籍变更），避免打开编辑页看不到历史
+    # v1.19.41.2 编辑页也展示变更记录（调班/转科/转出/学籍变更），避免打开编辑页看不到历史
     return render_template('system/students/form.html', form=form, title='编辑学生',
                            student=student, change_logs=student_change_logs(student.id))
 
@@ -537,15 +535,8 @@ def batch_edit_search():
     bed_number = data.get('bed_number', '')
     subject_selection = data.get('subject_selection', '')
 
-    # 班主任只能改自己班
-    if current_user.role == 'homeroom_teacher':
-        students = Student.query.filter(
-            Student.id.in_(ids),
-            Student.grade == current_user.grade,
-            Student.class_name == current_user.class_name
-        ).all()
-    else:
-        students = Student.query.filter(Student.id.in_(ids)).all()
+    # 2026-10-12 P1：批量修改同样按数据范围收敛（原 else 分支放行全部 id）
+    students = apply_student_scope(Student.query).filter(Student.id.in_(ids)).all()
 
     if not students:
         return jsonify({'success': False, 'message': '无匹配学生或无权限'})
@@ -966,7 +957,7 @@ def import_students():
                     )
                     db.session.add(acc)
             db.session.commit()
-            # v1.19.5.0 调班记录：导入新生 = 入校分班（逐人写入带班级）
+            # v1.19.41.2 调班记录：导入新生 = 入校分班（逐人写入带班级）
             try:
                 for _st, _acc in students_to_add:
                     if _st.class_name:
@@ -1012,7 +1003,7 @@ def import_students():
                     )
                     db.session.add(acc)
             db.session.commit()
-            # v1.19.5.0 调班记录：导入新生 = 入校分班（逐人写入带班级）
+            # v1.19.41.2 调班记录：导入新生 = 入校分班（逐人写入带班级）
             try:
                 for _st, _acc in students_to_add:
                     if _st.class_name:
@@ -1111,17 +1102,9 @@ def batch_delete():
 def transfer(id):
     """单个学生调班调年级"""
     student = Student.query.get_or_404(id)
-    # 权限控制：检查用户是否有权限调班该学生
-    if current_user.role == 'homeroom_teacher':
-        if student.grade != current_user.grade or student.class_name != current_user.class_name:
-            flash('无权调班该学生', 'danger')
-            return redirect(url_for('students.list_students'))
-    elif current_user.role == 'grade_leader':
-        if student.grade != current_user.grade:
-            flash('无权调班该年级学生', 'danger')
-            return redirect(url_for('students.list_students'))
-    elif current_user.role not in ('admin',):
-        flash('无权调班学生', 'danger')
+    # 2026-10-12 P1：调班权限收敛到 apply_student_scope（原内联漏用户级范围）
+    if not _student_in_scope(student):
+        flash('无权调班该学生', 'danger')
         return redirect(url_for('students.list_students'))
     new_grade = request.form.get('new_grade', '').strip()
     new_class = request.form.get('new_class', '').strip()
@@ -1131,7 +1114,7 @@ def transfer(id):
         return redirect(url_for('students.list_students'))
 
     old_info = f'{student.grade} {student.class_name}'
-    # v1.19.5.0 调班记录：变更性质由操作人声明
+    # v1.19.41.2 调班记录：变更性质由操作人声明
     #   transfer 个别调班（学生真实换班，默认）｜correct 修正班级（此前录入有误）
     change_kind = (request.form.get('class_change_kind') or 'transfer').strip()
     if change_kind not in ('transfer', 'correct'):
@@ -1327,7 +1310,7 @@ def batch_transfer():
 
         errors = []
         updated_count = 0
-        # v1.19.5.0 调班记录：循环内收集变更（含旧/新位置），供 reassign 日志使用
+        # v1.19.41.2 调班记录：循环内收集变更（含旧/新位置），供 reassign 日志使用
         changed_rows = []
 
         for row_idx in range(2, ws.max_row + 1):
@@ -1371,7 +1354,7 @@ def batch_transfer():
                                      'name': student.name, 'old': old_loc, 'new': new_loc})
 
         def _log_reassign():
-            """v1.19.5.0 批量调班 → 重新分班；逐人记录旧→新位置（含班型·方向）"""
+            """v1.19.41.2 批量调班 → 重新分班；逐人记录旧→新位置（含班型·方向）"""
             for c in changed_rows:
                 write_change_log('reassign',
                                  [{'id': c['id'], 'student_number': c['student_number'],

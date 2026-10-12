@@ -1,4 +1,4 @@
-# StuLink v1.19.5.0 2026-10-10
+# StuLink v1.19.41.2 2026-10-10
 # 考务管理：完整考务流程（对应 Excel 宏工作簿 2025考场学生考号与考场信息编排v1.2）
 #   步骤：① 学生名单（学生信息表） → ② 考场设置（考场信息表）
 #        → ③ 编排与考号生成（三种模式，镜像宏 编排考场考号2）
@@ -23,7 +23,7 @@ from app.models.grades import (ExamAffair, AffairRoom, AffairRoomLib, AffairStud
                                Exam)  # v1.12.1 加考场房间库；v1.12.2 移除成绩关联查询依赖
 from app.modules.grades import bp
 from app.utils.decorators import perm_required
-from app.utils.helpers import log_operation
+from app.utils.helpers import log_operation, get_dict_values
 from app.modules.grades.utils import is_teaching_class
 from app.utils.text_guard import (sanitize_label, sanitize_prefix,
                                   safe_download_name)
@@ -95,7 +95,7 @@ def _grade_options():
 
 
 def delete_affair_cascade(aid):
-    """v1.19.5.0：删除考务批次并级联清理其考场与学生名单。
+    """v1.19.41.2：删除考务批次并级联清理其考场与学生名单。
 
     AffairRoom / AffairStudent 的 affair_id 无外键约束（多库快照式设计，不建跨表外键），
     直接 `db.session.delete(affair)` 会留下孤儿行；此处显式按 affair_id 批量删除。
@@ -111,7 +111,7 @@ def delete_affair_cascade(aid):
 @login_required
 @perm_required('grades.edit')
 def affairs_list():
-    """v1.17.0 考试/考务合并收尾（v1.19.5.0）：考务批次列表已并入考试管理，
+    """v1.17.0 考试/考务合并收尾（v1.19.41.2）：考务批次列表已并入考试管理，
     本页保留为兼容入口（旧书签/外链），统一重定向到考试列表；
     未关联考试的孤儿批次由考试列表底部“待处理的考务批次”区兑底展示。"""
     return redirect(url_for('grades.exams_list'))
@@ -233,7 +233,7 @@ def exam_affair_go(exam_id):
 def affair_delete(aid):
     affair = _get_affair_checked(aid)
     name = affair.name
-    # v1.19.5.0：级联清理考场与名单（无外键约束，不显式删会留孤儿行）
+    # v1.19.41.2：级联清理考场与名单（无外键约束，不显式删会留孤儿行）
     n_rooms, n_stus = delete_affair_cascade(aid)
     db.session.commit()
     log_operation(current_user, '删除', '考务批次', aid,
@@ -244,6 +244,21 @@ def affair_delete(aid):
 
 # ==================== 考务向导详情（含 5 个步骤 + 成绩关联） ====================
 
+def _class_sort_key(name):
+    """班级排序键：'02班'→(0,2,'02班')；无班号的（未分班等）排最后"""
+    digits = ''.join(ch for ch in (name or '') if ch.isdigit())
+    return (0, int(digits), name or '') if digits else (1, 0, name or '')
+
+
+def _student_sort_key(s):
+    """v1.19.41.2 名单排序键：班级 → 姓氏（姓名以姓氏开头，故用姓名拼音）→ 学号。
+
+    拼音不可用时退化为汉字本身，仍保持稳定次序。
+    """
+    from app.modules.grades.services.user_account import pinyin_of
+    return (s.class_name or '', (pinyin_of(s.name) or (s.name or '')), s.student_no or '')
+
+
 @bp.route('/affairs/<int:aid>')
 @login_required
 @perm_required('grades.edit')
@@ -251,12 +266,31 @@ def affair_detail(aid):
     affair = _get_affair_checked(aid)
     students = (AffairStudent.query.filter_by(affair_id=aid)
                 .order_by(AffairStudent.class_name, AffairStudent.student_no).all())
+    # v1.19.41.2 名单次序（用户口径）：按「班级 → 姓氏」排序（不再把不参考的提到最上，
+    # 而是左右分栏展示：左=参加考试，右=不参加考试）
+    students.sort(key=_student_sort_key)
     rooms = (AffairRoom.query.filter_by(affair_id=aid)
              .order_by(AffairRoom.room_no).all())
-    scope_students = [s for s in students if s.is_attend]
+    join_students = [s for s in students if s.is_attend]          # 左栏：参加考试
+    skip_students = [s for s in students if not s.is_attend]      # 右栏：不参加考试
+    scope_students = join_students
     arranged = [s for s in scope_students if s.room_no]
+    # v1.19.41.2：步骤条状态用 —— 已生成考号的人数（AI 导入会带考号，此时步骤③应显示已完成）
+    numbered = sum(1 for s in scope_students if s.exam_number)
 
     # v1.12.2 步骤⑤成绩关联 UI 已移除，不再查询考试与成绩（省去每次访问的无用查询）
+
+    # v1.19.41.2 名单统计：年级汇总 + 各班（实际 / 参加 / 不参加）
+    grade_stat = {'total': len(students), 'join': len(join_students),
+                  'skip': len(skip_students)}
+    per_class = {}
+    for s in students:
+        d = per_class.setdefault(s.class_name or '未分班',
+                                 {'total': 0, 'join': 0, 'skip': 0})
+        d['total'] += 1
+        d['join' if s.is_attend else 'skip'] += 1
+    class_stats = [dict(name=k, **v) for k, v in
+                   sorted(per_class.items(), key=lambda kv: _class_sort_key(kv[0]))]
 
     # v1.12.1 编排容量统计：学生总数/参考数、考场总数/总容量、各选科人数与可用容量差额
     stats = {
@@ -280,9 +314,24 @@ def affair_detail(aid):
             stats['per_sel'][r.subject] = {'students': 0, 'capacity': r.capacity or 0}
     # v1.12.1 选科选项（批次设置弹窗中按选科设前后缀）
     sel_options = sorted({s.subject_selection for s in students if s.subject_selection})
+    # v1.19.41.2 步骤③下方学生名单：已编排者按「考场 → 座号」升序（考场号已补零，可直接字符串比较）
+    arranged_sorted = sorted(arranged,
+                             key=lambda s: (str(s.room_no or ''), s.seat_no or 0,
+                                            s.student_no or ''))
+    # v1.19.41.2 步骤②科目下拉：系统字典「选科」12 种 + 「全科」（= 通用/不限），
+    # 再兜底补上本批次考场里出现过的历史值（如旧写法的「史政地」），避免下拉丢失当前值
+    room_subject_options = ['全科'] + list(get_dict_values('subject') or [])
+    for r in rooms:
+        if r.subject and not r.is_universal and r.subject not in room_subject_options:
+            room_subject_options.append(r.subject)
     return render_template('grades/affairs/detail.html',
                            affair=affair, students=students, rooms=rooms,
                            scope_students=scope_students, arranged=arranged,
+                           numbered=numbered,
+                           join_students=join_students, skip_students=skip_students,
+                           grade_stat=grade_stat, class_stats=class_stats,
+                           arranged_sorted=arranged_sorted,
+                           room_subject_options=room_subject_options,
                            mode_label=MODE_LABEL,
                            stats=stats, sel_options=sel_options)
 
@@ -307,7 +356,7 @@ def affair_students_template(aid):
         c.alignment = _CENTER
         c.border = _TB
     # 预填系统该年级学生（与 Excel「学生信息表」口径一致，考务人员可直接编辑）
-    # v1.19.5.0：只预填数字教学班且年级未毕业的学生（不分班/已转出/已毕业不进入成绩模板）
+    # v1.19.41.2：只预填数字教学班且年级未毕业的学生（不分班/已转出/已毕业不进入成绩模板）
     from app.utils.helpers import get_graduated_grades
     _graduated = set(get_graduated_grades() or [])
     _grade_ok = affair.grade not in _graduated
@@ -388,7 +437,7 @@ def affair_students_import(aid):
             name = name or sys_stu.name
             cls = cls or sys_stu.class_name
             sel = sel or (sys_stu.subject_selection or '')
-        # v1.19.5.0：补全后仍无数字教学班的学生不导入成绩名单
+        # v1.19.41.2：补全后仍无数字教学班的学生不导入成绩名单
         if not is_teaching_class(cls):
             skipped_no_class += 1
             continue
@@ -413,7 +462,7 @@ def affair_students_import(aid):
 def affair_students_sync(aid):
     """v1.12.1 从学生学籍库同步本年级学生到考务名单（增量：新增+补全信息）
 
-    v1.19.5.0 口径调整（用户明确）：
+    v1.19.41.2 口径调整（用户明确）：
     - 无班级学生（不分班 / 已转出 / 离校 等非数字班级）与已毕业年级学生
       **不进入成绩治理模块**，同步时直接过滤掉；
     - 原「同时移除学籍已删的学生」复选框取消，改为**默认自动移除**：
@@ -450,12 +499,33 @@ def affair_students_sync(aid):
             db.session.delete(row)
             removed += 1
     skipped = len(all_stus) - len(sys_stus)   # 因无班级/已毕业而未导入的学籍数
+    # v1.19.41.2 自动匹配「上一场不参加考试的学生」：取本年级**日期早于本批次**的最近一场考务批次，
+    # 把其中标记为不参考的学号，在本批次一律同步为不参考（只 是→否；不反向把「否」改回「是」）。
+    prev_affair = (ExamAffair.query
+                   .filter(ExamAffair.grade == affair.grade,
+                           ExamAffair.id != affair.id,
+                           ExamAffair.exam_date < affair.exam_date)
+                   .order_by(ExamAffair.exam_date.desc(), ExamAffair.id.desc()).first())
+    non_attend_prev = set()
+    if prev_affair is not None:
+        non_attend_prev = {s.student_no for s in
+                           AffairStudent.query.filter_by(affair_id=prev_affair.id,
+                                                         is_attend=False).all()}
+    matched = 0
+    if non_attend_prev:
+        for row in AffairStudent.query.filter_by(affair_id=aid).all():
+            if row.student_no in non_attend_prev and row.is_attend:
+                row.is_attend = False
+                matched += 1
     db.session.commit()
     log_operation(current_user, '同步', '考务学生', aid,
-                  f'新增{added}人/移除{removed}人/有效{len(sys_stus)}人/跳过无班{skipped}人',
+                  f'新增{added}人/移除{removed}人/有效{len(sys_stus)}人/跳过无班{skipped}人'
+                  + (f'/沿用上一场不参考{matched}人' if matched else ''),
                   module='grades')
     return jsonify({'ok': True, 'added': added, 'removed': removed,
-                    'total': len(sys_stus), 'skipped_no_class': skipped})
+                    'total': len(sys_stus), 'skipped_no_class': skipped,
+                    'matched_non_attend': matched,
+                    'prev_affair': (prev_affair.name if prev_affair else '')})
 
 
 @bp.route('/affairs/<int:aid>/students/pick')
@@ -465,7 +535,7 @@ def affair_students_pick(aid):
     """v1.12.2 「加入学生」选择器数据源：返回本年级学籍学生，
     带 in_batch 标记（是否已在当前考务名单），供前端筛选/排序/搜索。
 
-    v1.19.5.0：与 sync 同口径，只列数字教学班且年级未毕业的学生（无班级/已毕业不展示）。"""
+    v1.19.41.2：与 sync 同口径，只列数字教学班且年级未毕业的学生（无班级/已毕业不展示）。"""
     affair = _get_affair_checked(aid)
     from app.utils.helpers import get_graduated_grades
     graduated = set(get_graduated_grades() or [])
@@ -494,7 +564,7 @@ def affair_students_batch_add(aid):
     for st in Student.query.filter(Student.student_number.in_(nos)).all():
         if st.student_number in exist:
             continue
-        # v1.19.5.0：无班级学生（不分班/已转出/离校等）不加入成绩治理名单
+        # v1.19.41.2：无班级学生（不分班/已转出/离校等）不加入成绩治理名单
         if not is_teaching_class(st.class_name):
             skipped += 1
             continue
@@ -527,6 +597,23 @@ def affair_student_fixed(aid, sid):
     st.fixed_room, st.fixed_seat = room, seat
     db.session.commit()
     return jsonify({'ok': True})
+
+
+@bp.route('/affairs/<int:aid>/students/<int:sid>/attend', methods=['POST'])
+@login_required
+@perm_required('grades.edit')
+def affair_student_attend(aid, sid):
+    """v1.19.41.2 步骤①「参考」就地点一下切换（本页不再提供「编辑学生信息」弹窗，
+    但「是否参加本场考试」属考务信息，需要能手工修正，例如上一场缺考、本场恢复参考）。"""
+    st = AffairStudent.query.get_or_404(sid)
+    if st.affair_id != aid:
+        abort(403)
+    raw = (request.form.get('is_attend') or '').strip().lower()
+    st.is_attend = raw in ('1', 'true', 'yes', 'on')
+    db.session.commit()
+    log_operation(current_user, '修改', '考务学生', sid,
+                  f'[{st.name}] 参考={st.is_attend}', module='grades')
+    return jsonify({'ok': True, 'is_attend': bool(st.is_attend)})
 
 
 @bp.route('/affairs/<int:aid>/students/<int:sid>')
@@ -737,6 +824,98 @@ def affair_room_save(aid):
     return jsonify({'ok': True})
 
 
+@bp.route('/affairs/<int:aid>/rooms/<int:rid>/patch', methods=['POST'])
+@login_required
+@perm_required('grades.edit')
+def affair_room_patch(aid, rid):
+    """v1.19.41.2 步骤② 行内编辑：科目 / 容量 / 备注 就地修改（不再走「编辑」按钮弹窗）。
+
+    只更新提交上来的字段（部分更新），避免前端行内编辑互相覆盖。
+    科目「全科」等价于通用考场（存为「默认」，`is_universal` 为真）。
+    """
+    _get_affair_checked(aid)
+    room = AffairRoom.query.get_or_404(rid)
+    if room.affair_id != aid:
+        abort(403)
+    if 'subject' in request.form:
+        sub = sanitize_label(request.form.get('subject'), 20) or '默认'
+        room.subject = '默认' if sub in ('全科', '通用', '全部') else sub
+    if 'capacity' in request.form:
+        try:
+            cap = int(str(request.form.get('capacity') or '').strip())
+        except (TypeError, ValueError):
+            return jsonify({'ok': False, 'msg': '容量必须是整数'})
+        if cap < 1 or cap > 500:
+            return jsonify({'ok': False, 'msg': '容量需在 1~500 之间'})
+        room.capacity = cap
+    if 'note' in request.form:
+        room.note = sanitize_label(request.form.get('note'), 100)
+    db.session.commit()
+    log_operation(current_user, '修改', '考务考场', rid,
+                  f'考场{room.room_no} 科目={room.subject} 容量={room.capacity}',
+                  module='grades')
+    return jsonify({'ok': True, 'subject': room.subject, 'capacity': room.capacity,
+                    'is_universal': bool(room.is_universal), 'note': room.note or ''})
+
+
+@bp.route('/affairs/<int:aid>/rooms/capacity', methods=['POST'])
+@login_required
+@perm_required('grades.edit')
+def affair_rooms_capacity(aid):
+    """v1.19.41.2 步骤② 考场容量批量操作。
+
+    - `mode=all`：把本批次**全部考场**容量设为 `capacity`（1~500）；
+    - `mode=prev`：按「同年级 + **同一房间**」沿用上一场（日期更早的最近一批次）的容量；
+      房间身份优先用「位置」匹配，位置为空时用「考场编号」兜底。
+    返回 `{ok, updated, total, src|capacity}`。
+    """
+    affair = _get_affair_checked(aid)
+    rooms = AffairRoom.query.filter_by(affair_id=aid).all()
+    if not rooms:
+        return jsonify({'ok': False, 'msg': '本批次还没有考场，先在左侧「考场库」加入'})
+
+    if (request.form.get('mode') or 'all').strip() == 'prev':
+        prev = (ExamAffair.query
+                .filter(ExamAffair.grade == affair.grade,
+                        ExamAffair.id != affair.id,
+                        ExamAffair.exam_date < affair.exam_date)
+                .order_by(ExamAffair.exam_date.desc(), ExamAffair.id.desc()).first())
+        if prev is None:
+            return jsonify({'ok': False, 'msg': '本年级没有更早的考务批次，无可沿用'})
+        prev_rooms = AffairRoom.query.filter_by(affair_id=prev.id).all()
+        by_loc = {r.location: (r.capacity or 30) for r in prev_rooms if r.location}
+        by_no = {r.room_no: (r.capacity or 30) for r in prev_rooms}
+        updated = unmatched = 0
+        for r in rooms:
+            cap = by_loc.get(r.location) if r.location else None
+            if cap is None:
+                cap = by_no.get(r.room_no)
+            if cap is None:
+                unmatched += 1
+                continue
+            if cap != (r.capacity or 0):
+                r.capacity = cap
+                updated += 1
+        db.session.commit()
+        log_operation(current_user, '设置', '考务考场容量', aid,
+                      f'沿用「{prev.name}」：更新{updated}个/未匹配{unmatched}个', module='grades')
+        return jsonify({'ok': True, 'updated': updated, 'unmatched': unmatched,
+                        'total': len(rooms), 'src': prev.name})
+
+    try:
+        cap = int(str(request.form.get('capacity') or '').strip())
+    except (TypeError, ValueError):
+        return jsonify({'ok': False, 'msg': '容量必须是整数'})
+    if cap < 1 or cap > 500:
+        return jsonify({'ok': False, 'msg': '容量需在 1~500 之间'})
+    for r in rooms:
+        r.capacity = cap
+    db.session.commit()
+    log_operation(current_user, '设置', '考务考场容量', aid,
+                  f'全部 {len(rooms)} 个考场容量设为 {cap}', module='grades')
+    return jsonify({'ok': True, 'updated': len(rooms), 'total': len(rooms), 'capacity': cap})
+
+
 @bp.route('/affairs/<int:aid>/rooms/<int:rid>/delete', methods=['POST'])
 @login_required
 @perm_required('grades.edit')
@@ -813,6 +992,9 @@ def affair_settings(aid):
     nm = request.form.get('non_attend_mode')
     if nm in ('skip', 'tail'):
         affair.non_attend_mode = nm
+    # v1.19.41.2 步骤② 去掉「考场前缀」列后，批次默认前缀成为唯一兜底 —— 允许在步骤③设置
+    if 'default_prefix' in request.form:
+        affair.default_prefix = sanitize_prefix(request.form.get('default_prefix'), 16) or None
     # 选科考号前后缀：前端以 prefix_<选科> / suffix_<选科> 成对提交，sels 为选科列表 JSON
     try:
         sel_list = json.loads(request.form.get('sels') or '[]')
@@ -1037,6 +1219,61 @@ def affair_arrange(aid):
                   f'{MODE_LABEL[mode]}，分配{assigned}人/失败{failed}人', module='grades')
     return jsonify({'ok': True, 'assigned': assigned, 'failed': failed,
                     'scope': len(scope), 'log': log})
+
+
+@bp.route('/affairs/<int:aid>/numbers/import', methods=['POST'])
+@login_required
+@perm_required('grades.edit')
+def affair_numbers_import(aid):
+    """v1.19.41.2 步骤③「自定义模式 → 使用自定义考号」的批量导入考号。
+
+    上传 Excel（表头需含「学号」与「考号」两列），把考号写入名单的 `custom_number`；
+    之后以「自定义考号」模式编排时，即用该值作为最终考号（`_arrange` 模式2）。
+    """
+    _get_affair_checked(aid)
+    f = request.files.get('file')
+    if not f or not f.filename:
+        return jsonify({'ok': False, 'msg': '请选择 Excel 文件'})
+    ok, msg = validate_upload(f.filename, allowed_exts=['xlsx', 'xls'], stream=f.stream)
+    if not ok:
+        return jsonify({'ok': False, 'msg': msg})
+    try:
+        wb = openpyxl.load_workbook(f.stream, read_only=True, data_only=True)
+    except Exception as e:
+        return jsonify({'ok': False, 'msg': f'Excel 解析失败：{e}'})
+    ws = wb.active
+    idx = _header_index(ws, {'学号', '考号', '自定义考号'})
+    if '学号' not in idx:
+        return jsonify({'ok': False, 'msg': '缺少「学号」列'})
+    num_key = '考号' if '考号' in idx else ('自定义考号' if '自定义考号' in idx else None)
+    if num_key is None:
+        return jsonify({'ok': False, 'msg': '缺少「考号」列（表头建议：学号 / 姓名 / 考号）'})
+    by_no = {s.student_no: s for s in AffairStudent.query.filter_by(affair_id=aid).all()}
+    updated = 0
+    missing = 0
+    empty = 0
+    for row in ws.iter_rows(min_row=2, values_only=True):
+        no = (str(row[idx['学号']]).strip()
+              if idx['学号'] < len(row) and row[idx['学号']] is not None else '')
+        if not no:
+            continue
+        num = (str(row[idx[num_key]]).strip()
+               if idx[num_key] < len(row) and row[idx[num_key]] is not None else '')
+        st = by_no.get(no)
+        if st is None:
+            missing += 1
+            continue
+        if not num:
+            empty += 1
+            continue
+        st.custom_number = num
+        updated += 1
+    db.session.commit()
+    wb.close()
+    log_operation(current_user, '导入', '考务考号', aid,
+                  f'写入考号 {updated} 条' + (f'/未匹配 {missing} 条' if missing else ''),
+                  module='grades')
+    return jsonify({'ok': True, 'updated': updated, 'missing': missing, 'empty': empty})
 
 
 # ==================== 步骤④ 导出：按班级 / 按考场 / 竖版桌签 ====================

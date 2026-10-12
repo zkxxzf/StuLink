@@ -4,20 +4,23 @@
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 """StuLink 四段版本号 bump 工具
 
-版本号规范：
+版本号规范（用户 2026-10-11 更新）：
     主.次.三.四
+    - 第一段（主）：重大版本，升级时**后三段全部保留，不归零**
+    - 第二段（次）：里程碑版本，升级时**标注里程碑**，三/四段保留
     - 第三段（zk）：主线维护者 zkxxzf 每次改动 +1
     - 第四段（sakay）：协助者 sakay 每次改动 +1
+    - 三/四段是「各自累计的改动计数」，**永不归零**，不随主/次版本升级重置
 
 用法（在项目根或任意位置执行）：
     python -m scripts.bump_version show              # 打印当前版本
-    python -m scripts.bump_version zk                # 第三段 +1，第四段不变（v1.18.7.1 → v1.18.8.1）
-    python -m scripts.bump_version sakay             # 第四段 +1（v1.18.8.1 → v1.18.8.2）
-    python -m scripts.bump_version minor             # 次版本 +1，三四归零（v1.18.x.x → v1.19.0.0）
-    python -m scripts.bump_version major             # 主版本 +1，其他归零
+    python -m scripts.bump_version zk                # 第三段 +1，第四段不变（v1.19.39.2 → v1.19.40.2）
+    python -m scripts.bump_version sakay             # 第四段 +1（v1.19.39.2 → v1.19.39.3）
+    python -m scripts.bump_version minor             # 第二段 +1（里程碑），三/四段保留（v1.19.39.2 → v1.20.39.2）
+    python -m scripts.bump_version major             # 第一段 +1，后三段全部保留（v1.19.39.2 → v2.19.39.2）
     python -m scripts.bump_version zk --dry          # 只列出将改的文件不写盘
     python -m scripts.bump_version zk --no-commit    # 写盘但不 git commit
-    python -m scripts.bump_version set 1.19.0.0     # 直接指定完整版本
+    python -m scripts.bump_version set 1.19.40.2     # 直接指定完整版本
 
 默认行为：扫描项目 → 替换所有形如 vX.Y.Z.W / vX.Y.Z 的"当前版本"引用 → 若 git 干净则自动 commit。
 不修改：scripts/migrate_*.py、代码内联变更注释、data/、聊天总结/ 等目录。
@@ -62,18 +65,21 @@ def fmt(v: tuple[int, int, int, int]) -> str:
 
 
 def next_version(mode: str, cur: tuple[int, int, int, int]) -> tuple[int, int, int, int]:
-    """四段版本号推演（用户 2026-10-10 明确的规则）
+    """四段版本号推演（用户 2026-10-11 更新的规则）
 
-    第三段 = 主线维护者 zk 的改动计数；第四段 = 协助者 sakay 的改动计数。
-    - zk  改动：第三段 +1，**第四段保留不动**（1.18.7.1 → 1.18.8.1）
-    - sakay 改动：第四段 +1（1.18.7.1 → 1.18.7.2）
-    - **只有前两位（主/次）升级时，后两位才重置为 0**
+    语义：`主.次.zk.sakay`
+    - 第三段 = 主线维护者 zk 的改动累计计数；第四段 = 协助者 sakay 的改动累计计数。
+    - **三/四段永不归零**：主/次版本升级时都原样保留（1.19.39.2 → 1.20.39.2）。
+    - zk  改动：第三段 +1，第四段不动（1.19.39.2 → 1.19.40.2）
+    - sakay 改动：第四段 +1（1.19.39.2 → 1.19.39.3）
+    - minor（里程碑）：第二段 +1，三/四段保留（1.19.39.2 → 1.20.39.2）并提示打里程碑 tag
+    - major：第一段 +1，后三段全部保留（1.19.39.2 → 2.19.39.2）
     """
     a, b, c, d = cur
-    if mode == 'zk':       return (a, b, c + 1, d)     # 末位保留（不归零）
-    if mode == 'sakay':    return (a, b, c, d + 1)
-    if mode == 'minor':    return (a, b + 1, 0, 0)     # 次版本升级 → 后两位重置
-    if mode == 'major':    return (a + 1, 0, 0, 0)     # 主版本升级 → 后三位重置
+    if mode == 'zk':       return (a, b, c + 1, d)     # 第三段 +1，末位保留
+    if mode == 'sakay':    return (a, b, c, d + 1)     # 第四段 +1
+    if mode == 'minor':    return (a, b + 1, c, d)     # 里程碑：仅第二段 +1，三/四段保留（不归零）
+    if mode == 'major':    return (a + 1, b, c, d)     # 主版本：仅第一段 +1，后三段保留（不归零）
     raise SystemExit(f'未知模式：{mode}')
 
 
@@ -149,7 +155,8 @@ def git_commit(new_ver: str, mode: str) -> None:
 def main() -> int:
     ap = argparse.ArgumentParser(description='StuLink 四段版本号 bump 工具')
     ap.add_argument('mode', choices=['show', 'zk', 'sakay', 'minor', 'major', 'set'],
-                    help='zk=第三段+1 / sakay=第四段+1 / minor / major / set 指定 / show 打印')
+                    help='zk=第三段+1 / sakay=第四段+1 / minor=第二段+1(里程碑) / '
+                         'major=第一段+1（主/次升级均不归零三、四段）/ set 指定 / show 打印')
     ap.add_argument('target', nargs='?', help='mode=set 时提供完整版本号，如 1.19.0.0')
     ap.add_argument('--dry', action='store_true', help='只列出将改的文件不写盘')
     ap.add_argument('--no-commit', action='store_true', help='写盘但不 git commit')
@@ -168,6 +175,9 @@ def main() -> int:
 
     new_str = fmt(new)
     print(f'版本变更：v{fmt(cur)} → v{new_str}（模式：{args.mode}）')
+    if args.mode in ('minor', 'major'):
+        print(f'  [里程碑] 第 {"二" if args.mode == "minor" else "一"} 段已升级，'
+              f'建议打里程碑 tag：git tag -a v{new_str} -m "milestone: v{new_str}"')
     changed = bump_files(new_str, dry=args.dry)
     tag = 'DRY-RUN' if args.dry else 'APPLIED'
     print(f'{tag} 影响 {len(changed)} 文件')

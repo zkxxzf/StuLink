@@ -149,6 +149,10 @@
                         {% elif s.status == 'approved' and is_reviewer %}
                             <button class="btn btn-sm btn-danger btn-execute" data-id="{{ s.id }}"
                                     title="{% if s.batch_count and s.batch_count > 1 %}整批 {{ s.batch_count }} 门一起执行{% else %}执行调课{% endif %}"><i class="bi bi-lightning-charge"></i> {% if s.batch_count and s.batch_count > 1 %}执行整批{% else %}执行{% endif %}</button>
+                        {% elif s.status == 'executed' and is_reviewer %}
+                            {# 2026-10-11：已执行的调课可撤销回退（执行错了的场景），整批一起回退 #}
+                            <button class="btn btn-sm btn-outline-danger btn-revoke" data-id="{{ s.id }}"
+                                    title="{% if s.batch_count and s.batch_count > 1 %}撤销整批 {{ s.batch_count }} 门执行（回退课表）{% else %}撤销执行（回退课表）{% endif %}"><i class="bi bi-arrow-uturn-left"></i> {% if s.batch_count and s.batch_count > 1 %}撤销整批{% else %}撤销执行{% endif %}</button>
                         {% endif %}
                     </td>
                 </tr>
@@ -209,6 +213,7 @@
     "rejectUrl": {{ url_for('academic.swap_reject', swap_id=0)|tojson }},
     "executeUrl": {{ url_for('academic.swap_execute', swap_id=0)|tojson }},
     "cancelUrl": {{ url_for('academic.swap_cancel', swap_id=0)|tojson }},
+    "revokeUrl": {{ url_for('academic.swap_revoke', swap_id=0)|tojson }},
     "detailUrl": {{ url_for('academic.swap_detail', swap_id=0)|tojson }}
 }
 </script>
@@ -279,6 +284,13 @@
         var id = $(this).data('id');
         if (!confirm('确认撤销' + batchWhat($(this)) + '？')) return;
         post(urlFor(cfg.cancelUrl, id), {}, '已撤销');
+    });
+
+    // 2026-10-11：撤销「已执行」的调课 —— 回退课表（永久恢复原课程 / 临时删除当天安排），整批一起回退
+    $(document).on('click', '.btn-revoke', function () {
+        var id = $(this).data('id');
+        if (!confirm('确认撤销执行' + batchWhat($(this)) + '？将回退课表改动（恢复原课程 / 删除当天临时安排），撤销后记录回到「已通过」，可重新执行。')) return;
+        post(urlFor(cfg.revokeUrl, id), {}, '已撤销执行');
     });
 })();
 </script>

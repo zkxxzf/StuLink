@@ -1,12 +1,14 @@
 # StuLink v1.8.0 2026-08-13（并发安全 + 合班床位份额过滤）
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
-from flask import Blueprint, render_template, request, jsonify, flash, redirect, url_for
+from flask import Blueprint, render_template, request, jsonify, flash, redirect, url_for, abort
 from flask_login import login_required, current_user
 from datetime import datetime
 from app.extensions import db
-from app.models import Room, BedAssignment, Student, StudentAccommodation
+from app.models import Room, BedAssignment, Student, StudentAccommodation, UserClassLink
 from app.utils.decorators import perm_required
 from app.utils.helpers import get_dict_values, get_active_grades, log_operation, get_graduated_grades
+# 2026-10-11 审计：宿舍数据范围唯一口径（班级归属 / 学生归属）
+from app.utils.dormitory_scope import class_in_scope, student_in_dorm_scope
 from app.services.history_service import record_assignment
 from sqlalchemy import and_, exists
 import threading
@@ -31,6 +33,25 @@ def _bed_write_lock_decorator(f):
     return wrapper
 
 
+def _homeroom_class_or_default(grade, class_name):
+    """班主任场景的 (grade, class_name)：传入优先，缺失回落本人管辖班级。
+
+    2026-10-12 P1：manage/clear_class/auto_assign 原各自内联
+    `if role == 'homeroom_teacher': grade = user.grade`（强制覆盖传入值，
+    漏 UserClassLink 多班与字段过期场景）；收敛为一个 helper。
+    范围校验仍走 dormitory_scope.class_in_scope（唯一口径，不外移判断）。
+    """
+    if current_user.role == 'homeroom_teacher' and (not grade or not class_name):
+        link = UserClassLink.query.filter_by(user_id=current_user.id).first()
+        if link:
+            grade = grade or link.grade
+            class_name = class_name or link.class_name
+        else:
+            grade = grade or (current_user.grade or '')
+            class_name = class_name or (current_user.class_name or '')
+    return grade, class_name
+
+
 @bp.route('/manage')
 @perm_required('dormitory.beds')
 def manage():
@@ -38,13 +59,12 @@ def manage():
     graduated = get_graduated_grades()
     grades = [g for g in grades if g not in graduated]
 
-    # 班主任只看自己班的宿舍
-    if current_user.role == 'homeroom_teacher':
-        grade = current_user.grade
-        class_name = current_user.class_name
-    else:
-        grade = request.args.get('grade', '')
-        class_name = request.args.get('class_name', '')
+    # 2026-10-12 P1：班级来源与范围校验统一收敛（原班主任分支只信
+    # user.grade/class_name 字段且不经 class_in_scope，非班主任走 URL 参数）
+    grade, class_name = _homeroom_class_or_default(
+        request.args.get('grade', ''), request.args.get('class_name', ''))
+    if grade and class_name and not class_in_scope(current_user, grade, class_name):
+        abort(403)
         # 非班主任必须指定班级
         if not grade or not class_name:
             # 计算全校未分配住校学生统计（按年级+班级+性别分组）
@@ -241,16 +261,16 @@ def manage():
 def clear_class():
     """清除本班全部已分配床位"""
     data = request.get_json() or {}
-    grade = data.get('grade', '')
-    class_name = data.get('class_name', '')
-    
-    if current_user.role == 'homeroom_teacher':
-        grade = current_user.grade
-        class_name = current_user.class_name
-    
+    grade, class_name = _homeroom_class_or_default(
+        data.get('grade', ''), data.get('class_name', ''))
+
     if not grade or not class_name:
         return jsonify({'success': False, 'message': '请指定年级和班级'}), 400
-    
+
+    # 2026-10-11 审计修复：清空班级床位前校验班级归属范围
+    if not class_in_scope(current_user, grade, class_name):
+        return jsonify({'success': False, 'message': '无权操作该班级'}), 403
+
     graduated = get_graduated_grades()
     if grade in graduated:
         return jsonify({'success': False, 'message': f'{grade}已毕业，无法操作床位分配'}), 400
@@ -317,10 +337,9 @@ def assign():
     if existing:
         return jsonify({'success': False, 'message': '该学生已有床位'}), 400
 
-    # 班主任权限检查
-    if current_user.role == 'homeroom_teacher':
-        if student.grade != current_user.grade or student.class_name != current_user.class_name:
-            return jsonify({'success': False, 'message': '无权分配该学生'}), 403
+    # 2026-10-11 审计修复：数据范围校验（原仅约束班主任，年级长/宿管可越界分配他班学生）
+    if not student_in_dorm_scope(current_user, student):
+        return jsonify({'success': False, 'message': '无权分配该学生'}), 403
 
     # 性别校验：学生性别必须与房间性别匹配
     room = Room.query.get(bed.room_id)
@@ -378,6 +397,9 @@ def unassign():
         return jsonify({'success': False, 'message': '该床位无人'}), 400
 
     student = Student.query.get(bed.student_id)
+    # 2026-10-11 审计修复：取消分配前校验学生归属范围
+    if student and not student_in_dorm_scope(current_user, student):
+        return jsonify({'success': False, 'message': '无权操作该学生床位'}), 403
     if student:
         graduated = get_graduated_grades()
         if student.grade in graduated:
@@ -425,6 +447,10 @@ def move():
 
     if not from_bed or not to_bed or not student:
         return jsonify({'success': False, 'message': '数据不存在'}), 400
+
+    # 2026-10-11 审计修复：搬移前校验学生归属范围
+    if not student_in_dorm_scope(current_user, student):
+        return jsonify({'success': False, 'message': '无权搬移该学生床位'}), 403
 
     if from_bed.student_id != student_id:
         return jsonify({'success': False, 'message': '该学生不在此床位'}), 400
@@ -508,6 +534,11 @@ def swap():
     if bed_a.student_id != sid_a or bed_b.student_id != sid_b:
         return jsonify({'success': False, 'message': '床位信息不匹配'}), 400
 
+    # 2026-10-11 审计修复：互换前校验两名学生均在本账号范围内
+    if not (student_in_dorm_scope(current_user, stu_a)
+            and student_in_dorm_scope(current_user, stu_b)):
+        return jsonify({'success': False, 'message': '无权互换该床位'}), 403
+
     graduated = get_graduated_grades()
     if stu_a.grade in graduated or stu_b.grade in graduated:
         return jsonify({'success': False, 'message': '已毕业年级的学生无法互换床位'}), 400
@@ -575,17 +606,17 @@ def swap():
 def auto_assign():
     """一键自动为本班学生分配床位"""
     data = request.get_json() or {}
-    grade = data.get('grade', '')
-    class_name = data.get('class_name', '')
-    
-    # 班主任自动获取自己的班级
-    if current_user.role == 'homeroom_teacher':
-        grade = current_user.grade
-        class_name = current_user.class_name
-    
+    # 班主任自动获取自己的班级（UserClassLink 优先，老数据回落 user 字段）
+    grade, class_name = _homeroom_class_or_default(
+        data.get('grade', ''), data.get('class_name', ''))
+
     if not grade or not class_name:
         return jsonify({'success': False, 'message': '请先选择年级和班级'}), 400
-    
+
+    # 2026-10-11 审计修复：自动分配前校验班级归属范围
+    if not class_in_scope(current_user, grade, class_name):
+        return jsonify({'success': False, 'message': '无权操作该班级'}), 403
+
     # 1. 找到该班级的房间（包括合班宿舍，合班班级不分主次）
     # 独享房必须同年级（不同年级的同名班级是不同班级）；
     # 合班房不限年级（跨年级合班时，份额在 combined_details 中带年级，匹配时精确校验）

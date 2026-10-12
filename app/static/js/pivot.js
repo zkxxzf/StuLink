@@ -36,20 +36,27 @@ function init() {
 function fillGrades() {
     var sel = $('#pvGrade').empty();
     var grades = meta.grades || [], exams = meta.exams || [];
+    // v1.19.41.2 考试态：服务端带入本场考试 id（#pvInitialExam），优先落到它所在年级并选中它
+    var initial = ($('#pvInitialExam').text() || '').trim();
+    var ie = initial ? exams.filter(function (e) { return String(e.id) === initial; })[0] : null;
     grades.forEach(function (g) { sel.append('<option value="' + esc(g) + '">' + esc(g) + '</option>'); });
     // 默认选中「第一个有考试的年级」，否则会停在无考试的年级上导致考试下拉为空
     var first = grades.filter(function (g) {
         return exams.some(function (e) { return e.grade === g; });
     })[0];
-    if (first) { sel.val(first); }
+    if (ie) { sel.val(ie.grade); }
+    else if (first) { sel.val(first); }
     else if (grades.length) { sel.val(grades[0]); }
-    fillExams();
+    fillExams(initial);
 }
-function fillExams() {
+function fillExams(want) {
     var g = $('#pvGrade').val(), sel = $('#pvExam').empty();
     (meta.exams || []).filter(function (e) { return e.grade === g; }).forEach(function (e) {
         sel.append('<option value="' + e.id + '">' + esc(e.name) + '（' + e.date + '）</option>');
     });
+    // want 仅在传入字符串时生效（年级 change 事件会传 Event 对象，此时忽略）
+    var id = (typeof want === 'string') ? want : '';
+    if (id && sel.find('option[value="' + id + '"]').length) { sel.val(id); }
 }
 function fillSubject() {
     var sel = $('#pvSubject').empty().append('<option value="总分">总分</option>');

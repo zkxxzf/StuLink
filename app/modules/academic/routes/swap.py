@@ -1,4 +1,4 @@
-# StuLink v1.19.5.0 2026-10-10
+# StuLink v1.19.41.2 2026-10-10
 # 教务 · 调课管理（重构版，基于 timetable.db）：
 #   个人调课 / 统一调课 / 审核 / 执行 / 撤销 / 详情 / 统计 / 联动 API
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
@@ -152,6 +152,7 @@ def swap_page():
                            status=status, swap_type=swap_type, pending=pending,
                            is_reviewer=is_reviewer, current_uid=uid,
                             can_apply=current_user.has_perm('academic.swap'),
+                            can_bulk=current_user.has_perm('academic.swap_bulk'),
                            status_map=SWAP_STATUS, type_map=SWAP_TYPES,
                            weekday_names=WEEKDAY_NAMES,
                            chain=swap_service.approval_chain(),
@@ -229,7 +230,7 @@ def swap_apply():
 
 @bp.route('/swap/bulk', methods=['GET', 'POST'])
 @login_required
-@perm_required('academic.swap')
+@perm_required('academic.swap_bulk')
 def swap_bulk():
     """统一调课：选年级/班级/星期 → 勾选多个课程 → 批量指定新时段。"""
     sched = swap_service.get_active_schedule()
@@ -456,6 +457,27 @@ def swap_execute(swap_id):
     log_operation(current_user, '执行', '调课记录', swap_id,
                   f'执行调课 #{swap_id}（{"永久" if sw.is_permanent else "临时"}）',
                   module='academic')
+    return jsonify({'success': True, 'message': msg,
+                    'data': sw.to_dict() if sw else None})
+
+
+@bp.route('/swap/<int:swap_id>/revoke', methods=['POST'])
+@login_required
+@perm_required('academic.timetable')
+def swap_revoke(swap_id):
+    """撤销已执行的调课（回退课表改动）。
+
+    2026-10-11 新增：针对"执行错了"的场景 —— 永久调课恢复原条目、临时调课删除当天
+    安排；统一调课批次整批回退。撤销后记录回到「已通过」，可重新执行。
+    权限与「执行」同级（academic.timetable），由教务/管理员操作。
+    """
+    ok, msg, sw = swap_service.revoke_executed_swap(
+        swap_id, current_user.id, current_user.real_name)
+    if not ok:
+        db.session.rollback()
+        return jsonify({'success': False, 'message': msg}), 400
+    log_operation(current_user, '撤销执行', '调课记录', swap_id,
+                  f'撤销执行 #{swap_id}', module='academic')
     return jsonify({'success': True, 'message': msg,
                     'data': sw.to_dict() if sw else None})
 

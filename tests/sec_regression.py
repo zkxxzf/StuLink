@@ -25,20 +25,25 @@ _TMP = tempfile.mkdtemp(prefix='stulink_sec_')
 
 import config as config_mod  # noqa: E402
 config_mod.BASE_DIR = _TMP
-config_mod.Config.SQLALCHEMY_DATABASE_URI = 'sqlite:///' + os.path.join(_TMP, 'system.db')
+# 2026-10-12：库文件必须放在 BASE_DIR/data/ 下——grade_mgmt 等裸 sqlite3 代码
+# 按生产布局 os.path.join(BASE_DIR, 'data', 'xxx.db') 找库；放在 _TMP 根下
+# 会令这类路由 FileNotFound（冒烟从未覆盖过 graduate）。
+_DATA = os.path.join(_TMP, 'data')
+os.makedirs(_DATA, exist_ok=True)
+config_mod.Config.SQLALCHEMY_DATABASE_URI = 'sqlite:///' + os.path.join(_DATA, 'system.db')
 config_mod.Config.SQLALCHEMY_BINDS = {
-    'dormitory': 'sqlite:///' + os.path.join(_TMP, 'dormitory.db'),
-    'history': 'sqlite:///' + os.path.join(_TMP, 'history.db'),
-    'grades': 'sqlite:///' + os.path.join(_TMP, 'grades.db'),
-    'points': 'sqlite:///' + os.path.join(_TMP, 'points.db'),
-    'academic': 'sqlite:///' + os.path.join(_TMP, 'academic.db'),
+    'dormitory': 'sqlite:///' + os.path.join(_DATA, 'dormitory.db'),
+    'history': 'sqlite:///' + os.path.join(_DATA, 'history.db'),
+    'grades': 'sqlite:///' + os.path.join(_DATA, 'grades.db'),
+    'points': 'sqlite:///' + os.path.join(_DATA, 'points.db'),
+    'academic': 'sqlite:///' + os.path.join(_DATA, 'academic.db'),
     # 2026-10-10：教务分库——查课 / 业绩 / 表单 各自独立库
-    'inspection': 'sqlite:///' + os.path.join(_TMP, 'inspection.db'),
-    'achievement': 'sqlite:///' + os.path.join(_TMP, 'achievement.db'),
-    'forms': 'sqlite:///' + os.path.join(_TMP, 'forms.db'),
-    'portrait': 'sqlite:///' + os.path.join(_TMP, 'portrait.db'),
-    'system': 'sqlite:///' + os.path.join(_TMP, 'system.db'),
-    'timetable': 'sqlite:///' + os.path.join(_TMP, 'timetable.db'),
+    'inspection': 'sqlite:///' + os.path.join(_DATA, 'inspection.db'),
+    'achievement': 'sqlite:///' + os.path.join(_DATA, 'achievement.db'),
+    'forms': 'sqlite:///' + os.path.join(_DATA, 'forms.db'),
+    'portrait': 'sqlite:///' + os.path.join(_DATA, 'portrait.db'),
+    'system': 'sqlite:///' + os.path.join(_DATA, 'system.db'),
+    'timetable': 'sqlite:///' + os.path.join(_DATA, 'timetable.db'),
 }
 config_mod.Config.SECRET_KEY = 'sec-regression-secret'
 config_mod.Config.UPLOAD_FOLDER = os.path.join(_TMP, 'uploads')
@@ -106,6 +111,16 @@ def login_ok(c, username, password):
 def seed():
     """创建测试账号：管理员 / 任课教师 / 年级长 / 无权限组 / 需改密账号"""
     with app.app_context():
+        # 2026-10-12 P0-2：create_app 的 INIT 演示数据会给 teacher_subject_links
+        # 灌 user_id=1..7 的记录，与首个测试账号（sec_admin, id=1）相撞，
+        # 令"裸 admin"实际带映射 → 范围类断言假绿。先清演示链接。
+        from app.models.grades import TeacherSubjectLink as _TSL
+        from app.models import UserClassLink as _UCL
+        _TSL.query.delete()
+        _UCL.query.delete()
+        UserDataScope.query.delete()
+        db.session.commit()
+
         groups = {g.name: g for g in PermissionGroup.query.all()}
         mk = {}
 
@@ -584,10 +599,13 @@ def check_H5():
 
     src = _read('app/templates/grades/affairs/detail.html')
     case('H-5 考务模板使用公共 escHtml', 'escHtml(' in src)
-    # 关键拼接点均已转义
-    for frag in ("escHtml(s.name)", "escHtml(r.location)", "escHtml(r.note||'')",
-                 "escHtml(r.prefix", "escHtml(c)"):
-        case(f'H-5 拼接点已转义：{frag}', frag in src)
+    # 关键拼接点均已转义。2026-10-12：detail.html 重构后原钉字符串断言
+    # （escHtml(r.prefix ...）已随 UI 改版消失 → 改为扫描式：
+    # innerHTML/insertAdjacentHTML 拼接行必须出现 escHtml(/esc( 转义。
+    bad = [l for l in src.splitlines()
+           if re.search(r'(?:innerHTML|insertAdjacentHTML)\s*\+=?', l)
+           and 'escHtml(' not in l and 'esc(' not in l]
+    case('H-5 无未转义的 innerHTML 拼接行', not bad, '; '.join(bad)[:120])
 
 
 # ======================================================================
@@ -975,11 +993,13 @@ def check_R1():
     for fn in ('visible_grades', 'check_exam_visible', 'user_grade_scope'):
         case(f'R-1 统一口径提供 {fn}', callable(getattr(scope_mod, fn, None)))
 
-    # 历史实现已降级为转发层，不再有独立判定逻辑
-    src = _read('app/modules/workbench/services/scope_service.py')
-    case('R-1 scope_service 不再直接查 UserClassLink',
-         'UserClassLink.query' not in src)
-    case('R-1 scope_service 委托 class_allowed', 'class_allowed' in src)
+    # 2026-10-12：scope_service 转发壳已删除（30 行纯转发、自述"请勿新增逻辑"），
+    # 判定逻辑唯一实现在 workbench/services/scope.py（委托 grades/services/scope.py）。
+    src = _read('app/modules/workbench/services/scope.py')
+    case('R-1 workbench 判定实现存在且提供 class_allowed',
+         'def class_allowed' in src)
+    case('R-1 workbench scope 委托 grades 统一口径',
+         'from app.modules.grades.services.scope import' in src)
 
 
 # ======================================================================
@@ -1310,6 +1330,244 @@ def check_csrf_tpl():
          not bad, '、'.join(bad[:8]))
     case('CSRF-TPL 通知中心表单已带 token',
          'csrf_token' in _read('app/templates/notifications/list.html'))
+
+
+# ======================================================================
+# SR 主应用侧数据范围缺口（2026-10-11 批次，见清单第 10 节）
+# ======================================================================
+@item('SR')
+def check_SR():
+    from app.utils.student_scope import apply_student_scope
+    from app.utils.dormitory_scope import class_in_scope, student_in_dorm_scope
+
+    # SR-1 画像列表接入数据范围唯一口径（行为 + 源码双证）
+    case('SR-1 画像列表接入唯一口径',
+         'apply_student_scope' in _read('app/modules/portrait/services/portrait_service.py'))
+    with app.app_context():
+        leader = db.session.get(User, IDS['leader'])
+        admin = db.session.get(User, IDS['admin'])
+        n_leader = {s.student_number for s in apply_student_scope(Student.query, user=leader).all()}
+        n_admin = {s.student_number for s in apply_student_scope(Student.query, user=admin).all()}
+        case('SR-1 年级长仅见本年级学生（范围外被过滤）',
+             'SEC2025001' in n_leader and 'SEC2024001' not in n_leader)
+        case('SR-1 管理员不受数据范围限制', 'SEC2024001' in n_admin)
+
+        # SR-3 宿舍范围口径（班级/学生判定）
+        case('SR-3 年级长限于本年级班级',
+             class_in_scope(leader, '2025级', '01班') is True
+             and class_in_scope(leader, '2024级', '01班') is False)
+        case('SR-3 管理员全范围班级', class_in_scope(admin, '2024级', '01班') is True)
+        s25 = Student.query.filter_by(student_number='SEC2025001').first()
+        s24 = Student.query.filter_by(student_number='SEC2024001').first()
+        case('SR-3 学生宿舍范围判定（范围内/外）',
+             student_in_dorm_scope(leader, s25) is True
+             and student_in_dorm_scope(leader, s24) is False)
+
+    # SR-2 宿舍搜索删除内联角色判断、改走唯一口径
+    dash = _read('app/modules/dormitory/routes/dashboard.py')
+    case('SR-2 宿舍搜索改用唯一口径', 'apply_student_scope' in dash)
+    case('SR-2 宿舍搜索不再内联角色分支',
+         'homeroom_teacher' not in dash and 'grade_leader' not in dash)
+
+    # SR-3 房间/分配端点接入宿舍范围口径
+    case('SR-3 房间列表接入 room_scope_query',
+         'room_scope_query' in _read('app/modules/dormitory/routes/rooms.py'))
+    assign = _read('app/modules/dormitory/routes/assignments.py')
+    case('SR-3 分配端点接入班级/学生范围校验',
+         'class_in_scope' in assign and 'student_in_dorm_scope' in assign)
+
+    # SR-4 宿舍统计年级长收敛本人年级
+    case('SR-4 年级长统计收敛本人年级',
+         "sel_grade = user_grade or ''" in _read('app/modules/dormitory/routes/statistics.py'))
+
+    # SR-5 成绩 compare/export 数据范围 fail-closed
+    case('SR-5 compare fail-closed',
+         'if limited is not None:' in _read('app/modules/grades/routes/analysis.py'))
+    case('SR-5 export fail-closed',
+         'if limited is not None:' in _read('app/modules/grades/routes/export.py'))
+
+    # SR-6 grades/rooms.html 内联处理器改 tojson（M-10 同类残留）
+    # 2026-10-12：renameGroup 已重构为无参（curGroup() 取值），原钉字符串断言
+    # （g.name|tojson）目标消失 → 改为扫描式：
+    # ① 分组按钮不再把名称拼进 onclick 单引号串；② 无 M-10 形态的内联处理器。
+    rooms_html = _read('app/templates/grades/rooms.html')
+    case('SR-6 分组按钮不再拼接名称进 onclick',
+         "renameGroup('" not in rooms_html)
+    case('SR-6 无内联处理器单引号变量（M-10 形态）',
+         not re.search(r'on\w+="[^"]*\'\{\{', rooms_html))
+
+
+# ======================================================================
+# SR-7 admin 数据范围特判（2026-10-12 全项目审计 P0-2）
+# ======================================================================
+@item('SR-7')
+def check_SR7():
+    """裸 admin（无权限组/无班级映射/无用户级范围）必须等同全校口径。
+
+    2026-10-12 审计：`get_scope()` 缺 admin 特判 → admin 落到 ('none', None) →
+    `visible_grades/visible_classes` 把管理员关进空集 → 分析页考试下拉空、
+    班级对比被 SR-5 的 fail-closed 挡死（smoke_grades 7 连败现场）。
+    与 `check_exam_visible`/`student_in_scope`/`_guard_tab`/`access_scope`
+    已有的 admin 特判同口径；缺一处即全校最常用账号范围全灭。
+    """
+    from app.modules.grades.services import scope as scope_mod
+
+    with app.app_context():
+        adm = db.session.get(User, uid('admin'))
+        case('SR-7 admin get_scope 恒为全校',
+             scope_mod.get_scope(adm) == ('school', None),
+             str(scope_mod.get_scope(adm)))
+        case('SR-7 admin visible_classes 为 None（不限班）',
+             scope_mod.visible_classes(adm) is None)
+        grades = scope_mod.visible_grades(adm)
+        case('SR-7 admin visible_grades 非空（全部未毕业年级）',
+             bool(grades) and '2025级' in grades, str(grades))
+
+        # 两班总分成绩，供 HTTP 层班级对比使用（幂等：先清后建）
+        from app.models.grades import ExamScore as _ES
+        _ES.query.filter_by(exam_id=uid('exam25')).delete()
+        db.session.add(Student(student_number='SEC2025002', name='二班学生',
+                               gender='女', grade='2025级', class_name='02班'))
+        for no, cls, nm in (('SEC2025001', '01班', '一班学生'),
+                            ('SEC2025002', '02班', '二班学生')):
+            db.session.add(_ES(exam_id=uid('exam25'), student_no=no, student_name=nm,
+                               grade='2025级', class_name=cls, subject='总分',
+                               score=90.0, rank_dir=1))
+        db.session.commit()
+
+    with app.test_client() as c:
+        case('SR-7 admin 登录成功', login_ok(c, 'sec_admin', TEST_PWD).status_code == 200)
+        js = c.get('/grades/api/options').get_json() or {}
+        case('SR-7 admin 分析页年级下拉非空',
+             bool(js.get('data', {}).get('grades')), str(js)[:120])
+        from urllib.parse import quote
+        pair = quote('01班') + ',' + quote('02班')
+        r = c.get(f'/grades/api/analysis/compare?exam_id={uid("exam25")}&classes={pair}')
+        js = r.get_json() or {}
+        ct = js.get('data', {}).get('tables', {}) if js.get('success') else {}
+        case('SR-7 admin 班级对比 200 且两班入表（不被 fail-closed 挡死）',
+             r.status_code == 200 and
+             len(ct.get('cmp_overview', {}).get('rows', [])) == 2,
+             str(r.get_data(as_text=True))[:160])
+
+
+# ======================================================================
+# SR-8 毕业归档数据完整性（2026-10-12 全项目审计 P0-1）
+# ======================================================================
+@item('SR-8')
+def check_SR8():
+    """毕业归档：SQL 不得引用已删列；空归档/失败必须硬中止。
+
+    2026-10-12 审计 P0-1：原归档 SQL 仍 SELECT students 的
+    boarding_type/day_student_type/textbook/teacher_notes（已被
+    cleanup_student_columns 删列、迁往 dormitory 库 student_accommodation）
+    → 必抛 no such column → 裸 except 吞掉 → student_count=0 而流程继续
+    清空在校数据并标记毕业（"归档 0 人 + 数据已清"丢失链）。
+    本组在临时库上真跑 /grade-mgmt/graduate 全流程。
+    """
+    import sqlite3
+    from app.models.room import StudentAccommodation
+    from app.models import GradeSetting
+
+    with app.app_context():
+        # graduate 第 1 步 shutil.copy2(dormitory.db) 要求文件已存在；
+        # SQLAlchemy 惰性建库，先查一次触发 dormitory 库文件创建（测试环境专属）
+        from app.models import Room as _Room
+        _Room.query.limit(1).all()
+        db.session.add(Student(student_number='SEC2024002', name='二班往届生',
+                               gender='男', grade='2024级', class_name='02班'))
+        db.session.flush()
+        _sid = db.session.query(Student.id).filter_by(
+            student_number='SEC2024002').scalar()
+        # 01班无住宿记录 → LEFT JOIN 后四列应为 NULL；02班有 → 应带出
+        db.session.add(StudentAccommodation(student_id=_sid, boarding_type='住校'))
+        db.session.commit()
+
+    with app.test_client() as c:
+        case('SR-8 admin 登录', login_ok(c, 'sec_admin', TEST_PWD).status_code == 200)
+        # M-2：登录后会话重建，须重新取 CSRF token（已登录时 /login 会 302，改打首页）
+        csrf = get_csrf(c, '/')
+        hdr = {'X-CSRFToken': csrf}
+        # 空归档年级（字典存在但无学生）→ 必须 500 硬中止且不标记毕业
+        r = c.post('/grade-mgmt/graduate', json={'grade': '2023级'}, headers=hdr)
+        js = r.get_json() or {}
+        case('SR-8 空归档硬中止（500 且 success=False）',
+             r.status_code == 500 and js.get('success') is False,
+             f'{r.status_code} {str(js)[:100]}')
+        with app.app_context():
+            gs = GradeSetting.query.filter_by(grade='2023级').first()
+            case('SR-8 硬中止后未标记毕业', gs is None or not gs.is_graduated)
+
+        # 正常毕业：SQL 不引用已删列，2 人全部归档
+        r = c.post('/grade-mgmt/graduate', json={'grade': '2024级'}, headers=hdr)
+        js = r.get_json() or {}
+        case('SR-8 正常毕业归档 2 人（不再 no such column）',
+             r.status_code == 200 and js.get('success') is True
+             and '2' in (js.get('message') or ''), str(js)[:160])
+
+    hist = sqlite3.connect(os.path.join(_DATA, 'history.db'))
+    rows = hist.execute('SELECT student_number, class_name, boarding_type '
+                        'FROM graduated_students WHERE graduated_grade=?',
+                        ('2024级',)).fetchall()
+    hist.close()
+    by_no = {r[0]: r for r in rows}
+    case('SR-8 归档行数=2', len(rows) == 2, str(rows))
+    case('SR-8 LEFT JOIN：无住宿记录 → boarding_type 为空',
+         by_no.get('SEC2024001', ('', '', 'x'))[2] in (None, ''))
+    case('SR-8 LEFT JOIN：有住宿记录 → boarding_type=住校',
+         by_no.get('SEC2024002', ('', '', None))[2] == '住校')
+
+
+# ======================================================================
+# SR-9 往届查询数据范围（2026-10-12 全项目审计 P1）
+# ======================================================================
+@item('SR-9')
+def check_SR9():
+    """往届（已毕业年级）查询必须收敛范围（H-2 在往届数据上的复活）。
+
+    2026-10-12 审计：`/dormitory/statistics/alumni`、`/grade-mgmt/alumni`
+    及两条 /history 路由原先零数据范围校验，任意持 statistics.view /
+    system.grade_mgmt 的账号可按毕业年级拉取全校往届住宿/档案。
+    口径与 check_exam_visible 对齐：毕业年级仅 admin/校级/用户级授权可见。
+    """
+    from app.utils.alumni_scope import (alumni_visible_grades,
+                                        filter_alumni_grades,
+                                        assert_alumni_grade_visible)
+
+    with app.app_context():
+        adm = db.session.get(User, uid('admin'))
+        leader = db.session.get(User, uid('leader'))    # 年级长 + 授权 2025级
+        noperm = db.session.get(User, uid('noperm'))    # staff 无权限组 → 无范围
+        case('SR-9 admin 不限毕业年级', alumni_visible_grades(adm) is None)
+        case('SR-9 年级长（用户级授权 2025级）仅见授权年级',
+             alumni_visible_grades(leader) == {'2025级'})
+        case('SR-9 无范围账号毕业年级空集（fail-closed）',
+             alumni_visible_grades(noperm) == set())
+        case('SR-9 下拉收敛：授权 2025 级 → 只见 2025 级',
+             filter_alumni_grades(leader, ['2024级', '2025级']) == ['2025级'])
+        try:
+            assert_alumni_grade_visible(noperm, '2024级')
+            case('SR-9 越界毕业年级抛 PermissionError', False)
+        except PermissionError:
+            case('SR-9 越界毕业年级抛 PermissionError', True)
+
+    with app.test_client() as c:
+        case('SR-9 年级长登录', login_ok(c, 'sec_leader', TEST_PWD).status_code == 200)
+        r = c.get('/statistics/alumni?grade=2024级')
+        case('SR-9 HTTP 越界往届宿舍查询 403', r.status_code == 403,
+             str(r.status_code))
+        r = c.get('/grade-mgmt/alumni?grade=2024级')
+        case('SR-9 HTTP 越界往届生档案查询 403', r.status_code == 403,
+             str(r.status_code))
+        r = c.get('/grade-mgmt/history?grade=2024级')
+        case('SR-9 HTTP 越界历史查询 403', r.status_code == 403, str(r.status_code))
+
+    # admin 旁路用独立 client（同 client 内二次登录时 /login 已 302，取不到 token）
+    with app.test_client() as c2:
+        case('SR-9 admin 登录', login_ok(c2, 'sec_admin', TEST_PWD).status_code == 200)
+        r = c2.get('/grade-mgmt/alumni?grade=2099级')
+        case('SR-9 admin 可查任意毕业年级（旁路）', r.status_code == 200,
+             str(r.status_code))
 
 
 def main(argv):

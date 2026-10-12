@@ -1,4 +1,4 @@
-# StuLink v1.19.5.0 2026-10-10
+# StuLink v1.19.41.2 2026-10-10
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 """备课组长（2026-09-25）。
 
@@ -19,7 +19,7 @@ from flask_login import login_required, current_user
 
 from app.models.academic import DUTY_TEMPLATES, SUBJECT_ORDER
 from app.modules.academic import bp
-from app.modules.academic.services import duty_service as svc
+from app.modules.academic.services import subject_leader_service as svc
 from app.utils.decorators import perm_required
 from app.utils.helpers import log_operation
 

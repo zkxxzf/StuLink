@@ -15,7 +15,7 @@
 | 形态 | 入口 | 说明 |
 |---|---|---|
 | **A. 局域网生产（主应用）** | `run.py` → waitress `0.0.0.0:5000`，HTTP | 默认形态；`SESSION_COOKIE_SECURE=False`；材料在 `app/static/uploads/` |
-| **B. 往届查询站** | `alumni_app/run.py` → **`debug=True` `0.0.0.0:5001`** | 共用 `data/system.db` 用户表、`data/.secret_key`、`data/.encryption_key` |
+| **B. 往届查询站** | `alumni_app/run.py` → 生产模式 `0.0.0.0:5001`；`--dev` 仅 `127.0.0.1`（2026-10-12 收敛） | 共用 `data/system.db` 用户表、`data/.secret_key`、`data/.encryption_key` |
 | **C. Docker** | `Dockerfile` / `docker-compose.yml` | 镜像 `COPY app/`；`alumni` 以 `:ro` 挂载同一 `stulink-data` |
 
 **两条铁律**：① 修鉴权时**后端校验为准**，菜单/按钮隐藏只是提示；② **同类校验不要写两份实现**（模块内联 `if role==` 与 `scope_service` 并存正是漂移来源）。
@@ -98,7 +98,8 @@
 - **修复**：① `debug=False` + waitress，Docker `CMD` 同步改 gunicorn/waitress；② 登录加角色/独立权限白名单；③ 独立 `SECRET_KEY`（仅共享 `ENCRYPTION_KEY`）；④ 身份证只作掩码用途、不在上下文保留明文。
 - **验证**：任课教师账号 POST `:5001/login` 期望 403（当前进入 `/`）；`grep -n "debug=True" alumni_app/run.py` 应为空；访问 `:5001` 触发异常不应返回调试页。
 - **2026-09-23 部分完成（改动点）**：**已做（代码层）**——① `alumni_app/app/auth.py` 新增 `ALUMNI_ALLOWED_ROLES`（默认 `admin,school_viewer,staff,grade_leader`，可用环境变量覆盖）与 `is_alumni_role_allowed()`；② `basic.py::login` 校验口令后**再校验角色白名单**，不在白名单直接 403（此前只验口令）；③ `load_user` 加 `is_active=1` 且校验角色白名单，主站禁用后本站会话同步失效；④ 首页不再把解密后的完整身份证号放进上下文（只留掩码），并 `pop` 掉 `id_card_number`；⑤ 认证异常不再 `except Exception: pass`，改 `logging` 记录（关联 L-5）；⑥ 查询异常不再把 `str(e)` 回传前端（关联 M-12）。`tests/alumni_regression.py`（子进程）+ `tests/sec_regression.py` H-7 断言 5 条全部通过。
-- ⏸ **本轮暂缓（用户 2026-09-23 决定：不动部署形态）**：`alumni_app/run.py:32` 的 `debug=True`（Werkzeug 调试器 PIN 可爆破 → **RCE 级残留风险**）、`alumni_app/Dockerfile:13` 的 CMD、独立 `SECRET_KEY`。下次做法：`debug=False` + 换 waitress/gunicorn、`CMD` 同步、改用独立 `.alumni_secret_key`（仅共享 `ENCRYPTION_KEY`）。
+- ⏸ **本轮暂缓（用户 2026-09-23 决定：不动部署形态）**：`alumni_app/run.py` 的 `debug=True`（Werkzeug 调试器 PIN 可爆破 → **RCE 级残留风险**）、`alumni_app/Dockerfile:13` 的 CMD、独立 `SECRET_KEY`。下次做法：`debug=False` + 换 waitress/gunicorn、`CMD` 同步、改用独立 `.alumni_secret_key`（仅共享 `ENCRYPTION_KEY`）。
+- **2026-10-12 更新（debug 已收敛，非"仍待修"）**：`alumni_app/run.py` 的 `debug=True` **已于此前版本修复** —— `debug_mode = '--dev' in sys.argv`（默认生产模式、`--dev` 才开 debug）；2026-10-12 进一步把 `--dev` 分支收敛到 `host='127.0.0.1'`（生产模式仍 `0.0.0.0`），Werkzeug 调试器不再对局域网可达。**剩余未做仅两项**：① 独立 `SECRET_KEY`（`.alumni_secret_key`，仅共享 `ENCRYPTION_KEY`）；② 非 waitress 服务器（含 `Dockerfile:13` 的 CMD 同步）。
 
 ### [x] H-8. `/static/uploads` 直链守卫可被大小写绕过（Windows），叠加附件类型不限 + 上传仅按扩展名
 - **来源**：01-H-8、03-H6/H7、02-L1
@@ -458,7 +459,7 @@ python scripts/smoke_academic.py          # 业务冒烟：31/31
 
 ### 暂缓项与残留风险（下次优先处理）
 
-1. **H-7 `alumni_app/run.py` 的 `debug=True`** —— **RCE 级**（Werkzeug 调试器 PIN 可爆破），仅一行改动即可消除；同时建议换 waitress/gunicorn + 独立 `SECRET_KEY`。
+1. ~~**H-7 `alumni_app/run.py` 的 `debug=True`**~~ —— **2026-10-12 已修复**：默认生产模式 + `--dev` 收敛到 `127.0.0.1`，调试器 RCE 路径已消除。**剩余仅**：独立 `SECRET_KEY`、非 waitress 服务器（含 `Dockerfile:13` CMD 同步）。
 2. **M-5 随机 IV + 盲索引** —— 身份证密文仍等同弱哈希，可离线字典比对；需幂等迁移脚本（加列 → 回填 → 切查询口径）。
 3. **M-16 / R-3 上传迁出 `static`** —— 设计性缺陷仍在（已修大小写绕过 + 白名单缓解）；需迁至 `instance/uploads` + 下载走鉴权路由 + 迁移 `FormAnswer.file_path`。
 4. **M-9 CSP 切换 enforcing** —— 当前 Report-Only；需先给内联脚本补 nonce 再置 `STULINK_CSP_MODE=enforce`。
@@ -472,3 +473,124 @@ python scripts/smoke_academic.py          # 业务冒烟：31/31
 - **登录会重建会话**（防会话固定）：登录后浏览器页面需重新取 CSRF token（本项目页面由 `base.html` 统一注入，正常不受影响；脚本/对接方需按 README 说明处理）。
 - 改密/重置/禁用后，其它设备的登录状态立即失效；升级后所有在线用户需重新登录一次（会话摘要缺失所致）。
 - 越权访问（跨年级/跨班/无权限）统一返回 403；公开的成绩证明核验页只显示真伪与摘要。
+
+---
+
+## 10. 2026-10-11 主应用侧数据范围缺口（MCP 二轮审计连带整改）
+
+> **来源**：`聊天总结/20261011_批次总结_MCP二轮审计整改_v1.19.5.0.md` 末尾「顺带发现的主应用侧缺口」3 处 + 本轮复核新增 2 处，均为 H-2/H-3「同类校验不得写两份实现」的残留或新增点。
+> **口径**：AI/MCP 可见范围必须等于网页端该账号可见范围；学生查询统一 `app/utils/student_scope.py::apply_student_scope`，宿舍查询统一新增的 `app/utils/dormitory_scope.py`。
+> **2026-10-11 完成（改动点）**：
+
+### [x] SR-1. 学生画像列表未做数据范围过滤（H-3 同类残留）
+- **位置**：`app/modules/portrait/services/portrait_service.py::get_student_list`。
+- **触发/影响**：任何持 `portrait.view` 的账号（班主任/年级长）可按页枚举**全校**学生姓名+画像等级（详情类入口另有 `_assert_student_in_scope` 守卫，列表漏了）。
+- **修复**：`q = Student.query` 之后接入 `apply_student_scope(q)`（H-2 唯一口径）。
+
+### [x] SR-2. 宿舍搜索 `/dormitory/search` 内联角色判断漏 `teacher` 分支（H-2 反模式复活）
+- **位置**：`app/modules/dormitory/routes/dashboard.py::search`。
+- **触发/影响**：原内联 `role=='homeroom_teacher'/'grade_leader'` 分支在 `role=='teacher'`（任课教师）时不命中任何分支 → 全校学生住校信息可枚举。
+- **修复**：删除内联分支，统一走 `apply_student_scope(query)`。
+
+### [x] SR-3. 宿舍房间列表/详情/分配写端点无范围校验（H-2/H-3 同类残留）
+- **位置**：`dormitory/routes/rooms.py`（`list_rooms` / `detail` / `class_bed_requirement` / `report_export`）、`dormitory/routes/assignments.py`（`manage` / `clear_class` / `auto_assign` / `assign` / `unassign` / `move` / `swap`）。
+- **触发/影响**：持 `dormitory.view`/`dormitory.assign` 的班级范围账号可枚举/读取全校宿舍，并**写**范围外班级的床位分配/清空/搬移。
+- **修复**：新增 **`app/utils/dormitory_scope.py`**（宿舍范围唯一口径：`room_scope_query` / `class_in_scope` / `student_in_dorm_scope`，按 admin → 用户级/年级长范围 → 权限组 `scope_type`（school/grade/class）解析，含合班 `+` 拼接班级匹配；未配置范围→空集）。`rooms.py` 列表/导出接 `room_scope_query`、详情/班级床位需求越界 `abort(403)`；`assignments.py` 全部读写端点接 `class_in_scope`/`student_in_dorm_scope`，越界 403。
+
+### [x] SR-4. 宿舍统计年级长可越权查看其它年级（H-2 同类残留）
+- **位置**：`dormitory/routes/statistics.py::index`（SCOPE_GRADE 分支）。
+- **触发/影响**：年级长传 `?grade=<他年级>` 时 `if not sel_grade` 不回落到本人年级 → 可看别的年级宿舍统计。
+- **修复**：SCOPE_GRADE 分支强制 `sel_grade = user_grade or ''`（收敛本人年级）。
+
+### [x] SR-5. 成绩 compare/export 数据范围 fail-open（H-2/H-4 同类残留）
+- **位置**：`grades/routes/analysis.py::api_compare_tab`、`grades/routes/export.py::export_tab`（compare 分支）。
+- **触发/影响**：`if limited:` 在 `visible_classes` 返回**空列表**（有范围但无可见班）时不加过滤 → fail-open，可跨班取数；正确语义应为 fail-closed。
+- **修复**：`if limited:` → `if limited is not None:`（空列表同样收敛为空集）。
+
+### [x] SR-6. `grades/rooms.html` 分组按钮内联处理器单引号未转义（M-10 同类残留）
+- **位置**：`app/templates/grades/rooms.html:29,33`（`onclick="renameGroup({{ g.id }}, '{{ g.name|e }}')"`）。
+- **触发/影响**：分组名含 `'` 时 `&#39;` 交 JS 引擎前还原为 `'` 打断字符串，构成内联处理器 JS 上下文 XSS（`scripts/scan_security_patterns.py` 长期 2 命中、`M-10`/`R-8` 断言长期红）。
+- **修复**：按 M-10 既定口径改 `{{ g.name|tojson }}`；扫描器 0 命中。
+
+**验证（2026-10-11）**：
+```powershell
+python tests/sec_regression.py            # 264 条断言，0 失败（新增 SR 组 14 条；SR-6 修复后原 M-10/R-8 两处红转绿）
+python tests/sec_regression.py SR         # 本轮缺口专项：14/14
+python scripts/scan_security_patterns.py  # 禁扫 0 命中（退出码 0）
+python tests/dormitory_regression.py      # 31/31
+python tests/academic_regression.py       # 298/298
+```
+
+**新增/改造文件**：新增 `app/utils/dormitory_scope.py`；改造 `portrait_service.py`、`dormitory/routes/dashboard.py`、`dormitory/routes/rooms.py`、`dormitory/routes/assignments.py`、`dormitory/routes/statistics.py`、`grades/routes/analysis.py`、`grades/routes/export.py`、`templates/grades/rooms.html`。
+
+**遗留（未改，供后续批次）**：`rooms.py`/`assignments.py` 中仍有零散内联角色判断（`current_user.role == ...`）未全部收敛到 `dormitory_scope`（本次已覆盖有越权面的读写端点）。
+
+---
+
+## 11. 2026-10-12 全项目审计整改（P0 ×3 / P1 ×12 / 结构·部署·数据）
+
+> 来源：`聊天总结/20261012_批次总结_全项目审计_v1.19.41.2.md`。全项目只读审计（4 个子代理 + 8 个验证入口 + 实证复现）后按用户决定全量修复。
+
+### [x] P0-1. 毕业归档 SQL 引用已删列 → 归档 0 人且在校数据照常清空（数据丢失链）
+- 位置：`app/modules/system/routes/grade_mgmt.py`（1.5/1.6 段）。
+- 修复：归档 SELECT 改为 `ATTACH dormitory.db` + `LEFT JOIN student_accommodation`（4 列已迁入该表）；**空归档（students 无记录）与归档失败一律硬中止**（记 `stulink` 错误日志 + `db.session.rollback()` + 返回 500「在校数据未做任何修改」），不再“记日志继续→清数据→标记毕业”。
+- 回归：`tests/sec_regression.py` SR-8（7 条，临时库真跑 `/grade-mgmt/graduate`：空归档 500、正常归档 2 人、LEFT JOIN 有无住宿记录两种路径）。
+- 连带：删除两个引用已删列的过期脚本 `scripts/migrate_accommodation.py`、`scripts/update_boarding_type.py`（使命已完成，全库零引用）。
+
+### [x] P0-2. `get_scope()` 无 admin 特判 → admin 数据范围全面为空
+- 位置：`app/modules/grades/services/scope.py`。
+- 修复：`get_scope` admin 恒返回 `(SCOPE_SCHOOL, None)`；`visible_grades(admin)` → 全部未毕业年级；`visible_classes(admin)` → None（不限班）。与 `check_exam_visible`/`student_in_scope`/`_guard_tab`/`access_scope` 既有 admin 特判同口径。
+- 背景：SR-5 的 `is not None` fail-closed 修复把“admin 无 link → 空列表”也关进去，班级对比/导出 400、分析页考试下拉全空；smoke 因 INIT 演示 `teacher_links.user_id` 与 smokeadm(id=1) 相撞而“假绿”。
+- 回归：SR-7（6 条：裸 admin 三函数 + 登录 + options 下拉 + 班级对比 200）；`scripts/smoke_grades.py` 建账号前清 INIT 演示 links。
+
+### [x] P0-3. `/grades/score-changes` 仅 `@login_required` + exams 列表/new 无年级范围
+- 位置：`app/modules/grades/routes/exams.py`。
+- 修复：score-changes 补 `@perm_required('grades.view')` + `assert_exam_visible`；`/grades/exams` 列表按 `visible_grades` 收敛（无范围→空集）+ 传 grade 先 `assert_grade_visible` + 孤儿考务批次同口径；`/exams/new` POST 前 `assert_grade_visible(grade)`。
+
+### [x] P1-3/4. 四条往届查询路由零数据范围（H-2 复活）
+- 位置：`/statistics/alumni`、`/grade-mgmt/alumni`、两条 `/history`。
+- 修复：新增唯一口径 `app/utils/alumni_scope.py`（毕业年级仅 admin/校级/用户级授权可见；年级长仅本人年级；班主任/任课教师/无范围→空集），下拉收敛 + 查询前 `assert_alumni_grade_visible`（越界 403）。
+- 回归：SR-9（11 条：四类角色 + 下拉收敛 + 三条 HTTP 403 + admin 旁路）。
+
+### [x] P1-5/6. 内联角色判定收口
+- `students.py`：detail/edit/batch-edit/transfer 四处 → `apply_student_scope`（新增 `_student_in_scope()` helper）。修复 staff 系校级账号被误拦、任课教师被误拦、用户级范围被忽略。
+- `assignments.py`：manage/clear_class/auto_assign 三处 → `_homeroom_class_or_default()` + `class_in_scope`；`dormitory_scope._resolve` class 分支补 UserClassLink 空时回落 user 字段（老数据不误伤）。
+- 删除 `workbench/services/scope_service.py` 30 行转发壳，`attendance.py` 三处直连 `wb_scope.class_allowed`。
+
+### [x] P1-7/8. 范围口径统一
+- `ai_service.scope_of`：改为用户级范围 > 组级 school > 组级 grade > 年级长回落 > 班主任 > 任课教师（原按 role 硬判：staff+校级/用户级账号 AI 拿不到数据、自身无年级防线）。
+- `student_query._student_query_in_scope`：用户级范围优先于 `admin or scope=='school'` 短路。
+
+### [x] 部署项
+- `alumni_app/run.py`：`--dev` 收敛 `127.0.0.1`（生产仍 0.0.0.0），Werkzeug 调试器 RCE 路径消除。
+- 文档漂移修正：H-7 暂缓段、第 0 节口径表、第 9 节清单同步“debug 已修，剩 2 项”。
+
+### [x] 结构/数据项
+- 死代码：删 `night_duty_service.py`（193 行孤儿，import 的 NightDuty 模型早已不存在）；`duty.py`/`duty_service.py` 重命名为 `subject_leaders.py`/`subject_leader_service.py`（承载备课组长，同步 academic/__init__.py 与 mcp_server/tools/duty.py）。
+- 迁移登记表：`app/models/migration_log.py` + `scripts/_mig_log.py`（裸 sqlite3、登记失败不阻塞迁移）+ 3 个代表脚本接入（幂等跳过）。
+- Teacher 索引：模型 `__table_args__` 补 user_id/subject/status + `scripts/add_teacher_indexes.py`（幂等/备份/dry-run/_ddl_guard 白名单）。
+- 班级口径：`tests/class_scope_regression.py`（8 条：科目行漂移 class_name 不得进入 classes/totals_of；教师页下拉=当前在籍口径仅 INFO 记录）。
+
+### 验证（2026-10-12，11 个入口全绿）
+```
+tests/sec_regression.py        285/285（新增 SR-7/SR-8/SR-9 共 24 条；原 2 条过期断言改扫描式）
+tests/dormitory_regression.py   31/31
+tests/academic_regression.py   302/302
+tests/alumni_regression.py       9 项全 true
+scripts/smoke_grades.py        135/135（P0-2 修复前 128/135）
+scripts/smoke_permissions.py    38/38
+scripts/smoke_academic.py       60/60
+scripts/scan_security_patterns.py  0 命中
+tests/class_scope_regression.py  8/8
+mcp_server/smoke_mcp.py          40/40（MCP venv）
+read_lints（20 个改动文件）        0 诊断
+```
+
+### 测试环境两处修复（曾掩盖/阻断真实问题）
+1. `sec_regression` 库路径迁至 `_TMP/data/`：grade_mgmt 等裸 sqlite3 代码按 `BASE_DIR/data/` 找库，放根下会 FileNotFound（冒烟从未覆盖 graduate）。
+2. `smoke_grades` 建账号前清 INIT 演示 links：`teacher_subject_links.user_id=1..7` 与首个账号 id 相撞 → admin 范围用例假绿。
+
+### 已知未做（留后续）
+- `night_duties` 表（timetable.db）**有 45 行历史数据**，模型已删、功能已下线：是否 DROP 需用户决定（删除即丢历史值班记录）。
+- 独立 `.alumni_secret_key`、alumni 换 waitress/gunicorn、CSP 转 enforce、uploads 迁出 static、限流持久化、身份证随机 IV + 盲索引、迁移登记表扩大接入面（97 个脚本仅接入 3 个）。
+- 结构治理：9 个 >1000 行文件 + tests/academic_regression.py 2250 行拆分（上一轮流程见 docs/代码结构-大文件拆分.md）。

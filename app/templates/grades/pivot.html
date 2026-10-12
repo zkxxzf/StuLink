@@ -4,10 +4,13 @@
 <link href="{{ su('css/grades.css') }}" rel="stylesheet">
 {% endblock %}
 {% block content %}
+{# v1.19.41.2 考试态：侧栏「成绩分析自由表」带 ?exam=<id>，此前本页完全不读该参数 →
+   停在默认第一场。这里把本场 id 交给 JS（#pvInitialExam），并隐藏年级/考试两个下拉。 #}
+{% set _en = exam_nav() %}
 <div class="g-filter-bar d-flex flex-wrap gap-2 align-items-center mb-3">
     <h5 class="mb-0 me-1"><i class="bi bi-grid-1x2"></i> 自由表</h5>
-    <select id="pvGrade" class="form-select form-select-sm w-auto" title="年级"></select>
-    <select id="pvExam" class="form-select form-select-sm w-auto" style="min-width:230px" title="考试"></select>
+    <select id="pvGrade" class="form-select form-select-sm w-auto{% if _en %} d-none{% endif %}" title="年级"></select>
+    <select id="pvExam" class="form-select form-select-sm w-auto{% if _en %} d-none{% endif %}" style="min-width:230px" title="考试"></select>
     <select id="pvSubject" class="form-select form-select-sm w-auto" title="统计口径"></select>
     <select id="pvDir" class="form-select form-select-sm w-auto" title="方向">
         <option value="">全部方向</option>
@@ -15,6 +18,8 @@
         <option value="历史">历史类</option>
     </select>
 </div>
+{# v1.19.41.2 考试态带入的本场考试 id（非考试态为空） #}
+<span id="pvInitialExam" class="d-none">{{ _en.exam_id if _en else (request.args.get('exam') or request.args.get('exam_id') or '') }}</span>
 
 <div class="card mb-3">
     <div class="card-body py-2">

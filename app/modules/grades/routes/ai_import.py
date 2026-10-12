@@ -140,15 +140,17 @@ def exam_ai_import_analyze(exam_id):
     else:
         ai_err = '未检测到本机 AI Key，已跳过 AI 识别，请在下方手工指定每列的用途'
 
-    # 工作表用途：成绩 / 分数线 / 考生安排 / 考场位置 / 不使用
-    # 考生安排只保留「字段最全」的一张（其余如桌签、粘贴用等打印表默认不使用，防串数据）
+    # 工作表用途：成绩 / 分数线 / 考生安排 / 考场位置 / 座位表 / 不使用
+    # 考生安排只保留「字段最全」的一张；其余学生表若带考场/座号 → 当座位表（仅取容量），
+    # 否则（如粘贴用等打印表）不使用，防串数据
     kinds = {s['name']: aisvc.guess_sheet_kind(s['headers']) for s in sheets}
     stud = [s for s in sheets if kinds[s['name']] == 'affair_students']
     best = (max(stud, key=lambda s: len(aisvc.classify_affair_headers(s['headers'])))
             if stud else None)
     for s in sheets:
         if kinds[s['name']] == 'affair_students' and s is not best:
-            kinds[s['name']] = 'skip'
+            kinds[s['name']] = ('affair_seats' if aisvc.has_seat_cols(s['headers'])
+                                else 'skip')
 
     return jsonify(success=True, token=token,
                    files=[f.filename for f in files],
@@ -388,15 +390,17 @@ def exam_ai_import_apply(exam_id):
     if not payload:
         return jsonify(success=False, message='请至少为一个工作表指定列映射')
 
-    # 按工作表用途分流：成绩 / 分数线（→分层） / 考生安排·考场位置（→本场考务）
+    # 按工作表用途分流：成绩 / 分数线（→分层） / 考生安排·考场位置·座位表（→本场考务）
+    _AFF_KINDS = ('affair_students', 'affair_rooms', 'affair_seats')
     score_items = [it for it in payload
                    if (it.get('score_kind') or 'converted')
-                   not in ('bands', 'skip', 'affair_students', 'affair_rooms')]
+                   not in ('bands', 'skip') + _AFF_KINDS]
     band_items = [it for it in payload if (it.get('score_kind') or '') == 'bands']
     aff_items = [{'_sheet': it['_sheet'], 'mapping': it.get('mapping'),
-                  'kind': 'students' if it.get('score_kind') == 'affair_students' else 'rooms'}
+                  'kind': {'affair_students': 'students', 'affair_rooms': 'rooms',
+                           'affair_seats': 'seats'}.get(it.get('score_kind'))}
                  for it in payload
-                 if (it.get('score_kind') or '') in ('affair_students', 'affair_rooms')]
+                 if (it.get('score_kind') or '') in _AFF_KINDS]
     dry = bool(data.get('dry_run'))
 
     errors = []

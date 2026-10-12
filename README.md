@@ -3,14 +3,14 @@
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
 [![Python](https://img.shields.io/badge/python-3.11+-green.svg)](https://python.org)
 [![Flask](https://img.shields.io/badge/flask-3.x-lightgrey.svg)](https://flask.palletsprojects.com/)
-[![Version](https://img.shields.io/badge/version-1.18.3.0-orange.svg)](https://gitee.com/zkxxzf/StuLink)
+[![Version](https://img.shields.io/badge/version-1.19.41.2-orange.svg)](https://gitee.com/zkxxzf/StuLink)
 
 面向中学的综合学生管理平台，采用双站点 + 七模块 + 多库故障隔离架构：
 
 - **在校生系统（主应用 :5000）**：宿舍自动分配 · 合班管理 · 床位管理 · 学生信息管理 · 批量导入/调班 · 二维权限（功能三档 × 数据范围）· 成绩管理与四大分析（ECharts）· 班级横向对比 · AI 分析（BYOK）· 德育管理 · 教务（教师名单/课表/查课/调课/表单/业绩）· 教师工作台（班级概览/工作记录/考勤/积分/画像）· 通知中心
 - **往届生查询（独立应用 :5001）**：毕业生数据快照查询 · 学习经历变迁 · 宿舍历史
 
-## 功能模块（v1.19.5.0）
+## 功能模块（v1.19.41.2）
 
 | 模块 | 站点 | 状态 | 说明 |
 |------|------|------|------|
@@ -23,6 +23,7 @@
 | ⭐ 德育管理 | 主应用 | ✅ 已完成 | 学生加减分记录 · 规则模板 · 批量导入 · 汇总排名 · 独立数据库（原"积分管理"v1.18.1.0 更名） |
 | 🔔 通知中心 | 主应用 | ✅ 已完成 | 站内通知 · 收件人筛选（年级/班级/角色/教师名单）· 已读回执 · 撤回 |
 | 🔍 往届查询 | 独立应用 | ✅ 已完成 | 毕业生基本信息查询 · 宿舍分配快照 · 学习经历变迁时间线 |
+| 🔌 MCP 服务 | 独立服务 | ✅ 已完成 | 给 AI 客户端（IDE 插件/桌面应用/豆包）开放数据能力 · **30 个工具**（基础/成绩/分析/考勤/课表/宿舍/画像）· 账号密码认证，权限与网页端一致 · 独立容器 `:8765` |
 
 ## 宿舍自动分配算法（V20260805 · v1.8.0 迭代爬山版）
 
@@ -60,13 +61,13 @@
 
 - **后端**：Python 3.11+ / Flask 3.x / Flask-Login / Flask-SQLAlchemy 2.x（多库 binds）/ Waitress / openpyxl / reportlab / python-pptx
 - **前端**：Bootstrap 5 / jQuery / Jinja2 / ECharts（成绩可视化与班级对比）/ Chart.js（画像）
-- **安全（v1.19.5.0）**：
+- **安全（v1.19.41.2）**：
   - **身份**：管理员首启随机口令 + 强制改密 · 一次性初始口令展示 · 会话口令摘要（改密即踢）· IP + 账号双维限流
   - **数据**：AES-256-GCM 身份证与 AI Key 加密 · CSRF 8h 时效 · 二维权限（功能三档 × 数据范围）· 白名单式教师候选过滤
   - **传输**：`url_guard` 出站白名单 + DNS 解析 + 禁 302 跟随 · CSP（Report-Only 起步，可切 enforce）· HTTPS Cookie Secure
   - **输入**：`upload_guard` 4 层（MIME / magic-bytes / 扩展名白名单 / 危险类型）· `text_guard` 考务短标签清洗 · Excel 公式注入防护（`xl_row` 转义）
   - **运维**：`err_safe` 异常脱敏 · `log_mask` 日志身份证/手机号掩码 · `scan_security_patterns.py` CI 正则扫描 · `_ddl_guard` 迁移白名单 · `sec_regression.py` 1274 行 244 断言
-- **部署**：支持 Docker Compose（独立容器）/ 阿里云 ECS / 绿联 NAS / Windows 本地；采用**轻量更新**（不 rebuild 镜像，直接 `docker cp` + `docker restart`）
+- **部署**：支持 Docker Compose（主应用 / 往届查询 / MCP 三容器）/ 阿里云 ECS / 绿联 NAS / Windows 本地；主应用采用**轻量更新**（不 rebuild 镜像，直接 `docker cp` + `docker restart`），MCP 因含独立依赖需**重建镜像**（`Dockerfile.mcp`）
 
 ## 快速开始
 
@@ -78,9 +79,10 @@ python run.py --dev
 # 本地开发 — 往届查询（:5001）
 cd alumni_app && python run.py
 
-# Docker 部署（两个容器）
-docker build -t stulink:v1.19.5.0 .
+# Docker 部署（三个容器：主应用 + 往届查询 + MCP 服务）
+docker build -t stulink:v1.19.41.2 .
 docker build -t stulink-alumni:v1.0.0 ./alumni_app
+docker build -f Dockerfile.mcp -t stulink-mcp:v1.0.0 .
 docker-compose up -d
 ```
 
@@ -148,11 +150,15 @@ StuLink/
 
 ## 版本管理规范
 
-**四段式** `主.次.三.四`（自 v1.18.0.0 起）：
+**四段式** `主.次.三.四`（自 v1.18.0.0 起；规则 2026-10-11 更新）：
 
-- **第三段**：主线维护者 `zkxxzf` 每次改动 +1
-- **第四段**：协助者 `sakay`（飒龘）每次改动 +1
-- **里程碑**：主版本或次版本变动时打 tag；协助者分支合并到 master 后**立即删除支线**
+- **第一段（主）**：重大版本
+- **第二段（次）**：**里程碑版本**——每次变动需**标注里程碑**（打 tag）
+- **第三段**：主线维护者 `zkxxzf` 的**累计改动计数**，每次改动 +1
+- **第四段**：协助者 `sakay`（飒龘）的**累计改动计数**，每次改动 +1
+- **三、四段永不归零**：主版本或次版本升级时，后两段**原样保留**，不重置为 0
+  （例：`1.19.39.2` → 次版本里程碑 `1.20.39.2` → 主版本 `2.20.39.2`）
+- 协助者分支合并到 master 后**立即删除支线**
 
 统一由 `python -m scripts.bump_version <mode>` 执行（支持 `show | zk | sakay | minor | major | set X.Y.Z.W`）。
 
