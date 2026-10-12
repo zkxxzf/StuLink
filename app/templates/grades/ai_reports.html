@@ -3,7 +3,7 @@
 {# 2026-10-12 UI 审计 M8：grades.css 已由 base.html 统一引入 #}
 {% block content %}
 <div class="d-flex align-items-center mb-3 flex-wrap gap-2">
-    {# 2026-10-13（v1.19.47.21）：优先返回来源页（多半是带考试上下文的成绩分析），
+    {# 2026-10-13（v1.19.47.22）：优先返回来源页（多半是带考试上下文的成绩分析），
        直接输入网址进来没有历史时才回落到成绩分析首页 #}
     <a href="{{ url_for('grades.index') }}" class="btn btn-sm btn-outline-secondary" title="返回"
        aria-label="返回"
