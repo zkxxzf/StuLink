@@ -35,7 +35,12 @@
     </h4>
     <div class="d-flex gap-2">
         <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('academic.swap_page') }}"><i class="bi bi-arrow-left"></i> 返回列表</a>
-        {% if d.status == 'pending' %}
+        {% if d.status == 'pending' and d.partner_status == 'pending' and is_partner %}
+        {# 2026-10-12 换课：对方（partner）先确认，确认后才进入教务审批 #}
+        <button class="btn btn-sm btn-success btn-partner-agree"><i class="bi bi-check2-circle"></i> 同意换课</button>
+        <button class="btn btn-sm btn-outline-danger btn-partner-refuse"><i class="bi bi-x-circle"></i> 拒绝</button>
+        {% endif %}
+        {% if d.status == 'pending' and d.partner_status != 'pending' %}
             {# 分级审批：只有当前这一级的审批人能看到通过/驳回 #}
             {% if d.can_review %}
             <button class="btn btn-sm btn-success btn-approve"><i class="bi bi-check-lg"></i> 通过（{{ d.review_step_name }}）{% if d.is_batch %} · 整批 {{ d.batch_count }} 门{% endif %}</button>
@@ -95,6 +100,20 @@
         </div>
     </div>
 </div>
+
+{% if d.exchange_kind %}
+{# 2026-10-12 换课（v1.19.47.8）：对方信息与确认状态 #}
+<div class="alert {% if d.partner_status == 'pending' %}alert-warning{% elif d.partner_status == 'refused' %}alert-danger{% elif d.partner_status == 'agreed' %}alert-success{% else %}alert-info{% endif %} py-2 small mb-3">
+    <i class="bi bi-people-fill"></i> <b>两人换课 · {{ d.exchange_kind_text }}</b>
+    <span class="ms-2">对方教师：<b>{{ d.partner_name or d.partner_uid or '-' }}</b></span>
+    {% if d.partner_entry %}
+    <span class="ms-2">对方课程：{{ d.partner_entry.subject }} · {{ d.partner_entry.grade }}{{ d.partner_entry.class_name }} · {{ weekday_names.get(d.partner_entry.weekday) }}第{{ d.partner_entry.period_number }}节</span>
+    {% endif %}
+    <span class="ms-2">对方确认：<b>{{ d.partner_status_text or '—' }}</b>{% if d.partner_responded_at %} <span class="text-muted">（{{ d.partner_responded_at }}）</span>{% endif %}</span>
+    {% if d.partner_note %}<div class="mt-1">对方备注：{{ d.partner_note }}</div>{% endif %}
+    <div class="mt-1 text-muted">流程：<b>对方确认</b> → 教务审批 → 执行（对方未确认前不会进入教务待审队列）。</div>
+</div>
+{% endif %}
 
 {# ── 调课批次成员（列表里整批只占一条记录，明细在这里看）── #}
 {% if d.is_batch %}
@@ -262,6 +281,7 @@
     "rejectUrl": {{ url_for('academic.swap_reject', swap_id=d.id)|tojson }},
     "executeUrl": {{ url_for('academic.swap_execute', swap_id=d.id)|tojson }},
     "cancelUrl": {{ url_for('academic.swap_cancel', swap_id=d.id)|tojson }},
+    "partnerRespondUrl": {{ url_for('academic.swap_partner_respond', swap_id=d.id)|tojson }},
     "batchCount": {{ d.batch_count }}
 }
 </script>
@@ -293,6 +313,17 @@
         if (!note) { alert('请填写驳回理由'); return; }
         if (rj) rj.hide();
         post(cfg.rejectUrl, { review_note: note });
+    });
+    // 2026-10-12 换课：对方确认（同意 → 进教务审批；拒绝需填原因）
+    $('.btn-partner-agree').on('click', function () {
+        if (!confirm('确认同意这次换课？同意后申请将进入教务审批。')) return;
+        post(cfg.partnerRespondUrl, { action: 'agree', note: '' });
+    });
+    $('.btn-partner-refuse').on('click', function () {
+        var note = prompt('请填写拒绝的原因（对方会收到）：');
+        if (note === null) return;
+        if (!note.trim()) { alert('请填写拒绝的原因'); return; }
+        post(cfg.partnerRespondUrl, { action: 'refuse', note: note.trim() });
     });
 })();
 </script>

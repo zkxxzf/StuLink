@@ -93,7 +93,10 @@
                     <td class="fw-bold">{{ s.applicant_name or '-' }}
                         <div class="text-muted small fw-normal">{{ s.applicant_uid }}</div>
                     </td>
-                    <td><span class="badge bg-{% if s.swap_type == 'personal' %}info text-dark{% else %}secondary{% endif %}">{{ s.swap_type_text }}</span>
+                    <td><span class="badge bg-{% if s.swap_type == 'personal' %}info text-dark{% elif s.swap_type == 'exchange' %}primary{% else %}secondary{% endif %}">{{ s.swap_type_text }}</span>
+                        {% if s.exchange_kind_text %}
+                        <div class="small text-primary mt-1"><i class="bi bi-people"></i> {{ s.exchange_kind_text }}{% if s.partner_name %} · {{ s.partner_name }}{% endif %}</div>
+                        {% endif %}
                         {# 2026-10-10：批量调课按批次折叠成一条记录 —— 一批课整批一次审批/执行 #}
                         {% if s.batch_count and s.batch_count > 1 %}
                         <div class="small text-secondary mt-1"
@@ -123,7 +126,12 @@
                     </td>
                     <td class="small text-muted" style="max-width:150px">{{ s.reason or '' }}</td>
                     <td><span class="pill pill-{{ s.status }}">{{ s.status_text }}</span>
-                        {% if s.status == 'pending' and s.review_step_name %}
+                        {% if s.partner_status == 'pending' %}
+                        <div class="small mt-1 text-warning fw-semibold"><i class="bi bi-hourglass-split"></i> 待对方确认{% if s.partner_name %}（{{ s.partner_name }}）{% endif %}</div>
+                        {% elif s.partner_status_text %}
+                        <div class="small mt-1 text-muted">{{ s.partner_status_text }}</div>
+                        {% endif %}
+                        {% if s.status == 'pending' and s.review_step_name and s.partner_status != 'pending' %}
                         <div class="small mt-1 {% if s.can_review %}text-danger fw-semibold{% else %}text-muted{% endif %}">
                             {% if s.can_review %}待我审 · {% endif %}{{ s.review_step_name }}
                         </div>{% endif %}</td>
@@ -135,6 +143,11 @@
                         <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('academic.swap_detail', swap_id=s.id) }}"
                            title="{% if s.batch_count and s.batch_count > 1 %}本批 {{ s.batch_count }} 门课明细{% else %}详情{% endif %}"><i class="bi bi-eye"></i></a>
                         {% if s.status == 'pending' %}
+                            {# 2026-10-12 换课：对方（我）先确认，确认后才进入教务审批 #}
+                            {% if s.partner_status == 'pending' and s.partner_uid == current_uid %}
+                            <button class="btn btn-sm btn-success btn-partner-agree" data-id="{{ s.id }}" title="同意换课（同意后才进入教务审批）"><i class="bi bi-check2-circle"></i></button>
+                            <button class="btn btn-sm btn-outline-danger btn-partner-refuse" data-id="{{ s.id }}" title="拒绝换课"><i class="bi bi-x-circle"></i></button>
+                            {% endif %}
                             {# 分级审批：只有"当前这一级"的审批人看得到通过/驳回按钮 #}
                             {% if s.can_review %}
                             <button class="btn btn-sm btn-outline-success btn-approve" data-id="{{ s.id }}"
@@ -214,7 +227,8 @@
     "executeUrl": {{ url_for('academic.swap_execute', swap_id=0)|tojson }},
     "cancelUrl": {{ url_for('academic.swap_cancel', swap_id=0)|tojson }},
     "revokeUrl": {{ url_for('academic.swap_revoke', swap_id=0)|tojson }},
-    "detailUrl": {{ url_for('academic.swap_detail', swap_id=0)|tojson }}
+    "detailUrl": {{ url_for('academic.swap_detail', swap_id=0)|tojson }},
+    "partnerRespondUrl": {{ url_for('academic.swap_partner_respond', swap_id=0)|tojson }}
 }
 </script>
 {% endblock %}
@@ -252,6 +266,20 @@
         var n = parseInt($btn.closest('tr').data('batch'), 10) || 0;
         return n > 1 ? ('该调课批次（共 ' + n + ' 门课）') : '该调课申请';
     }
+
+    // 2026-10-12 换课：对方（我）确认 —— 同意后进入教务审批；拒绝需填原因
+    $(document).on('click', '.btn-partner-agree', function () {
+        var id = $(this).data('id');
+        if (!confirm('确认同意这次换课？同意后申请将进入教务审批。')) return;
+        post(urlFor(cfg.partnerRespondUrl, id), { action: 'agree', note: '' }, '已同意');
+    });
+    $(document).on('click', '.btn-partner-refuse', function () {
+        var id = $(this).data('id');
+        var note = prompt('请填写拒绝的原因（对方会收到）：');
+        if (note === null) return;
+        if (!note.trim()) { alert('请填写拒绝的原因'); return; }
+        post(urlFor(cfg.partnerRespondUrl, id), { action: 'refuse', note: note.trim() }, '已拒绝');
+    });
 
     $(document).on('click', '.btn-approve', function () {
         var id = $(this).data('id');

@@ -282,12 +282,132 @@ def swap_apply():
     uid, name = _applicant()
     periods = swap_service.get_periods(sched.id)
     class_opts = _swap_class_options(sched.id)
+    # 2026-10-12 换课：我的课程清单（供换课表单选「我的课」；排除临时调课条目）
+    temp_ids = swap_service._temp_target_ids(sched.id)
+    my_entries = (ScheduleEntry.query
+                  .filter(ScheduleEntry.term_schedule_id == sched.id,
+                          ScheduleEntry.teacher_uid == uid,
+                          ScheduleEntry.is_deleted.is_(False))
+                  .order_by(ScheduleEntry.weekday, ScheduleEntry.period_number).all())
+    my_entries = [e.to_dict() for e in my_entries if e.id not in temp_ids]
     return render_template('academic/swap_apply.html',
                            schedule=sched, periods=periods, class_opts=class_opts,
                            weekdays=WEEKDAY_NAMES,
                            applicant_uid=uid, applicant_name=name,
                            today=date.today().isoformat(),
+                           my_entries=my_entries,
                            chain=swap_service.approval_chain())
+
+
+@bp.route('/swap/exchange/apply', methods=['POST'])
+@login_required
+@perm_required('academic.swap')
+def swap_exchange_apply():
+    """两人换课申请（v1.19.47.8）：换时段 / 换班上课 / 请人代课。
+
+    流程：本人发起 → 对方在调课管理里确认 → 进入教务审批 → 执行。
+    """
+    sched = swap_service.get_active_schedule()
+    if not sched:
+        flash('尚未建立学期课表，无法申请换课', 'warning')
+        return redirect(url_for('academic.swap_page'))
+    uid, name = _applicant()
+    entry_id = request.form.get('entry_id', type=int)
+    entry = db.session.get(ScheduleEntry, entry_id) if entry_id else None
+    if not entry or entry.is_deleted or entry.term_schedule_id != sched.id:
+        flash('原课程不存在或不在当前学期', 'danger')
+        return redirect(url_for('academic.swap_apply'))
+    if not swap_entry_authorizer(current_user)(entry):
+        flash('你只能为自己的课程发起换课', 'danger')
+        return redirect(url_for('academic.swap_apply'))
+    ok, msg, result = swap_service.apply_exchange(
+        applicant_uid=uid, applicant_name=name, entry_id=entry.id,
+        exchange_kind=(request.form.get('exchange_kind') or '').strip(),
+        partner_uid=(request.form.get('partner_uid') or '').strip(),
+        partner_entry_id=request.form.get('partner_entry_id', type=int),
+        is_permanent=_bool_flag(request.form.get('is_permanent')),
+        swap_date=_parse_date(request.form.get('swap_date')),
+        reason=(request.form.get('reason') or '').strip(),
+    )
+    if not ok:
+        db.session.rollback()
+        flash(msg, 'danger')
+        return redirect(url_for('academic.swap_apply') + '#exchange')
+    log_operation(current_user, '新增', '换课申请', result.get('swap_id') or 0,
+                  f'{name} 发起换课：{msg}', module='academic')
+    flash(msg, 'success')
+    return redirect(url_for('academic.swap_detail', swap_id=result['swap_id']))
+
+
+@bp.route('/swap/<int:swap_id>/partner-respond', methods=['POST'])
+@login_required
+@perm_required('academic.swap')
+def swap_partner_respond(swap_id):
+    """换课「对方确认」：同意 / 拒绝（仅对方本人或管理员可操作）。"""
+    sw = db.session.get(ScheduleSwap, swap_id)
+    if not sw:
+        abort(404)
+    uid, _ = _applicant()
+    if not (current_user.role == 'admin' or uid == sw.partner_uid):
+        flash('只有对方本人可以确认该换课申请', 'danger')
+        return redirect(url_for('academic.swap_detail', swap_id=swap_id))
+    action = (request.form.get('action') or '').strip()
+    note = (request.form.get('note') or '').strip()
+    ok, msg, _ = swap_service.respond_exchange(
+        swap_id, action, current_user.id,
+        current_user.real_name or current_user.username or '', note)
+    if ok:
+        log_operation(current_user, '审核' if action == 'agree' else '驳回',
+                      '换课确认', swap_id, msg, module='academic')
+    flash(msg, 'success' if ok else 'danger')
+    return redirect(url_for('academic.swap_detail', swap_id=swap_id))
+
+
+@bp.route('/api/swap/partner-entries')
+@login_required
+@perm_required('academic.swap')
+def api_swap_partner_entries():
+    """某位教师本学期课表条目（换课选「对方的课」用；排除临时调课产生的条目）。"""
+    uid = (request.args.get('uid') or '').strip()
+    if not uid:
+        return jsonify({'success': False, 'message': '缺少 uid 参数'}), 400
+    sched = swap_service.get_active_schedule()
+    if not sched:
+        return jsonify({'success': True, 'message': 'ok', 'data': {'entries': []}})
+    temp_ids = swap_service._temp_target_ids(sched.id)
+    rows = (ScheduleEntry.query
+            .filter(ScheduleEntry.term_schedule_id == sched.id,
+                    ScheduleEntry.teacher_uid == uid,
+                    ScheduleEntry.is_deleted.is_(False))
+            .order_by(ScheduleEntry.weekday, ScheduleEntry.period_number).all())
+    entries = [e.to_dict() for e in rows if e.id not in temp_ids]
+    return jsonify({'success': True, 'message': 'ok',
+                    'data': {'entries': entries, 'schedule_id': sched.id}})
+
+
+@bp.route('/api/swap/partner-teachers')
+@login_required
+@perm_required('academic.swap')
+def api_swap_partner_teachers():
+    """本学期有课表条目的教师清单（换课选对象用）：uid / 姓名 / 节次数。"""
+    sched = swap_service.get_active_schedule()
+    if not sched:
+        return jsonify({'success': True, 'message': 'ok', 'data': {'teachers': []}})
+    rows = (ScheduleEntry.query
+            .filter(ScheduleEntry.term_schedule_id == sched.id,
+                    ScheduleEntry.teacher_uid.isnot(None),
+                    ScheduleEntry.is_deleted.is_(False))
+            .with_entities(ScheduleEntry.teacher_uid, ScheduleEntry.teacher_name)
+            .all())
+    my_uid, _ = _applicant()
+    seen = {}
+    for t_uid, t_name in rows:
+        if not t_uid or t_uid == my_uid:
+            continue
+        d = seen.setdefault(t_uid, {'uid': t_uid, 'name': t_name or '', 'count': 0})
+        d['count'] += 1
+    teachers = sorted(seen.values(), key=lambda x: (x['name'] or '', x['uid']))
+    return jsonify({'success': True, 'message': 'ok', 'data': {'teachers': teachers}})
 
 
 @bp.route('/swap/bulk', methods=['GET', 'POST'])
@@ -377,8 +497,15 @@ def swap_detail(swap_id):
         abort(404)
     is_reviewer = _is_reviewer()
     uid, _ = _applicant()
+    # 2026-10-12 换课：对方（partner）本人也要能打开详情（确认按钮在详情页）
+    is_partner = bool(d.get('partner_uid') and d.get('partner_uid') == uid)
+    if d.get('partner_entry_id'):
+        _pe = db.session.get(ScheduleEntry, d['partner_entry_id'])
+        d['partner_entry'] = _pe.to_dict() if _pe else None
+    else:
+        d['partner_entry'] = None
     # 一级审批人（年级长）也要能打开详情，否则点不进去审批
-    if not (is_reviewer or _can_approve()) and d.get('applicant_uid') != uid:
+    if not (is_reviewer or _can_approve() or is_partner) and d.get('applicant_uid') != uid:
         abort(403)
     # 数据范围：非全校口径的审批人（如年级长）不得打开外年级的调课详情
     if not is_reviewer and d.get('applicant_uid') != uid:
@@ -403,6 +530,7 @@ def swap_detail(swap_id):
     return render_template('academic/swap_detail.html',
                            d=d, is_reviewer=is_reviewer,
                            is_owner=(d.get('applicant_uid') == uid),
+                           is_partner=is_partner,
                            status_map=SWAP_STATUS, weekday_names=WEEKDAY_NAMES,
                            chain=steps, cur_step=cur,
                            approvals=d.get('approvals') or [])

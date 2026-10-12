@@ -1788,6 +1788,201 @@ def check_inspection_mark():
              f'{r.status_code}/leaked={leaked}')
 
 
+@item('SWAPEXCH')
+def check_two_person_exchange():
+    """两人换课（v1.19.47.8）：换时段 / 换班上课 / 请人代课 × 临时与永久，
+    覆盖「对方先确认 → 教务审批 → 执行」全链路 + 拒绝 / 越权 / 校验路径。"""
+    from app.modules.academic.services import swap_service
+
+    class _Admin:
+        role = 'admin'
+        id = 1
+
+        def has_perm(self, k):
+            return True
+
+    def _mk(g, cn, wd, pn, subj, tuid, tname):
+        e = ScheduleEntry(term_schedule_id=TS_ID, grade=g, class_name=cn,
+                          weekday=wd, period_number=pn, subject=subj,
+                          teacher_uid=tuid, teacher_name=tname,
+                          week_range='1-20', entry_type='normal')
+        db.session.add(e)
+        return e
+
+    swap_ids, entry_ids = [], []
+    with app.app_context():
+        # ── ① 换时段（临时）：申请 → 未确认不能审 → 同意 → 审批 → 执行 ──
+        a1 = _mk('高二', '01班', 1, 1, '语文', 'TX0001', '甲语文')
+        b1 = _mk('高二', '02班', 2, 2, '数学', 'TX0002', '乙数学')
+        db.session.commit()
+        entry_ids += [a1.id, b1.id]
+        ok, msg, res = swap_service.apply_exchange(
+            applicant_uid='TX0001', applicant_name='甲语文', entry_id=a1.id,
+            exchange_kind='time', partner_uid='TX0002', partner_entry_id=b1.id,
+            is_permanent=False, swap_date=date(2026, 10, 14), reason='换时段回归')
+        sid = res.get('swap_id')
+        swap_ids.append(sid)
+        sw = db.session.get(ScheduleSwap, sid) if sid else None
+        case('换课·换时段：申请创建成功（待对方确认 / 类型=两人换课）',
+             bool(ok and sw and sw.exchange_kind == 'time' and sw.swap_type == 'exchange'
+                  and sw.partner_status == 'pending'), f'{msg} {res}')
+        admin = _Admin()
+        case('换课·换时段：对方未确认前，教务审不了（不进待审队列）',
+             bool(sw) and not swap_service.can_review(sw, admin),
+             f'partner_status={sw.partner_status if sw else None}')
+        ok_r, msg_r, _ = swap_service.respond_exchange(sid, 'agree', 1, '乙数学')
+        db.session.expire_all()
+        sw = db.session.get(ScheduleSwap, sid)
+        case('换课·换时段：对方同意后进入教务审批队列',
+             bool(ok_r and sw.partner_status == 'agreed'
+                  and swap_service.can_review(sw, admin)), f'{msg_r}')
+        swap_service.review_swap(sid, 1, '教务主任', 'approve')
+        swap_service.review_swap(sid, 1, '课表管理', 'approve')
+        db.session.expire_all()
+        sw = db.session.get(ScheduleSwap, sid)
+        case('换课·换时段：两级审批通过 → 已通过（待执行）',
+             sw.status == 'approved', f'status={sw.status}')
+        ok_e, msg_e, _ = swap_service.execute_swap(sid, 1, '课表管理')
+        db.session.expire_all()
+        sw = db.session.get(ScheduleSwap, sid)
+        t1 = db.session.get(ScheduleEntry, sw.target_entry_id) if sw.target_entry_id else None
+        t2 = (db.session.get(ScheduleEntry, sw.partner_target_entry_id)
+              if sw.partner_target_entry_id else None)
+        wd = date(2026, 10, 14).isoweekday()  # 周三 → 3
+        case('换课·换时段：执行生成两条当天条目（各自落到对方节次）',
+             bool(ok_e and t1 and t2 and t1.weekday == wd and t1.period_number == 2
+                  and t1.class_name == '01班' and t1.teacher_uid == 'TX0001'
+                  and t2.weekday == wd and t2.period_number == 1
+                  and t2.class_name == '02班' and t2.teacher_uid == 'TX0002'),
+             f'{msg_e} t1={t1} t2={t2}')
+        eff = swap_service.resolve_effective_entry(TS_ID, '高二', '01班', wd, 2,
+                                                   date(2026, 10, 14))
+        case('换课·换时段：实时课表按对调后生效（01班 周三第2节 = 甲的课）',
+             bool(eff and eff.get('teacher_uid') == 'TX0001'), f'{eff}')
+        case('换课·换时段：两条临时条目都不进常规周课表',
+             bool(t1 and t2 and swap_service._temp_target_ids(TS_ID).issuperset({t1.id, t2.id})),
+             'temp-target-ids')
+
+        # ── ② 请人代课（临时）：只换教师，时间班级不动 ──
+        a2 = _mk('高二', '03班', 4, 1, '英语', 'TX0001', '甲语文')
+        db.session.commit()
+        entry_ids.append(a2.id)
+        ok2, msg2, res2 = swap_service.apply_exchange(
+            applicant_uid='TX0001', applicant_name='甲语文', entry_id=a2.id,
+            exchange_kind='cover', partner_uid='TX0002',
+            is_permanent=False, swap_date=date(2026, 10, 15), reason='代课回归')
+        sid2 = res2.get('swap_id')
+        swap_ids.append(sid2)
+        swap_service.respond_exchange(sid2, 'agree', 2, '乙数学')
+        swap_service.review_swap(sid2, 1, '教务主任', 'approve')
+        swap_service.review_swap(sid2, 1, '课表管理', 'approve')
+        ok_e2, msg_e2, _ = swap_service.execute_swap(sid2, 1, '课表管理')
+        db.session.expire_all()
+        sw2 = db.session.get(ScheduleSwap, sid2)
+        c1 = db.session.get(ScheduleEntry, sw2.target_entry_id) if sw2.target_entry_id else None
+        case('换课·请人代课：执行后只有一条当天条目，教师换成对方（时间/班级不变）',
+             bool(ok_e2 and c1 and c1.teacher_uid == 'TX0002' and c1.period_number == 1
+                  and c1.class_name == '03班' and not sw2.partner_target_entry_id),
+             f'{msg_e2} c1={c1}')
+
+        # ── ③ 换班上课（永久）：两条原条目软删，新条目整体对调 ──
+        a3 = _mk('高二', '05班', 1, 3, '语文', 'TX0001', '甲语文')
+        b3 = _mk('高二', '06班', 3, 5, '语文', 'TX0002', '乙数学')
+        db.session.commit()
+        entry_ids += [a3.id, b3.id]
+        ok3, msg3, res3 = swap_service.apply_exchange(
+            applicant_uid='TX0001', applicant_name='甲语文', entry_id=a3.id,
+            exchange_kind='class', partner_uid='TX0002', partner_entry_id=b3.id,
+            is_permanent=True, reason='换班回归')
+        sid3 = res3.get('swap_id')
+        swap_ids.append(sid3)
+        swap_service.respond_exchange(sid3, 'agree', 2, '乙数学')
+        swap_service.review_swap(sid3, 1, '教务主任', 'approve')
+        swap_service.review_swap(sid3, 1, '课表管理', 'approve')
+        ok_e3, msg_e3, _ = swap_service.execute_swap(sid3, 1, '课表管理')
+        db.session.expire_all()
+        o1 = db.session.get(ScheduleEntry, a3.id)
+        o2 = db.session.get(ScheduleEntry, b3.id)
+        sw3 = db.session.get(ScheduleSwap, sid3)
+        n1 = db.session.get(ScheduleEntry, sw3.target_entry_id)
+        n2 = db.session.get(ScheduleEntry, sw3.partner_target_entry_id)
+        case('换课·换班（永久）：原条目软删 + 新条目整体对调（我上对方的课）',
+             bool(ok_e3 and o1.is_deleted and o2.is_deleted
+                  and n1.weekday == 3 and n1.period_number == 5
+                  and n1.class_name == '06班' and n1.teacher_uid == 'TX0001'
+                  and n2.weekday == 1 and n2.period_number == 3
+                  and n2.class_name == '05班' and n2.teacher_uid == 'TX0002'),
+             f'{msg_e3}')
+
+        # ── ④ 对方拒绝 → 驳回并带原因；且不能重复响应 ──
+        a4 = _mk('高二', '07班', 1, 4, '化学', 'TX0001', '甲语文')
+        b4 = _mk('高二', '08班', 2, 4, '化学', 'TX0002', '乙数学')
+        db.session.commit()
+        entry_ids += [a4.id, b4.id]
+        _ok4, _msg4, res4 = swap_service.apply_exchange(
+            applicant_uid='TX0001', applicant_name='甲语文', entry_id=a4.id,
+            exchange_kind='time', partner_uid='TX0002', partner_entry_id=b4.id,
+            is_permanent=True, reason='拒绝回归')
+        sid4 = res4.get('swap_id')
+        swap_ids.append(sid4)
+        ok_r4, msg_r4, _ = swap_service.respond_exchange(sid4, 'refuse', 2, '乙数学',
+                                                         note='那天我有事')
+        db.session.expire_all()
+        sw4 = db.session.get(ScheduleSwap, sid4)
+        case('换课：对方拒绝 → 记录驳回并带原因（不可重复响应）',
+             bool(ok_r4 and sw4.partner_status == 'refused' and sw4.status == 'rejected'
+                  and '对方不同意' in (sw4.review_note or '')
+                  and not swap_service.respond_exchange(sid4, 'agree', 2, '乙数学')[0]),
+             f'{msg_r4} {sw4.status}/{sw4.partner_status}')
+
+        # ── ⑤ 校验：非本人发起 / 同一节课重复提交 / 单双周不同 ──
+        ok5, msg5, _ = swap_service.apply_exchange(
+            applicant_uid='TX9999', applicant_name='别人', entry_id=a4.id,
+            exchange_kind='cover', partner_uid='TX0002',
+            is_permanent=True, reason='越权回归')
+        case('换课：非授课教师本人发起 → 拒绝', (not ok5) and '本人' in msg5, msg5)
+        a5 = _mk('高二', '09班', 2, 1, '生物', 'TX0001', '甲语文')
+        b5 = _mk('高二', '10班', 3, 1, '生物', 'TX0002', '乙数学')
+        db.session.commit()
+        entry_ids += [a5.id, b5.id]
+        _ok_a, _msg_a, res_a = swap_service.apply_exchange(
+            applicant_uid='TX0001', applicant_name='甲语文', entry_id=a5.id,
+            exchange_kind='time', partner_uid='TX0002', partner_entry_id=b5.id,
+            is_permanent=True, reason='重复回归一')
+        swap_ids.append(res_a.get('swap_id'))
+        ok_b, msg_b, _ = swap_service.apply_exchange(
+            applicant_uid='TX0001', applicant_name='甲语文', entry_id=a5.id,
+            exchange_kind='time', partner_uid='TX0002', partner_entry_id=b5.id,
+            is_permanent=True, reason='重复回归二')
+        case('换课：同一节课已有待处理申请 → 拒绝重复提交',
+             (not ok_b) and '待处理' in msg_b, msg_b)
+        a6 = _mk('高二', '11班', 4, 2, '地理', 'TX0001', '甲语文')
+        b6 = _mk('高二', '12班', 5, 2, '地理', 'TX0002', '乙数学')
+        b6.week_range = '2-20'
+        db.session.commit()
+        entry_ids += [a6.id, b6.id]
+        ok7, msg7, _ = swap_service.apply_exchange(
+            applicant_uid='TX0001', applicant_name='甲语文', entry_id=a6.id,
+            exchange_kind='time', partner_uid='TX0002', partner_entry_id=b6.id,
+            is_permanent=True, reason='单双周回归')
+        case('换课：两节课单双周设置不同 → 拒绝',
+             (not ok7) and '单双周' in msg7, msg7)
+
+        # ── 清理本次自建数据（临时库，保持其他项互不干扰）──
+        for eid in entry_ids:
+            e = db.session.get(ScheduleEntry, eid)
+            if e:
+                db.session.delete(e)
+        for t in ScheduleEntry.query.filter(
+                ScheduleEntry.note.like('%换课%'), ScheduleEntry.note.isnot(None)).all():
+            db.session.delete(t)
+        for one in [i for i in swap_ids if i]:
+            s = db.session.get(ScheduleSwap, one)
+            if s:
+                db.session.delete(s)
+        db.session.commit()
+
+
 @item('SWAPCHAIN')
 def check_swap_chain():
     """调课：分级审批（经过谁）+ 调休（日期 + 那天周几的课）+ 目标候选检测。"""

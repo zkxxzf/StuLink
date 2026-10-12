@@ -14,7 +14,15 @@ from app.extensions import db
 SCHEDULE_STATUS = {'draft': '未启用', 'active': '启用中', 'archived': '已归档'}
 ENTRY_TYPES = {'normal': '正常', 'swap': '调课'}
 SWAP_STATUS = {'pending': '待审核', 'approved': '已通过', 'rejected': '已驳回', 'executed': '已执行'}
-SWAP_TYPES = {'personal': '个人调课', 'bulk': '统一调课'}
+SWAP_TYPES = {'personal': '个人调课', 'bulk': '统一调课', 'exchange': '两人换课'}
+# 2026-10-12（v1.19.47.8）两人换课：三种类型（用户口径）
+EXCHANGE_KINDS = {
+    'time': '换时段',      # 两节课的时间对调（各自仍上自己的班与学科）
+    'class': '换班上课',   # 两节课整体对调：我上对方的课、对方上我的课（时间/班级/学科一起换）
+    'cover': '请人代课',   # 只换授课教师（时间、班级不变；可临时一天或整学期）
+}
+# 换课「对方确认」状态
+PARTNER_STATUS = {'pending': '待对方确认', 'agreed': '对方已同意', 'refused': '对方已拒绝'}
 PERIOD_TYPES = {'morning': '上午', 'afternoon': '下午', 'evening': '晚自习', 'break': '课间/午休'}
 WEEKDAY_NAMES = {1: '周一', 2: '周二', 3: '周三', 4: '周四', 5: '周五', 6: '周六', 7: '周日'}
 # 2026-10-10：原 `MAX_PERIOD = 13`（"一天最多 13 节"）已删除 —— **一天几节由学校自己定，
@@ -392,6 +400,18 @@ class ScheduleSwap(db.Model):
     # 2026-10-10：统一调课批次号 —— 同一次「统一调课」生成的多条记录共享同一 batch_id，
     # 列表按批次展示、整批一次性审批/执行，避免几十条一个个点。
     batch_id = db.Column(db.String(32), index=True)
+    # ── 2026-10-12（v1.19.47.8）两人换课 ───────────────────────────────────
+    # exchange_kind：换课类型（EXCHANGE_KINDS）；空 = 普通调课（含旧数据与统一调课）
+    exchange_kind = db.Column(db.String(10))
+    partner_uid = db.Column(db.String(16))            # 对方教师编号（换课 / 代课对象）
+    partner_name = db.Column(db.String(50))           # 对方教师姓名（快照，防改名失联）
+    partner_entry_id = db.Column(db.Integer)          # 对方课表条目 id（换时段/换班；代课为空）
+    # 对方确认：None=不涉及（普通调课）/ pending=待对方确认 / agreed=已同意 / refused=已拒绝
+    partner_status = db.Column(db.String(10))
+    partner_note = db.Column(db.String(200))          # 对方回复备注（拒绝理由等）
+    partner_responded_at = db.Column(db.DateTime)
+    # 对方侧落位条目 id（临时换课生成两条「当天」条目；永久换课生成两条新条目）
+    partner_target_entry_id = db.Column(db.Integer)
     created_at = db.Column(db.DateTime, default=datetime.now)
 
     __table_args__ = (
@@ -421,6 +441,19 @@ class ScheduleSwap(db.Model):
             'approval_step': self.approval_step or 0,
             'approvals': self.approvals(),
             'batch_id': self.batch_id,
+            'exchange_kind': self.exchange_kind,
+            'exchange_kind_text': (EXCHANGE_KINDS.get(self.exchange_kind, '')
+                                   if self.exchange_kind else ''),
+            'partner_uid': self.partner_uid,
+            'partner_name': self.partner_name,
+            'partner_entry_id': self.partner_entry_id,
+            'partner_status': self.partner_status,
+            'partner_status_text': (PARTNER_STATUS.get(self.partner_status, '')
+                                    if self.partner_status else ''),
+            'partner_note': self.partner_note,
+            'partner_responded_at': (self.partner_responded_at.strftime('%Y-%m-%d %H:%M:%S')
+                                     if self.partner_responded_at else None),
+            'partner_target_entry_id': self.partner_target_entry_id,
             'is_permanent': self.is_permanent,
             'reason': self.reason,
             'status': self.status,

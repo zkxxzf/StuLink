@@ -179,12 +179,31 @@ def temp_target_ids(schedule_id):
             g._temp_target_ids_cache = cache
         if schedule_id in cache:
             return cache[schedule_id]
-    rows = (ScheduleSwap.query
-            .filter(ScheduleSwap.term_schedule_id == schedule_id,
-                    ScheduleSwap.is_permanent.is_(False),
-                    ScheduleSwap.target_entry_id.isnot(None))
-            .with_entities(ScheduleSwap.target_entry_id).all())
-    out = {r[0] for r in rows if r[0]}
+    rows = None
+    out = None
+    # v1.19.47.8 换课：临时换课会同时产生「我方 / 对方」两条当天条目，两条都要排除；
+    # 列未迁移的历史库降级为旧口径（只排除我方），不让课表读路径因缺列而崩。
+    try:
+        rows = (ScheduleSwap.query
+                .filter(ScheduleSwap.term_schedule_id == schedule_id,
+                        ScheduleSwap.is_permanent.is_(False),
+                        db.or_(ScheduleSwap.target_entry_id.isnot(None),
+                               ScheduleSwap.partner_target_entry_id.isnot(None)))
+                .with_entities(ScheduleSwap.target_entry_id,
+                               ScheduleSwap.partner_target_entry_id).all())
+        out = set()
+        for a, b in rows:
+            if a:
+                out.add(a)
+            if b:
+                out.add(b)
+    except Exception:  # noqa: BLE001 列未迁移（no such column）时降级
+        rows = (ScheduleSwap.query
+                .filter(ScheduleSwap.term_schedule_id == schedule_id,
+                        ScheduleSwap.is_permanent.is_(False),
+                        ScheduleSwap.target_entry_id.isnot(None))
+                .with_entities(ScheduleSwap.target_entry_id).all())
+        out = {r[0] for r in rows if r[0]}
     if cache is not None:
         cache[schedule_id] = out
     return out

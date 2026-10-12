@@ -189,6 +189,78 @@
     </div>
 </form>
 
+{# ══ 2026-10-12 两人换课（v1.19.47.8）：换时段 / 换班上课 / 请人代课 ══ #}
+<div class="step-card mt-4" id="exchangeCard">
+    <div class="step-head">
+        <div class="step-num">⇄</div>
+        <div class="step-title">两人换课（对方确认 → 教务审批 → 执行）
+            <div class="step-hint">
+                和另一位老师<b>对调</b>，或请人来上你这节课：提交后对方先确认，之后才进入教务审批。
+                一次提交一条（多节请分次提交）。
+            </div>
+        </div>
+    </div>
+    <form method="POST" action="{{ url_for('academic.swap_exchange_apply') }}" id="exchangeForm">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <input type="hidden" name="entry_id" id="exMyEntry" value="">
+        <input type="hidden" name="partner_entry_id" id="exPartnerEntry" value="">
+        <div class="row g-2">
+            <div class="col-md-3">
+                <label class="form-label small mb-1">换课类型 <span class="text-danger">*</span></label>
+                <select name="exchange_kind" id="exKind" class="form-select form-select-sm" required>
+                    <option value="time">换时段（两节课的时间对调）</option>
+                    <option value="class">换班上课（我上对方的课、对方上我的课）</option>
+                    <option value="cover">请人代课（对方来上我这节课）</option>
+                </select>
+            </div>
+            <div class="col-md-4">
+                <label class="form-label small mb-1">我的课 <span class="text-danger">*</span></label>
+                <select id="exMyPick" class="form-select form-select-sm" required>
+                    {% if not my_entries %}<option value="">（本学期你没有课表条目）</option>{% endif %}
+                    {% for e in my_entries %}
+                    <option value="{{ e.id }}">{{ weekdays.get(e.weekday) }}第{{ e.period_number }}节 · {{ e.subject }} · {{ e.grade }}{{ e.class_name }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="col-md-3">
+                <label class="form-label small mb-1">对方教师 <span class="text-danger">*</span></label>
+                <select name="partner_uid" id="exPartner" class="form-select form-select-sm" required>
+                    <option value="">加载中…</option>
+                </select>
+            </div>
+            <div class="col-md-2" id="exPartnerEntryWrap">
+                <label class="form-label small mb-1">对方的课 <span class="text-danger">*</span></label>
+                <select id="exPartnerPick" class="form-select form-select-sm">
+                    <option value="">先选对方教师</option>
+                </select>
+            </div>
+        </div>
+        <div class="row g-2 mt-1">
+            <div class="col-md-3">
+                <label class="form-label small mb-1">生效范围</label>
+                <select name="is_permanent" id="exScope" class="form-select form-select-sm">
+                    <option value="0">临时（只改某一天）</option>
+                    <option value="1">永久（整学期课表）</option>
+                </select>
+            </div>
+            <div class="col-md-3" id="exDateWrap">
+                <label class="form-label small mb-1">换课日期 <span class="text-danger">*</span></label>
+                <input type="date" name="swap_date" id="exDate" class="form-control form-control-sm" value="{{ today }}">
+            </div>
+            <div class="col-md-6">
+                <label class="form-label small mb-1">理由 <span class="text-danger">*</span></label>
+                <input type="text" name="reason" class="form-control form-control-sm" maxlength="200" required
+                       placeholder="如：周三上午有教研活动，想和周四的课对调">
+            </div>
+        </div>
+        <div id="exPreview" class="alert alert-light border mt-3 mb-2 small">选好「我的课」和对方的课后，这里会显示对调预览。</div>
+        <div class="d-flex gap-2 align-items-center">
+            <button type="submit" class="btn btn-primary btn-sm"><i class="bi bi-send"></i> 发起换课（等对方确认）</button>
+            <span class="text-muted small">提交后对方会在通知中心与调课管理里看到，确认后才进入教务审批。</span>
+        </div>
+    </form>
+</div>
+
 <script id="applyData" type="application/json">
 {
     "entriesUrl": {{ url_for('academic.api_swap_entries')|tojson }},
@@ -196,7 +268,10 @@
     "gradeClasses": {{ class_opts.grade_classes|tojson }},
     "weekdays": {{ weekdays|tojson }},
     "myUid": {{ applicant_uid|tojson }},
-    "myName": {{ applicant_name|tojson }}
+    "myName": {{ applicant_name|tojson }},
+    "myEntries": {{ my_entries|tojson }},
+    "partnerTeachersUrl": {{ url_for('academic.api_swap_partner_teachers')|tojson }},
+    "partnerEntriesUrl": {{ url_for('academic.api_swap_partner_entries')|tojson }}
 }
 </script>
 {% endblock %}
@@ -624,6 +699,84 @@
         renderPicked();
         renderEditor();
         renderSummary();
+    })();
+
+    // ── 2026-10-12 两人换课（v1.19.47.8）────────────────────────────────
+    (function exchange() {
+        var $kind = $('#exKind'), $partner = $('#exPartner'), $pick = $('#exPartnerPick');
+        if (!$kind.length) { return; }
+        function isCover() { return $kind.val() === 'cover'; }
+        function selText($sel) {
+            var t = $sel.find('option:selected').text();
+            return ($sel.val() && t) ? t : '';
+        }
+        function syncCover() {
+            $('#exPartnerEntryWrap').toggle(!isCover());
+            $pick.prop('required', !isCover());
+        }
+        function syncScope() {
+            var perm = $('#exScope').val() === '1';
+            $('#exDateWrap').toggle(!perm);
+            $('#exDate').prop('required', !perm);
+        }
+        function loadTeachers() {
+            $.getJSON(cfg.partnerTeachersUrl).done(function (res) {
+                var list = (res && res.data && res.data.teachers) || [];
+                var html = '<option value="">请选择…</option>';
+                list.forEach(function (t) {
+                    html += '<option value="' + t.uid + '">' + t.name
+                        + '（本学期 ' + t.count + ' 节）</option>';
+                });
+                $partner.html(html);
+            }).fail(function () { $partner.html('<option value="">加载失败，请刷新重试</option>'); });
+        }
+        function loadPartnerEntries(uid) {
+            if (!uid) { $pick.html('<option value="">先选对方教师</option>'); return; }
+            $pick.html('<option value="">加载中…</option>');
+            $.getJSON(cfg.partnerEntriesUrl, { uid: uid }).done(function (res) {
+                var list = (res && res.data && res.data.entries) || [];
+                var html = list.length
+                    ? '<option value="">请选择对方的课…</option>'
+                    : '<option value="">（对方本学期没有可对调的课）</option>';
+                list.forEach(function (e) {
+                    html += '<option value="' + e.id + '">' + (e.weekday_text || '')
+                        + '第' + e.period_number + '节 · ' + e.subject + ' · '
+                        + e.grade + e.class_name + '</option>';
+                });
+                $pick.html(html);
+            }).fail(function () { $pick.html('<option value="">加载失败，请刷新重试</option>'); });
+        }
+        function preview() {
+            var mine = (cfg.myEntries || []).filter(function (e) {
+                return String(e.id) === String($('#exMyEntry').val());
+            })[0];
+            var kindText = selText($kind);
+            if (!mine) { $('#exPreview').text('请先选择「我的课」。'); return; }
+            var txt = '我的课：' + (mine.weekday_text || '') + '第' + mine.period_number + '节 · '
+                + mine.subject + ' · ' + mine.grade + mine.class_name;
+            if (isCover()) {
+                txt += '　→　由 ' + (selText($partner) || '（未选对方）') + ' 来上';
+            } else {
+                txt += '　⇄　对方的课：' + (selText($pick) || '（未选）');
+            }
+            $('#exPreview').text(txt + '　【' + kindText + '】');
+        }
+        $kind.on('change', function () { syncCover(); preview(); });
+        $('#exScope').on('change', syncScope);
+        $('#exMyPick').on('change', function () { $('#exMyEntry').val($(this).val()); preview(); });
+        $partner.on('change', function () { loadPartnerEntries($(this).val()); preview(); });
+        $pick.on('change', function () { preview(); });
+        $('#exchangeForm').on('submit', function (e) {
+            $('#exMyEntry').val($('#exMyPick').val());
+            if (!$('#exMyEntry').val()) { e.preventDefault(); alert('请选择「我的课」'); return; }
+            if (!$partner.val()) { e.preventDefault(); alert('请选择对方教师'); return; }
+            if (!isCover() && !$pick.val()) { e.preventDefault(); alert('请选择对方的课'); return; }
+            $('#exPartnerEntry').val(isCover() ? '' : $pick.val());
+            if (!confirm('确认发起这次换课？提交后需对方确认，再进入教务审批。')) { e.preventDefault(); }
+        });
+        syncCover();
+        syncScope();
+        loadTeachers();
     })();
 })();
 </script>
