@@ -2355,8 +2355,9 @@ def check_workbench_swap():
 
 @item('WORKBENCHPROFILE')
 def check_workbench_profile():
-    """教师工作台「个人信息」（2026-10-13）：隐私信息（手机号/登录密码/身份证）在工作台最前；
-    「个人中心」独立页可自助改手机号与登录密码（复用 auth 改密校验，成功后回跳本页）。"""
+    """教师工作台（2026-10-13，用户口径："哪怕显示一个欢迎到访都行"）：
+    首页**不展示**手机号 / 登录密码 / 身份证号等个人信息，只留欢迎语与身份徽章；
+    隐私信息与修改入口统一在「个人中心」页（workbench.profile）。"""
     with app.app_context():
         u = User.query.filter_by(username='wb_prof').first()
         if not u:
@@ -2377,13 +2378,16 @@ def check_workbench_profile():
         login(c, 'wb_prof', TEST_PWD)
         r = c.get('/workbench/')
         html = r.get_data(as_text=True) if r.status_code == 200 else ''
-        case('个人信息：工作台首页 200', r.status_code == 200, str(r.status_code))
-        case('个人信息：工作台首页有「个人中心」入口', '/workbench/profile' in html, 'entry')
-        # 隐私信息必须排在基本资料（教师编号）之前 —— 本轮"隐私信息放到最前边"的口径
-        case('个人信息：首页手机号在教师编号之前',
-             bool(html) and -1 < html.find('手机号（登录账号）') < html.find('教师编号'),
-             'order')
-        case('个人信息：首页不再有「修改手机号」弹窗', 'phoneModal' not in html, 'modal')
+        case('工作台首页：200', r.status_code == 200, str(r.status_code))
+        case('工作台首页：有「个人中心」入口', '/workbench/profile' in html, 'entry')
+        # 2026-10-13 用户口径：首页不展示个人信息（手机号 / 登录密码 / 身份证号 / 账号）
+        case('工作台首页：不再出现手机号与隐私三项标签',
+             bool(html) and all(k not in html for k in
+                                ('手机号（登录账号）', '登录密码', '身份证号')
+                                ) and '13800000001' not in html, 'privacy')
+        case('工作台首页：改为欢迎卡片（欢迎语 + 身份/权限组徽章）',
+             bool(html) and '欢迎' in html and '个人中心' in html, 'welcome')
+        case('工作台首页：不再有「修改手机号」弹窗', 'phoneModal' not in html, 'modal')
 
         r2 = c.get('/workbench/profile')
         h2 = r2.get_data(as_text=True) if r2.status_code == 200 else ''
