@@ -93,7 +93,7 @@
             position: sticky; left: 0; z-index: 1;
         }
         .table-responsive thead th:first-child { z-index: 3; }
-        /* v1.19.43.2 首列 sticky 的背景跟随「行状态」——用 --bs-table-bg（Bootstrap 的表变量）。
+        /* v1.19.44.2 首列 sticky 的背景跟随「行状态」——用 --bs-table-bg（Bootstrap 的表变量）。
            原先写死 var(--bs-body-bg)，导致 .table-warning 等"整行变黄"时首列仍是白底：
            考务步骤①「不参加考试」的学生就是这么被看漏的（学号列不变色）。 */
         .table-responsive tbody td:first-child {
@@ -109,14 +109,14 @@
         }
         /* ===== v1.19.0 考试态：左侧深色侧栏 → 独立悬浮卡片（风格参考轻量描边菜单） ===== */
         .sidebar.sidebar-float {
-            /* v1.19.43.2 垂直居中：top:50% + translateY(-50%)，不再贴顶也不掉底 */
+            /* v1.19.44.2 垂直居中：top:50% + translateY(-50%)，不再贴顶也不掉底 */
             top: 50%; transform: translateY(-50%); bottom: auto;
             left: 10px;
             width: calc(var(--sidebar-width) - 20px);
             max-height: calc(100vh - 140px);
             background: #fff; border: 1px solid #eef2f7; border-radius: 12px;
             box-shadow: 0 8px 24px rgba(15, 23, 42, .10);
-            /* v1.19.43.2 横向间距统一：卡片左右各 8px、下面每一行左右各 10px，
+            /* v1.19.44.2 横向间距统一：卡片左右各 8px、下面每一行左右各 10px，
                整张卡「左 18px = 右 18px」；旧版 efn-item 带 2px 左描边（左 14 / 右 12）不对称 */
             padding: 8px; overflow-y: auto;
         }
@@ -166,11 +166,11 @@
         }
         .sidebar-float .efn-group:hover { background: #eef2f7; }
         .sidebar-float .efn-group .bi { font-size: 11px; color: #94a3b8; }
-        /* v1.19.43.2：「成绩分析」标题本身是入口链接，右侧箭头单独负责展开/收起 */
+        /* v1.19.44.2：「成绩分析」标题本身是入口链接，右侧箭头单独负责展开/收起 */
         .sidebar-float .efn-group-title { flex: 1 1 auto; color: inherit; }
         .sidebar-float .efn-group-title:hover { color: #1d4ed8; }
         .sidebar-float .efn-group .bi[data-bs-toggle] { cursor: pointer; }
-        /* ---- v1.19.43.2：AI 智能导入移到侧栏最下方（进阶入口），用细线分隔 ---- */
+        /* ---- v1.19.44.2：AI 智能导入移到侧栏最下方（进阶入口），用细线分隔 ---- */
         .sidebar-float .efn-ai { margin-top: 8px; }
         .sidebar-float .efn-ai::before {
             content: ''; display: block; height: 1px; margin: 0 2px 8px; background: #f1f5f9;
@@ -374,7 +374,7 @@
                    href="{{ url_for('grades.exam_affair_go', exam_id=EN.exam_id) }}">考务安排{% if not EN.steps[1].done %}<span class="efn-tag">待做</span>{% endif %}</a>
                 <a class="efn-item {% if EN.section == 'import' %}active{% endif %}" data-nav="import"
                    href="{{ url_for('grades.exam_import', exam_id=EN.exam_id) }}">成绩导入{% if not EN.steps[2].done %}<span class="efn-tag">待做</span>{% endif %}</a>
-                {# v1.19.43.2：划线分层有自己的段位（'bands'），不再与「成绩导入」同时高亮 #}
+                {# v1.19.44.2：划线分层有自己的段位（'bands'），不再与「成绩导入」同时高亮 #}
                 <a class="efn-item {% if EN.section == 'bands' %}active{% endif %}" data-nav="bands"
                    href="{{ url_for('grades.bands_page', exam_id=EN.exam_id) }}">划线分层</a>
                 {# v1.19.0 成绩分析：折叠组 —— 总览（全年级对比）/ 班级分析（班主任）/ 学科分析（任课教师）
@@ -387,7 +387,7 @@
                                   'grades.report_page', 'grades.exam_near_line') %}
                 {% set _is_lead = current_user.role == 'admin' or (current_user.permission_group and
                      current_user.permission_group.scope_type in ('school', 'grade')) %}
-                {# v1.19.43.2：点「成绩分析」文字直接进入本场分析（领导=总览（全年级对比），
+                {# v1.19.44.2：点「成绩分析」文字直接进入本场分析（领导=总览（全年级对比），
                    其他角色=班级分析，避免非领导点总览被 403）；展开/收起改由右侧箭头负责。 #}
                 <div class="efn-group">
                     <a class="efn-group-title" data-nav="ana_home"
@@ -418,7 +418,7 @@
                     {% endif %}
                 </div>
                 {% endif %}
-                {# v1.19.43.2：AI 智能导入移到侧栏最下方（进阶入口）；移除「下一步」提示（用户：无用） #}
+                {# v1.19.44.2：AI 智能导入移到侧栏最下方（进阶入口）；移除「下一步」提示（用户：无用） #}
                 <a class="efn-item efn-ai {% if request.endpoint and request.endpoint.startswith('grades.exam_ai_import') %}active{% endif %}" data-nav="ai"
                    href="{{ url_for('grades.exam_ai_import', exam_id=EN.exam_id) }}">AI 智能导入</a>
             </div>
@@ -436,8 +436,8 @@
                 <i class="bi bi-person-vcard"></i>个人成绩查询
             </a>
             {% endif %}
-            {# v1.19.43.2 移除「分数修改记录」全局入口：它属于单场考试的数据，只在该场成绩单页右上角进入 #}
-            {# v1.19.43.2 移除「毕业生成绩（二期）」入口：暂无用处，后期单独做毕业生数据库 #}
+            {# v1.19.44.2 移除「分数修改记录」全局入口：它属于单场考试的数据，只在该场成绩单页右上角进入 #}
+            {# v1.19.44.2 移除「毕业生成绩（二期）」入口：暂无用处，后期单独做毕业生数据库 #}
 
             {# v1.19.0 基础配置：长期基础数据，不属于四段流程，默认折叠 #}
             {% set _cfg_eps = ('grades.subject_mgmt', 'grades.band_templates_page',
@@ -722,7 +722,7 @@
 
         {% if current_user.is_authenticated %}
         <footer class="text-center text-muted small mt-4 pt-3 border-top">
-            StuLink v1.19.43.2（2026-10-09） · © 2026 @zkxxzf · 感谢协作开发 @Sakaay
+            StuLink v1.19.44.2（2026-10-09） · © 2026 @zkxxzf · 感谢协作开发 @Sakaay
         </footer>
         {% endif %}
     </div>

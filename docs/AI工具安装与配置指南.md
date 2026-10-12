@@ -667,4 +667,4 @@ mcp_server/config.json  ←──  各 AI 工具的接入配置
 
 ---
 
-*文档版本：2026-10-11 · 对应 StuLink v1.19.43.2（MCP 服务：account 认证模式）*
+*文档版本：2026-10-11 · 对应 StuLink v1.19.44.2（MCP 服务：account 认证模式）*
