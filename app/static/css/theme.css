@@ -1,5 +1,5 @@
 /* =============================================================================
-   StuLink 主题层（浅色 / 深色）—— v1.19.47.24（2026-10-13）
+   StuLink 主题层（浅色 / 深色）—— v1.19.47.25（2026-10-13）
    -----------------------------------------------------------------------------
    背景：此前全站颜色是「字面量满天飞」——base.html 内联 56 处、业务 css 201 处、
    模板内联 style 665 处；成绩分析（考试态 .sidebar-float）侧栏是白底卡，
@@ -19,7 +19,7 @@
 :root,
 [data-bs-theme="light"] {
     /* —— 页面与面板 —— */
-    /* 2026-10-13（v1.19.47.24）：页面底色原 #f0f2f5 偏灰，整体提亮一档 */
+    /* 2026-10-13（v1.19.47.25）：页面底色原 #f0f2f5 偏灰，整体提亮一档 */
     --sl-bg: #f6f8fb;                  /* 页面底色 */
     --sl-surface: #ffffff;             /* 卡片 / 面板 / 弹层 */
     --sl-surface-2: #f8fafc;           /* 次级面：表头、卡片头、斑马行 */
@@ -56,15 +56,21 @@
     --sl-navbar-border: #e2e8f0;
 
     /* —— 表格 ——
-       2026-10-13（v1.19.47.24）：成绩类表头原是写死的深色 #1e293b + 白字
+       2026-10-13（v1.19.47.25）：成绩类表头原是写死的深色 #1e293b + 白字
        （grades.css 加了 !important）。页面整体主题化后这条黑表头就成了突兀的
        「黑条」（用户反馈「页面区域还有黑色的，比如表头」）→ 改为跟随主题：
        浅色 = 浅灰底深字，深色 = 深底浅字。 */
-    --sl-head-bg: #eef2f7;             /* 成绩类表格表头 */
+    --sl-head-bg: #e7ecf3;             /* 表头第 1 行（分组/大标题） */
+    --sl-head-bg-2: #f1f4f9;           /* 表头第 2 行（各子列，浅一档形成层级） */
     --sl-head-text: #334155;
-    --sl-th-bg: #f8f9fa;               /* 普通表格表头 */
+    --sl-head-border: #d5dde8;
+    --sl-th-bg: #f1f4f9;               /* 普通单行表头 */
     --sl-th-text: #64748b;
     --sl-row-hover: #e0ecff;
+    --sl-freeze-bg: #ffffff;           /* 冻结列（年级/班级） */
+    --sl-subtotal-bg: #eef4fb;         /* 小计行 */
+    --sl-grand-bg: #dfe9f6;            /* 总计行 */
+    --sl-zebra-bg: #f8fafc;            /* 斑马行 */
 
     /* 同步 Bootstrap 变量（浅色下即为 Bootstrap 默认值，显式写出防被上游污染） */
     --bs-body-bg: #f0f2f5;
@@ -109,11 +115,17 @@
     --sl-navbar-text: #e2e8f0;
     --sl-navbar-border: #2b3a52;
 
-    --sl-head-bg: #233047;
+    --sl-head-bg: #253149;             /* 第 1 行表头（深色下略亮，形成层级） */
+    --sl-head-bg-2: #1c2739;           /* 第 2 行表头 */
     --sl-head-text: #e2e8f0;
+    --sl-head-border: #33456b;
     --sl-th-bg: #1c2739;
     --sl-th-text: #94a3b8;
     --sl-row-hover: #1e3a5f;
+    --sl-freeze-bg: #172033;
+    --sl-subtotal-bg: #1d2b42;
+    --sl-grand-bg: #22334f;
+    --sl-zebra-bg: #1b2537;
 
     /* 同步 Bootstrap 变量：让 card / table / dropdown / modal / form 一起变暗 */
     --bs-body-bg: #0f172a;
@@ -250,8 +262,8 @@ body {
 
 /* 表格：表头 / 斑马 / 悬停用变量（Bootstrap dark 已改 --bs-table-*，这里补业务表） */
 .table > thead th { color: var(--sl-th-text); }
-.table-responsive thead th { background: var(--sl-th-bg) !important; }
-.table-striped > tbody > tr:nth-of-type(odd) > * { --bs-table-bg-type: var(--sl-surface-2); }
+/* 表头底色统一在第 1 行用 --sl-head-bg、第 2 行用 --sl-head-bg-2（见下方「两行表头」段） */
+.table-striped > tbody > tr:nth-of-type(odd) > * { --bs-table-bg-type: var(--sl-zebra-bg); }
 
 /* —— 成绩类表格（grades.css 用 !important 写死深色表头，必须逐个顶掉） —— */
 .g-table thead th,
@@ -259,9 +271,67 @@ body {
 .ld-table thead th {
     background: var(--sl-head-bg) !important;
     color: var(--sl-head-text) !important;
+    border-color: var(--sl-head-border) !important;
 }
-.g-table tbody tr:nth-child(even) { background: var(--sl-surface-2) !important; --bs-table-bg: var(--sl-surface-2) !important; }
-.g-table tbody tr:nth-child(even) td:first-child { background: var(--sl-surface-2) !important; }
+
+/* =============================================================================
+   两行表头 / 合并分组单元格：**层级用同族色阶**（纵深靠明度，不靠黑白对比）
+   -----------------------------------------------------------------------------
+   2026-10-13（v1.19.47.25）用户反馈：宽表「两行表头 + 合并单元格」样式割裂 ——
+   第 1 行 #1e293b 深、第 2 行 #334155 次深、冻结列又回 #1e293b，
+   与浅色表体拼在一起像三张表。现统一为：
+     第 1 行（分组/大标题）→ --sl-head-bg（稍深）
+     第 2 行（各子列）      → --sl-head-bg-2（稍浅一档）
+     冻结列表头            → 同第 1 行（不再单独回写深色）
+     表体 / 冻结列 / 斑马 / 小计总计 → 各自变量，全部跟随主题
+   区块之间靠「同族明度差 + 统一 1px 分隔线」区分，不再靠黑白撞色。
+   ============================================================================= */
+.ld-table { border-color: var(--sl-head-border); }
+/* 第 2 行表头（global_compare.css 里写死 #334155 + sticky top，这里只换色不动定位） */
+.ld-table thead tr:nth-child(2) th {
+    background: var(--sl-head-bg-2) !important;
+    color: var(--sl-head-text) !important;
+}
+.ld-table thead th.grp { color: var(--sl-head-text) !important; }
+/* 冻结列（年级/班级）：表头与第 1 行同色，表体与表体同色 —— 靠右分隔线区分区块 */
+.ld-table thead th.c-year, .ld-table thead th.c-cls {
+    background: var(--sl-head-bg) !important;
+    color: var(--sl-head-text) !important;
+    border-right: 1px solid var(--sl-head-border) !important;
+}
+.ld-table th.c-year, .ld-table td.c-year,
+.ld-table th.c-cls, .ld-table td.c-cls {
+    background: var(--sl-freeze-bg) !important;
+}
+.ld-table thead th.c-year, .ld-table thead th.c-cls {
+    background: var(--sl-head-bg) !important;
+}
+.ld-table tbody td {
+    background: var(--sl-surface);
+    border-color: var(--sl-border) !important;
+}
+/* 小计 / 总计行：同族加深，不再用写死浅蓝 */
+.ld-table tbody tr.sub td { background: var(--sl-subtotal-bg) !important; }
+.ld-table tbody tr.grand td { background: var(--sl-grand-bg) !important; }
+/* 方向/属性彩标在两套主题下都保持可读 */
+.ld-dir-all { background: var(--sl-surface-3); color: var(--sl-text); }
+.ld-type { color: var(--sl-text-muted); }
+
+/* —— 通用表格：表头层级与表体（.table / 两行表头的第二行）—— */
+.table thead th, .table-responsive thead th {
+    background: var(--sl-head-bg) !important;
+    color: var(--sl-head-text) !important;
+    border-color: var(--sl-head-border) !important;
+}
+.table-responsive thead tr:nth-child(2) th {
+    background: var(--sl-head-bg-2) !important;
+    border-top: 1px solid var(--sl-head-border);
+}
+.table tbody td, .table-responsive tbody td { border-color: var(--sl-border); }
+/* 合并分组列（rowspan 的「年级/班级」等）在表体里的底色统一为表体色 */
+.table tbody th[scope="row"] { background: var(--sl-freeze-bg); color: var(--sl-text); }
+.g-table tbody tr:nth-child(even) { background: var(--sl-zebra-bg) !important; --bs-table-bg: var(--sl-zebra-bg) !important; }
+.g-table tbody tr:nth-child(even) td:first-child { background: var(--sl-zebra-bg) !important; }
 .g-table tbody tr.stu-link:hover { background: var(--sl-row-hover) !important; }
 .g-table tbody tr.stu-link:hover td:first-child { background: var(--sl-row-hover) !important; }
 .g-table thead th.sortable:hover { color: var(--sl-sidebar-accent-text) !important; }
