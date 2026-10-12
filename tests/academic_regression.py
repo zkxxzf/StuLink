@@ -1790,7 +1790,7 @@ def check_inspection_mark():
 
 @item('SWAPEXCH')
 def check_two_person_exchange():
-    """两人换课（v1.19.47.15）：换时段 / 换班上课 / 请人代课 × 临时与永久，
+    """两人换课（v1.19.47.16）：换时段 / 换班上课 / 请人代课 × 临时与永久，
     覆盖「对方先确认 → 教务审批 → 执行」全链路 + 拒绝 / 越权 / 校验路径。"""
     from app.modules.academic.services import swap_service
 
@@ -2113,7 +2113,7 @@ def check_swap_exchange_batch():
 
 @item('SWAPMIXED')
 def check_swap_mixed_batch():
-    """调课页合并（v1.19.47.15）：一次提交 = 几节调空档 + 几节与同事对调（同一批次）。"""
+    """调课页合并（v1.19.47.16）：一次提交 = 几节调空档 + 几节与同事对调（同一批次）。"""
     from app.models.timetable import ScheduleEntry, ScheduleSwap
     from app.modules.academic.services import swap_service
 
@@ -2335,7 +2335,7 @@ def check_swap_bulk_offset():
 
 @item('WORKBENCHSWAP')
 def check_workbench_swap():
-    """教师工作台里的调课区块（v1.19.47.15）：入口 + 待我确认 + 我的申请。"""
+    """教师工作台里的调课区块（v1.19.47.16）：入口 + 待我确认 + 我的申请。"""
     with app.test_client() as c:
         login(c, 'ac_admin', TEST_PWD)
         r = c.get('/workbench/')      # 蓝图前缀 /workbench + 路由 '/'（不带斜杠会 308）
@@ -2431,6 +2431,40 @@ def check_swap_need_partner_confirm():
             for s in ScheduleSwap.query.filter_by(batch_id=b).all():
                 db.session.delete(s)
         db.session.commit()
+
+
+@item('WBCLASSSCH')
+def check_workbench_class_schedule():
+    """班主任工作台「我的班级课表」：所带班级解析（多班）+ 班级课表取数。"""
+    from app.models import User, UserClassLink
+    from app.models.timetable import ScheduleEntry
+    from app.modules.academic.services import schedule_service
+    from app.modules.workbench.routes import _homeroom_classes
+
+    with app.app_context():
+        e0 = ScheduleEntry.query.filter_by(term_schedule_id=TS_ID).first()
+        case('准备：本学期课表里有可用班级',
+             bool(e0 and e0.grade and e0.class_name), f'{e0}')
+        if not e0:
+            return
+        user = User.query.first()
+        link = UserClassLink(user_id=user.id, grade=e0.grade,
+                             class_name=e0.class_name)
+        db.session.add(link)
+        db.session.commit()
+        try:
+            pairs = _homeroom_classes(user)
+            case('班主任所带班级：取 user_class_links（一人可管多班）',
+                 (e0.grade, e0.class_name) in pairs, f'{pairs}')
+        finally:
+            db.session.delete(link)
+            db.session.commit()
+        case('未配置班级时：不臆造班级（返回空）',
+             _homeroom_classes(user) == [], f'{_homeroom_classes(user)}')
+        view = schedule_service.get_class_view(TS_ID, e0.grade, e0.class_name)
+        case('班级课表取数：grid + 条目数（工作台卡片数据源）',
+             bool(view.get('grid')) and (view.get('total') or 0) > 0,
+             f'total={view.get("total")}')
 
 
 @item('SWAPCHAIN')

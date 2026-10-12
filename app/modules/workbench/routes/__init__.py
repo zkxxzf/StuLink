@@ -1,4 +1,4 @@
-# StuLink v1.19.47.15 2026-10-10
+# StuLink v1.19.47.16 2026-10-10
 # 教师工作台：我的信息 / 今日课程 / 我的课表 / 我的业绩 / 手机号修改
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 import re
@@ -19,6 +19,7 @@ from app.modules.academic.services import (schedule_service, swap_service,
                                           teacher_service)
 from app.modules.academic.services.access_scope import (
     visible_academic_class_scope, visible_academic_grades)
+from app.modules.workbench.services.class_overview_service import get_managed_classes
 from app.utils.decorators import perm_required
 from app.utils.helpers import log_operation
 
@@ -27,6 +28,20 @@ bp = Blueprint('workbench', __name__, url_prefix='/workbench')
 _PHONE_RE = re.compile(r'^1\d{10}$')
 _WEEKDAYS = ['周一', '周二', '周三', '周四', '周五', '周六', '周日']
 _CATEGORY_KEYS = {k for k, _ in ACHIEVEMENT_CATEGORIES}
+
+
+def _homeroom_classes(user):
+    """班主任所带班级 [(grade, class_name)]。
+
+    以 `user_class_links`（一人可管多班）为准；没配关联时回落账号上的
+    单班字段 `User.grade/class_name`（老数据），避免"配了角色却看不到班"。
+    """
+    pairs = get_managed_classes(user.id)
+    if pairs:
+        return pairs
+    grade = (getattr(user, 'grade', '') or '').strip()
+    class_name = (getattr(user, 'class_name', '') or '').strip()
+    return [(grade, class_name)] if (grade and class_name) else []
 
 
 def _parse_date(value):
@@ -46,9 +61,10 @@ def index():
     pending_swaps = []
     partner_pending = []
     active_term = None
-    # 2026-10-13（v1.19.47.15）：调课入口挂到工作台 —— 能否申请由 academic.swap 决定，
+    # 2026-10-13（v1.19.47.16）：调课入口挂到工作台 —— 能否申请由 academic.swap 决定，
     # 菜单/按钮可见性与 perm_required 保持一致，避免"看得见、点了 403"。
     can_swap = current_user.has_perm('academic.swap')
+    is_head = (current_user.role == 'homeroom_teacher')
     if teacher:
         # 2026-10-10：课表改读 timetable.db 的 schedule_entries（与教务端「我的课表」同源）。
         # 旧表 academic.timetable_entries 已停用，此前读旧表导致本卡片恒为空。
@@ -112,7 +128,29 @@ def index():
                                          teacher.teacher_uid)
             partner_pending = []
 
+    # 2026-10-13（v1.19.47.16）：班主任在工作台直接看**本班班级课表**（多个班用页签切换）。
+    # 取数与教务端班级课表同源（get_class_view），并沿用同一套可见范围，避免越权。
+    class_schedules = []
+    if is_head and active_term:
+        try:
+            allowed_grades = visible_academic_grades(current_user)
+            allowed_classes = visible_academic_class_scope(current_user)
+            for grade, class_name in _homeroom_classes(current_user):
+                view = schedule_service.get_class_view(
+                    active_term.id, grade, class_name,
+                    allowed_grades=allowed_grades, allowed_classes=allowed_classes)
+                if not (view.get('entries') or []):
+                    continue
+                class_schedules.append({'grade': grade, 'class_name': class_name,
+                                         'view': view})
+        except Exception:       # 课表库异常只降级为空态，不拖垮首页
+            db.session.rollback()
+            current_app.logger.exception('工作台班级课表加载失败 user_id=%s',
+                                         current_user.id)
+            class_schedules = []
+
     return render_template('workbench/index.html', teacher=teacher,
+                           class_schedules=class_schedules,
                            partner_pending=partner_pending,
                            can_swap=can_swap,
                            entries=entries, today_entries=today_entries,
@@ -122,7 +160,7 @@ def index():
                            levels=ACHIEVEMENT_LEVELS,
                            status_map=ACHIEVEMENT_STATUS,
                            weekday_names=_WEEKDAYS,
-                           is_head=(current_user.role == 'homeroom_teacher'),
+                           is_head=is_head,
                            today=date.today(),
                            pending_swaps=pending_swaps)
 
