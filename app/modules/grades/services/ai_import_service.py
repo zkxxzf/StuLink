@@ -22,10 +22,14 @@ from __future__ import annotations
 import io
 import json
 import re
+from datetime import date
 
 import openpyxl
 
 from app.models.grades import SUBJECTS, TOTAL_SUBJECT
+
+# 系统内合法科目集合（用于把「英语→外语」并校验是否为真科目）
+SUBJECT_SET = set(SUBJECTS) | {TOTAL_SUBJECT}
 
 # 标准字段（AI 要从表头里找这些）
 FIELD_LABELS = {
@@ -717,14 +721,24 @@ def parse_bands(sheet):
     return res, []
 
 
-def guess_sheet_kind(headers):
+def guess_sheet_kind(headers, rows=None):
     """猜一张工作表的用途（成绩页/考务页共用）：
 
-    'bands' 各科分数线 ｜ 'scores' 成绩 ｜ 'affair_students' 考生安排 ｜
-    'affair_rooms' 考场位置 ｜ 'skip' 不使用
+    'bands' 各科分数线 ｜ 'scores' 成绩 ｜ 'exam_schedule' 考试时间表/监考表（划分场次）｜
+    'affair_students' 考生安排 ｜ 'affair_rooms' 考场位置 ｜ 'skip' 不使用
+
+    rows（可选）传入该表前若干行，用于识别「监考表 / 考试时间表」——
+    这类表的时间/科目是**数据行上方的多级表头**，只看合并后的列名会漏判，
+    因此必须结合行内容。
     """
     if looks_like_band_sheet(headers):
         return 'bands'
+    # v1.19.47.4：监考表/时间表优先于考务判定（它同样有「考场/人数」列，容易误判成考场表）。
+    # 但**含学号/姓名/考号列的表一定不是时间表**（是成绩表或名单），据此排除误判。
+    if rows and looks_like_schedule_sheet(rows):
+        _af0 = classify_affair_headers(headers)
+        if not any(k in _af0 for k in ('no', 'name', 'exam_no')):
+            return SCHEDULE_KIND
     sc = classify_headers(headers)
     if sc['subjects'] or sc['raw_subjects']:
         return 'scores'
@@ -748,3 +762,424 @@ def read_sheet_rows(stream, sheet_name, header_row, max_rows=MAX_SCAN_ROWS):
             out.append((i + 1, [_s(c) for c in (r or [])]))
     wb.close()
     return out
+
+
+# ==================== 考试时间表 / 监考表 → 划分场次（v1.19.47.4） ====================
+#
+# 背景（用户口径 2026-10-12）：AI 导入页要能识别**图片**或**监考表**，
+# 目的是**划分场次**（写入环节⑤ affair_schedules）。两种来源：
+#   1. 图片（考试时间表 / 监考表照片）→ 交视觉模型识图，只输出**场次**
+#      （日期/开始/结束/科目），全量落库由确定性代码做；
+#   2. Excel 监考表 → **多级表头**（日期行 / 时间行 / 科目行）+ 数据行（考场 + 监考老师），
+#      规则解析出场次，顺手把考场与监考安排也带出来（有则写环节⑥）。
+#
+# 设计原则与成绩导入一致：AI 只做「识图/判表」这件小事，结构化落库由代码负责。
+
+# 场次用途的 kind 标识（前端下拉里与成绩/考务/分数线并列）
+SCHEDULE_KIND = 'exam_schedule'
+SCHEDULE_KIND_LABEL = '考试时间表 / 监考表（划分场次）'
+
+# 时间区间：8:05-10:35 / 8：05—10：35 / 8:05~10:35 / 8:05至10:35
+_TIME_RANGE_RE = re.compile(
+    r'(\d{1,2})\s*[:：]\s*(\d{2})\s*[-–—~～至到]\s*(\d{1,2})\s*[:：]\s*(\d{2})')
+# 单个时间点（用于「开始时间 / 结束时间」两列式时间表）
+_TIME_ONE_RE = re.compile(r'(\d{1,2})\s*[:：]\s*(\d{2})')
+# 日期：2026年10月8日 / 10月8日 / 10月08日
+_DATE_CN_RE = re.compile(r'(?:(\d{4})\s*年\s*)?(\d{1,2})\s*月\s*(\d{1,2})\s*日')
+
+
+def _norm_time(h, m):
+    return '%02d:%02d' % (int(h), int(m))
+
+
+def _valid_time(h, m):
+    """校验时/分范围后格式化；非法返回 ''（正则本身不限制范围，"25:99" 也能匹配）"""
+    h, m = int(h), int(m)
+    if not (0 <= h <= 23 and 0 <= m <= 59):
+        return ''
+    return _norm_time(h, m)
+
+
+def _fmt_date(y, m, d):
+    """校验并格式化日期；非法（月/日越界、2026-13-45 这类）返回 ''
+
+    2026-10-12 审查修复 C：原实现直接 `'%04d-%02d-%02d' % (y,m,d)` 不做范围校验，
+    于是 "2026-13-45" 会被原样返回，随后 `date.fromisoformat()` 抛 ValueError
+    → 整个 apply 500（且该调用在写库 try 块之外）。这里统一用 date() 构造做校验。
+    """
+    try:
+        return date(int(y), int(m), int(d)).isoformat()
+    except (ValueError, TypeError):
+        return ''
+
+
+def normalize_date(text, default_year=None):
+    """'2026年10月8日' / '10月8日' / '2026-10-08' / '10/8' → 'YYYY-MM-DD'；识别不出或非法返回 ''"""
+    t = _s(text)
+    if not t:
+        return ''
+    m = _DATE_CN_RE.search(t)
+    if m:
+        y = int(m.group(1)) if m.group(1) else (default_year or date.today().year)
+        return _fmt_date(y, m.group(2), m.group(3))
+    s = t.replace('/', '-').replace('.', '-')
+    m2 = re.search(r'(\d{4})-(\d{1,2})-(\d{1,2})', s)
+    if m2:
+        return _fmt_date(m2.group(1), m2.group(2), m2.group(3))
+    m3 = re.search(r'(?<!\d)(\d{1,2})-(\d{1,2})(?!\d)', s)
+    if m3:
+        return _fmt_date(default_year or date.today().year, m3.group(1), m3.group(2))
+    return ''
+
+
+def normalize_time(text):
+    """'8:05' / '08：05' → 'HH:MM'；识别不出或非法（如 25:99）返回 ''
+
+    2026-10-12 审查修复 C：原实现不校验时/分范围，"25:99" 会被原样保留入库
+    并进入监考表导出。这里做 0-23 / 0-59 校验。
+    """
+    m = _TIME_ONE_RE.search(_s(text))
+    if not m:
+        return ''
+    h, mi = int(m.group(1)), int(m.group(2))
+    if not (0 <= h <= 23 and 0 <= mi <= 59):
+        return ''
+    return _norm_time(h, mi)
+
+
+def normalize_subject(text, strict=False):
+    """科目归一：英语→外语、去空白与换行。
+
+    strict=True 时只保留系统内合法科目（非科目返回 ''）；否则原样保留
+    （监考表里可能出现「物理/历史」这类合并写法，保留原文供人工核对）。
+    """
+    t = _s(text).split('\n')[0].strip()
+    t = re.sub(r'\s+', '', t)
+    t = SUBJ_ALIAS.get(t, t)
+    if strict:
+        return t if t in SUBJECT_SET else ''
+    return t
+
+
+def normalize_schedule_subject(text):
+    """场次科目归一：按分隔符拆开 → 别名映射 → 用「、」重新连接。
+
+    2026-10-12 审查修复 J③：场次科目写库时若直接过 sanitize_label，会把
+    「物理/历史」的斜杠剔除成「物理历史」，于是环节⑥ 的 `_split_subjects`
+    （按 `[、，,/\\s]+` 拆分）拆不出，**同科回避对该场次彻底失效**。
+    这里统一成白名单内允许的「、」连接，既保留多科语义又能被正确拆分。
+    """
+    parts = [p for p in re.split(r'[、，,/\s]+', _s(text)) if p]
+    parts = [SUBJ_ALIAS.get(p, p) for p in parts]
+    return '、'.join(parts)
+
+
+def looks_like_schedule_sheet(rows):
+    """像「考试时间表 / 监考表」吗？
+
+    rows: [(lineno, cells)]（probe 给的前 ~23 行即可）
+    三类特征（收紧口径，避免误判成绩表）：
+      ① 出现时间区间 且（表里有「监考/考场」）→ 监考表；
+      ② 出现时间区间 且（同时有「科目/学科」与「时间」）→ 带时间行的时间表；
+      ③ 有「科目/学科」+「开始」+（「结束」或「日期」）→ 两列式考试时间表（无区间）。
+    """
+    blob = ' '.join(c or '' for _ln, cells in rows[:4] for c in cells)
+    has_subj = ('科目' in blob or '学科' in blob)
+    if has_subj and '开始' in blob and ('结束' in blob or '日期' in blob):
+        return True
+    saw_time = False
+    for _lineno, cells in rows[:12]:
+        if any(_TIME_RANGE_RE.search(c or '') for c in cells):
+            saw_time = True
+            break
+    if not saw_time:
+        return False
+    if '监考' in blob or '考场' in blob:
+        return True
+    return has_subj and '时间' in blob
+
+
+def _right_fill(cells, j):
+    """合并单元格在 openpyxl 里只有左上格有值：本行取 j 及左侧最近的非空值"""
+    for k in range(min(j, len(cells) - 1), -1, -1):
+        v = _s(cells[k]) if k < len(cells) else ''
+        if v:
+            return v
+    return ''
+
+
+def parse_schedule_sheet(rows, default_year=None):
+    """从「监考表 / 考试时间表」的行数据里提取**场次**（以及可能的考场与监考安排）。
+
+    rows: [(lineno, cells)] 全量（含表头上方的标题行、主考行）
+    返回 dict：
+      sessions: [{date, start, end, subject, selection}]   # 场次（按列顺序）
+      invigs:   [{session_index, room_no, slot, name}]      # 监考安排（无监考列时为空）
+      rooms:    [{room, room_loc, capacity}]                # 考场（无考场列时为空）
+      header_row: 识别到的表头结束行（用于前端展示）
+      errors:   [str]
+    """
+    errs = []
+    cells_by_line = {ln: cells for ln, cells in rows}
+    ncol = 0
+    for _ln, cells in rows:
+        ncol = max(ncol, len(cells))
+    if ncol == 0:
+        return {'sessions': [], 'invigs': [], 'rooms': [], 'header_row': 0,
+                'errors': ['表格为空']}
+
+    def cell(ln, j):
+        cells = cells_by_line.get(ln) or []
+        return _s(cells[j]) if j < len(cells) else ''
+
+    # ---- 1. 找「时间行」：前 12 行里含时间区间最多的一行 ----
+    time_row, best = None, 0
+    for ln, cells in rows[:12]:
+        hit = sum(1 for c in cells if _TIME_RANGE_RE.search(c or ''))
+        # 同一格塞多个时间（如「14:30-15:45\n15:50-17:05」）算多次
+        hit = sum(len(_TIME_RANGE_RE.findall(c or '')) for c in cells)
+        if hit and hit > best:
+            time_row, best = ln, hit
+    if time_row is None:
+        return {'sessions': [], 'invigs': [], 'rooms': [], 'header_row': 0,
+                'errors': ['未找到「时间段」（形如 8:05-10:35）的行，'
+                           '若这是两列式时间表（开始时间/结束时间），请用 Excel 模板导入']}
+
+    # ---- 2. 找「日期行」：时间行上方最近含「月…日」的行 ----
+    date_row = None
+    for ln, cells in reversed([(ln, c) for ln, c in rows if ln < time_row]):
+        if any(_DATE_CN_RE.search(c or '') for c in cells):
+            date_row = ln
+            break
+
+    # ---- 3. 找「科目行」：时间行本身或其后 1~2 行里，命中已知科目最多的行 ----
+    subject_row = None
+    best_s = 0
+    for ln in (time_row + 1, time_row + 2, time_row):
+        if ln not in cells_by_line:
+            continue
+        cells = cells_by_line[ln]
+        hit = sum(1 for c in cells if normalize_subject(c, strict=True))
+        if hit and hit > best_s:
+            subject_row, best_s = ln, hit
+
+    # ---- 4. 场次列 = 时间行里含时间区间的列 ----
+    session_cols = []
+    for j in range(ncol):
+        m = _TIME_RANGE_RE.search(cell(time_row, j))
+        if m:
+            session_cols.append(j)
+    if not session_cols:
+        return {'sessions': [], 'invigs': [], 'rooms': [], 'header_row': time_row,
+                'errors': ['时间段行里没有可解析的时间区间']}
+
+    sessions, col_to_sidx = [], {}
+    for j in session_cols:
+        t = cell(time_row, j)
+        m = _TIME_RANGE_RE.search(t)
+        d = normalize_date(_right_fill(cells_by_line.get(date_row, []), j), default_year) \
+            if date_row else ''
+        subj = ''
+        if subject_row is not None:
+            subj = normalize_subject(cell(subject_row, j))
+        # 「上午 / 下午 / 四选二」是场次说明，不是科目
+        if subj in ('上午', '下午', '四选二', '上下午'):
+            subj = ''
+        # 科目行没有时，试从「时间行上方的父级表头」里捞科目（部分表在上午/下午格写科目）
+        if not subj:
+            for ln in (time_row - 1, time_row - 2):
+                cand = normalize_subject(cell(ln, j), strict=True)
+                if cand:
+                    subj = cand
+                    break
+        # 合并写法（物理/历史）统一为「、」连接，保证环节⑥ 同科回避能拆开
+        subj = normalize_schedule_subject(subj)
+        col_to_sidx[j] = len(sessions)
+        sessions.append({'date': d,
+                         'start': _valid_time(m.group(1), m.group(2)),
+                         'end': _valid_time(m.group(3), m.group(4)),
+                         'subject': subj, 'selection': ''})
+    if not any(s['date'] for s in sessions):
+        errs.append('未能确定场次日期，请导入后手工补全')
+
+    # ---- 5. 找「考场号 / 位置 / 人数」列（表头区里含关键词的列） ----
+    def find_col(*keys, rows_limit=None):
+        rng = [c for _ln, c in rows if (rows_limit is None or _ln <= rows_limit)]
+        for cells in rng:
+            for j, c in enumerate(cells):
+                t = _s(c)
+                if any(k in t for k in keys):
+                    return j
+        return None
+
+    c_room = find_col('考场号', '考场编号', '试室号', rows_limit=time_row)
+    c_loc = find_col('考场位置', '教室', '地点', rows_limit=time_row)
+    c_cap = find_col('人数', '容量', '参考人数', rows_limit=time_row)
+    if c_room is None:
+        # 兜底：数据行里连续两三位数字的列（考场号最常见）
+        for j in range(ncol):
+            vals = [cell(ln, j) for ln, _c in rows if ln > time_row]
+            nums = [v for v in vals if re.match(r'^\d{1,3}$', v)]
+            if len(nums) >= 2:
+                c_room = j
+                break
+
+    header_row = max([x for x in (time_row, subject_row) if x] or [time_row])
+
+    # ---- 6. 数据行 → 考场 + 监考老师 ----
+    rooms, invigs = [], []
+    if c_room is not None:
+        for ln, cells in rows:
+            if ln <= time_row:
+                continue
+            room_no = _s(cells[c_room]) if c_room < len(cells) else ''
+            if not re.match(r'^\d{1,3}$', room_no):
+                continue
+            loc = cell(ln, c_loc) if c_loc is not None else ''
+            cap = _num(cells[c_cap]) if (c_cap is not None and c_cap < len(cells)) else None
+            rooms.append({'room': room_no.zfill(2) if len(room_no) < 2 else room_no,
+                          'room_loc': loc, 'capacity': int(cap) if cap else None})
+            for j in session_cols:
+                raw = cell(ln, j)
+                if not raw:
+                    continue
+                # 一格可能写多名监考老师（空格/顿号/斜杠分隔）→ 依次占 slot 1/2/3
+                names = [x for x in re.split(r'[\s、,，/]+', raw) if len(x) >= 2]
+                for si, nm in enumerate(names[:3], start=1):
+                    invigs.append({'session_index': col_to_sidx[j],
+                                   'room_no': rooms[-1]['room'], 'slot': si, 'name': nm})
+    return {'sessions': sessions, 'invigs': invigs, 'rooms': rooms,
+            'header_row': header_row, 'errors': errs}
+
+
+# ---------- 图片路径：识图只输出场次 ----------
+
+SCHEDULE_IMAGE_SYSTEM = (
+    '你是考试时间表识别助手。用户上传一张「考试时间表 / 监考表 / 学情分析表」图片，\n'
+    '请提取其中的**考试场次**（每场：日期、开始时间、结束时间、考试科目）。\n'
+    '只输出一个 JSON，不要解释，格式：\n'
+    '{"sessions":[{"date":"2026-10-08","start":"08:05","end":"10:35",'
+    '"subject":"语文","selection":""}],"notes":"补充说明"}\n'
+    '规则：\n'
+    '1. 日期统一 YYYY-MM-DD；图片只有「月日」时，年份用 {year}。\n'
+    '2. 时间统一 HH:MM（24 小时制）。\n'
+    '3. 科目写系统全称（英语→外语）；同一时段考多科（如"物理/历史"同时进行）'
+    '写成一条，科目用 / 连接。\n'
+    '4.「上午 / 下午」「四选二」「间隔10分钟不休息」这类场次说明不要当科目；'
+    '辨认不出的字段留空字符串。\n'
+    '5. 只列**考试场次**，不要列监考老师、不要列教学进度/版本。'
+)
+
+
+def build_schedule_image_prompt(exam):
+    return SCHEDULE_IMAGE_SYSTEM.format(year=(exam.exam_date.year if exam and exam.exam_date
+                                              else date.today().year))
+
+
+def parse_schedule_json(text):
+    """容错解析识图返回的 JSON → (sessions, notes)
+
+    兼容：```json 代码块包裹 / 前后有解释文字 / 直接给数组。
+    """
+    raw = _s(text)
+    if not raw:
+        return [], ''
+    # 去掉 ```json ... ``` 包裹
+    raw = re.sub(r'^```[a-zA-Z]*\s*|\s*```$', '', raw.strip())
+    obj = None
+    try:
+        obj = json.loads(raw)
+    except (json.JSONDecodeError, TypeError):
+        # 前后有解释文字时：先尝试数组、再尝试对象
+        # （顺序不能颠倒 —— `\{[\s\S]*\}` 是贪婪的，会把数组里的单个对象抠出来）
+        for pat in (r'\[[\s\S]*\]', r'\{[\s\S]*\}'):
+            m = re.search(pat, raw)
+            if not m:
+                continue
+            try:
+                obj = json.loads(m.group(0))
+                break
+            except (json.JSONDecodeError, TypeError):
+                obj = None
+    if isinstance(obj, list):
+        obj = {'sessions': obj}
+    elif isinstance(obj, dict) and 'sessions' not in obj and \
+            ('date' in obj or '日期' in obj or 'subject' in obj or '科目' in obj):
+        # 模型把「单场」直接给了对象（没包在 sessions 里）
+        obj = {'sessions': [obj]}
+    if not isinstance(obj, dict):
+        return [], ''
+    sess_in = obj.get('sessions') or obj.get('场次') or []
+    out = []
+    for s in sess_in:
+        if not isinstance(s, dict):
+            continue
+        d = normalize_date(s.get('date') or s.get('日期'))
+        start = normalize_time(s.get('start') or s.get('开始时间') or s.get('开始'))
+        end = normalize_time(s.get('end') or s.get('结束时间') or s.get('结束'))
+        subj = normalize_subject(s.get('subject') or s.get('科目'))
+        sel = _s(s.get('selection') or s.get('选科'))
+        if not (d or start or subj):
+            continue
+        out.append({'date': d, 'start': start, 'end': end, 'subject': subj, 'selection': sel})
+    return out, _s(obj.get('notes') or obj.get('notes_zh') or '')
+
+
+def parse_schedule_columns(sheet, mapping=None):
+    """两列式「考试时间表」（日期 / 开始时间 / 结束时间 / 科目）→ 场次
+
+    2026-10-12：**自己定位表头行**，不依赖 probe 的 header_row ——
+    这类表的数据行常有「日期/时间」等含数字的文本，probe 会把它们误并进表头
+    （合成时间表实测 header_row 被判成第 3 行，导致前两场丢失）。
+    定位规则：第一行同时出现「科目/学科」与「时间/日期」关键词的行即表头。
+    """
+    rows = sheet.get('rows') or []
+    mapping = mapping or {}
+    hdr_ln, hdr_cells = None, []
+    for ln, cells in rows[:12]:
+        joined = ' '.join(cells)
+        if ('科目' in joined or '学科' in joined) and ('时间' in joined or '日期' in joined):
+            hdr_ln, hdr_cells = ln, cells
+            break
+    if hdr_ln is None:
+        return [], [{'line': 0, 'no': '',
+                     'reason': '未找到表头行（需同时含「科目」与「时间/日期」列）'}]
+
+    def idx(*names):
+        for nm in names:                     # 优先用调用方给的映射（列名原文）
+            if mapping.get(nm):
+                for j, c in enumerate(hdr_cells):
+                    if _s(c) == _s(mapping[nm]):
+                        return j
+        for j, c in enumerate(hdr_cells):
+            if any(nm in _s(c) for nm in names):
+                return j
+        return None
+
+    i_date = idx('日期')
+    i_start = idx('开始')
+    i_end = idx('结束')
+    i_subj = idx('科目', '学科')
+    i_sel = idx('选科', '组合', '分场')
+    if i_subj is None or (i_start is None and i_date is None):
+        return [], [{'line': hdr_ln, 'no': '',
+                     'reason': '未识别到「考试科目」与「开始/结束时间」或「日期」列'}]
+    sessions, errs = [], []
+    for lineno, cells in rows:
+        if lineno <= hdr_ln:
+            continue
+        get = lambda i: (_s(cells[i]) if (i is not None and i < len(cells)) else '')  # noqa: E731
+        subj = normalize_subject(get(i_subj))
+        start = normalize_time(get(i_start))
+        end = normalize_time(get(i_end))
+        d = normalize_date(get(i_date))
+        if not (subj or start):
+            continue
+        if not subj:
+            errs.append({'line': lineno, 'no': '', 'reason': '缺少考试科目，已跳过'})
+            continue
+        sessions.append({'date': d, 'start': start, 'end': end,
+                         'subject': subj, 'selection': _s(get(i_sel))})
+    if not sessions:
+        errs.append({'line': hdr_ln, 'no': '', 'reason': '没有解析出任何场次'})
+    return sessions, errs

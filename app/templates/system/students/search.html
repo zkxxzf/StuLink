@@ -260,6 +260,15 @@ function doBatchEditSearch() {
         errDiv.style.display = ''; return;
     }
 
+    // v1.19.47.4 离校联动（用户口径 2026-10-12）：批量置「离校」前提示确认，
+    // 确认后后端会自动清除这些学生的床位。
+    if (boarding === '离校') {
+        if (!window.confirm('将把选中的 ' + ids.length + ' 名学生住宿状态改为「离校」，'
+                + '并自动清除其床位。\n\n确认继续？')) {
+            return;
+        }
+    }
+
     var data = { student_ids: ids, boarding_type: boarding, day_student_type: dayType,
                  building: building, room_number: roomNumber, bed_number: bedNumber,
                  subject_selection: subject };

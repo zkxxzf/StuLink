@@ -132,9 +132,34 @@ def list_students():
                    if s[0]]
     # v1.19.47.6 调班记录：当前页学生的班级变更次数（列表「调班」列用）
     change_counts = class_change_counts([s.id for s in students])
-    return render_template('system/students/list.html', 
-                         students=students, 
-                         grades=grades, 
+    # v1.19.47.4 宿舍信息（只读展示）：宿舍号/住校走读等归宿舍管理模块维护，
+    # 本模块只读呈现，不允许在此修改。批量预取避免模板内逐行懒加载（N+1）。
+    # 跨库不能 JOIN：StudentAccommodation / BedAssignment 在 dormitory 库，
+    # Student 在 system 库；BedAssignment 与 Room 同库可 JOIN。固定 2 条查询。
+    acc_map = {}
+    bed_map = {}
+    page_ids = [s.id for s in students]
+    if page_ids:
+        for sa in StudentAccommodation.query.filter(
+                StudentAccommodation.student_id.in_(page_ids)).all():
+            acc_map[sa.student_id] = {
+                'boarding_type': sa.boarding_type,
+                'day_student_type': sa.day_student_type,
+            }
+        for sid, bed_number, rid, building, room_number in db.session.query(
+                BedAssignment.student_id, BedAssignment.bed_number,
+                Room.id, Room.building, Room.room_number
+        ).outerjoin(Room, BedAssignment.room_id == Room.id).filter(
+                BedAssignment.student_id.in_(page_ids)).all():
+            bed_map[sid] = {
+                'bed_number': bed_number,
+                'building': building,
+                'room_number': room_number,
+                'has_room': rid is not None,
+            }
+    return render_template('system/students/list.html',
+                         students=students,
+                         grades=grades,
                          classes=classes,
                          subjects=subjects,
                          boarding_types=boarding_types,
@@ -142,6 +167,8 @@ def list_students():
                          enrollment_statuses=enrollment_statuses,
                          pagination=pagination,
                          change_counts=change_counts,
+                         acc_map=acc_map,
+                         bed_map=bed_map,
                          filter_gender=filter_gender,
                          filter_grade=filter_grade,
                          filter_class=filter_class,
@@ -282,6 +309,8 @@ def edit(id):
     # v1.19.47.6 学籍驱动班级联动：旧学籍与旧位置需在填充前取
     _old_status = (student.enrollment_status or '').strip()
     _old_loc = student_location_desc(student)
+    # v1.19.47.4 离校联动：旧住宿状态需在变更前取（用于变更留痕）
+    _old_boarding = (student.accommodation.boarding_type if student.accommodation else '') or ''
     if form.validate_on_submit():
         # 1. 验证身份证号格式
         id_card = form.id_card_number.data
@@ -314,15 +343,27 @@ def edit(id):
         #   学籍已转出 → 班级自动置「已转出」；在籍不在校 → 班级自动置「不分班」
         _new_status = (student.enrollment_status or '').strip()
         _auto_kind = _auto_desc = None
+        _left_school = False
         if _new_status != _old_status:
             if _new_status == '学籍已转出':
                 student.class_name = '已转出'
                 _auto_kind = 'withdraw'
                 _auto_desc = '学籍已转出 → 班级自动归置为「已转出」'
+                _left_school = True
             elif _new_status == '在籍不在校':
                 student.class_name = '不分班'
                 _auto_kind = 'transfer'
                 _auto_desc = '学籍为「在籍不在校」→ 班级自动归置为「不分班」'
+        # v1.19.47.4 离校联动（用户口径 2026-10-12）：
+        #   学籍已转出 = 学生离校 → 住宿状态自动置「离校」；
+        #   前端确认（clear_bed=1，见 form.html）后自动清除其床位，
+        #   避免离校学生仍占用床位，导致宿舍入住率与分配算法算错空位。
+        _bed_released = False
+        if _left_school:
+            from app.utils.bed_ops import mark_boarding_left_school, release_student_bed
+            mark_boarding_left_school(student.id)
+            if (request.form.get('clear_bed') or '') == '1':
+                _bed_released = release_student_bed(student.id)
         db.session.commit()
         log_operation(current_user, '更新', '学生', student.id, f'{student.name} {student.grade}{student.class_name}')
         # 注：年级/班级在本页不可改（never_update_fields），调班请走「调班」弹窗 /students/<id>/transfer
@@ -334,6 +375,10 @@ def edit(id):
         if _auto_kind:
             _logs.append((_auto_kind, _old_loc, student_location_desc(student),
                           _auto_desc))
+        if _left_school:
+            _logs.append(('dormitory', _old_boarding or '（空）', '离校',
+                          '离校联动：住宿状态置「离校」'
+                          + ('，并已清除床位' if _bed_released else '')))
         try:
             _new_sel = (student.subject_selection or '')
             if _new_sel != _old_sel:
@@ -545,6 +590,8 @@ def batch_edit_search():
         return jsonify({'success': False, 'message': '无修改选科的权限（需学生编辑权限）'})
 
     updated = 0
+    # v1.19.47.4 离校联动：批量置「离校」时自动清除床位（计数用于回执）
+    released = 0
     # 批量修改床位
     if building and room_number and bed_number:
         try:
@@ -574,6 +621,11 @@ def batch_edit_search():
                 db.session.add(acc)
             if boarding_type:
                 acc.boarding_type = boarding_type
+                # v1.19.47.4 离校联动（用户口径 2026-10-12）：置「离校」→ 自动清除床位
+                if boarding_type == '离校':
+                    from app.utils.bed_ops import release_student_bed
+                    if release_student_bed(s.id):
+                        released += 1
             if day_student_type:
                 acc.day_student_type = day_student_type
         # 分配床位
@@ -594,8 +646,13 @@ def batch_edit_search():
         updated += 1
 
     db.session.commit()
-    log_operation(current_user, '批量修改', '学生', None, f'搜索页批量修改 {updated} 人')
-    return jsonify({'success': True, 'message': f'成功修改 {updated} 名学生'})
+    log_operation(current_user, '批量修改', '学生', None,
+                  f'搜索页批量修改 {updated} 人'
+                  + (f'（离校自动清床位 {released} 个）' if released else ''))
+    _msg = f'成功修改 {updated} 名学生'
+    if released:
+        _msg += f'，并自动清除 {released} 个床位'
+    return jsonify({'success': True, 'message': _msg, 'released': released})
 
 
 def _populate_student(student, form):
