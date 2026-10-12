@@ -83,6 +83,9 @@ MODULES = [
              'read': [], 'write': ['points.export']},
             {'key': 'rules', 'name': '规则模板',
              'read': [], 'write': ['points.rules']},
+            # 2026-10-13（v1.19.47.22）德育奖惩信息：与积分并列，独立页面 /morality/rewards
+            {'key': 'reward', 'name': '奖惩信息',
+             'read': ['morality.view'], 'write': ['morality.edit']},
         ],
     },
     {

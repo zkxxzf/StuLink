@@ -364,7 +364,7 @@ def unselected_subjects(selection, direction):
     return out
 
 
-def _four_step_status(exam):
+def _four_step_status(exam, user=None):
     """四段式进度（建立考试 → 考务安排 → 成绩导入 → 成绩分析）
 
     每一步给出：是否完成、可点进去的地址、“下一步”提示。
@@ -377,6 +377,20 @@ def _four_step_status(exam):
     affair = ExamAffair.query.filter_by(exam_id=exam.id).first()
     imported = (exam.status == 'imported')
     banded = ExamBand.query.filter_by(exam_id=exam.id).count() > 0
+    # v1.19.47.22：第④步落点与**侧栏「成绩分析」标题同口径**（base.html 同一套判断）——
+    #   领导（管理员 / 校级·年级权限组）→「总览（全年级对比）」global_compare_page；
+    #   其他人 →「班级分析」grades.index?tab=class。
+    # 此前④一律跳 grades.index（老的五页签分析页），与侧栏不一致（用户 2026-10-13 反馈
+    # 「点击以后跳转的还是老页面」）；URL 必须带本场 exam，否则全局页会选错年级/考试。
+    _pg = getattr(user, 'permission_group', None) if user is not None else None
+    is_lead = (user is not None and (
+        getattr(user, 'role', '') == 'admin'
+        or (_pg is not None
+            and getattr(_pg, 'scope_type', '') in ('school', 'grade'))))
+    if is_lead:
+        analysis_url = url_for('grades.global_compare_page', exam=exam.id)
+    else:
+        analysis_url = url_for('grades.index', exam=exam.id, tab='class')
     steps = [
         {'key': 'exam', 'label': '建立考试', 'done': True,
          'url': url_for('grades.exam_detail', exam_id=exam.id),
@@ -389,9 +403,7 @@ def _four_step_status(exam):
          'hint': (EXAM_STATUS_LABEL.get(exam.status, exam.status) if imported
                   else '尚未导入成绩')},
         {'key': 'analysis', 'label': '成绩分析', 'done': banded,
-         # v1.19.47.21 必须带本场 exam：此前不带 → 落到全局分析页并默认选「最新考试」，
-         # 从本场详情页（含「下一步：成绩分析」按钮）点进去会显示别的考试成绩。
-         'url': url_for('grades.index', exam=exam.id),
+         'url': analysis_url,
          'hint': ('已划线，分析可用' if banded else '未划线，分层类指标不可用')},
     ]
     nxt = next((s for s in steps if not s['done']), None)
@@ -426,7 +438,7 @@ def exam_detail(exam_id):
             info = json.loads(exam.import_info)
         except (json.JSONDecodeError, TypeError):
             info = None
-    steps, next_step = _four_step_status(exam)
+    steps, next_step = _four_step_status(exam, user=current_user)
     # 2026-10-12 数据可信度审计（§3.3）：分批导入（模式 A：未出现的科目列保留）
     # 中途，总分＝已导入科目合计，与导完后的总分**不可比**。后端早就有
     # stats_service.ExamData.partial_import() 能算出"仍有 X 科未导入"，

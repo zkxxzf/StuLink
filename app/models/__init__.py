@@ -16,6 +16,11 @@ from app.models.grades import Exam, ExamScore, ExamBand, TeacherSubjectLink, \
 from app.models.grades import AffairTeacher, AffairSchedule, AffairInvigilator, \
     AffairInvigilation  # v1.19.47.21 考务环节④⑤⑥：任课核对 / 考试时间表 / 监考编排
 from app.models.points import PointRecord, PointRuleTemplate
+from app.models.morality import (RewardPunishment, RewardPunishmentAttachment,
+                                 KINDS, REWARD_CATEGORIES, PUNISH_CATEGORIES,
+                                 REWARD_LEVELS, PUNISH_LEVELS, STATUSES,
+                                 DOC_TYPES, category_options, category_label,
+                                 level_options, level_label)
 from app.models.system_setting import SystemSetting
 from app.models.academic import Teacher, \
     InspectionRecord, TeacherAchievement, \
@@ -42,6 +47,11 @@ __all__ = ['User', 'Student', 'Room', 'BedAssignment', 'StudentAccommodation',
            'ExamAffair', 'AffairRoom', 'AffairStudent',
            'AiKey', 'AiGlobalKey', 'AiReport', 'AiChatMessage',
            'AffairRoomLib', 'PointRecord', 'PointRuleTemplate',
+           # 德育奖惩（morality.db，2026-10-13 v1.19.47.22）
+           'RewardPunishment', 'RewardPunishmentAttachment',
+           'REWARD_CATEGORIES', 'PUNISH_CATEGORIES', 'REWARD_LEVELS',
+           'PUNISH_LEVELS', 'DOC_TYPES', 'category_options', 'category_label',
+           'level_options', 'level_label',
            'SystemSetting',
            'Teacher',
            'InspectionRecord', 'TeacherAchievement',
