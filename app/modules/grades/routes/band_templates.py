@@ -9,6 +9,7 @@ from app.extensions import db
 from app.models import DictCategory
 from app.models.grades import Exam, ExamBand, BandTemplate
 from app.modules.grades import bp
+from app.modules.grades.services.exam_guard import assert_exam_visible
 from app.utils.decorators import perm_required
 from app.utils.helpers import log_operation
 
@@ -238,6 +239,9 @@ def api_band_template_delete(tid):
     if obj.is_builtin:
         return jsonify(success=False, message='内置模板不能删除')
     # 已绑定的考试解除绑定，避免残留悬空 id
+    # 2026-10-13 全面审计 M-1 复核说明：这里**有意不按年级范围收敛** —— 模板被删后，
+    # 任何仍引用它的考试都必须解绑，否则留下悬空 id（前端显示"套用了不存在的模板"）。
+    # 模板本身是全校共用的基础配置（`grades.settings` 才可改），故整批解绑是维护数据完整性。
     # v1.11.1 避免全表遍历：用 config_json.contains 粗筛，Python 端 band_template_id() 精确验证兜底
     # （contains 生成 LIKE '%...%' 仍扫描 config_json 列，但只实例化匹配行，核心 OOM 风险消除）
     # band_template_id() 精确验证还能防御 LIKE 子串误匹配（如模板 id=1 误匹配含 id=11 的 JSON）
@@ -260,7 +264,9 @@ def api_bind_exam_template():
     """考试 ↔ 模板绑定（解绑传 template_id=0）"""
     payload = request.get_json(force=True, silent=True) or {}
     exam_id = payload.get('exam_id')
-    exam = Exam.query.get_or_404(exam_id) if exam_id else None
+    # 2026-10-13 全面审计 M-1：绑定/解绑都要过考试范围守卫（原 get_or_404 只验存在，
+    # 任何 grades.settings 持有者都能改其它年级考试的划线模板绑定）——不存在 404、越界 403
+    exam = assert_exam_visible(exam_id) if exam_id else None
     if not exam:
         return jsonify(success=False, message='考试不存在')
     tid = payload.get('template_id')

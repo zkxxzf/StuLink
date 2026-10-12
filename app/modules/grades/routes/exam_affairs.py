@@ -1045,7 +1045,9 @@ def affair_room_lib_delete(lid):
 def affair_room_from_lib(aid):
     """v1.12.1 从考场房间库选取房间生成考场：
     自动生成考场编号（现有最大数字+1）、确定考场科目（默认，可再编辑）、带出默认容量"""
-    AffairRoom.query.get_or_404 and ExamAffair.query.get_or_404(aid)  # 批次存在性校验
+    # 2026-10-13 全面审计 M-2：本处原只做 ExamAffair 存在性校验（H-4 漏网的第 24 处），
+    # 任何 grades.edit 持有者都能向他年级批次写考场；改走统一入口（存在性 + 年级范围）。
+    _get_affair_checked(aid)
     lid = request.form.get('lib_id')
     lib_row = AffairRoomLib.query.get_or_404(int(lid))
     exist_rooms = AffairRoom.query.filter_by(affair_id=aid).all()

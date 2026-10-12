@@ -2574,6 +2574,216 @@ def check_band_template_suggest():
         db.session.commit()
 
 
+@item('AUDITP0')
+def check_audit_p0_scope_guards():
+    """全面审计 P0 修复回归（2026-10-13，docs/全面审计报告_20261013.md）：
+
+    · H-1 业绩附件删除：改走 `ach_svc.can_view`（academic.view 持有者 OR 提交者本人）
+      —— 「只勾 academic.edit、没勾 academic.view」的权限组不得删他人附件（403）
+    · M-1 划线模板绑定：改走 `assert_exam_visible` —— 越界年级 403
+    · M-2 考务 from-lib 生成考场：改走 `_get_affair_checked` —— 越界年级 403
+    三处均为"按 id 取对象但不校验数据范围"的写操作，故用**受限账号实打**验证。
+    """
+    from datetime import date as _date
+    from app.models import User, PermissionGroup, UserDataScope
+    from app.models.academic import TeacherAchievement, AchievementAttachment
+    from app.models.grades import (Exam, ExamAffair, AffairRoom, AffairRoomLib,
+                                   BandTemplate)
+
+    GRADE_MINE, GRADE_OTHER = '2025级', '2024级'
+
+    with app.app_context():
+        # ① 只有写入档（无 academic.view）的组 —— 验 H-1
+        pg_edit = PermissionGroup.query.filter_by(name='AUDITP0仅编辑组').first()
+        if not pg_edit:
+            pg_edit = PermissionGroup(name='AUDITP0仅编辑组', scope_type='school',
+                                      role='staff', description='审计用例：仅 academic.edit')
+            db.session.add(pg_edit)
+            db.session.flush()
+            pg_edit.set_menu_keys(['academic.edit'])
+        # ② 有 grades.edit/grades.settings，但数据范围只授 2025 级 —— 验 M-1/M-2
+        pg_scope = PermissionGroup.query.filter_by(name='AUDITP0范围组').first()
+        if not pg_scope:
+            pg_scope = PermissionGroup(name='AUDITP0范围组', scope_type='school',
+                                       role='staff', description='审计用例：范围受限')
+            db.session.add(pg_scope)
+            db.session.flush()
+            pg_scope.set_menu_keys(['grades.edit', 'grades.settings'])
+
+        def _get_user(uname, pg, scope_grade=None):
+            u = User.query.filter_by(username=uname).first()
+            if not u:
+                u = User(username=uname, real_name=uname, role='staff',
+                         permission_group_id=pg.id, must_change_pwd=False)
+                u.set_password(TEST_PWD)
+                db.session.add(u)
+                db.session.flush()
+            if scope_grade and not UserDataScope.query.filter_by(
+                    user_id=u.id, grade=scope_grade).first():
+                db.session.add(UserDataScope(user_id=u.id, grade=scope_grade))
+            return u
+
+        u_edit = _get_user('audit_edit', pg_edit)
+        u_scope = _get_user('audit_scope', pg_scope, GRADE_MINE)
+        db.session.flush()
+
+        # ③ 业绩 + 两个附件（提交人是**别人**）
+        rec = TeacherAchievement.query.filter_by(title='AUDITP0审计业绩').first()
+        if not rec:
+            rec = TeacherAchievement(teacher_uid='TAUDIT0', teacher_name='审计用例',
+                                     category='honor', title='AUDITP0审计业绩',
+                                     status='approved', submitted_by=u_scope.id)
+            db.session.add(rec)
+            db.session.flush()
+        att_ids = []
+        for i in (1, 2):
+            a = AchievementAttachment(achievement_id=rec.id,
+                                      file_name=f'审计附件{i}.pdf',
+                                      stored_name=f'audit{i}.pdf', ext='pdf',
+                                      size=10, uploaded_by=u_scope.id)
+            db.session.add(a)
+            db.session.flush()
+            att_ids.append(a.id)
+
+        # ④ 别人年级的考试 + 考务批次 + 全局房间库 + 一个模板
+        exam = Exam.query.filter_by(name='AUDITP0越界考试').first()
+        if not exam:
+            exam = Exam(name='AUDITP0越界考试', grade=GRADE_OTHER,
+                        exam_date=_date(2026, 5, 22), exam_type='AUDITP0')
+            db.session.add(exam)
+            db.session.flush()
+        affair = ExamAffair.query.filter_by(name='AUDITP0越界考务').first()
+        if not affair:
+            affair = ExamAffair(name='AUDITP0越界考务', grade=GRADE_OTHER,
+                                exam_id=exam.id)
+            db.session.add(affair)
+            db.session.flush()
+        lib = AffairRoomLib.query.filter_by(location='AUDITP0教室').first()
+        if not lib:
+            lib = AffairRoomLib(location='AUDITP0教室', capacity=30, note='审计用例')
+            db.session.add(lib)
+            db.session.flush()
+        tpl = BandTemplate.query.filter_by(name='默认模板').first()
+        if not tpl:
+            tpl = BandTemplate(name='AUDITP0模板', lower_mode='score',
+                               sort_order=99, is_builtin=False)
+            tpl.set_layers([{'name': 'A线', 'ratio': None}])
+            db.session.add(tpl)
+            db.session.flush()
+        db.session.commit()
+        exam_id, affair_id, lib_id, tpl_id = exam.id, affair.id, lib.id, tpl.id
+
+    with app.test_client() as c:
+        # —— H-1：只有 academic.edit 的账号删他人附件 → 403（且不落库）——
+        login(c, 'audit_edit', TEST_PWD)
+        csrf = get_csrf(c, '/workbench/')
+        r = c.post(f'/academic/achievements/attachment/{att_ids[0]}/delete',
+                   data={'csrf_token': csrf})
+        case('审计P0：无 academic.view 的编辑账号删他人附件被拒（403）',
+             r.status_code == 403, str(r.status_code))
+        with app.app_context():
+            case('审计P0：被拒后附件仍在（未落库）',
+                 db.session.get(AchievementAttachment, att_ids[0]) is not None, 'kept')
+        c.get('/logout')
+
+        # 合法路径不回归：admin（有 academic.view）可正常删
+        login(c, 'ac_admin', TEST_PWD)
+        csrf = get_csrf(c, '/academic/achievements')
+        r = c.post(f'/academic/achievements/attachment/{att_ids[0]}/delete',
+                   data={'csrf_token': csrf})
+        case('审计P0：有 academic.view 的教务端仍可正常删除（200）',
+             r.status_code == 200, str(r.status_code))
+        with app.app_context():
+            case('审计P0：合法删除已生效',
+                 db.session.get(AchievementAttachment, att_ids[0]) is None, 'deleted')
+        c.get('/logout')
+
+        # —— M-1：范围只有 2025 级的账号，给 2024 级考试绑模板 → 403 ——
+        login(c, 'audit_scope', TEST_PWD)
+        csrf = get_csrf(c, '/workbench/')
+        r = c.post('/grades/api/exam-band-template',
+                   json={'exam_id': exam_id, 'template_id': tpl_id},
+                   headers={'X-CSRFToken': csrf})
+        case('审计P0：越界年级绑定划线模板被拒（403）',
+             r.status_code == 403, str(r.status_code))
+        with app.app_context():
+            case('审计P0：越界绑定未落库',
+                 db.session.get(Exam, exam_id).band_template_id() != tpl_id, 'unbound')
+        c.get('/logout')
+
+        # 合法路径不回归：admin 可正常绑定/解绑
+        login(c, 'ac_admin', TEST_PWD)
+        csrf = get_csrf(c, '/grades/band-templates')
+        r = c.post('/grades/api/exam-band-template',
+                   json={'exam_id': exam_id, 'template_id': tpl_id},
+                   headers={'X-CSRFToken': csrf})
+        case('审计P0：有范围的账号绑定不受影响（200）',
+             r.status_code == 200, str(r.status_code))
+        r = c.post('/grades/api/exam-band-template',
+                   json={'exam_id': exam_id, 'template_id': 0},
+                   headers={'X-CSRFToken': csrf})
+        with app.app_context():
+            case('审计P0：解绑也走同一守卫（0=解绑 200 + 已解绑）',
+                 r.status_code == 200
+                 and not db.session.get(Exam, exam_id).band_template_id(), 'unbind')
+
+        # —— M-2：越界年级从房间库生成考场 → 403 ——
+        c.get('/logout')                     # 必须先退出 admin，否则仍以 admin 身份发请求
+        login(c, 'audit_scope', TEST_PWD)
+        csrf = get_csrf(c, '/workbench/')
+        r = c.post(f'/grades/affairs/{affair_id}/rooms/from-lib',
+                   data={'csrf_token': csrf, 'lib_id': lib_id})
+        case('审计P0：越界年级从房间库建考场被拒（403）',
+             r.status_code == 403, str(r.status_code))
+        with app.app_context():
+            case('审计P0：越界考场未落库',
+                 AffairRoom.query.filter_by(affair_id=affair_id,
+                                            location='AUDITP0教室').count() == 0,
+                 'no room')
+        c.get('/logout')
+
+        # 合法路径不回归：admin 同批次建考场 → 200
+        login(c, 'ac_admin', TEST_PWD)
+        csrf = get_csrf(c, '/workbench/')
+        r = c.post(f'/grades/affairs/{affair_id}/rooms/from-lib',
+                   data={'csrf_token': csrf, 'lib_id': lib_id})
+        case('审计P0：有范围的账号建考场不受影响（200）',
+             r.status_code == 200, str(r.status_code))
+
+    # 清理，避免污染本轮的考试/考务/业绩列表（分段提交，避免 ORM 删除顺序引发外键告警）
+    with app.app_context():
+        AffairRoom.query.filter_by(affair_id=affair_id).delete(synchronize_session=False)
+        ExamAffair.query.filter_by(id=affair_id).delete(synchronize_session=False)
+        AffairRoomLib.query.filter_by(location='AUDITP0教室').delete(synchronize_session=False)
+        db.session.commit()
+    with app.app_context():
+        Exam.query.filter_by(id=exam_id).delete(synchronize_session=False)
+        db.session.commit()
+    with app.app_context():
+        _rec = TeacherAchievement.query.filter_by(title='AUDITP0审计业绩').first()
+        if _rec:
+            AchievementAttachment.query.filter_by(
+                achievement_id=_rec.id).delete(synchronize_session=False)
+            TeacherAchievement.query.filter_by(
+                id=_rec.id).delete(synchronize_session=False)
+            db.session.commit()
+    with app.app_context():
+        from app.models import OperationLog
+        _uids = [u.id for u in User.query.filter(
+            User.username.in_(('audit_edit', 'audit_scope'))).all()]
+        if _uids:
+            UserDataScope.query.filter(
+                UserDataScope.user_id.in_(_uids)).delete(synchronize_session=False)
+            # 登录等操作日志引用了 users.id（有外键），必须先删，否则用户删不掉
+            OperationLog.query.filter(
+                OperationLog.user_id.in_(_uids)).delete(synchronize_session=False)
+            User.query.filter(User.id.in_(_uids)).delete(synchronize_session=False)
+            db.session.commit()      # 先落用户删除，再删权限组（users → permission_groups 有外键）
+            PermissionGroup.query.filter(PermissionGroup.name.in_(
+                ('AUDITP0仅编辑组', 'AUDITP0范围组'))).delete(synchronize_session=False)
+            db.session.commit()
+
+
 @item('PORTRAITLIST')
 def check_portrait_list_filter():
     """学生画像列表过滤（2026-10-13 修复）：**学籍为空（NULL）的学生必须可见**。

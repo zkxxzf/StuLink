@@ -470,10 +470,20 @@ def achievement_attachment_upload(aid):
 @login_required
 @perm_required('academic.edit')
 def achievement_attachment_delete(fid):
-    """删除附件（记录 + 落盘文件）"""
+    """删除附件（记录 + 落盘文件）
+
+    2026-10-13 全面审计 H-1：补**归属校验** —— 原先只按附件 id 取对象就删，
+    未判断"这条业绩我能不能看"，与记录级权限脱节；现与 view/download 同口径走
+    `ach_svc.can_view`（academic.view 持有者 OR 提交者本人）。
+    否则「只勾了 academic.edit、没勾 academic.view」的自定义权限组（权限组页可
+    单独勾选子项）看不到业绩列表，却能按 id 逐条删附件。
+    """
     att = db.session.get(AchievementAttachment, fid)
     if not att:
         abort(404)
+    rec = db.session.get(TeacherAchievement, att.achievement_id)
+    if not ach_svc.can_view(rec, att, current_user):
+        abort(403)
     name = att.file_name
     ach_svc.delete_attachment(att)
     log_operation(current_user, '删除', '业绩附件', fid, name or '', module='academic')
