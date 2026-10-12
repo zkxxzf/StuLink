@@ -51,7 +51,7 @@
                 </div>
                 <div class="collapse mb-2" id="phoneForm">
                     <form method="POST" action="{{ url_for('workbench.change_phone') }}"
-                          class="border rounded p-2" style="background: var(--sl-surface);">
+                          class="border rounded p-2" style="background: var(--sl-surface-2);">
                         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                         <input type="hidden" name="return_to" value="profile">
                         <div class="mb-2">
@@ -92,7 +92,7 @@
                     {# 复用 auth.change_password 的同一套校验（弱口令黑名单 / 强度 / 与原密码比较），
                        成功后由该路由按 next 回跳本页；不在此处重写一份改密逻辑。 #}
                     <form method="POST" action="{{ url_for('auth.change_password') }}"
-                          class="border rounded p-2" style="background: var(--sl-surface);">
+                          class="border rounded p-2" style="background: var(--sl-surface-2);">
                         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                         <input type="hidden" name="next" value="{{ url_for('workbench.profile') }}">
                         <div class="mb-2">
