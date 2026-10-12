@@ -306,7 +306,7 @@
             return { entry_id: o.entry.id, partner_uid: o.partner_uid, swap_date: perm ? '' : (o.swap_date || '') };
         }) }));
         var names = items.map(function (o, n) {
-            return circNum(n + 1) + wd(o.entry) + '第' + o.entry.period_number + '节 ' + o.entry.subject + '（' + (o.partner_name || '?') + '代）';
+            return circNum(n + 1) + wd(o.entry) + pn(o.entry.period_number) + ' ' + o.entry.subject + '（' + (o.partner_name || '?') + '代）';
         }).join('；');
         if (!confirm('确认提交请人代课申请？\n共 ' + items.length + ' 节：' + names
             + '\n提交后需代课老师确认，再进入教务审批。')) { e.preventDefault(); return false; }
