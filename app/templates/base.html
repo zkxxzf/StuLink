@@ -328,12 +328,8 @@
                             <i class="bi bi-key"></i> 修改密码
                         </a>
                     </li>
-                    {# 2026-10-13（v1.19.47.25）：主题切换的第二入口（顶栏按钮之外的备选） #}
-                    <li>
-                        <a class="dropdown-item" href="#" id="themeToggleItem">
-                            <i class="bi bi-moon-stars"></i> 切换为深色模式
-                        </a>
-                    </li>
+                    {# 2026-10-13：头像菜单里的「切换为深色模式」已删除（用户口径：菜单里不要这项）
+                       —— 主题切换只保留顶栏那一个按钮，避免同一功能两个入口。 #}
                     <li><hr class="dropdown-divider my-1"></li>
                     <li>
                         <a class="dropdown-item text-danger" href="{{ url_for('auth.logout') }}">
@@ -902,7 +898,6 @@
                 var dark = (theme === 'dark');
                 var icon = document.getElementById('themeIcon');
                 var label = document.getElementById('themeLabel');
-                var item = document.getElementById('themeToggleItem');
                 if (icon) {
                     icon.className = 'bi ' + (dark ? 'bi-sun' : 'bi-moon-stars');
                 }
@@ -912,16 +907,12 @@
                     btn.title = dark ? '当前：深色模式（点击切换为浅色）'
                                      : '当前：浅色模式（点击切换为深色）';
                 }
-                if (item) {
-                    item.innerHTML = '<i class="bi ' + (dark ? 'bi-sun' : 'bi-moon-stars')
-                                   + '"></i> ' + (dark ? '切换为浅色模式' : '切换为深色模式');
-                }
             }
 
             function toggle() { apply(current() === 'dark' ? 'light' : 'dark'); }
 
             document.addEventListener('click', function (e) {
-                if (e.target.closest('#themeToggle') || e.target.closest('#themeToggleItem')) {
+                if (e.target.closest('#themeToggle')) {
                     e.preventDefault();
                     toggle();
                 }

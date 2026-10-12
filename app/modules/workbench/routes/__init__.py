@@ -2,7 +2,7 @@
 # 教师工作台：我的信息 / 今日课程 / 我的课表 / 我的业绩 / 手机号修改
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 import re
-from datetime import date
+from datetime import date, datetime
 
 from flask import (Blueprint, render_template, request, redirect, url_for,
                    flash, current_app)
@@ -173,9 +173,16 @@ def index():
                                      current_user.id)
         todo = {'todos': [], 'todo_count': 0, 'unread': 0, 'recent': []}
 
+    # 2026-10-13：首页欢迎语（按时段）—— 首页原「个人信息」卡片（手机号 / 登录密码 /
+    # 身份证）按用户口径**下线**，隐私信息只在「个人中心」(workbench.profile) 展示。
+    _h = datetime.now().hour
+    greet = ('早上好' if _h < 6 else '上午好' if _h < 12
+             else '下午好' if _h < 18 else '晚上好')
+
     return render_template('workbench/index.html', teacher=teacher,
                            todo=todo,
-                           # 2026-10-13：个人信息卡片要展示「权限组」，与个人中心页同口径
+                           greet=greet,
+                           # 欢迎卡片上的身份/权限组徽章（与个人中心页同口径）
                            pg=current_user.permission_group,
                            class_schedules=class_schedules,
                            can_class_view=can_class_view,
