@@ -100,7 +100,7 @@ with app.app_context():
     db.session.commit()
     db.session.add(AffairStudent(affair_id=_prev_af.id, student_no='20250001',
                                  name='历生01', class_name='01班', is_attend=False))
-    # v1.19.47.23 容量用例：上一场 东211=44；本场同房间初始 30
+    # v1.19.47.24 容量用例：上一场 东211=44；本场同房间初始 30
     db.session.add(AffairRoom(affair_id=_prev_af.id, room_no='01', location='东211',
                               subject='默认', capacity=44))
     db.session.add(AffairRoom(affair_id=_cur_af.id, room_no='01', location='东211',
@@ -422,7 +422,7 @@ with app.test_client() as c:
         r = c.get(url)
         check(f'页面 {url}', r.status_code == 200, str(r.status_code))
 
-    # ---- v1.19.47.23 排序三角：统一在文字后面 + 未点选也看得清 + 右对齐列仍与数字对齐 ----
+    # ---- v1.19.47.24 排序三角：统一在文字后面 + 未点选也看得清 + 右对齐列仍与数字对齐 ----
     html = c.get(f'/grades/exams/{eid}').get_data(as_text=True)
     check('表头：三角统一在文字后面',
           all((lbl + '<i') in html for lbl in
@@ -438,7 +438,7 @@ with app.test_client() as c:
     check('页头：默认排序/改分说明整行已移除',
           '默认按' not in html and '恢复默认排序' not in html
           and '点击单科分数可修改' not in html)
-    # ---- v1.19.47.23 侧栏「成绩分析」标题本身即入口（直接进总览），展开/收起交给箭头 ----
+    # ---- v1.19.47.24 侧栏「成绩分析」标题本身即入口（直接进总览），展开/收起交给箭头 ----
     check('侧栏：成绩分析标题指向总览（全年级对比）',
           'class="efn-group-title"' in html
           and ('/grades/global-compare?exam=%d' % eid) in html
@@ -446,7 +446,7 @@ with app.test_client() as c:
     check('侧栏：分析组展开仍由箭头负责',
           'data-bs-toggle="collapse" href="#efnAnalysis"' in html)
 
-    # ---- v1.19.47.23 表头/数字严格对齐 + 名次列次序 + 进退步悬浮说明 ----
+    # ---- v1.19.47.24 表头/数字严格对齐 + 名次列次序 + 进退步悬浮说明 ----
     # th 内若残留空白，右对齐时行尾空格不会被折掉，会把表头文字往左推几个像素 → 与数字错开
     _thead = html.split('<thead')[1].split('</thead>')[0]
     check('表头：th 内部无空白', '</a></th>' in _thead and re.search(r'\s</th>', _thead) is None)
@@ -456,7 +456,7 @@ with app.test_client() as c:
           re.search(r'<td class="text-end c-rank">\d+</td>', html) is not None)
     check('进退步悬浮：写明同方向进退步', 'title="同方向进退步：' in html)
 
-    # ---- v1.19.47.23 导航高亮唯一性 + 分析子模块「考试态」锁本场 ----
+    # ---- v1.19.47.24 导航高亮唯一性 + 分析子模块「考试态」锁本场 ----
     hb = c.get(f'/grades/exams/{eid}/bands').get_data(as_text=True)
     check('导航：划线分层页只高亮「划线分层」',
           re.search(r'class="efn-item active" data-nav="bands"', hb) is not None
@@ -478,7 +478,7 @@ with app.test_client() as c:
     check('非考试态：年级下拉仍可选',
           'id="gGrade" class="form-select form-select-sm w-auto d-none"' not in hn)
 
-    # ---- v1.19.47.23 考务步骤① 名单维护：只读名单 + 沿用上一场不参考 + 不参考排最上 ----
+    # ---- v1.19.47.24 考务步骤① 名单维护：只读名单 + 沿用上一场不参考 + 不参考排最上 ----
     r = c.post(f'/grades/affairs/{_AFF_CUR}/students/sync', headers={'X-CSRFToken': csrf})
     d = r.get_json()
     check('考务同步：自动沿用上一场不参考 1 人',
@@ -489,7 +489,7 @@ with app.test_client() as c:
     check('考务步骤①：无手动新增/编辑',
           'onclick="openStuModal' not in h2 and 'id="stuModal"' not in h2
           and '>编辑</button>' not in h2)
-    # ---- v1.19.47.23 考务步骤① 左右分栏（左=参加/右=不参加）+ 名单统计 ----
+    # ---- v1.19.47.24 考务步骤① 左右分栏（左=参加/右=不参加）+ 名单统计 ----
     check('考务步骤①：左右分栏（参加 / 不参加 两张表）',
           '参加考试' in h2 and '不参加考试' in h2
           and 'id="stuTable"' in h2 and 'id="stuSkipTable"' in h2)
@@ -519,12 +519,12 @@ with app.test_client() as c:
     # ---- v1.19.36.0 步骤② 考场容量：批量设置 / 沿用上一场（同房间）----
     check('步骤② 有容量批量入口',
           '批量设置容量' in h2 and '带入上次容量' in h2)
-    # v1.19.47.23：这两个按钮属于「本批次考场」侧 → 应在右卡片头内（不在顶部工具栏）
+    # v1.19.47.24：这两个按钮属于「本批次考场」侧 → 应在右卡片头内（不在顶部工具栏）
     _rh = h2.split('id="roomStat"')[1][:900]
     check('步骤②：容量按钮已移到「本批次考场」卡片头',
           '批量设置容量' in _rh and '带入上次容量' in _rh
           and 'setAllCapacity()' in _rh)
-    # v1.19.47.23 考务页单独的 AI 导入入口已下线（统一走每场考试「AI 智能导入」）
+    # v1.19.47.24 考务页单独的 AI 导入入口已下线（统一走每场考试「AI 智能导入」）
     check('步骤②：考务页 AI 导入入口已下线',
           '导入考生安排' not in h2
           and ('/grades/affairs/%d/ai-import' % _AFF_CUR) not in h2)
@@ -545,7 +545,7 @@ with app.test_client() as c:
                for x in AffairRoom.query.filter_by(affair_id=_AFF_CUR).all()}
         check('容量落库 = 上一场 44', got == {'东211': 44}, got)
 
-    # ---- v1.19.47.23 任课教师映射：下拉按姓名首字母排序 + 保存不再静默失效 ----
+    # ---- v1.19.47.24 任课教师映射：下拉按姓名首字母排序 + 保存不再静默失效 ----
     # 排序键与后端一致：(拼音首字母, 全拼, 姓名)；无 pypinyin 时后端退化为账号（本身即拼音）
     from app.modules.grades.services.user_account import pinyin_of as _py_of
 
