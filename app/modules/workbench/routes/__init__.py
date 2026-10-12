@@ -1,4 +1,4 @@
-# StuLink v1.19.47.14 2026-10-10
+# StuLink v1.19.47.15 2026-10-10
 # 教师工作台：我的信息 / 今日课程 / 我的课表 / 我的业绩 / 手机号修改
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 import re
@@ -46,7 +46,7 @@ def index():
     pending_swaps = []
     partner_pending = []
     active_term = None
-    # 2026-10-13（v1.19.47.14）：调课入口挂到工作台 —— 能否申请由 academic.swap 决定，
+    # 2026-10-13（v1.19.47.15）：调课入口挂到工作台 —— 能否申请由 academic.swap 决定，
     # 菜单/按钮可见性与 perm_required 保持一致，避免"看得见、点了 403"。
     can_swap = current_user.has_perm('academic.swap')
     if teacher:

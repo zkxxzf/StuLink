@@ -1790,7 +1790,7 @@ def check_inspection_mark():
 
 @item('SWAPEXCH')
 def check_two_person_exchange():
-    """两人换课（v1.19.47.14）：换时段 / 换班上课 / 请人代课 × 临时与永久，
+    """两人换课（v1.19.47.15）：换时段 / 换班上课 / 请人代课 × 临时与永久，
     覆盖「对方先确认 → 教务审批 → 执行」全链路 + 拒绝 / 越权 / 校验路径。"""
     from app.modules.academic.services import swap_service
 
@@ -2113,7 +2113,7 @@ def check_swap_exchange_batch():
 
 @item('SWAPMIXED')
 def check_swap_mixed_batch():
-    """调课页合并（v1.19.47.14）：一次提交 = 几节调空档 + 几节与同事对调（同一批次）。"""
+    """调课页合并（v1.19.47.15）：一次提交 = 几节调空档 + 几节与同事对调（同一批次）。"""
     from app.models.timetable import ScheduleEntry, ScheduleSwap
     from app.modules.academic.services import swap_service
 
@@ -2148,7 +2148,8 @@ def check_swap_mixed_batch():
                     'swap_date': date(2026, 11, 12)},                    # 空档
                    {'entry_id': a2.id, 'new_weekday': 3, 'new_period': 5,
                     'swap_date': date(2026, 11, 11),
-                    'partner_entry_id': b1.id, 'swap_class': False}],    # 与乙对调
+                    'partner_entry_id': b1.id, 'swap_class': False,
+                    'need_partner_confirm': True}],                      # 与乙对调（需他确认）
             is_permanent=False, reason='混合批量回归')
         batch_id = res.get('batch_id')
         rows = ScheduleSwap.query.filter_by(batch_id=batch_id).all()
@@ -2334,7 +2335,7 @@ def check_swap_bulk_offset():
 
 @item('WORKBENCHSWAP')
 def check_workbench_swap():
-    """教师工作台里的调课区块（v1.19.47.14）：入口 + 待我确认 + 我的申请。"""
+    """教师工作台里的调课区块（v1.19.47.15）：入口 + 待我确认 + 我的申请。"""
     with app.test_client() as c:
         login(c, 'ac_admin', TEST_PWD)
         r = c.get('/workbench/')      # 蓝图前缀 /workbench + 路由 '/'（不带斜杠会 308）
@@ -2348,6 +2349,88 @@ def check_workbench_swap():
         case('工作台：调课入口（有 academic.swap 时出现两个申请入口，否则至少可查看记录）',
              bool(html) and (has_swap_entry or '/academic/swap' in html),
              f'entries={has_swap_entry}')
+
+
+@item('SWAPCONFIRM')
+def check_swap_need_partner_confirm():
+    """与同事对调时的「无需对方同意确认」选项：**默认勾选**（不勾选才需要对方答复）。"""
+    from app.models.timetable import ScheduleEntry, ScheduleSwap
+    from app.modules.academic.services import swap_service
+
+    class _Admin:
+        role = 'admin'
+        id = 1
+
+        def has_perm(self, k):
+            return True
+
+    def _mk(g, cn, wd, pn, subj, tuid, tname):
+        e = ScheduleEntry(term_schedule_id=TS_ID, grade=g, class_name=cn,
+                          weekday=wd, period_number=pn, subject=subj,
+                          teacher_uid=tuid, teacher_name=tname,
+                          week_range='1-20', entry_type='normal')
+        db.session.add(e)
+        return e
+
+    admin = _Admin()
+    entry_ids, batch_ids = [], []
+    with app.app_context():
+        m1 = _mk('高二', '01班', 1, 1, '语文', 'CF0001', '甲老师')
+        m2 = _mk('高二', '01班', 2, 1, '语文', 'CF0001', '甲老师')
+        p1 = _mk('高二', '02班', 3, 5, '数学', 'CF0002', '乙老师')
+        p2 = _mk('高二', '03班', 4, 5, '英语', 'CF0003', '丙老师')
+        db.session.commit()
+        entry_ids += [m1.id, m2.id, p1.id, p2.id]
+
+        # ① 默认（不传 need_partner_confirm）→ 免确认：直接进教务审批队列
+        ok1, msg1, res1 = swap_service.apply_swap_batch(
+            applicant_uid='CF0001', applicant_name='甲老师',
+            items=[{'entry_id': m1.id, 'new_weekday': 3, 'new_period': 5,
+                    'swap_date': date(2026, 11, 11),
+                    'partner_entry_id': p1.id, 'swap_class': False}],
+            is_permanent=False, reason='免确认回归')
+        b1 = res1.get('batch_id')
+        batch_ids.append(b1)
+        rows1 = ScheduleSwap.query.filter_by(batch_id=b1).all()
+        case('免确认（默认）：落库且 partner_status=agreed / need_partner_confirm=False',
+             bool(ok1 and res1.get('created') == 1 and rows1
+                 and rows1[0].partner_status == 'agreed'
+                 and rows1[0].need_partner_confirm is False), f'{msg1} {res1}')
+        case('免确认（默认）：可直进教务审批（不被「待对方确认」卡住）',
+             bool(rows1) and swap_service.can_review(rows1[0], admin), 'can_review')
+
+        # ② 显式勾选「需要对方同意确认」→ pending，未答复前不可审
+        ok2, msg2, res2 = swap_service.apply_swap_batch(
+            applicant_uid='CF0001', applicant_name='甲老师',
+            items=[{'entry_id': m2.id, 'new_weekday': 4, 'new_period': 5,
+                    'swap_date': date(2026, 11, 12),
+                'partner_entry_id': p2.id, 'swap_class': False,
+                'need_partner_confirm': True}],
+            is_permanent=False, reason='需确认回归')
+        b2 = res2.get('batch_id')
+        batch_ids.append(b2)
+        r2 = db.session.get(ScheduleSwap, res2.get('rep_id'))
+        case('需对方确认：partner_status=pending，未答复前不可审',
+             bool(ok2 and r2 and r2.partner_status == 'pending'
+                  and not swap_service.can_review(r2, admin)), f'{msg2} {res2}')
+        swap_service.respond_exchange(r2.id, 'agree', 1, '丙老师')
+        db.session.expire_all()
+        r2 = db.session.get(ScheduleSwap, r2.id)
+        case('需对方确认：答复同意后进入教务审批队列',
+             swap_service.can_review(r2, admin), f'{r2.partner_status}')
+
+        # ── 清理 ──
+        for eid in entry_ids:
+            e = db.session.get(ScheduleEntry, eid)
+            if e:
+                db.session.delete(e)
+        for t in ScheduleEntry.query.filter(
+                ScheduleEntry.note.like('%换课%'), ScheduleEntry.note.isnot(None)).all():
+            db.session.delete(t)
+        for b in batch_ids:
+            for s in ScheduleSwap.query.filter_by(batch_id=b).all():
+                db.session.delete(s)
+        db.session.commit()
 
 
 @item('SWAPCHAIN')

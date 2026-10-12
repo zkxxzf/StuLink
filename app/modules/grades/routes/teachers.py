@@ -1,4 +1,4 @@
-# StuLink v1.19.47.14 2026-10-10
+# StuLink v1.19.47.15 2026-10-10
 # 任课教师映射：矩阵维护（按年级）+ 教师安排表批量导入 + 自动开户
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 import io
@@ -44,13 +44,13 @@ def _grade_classes(grade):
 
 
 def _teacher_roles_filter():
-    """v1.19.47.14：教师候选的合法角色集合（明确排除 admin）"""
+    """v1.19.47.15：教师候选的合法角色集合（明确排除 admin）"""
     return ('teacher', 'homeroom_teacher', 'grade_leader',
             'dorm_manager', 'school_viewer', 'staff')
 
 
 def _teacher_candidates():
-    """v1.19.47.14：所有启用且属于教师类角色的账号 id 集合"""
+    """v1.19.47.15：所有启用且属于教师类角色的账号 id 集合"""
     rows = db.session.query(User.id).filter(
         User.role.in_(_teacher_roles_filter()),
         User.is_active.is_(True)
@@ -61,10 +61,10 @@ def _teacher_candidates():
 def _matrix_users(grade):
     """下拉候选教师：启用 + 教师类角色（明确排除 admin）。
 
-    v1.19.47.14：历史逻辑“已绑定 user_id 即可入选”会导致 admin 错配后一直显示在下拉里，
+    v1.19.47.15：历史逻辑“已绑定 user_id 即可入选”会导致 admin 错配后一直显示在下拉里，
     现改为仅按角色过滤；已绑定但非教师类的行依旧可在矩阵中显示历史名字（由 _build_matrix 侧），
     但下拉中不再提供 admin 作为新选择。
-    v1.19.47.14：候选**按老师名字首字母排序**（拼音 A→Z；无姓名时用账号拼音兜底）。"""
+    v1.19.47.15：候选**按老师名字首字母排序**（拼音 A→Z；无姓名时用账号拼音兜底）。"""
     valid = _teacher_candidates()
     if not valid:
         return []
@@ -77,7 +77,7 @@ def _matrix_users(grade):
 def _name_sort_key(name, username):
     """姓名 → 拼音排序键：(首字母, 全拼, 姓名)。
 
-    v1.19.47.14：用 pypinyin 把「付冰洋」排到 f、把「何楠」排到 h；
+    v1.19.47.15：用 pypinyin 把「付冰洋」排到 f、把「何楠」排到 h；
     没有姓名（real_name 为空）的账号退化为用账号（pinyin）排序，仍保证稳定有序。"""
     py = user_account.pinyin_of(name) if name else None
     py = (py or '').lower() or (username or '').lower() or (name or '')
@@ -145,7 +145,7 @@ def teachers_get():
 
 
 def _json_body():
-    """请求体 → dict（v1.19.47.14 兼容两种提交方式）。
+    """请求体 → dict（v1.19.47.15 兼容两种提交方式）。
 
     背景：前端历史上用 `$.post(url, JSON.stringify({...}))`，jQuery 会以
     `application/x-www-form-urlencoded` 发送**JSON 文本**，而 Flask 的

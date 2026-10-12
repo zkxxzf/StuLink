@@ -102,7 +102,7 @@
 </div>
 
 {% if d.exchange_kind %}
-{# 2026-10-12 换课（v1.19.47.14）：对方信息与确认状态 #}
+{# 2026-10-12 换课（v1.19.47.15）：对方信息与确认状态 #}
 <div class="alert {% if d.partner_status == 'pending' %}alert-warning{% elif d.partner_status == 'refused' %}alert-danger{% elif d.partner_status == 'agreed' %}alert-success{% else %}alert-info{% endif %} py-2 small mb-3">
     <i class="bi bi-people-fill"></i>
     <b>{{ d.exchange_kind_text }}{% if d.exchange_content_text %} · {{ d.exchange_content_text }}{% endif %}</b>
@@ -114,8 +114,17 @@
     <span class="ms-2">对方课程：{{ d.partner_entry.subject }} · {{ d.partner_entry.grade }}{{ d.partner_entry.class_name }} · {{ weekday_names.get(d.partner_entry.weekday) }}第{{ d.partner_entry.period_number }}节</span>
     {% endif %}
     <span class="ms-2">对方确认：<b>{{ d.partner_status_text or '—' }}</b>{% if d.partner_responded_at %} <span class="text-muted">（{{ d.partner_responded_at }}）</span>{% endif %}</span>
+    {% if d.exchange_kind == 'exchange' %}
+    <span class="ms-2">确认方式：<b>{% if d.need_partner_confirm %}需对方同意{% else %}无需对方确认{% endif %}</b></span>
+    {% endif %}
     {% if d.partner_note %}<div class="mt-1">对方备注：{{ d.partner_note }}</div>{% endif %}
-    <div class="mt-1 text-muted">流程：<b>对方确认</b> → 教务审批 → 执行（对方未确认前不会进入教务待审队列）。</div>
+    <div class="mt-1 text-muted">
+        {% if d.exchange_kind == 'exchange' and not d.need_partner_confirm %}
+        流程：<b>教务审批</b> → 执行（发起时选择「无需对方同意确认」，对方仅收到知会通知）。
+        {% else %}
+        流程：<b>对方确认</b> → 教务审批 → 执行（对方未确认前不会进入教务待审队列）。
+        {% endif %}
+    </div>
 </div>
 {% endif %}
 

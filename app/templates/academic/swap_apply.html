@@ -199,7 +199,7 @@
     </div>
 </form>
 
-{# ══ 2026-10-12 两人换课（v1.19.47.14）：换时段 / 换班上课 / 请人代课 ══ #}
+{# ══ 2026-10-12 两人换课（v1.19.47.15）：换时段 / 换班上课 / 请人代课 ══ #}
 
 <script id="applyData" type="application/json">
 {
@@ -395,6 +395,11 @@
                       + ' data-act="swapclass"' + (it.target.swap_class ? ' checked' : '')
                       + '><label class="form-check-label small">连班级一起对调</label></div>'
                     : '')
+                + (it.target && it.target.partner_entry_id && !it.target.swap_self
+                    ? '<div class="form-check mt-1 mb-0"><input class="form-check-input" type="checkbox"'
+                      + ' data-act="needconfirm"' + (it.target.skip_confirm ? '' : ' checked')
+                      + '><label class="form-check-label small">需要对方同意确认</label></div>'
+                    : '')
                 + '</td>'
                 + '<td>'
                 + '<button type="button" class="btn btn-sm btn-outline-primary me-1" data-act="set">设置</button>'
@@ -524,6 +529,7 @@
             swap_teacher_name: slot.swap_teacher_name || '',
             swap_self: !!slot.swap_self,
             swap_class: false,
+            skip_confirm: true,                 // 无需对方同意确认 —— 默认勾选
             partner_swap_date: dateVal
         };
         $('#btnApplyAll').prop('disabled', false);
@@ -581,6 +587,15 @@
         var it = itemOf($(this).closest('tr').data('id'));
         if (it && it.target) {
             it.target.swap_class = $(this).is(':checked');
+            renderPicked();
+            renderSummary();
+        }
+    });
+    // 与人对调时：默认**无需**对方同意确认（勾选此项才需要他点【同意】）
+    $(document).on('change', '#pickedBody [data-act=needconfirm]', function () {
+        var it = itemOf($(this).closest('tr').data('id'));
+        if (it && it.target) {
+            it.target.skip_confirm = !$(this).is(':checked');
             renderPicked();
             renderSummary();
         }
@@ -682,7 +697,9 @@
                 row.partner_entry_id = it.target.partner_entry_id;
                 row.swap_class = !!it.target.swap_class;
                 row.partner_swap_date = perm ? '' : (it.target.partner_swap_date
-                                                    || it.target.swap_date || '');
+                                                      || it.target.swap_date || '');
+                // 默认「无需对方同意确认」；勾选 needconfirm 才需要他答复
+                row.need_partner_confirm = !it.target.skip_confirm;
             }
             return row;
         }) };
