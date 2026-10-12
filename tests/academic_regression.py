@@ -2500,6 +2500,47 @@ def check_band_template_suggest():
             db.session.commit()
 
 
+@item('PORTRAITLIST')
+def check_portrait_list_filter():
+    """学生画像列表过滤（2026-10-13 修复）：**学籍为空（NULL）的学生必须可见**。
+
+    原实现 `enrollment_status.notin_(['已转出','离校'])` 在 SQL 三值逻辑下
+    `NULL NOT IN (...)` 结果为 NULL → 整行被剔除（主库 2114 人中 1419 人学籍为空，
+    列表只剩 695 人，表现为"管理员只能看部分学生"）；且排除名单取值与字典不符
+    （学籍实际值是「学籍已转出」，「已转出/离校」是班级取值）。本用例锁死修复口径。
+    """
+    from app.models import Student
+    # 独立年级，避免分页（20/页）把样本挤出第一页
+    GRADE = '2099级'
+    with app.app_context():
+        for num, name, cls, status in (('PL000N', '画像空学籍', '01班', None),
+                                       ('PL000C', '画像班级转出', '已转出', None),
+                                       ('PL000X', '画像学籍转出', '已转出', '学籍已转出')):
+            if not Student.query.filter_by(student_number=num).first():
+                db.session.add(Student(student_number=num, name=name, gender='男',
+                                       grade=GRADE, class_name=cls,
+                                       enrollment_status=status))
+        db.session.commit()
+
+    with app.test_client() as c:
+        login(c, 'ac_admin', TEST_PWD)
+        r = c.get('/portrait/', query_string={'grade': GRADE})
+        html = r.get_data(as_text=True) if r.status_code == 200 else ''
+        case('画像列表：管理员打开 200', r.status_code == 200, str(r.status_code))
+        case('画像列表：学籍为空的学生可见（NULL 不再被整行剔除）',
+             '画像空学籍' in html, 'null-status')
+        m = re.search(r'共\s*(\d+)\s*名学生', html)
+        case('画像列表：总数只算有效学生（学籍空 1 人 + 学籍已转出/班级已转出排除）',
+             bool(m) and m.group(1) == '1', m.group(0) if m else 'no count')
+        case('画像列表：学籍已转出的学生排除', '画像学籍转出' not in html, 'enroll-out')
+        case('画像列表：班级已转出（学籍为空）的学生排除', '画像班级转出' not in html, 'class-out')
+
+    with app.app_context():   # 清理样本
+        Student.query.filter(Student.student_number.in_(
+            ['PL000N', 'PL000C', 'PL000X'])).delete(synchronize_session=False)
+        db.session.commit()
+
+
 @item('SWAPCONFIRM')
 def check_swap_need_partner_confirm():
     """与同事对调时的「无需对方同意确认」选项：**默认勾选**（不勾选才需要对方答复）。"""
