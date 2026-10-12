@@ -1,4 +1,4 @@
-# StuLink v1.19.41.2 2026-10-10
+# StuLink v1.19.47.3 2026-10-10
 # 课表服务层：学期管理 / 节次配置 / 视图查询 / 条目CRUD / 冲突检测 / Excel导入导出 / 版本快照
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 """课表核心服务（独立库 timetable.db）。
@@ -934,15 +934,24 @@ def check_class_conflict(schedule_id, grade, class_name, weekday, period_number,
 
 
 def check_teacher_conflict(schedule_id, teacher_uid, weekday, period_number,
-                           exclude_entry_id=None, week_range=None, week=None):
-    """检测同教师同时段冲突，返回冲突 entry 或 None（周次维度同上）"""
+                           exclude_entry_id=None, week_range=None, week=None,
+                           teaching_class=None):
+    """检测同教师同时段冲突，返回冲突 entry 或 None（周次维度同上）。
+
+    走班课（2026-10-12）：同一个**教学班**（teaching_class 同名）的课在别的班课表里
+    同时出现，其实是"同一次走班课"（混合班两拨学生一起上），不算教师冲突 ——
+    如陈丽莉带的政治走班班同时在 2025级03班 / 04 班课表里各占一行。
+    """
     if not teacher_uid:
         return None
     q = _base_entry_query(schedule_id).filter_by(
         teacher_uid=teacher_uid, weekday=weekday, period_number=period_number)
     if exclude_entry_id:
         q = q.filter(ScheduleEntry.id != exclude_entry_id)
-    return _pick_conflict(q.all(), week_range=week_range, week=week)
+    rows = q.all()
+    if teaching_class:
+        rows = [e for e in rows if (e.teaching_class or '') != teaching_class]
+    return _pick_conflict(rows, week_range=week_range, week=week)
 
 
 def add_entry(schedule_id, grade, class_name, weekday, period_number, subject,
@@ -965,10 +974,11 @@ def add_entry(schedule_id, grade, class_name, weekday, period_number, subject,
     if conflict:
         return False, _conflict_msg('班级', f'{grade}{class_name}', weekday,
                                     period_number, conflict)
-    # 教师冲突
+    # 教师冲突（走班课按教学班合并：同名教学班跨班同格不算冲突）
     if teacher_uid:
         tc = check_teacher_conflict(schedule_id, teacher_uid, weekday, period_number,
-                                    week_range=week_range)
+                                    week_range=week_range,
+                                    teaching_class=teaching_class)
         if tc:
             return False, (f'教师冲突：{teacher_name or teacher_uid} '
                            f'{WEEKDAY_NAMES.get(weekday,"")}第{period_number}节 '
@@ -1017,7 +1027,9 @@ def edit_entry(entry_id, operator=None, **fields):
     if new_teacher_uid:
         tc = check_teacher_conflict(entry.term_schedule_id, new_teacher_uid,
                                     new_weekday, new_period, exclude_entry_id=entry_id,
-                                    week_range=new_week_range)
+                                    week_range=new_week_range,
+                                    teaching_class=fields.get('teaching_class',
+                                                              entry.teaching_class))
         if tc:
             return False, (f'教师冲突：{new_teacher_name or new_teacher_uid} '
                            f'{WEEKDAY_NAMES.get(new_weekday,"")}第{new_period}节 '
@@ -1053,6 +1065,196 @@ def delete_entry(entry_id, operator=None):
     return True, '已删除'
 
 
+def clear_entries(schedule_id, operator=None):
+    """清空学期**全部课表条目**（软删除 + 汇总版本留痕）→ {'deleted': n}
+
+    - 与 `scripts/import_school_timetable.py --replace` 同口径：只软删除课表条目，
+      **不动学期本身与节次配置**（要删整个学期用 delete_schedule）；
+    - 已归档学期的只读拦截由路由层 `_readonly_guard` 负责，这里不做状态判断；
+    - 写一条汇总版本（action='clear'，entry_id 为空），在页面「变更历史」可追溯，
+      但**不逐条记版本**（整学期动辄上千条，逐条会把版本表撑爆）。
+    """
+    ts = db.session.get(TermSchedule, schedule_id)
+    if not ts:
+        raise ValueError('学期不存在')
+    entries = ScheduleEntry.query.filter_by(term_schedule_id=schedule_id,
+                                            is_deleted=False).all()
+    if not entries:
+        return {'deleted': 0}
+    now = datetime.now()
+    for e in entries:
+        e.is_deleted = True
+        e.updated_at = now
+    _record_version(schedule_id, None, 'clear', '{}', operator,
+                    f'清空课表：{len(entries)} 条课程条目')
+    db.session.commit()
+    return {'deleted': len(entries)}
+
+
+def check_teacher_mapping(entries, subjects=None):
+    """按**任课教师映射**（TeacherSubjectLink）核对导入条目 → {'checked', 'issues', 'counts'}
+
+    用户 2026-10-12 要求：课表导入时，"这个老师不是教这个班这一科"要给提示，
+    但**绝对不准修改任课教师映射** —— 本函数只读不写（不新增/不更新/不删除任何 link），
+    页面上的处理建议也只是"去任课教师映射页改"。
+
+    口径：
+    - 只核对映射体系覆盖的 9 个学科（SUBJECTS：语数外物历化生政地）；
+      体育/美术/信息技术/心理健康/自习这些不在映射体系里，跳过以免整屏噪音；
+    - 课表里的教师先经 `Teacher.user_id` 换算到 users.id 再与映射比对（两库主键不同，
+      直接比会把同一个人全报成不一致）；没绑账号的（如学校表里只写姓氏「陈」「邓」）
+      退化为姓名比对；
+    - issues 已按「年级+班级+科目+课表教师+映射教师+结论」聚合（带 count 与首个位置），
+      避免上千条明细糊在预览页上。
+    kind：
+      no_link  — 该班该科还没有任课映射（先去映射页补，再核对）
+      mismatch — 该班该科映射的任课教师不是课表里的这位
+    """
+    from app.models import User
+    from app.models.academic import Teacher
+    from app.models.grades import TeacherSubjectLink, SUBJECTS
+
+    want = set(subjects or SUBJECTS)
+    rows = [e for e in (entries or []) if (e.get('subject') or '') in want]
+    if not rows:
+        return {'checked': 0, 'issues': [], 'counts': {}}
+
+    grades = {e.get('grade') for e in rows if e.get('grade')}
+    links = (TeacherSubjectLink.query
+             .filter(TeacherSubjectLink.grade.in_(grades)).all()
+             if grades else [])
+    link_map = {(l.grade, l.class_name, l.subject): l for l in links if l.active}
+
+    # 关键：课表条目的 teacher_uid 是 academic.Teacher.id，映射的 user_id 是 users.id，
+    # 两套库主键**不能直接比**（直接比会把"同一个人"全报成不一致）。经 Teacher.user_id
+    # 换算到 users.id 后再比；没绑账号的老师（Teacher.user_id 为空）退化为姓名比对。
+    tids = {e.get('teacher_uid') for e in rows if e.get('teacher_uid')}
+    teacher_to_uid = {}
+    if tids:
+        teacher_to_uid = {t.id: t.user_id
+                          for t in Teacher.query.filter(Teacher.id.in_(tids)).all()}
+
+    uids = {l.user_id for l in link_map.values()}
+    uids |= {u for u in teacher_to_uid.values() if u}
+    names = {}
+    if uids:
+        names = {u.id: (u.real_name or u.username)
+                 for u in User.query.filter(User.id.in_(uids)).all()}
+
+    agg = {}
+    checked = 0
+    for e in rows:
+        tname = (e.get('teacher_name') or '').strip()
+        uid = e.get('teacher_uid')
+        if not tname and not uid:
+            continue
+        checked += 1
+        link = link_map.get((e.get('grade'), e.get('class_name'), e.get('subject')))
+        expected_uid = link.user_id if link else None
+        expected = names.get(expected_uid, '') if expected_uid else ''
+        kind = None
+        if link is None:
+            kind = 'no_link'
+        else:
+            actual_uid = teacher_to_uid.get(uid) if uid else None
+            if actual_uid:
+                if actual_uid != expected_uid:
+                    kind = 'mismatch'
+            elif tname and expected and expected != tname:
+                # 未绑账号的老师只能比姓名；学校表常写姓氏缩写（「陈」「邓」），
+                # 能对上姓氏时只标「疑似同一人」，不硬判成"映射是别人"
+                if len(tname) == 1 and (expected.startswith(tname) or expected.endswith(tname)):
+                    kind = 'abbrev'
+                else:
+                    kind = 'mismatch'
+        if not kind:
+            continue
+        akey = (e.get('grade'), e.get('class_name'), e.get('subject'), tname,
+                expected, kind)
+        item = agg.get(akey)
+        if item is None:
+            try:
+                wd = '一二三四五六日'[int(e.get('weekday') or 1) - 1]
+            except (TypeError, ValueError, IndexError):
+                wd = '?'
+            item = agg[akey] = {
+                'grade': e.get('grade'), 'class_name': e.get('class_name'),
+                'subject': e.get('subject'), 'teacher_name': tname,
+                'expected': expected, 'kind': kind, 'count': 0,
+                'first': f'周{wd}第{e.get("period_number")}节',
+            }
+        item['count'] += 1
+    issues = sorted(agg.values(),
+                    key=lambda x: (x['grade'] or '', x['class_name'] or '', x['subject'] or ''))
+    counts = {}
+    for it in issues:
+        counts[it['kind']] = counts.get(it['kind'], 0) + 1
+    return {'checked': checked, 'issues': issues, 'counts': counts}
+
+
+def mapping_target(grade, class_name, subject):
+    """取「该班该科」任课映射里的那位教师 → {'found', 'teacher_name', 'teacher_uid', 'user_id'}
+
+    只读。`teacher_uid` 取 academic.Teacher.teacher_uid（课表条目用的就是这个编号，
+    不是 users.id），该映射账号在教师名单里没对应记录时留空。
+    """
+    from app.models import User
+    from app.models.academic import Teacher
+    from app.models.grades import TeacherSubjectLink
+
+    link = (TeacherSubjectLink.query
+            .filter_by(grade=grade, class_name=class_name, subject=subject, active=True)
+            .first())
+    if not link:
+        return {'found': False}
+    user = db.session.get(User, link.user_id)
+    teacher = Teacher.query.filter_by(user_id=link.user_id).first()
+    return {'found': True, 'user_id': link.user_id,
+            'teacher_name': ((user.real_name or user.username) if user else '') or '',
+            'teacher_uid': (teacher.teacher_uid if teacher else '') or ''}
+
+
+def apply_mapping_fix(data, grade, class_name, subject):
+    """把导入草稿里**该班该科**的课表教师改成任课映射里的那位 → {'fixed': n, ...}
+
+    只改本次导入的 `data`（预览/写入用的是它），**绝不改 TeacherSubjectLink**
+    （用户 2026-10-12 明确要求"不准修改任课教师映射"）。
+    教师名与教师编号一起换 —— 否则入库后教师课表/教师冲突检测对不上人。
+    """
+    target = mapping_target(grade, class_name, subject)
+    if not target.get('found'):
+        return {'fixed': 0, 'reason': 'no_link', 'target': target}
+    fixed = 0
+    for sh in (data.get('sheets') or []):
+        if (sh.get('grade') or '') != grade or (sh.get('class_name') or '') != class_name:
+            continue
+        for e in (sh.get('entries') or []):
+            if (e.get('subject') or '') != subject:
+                continue
+            if target.get('teacher_uid'):
+                e['teacher_uid'] = target['teacher_uid']
+            if target.get('teacher_name'):
+                e['teacher_name'] = target['teacher_name']
+            fixed += 1
+    return {'fixed': fixed, 'reason': '', 'target': target}
+
+
+def apply_all_mapping_fixes(data, issues):
+    """按核对结果批量更正所有「疑似缩写 / 映射是别人」组 → 更正条数
+
+    同样是**只改导入草稿**。`no_link`（该班该科无映射）不动 —— 那要去映射页设置，
+    不能凭空造映射。
+    """
+    total = 0
+    for it in (issues or []):
+        if it.get('kind') not in ('abbrev', 'mismatch'):
+            continue
+        res = apply_mapping_fix(data, it.get('grade'), it.get('class_name'),
+                                it.get('subject'))
+        total += res.get('fixed', 0)
+    return total
+
+
 def batch_add_entries(schedule_id, entries_list, operator=None):
     """批量添加（跳过冲突项）→ {success: n, failed: n, errors: [...]}"""
     success = 0
@@ -1071,6 +1273,7 @@ def batch_add_entries(schedule_id, entries_list, operator=None):
             room=item.get('room'),
             week_range=item.get('week_range', '1-18'),
             note=item.get('note'),
+            teaching_class=item.get('teaching_class'),
             operator=operator,
         )
         if ok:

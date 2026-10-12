@@ -264,6 +264,15 @@ def check_sched():
              'class_type/direction/combo')
         case('晚自习行有专用底色（与正课区分）', 'sch-evening' in html)
 
+        # 2026-10-12（用户要求）：教师课表每格显示"哪个班"（老师知道自己教什么），
+        # 班级/年级课表不变（学生家长视角要看学科）
+        thtml = c.get(u['teacher']).get_data(as_text=True)
+        case('教师课表主文本是班级', '<div class="sch-subject">高一01班' in thtml,
+             '应显示 高一01班 而不是只显示学科')
+        case('教师课表副行是学科', '<div class="sch-teacher">语文</div>' in thtml)
+        case('教师课表配置块声明 showClass', '"showClass": true' in thtml)
+        case('班级课表仍以学科为主文本', '<div class="sch-subject">语文' in html)
+
         token = get_csrf(c, u['grade'])
         hdrs = {'X-CSRFToken': token}
         r = c.post(u['edit'], json={'grade': '高一', 'class_name': '01班', 'weekday': 6,
@@ -2300,6 +2309,285 @@ def check_form_notify():
 
 
 # ── 入口 ────────────────────────────────────────────────────────────────────
+# ══════════════════════════════════════════════════════════════════════════════
+# 2026-10-12 用户报障三件套：清空学期课表 / 导入识别精准度 / 任课映射核对
+# ══════════════════════════════════════════════════════════════════════════════
+@item('FIX1012')
+def check_clear_parse_mapping_1012():
+    """① 学期管理页有「清空课表」入口（输入学期名二次确认，软删除留痕）；
+    ② 解析修复：合写学科（地政）+ 顿号多教师、一格两门课各自带周次；
+    ③ 任课映射核对：只提示不改映射，无映射/映射是别人/姓氏缩写三种结论。
+    """
+    import io as _io
+
+    from flask import url_for
+    from openpyxl import Workbook
+
+    from app.models.grades import TeacherSubjectLink
+    from app.modules.academic.services import schedule_matrix_import as mi
+    from app.modules.academic.services import schedule_service as svc
+
+    # ── ① 解析：合写学科 + 顿号多教师（原来只留第一位教师）──────────────
+    items = mi.parse_cell_content('地政\n孟科岐、陈丽莉')
+    case('解析：合写「地政」+ 顿号双师 → 两科两师一一配对',
+         len(items) == 2
+         and {(i['subject'], i['teacher_name']) for i in items}
+         == {('地理', '孟科岐'), ('政治', '陈丽莉')}, str(items))
+    case('解析：完整学科词不被拆（生物 ≠ 生 + 物）',
+         mi.parse_cell_content('生物\n张语文')[0]['subject'] == '生物')
+
+    # ── ② 解析：空行分隔的一格两门课（原来丢第二条 + 周次串味）──────────
+    two = mi.parse_cell_content('信息技术(双周)\n张真\n\n心理(单周)\n冯阳')
+    case('解析：一格两门课（空行分隔）不再丢第二条', len(two) == 2, str(two))
+    if len(two) == 2:
+        case('解析：两门课各带自己的周次（双周 / 单周，不串味）',
+             two[0]['week_range'] == '双周' and two[1]['week_range'] == '单周',
+             str([i['week_range'] for i in two]))
+        case('解析：第二门学科归一（心理 → 心理健康）',
+             two[1]['subject'] == '心理健康', two[1]['subject'])
+
+    # ── ②′ 单双周交替的三种常见写法（2026-10-12 用户报"还有类似的单双周设置课程"）──
+    for _txt, _desc in [
+        ('信息技术(双周)\n何向前\n\n心理(单周)\n冯阳', '空行分隔'),
+        ('语文(单周)\n张三\n数学(双周)\n李四', '无空行分隔'),
+        ('信息技术(双周) 心理(单周)\n何向前 冯阳', '两门课挤一行各带标注'),
+    ]:
+        _r = mi.parse_cell_content(_txt)
+        case(f'解析：单双周交替（{_desc}）→ 两门课都在且周次正确',
+             len(_r) == 2 and {i['week_range'] for i in _r} == {'单周', '双周'},
+             f'{_desc}: {_r}')
+
+    # ②″ 单双周两条同格可以一起入库（周次不重叠，不算班级冲突）
+    with app.app_context():
+        _ts = svc.create_schedule('回归-单双周', '2099-2100', '第一学期')
+        _ok1, _r1 = svc.add_entry(_ts.id, '高一', '01班', 1, 5, '信息技术',
+                                  teacher_name='何向前', week_range='双周')
+        _ok2, _r2 = svc.add_entry(_ts.id, '高一', '01班', 1, 5, '心理健康',
+                                  teacher_name='冯阳', week_range='单周')
+        case('单双周：同格两条都能入库（不判班级冲突）', _ok1 and _ok2, f'{_r1} | {_r2}')
+        _rows = ScheduleEntry.query.filter_by(term_schedule_id=_ts.id, grade='高一',
+                                              class_name='01班', weekday=1,
+                                              period_number=5, is_deleted=False).all()
+        case('单双周：同格两条都在，周次分别为 单周 / 双周',
+             len(_rows) == 2 and {r.week_range for r in _rows} == {'单周', '双周'},
+             str([r.week_range for r in _rows]))
+        svc.delete_schedule(_ts.id)
+
+    # ── ③ 任课映射核对：只读不改 + 三种结论 ────────────────────────────
+    with app.app_context():
+        before_links = TeacherSubjectLink.query.count()
+        entries = [{'grade': '高一', 'class_name': '01班', 'subject': '语文',
+                    'teacher_name': '张语文', 'teacher_uid': None,
+                    'weekday': 1, 'period_number': 2}]
+        m0 = svc.check_teacher_mapping(entries)
+        case('映射核对：主科条目被核对（checked=1）', m0['checked'] == 1, str(m0['checked']))
+        case('映射核对：该班该科无映射 → no_link',
+             {i['kind'] for i in m0['issues']} == {'no_link'}, str(m0['issues']))
+        case('映射核对：非映射体系科目（体育）不参与核对',
+             svc.check_teacher_mapping([dict(entries[0], subject='体育')])['checked'] == 0)
+
+        # 造映射：高一01班语文 → 临时账号「陈丽莉」（并绑一条教师名单记录，用于测编号替换）
+        tmp_user = User(username='t_map1012', real_name='陈丽莉', role='teacher',
+                        must_change_pwd=False)
+        tmp_user.set_password(TEST_PWD)
+        db.session.add(tmp_user)
+        db.session.flush()
+        tmp_teacher = Teacher(teacher_uid='T910012', name='陈丽莉', subject='语文',
+                              status='active', user_id=tmp_user.id)
+        db.session.add(tmp_teacher)
+        link = TeacherSubjectLink(grade='高一', class_name='01班', subject='语文',
+                                  user_id=tmp_user.id, active=True)
+        db.session.add(link)
+        db.session.commit()
+        m1 = svc.check_teacher_mapping(entries)
+        case('映射核对：映射的是别人 → mismatch',
+             {i['kind'] for i in m1['issues']} == {'mismatch'}, str(m1['issues']))
+        m2 = svc.check_teacher_mapping([dict(entries[0], teacher_name='陈')])
+        case('映射核对：课表写姓氏 → 疑似（abbrev）而非硬判不一致',
+             {i['kind'] for i in m2['issues']} == {'abbrev'}, str(m2['issues']))
+        m3 = svc.check_teacher_mapping([dict(entries[0], teacher_name='陈丽莉')])
+        case('映射核对：姓名一致 → 无告警', not m3['issues'], str(m3['issues']))
+
+        # 「按映射更正」：只改导入草稿，映射本身不动
+        fake = {'sheets': [{'grade': '高一', 'class_name': '01班', 'entries': [
+            {'subject': '语文', 'teacher_name': '张语文', 'teacher_uid': 'T900001'},
+            {'subject': '数学', 'teacher_name': '李数学', 'teacher_uid': 'T900002'},
+        ]}]}
+        fix = svc.apply_mapping_fix(fake, '高一', '01班', '语文')
+        elist = fake['sheets'][0]['entries']
+        case('更正：按映射换成映射那位的姓名与教师编号',
+             fix['fixed'] == 1 and elist[0]['teacher_name'] == '陈丽莉'
+             and elist[0]['teacher_uid'] == 'T910012', str(fix))
+        case('更正：同班其它科目不受影响', elist[1]['teacher_name'] == '李数学')
+        case('更正：该班该科无映射时拒绝更正（引导去映射页）',
+             svc.apply_mapping_fix(fake, '高一', '01班', '英语')['reason'] == 'no_link')
+        case('更正：批量只处理「疑似 / 映射是别人」，不碰 no_link',
+             svc.apply_all_mapping_fixes(fake, [
+                 {'grade': '高一', 'class_name': '01班', 'subject': '语文',
+                  'kind': 'abbrev'},
+                 {'grade': '高一', 'class_name': '01班', 'subject': '英语',
+                  'kind': 'no_link'},
+             ]) == 1)
+        db.session.delete(link)
+        db.session.delete(tmp_teacher)
+        db.session.delete(tmp_user)
+        db.session.commit()
+        case('映射核对：全程只读（映射条数复原）',
+             TeacherSubjectLink.query.count() == before_links)
+
+    # ── ④ 清空课表：入口 + 二次确认 + 软删除 + 留痕（自建临时学期，不动夹具）──
+    with app.app_context():
+        tmp_ts = svc.create_schedule('回归-清空学期', '2099-2100', '第一学期')
+        tid = tmp_ts.id
+        svc.add_entry(tid, '高一', '01班', 1, 2, '语文', teacher_name='张语文',
+                      week_range='1-20')
+        svc.add_entry(tid, '高一', '01班', 1, 3, '数学', teacher_name='李数学',
+                      week_range='1-20')
+        n0 = ScheduleEntry.query.filter_by(term_schedule_id=tid,
+                                           is_deleted=False).count()
+        manage_url = url_for('academic.schedule_manage')
+        clear_url = url_for('academic.schedule_clear_entries', sid=tid)
+    case('清空：临时学期已建 2 条课', n0 == 2, str(n0))
+
+    with app.test_client() as c:
+        login(c, 'ac_admin', TEST_PWD)
+        html = c.get(manage_url).get_data(as_text=True)
+        case('清空入口：学期管理页有「清空课表」与确认弹窗',
+             '清空课表' in html and 'clearEntriesModal' in html)
+
+        token = get_csrf(c, manage_url)
+        r1 = c.post(clear_url, data={'csrf_token': token, 'confirm_name': '瞎写的名字'},
+                    follow_redirects=True)
+        case('清空：确认名不符 → 拒绝并提示',
+             '未清空' in r1.get_data(as_text=True))
+        with app.app_context():
+            case('清空：被拒后条目原样保留',
+                 ScheduleEntry.query.filter_by(term_schedule_id=tid,
+                                               is_deleted=False).count() == 2)
+
+        token2 = get_csrf(c, manage_url)
+        r2 = c.post(clear_url,
+                    data={'csrf_token': token2, 'confirm_name': '回归-清空学期'},
+                    follow_redirects=True)
+        html2 = r2.get_data(as_text=True)
+        case('清空：确认名正确 → 执行成功', r2.status_code == 200 and '已清空' in html2,
+             str(r2.status_code))
+        with app.app_context():
+            left = ScheduleEntry.query.filter_by(term_schedule_id=tid,
+                                                 is_deleted=False).count()
+            case('清空：条目全部软删除（在用 0 条）', left == 0, str(left))
+            case('清空：变更历史留痕一条（action=clear）',
+                 ScheduleVersion.query.filter_by(term_schedule_id=tid,
+                                                 action='clear').count() == 1)
+            case('清空：学期本身与节次配置保留',
+                 db.session.get(TermSchedule, tid) is not None
+                 and PeriodDef.query.filter_by(term_schedule_id=tid).count() > 0)
+            svc.delete_schedule(tid)          # 清理临时学期（draft 可物理删）
+
+    # ── ⑤ 预览页渲染核对卡片与「按映射更正」操作入口（HTTP）────────────
+    with app.app_context():
+        smart_url = url_for('academic.schedule_smart_import', sid=TS_ID)
+        fix_url = url_for('academic.schedule_smart_mapping_fix', sid=TS_ID)
+    with app.test_client() as c:
+        login(c, 'ac_admin', TEST_PWD)
+        wb = Workbook()
+        ws = wb.active
+        ws.title = '高一1班'
+        ws.append(['节次', '周一', '周二'])          # 表头需 ≥2 个星期列才会被识别
+        ws.append(['第1节', '语文\n张语文', '数学\n李数学'])
+        buf = _io.BytesIO()
+        wb.save(buf)
+        buf.seek(0)
+        tk = get_csrf(c, smart_url)
+        r = c.post(smart_url, data={'csrf_token': tk, 'file': (buf, 'map.xlsx')},
+                   content_type='multipart/form-data')
+        html3 = r.get_data(as_text=True)
+        case('预览页：渲染「任课教师映射核对」卡片',
+             '任课教师映射核对' in html3, str(r.status_code))
+        case('预览页：无映射的班科给「去设置映射」入口', '去设置映射' in html3)
+        # 注意：无请求上下文时 url_for 生成绝对 URL（http://localhost/...），页面里是相对路径
+        case('预览页：更正操作指向 mapping-fix 路由',
+             fix_url.replace('http://localhost', '') in html3, fix_url)
+        case('预览页：头部有「重新核对」', '重新核对' in html3)
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# 混合班并行走班（2026-10-12 用户说明：一格俩学科俩老师，两拨学生同时走班）
+# ══════════════════════════════════════════════════════════════════════════════
+@item('PARA')
+def check_parallel_walk_class():
+    """「地政\n张葛、时康莉」= 混合班并行课：解析拆两科两师 → 打教学班标记 →
+    同格两条都能入库；同名教学班跨班同格不算教师冲突（一次走班课占多班课表）。"""
+    import io as _io
+
+    from openpyxl import Workbook
+
+    from app.models.timetable import get_default_periods
+    from app.modules.academic.services import schedule_matrix_import as mi
+    from app.modules.academic.services import schedule_service as svc
+
+    class _P:
+        def __init__(self, d):
+            self.period_name = d['period_name']
+            self.period_number = d['period_number']
+            self.period_type = d.get('period_type')
+
+    # ① 解析：一格拆成两科两师，且带原格标签
+    items = mi.parse_cell_content('地政\n张葛、时康莉')
+    case('并行走班：一格拆成两科两师', len(items) == 2, str(items))
+    case('并行走班：两条都带 parallel_tag（原格标签「地政」）',
+         all(i.get('parallel_tag') == '地政' for i in items), str(items))
+
+    # ② 全校总课表导入：组装层自动打「教学班」（地政·地理 / 地政·政治）
+    periods = [_P(d) for d in get_default_periods()]
+    wb = Workbook()
+    ws = wb.active
+    ws.title = '全校总课表'
+    ws.append(['星期', '节次', '高二1班', '高二2班'])
+    ws.append(['星期一', '1节', '地政\n张葛、时康莉', '地政\n张葛、时康莉'])
+    buf = _io.BytesIO()
+    wb.save(buf)
+    buf.seek(0)
+    data = mi.parse_school_workbook(buf, periods, ['高二'], [])
+    case('并行走班：解析出两个班', len(data['sheets']) == 2, str(len(data['sheets'])))
+    entries = [e for sh in data['sheets'] for e in sh['entries']]
+    case('并行走班：条目自动带教学班标记（地政·地理 / 地政·政治）',
+         {e['teaching_class'] for e in entries} == {'地政·地理', '地政·政治'},
+         str([e['teaching_class'] for e in entries]))
+
+    # ③ 写入：同格两条都进（不再被班级冲突拦掉）
+    with app.app_context():
+        ts = svc.create_schedule('回归-并行走班', '2099-2100', '第一学期')
+        tid = ts.id
+        res = svc.batch_add_entries(tid, entries)
+        case('并行走班：两条同时段并行导入成功（2 班 × 2 条）',
+             res['success'] == 4 and res['failed'] == 0, str(res))
+        rows = ScheduleEntry.query.filter_by(term_schedule_id=tid, grade='高二',
+                                             class_name='01班', weekday=1,
+                                             period_number=2, is_deleted=False).all()
+        case('并行走班：同班同格两条都在', len(rows) == 2, str(len(rows)))
+        case('并行走班：两条各带自己的教学班',
+             {r.teaching_class for r in rows} == {'地政·地理', '地政·政治'},
+             str([r.teaching_class for r in rows]))
+
+        # ④ 同名教学班跨班同格 → 不算教师冲突（一次走班课占多个班的课表）
+        ok1, r1 = svc.add_entry(tid, '高二', '01班', 3, 3, '政治', teacher_uid='T900001',
+                                teacher_name='张语文', teaching_class='地政·政治',
+                                week_range='1-18')
+        ok2, r2 = svc.add_entry(tid, '高二', '02班', 3, 3, '政治', teacher_uid='T900001',
+                                teacher_name='张语文', teaching_class='地政·政治',
+                                week_range='1-18')
+        case('并行走班：同一教学班跨班同格不算教师冲突（两条都进）',
+             ok1 and ok2, f'{r1} | {r2}')
+        # 反例：不同教学班、同教师同时段 → 仍然要判教师冲突
+        ok3, msg3 = svc.add_entry(tid, '高二', '03班', 3, 3, '政治', teacher_uid='T900001',
+                                  teacher_name='张语文', teaching_class='地政·政治2',
+                                  week_range='1-18')
+        case('并行走班：不同教学班同教师同时段仍判冲突',
+             not ok3 and '教师冲突' in str(msg3), str(msg3))
+        svc.delete_schedule(tid)
+
+
 if __name__ == '__main__':
     args = [a.upper() for a in sys.argv[1:]]
     targets = args or list(ITEMS)

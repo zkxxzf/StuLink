@@ -1,4 +1,4 @@
-/* StuLink 成绩管理：分析页前端 v1.19.41.2
+/* StuLink 成绩管理：分析页前端 v1.19.47.3
  * 五 tab 联动加载 / 统一表格渲染 / 每张指标卡「表格 | 图表」双视图 / ECharts 图表渲染
  */
 (function(){
@@ -110,7 +110,7 @@ function syncExamNav(){
     });
 }
 
-/* v1.19.41.2 班级筛选仅限本场考试：优先用该场考试自己的班级
+/* v1.19.47.3 班级筛选仅限本场考试：优先用该场考试自己的班级
    （该场学生名册 ∪ 该场任课教师表）；未选考试/旧库无快照时回落年级班级 */
 function classListFor(grade){
     var eid = state.examId || $('#gExam').val() || '';
@@ -159,7 +159,7 @@ function bindFilters(){
     $('#gExam').on('change', function(){
         state.examId = $(this).val();
         syncExamNav();          // v1.19.0 同步侧栏本场流程链接
-        fillClasses();          // v1.19.41.2 班级随考试变：仅列本场考试的班级
+        fillClasses();          // v1.19.47.3 班级随考试变：仅列本场考试的班级
         loadCurrent();
     });
     $('#gClass').on('change', function(){ state.class_name = $(this).val(); loadCurrent(); });
@@ -315,6 +315,12 @@ function disposePaneCharts(tab){
     });
 }
 
+// 2026-10-12 UI 审计 H2：分析页 5 个页签共用一个加载骨架，原先 loadCurrent() 只清
+// **当前** tab，快速连点 5 个页签会并发 5 个 $.getJSON，后返回的覆盖先返回的 →
+// 出现「图表/表格串 tab」的竞态。这里加递增序号（与 report.js / report_pivot.js 同做法），
+// 只有最后一次请求的回调才允许渲染。
+var _loadSeq = 0;
+
 function loadCurrent(){
     var pane = $('#pane-' + state.tab);
     disposePaneCharts(state.tab);
@@ -332,7 +338,9 @@ function loadCurrent(){
     }
     pane.find('.tab-pane-loading').removeClass('d-none');
     var url = '/grades/api/analysis/' + state.tab + buildQuery();
+    var my = ++_loadSeq;
     $.getJSON(url, function(res){
+        if (my !== _loadSeq) return;      // 已有更新的请求，丢弃本次结果
         pane.find('.tab-pane-loading').addClass('d-none');
         var data = res.data || {};
         var area = pane.find('.tab-content-area').removeClass('d-none');
@@ -348,6 +356,7 @@ function loadCurrent(){
         renderTables(area, data.tables || {});
         renderCharts(area, data.charts || {});
     }).fail(function(xhr){
+        if (my !== _loadSeq) return;
         pane.find('.tab-pane-loading').addClass('d-none');
         var msg = (xhr && xhr.responseJSON && xhr.responseJSON.message)
             || '数据加载失败（或无权查看该数据）';

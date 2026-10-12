@@ -2,7 +2,7 @@
 {% block title %}考场维护{% endblock %}
 {% block extra_css %}
 <style>
-  /* v1.19.41.2 考场维护：左（全部房间）— 中（箭头）— 右（分组）三栏，页面不再铺满全宽 */
+  /* v1.19.47.3 考场维护：左（全部房间）— 中（箭头）— 右（分组）三栏，页面不再铺满全宽 */
   .rm-list { max-height: 62vh; overflow: auto; padding: 4px; }
   .rm-item {
     display: flex; align-items: center; gap: 8px;
@@ -65,9 +65,11 @@
             <div class="card-header py-2 d-flex align-items-center gap-1">
                 <span class="fw-bold text-nowrap"><i class="bi bi-collection"></i> 分组</span>
                 <select id="grpSel" class="form-select form-select-sm w-auto ms-auto"></select>
-                <button class="btn btn-sm btn-outline-primary py-0" onclick="addGroup()" title="新增分组">＋</button>
-                <button class="btn btn-sm btn-outline-secondary py-0" onclick="renameGroup()" title="重命名当前分组">✎</button>
-                <button class="btn btn-sm btn-outline-danger py-0" onclick="delGroup()" title="删除当前分组">✗</button>
+                {# 2026-10-12 UI 审计 M6：文本符号按钮换成全站统一的 bi-* 图标，
+                   并补 aria-label（title 原本已有）。 #}
+                <button class="btn btn-sm btn-outline-primary py-0 px-1" onclick="addGroup()" title="新增分组" aria-label="新增分组"><i class="bi bi-plus-lg"></i></button>
+                <button class="btn btn-sm btn-outline-secondary py-0 px-1" onclick="renameGroup()" title="重命名当前分组" aria-label="重命名当前分组"><i class="bi bi-pencil"></i></button>
+                <button class="btn btn-sm btn-outline-danger py-0 px-1" onclick="delGroup()" title="删除当前分组" aria-label="删除当前分组"><i class="bi bi-x-lg"></i></button>
             </div>
             <div class="px-2 py-1 border-bottom small text-muted" id="grpMeta"></div>
             <div class="rm-list" id="rightList"></div>
@@ -111,7 +113,7 @@ var URL_ROOMS = '{{ url_for("grades.exam_rooms") }}';            // /grades/room
 var URL_ROOM_SAVE = '{{ url_for("grades.exam_room_save") }}';
 var URL_GROUP_SAVE = '{{ url_for("grades.exam_room_group_save") }}';
 
-// v1.19.41.2 三栏式房间归集：状态全部放前端，增删改后就地重渲染（不再整页刷新）
+// v1.19.47.3 三栏式房间归集：状态全部放前端，增删改后就地重渲染（不再整页刷新）
 var state = {
     rooms: {{ rooms|tojson }}.map(function (r) {
         return {id: r.id, location: r.location, note: r.note || '',
@@ -299,7 +301,7 @@ function delRoom(id) {
     });
 }
 
-// v1.19.41.2 批量导入学校房间（Excel：位置 / 备注；按位置去重，已有则更新备注）
+// v1.19.47.3 批量导入学校房间（Excel：位置 / 备注；按位置去重，已有则更新备注）
 function importRooms(input) {
     if (!input.files.length) return;
     var fd = new FormData();

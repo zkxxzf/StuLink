@@ -1,4 +1,4 @@
-# StuLink v1.19.41.2 2026-10-10
+# StuLink v1.19.47.3 2026-10-10
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 """学校原样课表导入（矩阵式，2026-09-26）。
 
@@ -161,57 +161,162 @@ def _pick_subject(token):
     return None
 
 
-def parse_cell_content(raw, default_week_range=None):
-    """格内容 → [{subject, teacher_name, week_range, note, unknown}]。
+_SINGLE_SUBJECT_CHARS = {'语': '语文', '数': '数学', '英': '英语', '物': '物理',
+                         '化': '化学', '生': '生物', '政': '政治', '史': '历史',
+                         '地': '地理', '体': '体育', '音': '音乐', '美': '美术'}
 
-    支持单段/多段（多段＝同一格多条，如单双周交替），返回列表。
-    default_week_range（2026-10-10）：整批按周次导入时统一指定的周次
-    （如「5」「1-9」「单周」），格内没有显式 (单周)/(3-5) 标注的课程用它；
-    显式标注优先。
+
+def _split_compound_subject(token):
+    """「地政」这类 2 字合写 → ['地理', '政治']；不是合写返回 None。
+
+    只在**整体不是已知别名**时才尝试拆分：'生物'、'地理'、'政治' 这些完整词
+    本身就在 _SUBJECT_ALIAS 里，不能被拆成单字（否则 '生物' 会变成 生+物）。
     """
-    # 先留一份"保留换行"的原文：格内两行分别是学科/教师，_clean 会把换行压成空格，
-    # 所以两行式解析必须用未压平的文本
-    raw_text = str(raw if raw is not None else '').replace('\r\n', '\n').replace('\r', '\n')
-    text = _clean(raw_text)
-    if not text or text in _EMPTY_TOKENS:
-        return []
+    t = _clean(token).replace(' ', '')
+    if len(t) != 2 or t in _SUBJECT_ALIAS:
+        return None
+    chars = [_SINGLE_SUBJECT_CHARS.get(c) for c in t]
+    if all(chars):
+        return chars
+    return None
 
+
+def _split_subjects(line):
+    """一行里的学科（可 '/'、'、' 分隔，或「地政」合写）→ [规范学科 or None, ...]"""
+    out = []
+    for piece in re.split(r'[\s/、,，]+', _clean(line)):
+        if not piece:
+            continue
+        if piece in _SUBJECT_ALIAS:                 # 完整别名优先（生物 ≠ 生+物）
+            out.append(_SUBJECT_ALIAS[piece])
+            continue
+        comp = _split_compound_subject(piece)       # 合写：地政 → 地理 + 政治
+        if comp:
+            out.extend(comp)
+            continue
+        out.append(_pick_subject(piece))            # 带后缀/修饰：生物学考 → 生物
+    return out
+
+
+def _is_subject_line(line):
+    """这一行是不是"学科行"（判定从严：只认别名表里的学科 / 合写学科 / 带考试后缀）。
+
+    2026-10-12：分段判断用，宁可保守 —— 像「体育场」这种教室名不能被
+    `_pick_subject` 的前缀匹配误当成"体育"学科行。
+    """
+    probe = re.sub(r'[（(][^）)]*[)）]', ' ', line)
+    toks = [t for t in re.split(r'[\s/、,，]+', _clean(probe)) if t]
+    if not toks:
+        return False
+    head = toks[0]
+    if head in _SUBJECT_ALIAS or _split_compound_subject(head):
+        return True
+    for suf in _SUBJECT_SUFFIX:
+        if head.endswith(suf) and head[:-len(suf)] in _SUBJECT_ALIAS:
+            return True
+    return False
+
+
+def _split_subject_line_by_tags(line):
+    """`信息技术(双周) 心理(单周)` → ['信息技术(双周)', '心理(单周)']。
+
+    只有出现 ≥2 个周次标注时才切（同一行写了两门课）；单个标注原样返回。
+    """
+    tags = list(re.finditer(
+        r'[（(]\s*(?:单周|双周|\d{1,2}\s*-\s*\d{1,2}|第?\d{1,2}周)\s*[)）]', line))
+    if len(tags) < 2:
+        return [line]
+    parts, start = [], 0
+    for m in tags:
+        parts.append(line[start:m.end()].strip())
+        start = m.end()
+    tail = line[start:].strip()
+    if tail and parts:
+        parts[-1] = (parts[-1] + ' ' + tail).strip()
+    return [p for p in parts if p]
+
+
+def _split_block_into_lessons(block):
+    """把一块切成"一门课一段"（块内还藏着多门课的两种情况）。
+
+    2026-10-12（用户报"还有类似于这种的单双周的设置课程"）：
+    ① 两行式「学科行 + 教师行」，学科行里每门课各带标注：
+       `信息技术(双周) 心理(单周)` / `何向前 冯阳` → 拆成两门；
+    ② 多行式但**没有空行分隔**：`语文(单周)\n张三\n数学(双周)\n李四`
+       → 每个学科行起一段；
+    其余情况原样返回（单门课行为完全不变）。
+    """
+    lines = [ln for ln in re.split(r'[\r\n]+', block) if _clean(ln)]
+    if len(lines) < 2:
+        return [block]
+
+    # ① 两行式 + 学科行里多门课各带周次标注
+    if len(lines) == 2:
+        parts = _split_subject_line_by_tags(lines[0])
+        if len(parts) > 1:
+            teach = [x for x in re.split(r'[\s/、,，]+', _clean(lines[1])) if x]
+            if len(teach) == len(parts):
+                return [f'{p}\n{t}' for p, t in zip(parts, teach)]
+
+    # ② 多行、多个学科行 → 按学科行起新段
+    segs, cur = [], []
+    for ln in lines:
+        if _is_subject_line(ln) and cur:
+            segs.append('\n'.join(cur))
+            cur = [ln]
+        else:
+            cur.append(ln)
+    if cur:
+        segs.append('\n'.join(cur))
+    return segs or [block]
+
+
+def _parse_cell_block(block, default_week_range=None):
+    """**单块**（一条课）解析 —— 提周次、拆学科/教师、一一配对。
+
+    2026-10-12 从 parse_cell_content 拆出，修两个"识别不精准"：
+    ① 一格两块（空行分隔）时，第二块的 (单周)/(双周) 标注原来会被第一块吞掉；
+    ② 「地政 + 孟科岐、陈丽莉」这种合写学科 + 顿号多教师，原来只出第一位教师。
+    """
     week_range = (default_week_range or '1-18')
     note = None
-    m = re.search(r'[（(]\s*(单周|双周|\d{1,2}\s*-\s*\d{1,2}|第?\d{1,2}周)\s*[)）]', text)
+    m = re.search(r'[（(]\s*(单周|双周|\d{1,2}\s*-\s*\d{1,2}|第?\d{1,2}周)\s*[)）]', block)
     if m:
         wr = m.group(1).replace(' ', '')
         if wr in ('单周', '双周'):
             week_range = wr
         elif re.match(r'^第?\d{1,2}周$', wr):
-            wk = int(re.sub(r'\D', '', wr))
-            week_range = f'{wk}'
+            week_range = str(int(re.sub(r'\D', '', wr)))
         else:
             week_range = wr
-        text = text.replace(m.group(0), ' ')
-        raw_text = raw_text.replace(m.group(0), ' ')
+        block = block.replace(m.group(0), ' ')
 
-    # 「学科并列 + 教师并列」两行写法（并行课/走班常见）：
-    #     地/政
-    #     陈/邓      → 地理·陈 + 政治·邓 两条，别把第二个学科吞掉
-    _lines = [p for p in re.split(r'[\n\r]+', raw_text) if _clean(p)]
-    if len(_lines) == 2:
-        _subs = [_pick_subject(x) for x in
-                 re.split(r'[\s/、,，]+', _clean(_lines[0])) if x]
-        _teach = [x for x in re.split(r'[\s/、,，]+', _clean(_lines[1])) if x]
-        if (len(_subs) > 1 and len(_subs) == len(_teach) and all(_subs)
-                and not any(_pick_subject(x) for x in _teach)):
+    text = _clean(block)
+    if not text or text in _EMPTY_TOKENS:
+        return []
+
+    # 两行式：学科行 + 教师行（可各含 / 、并列）→ 一一配对
+    lines = [p for p in re.split(r'[\n\r]+', block) if _clean(p)]
+    if len(lines) == 2:
+        subs = [s for s in _split_subjects(lines[0]) if s]
+        teach = [re.sub(r'(老师|教师)$', '', x).strip()
+                 for x in re.split(r'[\s/、,，]+', _clean(lines[1])) if x]
+        teach = [t for t in teach if t]
+        if (len(subs) > 1 and len(subs) == len(teach)
+                and not any(_pick_subject(x) for x in teach)):
+            # 一格「学科并列 + 教师并列」＝ 混合班**并行走班**（2026-10-12 用户说明：
+            # 有的班既有选地理又有选政治的学生，同一时段两拨人走班上课，如「地政」
+            # 张葛带地理、时康莉带政治）。parallel_tag 记原始组合文本，导入时据此给
+            # 每条打「教学班」标记 —— 否则两条同格会被班级冲突判定拦掉一条。
+            _ptag = _clean(lines[0]).replace('/', '').replace('／', '').replace(' ', '')
             return [{'subject': s, 'teacher_name': t, 'week_range': week_range,
-                     'note': note, 'unknown': False}
-                    for s, t in zip(_subs, _teach)]
+                     'note': note, 'unknown': False, 'parallel_tag': _ptag}
+                    for s, t in zip(subs, teach)]
 
-    # 一格内两门课（极简写法「语文/数学」通常指合班，这里按多段处理）
-    parts = [p for p in re.split(r'[\n\r]+', text) if _clean(p)]
-    # 块内再按空白切成 token，用于区分"学科"与"教师"
+    # 其余写法（一行式 / 学科(教师) / 认不出的学科）：沿用原 token 扫描
     out = []
-    for part in parts:
+    for part in [p for p in re.split(r'[\n\r]+', text) if _clean(p)]:
         tokens = [x for x in re.split(r'[\s/、,，]+', _clean(part)) if x]
-        # 括号里的名字（语文(张伟)）
         paren = re.findall(r'[（(]([^）)]{1,12})[)）]', part)
         if paren:
             tokens += [p for p in paren if _pick_subject(p) is None]
@@ -235,8 +340,33 @@ def parse_cell_content(raw, default_week_range=None):
             unknown = bool(subject)
         if subject:
             out.append({'subject': subject, 'teacher_name': teacher,
-                        'week_range': week_range, 'note': note,
-                        'unknown': unknown})
+                        'week_range': week_range, 'note': note, 'unknown': unknown,
+                        'parallel_tag': None})
+    return out
+
+
+def parse_cell_content(raw, default_week_range=None):
+    """格内容 → [{subject, teacher_name, week_range, note, unknown}]。
+
+    支持单段/多段（多段＝同一格多条，如单双周交替），返回列表。
+    default_week_range（2026-10-10）：整批按周次导入时统一指定的周次
+    （如「5」「1-9」「单周」），格内没有显式 (单周)/(3-5) 标注的课程用它；
+    显式标注优先。
+
+    2026-10-12：先按**空行**把格子拆成若干"块"（一块＝一条课），每块
+    **各自**提取周次标注后再解析 —— 修复「一格两类课时，第二条丢失 /
+    周次标注串味」的问题。
+    """
+    raw_text = str(raw if raw is not None else '').replace('\r\n', '\n').replace('\r', '\n')
+    cleaned = _clean(raw_text)
+    if not cleaned or cleaned in _EMPTY_TOKENS:
+        return []
+    blocks = [b for b in re.split(r'\n[ \t]*\n', raw_text) if _clean(b)] or [raw_text]
+    out = []
+    for block in blocks:
+        # 块内还可能藏着多门课：无空行分隔的「语文(单周)/数学(双周)」、同行两门课各带周次
+        for seg in _split_block_into_lessons(block):
+            out.extend(_parse_cell_block(seg, default_week_range))
     return out
 
 
@@ -422,6 +552,7 @@ def _parse_sheet(ws, periods_map, grades, teachers_by_name, default_grade=None,
                     matched.add(tname)
                 if item['unknown']:
                     unknown_subjects.append(item['subject'])
+                _ptag = item.get('parallel_tag')
                 entries.append({
                     'grade': grade, 'class_name': class_name,
                     'weekday': wd, 'period_number': pn,
@@ -429,6 +560,8 @@ def _parse_sheet(ws, periods_map, grades, teachers_by_name, default_grade=None,
                     'teacher_uid': uid, 'teacher_name': tname or item['teacher_name'],
                     'room': None, 'week_range': item['week_range'],
                     'note': None,
+                    # 混合班并行走班：打教学班标记（如「地政·地理」），两条同格才能并存
+                    'teaching_class': f'{_ptag}·{item["subject"]}' if _ptag else None,
                 })
 
     if not entries:
@@ -615,11 +748,32 @@ def _parse_full_school_sheet(ws, periods_map, grades, teachers_by_name,
             raw = row[ci] if ci < len(row) else None
             _items = parse_cell_content(raw, default_week_range)
             if len(_items) > 1:
-                warns[ci].append(
-                    f'第{pn}节周{wd} 一格内写了 {len(_items)} 门课'
-                    f'（{"、".join(i["subject"] for i in _items)}）——'
-                    f'若是并行/分层课请改用「走班教学班」，若是单双周请在格内标注'
-                    f'「(单周)/(双周)」，否则同班同时段只保留第一条')
+                # 2026-10-12：区分「单双周交替」（周次不重叠，两条都要）与
+                # 「真并行/分层」（周次重叠，同班同时段只能留第一条），不再一律按问题报
+                from app.modules.academic.services.schedule_common import (
+                    week_ranges_overlap as _wr_overlap)
+                _wrs = [i.get('week_range') for i in _items]
+                _overlap = any(_wr_overlap(_wrs[a], _wrs[b])
+                               for a in range(len(_wrs)) for b in range(a + 1, len(_wrs)))
+                if all(i.get('parallel_tag') for i in _items):
+                    # 混合班并行走班（2026-10-12 用户说明）：如「地政」——选地理的
+                    # 跟张葛、选政治的跟时康莉，同一时段两拨人走班，两条都要进
+                    warns[ci].append(
+                        f'第{pn}节周{wd} 并行走班课「{_items[0]["parallel_tag"]}」：'
+                        + '、'.join(f'{i["subject"]}·{i["teacher_name"] or "未指定"}'
+                                    for i in _items)
+                        + ' —— 同一时段两拨学生走班，按教学班并行导入')
+                elif _overlap:
+                    warns[ci].append(
+                        f'第{pn}节周{wd} 一格内写了 {len(_items)} 门课'
+                        f'（{"、".join(i["subject"] for i in _items)}）——'
+                        f'若是并行/分层课请改用「走班教学班」，若是单双周请在格内标注'
+                        f'「(单周)/(双周)」，否则同班同时段只保留第一条')
+                else:
+                    warns[ci].append(
+                        f'第{pn}节周{wd} 一格内 {len(_items)} 门课按周次区分'
+                        f'（{"、".join((i["subject"] or "") + "·" + (i.get("week_range") or "") for i in _items)}），'
+                        f'将分别导入，互不冲突')
             for item in _items:
                 key = (wd, pn, item['subject'])
                 if key in seen[ci]:
@@ -635,6 +789,7 @@ def _parse_full_school_sheet(ws, periods_map, grades, teachers_by_name,
                     matched.add(tname)
                 if item['unknown']:
                     unknowns[ci].append(item['subject'])
+                _ptag = item.get('parallel_tag')
                 buckets[ci].append({
                     'grade': grade, 'class_name': cls,
                     'weekday': wd, 'period_number': pn,
@@ -642,6 +797,8 @@ def _parse_full_school_sheet(ws, periods_map, grades, teachers_by_name,
                     'teacher_uid': uid, 'teacher_name': tname or item['teacher_name'],
                     'room': None, 'week_range': item['week_range'],
                     'note': None,
+                    # 混合班并行走班：两条各带「原格标签·学科」教学班（如 地政·地理 / 地政·政治）
+                    'teaching_class': f'{_ptag}·{item["subject"]}' if _ptag else None,
                 })
 
     out = []

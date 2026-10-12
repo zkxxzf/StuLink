@@ -6,7 +6,9 @@
     <title>成绩认定证明核验 - StuLink</title>
     <link href="{{ url_for('static', filename='css/bootstrap.min.css') }}" rel="stylesheet">
     <link href="{{ url_for('static', filename='css/bootstrap-icons.min.css') }}" rel="stylesheet">
-    <link href="{{ url_for('static', filename='css/grades.css') }}" rel="stylesheet">
+    {# 2026-10-12 UI 审计 M8：本页是免登录独立页（不走 base.html），
+       但 grades.css 仍应带缓存版本号，与站内其它页一致。 #}
+    <link href="{{ su('css/grades.css') }}" rel="stylesheet">
     <style>
         body { background: #f5f7fb; }
         .verify-wrap { max-width: 960px; margin: 30px auto; }

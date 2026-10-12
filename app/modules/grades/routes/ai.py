@@ -1,4 +1,4 @@
-# StuLink v1.19.41.2 2026-10-10
+# StuLink v1.19.47.3 2026-10-10
 # AI 分析：服务商注册表 / 个人与全局 Key 管理 / 连通性测试 / 发送范围预览 /
 #          分析生成 / 报告历史
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
@@ -192,6 +192,10 @@ def ai_key_delete():
     if k:
         db.session.delete(k)
         db.session.commit()
+        # 2026-10-12 数据可信度审计（§3.8）：保存有日志、清除原先无 ——
+        # Key 被清除（误操作或恶意）时无迹可查。
+        log_operation(current_user, '清除', 'AI Key', None, '个人 AI Key 已清除',
+                      module='grades')
     return jsonify(success=True, message='已清除')
 
 
@@ -295,6 +299,10 @@ def ai_global_key_delete():
     if g:
         db.session.delete(g)
         db.session.commit()
+        # 2026-10-12 数据可信度审计（§3.8）：全局 Key 被清除属高危事件
+        # （会影响所有未配个人 Key 的用户），必须留业务痕迹。
+        log_operation(current_user, '清除', 'AI 全局 Key', None, '全局 AI Key 已清除',
+                      module='grades')
     return jsonify(success=True, message='已清除')
 
 

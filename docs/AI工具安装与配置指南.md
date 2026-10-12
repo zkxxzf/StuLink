@@ -504,9 +504,9 @@ curl.exe -i -X POST http://127.0.0.1:8765/mcp `
 ```
 
 ```bat
-:: L4/L5：项目自带端到端自测（含认证、权限、写开关用例）
-mcp_server\.venv\Scripts\python.exe mcp_server\smoke_mcp.py
-:: 通过则输出：通过 40 / 失败 0
+:: L4/L5：项目自带端到端自测（含认证、权限、成绩可见范围用例）
+mcp_server\.venv\Scripts\python.exe mcp_server\smoke_scores.py
+:: 通过则输出：通过 69 / 失败 0
 ```
 
 > 提醒：**只看"进程启动了"就认为装好，是最常见的误判**。
@@ -667,4 +667,4 @@ mcp_server/config.json  ←──  各 AI 工具的接入配置
 
 ---
 
-*文档版本：2026-10-11 · 对应 StuLink v1.19.41.2（MCP 服务：account 认证模式）*
+*文档版本：2026-10-11 · 对应 StuLink v1.19.47.3（MCP 服务：account 认证模式）*

@@ -35,4 +35,35 @@
     window.escHtml = escHtml;
     window.escAttr = escAttr;
     window.jsStr = jsStr;
+
+    /* 2026-10-12 UI 审计 M5：全局操作反馈（stuToast）。
+       成绩模块原先混用 alert() / #scFlash / #qMsg / #tcMsg / .rp-copied 五种反馈，
+       同一模块内用户要适应 4 种心智模型。这里提供一个非阻塞、自动消失的 toast，
+       样式见 static/css/grades.css 的 .stu-toast-*。
+       用法：stuToast('已保存') / stuToast('失败原因', 'err')；type ∈ ok|warn|err。
+       不替代「删除/覆盖类」的 confirm（那类仍需用户明确决策）。 */
+    var _toastWrap = null;
+    function toast(msg, type, ms) {
+        type = type || 'ok';
+        ms = ms || (type === 'err' ? 4200 : 2200);
+        if (!_toastWrap) {
+            _toastWrap = document.createElement('div');
+            _toastWrap.className = 'stu-toast-wrap';
+            document.body.appendChild(_toastWrap);
+        }
+        var el = document.createElement('div');
+        el.className = 'stu-toast ' + type;
+        el.setAttribute('role', type === 'err' ? 'alert' : 'status');
+        el.textContent = msg == null ? '' : String(msg);
+        _toastWrap.appendChild(el);
+        setTimeout(function () {
+            el.classList.add('leaving');
+            setTimeout(function () {
+                if (el.parentNode) el.parentNode.removeChild(el);
+            }, 300);
+        }, ms);
+        return el;
+    }
+
+    window.stuToast = toast;
 })(window);

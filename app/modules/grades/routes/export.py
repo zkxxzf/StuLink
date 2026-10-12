@@ -1,4 +1,4 @@
-# StuLink v1.19.41.2 2026-10-10
+# StuLink v1.19.47.3 2026-10-10
 # 成绩分析导出：四大模块表格 → Excel（openpyxl，与页面所见一致）
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 import io
@@ -18,12 +18,9 @@ from app.utils.helpers import log_operation
 
 _TAB_LABEL = {'grade': '年级分析', 'class': '班级分析', 'subject': '学科分析',
               'teacher': '任课教师分析', 'compare': '班级对比分析'}
-_TAB_BY_ROLE = {
-    'admin': {'grade', 'class', 'subject', 'teacher', 'compare'},
-    'grade_leader': {'grade', 'class', 'subject', 'teacher', 'compare'},
-    'homeroom_teacher': {'class'},
-    'teacher': {'teacher'},
-}
+# 注：tab 可见性统一由 analysis._guard_tab 判定（含 scope_type=school 校级领导档），
+# 此处不再维护第二份 _TAB_BY_ROLE —— 2026-10-12 审计 L-1：两份字典口径不一致
+# 曾导致校级领导能看不能导。
 
 _HF = Font(bold=True, color='FFFFFF')
 _HFL = PatternFill(start_color='4472C4', end_color='4472C4', fill_type='solid')
@@ -75,9 +72,12 @@ def export_tab(tab):
     """导出模块表格 xlsx（复用各 tab 组装数据，与页面所见一致）"""
     if tab not in _TAB_LABEL:
         abort(404)
-    if (tab not in _TAB_BY_ROLE.get(current_user.role, set())
-            and not scope_service.has_user_scope(current_user)):
-        abort(403)
+    # 2026-10-12 安全审计 L-1：原先用 _TAB_BY_ROLE + has_user_scope 判定，
+    # 漏了「权限组 scope_type=school」这一档（校级领导 / school_viewer）——
+    # 他们能打开分析页（analysis._guard_tab 有 school 分支）却无法导出 Excel。
+    # 现直接复用 analysis._guard_tab，保证「能看就能导」。
+    from app.modules.grades.routes.analysis import _guard_tab
+    _guard_tab(tab)
     exam_id = request.args.get('exam_id', type=int)
     exam = Exam.query.get_or_404(exam_id)
     try:

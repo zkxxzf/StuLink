@@ -97,7 +97,8 @@
             </div>
             <div class="card-body p-2" id="gridContainer">
                 {% if view.total %}
-                {{ gridm.schedule_grid(view.periods, view.grid, can_edit=False) }}
+                {# 2026-10-12（用户要求）：教师视角每格显示"哪个班"，学科退到副行 #}
+                {{ gridm.schedule_grid(view.periods, view.grid, can_edit=False, show_class=True) }}
                 {% else %}
                 <div class="text-center text-muted py-5">
                     <i class="bi bi-calendar-x" style="font-size:36px"></i>
@@ -152,6 +153,7 @@
     "pageType": "teacher",
     "sid": {{ ts.id if ts else 'null' }},
     "canEdit": false,
+    "showClass": true,
     "myMode": {{ 'true' if my_mode else 'false' }},
     "uid": {{ uid|tojson }},
     "week": {{ week|tojson }},

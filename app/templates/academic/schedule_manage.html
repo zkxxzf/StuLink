@@ -161,6 +161,16 @@
                         <i class="bi bi-info-circle"></i> 切换启用其他学期时自动归档
                     </span>
                     {% endif %}
+                    {# 2026-10-12（用户报障「学期课表无法清空」）：清空该学期全部课程条目 ——
+                       保留学期与节次配置，需重新导入才能恢复；历史课表（已归档）只读，不给入口。 #}
+                    {% if not archived %}
+                    <button type="button" class="btn btn-sm btn-outline-danger py-0"
+                            data-bs-toggle="modal" data-bs-target="#clearEntriesModal"
+                            data-id="{{ ts.id }}" data-term="{{ ts.name }}"
+                            title="清空该学期全部课程条目（保留学期与节次配置；需重新导入才能恢复）">
+                        <i class="bi bi-eraser"></i> 清空课表
+                    </button>
+                    {% endif %}
                     {% if ts.status == 'draft' %}
                     <form method="POST" class="d-inline" action="{{ url_for('academic.schedule_delete', sid=ts.id) }}"
                           onsubmit="return confirm({{ ('删除未启用学期「' ~ ts.name ~ '」？其节次与课表条目将一并删除，不可恢复。') | tojson }})">
@@ -285,6 +295,43 @@
         </div>
     </div>
 </div>
+
+{# ===== 清空课表确认弹窗（2026-10-12）：危险操作 =====
+   与「编辑学期」同款复用方式：点哪张卡的「清空课表」，JS 就把表单 action 指到该学期；
+   并且要求**输入完整学期名**才放行（服务端 schedule_clear_entries 会再校验一次）。 #}
+<div class="modal fade" id="clearEntriesModal" tabindex="-1"
+     data-action-tpl="{{ url_for('academic.schedule_clear_entries', sid=0) }}">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content">
+            <form method="POST" id="clearEntriesForm" action="">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <div class="modal-header py-2">
+                    <h6 class="modal-title text-danger"><i class="bi bi-eraser"></i> 清空课表</h6>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="alert alert-danger small py-2 mb-2">
+                        将清空「<b id="ceTermName"></b>」的<b>全部课程条目</b>（含调课生成的目标条目）。
+                        学期本身与节次配置会保留，操作会写入变更历史，
+                        但课表<b>需要重新导入才能恢复</b>。
+                    </div>
+                    <label class="form-label small mb-1">
+                        请输入完整学期名称以确认 <span class="text-danger">*</span>
+                    </label>
+                    <input name="confirm_name" id="ceConfirmName" class="form-control form-control-sm"
+                           autocomplete="off" required placeholder="输入上方学期名称（一字不差）">
+                    <div class="form-text">也可以先「导出」当前课表留底，再清空重导。</div>
+                </div>
+                <div class="modal-footer py-2">
+                    <button type="button" class="btn btn-sm btn-secondary" data-bs-dismiss="modal">取消</button>
+                    <button type="submit" id="ceSubmit" class="btn btn-sm btn-danger" disabled>
+                        <i class="bi bi-eraser"></i> 确认清空
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
 {% endblock %}
 
 {% block extra_js %}
@@ -318,6 +365,33 @@
         sel.value = termVal;
         var form = document.getElementById('editTermForm');
         form.setAttribute('action', actionTpl.replace(/\/0\/edit$/, '/' + id + '/edit'));
+    });
+})();
+
+// 2026-10-12（用户报障「学期课表无法清空」）：清空确认 —— 输入学期名一致才放开提交
+(function () {
+    'use strict';
+    var modal = document.getElementById('clearEntriesModal');
+    if (!modal) { return; }
+    var actionTpl = modal.getAttribute('data-action-tpl') || '';
+    var form = document.getElementById('clearEntriesForm');
+    var input = document.getElementById('ceConfirmName');
+    var submit = document.getElementById('ceSubmit');
+    function sync() {
+        var want = modal.getAttribute('data-current-term') || '';
+        submit.disabled = (input.value.trim() !== want || !want);
+    }
+    input.addEventListener('input', sync);
+    modal.addEventListener('show.bs.modal', function (ev) {
+        var b = ev.relatedTarget;
+        if (!b) { return; }
+        var id = b.getAttribute('data-id');
+        var term = b.getAttribute('data-term') || '';
+        modal.setAttribute('data-current-term', term);
+        document.getElementById('ceTermName').textContent = term;
+        input.value = '';
+        form.setAttribute('action', actionTpl.replace(/\/0\/clear-entries$/, '/' + id + '/clear-entries'));
+        sync();
     });
 })();
 </script>

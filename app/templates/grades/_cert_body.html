@@ -33,7 +33,8 @@
             <tr>
                 <td class="subj">{{ r.exam_label }}</td>
                 {% for c in m.cols %}
-                <td{% if r[c.key] is string and r[c.key] != '' and r[c.key] in ['未选','未参加'] %} class="muted"{% endif %}>{{ r[c.key] if r[c.key] is not none else '–' }}</td>
+                {# 2026-10-12 UI 审计 L1：空值统一 em dash「—」 #}
+                <td{% if r[c.key] is string and r[c.key] != '' and r[c.key] in ['未选','未参加'] %} class="muted"{% endif %}>{{ r[c.key] if r[c.key] is not none else '—' }}</td>
                 {% endfor %}
             </tr>
             {% endfor %}

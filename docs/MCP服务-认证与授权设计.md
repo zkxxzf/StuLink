@@ -7,6 +7,12 @@
    `User.has_perm`、数据范围函数与分析维度矩阵——不另造一套权限；
 3. **拒绝策略明确**：认证失败/权限不足时返回什么、记什么日志，都有固定约定。
 
+> **2026-10-12 收敛说明**：主仓库的 `mcp_server/` 已收敛为**成绩分析专用、且只读**
+> （12 个成绩工具，细粒度授权见 [成绩分析权限设计](MCP服务-成绩分析权限设计.md)）。
+> 本文的认证机制、拒绝策略、审计与配置项**完全继续适用**；
+> 但第六节"实现结构"里的工具清单记录的是 `wr_mcp` 独立分支上更完整的**写工具**版本，
+> 主仓库当前**不含**那些写工具，`allow_write` 在主仓库实际不生效。
+
 ---
 
 ## 一、认证模型（Authentication）
@@ -413,7 +419,7 @@ app context 退出时回收会话。
 | `core/bootstrap.py` | app 单例；`load_user(uid)`（每请求）；`warm_up(bind_user)`（token 模式） |
 | `run.py` | 组装 ASGI（`AccessGuard` 包 MCP）+ 启动横幅（按模式给出客户端示例） |
 | `run_stdio.py` | stdio 模式启动认证（env 账号密码，失败拒绝启动） |
-| `smoke_mcp.py` | 40 项自测（含 account 模式端到端认证用例） |
+| `smoke_scores.py` + `smoke_auth.py` | 62 项自测（成绩权限矩阵 + account 模式端到端认证用例） |
 
 ---
 
@@ -438,10 +444,10 @@ app context 退出时回收会话。
 
 ## 八、验证
 
-- 端到端自测：`mcp_server\.venv\Scripts\python.exe mcp_server\smoke_mcp.py`
-  → **通过 40 / 失败 0**（工具总数 **96**），其中认证相关 6 项：无凭据 401、错密码 401、正确凭据进入
-  MCP 并调用工具、`X-StuLink-User/Password` 方式、越权工具按账号权限被拒、
-  连续失败锁定 429（带 Retry-After）。
+- 端到端自测：`mcp_server\.venv\Scripts\python.exe mcp_server\smoke_scores.py`
+  → **通过 69 / 失败 0**（主仓库当前工具集 = 12 个只读成绩工具）。其中认证相关用例在
+  `mcp_server/smoke_auth.py`：无凭据 401、错密码 401、正确凭据进入 MCP 并调用工具、
+  `X-StuLink-User/Password` 方式、连续失败锁定 429（带 Retry-After）。
 - 网页端回归：`py -3.12 tests/academic_regression.py` → **300 / 300**（第 1 批改动了
   查课/业绩/表单的共有代码，必须回归）。
 - 写工具专项验证（2026-10-11，临时脚本验证后已删除）：

@@ -1,10 +1,29 @@
-/* StuLink v1.19.41.2 2026-10-10 全局对比：多级表头宽表
- * 结构：固定列（年级/班级/人数/方向/属性/班主任）+ 每科目组 3 列（去差均分/特优线/本科线）
- * 交互：横向滚动 + 表头两级吸顶 + 前两列冻结；打印按 A3 横向输出。
- * 窄屏/宽表：容器内滚动，页面不产生横向溢出。 */
+/* StuLink v1.19.47.3 2026-10-10 全局对比：多级表头宽表
+ * 结构：固定列（年级/班级/人数/方向/属性）+ 每科目组（去差均分 + 各分数线）
+ * 交互：分数线勾选显隐 + 横向滚动 + 表头两级吸顶 + 前两列冻结；打印按 A3 横向输出。
+ * 列宽尽量压缩（小字号/窄内边距/表头换行），窄屏/宽表在容器内滚动，页面不横向溢出。 */
+.ld-lines {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 4px 14px;
+    font-size: 12.5px;
+    padding: 4px 8px;
+    background: #f8fafc;
+    border: 1px solid #e2e8f0;
+    border-radius: 6px;
+}
+.ld-lines-label { color: #64748b; }
+.ld-line-chk {
+    display: inline-flex; align-items: center; gap: 4px;
+    margin: 0; cursor: pointer; user-select: none;
+    font-weight: 500; color: #334155;
+}
+.ld-line-chk input { margin: 0; cursor: pointer; }
+
 .ld-wrap {
     overflow: auto;
-    max-height: calc(100vh - 168px);
+    max-height: calc(100vh - 210px);
     border: 1px solid #cbd5e1;
     border-radius: 8px;
     background: #fff;
@@ -14,12 +33,12 @@ table.ld-table {
     border-spacing: 0;
     width: max-content;
     min-width: 100%;
-    font-size: 12.5px;
+    font-size: 11px;
 }
 .ld-table th, .ld-table td {
     border-right: 1px solid #d8e0ea;
     border-bottom: 1px solid #d8e0ea;
-    padding: 5px 8px;
+    padding: 1px 3px;
     text-align: center;
     white-space: nowrap;
 }
@@ -30,10 +49,13 @@ table.ld-table {
     color: #fff;
     font-weight: 600;
     z-index: 3;
+    padding: 2px 3px;
 }
 .ld-table thead tr:nth-child(1) th { top: 0; }
-.ld-table thead tr:nth-child(2) th { top: var(--ld-h1, 30px); background: #334155; font-size: 12px; }
-.ld-table thead th.grp { font-size: 13px; letter-spacing: .5px; }
+.ld-table thead tr:nth-child(2) th { top: var(--ld-h1, 30px); background: #334155; font-size: 10.5px; }
+.ld-table thead th.grp { font-size: 11px; letter-spacing: .2px; }
+/* 「去差均分」表头两行显示，压缩列宽 */
+.ld-table thead th.c-avg { white-space: normal; line-height: 1.15; }
 /* 前两列冻结（年级/班级）：宽度实测写入 --ld-f0w，班级列 left 随之偏移 */
 .ld-table th.c-year, .ld-table td.c-year {
     position: sticky; left: 0; z-index: 2; background: #fff; text-align: left;
@@ -47,33 +69,40 @@ table.ld-table {
     z-index: 5; text-align: center; background: #1e293b;
 }
 /* 方向/属性 彩标 */
-.ld-dir { padding: 1px 6px; border-radius: 4px; font-size: 11.5px; }
+.ld-dir { padding: 0 5px; border-radius: 4px; font-size: 10.5px; }
 .ld-dir-phy { background: #dbeafe; color: #1e40af; }
 .ld-dir-his { background: #fde8e8; color: #9b1c1c; }
 .ld-dir-all { background: #e2e8f0; color: #334155; }
-.ld-type { font-size: 11.5px; color: #475569; }
+.ld-type { font-size: 10.5px; color: #475569; }
 /* 小计 / 总计行 */
 .ld-table tbody tr.sub td { background: #eef4fb !important; font-weight: 700; }
 .ld-table tbody tr.grand td { background: #dbe7f5 !important; font-weight: 700; }
 .ld-table tbody tr:hover td { background: #f6f9ff !important; }
 .ld-table tbody tr.sub:hover td { background: #e6efff !important; }
 .ld-table tbody tr.grand:hover td { background: #d2e2f7 !important; }
-/* 上线单元格：人数 / 率 */
-.ld-online { font-variant-numeric: tabular-nums; }
+/* 上线单元格：人数在上、上线率在下（竖排以压缩列宽，避免整表横向滚动） */
+.ld-online {
+    display: inline-flex;
+    flex-direction: column;
+    align-items: center;
+    line-height: 1.08;
+    font-variant-numeric: tabular-nums;
+}
 .ld-online .n { color: #1f4e79; font-weight: 600; }
-.ld-online .r { color: #64748b; }
+.ld-online .r { color: #64748b; font-size: 9.5px; }
 .ld-none { color: #cbd5e1; }
 .ld-avg { font-variant-numeric: tabular-nums; }
-/* 成绩下方的任课教师：小字弱化，不与分数抢焦点（小计/总计行不输出） */
+/* 成绩下方的小字：总分格＝班主任、其余格＝该科任课教师（小字弱化，可换行以压列宽） */
 .ld-table .ld-teacher {
-    font-size: 11px;
+    font-size: 9.5px;
     font-weight: 400;
     color: #7b8794;
-    line-height: 1.25;
+    line-height: 1.1;
     margin-top: 1px;
-    white-space: nowrap;
+    white-space: normal;
+    overflow-wrap: anywhere;
 }
-/* 打印：隐藏工具条、放开滚动区、A3 横向 */
+/* 打印：隐藏工具条/勾选区、放开滚动区、A3 横向 */
 @media print {
     .no-print { display: none !important; }
     .ld-wrap { max-height: none; overflow: visible; border: none; border-radius: 0; }

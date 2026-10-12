@@ -104,4 +104,8 @@ tests/qa_*/
 %SystemDrive%/
 %SystemRoot%/
 %ProgramData%/
-mcp_server/
+# mcp_server（2026-10-12 起重新纳入版本控制：成绩分析只读版）——只忽略本地配置与虚拟环境
+mcp_server/config.json
+mcp_server/.venv/
+mcp_server/start_mcp.bat
+docs/MCP服务接入排查-宿主机IP访问被421拦截.md

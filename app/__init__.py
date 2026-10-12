@@ -1,4 +1,4 @@
-# StuLink v1.19.41.2 2026-10-10
+# StuLink v1.19.47.3 2026-10-10
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 import logging
 import os
@@ -127,7 +127,7 @@ PERMISSION_GROUPS = [
             'points.import', 'points.export', 'points.rules',
             'grades.view', 'grades.edit',
             'grades.import', 'grades.settings', 'grades.teachers', 'grades.student_query',
-            'grades.score_edit',   # v1.19.41.2：成绩单改分（管理员天然可用；考务管理员另建组授予）
+            'grades.score_edit',   # v1.19.47.3：成绩单改分（管理员天然可用；考务管理员另建组授予）
             # v1.9.2 合并：master 新增选科维护页权限 + first 学术/画像/工作台权限（取并集）
             'grades.subject_mgmt',
             'academic.view', 'academic.timetable', 'academic.swap',
@@ -501,6 +501,18 @@ def create_app():
     login_manager.init_app(app)
     csrf.init_app(app)
 
+    # 2026-10-12 安全审计 M-4：install_log_masking() 定义后**从未被调用**，
+    # 导致 Flask 默认 logger / stulink.app 等都没装 MaskingFilter，
+    # 而各模块 current_app.logger.error(..., exc_info=True) 的异常栈可能带出
+    # 身份证/手机号/学籍上下文。这里在 create_app 统一装配（幂等），
+    # 并补上 app logger 自身（current_app.logger 默认走 'stulink.app'）。
+    from app.utils.log_mask import install_log_masking
+    install_log_masking(('stulink', 'stulink.app', 'stulink.error', 'stulink.auth',
+                         'stulink.crypto', 'stulink.dormitory', 'stulink.academic',
+                         'stulink.grades', 'stulink.timetable', 'stulink.portrait',
+                         'stulink.forms', 'stulink.points', 'stulink.inspection',
+                         'stulink.achievement', 'bands'))
+
     from app.models import User, Student, Room, BedAssignment, DictCategory, DictItem
     from app.models import OperationLog, PermissionGroup, ClassProfile, GradeSetting, UserClassLink, AssignmentHistory
     from app.models.grades import (Exam, ExamScore, ExamBand, BandTemplate,
@@ -618,7 +630,7 @@ def create_app():
             return
         if request.path.startswith('/static/'):
             return
-        # v1.19.41.2 S-1：AJAX/Fetch/JSON 客户端不能处理 302 到 HTML 页面，
+        # v1.19.47.3 S-1：AJAX/Fetch/JSON 客户端不能处理 302 到 HTML 页面，
         # 否则前端 fetch().json() 会抛异常、无“请先改密”提示。改为 401 JSON。
         wants_json = (request.accept_mimetypes.best == 'application/json'
                       or request.is_json

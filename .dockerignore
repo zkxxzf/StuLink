@@ -42,4 +42,3 @@ app/static/uploads/**
 mcp_server/config.json
 mcp_server/.venv
 **/__pycache__
-mcp_server

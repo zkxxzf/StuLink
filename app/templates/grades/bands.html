@@ -2,7 +2,7 @@
 {% block title %}划线分层 - {{ exam.name }}{% endblock %}
 {% block content %}
 <div class="d-flex align-items-center mb-3 flex-wrap gap-2">
-    <a href="{{ url_for('grades.exam_detail', exam_id=exam.id) }}" class="btn btn-sm btn-outline-secondary">
+    <a href="{{ url_for('grades.exam_detail', exam_id=exam.id) }}" class="btn btn-sm btn-outline-secondary" title="返回" aria-label="返回">
         <i class="bi bi-arrow-left"></i>
     </a>
     <h5 class="mb-0"><i class="bi bi-bar-chart"></i> 划线分层：{{ exam.name }}</h5>
@@ -135,7 +135,8 @@ $(function(){
                     });
                 });
             }
-            tr.append($('<td>').append($('<button class="btn btn-sm btn-outline-danger q-del"><i class="bi bi-x"></i></button>')));
+            // 2026-10-12 UI 审计 M6：纯图标按钮补 title/aria-label
+            tr.append($('<td>').append($('<button type="button" class="btn btn-sm btn-outline-danger q-del" title="删除该层" aria-label="删除该层"><i class="bi bi-x"></i></button>')));
             $tb.append(tr);
         });
     }
@@ -207,6 +208,8 @@ $(function(){
         if (scope() === 'all'){ render(); return; }
         if (!colKeys().length){ render(); return; }
         // 一次请求取回整张矩阵：原逐列请求会让后端每列都重建一次 ExamData，列多时很慢
+        // 2026-10-12 UI 审计 M4：失败原先只静默 render()（用户看到空表，不知是没划线
+        // 还是加载失败）。改为给出明确错误提示，并保留"空表"与"加载失败"的区分。
         $.getJSON('/grades/api/bands/matrix', {exam_id: examId}, function(res){
             var all = res.data || {};
             colKeys().forEach(function(k){
@@ -214,8 +217,14 @@ $(function(){
                 (all[k] || []).forEach(function(b){ vals[b.name] = b.lower_value; });
                 layers.forEach(function(l){ if (vals[l.name] != null) l.values[k] = vals[l.name]; });
             });
+            $('#qMsg').text('');
             render();
-        }).fail(function(){ render(); });   // 失败也刷新，避免整表空白
+        }).fail(function(x){
+            var m = (x.responseJSON && x.responseJSON.message) || '已保存的划线加载失败';
+            $('#qMsg').removeClass('text-success').addClass('text-danger')
+                .text(m + '，请刷新页面重试（不影响本次填写）');
+            render();   // 失败也刷新，避免整表空白
+        });
     }
 
     $('#qMode').on('change', function(){
@@ -262,6 +271,9 @@ $(function(){
             else { setLayers(['优秀', '良好', '及格', '待提升']); showBound(null); }
             if (cb) cb();
         }).fail(function(){
+            // 2026-10-12 UI 审计 M4：模板加载失败也明确提示（原为静默回落默认四层）
+            $('#qMsg').removeClass('text-success').addClass('text-danger')
+                .text('分层模板加载失败，已用默认四层占位，请刷新页面重试');
             setLayers(['优秀', '良好', '及格', '待提升']);
             if (cb) cb();
         });
@@ -322,6 +334,10 @@ $(function(){
                        template_id: $('#qTpl').val() || 0};   // 保存即绑定考试 ↔ 模板
         console.log('[划线] 提交保存', reqBody);
         if (!confirm('将按当前表格覆盖对应的划线，继续？')){ return; }
+        // 2026-10-12 UI 审计 H3：保存是覆盖写操作，网络慢时重复点击会并发多次
+        // 覆盖写（/grades/api/bands/batch）。提交期间禁用按钮 + 文案提示，
+        // 与 exam_detail / student_query / report 的做法对齐。
+        var $btn = $('#qSave').prop('disabled', true).text('保存中…');
         // 显式带 CSRF 头，不依赖 base.html 的 $.ajaxSetup（少一层失效风险）
         $.ajax({
             url: '/grades/api/bands/batch',
@@ -331,7 +347,10 @@ $(function(){
             headers: {'X-CSRFToken': (window.csrfToken || '')},
             success: function(res){
                 console.log('[划线] 保存成功', res);
-                $('#qMsg').text(res.message || '已保存');
+                $('#qMsg').removeClass('text-danger').addClass('text-success')
+                    .text(res.message || '已保存');
+                // 2026-10-12 UI 审计 M5：保存类反馈统一走非阻塞 toast
+                if (window.stuToast) stuToast(res.message || '划线已保存');
                 showBound($('#qTpl').val() || 0);
                 load();
             },
@@ -346,6 +365,9 @@ $(function(){
                         : ('服务器错误 ' + x.status);
                 }
                 alert('保存失败：' + msg);
+            },
+            complete: function(){
+                $btn.prop('disabled', false).text('保存划线');
             }
         });
     });

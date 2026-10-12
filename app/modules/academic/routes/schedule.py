@@ -1,4 +1,4 @@
-# StuLink v1.19.41.2 2026-10-10
+# StuLink v1.19.47.3 2026-10-10
 # 教务 · 学期课表（timetable.db）：管理 / 视图 / 条目CRUD / 导入导出 / 查课联动 / JSON API
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 """新课表系统路由。
@@ -257,6 +257,38 @@ def schedule_delete(sid):
         return redirect(url_for('academic.schedule_manage'))
     log_operation(current_user, '删除', '学期课表', sid, name, module='academic')
     flash(f'学期「{name}」已删除', 'success')
+    return redirect(url_for('academic.schedule_manage'))
+
+
+@bp.route('/schedule/<int:sid>/clear-entries', methods=['POST'])
+@login_required
+@perm_required('academic.timetable')
+def schedule_clear_entries(sid):
+    """清空该学期全部课程条目（保留学期与节次配置；软删除 + 变更历史留痕）
+
+    2026-10-12（用户报障「学期课表无法清空」）：导入页只说明"已有的课不会自动清空"，
+    却没有可点的清空入口 —— 补上。危险操作：要求**输入完整学期名**二次确认，
+    服务端同样校验（不依赖前端弹窗）。
+    """
+    ts = _get_schedule_or_404(sid)
+    guard = _readonly_guard(ts, 'academic.schedule_clear_entries', sid=sid)
+    if guard:
+        return guard
+    confirm = (request.form.get('confirm_name') or '').strip()
+    if confirm != (ts.name or '').strip():
+        flash('未清空：请在确认弹窗里输入完整的学期名称（防误点）。', 'warning')
+        return redirect(url_for('academic.schedule_manage'))
+    try:
+        result = svc.clear_entries(sid, operator=current_user)
+    except ValueError as e:
+        flash(str(e), 'danger')
+        return redirect(url_for('academic.schedule_manage'))
+    log_operation(current_user, '清空', '学期课表', sid, ts.name, module='academic')
+    if result['deleted']:
+        flash(f'已清空「{ts.name}」的 {result["deleted"]} 条课程（变更历史已留痕；'
+              f'课表需要重新导入才能恢复）', 'success')
+    else:
+        flash(f'「{ts.name}」当前没有课程条目，无需清空', 'info')
     return redirect(url_for('academic.schedule_manage'))
 
 
@@ -821,6 +853,11 @@ def schedule_smart_import(sid):
             flash('预览草稿已过期，请重新上传', 'warning')
             return redirect(url_for('academic.schedule_smart_import', sid=sid))
         data = draft['data']
+        # 任课映射核对：老草稿没有这项时补算一次（只读，不改映射）
+        mapping = draft.get('mapping')
+        if mapping is None:
+            mapping = svc.check_teacher_mapping(
+                [e for sh in (data.get('sheets') or []) for e in (sh.get('entries') or [])])
         mx, day, flat_n = _smart_matrix(ts, data, request.args.get('pday', type=int))
         return render_template('academic/schedule_smart_import.html',
                                ts=ts, token=draft_token, data=data,
@@ -828,6 +865,7 @@ def schedule_smart_import(sid):
                                grade_classes=grade_classes, preview=True, result=None,
                                matrix=mx, pday=day, flat_count=flat_n,
                                week_range=draft.get('week_range') or '',
+                               mapping=mapping,
                                weekday_names=WEEKDAY_NAMES)
 
     if request.method == 'POST':
@@ -850,9 +888,14 @@ def schedule_smart_import(sid):
             return redirect(url_for('academic.schedule_smart_import', sid=sid))
 
         token = _uuid.uuid4().hex
+        # 2026-10-12（用户要求）：按任课教师映射核对"这个老师是不是教这个班这一科"，
+        # 只在预览里提示，**不改映射**（check_teacher_mapping 只读）。
+        mapping = svc.check_teacher_mapping(
+            [e for sh in (data.get('sheets') or []) for e in (sh.get('entries') or [])])
         _smart_draft_set(token, {'data': data, 'fname': file.filename,
                                  'owner_id': current_user.id,
                                  'week_range': week_range,
+                                 'mapping': mapping,
                                  '_ts': _time.time()})
         mx, day, flat_n = _smart_matrix(ts, data, request.args.get('pday', type=int))
         return render_template('academic/schedule_smart_import.html',
@@ -860,7 +903,7 @@ def schedule_smart_import(sid):
                                grades=grades, grade_classes=grade_classes,
                                preview=True, result=None,
                                matrix=mx, pday=day, flat_count=flat_n,
-                               week_range=week_range,
+                               week_range=week_range, mapping=mapping,
                                weekday_names=WEEKDAY_NAMES)
 
     return render_template('academic/schedule_smart_import.html',
@@ -922,6 +965,60 @@ def schedule_smart_import_confirm(sid):
     flash(f'导入完成：成功 {result["success"]} 条，跳过 {result["failed"]} 条',
           'success' if result['success'] else 'warning')
     return redirect(url_for('academic.schedule_smart_import', sid=sid))
+
+
+@bp.route('/schedule/<int:sid>/smart-import/mapping-fix', methods=['POST'])
+@login_required
+@perm_required('academic.timetable')
+def schedule_smart_mapping_fix(sid):
+    """把预览里的课表教师**按任课教师映射更正**（只改本次导入草稿，不改映射）
+
+    2026-10-12（用户要求）：核对卡片上要能"确认就是映射里的那位"。
+    - 单组：form 带 grade/class_name/subject → 只更正该班该科；
+    - 全部：form 带 all=1 → 更正所有「疑似缩写 / 映射是别人」组（no_link 不动）；
+    - refresh=1：只重算核对结果（在映射页补完映射后回来点一下）。
+    """
+    ts = _get_schedule_or_404(sid)
+    guard = _readonly_guard(ts, 'academic.schedule_smart_mapping_fix', sid=sid)
+    if guard:
+        return guard
+    token = (request.form.get('token') or '').strip()
+    draft = _smart_draft_get(token)
+    if not draft or draft.get('owner_id') != current_user.id:
+        flash('预览草稿已过期，请重新上传文件', 'warning')
+        return redirect(url_for('academic.schedule_smart_import', sid=sid))
+
+    data = draft.get('data') or {}
+    form = request.form
+    try:
+        if (form.get('refresh') or '') == '1':
+            flash('已重新核对任课映射', 'info')
+        elif (form.get('all') or '') == '1':
+            n = svc.apply_all_mapping_fixes(data, (draft.get('mapping') or {}).get('issues'))
+            flash(f'已按任课映射更正 {n} 条课程教师（映射本身未改动）',
+                  'success' if n else 'info')
+        else:
+            grade = (form.get('grade') or '').strip()
+            class_name = (form.get('class_name') or '').strip()
+            subject = (form.get('subject') or '').strip()
+            res = svc.apply_mapping_fix(data, grade, class_name, subject)
+            if res.get('reason') == 'no_link':
+                flash(f'{grade}{class_name}「{subject}」还没有任课映射，'
+                      f'请先到「任课教师映射」里设置（本页不会替你改映射）', 'warning')
+            else:
+                tgt = res.get('target') or {}
+                flash(f'已把 {grade}{class_name}「{subject}」的 {res["fixed"]} 条课程教师'
+                      f'更正为映射里的「{tgt.get("teacher_name") or ""}」（映射本身未改动）',
+                      'success')
+    except Exception as exc:  # noqa: BLE001
+        db.session.rollback()
+        flash(f'更正失败：{exc}', 'danger')
+        return redirect(url_for('academic.schedule_smart_import', sid=sid, draft=token))
+
+    draft['mapping'] = svc.check_teacher_mapping(
+        [e for sh in (data.get('sheets') or []) for e in (sh.get('entries') or [])])
+    _smart_draft_set(token, draft)
+    return redirect(url_for('academic.schedule_smart_import', sid=sid, draft=token))
 
 
 @bp.route('/schedule/<int:sid>/smart-import/template.xlsx')

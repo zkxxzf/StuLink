@@ -1,4 +1,4 @@
-# StuLink v1.19.41.2 2026-10-10
+# StuLink v1.19.47.3 2026-10-10
 # 分层模板管理：自定义模板 + 考试与模板绑定
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 from flask import render_template, request, jsonify, abort
@@ -10,9 +10,10 @@ from app.models import DictCategory
 from app.models.grades import Exam, BandTemplate
 from app.modules.grades import bp
 from app.utils.decorators import perm_required
+from app.utils.helpers import log_operation
 
 # 内置模板：首次访问时自动写入（幂等），保证「四层 / 默认模板」一直在
-# v1.19.41.2 用户口径：默认模板改为 985线 / 211线 / 特控线 / 本科线 四层，
+# v1.19.47.3 用户口径：默认模板改为 985线 / 211线 / 特控线 / 本科线 四层，
 # 低于本科线即「未上线」（不单列一层，由“不落任何层”自然得出）。
 BUILTIN_LAYERS_NAME = '默认模板'      # 默认模板名（内置不可删）
 BUILTIN_TEMPLATES = [
@@ -62,7 +63,7 @@ def ensure_builtin_templates():
                            sort_order=t['sort_order'])
         obj.set_layers(t['layers'])
         db.session.add(obj)
-    # v1.19.41.2 修正 bug：历史上给 is_builtin 加字段时，迁移把已有行全标成了内置，
+    # v1.19.47.3 修正 bug：历史上给 is_builtin 加字段时，迁移把已有行全标成了内置，
     # 导致用户手工建的模板也没有删除按钮。内置与否以**名字**为唯一依据：
     # 不在规范定义（含旧内置名）里的-list 全部归为可删。
     builtin_names = {t['name'] for t in BUILTIN_TEMPLATES} | set(LEGACY_RENAME)
@@ -162,6 +163,12 @@ def api_band_template_save():
                         if str(x).strip()])
     db.session.add(obj)
     db.session.commit()
+    # 2026-10-12 数据可信度审计（§3.8）：划线模板改动会影响后续所有考试划线，
+    # 原先零业务日志。记录层定义，便于回溯"当时这套线是怎么配的"。
+    log_operation(current_user, '保存', '划线模板', obj.id,
+                  f'{name}（{obj.lower_mode}）：'
+                  + '、'.join(f'{x["name"]}={x["ratio"]}' for x in layers),
+                  module='grades')
     return jsonify(success=True, data={'id': obj.id}, message='模板已保存')
 
 
@@ -183,6 +190,8 @@ def api_band_template_delete(tid):
             db.session.add(exam)
     db.session.delete(obj)
     db.session.commit()
+    # 2026-10-12 数据可信度审计（§3.8）：删模板会解除已绑定考试的关联，补业务日志
+    log_operation(current_user, '删除', '划线模板', obj.id, f'{obj.name}', module='grades')
     return jsonify(success=True, message='模板已删除')
 
 

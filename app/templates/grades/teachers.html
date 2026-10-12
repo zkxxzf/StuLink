@@ -2,7 +2,7 @@
 {% block title %}任课教师映射 - {{ '教务管理' if request.blueprint == 'academic' else '成绩管理' }}{% endblock %}
 {% block content %}
 <div class="d-flex align-items-center mb-3 flex-wrap gap-2">
-    <a href="{{ url_for(ep('index')) }}" class="btn btn-sm btn-outline-secondary">
+    <a href="{{ url_for(ep('index')) }}" class="btn btn-sm btn-outline-secondary" title="返回" aria-label="返回">
         <i class="bi bi-arrow-left"></i>
     </a>
     <h5 class="mb-0"><i class="bi bi-person-workspace"></i> 任课教师映射</h5>
@@ -80,7 +80,14 @@ $(function(){
             var d = res.data;
             renderMatrix(d);
             $('#tcMsg').text('');
-        }).fail(function(){ $('#tcMsg').text('加载失败'); });
+        }).fail(function(x){
+            // 2026-10-12 UI 审计 M4：原为「加载失败」四个字，无图标无重试入口。
+            // 改为带图标与原因的警示条，并提示可直接刷新重试。
+            var why = (x.responseJSON && x.responseJSON.message) ? ('：' + x.responseJSON.message) : '';
+            $('#tcMsg').removeClass('text-muted').addClass('text-danger')
+                .html('<i class="bi bi-exclamation-triangle-fill"></i> 任课映射加载失败'
+                      + esc(why) + '，请点此 <a href="javascript:location.reload()">刷新重试</a>');
+        });
     }
     function renderMatrix(d){
         usersStore = d.users || [];
@@ -146,7 +153,7 @@ $(function(){
         var grade = $('#tcGrade').val();
         if (!grade) { alert('请先选择年级'); return; }
         $('#tcMsg').text('保存中…');
-        // v1.19.41.2：必须显式声明 JSON —— 原来 $.post(url, JSON.stringify(...)) 会以
+        // v1.19.47.3：必须显式声明 JSON —— 原来 $.post(url, JSON.stringify(...)) 会以
         // application/x-www-form-urlencoded 发送 JSON 文本，后端 get_json 取不到 → 保存静默失效
         $.ajax({
             url: app.data('saveUrl'), type: 'POST',

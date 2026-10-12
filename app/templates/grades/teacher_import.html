@@ -2,7 +2,7 @@
 {% block title %}批量导入任课教师 - {{ '教务管理' if request.blueprint == 'academic' else '成绩管理' }}{% endblock %}
 {% block content %}
 <div class="d-flex align-items-center mb-3">
-    <a href="{{ url_for(ep('teachers_page')) }}" class="btn btn-sm btn-outline-secondary me-2">
+    <a href="{{ url_for(ep('teachers_page')) }}" class="btn btn-sm btn-outline-secondary me-2" title="返回" aria-label="返回">
         <i class="bi bi-arrow-left"></i>
     </a>
     <h5 class="mb-0"><i class="bi bi-upload"></i> 批量导入《教师安排表》</h5>
