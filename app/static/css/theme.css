@@ -71,6 +71,7 @@
     --sl-subtotal-bg: #eef4fb;         /* 小计行 */
     --sl-grand-bg: #dfe9f6;            /* 总计行 */
     --sl-zebra-bg: #f8fafc;            /* 斑马行 */
+    --sl-extra-bg: #fff8e6;            /* 「不在当前模板内」的层（划线分层） */
 
     /* 同步 Bootstrap 变量（浅色下即为 Bootstrap 默认值，显式写出防被上游污染） */
     --bs-body-bg: #f0f2f5;
@@ -130,6 +131,7 @@
     --sl-subtotal-bg: #1d2b42;
     --sl-grand-bg: #22334f;
     --sl-zebra-bg: #1b2537;
+    --sl-extra-bg: #33291a;
 
     /* 同步 Bootstrap 变量：让 card / table / dropdown / modal / form 一起变暗 */
     --bs-body-bg: #0f172a;
@@ -392,6 +394,9 @@ body {
    并给足宽度，避免 426.5 被截断成 "426.!"。 */
 #bandTable tbody td { background: var(--sl-surface); padding: 2px 4px; }
 #bandTable tbody tr:nth-child(even) td { background: var(--sl-zebra-bg); }
+/* 「模板外」的层（不在当前模板层名内、由已保存划线追加而来）：淡琥珀底 + 层名下标注
+   —— 模板没选对时一眼可见，不再混在模板层里像补丁（用户口径 2026-10-13） */
+#bandTable tbody tr.q-extra td { background: var(--sl-extra-bg) !important; }
 #bandTable td .form-control {
     background: transparent;
     border: 0;

@@ -126,11 +126,19 @@ $(function(){
         var $tb = $('#bandTable tbody').empty();
         layers.forEach(function(l){
             var tr = $('<tr>');
-            // 2026-10-13：模板层带比例定义时，层名下方展示「比例 x% · 约 N 人」
+            // 2026-10-13：不在当前模板层名内的「模板外」行加标记 —— 这类行通常是
+            // 模板没选对时由已保存划线追加出来的，混在模板层里看不出区别
+            // （用户口径："模板选的正确与否，背景色和其他的也要跟着对"）
+            if (l.extra){ tr.addClass('q-extra'); }
+            // 模板层带比例定义时，层名下方展示「比例 x% · 约 N 人」
             // （N = 参考人数 × 比例，估算值，帮助先对上模板再填数值）
             var $name = $('<div>');
             $name.append($('<input class="form-control form-control-sm q-name" style="min-width:120px">')
                 .val(l.name).attr('data-ratio', (l.ratio == null ? '' : l.ratio)));
+            if (l.extra){
+                $name.append($('<div class="small">').addClass('text-warning')
+                    .text('不在当前模板内'));
+            }
             if (l.ratio !== '' && l.ratio != null && !isNaN(parseFloat(l.ratio))){
                 var r = parseFloat(l.ratio);
                 var est = totalCount ? Math.round(totalCount * r / 100) : 0;
@@ -164,6 +172,7 @@ $(function(){
             // 模板比例定义随行保存（重新 render 后提示不丢）
             var ratio = $r.find('.q-name').attr('data-ratio');
             if (ratio !== '' && ratio != null) o.ratio = ratio;
+            if ($r.hasClass('q-extra')) o.extra = true;
             if (scope() === 'all'){
                 o.value = $r.find('.q-value').val();
             } else {
@@ -249,7 +258,7 @@ $(function(){
                 var has = layers.some(function(l){ return norm(l.name) === key; });
                 if (!has){ appended.push(lib[key].name);
                     layers.push({seq: lib[key].seq, name: lib[key].name,
-                                 value: '', values: {}}); }
+                                 value: '', values: {}, extra: true}); }
             });
             layers.sort(function(a, c){ return a.seq - c.seq; });
             colKeys().forEach(function(k){
@@ -314,11 +323,21 @@ $(function(){
                 // 未绑定时自动匹配模板：优先按「本场已保存划线的层名」（归一化），
                 // 其次按考试适用类型 —— 先把模板定准，已保存的线才能对号入座
                 sel.val(String(suggested)); applyTemplate(true);
-                var why = ((res.data || {}).suggest_reason === 'lines')
-                    ? '已按本场已保存划线的层名自动匹配模板：'
-                    : ('按考试类型（' + ((res.data || {}).exam_type || '') + '）自动匹配模板：');
-                $('#qTplBound').text(why + (tplById(suggested) || {}).name
-                    + '（保存划线后正式绑定）');
+                var d = res.data || {};
+                var why, tail;
+                if (d.suggest_reason === 'lines'){
+                    why = '已按本场已保存的划线自动匹配模板：';
+                    tail = '（命中 ' + (d.suggest_hit || 0) + ' 条线'
+                         + (d.suggest_extra ? '，模板另有 ' + d.suggest_extra + ' 层待填' : '')
+                         + '；保存划线后正式绑定）';
+                } else if (d.suggest_reason === 'default'){
+                    why = '本场还没有可匹配的划线/类型，暂用内置模板：';
+                    tail = '（可另行选择模板；保存划线后正式绑定）';
+                } else {
+                    why = '按考试类型（' + (d.exam_type || '') + '）自动匹配模板：';
+                    tail = '（保存划线后正式绑定）';
+                }
+                $('#qTplBound').text(why + (tplById(suggested) || {}).name + tail);
             }
             else {
                 setLayers(['优秀', '良好', '及格', '待提升']); showBound(null);

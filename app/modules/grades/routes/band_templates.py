@@ -115,6 +115,7 @@ def api_band_templates():
       ② 本场已保存划线的层名（归一化）与某模板层名重叠最多 → 按内容推荐
       ③ 按考试适用类型推荐（原口径）
     suggest_reason: 'lines' | 'exam_type' | ''（推荐依据，前端展示用）
+    suggest_hit / suggest_extra：命中几条已保存的线 / 模板里还有几层待填（②用）
     """
     ensure_builtin_templates()
     exam_id = request.args.get('exam_id', type=int)
@@ -127,6 +128,7 @@ def api_band_templates():
 
     bound = suggested = None
     suggest_reason = ''
+    suggest_hit = suggest_extra = 0
     exam_type = ''
     if exam_id:
         exam = Exam.query.get(exam_id)
@@ -134,30 +136,51 @@ def api_band_templates():
             bound = exam.band_template_id()
             exam_type = exam.exam_type or ''
             if not bound:
-                # ② 按本场已保存划线的层名推荐：重叠层最多者胜（要求至少命中 2 层，
-                #    避免「只共有一个泛化层名」的模板被误推荐）
+                # ② 按本场已保存划线的层名推荐
                 saved = {_norm_line(n) for (n,) in
                          db.session.query(ExamBand.name)
                          .filter(ExamBand.exam_id == exam_id).all()}
                 saved.discard('')
                 if len(saved) >= 2:
-                    best, best_n = None, 0
+                    # 排序键（越小越合适）：
+                    #   ① missing = 已保存的线里模板没有的 → 越少越好（别丢线）
+                    #   ② extra   = 模板里没有对应划线值的层 → 越少越好（别多出一堆空行）
+                    #   ③ 内置模板优先（标准口径），最后按 sort_order/id 稳定兜底
+                    # 2026-07 那种「AI 导入遗留模板」与「默认模板」命中数相同时，
+                    # 旧实现按 sort_order 先到先得（sort_order 为 NULL 的排最前）→
+                    # 推荐了垃圾模板；现在按上面三条比，默认模板胜出。
+                    best, best_key = None, None
                     for t in rows:
-                        n = len(saved & {_norm_line(x.get('name'))
-                                         for x in t.get_layers()})
-                        if n > best_n:
-                            best, best_n = t.id, n
+                        lay = {_norm_line(x.get('name')) for x in t.get_layers()}
+                        if len(saved & lay) < 2:      # 至少命中 2 层才算对得上
+                            continue
+                        key = (len(saved - lay), len(lay - saved),
+                               0 if t.is_builtin else 1,
+                               t.sort_order if t.sort_order is not None else 999, t.id)
+                        if best_key is None or key < best_key:
+                            best, best_key = t.id, key
                     if best:
                         suggested, suggest_reason = best, 'lines'
+                        suggest_extra = best_key[1]
+                        suggest_hit = len(saved) - best_key[0]
             if not suggested and not bound and exam_type:
                 # ③ 未绑定时按「适用考试类型」推荐：取第一个声明适用该类型的模板
                 for t in rows:
                     if exam_type in t.get_exam_types():
                         suggested, suggest_reason = t.id, 'exam_type'
                         break
+            if not suggested and not bound:
+                # ④ 兜底：连类型都没匹配上 → 用内置「默认模板」（985线/211线/特控线/本科线）占位，
+                #    而不是落到「不套用 + 默认四层（优秀/良好/及格/待提升）」——
+                #    那正是"表格里层名乱七八糟、跟模板对不上"的来源（用户口径 2026-10-13）
+                fb = next((t for t in rows if t.name == BUILTIN_LAYERS_NAME), None)
+                if fb:
+                    suggested, suggest_reason = fb.id, 'default'
     return jsonify(success=True, data={'templates': data, 'bound_id': bound,
                                        'suggested_id': suggested,
                                        'suggest_reason': suggest_reason,
+                                       'suggest_hit': suggest_hit,
+                                       'suggest_extra': suggest_extra,
                                        'exam_type': exam_type,
                                        'exam_type_options': _exam_type_options()})
 

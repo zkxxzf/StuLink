@@ -2455,6 +2455,8 @@ def check_band_template_suggest():
     from datetime import date as _date
     from app.models.grades import Exam, ExamBand, BandTemplate
 
+    JUNK_TPL = 'BANDTPL干扰模板（清北985211特控本科）'
+
     with app.app_context():
         exam = Exam.query.filter_by(name='BANDTPL划线模板测试').first()
         if not exam:
@@ -2467,6 +2469,15 @@ def check_band_template_suggest():
                 db.session.add(ExamBand(exam_id=exam.id, direction='', subject='总分',
                                         seq=i, name=nm, lower_mode='score',
                                         lower_value=float(v)))
+            db.session.commit()
+        # 干扰项：模拟 AI 导入遗留的「多两层」模板（命中数一样，但多出没有划线值的层），
+        # 且 sort_order=0 排在最前 —— 旧实现"先到先得"会推荐它
+        if not BandTemplate.query.filter_by(name=JUNK_TPL).first():
+            junk = BandTemplate(name=JUNK_TPL, lower_mode='score', sort_order=0,
+                                remark='回归测试用干扰模板', is_builtin=False)
+            junk.set_layers([{'name': n, 'ratio': None} for n in
+                             ('清北线', '985线', '211线', '特控线', '本科线')])
+            db.session.add(junk)
             db.session.commit()
         exam_id = exam.id
 
@@ -2481,10 +2492,41 @@ def check_band_template_suggest():
              'reason=%s suggested=%s' % (d.get('suggest_reason'), d.get('suggested_id')))
         with app.app_context():
             default_tpl = BandTemplate.query.filter_by(name='默认模板').first()
+            junk_tpl = BandTemplate.query.filter_by(name=JUNK_TPL).first()
             case('划线模板：推荐命中的是「默认模板」（985/211/特控/本科 归一化对上）',
                  default_tpl is not None and d.get('suggested_id') == default_tpl.id,
                  'suggested=%s default=%s' % (d.get('suggested_id'),
                                               default_tpl.id if default_tpl else None))
+            # 命中数相同时比「谁少出空层」：AI 遗留的五层模板虽然也命中 4 层，
+            # 但比默认模板多出 1 层没有划线值的层 —— 不该被推荐
+            case('划线模板：命中数相同时不推荐「多出空层」的遗留模板',
+                 junk_tpl is not None and d.get('suggested_id') != junk_tpl.id,
+                 'suggested=%s junk=%s' % (d.get('suggested_id'),
+                                           junk_tpl.id if junk_tpl else None))
+        case('划线模板：返回命中/待填层数（前端展示推荐依据）',
+             d.get('suggest_hit') == 4 and d.get('suggest_extra') == 0,
+             'hit=%s extra=%s' % (d.get('suggest_hit'), d.get('suggest_extra')))
+
+        # ④ 兜底：全新考试（无划线、类型也没匹配）→ 仍推荐内置「默认模板」，
+        #    不落到「不套用 + 默认四层（优秀/良好/及格/待提升）」
+        with app.app_context():
+            e2 = Exam.query.filter_by(name='BANDTPL兜底测试').first()
+            if not e2:
+                e2 = Exam(name='BANDTPL兜底测试', grade='2024级',
+                          exam_date=_date(2026, 5, 21), exam_type='ZZZ不存在类型')
+                db.session.add(e2)
+                db.session.commit()
+            e2_id = e2.id
+        r2 = c.get('/grades/api/band-templates', query_string={'exam_id': e2_id})
+        d2 = (r2.get_json() or {}).get('data') or {}
+        with app.app_context():
+            default_tpl = BandTemplate.query.filter_by(name='默认模板').first()
+            case('划线模板：无任何依据时兜底推荐内置「默认模板」（不再不套用）',
+                 d2.get('suggest_reason') == 'default'
+                 and default_tpl is not None
+                 and d2.get('suggested_id') == default_tpl.id,
+                 'reason=%s suggested=%s' % (d2.get('suggest_reason'),
+                                             d2.get('suggested_id')))
         # AI 导入的模板归一化匹配：同一线名序列只认已有模板，不重复新建
         with app.app_context():
             from app.modules.grades.routes.ai_import import _norm_line
@@ -2497,7 +2539,14 @@ def check_band_template_suggest():
         if exam:
             ExamBand.query.filter_by(exam_id=exam.id).delete()
             db.session.delete(exam)
-            db.session.commit()
+        junk_tpl = BandTemplate.query.filter_by(name=JUNK_TPL).first()
+        if junk_tpl:
+            db.session.delete(junk_tpl)
+        e2 = Exam.query.filter_by(name='BANDTPL兜底测试').first()
+        if e2:
+            ExamBand.query.filter_by(exam_id=e2.id).delete()
+            db.session.delete(e2)
+        db.session.commit()
 
 
 @item('PORTRAITLIST')
