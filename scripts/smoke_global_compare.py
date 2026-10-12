@@ -201,8 +201,10 @@ with app.app_context():
           str(d1['subject_count']))
     check('分科：组数=2（物理/历史）', len(d1['groups']) == 2,
           str([g['key'] for g in d1['groups']]))
-    check('分科：层名 特控/本科', d1['l1_name'] == '特控' and d1['l2_name'] == '本科',
-          f"{d1['l1_name']}/{d1['l2_name']}")
+    check('分科：可选层名（高→低）=特控/本科', d1['layers'] == ['特控', '本科'],
+          str(d1.get('layers')))
+    check('分科：默认勾选层=特控/本科（211/特控/本科口径）',
+          d1['default_lines'] == ['特控', '本科'], str(d1.get('default_lines')))
 
     g_phy, g_his = d1['groups'][0], d1['groups'][1]
     check('物理组 2 个班', len(g_phy['rows']) == 2)
@@ -212,17 +214,20 @@ with app.app_context():
     c = r01['cells']
     check('01班 语文 去差均分=95.0（强基不去差）', c['语文']['trim_avg'] == 95.0,
           str(c['语文']['trim_avg']))
-    check('01班 语文 特控=2/50%', c['语文']['l1_n'] == 2 and c['语文']['l1_rate'] == 50,
-          f"{c['语文']['l1_n']}/{c['语文']['l1_rate']}")
-    check('01班 语文 本科=3/75%', c['语文']['l2_n'] == 3 and c['语文']['l2_rate'] == 75,
-          f"{c['语文']['l2_n']}/{c['语文']['l2_rate']}")
+    check('01班 语文 特控=2/50%',
+          c['语文']['lines']['特控']['n'] == 2 and c['语文']['lines']['特控']['rate'] == 50,
+          f"{c['语文']['lines']['特控']}")
+    check('01班 语文 本科=3/75%',
+          c['语文']['lines']['本科']['n'] == 3 and c['语文']['lines']['本科']['rate'] == 75,
+          f"{c['语文']['lines']['本科']}")
     check('01班 总分 去差均分=525.0', c[TOTAL_SUBJECT]['trim_avg'] == 525.0,
           str(c[TOTAL_SUBJECT]['trim_avg']))
     check('01班 总分 特控=1/25%（600≥580）',
-          c[TOTAL_SUBJECT]['l1_n'] == 1 and c[TOTAL_SUBJECT]['l1_rate'] == 25,
-          f"{c[TOTAL_SUBJECT]['l1_n']}/{c[TOTAL_SUBJECT]['l1_rate']}")
+          c[TOTAL_SUBJECT]['lines']['特控']['n'] == 1
+          and c[TOTAL_SUBJECT]['lines']['特控']['rate'] == 25,
+          f"{c[TOTAL_SUBJECT]['lines']['特控']}")
     check('01班 历史科 无成绩=—（None）',
-          c['历史']['trim_avg'] is None and c['历史']['l1_n'] is None,
+          c['历史']['trim_avg'] is None and c['历史']['lines']['特控'] is None,
           str(c['历史']))
 
     check('02班：班型快照=卓越班', r02['class_type'] == '卓越班')
@@ -230,13 +235,14 @@ with app.app_context():
     check('02班 语文 去差均分=125.0（剔总分末尾2人后）', c2['语文']['trim_avg'] == 125.0,
           str(c2['语文']['trim_avg']))
     check('02班 语文 特控=4/100%（上线按全体算）',
-          c2['语文']['l1_n'] == 4 and c2['语文']['l1_rate'] == 100,
-          f"{c2['语文']['l1_n']}/{c2['语文']['l1_rate']}")
+          c2['语文']['lines']['特控']['n'] == 4 and c2['语文']['lines']['特控']['rate'] == 100,
+          f"{c2['语文']['lines']['特控']}")
     check('02班 总分 去差均分=600.0', c2[TOTAL_SUBJECT]['trim_avg'] == 600.0,
           str(c2[TOTAL_SUBJECT]['trim_avg']))
     check('02班 总分 本科=3/75%（620/580/520 ≥500）',
-          c2[TOTAL_SUBJECT]['l2_n'] == 3 and c2[TOTAL_SUBJECT]['l2_rate'] == 75,
-          f"{c2[TOTAL_SUBJECT]['l2_n']}/{c2[TOTAL_SUBJECT]['l2_rate']}")
+          c2[TOTAL_SUBJECT]['lines']['本科']['n'] == 3
+          and c2[TOTAL_SUBJECT]['lines']['本科']['rate'] == 75,
+          f"{c2[TOTAL_SUBJECT]['lines']['本科']}")
 
     sub_phy = g_phy['subtotal']
     check('物理小计：标签=物理全年级', sub_phy and sub_phy['class_name'] == '物理全年级',
@@ -246,10 +252,9 @@ with app.app_context():
           sub_phy['cells'][TOTAL_SUBJECT]['trim_avg'] == 550.0,
           str(sub_phy['cells'][TOTAL_SUBJECT]['trim_avg']))
     check('物理小计 总分 本科=6/75%（含 520）',
-          sub_phy['cells'][TOTAL_SUBJECT]['l2_n'] == 6
-          and sub_phy['cells'][TOTAL_SUBJECT]['l2_rate'] == 75,
-          f"{sub_phy['cells'][TOTAL_SUBJECT]['l2_n']}/"
-          f"{sub_phy['cells'][TOTAL_SUBJECT]['l2_rate']}")
+          sub_phy['cells'][TOTAL_SUBJECT]['lines']['本科']['n'] == 6
+          and sub_phy['cells'][TOTAL_SUBJECT]['lines']['本科']['rate'] == 75,
+          f"{sub_phy['cells'][TOTAL_SUBJECT]['lines']['本科']}")
 
     check('历史组 1 个班', len(g_his['rows']) == 1 and g_his['rows'][0]['class_name'] == '03班')
     r03 = g_his['rows'][0]
@@ -257,8 +262,9 @@ with app.app_context():
           r03['cells']['历史']['trim_avg'] == 88.0,
           str(r03['cells']['历史']['trim_avg']))
     check('03班 历史科 本科=2/67%',
-          r03['cells']['历史']['l2_n'] == 2 and r03['cells']['历史']['l2_rate'] == 67,
-          f"{r03['cells']['历史']['l2_n']}/{r03['cells']['历史']['l2_rate']}")
+          r03['cells']['历史']['lines']['本科']['n'] == 2
+          and r03['cells']['历史']['lines']['本科']['rate'] == 67,
+          f"{r03['cells']['历史']['lines']['本科']}")
 
     gr = d1['grand']
     check('全年级行存在', gr and gr['class_name'] == '全年级')
@@ -267,13 +273,13 @@ with app.app_context():
           gr['cells'][TOTAL_SUBJECT]['trim_avg'] == 551.4,
           str(gr['cells'][TOTAL_SUBJECT]['trim_avg']))
     check('全年级 总分 特控=4/36%（逐生按各自方向线，含卡线580）',
-          gr['cells'][TOTAL_SUBJECT]['l1_n'] == 4
-          and gr['cells'][TOTAL_SUBJECT]['l1_rate'] == 36,
-          f"{gr['cells'][TOTAL_SUBJECT]['l1_n']}/{gr['cells'][TOTAL_SUBJECT]['l1_rate']}")
+          gr['cells'][TOTAL_SUBJECT]['lines']['特控']['n'] == 4
+          and gr['cells'][TOTAL_SUBJECT]['lines']['特控']['rate'] == 36,
+          f"{gr['cells'][TOTAL_SUBJECT]['lines']['特控']}")
     check('全年级 总分 本科=9/82%',
-          gr['cells'][TOTAL_SUBJECT]['l2_n'] == 9
-          and gr['cells'][TOTAL_SUBJECT]['l2_rate'] == 82,
-          f"{gr['cells'][TOTAL_SUBJECT]['l2_n']}/{gr['cells'][TOTAL_SUBJECT]['l2_rate']}")
+          gr['cells'][TOTAL_SUBJECT]['lines']['本科']['n'] == 9
+          and gr['cells'][TOTAL_SUBJECT]['lines']['本科']['rate'] == 82,
+          f"{gr['cells'][TOTAL_SUBJECT]['lines']['本科']}")
 
     # ================= 任课教师（v1.18.9.0：各科成绩下方，本场快照） =================
     check('01班 语文 教师=张语文（取本场快照）',
@@ -284,7 +290,7 @@ with app.app_context():
           str(r03['cells']['历史'].get('teacher')))
     check('03班 物理 无教师（该班不开物理课）',
           r03['cells']['物理'].get('teacher') is None, str(r03['cells']['物理']))
-    check('总分列不带教师（班主任已独立成列）',
+    check('总分列不带教师（班主任改在总分格下方由前端展示）',
           c[TOTAL_SUBJECT].get('teacher') is None, str(list(c[TOTAL_SUBJECT].keys())))
     check('物理小计行不带教师', sub_phy['cells']['语文'].get('teacher') is None)
     check('全年级行不带教师', gr['cells']['语文'].get('teacher') is None)
@@ -307,8 +313,9 @@ with app.app_context():
           rr01['cells']['语文']['trim_avg'] == 105.0,
           str(rr01['cells']['语文']['trim_avg']))
     check('全科 01班 语文 特控=1/50%（105 线，110 过）',
-          rr01['cells']['语文']['l1_n'] == 1 and rr01['cells']['语文']['l1_rate'] == 50,
-          f"{rr01['cells']['语文']['l1_n']}/{rr01['cells']['语文']['l1_rate']}")
+          rr01['cells']['语文']['lines']['特控']['n'] == 1
+          and rr01['cells']['语文']['lines']['特控']['rate'] == 50,
+          f"{rr01['cells']['语文']['lines']['特控']}")
     check('全科 全年级 人数=5', d2['grand']['count'] == 5, str(d2['grand']['count']))
     check('全科 01班 语文 教师=高一语文',
           rr01['cells']['语文'].get('teacher') == '高一语文',
@@ -363,9 +370,13 @@ with app.test_client() as c:
         wb = openpyxl.load_workbook(io.BytesIO(rx.data))
         ws = wb.active
         heads = [ws.cell(row=1, column=i).value for i in range(1, 9)]
-        check('导出表头正确（年级/班级/…/总分组）',
-              heads[:6] == ['年级', '班级', '班级人数', '方向', '属性', '班主任']
-              and heads[6] == '总分', str(heads))
+        check('导出表头正确（年级/班级/…/总分组，班主任已并入总分）',
+              heads[:5] == ['年级', '班级', '班级人数', '方向', '属性']
+              and heads[5] == '总分', str(heads))
+        # 第二行指标名：每科「去差均分 + 特控线 + 本科线」（默认勾选层）
+        heads2 = [ws.cell(row=2, column=i).value for i in range(1, 10)]
+        check('导出第二行指标名（去差均分/特控线/本科线）',
+              heads2[5:8] == ['去差均分', '特控线', '本科线'], str(heads2))
         check('导出含小计行', any(ws.cell(row=r, column=2).value == '物理全年级'
                                  for r in range(1, ws.max_row + 1)))
         check('导出含全年级行', any(ws.cell(row=r, column=2).value == '全年级'
@@ -379,6 +390,18 @@ with app.test_client() as c:
               '未找到「均分\\n教师」单元格')
     except Exception as e:  # noqa: BLE001
         check('导出文件可被 openpyxl 打开', False, str(e))
+
+    # 导出按页面勾选层（lines 参数）：只勾特控 → 每科仅 去差均分 + 特控线
+    rl = c.get(f'/grades/api/global-compare/export?exam_id={e1}&lines=%E7%89%B9%E6%8E%A7')
+    try:
+        import openpyxl
+        wb2 = openpyxl.load_workbook(io.BytesIO(rl.data))
+        ws2 = wb2.active
+        h2 = [ws2.cell(row=2, column=i).value for i in range(1, 9)]
+        check('导出仅勾特控：第二行=去差均分/特控线（无本科线）',
+              h2[5:7] == ['去差均分', '特控线'] and h2[7] != '本科线', str(h2))
+    except Exception as e:  # noqa: BLE001
+        check('导出 lines 参数生效', False, str(e))
 
 print(f'\n===== 全局对比验证：{ok} 通过 / {fail} 失败 =====')
 sys.exit(1 if fail else 0)
