@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-{# v1.19.48.0：主题挂在 <html> 上，Bootstrap 5.3.3 原生识别 data-bs-theme；
+{# v1.19.47.21：主题挂在 <html> 上，Bootstrap 5.3.3 原生识别 data-bs-theme；
    默认值由上面 head 内的脚本按「本地存储 → 系统偏好」改写，这里只是兜底。 #}
 <html lang="zh-CN" data-bs-theme="light">
 <head>
@@ -15,7 +15,7 @@
        打印规则全部不生效（这是"4 套表头风格并存"的根因之一）。
        成绩模块页面占全站相当比例，直接并入 base.html，一处引入全站生效。 #}
     <link href="{{ su('css/grades.css') }}" rel="stylesheet">
-    {# 2026-10-13（v1.19.48.0）：主题层必须在 bootstrap / grades.css **之后**加载，
+    {# 2026-10-13（v1.19.47.21）：主题层必须在 bootstrap / grades.css **之后**加载，
        才能覆盖业务 css 里的字面量颜色（同特异性，后来者胜）。 #}
     <link href="{{ su('css/theme.css') }}" rel="stylesheet">
     {# 主题提前应用：在 body 渲染前定好 data-bs-theme，避免深色下先闪一帧白屏（FOUC） #}
@@ -35,7 +35,7 @@
     {% block extra_css_head %}{% endblock %}
     <style>
         :root { --sidebar-width: 220px; }
-        /* 2026-10-13（v1.19.48.0）：颜色一律取主题变量（见 static/css/theme.css），
+        /* 2026-10-13（v1.19.47.21）：颜色一律取主题变量（见 static/css/theme.css），
            不再写字面量 —— 否则内联样式会压过主题层，深浅两模式切换不生效。 */
         body { font-family: -apple-system, "Microsoft YaHei", sans-serif; background: var(--sl-bg); color: var(--sl-text); padding-top: 56px; }
         .sidebar {
@@ -143,7 +143,7 @@
             /* 2026-10-13：恢复**贴顶落底全高** —— 原先垂直居中浮卡（top:50% + max-height）
                上不到顶、下不到底，和主内容之间还空一大块（用户实测反馈）。
                贴左占满视口高，宽度与常规侧栏一致。
-               v1.19.48.0：底色改用**与常规侧栏同一个变量** —— 原先是白卡，
+               v1.19.47.21：底色改用**与常规侧栏同一个变量** —— 原先是白卡，
                与其它模块的深色侧栏不一致（用户反馈「成绩分析侧栏是白的」）。 */
             top: 56px; bottom: 0; transform: none;
             left: 0; width: var(--sidebar-width); max-height: none;
@@ -263,7 +263,7 @@
         </a>
         <div class="ms-auto d-flex align-items-center">
             {% if current_user.is_authenticated %}
-            {# 2026-10-13（v1.19.48.0）：主题切换入口 —— 与铃铛/用户菜单同级，
+            {# 2026-10-13（v1.19.47.21）：主题切换入口 —— 与铃铛/用户菜单同级，
                图标与文案由底部脚本按当前主题同步（☀ 切深色 / 🌙 切浅色）。 #}
             <button type="button" class="btn btn-sm btn-outline-light me-2" id="themeToggle"
                     style="border-radius:8px;" title="切换深色 / 浅色模式" aria-label="切换主题">
@@ -305,7 +305,7 @@
                             <i class="bi bi-key"></i> 修改密码
                         </a>
                     </li>
-                    {# 2026-10-13（v1.19.48.0）：主题切换的第二入口（顶栏按钮之外的备选） #}
+                    {# 2026-10-13（v1.19.47.21）：主题切换的第二入口（顶栏按钮之外的备选） #}
                     <li>
                         <a class="dropdown-item" href="#" id="themeToggleItem">
                             <i class="bi bi-moon-stars"></i> 切换为深色模式
@@ -793,7 +793,7 @@
     <script src="{{ su('js/jquery-3.7.1.min.js') }}"></script>
     <script src="{{ su('js/bootstrap.bundle.min.js') }}"></script>
     <script>
-        // ===== v1.19.48.0 主题切换（浅色 / 深色）=====
+        // ===== v1.19.47.21 主题切换（浅色 / 深色）=====
         // 存储键 stulink-theme；切换只改 <html data-bs-theme>，Bootstrap 5.3.3 与
         // theme.css 的变量表负责其余部分；head 内的脚本负责首屏不闪白。
         (function () {
