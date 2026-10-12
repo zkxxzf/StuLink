@@ -2,9 +2,9 @@
 {% block title %}考务向导 - 成绩管理{% endblock %}
 {% block extra_css %}
 <style>
-  /* v1.19.47.12 步骤①「参考」徽标：点一下切换参考状态 */
+  /* v1.19.47.13 步骤①「参考」徽标：点一下切换参考状态 */
   .attend-toggle { cursor: pointer; user-select: none; }
-  /* v1.19.47.12 步骤② 双栏美化：统一卡片 / 表头 / 悬停 / 输入控件 */
+  /* v1.19.47.13 步骤② 双栏美化：统一卡片 / 表头 / 悬停 / 输入控件 */
   #t2 .t2-card {
     border: 1px solid #e5e7eb; border-radius: 10px; overflow: hidden;
     box-shadow: 0 1px 2px rgba(15, 23, 42, .04);
@@ -24,7 +24,7 @@
 </style>
 {% endblock %}
 {% block content %}
-{# v1.19.47.12 页头：以「本场考试」为主（名字 / 类型 / 时间 / 年级）。
+{# v1.19.47.13 页头：以「本场考试」为主（名字 / 类型 / 时间 / 年级）。
    绑定考试时用考试信息；未绑定的孤儿批次回落用批次自身字段。 #}
 {% set _ex = linked_exam %}
 {% set _head_name = _ex.name if _ex else affair.name %}
@@ -32,7 +32,7 @@
 <div class="card px-3 py-2 mb-2">
     <div class="d-flex justify-content-between align-items-start flex-wrap gap-2">
         <div class="flex-grow-1" style="min-width:0">
-            {# v1.19.47.12：考务已并入考试管理，面包屑直接返回考试列表 #}
+            {# v1.19.47.13：考务已并入考试管理，面包屑直接返回考试列表 #}
             <a href="{{ url_for('grades.exams_list') }}" class="text-decoration-none text-muted small">
                 <i class="bi bi-arrow-left"></i> 返回考试管理</a>
             <h5 class="mb-1 mt-1 text-break">
@@ -61,7 +61,7 @@
 </div>
 
 <!-- v1.12.2 移除步骤⑤成绩关联：功能使用率低，按考场查成绩走成绩模块自身入口即可 -->
-{# v1.19.47.12：删掉与下方页签重复的「1-7 步骤胶囊条」——完成状态已由页签上的对勾体现 #}
+{# v1.19.47.13：删掉与下方页签重复的「1-7 步骤胶囊条」——完成状态已由页签上的对勾体现 #}
 {% set _s1 = stats.students > 0 %}
 {% set _s2 = rooms|length > 0 %}
 {% set _s3 = (arranged|length > 0) or (numbered > 0) %}
@@ -79,7 +79,7 @@
 </ul>
 
 <div class="tab-content">
-    <!-- v1.19.47.12 编排容量统计：选科明细默认展开（不再折叠），且改考场/科目/容量后实时刷新 -->
+    <!-- v1.19.47.13 编排容量统计：选科明细默认展开（不再折叠），且改考场/科目/容量后实时刷新 -->
     <div class="card px-3 py-2 mb-3 small">
         <div class="d-flex flex-wrap align-items-center gap-3">
             <span class="fw-bold text-nowrap"><i class="bi bi-clipboard-data"></i> 编排容量</span>
@@ -105,7 +105,7 @@
             </div>
         </div>
     </div>
-    <!-- ===== 步骤① 学生名单（v1.19.47.12：名单统计 + 左右分栏） ===== -->
+    <!-- ===== 步骤① 学生名单（v1.19.47.13：名单统计 + 左右分栏） ===== -->
     <div class="tab-pane fade show active" id="t1">
         {# 本步只做「名单维护」：只允许从学生库同步/选取，不允许编辑学生信息；
            左=参加考试、右=不参加考试，两侧都按「班级 → 姓氏」排序；上方给年级与各班统计 #}
@@ -200,7 +200,7 @@
     <!-- ===== 步骤② 考场设置（左右双列表：考场库 ↔ 本批次考场） ===== -->
     <div class="tab-pane fade" id="t2">
         <div class="d-flex gap-2 mb-3 flex-wrap align-items-center">
-            {# v1.19.47.12：「导入考生安排 / 考场位置」入口下线 —— AI 导入统一走每场考试的
+            {# v1.19.47.13：「导入考生安排 / 考场位置」入口下线 —— AI 导入统一走每场考试的
                「AI 智能导入」（/grades/exams/<id>/ai-import，同页已能写入本场考务批次） #}
             <button class="btn btn-outline-primary btn-sm" onclick="document.getElementById('roomFile').click()">
                 <i class="bi bi-upload"></i> 导入 Excel</button>
@@ -236,7 +236,7 @@
                         <span class="small fw-bold"><i class="bi bi-list-check"></i> 本批次考场
                             <span class="badge bg-primary ms-1" id="roomStat">{{ rooms|length }}</span> 个 ·
                             容量 <span class="badge bg-info text-dark" id="capStat">{{ stats.capacity }}</span> 座</span>
-                        {# v1.19.47.12 由顶部工具栏移来：这两个功能服务的就是「本批次考场」 #}
+                        {# v1.19.47.13 由顶部工具栏移来：这两个功能服务的就是「本批次考场」 #}
                         <span class="d-flex gap-1">
                             <button class="btn btn-outline-secondary btn-sm py-0" onclick="setAllCapacity()"
                                     title="给本批次全部考场设同一容量">
@@ -254,7 +254,7 @@
                                 <th style="min-width:120px">备注</th>
                                 <th class="text-end">操作</th></tr></thead>
                             <tbody>
-                            {# v1.19.47.12 步骤②：去掉「编辑」按钮，科目/容量/备注在本行直接改（失焦/切换即存）；
+                            {# v1.19.47.13 步骤②：去掉「编辑」按钮，科目/容量/备注在本行直接改（失焦/切换即存）；
                                去掉「考号前缀」列（前缀改在步骤③自定义模式里按选科设置） #}
                             {% for r in rooms %}
                             <tr data-rid="{{ r.id }}">
@@ -289,7 +289,7 @@
 
     <!-- ===== 步骤③ 编排与考号生成 ===== -->
     <div class="tab-pane fade" id="t3">
-        {# v1.19.47.12：已编排/已带考号（如 AI 导入）时明确标注「无需再执行」，并提示重排会覆盖 #}
+        {# v1.19.47.13：已编排/已带考号（如 AI 导入）时明确标注「无需再执行」，并提示重排会覆盖 #}
         {% if _s3 %}
         <div class="alert alert-success py-2 small">
             <i class="bi bi-check-circle"></i>
@@ -301,7 +301,7 @@
         {% set _m = affair.mode if affair.mode in (0, 1, 2) else 0 %}
         <div class="card p-3">
             <h6 class="mb-2">考号生成模式</h6>
-            {# v1.19.47.12 改为「左侧选模式 + 右侧该模式的设置」两栏：学号模式 / 自定义模式（规则生成 或 批量导入考号） #}
+            {# v1.19.47.13 改为「左侧选模式 + 右侧该模式的设置」两栏：学号模式 / 自定义模式（规则生成 或 批量导入考号） #}
             <div class="row g-3">
                 <!-- 左：模式选择 -->
                 <div class="col-lg-4 col-md-5">
@@ -411,7 +411,7 @@
                 <i class="bi bi-shuffle"></i> 开始编排并生成考号</button>
             <span id="arrangeMsg" class="ms-2 small"></span>
         </div>
-        {# v1.19.47.12 已编排时在下方列出学生名单，默认按「考场 → 座号」排序 #}
+        {# v1.19.47.13 已编排时在下方列出学生名单，默认按「考场 → 座号」排序 #}
         {% if arranged_sorted %}
         <div class="card mt-2">
             <div class="card-header py-1 d-flex justify-content-between align-items-center">
@@ -758,9 +758,9 @@ const AID = {{ affair.id }};
 function csrf(){ return csrfToken; }
 
 // v1.12.1 记忆当前 tab：切换时写 URL hash，刷新后自动恢复（避免操作后跳回学生名单）
-// v1.19.47.12：改用 history.replaceState 写 hash —— 直接赋 location.hash 会让浏览器
+// v1.19.47.13：改用 history.replaceState 写 hash —— 直接赋 location.hash 会让浏览器
 // 跳到该锚点（#t1~#t7），表现为「点环节标签时屏幕滚动」；replaceState 只改地址栏不滚动。
-// v1.19.47.12：切页签时同步左侧悬浮栏的 7 个环节圆点（只亮当前这一步，前面不全亮）。
+// v1.19.47.13：切页签时同步左侧悬浮栏的 7 个环节圆点（只亮当前这一步，前面不全亮）。
 document.querySelectorAll('#affairTabs button[data-bs-toggle="tab"]').forEach(function(btn){
     btn.addEventListener('shown.bs.tab', function(){
         var hash = btn.dataset.bsTarget;   // #t1 ~ #t7
@@ -772,7 +772,7 @@ document.querySelectorAll('#affairTabs button[data-bs-toggle="tab"]').forEach(fu
         syncSidebarSteps(hash);
     });
 });
-// v1.19.47.12 把侧栏圆点的高亮改到「当前环节」上（done 状态保持不变）
+// v1.19.47.13 把侧栏圆点的高亮改到「当前环节」上（done 状态保持不变）
 function syncSidebarSteps(hash){
     var dots = document.querySelectorAll('.sidebar-float .efn-steps .efn-dot');
     if(!dots.length) return;
@@ -788,19 +788,19 @@ if(location.hash){
     var triggerEl = document.querySelector('#affairTabs button[data-bs-target="'+location.hash+'"]');
     if(triggerEl){
         new bootstrap.Tab(triggerEl).show();
-        // v1.19.47.12：带 #tN 打开/刷新时浏览器会自动跳到该锚点，落回顶部，
+        // v1.19.47.13：带 #tN 打开/刷新时浏览器会自动跳到该锚点，落回顶部，
         // 与「点环节标签不滚动」保持一致（目标元素在本脚本之前已解析，故直接滚即可）。
         window.scrollTo(0, 0);
     }
 }
-// v1.19.47.12 步骤③ 模式面板联动：初始按服务端保存的模式展示，切到该步骤时再同步一次
+// v1.19.47.13 步骤③ 模式面板联动：初始按服务端保存的模式展示，切到该步骤时再同步一次
 syncModePanes();
 document.querySelector('#affairTabs button[data-bs-target="#t3"]').addEventListener('shown.bs.tab', syncModePanes);
 
 // v1.12.1 学生名单从学籍库同步导入（增量：新增+刷新基本信息）
-// v1.19.47.12 取消 remove_missing 参数：无班级/已转出/已毕业学生一律不进入成绩模块，
+// v1.19.47.13 取消 remove_missing 参数：无班级/已转出/已毕业学生一律不进入成绩模块，
 // 名单中不再符合条件的学生（学籍已删等）由服务端默认自动剔除。
-// v1.19.47.12 同步后会「自动沿用上一场不参加考试的学生」（服务端 matched_non_attend）。
+// v1.19.47.13 同步后会「自动沿用上一场不参加考试的学生」（服务端 matched_non_attend）。
 function syncStudents(){
     var fd = new FormData();
     fetch('/grades/affairs/'+AID+'/students/sync', {method:'POST', body:fd, headers:{'X-CSRFToken':csrf()}})
@@ -817,7 +817,7 @@ function syncStudents(){
             else alert(d.msg);
         });
 }
-// v1.19.47.12 步骤① 左右分栏：把学生移到「参加 / 不参加」一侧（保存后刷新以重排与更新统计）
+// v1.19.47.13 步骤① 左右分栏：把学生移到「参加 / 不参加」一侧（保存后刷新以重排与更新统计）
 function toggleAttend(sid, toAttend){
     var fd = new FormData(); fd.append('is_attend', toAttend ? '1' : '0');
     fetch('/grades/affairs/'+AID+'/students/'+sid+'/attend',
@@ -827,7 +827,7 @@ function toggleAttend(sid, toAttend){
             location.reload();
         });
 }
-// v1.19.47.12 步骤② 行内编辑：科目下拉 / 容量 / 备注 改动即存（不再有「编辑」按钮弹窗）
+// v1.19.47.13 步骤② 行内编辑：科目下拉 / 容量 / 备注 改动即存（不再有「编辑」按钮弹窗）
 function saveRoomField(el){
     var tr = el.closest('tr');
     var rid = tr.dataset.rid;
@@ -842,11 +842,11 @@ function saveRoomField(el){
             if(rm){ rm.subject=d.subject; rm.capacity=d.capacity; rm.note=d.note; }
             tr.querySelector('.rm-cap').value = d.capacity;
             _roomCapStat();
-            // v1.19.47.12：科目/容量已变 → 实时重算选科明细
+            // v1.19.47.13：科目/容量已变 → 实时重算选科明细
             refreshStats();
         });
 }
-// v1.19.47.12 步骤② 容量批量操作：一键给全部考场设同一容量
+// v1.19.47.13 步骤② 容量批量操作：一键给全部考场设同一容量
 function setAllCapacity(){
     if(!_batchRooms.length){ alert('本批次还没有考场'); return; }
     var n = prompt('给本批次全部 ' + _batchRooms.length + ' 个考场设置容量：', '42');
@@ -859,11 +859,11 @@ function setAllCapacity(){
             if(!d.ok){ alert(d.msg||'设置失败'); return; }
             _batchRooms.forEach(function(r){ r.capacity = d.capacity; });
             renderRooms();
-            // v1.19.47.12：批量改容量后实时重算选科明细
+            // v1.19.47.13：批量改容量后实时重算选科明细
             refreshStats();
         });
 }
-// v1.19.47.12 步骤② 沿用上一场（同年级 + 同一房间）的考场容量
+// v1.19.47.13 步骤② 沿用上一场（同年级 + 同一房间）的考场容量
 function fillCapacityFromPrev(){
     if(!_batchRooms.length){ alert('本批次还没有考场'); return; }
     if(!confirm('按「同年级 + 同一房间（位置优先）」把上一场考试的考场容量带入本批次？\n（会覆盖本批次现有容量）')) return;
@@ -876,7 +876,7 @@ function fillCapacityFromPrev(){
                   + (d.unmatched ? ('（' + d.unmatched + ' 个房间在上一场没有对应）') : ''));
             location.reload();
         });
-    // v1.19.47.12 说明：本操作会覆盖本批次全部考场容量，走整页刷新以保持与列表一致，
+    // v1.19.47.13 说明：本操作会覆盖本批次全部考场容量，走整页刷新以保持与列表一致，
     // 无需在此 refreshStats()。
 }
 // v1.19.25.0 步骤③ 模式联动：学号模式 / 自定义模式（规则生成 或 批量导入考号）
@@ -889,7 +889,7 @@ function syncModePanes(){
     document.getElementById('paneRule').classList.toggle('d-none', imp);
     document.getElementById('paneImport').classList.toggle('d-none', !imp);
 }
-// v1.19.47.12 步骤③ 批量导入考号（Excel：学号 + 考号）→ 写入名单的「自定义考号」
+// v1.19.47.13 步骤③ 批量导入考号（Excel：学号 + 考号）→ 写入名单的「自定义考号」
 function importNumbers(input){
     if(!input.files.length) return;
     var fd = new FormData(); fd.append('file', input.files[0]);
@@ -967,7 +967,7 @@ function confirmPick(){
 }
 
 // v1.12.2 步骤③ 各选科前后缀保存（复用 /settings 接口，仅提交 sels + 前后缀，不动模式）
-// v1.19.47.12 一并提交「批次默认前缀」（原「考场前缀」列已移除，默认前缀成为兜底）
+// v1.19.47.13 一并提交「批次默认前缀」（原「考场前缀」列已移除，默认前缀成为兜底）
 function saveSelCfg(){
     var sels = Array.from(document.querySelectorAll('.selCfgPrefix')).map(i=>i.dataset.sel);
     var fd = new FormData();
@@ -1003,7 +1003,7 @@ function saveSettings(){
 }
 // v1.12.2 考场库内联双列表：纯前端渲染，加入/删除即时更新，无刷新闪烁
 // 本批次考场（服务端初值，之后由 JS 增删维护）：{id, room_no, location, capacity, subject, note}
-// v1.19.47.12 科目可选值（系统「选科」字典 + 全科），供行内下拉使用
+// v1.19.47.13 科目可选值（系统「选科」字典 + 全科），供行内下拉使用
 var _SUBJ_OPTS = {{ room_subject_options|tojson }};
 var _batchRooms = [{% for r in rooms %}{id:{{ r.id }},room_no:{{ (r.room_no or '')|tojson }},location:{{ (r.location or '')|tojson }},capacity:{{ r.capacity or 0 }},subject:{{ (r.subject or '默认')|tojson }},note:{{ (r.note or '')|tojson }}},
                    {% endfor %}];
@@ -1011,7 +1011,7 @@ var _libData = [];  // 考场库全量，loadLib 后填充
 
 function _locSet(){ return new Set(_batchRooms.map(r=>r.location)); }
 
-// v1.19.47.12 批次考场数与总容量（行内改容量后同步刷新）
+// v1.19.47.13 批次考场数与总容量（行内改容量后同步刷新）
 function _roomCapStat(){
     var cap = _batchRooms.reduce((s,r)=>s+(r.capacity||0),0);
     var el = document.getElementById('roomStat');
@@ -1020,7 +1020,7 @@ function _roomCapStat(){
     if(c2) c2.textContent = cap;
 }
 
-// v1.19.47.12 改考场/科目/容量后**实时**刷新「编排容量 + 选科明细」：
+// v1.19.47.13 改考场/科目/容量后**实时**刷新「编排容量 + 选科明细」：
 // 调 /affairs/<aid>/stats 拿最新口径，直接改 DOM（不刷新页面，老师调容量时能连续看效果）。
 function refreshStats(){
     fetch('/grades/affairs/'+AID+'/stats').then(r=>r.json()).then(function(d){
@@ -1055,7 +1055,7 @@ function refreshStats(){
     });
 }
 
-// v1.19.47.12 科目行内下拉：通用考场显示为「全科」
+// v1.19.47.13 科目行内下拉：通用考场显示为「全科」
 function _subjSel(r){
     var cur = r.subject || '默认';
     var universal = ['默认','通用','','全部'].indexOf(cur) >= 0;
@@ -1165,7 +1165,7 @@ function clearStudents(){
     fetch('/grades/affairs/'+AID+'/students/clear', {method:'POST', headers:{'X-CSRFToken':csrf()}})
         .then(r=>r.json()).then(d=>{ if(d.ok) location.reload(); });
 }
-// v1.19.47.12 移除「手动新增 / 编辑学生」弹窗（用户：本页不允许编辑学生信息，只允许从学生库选取），
+// v1.19.47.13 移除「手动新增 / 编辑学生」弹窗（用户：本页不允许编辑学生信息，只允许从学生库选取），
 // openStuModal / saveStu 一并删除；后端 /students/save 接口保留给外部工具使用。
 function delStu(id){
     if(!confirm('删除该学生？')) return;
@@ -1189,7 +1189,7 @@ function openRoomModal(id){
         fetch('/grades/affairs/'+AID+'/rooms/'+id).then(r=>r.json()).then(s=>{
             document.getElementById('roomNo').value=s.room_no;
             document.getElementById('roomLoc').value=s.location||'';
-            // v1.19.47.12 科目改下拉：通用（默认/通用/空）映射为「全科」
+            // v1.19.47.13 科目改下拉：通用（默认/通用/空）映射为「全科」
             var sub = s.subject || '默认';
             document.getElementById('roomSubj').value =
                 (['默认','通用','','全部'].indexOf(sub) >= 0) ? '全科' : sub;
@@ -1212,7 +1212,7 @@ function saveRoom(){
         .then(r=>r.json()).then(d=>{ if(d.ok) location.reload(); else alert(d.msg); });
 }
 function runArrange(){
-    // v1.19.47.12 模式：学号模式=1；自定义模式=0（按规则生成）/ 2（用导入的自定义考号）
+    // v1.19.47.13 模式：学号模式=1；自定义模式=0（按规则生成）/ 2（用导入的自定义考号）
     var mode = document.getElementById('modeStudent').checked ? '1'
              : (document.getElementById('subImport').checked ? '2' : '0');
     var fd = new FormData(); fd.append('mode', mode);
@@ -1231,7 +1231,7 @@ function runArrange(){
 // v1.12.2 步骤⑤成绩关联已移除：linkExam/unlinkExam/filterRoom 前端入口删除，
 // 后端 /link-exam 接口保留，供其他模块调用
 
-/* ============ v1.19.47.12 考务环节④⑤⑥⑦ ============ */
+/* ============ v1.19.47.13 考务环节④⑤⑥⑦ ============ */
 // 环节④ 首次进入时加载任课核对矩阵
 var _affTeachers = null;   // {classes, subjects, cells, users}
 var _invigData = null;     // 环节⑥ 数据
