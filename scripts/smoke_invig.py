@@ -87,19 +87,19 @@ with app.app_context():
         db.session.add(TeacherSubjectLink(grade='2025级', class_name=cls,
                                           subject=sub, user_id=uid, active=True))
 
-    affair = ExamAffair(name='冒烟考务', grade='2025级', exam_date=date(2026, 10, 8),
-                        status='draft')
-    db.session.add(affair)
-    db.session.flush()
-    aid = affair.id
-
-    # v1.19.46.2 页头「本场考试」信息：绑一场考试（名字 / 性质 / 阶段 / 时间）
+    # v1.19.46.3 页头「本场考试」信息：绑一场考试（名字 / 性质 / 阶段 / 时间）
+    # v1.19.47.2 侧栏 7 环节也依赖 affair.exam_id 反查考试 → 必须先建考试再建批次
     _exam = Exam(name='2025级2026-2027学年第一学期期中考（冒烟）', exam_kind='联考',
                  exam_type='期中考', grade='2025级', exam_date=date(2026, 10, 8),
                  term='2026-2027', status='imported')
     db.session.add(_exam)
     db.session.flush()
-    affair.exam_id = _exam.id
+
+    affair = ExamAffair(name='冒烟考务', grade='2025级', exam_date=date(2026, 10, 8),
+                        exam_id=_exam.id, status='draft')
+    db.session.add(affair)
+    db.session.flush()
+    aid = affair.id
 
     # 考场 ×2
     for rn, loc in [('01', '教学楼A-101'), ('02', '教学楼A-102')]:
@@ -134,7 +134,7 @@ with app.test_client() as c:
           all(x in ph for x in ['① 学生名单', '② 考场设置', '③ 编排考号',
                                 '④ 核对任课教师', '⑤ 考试时间表', '⑥ 编排监考表', '⑦ 导出']))
     check('页面含监考表导出入口', '导出监考表 Excel' in ph and '导出监考表 PDF' in ph)
-    # v1.19.46.2 页头与去重
+    # v1.19.46.3 页头与去重
     check('重复步骤条已删除（无 step-pill）', 'step-pill' not in ph)
     check('页头显示本场考试名字', '2025级2026-2027学年第一学期期中考（冒烟）' in ph)
     check('页头显示考试类型（性质/阶段）', '联考' in ph and '期中考' in ph)
@@ -142,8 +142,31 @@ with app.test_client() as c:
     check('侧栏标题=考试名字（非「年级·性质·阶段·日期」串）',
           '2025级2026-2027学年第一学期期中考（冒烟）' in ph
           and '2025级·联考·期中考' not in ph)
-    # v1.19.46.2 点环节标签不滚动：改用 history.replaceState 写 hash（不再直接赋 location.hash）
+    # v1.19.46.3 点环节标签不滚动：改用 history.replaceState 写 hash（不再直接赋 location.hash）
     check('点环节标签不滚动（用 history.replaceState）', 'history.replaceState' in ph)
+    # v1.19.47.2 侧栏 7 环节：断言**渲染产物**（affair_steps 是 Jinja 变量名，
+    # 不会出现在 HTML 里，故改数圆点 / 数「环节」文案）。
+    # 默认不带 hash 打开 → 当前环节 = 第 1 步：恰好 1 个圆点带 on，其余 6 个既非 on 也非 done
+    #（此刻 4/5/6 环节无数据），以此证明「只亮当前、不把前面的全亮」。
+    _n_dot = ph.count('class="efn-dot')
+    check('侧栏渲染 7 个环节圆点', _n_dot == 7, f'efn-dot 数={_n_dot}')
+    check('侧栏圆点只亮当前 1 个（其余未完成不亮）',
+          ph.count('efn-dot on"') == 1 and ph.count('efn-dot on done"') == 0,
+          f'on={ph.count("efn-dot on"+chr(34))}')
+    check('侧栏标注 7 环节', '/7 环节' in ph)
+    check('侧栏圆点带环节标题（鼠标悬浮可见第几步叫什么）', '环节1 学生名单' in ph)
+    check('选科明细默认展开（collapse show）', 'collapse show' in ph)
+    check('改容量实时刷新选科明细（refreshStats）', 'refreshStats' in ph)
+    check('侧栏圆点只亮当前环节（syncSidebarSteps）', 'syncSidebarSteps' in ph)
+
+    # v1.19.47.2 实时统计接口：改容量后选科明细即时反映
+    r = c.get(f'/grades/affairs/{aid}/stats')
+    js = r.get_json() or {}
+    check('实时统计接口 200', r.status_code == 200, str(r.status_code))
+    check('实时统计：2 个考场 / 容量 60', js.get('rooms') == 2 and js.get('capacity') == 60,
+          str({k: js.get(k) for k in ('rooms', 'capacity')}))
+    check('实时统计：选科明细含 物化生 8 人', (js.get('per_sel') or {}).get('物化生', {}).get('students') == 8,
+          str(js.get('per_sel')))
 
     # ---- 环节④ ----
     r = c.get(f'/grades/affairs/{aid}/teachers')

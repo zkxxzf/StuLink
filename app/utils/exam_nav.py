@@ -22,11 +22,25 @@ SECTION_LABELS = {
     'analysis': '成绩分析',
 }
 
+# v1.19.47.2 考务向导 7 个环节（/grades/affairs/<aid> 的页签 #t1~#t7）。
+# 侧栏悬浮栏原先只画 4 个圆点（建考试/考务/导入/分析），与考务页真实的 7 个环节对不上；
+# 这里给出 7 环节的标签与完成判定，供模板渲染「当前所处环节」高亮 —— 只亮当前这一步，
+# 不是把前面的全部点亮（用户口径 2026-10-12）。
+AFFAIR_STEPS = (
+    {'key': 't1', 'label': '学生名单'},
+    {'key': 't2', 'label': '考场设置'},
+    {'key': 't3', 'label': '编排与考号生成'},
+    {'key': 't4', 'label': '核对任课教师'},
+    {'key': 't5', 'label': '考试时间表'},
+    {'key': 't6', 'label': '编排监考表'},
+    {'key': 't7', 'label': '导出'},
+)
+
 # endpoint → 段位（前缀匹配，先长后短）
 _EP_SECTION = (
     ('grades.exam_ai_import', 'import'),
     ('grades.exam_import', 'import'),
-    # v1.19.46.2 划线分层单独一段：原先归到 'import' 导致侧栏「成绩导入」「划线分层」同时高亮
+    # v1.19.46.3 划线分层单独一段：原先归到 'import' 导致侧栏「成绩导入」「划线分层」同时高亮
     ('grades.bands_page', 'bands'),
     ('grades.exam_affair_go', 'affair'),
     ('grades.affair', 'affair'),
@@ -96,7 +110,7 @@ def _resolve():
     if exam is None:
         return None
     if affair is None:
-        # v1.19.46.2：**任何**进入考试态的页面都要取本场考务批次。
+        # v1.19.46.3：**任何**进入考试态的页面都要取本场考务批次。
         # 此前只在 sec == 'affair' 时查，导致成绩导入/划线分层/分数修改记录等页面里
         # affair 恒为 None → 侧栏「考务安排」永远挂「待做」、进度显示 3/4 步，
         # 而本场考务其实早已编排完成（有考场·座号·考号）。
@@ -111,6 +125,43 @@ def _resolve():
         {'label': '成绩导入', 'done': imported, 'key': 'import'},
         {'label': '成绩分析', 'done': banded, 'key': 'analysis'},
     ]
+
+    # v1.19.47.2 考务向导 7 环节：完成状态 + 当前所处环节（由 URL hash / 查询参数决定）。
+    # 仅考务页（affair 段）需要，其他页为 []（侧栏仍按 4 步渲染）。
+    affair_steps = []
+    if sec == 'affair' and affair is not None:
+        from app.models.grades import (AffairStudent, AffairRoom, AffairTeacher,
+                                       AffairSchedule, AffairInvigilation)
+        n_stu = AffairStudent.query.filter_by(affair_id=affair.id).count()
+        n_room = AffairRoom.query.filter_by(affair_id=affair.id).count()
+        n_arr = AffairStudent.query.filter_by(affair_id=affair.id).filter(
+            AffairStudent.room_no.isnot(None)).count()
+        n_num = AffairStudent.query.filter_by(affair_id=affair.id).filter(
+            AffairStudent.exam_number.isnot(None)).count()
+        done_map = {
+            't1': n_stu > 0,
+            't2': n_room > 0,
+            't3': n_arr > 0 or n_num > 0,
+            't4': AffairTeacher.query.filter_by(affair_id=affair.id).count() > 0,
+            't5': AffairSchedule.query.filter_by(affair_id=affair.id).count() > 0,
+            't6': AffairInvigilation.query.filter_by(affair_id=affair.id).count() > 0,
+            't7': True,
+        }
+        # 当前环节：URL hash（#tN）优先，其次 ?step=tN；缺省第 1 步
+        cur = (request.args.get('step') or '').strip().lower()
+        url = request.url or ''
+        for key in ('t1', 't2', 't3', 't4', 't5', 't6', 't7'):
+            if ('#' + key) in url:
+                cur = key
+                break
+        if cur not in done_map:
+            cur = 't1'
+        for s in AFFAIR_STEPS:
+            affair_steps.append({'key': s['key'], 'label': s['label'],
+                                 'done': done_map[s['key']],
+                                 'current': s['key'] == cur})
+
     return {'exam': exam, 'exam_id': exam.id, 'section': sec or 'overview',
             'affair_id': (affair.id if affair else None),
-            'affair': affair, 'steps': steps}
+            'affair': affair, 'steps': steps,
+            'affair_steps': affair_steps}

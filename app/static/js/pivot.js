@@ -36,7 +36,7 @@ function init() {
 function fillGrades() {
     var sel = $('#pvGrade').empty();
     var grades = meta.grades || [], exams = meta.exams || [];
-    // v1.19.46.2 考试态：服务端带入本场考试 id（#pvInitialExam），优先落到它所在年级并选中它
+    // v1.19.46.3 考试态：服务端带入本场考试 id（#pvInitialExam），优先落到它所在年级并选中它
     var initial = ($('#pvInitialExam').text() || '').trim();
     var ie = initial ? exams.filter(function (e) { return String(e.id) === initial; })[0] : null;
     grades.forEach(function (g) { sel.append('<option value="' + esc(g) + '">' + esc(g) + '</option>'); });

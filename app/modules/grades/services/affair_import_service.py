@@ -1,10 +1,10 @@
 # StuLink v1.19.2 2026-10-11
 # 考务导入的公共落库逻辑（考生安排 + 考场位置）
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
-"""考务导入公共逻辑（v1.19.46.2 起只剩一处入口）
+"""考务导入公共逻辑（v1.19.46.3 起只剩一处入口）
 
   · 成绩页  /exams/<id>/ai-import   （v1.19.2：同页能导入考务表，写到该考试的考务批次）
-  · 考务页  /affairs/<aid>/ai-import 已于 v1.19.46.2 下线（AI 导入统一走每场考试的入口）
+  · 考务页  /affairs/<aid>/ai-import 已于 v1.19.46.3 下线（AI 导入统一走每场考试的入口）
 """
 from app.extensions import db
 from app.models import Student
