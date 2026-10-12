@@ -1,0 +1,19 @@
+# StuLink MCP 服务依赖（独立于主应用的运行环境）
+#
+# 安装（在 mcp_server 目录创建隔离虚拟环境）：
+#   python -m venv mcp_server/.venv
+#   mcp_server/.venv/Scripts/python -m pip install -r mcp_server/requirements.txt
+#
+# 说明：MCP 服务**复用主应用代码与数据库**（app/、config.py、data/*.db），
+# 因此先装主应用依赖，再补 MCP SDK 与 ASGI 服务器，避免两处清单漂移。
+
+# 1) 主应用依赖（Flask/SQLAlchemy/openpyxl/pypinyin 等，复用同一份清单）
+-r ../requirements.txt
+
+# 2) MCP Python SDK（v2 线：FastMCP 已更名 MCPServer，提供 mcp.server.mcpserver）。
+#    SDK 自带 starlette / pydantic / httpx / anyio / sse-starlette 等传递依赖。
+#    run.py 使用 streamable_http_app + TransportSecuritySettings，均属 v2 API。
+mcp>=2.3.0,<3.0.0
+
+# 3) ASGI 服务器：run.py 用 uvicorn 承载 Streamable HTTP 端点。
+uvicorn>=0.30,<1.0
