@@ -1,4 +1,4 @@
-# StuLink v1.19.47.10 2026-10-10
+# StuLink v1.19.47.11 2026-10-10
 # 教务 · 调课管理（重构版，基于 timetable.db）：
 #   个人调课 / 统一调课 / 审核 / 执行 / 撤销 / 详情 / 统计 / 联动 API
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
@@ -288,7 +288,11 @@ def swap_apply():
         reason = (request.form.get('reason') or '').strip()
         is_permanent = _bool_flag(request.form.get('is_permanent'))
         new_room = (request.form.get('new_room') or '').strip()
-        items = _parse_swap_items(request.form)
+        # 2026-10-13（v1.19.47.11）：普通调课与「与人对调」合并 —— items 可带
+        # partner_entry_id（有 = 那格有人，和对调；没有 = 空档，直接调）。
+        items = _parse_json_items(request.form, required=('entry_id',))
+        if not items:
+            items = _parse_swap_items(request.form)   # 兼容旧的单条字段提交
 
         if not items:
             flash('请至少选择一节要调走的课', 'danger')
@@ -317,7 +321,7 @@ def swap_apply():
         if source_date and not source_weekday:
             source_weekday = first_entry.weekday
 
-        ok, msg, result = swap_service.apply_swap_multi(
+        ok, msg, result = swap_service.apply_swap_batch(
             applicant_uid=uid, applicant_name=name, items=items,
             is_permanent=is_permanent, reason=reason, new_room=new_room or None,
             source_date=source_date, source_weekday=source_weekday)
@@ -373,42 +377,11 @@ def _commit_exchange_batch(items, uid, name, reason, is_permanent,
     return redirect(url_for('academic.swap_detail', swap_id=rep_id))
 
 
-@bp.route('/swap/exchange', methods=['GET', 'POST'])
-@login_required
-@perm_required('academic.swap')
-def swap_exchange():
-    """两人换课（v1.19.47.10）：我的课 ↔ 对方的课，**支持批量**（一次与多位老师换多节）。
-
-    每行自带「对调内容」两个勾选（上课时间 / 上课班级）与**两个日期**（我这天 / 对方那天）。
-    一次提交共享 batch_id 整批审批；每条记录各自等自己的 partner 确认。
-    """
-    sched = swap_service.get_active_schedule()
-    if not sched:
-        flash('尚未建立学期课表，无法申请换课', 'warning')
-        return redirect(url_for('academic.swap_page'))
-    if request.method == 'POST':
-        uid, name = _applicant()
-        reason = (request.form.get('reason') or '').strip()
-        is_permanent = _bool_flag(request.form.get('is_permanent'))
-        items = _parse_json_items(request.form,
-                                  required=('entry_id', 'partner_uid', 'partner_entry_id'))
-        if not items:
-            flash('请至少完整填写一行换课（我的课 + 对方教师 + 对方的课）', 'danger')
-            return redirect(url_for('academic.swap_exchange'))
-        if not reason:
-            flash('请填写换课理由', 'danger')
-            return redirect(url_for('academic.swap_exchange'))
-        return _commit_exchange_batch(items, uid, name, reason, is_permanent,
-                                      kind='exchange', kind_name='换课',
-                                      back='academic.swap_exchange')
-    return _render_swap_page('academic/swap_exchange.html', 'exchange')
-
-
 @bp.route('/swap/cover', methods=['GET', 'POST'])
 @login_required
 @perm_required('academic.swap')
 def swap_cover():
-    """请人代课（v1.19.47.10）：我的课请别的老师来上，**支持批量**（多人代多节）。
+    """请人代课（v1.19.47.11）：我的课请别的老师来上，**支持批量**（多人代多节）。
 
     时间 / 班级都不变，只换授课人；每条记录各自等代课老师确认。
     """

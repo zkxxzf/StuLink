@@ -1790,7 +1790,7 @@ def check_inspection_mark():
 
 @item('SWAPEXCH')
 def check_two_person_exchange():
-    """两人换课（v1.19.47.10）：换时段 / 换班上课 / 请人代课 × 临时与永久，
+    """两人换课（v1.19.47.11）：换时段 / 换班上课 / 请人代课 × 临时与永久，
     覆盖「对方先确认 → 教务审批 → 执行」全链路 + 拒绝 / 越权 / 校验路径。"""
     from app.modules.academic.services import swap_service
 
@@ -2108,6 +2108,91 @@ def check_swap_exchange_batch():
         for b in batches:
             for s in ScheduleSwap.query.filter_by(batch_id=b).all():
                 db.session.delete(s)
+        db.session.commit()
+
+
+@item('SWAPMIXED')
+def check_swap_mixed_batch():
+    """调课页合并（v1.19.47.11）：一次提交 = 几节调空档 + 几节与同事对调（同一批次）。"""
+    from app.models.timetable import ScheduleEntry, ScheduleSwap
+    from app.modules.academic.services import swap_service
+
+    class _Admin:
+        role = 'admin'
+        id = 1
+
+        def has_perm(self, k):
+            return True
+
+    def _mk(g, cn, wd, pn, subj, tuid, tname):
+        e = ScheduleEntry(term_schedule_id=TS_ID, grade=g, class_name=cn,
+                          weekday=wd, period_number=pn, subject=subj,
+                          teacher_uid=tuid, teacher_name=tname,
+                          week_range='1-20', entry_type='normal')
+        db.session.add(e)
+        return e
+
+    admin = _Admin()
+    entry_ids, batch_id = [], None
+    with app.app_context():
+        # 甲的两节语文（周一1节 / 周二1节，都在 01班）；
+        # 01班 周三5节 = 乙的数学（可换对象）；01班 周四1节 = 空档
+        a1 = _mk('高二', '01班', 1, 1, '语文', 'MX0001', '甲老师')
+        a2 = _mk('高二', '01班', 2, 1, '语文', 'MX0001', '甲老师')
+        b1 = _mk('高二', '01班', 3, 5, '数学', 'MX0002', '乙老师')
+        db.session.commit()
+        entry_ids += [a1.id, a2.id, b1.id]
+        ok, msg, res = swap_service.apply_swap_batch(
+            applicant_uid='MX0001', applicant_name='甲老师',
+            items=[{'entry_id': a1.id, 'new_weekday': 4, 'new_period': 1,
+                    'swap_date': date(2026, 11, 12)},                    # 空档
+                   {'entry_id': a2.id, 'new_weekday': 3, 'new_period': 5,
+                    'swap_date': date(2026, 11, 11),
+                    'partner_entry_id': b1.id, 'swap_class': False}],    # 与乙对调
+            is_permanent=False, reason='混合批量回归')
+        batch_id = res.get('batch_id')
+        rows = ScheduleSwap.query.filter_by(batch_id=batch_id).all()
+        normal = [r for r in rows if not r.partner_entry_id]
+        exch = [r for r in rows if r.partner_entry_id]
+        case('混合批量：一次「调空档 + 与同事对调」→ 2 条同批次',
+             bool(ok and res.get('created') == 2 and batch_id), f'{msg} {res}')
+        case('混合批量：空档那条仍是普通调课（没有 partner、不需要对方确认）',
+             len(normal) == 1 and normal[0].swap_type == 'personal'
+             and normal[0].partner_status is None,
+             f'{[(r.id, r.swap_type, r.partner_status) for r in rows]}')
+        case('混合批量：对调那条带上 partner 且待确认（默认只换时间）',
+             len(exch) == 1 and exch[0].partner_uid == 'MX0002'
+             and exch[0].partner_status == 'pending'
+             and exch[0].swap_time and not exch[0].swap_class,
+             f'{[(r.partner_uid, r.partner_status, r.swap_time, r.swap_class) for r in exch]}')
+        case('混合批量：普通那条可直接审；对调那条未确认前不能审',
+             bool(normal and swap_service.can_review(normal[0], admin))
+             and bool(exch and not swap_service.can_review(exch[0], admin)),
+             'can_review 分流')
+        swap_service.respond_exchange(exch[0].id, 'agree', 1, '乙老师')
+        db.session.expire_all()
+        ex = db.session.get(ScheduleSwap, exch[0].id)
+        case('混合批量：对方同意后对调那条进入审批队列',
+             swap_service.can_review(ex, admin), f'{ex.partner_status}')
+        # 目标格被"我自己的课"占着 → 不可选（红格）；这里用接口口径验证
+        slots = swap_service.get_available_slots(TS_ID, '高二', '01班', 'MX0001',
+                                                 exclude_entry_id=a1.id, include_all=True)
+        wed5 = [s for s in slots if s['weekday'] == 3 and s['period_number'] == 5]
+        case('目标格接口：有人上的格子返回「可换」而不是一味标红',
+             bool(wed5) and wed5[0].get('swappable')
+             and wed5[0].get('swap_teacher_uid') == 'MX0002',
+             f'{wed5}')
+
+        # ── 清理 ──
+        for eid in entry_ids:
+            e = db.session.get(ScheduleEntry, eid)
+            if e:
+                db.session.delete(e)
+        for t in ScheduleEntry.query.filter(
+                ScheduleEntry.note.like('%换课%'), ScheduleEntry.note.isnot(None)).all():
+            db.session.delete(t)
+        for s in ScheduleSwap.query.filter_by(batch_id=batch_id).all():
+            db.session.delete(s)
         db.session.commit()
 
 

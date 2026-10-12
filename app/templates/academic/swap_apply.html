@@ -24,6 +24,10 @@
     .slot-card.conflict { background: #fef2f2; border-color: #fecaca; color: #b91c1c; cursor: not-allowed; opacity: .7; }
     .slot-card.conflict:hover { transform: none; box-shadow: none; }
     .slot-card.selected { background: #2563eb; border-color: #1d4ed8; color: #fff; box-shadow: 0 0 0 3px rgba(37,99,235,.25); }
+    /* 黄格：这一节有同事的课 → 不是不能用，而是可以和他换（需对方确认） */
+    .slot-card.swappable { background: #fef9c3; border-color: #fde047; color: #854d0e; }
+    .slot-card.swappable:hover { transform: translateY(-1px); box-shadow: 0 2px 6px rgba(0,0,0,.1); }
+    .slot-card.swappable.selected { background: #ca8a04; border-color: #a16207; color: #fff; }
     .slot-card .sc-pn { font-weight: 700; font-size: 13px; }
     .slot-card .sc-time { font-size: 11px; opacity: .8; }
     .slot-card .sc-note { font-size: 11px; margin-top: 2px; }
@@ -191,7 +195,7 @@
     </div>
 </form>
 
-{# ══ 2026-10-12 两人换课（v1.19.47.10）：换时段 / 换班上课 / 请人代课 ══ #}
+{# ══ 2026-10-12 两人换课（v1.19.47.11）：换时段 / 换班上课 / 请人代课 ══ #}
 
 <script id="applyData" type="application/json">
 {
@@ -348,7 +352,14 @@
         var t = it.target;
         var s = esc(cfg.weekdays[t.new_weekday] || '') + ' 第' + esc(t.new_period) + '节';
         if (!isPermanent() && t.swap_date) { s += ' · ' + esc(shortDate(t.swap_date)); }
-        return '<span class="tgt-badge">' + s + '</span>';
+        var html = '<span class="tgt-badge">' + s + '</span>';
+        if (t.partner_entry_id) {
+            html += '<div class="small mt-1" style="color:#a16207">'
+                + '<i class="bi bi-people"></i> 与 <b>'
+                + esc(t.swap_teacher_name || '该节任课老师') + '</b> 对调（需他/她确认）'
+                + (t.swap_class ? ' · 连班级一起换' : ' · 只换时间') + '</div>';
+        }
+        return html;
     }
 
     function renderPicked() {
@@ -368,7 +379,13 @@
                 + '<td class="small">' + esc(e.subject) + ' · ' + esc(e.grade) + esc(e.class_name)
                 + ' · ' + esc(cfg.weekdays[entryWeekday(e)] || '') + '第' + esc(e.period_number) + '节'
                 + ' · ' + esc(e.teacher_name || '-') + '</td>'
-                + '<td class="small">' + targetText(it) + '</td>'
+                + '<td class="small">' + targetText(it)
+                + (it.target && it.target.partner_entry_id
+                    ? '<div class="form-check mt-1 mb-0"><input class="form-check-input" type="checkbox"'
+                      + ' data-act="swapclass"' + (it.target.swap_class ? ' checked' : '')
+                      + '><label class="form-check-label small">连班级一起对调</label></div>'
+                    : '')
+                + '</td>'
                 + '<td>'
                 + '<button type="button" class="btn btn-sm btn-outline-primary me-1" data-act="set">设置</button>'
                 + '<button type="button" class="btn btn-sm btn-outline-danger" data-act="remove">移除</button>'
@@ -438,14 +455,22 @@
         var html = '<div class="small text-muted mb-2">' + (cfg.weekdays[wd] || '') + '：可选 '
             + avail.length + ' / ' + rows.length + ' 个节次</div><div class="row g-2">';
         show.forEach(function (s) {
-            var cls = s.available ? 'slot-card' : 'slot-card conflict';
-            if (s.available && selP && String(s.period_number) === selP && String(wd) === selW) {
+            var pickable = s.available || s.swappable;
+            var cls = s.available ? 'slot-card'
+                : (s.swappable ? 'slot-card swappable' : 'slot-card conflict');
+            if (pickable && selP && String(s.period_number) === selP && String(wd) === selW) {
                 cls += ' selected';
             }
-            var note = s.available ? '空' : esc(s.conflict_desc || '冲突');
+            var note = s.available ? '空'
+                : (s.swappable ? ('换 ' + esc(s.swap_teacher_name || '同事') + '·' + esc(s.swap_subject || ''))
+                               : esc(s.conflict_desc || '冲突'));
+            var tip = s.available ? '空闲：直接调过去'
+                : (s.swappable ? ('这节是' + (s.swap_teacher_name || '同事') + '的'
+                                 + (s.swap_subject || '') + '，点它与他/她对调')
+                               : (s.conflict_desc || '冲突'));
             html += '<div class="col-6 col-md-3 col-lg-2">'
                 + '<div class="' + cls + '" data-p="' + esc(s.period_number) + '"'
-                + (s.available ? '' : ' title="' + esc(s.conflict_desc || '冲突') + '"') + '>'
+                + ' title="' + esc(tip) + '">'
                 + '<div class="sc-pn">' + esc(s.period_name || ('第' + s.period_number + '节')) + '</div>'
                 + (s.start_time ? '<div class="sc-time">' + esc(s.start_time) + '-' + esc(s.end_time) + '</div>' : '')
                 + '<div class="sc-note">' + note + '</div>'
@@ -455,16 +480,26 @@
         $('#slotArea').html(html);
     }
 
-    // 点绿色格 → 写入当前行目标
+    // 点格子：绿=空档直接调；黄=那节有同事的课 → 和他换（需对方确认）
     function pickSlot() {
         var $el = $(this);
         if ($el.hasClass('conflict')) { return; }
         var it = activeItem();
         if (!it) { alert('请先在上方清单里点选一行'); return; }
+        var wd = $('#tgtWeekday').val();
+        var slot = (slotsCache[it.entry.id] || []).filter(function (s) {
+            return String(s.weekday) === String(wd)
+                && String(s.period_number) === String($el.data('p'));
+        })[0] || {};
+        var dateVal = isPermanent() ? '' : ($('#tgtDate').val() || '');
         it.target = {
-            new_weekday: $('#tgtWeekday').val(),
+            new_weekday: wd,
             new_period: $el.data('p'),
-            swap_date: isPermanent() ? '' : ($('#tgtDate').val() || '')
+            swap_date: dateVal,
+            partner_entry_id: slot.swappable ? (slot.swap_entry_id || null) : null,
+            swap_teacher_name: slot.swap_teacher_name || '',
+            swap_class: false,
+            partner_swap_date: dateVal
         };
         $('#btnApplyAll').prop('disabled', false);
         renderSlots();
@@ -516,6 +551,15 @@
     }
 
     // ── 事件绑定 ──
+    // 与人对调时：是否连班级一起换（默认只换时间）
+    $(document).on('change', '#pickedBody [data-act=swapclass]', function () {
+        var it = itemOf($(this).closest('tr').data('id'));
+        if (it && it.target) {
+            it.target.swap_class = $(this).is(':checked');
+            renderPicked();
+            renderSummary();
+        }
+    });
     $('#srcDate').on('change', function () {
         var w = weekdayOf($(this).val());
         if (w) { $('#srcWeekday').val(w); }        // 默认=日期的星期，可手动改（调休）
@@ -603,12 +647,19 @@
         if (!reason) { e.preventDefault(); alert('请填写调课理由'); return; }
 
         var payload = { items: items.map(function (it) {
-            return {
+            var row = {
                 entry_id: it.entry.id,
                 new_weekday: parseInt(it.target.new_weekday, 10),
                 new_period: parseInt(it.target.new_period, 10),
                 swap_date: perm ? '' : (it.target.swap_date || '')
             };
+            if (it.target.partner_entry_id) {          // 那格有人 → 与他对调
+                row.partner_entry_id = it.target.partner_entry_id;
+                row.swap_class = !!it.target.swap_class;
+                row.partner_swap_date = perm ? '' : (it.target.partner_swap_date
+                                                    || it.target.swap_date || '');
+            }
+            return row;
         }) };
         $('#hItemsJson').val(JSON.stringify(payload));
         $('#hSourceDate').val($('#srcDate').val());
@@ -617,7 +668,10 @@
         var names = items.map(function (it, idx) {
             return circNum(idx + 1) + (cfg.weekdays[entryWeekday(it.entry)] || '') + '第' + it.entry.period_number + '节 ' + it.entry.subject;
         }).join('；');
-        if (!confirm('确认提交调课申请？\n共 ' + items.length + ' 节：' + names + '\n提交后按审批链路整批一次审批。')) {
+        var needOk = items.filter(function (o) { return o.target && o.target.partner_entry_id; }).length;
+        var tail = needOk ? ('\n其中 ' + needOk + ' 节是和同事对调，需他们点【同意】后才进入教务审批。')
+                          : '\n提交后按审批链路整批一次审批。';
+        if (!confirm('确认提交调课申请？\n共 ' + items.length + ' 节：' + names + tail)) {
             e.preventDefault();
         }
     });

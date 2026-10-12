@@ -1,15 +1,9 @@
-{# v1.19.47.10 调课三页共用的顶部 Tab 栏 —— 由 include 传入 active='apply'|'exchange'|'cover' #}
+{# v1.19.47.11 调课两页共用的顶部 Tab 栏 —— include 时传 active='apply'|'cover' #}
 <ul class="nav nav-tabs nav-fill mb-3" id="swapTabs">
     <li class="nav-item">
         <a class="nav-link {% if active == 'apply' %}active{% endif %}"
            href="{{ url_for('academic.swap_apply') }}">
-            <i class="bi bi-arrow-left-right"></i> 普通调课
-        </a>
-    </li>
-    <li class="nav-item">
-        <a class="nav-link {% if active == 'exchange' %}active{% endif %}"
-           href="{{ url_for('academic.swap_exchange') }}">
-            <i class="bi bi-people"></i> 两人换课
+            <i class="bi bi-arrow-left-right"></i> 调课（含与同事对调）
         </a>
     </li>
     <li class="nav-item">
@@ -21,13 +15,14 @@
 </ul>
 <div class="alert alert-light border small mb-3">
     {% if active == 'apply' %}
-        <b>普通调课</b>：把我自己的课<b>挪到空档</b>（那一节本班和我都没课）。一次可以选多节课，各自指定目标时段，教务审批后一起生效。
-    {% elif active == 'exchange' %}
-        <b>两人换课</b>：我和另一位老师<b>互换</b>。勾选「对调什么」决定换哪些内容 ——
-        <b>都勾</b>=整条互换（我去上他这节课、他来上我这节课）· <b>只勾时间</b>=各上自己班，只把时段换过来 ·
-        <b>只勾班级</b>=时间不动，两人去上对方的班。
-        一次可以和多位老师换多节课；每位老师各自确认后进入教务审批。
+        <b>调课</b>：选我的课 → 再选<b>调到哪一格</b>。目标格有三类 ——
+        <span class="text-success fw-semibold">绿色＝空档</span>（那节本班和我都没课，直接调过去）、
+        <span class="fw-semibold" style="color:#a16207">黄色＝那节有同事的课</span>（点它就是<b>和他换</b>：
+        我上他那节、他上我这节，<b>需要他点【同意】</b>）、
+        <span class="text-danger fw-semibold">红色＝我自己那节有课</span>（换不了）。
+        一次可以选好几节，也可以同时和好几位老师换，算一批提交、一次审批。
     {% else %}
-        <b>请人代课</b>：我的课<b>请别的老师来上</b>（时间、班级都不变，只换授课人）。一次可以请多位老师代多节课。
+        <b>请人代课</b>：我的课<b>请别的老师来上</b> —— 时间、班级都不动，只换授课人。
+        一次可以请多位老师代多节课，每位老师各自确认。
     {% endif %}
 </div>

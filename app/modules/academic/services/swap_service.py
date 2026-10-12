@@ -1,4 +1,4 @@
-# StuLink v1.19.47.10 2026-10-10
+# StuLink v1.19.47.11 2026-10-10
 # 调课服务（基于 timetable.db 新模型）：申请 / 批量 / 审核 / 执行 / 撤销 / 统计 / 实时生效
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 #
@@ -243,6 +243,8 @@ def get_available_slots(schedule_id, grade, class_name, teacher_uid,
             tq = tq.filter(ScheduleEntry.id != exclude_entry_id)
         teacher_busy = {(e.weekday, e.period_number): e for e in tq.all()}
 
+    # 2026-10-13（v1.19.47.11）：临时调课产生的条目不能作为对调对象
+    temp_ids = _temp_target_ids(schedule_id)
     result = []
     for w in weekdays:
         for p in period_numbers:
@@ -251,6 +253,11 @@ def get_available_slots(schedule_id, grade, class_name, teacher_uid,
             class_conflict = ce is not None
             teacher_conflict = te is not None
             available = not class_conflict and not teacher_conflict
+            # 本班这一格有**别人的课** → 不是"不能用"，而是"可以和他换"（黄格）
+            swap_entry = None
+            if ce and ce.teacher_uid and ce.teacher_uid != teacher_uid \
+                    and ce.id not in temp_ids:
+                swap_entry = ce
             pd = pmap.get(p)
             conflict_desc = None
             if ce:
@@ -269,6 +276,14 @@ def get_available_slots(schedule_id, grade, class_name, teacher_uid,
                 'teacher_conflict': teacher_conflict,
                 'available': available,
                 'conflict_desc': conflict_desc,
+                # 对调对象（绿格=空档直接调；黄格=与这位老师对调，需他确认）
+                'swappable': swap_entry is not None,
+                'swap_entry_id': swap_entry.id if swap_entry else None,
+                'swap_teacher_uid': swap_entry.teacher_uid if swap_entry else None,
+                'swap_teacher_name': swap_entry.teacher_name if swap_entry else None,
+                'swap_subject': swap_entry.subject if swap_entry else None,
+                'swap_grade': swap_entry.grade if swap_entry else None,
+                'swap_class_name': swap_entry.class_name if swap_entry else None,
             }
             if include_all or available:
                 result.append(slot)
@@ -735,6 +750,210 @@ def apply_swap_multi(applicant_uid, applicant_name, items, is_permanent=False,
     return True, '调课申请已提交，待审核', result
 
 
+def apply_swap_batch(applicant_uid, applicant_name, items, is_permanent=False,
+                     reason='', new_room=None, source_date=None,
+                     source_weekday=None):
+    """调课 / 与人对调的**混合批量**提交（v1.19.47.11，用户口径 2026-10-13）。
+
+    用户口径：普通调课与两人换课是**同一个动作**，差别只在目标格现在有没有人 ——
+      - 目标格**空着** → 我把课挪过去（普通调课）；
+      - 目标格**有人** → 与那位老师对调（多一步"对方确认"，各自确认自己的那条）。
+
+    items: [{'entry_id': int, 'new_weekday': int, 'new_period': int,
+             'swap_date': date|None,
+             'partner_entry_id': int(可选；有值 = 与那节课对调),
+             'swap_class': bool(可选；对调时是否连班级一起换，默认只换时间),
+             'partner_swap_date': date(可选；对方那天，默认同 swap_date)}]
+
+    一次提交可以混着来（几节调空档 + 几节和不同老师换）：共享 batch_id 整批审批 /
+    执行 / 撤销，对调的那些行各自等自己的 partner 确认。**全成全败**。
+    返回 (success, message, {'created', 'batch_id', 'rep_id', 'conflicts'})
+    """
+    result = {'created': 0, 'batch_id': None, 'rep_id': None, 'conflicts': []}
+    items = list(items or [])
+    if not items:
+        return False, '请至少选择一节要调的课', result
+    if len(items) > MAX_SWAP_ITEMS:
+        return False, f'一次最多提交 {MAX_SWAP_ITEMS} 节，请分批提交', result
+    if not (reason or '').strip():
+        return False, '请填写调课理由', result
+    is_permanent = bool(is_permanent)
+
+    def _rej(idx, entry, desc):
+        result['conflicts'].append({
+            'index': idx,
+            'entry_id': entry.id if entry else None,
+            'subject': entry.subject if entry else None,
+            'class': f'{entry.grade}{entry.class_name}' if entry else None,
+            'desc': desc,
+        })
+
+    # ── ① 字段校验 + 分流（有没有 partner_entry_id 决定这条是"调"还是"换"）──
+    seen_ids, prepared, schedule_id = set(), [], None
+    for idx, it in enumerate(items, 1):
+        eid = it.get('entry_id')
+        entry = db.session.get(ScheduleEntry, int(eid)) if eid else None
+        if not entry or entry.is_deleted:
+            _rej(idx, None, '原课表条目不存在或已删除')
+            continue
+        if eid in seen_ids:
+            _rej(idx, entry, '同一节课重复选择')
+            continue
+        seen_ids.add(eid)
+        # 普通调课的权限（本人任教的课 / 自己负责班级的课）由路由层
+        # swap_entry_authorizer 把关，这里不再重复收紧；
+        # 只有「与人对调」才必须是授课教师本人（换课必须本人谈定）。
+        if it.get('partner_entry_id') and (not entry.teacher_uid
+                                           or entry.teacher_uid != applicant_uid):
+            _rej(idx, entry, '与人对调只能由这节课的授课教师本人发起')
+            continue
+        twd, tpd = it.get('new_weekday'), it.get('new_period')
+        if not twd or not tpd:
+            _rej(idx, entry, '未指定目标时段')
+            continue
+        twd, tpd = int(twd), int(tpd)
+        if not (1 <= twd <= 7) or not (1 <= tpd <= PERIOD_NUMBER_CEILING):
+            _rej(idx, entry, '目标星期/节次无效')
+            continue
+        if is_permanent and twd == entry.weekday and tpd == entry.period_number:
+            _rej(idx, entry, '目标时段与原时段相同，无需调课')
+            continue
+        sdate = None if is_permanent else it.get('swap_date')
+        if not is_permanent and not sdate:
+            _rej(idx, entry, '临时调课请选择具体日期')
+            continue
+        e2 = None
+        if it.get('partner_entry_id'):
+            e2 = db.session.get(ScheduleEntry, int(it['partner_entry_id']))
+            if not e2 or e2.is_deleted:
+                _rej(idx, entry, '对方的课程不存在或已删除')
+                continue
+            if e2.id == entry.id:
+                _rej(idx, entry, '不能与同一节课对调')
+                continue
+            if e2.teacher_uid == applicant_uid:
+                _rej(idx, entry, '不能与自己名下的课对调')
+                continue
+            if e2.id in _temp_target_ids(e2.term_schedule_id):
+                _rej(idx, entry, '对方这节课是临时调课产生的条目，不能作为对调对象')
+                continue
+        if schedule_id is None:
+            schedule_id = entry.term_schedule_id
+        elif entry.term_schedule_id != schedule_id:
+            _rej(idx, entry, '跨学期条目不允许一起调课')
+            continue
+        dup = ScheduleSwap.query.filter(
+            ScheduleSwap.original_entry_id == entry.id,
+            ScheduleSwap.status == 'pending').first()
+        if dup:
+            _rej(idx, entry, f'这节课已有待处理申请（#{dup.id}）')
+            continue
+        prepared.append({
+            'idx': idx, 'entry': entry, 'twd': twd, 'tpd': tpd, 'sdate': sdate,
+            'e2': e2, 'swap_class': bool(it.get('swap_class')),
+            'partner_swap_date': (None if is_permanent
+                                  else (it.get('partner_swap_date') or sdate)),
+        })
+    if result['conflicts']:
+        result['conflicts'].sort(key=lambda c: c.get('index') or 0)
+        return False, f'{len(result["conflicts"])} 节信息不完整，整批未创建', result
+
+    # ── ② 冲突校验：本批参与条目整体腾出（换课行还要过换课专用校验）──
+    all_yield = []
+    for r in prepared:
+        all_yield.append(r['entry'].id)
+        if r['e2'] is not None and r['e2'].id not in all_yield:
+            all_yield.append(r['e2'].id)
+    for r in prepared:
+        entry, twd, tpd, sdate = r['entry'], r['twd'], r['tpd'], r['sdate']
+        wd_text = WEEKDAY_NAMES.get(twd, '')
+        if r['e2'] is not None:                       # 与人对调
+            errs = check_exchange_conflicts(
+                schedule_id, entry, r['e2'], 'exchange', is_permanent, sdate,
+                swap_time=True, swap_class=r['swap_class'],
+                partner_swap_date=r['partner_swap_date'],
+                extra_yield_ids=all_yield)
+            if errs:
+                _rej(r['idx'], entry, '；'.join(errs))
+            continue
+        wr, wk = _week_ctx(schedule_id, entry, is_permanent, sdate)
+        cc = _check_class_conflict(schedule_id, entry.grade, entry.class_name,
+                                   twd, tpd, exclude_entry_id=entry.id,
+                                   week_range=wr, week=wk,
+                                   extra_exclude_ids=all_yield)
+        if cc:
+            _rej(r['idx'], entry,
+                 f'目标 {wd_text}第{tpd}节 本班已有课程（{cc.subject}）')
+            continue
+        tc = _check_teacher_conflict(schedule_id, entry.teacher_uid, twd, tpd,
+                                     exclude_entry_id=entry.id, week_range=wr,
+                                     week=wk, extra_exclude_ids=all_yield)
+        if tc:
+            _rej(r['idx'], entry,
+                 f'目标 {wd_text}第{tpd}节 授课教师已有课程'
+                 f'（{tc.grade}{tc.class_name} {tc.subject}）')
+    if result['conflicts']:
+        n = len(result['conflicts'])
+        return False, (f'{n} 节存在冲突，整批未创建'
+                       f'（{result["conflicts"][0]["desc"]}）'), result
+
+    # ── ③ 创建（共享 batch_id；对调行各自等自己的 partner 确认）──
+    batch_id = uuid.uuid4().hex if len(prepared) > 1 else None
+    made, exch_rows = [], []
+    try:
+        for r in prepared:
+            entry, e2 = r['entry'], r['e2']
+            p_name = ''
+            if e2 is not None:
+                p_name, _u = _teacher_brief(e2.teacher_uid)
+                p_name = p_name or (e2.teacher_name or '')
+            sw = ScheduleSwap(
+                term_schedule_id=entry.term_schedule_id,
+                swap_type='exchange' if e2 is not None else 'personal',
+                original_entry_id=entry.id,
+                applicant_uid=applicant_uid,
+                applicant_name=applicant_name or entry.teacher_name,
+                new_weekday=r['twd'], new_period=r['tpd'],
+                new_room=(new_room or '').strip() or None,
+                swap_date=r['sdate'],
+                source_date=source_date,
+                source_weekday=(int(source_weekday) if source_weekday else None),
+                is_permanent=is_permanent,
+                reason=(reason or '').strip() or None,
+                status='pending', approval_step=0, batch_id=batch_id,
+                exchange_kind=('exchange' if e2 is not None else None),
+                swap_time=(True if e2 is not None else None),
+                swap_class=(r['swap_class'] if e2 is not None else None),
+                partner_uid=(e2.teacher_uid if e2 is not None else None),
+                partner_name=(p_name or None),
+                partner_entry_id=(e2.id if e2 is not None else None),
+                partner_swap_date=r['partner_swap_date'],
+                partner_status=('pending' if e2 is not None else None),
+            )
+            db.session.add(sw)
+            made.append(sw)
+            if e2 is not None:
+                exch_rows.append(sw)
+        db.session.commit()
+    except Exception as e:  # noqa: BLE001
+        db.session.rollback()
+        return False, f'提交失败：{e}', {'created': 0, 'batch_id': None,
+                                         'rep_id': None, 'conflicts': []}
+
+    for sw in exch_rows:                    # 每条各自通知自己的 partner
+        _notify_exchange(sw, 'partner')
+    result['created'] = len(made)
+    result['batch_id'] = batch_id
+    result['rep_id'] = made[0].id if made else None
+    if len(made) > 1:
+        tail = f'，其中 {len(exch_rows)} 节需对方确认' if exch_rows else ''
+        return True, f'已提交 {len(made)} 节调课申请（整批一次审批 / 执行）{tail}', result
+    if exch_rows:
+        return True, (f'调课申请已提交，等待 {made[0].partner_name or "对方"} 确认'
+                      f'后进入教务审批'), result
+    return True, '调课申请已提交，待审核', result
+
+
 # ══════════════════════════════════════════════════════════════════════
 # 列表 / 详情
 # ══════════════════════════════════════════════════════════════════════
@@ -881,7 +1100,7 @@ def count_pending(schedule_id=None, applicant_uid=None):
     """
     q = ScheduleSwap.query.filter(ScheduleSwap.status == 'pending',
                                  batch_rep_filter())
-    # v1.19.47.10：换课「待对方确认」还没到教务这一步，不计入待审数 / 侧栏徽章
+    # v1.19.47.11：换课「待对方确认」还没到教务这一步，不计入待审数 / 侧栏徽章
     q = q.filter(db.or_(ScheduleSwap.partner_status.is_(None),
                         ScheduleSwap.partner_status == 'agreed'))
     if schedule_id:
@@ -1055,7 +1274,7 @@ def can_review(sw, user):
     """当前用户能否审批这条申请的"当前这一级"（管理员可审任何一级）。"""
     if not sw or sw.status != 'pending':
         return False
-    # v1.19.47.10 换课：对方确认前不进教务审批队列（避免"教务批了、对方还没同意"）
+    # v1.19.47.11 换课：对方确认前不进教务审批队列（避免"教务批了、对方还没同意"）
     if getattr(sw, 'partner_status', None) == 'pending':
         return False
     step = review_step_of(sw)
@@ -1113,7 +1332,7 @@ def review_swap(swap_id, reviewer_id, reviewer_name, action, review_note='',
     entry = db.session.get(ScheduleEntry, sw.original_entry_id) if sw.original_entry_id else None
     if not entry or entry.is_deleted:
         return False, '原课表条目不存在或已删除，无法通过', None
-    # v1.19.47.10 换课：复检按"对调后"口径（普通调课仍按新时段单点复检）
+    # v1.19.47.11 换课：复检按"对调后"口径（普通调课仍按新时段单点复检）
     if getattr(sw, 'exchange_kind', None):
         e2 = db.session.get(ScheduleEntry, sw.partner_entry_id) if sw.partner_entry_id else None
         if sw.exchange_kind != 'cover' and (not e2 or e2.is_deleted):
@@ -1208,7 +1427,7 @@ def review_swap_batch(swap_id, reviewer_id, reviewer_name, action, review_note='
     sibs = batch_pending_siblings(sw)
     if not sibs:
         return False, '没有待审核的记录', None
-    # 2026-10-12（v1.19.47.10）批量换课 / 代课：批内每条都有自己的 partner，
+    # 2026-10-12（v1.19.47.11）批量换课 / 代课：批内每条都有自己的 partner，
     # 通过前必须**全部答复过** —— 避免教务单方面把别人的课批掉。
     if action == 'approve':
         waiting = [s for s in sibs
@@ -1314,7 +1533,7 @@ def _execute_permanent(sw, entry, operator_id, operator_name):
     """永久调课执行（在 execute_swap 的事务内调用）。
 
     2026-10-10：目标星期/节次可留空（只换教室/只调日期），留空的维度沿用原条目值。
-    2026-10-12（v1.19.47.10）：换课（exchange_kind）走专用执行分支。
+    2026-10-12（v1.19.47.11）：换课（exchange_kind）走专用执行分支。
     """
     if getattr(sw, 'exchange_kind', None):
         return _execute_exchange_permanent(sw, entry, operator_id, operator_name)
@@ -1381,7 +1600,7 @@ def _execute_permanent(sw, entry, operator_id, operator_name):
 def _execute_temp(sw, entry, operator_id, operator_name):
     """临时调课执行（在 execute_swap 的事务内调用）。
 
-    2026-10-12（v1.19.47.10）：换课（exchange_kind）走专用执行分支。
+    2026-10-12（v1.19.47.11）：换课（exchange_kind）走专用执行分支。
     """
     if getattr(sw, 'exchange_kind', None):
         return _execute_exchange_temp(sw, entry, operator_id, operator_name)
@@ -1498,7 +1717,7 @@ def _revoke_one(sw, operator_id, operator_name):
                 remark=f'撤销调课#{sw.id}执行：恢复原课表条目'[:200],
                 operated_at=datetime.now(),
             ))
-    # 2026-10-12（v1.19.47.10）换课：对方侧条目同样回退（删对方当天条目 / 恢复对方原条目）
+    # 2026-10-12（v1.19.47.11）换课：对方侧条目同样回退（删对方当天条目 / 恢复对方原条目）
     if getattr(sw, 'partner_target_entry_id', None):
         p_new = db.session.get(ScheduleEntry, sw.partner_target_entry_id)
         if p_new and not p_new.is_deleted:
@@ -1557,7 +1776,7 @@ def revoke_executed_swap(swap_id, operator_id, operator_name):
 
 
 # ══════════════════════════════════════════════════════════════════════
-# 两人换课（v1.19.47.10）：申请 → 对方确认 → 教务审批 → 执行
+# 两人换课（v1.19.47.11）：申请 → 对方确认 → 教务审批 → 执行
 #   类型：time 换时段 / class 换班上课 / cover 请人代课
 #   范围：is_permanent=False 只影响某一天；True 改常规课表
 # ══════════════════════════════════════════════════════════════════════
@@ -1583,7 +1802,7 @@ def exchange_plan(e1, e2, kind, swap_time=True, swap_class=True,
     各 plan 键：weekday / period_number / grade / class_name / subject / room /
                 teacher_uid / teacher_name
 
-    v1.19.47.10：原先三种类型（time / class / cover）里 time 与 class 被用户指出重复，
+    v1.19.47.11：原先三种类型（time / class / cover）里 time 与 class 被用户指出重复，
     合并为一个 `exchange` + 两个勾选 —— **勾什么就换什么**（教师始终各归各位）：
 
         swap_time  ✔ → 星期 / 节次互换；否则各自保持
@@ -1632,7 +1851,7 @@ def check_exchange_conflicts(schedule_id, e1, e2, kind, is_permanent, swap_date,
     但与**第三方**不得在同一格撞车；代课只动我方教师 → 对方在该时段不能另有课
     （代课不排除 e2）。
 
-    v1.19.47.10：换课有**两个日期**（我方那天 / 对方那天），两侧按各自日期算单双周，
+    v1.19.47.11：换课有**两个日期**（我方那天 / 对方那天），两侧按各自日期算单双周，
     不再用同一个 swap_date 兜底。
     """
     errs = []
@@ -1721,7 +1940,7 @@ def _notify_exchange(sw, audience, event='', note=''):
 
 def apply_exchange_batch(applicant_uid, applicant_name, items, kind='exchange',
                          is_permanent=False, reason=''):
-    """批量发起「两人换课 / 请人代课」申请（v1.19.47.10）。
+    """批量发起「两人换课 / 请人代课」申请（v1.19.47.11）。
 
     items：[{'entry_id': int, 'partner_uid': str, 'partner_entry_id': int(换课时必填),
              'swap_time': bool, 'swap_class': bool,
@@ -2061,7 +2280,7 @@ def get_temp_swaps_by_date(schedule_id, target_date):
     ).all()
     result = []
     # 2026-10-10 N+1 优化：当天全部原/目标条目一次 in_ 取回，替代循环内逐条 get
-    # 2026-10-12（v1.19.47.10）换课：对方侧的「原条目 / 当天条目」一并取回
+    # 2026-10-12（v1.19.47.11）换课：对方侧的「原条目 / 当天条目」一并取回
     entry_map = _build_entry_map(
         [i for sw in swaps
          for i in (sw.original_entry_id, sw.target_entry_id,
@@ -2120,7 +2339,7 @@ def resolve_effective_entry(schedule_id, grade, class_name, weekday, period_numb
          for i in (sw.target_entry_id, getattr(sw, 'partner_target_entry_id', None))
          if i])
     for sw in temp_swaps:
-        # v1.19.47.10 换课：我方 / 对方两条当天条目都要参与"调入本时段"判定
+        # v1.19.47.11 换课：我方 / 对方两条当天条目都要参与"调入本时段"判定
         for eid in (sw.target_entry_id, getattr(sw, 'partner_target_entry_id', None)):
             te = tgt_map.get(eid) if eid else None
             if (te and not te.is_deleted and te.grade == grade
@@ -2200,7 +2419,7 @@ def build_live_schedule(schedule_id, target_date, period_number, grade_filter=No
     temp_swaps = get_temp_swaps_by_date(schedule_id, target_date)
     moved_away, temp_in = set(), {}
     for ts in temp_swaps:
-        # v1.19.47.10 换课：对方侧条目同样参与"调入 / 调走"叠加
+        # v1.19.47.11 换课：对方侧条目同样参与"调入 / 调走"叠加
         for oe in (ts.get('original_entry'), ts.get('partner_original_entry')):
             if oe and class_visible(oe.get('grade'), oe.get('class_name')):
                 moved_away.add(oe['id'])
