@@ -1790,7 +1790,7 @@ def check_inspection_mark():
 
 @item('SWAPEXCH')
 def check_two_person_exchange():
-    """两人换课（v1.19.47.8）：换时段 / 换班上课 / 请人代课 × 临时与永久，
+    """两人换课（v1.19.47.10）：换时段 / 换班上课 / 请人代课 × 临时与永久，
     覆盖「对方先确认 → 教务审批 → 执行」全链路 + 拒绝 / 越权 / 校验路径。"""
     from app.modules.academic.services import swap_service
 
@@ -1816,15 +1816,15 @@ def check_two_person_exchange():
         b1 = _mk('高二', '02班', 2, 2, '数学', 'TX0002', '乙数学')
         db.session.commit()
         entry_ids += [a1.id, b1.id]
-        ok, msg, res = swap_service.apply_exchange(
-            applicant_uid='TX0001', applicant_name='甲语文', entry_id=a1.id,
-            exchange_kind='time', partner_uid='TX0002', partner_entry_id=b1.id,
-            is_permanent=False, swap_date=date(2026, 10, 14), reason='换时段回归')
-        sid = res.get('swap_id')
+        ok, msg, res = swap_service.apply_exchange_batch(
+            applicant_uid='TX0001', applicant_name='甲语文',
+            items=[{'entry_id': a1.id, 'partner_uid': 'TX0002', 'partner_entry_id': b1.id, 'swap_time': True, 'swap_class': False, 'swap_date': date(2026, 10, 14)}],
+            kind='exchange', is_permanent=False, reason='换时段回归')
+        sid = res.get('rep_id')
         swap_ids.append(sid)
         sw = db.session.get(ScheduleSwap, sid) if sid else None
         case('换课·换时段：申请创建成功（待对方确认 / 类型=两人换课）',
-             bool(ok and sw and sw.exchange_kind == 'time' and sw.swap_type == 'exchange'
+             bool(ok and sw and sw.exchange_kind == 'exchange' and sw.swap_time and not sw.swap_class and sw.swap_type == 'exchange'
                   and sw.partner_status == 'pending'), f'{msg} {res}')
         admin = _Admin()
         case('换课·换时段：对方未确认前，教务审不了（不进待审队列）',
@@ -1867,11 +1867,11 @@ def check_two_person_exchange():
         a2 = _mk('高二', '03班', 4, 1, '英语', 'TX0001', '甲语文')
         db.session.commit()
         entry_ids.append(a2.id)
-        ok2, msg2, res2 = swap_service.apply_exchange(
-            applicant_uid='TX0001', applicant_name='甲语文', entry_id=a2.id,
-            exchange_kind='cover', partner_uid='TX0002',
-            is_permanent=False, swap_date=date(2026, 10, 15), reason='代课回归')
-        sid2 = res2.get('swap_id')
+        ok2, msg2, res2 = swap_service.apply_exchange_batch(
+            applicant_uid='TX0001', applicant_name='甲语文',
+            items=[{'entry_id': a2.id, 'partner_uid': 'TX0002', 'swap_date': date(2026, 10, 15)}],
+            kind='cover', is_permanent=False, reason='代课回归')
+        sid2 = res2.get('rep_id')
         swap_ids.append(sid2)
         swap_service.respond_exchange(sid2, 'agree', 2, '乙数学')
         swap_service.review_swap(sid2, 1, '教务主任', 'approve')
@@ -1890,11 +1890,11 @@ def check_two_person_exchange():
         b3 = _mk('高二', '06班', 3, 5, '语文', 'TX0002', '乙数学')
         db.session.commit()
         entry_ids += [a3.id, b3.id]
-        ok3, msg3, res3 = swap_service.apply_exchange(
-            applicant_uid='TX0001', applicant_name='甲语文', entry_id=a3.id,
-            exchange_kind='class', partner_uid='TX0002', partner_entry_id=b3.id,
-            is_permanent=True, reason='换班回归')
-        sid3 = res3.get('swap_id')
+        ok3, msg3, res3 = swap_service.apply_exchange_batch(
+            applicant_uid='TX0001', applicant_name='甲语文',
+            items=[{'entry_id': a3.id, 'partner_uid': 'TX0002', 'partner_entry_id': b3.id, 'swap_time': True, 'swap_class': True}],
+            kind='exchange', is_permanent=True, reason='换班回归')
+        sid3 = res3.get('rep_id')
         swap_ids.append(sid3)
         swap_service.respond_exchange(sid3, 'agree', 2, '乙数学')
         swap_service.review_swap(sid3, 1, '教务主任', 'approve')
@@ -1919,11 +1919,11 @@ def check_two_person_exchange():
         b4 = _mk('高二', '08班', 2, 4, '化学', 'TX0002', '乙数学')
         db.session.commit()
         entry_ids += [a4.id, b4.id]
-        _ok4, _msg4, res4 = swap_service.apply_exchange(
-            applicant_uid='TX0001', applicant_name='甲语文', entry_id=a4.id,
-            exchange_kind='time', partner_uid='TX0002', partner_entry_id=b4.id,
-            is_permanent=True, reason='拒绝回归')
-        sid4 = res4.get('swap_id')
+        _ok4, _msg4, res4 = swap_service.apply_exchange_batch(
+            applicant_uid='TX0001', applicant_name='甲语文',
+            items=[{'entry_id': a4.id, 'partner_uid': 'TX0002', 'partner_entry_id': b4.id, 'swap_time': True, 'swap_class': False}],
+            kind='exchange', is_permanent=True, reason='拒绝回归')
+        sid4 = res4.get('rep_id')
         swap_ids.append(sid4)
         ok_r4, msg_r4, _ = swap_service.respond_exchange(sid4, 'refuse', 2, '乙数学',
                                                          note='那天我有事')
@@ -1936,24 +1936,25 @@ def check_two_person_exchange():
              f'{msg_r4} {sw4.status}/{sw4.partner_status}')
 
         # ── ⑤ 校验：非本人发起 / 同一节课重复提交 / 单双周不同 ──
-        ok5, msg5, _ = swap_service.apply_exchange(
-            applicant_uid='TX9999', applicant_name='别人', entry_id=a4.id,
-            exchange_kind='cover', partner_uid='TX0002',
-            is_permanent=True, reason='越权回归')
-        case('换课：非授课教师本人发起 → 拒绝', (not ok5) and '本人' in msg5, msg5)
+        ok5, msg5, _ = swap_service.apply_exchange_batch(
+            applicant_uid='TX9999', applicant_name='别人',
+            items=[{'entry_id': a4.id, 'partner_uid': 'TX0002'}],
+            kind='cover', is_permanent=True, reason='越权回归')
+        case('换课：非授课教师本人发起 → 拒绝',
+             (not ok5) and ('自己的课程' in msg5 or '本人' in msg5), msg5)
         a5 = _mk('高二', '09班', 2, 1, '生物', 'TX0001', '甲语文')
         b5 = _mk('高二', '10班', 3, 1, '生物', 'TX0002', '乙数学')
         db.session.commit()
         entry_ids += [a5.id, b5.id]
-        _ok_a, _msg_a, res_a = swap_service.apply_exchange(
-            applicant_uid='TX0001', applicant_name='甲语文', entry_id=a5.id,
-            exchange_kind='time', partner_uid='TX0002', partner_entry_id=b5.id,
-            is_permanent=True, reason='重复回归一')
-        swap_ids.append(res_a.get('swap_id'))
-        ok_b, msg_b, _ = swap_service.apply_exchange(
-            applicant_uid='TX0001', applicant_name='甲语文', entry_id=a5.id,
-            exchange_kind='time', partner_uid='TX0002', partner_entry_id=b5.id,
-            is_permanent=True, reason='重复回归二')
+        _ok_a, _msg_a, res_a = swap_service.apply_exchange_batch(
+            applicant_uid='TX0001', applicant_name='甲语文',
+            items=[{'entry_id': a5.id, 'partner_uid': 'TX0002', 'partner_entry_id': b5.id, 'swap_time': True, 'swap_class': False}],
+            kind='exchange', is_permanent=True, reason='重复回归一')
+        swap_ids.append(res_a.get('rep_id'))
+        ok_b, msg_b, _ = swap_service.apply_exchange_batch(
+            applicant_uid='TX0001', applicant_name='甲语文',
+            items=[{'entry_id': a5.id, 'partner_uid': 'TX0002', 'partner_entry_id': b5.id, 'swap_time': True, 'swap_class': False}],
+            kind='exchange', is_permanent=True, reason='重复回归二')
         case('换课：同一节课已有待处理申请 → 拒绝重复提交',
              (not ok_b) and '待处理' in msg_b, msg_b)
         a6 = _mk('高二', '11班', 4, 2, '地理', 'TX0001', '甲语文')
@@ -1961,10 +1962,10 @@ def check_two_person_exchange():
         b6.week_range = '2-20'
         db.session.commit()
         entry_ids += [a6.id, b6.id]
-        ok7, msg7, _ = swap_service.apply_exchange(
-            applicant_uid='TX0001', applicant_name='甲语文', entry_id=a6.id,
-            exchange_kind='time', partner_uid='TX0002', partner_entry_id=b6.id,
-            is_permanent=True, reason='单双周回归')
+        ok7, msg7, _ = swap_service.apply_exchange_batch(
+            applicant_uid='TX0001', applicant_name='甲语文',
+            items=[{'entry_id': a6.id, 'partner_uid': 'TX0002', 'partner_entry_id': b6.id, 'swap_time': True, 'swap_class': False}],
+            kind='exchange', is_permanent=True, reason='单双周回归')
         case('换课：两节课单双周设置不同 → 拒绝',
              (not ok7) and '单双周' in msg7, msg7)
 
@@ -1979,6 +1980,133 @@ def check_two_person_exchange():
         for one in [i for i in swap_ids if i]:
             s = db.session.get(ScheduleSwap, one)
             if s:
+                db.session.delete(s)
+        db.session.commit()
+
+
+@item('SWAPEXBATCH')
+def check_swap_exchange_batch():
+    """两人换课 / 请人代课 —— **批量**（一次与多位老师换/代多节）+ 对调内容 + 双方日期。"""
+    from app.models.timetable import ScheduleEntry, ScheduleSwap
+    from app.modules.academic.services import swap_service
+
+    class _Admin:
+        role = 'admin'
+        id = 1
+
+        def has_perm(self, k):
+            return True
+
+    def _mk(g, cn, wd, pn, subj, tuid, tname):
+        e = ScheduleEntry(term_schedule_id=TS_ID, grade=g, class_name=cn,
+                          weekday=wd, period_number=pn, subject=subj,
+                          teacher_uid=tuid, teacher_name=tname,
+                          week_range='1-20', entry_type='normal')
+        db.session.add(e)
+        return e
+
+    admin = _Admin()
+    entry_ids, batches = [], []
+    with app.app_context():
+        # ── ① 批量换课：甲的 2 节 ↔ 乙 1 节 + 丙 1 节（两种对调内容）──
+        m1 = _mk('高三', '01班', 1, 1, '语文', 'BX0001', '甲老师')
+        m2 = _mk('高三', '02班', 1, 2, '语文', 'BX0001', '甲老师')
+        p1 = _mk('高三', '03班', 3, 4, '数学', 'BX0002', '乙老师')
+        p2 = _mk('高三', '04班', 4, 5, '英语', 'BX0003', '丙老师')
+        db.session.commit()
+        entry_ids += [m1.id, m2.id, p1.id, p2.id]
+        ok, msg, res = swap_service.apply_exchange_batch(
+            applicant_uid='BX0001', applicant_name='甲老师',
+            items=[{'entry_id': m1.id, 'partner_uid': 'BX0002',
+                    'partner_entry_id': p1.id,
+                    'swap_time': True, 'swap_class': True,
+                    'swap_date': date(2026, 11, 2),
+                    'partner_swap_date': date(2026, 11, 4)},
+                   {'entry_id': m2.id, 'partner_uid': 'BX0003',
+                    'partner_entry_id': p2.id,
+                    'swap_time': True, 'swap_class': False,
+                    'swap_date': date(2026, 11, 3),
+                    'partner_swap_date': date(2026, 11, 5)}],
+            kind='exchange', is_permanent=False, reason='批量换课回归')
+        b1 = res.get('batch_id')
+        batches.append(b1)
+        rows = ScheduleSwap.query.filter_by(batch_id=b1).all()
+        case('批量换课：一次与两位老师换两节 → 2 条记录共享同一批次',
+             bool(ok and res.get('created') == 2 and b1), f'{msg} {res}')
+        case('批量换课：每条都有自己的 partner（各自确认）',
+             len({r.partner_uid for r in rows}) == 2
+             and all(r.partner_status == 'pending' for r in rows),
+             f'{[(r.partner_uid, r.partner_status) for r in rows]}')
+        case('批量换课：对调内容按勾选分别落库（整条互换 / 只换时间）',
+             sorted([(r.swap_time, r.swap_class) for r in rows])
+             == [(True, False), (True, True)],
+             f'{[(r.original_entry_id, r.swap_time, r.swap_class) for r in rows]}')
+        case('批量换课：双方日期各自留存（我这天 / 对方那天）',
+             sorted([(str(r.swap_date), str(r.partner_swap_date)) for r in rows])
+             == [('2026-11-02', '2026-11-04'), ('2026-11-03', '2026-11-05')],
+             f'{[(str(r.swap_date), str(r.partner_swap_date)) for r in rows]}')
+        ok_r, msg_r, _ = swap_service.review_swap_batch(rows[0].id, 1, '教务主任',
+                                                       'approve')
+        case('批量换课：还有人没确认 → 不允许整批通过',
+             (not ok_r) and '等待对方确认' in msg_r, msg_r)
+        for r in rows:
+            swap_service.respond_exchange(r.id, 'agree', 1, '对方老师')
+        db.session.expire_all()
+        rows = ScheduleSwap.query.filter_by(batch_id=b1).all()
+        case('批量换课：各自同意后全部可审',
+             all(swap_service.can_review(r, admin) for r in rows),
+             f'{[(r.id, r.partner_status, r.status) for r in rows]}')
+
+        # ── ② 执行：两条各自按"两边各自的日期"落位 ──
+        row1 = [r for r in rows if r.original_entry_id == m1.id][0]
+        swap_service.review_swap(row1.id, 1, '教务主任', 'approve')
+        swap_service.review_swap(row1.id, 1, '课表管理', 'approve')
+        ok_e, msg_e, _ = swap_service.execute_swap(row1.id, 1, '课表管理')
+        db.session.expire_all()
+        row1 = db.session.get(ScheduleSwap, row1.id)
+        t_a = db.session.get(ScheduleEntry, row1.target_entry_id) if row1.target_entry_id else None
+        t_b = (db.session.get(ScheduleEntry, row1.partner_target_entry_id)
+               if row1.partner_target_entry_id else None)
+        case('批量换课（整条互换）：执行后两条临时条目按各自日期生成',
+             bool(ok_e and t_a and t_b
+                  and t_a.weekday == date(2026, 11, 2).isoweekday()
+                  and t_a.period_number == 4 and t_a.class_name == '03班'
+                  and t_b.weekday == date(2026, 11, 4).isoweekday()
+                  and t_b.period_number == 1 and t_b.class_name == '01班'),
+             f'{msg_e} t_a={t_a} t_b={t_b}')
+
+        # ── ③ 批量代课：一次请两位老师代两节 ──
+        c1 = _mk('高三', '05班', 2, 1, '物理', 'BX0001', '甲老师')
+        c2 = _mk('高三', '05班', 2, 2, '物理', 'BX0001', '甲老师')
+        db.session.commit()
+        entry_ids += [c1.id, c2.id]
+        ok2, msg2, res2 = swap_service.apply_exchange_batch(
+            applicant_uid='BX0001', applicant_name='甲老师',
+            items=[{'entry_id': c1.id, 'partner_uid': 'BX0002',
+                    'swap_date': date(2026, 11, 9)},
+                   {'entry_id': c2.id, 'partner_uid': 'BX0003',
+                    'swap_date': date(2026, 11, 9)}],
+            kind='cover', is_permanent=False, reason='批量代课回归')
+        b2 = res2.get('batch_id')
+        batches.append(b2)
+        rows2 = ScheduleSwap.query.filter_by(batch_id=b2).all()
+        case('批量代课：一次请两位老师代两节 → 2 条记录同一批次',
+             bool(ok2 and res2.get('created') == 2 and b2), f'{msg2} {res2}')
+        case('批量代课：每条 partner 不同、且不牵动对方的课',
+             len({r.partner_uid for r in rows2}) == 2
+             and all(not r.partner_entry_id for r in rows2),
+             f'{[(r.partner_uid, r.partner_entry_id) for r in rows2]}')
+
+        # ── 清理本次自建数据 ──
+        for eid in entry_ids:
+            e = db.session.get(ScheduleEntry, eid)
+            if e:
+                db.session.delete(e)
+        for t in ScheduleEntry.query.filter(
+                ScheduleEntry.note.like('%换课%'), ScheduleEntry.note.isnot(None)).all():
+            db.session.delete(t)
+        for b in batches:
+            for s in ScheduleSwap.query.filter_by(batch_id=b).all():
                 db.session.delete(s)
         db.session.commit()
 

@@ -102,10 +102,14 @@
 </div>
 
 {% if d.exchange_kind %}
-{# 2026-10-12 换课（v1.19.47.8）：对方信息与确认状态 #}
+{# 2026-10-12 换课（v1.19.47.10）：对方信息与确认状态 #}
 <div class="alert {% if d.partner_status == 'pending' %}alert-warning{% elif d.partner_status == 'refused' %}alert-danger{% elif d.partner_status == 'agreed' %}alert-success{% else %}alert-info{% endif %} py-2 small mb-3">
-    <i class="bi bi-people-fill"></i> <b>两人换课 · {{ d.exchange_kind_text }}</b>
+    <i class="bi bi-people-fill"></i>
+    <b>{{ d.exchange_kind_text }}{% if d.exchange_content_text %} · {{ d.exchange_content_text }}{% endif %}</b>
     <span class="ms-2">对方教师：<b>{{ d.partner_name or d.partner_uid or '-' }}</b></span>
+    {% if d.exchange_kind == 'exchange' and not d.is_permanent %}
+    <span class="ms-2">我这边上课日期：<b>{{ d.swap_date or '—' }}</b>　对方那边上课日期：<b>{{ d.partner_swap_date or d.swap_date or '—' }}</b></span>
+    {% endif %}
     {% if d.partner_entry %}
     <span class="ms-2">对方课程：{{ d.partner_entry.subject }} · {{ d.partner_entry.grade }}{{ d.partner_entry.class_name }} · {{ weekday_names.get(d.partner_entry.weekday) }}第{{ d.partner_entry.period_number }}节</span>
     {% endif %}

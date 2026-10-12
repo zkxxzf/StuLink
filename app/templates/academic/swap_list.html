@@ -95,7 +95,10 @@
                     </td>
                     <td><span class="badge bg-{% if s.swap_type == 'personal' %}info text-dark{% elif s.swap_type == 'exchange' %}primary{% else %}secondary{% endif %}">{{ s.swap_type_text }}</span>
                         {% if s.exchange_kind_text %}
-                        <div class="small text-primary mt-1"><i class="bi bi-people"></i> {{ s.exchange_kind_text }}{% if s.partner_name %} · {{ s.partner_name }}{% endif %}</div>
+                        <div class="small text-primary mt-1"><i class="bi bi-people"></i> {{ s.exchange_kind_text }}{% if s.exchange_content_text %} · {{ s.exchange_content_text }}{% endif %}{% if s.partner_name %} · {{ s.partner_name }}{% endif %}</div>
+                        {% if s.exchange_kind == 'exchange' and s.partner_swap_date %}
+                        <div class="small text-muted">{{ s.swap_date or '—' }} ⇄ {{ s.partner_swap_date }}</div>
+                        {% endif %}
                         {% endif %}
                         {# 2026-10-10：批量调课按批次折叠成一条记录 —— 一批课整批一次审批/执行 #}
                         {% if s.batch_count and s.batch_count > 1 %}

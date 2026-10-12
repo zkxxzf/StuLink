@@ -1,4 +1,4 @@
-# StuLink v1.19.47.8 2026-10-10
+# StuLink v1.19.47.10 2026-10-10
 # 课表模块模型：学期课表 / 节次定义 / 课表明细 / 调课记录 / 变更版本（独立库 timetable.db）
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 import re
@@ -15,12 +15,27 @@ SCHEDULE_STATUS = {'draft': '未启用', 'active': '启用中', 'archived': '已
 ENTRY_TYPES = {'normal': '正常', 'swap': '调课'}
 SWAP_STATUS = {'pending': '待审核', 'approved': '已通过', 'rejected': '已驳回', 'executed': '已执行'}
 SWAP_TYPES = {'personal': '个人调课', 'bulk': '统一调课', 'exchange': '两人换课'}
-# 2026-10-12（v1.19.47.8）两人换课：三种类型（用户口径）
+# 2026-10-12（v1.19.47.10）两人换课：模式收敛为「对调」与「代课」两种。
+# 原先的 time（换时段）/ class（换班上课）被用户指出"重复"，已合并 ——
+# 「对调什么」不再由类型决定，改为 ScheduleSwap.swap_time / swap_class 两个勾选的组合：
+#   time ✔ class ✔ → 整条互换（我去上他那节、他来上我这节）
+#   time ✔ class ✘ → 只换时间（各上自己的班）
+#   time ✘ class ✔ → 只换班级（时间不动，去上对方的班）
 EXCHANGE_KINDS = {
-    'time': '换时段',      # 两节课的时间对调（各自仍上自己的班与学科）
-    'class': '换班上课',   # 两节课整体对调：我上对方的课、对方上我的课（时间/班级/学科一起换）
-    'cover': '请人代课',   # 只换授课教师（时间、班级不变；可临时一天或整学期）
+    'exchange': '两人对调',   # 我的课 ↔ 对方的课（换什么由 swap_time / swap_class 决定）
+    'cover': '请人代课',      # 只换授课教师（时间、班级不变；可临时一天或整学期）
 }
+
+
+def exchange_content_text(swap_time, swap_class):
+    """「对调内容」组合文案（用于列表/详情/通知展示）。"""
+    if swap_time and swap_class:
+        return '整条互换'
+    if swap_time:
+        return '只换时间'
+    if swap_class:
+        return '只换班级'
+    return '未指定'
 # 换课「对方确认」状态
 PARTNER_STATUS = {'pending': '待对方确认', 'agreed': '对方已同意', 'refused': '对方已拒绝'}
 PERIOD_TYPES = {'morning': '上午', 'afternoon': '下午', 'evening': '晚自习', 'break': '课间/午休'}
@@ -400,9 +415,14 @@ class ScheduleSwap(db.Model):
     # 2026-10-10：统一调课批次号 —— 同一次「统一调课」生成的多条记录共享同一 batch_id，
     # 列表按批次展示、整批一次性审批/执行，避免几十条一个个点。
     batch_id = db.Column(db.String(32), index=True)
-    # ── 2026-10-12（v1.19.47.8）两人换课 ───────────────────────────────────
+    # ── 2026-10-12（v1.19.47.10）两人换课 ───────────────────────────────────
     # exchange_kind：换课类型（EXCHANGE_KINDS）；空 = 普通调课（含旧数据与统一调课）
     exchange_kind = db.Column(db.String(10))
+    # 2026-10-12（v1.19.47.10）「对调内容」两个勾选（取代原 time/class 类型）
+    swap_time = db.Column(db.Boolean, default=True)     # 是否对调上课时间（星期 + 节次）
+    swap_class = db.Column(db.Boolean, default=True)    # 是否对调上课班级（年级/班/学科/教室）
+    # 对方那节课所在的日期（临时换课用 —— 换课有"两个日期"，不再是只有我这边）
+    partner_swap_date = db.Column(db.Date)
     partner_uid = db.Column(db.String(16))            # 对方教师编号（换课 / 代课对象）
     partner_name = db.Column(db.String(50))           # 对方教师姓名（快照，防改名失联）
     partner_entry_id = db.Column(db.Integer)          # 对方课表条目 id（换时段/换班；代课为空）
@@ -444,6 +464,15 @@ class ScheduleSwap(db.Model):
             'exchange_kind': self.exchange_kind,
             'exchange_kind_text': (EXCHANGE_KINDS.get(self.exchange_kind, '')
                                    if self.exchange_kind else ''),
+            # 2026-10-12（v1.19.47.10）对调内容（getattr 兼容未跑迁移的旧库）
+            'swap_time': bool(getattr(self, 'swap_time', False)),
+            'swap_class': bool(getattr(self, 'swap_class', False)),
+            'exchange_content_text': (exchange_content_text(
+                getattr(self, 'swap_time', False), getattr(self, 'swap_class', False))
+                if self.exchange_kind == 'exchange' else ''),
+            'partner_swap_date': (getattr(self, 'partner_swap_date', None)
+                                  .strftime('%Y-%m-%d')
+                                  if getattr(self, 'partner_swap_date', None) else None),
             'partner_uid': self.partner_uid,
             'partner_name': self.partner_name,
             'partner_entry_id': self.partner_entry_id,
