@@ -2590,6 +2590,69 @@ def check_portrait_list_filter():
         db.session.commit()
 
 
+@item('PERIODLABEL')
+def check_period_label():
+    """节次显示口径（2026-10-13 用户实测）：`period_number` 只是**行号**（1=早读），
+    展示必须用 `period_defs.period_name` —— 教师工作台「今日课程」原先直接印 number，
+    于是「第7节」的课显示成「第 8 节」（整节次错一位）。"""
+    from app.utils.period_label import period_label, period_names
+
+    defaults = {p['period_number']: p['period_name'] for p in get_default_periods()}
+
+    with app.app_context():
+        case('节次显示名：period_label(8) 用 PeriodDef 名（不是「第8节」）',
+             period_label(8, TS_ID) == defaults[8],
+             '%s / 期望 %s' % (period_label(8, TS_ID), defaults[8]))
+        case('节次显示名：1 号位是早读（按名显示）',
+             period_label(1, TS_ID) == defaults[1], str(period_label(1, TS_ID)))
+        case('节次显示名：无定义回落「第N节」、0 / 空值返回空串',
+             period_label(99, TS_ID) == '第99节' and period_label(0, TS_ID) == '',
+             '%s / %s' % (period_label(99, TS_ID), period_label(0, TS_ID)))
+        case('节次显示名：period_names 返回完整映射（供前端 JS 用）',
+             period_names(TS_ID).get(8) == defaults[8],
+             str(len(period_names(TS_ID))))
+
+        # 端到端：造一位教师 + 今天第 8 号位（=第7节）的课，看工作台卡片怎么显示
+        u = User.query.filter_by(username='pl_teacher').first()
+        if not u:
+            u = User(username='pl_teacher', real_name='节次测试教师', role='teacher',
+                     must_change_pwd=False)
+            u.set_password(TEST_PWD)
+            db.session.add(u)
+            db.session.flush()
+        t = Teacher.query.filter_by(teacher_uid='TPL001').first()
+        if not t:
+            t = Teacher(teacher_uid='TPL001', name='节次测试教师', subject='信息技术',
+                        status='active', user_id=u.id)
+            db.session.add(t)
+            db.session.commit()
+        uid = u.id
+        today_wd = date.today().isoweekday()
+        ent = ScheduleEntry.query.filter_by(term_schedule_id=TS_ID, teacher_uid='TPL001',
+                                            weekday=today_wd, period_number=8).first()
+        if not ent:
+            ent = ScheduleEntry(term_schedule_id=TS_ID, grade='高一', class_name='09班',
+                                weekday=today_wd, period_number=8, subject='信息技术',
+                                teacher_uid='TPL001', teacher_name='节次测试教师',
+                                week_range='1-20', entry_type='normal')
+            db.session.add(ent)
+            db.session.commit()
+        ent_id = ent.id
+
+    with app.test_client() as c:
+        login(c, 'pl_teacher', TEST_PWD)
+        r = c.get('/workbench/')
+        html = r.get_data(as_text=True) if r.status_code == 200 else ''
+        case('今日课程：工作台 200', r.status_code == 200, str(r.status_code))
+        case('今日课程：第 8 号位显示为 PeriodDef 名（第7节），不再出现「第 8 节」',
+             '信息技术' in html and defaults[8] in html and '第 8 节' not in html,
+             '期望 %s' % defaults[8])
+
+    with app.app_context():   # 清理
+        ScheduleEntry.query.filter_by(id=ent_id).delete()
+        db.session.commit()
+
+
 @item('SWAPCONFIRM')
 def check_swap_need_partner_confirm():
     """与同事对调时的「无需对方同意确认」选项：**默认勾选**（不勾选才需要对方答复）。"""
