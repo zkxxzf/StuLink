@@ -2,7 +2,7 @@
 {% block title %}自由表{% endblock %}
 {# 2026-10-12 UI 审计 M8：grades.css 已由 base.html 统一引入 #}
 {% block content %}
-{# v1.19.47.19 考试态：侧栏「成绩分析自由表」带 ?exam=<id>，此前本页完全不读该参数 →
+{# v1.19.47.20 考试态：侧栏「成绩分析自由表」带 ?exam=<id>，此前本页完全不读该参数 →
    停在默认第一场。这里把本场 id 交给 JS（#pvInitialExam），并隐藏年级/考试两个下拉。 #}
 {% set _en = exam_nav() %}
 <div class="g-filter-bar d-flex flex-wrap gap-2 align-items-center mb-3">
@@ -16,7 +16,7 @@
         <option value="历史">历史类</option>
     </select>
 </div>
-{# v1.19.47.19 考试态带入的本场考试 id（非考试态为空） #}
+{# v1.19.47.20 考试态带入的本场考试 id（非考试态为空） #}
 <span id="pvInitialExam" class="d-none">{{ _en.exam_id if _en else (request.args.get('exam') or request.args.get('exam_id') or '') }}</span>
 
 <div class="card mb-3">

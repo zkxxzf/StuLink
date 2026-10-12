@@ -153,7 +153,7 @@ $(function(){
         var grade = $('#tcGrade').val();
         if (!grade) { alert('请先选择年级'); return; }
         $('#tcMsg').text('保存中…');
-        // v1.19.47.19：必须显式声明 JSON —— 原来 $.post(url, JSON.stringify(...)) 会以
+        // v1.19.47.20：必须显式声明 JSON —— 原来 $.post(url, JSON.stringify(...)) 会以
         // application/x-www-form-urlencoded 发送 JSON 文本，后端 get_json 取不到 → 保存静默失效
         $.ajax({
             url: app.data('saveUrl'), type: 'POST',
