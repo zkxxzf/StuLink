@@ -207,6 +207,7 @@
     "slotsUrl": {{ url_for('academic.api_swap_available_slots')|tojson }},
     "gradeClasses": {{ class_opts.grade_classes|tojson }},
     "weekdays": {{ weekdays|tojson }},
+    "periodLabels": {{ period_name_map()|tojson }},
     "myUid": {{ applicant_uid|tojson }},
     "myName": {{ applicant_name|tojson }},
     "myEntries": {{ my_entries|tojson }},
@@ -225,6 +226,8 @@
     var activeId = null;       // 当前行（entry_id）
     var slotsCache = {};       // entry_id -> slots[]（切行不重复请求）
     var CIRC = ['①','②','③','④','⑤','⑥','⑦','⑧','⑨','⑩','⑪','⑫','⑬','⑭','⑮','⑯','⑰','⑱','⑲','⑳'];
+    // 节次显示名：period_number 只是行号（1=早读 → 8 实为「第7节」），学校叫法见 periodLabels
+    function pn(n) { return (cfg.periodLabels || {})[String(n)] || ('第' + n + '节'); }
 
     function esc(v) {
         // 单引号也转义：data-entry 用的是单引号 HTML 属性，值里带 ' 会破坏属性
@@ -286,7 +289,7 @@
                 html += '<div class="col-6 col-md-4 col-lg-3">'
                     + '<div class="entry-pick" data-id="' + esc(e.id) + '" data-entry=\'' + esc(JSON.stringify(e)) + '\'>'
                     + '<span class="ep-badge" data-badge></span>'
-                    + '<div class="ep-pn">第' + esc(e.period_number) + '节</div>'
+                    + '<div class="ep-pn">' + esc(pn(e.period_number)) + '</div>'
                     + '<div class="ep-subj">' + esc(e.subject) + '</div>'
                     + '<div class="small text-muted">' + esc(e.grade) + esc(e.class_name)
                     + ' · ' + esc(e.teacher_name || '-') + '</div>'
@@ -354,7 +357,7 @@
     function targetText(it) {
         if (!it.target) { return '<span class="text-muted">未设置目标</span>'; }
         var t = it.target;
-        var s = esc(cfg.weekdays[t.new_weekday] || '') + ' 第' + esc(t.new_period) + '节';
+        var s = esc(cfg.weekdays[t.new_weekday] || '') + ' ' + esc(pn(t.new_period));
         if (!isPermanent() && t.swap_date) { s += ' · ' + esc(shortDate(t.swap_date)); }
         var html = '<span class="tgt-badge">' + s + '</span>';
         if (t.partner_entry_id) {
@@ -387,7 +390,7 @@
             html += '<tr class="' + cls + '" data-id="' + esc(e.id) + '">'
                 + '<td class="fw-bold">' + circNum(i + 1) + '</td>'
                 + '<td class="small">' + esc(e.subject) + ' · ' + esc(e.grade) + esc(e.class_name)
-                + ' · ' + esc(cfg.weekdays[entryWeekday(e)] || '') + '第' + esc(e.period_number) + '节'
+                + ' · ' + esc(cfg.weekdays[entryWeekday(e)] || '') + esc(pn(e.period_number))
                 + ' · ' + esc(e.teacher_name || '-') + '</td>'
                 + '<td class="small">' + targetText(it)
                 + (it.target && it.target.partner_entry_id
@@ -421,7 +424,7 @@
         var idx = items.indexOf(it) + 1;
         var e = it.entry;
         $('#slotEditorHead').html('正在设置：第 <b>' + idx + '</b> 行 · 原课 '
-            + esc(cfg.weekdays[entryWeekday(e)] || '') + '第' + esc(e.period_number) + '节 '
+            + esc(pn(e.period_number)) + ' '
             + esc(e.subject) + ' ' + esc(e.grade) + esc(e.class_name));
         $('#btnApplyAll').prop('disabled', !it.target);
         // 切到设置过的行：回显该行已选周几/日期
@@ -563,16 +566,16 @@
         var html = '';
         items.forEach(function (it, i) {
             var e = it.entry;
-            var left = esc(cfg.weekdays[entryWeekday(e)] || '') + '第' + esc(e.period_number) + '节 '
+            var left = esc(cfg.weekdays[entryWeekday(e)] || '') + esc(pn(e.period_number)) + ' '
                 + esc(e.subject) + ' ' + esc(e.grade) + esc(e.class_name);
             var right;
             if (!it.target) {
                 right = '<span class="text-danger">未设置目标</span>';
             } else if (!perm && !it.target.swap_date) {
-                right = '<b>' + esc(cfg.weekdays[it.target.new_weekday] || '') + '第' + esc(it.target.new_period) + '节</b>'
+                right = '<b>' + esc(cfg.weekdays[it.target.new_weekday] || '') + esc(pn(it.target.new_period)) + '</b>'
                     + ' <span class="text-danger">（缺日期）</span>';
             } else {
-                right = '<b>' + esc(cfg.weekdays[it.target.new_weekday] || '') + '第' + esc(it.target.new_period) + '节</b>'
+                right = '<b>' + esc(cfg.weekdays[it.target.new_weekday] || '') + esc(pn(it.target.new_period)) + '</b>'
                     + (perm ? '（永久）' : '（' + esc(it.target.swap_date) + '）');
             }
             html += '<div>' + circNum(i + 1) + ' ' + left + ' → ' + right + '</div>';
@@ -708,7 +711,7 @@
         $('#hSourceWeekday').val($('#srcWeekday').val());
 
         var names = items.map(function (it, idx) {
-            return circNum(idx + 1) + (cfg.weekdays[entryWeekday(it.entry)] || '') + '第' + it.entry.period_number + '节 ' + it.entry.subject;
+            return circNum(idx + 1) + (cfg.weekdays[entryWeekday(it.entry)] || '') + pn(it.entry.period_number) + ' ' + it.entry.subject;
         }).join('；');
         var needOk = items.filter(function (o) {
             return o.target && o.target.partner_entry_id && !o.target.swap_self;

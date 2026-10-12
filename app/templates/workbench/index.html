@@ -88,7 +88,9 @@
                     {% for e in today_entries %}
                     <div class="border rounded px-3 py-2">
                         <div class="fw-bold">
-                            第 {{ e.period_number }} 节 · {{ e.subject or '—' }}
+                            {# 2026-10-13：节次用 PeriodDef 的显示名（period_number 只是行号，
+                               1=早读 → period_number=8 实为「第7节」），取不到才回落「第N节」 #}
+                            {{ period_labels.get(e.period_number) or ('第%d节' % e.period_number) }} · {{ e.subject or '—' }}
                             {% if e.week_badge %}<span class="badge bg-warning text-dark ms-1">{{ e.week_badge }}</span>{% endif %}
                         </div>
                         <div class="text-muted small">{{ e.class_name or '' }} {{ e.room or '' }}</div>
@@ -202,7 +204,7 @@
                     <div class="d-flex flex-wrap gap-1">
                         {% for e in day_items %}
                         <span class="badge {{ 'bg-warning-subtle text-dark border border-warning' if e.entry_type != 'normal' else 'bg-white text-dark border' }} fw-normal">
-                            第{{ e.period_number }}节 {{ e.subject or '—' }} {{ e.class_name or '' }}{% if e.room %} · {{ e.room }}{% endif %}
+                            {{ period_labels.get(e.period_number) or ('第%d节' % e.period_number) }} {{ e.subject or '—' }} {{ e.class_name or '' }}{% if e.room %} · {{ e.room }}{% endif %}
                             {% if e.week_badge %}<span class="text-warning-emphasis">{{ e.week_badge }}</span>{% endif %}
                         </span>
                         {% endfor %}
@@ -430,7 +432,7 @@
                         </td>
                         <td>{{ s.original_subject or '-' }} {{ s.original_class or '' }}</td>
                         <td>{{ s.original_date.strftime('%m-%d') if s.original_date else '-' }}</td>
-                        <td>{% if s.original_period %}第{{ s.original_period }}节{% else %}-{% endif %}</td>
+                        <td>{% if s.original_period %}{{ period_labels.get(s.original_period) or ('第%d节' % s.original_period) }}{% else %}-{% endif %}</td>
                         <td>{{ s.original_class or '-' }}</td>
                         <td>{{ (s.reason or '-')|truncate(30) }}</td>
                         <td class="small text-muted">{{ s.created_at.strftime('%m-%d %H:%M') if s.created_at else '' }}</td>

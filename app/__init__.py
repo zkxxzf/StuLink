@@ -495,11 +495,16 @@ def create_app():
     from app.utils.helpers import subject_direction, subject_badge_class, normalize_subject
     # v1.19.0 成绩模块“考试上下文”导航（点进某场考试后侧栏切换为本场流程）
     from app.utils.exam_nav import exam_nav
+    # 2026-10-13：节次显示名（period_number 只是行号：1=早读 → period_number=8 实为「第7节」）。
+    # 凡模板里要显示「第几节」一律用它，避免各处自己拼接「第{{ period_number }}节」错一位。
+    from app.utils.period_label import period_label, period_name_map
     app.jinja_env.globals.update(
         subject_direction=subject_direction,
         subject_badge_class=subject_badge_class,
         normalize_subject=normalize_subject,
         exam_nav=exam_nav,
+        period_label=period_label,
+        period_name_map=period_name_map,
     )
 
     db.init_app(app)

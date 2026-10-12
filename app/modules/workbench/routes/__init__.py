@@ -59,6 +59,10 @@ def index():
     teacher = teacher_service.teacher_of_user(current_user)
 
     entries, today_entries, achievements = [], [], []
+    # 2026-10-13：节次显示名映射 —— period_number 只是行号（1=早读、2=第1节…），
+    # 学校实际叫法在 PeriodDef.period_name（见 timetable.db period_defs）。
+    # 卡片原先直接印 period_number，整节次都错一位（period_number=8 实为「第7节」）。
+    period_labels = {}
     pending_swaps = []
     partner_pending = []
     active_term = None
@@ -76,11 +80,17 @@ def index():
         try:
             active_term = schedule_service.get_active_schedule()
             if active_term:
+                # 按**当前教学周**取（单双周的课只在对应周出现）；周次取不到
+                #（没配学期起止日期）时传 None = 不过滤，行为与原来一致。
+                cur_week = active_term.get_week_number()
                 view = schedule_service.get_teacher_view(active_term.id,
-                                                         teacher.teacher_uid)
+                                                         teacher.teacher_uid,
+                                                         week=cur_week)
                 entries = sorted(view.get('entries') or [],
                                  key=lambda e: (e.get('weekday') or 0,
                                                 e.get('period_number') or 0))
+                period_labels = {p['period_number']: (p.get('period_name') or '')
+                                 for p in (view.get('periods') or [])}
         except Exception:   # 课表库异常（bind 未配置 / 表缺失）只降级为空态，不拖垮首页
             db.session.rollback()
             current_app.logger.exception('工作台课表加载失败 teacher_uid=%s',
@@ -180,6 +190,7 @@ def index():
                            levels=ACHIEVEMENT_LEVELS,
                            status_map=ACHIEVEMENT_STATUS,
                            weekday_names=_WEEKDAYS,
+                           period_labels=period_labels,
                            is_head=is_head,
                            today=date.today(),
                            pending_swaps=pending_swaps)

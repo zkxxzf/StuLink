@@ -86,7 +86,7 @@
                 <label class="form-label small mb-1">只看第几节（可留空）</label>
                 <select id="fltPeriod" class="form-select form-select-sm" disabled>
                     <option value="">全部节次</option>
-                    {% for p in periods %}<option value="{{ p.period_number }}">第{{ p.period_number }}节</option>{% endfor %}
+                    {% for p in periods %}<option value="{{ p.period_number }}">{{ p.period_name or period_label(p.period_number) }}</option>{% endfor %}
                 </select>
             </div>
             <div class="col-6 col-md-3 d-flex align-items-end">

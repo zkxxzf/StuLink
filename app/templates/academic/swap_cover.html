@@ -60,7 +60,7 @@
             <div class="col-6 col-md-4 col-lg-3">
                 <div class="entry-pick" data-id="{{ e.id }}" data-entry="{{ e|tojson }}">
                     <span class="ep-badge" data-badge></span>
-                    <div class="ep-pn">第{{ e.period_number }}节</div>
+                    <div class="ep-pn">{{ period_label(e.period_number) }}</div>
                     <div class="ep-subj">{{ e.subject }}</div>
                     <div class="small text-muted">{{ e.grade }}{{ e.class_name }} · {{ e.room or '无教室' }}</div>
                 </div>
@@ -135,7 +135,8 @@
 {
     "teachersUrl": {{ url_for('academic.api_swap_partner_teachers')|tojson }},
     "today": {{ today|tojson }},
-    "weekdays": {{ WEEKDAYS|tojson }}
+    "weekdays": {{ WEEKDAYS|tojson }},
+    "periodLabels": {{ period_name_map()|tojson }}
 }
 </script>
 {% endblock %}
@@ -154,7 +155,9 @@
     function shortDate(d) { return String(d || '').slice(5); }
     function isPermanent() { return $('#rdPerm').is(':checked'); }
     function wd(e) { return cfg.weekdays[e.weekday] || e.weekday_text || ('周' + e.weekday); }
-    function courseText(e) { return esc(wd(e)) + '第' + esc(e.period_number) + '节 · ' + esc(e.grade) + esc(e.class_name) + ' · ' + esc(e.subject); }
+    // 节次显示名：period_number 只是行号（1=早读），学校叫法见 periodLabels
+    function pn(n) { return (cfg.periodLabels || {})[String(n)] || ('第' + n + '节'); }
+    function courseText(e) { return esc(wd(e)) + esc(pn(e.period_number)) + ' · ' + esc(e.grade) + esc(e.class_name) + ' · ' + esc(e.subject); }
     function teacherName(uid) { var t = teachers.filter(function (o) { return String(o.uid) === String(uid); })[0]; return t ? t.name : ''; }
     function itemOf(id) { var m = items.filter(function (o) { return String(o.entry.id) === String(id); })[0]; return m || null; }
 

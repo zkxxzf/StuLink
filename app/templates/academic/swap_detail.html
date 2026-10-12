@@ -66,7 +66,7 @@
             {% if oe %}
             <div class="cmp-big">{{ oe.subject }}</div>
             <div class="cmp-val mt-1">{{ oe.grade }}{{ oe.class_name }}</div>
-            <div class="cmp-val">{{ weekday_names.get(oe.weekday) }} · 第{{ oe.period_number }}节{% if d.original_period %} {{ d.original_period.start_time }}-{{ d.original_period.end_time }}{% endif %}</div>
+            <div class="cmp-val">{{ weekday_names.get(oe.weekday) }} · {{ (d.original_period.period_name if d.original_period else '') or period_label(oe.period_number) }}{% if d.original_period %} {{ d.original_period.start_time }}-{{ d.original_period.end_time }}{% endif %}</div>
             <div class="cmp-val text-muted">教师：{{ oe.teacher_name or '-' }}　教室：{{ oe.room or '-' }}</div>
             <div class="cmp-val text-muted small">周次：{{ oe.week_range or '-' }}</div>
             {% if d.source_date %}
@@ -111,7 +111,7 @@
     <span class="ms-2">我这边上课日期：<b>{{ d.swap_date or '—' }}</b>　对方那边上课日期：<b>{{ d.partner_swap_date or d.swap_date or '—' }}</b></span>
     {% endif %}
     {% if d.partner_entry %}
-    <span class="ms-2">对方课程：{{ d.partner_entry.subject }} · {{ d.partner_entry.grade }}{{ d.partner_entry.class_name }} · {{ weekday_names.get(d.partner_entry.weekday) }}第{{ d.partner_entry.period_number }}节</span>
+    <span class="ms-2">对方课程：{{ d.partner_entry.subject }} · {{ d.partner_entry.grade }}{{ d.partner_entry.class_name }} · {{ weekday_names.get(d.partner_entry.weekday) }}{{ period_label(d.partner_entry.period_number) }}</span>
     {% endif %}
     <span class="ms-2">对方确认：<b>{{ d.partner_status_text or '—' }}</b>{% if d.partner_responded_at %} <span class="text-muted">（{{ d.partner_responded_at }}）</span>{% endif %}</span>
     {% if d.exchange_kind == 'exchange' %}
