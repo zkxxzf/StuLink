@@ -12,9 +12,9 @@ from app.models.user_class_link import UserClassLink
 from app.models.grade_setting import GradeSetting
 from app.models.grades import Exam, ExamScore, ExamBand, TeacherSubjectLink, \
     AiKey, AiGlobalKey, AiReport, AiChatMessage, AffairRoomLib, \
-    ExamTeacherLink, ExamAffair, AffairRoom, AffairStudent  # v1.19.47.7 考试任课快照 / 考务
+    ExamTeacherLink, ExamAffair, AffairRoom, AffairStudent  # v1.19.47.8 考试任课快照 / 考务
 from app.models.grades import AffairTeacher, AffairSchedule, AffairInvigilator, \
-    AffairInvigilation  # v1.19.47.7 考务环节④⑤⑥：任课核对 / 考试时间表 / 监考编排
+    AffairInvigilation  # v1.19.47.8 考务环节④⑤⑥：任课核对 / 考试时间表 / 监考编排
 from app.models.points import PointRecord, PointRuleTemplate
 from app.models.system_setting import SystemSetting
 from app.models.academic import Teacher, \
