@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-# StuLink v1.19.47.18 2026-10-10
+# StuLink v1.19.47.19 2026-10-10
 # users ↔ academic.teachers 双向同步钩子（保证两页数据一致）
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 """
