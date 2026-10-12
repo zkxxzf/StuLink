@@ -132,6 +132,22 @@ def _client_example(cfg, url, mode):
     return lines
 
 
+def _risk_notes(cfg):
+    """启动风险提示（2026-10-11 三轮审计新增，不阻断启动）：
+    token 兼容模式 = 静态令牌全权；非本机监听 + 无服务令牌 = 明文凭据暴露。
+    """
+    notes = []
+    if _auth_mode(cfg) == 'token':
+        notes.append('[!] 当前为 token 兼容模式：持有静态令牌者即以 bind_user'
+                     f"（{cfg.get('bind_user')}）身份执行全部工具、不受数据范围限制，"
+                     '请勿在不可信网络暴露；建议改用 account 模式。')
+    host = (cfg.get('host') or '').strip()
+    if host not in ('127.0.0.1', 'localhost', '::1') and not cfg.get('require_token'):
+        notes.append(f'[!] 监听地址为 {host} 且 require_token=false：账号密码经明文 HTTP 传输，'
+                     '同网段可被嗅探；建议置 require_token=true，或仅在本机/受信网段使用。')
+    return notes
+
+
 def _print_banner(cfg, me):
     """启动横幅：把客户端需要的信息一次印全，省得翻文档。"""
     mode = _auth_mode(cfg)
@@ -156,6 +172,10 @@ def _print_banner(cfg, me):
         '',
     ]
     lines.extend(_client_example(cfg, url, mode))
+    notes = _risk_notes(cfg)
+    if notes:
+        lines.append('')
+        lines.extend(notes)
     lines.extend([
         '',
         f"  配置文件 : {config.CONFIG_PATH}",
@@ -180,6 +200,8 @@ def main():
         print(f'[MCP] 启动失败：{exc}', flush=True)
         return 1
     _print_banner(cfg, me)
+    for note in _risk_notes(cfg):      # 风险提示同时落日志，便于事后排查
+        logger.warning('%s', note)
     import uvicorn
     uvicorn.run(app, host=cfg['host'] or '127.0.0.1', port=int(cfg['port']),
                 log_level='info')

@@ -77,6 +77,14 @@ def _execute(user_id, fn, tool, params, audit_on, perm=None):
         return fn(user)
     except Exception as exc:
         error = f'{type(exc).__name__}: {exc}'
+        # 2026-10-12 审计：异常路径显式回滚未提交的业务改动。虽然 app context
+        # 退出时 Flask-SQLAlchemy 也会 remove 会话回滚，但显式回滚能保证
+        # 「工具失败 → 未提交数据立即丢弃」，不依赖上下文生命周期。
+        try:
+            from app.extensions import db as _app_db
+            _app_db.session.rollback()
+        except Exception:  # noqa: BLE001  回滚失败不应掩盖原始异常
+            pass
         raise
     finally:
         if audit_on:

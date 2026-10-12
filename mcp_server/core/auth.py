@@ -75,14 +75,34 @@ def _lock_remaining(username):
     return 0
 
 
+def _evict_oldest(now):
+    """容量满时逐出"最早、且当前未处于锁定中"的一条失败记录。
+
+    2026-10-11 三轮审计修正：原先 `_fails.clear()` 会清掉**所有**账号的失败
+    计数——攻击者用 1024 个随机账号名刷一遍即可重置目标账号的锁定计数，
+    使 login_fail_limit 形同虚设。改为逐出单条：优先已解锁的老条目，
+    若全部锁定中则逐出最早插入的一条（dict 保序）。
+    """
+    victim = None
+    for name, (_count, until) in _fails.items():
+        if until <= now:      # 未锁定：优先逐出
+            victim = name
+            break
+    if victim is None:
+        victim = next(iter(_fails), None)
+    if victim is not None:
+        _fails.pop(victim, None)
+
+
 def _record_fail(username):
     limit = _cfg_int('login_fail_limit', 5)
     if limit <= 0:
         return
     lock_seconds = max(1, _cfg_int('login_lock_seconds', 300))
+    now = time.time()
     with _cred_lock:
-        if len(_fails) > _FAILS_MAX:
-            _fails.clear()
+        if len(_fails) >= _FAILS_MAX:
+            _evict_oldest(now)
         count, _until = _fails.get(username, (0, 0.0))
         count += 1
         if count >= limit:

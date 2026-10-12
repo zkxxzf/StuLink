@@ -3,10 +3,23 @@
 
 宿舍模块没有 service 层（只有分配算法），因此这里直接查模型；
 床位占用数一律用一次 GROUP BY 批量取回，避免房间列表的 N+1 查询。
+
+数据范围（2026-10-11 三轮审计修正）：房间/楼/统计一律走
+app.utils.dormitory_scope.room_scope_query（宿舍范围唯一口径，与网页端
+/dormitory/rooms/、宿舍统计页同源）。此前房间与楼清单无任何范围过滤
+（持 dormitory.view 即可枚举全校房间），统计另用一份 class_allowed 自拼实现、
+对任课教师比网页端更宽——两处均为越权，本批已统一。
 """
 from sqlalchemy import func
 
 from ..core import guards, respond, toolkit
+
+
+def _scoped_rooms(user):
+    """按账号宿舍范围收窄的 Room 基础查询（唯一口径，禁止再自拼判定）。"""
+    from app.models.room import Room
+    from app.utils.dormitory_scope import room_scope_query
+    return room_scope_query(Room.query.filter(Room.is_active.is_(True)), user)
 
 _ROOM_FIELDS = ('id', 'building', 'room_number', 'floor', 'gender',
                 'capacity', 'grade', 'class_name', 'is_active')
@@ -22,11 +35,9 @@ def _occupancy_map():
     return {room_id: count for room_id, count in rows}
 
 
-def _buildings(_user):
-    from app.extensions import db
+def _buildings(user):
     from app.models.room import Room
-    rows = (db.session.query(Room.building, func.count(Room.id))
-            .filter(Room.is_active.is_(True))
+    rows = (_scoped_rooms(user).with_entities(Room.building, func.count(Room.id))
             .group_by(Room.building).order_by(Room.building).all())
     return {'count': len(rows),
             'buildings': [{'building': b or '(未命名)', 'room_count': n} for b, n in rows]}
@@ -34,7 +45,7 @@ def _buildings(_user):
 
 def _rooms(user, building, grade, class_name, gender, page, per_page):
     from app.models.room import Room
-    query = Room.query.filter(Room.is_active.is_(True))
+    query = _scoped_rooms(user)
     if building:
         query = query.filter(Room.building == building)
     if grade:
@@ -59,60 +70,24 @@ def _rooms(user, building, grade, class_name, gender, page, per_page):
             'rooms': items}
 
 
-def _room_filter(user):
-    """受限账号的宿舍统计可见范围（返回房间判定函数；None = 全校不限）。
-
-    与网页端宿舍统计页的分级同口径：管理员 / 校级范围不限；年级长 / 年级范围限本年级；
-    其余（班主任、任课教师、用户级授权）限本人所辖班级对应的房间。
-    """
-    from app.modules.grades.services.scope import (
-        SCOPE_GRADE, SCOPE_SCHOOL, get_scope, user_grade_scope)
-    if user.role == 'admin':
-        return None
-    ug = user_grade_scope(user)
-    if ug is not None:
-        from app.models.user_data_scope import get_user_scope_classes
-
-        def check_user_scope(room):
-            if not room.grade or room.grade not in ug:
-                return False
-            classes = get_user_scope_classes(user.id, room.grade)
-            return True if classes is None else (room.class_name in classes)
-
-        return check_user_scope
-    scope, grade = get_scope(user)
-    if scope == SCOPE_SCHOOL:
-        return None
-    if scope == SCOPE_GRADE:
-        return lambda room: room.grade == grade
-    from app.modules.workbench.services.scope import class_allowed
-    return lambda room: bool(room.grade and room.class_name
-                             and class_allowed(user, room.grade, room.class_name))
-
-
 def _stats(user):
-    from app.extensions import db
+    """宿舍总览统计（限定在账号可见房间范围内）。
+
+    2026-10-11 三轮审计：原先自行用 class_allowed 拼装范围判定，对任课教师
+    按"任教年级"放行整年级，比网页端统计页（只认 UserClassLink 班对）更宽；
+    现统一走 room_scope_query + scope_kind，口径与网页端一致。
+    """
     from app.models.room import BedAssignment, Room
-    flt = _room_filter(user)
-    if flt is None:
-        total_rooms, total_beds = (db.session.query(func.count(Room.id), func.sum(Room.capacity))
-                                   .filter(Room.is_active.is_(True)).first()) or (0, 0)
-        occupied = (db.session.query(func.count(BedAssignment.id))
-                    .filter(BedAssignment.student_id.isnot(None)).scalar()) or 0
-        total_beds = int(total_beds or 0)
-        return {'scope': '全校', 'total_rooms': total_rooms or 0, 'total_beds': total_beds,
-                'occupied_beds': occupied, 'empty_beds': max(total_beds - occupied, 0),
-                'occupancy_rate': round(occupied / total_beds * 100, 1) if total_beds else 0.0}
-    rooms = [r for r in Room.query.filter(Room.is_active.is_(True)).all() if flt(r)]
-    room_ids = [r.id for r in rooms]
-    total_rooms = len(rooms)
-    total_beds = sum(int(r.capacity or 0) for r in rooms)
-    occupied = 0
-    if room_ids:
-        occupied = (db.session.query(func.count(BedAssignment.id))
-                    .filter(BedAssignment.student_id.isnot(None),
-                            BedAssignment.room_id.in_(room_ids)).scalar()) or 0
-    return {'scope': '仅本人数据范围', 'total_rooms': total_rooms, 'total_beds': total_beds,
+    from app.utils.dormitory_scope import scope_kind
+    scoped = _scoped_rooms(user)
+    total_rooms = scoped.count()
+    total_beds = int(scoped.with_entities(
+        func.coalesce(func.sum(Room.capacity), 0)).scalar() or 0)
+    # 已住床位：在可见房间内 join 床位分配统计（一次查询，避免逐个房间 N+1）
+    occupied = (scoped.join(BedAssignment, BedAssignment.room_id == Room.id)
+                .filter(BedAssignment.student_id.isnot(None)).count())
+    return {'scope': '全校' if scope_kind(user) == 'school' else '仅本人数据范围',
+            'total_rooms': total_rooms, 'total_beds': total_beds,
             'occupied_beds': occupied, 'empty_beds': max(total_beds - occupied, 0),
             'occupancy_rate': round(occupied / total_beds * 100, 1) if total_beds else 0.0}
 
@@ -120,7 +95,9 @@ def _stats(user):
 def _accommodation(user, student_no):
     from app.models.room import BedAssignment, Room, StudentAccommodation
     student = guards.find_student(student_no)
-    guards.student_scope(user, student_no)
+    # 2026-10-12 审计修复：住宿信息属宿舍数据，范围与网页端住宿检索页同源
+    # （app/utils/student_scope.apply_student_scope），不再用成绩口径 student_scope
+    guards.student_list_scope(user, student_no)
     acc = StudentAccommodation.query.filter_by(student_id=student.id).first()
     bed = BedAssignment.query.filter_by(student_id=student.id).first()
     result = {
@@ -169,5 +146,5 @@ def register(server):
                  description='查询单个学生的住宿情况：住宿类型、宿舍楼/房间/床位号')
     async def get_student_accommodation(student_no: str) -> str:
         return await toolkit.db_call(lambda u: _accommodation(u, student_no),
-                                     tool='get_student_accommodation', perm='students.view',
+                                     tool='get_student_accommodation', perm='dormitory.view',
                                      params={'student_no': student_no})

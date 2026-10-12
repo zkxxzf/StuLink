@@ -13,14 +13,18 @@ CONFIG_PATH = os.path.join(BASE_DIR, 'config.json')
 
 # 键名 → (默认值, 说明)：说明会写进自动生成的 config.json，作为使用文档
 DEFAULTS = {
-    'host': ('127.0.0.1', '监听地址；改为 0.0.0.0 可被局域网内其他设备访问'),
+    'host': ('127.0.0.1', '监听地址；改为 0.0.0.0 可被局域网内其他设备访问。'
+                           '注意：account 模式的账号密码经明文 HTTP 传输，'
+                           '仅在受信网段使用，或同时开启 require_token'),
     'port': (8765, '监听端口'),
     'path': ('/mcp', 'MCP 端点路径（客户端填写的 URL 为 http://地址:端口 + 本路径）'),
     'auth_mode': ('account', '接入认证模式：account=每请求校验 StuLink 账号密码（推荐，'
                              '客户端权限与网页端完全一致）；token=仅校验静态访问令牌、'
-                             '执行身份固定为 bind_user（兼容旧客户端，安全性较弱）'),
+                             '执行身份固定为 bind_user（兼容旧客户端；⚠ 持有令牌者即以'
+                             'bind_user 身份执行全部工具且不受数据范围限制，请勿在不可信网络暴露）'),
     'require_token': (False, 'account 模式下是否额外要求 X-StuLink-Token（双重准入，'
-                             '防止端口被随意扫描）；false 时只认账号密码'),
+                             '防止端口被随意扫描）；false 时只认账号密码。'
+                             '非本机监听（host=0.0.0.0）时建议置 true'),
     'token': ('', '静态访问令牌（token 模式的唯一凭据；account 模式在 require_token=true 时'
                   '作为第二道准入）；留空则自动生成'),
     'bind_user': ('admin', 'token 模式的执行账号（例如 admin）；account 模式不生效——'
