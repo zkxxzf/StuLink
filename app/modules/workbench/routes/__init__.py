@@ -1,4 +1,4 @@
-# StuLink v1.19.47.24 2026-10-10
+# StuLink v1.19.47.25 2026-10-10
 # 教师工作台：我的信息 / 今日课程 / 我的课表 / 我的业绩 / 手机号修改
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 import re
@@ -62,11 +62,11 @@ def index():
     pending_swaps = []
     partner_pending = []
     active_term = None
-    # 2026-10-13（v1.19.47.24）：调课入口挂到工作台 —— 能否申请由 academic.swap 决定，
+    # 2026-10-13（v1.19.47.25）：调课入口挂到工作台 —— 能否申请由 academic.swap 决定，
     # 菜单/按钮可见性与 perm_required 保持一致，避免"看得见、点了 403"。
     can_swap = current_user.has_perm('academic.swap')
     is_head = (current_user.role == 'homeroom_teacher')
-    # 2026-10-13（v1.19.47.24）：左侧「个人工作」菜单已精简，工作台内需自备这些入口
+    # 2026-10-13（v1.19.47.25）：左侧「个人工作」菜单已精简，工作台内需自备这些入口
     can_class_view = current_user.has_perm('workbench.class_view')
     can_records = current_user.has_perm('workbench.records')
     can_attendance = current_user.has_perm('workbench.attendance_view')
@@ -133,7 +133,7 @@ def index():
                                          teacher.teacher_uid)
             partner_pending = []
 
-    # 2026-10-13（v1.19.47.24）：班主任在工作台直接看**本班班级课表**（多个班用页签切换）。
+    # 2026-10-13（v1.19.47.25）：班主任在工作台直接看**本班班级课表**（多个班用页签切换）。
     # 取数与教务端班级课表同源（get_class_view），并沿用同一套可见范围，避免越权。
     class_schedules = []
     if is_head and active_term:
@@ -154,7 +154,7 @@ def index():
                                          current_user.id)
             class_schedules = []
 
-    # 2026-10-13（v1.19.47.24）：待办与通知 —— 换课待我确认 / 问卷待填 / 最近通知 + 未读数
+    # 2026-10-13（v1.19.47.25）：待办与通知 —— 换课待我确认 / 问卷待填 / 最近通知 + 未读数
     try:
         todo = todo_service.get_teacher_todo(current_user, teacher)
     except Exception:                       # 聚合层已逐项降级，这里只兜底
@@ -165,6 +165,8 @@ def index():
 
     return render_template('workbench/index.html', teacher=teacher,
                            todo=todo,
+                           # 2026-10-13：个人信息卡片要展示「权限组」，与个人中心页同口径
+                           pg=current_user.permission_group,
                            class_schedules=class_schedules,
                            can_class_view=can_class_view,
                            can_records=can_records,
@@ -218,27 +220,35 @@ def my_schedule():
 @bp.route('/phone', methods=['POST'])
 @login_required
 def change_phone():
-    """教师修改自己的手机号：校验密码与全局唯一后，同步登录名与教师名单"""
+    """教师修改自己的手机号：校验密码与全局唯一后，同步登录名与教师名单
+
+    2026-10-13：入口从工作台弹窗搬到「个人信息」页，`return_to=profile` 时改完回原页；
+    取值只认白名单，不接受任意跳转地址（防开放重定向）。
+    """
     teacher = teacher_service.teacher_of_user(current_user)
     new_phone = (request.form.get('new_phone') or '').strip()
     pwd = request.form.get('current_password') or ''
+    back = _RETURN_TO.get(request.form.get('return_to') or '')
+
+    def _back():
+        return redirect(url_for(back) if back else url_for('workbench.index'))
 
     if not current_user.check_password(pwd):
         flash('当前密码不正确', 'danger')
-        return redirect(url_for('workbench.index'))
+        return _back()
     if not _PHONE_RE.match(new_phone):
         flash('新手机号格式不正确（11 位，1 开头）', 'danger')
-        return redirect(url_for('workbench.index'))
+        return _back()
 
     exist = User.query.filter_by(username=new_phone).first()
     if exist and exist.id != current_user.id:
         flash('该手机号已被其他账号使用', 'danger')
-        return redirect(url_for('workbench.index'))
+        return _back()
     if teacher:
         dup = Teacher.query.filter_by(phone=new_phone).first()
         if dup and dup.id != teacher.id:
             flash('该手机号已被其他教师使用', 'danger')
-            return redirect(url_for('workbench.index'))
+            return _back()
 
     old_username = current_user.username
     current_user.username = new_phone
@@ -248,7 +258,37 @@ def change_phone():
     log_operation(current_user, '修改', '手机号', current_user.id,
                   f'{old_username} → {new_phone}', module='workbench')
     flash('手机号已更新，下次登录请使用新手机号', 'success')
-    return redirect(url_for('workbench.index'))
+    return _back()
+
+
+# ==================== 个人信息（个人中心） 2026-10-13 ====================
+# 工作台「个人信息」页：个人隐私信息（手机号 / 身份证）+ 账号安全（登录密码）
+# + 基本资料 + 更多设置入口。与右上角头像里的「用户设置」(auth.my_settings) 分工：
+# 本页面向教师本人、隐私信息置顶；AI 配置 / 权限清单 / 界面偏好仍留在用户设置页。
+
+# 手机号修改后的回跳白名单（值 = 端点名）
+_RETURN_TO = {'profile': 'workbench.profile'}
+
+# 数据范围展示名（与 auth.SCOPE_LABELS 同口径，页面只读展示用）
+_SCOPE_LABELS = {'school': '全校', 'grade': '本年级', 'class': '本班',
+                 'self': '仅本人', 'none': '受限（仅基础页面）'}
+
+
+@bp.route('/profile')
+@login_required
+def profile():
+    """个人信息页：本人隐私信息与账号安全（手机号 / 登录密码 / 身份证）+ 基本资料
+
+    仅登录即可访问（只展示与修改本人数据）；未关联教师名单的账号（如纯管理员）
+    也能正常打开，教师相关字段以「未关联」占位。
+    """
+    teacher = teacher_service.teacher_of_user(current_user)
+    pg = current_user.permission_group
+    scope = (getattr(pg, 'scope_type', '') or 'none') if pg else (
+        'school' if current_user.role == 'admin' else 'none')
+    return render_template('workbench/profile.html',
+                           teacher=teacher, pg=pg,
+                           scope_label=_SCOPE_LABELS.get(scope, scope))
 
 
 @bp.route('/achievement/add', methods=['POST'])

@@ -72,7 +72,7 @@ def login():
             return render_template('auth/login.html', form=form)
 
         # M-3：账号维度锁定（多 IP 分布式爆破时，IP 限流形同虚设）
-        # v1.19.47.24 S-7：归一化 —— strip().lower() 避免“ Admin”“ADMIN” 重置计数绕过锁定
+        # v1.19.47.25 S-7：归一化 —— strip().lower() 避免“ Admin”“ADMIN” 重置计数绕过锁定
         username_typed = (form.username.data or '').strip().lower()
         acct_fail_key = f'login_fail_{username_typed}'
         acct_lock_key = f'login_lock_{username_typed}'
@@ -139,11 +139,15 @@ def logout():
 @login_required
 def change_password():
     form = ChangePasswordForm()
+    # 2026-10-13：工作台「个人信息」页（workbench.profile）内嵌同一套改密表单，POST 到本路由，
+    # 用 next 回跳原页面（只接受站内相对路径）；不传 next 时行为与原来完全一致。
+    next_page = (request.values.get('next') or '').strip()
+    back = next_page if _is_safe_redirect(next_page) else ''
     if form.validate_on_submit():
         if not current_user.check_password(form.old_password.data):
             flash('原密码不正确', 'danger')
         else:
-            # v1.19.47.24 M-15：新口令必须过弱口令黑名单与强度校验，防止把弱口令写入库
+            # v1.19.47.25 M-15：新口令必须过弱口令黑名单与强度校验，防止把弱口令写入库
             from app.utils.password_policy import validate_password
             ok, msg = validate_password(form.new_password.data,
                                         username=current_user.username,
@@ -158,7 +162,14 @@ def change_password():
             # M-2：更新本设备会话摘要（保持登录）；其它设备的旧摘要失效 → 被踢下线
             stamp(current_user)
             flash('密码修改成功，其它设备的登录状态已失效', 'success')
-            return redirect(url_for('welcome.index'))
+            return redirect(back or url_for('welcome.index'))
+    if back and request.method == 'POST':
+        # 来自嵌入式表单且校验/原密码未通过：回跳原页面并提示（原页面没有字段级错误展示位）
+        msgs = [e for f in (form.old_password, form.new_password,
+                            form.confirm_password) for e in f.errors]
+        if msgs:
+            flash('；'.join(msgs), 'danger')
+        return redirect(back)
     return render_template('auth/change_password.html', form=form)
 
 

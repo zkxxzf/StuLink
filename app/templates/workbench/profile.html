@@ -1,0 +1,190 @@
+{# 教师工作台 · 个人信息（个人中心） 2026-10-13
+   定位：本人隐私信息与账号安全的自助入口（看 + 改），与右上角头像里的
+   「用户设置」(auth.my_settings) 互补 —— 那边是 AI 配置 / 权限清单 / 界面偏好。
+   规划：隐私信息（手机号 / 登录密码 / 身份证）置顶，随后是只读基本资料与更多设置入口。 #}
+{% extends "base.html" %}
+{% block title %}个人信息 - 教师工作台{% endblock %}
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
+    <div>
+        <h4 class="fw-bold mb-0"><i class="bi bi-person-vcard"></i> 个人信息</h4>
+        <nav aria-label="breadcrumb">
+            <ol class="breadcrumb small mb-0">
+                <li class="breadcrumb-item"><a href="{{ url_for('workbench.index') }}">工作台</a></li>
+                <li class="breadcrumb-item active">个人信息</li>
+            </ol>
+        </nav>
+    </div>
+    <a href="{{ url_for('workbench.index') }}" class="btn btn-sm btn-outline-secondary">
+        <i class="bi bi-arrow-left"></i> 返回工作台
+    </a>
+</div>
+
+{% if not teacher %}
+<div class="alert alert-warning">
+    <i class="bi bi-exclamation-triangle"></i>
+    当前账号（{{ current_user.real_name }}）尚未关联教务教师名单，教师专属字段暂无法展示。
+    如需关联，请联系管理员在「教务管理 - 教师名单」中导入名单并关联本账号。
+</div>
+{% endif %}
+
+<div class="row g-3">
+    {# ============ ① 隐私信息与账号安全（最前） ============ #}
+    <div class="col-lg-6">
+        <div class="card h-100">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <span><i class="bi bi-shield-lock"></i> 隐私信息与账号安全</span>
+                <span class="badge bg-secondary-subtle text-secondary-emphasis">仅本人可见</span>
+            </div>
+            <div class="card-body">
+
+                {# 手机号（= 登录账号） #}
+                <div class="d-flex justify-content-between align-items-center mb-1">
+                    <div>
+                        <div class="text-muted small">手机号（登录账号）</div>
+                        <div class="fw-bold">{{ teacher.phone if teacher and teacher.phone else current_user.username }}</div>
+                    </div>
+                    <button class="btn btn-sm btn-outline-primary" type="button"
+                            data-bs-toggle="collapse" data-bs-target="#phoneForm" aria-expanded="false">
+                        <i class="bi bi-pencil"></i> 修改
+                    </button>
+                </div>
+                <div class="collapse mb-2" id="phoneForm">
+                    <form method="POST" action="{{ url_for('workbench.change_phone') }}"
+                          class="border rounded p-2" style="background: var(--sl-surface);">
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                        <input type="hidden" name="return_to" value="profile">
+                        <div class="mb-2">
+                            <label class="form-label small mb-1">新手机号</label>
+                            <input name="new_phone" class="form-control form-control-sm" maxlength="11"
+                                   value="{{ teacher.phone if teacher and teacher.phone else '' }}" required>
+                        </div>
+                        <div class="mb-2">
+                            <label class="form-label small mb-1">当前密码（确认身份）</label>
+                            <input type="password" name="current_password" class="form-control form-control-sm" required>
+                        </div>
+                        <div class="form-text mb-2">手机号即登录账号，修改后请使用新手机号登录。</div>
+                        <button type="submit" class="btn btn-primary btn-sm">确认修改</button>
+                    </form>
+                </div>
+
+                <hr class="my-2">
+
+                {# 登录密码 #}
+                <div class="d-flex justify-content-between align-items-center mb-1">
+                    <div>
+                        <div class="text-muted small">登录密码</div>
+                        <div>
+                            {% if current_user.must_change_pwd %}
+                            <span class="badge bg-danger">首次登录未修改</span>
+                            <span class="text-muted small">改密前其它功能会受限</span>
+                            {% else %}
+                            <span class="text-success"><i class="bi bi-check-circle"></i> 已设置</span>
+                            {% endif %}
+                        </div>
+                    </div>
+                    <button class="btn btn-sm btn-outline-primary" type="button"
+                            data-bs-toggle="collapse" data-bs-target="#pwdForm" aria-expanded="false">
+                        <i class="bi bi-key"></i> 修改
+                    </button>
+                </div>
+                <div class="collapse mb-2" id="pwdForm">
+                    {# 复用 auth.change_password 的同一套校验（弱口令黑名单 / 强度 / 与原密码比较），
+                       成功后由该路由按 next 回跳本页；不在此处重写一份改密逻辑。 #}
+                    <form method="POST" action="{{ url_for('auth.change_password') }}"
+                          class="border rounded p-2" style="background: var(--sl-surface);">
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                        <input type="hidden" name="next" value="{{ url_for('workbench.profile') }}">
+                        <div class="mb-2">
+                            <label class="form-label small mb-1">原密码</label>
+                            <input type="password" name="old_password" class="form-control form-control-sm" required>
+                        </div>
+                        <div class="mb-2">
+                            <label class="form-label small mb-1">新密码</label>
+                            <input type="password" name="new_password" class="form-control form-control-sm" required>
+                        </div>
+                        <div class="mb-2">
+                            <label class="form-label small mb-1">确认新密码</label>
+                            <input type="password" name="confirm_password" class="form-control form-control-sm" required>
+                        </div>
+                        <div class="form-text mb-2">修改成功后，其它设备的登录状态会立即失效（本设备保持登录）。</div>
+                        <button type="submit" class="btn btn-primary btn-sm">确认修改</button>
+                    </form>
+                </div>
+
+                <hr class="my-2">
+
+                {# 身份证（本人不可改） #}
+                <div class="d-flex justify-content-between align-items-center">
+                    <div>
+                        <div class="text-muted small">身份证号</div>
+                        <div>
+                            {% if teacher %}
+                                {% if teacher.id_card_enc %}
+                                <span class="text-success"><i class="bi bi-check-circle"></i> 已录入</span>
+                                {% else %}
+                                <span class="text-warning">未录入（请联系管理员补录）</span>
+                                {% endif %}
+                            {% else %}
+                            <span class="text-muted">-</span>
+                            {% endif %}
+                        </div>
+                    </div>
+                    <span class="text-muted small"><i class="bi bi-lock"></i> 仅管理员可更新</span>
+                </div>
+
+                <div class="text-muted small mt-3">
+                    <i class="bi bi-info-circle"></i>
+                    手机号即登录账号；身份证属于实名信息，本人不可修改，如填写有误请联系管理员在教师名单中更正。
+                </div>
+            </div>
+        </div>
+    </div>
+
+    {# ============ ② 基本资料（只读） ============ #}
+    <div class="col-lg-6">
+        <div class="card mb-3">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <span><i class="bi bi-person-badge"></i> 基本资料</span>
+                <span class="badge bg-secondary-subtle text-secondary-emphasis">只读 · 如需变更请联系管理员</span>
+            </div>
+            <div class="card-body">
+                <table class="table table-sm mb-0">
+                    <tr><th style="width:110px;">姓名</th><td class="fw-bold">{{ teacher.name if teacher else current_user.real_name }}</td></tr>
+                    <tr><th>教师编号</th><td><code>{{ teacher.teacher_uid if teacher else '-' }}</code></td></tr>
+                    <tr><th>任教学科</th><td>{{ (teacher.subject if teacher else '') or '-' }}</td></tr>
+                    <tr><th>身份</th><td>{{ current_user.display_role }}</td></tr>
+                    <tr><th>账号</th><td>{{ current_user.username }}</td></tr>
+                    <tr><th>权限组</th><td>{{ pg.name if pg else '（未分配）' }}</td></tr>
+                    <tr><th>数据范围</th><td><span class="badge bg-info-subtle text-info-emphasis">{{ scope_label }}</span></td></tr>
+                </table>
+            </div>
+        </div>
+
+        {# ============ ③ 更多设置（跳转到右上角头像里的用户设置） ============ #}
+        <div class="card">
+            <div class="card-header"><i class="bi bi-sliders"></i> 更多设置</div>
+            <div class="card-body">
+                <div class="d-flex flex-wrap gap-2">
+                    <a href="{{ url_for('auth.my_settings') }}" class="btn btn-sm btn-outline-primary">
+                        <i class="bi bi-gear"></i> 用户设置（AI 配置 / 我的权限 / 界面偏好）
+                    </a>
+                    {# 我的课表受 workbench.class_view 控制：无权限就不显示（避免"看得见、点了 403"） #}
+                    {% if current_user.has_perm('workbench.class_view') %}
+                    <a href="{{ url_for('workbench.my_schedule') }}" class="btn btn-sm btn-outline-secondary">
+                        <i class="bi bi-calendar3"></i> 我的课表
+                    </a>
+                    {% endif %}
+                    <a href="{{ url_for('auth.logout') }}" class="btn btn-sm btn-outline-danger">
+                        <i class="bi bi-box-arrow-right"></i> 退出登录
+                    </a>
+                </div>
+                <div class="text-muted small mt-2">
+                    <i class="bi bi-info-circle"></i>
+                    手机号找回、账号停用等需要管理员操作的事项，请联系学校信息管理员。
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

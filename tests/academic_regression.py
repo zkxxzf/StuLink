@@ -33,7 +33,7 @@ config_mod.Config.SQLALCHEMY_BINDS = {
     'history': 'sqlite:///' + os.path.join(_TMP, 'history.db'),
     'grades': 'sqlite:///' + os.path.join(_TMP, 'grades.db'),
     'points': 'sqlite:///' + os.path.join(_TMP, 'points.db'),
-    # 2026-10-13（v1.19.47.24）：德育奖惩库
+    # 2026-10-13（v1.19.47.25）：德育奖惩库
     'morality': 'sqlite:///' + os.path.join(_TMP, 'morality.db'),
     'academic': 'sqlite:///' + os.path.join(_TMP, 'academic.db'),
     # 2026-10-10：教务分库——查课 / 业绩 / 表单 各自独立库
@@ -1792,7 +1792,7 @@ def check_inspection_mark():
 
 @item('SWAPEXCH')
 def check_two_person_exchange():
-    """两人换课（v1.19.47.24）：换时段 / 换班上课 / 请人代课 × 临时与永久，
+    """两人换课（v1.19.47.25）：换时段 / 换班上课 / 请人代课 × 临时与永久，
     覆盖「对方先确认 → 教务审批 → 执行」全链路 + 拒绝 / 越权 / 校验路径。"""
     from app.modules.academic.services import swap_service
 
@@ -2115,7 +2115,7 @@ def check_swap_exchange_batch():
 
 @item('SWAPMIXED')
 def check_swap_mixed_batch():
-    """调课页合并（v1.19.47.24）：一次提交 = 几节调空档 + 几节与同事对调（同一批次）。"""
+    """调课页合并（v1.19.47.25）：一次提交 = 几节调空档 + 几节与同事对调（同一批次）。"""
     from app.models.timetable import ScheduleEntry, ScheduleSwap
     from app.modules.academic.services import swap_service
 
@@ -2337,7 +2337,7 @@ def check_swap_bulk_offset():
 
 @item('WORKBENCHSWAP')
 def check_workbench_swap():
-    """教师工作台里的调课区块（v1.19.47.24）：入口 + 待我确认 + 我的申请。"""
+    """教师工作台里的调课区块（v1.19.47.25）：入口 + 待我确认 + 我的申请。"""
     with app.test_client() as c:
         login(c, 'ac_admin', TEST_PWD)
         r = c.get('/workbench/')      # 蓝图前缀 /workbench + 路由 '/'（不带斜杠会 308）
@@ -2351,6 +2351,101 @@ def check_workbench_swap():
         case('工作台：调课入口（有 academic.swap 时出现两个申请入口，否则至少可查看记录）',
              bool(html) and (has_swap_entry or '/academic/swap' in html),
              f'entries={has_swap_entry}')
+
+
+@item('WORKBENCHPROFILE')
+def check_workbench_profile():
+    """教师工作台「个人信息」（2026-10-13）：隐私信息（手机号/登录密码/身份证）在工作台最前；
+    「个人中心」独立页可自助改手机号与登录密码（复用 auth 改密校验，成功后回跳本页）。"""
+    with app.app_context():
+        u = User.query.filter_by(username='wb_prof').first()
+        if not u:
+            u = User(username='wb_prof', real_name='工作台测试教师', role='teacher',
+                     must_change_pwd=False)
+            u.set_password(TEST_PWD)
+            db.session.add(u)
+            db.session.flush()
+        t = Teacher.query.filter_by(teacher_uid='TWB001').first()
+        if not t:
+            t = Teacher(teacher_uid='TWB001', name='工作台测试教师', subject='语文',
+                        status='active', phone='13800000001', user_id=u.id)
+            db.session.add(t)
+            db.session.commit()
+        uid, tid = u.id, t.id
+
+    with app.test_client() as c:
+        login(c, 'wb_prof', TEST_PWD)
+        r = c.get('/workbench/')
+        html = r.get_data(as_text=True) if r.status_code == 200 else ''
+        case('个人信息：工作台首页 200', r.status_code == 200, str(r.status_code))
+        case('个人信息：工作台首页有「个人中心」入口', '/workbench/profile' in html, 'entry')
+        # 隐私信息必须排在基本资料（教师编号）之前 —— 本轮"隐私信息放到最前边"的口径
+        case('个人信息：首页手机号在教师编号之前',
+             bool(html) and -1 < html.find('手机号（登录账号）') < html.find('教师编号'),
+             'order')
+        case('个人信息：首页不再有「修改手机号」弹窗', 'phoneModal' not in html, 'modal')
+
+        r2 = c.get('/workbench/profile')
+        h2 = r2.get_data(as_text=True) if r2.status_code == 200 else ''
+        case('个人信息页 200', r2.status_code == 200, str(r2.status_code))
+        case('个人信息页：隐私三项齐全（手机号/登录密码/身份证）',
+             all(k in h2 for k in ('手机号（登录账号）', '登录密码', '身份证号')), 'items')
+        case('个人信息页：手机号表单回跳本页',
+             'name="return_to" value="profile"' in h2, 'return_to')
+        case('个人信息页：改密表单复用 auth 改密路由并回跳本页',
+             ('name="next"' in h2) and ('name="old_password"' in h2), 'pwd form')
+
+        # ① 手机号：密码错 → 拒绝；密码对 → 登录名与教师名单同步
+        csrf = get_csrf(c, '/workbench/profile')
+        bad = c.post('/workbench/phone',
+                     data={'csrf_token': csrf, 'new_phone': '13800000002',
+                           'current_password': 'wrong-pwd', 'return_to': 'profile'})
+        with app.app_context():
+            case('个人信息：密码错误时手机号不变',
+                 db.session.get(User, uid).username == 'wb_prof'
+                 and db.session.get(Teacher, tid).phone == '13800000001', 'unchanged')
+        case('个人信息：手机号修改失败回跳个人信息页',
+             bad.status_code == 302 and bad.headers['Location'].endswith('/workbench/profile'),
+             str(bad.headers.get('Location')))
+        csrf = get_csrf(c, '/workbench/profile')
+        ok = c.post('/workbench/phone',
+                    data={'csrf_token': csrf, 'new_phone': '13800000002',
+                          'current_password': TEST_PWD, 'return_to': 'profile'})
+        with app.app_context():
+            u2, t2 = db.session.get(User, uid), db.session.get(Teacher, tid)
+            case('个人信息：手机号修改成功并同步登录名 / 教师名单',
+                 u2.username == '13800000002' and t2.phone == '13800000002',
+                 f'{u2.username}/{t2.phone}')
+            # 复原（同一进程内后续用例还会登录这个账号）
+            u2.username, t2.phone = 'wb_prof', '13800000001'
+            db.session.commit()
+        case('个人信息：手机号修改成功回跳个人信息页',
+             ok.status_code == 302 and ok.headers['Location'].endswith('/workbench/profile'),
+             str(ok.headers.get('Location')))
+
+        # ② 登录密码：走 auth.change_password 同一套校验，next 回跳个人信息页
+        csrf = get_csrf(c, '/workbench/profile')
+        bad2 = c.post('/change-password',
+                      data={'csrf_token': csrf, 'old_password': 'nope-not-it',
+                            'new_password': 'New#Pwd2026', 'confirm_password': 'New#Pwd2026',
+                            'next': '/workbench/profile'})
+        case('个人信息：原密码错误 → 回跳个人信息页（不落到独立改密页）',
+             bad2.status_code == 302 and bad2.headers['Location'].endswith('/workbench/profile'),
+             str(bad2.headers.get('Location')))
+        with app.app_context():
+            case('个人信息：原密码错误时口令未变',
+                 db.session.get(User, uid).check_password(TEST_PWD), 'pwd kept')
+        csrf = get_csrf(c, '/workbench/profile')
+        okp = c.post('/change-password',
+                     data={'csrf_token': csrf, 'old_password': TEST_PWD,
+                           'new_password': 'New#Pwd2026', 'confirm_password': 'New#Pwd2026',
+                           'next': '/workbench/profile'})
+        case('个人信息：改密成功 → 回跳个人信息页',
+             okp.status_code == 302 and okp.headers['Location'].endswith('/workbench/profile'),
+             str(okp.headers.get('Location')))
+        with app.app_context():
+            case('个人信息：新口令已生效',
+                 db.session.get(User, uid).check_password('New#Pwd2026'), 'new pwd')
 
 
 @item('SWAPCONFIRM')

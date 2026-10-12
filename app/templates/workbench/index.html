@@ -31,23 +31,41 @@
     <div class="col-lg-5">
         <div class="card h-100">
             <div class="card-header d-flex justify-content-between align-items-center">
-                <span><i class="bi bi-person-badge"></i> 我的信息</span>
-                <button class="btn btn-sm btn-outline-primary" data-bs-toggle="modal" data-bs-target="#phoneModal">
-                    <i class="bi bi-phone"></i> 修改手机号
-                </button>
+                <span><i class="bi bi-person-vcard"></i> 个人信息</span>
+                <a href="{{ url_for('workbench.profile') }}" class="btn btn-sm btn-outline-primary">
+                    <i class="bi bi-pencil-square"></i> 个人中心
+                </a>
             </div>
             <div class="card-body small">
+                {# 2026-10-13：个人隐私信息（手机号 / 登录密码 / 身份证）提到最前，
+                   完整资料与各项修改统一收到「个人中心」页（原「修改手机号」弹窗已迁移）。 #}
+                <div class="d-flex justify-content-between align-items-center mb-1">
+                    <span class="text-muted">手机号（登录账号）</span>
+                    <span class="fw-bold">{{ (teacher.phone if teacher and teacher.phone else current_user.username) or '-' }}</span>
+                </div>
+                <div class="d-flex justify-content-between align-items-center mb-1">
+                    <span class="text-muted">登录密码</span>
+                    {% if current_user.must_change_pwd %}
+                    <a href="{{ url_for('auth.change_password') }}" class="text-danger text-decoration-none">
+                        <i class="bi bi-exclamation-circle"></i> 首次登录未修改，去修改
+                    </a>
+                    {% else %}
+                    <span class="text-success"><i class="bi bi-check-circle"></i> 已设置</span>
+                    {% endif %}
+                </div>
+                <div class="d-flex justify-content-between align-items-center mb-2">
+                    <span class="text-muted">身份证号</span>
+                    {% if teacher.id_card_enc %}<span class="text-success"><i class="bi bi-check-circle"></i> 已录入</span>
+                    {% else %}<span class="text-warning">未录入（请联系管理员补录）</span>{% endif %}
+                </div>
+                <hr class="my-2">
                 <div class="row">
                     <div class="col-6 mb-2"><span class="text-muted">姓名：</span><span class="fw-bold">{{ teacher.name }}</span></div>
                     <div class="col-6 mb-2"><span class="text-muted">教师编号：</span><code>{{ teacher.teacher_uid }}</code></div>
                     <div class="col-6 mb-2"><span class="text-muted">任教学科：</span>{{ teacher.subject or '-' }}</div>
-                    <div class="col-6 mb-2"><span class="text-muted">身份：</span>{{ current_user.role_display }}</div>
-                    <div class="col-6 mb-2"><span class="text-muted">手机号：</span>{{ teacher.phone or '-' }}</div>
-                    <div class="col-6 mb-2">
-                        <span class="text-muted">身份证：</span>
-                        {% if teacher.id_card_enc %}<span class="text-success">已录入</span>
-                        {% else %}<span class="text-warning">未录入（请联系管理员补录）</span>{% endif %}
-                    </div>
+                    <div class="col-6 mb-2"><span class="text-muted">身份：</span>{{ current_user.display_role }}</div>
+                    <div class="col-6 mb-2"><span class="text-muted">权限组：</span>{{ pg.name if pg else '（未分配）' }}</div>
+                    <div class="col-6 mb-2"><span class="text-muted">账号：</span>{{ current_user.username }}</div>
                 </div>
                 <div class="text-muted mt-1">
                     <i class="bi bi-info-circle"></i> 手机号即登录账号，修改后请使用新手机号登录；身份证信息本人不可修改，仅管理员可更新。
@@ -88,7 +106,7 @@
     </div>
 </div>
 
-{# 2026-10-13（v1.19.47.24）：待办与通知 #}
+{# 2026-10-13（v1.19.47.25）：待办与通知 #}
 <div class="row g-3 mb-3">
     <div class="col-12">
         <div class="card">
@@ -231,7 +249,7 @@
     </div>
 </div>
 
-{# 2026-10-13（v1.19.47.24）：班主任 —— 工作台直接看本班班级课表（带多个班时用页签切换） #}
+{# 2026-10-13（v1.19.47.25）：班主任 —— 工作台直接看本班班级课表（带多个班时用页签切换） #}
 {% if is_head %}
 <div class="row g-3 mb-3">
     <div class="col-12">
@@ -318,7 +336,7 @@
     </div>
 </div>
 
-<!-- 调课（v1.19.47.24：入口 + 待我确认 + 我的申请，都在工作台完成） -->
+<!-- 调课（v1.19.47.25：入口 + 待我确认 + 我的申请，都在工作台完成） -->
 <div class="card mt-3 mb-3">
     <div class="card-header d-flex justify-content-between align-items-center">
         <span><i class="bi bi-arrow-left-right"></i> 调课
@@ -463,35 +481,7 @@
 </div>
 {% endif %}
 
-<!-- 修改手机号 -->
-<div class="modal fade" id="phoneModal" tabindex="-1">
-    <div class="modal-dialog modal-sm">
-        <div class="modal-content">
-            <div class="modal-header">
-                <h5 class="modal-title">修改手机号</h5>
-                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
-            </div>
-            <form method="POST" action="{{ url_for('workbench.change_phone') }}">
-                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                <div class="modal-body">
-                    <div class="mb-3">
-                        <label class="form-label">新手机号</label>
-                        <input name="new_phone" class="form-control" maxlength="11"
-                               value="{{ teacher.phone or '' }}" required>
-                    </div>
-                    <div class="mb-2">
-                        <label class="form-label">当前密码（确认身份）</label>
-                        <input type="password" name="current_password" class="form-control" required>
-                    </div>
-                    <div class="form-text">修改后手机号即为新登录账号，请使用新手机号登录。</div>
-                </div>
-                <div class="modal-footer">
-                    <button type="submit" class="btn btn-primary">确认修改</button>
-                </div>
-            </form>
-        </div>
-    </div>
-</div>
+<!-- 修改手机号：2026-10-13 起移到「个人中心」页（workbench.profile），首页不再弹窗 -->
 
 <!-- 提交业绩 -->
 <div class="modal fade" id="achModal" tabindex="-1">
@@ -586,7 +576,7 @@
 </script>
 {% endif %}
 
-{# v1.19.47.24：工作台内直接确认 / 拒绝同事发起的换课、代课 #}
+{# v1.19.47.25：工作台内直接确认 / 拒绝同事发起的换课、代课 #}
 <script>
 (function () {
     var respondUrl = {{ url_for('academic.swap_partner_respond', swap_id=0)|tojson }};
