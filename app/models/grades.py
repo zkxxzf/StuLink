@@ -566,6 +566,8 @@ class ExamAffair(db.Model):
     selection_mode = db.Column(db.String(10), default='selected')  # 编排分组模式：selected 按选科分组 / plain 不选科（全体一组，考场全通用）
     non_attend_mode = db.Column(db.String(10), default='skip')     # 非参考学生处理：skip 不安排考场 / tail 安排到同选科考场尾场
     subject_prefixes = db.Column(db.Text)                          # 选科考号前后缀 JSON：{"物化生":{"prefix":"1701","suffix":""}}
+    # v1.19.43.0 监考编排：每考场默认监考人数（1/2/3，用户口径默认 1 人）
+    invig_slots = db.Column(db.Integer, default=1)
     status = db.Column(db.String(10), default='draft')     # draft / arranged / linked
     note = db.Column(db.Text)
     operator_id = db.Column(db.Integer)
@@ -727,4 +729,111 @@ class ScoreChangeLog(db.Model):
     __table_args__ = (
         db.Index('idx_scorelog_exam_time', 'exam_id', 'operated_at'),
         db.Index('idx_scorelog_student', 'exam_id', 'student_no'),
+    )
+
+
+# ============ v1.19.43.0 考务环节④⑤⑥：任课核对 / 考试时间表 / 监考编排 ============
+#
+# 设计口径（用户 2026-10-12 定案）：
+#   · 三者都是**本批次（本次考试）**的数据，不回写全局任课映射；
+#   · 环节④ 只核对「本次考试」的年级任课安排，供环节⑥ 的教师池与回避使用；
+#   · 环节⑤ 考试时间表承载「时间段 → 考试科目」，是回避教师的依据；
+#   · 环节⑥ 监考表一人一格；每考场监考人数 1/2/3（默认 1，存 ExamAffair.invig_slots）；
+#     回避规则：某场次科目 = 化学 → 所有任教化学的老师不排该场次。
+
+
+class AffairTeacher(db.Model):
+    """环节④ 本批次任课教师核对（仅本次考试）
+
+    默认从当前 TeacherSubjectLink（该年级 active）带入，可在考务向导内临时调整
+    （如某老师临时代课一两个月）。仅作用于本考务批次，不改全局任课映射。
+    """
+    __bind_key__ = 'grades'
+    __tablename__ = 'affair_teachers'
+
+    id = db.Column(db.Integer, primary_key=True)
+    affair_id = db.Column(db.Integer, nullable=False)
+    grade = db.Column(db.String(10))
+    class_name = db.Column(db.String(10), nullable=False)
+    subject = db.Column(db.String(10), nullable=False)
+    user_id = db.Column(db.Integer)                  # 关联 users.id（可空：校外/离职教师）
+    teacher_name = db.Column(db.String(50))
+    source = db.Column(db.String(10), default='sync')   # sync 带入 / manual 人工修订
+    updated_at = db.Column(db.DateTime, default=datetime.now, onupdate=datetime.now)
+
+    __table_args__ = (
+        db.UniqueConstraint('affair_id', 'class_name', 'subject', name='uq_affair_teacher'),
+        db.Index('idx_affair_teacher_affair', 'affair_id'),
+    )
+
+
+class AffairSchedule(db.Model):
+    """环节⑤ 考试时间表：本批次每个场次（时间段 → 考试科目）
+
+    一行 = 一个场次。subject 既是「这场考什么」的展示，也是环节⑥ 回避教师的依据
+    （考化学 → 化学老师不监考本场）。selection 可空（如按选科分场时标注）。
+    """
+    __bind_key__ = 'grades'
+    __tablename__ = 'affair_schedules'
+
+    id = db.Column(db.Integer, primary_key=True)
+    affair_id = db.Column(db.Integer, nullable=False)
+    exam_date = db.Column(db.Date)                   # 考试日期
+    start_time = db.Column(db.String(10))            # 开始时间（HH:MM）
+    end_time = db.Column(db.String(10))              # 结束时间（HH:MM）
+    subject = db.Column(db.String(20), nullable=False)   # 考试科目（回避依据）
+    selection = db.Column(db.String(20))             # 选科/分场标注（可空）
+    note = db.Column(db.String(100))
+    sort_order = db.Column(db.Integer, default=0)
+    created_at = db.Column(db.DateTime, default=datetime.now)
+
+    __table_args__ = (
+        db.Index('idx_affair_schedule_affair', 'affair_id'),
+    )
+
+
+class AffairInvigilator(db.Model):
+    """环节⑥ 其他监考员（本批次；可为**无系统账号**的校外老师）
+
+    仅用于本次考试的监考编排，不创建系统账号、不参与任何权限。
+    教师池 = 环节④ 任课教师（去重） + 本表的其他监考员。
+    """
+    __bind_key__ = 'grades'
+    __tablename__ = 'affair_invigilators'
+
+    id = db.Column(db.Integer, primary_key=True)
+    affair_id = db.Column(db.Integer, nullable=False)
+    name = db.Column(db.String(50), nullable=False)
+    subject = db.Column(db.String(50))               # 任教学科（可空/多科顿号分隔，用于回避）
+    note = db.Column(db.String(100))
+    created_at = db.Column(db.DateTime, default=datetime.now)
+
+    __table_args__ = (
+        db.UniqueConstraint('affair_id', 'name', name='uq_affair_invigilator'),
+        db.Index('idx_affair_invigilator_affair', 'affair_id'),
+    )
+
+
+class AffairInvigilation(db.Model):
+    """环节⑥ 监考安排结果：本批次「场次 × 考场 × 第 N 个监考位 → 监考老师」
+
+    一人一格：slot=1/2/3 对应监考老师1/2/3。name/subject 为快照，教师池变更不影响已排结果。
+    """
+    __bind_key__ = 'grades'
+    __tablename__ = 'affair_invigilations'
+
+    id = db.Column(db.Integer, primary_key=True)
+    affair_id = db.Column(db.Integer, nullable=False)
+    schedule_id = db.Column(db.Integer, nullable=False)   # → affair_schedules.id
+    room_no = db.Column(db.String(10), nullable=False)
+    slot = db.Column(db.Integer, default=1)               # 监考位 1/2/3
+    name = db.Column(db.String(50))                       # 监考老师（快照）
+    user_id = db.Column(db.Integer)                       # 关联 users.id（可空）
+    subject = db.Column(db.String(50))                    # 该老师任教学科（快照，留痕用）
+    updated_at = db.Column(db.DateTime, default=datetime.now, onupdate=datetime.now)
+
+    __table_args__ = (
+        db.UniqueConstraint('affair_id', 'schedule_id', 'room_no', 'slot',
+                            name='uq_affair_invigilation'),
+        db.Index('idx_affair_invig_affair', 'affair_id'),
     )

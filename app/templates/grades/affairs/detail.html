@@ -61,6 +61,9 @@
 {% set _s1 = stats.students > 0 %}
 {% set _s2 = rooms|length > 0 %}
 {% set _s3 = (arranged|length > 0) or (numbered > 0) %}
+{% set _s4 = invig_stat.n_teachers > 0 %}
+{% set _s5 = invig_stat.n_schedules > 0 %}
+{% set _s6 = invig_stat.n_invig > 0 %}
 <ol class="step-bar list-unstyled d-flex flex-wrap gap-2 mb-3 small">
     <li class="step-pill {{ 'done' if _s1 }}"><span class="num">1</span> 学生名单
         {% if _s1 %}<i class="bi bi-check-lg"></i>{% endif %}</li>
@@ -68,14 +71,23 @@
         {% if _s2 %}<i class="bi bi-check-lg"></i>{% endif %}</li>
     <li class="step-pill {{ 'done' if _s3 }}"><span class="num">3</span> 编排与考号生成
         {% if _s3 %}<i class="bi bi-check-lg"></i>{% endif %}</li>
-    <li class="step-pill"><span class="num">4</span> 导出</li>
+    <li class="step-pill {{ 'done' if _s4 }}"><span class="num">4</span> 核对任课教师
+        {% if _s4 %}<i class="bi bi-check-lg"></i>{% endif %}</li>
+    <li class="step-pill {{ 'done' if _s5 }}"><span class="num">5</span> 考试时间表
+        {% if _s5 %}<i class="bi bi-check-lg"></i>{% endif %}</li>
+    <li class="step-pill {{ 'done' if _s6 }}"><span class="num">6</span> 编排监考表
+        {% if _s6 %}<i class="bi bi-check-lg"></i>{% endif %}</li>
+    <li class="step-pill"><span class="num">7</span> 导出</li>
 </ol>
 
 <ul class="nav nav-tabs mb-3" id="affairTabs" role="tablist">
     <li class="nav-item"><button class="nav-link active" data-bs-toggle="tab" data-bs-target="#t1">① 学生名单{% if _s1 %} <i class="bi bi-check-lg small text-success"></i>{% endif %}</button></li>
     <li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#t2">② 考场设置{% if _s2 %} <i class="bi bi-check-lg small text-success"></i>{% endif %}</button></li>
     <li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#t3">③ 编排考号{% if _s3 %} <i class="bi bi-check-lg small text-success"></i>{% endif %}</button></li>
-    <li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#t4">④ 导出</button></li>
+    <li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#t4">④ 核对任课教师{% if _s4 %} <i class="bi bi-check-lg small text-success"></i>{% endif %}</button></li>
+    <li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#t5">⑤ 考试时间表{% if _s5 %} <i class="bi bi-check-lg small text-success"></i>{% endif %}</button></li>
+    <li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#t6">⑥ 编排监考表{% if _s6 %} <i class="bi bi-check-lg small text-success"></i>{% endif %}</button></li>
+    <li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#t7">⑦ 导出</button></li>
 </ul>
 
 <div class="tab-content">
@@ -439,8 +451,123 @@
         {% endif %}
     </div>
 
-    <!-- ===== 步骤④ 导出 ===== -->
+    <!-- ===== 环节④ 核对任课教师（仅本次考试） ===== -->
     <div class="tab-pane fade" id="t4">
+        <div class="d-flex flex-wrap align-items-center gap-2 mb-2">
+            <span class="small text-muted">核对本场考试的年级任课安排（仅作用于本批次，不改全局任课表）；
+                临时换老师可直接改，供环节⑥ 监考回避使用。</span>
+            <span class="ms-auto"></span>
+            <button class="btn btn-outline-secondary btn-sm" onclick="syncAffairTeachers()">
+                <i class="bi bi-arrow-repeat"></i> 从任课安排表重新带入</button>
+            <button class="btn btn-primary btn-sm" onclick="saveAffairTeachers()">
+                <i class="bi bi-save"></i> 保存</button>
+        </div>
+        <div class="alert alert-light border py-2 small">
+            表格为「班级 × 科目 → 任课教师」，留空表示该班不开设该科。
+        </div>
+        <div id="t4Body" class="table-responsive" style="max-height:66vh;overflow:auto">
+            <div class="text-center text-muted py-4"><div class="spinner-border spinner-border-sm"></div>
+                <span class="ms-2">加载中…</span></div>
+        </div>
+    </div>
+
+    <!-- ===== 环节⑤ 考试时间表（时段 → 科目，回避依据） ===== -->
+    <div class="tab-pane fade" id="t5">
+        <div class="d-flex flex-wrap align-items-center gap-2 mb-2">
+            <span class="small text-muted">一行 = 一个场次（时间段 + 考试科目）；科目用于环节⑥ 回避同科教师。</span>
+            <span class="ms-auto"></span>
+            <a href="{{ url_for('grades.affair_schedules_template', aid=affair.id) }}"
+               class="btn btn-outline-secondary btn-sm"><i class="bi bi-download"></i> 下载模板</a>
+            <label class="btn btn-outline-success btn-sm mb-0">
+                <i class="bi bi-upload"></i> 导入 Excel
+                <input type="file" accept=".xlsx,.xls" class="d-none" onchange="importSchedules(this)">
+            </label>
+            <button class="btn btn-primary btn-sm" onclick="addScheduleRow()">
+                <i class="bi bi-plus-lg"></i> 新增场次</button>
+        </div>
+        <div id="schedMsg" class="small mb-2"></div>
+        <div class="table-responsive" style="max-height:60vh;overflow:auto">
+            <table class="table table-sm table-hover align-middle mb-0">
+                <thead class="sticky-top bg-white"><tr>
+                    <th style="width:150px">考试日期</th><th style="width:110px">开始</th>
+                    <th style="width:110px">结束</th><th style="width:140px">考试科目</th>
+                    <th style="width:110px">选科</th><th>备注</th><th style="width:80px"></th>
+                </tr></thead>
+                <tbody id="schedBody">
+                {% for s in invig_stat.schedules %}
+                <tr data-sid="{{ s.id }}">
+                    <td><input type="date" class="form-control form-control-sm sc-date"
+                               value="{{ s.exam_date.strftime('%Y-%m-%d') if s.exam_date else '' }}"></td>
+                    <td><input type="time" class="form-control form-control-sm sc-start" value="{{ s.start_time or '' }}"></td>
+                    <td><input type="time" class="form-control form-control-sm sc-end" value="{{ s.end_time or '' }}"></td>
+                    <td><input class="form-control form-control-sm sc-subj" value="{{ s.subject or '' }}"></td>
+                    <td><input class="form-control form-control-sm sc-sel" value="{{ s.selection or '' }}"></td>
+                    <td><input class="form-control form-control-sm sc-note" value="{{ s.note or '' }}"></td>
+                    <td class="text-nowrap">
+                        <button class="btn btn-outline-primary btn-sm py-0" onclick="saveSchedule(this)">存</button>
+                        <button class="btn btn-outline-danger btn-sm py-0" onclick="delSchedule(this)">删</button>
+                    </td>
+                </tr>
+                {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        <div class="form-text mt-1">时间可留空；科目必填。</div>
+    </div>
+
+    <!-- ===== 环节⑥ 编排监考表 ===== -->
+    <div class="tab-pane fade" id="t6">
+        <div class="d-flex flex-wrap align-items-center gap-2 mb-2">
+            <label class="small mb-0">每考场监考人数</label>
+            <select id="invigSlots" class="form-select form-select-sm w-auto" onchange="saveInvigSlots()">
+                <option value="1">1 人</option><option value="2">2 人</option><option value="3">3 人</option>
+            </select>
+            <button class="btn btn-primary btn-sm" onclick="autoInvig()">
+                <i class="bi bi-magic"></i> 自动编排监考</button>
+            <span class="small text-muted">（回避本场科目教师；同一场次一人只监一个考场）</span>
+            <span class="ms-auto"></span>
+            <a href="{{ url_for('grades.affair_export_invig', aid=affair.id) }}"
+               class="btn btn-outline-success btn-sm"><i class="bi bi-file-earmark-excel"></i> 导出监考表</a>
+            <a href="{{ url_for('grades.affair_export_invig_pdf', aid=affair.id) }}"
+               class="btn btn-outline-success btn-sm"><i class="bi bi-file-earmark-pdf"></i> 监考表 PDF</a>
+        </div>
+        <div id="invigMsg" class="small mb-2"></div>
+
+        <div class="row g-3">
+            <div class="col-lg-4">
+                <div class="card">
+                    <div class="card-header py-2 d-flex align-items-center">
+                        <span class="fw-bold small"><i class="bi bi-people"></i> 监考教师池</span>
+                        <button class="btn btn-outline-primary btn-sm py-0 ms-auto" onclick="addOther()">+ 其他监考员</button>
+                    </div>
+                    <div class="card-body p-2" style="max-height:60vh;overflow:auto">
+                        <div class="text-muted small mb-1">任课教师（环节④，自动带入）</div>
+                        <div id="poolTeachers" class="mb-2"></div>
+                        <div class="text-muted small mb-1">其他监考员（可无账号：校外老师）</div>
+                        <div id="poolOthers"></div>
+                        <label class="btn btn-outline-success btn-sm w-100 mt-2 mb-0">
+                            <i class="bi bi-upload"></i> 导入其他监考员名单
+                            <input type="file" accept=".xlsx,.xls" class="d-none" onchange="importOthers(this)">
+                        </label>
+                    </div>
+                </div>
+            </div>
+            <div class="col-lg-8">
+                <div class="card">
+                    <div class="card-header py-2 small fw-bold"><i class="bi bi-table"></i> 监考表（一人一格，可下拉改）</div>
+                    <div class="card-body p-0" style="max-height:62vh;overflow:auto">
+                        <table class="table table-sm table-bordered align-middle mb-0" id="invigTable">
+                            <thead class="sticky-top bg-white"></thead>
+                            <tbody></tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ===== 环节⑦ 导出 ===== -->
+    <div class="tab-pane fade" id="t7">
         <div class="card p-3">
             <p class="text-muted small mb-2">A4 打印版 PDF（浏览器打开后可直接打印或另存）；Excel 版便于二次加工。</p>
             {# v1.12.2 网页版桌签预览在千人级会卡死，统一改为服务端生成 A4 PDF #}
@@ -468,6 +595,17 @@
                                 <i class="bi bi-download"></i> 按考场学生信息</a>
                             <a href="{{ url_for('grades.affair_cards_export', aid=affair.id) }}" class="btn btn-outline-success btn-sm">
                                 <i class="bi bi-download"></i> 竖版桌签</a>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-12">
+                    <div class="border rounded p-2">
+                        <div class="fw-bold small mb-2"><i class="bi bi-clipboard-check"></i> 监考表（环节⑥）</div>
+                        <div class="d-flex gap-2 flex-wrap">
+                            <a href="{{ url_for('grades.affair_export_invig', aid=affair.id) }}" class="btn btn-success btn-sm">
+                                <i class="bi bi-file-earmark-excel"></i> 导出监考表 Excel</a>
+                            <a href="{{ url_for('grades.affair_export_invig_pdf', aid=affair.id) }}" class="btn btn-outline-success btn-sm">
+                                <i class="bi bi-file-earmark-pdf"></i> 导出监考表 PDF</a>
                         </div>
                     </div>
                 </div>
@@ -1006,5 +1144,233 @@ function runArrange(){
 }
 // v1.12.2 步骤⑤成绩关联已移除：linkExam/unlinkExam/filterRoom 前端入口删除，
 // 后端 /link-exam 接口保留，供其他模块调用
+
+/* ============ v1.19.43.0 考务环节④⑤⑥⑦ ============ */
+// 环节④ 首次进入时加载任课核对矩阵
+var _affTeachers = null;   // {classes, subjects, cells, users}
+var _invigData = null;     // 环节⑥ 数据
+
+document.querySelector('#affairTabs button[data-bs-target="#t4"]').addEventListener('shown.bs.tab', loadAffairTeachers);
+document.querySelector('#affairTabs button[data-bs-target="#t6"]').addEventListener('shown.bs.tab', loadInvig);
+if(location.hash === '#t4'){ loadAffairTeachers(); }
+if(location.hash === '#t6'){ loadInvig(); }
+
+// ---------- 环节④ 任课核对 ----------
+function loadAffairTeachers(){
+    var box = document.getElementById('t4Body');
+    fetch('/grades/affairs/'+AID+'/teachers').then(r=>r.json()).then(d=>{
+        if(!d.success){ box.innerHTML = '<div class="alert alert-warning mb-0">'+escHtml(d.message||'加载失败')+'</div>'; return; }
+        _affTeachers = d.data; renderAffairTeachers();
+    });
+}
+function renderAffairTeachers(){
+    var d = _affTeachers; if(!d) return;
+    var h = ['<table class="table table-sm table-bordered align-middle mb-0"><thead class="sticky-top bg-white"><tr><th>班级</th>'];
+    d.subjects.forEach(s=>{ h.push('<th class="text-center">'+escHtml(s)+'</th>'); });
+    h.push('</tr></thead><tbody>');
+    d.classes.forEach(cls=>{
+        h.push('<tr><td class="text-nowrap fw-bold">'+escHtml(cls)+'</td>');
+        d.subjects.forEach(s=>{
+            var c = d.cells[cls+'|'+s] || {};
+            var cur = c.user_id ? String(c.user_id) : '';
+            var legacy = (c.name && !cur);   // 历史教师：有姓名无账号
+            var optHtml = '<option value=""'+(cur||legacy?'':' selected')+'>—</option>';
+            (d.users||[]).forEach(function(u){
+                var uid = String(u.id);
+                optHtml += '<option value="'+uid+'"'+(uid===cur?' selected':'')+'>'
+                         + escHtml(u.name||u.username||'')+'</option>';
+            });
+            if(legacy){ optHtml += '<option value="" selected>'+escHtml(c.name)+'（历史，无账号）</option>'; }
+            h.push('<td><select class="form-select form-select-sm at-sel" data-k="'+escHtml(cls+'|'+s)+'">'
+                   + optHtml + '</select></td>');
+        });
+        h.push('</tr>');
+    });
+    h.push('</tbody></table>');
+    document.getElementById('t4Body').innerHTML = h.join('');
+}
+function saveAffairTeachers(){
+    var cells = {};
+    document.querySelectorAll('#t4Body .at-sel').forEach(function(el){ cells[el.dataset.k] = el.value || ''; });
+    fetch('/grades/affairs/'+AID+'/teachers/save', {method:'POST',
+        headers:{'Content-Type':'application/json','X-CSRFToken':csrf()},
+        body: JSON.stringify({cells: cells})})
+        .then(r=>r.json()).then(d=>{ alert(d.ok?'已保存':'保存失败：'+(d.msg||'')); });
+}
+function syncAffairTeachers(){
+    if(!confirm('从「任课安排表」重新带入将覆盖本批次已做的临时调整，继续？')) return;
+    fetch('/grades/affairs/'+AID+'/teachers/sync', {method:'POST', headers:{'X-CSRFToken':csrf()}})
+        .then(r=>r.json()).then(d=>{ if(d.ok){ alert('已带入 '+d.synced+' 条'); loadAffairTeachers(); } else alert(d.msg||'失败'); });
+}
+
+// ---------- 环节⑤ 考试时间表 ----------
+function importSchedules(input){
+    if(!input.files.length) return;
+    var fd = new FormData(); fd.append('file', input.files[0]);
+    var msg = document.getElementById('schedMsg');
+    msg.className='small text-muted'; msg.textContent='导入中…';
+    fetch('/grades/affairs/'+AID+'/schedules/import', {method:'POST', body:fd, headers:{'X-CSRFToken':csrf()}})
+        .then(r=>r.json()).then(d=>{
+            input.value='';
+            if(!d.ok){ msg.className='small text-danger'; msg.textContent=d.msg; return; }
+            msg.className='small text-success';
+            msg.textContent='已导入 '+d.added+' 场'+(d.skipped?('，跳过 '+d.skipped+' 行（无科目）'):'');
+            setTimeout(()=>location.reload(), 600);
+        });
+}
+function addScheduleRow(){
+    var h = '<tr data-sid="">'
+        + '<td><input type="date" class="form-control form-control-sm sc-date"></td>'
+        + '<td><input type="time" class="form-control form-control-sm sc-start"></td>'
+        + '<td><input type="time" class="form-control form-control-sm sc-end"></td>'
+        + '<td><input class="form-control form-control-sm sc-subj"></td>'
+        + '<td><input class="form-control form-control-sm sc-sel"></td>'
+        + '<td><input class="form-control form-control-sm sc-note"></td>'
+        + '<td class="text-nowrap"><button class="btn btn-outline-primary btn-sm py-0" onclick="saveSchedule(this)">存</button> '
+        + '<button class="btn btn-outline-danger btn-sm py-0" onclick="delSchedule(this)">删</button></td></tr>';
+    document.getElementById('schedBody').insertAdjacentHTML('beforeend', h);
+}
+function saveSchedule(btn){
+    var tr = btn.closest('tr');
+    var fd = new FormData();
+    fd.append('id', tr.dataset.sid || '');
+    fd.append('exam_date', tr.querySelector('.sc-date').value);
+    fd.append('start_time', tr.querySelector('.sc-start').value);
+    fd.append('end_time', tr.querySelector('.sc-end').value);
+    fd.append('subject', tr.querySelector('.sc-subj').value.trim());
+    fd.append('selection', tr.querySelector('.sc-sel').value.trim());
+    fd.append('note', tr.querySelector('.sc-note').value.trim());
+    fetch('/grades/affairs/'+AID+'/schedules/save', {method:'POST', body:fd, headers:{'X-CSRFToken':csrf()}})
+        .then(r=>r.json()).then(d=>{ if(d.ok){ location.reload(); } else alert(d.msg||'保存失败'); });
+}
+function delSchedule(btn){
+    var tr = btn.closest('tr');
+    var sid = tr.dataset.sid;
+    if(!sid){ tr.remove(); return; }
+    if(!confirm('删除该场次？（其监考安排一并删除）')) return;
+    fetch('/grades/affairs/'+AID+'/schedules/'+sid+'/delete', {method:'POST', headers:{'X-CSRFToken':csrf()}})
+        .then(r=>r.json()).then(d=>{ if(d.ok) tr.remove(); else alert(d.msg||'删除失败'); });
+}
+
+// ---------- 环节⑥ 监考编排 ----------
+function loadInvig(){
+    fetch('/grades/affairs/'+AID+'/invig').then(r=>r.json()).then(d=>{
+        if(!d.success){ return; }
+        _invigData = d.data; renderInvig();
+    });
+}
+function renderInvig(){
+    var d = _invigData; if(!d) return;
+    document.getElementById('invigSlots').value = String(d.slots||1);
+    renderPool(d);
+    renderInvigTable(d);
+}
+function renderPool(d){
+    var t = d.pool.filter(p=>p.source==='teacher');
+    document.getElementById('poolTeachers').innerHTML = t.length
+        ? t.map(p=>'<span class="badge bg-primary-subtle text-primary-emphasis border me-1 mb-1" title="任教：'+(p.subjects.join('、')||'—')+'">'+escHtml(p.name)+'</span>').join('')
+        : '<span class="text-muted small">暂无（请先完成环节④）</span>';
+    document.getElementById('poolOthers').innerHTML = d.others.length
+        ? d.others.map(o=>'<span class="badge bg-warning-subtle text-warning-emphasis border me-1 mb-1">'+escHtml(o.name)
+            + (o.subject?('·'+escHtml(o.subject)):'')+' <a href="javascript:;" class="text-danger" onclick="delOther('+o.id+')">×</a></span>').join('')
+        : '<span class="text-muted small">暂无</span>';
+}
+function renderInvigTable(d){
+    var thead = document.querySelector('#invigTable thead');
+    var tbody = document.querySelector('#invigTable tbody');
+    var slots = d.slots || 1;
+    var th = '<tr><th style="width:130px">考试时间</th><th style="width:90px">科目</th>'
+           + '<th style="width:70px">考场</th><th style="width:130px">考场位置</th>';
+    for(var n=1;n<=slots;n++){ th += '<th>监考老师'+n+'</th>'; }
+    thead.innerHTML = th + '</tr>';
+    if(!d.schedules.length || !d.rooms.length){
+        tbody.innerHTML = '<tr><td colspan="'+(4+slots)+'" class="text-center text-muted py-3">'
+            + (d.schedules.length?'请先导入考试时间表（环节⑤）':'请先设置考场（环节②）')+'</td></tr>';
+        return;
+    }
+    var poolNames = d.pool.map(p=>p.name);
+    var rows = [];
+    d.schedules.forEach(function(s){
+        var when = [s.date, (s.start||s.end)?(s.start+'-'+s.end):''].filter(Boolean).join(' ');
+        var avoid = s.subject ? [s.subject] : [];
+        d.rooms.forEach(function(rm){
+            var key = s.id+'|'+rm.room_no;
+            var cur = d.invig[key] || {};
+            var tds = ['<td class="small">'+escHtml(when)+'</td>',
+                       '<td class="small fw-bold">'+escHtml(s.subject)+(s.selection?('<span class="text-muted">('+escHtml(s.selection)+')</span>'):'')+'</td>',
+                       '<td class="text-center">'+escHtml(rm.room_no)+'</td>',
+                       '<td class="small text-muted">'+escHtml(rm.location||'')+'</td>'];
+            for(var n=1;n<=slots;n++){
+                var val = (cur[n] && cur[n].name) || '';
+                var opts = '<option value="">—</option>' + poolNames.map(function(nm){
+                    var p = d.pool.find(x=>x.name===nm) || {};
+                    var conf = (p.subjects||[]).some(sj=>avoid.indexOf(sj)>=0);
+                    return '<option value="'+escHtml(nm)+'"'+(nm===val?' selected':'')+(conf?' data-conf="1"':'')+'>'
+                         + escHtml(nm)+(conf?'（回避）':'')+'</option>';
+                }).join('');
+                tds.push('<td><select class="form-select form-select-sm iv-sel" data-sid="'+s.id
+                         +'" data-room="'+escHtml(rm.room_no)+'" data-slot="'+n+'">'+opts+'</select></td>');
+            }
+            rows.push('<tr>'+tds.join('')+'</tr>');
+        });
+    });
+    tbody.innerHTML = rows.join('');
+    tbody.querySelectorAll('.iv-sel').forEach(function(el){
+        el.addEventListener('change', function(){ setInvig(el); });
+    });
+}
+function setInvig(el){
+    var fd = new FormData();
+    fd.append('schedule_id', el.dataset.sid);
+    fd.append('room_no', el.dataset.room);
+    fd.append('slot', el.dataset.slot);
+    fd.append('name', el.value);
+    fetch('/grades/affairs/'+AID+'/invig/set', {method:'POST', body:fd, headers:{'X-CSRFToken':csrf()}})
+        .then(r=>r.json()).then(d=>{
+            var msg = document.getElementById('invigMsg');
+            if(!d.ok){ msg.className='small text-danger'; msg.textContent=d.msg; el.value=''; return; }
+            msg.className='small text-success'; msg.textContent='已保存';
+        });
+}
+function saveInvigSlots(){
+    var fd = new FormData(); fd.append('slots', document.getElementById('invigSlots').value);
+    fetch('/grades/affairs/'+AID+'/invig/settings', {method:'POST', body:fd, headers:{'X-CSRFToken':csrf()}})
+        .then(r=>r.json()).then(d=>{ if(d.ok) loadInvig(); });
+}
+function autoInvig(){
+    if(!confirm('自动编排监考将覆盖现有监考安排，继续？')) return;
+    var msg = document.getElementById('invigMsg');
+    msg.className='small text-muted'; msg.textContent='编排中…';
+    fetch('/grades/affairs/'+AID+'/invig/auto', {method:'POST', headers:{'X-CSRFToken':csrf()}})
+        .then(r=>r.json()).then(d=>{
+            if(!d.ok){ msg.className='small text-danger'; msg.textContent=d.msg||'编排失败'; return; }
+            msg.className='small text-success';
+            msg.textContent='编排完成：'+d.schedules+' 场 × '+d.rooms+' 考场 × '+d.slots+' 人 = '+d.rows+' 格';
+            loadInvig();
+        });
+}
+function addOther(){
+    var name = prompt('其他监考员姓名（可为无账号的校外老师）：');
+    if(!name) return;
+    var subj = prompt('任教学科（可留空；多科用顿号分隔，用于回避）：','') || '';
+    var fd = new FormData(); fd.append('name', name.trim()); fd.append('subject', subj.trim());
+    fetch('/grades/affairs/'+AID+'/invig/others/add', {method:'POST', body:fd, headers:{'X-CSRFToken':csrf()}})
+        .then(r=>r.json()).then(d=>{ if(d.ok) loadInvig(); else alert(d.msg||'失败'); });
+}
+function delOther(id){
+    fetch('/grades/affairs/'+AID+'/invig/others/'+id+'/delete', {method:'POST', headers:{'X-CSRFToken':csrf()}})
+        .then(r=>r.json()).then(d=>{ if(d.ok) loadInvig(); });
+}
+function importOthers(input){
+    if(!input.files.length) return;
+    var fd = new FormData(); fd.append('file', input.files[0]);
+    fetch('/grades/affairs/'+AID+'/invig/others/import', {method:'POST', body:fd, headers:{'X-CSRFToken':csrf()}})
+        .then(r=>r.json()).then(d=>{
+            input.value='';
+            if(!d.ok){ alert(d.msg); return; }
+            alert('已导入 '+d.added+' 人'+(d.dup?('，跳过重复 '+d.dup+' 人'):''));
+            loadInvig();
+        });
+}
 </script>
 {% endblock %}
