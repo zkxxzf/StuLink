@@ -1,0 +1,164 @@
+{% extends "base.html" %}
+{% import "academic/_schedule_matrix.html" as mx %}
+{% import "academic/_schedule_parts.html" as parts %}
+{% block title %}{{ scope_label }}课表{% if view and view.group_name %} · {{ view.group_name }}{% endif %}{% endblock %}
+{% block extra_css %}{{ mx.schedule_matrix_css() }}{% endblock %}
+{% block content %}
+{# 2026-10-12 新增：备课组课表 / 教研组课表（同一模板，scope 区分）。
+   行＝教师、列＝节次；数据来自 schedule_service.get_group_view()。
+   scope='lesson'（备课组，年级×学科）/ 'subject'（教研组，同学科跨年级）。
+   学期用 ?sid=（默认当前生效学期），星期 ?day=1..7，周次 ?week=N。 #}
+{% set WEEKDAYS = ['周一', '周二', '周三', '周四', '周五', '周六', '周日'] %}
+
+{% if not ts %}
+<div class="card">
+    <div class="card-body text-center py-5 text-muted">
+        <i class="bi bi-calendar-x" style="font-size:40px;"></i>
+        <p class="mt-3 mb-1">尚未创建学期课表</p>
+    </div>
+</div>
+{% else %}
+
+<div class="ovv-head">
+    <div class="ovv-head-l">
+        <h4 class="ovv-title"><i class="bi bi-people"></i> {{ scope_label }}课表</h4>
+        {% if view %}
+        <span class="text-muted small">
+            <span class="fw-semibold text-dark">{{ view.group_name }}</span>
+            {% if scope == 'lesson' %} · 同年级同学科的备课组{% else %} · 同学科跨年级的教研组{% endif %}
+        </span>
+        {% endif %}
+    </div>
+    <div class="ovv-head-r">
+        {{ parts.term_selector(schedules, ts, query_mode='group', week=week) }}
+        {{ parts.week_selector(ts.total_weeks, ts.get_current_week(), week) }}
+        {{ parts.print_button('打印') }}
+    </div>
+</div>
+
+{{ parts.readonly_banner(ts) }}
+
+{# 2026-10-12：三个课表查询页共用一个入口（工作台），页内用这条 tab 互切 #}
+{{ parts.schedule_query_tabs('lesson' if scope == 'lesson' else 'subject',
+                             sid=ts.id, week=week,
+                             grade=(view.grade if view else None),
+                             subject=(view.subject if view else None)) }}
+
+{% if view %}
+{# ── 筛选条（服务端链接，全部走 url_for(request.endpoint, ...)）──────────
+   切年级时不带 subject（后端会自动落到该年级的第一门学科）。 #}
+<div class="ovv-filters no-print">
+    <div class="ovv-frow">
+        {% if scope == 'lesson' and view.grades %}
+        <span class="ovv-flabel"><i class="bi bi-mortarboard"></i> 年级</span>
+        <div class="ovv-seg">
+            {% for g in view.grades %}
+            <a class="ovv-seg-item {{ 'is-on' if view.grade == g }}"
+               href="{{ url_for(request.endpoint, sid=ts.id, week=week, day=view.day, grade=g) }}">{{ g }}</a>
+            {% endfor %}
+        </div>
+        <span class="ovv-fdiv"></span>
+        {% endif %}
+
+        <span class="ovv-flabel"><i class="bi bi-journal-bookmark"></i> 学科</span>
+        <div class="ovv-seg">
+            {% for s in view.subjects %}
+            <a class="ovv-seg-item {{ 'is-on' if view.subject == s }}"
+               href="{{ url_for(request.endpoint, sid=ts.id, week=week, day=view.day, grade=view.grade, subject=s) }}">{{ s }}</a>
+            {% endfor %}
+        </div>
+        <span class="ovv-fdiv"></span>
+
+        <span class="ovv-flabel"><i class="bi bi-calendar-week"></i> 星期</span>
+        <div class="ovv-seg">
+            {% for d in range(1, 8) %}
+            <a class="ovv-seg-item {{ 'is-on' if view.day == d }}"
+               href="{{ url_for(request.endpoint, sid=ts.id, week=week, grade=view.grade, subject=view.subject, day=d) }}">{{ WEEKDAYS[d-1] }}{% if today_wd is defined and today_wd == d %}<em>今天</em>{% endif %}</a>
+            {% endfor %}
+        </div>
+
+        <span class="ovv-stat">
+            {{ view.member_count }} 位教师 · 共 {{ view.course_total }} 节/周{% if week %} · 第 {{ week }} 周{% endif %}
+        </span>
+    </div>
+</div>
+
+{% if view.member_count == 0 %}
+<div class="card">
+    <div class="card-body text-center py-5 text-muted">
+        <i class="bi bi-inbox" style="font-size:40px;"></i>
+        <p class="mt-3 mb-1">本学期「{{ view.group_name }}」暂无排课</p>
+        <p class="small mb-0">换一个年级/学科，或到学期管理里确认该学期课表</p>
+    </div>
+</div>
+{% else %}
+<div class="text-muted small mb-2">
+    行＝教师，列＝节次（{{ WEEKDAYS[view.day - 1] }}）；格内＝学科 + 任教班级
+    <span class="ms-2">{{ view.member_count }} 位教师 · 共 {{ view.course_total }} 节/周</span>
+</div>
+
+{# 全组共同空档：适合安排集体备课 / 教研活动（最多列 6 个） #}
+{% if view.free_periods %}
+<div class="alert alert-success py-2">
+    <i class="bi bi-brightness-high"></i>
+    <strong>{{ WEEKDAYS[view.day - 1] }}全组共同空档：</strong>
+    {% for p in view.free_periods[:6] %}{{ p.period_name }}{% if p.start_time %}（{{ p.start_time }}）{% endif %}{% if not loop.last %}、{% endif %}{% endfor %}{% if view.free_periods|length > 6 %} 等 {{ view.free_periods|length }} 节{% endif %}
+    —— 适合安排集体备课 / 教研活动
+</div>
+{% else %}
+<div class="alert alert-secondary py-2">
+    <i class="bi bi-info-circle"></i> 当天没有全组共同空档
+</div>
+{% endif %}
+
+{# 矩阵：行＝教师、列＝节次，格内＝学科 + 班级 #}
+<section class="ovw-block">
+    {{ mx.schedule_matrix(view.periods, view.period_groups,
+                          view.members|map(attribute='label')|list, view.grids,
+                          metas=view.metas, day=view.day, row_head='教师', sub_field='class') }}
+</section>
+
+{# ── 成员卡 ──────────────────────────────────────────────────────── #}
+<div class="row g-2 mt-3">
+    {% for m in view.members %}
+    <div class="col-md-6 col-xl-4">
+        <div class="card h-100 {{ 'border-warning' if m.is_leader else '' }}">
+            <div class="card-body py-2">
+                <div class="d-flex align-items-center justify-content-between">
+                    <div class="fw-semibold">
+                        <i class="bi bi-person-badge"></i> {{ m.name }}
+                        {% for r in m.roles %}<span class="badge bg-warning text-dark ms-1">{{ r }}</span>{% endfor %}
+                    </div>
+                    <span class="text-muted small">{{ m.total }} 节/周</span>
+                </div>
+                <div class="small text-muted mt-1">
+                    学科：{{ m.subjects|join(' / ') if m.subjects else '—' }}
+                </div>
+                {% if m.classes %}
+                <div class="d-flex flex-wrap gap-1 mt-1">
+                    {% for c in m.classes[:6] %}
+                    <span class="badge bg-primary-subtle text-primary-emphasis border">{{ c }}</span>
+                    {% endfor %}
+                    {% if m.classes|length > 6 %}<span class="badge bg-light text-muted border">+{{ m.classes|length - 6 }}</span>{% endif %}
+                </div>
+                {% endif %}
+                <div class="mt-2">
+                    <a class="btn btn-sm btn-outline-primary"
+                       href="{{ url_for('academic.schedule_teacher_query', sid=ts.id, uid=m.uid, week=week) }}">
+                        <i class="bi bi-person-lines-fill"></i> 个人课表
+                    </a>
+                </div>
+            </div>
+        </div>
+    </div>
+    {% endfor %}
+</div>
+{% endif %}
+{% endif %}
+{% endif %}
+{% endblock %}
+
+{% block extra_js %}
+<script src="{{ su('js/schedule.js') }}"></script>
+<script src="{{ su('js/schedule_term.js') }}"></script>
+{% endblock %}

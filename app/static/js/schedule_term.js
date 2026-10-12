@@ -3,7 +3,6 @@
  * 通过页面底部 <script id="scheduleData" type="application/json"> 的 pageType 分派：
  *   dates    —— 学期日期配置：实时预览各教学周对应日期区间
  *   calendar —— 学期校历：自动滚动定位到当前周
- *   compare  —— 跨学期对比：A/B 同选校验
  *   today    —— 今日课表：从 current-context 接口刷新学期/周次上下文条
  * 另外全局处理 #weekSelect 周次选择器联动（grade/class/teacher/today/overview 通用）。
  */
@@ -100,27 +99,12 @@
         }
     }
 
-    /* ── 对比页：A/B 同选校验 ───────────────────────────────────── */
-    function initCompare() {
-        var form = document.getElementById('compareForm');
-        if (!form) { return; }
-        form.addEventListener('submit', function (ev) {
-            var a = form.querySelector('[name="sid_a"]');
-            var b = form.querySelector('[name="sid_b"]');
-            if (a && b && a.value && b.value && a.value === b.value) {
-                ev.preventDefault();
-                window.alert('请选择两个不同的学期进行对比。');
-            }
-        });
-    }
-
     function boot() {
         var cfg = readCfg();
         initWeekSwitcher();
         switch (cfg.pageType) {
             case 'dates': initDatesPreview(); break;
             case 'calendar': initCalendar(); break;
-            case 'compare': initCompare(); break;
             default: break;
         }
     }

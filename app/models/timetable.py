@@ -1,4 +1,4 @@
-# StuLink v1.19.47.3 2026-10-10
+# StuLink v1.19.47.6 2026-10-10
 # 课表模块模型：学期课表 / 节次定义 / 课表明细 / 调课记录 / 变更版本（独立库 timetable.db）
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 import re
@@ -31,7 +31,7 @@ PERIOD_NUMBER_CEILING = 99
 #    （原来默认给的是 60 分钟，已改）。 ──────────────────────────────────
 
 def get_default_periods():
-    """返回 13 节默认节次配置列表（dict 形式），用于新建学期时批量写入 PeriodDef。
+    """返回 13 节默认作息（节次）配置列表（dict 形式），用于新建学期时批量写入 PeriodDef。
 
     结构：period_number / period_name / start_time / end_time / period_type / sort_order
     适配早读 + 上午 5 节 + 下午 4 节 + 晚自习 3 节；午休作为时间空档，

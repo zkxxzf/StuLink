@@ -5,7 +5,12 @@
 .ac-hero { background: linear-gradient(120deg, #1e293b, #334155 60%, #0f766e);
            color: #f8fafc; border-radius: 12px; padding: 16px 18px; margin-bottom: 16px; }
 .ac-hero h4 { color: #fff; }
-.ac-kpi { border: 1px solid #e2e8f0; border-radius: 10px; background: #fff; height: 100%; }
+/* 2026-10-12：学期信息跟在标题后面同一行（原在标题下方、右上角另有一排按钮，已删） */
+.ac-hero .ac-hero-meta { opacity: .88; }
+.ac-hero .ac-hero-meta strong { color: #fff; }
+.ac-kpi { border: 1px solid #e2e8f0; border-radius: 10px; background: #fff; height: 100%;
+          transition: box-shadow .15s, transform .15s; }
+.ac-kpi:hover { box-shadow: 0 6px 18px rgba(15,23,42,.06); transform: translateY(-1px); }
 .ac-kpi .v { font-size: 26px; font-weight: 700; line-height: 1.1; }
 .ac-kpi .l { color: #64748b; font-size: 12px; }
 .ac-kpi .i { font-size: 20px; }
@@ -19,95 +24,85 @@
 .ac-todo-item { display: flex; justify-content: space-between; align-items: center;
                 padding: 8px 0; border-bottom: 1px dashed #e2e8f0; }
 .ac-todo-item:last-child { border-bottom: none; }
+/* 左侧描述再长也不挤右侧操作列（否则窄卡里「去审批」会被拆成两行） */
+.ac-todo-item .text-end { flex-shrink: 0; }
+/* 主流程块的主按钮不换行（「待审批申请（0）」这类带数字的按钮曾被压成两行） */
+.ac-flow .btn { white-space: nowrap; }
+/* 2026-10-12：KPI 卡可点（进对应子页面）；风险类（迟到/缺勤·待办）有值时红框红底 */
+a.ac-kpi-link { display: block; text-decoration: none; color: inherit; height: 100%; }
+.ac-kpi.risk { border-color: #fecaca; background: #fff5f5; }
 </style>
 {% endblock %}
+
+{# 2026-10-12（用户口径）：顶部 KPI 卡统一渲染 —— 大数字 + 小标签，可点/风险态可选 #}
+{% macro kpi_card(value, label, icon, tone='primary', href=None, risk=False) %}
+<div class="col-6 col-md-3 col-xl-2">
+    {% if href %}<a class="ac-kpi-link" href="{{ href }}">{% endif %}
+    <div class="ac-kpi p-3{{ ' risk' if risk else '' }}">
+        <div class="d-flex justify-content-between align-items-start">
+            <div class="v text-{{ tone }}">{{ value }}</div>
+            <i class="bi {{ icon }} i text-{{ tone }}"></i>
+        </div>
+        <div class="l">{{ label }}</div>
+    </div>
+    {% if href %}</a>{% endif %}
+</div>
+{% endmacro %}
+
 {% block content %}
 <div class="ac-hero">
-    <div class="d-flex justify-content-between align-items-center flex-wrap gap-2">
-        <div>
-            <h4 class="fw-bold mb-1"><i class="bi bi-speedometer2"></i> 教务工作台</h4>
-            <div class="small" style="opacity:.85">
-                {% if ts %}
-                当前学期：<strong>{{ ts.name }}</strong>
-                <span class="badge bg-light text-dark ms-1">{{ {'draft':'未启用','active':'启用中','archived':'已归档'}.get(ts.status, ts.status) }}</span>
-                {% if ts.period_text() %} · {{ ts.period_text() }}{% endif %}
-                {% else %}尚未建立学期课表{% endif %}
-                · 今天 {{ today.strftime('%Y-%m-%d') }}
-            </div>
-        </div>
-        <div class="d-flex gap-2 flex-wrap">
+    {# 2026-10-12（用户要求）：右上角那排快捷按钮删除 ——「全校总课表 / 查课 / 调课审批」的
+       功能都在下方「教务主流程」三个块里各有一个主入口，头部再挂一遍是重复入口；
+       学期信息（当前学期 / 状态 / 日期区间 / 今天）并到标题后面同一行。 #}
+    <div class="d-flex align-items-center gap-3 flex-wrap">
+        <h4 class="fw-bold mb-0"><i class="bi bi-speedometer2"></i> 教务工作台</h4>
+        <div class="ac-hero-meta small">
             {% if ts %}
-            <a class="btn btn-sm btn-light" href="{{ url_for('academic.schedule_overview', sid=ts.id) }}">
-                <i class="bi bi-list-columns-reverse"></i> 全校总课表
-            </a>
-            {% endif %}
-            <a class="btn btn-sm btn-light" href="{{ url_for('academic.inspection_page') }}">
-                <i class="bi bi-clipboard2-check"></i> 查课
-            </a>
-            {% if current_user.has_perm('academic.swap') or current_user.has_perm('academic.timetable') %}
-            <a class="btn btn-sm btn-light" href="{{ url_for('academic.swap_page', status='pending') if current_user.has_perm('academic.timetable') else url_for('academic.swap_page') }}">
-                <i class="bi bi-arrow-left-right"></i> {{ '调课审批' if current_user.has_perm('academic.timetable') else '我的调课' }}
-            </a>
-            {% endif %}
+            当前学期：<strong>{{ ts.name }}</strong>
+            <span class="badge bg-light text-dark ms-1">{{ {'draft':'未启用','active':'启用中','archived':'已归档'}.get(ts.status, ts.status) }}</span>
+            {% if ts.period_text() %} · {{ ts.period_text() }}{% endif %}
+            {% else %}尚未建立学期课表{% endif %}
+            · 今天 {{ today.strftime('%Y-%m-%d') }}
         </div>
     </div>
 </div>
 
+{# 2026-10-12（用户口径）：顶部 KPI 换成实时数据 ——
+   ① 今日查课 + 本月累计 + 今日覆盖率　② 今日迟到　③ 今日缺勤（②③ 为风险红卡）
+   ④ 待审批调课申请　⑤ 教师业绩待审核　⑥ 材料回收率/待回收份数。
+   全部实时统计，无缓存；卡片可点进对应子页面。 #}
+{% set _recycle = kpi.recycle %}
+{% set _rate_text = ('%g'|format(_recycle.rate)) ~ '%' if _recycle.rate is not none else '—' %}
+{% set _late_risk = (kpi.late_today or kpi.late_month) %}
+{% set _absent_risk = (kpi.absent_today or kpi.absent_month) %}
+{% set _swap_href = url_for('academic.swap_page', status='pending') if current_user.has_perm('academic.timetable')
+                    else (url_for('academic.swap_page') if current_user.has_perm('academic.swap') else none) %}
+{% set _ach_href = url_for('academic.achievements_page', status='pending') if current_user.has_perm('academic.edit') else none %}
+{% set _form_href = url_for('academic.form_list') if current_user.has_perm('academic.edit') else none %}
 <div class="row g-2 mb-3">
-    <div class="col-6 col-md-3 col-xl-2">
-        <div class="ac-kpi p-3">
-            <div class="d-flex justify-content-between align-items-start">
-                <div class="v text-primary">{{ kpi.students }}</div>
-                <i class="bi bi-people i text-primary"></i>
-            </div>
-            <div class="l">在校学生 · {{ kpi.classes }} 个班</div>
-        </div>
-    </div>
-    <div class="col-6 col-md-3 col-xl-2">
-        <div class="ac-kpi p-3">
-            <div class="d-flex justify-content-between align-items-start">
-                <div class="v text-success">{{ kpi.teachers_active }}</div>
-                <i class="bi bi-person-vcard i text-success"></i>
-            </div>
-            <div class="l">在职教师（共 {{ kpi.teachers_total }}）</div>
-        </div>
-    </div>
-    <div class="col-6 col-md-3 col-xl-2">
-        <div class="ac-kpi p-3">
-            <div class="d-flex justify-content-between align-items-start">
-                <div class="v text-dark">{{ timetable.entries }}</div>
-                <i class="bi bi-calendar3 i text-dark"></i>
-            </div>
-            <div class="l">本学期课时 · {{ timetable.classes }} 个班</div>
-        </div>
-    </div>
-    <div class="col-6 col-md-3 col-xl-2">
-        <div class="ac-kpi p-3">
-            <div class="d-flex justify-content-between align-items-start">
-                <div class="v text-info">{{ kpi.insp_month }}</div>
-                <i class="bi bi-clipboard2-check i text-info"></i>
-            </div>
-            <div class="l">本月查课（今日 {{ kpi.insp_today }}）</div>
-        </div>
-    </div>
-    <div class="col-6 col-md-3 col-xl-2">
-        <div class="ac-kpi p-3">
-            <div class="d-flex justify-content-between align-items-start">
-                <div class="v {{ 'text-danger' if kpi.insp_abnormal else 'text-muted' }}">{{ kpi.insp_abnormal }}</div>
-                <i class="bi bi-exclamation-triangle i text-danger"></i>
-            </div>
-            <div class="l">本月异常（迟到/缺课等）</div>
-        </div>
-    </div>
-    <div class="col-6 col-md-3 col-xl-2">
-        <div class="ac-kpi p-3">
-            <div class="d-flex justify-content-between align-items-start">
-                <div class="v text-secondary">{{ kpi.leaders }}</div>
-                <i class="bi bi-bookmark-star i text-secondary"></i>
-            </div>
-            <div class="l">已登记备课组长</div>
-        </div>
-    </div>
+    {# ① 今日查课 · 本月累计 · 今日覆盖率（分母＝当天有课的课表格子数，与查课页同口径） #}
+    {{ kpi_card(kpi.insp_today,
+                '本月累计 ' ~ kpi.insp_month ~ ' · 今日覆盖率 ' ~ (kpi.insp_today_rate ~ '%' if kpi.insp_today_rate is not none else '—'),
+                'bi-clipboard2-check', 'info', href=url_for('academic.inspection_page')) }}
+    {# ② 今日迟到（风险红卡） #}
+    {{ kpi_card(kpi.late_today, '本月迟到 ' ~ kpi.late_month ~ ' 人次', 'bi-clock-history',
+                'danger' if _late_risk else 'muted', risk=_late_risk,
+                href=url_for('academic.inspection_page')) }}
+    {# ③ 今日缺勤（风险红卡） #}
+    {{ kpi_card(kpi.absent_today, '本月缺勤 ' ~ kpi.absent_month ~ ' 人次', 'bi-person-dash',
+                'danger' if _absent_risk else 'muted', risk=_absent_risk,
+                href=url_for('academic.inspection_page')) }}
+    {# ④ 待审批调课申请（审批人＝全部待批；申请人＝本人待审） #}
+    {{ kpi_card(todo.swaps, '待审批调课申请', 'bi-arrow-left-right',
+                'danger' if todo.swaps else 'muted', href=_swap_href) }}
+    {# ⑤ 教师业绩待审核（业绩库待审数，与「待办事项」同一口径） #}
+    {{ kpi_card(todo.achievements, '教师业绩待审核', 'bi-award',
+                'danger' if todo.achievements else 'muted', href=_ach_href) }}
+    {# ⑥ 材料回收：进行中收集的当前轮汇总（回收率＝已交/应交；待回收＝未交份数） #}
+    {{ kpi_card(_rate_text, '材料回收 · 待回收 ' ~ _recycle.pending ~ ' 份', 'bi-inboxes',
+                'success' if (_recycle.rate is not none and not _recycle.pending)
+                else ('primary' if _recycle.rate is not none else 'muted'),
+                href=_form_href) }}
 </div>
 
 <div class="row g-3">
@@ -168,7 +163,7 @@
     <div class="col-xl-6">
         <div class="card h-100">
             <div class="card-header py-2"><i class="bi bi-diagram-3"></i> 教务主流程</div>
-            <div class="card-body">
+            <div class="card-body ac-flow">
                 <div class="row g-2">
                     <div class="col-md-4">
                         <div class="border rounded-3 p-3 h-100">
@@ -178,9 +173,14 @@
                             {% else %}
                             <div class="text-muted small mt-2">当前没有启用中的学期课表。</div>
                             {% endif %}
-                            {% if current_user.has_perm('academic.timetable') %}
-                            <a class="small d-inline-block mt-2" href="{{ url_for('academic.schedule_manage') }}">学期管理与排课</a>
-                            {% endif %}
+                            {# 与「查课 / 调课」两块同结构：主按钮一个 + 次要链接一列 #}
+                            <div class="small mt-2 d-flex flex-column gap-1">
+                                {# 2026-10-12：课表查询统一入口（教师 / 备课组 / 教研组课表合到这里，页内 tab 切换） #}
+                                <a href="{{ url_for('academic.schedule_teacher_query') }}">课表查询（教师 / 备课组 / 教研组）</a>
+                                {% if current_user.has_perm('academic.timetable') %}
+                                <a href="{{ url_for('academic.schedule_manage') }}">学期管理与排课</a>
+                                {% endif %}
+                            </div>
                         </div>
                     </div>
                     <div class="col-md-4">

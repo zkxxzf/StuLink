@@ -8,14 +8,16 @@
     .step-title { font-weight: 700; font-size: 15px; }
     .step-hint { font-size: 12px; color: #64748b; font-weight: 400; }
     .step-card { border: 1px solid #e2e8f0; border-radius: 12px; padding: 18px; margin-bottom: 18px; background: #fff; }
-    .entry-pick { border: 1px solid #e2e8f0; border-radius: 10px; padding: 8px 10px; cursor: pointer;
+    .entry-pick { position: relative; border: 1px solid #e2e8f0; border-radius: 10px; padding: 8px 10px; cursor: pointer;
                   transition: all .15s; background: #fff; height: 100%; }
     .entry-pick:hover { border-color: #93c5fd; background: #f8fbff; }
     .entry-pick.selected { border-color: #2563eb; background: #eff6ff; box-shadow: 0 0 0 2px rgba(37,99,235,.15); }
     .entry-pick .ep-pn { font-weight: 700; color: #1e293b; font-size: 13px; }
     .entry-pick .ep-subj { font-weight: 700; color: #0f172a; }
-    .orig-card { background: linear-gradient(135deg,#eff6ff,#f5f3ff); border: 1px solid #dbeafe;
-                 border-radius: 10px; padding: 14px; }
+    .entry-pick .ep-badge { position: absolute; top: 6px; right: 8px; display: none;
+                            background: #2563eb; color: #fff; border-radius: 10px; padding: 0 7px;
+                            font-size: 11px; font-weight: 700; }
+    .entry-pick.selected .ep-badge { display: inline-block; }
     .slot-card { border: 1px solid #d1fae5; background: #ecfdf5; color: #065f46; border-radius: 10px;
                  padding: 8px 6px; cursor: pointer; text-align: center; transition: all .12s; height: 100%; }
     .slot-card:hover { transform: translateY(-1px); box-shadow: 0 2px 6px rgba(0,0,0,.1); }
@@ -28,6 +30,10 @@
     .muted-tip { color: #94a3b8; font-size: 13px; }
     .wd-badge { display: inline-block; background: #fff7ed; color: #9a3412; border: 1px solid #fed7aa;
                 border-radius: 6px; padding: 1px 6px; font-size: 11px; }
+    .picked-row { cursor: pointer; }
+    .picked-row.row-active { background: #eff6ff; box-shadow: inset 3px 0 0 #2563eb; }
+    .tgt-badge { display: inline-block; background: #ecfdf5; color: #065f46; border: 1px solid #a7f3d0;
+                 border-radius: 6px; padding: 0 8px; font-size: 12px; }
 </style>
 {% endblock %}
 {% block content %}
@@ -45,19 +51,17 @@
 
 <form method="POST" action="{{ url_for('academic.swap_apply') }}" id="applyForm">
     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-    <input type="hidden" name="entry_id" id="hEntryId">
-    <input type="hidden" name="source_date" id="hSrcDate">
-    <input type="hidden" name="source_weekday" id="hSrcWeekday">
-    <input type="hidden" name="new_weekday" id="hWeekday">
-    <input type="hidden" name="new_period" id="hPeriod">
-    <input type="hidden" name="swap_date" id="hTgtDate">
+    <input type="hidden" name="source_date" id="hSourceDate">
+    <input type="hidden" name="source_weekday" id="hSourceWeekday">
+    <input type="hidden" name="items_json" id="hItemsJson">
 
-    {# ── 步骤 1：先定"哪一天 + 那天上的是周几的课"，再挑要调的那节课 ── #}
+    {# ── 步骤 1：先定"哪一天 + 那天上的是周几的课"，再挑要调的课（可多选）── #}
     <div class="step-card">
         <div class="step-head">
             <div class="step-num">1</div>
             <div class="step-title">确定调课日期与节次
-                <div class="step-hint">先选哪天要调课；那天上的是「周几的课」可手改（调休：如周六上周三的课 → 选周三）</div>
+                <div class="step-hint">先选哪天要调课；那天上的是「周几的课」可手改（调休：如周六上周三的课 → 选周三）。
+                    <b>可多选</b>，选中的课会进入下方清单。</div>
             </div>
         </div>
         <div class="row g-2 mb-2">
@@ -97,37 +101,64 @@
                 <span class="small text-muted">代他人/代班级申请时使用（需有该班权限）</span>
             </div>
         </div>
+        <div class="small text-muted mb-2"><i class="bi bi-info-circle"></i> 可多选，选中的课会进入下方清单（角标标出加入顺序）。</div>
         <div id="entryList" class="row g-2"><div class="col-12 muted-tip">请选择日期后自动加载当天课程…</div></div>
-        <div id="origCard" class="mt-3" style="display:none"></div>
     </div>
 
-    {# ── 步骤 2：目标时段（哪天 + 那天周几的课 + 第几节），只把能选的列出来 ── #}
+    {# ── 步骤 2：待调清单 + 目标时段编辑器（每节课各自指定目标）── #}
     <div class="step-card">
         <div class="step-head">
             <div class="step-num">2</div>
             <div class="step-title">选择调到哪一天 / 第几节
-                <div class="step-hint">系统已按班级与教师课表做过检测，绿色=可选，红色=冲突（鼠标悬停看原因）</div>
+                <div class="step-hint">每节课可各自指定目标时段；绿色=可选，红色=冲突（鼠标悬停看原因）。</div>
             </div>
         </div>
-        <div class="row g-2 mb-2">
-            <div class="col-6 col-md-3">
-                <label class="form-label small mb-1">调到哪一天 <span class="text-danger" id="tgtDateReq">*</span></label>
-                <input type="date" id="tgtDate" class="form-control form-control-sm" value="{{ today }}">
+
+        <div class="fw-semibold small mb-2">待调清单
+            <span class="text-muted fw-normal">（共 <span id="pickedCount">0</span> 节，整批一次审批）</span>
+        </div>
+        <div class="table-responsive">
+            <table class="table table-sm align-middle mb-0" id="pickedTable">
+                <thead class="table-light">
+                    <tr>
+                        <th style="width:56px">序号</th>
+                        <th>原课</th>
+                        <th>当前目标</th>
+                        <th style="width:140px">操作</th>
+                    </tr>
+                </thead>
+                <tbody id="pickedBody"></tbody>
+            </table>
+        </div>
+        <div id="pickedEmpty" class="muted-tip mb-3">还没有选择课程，先在上一步点选要调的课</div>
+
+        <div id="slotEditor" class="border rounded p-3 mt-3">
+            <div class="d-flex justify-content-between align-items-center mb-2 flex-wrap gap-2">
+                <div id="slotEditorHead" class="small text-muted">请先在上方清单里点选一行</div>
+                <button type="button" class="btn btn-sm btn-outline-primary" id="btnApplyAll" disabled>
+                    <i class="bi bi-arrow-down-square"></i> 套用到全部行
+                </button>
             </div>
-            <div class="col-6 col-md-3">
-                <label class="form-label small mb-1">那天上的是周几的课</label>
-                <select id="tgtWeekday" class="form-select form-select-sm">
-                    {% for k in range(1, 8) %}<option value="{{ k }}">{{ weekdays.get(k) }}</option>{% endfor %}
-                </select>
-            </div>
-            <div class="col-12 col-md-6 d-flex align-items-end">
-                <div class="form-check mb-1">
-                    <input class="form-check-input" type="checkbox" id="onlyAvail" checked>
-                    <label class="form-check-label small" for="onlyAvail">只显示可选的节次</label>
+            <div class="row g-2 mb-2">
+                <div class="col-6 col-md-3">
+                    <label class="form-label small mb-1">调到哪一天 <span class="text-danger" id="tgtDateReq">*</span></label>
+                    <input type="date" id="tgtDate" class="form-control form-control-sm" value="{{ today }}">
+                </div>
+                <div class="col-6 col-md-3">
+                    <label class="form-label small mb-1">那天上的是周几的课</label>
+                    <select id="tgtWeekday" class="form-select form-select-sm">
+                        {% for k in range(1, 8) %}<option value="{{ k }}">{{ weekdays.get(k) }}</option>{% endfor %}
+                    </select>
+                </div>
+                <div class="col-12 col-md-6 d-flex align-items-end">
+                    <div class="form-check mb-1">
+                        <input class="form-check-input" type="checkbox" id="onlyAvail" checked>
+                        <label class="form-check-label small" for="onlyAvail">只显示可选的节次</label>
+                    </div>
                 </div>
             </div>
+            <div id="slotArea" class="muted-tip">请先在上方清单里点选一行。</div>
         </div>
-        <div id="slotArea" class="muted-tip">请先在步骤 1 点选一节要调走的课。</div>
     </div>
 
     {# ── 步骤 3：调课信息 ── #}
@@ -175,10 +206,19 @@
 (function () {
     'use strict';
     var cfg = JSON.parse($('#applyData').text());
-    var selected = null;       // 选中的原课程条目
-    var slotsCache = [];       // 当前目标时段候选
+    var items = [];            // 待调清单：[{ entry: {...}, target: {new_weekday,new_period,swap_date} | null }]
+    var activeId = null;       // 当前行（entry_id）
+    var slotsCache = {};       // entry_id -> slots[]（切行不重复请求）
+    var CIRC = ['①','②','③','④','⑤','⑥','⑦','⑧','⑨','⑩','⑪','⑫','⑬','⑭','⑮','⑯','⑰','⑱','⑲','⑳'];
 
-    function esc(v) { return String(v == null ? '' : v).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+    function esc(v) {
+        // 单引号也转义：data-entry 用的是单引号 HTML 属性，值里带 ' 会破坏属性
+        return String(v == null ? '' : v).replace(/&/g, '&amp;').replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+    }
+    function circNum(n) { return (n >= 1 && n <= CIRC.length) ? CIRC[n - 1] : String(n); }
+    function shortDate(d) { return String(d || '').slice(5); }
+    function isPermanent() { return $('#swPermanent').is(':checked'); }
 
     // 日期 → 星期（JS 0=周日，转 1..7）
     function weekdayOf(dateStr) {
@@ -188,6 +228,15 @@
         var w = d.getDay();
         return w === 0 ? 7 : w;
     }
+
+    function itemOf(id) {
+        for (var i = 0; i < items.length; i++) {
+            if (String(items[i].entry.id) === String(id)) { return items[i]; }
+        }
+        return null;
+    }
+    function activeItem() { return activeId == null ? null : itemOf(activeId); }
+    function entryWeekday(e) { return (e.weekday != null && e.weekday !== '') ? e.weekday : $('#srcWeekday').val(); }
 
     function syncTip() {
         var w = weekdayOf($('#srcDate').val());
@@ -220,8 +269,9 @@
             var html = '';
             list.forEach(function (e) {
                 html += '<div class="col-6 col-md-4 col-lg-3">'
-                    + '<div class="entry-pick" data-id="' + e.id + '" data-entry=\'' + esc(JSON.stringify(e)) + '\'>'
-                    + '<div class="ep-pn">第' + e.period_number + '节</div>'
+                    + '<div class="entry-pick" data-id="' + esc(e.id) + '" data-entry=\'' + esc(JSON.stringify(e)) + '\'>'
+                    + '<span class="ep-badge" data-badge></span>'
+                    + '<div class="ep-pn">第' + esc(e.period_number) + '节</div>'
                     + '<div class="ep-subj">' + esc(e.subject) + '</div>'
                     + '<div class="small text-muted">' + esc(e.grade) + esc(e.class_name)
                     + ' · ' + esc(e.teacher_name || '-') + '</div>'
@@ -229,47 +279,145 @@
                     + '</div></div>';
             });
             $('#entryList').html(html);
+            syncCardStates();
         }).fail(function () {
             $('#entryList').html('<div class="col-12 text-danger small">加载失败</div>');
         });
     }
 
-    function pickEntry() {
-        var $el = $(this);
-        $('.entry-pick').removeClass('selected');
-        $el.addClass('selected');
-        selected = JSON.parse($el.attr('data-entry'));
-        $('#hEntryId').val(selected.id);
-        $('#hSrcDate').val($('#srcDate').val());
-        $('#hSrcWeekday').val($('#srcWeekday').val());
-        $('#hWeekday').val('');
-        $('#hPeriod').val('');
-        $('#origCard').show().html(
-            '<div class="orig-card"><div class="small text-muted mb-1">要调走的原课程</div>'
-            + '<div class="fw-bold fs-6">' + esc(selected.subject) + ' · ' + esc(selected.grade) + esc(selected.class_name) + '</div>'
-            + '<div class="small text-muted">' + (cfg.weekdays[$('#srcWeekday').val()] || '')
-            + '第' + selected.period_number + '节 · ' + esc(selected.teacher_name || '-')
-            + ' · ' + esc(selected.room || '无教室') + '</div></div>');
-        loadSlots();
+    // 卡片选中态 + 角标（序号按加入顺序）
+    function syncCardStates() {
+        $('#entryList .entry-pick').each(function () {
+            var $el = $(this);
+            var it = itemOf($el.data('id'));
+            if (it) {
+                $el.addClass('selected');
+                $el.find('[data-badge]').text('已选 ' + circNum(items.indexOf(it) + 1));
+            } else {
+                $el.removeClass('selected');
+                $el.find('[data-badge]').text('');
+            }
+        });
+    }
+
+    // 点击卡片 = 加入 / 移出待调清单
+    function toggleEntry() {
+        var entry = JSON.parse($(this).attr('data-entry'));
+        var it = itemOf(entry.id);
+        if (it) {
+            items.splice(items.indexOf(it), 1);
+            if (String(activeId) === String(entry.id)) { activeId = null; }
+        } else {
+            items.push({ entry: entry, target: null });
+            // 单节体验：只选一节时加入清单后自动激活该行为当前行
+            if (items.length === 1 || activeId == null) { activeId = entry.id; }
+        }
+        syncCardStates();
+        renderPicked();
+        renderEditor();
         renderSummary();
     }
 
-    // ── 步骤 2：目标节次候选（只列能选的）──
-    function loadSlots() {
-        if (!selected) { return; }
+    function removeItem(id) {
+        var it = itemOf(id);
+        if (!it) { return; }
+        items.splice(items.indexOf(it), 1);
+        if (String(activeId) === String(id)) { activeId = null; }
+        syncCardStates();
+        renderPicked();
+        renderEditor();
+        renderSummary();
+    }
+
+    function activateRow(id) {
+        activeId = id;
+        renderPicked();
+        renderEditor();
+    }
+
+    // ── 步骤 2：清单渲染 ──
+    function targetText(it) {
+        if (!it.target) { return '<span class="text-muted">未设置目标</span>'; }
+        var t = it.target;
+        var s = esc(cfg.weekdays[t.new_weekday] || '') + ' 第' + esc(t.new_period) + '节';
+        if (!isPermanent() && t.swap_date) { s += ' · ' + esc(shortDate(t.swap_date)); }
+        return '<span class="tgt-badge">' + s + '</span>';
+    }
+
+    function renderPicked() {
+        $('#pickedCount').text(items.length);
+        if (!items.length) {
+            $('#pickedBody').empty();
+            $('#pickedEmpty').show();
+            return;
+        }
+        $('#pickedEmpty').hide();
+        var html = '';
+        items.forEach(function (it, i) {
+            var e = it.entry;
+            var cls = (String(activeId) === String(e.id)) ? 'picked-row row-active' : 'picked-row';
+            html += '<tr class="' + cls + '" data-id="' + esc(e.id) + '">'
+                + '<td class="fw-bold">' + circNum(i + 1) + '</td>'
+                + '<td class="small">' + esc(e.subject) + ' · ' + esc(e.grade) + esc(e.class_name)
+                + ' · ' + esc(cfg.weekdays[entryWeekday(e)] || '') + '第' + esc(e.period_number) + '节'
+                + ' · ' + esc(e.teacher_name || '-') + '</td>'
+                + '<td class="small">' + targetText(it) + '</td>'
+                + '<td>'
+                + '<button type="button" class="btn btn-sm btn-outline-primary me-1" data-act="set">设置</button>'
+                + '<button type="button" class="btn btn-sm btn-outline-danger" data-act="remove">移除</button>'
+                + '</td></tr>';
+        });
+        $('#pickedBody').html(html);
+    }
+
+    // ── 步骤 2：目标时段编辑器 ──
+    function renderEditor() {
+        var it = activeItem();
+        if (!it) {
+            $('#slotEditorHead').text('请先在上方清单里点选一行');
+            $('#btnApplyAll').prop('disabled', true);
+            $('#slotArea').html('<div class="muted-tip">请先在上方清单里点选一行。</div>');
+            return;
+        }
+        var idx = items.indexOf(it) + 1;
+        var e = it.entry;
+        $('#slotEditorHead').html('正在设置：第 <b>' + idx + '</b> 行 · 原课 '
+            + esc(cfg.weekdays[entryWeekday(e)] || '') + '第' + esc(e.period_number) + '节 '
+            + esc(e.subject) + ' ' + esc(e.grade) + esc(e.class_name));
+        $('#btnApplyAll').prop('disabled', !it.target);
+        // 切到设置过的行：回显该行已选周几/日期
+        if (it.target) {
+            $('#tgtWeekday').val(it.target.new_weekday);
+            if (!isPermanent() && it.target.swap_date) { $('#tgtDate').val(it.target.swap_date); }
+        }
+        loadSlotsFor(it);
+    }
+
+    // 每行 slots 按 entry_id 缓存，切行不重复请求
+    function loadSlotsFor(it) {
+        var id = it.entry.id;
+        if (slotsCache[id]) { renderSlots(); return; }
         $('#slotArea').html('<div class="muted-tip">检测可调整到哪些节次…</div>');
-        $.getJSON(cfg.slotsUrl, { entry_id: selected.id }).done(function (res) {
-            slotsCache = (res && res.data && res.data.slots) || [];
-            renderSlots();
+        $.getJSON(cfg.slotsUrl, { entry_id: id }).done(function (res) {
+            slotsCache[id] = (res && res.data && res.data.slots) || [];
+            if (String(activeId) === String(id)) { renderSlots(); }
         }).fail(function () {
-            $('#slotArea').html('<div class="text-danger small">加载候选节次失败</div>');
+            if (String(activeId) === String(id)) {
+                $('#slotArea').html('<div class="text-danger small">加载候选节次失败</div>');
+            }
         });
     }
 
     function renderSlots() {
+        var it = activeItem();
+        if (!it) {
+            $('#slotArea').html('<div class="muted-tip">请先在上方清单里点选一行。</div>');
+            return;
+        }
+        var slots = slotsCache[it.entry.id] || [];
         var wd = $('#tgtWeekday').val();
         var only = $('#onlyAvail').is(':checked');
-        var rows = slotsCache.filter(function (s) { return String(s.weekday) === String(wd); });
+        var rows = slots.filter(function (s) { return String(s.weekday) === String(wd); });
         var avail = rows.filter(function (s) { return s.available; });
         var show = only ? avail : rows;
         if (!show.length) {
@@ -278,13 +426,18 @@
                 + rows.length + ' 个节次全部冲突），换个周几或换一天试试。</div>');
             return;
         }
+        var selP = it.target ? String(it.target.new_period) : '';
+        var selW = it.target ? String(it.target.new_weekday) : '';
         var html = '<div class="small text-muted mb-2">' + (cfg.weekdays[wd] || '') + '：可选 '
             + avail.length + ' / ' + rows.length + ' 个节次</div><div class="row g-2">';
         show.forEach(function (s) {
             var cls = s.available ? 'slot-card' : 'slot-card conflict';
+            if (s.available && selP && String(s.period_number) === selP && String(wd) === selW) {
+                cls += ' selected';
+            }
             var note = s.available ? '空' : esc(s.conflict_desc || '冲突');
             html += '<div class="col-6 col-md-3 col-lg-2">'
-                + '<div class="' + cls + '" data-p="' + s.period_number + '"'
+                + '<div class="' + cls + '" data-p="' + esc(s.period_number) + '"'
                 + (s.available ? '' : ' title="' + esc(s.conflict_desc || '冲突') + '"') + '>'
                 + '<div class="sc-pn">' + esc(s.period_name || ('第' + s.period_number + '节')) + '</div>'
                 + (s.start_time ? '<div class="sc-time">' + esc(s.start_time) + '-' + esc(s.end_time) + '</div>' : '')
@@ -295,30 +448,64 @@
         $('#slotArea').html(html);
     }
 
+    // 点绿色格 → 写入当前行目标
     function pickSlot() {
         var $el = $(this);
         if ($el.hasClass('conflict')) { return; }
-        $('.slot-card').removeClass('selected');
-        $el.addClass('selected');
-        $('#hWeekday').val($('#tgtWeekday').val());
-        $('#hPeriod').val($el.data('p'));
-        $('#hTgtDate').val($('#tgtDate').val());
+        var it = activeItem();
+        if (!it) { alert('请先在上方清单里点选一行'); return; }
+        it.target = {
+            new_weekday: $('#tgtWeekday').val(),
+            new_period: $el.data('p'),
+            swap_date: isPermanent() ? '' : ($('#tgtDate').val() || '')
+        };
+        $('#btnApplyAll').prop('disabled', false);
+        renderSlots();
+        renderPicked();
         renderSummary();
     }
 
+    // 套用到全部行：把当前行目标复制给其它所有行
+    function applyAll() {
+        var it = activeItem();
+        if (!it || !it.target) { alert('请先为当前行设置目标时段'); return; }
+        var src = it.target;
+        items.forEach(function (o) {
+            if (o !== it) {
+                o.target = { new_weekday: src.new_weekday, new_period: src.new_period, swap_date: src.swap_date };
+            }
+        });
+        renderPicked();
+        renderSlots();
+        renderSummary();
+    }
+
+    // ── 步骤 3：汇总 ──
     function renderSummary() {
-        var txt = '';
-        if (selected) {
-            txt += '原课：' + esc(selected.subject) + '（' + esc(selected.grade) + esc(selected.class_name)
-                + ' ' + (cfg.weekdays[$('#srcWeekday').val()] || '') + '第' + selected.period_number + '节，'
-                + $('#srcDate').val() + '）';
+        if (!items.length) {
+            $('#summary').html('请先在步骤 1 选择要调走的课。');
+            return;
         }
-        if ($('#hPeriod').val()) {
-            txt += (txt ? '<br>' : '') + '调整到：<b>' + $('#tgtDate').val() + '</b>（'
-                + (cfg.weekdays[$('#hWeekday').val()] || '') + '的课）第<b>' + $('#hPeriod').val() + '</b>节'
-                + ($('#swPermanent').is(':checked') ? ' · 永久' : ' · 仅当天');
-        }
-        $('#summary').html(txt || '请完成上面两步的选择。');
+        var perm = isPermanent();
+        var html = '';
+        items.forEach(function (it, i) {
+            var e = it.entry;
+            var left = esc(cfg.weekdays[entryWeekday(e)] || '') + '第' + esc(e.period_number) + '节 '
+                + esc(e.subject) + ' ' + esc(e.grade) + esc(e.class_name);
+            var right;
+            if (!it.target) {
+                right = '<span class="text-danger">未设置目标</span>';
+            } else if (!perm && !it.target.swap_date) {
+                right = '<b>' + esc(cfg.weekdays[it.target.new_weekday] || '') + '第' + esc(it.target.new_period) + '节</b>'
+                    + ' <span class="text-danger">（缺日期）</span>';
+            } else {
+                right = '<b>' + esc(cfg.weekdays[it.target.new_weekday] || '') + '第' + esc(it.target.new_period) + '节</b>'
+                    + (perm ? '（永久）' : '（' + esc(it.target.swap_date) + '）');
+            }
+            html += '<div>' + circNum(i + 1) + ' ' + left + ' → ' + right + '</div>';
+        });
+        html += '<div class="text-muted mt-1">共 ' + items.length + ' 节，整批一次审批</div>';
+        $('#summary').html(html);
     }
 
     // ── 事件绑定 ──
@@ -329,11 +516,13 @@
         $('#tgtWeekday').val($('#srcWeekday').val());
         syncTip();
         loadEntries();
+        renderEditor();
     });
     $('#srcWeekday').on('change', function () {
         $('#tgtWeekday').val($(this).val());
         syncTip();
         loadEntries();
+        renderEditor();
     });
     $('#selGrade').on('change', function () {
         var $c = $('#selClass');
@@ -352,30 +541,76 @@
     $('#tgtWeekday').on('change', renderSlots);
     $('#onlyAvail').on('change', renderSlots);
     $('#tgtDate').on('change', function () {
-        $('#hTgtDate').val($(this).val());
-        renderSummary();
+        var it = activeItem();
+        if (it && it.target && !isPermanent()) {
+            it.target.swap_date = $(this).val() || '';
+            renderPicked();
+            renderSummary();
+        }
     });
     $('#swPermanent').on('change', function () {
         var perm = $(this).is(':checked');
         $('#srcDateReq').toggle(!perm);
         $('#tgtDateReq').toggle(!perm);
+        // 切到「临时」时给已设过目标的行补上默认日期（编辑器里的日期），
+        // 免得每行都提示"缺日期"而用户不知道该改哪一行
+        if (!perm) {
+            var dft = $('#tgtDate').val() || $('#srcDate').val() || '';
+            items.forEach(function (o) {
+                if (o.target && !o.target.swap_date) { o.target.swap_date = dft; }
+            });
+        }
+        renderPicked();
         renderSummary();
     });
-    $(document).on('click', '.entry-pick', pickEntry);
-    $(document).on('click', '.slot-card', pickSlot);
+    $('#btnApplyAll').on('click', applyAll);
 
-    // 提交前校验
+    $(document).on('click', '.entry-pick', toggleEntry);
+    $(document).on('click', '.slot-card', pickSlot);
+    $(document).on('click', '#pickedBody tr', function (e) {
+        var $btn = $(e.target).closest('[data-act]');
+        var id = $(this).data('id');
+        if ($btn.length) {
+            if ($btn.data('act') === 'remove') { removeItem(id); return; }
+            if ($btn.data('act') === 'set') { activateRow(id); return; }
+        }
+        activateRow(id);
+    });
+
+    // 提交前校验 + 组装 items_json
     $('#applyForm').on('submit', function (e) {
-        if (!$('#hEntryId').val()) { e.preventDefault(); alert('请在步骤 1 点选一节要调走的课'); return; }
-        if (!$('#hWeekday').val() || !$('#hPeriod').val()) { e.preventDefault(); alert('请在步骤 2 选择调到第几节'); return; }
-        var perm = $('#swPermanent').is(':checked');
-        if (!perm && !$('#tgtDate').val()) { e.preventDefault(); alert('临时调课请选择调到哪一天'); return; }
-        $('#hSrcDate').val($('#srcDate').val());
-        $('#hSrcWeekday').val($('#srcWeekday').val());
-        $('#hTgtDate').val($('#tgtDate').val());
+        if (!items.length) { e.preventDefault(); alert('请至少选择一节要调走的课'); return; }
+        var i;
+        for (i = 0; i < items.length; i++) {
+            if (!items[i].target) { e.preventDefault(); alert('第 ' + (i + 1) + ' 行还没设置目标时段'); return; }
+        }
+        var perm = isPermanent();
+        if (!perm) {
+            for (i = 0; i < items.length; i++) {
+                if (!(items[i].target.swap_date || '')) {
+                    e.preventDefault(); alert('第 ' + (i + 1) + ' 行是临时调课，请选择调到哪一天'); return;
+                }
+            }
+        }
         var reason = ($('textarea[name=reason]').val() || '').trim();
         if (!reason) { e.preventDefault(); alert('请填写调课理由'); return; }
-        if (!confirm('确认提交调课申请？\n' + $('#summary').text().replace(/\s+/g, ' ') + '\n提交后按审批链路流转。')) {
+
+        var payload = { items: items.map(function (it) {
+            return {
+                entry_id: it.entry.id,
+                new_weekday: parseInt(it.target.new_weekday, 10),
+                new_period: parseInt(it.target.new_period, 10),
+                swap_date: perm ? '' : (it.target.swap_date || '')
+            };
+        }) };
+        $('#hItemsJson').val(JSON.stringify(payload));
+        $('#hSourceDate').val($('#srcDate').val());
+        $('#hSourceWeekday').val($('#srcWeekday').val());
+
+        var names = items.map(function (it, idx) {
+            return circNum(idx + 1) + (cfg.weekdays[entryWeekday(it.entry)] || '') + '第' + it.entry.period_number + '节 ' + it.entry.subject;
+        }).join('；');
+        if (!confirm('确认提交调课申请？\n共 ' + items.length + ' 节：' + names + '\n提交后按审批链路整批一次审批。')) {
             e.preventDefault();
         }
     });
@@ -386,6 +621,8 @@
         if (w) { $('#srcWeekday').val(w); $('#tgtWeekday').val(w); }
         syncTip();
         loadEntries();
+        renderPicked();
+        renderEditor();
         renderSummary();
     })();
 })();

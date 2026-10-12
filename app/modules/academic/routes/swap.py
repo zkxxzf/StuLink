@@ -1,7 +1,8 @@
-# StuLink v1.19.47.3 2026-10-10
+# StuLink v1.19.47.6 2026-10-10
 # 教务 · 调课管理（重构版，基于 timetable.db）：
 #   个人调课 / 统一调课 / 审核 / 执行 / 撤销 / 详情 / 统计 / 联动 API
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
+import json
 from datetime import date
 
 from flask import (render_template, request, redirect, url_for, flash,
@@ -116,6 +117,61 @@ def _bool_flag(value):
     return str(value).strip().lower() in ('1', 'on', 'true', 'yes')
 
 
+def _int_or_none(value):
+    try:
+        return int(str(value).strip())
+    except (TypeError, ValueError):
+        return None
+
+
+def _parse_swap_items(form):
+    """解析申请表单的"多节明细"（items_json 优先，回退旧的单条字段）。
+
+    返回 [{'entry_id', 'new_weekday', 'new_period', 'swap_date'}, ...]；
+    缺项/非法项原样带过，由服务层统一给"第 N 条信息不完整"的提示。
+    """
+    raw = (form.get('items_json') or '').strip()
+    if raw:
+        try:
+            data = json.loads(raw)
+        except (ValueError, TypeError):
+            return []
+        rows = data.get('items') if isinstance(data, dict) else None
+        items = []
+        for it in (rows or []):
+            if not isinstance(it, dict):
+                continue
+            items.append({
+                'entry_id': _int_or_none(it.get('entry_id')),
+                'new_weekday': _int_or_none(it.get('new_weekday')),
+                'new_period': _int_or_none(it.get('new_period')),
+                'swap_date': _parse_date(it.get('swap_date')),
+            })
+        return items
+    # 兼容旧单条字段（旧书签表单 / 外部调用）
+    eid = form.get('entry_id', type=int)
+    if not eid:
+        return []
+    return [{
+        'entry_id': eid,
+        'new_weekday': form.get('new_weekday', type=int),
+        'new_period': form.get('new_period', type=int),
+        'swap_date': _parse_date(form.get('swap_date')),
+    }]
+
+
+def _flash_swap_conflicts(msg, result):
+    """整批冲突明细回显（最多 3 条，别刷屏）。"""
+    conflicts = (result or {}).get('conflicts') or []
+    if not conflicts:
+        flash(msg, 'danger')
+        return
+    detail = '；'.join(f'第{c.get("index") or "?"}条 {c.get("desc") or ""}'.strip()
+                      for c in conflicts[:3])
+    more = f'（共 {len(conflicts)} 条）' if len(conflicts) > 3 else ''
+    flash(f'{msg}：{detail}{more}', 'danger')
+
+
 # ══════════════════════════════════════════════════════════════════════
 # 页面路由
 # ══════════════════════════════════════════════════════════════════════
@@ -163,7 +219,11 @@ def swap_page():
 @login_required
 @perm_required('academic.swap')
 def swap_apply():
-    """个人调课申请：选原课程 → 选目标时段 → 填理由/日期/是否永久。"""
+    """个人调课申请：选原课程（可多节，各自指定目标时段）→ 填理由/日期/是否永久。
+
+    2026-10-12：一次可提交多节 —— 明细走 `items_json`（服务层 apply_swap_multi
+    共享 batch_id，整批一次审批/执行/撤销），同时兼容旧的单条字段。
+    """
     sched = swap_service.get_active_schedule()
     if not sched:
         flash('尚未建立学期课表，无法申请调课', 'warning')
@@ -171,51 +231,53 @@ def swap_apply():
 
     if request.method == 'POST':
         uid, name = _applicant()
-        entry_id = request.form.get('entry_id', type=int)
-        new_weekday = request.form.get('new_weekday', type=int)
-        new_period = request.form.get('new_period', type=int)
-        new_room = (request.form.get('new_room') or '').strip()
         reason = (request.form.get('reason') or '').strip()
         is_permanent = _bool_flag(request.form.get('is_permanent'))
-        swap_date = _parse_date(request.form.get('swap_date'))
+        new_room = (request.form.get('new_room') or '').strip()
+        items = _parse_swap_items(request.form)
 
-        if not entry_id:
-            flash('请选择原课程', 'danger')
-            return redirect(url_for('academic.swap_apply'))
-        entry = db.session.get(ScheduleEntry, entry_id)
-        if (not entry or entry.is_deleted or entry.term_schedule_id != sched.id or
-                not swap_entry_authorizer(current_user)(entry)):
-            flash('你只能为本人任教课程或负责班级的课程提交申请', 'danger')
+        if not items:
+            flash('请至少选择一节要调走的课', 'danger')
             return redirect(url_for('academic.swap_apply'))
         if not reason:
             flash('请填写调课理由', 'danger')
             return redirect(url_for('academic.swap_apply'))
 
+        # 逐条：条目存在 / 未删 / 本学期 / 有权申请（与单条时代同一口径）
+        allowed = swap_entry_authorizer(current_user)
+        first_entry = None
+        for it in items:
+            entry = db.session.get(ScheduleEntry, it['entry_id']) if it.get('entry_id') else None
+            if (not entry or entry.is_deleted or entry.term_schedule_id != sched.id
+                    or not allowed(entry)):
+                flash('你只能为本人任教课程或负责班级的课程提交申请', 'danger')
+                return redirect(url_for('academic.swap_apply'))
+            if first_entry is None:
+                first_entry = entry
+
         # 调休/跨天：原课日期 + 那天上的是周几的课（默认=日期星期，可手改）
-        swap_date = _parse_date(request.form.get('swap_date'))
         source_date = _parse_date(request.form.get('source_date'))
         source_weekday = request.form.get('source_weekday', type=int)
         if not source_date:
-            source_date = swap_date          # 只传目标日期时按"同一天"处理
-        if not swap_date:
-            swap_date = source_date
+            source_date = _parse_date(request.form.get('swap_date'))  # 兼容旧单条入参
         if source_date and not source_weekday:
-            source_weekday = entry.weekday
+            source_weekday = first_entry.weekday
 
-        ok, msg, swap = swap_service.apply_swap(
-            applicant_uid=uid, applicant_name=name, original_entry_id=entry_id,
-            new_weekday=new_weekday, new_period=new_period, new_room=new_room or None,
-            swap_date=swap_date, is_permanent=is_permanent, reason=reason,
-            swap_type='personal', source_date=source_date,
-            source_weekday=source_weekday)
+        ok, msg, result = swap_service.apply_swap_multi(
+            applicant_uid=uid, applicant_name=name, items=items,
+            is_permanent=is_permanent, reason=reason, new_room=new_room or None,
+            source_date=source_date, source_weekday=source_weekday)
         if not ok:
             db.session.rollback()
-            flash(msg, 'danger')
+            _flash_swap_conflicts(msg, result)
             return redirect(url_for('academic.swap_apply'))
-        log_operation(current_user, '新增', '调课申请', swap.id,
-                      f'{name} 个人调课 #{swap.id}', module='academic')
+        log_operation(current_user, '新增', '调课申请', result.get('rep_id') or 0,
+                      f'{name} 个人调课 {result.get("created", 1)} 节'
+                      + (f'（批次 {str(result.get("batch_id"))[:8]}）'
+                         if result.get('batch_id') else ''),
+                      module='academic')
         flash(msg, 'success')
-        return redirect(url_for('academic.swap_detail', swap_id=swap.id))
+        return redirect(url_for('academic.swap_detail', swap_id=result['rep_id']))
 
     uid, name = _applicant()
     periods = swap_service.get_periods(sched.id)
@@ -444,7 +506,7 @@ def swap_execute(swap_id):
             return jsonify({'success': False,
                             'message': '；'.join(fails[:3]) or '执行失败'}), 400
         log_operation(current_user, '执行', '调课记录', swap_id,
-                      f'执行统一调课批次 {done} 门', module='academic')
+                      f'执行调课批次 {done} 门', module='academic')
         m = f'已执行该批次 {done} 门课'
         if fails:
             m += f'；{len(fails)} 条未执行：' + '；'.join(fails[:3])

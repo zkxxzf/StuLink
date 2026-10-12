@@ -96,11 +96,11 @@
     </div>
 </div>
 
-{# ── 统一调课批次成员（列表里整批只占一条记录，明细在这里看）── #}
+{# ── 调课批次成员（列表里整批只占一条记录，明细在这里看）── #}
 {% if d.is_batch %}
 <div class="card mb-3">
     <div class="card-header py-2 d-flex justify-content-between align-items-center flex-wrap gap-2">
-        <span><i class="bi bi-collection"></i> 统一调课批次：本批共 {{ d.batch_count }} 门课</span>
+        <span><i class="bi bi-collection"></i> 本批共 {{ d.batch_count }} 门课 · 一次审批整批生效</span>
         <span class="small text-muted">通过 / 驳回 / 撤销 / 执行一次即整批生效，不必逐条审批</span>
     </div>
     <div class="card-body py-2">
@@ -281,8 +281,8 @@
             alert(m);
         });
     }
-    // 统一调课批次：一次操作即整批生效，确认文案带上"共 N 门"
-    var what = (cfg.batchCount > 1) ? ('该统一调课批次（共 ' + cfg.batchCount + ' 门课）') : '该调课申请';
+    // 调课批次：一次操作即整批生效，确认文案带上"共 N 门"
+    var what = (cfg.batchCount > 1) ? ('该调课批次（共 ' + cfg.batchCount + ' 门课）') : '该调课申请';
     $('.btn-approve').on('click', function () { if (confirm('确认通过' + what + '？')) post(cfg.approveUrl, { review_note: '' }); });
     $('.btn-execute').on('click', function () { if (confirm('确认执行' + what + '？执行后将真正修改课表且不可重复执行。')) post(cfg.executeUrl, {}); });
     $('.btn-cancel').on('click', function () { if (confirm('确认撤销' + what + '？')) post(cfg.cancelUrl, {}); });

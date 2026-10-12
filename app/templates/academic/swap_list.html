@@ -94,10 +94,10 @@
                         <div class="text-muted small fw-normal">{{ s.applicant_uid }}</div>
                     </td>
                     <td><span class="badge bg-{% if s.swap_type == 'personal' %}info text-dark{% else %}secondary{% endif %}">{{ s.swap_type_text }}</span>
-                        {# 2026-10-10：统一调课按批次折叠成一条记录 —— 一批课整批一次审批/执行 #}
+                        {# 2026-10-10：批量调课按批次折叠成一条记录 —— 一批课整批一次审批/执行 #}
                         {% if s.batch_count and s.batch_count > 1 %}
                         <div class="small text-secondary mt-1"
-                             title="同一次统一调课的 {{ s.batch_count }} 门课合成一条记录，通过/驳回/执行一次即整批生效（课程明细见详情）">
+                             title="同一次批量调课的 {{ s.batch_count }} 门课合成一条记录，通过/驳回/执行一次即整批生效（课程明细见详情）">
                             <i class="bi bi-collection"></i> 共 {{ s.batch_count }} 门 · 一次审批
                         </div>
                         {% endif %}
@@ -247,10 +247,10 @@
         });
     }
 
-    // 统一调课批次在列表里只占一条：按钮作用于整批，确认文案带上"整批 N 门"
+    // 调课批次在列表里只占一条：按钮作用于整批，确认文案带上"整批 N 门"
     function batchWhat($btn) {
         var n = parseInt($btn.closest('tr').data('batch'), 10) || 0;
-        return n > 1 ? ('该统一调课批次（共 ' + n + ' 门课）') : '该调课申请';
+        return n > 1 ? ('该调课批次（共 ' + n + ' 门课）') : '该调课申请';
     }
 
     $(document).on('click', '.btn-approve', function () {

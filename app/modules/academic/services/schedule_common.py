@@ -1,4 +1,4 @@
-# StuLink v1.19.47.3 2026-10-10
+# StuLink v1.19.47.6 2026-10-10
 # 课表公共辅助函数（schedule_service 与 swap_service 共享）
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 """课表模块公共辅助层。
@@ -128,7 +128,7 @@ def get_periods(schedule_id):
 
     2026-10-10 优化：同一请求内多处会重复调用（总课表、年级课表、班级课表、
     实时课表各查一遍），这里加请求内缓存。返回值约定**只读**（调用方不得原地改）；
-    写节次配置的路由都是"保存 → redirect"，不存在同请求内改后读。
+    写作息时间配置的路由都是"保存 → redirect"，不存在同请求内改后读。
     """
     cache = None
     if has_request_context():

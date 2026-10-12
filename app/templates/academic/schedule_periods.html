@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 {% import "academic/_schedule_parts.html" as parts %}
-{% block title %}节次 · 作息配置 · {{ ts.name }}{% endblock %}
+{% block title %}作息时间 · {{ ts.name }}{% endblock %}
 {% block extra_css %}
 <style>
 /* ── 作息表视图（2026-10-10 由独立页面并入）：高中贴墙/打印用 ───────── */
@@ -34,7 +34,7 @@ table.tt tr.tt-row-break td { background: #fafbfd; color: #94a3b8; }
 {% block content %}
 <div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
     <div class="d-flex align-items-center gap-3 flex-wrap">
-        <h4 class="fw-bold mb-0"><i class="bi bi-clock-history"></i> 节次配置</h4>
+        <h4 class="fw-bold mb-0"><i class="bi bi-clock-history"></i> 作息时间</h4>
         {{ parts.term_selector(schedules, ts, base_endpoint='academic.schedule_periods') }}
     </div>
     <div class="d-flex gap-2 flex-wrap">
@@ -53,7 +53,7 @@ table.tt tr.tt-row-break td { background: #fafbfd; color: #94a3b8; }
 
 <div class="card">
     <div class="card-header py-2 d-flex justify-content-between align-items-center">
-        <span>{{ ts.name }} · 作息时间
+        <span>{{ ts.name }} · 节次与时间
             {# 2026-10-10：删掉「一天最多 13 节」的表述 —— 一天几节由学校自己定，数量不限 #}
             <span class="text-muted small fw-normal">
                 一天几节自定 · 数量不限{% if global_info %} · 全局模板 {{ global_info.count }} 节{% endif %}

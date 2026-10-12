@@ -13,6 +13,7 @@
 - 教务工作台、教师名单（筛选+导出）、查课（检查人姓名+编辑）、业绩（审核意见）
 """
 import io
+import json
 import os
 import re
 import shutil
@@ -202,7 +203,7 @@ def _urls():
         'class_data': url_for('academic.api_schedule_class_data', sid=TS_ID),
         'edit': url_for('academic.schedule_entry_edit', sid=TS_ID, eid=EID),
         'overview': url_for('academic.schedule_overview', sid=TS_ID),
-        'overview_index': url_for('academic.schedule_overview_index'),
+        # 2026-10-12：'overview_index'（无 sid 的侧栏跳转入口）已随侧栏入口下线，不再入表
         'timetable': url_for('academic.schedule_timetable', sid=TS_ID),
         'timetable_index': url_for('academic.schedule_timetable_index'),
         'smart_import': url_for('academic.schedule_smart_import', sid=TS_ID),
@@ -249,6 +250,13 @@ def check_sched():
         case('大课表页已下线 404', r.status_code == 404, str(r.status_code))
         r = c.get(f'/academic/api/schedule/{TS_ID}/grade-data')
         case('大课表年级数据接口已下线 404', r.status_code == 404, str(r.status_code))
+        # 2026-10-12（用户要求）：跨学期对比整体下线（页面/导出/数据接口一并删除）
+        for _p, _label in (('/academic/schedule/compare', '对比页'),
+                           ('/academic/schedule/compare/export', '对比导出'),
+                           ('/academic/api/schedule/compare-data', '对比数据接口')):
+            r = c.get(_p)
+            case(f'跨学期对比：{_label}已下线 404', r.status_code == 404,
+                 f'{_p} → {r.status_code}')
 
         html = c.get(u['class']).get_data(as_text=True)
         case('学科配色变量注入', '--sch:' in html)
@@ -371,9 +379,10 @@ def check_overview():
         _room_html = re.sub(r'\?v=\d+', '', r.get_data(as_text=True))
         case('总课表不显示教室（room=1 也不渲染）',
              '101' not in _room_html)
-        r = c.get(u['overview_index'], follow_redirects=False)
-        case('总课表入口重定向', r.status_code in (301, 302)
-             and '/overview' in r.headers.get('Location', ''))
+        # 2026-10-12（用户要求）：侧栏「全校总课表」入口及其无 sid 跳转路由一并下线，
+        # 入口改由学期卡片直接带 sid 进入 —— 旧地址按纪律给生 404
+        r = c.get('/academic/schedule/overview', follow_redirects=False)
+        case('旧「全校总课表」入口地址已下线 404', r.status_code == 404, str(r.status_code))
         r = c.get(u['export'], query_string={'view_type': 'overview'})
         try:
             wb = excel_sheets(r.data)
@@ -400,7 +409,7 @@ def check_overview():
 # ══════════════════════════════════════════════════════════════════════════════
 @item('TIMETABLE')
 def check_timetable():
-    """2026-10-10：作息表已并入「节次配置」——旧地址重定向，视图内容在节次配置页。"""
+    """2026-10-10：作息表已并入「作息时间」——旧地址重定向，视图内容在作息时间页。"""
     with app.app_context():
         u = _urls()
         from flask import url_for
@@ -408,18 +417,21 @@ def check_timetable():
     with app.test_client() as c:
         login(c, 'ac_admin', TEST_PWD)
         r = c.get(u['timetable'], follow_redirects=False)
-        case('旧作息表地址重定向到节次配置', r.status_code in (301, 302)
+        case('旧作息表地址重定向到作息时间', r.status_code in (301, 302)
              and r.headers.get('Location', '').endswith(f'/schedule/{TS_ID}/periods'),
              f"{r.status_code} {r.headers.get('Location')}")
         r = c.get(periods_url)
         html = r.get_data(as_text=True)
-        case('节次配置页 200（含作息表视图）', r.status_code == 200, str(r.status_code))
+        case('作息时间页 200（含作息表视图）', r.status_code == 200, str(r.status_code))
         case('含正课/早读/晚自习分类',
              '正课' in html and '晚自习' in html and '早读' in html)
         case('含时长与统计', '分钟' in html and '小时' in html)
         case('内嵌作息表视图', '作息时间表' in html)
+        # 2026-10-12 更名：「节次配置」→「作息时间」（只改称呼，入口/标识不变）
+        case('页面命名为「作息时间」（旧名「节次配置」不残留）',
+             '作息时间' in html and '节次配置' not in html)
         r = c.get(u['timetable_index'], follow_redirects=False)
-        case('作息表入口重定向到节次配置', r.status_code in (301, 302)
+        case('作息表入口重定向到作息时间', r.status_code in (301, 302)
              and r.headers.get('Location', '').endswith(f'/schedule/{TS_ID}/periods'),
              f"{r.status_code} {r.headers.get('Location')}")
 
@@ -500,17 +512,17 @@ def check_periods_unlimited_and_global():
         svc.delete_schedule(dump_id)
         case('清场：全局作息模板已移除', get_global_periods_info() is None)
 
-    # 页面级：节次配置页不再出现「一天最多」字样，且给出全局作息入口
+    # 页面级：作息时间页不再出现「一天最多」字样，且给出全局作息入口
     with app.test_client() as c:
         login(c, 'ac_admin', TEST_PWD)
         html = c.get(periods_url).get_data(as_text=True)
-        case('节次配置页不再写「一天最多 13 节」',
+        case('作息时间页不再写「一天最多 13 节」',
              '一天最多' not in html and '数量不限' in html)
-        case('节次配置页给出「存为全局作息」入口',
+        case('作息时间页给出「存为全局作息」入口',
              '/periods/global-save' in html)
-        case('节次配置页有「时长」列与 40/45/50 快捷设置',
+        case('作息时间页有「时长」列与 40/45/50 快捷设置',
              'period-dur-sel' in html and '改时长' in html)
-        case('节次配置页写明常规时长口径（早读40/正课45/晚自习50）',
+        case('作息时间页写明常规时长口径（早读40/正课45/晚自习50）',
              '常规时长' in html and '早读 40' in html and '晚自习 50' in html)
 
 
@@ -546,7 +558,7 @@ def check_sched_v2():
         r = c.get(draft_import_url)
         case('草稿学期：导入页 200（原 500）', r.status_code == 200, str(r.status_code))
         r = c.get(draft_periods_url)
-        case('草稿学期：节次配置页 200（草稿提示条可渲染）',
+        case('草稿学期：作息时间页 200（草稿提示条可渲染）',
              r.status_code == 200, str(r.status_code))
         case('未启用提示条可见', '未启用' in r.get_data(as_text=True))
 
@@ -608,8 +620,19 @@ def check_sched_v2():
         case('学期管理页：启用中的学期不给手动归档入口',
              f'/schedule/{TS_ID}/archive-term' not in html,
              '启用中的学期仍挂着归档按钮')
-        case('学期管理页：启用中的学期说明"自动归档"机制',
-             '切换启用其他学期时自动归档' in html)
+        # 2026-10-12（用户要求精简界面）：状态提示「切换启用其他学期时自动归档」已删除，
+        # 低频/危险操作收进「更多」下拉（断言改为"已下线"口径，不是漏测）
+        case('学期管理页：不再显示「自动归档」状态提示',
+             '切换启用其他学期时自动归档' not in html)
+        case('学期管理页：低频操作收进「更多」下拉（年级课表入口仍在）',
+             '更多' in html and 'dropdown-menu' in html
+             and f'/schedule/{TS_ID}/grade/' in html,
+             '更多下拉缺失或年级课表入口丢失')
+        # 2026-10-12（用户要求）：侧栏「全校总课表」入口删除 —— 学期卡片上已有该按钮，
+        # 侧栏再挂一个是重复入口；原来只为侧栏服务、无 sid 的跳转路由随之下线
+        case('侧栏不再挂「全校总课表」重复入口',
+             '/academic/schedule/overview"' not in html,
+             '侧栏仍有无 sid 的全校总课表入口')
 
     # 归档临时未启用学期（写快照）→ 出现在历史课表
     with app.app_context():
@@ -631,6 +654,121 @@ def check_sched_v2():
         case('学期管理页不再列已归档学期', '回归草稿学期' not in m_html)
         case('学期管理页仍列启用中的学期（入口为全校总课表）',
              f'/schedule/{TS_ID}/overview' in m_html)
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# 课表查询三项（2026-10-12 新增：教师课表 / 备课组课表 / 教研组课表）
+# ══════════════════════════════════════════════════════════════════════════════
+@item('GROUPQ')
+def check_group_schedule_query():
+    """① 成员按本学期课表聚合（不另配组织关系表）——备课组＝年级×学科、教研组＝学科跨年级；
+    ② 组长标注取 SubjectLeader（备课组页＝该年级备课组长，教研组页＝教研组长）；
+    ③ 共同空档＝当天全组都没课的节次（排除课间空档）；
+    ④ 三个入口都是查看类页面（academic.view 即可，不限课表管理员）。"""
+    from flask import url_for
+    from app.modules.academic.services import schedule_service as svc
+    from app.models.academic import SubjectLeader
+
+    with app.app_context():
+        # 年级备课组长 + 全校级（grade=''）教研组长各一条：两种标签各有归属。
+        # **用完即清理**：LEADER 项断言 SubjectLeader 全表只有它自己造的那条，
+        # 这里留下的夹具会把那条断言连带打红。
+        ld1 = SubjectLeader(school_year='2026-2027', term='第一学期', grade='高一',
+                            subject='语文', leader_uid='T900001', leader_name='张语文')
+        ld2 = SubjectLeader(school_year='2026-2027', term='', grade='',
+                            subject='语文', leader_uid='T900001', leader_name='张语文')
+        db.session.add_all([ld1, ld2])
+        db.session.commit()
+        ld_ids = [ld1.id, ld2.id]
+
+        g = svc.get_group_view(TS_ID, scope='lesson', grade='高一', subject='语文')
+        case('备课组按「年级×学科」从课表聚合成员',
+             [m['name'] for m in g['members']] == ['张语文'],
+             str([m['name'] for m in g['members']]))
+        case('备课组只算本年级该学科的课（别的年级不混入）',
+             bool(g['members']) and all(m['grades'] == ['高一'] for m in g['members']),
+             str([m['grades'] for m in g['members']]))
+        case('组长标注取自 SubjectLeader（高一备课组长）',
+             g['members'][0]['roles'] == ['高一备课组长'], str(g['members'][0]['roles']))
+        case('组长排成员列表最前', g['members'][0]['is_leader'])
+
+        sub = svc.get_group_view(TS_ID, scope='subject', subject='语文')
+        case('教研组跨年级聚合（张语文：高一 + 高二）',
+             sub['member_count'] == 1 and sub['members'][0]['grades'] == ['高一', '高二'],
+             str([m['grades'] for m in sub['members']]))
+        case('教研组页同时标出教研组长（全校级登记）与年级备课组长',
+             set(sub['members'][0]['roles']) == {'教研组长', '高一备课组长'},
+             str(sub['members'][0]['roles']))
+
+        mon = svc.get_group_view(TS_ID, scope='lesson', grade='高一', subject='语文', day=1)
+        nums = [p['period_number'] for p in mon['free_periods']]
+        case('共同空档排除了有人上课的节次（周一第2节）', bool(nums) and 2 not in nums,
+             str(nums))
+
+    with app.app_context():
+        u_lesson = url_for('academic.schedule_lesson_group', sid=TS_ID,
+                           grade='高一', subject='语文')
+        u_subject = url_for('academic.schedule_subject_group', sid=TS_ID, subject='语文')
+        u_teacher = url_for('academic.schedule_teacher_query', sid=TS_ID)
+        u_teacher_full = url_for('academic.schedule_teacher_query', sid=TS_ID,
+                                 uid='T900001')
+        u_manage = url_for('academic.schedule_manage')
+        u_home = url_for('academic.academic_home')
+
+    with app.test_client() as c:
+        login(c, 'ac_admin', TEST_PWD)
+        h = c.get(u_lesson).get_data(as_text=True)
+        case('备课组课表页 200：渲染成员行 + 表格头',
+             '张语文' in h and '教师' in h and '备课组课表' in h)
+        case('组课表格内副行是任教班级（行＝教师，格内看班级）', '高一01班' in h)
+        case('组课表页给出共同空档提示', '共同空档' in h)
+        case('星期段标出「今天」（与全校总课表同口径）', '今天' in h)
+        case('组长徽章渲染到页面', '高一备课组长' in h)
+        h2 = c.get(u_subject).get_data(as_text=True)
+        case('教研组课表页 200 且标出教研组长', '教研组长' in h2)
+        ht = c.get(u_teacher).get_data(as_text=True)
+        case('教师课表入口态＝选教师（列出有课教师）',
+             '张语文' in ht and '选择教师' in ht)
+        case('入口态不渲染个人课表统计卡', '每周课时统计' not in ht)
+        hf = c.get(u_teacher_full).get_data(as_text=True)
+        case('带 uid 直接出该教师课表（复用原页）',
+             '张语文' in hf and '每周课时统计' in hf)
+        # 2026-10-12（用户要求）：三个查询页**合成一个入口** —— 侧栏撤掉三项，统一入口在
+        # 教务工作台，页内用 tab 互切（三个 URL 仍各自独立，可直接收藏/分享/后退）
+        case('三个查询页顶部都有 tab 条，可互切',
+             '/academic/schedule/lesson-group' in h
+             and '/academic/schedule/subject-group' in h
+             and '/academic/schedule/teacher' in h
+             and '/academic/schedule/teacher' in h2
+             and '/academic/schedule/lesson-group' in h2
+             and '/academic/schedule/lesson-group' in ht)
+        mhtml = c.get(u_manage).get_data(as_text=True)
+        case('侧栏不再分挂三个查询入口（已合成到工作台）',
+             '/academic/schedule/lesson-group' not in mhtml
+             and '/academic/schedule/subject-group' not in mhtml)
+        hhome = c.get(u_home).get_data(as_text=True)
+        case('教务工作台给出统一「课表查询」入口',
+             '课表查询' in hhome and '/academic/schedule/teacher' in hhome)
+    with app.test_client() as c:
+        # 查看类放开的是「教务模块内可见即可看」（academic.view），不外溢给班主任等
+        # 非教务角色 —— 他们连侧栏教务菜单都没有；这里钉住 403（不是 500、更不是 200）
+        login(c, 'ac_head', TEST_PWD)
+        r = c.get(u_subject)
+        case('无 academic.view 的账号访问组课表被拦（403）',
+             r.status_code == 403, str(r.status_code))
+    with app.test_client() as c:
+        r = c.get(u_lesson)
+        case('未登录访问组课表被拦（302）', r.status_code in (301, 302),
+             str(r.status_code))
+
+    with app.app_context():
+        # 清理组长夹具：上面两个页面断言要能看到组长徽章，所以清理只能放在**全部断言之后**
+        # （放前面会把「组长徽章渲染到页面」一起打红）—— LEADER 项还断言全表只有它那条。
+        for _lid in ld_ids:
+            _row = db.session.get(SubjectLeader, _lid)
+            if _row:
+                db.session.delete(_row)
+        db.session.commit()
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -866,6 +1004,245 @@ def check_swap_batch_one_record():
                 synchronize_session=False)
         ScheduleSwap.query.filter(
             ScheduleSwap.batch_id.in_([bid, bid2])).delete(
+                synchronize_session=False)
+        db.session.commit()
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# 个人调课 = 多节一起申请（2026-10-12 用户要求：多节课一块申请、各自目标时段）
+# ══════════════════════════════════════════════════════════════════════════════
+@item('SWAPMULTI')
+def check_personal_multi_swap():
+    """个人调课一次提交多节：各自目标时段、共享批次号（整批一次审批/执行），
+    并支持同批让位/互换（整体后移一节、两节互换不算冲突）。"""
+    from app.modules.academic.services import swap_service
+
+    def _mk(g, cn, wd, pn, subj, tuid, tname):
+        e = ScheduleEntry(term_schedule_id=TS_ID, grade=g, class_name=cn,
+                          weekday=wd, period_number=pn, subject=subj,
+                          teacher_uid=tuid, teacher_name=tname,
+                          week_range='1-20', entry_type='normal')
+        db.session.add(e)
+        return e
+
+    made_ids, swap_ids, exec_rep = [], [], None
+    with app.app_context():
+        # ── ① 两节各自目标：一次提交成功、共享批次号 ──
+        e1 = _mk('高三', '03班', 4, 1, '语文', 'T900001', '张语文')
+        e2 = _mk('高三', '03班', 4, 2, '数学', 'T900002', '李数学')
+        db.session.commit()
+        made_ids += [e1.id, e2.id]
+        ok, msg, res = swap_service.apply_swap_multi(
+            applicant_uid='multireg', applicant_name='多节回归',
+            items=[{'entry_id': e1.id, 'new_weekday': 5, 'new_period': 5},
+                   {'entry_id': e2.id, 'new_weekday': 5, 'new_period': 6}],
+            is_permanent=True, reason='多节回归')
+        bid_a = res.get('batch_id')
+        case('多节申请：两节各自目标一次提交成功（共享批次号）',
+             ok and res.get('created') == 2 and bool(bid_a), f'{msg} {res}')
+        rows = [it for it in swap_service.get_swap_list(
+            schedule_id=TS_ID, is_reviewer=True, per_page=100)[0]
+            if bid_a and it.get('batch_id') == bid_a]
+        case('多节申请：列表折叠成一条（共 2 节 · 一次审批）',
+             len(rows) == 1 and rows[0].get('batch_count') == 2,
+             f'{len(rows)} 条 {rows[0].get("batch_count") if rows else None}')
+        d = swap_service.get_swap_detail(rows[0]['id']) if rows else {}
+        case('多节申请：详情列出两节各自的目标时段',
+             bool(d) and d.get('batch_count') == 2
+             and len({m['target_slot'] for m in (d.get('batch_members') or [])}) == 2,
+             f"batch={d.get('batch_count')} slots="
+             f"{[m['target_slot'] for m in (d.get('batch_members') or [])]}")
+        if bid_a:
+            swap_ids += [s.id for s in ScheduleSwap.query.filter_by(batch_id=bid_a).all()]
+
+        # ── ② 单节走同一入口：不打批次号（保持旧行为） ──
+        e3 = _mk('高三', '03班', 4, 3, '英语', 'T900003', '王英语')
+        db.session.commit()
+        made_ids.append(e3.id)
+        ok1, msg1, res1 = swap_service.apply_swap_multi(
+            applicant_uid='multireg', applicant_name='多节回归',
+            items=[{'entry_id': e3.id, 'new_weekday': 5, 'new_period': 8}],
+            is_permanent=True, reason='单节回归')
+        case('单节走同一入口：不产生批次号（与旧行为一致）',
+             ok1 and res1.get('created') == 1 and not res1.get('batch_id'),
+             f'{msg1} {res1}')
+        swap_ids += [s.id for s in ScheduleSwap.query.filter(
+            ScheduleSwap.original_entry_id == e3.id).all()]
+
+        # ── ③ 批内互斥：两节落到同一格 → 整批不创建 ──
+        e4 = _mk('高三', '04班', 4, 1, '语文', 'T900001', '张语文')
+        e5 = _mk('高三', '04班', 4, 2, '数学', 'T900002', '李数学')
+        db.session.commit()
+        made_ids += [e4.id, e5.id]
+        before = ScheduleSwap.query.filter_by(applicant_uid='multireg').count()
+        ok2, msg2, res2 = swap_service.apply_swap_multi(
+            applicant_uid='multireg', applicant_name='多节回归',
+            items=[{'entry_id': e4.id, 'new_weekday': 5, 'new_period': 9},
+                   {'entry_id': e5.id, 'new_weekday': 5, 'new_period': 9}],
+            is_permanent=True, reason='批内互斥')
+        after = ScheduleSwap.query.filter_by(applicant_uid='multireg').count()
+        case('批内互斥：两节落同一格 → 整批不创建',
+             (not ok2) and before == after and bool(res2.get('conflicts')),
+             f'{msg2} {before}->{after}')
+
+        # ── ④ 让位/互换：各自落到对方原位置（同批永久一起生效） ──
+        ok3, msg3, res3 = swap_service.apply_swap_multi(
+            applicant_uid='multireg', applicant_name='多节回归',
+            items=[{'entry_id': e4.id, 'new_weekday': 4, 'new_period': 2},
+                   {'entry_id': e5.id, 'new_weekday': 4, 'new_period': 1}],
+            is_permanent=True, reason='互换回归')
+        bid_c = res3.get('batch_id')
+        case('两节互换（各自落到对方原位置）允许提交',
+             ok3 and bool(bid_c), f'{msg3} {res3}')
+        if bid_c:
+            sibs = ScheduleSwap.query.filter_by(batch_id=bid_c).order_by(
+                ScheduleSwap.id).all()
+            swap_ids += [s.id for s in sibs]
+            exec_rep = sibs[0].id if sibs else None
+
+        # ── ⑤ 真冲突：目标格被别的课占着 → 整批拒绝并说明 ──
+        e6 = _mk('高三', '04班', 5, 3, '化学', 'T900005', '钱化学')
+        db.session.commit()
+        made_ids.append(e6.id)
+        ok4, msg4, res4 = swap_service.apply_swap_multi(
+            applicant_uid='multireg', applicant_name='多节回归',
+            items=[{'entry_id': e6.id, 'new_weekday': 4, 'new_period': 1}],
+            is_permanent=True, reason='真冲突')
+        case('目标格被占 → 整批拒绝且给出冲突说明',
+             (not ok4) and any('已有课程' in (c.get('desc') or '')
+                               for c in (res4.get('conflicts') or [])),
+             f'{msg4} {res4.get("conflicts")}')
+
+        # ── ⑥ 临时调课：每节各自的日期 ──
+        e7 = _mk('高三', '06班', 4, 1, '语文', 'T900001', '张语文')
+        e8 = _mk('高三', '06班', 4, 2, '数学', 'T900002', '李数学')
+        db.session.commit()
+        made_ids += [e7.id, e8.id]
+        ok5, msg5, res5 = swap_service.apply_swap_multi(
+            applicant_uid='multireg', applicant_name='多节回归',
+            items=[{'entry_id': e7.id, 'new_weekday': 5, 'new_period': 11,
+                    'swap_date': date(2026, 10, 16)},
+                   {'entry_id': e8.id, 'new_weekday': 6, 'new_period': 12,
+                    'swap_date': date(2026, 10, 17)}],
+            is_permanent=False, reason='临时多节回归')
+        rows5 = (ScheduleSwap.query.filter_by(batch_id=res5.get('batch_id'))
+                 .order_by(ScheduleSwap.id).all()) if res5.get('batch_id') else []
+        case('临时调课：每节各自的目标日期（10-16 / 10-17）',
+             ok5 and len(rows5) == 2
+             and {s.swap_date for s in rows5} == {date(2026, 10, 16), date(2026, 10, 17)},
+             f'{msg5} {[str(s.swap_date) for s in rows5]}')
+        swap_ids += [s.id for s in rows5]
+
+        # ── ⑦ 跨学期条目一起调 → 拒绝 ──
+        other = TermSchedule(name='多节回归别学期', school_year='2026-2027',
+                             term='第二学期', status='draft')
+        db.session.add(other)
+        db.session.flush()
+        e9 = ScheduleEntry(term_schedule_id=other.id, grade='高三', class_name='07班',
+                           weekday=4, period_number=1, subject='语文',
+                           teacher_uid='T900001', teacher_name='张语文',
+                           week_range='1-20', entry_type='normal')
+        db.session.add(e9)
+        db.session.commit()
+        other_id, e9_id = other.id, e9.id
+        ok6, msg6, res6 = swap_service.apply_swap_multi(
+            applicant_uid='multireg', applicant_name='多节回归',
+            items=[{'entry_id': e7.id, 'new_weekday': 5, 'new_period': 12},
+                   {'entry_id': e9.id, 'new_weekday': 5, 'new_period': 12}],
+            is_permanent=True, reason='跨学期')
+        case('跨学期条目不允许一起调课',
+             (not ok6) and any('跨学期' in (c.get('desc') or '')
+                               for c in (res6.get('conflicts') or [])),
+             f'{msg6} {res6.get("conflicts")}')
+        db.session.delete(db.session.get(ScheduleEntry, e9_id))
+        db.session.delete(db.session.get(TermSchedule, other_id))
+        db.session.commit()
+        e4_id, e5_id = e4.id, e5.id
+
+    # ── ⑧ HTTP：申请页契约 + 多节提交 302 到详情页 ──
+    with app.test_client() as c:
+        login(c, 'ac_admin', TEST_PWD)
+        html = c.get('/academic/swap/apply').get_data(as_text=True)
+        case('申请页：多节提交契约（items_json 字段）在位', 'items_json' in html)
+        hdrs = {'X-CSRFToken': get_csrf(c, '/academic/swap/apply')}
+        with app.app_context():
+            e10 = _mk('高三', '05班', 4, 1, '语文', 'T900001', '张语文')
+            e11 = _mk('高三', '05班', 4, 2, '数学', 'T900002', '李数学')
+            db.session.commit()
+            made_ids += [e10.id, e11.id]
+            payload = {'items': [
+                {'entry_id': e10.id, 'new_weekday': 5, 'new_period': 12},
+                {'entry_id': e11.id, 'new_weekday': 5, 'new_period': 13}]}
+            p10, p11 = e10.id, e11.id
+        r = c.post('/academic/swap/apply',
+                   data={'csrf_token': hdrs['X-CSRFToken'], 'reason': 'HTTP 多节回归',
+                         'is_permanent': '1',
+                         'items_json': json.dumps(payload, ensure_ascii=False)},
+                   follow_redirects=False)
+        loc = r.headers.get('Location') or ''
+        with app.app_context():
+            http_sws = ScheduleSwap.query.filter(
+                ScheduleSwap.original_entry_id.in_([p10, p11])).all()
+            swap_ids += [s.id for s in http_sws]
+            case('申请页：多节提交成功并跳到详情页',
+                 r.status_code == 302 and '/academic/swap/' in loc
+                 and len(http_sws) == 2
+                 and len({s.batch_id for s in http_sws}) == 1
+                 and all(s.batch_id for s in http_sws),
+                 f'{r.status_code} {loc} {len(http_sws)}')
+        bad = c.post('/academic/swap/apply',
+                     data={'csrf_token': hdrs['X-CSRFToken'], 'reason': '无效条目',
+                           'is_permanent': '1',
+                           'items_json': json.dumps(
+                               {'items': [{'entry_id': 99999999, 'new_weekday': 5,
+                                           'new_period': 3}]}, ensure_ascii=False)},
+                     follow_redirects=False)
+        with app.app_context():
+            case('申请页：条目不存在 → 退回申请页（不落库）',
+                 bad.status_code == 302 and '/apply' in (bad.headers.get('Location') or '')
+                 and not ScheduleSwap.query.filter_by(reason='无效条目').count(),
+                 f'{bad.status_code} {bad.headers.get("Location")}')
+
+        # ── ⑨ 批次审批 + 执行：互换两节真正落到对方格子 ──
+        if exec_rep:
+            with app.app_context():
+                chain_len = len(swap_service.approval_chain())
+            for _ in range(chain_len):
+                c.post(f'/academic/swap/{exec_rep}/approve', data={'review_note': ''},
+                       headers=hdrs)
+            r2 = c.post(f'/academic/swap/{exec_rep}/execute', data={}, headers=hdrs)
+            body = r2.get_json() or {}
+            with app.app_context():
+                news = ScheduleEntry.query.filter(
+                    ScheduleEntry.original_entry_id.in_([e4_id, e5_id]),
+                    ScheduleEntry.is_deleted.is_(False)).all()
+                got = {(e.weekday, e.period_number, e.subject) for e in news}
+                case('整批执行：互换两节各自落到对方格子（不是只改一条）',
+                     got == {(4, 2, '语文'), (4, 1, '数学')},
+                     f'{got} {body.get("message")}')
+                old_deleted = ScheduleEntry.query.filter(
+                    ScheduleEntry.id.in_([e4_id, e5_id]),
+                    ScheduleEntry.is_deleted.is_(True)).count()
+                case('整批执行：原两节都软删除', old_deleted == 2, f'{old_deleted}/2')
+
+    # ── 清理：本项创建的条目 / 调课记录 / 版本（别影响其它用例） ──
+    with app.app_context():
+        all_ids = [i for i in made_ids if i]
+        news = [e.id for e in ScheduleEntry.query.filter(
+            ScheduleEntry.original_entry_id.in_(all_ids)).all()] if all_ids else []
+        if all_ids or news:
+            ScheduleVersion.query.filter(
+                ScheduleVersion.entry_id.in_(all_ids + news)).delete(
+                    synchronize_session=False)
+            ScheduleEntry.query.filter(
+                ScheduleEntry.id.in_(all_ids + news)).delete(
+                    synchronize_session=False)
+        ids = [i for i in swap_ids if i]
+        if ids:
+            ScheduleSwap.query.filter(ScheduleSwap.id.in_(ids)).delete(
+                synchronize_session=False)
+        ScheduleSwap.query.filter(
+            ScheduleSwap.applicant_uid == 'multireg').delete(
                 synchronize_session=False)
         db.session.commit()
 
@@ -1206,6 +1583,30 @@ def check_home():
         case('含 KPI / 待办 / 入口 / 动态', all(k in html for k in
              ('教务工作台', '待办事项', '教务主流程', '最近动态')))
         case('显示当前学期', '2026-2027学年第一学期' in html)
+        # 2026-10-12（用户要求）：头部那排快捷按钮删除（内容在下方「教务主流程」三块里各有一个
+        # 主入口，头部再挂是重复），学期信息并到标题后面同一行
+        case('头部不再重复挂快捷按钮（全校总课表 / 查课 / 调课审批）',
+             'btn btn-sm btn-light' not in html)
+        case('学期信息跟在标题后面（同一行）',
+             'ac-hero-meta' in html and html.index('教务工作台') < html.index('当前学期：'))
+        # 2026-10-12（用户口径）：顶部 KPI 换成实时数据 —— 查课（今日/本月/覆盖率）、
+        # 迟到/缺勤（风险红卡）、待审批调课 / 待审业绩、材料回收率与待回收份数。
+        # 数字断言基于本文件夹具里那条「今日 late」记录（HOME 项在 INSPECTION 改它之前执行）。
+        case('顶部实时 KPI：今日查课 + 本月累计 + 今日覆盖率',
+             '本月累计' in html and '今日覆盖率' in html)
+        case('顶部实时 KPI：本月迟到 1 人次（夹具今日 1 条 late）',
+             '本月迟到 1 人次' in html)
+        case('顶部实时 KPI：本月缺勤 0 人次（无缺勤记录）',
+             '本月缺勤 0 人次' in html)
+        case('迟到/缺勤风险红卡：有值时套 risk 样式',
+             'ac-kpi p-3 risk' in html)
+        case('顶部实时 KPI：待审批调课 / 教师业绩待审核',
+             '待审批调课申请' in html and '教师业绩待审核' in html)
+        case('顶部实时 KPI：材料回收（回收率 / 待回收份数）',
+             '材料回收 · 待回收' in html)
+        case('旧基础数据卡已下线（学生 / 教师 / 课时 / 备课组长）',
+             all(k not in html for k in ('在校学生', '在职教师', '本学期课时',
+                                         '已登记备课组长')))
 
 
 @item('TEACHERS')
@@ -2479,7 +2880,7 @@ def check_clear_parse_mapping_1012():
             case('清空：变更历史留痕一条（action=clear）',
                  ScheduleVersion.query.filter_by(term_schedule_id=tid,
                                                  action='clear').count() == 1)
-            case('清空：学期本身与节次配置保留',
+            case('清空：学期本身与作息时间保留',
                  db.session.get(TermSchedule, tid) is not None
                  and PeriodDef.query.filter_by(term_schedule_id=tid).count() > 0)
             svc.delete_schedule(tid)          # 清理临时学期（draft 可物理删）

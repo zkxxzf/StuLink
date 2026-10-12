@@ -1,5 +1,5 @@
-# StuLink v1.19.47.3 2026-10-10
-# 课表服务层：学期管理 / 节次配置 / 视图查询 / 条目CRUD / 冲突检测 / Excel导入导出 / 版本快照
+# StuLink v1.19.47.6 2026-10-10
+# 课表服务层：学期管理 / 作息时间（节次与时间） / 视图查询 / 条目CRUD / 冲突检测 / Excel导入导出 / 版本快照
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 """课表核心服务（独立库 timetable.db）。
 
@@ -260,7 +260,7 @@ def delete_schedule(schedule_id):
 
 
 def save_periods(schedule_id, periods_data, remove_missing=False):
-    """批量保存节次配置（按 period_number upsert）。
+    """批量保存作息时间配置（按 period_number upsert）。
 
     remove_missing=True 时，未出现在提交列表中的节次会被**删除**
     （修复此前"删掉的行保存后又复活"的问题）；
@@ -397,7 +397,7 @@ def save_global_periods(schedule_id, operator=None):
                       json.dumps(payload, ensure_ascii=False),
                       user_id=getattr(operator, 'id', None),
                       description='全局作息模板（节次名称与时间）：新建学期默认套用，'
-                                  '也可在节次配置页套用到任意学期')
+                                  '也可在作息时间页套用到任意学期')
     db.session.commit()
     return True, f'已把本学期的 {len(periods)} 节作息存为全局模板（新建学期将默认套用）'
 
@@ -1069,7 +1069,7 @@ def clear_entries(schedule_id, operator=None):
     """清空学期**全部课表条目**（软删除 + 汇总版本留痕）→ {'deleted': n}
 
     - 与 `scripts/import_school_timetable.py --replace` 同口径：只软删除课表条目，
-      **不动学期本身与节次配置**（要删整个学期用 delete_schedule）；
+      **不动学期本身与作息时间配置**（要删整个学期用 delete_schedule）；
     - 已归档学期的只读拦截由路由层 `_readonly_guard` 负责，这里不做状态判断；
     - 写一条汇总版本（action='clear'，entry_id 为空），在页面「变更历史」可追溯，
       但**不逐条记版本**（整学期动辄上千条，逐条会把版本表撑爆）。
@@ -1575,3 +1575,201 @@ def get_all_teachers():
         .order_by(Teacher.teacher_uid).all()
     return [{'uid': t.teacher_uid, 'name': t.name, 'subject': t.subject or ''}
             for t in teachers]
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# 组课表查询（2026-10-12 新增）：教师课表 / 备课组课表 / 教研组课表
+#
+# 成员口径：**按本学期课表条目聚合** —— 教这个年级/学科的老师就是该组成员。
+# 备课组（年级 × 学科）与教研组（学科，跨年级）都不另建组织关系表，与课表天然一致，
+# 不会出现「组里有人但课表查不到」的口径分叉；组长标注取自 SubjectLeader
+# （无法从课表推导，故落库在 academic.db），只做标签展示，不参与成员筛选。
+# ═══════════════════════════════════════════════════════════════════════════════
+
+GROUP_SCOPES = {'lesson': '备课组', 'subject': '教研组'}
+
+
+def _subject_key(subject):
+    """学科排序键（SUBJECT_ORDER 优先，名单外的学科排最后）"""
+    from app.models.academic import SUBJECT_ORDER
+    try:
+        return (SUBJECT_ORDER.index(subject), subject or '')
+    except ValueError:
+        return (len(SUBJECT_ORDER), subject or '')
+
+
+def list_grade_options(schedule_id):
+    """该学期有排课的年级（低年级在前）"""
+    from app.modules.academic.services.grade_utils import grade_sort_key
+    q = _base_entry_query(schedule_id).with_entities(ScheduleEntry.grade).distinct()
+    grades = {r[0] for r in q.all() if r[0]}
+    return sorted(grades, key=grade_sort_key)
+
+
+def list_subject_options(schedule_id, grade=None):
+    """该学期出现过的学科（按 SUBJECT_ORDER 排序；给 grade 时只列该年级的）"""
+    q = _base_entry_query(schedule_id)
+    if grade:
+        q = q.filter_by(grade=grade)
+    subjects = {r[0] for r in q.with_entities(ScheduleEntry.subject).distinct().all() if r[0]}
+    return sorted(subjects, key=_subject_key)
+
+
+def leader_roles(schedule_id, subject, grade=None):
+    """组长标注 {teacher_uid: [角色标签]}（来自 SubjectLeader 落库数据）。
+
+    - grade=None（教研组页）：全校级登记（grade=''）标「教研组长」，各年级登记标「高一备课组长」；
+    - 给了 grade（备课组页）：只取该年级的备课组长。
+    学期口径：登记为空（''＝整学年）或与本学期一致才算数。
+    """
+    from app.models.academic import SubjectLeader
+    ts = db.session.get(TermSchedule, schedule_id)
+    roles = {}
+    if not ts or not subject:
+        return roles
+    for ld in SubjectLeader.query.filter_by(subject=subject,
+                                            school_year=ts.school_year).all():
+        if (ld.term or '') not in ('', ts.term or ''):
+            continue
+        if grade is not None and (ld.grade or '') != grade:
+            continue
+        if not ld.leader_uid:
+            continue
+        if (ld.grade or ''):
+            label = f'{ld.grade}备课组长'
+        else:
+            label = '教研组长' if grade is None else '备课组长'
+        labels = roles.setdefault(ld.leader_uid, [])
+        if label not in labels:
+            labels.append(label)
+    return roles
+
+
+def _group_members(buckets, roles=None):
+    """把 {teacher_uid: [ScheduleEntry, ...]} 聚合成成员列表。
+
+    展示名 label：组内重名时补教师编号（行标不能撞车）；排序＝组长优先、课时多的在前。
+    """
+    roles = roles or {}
+    members = []
+    for uid, items in buckets.items():
+        counts = {}
+        for e in items:
+            nm = (e.teacher_name or '').strip() or uid
+            counts[nm] = counts.get(nm, 0) + 1
+        name = sorted(counts.items(), key=lambda kv: (-kv[1], kv[0]))[0][0]
+        subs = {}
+        grades, classes = set(), set()
+        for e in items:
+            if e.subject:
+                subs[e.subject] = subs.get(e.subject, 0) + 1
+            if e.grade:
+                grades.add(e.grade)
+            classes.add(f'{e.grade or ""}{e.class_name or ""}')
+        sub_list = [s for s, _c in sorted(subs.items(), key=lambda kv: (-kv[1],
+                                                                       _subject_key(kv[0])))]
+        members.append({
+            'uid': uid, 'name': name, 'total': len(items),
+            'subjects': sub_list, 'primary_subject': sub_list[0] if sub_list else '',
+            'grades': sorted(grades), 'classes': sorted(classes),
+            'roles': roles.get(uid, []), 'is_leader': bool(roles.get(uid)),
+        })
+    # 重名消歧（同一组内出现同名教师时才补编号，正常情况行标就是姓名）
+    name_count = {}
+    for m in members:
+        name_count[m['name']] = name_count.get(m['name'], 0) + 1
+    for m in members:
+        m['label'] = (f"{m['name']}({m['uid']})"
+                      if name_count.get(m['name'], 0) > 1 else m['name'])
+    members.sort(key=lambda m: (0 if m['is_leader'] else 1, -m['total'], m['name']))
+    return members
+
+
+def get_group_view(schedule_id, scope='lesson', grade=None, subject=None,
+                   day=None, week=None):
+    """备课组 / 教研组课表视图。
+
+    - scope='lesson'： 年级 × 学科（备课组），两者都要给；
+    - scope='subject'：学科（教研组，跨年级）；
+    - day：渲染星期（1-7，默认今天）；week：周次过滤（单双周课）。
+    返回 dict：members / grids（键＝成员 label）/ metas / periods / period_groups /
+    free_periods（该天全组都没课的节次，排除课间空档）/ group_name / 选项列表。
+    """
+    periods = get_periods(schedule_id)
+    period_dicts = [p.to_dict() for p in periods]
+    period_groups = _period_groups(period_dicts)
+
+    # 参数不完整（备课组缺年级/学科）时按**空组**处理 —— 页面给"该组合本学期没排课"的
+    # 空态，绝不能退化成"整个年级全部学科"这种口径不符的结果。
+    if scope == 'lesson':
+        q = (_base_entry_query(schedule_id).filter_by(grade=grade, subject=subject)
+             if (grade and subject) else None)
+    else:
+        q = _base_entry_query(schedule_id).filter_by(subject=subject) if subject else None
+    entries = _filter_by_week(q.all(), week) if q is not None else []
+
+    buckets = {}
+    for e in entries:
+        uid = (e.teacher_uid or '').strip()
+        if uid:
+            buckets.setdefault(uid, []).append(e)
+    roles = leader_roles(schedule_id, subject,
+                         grade if scope == 'lesson' else None)
+    members = _group_members(buckets, roles)
+    grids = {m['label']: _build_grid(buckets[m['uid']], periods) for m in members}
+    metas = {m['label']: {'class_type': ' · '.join(m['roles'])}
+             for m in members if m['roles']}
+
+    day = int(day) if str(day or '').strip().isdigit() else date.today().isoweekday()
+    day = max(1, min(7, day))
+    free = []
+    for p in period_dicts:
+        if p.get('period_type') == 'break':
+            continue
+        busy = any((grids.get(m['label'], {}).get(p['period_number']) or {}).get(day)
+                   for m in members)
+        if not busy:
+            free.append({'period_number': p['period_number'],
+                         'period_name': p.get('period_name') or f"第{p['period_number']}节",
+                         'start_time': p.get('start_time') or ''})
+
+    if scope == 'lesson':
+        group_name = f'{grade or ""}{subject or ""}备课组'
+    else:
+        group_name = f'{subject or ""}教研组'
+    return {
+        'scope': scope, 'scope_label': GROUP_SCOPES.get(scope, '组'),
+        'grade': grade, 'subject': subject, 'day': day, 'week': week,
+        'group_name': group_name,
+        'periods': period_dicts, 'period_groups': period_groups,
+        'members': members, 'grids': grids, 'metas': metas,
+        'member_count': len(members),
+        'course_total': len(entries),
+        'free_periods': free,
+        'grades': list_grade_options(schedule_id),
+        'subjects': list_subject_options(schedule_id,
+                                        grade if scope == 'lesson' else None),
+    }
+
+
+def list_teacher_digest(schedule_id, week=None):
+    """本学期有排课的教师（按学科分组），供「教师课表」选择态展示。
+
+    返回 [{'subject': 学科, 'teachers': [{'uid','name','total','grades','classes'}]}]；
+    教师的归属学科取**课时最多的那门**（个人课表里能看到他的全部课程）。
+    """
+    entries = _filter_by_week(_base_entry_query(schedule_id).all(), week)
+    buckets = {}
+    for e in entries:
+        uid = (e.teacher_uid or '').strip()
+        if uid:
+            buckets.setdefault(uid, []).append(e)
+    members = _group_members(buckets)
+    grouped = {}
+    for m in members:
+        grouped.setdefault(m['primary_subject'] or '其他', []).append({
+            'uid': m['uid'], 'name': m['name'], 'total': m['total'],
+            'grades': m['grades'], 'classes': m['classes'],
+        })
+    return [{'subject': subj, 'teachers': sorted(rows, key=lambda r: (-r['total'], r['name']))}
+            for subj, rows in sorted(grouped.items(), key=lambda kv: _subject_key(kv[0]))]

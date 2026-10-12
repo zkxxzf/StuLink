@@ -123,7 +123,7 @@
                     <li>班级从 <b>表头列名</b>（形态 ①）或 <b>sheet 名 / 表格上方标题</b>（形态 ②）识别：
                         <code>高三1班</code>、<code>2024级01班</code>、<code>01班</code></li>
                     <li>节次写 <code>1节</code>、<code>第1节</code>、<code>早读</code>、
-                        <code>晚自习1</code> 都能认（须与学期「节次配置」对得上）</li>
+                        <code>晚自习1</code> 都能认（须与学期「作息时间」对得上）</li>
                     <li>学科可简写：语/数/英/物/化/生/政/史/地/体/音/美/班/自习</li>
                     <li>空值写 <code>—</code>、<code>/</code>、<code>无</code> 都可以；单双周写 <code>语文(单周)</code></li>
                     <li>教师按姓名自动匹配教师名单（找不到的按原样记录并提示）</li>
@@ -141,7 +141,7 @@
                 <div class="mt-1">4. 已有的课不会自动清空；重复导入前建议先到
                     <a href="{{ url_for('academic.schedule_overview', sid=ts.id) }}">全校总课表</a> 核对，
                     或到 <a href="{{ url_for('academic.schedule_manage') }}">学期课表管理</a> 点「清空课表」从头再来
-                    （清空前可先「导出」留底；清空保留学期与节次配置）。</div>
+                    （清空前可先「导出」留底；清空保留学期与作息时间）。</div>
             </div>
         </div>
     </div>

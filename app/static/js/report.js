@@ -75,7 +75,17 @@
         var cfg = loadCfg();
         if (examId) sel.val(String(examId));
         else if (cfg && cfg.exam) sel.val(String(cfg.exam));
+        var missed = !!(examId && sel.val() !== String(examId));
         if (!sel.val() && sel.find('option').length) sel.prop('selectedIndex', 0);
+        if (missed) {
+            // v1.19.47.7 本场考试不在可见列表（已删除 / 超出数据范围 / 已毕业）：
+            // 不能静默显示最近一场让用户误当本场（考试态下下拉原本隐藏）——
+            // 恢复下拉并明确提示。
+            $('#rpExam').removeClass('d-none');
+            $('#rpBody').before('<div id="rpNotice" class="alert alert-warning py-2 small mb-2">'
+                + '<i class="bi bi-exclamation-triangle"></i> 本场考试不可见（可能已删除或不在您的数据范围），'
+                + '已改为显示最近一场，请重新选择。</div>');
+        }
         if (cfg) {
             if (cfg.dir !== undefined) $('#rpDir').val(cfg.dir);
             if (cfg.checked) state.checked = {

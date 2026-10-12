@@ -70,6 +70,43 @@
 {% endmacro %}
 
 {# ===== 打印按钮（课表页统一入口，样式见 _schedule_grid.html 的 @media print） ===== #}
+{# ===== 课表查询 tab 条（2026-10-12）=====
+   用户要求把「教师课表 / 备课组课表 / 教研组课表」**合成一个入口**——侧栏不再分挂三项，
+   统一入口在教务工作台（academic/index.html 的「课表」块），进来后由这条 tab 切换。
+   三个页面各自 URL 仍独立（可收藏 / 分享 / 后退），tab 只是导航：切换时保留学期与周次。
+   参数：active='teacher'|'lesson'|'subject'；sid/week 透传；
+        grade/subject 给组课表（保留当前筛选），uid 给教师课表（保留当前教师）。
+#}
+{% macro schedule_query_tabs(active, sid=None, week=None, grade=None, subject=None, uid=None) %}
+{% set base = dict({}, **({'sid': sid} if sid else {})) %}
+{% if week %}{% set base = dict(base, week=week) %}{% endif %}
+{% set tkw = dict(base, uid=uid) if uid else base %}
+{% set lkw = dict(base, grade=grade) if grade else base %}
+{% set lkw = dict(lkw, subject=subject) if subject else lkw %}
+{% set skw = dict(base, subject=subject) if subject else base %}
+<ul class="nav nav-pills gap-1 mb-3 no-print">
+    <li class="nav-item">
+        <a class="nav-link py-1 px-3 {{ 'active' if active == 'teacher' }}"
+           href="{{ url_for('academic.schedule_teacher_query', **tkw) }}">
+            <i class="bi bi-person-workspace"></i> 教师课表
+        </a>
+    </li>
+    <li class="nav-item">
+        <a class="nav-link py-1 px-3 {{ 'active' if active == 'lesson' }}"
+           href="{{ url_for('academic.schedule_lesson_group', **lkw) }}">
+            <i class="bi bi-people"></i> 备课组课表
+        </a>
+    </li>
+    <li class="nav-item">
+        <a class="nav-link py-1 px-3 {{ 'active' if active == 'subject' }}"
+           href="{{ url_for('academic.schedule_subject_group', **skw) }}">
+            <i class="bi bi-diagram-3"></i> 教研组课表
+        </a>
+    </li>
+</ul>
+{% endmacro %}
+
+{# ===== 打印按钮（课表页统一入口，样式见 _schedule_grid.html 的 @media print） ===== #}
 {% macro print_button(label='打印课表') %}
 <button type="button" class="btn btn-sm btn-outline-dark no-print" onclick="window.print()">
     <i class="bi bi-printer"></i> {{ label }}

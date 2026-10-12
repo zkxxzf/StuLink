@@ -1,7 +1,11 @@
 {% extends "base.html" %}
 {% import "academic/_schedule_parts.html" as parts %}
 {% import "academic/_schedule_grid.html" as gridm %}
-{% block title %}{{ '我的课表' if my_mode else (teacher.name if teacher else uid) ~ ' 课表' }}{% endblock %}
+{# 2026-10-12：教师课表新增「查询/选择态」——只有新入口 /academic/schedule/teacher
+   会传 query_mode=True；旧的 /schedule/<sid>/teacher/<uid> 与工作台「我的课表」不传。
+   选择态＝query_mode 为真且未带 uid：只出「选教师」面板，不出个人课表与右侧统计卡。 #}
+{% set sel_mode = (query_mode is defined and query_mode and not uid) %}
+{% block title %}{% if my_mode %}我的课表{% elif sel_mode %}教师课表 · 选择教师{% else %}{{ (teacher.name if teacher else uid) }} 课表{% endif %}{% endblock %}
 {% block extra_css %}{{ gridm.schedule_grid_css() }}{% endblock %}
 {% block content %}
 <div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
@@ -9,16 +13,24 @@
         <h4 class="fw-bold mb-0">
             <i class="bi bi-person-workspace"></i>
             {% if my_mode %}我的课表{% if teacher %} · {{ teacher.name }}{% endif %}
+            {% elif sel_mode %}教师课表 · 选择教师
             {% else %}教师课表 · {{ teacher.name if teacher else uid }}{% endif %}
         </h4>
         {% if ts %}
+        {% if query_mode is defined and query_mode %}
+        {# 查询态（新入口 /academic/schedule/teacher，不带 sid）：学期切换走 ?sid=，保留 uid/week #}
+        {{ parts.term_selector(schedules, ts, base_endpoint=request.endpoint,
+                               query_mode='teacher', week=week) }}
+        {% else %}
         {{ parts.term_selector(schedules, ts,
                                base_endpoint=('workbench.my_schedule' if my_mode else 'academic.schedule_teacher'),
                                base_kwargs=({} if my_mode else {'uid': uid}),
                                query_mode=('my_schedule' if my_mode else None), week=week) }}
+        {% endif %}
         {{ parts.week_selector(ts.total_weeks, ts.get_current_week(), week) }}
         {% endif %}
     </div>
+    {% if not sel_mode %}
     <div class="d-flex gap-2 flex-wrap">
         {% if not my_mode %}
         {% if can_edit and uid %}
@@ -34,7 +46,14 @@
         </a>
         {% endif %}
     </div>
+    {% endif %}
 </div>
+
+{# 2026-10-12：查询入口态也叫「课表查询」，与备课组/教研组课表共用一条 tab；
+   旧的 /schedule/<sid>/teacher/<uid>（学期课表内视图）与工作台「我的课表」不显示。 #}
+{% if query_mode is defined and query_mode and ts %}
+{{ parts.schedule_query_tabs('teacher', sid=ts.id, week=week, uid=(uid or None)) }}
+{% endif %}
 
 {% if not ts %}
 <div class="card">
@@ -43,6 +62,68 @@
         <p class="mt-3 mb-1">尚未创建学期课表</p>
     </div>
 </div>
+{% elif sel_mode %}
+
+{{ parts.readonly_banner(ts) }}
+
+{# 面板 A：搜索/跳转 —— 纯服务端 GET 表单，提交到新入口 ?sid=&uid=（week 透传）；
+   沿用 #teacherJump 这个 select（选择态下 teacherUrlTpl 置空，旧 JS 的 change 跳转自动失效）。 #}
+<div class="card mb-3">
+    <div class="card-body py-2">
+        <form method="get" action="{{ url_for('academic.schedule_teacher_query') }}" class="row g-2 align-items-center">
+            <input type="hidden" name="sid" value="{{ ts.id }}">
+            {% if week %}<input type="hidden" name="week" value="{{ week }}">{% endif %}
+            <div class="col-md-6">
+                <div class="input-group input-group-sm">
+                    <span class="input-group-text"><i class="bi bi-search"></i></span>
+                    <select class="form-select form-select-sm" id="teacherJump" name="uid">
+                        <option value="">选择教师（共 {{ teachers|length }} 人）…</option>
+                        {% for t in teachers %}
+                        <option value="{{ t.uid }}">{{ t.name }}（{{ t.uid }}{% if t.subject %} · {{ t.subject }}{% endif %}）</option>
+                        {% endfor %}
+                    </select>
+                    <button class="btn btn-sm btn-primary" type="submit"><i class="bi bi-arrow-right"></i> 查看</button>
+                </div>
+            </div>
+            <div class="col-md-6 text-muted small">
+                <i class="bi bi-info-circle"></i> 从下面的教师墙点选，或在上面下拉里选择后点「查看」。
+            </div>
+        </form>
+    </div>
+</div>
+
+{# 面板 B：按学科分组的有课教师墙 #}
+{% if digest %}
+{% for grp in digest %}
+<div class="card mb-3">
+    <div class="card-header py-2 d-flex align-items-center gap-2">
+        <span class="badge bg-primary-subtle text-primary-emphasis border">{{ grp.subject }}</span>
+        <span class="text-muted small">{{ grp.teachers|length }} 人</span>
+    </div>
+    <div class="card-body py-2">
+        <div class="d-flex flex-wrap gap-2">
+            {% for t in grp.teachers %}
+            <a class="btn btn-sm btn-outline-secondary text-start"
+               href="{{ url_for('academic.schedule_teacher_query', sid=ts.id, uid=t.uid, week=week) }}">
+                <span class="fw-semibold">{{ t.name }}</span>
+                <span class="text-muted small ms-1">{{ t.total }} 节/周</span>
+                {% if t.grades %}<span class="badge bg-light text-dark border ms-1">{{ t.grades|join(' / ') }}</span>{% endif %}
+            </a>
+            {% endfor %}
+        </div>
+    </div>
+</div>
+{% endfor %}
+{% else %}
+<div class="card">
+    <div class="card-body text-center py-5 text-muted">
+        <i class="bi bi-calendar-x" style="font-size:40px;"></i>
+        <p class="mt-3 mb-1">本学期还没有排课</p>
+        <p class="small mb-0">换个学期，或在上面的下拉里直接选择教师</p>
+    </div>
+</div>
+{% endif %}
+
 {% elif my_mode and not teacher %}
 <div class="card">
     <div class="card-body text-center py-5 text-muted">
@@ -158,7 +239,7 @@
     "uid": {{ uid|tojson }},
     "week": {{ week|tojson }},
     "stats": {{ view.stats|tojson if view else '{}'|tojson }},
-    "teacherUrlTpl": {{ (url_for('academic.schedule_teacher', sid=ts.id, uid='__UID__') if ts and not my_mode else '')|tojson }},
+    "teacherUrlTpl": {{ (url_for('academic.schedule_teacher', sid=ts.id, uid='__UID__') if ts and not my_mode and not sel_mode else '')|tojson }},
     "urls": {
         "share": {{ (url_for('academic.schedule_share', sid=ts.id) if ts else '')|tojson }}
     }
