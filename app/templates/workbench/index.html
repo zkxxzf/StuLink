@@ -137,6 +137,12 @@
                 <i class="bi bi-journal-text" style="font-size:32px;"></i>
                 <p class="mb-0 mt-2">班主任工作记录功能建设中</p>
                 <p class="small mb-0">后续将支持班会记录、家访记录、学生谈话等</p>
+                {% if can_records %}
+                {# 2026-10-13：左侧菜单已精简，这里补上工作记录入口 #}
+                <a href="{{ url_for('records.records_page') }}" class="btn btn-sm btn-outline-primary mt-2">
+                    进入工作记录 <i class="bi bi-arrow-right"></i>
+                </a>
+                {% endif %}
                 {% else %}
                 <i class="bi bi-lock" style="font-size:32px;"></i>
                 <p class="mb-0 mt-2">仅班主任可见</p>
@@ -146,7 +152,7 @@
     </div>
 </div>
 
-{# 2026-10-13（v1.19.47.16）：班主任 —— 工作台直接看本班班级课表（带多个班时用页签切换） #}
+{# 2026-10-13（v1.19.47.17）：班主任 —— 工作台直接看本班班级课表（带多个班时用页签切换） #}
 {% if is_head %}
 <div class="row g-3 mb-3">
     <div class="col-12">
@@ -233,7 +239,7 @@
     </div>
 </div>
 
-<!-- 调课（v1.19.47.16：入口 + 待我确认 + 我的申请，都在工作台完成） -->
+<!-- 调课（v1.19.47.17：入口 + 待我确认 + 我的申请，都在工作台完成） -->
 <div class="card mt-3 mb-3">
     <div class="card-header d-flex justify-content-between align-items-center">
         <span><i class="bi bi-arrow-left-right"></i> 调课
@@ -345,7 +351,8 @@
     </div>
 </div>
 
-<!-- 考勤管理入口 -->
+<!-- 考勤管理入口（2026-10-13：无考勤权限的人不显示，避免"看得见、点了 403"） -->
+{% if can_attendance %}
 <div class="card mb-3">
     <div class="card-body d-flex justify-content-between align-items-center">
         <div>
@@ -358,13 +365,14 @@
         </a>
     </div>
 </div>
+{% endif %}
 
-<!-- 班级概览区域 -->
-{% if is_head %}
+<!-- 班级概览区域（2026-10-13：任课教师也能看自己任教的班，不再限班主任） -->
+{% if can_class_view %}
 <div class="card mb-3" id="classOverviewCard">
     <div class="card-header d-flex justify-content-between align-items-center">
         <span><i class="bi bi-grid-3x3-gap"></i> 班级概览</span>
-        <a href="/workbench/class-overview" class="btn btn-sm btn-outline-primary">
+        <a href="{{ url_for('overview.class_overview_page') }}" class="btn btn-sm btn-outline-primary">
             查看详情 <i class="bi bi-arrow-right"></i>
         </a>
     </div>
@@ -499,7 +507,7 @@
 </script>
 {% endif %}
 
-{# v1.19.47.16：工作台内直接确认 / 拒绝同事发起的换课、代课 #}
+{# v1.19.47.17：工作台内直接确认 / 拒绝同事发起的换课、代课 #}
 <script>
 (function () {
     var respondUrl = {{ url_for('academic.swap_partner_respond', swap_id=0)|tojson }};

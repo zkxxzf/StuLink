@@ -1790,7 +1790,7 @@ def check_inspection_mark():
 
 @item('SWAPEXCH')
 def check_two_person_exchange():
-    """两人换课（v1.19.47.16）：换时段 / 换班上课 / 请人代课 × 临时与永久，
+    """两人换课（v1.19.47.17）：换时段 / 换班上课 / 请人代课 × 临时与永久，
     覆盖「对方先确认 → 教务审批 → 执行」全链路 + 拒绝 / 越权 / 校验路径。"""
     from app.modules.academic.services import swap_service
 
@@ -2113,7 +2113,7 @@ def check_swap_exchange_batch():
 
 @item('SWAPMIXED')
 def check_swap_mixed_batch():
-    """调课页合并（v1.19.47.16）：一次提交 = 几节调空档 + 几节与同事对调（同一批次）。"""
+    """调课页合并（v1.19.47.17）：一次提交 = 几节调空档 + 几节与同事对调（同一批次）。"""
     from app.models.timetable import ScheduleEntry, ScheduleSwap
     from app.modules.academic.services import swap_service
 
@@ -2335,7 +2335,7 @@ def check_swap_bulk_offset():
 
 @item('WORKBENCHSWAP')
 def check_workbench_swap():
-    """教师工作台里的调课区块（v1.19.47.16）：入口 + 待我确认 + 我的申请。"""
+    """教师工作台里的调课区块（v1.19.47.17）：入口 + 待我确认 + 我的申请。"""
     with app.test_client() as c:
         login(c, 'ac_admin', TEST_PWD)
         r = c.get('/workbench/')      # 蓝图前缀 /workbench + 路由 '/'（不带斜杠会 308）

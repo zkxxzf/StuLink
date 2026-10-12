@@ -1,4 +1,4 @@
-# StuLink v1.19.47.16 2026-10-10
+# StuLink v1.19.47.17 2026-10-10
 # 教师工作台：我的信息 / 今日课程 / 我的课表 / 我的业绩 / 手机号修改
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 import re
@@ -61,10 +61,14 @@ def index():
     pending_swaps = []
     partner_pending = []
     active_term = None
-    # 2026-10-13（v1.19.47.16）：调课入口挂到工作台 —— 能否申请由 academic.swap 决定，
+    # 2026-10-13（v1.19.47.17）：调课入口挂到工作台 —— 能否申请由 academic.swap 决定，
     # 菜单/按钮可见性与 perm_required 保持一致，避免"看得见、点了 403"。
     can_swap = current_user.has_perm('academic.swap')
     is_head = (current_user.role == 'homeroom_teacher')
+    # 2026-10-13（v1.19.47.17）：左侧「个人工作」菜单已精简，工作台内需自备这些入口
+    can_class_view = current_user.has_perm('workbench.class_view')
+    can_records = current_user.has_perm('workbench.records')
+    can_attendance = current_user.has_perm('workbench.attendance_view')
     if teacher:
         # 2026-10-10：课表改读 timetable.db 的 schedule_entries（与教务端「我的课表」同源）。
         # 旧表 academic.timetable_entries 已停用，此前读旧表导致本卡片恒为空。
@@ -128,7 +132,7 @@ def index():
                                          teacher.teacher_uid)
             partner_pending = []
 
-    # 2026-10-13（v1.19.47.16）：班主任在工作台直接看**本班班级课表**（多个班用页签切换）。
+    # 2026-10-13（v1.19.47.17）：班主任在工作台直接看**本班班级课表**（多个班用页签切换）。
     # 取数与教务端班级课表同源（get_class_view），并沿用同一套可见范围，避免越权。
     class_schedules = []
     if is_head and active_term:
@@ -151,6 +155,9 @@ def index():
 
     return render_template('workbench/index.html', teacher=teacher,
                            class_schedules=class_schedules,
+                           can_class_view=can_class_view,
+                           can_records=can_records,
+                           can_attendance=can_attendance,
                            partner_pending=partner_pending,
                            can_swap=can_swap,
                            entries=entries, today_entries=today_entries,
