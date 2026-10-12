@@ -104,3 +104,4 @@ tests/qa_*/
 %SystemDrive%/
 %SystemRoot%/
 %ProgramData%/
+mcp_server/
