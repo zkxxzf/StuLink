@@ -1,4 +1,4 @@
-# StuLink v1.19.47.2 2026-10-10
+# StuLink v1.19.47.3 2026-10-10
 # 成绩统计分析服务：一次载入考试成绩数据，提供各 tab 需要的聚合（纯函数 + 内存计算）
 # 口径遵循设计文档第 8 章：参考学生=有总分行（至少一应考科有分），不分学籍状态
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
@@ -19,9 +19,12 @@ logger = logging.getLogger(__name__)
 
 
 def _stddev(values):
+    # 2026-10-12 质量审计 P2：原先这里返回**未 round 的 float**，而 compare_service /
+    # pivot_service 的同名函数内部就 round 1 位 —— 三份实现语义相同但舍入位置不同，
+    # 属"未抽象 + 隐蔽不一致"。统一为内部 round 1 位（调用点的 round(_, 1) 幂等，无行为变化）。
     if len(values) <= 1:
         return 0.0
-    return statistics.stdev(values)
+    return round(statistics.stdev(values), 1)
 
 
 # ---------- ExamData 进程级缓存（v1.13.1 汇报区性能） ----------
@@ -80,7 +83,7 @@ def _detach_shared(data):
 def clear_exam_data_cache():
     """成绩/划线变更后清空，防止读到旧快照（由 invalidate_exam_cache 调用）
 
-    v1.19.47.2 审核修正：两个缓存都受 _exam_data_lock 保护，清空时同样持锁，
+    v1.19.47.3 审核修正：两个缓存都受 _exam_data_lock 保护，清空时同样持锁，
     避免与 cached_exam_data / exam_score_means 的读写产生 LRU 一致性问题（
     OrderedDict.clear() 在 CPython GIL 下虽安全，但与 move_to_end/popitem 无锁读写同存时仍不严谨）。"""
     with _exam_data_lock:
@@ -153,7 +156,7 @@ class ExamData:
                 return []
             if direction:
                 return [t for t in rows if t['direction'] == direction]
-            # v1.19.47.2 审核修正：不直接返回内部共享 list（_by_class 值），
+            # v1.19.47.3 审核修正：不直接返回内部共享 list（_by_class 值），
             # 防止 caller 一旦 append/sort/pop 就会污染进程级 ExamData 缓存 900s。
             # list(rows) 仅拷贝外层引用，内层 snap 字典依旧只读共享，开销 O(班人数) 仍可接受。
             return list(rows)
@@ -424,7 +427,7 @@ def exam_score_means(grade, subjects, direction=None, class_name=None):
     with _exam_data_lock:
         ent = _exam_means_cache.get(key)
         if ent is not None and time.time() - ent[0] < _EXAM_DATA_TTL:
-            # v1.19.47.2 审核修正：返回时拷贝外层与 means/counts 内层，
+            # v1.19.47.3 审核修正：返回时拷贝外层与 means/counts 内层，
             # 避免 caller 就地修改污染进程级缓存（当前 caller 均为只读，修修正防未来变更）。
             cached = ent[1]
             return {eid: {**info,
@@ -470,28 +473,62 @@ def exam_trend_series(grade, subject, direction=None, class_name=None, need_rate
     全程只做聚合查询，不加载明细行。返回 list：
     {'id','name','date','avg','count','pass_rate','good_rate'（need_rates 时）}。
     用于学科/教师历次趋势表（含及格率/优秀率）。
+
+    2026-10-12 质量审计 P0-2：原实现每场考试 3 次查询
+    （1 次 avg/count + 2 次 count 算及格率/优秀率），25 场历史 = 75 次查询，
+    且同文件的 exam_score_means 已有 LRU 缓存、这个函数**没有**，
+    而调用方（A3-T2 学科历次 / A4 教师跟踪）都在分析页热路径上。
+    现改为**一次 group_by(exam_id)** 把 (sum, count, pass_n, good_n) 一起算出来，
+    内存里求率；三线阈值逐场读（三线是考试级配置，无法在 SQL 里统一）。
     """
+    exams = trend_exams(grade)
+    if not exams:
+        return []
+    ids = [e.id for e in exams]
+    q = (ExamScore.query
+         .filter(ExamScore.exam_id.in_(ids), ExamScore.subject == subject,
+                 ExamScore.score.isnot(None)))
+    if direction:
+        q = q.filter(ExamScore.direction == direction)
+    if class_name:
+        q = q.filter(ExamScore.class_name == class_name)
+    if not need_rates:
+        rows = (q.group_by(ExamScore.exam_id)
+                  .with_entities(ExamScore.exam_id,
+                                 func.avg(ExamScore.score),
+                                 func.count(ExamScore.score)).all())
+        agg = {eid: (avg, cnt) for eid, avg, cnt in rows}
+        out = []
+        for ex in exams:
+            got = agg.get(ex.id)
+            if not got or not got[1]:
+                continue
+            out.append({'id': ex.id, 'name': ex.name,
+                        'date': ex.exam_date.strftime('%Y-%m-%d'),
+                        'avg': round(got[0], 1), 'count': got[1]})
+        return out
+
+    # need_rates：三线阈值是**考试级配置**（逐场不同），无法在一条 SQL 里统一比较，
+    # 因此改为一次查询取回该科目全部 (exam_id, score)，在内存里按各场自己的三线求率。
+    # 相比原来「每场 3 次查询」（25 场 = 75 次），这里只 1 次往返。
+    per_exam = {}
+    for eid, sc in q.with_entities(ExamScore.exam_id, ExamScore.score).all():
+        per_exam.setdefault(eid, []).append(sc)
     out = []
-    for ex in trend_exams(grade):
-        base = ExamScore.query.filter_by(exam_id=ex.id, subject=subject)
-        base = base.filter(ExamScore.score.isnot(None))
-        if direction:
-            base = base.filter(ExamScore.direction == direction)
-        if class_name:
-            base = base.filter(ExamScore.class_name == class_name)
-        avg, cnt = base.with_entities(func.avg(ExamScore.score),
-                                      func.count(ExamScore.score)).one()
-        if not cnt:
+    for ex in exams:
+        scores = per_exam.get(ex.id) or []
+        if not scores:
             continue
+        cnt = len(scores)
+        lines = ex.subject_lines(subject)
         rec = {'id': ex.id, 'name': ex.name,
                'date': ex.exam_date.strftime('%Y-%m-%d'),
-               'avg': round(avg, 1), 'count': cnt}
+               'avg': round(sum(scores) / cnt, 1), 'count': cnt}
         if need_rates:
-            lines = ex.subject_lines(subject)
             rec['pass_rate'] = round(
-                base.filter(ExamScore.score >= lines['pass']).count() / cnt * 100, 1)
+                sum(1 for s in scores if s >= lines['pass']) / cnt * 100, 1)
             rec['good_rate'] = round(
-                base.filter(ExamScore.score >= lines['excellent']).count() / cnt * 100, 1)
+                sum(1 for s in scores if s >= lines['excellent']) / cnt * 100, 1)
         out.append(rec)
     return out
 

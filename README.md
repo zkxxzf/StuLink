@@ -3,20 +3,20 @@
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
 [![Python](https://img.shields.io/badge/python-3.11+-green.svg)](https://python.org)
 [![Flask](https://img.shields.io/badge/flask-3.x-lightgrey.svg)](https://flask.palletsprojects.com/)
-[![Version](https://img.shields.io/badge/version-1.19.41.2-orange.svg)](https://gitee.com/zkxxzf/StuLink)
+[![Version](https://img.shields.io/badge/version-1.19.47.3-orange.svg)](https://gitee.com/zkxxzf/StuLink)
 
 面向中学的综合学生管理平台，采用双站点 + 七模块 + 多库故障隔离架构：
 
 - **在校生系统（主应用 :5000）**：宿舍自动分配 · 合班管理 · 床位管理 · 学生信息管理 · 批量导入/调班 · 二维权限（功能三档 × 数据范围）· 成绩管理与四大分析（ECharts）· 班级横向对比 · AI 分析（BYOK）· 德育管理 · 教务（教师名单/课表/查课/调课/表单/业绩）· 教师工作台（班级概览/工作记录/考勤/积分/画像）· 通知中心
 - **往届生查询（独立应用 :5001）**：毕业生数据快照查询 · 学习经历变迁 · 宿舍历史
 
-## 功能模块（v1.19.47.2）
+## 功能模块（v1.19.47.3）
 
 | 模块 | 站点 | 状态 | 说明 |
 |------|------|------|------|
 | 📚 系统管理 | 主应用 | ✅ 已完成 | 学生管理 · 用户/账号管理 · 教师名单同步 · 字典管理 · 班型设置 · 权限组 · 年级毕业归档 · 审计日志 |
 | 🏠 宿舍管理 | 主应用 | ✅ 已完成 | 宿舍列表 · 可视化拖拽分配 · 床位管理 · 自动分配 V20260805 · 合班自动识别 · 统计报表 · 宿舍数据导入 · 床位操作并发安全 |
-| 📊 成绩管理 | 主应用 | ✅ 已完成 | 考试登记 · 成绩导入（分批覆盖）· 划线分层 · **五大分析**（年级/班级/学科/任课教师/**班级对比**，ECharts 可视化）· 双上线/进退步/预警 · Excel/PDF 导出 · 成绩证明快照（AES 加密）· AI 分析（个人 Key/公共 Key，数据按权限收敛）· 考务批次（考场编排/座号标签/PDF 三视图）· 个人成绩查询 |
+| 📊 成绩管理 | 主应用 | ✅ 已完成 | 考试登记 · 成绩导入（分批覆盖 / 整场重置）· AI 智能导入（任意表 + 防误覆盖）· 划线分层 · **五大分析**（年级/班级/学科/任课教师/**班级对比**，ECharts 可视化）· 全局对比宽表（去差均分 + 各分数线）· 临界生对比 · 自由透视表 · 汇报区（PPT/HTML 交付物）· 双上线/进退步/预警 · 赋分/原始双轨 · Excel/PDF 导出 · 成绩证明快照（AES 加密 + 防伪核验）· AI 分析（本机 Key，数据按权限收敛）· 考务七环节（名单/考场/编排/任课核对/时间表/监考编排/监考表导出）· 分数修改记录 · 个人成绩查询 |
 | 🎓 教务管理 | 主应用 | ✅ 已完成 | 教师名单（唯一 UID + 身份证 AES 密文 + 手机号/学科）· 课本管理 · 查课记录 · 教师业绩 · 课表档案（多学期）· 调课（个人/统一）· 表单收集（多题型/文件/审核）· 交付物汇总 |
 | 👨‍🏫 教师工作台 | 主应用 | ✅ 已完成 | 班级概览 · 学生信息（年级+班级联动筛选）· 成绩分析 · 积分概览 · 工作记录（班会/家访/谈话+附件）· 考勤记录 · 个人工作台首页 |
 | 🧑‍🎨 学生画像 | 主应用 | ✅ 已完成 | 德智体美劳五维雷达 · 成长轨迹 · 多维数据聚合（成绩/积分/考勤/住宿/工作记录/事件）· 评语管理 |
@@ -61,7 +61,7 @@
 
 - **后端**：Python 3.11+ / Flask 3.x / Flask-Login / Flask-SQLAlchemy 2.x（多库 binds）/ Waitress / openpyxl / reportlab / python-pptx
 - **前端**：Bootstrap 5 / jQuery / Jinja2 / ECharts（成绩可视化与班级对比）/ Chart.js（画像）
-- **安全（v1.19.47.2）**：
+- **安全（v1.19.47.3）**：
   - **身份**：管理员首启随机口令 + 强制改密 · 一次性初始口令展示 · 会话口令摘要（改密即踢）· IP + 账号双维限流
   - **数据**：AES-256-GCM 身份证与 AI Key 加密 · CSRF 8h 时效 · 二维权限（功能三档 × 数据范围）· 白名单式教师候选过滤
   - **传输**：`url_guard` 出站白名单 + DNS 解析 + 禁 302 跟随 · CSP（Report-Only 起步，可切 enforce）· HTTPS Cookie Secure
@@ -80,7 +80,7 @@ python run.py --dev
 cd alumni_app && python run.py
 
 # Docker 部署（三个容器：主应用 + 往届查询 + MCP 服务）
-docker build -t stulink:v1.19.47.2 .
+docker build -t stulink:v1.19.47.3 .
 docker build -t stulink-alumni:v1.0.0 ./alumni_app
 docker build -f Dockerfile.mcp -t stulink-mcp:v1.0.0 .
 docker-compose up -d

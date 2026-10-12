@@ -1,4 +1,4 @@
-# StuLink v1.19.47.2 2026-10-10
+# StuLink v1.19.47.3 2026-10-10
 # 分层/划线配置：模板应用（四层/高考线）、手动编辑、人数预览
 # 划线维度：方向 × 学科（subject='总分' 为总分线，学科名为单科线，两者独立）
 # Copyright (c) 2026 zkxxzf
@@ -215,6 +215,12 @@ def _save_bands(exam_id, direction, subject, payload):
     ratio 模式在保存时按当前参考人数换算为实际分数线落库（统一存 score）
     """
     data = st.ExamData(exam_id)
+    # 2026-10-12 数据可信度审计（§3.6-7）：没成绩就划线时，_ratio_to_score /
+    # _rank_to_score 对"无参考"都返回 0.0 → 会划出「所有层下界都是 0」的线
+    # 并**保存成功**，之后所有分层统计/上线人数全部失真，且很难被发现。
+    # 这里在该（方向×学科）没有任何参考分数时直接拒绝。
+    if not _scope_scores(data, direction, subject):
+        return None, f'{direction or "全体"}·{subject} 暂无成绩，请先导入成绩再划线'
     items = []
     seen_seq = set()
     prev_lower = None

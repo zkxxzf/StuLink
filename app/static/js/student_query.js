@@ -225,7 +225,9 @@ function renderCertMatrix(area, m) {
         var tr = $('<tr>').append($('<td class="fw-semibold">').text(r.exam_label));
         (m.cols || []).forEach(function (c) {
             var v = r[c.key];
-            var td = $('<td>').text(v === null || v === undefined ? '–' : String(v));
+            // 2026-10-12 UI 审计 L1：空值统一用 em dash「—」（原为 en dash「–」，
+            // 与全模块其余页面宽度/观感不一致）
+            var td = $('<td>').text(v === null || v === undefined ? '—' : String(v));
             if (typeof v === 'string' && (v === '未选' || v === '未参加')) td.addClass('text-muted');
             tr.append(td);
         });

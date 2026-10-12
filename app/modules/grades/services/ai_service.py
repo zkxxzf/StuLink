@@ -1,4 +1,4 @@
-# StuLink v1.19.47.2 2026-10-10
+# StuLink v1.19.47.3 2026-10-10
 # AI 分析服务：权限收敛取数（本次+上次原始成绩）→ payload 组装 → LLM 转发
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 import json
@@ -15,12 +15,10 @@ from app.modules.grades.services import ai_providers
 from app.utils.crypto import encrypt_rand, decrypt
 from app.utils.url_guard import assert_outbound_url_allowed
 
-DEEPSEEK_BASE = ai_providers.PROVIDERS['deepseek']['base_url']
-DEFAULT_MODEL = ai_providers.PROVIDERS['deepseek']['default_model']
 DEFAULT_TEMPERATURE = 0.4
 DEFAULT_TIMEOUT = 180
 
-# v1.19.47.2 S-4：不自动跟随 3xx，防 SSRF 以 approved.com → 302 → 169.254.169.254 绕过 url_guard
+# v1.19.47.3 S-4：不自动跟随 3xx，防 SSRF 以 approved.com → 302 → 169.254.169.254 绕过 url_guard
 
 class _NoRedirect(urllib.request.HTTPRedirectHandler):
     def redirect_request(self, req, fp, code, msg, headers, newurl):
@@ -46,8 +44,6 @@ SYSTEM_PROMPT = (
     '3. 保持客观，不评价教师与学校的教学，不给情绪化结论。\n'
     '4. 报告以“本报告由 AI 根据所提供成绩数据生成，仅供参考”开头。'
 )
-
-SYSTEM_PROMPT_CN = SYSTEM_PROMPT
 
 # 多轮对话用的系统提示（更口语化，允许追问）
 CHAT_SYSTEM_PROMPT = (
@@ -469,6 +465,33 @@ def _mean(values):
     return round(sum(vals) / len(vals), 1) if vals else None
 
 
+def _total_pass_rate(payload, totals):
+    """总分及格率：口径与成绩分析/汇报区一致（读本场考试总分行三线的 pass 线）。
+
+    取不到及格线（考试未划线、无成绩、payload 未带 exam id）时返回 None，
+    由前端显示「-」——不给一个会误导的数字。
+    """
+    if not totals:
+        return None
+    exam_id = (payload.get('exam') or {}).get('id')
+    if not exam_id:
+        return None
+    try:
+        from app.models.grades import Exam, TOTAL_SUBJECT
+        ex = db.session.get(Exam, int(exam_id))
+        if ex is None:
+            return None
+        line = (ex.subject_lines(TOTAL_SUBJECT) or {}).get('pass')
+        if line is None:
+            return None
+        return round(sum(1 for t in totals if t >= line) / len(totals) * 100, 1)
+    except Exception:  # noqa: BLE001  统计口径不应让报告生成失败
+        from flask import current_app
+        current_app.logger.warning('AI 统计：总分及格率计算失败 exam_id=%s', exam_id,
+                                   exc_info=True)
+        return None
+
+
 def build_stats(payload):
     """由成绩 payload 计算图表数据与概览，返回可直给 ECharts 的结构
 
@@ -521,7 +544,7 @@ def build_stats(payload):
                    'values': [_mean(subj[k]) for k in sorted(subj.keys())]}
 
     # 4) 进退步分布
-    # v1.19.47.2 修复：move_rank = 本场方向排名 − 上一场方向排名，
+    # v1.19.47.3 修复：move_rank = 本场方向排名 − 上一场方向排名，
     # 负值 = 名次数字变小 = 进步、正值 = 退步（与成绩单、个人查询同口径）。
     # 原实现把 ≥50 记成"大幅进步"、≤-50 记成"大幅退步"，饼图标签整体标反，此处纠正。
     moves = {'大幅进步(≤-50)': 0, '进步': 0, '持平': 0, '退步': 0, '大幅退步(≥50)': 0}
@@ -557,8 +580,12 @@ def build_stats(payload):
         'max': max(totals) if totals else None,
         'min': min(totals) if totals else None,
         'classes': len(by_class),
-        'pass_rate': (round(sum(1 for t in totals if t >= (max(totals) * 0.6 if totals else 0))
-                            / len(totals) * 100, 1) if totals else None),
+        # 2026-10-12 质量审计 P2：原口径是 `t >= max(totals) * 0.6`（拍脑袋的"六成最高分"），
+        # 与分析页/汇报区「及格率来自 exam.subject_lines()['pass']」**不是同一个数**，
+        # 而前端 workbench_grades.js 把它标成「及格率」展示 → 两个口径互相矛盾。
+        # 现改为读本场考试自己的总分行及格线；取不到（未划线/无数据）时返回 None，
+        # 由前端显示「-」，不再给一个会误导的数字。
+        'pass_rate': _total_pass_rate(payload, totals),
         'prev_avg': _mean(prev_totals) if prev_totals else None,
         'delta_avg': (round(_mean(totals) - _mean(prev_totals), 1)
                       if prev_totals and totals else None),

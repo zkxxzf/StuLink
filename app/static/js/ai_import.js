@@ -260,6 +260,19 @@
             post('/grades/exams/' + EID + '/ai-import/apply', body)
                 .done(function (res) {
                     if (!res.success) {
+                        // 2026-10-12 数据可信度审计（§3.4）：本场已有成绩 + 模式 B（整场重置）
+                        // 时服务端要求账号密码二次确认。确认后带 confirmed/username/password
+                        // 重发，不再让用户能一键清空整场成绩。
+                        if (res.need_confirm) {
+                            msg('#aiRunMsg', false, res.message || '需要二次确认');
+                            askResetConfirm(function (u, p) {
+                                body.username = u;
+                                body.password = p;
+                                body.confirmed = true;
+                                sendApply(body);
+                            });
+                            return;
+                        }
                         msg('#aiRunMsg', false, res.message || '失败');
                         if (res.errors && res.errors.length) {
                             $('#aiPreviewBox').removeClass('d-none')
@@ -285,6 +298,35 @@
                 .fail(function (x) {
                     msg('#aiRunMsg', false, (x.responseJSON && x.responseJSON.message) || '请求失败');
                 });
+        }
+
+        function sendApply(body) {
+            msg('#aiRunMsg', true, '导入中…');
+            post('/grades/exams/' + EID + '/ai-import/apply', body)
+                .done(function (res) {
+                    if (!res.success) {
+                        msg('#aiRunMsg', false, res.message || '失败');
+                        return;
+                    }
+                    msg('#aiRunMsg', true, '导入成功，正在跳转…');
+                    setTimeout(function () {
+                        location.href = '/grades/exams/' + EID;
+                    }, 800);
+                })
+                .fail(function (x) {
+                    msg('#aiRunMsg', false, (x.responseJSON && x.responseJSON.message) || '请求失败');
+                });
+        }
+
+        /** 整场重置二次确认：账号 + 密码（与删除考试同口径） */
+        function askResetConfirm(cb) {
+            var u = window.prompt('本场已有成绩，「整场覆盖」会先清空再重导。\n请输入当前登录账号：', '');
+            if (u === null) { msg('#aiRunMsg', false, '已取消导入'); return; }
+            u = (u || '').trim();
+            if (!u) { msg('#aiRunMsg', false, '已取消导入'); return; }
+            var p = window.prompt('请输入该账号的密码：', '');
+            if (p === null || !p) { msg('#aiRunMsg', false, '已取消导入'); return; }
+            cb(u, p);
         }
 
         function esc(s) {

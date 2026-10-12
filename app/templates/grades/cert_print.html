@@ -2,7 +2,6 @@
 {% from "grades/_cert_body.html" import cert_doc %}
 {% block title %}成绩认定证明{% endblock %}
 {% block extra_css_head %}
-<link href="{{ url_for('static', filename='css/grades.css') }}" rel="stylesheet">
 <style>
   @media print {
     body * { visibility: hidden; }

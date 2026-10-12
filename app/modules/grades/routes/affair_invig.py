@@ -1,4 +1,4 @@
-# StuLink v1.19.47.2 2026-10-12
+# StuLink v1.19.47.3 2026-10-12
 # 考务环节④⑤⑥⑦：核对任课教师 / 考试时间表 / 监考编排 / 监考表导出
 #
 # 用户口径（2026-10-12 定案）：
@@ -28,9 +28,14 @@ from app.modules.grades.utils import numeric_classes
 from app.utils.decorators import perm_required
 from app.utils.helpers import log_operation
 from app.utils.export_helpers import xl_row
+from app.utils.text_guard import sanitize_label, sanitize_prefix, safe_download_name
 from app.utils.upload_guard import validate_upload
 
 _MAX_SLOTS = 3
+# 2026-10-12 安全审计 M-1：考试科目白名单。时间表科目是环节⑥「同科回避」的匹配键
+# （_auto_arrange 按 {sch.subject} 回避任教该科老师），此前任意文本可入库 →
+# 手写「化学(」之类的值会让回避规则静默失配，排出来就是化学老师监考化学。
+_SUBJ_SET = set(SUBJECTS)
 
 
 # ==================== 公共小工具 ====================
@@ -318,8 +323,12 @@ def affair_schedules_import(aid):
     for r in rows[1:]:
         def cell(i):
             return r[i] if (0 <= i < len(r)) else None
-        subj = str(cell(ci_subj) or '').strip()
+        # 2026-10-12 安全审计 M-1：Excel 导入同样做服务端白名单 + 科目白名单校验
+        subj = sanitize_label(cell(ci_subj), 20)
         if not subj:
+            skipped += 1
+            continue
+        if subj not in _SUBJ_SET:
             skipped += 1
             continue
         db.session.add(AffairSchedule(
@@ -328,8 +337,8 @@ def affair_schedules_import(aid):
             start_time=_parse_time(cell(ci_start)) if ci_start >= 0 else '',
             end_time=_parse_time(cell(ci_end)) if ci_end >= 0 else '',
             subject=subj,
-            selection=str(cell(ci_sel) or '').strip() if ci_sel >= 0 else '',
-            note=str(cell(ci_note) or '').strip() if ci_note >= 0 else '',
+            selection=sanitize_label(cell(ci_sel) if ci_sel >= 0 else '', 30),
+            note=sanitize_label(cell(ci_note) if ci_note >= 0 else '', 100),
             sort_order=base_order + added))
         added += 1
     db.session.commit()
@@ -344,9 +353,13 @@ def affair_schedules_save(aid):
     """新增/修改一场（表单：id 为空则新增）"""
     affair = _affair(aid)
     sid = request.form.get('id', type=int)
-    subj = (request.form.get('subject') or '').strip()
+    # 2026-10-12 安全审计 M-1：科目是环节⑥「同科回避」的匹配键，须落在科目白名单内；
+    # 备注/选科走 sanitize_label。任意文本入库会让回避规则静默失配。
+    subj = sanitize_label(request.form.get('subject'), 20)
     if not subj:
         return jsonify({'ok': False, 'msg': '请填写考试科目'})
+    if subj not in _SUBJ_SET:
+        return jsonify({'ok': False, 'msg': f'科目「{subj}」不在科目字典内'})
     row = AffairSchedule.query.get(sid) if sid else None
     if row is not None and row.affair_id != affair.id:
         return jsonify({'ok': False, 'msg': '场次不属于本批次'})
@@ -359,8 +372,8 @@ def affair_schedules_save(aid):
     row.start_time = _parse_time(request.form.get('start_time'))
     row.end_time = _parse_time(request.form.get('end_time'))
     row.subject = subj
-    row.selection = (request.form.get('selection') or '').strip()
-    row.note = (request.form.get('note') or '').strip()
+    row.selection = sanitize_label(request.form.get('selection'), 30)
+    row.note = sanitize_label(request.form.get('note'), 100)
     db.session.commit()
     return jsonify({'ok': True, 'id': row.id})
 
@@ -373,9 +386,15 @@ def affair_schedule_delete(aid, sid):
     row = AffairSchedule.query.get_or_404(sid)
     if row.affair_id != affair.id:
         return jsonify({'ok': False, 'msg': '场次不属于本批次'})
-    AffairInvigilation.query.filter_by(affair_id=affair.id, schedule_id=sid).delete()
+    n_inv = AffairInvigilation.query.filter_by(
+        affair_id=affair.id, schedule_id=sid).delete()
+    _desc = f'{row.exam_date or ""} {row.subject}'
     db.session.delete(row)
     db.session.commit()
+    # 2026-10-12 数据可信度审计（§3.8）：删场次会连带删该场次全部监考安排，
+    # 此前无业务日志（兜底网只记 endpoint 名）。
+    log_operation(current_user, '删除', '考试时间表', aid,
+                  f'删除场次「{_desc}」并清理其 {n_inv} 格监考安排', module='grades')
     return jsonify({'ok': True})
 
 
@@ -418,8 +437,13 @@ def affair_invig_settings(aid):
     """设置每考场监考人数（1/2/3，默认 1）"""
     affair = _affair(aid)
     n = request.form.get('slots', type=int) or 1
+    old = affair.invig_slots or 1
     affair.invig_slots = max(1, min(_MAX_SLOTS, n))
     db.session.commit()
+    # 2026-10-12 数据可信度审计（§3.8）：该设置决定监考表列数（1/2/3 人），
+    # 改动会影响后续所有编排与导出，原先无业务日志。
+    log_operation(current_user, '设置', '监考人数', aid,
+                  f'每考场监考人数 {old} → {affair.invig_slots}', module='grades')
     return jsonify({'ok': True, 'slots': affair.invig_slots})
 
 
@@ -429,7 +453,10 @@ def affair_invig_settings(aid):
 def affair_invig_others_add(aid):
     """新增其他监考员（可无系统账号：校外老师，仅本次考试使用）"""
     affair = _affair(aid)
-    name = (request.form.get('name') or '').strip()
+    # 2026-10-12 安全审计 M-1：姓名/学科/备注走 sanitize_label 服务端白名单
+    # （与 exam_affairs 的考场位置/备注同防线）。这些字段会进监考表 Excel/PDF，
+    # 且前端有 innerHTML 拼接路径，只 .strip() 不构成纵深防御。
+    name = sanitize_label(request.form.get('name'), 30)
     if not name:
         return jsonify({'ok': False, 'msg': '请填写姓名'})
     exist = AffairInvigilator.query.filter_by(affair_id=affair.id, name=name).first()
@@ -437,9 +464,11 @@ def affair_invig_others_add(aid):
         return jsonify({'ok': False, 'msg': '该监考员已存在'})
     db.session.add(AffairInvigilator(
         affair_id=affair.id, name=name,
-        subject=(request.form.get('subject') or '').strip(),
-        note=(request.form.get('note') or '').strip()))
+        subject=sanitize_label(request.form.get('subject'), 20),
+        note=sanitize_label(request.form.get('note'), 100)))
     db.session.commit()
+    # 2026-10-12 数据可信度审计（§3.8）：其他监考员（含校外无账号老师）增删原先无业务日志
+    log_operation(current_user, '新增', '其他监考员', aid, f'{name}', module='grades')
     return jsonify({'ok': True})
 
 
@@ -451,8 +480,10 @@ def affair_invig_other_delete(aid, oid):
     row = AffairInvigilator.query.get_or_404(oid)
     if row.affair_id != affair.id:
         return jsonify({'ok': False, 'msg': '不属于本批次'})
+    _nm = row.name
     db.session.delete(row)
     db.session.commit()
+    log_operation(current_user, '删除', '其他监考员', aid, f'{_nm}', module='grades')
     return jsonify({'ok': True})
 
 
@@ -497,7 +528,8 @@ def affair_invig_others_import(aid):
     for r in rows[1:]:
         def cell(i):
             return r[i] if (0 <= i < len(r)) else None
-        nm = str(cell(ci_name) or '').strip()
+        # 2026-10-12 安全审计 M-1：Excel 导入同样走服务端白名单（导入是写入面最宽的口子）
+        nm = sanitize_label(cell(ci_name), 30)
         if not nm:
             continue
         if nm in exist or nm in teacher_names:
@@ -505,8 +537,8 @@ def affair_invig_others_import(aid):
             continue
         db.session.add(AffairInvigilator(
             affair_id=affair.id, name=nm,
-            subject=str(cell(ci_subj) or '').strip() if ci_subj >= 0 else '',
-            note=str(cell(ci_note) or '').strip() if ci_note >= 0 else ''))
+            subject=sanitize_label(cell(ci_subj) if ci_subj >= 0 else '', 20),
+            note=sanitize_label(cell(ci_note) if ci_note >= 0 else '', 100)))
         exist.add(nm)
         added += 1
     db.session.commit()
@@ -520,7 +552,12 @@ def affair_invig_others_import(aid):
 def affair_invig_auto(aid):
     """自动编排监考：场次 × 考场 × 监考位，回避本场科目教师，尽量均衡轮转。"""
     affair = _affair(aid)
-    rows, info = _auto_arrange(affair)
+    # 2026-10-12（§3.5）：容量不足等前置条件不满足时给 400 + 明确原因，
+    # 不要让 ValueError 冒成 500（原实现未捕获，前端只看到"请求失败"）。
+    try:
+        rows, info = _auto_arrange(affair)
+    except ValueError as e:
+        return jsonify({'ok': False, 'msg': str(e)}), 400
     db.session.commit()
     log_operation(current_user, '编排', '监考表', aid,
                   f'{info["schedules"]}场×{info["rooms"]}考场×{info["slots"]}人 → {rows}格',
@@ -540,6 +577,21 @@ def _auto_arrange(affair):
         raise ValueError('尚未导入考试时间表（环节⑤）')
     if not rooms:
         raise ValueError('尚未设置考场（环节②）')
+    # 2026-10-12 数据可信度审计（§3.5）：原先池内人手不够时 `if not cands: break`
+    # 直接留空，该考场剩余监考位**无声无息**——20 考场×2 人=40 格、池里只有 25 人时，
+    # 15 个空格既不报错也不计数，导出的监考表就是空的。
+    # 这里先做容量预检：总格数 vs 池内可用教师数（按场次剔除同科回避后取最小值）。
+    total_cells = len(schedules) * len(rooms) * slots
+    avail = min(
+        len([p for p in pool if not (p['subjects'] & ({s.subject} if s.subject else set()))])
+        for s in schedules)
+    if avail * len(rooms) * slots < total_cells:
+        raise ValueError(
+            '监考教师不足：共需 %d 格（%d 场 × %d 考场 × %d 人），'
+            '而单场最多只有 %d 名可排教师（已剔除同科回避）→ 最多排 %d 格，'
+            '将缺少 %d 格。请增加监考员（环节⑥「其他监考员」）或减少每考场监考人数。'
+            % (total_cells, len(schedules), len(rooms), slots,
+               avail, avail * len(rooms) * slots, total_cells - avail * len(rooms) * slots))
     AffairInvigilation.query.filter_by(affair_id=affair.id).delete()
     load = {p['name']: 0 for p in pool}
     rows = 0
@@ -604,6 +656,11 @@ def affair_invig_set(aid):
     row.user_id = p['user_id']
     row.subject = '、'.join(sorted(p['subjects']))
     db.session.commit()
+    # 2026-10-12 数据可信度审计（§3.8）：手动改监考表原先无业务日志，
+    # 事后无法回答"这一格是谁改的、从谁改成谁"。
+    log_operation(current_user, '修改', '监考表', aid,
+                  f'{sch.exam_date or ""} {sch.subject}｜考场 {room_no} 第 {slot} 位 → {name}',
+                  module='grades')
     return jsonify({'ok': True, 'name': name})
 
 
@@ -661,7 +718,7 @@ def affair_export_invig(aid):
     out.seek(0)
     log_operation(current_user, '导出', '监考表', aid, f'{len(rows)} 行', module='grades')
     return send_file(out, as_attachment=True,
-                     download_name=f'监考表_{affair.name}.xlsx',
+                     download_name=safe_download_name(f'监考表_{affair.name}') + '.xlsx',
                      mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
 
 
@@ -682,5 +739,6 @@ def affair_export_invig_pdf(aid):
     buf = seating_list_sections(
         f'{affair.name}　监考表（{len(rows)} 行）', headers,
         [(f'{affair.grade} 监考安排', rows)], widths_mm=widths)
-    return send_file(buf, as_attachment=True, download_name=f'监考表_{affair.name}.pdf',
+    return send_file(buf, as_attachment=True,
+                     download_name=safe_download_name(f'监考表_{affair.name}') + '.pdf',
                      mimetype='application/pdf')

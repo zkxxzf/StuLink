@@ -2,7 +2,7 @@
 {% block title %}分数修改记录 - {{ exam.name }}{% endblock %}
 {% block content %}
 <div class="d-flex align-items-center mb-2 flex-wrap gap-2">
-    <a href="{{ url_for('grades.exam_detail', exam_id=exam.id) }}" class="btn btn-sm btn-outline-secondary">
+    <a href="{{ url_for('grades.exam_detail', exam_id=exam.id) }}" class="btn btn-sm btn-outline-secondary" title="返回" aria-label="返回">
         <i class="bi bi-arrow-left"></i>
     </a>
     <h5 class="mb-0"><i class="bi bi-clock-history"></i> 分数修改记录</h5>
@@ -11,7 +11,7 @@
     <span class="text-muted small ms-auto">共 {{ logs|length }} 条</span>
 </div>
 
-{# v1.19.47.2：本页只属于这一场考试，入口仅成绩单页右上角按钮 #}
+{# v1.19.47.3：本页只属于这一场考试，入口仅成绩单页右上角按钮 #}
 <div class="alert alert-light border small py-2">
     <i class="bi bi-info-circle"></i>
     本页记录<b>本场考试</b>的每一次改分 / 标记缺考：谁、什么时候、改了哪个学生的哪一科、改前改后各是多少。

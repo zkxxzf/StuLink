@@ -1,4 +1,22 @@
 /* StuLink 成绩管理模块统一样式 v1.9.0 */
+
+/* 2026-10-12 UI 审计 M5：成绩模块原有 5 种操作反馈（原生 alert / #scFlash 定时消失 /
+   #qMsg 文字 / #tcMsg 文字 / report.css 的 .rp-copied toast），同一模块内给用户
+   4 种心智模型。这里提供一个全局 stuToast(msg, type) 的样式载体，
+   实现放在 static/js/common.js（base.html 已全局引入），各页面逐步替换 alert()。
+   非阻塞、自动消失、不打断填写。 */
+.stu-toast-wrap { position: fixed; top: 16px; left: 50%; transform: translateX(-50%);
+    z-index: 9999; display: flex; flex-direction: column; gap: 6px; align-items: center;
+    pointer-events: none; }
+.stu-toast { padding: 8px 16px; border-radius: 6px; font-size: 13.5px; color: #fff;
+    box-shadow: 0 4px 14px rgba(0,0,0,.18); max-width: 70vw;
+    animation: stuToastIn .16s ease-out; }
+.stu-toast.ok { background: #198754; }
+.stu-toast.warn { background: #b45309; }
+.stu-toast.err { background: #b42318; }
+.stu-toast.leaving { opacity: 0; transition: opacity .25s ease-out; }
+@keyframes stuToastIn { from { opacity: 0; transform: translateY(-6px); } to { opacity: 1; transform: none; } }
+@media print { .stu-toast-wrap { display: none !important; } }
 .g-table thead th {
     background: #1e293b !important;
     color: #fff !important;
@@ -26,13 +44,37 @@
 .g-table thead th.num, .g-table tbody td.num { padding-left: .35rem; padding-right: .35rem; }
 .g-table .center { text-align: center; }
 
-/* 宽表横向滚动时首列冻结（如每生一行的明细表）：标签列始终可见 */
+/* 2026-10-12 UI 审计 M1：.g-table 全表 nowrap，长考试名/长科目名/备注必触发横向滚动。
+   给「文本类列」加一个可选的 .wrap 类：允许换行 + 任意位置断行，列宽由 max-width 收住。
+   用法：<td class="wrap">很长的名字</td>。 */
+.g-table td.wrap, .g-table th.wrap {
+    white-space: normal;
+    overflow-wrap: anywhere;
+    word-break: break-all;
+    max-width: 220px;
+}
+/* 表头也允许换行（多级表头/长科目名），避免把整表撑宽 */
+.g-table thead th.wrap { max-width: 120px; line-height: 1.3; }
+
+/* 宽表横向滚动时首列冻结（如每生一行的明细表）：标签列始终可见
+   2026-10-12 UI 审计 L7：冻结列背景原写死 #fff/#f8fafc，与 .table-warning /
+   .table-success 等行状态冲突 → 横向滚动时首列不变色、行状态被"切断"。
+   改用 var(--bs-table-bg)（base.html 已为 .table-responsive 场景修过同类问题），
+   让行背景由 Bootstrap 的行类统一决定。 */
 .g-table thead th:first-child,
-.g-table tbody td:first-child { position: sticky; left: 0; background: #fff; }
+.g-table tbody td:first-child { position: sticky; left: 0; background: var(--bs-table-bg, #fff); }
 .g-table thead th:first-child { z-index: 3; background: #1e293b !important; }
 .g-table tbody td:first-child { z-index: 1; }
-.g-table tbody tr:nth-child(even) td:first-child { background: #f8fafc; }
+.g-table tbody tr:nth-child(even) { --bs-table-bg: #f8fafc; }
+.g-table tbody tr:nth-child(even) td:first-child { background: var(--bs-table-bg, #f8fafc); }
 .g-table tbody tr.stu-link:hover td:first-child { background: #e0ecff !important; }
+/* 行状态类（缺考黄 / 已选绿等）在冻结列上同样生效 */
+.g-table tbody tr.table-warning { --bs-table-bg: var(--bs-table-warning-bg, #fff3cd); }
+.g-table tbody tr.table-warning td:first-child { background: var(--bs-table-bg, #fff3cd); }
+.g-table tbody tr.table-success { --bs-table-bg: var(--bs-table-success-bg, #d1e7dd); }
+.g-table tbody tr.table-success td:first-child { background: var(--bs-table-bg, #d1e7dd); }
+.g-table tbody tr.table-danger { --bs-table-bg: var(--bs-table-danger-bg, #f8d7da); }
+.g-table tbody tr.table-danger td:first-child { background: var(--bs-table-bg, #f8d7da); }
 
 /* 表头排序（点击表头切换 升序 → 降序 → 还原） */
 .g-table thead th.sortable { cursor: pointer; user-select: none; }

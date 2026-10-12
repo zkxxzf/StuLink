@@ -1,8 +1,6 @@
 {% extends "base.html" %}
 {% block title %}个人成绩查询与分析{% endblock %}
-{% block extra_css_head %}
-<link href="{{ su('css/grades.css') }}" rel="stylesheet">
-{% endblock %}
+{# 2026-10-12 UI 审计 M8：grades.css 已由 base.html 统一引入 #}
 {% block content %}
 <div id="sqApp" class="no-print">
     <div class="g-filter-bar d-flex flex-wrap gap-2 align-items-center mb-3">

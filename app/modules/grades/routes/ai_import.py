@@ -18,7 +18,7 @@ from __future__ import annotations
 import json
 import uuid
 
-from flask import render_template, request, jsonify, redirect, url_for, flash
+from flask import render_template, request, jsonify, redirect, url_for, flash, current_app
 from flask_login import login_required, current_user
 
 from app.extensions import db
@@ -31,7 +31,19 @@ from app.utils.decorators import perm_required
 from app.utils.helpers import log_operation
 
 MAX_AI_FILES = 8
-MAX_FILE_MB = 20
+# 2026-10-12 安全审计 M-6：原先这里是 20MB，而 Flask 层 MAX_CONTENT_LENGTH 只有 16MB，
+# 「len(raw) > 20MB」这个分支**永远走不到**（死代码），却给人"已设上限"的错觉。
+# 真正的风险是 MAX_AI_FILES 个文件同时进内存 + 全量行 json.dumps 写 import_draft。
+# 现把单文件降到 5MB，并对**所有文件总字节数**设上限（见 _apply_draft）。
+MAX_FILE_MB = 5
+MAX_TOTAL_MB = 40
+MAX_DRAFT_MB = 8          # import_draft（TEXT 列）落库上限，超出说明表太大，要求分批
+
+
+def _exam_has_scores(exam_id):
+    """本场是否已有成绩（用于 mode=B 整场覆盖的二次确认判定）"""
+    from app.models.grades import ExamScore
+    return db.session.query(ExamScore.id).filter_by(exam_id=exam_id).first() is not None
 
 
 def _ai_cfg_from_request():
@@ -83,6 +95,16 @@ def exam_ai_import_analyze(exam_id):
         return jsonify(success=False, message='请先选择文件（可多选：赋分表 + 原始表一起发）')
     if len(files) > MAX_AI_FILES:
         return jsonify(success=False, message='一次最多 %d 个文件' % MAX_AI_FILES)
+    # 2026-10-12 安全审计 M-6：多文件同时进内存，须对**总字节数**设上限
+    # （单文件 5MB × 8 = 40MB，与下方 MAX_TOTAL_MB 对齐）
+    _total = 0
+    for f in files:
+        f.stream.seek(0, 2)
+        _total += f.stream.tell()
+        f.stream.seek(0)
+    if _total > MAX_TOTAL_MB * 1024 * 1024:
+        return jsonify(success=False,
+                       message='文件总大小超过 %dMB，请分批导入' % MAX_TOTAL_MB)
 
     sheets, errors = [], []
     for f in files:
@@ -108,7 +130,14 @@ def exam_ai_import_analyze(exam_id):
     draft = {'mode': 'ai', 'sheets': sheets,
              'fname': '、'.join(f.filename for f in files),
              'errors': errors}
-    exam.import_draft = json.dumps(draft, ensure_ascii=False)
+    # 2026-10-12 安全审计 M-6：草稿是 json.dumps 后写 TEXT 列，
+    # 8 张大表可能产生数百 MB → 直接拖垮 SQLite。落库前先量长度。
+    draft_text = json.dumps(draft, ensure_ascii=False)
+    if len(draft_text.encode('utf-8')) > MAX_DRAFT_MB * 1024 * 1024:
+        return jsonify(success=False,
+                       message='表格数据量过大（超过 %dMB），请减少工作表或分行数后分批导入'
+                               % MAX_DRAFT_MB)
+    exam.import_draft = draft_text
     exam.import_token = token
     db.session.commit()
 
@@ -230,6 +259,11 @@ def _resolve_student_no(exam, rows):
     if not any(not (r.get('no') or '').strip() for r in rows):
         return rows, []
     no_map, name_map = {}, {}
+    # 2026-10-12 数据可信度审计（§3.6-3）：同班同名（双胞胎/改名重复）时，
+    # 原先 name_map.setdefault(...) 只保留第一个学号 → 第二个学生的成绩被
+    # **静默挂到第一个人头上**，而且第二人根本不出现在 errors 里。
+    # 改为收集全部候选，命中多个时按"歧义"处理：不猜，报错要求人工指定。
+    name_all = {}
     aff = (ExamAffair.query.filter_by(exam_id=exam.id)
            .order_by(ExamAffair.id.desc()).first())
     if aff:
@@ -237,16 +271,18 @@ def _resolve_student_no(exam, rows):
             if s.exam_number:
                 no_map.setdefault(s.exam_number, s.student_no)
             if s.name and s.class_name:
-                name_map.setdefault((s.name, normalize_class_name(s.class_name)),
-                                    s.student_no)
+                k = (s.name, normalize_class_name(s.class_name))
+                name_all.setdefault(k, set()).add(s.student_no)
     for r in ExamScore.query.filter(ExamScore.exam_id == exam.id,
                                     ExamScore.exam_no.isnot(None)).all():
         if r.exam_no:
             no_map.setdefault(r.exam_no, r.student_no)
     for st in Student.query.filter_by(grade=exam.grade).all():
         if st.name and st.class_name:
-            name_map.setdefault((st.name, normalize_class_name(st.class_name)),
-                                st.student_number)
+            k = (st.name, normalize_class_name(st.class_name))
+            name_all.setdefault(k, set()).add(st.student_number)
+    for k, v in name_all.items():
+        name_map[k] = sorted(v)[0] if len(v) == 1 else None
     errs, miss = [], 0
     for r in rows:
         if (r.get('no') or '').strip():
@@ -256,7 +292,17 @@ def _resolve_student_no(exam, rows):
         if not cand:
             nm = (r.get('name') or '').strip()
             cls = normalize_class_name(r.get('class_name') or '')
-            cand = name_map.get((nm, cls)) if (nm and cls) else None
+            k = (nm, cls) if (nm and cls) else None
+            if k and k in name_all:
+                if name_map[k] is None:
+                    # 同名多人：明确报错，绝不猜
+                    errs.append({'line': r.get('line', 0), 'no': en or nm,
+                                 'reason': '姓名+班级在本年级存在多名学生（%s），'
+                                           '无法确定学号，请改用学号列或考号列导入'
+                                           % '、'.join(sorted(name_all[k]))})
+                    miss += 1
+                    continue
+                cand = name_map[k]
         if cand:
             r['no'] = cand
         else:
@@ -447,6 +493,19 @@ def exam_ai_import_apply(exam_id):
         preview['affair'] = affair_info
     if dry:
         return jsonify(success=True, preview=preview, errors=errors[:20])
+    # 2026-10-12 数据可信度审计（§3.4）：AI 导入默认 mode='B' **整场覆盖**，
+    # 而页面「确认导入」可不点预览直接写入 → 一次误点就把整场成绩清空重导。
+    # 这里对齐删除考试的口径：本场已有成绩 + 模式 B → 必须输入当前账号密码确认。
+    if rows and mode == 'B' and _exam_has_scores(exam_id):
+        if not bool(data.get('confirmed')):
+            return jsonify(success=False, need_confirm=True,
+                           message='本场已有成绩，模式 B（整场重置）将清空后重导，'
+                                   '请输入当前账号密码确认')
+        uname = (data.get('username') or '').strip()
+        pwd = data.get('password') or ''
+        if uname != current_user.username or not current_user.check_password(pwd):
+            return jsonify(success=False, need_confirm=True,
+                           message='账号或密码不正确，已取消整场重置')
     if not rows:
         # 只导入了分数线 / 考务（没有成绩可写）
         exam.import_draft = None
@@ -497,6 +556,9 @@ def exam_ai_import_apply(exam_id):
         db.session.commit()
     except Exception as e:
         db.session.rollback()
+        # 2026-10-12 质量审计 P1-5：原实现只回给前端 160 字符、服务端无任何日志，
+        # 生产环境无法排查。同模式的 exams.py / teachers.py 都有 exc_info=True。
+        current_app.logger.error('AI 导入写入失败 exam_id=%s: %s', exam_id, e, exc_info=True)
         return jsonify(success=False, message='写入失败已回滚：%s' % str(e)[:160])
     tab_service.clear_exam_cache(exam_id)
     log_operation(current_user, '导入', '考试', exam_id,

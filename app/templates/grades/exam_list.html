@@ -64,7 +64,9 @@
             {# v1.19.0 整行可点：直接进本场考试工作台（不再需要“详情”按钮） #}
             <tr class="exam-row" data-href="{{ url_for('grades.exam_detail', exam_id=e.id) }}"
                 style="cursor:pointer" title="点击进入本场考试工作台">
-                <td>{{ e.name }}</td>
+                {# 2026-10-12 UI 审计 M1：考试名可能很长 → 文本列允许换行（.wrap），
+                   不再把整表撑出横向滚动条 #}
+                <td class="wrap">{{ e.name }}</td>
                 <td>{{ e.exam_type or '—' }}</td>
                 <td>{{ e.grade }}</td>
                 <td>{{ e.exam_date.strftime('%Y-%m-%d') }}</td>
@@ -106,7 +108,7 @@
     </div>
 </div>
 
-{# v1.19.47.2：待处理的考务批次（孤儿兜底）——考试已删或未关联考试的批次 #}
+{# v1.19.47.3：待处理的考务批次（孤儿兜底）——考试已删或未关联考试的批次 #}
 {% if orphan_affairs %}
 <div class="card border-warning mt-3">
     <div class="card-header bg-warning bg-opacity-10 d-flex justify-content-between align-items-center">

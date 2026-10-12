@@ -1,4 +1,4 @@
-# StuLink v1.19.47.2 2026-10-10
+# StuLink v1.19.47.3 2026-10-10
 # 个人成绩查询与分析：页面 + 数据API + 学生搜索 + 成绩证明生成/公开核验
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 import hashlib
@@ -60,10 +60,18 @@ def student_query_page():
 @login_required
 @perm_required('grades.student_query')
 def cert_print(code):
-    """成绩证明打印页（教职工生成后打印/另存 PDF；含打印按钮与 @media print）"""
+    """成绩证明打印页（教职工生成后打印/另存 PDF；含打印按钮与 @media print）
+
+    2026-10-12 安全审计 H-4：原先只校验 perm_required('grades.student_query')，
+    不校验生成人、也不校验学生是否在本用户数据范围内 → 同校任意教务员可打印
+    任意学生的完整成绩证明（含完整身份证号与全部成绩明细，对外法律文书）。
+    现与同文件 api_invalid_cert 对齐：仅生成人或管理员可打印。
+    """
     cert = Certificate.query.filter_by(code=code).first()
     if not cert:
         abort(404)
+    if current_user.role != 'admin' and cert.generated_by != current_user.id:
+        abort(403, description='仅证明生成人或管理员可打印')
     from app.utils.cert_sign import load_content
     content = json.loads(load_content(cert.content_json) or '{}')
     return render_template('grades/cert_print.html', cert=cert, content=content)
@@ -264,6 +272,13 @@ def api_create_cert():
     from app.extensions import db
     db.session.add(cert)
     db.session.commit()
+    # 2026-10-12 数据可信度审计（§3.8）：成绩证明是对外法律效力文书，
+    # 此前生成只有 generated_by/generated_at 两列、**无操作审计** ——
+    # 事后无法回答"谁在哪台机器给谁开了证明"。这里补业务日志（含范围摘要）。
+    from app.utils.helpers import log_operation
+    log_operation(current_user, '生成', '成绩证明', cert.id,
+                  f'{basic["name"]}（{basic["grade"]}{basic["class_name"]}）'
+                  f'范围：{scope_desc}｜防伪码 {code}', module='grades')
     return jsonify(success=True, data={
         'code': code,
         'print_url': url_for('grades.cert_print', code=code),
@@ -284,4 +299,9 @@ def api_invalid_cert(code):
     cert.invalid = True
     from app.extensions import db
     db.session.commit()
+    # 2026-10-12 数据可信度审计（§3.8）：作废同样补业务日志
+    from app.utils.helpers import log_operation
+    log_operation(current_user, '作废', '成绩证明', cert.id,
+                  f'{cert.student_name}（{cert.grade}{cert.class_name}）防伪码 {code}',
+                  module='grades')
     return jsonify(success=True, message='成绩证明已作废')
