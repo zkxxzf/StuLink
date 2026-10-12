@@ -77,6 +77,10 @@
     --bs-body-color: #1e293b;
     --bs-border-color: #dee2e6;
     --bs-secondary-bg: #e9ecef;
+    /* 2026-10-13：Bootstrap 的卡片底色默认取 --bs-body-bg（#f0f2f5 灰），
+       比页面底色 #f6f8fb 还暗 → "卡片比页面还脏、表格一片灰"。
+       统一让卡片用面板白（深色下为深面板色），层级变成「灰页面 + 白卡片」。 */
+    --bs-card-bg: var(--sl-surface);
     --bs-tertiary-bg: #f8f9fa;
     --bs-secondary-color: #64748b;
     --bs-emphasis-color: #1e293b;
@@ -132,6 +136,7 @@
     --bs-body-color: #e2e8f0;
     --bs-border-color: #2b3a52;
     --bs-secondary-bg: #1c2739;
+    --bs-card-bg: var(--sl-surface);
     --bs-tertiary-bg: #233047;
     --bs-secondary-color: #94a3b8;
     --bs-emphasis-color: #f1f5f9;
@@ -336,6 +341,73 @@ body {
 .g-table tbody tr.stu-link:hover td:first-child { background: var(--sl-row-hover) !important; }
 .g-table thead th.sortable:hover { color: var(--sl-sidebar-accent-text) !important; }
 .g-table, .ld-table { color: var(--sl-text); border-color: var(--sl-border); }
+
+/* =============================================================================
+   表格统一（2026-10-13 用户反馈「边框还是不行 / padding 还是 margin」）
+   -----------------------------------------------------------------------------
+   症状①：.g-table 表头在 grades.css 里写了 `border-bottom: none`（当年配深色表头用），
+          换成浅色表头后表头与表体之间**没有线**，整张表像"贴"在一起；
+   症状②：表体横线是 grades.css 的 `1px dashed #dbe3ec`，与其它表的实线不是一套，
+          深色模式下还是一道亮虚线；
+   症状③：卡片底色默认取 --bs-body-bg（灰），比页面底色还暗 → 表格区域整体发灰；
+   症状④：单元格里带输入框（划线分层）时，td 的边框 + input 的边框 = 格子套格子，
+          且 input 宽度不足时数值被截断（426.5 → "426.!"）。
+   统一口径：表头下 1px 实线（--sl-head-border）、表体横线 1px 实线（--sl-border）、
+            宽表竖线同为 1px 实线、冻结列右侧加分隔线、单元格里的输入框不再自带边框。
+   ============================================================================= */
+.g-table thead th,
+.table thead th,
+.ld-table thead th {
+    border-bottom: 1px solid var(--sl-head-border) !important;
+}
+.g-table tbody td,
+.table tbody td,
+.ld-table tbody td {
+    border-bottom: 1px solid var(--sl-border) !important;
+}
+/* 冻结首列：右侧一条分隔线（横向滚动时「这一列不动」才有边界） */
+.g-table thead th:first-child,
+.g-table tbody td:first-child {
+    border-right: 1px solid var(--sl-head-border) !important;
+}
+/* 例外：.table-borderless 是**刻意不要格线**的紧凑表（弹层清单 / 宿舍统计小表），
+   上面几条是在"给所有表补线"，必须放行这一类，否则等于把它们的 borderless 抹掉 */
+.table-borderless thead th,
+.table-borderless tbody td,
+.table-borderless > :not(caption) > * > * {
+    border-bottom: 0 !important;
+}
+/* 宽表（全局对比 / 划线分层）：列多，靠竖线读列 */
+.ld-table th, .ld-table td,
+#bandTable th, #bandTable td {
+    border-right: 1px solid var(--sl-border);
+}
+.ld-table thead th, #bandTable thead th { border-right-color: var(--sl-head-border); }
+.ld-table th:last-child, .ld-table td:last-child,
+#bandTable th:last-child, #bandTable td:last-child { border-right: none; }
+
+/* —— 划线分层（#bandTable）：整张表都是输入框 ——
+   原来 input 的底色跟着页面/卡片底色走，与单元格底色不同 → "格子套格子"；
+   现在 td 负责画格线与底色，input 只负责文字（透明底、无边框、聚焦才高亮），
+   并给足宽度，避免 426.5 被截断成 "426.!"。 */
+#bandTable tbody td { background: var(--sl-surface); padding: 2px 4px; }
+#bandTable tbody tr:nth-child(even) td { background: var(--sl-zebra-bg); }
+#bandTable td .form-control {
+    background: transparent;
+    border: 0;
+    color: var(--sl-text);
+    font-size: 12.5px;
+    padding: 3px 6px;
+    min-width: 66px;
+    height: auto;
+}
+#bandTable td .q-name { min-width: 120px; }
+#bandTable td .q-cell { text-align: center; font-variant-numeric: tabular-nums; }
+#bandTable td .form-control:focus {
+    background: var(--sl-surface);
+    box-shadow: 0 0 0 2px var(--sl-sidebar-accent);
+    border-radius: 3px;
+}
 /* 页面模板里内联写死的深色表头/横幅（内联优先级高于本文件，必须用 !important 顶掉）：
    - academic/schedule_periods.html：table.tt thead th（节次表）
    - academic/subject_leaders.html：.ld-head（备课组长分组头）
