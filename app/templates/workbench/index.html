@@ -1,7 +1,18 @@
 {% extends "base.html" %}
 {% import "academic/_schedule_grid.html" as gridm %}
 {% block title %}教师工作台{% endblock %}
-{% block extra_css %}{{ gridm.schedule_grid_css() }}{% endblock %}
+{% block extra_css %}{{ gridm.schedule_grid_css() }}
+<style>
+/* 通知分类徽章（与通知中心同款配色） */
+.category-badge { font-size:10px; padding:1px 6px; border-radius:8px; font-weight:600; }
+.cat-system { background:#eff6ff; color:#2563eb; }
+.cat-reminder { background:#fef3c7; color:#b45309; }
+.cat-academic { background:#ecfdf5; color:#059669; }
+.cat-collect { background:#fff7ed; color:#c2410c; }
+.cat-workbench { background:#f5f3ff; color:#7c3aed; }
+.cat-other { background:#f1f5f9; color:#475569; }
+</style>
+{% endblock %}
 {% block content %}
 <div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
     <h4 class="fw-bold mb-0"><i class="bi bi-person-workspace"></i> 教师工作台</h4>
@@ -72,6 +83,74 @@
                     <p class="mb-0 mt-2">今天暂无课程安排</p>
                 </div>
                 {% endif %}
+            </div>
+        </div>
+    </div>
+</div>
+
+{# 2026-10-13（v1.19.47.18）：待办与通知 #}
+<div class="row g-3 mb-3">
+    <div class="col-12">
+        <div class="card">
+            <div class="card-header d-flex justify-content-between align-items-center flex-wrap gap-2">
+                <span>
+                    <i class="bi bi-bell"></i> 待办与通知
+                    {% if todo.todo_count %}<span class="badge bg-danger ms-1">{{ todo.todo_count }} 项待办</span>{% endif %}
+                    {% if todo.unread %}<span class="badge bg-warning text-dark ms-1">{{ todo.unread }} 条未读</span>{% endif %}
+                </span>
+                <a href="{{ url_for('notifications.notifications_page') }}" class="btn btn-sm btn-outline-primary">
+                    通知中心 <i class="bi bi-arrow-right"></i>
+                </a>
+            </div>
+            <div class="card-body">
+                <div class="row g-3">
+                    <div class="col-lg-5">
+                        <div class="small text-muted mb-1"><i class="bi bi-list-check"></i> 待办（需要你处理）</div>
+                        {% if todo.todos %}
+                        <div class="list-group list-group-flush">
+                            {% for t in todo.todos %}
+                            <a href="{{ t.url }}" class="list-group-item list-group-item-action py-2 px-2 d-flex align-items-center">
+                                <i class="bi {{ t.icon }} me-2 text-primary"></i>
+                                <span class="small">{{ t.text }}</span>
+                            </a>
+                            {% endfor %}
+                        </div>
+                        {% else %}
+                        <div class="text-muted small py-2">
+                            <i class="bi bi-check-circle"></i> 暂无待办事项
+                        </div>
+                        {% endif %}
+                    </div>
+                    <div class="col-lg-7">
+                        <div class="small text-muted mb-1"><i class="bi bi-envelope"></i> 最近通知</div>
+                        {% if todo.recent %}
+                        <div class="list-group list-group-flush">
+                            {% for n in todo.recent %}
+                            <a href="{{ url_for('notifications.notification_detail', notification_id=n.id) }}"
+                               class="list-group-item list-group-item-action py-2 px-2">
+                                <div class="d-flex justify-content-between align-items-center gap-2">
+                                    <span class="small text-truncate {{ 'fw-bold' if not n.is_read else '' }}">
+                                        {% if not n.is_read %}<span class="badge bg-danger me-1" style="font-size:10px;">未读</span>{% endif %}
+                                        {{ n.title }}
+                                    </span>
+                                    <span class="text-muted" style="font-size:11px;white-space:nowrap;">
+                                        {{ n.published_at.strftime('%m-%d %H:%M') if n.published_at else '' }}
+                                    </span>
+                                </div>
+                                <div class="mt-1">
+                                    <span class="category-badge cat-{{ n.category }}">{{ n.category_label }}</span>
+                                    {% if n.priority == 'urgent' %}<span class="badge bg-danger ms-1" style="font-size:10px;">紧急</span>{% endif %}
+                                </div>
+                            </a>
+                            {% endfor %}
+                        </div>
+                        {% else %}
+                        <div class="text-muted small py-2">
+                            <i class="bi bi-envelope"></i> 暂无通知
+                        </div>
+                        {% endif %}
+                    </div>
+                </div>
             </div>
         </div>
     </div>
@@ -152,7 +231,7 @@
     </div>
 </div>
 
-{# 2026-10-13（v1.19.47.17）：班主任 —— 工作台直接看本班班级课表（带多个班时用页签切换） #}
+{# 2026-10-13（v1.19.47.18）：班主任 —— 工作台直接看本班班级课表（带多个班时用页签切换） #}
 {% if is_head %}
 <div class="row g-3 mb-3">
     <div class="col-12">
@@ -239,7 +318,7 @@
     </div>
 </div>
 
-<!-- 调课（v1.19.47.17：入口 + 待我确认 + 我的申请，都在工作台完成） -->
+<!-- 调课（v1.19.47.18：入口 + 待我确认 + 我的申请，都在工作台完成） -->
 <div class="card mt-3 mb-3">
     <div class="card-header d-flex justify-content-between align-items-center">
         <span><i class="bi bi-arrow-left-right"></i> 调课
@@ -507,7 +586,7 @@
 </script>
 {% endif %}
 
-{# v1.19.47.17：工作台内直接确认 / 拒绝同事发起的换课、代课 #}
+{# v1.19.47.18：工作台内直接确认 / 拒绝同事发起的换课、代课 #}
 <script>
 (function () {
     var respondUrl = {{ url_for('academic.swap_partner_respond', swap_id=0)|tojson }};

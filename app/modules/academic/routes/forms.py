@@ -1,4 +1,4 @@
-# StuLink v1.19.47.17 2026-10-10
+# StuLink v1.19.47.18 2026-10-10
 # 教务 · 表单收集：管理端（创建/编辑/发布/关闭/提交列表/审核/导出）
 #                 填写端（可填列表/填写/提交/我的提交）
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
@@ -688,12 +688,23 @@ def form_review(sid):
 
 # ── 填写端：可填写表单列表 ────────────────────────────────────
 
+def _submitter_type(user):
+    """填写端身份：教师 / 学生。
+
+    2026-10-13（v1.19.47.18）：原判断只认 role in ('teacher','admin')，
+    **班主任（homeroom_teacher）被当成学生** —— 看不到发给教师的问卷。
+    列表 / 资格校验 / 提交 三处必须同一口径，否则会出现"看得见但提交被拒"。
+    """
+    return ('teacher' if getattr(user, 'role', '') in
+            ('teacher', 'homeroom_teacher', 'admin') else 'student')
+
+
 @bp.route('/forms/fill')
 @login_required
 @perm_required('academic.view')
 def form_fill_list():
     """获取当前用户可填写的表单列表（按当前轮时间窗 + 定向范围）"""
-    submitter_type = 'teacher' if current_user.role in ('teacher', 'admin') else 'student'
+    submitter_type = _submitter_type(current_user)
 
     items = form_service.fill_items(
         current_user.id,
@@ -730,7 +741,7 @@ def form_fill(form_id):
         return redirect(url_for('academic.form_fill_list'))
 
     # 资格检查（窗口按当前轮次判定：未开始/已截止/不在定向范围/本轮已交）
-    submitter_type = 'teacher' if current_user.role in ('teacher', 'admin') else 'student'
+    submitter_type = _submitter_type(current_user)
     eligibility = form_service.check_eligibility(
         form_id, current_user.id,
         submitter_type=submitter_type,
@@ -766,7 +777,7 @@ def form_submit(form_id):
         abort(404)
 
     # 构建提交者信息
-    submitter_type = 'teacher' if current_user.role in ('teacher', 'admin') else 'student'
+    submitter_type = _submitter_type(current_user)
     submitter_info = {
         'submitter_type': submitter_type,
         'submitter_id': current_user.id,

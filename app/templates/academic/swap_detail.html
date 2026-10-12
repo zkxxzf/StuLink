@@ -102,7 +102,7 @@
 </div>
 
 {% if d.exchange_kind %}
-{# 2026-10-12 换课（v1.19.47.17）：对方信息与确认状态 #}
+{# 2026-10-12 换课（v1.19.47.18）：对方信息与确认状态 #}
 <div class="alert {% if d.partner_status == 'pending' %}alert-warning{% elif d.partner_status == 'refused' %}alert-danger{% elif d.partner_status == 'agreed' %}alert-success{% else %}alert-info{% endif %} py-2 small mb-3">
     <i class="bi bi-people-fill"></i>
     <b>{{ d.exchange_kind_text }}{% if d.exchange_content_text %} · {{ d.exchange_content_text }}{% endif %}</b>
