@@ -109,8 +109,10 @@ $(function(){
         } else {
             dirs.forEach(function(d){
                 var subs = colsOf(d);
-                r1.append($('<th>').attr('colspan', subs.length).text(dirLabel(d)));
-                subs.forEach(function(s){ r2.append($('<th style="min-width:82px">').text(s)); });
+                // 2026-10-13：分组标题居中 —— 原先默认左对齐，「历史类」贴在跨 7 列分组
+                // 最左边、正压在「总分」上方，看起来像 colspan 错位（"表头两行"的观感来源）
+                r1.append($('<th class="text-center">').attr('colspan', subs.length).text(dirLabel(d)));
+                subs.forEach(function(s){ r2.append($('<th class="text-center" style="min-width:82px">').text(s)); });
             });
         }
         r1.append('<th rowspan="2" style="width:70px"></th>');
@@ -212,10 +214,31 @@ $(function(){
         // 还是加载失败）。改为给出明确错误提示，并保留"空表"与"加载失败"的区分。
         $.getJSON('/grades/api/bands/matrix', {exam_id: examId}, function(res){
             var all = res.data || {};
+            // 2026-10-13：回填不能只按层名**精确**匹配 —— 导入的线名与模板层名常差
+            // 一个「线」字（库里「特控/本科/211」，模板层名「特控线/本科线」），
+            // 差一个字整表就空白（用户实测命中）。改为「归一化名匹配」（去首尾空格 +
+            // 去尾部「线」），库里多出来的层追加为新行，不再静默丢弃。
+            function norm(n){ return ((n || '') + '').trim().replace(/线$/, ''); }
+            var lib = {};                       // 归一化名 -> {name, seq}
+            Object.keys(all).forEach(function(k){
+                (all[k] || []).forEach(function(b){
+                    var key = norm(b.name);
+                    if (key && !(key in lib)) lib[key] = {name: (b.name || '').trim(), seq: b.seq};
+                });
+            });
+            Object.keys(lib).forEach(function(key){
+                var has = layers.some(function(l){ return norm(l.name) === key; });
+                if (!has) layers.push({seq: lib[key].seq, name: lib[key].name,
+                                        value: '', values: {}});
+            });
+            layers.sort(function(a, c){ return a.seq - c.seq; });
             colKeys().forEach(function(k){
-                var vals = {};
-                (all[k] || []).forEach(function(b){ vals[b.name] = b.lower_value; });
-                layers.forEach(function(l){ if (vals[l.name] != null) l.values[k] = vals[l.name]; });
+                var byKey = {};
+                (all[k] || []).forEach(function(b){ byKey[norm(b.name)] = b; });
+                layers.forEach(function(l){
+                    var b = byKey[norm(l.name)];
+                    if (b && b.lower_value != null) l.values[k] = b.lower_value;
+                });
             });
             $('#qMsg').text('');
             render();
