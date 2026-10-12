@@ -343,8 +343,12 @@ def affair_detail(aid):
         'n_invig': AffairInvigilation.query.filter_by(affair_id=aid).count(),
         'schedules': _t_scheds,
     }
+    # v1.19.45.2 页头要显示「本场考试」信息（名字 / 类型 / 时间）：
+    # 取本批次绑定的考试；未绑定（孤儿批次）时为 None，模板回落用批次自身字段。
+    linked_exam = Exam.query.get(affair.exam_id) if affair.exam_id else None
     return render_template('grades/affairs/detail.html',
-                           affair=affair, students=students, rooms=rooms,
+                           affair=affair, linked_exam=linked_exam,
+                           students=students, rooms=rooms,
                            scope_students=scope_students, arranged=arranged,
                            numbered=numbered,
                            join_students=join_students, skip_students=skip_students,

@@ -36,7 +36,7 @@ from app.extensions import db  # noqa: E402
 from app.models import Student, User  # noqa: E402
 from app.models.grades import (ExamAffair, AffairRoom, AffairStudent, TeacherSubjectLink,  # noqa: E402
                                AffairTeacher, AffairSchedule, AffairInvigilator,
-                               AffairInvigilation)
+                               AffairInvigilation, Exam)
 
 app = create_app()
 ok = fail = 0
@@ -93,6 +93,14 @@ with app.app_context():
     db.session.flush()
     aid = affair.id
 
+    # v1.19.45.2 页头「本场考试」信息：绑一场考试（名字 / 性质 / 阶段 / 时间）
+    _exam = Exam(name='2025级2026-2027学年第一学期期中考（冒烟）', exam_kind='联考',
+                 exam_type='期中考', grade='2025级', exam_date=date(2026, 10, 8),
+                 term='2026-2027', status='imported')
+    db.session.add(_exam)
+    db.session.flush()
+    affair.exam_id = _exam.id
+
     # 考场 ×2
     for rn, loc in [('01', '教学楼A-101'), ('02', '教学楼A-102')]:
         db.session.add(AffairRoom(affair_id=aid, room_no=rn, location=loc,
@@ -126,6 +134,14 @@ with app.test_client() as c:
           all(x in ph for x in ['① 学生名单', '② 考场设置', '③ 编排考号',
                                 '④ 核对任课教师', '⑤ 考试时间表', '⑥ 编排监考表', '⑦ 导出']))
     check('页面含监考表导出入口', '导出监考表 Excel' in ph and '导出监考表 PDF' in ph)
+    # v1.19.45.2 页头与去重
+    check('重复步骤条已删除（无 step-pill）', 'step-pill' not in ph)
+    check('页头显示本场考试名字', '2025级2026-2027学年第一学期期中考（冒烟）' in ph)
+    check('页头显示考试类型（性质/阶段）', '联考' in ph and '期中考' in ph)
+    check('页头显示考试时间', '2026-10-08' in ph)
+    check('侧栏标题=考试名字（非「年级·性质·阶段·日期」串）',
+          '2025级2026-2027学年第一学期期中考（冒烟）' in ph
+          and '2025级·联考·期中考' not in ph)
 
     # ---- 环节④ ----
     r = c.get(f'/grades/affairs/{aid}/teachers')

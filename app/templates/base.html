@@ -118,9 +118,12 @@
             box-shadow: 0 8px 24px rgba(15, 23, 42, .10);
             /* v1.19.44.2 横向间距统一：卡片左右各 8px、下面每一行左右各 10px，
                整张卡「左 18px = 右 18px」；旧版 efn-item 带 2px 左描边（左 14 / 右 12）不对称 */
-            padding: 8px; overflow-y: auto;
+            /* v1.19.45.2 overflow-x: hidden：卡片只纵向滚动，杜绝底部横向滚动条 */
+            padding: 8px; overflow-y: auto; overflow-x: hidden;
         }
         .sidebar-float .nav.flex-column { padding-top: 0 !important; }
+        /* flex 子项允许收缩：否则长文本（如很长的考试名）会撑破卡片宽度 */
+        .sidebar-float .nav.flex-column > * { min-width: 0; }
         .sidebar-float .exam-flow-nav { position: static; }
         .sidebar-float a { text-decoration: none; }
         /* ---- 头部：返回 / 标题 / 步骤，与菜单同一左右内边距，底部细线分隔 ---- */
@@ -131,7 +134,10 @@
         .sidebar-float .efn-back:hover { color: #2563eb; background: #f1f5f9; }
         .sidebar-float .efn-title {
             padding: 4px 10px 6px; color: #0f172a; font-weight: 600; font-size: 12.5px;
-            white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+            /* v1.19.45.2：考试名可能很长 → 允许换行。
+               原先 white-space:nowrap 会让该项的 min-content 超过卡片宽度，
+               作为 flex 项又无法收缩 → 撑出底部横向滚动条（用户反馈）。 */
+            white-space: normal; overflow-wrap: anywhere; line-height: 1.35;
         }
         .sidebar-float .efn-steps {
             display: flex; align-items: center; gap: 4px;
@@ -360,7 +366,9 @@
                 <a class="efn-back" href="{{ url_for('grades.exams_list') }}">
                     <i class="bi bi-arrow-left"></i>返回考试列表
                 </a>
-                <div class="efn-title" title="{{ EN.exam.name }}">{{ EN.exam.title_with_dimensions() }}</div>
+                {# v1.19.45.2 侧栏头部只显示**考试名字**（此前显示「年级·性质·阶段·日期」，
+                   用户反馈"不是名字"）；名字过长时换行显示，不再截断/撑出横向滚动条。 #}
+                <div class="efn-title" title="{{ EN.exam.name or EN.exam.title_with_dimensions() }}">{{ EN.exam.name or EN.exam.title_with_dimensions() }}</div>
                 <div class="efn-steps">
                     {% for s in EN.steps %}
                     <span class="efn-dot {{ 'on' if s.done }}"

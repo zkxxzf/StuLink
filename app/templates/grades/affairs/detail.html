@@ -2,19 +2,7 @@
 {% block title %}考务向导 - 成绩管理{% endblock %}
 {% block extra_css %}
 <style>
-  /* v1.19.44.2 考务步骤条：按实际数据标出「已完成 / 待完成」（此前无任何状态与样式） */
-  .step-bar .step-pill {
-    display: inline-flex; align-items: center; gap: 6px;
-    padding: 2px 10px; border-radius: 999px;
-    border: 1px solid #e5e7eb; background: #f8fafc; color: #64748b;
-  }
-  .step-bar .step-pill .num {
-    width: 16px; height: 16px; line-height: 16px; text-align: center;
-    border-radius: 50%; background: #e2e8f0; color: #475569; font-size: 11px;
-  }
-  .step-bar .step-pill.done { border-color: #86efac; background: #dcfce7; color: #166534; }
-  .step-bar .step-pill.done .num { background: #16a34a; color: #fff; }
-  /* v1.19.44.2 步骤①「参考」徽标：点一下切换参考状态 */
+  /* v1.19.45.2 步骤①「参考」徽标：点一下切换参考状态 */
   .attend-toggle { cursor: pointer; user-select: none; }
   /* v1.19.44.2 步骤② 双栏美化：统一卡片 / 表头 / 悬停 / 输入控件 */
   #t2 .t2-card {
@@ -36,50 +24,50 @@
 </style>
 {% endblock %}
 {% block content %}
-<div class="d-flex justify-content-between align-items-center mb-2 flex-wrap gap-2">
-    <div>
-        {# v1.19.44.2：考务已并入考试管理，面包屑直接返回考试列表 #}
-        <a href="{{ url_for('grades.exams_list') }}" class="text-decoration-none text-muted small">
-            <i class="bi bi-arrow-left"></i> 返回考试管理</a>
-        <h5 class="mb-0 mt-1"><i class="bi bi-clipboard-check"></i> {{ affair.name }}
-            <span class="badge bg-secondary ms-1">{{ affair.grade }}</span>
-            {% if affair.status == 'linked' %}<span class="badge bg-info">已关联成绩</span>
-            {% elif affair.status == 'arranged' %}<span class="badge bg-success">已编排</span>
-            {% else %}<span class="badge bg-light text-dark">草稿</span>{% endif %}
-        </h5>
-    </div>
-    <div class="d-flex align-items-center gap-2 text-muted small">
-        参考 {{ scope_students|length }} 人 · 已编排 {{ arranged|length }} 人 · 考场 {{ rooms|length }} 个
-        {# v1.12.1 批次设置入口：编排模式 / 非参考处理 / 选科考号前后缀 #}
-        <button class="btn btn-outline-secondary btn-sm py-0" onclick="openSettings()">
-            <i class="bi bi-gear"></i> 批次设置</button>
+{# v1.19.45.2 页头：以「本场考试」为主（名字 / 类型 / 时间 / 年级）。
+   绑定考试时用考试信息；未绑定的孤儿批次回落用批次自身字段。 #}
+{% set _ex = linked_exam %}
+{% set _head_name = _ex.name if _ex else affair.name %}
+{% set _head_date = (_ex.exam_date if _ex else affair.exam_date) %}
+<div class="card px-3 py-2 mb-2">
+    <div class="d-flex justify-content-between align-items-start flex-wrap gap-2">
+        <div class="flex-grow-1" style="min-width:0">
+            {# v1.19.44.2：考务已并入考试管理，面包屑直接返回考试列表 #}
+            <a href="{{ url_for('grades.exams_list') }}" class="text-decoration-none text-muted small">
+                <i class="bi bi-arrow-left"></i> 返回考试管理</a>
+            <h5 class="mb-1 mt-1 text-break">
+                <i class="bi bi-clipboard-check"></i> {{ _head_name }}
+            </h5>
+            <div class="d-flex flex-wrap align-items-center gap-1 small">
+                <span class="badge bg-secondary">{{ affair.grade }}</span>
+                {% if _ex and _ex.kind_label() %}<span class="badge bg-primary">{{ _ex.kind_label() }}</span>{% endif %}
+                {% if _ex and _ex.stage_label() %}<span class="badge bg-info text-dark">{{ _ex.stage_label() }}</span>{% endif %}
+                {% if _head_date %}<span class="text-muted"><i class="bi bi-calendar3"></i> {{ _head_date.strftime('%Y-%m-%d') }}</span>{% endif %}
+                {% if _ex and _ex.term %}<span class="text-muted">· 学年 {{ _ex.term }}</span>{% endif %}
+                {% if _ex and _ex.score_mode %}<span class="text-muted">· 口径 {{ _ex.score_mode_label() }}</span>{% endif %}
+                {% if affair.status == 'linked' %}<span class="badge bg-info">已关联成绩</span>
+                {% elif affair.status == 'arranged' %}<span class="badge bg-success">已编排</span>
+                {% else %}<span class="badge bg-light text-dark border">草稿</span>{% endif %}
+                {% if not _ex %}<span class="badge bg-warning text-dark">未绑定考试</span>{% endif %}
+            </div>
+        </div>
+        <div class="d-flex align-items-center gap-2 text-muted small flex-shrink-0">
+            参考 {{ scope_students|length }} 人 · 已编排 {{ arranged|length }} 人 · 考场 {{ rooms|length }} 个
+            {# v1.12.1 批次设置入口：编排模式 / 非参考处理 / 选科考号前后缀 #}
+            <button class="btn btn-outline-secondary btn-sm py-0" onclick="openSettings()">
+                <i class="bi bi-gear"></i> 批次设置</button>
+        </div>
     </div>
 </div>
 
 <!-- v1.12.2 移除步骤⑤成绩关联：功能使用率低，按考场查成绩走成绩模块自身入口即可 -->
-{# v1.19.44.2：步骤条按实际数据标出完成状态（AI 导入带上考场/考号时，②③ 也应显示已完成） #}
+{# v1.19.45.2：删掉与下方页签重复的「1-7 步骤胶囊条」——完成状态已由页签上的对勾体现 #}
 {% set _s1 = stats.students > 0 %}
 {% set _s2 = rooms|length > 0 %}
 {% set _s3 = (arranged|length > 0) or (numbered > 0) %}
 {% set _s4 = invig_stat.n_teachers > 0 %}
 {% set _s5 = invig_stat.n_schedules > 0 %}
 {% set _s6 = invig_stat.n_invig > 0 %}
-<ol class="step-bar list-unstyled d-flex flex-wrap gap-2 mb-3 small">
-    <li class="step-pill {{ 'done' if _s1 }}"><span class="num">1</span> 学生名单
-        {% if _s1 %}<i class="bi bi-check-lg"></i>{% endif %}</li>
-    <li class="step-pill {{ 'done' if _s2 }}"><span class="num">2</span> 考场设置
-        {% if _s2 %}<i class="bi bi-check-lg"></i>{% endif %}</li>
-    <li class="step-pill {{ 'done' if _s3 }}"><span class="num">3</span> 编排与考号生成
-        {% if _s3 %}<i class="bi bi-check-lg"></i>{% endif %}</li>
-    <li class="step-pill {{ 'done' if _s4 }}"><span class="num">4</span> 核对任课教师
-        {% if _s4 %}<i class="bi bi-check-lg"></i>{% endif %}</li>
-    <li class="step-pill {{ 'done' if _s5 }}"><span class="num">5</span> 考试时间表
-        {% if _s5 %}<i class="bi bi-check-lg"></i>{% endif %}</li>
-    <li class="step-pill {{ 'done' if _s6 }}"><span class="num">6</span> 编排监考表
-        {% if _s6 %}<i class="bi bi-check-lg"></i>{% endif %}</li>
-    <li class="step-pill"><span class="num">7</span> 导出</li>
-</ol>
-
 <ul class="nav nav-tabs mb-3" id="affairTabs" role="tablist">
     <li class="nav-item"><button class="nav-link active" data-bs-toggle="tab" data-bs-target="#t1">① 学生名单{% if _s1 %} <i class="bi bi-check-lg small text-success"></i>{% endif %}</button></li>
     <li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#t2">② 考场设置{% if _s2 %} <i class="bi bi-check-lg small text-success"></i>{% endif %}</button></li>
