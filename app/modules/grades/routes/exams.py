@@ -1,4 +1,4 @@
-# StuLink v1.19.47.13 2026-10-10
+# StuLink v1.19.47.14 2026-10-10
 # 成绩管理：考试管理 + 成绩导入向导路由
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 import io
@@ -75,7 +75,7 @@ def exams_list():
                     .group_by(ExamScore.exam_id).all())
         for eid, cnt in rows_cnt:
             counts[eid] = cnt
-    # v1.19.47.13：孤儿考务批次兜底（exam_id 为空，或指向已删除的考试）
+    # v1.19.47.14：孤儿考务批次兜底（exam_id 为空，或指向已删除的考试）
     # 这类批次从考试列表无法进入，以前只能直连 /grades/affairs 才能看到，现在底部统一列出
     # 2026-10-12 安全审计 H-3：孤儿批次同样按可见年级收敛（未传 grade 时），
     # 否则跨年级用户仍能从此区读到不该看的年级的批次元数据。
@@ -151,7 +151,7 @@ def exam_new():
         name = (request.form.get('name') or '').strip()
         exam_kind = (request.form.get('exam_kind') or '').strip()
         exam_type = (request.form.get('exam_type') or '').strip()
-        # v1.19.47.13：不再有「分数口径」表单字段（口径在导入时按文件确定），
+        # v1.19.47.14：不再有「分数口径」表单字段（口径在导入时按文件确定），
         # 新考试 score_mode 一律留空（未指定），展示为「按导入确定」
         if not name:
             # 名称留空 → 默认「年级 + 日期」（两维度已单独存列，不塞进名称）
@@ -212,7 +212,7 @@ def _exam_classes(exam_id):
     return sorted({r[0] for r in rows})
 
 
-# v1.19.47.13 成绩单表头可排序列 → 总分行（每生一行）字段名；
+# v1.19.47.14 成绩单表头可排序列 → 总分行（每生一行）字段名；
 # 各科成绩用 's:科目名' 前缀（见 _exam_page_rows），不在此表内。
 _SORT_COLS = {
     'no': 'student_no', 'name': 'student_name', 'exam_no': 'exam_no',
@@ -245,11 +245,11 @@ def _exam_page_rows(exam_id, page, size, class_name=None, direction=None,
       - 学籍状态一次性 IN 查询（1 次，而非逐批 10 次）。
 
     class_name（v1.19.0）：按班级查看成绩单，只统计/展示该班学生（None=全部）。
-    direction（v1.19.47.13）：按方向查看（物理/历史），取**总分行**上的方向快照（None=全部）。
-    sort_key / order（v1.19.47.13）：表头排序。sort_key 取 _SORT_COLS 的键，
+    direction（v1.19.47.14）：按方向查看（物理/历史），取**总分行**上的方向快照（None=全部）。
+    sort_key / order（v1.19.47.14）：表头排序。sort_key 取 _SORT_COLS 的键，
         或 's:科目名' 表示按该科成绩排；order 为 'asc'/'desc'（空 sort_key = 默认次序）。
         排序必须在**服务端**做：页面只加载当前页，前端排序只会排到本页 50 人。
-        排序状态只存在于 URL 参数里（v1.19.47.13 确认），服务端不保存"当前排序"，
+        排序状态只存在于 URL 参数里（v1.19.47.14 确认），服务端不保存"当前排序"，
         因此**不会影响其他用户**；不传参数时回到「方向 → 总分名次」默认榜。
     """
     q = ExamScore.query.filter_by(exam_id=exam_id, subject=TOTAL_SUBJECT)
@@ -288,7 +288,7 @@ def _exam_page_rows(exam_id, page, size, class_name=None, direction=None,
                 ExamScore.student_no]
         meta = q.order_by(*seqq).limit(size).offset((page - 1) * size).all()
     else:
-        # 默认次序（v1.19.47.13）：按**总分名次**排列 —— 先分方向（历史在前、物理在后），
+        # 默认次序（v1.19.47.14）：按**总分名次**排列 —— 先分方向（历史在前、物理在后），
         # 方向内按方向排（= 该方向的总分名次）升序，缺考（无方向排）排在本方向最后，
         # 末尾按学号定序保证翻页稳定。注意：不按班级分组（老师要看的是名次榜）。
         dir_seq = db.case((ExamScore.direction == '历史', 0),
@@ -389,7 +389,7 @@ def _four_step_status(exam):
          'hint': (EXAM_STATUS_LABEL.get(exam.status, exam.status) if imported
                   else '尚未导入成绩')},
         {'key': 'analysis', 'label': '成绩分析', 'done': banded,
-         # v1.19.47.13 必须带本场 exam：此前不带 → 落到全局分析页并默认选「最新考试」，
+         # v1.19.47.14 必须带本场 exam：此前不带 → 落到全局分析页并默认选「最新考试」，
          # 从本场详情页（含「下一步：成绩分析」按钮）点进去会显示别的考试成绩。
          'url': url_for('grades.index', exam=exam.id),
          'hint': ('已划线，分析可用' if banded else '未划线，分层类指标不可用')},
@@ -406,7 +406,7 @@ def exam_detail(exam_id):
     page = _safe_int(request.args.get('page'), 1)
     size = _safe_int(request.args.get('size'), 50)
     # v1.19.0：成绩单支持按班级查看（cls=班级名，空/非法=全部）
-    # v1.19.47.13：再支持按方向查看（dir=物理/历史）；两者互斥，传 cls 时忽略 dir
+    # v1.19.47.14：再支持按方向查看（dir=物理/历史）；两者互斥，传 cls 时忽略 dir
     classes = _exam_classes(exam_id)
     cur_class = (request.args.get('cls') or '').strip()
     if cur_class not in classes:
@@ -416,7 +416,7 @@ def exam_detail(exam_id):
         cur_dir = ''
     if cur_class:
         cur_dir = ''
-    cur_sort, cur_order = _sort_args(request.args)      # v1.19.47.13 表头排序
+    cur_sort, cur_order = _sort_args(request.args)      # v1.19.47.14 表头排序
     students, page, total_pages, total = _exam_page_rows(
         exam_id, page, size, class_name=cur_class or None, direction=cur_dir or None,
         sort_key=cur_sort, order=cur_order)
@@ -463,7 +463,7 @@ def exam_scores_page(exam_id):
     cur_dir = (request.args.get('dir') or '').strip()     # v1.19.15.0 按方向查看
     if cur_dir not in ('物理', '历史'):
         cur_dir = ''
-    cur_sort, cur_order = _sort_args(request.args)        # v1.19.47.13 表头排序
+    cur_sort, cur_order = _sort_args(request.args)        # v1.19.47.14 表头排序
     students, _page, _total_pages, _total = _exam_page_rows(
         exam_id, page, size, class_name=cur_class or None, direction=cur_dir or None,
         sort_key=cur_sort, order=cur_order)
@@ -548,7 +548,7 @@ def _log_score_change(exam, row, action, old_score, new_score, old_raw, new_raw)
 @perm_required('grades.edit')
 @perm_required('grades.score_edit')
 def score_update(exam_id, score_id):
-    """单科改分（v1.19.47.13）
+    """单科改分（v1.19.47.14）
 
     · 赋分（score）与原始分（raw_score）都可改，提交哪个改哪个；
     · 两者都提交为空 = 该科缺考（删除该科）；
@@ -647,7 +647,7 @@ def score_delete(exam_id, score_id):
 @login_required
 @perm_required('grades.edit')
 def score_changes():
-    """分数修改记录（v1.19.47.13）：**只看某一场考试**
+    """分数修改记录（v1.19.47.14）：**只看某一场考试**
 
     该记录属于单场考试的数据，入口只有一处：成绩单页右上角「分数修改记录」按钮
     （带 ?exam=<id>）。不再提供跨考试视图，也不在左侧栏出现；缺 ?exam= 时回考试列表。
@@ -726,7 +726,7 @@ def exam_delete(exam_id):
         n_ai = AiReport.query.filter_by(exam_id=exam_id).delete()
         n_logs = ScoreChangeLog.query.filter_by(exam_id=exam_id).delete()
         n_links = ExamTeacherLink.query.filter_by(exam_id=exam_id).delete()
-        # v1.19.47.13：级联删除本考试的考务批次（含其考场与名单），避免产生孤儿批次
+        # v1.19.47.14：级联删除本考试的考务批次（含其考场与名单），避免产生孤儿批次
         # 旧逻辑只删考试，导致 affair 的 exam_id 指向已删除考试，从考试列表无法再进入
         from app.modules.grades.routes.exam_affairs import delete_affair_cascade
         from app.models.grades import ExamAffair
@@ -859,7 +859,7 @@ def exam_import_confirm(exam_id):
         summary = store_service.apply_import(exam, parsed, mode=mode,
                                              remove_missing=remove_missing)
         ranking.recalc_exam(exam_id)
-        # v1.19.47.13 任课快照：把本次导入时的任课教师映射定格到本场考试（教师维度分析读它，
+        # v1.19.47.14 任课快照：把本次导入时的任课教师映射定格到本场考试（教师维度分析读它，
         # 以后教师调整/重新分班都不会把历史成绩归到新教师名下）
         from app.modules.grades.services import teacher_snapshot_service as tss
         n_tch = tss.snapshot_exam(exam, source='import')

@@ -181,20 +181,80 @@
     </div>
 </div>
 
-<!-- 我的调课 -->
+<!-- 调课（v1.19.47.14：入口 + 待我确认 + 我的申请，都在工作台完成） -->
 <div class="card mt-3 mb-3">
     <div class="card-header d-flex justify-content-between align-items-center">
-        <span><i class="bi bi-arrow-left-right"></i> 我的调课</span>
+        <span><i class="bi bi-arrow-left-right"></i> 调课
+            {% if partner_pending %}
+            <span class="badge bg-danger ms-1">{{ partner_pending|length }} 条待你确认</span>
+            {% endif %}
+        </span>
         <div>
+            {% if can_swap %}
             <a href="{{ url_for('academic.swap_apply') }}" class="btn btn-sm btn-outline-primary me-1">
-                <i class="bi bi-plus-lg"></i> 申请调课
+                <i class="bi bi-plus-lg"></i> 调课 / 与同事换课
             </a>
+            <a href="{{ url_for('academic.swap_cover') }}" class="btn btn-sm btn-outline-primary me-1">
+                <i class="bi bi-person-check"></i> 请人代课
+            </a>
+            {% endif %}
             <a href="{{ url_for('academic.swap_page') }}" class="btn btn-sm btn-outline-secondary">
                 <i class="bi bi-list"></i> 查看记录
             </a>
         </div>
     </div>
     <div class="card-body">
+        {# ① 同事发起、等着**我**确认的换课 / 代课 #}
+        {% if partner_pending %}
+        <div class="border rounded p-2 mb-3" style="border-color:#fde68a !important;background:#fffbeb;">
+            <div class="fw-semibold small mb-2">
+                <i class="bi bi-hourglass-split"></i> 待你确认
+                <span class="badge bg-warning text-dark ms-1">{{ partner_pending|length }}</span>
+                <span class="text-muted fw-normal">—— 你同意后才会进入教务审批</span>
+            </div>
+            <div class="table-responsive">
+                <table class="table table-sm table-hover align-middle mb-0">
+                    <thead class="table-light">
+                        <tr><th>发起人</th><th>他的课</th><th>涉及你的课</th><th>类型</th><th>操作</th></tr>
+                    </thead>
+                    <tbody>
+                        {% for p in partner_pending %}
+                        <tr>
+                            <td>{{ p.applicant_name or '-' }}</td>
+                            <td class="small">{{ p.original_text }}</td>
+                            <td class="small">{{ p.partner_entry_text or '（只请你代上，不用你换课）' }}</td>
+                            <td class="small">
+                                {% if p.exchange_kind == 'cover' %}
+                                <span class="badge bg-info text-dark">请人代课</span>
+                                {% else %}
+                                <span class="badge bg-primary">两人对调</span>
+                                {% if p.exchange_content_text %}
+                                <div class="text-muted">{{ p.exchange_content_text }}</div>
+                                {% endif %}
+                                {% endif %}
+                                {% if p.is_permanent %}
+                                <div class="text-muted">整学期</div>
+                                {% elif p.partner_swap_date and p.swap_date and p.partner_swap_date != p.swap_date %}
+                                <div class="text-muted">{{ p.swap_date }} ⇄ {{ p.partner_swap_date }}</div>
+                                {% elif p.swap_date %}
+                                <div class="text-muted">{{ p.swap_date }}</div>
+                                {% endif %}
+                            </td>
+                            <td>
+                                <button class="btn btn-sm btn-success btn-partner-agree" data-id="{{ p.id }}">
+                                    <i class="bi bi-check2"></i> 同意</button>
+                                <button class="btn btn-sm btn-outline-danger btn-partner-refuse" data-id="{{ p.id }}">
+                                    <i class="bi bi-x"></i> 拒绝</button>
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+        {% endif %}
+
+        {# ② 我提交的、还在待审的申请 #}
         {% if pending_swaps %}
         <div class="d-flex align-items-center mb-2">
             <span class="badge bg-warning text-dark me-2">{{ pending_swaps|length }}</span>
@@ -386,4 +446,40 @@
 })();
 </script>
 {% endif %}
+
+{# v1.19.47.14：工作台内直接确认 / 拒绝同事发起的换课、代课 #}
+<script>
+(function () {
+    var respondUrl = {{ url_for('academic.swap_partner_respond', swap_id=0)|tojson }};
+    var csrf = {{ csrf_token()|tojson }};
+    function respond(id, action, note) {
+        var url = respondUrl.replace('/0/', '/' + id + '/');
+        var body = new URLSearchParams();
+        body.set('action', action);
+        body.set('note', note || '');
+        body.set('csrf_token', csrf);
+        fetch(url, {
+            method: 'POST',
+            headers: {'Content-Type': 'application/x-www-form-urlencoded'},
+            body: body.toString()
+        }).then(function () { location.reload(); })
+          .catch(function () { alert('操作失败，请刷新后重试或到「调课管理」里处理'); });
+    }
+    document.querySelectorAll('.btn-partner-agree').forEach(function (btn) {
+        btn.addEventListener('click', function () {
+            if (confirm('确认同意这次换课？同意后申请将进入教务审批。')) {
+                respond(btn.dataset.id, 'agree', '');
+            }
+        });
+    });
+    document.querySelectorAll('.btn-partner-refuse').forEach(function (btn) {
+        btn.addEventListener('click', function () {
+            var note = prompt('请输入拒绝原因（会通知发起人）：');
+            if (note === null) { return; }
+            if (!note.trim()) { alert('拒绝必须填写原因'); return; }
+            respond(btn.dataset.id, 'refuse', note.trim());
+        });
+    });
+})();
+</script>
 {% endblock %}

@@ -1,4 +1,4 @@
-# StuLink v1.19.47.13 2026-10-10
+# StuLink v1.19.47.14 2026-10-10
 # 教师工作台：我的信息 / 今日课程 / 我的课表 / 我的业绩 / 手机号修改
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 import re
@@ -44,7 +44,11 @@ def index():
 
     entries, today_entries, achievements = [], [], []
     pending_swaps = []
+    partner_pending = []
     active_term = None
+    # 2026-10-13（v1.19.47.14）：调课入口挂到工作台 —— 能否申请由 academic.swap 决定，
+    # 菜单/按钮可见性与 perm_required 保持一致，避免"看得见、点了 403"。
+    can_swap = current_user.has_perm('academic.swap')
     if teacher:
         # 2026-10-10：课表改读 timetable.db 的 schedule_entries（与教务端「我的课表」同源）。
         # 旧表 academic.timetable_entries 已停用，此前读旧表导致本卡片恒为空。
@@ -99,8 +103,18 @@ def index():
                 'reason': sw.reason,
                 'created_at': sw.created_at,
             })
+        # 待**我**确认的换课 / 代课（同事发起、指定我配合的那些），工作台内直接处理
+        try:
+            partner_pending = swap_service.get_partner_pending(teacher.teacher_uid)
+        except Exception:   # 调课库异常不拖垮首页
+            db.session.rollback()
+            current_app.logger.exception('工作台待确认换课加载失败 uid=%s',
+                                         teacher.teacher_uid)
+            partner_pending = []
 
     return render_template('workbench/index.html', teacher=teacher,
+                           partner_pending=partner_pending,
+                           can_swap=can_swap,
                            entries=entries, today_entries=today_entries,
                            active_term=active_term,
                            achievements=achievements,

@@ -13,6 +13,12 @@
     /* 2026-10-10：加载出的课程列表加滚动条（课程多时不再把整页撑得很长），表头吸附 */
     .entry-scroll { max-height: 340px; overflow: auto; border: 1px solid #eef2f7; border-radius: 8px; }
     .entry-scroll thead th { position: sticky; top: 0; z-index: 2; background: #f8f9fa; }
+    /* 2026-10-13（v1.19.47.14）课程多时按班级分组 + 吸底操作栏，不再需要滚到页面底部 */
+    tr.grp-head td { background: #f1f5f9; font-size: 13px; }
+    tr.grp-head .grp-toggle { cursor: pointer; user-select: none; }
+    .bulk-bar { position: sticky; bottom: 0; z-index: 5; background: #fff;
+                border-top: 2px solid #2563eb; box-shadow: 0 -4px 14px rgba(0,0,0,.08);
+                padding: 10px 14px; border-radius: 10px 10px 0 0; }
 </style>
 {% endblock %}
 {% block content %}
@@ -76,6 +82,13 @@
                     {% for k in range(1, 8) %}<option value="{{ k }}" {% if f_weekday == k|string %}selected{% endif %}>{{ weekdays.get(k) }}</option>{% endfor %}
                 </select>
             </div>
+            <div class="col-6 col-md-3">
+                <label class="form-label small mb-1">只看第几节（可留空）</label>
+                <select id="fltPeriod" class="form-select form-select-sm" disabled>
+                    <option value="">全部节次</option>
+                    {% for p in periods %}<option value="{{ p.period_number }}">第{{ p.period_number }}节</option>{% endfor %}
+                </select>
+            </div>
             <div class="col-6 col-md-3 d-flex align-items-end">
                 <button type="button" class="btn btn-sm btn-primary w-100" id="btnLoad"><i class="bi bi-search"></i> 加载课程</button>
             </div>
@@ -101,6 +114,24 @@
     <div class="bulk-card">
         <h6 class="mb-3"><i class="bi bi-bullseye"></i> ② 统一调整到</h6>
         <div class="row g-3">
+            <div class="col-md-4">
+                <label class="form-label small mb-1">调整方式</label>
+                <select name="mode" id="mode" class="form-select form-select-sm">
+                    <option value="target">统一落到同一节（适合不同班的课）</option>
+                    <option value="offset">整体平移 N 节（各按自己的原节次挪）</option>
+                </select>
+            </div>
+            <div class="col-md-4" id="offsetWrap" style="display:none">
+                <label class="form-label small mb-1">平移几节</label>
+                <select name="period_offset" id="offsetSel" class="form-select form-select-sm">
+                    <option value="">请选择…</option>
+                    <option value="1">后移 1 节</option>
+                    <option value="2">后移 2 节</option>
+                    <option value="3">后移 3 节</option>
+                    <option value="-1">前移 1 节</option>
+                    <option value="-2">前移 2 节</option>
+                </select>
+            </div>
             <div class="col-6 col-md-3">
                 {# 2026-10-10：目标星期/节次改为选填——留空即沿用原值，只换教室或只调日期 #}
                 <label class="form-label small mb-1">目标星期</label>
@@ -135,9 +166,20 @@
                 <input name="reason" class="form-control form-control-sm" maxlength="200" required placeholder="如：期中考试安排 / 全年级教研活动">
             </div>
         </div>
-        <div class="mt-4 d-flex gap-2">
-            <button type="submit" class="btn btn-primary"><i class="bi bi-send"></i> 提交统一调课</button>
-            <a href="{{ url_for('academic.swap_page') }}" class="btn btn-outline-secondary">取消</a>
+    </div>
+
+    {# 吸底操作栏：课程再多也不用滚到页面最底部才找到提交按钮 #}
+    <div class="bulk-bar" id="bulkBar">
+        <div class="d-flex align-items-center justify-content-between flex-wrap gap-2">
+            <div class="small">
+                已选 <b id="barCount" class="text-primary">0</b> 门课
+                <span id="barInfo" class="text-muted ms-1">提交后合成 1 条统一调课记录，审批一次整批生效</span>
+            </div>
+            <div class="d-flex gap-2">
+                <button type="button" class="btn btn-sm btn-outline-secondary" id="btnClear">清空选择</button>
+                <a href="{{ url_for('academic.swap_page') }}" class="btn btn-sm btn-outline-secondary">取消</a>
+                <button type="submit" class="btn btn-sm btn-primary"><i class="bi bi-send"></i> 提交统一调课</button>
+            </div>
         </div>
     </div>
 </form>
@@ -189,33 +231,90 @@
                 $('#entryEmpty').text('当前生效学期' + (cfg.scheduleName ? '（' + cfg.scheduleName + '）' : '') + '在所选条件下没有课程：换个星期/班级，或确认该学期课表已导入。').show();
                 return;
             }
-            var html = '';
+            // 2026-10-13：按班级分组 —— 一整天的课动辄上百行，分组后可整班勾选 / 折叠
+            var groups = {}, order = [];
             entriesCache.forEach(function (e) {
-                html += '<tr class="entry-row" data-id="' + e.id + '" data-teacher="' + esc(e.teacher_uid || '') + '" data-class="' + esc(e.grade + e.class_name) + '">'
-                    + '<td><input type="checkbox" class="form-check-input row-chk" name="entry_ids" value="' + e.id + '"></td>'
-                    + '<td class="small">' + esc(e.weekday_text) + '第' + e.period_number + '节</td>'
-                    + '<td class="fw-semibold">' + esc(e.subject) + '</td>'
-                    + '<td class="small">' + esc(e.grade) + esc(e.class_name) + '</td>'
-                    + '<td class="small">' + esc(e.teacher_name || '-') + '</td>'
-                    + '<td class="small">' + esc(e.room || '') + '</td>'
-                    + '<td class="st-idle" data-st>—</td></tr>';
+                var k = String(e.grade || '') + String(e.class_name || '');
+                if (!groups[k]) { groups[k] = []; order.push(k); }
+                groups[k].push(e);
+            });
+            var html = '';
+            order.forEach(function (k) {
+                var list = groups[k];
+                html += '<tr class="grp-head" data-grp="' + esc(k) + '">'
+                    + '<td><input type="checkbox" class="form-check-input grp-chk" data-grp="' + esc(k) + '"></td>'
+                    + '<td colspan="6"><span class="grp-toggle"><i class="bi bi-chevron-down"></i> <b>' + esc(k) + '</b></span>'
+                    + ' <span class="text-muted small">（' + list.length + ' 节，可整班勾选）</span></td></tr>';
+                list.forEach(function (e) {
+                    html += '<tr class="entry-row" data-id="' + e.id + '" data-teacher="'
+                        + esc(e.teacher_uid || '') + '" data-class="' + esc(k) + '"'
+                        + ' data-period="' + e.period_number + '" data-weekday="' + e.weekday + '">'
+                        + '<td><input type="checkbox" class="form-check-input row-chk" name="entry_ids" value="' + e.id + '"></td>'
+                        + '<td class="small">' + esc(e.weekday_text) + '第' + e.period_number + '节</td>'
+                        + '<td class="fw-semibold">' + esc(e.subject) + '</td>'
+                        + '<td class="small">' + esc(e.grade) + esc(e.class_name) + '</td>'
+                        + '<td class="small">' + esc(e.teacher_name || '-') + '</td>'
+                        + '<td class="small">' + esc(e.room || '') + '</td>'
+                        + '<td class="st-idle" data-st>—</td></tr>';
+                });
             });
             $('#entryBody').html(html);
             $('#entryEmpty').hide();
             $('#entryTable').show();
+            $('#fltPeriod').prop('disabled', false).val('');
             updateSummary();
         }).fail(function () { $('#entryEmpty').text('加载失败').show(); });
     });
 
     $('#chkAll').on('change', function () {
-        $('.row-chk').prop('checked', $(this).is(':checked'));
+        $('.row-chk:visible').prop('checked', $(this).is(':checked'));
         updateSummary(); checkConflicts();
     });
     $(document).on('change', '.row-chk', function () { updateSummary(); checkConflicts(); });
 
+    // 组头：整班勾选
+    $(document).on('change', '.grp-chk', function () {
+        var g = $(this).data('grp'), on = $(this).is(':checked');
+        $('tr.entry-row[data-class="' + g + '"]:visible .row-chk').prop('checked', on);
+        updateSummary(); checkConflicts();
+    });
+    // 组头：折叠 / 展开该班
+    $(document).on('click', '.grp-toggle', function () {
+        var $tr = $(this).closest('tr'), g = $tr.data('grp');
+        $('tr.entry-row[data-class="' + g + '"]').toggle();
+        var $i = $(this).find('i');
+        $i.toggleClass('bi-chevron-down'); $i.toggleClass('bi-chevron-right');
+    });
+    // 只看第几节（一整天的课按节次筛，列表立刻变短）
+    $('#fltPeriod').on('change', function () {
+        var p = $(this).val();
+        $('tr.entry-row').each(function () {
+            $(this).toggle(!p || String($(this).data('period')) === String(p));
+        });
+        $('tr.grp-head').each(function () {
+            var g = $(this).data('grp');
+            $(this).toggle($('tr.entry-row[data-class="' + g + '"]:visible').length > 0);
+        });
+        updateSummary();
+    });
+    // 调整方式：统一落到同一节 / 整体平移 N 节
+    function syncMode() {
+        var off = $('#mode').val() === 'offset';
+        $('#offsetWrap').toggle(off);
+        $('#tgtPeriod').parent().toggle(!off);
+        $('#offsetSel').prop('required', off);
+        checkConflicts();
+    }
+    $('#mode, #offsetSel').on('change', syncMode);
+    $('#btnClear').on('click', function () {
+        $('.row-chk, .grp-chk, #chkAll').prop('checked', false);
+        updateSummary(); checkConflicts();
+    });
+
     function selectedRows() { return $('.row-chk:checked').closest('tr'); }
     function updateSummary() {
         var n = selectedRows().length;
+        $('#barCount').text(n);                 // 吸底栏同步已选数量
         if (n) { $('#selSummary').show().html('已选择 <b>' + n + '</b> 条课程，将统一调整到指定时段；' +
             '提交后合成 <b>1 条</b>统一调课记录，审批一次整批生效。'); }
         else { $('#selSummary').hide(); }
@@ -227,34 +326,50 @@
         clearTimeout(debounceTimer);
         debounceTimer = setTimeout(runCheck, 350);
     }
+    // 每行的实际目标格：平移模式 = 自己原节次 + offset
+    function targetOf($tr) {
+        if ($('#mode').val() === 'offset') {
+            var off = parseInt($('#offsetSel').val(), 10) || 0;
+            return { w: $('#tgtWeekday').val() || $tr.data('weekday'),
+                     p: parseInt($tr.data('period'), 10) + off };
+        }
+        return { w: $('#tgtWeekday').val(), p: $('#tgtPeriod').val() };
+    }
     function runCheck() {
-        var w = $('#tgtWeekday').val(), p = $('#tgtPeriod').val();
+        var mode = $('#mode').val();
         var $rows = selectedRows();
         $rows.find('[data-st]').attr('class', 'st-idle').data('st', '—').text('—');
-        if (!w || !p || !$rows.length) { return; }
+        if (!$rows.length) { $('#selSummary').removeClass('text-danger'); return; }
+        if (mode === 'offset' && !$('#offsetSel').val()) { return; }
+        if (mode === 'target' && (!$('#tgtWeekday').val() || !$('#tgtPeriod').val())) { return; }
         $rows.each(function () {
             var $tr = $(this), id = $tr.data('id'), $st = $tr.find('[data-st]');
+            var t = targetOf($tr);
             $st.attr('class', 'st-idle').text('检测中…');
             $.getJSON(cfg.slotsUrl, { entry_id: id }).done(function (res) {
                 var slots = (res && res.data && res.data.slots) || [];
                 var hit = null;
                 for (var i = 0; i < slots.length; i++) {
-                    if (String(slots[i].weekday) === String(w) && String(slots[i].period_number) === String(p)) { hit = slots[i]; break; }
+                    if (String(slots[i].weekday) === String(t.w)
+                        && String(slots[i].period_number) === String(t.p)) { hit = slots[i]; break; }
                 }
                 if (!hit) { $st.attr('class', 'st-idle').text('—'); return; }
                 if (hit.available) { $st.attr('class', 'st-ok').text('✓ 可用'); }
                 else { $st.attr('class', 'st-bad').text('✕ ' + (hit.conflict_desc || '冲突')); }
             }).fail(function () { $st.attr('class', 'st-idle').text('—'); });
         });
-        // 批量内部提示：同班 / 同教师选中多条到同一时段
-        var seenClass = {}, seenTeacher = {}, warn = [];
-        $rows.each(function () {
-            var c = $(this).data('class'), t = $(this).data('teacher');
-            if (seenClass[c]) { warn.push('同班「' + c + '」选中多条到同一时段，将冲突'); }
-            if (t && seenTeacher[t]) { warn.push('同教师选中多条到同一时段，将冲突'); }
-            seenClass[c] = 1; if (t) { seenTeacher[t] = 1; }
-        });
-        if (warn.length) { $('#selSummary').addClass('text-danger').html('⚠ ' + warn.join('；')); }
+        // 批内互撞提示仅对「统一落到同一节」有意义：平移各自错开，不会撞在一起
+        if (mode === 'target') {
+            var seenClass = {}, seenTeacher = {}, warn = [];
+            $rows.each(function () {
+                var c = $(this).data('class'), t = $(this).data('teacher');
+                if (seenClass[c]) { warn.push('同班「' + c + '」选中多条到同一时段，将冲突'); }
+                if (t && seenTeacher[t]) { warn.push('同教师选中多条到同一时段，将冲突'); }
+                seenClass[c] = 1; if (t) { seenTeacher[t] = 1; }
+            });
+            if (warn.length) { $('#selSummary').addClass('text-danger').html('⚠ ' + warn.join('；')); }
+            else { $('#selSummary').removeClass('text-danger'); }
+        }
     }
     $('#tgtWeekday, #tgtPeriod').on('change', checkConflicts);
 
@@ -267,6 +382,7 @@
     }
     $('#swPermanent').on('change', syncPermanent);
     syncPermanent();
+    syncMode();
 
     $('#bulkForm').on('submit', function (e) {
         if (!selectedRows().length) { e.preventDefault(); alert('请至少勾选一条课程'); return; }

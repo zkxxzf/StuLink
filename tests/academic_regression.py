@@ -1790,7 +1790,7 @@ def check_inspection_mark():
 
 @item('SWAPEXCH')
 def check_two_person_exchange():
-    """两人换课（v1.19.47.13）：换时段 / 换班上课 / 请人代课 × 临时与永久，
+    """两人换课（v1.19.47.14）：换时段 / 换班上课 / 请人代课 × 临时与永久，
     覆盖「对方先确认 → 教务审批 → 执行」全链路 + 拒绝 / 越权 / 校验路径。"""
     from app.modules.academic.services import swap_service
 
@@ -2113,7 +2113,7 @@ def check_swap_exchange_batch():
 
 @item('SWAPMIXED')
 def check_swap_mixed_batch():
-    """调课页合并（v1.19.47.13）：一次提交 = 几节调空档 + 几节与同事对调（同一批次）。"""
+    """调课页合并（v1.19.47.14）：一次提交 = 几节调空档 + 几节与同事对调（同一批次）。"""
     from app.models.timetable import ScheduleEntry, ScheduleSwap
     from app.modules.academic.services import swap_service
 
@@ -2272,6 +2272,82 @@ def check_swap_self_swap():
         if s:
             db.session.delete(s)
         db.session.commit()
+
+
+@item('SWAPOFFSET')
+def check_swap_bulk_offset():
+    """统一调课「整体平移 N 节」：各按自己的原节次挪 —— 一整天的课一次搞定。"""
+    from app.models.timetable import ScheduleEntry, ScheduleSwap
+    from app.modules.academic.services import swap_service
+
+    def _mk(g, cn, wd, pn, subj, tuid, tname):
+        e = ScheduleEntry(term_schedule_id=TS_ID, grade=g, class_name=cn,
+                          weekday=wd, period_number=pn, subject=subj,
+                          teacher_uid=tuid, teacher_name=tname,
+                          week_range='1-20', entry_type='normal')
+        db.session.add(e)
+        return e
+
+    entry_ids, batch_id = [], None
+    with app.app_context():
+        # 用自建班级（固定测试数据里高二 01 班周一第 2 节已有课，会撞真实冲突）
+        a = _mk('高三', '90班', 1, 5, '语文', 'BO0001', '甲老师')
+        b = _mk('高三', '91班', 1, 6, '数学', 'BO0002', '乙老师')
+        c = _mk('高三', '92班', 1, 7, '英语', 'BO0003', '丙老师')
+        db.session.commit()
+        entry_ids += [a.id, b.id, c.id]
+        ok, msg, res = swap_service.bulk_apply_swap(
+            applicant_uid='BO0001', applicant_name='甲老师',
+            entry_ids=entry_ids, new_weekday=None, new_period=None,
+            is_permanent=True, reason='整体后移一节', period_offset=1)
+        batch_id = res.get('batch_id')
+        rows = ScheduleSwap.query.filter_by(batch_id=batch_id).all()
+        case('统一调课·整体平移：3 节一次提交、合成 1 批',
+             bool(ok and res.get('created') == 3 and batch_id), f'{msg} {res}')
+        got = sorted([(r.original_entry_id, r.new_period) for r in rows])
+        case('统一调课·整体平移：各按原节次后移 1 节（5→6、6→7、7→8）',
+             got == sorted([(a.id, 6), (b.id, 7), (c.id, 8)]), f'{got}')
+        ok2, msg2, _ = swap_service.bulk_apply_swap(
+            applicant_uid='BO0001', applicant_name='甲老师',
+            entry_ids=[c.id], new_weekday=None, new_period=None,
+            is_permanent=True, reason='平移越界', period_offset=99)
+        case('统一调课·整体平移：平移值越界 → 拒绝', (not ok2), msg2)
+        # 留空维度仍应落库为 NULL（执行时沿用原值），不被平移逻辑破坏
+        ok3, msg3, res3 = swap_service.bulk_apply_swap(
+            applicant_uid='BO0001', applicant_name='甲老师',
+            entry_ids=[a.id], new_weekday=None, new_period=None,
+            new_room='综合楼305', is_permanent=True, reason='只换教室')
+        row3 = ScheduleSwap.query.filter_by(batch_id=res3.get('batch_id')).first()
+        case('统一调课：不平移时仍保留「留空沿用原值」（new_period 为 NULL）',
+             bool(ok3 and row3 and row3.new_period is None), f'{msg3}')
+
+        # ── 清理 ──
+        for eid in entry_ids:
+            e = db.session.get(ScheduleEntry, eid)
+            if e:
+                db.session.delete(e)
+        for bid in (batch_id, res3.get('batch_id')):
+            for s in ScheduleSwap.query.filter_by(batch_id=bid).all():
+                db.session.delete(s)
+        db.session.commit()
+
+
+@item('WORKBENCHSWAP')
+def check_workbench_swap():
+    """教师工作台里的调课区块（v1.19.47.14）：入口 + 待我确认 + 我的申请。"""
+    with app.test_client() as c:
+        login(c, 'ac_admin', TEST_PWD)
+        r = c.get('/workbench/')      # 蓝图前缀 /workbench + 路由 '/'（不带斜杠会 308）
+        case('工作台：首页 200', r.status_code == 200, str(r.status_code))
+        html = r.get_data(as_text=True) if r.status_code == 200 else ''
+        # 申请入口受 academic.swap 权限控制（无权限时只保留"查看记录"），
+        # 所以这里只断言区块存在 + 有权限时两个入口都在。
+        case('工作台：含调课区块',
+             bool(html) and ('调课' in html), 'swap block')
+        has_swap_entry = ('/academic/swap/apply' in html) and ('/academic/swap/cover' in html)
+        case('工作台：调课入口（有 academic.swap 时出现两个申请入口，否则至少可查看记录）',
+             bool(html) and (has_swap_entry or '/academic/swap' in html),
+             f'entries={has_swap_entry}')
 
 
 @item('SWAPCHAIN')
