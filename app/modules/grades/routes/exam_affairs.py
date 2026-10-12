@@ -21,7 +21,8 @@ from app.extensions import db
 from app.models import Student
 from app.models.grades import (ExamAffair, AffairRoom, AffairRoomLib, AffairStudent,
                                Exam, AffairTeacher, AffairSchedule,
-                               AffairInvigilator, AffairInvigilation)  # v1.12.1 加考场房间库；v1.12.2 移除成绩关联查询依赖
+                               AffairInvigilator, AffairInvigilation,
+                               SUBJECTS)  # 2026-10-13：时间表科目下拉用科目字典
 #   v1.19.47.20 加环节④⑤⑥：任课核对 / 考试时间表 / 监考编排
 from app.modules.grades import bp
 from app.utils.decorators import perm_required
@@ -394,6 +395,7 @@ def affair_detail(aid):
                            arranged_sorted=arranged_sorted,
                            room_subject_options=room_subject_options,
                            mode_label=MODE_LABEL, invig_stat=invig_stat,
+                           subjects=SUBJECTS,
                            stats=stats, sel_options=sel_options)
 
 

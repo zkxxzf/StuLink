@@ -41,16 +41,9 @@
         .sidebar .aca-group[aria-expanded="true"] .aca-caret { transform: rotate(180deg); }
         .sidebar .aca-group[aria-expanded="true"] { color: #e2e8f0; }
         .main-content { margin-left: var(--sidebar-width); padding: 20px 24px 24px; min-height: 100vh; }
-        /* 2026-10-12 UI 审计 H1：考试态下 .sidebar-float 是 position:fixed 的浮层卡片
-           （left:10px + width:sidebar-20 = 覆盖到主内容左侧约 230px），
-           而各页面第一屏元素（考试名标题/badge/返回按钮）恰好落在该区域 →
-           白底浮层会压在内容上（窗口较矮、浮层垂直居中时尤其明显）。
-           这里给考试态的主内容区加左内边距补偿，让内容起点退到浮层右侧之外。 */
-        body.exam-ctx .main-content { padding-left: 252px; }
-        @media (max-width: 992px) {
-            /* 窄屏侧栏本就收起，不再补偿 */
-            body.exam-ctx .main-content { padding-left: 16px; }
-        }
+        /* 2026-10-13：考试态侧栏已改为**贴左全高**（与常规侧栏同位同宽），
+           main-content 的 margin-left:220px 直接生效，原先给浮层让位的
+           padding-left:252px 补偿不再需要 —— 那正是"侧栏与内容之间大空白"的来源。 */
         .navbar { z-index: 200; }
         .stat-card { border: none; border-radius: 10px; box-shadow: 0 1px 3px rgba(0,0,0,.08); }
         .stat-card .stat-icon { width: 48px; height: 48px; border-radius: 10px; display: flex; align-items: center; justify-content: center; font-size: 22px; }
@@ -125,13 +118,13 @@
         }
         /* ===== v1.19.0 考试态：左侧深色侧栏 → 独立悬浮卡片（风格参考轻量描边菜单） ===== */
         .sidebar.sidebar-float {
-            /* v1.19.47.20 垂直居中：top:50% + translateY(-50%)，不再贴顶也不掉底 */
-            top: 50%; transform: translateY(-50%); bottom: auto;
-            left: 10px;
-            width: calc(var(--sidebar-width) - 20px);
-            max-height: calc(100vh - 140px);
-            background: #fff; border: 1px solid #eef2f7; border-radius: 12px;
-            box-shadow: 0 8px 24px rgba(15, 23, 42, .10);
+            /* 2026-10-13：恢复**贴顶落底全高** —— 原先垂直居中浮卡（top:50% + max-height）
+               上不到顶、下不到底，和主内容之间还空一大块（用户实测反馈）。
+               保留白底卡片外观，但贴左占满视口高，宽度与常规侧栏一致。 */
+            top: 56px; bottom: 0; transform: none;
+            left: 0; width: var(--sidebar-width); max-height: none;
+            background: #fff; border: none; border-radius: 0;
+            box-shadow: 2px 0 8px rgba(15, 23, 42, .06);
             /* v1.19.47.20 横向间距统一：卡片左右各 8px、下面每一行左右各 10px，
                整张卡「左 18px = 右 18px」；旧版 efn-item 带 2px 左描边（左 14 / 右 12）不对称 */
             /* v1.19.47.20 overflow-x: hidden：卡片只纵向滚动，杜绝底部横向滚动条 */

@@ -519,7 +519,24 @@
                                value="{{ s.exam_date.strftime('%Y-%m-%d') if s.exam_date else '' }}"></td>
                     <td><input type="time" class="form-control form-control-sm sc-start" value="{{ s.start_time or '' }}"></td>
                     <td><input type="time" class="form-control form-control-sm sc-end" value="{{ s.end_time or '' }}"></td>
-                    <td><input class="form-control form-control-sm sc-subj" value="{{ s.subject or '' }}"></td>
+                    <td>
+                        {# 2026-10-13：科目从自由文本改为**多选下拉**（科目字典勾选，支持一场多科如四选二） #}
+                        {% set _picked = (s.subject or '').replace('，', '、').replace(',', '、').split('、') %}
+                        <div class="dropdown">
+                            <button type="button" class="btn btn-outline-secondary btn-sm py-0 subj-btn text-truncate"
+                                    data-bs-toggle="dropdown" style="max-width:132px"
+                                    title="点开勾选考试科目（可多选）">{{ s.subject or '选科目' }}</button>
+                            <div class="dropdown-menu px-2" style="min-width:120px;max-height:280px;overflow:auto">
+                                {% for sub in subjects %}
+                                <label class="dropdown-item-text form-check mb-0" style="font-size:.85rem">
+                                    <input type="checkbox" class="form-check-input mt-0 me-1 subj-cb" value="{{ sub }}"
+                                           {% if sub in _picked %}checked{% endif %}>{{ sub }}
+                                </label>
+                                {% endfor %}
+                            </div>
+                        </div>
+                        <input type="hidden" class="sc-subj" value="{{ s.subject or '' }}">
+                    </td>
                     <td><input class="form-control form-control-sm sc-sel" value="{{ s.selection or '' }}"></td>
                     <td><input class="form-control form-control-sm sc-note" value="{{ s.note or '' }}"></td>
                     <td class="text-nowrap">
@@ -568,6 +585,16 @@
                             <i class="bi bi-upload"></i> 导入其他监考员名单
                             <input type="file" accept=".xlsx,.xls" class="d-none" onchange="importOthers(this)">
                         </label>
+                        {# 2026-10-13：排除名单 —— 不监考的人 / 某人不监考某一场 #}
+                        <hr class="my-2">
+                        <div class="text-muted small mb-1"><i class="bi bi-slash-circle"></i> 排除名单</div>
+                        <div class="row g-1 mb-1">
+                            <div class="col-5"><select class="form-select form-select-sm" id="exclWho"></select></div>
+                            <div class="col-5"><select class="form-select form-select-sm" id="exclSch"></select></div>
+                            <div class="col-2"><button class="btn btn-outline-secondary btn-sm w-100 py-0"
+                                                       onclick="addExclude()">加</button></div>
+                        </div>
+                        <div id="exclBox"></div>
                     </div>
                 </div>
             </div>
@@ -760,6 +787,7 @@
 {% block extra_js %}
 <script>
 const AID = {{ affair.id }};
+const _SUBJECTS = {{ subjects | tojson }};   // 科目字典（时间表科目多选下拉用）
 function csrf(){ return csrfToken; }
 
 // v1.12.1 记忆当前 tab：切换时写 URL hash，刷新后自动恢复（避免操作后跳回学生名单）
@@ -1326,6 +1354,11 @@ function syncAffairTeachers(){
 // ---------- 环节⑤ 考试时间表 ----------
 function importSchedules(input){
     if(!input.files.length) return;
+    // 2026-10-13：导入完成会刷新页面 —— 有未点「存」的行时先提醒，避免无声丢内容
+    if (document.querySelector('#schedBody tr[data-sid=""]')
+        && !confirm('导入完成会刷新页面，还没点「存」的场次内容会丢失。继续导入？')) {
+        input.value = ''; return;
+    }
     var fd = new FormData(); fd.append('file', input.files[0]);
     var msg = document.getElementById('schedMsg');
     msg.className='small text-muted'; msg.textContent='导入中…';
@@ -1339,17 +1372,33 @@ function importSchedules(input){
         });
 }
 function addScheduleRow(){
+    var cbs = (_SUBJECTS || []).map(function(s){
+        return '<label class="dropdown-item-text form-check mb-0" style="font-size:.85rem">'
+            + '<input type="checkbox" class="form-check-input mt-0 me-1 subj-cb" value="' + s + '">' + s + '</label>';
+    }).join('');
     var h = '<tr data-sid="">'
         + '<td><input type="date" class="form-control form-control-sm sc-date"></td>'
         + '<td><input type="time" class="form-control form-control-sm sc-start"></td>'
         + '<td><input type="time" class="form-control form-control-sm sc-end"></td>'
-        + '<td><input class="form-control form-control-sm sc-subj"></td>'
+        + '<td><div class="dropdown"><button type="button" class="btn btn-outline-secondary btn-sm py-0 subj-btn text-truncate" '
+        + 'data-bs-toggle="dropdown" style="max-width:132px">选科目</button>'
+        + '<div class="dropdown-menu px-2" style="min-width:120px;max-height:280px;overflow:auto">' + cbs + '</div></div>'
+        + '<input type="hidden" class="sc-subj" value=""></td>'
         + '<td><input class="form-control form-control-sm sc-sel"></td>'
         + '<td><input class="form-control form-control-sm sc-note"></td>'
         + '<td class="text-nowrap"><button class="btn btn-outline-primary btn-sm py-0" onclick="saveSchedule(this)">存</button> '
         + '<button class="btn btn-outline-danger btn-sm py-0" onclick="delSchedule(this)">删</button></td></tr>';
     document.getElementById('schedBody').insertAdjacentHTML('beforeend', h);
 }
+// 科目多选：勾选即更新按钮文本与隐藏值（「、」连接，与环节⑥同科回避的拆分口径一致）
+document.getElementById('schedBody').addEventListener('change', function(e){
+    if (!e.target.classList.contains('subj-cb')) return;
+    var tr = e.target.closest('tr');
+    var picked = Array.prototype.slice.call(tr.querySelectorAll('.subj-cb:checked'))
+        .map(function(c){ return c.value; });
+    tr.querySelector('.sc-subj').value = picked.join('、');
+    tr.querySelector('.subj-btn').textContent = picked.length ? picked.join('+') : '选科目';
+});
 function saveSchedule(btn){
     var tr = btn.closest('tr');
     var fd = new FormData();
@@ -1360,8 +1409,24 @@ function saveSchedule(btn){
     fd.append('subject', tr.querySelector('.sc-subj').value.trim());
     fd.append('selection', tr.querySelector('.sc-sel').value.trim());
     fd.append('note', tr.querySelector('.sc-note').value.trim());
+    // 2026-10-13：保存改为**局部更新**（不再 location.reload）——
+    // 刷新会把其他行还没保存的内容一起冲掉（用户实测反馈）。
+    // 新增行保存后把返回 id 写回行，后续再点「存」就是更新同一条。
     fetch('/grades/affairs/'+AID+'/schedules/save', {method:'POST', body:fd, headers:{'X-CSRFToken':csrf()}})
-        .then(r=>r.json()).then(d=>{ if(d.ok){ location.reload(); } else alert(d.msg||'保存失败'); });
+        .then(r=>r.json()).then(d=>{
+            var msg = document.getElementById('schedMsg');
+            if (!d.ok){ msg.className = 'small text-danger'; msg.textContent = d.msg || '保存失败'; return; }
+            if (d.id) tr.dataset.sid = d.id;
+            btn.classList.replace('btn-outline-primary', 'btn-success');
+            btn.textContent = '已存';
+            setTimeout(function(){
+                btn.classList.replace('btn-success', 'btn-outline-primary');
+                btn.textContent = '存';
+            }, 1500);
+            msg.className = 'small text-success';
+            msg.textContent = '该场次已保存，其他行未保存的内容不受影响';
+            setTimeout(function(){ msg.textContent = ''; }, 3000);
+        });
 }
 function delSchedule(btn){
     var tr = btn.closest('tr');
@@ -1387,13 +1452,85 @@ function renderInvig(){
 }
 function renderPool(d){
     var t = d.pool.filter(p=>p.source==='teacher');
+    // 2026-10-13：徽章上的「不监考」开关 —— 点了即整批次不参与监考（排除名单）
     document.getElementById('poolTeachers').innerHTML = t.length
-        ? t.map(p=>'<span class="badge bg-primary-subtle text-primary-emphasis border me-1 mb-1" title="任教：'+(p.subjects.join('、')||'—')+'">'+escHtml(p.name)+'</span>').join('')
+        ? t.map(p=>poolBadge(p, d)).join('')
         : '<span class="text-muted small">暂无（请先完成环节④）</span>';
     document.getElementById('poolOthers').innerHTML = d.others.length
         ? d.others.map(o=>'<span class="badge bg-warning-subtle text-warning-emphasis border me-1 mb-1">'+escHtml(o.name)
-            + (o.subject?('·'+escHtml(o.subject)):'')+' <a href="javascript:;" class="text-danger" onclick="delOther('+o.id+')">×</a></span>').join('')
+            + (o.subject?('·'+escHtml(o.subject)):'')
+            + ' <a href="javascript:;" class="text-danger" onclick="delOther('+o.id+')">×</a>'
+            + ' <a href="javascript:;" class="small" onclick="toggleExclude(' + "'" + escHtml(o.name) + "'" + ', 0)">'
+            + (isExcluded(d, o.name, 0) ? '恢复' : '不监考') + '</a></span>').join('')
         : '<span class="text-muted small">暂无</span>';
+    renderExcludes(d);
+}
+function poolBadge(p, d){
+    var ex = !!p.excluded, n = (d.load||{})[p.name] || 0;
+    var cls = ex ? 'bg-light text-muted border text-decoration-line-through'
+                 : 'bg-primary-subtle text-primary-emphasis border';
+    var tip = '任教：' + (p.subjects.join('、') || '—') + '｜已排 ' + n + ' 格';
+    return '<span class="badge ' + cls + ' me-1 mb-1" title="' + escHtml(tip) + '">'
+        + escHtml(p.name) + (n ? ('<span class="ms-1 small">(' + n + ')</span>') : '')
+        + ' <a href="javascript:;" class="small" onclick="toggleExclude(' + "'" + escHtml(p.name) + "'" + ', 0)">'
+        + (ex ? '恢复' : '不监考') + '</a></span>';
+}
+function isExcluded(d, name, sid){
+    return (d.excludes || []).some(e => e.name === name && (e.schedule_id || 0) === (sid || 0));
+}
+function toggleExclude(name, sid){
+    var fd = new FormData();
+    fd.append('name', name);
+    if (sid) fd.append('schedule_id', sid);
+    var d0 = _invigData || {excludes: []};
+    if (isExcluded(d0, name, sid || 0)) {
+        var row = (d0.excludes || []).find(e => e.name === name && (e.schedule_id || 0) === (sid || 0));
+        var fd2 = new FormData(); fd2.append('id', row.id);
+        fetch('/grades/affairs/'+AID+'/invig/exclude/delete', {method:'POST', body:fd2, headers:{'X-CSRFToken':csrf()}})
+            .then(r=>r.json()).then(d=>{ if(d.ok) loadInvig(); else alert(d.msg||'失败'); });
+        return;
+    }
+    fetch('/grades/affairs/'+AID+'/invig/exclude', {method:'POST', body:fd, headers:{'X-CSRFToken':csrf()}})
+        .then(r=>r.json()).then(d=>{ if(d.ok) loadInvig(); else alert(d.msg||'失败'); });
+}
+// 排除名单面板：整批不监考 + 「某人不监考某一场」
+function renderExcludePickers(d){
+    var who = document.getElementById('exclWho'), sch = document.getElementById('exclSch');
+    if (!who || !sch) return;
+    var keepWho = who.value, keepSch = sch.value;
+    who.innerHTML = (d.pool || []).map(p =>
+        '<option value="' + escHtml(p.name) + '">' + escHtml(p.name) + '</option>').join('');
+    sch.innerHTML = '<option value="0">整批次不监考</option>' + (d.schedules || []).map(s =>
+        '<option value="' + s.id + '">' + escHtml((s.date ? s.date + ' ' : '') + (s.subject || '')) + '</option>').join('');
+    if (keepWho) who.value = keepWho;
+    if (keepSch) sch.value = keepSch;
+}
+function addExclude(){
+    var who = document.getElementById('exclWho'), sch = document.getElementById('exclSch');
+    if (!who || !who.value) { alert('请选择老师'); return; }
+    var sid = parseInt(sch.value, 10) || 0;
+    toggleExclude(who.value, sid);
+}
+function renderExcludes(d){
+    renderExcludePickers(d);
+    var box = document.getElementById('exclBox');
+    if (!box) return;
+    var rows = d.excludes || [];
+    if (!rows.length){
+        box.innerHTML = '<div class="text-muted small">暂无排除（在上方教师池点「不监考」可整批排除）</div>';
+        return;
+    }
+    var schMap = {};
+    (d.schedules || []).forEach(s => { schMap[s.id] = (s.date ? s.date + ' ' : '') + (s.subject || ''); });
+    box.innerHTML = rows.map(e =>
+        '<span class="badge bg-light text-dark border me-1 mb-1">' + escHtml(e.name)
+        + '：' + (e.schedule_id ? ('不监考「' + escHtml(schMap[e.schedule_id] || ('#' + e.schedule_id)) + '」') : '整批次不监考')
+        + ' <a href="javascript:;" class="text-danger" onclick="delExclude(' + e.id + ')">×</a></span>').join('');
+}
+function delExclude(id){
+    var fd = new FormData(); fd.append('id', id);
+    fetch('/grades/affairs/'+AID+'/invig/exclude/delete', {method:'POST', body:fd, headers:{'X-CSRFToken':csrf()}})
+        .then(r=>r.json()).then(d=>{ if(d.ok) loadInvig(); else alert(d.msg||'失败'); });
 }
 function renderInvigTable(d){
     var thead = document.querySelector('#invigTable thead');
@@ -1465,7 +1602,21 @@ function autoInvig(){
         .then(r=>r.json()).then(d=>{
             if(!d.ok){ msg.className='small text-danger'; msg.textContent=d.msg||'编排失败'; return; }
             msg.className='small text-success';
-            msg.textContent='编排完成：'+d.schedules+' 场 × '+d.rooms+' 考场 × '+d.slots+' 人 = '+d.rows+' 格';
+            // 2026-10-13：编排结果说清楚「填满多少 / 缺口多少 / 每人几场」
+            var txt = '编排完成：'+d.schedules+' 场 × '+d.rooms+' 考场 × '+d.slots+' 人，'
+                    + '已排 '+d.filled+'/'+d.total+' 格';
+            var ld = d.load || {}, ks = Object.keys(ld);
+            if (ks.length){
+                var vals = ks.map(k=>ld[k]);
+                txt += '；每人 '+Math.min.apply(null,vals)+'~'+Math.max.apply(null,vals)+' 场'
+                     + '（共 '+ks.length+' 人有安排）';
+            }
+            if (d.gap_count){
+                msg.className='small text-warning';
+                txt += '；⚠ 缺 '+d.gap_count+' 格排不下（' + ((d.gaps&&d.gaps[0]) ? d.gaps[0].reason : '无可用教师')
+                     + '）—— 请增加监考员或取消部分排除';
+            }
+            msg.textContent = txt;
             loadInvig();
         });
 }

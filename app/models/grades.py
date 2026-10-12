@@ -837,3 +837,31 @@ class AffairInvigilation(db.Model):
                             name='uq_affair_invigilation'),
         db.Index('idx_affair_invig_affair', 'affair_id'),
     )
+
+
+class AffairInvigExclude(db.Model):
+    """环节⑥ 监考**排除名单**（2026-10-13 新增）
+
+    两类：
+      - `schedule_id IS NULL` → 这个老师**整批次不监考**（产假/外出/身体原因等）
+      - `schedule_id = 某场次` → 这个老师**不监考指定的这一场**（如当天另有工作、
+        或有该科学生需回避之外的个人原因）
+
+    排除对**自动编排**与**手动指派**同时生效；被排除的人仍留在教师池里显示（划掉），
+    便于随时恢复。校外/无账号监考员没有 user_id，故以 `name` 为准（批次内姓名唯一）。
+    """
+    __bind_key__ = 'grades'
+    __tablename__ = 'affair_invig_excludes'
+
+    id = db.Column(db.Integer, primary_key=True)
+    affair_id = db.Column(db.Integer, nullable=False)
+    name = db.Column(db.String(50), nullable=False)
+    user_id = db.Column(db.Integer)                       # 可空（无账号者）
+    schedule_id = db.Column(db.Integer)                   # 空 = 整批次不监考
+    note = db.Column(db.String(100))
+    created_at = db.Column(db.DateTime, default=datetime.now)
+
+    __table_args__ = (
+        db.Index('idx_affair_invig_ex_affair', 'affair_id'),
+        db.Index('idx_affair_invig_ex_sch', 'affair_id', 'schedule_id'),
+    )

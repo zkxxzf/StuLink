@@ -32,6 +32,7 @@ ALLOWED_TABLES = {
     'form_submissions',     # 提交归属轮次列迁移（同上）
     'timetables',           # 旧版课表下线删表（migrate_drop_legacy_timetable_20261010.py）
     'timetable_entries',    # 旧课表明细删表（同上）
+    'affair_invig_excludes',  # 监考排除名单建表（migrate_affair_invig_exclude_20261013.py）
 }
 
 
