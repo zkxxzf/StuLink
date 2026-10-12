@@ -164,6 +164,11 @@ def global_compare_report(exam_id, direction=''):
 
     # 行集合：数字班（过滤 不分班/离校 等非教学班），保持班号顺序
     classes = numeric_classes(data.classes)
+    # v1.19.43.2 方向下拉的**完整**可选集：先按全部班级算出各方向，再按 direction
+    # 过滤生成展示分组。否则选定某方向后返回值里只剩该方向，前端据此重建下拉
+    # 就会丢掉另一个方向（用户反馈的 bug）。
+    all_dirs = sorted({_row_dir(data, cls) for cls in classes},
+                      key=lambda x: (_DIR_ORDER.get(x, 3), x))
     by_dir = {}
     for cls in classes:
         d = _row_dir(data, cls)
@@ -238,7 +243,8 @@ def global_compare_report(exam_id, direction=''):
         # 可选层名（高→低）+ 默认勾选（211/特控/本科）；页面用复选框控制显示列
         'layers': layers,
         'default_lines': default_lines,
-        'directions': [g['key'] for g in groups if g['key'] != 'all'],
+        # 方向下拉用**完整**可选集（不随当前筛选变化，避免选完一个就丢另一个）
+        'directions': [d for d in all_dirs if d],
         'groups': groups,
         'grand': grand,
         # 分批导入缺科提示（总分＝已导入科目合计，口径不完整）
