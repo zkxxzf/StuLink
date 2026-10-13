@@ -3,7 +3,7 @@
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
 [![Python](https://img.shields.io/badge/python-3.11+-green.svg)](https://python.org)
 [![Flask](https://img.shields.io/badge/flask-3.x-lightgrey.svg)](https://flask.palletsprojects.com/)
-[![Version](https://img.shields.io/badge/version-1.19.47.27-orange.svg)](https://gitee.com/zkxxzf/StuLink)
+[![Version](https://img.shields.io/badge/version-1.19.47.28-orange.svg)](https://gitee.com/zkxxzf/StuLink)
 
 面向中学的综合学生管理平台，采用 **双站点 + 多模块 + 一模块一库** 的故障隔离架构：
 
@@ -301,6 +301,7 @@ StuLink/
 
 | 版本 | 日期 | 亮点 |
 |---|---|---|
+| **1.19.47.28** | 2026-10-13 | **权限体系文档**（新增《权限体系说明》：权限模型 / 41 子功能 56 权限点全清单 / 12 身份矩阵 / 敏感字段字段级权限 / 数据范围口径）· 修复教务权限文档 28 处失效链接 · 管理员组种子补漏列的 `academic.edit` |
 | **1.19.47.27** | 2026-10-13 | **`dormitory.assign` 权限接线**（15 条分配类路由脱离 manage，四档语义落地）· 宿舍总览图表**本地化**（去公网 CDN，离线可显示） |
 | **1.19.47.26** | 2026-10-13 | **敏感字段字段级权限**：身份证号 / 联系电话 / 教师手机号新增「查看」权限点（standalone），页面展示维度统一脱敏，导出需「查看+导出」双权限；**权限最小化重排**（年级长/班主任收掉敏感导出与批量导入/跨班调动）；数据范围收口（批量删除越权、宿舍统计 fail-open） |
 | **1.19.47.25** | 2026-10-13 | **德育奖惩模块**（含附件）· **全站浅色/深色主题切换** · MCP 收敛为**成绩分析只读版**（12 工具 + 细粒度授权）· 教务工作台实时 KPI · 调课**两人换课** · 监考**排除名单** · 安全审计整改（H-2/M-3/M-4/M-5/M-6：登录锁定按来源、上传统一校验、日志异常栈脱敏、MCP 节流移出 DB 线程） |
