@@ -1,4 +1,4 @@
-# StuLink v1.19.47.25 2026-10-10
+# StuLink v1.19.47.26 2026-10-10
 # 模块权限映射：功能权限表格（身份 × 子功能 × 三档）与细粒度 menu_keys 的转换层
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 """模块权限映射（转换层）
@@ -64,7 +64,7 @@ MODULES = [
             {'key': 'manage', 'name': '教学管理',
              'read': [],
              'write': ['grades.edit', 'grades.import', 'grades.settings']},
-            # v1.19.47.25：成绩单改分单独授权。standalone=True 表示**不随模块「写入」批发**，
+            # v1.19.47.26：成绩单改分单独授权。standalone=True 表示**不随模块「写入」批发**，
             # 只能单独勾选（默认所有人不可见，管理员角色天然可用）；「考务管理员」另行建组授予。
             {'key': 'score_edit', 'name': '成绩修改（改分）', 'standalone': True,
              'read': [], 'write': ['grades.score_edit']},
@@ -90,7 +90,7 @@ MODULES = [
              'read': [], 'write': ['points.export']},
             {'key': 'rules', 'name': '规则模板',
              'read': [], 'write': ['points.rules']},
-            # 2026-10-13（v1.19.47.25）德育奖惩信息：与积分并列，独立页面 /morality/rewards
+            # 2026-10-13（v1.19.47.26）德育奖惩信息：与积分并列，独立页面 /morality/rewards
             {'key': 'reward', 'name': '奖惩信息',
              'read': ['morality.view'], 'write': ['morality.edit']},
         ],
@@ -118,7 +118,7 @@ MODULES = [
              'read': [], 'write': ['academic.inspection_export']},
             {'key': 'forms', 'name': '问卷收集',
              'read': ['academic.forms_view'], 'write': ['academic.forms']},
-            # 2026-10-13（v1.19.47.25）教师手机号明文查看：standalone，不随模块写入批发。
+            # 2026-10-13（v1.19.47.26）教师手机号明文查看：standalone，不随模块写入批发。
             # 无此权限时教师名单/导出只显示脱敏手机号。
             {'key': 'teacher_phone', 'name': '教师手机号明文', 'standalone': True,
              'read': [], 'write': ['academic.view_teacher_phone']},
