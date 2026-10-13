@@ -222,6 +222,46 @@ async def run_account_mode_cases(record, expected_tools, probe_tool='list_my_sco
             print(f'      （状态码 {codes}，retry-after={resp.headers.get("retry-after")}）')
         else:
             record('接入认证：连续失败锁定', [f'状态码序列 {codes}'], '')
+
+        # —— 2026-10-13 全面审计 M-5：锁定必须按「来源」而不是按账号 ——
+        # 否则局域网内任何设备用 5 次错误口令就能把某位老师的账号锁死 300 秒（拒绝服务）。
+        from mcp_server.core import auth as _auth
+        _auth._fails.clear()
+        _auth._account_fails.clear()
+        for _ in range(5):
+            _auth._record_fail('__smoke_victim__', client='10.9.9.9')
+        locked_src = _auth._lock_remaining('__smoke_victim__', client='10.9.9.9') > 0
+        locked_other = _auth._lock_remaining('__smoke_victim__', client='10.9.9.8') == 0
+        if locked_src and locked_other:
+            record('审计M-5：失败锁定只锁来源、不锁账号', [], '')
+        else:
+            record('审计M-5：失败锁定作用域',
+                   [f'攻击来源被锁={locked_src}（期望 True）/ 其他来源被锁={not locked_other}'
+                    f'（期望 False）'], '')
+        _auth._clear_fail('__smoke_victim__', client='10.9.9.9')
+        if _auth._lock_remaining('__smoke_victim__', client='10.9.9.9') == 0:
+            record('审计M-5：成功登录只清本来源计数', [], '')
+        else:
+            record('审计M-5：成功登录只清本来源计数', ['本来源仍处于锁定'], '')
+
+        # 跨来源累计只做延迟兜底：不拒绝，账号本人永远进得来
+        _auth._fails.clear()
+        _auth._account_fails.clear()
+        config._cache = dict(cfg, login_throttle_threshold=3,
+                             login_throttle_max_delay=1.0, login_throttle_window=300)
+        for i in range(3):
+            _auth._record_fail('__smoke_victim__', client=f'10.9.9.{i}')
+        delay = _auth._throttle_delay('__smoke_victim__')
+        still_free = _auth._lock_remaining('__smoke_victim__', client='10.8.8.8') == 0
+        config._cache = cfg
+        if 0 < delay <= 1.0 and still_free:
+            record('审计M-5：跨来源失败累计只加延迟、不锁定', [], '')
+            print(f'      （附加延迟 {delay:.2f}s，账号在其它来源仍可正常登录）')
+        else:
+            record('审计M-5：跨来源失败累计延迟兜底',
+                   [f'delay={delay}（期望 0<delay<=1）/ 其它来源可登录={still_free}'], '')
+        _auth._fails.clear()
+        _auth._account_fails.clear()
     except Exception as exc:                                        # noqa: BLE001
         record('接入认证：端到端用例执行', [f'{type(exc).__name__}: {exc}'], '')
     finally:

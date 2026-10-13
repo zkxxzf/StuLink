@@ -411,8 +411,12 @@ def import_dormitory_info():
         flash('请选择要上传的Excel文件', 'danger')
         return redirect(url_for('dashboard.search_student_accommodation'))
 
-    if not file.filename.endswith(('.xlsx', '.xls')):
-        flash(f'文件格式不正确，请上传 .xlsx 格式的Excel文件（当前文件：{file.filename}）', 'danger')
+    # 2026-10-13 全面审计 M-6：只看后缀 → 改为统一上传校验（白名单 + 危险类型 + magic）
+    from app.utils.upload_guard import validate_upload
+    ok, msg = validate_upload(file.filename, allowed_exts=['xlsx', 'xls'],
+                              stream=file.stream)
+    if not ok:
+        flash(f'{msg}（当前文件：{file.filename}）', 'danger')
         return redirect(url_for('dashboard.search_student_accommodation'))
 
     try:

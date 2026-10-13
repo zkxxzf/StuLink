@@ -964,6 +964,13 @@ def schedule_smart_import(sid):
         if not file or not file.filename:
             flash('请选择课表 Excel 文件', 'danger')
             return redirect(url_for('academic.schedule_smart_import', sid=sid))
+        # 2026-10-13 全面审计 M-6：统一上传校验（白名单 + 危险类型 + magic 嗅探）
+        from app.utils.upload_guard import validate_upload
+        ok, msg = validate_upload(file.filename, allowed_exts=['xlsx', 'xls'],
+                                  stream=file.stream)
+        if not ok:
+            flash(f'{msg}（当前文件：{file.filename}）', 'danger')
+            return redirect(url_for('academic.schedule_smart_import', sid=sid))
         # 2026-10-10：整批周次（按周次为单位批量导入）——如 5 / 1-9 / 单周；
         # 留空 = 按格内标注（缺省 1-18）
         week_range = (request.form.get('week_range') or '').strip()

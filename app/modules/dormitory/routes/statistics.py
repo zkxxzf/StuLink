@@ -707,8 +707,15 @@ def export_bed_detail():
 def import_dormitory():
     """批量导入宿舍数据（学号+姓名双重匹配）"""
     file = request.files.get('file')
-    if not file or not file.filename.endswith(('.xlsx', '.xls')):
+    if not file or not file.filename:
         flash('请上传 .xlsx 格式的Excel文件', 'danger')
+        return redirect(url_for('statistics.index'))
+    # 2026-10-13 全面审计 M-6：只看后缀 → 改为统一上传校验（白名单 + 危险类型 + magic）
+    from app.utils.upload_guard import validate_upload
+    ok, msg = validate_upload(file.filename, allowed_exts=['xlsx', 'xls'],
+                              stream=file.stream)
+    if not ok:
+        flash(f'{msg}（当前文件：{file.filename}）', 'danger')
         return redirect(url_for('statistics.index'))
 
     try:

@@ -113,6 +113,13 @@ def timetable_import_upload():
     if not name:
         flash('请填写课表名称（如 2026-2027学年第一学期）', 'danger')
         return redirect(url_for('academic.timetable_import_page'))
+    # 2026-10-13 全面审计 M-6：统一上传校验（白名单 + 危险类型 + magic 嗅探）
+    from app.utils.upload_guard import validate_upload
+    ok, msg = validate_upload(file.filename, allowed_exts=['xlsx', 'xls'],
+                              stream=file.stream)
+    if not ok:
+        flash(f'{msg}（当前文件：{file.filename}）', 'danger')
+        return redirect(url_for('academic.timetable_import_page'))
 
     try:
         entries = timetable_import_service.parse_timetable_excel(io.BytesIO(file.read()))

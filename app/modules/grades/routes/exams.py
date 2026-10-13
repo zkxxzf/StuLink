@@ -789,6 +789,14 @@ def exam_import_upload(exam_id):
     if not file or not file.filename:
         flash('请选择要上传的 Excel 文件', 'danger')
         return redirect(url_for('grades.exam_import', exam_id=exam_id))
+    # 2026-10-13 全面审计 M-6：统一上传校验（白名单 + 危险类型 + magic 嗅探），
+    # 此前本入口直接读流交给 openpyxl —— 不校验扩展名，畸形/压缩炸弹文件可耗尽内存
+    from app.utils.upload_guard import validate_upload
+    ok, msg = validate_upload(file.filename, allowed_exts=['xlsx', 'xls'],
+                              stream=file.stream)
+    if not ok:
+        flash(f'{msg}（当前文件：{file.filename}）', 'danger')
+        return redirect(url_for('grades.exam_import', exam_id=exam_id))
     fname = file.filename
     try:
         stream = io.BytesIO(file.read())

@@ -242,6 +242,13 @@ def teachers_import_upload():
     if not file or not file.filename:
         flash('请选择教师安排表 Excel 文件', 'danger')
         return redirect(url_for(_ep('teachers_import_page')))
+    # 2026-10-13 全面审计 M-6：统一上传校验（白名单 + 危险类型 + magic 嗅探）
+    from app.utils.upload_guard import validate_upload
+    ok, msg = validate_upload(file.filename, allowed_exts=['xlsx', 'xls'],
+                              stream=file.stream)
+    if not ok:
+        flash(f'{msg}（当前文件：{file.filename}）', 'danger')
+        return redirect(url_for(_ep('teachers_import_page')))
     try:
         stream = io.BytesIO(file.read())
         parsed = teacher_import.parse_teacher_excel(stream)

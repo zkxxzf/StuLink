@@ -56,9 +56,18 @@ X-StuLink-Token: <config.json 里的 token>      # 也接受 Authorization: Bear
   `sha256(账号\0密码)`，命中后仍会比对当前 `password_hash` 指纹与启用状态，
   因此**改密码、停用账号立即生效**，缓存只省掉 scrypt 计算。
 - **失败锁定**（`login_fail_limit` 默认 5，`login_lock_seconds` 默认 300）：
-  按账号维度计数；锁定期间不再查库、直接 429，也不再写审计（防止刷日志）。
-  按账号而非按 IP，是因为本服务通常部署在本机/局域网共享出口，按 IP 会误伤
-  同一台机器上的其他客户端。
+  按 **「来源 + 账号」** 维度计数（2026-10-13 全面审计 M-5 起）；锁定期间不再查库、
+  直接 429，也不再写审计（防止刷日志）。
+  - 为什么不按账号锁：服务常以 `host=0.0.0.0` 暴露在局域网，若按账号锁，任何人用
+    5 次错误口令就能把某位老师的账号锁死 300 秒（拒绝服务）。按来源锁之后，攻击者
+    只能锁住自己这条来源，账号主人从自己设备登录不受影响。
+  - 为什么不单纯按 IP 锁：本机 / 局域网可能共享出口 IP，纯按 IP 会误伤同一台机器
+    上的其他客户端 —— 所以键是「来源 + 账号」这一组合，而不是来源本身。
+  - 跨来源兜底（`login_throttle_threshold` 默认 10、`login_throttle_window` 默认
+    300 秒、`login_throttle_max_delay` 默认 1 秒）：同一账号在窗口内失败累计超过阈值
+    后，每次尝试**附加递增延迟**（上限 1 秒），只延迟、不拒绝 —— 分布式爆破会被拖慢，
+    而账号本人永远进得来。
+  - stdio 本地调用（`run_stdio.py`）不带来源，等价于按账号维度计数（单机无他人锁号问题）。
 - 校验在 MCP 的专用 DB 线程（`core/db.py`）执行，不阻塞事件循环。
 
 ### 1.4 身份如何传给工具（关键实现）
@@ -389,8 +398,11 @@ app context 退出时回收会话。
 | `token` | 自动生成 | 静态令牌（token 模式必需；account 模式下由 `require_token` 决定用途） |
 | `bind_user` | `admin` | **token 模式**的执行账号；account 模式不生效 |
 | `credential_cache_ttl` | 300 | 账号密码校验缓存秒数（0=每次完整校验） |
-| `login_fail_limit` | 5 | 连续失败锁定阈值（0=不锁定） |
+| `login_fail_limit` | 5 | 同一来源对同一账号连续失败锁定阈值（0=不锁定）；**只锁来源、不锁账号** |
 | `login_lock_seconds` | 300 | 锁定时长（秒） |
+| `login_throttle_threshold` | 10 | 跨来源失败累计阈值：超过后每次尝试附加递增延迟（只延迟不拒绝） |
+| `login_throttle_window` | 300 | 跨来源失败累计统计窗口（秒） |
+| `login_throttle_max_delay` | 1.0 | 附加延迟上限（秒）；0=关闭 |
 | `allow_write` | `true` | 写工具总开关 |
 | `max_rows` / `exam_cache_ttl` / `allowed_hosts` / `host` / `port` / `path` / `audit_reads` | 见 config.json | 非认证项，语义不变 |
 

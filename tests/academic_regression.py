@@ -2879,6 +2879,81 @@ def check_audit_p1():
         db.session.commit()
 
 
+@item('AUDITP2')
+def check_audit_p2_upload_guard():
+    """全面审计 M-6（2026-10-13）：7 处 Excel 上传统一走 `upload_guard`。
+
+    活体验证成绩导入入口（旧实现直接读流交给 openpyxl）：
+      ① `.html` 后缀 → 被白名单/危险类型拒绝；
+      ② 伪装成 `.xlsx` 但内容不是 zip 的文件 → 被 magic 嗅探拒绝；
+      ③ 真 xlsx → 不误伤（不出现 guard 的拒绝文案）。
+    另做静态断言：7 个入口都必须调用 validate_upload，防止回退成"只看后缀"。
+    """
+    import io as _io
+    import openpyxl
+    from datetime import date as _date
+    from app.models.grades import Exam
+
+    with app.app_context():
+        exam = Exam.query.filter_by(name='AUDITP2上传考试').first()
+        if not exam:
+            exam = Exam(name='AUDITP2上传考试', grade='2099级',
+                        exam_date=_date(2026, 6, 1), exam_type='AUDITP2')
+            db.session.add(exam)
+            db.session.commit()
+        exam_id = exam.id
+
+    with app.test_client() as c:
+        login(c, 'ac_admin', TEST_PWD)
+        csrf = get_csrf(c, '/grades/exams')
+        url = f'/grades/exams/{exam_id}/import/upload'
+        base = {'csrf_token': csrf, 'mode': 'A', 'remove_missing': '0'}
+
+        r = c.post(url, data=dict(base, file=(_io.BytesIO(b'<html>x</html>'), 'evil.html')),
+                   content_type='multipart/form-data', follow_redirects=True)
+        html = r.get_data(as_text=True)
+        case('审计P2：.html 后缀上传被拒（危险类型）',
+             r.status_code == 200 and ('不允许上传 .html' in html
+                                       or '不允许的文件类型' in html), 'html')
+        r = c.post(url, data=dict(base, file=(_io.BytesIO(b'<script>x</script>'),
+                                              'fake.xlsx')),
+                   content_type='multipart/form-data', follow_redirects=True)
+        html = r.get_data(as_text=True)
+        case('审计P2：伪装 .xlsx（内容非 zip）被 magic 嗅探拒绝',
+             r.status_code == 200 and '文件内容与' in html, 'magic')
+
+        buf = _io.BytesIO()
+        wb = openpyxl.Workbook()
+        wb.active['A1'] = '学号'
+        wb.save(buf)
+        buf.seek(0)
+        r = c.post(url, data=dict(base, file=(buf, 'ok.xlsx')),
+                   content_type='multipart/form-data', follow_redirects=True)
+        html = r.get_data(as_text=True)
+        case('审计P2：真 xlsx 不被上传校验误伤',
+             r.status_code == 200 and '文件内容与' not in html
+             and '不允许的文件类型' not in html, 'control')
+        c.get('/logout')
+
+    guarded = []
+    for rel in ('app/modules/grades/routes/exams.py',
+                'app/modules/academic/routes/timetable.py',
+                'app/modules/academic/routes/teachers.py',
+                'app/modules/academic/routes/schedule.py',
+                'app/modules/grades/routes/teachers.py',
+                'app/modules/dormitory/routes/dashboard.py',
+                'app/modules/dormitory/routes/statistics.py'):
+        with open(os.path.join(BASE, rel.replace('/', os.sep)), encoding='utf-8') as f:
+            if 'validate_upload' not in f.read():
+                guarded.append(rel)
+    case('审计P2：7 处上传入口全部接入 upload_guard（无遗漏）',
+         not guarded, '; '.join(guarded))
+
+    with app.app_context():
+        Exam.query.filter_by(name='AUDITP2上传考试').delete(synchronize_session=False)
+        db.session.commit()
+
+
 @item('PORTRAITLIST')
 def check_portrait_list_filter():
     """学生画像列表过滤（2026-10-13 修复）：**学籍为空（NULL）的学生必须可见**。
