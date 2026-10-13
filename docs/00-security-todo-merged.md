@@ -609,5 +609,9 @@ read_lints（20 个改动文件）        0 诊断
 - [x] **M-4 日志脱敏只覆盖 8 个显式 logger**：31 处 `getLogger(__name__)`（形如 `app.modules.*`）未脱敏 → 改为 logger + handler + **LogRecord 工厂**三层（工厂口径才管得住"装脱敏之后新建的 handler"）。2026-10-13 完成（`app/utils/log_mask.py`）。
 - [x] **M-7 现网缺 3 个模型声明的索引**（`academic.teachers` 的 status/subject/user_id）：`check_indexes.py --fix` 补建。2026-10-13 完成。
 - [x] **H-2 跨库写无补偿**：学生导入改两阶段提交 + 失败补偿回退；考务名单多库写显式回滚报错；毕业归档按 history 库 rowid 水位撤销本次归档（防重试重复）。2026-10-13 完成（`system/routes/students.py`、`grades/routes/exam_affairs.py`、`system/routes/grade_mgmt.py`）。
-- [ ] **仍未处理**：M-5 MCP 服务在 `0.0.0.0` 暴露且 `require_token=false`、失败锁定作用于真实账号（可被用来锁号）——需定部署口径；报告 L 类结构债（20 个 >800 行文件、221 个 >50 行函数、`scope_required` 僵尸件、tests 备份树、7 处上传统一 `upload_guard`）。
+- [x] **M-6 7 处 Excel 上传未走统一 `upload_guard`**：成绩导入 / 课表导入 / 教师名单导入 / 智能课表导入 / 教师安排表导入 / 宿舍信息导入 / 宿舍批量导入全部接入（白名单 + 危险类型 + magic）。2026-10-13 完成（回归 `AUDITP2`）。
+- [x] **M-5（锁号一侧）MCP 失败锁定按账号 → 按「来源 + 账号」**：原口径下局域网任意设备用 5 次错误口令即可把老师账号锁死 300 秒；另加跨来源失败累计的递增延迟兜底（只延迟不拒绝）。2026-10-13 完成（`mcp_server/core/auth.py`；MCP 自测 72/0）。
+- [x] **L-4 勘误**：`scope_required` 并非僵尸件 —— 2026-10-10 已删除，`decorators.py:34` 只剩说明注释（本轮审计初稿为误报，已更正）。
+- [x] **L-8（部分）**：新增一键回归 `scripts/run_all_regression.py` + 根目录 `ruff.toml`（只开真错级规则，工具不入依赖）+ `CODEBUDDY.md` 回归与自检章节。
+- [ ] **仍未处理**：M-5 的另一半（`host=0.0.0.0` / `require_token=false` 是否收紧，需用户定部署口径）；报告 L 类结构债（20 个 >800 行文件、221 个 >50 行函数、`tests/qa_*` 历史快照、重复实现替换、`import_students` 341 行拆分）。
 - 回归基线（本轮实测）：教务 501 / 安全 287 / 宿舍 31 / 班级范围 8 = **827 项全绿**；`scan_security_patterns.py` 0 命中；`check_columns.py` 缺列 0。

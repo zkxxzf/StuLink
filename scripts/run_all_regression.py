@@ -1,0 +1,128 @@
+# -*- coding: utf-8 -*-
+"""StuLink 一键回归：3 项自检 + 4 套回归（2026-10-13 全面审计 P2 产出）。
+
+用法（在项目根目录）：
+    py -3.12 scripts\\run_all_regression.py             # 自检 + 4 套回归
+    py -3.12 scripts\\run_all_regression.py --with-mcp  # 额外跑 MCP 端到端自测（需 mcp_server\\.venv）
+    py -3.12 scripts\\run_all_regression.py --quick     # 只跑自检
+
+输出末尾给出汇总表；有任何一项失败时退出码为 1（可用于 CI / 发布前检查）。
+若把输出重定向到文件出现乱码，先执行 `chcp 65001`；直接在 cmd / PowerShell 窗口里
+运行不受影响（脚本已对子进程输出做 utf-8 → 本机编码的兜底解码）。
+"""
+import locale
+import os
+import re
+import subprocess
+import sys
+
+BASE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+MCP_PY = os.path.join(BASE, 'mcp_server', '.venv', 'Scripts', 'python.exe')
+
+SELF_CHECKS = [
+    ('安全模式扫描', ['scripts/scan_security_patterns.py']),
+    ('列结构自检', ['scripts/check_columns.py']),
+    ('索引自检', ['scripts/check_indexes.py']),
+]
+SUITES = [
+    ('教务回归', ['tests/academic_regression.py']),
+    ('安全回归', ['tests/sec_regression.py']),
+    ('宿舍回归', ['tests/dormitory_regression.py']),
+    ('班级范围回归', ['tests/class_scope_regression.py']),
+]
+# 结果行样例：「===== 教务回归完成：通过 505 / 失败 0 =====」「结果：PASS 8 / FAIL 0」
+_PATTERNS = (
+    re.compile(r'通过\s*(\d+)\s*/\s*失败\s*(\d+)'),
+    re.compile(r'PASS\s*(\d+)\s*/\s*FAIL\s*(\d+)'),
+)
+
+
+def _decode(raw):
+    """子进程输出解码：utf-8 优先，失败退回本机编码（Windows 控制台多为 cp936）。
+
+    两种编码都要试的原因：控制台/管道的默认编码取决于 PYTHONIOENCODING 与系统区域，
+    单试一种会让结果行变成乱码、中文结果行匹配不上（退出码仍可判定，但信息丢失）。
+    """
+    if not raw:
+        return ''
+    try:
+        return raw.decode('utf-8')
+    except UnicodeDecodeError:
+        return raw.decode(locale.getpreferredencoding(False), errors='replace')
+
+
+def _parse_result(out):
+    for pattern in _PATTERNS:
+        match = None
+        for match in pattern.finditer(out):
+            pass                      # 取最后一个（有的脚本会打印多次）
+        if match:
+            return int(match.group(1)), int(match.group(2))
+    return None, None
+
+
+def _run(title, argv, python=None):
+    """跑一项，返回 (ok, 摘要行, 失败片段)。"""
+    exe = python or sys.executable
+    print(f'\n──── {title} ' + '─' * max(4, 60 - len(title)))
+    try:
+        proc = subprocess.run([exe] + argv, cwd=BASE, capture_output=True)
+    except OSError as exc:
+        print(f'  无法启动：{exc}')
+        return False, f'{title}：无法启动（{exc}）', ''
+    out = _decode((proc.stdout or b'') + (proc.stderr or b''))
+    tail = '\n'.join(out.strip().splitlines()[-12:])
+    print(tail)
+
+    passed, failed = _parse_result(out)
+    if passed is None:                # 没有结果行：按退出码判定（scan_security_patterns 这类）
+        ok = proc.returncode == 0
+        mark = 'OK' if ok else '退出码 %s' % proc.returncode
+        return ok, f'{title}：{mark}', '' if ok else tail
+    ok = failed == 0 and proc.returncode == 0
+    return ok, f'{title}：通过 {passed} / 失败 {failed}', '' if ok else tail
+
+
+def main():
+    try:
+        sys.stdout.reconfigure(errors='replace')   # 控制台编码兜底：打印子进程输出不崩
+    except Exception:                              # noqa: BLE001
+        pass
+    args = set(sys.argv[1:])
+    quick = '--quick' in args
+    with_mcp = '--with-mcp' in args
+
+    print('StuLink 一键回归' + ('（--quick）' if quick else ''))
+    results = []
+    for title, argv in SELF_CHECKS:
+        results.append(_run(title, argv))
+    if not quick:
+        for title, argv in SUITES:
+            results.append(_run(title, argv))
+        if with_mcp:
+            if os.path.exists(MCP_PY):
+                results.append(_run('MCP 端到端自测', ['mcp_server/smoke_scores.py'],
+                                    python=MCP_PY))
+            else:
+                print('\n（跳过 MCP 自测：未找到 mcp_server\\.venv\\Scripts\\python.exe）')
+
+    print('\n' + '=' * 64)
+    print('汇总')
+    print('=' * 64)
+    bad = []
+    for ok, summary, detail in results:
+        print(('  [OK]   ' if ok else '  [FAIL] ') + summary)
+        if not ok:
+            bad.append((summary, detail))
+    if bad:
+        print('\n失败详情（末尾片段）：')
+        for summary, detail in bad:
+            print(f'\n---- {summary} ----\n{detail}')
+        print(f'\n结果：有 {len(bad)} 项失败')
+        return 1
+    print('\n结果：全部通过')
+    return 0
+
+
+if __name__ == '__main__':
+    sys.exit(main())

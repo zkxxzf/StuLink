@@ -76,3 +76,26 @@
   核对时**按班级方向取对应文件**（史* 看历史文件、物* 看物理文件）。
 - **历史方向（史*）没有物理课/物理成绩**，不要给该方向班级配物理老师（原表若填了属笔误）。
 - `exam_teacher_links.source='excel'` 表示来自旧成绩 Excel；`backfill` 为按当前映射推测，可信度低。
+
+## 回归与自检（2026-10-13 起，改代码前后都跑）
+
+**一键跑全部**（3 项自检 + 4 套回归，末行给汇总，失败退出码 1）：
+
+```powershell
+py -3.12 scripts\run_all_regression.py            # 自检 + 4 套回归
+py -3.12 scripts\run_all_regression.py --with-mcp # 额外跑 MCP 端到端自测（需 mcp_server\.venv）
+py -3.12 scripts\run_all_regression.py --quick    # 只跑 3 项自检
+```
+
+- 单项也可单独跑：`tests/academic_regression.py`（教务，含 `item` 名可只跑一项，如
+  `py -3.12 tests/academic_regression.py AUDITP2`）、`tests/sec_regression.py`、
+  `tests/dormitory_regression.py`、`tests/class_scope_regression.py`。
+- 自检：`scripts/scan_security_patterns.py`（六类安全红线，必须 0 命中）、
+  `scripts/check_columns.py`（模型列 vs 现网列）、`scripts/check_indexes.py`
+  （模型声明索引 vs 现网；`--fix` 可补，改库前会先备份）。
+- MCP 服务改动另跑：`mcp_server\.venv\Scripts\python.exe mcp_server\smoke_scores.py`。
+- 当前基线（2026-10-13 全面审计后）：教务 505、安全 287、宿舍 31、班级范围 8，
+  **合计 831 项全绿**；MCP 自测 72 / 0。
+- lint（本仓库不装进依赖，按需 `py -3.12 -m pip install ruff`）：
+  `py -3.12 -m ruff check app mcp_server scripts tests`，规则见根目录 `ruff.toml`
+  （只开"真错"级：语法错误 E9、未定义名 F82、重复定义 F811）。
