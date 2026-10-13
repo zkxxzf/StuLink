@@ -118,6 +118,8 @@ PERMISSION_GROUPS = [
             'students.export', 'students.export_id_card', 'students.export_phone',
             'students.export_graduation_school', 'students.export_enrollment',
             'students.transfer',
+            # 2026-10-13：字段级明文查看（敏感字段脱敏的唯一豁免）
+            'students.view_id_card', 'students.view_phone',
             'dormitory.view', 'dormitory.manage', 'dormitory.assign',
             'dormitory.beds', 'dormitory.import',
             'statistics.view',
@@ -134,6 +136,7 @@ PERMISSION_GROUPS = [
             'academic.view', 'academic.timetable', 'academic.swap',
             'academic.swap_bulk', 'academic.swap_approve',
             'academic.inspection_export', 'academic.forms', 'academic.forms_view',
+            'academic.view_teacher_phone',   # 2026-10-13 教师手机号明文
             'portrait.view', 'portrait.edit',
             'workbench.records', 'workbench.class_view',
             'workbench.attendance_view', 'workbench.attendance',
@@ -146,8 +149,10 @@ PERMISSION_GROUPS = [
         'scope_type': 'grade',
         'description': '年级长，管理本年级学生数据和统计',
         'menu_keys': [
-            'students.view', 'students.edit', 'students.import',
-            'students.export', 'students.export_id_card', 'students.export_phone',
+            # 2026-10-13 最小权限重排：收掉 students.import（批量导入属招生/教务口径），
+            # 敏感导出（身份证/手机号）本就不给；年级长看不到明文敏感字段。
+            'students.view', 'students.edit',
+            'students.export',
             'students.export_graduation_school', 'students.export_enrollment',
             'students.transfer',
             'dormitory.view', 'dormitory.beds',
@@ -176,10 +181,13 @@ PERMISSION_GROUPS = [
         'scope_type': 'class',
         'description': '班主任，管理本班学生和床位',
         'menu_keys': [
-            'students.view', 'students.edit', 'students.import',
-            'students.export', 'students.export_id_card', 'students.export_phone',
-            'students.export_graduation_school', 'students.export_enrollment',
-            'students.transfer',
+            # 2026-10-13 最小权限重排：收掉 students.import / students.transfer
+            # （批量导入与跨班调动属招生/教务口径）、收掉敏感导出（export_id_card /
+            # export_phone / export_graduation_school / export_enrollment）；
+            # 保留本班学生的联系电话明文查看（联系家长/学生本人所需），身份证号仍脱敏。
+            'students.view', 'students.edit',
+            'students.export',
+            'students.view_phone',
             'dormitory.view', 'dormitory.beds',
             'statistics.view',
             'points.view', 'grades.view', 'grades.student_query',
@@ -201,6 +209,8 @@ PERMISSION_GROUPS = [
         'description': '宿管教师，管理全校宿舍分配和床位',
         'menu_keys': [
             'students.view',
+            # 2026-10-13：宿管需联系住宿学生，给联系电话明文查看；身份证号仍脱敏。
+            'students.view_phone',
             'dormitory.view', 'dormitory.manage', 'dormitory.assign',
             'dormitory.beds', 'dormitory.import',
             'statistics.view',
@@ -498,6 +508,9 @@ def create_app():
     # 2026-10-13：节次显示名（period_number 只是行号：1=早读 → period_number=8 实为「第7节」）。
     # 凡模板里要显示「第几节」一律用它，避免各处自己拼接「第{{ period_number }}节」错一位。
     from app.utils.period_label import period_label, period_name_map
+    # 2026-10-13：敏感字段（身份证号/联系电话）字段级脱敏。模板里取值处统一改
+    # `{{ field_value(s.phone1, 'phone') }}`，无权限即返回脱敏值（后端决定，非前端隐藏）。
+    from app.utils.sensitive import field_value
     app.jinja_env.globals.update(
         subject_direction=subject_direction,
         subject_badge_class=subject_badge_class,
@@ -505,6 +518,7 @@ def create_app():
         exam_nav=exam_nav,
         period_label=period_label,
         period_name_map=period_name_map,
+        field_value=field_value,
     )
 
     db.init_app(app)

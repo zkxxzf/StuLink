@@ -14,14 +14,20 @@ th.col-dorm-head { background: #eef2f7 !important; }
 </style>
 <div class="d-flex justify-content-between align-items-center mb-3">
     <h4 class="fw-bold mb-0"><i class="bi bi-people"></i> 学生列表</h4>
-    {% if current_user.has_role('admin', 'homeroom_teacher') %}
+    {# 2026-10-13：按钮改按权限点显示（原按角色 → 收掉班主任 students.import/transfer 后
+       会出现「看得见按钮、点了 403」） #}
+    {% if current_user.has_perm('students.view') %}
     <div class="d-flex gap-2">
+        {% if current_user.has_perm('students.import') %}
         <button class="btn btn-success" data-bs-toggle="modal" data-bs-target="#importModal">
             <i class="bi bi-file-earmark-excel"></i> 批量导入
         </button>
+        {% endif %}
+        {% if current_user.has_perm('students.transfer') %}
         <button class="btn btn-info" data-bs-toggle="modal" data-bs-target="#batchTransferModal">
             <i class="bi bi-arrow-left-right"></i> 批量调班
         </button>
+        {% endif %}
         {# v1.19.47.25 调班记录总览 #}
         <a href="{{ url_for('students.class_changes') }}" class="btn btn-outline-info">
             <i class="bi bi-clock-history"></i> 调班记录
@@ -31,9 +37,11 @@ th.col-dorm-head { background: #eef2f7 !important; }
             <i class="bi bi-trash"></i> 批量删除 (<span id="selectedCount">0</span>)
         </button>
         {% endif %}
+        {% if current_user.has_perm('students.edit') %}
         <a href="{{ url_for('students.create') }}" class="btn btn-primary">
             <i class="bi bi-plus-lg"></i> 新增学生
         </a>
+        {% endif %}
     </div>
     {% endif %}
 </div>
@@ -59,7 +67,9 @@ th.col-dorm-head { background: #eef2f7 !important; }
         <div class="d-flex justify-content-between align-items-center mb-2">
             <small class="text-muted">共 {{ pagination.total if pagination else 0 }} 条</small>
             <div class="d-flex gap-2">
+                {% if current_user.has_perm('students.export') %}
                 <button class="btn btn-sm btn-outline-success" onclick="openExportModal()"><i class="bi bi-file-earmark-excel"></i> 导出</button>
+                {% endif %}
                 <a href="{{ url_for('students.list_students') }}" class="btn btn-sm btn-outline-secondary" title="清除筛选"><i class="bi bi-x-lg"></i> 清除</a>
             </div>
         </div>
@@ -194,8 +204,9 @@ th.col-dorm-head { background: #eef2f7 !important; }
                         <span class="text-muted">-</span>
                         {% endif %}
                     </td>
-                    <td>{{ s.phone1 or '-' }}</td>
-                    <td>{{ s.phone2 or '-' }}</td>
+                    {# 2026-10-13 字段级脱敏：无 students.view_phone 时显示 138****5678 #}
+                    <td>{{ field_value(s.phone1, 'phone') or '-' }}</td>
+                    <td>{{ field_value(s.phone2, 'phone') or '-' }}</td>
                     <td>{{ s.enrollment_status or '-' }}</td>
                     <td><small>{{ s.enrollment_notes or '-' }}</small></td>
                     {# v1.19.47.4 宿舍信息（只读）：acc_map/bed_map 由路由批量预取，无需懒加载 #}
@@ -225,10 +236,12 @@ th.col-dorm-head { background: #eef2f7 !important; }
                         <a href="{{ url_for('students.detail', id=s.id) }}" class="btn btn-sm btn-outline-primary" title="查看">
                             <i class="bi bi-eye"></i>
                         </a>
-                        {% if current_user.has_role('admin', 'homeroom_teacher') %}
+                        {% if current_user.has_perm('students.edit') %}
                         <a href="{{ url_for('students.edit', id=s.id) }}" class="btn btn-sm btn-outline-warning" title="编辑">
                             <i class="bi bi-pencil"></i>
                         </a>
+                        {% endif %}
+                        {% if current_user.has_perm('students.transfer') %}
                         <button type="button" class="btn btn-sm btn-outline-info" title="调班"
                                 {# M-10：内联处理器中的字符串参数必须 |tojson（|e 的 &#39; 会在交 JS 引擎前还原为 ' 从而打断字符串） #}
                                 onclick="openTransferModal({{ s.id }}, {{ s.name|tojson }}, {{ s.grade|tojson }}, {{ s.class_name|tojson }})">
@@ -276,7 +289,7 @@ th.col-dorm-head { background: #eef2f7 !important; }
     </div>
 </div>
 
-{% if current_user.has_role('admin', 'homeroom_teacher') %}
+{% if current_user.has_perm('students.import') %}
 <!-- 导入弹窗 -->
 <div class="modal fade" id="importModal" tabindex="-1">
     <div class="modal-dialog">
@@ -392,6 +405,9 @@ th.col-dorm-head { background: #eef2f7 !important; }
     </div>
 </div>
 
+{% endif %}
+
+{% if current_user.has_perm('students.transfer') %}
 <!-- 批量调班弹窗 -->
 <div class="modal fade" id="batchTransferModal" tabindex="-1">
     <div class="modal-dialog">
@@ -445,7 +461,9 @@ th.col-dorm-head { background: #eef2f7 !important; }
         </div>
     </div>
 </div>
+{% endif %}
 
+{% if current_user.has_perm('students.export') %}
 <!-- 导出列选择弹窗 -->
 <div class="modal fade" id="exportModal" tabindex="-1">
     <div class="modal-dialog modal-lg">
@@ -505,18 +523,21 @@ th.col-dorm-head { background: #eef2f7 !important; }
                         </div>
                         <div class="col-md-6">
                             <h6 class="text-muted mb-2">敏感信息（需权限）</h6>
+                            {# 2026-10-13：敏感列导出需「查看 + 导出」双权限（看不到明文就不允许导出明文） #}
+                            {% set _can_export_id = current_user.has_perm('students.export_id_card') and current_user.has_perm('students.view_id_card') %}
+                            {% set _can_export_ph = current_user.has_perm('students.export_phone') and current_user.has_perm('students.view_phone') %}
                             <div class="space-y-2">
                                 <label class="form-check">
-                                    <input type="checkbox" class="form-check-input" name="columns" value="id_card_number" {% if not current_user.has_perm('students.export_id_card') %}disabled{% endif %}>
-                                    <span class="form-check-label">身份证号{% if not current_user.has_perm('students.export_id_card') %} <span class="text-danger small">(无权限)</span>{% endif %}</span>
+                                    <input type="checkbox" class="form-check-input" name="columns" value="id_card_number" {% if not _can_export_id %}disabled{% endif %}>
+                                    <span class="form-check-label">身份证号{% if not _can_export_id %} <span class="text-danger small">(无权限)</span>{% endif %}</span>
                                 </label>
                                 <label class="form-check">
-                                    <input type="checkbox" class="form-check-input" name="columns" value="phone1" {% if not current_user.has_perm('students.export_phone') %}disabled{% endif %}>
-                                    <span class="form-check-label">联系方式1{% if not current_user.has_perm('students.export_phone') %} <span class="text-danger small">(无权限)</span>{% endif %}</span>
+                                    <input type="checkbox" class="form-check-input" name="columns" value="phone1" {% if not _can_export_ph %}disabled{% endif %}>
+                                    <span class="form-check-label">联系方式1{% if not _can_export_ph %} <span class="text-danger small">(无权限)</span>{% endif %}</span>
                                 </label>
                                 <label class="form-check">
-                                    <input type="checkbox" class="form-check-input" name="columns" value="phone2" {% if not current_user.has_perm('students.export_phone') %}disabled{% endif %}>
-                                    <span class="form-check-label">联系方式2{% if not current_user.has_perm('students.export_phone') %} <span class="text-danger small">(无权限)</span>{% endif %}</span>
+                                    <input type="checkbox" class="form-check-input" name="columns" value="phone2" {% if not _can_export_ph %}disabled{% endif %}>
+                                    <span class="form-check-label">联系方式2{% if not _can_export_ph %} <span class="text-danger small">(无权限)</span>{% endif %}</span>
                                 </label>
                                 <label class="form-check">
                                     <input type="checkbox" class="form-check-input" name="columns" value="graduation_school" {% if not current_user.has_perm('students.export_graduation_school') %}disabled{% endif %}>

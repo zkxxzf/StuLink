@@ -113,8 +113,8 @@
                     <td>{% if s.id in acc_map and acc_map[s.id]['day_student_type'] %}<span class="badge bg-info">{{ acc_map[s.id]['day_student_type'] }}</span>{% else %}-{% endif %}</td>
                     <td>{% if s.id in bed_map and bed_map[s.id]['has_room'] %}{{ bed_map[s.id]['building'] }}{{ bed_map[s.id]['room_number'] }}{% else %}-{% endif %}</td>
                     <td>{% if s.id in bed_map %}{{ bed_map[s.id]['bed_number'] }}床{% else %}-{% endif %}</td>
-                    <td>{{ s.phone1 or '-' }}</td>
-                    <td>{{ s.phone2 or '-' }}</td>
+                    <td>{{ field_value(s.phone1, 'phone') or '-' }}</td>
+                    <td>{{ field_value(s.phone2, 'phone') or '-' }}</td>
                     <td><a href="{{ url_for('students.detail', id=s.id) }}" class="btn btn-sm btn-outline-primary"><i class="bi bi-eye"></i></a></td>
                 </tr>
                 {% endfor %}

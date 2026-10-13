@@ -42,7 +42,8 @@
                     </div>
                     <div class="col-sm-3">
                         <label class="text-muted small d-block">身份证号</label>
-                        <span class="font-monospace small">{{ student.id_card_number or '-' }}</span>
+                        {# 2026-10-13 字段级脱敏：无 students.view_id_card 时显示 110***********1234 #}
+                        <span class="font-monospace small">{{ field_value(student.id_card_number, 'id_card') or '-' }}</span>
                     </div>
                 </div>
                 <hr class="my-3">
@@ -95,12 +96,17 @@
                     </div>
                     <div class="col-sm-3">
                         <label class="text-muted small d-block">联系方式 1</label>
-                        {% if student.phone1 %}<a href="tel:{{ student.phone1 }}" class="text-decoration-none"><i class="bi bi-telephone"></i> {{ student.phone1 }}</a>
+                        {# 2026-10-13 字段级脱敏：无 students.view_phone 时显示 138****5678，且不可点击拨号 #}
+                        {% set p1 = field_value(student.phone1, 'phone') %}
+                        {% if p1 and current_user.has_perm('students.view_phone') %}<a href="tel:{{ p1 }}" class="text-decoration-none"><i class="bi bi-telephone"></i> {{ p1 }}</a>
+                        {% elif p1 %}<span class="text-muted"><i class="bi bi-telephone"></i> {{ p1 }}</span>
                         {% else %}<span class="text-muted">-</span>{% endif %}
                     </div>
                     <div class="col-sm-3">
                         <label class="text-muted small d-block">联系方式 2</label>
-                        {% if student.phone2 %}<a href="tel:{{ student.phone2 }}" class="text-decoration-none"><i class="bi bi-telephone"></i> {{ student.phone2 }}</a>
+                        {% set p2 = field_value(student.phone2, 'phone') %}
+                        {% if p2 and current_user.has_perm('students.view_phone') %}<a href="tel:{{ p2 }}" class="text-decoration-none"><i class="bi bi-telephone"></i> {{ p2 }}</a>
+                        {% elif p2 %}<span class="text-muted"><i class="bi bi-telephone"></i> {{ p2 }}</span>
                         {% else %}<span class="text-muted">-</span>{% endif %}
                     </div>
                 </div>

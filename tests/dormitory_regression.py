@@ -18,6 +18,7 @@
 - 分配页房间数据构建（床位分组 + 学生批量映射）
 """
 import os
+import re
 import sys
 import tempfile
 
@@ -77,6 +78,17 @@ def item(iid):
     return deco
 
 
+def _login(username, password):
+    """真实登录（POST /login + CSRF），返回已登录的 test_client。"""
+    c = app.test_client()
+    html = c.get('/login').get_data(as_text=True)
+    m = re.search(r'name="csrf_token"[^>]*value="([^"]+)"', html)
+    csrf = m.group(1) if m else ''
+    c.post('/login', data={'csrf_token': csrf, 'username': username,
+                           'password': password}, follow_redirects=True)
+    return c
+
+
 # ── 数据准备 ────────────────────────────────────────────────────────────────
 with app.app_context():
     db.create_all()
@@ -111,7 +123,31 @@ with app.app_context():
     BedAssignment.query.filter_by(room_id=r2.id, bed_number=1).first().student_id = s2.id
     db.session.commit()
 
-    IDS.update(admin=admin.id, r1=r1.id, r2=r2.id, r3=r3.id, s1=s1.id, s2=s2.id)
+    # 2026-10-13：范围类账号（验证 /statistics/ 统一走 dormitory_scope）
+    #   dm_homeroom 班主任（class 范围，所辖高一01班）
+    #   dm_leader   年级长（grade 范围，高一）
+    #   dm_office   教务员（scope_type='none' 且无用户级范围 → 统计页应 fail-closed 403）
+    g_homeroom = PermissionGroup.query.filter_by(name='班主任组').first()
+    g_leader = PermissionGroup.query.filter_by(name='年级长组').first()
+    g_office = PermissionGroup.query.filter_by(name='教务员').first()
+    ht = User(username='dm_homeroom', real_name='班主任', role='homeroom_teacher',
+              must_change_pwd=False, grade='高一', class_name='01班',
+              permission_group_id=g_homeroom.id if g_homeroom else None)
+    gl = User(username='dm_leader', real_name='年级长', role='grade_leader',
+              must_change_pwd=False, grade='高一',
+              permission_group_id=g_leader.id if g_leader else None)
+    off = User(username='dm_office', real_name='教务员', role='staff',
+               must_change_pwd=False,
+               permission_group_id=g_office.id if g_office else None)
+    for _u in (ht, gl, off):
+        _u.set_password(TEST_PWD)
+    db.session.add_all([ht, gl, off])
+    db.session.flush()
+    db.session.add(UserClassLink(user_id=ht.id, grade='高一', class_name='01班'))
+    db.session.commit()
+
+    IDS.update(admin=admin.id, r1=r1.id, r2=r2.id, r3=r3.id, s1=s1.id, s2=s2.id,
+               homeroom=ht.id, leader=gl.id, office=off.id)
 
 
 # ==================== 批量占用统计（group_by 口径） ====================
@@ -251,12 +287,14 @@ def check_tuple_in():
         db.session.add(UserClassLink(user_id=u.id, grade='高一', class_name='02班'))
         db.session.commit()
         got = UserClassLink.query.filter(
+            UserClassLink.user_id == u.id,
             tuple_(UserClassLink.grade, UserClassLink.class_name)
             .in_([('高一', '01班')])
         ).all()
         case('tuple_ 单组合命中 1 条', len(got) == 1, f'实际 {len(got)}')
         case('命中的是 01班', got and got[0].class_name == '01班')
         got2 = UserClassLink.query.filter(
+            UserClassLink.user_id == u.id,
             tuple_(UserClassLink.grade, UserClassLink.class_name)
             .in_([('高一', '01班'), ('高一', '02班')])
         ).all()
@@ -283,6 +321,39 @@ def check_pages():
                      f'status={r.status_code}')
             except Exception as e:  # noqa: BLE001
                 case(f'页面可访问 {path}', False, f'异常 {e}')
+
+
+# ==================== 统计页数据范围收敛（2026-10-13） ====================
+@item('SCOPE')
+def check_stats_scope():
+    """宿舍统计页统一走 dormitory_scope.resolve_scope（含用户级范围 + fail-closed）。
+
+    修复前：statistics 自带 _get_scope 只读组级 scope_type、不读用户级数据范围，
+    且 scope_type='none' 时 index 走 else「全校」分支（fail-open）。
+    """
+    def _client(username):
+        return _login(username, TEST_PWD)
+
+    # admin：全校统计 tab 可见（链接 href 指向 tab=school）
+    html = _client('dm_admin').get('/statistics/').get_data(as_text=True)
+    case('SCOPE admin 统计页含「全校统计」tab', 'tab=school' in html)
+
+    # 班主任（class 范围）：200 且不出现「全校统计」tab（tab=school 链接）
+    r = _client('dm_homeroom').get('/statistics/')
+    case('SCOPE 班主任统计页 200', r.status_code == 200, f'status={r.status_code}')
+    case('SCOPE 班主任无「全校统计」tab',
+         'tab=school' not in r.get_data(as_text=True))
+
+    # 年级长（grade 范围）：200 且不出现「全校统计」tab
+    r = _client('dm_leader').get('/statistics/')
+    case('SCOPE 年级长统计页 200', r.status_code == 200, f'status={r.status_code}')
+    case('SCOPE 年级长无「全校统计」tab',
+         'tab=school' not in r.get_data(as_text=True))
+
+    # 教务员（scope_type='none' 且无用户级范围）：fail-closed 403（修复前 fail-open 到全校）
+    r = _client('dm_office').get('/statistics/')
+    case('SCOPE 无范围账号统计页 403（fail-closed）', r.status_code == 403,
+         f'status={r.status_code}')
 
 
 # ── 执行 ────────────────────────────────────────────────────────────────────

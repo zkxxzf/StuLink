@@ -50,8 +50,9 @@
                         </div>
                         <div class="col-md-4">
                             <label class="form-label small">身份证号</label>
+                            {# 2026-10-13 字段级脱敏：已录入时只读展示，无 students.view_id_card 则显示脱敏值 #}
                             {% if form.id_card_number.data %}
-                            <div class="form-control form-control-sm bg-white border-0">{{ form.id_card_number.data }}</div>
+                            <div class="form-control form-control-sm bg-white border-0">{{ field_value(form.id_card_number.data, 'id_card') }}</div>
                             {% else %}
                             {{ form.id_card_number(class="form-control form-control-sm") }}
                             {% endif %}
@@ -95,14 +96,27 @@
             {% endif %}
             
             <!-- 联系方式 -->
+            {# 2026-10-13 字段级脱敏：无 students.view_phone 时只读展示脱敏号码，
+               并用 hidden 保留原值（否则保存会把号码清空）——改号需先获查看权限 #}
+            {% set _can_view_phone = current_user.has_perm('students.view_phone') %}
             <div class="row g-2 mb-3">
                 <div class="col-md-6">
-                    <label class="form-label small">联系方式 1</label>
+                    <label class="form-label small">联系方式 1{% if not _can_view_phone %} <span class="text-muted">（只读）</span>{% endif %}</label>
+                    {% if _can_view_phone %}
                     {{ form.phone1(class="form-control") }}
+                    {% else %}
+                    <input type="text" class="form-control bg-light" value="{{ field_value(form.phone1.data, 'phone') }}" readonly>
+                    <input type="hidden" name="phone1" value="{{ form.phone1.data or '' }}">
+                    {% endif %}
                 </div>
                 <div class="col-md-6">
-                    <label class="form-label small">联系方式 2</label>
+                    <label class="form-label small">联系方式 2{% if not _can_view_phone %} <span class="text-muted">（只读）</span>{% endif %}</label>
+                    {% if _can_view_phone %}
                     {{ form.phone2(class="form-control") }}
+                    {% else %}
+                    <input type="text" class="form-control bg-light" value="{{ field_value(form.phone2.data, 'phone') }}" readonly>
+                    <input type="hidden" name="phone2" value="{{ form.phone2.data or '' }}">
+                    {% endif %}
                 </div>
             </div>
             

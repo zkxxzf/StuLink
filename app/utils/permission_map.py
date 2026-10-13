@@ -31,6 +31,13 @@ MODULES = [
             {'key': 'sensitive', 'name': '敏感导出',
              'read': [], 'write': ['students.export_id_card',
                                    'students.export_phone']},
+            # 2026-10-13 敏感字段「查看」级（字段级）：standalone=True，不随模块写入批发，
+            # 只能单独勾选（默认不可见）。无此权限时页面/接口一律返回脱敏值
+            # （app/utils/sensitive.py），即使有「敏感导出」也不放行明文导出。
+            {'key': 'view_id_card', 'name': '查看身份证号', 'standalone': True,
+             'read': [], 'write': ['students.view_id_card']},
+            {'key': 'view_phone', 'name': '查看联系电话', 'standalone': True,
+             'read': [], 'write': ['students.view_phone']},
         ],
     },
     {
@@ -111,6 +118,10 @@ MODULES = [
              'read': [], 'write': ['academic.inspection_export']},
             {'key': 'forms', 'name': '问卷收集',
              'read': ['academic.forms_view'], 'write': ['academic.forms']},
+            # 2026-10-13（v1.19.47.25）教师手机号明文查看：standalone，不随模块写入批发。
+            # 无此权限时教师名单/导出只显示脱敏手机号。
+            {'key': 'teacher_phone', 'name': '教师手机号明文', 'standalone': True,
+             'read': [], 'write': ['academic.view_teacher_phone']},
         ],
     },
     {

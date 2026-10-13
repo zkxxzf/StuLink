@@ -148,10 +148,17 @@ def seed():
         db.session.add(UserDataScope(user_id=leader.id, grade='2025级'))
 
         # 画像/学生范围用种子学生：SEC2025001 在 2025级01班，SEC2024001 在 2024级01班
-        db.session.add(Student(student_number='SEC2025001', name='范围内学生',
-                               gender='男', grade='2025级', class_name='01班'))
-        db.session.add(Student(student_number='SEC2024001', name='范围外学生',
-                               gender='女', grade='2024级', class_name='01班'))
+        s_in = Student(student_number='SEC2025001', name='范围内学生',
+                       gender='男', grade='2025级', class_name='01班',
+                       phone1='13800138000', phone2='13900139000')
+        s_in.id_card_number = '110101199001011234'   # 透明加密写入
+        s_out = Student(student_number='SEC2024001', name='范围外学生',
+                        gender='女', grade='2024级', class_name='01班',
+                        phone1='13700137000')
+        db.session.add_all([s_in, s_out])
+        db.session.flush()
+        mk['student_in'] = s_in.id
+        mk['student_out'] = s_out.id
 
         e25 = Exam(name='2025级期中', grade='2025级', exam_date=date(2026, 4, 1))
         e24 = Exam(name='2024级期中', grade='2024级', exam_date=date(2026, 4, 1))
@@ -1411,8 +1418,13 @@ def check_SR():
          'class_in_scope' in assign and 'student_in_dorm_scope' in assign)
 
     # SR-4 宿舍统计年级长收敛本人年级
+    # 2026-10-13：statistics 由自带 _get_scope（只读组级 scope_type、scope_type='none'
+    # 时 fail-open 到全校）改为统一走 dormitory_scope.resolve_scope（含用户级数据范围 +
+    # fail-closed），越权 grade 参数收敛到授权年级内。
+    _stats_src = _read('app/modules/dormitory/routes/statistics.py')
     case('SR-4 年级长统计收敛本人年级',
-         "sel_grade = user_grade or ''" in _read('app/modules/dormitory/routes/statistics.py'))
+         'resolve_scope()' in _stats_src
+         and "if sel_grade not in allowed_grades:" in _stats_src)
 
     # SR-5 成绩 compare/export 数据范围 fail-closed
     case('SR-5 compare fail-closed',
@@ -1602,6 +1614,65 @@ def check_SR9():
         r = c2.get('/grade-mgmt/alumni?grade=2099级')
         case('SR-9 admin 可查任意毕业年级（旁路）', r.status_code == 200,
              str(r.status_code))
+
+
+@item('SR-10')
+def check_SR10():
+    """敏感字段（身份证号 / 联系电话）字段级权限与脱敏展示（2026-10-13 权限审计）。
+
+    此前学生身份证号 / 联系电话只有「导出」维度有权限点，**页面展示**完全没有控制 ——
+    只要拿到 students.view 就能看到明文（学生详情页身份证号、学生列表 / 宿舍床位卡
+    联系电话）。现新增字段级权限点（standalone，不随模块写入批发）：
+      students.view_id_card / students.view_phone / academic.view_teacher_phone
+    无权限时页面/接口一律返回脱敏值（app/utils/sensitive.py，后端决定而非前端隐藏）；
+    导出敏感列需「查看 + 导出」双权限。
+    """
+    from app.utils import permission_map as pm
+    from app.utils.sensitive import display, mask_phone
+
+    # 1) 权限映射：三个字段级权限点为 standalone 且不随模块「写入」批发
+    lv = pm.module_levels_to_item_levels({'students': 'write', 'academic': 'write'})
+    case('SR-10 view_id_card 为 standalone（不随模块写入批发）',
+         lv['students:view_id_card'] == 'none')
+    case('SR-10 view_phone 为 standalone', lv['students:view_phone'] == 'none')
+    case('SR-10 teacher_phone 为 standalone', lv['academic:teacher_phone'] == 'none')
+
+    # 2) 脱敏口径
+    case('SR-10 手机号脱敏前3后4', mask_phone('13800138000') == '138****8000',
+         mask_phone('13800138000'))
+
+    with app.app_context():
+        adm = db.session.get(User, uid('admin'))
+        leader = db.session.get(User, uid('leader'))
+        case('SR-10 管理员有身份证查看权', adm.has_perm('students.view_id_card'))
+        case('SR-10 年级长无身份证查看权',
+             not leader.has_perm('students.view_id_card'))
+        case('SR-10 年级长无手机号查看权', not leader.has_perm('students.view_phone'))
+        case('SR-10 年级长脱敏展示',
+             display('13800138000', 'phone', leader) == '138****8000')
+        case('SR-10 管理员明文展示',
+             display('13800138000', 'phone', adm) == '13800138000')
+
+    sid = uid('student_in')
+    with app.test_client() as c:
+        case('SR-10 年级长登录', login_ok(c, 'sec_leader', TEST_PWD).status_code == 200)
+        html = c.get('/students/').get_data(as_text=True)
+        case('SR-10 年级长学生列表：手机号脱敏', '138****8000' in html)
+        case('SR-10 年级长学生列表：不出现明文手机号', '13800138000' not in html)
+        html = c.get(f'/students/{sid}').get_data(as_text=True)
+        case('SR-10 年级长详情页：身份证脱敏', '110***********1234' in html)
+        case('SR-10 年级长详情页：不出现明文身份证', '110101199001011234' not in html)
+
+    with app.test_client() as c2:
+        case('SR-10 admin 登录', login_ok(c2, 'sec_admin', TEST_PWD).status_code == 200)
+        html = c2.get('/students/').get_data(as_text=True)
+        case('SR-10 管理员学生列表：手机号明文', '13800138000' in html)
+        html = c2.get(f'/students/{sid}').get_data(as_text=True)
+        case('SR-10 管理员详情页：身份证明文', '110101199001011234' in html)
+
+    # 3) 导出敏感列需「查看 + 导出」双权限（后端强校验，非仅前端置灰）
+    src = _read('app/utils/export_helpers.py')
+    case('SR-10 导出敏感列需查看+导出双权限', "config.get('view_perm')" in src)
 
 
 def main(argv):

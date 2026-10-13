@@ -157,7 +157,7 @@
                 {% if teacher %}
                 <i class="bi bi-person-badge"></i> {{ teacher.name }} · {{ teacher.teacher_uid }}
                 {% if teacher.subject %} · {{ teacher.subject }}{% endif %}
-                {% if teacher.phone %} · {{ teacher.phone }}{% endif %}
+                {% if teacher.phone %} · {{ field_value(teacher.phone, 'teacher_phone') }}{% endif %}
                 {% else %}
                 <i class="bi bi-exclamation-triangle text-warning"></i> 教师编号 {{ uid }} 不在教师名单中（课表数据仍按编号展示）
                 {% endif %}

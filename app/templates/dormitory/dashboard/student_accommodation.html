@@ -117,8 +117,8 @@
                     <td>{% if s.accommodation and s.accommodation.day_student_type %}<span class="badge bg-info">{{ s.accommodation.day_student_type }}</span>{% else %}-{% endif %}</td>
                     <td>{% if s.bed_assignment and s.bed_assignment.room %}{{ s.bed_assignment.room.building }} {{ s.bed_assignment.room.room_number }}{% else %}-{% endif %}</td>
                     <td>{% if s.bed_assignment %}{{ s.bed_assignment.bed_number }}床{% else %}-{% endif %}</td>
-                    <td>{{ s.phone1 or '-' }}</td>
-                    <td>{{ s.phone2 or '-' }}</td>
+                    <td>{{ field_value(s.phone1, 'phone') or '-' }}</td>
+                    <td>{{ field_value(s.phone2, 'phone') or '-' }}</td>
                 </tr>
                 {% endfor %}
                 {% if not students %}
@@ -317,14 +317,16 @@
                         </div>
                         <div class="col-md-6">
                             <h6 class="text-muted mb-2">敏感信息（需权限）</h6>
+                            {# 2026-10-13：敏感列导出需「查看 + 导出」双权限 #}
+                            {% set _can_export_ph = current_user.has_perm('students.export_phone') and current_user.has_perm('students.view_phone') %}
                             <div class="space-y-2">
                                 <label class="form-check">
-                                    <input type="checkbox" class="form-check-input" name="columns" value="phone1" {% if not current_user.has_perm('students.export_phone') %}disabled{% endif %}>
-                                    <span class="form-check-label">联系方式1{% if not current_user.has_perm('students.export_phone') %} <span class="text-danger small">(无权限)</span>{% endif %}</span>
+                                    <input type="checkbox" class="form-check-input" name="columns" value="phone1" {% if not _can_export_ph %}disabled{% endif %}>
+                                    <span class="form-check-label">联系方式1{% if not _can_export_ph %} <span class="text-danger small">(无权限)</span>{% endif %}</span>
                                 </label>
                                 <label class="form-check">
-                                    <input type="checkbox" class="form-check-input" name="columns" value="phone2" {% if not current_user.has_perm('students.export_phone') %}disabled{% endif %}>
-                                    <span class="form-check-label">联系方式2{% if not current_user.has_perm('students.export_phone') %} <span class="text-danger small">(无权限)</span>{% endif %}</span>
+                                    <input type="checkbox" class="form-check-input" name="columns" value="phone2" {% if not _can_export_ph %}disabled{% endif %}>
+                                    <span class="form-check-label">联系方式2{% if not _can_export_ph %} <span class="text-danger small">(无权限)</span>{% endif %}</span>
                                 </label>
                             </div>
                         </div>

@@ -9,7 +9,7 @@
 本模块把「当前用户能看哪些宿舍/班级/学生」收敛成一组函数，宿舍相关查询统一调用，
 禁止再各自内联角色判断（清单第 0 节铁律②）。
 
-口径（与宿舍统计页 statistics._get_scope 同源）：
+口径（与宿舍统计页 statistics.index 同源，2026-10-13 起统一走 resolve_scope）：
 - admin / 组级 scope=school（含宿管组）→ 全校，不过滤
 - 用户级数据范围（权限管理页第二张表）→ 仅授权年级
 - 组级 scope=grade（年级长）→ 仅本年级
@@ -67,6 +67,16 @@ def scope_kind(user=None):
     避免在调用侧再写一套角色/范围判定（保持唯一口径）。
     """
     return _resolve(_current(user))[0]
+
+
+def resolve_scope(user=None):
+    """公开的范围解析入口 → (kind, grades, pairs)。
+
+    2026-10-13：宿舍统计页 statistics.index 原自带 _get_scope（只读组级 scope_type、
+    不读用户级数据范围，且 scope_type='none' 时 fail-open 到全校）。改为统一走本函数，
+    与 rooms/assignments 同口径（含 UserDataScope 与 fail-closed）。
+    """
+    return _resolve(_current(user))
 
 
 def _class_match(class_name):

@@ -455,17 +455,10 @@ def edit(id):
 @perm_required('students.import')
 def delete(id):
     student = Student.query.get_or_404(id)
-    # 权限控制：检查用户是否有权限删除该学生
-    if current_user.role == 'homeroom_teacher':
-        if student.grade != current_user.grade or student.class_name != current_user.class_name:
-            flash('无权删除该学生', 'danger')
-            return redirect(url_for('students.list_students'))
-    elif current_user.role == 'grade_leader':
-        if student.grade != current_user.grade:
-            flash('无权删除该年级学生', 'danger')
-            return redirect(url_for('students.list_students'))
-    elif current_user.role not in ('admin',):
-        flash('无权删除学生', 'danger')
+    # 2026-10-13 审计修复：原内联 role 判断既漏用户级数据范围、又把 staff 系
+    # （教务主任等 scope=school）误拦；统一收敛到 apply_student_scope（与列表/搜索/导出同源）。
+    if not _student_in_scope(student):
+        flash('无权删除该学生', 'danger')
         return redirect(url_for('students.list_students'))
     # 先删除床位分配
     if student.bed_assignment:
@@ -1140,9 +1133,12 @@ def batch_delete():
         flash('参数错误', 'danger')
         return redirect(url_for('students.list_students'))
 
-    students = Student.query.filter(Student.id.in_(id_list)).all()
+    # 2026-10-13 审计修复：原 `Student.query.filter(id.in_(...))` 完全没有数据范围过滤，
+    # 持 students.import 的账号可传任意 id 删除全校学生（越权）。收敛到统一范围口径。
+    students = apply_student_scope(
+        Student.query.filter(Student.id.in_(id_list))).all()
     if not students:
-        flash('未找到选中的学生', 'warning')
+        flash('未找到选中的学生（或超出你的数据范围）', 'warning')
         return redirect(url_for('students.list_students'))
 
     count = len(students)

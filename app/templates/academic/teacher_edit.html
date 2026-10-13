@@ -36,8 +36,15 @@
 
                     <div class="row">
                         <div class="col-md-6 mb-3">
-                            <label class="form-label">手机号（可作登录账号）</label>
+                            <label class="form-label">手机号（可作登录账号）{% if not current_user.has_perm('academic.view_teacher_phone') %} <span class="text-muted">（只读）</span>{% endif %}</label>
+                            {# 2026-10-13 字段级脱敏：无 academic.view_teacher_phone 时只读展示脱敏号码，
+                               并用 hidden 保留原值（否则保存会把手机号清空） #}
+                            {% if current_user.has_perm('academic.view_teacher_phone') %}
                             <input name="phone" class="form-control" maxlength="11" value="{{ t.phone or '' }}">
+                            {% else %}
+                            <input type="text" class="form-control bg-light" value="{{ field_value(t.phone, 'teacher_phone') }}" readonly>
+                            <input type="hidden" name="phone" value="{{ t.phone or '' }}">
+                            {% endif %}
                         </div>
                         <div class="col-md-6 mb-3">
                             <label class="form-label">任教学科</label>

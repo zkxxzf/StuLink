@@ -20,7 +20,7 @@
             <div class="rd-berth-sub">
                 {{ stu.student_number or '无学号' }}
                 {% if stu.class_name %}<span class="rd-dot">·</span>{{ stu.grade or '' }}{{ stu.class_name }}{% endif %}
-                {% if stu.phone1 %}<span class="rd-dot">·</span>{{ stu.phone1 }}{% endif %}
+                {% if stu.phone1 %}<span class="rd-dot">·</span>{{ field_value(stu.phone1, 'phone') }}{% endif %}
             </div>
             {% else %}
             <div class="rd-berth-name rd-berth-none">空床待分配</div>

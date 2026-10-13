@@ -111,6 +111,7 @@ def teachers_export():
     from openpyxl.utils import get_column_letter
 
     from app.utils.export_helpers import xl_safe
+    from app.utils.sensitive import display as _sensitive_display
 
     filters = _teacher_filters()
     teachers = _teacher_query(filters).order_by(Teacher.teacher_uid).all()
@@ -123,6 +124,9 @@ def teachers_export():
     ws.title = '教师名单'
     headers = ['序号', '教师编号', '姓名', '学科', '手机号', '身份证号(掩码)',
                '登录账号', '状态', '备注']
+    # 2026-10-13 字段级脱敏：无 academic.view_teacher_phone 时导出脱敏手机号
+    _phone_plain = current_user.has_perm('academic.view_teacher_phone')
+    headers[4] = '手机号' if _phone_plain else '手机号(掩码)'
     for ci, h in enumerate(headers, 1):
         c = ws.cell(row=1, column=ci, value=h)
         c.font = Font(bold=True, color='FFFFFF')
@@ -131,7 +135,8 @@ def teachers_export():
     for i, t in enumerate(teachers, 1):
         account = users.get(t.user_id) if t.user_id else None
         values = [
-            i, t.teacher_uid, t.name, t.subject or '', t.phone or '',
+            i, t.teacher_uid, t.name, t.subject or '',
+            (t.phone or '') if _phone_plain else _sensitive_display(t.phone, 'teacher_phone'),
             id_card_util.masked_from_cipher(t.id_card_enc) or '',
             account.username if account else '',
             '在职' if t.status == 'active' else '离职', t.note or '',

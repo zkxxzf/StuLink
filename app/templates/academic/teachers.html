@@ -66,7 +66,8 @@
                     <td><code>{{ r.t.teacher_uid }}</code></td>
                     <td class="fw-bold">{{ r.t.name }}</td>
                     <td>{{ r.t.subject or '-' }}</td>
-                    <td>{{ r.t.phone or '-' }}</td>
+                    {# 2026-10-13 字段级脱敏：无 academic.view_teacher_phone 时显示 138****5678 #}
+                    <td>{{ field_value(r.t.phone, 'teacher_phone') or '-' }}</td>
                     <td>
                         {% if r.id_masked %}{{ r.id_masked }}
                         {% else %}<span class="text-muted small">未录入</span>{% endif %}

@@ -84,8 +84,8 @@
                 <td>{{ s.accommodation.boarding_type if s.accommodation else '-' }}</td>
                 <td>{{ s.enrollment_status or '-' }}</td>
                 <td><small>{{ s.graduation_school or '-' }}{% if s.graduation_school_code %} <span class="badge bg-secondary">{{ s.graduation_school_code }}</span>{% endif %}</small></td>
-                <td>{{ s.phone1 or '-' }}</td>
-                <td>{{ s.phone2 or '-' }}</td>
+                <td>{{ field_value(s.phone1, 'phone') or '-' }}</td>
+                <td>{{ field_value(s.phone2, 'phone') or '-' }}</td>
                 <td><small>{{ s.graduated_at or '-' }}</small></td>
             </tr>
             {% endfor %}

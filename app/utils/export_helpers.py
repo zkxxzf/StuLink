@@ -72,16 +72,20 @@ SENSITIVE_COLUMNS = {
     'id_card_number': {
         'label': '身份证号',
         'perm': 'students.export_id_card',
+        # 2026-10-13：导出明文还需「查看」权限（看不到明文就不允许导出明文）
+        'view_perm': 'students.view_id_card',
         'width': 18,
     },
     'phone1': {
         'label': '联系方式1',
         'perm': 'students.export_phone',
+        'view_perm': 'students.view_phone',
         'width': 15,
     },
     'phone2': {
         'label': '联系方式2',
         'perm': 'students.export_phone',
+        'view_perm': 'students.view_phone',
         'width': 15,
     },
     'graduation_school': {
@@ -185,7 +189,10 @@ def do_export_students(args):
             selected_widths.append(10)
         elif field in SENSITIVE_COLUMNS:
             config = SENSITIVE_COLUMNS[field]
-            if current_user.has_perm(config['perm']):
+            # 2026-10-13：导出敏感列需同时具备「导出」与「查看」两项权限
+            if (current_user.has_perm(config['perm'])
+                    and (not config.get('view_perm')
+                         or current_user.has_perm(config['view_perm']))):
                 selected_columns.append((field, config['label']))
                 selected_widths.append(config['width'])
         elif field in DORMITORY_COLUMNS:   # v1.19.47.4 宿舍信息列（只读，无额外权限）
@@ -304,11 +311,13 @@ ACCOMMODATION_SENSITIVE_COLUMNS = {
     'phone1': {
         'label': '联系方式1',
         'perm': 'students.export_phone',
+        'view_perm': 'students.view_phone',   # 2026-10-13 双权限
         'width': 15,
     },
     'phone2': {
         'label': '联系方式2',
         'perm': 'students.export_phone',
+        'view_perm': 'students.view_phone',
         'width': 15,
     },
 }
@@ -387,7 +396,10 @@ def do_export_student_accommodation(args):
             selected_widths.append(10)
         elif field in ACCOMMODATION_SENSITIVE_COLUMNS:
             config = ACCOMMODATION_SENSITIVE_COLUMNS[field]
-            if current_user.has_perm(config['perm']):
+            # 2026-10-13：导出敏感列需同时具备「导出」与「查看」两项权限
+            if (current_user.has_perm(config['perm'])
+                    and (not config.get('view_perm')
+                         or current_user.has_perm(config['view_perm']))):
                 selected_columns.append((field, config['label']))
                 selected_widths.append(config['width'])
 

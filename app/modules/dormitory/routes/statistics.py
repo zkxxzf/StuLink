@@ -5,13 +5,14 @@ from flask import (Blueprint, render_template, request, flash, redirect,
                    url_for, send_file, abort)
 from markupsafe import Markup
 from flask_login import login_required, current_user
-from app.models import Student, Room, BedAssignment, UserClassLink, StudentAccommodation
+from app.models import Student, Room, BedAssignment, StudentAccommodation
 from app.extensions import db
 from sqlalchemy import func
 from app.utils.helpers import (get_dict_values, get_active_grades, get_class_options,
                                is_standard_class, log_operation, get_graduated_grades)
 from app.utils.decorators import perm_required
 from app.utils.alumni_scope import filter_alumni_grades, assert_alumni_grade_visible
+from app.utils.dormitory_scope import resolve_scope, room_scope_query
 import io
 import uuid
 import time
@@ -24,32 +25,10 @@ logger = logging.getLogger(__name__)
 
 bp = Blueprint('statistics', __name__, url_prefix='/statistics')
 
-SCOPE_CLASS = 'class'    # 班主任：只看所管班级
-SCOPE_GRADE = 'grade'    # 年级长：只看所管年级
-SCOPE_SCHOOL = 'school'  # 全校组/admin：看全部
 
 def _is_valid_class(class_name):
     """判断是否为标准班级名（统一走 helpers.is_standard_class，避免口径漂移）"""
     return is_standard_class(class_name)
-
-
-def _get_scope():
-    """获取当前用户的权限范围
-
-    H-2：此前「无权限组」回落 SCOPE_SCHOOL（全校可读），等于给未配置身份的账号
-    开了全校后门；现在一律 403，由权限组显式授予范围。
-    """
-    if current_user.role == 'admin':
-        return SCOPE_SCHOOL, None
-    pg = current_user.permission_group
-    if not pg:
-        abort(403)
-    return pg.scope_type, current_user.grade
-
-
-def _get_user_class_links():
-    """获取当前班主任的所有班级关联"""
-    return UserClassLink.query.filter_by(user_id=current_user.id).all()
 
 
 def _load_stats_base():
@@ -73,17 +52,22 @@ def _load_stats_base():
     return students, acc_map
 
 
-def _build_per_class_stats(filter_grade=None, filter_classes=None, _base=None):
+def _build_per_class_stats(filter_grade=None, filter_grades=None,
+                           filter_classes=None, _base=None):
     """按年级+班级统计（口径同旧版：排除毕业年级与非标准班级）
 
     _base: 可选的 _load_stats_base() 结果，同一请求内多个 builder 共享，避免重复查询
+    filter_grades: 2026-10-13 新增，用户级数据范围可能授权多个年级（集合过滤）
     """
     students, acc_map = _base if _base is not None else _load_stats_base()
     allowed = {(g, c) for g, c in filter_classes} if filter_classes else None
+    gset = set(filter_grades) if filter_grades else None
 
     buckets = {}
     for sid, grade, class_name, gender in students:
         if filter_grade and grade != filter_grade:
+            continue
+        if gset is not None and grade not in gset:
             continue
         # 过滤非标准班级（未分班、不分班、转出等）
         if not _is_valid_class(class_name):
@@ -130,13 +114,16 @@ def _build_per_class_stats(filter_grade=None, filter_classes=None, _base=None):
     return stats
 
 
-def _build_per_grade_stats(filter_grade=None, _base=None):
+def _build_per_grade_stats(filter_grade=None, filter_grades=None, _base=None):
     """按年级汇总（在校生口径：不包含“不分班”学生，与旧版一致）"""
     students, acc_map = _base if _base is not None else _load_stats_base()
+    gset = set(filter_grades) if filter_grades else None
 
     per = {}
     for sid, grade, class_name, gender in students:
         if filter_grade and grade != filter_grade:
+            continue
+        if gset is not None and grade not in gset:
             continue
         # 在校生口径：不包含“不分班”学生（其余非标准班级照旧计入，与旧版一致）
         if (class_name or '') == '不分班':
@@ -208,9 +195,22 @@ def _build_school_stats(_base=None):
 
 
 def _dorm_stats():
-    total_rooms = Room.query.filter_by(is_active=True).count()
-    occupied_beds = BedAssignment.query.filter(BedAssignment.student_id.isnot(None)).count()
-    total_beds = BedAssignment.query.count()
+    """宿舍容量/入住汇总。
+
+    2026-10-13：按可见范围过滤（原为全校口径 —— 非全校账号在统计页会看到
+    全校房间数/床位数/入住率，与 per_class 统计口径不一致）。
+    """
+    rq = room_scope_query(Room.query.filter_by(is_active=True))
+    room_ids = [r[0] for r in rq.with_entities(Room.id).all()]
+    if not room_ids:
+        return {'total_rooms': 0, 'total_beds': 0, 'occupied_beds': 0,
+                'empty_beds': 0, 'occupancy_rate': 0}
+    total_rooms = len(room_ids)
+    total_beds = BedAssignment.query.filter(
+        BedAssignment.room_id.in_(room_ids)).count()
+    occupied_beds = BedAssignment.query.filter(
+        BedAssignment.room_id.in_(room_ids),
+        BedAssignment.student_id.isnot(None)).count()
     return {
         'total_rooms': total_rooms,
         'total_beds': total_beds,
@@ -223,43 +223,58 @@ def _dorm_stats():
 @bp.route('/')
 @perm_required('statistics.view')  # H-2：此前只有 @login_required
 def index():
-    scope_type, user_grade = _get_scope()
-    tab = request.args.get('tab', scope_type)  # 默认选用户范围对应的tab
+    # 2026-10-13 审计修复：原 _get_scope 只读组级 scope_type，不读用户级数据范围，
+    # 且 scope_type='none' 时 fail-open 到全校。改为统一走 dormitory_scope.resolve_scope
+    # （与 rooms/assignments 同口径：admin/组级 school → 全校；用户级范围 → 授权年级；
+    #  组级 grade → 本年级；组级 class → 所辖班级；无范围 → 403 fail-closed）。
+    kind, scope_grades, scope_pairs = resolve_scope()
+    if kind == 'none':
+        abort(403)
+    is_school = (kind == 'school')
+    scope_type = 'school' if is_school else ('class' if kind == 'class' else 'grade')
+
+    tab = request.args.get('tab', 'school' if is_school else 'class')  # 默认选用户范围对应的tab
     if tab == 'grade':  # 旧链接兼容：年级统计已并入班级统计
         tab = 'class'
     if tab not in ('school', 'class', 'import', 'rooms'):
         tab = 'school'
-    sel_grade = request.args.get('grade', user_grade or '')
 
     # 一次性载入基础数据（2 条 SQL），三个 builder 共享，避免整页 400+ 条查询
     base = _load_stats_base()
 
-    # 班主任：只允许看 class tab
-    if scope_type == SCOPE_CLASS:
-        tab = 'class'
-        links = _get_user_class_links()
-        allowed = [(l.grade, l.class_name) for l in links]
-        per_class_stats = _build_per_class_stats(filter_classes=allowed, _base=base)
-        per_grade_stats = []
-        school_stats = {}
-        grade_options = list(set(l.grade for l in links))
-    # 年级长：只看 class tab，限制年级
-    elif scope_type == SCOPE_GRADE:
-        if tab == 'school':
-            tab = 'class'
-        # 2026-10-11 审计修复：sel_grade 原优先取 URL 参数（L231）且不校验归属 →
-        # 年级长可传 grade=他年级 越权查看他年级班级统计与房间明细。强制收敛到本人年级。
-        sel_grade = user_grade or ''
-        per_class_stats = _build_per_class_stats(filter_grade=sel_grade, _base=base)
-        per_grade_stats = _build_per_grade_stats(filter_grade=user_grade, _base=base)
-        school_stats = _build_school_stats(_base=base) if tab == 'school' else {}
-        grade_options = [user_grade] if user_grade else []
-    else:
+    if is_school:
         # 全校组/admin：全部数据
-        per_class_stats = _build_per_class_stats(filter_grade=sel_grade if tab == 'class' and sel_grade else None, _base=base)
+        sel_grade = request.args.get('grade', '') or ''
+        per_class_stats = _build_per_class_stats(
+            filter_grade=sel_grade if (tab == 'class' and sel_grade) else None, _base=base)
         per_grade_stats = _build_per_grade_stats(_base=base)
         school_stats = _build_school_stats(_base=base)
         grade_options = sorted(get_active_grades(), reverse=True)
+    elif kind == 'class':
+        # 班主任：只允许看 class tab，仅所辖班级
+        tab = 'class'
+        allowed_classes = sorted(scope_pairs or set())
+        allowed_grades = sorted({g for g, _ in allowed_classes})
+        sel_grade = ''
+        per_class_stats = _build_per_class_stats(filter_classes=allowed_classes, _base=base)
+        per_grade_stats = []
+        school_stats = {}
+        grade_options = allowed_grades
+    else:
+        # 年级长（本年级）/ 用户级数据范围（授权年级，可多年级）：只看 class tab
+        tab = 'class'
+        allowed_grades = sorted(scope_grades or set())
+        if not allowed_grades:
+            abort(403)
+        # 2026-10-11 审计修复：sel_grade 原优先取 URL 参数且不校验归属 → 越权查看他年级；
+        # 2026-10-13 扩展到用户级范围：参数必须落在授权年级内，否则收敛。
+        sel_grade = request.args.get('grade', '') or ''
+        if sel_grade not in allowed_grades:
+            sel_grade = allowed_grades[0] if len(allowed_grades) == 1 else ''
+        per_class_stats = _build_per_class_stats(filter_grades=set(allowed_grades), _base=base)
+        per_grade_stats = _build_per_grade_stats(filter_grades=set(allowed_grades), _base=base)
+        school_stats = {}
+        grade_options = allowed_grades
 
     # 宿舍分配明细（原 /rooms/report）：年级 → 性别 → 房间列表（一房一行）
     room_tree = {}
@@ -274,6 +289,8 @@ def index():
             Room.class_name.isnot(None),
             Room.class_name != ''
         )
+        # 2026-10-13：房间明细同样收敛到可见范围（原为全校房间，非全校账号可见全部）
+        rq = room_scope_query(rq)
         if sel_grade:
             rq = rq.filter_by(grade=sel_grade)
         # 以宿舍为单位：房间按 宿舍楼→楼层→房间号 排列
