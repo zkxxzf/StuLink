@@ -83,6 +83,7 @@ td.ovw-cur-col { background: #ecfdf5 !important; }
 .ovw-chk-late { background: #fef3c7; color: #92400e; }
 .ovw-chk-absent { background: #fee2e2; color: #991b1b; }
 .ovw-chk-swap { background: #e0e7ff; color: #3730a3; }
+.ovw-chk-exam { background: #e0f2fe; color: #075985; }   /* 2026-10-13 新增：考试 */
 .ovw-chk-other { background: #e5e7eb; color: #4b5563; }
 
 /* ── 移动端：压缩、隐藏时间与教师 ─────────────────────────────── */

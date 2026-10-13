@@ -1,6 +1,7 @@
 /* StuLink v1.18.8.0 · 查课核对页（2026-10-09 改版）
  * 页面版式：与全校总课表同款矩阵 —— 行＝班级、列＝节次，一天所有节次一次铺开。
- * 交互：点格子弹出标记面板（正常/迟到/缺课/调课/其他 + 备注）→
+ * 交互：单击=正常 / 双击=迟到 / 右键=缺勤·调课·考试等（2026-10-13 起「缺课」改叫「缺勤」，
+ *       并新增「考试」：该格是考试而非正常上课，不计课时工作量、也不算违纪/迟到）→
  *       POST /inspection/mark 写回 inspection_records，就地更新徽标与"覆盖率"。
  *       支持"未标记的全部正常"一键巡课；筛选（日期/年级）走服务端渲染整页刷新。
  */
@@ -11,7 +12,10 @@
     var $ = window.jQuery;
     if (!$) { return; }
 
-    var RESULT_TEXT = { normal: '正常', late: '迟到', absent: '缺课', swap: '调课', other: '其他' };
+    // 2026-10-13：'缺课'统一改为'缺勤'；新增 'exam'（考试：该格是考试而非正常上课，
+    // 不计课时工作量、也不算违纪/迟到 —— 考试期间有正常考务工作量）
+    var RESULT_TEXT = { normal: '正常', late: '迟到', absent: '缺勤', swap: '调课',
+                        exam: '考试', other: '其他' };
 
     function notify(msg, type) {
         if (typeof window.toast === 'function') { window.toast(msg, type || 'success'); return; }
@@ -149,7 +153,7 @@
         }, 260);
     });
 
-    /* ── 右键菜单：缺课 / 调课 / 迟到说明 / 其他 / 撤销 ── */
+    /* ── 右键菜单：正常 / 缺勤 / 迟到（含说明）/ 调课 / 考试 / 其他 / 撤销 ── */
     var $menu = null;
     function closeMenu() { if ($menu) { $menu.remove(); $menu = null; } }
     function openMenu($el, x, y) {
@@ -157,10 +161,11 @@
         $menu = $('<div class="chk-menu"></div>').css({ left: x + 'px', top: y + 'px' });
         var items = [
             ['normal', '正常', 'success'],
+            ['absent', '缺勤', 'danger'],
             ['late', '迟到', 'warning'],
             ['late-note', '迟到说明…（如迟到 5 分钟）', 'warning'],
-            ['absent', '缺课', 'danger'],
             ['swap', '调课', 'primary'],
+            ['exam', '考试', 'info'],
             ['other', '其他', 'secondary'],
             ['clear', '撤销标记', 'secondary']
         ];

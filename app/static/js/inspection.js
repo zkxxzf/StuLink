@@ -1,6 +1,11 @@
-/* StuLink 查课统计：ECharts 图表 + 批量录入动态行
+/* StuLink 查课：ECharts 图表 + 批量录入动态行
  *
- * 页面数据来源：模板 inspection.html 里的
+ * 使用页面（2026-10-13 起）：
+ *     · 查课统计页 inspection.html  —— 只做图表统计（statsUrl 有值）
+ *     · 查课录入页 inspection_entry.html —— 只做批量录入（statsUrl 为空，
+ *       loadStats() 直接返回；批量表格直接铺在「批量录入」页签里）
+ *
+ * 页面数据来源：模板里的
  *     <script id="inspectionData" type="application/json"> … </script>
  * 该 JSON 的字段形状（2026-10-10 起）：
  *     statsUrl : string
@@ -27,6 +32,7 @@ function esc(v) {
 
 function loadStats(year) {
     var url = config.statsUrl;
+    if (!url) { return; }   // 独立查课录入页没有统计区域（statsUrl 为空）
     if (year) url += '?year=' + encodeURIComponent(year);
     $.getJSON(url, function (res) {
         renderPie(res.result_distribution || []);
@@ -144,7 +150,9 @@ function renderPie(data) {
         if (!el) return;
         charts.pie = echarts.init(el);
     }
-    var colorMap = { '正常': '#10b981', '迟到': '#f59e0b', '缺课': '#ef4444', '调课': '#6366f1', '其他': '#94a3b8' };
+    // 2026-10-13：'缺课'统一改为'缺勤'，新增'考试'（与 models/academic.py 的 INSPECTION_RESULTS 同步）
+    var colorMap = { '正常': '#10b981', '迟到': '#f59e0b', '缺勤': '#ef4444', '调课': '#6366f1',
+                     '考试': '#0ea5e9', '其他': '#94a3b8' };
     var pieData = data.map(function (d) {
         return { name: d.name, value: d.value, itemStyle: { color: colorMap[d.name] || undefined } };
     });
@@ -171,7 +179,7 @@ function renderLine(trend) {
     var months = trend.map(function (d) { return d.month; });
     charts.line.setOption({
         tooltip: { trigger: 'axis' },
-        legend: { data: ['正常', '迟到', '缺课', '调课'], top: 0, textStyle: { fontSize: 11 } },
+        legend: { data: ['正常', '迟到', '缺勤', '调课', '考试'], top: 0, textStyle: { fontSize: 11 } },
         grid: { left: 45, right: 15, top: 35, bottom: 30 },
         xAxis: { type: 'category', data: months, axisLabel: { fontSize: 10, rotate: months.length > 8 ? 30 : 0 } },
         yAxis: { type: 'value', axisLabel: { fontSize: 11 }, minInterval: 1 },
@@ -181,10 +189,12 @@ function renderLine(trend) {
               areaStyle: { color: 'rgba(16,185,129,0.08)' } },
             { name: '迟到', type: 'line', data: trend.map(function (d) { return d.late; }),
               smooth: true, lineStyle: { color: '#f59e0b', width: 2 }, itemStyle: { color: '#f59e0b' } },
-            { name: '缺课', type: 'line', data: trend.map(function (d) { return d.absent; }),
+            { name: '缺勤', type: 'line', data: trend.map(function (d) { return d.absent; }),
               smooth: true, lineStyle: { color: '#ef4444', width: 2 }, itemStyle: { color: '#ef4444' } },
             { name: '调课', type: 'line', data: trend.map(function (d) { return d.swap; }),
-              smooth: true, lineStyle: { color: '#6366f1', width: 2 }, itemStyle: { color: '#6366f1' } }
+              smooth: true, lineStyle: { color: '#6366f1', width: 2 }, itemStyle: { color: '#6366f1' } },
+            { name: '考试', type: 'line', data: trend.map(function (d) { return d.exam; }),
+              smooth: true, lineStyle: { color: '#0ea5e9', width: 2 }, itemStyle: { color: '#0ea5e9' } }
         ]
     });
 }
@@ -226,13 +236,12 @@ function addBatchRow() {
     rowIdx++;
 }
 
-function initBatchModal() {
-    // 打开模态框时，如果表格为空则添加 5 行
-    $('#batchModal').on('shown.bs.modal', function () {
-        if ($('#batchBody tr').length === 0) {
-            for (var i = 0; i < 5; i++) addBatchRow();
-        }
-    });
+/* 2026-10-13：批量录入随「查课录入」独立成页（原为统计页的模态框）——
+   表格直接铺在录入页的「批量录入」页签里，进入页面即铺好 5 行空行。 */
+function initBatchEntry() {
+    if ($('#batchBody tr').length === 0) {
+        for (var i = 0; i < 5; i++) addBatchRow();
+    }
     // 添加行
     $('#btnAddRow').on('click', function () {
         addBatchRow();
@@ -296,8 +305,8 @@ $(function () {
         if (charts.line) charts.line.resize();
     });
 
-    // 批量录入
-    initBatchModal();
+    // 批量录入（独立查课录入页；统计页已不再承载录入）
+    initBatchEntry();
 });
 
 })();

@@ -1,5 +1,5 @@
 # StuLink v1.19.47.29 2026-10-10
-# 教务 · 查课统计：记录录入 / 列表筛选 / 月度统计 / 批量录入 / 导出 / 图表API
+# 教务 · 查课：统计页（列表筛选 / 月度统计 / 导出 / 图表API）+ 独立录入页（单条/批量）
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 import io
 import json
@@ -144,7 +144,7 @@ def inspection_page():
                            f_teacher=teacher_uid, f_result=result_f, f_grade=grade_f,
                            f_from=d_from, f_to=d_to,
                            month_total=month_total, month_abnormal=month_abnormal,
-                           by_teacher=by_teacher, today=today.isoformat(),
+                           by_teacher=by_teacher,
                            can_edit=current_user.has_perm('academic.edit'))
 
 

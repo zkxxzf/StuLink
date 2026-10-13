@@ -698,7 +698,8 @@
                               'academic.schedule_teacher', 'academic.schedule_dates',
                               'academic.schedule_versions', 'academic.schedule_periods',
                               'academic.schedule_copy', 'academic.schedule_smart_import'] %}
-            {% set chk_eps = ['academic.inspection_live_schedule', 'academic.inspection_page'] %}
+            {% set chk_eps = ['academic.inspection_entry_page',
+                              'academic.inspection_live_schedule', 'academic.inspection_page'] %}
             {% set tch_eps = ['academic.teachers_page', 'academic.teacher_links_page',
                               'academic.subject_leaders'] %}
             {% set form_eps = ['academic.form_list', 'academic.form_fill_list',
@@ -732,6 +733,13 @@
                 <i class="bi bi-chevron-down small ms-auto aca-caret"></i>
             </a>
             <div class="collapse {% if aca_ep in chk_eps %}show{% endif %}" id="navAcaChk">
+                {# 2026-10-13：录入（单条 + 批量）从查课统计页拆出为独立页 #}
+                {% if current_user.has_perm('academic.edit') %}
+                <a class="nav-link ps-4 {% if aca_ep == 'academic.inspection_entry_page' %}active{% endif %}"
+                   href="{{ url_for('academic.inspection_entry_page') }}">
+                    <i class="bi bi-pencil-square"></i>查课录入
+                </a>
+                {% endif %}
                 <a class="nav-link ps-4 {% if aca_ep == 'academic.inspection_live_schedule' %}active{% endif %}"
                    href="{{ url_for('academic.inspection_live_schedule') }}">
                     <i class="bi bi-broadcast"></i>实时查课
