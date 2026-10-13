@@ -31,7 +31,7 @@ def mask_text(text):
 
 
 class MaskingFilter(logging.Filter):
-    """对日志内容做脱敏（含异常栈中的敏感串）"""
+    """对日志内容做脱敏（message 层；异常栈由 MaskingFormatter 兜住）"""
 
     def filter(self, record):
         try:
@@ -40,8 +40,10 @@ class MaskingFilter(logging.Filter):
             if masked != msg:
                 record.msg = masked
                 record.args = ()
-            if record.exc_text:
-                record.exc_text = mask_text(record.exc_text)
+            # 2026-10-13 审计修复：record.exc_text 是在 Formatter.format() 内部
+            # （即 handler 过滤**之后**）才由 formatException 生成，Filter 阶段它
+            # 恒为 None，原来这里的脱敏分支永不生效。异常栈改由下面的
+            # MaskingFormatter 在最终拼接时统一掩码。
         except Exception:  # noqa: BLE001
             # 2026-10-10：**此处禁止打日志** —— ① 本 Filter 被装到各 logger 上，
             # 内部 logger.warning 会触发 filter 重入（递归风险）；
@@ -49,6 +51,21 @@ class MaskingFilter(logging.Filter):
             # 维持原「静默降级」（返回 True 让日志照常输出），仅加说明。
             pass
         return True
+
+
+class MaskingFormatter(logging.Formatter):
+    """在最终输出串上再脱敏一次，专门兜住**异常栈**。
+
+    Python 的 LogRecord.exc_text 由 Formatter.formatException() 在 format() 内部
+    生成，晚于 Filter；且异常信息里常带业务上下文（例如 "student 4101231999..."
+    出现在异常 message 或堆栈末行的 repr 里），只掩 message 会漏。
+    """
+
+    def format(self, record):
+        try:
+            return mask_text(super().format(record))
+        except Exception:  # noqa: BLE001  脱敏失败时退回原始输出，不能吞日志
+            return super().format(record)
 
 
 _FACTORY_INSTALLED = False
@@ -60,13 +77,34 @@ def _install_on_handlers():
     logger 级过滤器只作用于"通过该 logger 发出"的记录，别的 logger 传播过来的不会过；
     handler 级过滤器则对**所有到达该 handler 的记录**生效 —— 这才能覆盖
     `logging.getLogger(__name__)`（形如 app.modules.*）这一类不在名单里的模块 logger。
+
+    2026-10-13 审计修复：同时把 handler 的 formatter 包一层 MaskingFormatter，
+    兜住异常栈（Formatter 阶段才生成 exc_text，Filter 抓不到）。
     """
     targets = list(logging.getLogger().handlers)            # root（文件/控制台 handler）
     for name in ('stulink', 'stulink.app', 'bands', 'stulink.bands'):
         targets += list(logging.getLogger(name).handlers)
+    seen = set()
     for h in targets:
+        if id(h) in seen:
+            continue
+        seen.add(id(h))
         if not any(isinstance(f, MaskingFilter) for f in h.filters):
             h.addFilter(MaskingFilter())
+        _wrap_formatter(h)
+
+
+def _wrap_formatter(handler):
+    """把 handler 的 formatter 换成 MaskingFormatter（幂等，保留原有格式串）。"""
+    fmt = handler.formatter
+    if isinstance(fmt, MaskingFormatter):
+        return
+    if fmt is None:
+        handler.setFormatter(MaskingFormatter())
+        return
+    # 复用原有 fmt/datefmt，只把类换成带脱敏的子类
+    handler.setFormatter(MaskingFormatter(fmt._fmt, fmt.datefmt,
+                                          fmt.style, getattr(fmt, 'validate', True)))
 
 
 def install_masking_factory():
@@ -76,8 +114,9 @@ def install_masking_factory():
     **之后才创建**的 handler（例如 bands.py 首次写日志时才 new 出来的 FileHandler、
     第三方库自建的 handler）。`logging.setLogRecordFactory` 在**记录创建瞬间**掩码，
     对所有 logger、所有 handler（含晚挂的）一律生效，是唯一能兜住这种缺口的方式。
-    代价：每条日志多一次正则匹配（三条正则，可忽略）；异常栈在工厂阶段尚未生成，
-    仍由 logger 级 / handler 级过滤器兜住。
+    代价：每条日志多一次正则匹配（三条正则，可忽略）；
+    **异常栈**在工厂阶段尚未生成，由 MaskingFormatter（handler.formatter 包装层）
+    在最终拼接时掩码。
     """
     global _FACTORY_INSTALLED
     if _FACTORY_INSTALLED:

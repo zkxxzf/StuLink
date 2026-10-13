@@ -61,10 +61,12 @@ def rewards_page():
                 RewardPunishmentAttachment.record_id.in_(ids)).all():
             atts.setdefault(a.record_id, []).append(a)
     # 年级/班级下拉：取可见范围内已有记录的班级（跨库不 join，就地聚合）
+    # 2026-10-13 审计修复：原来写 `visible_grades(...) or <全表去重>`，当用户无任何
+    # 可见年级时（visible_grades 返回空列表）会回退列出全校年级，等于把无权查看的
+    # 年级名泄露到下拉里。空列表时保持为空，不再回退。
     from app.modules.grades.services.scope import visible_grades
-    grades = visible_grades(current_user) or sorted(
-        {r[0] for r in db.session.query(RewardPunishment.grade).distinct().all()
-         if r[0]})
+    _vg = visible_grades(current_user)
+    grades = sorted(_vg) if _vg else []
 
     return render_template('morality/rewards.html',
                            items=items, pagination=pagination, f=f,
@@ -204,6 +206,8 @@ def attachment_delete(fid):
 
 @bp.route('/rewards/attachment/<int:fid>')
 @login_required
+@perm_required('morality.view')     # 2026-10-13 审计修复：附件同属模块可见范围，
+                                    # 原缺此权限点 → 仅知附件 id 即可越权下载
 def rp_file_view(fid):
     """附件预览：图片/PDF 内联打开，其它类型强制下载"""
     att = db.session.get(RewardPunishmentAttachment, fid)
@@ -225,6 +229,7 @@ def rp_file_view(fid):
 
 @bp.route('/rewards/attachment/<int:fid>/download')
 @login_required
+@perm_required('morality.view')     # 2026-10-13 审计修复：同 rp_file_view
 def rp_file_download(fid):
     att = db.session.get(RewardPunishmentAttachment, fid)
     if not att:

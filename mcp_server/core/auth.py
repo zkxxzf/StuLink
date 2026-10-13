@@ -28,6 +28,7 @@
 OAuth 授权服务器设计（issuer_url、动态注册等），对"校验本系统账号密码"属过度
 设计；自写行为完全可控、可读、可测，且与网页端共用 User.check_password。
 """
+import asyncio
 import base64
 import binascii
 import hashlib
@@ -214,30 +215,35 @@ def verify_credentials(username, password, client=None):
     `client` = 来源标识（HTTP 层传客户端 IP，stdio 传 None）。
 
     返回 (user_id, error, message)：error 为 None 表示通过。
-    校验顺序：锁定检查（本来源） → 跨来源失败累计的附加延迟 → 账号存在/启用
-    → 缓存命中（密码指纹未变） → 完整密码校验。
+    校验顺序：锁定检查（本来源） → 账号存在/启用 → 缓存命中（密码指纹未变）
+    → 完整密码校验。
+
+    注意（2026-10-13 审计修复）：跨来源暴力破解的**附加延迟不再在这里 sleep**。
+    原先 `time.sleep(delay)` 跑在 db.run 的唯一工作线程里（max_workers=1），
+    等于让未认证者也能量级拖慢整个服务的工具调用。现在只**计算**延迟并返回
+    throttle_delay，由异步调用方在 DB 线程之外 await。
     """
     username = (username or '').strip()
     if not username or not password:
-        return None, 'unauthorized', '缺少账号或密码'
+        return None, 'unauthorized', '缺少账号或密码', 0.0
     remain = _lock_remaining(username, client)
     if remain:
-        return None, 'too_many_attempts', f'认证失败次数过多，请 {remain} 秒后重试'
+        return None, 'too_many_attempts', f'认证失败次数过多，请 {remain} 秒后重试', 0.0
     blocked = _source_block_remaining(client)
     if blocked:
-        return None, 'too_many_attempts', f'本机认证失败次数过多，请 {blocked} 秒后重试'
-    # 跨来源暴力破解兜底：只增加等待，不拒绝（账号本人永远进得来）
+        return None, 'too_many_attempts', f'本机认证失败次数过多，请 {blocked} 秒后重试', 0.0
+
+    # 跨来源暴力破解兜底：只增加等待，不拒绝（账号本人永远进得来）。
+    # 延迟交给调用方在异步侧执行，避免占用唯一 DB 线程。
     delay = _throttle_delay(username)
-    if delay:
-        time.sleep(delay)
 
     from app.models.user import User
     user = User.query.filter_by(username=username).first()
     if user is None:
         _record_fail(username, client)
-        return None, 'invalid_credentials', '账号或密码错误'
+        return None, 'invalid_credentials', '账号或密码错误', delay
     if not user.is_active:
-        return None, 'account_disabled', f'账号 {username} 已停用，请联系管理员'
+        return None, 'account_disabled', f'账号 {username} 已停用，请联系管理员', delay
 
     key = _cred_key(username, password)
     ttl = _cfg_int('credential_cache_ttl', 300)
@@ -248,11 +254,11 @@ def verify_credentials(username, password, client=None):
         if (hit and now - hit['at'] < ttl and hit['user_id'] == user.id
                 and hit['fingerprint'] == user.password_hash):
             _clear_fail(username, client)
-            return user.id, None, None
+            return user.id, None, None, delay
 
     if not user.check_password(password):
         _record_fail(username, client)
-        return None, 'invalid_credentials', '账号或密码错误'
+        return None, 'invalid_credentials', '账号或密码错误', delay
 
     if ttl > 0:
         with _cred_lock:
@@ -261,7 +267,7 @@ def verify_credentials(username, password, client=None):
             _cred_cache[key] = {'user_id': user.id,
                                 'fingerprint': user.password_hash, 'at': now}
     _clear_fail(username, client)
-    return user.id, None, None
+    return user.id, None, None, delay
 
 
 def audit_auth_failure(username, error, message, client=None):
@@ -285,11 +291,15 @@ def audit_auth_failure(username, error, message, client=None):
 
 
 def _verify_and_audit(username, password, client=None):
-    """校验 + 失败审计，整体在 db 线程内执行（一次排队完成）。"""
-    user_id, error, message = verify_credentials(username, password, client=client)
+    """校验 + 失败审计，整体在 db 线程内执行（一次排队完成）。
+
+    2026-10-13 审计修复：verify_credentials 新增返回第 4 个值 throttle_delay，
+    这里原样透出，供 HTTP 层在 DB 线程之外 await（详见 verify_credentials 注释）。
+    """
+    user_id, error, message, delay = verify_credentials(username, password, client=client)
     if error:
         audit_auth_failure(username, error, message, client=client)
-    return user_id, error, message
+    return user_id, error, message, delay
 
 
 def _token_ok(provided, expected):
@@ -373,13 +383,34 @@ class AccessGuard:
         self.mode = (cfg.get('auth_mode') or 'account').strip().lower()
         self.token = cfg.get('token') or ''
         self.require_token = bool(cfg.get('require_token'))
+        # 2026-10-13 审计修复 #12：来源总闸原先只认 TCP 源 IP。校园网普遍
+        # NAT / 反向代理，一个出口 IP 背后是全校用户，攻击者刷满阈值会让
+        # 同出口的所有合法客户端被挡。可信代理下改信 X-Forwarded-For。
+        # 默认关闭：XFF 可被伪造，只有在确认前面有可信反代时才打开。
+        self.trust_forwarded = bool(cfg.get('trust_forwarded_for'))
+
+    @staticmethod
+    def _client_ip(scope, headers, trust_forwarded):
+        """取来源标识：优先 X-Forwarded-For（仅在信任反代时），否则 TCP 源 IP。
+
+        XFF 取**最右**一个非 unknown 项：每一跳代理都会把自己的前一跳 append 到
+        右边，最右项就是离我们最近、也最难伪造的那一跳。
+        """
+        peer = (scope.get('client') or ('', 0))[0]
+        if trust_forwarded:
+            xff = headers.get('x-forwarded-for') or ''
+            hops = [h.strip() for h in xff.split(',') if h.strip()]
+            for hop in reversed(hops):
+                if hop and hop.lower() != 'unknown':
+                    return hop
+        return peer
 
     async def __call__(self, scope, receive, send):
         if scope.get('type') != 'http':
             await self.app(scope, receive, send)
             return
         headers = RequestHeaders(scope)
-        client = (scope.get('client') or ('', 0))[0]
+        client = self._client_ip(scope, headers, self.trust_forwarded)
 
         # 第一道（可选）：服务令牌，防止端口被随意扫描/连接
         if self.require_token and not _token_ok(headers.service_token(), self.token):
@@ -414,10 +445,18 @@ class AccessGuard:
             return
 
         username, password = credentials
-        user_id, error, message = await db.run_async(
+        user_id, error, message, delay = await db.run_async(
             lambda: _verify_and_audit(username, password, client=client))
+        # 2026-10-13 审计修复：跨来源失败的附加延迟改在**异步侧**执行，
+        # 不再占用 db.run 的唯一工作线程（否则未认证者即可拖慢全服务）。
+        if delay:
+            await asyncio.sleep(delay)
         if error == 'too_many_attempts':
-            remain = _lock_remaining(username, client) or 1
+            # 2026-10-13 审计修复：区分"账号锁"与"来源总闸"，Retry-After 取对应的
+            # 剩余秒数；原先统一 `_lock_remaining(...) or 1`，来源闸命中时会返回 1 秒。
+            remain = _lock_remaining(username, client)
+            if not remain:
+                remain = _source_block_remaining(client) or 1
             await send_json(send, 429, {'error': error, 'message': message},
                             extra_headers=[(b'retry-after', str(remain).encode())])
             return

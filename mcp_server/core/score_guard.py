@@ -135,6 +135,21 @@ def resolve(user):
     from app.models.user_data_scope import UserDataScope
     from app.modules.grades.services import scope as scope_service
 
+    # 2026-10-13 审计修复：网页端 scope.check_exam_visible / visible_grades 都会
+    # 剔除「已毕业年级」（get_graduated_grades），本引擎此前漏了这一层，导致
+    # 年级长 / 权限组 grade 范围 / 班级授权账号可通过 MCP 读到已毕业年级成绩，
+    # 违反「AI 可见范围 = 网页端可见范围」。
+    # 管理员与校级范围本就全校可见，不受毕业标记影响（与网页端口径一致）。
+    from app.utils.helpers import get_graduated_grades
+    graduated = set(get_graduated_grades() or ())
+
+    def _strip_graduated(grade_set):
+        """从年级集合中剔除已毕业年级；返回 (剩余集合, 被剔除集合)。"""
+        if not grade_set or not graduated:
+            return grade_set, set()
+        dropped = grade_set & graduated
+        return grade_set - graduated, dropped
+
     uid = getattr(user, 'id', None)
     username = getattr(user, 'username', None)
     role = getattr(user, 'role', None)
@@ -166,8 +181,16 @@ def resolve(user):
                 classes.update((grade, n) for n in whitelist)
             else:
                 grades.add(grade)
+        # 已毕业年级不可见（与网页端口径一致）
+        grades, dropped_g = _strip_graduated(grades)
+        classes = {(g, c) for g, c in classes if g not in graduated}
+        if not grades and not classes:
+            raise PermissionError('无权查看任何成绩：授权年级均已毕业')
+        reason = f'用户级数据范围授权（{len(rows)} 条）'
+        if dropped_g:
+            reason += f'；已剔除毕业年级 {sorted(dropped_g)}'
         return ScoreScope(uid, username, role, grades=grades, classes=classes,
-                          reasons=[f'用户级数据范围授权（{len(rows)} 条）'])
+                          reasons=[reason])
 
     grades, classes, teach, reasons = set(), set(), set(), []
 
@@ -185,7 +208,7 @@ def resolve(user):
         classes.add((link.grade, link.class_name))
     if links:
         reasons.append(f'班主任：{len(links)} 个班')
-    # 兼容网页端口径：homeroom_teacher 角色还会按 User.grade/class_name 兜底
+    # 兼容网页端口径：homereoom_teacher 角色还会按 User.grade/class_name 兜底
     if role == 'homeroom_teacher' and getattr(user, 'grade', None) and getattr(user, 'class_name', None):
         classes.add((user.grade, user.class_name))
 
@@ -195,6 +218,14 @@ def resolve(user):
         teach.add((t.grade, t.class_name, t.subject))
     if tlinks:
         reasons.append(f'任课教师：{len(tlinks)} 条映射')
+
+    # 2026-10-13 审计修复：统一剔除已毕业年级（三条授权路径都可能含毕业年级）
+    grades, dropped_g = _strip_graduated(grades)
+    if dropped_g:
+        reasons.append(f'已剔除毕业年级：{sorted(dropped_g)}')
+    if graduated:
+        classes = {(g, c) for g, c in classes if g not in graduated}
+        teach = {(g, c, s) for g, c, s in teach if g not in graduated}
 
     return ScoreScope(uid, username, role, grades=grades, classes=classes,
                       teach=teach, reasons=reasons)

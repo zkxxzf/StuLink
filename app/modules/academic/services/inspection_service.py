@@ -273,6 +273,17 @@ def mark_cells(user, inspect_date, cells):
                 subject = be.subject or subject
                 class_name = be.class_name or class_name
                 period = be.period_number or period
+                # 2026-10-13 审计修复：entry_id 会连带覆盖 grade/class_name/period，
+                # 而上面第 250-255 行的年级与班级可见性校验是对**入参**做的。
+                # 若不复检，受限账号传一个越界班级的 entry_id 就能把查课记录写到
+                # 非授权班级。这里对覆盖后的班级重新过一遍可见性。
+                if grades_scope is not None and be.grade not in grades_scope:
+                    skipped += 1
+                    continue
+                if not class_visible(be.grade, be.class_name):
+                    skipped += 1
+                    continue
+                grade = be.grade or grade
 
         rec = (InspectionRecord.query
                .filter_by(inspect_date=inspect_date, grade=grade,

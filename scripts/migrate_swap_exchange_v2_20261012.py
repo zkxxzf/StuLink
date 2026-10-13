@@ -25,9 +25,11 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from app import create_app                                   # noqa: E402
 from app.extensions import db                                # noqa: E402
+from scripts._db_backup import backup_db                     # noqa: E402
 from scripts._ddl_guard import assert_ident, assert_table    # noqa: E402
 
 TABLE = 'schedule_swaps'
+BIND = 'timetable'
 COLUMNS = [
     ('swap_time', 'BOOLEAN DEFAULT 1'),
     ('swap_class', 'BOOLEAN DEFAULT 1'),
@@ -44,21 +46,31 @@ BACKFILL = [
 def main():
     app = create_app()
     with app.app_context():
-        engine = db.engines['timetable']
+        from flask import current_app
+        uri = current_app.config['SQLALCHEMY_BINDS'][BIND]
+        db_path = uri.replace('sqlite:///', '')
+        print(f'[{BIND}] 数据库：{db_path}')
+
+        engine = db.engines[BIND]
         insp = sa.inspect(engine)
         if not insp.has_table(TABLE):
             print(f'[SKIP] {TABLE} 表不存在（尚未建过课表，无需迁移）')
             return 0
         assert_table(TABLE)
         cols = {c['name'] for c in insp.get_columns(TABLE)}
-        for name, ddl in COLUMNS:
+        pending = [(n, ddl) for n, ddl in COLUMNS if n not in cols]
+        # 2026-10-13 审计修复：本项目约定「改动 .db 前必须先备份」。
+        # 本脚本既有加列又有批量回填 UPDATE，风险更高，一律先备份。
+        if pending and os.path.exists(db_path):
+            backup_db(db_path)          # 保留最近 5 份
+            print('[OK] 已备份原库')
+        for name, ddl in pending:
             assert_ident(name, '列名')
-            if name in cols:
-                print(f'[OK] {TABLE}.{name} 已存在')
-                continue
             with engine.begin() as conn:
                 conn.exec_driver_sql(f'ALTER TABLE {TABLE} ADD COLUMN {name} {ddl}')
             print(f'[OK] {TABLE} 已增加 {name} 列')
+        if not pending:
+            print('[OK] 3 列均已存在，仅执行幂等回填')
 
         with engine.begin() as conn:
             for old, new, st, sc in BACKFILL:

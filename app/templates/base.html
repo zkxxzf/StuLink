@@ -21,15 +21,23 @@
     {# 主题提前应用：在 body 渲染前定好 data-bs-theme，避免深色下先闪一帧白屏（FOUC） #}
     <script>
     (function () {
-        try {
-            var saved = localStorage.getItem('stulink-theme');
-            var sysDark = window.matchMedia &&
-                          window.matchMedia('(prefers-color-scheme: dark)').matches;
-            document.documentElement.setAttribute('data-bs-theme',
-                saved ? saved : (sysDark ? 'dark' : 'light'));
-        } catch (e) {
-            document.documentElement.setAttribute('data-bs-theme', 'light');
+        // 2026-10-13 审计修复 #19：localStorage 的值可能被写坏（手改 / 旧版本残留），
+        // 原先直接透传给 data-bs-theme，导致主题类名不匹配、深浅色回退异常。
+        // 这里做白名单，非法值回退到系统偏好。注意：这是 setAttribute 而非 innerHTML，
+        // 不存在 XSS 面，纯粹是取值健壮性。
+        var VALID = { 'dark': 1, 'light': 1 };
+        function pick() {
+            try {
+                var saved = localStorage.getItem('stulink-theme');
+                if (saved && VALID[saved]) { return saved; }
+                var sysDark = window.matchMedia &&
+                              window.matchMedia('(prefers-color-scheme: dark)').matches;
+                return sysDark ? 'dark' : 'light';
+            } catch (e) {
+                return 'light';
+            }
         }
+        document.documentElement.setAttribute('data-bs-theme', pick());
     })();
     </script>
     {% block extra_css_head %}{% endblock %}
@@ -194,7 +202,6 @@
         }
         .sidebar-float .efn-dot.on { background: #16a34a; color: #fff; }
         /* v1.19.47.25 已完成但非当前的环节：浅绿底绿字（不与「当前」的深绿实心混淆） */
-<<<<<<< HEAD
         .sidebar-float .efn-dot.done {
             background: var(--sl-sidebar-done-bg); color: var(--sl-sidebar-done-text);
         }
@@ -373,13 +380,15 @@
                href="{{ url_for('points.rules_page') }}">
                 <i class="bi bi-collection"></i>规则模板
             </a>
+            {% endif %}
             {% if current_user.has_perm('morality.view') %}
-            {# 2026-10-13（v1.19.47.25）：德育奖惩信息（含附件）——与积分并列 #}
+            {# 2026-10-13（v1.19.47.25）：德育奖惩信息（含附件）——与积分并列。
+               注意：必须与上面的 points 写权限条件**平级**，不能嵌在其中，
+               否则仅授予 morality.view 的自定义身份看不到本入口。 #}
             <a class="nav-link {% if request.blueprint == 'morality' %}active{% endif %}"
                href="{{ url_for('morality.rewards_page') }}">
                 <i class="bi bi-award"></i>奖惩信息
             </a>
-            {% endif %}
             {% endif %}
             {% elif request.blueprint == 'portrait' %}
             <a class="nav-link" href="{{ url_for('portrait.index') }}">

@@ -64,7 +64,9 @@ try:
             sys.exit(2)
         app = bootstrap.get_app()
         with app.app_context():
-            user_id, error, message = auth.verify_credentials(username, password)
+            # 2026-10-13：verify_credentials 现返回 4 元组（第 4 项为节流延迟）。
+            # stdio 是启动时认证一次，延迟在这里同步 sleep 无副作用（不在 DB 线程里）。
+            user_id, error, message, delay = auth.verify_credentials(username, password)
             if error:
                 auth.audit_auth_failure(username, error, message, client='stdio')
         if error:

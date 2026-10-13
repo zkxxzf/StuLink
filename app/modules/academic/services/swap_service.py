@@ -1690,7 +1690,11 @@ def _execute_temp(sw, entry, operator_id, operator_name):
     if not swap_date:
         db.session.rollback()
         return False, '临时调课缺少具体日期，无法执行', None
-    target_weekday = swap_date.isoweekday()
+    # 2026-10-13 审计修复：目标星期统一取 sw.new_weekday（与提交 apply_swap /
+    # 终审 review_swap 的冲突校验同口径），仅在未填时回退到日期实际星期。
+    # 原来这里写死 swap_date.isoweekday()，导致"调休时按周三课表上课"这类
+    # new_weekday≠日期星期 的场景，审批校验与实际落位不是同一格。
+    target_weekday = sw.new_weekday or swap_date.isoweekday()
     target_period = sw.new_period or entry.period_number
     target_week = _week_of_date(sw.term_schedule_id, swap_date)  # 只校验调课当周
     cc = _check_class_conflict(sw.term_schedule_id, entry.grade, entry.class_name,
@@ -1959,20 +1963,28 @@ def check_exchange_conflicts(schedule_id, e1, e2, kind, is_permanent, swap_date,
     for label, plan, side_date in sides:
         if not plan:
             continue
+        # 2026-10-13 审计修复 #9：临时换课（有具体日期）时，落位用的是
+        # **该日期的实际星期**（见 _execute_exchange_temp 的 side_wd），
+        # 而这里原先一直用 plan['weekday']（课表条目自身星期）做冲突校验。
+        # 遇到"调休按周三课表上课"（目标星期≠日期星期）时，校验的格子与实际
+        # 落位的格子不是同一格 → 可能审批通过却落在从未校验过的时段。
+        # 永久换课不涉及具体日期，仍按 plan['weekday']（= 课表星期）校验。
         if is_permanent or not side_date:
             w_args = {'week_range': e1.week_range}
+            check_weekday = plan['weekday']
         else:
             w_args = {'week': _week_of_date(schedule_id, side_date)}
-        wd_text = WEEKDAY_NAMES.get(plan['weekday'], '')
+            check_weekday = side_date.isoweekday()
+        wd_text = WEEKDAY_NAMES.get(check_weekday, '')
         pd = plan['period_number']
         cc = _check_class_conflict(schedule_id, plan['grade'], plan['class_name'],
-                                   plan['weekday'], pd,
+                                   check_weekday, pd,
                                    extra_exclude_ids=yield_ids, **w_args)
         if cc:
             errs.append('%s落到 %s第%s节 时该班已有课程（%s）'
                         % (label, wd_text, pd, cc.subject))
         tc = _check_teacher_conflict(schedule_id, plan['teacher_uid'],
-                                     plan['weekday'], pd,
+                                     check_weekday, pd,
                                      extra_exclude_ids=yield_ids, **w_args)
         if tc:
             errs.append('%s落到 %s第%s节 时教师已有课程（%s%s %s）'
@@ -2312,15 +2324,19 @@ def _execute_exchange_temp(sw, e1, operator_id, operator_name):
                                  swap_time=getattr(sw, 'swap_time', True),
                                  swap_class=getattr(sw, 'swap_class', True))
     kind_text = EXCHANGE_KINDS.get(kind, kind)
+    # 2026-10-13 审计修复 #9：临时换课的落位一律取**该日期的实际星期**，
+    # 与 check_exchange_conflicts 中临时分支的校验口径一致（该校验已同步改为
+    # side_date.isoweekday()）。永久换课走 _execute_exchange_permanent，
+    # 那里用 plan['weekday']（课表星期），两条路径互不干扰。
     wd_1 = swap_date.isoweekday()
-    wd_2 = partner_date.isoweekday()        # 对方那天（可能与我这天不同）
+    wd_2 = partner_date.isoweekday()    # 对方那天（可能与我这天不同）
     made = []
     for src, plan, side_date, side_wd in ((e1, plan1, swap_date, wd_1),
                                           (e2, plan2, partner_date, wd_2)):
         if not plan:
             continue
         d = dict(plan)
-        d['weekday'] = side_wd              # 临时条目：星期取各自那天的实际星期
+        d['weekday'] = side_wd          # 临时条目：星期取各自那天的实际星期
         t = _mk_exchange_entry(sw, src, d, '临时换课')
         t.note = f'临时换课 {side_date.strftime("%Y-%m-%d")}'
         db.session.add(t)

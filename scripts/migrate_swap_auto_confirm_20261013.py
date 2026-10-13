@@ -11,15 +11,12 @@
 
 历史数据：本列出现前的记录一律按“无需确认”（0）处理，避免旧申请被“待确认”卡住。
 
-幂等：列已存在则跳过；加列前备份库文件（scripts/_db_backup 若存在则走统一入口）。
+幂等：列已存在则跳过；加列前经 scripts/_db_backup.backup_db 备份（保留最近 5 份）。
 
 用法：python scripts/migrate_swap_auto_confirm_20261013.py
 """
 import os
-import shutil
 import sys
-from datetime import datetime
-from pathlib import Path
 
 import sqlalchemy as sa
 
@@ -27,21 +24,24 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from app import create_app                                   # noqa: E402
 from app.extensions import db                                # noqa: E402
+from scripts._db_backup import backup_db                     # noqa: E402
 from scripts._ddl_guard import assert_ident, assert_table    # noqa: E402
 
-ROOT = Path(__file__).resolve().parents[1]
-DB = ROOT / 'data' / 'timetable.db'
-
 TABLE = 'schedule_swaps'
+BIND = 'timetable'
 COLUMN = 'need_partner_confirm'
 DDL = 'BOOLEAN DEFAULT 0'
-_stamp = datetime.now().strftime('%Y%m%d%H%M%S')
 
 
 def main():
     app = create_app()
     with app.app_context():
-        engine = db.engines['timetable']
+        from flask import current_app
+        uri = current_app.config['SQLALCHEMY_BINDS'][BIND]
+        db_path = uri.replace('sqlite:///', '')
+        print(f'[{BIND}] 数据库：{db_path}')
+
+        engine = db.engines[BIND]
         insp = sa.inspect(engine)
         if not insp.has_table(TABLE):
             print(f'[SKIP] {TABLE} 表不存在（尚未建过课表，无需迁移）')
@@ -52,8 +52,11 @@ def main():
         if COLUMN in cols:
             print(f'[OK] {TABLE}.{COLUMN} 已存在')
         else:
-            print(f'[..] 备份 timetable.db -> schedule_swaps.bak-{_stamp}')
-            shutil.copy2(DB, DB.with_name(f'schedule_swaps.bak-{_stamp}'))
+            # 2026-10-13 审计修复 #15：改为走统一 backup_db（自动保留最近 5 份），
+            # 不再裸 shutil.copy2（原实现不 prune，且与项目约定不一致）。
+            if os.path.exists(db_path):
+                backup_db(db_path)
+                print('[OK] 已备份原库')
             with engine.begin() as conn:
                 conn.exec_driver_sql(
                     f'ALTER TABLE {TABLE} ADD COLUMN {COLUMN} {DDL}')

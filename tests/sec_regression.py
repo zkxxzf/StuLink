@@ -195,9 +195,12 @@ def check_M15():
     case('M-15 符合策略的强口令通过', validate_password(TEST_PWD)[0])
 
     # v1.18.8.0：清除历史失败计数，避免 M-3 预先锁定 sec_teacher
+    # 2026-10-13 #11：键名改为「来源 IP + 账号」，新旧键都清一遍
     from app.utils.cache import cache as _c
-    _c.delete('login_fail_sec_teacher')
-    _c.delete('login_lock_sec_teacher')
+    for _k in ('login_fail_sec_teacher', 'login_lock_sec_teacher',
+               'login_fail_127.0.0.1_sec_teacher',
+               'login_lock_127.0.0.1_sec_teacher'):
+        _c.delete(_k)
 
     # 表单层：弱口令无法改密成功
     with app.test_client() as c:
@@ -284,16 +287,22 @@ def check_M3():
 
     from app.utils.cache import cache
     with app.test_client() as c0:
-        cache.delete('login_fail_sec_lockme')
-        cache.delete('login_lock_sec_lockme')
+        # 2026-10-13 #11：锁定/计数键已改为「来源 IP + 账号」，清理时需带前缀。
+        # test_client 的 remote_addr 固定为 127.0.0.1。
+        for k in ('login_fail_sec_lockme', 'login_lock_sec_lockme',
+                  'login_fail_127.0.0.1_sec_lockme',
+                  'login_lock_127.0.0.1_sec_lockme'):
+            cache.delete(k)
         for _ in range(5):
             try_login('wrong-password')
         html = try_login('Lock#Test2026')   # 正确口令也应被锁定挡住
         case('M-3 连续失败后账号被锁定', '临时锁定' in html, html[:120])
     # 解锁后恢复使用（清缓存模拟锁定过期）
     with app.app_context():
-        cache.delete('login_fail_sec_lockme')
-        cache.delete('login_lock_sec_lockme')
+        for k in ('login_fail_sec_lockme', 'login_lock_sec_lockme',
+                  'login_fail_127.0.0.1_sec_lockme',
+                  'login_lock_127.0.0.1_sec_lockme'):
+            cache.delete(k)
     with app.test_client() as c1:
         r0 = c1.get('/login')
         m = re.search(r'name="csrf_token"[^>]*value="([^"]+)"', r0.get_data(as_text=True))

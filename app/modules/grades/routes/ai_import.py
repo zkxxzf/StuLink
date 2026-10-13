@@ -52,6 +52,8 @@ MAX_TOTAL_MB = 40
 MAX_DRAFT_MB = 8          # import_draft（TEXT 列）落库上限，超出说明表太大，要求分批
 # v1.19.47.4 图片识别（考试时间表 / 监考表 → 划分场次）：只收常见位图，走视觉模型
 IMAGE_EXTS = ('jpg', 'jpeg', 'png', 'webp', 'bmp', 'gif')
+# 2026-10-13 审计修复 #13：Excel 分支的白名单（与成绩导入向导同口径）
+EXCEL_EXTS = ('xlsx', 'xls')
 
 
 def _exam_has_scores(exam_id):
@@ -132,6 +134,13 @@ def exam_ai_import_analyze(exam_id):
         raw = f.read()
         if len(raw) > MAX_FILE_MB * 1024 * 1024:
             errors.append('%s 超过 %dMB，已跳过' % (f.filename, MAX_FILE_MB))
+            continue
+        # 2026-10-13 审计修复 #13：Excel 分支此前只查大小、没过 upload_guard，
+        # 与其余 17 个导入入口不一致（扩展名白名单 / magic 嗅探 / 危险类型）。
+        ok, err = validate_upload(f.filename, allowed_exts=list(EXCEL_EXTS),
+                                  stream=io.BytesIO(raw))
+        if not ok:
+            errors.append('%s：%s' % (f.filename, err))
             continue
         try:
             pr = aisvc.probe(raw)
