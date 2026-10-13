@@ -4,6 +4,11 @@
 （新安装无需运行：app/__init__.py PERMISSION_GROUPS 已是新基线；
   存量库因权限组 menu_keys 已落库，需跑一次才会生效）
 
+⚠️ 本脚本的「明文查看」授予口径已被 **migrate_sensitive_perm_v2_20261013.py 取代**
+   （用户口径 2026-10-13：默认只有管理员与班主任可看学生身份证号 / 联系电话）。
+   本脚本已同步收敛：不再给宿管组追加 students.view_phone（原先会给，现按口径收回）。
+   请以 v2 脚本 + 当前种子为最终基线；本脚本仅作历史记录保留。
+
 背景（2026-10-13 权限审计）：
   1. 学生身份证号 / 联系电话此前只有「导出」维度有权限点，**页面展示**完全没有控制 ——
      只要拿到 students.view 就能看到明文。新增三个字段级权限点（permission_map 中
@@ -14,11 +19,10 @@
      无权限时页面/接口一律返回脱敏值（app/utils/sensitive.py）。
   2. 最小权限重排：收掉年级长/班主任的敏感导出与批量导入/跨班调动等越权项。
 
-授予口径：
+授予口径（已按 v2 收敛）：
   追加（字段级查看）：
     管理员组    view_id_card + view_phone + academic.view_teacher_phone（唯一明文豁免）
-    班主任组    view_phone（本班联系电话明文；身份证仍脱敏）
-    宿管组      view_phone（联系住宿学生；身份证仍脱敏）
+    班主任组    view_phone（本班联系电话明文；view_id_card 由 v2 脚本补）
   移除（越权）：
     年级长组    students.import / students.export_id_card / students.export_phone
     班主任组    students.import / students.transfer / students.export_id_card /
@@ -43,7 +47,6 @@ ADD = {
     '管理员组': ['students.view_id_card', 'students.view_phone',
                  'academic.view_teacher_phone'],
     '班主任组': ['students.view_phone'],
-    '宿管组': ['students.view_phone'],
 }
 
 # 组名 → 需要移除的 key（最小权限重排）

@@ -51,7 +51,8 @@ config_mod.Config.UPLOAD_FOLDER = os.path.join(_TMP, 'uploads')
 
 from app import create_app  # noqa: E402
 from app.extensions import db  # noqa: E402
-from app.models import User, PermissionGroup, UserDataScope, Student  # noqa: E402
+from app.models import (User, PermissionGroup, UserDataScope, Student,  # noqa: E402
+                        UserClassLink)
 from app.models.grades import Exam, ExamAffair  # noqa: E402
 
 app = create_app()
@@ -143,9 +144,18 @@ def seed():
         add('noperm', 'sec_noperm', '无权限组账号', 'staff')
         add('mustchg', 'sec_mustchg', '待改密账号', 'teacher', '任课教师组',
             must_change=True)
+        # 2026-10-13 用户口径：只有管理员与班主任可看学生身份证号/联系电话明文
+        add('homeroom', 'sec_homeroom', '班主任测试', 'homeroom_teacher',
+            '班主任组', grade='2025级')
+        add('dorm', 'sec_dorm', '宿管测试', 'dorm_manager', '宿管组')
 
         leader = db.session.get(User, mk['leader'])
         db.session.add(UserDataScope(user_id=leader.id, grade='2025级'))
+        # 班主任范围走 UserClassLink（与宿舍/成绩侧口径一致）
+        hr = db.session.get(User, mk['homeroom'])
+        hr.class_name = '01班'
+        db.session.add(UserClassLink(user_id=hr.id, grade='2025级',
+                                     class_name='01班'))
 
         # 画像/学生范围用种子学生：SEC2025001 在 2025级01班，SEC2024001 在 2024级01班
         s_in = Student(student_number='SEC2025001', name='范围内学生',
@@ -1704,6 +1714,50 @@ def check_SR11():
     levels = pm.keys_to_item_levels(admin['menu_keys'])
     invisible = [k for k, v in levels.items() if v == pm.LEVEL_NONE]
     case('SR-11 管理员组矩阵无「不可见」子功能', not invisible, str(invisible))
+
+
+@item('SR-12')
+def check_SR12():
+    """学生身份证号 / 联系电话明文：**默认只有管理员与班主任**可见（2026-10-13 用户口径）。
+
+    「系统默认只有管理员和班主任可以看到身份证号和电话，其他人都不需要。」
+    —— 因此除这两组外，任何身份都不得持有 students.view_id_card / view_phone，
+    宿舍侧（宿管）也一律脱敏。
+    """
+    from app import PERMISSION_GROUPS
+
+    groups = {g['name']: set(g['menu_keys']) for g in PERMISSION_GROUPS}
+    id_card_groups = sorted(n for n, k in groups.items() if 'students.view_id_card' in k)
+    phone_groups = sorted(n for n, k in groups.items() if 'students.view_phone' in k)
+
+    case('SR-12 身份证明文仅管理员组+班主任组',
+         id_card_groups == ['班主任组', '管理员组'], str(id_card_groups))
+    case('SR-12 联系电话明文仅管理员组+班主任组',
+         phone_groups == ['班主任组', '管理员组'], str(phone_groups))
+    case('SR-12 宿管组无身份证明文', 'students.view_id_card' not in groups['宿管组'])
+    case('SR-12 宿管组无联系电话明文', 'students.view_phone' not in groups['宿管组'])
+    case('SR-12 年级长组无明文（两个字段都无）',
+         not ({'students.view_id_card', 'students.view_phone'} & groups['年级长组']))
+    case('SR-12 任课教师组无明文',
+         not ({'students.view_id_card', 'students.view_phone'} & groups['任课教师组']))
+
+    sid = uid('student_in')
+
+    # 班主任（本班）：两个字段都明文
+    with app.test_client() as c:
+        case('SR-12 班主任登录',
+             login_ok(c, 'sec_homeroom', TEST_PWD).status_code == 200)
+        html = c.get('/students/').get_data(as_text=True)
+        case('SR-12 班主任列表：手机号明文', '13800138000' in html)
+        html = c.get(f'/students/{sid}').get_data(as_text=True)
+        case('SR-12 班主任详情：身份证明文', '110101199001011234' in html)
+
+    # 宿管：两个字段都脱敏
+    with app.test_client() as c2:
+        case('SR-12 宿管登录', login_ok(c2, 'sec_dorm', TEST_PWD).status_code == 200)
+        html = c2.get('/students/').get_data(as_text=True)
+        case('SR-12 宿管列表：手机号脱敏', '138****8000' in html)
+        case('SR-12 宿管列表：无明文手机号', '13800138000' not in html)
 
 
 def main(argv):

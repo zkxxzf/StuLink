@@ -183,11 +183,12 @@ PERMISSION_GROUPS = [
         'menu_keys': [
             # 2026-10-13 最小权限重排：收掉 students.import / students.transfer
             # （批量导入与跨班调动属招生/教务口径）、收掉敏感导出（export_id_card /
-            # export_phone / export_graduation_school / export_enrollment）；
-            # 保留本班学生的联系电话明文查看（联系家长/学生本人所需），身份证号仍脱敏。
+            # export_phone / export_graduation_school / export_enrollment）。
+            # 2026-10-13 用户口径：**默认只有管理员与班主任可看学生身份证号 / 联系电话明文**
+            # （班主任限本班）—— 班主任两个字段都给。
             'students.view', 'students.edit',
             'students.export',
-            'students.view_phone',
+            'students.view_id_card', 'students.view_phone',
             'dormitory.view', 'dormitory.beds',
             'statistics.view',
             'points.view', 'grades.view', 'grades.student_query',
@@ -209,8 +210,8 @@ PERMISSION_GROUPS = [
         'description': '宿管教师，管理全校宿舍分配和床位',
         'menu_keys': [
             'students.view',
-            # 2026-10-13：宿管需联系住宿学生，给联系电话明文查看；身份证号仍脱敏。
-            'students.view_phone',
+            # 2026-10-13 用户口径：默认只有管理员与班主任可看学生身份证号 / 联系电话明文，
+            # 宿管不需要 —— 学生敏感字段在宿舍侧一律脱敏展示。
             'dormitory.view', 'dormitory.manage', 'dormitory.assign',
             'dormitory.beds', 'dormitory.import',
             'statistics.view',
