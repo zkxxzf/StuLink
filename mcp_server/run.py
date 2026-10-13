@@ -165,6 +165,17 @@ def _print_banner(cfg, me):
         '',
     ]
     lines.extend(_client_example(cfg, url, mode))
+    # 2026-10-13（全面审计 M-5）：局域网暴露时的准入自检 —— 只认账号密码，等于让
+    # 同网段任何设备都能拿真实教师账号反复试探本端口，这里显式提醒一次。
+    if (host in ('0.0.0.0', '::', '::0')
+            and not (cfg.get('require_token') or mode == 'token')):
+        lines.extend([
+            '',
+            '  【警告】服务已暴露到局域网，但没有开第二道准入（require_token=false）：',
+            '         同网段任何设备都能拿账号口令试探本端口（认证有失败限速，但仍是单凭据）。',
+            '         建议把 config.json 的 require_token 改为 true 并重启，'
+            '客户端加 X-StuLink-Token 头。',
+        ])
     lines.extend([
         '',
         f"  配置文件 : {config.CONFIG_PATH}",
