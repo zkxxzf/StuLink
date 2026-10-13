@@ -96,4 +96,14 @@
     }
 
     window.initPopperFixedDropdowns = initPopperFixedDropdowns;
+
+    /* 2026-10-13：编号补零到两位（考场号 / 座号）——与服务端 app.utils.text_guard.pad2
+       同一口径（纯数字 zfill(2)，'A1' 原样）。页面里前端渲染编号时统一走它，
+       不要再各写一份 padStart。 */
+    function pad2(value) {
+        var s = (value === null || value === undefined) ? '' : String(value).trim();
+        return /^\d+$/.test(s) ? (s.length < 2 ? '0' + s : s) : s;
+    }
+
+    window.stuPad2 = pad2;
 })(window);

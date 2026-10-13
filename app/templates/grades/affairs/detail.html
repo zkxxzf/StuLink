@@ -263,7 +263,8 @@
                                去掉「考号前缀」列（前缀改在步骤③自定义模式里按选科设置） #}
                             {% for r in rooms %}
                             <tr data-rid="{{ r.id }}">
-                                <td>{{ r.room_no }}</td><td>{{ r.location }}</td>
+                                {# 2026-10-13 用户口径：考场号 / 座号一律两位（01 考场、01 座） #}
+                                <td>{{ pad2(r.room_no) }}</td><td>{{ r.location }}</td>
                                 <td>
                                     <select class="form-select form-select-sm py-0 rm-subj" onchange="saveRoomField(this)">
                                         {% for opt in room_subject_options %}
