@@ -594,3 +594,20 @@ read_lints（20 个改动文件）        0 诊断
 - `night_duties` 表（timetable.db）**有 45 行历史数据**，模型已删、功能已下线：是否 DROP 需用户决定（删除即丢历史值班记录）。
 - 独立 `.alumni_secret_key`、alumni 换 waitress/gunicorn、CSP 转 enforce、uploads 迁出 static、限流持久化、身份证随机 IV + 盲索引、迁移登记表扩大接入面（97 个脚本仅接入 3 个）。
 - 结构治理：9 个 >1000 行文件 + tests/academic_regression.py 2250 行拆分（上一轮流程见 docs/代码结构-大文件拆分.md）。
+
+---
+
+## 2026-10-13 全面审计（第二轮）新增发现与修复
+
+> 来源：`docs/全面审计报告_20261013.md`。**编号 H-x / M-x 为该报告内编号，与本清单既有编号无关。**
+> 该轮为只读全量审计（480 端点、13 库 68 表、5 套回归 808 项），发现已按 P0/P1 施工完毕。
+
+- [x] **H-1 业绩附件删除缺归属校验**（越权删他人附件）：改走 `ach_svc.can_view`，与预览/下载同口径。2026-10-13 完成（`app/modules/academic/routes/achievements.py`）。
+- [x] **M-1 划线模板绑定/解绑考试不校验年级**：改走 `assert_exam_visible`；删模板时的整批解绑有意保留（清悬空 id）。2026-10-13 完成（`app/modules/grades/routes/band_templates.py`）。
+- [x] **M-2 考务「从房间库生成考场」绕过年级校验**（H-4 漏网第 24 处）：改走 `_get_affair_checked`。2026-10-13 完成（`app/modules/grades/routes/exam_affairs.py`）。
+- [x] **M-3 宿舍导入错误日志仅登录即可下载**（含学号/姓名）：补 `@perm_required('dormitory.import')`。2026-10-13 完成（`app/modules/dormitory/routes/statistics.py`）。
+- [x] **M-4 日志脱敏只覆盖 8 个显式 logger**：31 处 `getLogger(__name__)`（形如 `app.modules.*`）未脱敏 → 改为 logger + handler + **LogRecord 工厂**三层（工厂口径才管得住"装脱敏之后新建的 handler"）。2026-10-13 完成（`app/utils/log_mask.py`）。
+- [x] **M-7 现网缺 3 个模型声明的索引**（`academic.teachers` 的 status/subject/user_id）：`check_indexes.py --fix` 补建。2026-10-13 完成。
+- [x] **H-2 跨库写无补偿**：学生导入改两阶段提交 + 失败补偿回退；考务名单多库写显式回滚报错；毕业归档按 history 库 rowid 水位撤销本次归档（防重试重复）。2026-10-13 完成（`system/routes/students.py`、`grades/routes/exam_affairs.py`、`system/routes/grade_mgmt.py`）。
+- [ ] **仍未处理**：M-5 MCP 服务在 `0.0.0.0` 暴露且 `require_token=false`、失败锁定作用于真实账号（可被用来锁号）——需定部署口径；报告 L 类结构债（20 个 >800 行文件、221 个 >50 行函数、`scope_required` 僵尸件、tests 备份树、7 处上传统一 `upload_guard`）。
+- 回归基线（本轮实测）：教务 501 / 安全 287 / 宿舍 31 / 班级范围 8 = **827 项全绿**；`scan_security_patterns.py` 0 命中；`check_columns.py` 缺列 0。

@@ -2784,6 +2784,101 @@ def check_audit_p0_scope_guards():
             db.session.commit()
 
 
+@item('AUDITP1')
+def check_audit_p1():
+    """全面审计 P1 修复回归（2026-10-13）：
+
+    · M-3 宿舍导入错误日志补 `dormitory.import` 权限（原只需登录即可下载学号/姓名明细）
+    · H-2 跨库写事务边界：
+        - 学生导入改两阶段提交 + 补偿（宿舍库失败 → 回退本次插入的学生行）
+        - 考务名单多库写入显式 try/rollback + 报错
+        - 毕业归档：主库 commit 失败时按水位撤销本次历史归档
+    """
+    from app.models import Student, PermissionGroup, OperationLog
+    import app.modules.system.routes.students as stu_mod
+
+    # —— M-3：无宿舍权限的账号下载导入错误日志 → 403 ——
+    with app.app_context():
+        pg = PermissionGroup.query.filter_by(name='AUDITP1无宿舍权限组').first()
+        if not pg:
+            pg = PermissionGroup(name='AUDITP1无宿舍权限组', scope_type='none',
+                                 role='staff', description='审计用例：无宿舍权限')
+            db.session.add(pg)
+            db.session.flush()
+            pg.set_menu_keys(['workbench.notifications_view'])
+        u = User.query.filter_by(username='audit_noperm').first()
+        if not u:
+            u = User(username='audit_noperm', real_name='审计无权限', role='staff',
+                     permission_group_id=pg.id, must_change_pwd=False)
+            u.set_password(TEST_PWD)
+            db.session.add(u)
+        db.session.commit()
+
+    with app.test_client() as c:
+        login(c, 'audit_noperm', TEST_PWD)
+        r = c.get('/statistics/download-errors/deadbeef')
+        case('审计P1：无 dormitory.import 下载宿舍错误日志被拒（403）',
+             r.status_code == 403, str(r.status_code))
+        c.get('/logout')
+        login(c, 'ac_admin', TEST_PWD)
+        r = c.get('/statistics/download-errors/deadbeef')
+        case('审计P1：有权限账号不受影响（不 403）',
+             r.status_code != 403, str(r.status_code))
+
+    # —— H-2①：学生导入两阶段提交 + 补偿（模拟宿舍库提交失败）——
+    NEW_NO = 'AUDITP1H2'
+    with app.app_context():
+        Student.query.filter_by(student_number=NEW_NO).delete(synchronize_session=False)
+        db.session.commit()
+        stu = Student(student_number=NEW_NO, name='审计H2学生', gender='男',
+                      grade='2099级', class_name='01班')
+        payload = [(stu, {'boarding_type': '住校', 'day_student_type': '',
+                          'textbook': '', 'teacher_notes': ''})]
+        calls = {'n': 0}
+        real_commit = db.session.commit
+
+        def _flaky():
+            calls['n'] += 1
+            if calls['n'] == 2:          # ①主库成功，②宿舍库炸
+                raise RuntimeError('模拟宿舍库提交失败')
+            return real_commit()
+
+        db.session.commit = _flaky
+        raised = False
+        try:
+            stu_mod._save_new_students(payload)
+        except RuntimeError:
+            raised = True
+        finally:
+            db.session.commit = real_commit
+        case('审计P1：H-2 宿舍库失败时导入整体报错（不静默半成功）', raised, 'raised')
+        case('审计P1：H-2 已插入的学生行被补偿回退（不留半成品）',
+             Student.query.filter_by(student_number=NEW_NO).count() == 0, 'rolled back')
+
+    # —— H-2②③：静态确认另两处也加了事务边界 ——
+    gm = open(os.path.join(BASE, 'app/modules/system/routes/grade_mgmt.py'),
+              encoding='utf-8').read()
+    ea = open(os.path.join(BASE, 'app/modules/grades/routes/exam_affairs.py'),
+              encoding='utf-8').read()
+    case('审计P1：H-2 毕业归档有水位补偿（_undo_history_archive）',
+         '_undo_history_archive' in gm and '_history_watermark' in gm, 'grade_mgmt')
+    case('审计P1：H-2 考务多库写有 try/rollback + 报错',
+         '已回滚' in ea and 'db.session.rollback()' in ea, 'exam_affairs')
+
+    # 清理
+    with app.app_context():
+        Student.query.filter_by(student_number=NEW_NO).delete(synchronize_session=False)
+        u = User.query.filter_by(username='audit_noperm').first()
+        if u:
+            OperationLog.query.filter_by(user_id=u.id).delete(synchronize_session=False)
+            db.session.delete(u)
+        db.session.commit()
+        pg = PermissionGroup.query.filter_by(name='AUDITP1无宿舍权限组').first()
+        if pg and not User.query.filter_by(permission_group_id=pg.id).first():
+            db.session.delete(pg)
+        db.session.commit()
+
+
 @item('PORTRAITLIST')
 def check_portrait_list_filter():
     """学生画像列表过滤（2026-10-13 修复）：**学籍为空（NULL）的学生必须可见**。

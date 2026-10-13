@@ -1056,6 +1056,30 @@ def check_L2():
     src = _read('app/modules/grades/routes/bands.py')
     case('L-2 bands 日志挂脱敏过滤器', 'MaskingFilter' in src)
 
+    # 2026-10-13 全面审计 M-4：脱敏必须覆盖 logging.getLogger(__name__) 这类模块 logger
+    # （名称形如 app.modules.*，不在名单里），且必须管住"装脱敏之后再新建的 handler"
+    # —— 靠 LogRecord 工厂在记录创建瞬间掩码（handler/logger 级过滤都追不上晚挂的 handler）。
+    import io as _io
+    import logging as _logging
+    from app.utils.log_mask import install_log_masking
+    buf = _io.StringIO()
+    late = _logging.StreamHandler(buf)          # 故意晚于 create_app 的安装时刻
+    _logging.getLogger().addHandler(late)
+    try:
+        install_log_masking()
+        _logging.getLogger('app.modules.system.routes.students').warning(
+            '测试 身份证 110101200001011234 手机 13912345678')
+        late.flush()
+        out = buf.getvalue()
+    finally:
+        _logging.getLogger().removeHandler(late)
+    case('M-4 模块 logger（app.modules.*）日志已脱敏',
+         '110101200001011234' not in out and '13912345678' not in out,
+         (out.strip() or '（未捕获到日志）')[-60:])
+    src2 = _read('app/utils/log_mask.py')
+    case('M-4 脱敏覆盖 handler 与 LogRecord 工厂',
+         'setLogRecordFactory' in src2 and '_install_on_handlers' in src2, 'log_mask')
+
 
 # ======================================================================
 # L-3 PDF 生成的类 HTML 解析
