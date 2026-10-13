@@ -1675,6 +1675,37 @@ def check_SR10():
     case('SR-10 导出敏感列需查看+导出双权限', "config.get('view_perm')" in src)
 
 
+@item('SR-11')
+def check_SR11():
+    """管理员组种子必须覆盖注册表全部权限点（防止再次漏列）。
+
+    2026-10-13 文档整理时发现：管理员组 `menu_keys` 漏列 `academic.edit`，
+    导致权限矩阵中「管理员组 × 教务管理 × 录入管理」显示为「不可见」，
+    与该组"拥有全部权限"的语义不符（实际 has_perm 恒 True，仅显示不一致）。
+    已修复并加此断言防回归。
+    """
+    from app.utils import permission_map as pm
+    from app import PERMISSION_GROUPS
+
+    all_keys = set()
+    for m in pm.MODULES:
+        for it in m['items']:
+            all_keys.update(it['read'])
+            all_keys.update(it['write'])
+
+    admin = next((g for g in PERMISSION_GROUPS if g['name'] == '管理员组'), None)
+    case('SR-11 管理员组存在', admin is not None)
+    keys = set(admin['menu_keys'])
+    case('SR-11 管理员组覆盖全部权限点（无缺口）',
+         not (all_keys - keys), f'缺口 {sorted(all_keys - keys)}')
+    case('SR-11 管理员组无未登记 key', not (keys - all_keys),
+         f'多余 {sorted(keys - all_keys)}')
+
+    levels = pm.keys_to_item_levels(admin['menu_keys'])
+    invisible = [k for k, v in levels.items() if v == pm.LEVEL_NONE]
+    case('SR-11 管理员组矩阵无「不可见」子功能', not invisible, str(invisible))
+
+
 def main(argv):
     selected = [a.upper() for a in argv if a.upper() in ITEMS]
     if not selected:

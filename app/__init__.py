@@ -133,7 +133,7 @@ PERMISSION_GROUPS = [
             'grades.score_edit',   # v1.19.47.6：成绩单改分（管理员天然可用；考务管理员另建组授予）
             # v1.9.2 合并：master 新增选科维护页权限 + first 学术/画像/工作台权限（取并集）
             'grades.subject_mgmt',
-            'academic.view', 'academic.timetable', 'academic.swap',
+            'academic.view', 'academic.edit', 'academic.timetable', 'academic.swap',
             'academic.swap_bulk', 'academic.swap_approve',
             'academic.inspection_export', 'academic.forms', 'academic.forms_view',
             'academic.view_teacher_phone',   # 2026-10-13 教师手机号明文
