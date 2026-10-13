@@ -1,4 +1,4 @@
-# StuLink v1.19.47.28 2026-10-13
+# StuLink v1.19.47.29 2026-10-13
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 """德育奖惩 —— 列表 / 登记 / 编辑 / 状态流转 / 删除 / 附件
 
