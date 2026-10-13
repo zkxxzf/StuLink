@@ -171,11 +171,18 @@ def _print_banner(cfg, me):
             and not (cfg.get('require_token') or mode == 'token')):
         lines.extend([
             '',
+<<<<<<< HEAD
             '  【安全提示】服务暴露到局域网（host=0.0.0.0），当前只有账号密码一道准入：',
             '         同网段任何设备都能拿账号口令试探本端口。已有防护：同来源+同账号连错 5 次',
             '         → 锁该来源（不锁账号）；同来源失败 20 次 → 挡该来源；跨来源累计 → 只加延迟。',
             '         要更严可选：config.json 的 require_token 改 true（客户端加',
             '         X-StuLink-Token 头），或把 host 收回 127.0.0.1（仅本机可访问）。',
+=======
+            '  【警告】服务已暴露到局域网，但没有开第二道准入（require_token=false）：',
+            '         同网段任何设备都能拿账号口令试探本端口（认证有失败限速，但仍是单凭据）。',
+            '         建议把 config.json 的 require_token 改为 true 并重启，'
+            '客户端加 X-StuLink-Token 头。',
+>>>>>>> fcc16f98397f2ba5a54331a9c45058cec6703db7
         ])
     lines.extend([
         '',
