@@ -1,4 +1,4 @@
-# StuLink v1.19.47.4 2026-10-10
+# StuLink v1.19.47.25 2026-10-10
 # 课表公共辅助函数（schedule_service 与 swap_service 共享）
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 """课表模块公共辅助层。
@@ -128,7 +128,7 @@ def get_periods(schedule_id):
 
     2026-10-10 优化：同一请求内多处会重复调用（总课表、年级课表、班级课表、
     实时课表各查一遍），这里加请求内缓存。返回值约定**只读**（调用方不得原地改）；
-    写节次配置的路由都是"保存 → redirect"，不存在同请求内改后读。
+    写作息时间配置的路由都是"保存 → redirect"，不存在同请求内改后读。
     """
     cache = None
     if has_request_context():
@@ -179,12 +179,31 @@ def temp_target_ids(schedule_id):
             g._temp_target_ids_cache = cache
         if schedule_id in cache:
             return cache[schedule_id]
-    rows = (ScheduleSwap.query
-            .filter(ScheduleSwap.term_schedule_id == schedule_id,
-                    ScheduleSwap.is_permanent.is_(False),
-                    ScheduleSwap.target_entry_id.isnot(None))
-            .with_entities(ScheduleSwap.target_entry_id).all())
-    out = {r[0] for r in rows if r[0]}
+    rows = None
+    out = None
+    # v1.19.47.25 换课：临时换课会同时产生「我方 / 对方」两条当天条目，两条都要排除；
+    # 列未迁移的历史库降级为旧口径（只排除我方），不让课表读路径因缺列而崩。
+    try:
+        rows = (ScheduleSwap.query
+                .filter(ScheduleSwap.term_schedule_id == schedule_id,
+                        ScheduleSwap.is_permanent.is_(False),
+                        db.or_(ScheduleSwap.target_entry_id.isnot(None),
+                               ScheduleSwap.partner_target_entry_id.isnot(None)))
+                .with_entities(ScheduleSwap.target_entry_id,
+                               ScheduleSwap.partner_target_entry_id).all())
+        out = set()
+        for a, b in rows:
+            if a:
+                out.add(a)
+            if b:
+                out.add(b)
+    except Exception:  # noqa: BLE001 列未迁移（no such column）时降级
+        rows = (ScheduleSwap.query
+                .filter(ScheduleSwap.term_schedule_id == schedule_id,
+                        ScheduleSwap.is_permanent.is_(False),
+                        ScheduleSwap.target_entry_id.isnot(None))
+                .with_entities(ScheduleSwap.target_entry_id).all())
+        out = {r[0] for r in rows if r[0]}
     if cache is not None:
         cache[schedule_id] = out
     return out

@@ -1,4 +1,4 @@
-# StuLink v1.19.47.4 2026-10-10
+# StuLink v1.19.47.25 2026-10-10
 # 个人成绩查询与分析：页面 + 数据API + 学生搜索 + 成绩证明生成/公开核验
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 import hashlib
@@ -27,6 +27,12 @@ logger = logging.getLogger(__name__)
 def _student_query_in_scope(user):
     """返回 Student 查询（已按当前用户成绩可见范围过滤）"""
     q = Student.query
+    # 2026-10-12 P1：用户级数据范围优先（与 student_scope/dormitory_scope 同口径）。
+    # 原实现 `admin or scope=='school'` 先短路，staff+校级组再配用户级范围时
+    # 会忽略用户级范围放行全校（口径漂移）。
+    ug = scope_service.user_grade_scope(user)
+    if ug is not None:
+        return q.filter(Student.grade.in_(ug))
     scope, grade = scope_service.get_scope(user)
     if user.role == 'admin' or scope == 'school':
         pass

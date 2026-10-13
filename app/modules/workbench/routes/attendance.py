@@ -1,5 +1,5 @@
 """考勤管理路由"""
-# StuLink v1.19.47.4 2026-10-10：补权限校验与班级归属校验（PR#5 安全审查 S1）
+# StuLink v1.19.47.25 2026-10-10：补权限校验与班级归属校验（PR#5 安全审查 S1）
 from datetime import date
 
 from flask import (Blueprint, render_template, request, jsonify, flash,
@@ -13,7 +13,6 @@ from app.modules.workbench.services.attendance_service import (
 )
 from app.modules.workbench.services import scope as wb_scope
 from app.models.academic import ATTENDANCE_STATUS
-from app.modules.workbench.services import scope_service
 from app.utils.helpers import to_date
 from app.utils.decorators import perm_required
 
@@ -74,12 +73,10 @@ def attendance_record():
         flash('请选择日期和班级', 'danger')
         return redirect(url_for('attendance.attendance_page'))
     # 越权防护：只能给本班学生记录考勤（原先可给任意学号写记录）
+    # 2026-10-13 审计修复 #20：原先这里连续做两次完全相同的 class_allowed 判断，
+    # 第一次已 abort(403)，第二次的 flash+redirect 永远走不到（死代码）。
     if not wb_scope.class_allowed(current_user, grade, class_name):
         abort(403)
-
-    if not scope_service.is_class_in_scope(current_user, grade, class_name):
-        flash('无该班级的操作权限（超出管辖范围）', 'danger')
-        return redirect(url_for('attendance.attendance_page'))
 
     records_list = []
     valid_nos = {s.student_number for s in get_class_students(class_name, grade)}
@@ -128,12 +125,9 @@ def attendance_export():
         flash('请选择班级后再导出', 'warning')
         return redirect(url_for('attendance.attendance_page'))
     # 越权防护：不能导出非管辖班级的考勤
+    # 2026-10-13 审计修复 #20：删掉第二次重复的 class_allowed 判断（abort 之后走不到）
     if not wb_scope.class_allowed(current_user, grade, class_name):
         abort(403)
-
-    if not scope_service.is_class_in_scope(current_user, grade, class_name):
-        flash('无该班级的导出权限（超出管辖范围）', 'danger')
-        return redirect(url_for('attendance.attendance_page'))
 
     out = export_attendance(
         class_name=class_name,
@@ -160,11 +154,9 @@ def attendance_stats_api():
 
     if not class_name:
         return jsonify({'error': '请选择班级'}), 400
+    # 2026-10-13 审计修复 #20：删掉第二次重复判断
     if not wb_scope.class_allowed(current_user, grade, class_name):
         return jsonify({'error': '无权访问该班级数据'}), 403
-
-    if not scope_service.is_class_in_scope(current_user, grade, class_name):
-        return jsonify({'error': '无该班级的访问权限（超出管辖范围）'}), 403
 
     stats = get_attendance_stats(class_name, grade=grade, month=month or None)
     return jsonify(stats)

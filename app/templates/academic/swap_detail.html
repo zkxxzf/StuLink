@@ -35,7 +35,12 @@
     </h4>
     <div class="d-flex gap-2">
         <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('academic.swap_page') }}"><i class="bi bi-arrow-left"></i> 返回列表</a>
-        {% if d.status == 'pending' %}
+        {% if d.status == 'pending' and d.partner_status == 'pending' and is_partner %}
+        {# 2026-10-12 换课：对方（partner）先确认，确认后才进入教务审批 #}
+        <button class="btn btn-sm btn-success btn-partner-agree"><i class="bi bi-check2-circle"></i> 同意换课</button>
+        <button class="btn btn-sm btn-outline-danger btn-partner-refuse"><i class="bi bi-x-circle"></i> 拒绝</button>
+        {% endif %}
+        {% if d.status == 'pending' and d.partner_status != 'pending' %}
             {# 分级审批：只有当前这一级的审批人能看到通过/驳回 #}
             {% if d.can_review %}
             <button class="btn btn-sm btn-success btn-approve"><i class="bi bi-check-lg"></i> 通过（{{ d.review_step_name }}）{% if d.is_batch %} · 整批 {{ d.batch_count }} 门{% endif %}</button>
@@ -61,7 +66,7 @@
             {% if oe %}
             <div class="cmp-big">{{ oe.subject }}</div>
             <div class="cmp-val mt-1">{{ oe.grade }}{{ oe.class_name }}</div>
-            <div class="cmp-val">{{ weekday_names.get(oe.weekday) }} · 第{{ oe.period_number }}节{% if d.original_period %} {{ d.original_period.start_time }}-{{ d.original_period.end_time }}{% endif %}</div>
+            <div class="cmp-val">{{ weekday_names.get(oe.weekday) }} · {{ (d.original_period.period_name if d.original_period else '') or period_label(oe.period_number) }}{% if d.original_period %} {{ d.original_period.start_time }}-{{ d.original_period.end_time }}{% endif %}</div>
             <div class="cmp-val text-muted">教师：{{ oe.teacher_name or '-' }}　教室：{{ oe.room or '-' }}</div>
             <div class="cmp-val text-muted small">周次：{{ oe.week_range or '-' }}</div>
             {% if d.source_date %}
@@ -96,11 +101,38 @@
     </div>
 </div>
 
-{# ── 统一调课批次成员（列表里整批只占一条记录，明细在这里看）── #}
+{% if d.exchange_kind %}
+{# 2026-10-12 换课（v1.19.47.25）：对方信息与确认状态 #}
+<div class="alert {% if d.partner_status == 'pending' %}alert-warning{% elif d.partner_status == 'refused' %}alert-danger{% elif d.partner_status == 'agreed' %}alert-success{% else %}alert-info{% endif %} py-2 small mb-3">
+    <i class="bi bi-people-fill"></i>
+    <b>{{ d.exchange_kind_text }}{% if d.exchange_content_text %} · {{ d.exchange_content_text }}{% endif %}</b>
+    <span class="ms-2">对方教师：<b>{{ d.partner_name or d.partner_uid or '-' }}</b></span>
+    {% if d.exchange_kind == 'exchange' and not d.is_permanent %}
+    <span class="ms-2">我这边上课日期：<b>{{ d.swap_date or '—' }}</b>　对方那边上课日期：<b>{{ d.partner_swap_date or d.swap_date or '—' }}</b></span>
+    {% endif %}
+    {% if d.partner_entry %}
+    <span class="ms-2">对方课程：{{ d.partner_entry.subject }} · {{ d.partner_entry.grade }}{{ d.partner_entry.class_name }} · {{ weekday_names.get(d.partner_entry.weekday) }}{{ period_label(d.partner_entry.period_number) }}</span>
+    {% endif %}
+    <span class="ms-2">对方确认：<b>{{ d.partner_status_text or '—' }}</b>{% if d.partner_responded_at %} <span class="text-muted">（{{ d.partner_responded_at }}）</span>{% endif %}</span>
+    {% if d.exchange_kind == 'exchange' %}
+    <span class="ms-2">确认方式：<b>{% if d.need_partner_confirm %}需对方同意{% else %}无需对方确认{% endif %}</b></span>
+    {% endif %}
+    {% if d.partner_note %}<div class="mt-1">对方备注：{{ d.partner_note }}</div>{% endif %}
+    <div class="mt-1 text-muted">
+        {% if d.exchange_kind == 'exchange' and not d.need_partner_confirm %}
+        流程：<b>教务审批</b> → 执行（发起时选择「无需对方同意确认」，对方仅收到知会通知）。
+        {% else %}
+        流程：<b>对方确认</b> → 教务审批 → 执行（对方未确认前不会进入教务待审队列）。
+        {% endif %}
+    </div>
+</div>
+{% endif %}
+
+{# ── 调课批次成员（列表里整批只占一条记录，明细在这里看）── #}
 {% if d.is_batch %}
 <div class="card mb-3">
     <div class="card-header py-2 d-flex justify-content-between align-items-center flex-wrap gap-2">
-        <span><i class="bi bi-collection"></i> 统一调课批次：本批共 {{ d.batch_count }} 门课</span>
+        <span><i class="bi bi-collection"></i> 本批共 {{ d.batch_count }} 门课 · 一次审批整批生效</span>
         <span class="small text-muted">通过 / 驳回 / 撤销 / 执行一次即整批生效，不必逐条审批</span>
     </div>
     <div class="card-body py-2">
@@ -262,6 +294,7 @@
     "rejectUrl": {{ url_for('academic.swap_reject', swap_id=d.id)|tojson }},
     "executeUrl": {{ url_for('academic.swap_execute', swap_id=d.id)|tojson }},
     "cancelUrl": {{ url_for('academic.swap_cancel', swap_id=d.id)|tojson }},
+    "partnerRespondUrl": {{ url_for('academic.swap_partner_respond', swap_id=d.id)|tojson }},
     "batchCount": {{ d.batch_count }}
 }
 </script>
@@ -281,8 +314,8 @@
             alert(m);
         });
     }
-    // 统一调课批次：一次操作即整批生效，确认文案带上"共 N 门"
-    var what = (cfg.batchCount > 1) ? ('该统一调课批次（共 ' + cfg.batchCount + ' 门课）') : '该调课申请';
+    // 调课批次：一次操作即整批生效，确认文案带上"共 N 门"
+    var what = (cfg.batchCount > 1) ? ('该调课批次（共 ' + cfg.batchCount + ' 门课）') : '该调课申请';
     $('.btn-approve').on('click', function () { if (confirm('确认通过' + what + '？')) post(cfg.approveUrl, { review_note: '' }); });
     $('.btn-execute').on('click', function () { if (confirm('确认执行' + what + '？执行后将真正修改课表且不可重复执行。')) post(cfg.executeUrl, {}); });
     $('.btn-cancel').on('click', function () { if (confirm('确认撤销' + what + '？')) post(cfg.cancelUrl, {}); });
@@ -293,6 +326,17 @@
         if (!note) { alert('请填写驳回理由'); return; }
         if (rj) rj.hide();
         post(cfg.rejectUrl, { review_note: note });
+    });
+    // 2026-10-12 换课：对方确认（同意 → 进教务审批；拒绝需填原因）
+    $('.btn-partner-agree').on('click', function () {
+        if (!confirm('确认同意这次换课？同意后申请将进入教务审批。')) return;
+        post(cfg.partnerRespondUrl, { action: 'agree', note: '' });
+    });
+    $('.btn-partner-refuse').on('click', function () {
+        var note = prompt('请填写拒绝的原因（对方会收到）：');
+        if (note === null) return;
+        if (!note.trim()) { alert('请填写拒绝的原因'); return; }
+        post(cfg.partnerRespondUrl, { action: 'refuse', note: note.trim() });
     });
 })();
 </script>

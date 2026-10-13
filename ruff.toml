@@ -1,0 +1,24 @@
+# StuLink 最小 lint 配置（2026-10-13 全面审计 L-8：此前无任何 lint / CI 配置）
+#
+# 本仓库**不把 lint 工具写进依赖**（requirements.txt 只放运行期依赖），要用时：
+#   py -3.12 -m pip install ruff
+#   py -3.12 -m ruff check app mcp_server scripts tests
+#
+# 只开"真错"级规则，不开风格规则：存量代码的风格问题量很大（超长函数 221 个、
+# 重复实现多组，见 docs/全面审计报告_20261013.md 的 L-2/L-5），一次全开会把真问题淹没。
+#   E9  = 语法错误（编译不过）
+#   F82 = 未定义名 / 未定义局部变量（运行时必炸）
+#   F811 = 重复定义（同名函数/变量被覆盖，多为复制粘贴事故）
+target-version = "py312"
+line-length = 110
+
+[lint]
+select = ["E9", "F811", "F82"]
+
+exclude = [
+    "data",
+    ".venv",
+    "mcp_server/.venv",
+    "__pycache__",
+    "tests/qa_*",          # 历史快照目录（已不再纳入回归）
+]

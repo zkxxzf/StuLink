@@ -30,9 +30,6 @@
             <i class="bi bi-files"></i> 学期交接：复制当前学期课表
         </a>
         {% endif %}
-        <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('academic.schedule_compare') }}">
-            <i class="bi bi-arrow-left-right"></i> 跨学期对比
-        </a>
         <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('academic.schedule_manage') }}">
             <i class="bi bi-house"></i> 学期管理
         </a>
@@ -91,9 +88,6 @@
                            「大课表」页已于 2026-10-10 下线） #}
                         <a class="btn btn-sm btn-outline-primary py-0" href="{{ url_for('academic.schedule_history_detail', sid=t.id) }}">
                             <i class="bi bi-eye"></i> 查看课表
-                        </a>
-                        <a class="btn btn-sm btn-outline-secondary py-0" href="{{ url_for('academic.schedule_compare', sid_a=t.id) }}">
-                            <i class="bi bi-arrow-left-right"></i> 对比
                         </a>
                         <a class="btn btn-sm btn-outline-success py-0" href="{{ url_for('academic.schedule_copy', sid=t.id) }}">
                             <i class="bi bi-files"></i> 以此为底版

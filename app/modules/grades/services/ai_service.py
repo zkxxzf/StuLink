@@ -1,4 +1,4 @@
-# StuLink v1.19.47.4 2026-10-10
+# StuLink v1.19.47.25 2026-10-10
 # AI 分析服务：权限收敛取数（本次+上次原始成绩）→ payload 组装 → LLM 转发
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 import json
@@ -18,7 +18,7 @@ from app.utils.url_guard import assert_outbound_url_allowed
 DEFAULT_TEMPERATURE = 0.4
 DEFAULT_TIMEOUT = 180
 
-# v1.19.47.4 S-4：不自动跟随 3xx，防 SSRF 以 approved.com → 302 → 169.254.169.254 绕过 url_guard
+# v1.19.47.25 S-4：不自动跟随 3xx，防 SSRF 以 approved.com → 302 → 169.254.169.254 绕过 url_guard
 
 class _NoRedirect(urllib.request.HTTPRedirectHandler):
     def redirect_request(self, req, fp, code, msg, headers, newurl):
@@ -76,7 +76,22 @@ def scope_of(user, exam):
 
     if user.role == 'admin':
         return nos, f'{exam.grade}全年级', None
-    if user.has_role('grade_leader'):
+    # 2026-10-12 P1：与网页端分析（_guard_tab/check_exam_visible）同口径：
+    # 用户级范围 > 组级 school > 组级 grade > 年级长角色回落 > 班主任 > 任课教师。
+    # 原实现按 role 硬判：① staff+校级组/用户级授权账号一律拿到空集（AI 无数据）；
+    # ② scope_of 自身不设年级防线（只靠路由层 check_exam_visible 单点防护）。
+    ug = scope_service.user_grade_scope(user)
+    if ug is not None:
+        if exam.grade not in ug:
+            return set(), '授权年级不含本场考试', None
+        return nos, '授权年级：' + exam.grade, None
+    scope, my_grade = scope_service.get_scope(user)
+    if scope == scope_service.SCOPE_SCHOOL:
+        return nos, f'{exam.grade}全年级', None
+    if scope == scope_service.SCOPE_GRADE or user.has_role('grade_leader'):
+        my_grade = my_grade or user.grade
+        if my_grade and exam.grade != my_grade:
+            return set(), '非本人年级', None
         return nos, f'{exam.grade}全年级', None
     if user.has_role('homeroom_teacher'):
         links = scope_service.visible_classes(user) or []
@@ -544,7 +559,7 @@ def build_stats(payload):
                    'values': [_mean(subj[k]) for k in sorted(subj.keys())]}
 
     # 4) 进退步分布
-    # v1.19.47.4 修复：move_rank = 本场方向排名 − 上一场方向排名，
+    # v1.19.47.25 修复：move_rank = 本场方向排名 − 上一场方向排名，
     # 负值 = 名次数字变小 = 进步、正值 = 退步（与成绩单、个人查询同口径）。
     # 原实现把 ≥50 记成"大幅进步"、≤-50 记成"大幅退步"，饼图标签整体标反，此处纠正。
     moves = {'大幅进步(≤-50)': 0, '进步': 0, '持平': 0, '退步': 0, '大幅退步(≥50)': 0}

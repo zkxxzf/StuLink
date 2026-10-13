@@ -1,4 +1,4 @@
-/* StuLink v1.19.47.4 学期课表前端
+/* StuLink v1.19.47.25 学期课表前端
  * 统一入口：各课表页底部注入 <script id="scheduleData" type="application/json"> 配置块。
  * 依赖：jQuery 3.7 + Bootstrap 5 bundle（base.html 已全局加载）；图表页额外加载 echarts.min.js。
  * CSRF：base.html 已 $.ajaxSetup 注入 X-CSRFToken，本文件的 $.ajax/$.getJSON 自动携带。
@@ -120,17 +120,22 @@
      * 结构与 _schedule_grid.html 宏保持一致
      * ══════════════════════════════════════════════════════════════ */
     function entryHtml(e, canEdit) {
+        // 2026-10-12（用户要求）：教师课表（CFG.showClass）主文本显示班级、副行显示学科，
+        // 与 _schedule_grid.html 宏的 show_class 同口径
+        var byClass = !!CFG.showClass;
         return '<div class="sch-item' + (e.entry_type === 'swap' ? ' sch-item-swap' : '')
             + '" data-entry-id="' + e.id + '" style="' + toneStyle(e.subject) + '"'
             + (canEdit ? ' draggable="true" title="拖到别的格子可换课（点击可编辑）"' : '')
             + '>'
-            + '<div class="sch-subject">' + esc(e.subject)
+            + '<div class="sch-subject">'
+            + (byClass ? esc((e.grade || '') + (e.class_name || '')) : esc(e.subject))
             + (e.entry_type === 'swap' ? '<span class="sch-badge-swap">调</span>' : '')
             + (e.teaching_class ? '<span class="sch-badge-tc" title="走班课：'
                 + esc(e.teaching_class) + '">走</span>' : '')
             + (e.week_badge ? '<span class="sch-badge-week">' + esc(e.week_badge) + '</span>' : '')
             + '</div>'
-            + '<div class="sch-teacher">' + esc(e.teacher_name || '未指定') + '</div>'
+            + '<div class="sch-teacher">'
+            + (byClass ? esc(e.subject || '—') : esc(e.teacher_name || '未指定')) + '</div>'
             + (e.room ? '<div class="sch-room"><i class="bi bi-geo-alt"></i> ' + esc(e.room) + '</div>' : '')
             + '</div>';
     }
@@ -1121,7 +1126,7 @@
     }
 
     /* ══════════════════════════════════════════════════════════════
-     * 节次配置：动态增删行
+     * 作息时间（节次与时间）：动态增删行
      * ══════════════════════════════════════════════════════════════ */
     function initPeriods() {
         if (!CFG.canEdit) { return; }

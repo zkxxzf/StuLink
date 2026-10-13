@@ -1,4 +1,4 @@
-# StuLink v1.19.47.4 2026-10-10
+# StuLink v1.19.47.25 2026-10-10
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 """教师业绩库：标签 + 附件（2026-09-26）。
 
@@ -17,6 +17,7 @@
 import os
 import re
 import uuid
+from datetime import datetime
 
 from app.extensions import db
 from app.models.academic import AchievementAttachment, TeacherAchievement
@@ -424,3 +425,122 @@ def submission_brief(rec):
         'list_url': url_for('academic.form_submissions',
                             form_id=sub.template_id),
     }
+
+
+# ══════════════════════════════════════════════════════════════════════
+# 业绩主流程（2026-10-11 从 routes/achievements.py 抽出，供网页端与 MCP 共用）
+#
+# 原先 add / review / delete / edit 全部内联在路由里；MCP 若自行实现一份，
+# 极易与网页端口径分叉。这里按原语义 1:1 抽出，参数错误 raise ValueError、
+# 越权 raise PermissionError，由调用方（路由 / MCP toolkit）转呈现。
+# 调用方负责 commit（除注明内部 commit 的）。
+# ══════════════════════════════════════════════════════════════════════
+
+def add_achievement(operator, teacher_uid, category, title, level=None,
+                    obtain_date=None, issuer=None, note=None, tags=''):
+    """教务录入业绩（直接生效 status='approved'）。返回新建记录（未 commit）。
+
+    category 须在 ACHIEVEMENT_CATEGORIES 内；teacher_uid 必须命中在职教师。
+    """
+    from app.models.academic import (ACHIEVEMENT_CATEGORIES, Teacher,
+                                     TeacherAchievement)
+    teacher = Teacher.query.filter_by(teacher_uid=(teacher_uid or '').strip()).first()
+    if not teacher:
+        raise ValueError('请选择教师（teacher_uid 未匹配到教师档案）')
+    keys = {k for k, _ in ACHIEVEMENT_CATEGORIES}
+    category = (category or '').strip()
+    if category not in keys:
+        raise ValueError(f'业绩类别非法：{category}，可选：{"、".join(sorted(keys))}')
+    title = (title or '').strip()
+    if not title:
+        raise ValueError('请填写业绩名称')
+
+    rec = TeacherAchievement(
+        teacher_uid=teacher.teacher_uid, teacher_name=teacher.name,
+        category=category, title=title[:200],
+        level=(level or '').strip() or None,
+        obtain_date=obtain_date,
+        issuer=(issuer or '').strip() or None,
+        note=(note or '').strip() or None,
+        tags=(','.join(parse_tags(tags)) or None),
+        status='approved', submitted_by=operator.id,
+    )
+    db.session.add(rec)
+    return rec
+
+
+def review_achievement(operator, aid, action, note=''):
+    """审核业绩（approve / reject）；驳回必填理由。返回 (rec, 状态中文)。"""
+    from app.models.academic import ACHIEVEMENT_STATUS, TeacherAchievement
+    rec = db.session.get(TeacherAchievement, aid)
+    if rec is None:
+        raise ValueError(f'业绩记录不存在：{aid}')
+    if action not in ('approve', 'reject'):
+        raise ValueError('action 只能是 approve 或 reject')
+    note = (note or '').strip()
+    if action == 'reject' and not note:
+        raise ValueError('驳回时请填写审核意见，教师可在工作台看到原因')
+    rec.status = 'approved' if action == 'approve' else 'rejected'
+    rec.review_note = note[:200] or None
+    rec.reviewed_by = operator.id
+    rec.reviewed_at = datetime.now()
+    return rec, ACHIEVEMENT_STATUS.get(rec.status, rec.status)
+
+
+def edit_achievement(operator, aid, title=None, category=None, level=None,
+                     obtain_date=..., issuer=None, note=None, tags=None):
+    """编辑业绩。返回更新后的记录（未 commit）。
+
+    obtain_date 用 `...` 哨兵区分「不修改」与「置空」（传入 None 表示清空）。
+    权限：教务（academic.edit）可改任意记录；非教务只能改
+    「本人任教的业绩 + 仍 pending」——注意网页端 achievements_edit 里的同款
+    判定因装饰器已强制 academic.edit 而恒为真（死代码），本函数改为真正生效。
+    """
+    from app.modules.academic.services import teacher_service
+    from app.models.academic import ACHIEVEMENT_CATEGORIES, TeacherAchievement
+    rec = db.session.get(TeacherAchievement, aid)
+    if rec is None:
+        raise ValueError(f'业绩记录不存在：{aid}')
+
+    is_admin = (getattr(operator, 'role', None) == 'admin'
+                or operator.has_perm('academic.edit'))
+    if not is_admin:
+        teacher = teacher_service.teacher_of_user(operator)
+        if not (teacher and rec.teacher_uid == teacher.teacher_uid
+                and rec.status == 'pending'):
+            raise PermissionError('没有权限编辑该业绩记录（只能改自己提交且待审核的）')
+
+    if title is not None:
+        title = (title or '').strip()
+        if not title:
+            raise ValueError('名称不能为空')
+        rec.title = title[:200]
+    if category:
+        keys = {k for k, _ in ACHIEVEMENT_CATEGORIES}
+        if category not in keys:
+            raise ValueError(f'业绩类别非法：{category}')
+        rec.category = category
+    if level is not None:
+        rec.level = (level or '').strip() or None
+    if obtain_date is not ...:
+        rec.obtain_date = obtain_date          # None 表示清空
+    if issuer is not None:
+        rec.issuer = (issuer or '').strip() or None
+    if note is not None:
+        rec.note = (note or '').strip() or None
+    if tags is not None:
+        # 传原始字符串交给 parse_tags 拆分去重；传 list 会被 str() 成脏值
+        set_tags(rec, tags)
+    return rec
+
+
+def delete_achievement(operator, aid):
+    """删除业绩，并连带清理附件（记录 + 落盘文件），避免留下孤儿文件。"""
+    from app.models.academic import TeacherAchievement
+    rec = db.session.get(TeacherAchievement, aid)
+    if rec is None:
+        raise ValueError(f'业绩记录不存在：{aid}')
+    for att in list_attachments(rec):
+        delete_attachment(att)
+    db.session.delete(rec)
+    return rec

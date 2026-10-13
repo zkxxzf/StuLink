@@ -1,4 +1,4 @@
-# StuLink v1.19.47.4 2026-10-10
+# StuLink v1.19.47.25 2026-10-10
 # 学期周期服务（Task#27）：日期→学期/教学周定位、校历、学期交接、归档、跨学期对比、使用报告
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 """学期周期维度服务层（独立库 timetable.db）。
@@ -288,90 +288,8 @@ def archive_term(schedule_id, operator=None):
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# 跨学期对比 / 同学期变更时间线
+# 同学期变更时间线（2026-10-12：跨学期对比 compare_terms 已随功能整体下线）
 # ═══════════════════════════════════════════════════════════════════════════════
-
-def compare_terms(schedule_id_a, schedule_id_b, grade=None, class_name=None):
-    """跨学期课表对比。对齐键 (grade, class_name, weekday, period_number)，只比较未删除条目。
-
-    返回 {term_a, term_b, added[], removed[], changed[], unchanged_count, summary{}}。
-    - added：B 有 A 无（slot 级）
-    - removed：A 有 B 无（slot 级）
-    - changed：同时段但 学科/教师/教室/周次 不同（field 级，一个差异字段一行）
-    - summary.added/removed/changed 为 slot 级计数，changed_fields 为 field 级行数
-    """
-    ta = db.session.get(TermSchedule, schedule_id_a)
-    tb = db.session.get(TermSchedule, schedule_id_b)
-
-    def fetch(sid):
-        q = ScheduleEntry.query.filter_by(term_schedule_id=sid, is_deleted=False)
-        if grade:
-            q = q.filter_by(grade=grade)
-        if class_name:
-            q = q.filter_by(class_name=class_name)
-        return q.all()
-
-    def key(e):
-        return (e.grade, e.class_name, e.weekday, e.period_number)
-
-    ma, mb = {}, {}
-    for e in fetch(schedule_id_a):
-        ma.setdefault(key(e), e)
-    for e in fetch(schedule_id_b):
-        mb.setdefault(key(e), e)
-
-    def brief(e):
-        return {'grade': e.grade, 'class_name': e.class_name, 'weekday': e.weekday,
-                'weekday_text': WEEKDAY_NAMES.get(e.weekday, ''),
-                'period_number': e.period_number, 'subject': e.subject,
-                'teacher_name': e.teacher_name, 'room': e.room,
-                'week_range': e.week_range}
-
-    added, removed, changed = [], [], []
-    unchanged = 0
-    changed_slots = 0
-    compare_fields = ('subject', 'teacher_name', 'room', 'week_range')
-
-    for k, b in mb.items():
-        if k not in ma:
-            added.append(brief(b))
-            continue
-        a = ma[k]
-        diffs = [(f, getattr(a, f), getattr(b, f)) for f in compare_fields
-                 if (getattr(a, f) or '') != (getattr(b, f) or '')]
-        if diffs:
-            changed_slots += 1
-            for f, old, new in diffs:
-                row = brief(b)
-                row.update({'field': f, 'old': old, 'new': new})
-                changed.append(row)
-        else:
-            unchanged += 1
-    for k, a in ma.items():
-        if k not in mb:
-            removed.append(brief(a))
-
-    added.sort(key=lambda r: (r['grade'], r['class_name'], r['weekday'], r['period_number']))
-    removed.sort(key=lambda r: (r['grade'], r['class_name'], r['weekday'], r['period_number']))
-    changed.sort(key=lambda r: (r['grade'], r['class_name'], r['weekday'], r['period_number']))
-
-    return {
-        'term_a': ta.to_dict() if ta else None,
-        'term_b': tb.to_dict() if tb else None,
-        'added': added,
-        'removed': removed,
-        'changed': changed,
-        'unchanged_count': unchanged,
-        'summary': {
-            'added': len(added),
-            'removed': len(removed),
-            'changed': changed_slots,
-            'changed_fields': len(changed),
-            'unchanged': unchanged,
-            'total_a': len(ma),
-            'total_b': len(mb),
-        },
-    }
 
 
 def compare_term_versions(schedule_id, entry_id=None, limit=100):

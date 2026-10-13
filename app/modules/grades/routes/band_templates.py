@@ -1,4 +1,4 @@
-# StuLink v1.19.47.4 2026-10-10
+# StuLink v1.19.47.25 2026-10-10
 # 分层模板管理：自定义模板 + 考试与模板绑定
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 from flask import render_template, request, jsonify, abort
@@ -7,13 +7,14 @@ import json
 
 from app.extensions import db
 from app.models import DictCategory
-from app.models.grades import Exam, BandTemplate
+from app.models.grades import Exam, ExamBand, BandTemplate
 from app.modules.grades import bp
+from app.modules.grades.services.exam_guard import assert_exam_visible
 from app.utils.decorators import perm_required
 from app.utils.helpers import log_operation
 
 # 内置模板：首次访问时自动写入（幂等），保证「四层 / 默认模板」一直在
-# v1.19.47.4 用户口径：默认模板改为 985线 / 211线 / 特控线 / 本科线 四层，
+# v1.19.47.25 用户口径：默认模板改为 985线 / 211线 / 特控线 / 本科线 四层，
 # 低于本科线即「未上线」（不单列一层，由“不落任何层”自然得出）。
 BUILTIN_LAYERS_NAME = '默认模板'      # 默认模板名（内置不可删）
 BUILTIN_TEMPLATES = [
@@ -63,7 +64,7 @@ def ensure_builtin_templates():
                            sort_order=t['sort_order'])
         obj.set_layers(t['layers'])
         db.session.add(obj)
-    # v1.19.47.4 修正 bug：历史上给 is_builtin 加字段时，迁移把已有行全标成了内置，
+    # v1.19.47.25 修正 bug：历史上给 is_builtin 加字段时，迁移把已有行全标成了内置，
     # 导致用户手工建的模板也没有删除按钮。内置与否以**名字**为唯一依据：
     # 不在规范定义（含旧内置名）里的-list 全部归为可删。
     builtin_names = {t['name'] for t in BUILTIN_TEMPLATES} | set(LEGACY_RENAME)
@@ -94,11 +95,29 @@ def _exam_type_options():
     return opts
 
 
+def _norm_line(name):
+    """线名归一化：去首尾空白 + 去尾部「线」（「特控线」≈「特控」）
+
+    与划线分层页 bands.html 回填的 norm() 同口径 —— 导入的线名与模板层名
+    常差一个「线」字，精确比较会对不上。
+    """
+    t = str(name or '').strip()
+    return t[:-1] if t.endswith('线') else t
+
+
 @bp.route('/api/band-templates')
 @login_required
 @perm_required('grades.settings')
 def api_band_templates():
-    """模板列表；带 exam_id 时返回该考试已绑定的模板，未绑定则按考试类型推荐一个"""
+    """模板列表；带 exam_id 时返回该考试已绑定的模板，未绑定则推荐一个
+
+    推荐优先级（2026-10-13 口径："先知道是哪个模板，再填比例/数值"）：
+      ① 已绑定 → bound_id
+      ② 本场已保存划线的层名（归一化）与某模板层名重叠最多 → 按内容推荐
+      ③ 按考试适用类型推荐（原口径）
+    suggest_reason: 'lines' | 'exam_type' | ''（推荐依据，前端展示用）
+    suggest_hit / suggest_extra：命中几条已保存的线 / 模板里还有几层待填（②用）
+    """
     ensure_builtin_templates()
     exam_id = request.args.get('exam_id', type=int)
     rows = (BandTemplate.query.order_by(BandTemplate.sort_order, BandTemplate.id).all())
@@ -109,20 +128,60 @@ def api_band_templates():
     } for t in rows]
 
     bound = suggested = None
+    suggest_reason = ''
+    suggest_hit = suggest_extra = 0
     exam_type = ''
     if exam_id:
         exam = Exam.query.get(exam_id)
         if exam:
             bound = exam.band_template_id()
             exam_type = exam.exam_type or ''
-            if not bound and exam_type:
-                # 未绑定时按「适用考试类型」推荐：取第一个声明适用该类型的模板
+            if not bound:
+                # ② 按本场已保存划线的层名推荐
+                saved = {_norm_line(n) for (n,) in
+                         db.session.query(ExamBand.name)
+                         .filter(ExamBand.exam_id == exam_id).all()}
+                saved.discard('')
+                if len(saved) >= 2:
+                    # 排序键（越小越合适）：
+                    #   ① missing = 已保存的线里模板没有的 → 越少越好（别丢线）
+                    #   ② extra   = 模板里没有对应划线值的层 → 越少越好（别多出一堆空行）
+                    #   ③ 内置模板优先（标准口径），最后按 sort_order/id 稳定兜底
+                    # 2026-07 那种「AI 导入遗留模板」与「默认模板」命中数相同时，
+                    # 旧实现按 sort_order 先到先得（sort_order 为 NULL 的排最前）→
+                    # 推荐了垃圾模板；现在按上面三条比，默认模板胜出。
+                    best, best_key = None, None
+                    for t in rows:
+                        lay = {_norm_line(x.get('name')) for x in t.get_layers()}
+                        if len(saved & lay) < 2:      # 至少命中 2 层才算对得上
+                            continue
+                        key = (len(saved - lay), len(lay - saved),
+                               0 if t.is_builtin else 1,
+                               t.sort_order if t.sort_order is not None else 999, t.id)
+                        if best_key is None or key < best_key:
+                            best, best_key = t.id, key
+                    if best:
+                        suggested, suggest_reason = best, 'lines'
+                        suggest_extra = best_key[1]
+                        suggest_hit = len(saved) - best_key[0]
+            if not suggested and not bound and exam_type:
+                # ③ 未绑定时按「适用考试类型」推荐：取第一个声明适用该类型的模板
                 for t in rows:
                     if exam_type in t.get_exam_types():
-                        suggested = t.id
+                        suggested, suggest_reason = t.id, 'exam_type'
                         break
+            if not suggested and not bound:
+                # ④ 兜底：连类型都没匹配上 → 用内置「默认模板」（985线/211线/特控线/本科线）占位，
+                #    而不是落到「不套用 + 默认四层（优秀/良好/及格/待提升）」——
+                #    那正是"表格里层名乱七八糟、跟模板对不上"的来源（用户口径 2026-10-13）
+                fb = next((t for t in rows if t.name == BUILTIN_LAYERS_NAME), None)
+                if fb:
+                    suggested, suggest_reason = fb.id, 'default'
     return jsonify(success=True, data={'templates': data, 'bound_id': bound,
                                        'suggested_id': suggested,
+                                       'suggest_reason': suggest_reason,
+                                       'suggest_hit': suggest_hit,
+                                       'suggest_extra': suggest_extra,
                                        'exam_type': exam_type,
                                        'exam_type_options': _exam_type_options()})
 
@@ -180,6 +239,9 @@ def api_band_template_delete(tid):
     if obj.is_builtin:
         return jsonify(success=False, message='内置模板不能删除')
     # 已绑定的考试解除绑定，避免残留悬空 id
+    # 2026-10-13 全面审计 M-1 复核说明：这里**有意不按年级范围收敛** —— 模板被删后，
+    # 任何仍引用它的考试都必须解绑，否则留下悬空 id（前端显示"套用了不存在的模板"）。
+    # 模板本身是全校共用的基础配置（`grades.settings` 才可改），故整批解绑是维护数据完整性。
     # v1.11.1 避免全表遍历：用 config_json.contains 粗筛，Python 端 band_template_id() 精确验证兜底
     # （contains 生成 LIKE '%...%' 仍扫描 config_json 列，但只实例化匹配行，核心 OOM 风险消除）
     # band_template_id() 精确验证还能防御 LIKE 子串误匹配（如模板 id=1 误匹配含 id=11 的 JSON）
@@ -202,7 +264,9 @@ def api_bind_exam_template():
     """考试 ↔ 模板绑定（解绑传 template_id=0）"""
     payload = request.get_json(force=True, silent=True) or {}
     exam_id = payload.get('exam_id')
-    exam = Exam.query.get_or_404(exam_id) if exam_id else None
+    # 2026-10-13 全面审计 M-1：绑定/解绑都要过考试范围守卫（原 get_or_404 只验存在，
+    # 任何 grades.settings 持有者都能改其它年级考试的划线模板绑定）——不存在 404、越界 403
+    exam = assert_exam_visible(exam_id) if exam_id else None
     if not exam:
         return jsonify(success=False, message='考试不存在')
     tid = payload.get('template_id')

@@ -1,12 +1,14 @@
 # StuLink v1.8.0 2026-08-02
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
-from flask import Blueprint, render_template, redirect, url_for, flash, request, jsonify
+from flask import Blueprint, render_template, redirect, url_for, flash, request, jsonify, abort
 from flask_login import login_required, current_user
 from app.extensions import db
 from app.models import Room, BedAssignment, Student, StudentAccommodation
 from app.utils.decorators import perm_required
 from app.utils.helpers import get_dict_values, get_active_grades, get_class_options, log_operation, to_int
 from app.utils.err_safe import safe_error   # M-12
+# 2026-10-11 审计：宿舍数据范围唯一口径（房间查询 / 班级归属）
+from app.utils.dormitory_scope import room_scope_query, class_in_scope
 from sqlalchemy import func
 import json
 import logging
@@ -28,7 +30,9 @@ def _class_sort_key(name):
 @bp.route('/')
 @perm_required('dormitory.view')   # H-2
 def list_rooms():
-    query = Room.query.filter_by(is_active=True)
+    # 2026-10-11 审计修复：原先无任何数据范围过滤 → 任意持 dormitory.view 的账号
+    # （班主任/年级长）可见全校房间与学生姓名。统一走 room_scope_query。
+    query = room_scope_query(Room.query.filter_by(is_active=True))
 
     building = request.args.get('building', '')
     gender = request.args.get('gender', '')
@@ -112,6 +116,9 @@ def list_rooms():
 @perm_required('dormitory.view')   # H-2
 def detail(id):
     room = Room.query.get_or_404(id)
+    # 2026-10-11 审计修复：详情页同样需范围校验，越界 403
+    if room_scope_query(Room.query.filter_by(id=room.id)).first() is None:
+        abort(403)
     beds = BedAssignment.query.filter_by(room_id=room.id).order_by(
         BedAssignment.bed_number).all()
     
@@ -547,6 +554,11 @@ def class_bed_requirement():
     grade = request.args.get('grade', '')
     class_name = request.args.get('class_name', '')
     
+    # 2026-10-11 审计修复：班级归属校验，防跨班/跨年级用 URL 参数查询他班住宿需求
+    # （未指定班级时不拦截，直接返回空统计，保持原有可用性）
+    if class_name and not class_in_scope(current_user, grade, class_name):
+        abort(403)
+
     if not grade or not class_name:
         return jsonify({
             'male': 0, 'female': 0, 'total': 0,
@@ -1350,11 +1362,12 @@ def report_export():
 
     grade_filter = request.args.get('grade', '')
 
-    query = Room.query.filter(
+    # 2026-10-11 审计修复：导出报表原先无数据范围过滤 → 统一走 room_scope_query
+    query = room_scope_query(Room.query.filter(
         Room.is_active == True,
         Room.class_name.isnot(None),
         Room.class_name != ''
-    )
+    ))
     if grade_filter:
         query = query.filter_by(grade=grade_filter)
 

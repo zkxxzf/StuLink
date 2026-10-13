@@ -1,5 +1,10 @@
 # -*- coding: utf-8 -*-
-"""StuLink MCP 服务入口：HTTP(Streamable HTTP) 传输 + 接入认证。
+"""StuLink 成绩分析 MCP 服务入口（**只读**）：HTTP(Streamable HTTP) 传输 + 接入认证。
+
+服务范围：只暴露 12 个成绩分析只读工具，权限按三条规则细粒度裁决——
+R1 任课教师（年级+班级同时命中，且仅所教学科）/ R2 班主任（本班）/
+R3 年级长及以上（本年级，校级/管理员=全校）。无任何写入能力。
+详见 docs/MCP服务-成绩分析权限设计.md。
 
 启动方式（二选一）：
   · 双击 mcp_server\\start_mcp.bat（首次会自动创建虚拟环境并装依赖）
@@ -10,7 +15,7 @@
   · X-StuLink-User: <账号> + X-StuLink-Password: <密码>
   · Authorization: Basic base64(账号:密码)
 （require_token=true 时另加 X-StuLink-Token；token 兼容模式见 config.json。）
-完整设计见 docs/MCP服务-认证与授权设计.md。
+认证设计见 docs/MCP服务-认证与授权设计.md。
 """
 import logging
 import os
@@ -32,14 +37,17 @@ from mcp_server.tools import register_all                      # noqa: E402
 logger = logging.getLogger('stulink.mcp')
 
 INSTRUCTIONS = (
-    '本服务提供 StuLink 教务管理系统的数据查询与操作能力，覆盖：基础信息（年级/班级/学生）、'
-    '考试与成绩、统计分析（学科分析/分数段/上线率/班级对比）、考勤、课表、宿舍、学生画像。\n'
+    '本服务只提供 StuLink 教务系统的「成绩分析」只读能力，无任何写入操作。\n'
+    '可见范围＝接入账号在网页端成绩模块的可见范围，细粒度规则：\n'
+    '1. 任课教师：仅当同时任教某班级所在年级与该班级时，才能查看该班成绩，'
+    '且只能看到自己在该年级所教学科的成绩；\n'
+    '2. 班主任（班型设置）：可查看本班成绩；\n'
+    '3. 年级长及以上（含校级/管理员）：可查看所在年级（校级/管理员为全校）成绩。\n'
     '使用约定：\n'
-    '1. 所有操作以接入时认证的账号身份执行，越权数据会返回"权限不足"；\n'
-    '2. 先用 list_grades / list_classes / search_students 拿到准确的年级、班级、学号，'
-    '再用 list_exams 拿 exam_id，避免凭空猜测参数；\n'
-    '3. 班级名如 "01班"、年级如 "2025级"，务必与 list_classes 返回一致；\n'
-    '4. 标有【写操作】的工具会真实修改数据，调用前请向用户确认；\n'
+    '1. 先调用 list_my_score_scope 确认自己能看到哪些年级/班级/学科；\n'
+    '2. 用 list_exams 取 exam_id、list_classes 核对班级名（如 "01班"）；\n'
+    '3. 越权查询一律返回 {"ok": false, "error": "权限不足：…"}，不要绕过提示继续尝试；\n'
+    '4. 任课教师查看班级时，"总分/班均分/排名"会显示为已隐藏（其只被授予单科）；\n'
     '5. 返回值为 JSON 文本，形如 {"ok": true, "data": ...} 或 {"ok": false, "error": "原因"}。'
 )
 
@@ -86,8 +94,8 @@ def build_asgi_app(cfg):
     else:
         bootstrap.prepare_app()                  # 账号密码模式：多用户，每请求认证
     server = MCPServer(
-        name='stulink',
-        title='StuLink 教务系统',
+        name='stulink-scores',
+        title='StuLink 成绩分析',
         instructions=INSTRUCTIONS,
         version='1.0.0',
     )
@@ -145,17 +153,30 @@ def _print_banner(cfg, me):
         identity_line = '  执行身份 : 每个客户端用自己的 StuLink 账号密码（每请求认证）'
     lines = [
         '=' * 68,
-        '  StuLink MCP 服务已启动',
+        '  StuLink 成绩分析 MCP 服务已启动（只读）',
         '',
         f"  接入地址 : {url}",
         f"  认证模式 : {'账号密码（每请求校验）' if mode == 'account' else '静态访问令牌（兼容模式）'}",
         f"  服务令牌 : {_mask_token(cfg['token'])}（完整值见 mcp_server/config.json；"
         + ('必填' if mode == 'token' or cfg.get('require_token') else '可选') + '）',
         identity_line,
-        f"  写操作   : {'允许' if cfg.get('allow_write') else '已禁用（allow_write=false）'}",
+        '  工具集   : 成绩分析（12 个只读工具，无写入能力）',
+        '  权限口径 : 任课教师=所教班级×所教学科 / 班主任=本班 / 年级长及以上=本年级',
         '',
     ]
     lines.extend(_client_example(cfg, url, mode))
+    # 2026-10-13（全面审计 M-5）：局域网暴露时的准入自检 —— 只认账号密码，等于让
+    # 同网段任何设备都能拿真实教师账号反复试探本端口，这里显式提醒一次。
+    if (host in ('0.0.0.0', '::', '::0')
+            and not (cfg.get('require_token') or mode == 'token')):
+        lines.extend([
+            '',
+            '  【安全提示】服务暴露到局域网（host=0.0.0.0），当前只有账号密码一道准入：',
+            '         同网段任何设备都能拿账号口令试探本端口。已有防护：同来源+同账号连错 5 次',
+            '         → 锁该来源（不锁账号）；同来源失败 20 次 → 挡该来源；跨来源累计 → 只加延迟。',
+            '         要更严可选：config.json 的 require_token 改 true（客户端加',
+            '         X-StuLink-Token 头），或把 host 收回 127.0.0.1（仅本机可访问）。',
+        ])
     lines.extend([
         '',
         f"  配置文件 : {config.CONFIG_PATH}",

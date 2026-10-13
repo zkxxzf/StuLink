@@ -11,6 +11,7 @@ from sqlalchemy import func
 from app.utils.helpers import (get_dict_values, get_active_grades, get_class_options,
                                is_standard_class, log_operation, get_graduated_grades)
 from app.utils.decorators import perm_required
+from app.utils.alumni_scope import filter_alumni_grades, assert_alumni_grade_visible
 import io
 import uuid
 import time
@@ -246,8 +247,9 @@ def index():
     elif scope_type == SCOPE_GRADE:
         if tab == 'school':
             tab = 'class'
-        if not sel_grade:
-            sel_grade = user_grade or ''
+        # 2026-10-11 审计修复：sel_grade 原优先取 URL 参数（L231）且不校验归属 →
+        # 年级长可传 grade=他年级 越权查看他年级班级统计与房间明细。强制收敛到本人年级。
+        sel_grade = user_grade or ''
         per_class_stats = _build_per_class_stats(filter_grade=sel_grade, _base=base)
         per_grade_stats = _build_per_grade_stats(filter_grade=user_grade, _base=base)
         school_stats = _build_school_stats(_base=base) if tab == 'school' else {}
@@ -354,6 +356,8 @@ def dormitory_history():
             conn.close()
         except Exception as _e:  # noqa: BLE001
             logger.warning('statistics.py::dormitory_history 异常（已降级处理）: %s', _e)
+    # 2026-10-12 审计 P1：历史查询与 /alumni 同口径收敛（往届=已毕业年级）
+    graduated_grades = filter_alumni_grades(current_user, graduated_grades)
 
     search_grade = request.args.get('grade', '')
     search_room = request.args.get('room_number', '').strip()
@@ -363,6 +367,10 @@ def dormitory_history():
     rooms = []
     beds = []
     if search_grade and _os.path.exists(history_db_path):
+        try:
+            assert_alumni_grade_visible(current_user, search_grade)
+        except PermissionError:
+            abort(403)
         try:
             conn = _sql.connect(history_db_path)
             conn.row_factory = _sql.Row
@@ -427,6 +435,8 @@ def alumni():
             conn.close()
         except Exception as _e:  # noqa: BLE001
             logger.warning('statistics.py::alumni 异常（已降级处理）: %s', _e)
+    # 2026-10-12 审计 P1：往届查询收敛数据范围（原先零校验，H-2 复活）
+    graduated_grades = filter_alumni_grades(current_user, graduated_grades)
 
     search_grade = request.args.get('grade', '')
     search_room = request.args.get('room_number', '').strip()
@@ -435,6 +445,10 @@ def alumni():
     rooms = []
     beds = []
     if search_grade and _os.path.exists(history_db_path):
+        try:
+            assert_alumni_grade_visible(current_user, search_grade)
+        except PermissionError:
+            abort(403)
         try:
             conn = _sql.connect(history_db_path)
             conn.row_factory = _sql.Row
@@ -693,8 +707,15 @@ def export_bed_detail():
 def import_dormitory():
     """批量导入宿舍数据（学号+姓名双重匹配）"""
     file = request.files.get('file')
-    if not file or not file.filename.endswith(('.xlsx', '.xls')):
+    if not file or not file.filename:
         flash('请上传 .xlsx 格式的Excel文件', 'danger')
+        return redirect(url_for('statistics.index'))
+    # 2026-10-13 全面审计 M-6：只看后缀 → 改为统一上传校验（白名单 + 危险类型 + magic）
+    from app.utils.upload_guard import validate_upload
+    ok, msg = validate_upload(file.filename, allowed_exts=['xlsx', 'xls'],
+                              stream=file.stream)
+    if not ok:
+        flash(f'{msg}（当前文件：{file.filename}）', 'danger')
         return redirect(url_for('statistics.index'))
 
     try:
@@ -794,6 +815,10 @@ def import_dormitory():
 
 @bp.route('/download-errors/<key>')
 @login_required
+# 2026-10-13 全面审计 M-3：错误明细含学号/姓名，属导入过程数据 ——
+# 与导入同权限（dormitory.import），不再只要求登录（对照 system/students.py 的
+# download_import_errors 要求 students.import）。
+@perm_required('dormitory.import')
 def download_import_errors(key):
     """下载导入错误日志"""
     _clean_expired_errors()

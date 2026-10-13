@@ -1,4 +1,4 @@
-# StuLink v1.19.47.4 2026-10-10
+# StuLink v1.19.47.25 2026-10-10
 # 成绩分析导出：四大模块表格 → Excel（openpyxl，与页面所见一致）
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 import io
@@ -103,8 +103,9 @@ def export_tab(tab):
             payload = tab_service.subject_tab(exam_id, subject, direction)
         elif tab == 'compare':
             # 多班对比：班级可见性过滤与 API 端点同口径
+            # 2026-10-11 审计修复：`if limited:` 空列表时 fail-open → 改 is not None（fail-closed）
             limited = scope_service.visible_classes(current_user)
-            if limited:
+            if limited is not None:
                 allowed = {c for g, c in limited if g == exam.grade}
                 compare_classes = [c for c in compare_classes if c in allowed]
             if len(compare_classes) < 2:

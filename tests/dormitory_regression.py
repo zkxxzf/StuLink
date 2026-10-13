@@ -33,6 +33,7 @@ config_mod.Config.SQLALCHEMY_BINDS = {
     'history': 'sqlite:///' + os.path.join(_TMP, 'history.db'),
     'grades': 'sqlite:///' + os.path.join(_TMP, 'grades.db'),
     'points': 'sqlite:///' + os.path.join(_TMP, 'points.db'),
+    'morality': 'sqlite:///' + os.path.join(_TMP, 'morality.db'),
     'academic': 'sqlite:///' + os.path.join(_TMP, 'academic.db'),
     'inspection': 'sqlite:///' + os.path.join(_TMP, 'inspection.db'),
     'achievement': 'sqlite:///' + os.path.join(_TMP, 'achievement.db'),

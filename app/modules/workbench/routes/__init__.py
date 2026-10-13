@@ -1,8 +1,8 @@
-# StuLink v1.19.47.4 2026-10-10
+# StuLink v1.19.47.25 2026-10-10
 # 教师工作台：我的信息 / 今日课程 / 我的课表 / 我的业绩 / 手机号修改
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 import re
-from datetime import date
+from datetime import date, datetime
 
 from flask import (Blueprint, render_template, request, redirect, url_for,
                    flash, current_app)
@@ -19,6 +19,8 @@ from app.modules.academic.services import (schedule_service, swap_service,
                                           teacher_service)
 from app.modules.academic.services.access_scope import (
     visible_academic_class_scope, visible_academic_grades)
+from app.modules.workbench.services.class_overview_service import get_managed_classes
+from app.modules.workbench.services import todo_service
 from app.utils.decorators import perm_required
 from app.utils.helpers import log_operation
 
@@ -27,6 +29,20 @@ bp = Blueprint('workbench', __name__, url_prefix='/workbench')
 _PHONE_RE = re.compile(r'^1\d{10}$')
 _WEEKDAYS = ['周一', '周二', '周三', '周四', '周五', '周六', '周日']
 _CATEGORY_KEYS = {k for k, _ in ACHIEVEMENT_CATEGORIES}
+
+
+def _homeroom_classes(user):
+    """班主任所带班级 [(grade, class_name)]。
+
+    以 `user_class_links`（一人可管多班）为准；没配关联时回落账号上的
+    单班字段 `User.grade/class_name`（老数据），避免"配了角色却看不到班"。
+    """
+    pairs = get_managed_classes(user.id)
+    if pairs:
+        return pairs
+    grade = (getattr(user, 'grade', '') or '').strip()
+    class_name = (getattr(user, 'class_name', '') or '').strip()
+    return [(grade, class_name)] if (grade and class_name) else []
 
 
 def _parse_date(value):
@@ -43,19 +59,38 @@ def index():
     teacher = teacher_service.teacher_of_user(current_user)
 
     entries, today_entries, achievements = [], [], []
+    # 2026-10-13：节次显示名映射 —— period_number 只是行号（1=早读、2=第1节…），
+    # 学校实际叫法在 PeriodDef.period_name（见 timetable.db period_defs）。
+    # 卡片原先直接印 period_number，整节次都错一位（period_number=8 实为「第7节」）。
+    period_labels = {}
     pending_swaps = []
+    partner_pending = []
     active_term = None
+    # 2026-10-13（v1.19.47.25）：调课入口挂到工作台 —— 能否申请由 academic.swap 决定，
+    # 菜单/按钮可见性与 perm_required 保持一致，避免"看得见、点了 403"。
+    can_swap = current_user.has_perm('academic.swap')
+    is_head = (current_user.role == 'homeroom_teacher')
+    # 2026-10-13（v1.19.47.25）：左侧「个人工作」菜单已精简，工作台内需自备这些入口
+    can_class_view = current_user.has_perm('workbench.class_view')
+    can_records = current_user.has_perm('workbench.records')
+    can_attendance = current_user.has_perm('workbench.attendance_view')
     if teacher:
         # 2026-10-10：课表改读 timetable.db 的 schedule_entries（与教务端「我的课表」同源）。
         # 旧表 academic.timetable_entries 已停用，此前读旧表导致本卡片恒为空。
         try:
             active_term = schedule_service.get_active_schedule()
             if active_term:
+                # 按**当前教学周**取（单双周的课只在对应周出现）；周次取不到
+                #（没配学期起止日期）时传 None = 不过滤，行为与原来一致。
+                cur_week = active_term.get_week_number()
                 view = schedule_service.get_teacher_view(active_term.id,
-                                                         teacher.teacher_uid)
+                                                         teacher.teacher_uid,
+                                                         week=cur_week)
                 entries = sorted(view.get('entries') or [],
                                  key=lambda e: (e.get('weekday') or 0,
                                                 e.get('period_number') or 0))
+                period_labels = {p['period_number']: (p.get('period_name') or '')
+                                 for p in (view.get('periods') or [])}
         except Exception:   # 课表库异常（bind 未配置 / 表缺失）只降级为空态，不拖垮首页
             db.session.rollback()
             current_app.logger.exception('工作台课表加载失败 teacher_uid=%s',
@@ -99,8 +134,62 @@ def index():
                 'reason': sw.reason,
                 'created_at': sw.created_at,
             })
+        # 待**我**确认的换课 / 代课（同事发起、指定我配合的那些），工作台内直接处理
+        try:
+            partner_pending = swap_service.get_partner_pending(teacher.teacher_uid)
+        except Exception:   # 调课库异常不拖垮首页
+            db.session.rollback()
+            current_app.logger.exception('工作台待确认换课加载失败 uid=%s',
+                                         teacher.teacher_uid)
+            partner_pending = []
+
+    # 2026-10-13（v1.19.47.25）：班主任在工作台直接看**本班班级课表**（多个班用页签切换）。
+    # 取数与教务端班级课表同源（get_class_view），并沿用同一套可见范围，避免越权。
+    class_schedules = []
+    if is_head and active_term:
+        try:
+            allowed_grades = visible_academic_grades(current_user)
+            allowed_classes = visible_academic_class_scope(current_user)
+            for grade, class_name in _homeroom_classes(current_user):
+                view = schedule_service.get_class_view(
+                    active_term.id, grade, class_name,
+                    allowed_grades=allowed_grades, allowed_classes=allowed_classes)
+                if not (view.get('entries') or []):
+                    continue
+                class_schedules.append({'grade': grade, 'class_name': class_name,
+                                         'view': view})
+        except Exception:       # 课表库异常只降级为空态，不拖垮首页
+            db.session.rollback()
+            current_app.logger.exception('工作台班级课表加载失败 user_id=%s',
+                                         current_user.id)
+            class_schedules = []
+
+    # 2026-10-13（v1.19.47.25）：待办与通知 —— 换课待我确认 / 问卷待填 / 最近通知 + 未读数
+    try:
+        todo = todo_service.get_teacher_todo(current_user, teacher)
+    except Exception:                       # 聚合层已逐项降级，这里只兜底
+        db.session.rollback()
+        current_app.logger.exception('工作台待办与通知聚合失败 user_id=%s',
+                                     current_user.id)
+        todo = {'todos': [], 'todo_count': 0, 'unread': 0, 'recent': []}
+
+    # 2026-10-13：首页欢迎语（按时段）—— 首页原「个人信息」卡片（手机号 / 登录密码 /
+    # 身份证）按用户口径**下线**，隐私信息只在「个人中心」(workbench.profile) 展示。
+    _h = datetime.now().hour
+    greet = ('早上好' if _h < 6 else '上午好' if _h < 12
+             else '下午好' if _h < 18 else '晚上好')
 
     return render_template('workbench/index.html', teacher=teacher,
+                           todo=todo,
+                           greet=greet,
+                           # 欢迎卡片上的身份/权限组徽章（与个人中心页同口径）
+                           pg=current_user.permission_group,
+                           class_schedules=class_schedules,
+                           can_class_view=can_class_view,
+                           can_records=can_records,
+                           can_attendance=can_attendance,
+                           partner_pending=partner_pending,
+                           can_swap=can_swap,
                            entries=entries, today_entries=today_entries,
                            active_term=active_term,
                            achievements=achievements,
@@ -108,7 +197,8 @@ def index():
                            levels=ACHIEVEMENT_LEVELS,
                            status_map=ACHIEVEMENT_STATUS,
                            weekday_names=_WEEKDAYS,
-                           is_head=(current_user.role == 'homeroom_teacher'),
+                           period_labels=period_labels,
+                           is_head=is_head,
                            today=date.today(),
                            pending_swaps=pending_swaps)
 
@@ -148,27 +238,35 @@ def my_schedule():
 @bp.route('/phone', methods=['POST'])
 @login_required
 def change_phone():
-    """教师修改自己的手机号：校验密码与全局唯一后，同步登录名与教师名单"""
+    """教师修改自己的手机号：校验密码与全局唯一后，同步登录名与教师名单
+
+    2026-10-13：入口从工作台弹窗搬到「个人信息」页，`return_to=profile` 时改完回原页；
+    取值只认白名单，不接受任意跳转地址（防开放重定向）。
+    """
     teacher = teacher_service.teacher_of_user(current_user)
     new_phone = (request.form.get('new_phone') or '').strip()
     pwd = request.form.get('current_password') or ''
+    back = _RETURN_TO.get(request.form.get('return_to') or '')
+
+    def _back():
+        return redirect(url_for(back) if back else url_for('workbench.index'))
 
     if not current_user.check_password(pwd):
         flash('当前密码不正确', 'danger')
-        return redirect(url_for('workbench.index'))
+        return _back()
     if not _PHONE_RE.match(new_phone):
         flash('新手机号格式不正确（11 位，1 开头）', 'danger')
-        return redirect(url_for('workbench.index'))
+        return _back()
 
     exist = User.query.filter_by(username=new_phone).first()
     if exist and exist.id != current_user.id:
         flash('该手机号已被其他账号使用', 'danger')
-        return redirect(url_for('workbench.index'))
+        return _back()
     if teacher:
         dup = Teacher.query.filter_by(phone=new_phone).first()
         if dup and dup.id != teacher.id:
             flash('该手机号已被其他教师使用', 'danger')
-            return redirect(url_for('workbench.index'))
+            return _back()
 
     old_username = current_user.username
     current_user.username = new_phone
@@ -178,7 +276,37 @@ def change_phone():
     log_operation(current_user, '修改', '手机号', current_user.id,
                   f'{old_username} → {new_phone}', module='workbench')
     flash('手机号已更新，下次登录请使用新手机号', 'success')
-    return redirect(url_for('workbench.index'))
+    return _back()
+
+
+# ==================== 个人信息（个人中心） 2026-10-13 ====================
+# 工作台「个人信息」页：个人隐私信息（手机号 / 身份证）+ 账号安全（登录密码）
+# + 基本资料 + 更多设置入口。与右上角头像里的「用户设置」(auth.my_settings) 分工：
+# 本页面向教师本人、隐私信息置顶；AI 配置 / 权限清单 / 界面偏好仍留在用户设置页。
+
+# 手机号修改后的回跳白名单（值 = 端点名）
+_RETURN_TO = {'profile': 'workbench.profile'}
+
+# 数据范围展示名（与 auth.SCOPE_LABELS 同口径，页面只读展示用）
+_SCOPE_LABELS = {'school': '全校', 'grade': '本年级', 'class': '本班',
+                 'self': '仅本人', 'none': '受限（仅基础页面）'}
+
+
+@bp.route('/profile')
+@login_required
+def profile():
+    """个人信息页：本人隐私信息与账号安全（手机号 / 登录密码 / 身份证）+ 基本资料
+
+    仅登录即可访问（只展示与修改本人数据）；未关联教师名单的账号（如纯管理员）
+    也能正常打开，教师相关字段以「未关联」占位。
+    """
+    teacher = teacher_service.teacher_of_user(current_user)
+    pg = current_user.permission_group
+    scope = (getattr(pg, 'scope_type', '') or 'none') if pg else (
+        'school' if current_user.role == 'admin' else 'none')
+    return render_template('workbench/profile.html',
+                           teacher=teacher, pg=pg,
+                           scope_label=_SCOPE_LABELS.get(scope, scope))
 
 
 @bp.route('/achievement/add', methods=['POST'])

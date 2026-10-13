@@ -221,6 +221,11 @@ def _save_bands(exam_id, direction, subject, payload):
     # 这里在该（方向×学科）没有任何参考分数时直接拒绝。
     if not _scope_scores(data, direction, subject):
         return None, f'{direction or "全体"}·{subject} 暂无成绩，请先导入成绩再划线'
+    # 2026-10-13：科目名白名单校验 —— AI 导入的解析器对别名表外的科目名会原样透传
+    # （如「英语」），落库后 matrix 只认 SUBJECTS+总分，这些行永远查不到也不报错。
+    from app.models.grades import SUBJECTS, TOTAL_SUBJECT
+    if subject not in SUBJECTS and subject != TOTAL_SUBJECT:
+        return None, f'科目名无效：{subject}（AI 导入解析到无法识别的科目，请检查表头）'
     items = []
     seen_seq = set()
     prev_lower = None

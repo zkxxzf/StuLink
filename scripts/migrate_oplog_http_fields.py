@@ -21,6 +21,17 @@ import sys
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DATA_DIR = os.path.join(BASE_DIR, 'data')
 
+SCRIPT_NAME = os.path.basename(__file__)
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+# 2026-10-12：迁移登记（幂等）——已登记过则整体跳过；登记查询失败不阻塞迁移
+try:
+    import _mig_log
+    if _mig_log.is_applied(SCRIPT_NAME):
+        print(f'[SKIP] {SCRIPT_NAME} 已登记为已应用，跳过迁移')
+        sys.exit(0)
+except Exception as _e:  # noqa: BLE001
+    print(f'[WARN] 读取迁移登记失败（继续执行迁移）：{_e}')
+
 # (列名, DDL 类型) —— 硬编码常量
 NEW_COLUMNS = [
     ('endpoint', 'VARCHAR(120)'),
@@ -57,6 +68,12 @@ for db_path in sorted(glob.glob(os.path.join(DATA_DIR, '*.db'))):
         print(f'[ERR]  {os.path.basename(db_path)}: {e}')
 
 print(f'[DONE] 迁移完成，共新增 {touched} 列')
+
+# 迁移登记（失败不得阻塞迁移）
+try:
+    _mig_log.record(SCRIPT_NAME, note=f'operation_logs 新增 {touched} 个 HTTP 审计列')
+except Exception as _e:  # noqa: BLE001
+    print(f'[WARN] 迁移登记失败（不影响迁移结果）：{_e}')
 
 # StuLink v1.18.2.1 2026-09-24
 # Copyright (c) 2026 zkxxzf. Apache License 2.0

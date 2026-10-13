@@ -18,12 +18,17 @@
   401 invalid_credentials 账号或密码错误（不区分账号是否存在，防枚举）
   401 account_disabled    账号已停用
   401 invalid_token       服务令牌缺失/错误
-  429 too_many_attempts   同账号连续失败超限，带 Retry-After
+  429 too_many_attempts   认证失败超限，带 Retry-After。三种触发口径：
+                          ① 同一来源对该账号连续失败（2026-10-13 起只锁"来源+账号"，
+                             账号本人从别的设备登录不受影响）；
+                          ② 同一来源的失败总数超限（跨账号，防"换账号扫口令"）；
+                          ③ 跨来源失败累计 → 只加递增延迟，不拒绝。
 
 为什么自写中间件而不用 SDK 自带 auth：SDK 的 AuthSettings/TokenVerifier 围绕
 OAuth 授权服务器设计（issuer_url、动态注册等），对"校验本系统账号密码"属过度
 设计；自写行为完全可控、可读、可测，且与网页端共用 User.check_password。
 """
+import asyncio
 import base64
 import binascii
 import hashlib
@@ -45,10 +50,23 @@ _cred_cache = {}
 _cred_lock = threading.Lock()
 _CRED_CACHE_MAX = 256
 
-# 认证失败计数（按账号维度）：防密码爆破。按账号而不是按 IP，是因为本服务
-# 通常部署在本机/局域网共享出口，按 IP 会误伤同一台机器上的其他客户端。
-_fails = {}
+# 认证失败计数（按「来源 + 账号」维度）：防密码爆破，同时**不会锁死真实账号**。
+# 2026-10-13 全面审计 M-5：原实现按账号维度硬锁（默认 5 次失败锁 300 秒），而服务
+# 常以 host=0.0.0.0 暴露在局域网 —— 任意设备都能用 5 次错误口令把某位老师的账号
+# 锁死 300 秒（拒绝服务）。改成按来源维度后，攻击者只能锁住自己这条来源，该账号
+# 从其他设备登录不受影响；单一来源的暴力破解仍会被挡下。
+_fails = {}                     # (client, username) -> (count, locked_until)
 _FAILS_MAX = 1024
+
+# 跨来源的暴力破解兜底：同一账号在窗口内失败累计超过阈值后，**每次尝试附加递增
+# 延迟**（不做硬锁，任何人都影响不了这个账号的正常使用）。窗口内成功登录即清零。
+_account_fails = {}             # username -> (count, window_start)
+_ACCOUNT_FAILS_MAX = 4096
+
+# 单来源失败总闸（跨账号）：防"用一个来源换着账号扫口令"。命中后该来源整段
+# 窗口内一律 429 —— 只影响这个来源，与具体账号无关，也不会波及账号本人。
+_source_fails = {}              # client -> (count, window_start)
+_SOURCE_FAILS_MAX = 2048
 
 
 def _cfg_int(key, default):
@@ -59,64 +77,173 @@ def _cfg_int(key, default):
         return default
 
 
+def _cfg_float(key, default):
+    try:
+        value = config.load_config().get(key)
+        return default if value is None else float(value)
+    except (TypeError, ValueError):
+        return default
+
+
 def _cred_key(username, password):
     return hashlib.sha256(f'{username}\0{password}'.encode('utf-8')).hexdigest()
 
 
-def _lock_remaining(username):
-    """账号是否处于失败锁定中；返回剩余秒数（0 = 未锁定）。"""
+def _fail_key(username, client=None):
+    """失败计数维度：「来源 + 账号」。
+
+    client 为空（stdio 本地调用，见 run_stdio.py）时退化为账号维度 —— 单机本地
+    调用不存在"别人锁你号"的问题。
+    """
+    return (client or '-', username)
+
+
+def _lock_remaining(username, client=None):
+    """该来源对该账号是否处于失败锁定中；返回剩余秒数（0 = 未锁定）。
+
+    注意：锁的是 **(来源, 账号)** 这一组合，不是账号本身 —— 局域网里别人的
+    错误尝试不会影响账号主人从自己设备登录（2026-10-13 全面审计 M-5）。
+    """
     if _cfg_int('login_fail_limit', 5) <= 0:
         return 0
     now = time.time()
     with _cred_lock:
-        record = _fails.get(username)
+        record = _fails.get(_fail_key(username, client))
         if record and record[1] > now:
             return int(record[1] - now) + 1
     return 0
 
 
-def _record_fail(username):
+def _source_block_remaining(client):
+    """该来源在窗口内失败总数是否超限；返回剩余秒数（0 = 未超限）。
+
+    与账号无关的粗闸门，只用于挡住"一个来源换着账号扫口令"；正常使用（一两个账号、
+    偶尔打错密码）远达不到阈值，且窗口过后自动恢复。
+    """
+    limit = _cfg_int('login_source_fail_limit', 20)
+    if limit <= 0 or not client:
+        return 0
+    window = max(30, _cfg_int('login_source_window', 300))
+    now = time.time()
+    with _cred_lock:
+        count, start = _source_fails.get(client, (0, now))
+        if count < limit or now - start > window:
+            return 0
+        return int(start + window - now) + 1
+
+
+def _record_source_fail(client):
+    """记一次来源级失败（跨账号累计）。"""
+    limit = _cfg_int('login_source_fail_limit', 20)
+    if limit <= 0 or not client:
+        return
+    window = max(30, _cfg_int('login_source_window', 300))
+    now = time.time()
+    with _cred_lock:
+        if len(_source_fails) > _SOURCE_FAILS_MAX:
+            _source_fails.clear()
+        count, start = _source_fails.get(client, (0, now))
+        if now - start > window:
+            count, start = 0, now
+        _source_fails[client] = (count + 1, start)
+
+
+def _record_fail(username, client=None):
+    # 来源级总闸独立于账号级阈值（login_fail_limit=0 关掉账号锁时它仍然生效）
+    _record_source_fail(client)          # 自带锁，必须在下面 with 之前调用
     limit = _cfg_int('login_fail_limit', 5)
     if limit <= 0:
         return
     lock_seconds = max(1, _cfg_int('login_lock_seconds', 300))
+    now = time.time()
+    key = _fail_key(username, client)
+    window = max(30, _cfg_int('login_throttle_window', 300))
     with _cred_lock:
         if len(_fails) > _FAILS_MAX:
             _fails.clear()
-        count, _until = _fails.get(username, (0, 0.0))
+        count, _until = _fails.get(key, (0, 0.0))
         count += 1
         if count >= limit:
-            _fails[username] = (0, time.time() + lock_seconds)
-            logger.warning('MCP 认证失败次数超限：账号 %s 锁定 %s 秒', username, lock_seconds)
+            _fails[key] = (0, now + lock_seconds)
+            logger.warning('MCP 认证失败次数超限：来源 %s 对账号 %s 锁定 %s 秒'
+                           '（只锁该来源，账号本人不受影响）',
+                           client or '-', username, lock_seconds)
         else:
-            _fails[username] = (count, 0.0)
+            _fails[key] = (count, 0.0)
+        # 跨来源累计（只用于附加延迟，不参与锁定判定）
+        if len(_account_fails) > _ACCOUNT_FAILS_MAX:
+            _account_fails.clear()
+        acount, astart = _account_fails.get(username, (0, now))
+        if now - astart > window:
+            acount, astart = 0, now
+        _account_fails[username] = (acount + 1, astart)
 
 
-def _clear_fail(username):
+def _clear_fail(username, client=None):
     with _cred_lock:
-        _fails.pop(username, None)
+        _fails.pop(_fail_key(username, client), None)
+        _account_fails.pop(username, None)
 
 
-def verify_credentials(username, password):
+def _throttle_delay(username):
+    """跨来源失败累计后的附加延迟（秒）；未超阈值返回 0。
+
+    只延迟、不锁定：即使被多个来源分布式尝试，账号本人也只是最多多等
+    `login_throttle_max_delay` 秒，永远不会被拒绝。
+    """
+    limit = _cfg_int('login_fail_limit', 5)
+    if limit <= 0:
+        return 0.0
+    threshold = max(2, _cfg_int('login_throttle_threshold', limit * 2))
+    max_delay = max(0.0, _cfg_float('login_throttle_max_delay', 1.0))
+    if max_delay <= 0:
+        return 0.0
+    window = max(30, _cfg_int('login_throttle_window', 300))
+    now = time.time()
+    with _cred_lock:
+        count, start = _account_fails.get(username, (0, now))
+        if now - start > window:
+            return 0.0
+        if count < threshold:
+            return 0.0
+    return min(max_delay, 0.1 * (count - threshold + 1))
+
+
+def verify_credentials(username, password, client=None):
     """同步校验 StuLink 账号密码（必须在 app context 内调用）。
 
+    `client` = 来源标识（HTTP 层传客户端 IP，stdio 传 None）。
+
     返回 (user_id, error, message)：error 为 None 表示通过。
-    校验顺序：锁定检查 → 账号存在/启用 → 缓存命中（密码指纹未变） → 完整密码校验。
+    校验顺序：锁定检查（本来源） → 账号存在/启用 → 缓存命中（密码指纹未变）
+    → 完整密码校验。
+
+    注意（2026-10-13 审计修复）：跨来源暴力破解的**附加延迟不再在这里 sleep**。
+    原先 `time.sleep(delay)` 跑在 db.run 的唯一工作线程里（max_workers=1），
+    等于让未认证者也能量级拖慢整个服务的工具调用。现在只**计算**延迟并返回
+    throttle_delay，由异步调用方在 DB 线程之外 await。
     """
     username = (username or '').strip()
     if not username or not password:
-        return None, 'unauthorized', '缺少账号或密码'
-    remain = _lock_remaining(username)
+        return None, 'unauthorized', '缺少账号或密码', 0.0
+    remain = _lock_remaining(username, client)
     if remain:
-        return None, 'too_many_attempts', f'认证失败次数过多，请 {remain} 秒后重试'
+        return None, 'too_many_attempts', f'认证失败次数过多，请 {remain} 秒后重试', 0.0
+    blocked = _source_block_remaining(client)
+    if blocked:
+        return None, 'too_many_attempts', f'本机认证失败次数过多，请 {blocked} 秒后重试', 0.0
+
+    # 跨来源暴力破解兜底：只增加等待，不拒绝（账号本人永远进得来）。
+    # 延迟交给调用方在异步侧执行，避免占用唯一 DB 线程。
+    delay = _throttle_delay(username)
 
     from app.models.user import User
     user = User.query.filter_by(username=username).first()
     if user is None:
-        _record_fail(username)
-        return None, 'invalid_credentials', '账号或密码错误'
+        _record_fail(username, client)
+        return None, 'invalid_credentials', '账号或密码错误', delay
     if not user.is_active:
-        return None, 'account_disabled', f'账号 {username} 已停用，请联系管理员'
+        return None, 'account_disabled', f'账号 {username} 已停用，请联系管理员', delay
 
     key = _cred_key(username, password)
     ttl = _cfg_int('credential_cache_ttl', 300)
@@ -126,12 +253,12 @@ def verify_credentials(username, password):
             hit = _cred_cache.get(key)
         if (hit and now - hit['at'] < ttl and hit['user_id'] == user.id
                 and hit['fingerprint'] == user.password_hash):
-            _clear_fail(username)
-            return user.id, None, None
+            _clear_fail(username, client)
+            return user.id, None, None, delay
 
     if not user.check_password(password):
-        _record_fail(username)
-        return None, 'invalid_credentials', '账号或密码错误'
+        _record_fail(username, client)
+        return None, 'invalid_credentials', '账号或密码错误', delay
 
     if ttl > 0:
         with _cred_lock:
@@ -139,8 +266,8 @@ def verify_credentials(username, password):
                 _cred_cache.clear()
             _cred_cache[key] = {'user_id': user.id,
                                 'fingerprint': user.password_hash, 'at': now}
-    _clear_fail(username)
-    return user.id, None, None
+    _clear_fail(username, client)
+    return user.id, None, None, delay
 
 
 def audit_auth_failure(username, error, message, client=None):
@@ -164,11 +291,15 @@ def audit_auth_failure(username, error, message, client=None):
 
 
 def _verify_and_audit(username, password, client=None):
-    """校验 + 失败审计，整体在 db 线程内执行（一次排队完成）。"""
-    user_id, error, message = verify_credentials(username, password)
+    """校验 + 失败审计，整体在 db 线程内执行（一次排队完成）。
+
+    2026-10-13 审计修复：verify_credentials 新增返回第 4 个值 throttle_delay，
+    这里原样透出，供 HTTP 层在 DB 线程之外 await（详见 verify_credentials 注释）。
+    """
+    user_id, error, message, delay = verify_credentials(username, password, client=client)
     if error:
         audit_auth_failure(username, error, message, client=client)
-    return user_id, error, message
+    return user_id, error, message, delay
 
 
 def _token_ok(provided, expected):
@@ -252,13 +383,34 @@ class AccessGuard:
         self.mode = (cfg.get('auth_mode') or 'account').strip().lower()
         self.token = cfg.get('token') or ''
         self.require_token = bool(cfg.get('require_token'))
+        # 2026-10-13 审计修复 #12：来源总闸原先只认 TCP 源 IP。校园网普遍
+        # NAT / 反向代理，一个出口 IP 背后是全校用户，攻击者刷满阈值会让
+        # 同出口的所有合法客户端被挡。可信代理下改信 X-Forwarded-For。
+        # 默认关闭：XFF 可被伪造，只有在确认前面有可信反代时才打开。
+        self.trust_forwarded = bool(cfg.get('trust_forwarded_for'))
+
+    @staticmethod
+    def _client_ip(scope, headers, trust_forwarded):
+        """取来源标识：优先 X-Forwarded-For（仅在信任反代时），否则 TCP 源 IP。
+
+        XFF 取**最右**一个非 unknown 项：每一跳代理都会把自己的前一跳 append 到
+        右边，最右项就是离我们最近、也最难伪造的那一跳。
+        """
+        peer = (scope.get('client') or ('', 0))[0]
+        if trust_forwarded:
+            xff = headers.get('x-forwarded-for') or ''
+            hops = [h.strip() for h in xff.split(',') if h.strip()]
+            for hop in reversed(hops):
+                if hop and hop.lower() != 'unknown':
+                    return hop
+        return peer
 
     async def __call__(self, scope, receive, send):
         if scope.get('type') != 'http':
             await self.app(scope, receive, send)
             return
         headers = RequestHeaders(scope)
-        client = (scope.get('client') or ('', 0))[0]
+        client = self._client_ip(scope, headers, self.trust_forwarded)
 
         # 第一道（可选）：服务令牌，防止端口被随意扫描/连接
         if self.require_token and not _token_ok(headers.service_token(), self.token):
@@ -293,10 +445,18 @@ class AccessGuard:
             return
 
         username, password = credentials
-        user_id, error, message = await db.run_async(
+        user_id, error, message, delay = await db.run_async(
             lambda: _verify_and_audit(username, password, client=client))
+        # 2026-10-13 审计修复：跨来源失败的附加延迟改在**异步侧**执行，
+        # 不再占用 db.run 的唯一工作线程（否则未认证者即可拖慢全服务）。
+        if delay:
+            await asyncio.sleep(delay)
         if error == 'too_many_attempts':
-            remain = _lock_remaining(username) or 1
+            # 2026-10-13 审计修复：区分"账号锁"与"来源总闸"，Retry-After 取对应的
+            # 剩余秒数；原先统一 `_lock_remaining(...) or 1`，来源闸命中时会返回 1 秒。
+            remain = _lock_remaining(username, client)
+            if not remain:
+                remain = _source_block_remaining(client) or 1
             await send_json(send, 429, {'error': error, 'message': message},
                             extra_headers=[(b'retry-after', str(remain).encode())])
             return

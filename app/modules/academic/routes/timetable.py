@@ -1,4 +1,4 @@
-# StuLink v1.19.47.4 2026-10-10
+# StuLink v1.19.47.25 2026-10-10
 # 教务 · 课表：查看 / 导入 / 编辑 / 删除
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 import io
@@ -112,6 +112,13 @@ def timetable_import_upload():
         return redirect(url_for('academic.timetable_import_page'))
     if not name:
         flash('请填写课表名称（如 2026-2027学年第一学期）', 'danger')
+        return redirect(url_for('academic.timetable_import_page'))
+    # 2026-10-13 全面审计 M-6：统一上传校验（白名单 + 危险类型 + magic 嗅探）
+    from app.utils.upload_guard import validate_upload
+    ok, msg = validate_upload(file.filename, allowed_exts=['xlsx', 'xls'],
+                              stream=file.stream)
+    if not ok:
+        flash(f'{msg}（当前文件：{file.filename}）', 'danger')
         return redirect(url_for('academic.timetable_import_page'))
 
     try:

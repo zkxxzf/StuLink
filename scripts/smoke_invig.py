@@ -278,12 +278,26 @@ with app.test_client() as c:
                headers=H)
     check('环节⑥ 手动指派回避教师被拒', (r.get_json() or {}).get('ok') is False,
           str(r.get_json()))
-    # 手动指定：语文场次给 校外陈老师（不冲突）→ 允许
+    # 手动指定：派一个从未被编排的校外监考员 → 允许
+    # 2026-10-13 审计修复：v1.19.47.25 起手动指派与自动编排共用
+    # 「一人一场次一考场」硬约束，而自动编排已把 12 格填满，
+    # 已入池的老师（含校外陈老师）都已被排到某场某考场 —— 再派他们都会被拒
+    # （这是产品的正确行为，不是缺陷）。
+    # 因此新增一个未入池的校外监考员，先清一格再派，验证手动指派链路可用。
+    r = c.post(f'/grades/affairs/{aid}/invig/others/add',
+               data={'name': '校外刘老师', 'subject': '地理'}, headers=H)
+    check('环节⑥ 追加第二位校外监考员', (r.get_json() or {}).get('ok') is True,
+          str(r.get_json()))
     with app.app_context():
-        ch_sched = AffairSchedule.query.filter_by(affair_id=aid, subject='语文').first()
-        chsid = ch_sched.id
+        chem_sched2 = AffairSchedule.query.filter_by(affair_id=aid, subject='化学').first()
+        chsid = chem_sched2.id
     r = c.post(f'/grades/affairs/{aid}/invig/set',
-               data={'schedule_id': chsid, 'room_no': '01', 'slot': 1, 'name': '校外陈老师'},
+               data={'schedule_id': chsid, 'room_no': '02', 'slot': 2, 'name': ''},
+               headers=H)
+    check('环节⑥ 手动清空格成功', (r.get_json() or {}).get('ok') is True,
+          str(r.get_json()))
+    r = c.post(f'/grades/affairs/{aid}/invig/set',
+               data={'schedule_id': chsid, 'room_no': '02', 'slot': 2, 'name': '校外刘老师'},
                headers=H)
     check('环节⑥ 手动指派校外监考员成功', (r.get_json() or {}).get('ok') is True,
           str(r.get_json()))

@@ -1,4 +1,4 @@
-# StuLink v1.19.47.4 2026-10-12
+# StuLink v1.19.47.25 2026-10-12
 # 考务环节④⑤⑥⑦：核对任课教师 / 考试时间表 / 监考编排 / 监考表导出
 #
 # 用户口径（2026-10-12 定案）：
@@ -324,13 +324,12 @@ def affair_schedules_import(aid):
         def cell(i):
             return r[i] if (0 <= i < len(r)) else None
         # 2026-10-12 安全审计 M-1：Excel 导入同样做服务端白名单 + 科目白名单校验
-        subj = sanitize_label(cell(ci_subj), 20)
-        if not subj:
+        # 2026-10-13：科目支持多选（「、」分隔，与手填口径一致）
+        names = [s for s in re.split(r'[、，,/\\s]+', str(cell(ci_subj) or '').strip()) if s]
+        if not names or any(s not in _SUBJ_SET for s in names):
             skipped += 1
             continue
-        if subj not in _SUBJ_SET:
-            skipped += 1
-            continue
+        subj = '、'.join(names)
         db.session.add(AffairSchedule(
             affair_id=affair.id,
             exam_date=_parse_date(cell(ci_date)) if ci_date >= 0 else None,
@@ -350,16 +349,22 @@ def affair_schedules_import(aid):
 @login_required
 @perm_required('grades.edit')
 def affair_schedules_save(aid):
-    """新增/修改一场（表单：id 为空则新增）"""
+    """新增/修改一场（表单：id 为空则新增）
+
+    2026-10-13：科目改为**多选**（如"四选二"一场同时考两科）——
+    前端勾选后以「、」连接提交；每个科目都必须在字典内；
+    存储沿用「、」分隔，与环节⑥「同科回避」的 _split_subjects 口径一致。
+    """
     affair = _affair(aid)
     sid = request.form.get('id', type=int)
-    # 2026-10-12 安全审计 M-1：科目是环节⑥「同科回避」的匹配键，须落在科目白名单内；
-    # 备注/选科走 sanitize_label。任意文本入库会让回避规则静默失配。
-    subj = sanitize_label(request.form.get('subject'), 20)
-    if not subj:
-        return jsonify({'ok': False, 'msg': '请填写考试科目'})
-    if subj not in _SUBJ_SET:
-        return jsonify({'ok': False, 'msg': f'科目「{subj}」不在科目字典内'})
+    names = [s for s in re.split(r'[、，,/\\s]+', (request.form.get('subject') or '').strip())
+             if s]
+    if not names:
+        return jsonify({'ok': False, 'msg': '请选择考试科目'})
+    bad = [s for s in names if s not in _SUBJ_SET]
+    if bad:
+        return jsonify({'ok': False, 'msg': f'科目不在科目字典内：{"、".join(bad)}'})
+    subj = '、'.join(names)
     row = AffairSchedule.query.get(sid) if sid else None
     if row is not None and row.affair_id != affair.id:
         return jsonify({'ok': False, 'msg': '场次不属于本批次'})
@@ -415,11 +420,24 @@ def affair_invig_get(aid):
     for iv in invigs:
         by_key.setdefault((iv.schedule_id, iv.room_no), {})[iv.slot] = {
             'name': iv.name or '', 'user_id': iv.user_id}
+    excl_all, excl_sch = _excludes(affair)
+    # 每人格数（已排的监考位）—— 供前端展示"谁排得多/谁还没排到"
+    load = {}
+    for iv in invigs:
+        if iv.name:
+            load[iv.name] = load.get(iv.name, 0) + 1
     return jsonify(success=True, data={
         'slots': max(1, min(_MAX_SLOTS, affair.invig_slots or 1)),
         'pool': [{'name': p['name'], 'user_id': p['user_id'],
-                  'subjects': sorted(p['subjects']), 'source': p['source']}
+                  'subjects': sorted(p['subjects']), 'source': p['source'],
+                  'excluded': p['name'] in excl_all,
+                  'excl_schedules': sorted(sid for sid, names in excl_sch.items()
+                                           if p['name'] in names)}
                  for p in pool],
+        'load': load,
+        'excludes': [{'id': e.id, 'name': e.name, 'schedule_id': e.schedule_id,
+                      'note': e.note or ''}
+                     for e in _excl_rows(affair)],
         'others': [{'id': o.id, 'name': o.name, 'subject': o.subject or '', 'note': o.note or ''}
                    for o in AffairInvigilator.query.filter_by(affair_id=affair.id).all()],
         'schedules': [{'id': s.id, 'date': s.exam_date.strftime('%Y-%m-%d') if s.exam_date else '',
@@ -546,6 +564,60 @@ def affair_invig_others_import(aid):
     return jsonify({'ok': True, 'added': added, 'dup': dup})
 
 
+@bp.route('/affairs/<int:aid>/invig/exclude', methods=['POST'])
+@login_required
+@perm_required('grades.edit')
+def affair_invig_exclude_add(aid):
+    """加入排除名单：form name（必填）、schedule_id（空=整批次不监考）、note"""
+    from app.models.grades import AffairInvigExclude
+
+    affair = _affair(aid)
+    name = (request.form.get('name') or '').strip()
+    sid = request.form.get('schedule_id', type=int)
+    if not name:
+        return jsonify({'ok': False, 'msg': '请选择老师'})
+    pool = {p['name']: p for p in invig_pool(affair)}
+    p = pool.get(name)
+    if p is None:
+        return jsonify({'ok': False, 'msg': '该老师不在监考池中'})
+    if sid:
+        sch = AffairSchedule.query.get(sid)
+        if sch is None or sch.affair_id != affair.id:
+            return jsonify({'ok': False, 'msg': '场次无效'})
+    q = AffairInvigExclude.query.filter_by(affair_id=affair.id, name=name,
+                                           schedule_id=sid)
+    if q.first() is not None:
+        return jsonify({'ok': False, 'msg': '该排除项已存在'})
+    db.session.add(AffairInvigExclude(
+        affair_id=affair.id, name=name, user_id=p['user_id'], schedule_id=sid,
+        note=(request.form.get('note') or '').strip()[:100] or None))
+    db.session.commit()
+    scope = '整批次不监考' if not sid else '不监考该场次'
+    log_operation(current_user, '修改', '监考排除名单', aid, f'{name} {scope}',
+                  module='grades')
+    return jsonify({'ok': True, 'msg': f'{name}：{scope}'})
+
+
+@bp.route('/affairs/<int:aid>/invig/exclude/delete', methods=['POST'])
+@login_required
+@perm_required('grades.edit')
+def affair_invig_exclude_del(aid):
+    """恢复某人监考（删除排除项）：form id"""
+    from app.models.grades import AffairInvigExclude
+
+    affair = _affair(aid)
+    eid = request.form.get('id', type=int)
+    row = db.session.get(AffairInvigExclude, eid) if eid else None
+    if row is None or row.affair_id != affair.id:
+        return jsonify({'ok': False, 'msg': '排除项不存在'})
+    _n = row.name
+    db.session.delete(row)
+    db.session.commit()
+    log_operation(current_user, '修改', '监考排除名单', aid, f'恢复 {_n} 监考',
+                  module='grades')
+    return jsonify({'ok': True, 'msg': f'已恢复 {_n}'})
+
+
 @bp.route('/affairs/<int:aid>/invig/auto', methods=['POST'])
 @login_required
 @perm_required('grades.edit')
@@ -559,14 +631,76 @@ def affair_invig_auto(aid):
     except ValueError as e:
         return jsonify({'ok': False, 'msg': str(e)}), 400
     db.session.commit()
+    gaps = info.get('gap_count') or 0
     log_operation(current_user, '编排', '监考表', aid,
-                  f'{info["schedules"]}场×{info["rooms"]}考场×{info["slots"]}人 → {rows}格',
+                  f'{info["schedules"]}场×{info["rooms"]}考场×{info["slots"]}人 → '
+                  f'{rows}/{info.get("total", rows)}格'
+                  + (f'，缺口 {gaps}' if gaps else ''),
                   module='grades')
     return jsonify({'ok': True, 'rows': rows, **info})
 
 
+def _excl_rows(affair):
+    """排除名单明细（整批在前）；表尚未迁移时返回空列表。"""
+    from app.models.grades import AffairInvigExclude
+
+    try:
+        return (AffairInvigExclude.query.filter_by(affair_id=affair.id)
+                .order_by(AffairInvigExclude.schedule_id.is_(None).desc(),
+                          AffairInvigExclude.name).all())
+    except Exception:                       # noqa: BLE001
+        db.session.rollback()
+        return []
+
+
+def _excludes(affair):
+    """监考排除名单 → (整批不监考 set(name), {场次id: set(name)} 不监考该场次)"""
+    excl_all, excl_sch = set(), {}
+    rows = _excl_rows(affair)
+    for e in rows:
+        nm = (e.name or '').strip()
+        if not nm:
+            continue
+        if e.schedule_id:
+            excl_sch.setdefault(e.schedule_id, set()).add(nm)
+        else:
+            excl_all.add(nm)
+    return excl_all, excl_sch
+
+
+def _time_overlap(s1, s2):
+    """两个场次时间是否重叠（同一人被排进重叠场次 = 分身乏术）。
+
+    只有**同一天且两端时间齐全**才判定；时间缺失时不误判（保守放行）。
+    """
+    if not s1.exam_date or s1.exam_date != s2.exam_date:
+        return False
+    a1, b1 = (s1.start_time or ''), (s1.end_time or '')
+    a2, b2 = (s2.start_time or ''), (s2.end_time or '')
+    if not (a1 and b1 and a2 and b2):
+        return False
+    return a1 < b2 and a2 < b1
+
+
 def _auto_arrange(affair):
+    """自动编排监考（2026-10-13 增强）：
+
+    约束（硬）：
+      H1 同科回避：任教该场科目的老师不排（一场多科时每科都回避）
+      H2 一人一格：同一场次内一人只监一个考场
+      H3 排除名单：整批不监考 / 不监考指定场次
+      H4 时间冲突：同一人被排的两个场次时间不能重叠
+
+    算法：**MRV（候选最少的场次先排）+ 最小负载均衡** ——
+      1. 先算每场次的静态候选（排除 + 回避后）；
+      2. 按候选数升序处理场次（最受约束的先排，能显著减少"后面排不下"的缺口）；
+      3. 每格在候选里取「当前已排格数最少」的人（天然做到尽量均匀、人人有份）；
+      4. 排不下的格子**记录缺口与原因**并继续，不再无声留空。
+
+    返回 (rows, stat)；stat 含 filled/total/gaps/load（每人格数）。
+    """
     pool = invig_pool(affair)
+    excl_all, excl_sch = _excludes(affair)
     schedules = sorted(AffairSchedule.query.filter_by(affair_id=affair.id).all(),
                        key=_schedule_key)
     rooms = AffairRoom.query.filter_by(affair_id=affair.id).order_by(AffairRoom.room_no).all()
@@ -581,43 +715,63 @@ def _auto_arrange(affair):
     # 直接留空，该考场剩余监考位**无声无息**——20 考场×2 人=40 格、池里只有 25 人时，
     # 15 个空格既不报错也不计数，导出的监考表就是空的。
     # 这里先做容量预检：总格数 vs 池内可用教师数（按场次剔除同科回避后取最小值）。
+    def _static_cands(sch):
+        return [p for p in pool
+                if p['name'] not in excl_all
+                and p['name'] not in excl_sch.get(sch.id, set())
+                and not (p['subjects'] & _split_subjects(sch.subject))]
+
     total_cells = len(schedules) * len(rooms) * slots
-    avail = min(
-        len([p for p in pool if not (p['subjects'] & ({s.subject} if s.subject else set()))])
-        for s in schedules)
-    if avail * len(rooms) * slots < total_cells:
+    # 2026-10-13：容量预检改为**各场次可排上限之和**（原先用"单场最小可用人数 × 场次数"，
+    # 但各场次可用人数本就不同 —— 回避/排除往往只影响个别场次，那样算会误判"人不够"）。
+    per_sch = {s.id: len(_static_cands(s)) for s in schedules}
+    capacity = sum(min(n, len(rooms) * slots) for n in per_sch.values())
+    avail = min(per_sch.values()) if per_sch else 0
+    if capacity < total_cells:
         raise ValueError(
             '监考教师不足：共需 %d 格（%d 场 × %d 考场 × %d 人），'
-            '而单场最多只有 %d 名可排教师（已剔除同科回避）→ 最多排 %d 格，'
-            '将缺少 %d 格。请增加监考员（环节⑥「其他监考员」）或减少每考场监考人数。'
+            '而各场次可排教师合计最多 %d 格（已剔除同科回避与排除名单，'
+            '最少的一场只有 %d 人可用）→ 缺 %d 格。'
+            '请增加监考员（环节⑥「其他监考员」）、取消部分排除，或减少每考场监考人数。'
             % (total_cells, len(schedules), len(rooms), slots,
-               avail, avail * len(rooms) * slots, total_cells - avail * len(rooms) * slots))
+               capacity, avail, total_cells - capacity))
     AffairInvigilation.query.filter_by(affair_id=affair.id).delete()
     load = {p['name']: 0 for p in pool}
+    busy = {p['name']: [] for p in pool}        # name -> 已排入的场次（判时间冲突）
     rows = 0
-    for sch in schedules:
-        # 2026-10-12：一场可能同时考多科（如监考表里的「物理/历史」），
-        # 用 _split_subjects 拆成集合再回避，否则合并写法会导致回避静默失效
-        # （考物理/历史时，物理老师和历史老师都应回避）。
+    gaps = []
+    # MRV：候选最少的场次先排（最受约束的先排，避免"前面随便排、后面排不下"）
+    order = sorted(schedules, key=lambda s: (len(_static_cands(s)), _schedule_key(s)))
+    for sch in order:
         avoid = _split_subjects(sch.subject)
         used_this = set()          # 同一场次内，一人只监一个考场
         for room in rooms:
             for slot in range(1, slots + 1):
                 cands = [p for p in pool
                          if p['name'] not in used_this
-                         and not (p['subjects'] & avoid)]
+                         and p['name'] not in excl_all
+                         and p['name'] not in excl_sch.get(sch.id, set())
+                         and not (p['subjects'] & avoid)
+                         and not any(_time_overlap(sch, s2) for s2 in busy[p['name']])]
                 if not cands:
-                    break
+                    gaps.append({'schedule': f'{sch.exam_date or ""} {sch.subject}',
+                                 'room': room.room_no, 'slot': slot,
+                                 'reason': '无可用教师（同科回避 / 排除 / 时间冲突）'})
+                    continue       # 不再 break —— 原来会跳过该考场剩余监考位
                 cands.sort(key=lambda p: (load[p['name']], p['name']))
                 p = cands[0]
                 used_this.add(p['name'])
                 load[p['name']] += 1
+                busy[p['name']].append(sch)
                 db.session.add(AffairInvigilation(
                     affair_id=affair.id, schedule_id=sch.id, room_no=room.room_no,
                     slot=slot, name=p['name'], user_id=p['user_id'],
                     subject='、'.join(sorted(p['subjects']))))
                 rows += 1
-    return rows, {'slots': slots, 'schedules': len(schedules), 'rooms': len(rooms)}
+    return rows, {'slots': slots, 'schedules': len(schedules), 'rooms': len(rooms),
+                  'total': total_cells, 'filled': rows, 'gap_count': len(gaps),
+                  'gaps': gaps[:8],
+                  'load': {k: v for k, v in sorted(load.items(), key=lambda x: -x[1])}}
 
 
 @bp.route('/affairs/<int:aid>/invig/set', methods=['POST'])
@@ -651,6 +805,28 @@ def affair_invig_set(aid):
         return jsonify({'ok': False, 'msg': '该老师不在监考池中'})
     if sch.subject and (p['subjects'] & _split_subjects(sch.subject)):
         return jsonify({'ok': False, 'msg': f'{name} 任教{sch.subject}，本场需回避'})
+    # 2026-10-13：手动指派与自动编排同一套硬约束（原先手动可绕过）
+    excl_all, excl_sch = _excludes(affair)
+    if name in excl_all:
+        return jsonify({'ok': False, 'msg': f'{name} 已设为本次考试不监考'})
+    if name in excl_sch.get(sid, set()):
+        return jsonify({'ok': False, 'msg': f'{name} 已设为不监考这一场'})
+    dup = AffairInvigilation.query.filter_by(
+        affair_id=affair.id, schedule_id=sid, name=name).filter(
+        db.or_(AffairInvigilation.room_no != room_no,
+               AffairInvigilation.slot != slot)).first()
+    if dup is not None:
+        return jsonify({'ok': False,
+                        'msg': f'{name} 本场已排在考场 {dup.room_no}，不能同时监考两个考场'})
+    for other in AffairInvigilation.query.filter_by(
+            affair_id=affair.id, name=name).all():
+        if other.schedule_id == sid:
+            continue
+        s2 = AffairSchedule.query.get(other.schedule_id)
+        if s2 is not None and _time_overlap(sch, s2):
+            return jsonify({'ok': False,
+                            'msg': f'{name} 在 {s2.exam_date} {s2.start_time}-{s2.end_time} '
+                                   f'已排监考，与本场时间重叠'})
     if row is None:
         row = AffairInvigilation(affair_id=affair.id, schedule_id=sid,
                                  room_no=room_no, slot=slot)

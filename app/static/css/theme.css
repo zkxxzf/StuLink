@@ -1,0 +1,560 @@
+/* =============================================================================
+   StuLink 主题层（浅色 / 深色）—— v1.19.47.25（2026-10-13）
+   -----------------------------------------------------------------------------
+   背景：此前全站颜色是「字面量满天飞」——base.html 内联 56 处、业务 css 201 处、
+   模板内联 style 665 处；成绩分析（考试态 .sidebar-float）侧栏是白底卡，
+   其它模块侧栏是深色 #1e293b，风格不统一。
+
+   方案：Bootstrap 5.3.3 原生支持 data-bs-theme="dark"，但业务字面量优先级更高，
+   所以这里做两层：
+     L1 变量层：--sl-* 语义变量（两套值），并把 base.html 骨架改为引用变量；
+     L2 兜底层：对「改不到的」外部 css / 模板内联 style，用属性选择器 +
+        工具类覆盖（.bg-white / [style*="background:#fff"] …），深色下不再出现白块。
+
+   加载位置：必须在 bootstrap.min.css **之后**（base.html 中位于 grades.css 之后），
+   以便同特异性下由本文件胜出。
+   ============================================================================= */
+
+/* ============ 浅色（默认）：视觉保持与改造前一致，避免既有页面回归 ============ */
+:root,
+[data-bs-theme="light"] {
+    /* —— 页面与面板 —— */
+    /* 2026-10-13（v1.19.47.25）：页面底色原 #f0f2f5 偏灰，整体提亮一档 */
+    --sl-bg: #f6f8fb;                  /* 页面底色 */
+    --sl-surface: #ffffff;             /* 卡片 / 面板 / 弹层 */
+    --sl-surface-2: #f8fafc;           /* 次级面：表头、卡片头、斑马行 */
+    --sl-surface-3: #f1f5f9;           /* hover / 分组头 */
+    --sl-border: #e2e8f0;              /* 分割线、边框 */
+    --sl-text: #1e293b;                /* 主文字 */
+    --sl-text-muted: #64748b;          /* 次要文字 */
+    --sl-text-subtle: #94a3b8;         /* 更弱文字 */
+    --sl-shadow: 0 1px 3px rgba(0, 0, 0, .08);
+
+    /* —— 侧栏（普通侧栏与考试态侧栏共用同一套，风格统一） ——
+       2026-10-13 修正：此前两套主题里侧栏都是深色（#1e293b / #131c2e），
+       切到浅色模式后「只有内容区变亮、侧栏仍是一块深色」→ 视觉割裂（用户反馈）。
+       现在侧栏跟随主题：浅色=白底深字，深色=深底浅字。 */
+    --sl-sidebar-bg: #ffffff;
+    --sl-sidebar-text: #475569;
+    --sl-sidebar-text-hover: #1e293b;
+    --sl-sidebar-title: #0f172a;       /* 侧栏内标题/强调 */
+    --sl-sidebar-muted: #94a3b8;
+    --sl-sidebar-hover: #f1f5f9;
+    --sl-sidebar-active: #eff6ff;
+    --sl-sidebar-active-text: #1d4ed8; /* 激活项文字（此前写死 #fff，浅侧栏下看不见） */
+    --sl-sidebar-accent: #2563eb;      /* 激活竖条 */
+    --sl-sidebar-accent-text: #1d4ed8; /* 激活/悬浮文字 */
+    --sl-sidebar-line: #eef2f7;
+    --sl-sidebar-group: #f8fafc;
+    --sl-sidebar-chip: #e2e8f0;
+    --sl-sidebar-done-bg: #dcfce7;     /* 已完成环节（绿点） */
+    --sl-sidebar-done-text: #166534;
+
+    /* —— 导航栏：同样跟随主题（原为写死深色 navbar-dark bg-dark）—— */
+    --sl-navbar-bg: #ffffff;
+    --sl-navbar-text: #1e293b;
+    --sl-navbar-border: #e2e8f0;
+
+    /* —— 表格 ——
+       2026-10-13（v1.19.47.25）：成绩类表头原是写死的深色 #1e293b + 白字
+       （grades.css 加了 !important）。页面整体主题化后这条黑表头就成了突兀的
+       「黑条」（用户反馈「页面区域还有黑色的，比如表头」）→ 改为跟随主题：
+       浅色 = 浅灰底深字，深色 = 深底浅字。 */
+    --sl-head-bg: #e7ecf3;             /* 表头第 1 行（分组/大标题） */
+    --sl-head-bg-2: #f1f4f9;           /* 表头第 2 行（各子列，浅一档形成层级） */
+    --sl-head-text: #334155;
+    --sl-head-border: #d5dde8;
+    --sl-th-bg: #f1f4f9;               /* 普通单行表头 */
+    --sl-th-text: #64748b;
+    --sl-row-hover: #e0ecff;
+    --sl-freeze-bg: #ffffff;           /* 冻结列（年级/班级） */
+    --sl-subtotal-bg: #eef4fb;         /* 小计行 */
+    --sl-grand-bg: #dfe9f6;            /* 总计行 */
+    --sl-zebra-bg: #f8fafc;            /* 斑马行 */
+    --sl-extra-bg: #fff8e6;            /* 「不在当前模板内」的层（划线分层） */
+
+    /* 同步 Bootstrap 变量（浅色下即为 Bootstrap 默认值，显式写出防被上游污染） */
+    --bs-body-bg: #f0f2f5;
+    --bs-body-color: #1e293b;
+    --bs-border-color: #dee2e6;
+    --bs-secondary-bg: #e9ecef;
+    /* 2026-10-13：Bootstrap 的卡片底色默认取 --bs-body-bg（#f0f2f5 灰），
+       比页面底色 #f6f8fb 还暗 → "卡片比页面还脏、表格一片灰"。
+       统一让卡片用面板白（深色下为深面板色），层级变成「灰页面 + 白卡片」。 */
+    --bs-card-bg: var(--sl-surface);
+    --bs-tertiary-bg: #f8f9fa;
+    --bs-secondary-color: #64748b;
+    --bs-emphasis-color: #1e293b;
+}
+
+/* ============================ 深色 ============================ */
+[data-bs-theme="dark"] {
+    --sl-bg: #0f172a;
+    --sl-surface: #172033;
+    --sl-surface-2: #1c2739;
+    --sl-surface-3: #233047;
+    --sl-border: #2b3a52;
+    --sl-text: #e2e8f0;
+    --sl-text-muted: #94a3b8;
+    --sl-text-subtle: #64748b;
+    --sl-shadow: 0 1px 3px rgba(0, 0, 0, .45);
+
+    /* 深色：侧栏与顶栏转深底浅字（比页面底色略深一档，形成层次） */
+    --sl-sidebar-bg: #131c2e;
+    --sl-sidebar-text: #cbd5e1;
+    --sl-sidebar-text-hover: #f1f5f9;
+    --sl-sidebar-title: #f8fafc;
+    --sl-sidebar-muted: #8394ab;
+    --sl-sidebar-hover: rgba(255, 255, 255, .07);
+    --sl-sidebar-active: rgba(59, 130, 246, .20);
+    --sl-sidebar-active-text: #f1f5f9;
+    --sl-sidebar-accent: #60a5fa;
+    --sl-sidebar-accent-text: #93c5fd;
+    --sl-sidebar-line: rgba(255, 255, 255, .10);
+    --sl-sidebar-group: rgba(255, 255, 255, .05);
+    --sl-sidebar-chip: rgba(255, 255, 255, .14);
+    --sl-sidebar-done-bg: rgba(22, 163, 74, .25);
+    --sl-sidebar-done-text: #86efac;
+
+    --sl-navbar-bg: #131c2e;
+    --sl-navbar-text: #e2e8f0;
+    --sl-navbar-border: #2b3a52;
+
+    --sl-head-bg: #253149;             /* 第 1 行表头（深色下略亮，形成层级） */
+    --sl-head-bg-2: #1c2739;           /* 第 2 行表头 */
+    --sl-head-text: #e2e8f0;
+    --sl-head-border: #33456b;
+    --sl-th-bg: #1c2739;
+    --sl-th-text: #94a3b8;
+    --sl-row-hover: #1e3a5f;
+    --sl-freeze-bg: #172033;
+    --sl-subtotal-bg: #1d2b42;
+    --sl-grand-bg: #22334f;
+    --sl-zebra-bg: #1b2537;
+    --sl-extra-bg: #33291a;
+
+    /* 同步 Bootstrap 变量：让 card / table / dropdown / modal / form 一起变暗 */
+    --bs-body-bg: #0f172a;
+    --bs-body-color: #e2e8f0;
+    --bs-border-color: #2b3a52;
+    --bs-secondary-bg: #1c2739;
+    --bs-card-bg: var(--sl-surface);
+    --bs-tertiary-bg: #233047;
+    --bs-secondary-color: #94a3b8;
+    --bs-emphasis-color: #f1f5f9;
+    --bs-heading-color: #f1f5f9;
+    --bs-link-color: #7cb0f7;
+    --bs-link-hover-color: #a5c8fa;
+
+    color-scheme: dark;
+}
+
+[data-bs-theme="light"] { color-scheme: light; }
+
+/* =============================================================================
+   L1：骨架元素统一取变量（覆盖 base.html 内联与其它 css 的字面量）
+   ============================================================================= */
+body {
+    background: var(--sl-bg) !important;
+    color: var(--sl-text);
+}
+
+/* 导航栏：原来是写死的 navbar-dark bg-dark（永远深色），现跟随主题变量。
+   注意 navbar 里的按钮用的是 Bootstrap 的 btn-outline-light（白字白边），
+   在浅色顶栏上会"消失" —— 这里统一按主题重描边/重着色，两模式都要看得见。 */
+.navbar {
+    background-color: var(--sl-navbar-bg) !important;
+    color: var(--sl-navbar-text);
+    border-bottom: 1px solid var(--sl-navbar-border);
+}
+.navbar .navbar-brand,
+.navbar .nav-link,
+.navbar .btn-outline-light { color: var(--sl-navbar-text) !important; }
+.navbar .btn-outline-light { border-color: var(--sl-navbar-border) !important; }
+.navbar .btn-outline-light:hover,
+.navbar .btn-outline-light:focus {
+    background: var(--sl-sidebar-hover) !important;
+    color: var(--sl-sidebar-accent-text) !important;
+}
+/* 深色顶栏上 hover 底色是半透明白，浅色下用主题 hover 色即可（上面已覆盖） */
+.navbar .text-white { color: var(--sl-navbar-text) !important; }
+/* 窄屏汉堡按钮：navbar-dark 的图标是白色描边 SVG，浅色顶栏下会「消失」 */
+[data-bs-theme="light"] .navbar .navbar-toggler-icon {
+    --bs-navbar-toggler-icon-bg: url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 30 30'%3e%3cpath stroke='rgba%2833, 37, 41, 0.75%29' stroke-linecap='round' stroke-miterlimit='10' stroke-width='2' d='M4 7h22M4 15h22M4 23h22'/%3e%3c/svg%3e");
+}
+/* 汉堡按钮本体在浅色顶栏下改浅底深字（原来是 btn-dark 黑底） */
+[data-bs-theme="light"] .navbar > .btn-dark {
+    background-color: #fff !important; border-color: var(--sl-navbar-border) !important;
+    color: var(--sl-navbar-text) !important;
+}
+
+/* 侧栏：普通侧栏 + 考试态 .sidebar-float（成绩分析）一律同源 —— 不再一黑一白 */
+.sidebar,
+.sidebar.sidebar-float {
+    background: var(--sl-sidebar-bg) !important;
+    color: var(--sl-sidebar-text);
+    border-color: var(--sl-border);
+}
+.sidebar .nav-link { color: var(--sl-sidebar-text); }
+.sidebar .nav-link:hover {
+    color: var(--sl-sidebar-text-hover);
+    background: var(--sl-sidebar-hover);
+}
+.sidebar .nav-link.active {
+    color: var(--sl-sidebar-active-text);
+    background: var(--sl-sidebar-active);
+    border-left-color: var(--sl-sidebar-accent);
+}
+.sidebar .nav-section { color: var(--sl-sidebar-muted); }
+.sidebar .aca-group[aria-expanded="true"] { color: var(--sl-sidebar-text-hover); }
+
+/* 考试态侧栏内部（原白卡专属配色）→ 改为侧栏语义变量，深浅两模式都协调 */
+.sidebar-float .efn-back { color: var(--sl-sidebar-muted); }
+.sidebar-float .efn-back:hover {
+    color: var(--sl-sidebar-accent-text);
+    background: var(--sl-sidebar-hover);
+}
+.sidebar-float .efn-title { color: var(--sl-sidebar-title); }
+.sidebar-float .efn-steps { border-bottom: 1px solid var(--sl-sidebar-line); }
+.sidebar-float .efn-dot { background: var(--sl-sidebar-chip); color: var(--sl-sidebar-text); }
+.sidebar-float .efn-dot.on { background: #16a34a; color: #fff; }
+.sidebar-float .efn-dot.done {
+    background: var(--sl-sidebar-done-bg);
+    color: var(--sl-sidebar-done-text);
+}
+.sidebar-float .efn-count,
+.sidebar-float .efn-item .text-muted { color: var(--sl-sidebar-muted) !important; }
+.sidebar-float .efn-item { color: var(--sl-sidebar-text); }
+.sidebar-float .efn-item:hover {
+    background: var(--sl-sidebar-hover);
+    color: var(--sl-sidebar-accent-text);
+}
+.sidebar-float .efn-item.active {
+    background: var(--sl-sidebar-active);
+    color: var(--sl-sidebar-accent-text);
+    box-shadow: inset 3px 0 0 0 var(--sl-sidebar-accent);
+}
+.sidebar-float .efn-group { background: var(--sl-sidebar-group); color: var(--sl-sidebar-text); }
+.sidebar-float .efn-group:hover { background: var(--sl-sidebar-hover); }
+.sidebar-float .efn-group .bi { color: var(--sl-sidebar-muted); }
+.sidebar-float .efn-ai::before { background: var(--sl-sidebar-line); }
+.sidebar-float .efn-ai { color: var(--sl-sidebar-text); }
+.sidebar-float .efn-ai:hover { background: var(--sl-sidebar-hover); }
+/* 激活项里的浅色 badge（如「未配置」）在深色侧栏下不必反白 */
+.sidebar-float .badge.bg-light { background: var(--sl-sidebar-chip) !important; color: var(--sl-sidebar-text) !important; }
+
+/* 卡片 / 统计卡 / 面板：Bootstrap 5.3 的 dark 已处理 .card，这里统一阴影与边框 */
+.card, .stat-card, .chart-card, .tbl-card,
+.modal-content, .offcanvas, .toast, .popover, .dropdown-menu {
+    background-color: var(--sl-surface);
+    color: var(--sl-text);
+    border-color: var(--sl-border);
+    box-shadow: var(--sl-shadow);
+}
+.card-header, .card-footer, .modal-header, .modal-footer, .offcanvas-header {
+    background-color: var(--sl-surface-2);
+    border-color: var(--sl-border);
+    color: var(--sl-text);
+}
+.list-group-item { background-color: var(--sl-surface); color: var(--sl-text); border-color: var(--sl-border); }
+.list-group-item:hover { background-color: var(--sl-surface-2); }
+.nav-tabs .nav-link { color: var(--sl-text-muted); }
+.nav-tabs .nav-link.active { background: var(--sl-surface); color: var(--sl-text); border-color: var(--sl-border) var(--sl-border) var(--sl-surface); }
+.nav-tabs { border-color: var(--sl-border); }
+.page-link { background: var(--sl-surface); border-color: var(--sl-border); color: var(--sl-text); }
+.page-link:hover { background: var(--sl-surface-2); color: var(--sl-text); }
+.page-item.disabled .page-link { background: var(--sl-surface-2); color: var(--sl-text-subtle); }
+.breadcrumb { --bs-breadcrumb-divider-color: var(--sl-text-subtle); }
+.text-muted { color: var(--sl-text-muted) !important; }
+
+/* 表格：表头 / 斑马 / 悬停用变量（Bootstrap dark 已改 --bs-table-*，这里补业务表） */
+.table > thead th { color: var(--sl-th-text); }
+/* 表头底色统一在第 1 行用 --sl-head-bg、第 2 行用 --sl-head-bg-2（见下方「两行表头」段） */
+.table-striped > tbody > tr:nth-of-type(odd) > * { --bs-table-bg-type: var(--sl-zebra-bg); }
+
+/* —— 成绩类表格（grades.css 用 !important 写死深色表头，必须逐个顶掉） —— */
+.g-table thead th,
+.g-table thead th:first-child,
+.ld-table thead th {
+    background: var(--sl-head-bg) !important;
+    color: var(--sl-head-text) !important;
+    border-color: var(--sl-head-border) !important;
+}
+
+/* =============================================================================
+   两行表头 / 合并分组单元格：**层级用同族色阶**（纵深靠明度，不靠黑白对比）
+   -----------------------------------------------------------------------------
+   2026-10-13（v1.19.47.25）用户反馈：宽表「两行表头 + 合并单元格」样式割裂 ——
+   第 1 行 #1e293b 深、第 2 行 #334155 次深、冻结列又回 #1e293b，
+   与浅色表体拼在一起像三张表。现统一为：
+     第 1 行（分组/大标题）→ --sl-head-bg（稍深）
+     第 2 行（各子列）      → --sl-head-bg-2（稍浅一档）
+     冻结列表头            → 同第 1 行（不再单独回写深色）
+     表体 / 冻结列 / 斑马 / 小计总计 → 各自变量，全部跟随主题
+   区块之间靠「同族明度差 + 统一 1px 分隔线」区分，不再靠黑白撞色。
+   ============================================================================= */
+.ld-table { border-color: var(--sl-head-border); }
+/* 第 2 行表头（global_compare.css 里写死 #334155 + sticky top，这里只换色不动定位） */
+.ld-table thead tr:nth-child(2) th {
+    background: var(--sl-head-bg-2) !important;
+    color: var(--sl-head-text) !important;
+}
+.ld-table thead th.grp { color: var(--sl-head-text) !important; }
+/* 冻结列（年级/班级）：表头与第 1 行同色，表体与表体同色 —— 靠右分隔线区分区块 */
+.ld-table thead th.c-year, .ld-table thead th.c-cls {
+    background: var(--sl-head-bg) !important;
+    color: var(--sl-head-text) !important;
+    border-right: 1px solid var(--sl-head-border) !important;
+}
+.ld-table th.c-year, .ld-table td.c-year,
+.ld-table th.c-cls, .ld-table td.c-cls {
+    background: var(--sl-freeze-bg) !important;
+}
+.ld-table thead th.c-year, .ld-table thead th.c-cls {
+    background: var(--sl-head-bg) !important;
+}
+.ld-table tbody td {
+    background: var(--sl-surface);
+    border-color: var(--sl-border) !important;
+}
+/* 小计 / 总计行：同族加深，不再用写死浅蓝 */
+.ld-table tbody tr.sub td { background: var(--sl-subtotal-bg) !important; }
+.ld-table tbody tr.grand td { background: var(--sl-grand-bg) !important; }
+/* 方向/属性彩标在两套主题下都保持可读 */
+.ld-dir-all { background: var(--sl-surface-3); color: var(--sl-text); }
+.ld-type { color: var(--sl-text-muted); }
+
+/* —— 通用表格：表头层级与表体（.table / 两行表头的第二行）—— */
+.table thead th, .table-responsive thead th {
+    background: var(--sl-head-bg) !important;
+    color: var(--sl-head-text) !important;
+    border-color: var(--sl-head-border) !important;
+}
+.table-responsive thead tr:nth-child(2) th {
+    background: var(--sl-head-bg-2) !important;
+    border-top: 1px solid var(--sl-head-border);
+}
+.table tbody td, .table-responsive tbody td { border-color: var(--sl-border); }
+/* 合并分组列（rowspan 的「年级/班级」等）在表体里的底色统一为表体色 */
+.table tbody th[scope="row"] { background: var(--sl-freeze-bg); color: var(--sl-text); }
+.g-table tbody tr:nth-child(even) { background: var(--sl-zebra-bg) !important; --bs-table-bg: var(--sl-zebra-bg) !important; }
+.g-table tbody tr:nth-child(even) td:first-child { background: var(--sl-zebra-bg) !important; }
+.g-table tbody tr.stu-link:hover { background: var(--sl-row-hover) !important; }
+.g-table tbody tr.stu-link:hover td:first-child { background: var(--sl-row-hover) !important; }
+.g-table thead th.sortable:hover { color: var(--sl-sidebar-accent-text) !important; }
+.g-table, .ld-table { color: var(--sl-text); border-color: var(--sl-border); }
+
+/* =============================================================================
+   表格统一（2026-10-13 用户反馈「边框还是不行 / padding 还是 margin」）
+   -----------------------------------------------------------------------------
+   症状①：.g-table 表头在 grades.css 里写了 `border-bottom: none`（当年配深色表头用），
+          换成浅色表头后表头与表体之间**没有线**，整张表像"贴"在一起；
+   症状②：表体横线是 grades.css 的 `1px dashed #dbe3ec`，与其它表的实线不是一套，
+          深色模式下还是一道亮虚线；
+   症状③：卡片底色默认取 --bs-body-bg（灰），比页面底色还暗 → 表格区域整体发灰；
+   症状④：单元格里带输入框（划线分层）时，td 的边框 + input 的边框 = 格子套格子，
+          且 input 宽度不足时数值被截断（426.5 → "426.!"）。
+   统一口径：表头下 1px 实线（--sl-head-border）、表体横线 1px 实线（--sl-border）、
+            宽表竖线同为 1px 实线、冻结列右侧加分隔线、单元格里的输入框不再自带边框。
+   ============================================================================= */
+.g-table thead th,
+.table thead th,
+.ld-table thead th {
+    border-bottom: 1px solid var(--sl-head-border) !important;
+}
+.g-table tbody td,
+.table tbody td,
+.ld-table tbody td {
+    border-bottom: 1px solid var(--sl-border) !important;
+}
+/* 冻结首列：右侧一条分隔线（横向滚动时「这一列不动」才有边界） */
+.g-table thead th:first-child,
+.g-table tbody td:first-child {
+    border-right: 1px solid var(--sl-head-border) !important;
+}
+/* 例外：.table-borderless 是**刻意不要格线**的紧凑表（弹层清单 / 宿舍统计小表），
+   上面几条是在"给所有表补线"，必须放行这一类，否则等于把它们的 borderless 抹掉 */
+.table-borderless thead th,
+.table-borderless tbody td,
+.table-borderless > :not(caption) > * > * {
+    border-bottom: 0 !important;
+}
+/* 宽表（全局对比 / 划线分层）：列多，靠竖线读列 */
+.ld-table th, .ld-table td,
+#bandTable th, #bandTable td {
+    border-right: 1px solid var(--sl-border);
+}
+.ld-table thead th, #bandTable thead th { border-right-color: var(--sl-head-border); }
+.ld-table th:last-child, .ld-table td:last-child,
+#bandTable th:last-child, #bandTable td:last-child { border-right: none; }
+
+/* —— 划线分层（#bandTable）：整张表都是输入框 ——
+   原来 input 的底色跟着页面/卡片底色走，与单元格底色不同 → "格子套格子"；
+   现在 td 负责画格线与底色，input 只负责文字（透明底、无边框、聚焦才高亮），
+   并给足宽度，避免 426.5 被截断成 "426.!"。 */
+#bandTable tbody td { background: var(--sl-surface); padding: 2px 4px; }
+#bandTable tbody tr:nth-child(even) td { background: var(--sl-zebra-bg); }
+/* 「模板外」的层（不在当前模板层名内、由已保存划线追加而来）：淡琥珀底 + 层名下标注
+   —— 模板没选对时一眼可见，不再混在模板层里像补丁（用户口径 2026-10-13） */
+#bandTable tbody tr.q-extra td { background: var(--sl-extra-bg) !important; }
+#bandTable td .form-control {
+    background: transparent;
+    border: 0;
+    color: var(--sl-text);
+    font-size: 12.5px;
+    padding: 3px 6px;
+    min-width: 66px;
+    height: auto;
+}
+#bandTable td .q-name { min-width: 120px; }
+#bandTable td .q-cell { text-align: center; font-variant-numeric: tabular-nums; }
+#bandTable td .form-control:focus {
+    background: var(--sl-surface);
+    box-shadow: 0 0 0 2px var(--sl-sidebar-accent);
+    border-radius: 3px;
+}
+/* 页面模板里内联写死的深色表头/横幅（内联优先级高于本文件，必须用 !important 顶掉）：
+   - academic/schedule_periods.html：table.tt thead th（节次表）
+   - academic/subject_leaders.html：.ld-head（备课组长分组头）
+   - academic/index.html：.ac-hero（教务工作台横幅，原本深色渐变 + 白字） */
+table.tt thead th {
+    background: var(--sl-head-bg) !important;
+    color: var(--sl-head-text) !important;
+}
+.ld-head {
+    background: var(--sl-head-bg) !important;
+    color: var(--sl-head-text) !important;
+}
+.ac-hero {
+    background: linear-gradient(120deg, var(--sl-head-bg),
+                var(--sl-surface-2) 60%, var(--sl-surface-3)) !important;
+    color: var(--sl-text) !important;
+}
+.ac-hero h4, .ac-hero .ac-hero-meta strong { color: var(--sl-text) !important; }
+.ac-hero .ac-hero-meta { opacity: .8; }
+.chart-card .card-header, .tbl-card .card-header {
+    background: var(--sl-surface-2);
+    border-bottom: 1px solid var(--sl-border);
+}
+.empty-state { color: var(--sl-text-muted); }
+.empty-state .bi { color: var(--sl-text-subtle); }
+.chart-tip { color: var(--sl-text-muted); }
+#gCmList .cm-item:hover { background: var(--sl-surface-3); }
+
+/* —— 课表总览（schedule_matrix.css） —— */
+.ovw-block { border-color: var(--sl-border); }
+.ovw-block-head {
+    background: linear-gradient(90deg, var(--sl-sidebar-bg), var(--sl-surface-2)) !important;
+    color: var(--sl-sidebar-text-hover);
+}
+.ovw-block-head .ovw-sub { color: var(--sl-sidebar-muted); }
+.ovw-table thead th { background: var(--sl-surface-2); color: var(--sl-text); }
+.ovw-grp-row th, .ovw-per-row th { background: var(--sl-surface-2); color: var(--sl-text); }
+.ovw-period-name, .ovw-cmeta { color: var(--sl-text-muted); }
+.ovw-grp-break { color: var(--sl-text-muted) !important; }
+.ovw-teacher { color: var(--sl-text-muted); }
+.ovw-cell, .ovw-blank { border-color: var(--sl-border); }
+.ovw-chk-none { background: var(--sl-surface-3); color: var(--sl-text-muted); }
+
+/* =============================================================================
+   L2：兜底 —— 覆盖「改不到的」模板内联 style 与 Bootstrap 浅色工具类
+   （模板里有 665 行内联色，逐个改不现实；用属性选择器批量接管白底/深色字）
+   ============================================================================= */
+[data-bs-theme="dark"] .bg-white,
+[data-bs-theme="dark"] .bg-light,
+[data-bs-theme="dark"] [style*="background:#fff"],
+[data-bs-theme="dark"] [style*="background: #fff"],
+[data-bs-theme="dark"] [style*="background:#ffffff"],
+[data-bs-theme="dark"] [style*="background: #ffffff"],
+[data-bs-theme="dark"] [style*="background-color:#fff"],
+[data-bs-theme="dark"] [style*="background-color: #fff"] {
+    background: var(--sl-surface) !important;
+}
+[data-bs-theme="dark"] [style*="background:#f8f9fa"],
+[data-bs-theme="dark"] [style*="background: #f8f9fa"],
+[data-bs-theme="dark"] [style*="background:#f8fafc"],
+[data-bs-theme="dark"] [style*="background: #f8fafc"],
+[data-bs-theme="dark"] [style*="background:#f1f5f9"],
+[data-bs-theme="dark"] [style*="background: #f1f5f9"],
+[data-bs-theme="dark"] [style*="background:#f6f8fb"],
+[data-bs-theme="dark"] [style*="background: #f6f8fb"] {
+    background: var(--sl-surface-2) !important;
+}
+[data-bs-theme="dark"] [style*="color:#333"],
+[data-bs-theme="dark"] [style*="color: #333"],
+[data-bs-theme="dark"] [style*="color:#000"],
+[data-bs-theme="dark"] [style*="color: #000"],
+[data-bs-theme="dark"] [style*="color:#212529"],
+[data-bs-theme="dark"] [style*="color: #212529"],
+[data-bs-theme="dark"] .text-dark,
+[data-bs-theme="dark"] .text-black {
+    color: var(--sl-text) !important;
+}
+[data-bs-theme="dark"] [style*="background:#1e293b"],
+[data-bs-theme="dark"] [style*="background: #1e293b"] {
+    background: var(--sl-sidebar-bg) !important;
+}
+
+/* —— 成绩汇报区（report.js 内联样式 + report.css）——
+   表格底色/文字是 JS 内联输出的（复制进 PPT 要保样式），只能靠属性选择器兜底。
+   此前 #f3f5f9 斑马行 / #1a1a1a·#222 深字不在兜底清单里：
+   深色下普通行「深底深字」→ 文字隐身，斑马行变成亮白条（用户反馈"颜色表格"）。 */
+[data-bs-theme="dark"] [style*="background:#f3f5f9"],
+[data-bs-theme="dark"] [style*="background: #f3f5f9"],
+[data-bs-theme="dark"] [style*="background:#eef3fa"],
+[data-bs-theme="dark"] [style*="background: #eef3fa"],
+[data-bs-theme="dark"] [style*="background:#dbe7f5"],
+[data-bs-theme="dark"] [style*="background: #dbe7f5"] {
+    background: var(--sl-surface-3) !important;
+}
+[data-bs-theme="dark"] [style*="color:#1a1a1a"],
+[data-bs-theme="dark"] [style*="color: #1a1a1a"],
+[data-bs-theme="dark"] [style*="color:#222"],
+[data-bs-theme="dark"] [style*="color: #222"] {
+    color: var(--sl-text) !important;
+}
+[data-bs-theme="dark"] [style*="color:#444"],
+[data-bs-theme="dark"] [style*="color: #444"],
+[data-bs-theme="dark"] [style*="color:#666"],
+[data-bs-theme="dark"] [style*="color: #666"],
+[data-bs-theme="dark"] [style*="color:#888"],
+[data-bs-theme="dark"] [style*="color: #888"],
+[data-bs-theme="dark"] [style*="color:#999"],
+[data-bs-theme="dark"] [style*="color: #999"] {
+    color: var(--sl-text-muted) !important;
+}
+/* 名次列的蓝字（#1f4e79）在深色下换成亮蓝；表头深蓝底保留（白字可读） */
+[data-bs-theme="dark"] [style*="color:#1f4e79"] {
+    color: var(--sl-sidebar-accent-text) !important;
+}
+/* 单元格 1.5px 深蓝描边在深色下调暗，避免整表"发蓝" */
+[data-bs-theme="dark"] [style*="solid #2b5f9e"] {
+    border-color: var(--sl-border) !important;
+}
+/* report.css（屏幕样式）里的深字标题 / 灰字说明 */
+[data-bs-theme="dark"] .rp-title h6 { color: var(--sl-text) !important; }
+[data-bs-theme="dark"] .rp-title .rp-sub,
+[data-bs-theme="dark"] .rp-hint,
+[data-bs-theme="dark"] .rp-rank-opt { color: var(--sl-text-muted) !important; }
+[data-bs-theme="dark"] ::-webkit-scrollbar { width: 10px; height: 10px; }
+[data-bs-theme="dark"] ::-webkit-scrollbar-track { background: var(--sl-bg); }
+[data-bs-theme="dark"] ::-webkit-scrollbar-thumb { background: #35465f; border-radius: 5px; }
+
+/* 图表中常见的浅色辅助线：深色下调暗，避免刺眼 */
+[data-bs-theme="dark"] .chartjs-render-monitor { filter: brightness(.9); }
+
+/* 反向问题：模板里写死的「深色文字」（宿舍床位姓名、调课节次等）在深色卡片上看不清 */
+[data-bs-theme="dark"] .bed-student,
+[data-bs-theme="dark"] .ep-pn,
+[data-bs-theme="dark"] .ld-duty,
+[data-bs-theme="dark"] .ld-members { color: var(--sl-text) !important; }
+
+/* 打印时永远按浅色输出（成绩单/台账要能打印） */
+@media print {
+    :root, [data-bs-theme="dark"] {
+        --sl-bg: #fff; --sl-surface: #fff; --sl-surface-2: #fff;
+        --sl-surface-3: #f1f5f9; --sl-border: #e2e8f0;
+        --sl-text: #000; --sl-text-muted: #333; --sl-text-subtle: #666;
+    }
+    body { background: #fff !important; color: #000 !important; }
+}

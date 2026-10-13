@@ -1,5 +1,7 @@
 <!DOCTYPE html>
-<html lang="zh-CN">
+{# v1.19.47.25：主题挂在 <html> 上，Bootstrap 5.3.3 原生识别 data-bs-theme；
+   默认值由上面 head 内的脚本按「本地存储 → 系统偏好」改写，这里只是兜底。 #}
+<html lang="zh-CN" data-bs-theme="light">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -13,50 +15,78 @@
        打印规则全部不生效（这是"4 套表头风格并存"的根因之一）。
        成绩模块页面占全站相当比例，直接并入 base.html，一处引入全站生效。 #}
     <link href="{{ su('css/grades.css') }}" rel="stylesheet">
+    {# 2026-10-13（v1.19.47.25）：主题层必须在 bootstrap / grades.css **之后**加载，
+       才能覆盖业务 css 里的字面量颜色（同特异性，后来者胜）。 #}
+    <link href="{{ su('css/theme.css') }}" rel="stylesheet">
+    {# 主题提前应用：在 body 渲染前定好 data-bs-theme，避免深色下先闪一帧白屏（FOUC） #}
+    <script>
+    (function () {
+        // 2026-10-13 审计修复 #19：localStorage 的值可能被写坏（手改 / 旧版本残留），
+        // 原先直接透传给 data-bs-theme，导致主题类名不匹配、深浅色回退异常。
+        // 这里做白名单，非法值回退到系统偏好。注意：这是 setAttribute 而非 innerHTML，
+        // 不存在 XSS 面，纯粹是取值健壮性。
+        var VALID = { 'dark': 1, 'light': 1 };
+        function pick() {
+            try {
+                var saved = localStorage.getItem('stulink-theme');
+                if (saved && VALID[saved]) { return saved; }
+                var sysDark = window.matchMedia &&
+                              window.matchMedia('(prefers-color-scheme: dark)').matches;
+                return sysDark ? 'dark' : 'light';
+            } catch (e) {
+                return 'light';
+            }
+        }
+        document.documentElement.setAttribute('data-bs-theme', pick());
+    })();
+    </script>
     {% block extra_css_head %}{% endblock %}
     <style>
         :root { --sidebar-width: 220px; }
-        body { font-family: -apple-system, "Microsoft YaHei", sans-serif; background: #f0f2f5; padding-top: 56px; }
+        /* 2026-10-13（v1.19.47.25）：颜色一律取主题变量（见 static/css/theme.css），
+           不再写字面量 —— 否则内联样式会压过主题层，深浅两模式切换不生效。 */
+        body { font-family: -apple-system, "Microsoft YaHei", sans-serif; background: var(--sl-bg); color: var(--sl-text); padding-top: 56px; }
         .sidebar {
             position: fixed; top: 56px; left: 0; bottom: 0;
-            width: var(--sidebar-width); background: #1e293b; overflow-y: auto; z-index: 100;
+            width: var(--sidebar-width); background: var(--sl-sidebar-bg); overflow-y: auto; z-index: 100;
             transition: transform .2s;
         }
         .sidebar .nav-link {
-            color: #cbd5e1; padding: 10px 20px; font-size: 14px;
+            color: var(--sl-sidebar-text); padding: 10px 20px; font-size: 14px;
             border-left: 3px solid transparent;
         }
-        .sidebar .nav-link:hover { color: #e2e8f0; background: rgba(255,255,255,.05); }
+        .sidebar .nav-link:hover { color: var(--sl-sidebar-text-hover); background: var(--sl-sidebar-hover); }
         .sidebar .nav-link.active {
-            color: #fff; background: rgba(255,255,255,.1);
-            border-left-color: #3b82f6;
+            color: var(--sl-sidebar-active-text); background: var(--sl-sidebar-active);
+            border-left-color: var(--sl-sidebar-accent);
         }
         .sidebar .nav-link i { width: 20px; margin-right: 8px; text-align: center; }
         .sidebar .nav-section {
-            color: #94a3b8; font-size: 11px; text-transform: uppercase;
+            color: var(--sl-sidebar-muted); font-size: 11px; text-transform: uppercase;
             padding: 15px 20px 5px; letter-spacing: .5px;
         }
         /* 分组栏目（课表/查课/调课/教师/表单）：标题行带箭头，展开时箭头翻转 */
         .sidebar .aca-group .aca-caret { transition: transform .15s ease; }
         .sidebar .aca-group[aria-expanded="true"] .aca-caret { transform: rotate(180deg); }
-        .sidebar .aca-group[aria-expanded="true"] { color: #e2e8f0; }
-        .main-content { margin-left: var(--sidebar-width); padding: 20px 24px 24px; min-height: 100vh; }
-        /* 2026-10-12 UI 审计 H1：考试态下 .sidebar-float 是 position:fixed 的浮层卡片
-           （left:10px + width:sidebar-20 = 覆盖到主内容左侧约 230px），
-           而各页面第一屏元素（考试名标题/badge/返回按钮）恰好落在该区域 →
-           白底浮层会压在内容上（窗口较矮、浮层垂直居中时尤其明显）。
-           这里给考试态的主内容区加左内边距补偿，让内容起点退到浮层右侧之外。 */
-        body.exam-ctx .main-content { padding-left: 252px; }
-        @media (max-width: 992px) {
-            /* 窄屏侧栏本就收起，不再补偿 */
-            body.exam-ctx .main-content { padding-left: 16px; }
+        .sidebar .aca-group[aria-expanded="true"] { color: var(--sl-sidebar-text-hover); }
+        /* 2026-10-13：折叠项（基础配置等）的箭头方向反映状态 —— 原先恒为 ▾，
+           收起后看不出"这里还能展开"，也看不出当前是展开还是收起 */
+        .sidebar .nav-link[data-bs-toggle="collapse"] .bi-chevron-down {
+            transition: transform .15s ease;
         }
+        .sidebar .nav-link[data-bs-toggle="collapse"][aria-expanded="false"] .bi-chevron-down {
+            transform: rotate(-90deg);
+        }
+        .main-content { margin-left: var(--sidebar-width); padding: 20px 24px 24px; min-height: 100vh; }
+        /* 2026-10-13：考试态侧栏已改为**贴左全高**（与常规侧栏同位同宽），
+           main-content 的 margin-left:220px 直接生效，原先给浮层让位的
+           padding-left:252px 补偿不再需要 —— 那正是"侧栏与内容之间大空白"的来源。 */
         .navbar { z-index: 200; }
-        .stat-card { border: none; border-radius: 10px; box-shadow: 0 1px 3px rgba(0,0,0,.08); }
+        .stat-card { border: none; border-radius: 10px; box-shadow: var(--sl-shadow); }
         .stat-card .stat-icon { width: 48px; height: 48px; border-radius: 10px; display: flex; align-items: center; justify-content: center; font-size: 22px; }
         .stat-card .stat-number { font-size: 26px; font-weight: 700; }
-        .stat-card .stat-label { color: #64748b; font-size: 13px; font-weight: 500; }
-        .card { border: none; border-radius: 10px; box-shadow: 0 1px 3px rgba(0,0,0,.08); }
+        .stat-card .stat-label { color: var(--sl-text-muted); font-size: 13px; font-weight: 500; }
+        .card { border: none; border-radius: 10px; box-shadow: var(--sl-shadow); }
         .bed-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
         .bed-slot {
             border: 2px dashed #d1d5db; border-radius: 8px; padding: 10px;
@@ -97,23 +127,27 @@
         }
         .subj-physics { background: #e7f1ff; color: #0b5ed7; border-color: #b6d4fe; }
         .subj-history { background: #fff3e0; color: #b45309; border-color: #ffd8a8; }
-        .table th { font-weight: 600; font-size: 13px; color: #64748b; white-space: nowrap; }
+        .table th { font-weight: 600; font-size: 13px; color: var(--sl-th-text); white-space: nowrap; }
         /* 表格冻结窗格：表头行 + 第一列 sticky */
         .table-responsive table { border-collapse: separate; border-spacing: 0; }
         .table-responsive thead th {
-            position: sticky; top: 0; z-index: 2; background: #f8f9fa;
+            position: sticky; top: 0; z-index: 2; background: var(--sl-head-bg);
+            color: var(--sl-head-text);
+            border-color: var(--sl-head-border);
         }
+        /* v1.19.47.25：两行表头时第 2 行浅一档，靠同族明度差区分层级 */
+        .table-responsive thead tr:nth-child(2) th { background: var(--sl-head-bg-2); }
         .table-responsive thead tr:nth-child(2) th { top: 38px; }
         .table-responsive td:first-child,
         .table-responsive th:first-child {
             position: sticky; left: 0; z-index: 1;
         }
         .table-responsive thead th:first-child { z-index: 3; }
-        /* v1.19.47.4 首列 sticky 的背景跟随「行状态」——用 --bs-table-bg（Bootstrap 的表变量）。
+        /* v1.19.47.25 首列 sticky 的背景跟随「行状态」——用 --bs-table-bg（Bootstrap 的表变量）。
            原先写死 var(--bs-body-bg)，导致 .table-warning 等"整行变黄"时首列仍是白底：
            考务步骤①「不参加考试」的学生就是这么被看漏的（学号列不变色）。 */
         .table-responsive tbody td:first-child {
-            background: var(--bs-table-bg, var(--bs-body-bg, #fff));
+            background: var(--bs-table-bg, var(--sl-surface));
         }
         /* 手机端导航栏紧凑 */
         @media (max-width: 768px) {
@@ -125,16 +159,18 @@
         }
         /* ===== v1.19.0 考试态：左侧深色侧栏 → 独立悬浮卡片（风格参考轻量描边菜单） ===== */
         .sidebar.sidebar-float {
-            /* v1.19.47.4 垂直居中：top:50% + translateY(-50%)，不再贴顶也不掉底 */
-            top: 50%; transform: translateY(-50%); bottom: auto;
-            left: 10px;
-            width: calc(var(--sidebar-width) - 20px);
-            max-height: calc(100vh - 140px);
-            background: #fff; border: 1px solid #eef2f7; border-radius: 12px;
-            box-shadow: 0 8px 24px rgba(15, 23, 42, .10);
-            /* v1.19.47.4 横向间距统一：卡片左右各 8px、下面每一行左右各 10px，
+            /* 2026-10-13：恢复**贴顶落底全高** —— 原先垂直居中浮卡（top:50% + max-height）
+               上不到顶、下不到底，和主内容之间还空一大块（用户实测反馈）。
+               贴左占满视口高，宽度与常规侧栏一致。
+               v1.19.47.25：底色改用**与常规侧栏同一个变量** —— 原先是白卡，
+               与其它模块的深色侧栏不一致（用户反馈「成绩分析侧栏是白的」）。 */
+            top: 56px; bottom: 0; transform: none;
+            left: 0; width: var(--sidebar-width); max-height: none;
+            background: var(--sl-sidebar-bg); border: none; border-radius: 0;
+            box-shadow: 2px 0 8px rgba(15, 23, 42, .06);
+            /* v1.19.47.25 横向间距统一：卡片左右各 8px、下面每一行左右各 10px，
                整张卡「左 18px = 右 18px」；旧版 efn-item 带 2px 左描边（左 14 / 右 12）不对称 */
-            /* v1.19.47.4 overflow-x: hidden：卡片只纵向滚动，杜绝底部横向滚动条 */
+            /* v1.19.47.25 overflow-x: hidden：卡片只纵向滚动，杜绝底部横向滚动条 */
             padding: 8px; overflow-y: auto; overflow-x: hidden;
         }
         .sidebar-float .nav.flex-column { padding-top: 0 !important; }
@@ -145,38 +181,41 @@
         /* ---- 头部：返回 / 标题 / 步骤，与菜单同一左右内边距，底部细线分隔 ---- */
         .sidebar-float .efn-back {
             display: block; padding: 4px 10px; border-radius: 6px;
-            color: #64748b; font-size: 12.5px;
+            color: var(--sl-sidebar-muted); font-size: 12.5px;
         }
-        .sidebar-float .efn-back:hover { color: #2563eb; background: #f1f5f9; }
+        .sidebar-float .efn-back:hover { color: var(--sl-sidebar-accent-text); background: var(--sl-sidebar-hover); }
         .sidebar-float .efn-title {
-            padding: 4px 10px 6px; color: #0f172a; font-weight: 600; font-size: 12.5px;
-            /* v1.19.47.4：考试名可能很长 → 允许换行。
+            padding: 4px 10px 6px; color: var(--sl-sidebar-title); font-weight: 600; font-size: 12.5px;
+            /* v1.19.47.25：考试名可能很长 → 允许换行。
                原先 white-space:nowrap 会让该项的 min-content 超过卡片宽度，
                作为 flex 项又无法收缩 → 撑出底部横向滚动条（用户反馈）。 */
             white-space: normal; overflow-wrap: anywhere; line-height: 1.35;
         }
         .sidebar-float .efn-steps {
             display: flex; align-items: center; gap: 4px;
-            padding: 0 10px 10px; margin-bottom: 6px; border-bottom: 1px solid #f1f5f9;
+            padding: 0 10px 10px; margin-bottom: 6px; border-bottom: 1px solid var(--sl-sidebar-line);
         }
         .sidebar-float .efn-dot {
             width: 16px; height: 16px; line-height: 16px; text-align: center;
-            border-radius: 50%; font-size: 10px; background: #e2e8f0; color: #64748b;
+            border-radius: 50%; font-size: 10px;
+            background: var(--sl-sidebar-chip); color: var(--sl-sidebar-text);
         }
         .sidebar-float .efn-dot.on { background: #16a34a; color: #fff; }
-        /* v1.19.47.4 已完成但非当前的环节：浅绿底绿字（不与「当前」的深绿实心混淆） */
-        .sidebar-float .efn-dot.done { background: #dcfce7; color: #166534; }
-        .sidebar-float .efn-count { color: #94a3b8; font-size: 11.5px; margin-left: 4px; }
+        /* v1.19.47.25 已完成但非当前的环节：浅绿底绿字（不与「当前」的深绿实心混淆） */
+        .sidebar-float .efn-dot.done {
+            background: var(--sl-sidebar-done-bg); color: var(--sl-sidebar-done-text);
+        }
+        .sidebar-float .efn-count { color: var(--sl-sidebar-muted); font-size: 11.5px; margin-left: 4px; }
         /* ---- 菜单项：胶囊式，左右内边距一致；激活竖条改用内阴影（不占位，文字不偏移） ---- */
         .sidebar-float .efn-item {
             display: block; padding: 7px 10px; border-radius: 6px;
-            color: #374151; font-size: 13px;
+            color: var(--sl-sidebar-text); font-size: 13px;
             transition: background-color .12s ease, color .12s ease;
         }
-        .sidebar-float .efn-item:hover { background: #f1f5f9; color: #1d4ed8; }
+        .sidebar-float .efn-item:hover { background: var(--sl-sidebar-hover); color: var(--sl-sidebar-accent-text); }
         .sidebar-float .efn-item.active {
-            background: #eff6ff; color: #1d4ed8; font-weight: 600;
-            box-shadow: inset 3px 0 0 0 #2563eb;
+            background: var(--sl-sidebar-active); color: var(--sl-sidebar-accent-text); font-weight: 600;
+            box-shadow: inset 3px 0 0 0 var(--sl-sidebar-accent);
         }
         .sidebar-float .efn-tag {
             font-size: 10.5px; color: #b45309; background: #fef3c7;
@@ -185,20 +224,26 @@
         /* ---- 折叠组（成绩分析）：浅底胶囊，与菜单项同左右内边距 ---- */
         .sidebar-float .efn-group {
             display: flex; align-items: center; justify-content: space-between;
-            padding: 7px 10px; margin-top: 4px; border-radius: 6px; background: #f8fafc;
-            color: #334155; font-size: 12.5px; font-weight: 600;
+            padding: 7px 10px; margin-top: 4px; border-radius: 6px;
+            background: var(--sl-sidebar-group);
+            color: var(--sl-sidebar-text); font-size: 12.5px; font-weight: 600;
         }
-        .sidebar-float .efn-group:hover { background: #eef2f7; }
-        .sidebar-float .efn-group .bi { font-size: 11px; color: #94a3b8; }
-        /* v1.19.47.4：「成绩分析」标题本身是入口链接，右侧箭头单独负责展开/收起 */
+        .sidebar-float .efn-group:hover { background: var(--sl-sidebar-hover); }
+        .sidebar-float .efn-group .bi { font-size: 11px; color: var(--sl-sidebar-muted); }
+        /* v1.19.47.25：「成绩分析」标题本身是入口链接，右侧箭头单独负责展开/收起 */
         .sidebar-float .efn-group-title { flex: 1 1 auto; color: inherit; }
-        .sidebar-float .efn-group-title:hover { color: #1d4ed8; }
-        .sidebar-float .efn-group .bi[data-bs-toggle] { cursor: pointer; }
-        /* ---- v1.19.47.4：AI 智能导入移到侧栏最下方（进阶入口），用细线分隔 ---- */
-        .sidebar-float .efn-ai { margin-top: 8px; }
-        .sidebar-float .efn-ai::before {
-            content: ''; display: block; height: 1px; margin: 0 2px 8px; background: #f1f5f9;
+        .sidebar-float .efn-group-title:hover { color: var(--sl-sidebar-accent-text); }
+        .sidebar-float .efn-group .bi[data-bs-toggle] {
+            cursor: pointer; transition: transform .15s ease;
         }
+        /* 2026-10-13：箭头方向反映展开状态（原来恒为 ▾，收起后看不出来） */
+        .sidebar-float .efn-group .bi[data-bs-toggle][aria-expanded="false"] {
+            transform: rotate(-90deg);
+        }
+        /* ---- 2026-10-13：AI 智能导入紧跟「成绩导入」（同一种事的两个入口），
+               不再放侧栏最下方、也不再用那条细线分隔 ---- */
+        .sidebar-float .efn-ai { color: var(--sl-sidebar-text); }
+        .sidebar-float .efn-ai .bi { margin-right: 4px; }
         @media (max-width: 767.98px) {
             .sidebar.sidebar-float { display: none; }
         }
@@ -226,7 +271,7 @@
 {# v1.19.0：进入某场考试（考试态）后，左侧深色侧栏改为「独立悬浮栏」——
    侧栏元素保留（仅此页含本场考试菜单），套 .sidebar-float 变成描边白卡浮在左槽位。
    考试态由 exam_nav() 判定（本请求内已缓存，重复调用无额外查询）。
-   v1.19.47.4 起 body 加 .exam-ctx：为悬浮浮层让出左内边距（UI 审计 H1）。 #}
+   v1.19.47.25 起 body 加 .exam-ctx：为悬浮浮层让出左内边距（UI 审计 H1）。 #}
 {% set EN = exam_nav() if request.blueprint == 'grades' else None %}
 {% set exam_mode = (request.blueprint == 'grades' and EN) %}
 <body class="{{ 'exam-ctx' if exam_mode }}">
@@ -242,6 +287,13 @@
         </a>
         <div class="ms-auto d-flex align-items-center">
             {% if current_user.is_authenticated %}
+            {# 2026-10-13（v1.19.47.25）：主题切换入口 —— 与铃铛/用户菜单同级，
+               图标与文案由底部脚本按当前主题同步（☀ 切深色 / 🌙 切浅色）。 #}
+            <button type="button" class="btn btn-sm btn-outline-light me-2" id="themeToggle"
+                    style="border-radius:8px;" title="切换深色 / 浅色模式" aria-label="切换主题">
+                <i class="bi bi-moon-stars" id="themeIcon"></i>
+                <span class="d-none d-lg-inline ms-1" id="themeLabel">深色模式</span>
+            </button>
             <a href="{{ url_for('notifications.notifications_page') }}" class="btn btn-sm btn-outline-light position-relative me-2" style="border-radius:8px;" title="通知公告">
                 <i class="bi bi-bell"></i>
                 <span id="notificationBadge" class="position-absolute top-0 start-100 translate-middle badge rounded-pill bg-danger" style="display:none;font-size:10px;">
@@ -261,6 +313,12 @@
                         {{ current_user.username }} · {{ current_user.display_role }}
                     </li>
                     <li><hr class="dropdown-divider my-1"></li>
+                    {# 2026-10-13：个人信息页（手机号 / 登录密码 / 身份证状态）—— 教师本人自助入口 #}
+                    <li>
+                        <a class="dropdown-item" href="{{ url_for('workbench.profile') }}">
+                            <i class="bi bi-person-vcard"></i> 个人信息
+                        </a>
+                    </li>
                     <li>
                         <a class="dropdown-item" href="{{ url_for('auth.my_settings') }}">
                             <i class="bi bi-gear"></i> 用户设置
@@ -277,6 +335,8 @@
                             <i class="bi bi-key"></i> 修改密码
                         </a>
                     </li>
+                    {# 2026-10-13：头像菜单里的「切换为深色模式」已删除（用户口径：菜单里不要这项）
+                       —— 主题切换只保留顶栏那一个按钮，避免同一功能两个入口。 #}
                     <li><hr class="dropdown-divider my-1"></li>
                     <li>
                         <a class="dropdown-item text-danger" href="{{ url_for('auth.logout') }}">
@@ -301,7 +361,8 @@
             {# v1.19.0：成绩模块落地页＝「历次考试」列表，不再单列「成绩管理」入口。
                原入口 url_for('grades.index') 指向的是 /grades/analysis（分析页）而非考试列表，
                且与下方同名小节标题重复；入口统一由下方「历次考试」承担。 #}
-            {% elif request.blueprint == 'points' %}
+            {% elif request.blueprint in ('points', 'morality') %}
+            {# 2026-10-13（v1.19.47.25）：奖惩页（morality 蓝图）与积分同属德育，共用这一栏菜单 #}
             <a class="nav-link" href="{{ url_for('points.index') }}">
                 <i class="bi bi-house"></i>德育管理
             </a>
@@ -318,6 +379,15 @@
             <a class="nav-link {% if request.endpoint == 'points.rules_page' %}active{% endif %}"
                href="{{ url_for('points.rules_page') }}">
                 <i class="bi bi-collection"></i>规则模板
+            </a>
+            {% endif %}
+            {% if current_user.has_perm('morality.view') %}
+            {# 2026-10-13（v1.19.47.25）：德育奖惩信息（含附件）——与积分并列。
+               注意：必须与上面的 points 写权限条件**平级**，不能嵌在其中，
+               否则仅授予 morality.view 的自定义身份看不到本入口。 #}
+            <a class="nav-link {% if request.blueprint == 'morality' %}active{% endif %}"
+               href="{{ url_for('morality.rewards_page') }}">
+                <i class="bi bi-award"></i>奖惩信息
             </a>
             {% endif %}
             {% elif request.blueprint == 'portrait' %}
@@ -403,10 +473,10 @@
                 <a class="efn-back" href="{{ url_for('grades.exams_list') }}">
                     <i class="bi bi-arrow-left"></i>返回考试列表
                 </a>
-                {# v1.19.47.4 侧栏头部只显示**考试名字**（此前显示「年级·性质·阶段·日期」，
+                {# v1.19.47.25 侧栏头部只显示**考试名字**（此前显示「年级·性质·阶段·日期」，
                    用户反馈"不是名字"）；名字过长时换行显示，不再截断/撑出横向滚动条。 #}
                 <div class="efn-title" title="{{ EN.exam.name or EN.exam.title_with_dimensions() }}">{{ EN.exam.name or EN.exam.title_with_dimensions() }}</div>
-                {# v1.19.47.4 考务页（affair 段）显示 7 个环节圆点，与考务向导页签一一对应；
+                {# v1.19.47.25 考务页（affair 段）显示 7 个环节圆点，与考务向导页签一一对应；
                    **只亮当前所处环节**（EN.affair_steps[].current），不是把前面的全点亮；
                    已完成但非当前的环节用浅绿勾，一眼能看出进度又不喧宾夺主。
                    非考务页仍用原来的 4 步（建考试/考务/导入/分析）。 #}
@@ -431,7 +501,12 @@
                    href="{{ url_for('grades.exam_affair_go', exam_id=EN.exam_id) }}">考务安排{% if not EN.steps[1].done %}<span class="efn-tag">待做</span>{% endif %}</a>
                 <a class="efn-item {% if EN.section == 'import' %}active{% endif %}" data-nav="import"
                    href="{{ url_for('grades.exam_import', exam_id=EN.exam_id) }}">成绩导入{% if not EN.steps[2].done %}<span class="efn-tag">待做</span>{% endif %}</a>
-                {# v1.19.47.4：划线分层有自己的段位（'bands'），不再与「成绩导入」同时高亮 #}
+                {# 2026-10-13：AI 智能导入紧跟「成绩导入」—— 两者是同一种事（把成绩送进本场考试）的
+                   两个入口。原先放在侧栏最下方，中间隔着「划线分层」和整块「成绩分析」，
+                   导入时要往下找很久（用户反馈：放到成绩导入的下边或上边）。 #}
+                <a class="efn-item efn-ai {% if request.endpoint and request.endpoint.startswith('grades.exam_ai_import') %}active{% endif %}" data-nav="ai"
+                   href="{{ url_for('grades.exam_ai_import', exam_id=EN.exam_id) }}"><i class="bi bi-robot"></i>AI 智能导入</a>
+                {# v1.19.47.25：划线分层有自己的段位（'bands'），不再与「成绩导入」同时高亮 #}
                 <a class="efn-item {% if EN.section == 'bands' %}active{% endif %}" data-nav="bands"
                    href="{{ url_for('grades.bands_page', exam_id=EN.exam_id) }}">划线分层</a>
                 {# v1.19.0 成绩分析：折叠组 —— 总览（全年级对比）/ 班级分析（班主任）/ 学科分析（任课教师）
@@ -444,17 +519,19 @@
                                   'grades.report_page', 'grades.exam_near_line') %}
                 {% set _is_lead = current_user.role == 'admin' or (current_user.permission_group and
                      current_user.permission_group.scope_type in ('school', 'grade')) %}
-                {# v1.19.47.4：点「成绩分析」文字直接进入本场分析（领导=总览（全年级对比），
-                   其他角色=班级分析，避免非领导点总览被 403）；展开/收起改由右侧箭头负责。 #}
+                {# v1.19.47.25：点「成绩分析」文字直接进入本场分析（领导=总览（全年级对比），
+                   其他角色=班级分析，避免非领导点总览被 403）；展开/收起改由右侧箭头负责。
+                   2026-10-13：**不再随当前页面自动展开 / 折叠** —— 原先进分析页自动展开、
+                   回到导入页又自动收起，每次导航侧栏高度都在变（用户反馈"画面跳动感"）。
+                   现在恒定展开；用户手动收起后记在本机 localStorage，跨页面保持，不再自己变。 #}
                 <div class="efn-group">
                     <a class="efn-group-title" data-nav="ana_home"
                        href="{{ url_for('grades.global_compare_page', exam=EN.exam_id) if _is_lead
                                  else url_for('grades.index', exam=EN.exam_id, tab='class') }}">成绩分析</a>
                     <i class="bi bi-chevron-down" data-bs-toggle="collapse" href="#efnAnalysis"
-                       role="button" title="展开 / 收起"
-                       aria-expanded="{{ 'true' if (EN.section == 'analysis' or request.endpoint in _ana_ep) else 'false' }}"></i>
+                       role="button" title="展开 / 收起" aria-expanded="true"></i>
                 </div>
-                <div class="collapse {% if EN.section == 'analysis' or request.endpoint in _ana_ep %}show{% endif %}" id="efnAnalysis">
+                <div class="collapse show" id="efnAnalysis">
                     {% if _is_lead %}
                     <a class="efn-item ps-4 {% if request.endpoint == 'grades.global_compare_page' %}active{% endif %}" data-nav="global"
                        href="{{ url_for('grades.global_compare_page') }}?exam={{ EN.exam_id }}">总览（全年级对比）</a>
@@ -474,10 +551,31 @@
                        href="{{ url_for('grades.report_page') }}?exam={{ EN.exam_id }}">成绩汇报区</a>
                     {% endif %}
                 </div>
+                <script>
+                {# 2026-10-13：分析组展开状态记在本机（键 stulink-efn-analysis），
+                   服务端不再按当前路由写死 show —— 跨页面导航时侧栏高度恒定，不跳动。
+                   脚本放在元素正后方：解析到即执行，先于首屏绘制，不会闪一下再收起。 #}
+                (function () {
+                    var box = document.getElementById('efnAnalysis');
+                    if (!box) { return; }
+                    var KEY = 'stulink-efn-analysis';
+                    var prev = box.previousElementSibling;
+                    var caret = prev ? prev.querySelector('[data-bs-toggle="collapse"]') : null;
+                    try {
+                        if (localStorage.getItem(KEY) === '0') {
+                            box.classList.remove('show');
+                            if (caret) { caret.setAttribute('aria-expanded', 'false'); }
+                        }
+                    } catch (e) { /* 隐私模式等读不到 → 保持默认展开 */ }
+                    box.addEventListener('hidden.bs.collapse', function () {
+                        try { localStorage.setItem(KEY, '0'); } catch (e) {}
+                    });
+                    box.addEventListener('shown.bs.collapse', function () {
+                        try { localStorage.setItem(KEY, '1'); } catch (e) {}
+                    });
+                })();
+                </script>
                 {% endif %}
-                {# v1.19.47.4：AI 智能导入移到侧栏最下方（进阶入口）；移除「下一步」提示（用户：无用） #}
-                <a class="efn-item efn-ai {% if request.endpoint and request.endpoint.startswith('grades.exam_ai_import') %}active{% endif %}" data-nav="ai"
-                   href="{{ url_for('grades.exam_ai_import', exam_id=EN.exam_id) }}">AI 智能导入</a>
             </div>
             {% else %}
             {# ---------- 全局态：精简菜单 ----------
@@ -493,19 +591,21 @@
                 <i class="bi bi-person-vcard"></i>个人成绩查询
             </a>
             {% endif %}
-            {# v1.19.47.4 移除「分数修改记录」全局入口：它属于单场考试的数据，只在该场成绩单页右上角进入 #}
-            {# v1.19.47.4 移除「毕业生成绩（二期）」入口：暂无用处，后期单独做毕业生数据库 #}
+            {# v1.19.47.25 移除「分数修改记录」全局入口：它属于单场考试的数据，只在该场成绩单页右上角进入 #}
+            {# v1.19.47.25 移除「毕业生成绩（二期）」入口：暂无用处，后期单独做毕业生数据库 #}
 
-            {# v1.19.0 基础配置：长期基础数据，不属于四段流程，默认折叠 #}
+            {# v1.19.0 基础配置：长期基础数据，不属于四段流程，默认折叠
+               2026-10-13：同样**不再随当前页面自动展开**（进「选科维护」展开、离开又收起，
+               侧栏高度来回变 → 画面跳动）；状态记在本机 localStorage，用户手动展开后一直保持。 #}
             {% set _cfg_eps = ('grades.subject_mgmt', 'grades.band_templates_page',
                                'grades.teachers_page', 'grades.teachers_import_page',
                                'grades.exam_rooms') %}
             <a class="nav-link d-flex align-items-center" data-bs-toggle="collapse" href="#navCfg"
-               role="button" aria-expanded="{{ 'true' if request.endpoint in _cfg_eps else 'false' }}">
+               role="button" aria-expanded="false" data-nav="cfg">
                 <i class="bi bi-sliders"></i>基础配置
                 <i class="bi bi-chevron-down small ms-auto"></i>
             </a>
-            <div class="collapse {% if request.endpoint in _cfg_eps %}show{% endif %}" id="navCfg">
+            <div class="collapse" id="navCfg">
                 {% if current_user.has_perm('grades.subject_mgmt') %}
                 <a class="nav-link ps-4 {% if request.endpoint == 'grades.subject_mgmt' %}active{% endif %}"
                    href="{{ url_for('grades.subject_mgmt') }}">
@@ -531,6 +631,28 @@
                 </a>
                 {% endif %}
             </div>
+            <script>
+            {# 2026-10-13：「基础配置」展开状态记在本机（键 stulink-nav-cfg），默认折叠。
+               跟「成绩分析」同一套做法：服务端不再按路由自动展开，避免导航时侧栏跳动。 #}
+            (function () {
+                var box = document.getElementById('navCfg');
+                if (!box) { return; }
+                var KEY = 'stulink-nav-cfg';
+                var toggle = document.querySelector('[data-bs-toggle="collapse"][href="#navCfg"]');
+                try {
+                    if (localStorage.getItem(KEY) === '1') {
+                        box.classList.add('show');
+                        if (toggle) { toggle.setAttribute('aria-expanded', 'true'); }
+                    }
+                } catch (e) { /* 读不到本机存储 → 保持默认折叠 */ }
+                box.addEventListener('shown.bs.collapse', function () {
+                    try { localStorage.setItem(KEY, '1'); } catch (e) {}
+                });
+                box.addEventListener('hidden.bs.collapse', function () {
+                    try { localStorage.setItem(KEY, '0'); } catch (e) {}
+                });
+            })();
+            </script>
             {% endif %}
             {% endif %}
 
@@ -545,7 +667,9 @@
 
             {# ========= 教务管理模块侧边栏（v1.14.0；2026-10-10 重构为分组层级）=========
                用户要求把「课表 / 查课 / 调课 / 教师 / 表单」做成可折叠的分组栏目：
-               课表 → 学期课表 / 全校总课表 / 历史课表 / 跨学期对比；
+               课表 → 学期课表 / 历史课表
+               （2026-10-12：全校总课表入口只留在学期卡片上，侧栏不再单独挂；跨学期对比已
+               整体下线；教师/备课组/教研组课表合成**一个入口**放在教务工作台，页内 tab 互切）；
                查课 → 实时查课 / 查课统计；调课 → 申请 / 统一调课 / 审批 / 统计；
                教师 → 教师名单 / 任课教师映射 / 备课组长；
                表单 → 表单管理 / 填写问卷 / 我的提交 / 教师业绩库。 #}
@@ -556,8 +680,8 @@
                字符串 → TypeError: 'str' object is not callable（/academic/teacher-links 打不开）。 #}
             {% set aca_ep = request.endpoint or '' %}
             {% set sch_eps = ['academic.schedule_manage', 'academic.schedule_overview',
-                              'academic.schedule_overview_index', 'academic.schedule_history',
-                              'academic.schedule_history_detail', 'academic.schedule_compare',
+                              'academic.schedule_history',
+                              'academic.schedule_history_detail',
                               'academic.schedule_grade', 'academic.schedule_class',
                               'academic.schedule_teacher', 'academic.schedule_dates',
                               'academic.schedule_versions', 'academic.schedule_periods',
@@ -589,19 +713,18 @@
                     <i class="bi bi-calendar-week"></i>学期课表
                 </a>
                 {% endif %}
-                <a class="nav-link ps-4 {% if aca_ep in ['academic.schedule_overview', 'academic.schedule_overview_index'] %}active{% endif %}"
-                   href="{{ url_for('academic.schedule_overview_index') }}">
-                    <i class="bi bi-list-columns-reverse"></i>全校总课表
-                </a>
+                {# 2026-10-12（用户要求）：侧栏「全校总课表」入口已删除 —— 学期管理卡片上
+                   就有「全校总课表」按钮，侧栏再挂一个是重复入口；原来只为侧栏服务、
+                   无 sid 的 /schedule/overview 跳转路由也随之下线。 #}
+                {# 2026-10-12（用户要求）：教师 / 备课组 / 教研组课表**合成一个入口**——
+                   统一入口放在教务工作台「课表」块的「课表查询」按钮，页内用 tab 互切，
+                   侧栏不再分挂三项（三个页面本身仍是查看类，academic.view）。 #}
                 {% if current_user.has_perm('academic.timetable') %}
                 <a class="nav-link ps-4 {% if aca_ep in ['academic.schedule_history', 'academic.schedule_history_detail'] %}active{% endif %}"
                    href="{{ url_for('academic.schedule_history') }}">
                     <i class="bi bi-clock-history"></i>历史课表
                 </a>
-                <a class="nav-link ps-4 {% if aca_ep == 'academic.schedule_compare' %}active{% endif %}"
-                   href="{{ url_for('academic.schedule_compare') }}">
-                    <i class="bi bi-arrow-left-right"></i>跨学期对比
-                </a>
+                {# 2026-10-12（用户要求）：原「跨学期对比」侧栏入口已随该功能整体下线删除。 #}
                 {% endif %}
             </div>
 
@@ -639,6 +762,8 @@
                    href="{{ url_for('academic.swap_apply') }}">
                     <i class="bi bi-pencil-square"></i>调课申请
                 </a>
+                {% endif %}
+                {% if current_user.has_perm('academic.swap_bulk') %}
                 <a class="nav-link ps-4 {% if aca_ep == 'academic.swap_bulk' %}active{% endif %}"
                    href="{{ url_for('academic.swap_bulk') }}">
                     <i class="bi bi-collection"></i>统一调课
@@ -711,50 +836,19 @@
             {# ========= 教师工作台侧边栏（v1.9.3 全量子导航） ========= #}
             {# v1.17.0：个人工作菜单仅在教师工作台及其子页面显示，不在教务管理等其他模块出现 #}
             {% if request.blueprint in ('workbench', 'overview', 'attendance', 'records') %}
+            {# 2026-10-13（v1.19.47.25）：工作台已把这些功能都收进首页（班级概览 / 学生信息 /
+                积分 / 考勤 / 我的成绩 / 我的课表 / 工作记录 均有入口），左侧只留工作台首页，
+                不再重复一套导航。功能页面本身都在，只是入口统一从工作台进。 #}
             <div class="nav-section">个人工作</div>
             <a class="nav-link {% if request.endpoint == 'workbench.index' %}active{% endif %}"
                href="{{ url_for('workbench.index') }}">
                 <i class="bi bi-person-workspace"></i>工作台首页
             </a>
-            {# 我的课表：版式与教务端 /academic/my-schedule 一致，但归在工作台内（2026-10-10） #}
-            {% if current_user.has_perm('workbench.class_view') %}
-            <a class="nav-link {% if request.endpoint == 'workbench.my_schedule' %}active{% endif %}"
-               href="{{ url_for('workbench.my_schedule') }}">
-                <i class="bi bi-calendar3"></i>我的课表
+            {# 2026-10-13：个人信息（改手机号 / 登录密码 / 看身份证状态）有了独立页面 #}
+            <a class="nav-link {% if request.endpoint == 'workbench.profile' %}active{% endif %}"
+               href="{{ url_for('workbench.profile') }}">
+                <i class="bi bi-person-vcard"></i>个人信息
             </a>
-            {% endif %}
-            {# v1.17.0：菜单可见性改为按权限 key 判断，与路由 perm_required 保持一致，
-                避免「菜单能看见、点进去 403」（PR#5 审查 M1） #}
-            {% if current_user.has_perm('workbench.class_view') %}
-            <a class="nav-link {% if request.blueprint == 'overview' and request.endpoint == 'overview.class_overview_page' %}active{% endif %}"
-               href="{{ url_for('overview.class_overview_page') }}">
-                <i class="bi bi-grid-3x3-gap"></i>班级概览
-            </a>
-            <a class="nav-link {% if request.blueprint == 'overview' and request.endpoint == 'overview.students_page' %}active{% endif %}"
-               href="{{ url_for('overview.students_page') }}">
-                <i class="bi bi-people"></i>学生信息
-            </a>
-            <a class="nav-link {% if request.blueprint == 'overview' and request.endpoint == 'overview.grades_page' %}active{% endif %}"
-               href="{{ url_for('overview.grades_page') }}">
-                <i class="bi bi-graph-up"></i>我的成绩
-            </a>
-            <a class="nav-link {% if request.blueprint == 'overview' and request.endpoint == 'overview.points_page' %}active{% endif %}"
-               href="{{ url_for('overview.points_page') }}">
-                <i class="bi bi-star"></i>积分概览
-            </a>
-            {% endif %}
-            {% if current_user.has_perm('workbench.attendance_view') %}
-            <a class="nav-link {% if request.blueprint == 'attendance' %}active{% endif %}"
-               href="{{ url_for('attendance.attendance_page') }}">
-                <i class="bi bi-calendar-check"></i>考勤管理
-            </a>
-            {% endif %}
-            {% if current_user.has_perm('workbench.records') %}
-            <a class="nav-link {% if request.blueprint == 'records' %}active{% endif %}"
-               href="{{ url_for('records.records_page') }}">
-                <i class="bi bi-journal-text"></i>工作记录
-            </a>
-            {% endif %}
             {% endif %}
         </nav>
     </div>
@@ -779,7 +873,7 @@
 
         {% if current_user.is_authenticated %}
         <footer class="text-center text-muted small mt-4 pt-3 border-top">
-            StuLink v1.19.47.4（2026-10-09） · © 2026 @zkxxzf · 感谢协作开发 @Sakaay
+            StuLink v1.19.47.25（2026-10-09） · © 2026 @zkxxzf · 感谢协作开发 @Sakaay
         </footer>
         {% endif %}
     </div>
@@ -791,6 +885,64 @@
     <script src="{{ su('js/common.js') }}"></script>
     <script src="{{ su('js/jquery-3.7.1.min.js') }}"></script>
     <script src="{{ su('js/bootstrap.bundle.min.js') }}"></script>
+    <script>
+        // ===== v1.19.47.25 主题切换（浅色 / 深色）=====
+        // 存储键 stulink-theme；切换只改 <html data-bs-theme>，Bootstrap 5.3.3 与
+        // theme.css 的变量表负责其余部分；head 内的脚本负责首屏不闪白。
+        (function () {
+            var KEY = 'stulink-theme';
+
+            function current() {
+                return document.documentElement.getAttribute('data-bs-theme') === 'dark'
+                    ? 'dark' : 'light';
+            }
+
+            function apply(theme) {
+                document.documentElement.setAttribute('data-bs-theme', theme);
+                try { localStorage.setItem(KEY, theme); } catch (e) {}
+                syncUI(theme);
+            }
+
+            function syncUI(theme) {
+                var dark = (theme === 'dark');
+                var icon = document.getElementById('themeIcon');
+                var label = document.getElementById('themeLabel');
+                if (icon) {
+                    icon.className = 'bi ' + (dark ? 'bi-sun' : 'bi-moon-stars');
+                }
+                if (label) { label.textContent = dark ? '浅色模式' : '深色模式'; }
+                var btn = document.getElementById('themeToggle');
+                if (btn) {
+                    btn.title = dark ? '当前：深色模式（点击切换为浅色）'
+                                     : '当前：浅色模式（点击切换为深色）';
+                }
+            }
+
+            function toggle() { apply(current() === 'dark' ? 'light' : 'dark'); }
+
+            document.addEventListener('click', function (e) {
+                if (e.target.closest('#themeToggle')) {
+                    e.preventDefault();
+                    toggle();
+                }
+            });
+
+            // 用户没手动选过时，跟随系统主题变化
+            if (window.matchMedia) {
+                var mq = window.matchMedia('(prefers-color-scheme: dark)');
+                var onChange = function (ev) {
+                    var saved = null;
+                    try { saved = localStorage.getItem(KEY); } catch (e) {}
+                    if (!saved) { apply(ev.matches ? 'dark' : 'light'); }
+                };
+                if (mq.addEventListener) { mq.addEventListener('change', onChange); }
+                else if (mq.addListener) { mq.addListener(onChange); }
+            }
+
+            syncUI(current());
+            window.StuLinkTheme = { toggle: toggle, apply: apply, current: current };
+        })();
+    </script>
     <script>
         // CSRF 令牌用于 AJAX 请求
         var csrfToken = "{{ csrf_token() }}";

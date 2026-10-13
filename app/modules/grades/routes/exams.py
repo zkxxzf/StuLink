@@ -1,4 +1,4 @@
-# StuLink v1.19.47.4 2026-10-10
+# StuLink v1.19.47.25 2026-10-10
 # 成绩管理：考试管理 + 成绩导入向导路由
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 import io
@@ -75,7 +75,7 @@ def exams_list():
                     .group_by(ExamScore.exam_id).all())
         for eid, cnt in rows_cnt:
             counts[eid] = cnt
-    # v1.19.47.4：孤儿考务批次兜底（exam_id 为空，或指向已删除的考试）
+    # v1.19.47.25：孤儿考务批次兜底（exam_id 为空，或指向已删除的考试）
     # 这类批次从考试列表无法进入，以前只能直连 /grades/affairs 才能看到，现在底部统一列出
     # 2026-10-12 安全审计 H-3：孤儿批次同样按可见年级收敛（未传 grade 时），
     # 否则跨年级用户仍能从此区读到不该看的年级的批次元数据。
@@ -151,7 +151,7 @@ def exam_new():
         name = (request.form.get('name') or '').strip()
         exam_kind = (request.form.get('exam_kind') or '').strip()
         exam_type = (request.form.get('exam_type') or '').strip()
-        # v1.19.47.4：不再有「分数口径」表单字段（口径在导入时按文件确定），
+        # v1.19.47.25：不再有「分数口径」表单字段（口径在导入时按文件确定），
         # 新考试 score_mode 一律留空（未指定），展示为「按导入确定」
         if not name:
             # 名称留空 → 默认「年级 + 日期」（两维度已单独存列，不塞进名称）
@@ -161,6 +161,9 @@ def exam_new():
             return render_template('grades/exam_form.html', **_exam_form_ctx(
                 grade=grade, exam_date=exam_date.isoformat(), name=name,
                 exam_kind=exam_kind, exam_type=exam_type))
+        # 2026-10-12 P1：目标年级可见性校验（防止为未授权年级创建考试后导入成绩，
+        # 构成跨年级写入；与 H-4 的 assert_grade_visible 同一入口）
+        assert_grade_visible(grade)
         dup = Exam.query.filter_by(grade=grade, name=name).first()
         if dup:
             # 修复：同名考试由“仅警告仍创建”改为阻断——避免成绩分散到两场同名考试混淆统计
@@ -209,7 +212,7 @@ def _exam_classes(exam_id):
     return sorted({r[0] for r in rows})
 
 
-# v1.19.47.4 成绩单表头可排序列 → 总分行（每生一行）字段名；
+# v1.19.47.25 成绩单表头可排序列 → 总分行（每生一行）字段名；
 # 各科成绩用 's:科目名' 前缀（见 _exam_page_rows），不在此表内。
 _SORT_COLS = {
     'no': 'student_no', 'name': 'student_name', 'exam_no': 'exam_no',
@@ -242,11 +245,11 @@ def _exam_page_rows(exam_id, page, size, class_name=None, direction=None,
       - 学籍状态一次性 IN 查询（1 次，而非逐批 10 次）。
 
     class_name（v1.19.0）：按班级查看成绩单，只统计/展示该班学生（None=全部）。
-    direction（v1.19.47.4）：按方向查看（物理/历史），取**总分行**上的方向快照（None=全部）。
-    sort_key / order（v1.19.47.4）：表头排序。sort_key 取 _SORT_COLS 的键，
+    direction（v1.19.47.25）：按方向查看（物理/历史），取**总分行**上的方向快照（None=全部）。
+    sort_key / order（v1.19.47.25）：表头排序。sort_key 取 _SORT_COLS 的键，
         或 's:科目名' 表示按该科成绩排；order 为 'asc'/'desc'（空 sort_key = 默认次序）。
         排序必须在**服务端**做：页面只加载当前页，前端排序只会排到本页 50 人。
-        排序状态只存在于 URL 参数里（v1.19.47.4 确认），服务端不保存"当前排序"，
+        排序状态只存在于 URL 参数里（v1.19.47.25 确认），服务端不保存"当前排序"，
         因此**不会影响其他用户**；不传参数时回到「方向 → 总分名次」默认榜。
     """
     q = ExamScore.query.filter_by(exam_id=exam_id, subject=TOTAL_SUBJECT)
@@ -285,7 +288,7 @@ def _exam_page_rows(exam_id, page, size, class_name=None, direction=None,
                 ExamScore.student_no]
         meta = q.order_by(*seqq).limit(size).offset((page - 1) * size).all()
     else:
-        # 默认次序（v1.19.47.4）：按**总分名次**排列 —— 先分方向（历史在前、物理在后），
+        # 默认次序（v1.19.47.25）：按**总分名次**排列 —— 先分方向（历史在前、物理在后），
         # 方向内按方向排（= 该方向的总分名次）升序，缺考（无方向排）排在本方向最后，
         # 末尾按学号定序保证翻页稳定。注意：不按班级分组（老师要看的是名次榜）。
         dir_seq = db.case((ExamScore.direction == '历史', 0),
@@ -361,7 +364,7 @@ def unselected_subjects(selection, direction):
     return out
 
 
-def _four_step_status(exam):
+def _four_step_status(exam, user=None):
     """四段式进度（建立考试 → 考务安排 → 成绩导入 → 成绩分析）
 
     每一步给出：是否完成、可点进去的地址、“下一步”提示。
@@ -374,6 +377,20 @@ def _four_step_status(exam):
     affair = ExamAffair.query.filter_by(exam_id=exam.id).first()
     imported = (exam.status == 'imported')
     banded = ExamBand.query.filter_by(exam_id=exam.id).count() > 0
+    # v1.19.47.25：第④步落点与**侧栏「成绩分析」标题同口径**（base.html 同一套判断）——
+    #   领导（管理员 / 校级·年级权限组）→「总览（全年级对比）」global_compare_page；
+    #   其他人 →「班级分析」grades.index?tab=class。
+    # 此前④一律跳 grades.index（老的五页签分析页），与侧栏不一致（用户 2026-10-13 反馈
+    # 「点击以后跳转的还是老页面」）；URL 必须带本场 exam，否则全局页会选错年级/考试。
+    _pg = getattr(user, 'permission_group', None) if user is not None else None
+    is_lead = (user is not None and (
+        getattr(user, 'role', '') == 'admin'
+        or (_pg is not None
+            and getattr(_pg, 'scope_type', '') in ('school', 'grade'))))
+    if is_lead:
+        analysis_url = url_for('grades.global_compare_page', exam=exam.id)
+    else:
+        analysis_url = url_for('grades.index', exam=exam.id, tab='class')
     steps = [
         {'key': 'exam', 'label': '建立考试', 'done': True,
          'url': url_for('grades.exam_detail', exam_id=exam.id),
@@ -386,7 +403,7 @@ def _four_step_status(exam):
          'hint': (EXAM_STATUS_LABEL.get(exam.status, exam.status) if imported
                   else '尚未导入成绩')},
         {'key': 'analysis', 'label': '成绩分析', 'done': banded,
-         'url': url_for('grades.index'),
+         'url': analysis_url,
          'hint': ('已划线，分析可用' if banded else '未划线，分层类指标不可用')},
     ]
     nxt = next((s for s in steps if not s['done']), None)
@@ -401,7 +418,7 @@ def exam_detail(exam_id):
     page = _safe_int(request.args.get('page'), 1)
     size = _safe_int(request.args.get('size'), 50)
     # v1.19.0：成绩单支持按班级查看（cls=班级名，空/非法=全部）
-    # v1.19.47.4：再支持按方向查看（dir=物理/历史）；两者互斥，传 cls 时忽略 dir
+    # v1.19.47.25：再支持按方向查看（dir=物理/历史）；两者互斥，传 cls 时忽略 dir
     classes = _exam_classes(exam_id)
     cur_class = (request.args.get('cls') or '').strip()
     if cur_class not in classes:
@@ -411,7 +428,7 @@ def exam_detail(exam_id):
         cur_dir = ''
     if cur_class:
         cur_dir = ''
-    cur_sort, cur_order = _sort_args(request.args)      # v1.19.47.4 表头排序
+    cur_sort, cur_order = _sort_args(request.args)      # v1.19.47.25 表头排序
     students, page, total_pages, total = _exam_page_rows(
         exam_id, page, size, class_name=cur_class or None, direction=cur_dir or None,
         sort_key=cur_sort, order=cur_order)
@@ -421,7 +438,7 @@ def exam_detail(exam_id):
             info = json.loads(exam.import_info)
         except (json.JSONDecodeError, TypeError):
             info = None
-    steps, next_step = _four_step_status(exam)
+    steps, next_step = _four_step_status(exam, user=current_user)
     # 2026-10-12 数据可信度审计（§3.3）：分批导入（模式 A：未出现的科目列保留）
     # 中途，总分＝已导入科目合计，与导完后的总分**不可比**。后端早就有
     # stats_service.ExamData.partial_import() 能算出"仍有 X 科未导入"，
@@ -458,7 +475,7 @@ def exam_scores_page(exam_id):
     cur_dir = (request.args.get('dir') or '').strip()     # v1.19.15.0 按方向查看
     if cur_dir not in ('物理', '历史'):
         cur_dir = ''
-    cur_sort, cur_order = _sort_args(request.args)        # v1.19.47.4 表头排序
+    cur_sort, cur_order = _sort_args(request.args)        # v1.19.47.25 表头排序
     students, _page, _total_pages, _total = _exam_page_rows(
         exam_id, page, size, class_name=cur_class or None, direction=cur_dir or None,
         sort_key=cur_sort, order=cur_order)
@@ -543,7 +560,7 @@ def _log_score_change(exam, row, action, old_score, new_score, old_raw, new_raw)
 @perm_required('grades.edit')
 @perm_required('grades.score_edit')
 def score_update(exam_id, score_id):
-    """单科改分（v1.19.47.4）
+    """单科改分（v1.19.47.25）
 
     · 赋分（score）与原始分（raw_score）都可改，提交哪个改哪个；
     · 两者都提交为空 = 该科缺考（删除该科）；
@@ -642,7 +659,7 @@ def score_delete(exam_id, score_id):
 @login_required
 @perm_required('grades.edit')
 def score_changes():
-    """分数修改记录（v1.19.47.4）：**只看某一场考试**
+    """分数修改记录（v1.19.47.25）：**只看某一场考试**
 
     该记录属于单场考试的数据，入口只有一处：成绩单页右上角「分数修改记录」按钮
     （带 ?exam=<id>）。不再提供跨考试视图，也不在左侧栏出现；缺 ?exam= 时回考试列表。
@@ -721,7 +738,7 @@ def exam_delete(exam_id):
         n_ai = AiReport.query.filter_by(exam_id=exam_id).delete()
         n_logs = ScoreChangeLog.query.filter_by(exam_id=exam_id).delete()
         n_links = ExamTeacherLink.query.filter_by(exam_id=exam_id).delete()
-        # v1.19.47.4：级联删除本考试的考务批次（含其考场与名单），避免产生孤儿批次
+        # v1.19.47.25：级联删除本考试的考务批次（含其考场与名单），避免产生孤儿批次
         # 旧逻辑只删考试，导致 affair 的 exam_id 指向已删除考试，从考试列表无法再进入
         from app.modules.grades.routes.exam_affairs import delete_affair_cascade
         from app.models.grades import ExamAffair
@@ -771,6 +788,14 @@ def exam_import_upload(exam_id):
     file = request.files.get('file')
     if not file or not file.filename:
         flash('请选择要上传的 Excel 文件', 'danger')
+        return redirect(url_for('grades.exam_import', exam_id=exam_id))
+    # 2026-10-13 全面审计 M-6：统一上传校验（白名单 + 危险类型 + magic 嗅探），
+    # 此前本入口直接读流交给 openpyxl —— 不校验扩展名，畸形/压缩炸弹文件可耗尽内存
+    from app.utils.upload_guard import validate_upload
+    ok, msg = validate_upload(file.filename, allowed_exts=['xlsx', 'xls'],
+                              stream=file.stream)
+    if not ok:
+        flash(f'{msg}（当前文件：{file.filename}）', 'danger')
         return redirect(url_for('grades.exam_import', exam_id=exam_id))
     fname = file.filename
     try:
@@ -854,7 +879,7 @@ def exam_import_confirm(exam_id):
         summary = store_service.apply_import(exam, parsed, mode=mode,
                                              remove_missing=remove_missing)
         ranking.recalc_exam(exam_id)
-        # v1.19.47.4 任课快照：把本次导入时的任课教师映射定格到本场考试（教师维度分析读它，
+        # v1.19.47.25 任课快照：把本次导入时的任课教师映射定格到本场考试（教师维度分析读它，
         # 以后教师调整/重新分班都不会把历史成绩归到新教师名下）
         from app.modules.grades.services import teacher_snapshot_service as tss
         n_tch = tss.snapshot_exam(exam, source='import')

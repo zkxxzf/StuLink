@@ -1,4 +1,4 @@
-# StuLink v1.19.47.4 2026-10-10
+# StuLink v1.19.47.25 2026-10-10
 # 模块权限映射：功能权限表格（身份 × 子功能 × 三档）与细粒度 menu_keys 的转换层
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 """模块权限映射（转换层）
@@ -57,7 +57,7 @@ MODULES = [
             {'key': 'manage', 'name': '教学管理',
              'read': [],
              'write': ['grades.edit', 'grades.import', 'grades.settings']},
-            # v1.19.47.4：成绩单改分单独授权。standalone=True 表示**不随模块「写入」批发**，
+            # v1.19.47.25：成绩单改分单独授权。standalone=True 表示**不随模块「写入」批发**，
             # 只能单独勾选（默认所有人不可见，管理员角色天然可用）；「考务管理员」另行建组授予。
             {'key': 'score_edit', 'name': '成绩修改（改分）', 'standalone': True,
              'read': [], 'write': ['grades.score_edit']},
@@ -83,6 +83,9 @@ MODULES = [
              'read': [], 'write': ['points.export']},
             {'key': 'rules', 'name': '规则模板',
              'read': [], 'write': ['points.rules']},
+            # 2026-10-13（v1.19.47.25）德育奖惩信息：与积分并列，独立页面 /morality/rewards
+            {'key': 'reward', 'name': '奖惩信息',
+             'read': ['morality.view'], 'write': ['morality.edit']},
         ],
     },
     {
@@ -97,6 +100,10 @@ MODULES = [
              'read': [], 'write': ['academic.timetable']},
             {'key': 'swap', 'name': '调课管理',
              'read': [], 'write': ['academic.swap']},
+            # 2026-10-11：统一调课（批量）从「调课管理」拆出为独立权限点，
+            # 避免普通教师仅因可申请个人调课就获得整批调课能力
+            {'key': 'swap_bulk', 'name': '统一调课',
+             'read': [], 'write': ['academic.swap_bulk']},
             # v1.18.8.0：调课分级审批的第一级（年级长审本年级调课，教务课表管理终审+执行）
             {'key': 'swap_approve', 'name': '调课审批（一级）',
              'read': [], 'write': ['academic.swap_approve']},

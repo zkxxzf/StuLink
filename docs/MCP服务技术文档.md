@@ -9,8 +9,9 @@
 
 ## 一、定位与设计原则
 
-MCP（Model Context Protocol）服务把 StuLink 教务系统的数据能力，以标准协议暴露给
-AI 客户端（IDE 插件、桌面应用、豆包等）。它**不是主应用的一部分**，而是一个
+MCP（Model Context Protocol）服务把 StuLink 教务系统的**成绩数据**，以标准协议暴露给
+AI 客户端（IDE 插件、桌面应用、豆包等）。**本服务只做成绩分析、且只读**：
+12 个查询工具，不含任何写入能力。它**不是主应用的一部分**，而是一个
 **独立进程 / 独立容器**，与主应用解耦：
 
 | 原则 | 含义 |
@@ -18,8 +19,9 @@ AI 客户端（IDE 插件、桌面应用、豆包等）。它**不是主应用�
 | **进程独立** | 单独启动（uvicorn 承载 Streamable HTTP），主应用完全不 import `mcp_server`，双方零引用 |
 | **共库不共进程** | 直接读取主应用的 SQLite 数据文件（`data/*.db`），不复制数据、不建第二套存储 |
 | **权限同源** | 认证身份直接复用 `User.has_perm` 与数据范围函数，**AI 能看到的范围 = 该账号网页端能看到的范围** |
+| **细粒度授权** | 成绩可见范围由 `core/score_guard.py` 按三条规则裁决：任课教师 / 班主任 / 年级长及以上 |
+| **只读** | 工具集无任何写入路径（`allow_write` 对本服务无实际作用），权限范围仅限读取成绩 |
 | **默认不暴露** | 默认只听 `127.0.0.1`；容器 / 局域网部署时显式改为 `0.0.0.0` 并加令牌 |
-| **写操作可控** | 写类工具由 `allow_write` 总开关独立控制，默认按需开启 |
 
 ---
 
@@ -36,9 +38,11 @@ AI 客户端（IDE 插件 / 桌面应用 / 豆包）
 │        │ 通过：写入 contextvars 身份             │
 │        ▼                                        │
 │  MCPServer（mcp 2.x SDK）                        │
-│        │  工具分发（30 个）                       │
+│        │  工具分发（12 个 · 全部只读）            │
 │        ▼                                        │
-│  core/toolkit.py（权限校验 + 异常兜底）          │
+│  core/toolkit.py（功能权限点 + 异常兜底）        │
+│        ▼                                        │
+│  core/score_guard.py（成绩可见范围：三条规则）   │
 │        ▼                                        │
 │  core/db.py（单线程串行 + 独立 app context）     │
 │        ▼                                        │
@@ -56,21 +60,20 @@ AI 客户端（IDE 插件 / 桌面应用 / 豆包）
 
 ---
 
-## 三、工具清单（7 模块 · 30 个）
+## 三、工具清单（2 模块 · 12 个 · 全部只读）
 
 | 模块 | 工具 |
 |---|---|
-| 基础信息与学生 | `list_grades`、`list_classes`、`search_students`、`get_student`、`get_system_overview` |
-| 考试与成绩 | `list_exams`、`get_exam_overview`、`get_class_score_summary`、`get_student_scores` |
-| 统计分析 | `get_subject_analysis`、`get_exam_score_segments`、`get_layer_online_stats`、`compare_classes` |
-| 考勤 | `get_attendance_records`、`get_attendance_stats`、`get_student_attendance`、`record_attendance`（写） |
-| 课表 | `list_schedules`、`get_class_schedule`、`get_teacher_schedule`、`get_daily_schedule` |
-| 宿舍 | `list_dorm_buildings`、`list_dorm_rooms`、`get_dorm_stats`、`get_student_accommodation` |
-| 学生画像 | `get_student_portrait`、`list_portrait_comments`、`list_portrait_events`、`add_portrait_comment`（写）、`add_portrait_event`（写） |
+| 成绩查询（只读） | `list_my_score_scope`、`list_exams`、`list_classes`、`get_exam_overview`、`get_class_score_summary`、`get_class_score_detail`、`get_student_scores`、`get_student_score_trend` |
+| 成绩分析（只读） | `get_subject_analysis`、`get_exam_score_segments`、`get_layer_online_stats`、`compare_classes` |
 
-- 每个工具在 `toolkit.db_call(..., perm=...)` 声明权限点，与网页端同名；
-- 标【写】的工具受 `allow_write` 总开关约束，调用前应向用户确认；
+- 每个工具在 `toolkit.db_call(..., perm='grades.view')` 声明权限点，与网页端同名；
+- **没有任何写工具**：服务不提供成绩录入 / 改分 / 重算等写入路径；
 - 返回值统一为 JSON 文本：`{"ok": true, "data": ...}` 或 `{"ok": false, "error": "原因"}`。
+
+> 细粒度授权规则（任课教师=所教班级×所教学科 / 班主任=本班 / 年级长及以上=本年级）、
+> 判定矩阵与各工具的范围过滤细则，见
+> [MCP 服务成绩分析权限设计](MCP服务-成绩分析权限设计.md)。
 
 ---
 
@@ -164,7 +167,8 @@ docker build -f Dockerfile.mcp -t stulink-mcp:v1.0.0 .
 3. **令牌持久化**：容器内 `mcp_server/config.json` 随重启重建会重新生成令牌。
    需要固定令牌时，用环境变量注入（不落盘）：
    `- STULINK_MCP_REQUIRE_TOKEN=true` 与 `- STULINK_MCP_TOKEN=<随机令牌>`。
-4. **写开关**：只读场景加 `- STULINK_MCP_ALLOW_WRITE=false`。
+4. **只读**：服务本身不含写工具，无需再设写开关；需要完整留痕时可加
+   `- STULINK_MCP_AUDIT_READS=true`（只读调用也写审计）。
 5. **离线环境**：若 NAS 无法构建镜像，可在有网机器 `docker build` 后
    `docker save` / `docker load` 导入；或走整包部署脚本（见第七节）。
 
@@ -182,7 +186,7 @@ docker build -f Dockerfile.mcp -t stulink-mcp:v1.0.0 .
 | `require_token` | `false` | account 下是否额外要求 `X-StuLink-Token` | 暴露到局域网/公网时设 `true` |
 | `token` | 自动生成 | 静态令牌 | 用 `STULINK_MCP_TOKEN` 注入固定值 |
 | `bind_user` | `admin` | 仅 token 模式的执行账号 | account 模式不生效 |
-| `allow_write` | `true` | 写工具总开关 | 只读场景设 `false` |
+| `allow_write` | `true` | 写工具总开关（本服务无写工具，实际不生效） | 可忽略 |
 | `audit_reads` | `false` | 只读调用是否也写审计 | 需完整留痕时设 `true` |
 | `max_rows` | `200` | 单次返回最大行数 | 保持默认 |
 | `exam_cache_ttl` | `300` | 成绩分析缓存秒数（0=用主程序默认 900） | 保持默认 |
@@ -235,21 +239,22 @@ docker build -f Dockerfile.mcp -t stulink-mcp:v1.0.0 .
 | L1 连通 | 端口可连 | `Test-NetConnection <host> -Port 8765` | TcpTestSucceeded=True |
 | L2 协议 | MCP 握手 | 客户端连接 / `curl` 发 initialize | 非 4xx/5xx |
 | L3 认证 | 凭据有效 | 真实账号密码连接 | 不再 401 |
-| L4 工具 | 工具清单 | 客户端查看工具列表 | 30 项 |
+| L4 工具 | 工具清单 | 客户端查看工具列表 | 12 项（全只读） |
 | L5 取数 | 真实数据 | 问只读问题（如“查 2025级01班最近一次考试”） | 返回真实数据 |
 | L6 边界 | 权限正确 | 受限账号越权提问 | 明确返回“权限不足” |
 
 端到端自测（本地 venv）：
 
 ```bat
-mcp_server\.venv\Scripts\python.exe mcp_server\smoke_mcp.py
-:: 期望输出：通过 39 / 失败 0（30 个工具 + 权限/写开关 + account 认证用例）
+mcp_server\.venv\Scripts\python.exe mcp_server\smoke_scores.py
+:: 期望输出：通过 69 / 失败 0
+::   = 12 个只读工具 + 三条权限规则矩阵 + 真实账号端到端 + account 认证（401/429）
 ```
 
 容器内自测：
 
 ```bash
-docker exec stulink-mcp python mcp_server/smoke_mcp.py
+docker exec stulink-mcp python mcp_server/smoke_scores.py
 ```
 
 ---
@@ -263,9 +268,10 @@ docker exec stulink-mcp python mcp_server/smoke_mcp.py
 | `mcp_server/run.py` | HTTP(Streamable) 入口：组装 ASGI、启动 uvicorn、打印启动横幅 |
 | `mcp_server/run_stdio.py` | stdio 入口：env 账号密码认证，失败拒绝启动 |
 | `mcp_server/config.py` | 配置加载（`config.json` + `STULINK_MCP_*` 环境变量覆盖） |
-| `mcp_server/core/` | `auth`(认证中间件) · `identity`(请求身份) · `toolkit`(工具分发与鉴权) · `bootstrap`(app 引导) · `db`(串行 DB) · `guards`(权限/范围) · `examdata` · `respond` · `audit` |
-| `mcp_server/tools/` | 7 个工具模块（basic/exams/analytics/attendance/schedule/dormitory/portrait） |
-| `mcp_server/smoke_mcp.py` | 40 项端到端自测 |
+| `mcp_server/core/` | `auth`(认证中间件) · `identity`(请求身份) · `toolkit`(工具分发与鉴权) · `bootstrap`(app 引导) · `db`(串行 DB) · **`score_guard`(成绩权限引擎)** · `guards`(权限点/取对象) · `examdata` · `respond` · `audit` |
+| `mcp_server/tools/` | `scores`(成绩查询 8 个) + `score_analysis`(成绩分析 4 个) + `_score_common`(共享常量与 helper)，全部只读 |
+| `mcp_server/smoke_scores.py` | 62 项端到端自测（工具集 + 权限矩阵 + 真实账号 + 接入认证） |
+| `mcp_server/smoke_auth.py` | account 模式接入认证端到端用例（被 smoke_scores 调用） |
 | `deploy/docker-compose.yml` | `mcp` 服务定义（与 `stulink`/`alumni` 并列） |
 
 ---
@@ -273,5 +279,6 @@ docker exec stulink-mcp python mcp_server/smoke_mcp.py
 ## 十、相关文档
 
 - [MCP 服务认证与授权设计](MCP服务-认证与授权设计.md)：认证模型、授权三层、拒绝策略、审计
+- [MCP 服务成绩分析权限设计](MCP服务-成绩分析权限设计.md)：成绩分析专用服务的三条授权规则与工具清单
 - [AI 工具安装与配置指南](AI工具安装与配置指南.md)：客户端接入（HTTP/stdio）、L0–L6 验证、排障
 - [部署文档](部署文档.md)：主应用 Docker / NAS / 云服务器部署与升级

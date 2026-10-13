@@ -1,4 +1,4 @@
-# StuLink v1.19.47.4 2026-10-10
+# StuLink v1.19.47.25 2026-10-10
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 import logging
 import os
@@ -125,13 +125,14 @@ PERMISSION_GROUPS = [
             'system.perm_groups', 'system.grade_mgmt', 'system.settings',
             'points.view', 'points.edit',
             'points.import', 'points.export', 'points.rules',
+            'morality.view', 'morality.edit',   # v1.19.47.25 德育奖惩信息
             'grades.view', 'grades.edit',
             'grades.import', 'grades.settings', 'grades.teachers', 'grades.student_query',
-            'grades.score_edit',   # v1.19.47.4：成绩单改分（管理员天然可用；考务管理员另建组授予）
+            'grades.score_edit',   # v1.19.47.6：成绩单改分（管理员天然可用；考务管理员另建组授予）
             # v1.9.2 合并：master 新增选科维护页权限 + first 学术/画像/工作台权限（取并集）
             'grades.subject_mgmt',
             'academic.view', 'academic.timetable', 'academic.swap',
-            'academic.swap_approve',
+            'academic.swap_bulk', 'academic.swap_approve',
             'academic.inspection_export', 'academic.forms', 'academic.forms_view',
             'portrait.view', 'portrait.edit',
             'workbench.records', 'workbench.class_view',
@@ -157,7 +158,11 @@ PERMISSION_GROUPS = [
             'grades.subject_mgmt',
             'portrait.view', 'portrait.edit',
             'points.import', 'points.rules',
+            # v1.19.47.25：年级长可登记/管理本年级奖惩
+            'morality.view', 'morality.edit',
             'academic.view', 'academic.forms_view',
+            # 2026-10-11：年级长本人任课时需能自助申请调课（此前缺 academic.swap，申请入口 403）
+            'academic.swap',
             # v1.18.8.0：年级长是调课审批第一级（审本年级教师提交的调课）
             'academic.swap_approve',
             # v1.17.0：年级长按年级只读工作台（班级概览/考勤查看）
@@ -180,6 +185,8 @@ PERMISSION_GROUPS = [
             'points.view', 'grades.view', 'grades.student_query',
             'portrait.view', 'portrait.edit',
             'points.import',
+            # v1.19.47.25：班主任可查看本班奖惩（登记/处理由德育处统一口径，故只给只读）
+            'morality.view',
             'academic.view', 'academic.swap', 'academic.forms_view',
             # v1.17.0：写权限必须配套只读权限，否则「有考勤录入权却打不开考勤页」
             'workbench.records', 'workbench.class_view',
@@ -284,6 +291,13 @@ PERMISSION_GROUPS = [
 for _g in PERMISSION_GROUPS:
     if 'workbench.notifications_view' not in _g['menu_keys']:
         _g['menu_keys'].append('workbench.notifications_view')
+
+# 2026-10-11：一级调课审批（academic.swap_approve）只应由年级长承担。教务主任/教务员的
+# 教务模块取「写入档」，会被 _module_keys 展开顺带带上该 key，使其意外成为全校口径的
+# 一级审批人。此处显式剔除，二者仅保留终审+执行（academic.timetable）职责。
+for _g in PERMISSION_GROUPS:
+    if _g['name'] in ('教务主任', '教务员'):
+        _g['menu_keys'] = [k for k in _g['menu_keys'] if k != 'academic.swap_approve']
 
 
 def _init_system_data():
@@ -481,11 +495,16 @@ def create_app():
     from app.utils.helpers import subject_direction, subject_badge_class, normalize_subject
     # v1.19.0 成绩模块“考试上下文”导航（点进某场考试后侧栏切换为本场流程）
     from app.utils.exam_nav import exam_nav
+    # 2026-10-13：节次显示名（period_number 只是行号：1=早读 → period_number=8 实为「第7节」）。
+    # 凡模板里要显示「第几节」一律用它，避免各处自己拼接「第{{ period_number }}节」错一位。
+    from app.utils.period_label import period_label, period_name_map
     app.jinja_env.globals.update(
         subject_direction=subject_direction,
         subject_badge_class=subject_badge_class,
         normalize_subject=normalize_subject,
         exam_nav=exam_nav,
+        period_label=period_label,
+        period_name_map=period_name_map,
     )
 
     db.init_app(app)
@@ -515,6 +534,7 @@ def create_app():
     from app.models.portrait import StudentPortrait, PortraitComment, PortraitEvent  # noqa: F401
     from app.models.timetable import (TermSchedule, PeriodDef, ScheduleEntry,  # noqa: F401
                                       ScheduleSwap, ScheduleVersion)
+    from app.models.migration_log import MigrationLog  # noqa: F401  迁移登记表（_mig_log 使用）
     with app.app_context():
         # v1.15.0 模块故障隔离：逐库建表，单个模块库异常不阻塞系统启动。
         # system 为根基库最先建；其他模块库失败仅告警（对应模块暂不可用），
@@ -522,7 +542,7 @@ def create_app():
         # 2026-10-10：教务分库后新增 inspection / achievement / forms 三个模块库
         # （漏在此列表里会让新库的表建不出来 —— 页面报 no such table）
         for _bind in (None, 'dormitory', 'history', 'grades', 'points',
-                      'academic', 'inspection', 'achievement', 'forms',
+                      'morality', 'academic', 'inspection', 'achievement', 'forms',
                       'portrait', 'system', 'timetable'):
             try:
                 db.create_all(bind_key=_bind)
@@ -620,7 +640,7 @@ def create_app():
             return
         if request.path.startswith('/static/'):
             return
-        # v1.19.47.4 S-1：AJAX/Fetch/JSON 客户端不能处理 302 到 HTML 页面，
+        # v1.19.47.6 S-1：AJAX/Fetch/JSON 客户端不能处理 302 到 HTML 页面，
         # 否则前端 fetch().json() 会抛异常、无“请先改密”提示。改为 401 JSON。
         wants_json = (request.accept_mimetypes.best == 'application/json'
                       or request.is_json

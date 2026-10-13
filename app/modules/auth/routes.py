@@ -10,6 +10,7 @@ from app.utils.helpers import log_operation
 from app.utils.session_guard import stamp
 from urllib.parse import urlparse
 import logging
+import threading
 import time
 
 # 2026-10-10 架构审计修复：本文件原有静默 `except Exception: pass`，失败不可观测。
@@ -25,8 +26,17 @@ bp = Blueprint('auth', __name__)
 _LOGIN_RATE_LIMIT = 10
 _LOGIN_RATE_WINDOW = 60
 # M-3：账号维度限流（此前只有 IP 维度，多 IP 分布式爆破可绕过）
-_LOGIN_ACCT_FAIL_LIMIT = 5        # 同一账号连续失败次数上限
+_LOGIN_ACCT_FAIL_LIMIT = 5        # 同一「来源+账号」连续失败次数上限
 _LOGIN_ACCT_LOCK_SECONDS = 900    # 触发后锁定时长（15 分钟）
+
+# 2026-10-13 审计修复：#11 账号锁原先只按账号名做键（login_lock_<username>），
+# 任何知道用户名的人连错 5 次就能把该账号锁 15 分钟 —— 校园网里账号名易枚举，
+# 等于给了一个"无需凭据即可让别人登不进来"的拒绝服务面。
+# 现在锁与计数都按「来源 IP + 账号」双键：只有同一个来源反复打同一个账号才锁，
+# 账号本人在自己电脑上仍可正常登录（与 MCP 侧 M-5 的修复口径一致）。
+# #17：cache 无原子自增，读-改-写之间有窗口，并发失败会互相覆盖、少计数。
+# 这里用模块级锁把「读+写」合成一个临界区。
+_FAIL_LOCK = threading.Lock()
 
 
 def _is_safe_redirect(target):
@@ -72,14 +82,17 @@ def login():
             return render_template('auth/login.html', form=form)
 
         # M-3：账号维度锁定（多 IP 分布式爆破时，IP 限流形同虚设）
-        # v1.19.47.4 S-7：归一化 —— strip().lower() 避免“ Admin”“ADMIN” 重置计数绕过锁定
+        # v1.19.47.25 S-7：归一化 —— strip().lower() 避免“ Admin”“ADMIN” 重置计数绕过锁定
+        # 2026-10-13 #11：锁定键加入来源 IP（login_lock_<ip>_<username>），
+        # 防止"知道用户名即可把别人锁在门外"的拒绝服务（详见上方常量注释）。
         username_typed = (form.username.data or '').strip().lower()
-        acct_fail_key = f'login_fail_{username_typed}'
-        acct_lock_key = f'login_lock_{username_typed}'
+        acct_fail_key = f'login_fail_{client_ip}_{username_typed}'
+        acct_lock_key = f'login_lock_{client_ip}_{username_typed}'
         locked_until = cache.get(acct_lock_key)
         if locked_until and time.time() < float(locked_until):
             left = int(float(locked_until) - time.time()) // 60 + 1
-            flash(f'该账号连续登录失败次数过多，已临时锁定，请 {left} 分钟后再试', 'danger')
+            flash(f'该账号在本机连续登录失败次数过多，已临时锁定，请 {left} 分钟后再试'
+                  '（或改用本人常用设备登录）', 'danger')
             return render_template('auth/login.html', form=form)
 
         user = User.query.filter_by(username=(form.username.data or '').strip()).first()
@@ -106,20 +119,27 @@ def login():
             return redirect(url_for('welcome.index'))
 
         # 登录失败，记录尝试（IP 维度保留）
-        attempts.append(now)
-        cache.set(cache_key, attempts, timeout=_LOGIN_RATE_WINDOW * 2)
+        # 2026-10-13 #17：同样把读改写放进临界区，避免并发失败互相覆盖
+        with _FAIL_LOCK:
+            attempts.append(now)
+            cache.set(cache_key, attempts, timeout=_LOGIN_RATE_WINDOW * 2)
 
-        # M-3：账号维度计数 + 触发锁定 + 安全日志
-        fails = (cache.get(acct_fail_key) or 0) + 1
-        cache.set(acct_fail_key, fails, timeout=_LOGIN_ACCT_LOCK_SECONDS)
+            # M-3：账号维度计数 + 触发锁定 + 安全日志
+            fails = (cache.get(acct_fail_key) or 0) + 1
+            cache.set(acct_fail_key, fails, timeout=_LOGIN_ACCT_LOCK_SECONDS)
+            if fails >= _LOGIN_ACCT_FAIL_LIMIT:
+                cache.set(acct_lock_key, time.time() + _LOGIN_ACCT_LOCK_SECONDS,
+                          timeout=_LOGIN_ACCT_LOCK_SECONDS)
+                just_locked = True
+            else:
+                just_locked = False
         _sec_logger.warning('登录失败：账号=%s 来源IP=%s 连续失败=%s',
                             username_typed, client_ip, fails)
-        if fails >= _LOGIN_ACCT_FAIL_LIMIT:
-            cache.set(acct_lock_key, time.time() + _LOGIN_ACCT_LOCK_SECONDS,
-                      timeout=_LOGIN_ACCT_LOCK_SECONDS)
-            _sec_logger.warning('账号已临时锁定：账号=%s 来源IP=%s 时长=%ss',
+        if just_locked:
+            _sec_logger.warning('账号已临时锁定（本来源）：账号=%s 来源IP=%s 时长=%ss',
                                 username_typed, client_ip, _LOGIN_ACCT_LOCK_SECONDS)
-            flash(f'该账号连续登录失败 {fails} 次，已临时锁定 15 分钟', 'danger')
+            flash(f'该账号在本机连续登录失败 {fails} 次，已临时锁定 15 分钟'
+                  '（账号本人请用常用设备登录）', 'danger')
         else:
             flash('用户名或密码错误', 'danger')
     return render_template('auth/login.html', form=form)
@@ -139,11 +159,15 @@ def logout():
 @login_required
 def change_password():
     form = ChangePasswordForm()
+    # 2026-10-13：工作台「个人信息」页（workbench.profile）内嵌同一套改密表单，POST 到本路由，
+    # 用 next 回跳原页面（只接受站内相对路径）；不传 next 时行为与原来完全一致。
+    next_page = (request.values.get('next') or '').strip()
+    back = next_page if _is_safe_redirect(next_page) else ''
     if form.validate_on_submit():
         if not current_user.check_password(form.old_password.data):
             flash('原密码不正确', 'danger')
         else:
-            # v1.19.47.4 M-15：新口令必须过弱口令黑名单与强度校验，防止把弱口令写入库
+            # v1.19.47.25 M-15：新口令必须过弱口令黑名单与强度校验，防止把弱口令写入库
             from app.utils.password_policy import validate_password
             ok, msg = validate_password(form.new_password.data,
                                         username=current_user.username,
@@ -158,7 +182,14 @@ def change_password():
             # M-2：更新本设备会话摘要（保持登录）；其它设备的旧摘要失效 → 被踢下线
             stamp(current_user)
             flash('密码修改成功，其它设备的登录状态已失效', 'success')
-            return redirect(url_for('welcome.index'))
+            return redirect(back or url_for('welcome.index'))
+    if back and request.method == 'POST':
+        # 来自嵌入式表单且校验/原密码未通过：回跳原页面并提示（原页面没有字段级错误展示位）
+        msgs = [e for f in (form.old_password, form.new_password,
+                            form.confirm_password) for e in f.errors]
+        if msgs:
+            flash('；'.join(msgs), 'danger')
+        return redirect(back)
     return render_template('auth/change_password.html', form=form)
 
 

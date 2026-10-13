@@ -16,10 +16,22 @@
 import os
 import shutil
 import sqlite3
+import sys
 from datetime import datetime
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DATA_DIR = os.path.join(BASE_DIR, 'data')
+
+SCRIPT_NAME = os.path.basename(__file__)
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+# 2026-10-12：迁移登记（幂等）——已登记过则整体跳过；登记查询失败不阻塞迁移
+try:
+    import _mig_log
+    if _mig_log.is_applied(SCRIPT_NAME):
+        print(f'[SKIP] {SCRIPT_NAME} 已登记为已应用，跳过补建')
+        sys.exit(0)
+except Exception as _e:  # noqa: BLE001
+    print(f'[WARN] 读取迁移登记失败（继续执行补建）：{_e}')
 
 # 每个库要补建的索引：name / table / columns（顺序即索引列顺序）
 INDEX_SPECS = {
@@ -210,6 +222,12 @@ def main():
         if result:
             total_created += len(result[0])
     print(f'\n完成：本次新建 {total_created} 个索引。请重启应用使连接生效。')
+
+    # 迁移登记（失败不得阻塞）
+    try:
+        _mig_log.record(SCRIPT_NAME, note=f'本次新建 {total_created} 个索引')
+    except Exception as _e:  # noqa: BLE001
+        print(f'[WARN] 迁移登记失败（不影响补建结果）：{_e}')
 
 
 if __name__ == '__main__':

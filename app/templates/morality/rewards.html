@@ -1,0 +1,631 @@
+{% extends "base.html" %}
+{% block title %}奖惩信息{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
+    <div>
+        <h4 class="mb-0"><i class="bi bi-award"></i> 奖惩信息</h4>
+        <div class="text-muted small mt-1">
+            记录学生的表彰与处分（含考试作弊等违纪），可上传考场记录、情况说明、承诺书等佐证材料
+        </div>
+    </div>
+    {% if can_edit %}
+    <button class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#addModal">
+        <i class="bi bi-plus-lg"></i> 登记奖惩
+    </button>
+    {% endif %}
+</div>
+
+{# ---- 概览 ---- #}
+<div class="row g-2 mb-3">
+    <div class="col-6 col-md-3 col-xl-2">
+        <div class="stat-card card h-100">
+            <div class="card-body d-flex align-items-center gap-2 py-2">
+                <div class="stat-icon bg-primary bg-opacity-10 text-primary"><i class="bi bi-list-ul"></i></div>
+                <div><div class="stat-number" style="font-size:22px">{{ stats.total }}</div><div class="stat-label">记录总数</div></div>
+            </div>
+        </div>
+    </div>
+    <div class="col-6 col-md-3 col-xl-2">
+        <div class="stat-card card h-100">
+            <div class="card-body d-flex align-items-center gap-2 py-2">
+                <div class="stat-icon bg-success bg-opacity-10 text-success"><i class="bi bi-award"></i></div>
+                <div><div class="stat-number" style="font-size:22px">{{ stats.reward }}</div><div class="stat-label">奖励</div></div>
+            </div>
+        </div>
+    </div>
+    <div class="col-6 col-md-3 col-xl-2">
+        <div class="stat-card card h-100">
+            <div class="card-body d-flex align-items-center gap-2 py-2">
+                <div class="stat-icon bg-danger bg-opacity-10 text-danger"><i class="bi bi-exclamation-octagon"></i></div>
+                <div><div class="stat-number" style="font-size:22px">{{ stats.punish }}</div><div class="stat-label">惩罚</div></div>
+            </div>
+        </div>
+    </div>
+    <div class="col-6 col-md-3 col-xl-2">
+        <div class="stat-card card h-100">
+            <div class="card-body d-flex align-items-center gap-2 py-2">
+                <div class="stat-icon bg-warning bg-opacity-10 text-warning"><i class="bi bi-hourglass-split"></i></div>
+                <div><div class="stat-number" style="font-size:22px">{{ stats.draft }}</div><div class="stat-label">待确认</div></div>
+            </div>
+        </div>
+    </div>
+    <div class="col-6 col-md-3 col-xl-2">
+        <div class="stat-card card h-100">
+            <div class="card-body d-flex align-items-center gap-2 py-2">
+                <div class="stat-icon bg-info bg-opacity-10 text-info"><i class="bi bi-check2-circle"></i></div>
+                <div><div class="stat-number" style="font-size:22px">{{ stats.confirmed }}</div><div class="stat-label">已生效</div></div>
+            </div>
+        </div>
+    </div>
+    <div class="col-6 col-md-3 col-xl-2">
+        <div class="stat-card card h-100">
+            <div class="card-body d-flex align-items-center gap-2 py-2">
+                <div class="stat-icon bg-secondary bg-opacity-10 text-secondary"><i class="bi bi-x-octagon"></i></div>
+                <div><div class="stat-number" style="font-size:22px">{{ stats.revoked }}</div><div class="stat-label">已撤销</div></div>
+            </div>
+        </div>
+    </div>
+</div>
+
+{# ---- 筛选 ---- #}
+<div class="card mb-3">
+    <div class="card-body py-2">
+        <form class="row g-2 align-items-center" method="get">
+            <div class="col-auto">
+                <select name="kind" class="form-select form-select-sm" style="width:110px" onchange="this.form.submit()">
+                    <option value="">全部类型</option>
+                    <option value="reward" {% if f.kind=='reward' %}selected{% endif %}>奖励</option>
+                    <option value="punish" {% if f.kind=='punish' %}selected{% endif %}>惩罚</option>
+                </select>
+            </div>
+            <div class="col-auto">
+                <select name="category" class="form-select form-select-sm" style="width:140px" onchange="this.form.submit()">
+                    <option value="">全部类别</option>
+                    {% for k, v in reward_categories %}
+                    <option value="{{ k }}" {% if f.category==k %}selected{% endif %}>奖励·{{ v }}</option>
+                    {% endfor %}
+                    {% for k, v in punish_categories %}
+                    <option value="{{ k }}" {% if f.category==k %}selected{% endif %}>惩罚·{{ v }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="col-auto">
+                <select name="status" class="form-select form-select-sm" style="width:110px" onchange="this.form.submit()">
+                    <option value="">全部状态</option>
+                    <option value="draft" {% if f.status=='draft' %}selected{% endif %}>待确认</option>
+                    <option value="confirmed" {% if f.status=='confirmed' %}selected{% endif %}>已生效</option>
+                    <option value="revoked" {% if f.status=='revoked' %}selected{% endif %}>已撤销</option>
+                </select>
+            </div>
+            <div class="col-auto">
+                <select name="grade" class="form-select form-select-sm" style="width:110px" onchange="this.form.submit()">
+                    <option value="">全部年级</option>
+                    {% for g in grades %}<option value="{{ g }}" {% if f.grade==g %}selected{% endif %}>{{ g }}</option>{% endfor %}
+                </select>
+            </div>
+            <div class="col-auto">
+                <input type="text" name="kw" class="form-control form-control-sm" style="width:150px"
+                       placeholder="学号 / 姓名 / 事由" value="{{ f.kw }}">
+            </div>
+            <div class="col-auto">
+                <input type="date" name="date_from" class="form-control form-control-sm" style="width:145px" value="{{ f.date_from }}" title="起始日期">
+            </div>
+            <div class="col-auto">
+                <input type="date" name="date_to" class="form-control form-control-sm" style="width:145px" value="{{ f.date_to }}" title="截止日期">
+            </div>
+            <div class="col-auto">
+                <button class="btn btn-sm btn-outline-primary"><i class="bi bi-search"></i> 筛选</button>
+                <a href="{{ url_for('morality.rewards_page') }}" class="btn btn-sm btn-outline-secondary">重置</a>
+            </div>
+        </form>
+    </div>
+</div>
+
+{# ---- 列表 ---- #}
+<div class="card">
+    <div class="card-body p-0">
+        <div class="table-responsive">
+            <table class="table table-hover align-middle mb-0">
+                <thead>
+                <tr>
+                    <th style="width:100px">日期</th>
+                    <th style="width:170px">学生</th>
+                    <th style="width:90px">类型</th>
+                    <th style="width:110px">类别</th>
+                    <th style="width:100px">级别 / 档次</th>
+                    <th>事由</th>
+                    <th style="width:90px">状态</th>
+                    <th style="width:70px">附件</th>
+                    <th style="width:120px">操作</th>
+                </tr>
+                </thead>
+                <tbody>
+                {% for r in items %}
+                <tr>
+                    <td class="small">{{ r.happen_date or '—' }}</td>
+                    <td>
+                        <div class="fw-semibold">{{ r.student_name or '—' }}</div>
+                        <div class="text-muted small">{{ r.grade }}{{ r.class_name }} · {{ r.student_no }}</div>
+                    </td>
+                    <td>
+                        <span class="badge {{ 'bg-success' if r.kind=='reward' else 'bg-danger' }}">{{ r.kind_text() }}</span>
+                    </td>
+                    <td class="small">{{ r.category_text() }}</td>
+                    <td class="small">{{ r.level_text() }}</td>
+                    <td>
+                        <div class="small">{{ r.title }}</div>
+                        {% if r.related_exam %}<div class="text-muted small">涉及考试：{{ r.related_exam }}</div>{% endif %}
+                        {% if r.effect %}<div class="text-muted small">{{ r.effect }}</div>{% endif %}
+                    </td>
+                    <td>
+                        <span class="badge {{ 'bg-secondary' if r.status=='draft' else ('bg-primary' if r.status=='confirmed' else 'bg-light text-muted border') }}">{{ r.status_text() }}</span>
+                    </td>
+                    <td class="small">
+                        {% set n = atts.get(r.id, [])|length %}
+                        {% if n %}<span class="badge bg-light text-muted border"><i class="bi bi-paperclip"></i> {{ n }}</span>{% else %}<span class="text-muted">—</span>{% endif %}
+                    </td>
+                    <td class="text-nowrap">
+                        <button class="btn btn-sm btn-outline-secondary py-0 px-1" data-act="detail" data-id="{{ r.id }}" title="详情">
+                            <i class="bi bi-eye"></i>
+                        </button>
+                        {% if can_edit %}
+                        <button class="btn btn-sm btn-outline-primary py-0 px-1" data-act="edit" data-id="{{ r.id }}" title="编辑">
+                            <i class="bi bi-pencil"></i>
+                        </button>
+                        <button class="btn btn-sm btn-outline-danger py-0 px-1" data-act="del" data-id="{{ r.id }}" title="删除">
+                            <i class="bi bi-trash"></i>
+                        </button>
+                        {% endif %}
+                    </td>
+                </tr>
+                {% else %}
+                <tr><td colspan="9" class="text-center text-muted py-5">
+                    <i class="bi bi-inbox" style="font-size:32px"></i>
+                    <p class="mb-0 mt-2">暂无奖惩记录</p>
+                    {% if can_edit %}<p class="small mb-0">点击右上角「登记奖惩」新增</p>{% endif %}
+                </td></tr>
+                {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+    {% if pagination and pagination.pages > 1 %}
+    <div class="card-footer">
+        <nav>
+            <ul class="pagination pagination-sm mb-0 justify-content-center">
+                <li class="page-item {{ 'disabled' if not pagination.has_prev }}">
+                    <a class="page-link" href="{{ url_for('morality.rewards_page', page=pagination.prev_num, kind=f.kind, category=f.category, status=f.status, grade=f.grade, kw=f.kw, date_from=f.date_from, date_to=f.date_to) }}">上一页</a>
+                </li>
+                {% for p in pagination.iter_pages(left_edge=1, right_edge=1, left_current=2, right_current=2) %}
+                    {% if p %}
+                    <li class="page-item {{ 'active' if p == pagination.page }}">
+                        <a class="page-link" href="{{ url_for('morality.rewards_page', page=p, kind=f.kind, category=f.category, status=f.status, grade=f.grade, kw=f.kw, date_from=f.date_from, date_to=f.date_to) }}">{{ p }}</a>
+                    </li>
+                    {% else %}<li class="page-item disabled"><span class="page-link">…</span></li>{% endif %}
+                {% endfor %}
+                <li class="page-item {{ 'disabled' if not pagination.has_next }}">
+                    <a class="page-link" href="{{ url_for('morality.rewards_page', page=pagination.next_num, kind=f.kind, category=f.category, status=f.status, grade=f.grade, kw=f.kw, date_from=f.date_from, date_to=f.date_to) }}">下一页</a>
+                </li>
+            </ul>
+        </nav>
+    </div>
+    {% endif %}
+</div>
+{% endblock %}
+
+{% block extra_js %}
+{# ================= 登记 / 编辑 模态框 ================= #}
+{% if can_edit %}
+<div class="modal fade" id="addModal" tabindex="-1">
+    <div class="modal-dialog modal-lg modal-dialog-scrollable">
+        <form method="POST" id="addForm" enctype="multipart/form-data" class="modal-content">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <div class="modal-header">
+                <h6 class="modal-title" id="addTitle">登记奖惩</h6>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <div class="row g-2">
+                    <div class="col-12">
+                        <label class="form-label small mb-1">学生 <span class="text-danger">*</span></label>
+                        <div class="input-group input-group-sm mb-1">
+                            <input type="text" id="stuKw" class="form-control" placeholder="输入姓名或学号后点「查找」">
+                            <button class="btn btn-outline-secondary" type="button" id="stuFind">查找</button>
+                        </div>
+                        <select id="stuPick" class="form-select form-select-sm" size="4" style="display:none"></select>
+                        <div class="text-muted small" id="stuHint">也可直接在下面手填学号与姓名</div>
+                    </div>
+                    <div class="col-6 col-md-3">
+                        <label class="form-label small mb-1">学号 <span class="text-danger">*</span></label>
+                        <input type="text" name="student_no" id="fStudentNo" class="form-control form-control-sm" required>
+                    </div>
+                    <div class="col-6 col-md-3">
+                        <label class="form-label small mb-1">姓名</label>
+                        <input type="text" name="student_name" id="fStudentName" class="form-control form-control-sm">
+                    </div>
+                    <div class="col-6 col-md-3">
+                        <label class="form-label small mb-1">年级</label>
+                        <input type="text" name="grade" id="fGrade" class="form-control form-control-sm" placeholder="2024级">
+                    </div>
+                    <div class="col-6 col-md-3">
+                        <label class="form-label small mb-1">班级</label>
+                        <input type="text" name="class_name" id="fClass" class="form-control form-control-sm" placeholder="01班">
+                    </div>
+                    <div class="col-6 col-md-3">
+                        <label class="form-label small mb-1">类型 <span class="text-danger">*</span></label>
+                        <select name="kind" id="fKind" class="form-select form-select-sm">
+                            <option value="reward">奖励</option>
+                            <option value="punish">惩罚</option>
+                        </select>
+                    </div>
+                    <div class="col-6 col-md-3">
+                        <label class="form-label small mb-1">类别</label>
+                        <select name="category" id="fCategory" class="form-select form-select-sm"></select>
+                    </div>
+                    <div class="col-6 col-md-3">
+                        <label class="form-label small mb-1"><span id="lvlLabel">级别</span></label>
+                        <select name="level" id="fLevel" class="form-select form-select-sm"></select>
+                    </div>
+                    <div class="col-6 col-md-3">
+                        <label class="form-label small mb-1">发生日期</label>
+                        <input type="date" name="happen_date" id="fDate" class="form-control form-control-sm">
+                    </div>
+                    <div class="col-12">
+                        <label class="form-label small mb-1">事由 <span class="text-danger">*</span></label>
+                        <input type="text" name="title" id="fTitle" class="form-control form-control-sm" required
+                               placeholder="如：期末考试携带手机作弊 / 获市三好学生">
+                    </div>
+                    <div class="col-12">
+                        <label class="form-label small mb-1">详细情况</label>
+                        <textarea name="description" id="fDesc" class="form-control form-control-sm" rows="2"
+                                  placeholder="时间、地点、经过、处理依据等"></textarea>
+                    </div>
+                </div>
+
+                {# ---- 奖励专属 ---- #}
+                <div id="rewardBox" class="row g-2 mt-1 border-top pt-2">
+                    <div class="col-12 col-md-6">
+                        <label class="form-label small mb-1">奖项名称</label>
+                        <input type="text" name="award_name" id="fAward" class="form-control form-control-sm" placeholder="如：市级三好学生">
+                    </div>
+                    <div class="col-12 col-md-6">
+                        <label class="form-label small mb-1">颁发单位</label>
+                        <input type="text" name="source" id="fSource" class="form-control form-control-sm" placeholder="如：市教育局 / 学校德育处">
+                    </div>
+                </div>
+
+                {# ---- 惩罚专属 ---- #}
+                <div id="punishBox" class="row g-2 mt-1 border-top pt-2" style="display:none">
+                    <div class="col-12 col-md-4">
+                        <label class="form-label small mb-1">涉及考试</label>
+                        <input type="text" name="related_exam" id="fExam" class="form-control form-control-sm" placeholder="如：高三上期中考试">
+                    </div>
+                    <div class="col-12 col-md-2">
+                        <label class="form-label small mb-1">涉及科目</label>
+                        <input type="text" name="subject" id="fSubject" class="form-control form-control-sm" placeholder="数学">
+                    </div>
+                    <div class="col-12 col-md-6">
+                        <label class="form-label small mb-1">处理 / 影响</label>
+                        <input type="text" name="effect" id="fEffect" class="form-control form-control-sm"
+                               placeholder="如：本次考试成绩作废，记入档案，取消本学年评优资格">
+                    </div>
+                    <div class="col-6 col-md-3">
+                        <label class="form-label small mb-1">处分期限（月）</label>
+                        <input type="number" name="period_months" id="fPeriod" class="form-control form-control-sm" min="0" placeholder="留空=无期限">
+                    </div>
+                    <div class="col-6 col-md-3">
+                        <label class="form-label small mb-1">到期日</label>
+                        <input type="date" name="expire_date" id="fExpire" class="form-control form-control-sm">
+                    </div>
+                    <div class="col-12 col-md-6 d-flex align-items-end">
+                        <div class="form-check mb-1">
+                            <input class="form-check-input" type="checkbox" name="notify_parent" id="fNotify" value="1">
+                            <label class="form-check-label small" for="fNotify">已通知家长</label>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="row g-2 mt-1 border-top pt-2">
+                    <div class="col-12">
+                        <label class="form-label small mb-1">佐证材料（可多选）</label>
+                        <div class="d-flex flex-wrap gap-2 align-items-center">
+                            <select name="doc_type" class="form-select form-select-sm" style="width:auto">
+                                {% for k, v in doc_types %}<option value="{{ k }}">{{ v }}</option>{% endfor %}
+                            </select>
+                            <input type="file" name="files" id="addFiles" multiple class="form-control form-control-sm" style="width:auto;max-width:300px"
+                                   accept=".pdf,.doc,.docx,.xls,.xlsx,.txt,.jpg,.jpeg,.png,.gif,.bmp,.webp">
+                        </div>
+                        <div class="form-text">支持 PDF / Word / Excel / 图片，单文件 ≤10MB。</div>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <span class="text-danger small me-auto" id="addErr"></span>
+                <button type="button" class="btn btn-sm btn-secondary" data-bs-dismiss="modal">取消</button>
+                <button type="submit" class="btn btn-sm btn-primary" id="addSubmit">保存</button>
+            </div>
+        </form>
+    </div>
+</div>
+{% endif %}
+
+{# ================= 详情 模态框 ================= #}
+<div class="modal fade" id="detailModal" tabindex="-1">
+    <div class="modal-dialog modal-lg modal-dialog-scrollable">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h6 class="modal-title">奖惩详情</h6>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body" id="detailBody">
+                <div class="text-center text-muted py-4"><div class="spinner-border spinner-border-sm"></div> 加载中…</div>
+            </div>
+            <div class="modal-footer">
+                <span class="small text-muted me-auto" id="dtHint"></span>
+                {% if can_edit %}
+                <button type="button" class="btn btn-sm btn-outline-success" id="dtConfirm" style="display:none">确认生效</button>
+                <button type="button" class="btn btn-sm btn-outline-warning" id="dtRevoke" style="display:none">撤销</button>
+                {% endif %}
+                <button type="button" class="btn btn-sm btn-secondary" data-bs-dismiss="modal">关闭</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<form method="POST" id="delForm" class="d-none">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+</form>
+<form method="POST" id="statusForm" class="d-none">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <input type="hidden" name="status" id="statusVal">
+    <input type="hidden" name="reason" id="statusReason">
+</form>
+
+<script>
+(function () {
+    var CSRF = '{{ csrf_token() }}';
+    var REWARD_CATS = {{ reward_categories|tojson }};
+    var PUNISH_CATS = {{ punish_categories|tojson }};
+    var REWARD_LVLS = {{ reward_levels|tojson }};
+    var PUNISH_LVLS = {{ punish_levels|tojson }};
+    var CAN_EDIT = {{ 'true' if can_edit else 'false' }};
+    var editingId = 0;
+
+    function esc(s) {
+        return String(s === null || s === undefined ? '' : s)
+            .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+    }
+    function opts(list, cur) {
+        var h = '<option value="">—</option>';
+        (list || []).forEach(function (it) {
+            h += '<option value="' + esc(it[0]) + '"' + (it[0] === cur ? ' selected' : '') + '>' + esc(it[1]) + '</option>';
+        });
+        return h;
+    }
+    function syncKind() {
+        var k = $('#fKind').val();
+        $('#fCategory').html(opts(k === 'punish' ? PUNISH_CATS : REWARD_CATS));
+        $('#fLevel').html(opts(k === 'punish' ? PUNISH_LVLS : REWARD_LVLS));
+        $('#lvlLabel').text(k === 'punish' ? '处分档次' : '表彰级别');
+        $('#rewardBox').toggle(k !== 'punish');
+        $('#punishBox').toggle(k === 'punish');
+    }
+    $('#fKind').on('change', syncKind);
+    syncKind();
+
+    // ---------- 学生查找 ----------
+    $('#stuFind').on('click', function () {
+        var kw = $.trim($('#stuKw').val());
+        if (!kw) { $('#stuHint').text('请输入姓名或学号'); return; }
+        $('#stuHint').text('查找中…');
+        $.getJSON('{{ url_for("morality.api_students") }}', {q: kw}, function (res) {
+            var list = (res && res.students) || [];
+            if (!list.length) { $('#stuHint').text('没有匹配的学生（换个关键字，或直接手填）'); $('#stuPick').hide(); return; }
+            var h = '';
+            list.forEach(function (s, i) {
+                h += '<option value="' + i + '">' + esc(s.name) + '（' + esc(s.student_no) + '） ' + esc(s.grade) + esc(s.class_name) + '</option>';
+            });
+            window.__stuList = list;
+            $('#stuPick').html(h).show();
+            $('#stuHint').text('点选上面的学生，自动填充学号 / 姓名 / 年级 / 班级');
+        }).fail(function () { $('#stuHint').text('查找失败，请重试或直接手填'); });
+    });
+    $('#stuPick').on('change', function () {
+        var s = (window.__stuList || [])[parseInt($(this).val(), 10)];
+        if (!s) return;
+        $('#fStudentNo').val(s.student_no);
+        $('#fStudentName').val(s.name);
+        $('#fGrade').val(s.grade);
+        $('#fClass').val(s.class_name);
+    });
+
+    // ---------- 新增 / 编辑提交 ----------
+    $('#addForm').on('submit', function (e) {
+        e.preventDefault();
+        $('#addErr').text('');
+        var url = editingId ? '/morality/rewards/' + editingId + '/edit'
+                            : '{{ url_for("morality.rewards_add") }}';
+        var fd = new FormData(this);
+        $.ajax({
+            url: url, method: 'POST', data: fd,
+            processData: false, contentType: false,
+            headers: {'X-CSRFToken': CSRF},
+            success: function (res) {
+                if (!res || !res.success) { $('#addErr').text((res && res.message) || '保存失败'); return; }
+                $('#addModal').modal('hide');
+                location.reload();
+            },
+            error: function (xhr) {
+                var m = '保存失败';
+                try { m = (xhr.responseJSON && xhr.responseJSON.message) || m; } catch (e) {}
+                $('#addErr').text(m);
+            }
+        });
+    });
+
+    // 打开「编辑」：把现有值填进新增表单
+    function openEdit(rec) {
+        editingId = rec.id;
+        $('#addTitle').text('编辑奖惩（' + esc(rec.student_name) + '）');
+        $('#fStudentNo').val(rec.student_no);
+        $('#fStudentName').val(rec.student_name);
+        $('#fGrade').val(rec.grade);
+        $('#fClass').val(rec.class_name);
+        $('#fKind').val(rec.kind); syncKind();
+        $('#fCategory').val(rec.category);
+        $('#fLevel').val(rec.level);
+        $('#fDate').val(rec.happen_date);
+        $('#fTitle').val(rec.title);
+        $('#fDesc').val(rec.description);
+        $('#fAward').val(rec.award_name);
+        $('#fSource').val(rec.source);
+        $('#fExam').val(rec.related_exam);
+        $('#fSubject').val(rec.subject);
+        $('#fEffect').val(rec.effect);
+        $('#fPeriod').val(rec.period_months || '');
+        $('#fExpire').val(rec.expire_date);
+        $('#fNotify').prop('checked', !!rec.notify_parent);
+        $('#addFiles').val('');
+        $('#addErr').text('');
+        new bootstrap.Modal(document.getElementById('addModal')).show();
+    }
+
+    // ---------- 详情 ----------
+    function renderAtts(atts, rid) {
+        var h = '';
+        (atts || []).forEach(function (a) {
+            var prev = (a.ext === 'pdf' || ['jpg', 'jpeg', 'png', 'gif', 'bmp', 'webp'].indexOf(a.ext) >= 0);
+            h += '<div class="col-12 col-md-6"><div class="border rounded p-2 d-flex align-items-center gap-2">'
+               + '<i class="bi bi-paperclip text-muted"></i>'
+               + '<div class="flex-grow-1 overflow-hidden">'
+               + '<div class="small text-truncate">' + esc(a.file_name) + '</div>'
+               + '<div class="text-muted" style="font-size:11px">' + esc(a.doc_type_text) + ' · ' + esc(a.size_text) + ' · ' + esc(a.uploaded_name) + '</div>'
+               + '</div>'
+               + '<a class="btn btn-sm btn-outline-secondary py-0 px-1" target="_blank" href="/morality/rewards/attachment/' + a.id + '" title="预览"><i class="bi bi-eye"></i></a>'
+               + '<a class="btn btn-sm btn-outline-secondary py-0 px-1" href="/morality/rewards/attachment/' + a.id + '/download" title="下载"><i class="bi bi-download"></i></a>'
+               + (CAN_EDIT ? '<button class="btn btn-sm btn-outline-danger py-0 px-1" data-att-del="' + a.id + '" data-rid="' + rid + '" title="删除"><i class="bi bi-trash"></i></button>' : '')
+               + '</div></div>';
+        });
+        return h || '<div class="col-12 text-muted small">暂无附件</div>';
+    }
+
+    function loadDetail(rid, isEdit) {
+        $.getJSON('/morality/rewards/' + rid, function (res) {
+            if (!res || !res.success) { alert('加载失败'); return; }
+            var r = res.record;
+            if (isEdit && CAN_EDIT) { openEdit(r); return; }
+            var html = '<dl class="row mb-0 small">'
+                + '<dt class="col-4">学生</dt><dd class="col-8">' + esc(r.student_name) + '（' + esc(r.student_no) + '） ' + esc(r.grade) + esc(r.class_name) + '</dd>'
+                + '<dt class="col-4">类型</dt><dd class="col-8">' + esc(r.kind_text) + ' · ' + esc(r.category_text) + '</dd>'
+                + '<dt class="col-4">级别</dt><dd class="col-8">' + esc(r.level_text) + '</dd>'
+                + '<dt class="col-4">发生日期</dt><dd class="col-8">' + esc(r.happen_date || '—') + '</dd>'
+                + '<dt class="col-4">事由</dt><dd class="col-8">' + esc(r.title) + '</dd>'
+                + '<dt class="col-4">详细情况</dt><dd class="col-8">' + esc(r.description || '—') + '</dd>';
+            if (r.kind === 'reward') {
+                html += '<dt class="col-4">奖项</dt><dd class="col-8">' + esc(r.award_name || '—') + '</dd>'
+                      + '<dt class="col-4">颁发单位</dt><dd class="col-8">' + esc(r.source || '—') + '</dd>';
+            } else {
+                html += '<dt class="col-4">涉及考试</dt><dd class="col-8">' + esc(r.related_exam || '—') + (r.subject ? ' · ' + esc(r.subject) : '') + '</dd>'
+                      + '<dt class="col-4">处理 / 影响</dt><dd class="col-8">' + esc(r.effect_text || '—') + '</dd>'
+                      + '<dt class="col-4">已通知家长</dt><dd class="col-8">' + (r.notify_parent ? '是' : '否') + '</dd>';
+            }
+            html += '<dt class="col-4">状态</dt><dd class="col-8">' + esc(r.status_text)
+                  + (r.confirmed_by ? '（' + esc(r.confirmed_by) + ' ' + esc(r.confirmed_at) + '）' : '')
+                  + (r.revoke_reason ? '　撤销原因：' + esc(r.revoke_reason) : '') + '</dd>'
+                  + '<dt class="col-4">登记人</dt><dd class="col-8">' + esc(r.operator_name || '—') + '　' + esc(r.created_at) + '</dd>'
+                  + '</dl>';
+            if (CAN_EDIT) {
+                html += '<hr><div class="row g-2 align-items-center mb-2">'
+                      + '<div class="col-auto"><select id="dtDocType" class="form-select form-select-sm" style="width:auto">'
+                      + '{% for k, v in doc_types %}<option value="{{ k }}">{{ v }}</option>{% endfor %}</select></div>'
+                      + '<div class="col-auto"><input type="file" id="dtFiles" multiple class="form-control form-control-sm" style="width:auto;max-width:260px"></div>'
+                      + '<div class="col-auto"><button class="btn btn-sm btn-primary" id="dtUpload"><i class="bi bi-upload"></i> 上传附件</button></div>'
+                      + '</div>';
+            }
+            html += '<div class="row g-2" id="dtAtts">' + renderAtts(r.attachments, r.id) + '</div>';
+            $('#detailBody').html(html);
+            $('#dtConfirm').toggle(r.status === 'draft');
+            $('#dtRevoke').toggle(r.status === 'confirmed');
+            $('#dtHint').text(r.status === 'revoked' ? '该记录已撤销' : '');
+            window.__curRec = r;
+            new bootstrap.Modal(document.getElementById('detailModal')).show();
+        }).fail(function () { alert('加载失败'); });
+    }
+
+    $('[data-act]').on('click', function () {
+        var rid = $(this).data('id'), act = $(this).data('act');
+        if (act === 'detail') { loadDetail(rid, false); }
+        else if (act === 'edit') { loadDetail(rid, true); }
+        else if (act === 'del') {
+            if (!confirm('确定删除这条奖惩记录吗？附件会一并删除，且不可恢复。')) return;
+            $('#delForm').attr('action', '/morality/rewards/' + rid + '/delete').submit();
+        }
+    });
+
+    // 附件：上传 / 删除
+    $(document).on('click', '#dtUpload', function () {
+        var files = document.getElementById('dtFiles').files;
+        if (!files || !files.length) { alert('请先选择文件'); return; }
+        var r = window.__curRec; if (!r) return;
+        var fd = new FormData();
+        for (var i = 0; i < files.length; i++) { fd.append('files', files[i]); }
+        var dt = document.getElementById('dtDocType');
+        if (dt && dt.value) { fd.append('doc_type', dt.value); }
+        fetch('/morality/rewards/' + r.id + '/attachment', {
+            method: 'POST', headers: {'X-CSRFToken': CSRF}, body: fd
+        }).then(function (x) { return x.json(); }).then(function (res) {
+            if (res && res.errors && res.errors.length) { alert(res.errors.join('\n')); }
+            if (res && res.attachments) {
+                $('#dtAtts').html(renderAtts(res.attachments, r.id));
+                window.__curRec.attachments = res.attachments;
+            }
+            document.getElementById('dtFiles').value = '';
+        }).catch(function () { alert('上传失败'); });
+    });
+
+    $(document).on('click', '[data-att-del]', function () {
+        var fid = $(this).data('att-del'), rid = $(this).data('rid');
+        if (!confirm('删除这个附件？')) return;
+        fetch('/morality/rewards/attachment/' + fid + '/delete', {
+            method: 'POST', headers: {'X-CSRFToken': CSRF}
+        }).then(function (x) { return x.json(); }).then(function (res) {
+            if (res && res.attachments) {
+                $('#dtAtts').html(renderAtts(res.attachments, rid));
+                window.__curRec.attachments = res.attachments;
+            }
+        }).catch(function () { alert('删除失败'); });
+    });
+
+    // 状态流转
+    function setStatus(status) {
+        var r = window.__curRec; if (!r) return;
+        var reason = '';
+        if (status === 'revoked') {
+            reason = prompt('撤销原因（申诉成立 / 期满解除 / 录入有误…）', '') || '';
+        }
+        fetch('/morality/rewards/' + r.id + '/status', {
+            method: 'POST',
+            headers: {'X-CSRFToken': CSRF, 'Content-Type': 'application/x-www-form-urlencoded'},
+            body: 'status=' + encodeURIComponent(status) + '&reason=' + encodeURIComponent(reason)
+        }).then(function (x) { return x.json(); }).then(function (res) {
+            if (!res || !res.success) { alert((res && res.message) || '操作失败'); return; }
+            $('#detailModal').modal('hide');
+            location.reload();
+        }).catch(function () { alert('操作失败'); });
+    }
+    $('#dtConfirm').on('click', function () { setStatus('confirmed'); });
+    $('#dtRevoke').on('click', function () { setStatus('revoked'); });
+
+    // 关掉新增框时恢复「新增」态
+    $('#addModal').on('hidden.bs.modal', function () {
+        if (editingId) {
+            editingId = 0;
+            $('#addTitle').text('登记奖惩');
+            document.getElementById('addForm').reset();
+            syncKind();
+        }
+    });
+})();
+</script>
+{% endblock %}

@@ -1,10 +1,10 @@
 # -*- coding: utf-8 -*-
-"""StuLink MCP 服务（stdio 传输入口）：供 CodeBuddy / Claude Desktop 等本地客户端直连。
+"""StuLink 成绩分析 MCP 服务（stdio 传输入口）：供 CodeBuddy / Claude Desktop 等本地客户端直连。
 
-与 run.py（HTTP + Bearer 令牌）的区别：
+与 run.py（HTTP）的区别：
   · 走标准输入输出管道，由客户端以子进程方式拉起，不占端口、不需要令牌；
   · 启动阶段的提示一律写 stderr，stdout 只留给 MCP 协议（避免污染协议流）；
-  · 权限、数据范围、写开关与审计完全复用 core 层，与 HTTP 模式行为一致。
+  · 权限、数据范围与审计完全复用 core 层，与 HTTP 模式行为一致（同为只读成绩工具集）。
 
 客户端配置（.codebuddy/mcp.json 或 Claude Desktop 等）：
   {
@@ -64,7 +64,9 @@ try:
             sys.exit(2)
         app = bootstrap.get_app()
         with app.app_context():
-            user_id, error, message = auth.verify_credentials(username, password)
+            # 2026-10-13：verify_credentials 现返回 4 元组（第 4 项为节流延迟）。
+            # stdio 是启动时认证一次，延迟在这里同步 sleep 无副作用（不在 DB 线程里）。
+            user_id, error, message, delay = auth.verify_credentials(username, password)
             if error:
                 auth.audit_auth_failure(username, error, message, client='stdio')
         if error:
@@ -81,8 +83,7 @@ try:
     )
     loaded = register_all(server)
     print(f"[MCP] stdio 模式已就绪：执行身份 {identity_note}，"
-          f"写操作 {'允许' if cfg.get('allow_write') else '已禁用'}，"
-          f"工具模块 {'、'.join(label for _n, label in loaded)}",
+          f"工具集 {'、'.join(label for _n, label in loaded)}（只读）",
           file=sys.stderr, flush=True)
 finally:
     sys.stdout = _stdout     # 关键：协议运行前必须恢复真实 stdout，否则响应会写进 stderr

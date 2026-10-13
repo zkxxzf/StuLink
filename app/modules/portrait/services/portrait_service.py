@@ -1,4 +1,4 @@
-# StuLink v1.19.47.4 2026-10-10
+# StuLink v1.19.47.25 2026-10-10
 # 学生画像计算服务：评分标准化、综合评级计算
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 """画像计算服务
@@ -178,8 +178,25 @@ def get_student_list(grade=None, class_name=None, level=None, page=1, per_page=2
     """
     q = Student.query
 
-    # 过滤已转出/离校的学生
-    q = q.filter(Student.enrollment_status.notin_(['已转出', '离校']))
+    # 2026-10-11 审计修复：列表此前未做数据范围过滤，任何持 portrait.view 的账号
+    # （班主任/年级长）可分页枚举全校学生姓名+画像等级 → 统一走 apply_student_scope
+    # （H-2 唯一口径）；详情类入口另有 _assert_student_in_scope 守卫。
+    from app.utils.student_scope import apply_student_scope
+    q = apply_student_scope(q)
+
+    # 排除「已离校」的学生（2026-10-13 修复）
+    #
+    # 原写法 `Student.enrollment_status.notin_(['已转出', '离校'])` 有两个缺陷：
+    #  ① 排除名单与实际字典取值对不上：学籍字典里的值是「学籍已转出」，
+    #     「已转出 / 离校」是**班级**取值 —— 该排的学生没排掉（学籍已转出的仍出现在列表）；
+    #  ② 更严重：学籍没填时该列为 NULL，SQL 三值逻辑下 `NULL NOT IN (...)` 结果为 NULL
+    #     → **整行被剔除**。主库 2114 名学生中 1419 人学籍为空，画像列表因此只剩
+    #     695 人，看起来像「管理员只能看到部分学生」（范围过滤对 admin 是全放开，无关）。
+    # 现口径：学籍或班级被标记为已转出/离校才排除；NULL 视为「未标记」，正常保留。
+    q = q.filter(or_(Student.enrollment_status.is_(None),
+                     Student.enrollment_status.notin_(['学籍已转出', '离校'])),
+                 or_(Student.class_name.is_(None),
+                     Student.class_name.notin_(['已转出', '离校'])))
 
     if grade:
         q = q.filter(Student.grade == grade)

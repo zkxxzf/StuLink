@@ -1,4 +1,4 @@
-# StuLink v1.19.47.4 2026-10-10
+# StuLink v1.19.47.25 2026-10-10
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 """备课组长（2026-09-25）。
 
@@ -19,7 +19,7 @@ from flask_login import login_required, current_user
 
 from app.models.academic import DUTY_TEMPLATES, SUBJECT_ORDER
 from app.modules.academic import bp
-from app.modules.academic.services import duty_service as svc
+from app.modules.academic.services import subject_leader_service as svc
 from app.utils.decorators import perm_required
 from app.utils.helpers import log_operation
 
@@ -72,7 +72,7 @@ def _grade_options():
         from app.models import ClassProfile
         grades = sorted({cp.grade for cp in ClassProfile.query.all() if cp.grade})
     except Exception as _e:  # noqa: BLE001
-        logger.warning('duty.py::_grade_options 异常（已降级处理）: %s', _e)
+        logger.warning('subject_leaders::_grade_options 异常（已降级处理）: %s', _e)
     for g in ('高一', '高二', '高三'):
         if g not in grades:
             grades.append(g)

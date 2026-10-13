@@ -1,4 +1,4 @@
-/* StuLink v1.19.47.4 2026-10-10 全局对比
+/* StuLink v1.19.47.25 2026-10-10 全局对比
  * 班级 × 学科宽表：固定列（年级/班级/人数/方向/属性）+ 每科（去差均分 + 各分数线）。
  * 分数线可选：默认勾选 211线/特控线/本科线，其余层（清北/985…）勾选才显示；
  * 班主任并入「总分」格下方（不再单列），各科成绩下方为本场任课教师快照。
@@ -53,10 +53,20 @@
             });
         });
         if (examId) { sel.val(String(examId)); }
+        var missed = !!(examId && sel.val() !== String(examId));
         if (!sel.val() && sel.find('option').length) { sel.prop('selectedIndex', 0); }
         if (!sel.find('option').length) {
             $body.html(emptyHtml('暂无可查看的考试'));
             return;
+        }
+        if (missed) {
+            // v1.19.47.25 本场考试不在可见列表（已删除 / 超出数据范围 / 已毕业）：
+            // 不能静默显示最近一场让用户误当本场（考试态下下拉原本隐藏）——
+            // 恢复下拉并明确提示。
+            $('#ldExam').removeClass('d-none');
+            $('#ldMeta').before('<div id="ldNotice" class="alert alert-warning py-2 small mb-2">'
+                + '<i class="bi bi-exclamation-triangle"></i> 本场考试不可见（可能已删除或不在您的数据范围），'
+                + '已改为显示最近一场，请重新选择。</div>');
         }
         load();
     }).fail(function (x) {

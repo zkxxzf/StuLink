@@ -345,6 +345,12 @@ HTTP 模式（服务已在运行）：
 }
 ```
 
+> 前两个头是**身份**（每个客户端用哪个 StuLink 账号）；如果 `config.json` 里
+> `require_token=true`，还要再加一个**服务准入令牌** `"X-StuLink-Token": "<config.json 里的 token>"`
+> （或 `Authorization: Bearer <token>`），缺了会得到 401 `invalid_token`。
+> **本项目当前 `require_token=false`**（2026-10-13 用户口径：不开令牌），所以照抄上面两个头即可；
+> 多带令牌也无害（会被忽略）。令牌值只在 `config.json` 与启动横幅（首尾片段）出现，别外发。
+
 stdio 模式（应用自己拉起进程，无需手动启动服务）：
 
 ```json
@@ -504,9 +510,9 @@ curl.exe -i -X POST http://127.0.0.1:8765/mcp `
 ```
 
 ```bat
-:: L4/L5：项目自带端到端自测（含认证、权限、写开关用例）
-mcp_server\.venv\Scripts\python.exe mcp_server\smoke_mcp.py
-:: 通过则输出：通过 40 / 失败 0
+:: L4/L5：项目自带端到端自测（含认证、权限、成绩可见范围用例）
+mcp_server\.venv\Scripts\python.exe mcp_server\smoke_scores.py
+:: 通过则输出：通过 69 / 失败 0
 ```
 
 > 提醒：**只看"进程启动了"就认为装好，是最常见的误判**。
@@ -579,7 +585,7 @@ mcp_server/config.json  ←──  各 AI 工具的接入配置
 | `invalid_credentials` | 账号或密码错误 | 核对账号密码；注意全角字符与首尾空格 |
 | `account_disabled` | 账号被停用 | 联系管理员启用或换账号 |
 | `invalid_token` | 服务令牌缺失/错误 | 用 `config.json` 里的 `token`（`require_token=true` 时必需） |
-| `too_many_attempts` | 连续失败被锁定 | 按 `Retry-After` 等待（默认 300 秒） |
+| `too_many_attempts` | 认证失败超限 | 按 `Retry-After` 等待（默认 300 秒）。三种触发：① 本机对该账号连错 5 次 → **只锁本机**，账号本人从别的设备照常登录；② 本机各类失败累计 20 次（换着账号试）→ 挡住本机；③ 账号被多来源试 → 只加延迟，不拒绝 |
 
 ### 8.3 通用错误对照表
 

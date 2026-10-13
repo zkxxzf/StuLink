@@ -1,4 +1,4 @@
-# StuLink v1.19.47.4 2026-10-10
+# StuLink v1.19.47.25 2026-10-10
 # 班级概览服务：聚合班主任管辖班级数据（跨库查询）
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 from datetime import date, datetime
@@ -48,14 +48,24 @@ def get_managed_classes(user_id):
     return [(lk.grade, lk.class_name) for lk in links]
 
 
-def get_class_overview(user_id, month_str=None):
+def get_class_overview(user_id, month_str=None, user=None):
     """聚合管辖班级概览数据
 
     返回: [{class_name, grade, student_count, points_plus, points_minus,
             latest_exam_name, latest_exam_avg, attendance_rate}, ...]
+
+    v1.19.47.25：班级来源改用**统一可见班级口径** `wb_scope.managed_class_pairs(user)`
+    —— 任课教师（凭 TeacherSubjectLink 任教班）也能看到自己教的班；
+    此前只认 UserClassLink（班主任关联），任课教师的班级概览恒为空。
+    不传 user 时沿用旧口径，保持向后兼容。
     """
-    links = UserClassLink.query.filter_by(user_id=user_id).all()
-    if not links:
+    if user is not None:
+        from app.modules.workbench.services import scope as wb_scope
+        pairs = list(wb_scope.managed_class_pairs(user) or [])
+    else:
+        pairs = [(lk.grade, lk.class_name)
+                 for lk in UserClassLink.query.filter_by(user_id=user_id).all()]
+    if not pairs:
         return []
 
     month_start, month_end = _month_range(month_str)
@@ -63,8 +73,8 @@ def get_class_overview(user_id, month_str=None):
     # v1.16.0 性能改造：旧版每班 6 条查询（学生数/积分/考试/均分/考勤总数/考勤出勤），
     # 班主任带多个班时 SQL 随班数线性膨胀。现改为跨班一次性 GROUP BY 聚合 +
     # 考勤条件聚合，总查询数与班数无关。跨库不能 JOIN，故按库分别聚合后内存拼接，口径一致。
-    grades = list({lk.grade for lk in links})
-    class_names = list({lk.class_name for lk in links})
+    grades = list({g for g, _ in pairs})
+    class_names = list({c for _, c in pairs})
 
     # 1. 学生数（system.db）：一次 GROUP BY
     stu_map = {}
@@ -117,8 +127,7 @@ def get_class_overview(user_id, month_str=None):
         att_map[(g, c)] = round(pres / tot * 100, 1) if tot and tot > 0 else None
 
     results = []
-    for lk in links:
-        grade, class_name = lk.grade, lk.class_name
+    for grade, class_name in pairs:
         full_class = f'{grade}{class_name}'
         student_count = stu_map.get((grade, class_name), 0)
         points_plus, points_minus = pts_map.get((grade, class_name), (0, 0))

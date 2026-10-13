@@ -1,4 +1,4 @@
-{# StuLink v1.19.47.4 课表网格宏：13行(节次) x 7列(星期)，供 master/grade/class/teacher 模板复用。
+{# StuLink v1.19.47.25 课表网格宏：13行(节次) x 7列(星期)，供 master/grade/class/teacher 模板复用。
    视觉：学科配色 + 卡片化条目 + 节次列吸附 + 移动端压缩 + 打印黑白化。
    JS 端 schedule.js 用同样的 class/结构约定重渲染（AJAX 切换班级/年级时），改结构时两处同步。 #}
 {% macro schedule_grid_css() %}
@@ -150,8 +150,9 @@
    - can_edit: 是否可点击编辑（空格 "+" / 有课单元格点击弹窗 / 拖拽换格）
    - current_period: 当前节次号（今日课表高亮，可为 None）
    - grid_id: 容器 id（AJAX 重渲染定位用）
+   - show_class: 主文本用「班级」、副文本用「学科」（教师课表专用，见下）
 #}
-{% macro schedule_grid(periods, grid, can_edit=False, current_period=None, grid_id='schGrid') %}
+{% macro schedule_grid(periods, grid, can_edit=False, current_period=None, grid_id='schGrid', show_class=False) %}
 {% set dot_cls = {'morning': 'sch-dot-morning', 'afternoon': 'sch-dot-afternoon',
                   'evening': 'sch-dot-evening', 'break': 'sch-dot-break'} %}
 <div class="sch-grid-wrap" id="{{ grid_id }}">
@@ -185,8 +186,10 @@
                          data-entry-id="{{ e.id }}"
                          {% if can_edit %}draggable="true" title="拖到别的格子可换课（点击可编辑）"{% endif %}
                          style="--sch:{{ tone.c }};--sch-bg:{{ tone.bg }};--sch-fg:{{ tone.fg }}">
-                        <div class="sch-subject">{{ e.subject }}{% if e.entry_type == 'swap' %}<span class="sch-badge-swap">调</span>{% endif %}{% if e.teaching_class %}<span class="sch-badge-tc" title="走班课：{{ e.teaching_class }}">走</span>{% endif %}{% if e.week_badge %}<span class="sch-badge-week">{{ e.week_badge }}</span>{% endif %}</div>
-                        <div class="sch-teacher">{{ e.teacher_name or '未指定' }}</div>
+                        {# 2026-10-12（用户要求）：教师课表上老师只需知道"这节是哪个班的课"，
+                           自己的学科不必重复 —— show_class=True 时主文本换成班级、副文本换成学科。 #}
+                        <div class="sch-subject">{{ ((e.grade or '') ~ (e.class_name or '')) if show_class else e.subject }}{% if e.entry_type == 'swap' %}<span class="sch-badge-swap">调</span>{% endif %}{% if e.teaching_class %}<span class="sch-badge-tc" title="走班课：{{ e.teaching_class }}">走</span>{% endif %}{% if e.week_badge %}<span class="sch-badge-week">{{ e.week_badge }}</span>{% endif %}</div>
+                        <div class="sch-teacher">{{ (e.subject or '—') if show_class else (e.teacher_name or '未指定') }}</div>
                         {% if e.room %}<div class="sch-room"><i class="bi bi-geo-alt"></i> {{ e.room }}</div>{% endif %}
                     </div>
                     {% if loop.last and can_edit %}
