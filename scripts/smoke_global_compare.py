@@ -299,7 +299,7 @@ with app.app_context():
     dp = ld.global_compare_report(e1, '物理')
     check('筛选物理：仅 1 组 2 班', len(dp['groups']) == 1 and len(dp['groups'][0]['rows']) == 2)
     check('筛选物理：不出全年级行', dp['grand'] is None)
-    # v1.19.47.27 回归：筛选后 directions 仍返回**完整**方向集（否则前端下拉会丢另一个方向）
+    # v1.19.47.28 回归：筛选后 directions 仍返回**完整**方向集（否则前端下拉会丢另一个方向）
     check('筛选物理：方向下拉仍含 物理+历史（不丢另一方向）',
           dp['directions'] == ['物理', '历史'], str(dp.get('directions')))
     check('未筛选：方向下拉含 物理+历史',

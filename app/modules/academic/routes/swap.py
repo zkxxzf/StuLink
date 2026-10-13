@@ -1,4 +1,4 @@
-# StuLink v1.19.47.27 2026-10-10
+# StuLink v1.19.47.28 2026-10-10
 # 教务 · 调课管理（重构版，基于 timetable.db）：
 #   个人调课 / 统一调课 / 审核 / 执行 / 撤销 / 详情 / 统计 / 联动 API
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
@@ -288,7 +288,7 @@ def swap_apply():
         reason = (request.form.get('reason') or '').strip()
         is_permanent = _bool_flag(request.form.get('is_permanent'))
         new_room = (request.form.get('new_room') or '').strip()
-        # 2026-10-13（v1.19.47.27）：普通调课与「与人对调」合并 —— items 可带
+        # 2026-10-13（v1.19.47.28）：普通调课与「与人对调」合并 —— items 可带
         # partner_entry_id（有 = 那格有人，和对调；没有 = 空档，直接调）。
         items = _parse_json_items(request.form, required=('entry_id',))
         if not items:
@@ -381,7 +381,7 @@ def _commit_exchange_batch(items, uid, name, reason, is_permanent,
 @login_required
 @perm_required('academic.swap')
 def swap_cover():
-    """请人代课（v1.19.47.27）：我的课请别的老师来上，**支持批量**（多人代多节）。
+    """请人代课（v1.19.47.28）：我的课请别的老师来上，**支持批量**（多人代多节）。
 
     时间 / 班级都不变，只换授课人；每条记录各自等代课老师确认。
     """
@@ -516,7 +516,7 @@ def swap_bulk():
         is_permanent = _bool_flag(request.form.get('is_permanent'))
         swap_date = _parse_date(request.form.get('swap_date'))
 
-        # 2026-10-13（v1.19.47.27）：两种目标模式 —— 统一落到同一格 / 整体平移 N 节
+        # 2026-10-13（v1.19.47.28）：两种目标模式 —— 统一落到同一格 / 整体平移 N 节
         mode = (request.form.get('mode') or 'target').strip()
         period_offset = request.form.get('period_offset', type=int) if mode == 'offset' else None
         ok, msg, result = swap_service.bulk_apply_swap(
