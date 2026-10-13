@@ -280,7 +280,7 @@ def delete(id):
     return redirect(url_for('rooms.list_rooms'))
 
 @bp.route('/assign-visual')
-@perm_required('dormitory.manage')
+@perm_required('dormitory.assign')   # 2026-10-13：宿舍分配独立权限点（原误用 manage，致 assign 成死权限）
 def assign_visual():
     """可视化宿舍分配页面"""
     from app.utils.helpers import get_graduated_grades
@@ -292,7 +292,7 @@ def assign_visual():
 
 
 @bp.route('/assign-data')
-@perm_required('dormitory.manage')  # H-2：分配页数据源
+@perm_required('dormitory.assign')  # H-2：分配页数据源
 def assign_data():
     """获取宿舍分配页面所需的所有数据"""
     from flask import jsonify
@@ -376,7 +376,7 @@ def assign_data():
 
 
 @bp.route('/assign-room', methods=['POST'])
-@perm_required('dormitory.manage')
+@perm_required('dormitory.assign')
 def assign_room():
     """分配宿舍给班级"""
     from flask import jsonify
@@ -408,7 +408,7 @@ def assign_room():
 
 
 @bp.route('/unassign-room', methods=['POST'])
-@perm_required('dormitory.manage')
+@perm_required('dormitory.assign')
 def unassign_room():
     """取消宿舍分配"""
     from flask import jsonify
@@ -434,7 +434,7 @@ def unassign_room():
 
 
 @bp.route('/set-combined', methods=['POST'])
-@perm_required('dormitory.manage')
+@perm_required('dormitory.assign')
 def set_combined():
     """设置合班宿舍"""
     from flask import jsonify
@@ -462,7 +462,7 @@ def set_combined():
 
 
 @bp.route('/save-assignments', methods=['POST'])
-@perm_required('dormitory.manage')
+@perm_required('dormitory.assign')
 def save_assignments():
     """批量保存所有分配"""
     from flask import jsonify
@@ -641,7 +641,7 @@ def class_bed_requirement():
 
 
 @bp.route('/update-room-assignment', methods=['POST'])
-@perm_required('dormitory.manage')
+@perm_required('dormitory.assign')
 def update_room_assignment():
     """更新单个房间的年级班级分配"""
     from flask import jsonify
@@ -853,7 +853,7 @@ def _adjust_beds(room, old_capacity, new_capacity):
 
 @bp.route('/assign-auto')
 @login_required
-@perm_required('dormitory.manage')
+@perm_required('dormitory.assign')
 def assign_auto():
     """自动分配宿舍向导页面"""
     from app.utils.helpers import get_graduated_grades
@@ -921,7 +921,7 @@ def assign_auto():
 
 
 @bp.route('/assign-auto/stats')
-@perm_required('dormitory.manage')  # H-2
+@perm_required('dormitory.assign')  # H-2
 def assign_auto_stats():
     """
     获取班级选择统计数据（后端计算，防止篡改）
@@ -1025,7 +1025,7 @@ def assign_auto_stats():
 
 @bp.route('/assign-auto/preview', methods=['POST'])
 @login_required
-@perm_required('dormitory.manage')
+@perm_required('dormitory.assign')
 def assign_auto_preview():
     """预览自动分配方案（不执行）- V7"""
     data = request.json or {}
@@ -1108,7 +1108,7 @@ def assign_auto_preview():
 
 @bp.route('/assign-auto/execute', methods=['POST'])
 @login_required
-@perm_required('dormitory.manage')
+@perm_required('dormitory.assign')
 def assign_auto_execute():
     """执行自动分配 - V7"""
     data = request.json or {}
@@ -1144,7 +1144,7 @@ def assign_auto_execute():
 
 
 @bp.route('/available-rooms-data')
-@perm_required('dormitory.manage')  # H-2
+@perm_required('dormitory.assign')  # H-2
 def available_rooms_data():
     """获取可用房间数据（用于自动分配页面）"""
     # 获取所有激活的房间
@@ -1182,7 +1182,7 @@ def available_rooms_data():
 
 
 @bp.route('/assign-auto/room-stats', methods=['POST'])
-@perm_required('dormitory.manage')  # H-2
+@perm_required('dormitory.assign')  # H-2
 def assign_auto_room_stats():
     """
     获取房间选择统计数据（后端计算，防止篡改）
@@ -1555,10 +1555,12 @@ def report_export():
 
 
 @bp.route('/swap-data')
-@perm_required('dormitory.manage')  # H-2
+@perm_required('dormitory.assign')  # H-2
 def swap_data():
     """获取宿舍互换所需的房间列表数据"""
-    rooms = Room.query.filter_by(is_active=True).order_by(
+    # 2026-10-13：宿舍互换改由 dormitory.assign 把关（原 manage），
+    # 因 assign 可单独授予年级/班级范围账号，房间列表必须同步收敛范围。
+    rooms = room_scope_query(Room.query.filter_by(is_active=True)).order_by(
         Room.gender, Room.building, Room.floor, Room.room_number
     ).all()
 
@@ -1602,7 +1604,7 @@ def swap_data():
 
 
 @bp.route('/swap', methods=['POST'])
-@perm_required('dormitory.manage')
+@perm_required('dormitory.assign')
 def swap_rooms():
     """交换两个宿舍的班级分配和学生床位"""
     data = request.get_json()
@@ -1618,6 +1620,10 @@ def swap_rooms():
     room_b = Room.query.get(room_b_id)
     if not room_a or not room_b:
         return jsonify({'success': False, 'message': '宿舍不存在'}), 404
+    # 2026-10-13：两个房间都必须在当前用户的宿舍可见范围内（范围账号不得跨范围互换）
+    if (room_scope_query(Room.query.filter_by(id=room_a.id)).first() is None
+            or room_scope_query(Room.query.filter_by(id=room_b.id)).first() is None):
+        return jsonify({'success': False, 'message': '无权操作所选宿舍（超出你的数据范围）'}), 403
     if not room_a.is_active or not room_b.is_active:
         return jsonify({'success': False, 'message': '宿舍已停用'}), 400
 

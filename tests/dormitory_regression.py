@@ -89,6 +89,12 @@ def _login(username, password):
     return c
 
 
+def _read(rel):
+    """读取仓库内源码/模板（源码口径断言用）"""
+    with open(os.path.join(BASE, rel), 'r', encoding='utf-8') as f:
+        return f.read()
+
+
 # ── 数据准备 ────────────────────────────────────────────────────────────────
 with app.app_context():
     db.create_all()
@@ -144,6 +150,23 @@ with app.app_context():
     db.session.add_all([ht, gl, off])
     db.session.flush()
     db.session.add(UserClassLink(user_id=ht.id, grade='高一', class_name='01班'))
+
+    # 2026-10-13：dormitory.assign 接线验证用 —— 两个自定义权限组，分别只给
+    # 「房间管理」与「宿舍分配」，验证两档互不越权。
+    from app.models import PermissionGroup as _PG
+    g_room = _PG(name='DM房间管理', scope_type='school', role='staff')
+    g_room.set_menu_keys(['dormitory.view', 'dormitory.manage'])
+    g_asg = _PG(name='DM宿舍分配', scope_type='school', role='staff')
+    g_asg.set_menu_keys(['dormitory.view', 'dormitory.assign'])
+    db.session.add_all([g_room, g_asg])
+    db.session.flush()
+    u_room = User(username='dm_roomonly', real_name='仅房间管理', role='staff',
+                  must_change_pwd=False, permission_group_id=g_room.id)
+    u_asg = User(username='dm_assignonly', real_name='仅宿舍分配', role='staff',
+                 must_change_pwd=False, permission_group_id=g_asg.id)
+    for _u in (u_room, u_asg):
+        _u.set_password(TEST_PWD)
+    db.session.add_all([u_room, u_asg])
     db.session.commit()
 
     IDS.update(admin=admin.id, r1=r1.id, r2=r2.id, r3=r3.id, s1=s1.id, s2=s2.id,
@@ -354,6 +377,75 @@ def check_stats_scope():
     r = _client('dm_office').get('/statistics/')
     case('SCOPE 无范围账号统计页 403（fail-closed）', r.status_code == 403,
          f'status={r.status_code}')
+
+
+# ==================== dormitory.assign 权限接线（2026-10-13） ====================
+@item('ASSIGN')
+def check_assign_perm():
+    """`dormitory.assign` 独立把宿舍分配类路由（原为死权限点，路由误用 manage）。
+
+    修复前：拖拽分配 / 自动分配 / 合班 / 宿舍互换 均用 `dormitory.manage` 把关，
+    授予 assign 与否不影响任何页面（权限矩阵里的「宿舍分配」形同虚设）。
+    """
+    def _client(username):
+        return _login(username, TEST_PWD)
+
+    # 仅房间管理（无 assign）：房间 CRUD 放行，分配类页面拦截
+    c = _client('dm_roomonly')
+    case('ASSIGN 仅房间管理：宿舍列表 200', c.get('/rooms/').status_code == 200)
+    case('ASSIGN 仅房间管理：新增宿舍页 200', c.get('/rooms/create').status_code == 200)
+    case('ASSIGN 仅房间管理：拖拽分配页 403',
+         c.get('/rooms/assign-visual').status_code == 403)
+    case('ASSIGN 仅房间管理：自动分配页 403',
+         c.get('/rooms/assign-auto').status_code == 403)
+    case('ASSIGN 仅房间管理：宿舍互换数据 403',
+         c.get('/rooms/swap-data').status_code == 403)
+
+    # 仅宿舍分配（无 manage）：分配类页面放行，房间 CRUD 拦截
+    c = _client('dm_assignonly')
+    case('ASSIGN 仅宿舍分配：拖拽分配页 200',
+         c.get('/rooms/assign-visual').status_code == 200)
+    case('ASSIGN 仅宿舍分配：自动分配页 200',
+         c.get('/rooms/assign-auto').status_code == 200)
+    case('ASSIGN 仅宿舍分配：分配页数据源 200',
+         c.get('/rooms/assign-data').status_code == 200)
+    case('ASSIGN 仅宿舍分配：宿舍互换数据 200',
+         c.get('/rooms/swap-data').status_code == 200)
+    case('ASSIGN 仅宿舍分配：新增宿舍页 403',
+         c.get('/rooms/create').status_code == 403)
+
+    # 源码口径：分配类路由用 assign、房间 CRUD 用 manage
+    src = _read('app/modules/dormitory/routes/rooms.py')
+    case('ASSIGN 源码：分配类路由用 dormitory.assign',
+         src.count("@perm_required('dormitory.assign')") >= 12)
+    for fn in ('assign_visual', 'assign_auto', 'assign_room', 'save_assignments',
+               'set_combined', 'swap_rooms'):
+        # 允许修饰器行尾带注释 / 夹一行 @login_required
+        pat = (r"@perm_required\('dormitory\.assign'\)[^\n]*\n"
+               r"(?:@login_required\n)?def " + fn + r"\(")
+        case(f'ASSIGN 源码：{fn} 用 assign', bool(re.search(pat, src)))
+
+    # 前端入口按权限点显示
+    base = _read('app/templates/base.html')
+    case('ASSIGN 侧栏「分配宿舍」按 assign 显示',
+         "has_perm('dormitory.assign')" in base)
+    lst = _read('app/templates/dormitory/rooms/list.html')
+    case('ASSIGN 宿舍列表「宿舍互换」按 assign 显示',
+         "has_perm('dormitory.assign')" in lst)
+
+
+# ==================== /dashboard 图表本地化（2026-10-13） ====================
+@item('CHART')
+def check_dashboard_local_chart():
+    """宿舍总览年级人数图不再依赖公网 CDN（离线/NAS 部署可显示）。"""
+    tpl = _read('app/templates/dormitory/dashboard/index.html')
+    case('CHART 不再引用公网 CDN', 'cdn.jsdelivr.net' not in tpl
+         and 'chart.umd' not in tpl)
+    case('CHART 改用本地 echarts', "su('js/echarts.min.js')" in tpl)
+    case('CHART 保留加载失败降级提示', '图表加载失败' in tpl)
+    case('CHART 本地文件存在',
+         __import__('os').path.isfile(
+             BASE + '/app/static/js/echarts.min.js'))
 
 
 # ── 执行 ────────────────────────────────────────────────────────────────────

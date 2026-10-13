@@ -411,6 +411,8 @@
                href="{{ url_for('dashboard.search_student_accommodation') }}">
                 <i class="bi bi-search"></i>学生住宿
             </a>
+            {% endif %}
+            {% if current_user.has_perm('dormitory.assign') %}
             <a class="nav-link {% if request.endpoint == 'rooms.assign_visual' %}active{% endif %}"
                href="{{ url_for('rooms.assign_visual') }}">
                 <i class="bi bi-diagram-3"></i>分配宿舍

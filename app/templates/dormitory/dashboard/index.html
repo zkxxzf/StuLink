@@ -97,7 +97,8 @@
                 </div>
             </div>
             <div class="card-body" style="height: 220px; padding: 12px 16px;">
-                <canvas id="gradeChart"></canvas>
+                {# 2026-10-13：不再用公网 CDN 的 Chart.js，改用本地 echarts（离线/NAS 可显示） #}
+                <div id="gradeChart" style="width:100%; height:100%;"></div>
             </div>
         </div>
     </div>
@@ -178,99 +179,90 @@
 {% endblock %}
 
 {% block extra_js %}
-<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.2.0/dist/chartjs-plugin-datalabels.min.js"></script>
+{# 2026-10-13：图表库从公网 CDN（chart.js）改为项目自带本地 echarts。
+   原写法在内网/NAS 离线部署时加载失败、图表空白；echarts 为项目统一图表库，
+   其余 14 个页面均已使用。 #}
+<script src="{{ su('js/echarts.min.js') }}"></script>
 <script>
-(function() {
-    if (typeof Chart === 'undefined') {
-        document.getElementById('gradeChart').parentElement.innerHTML = '<p class="text-muted text-center py-4">图表加载失败，请刷新页面重试</p>';
+(function () {
+    var box = document.getElementById('gradeChart');
+    if (!box) { return; }
+    if (typeof echarts === 'undefined') {
+        box.innerHTML = '<p class="text-muted text-center py-4">图表加载失败，请刷新页面重试</p>';
         return;
     }
-    Chart.register(ChartDataLabels);
 
     var labels = [{% for g in grade_stats %}'{{ g.grade }}'{% if not loop.last %},{% endif %}{% endfor %}];
     var dayData = [{% for g in grade_stats %}{{ g.day }}{% if not loop.last %},{% endif %}{% endfor %}];
     var boardMaleData = [{% for g in grade_stats %}{{ g.boarding_male }}{% if not loop.last %},{% endif %}{% endfor %}];
     var boardFemaleData = [{% for g in grade_stats %}{{ g.boarding_female }}{% if not loop.last %},{% endif %}{% endfor %}];
 
-    var ctx = document.getElementById('gradeChart').getContext('2d');
-    new Chart(ctx, {
-        type: 'bar',
-        data: {
-            labels: labels,
-            datasets: [
-                {
-                    label: '走读',
-                    data: dayData,
-                    backgroundColor: 'rgba(251, 191, 36, 0.85)',
-                    hoverBackgroundColor: 'rgba(251, 191, 36, 1)',
-                    borderRadius: 4,
-                    borderSkipped: false
-                },
-                {
-                    label: '住校男生',
-                    data: boardMaleData,
-                    backgroundColor: 'rgba(59, 130, 246, 0.85)',
-                    hoverBackgroundColor: 'rgba(59, 130, 246, 1)',
-                    borderRadius: 4,
-                    borderSkipped: false
-                },
-                {
-                    label: '住校女生',
-                    data: boardFemaleData,
-                    backgroundColor: 'rgba(236, 72, 153, 0.85)',
-                    hoverBackgroundColor: 'rgba(236, 72, 153, 1)',
-                    borderRadius: 4,
-                    borderSkipped: false
-                }
-            ]
-        },
-        options: {
-            responsive: true,
-            maintainAspectRatio: false,
-            interaction: { mode: 'index', intersect: false },
-            plugins: {
-                legend: { display: false },
-                datalabels: {
-                    display: function(ctx) {
-                        return ctx.dataset.data[ctx.dataIndex] > 0;
-                    },
-                    color: '#fff',
-                    font: { size: 11, weight: '600' },
-                    anchor: 'center',
-                    align: 'center'
-                },
-                tooltip: {
-                    backgroundColor: 'rgba(30,41,59,0.92)',
-                    titleFont: { size: 13, weight: 'bold' },
-                    bodyFont: { size: 12 },
-                    padding: 12,
-                    cornerRadius: 8,
-                    callbacks: {
-                        afterBody: function(items) {
-                            var idx = items[0].dataIndex;
-                            var total = dayData[idx] + boardMaleData[idx] + boardFemaleData[idx];
-                            return '\n合计：' + total + ' 人';
-                        }
-                    }
-                }
-            },
-            scales: {
-                x: {
-                    stacked: true,
-                    grid: { display: false },
-                    ticks: { font: { size: 12, weight: '600' }, color: '#64748b' }
-                },
-                y: {
-                    stacked: true,
-                    beginAtZero: true,
-                    grid: { color: 'rgba(0,0,0,0.04)' },
-                    border: { display: false },
-                    ticks: { font: { size: 11 }, color: '#94a3b8', stepSize: 100 }
-                }
+    // 柱内数值标签：为 0 不显示（与原 Chart.js datalabels 口径一致）
+    function insideLabel() {
+        return {
+            show: true, position: 'inside', color: '#fff',
+            fontSize: 11, fontWeight: 600,
+            formatter: function (p) { return p.value > 0 ? p.value : ''; }
+        };
+    }
+
+    var chart = echarts.init(box);
+    chart.setOption({
+        tooltip: {
+            trigger: 'axis',
+            axisPointer: { type: 'shadow' },
+            backgroundColor: 'rgba(30,41,59,0.92)',
+            borderWidth: 0,
+            textStyle: { color: '#fff', fontSize: 12 },
+            padding: [8, 12],
+            formatter: function (ps) {
+                var idx = ps[0].dataIndex;
+                var total = dayData[idx] + boardMaleData[idx] + boardFemaleData[idx];
+                var out = ps[0].axisValue + '<br/>';
+                ps.forEach(function (p) {
+                    out += p.marker + p.seriesName + '：' + p.value + ' 人<br/>';
+                });
+                return out + '合计：' + total + ' 人';
             }
-        }
+        },
+        legend: { show: false },
+        grid: { left: 8, right: 8, top: 8, bottom: 4, containLabel: true },
+        xAxis: {
+            type: 'category',
+            data: labels,
+            axisTick: { show: false },
+            axisLine: { lineStyle: { color: '#e2e8f0' } },
+            axisLabel: { color: '#64748b', fontSize: 12, fontWeight: 600, interval: 0 }
+        },
+        yAxis: {
+            type: 'value',
+            splitLine: { lineStyle: { color: 'rgba(0,0,0,0.04)' } },
+            axisLine: { show: false },
+            axisTick: { show: false },
+            axisLabel: { color: '#94a3b8', fontSize: 11 }
+        },
+        series: [
+            {
+                name: '走读', type: 'bar', stack: 'total', barMaxWidth: 46,
+                itemStyle: { color: 'rgba(251, 191, 36, 0.85)' },
+                emphasis: { itemStyle: { color: 'rgba(251, 191, 36, 1)' } },
+                label: insideLabel(), data: dayData
+            },
+            {
+                name: '住校男生', type: 'bar', stack: 'total', barMaxWidth: 46,
+                itemStyle: { color: 'rgba(59, 130, 246, 0.85)' },
+                emphasis: { itemStyle: { color: 'rgba(59, 130, 246, 1)' } },
+                label: insideLabel(), data: boardMaleData
+            },
+            {
+                name: '住校女生', type: 'bar', stack: 'total', barMaxWidth: 46,
+                itemStyle: { color: 'rgba(236, 72, 153, 0.85)', borderRadius: [4, 4, 0, 0] },
+                emphasis: { itemStyle: { color: 'rgba(236, 72, 153, 1)' } },
+                label: insideLabel(), data: boardFemaleData
+            }
+        ]
     });
+    window.addEventListener('resize', function () { chart.resize(); });
 })();
 </script>
 {% endblock %}

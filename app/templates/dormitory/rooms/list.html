@@ -51,17 +51,22 @@
 <div class="card mb-3">
     <div class="card-body d-flex justify-content-between align-items-center">
         <h4 class="fw-bold mb-0"><i class="bi bi-door-open"></i> 宿舍列表</h4>
-        {% if current_user.has_role('admin', 'dorm_manager') %}
+        {# 2026-10-13：按钮按权限点显示（宿舍互换＝宿舍分配；批量加房/新增＝房间管理） #}
+        {% if current_user.has_perm('dormitory.assign') or current_user.has_perm('dormitory.manage') %}
         <div class="d-flex gap-2">
+            {% if current_user.has_perm('dormitory.assign') %}
             <button type="button" class="btn btn-sm btn-warning" onclick="openSwapModal()">
                 <i class="bi bi-arrow-left-right"></i> 宿舍互换
             </button>
+            {% endif %}
+            {% if current_user.has_perm('dormitory.manage') %}
             <a href="{{ url_for('rooms.batch_add_rooms') }}" class="btn btn-sm btn-info">
                 <i class="bi bi-building"></i> 批量添加楼层
             </a>
             <a href="{{ url_for('rooms.create') }}" class="btn btn-sm btn-success">
                 <i class="bi bi-plus-lg"></i> 新增宿舍
             </a>
+            {% endif %}
         </div>
         {% endif %}
     </div>
