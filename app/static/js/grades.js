@@ -141,7 +141,8 @@ function syncExamNav(){
         ana_grade: '/grades/analysis?exam=' + eid + '&tab=grade',
         ana_class: '/grades/analysis?exam=' + eid + '&tab=class',
         ana_subject: '/grades/analysis?exam=' + eid + '&tab=subject',
-        ai: '/grades/exams/' + eid + '/ai-import',
+        // 2026-10-13：原侧栏「AI 智能导入」项已并入「成绩导入」（data-nav="import"），
+        // 两种方式在导入页内切换，因此这里不再需要 ai 映射。
         bands: '/grades/exams/' + eid + '/bands',
         pivot: '/grades/pivot?exam=' + eid,
         near: '/grades/exams/' + eid + '/near-line',

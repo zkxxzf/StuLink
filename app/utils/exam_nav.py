@@ -50,7 +50,7 @@ _EP_SECTION = (
     ('grades.score_update', 'overview'),
     ('grades.score_delete', 'overview'),
     ('grades.exam_recalc', 'overview'),
-    ('grades.exam_rename', 'overview'),
+    ('grades.exam_update', 'overview'),
     ('grades.exam_delete', 'overview'),
     ('grades.index', 'analysis'),
     ('grades.pivot_page', 'analysis'),

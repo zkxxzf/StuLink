@@ -240,10 +240,6 @@
         .sidebar-float .efn-group .bi[data-bs-toggle][aria-expanded="false"] {
             transform: rotate(-90deg);
         }
-        /* ---- 2026-10-13：AI 智能导入紧跟「成绩导入」（同一种事的两个入口），
-               不再放侧栏最下方、也不再用那条细线分隔 ---- */
-        .sidebar-float .efn-ai { color: var(--sl-sidebar-text); }
-        .sidebar-float .efn-ai .bi { margin-right: 4px; }
         @media (max-width: 767.98px) {
             .sidebar.sidebar-float { display: none; }
         }
@@ -501,13 +497,12 @@
                    href="{{ url_for('grades.exam_detail', exam_id=EN.exam_id) }}">考试概览·成绩单</a>
                 <a class="efn-item {% if EN.section == 'affair' %}active{% endif %}" data-nav="affair"
                    href="{{ url_for('grades.exam_affair_go', exam_id=EN.exam_id) }}">考务安排{% if not EN.steps[1].done %}<span class="efn-tag">待做</span>{% endif %}</a>
+                {# 2026-10-13：原「成绩导入 + AI 智能导入」两个侧栏项合并为**一个入口** ——
+                   两种导入方式（标准模板导入 / AI 智能导入）改在导入页内切换，
+                   见 grades/_import_tabs.html（用户口径：侧栏只留一个入口，页面里再区分）。
+                   两个导入页的 EN.section 都是 'import'，所以这里始终正确高亮。 #}
                 <a class="efn-item {% if EN.section == 'import' %}active{% endif %}" data-nav="import"
                    href="{{ url_for('grades.exam_import', exam_id=EN.exam_id) }}">成绩导入{% if not EN.steps[2].done %}<span class="efn-tag">待做</span>{% endif %}</a>
-                {# 2026-10-13：AI 智能导入紧跟「成绩导入」—— 两者是同一种事（把成绩送进本场考试）的
-                   两个入口。原先放在侧栏最下方，中间隔着「划线分层」和整块「成绩分析」，
-                   导入时要往下找很久（用户反馈：放到成绩导入的下边或上边）。 #}
-                <a class="efn-item efn-ai {% if request.endpoint and request.endpoint.startswith('grades.exam_ai_import') %}active{% endif %}" data-nav="ai"
-                   href="{{ url_for('grades.exam_ai_import', exam_id=EN.exam_id) }}"><i class="bi bi-robot"></i>AI 智能导入</a>
                 {# v1.19.47.29：划线分层有自己的段位（'bands'），不再与「成绩导入」同时高亮 #}
                 <a class="efn-item {% if EN.section == 'bands' %}active{% endif %}" data-nav="bands"
                    href="{{ url_for('grades.bands_page', exam_id=EN.exam_id) }}">划线分层</a>

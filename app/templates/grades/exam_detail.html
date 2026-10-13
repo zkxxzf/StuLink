@@ -58,7 +58,7 @@
     <a href="{{ url_for('grades.exams_list') }}" class="btn btn-sm btn-outline-secondary" title="返回" aria-label="返回">
         <i class="bi bi-arrow-left"></i>
     </a>
-    <h5 class="mb-0 me-2" id="examName" role="button" title="点击修改考试名称">
+    <h5 class="mb-0 me-2" id="examName" role="button" title="点击修改考试信息（名称 / 年级 / 日期 / 性质 / 阶段）">
         <i class="bi bi-journal-text"></i> {{ exam.name }}
         <i class="bi bi-pencil-square small text-muted"></i>
     </h5>
@@ -329,6 +329,80 @@
         </div>
     </div>
 </div>
+
+{# 2026-10-13：考试信息编辑弹窗（原先是浏览器 prompt，只能改名）。
+   年级字段：**已导入成绩后锁定**（成绩行绑的是考试当时的班级与学号，
+   改年级等于把历史成绩挂到另一个年级），未导入时可自由改。
+   日期改动会把学年（term）一并按新日期重算。 #}
+<div class="modal fade" id="examInfoModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header py-2">
+                <h6 class="modal-title fw-bold">修改考试信息</h6>
+                <button class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <div class="row g-2">
+                    <div class="col-md-6">
+                        <label class="form-label small mb-1" for="eiGrade">年级 <span class="text-danger">*</span></label>
+                        <select class="form-select form-select-sm" id="eiGrade"{% if has_scores %} disabled{% endif %}>
+                            {% for g in grade_options %}
+                            <option value="{{ g }}"{% if g == exam.grade %} selected{% endif %}>{{ g }}</option>
+                            {% endfor %}
+                        </select>
+                        {% if has_scores %}
+                        <div class="form-text text-danger">
+                            <i class="bi bi-lock-fill"></i> 已导入成绩，年级不可修改
+                        </div>
+                        {% else %}
+                        <div class="form-text">本场还没有成绩，年级可以修改</div>
+                        {% endif %}
+                    </div>
+                    <div class="col-md-6">
+                        <label class="form-label small mb-1" for="eiDate">考试日期 <span class="text-danger">*</span></label>
+                        <input type="date" class="form-control form-control-sm" id="eiDate"
+                               value="{{ exam.exam_date.strftime('%Y-%m-%d') }}">
+                        <div class="form-text">学年（{{ exam.term or '—' }}）随日期自动重算</div>
+                    </div>
+                    <div class="col-md-6">
+                        <label class="form-label small mb-1" for="eiKind">考试性质</label>
+                        <select class="form-select form-select-sm" id="eiKind">
+                            <option value=""{% if not exam.exam_kind %} selected{% endif %}>（未指定）</option>
+                            {% for k in kind_options %}
+                            <option value="{{ k }}"{% if k == exam.exam_kind %} selected{% endif %}>{{ k }}</option>
+                            {% endfor %}
+                            {% if exam.exam_kind and exam.exam_kind not in kind_options %}
+                            <option value="{{ exam.exam_kind }}" selected>{{ exam.exam_kind }}（当前值）</option>
+                            {% endif %}
+                        </select>
+                    </div>
+                    <div class="col-md-6">
+                        <label class="form-label small mb-1" for="eiStage">考试阶段</label>
+                        <select class="form-select form-select-sm" id="eiStage">
+                            {% for s in stage_options %}
+                            <option value="{{ s }}"{% if s == exam.exam_type %} selected{% endif %}>{{ s }}</option>
+                            {% endfor %}
+                            {% if exam.exam_type and exam.exam_type not in stage_options %}
+                            <option value="{{ exam.exam_type }}" selected>{{ exam.exam_type }}（当前值）</option>
+                            {% endif %}
+                        </select>
+                    </div>
+                    <div class="col-12">
+                        <label class="form-label small mb-1" for="eiName">考试名称 <span class="text-danger">*</span></label>
+                        <input type="text" class="form-control form-control-sm" id="eiName" maxlength="100"
+                               value="{{ exam.name }}">
+                        <div class="form-text">同年级内不能重名。</div>
+                    </div>
+                </div>
+                <div class="form-text text-danger d-none mt-2" id="eiErr"></div>
+            </div>
+            <div class="modal-footer py-2">
+                <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">取消</button>
+                <button type="button" class="btn btn-primary btn-sm" id="eiSave">保存</button>
+            </div>
+        </div>
+    </div>
+</div>
 {% endblock %}
 {% block extra_js %}
 <script>
@@ -337,22 +411,36 @@ $(function(){
     // 各科满分（用于改分弹窗的范围校验）；总分不在此列，也不可改
     var FULL_MARKS = {{ full_marks|tojson }};
 
-    /* ---------- 点击考试名称：就地改名（同年级内需唯一） ---------- */
+    /* ---------- 点击考试名称：打开「修改考试信息」弹窗 ----------
+       2026-10-13：原先只弹 prompt 改名，日期/性质/阶段都改不了。
+       年级字段在「已导入成绩」后由后端锁定（模板里已 disabled）。 ---------- */
     $('#examName').on('click', function(){
-        var cur = $.trim($(this).text());
-        var input = prompt('修改考试名称（同年级内不能重名）：', cur);
-        if(input === null){ return; }
-        var v = $.trim(input);
-        if(!v || v === cur){ return; }
-        $.post('/grades/exams/' + examId + '/rename', {name: v})
+        bootstrap.Modal.getOrCreateInstance(document.getElementById('examInfoModal')).show();
+    });
+    function _eiFail(msg){
+        $('#eiErr').removeClass('d-none').text(msg);
+        $('#eiSave').prop('disabled', false).text('保存');
+    }
+    $('#eiSave').on('click', function(){
+        var fd = {
+            name: $.trim($('#eiName').val()),
+            grade: $('#eiGrade').val() || '',
+            exam_date: $('#eiDate').val(),
+            exam_kind: $('#eiKind').val(),
+            exam_type: $('#eiStage').val()
+        };
+        if(!fd.name){ $('#eiErr').removeClass('d-none').text('考试名称不能为空'); return; }
+        $('#eiErr').addClass('d-none').text('');
+        $(this).prop('disabled', true).text('保存中…');
+        $.post('/grades/exams/' + examId + '/update', fd)
             .done(function(res){
                 if(res && res.success){ location.reload(); }
-                else { alert((res && res.message) || '修改失败'); }
+                else { _eiFail((res && res.message) || '修改失败'); }
             })
             .fail(function(xhr){
                 var m = '修改失败';
                 try { m = JSON.parse(xhr.responseText).message || m; } catch(e){}
-                alert(m);
+                _eiFail(m);
             });
     });
 

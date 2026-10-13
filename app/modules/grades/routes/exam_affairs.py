@@ -30,7 +30,7 @@ from app.utils.helpers import log_operation, get_dict_values
 from app.modules.grades.utils import is_teaching_class
 from app.modules.grades.services.exam_guard import assert_grade_visible
 from app.utils.text_guard import (sanitize_label, sanitize_prefix,
-                                  safe_download_name)
+                                  safe_download_name, pad2)
 from app.utils.upload_guard import validate_upload   # L-8：导入文件类型校验
 from app.utils.export_helpers import xl_row   # M-4：公式注入防护
 
@@ -55,9 +55,9 @@ def _get_affair_checked(aid):
     return affair
 
 
-def _pad2(v):
-    s = str(v)
-    return s.zfill(2) if s.isdigit() else s
+# 2026-10-13：编号补零统一走 app.utils.text_guard.pad2（考场号 / 座号两位），
+# 本文件内的导出代码继续用 _pad2 这个名字，避免大范围改名。
+_pad2 = pad2
 
 
 # v1.12.2 考场编号规范：纯数字编号统一补零为两位（01、02…），保证排序与考号拼接一致
@@ -396,7 +396,10 @@ def affair_detail(aid):
                            room_subject_options=room_subject_options,
                            mode_label=MODE_LABEL, invig_stat=invig_stat,
                            subjects=SUBJECTS,
-                           stats=stats, sel_options=sel_options)
+                           stats=stats, sel_options=sel_options,
+                           # 2026-10-13：⑤ 考试时间表「粘贴导入」的默认考试日期与每天场次上限
+                           sched_default_date=_ai._sched_default_date(affair),
+                           sched_daily_max=_ai._SCHED_DAILY_MAX)
 
 
 # ==================== 步骤① 学生名单：导入 / 模板 / 增删改 ====================
@@ -1446,7 +1449,7 @@ def affair_export_class(aid):
     ws.title = '按班级学生信息'
     _write_sheet(ws, ['班级', '姓名', '考场位置', '考号', '考场编号', '座号'],
                  [[s.class_name, s.name, _room_loc(affair, s.room_no),
-                   s.exam_number, s.room_no, _pad2(s.seat_no)] for s in stus])
+                   s.exam_number, _pad2(s.room_no), _pad2(s.seat_no)] for s in stus])
     out = io.BytesIO()
     wb.save(out)
     out.seek(0)
@@ -1467,7 +1470,7 @@ def affair_export_room(aid):
     ws = wb.active
     ws.title = '按考场学生信息'
     _write_sheet(ws, ['考场编号', '座号', '考号', '姓名', '班级', '考场位置'],
-                 [[s.room_no, _pad2(s.seat_no), s.exam_number, s.name,
+                 [[_pad2(s.room_no), _pad2(s.seat_no), s.exam_number, s.name,
                    s.class_name, _room_loc(affair, s.room_no)] for s in stus])
     out = io.BytesIO()
     wb.save(out)
@@ -1530,7 +1533,7 @@ def affair_export_class_pdf(aid):
     groups = {}
     for s in stus:
         groups.setdefault(s.class_name or '未分班', []).append(
-            [s.name, s.exam_number, s.room_no, _pad2(s.seat_no),
+            [s.name, s.exam_number, _pad2(s.room_no), _pad2(s.seat_no),
              loc_map.get(s.room_no, '')])
     sections = [(f'{cls}（共 {len(rows)} 人）', rows) for cls, rows in groups.items()]
     buf = seating_list_sections(
@@ -1555,7 +1558,7 @@ def affair_export_room_pdf(aid):
     for s in stus:
         groups.setdefault(s.room_no or '未分配', []).append(
             [_pad2(s.seat_no), s.exam_number, s.name, s.class_name])
-    sections = [(f'考场 {rn}（{loc_map.get(rn, "")}，共 {len(rows)} 人）', rows)
+    sections = [(f'考场 {_pad2(rn)}（{loc_map.get(rn, "")}，共 {len(rows)} 人）', rows)
                 for rn, rows in groups.items()]
     buf = seating_list_sections(
         f'{affair.name}　按考场学生名单（共 {len(stus)} 人 {len(sections)} 个考场）',
@@ -1594,7 +1597,8 @@ def affair_cards_export(aid):
         chunk = stus[i:i + per]
         row = []
         for s in chunk:
-            row += [s.exam_number, s.name, s.class_name, f'{s.room_no}-{_pad2(s.seat_no)}']
+            row += [s.exam_number, s.name, s.class_name,
+                    f'{_pad2(s.room_no)}-{_pad2(s.seat_no)}']
         while len(row) < per * 4:
             row += ['', '', '', '']
         rows.append(row)

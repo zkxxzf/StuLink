@@ -326,13 +326,15 @@ $('#rmSearch').on('input', function () {
     state.kw = this.value.trim(); renderLeft();
 });
 // 点整行即勾选（按钮区域除外）
+// 2026-10-13 修复：点在复选框本体上时**必须**跳过 —— 浏览器原生已切换一次，
+// 这里再取反等于没点（用户表现为「有些房间点不动」，实际是看点在哪儿、与房间无关）。
 $('#leftList').on('click', '.rm-item', function (e) {
-    if ($(e.target).closest('button').length) return;
+    if ($(e.target).closest('button, input').length) return;
     var c = $(this).find('.rm-chk');
     c.prop('checked', !c.prop('checked'));
 });
 $('#rightList').on('click', '.rm-item', function (e) {
-    if ($(e.target).closest('button').length) return;
+    if ($(e.target).closest('button, input').length) return;
     var c = $(this).find('.rm-chk-r');
     c.prop('checked', !c.prop('checked'));
 });

@@ -431,7 +431,8 @@
                     <tbody>
                     {% for s in arranged_sorted %}
                     <tr>
-                        <td>{{ s.room_no }}</td><td>{{ s.seat_no }}</td>
+                        {# 2026-10-13 用户口径：考场号 / 座号一律两位（01 考场、01 座） #}
+                        <td>{{ pad2(s.room_no) }}</td><td>{{ pad2(s.seat_no) }}</td>
                         <td>{{ s.exam_number or '—' }}</td>
                         <td>{{ s.student_no }}</td><td>{{ s.name }}</td>
                         <td>{{ s.class_name }}</td><td>{{ s.subject_selection }}</td>
@@ -477,7 +478,8 @@
                     <tbody>
                     {% for s in arranged_sorted %}
                     <tr>
-                        <td>{{ s.room_no }}</td><td>{{ s.seat_no }}</td>
+                        {# 2026-10-13 用户口径：考场号 / 座号一律两位（01 考场、01 座） #}
+                        <td>{{ pad2(s.room_no) }}</td><td>{{ pad2(s.seat_no) }}</td>
                         <td>{{ s.exam_number or '—' }}</td>
                         <td>{{ s.student_no }}</td><td>{{ s.name }}</td>
                         <td>{{ s.class_name }}</td><td>{{ s.subject_selection }}</td>
@@ -501,6 +503,9 @@
                 <i class="bi bi-upload"></i> 导入 Excel
                 <input type="file" accept=".xlsx,.xls" class="d-none" onchange="importSchedules(this)">
             </label>
+            {# 2026-10-13：从 Excel 直接复制粘贴批量导入（不必先另存文件） #}
+            <button class="btn btn-outline-primary btn-sm" onclick="openSchedPaste()">
+                <i class="bi bi-clipboard-plus"></i> 粘贴导入</button>
             <button class="btn btn-primary btn-sm" onclick="addScheduleRow()">
                 <i class="bi bi-plus-lg"></i> 新增场次</button>
         </div>
@@ -523,8 +528,9 @@
                         {# 2026-10-13：科目从自由文本改为**多选下拉**（科目字典勾选，支持一场多科如四选二） #}
                         {% set _picked = (s.subject or '').replace('，', '、').replace(',', '、').split('、') %}
                         <div class="dropdown">
+                            {# data-popper-fixed：表格容器 overflow:auto 会裁剪菜单，改用固定定位（见 common.js） #}
                             <button type="button" class="btn btn-outline-secondary btn-sm py-0 subj-btn text-truncate"
-                                    data-bs-toggle="dropdown" style="max-width:132px"
+                                    data-bs-toggle="dropdown" data-popper-fixed style="max-width:132px"
                                     title="点开勾选考试科目（可多选）">{{ s.subject or '选科目' }}</button>
                             <div class="dropdown-menu px-2" style="min-width:120px;max-height:280px;overflow:auto">
                                 {% for sub in subjects %}
@@ -780,6 +786,33 @@
         <button class="btn-close" data-bs-dismiss="modal"></button></div>
         <div class="modal-body"><pre id="logBody" class="small mb-0" style="white-space:pre-wrap;max-height:50vh;overflow:auto"></pre></div>
         <div class="modal-footer"><button class="btn btn-sm btn-primary" data-bs-dismiss="modal" onclick="location.reload()">确定</button></div>
+    </div>
+</div></div>
+
+{# 2026-10-13：⑤ 考试时间表「粘贴导入」——从 Excel 选中区域 Ctrl+C，这里 Ctrl+V 直接导入 #}
+<div class="modal fade" id="schedPasteModal" tabindex="-1"><div class="modal-dialog modal-lg">
+    <div class="modal-content">
+        <div class="modal-header py-2">
+            <h6 class="modal-title fw-bold"><i class="bi bi-clipboard-plus"></i> 粘贴导入考试时间表</h6>
+            <button class="btn-close" data-bs-dismiss="modal"></button>
+        </div>
+        <div class="modal-body">
+            <div class="alert alert-light border small py-2 mb-2">
+                在 Excel 里选中表格区域 <b>Ctrl+C</b>，回到本窗口 <b>Ctrl+V</b> 即可（一行 = 一个场次）。
+                列顺序不限、带不带表头都行；<b>09:00-10:30</b> 这种并在一格的时间会自动拆成开始/结束。
+                <br>
+                没写日期时默认用本场考试的<b>考试日期 {{ sched_default_date.strftime('%Y-%m-%d') }}</b>；
+                同一天最多 <b>{{ sched_daily_max }}</b> 场，超出会自动顺延到第二天（导入后可手动改）；
+                科目必须在科目字典内，多科用「、」连接。
+            </div>
+            <textarea id="schedPasteText" class="form-control font-monospace" rows="10"
+                      placeholder="考试日期&#9;开始时间&#9;结束时间&#9;考试科目&#9;选科&#9;备注&#10;2026-10-08&#9;09:00&#9;10:30&#9;语文&#10;2026-10-08&#9;14:00&#9;15:30&#9;数学&#10;（也可以只贴科目：物理）"></textarea>
+            <div id="schedPasteMsg" class="small mt-2"></div>
+        </div>
+        <div class="modal-footer py-2">
+            <button class="btn btn-secondary btn-sm" data-bs-dismiss="modal">取消</button>
+            <button class="btn btn-primary btn-sm" id="schedPasteBtn" onclick="submitSchedPaste()">导入</button>
+        </div>
     </div>
 </div></div>
 {% endblock %}
@@ -1371,6 +1404,44 @@ function importSchedules(input){
             setTimeout(()=>location.reload(), 600);
         });
 }
+// 2026-10-13：⑤ 考试时间表「粘贴导入」——Excel 复制 → 这里粘贴 → 后端按每天最多 N 场排期
+function openSchedPaste(){
+    var m = bootstrap.Modal.getOrCreateInstance(document.getElementById('schedPasteModal'));
+    var msg = document.getElementById('schedPasteMsg');
+    msg.className = 'small mt-2'; msg.textContent = '';
+    document.getElementById('schedPasteBtn').disabled = false;
+    m.show();
+    setTimeout(function(){ document.getElementById('schedPasteText').focus(); }, 300);
+}
+function submitSchedPaste(){
+    var text = document.getElementById('schedPasteText').value;
+    var msg = document.getElementById('schedPasteMsg');
+    var btn = document.getElementById('schedPasteBtn');
+    if(!text.trim()){
+        msg.className='small mt-2 text-danger';
+        msg.textContent='请先粘贴表格内容（在 Excel 里选中后 Ctrl+C）';
+        return;
+    }
+    msg.className = 'small mt-2 text-muted'; msg.textContent = '导入中…';
+    btn.disabled = true;
+    var fd = new FormData(); fd.append('text', text);
+    fetch('/grades/affairs/'+AID+'/schedules/paste', {method:'POST', body:fd, headers:{'X-CSRFToken':csrf()}})
+        .then(r=>r.json()).then(function(d){
+            if(!d.ok){
+                msg.className='small mt-2 text-danger'; msg.textContent=d.msg;
+                btn.disabled = false; return;
+            }
+            msg.className = 'small mt-2 text-success';
+            msg.textContent = '已导入 '+d.added+' 场'
+                + (d.shifted ? ('，'+d.shifted+' 场因当天已满 '+d.daily_max+' 场自动顺延到次日') : '')
+                + (d.skipped ? ('，跳过 '+d.skipped+' 行') : '');
+            setTimeout(function(){ location.reload(); }, 800);
+        })
+        .catch(function(){
+            msg.className='small mt-2 text-danger'; msg.textContent='网络错误，导入失败';
+            btn.disabled = false;
+        });
+}
 function addScheduleRow(){
     var cbs = (_SUBJECTS || []).map(function(s){
         return '<label class="dropdown-item-text form-check mb-0" style="font-size:.85rem">'
@@ -1381,14 +1452,17 @@ function addScheduleRow(){
         + '<td><input type="time" class="form-control form-control-sm sc-start"></td>'
         + '<td><input type="time" class="form-control form-control-sm sc-end"></td>'
         + '<td><div class="dropdown"><button type="button" class="btn btn-outline-secondary btn-sm py-0 subj-btn text-truncate" '
-        + 'data-bs-toggle="dropdown" style="max-width:132px">选科目</button>'
+        + 'data-bs-toggle="dropdown" data-popper-fixed style="max-width:132px">选科目</button>'
         + '<div class="dropdown-menu px-2" style="min-width:120px;max-height:280px;overflow:auto">' + cbs + '</div></div>'
         + '<input type="hidden" class="sc-subj" value=""></td>'
         + '<td><input class="form-control form-control-sm sc-sel"></td>'
         + '<td><input class="form-control form-control-sm sc-note"></td>'
         + '<td class="text-nowrap"><button class="btn btn-outline-primary btn-sm py-0" onclick="saveSchedule(this)">存</button> '
         + '<button class="btn btn-outline-danger btn-sm py-0" onclick="delSchedule(this)">删</button></td></tr>';
-    document.getElementById('schedBody').insertAdjacentHTML('beforeend', h);
+    var tb = document.getElementById('schedBody');
+    tb.insertAdjacentHTML('beforeend', h);
+    // 2026-10-13：新行的科目下拉也要走固定定位（容器 overflow:auto 会裁剪菜单）
+    initPopperFixedDropdowns(tb.lastElementChild);
 }
 // 科目多选：勾选即更新按钮文本与隐藏值（「、」连接，与环节⑥同科回避的拆分口径一致）
 document.getElementById('schedBody').addEventListener('change', function(e){
@@ -1436,6 +1510,9 @@ function delSchedule(btn){
     fetch('/grades/affairs/'+AID+'/schedules/'+sid+'/delete', {method:'POST', headers:{'X-CSRFToken':csrf()}})
         .then(r=>r.json()).then(d=>{ if(d.ok) tr.remove(); else alert(d.msg||'删除失败'); });
 }
+// 已渲染出来的场次行：科目下拉改固定定位（表格容器 max-height:60vh + overflow:auto 会裁剪菜单，
+// 2026-10-13 用户反馈「下拉弹在页面下方被表格遮住」）。新增行在 addScheduleRow 里单独初始化。
+initPopperFixedDropdowns(document.getElementById('t5'));
 
 // ---------- 环节⑥ 监考编排 ----------
 function loadInvig(){

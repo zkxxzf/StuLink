@@ -237,9 +237,7 @@ body {
 .sidebar-float .efn-group { background: var(--sl-sidebar-group); color: var(--sl-sidebar-text); }
 .sidebar-float .efn-group:hover { background: var(--sl-sidebar-hover); }
 .sidebar-float .efn-group .bi { color: var(--sl-sidebar-muted); }
-.sidebar-float .efn-ai::before { background: var(--sl-sidebar-line); }
-.sidebar-float .efn-ai { color: var(--sl-sidebar-text); }
-.sidebar-float .efn-ai:hover { background: var(--sl-sidebar-hover); }
+/* 2026-10-13：原 .efn-ai（侧栏「AI 智能导入」项）已并入「成绩导入」，相关样式随之删除 */
 /* 激活项里的浅色 badge（如「未配置」）在深色侧栏下不必反白 */
 .sidebar-float .badge.bg-light { background: var(--sl-sidebar-chip) !important; color: var(--sl-sidebar-text) !important; }
 

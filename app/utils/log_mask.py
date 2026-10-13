@@ -94,17 +94,46 @@ def _install_on_handlers():
         _wrap_formatter(h)
 
 
+# 风格字符 ← Formatter 内部 style 对象。**注意**：logging.Formatter 没有公开的
+# `.style` 属性（风格存于 `_style`，格式串存于 `_fmt`）。2026-10-13 现场：这里曾写成
+# `fmt.style`，于是"handler 已经带了普通 Formatter"时（MCP 进程先调
+# logging.basicConfig 建了标准 Formatter，之后 create_app 才装脱敏）抛
+#     AttributeError: 'Formatter' object has no attribute 'style'
+# 把异常抛到 build_asgi_app → 整个 MCP 服务起不来（[MCP] 启动失败：…）。
+_STYLE_CHARS = ((logging.PercentStyle, '%'),
+                (logging.StrFormatStyle, '{'),
+                (logging.StringTemplateStyle, '$'))
+
+
+def _fmt_style(fmt):
+    """还原 formatter 的格式风格字符（'%' / '{' / '$'）；取不到按 '%' 处理。"""
+    style = getattr(fmt, '_style', None)
+    for cls, char in _STYLE_CHARS:
+        if isinstance(style, cls):
+            return char
+    return '%'
+
+
 def _wrap_formatter(handler):
-    """把 handler 的 formatter 换成 MaskingFormatter（幂等，保留原有格式串）。"""
-    fmt = handler.formatter
-    if isinstance(fmt, MaskingFormatter):
-        return
-    if fmt is None:
-        handler.setFormatter(MaskingFormatter())
-        return
-    # 复用原有 fmt/datefmt，只把类换成带脱敏的子类
-    handler.setFormatter(MaskingFormatter(fmt._fmt, fmt.datefmt,
-                                          fmt.style, getattr(fmt, 'validate', True)))
+    """把 handler 的 formatter 换成 MaskingFormatter（幂等，保留原有格式串）。
+
+    整体 try/except：脱敏是**兜底**能力，绝不能因为它的内部细节把应用/服务卡在启动
+    阶段（2026-10-13 MCP 起不来即此因）；包装失败就退回未包装的 formatter —— 该条
+    记录仍会被 LogRecord 工厂那一层掩码，只是异常栈少一道保险。
+    """
+    try:
+        fmt = handler.formatter
+        if isinstance(fmt, MaskingFormatter):
+            return
+        if fmt is None:
+            handler.setFormatter(MaskingFormatter())
+            return
+        # 复用原有 fmt/datefmt/风格，只把类换成带脱敏的子类
+        handler.setFormatter(MaskingFormatter(fmt._fmt, fmt.datefmt,
+                                              _fmt_style(fmt),
+                                              getattr(fmt, 'validate', True)))
+    except Exception:  # noqa: BLE001  见上：脱敏异常不阻塞启动
+        pass
 
 
 def install_masking_factory():

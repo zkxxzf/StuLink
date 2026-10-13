@@ -12,7 +12,7 @@
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 import io
 import re
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 
 import openpyxl
 from flask import jsonify, request, send_file
@@ -22,13 +22,14 @@ from app.extensions import db
 from app.models import User
 from app.models.grades import (AffairTeacher, AffairSchedule, AffairInvigilator,
                                AffairInvigilation, AffairRoom, AffairStudent,
-                               TeacherSubjectLink, SUBJECTS)
+                               TeacherSubjectLink, SUBJECTS, Exam)
 from app.modules.grades import bp
 from app.modules.grades.utils import numeric_classes
 from app.utils.decorators import perm_required
 from app.utils.helpers import log_operation
 from app.utils.export_helpers import xl_row
-from app.utils.text_guard import sanitize_label, sanitize_prefix, safe_download_name
+from app.utils.text_guard import (sanitize_label, sanitize_prefix, safe_download_name,
+                                  pad2)   # 2026-10-13：监考表考场号补零（01/02…）
 from app.utils.upload_guard import validate_upload
 
 _MAX_SLOTS = 3
@@ -258,6 +259,238 @@ def _parse_date(v):
     return None
 
 
+# ==================== ⑤ 考试时间表：粘贴 / Excel 导入的解析与排期 ====================
+# 2026-10-13 用户口径：
+#   1) 支持从 Excel 直接复制表格区域、粘贴批量导入（不必先存成文件再上传）；
+#   2) 每天最多 _SCHED_DAILY_MAX 场，某天排满后自动顺延到次日（导完仍可手动改回）；
+#   3) 行里没写日期时，默认用**创建考试时填的考试日期**作为考试时间。
+_SCHED_DAILY_MAX = 6
+# 表头列名别名（与 Excel 模板一致，另兼容常见写法）
+_HEAD_ALIASES = (
+    ('exam_date', ('考试日期', '日期', '考试时间')),
+    ('start_time', ('开始时间', '开始', '时间段', '时间')),
+    ('end_time', ('结束时间', '结束', '止')),
+    ('subject', ('考试科目', '科目', '学科')),
+    ('selection', ('选科', '选科组合', '分场')),
+    ('note', ('备注', '说明')),
+)
+_RANGE_RE = re.compile(r'(\d{1,2}[:：.]\d{1,2})\s*[-~～—－–至到]\s*(\d{1,2}[:：.]\d{1,2})')
+_DATE_ONLY_RE = re.compile(r'^\s*\d{4}\s*[-/.年]\s*\d{1,2}\s*[-/.月]\s*\d{1,2}\s*日?\s*$'
+                           r'|^\s*\d{1,2}\s*[-/.月]\s*\d{1,2}\s*日?\s*$'
+                           r'|^\s*\d{8}\s*$')
+
+
+def _sched_default_date(affair):
+    """导入时的默认考试日期 = 创建考试（或建批次）时填的考试日期。
+
+    批次 exam_date → 关联考试 exam_date → 今天（都为空时的兜底，避免出现无日期场次）。
+    """
+    if affair.exam_date:
+        return affair.exam_date
+    if affair.exam_id:
+        ex = Exam.query.get(affair.exam_id)
+        if ex is not None and ex.exam_date:
+            return ex.exam_date
+    return date.today()
+
+
+def _hhmm(v):
+    """规范成 HH:MM；不是时间就返回空串（用于识别「这格到底是不是时间」）"""
+    s = _parse_time(v)
+    return s if re.match(r'^\d{2}:\d{2}$', s or '') else ''
+
+
+def _sched_blank_row():
+    return {'exam_date': None, 'start_time': '', 'end_time': '',
+            'subject': '', 'selection': '', 'note': ''}
+
+
+def _fill_date(row, value):
+    d = _parse_date(value)
+    if d is None:
+        return False
+    row['exam_date'] = d
+    return True
+
+
+def _fill_time(row, value, slot=None):
+    """把一格时间填进开始/结束。
+
+    支持合并写法「09:00-10:30」（一格顶两列）；单个时间则按 slot 落位
+    （slot=None 时优先补空的那一侧）。
+    """
+    s = str(value or '').strip()
+    if not s:
+        return False
+    m = _RANGE_RE.search(s)
+    if m:
+        row['start_time'] = _hhmm(m.group(1)) or row['start_time']
+        row['end_time'] = _hhmm(m.group(2)) or row['end_time']
+        return True
+    t = _hhmm(s)
+    if not t:
+        return False
+    if slot == 'end':
+        if not row['end_time']:
+            row['end_time'] = t
+    elif slot == 'start':
+        if not row['start_time']:
+            row['start_time'] = t
+    elif not row['start_time']:
+        row['start_time'] = t
+    elif not row['end_time']:
+        row['end_time'] = t
+    return True
+
+
+def _fill_subject(row, value):
+    """科目白名单校验（与手填/Excel 导入同一口径）；多科用「、」累积去重"""
+    names = [x for x in re.split(r'[、，,/\\\s]+', str(value or '').strip()) if x]
+    if not names or any(x not in _SUBJ_SET for x in names):
+        return False
+    cur = [x for x in (row['subject'] or '').split('、') if x]
+    for n in names:
+        if n not in cur:
+            cur.append(n)
+    row['subject'] = '、'.join(cur)
+    return True
+
+
+def _split_paste_cells(raw):
+    """一行文本 → 单元格：Excel 复制是 tab 分隔；其次 2 个以上空格；否则整行当一格"""
+    if '\t' in raw:
+        return [c.strip() for c in raw.split('\t')]
+    if re.search(r'\s{4,}', raw):
+        return [c.strip() for c in re.split(r'\s{4,}', raw)]
+    return [raw.strip()]
+
+
+def _detect_head(cells):
+    """识别表头行 → {字段: 列下标}；没找到「科目」列就不当表头（返回 None）"""
+    idx = {}
+    for i, c in enumerate(cells):
+        t = re.sub(r'\s+', '', str(c or ''))
+        if not t:
+            continue
+        for key, names in _HEAD_ALIASES:
+            if key not in idx and t in names:
+                idx[key] = i
+    return idx if 'subject' in idx else None
+
+
+def _parse_line_by_head(cells, head):
+    """按表头列序取值（列序不限，短行自动留空）"""
+    row = _sched_blank_row()
+
+    def get(key):
+        i = head.get(key, -1)
+        return cells[i] if 0 <= i < len(cells) else ''
+
+    _fill_date(row, get('exam_date'))
+    _fill_time(row, get('start_time'), 'start')
+    _fill_time(row, get('end_time'), 'end')
+    _fill_subject(row, get('subject'))
+    row['selection'] = sanitize_label(get('selection'), 30)
+    row['note'] = sanitize_label(get('note'), 100)
+    return row
+
+
+def _parse_line_loose(cells):
+    """无表头：按内容识别（日期 / 时间段 / 科目 各归各位），不依赖列顺序。
+
+    兼容「2026-10-08 09:00-10:30 语文」这种一格合体（同格含日期+时间+科目）的写法：
+    整格能认出单一字段就直接归位，否则按空白拆 token 逐个识别，剩下的进选科/备注。
+    """
+    row = _sched_blank_row()
+    leftovers = []
+
+    def absorb(token):
+        """单个字段值归位，返回是否已消费"""
+        if not token:
+            return True
+        compact = re.sub(r'\s+', '', token)
+        if _RANGE_RE.fullmatch(compact) and _fill_time(row, compact):
+            return True
+        if _DATE_ONLY_RE.match(token) and _fill_date(row, token):
+            return True
+        if _hhmm(token) and _fill_time(row, token):
+            return True
+        return _fill_subject(row, token)
+
+    for c in cells:
+        s = str(c or '').strip()
+        if not s:
+            continue
+        # 整格 = 单一字段（时间段 / 日期 / 时间 / 科目）→ 直接归位；
+        # 否则按空白拆开逐个识别（合体写法），仍未识别的进选科/备注。
+        compact = re.sub(r'\s+', '', s)
+        if ((_RANGE_RE.fullmatch(compact) or _DATE_ONLY_RE.match(s) or _hhmm(s)
+             or s in _SUBJ_SET) and absorb(s)):
+            continue
+        for t in [x for x in re.split(r'\s+', s) if x]:
+            if not absorb(t):
+                leftovers.append(t)
+    for t in leftovers:
+        if not row['selection']:
+            row['selection'] = sanitize_label(t, 30)
+        elif not row['note']:
+            row['note'] = sanitize_label(t, 100)
+    return row
+
+
+def _parse_paste_text(text):
+    """粘贴文本 → (场次列表, 跳过行数)。表头行自动跳过。"""
+    lines = (text or '').replace('\r\n', '\n').replace('\r', '\n').split('\n')
+    head = None
+    for l in [x for x in lines if x.strip()][:3]:
+        head = _detect_head(_split_paste_cells(l))
+        if head:
+            break
+    rows, skipped, head_seen = [], 0, False
+    for l in lines:
+        if not l.strip():
+            continue
+        cells = _split_paste_cells(l)
+        if head is not None and not head_seen and _detect_head(cells):
+            head_seen = True          # 只跳第一处表头
+            continue
+        row = _parse_line_by_head(cells, head) if head else _parse_line_loose(cells)
+        if not row['subject']:
+            skipped += 1
+            continue
+        rows.append(row)
+    return rows, skipped
+
+
+def _sched_apply(affair, parsed, default_date):
+    """按「每天最多 _SCHED_DAILY_MAX 场」排日期后入库。
+
+    已在批次里的场次也占当天名额；当天排满则顺延到次日（导入后用户可手动改回）。
+    返回 (新增数, 顺延数)。
+    """
+    used = {}
+    for s in AffairSchedule.query.filter_by(affair_id=affair.id).all():
+        if s.exam_date:
+            used[s.exam_date] = used.get(s.exam_date, 0) + 1
+    base_order = AffairSchedule.query.filter_by(affair_id=affair.id).count()
+    added = shifted = 0
+    for r in parsed:
+        want = r['exam_date'] if r['exam_date'] else default_date
+        d = want
+        while used.get(d, 0) >= _SCHED_DAILY_MAX:
+            d = d + timedelta(days=1)
+        if d != want:
+            shifted += 1
+        used[d] = used.get(d, 0) + 1
+        db.session.add(AffairSchedule(
+            affair_id=affair.id, exam_date=d,
+            start_time=r['start_time'], end_time=r['end_time'],
+            subject=r['subject'], selection=r['selection'], note=r['note'],
+            sort_order=base_order + added))
+        added += 1
+    return added, shifted
+
+
 @bp.route('/affairs/<int:aid>/schedules/template')
 @login_required
 @perm_required('grades.edit')
@@ -318,31 +551,71 @@ def affair_schedules_import(aid):
     ci_note = _col('备注')
     if ci_subj < 0:
         return jsonify({'ok': False, 'msg': '未找到「考试科目」列'})
-    base_order = (AffairSchedule.query.filter_by(affair_id=affair.id).count())
-    added, skipped = 0, 0
+    default_date = _sched_default_date(affair)
+    parsed, skipped = [], 0
     for r in rows[1:]:
         def cell(i):
             return r[i] if (0 <= i < len(r)) else None
+        row = _sched_blank_row()
+        if ci_date >= 0:
+            _fill_date(row, cell(ci_date))
+        if ci_start >= 0:
+            _fill_time(row, cell(ci_start), 'start')
+        if ci_end >= 0:
+            _fill_time(row, cell(ci_end), 'end')
         # 2026-10-12 安全审计 M-1：Excel 导入同样做服务端白名单 + 科目白名单校验
         # 2026-10-13：科目支持多选（「、」分隔，与手填口径一致）
-        names = [s for s in re.split(r'[、，,/\\s]+', str(cell(ci_subj) or '').strip()) if s]
-        if not names or any(s not in _SUBJ_SET for s in names):
+        if not _fill_subject(row, cell(ci_subj)):
             skipped += 1
             continue
-        subj = '、'.join(names)
-        db.session.add(AffairSchedule(
-            affair_id=affair.id,
-            exam_date=_parse_date(cell(ci_date)) if ci_date >= 0 else None,
-            start_time=_parse_time(cell(ci_start)) if ci_start >= 0 else '',
-            end_time=_parse_time(cell(ci_end)) if ci_end >= 0 else '',
-            subject=subj,
-            selection=sanitize_label(cell(ci_sel) if ci_sel >= 0 else '', 30),
-            note=sanitize_label(cell(ci_note) if ci_note >= 0 else '', 100),
-            sort_order=base_order + added))
-        added += 1
+        row['selection'] = sanitize_label(cell(ci_sel) if ci_sel >= 0 else '', 30)
+        row['note'] = sanitize_label(cell(ci_note) if ci_note >= 0 else '', 100)
+        parsed.append(row)
+    # 2026-10-13 用户口径：日期缺省用「创建考试时填的考试日期」；
+    # 每天最多 _SCHED_DAILY_MAX 场，排满自动顺延到次日（与粘贴导入同一条规则）
+    added, shifted = _sched_apply(affair, parsed, default_date)
     db.session.commit()
-    log_operation(current_user, '导入', '考试时间表', aid, f'新增 {added} 场', module='grades')
-    return jsonify({'ok': True, 'added': added, 'skipped': skipped})
+    log_operation(current_user, '导入', '考试时间表', aid,
+                  f'Excel 导入 {added} 场（跳过 {skipped} 行，'
+                  f'{shifted} 场因当天已满 {_SCHED_DAILY_MAX} 场顺延）', module='grades')
+    return jsonify({'ok': True, 'added': added, 'skipped': skipped, 'shifted': shifted})
+
+
+@bp.route('/affairs/<int:aid>/schedules/paste', methods=['POST'])
+@login_required
+@perm_required('grades.edit')
+def affair_schedules_paste(aid):
+    """粘贴导入考试时间表（2026-10-13 用户口径）。
+
+    从 Excel 选中区域 Ctrl+C，直接粘贴到页面弹窗即可，不必先另存成文件。
+    解析规则（列顺序不限，带表头按表头、不带表头按内容识别）：
+      · 日期 / 开始 / 结束 / 科目 / 选科 / 备注 六列，可缺列；
+      · 「09:00-10:30」这种一格合体的时间会自动拆成开始/结束；
+      · 每行必须有科目且科目在字典内，多科用「、」连接；
+      · 没写日期 → 用创建考试时填的考试日期；每天最多 6 场，排满顺延到次日。
+    """
+    affair = _affair(aid)
+    text = request.form.get('text') or ''
+    if not (text or '').strip():
+        return jsonify({'ok': False, 'msg': '请先粘贴表格内容（在 Excel 里选中后 Ctrl+C）'})
+    if len(text) > 200000:
+        return jsonify({'ok': False, 'msg': '一次粘贴的内容过长（不超过 20 万字符），请分批导入'})
+    parsed, skipped = _parse_paste_text(text)
+    if not parsed:
+        return jsonify({'ok': False,
+                        'msg': '没有解析出可导入的场次：每行至少要有一个「科目」，'
+                               '且科目必须在科目字典内'})
+    if len(parsed) > 500:
+        return jsonify({'ok': False, 'msg': f'一次最多导入 500 场（本次 {len(parsed)} 场），请分批'})
+    default_date = _sched_default_date(affair)
+    added, shifted = _sched_apply(affair, parsed, default_date)
+    db.session.commit()
+    log_operation(current_user, '导入', '考试时间表', aid,
+                  f'粘贴导入 {added} 场（跳过 {skipped} 行，'
+                  f'{shifted} 场因当天已满 {_SCHED_DAILY_MAX} 场顺延）', module='grades')
+    return jsonify({'ok': True, 'added': added, 'skipped': skipped, 'shifted': shifted,
+                    'daily_max': _SCHED_DAILY_MAX,
+                    'default_date': default_date.strftime('%Y-%m-%d')})
 
 
 @bp.route('/affairs/<int:aid>/schedules/save', methods=['POST'])
@@ -871,7 +1144,7 @@ def _invig_rows(affair):
                 (f'{s.start_time}-{s.end_time}' if (s.start_time or s.end_time) else '')] if x)
             sel = f'（{s.selection}）' if s.selection else ''
             names = by_key.get(key, {})
-            row = [when, (s.subject or '') + sel, rn, rooms[rn].location or '']
+            row = [when, (s.subject or '') + sel, pad2(rn), rooms[rn].location or '']
             row += [names.get(n, '') for n in range(1, slots + 1)]
             rows.append(row)
     return headers, rows, slots

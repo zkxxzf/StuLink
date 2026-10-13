@@ -1106,6 +1106,27 @@ def check_L2():
     case('M-4 脱敏覆盖 handler 与 LogRecord 工厂',
          'setLogRecordFactory' in src2 and '_install_on_handlers' in src2, 'log_mask')
 
+    # 2026-10-13 现场回归（MCP 起不来）：handler **已经带普通 Formatter** 时也要能安全
+    # 包装 —— MCP 进程先 logging.basicConfig(format=…) 建了标准 Formatter，之后
+    # create_app 才装脱敏；原实现读 `fmt.style`（logging.Formatter 无此公开属性，
+    # 风格存在 _style / 格式串在 _fmt）→ AttributeError 抛到 build_asgi_app →
+    # [MCP] 启动失败：'Formatter' object has no attribute 'style'。
+    from app.utils.log_mask import MaskingFormatter, _wrap_formatter
+    case('M-4 风格还原不再依赖 Formatter.style', '_fmt_style' in src2, 'log_mask')
+    buf2 = _io.StringIO()
+    late2 = _logging.StreamHandler(buf2)
+    late2.setFormatter(_logging.Formatter('%(levelname)s|%(message)s'))
+    _wrap_formatter(late2)                     # 不得抛异常（抛了 = 服务起不来）
+    case('M-4 带普通 Formatter 的 handler 可安全包装',
+         isinstance(late2.formatter, MaskingFormatter),
+         type(late2.formatter).__name__)
+    late2.handle(_logging.LogRecord('t', _logging.INFO, __file__, 1,
+                                    '身份证 110101200001011234', None, None))
+    out2 = buf2.getvalue().strip()
+    case('M-4 包装后保留原格式串且已脱敏',
+         out2.startswith('INFO|') and '110101200001011234' not in out2
+         and '1234' in out2, out2[-45:] or '（无输出）')
+
 
 # ======================================================================
 # L-3 PDF 生成的类 HTML 解析

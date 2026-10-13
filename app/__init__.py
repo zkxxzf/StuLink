@@ -512,6 +512,9 @@ def create_app():
     # 2026-10-13：敏感字段（身份证号/联系电话）字段级脱敏。模板里取值处统一改
     # `{{ field_value(s.phone1, 'phone') }}`，无权限即返回脱敏值（后端决定，非前端隐藏）。
     from app.utils.sensitive import field_value
+    # 2026-10-13：考务编号补零（用户口径：考场号 / 座号一律两位 —— 01 考场、01 座）。
+    # 模板里 {{ pad2(s.room_no) }} / {{ pad2(s.seat_no) }}，与导出（Excel/PDF）同一实现。
+    from app.utils.text_guard import pad2
     app.jinja_env.globals.update(
         subject_direction=subject_direction,
         subject_badge_class=subject_badge_class,
@@ -520,6 +523,7 @@ def create_app():
         period_label=period_label,
         period_name_map=period_name_map,
         field_value=field_value,
+        pad2=pad2,
     )
 
     db.init_app(app)

@@ -452,10 +452,19 @@ def exam_detail(exam_id):
         except Exception as _e:  # noqa: BLE001  提示信息不应影响页面渲染
             current_app.logger.debug('partial_import 计算失败 exam_id=%s: %s', exam_id, _e)
             partial = None
+    # 2026-10-13：考试信息编辑弹窗（名称/年级/日期/性质/阶段）。
+    # has_scores 决定年级能否改 —— 已导入成绩后年级锁定（成绩行绑的是考试当时的班级与学号）。
+    from app.models.grades import EXAM_KINDS, EXAM_STAGES
+    has_scores = db.session.query(ExamScore.id).filter(
+        ExamScore.exam_id == exam_id).first() is not None
     return render_template('grades/exam_detail.html', exam=exam, students=students,
                            subjects=SUBJECTS, status_label=EXAM_STATUS_LABEL,
                            import_info=info, steps=steps, next_step=next_step,
                            partial_import=partial,
+                           grade_options=_grade_options(),
+                           kind_options=_dict_values('exam_kind', EXAM_KINDS),
+                           stage_options=_dict_values('exam_type', EXAM_STAGES),
+                           has_scores=has_scores,
                            full_marks=exam.full_marks(),
                            can_edit_scores=current_user.has_perm('grades.score_edit'),
                            classes=classes, cur_class=cur_class, cur_dir=cur_dir,
@@ -491,29 +500,75 @@ def _safe_int(val, default):
         return default
 
 
-@bp.route('/exams/<int:exam_id>/rename', methods=['POST'])
+@bp.route('/exams/<int:exam_id>/update', methods=['POST'])
 @login_required
 @perm_required('grades.edit')
-def exam_rename(exam_id):
-    """考试名称就地改名：同年级内唯一（与新建考试的重名规则一致）"""
+def exam_update(exam_id):
+    """修改考试基本信息：名称 / 年级 / 考试日期 / 性质 / 阶段。
+
+    2026-10-13（用户口径）：考试详情页原先只能改名（浏览器 prompt），
+    日期/类型也应可改；但**已导入成绩后年级不可改** —— 成绩行存的是
+    考试当时的班级与学号，改年级会让历史成绩挂到别的年级。
+    """
     exam = assert_exam_visible(exam_id)   # H-4：校验考试所属年级范围
     name = (request.form.get('name') or '').strip()
     if not name:
         return jsonify(success=False, message='考试名称不能为空'), 400
-    if name == exam.name:
-        return jsonify(success=True, message='名称未变化')
-    dup = Exam.query.filter(Exam.grade == exam.grade,
-                            Exam.name == name, Exam.id != exam.id).first()
+    if len(name) > 100:
+        return jsonify(success=False, message='考试名称过长（不超过 100 字）'), 400
+
+    grade = (request.form.get('grade') or '').strip() or exam.grade
+    # 日期：解析失败要报错，不能静默回落到今天（编辑场景静默改期最危险）
+    raw_date = (request.form.get('exam_date') or '').strip()
+    if raw_date:
+        try:
+            exam_date = date.fromisoformat(raw_date)
+        except ValueError:
+            return jsonify(success=False, message='考试日期格式不正确'), 400
+    else:
+        exam_date = exam.exam_date
+    # 性质/阶段：表单未给值（字段被禁用等）时保留原值，避免误清空
+    exam_kind = (request.form.get('exam_kind') or '').strip() or (exam.exam_kind or '')
+    exam_type = (request.form.get('exam_type') or '').strip() or (exam.exam_type or '其他')
+
+    has_scores = db.session.query(ExamScore.id).filter(
+        ExamScore.exam_id == exam_id).first() is not None
+    if grade != exam.grade:
+        if has_scores:
+            return jsonify(success=False,
+                           message='本场已导入成绩，年级不可修改（会影响历史成绩归属）'), 400
+        assert_grade_visible(grade)       # 目标年级也必须在当前用户可见范围内
+
+    dup = Exam.query.filter(Exam.grade == grade, Exam.name == name,
+                            Exam.id != exam.id).first()
     if dup:
         return jsonify(success=False,
                        message=f'同年级已存在同名考试「{name}」（{dup.exam_date}），请换一个名称'), 400
-    old = exam.name
+
+    changes = []
+    if name != exam.name:
+        changes.append(f'名称「{exam.name}」→「{name}」')
+    if grade != exam.grade:
+        changes.append(f'年级 {exam.grade}→{grade}')
+    if exam_date != exam.exam_date:
+        changes.append(f'日期 {exam.exam_date}→{exam_date}')
+    if exam_kind != (exam.exam_kind or ''):
+        changes.append(f'性质「{exam.exam_kind or "—"}」→「{exam_kind or "—"}」')
+    if exam_type != (exam.exam_type or ''):
+        changes.append(f'阶段「{exam.exam_type or "—"}」→「{exam_type or "—"}」')
+    if not changes:
+        return jsonify(success=True, message='未做任何修改')
+
     exam.name = name
+    exam.grade = grade
+    exam.exam_date = exam_date
+    exam.exam_kind = exam_kind
+    exam.exam_type = exam_type
+    exam.term = term_of_date(exam_date)   # 学年随日期自动重算（不单独编辑）
     db.session.commit()
     invalidate_exam_cache(exam_id)
-    log_operation(current_user, '修改', '考试', exam_id,
-                  f'名称「{old}」→「{name}」', module='grades')
-    return jsonify(success=True, message=f'考试名称已更新为「{name}」')
+    log_operation(current_user, '修改', '考试', exam_id, '；'.join(changes), module='grades')
+    return jsonify(success=True, message='考试信息已更新：' + '；'.join(changes))
 
 
 def _recalc_after_edit(exam_id):
