@@ -223,11 +223,36 @@ async def run_account_mode_cases(record, expected_tools, probe_tool='list_my_sco
         else:
             record('接入认证：连续失败锁定', [f'状态码序列 {codes}'], '')
 
+        # —— 2026-10-13 全面审计 M-5：第二道准入（require_token=true）——
+        # AccessGuard 在服务启动时读取配置，所以要另起一个开了 require_token 的实例。
+        http2, port2 = _start_http(dict(cfg, require_token=True))
+        try:
+            resp = await _raw_post(port2, {'x-stulink-user': username,
+                                           'x-stulink-password': password})
+            _status(record, '审计M-5：开第二道准入后「只有账号密码」被拒', resp.status_code, 401)
+            if 'invalid_token' not in resp.text:
+                record('审计M-5：无令牌错误码', ['缺少 invalid_token'], resp.text[:200])
+            count3, text3 = await _sdk_session(
+                port2, {'X-StuLink-User': username, 'X-StuLink-Password': password,
+                        'X-StuLink-Token': base_cfg.get('token') or ''}, probe_tool)
+            if count3 == expected_tools:
+                record('审计M-5：账号密码 + X-StuLink-Token 正常进入并调用', [], '')
+            else:
+                record('审计M-5：带令牌调用',
+                       [f'工具数 {count3}（期望 {expected_tools}）'], text3[:200])
+            resp = await _raw_post(port2, {'x-stulink-user': username,
+                                           'x-stulink-password': password,
+                                           'x-stulink-token': 'wrong-token'})
+            _status(record, '审计M-5：错误令牌被拒', resp.status_code, 401)
+        finally:
+            http2.should_exit = True
+
         # —— 2026-10-13 全面审计 M-5：锁定必须按「来源」而不是按账号 ——
         # 否则局域网内任何设备用 5 次错误口令就能把某位老师的账号锁死 300 秒（拒绝服务）。
         from mcp_server.core import auth as _auth
         _auth._fails.clear()
         _auth._account_fails.clear()
+        _auth._source_fails.clear()
         for _ in range(5):
             _auth._record_fail('__smoke_victim__', client='10.9.9.9')
         locked_src = _auth._lock_remaining('__smoke_victim__', client='10.9.9.9') > 0
@@ -260,8 +285,24 @@ async def run_account_mode_cases(record, expected_tools, probe_tool='list_my_sco
         else:
             record('审计M-5：跨来源失败累计延迟兜底',
                    [f'delay={delay}（期望 0<delay<=1）/ 其它来源可登录={still_free}'], '')
+
+        # 来源级总闸（跨账号）：一个来源换着账号扫口令 → 只挡这个来源
+        _auth._source_fails.clear()
+        config._cache = dict(cfg, login_source_fail_limit=3, login_source_window=300)
+        for _ in range(3):
+            _auth._record_source_fail('10.7.7.7')
+        blocked_src = _auth._source_block_remaining('10.7.7.7') > 0
+        other_src_free = _auth._source_block_remaining('10.7.7.8') == 0
+        config._cache = cfg
+        if blocked_src and other_src_free:
+            record('审计M-5：来源级失败总闸只挡超限来源（不影响别的设备）', [], '')
+        else:
+            record('审计M-5：来源级失败总闸',
+                   [f'超限来源被挡={blocked_src}（期望 True）/ 其他来源被挡='
+                    f'{not other_src_free}（期望 False）'], '')
         _auth._fails.clear()
         _auth._account_fails.clear()
+        _auth._source_fails.clear()
     except Exception as exc:                                        # noqa: BLE001
         record('接入认证：端到端用例执行', [f'{type(exc).__name__}: {exc}'], '')
     finally:

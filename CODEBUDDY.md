@@ -94,8 +94,25 @@ py -3.12 scripts\run_all_regression.py --quick    # 只跑 3 项自检
   `scripts/check_columns.py`（模型列 vs 现网列）、`scripts/check_indexes.py`
   （模型声明索引 vs 现网；`--fix` 可补，改库前会先备份）。
 - MCP 服务改动另跑：`mcp_server\.venv\Scripts\python.exe mcp_server\smoke_scores.py`。
+- `tests/_archive/` 是**一次性历史脚本**（按日期 `qa_YYYYMMDD/` 归档，被若干批次总结当验证证据引用），
+  **不属于回归**，改代码不必管它；新增一次性脚本也请放这里，别堆在 `tests/` 顶层。
 - 当前基线（2026-10-13 全面审计后）：教务 505、安全 287、宿舍 31、班级范围 8，
-  **合计 831 项全绿**；MCP 自测 72 / 0。
+  **合计 831 项全绿**；MCP 自测 76 / 0。
+
+### MCP 服务的准入现状（动 mcp_server 前必读）
+
+- 实机 `mcp_server/config.json`：`host=0.0.0.0`、`auth_mode=account`、**`require_token=false`**
+  —— 客户端只需账号密码（`X-StuLink-User/Password` 或 Basic）。
+  **2026-10-13 用户口径：第二道准入（令牌）不开**（开过一次，当天按要求关了）：
+  能力保留，改 `require_token=true` + 重启即启用；若要更严也可把 `host` 收回 `127.0.0.1`。
+  多带 `X-StuLink-Token` 头在 `false` 时会被直接忽略（无害），所以客户端加了也不用撤。
+- 令牌只在 `config.json` 与启动横幅（首尾片段）出现：**不要回显、不要写进文档/日志/提交**。
+  该文件**从未进过 git**（本地与 `origin` 均无；`.gitignore` 已含它），它的**任何副本/备份/归档
+  也不许提交**（`.gitignore` 已封堵 `**/backup_mcp_server*/`、`tests/**/config.json`、
+  `**/config.json.bak*`）；`scripts/scan_security_patterns.py` 第 7 项会按令牌**字面值**
+  全仓搜一遍并拦截（含 `backup*` 目录，命令 `py -3.12 scripts/scan_security_patterns.py` 必须 0 命中）。
+- 认证限速三层：同来源+同账号连错 5 次 → 只锁该来源（**不锁账号**）；同来源失败总数 20 次
+  → 挡该来源；跨来源累计 → 只加延迟不拒绝。改这块别把"锁来源"退回"锁账号"（那会被人拿错口令锁死老师账号）。
 - lint（本仓库不装进依赖，按需 `py -3.12 -m pip install ruff`）：
   `py -3.12 -m ruff check app mcp_server scripts tests`，规则见根目录 `ruff.toml`
   （只开"真错"级：语法错误 E9、未定义名 F82、重复定义 F811）。

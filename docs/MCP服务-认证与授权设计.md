@@ -68,6 +68,17 @@ X-StuLink-Token: <config.json 里的 token>      # 也接受 Authorization: Bear
     后，每次尝试**附加递增延迟**（上限 1 秒），只延迟、不拒绝 —— 分布式爆破会被拖慢，
     而账号本人永远进得来。
   - stdio 本地调用（`run_stdio.py`）不带来源，等价于按账号维度计数（单机无他人锁号问题）。
+- **单来源总闸**（`login_source_fail_limit` 默认 20，`login_source_window` 默认 300 秒）：
+  同一来源在窗口内的失败**总数**（不分账号）达到阈值后，该来源整段窗口内一律 429 ——
+  挡住"一个来源换着账号扫口令"；只影响这个来源，与账号无关，窗口过后自动恢复。
+- **第二道准入（部署现状 = 关）**：本项目实机 `require_token=false`（2026-10-13
+  用户口径：**不开令牌**，只留账号密码一道准入）。此时客户端多带的
+  `X-StuLink-Token` 会被直接忽略（无害）。
+  要启用：把该键改 `true` 并重启服务，客户端加 `X-StuLink-Token: <config.json 里的 token>`
+  （或 `Authorization: Bearer <token>`）—— 相关端到端用例在 `smoke_auth.py` 里已有
+  （无令牌 401 / 带令牌通过 / 错令牌 401），启用前先跑一遍自测。
+  令牌只在 `config.json` 与启动横幅（首尾片段）出现，不进日志、不进文档。
+  局域网暴露且未开第二道准入时，服务启动横幅会打印一行安全提示（含两种收紧方式）。
 - 校验在 MCP 的专用 DB 线程（`core/db.py`）执行，不阻塞事件循环。
 
 ### 1.4 身份如何传给工具（关键实现）
@@ -403,6 +414,8 @@ app context 退出时回收会话。
 | `login_throttle_threshold` | 10 | 跨来源失败累计阈值：超过后每次尝试附加递增延迟（只延迟不拒绝） |
 | `login_throttle_window` | 300 | 跨来源失败累计统计窗口（秒） |
 | `login_throttle_max_delay` | 1.0 | 附加延迟上限（秒）；0=关闭 |
+| `login_source_fail_limit` | 20 | 单来源失败总数上限（跨账号，超限该来源一律 429）；0=不限制 |
+| `login_source_window` | 300 | 单来源失败总数的统计窗口（秒） |
 | `allow_write` | `true` | 写工具总开关 |
 | `max_rows` / `exam_cache_ttl` / `allowed_hosts` / `host` / `port` / `path` / `audit_reads` | 见 config.json | 非认证项，语义不变 |
 

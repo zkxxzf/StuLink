@@ -51,8 +51,15 @@ venv/
 .encryption_key
 data/.secret_key
 data/.encryption_key
-# MCP 服务配置（含访问令牌，禁止提交）
+# MCP 服务配置（含访问令牌，禁止提交；它从未被跟踪，2026-10-13 再次核实）
 mcp_server/config.json
+# …它的任何**副本/备份/归档**同样禁止提交：
+#   2026-10-13 在 tests/_archive 里发现过一份带同一令牌的 config.json 副本，
+#   这类副本最容易被 `git add -A` 顺带收进提交，故一并封堵。
+**/backup_mcp_server*/
+tests/**/config.json
+**/config.json.bak*
+**/config.json.*.bak
 
 # 运行日志与测试缓存（勿提交）
 *.log
@@ -98,7 +105,7 @@ _v*.sh
 data_backup_*/
 
 # QA 过程产物（勿入库）：如 tests/qa_20261010/backup_before_delete 这类"删除前备份"副本目录
-tests/qa_*/
+tests
 
 # 误把 %VAR% 当字面路径（PowerShell 不展开 %VAR%）产生的 Windows 缓存目录（勿入库）
 %SystemDrive%/

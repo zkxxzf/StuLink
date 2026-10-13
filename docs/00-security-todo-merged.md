@@ -613,5 +613,9 @@ read_lints（20 个改动文件）        0 诊断
 - [x] **M-5（锁号一侧）MCP 失败锁定按账号 → 按「来源 + 账号」**：原口径下局域网任意设备用 5 次错误口令即可把老师账号锁死 300 秒；另加跨来源失败累计的递增延迟兜底（只延迟不拒绝）。2026-10-13 完成（`mcp_server/core/auth.py`；MCP 自测 72/0）。
 - [x] **L-4 勘误**：`scope_required` 并非僵尸件 —— 2026-10-10 已删除，`decorators.py:34` 只剩说明注释（本轮审计初稿为误报，已更正）。
 - [x] **L-8（部分）**：新增一键回归 `scripts/run_all_regression.py` + 根目录 `ruff.toml`（只开真错级规则，工具不入依赖）+ `CODEBUDDY.md` 回归与自检章节。
-- [ ] **仍未处理**：M-5 的另一半（`host=0.0.0.0` / `require_token=false` 是否收紧，需用户定部署口径）；报告 L 类结构债（20 个 >800 行文件、221 个 >50 行函数、`tests/qa_*` 历史快照、重复实现替换、`import_students` 341 行拆分）。
+- [x] **M-5（第二道准入）能力具备、实机按用户口径保持关闭**：`mcp_server/config.json` 当天曾开 `require_token=true` 并跑通端到端用例（无令牌 401 / 带令牌通过 / 错令牌 401），随后**按要求改回 `false`**（客户端只带账号密码，减少摩擦）；启用只需改 `true` + 重启。暴露且未开时启动横幅打印安全提示（含"开令牌 / 收 host"两种收紧方式）。2026-10-13 完成。
+- [x] **M-5（单来源总闸）**：新增 `login_source_fail_limit`（20）/`login_source_window`（300s）——同一来源换着账号扫口令时，该来源整段窗口内 429，与账号无关。2026-10-13 完成。
+- [x] **P2 清理**：`tests/qa_20261010|12|13` 39 个一次性脚本归档到 `tests/_archive/`（未删：其中 38 个未被 git 跟踪，且被多份总结当证据引用）；项目侧 Python 字节码缓存 348 个 / 5.0MB 已清（`.venv` 内保留）。
+- [x] **令牌副本治理（2026-10-13 用户要求"从云端去掉、以后不再提交"）**：核实 `mcp_server/config.json` **从未进入 git**（本地全历史 + `origin/sakaay` 远端树均无；`.gitignore` 早已含它）→ 云端无需删除；实为堵住"副本被 `git add -A` 带上去"的口子：`tests/_archive/**/backup_mcp_server_before_merge/config.json` 中的令牌值已清空，`.gitignore` 增补 `**/backup_mcp_server*/`、`tests/**/config.json`、`**/config.json.bak*`，并在 `scan_security_patterns.py` 增加第 7 项"令牌泄漏检查"（按实机令牌字面值全仓搜，含 backup 目录；已用假令牌副本验证可抓到）。
+- [ ] **仍未处理（选做结构债）**：拆 `import_students`（341 行）；L-5 重复实现替换（周次/节次/下载名等）；20 个 >800 行文件与 221 个 >50 行函数的拆分治理。
 - 回归基线（本轮实测）：教务 501 / 安全 287 / 宿舍 31 / 班级范围 8 = **827 项全绿**；`scan_security_patterns.py` 0 命中；`check_columns.py` 缺列 0。

@@ -11,9 +11,13 @@
   4. 模板新增 |safe / Markup(用户输入) / render_template_string
   5. 前端新增裸 innerHTML 拼接（未走 escHtml）
   6. 内联事件处理器里出现 '{{ ... }}'（M-10）
+  7. 实机 MCP 令牌泄漏到其它文件（副本/备份/归档/文档）——2026-10-13 新增：
+     当时在 `tests/_archive/**/backup_mcp_server_*/` 里发现一份带同一令牌的 config.json
+     副本（该副本未被 .gitignore 覆盖，一次 `git add -A` 就会进云端）
 
 运行：python scripts/scan_security_patterns.py
 """
+import json
 import os
 import re
 import sys
@@ -93,6 +97,64 @@ def iter_files():
                 yield os.path.join(root, fn)
 
 
+LIVE_CONFIG_REL = 'mcp_server/config.json'
+# 令牌字面量：JSON 里 token 值至少有这么长（占位符 <...> 不会命中）
+_TOKEN_FIELD = re.compile(r'"token"\s*:\s*"([A-Za-z0-9_\-]{16,})"')
+
+
+def _live_token():
+    """读实机 MCP 令牌（config.json 允许 // 注释行）；读不到返回空串。"""
+    path = os.path.join(BASE, LIVE_CONFIG_REL)
+    if not os.path.exists(path):
+        return ''
+    try:
+        with open(path, encoding='utf-8') as f:
+            text = '\n'.join(l for l in f if not l.lstrip().startswith('//'))
+        return (json.loads(text).get('token') or '').strip()
+    except Exception:                      # noqa: BLE001  配置读不到就不做字面值比对
+        return ''
+
+
+def scan_token_leaks():
+    """实机 MCP 令牌是否出现在别的文件里（副本 / 备份 / 归档 / 文档 / 日志）。
+
+    两类命中：
+      ① 按**实机令牌字面值**全仓搜（精准，零误报）；
+      ② 任何非实机配置的 `*config*.json` 里出现 ≥16 位的 token 字段（覆盖令牌已轮换、
+         旧副本仍在的情况）。
+    `backup*` 目录在这里**不跳过**——这正是要抓的东西。
+    """
+    token = _live_token()
+    hits = []
+    for root, dirs, files in os.walk(BASE):
+        dirs[:] = [d for d in dirs if d not in SKIP_DIRS]
+        for fn in files:
+            path = os.path.join(root, fn)
+            rel = os.path.relpath(path, BASE).replace('\\', '/')
+            if rel == LIVE_CONFIG_REL or _is_third_party(rel):
+                continue
+            try:
+                if os.path.getsize(path) > 2 * 1024 * 1024:
+                    continue
+                with open(path, 'rb') as f:
+                    raw = f.read()
+            except OSError:
+                continue
+            msg = ('该文件含实机 MCP 令牌，禁止提交/外发（令牌只留在 '
+                   + LIVE_CONFIG_REL + '）')
+            rid = ''
+            if token and len(token) >= 12 and token.encode('utf-8') in raw:
+                rid = '令牌-副本泄漏'
+            elif (fn.lower().endswith('.json') and 'config' in fn.lower()
+                    and _TOKEN_FIELD.search(raw.decode('utf-8', 'ignore'))):
+                rid = '令牌-遗留副本'
+                msg = ('该配置副本里含 token 字段（可能是旧令牌），禁止提交；'
+                       '确认无用就删掉')
+            if rid:
+                hits.append((rid, rel, 1, '（已按令牌内容命中，值不打印）', msg))
+    return hits
+
+
 def main():
     hits = []
     for path in iter_files():
@@ -113,8 +175,11 @@ def main():
         except Exception:  # noqa: BLE001
             continue
 
+    hits.extend(scan_token_leaks())
+
     if not hits:
-        print('[OK] 安全模式扫描通过：0 处命中')
+        print(f'[OK] 安全模式扫描通过：0 处命中（含令牌副本检查，'
+              f'实机令牌只存在于 {LIVE_CONFIG_REL}）')
         return 0
     print(f'[WARN] 安全模式扫描命中 {len(hits)} 处：')
     for rid, rel, ln, text, msg in hits:
