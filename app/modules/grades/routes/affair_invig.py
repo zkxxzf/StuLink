@@ -22,12 +22,12 @@ from app.extensions import db
 from app.models import User
 from app.models.grades import (AffairTeacher, AffairSchedule, AffairInvigilator,
                                AffairInvigilation, AffairRoom, AffairStudent,
-                               TeacherSubjectLink, SUBJECTS, Exam)
+                               TeacherSubjectLink, SUBJECTS, Exam, normalize_subject)
 from app.modules.grades import bp
 from app.modules.grades.utils import numeric_classes
 from app.utils.decorators import perm_required
 from app.utils.helpers import log_operation
-from app.utils.export_helpers import xl_row
+from app.utils.export_helpers import xl_row, xl_safe
 from app.utils.text_guard import (sanitize_label, sanitize_prefix, safe_download_name,
                                   pad2)   # 2026-10-13：监考表考场号补零（01/02…）
 from app.utils.upload_guard import validate_upload
@@ -196,6 +196,8 @@ def affair_teachers_save(aid):
         if '|' not in key:
             continue
         cls, subj = key.split('|', 1)
+        # 2026-10-13：科目别名归一（英语/日语→外语 等）后再做白名单校验
+        subj = normalize_subject(subj)
         if cls not in classes or subj not in SUBJECTS:
             continue
         uid = int(val) if str(val).strip() else None
@@ -344,8 +346,13 @@ def _fill_time(row, value, slot=None):
 
 
 def _fill_subject(row, value):
-    """科目白名单校验（与手填/Excel 导入同一口径）；多科用「、」累积去重"""
-    names = [x for x in re.split(r'[、，,/\\\s]+', str(value or '').strip()) if x]
+    """科目白名单校验（与手填/Excel 导入同一口径）；多科用「、」累积去重。
+
+    2026-10-13：先对每一段调用 normalize_subject 做别名映射（英语/日语→外语 等），
+    再过白名单 —— 不认识的写法仍会被挡下（整行跳过），不会悄悄入库。
+    """
+    names = [normalize_subject(x)
+             for x in re.split(r'[、，,/\\\s]+', str(value or '').strip()) if x]
     if not names or any(x not in _SUBJ_SET for x in names):
         return False
     cur = [x for x in (row['subject'] or '').split('、') if x]
@@ -424,8 +431,9 @@ def _parse_line_loose(cells):
         # 整格 = 单一字段（时间段 / 日期 / 时间 / 科目）→ 直接归位；
         # 否则按空白拆开逐个识别（合体写法），仍未识别的进选科/备注。
         compact = re.sub(r'\s+', '', s)
+        # 2026-10-13：「这格是不是科目」也先用归一后的值判断（英语→外语 等别名同样认得出）
         if ((_RANGE_RE.fullmatch(compact) or _DATE_ONLY_RE.match(s) or _hhmm(s)
-             or s in _SUBJ_SET) and absorb(s)):
+             or normalize_subject(s) in _SUBJ_SET) and absorb(s)):
             continue
         for t in [x for x in re.split(r'\s+', s) if x]:
             if not absorb(t):
@@ -630,11 +638,14 @@ def affair_schedules_save(aid):
     """
     affair = _affair(aid)
     sid = request.form.get('id', type=int)
-    names = [s for s in re.split(r'[、，,/\\s]+', (request.form.get('subject') or '').strip())
-             if s]
-    if not names:
+    raw_names = [s for s in re.split(r'[、，,/\\\s]+', (request.form.get('subject') or '').strip())
+                 if s]
+    if not raw_names:
         return jsonify({'ok': False, 'msg': '请选择考试科目'})
-    bad = [s for s in names if s not in _SUBJ_SET]
+    # 2026-10-13：先对每一段做别名归一（英语/日语→外语 等）再校验白名单；
+    # 报错回显**用户原始写法**，便于排查。
+    names = [normalize_subject(s) for s in raw_names]
+    bad = [raw for raw, std in zip(raw_names, names) if std not in _SUBJ_SET]
     if bad:
         return jsonify({'ok': False, 'msg': f'科目不在科目字典内：{"、".join(bad)}'})
     subj = '、'.join(names)
@@ -716,9 +727,91 @@ def affair_invig_get(aid):
         'schedules': [{'id': s.id, 'date': s.exam_date.strftime('%Y-%m-%d') if s.exam_date else '',
                        'start': s.start_time or '', 'end': s.end_time or '',
                        'subject': s.subject, 'selection': s.selection or ''} for s in schedules],
-        'rooms': [{'room_no': r.room_no, 'location': r.location or ''} for r in rooms],
+        # 2026-10-13：补 capacity —— 矩阵视图（学校张贴格式）行头要显示「容纳人数」
+        'rooms': [{'room_no': r.room_no, 'location': r.location or '',
+                   'capacity': r.capacity} for r in rooms],
         'invig': {f'{k[0]}|{k[1]}': v for k, v in by_key.items()},
     })
+
+
+# ---- 监考工作量统计（2026-10-13 用户口径：要能看「每位老师监考了多长时间」）----
+
+def _hhmm_minutes(t):
+    """'09:00' → 540（分钟）；空 / 非法 → None"""
+    m = re.match(r'^\s*(\d{1,2})\s*[:：]\s*(\d{1,2})\s*$', t or '')
+    if not m:
+        return None
+    h, mi = int(m.group(1)), int(m.group(2))
+    if h > 23 or mi > 59:
+        return None
+    return h * 60 + mi
+
+
+def _session_minutes(s):
+    """场次时长（分钟）：起止时间齐全才计；end < start 视为跨零点顺延一天。"""
+    if s is None:
+        return None
+    a, b = _hhmm_minutes(s.start_time), _hhmm_minutes(s.end_time)
+    if a is None or b is None:
+        return None
+    return (b - a) if b >= a else (b + 1440 - a)
+
+
+def _invig_workload(affair):
+    """按老师汇总监考工作量：格数 / 时长（分钟）/ 缺时间格数 + 逐格明细。
+
+    口径：一人一场次只监一个考场（环节⑥ 硬约束），故「格数」即场次数；
+    时长按场次起止时间累加；没填时间的场次只计数、计入 missing，不猜时长。
+    """
+    scheds = {s.id: s for s in AffairSchedule.query.filter_by(affair_id=affair.id).all()}
+    rooms = {r.room_no: r for r in AffairRoom.query.filter_by(affair_id=affair.id).all()}
+    pool = {p['name']: p for p in invig_pool(affair)}
+    items = {}
+    for iv in AffairInvigilation.query.filter_by(affair_id=affair.id).all():
+        nm = (iv.name or '').strip()
+        if not nm:
+            continue
+        s = scheds.get(iv.schedule_id)
+        room = rooms.get(iv.room_no)
+        mins = _session_minutes(s)
+        it = items.setdefault(nm, {
+            'name': nm,
+            'user_id': iv.user_id or (pool.get(nm) or {}).get('user_id'),
+            'source': (pool.get(nm) or {}).get('source') or 'unknown',
+            'cells': 0, 'minutes': 0, 'missing': 0, 'detail': []})
+        it['cells'] += 1
+        if mins is None:
+            it['missing'] += 1
+        else:
+            it['minutes'] += mins
+        it['detail'].append({
+            'date': s.exam_date.strftime('%Y-%m-%d') if (s is not None and s.exam_date) else '',
+            'start': (s.start_time if s is not None else '') or '',
+            'end': (s.end_time if s is not None else '') or '',
+            'subject': (s.subject if s is not None else '') or '',
+            'room_no': pad2(iv.room_no or ''),
+            'location': (room.location if room is not None else '') or '',
+            'minutes': mins,
+        })
+    rows = sorted(items.values(),
+                  key=lambda x: (-x['minutes'], -x['cells'], x['name']))
+    for it in rows:
+        it['detail'].sort(key=lambda d: (d['date'], d['start'], d['subject']))
+    return {
+        'items': rows,
+        'has_time': any(it['minutes'] for it in rows),
+        'total_cells': sum(it['cells'] for it in rows),
+        'total_minutes': sum(it['minutes'] for it in rows),
+        'total_missing': sum(it['missing'] for it in rows),
+    }
+
+
+@bp.route('/affairs/<int:aid>/invig/workload')
+@login_required
+@perm_required('grades.edit')
+def affair_invig_workload(aid):
+    affair = _affair(aid)
+    return jsonify(success=True, data=_invig_workload(affair))
 
 
 @bp.route('/affairs/<int:aid>/invig/settings', methods=['POST'])
@@ -869,6 +962,76 @@ def affair_invig_exclude_add(aid):
     log_operation(current_user, '修改', '监考排除名单', aid, f'{name} {scope}',
                   module='grades')
     return jsonify({'ok': True, 'msg': f'{name}：{scope}'})
+
+
+@bp.route('/affairs/<int:aid>/invig/exclude/batch', methods=['POST'])
+@login_required
+@perm_required('grades.edit')
+def affair_invig_exclude_batch(aid):
+    """批量加入排除名单：names（可多选老师）× sids（可多选场次，0 = 整批次）。
+
+    2026-10-13 用户口径：原先「一个人 × 一场」逐个加，一个老师要排掉 6 场得点 6 次；
+    现在横竖都能多选，一次落多条。规则：
+      - 老师必须来自监考池（与单个添加同一道校验）；
+      - 场次必须属于本批次；勾了「整批次不监考」时该老师只落一条整批排除
+        （具体场次的勾选忽略，避免「整批 + 每场」的冗余行）；
+      - 同一组合已存在则跳过计数，不算失败（重复点「加」不会报错）。
+    """
+    from app.models.grades import AffairInvigExclude
+
+    affair = _affair(aid)
+    names = []
+    for raw in request.form.getlist('names'):
+        nm = (raw or '').strip()
+        if nm and nm not in names:
+            names.append(nm)
+    if not names:
+        return jsonify({'ok': False, 'msg': '请选择老师'})
+    pool = {p['name']: p for p in invig_pool(affair)}
+    bad = [n for n in names if n not in pool]
+    if bad:
+        return jsonify({'ok': False, 'msg': '不在监考池中：' + '、'.join(bad[:5])})
+    vals = []
+    for raw in request.form.getlist('sids'):
+        if raw is None or str(raw).strip() == '':
+            continue
+        try:
+            vals.append(int(raw))
+        except (TypeError, ValueError):
+            return jsonify({'ok': False, 'msg': '场次参数无效'})
+    whole = (0 in vals) or not vals            # 没勾场次 = 按整批次（与旧单选默认一致）
+    sids = [v for v in dict.fromkeys(vals) if v]
+    if sids:
+        owned = {s.id for s in AffairSchedule.query.filter_by(affair_id=affair.id).all()}
+        bad_s = [str(v) for v in sids if v not in owned]
+        if bad_s:
+            return jsonify({'ok': False, 'msg': '场次不属于本批次：' + '、'.join(bad_s[:5])})
+    targets = [0] if whole else sids
+    if len(names) * len(targets) > 500:
+        return jsonify({'ok': False,
+                        'msg': f'一次最多 500 条（本次 {len(names) * len(targets)} 条），请分批'})
+    exist = {(e.name, e.schedule_id or 0) for e in _excl_rows(affair)}
+    added = skipped = 0
+    for nm in names:
+        for sid in targets:
+            if (nm, sid) in exist:
+                skipped += 1
+                continue
+            db.session.add(AffairInvigExclude(
+                affair_id=affair.id, name=nm, user_id=pool[nm]['user_id'],
+                schedule_id=sid or None))
+            exist.add((nm, sid))
+            added += 1
+    if added:
+        db.session.commit()
+        scope = '整批次不监考' if whole else f'{len(sids)} 个场次不监考'
+        log_operation(current_user, '修改', '监考排除名单', aid,
+                      f'批量：{len(names)} 人 × {scope} → 新增 {added} 条'
+                      + (f'（跳过已存在 {skipped} 条）' if skipped else ''),
+                      module='grades')
+    return jsonify({'ok': True, 'added': added, 'skipped': skipped,
+                    'names': len(names), 'schedules': 0 if whole else len(sids),
+                    'whole': whole})
 
 
 @bp.route('/affairs/<int:aid>/invig/exclude/delete', methods=['POST'])
@@ -1116,81 +1279,201 @@ def affair_invig_set(aid):
     return jsonify({'ok': True, 'name': name})
 
 
-# ==================== 环节⑦ 导出监考表 ====================
+# ==================== 环节⑦ 导出监考表（学校张贴格式矩阵 + 工作量统计） ====================
+# 2026-10-13 用户口径：监考表**只保留一个导出**——行=考场（含容纳人数/位置）、
+# 列=日期 × 上午/下午 × 科目的「教师安排」矩阵（对齐学校下发的张贴表），
+# 并在**同一张表**下方直接带「监考工作量统计」（每人 格数 × 时长 + 合计）。
+# 原先的「长表 Excel / 监考表 PDF / 矩阵 / 工作量」四个入口按用户要求合并为一个。
+_WEEKS_CN = ('周一', '周二', '周三', '周四', '周五', '周六', '周日')
 
-def _invig_rows(affair):
-    """监考表数据行：按「场次 → 考场」排序，返回 (headers, rows, slots)。"""
-    schedules = {s.id: s for s in
-                 AffairSchedule.query.filter_by(affair_id=affair.id).all()}
-    rooms = {r.room_no: r for r in
-             AffairRoom.query.filter_by(affair_id=affair.id).all()}
-    invigs = AffairInvigilation.query.filter_by(affair_id=affair.id).all()
-    slots = max(1, min(_MAX_SLOTS, affair.invig_slots or 1))
-    for iv in invigs:
-        if iv.slot and iv.slot > slots:
-            slots = min(_MAX_SLOTS, iv.slot)
-    by_key = {}
-    for iv in invigs:
-        by_key.setdefault((iv.schedule_id, iv.room_no), {})[iv.slot] = iv.name or ''
-    headers = ['考试时间', '考试科目', '考场号', '考场位置']
-    headers += [f'监考老师{n}' for n in range(1, slots + 1)]
-    order = sorted(schedules.values(), key=_schedule_key)
-    rows = []
-    for s in order:
-        for rn in sorted(rooms):
-            key = (s.id, rn)
-            when = ' '.join(x for x in [
-                s.exam_date.strftime('%Y-%m-%d') if s.exam_date else '',
-                (f'{s.start_time}-{s.end_time}' if (s.start_time or s.end_time) else '')] if x)
-            sel = f'（{s.selection}）' if s.selection else ''
-            names = by_key.get(key, {})
-            row = [when, (s.subject or '') + sel, pad2(rn), rooms[rn].location or '']
-            row += [names.get(n, '') for n in range(1, slots + 1)]
-            rows.append(row)
-    return headers, rows, slots
+_SRC_CN = {'teacher': '任课教师', 'other': '其他监考员', 'unknown': ''}
+
+
+def _matrix_days(schedules):
+    """场次按日期分组（组内保持 _schedule_key 顺序）→ [{'date': date, 'items': [s]}]"""
+    days = []
+    for s in sorted(schedules, key=_schedule_key):
+        if not days or days[-1]['date'] != s.exam_date:
+            days.append({'date': s.exam_date, 'items': []})
+        days[-1]['items'].append(s)
+    return days
+
+
+def _period_of(t):
+    """'08:20' → 上午 / '14:30' → 下午；没写时间返回 ''（表头该格留空）"""
+    m = re.match(r'^\s*(\d{1,2})\s*[:：]\s*(\d{1,2})', t or '')
+    if not m:
+        return ''
+    return '上午' if int(m.group(1)) < 12 else '下午'
+
+
+def _cn_day(d):
+    return f'{d.month}月{d.day}日（{_WEEKS_CN[d.weekday()]}）' if d else '日期待定'
 
 
 @bp.route('/affairs/<int:aid>/export/invig')
 @login_required
 @perm_required('grades.edit')
 def affair_export_invig(aid):
+    """导出监考表（一个文件、一张表）：上段 = 教师安排矩阵（行=考场，列=日期×时段×科目，
+    一格一位老师），下段 = 监考工作量统计（每人 格数 × 时长 + 合计）——2026-10-13 用户口径。"""
     affair = _affair(aid)
-    headers, rows, _slots = _invig_rows(affair)
-    if not rows:
+    schedules = AffairSchedule.query.filter_by(affair_id=affair.id).all()
+    rooms = (AffairRoom.query.filter_by(affair_id=affair.id)
+             .order_by(AffairRoom.room_no).all())
+    if not schedules or not rooms:
         return jsonify({'ok': False, 'msg': '尚未编排监考表'}), 400
+    invigs = AffairInvigilation.query.filter_by(affair_id=affair.id).all()
+    slots = max(1, min(_MAX_SLOTS, affair.invig_slots or 1))
+    for iv in invigs:
+        if iv.slot and iv.slot > slots:
+            slots = min(_MAX_SLOTS, iv.slot)
+    at = {}
+    for iv in invigs:
+        at.setdefault((iv.schedule_id, iv.room_no), {})[iv.slot] = iv.name or ''
+
+    from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
+    from openpyxl.utils import get_column_letter
+
+    days = _matrix_days(schedules)
+    ordered = [s for d in days for s in d['items']]
+    lead = 3                       # 左侧固定列：考场号 / 容纳人数 / 考场位置
+    ncol = lead + len(ordered)
+
+    thin = Side(style='thin', color='9AA5B1')
+    box = Border(left=thin, right=thin, top=thin, bottom=thin)
+    center = Alignment(horizontal='center', vertical='center', wrap_text=True)
+    head_fill = PatternFill('solid', fgColor='DCE6F1')
+    gap_fill = PatternFill('solid', fgColor='FCE4E4')
+    title_font = Font(bold=True, size=14)
+    head_font = Font(bold=True)
+    data_font = Font()
+    gap_font = Font(color='B02A2A')
+
     wb = openpyxl.Workbook()
     ws = wb.active
     ws.title = '监考表'
-    from app.modules.grades.routes.exam_affairs import _write_sheet
-    _write_sheet(ws, headers, rows)
-    for i, w in enumerate([22, 14, 10, 20] + [14] * (_len_after(headers)), start=1):
-        ws.column_dimensions[openpyxl.utils.get_column_letter(i)].width = w
+
+    def paint(r1, c1, r2, c2, value=None, font=None, fill=None):
+        """区域刷边框（合并前逐格刷，合并后 openpyxl 只保留左上角），左上角写值"""
+        for rr in range(r1, r2 + 1):
+            for cc in range(c1, c2 + 1):
+                cell = ws.cell(row=rr, column=cc)
+                cell.border = box
+                if fill:
+                    cell.fill = fill
+        top = ws.cell(row=r1, column=c1)
+        if value is not None:
+            top.value = xl_safe(value)
+        top.font = font or data_font
+        top.alignment = center
+
+    # ① 标题
+    paint(1, 1, 1, ncol, f'{affair.name}　监考表', font=title_font, fill=head_fill)
+    ws.merge_cells(start_row=1, start_column=1, end_row=1, end_column=ncol)
+    ws.row_dimensions[1].height = 26
+
+    # ② 日期层 / ③ 上午下午层 / ④ 科目层
+    col = lead + 1          # 1..lead 是左侧固定列，场次从 lead+1 列开始
+    for d in days:
+        span = len(d['items'])
+        paint(2, col, 2, col + span - 1, _cn_day(d['date']), font=head_font, fill=head_fill)
+        if span > 1:
+            ws.merge_cells(start_row=2, start_column=col, end_row=2, end_column=col + span - 1)
+        # 上午/下午：只有该天场次都写了时间才可信，否则整天留空
+        per_list = [_period_of(s.start_time) for s in d['items']]
+        if all(per_list):
+            i = 0
+            while i < len(per_list):
+                j = i
+                while j + 1 < len(per_list) and per_list[j + 1] == per_list[i]:
+                    j += 1
+                paint(3, col + i, 3, col + j, per_list[i], font=head_font, fill=head_fill)
+                if j > i:
+                    ws.merge_cells(start_row=3, start_column=col + i,
+                                   end_row=3, end_column=col + j)
+                i = j + 1
+        else:
+            paint(3, col, 3, col + span - 1, '', fill=head_fill)
+        for i, s in enumerate(d['items']):
+            t = f'{s.start_time}-{s.end_time}' if (s.start_time or s.end_time) else ''
+            paint(4, col + i, 4, col + i, (s.subject or '') + (f'\n{t}' if t else ''),
+                  font=head_font, fill=head_fill)
+        col += span
+
+    # ⑤ 左侧三个列头
+    paint(5, 1, 5, 1, '考场号', font=head_font, fill=head_fill)
+    paint(5, 2, 5, 2, '容纳人数', font=head_font, fill=head_fill)
+    paint(5, 3, 5, 3, '考场位置', font=head_font, fill=head_fill)
+
+    # ⑥ 数据行（一格一位老师；多监考位用「、」并列；空格标「待排」）
+    row = 6
+    for rm in rooms:
+        paint(row, 1, row, 1, pad2(rm.room_no))
+        paint(row, 2, row, 2, rm.capacity if rm.capacity else '')
+        paint(row, 3, row, 3, rm.location or '')
+        for i, s in enumerate(ordered):
+            names = [n for n in (at.get((s.id, rm.room_no), {}).get(k, '')
+                                 for k in range(1, slots + 1)) if n]
+            c1 = lead + 1 + i
+            if names:
+                paint(row, c1, row, c1, '、'.join(names))
+            else:
+                paint(row, c1, row, c1, '待排', font=gap_font, fill=gap_fill)
+        ws.row_dimensions[row].height = 22
+        row += 1
+
+    # ---- 下段：监考工作量统计（与矩阵同一张表；2026-10-13 用户口径：一个导出里自带） ----
+    wl = _invig_workload(affair)
+    row += 1
+    paint(row, 1, row, 6, f'{affair.name}　监考工作量统计', font=head_font, fill=head_fill)
+    ws.merge_cells(start_row=row, start_column=1, end_row=row, end_column=6)
+    row += 1
+    if wl['total_missing']:
+        paint(row, 1, row, 6,
+              f'（有 {wl["total_missing"]} 格场次未填开始/结束时间，未计入时长 —— 请到环节⑤ 补时间）',
+              font=gap_font)
+        ws.merge_cells(start_row=row, start_column=1, end_row=row, end_column=6)
+        row += 1
+    for ci, h in enumerate(['教师', '身份', '监考格数', '监考时长（分钟）',
+                            '监考时长（小时）', '缺时间格数'], 1):
+        paint(row, ci, row, ci, h, font=head_font, fill=head_fill)
+    row += 1
+    if wl['items']:
+        for it in wl['items']:
+            paint(row, 1, row, 1, it['name'])
+            paint(row, 2, row, 2, _SRC_CN.get(it['source'], ''))
+            paint(row, 3, row, 3, it['cells'])
+            paint(row, 4, row, 4, it['minutes'])
+            paint(row, 5, row, 5, round(it['minutes'] / 60, 2))
+            paint(row, 6, row, 6, it['missing'])
+            row += 1
+        for ci, v in enumerate(['合计', '', wl['total_cells'], wl['total_minutes'],
+                                round(wl['total_minutes'] / 60, 2), wl['total_missing']], 1):
+            paint(row, ci, row, ci, v, font=head_font)
+        row += 1
+    else:
+        paint(row, 1, row, 6, '（尚未编排监考表）')
+        row += 1
+
+    ws.column_dimensions['A'].width = 13
+    ws.column_dimensions['B'].width = 12
+    ws.column_dimensions['C'].width = 16
+    for i in range(lead + 1, ncol + 1):
+        ws.column_dimensions[get_column_letter(i)].width = 12
+    ws.freeze_panes = 'D6'
+    ws.print_title_rows = '1:5'          # 打印时每页重复表头
+    ws.page_setup.orientation = 'landscape'
+
     out = io.BytesIO()
     wb.save(out)
     out.seek(0)
-    log_operation(current_user, '导出', '监考表', aid, f'{len(rows)} 行', module='grades')
+    log_operation(current_user, '导出', '监考表', aid,
+                  f'{len(ordered)} 场 × {len(rooms)} 考场 / {len(wl["items"])} 人工作量',
+                  module='grades')
     return send_file(out, as_attachment=True,
                      download_name=safe_download_name(f'监考表_{affair.name}') + '.xlsx',
                      mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
 
 
-def _len_after(headers):
-    return max(0, len(headers) - 4)
 
-
-@bp.route('/affairs/<int:aid>/export/invig/pdf')
-@login_required
-@perm_required('grades.edit')
-def affair_export_invig_pdf(aid):
-    affair = _affair(aid)
-    headers, rows, _slots = _invig_rows(affair)
-    if not rows:
-        return jsonify({'ok': False, 'msg': '尚未编排监考表'}), 400
-    from app.utils.affair_pdf import seating_list_sections
-    widths = [26, 16, 12, 26] + [20] * (len(headers) - 4)
-    buf = seating_list_sections(
-        f'{affair.name}　监考表（{len(rows)} 行）', headers,
-        [(f'{affair.grade} 监考安排', rows)], widths_mm=widths)
-    return send_file(buf, as_attachment=True,
-                     download_name=safe_download_name(f'监考表_{affair.name}') + '.pdf',
-                     mimetype='application/pdf')

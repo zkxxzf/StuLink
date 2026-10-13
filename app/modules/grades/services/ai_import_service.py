@@ -26,7 +26,7 @@ from datetime import date
 
 import openpyxl
 
-from app.models.grades import SUBJECTS, TOTAL_SUBJECT
+from app.models.grades import SUBJECTS, TOTAL_SUBJECT, SUBJECT_ALIAS
 
 # 系统内合法科目集合（用于把「英语→外语」并校验是否为真科目）
 SUBJECT_SET = set(SUBJECTS) | {TOTAL_SUBJECT}
@@ -42,7 +42,10 @@ FIELD_LABELS = {
     'raw_total': '总分（原始分）',
 }
 # 科目别名：文件常写「英语」，系统内是「外语」
-SUBJ_ALIAS = {'英语': '外语'}
+# 2026-10-13：改为引用 models.grades 公共别名表（SUBJECT_ALIAS = 唯一维护点，
+# 含日语/俄语等小语种与政治系写法）——本模块的表头别名展开、normalize_subject、
+# normalize_schedule_subject 全部随之生效，不再各写一份。
+SUBJ_ALIAS = SUBJECT_ALIAS
 RAW_SUFFIX = ('原始分', '原始成绩', '原始', '裸分')
 SCORE_KINDS = ('converted', 'raw', 'both', 'unknown')
 SCORE_KIND_LABEL = {'converted': '赋分成绩', 'raw': '原始成绩',

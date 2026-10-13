@@ -3,8 +3,9 @@
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 import hashlib
 
-from flask import (render_template, request, redirect, url_for, jsonify, abort,
+from flask import (render_template, request, jsonify, abort,
                    current_app)  # current_app 为 2026-10-11 修复 L163 未定义引用所补
+# 2026-10-13：redirect / url_for 随 index_legacy 一并移除（/grades/ 已改由 dashboard 承担）
 from flask_login import login_required, current_user
 from app.models.grades import Exam, TeacherSubjectLink
 from app.models import Student
@@ -16,15 +17,8 @@ from app.utils.decorators import perm_required
 from app.utils.cache import cache
 
 
-@bp.route('/')
-@login_required
-@perm_required('grades.view')
-def index_legacy():
-    """v1.19.0 成绩模块落地页改为「历次考试列表」（用户口径：进入模块先看考试列表）
-
-    原 /grades/ 是成绩分析页；现改为重定向，旧书签/旧链接仍可用。
-    """
-    return redirect(url_for('grades.exams_list'))
+# 2026-10-13：原 /grades/ → 历次考试的重定向（index_legacy）已移出，
+# 该地址现由 routes/dashboard.py 承担「首页仪表盘」（用户口径：成绩模块默认落地页＝仪表盘）。
 
 
 @bp.route('/exams/<int:exam_id>/near-line')
@@ -35,6 +29,7 @@ def exam_near_line(exam_id):
 
     口径：总分线**线上 above 分内**（危险：可能掉下来）/ **线下 below 分内**（希望：可能冲上去）
     默认 10 / 20 分，可在页面上调；复用 report_warning_service.near_line_report 的计算。
+    cls（可选）：按班级筛选，与成绩单「按班级查看」同名同口径（总分行＝考试当时班级）。
     本页在“考试上下文”内（侧栏会切成该场考试的悬浮流程栏）。
     """
     from app.modules.grades.services.exam_guard import assert_exam_visible
@@ -50,6 +45,7 @@ def exam_near_line(exam_id):
     below = request.args.get('below', default=rs.NEAR_LINE_BELOW, type=int)
     above = max(0, min(above or 0, cfg_max))
     below = max(0, min(below or 0, cfg_max))
+    cls = (request.args.get('cls') or '').strip()   # 班级筛选（服务内校验，非法＝全部）
 
     # 可选层级（本场总分划线）——不依赖缓存服务，直接查分数线表
     lq = ExamBand.query.filter_by(exam_id=exam_id, subject=TOTAL_SUBJECT)
@@ -60,7 +56,7 @@ def exam_near_line(exam_id):
         if row.name and row.name not in layers:
             layers.append(row.name)
 
-    data = rws.near_line_report(exam_id, direction, layer, above, below)
+    data = rws.near_line_report(exam_id, direction, layer, above, below, cls)
     err = data.get('error') if isinstance(data, dict) else '计算失败'
     by_class = []
     if not err:

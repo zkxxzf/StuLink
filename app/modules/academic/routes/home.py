@@ -23,7 +23,8 @@ from sqlalchemy import func
 
 from app.extensions import db
 from app.models import OperationLog, Student, User
-from app.models.academic import FormTemplate, InspectionRecord, TeacherAchievement
+from app.models.academic import (FormTemplate, INSPECTION_EXEMPT_KEYS,
+                                 InspectionRecord, TeacherAchievement)
 from app.models.timetable import ScheduleSwap, ScheduleEntry
 from app.modules.academic import bp
 from app.modules.academic.services.access_scope import (
@@ -123,7 +124,9 @@ def academic_home():
     class_rows_q = apply_academic_scope(class_rows_q, current_user, Student)
     class_rows = class_rows_q.distinct().all()
     insp_month = _count(insp_q)
-    insp_abnormal = _count(insp_q.filter(InspectionRecord.result != 'normal'))
+    # 「考试」不算异常（与查课统计页同口径，见 models/academic.py::INSPECTION_EXEMPT_KEYS）
+    insp_abnormal = _count(insp_q.filter(
+        InspectionRecord.result.notin_(tuple(INSPECTION_EXEMPT_KEYS))))
 
     # ── 查课（2026-10-12 用户口径：今日为主、本月为辅）──────────────
     # 记录本身按用户数据范围过滤（与查课页一致）；覆盖率分母（应查）为全校当天课次。

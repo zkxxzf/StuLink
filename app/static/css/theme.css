@@ -25,6 +25,11 @@
     --sl-surface-2: #f8fafc;           /* 次级面：表头、卡片头、斑马行 */
     --sl-surface-3: #f1f5f9;           /* hover / 分组头 */
     --sl-border: #e2e8f0;              /* 分割线、边框 */
+    /* 2026-10-13：课表（schedule_matrix.css / _schedule_grid.html）不再写死这三个色，
+       浅色值与原来完全一致，深色下跟随主题 */
+    --sl-line: #eef2f7;                /* 表格细网格线 */
+    --sl-head-soft: #eef2f7;           /* 浅灰表头 / 矩阵次级底 */
+    --sl-accent: #1d4ed8;              /* 强调色（表头链接 / 激活态） */
     --sl-text: #1e293b;                /* 主文字 */
     --sl-text-muted: #64748b;          /* 次要文字 */
     --sl-text-subtle: #94a3b8;         /* 更弱文字 */
@@ -94,6 +99,9 @@
     --sl-surface-2: #1c2739;
     --sl-surface-3: #233047;
     --sl-border: #2b3a52;
+    --sl-line: rgba(255, 255, 255, .10);
+    --sl-head-soft: #1c2739;
+    --sl-accent: #93c5fd;
     --sl-text: #e2e8f0;
     --sl-text-muted: #94a3b8;
     --sl-text-subtle: #64748b;
@@ -360,10 +368,12 @@ body {
 .ld-table thead th {
     border-bottom: 1px solid var(--sl-head-border) !important;
 }
+/* 2026-10-13 用户口径：表格一律加**虚线**格线（表体横线 + 列线 + 外框）。
+   表头下沿保留实线，作为「表头 / 表体」的分区线。 */
 .g-table tbody td,
 .table tbody td,
 .ld-table tbody td {
-    border-bottom: 1px solid var(--sl-border) !important;
+    border-bottom: 1px dashed var(--sl-border) !important;
 }
 /* 冻结首列：右侧一条分隔线（横向滚动时「这一列不动」才有边界） */
 .g-table thead th:first-child,
@@ -380,17 +390,118 @@ body {
 /* 宽表（全局对比 / 划线分层）：列多，靠竖线读列 */
 .ld-table th, .ld-table td,
 #bandTable th, #bandTable td {
-    border-right: 1px solid var(--sl-border);
+    border-right: 1px dashed var(--sl-border);
 }
 .ld-table thead th, #bandTable thead th { border-right-color: var(--sl-head-border); }
 .ld-table th:last-child, .ld-table td:last-child,
 #bandTable th:last-child, #bandTable td:last-child { border-right: none; }
 
+/* 2026-10-13 用户口径：**所有没有框线的普通表格**补虚线列线 + 虚线外框。
+   - 只画 border，不碰 background / box-shadow：sticky 表头与冻结首列的底色、行 hover、
+     斑马纹都是靠 --bs-table-* 变量与 inset box-shadow 画的，加了背景就全断；
+   - .table-bordered 已自带实线外框、.table-borderless 刻意无线 → 两类都放行；
+   - 末列去右边线，避免与表格外框叠成双线。 */
+.table:not(.table-borderless):not(.table-bordered) > :not(caption) > * > * {
+    border-right: 1px dashed var(--sl-border);
+}
+.table:not(.table-borderless):not(.table-bordered) > thead > tr > * {
+    border-right-color: var(--sl-head-border);
+}
+.table:not(.table-borderless):not(.table-bordered) > :not(caption) > * > :last-child {
+    border-right: 0;
+}
+.table:not(.table-borderless):not(.table-bordered) {
+    border: 1px dashed var(--sl-border);
+}
+/* 打印：虚点在纸面上发灰，统一回实线 */
+@media print {
+    .table:not(.table-borderless) > :not(caption) > * > * {
+        border-right: 1px solid var(--sl-border) !important;
+        border-bottom: 1px solid var(--sl-border) !important;
+    }
+    .table:not(.table-borderless):not(.table-bordered) { border: 1px solid #e2e8f0; }
+}
+
+/* =============================================================================
+   深色模式的语义行色（2026-10-13 用户反馈「暗黑模式下这些色块很突兀」）
+   -----------------------------------------------------------------------------
+   Bootstrap 5.3 编译产物里的 .table-success / .table-warning / .table-danger …
+   是**主题无关的字面色**，[data-bs-theme=dark] 段没有重映射它们 → 考务②「考场库」
+   已选行（<tr class="table-success">）在深色下整行亮绿，与深色底完全脱节。
+   这里在深色下改成「低饱和半透明底 + 浅色字」；只设 --bs-table-* 变量（不写
+   background），冻结首列与 hover 都能自动跟随。
+   ============================================================================= */
+[data-bs-theme="dark"] .table-success,
+[data-bs-theme="dark"] .g-table tbody tr.table-success {
+    --bs-table-bg: rgba(25, 135, 84, .16);
+    --bs-table-color: #9ae6b4;
+    --bs-table-border-color: rgba(25, 135, 84, .32);
+    --bs-table-hover-bg: rgba(25, 135, 84, .26);
+}
+[data-bs-theme="dark"] .table-warning,
+[data-bs-theme="dark"] .g-table tbody tr.table-warning {
+    --bs-table-bg: rgba(255, 193, 7, .15);
+    --bs-table-color: #fcd34d;
+    --bs-table-border-color: rgba(255, 193, 7, .30);
+    --bs-table-hover-bg: rgba(255, 193, 7, .24);
+}
+[data-bs-theme="dark"] .table-danger,
+[data-bs-theme="dark"] .g-table tbody tr.table-danger {
+    --bs-table-bg: rgba(220, 53, 69, .18);
+    --bs-table-color: #f1aeb5;
+    --bs-table-border-color: rgba(220, 53, 69, .34);
+    --bs-table-hover-bg: rgba(220, 53, 69, .26);
+}
+[data-bs-theme="dark"] .table-info {
+    --bs-table-bg: rgba(13, 202, 240, .14);
+    --bs-table-color: #7ddfef;
+    --bs-table-border-color: rgba(13, 202, 240, .30);
+}
+[data-bs-theme="dark"] .table-active {
+    --bs-table-bg: var(--sl-surface-3);
+    --bs-table-color: var(--sl-text);
+}
+/* .table-light 写死浅灰：深色下按面板色处理（表头 / 斑马行都用得多） */
+[data-bs-theme="dark"] .table-light,
+[data-bs-theme="dark"] thead.table-light > tr > * {
+    --bs-table-bg: var(--sl-surface-2);
+    --bs-table-color: var(--sl-text);
+    --bs-table-border-color: var(--sl-border);
+}
+
 /* —— 划线分层（#bandTable）：整张表都是输入框 ——
    原来 input 的底色跟着页面/卡片底色走，与单元格底色不同 → "格子套格子"；
    现在 td 负责画格线与底色，input 只负责文字（透明底、无边框、聚焦才高亮），
    并给足宽度，避免 426.5 被截断成 "426.!"。 */
-#bandTable tbody td { background: var(--sl-surface); padding: 2px 4px; }
+#bandTable tbody td { background: var(--sl-surface); padding: 5px 4px; }
+/* 表格宽度与列宽（2026-10-13 用户反馈"表头"）：
+   Bootstrap 的 .table 是 width:100%，只有「层名 + 总分」两列时两列各被撑到几百像素，
+   表头看上去就是上下两条空色带。改为按内容收缩：层名列 300px、科目列统一 110px、
+   操作列 56px，下限 min(100%, 620px) 免得缩成一张小卡片；
+   分科（两组 × 7 科）内容更宽，在 .table-responsive 里横向滚动 ——
+   与「全局对比」等宽表同一套交互。 */
+#bandTable { width: max-content; min-width: min(100%, 620px); }
+/* 字号随表格规模一起放大（2026-10-13 用户反馈"表格的宽度和文字大小很不协调"）：
+   18 列铺到 2300px 宽时，12px 表头 / 12.5px 数字在大格子里显得又小又散。
+   口径：表头 13px、格内数字 13.5px（其余成绩表仍是 12/12.5 —— 那些表列窄、行密，
+   字号不能一起放大，这里只针对「宽格子 + 少内容」的划线分层）。 */
+#bandTable thead th { font-size: 13px; }
+/* 跨两行的表头格（层名 / 操作）垂直居中：Bootstrap 表头默认 vertical-align:bottom，
+   会让「层名」「操作」两处文字掉到第 2 行的高度上，第 1 行左右两头各缺一块 ——
+   用户看到的就是表头"裂了两条缝"（2026-10-13 反馈）。 */
+#bandTable thead th { vertical-align: middle; }
+/* 表头不做吸附。grades.css 的 `.g-table thead th` 带 position:sticky;top:0，
+   在这个「内容比容器宽、会横向滚动」的表里，粘性定位会把**第 2 行**表头整体下推 5px，
+   于是「层名」格的底边比右侧「总分」行的底边高出一截（用户反馈"没有对齐高度"）。
+   本表最多几行层，垂直吸附本来也没用 —— 直接去掉 sticky，底边即对齐。 */
+#bandTable thead th { position: static; }
+/* 第 2 行表头的那条横分隔线在 rowspan 格（层名 / 操作）处必然断开，
+   反而像一条裂缝；去掉它，两行表头用同族色阶（--sl-head-bg / -2）区分。 */
+#bandTable thead tr:nth-child(2) th { border-top: 0 !important; }
+#bandTable th.col-layer, #bandTable td:first-child { width: 300px; min-width: 220px; }
+#bandTable th.col-sub, #bandTable td.q-sub { width: 100px; min-width: 96px; }
+/* 操作列（删除按钮）窄、居中；表头格留空（与分层模板页一致） */
+#bandTable th.col-op, #bandTable td:last-child { width: 56px; min-width: 52px; text-align: center; }
 #bandTable tbody tr:nth-child(even) td { background: var(--sl-zebra-bg); }
 /* 「模板外」的层（不在当前模板层名内、由已保存划线追加而来）：淡琥珀底 + 层名下标注
    —— 模板没选对时一眼可见，不再混在模板层里像补丁（用户口径 2026-10-13） */
@@ -399,8 +510,9 @@ body {
     background: transparent;
     border: 0;
     color: var(--sl-text);
-    font-size: 12.5px;
-    padding: 3px 6px;
+    /* 13.5px：与 100px 列的格子成比例（原 12.5px 配 110px 格显得小） */
+    font-size: 13.5px;
+    padding: 5px 7px;
     min-width: 66px;
     height: auto;
 }
@@ -546,6 +658,114 @@ table.tt thead th {
 [data-bs-theme="dark"] .ep-pn,
 [data-bs-theme="dark"] .ld-duty,
 [data-bs-theme="dark"] .ld-members { color: var(--sl-text) !important; }
+
+/* =============================================================================
+   L3：暗色可读性补漏（2026-10-13 用户反馈「考试概览页夜色模式下啥也看不见」）
+   -----------------------------------------------------------------------------
+   L2 的 `[style*="..."]` 只匹配**内联 style 属性**，管不到模板 <style> 块里的类选择器，
+   而"看不见"的重灾区恰好在那里（成绩单姓名/总分列，已在各模板内改用 --sl-*）。
+   这里补三类：
+     1) Bootstrap 静态语义类：.alert-light 深色下不重映射，永远是一条浅底白条；
+     2) 内联浅色底 / 深色字的白名单扩容（语义浅底映射成低饱和语义色，不丢语义）；
+     3) 模板 <style> 块里写死深字的类，逐条点名（只作用于深色，不影响亮色与打印）。
+   ============================================================================= */
+[data-bs-theme="dark"] .alert-light {
+    --bs-alert-bg: var(--sl-surface-2);
+    --bs-alert-color: var(--sl-text);
+    --bs-alert-border-color: var(--sl-border);
+    --bs-alert-link-color: var(--sl-sidebar-accent-text);
+}
+/* —— 内联浅底：按语义映射成低饱和底，保留「这个块在提示什么」—— */
+[data-bs-theme="dark"] [style*="background:#fef3c7"],
+[data-bs-theme="dark"] [style*="background: #fef3c7"],
+[data-bs-theme="dark"] [style*="background:#fffbeb"],
+[data-bs-theme="dark"] [style*="background: #fffbeb"],
+[data-bs-theme="dark"] [style*="background:#fff7ed"],
+[data-bs-theme="dark"] [style*="background: #fff7ed"],
+[data-bs-theme="dark"] [style*="background:#fef9c3"],
+[data-bs-theme="dark"] [style*="background: #fef9c3"] {
+    background: rgba(255, 193, 7, .14) !important;
+}
+[data-bs-theme="dark"] [style*="background:#e0e7ff"],
+[data-bs-theme="dark"] [style*="background: #e0e7ff"],
+[data-bs-theme="dark"] [style*="background:#f5f3ff"],
+[data-bs-theme="dark"] [style*="background: #f5f3ff"] {
+    background: rgba(99, 102, 241, .18) !important;
+}
+[data-bs-theme="dark"] [style*="background:#eff6ff"],
+[data-bs-theme="dark"] [style*="background: #eff6ff"],
+[data-bs-theme="dark"] [style*="background:#e0f2fe"],
+[data-bs-theme="dark"] [style*="background: #e0f2fe"],
+[data-bs-theme="dark"] [style*="background:#dbeafe"],
+[data-bs-theme="dark"] [style*="background: #dbeafe"],
+[data-bs-theme="dark"] [style*="background:#eef2ff"],
+[data-bs-theme="dark"] [style*="background: #eef2ff"] {
+    background: rgba(13, 110, 253, .16) !important;
+}
+[data-bs-theme="dark"] [style*="background:#fef2f2"],
+[data-bs-theme="dark"] [style*="background: #fef2f2"],
+[data-bs-theme="dark"] [style*="background:#fee2e2"],
+[data-bs-theme="dark"] [style*="background: #fee2e2"] {
+    background: rgba(220, 53, 69, .16) !important;
+}
+[data-bs-theme="dark"] [style*="background:#ecfdf5"],
+[data-bs-theme="dark"] [style*="background: #ecfdf5"],
+[data-bs-theme="dark"] [style*="background:#f0fdf4"],
+[data-bs-theme="dark"] [style*="background: #f0fdf4"],
+[data-bs-theme="dark"] [style*="background:#dcfce7"],
+[data-bs-theme="dark"] [style*="background: #dcfce7"] {
+    background: rgba(25, 135, 84, .16) !important;
+}
+[data-bs-theme="dark"] [style*="background:#e2e8f0"],
+[data-bs-theme="dark"] [style*="background: #e2e8f0"],
+[data-bs-theme="dark"] [style*="background:#e5e7eb"],
+[data-bs-theme="dark"] [style*="background: #e5e7eb"],
+[data-bs-theme="dark"] [style*="background:#f5f5f5"],
+[data-bs-theme="dark"] [style*="background: #f5f5f5"],
+[data-bs-theme="dark"] [style*="background:#f9fafb"],
+[data-bs-theme="dark"] [style*="background: #f9fafb"],
+[data-bs-theme="dark"] [style*="background:#fbfcfd"],
+[data-bs-theme="dark"] [style*="background: #fbfcfd"],
+[data-bs-theme="dark"] [style*="background:#eef2f7"],
+[data-bs-theme="dark"] [style*="background: #eef2f7"] {
+    background: var(--sl-surface-2) !important;
+}
+/* —— 内联深色文字：深底上必须提亮（近黑 / 深灰一起覆盖）—— */
+[data-bs-theme="dark"] [style*="color:#1e293b"],
+[data-bs-theme="dark"] [style*="color: #1e293b"],
+[data-bs-theme="dark"] [style*="color:#0f172a"],
+[data-bs-theme="dark"] [style*="color: #0f172a"],
+[data-bs-theme="dark"] [style*="color:#111827"],
+[data-bs-theme="dark"] [style*="color: #111827"],
+[data-bs-theme="dark"] [style*="color:#0f1e3b"] {
+    color: var(--sl-text) !important;
+}
+[data-bs-theme="dark"] [style*="color:#334155"],
+[data-bs-theme="dark"] [style*="color: #334155"],
+[data-bs-theme="dark"] [style*="color:#475569"],
+[data-bs-theme="dark"] [style*="color: #475569"],
+[data-bs-theme="dark"] [style*="color:#495057"],
+[data-bs-theme="dark"] [style*="color: #495057"],
+[data-bs-theme="dark"] [style*="color:#6c757d"],
+[data-bs-theme="dark"] [style*="color: #6c757d"],
+[data-bs-theme="dark"] [style*="color:#6b7280"] {
+    color: var(--sl-text-muted) !important;
+}
+/* —— 模板 <style> 块：逐条点名的深色文字（类选择器，L2 的属性选择器管不到）—— */
+[data-bs-theme="dark"] .detail-content,
+[data-bs-theme="dark"] .cmp-val,
+[data-bs-theme="dark"] .cmp-big,
+[data-bs-theme="dark"] .orig-course .subj,
+[data-bs-theme="dark"] .ep-subj,
+[data-bs-theme="dark"] .rd-berth-name,
+[data-bs-theme="dark"] .sch-period-name { color: var(--sl-text) !important; }
+[data-bs-theme="dark"] .rd-notes,
+[data-bs-theme="dark"] .rd-berth-no { color: var(--sl-text-muted) !important; }
+/* —— 无主题变体的浅色容器（课表网格外壳）—— */
+[data-bs-theme="dark"] .sch-grid-wrap {
+    background: var(--sl-surface) !important;
+    border-color: var(--sl-border) !important;
+}
 
 /* 打印时永远按浅色输出（成绩单/台账要能打印） */
 @media print {

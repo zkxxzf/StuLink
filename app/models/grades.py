@@ -15,6 +15,35 @@ logger = logging.getLogger(__name__)
 # ============ 科目常量（与字典 exam_subject 预置值保持一致） ============
 SUBJECTS = ['语文', '数学', '外语', '物理', '历史', '化学', '生物', '政治', '地理']
 TOTAL_SUBJECT = '总分'
+# 2026-10-13 科目别名自动映射（**唯一维护点**，用户口径「英语→外语、日语→外语」等）。
+# 用户粘贴 / 导入 Excel / 手填时习惯写「英语」「日语」等，实际都指系统的标准科「外语」；
+# 此前各模块各写一份 {'英语': '外语'}，日语/俄语等小语种一律被判非法（整行丢弃/列被忽略）。
+# 口径：先归一、再过白名单；**未命中别名时原样返回** —— 不认识的值仍会被白名单挡下并给
+# 用户明确报错，绝不把未知值悄悄变成合法值。
+SUBJECT_ALIAS = {
+    # 外语系：小语种统一归到系统标准科「外语」
+    '英语': '外语', '日语': '外语', '俄语': '外语', '德语': '外语', '法语': '外语',
+    '西班牙语': '外语', '韩语': '外语', '朝鲜语': '外语', '意大利语': '外语',
+    '葡萄牙语': '外语', '阿拉伯语': '外语',
+    # 政治系
+    '思想政治': '政治', '思想品德': '政治', '思品': '政治',
+    '道法': '政治', '道德与法治': '政治',
+    # 常见单字简称（教务 / 粘贴表格里很常见）
+    '语': '语文', '数': '数学', '英': '外语', '物': '物理', '化': '化学',
+    '生': '生物', '政': '政治', '史': '历史', '地': '地理',
+}
+
+
+def normalize_subject(name):
+    """科目名归一：去首尾空白（含全角空格）→ 查别名表 → 返回标准科名。
+
+    2026-10-13：各导入 / 手填 / 粘贴入口统一调用它，再各自做白名单校验。
+    未命中别名时**原样返回**；None 返回 ''（同样会被白名单挡下，不抛异常）。
+    """
+    if name is None:
+        return ''
+    t = str(name).replace('\u3000', ' ').strip()
+    return SUBJECT_ALIAS.get(t, t)
 # 默认满分：语数外 150，其余 100（河南 3+1+2）
 DEFAULT_FULL_MARKS = {s: (150 if s in ('语文', '数学', '外语') else 100) for s in SUBJECTS}
 
@@ -480,6 +509,11 @@ class AiReport(db.Model):
     model = db.Column(db.String(50))
     content = db.Column(db.Text)               # 报告原文
     charts = db.Column(db.Text)                # 图表数据（JSON，本地统计，随报告固化）
+    # 2026-10-13「AI 一句话分析」：kind=md（旧口径 Markdown 报告）/ html（工具调用后
+    # 直接产出的 HTML 片段，已由 app/utils/html_guard.py 白名单消毒，前端直插）；
+    # trace 记录这轮的工具调用轨迹（JSON：[{tool,args,ok,summary,ms}]），便于回溯数据来源。
+    kind = db.Column(db.String(10), default='md')
+    trace = db.Column(db.Text)
     created_at = db.Column(db.DateTime, default=datetime.now)
 
     __table_args__ = (
@@ -504,6 +538,46 @@ class AiChatMessage(db.Model):
 
     __table_args__ = (
         db.Index('idx_ai_chat_user_exam', 'user_id', 'exam_id'),
+    )
+
+
+class AiTask(db.Model):
+    """AI 一句话分析任务（服务端持久化）。
+
+    为什么落库：生成一次报告要跑多轮工具调用（几十秒~几分钟），
+    若只靠"一次 SSE 请求直通"，用户切页/刷新就断了、看不到进度也找不到结果。
+    现在改成：**提问即建任务**（本表）→ 后台线程执行 → 进度事件进进程内缓冲
+    并可随时（重新）订阅 → 完成后写 `AiReport` 并回填 `report_id`。
+
+    status:
+      running     进行中（`heartbeat` 心跳，进程内 `_RUNNING` 集合用于识别僵尸）
+      done        已完成（`report_id` 指向 ai_reports）
+      error       失败（`error` 是给用户看的原因）
+      interrupted 服务重启/进程丢失导致的中断（可重新提问）
+    """
+    __bind_key__ = 'grades'
+    __tablename__ = 'ai_tasks'
+
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, nullable=False)
+    exam_id = db.Column(db.Integer, nullable=False)
+    question = db.Column(db.String(500), nullable=False)
+    direction = db.Column(db.String(10), default='')
+    layer = db.Column(db.String(30), default='')
+    status = db.Column(db.String(12), default='running')
+    stage = db.Column(db.String(200), default='')        # 最近一条阶段文案（列表里直接显示）
+    error = db.Column(db.String(500), default='')
+    tool_count = db.Column(db.Integer, default=0)
+    report_id = db.Column(db.Integer)                    # 完成后指向 ai_reports.id
+    trace = db.Column(db.Text)                           # 工具调用轨迹（JSON，与报告同一份）
+    heartbeat = db.Column(db.DateTime, default=datetime.now)   # 心跳：识别僵尸任务
+    created_at = db.Column(db.DateTime, default=datetime.now)
+    finished_at = db.Column(db.DateTime)
+
+    __table_args__ = (
+        db.Index('idx_ai_task_user', 'user_id'),
+        db.Index('idx_ai_task_exam', 'exam_id'),
+        db.Index('idx_ai_task_status', 'status'),
     )
 
 

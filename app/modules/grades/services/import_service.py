@@ -3,7 +3,7 @@
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 import openpyxl
 from app.models import Student, ClassProfile
-from app.models.grades import SUBJECTS, TOTAL_SUBJECT
+from app.models.grades import SUBJECTS, TOTAL_SUBJECT, SUBJECT_ALIAS
 from app.modules.grades.utils import parse_grade_any, normalize_class_name
 
 # 列名兼容映射
@@ -18,7 +18,9 @@ _EXAM_NO_KEYS = ('考号', '准考证号', '考试号')
 # 命中时该列不进主分（主分仍是赋分），而写入 exam_scores.raw_score
 _RAW_SUFFIX = ('原始分', '原始成绩', '原始', '裸分')
 # 科目别名：文件里常见的"英语"对齐字典"外语"
-_SUBJECT_ALIAS = {'英语': '外语'}
+# 2026-10-13：改为引用 models.grades 公共别名表（唯一维护点）——
+# 原来只有「英语」一条，「日语」等小语种列会被静默忽略。
+_SUBJECT_ALIAS = SUBJECT_ALIAS
 # 识别后忽略的列（粘贴参考 Excel 整表常见）
 _IGNORED_COLS = {'方向', '选科', '备注', '座位号'}
 

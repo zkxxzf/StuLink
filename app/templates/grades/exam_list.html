@@ -3,33 +3,16 @@
 {% block content %}
 {# v1.19.0 成绩模块落地页（第一屏）：历次考试看板 #}
 <div class="d-flex justify-content-between align-items-start mb-3 flex-wrap gap-2">
-    <div>
+    <div class="d-flex align-items-baseline flex-wrap gap-2">
         <h4 class="mb-0"><i class="bi bi-journals"></i> 历次考试</h4>
-        <div class="text-muted small mt-1">
+        {# 2026-10-13 用户口径：该提示紧跟标题右侧，不再单独占一行 #}
+        <span class="text-muted small">
             点任意一场考试进入它的工作台：<b>考务安排 → 成绩导入 → 成绩分析</b>
-        </div>
+        </span>
     </div>
     <a href="{{ url_for('grades.exam_new') }}" class="btn btn-primary">
         <i class="bi bi-plus-lg"></i> 新建考试
     </a>
-</div>
-
-{# 概览卡片（当前筛选范围内） #}
-<div class="row g-2 mb-3">
-    {% for k, lbl, cls in [('total', '考试场次', 'primary'),
-                           ('imported', '已导入成绩', 'success'),
-                           ('pending', '待导入', 'warning'),
-                           ('affair', '已有考务', 'info'),
-                           ('banded', '已划线', 'secondary')] %}
-    <div class="col-6 col-md">
-        <div class="card h-100 border-0 shadow-sm">
-            <div class="card-body py-2 px-3">
-                <div class="text-muted small">{{ lbl }}</div>
-                <div class="fs-4 fw-semibold text-{{ cls }}">{{ stats[k] }}</div>
-            </div>
-        </div>
-    </div>
-    {% endfor %}
 </div>
 
 {# 年级筛选（胶囊） #}

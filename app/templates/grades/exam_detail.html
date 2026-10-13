@@ -5,24 +5,38 @@
   /* v1.19.47.29：仅单科分数可点击修改（总分由各科自动汇总，不可改） */
   #scoreTable td.score-cell { cursor: pointer; }
   /* v1.19.47.29 压缩「学号→进退步」这些登记列，把横向空间让给成绩 */
+  /* 2026-10-13：颜色一律改用主题变量 —— 原来写死 #475569/#111827/#0f172a，
+     暗黑模式下是「深字压深底」，这一页几乎啥也看不见（用户反馈）。 */
+  /* 2026-10-13 用户反馈「字体太小」：成绩单字号整体放大两档（约 +2px / +17%）。
+     字号集中在这里，后续要再调只改这几个变量即可。
+     注：表格原本就顶满容器（1330/1332），放大后容器内会横向滚动
+     （table-responsive 本来就支持横向滚动，不影响功能）。 */
+  #scoreTable {
+      --sc-fs-head: 13.5px;    /* 表头（原 11.5px） */
+      --sc-fs-meta: 13.5px;    /* 学号/班级/名次等登记列（原 11.5px） */
+      --sc-fs-name: 15px;      /* 姓名（原 13px） */
+      --sc-fs-sub: 16px;       /* 各科成绩（原 14px） */
+      --sc-fs-total: 17px;     /* 总分（原 15px） */
+  }
+  #scoreTable thead th { font-size: var(--sc-fs-head); }
   #scoreTable th.c-meta, #scoreTable td.c-meta {
-      white-space: nowrap; font-size: .72rem; color: #475569;
+      white-space: nowrap; font-size: var(--sc-fs-meta); color: var(--sl-text-muted);
       padding-left: .16rem; padding-right: .16rem;
   }
-  /* 姓名列不跟着缩：加黑（font-size 覆盖上面的 .72rem），便于在密集信息里定位学生 */
-  #scoreTable td.c-name { font-size: .82rem; font-weight: 700; color: #111827; }
+  /* 姓名列不跟着缩：加黑（font-size 覆盖上面的登记列字号），便于在密集信息里定位学生 */
+  #scoreTable td.c-name { font-size: var(--sc-fs-name); font-weight: 700; color: var(--sl-text); }
   /* 总分：成绩区第一列，紧挨语文，保持醒目 */
   #scoreTable th.c-total, #scoreTable td.c-total {
-      white-space: nowrap; font-size: .95rem; font-weight: 700; color: #0f172a;
+      white-space: nowrap; font-size: var(--sc-fs-total); font-weight: 700; color: var(--sl-text);
       padding-left: .3rem; padding-right: .3rem;
   }
-  /* 成绩列（各科）留出更多留白，字号略大 */
+  /* 成绩列（各科）留出更多留白 */
   #scoreTable th.c-sub, #scoreTable td.c-sub {
-      font-size: .88rem; padding-left: .5rem; padding-right: .5rem;
+      font-size: var(--sc-fs-sub); padding-left: .5rem; padding-right: .5rem;
   }
   /* v1.19.47.29 名次类列（方向排/班排/进退步）内容就一个数字，收到最窄 */
   #scoreTable th.c-rank, #scoreTable td.c-rank {
-      width: 1%; white-space: nowrap; font-size: .72rem; color: #475569;
+      width: 1%; white-space: nowrap; font-size: var(--sc-fs-meta); color: var(--sl-text-muted);
       padding-left: .12rem; padding-right: .12rem;
   }
   /* v1.19.47.29 进退步：进步=上升箭头（深绿 #15803d，比 Bootstrap text-success 更深），
@@ -30,7 +44,7 @@
   #scoreTable td.c-rank.move-up { color: #15803d; font-weight: 600; }
   #scoreTable td.c-rank.move-down { color: #b91c1c; font-weight: 600; }
   #scoreTable td.c-rank.move-up i, #scoreTable td.c-rank.move-down i {
-      font-size: .68rem; vertical-align: -.02em;
+      font-size: .8rem; vertical-align: -.02em;
   }
   /* v1.19.47.29 表格两端留白：学号左侧、最后一列（地理）右侧；
      放在 c-meta/c-rank 之后，用等特异性的后置规则覆盖它们的左右内边距 */
@@ -38,10 +52,10 @@
   #scoreTable th:last-child, #scoreTable td:last-child { padding-right: .7rem; }
   /* v1.19.47.29 表头排序：点一下按该列从高到低，再点切换升序 */
   #scoreTable th a.th-sort { white-space: nowrap; color: inherit; text-decoration: none; }
-  #scoreTable th a.th-sort:hover { color: #2563eb; }
+  #scoreTable th a.th-sort:hover { color: var(--sl-sidebar-accent-text); }
   /* v1.19.47.29 三角统一放在文字**后面**；未点选时也要看得清（原 opacity-25 太淡） */
-  #scoreTable th a.th-sort i { font-size: .6rem; margin-left: 2px; vertical-align: .08em; }
-  #scoreTable th a.th-sort i.sort-off { color: #94a3b8; }
+  #scoreTable th a.th-sort i { font-size: .75rem; margin-left: 2px; vertical-align: .08em; }
+  #scoreTable th a.th-sort i.sort-off { color: var(--sl-text-subtle); }
   #scoreTable th.text-end a.th-sort { position: relative; display: inline-block; }
   /* 右对齐列（名次/总分/各科）：表头与数据单元预留同样宽度的「三角位」，
      三角绝对定位进预留区 → 表头文字右缘仍与数字右缘严格对齐（不会被三角挤走）。
@@ -49,7 +63,10 @@
   #scoreTable th.text-end,
   #scoreTable td.c-rank, #scoreTable td.c-total, #scoreTable td.c-sub { padding-right: 12px; }
   #scoreTable th.text-end a.th-sort i { position: absolute; left: 100%; margin-left: 2px; }
-  #scoreTable th.th-active { background: #eef2ff; color: #1d4ed8; }
+  #scoreTable th.th-active { background: var(--sl-surface-3); color: var(--sl-sidebar-accent-text); }
+  /* 2026-10-13 暗黑模式：进退步箭头换亮一档的绿/红（原深绿 #15803d / 深红 #b91c1c 压在深底上发闷） */
+  [data-bs-theme="dark"] #scoreTable td.c-rank.move-up { color: #4ade80; }
+  [data-bs-theme="dark"] #scoreTable td.c-rank.move-down { color: #f87171; }
   #scoreTable tbody tr { cursor: default; }
 </style>
 {% endblock %}

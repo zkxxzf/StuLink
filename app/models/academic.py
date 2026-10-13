@@ -222,9 +222,15 @@ ACHIEVEMENT_FIELDS = {
     'other': [('detail', '补充说明')],
 }
 INSPECTION_RESULTS = [
-    ('normal', '正常'), ('late', '迟到'), ('absent', '缺课'),
-    ('swap', '调课'), ('other', '其他'),
+    ('normal', '正常'), ('absent', '缺勤'), ('late', '迟到'),
+    ('swap', '调课'), ('exam', '考试'), ('other', '其他'),
 ]
+# 2026-10-13：
+# ① 'absent' 显示名由「缺课」统一改为「缺勤」（用户口径，值不变，历史数据不受影响）；
+# ② 新增 'exam'（考试）：该格是考试而非正常上课 —— 不计课时工作量、也不算异常
+#    （考试期间有正常考务工作量，不能算违纪/迟到）。判定异常的位置统一用
+#    INSPECTION_NORMAL_KEYS 之外的集合，避免各页各写一份。
+INSPECTION_EXEMPT_KEYS = frozenset({'normal', 'exam'})   # 不算「异常」的结果
 
 
 # 2026-10-10：CourseSwap（course_swaps 表，长期 0 行）已删除 ——

@@ -5,22 +5,39 @@
   /* v1.19.47.29 步骤①「参考」徽标：点一下切换参考状态 */
   .attend-toggle { cursor: pointer; user-select: none; }
   /* v1.19.47.29 步骤② 双栏美化：统一卡片 / 表头 / 悬停 / 输入控件 */
+  /* 2026-10-13：全部改用主题变量（--sl-*）——原来写死浅灰字面量，暗黑模式下卡片头
+     仍是浅色渐变、hover 仍是白灰底，与深色底突兀（用户反馈「色块很突兀」）。 */
   #t2 .t2-card {
-    border: 1px solid #e5e7eb; border-radius: 10px; overflow: hidden;
-    box-shadow: 0 1px 2px rgba(15, 23, 42, .04);
+    border: 1px solid var(--sl-border); border-radius: 10px; overflow: hidden;
+    box-shadow: var(--sl-shadow);
   }
   #t2 .t2-card > .card-header {
-    background: linear-gradient(#fbfdff, #f1f5f9);
-    border-bottom: 1px solid #e8eef5; min-height: 40px;
+    background: var(--sl-surface-2);
+    border-bottom: 1px solid var(--sl-border); min-height: 40px;
   }
-  #t2 .t2-card .bi { color: #64748b; }
-  #t2 tbody tr:hover { background: #f8fafc; }
+  #t2 .t2-card .bi { color: var(--sl-text-muted); }
+  #t2 tbody tr:hover { background: var(--sl-surface-3); }
   #t2 table thead th {
-    background: #f8fafc; font-size: .76rem; color: #64748b; font-weight: 600;
-    border-bottom: 1px solid #e8eef5;
+    background: var(--sl-head-bg); font-size: .76rem; color: var(--sl-head-text); font-weight: 600;
+    border-bottom: 1px solid var(--sl-head-border);
   }
-  #t2 .rm-subj, #t2 .rm-cap, #t2 .rm-note { border-color: #e2e8f0; }
-  #t2 .rm-cap { max-width: 76px; }
+  #t2 .rm-subj, #t2 .rm-cap, #t2 .rm-note { border-color: var(--sl-border); }
+  /* 2026-10-13：字号放大两档后容量框要跟着放宽，否则三位数会被数字微调按钮压住 */
+  #t2 .rm-cap { max-width: 84px; }
+  /* 2026-10-13：环节⑥ 矩阵视图（学校张贴格式）——格子做成"隐形下拉"，
+     看上去就是一张表，点开即可换人；表头用主题变量，深色模式一并适配。 */
+  #invigMatrix { width: auto; min-width: 100%; }
+  #invigMatrix th { text-align: center; vertical-align: middle; font-size: .78rem;
+                    background: var(--sl-head-bg); color: var(--sl-head-text);
+                    border-color: var(--sl-head-border); }
+  #invigMatrix th, #invigMatrix td { min-width: 78px; padding: .2rem .25rem; }
+  #invigMatrix th:first-child, #invigMatrix td:first-child { min-width: 56px; }
+  #invigMatrix th:nth-child(2), #invigMatrix td:nth-child(2) { min-width: 72px; }
+  #invigMatrix th:nth-child(3), #invigMatrix td:nth-child(3) { min-width: 48px; }
+  #invigMatrix .iv-mat-sel { border: 0; background: transparent; text-align: center;
+                             font-size: .8rem; padding: .1rem .2rem; cursor: pointer; }
+  #invigMatrix .iv-mat-sel:hover, #invigMatrix .iv-mat-sel:focus {
+    border: 1px solid var(--sl-border); }
 </style>
 {% endblock %}
 {% block content %}
@@ -464,33 +481,9 @@
             <div class="text-center text-muted py-4"><div class="spinner-border spinner-border-sm"></div>
                 <span class="ms-2">加载中…</span></div>
         </div>
-        {# v1.19.41.2 已编排时在下方列出学生名单，默认按「考场 → 座号」排序 #}
-        {% if arranged_sorted %}
-        <div class="card mt-2">
-            <div class="card-header py-1 d-flex justify-content-between align-items-center">
-                <span class="small fw-bold"><i class="bi bi-person-lines-fill"></i> 已编排学生名单（按考场排序）</span>
-                <span class="text-muted small">共 {{ arranged_sorted|length }} 人</span>
-            </div>
-            <div class="table-responsive" style="max-height:52vh;overflow:auto">
-                <table class="table table-sm table-hover align-middle mb-0">
-                    <thead class="sticky-top bg-white"><tr>
-                        <th>考场</th><th>座号</th><th>考号</th><th>学号</th><th>姓名</th>
-                        <th>班级</th><th>选科组合</th></tr></thead>
-                    <tbody>
-                    {% for s in arranged_sorted %}
-                    <tr>
-                        {# 2026-10-13 用户口径：考场号 / 座号一律两位（01 考场、01 座） #}
-                        <td>{{ pad2(s.room_no) }}</td><td>{{ pad2(s.seat_no) }}</td>
-                        <td>{{ s.exam_number or '—' }}</td>
-                        <td>{{ s.student_no }}</td><td>{{ s.name }}</td>
-                        <td>{{ s.class_name }}</td><td>{{ s.subject_selection }}</td>
-                    </tr>
-                    {% endfor %}
-                    </tbody>
-                </table>
-            </div>
-        </div>
-        {% endif %}
+        {# 2026-10-13：删掉本页下方重复的「已编排学生名单」——这里是④ 核对任课教师，
+           学生名单属于③ 编排考号的产物，用户口径「核对任课教师里面怎么还有编排学生的」。
+           完整名单在③ 环节下方（同一份 arranged_sorted），不丢信息。 #}
     </div>
 
     <!-- ===== 环节⑤ 考试时间表（时段 → 科目，回避依据） ===== -->
@@ -516,7 +509,7 @@
                 <thead class="sticky-top bg-white"><tr>
                     <th style="width:150px">考试日期</th><th style="width:110px">开始</th>
                     <th style="width:110px">结束</th><th style="width:140px">考试科目</th>
-                    <th style="width:110px">选科</th><th>备注</th><th style="width:80px"></th>
+                    <th style="width:110px">选科</th><th>备注</th><th style="width:96px"></th>
                 </tr></thead>
                 <tbody id="schedBody">
                 {% for s in invig_stat.schedules %}
@@ -555,7 +548,10 @@
                 </tbody>
             </table>
         </div>
-        <div class="form-text mt-1">时间可留空；科目必填。</div>
+        {# 2026-10-13 用户口径：新增场次的日期不再留空（原先是空的 yyyy/mm/dd 要自己填） #}
+        <div class="form-text mt-1">点「新增场次」的日期默认沿用上一场（表格为空时用本场考试日期
+            {{ sched_default_date.strftime('%Y-%m-%d') }}），同一天满 {{ sched_daily_max }} 场自动顺延到次日，都可手动改；
+            时间可留空；科目必填。</div>
     </div>
 
     <!-- ===== 环节⑥ 编排监考表 ===== -->
@@ -568,11 +564,25 @@
             <button class="btn btn-primary btn-sm" onclick="autoInvig()">
                 <i class="bi bi-magic"></i> 自动编排监考</button>
             <span class="small text-muted">（回避本场科目教师；同一场次一人只监一个考场）</span>
-            <span class="ms-auto"></span>
+            {# 2026-10-13 用户口径：按老师统计监考工作量（格数 × 场次时长） #}
+            <button class="btn btn-outline-primary btn-sm" onclick="openWorkload()">
+                <i class="bi bi-stopwatch"></i> 工作量统计</button>
+            {# 2026-10-13 用户口径：学校下发的是「考场 × 时段」矩阵表（张贴/打印），
+               系统长表是编排视图 —— 这里一键切换，矩阵同样支持下拉换人。 #}
+            <div class="btn-group btn-group-sm ms-auto" role="group" aria-label="监考表视图">
+                <input type="radio" class="btn-check" name="invigView" id="invigViewList"
+                       value="list" checked>
+                <label class="btn btn-outline-secondary" for="invigViewList">
+                    <i class="bi bi-list-ul"></i> 列表视图</label>
+                <input type="radio" class="btn-check" name="invigView" id="invigViewMatrix"
+                       value="matrix">
+                <label class="btn btn-outline-secondary" for="invigViewMatrix">
+                    <i class="bi bi-grid-3x3-gap"></i> 教师安排（学校格式）</label>
+            </div>
+            {# 2026-10-13 用户口径：监考表只留一个导出 —— 教师安排矩阵 + 工作量统计在同一个文件里 #}
             <a href="{{ url_for('grades.affair_export_invig', aid=affair.id) }}"
-               class="btn btn-outline-success btn-sm"><i class="bi bi-file-earmark-excel"></i> 导出监考表</a>
-            <a href="{{ url_for('grades.affair_export_invig_pdf', aid=affair.id) }}"
-               class="btn btn-outline-success btn-sm"><i class="bi bi-file-earmark-pdf"></i> 监考表 PDF</a>
+               class="btn btn-outline-success btn-sm">
+               <i class="bi bi-file-earmark-excel"></i> 导出监考表（含工作量统计）</a>
         </div>
         <div id="invigMsg" class="small mb-2"></div>
 
@@ -592,15 +602,30 @@
                             <i class="bi bi-upload"></i> 导入其他监考员名单
                             <input type="file" accept=".xlsx,.xls" class="d-none" onchange="importOthers(this)">
                         </label>
-                        {# 2026-10-13：排除名单 —— 不监考的人 / 某人不监考某一场 #}
+                        {# 2026-10-13 用户口径：排除名单 —— 老师与场次**都能多选**，
+                           一次加多条（原先只能「一个人 × 一场」逐个加，很慢） #}
                         <hr class="my-2">
-                        <div class="text-muted small mb-1"><i class="bi bi-slash-circle"></i> 排除名单</div>
-                        <div class="row g-1 mb-1">
-                            <div class="col-5"><select class="form-select form-select-sm" id="exclWho"></select></div>
-                            <div class="col-5"><select class="form-select form-select-sm" id="exclSch"></select></div>
-                            <div class="col-2"><button class="btn btn-outline-secondary btn-sm w-100 py-0"
-                                                       onclick="addExclude()">加</button></div>
+                        <div class="text-muted small mb-1">
+                            <i class="bi bi-slash-circle"></i> 排除名单
+                            <span style="font-size:.75rem">（不监考：老师可多选 × 场次可多选）</span>
                         </div>
+                        <div class="d-flex gap-1 mb-1">
+                            <div class="dropdown flex-fill" style="min-width:0">
+                                <button type="button" class="btn btn-outline-secondary btn-sm w-100 py-0 text-truncate"
+                                        id="exclWhoBtn" data-bs-toggle="dropdown" data-popper-fixed>选择老师</button>
+                                <div class="dropdown-menu p-2" id="exclWhoMenu"
+                                     style="min-width:220px;max-height:320px;overflow:auto"></div>
+                            </div>
+                            <div class="dropdown flex-fill" style="min-width:0">
+                                <button type="button" class="btn btn-outline-secondary btn-sm w-100 py-0 text-truncate"
+                                        id="exclSchBtn" data-bs-toggle="dropdown" data-popper-fixed>选择场次</button>
+                                <div class="dropdown-menu p-2" id="exclSchMenu"
+                                     style="min-width:280px;max-height:320px;overflow:auto"></div>
+                            </div>
+                            <button class="btn btn-outline-secondary btn-sm py-0 flex-shrink-0"
+                                    id="exclAddBtn" onclick="addExclude()">加</button>
+                        </div>
+                        <div id="exclMsg" class="small mb-1"></div>
                         <div id="exclBox"></div>
                     </div>
                 </div>
@@ -609,10 +634,19 @@
                 <div class="card">
                     <div class="card-header py-2 small fw-bold"><i class="bi bi-table"></i> 监考表（一人一格，可下拉改）</div>
                     <div class="card-body p-0" style="max-height:62vh;overflow:auto">
-                        <table class="table table-sm table-bordered align-middle mb-0" id="invigTable">
-                            <thead class="sticky-top bg-white"></thead>
-                            <tbody></tbody>
-                        </table>
+                        <div id="invigListWrap">
+                            <table class="table table-sm table-bordered align-middle mb-0" id="invigTable">
+                                <thead class="sticky-top bg-white"></thead>
+                                <tbody></tbody>
+                            </table>
+                        </div>
+                        <div id="invigMatrixWrap" class="d-none">
+                            <table class="table table-sm table-bordered align-middle mb-0 text-center"
+                                   id="invigMatrix">
+                                <thead></thead>
+                                <tbody></tbody>
+                            </table>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -655,10 +689,10 @@
                     <div class="border rounded p-2">
                         <div class="fw-bold small mb-2"><i class="bi bi-clipboard-check"></i> 监考表（环节⑥）</div>
                         <div class="d-flex gap-2 flex-wrap">
+                            {# 2026-10-13 用户口径：监考表只要一个导出 —— 教师安排矩阵（行=考场、
+                               列=日期×时段×科目）与工作量统计合在同一张表里，不再分开成四个入口。 #}
                             <a href="{{ url_for('grades.affair_export_invig', aid=affair.id) }}" class="btn btn-success btn-sm">
-                                <i class="bi bi-file-earmark-excel"></i> 导出监考表 Excel</a>
-                            <a href="{{ url_for('grades.affair_export_invig_pdf', aid=affair.id) }}" class="btn btn-outline-success btn-sm">
-                                <i class="bi bi-file-earmark-pdf"></i> 导出监考表 PDF</a>
+                                <i class="bi bi-file-earmark-excel"></i> 导出监考表（含工作量统计）</a>
                         </div>
                     </div>
                 </div>
@@ -700,6 +734,36 @@
             <button class="btn btn-sm btn-primary" onclick="saveRoom()">保存</button></div>
     </div>
 </div></div>
+
+<!-- 监考工作量统计（2026-10-13 用户口径：看每位老师监考了多长时间） -->
+<div class="modal fade" id="wlModal" tabindex="-1">
+    <div class="modal-dialog modal-lg modal-dialog-scrollable">
+        <div class="modal-content">
+            <div class="modal-header py-2">
+                <h6 class="modal-title"><i class="bi bi-stopwatch"></i> 监考工作量统计</h6>
+                <button class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body p-2">
+                <div id="wlTip" class="small text-muted mb-2"></div>
+                <table class="table table-sm table-bordered align-middle mb-0">
+                    <thead class="sticky-top"><tr>
+                        <th>教师</th>
+                        <th class="text-center" style="width:92px">监考格数</th>
+                        <th class="text-end" style="width:130px">监考时长</th>
+                        <th class="text-center" style="width:70px">明细</th>
+                    </tr></thead>
+                    <tbody id="wlBody"></tbody>
+                </table>
+            </div>
+            <div class="modal-footer py-1">
+                <span id="wlTotal" class="small text-muted me-auto"></span>
+                <a id="wlExport" class="btn btn-outline-success btn-sm" href="#">
+                    <i class="bi bi-file-earmark-excel"></i> 导出监考表（含工作量）</a>
+                <button class="btn btn-secondary btn-sm" data-bs-dismiss="modal">关闭</button>
+            </div>
+        </div>
+    </div>
+</div>
 
 <!-- v1.12.1 批次设置弹窗：编排模式 / 非参考处理 / 选科考号前后缀 -->
 <div class="modal fade" id="settingsModal" tabindex="-1"><div class="modal-dialog">
@@ -804,7 +868,8 @@
                 <br>
                 没写日期时默认用本场考试的<b>考试日期 {{ sched_default_date.strftime('%Y-%m-%d') }}</b>；
                 同一天最多 <b>{{ sched_daily_max }}</b> 场，超出会自动顺延到第二天（导入后可手动改）；
-                科目必须在科目字典内，多科用「、」连接。
+                科目写「英语 / 日语」等会自动归到「外语」，多科用「、」连接；
+                不在科目字典内的写法会被跳过。
             </div>
             <textarea id="schedPasteText" class="form-control font-monospace" rows="10"
                       placeholder="考试日期&#9;开始时间&#9;结束时间&#9;考试科目&#9;选科&#9;备注&#10;2026-10-08&#9;09:00&#9;10:30&#9;语文&#10;2026-10-08&#9;14:00&#9;15:30&#9;数学&#10;（也可以只贴科目：物理）"></textarea>
@@ -822,6 +887,9 @@
 <script>
 const AID = {{ affair.id }};
 const _SUBJECTS = {{ subjects | tojson }};   // 科目字典（时间表科目多选下拉用）
+// 2026-10-13 用户口径：⑤ 新增场次的日期默认口径 —— 与导入（缺省日期 / 每天上限）同源
+const SCHED_DEFAULT_DATE = '{{ sched_default_date.strftime("%Y-%m-%d") }}';
+const SCHED_DAILY_MAX = {{ sched_daily_max }};
 function csrf(){ return csrfToken; }
 
 // v1.12.1 记忆当前 tab：切换时写 URL hash，刷新后自动恢复（避免操作后跳回学生名单）
@@ -1171,7 +1239,7 @@ function renderRooms(){
     }
     tb.innerHTML = _batchRooms.map(r=>
         // H-5：location / note 由用户填写（服务端仅 strip），必须转义
-        '<tr data-rid="'+r.id+'"><td>'+escHtml(r.room_no)+'</td><td>'+escHtml(r.location)+'</td>'+
+        '<tr data-rid="'+r.id+'"><td>'+escHtml(stuPad2(r.room_no))+'</td><td>'+escHtml(r.location)+'</td>'+
         '<td>'+_subjSel(r)+'</td>'+
         '<td><input type="number" min="1" max="500" class="form-control form-control-sm py-0 text-end rm-cap" value="'+escHtml(r.capacity)+'" onchange="saveRoomField(this)"></td>'+
         '<td><input class="form-control form-control-sm py-0 rm-note" value="'+escHtml(r.note||'')+'" placeholder="备注" onchange="saveRoomField(this)"></td>'+
@@ -1443,13 +1511,37 @@ function submitSchedPaste(){
             btn.disabled = false;
         });
 }
+// 2026-10-13 用户口径：新增场次时不再只给一个空的 yyyy/mm/dd 让人自己填。
+// 默认日期 = 表格里最后一个已填日期（= 上一场，顺着往下排）；表格为空时用本场考试日期；
+// 该天已排满 SCHED_DAILY_MAX 场则顺延到下一个未满的日期（与 Excel / 粘贴导入同一条规则）。
+function _nextDayIso(iso){
+    var p = iso.split('-');
+    var dt = new Date(+p[0], (+p[1]) - 1, +p[2]);
+    dt.setDate(dt.getDate() + 1);
+    var m = String(dt.getMonth() + 1), d = String(dt.getDate());
+    return dt.getFullYear() + '-' + (m.length < 2 ? '0' + m : m) + '-' + (d.length < 2 ? '0' + d : d);
+}
+function nextSchedDate(){
+    var counts = {}, last = '';
+    document.querySelectorAll('#schedBody .sc-date').forEach(function(inp){
+        var v = (inp.value || '').trim();
+        if(!v) return;
+        last = v;                               // 行按时序渲染，最后一个有效日期即「上一场」
+        counts[v] = (counts[v] || 0) + 1;
+    });
+    var d = last || SCHED_DEFAULT_DATE;
+    if(!d) return '';
+    var guard = 0;
+    while((counts[d] || 0) >= SCHED_DAILY_MAX && guard++ < 3650) d = _nextDayIso(d);
+    return d;
+}
 function addScheduleRow(){
     var cbs = (_SUBJECTS || []).map(function(s){
         return '<label class="dropdown-item-text form-check mb-0" style="font-size:.85rem">'
             + '<input type="checkbox" class="form-check-input mt-0 me-1 subj-cb" value="' + s + '">' + s + '</label>';
     }).join('');
     var h = '<tr data-sid="">'
-        + '<td><input type="date" class="form-control form-control-sm sc-date"></td>'
+        + '<td><input type="date" class="form-control form-control-sm sc-date" value="' + nextSchedDate() + '"></td>'
         + '<td><input type="time" class="form-control form-control-sm sc-start"></td>'
         + '<td><input type="time" class="form-control form-control-sm sc-end"></td>'
         + '<td><div class="dropdown"><button type="button" class="btn btn-outline-secondary btn-sm py-0 subj-btn text-truncate" '
@@ -1514,6 +1606,21 @@ function delSchedule(btn){
 // 已渲染出来的场次行：科目下拉改固定定位（表格容器 max-height:60vh + overflow:auto 会裁剪菜单，
 // 2026-10-13 用户反馈「下拉弹在页面下方被表格遮住」）。新增行在 addScheduleRow 里单独初始化。
 initPopperFixedDropdowns(document.getElementById('t5'));
+// 2026-10-13：排除名单的两个多选下拉也在滚动容器里（教师池卡片 max-height:60vh）
+initPopperFixedDropdowns(document.getElementById('t6'));
+// 2026-10-13 用户口径：监考表两种视图 —— 列表（逐条编排）/ 教师安排矩阵（对齐学校张贴表）
+document.querySelectorAll('input[name="invigView"]').forEach(function(el){
+    el.addEventListener('change', function(){ applyInvigView(); });
+});
+function invigView(){
+    return (document.querySelector('input[name="invigView"]:checked')||{}).value || 'list';
+}
+function applyInvigView(){
+    var v = invigView();
+    document.getElementById('invigListWrap').classList.toggle('d-none', v !== 'list');
+    document.getElementById('invigMatrixWrap').classList.toggle('d-none', v !== 'matrix');
+    if(v === 'matrix' && _invigData){ renderInvigMatrix(_invigData); }
+}
 
 // ---------- 环节⑥ 监考编排 ----------
 function loadInvig(){
@@ -1527,67 +1634,182 @@ function renderInvig(){
     document.getElementById('invigSlots').value = String(d.slots||1);
     renderPool(d);
     renderInvigTable(d);
+    if(invigView() === 'matrix'){ renderInvigMatrix(d); }
 }
 function renderPool(d){
     var t = d.pool.filter(p=>p.source==='teacher');
-    // 2026-10-13：徽章上的「不监考」开关 —— 点了即整批次不参与监考（排除名单）
+    // 2026-10-13 用户口径：① 去掉教师徽章上的「不监考」开关（排除统一在下方排除名单里做，可多选）；
+    //                    ② 老师改按**学科分组**展示（同一老师教多科会在各组都出现）。
     document.getElementById('poolTeachers').innerHTML = t.length
-        ? t.map(p=>poolBadge(p, d)).join('')
+        ? renderPoolBySubject(t, d)
         : '<span class="text-muted small">暂无（请先完成环节④）</span>';
     document.getElementById('poolOthers').innerHTML = d.others.length
-        ? d.others.map(o=>'<span class="badge bg-warning-subtle text-warning-emphasis border me-1 mb-1">'+escHtml(o.name)
-            + (o.subject?('·'+escHtml(o.subject)):'')
-            + ' <a href="javascript:;" class="text-danger" onclick="delOther('+o.id+')">×</a>'
-            + ' <a href="javascript:;" class="small" onclick="toggleExclude(' + "'" + escHtml(o.name) + "'" + ', 0)">'
-            + (isExcluded(d, o.name, 0) ? '恢复' : '不监考') + '</a></span>').join('')
+        ? d.others.map(function(o){
+            var ex = isExcluded(d, o.name, 0);
+            return '<span class="badge ' + (ex ? 'bg-light text-muted border text-decoration-line-through'
+                                               : 'bg-warning-subtle text-warning-emphasis border')
+                + ' me-1 mb-1" title="' + escHtml(ex ? '已设为整批次不监考（在下方排除名单里删）' : '其他监考员') + '">'
+                + escHtml(o.name) + (o.subject ? ('·' + escHtml(o.subject)) : '')
+                + ' <a href="javascript:;" class="text-danger" onclick="delOther(' + o.id + ')">×</a></span>';
+        }).join('')
         : '<span class="text-muted small">暂无</span>';
     renderExcludes(d);
 }
-function poolBadge(p, d){
-    var ex = !!p.excluded, n = (d.load||{})[p.name] || 0;
-    var cls = ex ? 'bg-light text-muted border text-decoration-line-through'
-                 : 'bg-primary-subtle text-primary-emphasis border';
-    var tip = '任教：' + (p.subjects.join('、') || '—') + '｜已排 ' + n + ' 格';
-    return '<span class="badge ' + cls + ' me-1 mb-1" title="' + escHtml(tip) + '">'
-        + escHtml(p.name) + (n ? ('<span class="ms-1 small">(' + n + ')</span>') : '')
-        + ' <a href="javascript:;" class="small" onclick="toggleExclude(' + "'" + escHtml(p.name) + "'" + ', 0)">'
-        + (ex ? '恢复' : '不监考') + '</a></span>';
+function _subjRank(s){
+    var i = (_SUBJECTS || []).indexOf(s);
+    return i < 0 ? 999 : i;
+}
+// 任课教师按学科分组（科目顺序跟页面科目字典；「未标注学科 / 其他监考员」排最后）
+function renderPoolBySubject(list, d){
+    var groups = {}, order = [];
+    list.forEach(function(p){
+        var subs = (p.subjects && p.subjects.length) ? p.subjects : ['未标注学科'];
+        subs.forEach(function(s){
+            if(!groups[s]){ groups[s] = []; order.push(s); }
+            groups[s].push(p);
+        });
+    });
+    order.sort(function(a, b){ return _subjRank(a) - _subjRank(b) || (a < b ? -1 : (a > b ? 1 : 0)); });
+    return order.map(function(s){
+        return '<div class="text-muted mt-1" style="font-size:.75rem">' + escHtml(s)
+            + '（' + groups[s].length + '）</div>'
+            + '<div class="mb-1">' + groups[s].map(function(p){ return poolChip(p, d); }).join('') + '</div>';
+    }).join('');
+}
+// 教师徽章：只展示（任教科目 / 已排格数 / 是否已排除），不再挂「不监考」开关
+function poolChip(p, d){
+    var n = (d.load||{})[p.name] || 0;
+    var ex = !!p.excluded, exs = (p.excl_schedules||[]).length;
+    var tip = '任教：' + ((p.subjects||[]).join('、') || '—') + '｜已排 ' + n + ' 格';
+    if(ex) tip += '｜已排除：整批次不监考（在下方排除名单里删）';
+    else if(exs) tip += '｜已排除 ' + exs + ' 场不监考';
+    return '<span class="badge ' + (ex ? 'bg-light text-muted border text-decoration-line-through'
+                                       : 'bg-primary-subtle text-primary-emphasis border')
+        + ' me-1 mb-1" title="' + escHtml(tip) + '">'
+        + escHtml(p.name) + (n ? ('<span class="ms-1 small">(' + n + ')</span>') : '') + '</span>';
 }
 function isExcluded(d, name, sid){
     return (d.excludes || []).some(e => e.name === name && (e.schedule_id || 0) === (sid || 0));
 }
-function toggleExclude(name, sid){
-    var fd = new FormData();
-    fd.append('name', name);
-    if (sid) fd.append('schedule_id', sid);
-    var d0 = _invigData || {excludes: []};
-    if (isExcluded(d0, name, sid || 0)) {
-        var row = (d0.excludes || []).find(e => e.name === name && (e.schedule_id || 0) === (sid || 0));
-        var fd2 = new FormData(); fd2.append('id', row.id);
-        fetch('/grades/affairs/'+AID+'/invig/exclude/delete', {method:'POST', body:fd2, headers:{'X-CSRFToken':csrf()}})
-            .then(r=>r.json()).then(d=>{ if(d.ok) loadInvig(); else alert(d.msg||'失败'); });
-        return;
+
+// ---------- 排除名单：老师 / 场次**都可多选**，一次加多条 ----------
+// 2026-10-13 用户口径：原先只能「一个人 × 一场」逐个加，一个老师排掉 6 场要点 6 次。
+var _exclSel = {who: {}, sch: {0: true}};  // 对象当集合用（重渲染不丢勾选）；sch 0 = 整批次不监考
+var _exclWho = [];                         // 当前菜单里的老师姓名（按 data-i 下标取，不把姓名拼进属性）
+function updateExclButtons(){
+    var whoBtn = document.getElementById('exclWhoBtn'), schBtn = document.getElementById('exclSchBtn');
+    var nw = Object.keys(_exclSel.who).length, ns = Object.keys(_exclSel.sch).length;
+    if(whoBtn){
+        whoBtn.textContent = nw ? ('已选 ' + nw + ' 位老师') : '选择老师';
+        whoBtn.className = 'btn btn-sm w-100 py-0 text-truncate '
+            + (nw ? 'btn-primary' : 'btn-outline-secondary');
     }
-    fetch('/grades/affairs/'+AID+'/invig/exclude', {method:'POST', body:fd, headers:{'X-CSRFToken':csrf()}})
-        .then(r=>r.json()).then(d=>{ if(d.ok) loadInvig(); else alert(d.msg||'失败'); });
+    if(schBtn){
+        schBtn.textContent = _exclSel.sch[0] ? '整批次不监考' : (ns ? ('已选 ' + ns + ' 场') : '选择场次');
+        schBtn.className = 'btn btn-sm w-100 py-0 text-truncate '
+            + (ns ? 'btn-primary' : 'btn-outline-secondary');
+    }
 }
-// 排除名单面板：整批不监考 + 「某人不监考某一场」
+// 「整批次不监考」与具体场次互斥：勾整批就清掉逐场，勾逐场就取消整批
+function exclOnPick(kind, key, cb){
+    var menu = document.getElementById(kind === 'who' ? 'exclWhoMenu' : 'exclSchMenu');
+    if(kind === 'who'){
+        if(cb.checked) _exclSel.who[key] = true; else delete _exclSel.who[key];
+    } else if(!key){
+        _exclSel.sch = cb.checked ? {0: true} : {};
+        menu.querySelectorAll('input[data-sid]').forEach(function(x){ x.checked = false; });
+    } else if(cb.checked){
+        _exclSel.sch[key] = true;
+        delete _exclSel.sch[0];
+        var all = menu.querySelector('input[data-whole]');
+        if(all) all.checked = false;
+    } else {
+        delete _exclSel.sch[key];
+    }
+    updateExclButtons();
+}
 function renderExcludePickers(d){
-    var who = document.getElementById('exclWho'), sch = document.getElementById('exclSch');
-    if (!who || !sch) return;
-    var keepWho = who.value, keepSch = sch.value;
-    who.innerHTML = (d.pool || []).map(p =>
-        '<option value="' + escHtml(p.name) + '">' + escHtml(p.name) + '</option>').join('');
-    sch.innerHTML = '<option value="0">整批次不监考</option>' + (d.schedules || []).map(s =>
-        '<option value="' + s.id + '">' + escHtml((s.date ? s.date + ' ' : '') + (s.subject || '')) + '</option>').join('');
-    if (keepWho) who.value = keepWho;
-    if (keepSch) sch.value = keepSch;
+    var whoMenu = document.getElementById('exclWhoMenu'), schMenu = document.getElementById('exclSchMenu');
+    if(!whoMenu || !schMenu) return;
+    // 老师菜单：按学科分组（其他监考员单列）
+    var groups = {}, order = [];
+    function _add(key, p){
+        if(!groups[key]){ groups[key] = []; order.push(key); }
+        if(!groups[key].some(function(x){ return x.name === p.name; })) groups[key].push(p);
+    }
+    _exclWho = [];
+    (d.pool || []).forEach(function(p){
+        if(p.source !== 'teacher'){ _add('其他监考员', p); return; }
+        var subs = (p.subjects && p.subjects.length) ? p.subjects : ['未标注学科'];
+        subs.forEach(function(s){ _add(s, p); });
+    });
+    var tail = {'未标注学科': 1, '其他监考员': 1};
+    order.sort(function(a, b){
+        var ra = tail[a] ? 999 : _subjRank(a), rb = tail[b] ? 999 : _subjRank(b);
+        return ra - rb || (a < b ? -1 : (a > b ? 1 : 0));
+    });
+    whoMenu.innerHTML = order.map(function(k){
+        return '<div class="dropdown-header px-1 py-0 small text-muted">' + escHtml(k) + '</div>'
+            + groups[k].map(function(p){
+                _exclWho.push(p.name);
+                var i = _exclWho.length - 1;
+                var ex = (p.source === 'teacher' && p.excluded)
+                    ? '<span class="text-muted ms-1" style="font-size:.72rem">（已整批排除）</span>' : '';
+                return '<label class="dropdown-item-text form-check mb-0" style="font-size:.85rem">'
+                    + '<input type="checkbox" class="form-check-input mt-0 me-1" data-i="' + i + '"'
+                    + (_exclSel.who[p.name] ? ' checked' : '') + '>'
+                    + escHtml(p.name) + ex + '</label>';
+            }).join('');
+    }).join('') || '<div class="text-muted small px-1">暂无老师</div>';
+    // 场次菜单：整批次 + 每场（可多选）
+    schMenu.innerHTML = '<label class="dropdown-item-text form-check mb-0" style="font-size:.85rem">'
+        + '<input type="checkbox" class="form-check-input mt-0 me-1" data-whole="1"'
+        + (_exclSel.sch[0] ? ' checked' : '') + '>整批次不监考</label>'
+        + (d.schedules || []).map(function(s){
+            var txt = (s.date ? s.date + ' ' : '') + (s.subject || '');
+            return '<label class="dropdown-item-text form-check mb-0" style="font-size:.85rem">'
+                + '<input type="checkbox" class="form-check-input mt-0 me-1" data-sid="' + s.id + '"'
+                + (_exclSel.sch[s.id] ? ' checked' : '') + '>' + escHtml(txt) + '</label>';
+        }).join('');
+    updateExclButtons();
 }
+document.getElementById('exclWhoMenu').addEventListener('change', function(e){
+    if(!e.target.classList.contains('form-check-input')) return;
+    exclOnPick('who', _exclWho[parseInt(e.target.dataset.i, 10)] || '', e.target);
+});
+document.getElementById('exclSchMenu').addEventListener('change', function(e){
+    var cb = e.target;
+    if(!cb.classList.contains('form-check-input')) return;
+    exclOnPick('sch', cb.dataset.whole ? 0 : (parseInt(cb.dataset.sid, 10) || 0), cb);
+});
 function addExclude(){
-    var who = document.getElementById('exclWho'), sch = document.getElementById('exclSch');
-    if (!who || !who.value) { alert('请选择老师'); return; }
-    var sid = parseInt(sch.value, 10) || 0;
-    toggleExclude(who.value, sid);
+    var names = Object.keys(_exclSel.who);
+    var sids = Object.keys(_exclSel.sch).map(function(k){ return parseInt(k, 10); });
+    var msg = document.getElementById('exclMsg');
+    if(!names.length){ alert('请选择老师（可多选）'); return; }
+    if(!sids.length){ alert('请选择场次，或勾「整批次不监考」'); return; }
+    var fd = new FormData();
+    names.forEach(function(n){ fd.append('names', n); });
+    sids.forEach(function(s){ fd.append('sids', String(s)); });
+    var btn = document.getElementById('exclAddBtn');
+    if(btn) btn.disabled = true;
+    fetch('/grades/affairs/'+AID+'/invig/exclude/batch', {method:'POST', body:fd, headers:{'X-CSRFToken':csrf()}})
+        .then(r=>r.json()).then(function(res){
+            if(btn) btn.disabled = false;
+            if(!res.ok){ alert(res.msg || '添加失败'); return; }
+            _exclSel = {who: {}, sch: {0: true}};
+            if(msg){
+                msg.className = 'small mb-1 text-success';
+                msg.textContent = '已加 ' + res.added + ' 条排除'
+                    + (res.skipped ? ('，跳过已存在的 ' + res.skipped + ' 条') : '');
+                setTimeout(function(){ msg.textContent = ''; }, 4000);
+            }
+            loadInvig();
+        })
+        .catch(function(){
+            if(btn) btn.disabled = false;
+            alert('添加失败：网络或服务异常');
+        });
 }
 function renderExcludes(d){
     renderExcludePickers(d);
@@ -1595,7 +1817,7 @@ function renderExcludes(d){
     if (!box) return;
     var rows = d.excludes || [];
     if (!rows.length){
-        box.innerHTML = '<div class="text-muted small">暂无排除（在上方教师池点「不监考」可整批排除）</div>';
+        box.innerHTML = '<div class="text-muted small">暂无排除（在上方选老师与场次后点「加」；两侧都可多选）</div>';
         return;
     }
     var schMap = {};
@@ -1614,8 +1836,8 @@ function renderInvigTable(d){
     var thead = document.querySelector('#invigTable thead');
     var tbody = document.querySelector('#invigTable tbody');
     var slots = d.slots || 1;
-    var th = '<tr><th style="width:130px">考试时间</th><th style="width:90px">科目</th>'
-           + '<th style="width:70px">考场</th><th style="width:130px">考场位置</th>';
+    var th = '<tr><th style="width:130px">考试时间</th><th style="width:110px">科目</th>'
+           + '<th style="width:78px">考场</th><th style="width:130px">考场位置</th>';
     for(var n=1;n<=slots;n++){ th += '<th>监考老师'+n+'</th>'; }
     thead.innerHTML = th + '</tr>';
     if(!d.schedules.length || !d.rooms.length){
@@ -1633,7 +1855,8 @@ function renderInvigTable(d){
             var cur = d.invig[key] || {};
             var tds = ['<td class="small">'+escHtml(when)+'</td>',
                        '<td class="small fw-bold">'+escHtml(s.subject)+(s.selection?('<span class="text-muted">('+escHtml(s.selection)+')</span>'):'')+'</td>',
-                       '<td class="text-center">'+escHtml(rm.room_no)+'</td>',
+                       // 2026-10-13 用户口径：展示用考场号两位（01/02…）；data-room 仍是原值（提交给后端做键匹配）
+                       '<td class="text-center">'+escHtml(stuPad2(rm.room_no))+'</td>',
                        '<td class="small text-muted">'+escHtml(rm.location||'')+'</td>'];
             for(var n=1;n<=slots;n++){
                 var val = (cur[n] && cur[n].name) || '';
@@ -1653,6 +1876,156 @@ function renderInvigTable(d){
     tbody.querySelectorAll('.iv-sel').forEach(function(el){
         el.addEventListener('change', function(){ setInvig(el); });
     });
+}
+// 2026-10-13：教师安排矩阵（对齐学校张贴表）——行=考场（号/位置/人数），
+// 列=日期 × 科目（含时段），一格一位老师；格内是"隐形下拉"，点开即可换人。
+function _cnDay(s){
+    var m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(s || '');
+    if(!m){ return s || '日期待定'; }
+    var wd = ['周日','周一','周二','周三','周四','周五','周六'][
+        new Date(+m[1], +m[2]-1, +m[3]).getDay()];
+    return (+m[2]) + '月' + (+m[3]) + '日（' + wd + '）';
+}
+function renderInvigMatrix(d){
+    var thead = document.querySelector('#invigMatrix thead');
+    var tbody = document.querySelector('#invigMatrix tbody');
+    var slots = d.slots || 1;
+    if(!d.schedules.length || !d.rooms.length){
+        thead.innerHTML = '';
+        tbody.innerHTML = '<tr><td class="text-center text-muted py-3">'
+            + (d.schedules.length ? '请先导入考试时间表（环节⑤）' : '请先设置考场（环节②）')
+            + '</td></tr>';
+        return;
+    }
+    // 列 = 场次按日期分组，保持后端下发顺序（= 时间表顺序）
+    var days = [], cur = null;
+    d.schedules.forEach(function(s){
+        var day = s.date || '';
+        if(!cur || cur.date !== day){ cur = {date: day, items: []}; days.push(cur); }
+        cur.items.push(s);
+    });
+    var r1 = '<tr><th class="align-middle" rowspan="2">考场</th>'
+           + '<th class="align-middle" rowspan="2">位置</th>'
+           + '<th class="align-middle" rowspan="2">人数</th>';
+    var r2 = '';
+    days.forEach(function(day){
+        r1 += '<th colspan="' + day.items.length + '">' + escHtml(_cnDay(day.date)) + '</th>';
+        day.items.forEach(function(s){
+            var t = (s.start || s.end)
+                ? (escHtml(s.start || '') + (s.end ? ('–' + escHtml(s.end)) : '')) : '';
+            r2 += '<th>' + escHtml(s.subject)
+                + (s.selection ? '<div class="fw-normal text-muted" style="font-size:.72rem">（'
+                    + escHtml(s.selection) + '）</div>' : '')
+                + (t ? '<div class="fw-normal text-muted" style="font-size:.72rem">' + t + '</div>' : '')
+                + '</th>';
+        });
+    });
+    thead.innerHTML = r1 + '</tr><tr>' + r2 + '</tr>';
+
+    var poolNames = d.pool.map(function(p){ return p.name; });
+    var rows = [];
+    d.rooms.forEach(function(rm){
+        var tds = ['<td class="fw-bold">' + escHtml(stuPad2(rm.room_no)) + '</td>',
+                   '<td class="text-nowrap text-muted">' + escHtml(rm.location || '') + '</td>',
+                   '<td class="text-muted">'
+                       + (rm.capacity == null ? '' : escHtml(String(rm.capacity))) + '</td>'];
+        d.schedules.forEach(function(s){
+            var cell = d.invig[s.id + '|' + rm.room_no] || {};
+            var avoid = s.subject ? [s.subject] : [];
+            var sels = [];
+            for(var n = 1; n <= slots; n++){
+                var val = (cell[n] && cell[n].name) || '';
+                var opts = '<option value="">—</option>' + poolNames.map(function(nm){
+                    var p = d.pool.find(function(x){ return x.name === nm; }) || {};
+                    var conf = (p.subjects || []).some(function(sj){ return avoid.indexOf(sj) >= 0; });
+                    return '<option value="' + escHtml(nm) + '"' + (nm === val ? ' selected' : '')
+                         + (conf ? ' data-conf="1"' : '') + '>'
+                         + escHtml(nm) + (conf ? '（回避）' : '') + '</option>';
+                }).join('');
+                sels.push('<select class="form-select form-select-sm iv-sel iv-mat-sel" data-sid="'
+                          + s.id + '" data-room="' + escHtml(rm.room_no) + '" data-slot="' + n + '">'
+                          + opts + '</select>');
+            }
+            tds.push('<td><div class="d-flex flex-column gap-1">' + sels.join('') + '</div></td>');
+        });
+        rows.push('<tr>' + tds.join('') + '</tr>');
+    });
+    tbody.innerHTML = rows.join('');
+    tbody.querySelectorAll('.iv-sel').forEach(function(el){
+        el.addEventListener('change', function(){ setInvig(el); });
+    });
+}
+// ---------- 环节⑥ 工作量统计（2026-10-13 用户口径：看每位老师监考多长时间） ----------
+function _fmtDuration(min){
+    if(min === null || min === undefined){ return '—'; }
+    var h = Math.floor(min / 60), m = min % 60;
+    if(h && m){ return h + ' 小时 ' + m + ' 分'; }
+    if(h){ return h + ' 小时'; }
+    return m + ' 分';
+}
+function openWorkload(){
+    bootstrap.Modal.getOrCreateInstance(document.getElementById('wlModal')).show();
+    // 2026-10-13 用户口径：不再单出工作量文件 —— 统一导「监考表（含工作量统计）」
+    document.getElementById('wlExport').href = '/grades/affairs/' + AID + '/export/invig';
+    var body = document.getElementById('wlBody');
+    body.innerHTML = '<tr><td colspan="4" class="text-center text-muted py-3">加载中…</td></tr>';
+    fetch('/grades/affairs/' + AID + '/invig/workload').then(r => r.json()).then(function(res){
+        if(!res.success){
+            body.innerHTML = '<tr><td colspan="4" class="text-center text-danger py-3">加载失败</td></tr>';
+            return;
+        }
+        renderWorkload(res.data);
+    }).catch(function(){
+        body.innerHTML = '<tr><td colspan="4" class="text-center text-danger py-3">加载失败</td></tr>';
+    });
+}
+function renderWorkload(d){
+    var body = document.getElementById('wlBody');
+    var tip = document.getElementById('wlTip');
+    var total = document.getElementById('wlTotal');
+    if(!d.items.length){
+        body.innerHTML = '<tr><td colspan="4" class="text-center text-muted py-3">尚未编排监考表</td></tr>';
+        tip.textContent = '';
+        total.textContent = '';
+        return;
+    }
+    tip.innerHTML = d.has_time
+        ? '时长按每场次「开始—结束」累加；一人一场次只监一个考场，故格数即场次数。'
+        : '<span class="text-danger">场次尚未填写开始/结束时间，暂时算不出时长 —— 先到环节⑤ 考试时间表补时间。</span>';
+    var srcCn = {teacher: '任课教师', other: '其他监考员'};
+    var rows = [];
+    d.items.forEach(function(it, idx){
+        var badge = srcCn[it.source]
+            ? '<span class="badge bg-light text-dark border ms-1">' + srcCn[it.source] + '</span>' : '';
+        var miss = it.missing
+            ? '<span class="text-danger small ms-1">（' + it.missing + ' 格缺时间）</span>' : '';
+        rows.push('<tr>'
+            + '<td>' + escHtml(it.name) + badge + miss + '</td>'
+            + '<td class="text-center">' + it.cells + '</td>'
+            + '<td class="text-end fw-bold">' + _fmtDuration(d.has_time ? it.minutes : null) + '</td>'
+            + '<td class="text-center"><button class="btn btn-outline-secondary btn-sm py-0" '
+            + 'onclick="toggleWlDetail(' + idx + ')">明细</button></td>'
+            + '</tr>');
+        var det = it.detail.map(function(x){
+            return '<tr><td>' + escHtml(x.date) + '</td>'
+                 + '<td>' + escHtml((x.start || '') + (x.end ? ('-' + x.end) : '')) + '</td>'
+                 + '<td>' + escHtml(x.subject) + '</td>'
+                 + '<td>' + escHtml(x.room_no + (x.location ? ('（' + x.location + '）') : '')) + '</td>'
+                 + '<td class="text-end">' + _fmtDuration(x.minutes) + '</td></tr>';
+        }).join('');
+        rows.push('<tr class="wl-detail d-none" data-idx="' + idx + '"><td colspan="4" class="p-2" '
+            + 'style="background:var(--sl-surface-2)">'
+            + '<table class="table table-sm table-borderless mb-0 small"><thead><tr>'
+            + '<th>日期</th><th>时间</th><th>科目</th><th>考场</th>'
+            + '<th class="text-end">时长</th></tr></thead><tbody>' + det + '</tbody></table></td></tr>');
+    });
+    body.innerHTML = rows.join('');
+    total.textContent = '共 ' + d.items.length + ' 人 / ' + d.total_cells + ' 格'
+        + (d.has_time ? ('，合计 ' + _fmtDuration(d.total_minutes)) : '');
+}
+function toggleWlDetail(idx){
+    var tr = document.querySelector('#wlBody tr.wl-detail[data-idx="' + idx + '"]');
+    if(tr){ tr.classList.toggle('d-none'); }
 }
 function setInvig(el){
     var fd = new FormData();

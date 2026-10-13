@@ -161,6 +161,12 @@ def cert_records_page():
                            kw=kw, status=status, d_from=d_from, d_to=d_to)
 
 
+# 2026-10-13 用户口径：删除「成绩核验」页签（原 /grades/student-query/cert-verify）。
+# 理由：成绩证明台账（cert_records.html）每行已有「核验」按钮，直达公开核验页
+# /grades/cert/<code>，同一套 HMAC 校验，功能不缺失 → 不需要再单独一页。
+# 保留：公开核验页 grades.cert_verify（免登录、脱敏、IP 限流）与证书打印 cert_print。
+
+
 # ============ API ============
 
 @bp.route('/api/student-query/search')
@@ -186,7 +192,9 @@ def api_sq_options():
     base = _student_query_in_scope(current_user)
     grades = sorted({s.grade for s in base.with_entities(Student.grade).distinct().all()})
     exams = Exam.query.filter(Exam.grade.in_(grades)).all() if grades else []
-    terms = sorted({e.term for e in exams if e.term})
+    # 2026-10-13：学年选项用 exam_term 口径（缺 term 的历史考试按日期推导），
+    # 否则下拉里只剩有 term 的那一场，选了就查不到往年成绩。
+    terms = sorted({t for t in (student_service.exam_term(e) for e in exams) if t})
     types = sorted({e.exam_type for e in exams if e.exam_type})
     from app.models.grades import SUBJECTS
     return jsonify(success=True, data={

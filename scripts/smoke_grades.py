@@ -411,16 +411,62 @@ with app.test_client() as c:
     check('导出年级分析 Excel', r.status_code == 200 and r.data[:2] == b'PK')
 
     # ---- 页面可访问 ----
-    # 2026-10-10 合并 master（v1.19.0）：/grades/ 落地页改为「历次考试列表」，
-    # 原成绩分析页迁走、旧链接保留为重定向 —— 断言随之更新。
+    # 2026-10-13：/grades/ 由「重定向到历次考试列表」改为成绩模块默认落地页「首页仪表盘」
+    # （routes/dashboard.py::dashboard），旧的重定向断言随之作废。
     r = c.get('/grades/')
-    check('页面 /grades/（重定向到考试列表）', r.status_code in (301, 302),
+    check('页面 /grades/（首页仪表盘）',
+          r.status_code == 200 and '首页仪表盘' in r.get_data(as_text=True),
           str(r.status_code))
     for url in ('/grades/exams', f'/grades/exams/{eid}',
                 f'/grades/exams/{eid}/import', f'/grades/exams/{eid}/bands',
                 '/grades/teachers', '/grades/teachers/import'):
         r = c.get(url)
         check(f'页面 {url}', r.status_code == 200, str(r.status_code))
+
+    # ---- 临界生对比：班级筛选（cls；总分行口径＝考试当时班级，按方向收敛，非法值＝全部） ----
+    nl = c.get(f'/grades/exams/{eid}/near-line').get_data(as_text=True)
+    check('临界生页：班级筛选下拉出现且列出本方向班级',
+          'name="cls"' in nl and '全部班级' in nl and '<option value="02班"' in nl,
+          nl[:200])
+    check('临界生页：方向内的班级才进下拉（默认物理 → 不下拉 01班）',
+          '<option value="01班"' not in nl)
+    nl_cls = c.get(f'/grades/exams/{eid}/near-line?cls={quote("02班")}'
+                   '&above=10&below=20').get_data(as_text=True)
+    check('临界生页：选中班级后只显示该班（表头标注「仅 X」）',
+          re.search(r'仅\s*02班', nl_cls) is not None and 'name="cls"' in nl_cls)
+    hrefs = re.findall(r'href="([^"]*near-line\?[^"]*)"', nl_cls)
+    check('临界生页：清除班级链接保留分数区间（且不带 cls）',
+          any('cls=' not in h and 'above=10' in h and 'below=20' in h for h in hrefs),
+          str(hrefs))
+    check('临界生页：班级对比里的班名可点该班下钻',
+          any('cls=02' in h for h in hrefs), str(hrefs))
+    nl_hist = c.get(f'/grades/exams/{eid}/near-line?direction={quote("历史")}'
+                    f'&cls={quote("01班")}').get_data(as_text=True)
+    check('临界生页：切历史方向后下拉/筛选跟着换（01班生效）',
+          '<option value="01班" selected' in nl_hist and re.search(r'仅\s*01班', nl_hist))
+    nl_bad = c.get(f'/grades/exams/{eid}/near-line?cls={quote("不存在的班")}') \
+        .get_data(as_text=True)
+    check('临界生页：非法班级回退为全部（不残留「仅」标注）',
+          'name="cls"' in nl_bad and re.search(r'仅\s*不存在的班', nl_bad) is None)
+    # ---- 明细分页（展示层）：行带 nl-row 标记、分页条在卡片脚、页码 scope 随筛选变化 ----
+    check('临界生页：明细行带分页标记且分页条就位（每页可选「全部」）',
+          'id="nlBody"' in nl and '<tr class="nl-row">' in nl
+          and 'id="nlPager"' in nl and 'id="nlInfo"' in nl and 'value="all"' in nl)
+    scope_all = re.findall(r'data-scope="([^"]*)"', nl)
+    scope_cls = re.findall(r'data-scope="([^"]*)"', nl_cls)
+    check('临界生页：页码按筛选条件分区（班级进 scope → 换班/换方向即回第 1 页）',
+          bool(scope_all) and scope_all[0].startswith('||')
+          and bool(scope_cls) and scope_cls[0].startswith('02班|'),
+          f'{scope_all[:1]} / {scope_cls[:1]}')
+    nl_empty = c.get(f'/grades/exams/{eid}/near-line?above=0&below=0').get_data(as_text=True)
+    check('临界生页：区间内没人时不渲染分页条',
+          '<tr class="nl-row">' in nl_empty or 'id="nlPager"' not in nl_empty)
+
+    # ---- 成绩汇报区：AI 一句话分析入口（2026-10-13，工具调用 → HTML 报告） ----
+    hr = c.get(f'/grades/report?exam={eid}').get_data(as_text=True)
+    check('汇报区：AI 一句话分析入口就位',
+          'id="rpAiCard"' in hr and 'id="rpAiQ"' in hr and 'id="rpAiRun"' in hr
+          and 'rp-ai-chip' in hr and 'js/report_ai.js' in hr)
 
     # ---- v1.19.47.29 排序三角：统一在文字后面 + 未点选也看得清 + 右对齐列仍与数字对齐 ----
     html = c.get(f'/grades/exams/{eid}').get_data(as_text=True)
@@ -841,18 +887,18 @@ with app.test_client() as c:
           and s['scope_desc'] == '所辖班级：01班', str(s))
     logout()
 
-    # 8) 报告历史权限：本人可见、admin 全量、跨用户 403
+    # 8) AI 分析列表权限：本人可见、admin 全量、跨用户 403
     login_as('renke01')
-    r = c.get('/grades/ai/reports/list')
-    rows = r.get_json()['data']
-    check('AI：教师报告列表仅本人', len(rows) == 1 and rows[0]['id'] == rid_teacher)
+    rows = (c.get('/grades/ai/tasks').get_json() or {}).get('data') or []
+    check('AI：教师工作台列表仅本人（历史报告以负数 id 呈现）',
+          len(rows) == 1 and rows[0]['id'] == -rid_teacher, str(rows)[:200])
     r = c.get(f'/grades/ai/reports/{rid_admin}')
     check('AI：教师不可看他人报告（403）', r.status_code == 403)
     logout()
     acsrf = login_admin()
-    r = c.get('/grades/ai/reports/list')
-    rows = r.get_json()['data']
-    check('AI：admin 报告列表全量', len(rows) == 2)
+    rows = (c.get('/grades/ai/tasks').get_json() or {}).get('data') or []
+    check('AI：admin 工作台列表全量（含他人历史报告）',
+          any((x.get('id') or 0) == -rid_teacher for x in rows), str(rows)[:200])
     # 9) 删除
     r = c.post(f'/grades/ai/reports/{rid_teacher}/delete', headers={'X-CSRFToken': acsrf})
     check('AI：admin 可删他人报告', r.status_code == 200)
@@ -860,6 +906,176 @@ with app.test_client() as c:
         from app.models.grades import AiReport as AiR
         check('AI：删除生效', AiR.query.get(rid_teacher) is None)
     logout()
+
+    # ==================== AI 一句话分析（服务端任务 + 后台执行，mock 模型） ====================
+    import time as _time
+    from app.modules.grades.services import ai_tools as _tools
+    csrf = login_admin()
+    rounds = []
+
+    def fake_chat(cfg, messages, **kw):
+        """第 1 轮让模型调工具；第 2 轮返回带脏标签的 HTML（验证消毒）。"""
+        rounds.append({'tools': kw.get('tools'), 'messages': messages})
+        if len(rounds) == 1:
+            return True, {'choices': [{'message': {
+                'content': '',
+                'tool_calls': [{'id': 'call_1', 'type': 'function', 'function': {
+                    'name': 'class_summary',
+                    'arguments': _json.dumps({'exam_id': eid})}}]}}]}, 0.1
+        return True, {'choices': [{'message': {'content': (
+            '<h5>结论</h5><p class="text-danger">01班总分最高</p>'
+            '<script>alert(1)</script><a href="javascript:alert(1)">x</a>'
+            '<img src=x onerror=alert(1)>'
+            '<table class="table table-sm"><tr><td colspan="2">a</td></tr></table>')}}]}, 0.1
+
+    ai_svc._chat_completions = fake_chat
+    r = c.post('/grades/ai/ask', json={'exam_id': eid, 'question': '分析各班总分差距'},
+               headers={'X-CSRFToken': csrf})
+    d = r.get_json()
+    check('AI任务：提交只建任务并返回 task_id',
+          r.status_code == 200 and d.get('success') and d['data'].get('task_id'), str(d)[:200])
+    tid = (d.get('data') or {}).get('task_id')
+
+    status, detail = 'running', {}
+    for _ in range(80):                     # 后台线程异步：轮询到结束（上限 ~16s）
+        _time.sleep(0.2)
+        rr = c.get(f'/grades/ai/tasks/{tid}')
+        detail = (rr.get_json() or {}).get('data') or {}
+        status = detail.get('status') or ''
+        if status != 'running':
+            break
+    check('AI任务：后台执行完成', status == 'done', f'{status} {detail.get("error")}')
+    check('AI任务：模型收到工具清单', bool(rounds) and bool(rounds[0]['tools'])
+          and any(t['function']['name'] == 'near_line' for t in rounds[0]['tools']))
+    check('AI任务：工具结果已回灌模型',
+          any(m.get('role') == 'tool' and 'class_name' in (m.get('content') or '')
+              for m in (rounds[1]['messages'] if len(rounds) > 1 else [])))
+    check('AI任务：进度可回放（工具事件）',
+          any(ev.get('type') == 'tool' and ev.get('name') == 'class_summary'
+              for ev in detail.get('events') or []), str(detail.get('events'))[:200])
+    html_out = detail.get('html') or ''
+    check('AI任务：报告已消毒',
+          '<h5>' in html_out and 'text-danger' in html_out and 'colspan' in html_out
+          and '<script' not in html_out.lower() and 'onerror' not in html_out.lower()
+          and 'javascript:' not in html_out.lower() and '<img' not in html_out.lower())
+    check('AI任务：落库 kind=html + trace',
+          bool(detail.get('report_id'))
+          and 'class_summary' in _json.dumps(detail.get('trace') or []))
+    r = c.get(f'/grades/ai/tasks/{tid}/stream')
+    body = r.get_data(as_text=True)
+    check('AI任务：SSE 订阅可用且能补发',
+          r.status_code == 200 and 'text/event-stream' in (r.headers.get('Content-Type') or '')
+          and '"type": "done"' in body, body[:200])
+    rows = (c.get('/grades/ai/tasks?limit=50').get_json() or {}).get('data') or []
+    check('AI任务：列表含本任务', any(x.get('id') == tid for x in rows), str(rows)[:200])
+    check('AI任务：历史报告以负数 id 兼容进同一列表',
+          any((x.get('id') or 0) < 0 for x in rows))
+    hr = c.get(f'/grades/ai?exam={eid}')
+    htxt = hr.get_data(as_text=True)
+    check('AI任务：工作台页面元素齐备',
+          hr.status_code == 200 and 'id="aiTaskList"' in htxt and 'id="aiQ"' in htxt
+          and 'id="aiSubmit"' in htxt and 'id="aiStudioCfg"' in htxt
+          and 'js/ai_task_ui.js' in htxt and 'js/ai_studio.js' in htxt)
+    check('AI任务：旧历史页 302 到工作台',
+          c.get('/grades/ai/reports').status_code in (301, 302))
+    r = c.post(f'/grades/ai/tasks/{tid}/delete', headers={'X-CSRFToken': csrf})
+    check('AI任务：可删除已结束的任务', r.status_code == 200)
+    logout()
+
+    # ---- 工具层权限收窄（单元级：直接打 dispatch） ----
+    with app.app_context():
+        lk = TeacherSubjectLink.query.filter_by(grade='2025级', class_name='01班',
+                                                subject='数学').first()
+        ru = User.query.filter_by(username='renke01').first()
+        if lk:
+            lk.user_id = ru.id
+            db.session.commit()
+        okc, text, summ = _tools.dispatch('class_summary', {}, ru, eid)
+        d = _json.loads(text) if okc else {}
+        classes = [x['class_name'] for x in (d.get('rows') or [])]
+        check('AI工具：任课教师只见本班', okc and classes == ['01班'], f'{okc} {classes} {text[:200]}')
+        check('AI工具：任课教师总分口径被隐藏',
+              bool(d.get('rows')) and d['rows'][0].get('total_hidden')
+              and 'avg' not in d['rows'][0])
+        okc2, text2, _s2 = _tools.dispatch('student_trend', {'student_no': '20250101'}, ru, eid)
+        check('AI工具：越权查他班学生被拒', not okc2 and '权限不足' in text2, text2[:120])
+        okc3, text3, _s3 = _tools.dispatch('no_such_tool', {}, ru, eid)
+        check('AI工具：未知工具被拒', not okc3 and '未知工具' in text3)
+        okc4, text4, _s4 = _tools.dispatch('list_my_score_scope', {}, ru, eid)
+        check('AI工具：范围说明可用', okc4 and '01班' in text4, text4[:160])
+
+    # ---- 与 MCP 服务同一份实现的两个工具 + 口径一致性（防两套封装漂移） ----
+    with app.app_context():
+        from app.models import User as U2
+        from mcp_server.tools import scores as _mcp
+        admin_user = U2.query.filter_by(username='admin').first()
+        okc, text, _s = _tools.dispatch('list_classes', {'exam_id': eid}, admin_user)
+        check('AI工具：班级清单（直接复用 MCP 的 list_classes）',
+              okc and '01班' in text and 'visible_subjects' in text, f'{okc} {text[:120]}')
+        okd, textd, _sd = _tools.dispatch('class_detail',
+                                          {'exam_id': eid, 'class_name': '01班'}, admin_user)
+        check('AI工具：逐生明细（直接复用 MCP 的 get_class_score_detail）',
+              okd and '"students"' in textd and '"student_no"' in textd, f'{okd} {textd[:120]}')
+        web, _sw = _tools.HANDLERS['class_summary'](admin_user, exam_id=eid)
+        mcp = _mcp._class_scores(admin_user, eid, '')
+        check('AI工具：Web 与 MCP 同口径（班级数 + 首班均分逐项一致）',
+              len(web['rows']) == len(mcp['classes'])
+              and web['rows'][0].get('avg') == mcp['classes'][0].get('avg'),
+              f"{len(web['rows'])}/{len(mcp['classes'])} "
+              f"{web['rows'][0].get('avg')}/{mcp['classes'][0].get('avg')}")
+
+    # ---- 收敛：轮数用尽时必须"只准出报告"（tool_choice=none），不再无限磨蹭 ----
+    with app.app_context():
+        from app.modules.grades.services import ai_agent as _agent
+        from app.models import User as U3
+        from app.models.grades import Exam as _Exam
+        admin_user = U3.query.filter_by(username='admin').first()
+        _exam = _Exam.query.get(eid)
+        choices = []
+
+        def fake_converge(cfg, messages, **kw):
+            choices.append(kw.get('tool_choice'))
+            if len(choices) == 1:
+                return True, {'choices': [{'message': {'content': '', 'tool_calls': [
+                    {'id': 'c1', 'type': 'function',
+                     'function': {'name': 'class_summary',
+                                  'arguments': _json.dumps({'exam_id': eid})}}]}}]}, 0.1
+            return True, {'choices': [{'message': {'content': '<h5>收敛</h5>'}}]}, 0.1
+
+        ai_svc._chat_completions = fake_converge
+        evs = list(_agent.run({'provider': 'deepseek', 'model': 'x', 'api_key': 'k'},
+                              admin_user, _exam, '各班差距', max_rounds=2))
+        check('AI收敛：最后一轮带 tool_choice=none（强制出报告）',
+              choices == [None, 'none'], str(choices))
+        check('AI收敛：仍产出 html 报告',
+              any(e.get('type') == 'html' and '<h5>' in (e.get('text') or '') for e in evs))
+
+    # ---- 2026-10-13 成绩证明矩阵（单元级）：缺 term 的历史考试不能丢 ----
+    # 回归的是「勾选多场考试 → 生成 PDF 只有一场」：历史导入的 exam.term 为 NULL，
+    # 旧实现要求 term 非空才纳入矩阵，结果 2024/2025 级学生的历次考试被整体丢弃。
+    with app.app_context():
+        from datetime import date as _date
+        from types import SimpleNamespace as _NS
+        from app.modules.grades.services import student_service as _ss
+
+        def _mk(i, d, ty, term=None):
+            return _NS(id=i, name=f'X{i}', exam_date=_date(*d), exam_type=ty,
+                       term=term, grade='2025级')
+
+        _ex = [_mk(1, (2025, 9, 20), '月考'),        # term 缺失（历史数据）
+               _mk(2, (2026, 1, 10), '期末'),
+               _mk(3, (2026, 3, 20), '月考', '2025-2026')]
+        _default = _ss.build_cert_matrix('2025级', _ex, {}, {}, None)
+        check('证明矩阵：缺 term 的历史考试不被丢弃（默认口径每时段一场）',
+              len(_default['rows']) == 2 and _default['rep_ids'] == [2, 3],
+              str(_default['rep_ids']))
+        _pick = _ss.build_cert_matrix('2025级', _ex, {}, {}, {1, 2})
+        check('证明矩阵：同段勾选多场全部进矩阵（不再只留一场）',
+              len(_pick['rows']) == 2 and _pick['exam_ids'] == [1, 2]
+              and _pick['chosen'] is True, str(_pick['exam_ids']))
+        check('证明矩阵：行标签＝年级学期口径（高一上·月考）',
+              _pick['rows'][0]['exam_label'].startswith('高一上·月考'),
+              _pick['rows'][0]['exam_label'])
 
 print(f'\n===== 冒烟测试完成：通过 {ok} / 失败 {fail} =====')
 sys.exit(1 if fail else 0)

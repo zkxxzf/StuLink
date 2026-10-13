@@ -354,9 +354,9 @@
                 <i class="bi bi-house"></i>宿舍管理
             </a>
             {% elif request.blueprint == 'grades' %}
-            {# v1.19.0：成绩模块落地页＝「历次考试」列表，不再单列「成绩管理」入口。
-               原入口 url_for('grades.index') 指向的是 /grades/analysis（分析页）而非考试列表，
-               且与下方同名小节标题重复；入口统一由下方「历次考试」承担。 #}
+            {# v1.19.0：成绩模块不单列「成绩管理」入口（与下方同名小节标题重复），
+               落地页由下方首项承担；2026-10-13 起该首项为「首页仪表盘」（/grades/），
+               其后 历次考试 / 个人成绩 / 基础配置。 #}
             {% elif request.blueprint in ('points', 'morality') %}
             {# 2026-10-13（v1.19.47.29）：奖惩页（morality 蓝图）与积分同属德育，共用这一栏菜单 #}
             <a class="nav-link" href="{{ url_for('points.index') }}">
@@ -542,6 +542,9 @@
                        href="{{ url_for('grades.exam_near_line', exam_id=EN.exam_id) }}">临界生对比</a>
                     <a class="efn-item ps-4 {% if request.endpoint == 'grades.pivot_page' %}active{% endif %}" data-nav="pivot"
                        href="{{ url_for('grades.pivot_page') }}?exam={{ EN.exam_id }}">成绩分析自由表</a>
+                    {# 2026-10-13：AI 分析工作台（一句话提问 → 工具取数 → HTML 报告；任务在后台跑，切页可续看） #}
+                    <a class="efn-item ps-4 {% if request.endpoint == 'grades.ai_studio' %}active{% endif %}" data-nav="ai"
+                       href="{{ url_for('grades.ai_studio') }}?exam={{ EN.exam_id }}">AI 分析</a>
                     {% endif %}
                     {% if _is_lead %}
                     <a class="efn-item ps-4 {% if request.endpoint == 'grades.report_page' %}active{% endif %}" data-nav="report"
@@ -576,16 +579,28 @@
             </div>
             {% else %}
             {# ---------- 全局态：精简菜单 ----------
-               不再重复「成绩管理」小节标题（与模块入口同名），首项「历次考试」即模块入口 #}
+               2026-10-13 用户口径：成绩模块落地页＝「首页仪表盘」（跨考试总览），
+               其后依次 历次考试 / 个人成绩 / 基础配置；
+               「个人成绩查询」按用户要求更名「个人成绩」（仅展示名，权限 key 不变）。 #}
+            <a class="nav-link {% if request.endpoint == 'grades.dashboard' %}active{% endif %}"
+               href="{{ url_for('grades.dashboard') }}">
+                <i class="bi bi-speedometer2"></i>首页仪表盘
+            </a>
             <a class="nav-link {% if request.endpoint in ('grades.exams_list','grades.exam_new') %}active{% endif %}"
                href="{{ url_for('grades.exams_list') }}">
                 <i class="bi bi-journals"></i>历次考试
             </a>
+            {# 2026-10-13 用户口径：**成绩模块的全局侧栏不放「AI 分析」** ——
+               它是单场考试的能力（提问、取数、报告都围绕一场考试），入口只保留在
+               该场考试的「成绩分析」段里（见上方 efnAnalysis 内的 AI 分析项）。
+               全局态再放一个 = 同一功能两个入口，且会让人误以为它属于考试列表这一层。 #}
             {# v1.19.0 全局态只放“跨多次考试”的内容；分析类子模块已收进本场考试的分析段 #}
             {% if current_user.has_perm('grades.student_query') %}
-            <a class="nav-link {% if request.endpoint == 'grades.student_query_page' %}active{% endif %}"
+            {# 个人成绩分区＝两页（个人成绩/成绩证明），侧栏同一入口；两页都算本项 active。
+               2026-10-13：「成绩核验」页已删除（核验入口在证明台账每行的「核验」按钮） #}
+            <a class="nav-link {% if request.endpoint in ('grades.student_query_page','grades.cert_records_page') %}active{% endif %}"
                href="{{ url_for('grades.student_query_page') }}">
-                <i class="bi bi-person-vcard"></i>个人成绩查询
+                <i class="bi bi-person-vcard"></i>个人成绩
             </a>
             {% endif %}
             {# v1.19.47.29 移除「分数修改记录」全局入口：它属于单场考试的数据，只在该场成绩单页右上角进入 #}
@@ -696,34 +711,18 @@
             {# 2026-10-10：原「晚自习值班」独立入口已删除 —— 晚自习在「全校总课表」里
                本就按节次列出并带值班教师，独立页面重复，不再保留。 #}
 
-            {# ── 课表 ── #}
-            <a class="nav-link d-flex align-items-center aca-group" data-bs-toggle="collapse"
-               href="#navAcaSch" role="button"
-               aria-expanded="{{ 'true' if aca_ep in sch_eps else 'false' }}">
+            {# ── 课表（2026-10-13 用户口径：侧栏入口收敛为一个）──
+               点「课表」直接进**学期课表**（当前学期卡片就在该页最前，卡片上可进全校总课表）；
+               「历史课表」入口移到学期课表页右上角（带归档数量徽标），侧栏不再展开子项。
+               沿革：2026-10-12 侧栏「全校总课表」入口已删（学期卡片上就有按钮）；
+               教师 / 备课组 / 教研组课表合成一个入口放在教务工作台（页内 tab 互切）；
+               「跨学期对比」随该功能整体下线。 #}
+            {% if current_user.has_perm('academic.timetable') %}
+            <a class="nav-link {% if aca_ep in sch_eps %}active{% endif %}"
+               href="{{ url_for('academic.schedule_manage') }}">
                 <i class="bi bi-calendar-range"></i>课表
-                <i class="bi bi-chevron-down small ms-auto aca-caret"></i>
             </a>
-            <div class="collapse {% if aca_ep in sch_eps %}show{% endif %}" id="navAcaSch">
-                {% if current_user.has_perm('academic.timetable') %}
-                <a class="nav-link ps-4 {% if aca_ep == 'academic.schedule_manage' %}active{% endif %}"
-                   href="{{ url_for('academic.schedule_manage') }}">
-                    <i class="bi bi-calendar-week"></i>学期课表
-                </a>
-                {% endif %}
-                {# 2026-10-12（用户要求）：侧栏「全校总课表」入口已删除 —— 学期管理卡片上
-                   就有「全校总课表」按钮，侧栏再挂一个是重复入口；原来只为侧栏服务、
-                   无 sid 的 /schedule/overview 跳转路由也随之下线。 #}
-                {# 2026-10-12（用户要求）：教师 / 备课组 / 教研组课表**合成一个入口**——
-                   统一入口放在教务工作台「课表」块的「课表查询」按钮，页内用 tab 互切，
-                   侧栏不再分挂三项（三个页面本身仍是查看类，academic.view）。 #}
-                {% if current_user.has_perm('academic.timetable') %}
-                <a class="nav-link ps-4 {% if aca_ep in ['academic.schedule_history', 'academic.schedule_history_detail'] %}active{% endif %}"
-                   href="{{ url_for('academic.schedule_history') }}">
-                    <i class="bi bi-clock-history"></i>历史课表
-                </a>
-                {# 2026-10-12（用户要求）：原「跨学期对比」侧栏入口已随该功能整体下线删除。 #}
-                {% endif %}
-            </div>
+            {% endif %}
 
             {# ── 查课 ── #}
             <a class="nav-link d-flex align-items-center aca-group" data-bs-toggle="collapse"

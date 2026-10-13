@@ -1,0 +1,159 @@
+{% extends "base.html" %}
+{% block title %}查课录入{% endblock %}
+{# 2026-10-13：查课录入从「查课统计」页拆出为独立页（用户口径）——
+   统计页只负责统计与导出；录入页两种方式二选一：单条录入 / 批量录入。
+   提交后仍回到本页（批量提交回本页的批量方式），便于连续录入。 #}
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
+    <h4 class="fw-bold mb-0"><i class="bi bi-pencil-square"></i> 查课录入</h4>
+    <div class="d-flex gap-2 flex-wrap">
+        <a class="btn btn-sm btn-outline-primary" href="{{ url_for('academic.inspection_live_schedule') }}">
+            <i class="bi bi-broadcast"></i> 查课核对（点格子标记）
+        </a>
+        <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('academic.inspection_page') }}">
+            <i class="bi bi-bar-chart-line"></i> 查课统计
+        </a>
+    </div>
+</div>
+
+<ul class="nav nav-pills mb-3" id="entryTabs" role="tablist">
+    <li class="nav-item" role="presentation">
+        <button class="nav-link {% if mode == 'single' %}active{% endif %}" id="tabSingleBtn"
+                data-bs-toggle="pill" data-bs-target="#paneSingle" type="button" role="tab">
+            <i class="bi bi-plus-circle"></i> 单条录入
+        </button>
+    </li>
+    <li class="nav-item" role="presentation">
+        <button class="nav-link {% if mode == 'batch' %}active{% endif %}" id="tabBatchBtn"
+                data-bs-toggle="pill" data-bs-target="#paneBatch" type="button" role="tab">
+            <i class="bi bi-list-check"></i> 批量录入
+        </button>
+    </li>
+</ul>
+
+<div class="tab-content">
+    {# ===== 单条录入 ===== #}
+    <div class="tab-pane fade {% if mode == 'single' %}show active{% endif %}" id="paneSingle" role="tabpanel">
+        <div class="card">
+            <div class="card-header"><i class="bi bi-plus-circle"></i> 录入一条查课记录</div>
+            <div class="card-body">
+                <form class="row g-2 align-items-end" method="POST"
+                      action="{{ url_for('academic.inspection_add') }}">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                    <div class="col-6 col-md-2">
+                        <label class="form-label small mb-1">日期 <span class="text-danger">*</span></label>
+                        <input type="date" name="inspect_date" class="form-control form-control-sm"
+                               value="{{ today }}" required>
+                    </div>
+                    <div class="col-6 col-md-1">
+                        <label class="form-label small mb-1">节次</label>
+                        <input type="number" name="period" class="form-control form-control-sm" min="1">
+                    </div>
+                    <div class="col-6 col-md-1">
+                        <label class="form-label small mb-1">年级 <span class="text-danger">*</span></label>
+                        <select name="grade" class="form-select form-select-sm" required>
+                            <option value="">--</option>
+                            {% for g in grade_opts %}<option value="{{ g }}">{{ g }}</option>{% endfor %}
+                        </select>
+                    </div>
+                    <div class="col-12 col-md-2">
+                        <label class="form-label small mb-1">教师 <span class="text-danger">*</span></label>
+                        <select name="teacher_uid" class="form-select form-select-sm" required>
+                            <option value="">-- 选择教师 --</option>
+                            {% for t in teachers %}
+                            <option value="{{ t.teacher_uid }}">{{ t.name }}（{{ t.teacher_uid }}）</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    <div class="col-6 col-md-1">
+                        <label class="form-label small mb-1">班级</label>
+                        <input name="class_name" class="form-control form-control-sm" maxlength="10">
+                    </div>
+                    <div class="col-6 col-md-1">
+                        <label class="form-label small mb-1">科目</label>
+                        <input name="subject" class="form-control form-control-sm" maxlength="20">
+                    </div>
+                    <div class="col-6 col-md-1">
+                        <label class="form-label small mb-1">情况</label>
+                        <select name="result" class="form-select form-select-sm">
+                            {% for k, label in results %}
+                            <option value="{{ k }}">{{ label }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    <div class="col-12 col-md-2">
+                        <label class="form-label small mb-1">备注</label>
+                        <input name="note" class="form-control form-control-sm" maxlength="200">
+                    </div>
+                    <div class="col-12 col-md-1">
+                        <button class="btn btn-sm btn-primary w-100"><i class="bi bi-check-lg"></i> 保存</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    {# ===== 批量录入 ===== #}
+    <div class="tab-pane fade {% if mode == 'batch' %}show active{% endif %}" id="paneBatch" role="tabpanel">
+        <div class="card">
+            <div class="card-header"><i class="bi bi-list-check"></i> 批量录入查课记录</div>
+            <div class="card-body">
+                <form id="batchForm" method="POST" action="{{ url_for('academic.inspection_batch') }}">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                    <div class="row g-2 mb-3">
+                        <div class="col-md-3">
+                            <label class="form-label small fw-bold">查课日期 <span class="text-danger">*</span></label>
+                            <input type="date" name="inspect_date" id="batchDate" class="form-control form-control-sm"
+                                   value="{{ today }}" required>
+                        </div>
+                        <div class="col-md-9 d-flex align-items-end">
+                            <span class="text-muted small">空行会被自动忽略；越权/无效的行会跳过，不影响其余行落库。</span>
+                        </div>
+                    </div>
+                    <div class="table-responsive">
+                        <table class="table table-sm table-bordered align-middle" id="batchTable">
+                            <thead class="table-light">
+                                <tr>
+                                    <th style="width:40px">#</th>
+                                    <th>年级</th>
+                                    <th>教师</th>
+                                    <th>班级</th>
+                                    <th>科目</th>
+                                    <th>节次</th>
+                                    <th>情况</th>
+                                    <th>备注</th>
+                                    <th style="width:40px"></th>
+                                </tr>
+                            </thead>
+                            <tbody id="batchBody">
+                            </tbody>
+                        </table>
+                    </div>
+                    <button type="button" class="btn btn-sm btn-outline-secondary" id="btnAddRow">
+                        <i class="bi bi-plus"></i> 添加行
+                    </button>
+                    <div class="mt-3 d-flex justify-content-end gap-2">
+                        <button type="button" class="btn btn-sm btn-success" id="btnBatchSubmit">
+                            <i class="bi bi-check-lg"></i> 批量提交
+                        </button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+
+{# 模板变量供 JS 使用（与统计页同款结构，statsUrl 留空 = 本页不做图表统计） #}
+<script id="inspectionData" type="application/json">
+{
+    "statsUrl": "",
+    "teachers": [{% for t in teachers %}[{{ t.teacher_uid|tojson }},{{ t.name|tojson }}]{% if not loop.last %},{% endif %}{% endfor %}],
+    "grades": [{% for g in grade_opts %}{{ g|tojson }}{% if not loop.last %},{% endif %}{% endfor %}],
+    "results": [{% for k, label in results %}{"key":{{ k|tojson }},"label":{{ label|tojson }}}{% if not loop.last %},{% endif %}{% endfor %}]
+}
+</script>
+{% endblock %}
+
+{% block extra_js %}
+<script src="{{ su('js/inspection.js') }}"></script>
+{% endblock %}

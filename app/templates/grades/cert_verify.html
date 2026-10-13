@@ -48,10 +48,14 @@
             <div class="table-responsive mt-3">
                 <table class="table table-sm mb-0">
                     <tbody>
+                        {# 2026-10-13 修正字段名：Certificate 只有 generated_at（无 created_at），
+                           内容摘要由路由算好传来（cert 上没有 content_hash 属性）——
+                           此前两格一个空白、一个恒为「—」。 #}
                         <tr><th style="width:9rem">防伪码</th><td><code>{{ cert.code }}</code></td></tr>
-                        <tr><th>出具时间</th><td>{{ cert.created_at }}</td></tr>
+                        <tr><th>出具时间</th>
+                            <td>{{ cert.generated_at.strftime('%Y-%m-%d %H:%M') if cert.generated_at else '—' }}</td></tr>
                         <tr><th>状态</th><td>{{ '已作废' if cert.invalid else '有效' }}</td></tr>
-                        <tr><th>内容摘要</th><td><code class="small">{{ cert.content_hash or '—' }}</code></td></tr>
+                        <tr><th>内容摘要</th><td><code class="small">{{ content_hash or '—' }}</code></td></tr>
                     </tbody>
                 </table>
             </div>

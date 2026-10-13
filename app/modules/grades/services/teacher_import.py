@@ -5,10 +5,11 @@ import re
 
 import openpyxl
 
-from app.models.grades import SUBJECTS
+from app.models.grades import SUBJECTS, SUBJECT_ALIAS
 from app.modules.grades.utils import parse_grade_any
 
-_SUBJECT_ALIAS = {'英语': '外语'}
+# 2026-10-13：引用 models.grades 公共别名表（唯一维护点，含小语种）
+_SUBJECT_ALIAS = SUBJECT_ALIAS
 _CLASS_RE = re.compile(r'^\s*(\d{1,2})班\s*$')
 _SECTION_MARKERS = ('任课安排', '备课组长', '任课表')
 _MAX_ROWS = 3000

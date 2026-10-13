@@ -338,12 +338,15 @@ def _send_once(url, cfg, body, timeout):
         return False, f'调用失败：{e}', round(time.time() - started, 2), 0
 
 
-def _chat_completions(cfg, messages, timeout=None, max_tokens=None, temperature=None):
+def _chat_completions(cfg, messages, timeout=None, max_tokens=None, temperature=None,
+                      tools=None, tool_choice=None):
     """统一的 OpenAI 兼容 chat/completions 调用，返回 (ok, payload_or_error, 秒)
 
     payload 为厂商原始 JSON；调用方按需取用。
     v1.19.0：用户在“用户设置”里填的 **输出上限 / 思考强度 / 输入上限** 优先于代码默认值；
     三者都不填时完全不传，由服务商自行决定（与以前行为一致）。
+    2026-10-13：新增 tools / tool_choice（OpenAI 兼容 function calling），
+    供成绩汇报区「AI 一句话分析」的 agent 循环使用；不传则请求体与以前完全一致。
     """
     provider = cfg.get('provider') or ai_providers.DEFAULT_PROVIDER
     base = (cfg.get('base_url') or ai_providers.resolve_base_url(provider)).rstrip('/')
@@ -371,6 +374,10 @@ def _chat_completions(cfg, messages, timeout=None, max_tokens=None, temperature=
                 body['max_tokens'] = max_tokens
     if effort in REASONING_EFFORTS:
         body['reasoning_effort'] = effort
+    if tools:
+        body['tools'] = tools
+        if tool_choice:
+            body['tool_choice'] = tool_choice
 
     ok, out, sec, code = _send_once(url, cfg, body, timeout)
     if (not ok) and effort and code == 400:

@@ -36,7 +36,7 @@ from app.extensions import db  # noqa: E402
 from app.models import Student, User  # noqa: E402
 from app.models.grades import (ExamAffair, AffairRoom, AffairStudent, TeacherSubjectLink,  # noqa: E402
                                AffairTeacher, AffairSchedule, AffairInvigilator,
-                               AffairInvigilation, Exam)
+                               AffairInvigilation, Exam, AffairInvigExclude)
 
 app = create_app()
 ok = fail = 0
@@ -133,7 +133,11 @@ with app.test_client() as c:
     check('页面含 7 个环节标签',
           all(x in ph for x in ['① 学生名单', '② 考场设置', '③ 编排考号',
                                 '④ 核对任课教师', '⑤ 考试时间表', '⑥ 编排监考表', '⑦ 导出']))
-    check('页面含监考表导出入口', '导出监考表 Excel' in ph and '导出监考表 PDF' in ph)
+    check('页面只保留一个监考表导出入口（含工作量统计；无 PDF / 长表）',
+          '导出监考表（含工作量统计）' in ph
+          and '监考表 PDF' not in ph and '导出监考表 Excel' not in ph)
+    check('页面含监考矩阵视图与工作量统计入口',
+          '教师安排（学校格式）' in ph and '工作量统计' in ph and 'wlModal' in ph)
     # v1.19.47.3 页头与去重
     check('重复步骤条已删除（无 step-pill）', 'step-pill' not in ph)
     check('页头显示本场考试名字', '2025级2026-2027学年第一学期期中考（冒烟）' in ph)
@@ -158,6 +162,20 @@ with app.test_client() as c:
     check('选科明细默认展开（collapse show）', 'collapse show' in ph)
     check('改容量实时刷新选科明细（refreshStats）', 'refreshStats' in ph)
     check('侧栏圆点只亮当前环节（syncSidebarSteps）', 'syncSidebarSteps' in ph)
+    # 2026-10-13 用户口径：⑤ 点「新增场次」不再给空白 yyyy/mm/dd —— 页面下发默认日期（本场考试日期）
+    # 与每天场次上限，新行日期由 nextSchedDate() 给出（延续上一场 → 缺省考试日期 → 满员顺延）
+    check('环节⑤ 新增场次默认日期已下发（本场 2026-10-08 / 每天 6 场）',
+          "SCHED_DEFAULT_DATE = '2026-10-08'" in ph
+          and 'const SCHED_DAILY_MAX = 6' in ph
+          and 'function nextSchedDate()' in ph
+          and 'sc-date" value="\' + nextSchedDate()' in ph)
+    # 2026-10-13 用户口径：⑥ 教师池去掉「不监考」开关（改按学科分组展示），
+    # 排除名单的老师 / 场次两侧都能多选，一次批量加
+    check('环节⑥ 教师池按学科分组、已无「不监考」开关',
+          'renderPoolBySubject' in ph and 'toggleExclude' not in ph)
+    check('环节⑥ 排除名单多选控件（老师菜单 / 场次菜单 / 批量接口）',
+          'exclWhoMenu' in ph and 'exclSchMenu' in ph
+          and "invig/exclude/batch" in ph and 'function exclOnPick' in ph)
 
     # v1.19.47.3 实时统计接口：改容量后选科明细即时反映
     r = c.get(f'/grades/affairs/{aid}/stats')
@@ -302,22 +320,114 @@ with app.test_client() as c:
     check('环节⑥ 手动指派校外监考员成功', (r.get_json() or {}).get('ok') is True,
           str(r.get_json()))
 
-    # ---- 环节⑦ 导出 ----
+    # ---- 环节⑦ 导出（2026-10-13 用户口径：只保留**一个**监考表导出 = 教师安排矩阵 + 工作量统计） ----
     r = c.get(f'/grades/affairs/{aid}/export/invig')
-    check('环节⑦ 监考表 xlsx 200', r.status_code == 200, str(r.status_code))
+    check('环节⑦ 监考表 xlsx 200（合并版）', r.status_code == 200, str(r.status_code))
     try:
         wb = openpyxl.load_workbook(io.BytesIO(r.data))
-        ws = wb.active
-        heads = [ws.cell(row=1, column=i).value for i in range(1, 7)]
-        check('环节⑦ 监考表表头（考试时间/科目/考场号/考场位置/监考1/监考2）',
-              heads == ['考试时间', '考试科目', '考场号', '考场位置',
-                        '监考老师1', '监考老师2'], str(heads))
-        check('环节⑦ 监考表行数=3场×2考场=6', ws.max_row - 1 == 6, str(ws.max_row - 1))
+        check('环节⑦ 只有一个工作表（监考表）', wb.sheetnames == ['监考表'], str(wb.sheetnames))
+        ws = wb['监考表']
+        check('环节⑦ 标题写明「监考表」（同一张表内含工作量）',
+              '监考表' in str(ws.cell(row=1, column=1).value or ''),
+              str(ws.cell(row=1, column=1).value))
+        _hdr = [ws.cell(row=5, column=i).value for i in range(1, 4)]
+        check('环节⑦ 上段矩阵列头（考场号/容纳人数/考场位置）',
+              _hdr == ['考场号', '容纳人数', '考场位置'], str(_hdr))
+        check('环节⑦ 日期层=10月8日（周四）',
+              ws.cell(row=2, column=4).value == '10月8日（周四）',
+              str(ws.cell(row=2, column=4).value))
+        check('环节⑦ 上午/下午层（09:00→上午 / 14:00→下午）',
+              ws.cell(row=3, column=4).value == '上午'
+              and ws.cell(row=3, column=5).value == '下午',
+              f"{ws.cell(row=3, column=4).value}/{ws.cell(row=3, column=5).value}")
+        _cell = ws.cell(row=6, column=4).value
+        check('环节⑦ 一格并排 2 位监考（、连接）',
+              bool(_cell) and '、' in str(_cell), str(_cell))
+        # 下段：工作量统计（与矩阵同一张表）
+        _wl_head = None
+        for _r in range(1, ws.max_row + 1):
+            if ws.cell(row=_r, column=3).value == '监考格数':
+                _wl_head = _r
+                break
+        check('环节⑦ 同表下段有工作量统计表头', _wl_head is not None, f'rows={ws.max_row}')
+        if _wl_head:
+            _h1 = [ws.cell(row=_wl_head, column=i).value for i in range(1, 7)]
+            check('环节⑦ 工作量表头（教师/身份/格数/分钟/小时/缺时间格数）',
+                  _h1 == ['教师', '身份', '监考格数', '监考时长（分钟）',
+                          '监考时长（小时）', '缺时间格数'], str(_h1))
+            _last = [ws.cell(row=ws.max_row, column=i).value for i in range(1, 7)]
+            check('环节⑦ 工作量合计行（合计 / 12 格 / 1080 分钟 / 18 小时）',
+                  _last[0] == '合计' and _last[2] == 12 and _last[3] == 1080
+                  and _last[4] == 18.0, str(_last))
     except Exception as e:  # noqa: BLE001
         check('环节⑦ 监考表 xlsx 可打开', False, str(e))
-    r = c.get(f'/grades/affairs/{aid}/export/invig/pdf')
-    check('环节⑦ 监考表 PDF 200', r.status_code == 200
-          and 'pdf' in (r.headers.get('Content-Type') or ''), str(r.status_code))
+    # 用户口径：四个入口已合并成一个，旧的三个一律 404（防止误恢复）
+    for _old in ('/export/invig/pdf', '/export/invig/matrix', '/export/invig/workload'):
+        _rr = c.get(f'/grades/affairs/{aid}{_old}')
+        check(f'环节⑦ 旧导出入口 {_old} 已下线（404）', _rr.status_code == 404,
+              str(_rr.status_code))
+    # 工作量 JSON 接口（弹窗数据源）保留
+    r = c.get(f'/grades/affairs/{aid}/invig/workload')
+    wl = (r.get_json() or {}).get('data') or {}
+    check('环节⑥ 工作量接口 200 且有可计时场次',
+          r.status_code == 200 and wl.get('has_time') is True and len(wl.get('items', [])) > 0,
+          str((r.status_code, wl.get('has_time'))))
+    check('环节⑥ 工作量合计 = 12 格 / 1080 分钟',
+          wl.get('total_cells') == 12 and wl.get('total_minutes') == 1080,
+          str((wl.get('total_cells'), wl.get('total_minutes'))))
+    check('环节⑥ 工作量：每人 minutes = 格数 × 90，且明细逐格齐全',
+          all(it['minutes'] == it['cells'] * 90 and len(it['detail']) == it['cells']
+              for it in wl.get('items', [])),
+          str([(it['name'], it['cells'], it['minutes']) for it in wl.get('items', [])]))
+
+
+    # ---- 环节⑥ 排除名单：批量（多老师 × 多场次，2026-10-13 用户口径） ----
+    # 放在导出之后跑：本段会重跑自动编排（会被排除名单影响），不干扰上面既有的编排/导出行数断言
+    with app.app_context():
+        _sids = [s.id for s in AffairSchedule.query.filter_by(affair_id=aid)
+                 .order_by(AffairSchedule.id).limit(2).all()]
+    _batch = {'names': ['张语文', '李数学'],
+              'sids': [str(_sids[0]), str(_sids[1])]}   # 同名多值 = 多选（werkzeug 会展开成重复字段）
+    r = c.post(f'/grades/affairs/{aid}/invig/exclude/batch', data=_batch, headers=H)
+    jd = r.get_json() or {}
+    check('环节⑥ 批量排除 2 人 × 2 场 = 4 条',
+          jd.get('ok') and jd.get('added') == 4, str(jd))
+    r = c.post(f'/grades/affairs/{aid}/invig/exclude/batch', data=_batch, headers=H)
+    jd = r.get_json() or {}
+    check('环节⑥ 重复批量排除跳过（added=0 / skipped=4）',
+          jd.get('ok') and jd.get('added') == 0 and jd.get('skipped') == 4, str(jd))
+    r = c.post(f'/grades/affairs/{aid}/invig/exclude/batch',
+               data={'names': '查无此人', 'sids': '0'}, headers=H)
+    check('环节⑥ 批量排除拒收池外老师', (r.get_json() or {}).get('ok') is False)
+    r = c.post(f'/grades/affairs/{aid}/invig/exclude/batch',
+               data={'names': '王化学', 'sids': '0'}, headers=H)
+    jd = r.get_json() or {}
+    check('环节⑥ 整批次批量排除（1 人，whole=True）',
+          jd.get('ok') and jd.get('added') == 1 and jd.get('whole') is True, str(jd))
+    with app.app_context():
+        check('环节⑥ 排除名单落库共 5 条',
+              AffairInvigExclude.query.filter_by(affair_id=aid).count() == 5)
+        _rno = AffairRoom.query.filter_by(affair_id=aid).order_by(
+            AffairRoom.room_no).first().room_no
+    # 排除名单是硬约束：手动指派同样被拒（整批不监考 / 该场次不监考）
+    r = c.post(f'/grades/affairs/{aid}/invig/set',
+               data={'schedule_id': _sids[0], 'room_no': _rno, 'slot': 1, 'name': '王化学'},
+               headers=H)
+    jd = r.get_json() or {}
+    check('环节⑥ 整批排除的老师不能再被手动指派',
+          jd.get('ok') is False and '不监考' in (jd.get('msg') or ''), str(jd))
+    r = c.post(f'/grades/affairs/{aid}/invig/set',
+               data={'schedule_id': _sids[0], 'room_no': _rno, 'slot': 1, 'name': '李数学'},
+               headers=H)
+    jd = r.get_json() or {}
+    check('环节⑥ 被排掉该场次的老师不能再被手动指派',
+          jd.get('ok') is False and '不监考' in (jd.get('msg') or ''), str(jd))
+    # 排除后可用教师变少：自动编排应明确报「缺 N 格」，而不是静默留空
+    r = c.post(f'/grades/affairs/{aid}/invig/auto', headers=H)
+    jd = r.get_json() or {}
+    check('环节⑥ 排除后容量不足：自动编排 400 + 缺格说明',
+          r.status_code == 400 and jd.get('ok') is False and '格' in (jd.get('msg') or ''),
+          str(jd))
 
 print(f'\n===== 考务监考冒烟：{ok} 通过 / {fail} 失败 =====')
 sys.exit(1 if fail else 0)

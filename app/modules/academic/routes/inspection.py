@@ -10,7 +10,8 @@ from flask_login import login_required, current_user
 from sqlalchemy import func
 
 from app.extensions import db
-from app.models.academic import (InspectionRecord, Teacher, INSPECTION_RESULTS)
+from app.models.academic import (InspectionRecord, Teacher,
+                                 INSPECTION_EXEMPT_KEYS, INSPECTION_RESULTS)
 from app.models.timetable import WEEKDAY_NAMES
 from app.modules.academic import bp
 from app.modules.academic.services.access_scope import (
@@ -121,8 +122,9 @@ def inspection_page():
         InspectionRecord.query.filter(InspectionRecord.inspect_date >= month_start),
         current_user, InspectionRecord)
     month_total = month_q.count()
+    # 「考试」不算异常（考试期间有正常考务工作量，不能计为违纪/迟到）
     month_abnormal = month_q.filter(
-        InspectionRecord.result != 'normal').count()
+        InspectionRecord.result.notin_(tuple(INSPECTION_EXEMPT_KEYS))).count()
     teacher_month_q = apply_academic_scope(
         InspectionRecord.query.filter(InspectionRecord.inspect_date >= month_start),
         current_user, InspectionRecord)
@@ -144,6 +146,29 @@ def inspection_page():
                            month_total=month_total, month_abnormal=month_abnormal,
                            by_teacher=by_teacher, today=today.isoformat(),
                            can_edit=current_user.has_perm('academic.edit'))
+
+
+@bp.route('/inspection/entry')
+@login_required
+@perm_required('academic.edit')
+def inspection_entry_page():
+    """查课录入（2026-10-13 从查课统计页拆出为**独立页**）。
+
+    页内二选一：单条录入（日常补录）/ 批量录入（巡课回来一屏几十条）。
+    统计页只负责统计与导出，不再承载任何录入入口；本页提交后仍回到本页，
+    便于连续录入。默认进入单条方式，?mode=batch 直达批量。
+    """
+    mode = (request.args.get('mode') or 'single').strip()
+    if mode not in ('single', 'batch'):
+        mode = 'single'
+    grade_opts = _grade_options()
+    ug = visible_academic_grades(current_user)
+    if ug is not None:
+        grade_opts = [g for g in grade_opts if g in ug]
+    return render_template('academic/inspection_entry.html',
+                           teachers=_visible_active_teachers(current_user),
+                           results=INSPECTION_RESULTS, grade_opts=grade_opts,
+                           today=date.today().isoformat(), mode=mode)
 
 
 @bp.route('/inspection/<int:rid>/edit', methods=['POST'])
@@ -183,8 +208,11 @@ def inspection_edit(rid):
 @login_required
 @perm_required('academic.edit')
 def inspection_add():
-    """录入一条查课记录（年级必选；用户级数据范围时仅限授权年级）"""
-    back = redirect(url_for('academic.inspection_page'))
+    """录入一条查课记录（年级必选；用户级数据范围时仅限授权年级）
+
+    2026-10-13：入口移到独立录入页，提交后回录入页（连续录入不跳走）。
+    """
+    back = redirect(url_for('academic.inspection_entry_page'))
     date_str = (request.form.get('inspect_date') or '').strip()
     grade = (request.form.get('grade') or '').strip()
     teacher_uid = (request.form.get('teacher_uid') or '').strip()
@@ -222,8 +250,8 @@ def inspection_add():
 @login_required
 @perm_required('academic.edit')
 def inspection_batch():
-    """批量录入查课记录"""
-    back = redirect(url_for('academic.inspection_page'))
+    """批量录入查课记录（提交后回独立录入页的批量方式）"""
+    back = redirect(url_for('academic.inspection_entry_page', mode='batch'))
     date_str = (request.form.get('inspect_date') or '').strip()
     try:
         inspect_date = date.fromisoformat(date_str)
@@ -378,11 +406,11 @@ def inspection_stats():
         by_result[res] = by_result.get(res, 0) + 1
         if res == 'normal':
             normal_cnt += 1
-        # 与 SQL 的 result != 'normal' 语义一致：NULL 不算异常
-        abnormal = res is not None and res != 'normal'
+        # 与 SQL 同口径：NULL 不算异常；「考试」也不算异常（考试期间有正常考务工作量）
+        abnormal = res is not None and res not in INSPECTION_EXEMPT_KEYS
         m = d.strftime('%Y-%m') if d else None
         mm = monthly_map.setdefault(m, {'month': m, 'normal': 0, 'late': 0,
-                                        'absent': 0, 'swap': 0, 'other': 0})
+                                        'absent': 0, 'swap': 0, 'exam': 0, 'other': 0})
         if res in mm:
             mm[res] = mm[res] + 1
         if abnormal:
@@ -399,8 +427,14 @@ def inspection_stats():
             if d >= this_month_start:
                 this_month += 1
 
-    normal_rate = round(normal_cnt * 100.0 / total, 1) if total else 0
-    abnormal_cnt = total - normal_cnt
+    # 2026-10-13「考试」口径：考试格既不算正常、也不算异常 ——
+    # 正常率的分母排除考试格；异常只数 INSPECTION_EXEMPT_KEYS 之外的结果
+    # （与上面 SQL notin_ 口径、以及 NULL 不算异常的行为保持一致）。
+    exam_cnt = by_result.get('exam', 0)
+    rated_total = total - exam_cnt
+    normal_rate = round(normal_cnt * 100.0 / rated_total, 1) if rated_total else 0
+    abnormal_cnt = sum(cnt for k, cnt in by_result.items()
+                       if k is not None and k not in INSPECTION_EXEMPT_KEYS)
 
     # 结果分布
     result_distribution = [{'name': result_map.get(k, k), 'value': cnt}

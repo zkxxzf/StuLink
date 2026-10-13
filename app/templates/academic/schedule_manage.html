@@ -11,7 +11,10 @@
         <span class="text-muted small">在用 / 待启用的学期：创建、导入、激活、归档、删除</span>
     </div>
     <div class="d-flex gap-2 flex-wrap">
-        <a class="btn btn-sm btn-outline-dark" href="{{ url_for('academic.schedule_history') }}">
+        {# 2026-10-13（用户反馈"历史课表在哪、没看到"）：入口本来就在，但用的是
+           btn-outline-dark（浅色下深灰描边）——在部分浏览器/缓存旧 CSS 时对比度过低，
+           容易被当成禁用状态忽略。改为蓝色描边 + 加粗，位置仍在右上角、创建学期左侧。 #}
+        <a class="btn btn-sm btn-outline-primary fw-semibold" href="{{ url_for('academic.schedule_history') }}">
             <i class="bi bi-clock-history"></i> 历史课表
             {% if archived_count %}<span class="badge bg-secondary ms-1">{{ archived_count }}</span>{% endif %}
         </a>
@@ -96,12 +99,12 @@
                 {% endif %}
             </div>
             <div class="card-footer py-2 bg-transparent">
-                {# 2026-10-12（用户要求精简界面）：卡片按钮从 11+ 个收敛为 4 个 ——
-                   ① 全校总课表（右侧箭头展开各年级课表，原每个年级一个按钮）
-                   ② 导入课表  ③ 导出  ④ 激活（未启用时）
-                   其余低频 / 危险操作一律收进「更多」下拉（作息时间 / 变更历史 / 配置日期 /
-                   以此为底版新建 / 归档进历史课表 / 设为当前 / 清空课表 / 删除学期）。
-                   同时删掉「切换启用其他学期时自动归档」这条状态提示（用户要求）。 #}
+                {# 2026-10-13（用户要求再精简一轮）：卡片常驻按钮收敛为**两个** ——
+                   ① 全校总课表（右侧箭头展开各年级课表）② 更多（下拉）；
+                   「导入课表 / 导出」不常用，一并移入「更多」下拉；未启用学期才额外出现「激活」。
+                   「更多」内顺序：导入课表 / 导出 Excel / 作息时间 / 变更历史 / 配置日期 /
+                   以此为底版新建 / 设为当前 / 归档进历史课表 / 清空课表 / 删除学期。
+                   （2026-10-12 那轮已把这批低频/危险操作从卡片收进本下拉。） #}
                 <div class="d-flex flex-wrap gap-1">
                     <div class="btn-group btn-group-sm">
                         <a class="btn btn-sm btn-outline-primary py-0" href="{{ url_for('academic.schedule_overview', sid=ts.id) }}">
@@ -125,16 +128,6 @@
                             {% endfor %}
                         </ul>
                     </div>
-                    {% if not archived %}
-                    <a class="btn btn-sm btn-outline-success py-0" href="{{ url_for('academic.schedule_smart_import', sid=ts.id) }}">
-                        <i class="bi bi-upload"></i> 导入课表
-                    </a>
-                    {% endif %}
-                    <a class="btn btn-sm btn-outline-info py-0"
-                       title="导出 Excel：整校一个班一张 sheet"
-                       href="{{ url_for('academic.schedule_export', sid=ts.id, view_type='all') }}">
-                        <i class="bi bi-download"></i> 导出
-                    </a>
                     {% if ts.status != 'active' %}
                     <form method="POST" class="d-inline" action="{{ url_for('academic.schedule_activate', sid=ts.id) }}"
                           {# M-10：学期名可能含引号，confirm 文本整体走 |tojson #}
@@ -151,6 +144,15 @@
                             <i class="bi bi-three-dots"></i> 更多
                         </button>
                         <ul class="dropdown-menu">
+                            {# 2026-10-13：导入 / 导出不常用，卡片上不再常驻，收进这里（排在最前） #}
+                            {% if not archived %}
+                            <li><a class="dropdown-item" href="{{ url_for('academic.schedule_smart_import', sid=ts.id) }}">
+                                <i class="bi bi-upload"></i> 导入课表</a></li>
+                            {% endif %}
+                            <li><a class="dropdown-item" title="导出 Excel：整校一个班一张 sheet"
+                                   href="{{ url_for('academic.schedule_export', sid=ts.id, view_type='all') }}">
+                                <i class="bi bi-download"></i> 导出 Excel</a></li>
+                            <li><hr class="dropdown-divider"></li>
                             <li><a class="dropdown-item" href="{{ url_for('academic.schedule_periods', sid=ts.id) }}">
                                 <i class="bi bi-clock-history"></i> 作息时间</a></li>
                             <li><a class="dropdown-item" href="{{ url_for('academic.schedule_versions', sid=ts.id) }}">

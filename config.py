@@ -60,7 +60,11 @@ class Config:
     # M-7：CSRF token 有效期（默认 8 小时；None=永不过期，泄露后长期可用）
     WTF_CSRF_TIME_LIMIT = int(os.environ.get('STULINK_CSRF_TIME_LIMIT', '28800'))
     WTF_CSRF_SSL_STRICT = False          # 非 HTTPS 环境关闭严格检查
-    TEMPLATES_AUTO_RELOAD = False         # 生产环境关闭模板自动重载以提升性能
+    # 生产环境关闭模板自动重载（性能）；改版/迭代期间可临时用环境变量打开
+    # STULINK_RELOAD_TEMPLATES=1 —— 这样改 .html 不必重启服务。重启会打断正在后台
+    # 跑的 AI 分析等长任务（进度在进程内），迭代期频繁重启是"任务老中断"的主因。
+    TEMPLATES_AUTO_RELOAD = os.environ.get(
+        'STULINK_RELOAD_TEMPLATES', '0').strip() == '1'
     
     # 缓存配置 - 使用简单内存缓存
     CACHE_TYPE = 'simple'

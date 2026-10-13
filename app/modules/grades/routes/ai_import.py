@@ -528,8 +528,17 @@ def _apply_schedules(exam, sheet_items, body_sessions, mode='replace', dry=False
     default_year = exam.exam_date.year if exam.exam_date else None
 
     def _subj(v):
-        """场次科目：先按「、」合并写法归一（保留多科语义），再走标签白名单"""
-        return sanitize_label(aisvc.normalize_schedule_subject(v), 20) or '待定'
+        """场次科目：先按「、」合并写法归一（保留多科语义），再做科目白名单兜底。
+
+        2026-10-13：别名归一后**仍不在白名单内的（如「体育」）回落「待定」**——
+        否则非法科目会被写进考试时间表，令环节⑥「同科回避」静默失配。
+        保持原返回结构（始终返回 str），不抛异常。
+        """
+        t = sanitize_label(aisvc.normalize_schedule_subject(v), 20)
+        parts = [p for p in t.split('、') if p]
+        if not parts or any(p not in aisvc.SUBJECT_SET for p in parts):
+            return '待定'
+        return t
 
     sess_list, invig_src, room_src, errs = [], [], [], []
     excel_sess = []

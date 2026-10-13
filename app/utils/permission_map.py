@@ -70,7 +70,8 @@ MODULES = [
              'read': [], 'write': ['grades.score_edit']},
             {'key': 'teachers', 'name': '任课映射',
              'read': [], 'write': ['grades.teachers']},
-            {'key': 'query', 'name': '个人成绩查询',
+            # 2026-10-13：展示名与侧栏统一为「个人成绩」（权限 key 不变）
+            {'key': 'query', 'name': '个人成绩',
              'read': [], 'write': ['grades.student_query']},
             {'key': 'subject', 'name': '选科维护',
              'read': [], 'write': ['grades.subject_mgmt']},

@@ -49,6 +49,13 @@
                     <i class="bi bi-collection"></i> 管理模板
                 </a>
             </div>
+            {# 2026-10-13 用户口径：形如「历史类·物理」这种逐格永远是空的列默认收起，
+               按钮可随时展开；整场考试一列都没填（初次录入）时不收起 #}
+            <div class="col-auto">
+                <button class="btn btn-sm btn-outline-secondary" id="qEmpty" type="button">
+                    <i class="bi bi-eye"></i> 显示空列
+                </button>
+            </div>
             <div class="col-auto ms-auto">
                 <span class="text-muted small" id="qTplBound"></span>
             </div>
@@ -83,6 +90,8 @@ $(function(){
     var dirSubjects = $app.data('dirSubjects') || {};
     var totalCount = parseInt($app.data('totalCount') || 0, 10) || 0;
     var layers = [];
+    var hideEmpty = true;    // 全空列默认收起（用户口径 2026-10-13）
+    var hiddenCols = [];     // 本次渲染实际收起的列 key（'方向|科目'）
 
     function mode(){ return $('#qMode').val(); }
     function scope(){ return $('#qScope').val(); }
@@ -102,26 +111,82 @@ $(function(){
     function colLabel(k){ return k === '*' ? '（全部学科）' : k.replace('|', '类·'); }
     function dirLabel(d){ return d ? (d + '类') : '全体（未分科）'; }
 
+    /* 空列折叠（用户口径 2026-10-13）：
+       「历史类·物理」这类跨文理错位的列，逐格填值永远是空的，却把表撑得很散。
+       默认把「所有层都没值」的列收起来（工具栏按钮可展开）；
+       若整场考试一列都没填（初次录入），则全部展开 —— 否则用户无处可填。
+       注意：收起的列只是不渲染，后端 batch 对「整列未填」是跳过、不动已有划线（bands.py）。 */
+    function colHasData(k){
+        return layers.some(function(l){
+            var v = (scope() === 'all') ? l.value : ((l.values || {})[k]);
+            return v !== '' && v != null;
+        });
+    }
+    function emptyColKeys(){
+        if (scope() === 'all') return [];
+        var keys = colKeys();
+        var empty = keys.filter(function(k){ return !colHasData(k); });
+        return empty.length === keys.length ? [] : empty;   // 全空 = 初次录入，不收起
+    }
+    // 实际收起的列：只有"收起"状态才真的隐藏（按钮统计用的是 emptyColKeys —— 与开关无关，
+    // 否则展开后空列数为 0，按钮会变成「无空列」禁用，再也收不回去）
+    function computeHiddenCols(){
+        return hideEmpty ? emptyColKeys() : [];
+    }
+    function colShown(k){ return hiddenCols.indexOf(k) < 0; }
+    function updateEmptyBtn(){
+        var n = emptyColKeys().length, $b = $('#qEmpty');   // 用"空列总数"，与当前展开/收起无关
+        if (!n){
+            $b.prop('disabled', true)
+              .attr('title', '所有科目列都有划线，无需收起')
+              .html('<i class="bi bi-eye-slash"></i> 无空列');
+            return;
+        }
+        $b.prop('disabled', false);
+        if (hideEmpty){
+            $b.attr('title', '展开这 ' + n + ' 个全空的科目列（如确需给它们划线）')
+              .html('<i class="bi bi-eye"></i> 显示空列（' + n + '）');
+        } else {
+            $b.attr('title', '把全空的科目列收起来')
+              .html('<i class="bi bi-eye-slash"></i> 隐藏空列（' + n + '）');
+        }
+    }
+
     function buildHead(){
         var $th = $('#bandTable thead').empty();
-        var r1 = $('<tr>'), r2 = $('<tr>');
-        r1.append('<th rowspan="2">层名</th>');
-        if (scope() === 'all'){
-            r1.append($('<th rowspan="2">').text(unit() + '（全部学科共用）'));
-        } else {
-            dirs.forEach(function(d){
-                var subs = colsOf(d);
-                // 2026-10-13：分组标题居中 —— 原先默认左对齐，「历史类」贴在跨 7 列分组
-                // 最左边、正压在「总分」上方，看起来像 colspan 错位（"表头两行"的观感来源）
-                r1.append($('<th class="text-center">').attr('colspan', subs.length).text(dirLabel(d)));
-                subs.forEach(function(s){ r2.append($('<th class="text-center" style="min-width:82px">').text(s)); });
-            });
+        // 2026-10-13：未分科（只有一组）时只出一行表头 —— 分组标题行在只有一组时
+        // 没有信息量，却把表头撑成上下两条空色带（用户截图里就是这一块）。
+        var single = (scope() === 'all') || (dirs.length === 1 && !dirs[0]);
+        if (single){
+            var d0 = dirs[0] || '';
+            var r = $('<tr>');
+            r.append('<th class="col-layer">层名</th>');
+            if (scope() === 'all'){
+                r.append($('<th class="col-sub">').text(unit() + '（全部学科共用）'));
+            } else {
+                colsOf(d0).filter(function(s){ return colShown(d0 + '|' + s); })
+                          .forEach(function(s){ r.append($('<th class="col-sub">').text(s)); });
+            }
+            r.append('<th class="col-op"></th>');
+            $th.append(r);
+            return;
         }
-        r1.append('<th rowspan="2" style="width:70px"></th>');
-        $th.append(r1);
-        if (scope() !== 'all') $th.append(r2);
+        var r1 = $('<tr>'), r2 = $('<tr>');
+        r1.append('<th rowspan="2" class="col-layer">层名</th>');
+        dirs.forEach(function(d){
+            // 收起的空列不参与表头；整组都被收起时连分组标题一起省掉
+            var subs = colsOf(d).filter(function(s){ return colShown(d + '|' + s); });
+            if (!subs.length) return;
+            // 2026-10-13：分组标题居中 —— 原先默认左对齐，「历史类」贴在跨 7 列分组
+            // 最左边、正压在「总分」上方，看起来像 colspan 错位（"表头两行"的观感来源）
+            r1.append($('<th class="text-center head-group">').attr('colspan', subs.length).text(dirLabel(d)));
+            subs.forEach(function(s){ r2.append($('<th class="text-center col-sub">').text(s)); });
+        });
+        r1.append('<th rowspan="2" class="col-op"></th>');
+        $th.append(r1).append(r2);
     }
     function render(){
+        hiddenCols = computeHiddenCols();   // 先定下本次要收起的空列（表头与表体共用）
         buildHead();
         var $tb = $('#bandTable tbody').empty();
         layers.forEach(function(l){
@@ -152,6 +217,7 @@ $(function(){
                 dirs.forEach(function(d){
                     colsOf(d).forEach(function(s){
                         var k = d + '|' + s;
+                        if (!colShown(k)) return;   // 收起的空列不渲染输入格
                         tr.append($('<td>').append($('<input type="number" step="0.5" class="form-control form-control-sm q-cell">')
                             .attr('data-key', k)
                             .val((l.values && l.values[k] != null) ? l.values[k] : '')));
@@ -162,6 +228,7 @@ $(function(){
             tr.append($('<td>').append($('<button type="button" class="btn btn-sm btn-outline-danger q-del" title="删除该层" aria-label="删除该层"><i class="bi bi-x"></i></button>')));
             $tb.append(tr);
         });
+        updateEmptyBtn();
     }
     function read(){
         var out = [];
@@ -296,6 +363,13 @@ $(function(){
         render();
     });
     $('#qScope,#qTotal').on('change', function(){ layers = read(); render(); });
+    // 空列展开 / 收起：点击前先把当前已填值收进 layers
+    //（收起后那些格子不再渲染，但只要有值就不会被判定为空列，不会被收起）
+    $('#qEmpty').on('click', function(){
+        hideEmpty = !hideEmpty;
+        layers = read();
+        render();
+    });
     $('#qAdd').on('click', function(){
         layers = read();
         var maxSeq = layers.reduce(function(m, x){ return Math.max(m, +x.seq || 0); }, 0);

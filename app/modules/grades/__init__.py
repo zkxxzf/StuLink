@@ -6,8 +6,11 @@ from flask import Blueprint
 bp = Blueprint('grades', __name__, url_prefix='/grades')
 
 # 各子模块通过 @bp.route 注册（延迟 import，保证 bp 已定义）
-from app.modules.grades.routes import (exams, bands, teachers, analysis, export, ai,  # noqa: E402,F401
+from app.modules.grades.routes import (dashboard, exams, bands, teachers, analysis,  # noqa: E402,F401
+                                       export, ai,
                                        student_query, pivot, band_templates, exam_affairs,
                                        report, report_pivot, subject_mgmt, global_compare,
                                        ai_import, exam_rooms,
                                        affair_invig)  # v1.19.47.29 考务环节④⑤⑥⑦
+# v1.19.47.29 说明：dashboard 必须最先 import —— 它占用模块根路径 /grades/
+# （首页仪表盘，模块默认落地页），其余子模块按各自 url 注册。

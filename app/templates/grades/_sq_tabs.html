@@ -1,0 +1,21 @@
+{# 个人成绩分区两页签：个人成绩 / 成绩证明。
+   用法：{% from "grades/_sq_tabs.html" import sq_tabs %}  {{ sq_tabs('cert') }}
+   active 取值：grades（个人成绩）/ cert（成绩证明）。
+   注意：宏内只用 url_for（Jinja 全局），不引用 request/current_user，
+   这样 import 时无需带 context（缺 context 会取不到请求级变量而报错）。
+   2026-10-13 用户口径：「成绩核验」页签已删除 —— 核验入口在成绩证明台账每行的
+   「核验」按钮（直达公开核验页 /grades/cert/<code>），不再单独占一个页签。 #}
+{% macro sq_tabs(active) %}
+<ul class="nav nav-tabs mb-3" id="sqTabs">
+    <li class="nav-item">
+        <a class="nav-link {{ 'active' if active == 'grades' }}"
+           href="{{ url_for('grades.student_query_page') }}">
+            <i class="bi bi-person-vcard"></i> 个人成绩</a>
+    </li>
+    <li class="nav-item">
+        <a class="nav-link {{ 'active' if active == 'cert' }}"
+           href="{{ url_for('grades.cert_records_page') }}">
+            <i class="bi bi-file-earmark-check"></i> 成绩证明</a>
+    </li>
+</ul>
+{% endmacro %}

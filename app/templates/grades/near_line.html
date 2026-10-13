@@ -1,18 +1,35 @@
 {% extends "base.html" %}
 {% block title %}临界生对比 - {{ exam.name }}{% endblock %}
 {% block content %}
+{# 班级筛选下拉/清除链接：班级来自服务端「该方向出现过的班级」（总分行口径＝考试当时班级） #}
+{% set cls_list = data.classes if data.classes is defined else [] %}
+{% set cur_cls = data.class_name if data.class_name is defined else '' %}
+{% set clear_url = url_for('grades.exam_near_line', exam_id=exam.id,
+                           direction=(direction or none), layer=(layer or none),
+                           above=above, below=below) %}
 <div class="d-flex align-items-center mb-3 flex-wrap gap-2">
     <h5 class="mb-0"><i class="bi bi-bullseye"></i> 临界生对比</h5>
     <span class="text-muted small">{{ exam.title_with_dimensions() }}</span>
     {% if not error %}
     <span class="badge bg-primary ms-1">{{ data.direction }} · {{ data.layer }}线 {{ data.line }}</span>
+    {% if cur_cls %}<span class="badge bg-secondary ms-1">班级：{{ cur_cls }}</span>{% endif %}
     {% endif %}
 </div>
 
-{# 参数：线上/线下分数阈值（默认 10 / 20，上限 {{ cfg_max }}） #}
+{# 参数：班级筛选 + 线上/线下分数阈值（默认 10 / 20，上限 {{ cfg_max }}） #}
 <form class="card mb-3" method="get">
     <div class="card-body py-2">
         <div class="row g-2 align-items-end">
+            <div class="col-auto">
+                <label class="form-label small mb-1">班级</label>
+                <select name="cls" class="form-select form-select-sm" style="min-width:130px;"
+                        onchange="this.form.submit()">
+                    <option value="">全部班级</option>
+                    {% for c in cls_list %}
+                    <option value="{{ c }}" {% if c == cur_cls %}selected{% endif %}>{{ c }}</option>
+                    {% endfor %}
+                </select>
+            </div>
             <div class="col-auto">
                 <label class="form-label small mb-1">方向</label>
                 <select name="direction" class="form-select form-select-sm">
@@ -84,6 +101,10 @@
     <div class="card-header py-2">
         <i class="bi bi-people"></i> 班级对比（按临界生人数降序）
         <span class="text-muted small ms-2">线下 = {{ data.line - data.below }} ~ {{ data.line }} 分；线上 = {{ data.line }} ~ {{ data.line + data.above }} 分</span>
+        {% if cur_cls %}
+        <span class="badge bg-secondary ms-2">仅 {{ cur_cls }}</span>
+        <a class="small ms-1" href="{{ clear_url }}">查看全部班级</a>
+        {% endif %}
     </div>
     <div class="table-responsive">
         <table class="table table-sm table-hover align-middle mb-0">
@@ -100,7 +121,15 @@
             {% set tot_above = data.above_n or 1 %}
             {% for c in by_class %}
             <tr>
-                <td>{{ c.class_name }}</td>
+                <td>
+                    {% if c.class_name in cls_list %}
+                    {# 点班级名即筛该班（保留方向/层级/分数区间），便于逐个班盯人 #}
+                    <a class="text-decoration-none" title="只看该班临界生"
+                       href="{{ url_for('grades.exam_near_line', exam_id=exam.id, cls=c.class_name,
+                                        direction=(direction or none), layer=(layer or none),
+                                        above=above, below=below) }}">{{ c.class_name }}</a>
+                    {% else %}{{ c.class_name }}{% endif %}
+                </td>
                 <td class="text-muted small">{{ c.headteacher or '—' }}</td>
                 <td class="text-end text-warning">{{ c.below }}</td>
                 <td class="text-end text-danger">{{ c.above }}</td>
@@ -113,7 +142,10 @@
                 </td>
             </tr>
             {% else %}
-            <tr><td colspan="6" class="text-center text-muted py-3">该范围内没有临界生</td></tr>
+            <tr><td colspan="6" class="text-center text-muted py-3">
+                {% if cur_cls %}「{{ cur_cls }}」在此范围内没有临界生（<a href="{{ clear_url }}">查看全部班级</a>）
+                {% else %}该范围内没有临界生{% endif %}
+            </td></tr>
             {% endfor %}
             </tbody>
             <tfoot>
@@ -130,10 +162,14 @@
 </div>
 
 {# 临界生明细 #}
-<div class="card">
+<div class="card" id="nlCard">
     <div class="card-header py-2">
         <i class="bi bi-list-ul"></i> 临界生明细
         <span class="text-muted small ms-2">线下组按总分降序（最接近线的在前）· 线上组按总分升序（最危险的在前）</span>
+        {% if cur_cls %}
+        <span class="badge bg-secondary ms-2">仅 {{ cur_cls }}</span>
+        <a class="small ms-1" href="{{ clear_url }}">查看全部班级</a>
+        {% endif %}
     </div>
     <div class="table-responsive">
         <table class="table table-sm table-hover align-middle mb-0">
@@ -146,9 +182,9 @@
                 {% for s in data.subjects %}<th class="text-end">{{ s.label }}</th>{% endfor %}
             </tr>
             </thead>
-            <tbody>
+            <tbody id="nlBody">
             {% for r in data.rows %}
-            <tr>
+            <tr class="nl-row">
                 <td>
                     {% if r.status == '线上' %}
                     <span class="badge bg-danger-subtle text-danger-emphasis">线上</span>
@@ -169,13 +205,95 @@
                 {% endfor %}
             </tr>
             {% else %}
-            <tr><td colspan="{{ 7 + data.subjects|length }}" class="text-center text-muted py-3">
-                该范围内没有临界生（可放宽线上/线下分数）
+            <tr class="nl-empty"><td colspan="{{ 7 + data.subjects|length }}" class="text-center text-muted py-3">
+                {% if cur_cls %}「{{ cur_cls }}」在此范围内没有临界生（可放宽线上/线下分数，或 <a href="{{ clear_url }}">查看全部班级</a>）
+                {% else %}该范围内没有临界生（可放宽线上/线下分数）{% endif %}
             </td></tr>
             {% endfor %}
             </tbody>
         </table>
     </div>
+    {% if data.rows %}
+    {# 临界生明细分页（展示层）：名单已随页面一次性下发，翻页只切换行的显示、不再请求；
+       每页条数全局记住一份，页码按「班级|方向|层级|线上|线下」各记各的（换筛选回到第 1 页）。 #}
+    <div class="card-footer py-2 d-flex align-items-center flex-wrap gap-2" id="nlPager"
+         data-scope="{{ cur_cls }}|{{ direction or '' }}|{{ layer or '' }}|{{ above }}|{{ below }}">
+        <span class="small text-muted" id="nlInfo"></span>
+        <div class="d-flex align-items-center gap-1 ms-auto">
+            <label class="small text-muted mb-0" for="nlSize">每页</label>
+            <select id="nlSize" class="form-select form-select-sm w-auto">
+                <option value="25">25</option>
+                <option value="50">50</option>
+                <option value="100">100</option>
+                <option value="200">200</option>
+                <option value="500">500</option>
+                <option value="all">全部</option>
+            </select>
+            <button type="button" id="nlPrev" class="btn btn-sm btn-outline-secondary">
+                <i class="bi bi-chevron-left"></i> 上一页</button>
+            <button type="button" id="nlNext" class="btn btn-sm btn-outline-secondary">
+                下一页 <i class="bi bi-chevron-right"></i></button>
+        </div>
+    </div>
+    {% endif %}
 </div>
 {% endif %}
+{% endblock %}
+
+{% block extra_js %}
+<script>
+/* 临界生明细分页：数据已随页面下发，翻页仅切换行显示（不发请求、瞬时）；
+   页码按当前筛选条件记忆，从该页下钻（点班级名）再返回时仍停在原页。
+   注意：只做 .show()/.hide()，不拼接任何 HTML。 */
+$(function () {
+    var $pager = $('#nlPager');
+    var $rows = $('#nlBody').children('tr.nl-row');
+    var total = $rows.length;
+    if (!$pager.length || !total) { return; }
+
+    var SIZE_KEY = 'nearLineSize';                     // 每页条数：全局一份
+    var PAGE_KEY = 'nearLinePage|' + $pager.data('scope');   // 页码：各筛选条件各一份
+
+    var sizeRaw = sessionStorage.getItem(SIZE_KEY) || '50';
+    var size = (sizeRaw === 'all') ? total : parseInt(sizeRaw, 10);
+    if (isNaN(size) || size < 10) { sizeRaw = '50'; size = 50; }
+    var page = 1, pages = 1;
+
+    function render() {
+        pages = Math.max(1, Math.ceil(total / size));
+        if (page < 1) { page = 1; }
+        if (page > pages) { page = pages; }
+        var start = (page - 1) * size;
+        $rows.hide().slice(start, start + size).show();
+        $('#nlInfo').text(pages > 1
+            ? '第 ' + page + ' / ' + pages + ' 页 · 共 ' + total + ' 人'
+            : '共 ' + total + ' 人');
+        $('#nlPrev').prop('disabled', page <= 1);
+        $('#nlNext').prop('disabled', page >= pages);
+        $('#nlSize').val(sizeRaw);
+    }
+
+    // scroll：仅翻页时把明细卡片拉回视口（表很长时点下一页不至于停在表尾）
+    function goto(p, scroll) {
+        page = p;
+        sessionStorage.setItem(PAGE_KEY, String(page));
+        render();
+        var card = document.getElementById('nlCard');
+        if (scroll && card) { card.scrollIntoView({ block: 'start' }); }
+    }
+
+    $('#nlSize').on('change', function () {
+        sizeRaw = $(this).val();
+        size = (sizeRaw === 'all') ? total : parseInt(sizeRaw, 10);
+        sessionStorage.setItem(SIZE_KEY, sizeRaw);
+        goto(1, false);
+    });
+    $('#nlPrev').on('click', function () { if (page > 1) { goto(page - 1, true); } });
+    $('#nlNext').on('click', function () { if (page < pages) { goto(page + 1, true); } });
+
+    var restored = parseInt(sessionStorage.getItem(PAGE_KEY) || '1', 10);
+    page = (restored > 0) ? restored : 1;
+    render();
+});
+</script>
 {% endblock %}
