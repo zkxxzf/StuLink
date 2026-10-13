@@ -56,6 +56,44 @@ def _prune_backups(backups_dir, keep=20, max_age_days=180):
     return removed
 
 
+def _history_watermark(conn, table):
+    """记录历史库某表的 rowid 水位（用于失败补偿时只删本次新增的行）"""
+    try:
+        return conn.execute(f'SELECT IFNULL(MAX(rowid), 0) FROM {table}').fetchone()[0]
+    except Exception:  # noqa: BLE001  表还不存在时视为 0
+        return 0
+
+
+def _undo_history_archive(grade, wm_students=None, wm_rooms=None, wm_beds=None):
+    """H-2 补偿：删掉本次毕业**刚写入**的历史归档行（按 rowid 水位）。
+
+    2026-10-13 全面审计 H-2：历史库用裸 sqlite3 独立提交，主库那笔 commit 若失败，
+    会出现"历史库有归档、主库没毕业"的半成品，用户重试就会重复归档。这里按水位
+    精确回退本次新增的行（该年级历史里既有的行不受影响）。
+    """
+    from config import BASE_DIR
+    history_db_path = os.path.join(BASE_DIR, 'data', 'history.db')
+    pairs = (('graduated_students', wm_students),
+             ('graduated_rooms', wm_rooms),
+             ('graduated_beds', wm_beds))
+    try:
+        conn = sqlite3.connect(history_db_path)
+        removed = 0
+        for table, wm in pairs:
+            if not wm:
+                continue
+            cur = conn.execute(
+                f'DELETE FROM {table} WHERE rowid > ? AND graduated_grade = ?',
+                (wm, grade))
+            removed += cur.rowcount or 0
+        conn.commit()
+        conn.close()
+        logger.warning('%s 毕业失败，已回退本次历史归档 %d 行', grade, removed)
+    except Exception as _e:  # noqa: BLE001
+        logger.error('%s 历史归档补偿失败（需人工核对 history.db）: %s',
+                     grade, _e, exc_info=True)
+
+
 def _mask_id_card(id_card):
     """身份证号脱敏：显示前6位和后4位，中间用*替换"""
     if not id_card:
@@ -132,6 +170,8 @@ def graduate():
     _prune_backups(backups_dir, keep=20)
     
     # 1.5 归档学生数据到历史库
+    # 2026-10-13 H-2：先记归档前水位，主库落库失败时据此精确回退本次写入（见 _undo_history_archive）
+    _wm_students = _wm_rooms = _wm_beds = None
     try:
         hist_conn = sqlite3.connect(history_db_path)
         hist_conn.execute('''
@@ -161,6 +201,7 @@ def graduate():
             )
         ''')
         hist_conn.commit()
+        _wm_students = _history_watermark(hist_conn, 'graduated_students')
         sys_conn = sqlite3.connect(system_db_path)
         # 2026-10-12 审计 P0-1：boarding_type/day_student_type/textbook/teacher_notes
         # 已从 students 表迁至 dormitory 库 student_accommodation（cleanup_student_columns
@@ -252,6 +293,8 @@ def graduate():
             )
         ''')
         hist_conn.commit()
+        _wm_rooms = _history_watermark(hist_conn, 'graduated_rooms')
+        _wm_beds = _history_watermark(hist_conn, 'graduated_beds')
 
         # 归档房间
         dorm_conn = sqlite3.connect(db_path)
@@ -349,7 +392,20 @@ def graduate():
     gs.graduated_at = datetime.now()
     gs.backup_path = backup_path
     gs.graduated_by = current_user.id
-    db.session.commit()
+    try:
+        db.session.commit()
+    except Exception as _e:  # noqa: BLE001
+        # 2026-10-13 全面审计 H-2：此处 commit 跨 system + dormitory 两个库，
+        # 失败时主库回滚，但历史库是先独立提交的 —— 会留下"历史库已归档、主库没毕业"
+        # 的半成品，用户重试即重复归档。这里按水位把本次历史写入撤掉，让重试是干净的。
+        db.session.rollback()
+        logger.error('%s 毕业：主库落库失败，已回滚并撤销本次历史归档: %s',
+                     grade, _e, exc_info=True)
+        _undo_history_archive(grade, _wm_students, _wm_rooms, _wm_beds)
+        return jsonify({'success': False,
+                        'message': f'{grade} 毕业未完成：数据写入失败，已回滚'
+                                   f'（本次历史归档已撤销，可直接重试）。'
+                                   f'详情见服务端日志。'}), 500
 
     # v1.16.0：年级毕业状态变更，主动失效已毕业年级缓存（避免统计/搜索页 600s 内用到陈旧名单）
     clear_graduated_grades_cache()

@@ -808,6 +808,10 @@ def import_dormitory():
 
 @bp.route('/download-errors/<key>')
 @login_required
+# 2026-10-13 全面审计 M-3：错误明细含学号/姓名，属导入过程数据 ——
+# 与导入同权限（dormitory.import），不再只要求登录（对照 system/students.py 的
+# download_import_errors 要求 students.import）。
+@perm_required('dormitory.import')
 def download_import_errors(key):
     """下载导入错误日志"""
     _clean_expired_errors()

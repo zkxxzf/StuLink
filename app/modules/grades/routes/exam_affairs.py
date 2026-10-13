@@ -761,7 +761,16 @@ def affair_student_save(aid):
             sys_stu.name = st.name or sys_stu.name
             sys_stu.class_name = st.class_name or sys_stu.class_name
             sys_stu.subject_selection = st.subject_selection or sys_stu.subject_selection
-    db.session.commit()
+    try:
+        db.session.commit()
+    except Exception as _e:  # noqa: BLE001
+        # 2026-10-13 全面审计 H-2：本路由一次写两个库（考务名单 grades + 学籍 system），
+        # 多 bind 的 commit 是"各库各自提交"，中间失败会留下半成品。这里显式回滚并报错
+        # （学籍同步是幂等 upsert，重试即可），不再让失败以静默半成功的形式出现。
+        db.session.rollback()
+        current_app.logger.error('考务名单保存失败（已回滚）affair=%s: %s',
+                                 aid, _e, exc_info=True)
+        return jsonify({'ok': False, 'msg': '保存失败，本次未写入，请重试'}), 500
     return jsonify({'ok': True})
 
 

@@ -67,6 +67,44 @@ def _clean_expired_errors():
         del _import_errors[k]
 
 
+def _save_new_students(students_to_add):
+    """导入新生：students(system) + student_accommodation(dormitory) 一起落库。
+
+    2026-10-13 全面审计 H-2：一次 session.commit() 写两个库时，SQLAlchemy 是
+    "每个库各自提交"，两个库之间**没有真正的原子性**。这里显式拆成两次提交，并把
+    "主库已落、宿舍库失败"的补偿做掉（只删本次刚插入的行），避免留下
+    "学生进了、住宿信息没进"的半成品。异常照旧抛出，由调用方统一给友好提示。
+    """
+    rows = [s for s, _ in students_to_add]
+    db.session.add_all(rows)
+    db.session.flush()                       # 先拿主键，避免 commit 后再逐行 refresh
+    new_ids = [s.id for s in rows]
+    db.session.commit()                      # ① students（system.db）
+    accs = []
+    for student, acc_data in students_to_add:
+        if any(acc_data.get(k) for k in ('boarding_type', 'day_student_type',
+                                        'textbook', 'teacher_notes')):
+            accs.append(StudentAccommodation(
+                student_id=student.id,
+                boarding_type=acc_data['boarding_type'],
+                day_student_type=acc_data['day_student_type'],
+                textbook=acc_data['textbook'],
+                teacher_notes=acc_data['teacher_notes']))
+    if not accs:
+        return
+    db.session.add_all(accs)
+    try:
+        db.session.commit()                  # ② student_accommodation（dormitory.db）
+    except Exception:
+        db.session.rollback()
+        # 补偿：回退本次已插入的学生行，保持"要么都进、要么都不进"
+        Student.query.filter(Student.id.in_(new_ids)).delete(synchronize_session=False)
+        db.session.commit()
+        logger.error('导入新生：宿舍库写入失败，已回退本次插入的 %d 名学生',
+                     len(new_ids), exc_info=True)
+        raise
+
+
 @bp.route('/')
 @perm_required('students.view')    # H-2：此前只有 @login_required
 def list_students():
@@ -996,24 +1034,8 @@ def import_students():
             flash(msg, 'success' if not errors and not conflicts else 'warning')
         elif errors and students_to_add:
             # 部分导入：正确的行导入，错误的行报告
-            actual_students = [s[0] for s in students_to_add]
-            db.session.add_all(actual_students)
-            db.session.flush()
-            for student, acc_data in students_to_add:
-                acc_boarding_type = acc_data['boarding_type']
-                acc_day_student_type = acc_data['day_student_type']
-                acc_textbook = acc_data['textbook']
-                acc_teacher_notes = acc_data['teacher_notes']
-                if acc_boarding_type or acc_day_student_type or acc_textbook or acc_teacher_notes:
-                    acc = StudentAccommodation(
-                        student_id=student.id,
-                        boarding_type=acc_boarding_type,
-                        day_student_type=acc_day_student_type,
-                        textbook=acc_textbook,
-                        teacher_notes=acc_teacher_notes
-                    )
-                    db.session.add(acc)
-            db.session.commit()
+            # 2026-10-13 H-2：两阶段提交 + 补偿（见 _save_new_students 注释）
+            _save_new_students(students_to_add)
             # v1.19.47.25 调班记录：导入新生 = 入校分班（逐人写入带班级）
             try:
                 for _st, _acc in students_to_add:
@@ -1042,24 +1064,8 @@ def import_students():
         elif not students_to_add:
             flash('Excel中没有有效的学生数据', 'warning')
         else:
-            actual_students = [s[0] for s in students_to_add]
-            db.session.add_all(actual_students)
-            db.session.flush()
-            for student, acc_data in students_to_add:
-                acc_boarding_type = acc_data['boarding_type']
-                acc_day_student_type = acc_data['day_student_type']
-                acc_textbook = acc_data['textbook']
-                acc_teacher_notes = acc_data['teacher_notes']
-                if acc_boarding_type or acc_day_student_type or acc_textbook or acc_teacher_notes:
-                    acc = StudentAccommodation(
-                        student_id=student.id,
-                        boarding_type=acc_boarding_type,
-                        day_student_type=acc_day_student_type,
-                        textbook=acc_textbook,
-                        teacher_notes=acc_teacher_notes
-                    )
-                    db.session.add(acc)
-            db.session.commit()
+            # 2026-10-13 H-2：两阶段提交 + 补偿（见 _save_new_students 注释）
+            _save_new_students(students_to_add)
             # v1.19.47.25 调班记录：导入新生 = 入校分班（逐人写入带班级）
             try:
                 for _st, _acc in students_to_add:
