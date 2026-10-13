@@ -18,9 +18,11 @@
   401 invalid_credentials 账号或密码错误（不区分账号是否存在，防枚举）
   401 account_disabled    账号已停用
   401 invalid_token       服务令牌缺失/错误
-  429 too_many_attempts   同一来源对该账号连续失败超限，带 Retry-After
-                          （2026-10-13 起只锁"来源+账号"这一组合：账号本人从别的设备
-                           登录不受影响；另对跨来源的失败累计做**递增延迟**兜底）
+  429 too_many_attempts   认证失败超限，带 Retry-After。三种触发口径：
+                          ① 同一来源对该账号连续失败（2026-10-13 起只锁"来源+账号"，
+                             账号本人从别的设备登录不受影响）；
+                          ② 同一来源的失败总数超限（跨账号，防"换账号扫口令"）；
+                          ③ 跨来源失败累计 → 只加递增延迟，不拒绝。
 
 为什么自写中间件而不用 SDK 自带 auth：SDK 的 AuthSettings/TokenVerifier 围绕
 OAuth 授权服务器设计（issuer_url、动态注册等），对"校验本系统账号密码"属过度
@@ -59,6 +61,11 @@ _FAILS_MAX = 1024
 # 延迟**（不做硬锁，任何人都影响不了这个账号的正常使用）。窗口内成功登录即清零。
 _account_fails = {}             # username -> (count, window_start)
 _ACCOUNT_FAILS_MAX = 4096
+
+# 单来源失败总闸（跨账号）：防"用一个来源换着账号扫口令"。命中后该来源整段
+# 窗口内一律 429 —— 只影响这个来源，与具体账号无关，也不会波及账号本人。
+_source_fails = {}              # client -> (count, window_start)
+_SOURCE_FAILS_MAX = 2048
 
 
 def _cfg_int(key, default):
@@ -106,7 +113,43 @@ def _lock_remaining(username, client=None):
     return 0
 
 
+def _source_block_remaining(client):
+    """该来源在窗口内失败总数是否超限；返回剩余秒数（0 = 未超限）。
+
+    与账号无关的粗闸门，只用于挡住"一个来源换着账号扫口令"；正常使用（一两个账号、
+    偶尔打错密码）远达不到阈值，且窗口过后自动恢复。
+    """
+    limit = _cfg_int('login_source_fail_limit', 20)
+    if limit <= 0 or not client:
+        return 0
+    window = max(30, _cfg_int('login_source_window', 300))
+    now = time.time()
+    with _cred_lock:
+        count, start = _source_fails.get(client, (0, now))
+        if count < limit or now - start > window:
+            return 0
+        return int(start + window - now) + 1
+
+
+def _record_source_fail(client):
+    """记一次来源级失败（跨账号累计）。"""
+    limit = _cfg_int('login_source_fail_limit', 20)
+    if limit <= 0 or not client:
+        return
+    window = max(30, _cfg_int('login_source_window', 300))
+    now = time.time()
+    with _cred_lock:
+        if len(_source_fails) > _SOURCE_FAILS_MAX:
+            _source_fails.clear()
+        count, start = _source_fails.get(client, (0, now))
+        if now - start > window:
+            count, start = 0, now
+        _source_fails[client] = (count + 1, start)
+
+
 def _record_fail(username, client=None):
+    # 来源级总闸独立于账号级阈值（login_fail_limit=0 关掉账号锁时它仍然生效）
+    _record_source_fail(client)          # 自带锁，必须在下面 with 之前调用
     limit = _cfg_int('login_fail_limit', 5)
     if limit <= 0:
         return
@@ -180,6 +223,9 @@ def verify_credentials(username, password, client=None):
     remain = _lock_remaining(username, client)
     if remain:
         return None, 'too_many_attempts', f'认证失败次数过多，请 {remain} 秒后重试'
+    blocked = _source_block_remaining(client)
+    if blocked:
+        return None, 'too_many_attempts', f'本机认证失败次数过多，请 {blocked} 秒后重试'
     # 跨来源暴力破解兜底：只增加等待，不拒绝（账号本人永远进得来）
     delay = _throttle_delay(username)
     if delay:
