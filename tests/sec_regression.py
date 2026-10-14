@@ -52,7 +52,7 @@ config_mod.Config.UPLOAD_FOLDER = os.path.join(_TMP, 'uploads')
 from app import create_app  # noqa: E402
 from app.extensions import db  # noqa: E402
 from app.models import (User, PermissionGroup, UserDataScope, Student,  # noqa: E402
-                        UserClassLink)
+                        UserClassLink, UserPermissionGroup)
 from app.models.grades import Exam, ExamAffair  # noqa: E402
 
 app = create_app()
@@ -148,6 +148,15 @@ def seed():
         add('homeroom', 'sec_homeroom', '班主任测试', 'homeroom_teacher',
             '班主任组', grade='2025级')
         add('dorm', 'sec_dorm', '宿管测试', 'dorm_manager', '宿管组')
+        # 2026-10-14（P6）：多身份账号 —— 主组=任课教师组，另挂宿管组
+        add('multi', 'sec_multi', '多身份测试', 'teacher', '任课教师组')
+        _mu = db.session.get(User, mk['multi'])
+        db.session.add(UserPermissionGroup(user_id=_mu.id,
+                                           group_id=groups['任课教师组'].id,
+                                           is_primary=True))
+        db.session.add(UserPermissionGroup(user_id=_mu.id,
+                                           group_id=groups['宿管组'].id,
+                                           is_primary=False))
 
         leader = db.session.get(User, mk['leader'])
         db.session.add(UserDataScope(user_id=leader.id, grade='2025级'))
@@ -1758,6 +1767,73 @@ def check_SR12():
         html = c2.get('/students/').get_data(as_text=True)
         case('SR-12 宿管列表：手机号脱敏', '138****8000' in html)
         case('SR-12 宿管列表：无明文手机号', '13800138000' not in html)
+
+
+@item('SR-13')
+def check_SR13():
+    """多身份切换：has_perm 按「当前身份」判定（不并集）。2026-10-14（P1–P3）"""
+    from flask import session
+    from flask_login import login_user
+    mid = uid('multi')
+    with app.app_context():
+        u = db.session.get(User, mid)
+        dorm_gid = PermissionGroup.query.filter_by(name='宿管组').first().id
+        case('SR-13 多身份账号有两个身份', len(u.permission_groups) == 2,
+             str([g.name for g in u.permission_groups]))
+        with app.test_request_context('/'):
+            login_user(u)
+            # 默认身份 = 主组（任课教师组）：有 academic.swap、无 dormitory.assign
+            case('SR-13 默认身份=主组（任课教师）',
+                 u.has_perm('academic.swap') and not u.has_perm('dormitory.assign'))
+            session['active_group_id'] = dorm_gid
+            case('SR-13 切换宿管后权限随之变化',
+                 u.has_perm('dormitory.assign') and not u.has_perm('academic.swap'))
+
+
+@item('SR-14')
+def check_SR14():
+    """范围类型 7 值：旧 scope_type 映射无损 + pick_grades 解析。2026-10-14（P4）"""
+    import json
+    from app.models.permission_group import KIND_TO_LEGACY, LEGACY_TO_KIND
+    from app.utils.scope import resolve_scope
+    case('SR-14 旧 scope_type 映射无损',
+         all(KIND_TO_LEGACY.get(v) == k for k, v in LEGACY_TO_KIND.items()))
+    with app.app_context():
+        g = PermissionGroup(name='SR14考务', scope_type='grade',
+                            scope_kind='pick_grades', role='staff')
+        g.set_menu_keys(['students.view'])
+        g.scope_grades = json.dumps(['2025级'])
+        db.session.add(g)
+        db.session.flush()
+        u = User(username='sec_sr14', real_name='指定年级', role='staff',
+                 permission_group_id=g.id, must_change_pwd=False)
+        u.set_password(TEST_PWD)
+        db.session.add(u)
+        db.session.flush()
+        u.sync_primary_link()
+        db.session.commit()
+        s = resolve_scope(u)
+        case('SR-14 pick_grades 解析为指定年级',
+             s.kind == 'grades' and s.grades == {'2025级'}, str(s))
+
+
+@item('SR-15')
+def check_SR15():
+    """多身份不放大范围：数据范围随「当前身份」变化（不取最宽）。2026-10-14（P2/P3）"""
+    from flask import session
+    from flask_login import login_user
+    from app.utils.scope import resolve_scope
+    mid = uid('multi')
+    with app.app_context():
+        u = db.session.get(User, mid)
+        dorm_gid = PermissionGroup.query.filter_by(name='宿管组').first().id
+        with app.test_request_context('/'):
+            login_user(u)
+            case('SR-15 主身份范围=本人班级（任课教师）',
+                 resolve_scope().kind == 'classes', str(resolve_scope()))
+            session['active_group_id'] = dorm_gid
+            case('SR-15 切宿管后范围=全校（不被主身份收窄）',
+                 resolve_scope().kind == 'school', str(resolve_scope()))
 
 
 def main(argv):

@@ -1,4 +1,4 @@
-# StuLink v1.19.47.29 2026-10-10
+# StuLink v1.19.47.30 2026-10-10
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 import logging
 import os
@@ -127,7 +127,7 @@ PERMISSION_GROUPS = [
             'system.perm_groups', 'system.grade_mgmt', 'system.settings',
             'points.view', 'points.edit',
             'points.import', 'points.export', 'points.rules',
-            'morality.view', 'morality.edit',   # v1.19.47.29 德育奖惩信息
+            'morality.view', 'morality.edit',   # v1.19.47.30 德育奖惩信息
             'grades.view', 'grades.edit',
             'grades.import', 'grades.settings', 'grades.teachers', 'grades.student_query',
             'grades.score_edit',   # v1.19.47.6：成绩单改分（管理员天然可用；考务管理员另建组授予）
@@ -163,7 +163,7 @@ PERMISSION_GROUPS = [
             'grades.subject_mgmt',
             'portrait.view', 'portrait.edit',
             'points.import', 'points.rules',
-            # v1.19.47.29：年级长可登记/管理本年级奖惩
+            # v1.19.47.30：年级长可登记/管理本年级奖惩
             'morality.view', 'morality.edit',
             'academic.view', 'academic.forms_view',
             # 2026-10-11：年级长本人任课时需能自助申请调课（此前缺 academic.swap，申请入口 403）
@@ -194,7 +194,7 @@ PERMISSION_GROUPS = [
             'points.view', 'grades.view', 'grades.student_query',
             'portrait.view', 'portrait.edit',
             'points.import',
-            # v1.19.47.29：班主任可查看本班奖惩（登记/处理由德育处统一口径，故只给只读）
+            # v1.19.47.30：班主任可查看本班奖惩（登记/处理由德育处统一口径，故只给只读）
             'morality.view',
             'academic.view', 'academic.swap', 'academic.forms_view',
             # v1.17.0：写权限必须配套只读权限，否则「有考勤录入权却打不开考勤页」
@@ -232,24 +232,8 @@ PERMISSION_GROUPS = [
         ],
     },
     # ===== v1.9.2 新增身份（身份不写死，可在权限页随时新增/调整） =====
-    {
-        'name': '校长',
-        'role': 'staff',
-        'scope_type': 'school',
-        'description': '校长：全校数据只读（如需限定年级，可在数据范围表勾选）',
-        'menu_keys': _module_keys(
-            ('students', 'read'), ('dormitory', 'read'), ('grades', 'read'),
-            ('points', 'read'), ('academic', 'read')),
-    },
-    {
-        'name': '副校长',
-        'role': 'staff',
-        'scope_type': 'school',
-        'description': '副校长：全校数据只读（如需限定年级，可在数据范围表勾选）',
-        'menu_keys': _module_keys(
-            ('students', 'read'), ('dormitory', 'read'), ('grades', 'read'),
-            ('points', 'read'), ('academic', 'read')),
-    },
+    # 2026-10-14（P4）：按用户裁决删除 校长/副校长/备课组长/教研组长/学生发展中心，
+    # 新增 考试管理员/生活处/政教主任/政教员 —— 系统预置身份定为 11 个。
     {
         'name': '教务主任',
         'role': 'staff',
@@ -262,37 +246,61 @@ PERMISSION_GROUPS = [
     {
         'name': '教务员',
         'role': 'staff',
-        'scope_type': 'none',
-        'description': '教务员：成绩/教务写入，学生/积分只读（数据范围按用户勾选，如仅 2025 级）',
+        'scope_type': 'grade',
+        'scope_kind': 'pick_grades',
+        'description': '教务员：成绩/教务写入，学生/积分只读（范围按指定年级，专职行政在用户侧勾选）',
         'menu_keys': _module_keys(
             ('students', 'read'), ('dormitory', 'read'), ('grades', 'write'),
             ('points', 'read'), ('academic', 'write')),
     },
     {
-        'name': '备课组长',
+        'name': '考试管理员',
         'role': 'staff',
-        'scope_type': 'none',
-        'description': '备课组长：成绩写入，其余只读（数据范围按用户勾选，如本年级）',
-        'menu_keys': _module_keys(
-            ('students', 'read'), ('dormitory', 'read'), ('grades', 'write'),
-            ('points', 'read'), ('academic', 'read')),
+        'scope_type': 'grade',
+        'scope_kind': 'pick_grades',
+        'description': '考试管理员：导入/维护考试成绩与考务（改分单独授权），范围按指定年级',
+        'menu_keys': [
+            'students.view',
+            'grades.view', 'grades.edit', 'grades.import', 'grades.settings',
+            'grades.score_edit', 'grades.teachers',
+            'academic.view',
+        ],
     },
     {
-        'name': '教研组长',
+        'name': '生活处',
         'role': 'staff',
-        'scope_type': 'none',
-        'description': '教研组长：成绩写入，其余只读（数据范围按用户勾选，如本年级）',
-        'menu_keys': _module_keys(
-            ('students', 'read'), ('dormitory', 'read'), ('grades', 'write'),
-            ('points', 'read'), ('academic', 'read')),
+        'scope_type': 'school',
+        'description': '生活处：宿舍主管（房间管理 + 宿舍分配 + 床位分配），全校',
+        'menu_keys': [
+            'students.view',
+            'dormitory.view', 'dormitory.manage', 'dormitory.assign',
+            'dormitory.beds', 'dormitory.import',
+            'statistics.view',
+        ],
     },
     {
-        'name': '学生发展中心',
+        'name': '政教主任',
         'role': 'staff',
-        'scope_type': 'none',
-        'description': '学生发展中心：积分/画像写入 + 学生只读（数据范围按用户勾选）',
-        'menu_keys': _module_keys(
-            ('students', 'read'), ('points', 'write'), ('portrait', 'write')),
+        'scope_type': 'school',
+        'description': '政教主任：德育主管（积分 + 奖惩 + 规则 + 导出），全校',
+        'menu_keys': [
+            'students.view',
+            'points.view', 'points.edit', 'points.import', 'points.export',
+            'points.rules',
+            'morality.view', 'morality.edit',
+        ],
+    },
+    {
+        'name': '政教员',
+        'role': 'staff',
+        'scope_type': 'grade',
+        'scope_kind': 'pick_grades',
+        'description': '政教员：德育录入（积分 + 奖惩只读），范围按指定年级',
+        'menu_keys': [
+            'students.view',
+            'points.view', 'points.edit', 'points.import',
+            'morality.view',
+        ],
     },
 ]
 
@@ -333,6 +341,7 @@ def _init_system_data():
                 name=p['name'],
                 role=p['role'],
                 scope_type=p['scope_type'],
+                scope_kind=p.get('scope_kind'),   # P4：新 7 值（缺省由旧值映射）
                 description=p['description'],
             )
             g.set_menu_keys(p['menu_keys'])
@@ -345,6 +354,8 @@ def _init_system_data():
             admin_group = PermissionGroup.query.filter_by(name='管理员组').first()
             if admin_group:
                 admin.permission_group_id = admin_group.id
+                # P1 双写：同步多身份关联表（新装库同样保证二者一致）
+                admin.sync_primary_link()
     
     if not Room.query.first():
         created_rooms = 0

@@ -1,4 +1,4 @@
-# StuLink v1.19.47.29 2026-10-10
+# StuLink v1.19.47.30 2026-10-10
 # 学生画像计算服务：评分标准化、综合评级计算
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 """画像计算服务
@@ -308,9 +308,9 @@ def _is_portrait_manager(user_id):
         return False
     if u.role == 'admin':
         return True
-    pg = u.permission_group
-    return bool(pg and getattr(pg, 'scope_type', '') == 'school'
-                and pg.has_menu('portrait.edit'))
+    # P2：校级判定走唯一口径（scope_type_of 内部已含 admin 特判）
+    from app.utils.scope import scope_type_of
+    return scope_type_of(u) == 'school' and u.has_perm('portrait.edit')
 
 
 def can_manage_comment(comment_id, operator_id):

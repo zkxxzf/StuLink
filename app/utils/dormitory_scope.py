@@ -9,16 +9,17 @@
 本模块把「当前用户能看哪些宿舍/班级/学生」收敛成一组函数，宿舍相关查询统一调用，
 禁止再各自内联角色判断（清单第 0 节铁律②）。
 
-口径（与宿舍统计页 statistics.index 同源，2026-10-13 起统一走 resolve_scope）：
+口径（P2 起统一委托 app.utils.scope，唯一口径）：
 - admin / 组级 scope=school（含宿管组）→ 全校，不过滤
-- 用户级数据范围（权限管理页第二张表）→ 仅授权年级
+- 用户级数据范围（UserDataScope）→ 仅授权年级
 - 组级 scope=grade（年级长）→ 仅本年级
 - 组级 scope=class（班主任）→ 仅所辖班级（含合班房，'+' 拼接不分主次）
 - 无权限组 / 其它 → 空集（fail-closed，不回落全校）
 """
 from sqlalchemy import and_, or_
 
-from app.models import Room, UserClassLink
+from app.models import Room
+from app.utils.scope import resolve_scope as _canonical_scope
 
 
 def _current(user):
@@ -33,30 +34,17 @@ def _resolve(user):
     """解析范围 → (kind, grades, pairs)
 
     kind: 'school' | 'grades' | 'grade' | 'class' | 'none'
+    P2：委托 app.utils.scope 唯一口径（class 范围保留 user.grade/class_name 回落）。
     """
-    if getattr(user, 'role', None) == 'admin':
+    s = _canonical_scope(_current(user), class_fallback=True)
+    if s.origin in ('admin', 'school'):
         return 'school', None, None
-    # 用户级数据范围优先（惰性导入避免模块循环依赖）
-    from app.modules.grades.services.scope import user_grade_scope
-    ug = user_grade_scope(user)
-    if ug is not None:
-        return 'grades', set(ug), None
-    pg = getattr(user, 'permission_group', None)
-    if not pg:
-        return 'none', None, None
-    st = getattr(pg, 'scope_type', None)
-    if st == 'school':
-        return 'school', None, None
-    if st == 'grade':
-        return 'grade', ({user.grade} if user.grade else set()), None
-    if st == 'class':
-        pairs = {(l.grade, l.class_name)
-                 for l in UserClassLink.query.filter_by(user_id=user.id).all()}
-        if not pairs and user.grade and user.class_name:
-            # 2026-10-12 P1：班主任未配 UserClassLink 的老数据回落本人字段，
-            # 与班主任原内联判断（user.grade/class_name）行为一致，避免误伤
-            pairs = {(user.grade, user.class_name)}
-        return 'class', None, pairs
+    if s.origin == 'user_grades':
+        return 'grades', set(s.grades), None
+    if s.origin == 'grade':
+        return 'grade', set(s.grades), None
+    if s.origin == 'class':
+        return 'class', None, set(s.classes)
     return 'none', None, None
 
 

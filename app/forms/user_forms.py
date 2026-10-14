@@ -1,7 +1,8 @@
 # StuLink v1.7.0 2026-08-02
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 from flask_wtf import FlaskForm
-from wtforms import StringField, SelectField, PasswordField, ValidationError
+from wtforms import (StringField, SelectField, SelectMultipleField, PasswordField,
+                     ValidationError)
 from wtforms.validators import DataRequired, Length, Optional
 from app.utils.password_policy import validate_password, MIN_LENGTH
 
@@ -19,7 +20,9 @@ class UserForm(FlaskForm):
         ('school_viewer', '全校组'),
         ('staff', '教职人员'),
     ], validators=[DataRequired()])
-    permission_group_id = SelectField('权限组', validators=[Optional()], coerce=int)
+    # 2026-10-14（P5）：一人可挂多个身份（权限组）；列表首个为「主组」。
+    permission_group_ids = SelectMultipleField('权限组', validators=[Optional()],
+                                               coerce=int)
     grade = SelectField('管理年级', validators=[Optional()])
     class_name = SelectField('管理班级', validators=[Optional()])
     password = PasswordField('密码', validators=[Optional(), Length(min=MIN_LENGTH, message=f'密码至少{MIN_LENGTH}位')])
@@ -41,6 +44,6 @@ class UserForm(FlaskForm):
         self.grade.choices = [('', '不限')] + get_dict_items('grade')
         self.class_name.choices = [('', '不限')] + get_dict_items('class')
         groups = PermissionGroup.query.order_by(PermissionGroup.id).all()
-        self.permission_group_id.choices = [(0, '— 请选择 —')] + [(g.id, g.name) for g in groups]
+        self.permission_group_ids.choices = [(g.id, g.name) for g in groups]
 
 
