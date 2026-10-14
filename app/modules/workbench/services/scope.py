@@ -1,4 +1,4 @@
-# StuLink v1.19.47.30 2026-10-10
+# StuLink v1.19.49.31 2026-10-14
 # 班主任工作台：班级/学生归属校验（越权防护，PR#5 安全审查 S1）
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 """工作台数据范围判定。
@@ -7,12 +7,14 @@
 名单、导出任意班级考勤、为任意学生写入考勤记录。本模块沿用成绩模块的
 「角色 → 权限组范围 → 用户级数据范围 → 班主任/任课教师映射」同一套口径，
 对外只暴露三个判定函数，供路由层做越权拦截。
+
+P2（多身份改造）：底层原语统一委托 app.utils.scope；本模块保留原有判定行为。
 """
-from app.models import Student, UserClassLink
+from app.models import Student
 from app.models.user_data_scope import get_user_scope_classes
-from app.models.grades import TeacherSubjectLink
+from app.utils.scope import (user_scope_grades, class_pairs, teaching_links)
 from app.modules.grades.services.scope import (
-    user_grade_scope, get_scope, SCOPE_SCHOOL, SCOPE_GRADE, SCOPE_CLASS,
+    get_scope, SCOPE_SCHOOL, SCOPE_GRADE,
 )
 
 
@@ -33,7 +35,7 @@ def managed_class_pairs(user):
         return []
     if user.role == 'admin':
         return _all_pairs()
-    ug = user_grade_scope(user)
+    ug = user_scope_grades(user)
     if ug is not None:
         return _grade_pairs(ug)
     scope, grade = get_scope(user)
@@ -43,9 +45,8 @@ def managed_class_pairs(user):
         return _grade_pairs([grade] if grade else [])
     # 班主任（UserClassLink）；任课教师并入任教映射（与成绩模块 visible_grades 口径一致：
     # scope_type=class 的任课教师若只看 UserClassLink 会拿到空列表，页面无班可选）
-    pairs = {(l.grade, l.class_name) for l in
-             UserClassLink.query.filter_by(user_id=user.id).all()}
-    for l in TeacherSubjectLink.query.filter_by(user_id=user.id, active=True).all():
+    pairs = class_pairs(user)
+    for l in teaching_links(user):
         cn = getattr(l, 'class_name', None)
         if cn:
             pairs.add((l.grade, cn))
@@ -60,7 +61,7 @@ def class_allowed(user, grade, class_name):
         return False
     if user.role == 'admin':
         return True
-    ug = user_grade_scope(user)
+    ug = user_scope_grades(user)
     if ug is not None:
         # 用户级数据范围优先（含可选班级白名单）
         if grade not in ug:
@@ -71,11 +72,11 @@ def class_allowed(user, grade, class_name):
     if scope == SCOPE_GRADE:
         return grade == g
     # 班主任（UserClassLink）或任课教师映射（任教年级/班级）
-    if UserClassLink.query.filter_by(user_id=user.id, grade=grade,
-                                     class_name=class_name).first():
+    if (grade, class_name) in class_pairs(user):
         return True
-    for l in TeacherSubjectLink.query.filter_by(user_id=user.id, grade=grade,
-                                                active=True).all():
+    for l in teaching_links(user):
+        if l.grade != grade:
+            continue
         cn = getattr(l, 'class_name', None)
         if not cn or cn == class_name:
             return True

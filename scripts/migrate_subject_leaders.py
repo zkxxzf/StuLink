@@ -24,6 +24,13 @@ try:
 except Exception as _e:  # noqa: BLE001
     print(f'[WARN] 读取迁移登记失败（继续执行迁移）：{_e}')
 
+# 2026-10-14 第三轮审计（CONS3-03）：本脚本原先建的是**旧结构**（含已下线的
+# members / duty / sort_order 三列、唯一键 4 列、无 category）。执行器里它排在
+# `migrate_subject_leader_category_20261014.py`（重建表）**之后**，而重建脚本对
+# 「无表库」是 SKIP → 缺表的存量库上线后会停在旧结构（且 unique 键也错）。
+# 现在：①本脚本直接建**目标结构**；②执行器把本脚本移到重建脚本**之前**
+# （先建表 → 再重建/规范化），两条腿互相兜底。
+# 结构与 app/models/academic.py::SubjectLeader 一致（check_columns/check_indexes 逐列比对）。
 DDL_TABLE = """
 CREATE TABLE IF NOT EXISTS subject_leaders (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -31,20 +38,26 @@ CREATE TABLE IF NOT EXISTS subject_leaders (
     term VARCHAR(10) DEFAULT '',
     grade VARCHAR(10) DEFAULT '',
     subject VARCHAR(20) NOT NULL,
+    category VARCHAR(10) NOT NULL DEFAULT '备课组长',
     leader_uid VARCHAR(16),
     leader_name VARCHAR(50) NOT NULL,
-    members VARCHAR(300),
-    duty VARCHAR(500),
-    sort_order INTEGER DEFAULT 0,
     updated_by INTEGER,
     created_at DATETIME,
     updated_at DATETIME,
-    CONSTRAINT uq_subject_leader UNIQUE (school_year, term, grade, subject)
+    CONSTRAINT uq_subject_leader UNIQUE (school_year, term, grade, subject, category)
 )
 """
 
-DDL_INDEX = ("CREATE INDEX IF NOT EXISTS idx_leader_year_subject "
-             "ON subject_leaders (school_year, subject)")
+# 模型声明了 3 个索引（idx_leader_year_subject 复合 + school_year / subject 两个单列），
+# 新装库必须一并建出，否则索引自检报「模型声明、现网缺失」。
+DDL_INDEXES = (
+    "CREATE INDEX IF NOT EXISTS idx_leader_year_subject "
+    "ON subject_leaders (school_year, subject)",
+    "CREATE INDEX IF NOT EXISTS ix_subject_leaders_school_year "
+    "ON subject_leaders (school_year)",
+    "CREATE INDEX IF NOT EXISTS ix_subject_leaders_subject "
+    "ON subject_leaders (subject)",
+)
 
 if not os.path.isdir(DATA_DIR):
     print(f'[SKIP] 数据目录不存在: {DATA_DIR}')
@@ -65,7 +78,8 @@ for db_path in sorted(glob.glob(os.path.join(DATA_DIR, '*.db'))):
             "SELECT 1 FROM sqlite_master WHERE type='table' AND name='subject_leaders'"
         ).fetchone()
         conn.execute(DDL_TABLE)
-        conn.execute(DDL_INDEX)
+        for ddl in DDL_INDEXES:
+            conn.execute(ddl)
         conn.commit()
         conn.close()
         name = os.path.basename(db_path)

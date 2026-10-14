@@ -52,7 +52,7 @@ config_mod.Config.UPLOAD_FOLDER = os.path.join(_TMP, 'uploads')
 from app import create_app  # noqa: E402
 from app.extensions import db  # noqa: E402
 from app.models import (User, PermissionGroup, UserDataScope, Student,  # noqa: E402
-                        UserClassLink)
+                        UserClassLink, UserPermissionGroup)
 from app.models.grades import Exam, ExamAffair  # noqa: E402
 
 app = create_app()
@@ -148,6 +148,15 @@ def seed():
         add('homeroom', 'sec_homeroom', '班主任测试', 'homeroom_teacher',
             '班主任组', grade='2025级')
         add('dorm', 'sec_dorm', '宿管测试', 'dorm_manager', '宿管组')
+        # 2026-10-14（P6）：多身份账号 —— 主组=任课教师组，另挂宿管组
+        add('multi', 'sec_multi', '多身份测试', 'teacher', '任课教师组')
+        _mu = db.session.get(User, mk['multi'])
+        db.session.add(UserPermissionGroup(user_id=_mu.id,
+                                           group_id=groups['任课教师组'].id,
+                                           is_primary=True))
+        db.session.add(UserPermissionGroup(user_id=_mu.id,
+                                           group_id=groups['宿管组'].id,
+                                           is_primary=False))
 
         leader = db.session.get(User, mk['leader'])
         db.session.add(UserDataScope(user_id=leader.id, grade='2025级'))
@@ -1779,6 +1788,275 @@ def check_SR12():
         html = c2.get('/students/').get_data(as_text=True)
         case('SR-12 宿管列表：手机号脱敏', '138****8000' in html)
         case('SR-12 宿管列表：无明文手机号', '13800138000' not in html)
+
+
+@item('SR-13')
+def check_SR13():
+    """多身份切换：has_perm 按「当前身份」判定（不并集）。2026-10-14（P1–P3）"""
+    from flask import session
+    from flask_login import login_user
+    mid = uid('multi')
+    with app.app_context():
+        u = db.session.get(User, mid)
+        dorm_gid = PermissionGroup.query.filter_by(name='宿管组').first().id
+        case('SR-13 多身份账号有两个身份', len(u.permission_groups) == 2,
+             str([g.name for g in u.permission_groups]))
+        with app.test_request_context('/'):
+            login_user(u)
+            # 默认身份 = 主组（任课教师组）：有 academic.swap、无 dormitory.assign
+            case('SR-13 默认身份=主组（任课教师）',
+                 u.has_perm('academic.swap') and not u.has_perm('dormitory.assign'))
+            session['active_group_id'] = dorm_gid
+            case('SR-13 切换宿管后权限随之变化',
+                 u.has_perm('dormitory.assign') and not u.has_perm('academic.swap'))
+
+
+@item('SR-14')
+def check_SR14():
+    """范围类型 7 值：旧 scope_type 映射无损 + pick_grades 解析。2026-10-14（P4）"""
+    import json
+    from app.models.permission_group import KIND_TO_LEGACY, LEGACY_TO_KIND
+    from app.utils.scope import resolve_scope
+    case('SR-14 旧 scope_type 映射无损',
+         all(KIND_TO_LEGACY.get(v) == k for k, v in LEGACY_TO_KIND.items()))
+    with app.app_context():
+        g = PermissionGroup(name='SR14考务', scope_type='grade',
+                            scope_kind='pick_grades', role='staff')
+        g.set_menu_keys(['students.view'])
+        g.scope_grades = json.dumps(['2025级'])
+        db.session.add(g)
+        db.session.flush()
+        u = User(username='sec_sr14', real_name='指定年级', role='staff',
+                 permission_group_id=g.id, must_change_pwd=False)
+        u.set_password(TEST_PWD)
+        db.session.add(u)
+        db.session.flush()
+        u.sync_primary_link()
+        db.session.commit()
+        s = resolve_scope(u)
+        case('SR-14 pick_grades 解析为指定年级',
+             s.kind == 'grades' and s.grades == {'2025级'}, str(s))
+
+
+@item('SR-15')
+def check_SR15():
+    """多身份不放大范围：数据范围随「当前身份」变化（不取最宽）。2026-10-14（P2/P3）"""
+    from flask import session
+    from flask_login import login_user
+    from app.utils.scope import resolve_scope
+    mid = uid('multi')
+    with app.app_context():
+        u = db.session.get(User, mid)
+        dorm_gid = PermissionGroup.query.filter_by(name='宿管组').first().id
+        with app.test_request_context('/'):
+            login_user(u)
+            case('SR-15 主身份范围=本人班级（任课教师）',
+                 resolve_scope().kind == 'classes', str(resolve_scope()))
+            session['active_group_id'] = dorm_gid
+            case('SR-15 切宿管后范围=全校（不被主身份收窄）',
+                 resolve_scope().kind == 'school', str(resolve_scope()))
+
+
+@item('SR-16')
+def check_SR16():
+    """日志脱敏 Formatter 包装：handler 已预先有 formatter 时不得崩溃。2026-10-14"""
+    import logging as _log
+    from app.utils.log_mask import (MaskingFormatter, _formatter_style,
+                                    _wrap_formatter)
+    # 三种 style 推断正确
+    for style, fmt, expect in (('%', '%(levelname)s %(message)s', '%'),
+                               ('{', '{levelname} {message}', '{'),
+                               ('$', '${levelname} ${message}', '$')):
+        f = _log.Formatter(fmt, style=style)
+        case('SR-16 推断 style=%s' % style, _formatter_style(f) == expect,
+             _formatter_style(f))
+    # 回归：handler 已有 formatter（uvicorn 场景）时不得抛 AttributeError
+    h = _log.StreamHandler()
+    h.setFormatter(_log.Formatter('%(levelname)s %(message)s'))
+    try:
+        _wrap_formatter(h)
+        case('SR-16 包装已有 formatter 不崩溃',
+             isinstance(h.formatter, MaskingFormatter)
+             and h.formatter._fmt == '%(levelname)s %(message)s')
+    except AttributeError as e:
+        case('SR-16 包装已有 formatter 不崩溃', False, repr(e))
+
+
+@item('PERF113')
+def check_exam_report_cache_invalidation():
+    """汇报缓存按考试精确失效：**被比对场次**改分也必须失效（2026-10-14 第三轮审计）。
+
+    背景（PERF-113 正确性回归）：PERF-19 把 `grades_report_` 从"全清"收窄为
+    "只清本场（旧实现比对 `split('_')[3] == exam_id`）"，但 `sl`（对比）键里还带
+    **被比对考试** id：`grades_report_sl_<主考>_<方向>_<层>_<比对考>_<c|nc>`。
+    于是"改 B 场分数"不会清掉 (A vs B) 的缓存 → 最长 `CACHE_TIMEOUT=900s` 呈现陈旧
+    对比数据。PERF-114 同源：位置契约（第 4 段）一旦新增/挪动分段就静默不失效。
+
+    本项断言修复后的行为：**键中任一分段命中该考试**即失效（宁可多清几个键，
+    都不能留陈旧数据）；`grades_report_ld_*`（全局对比，跨考试取数）仍由调用方
+    单独整体失效，不归本函数管。
+    """
+    from app.modules.grades.utils import delete_cache_exam_reports
+    from app.utils.cache import cache
+
+    keys = [
+        # 主 19、被比对 21 → 清 19 时本来就会清
+        'grades_report_sl_19_物理_一本_21_c',
+        # 主 21、被比对 19 → ★ PERF-113 核心：改 19 必须也清掉这个键
+        'grades_report_sl_21_物理_一本_19_c',
+        # 主 19 / 主 21 的「显式不对比」哨兵
+        'grades_report_sl_19_物理_一本__nc',
+        'grades_report_sl_21_物理_一本__nc',
+        # 其它 kind（班级概况）
+        'grades_report_co_19_物理',
+        'grades_report_co_21_物理',
+        # ★ PERF-114：新增分段使考试 id 不在第 4 段（旧实现永远清不到）
+        'grades_report_sl_物理_19_一本',
+        # 全局对比：不归本函数管（调用方另有整体失效）
+        'grades_report_ld_19_物理',
+        # 非汇报缓存键：一个都不能动
+        'grades_options_classes_by_exam',
+    ]
+    for k in keys:
+        cache.set(k, {'key': k}, timeout=60)
+    try:
+        delete_cache_exam_reports(19)
+        alive = {k: cache.get(k) is not None for k in keys}
+        case('PERF113 主考 19 的 sl 键被清',
+             not alive['grades_report_sl_19_物理_一本_21_c'])
+        case('PERF113 被比对场次 19 的 sl 键也被清（修复前残留 900s 陈旧数据）',
+             not alive['grades_report_sl_21_物理_一本_19_c'])
+        case('PERF113 主考 19 的 nc 哨兵键被清',
+             not alive['grades_report_sl_19_物理_一本__nc'])
+        case('PERF113 无关场次 21 的 nc 键保留',
+             alive['grades_report_sl_21_物理_一本__nc'])
+        case('PERF113 主考 19 的 co 键被清', not alive['grades_report_co_19_物理'])
+        case('PERF113 无关场次 21 的 co 键保留', alive['grades_report_co_21_物理'])
+        case('PERF114 分段位置变化后仍按考试失效（不再依赖第 4 段）',
+             not alive['grades_report_sl_物理_19_一本'])
+        case('PERF113 全局对比 ld 键不在本函数管辖内',
+             alive['grades_report_ld_19_物理'])
+        case('PERF113 非汇报缓存键不受影响',
+             alive['grades_options_classes_by_exam'])
+    finally:
+        for k in keys:
+            cache.delete(k)
+
+
+# ======================================================================
+# 第四轮审计（2026-10-14）修复守卫：SEC-03/04/05、SEC3-01、PERF-101/102/110/112、
+# 多身份范围（班级白名单）、DATA3-01、多身份迁移保护。
+# 均为源码级/契约级断言：修复点一旦被回退（装饰器换回 grades.view、GET 重新写库、
+# 缓存改回重查全量、班级口径改回全表 GROUP BY）立即变红。
+# ======================================================================
+
+def _read_src(rel):
+    with open(os.path.join(BASE, rel), encoding='utf-8') as f:
+        return f.read()
+
+
+def check_audit4():
+    import re
+
+    mp = _read_src('app/utils/permission_map.py')
+    case('SEC-04 权限点 grades.ai_manage 已定义（standalone 单独勾选）',
+         "'ai_manage'" in mp and "'grades.ai_manage'" in mp)
+
+    ai = _read_src('app/modules/grades/routes/ai.py')
+    case('SEC-04 全局 Key 三端点装饰器统一为 grades.ai_manage',
+         ai.count("@perm_required('grades.ai_manage')") == 3)
+    case('SEC-04 函数体守卫同判据（重构漏拷装饰器仍有防线）',
+         "current_user.has_perm('grades.ai_manage')" in ai)
+
+    sl = _read_src('app/modules/academic/routes/subject_leaders.py')
+    case('SEC-05 导出文件名走 safe_download_name（未消毒的 args 不再进响应头）',
+         'safe_download_name(' in sl)
+    _ctx = sl.split('def _context()')[1].split('def subject_leaders')[0]
+    case('SEC3-01 GET 只读：_context 内不再写库（无 svc.ensure_plan 调用）',
+         'svc.ensure_plan(' not in _ctx)
+    case('SEC3-01 保存路径仍登记方案（ensure_plan 保留在 POST）',
+         'svc.ensure_plan(' in sl)
+
+    insp = _read_src('app/modules/academic/routes/inspection.py')
+    case('SEC-03 单节总览代办入口记录实际操作人',
+         'operator_uid=op_uid' in insp and 'operator_name=op_name' in insp)
+    ssvc = _read_src('app/modules/academic/services/swap_service.py')
+    case('SEC-03 服务层支持 operator 参数并落库',
+         'operator_uid=None, operator_name=' in ssvc
+         and 'operator_uid=(operator_uid or None)' in ssvc)
+    case('SEC-03 代办时通知点名操作人', '（由 %s 代办）' in ssvc)
+    tt = _read_src('app/models/timetable.py')
+    case('SEC-03 模型有 operator_uid / operator_name 两列',
+         'operator_uid = db.Column' in tt and 'operator_name = db.Column' in tt)
+
+    ais = _read_src('app/modules/grades/services/ai_service.py')
+    case('PERF-101 追问复用共享 ExamData 缓存（不再重查两场全量）',
+         'cached_exam_data(ex.id).rows' in ais)
+    imp = _read_src('app/modules/grades/routes/ai_import.py')
+    case('PERF-102 原始分回填一次预取（无逐行 filter().first()）',
+         'existing.get((r[' in imp
+         and "filter_by(exam_id=exam.id, student_no=r['no']" not in imp)
+    rk = _read_src('app/modules/grades/services/ranking.py')
+    case('PERF-110 排名改批量写库（bulk_update_mappings + _rank_map）',
+         'bulk_update_mappings(ExamScore' in rk and 'def _rank_map' in rk)
+    case('PERF-110 已删除逐行 setattr 的 _assign_ranks（不留死代码）',
+         'def _assign_ranks' not in rk)
+    an = _read_src('app/modules/grades/routes/analysis.py')
+    case('PERF-112 班级枚举取总分行口径（考试当时班级）',
+         'ExamScore.subject == TOTAL_SUBJECT' in an)
+    case('PERF-112 班级按数据范围收敛下发（_restrict_pairs）',
+         '_restrict_pairs' in an)
+    ap = _read_src('app/modules/grades/services/ai_prompt.py')
+    case('PERF-112 生成器班级口径同源（总分行）',
+         'ExamScore.subject == TOTAL_SUBJECT' in ap)
+
+    sc = _read_src('app/utils/scope.py')
+    case('多身份范围 user_scope_detail 原语存在且被 resolve_scope 使用',
+         'def user_scope_detail' in sc and 'user_scope_detail(u)' in sc)
+    case('多身份范围 纯班级级授权收成 classes（不放大为整年级）',
+         "return Scope('classes', classes=pairs, origin='user_grades')" in sc)
+    case('多身份范围 学生查询吸收班级白名单',
+         'user_scope_detail(user)' in _read_src('app/utils/student_scope.py'))
+    case('多身份 用户组保存校验组存在性（防悬空关联）',
+         'valid_ids' in _read_src('app/modules/system/routes/users.py'))
+    pm = _read_src('scripts/migrate_perm_multi_20261014.py')
+    case('多身份 废弃组删除前同时统计 user_permission_groups 引用',
+         'UserPermissionGroup.query.filter_by(group_id=g.id).count()' in pm)
+    case('多身份 P1 迁移补 is_primary 标记',
+         'fix_primary' in _read_src('scripts/migrate_user_groups_p1.py'))
+
+    gm = _read_src('app/models/grades.py')
+    ac = _read_src('app/models/academic.py')
+    case('DATA3-01 两张方案表声明 is_current 部分唯一索引',
+         'uq_link_plan_current' in gm and 'uq_leader_plan_current' in ac)
+    import sqlite3
+
+    def _has_idx(db, ix):
+        p = os.path.join(BASE, 'data', db)
+        if not os.path.exists(p):
+            return True          # 无库环境跳过（新装由 create_all 建）
+        con = sqlite3.connect(p)
+        try:
+            return con.execute(
+                "SELECT 1 FROM sqlite_master WHERE type='index' AND name=?",
+                (ix,)).fetchone() is not None
+        finally:
+            con.close()
+
+    case('DATA3-01 现网 grades.db 已建 uq_link_plan_current',
+         _has_idx('grades.db', 'uq_link_plan_current'))
+    case('DATA3-01 现网 academic.db 已建 uq_leader_plan_current',
+         _has_idx('academic.db', 'uq_leader_plan_current'))
+    case('PERF-117/118 现网已建 oplog / cert / entry 索引',
+         _has_idx('system.db', 'idx_oplog_created')
+         and _has_idx('grades.db', 'idx_cert_generated_by')
+         and _has_idx('timetable.db', 'idx_entry_deleted_teacher'))
+    case('CONS-07 新功能 smoke 已挂进一键回归', (
+        lambda r: 'SMOKES' in r and 'scripts/smoke_grades.py' in r)(
+            _read_src('scripts/run_all_regression.py')))
+
+
+ITEMS['AUDIT4'] = check_audit4
 
 
 def main(argv):

@@ -20,7 +20,8 @@
     /* 2026-10-14：表头/冻结列写死浅底在深色下是「白块 + 浅字」（对比 1.1）→ 主题变量 */
     #permTable thead tr:first-child th { position: sticky; top: 0; z-index: 3;
         background: var(--sl-surface-2); height: 38px; white-space: nowrap; }
-    #permTable thead tr:nth-child(2) th { position: sticky; top: 38px; z-index: 3;
+    /* 2026-10-14 第四轮审计（UI-14）：偏移量走变量（base.html --sl-thead-h） */
+    #permTable thead tr:nth-child(2) th { position: sticky; top: var(--sl-thead-h, 38px); z-index: 3;
         background: var(--sl-surface-2); }
     #permTable th.sticky-col, #permTable td.sticky-col {
         position: sticky; left: 0; z-index: 2; background: var(--sl-surface); }
@@ -135,7 +136,7 @@
 <!-- ============ 表二：数据范围（用户 × 年级） ============ -->
 <div class="card">
     <div class="card-header d-flex justify-content-between align-items-center flex-wrap gap-2">
-        <span><i class="bi bi-geo-alt"></i> 数据范围：用户 × 年级（勾选 = 该用户可见这些年级的数据）</span>
+        <span><i class="bi bi-geo-alt"></i> 专职行政人员管理年级（勾选 = 该用户仅可见这些年级的数据）</span>
         <div class="d-flex gap-2 align-items-center">
             <select id="dsGroupFilter" class="form-select form-select-sm" style="width:160px">
                 <option value="">全部身份</option>
@@ -208,13 +209,30 @@
                     <input id="gmName" class="form-control" maxlength="30" placeholder="如：教务员、宿管组长…">
                 </div>
                 <div class="mb-3">
-                    <label class="form-label">默认数据范围（未在表二勾选年级时生效）</label>
+                    <label class="form-label">数据范围类型</label>
                     <select id="gmScope" class="form-select">
-                        <option value="none">无（按表二勾选年级）</option>
-                        <option value="school">全校</option>
-                        <option value="grade">本年级（人员信息中的年级）</option>
-                        <option value="class">本班（人员关联的班级）</option>
+                        {% for val, label in kind_options %}
+                        <option value="{{ val }}">{{ label }}</option>
+                        {% endfor %}
                     </select>
+                    <div class="form-text">
+                        决定该身份可见的数据：全校 / 本人年级 / 本人班级 / 本人任课，
+                        或「指定年级 / 指定班级」。专职行政（无任课安排）选「指定年级」，
+                        再在表二按人勾选其分管年级。
+                    </div>
+                </div>
+                <div class="mb-3 d-none" id="gmGradesBox">
+                    <label class="form-label">指定年级（可多选）</label>
+                    <select id="gmGrades" class="form-select" multiple size="5">
+                        {% for g in grades %}
+                        <option value="{{ g }}">{{ g }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div class="mb-3 d-none" id="gmClassesBox">
+                    <label class="form-label">指定班级（每行一个：年级,班级）</label>
+                    <textarea id="gmClasses" class="form-control" rows="3"
+                              placeholder="如：2025级,01班"></textarea>
                 </div>
                 <div class="mb-2">
                     <label class="form-label">说明</label>
@@ -314,12 +332,35 @@
     /* ---------- 身份新建 / 编辑 / 删除 ---------- */
     var modal = new bootstrap.Modal(document.getElementById('groupModal'));
 
+    /* 范围类型联动：仅「指定年级 / 指定班级」显示对应多选 */
+    function toggleScopeBoxes() {
+        var k = $('#gmScope').val();
+        $('#gmGradesBox').toggleClass('d-none', k !== 'pick_grades');
+        $('#gmClassesBox').toggleClass('d-none', k !== 'pick_classes');
+    }
+    $('#gmScope').on('change', toggleScopeBoxes);
+
+    function parseClasses(text) {
+        var out = [];
+        String(text || '').split(/\r?\n/).forEach(function (line) {
+            var parts = line.split(',');
+            if (parts.length >= 2) {
+                var g = (parts[0] || '').trim(), c = (parts[1] || '').trim();
+                if (g && c) { out.push({grade: g, class: c}); }
+            }
+        });
+        return out;
+    }
+
     $('#btnNewGroup').on('click', function () {
         $('#groupModalTitle').text('新建身份');
         $('#gmId').val('');
         $('#gmName').val('');
         $('#gmScope').val('none');
+        $('#gmGrades').val([]);
+        $('#gmClasses').val('');
         $('#gmDesc').val('');
+        toggleScopeBoxes();
         modal.show();
     });
 
@@ -330,8 +371,12 @@
             $('#groupModalTitle').text('编辑身份：' + d.name);
             $('#gmId').val(d.id);
             $('#gmName').val(d.name);
-            $('#gmScope').val(d.scope_type);
+            $('#gmScope').val(d.scope_kind || 'none');
+            $('#gmGrades').val(d.scope_grades || []);
+            $('#gmClasses').val((d.scope_classes || [])
+                .map(function (c) { return c.grade + ',' + c['class']; }).join('\n'));
             $('#gmDesc').val(d.description || '');
+            toggleScopeBoxes();
             modal.show();
         });
     });
@@ -340,7 +385,9 @@
         var payload = {
             id: $('#gmId').val() || null,
             name: $('#gmName').val().trim(),
-            scope_type: $('#gmScope').val(),
+            scope_kind: $('#gmScope').val(),
+            scope_grades: $('#gmGrades').val() || [],
+            scope_classes: parseClasses($('#gmClasses').val()),
             description: $('#gmDesc').val().trim()
         };
         if (!payload.name) { toast('请输入身份名称'); return; }

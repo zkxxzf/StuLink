@@ -21,6 +21,21 @@ from app.extensions import db                                 # noqa: E402
 from scripts._db_backup import backup_db                      # noqa: E402
 from scripts._ddl_guard import assert_table                   # noqa: E402
 
+# 2026-10-14 第四轮审计（CONS-02）：补迁移登记（只登记不早退）
+SCRIPT_NAME = os.path.basename(__file__)
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+try:
+    import _mig_log
+except Exception as _e:  # noqa: BLE001
+    _mig_log = None
+    print(f'[WARN] 迁移登记模块不可用（迁移照常执行，仅不登记）：{_e}')
+
+
+def _record():
+    if _mig_log:
+        _mig_log.record(SCRIPT_NAME, note='grades.db 建监考排除名单表 affair_invig_excludes')
+
+
 TABLE = 'affair_invig_excludes'
 BIND = 'grades'
 
@@ -55,10 +70,12 @@ def main():
         insp = sa.inspect(engine)
         if not insp.has_table('affairs') and not insp.has_table('exam_affairs'):
             print('[SKIP] grades 库尚未初始化（没有考务表），无需迁移')
+            _record()
             return 0
         assert_table(TABLE)
         if insp.has_table(TABLE):
             print(f'[OK] {TABLE} 已存在')
+            _record()
             return 0
         # 2026-10-13 审计修复 #15：改走统一 backup_db（自动保留最近 5 份）
         if os.path.exists(db_path):
@@ -69,6 +86,7 @@ def main():
             for sql in INDEXES:
                 conn.exec_driver_sql(sql)
         print(f'[OK] 已建表 {TABLE}（含 {len(INDEXES)} 个索引）')
+    _record()
     return 0
 
 

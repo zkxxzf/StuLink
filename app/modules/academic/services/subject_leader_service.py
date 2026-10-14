@@ -37,7 +37,8 @@ from app.extensions import db
 from app.models.academic import (COMPREHENSIVE_GROUP, COMPREHENSIVE_SUBJECTS,
                                  LEADER_CATEGORIES, LEADER_CATEGORY_DEFAULT,
                                  LEADER_CATEGORY_LESSON, LEADER_CATEGORY_RESEARCH,
-                                 SUBJECT_ORDER, SubjectLeader, leader_group_name)
+                                 SUBJECT_ORDER, SubjectLeader, SubjectLeaderPlan,
+                                 leader_group_name)
 from app.utils.export_helpers import xl_safe
 
 # 2026-10-10 架构审计修复：本文件原有静默 `except Exception: pass`，失败不可观测。
@@ -334,6 +335,172 @@ def save_matrix(data, operator_id=None):
             changes['changed'] += 1
     db.session.commit()
     return changes, skipped
+
+
+# ── 方案（2026-10-14：用户要求「做成方案，每学期会变，要有记录、可新建 / 使用」）──
+# 方案 ＝ 一个「学年 × 学期」的组长登记（与 subject_leaders 的唯一键口径一致），
+# 一个学期只能有一套；「使用」＝把它设为当前学期方案（页面默认打开），
+# 登记数据本身仍按 (学年, 学期) 并存，课表徽章按课表自己的学期回查不受影响。
+
+def current_plan():
+    """当前学期方案（无则 None）。"""
+    return (SubjectLeaderPlan.query.filter_by(is_current=True)
+            .order_by(SubjectLeaderPlan.id).first())
+
+
+def _plan_creator_names(ids):
+    ids = {i for i in ids if i}
+    if not ids:
+        return {}
+    from app.models import User
+    return {u.id: (u.real_name or u.username or '')
+            for u in User.query.filter(User.id.in_(ids)).all()}
+
+
+def leader_count(school_year, term=''):
+    """某「学年 × 学期」的组长登记条数（与 leaders_of_term 同一口径）。"""
+    if not school_year:
+        return 0
+    q = SubjectLeader.query.filter_by(school_year=school_year)
+    if term:
+        return q.filter(SubjectLeader.term == term).count()
+    return q.filter(db.or_(SubjectLeader.term == '', SubjectLeader.term.is_(None))).count()
+
+
+def list_plans():
+    """方案清单（当前在前，其余按学年学期倒序）：含登记条数 / 创建人。"""
+    plans = (SubjectLeaderPlan.query
+             .order_by(SubjectLeaderPlan.is_current.desc(),
+                       SubjectLeaderPlan.school_year.desc(),
+                       SubjectLeaderPlan.term.desc(),
+                       SubjectLeaderPlan.id.desc()).all())
+    names = _plan_creator_names({p.created_by for p in plans})
+    items = []
+    for p in plans:
+        d = p.to_dict()
+        d['count'] = leader_count(p.school_year, p.term or '')
+        d['creator'] = names.get(p.created_by, '')
+        d['scope'] = ''
+        items.append(d)
+    return items
+
+
+def ensure_plan(school_year, term='', operator_id=None):
+    """某学年学期没有方案记录时自动登记一个（进入页面 / 保存时调用，幂等）。"""
+    school_year = (school_year or '').strip()
+    if not school_year:
+        return None
+    term = (term or '').strip()
+    plan = SubjectLeaderPlan.query.filter_by(school_year=school_year, term=term).first()
+    if plan is not None:
+        return plan
+    plan = SubjectLeaderPlan(name=f'{school_year}学年 {term or "整学年"}',
+                             school_year=school_year, term=term,
+                             note='自动登记（进入或保存该学期时创建）',
+                             is_current=False, created_by=operator_id)
+    db.session.add(plan)
+    db.session.commit()
+    return plan
+
+
+def create_plan(name='', school_year='', term='', note='', copy_from='current',
+                source_year=None, source_term=None, use_now=True, operator_id=None):
+    """新建方案。
+
+    :param copy_from: 'current'=复制当前查看学期的登记（默认）/ 'blank'=空白 /
+                      'plan:<id>'=复制某历史方案的登记
+    :param use_now: 创建后立即设为当前学期方案（默认 True）
+    """
+    school_year = (school_year or '').strip()
+    term = (term or '').strip()
+    if not school_year:
+        raise ValueError('学年必填（如 2026-2027）')
+    if SubjectLeaderPlan.query.filter_by(school_year=school_year, term=term).first():
+        raise ValueError(f'「{school_year}学年 {term or "整学年"}」已有方案，'
+                         f'请直接在历史记录里「使用」它')
+    name = (name or '').strip() or f'{school_year}学年 {term or "整学年"}'
+    if SubjectLeaderPlan.query.filter_by(name=name).first():
+        raise ValueError(f'方案「{name}」已存在，请换个名称')
+    plan = SubjectLeaderPlan(name=name, school_year=school_year, term=term,
+                             note=(note or '').strip(), is_current=False,
+                             created_by=operator_id)
+    db.session.add(plan)
+
+    source = (copy_from or 'current').strip()
+    src_year, src_term = None, ''
+    if source.startswith('plan:'):
+        try:
+            src_id = int(source.split(':', 1)[1])
+        except (ValueError, TypeError):
+            raise ValueError('复制来源不正确')
+        src_plan = SubjectLeaderPlan.query.get(src_id)
+        if src_plan is None:
+            raise ValueError('复制的来源方案不存在')
+        src_year, src_term = src_plan.school_year, src_plan.term or ''
+    elif source == 'blank':
+        src_year = None
+    else:                                   # current（默认）＝当前页面查看的学期
+        src_year = (source_year or '').strip() or None
+        src_term = (source_term or '').strip()
+    if src_year:
+        for ld in leaders_of_term(src_year, src_term):
+            db.session.add(SubjectLeader(
+                school_year=school_year, term=term, grade=ld.grade or '',
+                subject=ld.subject, category=ld.category or LEADER_CATEGORY_DEFAULT,
+                leader_uid=ld.leader_uid, leader_name=ld.leader_name,
+                updated_by=operator_id))
+    db.session.commit()
+    if use_now:
+        use_plan(plan.id, operator_id=operator_id)
+    return plan
+
+
+def use_plan(plan_id, operator_id=None):
+    """使用某方案：设为当前学期方案（is_current 唯一）。"""
+    plan = SubjectLeaderPlan.query.get(int(plan_id))
+    if plan is None:
+        raise ValueError('方案不存在（可能已被删除）')
+    for p in SubjectLeaderPlan.query.filter_by(is_current=True).all():
+        p.is_current = False
+    plan.is_current = True
+    db.session.commit()
+    return plan
+
+
+def rename_plan(plan_id, name='', note=None, operator_id=None):
+    """重命名 / 改说明（学年学期是课表徽章回查的坐标，不支持改）。"""
+    plan = SubjectLeaderPlan.query.get(int(plan_id))
+    if plan is None:
+        raise ValueError('方案不存在（可能已被删除）')
+    name = (name or '').strip()
+    if not name:
+        raise ValueError('方案名称不能为空')
+    dup = (SubjectLeaderPlan.query
+           .filter(SubjectLeaderPlan.name == name, SubjectLeaderPlan.id != plan.id)
+           .first())
+    if dup:
+        raise ValueError(f'方案「{name}」已存在，请换个名称')
+    plan.name = name
+    if note is not None:
+        plan.note = (note or '').strip()
+    db.session.commit()
+    return plan
+
+
+def delete_plan(plan_id, operator_id=None):
+    """删除方案：连同该「学年 × 学期」的组长登记一起删（返回 (plan, 删除条数)）。"""
+    plan = SubjectLeaderPlan.query.get(int(plan_id))
+    if plan is None:
+        raise ValueError('方案不存在（可能已被删除）')
+    q = SubjectLeader.query.filter_by(school_year=plan.school_year)
+    if plan.term:
+        q = q.filter(SubjectLeader.term == plan.term)
+    else:
+        q = q.filter(db.or_(SubjectLeader.term == '', SubjectLeader.term.is_(None)))
+    removed = q.delete(synchronize_session=False)
+    db.session.delete(plan)
+    db.session.commit()
+    return plan, removed
 
 
 # ── 导出 ───────────────────────────────────────────────────────────────────

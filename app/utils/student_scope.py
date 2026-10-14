@@ -8,11 +8,14 @@
 
 本模块把「当前用户能看到哪些学生」收敛成一个函数，所有 Student 查询统一调用，
 禁止再各自内联角色判断（清单第 0 节铁律②）。
+
+P2（多身份改造）：底层原语（UserDataScope / UserClassLink / TeacherSubjectLink 查询）
+统一委托 app.utils.scope；本函数保留原有角色分支与返回行为。
 """
 from sqlalchemy import and_, or_
 
-from app.models import Student, UserClassLink
-from app.models.grades import TeacherSubjectLink
+from app.models import Student
+from app.utils.scope import (user_scope_detail, class_pairs, teaching_grades)
 
 
 def apply_student_scope(query, user=None):
@@ -27,13 +30,19 @@ def apply_student_scope(query, user=None):
     if getattr(user, 'role', None) == 'admin':
         return query
 
-    from app.modules.grades.services.scope import (
-        user_grade_scope, get_scope, SCOPE_SCHOOL, SCOPE_GRADE)
+    from app.modules.grades.services.scope import get_scope, SCOPE_SCHOOL, SCOPE_GRADE
 
     # 1) 用户级数据范围（权限管理页第二张表）优先
-    ug = user_grade_scope(user)
-    if ug is not None:
-        return query.filter(Student.grade.in_(ug))
+    # 2026-10-14 第四轮审计修复（多身份 B 项）：吸收 UserDataScope.class_name 班级白名单 ——
+    # 此前只按年级过滤，把"仅授权某班"放大为整个年级（与成绩侧 student_in_scope 口径分裂）。
+    has_scope, grade_wide, pairs = user_scope_detail(user)
+    if has_scope:
+        if pairs and not grade_wide:
+            return query.filter(or_(*[and_(Student.grade == g, Student.class_name == c)
+                                      for g, c in sorted(pairs)]))
+        # 含整年级授权（或混合形态）：按年级口径（数据完整优先，同 resolve_scope 取舍）
+        return query.filter(Student.grade.in_(
+            sorted(grade_wide | {g for g, _ in pairs})))
 
     # 2) 班主任 / 年级长沿用原有字段口径
     if user.role == 'homeroom_teacher':
@@ -42,15 +51,13 @@ def apply_student_scope(query, user=None):
         return query.filter_by(grade=user.grade)
 
     # 3) 任课教师等：班级映射 > 任课映射年级 > 组级范围
-    pairs = [(l.grade, l.class_name)
-             for l in UserClassLink.query.filter_by(user_id=user.id).all()]
+    pairs = class_pairs(user)
     if pairs:
         return query.filter(or_(*[and_(Student.grade == g, Student.class_name == c)
-                                  for g, c in pairs]))
-    grades = {l.grade for l in
-              TeacherSubjectLink.query.filter_by(user_id=user.id, active=True).all()}
+                                  for g, c in sorted(pairs)]))
+    grades = teaching_grades(user)
     if grades:
-        return query.filter(Student.grade.in_(grades))
+        return query.filter(Student.grade.in_(sorted(grades)))
 
     scope, grade = get_scope(user)
     if scope == SCOPE_SCHOOL:

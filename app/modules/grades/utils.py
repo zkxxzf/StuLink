@@ -1,4 +1,4 @@
-# StuLink v1.19.47.30 2026-10-10
+# StuLink v1.19.49.31 2026-10-10
 # 成绩管理：通用小工具
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 import re
@@ -23,7 +23,7 @@ def numeric_classes(class_names):
 
 
 def is_teaching_class(class_name):
-    """v1.19.47.30：单个班级是否为教学班（01班~99班）。
+    """v1.19.49.31：单个班级是否为教学班（01班~99班）。
 
     不分班 / 已转出 / 离校 等非数字班级返回 False。
     与 numeric_classes 同一正则口径，供成绩治理模块统一过滤无班级学生。
@@ -31,13 +31,13 @@ def is_teaching_class(class_name):
     return bool(class_name and _NUM_CLASS_RE.match(str(class_name).strip()))
 
 
-# v1.19.47.30 班级名归一化：把外部 Excel 的各种写法统一成系统口径
+# v1.19.49.31 班级名归一化：把外部 Excel 的各种写法统一成系统口径
 _CLS_TAIL_RE = re.compile(r'(\d{1,2})\s*班')
 _SPECIAL_CLASSES = ('不分班', '已转出', '离校')
 
 
 def normalize_class_name(value):
-    """把外部/历史写法归一化为系统班级名（v1.19.47.30）
+    """把外部/历史写法归一化为系统班级名（v1.19.49.31）
 
     支持：
         '高一03班' / '2024级01班' / '高三10班' → '03班' / '01班' / '10班'
@@ -91,8 +91,14 @@ def delete_cache_exam_reports(exam_id):
     """按考试精确失效汇报缓存（键形如 grades_report_<kind>_<exam_id>_<...>）
 
     PERF-19：此前用 delete_cache_prefix('grades_report_') 全清，改一科学分会把全部
-    21 场考试的汇报缓存一起作废。改为只清本场（键第 4 段即 exam_id）。
-    注意 grades_report_ld_*（全局对比）跨考试取数，不在此列，需单独整体失效。
+    21 场考试的汇报缓存一起作废。改为按考试精确失效。
+    PERF-113（2026-10-14 第三轮审计，正确性回归）：旧实现只比对键第 4 段（主 exam_id），
+    而 `grades_report_sl_<主考>_<方向>_<层>_<被比对考>_<c|nc>` 的**被比对场次**也在键里
+    —— 改被比对场次的分数时该键不失效，最长 CACHE_TIMEOUT=900s 呈现陈旧对比数据。
+    现改为**键中任一分段命中该考试**即失效（宁可多清几个键，也不能留陈旧数据）；
+    同时不再依赖 `split('_')[3]` 的位置契约（PERF-114：新增分段不再静默不失效）。
+    注意 grades_report_ld_*（全局对比）跨考试取数，不在此列，需单独整体失效
+    （调用方 invalidate_exam_cache 已整体清）。
     """
     try:
         from app.utils.cache import cache
@@ -100,8 +106,8 @@ def delete_cache_exam_reports(exam_id):
         for key in list(cache._cache.keys()):
             if not key.startswith('grades_report_') or key.startswith('grades_report_ld_'):
                 continue
-            parts = key.split('_')
-            if len(parts) > 3 and parts[3] == eid:
+            # 前 3 段固定（grades/report/<kind>），从 kind 之后找该考试（主考或被比对场次）
+            if eid in key.split('_')[3:]:
                 cache.delete(key)
     except Exception as _e:  # noqa: BLE001
         logger.warning('utils.py::delete_cache_exam_reports 异常（已降级处理）: %s', _e)

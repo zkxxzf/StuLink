@@ -433,7 +433,10 @@ function initPointsPieChart() {
 }
 
 // 刷新画像
-document.getElementById('btnRefresh')?.addEventListener('click', function() {
+// 2026-10-14 第三轮审计（UI-07）：不用 ES2020 可选链（问号 + 点）—— 旧微信 X5 不支持，
+// 会让整段内联脚本 SyntaxError（页面交互全失效）。改写为显式判空。
+var portraitRefreshBtn = document.getElementById('btnRefresh');
+if (portraitRefreshBtn) portraitRefreshBtn.addEventListener('click', function() {
     if (!confirm('确定要重新计算该学生的画像数据吗？')) return;
     this.disabled = true;
     this.innerHTML = '<span class="spinner-border spinner-border-sm"></span> 计算中...';
@@ -522,7 +525,9 @@ function deleteComment(id) {
     .then(r => r.json())
     .then(data => {
         if (data.success) {
-            document.querySelector(`.comment-item[data-id="${id}"]`)?.remove();
+            // UI-07：不用可选链（旧微信 X5 整段脚本会 SyntaxError）
+            var commentItem = document.querySelector(`.comment-item[data-id="${id}"]`);
+            if (commentItem) commentItem.remove();
         } else {
             alert(data.message || '删除失败');
         }
@@ -573,7 +578,9 @@ function deleteEvent(id) {
     .then(r => r.json())
     .then(data => {
         if (data.success) {
-            document.querySelector(`.event-item[data-id="${id}"]`)?.remove();
+            // UI-07：不用可选链（旧微信 X5 整段脚本会 SyntaxError）
+            var eventItem = document.querySelector(`.event-item[data-id="${id}"]`);
+            if (eventItem) eventItem.remove();
         } else {
             alert(data.message || '删除失败');
         }

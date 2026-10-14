@@ -34,7 +34,7 @@
 </div>
 {% endif %}
 
-<form method="POST" action="{{ url_for('academic.teachers_import_confirm') }}">
+<form method="POST" action="{{ url_for(ep('teachers_import_confirm')) }}">
     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
     <input type="hidden" name="token" value="{{ token }}">
 
@@ -106,7 +106,7 @@
         <button type="submit" class="btn btn-success">
             <i class="bi bi-check-lg"></i> 确认导入
         </button>
-        <a class="btn btn-outline-secondary" href="{{ url_for('academic.teachers_page') }}">取消返回</a>
+        <a class="btn btn-outline-secondary" href="{{ url_for(ep('teachers_page')) }}">取消返回</a>
         <span class="text-muted small align-self-center">
             确认后将写入 {{ plan.summary['create'] + plan.summary['update'] }} 条教师记录，
             新建 {{ plan.summary['account_create'] }} 个账号（用户名可在上表修改）

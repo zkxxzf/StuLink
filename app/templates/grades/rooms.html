@@ -2,14 +2,17 @@
 {% block title %}考场维护{% endblock %}
 {% block extra_css %}
 <style>
-  /* v1.19.47.30 考场维护：左（全部房间）— 中（箭头）— 右（分组）三栏，页面不再铺满全宽 */
+  /* v1.19.49.31 考场维护：左（全部房间）— 中（箭头）— 右（分组）三栏，页面不再铺满全宽 */
   .rm-list { max-height: 62vh; overflow: auto; padding: 4px; }
   .rm-item {
     display: flex; align-items: center; gap: 8px;
     padding: 4px 6px; border-radius: 6px; cursor: pointer;
   }
-  .rm-item:hover { background: #f1f5f9; }
-  .rm-item + .rm-item { border-top: 1px solid #f1f5f9; }
+  /* 2026-10-14 用户口径（鼠标移到行上颜色不好 / 看不清）：原来写死 #f1f5f9 ——
+     深色主题下 hover 整行发白、浅色文字直接糊掉（与 dormitory/statistics/overview
+     那次「写死浅底」是同一个坑）。颜色一律取主题变量，深浅两模式自动跟随。 */
+  .rm-item:hover { background: var(--sl-surface-3); }
+  .rm-item + .rm-item { border-top: 1px solid var(--sl-line); }
   .rm-item .form-check-input { margin: 0; flex: none; }
   .rm-item .badge { font-weight: 500; }
 </style>
@@ -155,7 +158,7 @@ var URL_ROOMS = '{{ url_for("grades.exam_rooms") }}';            // /grades/room
 var URL_ROOM_SAVE = '{{ url_for("grades.exam_room_save") }}';
 var URL_GROUP_SAVE = '{{ url_for("grades.exam_room_group_save") }}';
 
-// v1.19.47.30 三栏式房间归集：状态全部放前端，增删改后就地重渲染（不再整页刷新）
+// v1.19.49.31 三栏式房间归集：状态全部放前端，增删改后就地重渲染（不再整页刷新）
 var state = {
     rooms: {{ rooms|tojson }}.map(function (r) {
         return {id: r.id, location: r.location, note: r.note || '',
@@ -164,17 +167,23 @@ var state = {
     }),
     groups: (function () {
         var ids = {{ group_ids|tojson }}, names = {{ group_names|tojson }};
-        return ids.map(function (id, i) { return {id: id, name: names[i]}; });
+        // 2026-10-14：lib_ids = 组内房间顺序（落库在 exam_room_group_map.sort_order）。
+        // 右侧列表按它渲染、↑↓ 按它交换；考务步骤②「一键带入」也按这个顺序生成考场编号。
+        var orders = {{ group_lib_ids|tojson }};
+        return ids.map(function (id, i) {
+            return {id: id, name: names[i], lib_ids: (orders[i] || []).slice()};
+        });
     })(),
     cur: null,     // 当前分组 id
     kw: ''         // 左侧搜索词
 };
 
-function post(url, data, cb) {
+function post(url, data, cb, err) {
+    // err（可选）：失败回调 —— 「上移 / 下移」要先动界面，失败时得把界面回滚
     $.post(url, data).done(function (d) {
         if (d && d.ok) { if (cb) cb(d); }
-        else { alert((d && d.msg) || '操作失败'); }
-    }).fail(function () { alert('请求失败'); });
+        else { alert((d && d.msg) || '操作失败'); if (err) err(d); }
+    }).fail(function () { alert('请求失败'); if (err) err(); });
 }
 
 function esc(s) { return escHtml(s == null ? '' : String(s)); }
@@ -225,16 +234,31 @@ function renderRight() {
         $('#rightList').html('<div class="text-muted small p-2">暂无分组：点右上角 ＋ 新增</div>');
         return;
     }
+    var order = (g.lib_ids || []);
     var members = state.rooms.filter(function (r) { return inGroup(r, g.id); });
+    // 组内顺序 = lib_ids（落库顺序）；没记录到的（理论上不该有）按 id 补在最后
+    members.sort(function (a, b) {
+        var ia = order.indexOf(a.id), ib = order.indexOf(b.id);
+        if (ia < 0) ia = 1e9 + a.id;
+        if (ib < 0) ib = 1e9 + b.id;
+        return ia - ib;
+    });
     $('#grpMeta').html('当前分组「<b>' + esc(g.name) + '</b>」共 <b>' + members.length + '</b> 个房间'
         + ' · 从左侧勾选后点「加入 →」');
     // v1.19.47.31 用户口径：容量（人）只在「已选入分组」的房间上维护（未选入的不显示），
     // 考务编排「一键带入」时按这个值带入各考场
-    var html = members.map(function (r) {
+    var html = members.map(function (r, idx) {
+        // 2026-10-14 用户口径：这里也能排顺序（↑↓），顺序随分组落库、考务「一键带入」沿用
         return '<div class="rm-item" data-id="' + r.id + '">'
             + '<input class="form-check-input rm-chk-r" type="checkbox" data-id="' + r.id + '">'
             + '<span class="flex-grow-1 text-truncate"><b>' + esc(r.location) + '</b> '
             + '<span class="text-muted small">' + esc(r.note) + '</span></span>'
+            + '<button class="btn btn-sm btn-outline-secondary py-0 px-1 rm-up" title="上移一位'
+            + '（顺序会被考务「一键带入」沿用）"' + (idx === 0 ? ' disabled' : '')
+            + ' onclick="moveRoomInGroup(' + r.id + ', -1)"><i class="bi bi-arrow-up"></i></button>'
+            + '<button class="btn btn-sm btn-outline-secondary py-0 px-1 rm-dn" title="下移一位'
+            + '（顺序会被考务「一键带入」沿用）"' + (idx === members.length - 1 ? ' disabled' : '')
+            + ' onclick="moveRoomInGroup(' + r.id + ', 1)"><i class="bi bi-arrow-down"></i></button>'
             + '<input type="number" min="1" max="500" step="1" data-id="' + r.id + '"'
             + ' class="form-control form-control-sm py-0 rm-cap" style="width:72px"'
             + ' title="容量（人）· 考务「一键带入」时的默认容量" aria-label="容量"'
@@ -253,8 +277,40 @@ function checkedIds(sel) {
 }
 function _setGroups(room, ids, done) {
     post(URL_ROOMS + '/' + room.id + '/groups', {group_ids: ids.join(',')}, function () {
-        room.group_ids = ids; done();
+        room.group_ids = ids;
+        _syncLibIds(room);      // 归属变了，组内顺序跟着改（与服务端「新加入排末尾」口径一致）
+        done();
     });
+}
+// 2026-10-14：房间归属变化后同步各组 lib_ids —— 保留原有顺序，新加入的追加到末尾
+function _syncLibIds(room) {
+    state.groups.forEach(function (g) {
+        g.lib_ids = g.lib_ids || [];
+        var i = g.lib_ids.indexOf(room.id);
+        if (inGroup(room, g.id)) {
+            if (i < 0) g.lib_ids.push(room.id);
+        } else if (i >= 0) {
+            g.lib_ids.splice(i, 1);
+        }
+    });
+}
+// 2026-10-14 用户口径：分组里的房间要能「上移 / 下移」，而且**顺序要能带着复用** ——
+// 先动界面（即时反馈），服务端落库（exam_room_group_map.sort_order）成功后以它返回的顺序为准；
+// 失败则回滚成操作前的顺序。考务步骤②「一键带入」按这个顺序生成 01、02… 考场编号。
+function moveRoomInGroup(id, dir) {
+    var g = curGroup();
+    if (!g) return;
+    var order = (g.lib_ids || []).slice();
+    var i = order.indexOf(id), j = i + dir;
+    if (i < 0 || j < 0 || j >= order.length) return;     // 已在最前 / 最后
+    var prev = (g.lib_ids || []).slice();
+    order.splice(i, 1);
+    order.splice(j, 0, id);
+    g.lib_ids = order;
+    renderRight();
+    post(URL_ROOMS + '/groups/' + g.id + '/reorder', {lib_id: id, dir: dir},
+        function (d) { g.lib_ids = d.order || order; renderRight(); },
+        function () { g.lib_ids = prev; renderRight(); });
 }
 function addSel() {
     if (state.cur == null) { alert('请先在右上角选择或新增分组'); return; }
@@ -350,7 +406,7 @@ function delRoom(id) {
     });
 }
 
-// v1.19.47.30 批量导入学校房间（Excel：位置 / 备注；按位置去重，已有则更新备注）
+// v1.19.49.31 批量导入学校房间（Excel：位置 / 备注；按位置去重，已有则更新备注）
 function importRooms(input) {
     if (!input.files.length) return;
     var fd = new FormData();

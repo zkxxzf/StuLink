@@ -1,4 +1,4 @@
-# StuLink v1.19.47.30 2026-10-10
+# StuLink v1.19.49.31 2026-10-10
 # 教务 · 教师名单：列表 / Excel 导入（模板-预览-确认-密码清单）/ 编辑
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 import io
@@ -27,6 +27,34 @@ _PHONE_RE = re.compile(r'^1\d{10}$')
 # 导入草稿（内存级，服务重启后自动失效，与成绩模块教师导入同模式）
 _DRAFT = {}
 _DRAFT_TTL = 1800
+
+# 2026-10-14：本页有**两处入口** —— 教务管理「教师」(/academic/teachers) 与
+# 系统管理「教师管理 → 教师名单」(/users/teachers，见 app/modules/system/routes/users.py
+# 的 add_url_rule)。同一份视图函数、同一份数据，端点按当前蓝图自适应：
+# 页面内链接 / 表单 action / 重定向都留在用户所在模块（不跨模块跳，与
+# app/modules/grades/routes/teachers.py 的双端模式一致）。
+_USERS_ENDPOINTS = {
+    'teachers_page': 'users.teachers_page',
+    'teachers_export': 'users.teachers_export',
+    'teachers_template': 'users.teachers_template',
+    'teachers_import_upload': 'users.teachers_import_upload',
+    'teachers_import_confirm': 'users.teachers_import_confirm',
+    'teachers_import_passwords': 'users.teachers_import_passwords',
+    'teacher_edit': 'users.teacher_edit',
+}
+
+
+def _ep(name):
+    """端点名自适应：返回当前模块下该功能的端点全名（模板里以 url_for(ep('x')) 使用）。"""
+    if request.blueprint == 'users':
+        return _USERS_ENDPOINTS[name]
+    return f'academic.{name}'
+
+
+def _log_module():
+    """操作日志的模块名按当前入口记（系统管理侧 system / 教务侧 academic），
+    便于「操作日志」页按模块筛选时归属正确。"""
+    return 'system' if request.blueprint == 'users' else 'academic'
 
 
 def _purge_expired_drafts():
@@ -96,7 +124,7 @@ def teachers_page():
             'id_masked': id_card_util.masked_from_cipher(t.id_card_enc),
         })
     return render_template('academic/teachers.html', rows=rows, pagination=pagination,
-                           subjects=_subject_options(), **filters)
+                           subjects=_subject_options(), ep=_ep, **filters)
 
 
 @bp.route('/teachers/export')
@@ -154,7 +182,7 @@ def teachers_export():
     buf.seek(0)
     stamp = datetime.now().strftime('%Y%m%d_%H%M%S')
     log_operation(current_user, '导出', '教师名单', None, f'{len(teachers)} 条',
-                  module='academic')
+                  module=_log_module())
     return send_file(buf, as_attachment=True,
                      download_name=f'教师名单_{stamp}.xlsx',
                      mimetype='application/vnd.openxmlformats-officedocument'
@@ -181,29 +209,29 @@ def teachers_import_upload():
     file = request.files.get('file')
     if not file or not file.filename:
         flash('请选择教师名单 Excel 文件', 'danger')
-        return redirect(url_for('academic.teachers_page'))
+        return redirect(url_for(_ep('teachers_page')))
     # 2026-10-13 全面审计 M-6：统一上传校验（白名单 + 危险类型 + magic 嗅探）
     from app.utils.upload_guard import validate_upload
     ok, msg = validate_upload(file.filename, allowed_exts=['xlsx', 'xls'],
                               stream=file.stream)
     if not ok:
         flash(f'{msg}（当前文件：{file.filename}）', 'danger')
-        return redirect(url_for('academic.teachers_page'))
+        return redirect(url_for(_ep('teachers_page')))
     try:
         rows = teacher_import_service.parse_excel(io.BytesIO(file.read()))
     except ValueError as e:
         flash(str(e), 'danger')
-        return redirect(url_for('academic.teachers_page'))
+        return redirect(url_for(_ep('teachers_page')))
     except Exception:
         flash('文件解析失败：请使用下载的标准模板填写后重试', 'danger')
-        return redirect(url_for('academic.teachers_page'))
+        return redirect(url_for(_ep('teachers_page')))
 
     plan = teacher_import_service.build_plan(rows)
     token = uuid.uuid4().hex
     _purge_expired_drafts()
     _DRAFT[token] = {'plan': plan, 'fname': file.filename, '_ts': time.time()}
     return render_template('academic/teacher_import_preview.html',
-                           token=token, plan=plan, fname=file.filename)
+                           token=token, plan=plan, fname=file.filename, ep=_ep)
 
 
 @bp.route('/teachers/import/confirm', methods=['POST'])
@@ -216,7 +244,7 @@ def teachers_import_confirm():
     draft = _DRAFT.get(token)
     if not draft:
         flash('导入批次已失效，请重新上传文件', 'danger')
-        return redirect(url_for('academic.teachers_page'))
+        return redirect(url_for(_ep('teachers_page')))
 
     plan = draft['plan']
     overrides = {}
@@ -230,19 +258,19 @@ def teachers_import_confirm():
     except IntegrityError:
         db.session.rollback()
         flash('导入失败：身份证号或用户名与现有数据冲突，请检查后重新导入', 'danger')
-        return redirect(url_for('academic.teachers_page'))
+        return redirect(url_for(_ep('teachers_page')))
     except Exception as e:
         db.session.rollback()
         flash(f'导入失败：{e}', 'danger')
-        return redirect(url_for('academic.teachers_page'))
+        return redirect(url_for(_ep('teachers_page')))
 
     draft['result'] = result
     draft['_ts'] = time.time()
     log_operation(current_user, '导入', '教师名单', None,
                   f'新增 {result["created_teachers"]}、更新 {result["updated_teachers"]}、'
-                  f'新建账号 {len(result["accounts"])}', module='academic')
+                  f'新建账号 {len(result["accounts"])}', module=_log_module())
     return render_template('academic/teacher_import_result.html',
-                           token=token, result=result, plan=plan)
+                           token=token, result=result, plan=plan, ep=_ep)
 
 
 @bp.route('/teachers/import/passwords/<token>.csv')
@@ -254,7 +282,7 @@ def teachers_import_passwords(token):
     draft = _DRAFT.get(token)
     if not draft or not draft.get('result'):
         flash('密码清单已失效，请在教师管理页重置相应账号密码', 'warning')
-        return redirect(url_for('academic.teachers_page'))
+        return redirect(url_for(_ep('teachers_page')))
     data = teacher_import_service.accounts_csv(draft['result']['accounts'])
     return send_file(io.BytesIO(data), as_attachment=True,
                      download_name='教师初始账号密码.csv', mimetype='text/csv')
@@ -277,7 +305,7 @@ def teacher_edit(tid):
         status = request.form.get('status') or 'active'
         id_card_raw = id_card_util.normalize(request.form.get('id_card'))
 
-        back = redirect(url_for('academic.teacher_edit', tid=tid))
+        back = redirect(url_for(_ep('teacher_edit'), tid=tid))
         if not name:
             flash('姓名不能为空', 'danger')
             return back
@@ -313,16 +341,16 @@ def teacher_edit(tid):
         if status in ('active', 'left') and status != t.status:
             t.status = status
             changes.append('状态变更')
-        # v1.19.47.30：教师档案变更 → 同步回写到关联的 users 账号（admin 自动 skip）
+        # v1.19.49.31：教师档案变更 → 同步回写到关联的 users 账号（admin 自动 skip）
         back_changes = teacher_sync.sync_from_teacher(t, renamed_from=None)
         if back_changes:
             changes.extend(back_changes)
         db.session.commit()
         log_operation(current_user, '更新', '教师', t.id,
                       f'{t.name}：' + ('；'.join(changes) or '无字段变化'),
-                      module='academic')
+                      module=_log_module())
         flash(f'教师 {t.name} 已更新', 'success')
-        return redirect(url_for('academic.teachers_page'))
+        return redirect(url_for(_ep('teachers_page')))
 
-    return render_template('academic/teacher_edit.html', t=t,
+    return render_template('academic/teacher_edit.html', t=t, ep=_ep,
                            id_masked=id_card_util.masked_from_cipher(t.id_card_enc))

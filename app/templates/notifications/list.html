@@ -3,23 +3,25 @@
 
 {% block extra_css %}
 <style>
+    /* 2026-10-14：本页原为写死浅色（#f0f7ff 底 + 主题浅色文字 → 深色下标题对比 1.01 隐身、
+       浅底白块刺眼）。统一改引 theme.css 的 --sl-* 变量，深浅两主题同源。 */
     .notif-card {
-        border-left: 4px solid #e2e8f0;
+        border-left: 4px solid var(--sl-border);
         transition: all .2s;
         cursor: pointer;
     }
-    .notif-card:hover { box-shadow: 0 2px 8px rgba(0,0,0,.1); transform: translateY(-1px); }
-    .notif-card.unread { border-left-color: #3b82f6; background: #f0f7ff; }
+    .notif-card:hover { box-shadow: var(--sl-shadow); transform: translateY(-1px); }
+    .notif-card.unread { border-left-color: var(--sl-sidebar-accent); background: var(--sl-soft-info-bg); }
     .notif-card.urgent { border-left-color: #ef4444; }
-    .notif-card.urgent.unread { background: #fef2f2; }
+    .notif-card.urgent.unread { background: var(--sl-soft-danger-bg); }
     .priority-badge { font-size: 11px; padding: 2px 8px; border-radius: 10px; font-weight: 600; }
-    .priority-urgent { background: #fef2f2; color: #dc2626; border: 1px solid #fecaca; }
-    .priority-normal { background: #eff6ff; color: #2563eb; border: 1px solid #bfdbfe; }
+    .priority-urgent { background: var(--sl-soft-danger-bg); color: var(--sl-soft-danger-fg); border: 1px solid var(--sl-soft-danger-bd); }
+    .priority-normal { background: var(--sl-soft-info-bg); color: var(--sl-soft-info-fg); border: 1px solid var(--sl-soft-info-bd); }
     .read-dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
-    .read-dot.unread { background: #3b82f6; }
-    .read-dot.read { background: #cbd5e1; }
+    .read-dot.unread { background: var(--sl-sidebar-accent); }
+    .read-dot.read { background: var(--sl-border); }
     .notif-content-preview {
-        color: #64748b; font-size: 13px;
+        color: var(--sl-text-muted); font-size: 13px;
         max-height: 40px; overflow: hidden; text-overflow: ellipsis;
         display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
     }
@@ -31,43 +33,43 @@
     @media (hover: none) {
         .notif-actions { opacity: 1; }
     }
-    .target-tag { font-size: 11px; background: #f1f5f9; color: #475569; padding: 2px 6px; border-radius: 4px; }
+    .target-tag { font-size: 11px; background: var(--sl-surface-2); color: var(--sl-text-muted); padding: 2px 6px; border-radius: 4px; }
     .category-badge { font-size: 10px; padding: 1px 6px; border-radius: 8px; font-weight: 600; }
-    .cat-system { background: #eff6ff; color: #2563eb; }
-    .cat-reminder { background: #fef3c7; color: #b45309; }
-    .cat-academic { background: #ecfdf5; color: #059669; }
-    .cat-collect { background: #fff7ed; color: #c2410c; }
-    .cat-workbench { background: #f5f3ff; color: #7c3aed; }
-    .cat-other { background: #f1f5f9; color: #475569; }
+    .cat-system { background: var(--sl-soft-info-bg); color: var(--sl-soft-info-fg); }
+    .cat-reminder { background: var(--sl-soft-warn-bg); color: var(--sl-soft-warn-fg); }
+    .cat-academic { background: var(--sl-soft-success-bg); color: var(--sl-soft-success-fg); }
+    .cat-collect { background: var(--sl-soft-amber-bg); color: var(--sl-soft-amber-fg); }
+    .cat-workbench { background: var(--sl-soft-purple-bg); color: var(--sl-soft-purple-fg); }
+    .cat-other { background: var(--sl-surface-2); color: var(--sl-text-muted); }
     .create-btn { border-radius: 8px; font-weight: 600; }
     .page-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 20px; }
-    .pagination-info { color: #64748b; font-size: 13px; }
+    .pagination-info { color: var(--sl-text-muted); font-size: 13px; }
     /* 分类筛选标签 */
     .filter-bar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 16px; }
-    .filter-tab { font-size: 12px; padding: 4px 12px; border-radius: 16px; border: 1px solid #e2e8f0;
-        color: #475569; text-decoration: none; transition: all .15s; background: #fff; }
-    .filter-tab:hover { border-color: #93c5fd; color: #2563eb; }
-    .filter-tab.active { background: #2563eb; color: #fff; border-color: #2563eb; }
+    .filter-tab { font-size: 12px; padding: 4px 12px; border-radius: 16px; border: 1px solid var(--sl-border);
+        color: var(--sl-text-muted); text-decoration: none; transition: all .15s; background: var(--sl-surface); }
+    .filter-tab:hover { border-color: var(--sl-sidebar-accent); color: var(--sl-sidebar-accent-text); }
+    .filter-tab.active { background: var(--sl-sidebar-accent); color: var(--sl-surface); border-color: var(--sl-sidebar-accent); }
     .filter-switch { font-size: 12px; display: flex; align-items: center; gap: 4px; }
     /* 创建通知模态框 */
     .modal-content { border-radius: 12px; border: none; }
-    .modal-header { border-bottom: 1px solid #f1f5f9; padding: 16px 20px; }
+    .modal-header { border-bottom: 1px solid var(--sl-border); padding: 16px 20px; }
     .modal-body { padding: 20px; }
     .scope-group { display: none; }
     .scope-group.active { display: block; }
     .checkbox-grid { display: flex; flex-wrap: wrap; gap: 8px; }
     .checkbox-grid .form-check { min-width: 80px; }
     /* 人员多选控件 */
-    .user-picker { border: 1px solid #dee2e6; border-radius: 8px; padding: 8px; min-height: 42px; }
-    .user-picker .selected-tag { display: inline-flex; align-items: center; gap: 4px; background: #eff6ff;
-        color: #2563eb; border-radius: 12px; padding: 2px 8px; font-size: 12px; margin: 2px; }
-    .user-picker .selected-tag .remove { cursor: pointer; font-weight: bold; color: #94a3b8; }
-    .user-picker .selected-tag .remove:hover { color: #dc2626; }
-    .search-dropdown { position: absolute; z-index: 1050; background: #fff; border: 1px solid #dee2e6;
-        border-radius: 8px; max-height: 200px; overflow-y: auto; width: 100%; box-shadow: 0 4px 12px rgba(0,0,0,.1); }
-    .search-dropdown .item { padding: 8px 12px; cursor: pointer; font-size: 13px; border-bottom: 1px solid #f1f5f9; }
-    .search-dropdown .item:hover { background: #f0f7ff; }
-    .search-dropdown .item .meta { color: #94a3b8; font-size: 11px; }
+    .user-picker { border: 1px solid var(--sl-border); border-radius: 8px; padding: 8px; min-height: 42px; }
+    .user-picker .selected-tag { display: inline-flex; align-items: center; gap: 4px; background: var(--sl-soft-info-bg);
+        color: var(--sl-soft-info-fg); border-radius: 12px; padding: 2px 8px; font-size: 12px; margin: 2px; }
+    .user-picker .selected-tag .remove { cursor: pointer; font-weight: bold; color: var(--sl-text-subtle); }
+    .user-picker .selected-tag .remove:hover { color: var(--sl-soft-danger-fg); }
+    .search-dropdown { position: absolute; z-index: 1050; background: var(--sl-surface); border: 1px solid var(--sl-border);
+        border-radius: 8px; max-height: 200px; overflow-y: auto; width: 100%; box-shadow: var(--sl-shadow); }
+    .search-dropdown .item { padding: 8px 12px; cursor: pointer; font-size: 13px; border-bottom: 1px solid var(--sl-border); }
+    .search-dropdown .item:hover { background: var(--sl-soft-info-bg); }
+    .search-dropdown .item .meta { color: var(--sl-text-subtle); font-size: 11px; }
 </style>
 {% endblock %}
 
@@ -221,7 +223,7 @@
 {% else %}
 <div class="card">
     <div class="card-body text-center py-5">
-        <i class="bi bi-inbox" style="font-size:48px;color:#cbd5e1;"></i>
+        <i class="bi bi-inbox" style="font-size:48px;color:var(--sl-text-subtle);"></i>
         <p class="text-muted mt-3 mb-0">暂无通知</p>
     </div>
 </div>

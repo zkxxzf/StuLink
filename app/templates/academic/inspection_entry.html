@@ -35,30 +35,48 @@
     {# ===== 单条录入 ===== #}
     <div class="tab-pane fade {% if mode == 'single' %}show active{% endif %}" id="paneSingle" role="tabpanel">
         <div class="card">
-            <div class="card-header"><i class="bi bi-plus-circle"></i> 录入一条查课记录</div>
+            <div class="card-header d-flex justify-content-between align-items-center flex-wrap gap-1">
+                <span><i class="bi bi-plus-circle"></i> 录入一条查课记录</span>
+                {# 2026-10-14：选中教师后按「日期 + 节次」自动追踪班级 / 科目（可手改） #}
+                <span class="small text-muted fw-normal" id="singleLookupHint">
+                    选择教师后自动带出班级 / 科目，仍可修改
+                </span>
+            </div>
             <div class="card-body">
-                <form class="row g-2 align-items-end" method="POST"
+                <form id="singleForm" class="row g-2 align-items-end" method="POST"
                       action="{{ url_for('academic.inspection_add') }}">
                     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                     <div class="col-6 col-md-2">
                         <label class="form-label small mb-1">日期 <span class="text-danger">*</span></label>
-                        <input type="date" name="inspect_date" class="form-control form-control-sm"
-                               value="{{ today }}" required>
+                        <input type="date" name="inspect_date" id="singleDate"
+                               class="form-control form-control-sm" value="{{ today }}" required>
                     </div>
                     <div class="col-6 col-md-1">
                         <label class="form-label small mb-1">节次</label>
-                        <input type="number" name="period" class="form-control form-control-sm" min="1">
+                        {# 2026-10-14：节次改下拉（本学期作息节次定义），避免手填数字错位 #}
+                        {% if period_opts %}
+                        <select name="period" id="singlePeriod" class="form-select form-select-sm">
+                            <option value="">--</option>
+                            {% for p in period_opts %}
+                            <option value="{{ p.number }}">{{ p.name }}</option>
+                            {% endfor %}
+                        </select>
+                        {% else %}
+                        <input type="number" name="period" id="singlePeriod"
+                               class="form-control form-control-sm" min="1">
+                        {% endif %}
                     </div>
                     <div class="col-6 col-md-1">
                         <label class="form-label small mb-1">年级 <span class="text-danger">*</span></label>
-                        <select name="grade" class="form-select form-select-sm" required>
+                        <select name="grade" id="singleGrade" class="form-select form-select-sm" required>
                             <option value="">--</option>
                             {% for g in grade_opts %}<option value="{{ g }}">{{ g }}</option>{% endfor %}
                         </select>
                     </div>
                     <div class="col-12 col-md-2">
                         <label class="form-label small mb-1">教师 <span class="text-danger">*</span></label>
-                        <select name="teacher_uid" class="form-select form-select-sm" required>
+                        <select name="teacher_uid" id="singleTeacher"
+                                class="form-select form-select-sm" required>
                             <option value="">-- 选择教师 --</option>
                             {% for t in teachers %}
                             <option value="{{ t.teacher_uid }}">{{ t.name }}（{{ t.teacher_uid }}）</option>
@@ -67,11 +85,15 @@
                     </div>
                     <div class="col-6 col-md-1">
                         <label class="form-label small mb-1">班级</label>
-                        <input name="class_name" class="form-control form-control-sm" maxlength="10">
+                        <input name="class_name" id="singleClass"
+                               class="form-control form-control-sm" maxlength="10"
+                               placeholder="自动带出">
                     </div>
                     <div class="col-6 col-md-1">
                         <label class="form-label small mb-1">科目</label>
-                        <input name="subject" class="form-control form-control-sm" maxlength="20">
+                        <input name="subject" id="singleSubject"
+                               class="form-control form-control-sm" maxlength="20"
+                               placeholder="自动带出">
                     </div>
                     <div class="col-6 col-md-1">
                         <label class="form-label small mb-1">情况</label>
@@ -107,7 +129,10 @@
                                    value="{{ today }}" required>
                         </div>
                         <div class="col-md-9 d-flex align-items-end">
-                            <span class="text-muted small">空行会被自动忽略；越权/无效的行会跳过，不影响其余行落库。</span>
+                            <span class="text-muted small">
+                                空行会被自动忽略；越权/无效的行会跳过，不影响其余行落库。
+                                选择教师后自动带出班级 / 科目（仍可修改）。
+                            </span>
                         </div>
                     </div>
                     <div class="table-responsive">
@@ -144,9 +169,12 @@
 </div>
 
 {# 模板变量供 JS 使用（与统计页同款结构，statsUrl 留空 = 本页不做图表统计） #}
+{# 2026-10-14：lookupUrl = 录入页「按教师自动带出班级/科目」反查接口 #}
 <script id="inspectionData" type="application/json">
 {
     "statsUrl": "",
+    "lookupUrl": {{ url_for('academic.api_inspection_teacher_courses')|tojson }},
+    "periods": [{% for p in period_opts %}{"number":{{ p.number }},"name":{{ p.name|tojson }}}{% if not loop.last %},{% endif %}{% endfor %}],
     "teachers": [{% for t in teachers %}[{{ t.teacher_uid|tojson }},{{ t.name|tojson }}]{% if not loop.last %},{% endif %}{% endfor %}],
     "grades": [{% for g in grade_opts %}{{ g|tojson }}{% if not loop.last %},{% endif %}{% endfor %}],
     "results": [{% for k, label in results %}{"key":{{ k|tojson }},"label":{{ label|tojson }}}{% if not loop.last %},{% endif %}{% endfor %}]

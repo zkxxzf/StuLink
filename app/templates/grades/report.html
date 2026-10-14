@@ -18,7 +18,7 @@
 </style>
 {% endblock %}
 {% block content %}
-{# v1.19.47.30 考试态：侧栏入口带 ?exam=<id>（此前这里只认 exam_id，本场 id 被丢掉）。
+{# v1.19.49.31 考试态：侧栏入口带 ?exam=<id>（此前这里只认 exam_id，本场 id 被丢掉）。
    统一先问 exam_nav()（认 ?exam / exam_id / 路径），考试态下隐藏「考试」下拉（只看本场）。 #}
 {% set _en = exam_nav() %}
 {% set _eid = _en.exam_id if _en else (request.args.get('exam') or request.args.get('exam_id') or '') %}
@@ -51,18 +51,81 @@
     </div>
 
     {# v1.19.47.30 AI 一句话分析：浏览器本地 Key（不上服务器），SSE 流式返回。
-       报告正文由后端 app/utils/html_guard.py 白名单消毒后再下发，前端只插入不拼接。 #}
+       报告正文由后端 app/utils/html_guard.py 白名单消毒后再下发，前端只插入不拼接。
+       2026-10-14：加入「提示词生成器」（与 AI 分析工作台同款，参数化挂载）；
+       进行中可停止，中断/失败/停止后可「重新编辑提示词」回填选项与提示词。 #}
     <div class="card shadow-sm mb-3 rp-ai-card" id="rpAiCard">
         <div class="card-body py-3">
             <div class="d-flex flex-wrap align-items-center gap-2 mb-2">
                 <h6 class="mb-0"><i class="bi bi-stars text-primary"></i> AI 一句话分析</h6>
                 <span class="text-muted small">用一句话提问，AI 结合本场考试成绩给出分析；Key 只存本机浏览器，服务器不留存</span>
+                <button type="button" class="btn btn-sm btn-outline-primary ms-auto" id="rpGenToggle"
+                        aria-expanded="false" aria-controls="rpGenPanel">
+                    <i class="bi bi-sliders"></i> 提示词生成器
+                </button>
             </div>
-            <div class="input-group input-group-sm">
-                <input type="text" id="rpAiQ" class="form-control" autocomplete="off"
-                       placeholder="一句话分析：本次考试各班物理成绩差异，并找出临界生最多的班">
-                <button class="btn btn-primary" type="button" id="rpAiRun">
+
+            {# 提示词生成器（2026-10-14，默认收起；与 AI 分析工作台共用 ai_prompt_gen.js） #}
+            <div id="rpGenPanel" class="ai-gen-panel border rounded-3 p-3 mb-2 d-none">
+                <div class="d-flex flex-wrap align-items-center gap-2 mb-2">
+                    <span class="fw-semibold small"><i class="bi bi-magic"></i> 选一选，自动拼好提示词</span>
+                    <span class="text-muted small ms-auto">选项随时可改；拼出的提示词在下面仍可手动编辑</span>
+                </div>
+                {# 年级不在面板里选：本页看的就是某一场考试（自带年级），生成器只在场次内收窄。 #}
+                <div>
+                    <label class="form-label small text-muted mb-1">
+                        班级 <span class="text-muted">（可多选，不选＝本场考试全部班级）</span>
+                    </label>
+                    <div id="rpGenClasses" class="d-flex flex-wrap gap-1 ai-gen-chips"></div>
+                </div>
+                <div class="mt-2">
+                    <label class="form-label small text-muted mb-1">
+                        学科 <span class="text-muted">（可多选，不选＝全部学科）</span>
+                    </label>
+                    <div id="rpGenSubjects" class="d-flex flex-wrap gap-1 ai-gen-chips"></div>
+                </div>
+                <div class="row g-2 mt-1">
+                    <div class="col-md-6">
+                        <label class="form-label small text-muted mb-1" for="rpGenFocus">分析侧重</label>
+                        <select id="rpGenFocus" class="form-select form-select-sm"></select>
+                    </div>
+                    <div class="col-md-6">
+                        <label class="form-label small text-muted mb-1" for="rpGenOutput">输出格式</label>
+                        <select id="rpGenOutput" class="form-select form-select-sm"></select>
+                    </div>
+                </div>
+                <div class="mt-2">
+                    <label class="form-label small text-muted mb-1" for="rpGenExtra">
+                        附加要求 <span class="text-muted">（可留空；也可点下面常用要求快速填入）</span>
+                    </label>
+                    <textarea id="rpGenExtra" class="form-control form-control-sm" rows="2"
+                              maxlength="500" placeholder="例如：只陈述客观数据，不做人格化评价"></textarea>
+                    <div id="rpGenExtraPresets" class="d-flex flex-wrap gap-1 mt-1 ai-gen-chips"></div>
+                </div>
+                <div class="d-flex flex-wrap align-items-center gap-2 mt-3 pt-2 border-top">
+                    <input type="text" id="rpGenTplName" class="form-control form-control-sm"
+                           style="max-width:150px" maxlength="30" placeholder="模板名（如：月考班级对比）">
+                    <button type="button" class="btn btn-sm btn-outline-secondary" id="rpGenTplSave">
+                        <i class="bi bi-bookmark-plus"></i> 存为模板
+                    </button>
+                    <select id="rpGenTpl" class="form-select form-select-sm" style="max-width:210px"></select>
+                    <button type="button" class="btn btn-sm btn-outline-danger" id="rpGenTplDel" disabled>
+                        <i class="bi bi-trash"></i> 删除模板
+                    </button>
+                    <button type="button" class="btn btn-sm btn-primary ms-auto" id="rpGenBuild">
+                        <i class="bi bi-magic"></i> 生成提示词
+                    </button>
+                </div>
+            </div>
+
+            <textarea id="rpAiQ" class="form-control form-control-sm" rows="2" autocomplete="off"
+                      placeholder="一句话分析：本次考试各班物理成绩差异，并找出临界生最多的班（也可用右上「提示词生成器」拼装）"></textarea>
+            <div class="d-flex flex-wrap align-items-center gap-2 mt-2">
+                <button class="btn btn-primary btn-sm" type="button" id="rpAiRun">
                     <i class="bi bi-stars"></i> <span class="rp-ai-run-label">AI 分析</span>
+                </button>
+                <button class="btn btn-sm btn-outline-secondary" type="button" id="rpAiCopyPrompt">
+                    <i class="bi bi-clipboard"></i> 复制提示词
                 </button>
             </div>
             <div class="d-flex flex-wrap gap-2 mt-2" id="rpAiChips">
@@ -77,6 +140,13 @@
                 <div id="rpAiTools" class="rp-ai-tools mb-2"></div>
                 <div class="rp-ai-report"></div>
                 <div class="d-flex flex-wrap gap-2 mt-3 pt-2 border-top">
+                    {# 进行中可停止；中断/失败/停止后可把当时的选择与提示词带回生成器 #}
+                    <button class="btn btn-sm btn-outline-warning d-none" type="button" id="rpAiStop">
+                        <i class="bi bi-stop-circle"></i> 停止
+                    </button>
+                    <button class="btn btn-sm btn-outline-primary d-none" type="button" id="rpAiReedit">
+                        <i class="bi bi-pencil-square"></i> 重新编辑提示词
+                    </button>
                     <button class="btn btn-sm btn-outline-secondary" type="button" id="rpAiCopy">
                         <i class="bi bi-clipboard"></i> 复制
                     </button>
@@ -102,6 +172,8 @@
 {# grades_md.js：恢复历史任务时，旧口径 Markdown 报告（后端包装为负数 id 条目）用它渲染 #}
 <script src="{{ su('js/grades_md.js') }}"></script>
 <script src="{{ su('js/ai_task_ui.js') }}"></script>
+{# ai_prompt_gen.js：提示词生成器（工厂，本页在 report_ai.js 里自建实例） #}
+<script src="{{ su('js/ai_prompt_gen.js') }}"></script>
 <script src="{{ su('js/report.js') }}"></script>
 <script src="{{ su('js/report_pivot.js') }}"></script>
 <script src="{{ su('js/report_warning.js') }}"></script>

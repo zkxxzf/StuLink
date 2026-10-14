@@ -20,6 +20,20 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from _db_backup import backup_db      # noqa: E402
 from _ddl_guard import assert_table   # noqa: E402
 
+# 2026-10-14 第四轮审计（CONS-02）：补迁移登记（只登记不早退）
+SCRIPT_NAME = os.path.basename(__file__)
+try:
+    import _mig_log
+except Exception as _e:  # noqa: BLE001
+    _mig_log = None
+    print(f'[WARN] 迁移登记模块不可用（迁移照常执行，仅不登记）：{_e}')
+
+
+def _record():
+    if _mig_log:
+        _mig_log.record(SCRIPT_NAME, note='删除 academic.db 旧课表残留表 timetables / timetable_entries')
+
+
 DB_PATH = os.path.join(BASE, 'data', 'academic.db')
 # 先删明细表再删档案表（顺序不影响，但保持语义清晰）
 TABLES = ('timetable_entries', 'timetables')
@@ -28,6 +42,7 @@ TABLES = ('timetable_entries', 'timetables')
 def main():
     if not os.path.exists(DB_PATH):
         print(f'[SKIP] 库文件不存在：{DB_PATH}')
+        _record()
         return 0
 
     backup_db(DB_PATH)
@@ -50,6 +65,7 @@ def main():
         conn.close()
 
     print('[完成] 旧课表两张表已清理；如需回滚，用上面的备份文件覆盖 data/academic.db')
+    _record()
     return 0
 
 

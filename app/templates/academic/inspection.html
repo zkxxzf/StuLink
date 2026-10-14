@@ -190,7 +190,8 @@
                 <tr>
                     <td>{{ r.inspect_date.strftime('%Y-%m-%d') }}</td>
                     <td>{{ r.grade or '-' }}</td>
-                    <td>{{ r.period or '-' }}</td>
+                    {# 2026-10-14：节次显示名（1=早读、2=第1节），与录入下拉同口径 #}
+                    <td>{{ period_label(r.period) if r.period else '-' }}</td>
                     <td class="fw-bold">{{ r.teacher_name }}</td>
                     <td>{{ r.class_name or '-' }}</td>
                     <td>{{ r.subject or '-' }}</td>
@@ -280,8 +281,18 @@
                         </div>
                         <div class="col-6">
                             <label class="form-label small mb-1">节次</label>
+                            {# 2026-10-14：节次改下拉（本学期作息节次定义），与录入页同口径 #}
+                            {% if period_opts %}
+                            <select name="period" id="eiPeriod" class="form-select form-select-sm">
+                                <option value="">--</option>
+                                {% for p in period_opts %}
+                                <option value="{{ p.number }}">{{ p.name }}</option>
+                                {% endfor %}
+                            </select>
+                            {% else %}
                             <input name="period" id="eiPeriod" type="number" min="1" max="13"
                                    class="form-control form-control-sm">
+                            {% endif %}
                         </div>
                         <div class="col-6">
                             <label class="form-label small mb-1">班级</label>
@@ -308,13 +319,31 @@
 <script>
 document.addEventListener('DOMContentLoaded', function () {
     var tpl = {{ url_for('academic.inspection_edit', rid=0)|tojson }};
+    var eiPeriod = document.getElementById('eiPeriod');
+    // 2026-10-14：节次控件可能是下拉（本学期作息节次定义）或数字输入（无定义时）
+    function setEiPeriod(v) {
+        var want = String(v == null ? '' : v);
+        if (eiPeriod.tagName === 'SELECT') {
+            // 历史节次不在本学期下拉里（作息改过）→ 临时补一项，避免打开编辑就丢值
+            if (want && /^\d+$/.test(want)
+                    && !eiPeriod.querySelector('option[value="' + want + '"]')) {
+                var opt = document.createElement('option');
+                opt.value = want;
+                opt.textContent = want + '（原节次）';
+                eiPeriod.appendChild(opt);
+            }
+            eiPeriod.value = want;
+        } else {
+            eiPeriod.value = want;
+        }
+    }
     document.querySelectorAll('[data-bs-target="#editInspModal"]').forEach(function (btn) {
         btn.addEventListener('click', function () {
             var d = this.dataset;
             document.getElementById('editInspForm').action = tpl.replace(/\/\d+\/edit$/, '/' + d.id + '/edit');
             document.getElementById('eiTeacher').textContent = d.teacher || '';
             document.getElementById('eiResult').value = d.result || 'normal';
-            document.getElementById('eiPeriod').value = d.period || '';
+            setEiPeriod(d.period);
             document.getElementById('eiClass').value = d.className || '';
             document.getElementById('eiSubject').value = d.subject || '';
             document.getElementById('eiNote').value = d.note || '';

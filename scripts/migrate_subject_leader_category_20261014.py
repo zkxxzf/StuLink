@@ -89,6 +89,17 @@ FROM subject_leaders
 DDL_INDEX = ("CREATE INDEX IF NOT EXISTS idx_leader_year_subject "
              "ON subject_leaders (school_year, subject)")
 
+# 2026-10-14：模型还声明了两个**单列索引**（app/models/academic.py::SubjectLeader 的
+# school_year / subject 均为 index=True → ix_subject_leaders_school_year / _subject）。
+# 本脚本重建表时必须一并补建，否则 scripts/check_indexes.py 会以
+# 「模型声明、现网缺失」报红（run_all_regression 的索引自检因此失败）。
+DDL_INDEXES = (
+    "CREATE INDEX IF NOT EXISTS ix_subject_leaders_school_year "
+    "ON subject_leaders (school_year)",
+    "CREATE INDEX IF NOT EXISTS ix_subject_leaders_subject "
+    "ON subject_leaders (subject)",
+)
+
 if not os.path.isdir(DATA_DIR):
     print(f'[SKIP] 数据目录不存在: {DATA_DIR}')
     sys.exit(0)
@@ -155,10 +166,14 @@ for db_path in sorted(glob.glob(os.path.join(DATA_DIR, '*.db'))):
             conn.execute("UPDATE subject_leaders SET category=? "
                          "WHERE category IS NULL OR TRIM(category)=''",
                          (DEFAULT_CATEGORY,))
+            # 幂等补索引：老版本脚本重建表时只建了复合索引，
+            # 缺模型声明的两个单列索引（本脚本第二版起不再漏）
+            for ddl in (DDL_INDEX,) + DDL_INDEXES:
+                conn.execute(ddl)
             conn.commit()
             conn.close()
             skipped += 1
-            print(f'[SKIP] {name} 已是目标结构（含 category、无职责列），仅补齐空值')
+            print(f'[SKIP] {name} 已是目标结构（含 category、无职责列），补齐空值与索引')
             continue
 
         legacy = sorted(set(LEGACY_DUTY_COLUMNS) & cols)
@@ -174,6 +189,8 @@ for db_path in sorted(glob.glob(os.path.join(DATA_DIR, '*.db'))):
         conn.execute('DROP TABLE subject_leaders')
         conn.execute('ALTER TABLE subject_leaders_new RENAME TO subject_leaders')
         conn.execute(DDL_INDEX)
+        for ddl in DDL_INDEXES:
+            conn.execute(ddl)
         conn.commit()
         # 老备份表不再需要（数据已完整拷入新表），清掉避免误用
         conn.execute('DROP TABLE IF EXISTS subject_leaders_old_20261014')

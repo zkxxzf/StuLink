@@ -1,4 +1,4 @@
-# StuLink v1.19.47.30 2026-10-10
+# StuLink v1.19.49.31 2026-10-10
 # 教务模块模型（2026-10-10 按「一个功能一个库」分库）：
 #   academic.db    师资基础（教师名单 / 学科组长 / 班主任记录 / 考勤）
 #   timetable.db   课表与晚自习值班
@@ -640,6 +640,56 @@ class SubjectLeader(db.Model):
     def __repr__(self):
         return (f'<SubjectLeader {self.school_year} {self.grade}{self.subject}'
                 f'{self.category} {self.leader_name}>')
+
+
+class SubjectLeaderPlan(db.Model):
+    """学科组长方案 ＝ 一个「学年 × 学期」（2026-10-14 加，与任课映射方案同款交互）
+
+    为什么需要：组长登记本就按 学年 × 学期 并存（课表「备课组 / 教研组课表」的徽章
+    按课表自己的学年学期回查），但页面上只能"手输学年 + 选学期"切换，没有方案记录
+    （谁建的、叫什么、什么时候更新的）。方案表把每个学期显式化，页面右上角
+    「历史记录」即可使用历史方案 / 使用其他方案 / 新建方案。
+
+    - 唯一键 `学年 × 学期`：一个学期只能有一套组长登记（与 subject_leaders 的
+      唯一键口径一致），故方案与登记一一对应，重名/重复学期会被拒绝；
+    - `is_current=True` ＝ 页面默认打开的「当前学期方案」（至多一个）；
+    - 删除方案会连同该学期的组长登记一起删除（服务层负责，UI 二次确认）。
+    """
+    __bind_key__ = 'academic'
+    __tablename__ = 'subject_leader_plans'
+
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(80), nullable=False)
+    school_year = db.Column(db.String(20), nullable=False)   # 如 2026-2027
+    term = db.Column(db.String(10), default='')              # ''=整学年 / 第一学期 / 第二学期
+    note = db.Column(db.String(200), default='')
+    is_current = db.Column(db.Boolean, default=False, index=True)
+    created_by = db.Column(db.Integer)                       # users.id
+    created_at = db.Column(db.DateTime, default=datetime.now)
+    updated_at = db.Column(db.DateTime, default=datetime.now, onupdate=datetime.now)
+
+    __table_args__ = (
+        db.UniqueConstraint('school_year', 'term', name='uq_leader_plan_term'),
+        # 2026-10-14 第四轮审计（DATA3-01）：至多一个「当前学期方案」由 DB 级部分唯一索引兜底
+        db.Index('uq_leader_plan_current', 'is_current', unique=True,
+                 sqlite_where=db.text('is_current = 1')),
+    )
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'name': self.name,
+            'school_year': self.school_year or '',
+            'term': self.term or '',
+            'term_text': self.term or '整学年',
+            'note': self.note or '',
+            'is_current': bool(self.is_current),
+            'created_at': self.created_at.strftime('%Y-%m-%d %H:%M') if self.created_at else '',
+            'updated_at': self.updated_at.strftime('%Y-%m-%d %H:%M') if self.updated_at else '',
+        }
+
+    def __repr__(self):
+        return f'<SubjectLeaderPlan {self.school_year} {self.term} {self.name}>'
 
 
 # 学科固定展示顺序（任课表列序、学科组长矩阵行序都用它；未列入的学科排在后面）

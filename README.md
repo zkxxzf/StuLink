@@ -3,7 +3,7 @@
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
 [![Python](https://img.shields.io/badge/python-3.11+-green.svg)](https://python.org)
 [![Flask](https://img.shields.io/badge/flask-3.x-lightgrey.svg)](https://flask.palletsprojects.com/)
-[![Version](https://img.shields.io/badge/version-1.19.47.29-orange.svg)](https://gitee.com/zkxxzf/StuLink)
+[![Version](https://img.shields.io/badge/version-1.19.49.30-orange.svg)](https://gitee.com/zkxxzf/StuLink)
 
 面向中学的综合学生管理平台，采用 **双站点 + 多模块 + 一模块一库** 的故障隔离架构：
 
@@ -195,7 +195,7 @@
 
 - **后端**：Python 3.11+ / Flask 3.x / Flask-Login / Flask-SQLAlchemy 2.x（多库 binds）/ Waitress / openpyxl / reportlab / python-pptx
 - **前端**：Bootstrap 5 / jQuery / Jinja2 / ECharts（成绩可视化）/ Chart.js（画像）
-- **安全（v1.19.47.30）**：
+- **安全（v1.19.49.31）**：
   - **身份**：管理员首启随机口令 + 强制改密 · 一次性初始口令展示 · 会话口令摘要（改密即踢）· IP + 账号双维限流与锁定（锁键含来源，防账号被恶意锁定）
   - **数据**：AES 身份证与 AI Key 加密 · CSRF 8h 时效 · 二维权限（功能三档 × 数据范围）· 白名单式教师候选过滤
   - **传输**：`url_guard` 出站白名单 + DNS 解析 + 禁 302 跟随 · CSP（Report-Only 起步，可切 enforce）· HTTPS Cookie Secure
@@ -216,7 +216,7 @@ python run.py --dev
 cd alumni_app && python run.py
 
 # Docker 部署（三个容器：主应用 + 往届查询 + MCP 服务）
-docker build -t stulink:v1.19.47.30 .
+docker build -t stulink:v1.19.49.31 .
 docker build -t stulink-alumni:v1.0.0 ./alumni_app
 docker build -f Dockerfile.mcp -t stulink-mcp:v1.0.0 .
 docker-compose up -d
@@ -301,6 +301,8 @@ StuLink/
 
 | 版本 | 日期 | 亮点 |
 |---|---|---|
+| **1.19.49.29** | 2026-10-14 | **日志脱敏修复**：`log_mask` 包装已有 formatter 时误读 `Formatter.style`（不存在）导致启动崩溃——MCP 服务（uvicorn 预配 handler）场景实测暴露，改为按 `_style` 类名推断 style，并保留 `fmt/datefmt/defaults`；新增 SR-16 防回归 |
+| **1.19.48.29** | 2026-10-14 | **权限体系多身份改造（P1–P6）**：一人可挂多个权限组 + **身份切换**（顶栏 / 工作台）；数据范围收敛为唯一口径（`app/utils/scope.py`，6 处委托）；范围类型扩为 7 档（全校/本人年级/指定年级/本人班级/指定班级/本人任课/无）；预置身份重排为 **11 组**（新增考试管理员/生活处/政教主任/政教员，删除校长/副校长/备课组长/教研组长/学生发展中心）；管理界面支持组范围 7 档与用户多身份分配 |
 | **1.19.47.29** | 2026-10-13 | **学生身份证号 / 联系电话明文收敛为「仅管理员 + 班主任」**（班主任补身份证明文、宿管收回联系电话，其余身份一律脱敏） |
 | **1.19.47.28** | 2026-10-13 | **权限体系文档**（新增《权限体系说明》：权限模型 / 41 子功能 56 权限点全清单 / 12 身份矩阵 / 敏感字段字段级权限 / 数据范围口径）· 修复教务权限文档 28 处失效链接 · 管理员组种子补漏列的 `academic.edit` |
 | **1.19.47.27** | 2026-10-13 | **`dormitory.assign` 权限接线**（15 条分配类路由脱离 manage，四档语义落地）· 宿舍总览图表**本地化**（去公网 CDN，离线可显示） |

@@ -31,6 +31,7 @@ config_mod.Config.SQLALCHEMY_BINDS = {
     # 2026-10-10：补 system 绑定 —— 启动建表会遍历 'system'，缺它会有 WARN 噪音
     'system': 'sqlite:///' + os.path.join(_TMP, 'system.db'),
     'portrait': 'sqlite:///' + os.path.join(_TMP, 'portrait.db'),
+    'morality': 'sqlite:///' + os.path.join(_TMP, 'morality.db'),
     # 2026-10-10：教师工作台首页读 timetable.db（课表/调课），缺该 bind 会让
     # 教师身份访问 /workbench/ 直接 500（此前两条工作台断言失败的根因）
     'timetable': 'sqlite:///' + os.path.join(_TMP, 'timetable.db'),
@@ -95,8 +96,14 @@ with app.test_client() as c:
 
     # 2026-10-10：教务管理侧新增同款「任课教师映射」（复用成绩管理视图函数与源数据，
     # URL 与接口都在 /academic 前缀下，页面不跳转到成绩模块）
+    # 2026-10-14：教师名单 / 任课教师映射 / 学科组长合成一个入口（页内 tab 互切）——
+    # 工作台上是一条「教师」链接，映射页从该入口页的 tab 进入
     r = c.get('/academic/')
-    check('教务工作台含任课教师映射入口',
+    check('教务工作台含教师入口',
+          r.status_code == 200 and '/academic/teachers' in r.get_data(as_text=True),
+          f'status={r.status_code}')
+    r = c.get('/academic/teachers')
+    check('教师页 tab 含任课教师映射入口',
           r.status_code == 200 and '/academic/teacher-links' in r.get_data(as_text=True),
           f'status={r.status_code}')
     r = c.get('/academic/teacher-links')
@@ -117,10 +124,12 @@ with app.test_client() as c:
     check('教务侧导入页表单归教务',
           r.status_code == 200 and '/academic/teacher-links/import/upload' in html,
           f'status={r.status_code}')
-    # 矩阵页整页不出现 /grades/ 链接：教务内的页面不把用户送回成绩模块
+    # 矩阵页整页不出现指向成绩模块的链接：教务内的页面不把用户送回成绩模块
+    # （2026-10-14：base.html 的 <style> 里有一段含 /grades/exams/<id> 字样的 CSS 注释，
+    #   原断言查字面量 '/grades/' 会被它误伤，这里只查真正的链接 href）
     r = c.get('/academic/teacher-links')
     check('教务映射页不跳成绩模块',
-          r.status_code == 200 and '/grades/' not in r.get_data(as_text=True),
+          r.status_code == 200 and 'href="/grades/' not in r.get_data(as_text=True),
           f'status={r.status_code}')
     r = c.get('/grades/teachers')
     html = r.get_data(as_text=True)

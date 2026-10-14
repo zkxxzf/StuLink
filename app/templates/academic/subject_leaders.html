@@ -21,26 +21,34 @@
 </style>
 {% endblock %}
 {% block content %}
+{# 2026-10-14：教师名单 / 任课教师映射 / 学科组长合成一个入口，顶部 tab 互切 #}
+{% with active = 'leaders' %}{% include 'academic/_staff_tabs.html' %}{% endwith %}
 <div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
     <div class="d-flex align-items-center gap-2 flex-wrap">
         <h4 class="fw-bold mb-0"><i class="bi bi-people"></i> 学科组长名单</h4>
-        <form class="d-flex gap-2 flex-wrap align-items-center no-print" method="get" id="ctxForm">
-            <input name="school_year" class="form-control form-control-sm" style="width:130px"
-                   list="yearList" value="{{ school_year }}" placeholder="学年 2026-2027"
-                   onchange="this.form.submit()">
-            <datalist id="yearList">{% for y in years %}<option value="{{ y }}"></option>{% endfor %}</datalist>
-            <select name="term" class="form-select form-select-sm" style="width:120px"
-                    onchange="this.form.submit()">
-                <option value="">整学年</option>
-                <option value="第一学期" {% if term == '第一学期' %}selected{% endif %}>第一学期</option>
-                <option value="第二学期" {% if term == '第二学期' %}selected{% endif %}>第二学期</option>
-            </select>
-        </form>
+        {# 2026-10-14 方案：学年 × 学期即方案，下拉直接切换；新建 / 使用其他方案走右上「历史记录」 #}
+        <select class="form-select form-select-sm w-auto no-print" id="ldPlan"
+                aria-label="切换方案"
+                onchange="if (this.value) { location.href = this.value; }">
+            {% for p in plans %}
+            <option value="{{ url_for('academic.subject_leaders', school_year=p.school_year, term=p.term) }}"
+                    {% if p.school_year == school_year and p.term == term %}selected{% endif %}>
+                {{ p.name }}{% if p.is_current %} · 当前{% endif %}（{{ p.count }} 条）
+            </option>
+            {% endfor %}
+            {% if not plans %}
+            <option value="">{{ school_year or '暂无方案' }}{% if can_edit %}（点「历史记录」新建）{% endif %}</option>
+            {% endif %}
+        </select>
         <span class="badge text-bg-light">已登记 {{ matrix.count }} 条</span>
     </div>
     {# 卡片常驻按钮收敛为「主操作 + 更多」：导出 / 打印都进下拉（2026-10-14） #}
     <div class="d-flex gap-2 flex-wrap">
         {% if can_edit %}
+        {# 历史记录里的新建 / 使用 / 编辑 / 删除都需 academic.edit，只看不改的账号不显示入口 #}
+        <button type="button" class="btn btn-sm btn-outline-secondary no-print" id="ldHistory">
+            <i class="bi bi-clock-history"></i> 历史记录
+        </button>
         <button class="btn btn-sm btn-success no-print" id="btnSaveMatrix">
             <i class="bi bi-save"></i> 保存全部
         </button>
@@ -140,7 +148,7 @@
             组长必须是本学科教师（任课教师映射为唯一依据，课表兜底）；
             体育 / 音乐 / 美术 / 信息技术 / 通用技术 / 心理 归「综合组」。
             带 <i class="bi bi-info-circle"></i> 的学科在任课数据里查不到教师，该行可选全部教师。
-            改动格子后点右上「保存全部」。
+            改动格子后点右上「保存全部」；切换学期（方案）走顶部下拉或右上「历史记录」。
         </div>
     </div>
 </div>
@@ -150,6 +158,8 @@
 <script>
 $(function () {
     'use strict';
+    // 2026-10-14 方案：右上角「历史记录」（新建 / 使用其他方案 / 编辑 / 删除）
+    $('#ldHistory').on('click', function () { window.slPlans['ldPlanModal'].open(); });
     var $mx = $('#ldMatrix');
     if (!$mx.length) { return; }
     var saveUrl = $mx.data('save-url'), dirty = {};
@@ -180,4 +190,19 @@ $(function () {
     });
 });
 </script>
+
+{# 2026-10-14 方案 · 历史记录（新建 / 使用 / 编辑 / 删除），与任课映射页共用组件。
+   必须放在 extra_js（base.html 在 jQuery 之后渲染），否则 $ 未定义、按钮点了没反应。 #}
+{% from '_plan_manager.html' import plan_manager %}
+{{ plan_manager('ldPlanModal', '学科组长方案 · 历史记录',
+                '每学期的组长各留一套方案；「使用」＝页面切到该学期（各学期互不影响）。',
+                url_for('academic.subject_leader_plans'),
+                url_for('academic.subject_leader_plans_create'),
+                url_for('academic.subject_leader_plans_use'),
+                url_for('academic.subject_leader_plans_rename'),
+                url_for('academic.subject_leader_plans_delete'),
+                count_label='组长条数',
+                use_confirm='页面将切到该学期（各学期的组长登记互相独立，不受影响）。',
+                reload_after_use=False,
+                source_year=school_year, source_term=term) }}
 {% endblock %}

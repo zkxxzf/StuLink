@@ -225,11 +225,9 @@ a.ac-kpi-link { display: block; text-decoration: none; color: inherit; height: 1
                 <hr class="my-3">
                 <div class="small text-muted mb-2">其他教务工具</div>
                 <div class="d-flex gap-3 flex-wrap small">
-                    {% if current_user.has_perm('grades.teachers') %}
-                    <a href="{{ url_for('academic.teacher_links_page') }}">任课教师</a>
-                    {% endif %}
-                    <a href="{{ url_for('academic.subject_leaders') }}">学科组长</a>
-                    <a href="{{ url_for('academic.teachers_page') }}">教师名单</a>
+                    {# 2026-10-14：教师名单 / 任课教师映射 / 学科组长合成一个入口（页内 tab 互切），
+                       这里不再分挂三行 #}
+                    <a href="{{ url_for('academic.teachers_page') }}">教师（名单 / 任课映射 / 学科组长）</a>
                     {% if current_user.has_perm('academic.edit') %}
                     <a href="{{ url_for('academic.achievements_page') }}">教师业绩库</a>
                     <a href="{{ url_for('academic.form_list') }}">问卷收集</a>

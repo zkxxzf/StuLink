@@ -1,4 +1,4 @@
-{# StuLink v1.19.47.30 课表网格宏：13行(节次) x 7列(星期)，供 master/grade/class/teacher 模板复用。
+{# StuLink v1.19.49.31 课表网格宏：13行(节次) x 7列(星期)，供 master/grade/class/teacher 模板复用。
    视觉：学科配色 + 卡片化条目 + 节次列吸附 + 移动端压缩 + 打印黑白化。
    JS 端 schedule.js 用同样的 class/结构约定重渲染（AJAX 切换班级/年级时），改结构时两处同步。 #}
 {% macro schedule_grid_css() %}
@@ -122,6 +122,13 @@
     .sch-teacher { display: none; }        /* 手机只留学科+教室，点开弹窗看详情 */
     .sch-room { font-size: 9.5px; }
     .sch-badge-week { display: none; }     /* 周次徽章手机上省略，避免挤爆 */
+}
+/* 2026-10-14 第四轮审计（UI-16）：480 档进一步压缩（375/414 手机少滚一屏）；
+   课表网格横滚是合理形态，这里只做列宽与字号收敛，不改成卡片。 */
+@media (max-width: 480px) {
+    .sch-grid { min-width: 520px; font-size: 11px; }
+    .sch-grid .sch-period-col { width: 64px; }
+    .sch-cell { height: 44px; }
 }
 
 /* ── 打印：只输出课表本体（A4 横向，黑白友好），配合 parts.print_button() ── */

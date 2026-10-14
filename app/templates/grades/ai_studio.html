@@ -28,6 +28,8 @@
     .ai-chip { font-size: 12px; }
     .ai-stage-err { color: var(--bs-danger); }
     .ai-studio-list { max-height: 62vh; overflow: auto; }
+    /* 提示词生成器面板样式（.ai-gen-panel / .ai-gen-chips）在 theme.css 里，
+       与成绩汇报区共用同一套 class —— 不要在页面里重复写。 */
 </style>
 {% endblock %}
 {% block content %}
@@ -79,14 +81,89 @@
                             <label class="form-label small text-muted mb-1" for="aiExamSel">考试</label>
                             <select id="aiExamSel" class="form-select form-select-sm"></select>
                         </div>
+                        <div class="col-sm-5 d-flex justify-content-sm-end">
+                            <button type="button" class="btn btn-sm btn-outline-primary" id="aiGenToggle"
+                                    aria-expanded="false" aria-controls="aiGenPanel">
+                                <i class="bi bi-sliders"></i> 提示词生成器
+                            </button>
+                        </div>
                     </div>
 
-                    <div class="input-group input-group-sm">
-                        <input type="text" id="aiQ" class="form-control" autocomplete="off"
-                               placeholder="一句话分析：本次考试各班物理成绩差异，并找出临界生最多的班">
-                        <button class="btn btn-primary" type="button" id="aiSubmit">
+                    {# ---------- 提示词生成器（2026-10-14，默认收起） ----------
+                       老师点选「范围（年级/班级/学科）→ 侧重 → 输出格式 → 附加要求」，
+                       服务端校验并拼装成完整提示词；拼出的内容填入下方文本框，仍可手动编辑。 #}
+                    <div id="aiGenPanel" class="ai-gen-panel border rounded-3 p-3 mb-2 d-none">
+                        <div class="d-flex flex-wrap align-items-center gap-2 mb-2">
+                            <span class="fw-semibold small"><i class="bi bi-magic"></i> 选一选，自动拼好提示词</span>
+                            <span class="text-muted small ms-auto">选项随时可改；拼出的提示词在下面仍可手动编辑</span>
+                        </div>
+
+                        {# 年级不在面板里选：每场考试自带年级（上面「考试」下拉已标），
+                           生成器只在**本场考试内**收窄范围（2026-10-14 用户口径）。 #}
+                        <div>
+                            <label class="form-label small text-muted mb-1">
+                                班级 <span class="text-muted">（可多选，不选＝本场考试全部班级）</span>
+                            </label>
+                            <div id="aiGenClasses" class="d-flex flex-wrap gap-1 ai-gen-chips"></div>
+                        </div>
+
+                        <div class="mt-2">
+                            <label class="form-label small text-muted mb-1">
+                                学科 <span class="text-muted">（可多选，不选＝全部学科）</span>
+                            </label>
+                            <div id="aiGenSubjects" class="d-flex flex-wrap gap-1 ai-gen-chips"></div>
+                        </div>
+
+                        <div class="row g-2 mt-1">
+                            <div class="col-md-6">
+                                <label class="form-label small text-muted mb-1" for="aiGenFocus">分析侧重</label>
+                                <select id="aiGenFocus" class="form-select form-select-sm"></select>
+                            </div>
+                            <div class="col-md-6">
+                                <label class="form-label small text-muted mb-1" for="aiGenOutput">输出格式</label>
+                                <select id="aiGenOutput" class="form-select form-select-sm"></select>
+                            </div>
+                        </div>
+
+                        <div class="mt-2">
+                            <label class="form-label small text-muted mb-1" for="aiGenExtra">
+                                附加要求 <span class="text-muted">（可留空；也可点下面常用要求快速填入）</span>
+                            </label>
+                            <textarea id="aiGenExtra" class="form-control form-control-sm" rows="2"
+                                      maxlength="500"
+                                      placeholder="例如：只陈述客观数据，不做人格化评价"></textarea>
+                            <div id="aiGenExtraPresets" class="d-flex flex-wrap gap-1 mt-1 ai-gen-chips"></div>
+                        </div>
+
+                        <div class="d-flex flex-wrap align-items-center gap-2 mt-3 pt-2 border-top">
+                            <input type="text" id="aiGenTplName" class="form-control form-control-sm"
+                                   style="max-width:150px" maxlength="30" placeholder="模板名（如：月考班级对比）">
+                            <button type="button" class="btn btn-sm btn-outline-secondary" id="aiGenTplSave">
+                                <i class="bi bi-bookmark-plus"></i> 存为模板
+                            </button>
+                            <select id="aiGenTpl" class="form-select form-select-sm" style="max-width:210px"></select>
+                            <button type="button" class="btn btn-sm btn-outline-danger" id="aiGenTplDel" disabled>
+                                <i class="bi bi-trash"></i> 删除模板
+                            </button>
+                            <button type="button" class="btn btn-sm btn-primary ms-auto" id="aiGenBuild">
+                                <i class="bi bi-magic"></i> 生成提示词
+                            </button>
+                        </div>
+                    </div>
+
+                    {# ---------- 最终提示词（生成器拼装 / 一句话 / 手动编辑都落到这里） ---------- #}
+                    <textarea id="aiQ" class="form-control form-control-sm" rows="3" autocomplete="off"
+                              placeholder="一句话分析：本次考试各班物理成绩差异，并找出临界生最多的班（也可用上方「提示词生成器」拼装）"></textarea>
+                    <div class="d-flex flex-wrap align-items-center gap-2 mt-2">
+                        <button class="btn btn-primary btn-sm" type="button" id="aiSubmit">
                             <i class="bi bi-stars"></i> <span class="ai-run-label">开始分析</span>
                         </button>
+                        <button class="btn btn-sm btn-outline-secondary" type="button" id="aiCopyPrompt">
+                            <i class="bi bi-clipboard"></i> 复制提示词
+                        </button>
+                        <span class="text-muted small">
+                            提示词会原样发给 AI；报告只使用你有权限看到的成绩数据
+                        </span>
                     </div>
                     <div class="d-flex flex-wrap gap-2 mt-2" id="aiChips">
                         <button type="button" class="btn btn-sm btn-outline-secondary ai-chip">本次考试整体情况与各班差距</button>
@@ -101,6 +178,13 @@
                         <div id="aiTools" class="ai-tools mb-2"></div>
                         <div class="ai-report-body"></div>
                         <div class="d-flex flex-wrap gap-2 mt-3 pt-2 border-top">
+                            {# 进行中：可请求停止（当前步骤完成即停）；结束后：可把当时的选择+提示词带回生成器改 #}
+                            <button class="btn btn-sm btn-outline-warning d-none" type="button" id="aiStop">
+                                <i class="bi bi-stop-circle"></i> 停止
+                            </button>
+                            <button class="btn btn-sm btn-outline-primary d-none" type="button" id="aiReedit">
+                                <i class="bi bi-pencil-square"></i> 重新编辑提示词
+                            </button>
                             <button class="btn btn-sm btn-outline-secondary" type="button" id="aiCopy">
                                 <i class="bi bi-clipboard"></i> 复制
                             </button>
@@ -139,12 +223,16 @@
     "ask_url": {{ url_for('grades.ai_ask')|tojson }},
     "tasks_url": {{ '/grades/ai/tasks'|tojson }},
     "reports_url": {{ '/grades/ai/reports'|tojson }},
-    "exam_opts_url": {{ url_for('grades.api_options')|tojson }}
+    "exam_opts_url": {{ url_for('grades.api_options')|tojson }},
+    "prompt_options_url": {{ url_for('grades.ai_prompt_options')|tojson }},
+    "prompt_build_url": {{ url_for('grades.ai_prompt_build')|tojson }},
+    "prompt_tpl_url": {{ url_for('grades.ai_prompt_templates')|tojson }}
 }</script>
 {% endblock %}
 {% block extra_js %}
 {# grades_md.js：旧口径 Markdown 报告（负数 id 的历史条目）用 renderGradeMd 渲染 #}
 <script src="{{ su('js/grades_md.js') }}"></script>
 <script src="{{ su('js/ai_task_ui.js') }}"></script>
+<script src="{{ su('js/ai_prompt_gen.js') }}"></script>
 <script src="{{ su('js/ai_studio.js') }}"></script>
 {% endblock %}

@@ -28,7 +28,7 @@ config_mod.Config.SQLALCHEMY_DATABASE_URI = 'sqlite:///' + os.path.join(_TMP, 's
 config_mod.Config.SQLALCHEMY_BINDS = {
     k: 'sqlite:///' + os.path.join(_TMP, k + '.db')
     for k in ('dormitory', 'history', 'grades', 'points', 'academic', 'inspection',
-              'achievement', 'forms', 'system', 'portrait', 'timetable')
+              'achievement', 'forms', 'system', 'portrait', 'timetable', 'morality')
 }
 config_mod.Config.SECRET_KEY = 'invig-check-secret'
 
@@ -191,6 +191,13 @@ with app.test_client() as c:
           and 'function autoSchedTimes' in ph
           and 'function autoFillAllSchedTimes' in ph
           and '按科目补时间' in ph)
+    # 2026-10-14 用户口径：⑤ 列序 = 日期 → 考试科目 → 开始 → 结束（先选科目，时间自动算）
+    check('环节⑤ 表头列序：日期 → 科目 → 开始 → 结束 → 选科 → 备注',
+          '<th style="width:150px">考试日期</th><th style="width:140px">考试科目</th>' in ph
+          and '<th style="width:110px">开始</th><th style="width:110px">结束</th>' in ph)
+    check('环节⑤ 新增行按同列序拼接（日期 → 科目下拉 → 开始/结束）',
+          re.search(r"sc-date\" value=\"' \+ nextSchedDate\(\) \+ '\"></td>'\s*"
+                    r"\+ '<td><div class=\"dropdown\">", ph) is not None)
     # 2026-10-13 用户口径：⑥ 教师池去掉「不监考」开关（改按学科分组展示），
     # 排除名单的老师 / 场次两侧都能多选，一次批量加
     check('环节⑥ 教师池按学科分组、已无「不监考」开关',
@@ -319,7 +326,7 @@ with app.test_client() as c:
     check('环节⑥ 手动指派回避教师被拒', (r.get_json() or {}).get('ok') is False,
           str(r.get_json()))
     # 手动指定：派一个从未被编排的校外监考员 → 允许
-    # 2026-10-13 审计修复：v1.19.47.30 起手动指派与自动编排共用
+    # 2026-10-13 审计修复：v1.19.49.31 起手动指派与自动编排共用
     # 「一人一场次一考场」硬约束，而自动编排已把 12 格填满，
     # 已入池的老师（含校外陈老师）都已被排到某场某考场 —— 再派他们都会被拒
     # （这是产品的正确行为，不是缺陷）。
@@ -532,10 +539,18 @@ with app.test_client() as c:
     r = c.get(f'/grades/affairs/{aid2}/schedules/template')
     _wb2 = openpyxl.load_workbook(io.BytesIO(r.data))
     _ws2 = _wb2.active
-    _rows = [[ _ws2.cell(row=i, column=j).value for j in range(1, 5)] for i in (2, 3)]
+    _head = [(_ws2.cell(row=1, column=j).value or '') for j in range(1, 7)]
+    # 2026-10-14 用户口径：模板列序与页面⑤ 对齐（日期 → 科目 → 开始 → 结束 → 选科 → 备注）；
+    # 断言按**表头名**取列，列序再调整也不会误报
+    def _tpl(row, name):
+        return _ws2.cell(row=row, column=_head.index(name) + 1).value
+    check('⑤ 下载模板表头与页面⑤ 同列序（日期→科目→开始→结束→选科→备注）',
+          _head == ['考试日期', '考试科目', '开始时间', '结束时间', '选科', '备注'], str(_head))
+    _r2 = tuple(_tpl(2, x) for x in ('考试日期', '考试科目', '开始时间', '结束时间'))
+    _r3 = tuple(_tpl(3, x) for x in ('考试日期', '考试科目', '开始时间', '结束时间'))
     check('⑤ 下载模板示例行按内置时长（语文 09:00-11:30 / 数学 14:00-16:00）',
-          _rows[0][:4] == ['2026-10-08', '09:00', '11:30', '语文']
-          and _rows[1][:4] == ['2026-10-08', '14:00', '16:00', '数学'], str(_rows))
+          _r2 == ('2026-10-08', '语文', '09:00', '11:30')
+          and _r3 == ('2026-10-08', '数学', '14:00', '16:00'), str([_r2, _r3]))
 
 print(f'\n===== 考务监考冒烟：{ok} 通过 / {fail} 失败 =====')
 sys.exit(1 if fail else 0)

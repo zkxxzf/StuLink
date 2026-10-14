@@ -1,6 +1,9 @@
 {% extends "base.html" %}
 {% block title %}教师管理{% endblock %}
 {% block content %}
+{# 2026-10-14：教师管理拆成两个子页（教师名单 / 教师权限管理），顶部 tab 互切；
+   教师名单即教务侧同一页面（/users/teachers 复用 /academic/teachers 的视图与数据） #}
+{% with active = 'perms' %}{% include 'system/_user_tabs.html' %}{% endwith %}
 <div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
     <h4 class="fw-bold mb-0">
         <i class="bi bi-person-gear"></i> 教师管理
@@ -85,7 +88,13 @@
                     <tr data-search="{{ (u.real_name ~ ' ' ~ u.username ~ ' ' ~ gname)|lower }}">
                         <td>{{ u.username }}</td>
                         <td class="fw-bold">{{ u.real_name }}</td>
-                        <td><span class="badge bg-{% if u.role=='admin' %}danger{% elif u.role=='dorm_manager' %}warning text-dark{% elif u.role=='homeroom_teacher' %}primary{% elif u.role=='grade_leader' %}info{% elif u.role=='school_viewer' %}success{% else %}secondary{% endif %}">{{ u.display_role }}</span></td>
+                        <td><span class="badge bg-{% if u.role=='admin' %}danger{% elif u.role=='dorm_manager' %}warning text-dark{% elif u.role=='homeroom_teacher' %}primary{% elif u.role=='grade_leader' %}info{% elif u.role=='school_viewer' %}success{% else %}secondary{% endif %}">{{ u.display_role }}</span>
+                            {% set _ids = u.permission_groups %}
+                            {% if _ids|length > 1 %}
+                            <span class="badge bg-light text-dark border ms-1"
+                                  title="{% for g in _ids %}{{ g.name }}{{ '、' if not loop.last }}{% endfor %}">+{{ _ids|length - 1 }} 身份</span>
+                            {% endif %}
+                        </td>
                         <td>{% if u.is_active %}<span class="badge bg-success">启用</span>{% else %}<span class="badge bg-secondary">禁用</span>{% endif %}</td>
                         <td>
                             <a href="{{ url_for('users.edit', id=u.id) }}" class="btn btn-sm btn-outline-warning" aria-label="编辑用户"><i class="bi bi-pencil"></i></a>

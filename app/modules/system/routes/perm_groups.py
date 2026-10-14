@@ -1,4 +1,4 @@
-# StuLink v1.19.47.30 2026-10-10
+# StuLink v1.19.49.31 2026-10-10
 # 权限组管理：功能权限表格（身份×子功能×三档）+ 用户数据范围表格（用户×年级）
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 """权限组管理路由
@@ -17,14 +17,48 @@ from flask_login import current_user
 from sqlalchemy import func
 
 from app.extensions import db
-from app.models import PermissionGroup, User, DictCategory, UserDataScope
-from app.models.permission_group import invalidate_group_menu_cache
+from app.models import (PermissionGroup, User, DictCategory, UserDataScope,
+                        UserPermissionGroup)
+from app.models.permission_group import (invalidate_group_menu_cache,
+                                         KIND_LABELS, LEGACY_TO_KIND)
 from app.utils.decorators import perm_required
 from app.utils.permission_map import (MODULES, PROTECTED_GROUP_NAMES,
                                       item_levels_to_keys, keys_to_item_levels)
 from app.utils.helpers import log_operation
+import json
 
 bp = Blueprint('perm_groups', __name__, url_prefix='/perm-groups')
+
+# 范围类型下拉（用户可见文案见 KIND_LABELS）
+KIND_OPTIONS = [('school', '全校'), ('self_grade', '本人年级'),
+                ('pick_grades', '指定年级'), ('self_class', '本人班级'),
+                ('pick_classes', '指定班级'), ('self_teaching', '本人任课'),
+                ('none', '无')]
+
+
+def _clean_str_list(v):
+    """清洗字符串列表（去空、去重、保序）"""
+    out = []
+    for x in (v or []):
+        s = str(x or '').strip()
+        if s and s not in out:
+            out.append(s)
+    return out
+
+
+def _clean_pairs(v):
+    """清洗 [{grade,class}] 列表"""
+    out = []
+    seen = set()
+    for c in (v or []):
+        if not isinstance(c, dict):
+            continue
+        g = str(c.get('grade') or '').strip()
+        cl = str(c.get('class') or '').strip()
+        if g and cl and (g, cl) not in seen:
+            seen.add((g, cl))
+            out.append({'grade': g, 'class': cl})
+    return out
 
 
 def _all_grades():
@@ -46,12 +80,13 @@ def manage():
     _gid_list = [g.id for g in groups]
     _ucount = {}
     if _gid_list:
+        # P5：用户数按多身份关联表统计（一人多组则各组都计）
         _ucount = {
             row[0]: row[1] for row in db.session.query(
-                User.permission_group_id, func.count(User.id)
+                UserPermissionGroup.group_id, func.count(UserPermissionGroup.user_id)
             ).filter(
-                User.permission_group_id.in_(_gid_list)
-            ).group_by(User.permission_group_id).all()
+                UserPermissionGroup.group_id.in_(_gid_list)
+            ).group_by(UserPermissionGroup.group_id).all()
         }
     group_rows = []
     for g in groups:
@@ -60,6 +95,8 @@ def manage():
             'levels': keys_to_item_levels(g.get_menu_keys()),
             'user_count': _ucount.get(g.id, 0),
             'protected': g.name in PROTECTED_GROUP_NAMES,
+            'kind': g.effective_kind,
+            'kind_label': g.kind_label,
         })
 
     users = User.query.order_by(User.permission_group_id, User.username).all()
@@ -79,23 +116,29 @@ def manage():
 
     return render_template('system/perm_groups/manage.html',
                            group_rows=group_rows, modules=MODULES,
-                           user_rows=user_rows, grades=_all_grades())
+                           user_rows=user_rows, grades=_all_grades(),
+                           kind_options=KIND_OPTIONS)
 
 
 @bp.route('/save', methods=['POST'])
 @perm_required('system.perm_groups')
 def save():
-    """创建/更新身份（权限组）基础信息"""
+    """创建/更新身份（权限组）基础信息（P5：范围类型 7 档 + 指定年级/班级）"""
     data = request.get_json() or {}
     group_id = data.get('id')
     name = (data.get('name') or '').strip()
-    scope_type = data.get('scope_type', 'none')
     description = (data.get('description') or '').strip()
+    # 范围类型：优先 scope_kind（7 值），兼容旧 scope_type（4 值）
+    scope_kind = (data.get('scope_kind') or '').strip()
+    if not scope_kind:
+        scope_kind = LEGACY_TO_KIND.get((data.get('scope_type') or 'none').strip(), 'none')
+    if scope_kind not in KIND_LABELS:
+        return jsonify({'success': False, 'message': '无效的范围类型'}), 400
+    scope_grades = _clean_str_list(data.get('scope_grades'))
+    scope_classes = _clean_pairs(data.get('scope_classes'))
 
     if not name:
         return jsonify({'success': False, 'message': '请输入身份名称'}), 400
-    if scope_type not in ('class', 'grade', 'school', 'none'):
-        return jsonify({'success': False, 'message': '无效的管理范围'}), 400
 
     if group_id:
         group = PermissionGroup.query.get(group_id)
@@ -112,11 +155,14 @@ def save():
         db.session.add(group)
 
     group.name = name
-    group.scope_type = scope_type
+    group.scope_kind = scope_kind
+    group.scope_grades = json.dumps(scope_grades, ensure_ascii=False)
+    group.scope_classes = json.dumps(scope_classes, ensure_ascii=False)
+    group.sync_scope_type()
     group.description = description
     db.session.commit()
     log_operation(current_user, '保存', '身份权限组',
-                  group.id, f'{group.name}（{scope_type}）', module='system')
+                  group.id, f'{group.name}（{group.kind_label}）', module='system')
     return jsonify({'success': True, 'message': '身份已保存', 'id': group.id})
 
 
@@ -182,7 +228,7 @@ def delete(id):
     if group.name in PROTECTED_GROUP_NAMES:
         return jsonify({'success': False,
                         'message': f'「{group.name}」为系统保留身份，不允许删除'}), 400
-    user_count = User.query.filter_by(permission_group_id=id).count()
+    user_count = UserPermissionGroup.query.filter_by(group_id=id).count()
     if user_count > 0:
         return jsonify({'success': False,
                         'message': f'该身份下还有 {user_count} 个用户，请先移走用户'}), 400
@@ -201,6 +247,9 @@ def get_json(id):
         'id': group.id,
         'name': group.name,
         'scope_type': group.scope_type,
+        'scope_kind': group.effective_kind,
+        'scope_grades': group.get_scope_grades(),
+        'scope_classes': group.get_scope_classes(),
         'description': group.description,
         'protected': group.name in PROTECTED_GROUP_NAMES,
     })

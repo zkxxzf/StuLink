@@ -1,4 +1,4 @@
-# StuLink v1.19.47.30 2026-10-10
+# StuLink v1.19.49.31 2026-10-10
 # 成绩分析：主页（四 tab）+ options/analysis API + AI 预留
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 import hashlib
@@ -118,10 +118,14 @@ def _classes_by_exam():
         return cached_value
     out = {}
     try:
-        from app.models.grades import ExamScore, ExamTeacherLink
+        from app.models.grades import ExamScore, ExamTeacherLink, TOTAL_SUBJECT
         from app.extensions import db
         tmp = {}
+        # 2026-10-14 第四轮审计修复（PERF-112 / CONS-05）：班级口径必须取**总分行**
+        # （subject='总分'＝考试当时班级，全库唯一权威口径）——原实现按全部行
+        # （含科目行）GROUP BY，选科分班后的科目行班级会与考试当时不一致。
         for eid, cn in (db.session.query(ExamScore.exam_id, ExamScore.class_name)
+                        .filter(ExamScore.subject == TOTAL_SUBJECT)
                         .group_by(ExamScore.exam_id, ExamScore.class_name).all()):
             tmp.setdefault(eid, set()).add(cn)
         try:
@@ -163,15 +167,43 @@ def api_options():
             'id': e.id, 'name': e.name, 'date': e.exam_date.strftime('%Y-%m-%d'),
             'type': e.exam_type or '', 'status': e.status, 'banded': e.id in banded_ids,
         })
-    # 班级（年级下的数字教学班 + 锁定范围）——仅作“未选考试时”的兑底
+    # v1.19.49.31 每场考试自己的班级：**班级筛选仅限本场考试**
+    # 来源 = 该场考试的学生名册（exam_scores.class_name）∪ 任课教师表（exam_teacher_links）
+    # 不能用主库当前班级：考试是自包含的独立单元，其参与者是整个年级、且班级为考试当时
+    #
+    # 2026-10-14 第四轮审计修复（PERF-112 / CONS-05）：此前 classes_by_exam 与
+    # classes_by_grade 对**所有角色**原样下发（教师/班主任也能拿到全部考试的全部班级）。
+    # 现在统一按数据范围收敛：校级不限；年级范围按本年级；班级范围（班主任/任课）
+    # 只给所辖/任教班级；无范围（none）不给任何班级（fail-closed）。
+    _is_school = (current_user.role == 'admin' or scope_type == 'school')
+    _restrict_pairs = None
+    if not _is_school and scope_type != 'grade':
+        _restrict_pairs = set(scope_service.visible_classes(current_user) or [])
+        _restrict_pairs |= {(l.grade, l.class_name)
+                            for l in scope_service.teacher_links(current_user)
+                            if l.class_name}
+    # 班级（年级下的数字教学班 + 锁定范围）——仅作“未选考试时”的兜底
     classes_by_grade = {}
     for g in grades:
         st_rows = Student.query.filter_by(grade=g).with_entities(Student.class_name).distinct().all()
-        classes_by_grade[g] = numeric_classes([r[0] for r in st_rows])
-    # v1.19.47.30 每场考试自己的班级：**班级筛选仅限本场考试**
-    # 来源 = 该场考试的学生名册（exam_scores.class_name）∪ 任课教师表（exam_teacher_links）
-    # 不能用主库当前班级：考试是自包含的独立单元，其参与者是整个年级、且班级为考试当时
-    classes_by_exam = _classes_by_exam()
+        cs = numeric_classes([r[0] for r in st_rows])
+        if _restrict_pairs is not None:
+            cs = [c for c in cs if (g, c) in _restrict_pairs]
+        classes_by_grade[g] = cs
+    # 每场考试的班级（同样按范围收敛；缓存本体仍是全量，仅下发时过滤）
+    classes_by_exam = {}
+    _all_by_exam = _classes_by_exam()
+    _exam_grade = {str(e.id): e.grade for e in exams}
+    for _eid, _cs in _all_by_exam.items():
+        _g = _exam_grade.get(_eid)
+        if _g is None:
+            continue                       # 不可见考试直接不发
+        if _is_school or (_g == grade and scope_type == 'grade'):
+            classes_by_exam[_eid] = _cs
+        elif _restrict_pairs:
+            _keep = [c for c in _cs if (_g, c) in _restrict_pairs]
+            if _keep:
+                classes_by_exam[_eid] = _keep
     # tab 可见性（恒返回 5 键，前端据此显隐）
     tabs = {'grade': False, 'class': False, 'subject': False, 'teacher': False,
             'compare': False}

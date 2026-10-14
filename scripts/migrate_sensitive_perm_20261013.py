@@ -42,6 +42,21 @@ from app.extensions import db
 from app.models import PermissionGroup
 from scripts._db_backup import backup_db
 
+# 2026-10-14 第四轮审计（CONS-02）：补迁移登记（只登记不早退）
+SCRIPT_NAME = os.path.basename(__file__)
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+try:
+    import _mig_log
+except Exception as _e:  # noqa: BLE001
+    _mig_log = None
+    print(f'[WARN] 迁移登记模块不可用（迁移照常执行，仅不登记）：{_e}')
+
+
+def _record():
+    if _mig_log:
+        _mig_log.record(SCRIPT_NAME, note='权限组同步敏感字段查看权 + 最小权限重排（v2 前基线，历史保留）')
+
+
 # 组名 → 需要追加的 key
 ADD = {
     '管理员组': ['students.view_id_card', 'students.view_phone',
@@ -77,6 +92,7 @@ def main():
 
         if not pending:
             print('[SKIP] 所有权限组已是最新口径，无需改动')
+            _record()
             return
 
         from flask import current_app
@@ -97,6 +113,7 @@ def main():
             print(f'[OK] {g.name} 已更新：' + '；'.join(parts))
         db.session.commit()
         print(f'[DONE] 共更新 {len(pending)} 个权限组')
+    _record()
 
 
 if __name__ == '__main__':

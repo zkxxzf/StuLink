@@ -1,10 +1,13 @@
-/* StuLink · AI 分析工作台（v1.19.47.x 2026-10-13）
+/* StuLink · AI 分析工作台（v1.19.49.31 2026-10-14）
  * 对接服务端 AI 任务：
- *   POST /grades/ai/ask                → 建任务，拿 task_id
+ *   POST /grades/ai/ask                → 建任务，拿 task_id（可附 gen＝生成器选项留档）
  *   GET  /grades/ai/tasks?…            → 我的任务列表
- *   GET  /grades/ai/tasks/<id>         → 任务详情（events / html / trace）
+ *   GET  /grades/ai/tasks/<id>         → 任务详情（events / html / trace / gen）
  *   GET  /grades/ai/tasks/<id>/stream  → SSE 进度（由 AiTaskUI.subscribe 封装）
+ *   POST /grades/ai/tasks/<id>/stop    → 请求停止（进行中任务，当前步骤完成即停）
  *   POST /grades/ai/reports/<id>/delete→ 删除报告
+ * 提示词生成器面板（AiPromptGen）见 ai_prompt_gen.js：范围/侧重/输出格式/附加要求
+ * → 拼装提示词 → 存模板 / 复制 / 直接分析；中断或停止后可「重新编辑提示词」回填。
  * 路径从页面 #aiStudioCfg 注入，不在 JS 里硬编码。
  * 安全：报告正文只经 AiTaskUI.renderReport 插入（服务端已消毒），UI 文本一律 .text()。
  * Copyright (c) 2026 zkxxzf. Apache License 2.0 */
@@ -13,6 +16,7 @@
     if (!window.jQuery) { return; }
     var $ = window.jQuery;
     var UI = window.AiTaskUI;
+    var PG = window.AiPromptGen;
 
     var cfg = {};
     try { cfg = JSON.parse((document.getElementById('aiStudioCfg') || {}).textContent || '{}'); }
@@ -60,7 +64,10 @@
             $top.append($('<span class="t-meta ms-auto"></span>').text(t.created_at || ''));
             $item.append($top);
 
-            $item.append($('<div class="t-q mt-1"></div>').text(t.question || '（无问题）'));
+            // 提示词生成器拼出来的提问可能很长（提示词正文），列表里只显示开头一段
+            var q = t.question || '（无问题）';
+            $item.append($('<div class="t-q mt-1"></div>')
+                .text(q.length > 70 ? q.slice(0, 70) + '…' : q));
             var sub = (t.exam_name || '') + (t.grade ? ' · ' + t.grade : '');
             $item.append($('<div class="t-meta"></div>').text(sub || '—'));
             if (t.status === 'error' && t.error) {
@@ -107,6 +114,20 @@
         $('#aiEmpty').addClass('d-none');
         $('#aiProgress').removeClass('d-none');
     }
+    /* 进度区状态按钮：进行中→「停止」；结束/失败/中断→「重新编辑提示词」 */
+    function setStopVisible(on) {
+        $('#aiStop').toggleClass('d-none', !on).prop('disabled', false);
+    }
+    function setReeditVisible(on) {
+        $('#aiReedit').toggleClass('d-none', !on);
+    }
+    /** 把该任务当时的生成器选项 + 提示词带回生成器（没有 gen 的老任务只回填提示词） */
+    function reeditTask(t) {
+        if (!t) { return; }
+        if (PG && typeof PG.applyTask === 'function') { PG.applyTask(t); }
+        else { $('#aiQ').val(t.question || ''); }
+        toast('已带回当时的选择与提示词，改完点「开始分析」', 'ok');
+    }
 
     function stopStream() {
         if (state.closeStream) {
@@ -128,10 +149,23 @@
                 refreshDelBtn();
                 setStage('报告已保存');
             },
-            onError: function (text) { setStageErr(text); },
+            onError: function (text) {
+                setStageErr(text);
+                setStopVisible(false);
+                setReeditVisible(true);
+            },
+            onCanceled: function (text) {
+                // 用户点了「停止」：服务端标记 canceled 后还会补一个 done 帧（见 onDone 保护）
+                if (state.task) { state.task.status = 'canceled'; }
+                setStopVisible(false);
+                setReeditVisible(true);
+                setStage(text || '已按你的要求停止');
+                loadTasks();
+            },
             onDone: function () {
                 state.closeStream = null;
-                if (state.task) { state.task.status = 'done'; }
+                setStopVisible(false);
+                if (state.task && state.task.status !== 'canceled') { state.task.status = 'done'; }
                 loadTasks();
             }
         });
@@ -156,6 +190,8 @@
         UI.renderReport(reportBody(), '');
         setStage('加载任务…');
         refreshDelBtn();
+        setStopVisible(false);
+        setReeditVisible(false);
 
         $.getJSON(TASKS + '/' + encodeURIComponent(id), function (res) {
             if (!res || !res.success) {
@@ -178,14 +214,20 @@
             }
             if (t.status === 'running') {
                 if (!$('#aiStage').text()) { setStage(t.stage || '生成中…'); }
+                setStopVisible(true);
                 subscribeTask(t.id);
             } else if (t.status === 'done') {
                 setStage('分析完成');
             } else if (t.status === 'error') {
                 setStageErr(t.error || '生成失败');
+                setReeditVisible(true);                 // 失败后：改改提示词再跑，常比原样重跑有用
+            } else if (t.status === 'canceled') {
+                setStage(t.error || '已按你的要求停止');
+                setReeditVisible(true);
             } else if (t.status === 'interrupted') {
-                setStage('任务已中断（生成期间服务重启），可就原问题重跑');
-                var $again = $('<button type="button" class="btn btn-sm btn-outline-primary ms-2">' +
+                setStage('任务已中断（生成期间服务重启），可就原问题重跑，或改提示词再跑');
+                setReeditVisible(true);
+                var $again = $('<button type="button" class="btn btn-sm btn-outline-secondary ms-2">' +
                     '<i class="bi bi-arrow-clockwise"></i> 重跑</button>');
                 $again.on('click', function () { rerunTask(t); });
                 $('#aiStage').append($again);
@@ -193,6 +235,31 @@
             refreshDelBtn();
         }).fail(function (x) {
             setStageErr('任务加载失败' + (x && x.status ? '（HTTP ' + x.status + '）' : ''));
+        });
+    }
+
+    /* 请求停止进行中的任务：当前步骤（模型往返/工具查询）完成即停 */
+    function stopTask() {
+        var tid = state.id;
+        if (tid === null || tid === undefined || String(tid).charAt(0) === '-') { return; }
+        if (!window.confirm('停止这个分析任务？（当前步骤完成即停，已生成的进度会保留）')) { return; }
+        $('#aiStop').prop('disabled', true);
+        $.ajax({
+            url: TASKS + '/' + encodeURIComponent(tid) + '/stop',
+            method: 'POST',
+            headers: { 'X-CSRFToken': csrf() }
+        }).done(function (res) {
+            if (!res || !res.success) {
+                $('#aiStop').prop('disabled', false);
+                toast((res && res.message) || '停止失败', 'err');
+                return;
+            }
+            toast(res.message || '已请求停止', 'ok');
+            setStage('已请求停止，当前步骤完成即停…');
+        }).fail(function (x) {
+            $('#aiStop').prop('disabled', false);
+            toast((x && x.responseJSON && x.responseJSON.message)
+                || ('停止失败' + (x && x.status ? '（HTTP ' + x.status + '）' : '')), 'err');
         });
     }
 
@@ -253,6 +320,8 @@
                 direction: '',
                 layer: '',
                 history: [],
+                // 用过提示词生成器才附 gen（结构化选项留档，供「重新编辑提示词」回填）
+                gen: (PG && PG.isUsed()) ? PG.getGen() : null,
                 ai: aiPayload()
             })
         }).done(function (res) {
@@ -263,7 +332,7 @@
             }
             var tid = ((res.data || {}).task_id);
             toast('任务已创建，正在后台分析…', 'ok');
-            $('#aiQ').val('');
+            // 提示词保留在文本框里（生成器场景常要微调后再跑；一句话场景也便于复用）
             loadTasks(function () { if (tid) { openTask(tid); } });
         }).fail(function (x) {
             setBusy(false);
@@ -326,17 +395,36 @@
             if (id) { openTask(id); }
         });
         $('#aiRefresh').on('click', function () { loadTasks(); });
-        $('#aiExamSel').on('change', function () { loadTasks(); });
+        $('#aiExamSel').on('change', function () {
+            var eid = $(this).val();
+            loadTasks();
+            if (PG && typeof PG.onExamChanged === 'function') { PG.onExamChanged(eid); }
+        });
         $('#aiSubmit').on('click', submit);
+        // 提示词是多行文本（生成器拼装后可继续编辑）：Enter 换行，Ctrl/⌘+Enter 提交
         $('#aiQ').on('keydown', function (e) {
-            if (e.key === 'Enter') { e.preventDefault(); submit(); }
+            if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); submit(); }
         });
         $('#aiChips').on('click', '.ai-chip', function () {
             $('#aiQ').val(($(this).text() || '').trim()).trigger('focus');
         });
+        $('#aiCopyPrompt').on('click', function () {
+            var txt = (PG && PG.getPrompt) ? PG.getPrompt() : ($('#aiQ').val() || '');
+            if (!(txt || '').trim()) {
+                toast('提示词还是空的：可直接输入，或用「提示词生成器」拼装', 'warn');
+                $('#aiQ').trigger('focus');
+                return;
+            }
+            UI.copyText(txt);
+            toast('已复制提示词', 'ok');
+        });
+        $('#aiStop').on('click', stopTask);
+        $('#aiReedit').on('click', function () { reeditTask(state.task); });
         $('#aiCopy').on('click', copyReport);
         $('#aiExport').on('click', exportReport);
         $('#aiDel').on('click', deleteReport);
+
+        if (PG && typeof PG.init === 'function') { PG.init(); }
 
         fillExams();
         // 启动即打开：优先 URL 指定任务，否则最近一条

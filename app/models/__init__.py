@@ -12,9 +12,10 @@ from app.models.user_class_link import UserClassLink
 from app.models.grade_setting import GradeSetting
 from app.models.grades import Exam, ExamScore, ExamBand, TeacherSubjectLink, \
     AiKey, AiGlobalKey, AiReport, AiChatMessage, AffairRoomLib, \
-    ExamTeacherLink, ExamAffair, AffairRoom, AffairStudent  # v1.19.47.30 考试任课快照 / 考务
+    ExamTeacherLink, ExamAffair, AffairRoom, AffairStudent  # v1.19.49.31 考试任课快照 / 考务
+from app.models.grades import TeacherLinkPlan, TeacherLinkPlanRow  # 任课映射方案（2026-10-14）
 from app.models.grades import AffairTeacher, AffairSchedule, AffairInvigilator, \
-    AffairInvigilation  # v1.19.47.30 考务环节④⑤⑥：任课核对 / 考试时间表 / 监考编排
+    AffairInvigilation  # v1.19.49.31 考务环节④⑤⑥：任课核对 / 考试时间表 / 监考编排
 from app.models.points import PointRecord, PointRuleTemplate
 from app.models.morality import (RewardPunishment, RewardPunishmentAttachment,
                                  KINDS, REWARD_CATEGORIES, PUNISH_CATEGORIES,
@@ -26,12 +27,13 @@ from app.models.academic import Teacher, \
     InspectionRecord, TeacherAchievement, \
     FormCategory, FormTemplate, FormQuestion, FormSubmission, FormAnswer, \
     WorkRecord, AttendanceRecord, RECORD_TYPES, ATTENDANCE_STATUS, \
-    SubjectLeader, SUBJECT_ORDER, \
+    SubjectLeader, SUBJECT_ORDER, SubjectLeaderPlan, \
     WorkloadRule, ExamPeriod, WORKLOAD_KINDS
 from app.models.notification import Notification, NotificationRead, \
     NotificationRecipient, CATEGORY_LABELS
 from app.models.portrait import StudentPortrait, PortraitComment, PortraitEvent
 from app.models.user_data_scope import UserDataScope
+from app.models.user_permission_group import UserPermissionGroup
 from app.models.timetable import (
     TermSchedule, PeriodDef, ScheduleEntry, ScheduleSwap, ScheduleVersion,
     get_default_periods,
@@ -45,10 +47,11 @@ __all__ = ['User', 'Student', 'Room', 'BedAssignment', 'StudentAccommodation',
            'ClassProfile', 'ClassSubject',
            'PermissionGroup', 'UserClassLink', 'GradeSetting',
            'Exam', 'ExamScore', 'ExamBand', 'TeacherSubjectLink', 'ExamTeacherLink',
+           'TeacherLinkPlan', 'TeacherLinkPlanRow',
            'ExamAffair', 'AffairRoom', 'AffairStudent',
            'AiKey', 'AiGlobalKey', 'AiReport', 'AiChatMessage',
            'AffairRoomLib', 'PointRecord', 'PointRuleTemplate',
-           # 德育奖惩（morality.db，2026-10-13 v1.19.47.30）
+           # 德育奖惩（morality.db，2026-10-13 v1.19.49.31）
            'RewardPunishment', 'RewardPunishmentAttachment',
            'REWARD_CATEGORIES', 'PUNISH_CATEGORIES', 'REWARD_LEVELS',
            'PUNISH_LEVELS', 'DOC_TYPES', 'category_options', 'category_label',
@@ -62,6 +65,8 @@ __all__ = ['User', 'Student', 'Room', 'BedAssignment', 'StudentAccommodation',
            'Notification', 'NotificationRead', 'NotificationRecipient',
            'CATEGORY_LABELS',
            'StudentPortrait', 'PortraitComment', 'PortraitEvent', 'UserDataScope',
+           # 多身份改造 P1：用户 ↔ 权限组 多对多
+           'UserPermissionGroup',
            # 课表模块（timetable.db）
            'TermSchedule', 'PeriodDef', 'ScheduleEntry', 'ScheduleSwap', 'ScheduleVersion',
            'get_default_periods',

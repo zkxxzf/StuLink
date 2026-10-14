@@ -1,4 +1,4 @@
-# StuLink v1.19.47.30 2026-10-10
+# StuLink v1.19.49.31 2026-10-10
 # AI 分析：服务商注册表 / 个人与全局 Key 管理 / 连通性测试 / 发送范围预览 /
 #          分析生成 / 报告历史
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
@@ -12,7 +12,7 @@ from app.extensions import db
 from app.models.grades import (Exam, AiKey, AiGlobalKey, AiReport, AiChatMessage,
                                AiTask)
 from app.modules.grades import bp
-from app.modules.grades.services import (ai_service, ai_task_service,
+from app.modules.grades.services import (ai_prompt, ai_service, ai_task_service,
                                          scope as scope_service)
 from app.modules.grades.services import ai_providers
 from app.utils.crypto import encrypt_rand, decrypt
@@ -71,8 +71,15 @@ def _json():
 
 
 def _guard_key_manage():
-    """全局 Key 管理权限：管理员或拥有 system.users 权限者"""
-    if current_user.role == 'admin' or current_user.has_perm('system.users'):
+    """全局 Key 管理权限：持有 grades.ai_manage 者（admin 由 has_perm 恒真覆盖）。
+
+    2026-10-14 第四轮审计修复（SEC-04）：原判据是「admin 或 system.users」，
+    但三个全局 Key 端点的**装饰器**只要求 grades.view —— 一旦重构漏拷函数体
+    守卫，任何只读账号即可改写全局 AI Key。现在装饰器与函数体统一用独立权限点
+    `grades.ai_manage`（迁移 scripts/migrate_ai_key_perm_20261014.py 已给原
+    「有 system.users 的组」补齐该 key，行为不倒退）。
+    """
+    if current_user.has_perm('grades.ai_manage'):
         return
     abort(403)
 
@@ -247,7 +254,7 @@ def ai_key_test():
 
 @bp.route('/ai/global-key', methods=['GET'])
 @login_required
-@perm_required('grades.view')
+@perm_required('grades.ai_manage')
 def ai_global_key_get():
     _guard_key_manage()
     g = AiGlobalKey.query.get(1)
@@ -258,7 +265,7 @@ def ai_global_key_get():
 
 @bp.route('/ai/global-key', methods=['POST'])
 @login_required
-@perm_required('grades.view')
+@perm_required('grades.ai_manage')
 def ai_global_key_save():
     _guard_key_manage()
     data = _json()
@@ -294,7 +301,7 @@ def ai_global_key_save():
 
 @bp.route('/ai/global-key', methods=['DELETE'])
 @login_required
-@perm_required('grades.view')
+@perm_required('grades.ai_manage')
 def ai_global_key_delete():
     _guard_key_manage()
     g = AiGlobalKey.query.get(1)
@@ -543,7 +550,7 @@ def ai_ask():
     """
     data = _json()
     exam_id = int(data.get('exam_id') or 0)
-    question = (data.get('question') or '').strip()[:500]
+    question = (data.get('question') or '').strip()[:ai_task_service.MAX_QUESTION]
     exam = Exam.query.get_or_404(exam_id)
     if not question:
         return jsonify(success=False, message='请输入要分析的问题'), 400
@@ -558,14 +565,28 @@ def ai_ask():
             if isinstance(h, dict) and str(h.get('content') or '').strip():
                 history.append({'role': 'user' if h.get('role') == 'user' else 'assistant',
                                 'content': str(h.get('content'))[:2000]})
+    # 提示词生成器的结构化选项：只做清洗留档（供「重新编辑提示词」回填）。
+    # 这里**不**因选项非法而拒绝任务 —— question 才是真正发出去的话，用户手动改过也照跑；
+    # 数据边界由工具层的 score_guard 兜底，选项本身不构成权限通道。
+    raw_gen = data.get('gen')
+    gen = ai_prompt.normalize_gen(raw_gen) if isinstance(raw_gen, dict) and raw_gen else None
     ok, out = ai_task_service.submit(
         current_user, exam, question,
         direction=(data.get('direction') or '').strip(),
         layer=(data.get('layer') or '').strip(),
-        client_cfg=_client_ai_cfg(), history=history)
+        client_cfg=_client_ai_cfg(), history=history, gen=gen)
     if not ok:
         return jsonify(success=False, message=str(out)), 400
     return jsonify(success=True, data={'task_id': out})
+
+
+def _loads_gen(text):
+    """任务上的生成器选项 JSON → dict；为空/坏数据返回 None（前端据此隐藏回填入口）。"""
+    try:
+        data = json.loads(text) if text else None
+    except Exception:                      # noqa: BLE001  坏数据不影响任务详情
+        return None
+    return data if isinstance(data, dict) and data else None
 
 
 def _task_json(task, with_body=False, names=None):
@@ -575,6 +596,7 @@ def _task_json(task, with_body=False, names=None):
         'id': task.id, 'origin': 'task', 'exam_id': task.exam_id,
         'exam_name': exam.name if exam else '（考试已删除）',
         'grade': exam.grade if exam else '', 'question': task.question,
+        'gen': _loads_gen(task.gen),
         'status': task.status, 'stage': task.stage or '', 'error': task.error or '',
         'tool_count': task.tool_count or 0, 'report_id': task.report_id,
         'kind': 'html',
@@ -717,6 +739,101 @@ def ai_task_delete(tid):
     ai_task_service.drop_events(tid)
     log_operation(current_user, '删除', 'AI 任务', tid, '', module='grades')
     return jsonify(success=True, message='已删除')
+
+
+@bp.route('/ai/tasks/<int:tid>/stop', methods=['POST'])
+@login_required
+@perm_required('grades.view')
+def ai_task_stop(tid):
+    """请求停止一个进行中的任务（2026-10-14）。
+
+    语义是"当前这一步跑完就停"：模型 HTTP 请求在飞时无法中断，线程会在下一轮
+    模型调用前 / 下一次工具调用前看到标记并停下，任务状态记为 `canceled`，
+    前端随即给出「重新编辑提示词」（用 task.gen 无损回填生成器）。
+    """
+    task = AiTask.query.get_or_404(tid)
+    if task.user_id != current_user.id and current_user.role != 'admin':
+        abort(403)
+    if task.status != 'running':
+        return jsonify(success=False, message='任务已结束，无需停止'), 400
+    if not ai_task_service.request_stop(tid):
+        return jsonify(success=False,
+                       message='任务不在当前进程中执行（可能刚被中断），请刷新列表'), 409
+    log_operation(current_user, '停止', 'AI 任务', tid, '', module='grades')
+    return jsonify(success=True, message='已请求停止，当前步骤完成即停')
+
+
+# ==================== 提示词生成器（2026-10-14） ====================
+# 老师用下拉选项拼装提示词：选项（权限收窄）→ 拼装（真实性+权限双校验）→
+# 复制 / 直接分析 / 存模板。落库与执行仍走既有的 /ai/ask 任务链路。
+
+@bp.route('/ai/prompt/options')
+@login_required
+@perm_required('grades.view')
+def ai_prompt_options():
+    """生成器选项：年级 / 班级 / 学科 + 侧重 / 输出格式 / 附加要求预设。
+
+    班级/学科都是**本场考试成绩里真实存在的值**（班级=总分行口径），
+    且按账号成绩可见范围收窄——下拉里选出来的组合天然不会越权。
+    """
+    exam_id = request.args.get('exam_id', type=int)
+    exam = Exam.query.get_or_404(exam_id or 0)
+    try:
+        scope_service.check_exam_visible(current_user, exam)
+    except PermissionError:
+        abort(403)
+    try:
+        data = ai_prompt.options(current_user, exam)
+    except PermissionError as e:
+        return jsonify(success=False, message=str(e)), 403
+    return jsonify(success=True, data=data)
+
+
+@bp.route('/ai/prompt/build', methods=['POST'])
+@login_required
+@perm_required('grades.view')
+def ai_prompt_build():
+    """校验生成器选项并拼装提示词（只返回文本，不发起分析）。"""
+    data = _json()
+    exam = Exam.query.get_or_404(int(data.get('exam_id') or 0))
+    try:
+        scope_service.check_exam_visible(current_user, exam)
+    except PermissionError:
+        abort(403)
+    try:
+        out = ai_prompt.build(current_user, exam, data.get('gen'))
+    except PermissionError as e:
+        return jsonify(success=False, message=str(e)), 403
+    except ValueError as e:
+        return jsonify(success=False, message=str(e)), 400
+    return jsonify(success=True, data=out)
+
+
+@bp.route('/ai/prompt/templates', methods=['GET', 'POST'])
+@login_required
+@perm_required('grades.view')
+def ai_prompt_templates():
+    """我的提示词模板：GET 列表 / POST 保存（新建或按 id/同名覆盖）。"""
+    if request.method == 'GET':
+        return jsonify(success=True, data=ai_prompt.list_templates(current_user))
+    try:
+        row = ai_prompt.save_template(current_user, _json())
+    except ValueError as e:
+        return jsonify(success=False, message=str(e)), 400
+    log_operation(current_user, '保存', 'AI 提示词模板', row['id'], row['name'],
+                  module='grades')
+    return jsonify(success=True, data=row, message='模板已保存')
+
+
+@bp.route('/ai/prompt/templates/<int:tid>/delete', methods=['POST'])
+@login_required
+@perm_required('grades.view')
+def ai_prompt_template_delete(tid):
+    """删除我的模板（只允许本人）。"""
+    if not ai_prompt.delete_template(current_user, tid):
+        return jsonify(success=False, message='模板不存在或不属于你'), 404
+    log_operation(current_user, '删除', 'AI 提示词模板', tid, '', module='grades')
+    return jsonify(success=True, message='模板已删除')
 
 
 @bp.route('/ai')

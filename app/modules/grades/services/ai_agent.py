@@ -104,16 +104,21 @@ def _context_note(user, exam, direction='', layer='', scope_desc=''):
 
 
 def run(cfg, user, exam, question, direction='', layer='', scope_desc='',
-        history=None, max_rounds=MAX_ROUNDS):
+        history=None, max_rounds=MAX_ROUNDS, cancel_check=None):
     """跑一轮「一句话分析」，生成事件流（供路由直通 SSE）。
 
     history：页面内的多轮追问上下文（[{role,content}]，只保留最近几条），
     由前端内存携带；不落库、不跨用户，仅作本会话的对话上下文。
 
+    cancel_check：可调用对象（返回 True = 用户已点「停止」）。在**每一轮模型调用前
+    与每次工具调用前**检查一次 —— 模型调用本身不可中断（HTTP 请求在飞），
+    所以"停止"的语义是"当前这一步跑完就停"，最多多等一次模型往返/一个工具查询。
+
     事件：
       {'type': 'stage', 'text': …}      阶段提示
       {'type': 'tool',  'name':…, 'summary':…, 'ok':bool, 'ms':int}
       {'type': 'html',  'text': 消毒后的 HTML, 'trace': [工具轨迹]}
+      {'type': 'canceled', 'text': …}   用户点了停止
       {'type': 'error', 'text': …}
     """
     messages = [
@@ -130,6 +135,9 @@ def run(cfg, user, exam, question, direction='', layer='', scope_desc='',
     started = time.time()
 
     for round_no in range(1, max_rounds + 1):
+        if cancel_check and cancel_check():
+            yield {'type': 'canceled', 'text': '已按你的要求停止'}
+            return
         left = TIME_BUDGET - (time.time() - started)
         # 已取到数据 + （最后一轮 或 预算耗尽）→ 收尾轮：只准出报告，不准再调工具
         forced = bool(trace) and (round_no >= max_rounds or left <= 0)
@@ -177,6 +185,9 @@ def run(cfg, user, exam, question, direction='', layer='', scope_desc='',
                          'content': msg.get('content') or '',
                          'tool_calls': calls})
         for call in calls:
+            if cancel_check and cancel_check():
+                yield {'type': 'canceled', 'text': '已按你的要求停止'}
+                return
             if used_calls >= MAX_TOOL_CALLS:
                 yield {'type': 'error',
                        'text': f'工具调用次数超过上限（{MAX_TOOL_CALLS} 次），'

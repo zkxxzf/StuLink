@@ -1,5 +1,5 @@
 /* =============================================================================
-   StuLink 主题层（浅色 / 深色）—— v1.19.47.30（2026-10-13）
+   StuLink 主题层（浅色 / 深色）—— v1.19.49.31（2026-10-13）
    -----------------------------------------------------------------------------
    背景：此前全站颜色是「字面量满天飞」——base.html 内联 56 处、业务 css 201 处、
    模板内联 style 665 处；成绩分析（考试态 .sidebar-float）侧栏是白底卡，
@@ -19,7 +19,7 @@
 :root,
 [data-bs-theme="light"] {
     /* —— 页面与面板 —— */
-    /* 2026-10-13（v1.19.47.30）：页面底色原 #f0f2f5 偏灰，整体提亮一档 */
+    /* 2026-10-13（v1.19.49.31）：页面底色原 #f0f2f5 偏灰，整体提亮一档 */
     --sl-bg: #f6f8fb;                  /* 页面底色 */
     --sl-surface: #ffffff;             /* 卡片 / 面板 / 弹层 */
     --sl-surface-2: #f8fafc;           /* 次级面：表头、卡片头、斑马行 */
@@ -61,7 +61,7 @@
     --sl-navbar-border: #e2e8f0;
 
     /* —— 表格 ——
-       2026-10-13（v1.19.47.30）：成绩类表头原是写死的深色 #1e293b + 白字
+       2026-10-13（v1.19.49.31）：成绩类表头原是写死的深色 #1e293b + 白字
        （grades.css 加了 !important）。页面整体主题化后这条黑表头就成了突兀的
        「黑条」（用户反馈「页面区域还有黑色的，比如表头」）→ 改为跟随主题：
        浅色 = 浅灰底深字，深色 = 深底浅字。 */
@@ -382,7 +382,7 @@ body {
 /* =============================================================================
    两行表头 / 合并分组单元格：**层级用同族色阶**（纵深靠明度，不靠黑白对比）
    -----------------------------------------------------------------------------
-   2026-10-13（v1.19.47.30）用户反馈：宽表「两行表头 + 合并单元格」样式割裂 ——
+   2026-10-13（v1.19.49.31）用户反馈：宽表「两行表头 + 合并单元格」样式割裂 ——
    第 1 行 #1e293b 深、第 2 行 #334155 次深、冻结列又回 #1e293b，
    与浅色表体拼在一起像三张表。现统一为：
      第 1 行（分组/大标题）→ --sl-head-bg（稍深）
@@ -979,16 +979,38 @@ table.tt thead th {
 /* —— 表单汇总迷你条（_fx_style.html 内联 #edf1f8，模板不在可改清单）—— */
 [data-bs-theme="dark"] .fx-mini-bar { background: var(--sl-surface-3) !important; }
 
+/* —— AI 提示词生成器（成绩汇报区 / AI 分析工作台共用，2026-10-14）——
+   班级 / 学科多选用胶囊勾选（比 ctrl+多选下拉直观），选中态跟随主题 primary；
+   面板底色用次级面，深浅主题自适应，不写死颜色（两侧模板都用同一套 class）。 */
+.ai-gen-panel { background: var(--sl-surface-2); }
+.ai-gen-chips .chip {
+    font-size: 12px; padding: 1px 9px; border-radius: 999px; cursor: pointer;
+    border: 1px solid var(--sl-border); background: var(--sl-surface); color: var(--sl-text);
+}
+.ai-gen-chips .chip:hover { border-color: var(--bs-primary); }
+.ai-gen-chips .chip.on {
+    border-color: var(--bs-primary); color: var(--bs-primary);
+    background: var(--bs-primary-bg-subtle); font-weight: 600;
+}
+.ai-gen-chips .chip.chip-extra { border-style: dashed; }
+
 /* =============================================================================
    移动端点击区（2026-10-14 审计）：触屏下把 12~24px 的小按钮撑到 40×40
    （WCAG 2.5.5 / 微信 X5 与手机浏览器点不准）。
    只在「无 hover + 粗指针」的触屏生效 —— 桌面（有 hover 的鼠标）观感完全不变。
    ============================================================================= */
 @media (hover: none) and (pointer: coarse) {
+    /* 2026-10-14 第四轮审计（UI-11）：原只覆盖「图标型」两个选择器，表格行内的
+       「移出 / 加入 / 编辑」等 .btn-sm 仍只有 ~31px（点不准）。扩到全部 .btn-sm
+       与表格内按钮：只加 min-height（不动横向布局）；图标型按钮继续强制 40×40。 */
+    .btn-sm,
+    .table .btn,
+    .btn-close-sm {
+        min-height: 40px;
+    }
     .btn.btn-sm.py-0.px-1,
     .btn-close-sm {
         min-width: 40px;
-        min-height: 40px;
     }
 }
 
@@ -1067,6 +1089,12 @@ table.tt thead th {
 }
 
 /* 打印时永远按浅色输出（成绩单/台账要能打印） */
+/* —— 2026-10-14 第三轮审计（UI-M5′）：AI 报告正文（.ai-report-body，AI 生成的 HTML
+   含宽表）在移动端把整页撑破（真机实测 /grades/ai 与 /grades/ai/reports 均 +73px）
+   → 容器内横滚，等价于给表格加 .table-responsive —— */
+.ai-report-body { overflow-x: auto; }
+.ai-report-body table { margin-bottom: .5rem; }
+
 @media print {
     :root, [data-bs-theme="dark"] {
         --sl-bg: #fff; --sl-surface: #fff; --sl-surface-2: #fff;

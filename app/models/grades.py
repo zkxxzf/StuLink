@@ -1,4 +1,4 @@
-# StuLink v1.19.47.30 2026-10-10
+# StuLink v1.19.49.31 2026-10-10
 # 成绩管理与可视化分析系统：数据模型（独立库 grades.db）
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 import json
@@ -149,7 +149,7 @@ def _default_config():
 EXAM_KINDS = ('联考', '本校考', '小测验')
 # 阶段：教学进度节点 —— 用于“上一场同阶段考试”的定位（分层依据）
 EXAM_STAGES = ('期末考', '期中考', '月考', '限时练', '高三一测', '高三二测')
-# 分数口径（v1.19.47.30）：**仅作标记**，不参与导入解析/排名/划线口径判断
+# 分数口径（v1.19.49.31）：**仅作标记**，不参与导入解析/排名/划线口径判断
 # （口径在导入时按数据确定：有赋分进主分，只给原始分时原始分顶上主分）。
 # 允许留空 = 未指定，由导入时的文件决定。
 SCORE_MODES = ('converted', 'raw')
@@ -163,7 +163,7 @@ class Exam(db.Model):
     v1.19.0 四段式重构：新增两个维度
       exam_kind  考试性质（联考 / 本校考 / 小测验）
       exam_type  考试阶段（期末考 / 期中考 / 月考 / 限时练 / 高三一测 / 高三二测）
-    以及 score_mode（分数口径**标记**——v1.19.47.30 起允许不选；见字段注释）。
+    以及 score_mode（分数口径**标记**——v1.19.49.31 起允许不选；见字段注释）。
     """
     __bind_key__ = 'grades'
     __tablename__ = 'exams'
@@ -174,7 +174,7 @@ class Exam(db.Model):
     # v1.19.0 考试性质（字典 exam_kind：联考/本校考/小测验）
     exam_kind = db.Column(db.String(20))
     # 分数口径标记：converted=赋分 / raw=原始分 / 空=未指定（默认，导入时按文件确定）
-    # v1.19.47.30 起允许留空。注意它只是"标记"：导入解析、排名、划线都不读它——
+    # v1.19.49.31 起允许留空。注意它只是"标记"：导入解析、排名、划线都不读它——
     # exam_scores.score 在导入时已按「有赋分进主分、只给原始分则原始分顶上」定型。
     score_mode = db.Column(db.String(10), default='')
     grade = db.Column(db.String(10), nullable=False)  # 2024级/2025级…（与字典一致）
@@ -200,7 +200,7 @@ class Exam(db.Model):
     def score_mode_label(self):
         """分数口径展示名：赋分 / 原始分 / 按导入确定（未指定）
 
-        v1.19.47.30：未指定显示「按导入确定」，不再回落成「赋分」——
+        v1.19.49.31：未指定显示「按导入确定」，不再回落成「赋分」——
         否则老师没选却被显示成"赋分"，与本场实际口径不符。
         """
         return SCORE_MODE_LABELS.get((self.score_mode or '').strip(), SCORE_MODE_AUTO_LABEL)
@@ -310,7 +310,7 @@ class ExamScore(db.Model):
     class_name = db.Column(db.String(10))                   # 班级快照（换班不影响历史）
     # v1.19.0 考号快照（联考等第三方编排的号，第三方未给时为空）
     exam_no = db.Column(db.String(20))
-    # v1.19.47.30 班型快照（强基班/卓越班…）：导入时取自班型设置，使去差均分等分析
+    # v1.19.49.31 班型快照（强基班/卓越班…）：导入时取自班型设置，使去差均分等分析
     # 永远用「考试当时」的班型；此前实时读 ClassProfile，班型一改历史全部失真
     class_type = db.Column(db.String(20))
     direction = db.Column(db.String(4))                     # 物理/历史 快照
@@ -436,8 +436,74 @@ class TeacherSubjectLink(db.Model):
     )
 
 
+# ── 任课映射方案（2026-10-14）────────────────────────────────────────────────
+# 为什么需要：高中每学期任课安排都会变（分班 / 换老师 / 学科组调整），而
+# TeacherSubjectLink 只存「当前」一套，改完就没法回看上一学期谁教哪个班。
+# 「方案」＝某个学期（或某次调整）的整套任课映射留档 + 一个明确的「当前生效」。
+#
+# 关键取舍（重要，勿改）：
+# - **teacher_subject_links 仍是"当前生效映射"的唯一运行真值**，语义与列都不动 ——
+#   成绩 / 教务 / 考务 / 工作台 / MCP 等 20+ 处读取点零改动（它们只认 active=True）；
+# - 每个方案（含当前方案）在 teacher_link_plan_rows 里各存一份完整快照，
+#   「使用某方案」＝把该方案快照物化回主表（服务层 link_plan_service 负责）；
+# - is_current=True 全局至多一个（服务层保证），页面据此显示/编辑"当前方案"。
+
+class TeacherLinkPlan(db.Model):
+    """任课映射方案（学年 × 学期 / 自定义名称，可任意多个）"""
+    __bind_key__ = 'grades'
+    __tablename__ = 'teacher_link_plans'
+
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(80), nullable=False)      # 方案名（如「2026-2027学年 第一学期」）
+    school_year = db.Column(db.String(20), default='')   # 如 2026-2027（可空＝未标注）
+    term = db.Column(db.String(10), default='')          # ''=整学年 / 第一学期 / 第二学期
+    note = db.Column(db.String(200), default='')         # 说明（可空）
+    is_current = db.Column(db.Boolean, default=False, index=True)  # 当前生效方案（至多一个）
+    created_by = db.Column(db.Integer)                   # users.id
+    created_at = db.Column(db.DateTime, default=datetime.now)
+    updated_at = db.Column(db.DateTime, default=datetime.now, onupdate=datetime.now)
+
+    # 2026-10-14 第四轮审计（DATA3-01）：至多一个「当前方案」由 DB 级**部分唯一索引**兜底
+    # （服务层循环翻转只保正常路径；手工改库 / 并发提交仍可能留下两个 is_current=1）
+    __table_args__ = (
+        db.Index('uq_link_plan_current', 'is_current', unique=True,
+                 sqlite_where=db.text('is_current = 1')),
+    )
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'name': self.name,
+            'school_year': self.school_year or '',
+            'term': self.term or '',
+            'term_text': self.term or '整学年',
+            'note': self.note or '',
+            'is_current': bool(self.is_current),
+            'created_at': self.created_at.strftime('%Y-%m-%d %H:%M') if self.created_at else '',
+            'updated_at': self.updated_at.strftime('%Y-%m-%d %H:%M') if self.updated_at else '',
+        }
+
+
+class TeacherLinkPlanRow(db.Model):
+    """任课映射方案明细（方案 × 年级 × 班级 × 科目 → 教师账号快照）"""
+    __bind_key__ = 'grades'
+    __tablename__ = 'teacher_link_plan_rows'
+
+    id = db.Column(db.Integer, primary_key=True)
+    plan_id = db.Column(db.Integer, nullable=False, index=True)
+    grade = db.Column(db.String(10), nullable=False)
+    class_name = db.Column(db.String(10), nullable=False)
+    subject = db.Column(db.String(10), nullable=False)
+    user_id = db.Column(db.Integer, nullable=False)
+
+    __table_args__ = (
+        db.UniqueConstraint('plan_id', 'grade', 'class_name', 'subject',
+                            name='uq_plan_link_cell'),
+    )
+
+
 class ExamTeacherLink(db.Model):
-    """v1.19.47.30 考试任课快照：考试 × 班级 × 科目的**当时**任课教师
+    """v1.19.49.31 考试任课快照：考试 × 班级 × 科目的**当时**任课教师
 
     为什么需要：TeacherSubjectLink 只存"当前"映射，教师一换（尤其分班后）
     历史考试的教师维度分析会全部错位。本表把每场考试的任课教师映射定格，
@@ -561,7 +627,13 @@ class AiTask(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     user_id = db.Column(db.Integer, nullable=False)
     exam_id = db.Column(db.Integer, nullable=False)
-    question = db.Column(db.String(500), nullable=False)
+    # 2026-10-14 提示词生成器：question 就是最终提示词（可能由生成器拼装、可手动编辑），
+    # 500 字太短（生成器模板本身约 200~400 字 + 附加要求），放宽到 2000。
+    question = db.Column(db.String(2000), nullable=False)
+    # gen = 提示词生成器的**结构化选项** JSON（{grades,classes,subjects,focus,output,extra,prompt}）。
+    # 为什么与 question 分开存：question 是"最终发出去的那段话"（可能被手动改过），
+    # gen 是"当时选了哪些维度" —— 中断/失败后「重新编辑提示词」靠它无损回填表单。
+    gen = db.Column(db.Text, default='')
     direction = db.Column(db.String(10), default='')
     layer = db.Column(db.String(30), default='')
     status = db.Column(db.String(12), default='running')
@@ -578,6 +650,32 @@ class AiTask(db.Model):
         db.Index('idx_ai_task_user', 'user_id'),
         db.Index('idx_ai_task_exam', 'exam_id'),
         db.Index('idx_ai_task_status', 'status'),
+    )
+
+
+class AiPromptTemplate(db.Model):
+    """AI 成绩分析「提示词生成器」模板（2026-10-14）。
+
+    老师用下拉选项（分析范围＝年级/班级/学科 → 分析侧重 → 输出格式 → 附加要求）
+    拼出一次分析的提示词；本表把**这套选项**存成命名模板，下次直接套用、再改再跑。
+
+    存的是 `payload`（JSON）= 结构化选项 + 当时生成的 prompt 文本：
+      · 结构化选项 → 套用后表单可无损回填（选项仍可改、可重新生成）；
+      · prompt 文本   → 「当时是这么拼的 / 我手动改成了这样」的留档。
+    仅本人可见（列表/删除都按 user_id 过滤）。
+    """
+    __bind_key__ = 'grades'
+    __tablename__ = 'ai_prompt_templates'
+
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, nullable=False)
+    name = db.Column(db.String(50), nullable=False)
+    payload = db.Column(db.Text)                 # JSON：生成器选项 + prompt 文本
+    created_at = db.Column(db.DateTime, default=datetime.now)
+    updated_at = db.Column(db.DateTime, default=datetime.now)
+
+    __table_args__ = (
+        db.Index('idx_ai_prompt_tpl_user', 'user_id'),
     )
 
 
@@ -617,6 +715,9 @@ class Certificate(db.Model):
     __table_args__ = (
         db.Index('idx_cert_code', 'code'),
         db.Index('idx_cert_stu', 'student_no'),
+        # 2026-10-14 第四轮审计修复（PERF-118①）：按生成人追溯/统计（谁开了多少份
+        # 证明）此前无索引；带 generated_at 支持时间范围过滤。
+        db.Index('idx_cert_generated_by', 'generated_by', 'generated_at'),
     )
 
 
@@ -640,7 +741,7 @@ class ExamAffair(db.Model):
     selection_mode = db.Column(db.String(10), default='selected')  # 编排分组模式：selected 按选科分组 / plain 不选科（全体一组，考场全通用）
     non_attend_mode = db.Column(db.String(10), default='skip')     # 非参考学生处理：skip 不安排考场 / tail 安排到同选科考场尾场
     subject_prefixes = db.Column(db.Text)                          # 选科考号前后缀 JSON：{"物化生":{"prefix":"1701","suffix":""}}
-    # v1.19.47.30 监考编排：每考场默认监考人数（1/2/3，用户口径默认 1 人）
+    # v1.19.49.31 监考编排：每考场默认监考人数（1/2/3，用户口径默认 1 人）
     invig_slots = db.Column(db.Integer, default=1)
     status = db.Column(db.String(10), default='draft')     # draft / arranged / linked
     note = db.Column(db.Text)
@@ -758,13 +859,20 @@ class ExamRoomGroup(db.Model):
 
 
 class ExamRoomGroupMap(db.Model):
-    """v1.19.0 考场房间 ↔ 分组 关联（多对多）"""
+    """v1.19.0 考场房间 ↔ 分组 关联（多对多）
+
+    2026-10-14 用户口径：分组里的房间**顺序**也要能调（上移 / 下移），而且要能「带着顺序复用」——
+    考务步骤② 从某个分组「一键带入」时按本字段排出来的先后生成 01、02… 考场编号
+    （见 ``exam_affairs.affair_rooms_from_lib_batch``；迁移脚本
+    ``scripts/migrate_room_group_map_sort_20261014.py``）。
+    """
     __bind_key__ = 'grades'
     __tablename__ = 'exam_room_group_map'
 
     id = db.Column(db.Integer, primary_key=True)
     group_id = db.Column(db.Integer, nullable=False)
     lib_id = db.Column(db.Integer, nullable=False)     # → affair_room_libs.id
+    sort_order = db.Column(db.Integer, default=0)      # 组内顺序（10、20、30… 步进）
 
     __table_args__ = (
         db.UniqueConstraint('group_id', 'lib_id', name='uq_room_group_map'),
@@ -773,7 +881,7 @@ class ExamRoomGroupMap(db.Model):
 
 
 class ScoreChangeLog(db.Model):
-    """v1.19.47.30 分数修改记录（改分/删分留痕）
+    """v1.19.49.31 分数修改记录（改分/删分留痕）
 
     每次在成绩单改分（含赋分/原始分、标记缺考）都写一条，供全校查询：
     谁、什么时候、改了哪场考试哪个学生的哪一科、改前改后各是多少、什么动作。
@@ -806,7 +914,7 @@ class ScoreChangeLog(db.Model):
     )
 
 
-# ============ v1.19.47.30 考务环节④⑤⑥：任课核对 / 考试时间表 / 监考编排 ============
+# ============ v1.19.49.31 考务环节④⑤⑥：任课核对 / 考试时间表 / 监考编排 ============
 #
 # 设计口径（用户 2026-10-12 定案）：
 #   · 三者都是**本批次（本次考试）**的数据，不回写全局任课映射；

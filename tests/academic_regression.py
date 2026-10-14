@@ -11,6 +11,7 @@
 - 任课安排下线核查：/academic/duty* 一律 404（2026-10-10 整功能移除）
 - 学科组长（备课组长＝年级×学科 / 教研组长＝只按学科、组长必须本学科教师 / 综合组 / 导出 / 删除）
 - 教务工作台、教师名单（筛选+导出）、查课（检查人姓名+编辑）、业绩（审核意见）
+- 教师三页合一（2026-10-14）：教师名单 / 任课教师映射 / 学科组长 顶部 tab 互切（STAFFTABS）
 """
 import io
 import json
@@ -33,7 +34,7 @@ config_mod.Config.SQLALCHEMY_BINDS = {
     'history': 'sqlite:///' + os.path.join(_TMP, 'history.db'),
     'grades': 'sqlite:///' + os.path.join(_TMP, 'grades.db'),
     'points': 'sqlite:///' + os.path.join(_TMP, 'points.db'),
-    # 2026-10-13（v1.19.47.30）：德育奖惩库
+    # 2026-10-13（v1.19.49.31）：德育奖惩库
     'morality': 'sqlite:///' + os.path.join(_TMP, 'morality.db'),
     'academic': 'sqlite:///' + os.path.join(_TMP, 'academic.db'),
     # 2026-10-10：教务分库——查课 / 业绩 / 表单 各自独立库
@@ -227,6 +228,8 @@ def _urls():
         'insp_edit_tpl': url_for('academic.inspection_edit', rid=0),
         'insp_live': url_for('academic.inspection_live_schedule'),
         'insp_mark': url_for('academic.inspection_mark'),
+        # 2026-10-14：录入页按教师自动带出班级/科目（反查当天生效课表）
+        'insp_lookup': url_for('academic.api_inspection_teacher_courses'),
         'insp_stats': url_for('academic.inspection_stats'),
         'wl_config': url_for('academic.inspection_workload_config'),
         'wl_rules': url_for('academic.inspection_workload_rules_save'),
@@ -1961,6 +1964,133 @@ def check_teachers():
             case('教师名单导出可解析', False, str(e))
 
 
+@item('STAFFTABS')
+def check_staff_tabs():
+    """2026-10-14 教师三页合一：教师名单 / 任课教师映射 / 学科组长 顶部 tab 互切。
+
+    - 三页共用 _staff_tabs.html，各页高亮自己的项（data-tab 定位）；
+    - 侧栏「教师」合并为一个入口（旧的折叠组 navAcaTch 不再存在）；
+    - 成绩管理侧 /grades/teachers 是同源另一入口：不出现教务 tab、保留返回按钮。
+    """
+    from flask import url_for
+    with app.app_context():
+        u = _urls()
+        links_url = url_for('academic.teacher_links_page')
+    with app.test_client() as c:
+        login(c, 'ac_admin', TEST_PWD)
+        pages = {'roster': u['teachers'], 'links': links_url, 'leaders': u['leaders']}
+        for tab, path in pages.items():
+            r = c.get(path)
+            html = r.get_data(as_text=True)
+            case(f'教师页 {path} 200', r.status_code == 200, str(r.status_code))
+            case(f'教师页 tab 栏渲染 + 当前项高亮（{tab}）',
+                 'id="staffTabs"' in html
+                 and bool(re.search(r'class="nav-link[^"]*active[^"]*"[^>]*data-tab="'
+                                    + tab + '"', html)))
+            case(f'教师页 tab 三项齐全（{tab} 视角）',
+                 all(f'data-tab="{t}"' in html for t in ('roster', 'links', 'leaders')))
+        # 侧栏：旧的「教师」折叠组（navAcaTch）已删除，只留一个「教师」入口
+        case('侧栏教师合并为一个入口（旧折叠组已删除）',
+             'navAcaTch' not in html
+             and bool(re.search(r'bi-person-vcard"></i>教师\s*</a>', html)))
+        # 成绩管理侧不受影响
+        r = c.get('/grades/teachers')
+        ghtml = r.get_data(as_text=True)
+        case('成绩侧任课映射正常 200 且不出现教务 tab',
+             r.status_code == 200 and 'id="staffTabs"' not in ghtml, str(r.status_code))
+        case('成绩侧保留返回按钮', 'bi bi-arrow-left' in ghtml)
+
+
+@item('USERTABS')
+def check_user_tabs():
+    """2026-10-14 系统管理「教师管理」拆成两个子页：教师名单 / 教师权限管理。
+
+    - `/users/`（教师权限管理，权限 system.users）与 `/users/teachers`（教师名单，权限
+      academic.view，复用教务侧同一视图与数据）共用一条 tab 栏；
+    - 页内链接 / 表单 / 重定向按当前模块自适应（users.* ↔ academic.*），不跨模块跳；
+    - 权限边界：只有 academic.view 的身份进得来教师名单、进不去教师权限管理（反之亦然）。
+    """
+    from flask import url_for
+    with app.app_context():
+        g_aca = PermissionGroup(name='回归-仅教务查看')
+        g_aca.set_menu_keys(['academic.view'])
+        g_sys = PermissionGroup(name='回归-仅系统用户')
+        g_sys.set_menu_keys(['system.users'])
+        db.session.add_all([g_aca, g_sys])
+        db.session.flush()
+        for uname, rname, gid in (('ac_only_aca', '教务查看员', g_aca.id),
+                                  ('ac_only_sys', '系统用户员', g_sys.id)):
+            u = User(username=uname, real_name=rname, role='staff',
+                     must_change_pwd=False, permission_group_id=gid)
+            u.set_password(TEST_PWD)
+            db.session.add(u)
+        db.session.commit()
+
+    with app.test_client() as c:
+        login(c, 'ac_admin', TEST_PWD)
+        html = c.get('/users/').get_data(as_text=True)
+        case('教师管理页 tab 栏 2 项 + 高亮教师权限管理',
+             'id="userTabs"' in html and bool(re.search(
+                 r'class="nav-link[^"]*active[^"]*"[^>]*data-tab="perms"', html)))
+        case('教师管理页 tab 含教师名单子页（管理员有 academic.view）',
+             'data-tab="roster"' in html and '/users/teachers' in html)
+        r = c.get('/users/teachers')
+        html = r.get_data(as_text=True)
+        case('教师名单子页 200', r.status_code == 200, str(r.status_code))
+        case('教师名单子页高亮 roster（系统管理那组 tab）',
+             'id="userTabs"' in html and bool(re.search(
+                 r'class="nav-link[^"]*active[^"]*"[^>]*data-tab="roster"', html)))
+        case('教师名单子页内容正确（教师编号 / 姓名 / 科目）',
+             '教师编号' in html and '张语文' in html)
+        case('教师名单子页不再出现教务那组 tab', 'id="staffTabs"' not in html)
+        # 双端自适应：链接必须留在当前模块（/users/...），不把用户送回教务
+        case('子页链接按当前模块自适应（导出 / 模板 / 编辑 / 分页）',
+             '/users/teachers/export' in html and '/users/teachers/template.xlsx' in html
+             and '/users/teachers/' in html and '/academic/teachers' not in html,
+             '存在跨模块链接')
+        r = c.get('/users/teachers/export')
+        case('子页导出可用（xlsx）',
+             r.status_code == 200 and r.data[:2] == b'PK', str(r.status_code))
+        # 教务侧仍是独立的三 tab，不受影响
+        html = c.get(url_for('academic.teachers_page')).get_data(as_text=True)
+        case('教务侧教师名单仍是教务 tab 且不含系统管理 tab',
+             'id="staffTabs"' in html and 'id="userTabs"' not in html
+             and '/academic/teachers/export' in html)
+
+    with app.test_client() as c:
+        login(c, 'ac_only_aca', TEST_PWD)
+        r = c.get('/users/teachers')
+        case('仅 academic.view：教师名单子页可访问', r.status_code == 200, str(r.status_code))
+        r = c.get('/users/')
+        case('仅 academic.view：教师权限管理被拒 403', r.status_code == 403, str(r.status_code))
+
+    with app.test_client() as c:
+        login(c, 'ac_only_sys', TEST_PWD)
+        html = c.get('/users/').get_data(as_text=True)
+        case('仅 system.users：教师权限管理可用且 tab 不含教师名单',
+             'id="userTabs"' in html and 'data-tab="perms"' in html
+             and 'data-tab="roster"' not in html)
+        r = c.get('/users/teachers')
+        case('仅 system.users：教师名单子页被拒 403', r.status_code == 403, str(r.status_code))
+
+    with app.app_context():
+        from sqlalchemy import text
+        uids = [u.id for u in User.query.filter(
+            User.username.in_(('ac_only_aca', 'ac_only_sys'))).all()]
+        if uids:
+            # 登录会写 operation_logs（引用 users.id），先清这些行再删用户，避免外键阻断
+            db.session.execute(
+                text('DELETE FROM operation_logs WHERE user_id IN :ids')
+                .bindparams(db.bindparam('ids', expanding=True)), {'ids': uids})
+            db.session.commit()
+        User.query.filter(User.id.in_(uids)).delete(synchronize_session=False)
+        PermissionGroup.query.filter(PermissionGroup.name.in_(
+            ('回归-仅教务查看', '回归-仅系统用户'))).delete(synchronize_session=False)
+        db.session.commit()
+        case('教师管理子页用例清理干净',
+             User.query.filter_by(username='ac_only_aca').first() is None)
+
+
 @item('INSPECTION')
 def check_inspection():
     with app.app_context():
@@ -2021,6 +2151,77 @@ def check_inspection():
             if rec_new:                      # 断言完立即清理，保持夹具干净
                 db.session.delete(rec_new)
                 db.session.commit()
+
+        # ── 2026-10-14 用户口径：录入时按教师自动追踪班级 / 科目（仍可手改） ──
+        case('录入页挂上自动带出接口与提示位',
+             'id="singleLookupHint"' in entry_html
+             and '/api/inspection/teacher-courses' in entry_html
+             and all(k in entry_html for k in ('id="singleTeacher"', 'id="singleDate"',
+                                               'id="singlePeriod"', 'id="singleGrade"',
+                                               'id="singleClass"', 'id="singleSubject"')),
+             f'len={len(entry_html)}')
+        # 2026-10-14（用户报「缺个班级」）：节次手填数字会错位（课表里 1=早读、2=第1节）——
+        # 录入 / 编辑一律改下拉，选项名取本学期作息（get_default_periods：1=早读、2=第1节）
+        case('录入页节次改下拉（作息节次名，不再手填数字）',
+             'id="singlePeriod"' in entry_html and '<select name="period" id="singlePeriod"' in entry_html
+             and '>早读</option>' in entry_html and '>第1节</option>' in entry_html
+             and '"periods":' in entry_html,
+             f'len={len(entry_html)}')
+        case('查课列表节次显示节次名（period_label 口径）', '<td>第1节</td>' in html,
+             'expect 第1节 for period=2')
+        case('编辑弹窗节次同样用下拉',
+             '<select name="period" id="eiPeriod"' in html)
+        today_str = date.today().isoformat()
+        r = c.get(u['insp_lookup'] + f'?date={today_str}&teacher_uid=T900001')
+        look = r.get_json() or {}
+        courses = look.get('courses') or []
+        case('反查接口：按教师带出当天课（班级 / 科目 / 节次）',
+             r.status_code == 200 and look.get('success') and len(courses) == 2
+             and any(cc['class_name'] == '01班' and cc['subject'] == '语文'
+                     and cc['grade'] == '高一' and cc['period'] == 3
+                     for cc in courses),
+             f'{r.status_code} {str(look)[:160]}')
+
+        # 叠加当天临时调课：把「李数学 周一第3节」调到今天第9节 ——
+        # 反查应带出调入的第9节（is_temp_swap=True），且当天不再出现原时段。
+        with app.app_context():
+            src = ScheduleEntry.query.filter_by(
+                term_schedule_id=TS_ID, teacher_uid='T900002', weekday=1,
+                period_number=3).first()
+            tgt = ScheduleEntry(term_schedule_id=TS_ID, grade='高一', class_name='01班',
+                                weekday=date.today().isoweekday(), period_number=9,
+                                week_range='1-20', subject='数学', teacher_uid='T900002',
+                                teacher_name='李数学', room='101', entry_type='swap',
+                                is_deleted=False)
+            db.session.add(tgt)
+            db.session.flush()
+            sw = ScheduleSwap(term_schedule_id=TS_ID, swap_type='personal',
+                              original_entry_id=src.id, target_entry_id=tgt.id,
+                              applicant_uid='T900002', applicant_name='李数学',
+                              swap_date=date.today(),
+                              new_weekday=date.today().isoweekday(), new_period=9,
+                              is_permanent=False, status='executed',
+                              reason='回归：查课反查叠加验证')
+            db.session.add(sw)
+            db.session.commit()
+            tgt_id, sw_id = tgt.id, sw.id
+        r = c.get(u['insp_lookup'] + f'?date={today_str}&teacher_uid=T900002')
+        courses2 = (r.get_json() or {}).get('courses') or []
+        case('反查接口叠加当天临时调课（按实际任课教师带出、原时段不计）',
+             any(cc['entry_id'] == tgt_id and cc['is_temp_swap'] and cc['period'] == 9
+                 for cc in courses2)
+             and all(cc['period'] != 3 for cc in courses2),
+             str(courses2)[:160])
+        with app.app_context():          # 断言完立即清理，保持夹具干净
+            db.session.delete(db.session.get(ScheduleSwap, sw_id))
+            db.session.delete(db.session.get(ScheduleEntry, tgt_id))
+            db.session.commit()
+
+    # 反查接口与录入同权限：无 academic.edit 的账号不得调用
+    with app.test_client() as c3:
+        login(c3, 'ac_head', TEST_PWD)
+        r = c3.get(u['insp_lookup'] + f'?date={today_str}&teacher_uid=T900001')
+        case('反查接口需录入权限（班主任被拒）', r.status_code == 403, str(r.status_code))
 
 
 @item('WORKLOAD')
@@ -2298,7 +2499,7 @@ def check_inspection_mark():
 
 @item('SWAPEXCH')
 def check_two_person_exchange():
-    """两人换课（v1.19.47.30）：换时段 / 换班上课 / 请人代课 × 临时与永久，
+    """两人换课（v1.19.49.31）：换时段 / 换班上课 / 请人代课 × 临时与永久，
     覆盖「对方先确认 → 教务审批 → 执行」全链路 + 拒绝 / 越权 / 校验路径。"""
     from app.modules.academic.services import swap_service
 
@@ -2623,7 +2824,7 @@ def check_swap_exchange_batch():
 
 @item('SWAPMIXED')
 def check_swap_mixed_batch():
-    """调课页合并（v1.19.47.30）：一次提交 = 几节调空档 + 几节与同事换上课时间（同一批次）；
+    """调课页合并（v1.19.49.31）：一次提交 = 几节调空档 + 几节与同事换上课时间（同一批次）；
     2026-10-14：对调只换时间（不再连班级一起换）。"""
     from app.models.timetable import ScheduleEntry, ScheduleSwap
     from app.modules.academic.services import swap_service
@@ -2962,7 +3163,7 @@ def check_swap_bulk_offset():
 
 @item('WORKBENCHSWAP')
 def check_workbench_swap():
-    """教师工作台里的调课区块（v1.19.47.30）：入口 + 待我确认 + 我的申请。"""
+    """教师工作台里的调课区块（v1.19.49.31）：入口 + 待我确认 + 我的申请。"""
     with app.test_client() as c:
         login(c, 'ac_admin', TEST_PWD)
         r = c.get('/workbench/')      # 蓝图前缀 /workbench + 路由 '/'（不带斜杠会 308）
@@ -5002,6 +5203,194 @@ def check_parallel_walk_class():
         case('并行走班：不同教学班同教师同时段仍判冲突',
              not ok3 and '教师冲突' in str(msg3), str(msg3))
         svc.delete_schedule(tid)
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# 方案 · 历史记录（任课映射 / 学科组长，2026-10-14）
+# ══════════════════════════════════════════════════════════════════════════════
+@item('PLANMGR')
+def check_plan_manager():
+    """右上角「历史记录」＝使用历史方案 / 使用其他方案 / 新建方案。
+
+    - 任课映射：方案是 TeacherSubjectLink 的留档，切换＝把该方案物化回主表
+      （主表列与语义不变，成绩 / 教务 / 考务等读取点不受影响）；
+    - 学科组长：方案＝学年 × 学期，切换只影响页面（登记本身按学期并存）；
+    - 当前方案不可删、同一学年学期不可重复建方案。
+    """
+    from app.models.academic import SubjectLeaderPlan
+    from app.models.grades import (TeacherLinkPlan, TeacherLinkPlanRow,
+                                   TeacherSubjectLink)
+
+    with app.app_context():
+        # 临时库默认没有任课映射（也没有学生班级），这里造两条教师账号 + 三条映射，
+        # 让"方案 = 映射留档 / 切换 = 物化回主表"这条链路是真的被验证到。
+        t1 = User(username='plan_r1', real_name='方案回归甲', role='teacher',
+                  must_change_pwd=False)
+        t2 = User(username='plan_r2', real_name='方案回归乙', role='teacher',
+                  must_change_pwd=False)
+        t1.set_password(TEST_PWD)
+        t2.set_password(TEST_PWD)
+        db.session.add_all([t1, t2])
+        db.session.flush()
+        seed_uids = [t1.id, t2.id]
+        seeded_cells = [('高一', '01班', '语文', t1.id),
+                        ('高一', '01班', '数学', t2.id),
+                        ('高二', '02班', '语文', t2.id)]
+        for _g, _c, _s, _u in seeded_cells:
+            db.session.add(TeacherSubjectLink(grade=_g, class_name=_c, subject=_s,
+                                              user_id=_u, active=True))
+        db.session.commit()
+        base_links = TeacherSubjectLink.query.filter_by(active=True).count()
+        base_leaders = SubjectLeader.query.count()
+
+    with app.test_client() as c:
+        login(c, 'ac_admin', TEST_PWD)
+        csrf = get_csrf(c, '/academic/leaders')
+        hdrs = {'X-CSRFToken': csrf}
+
+        def jpost(url, payload):
+            return c.post(url, data=json.dumps(payload), content_type='application/json',
+                          headers=hdrs)
+
+        # 页面入口
+        html = c.get('/academic/leaders').get_data(as_text=True)
+        case('组长页：右上「历史记录」入口存在',
+             'id="ldHistory"' in html and 'ldPlanModal' in html)
+        case('组长页：方案下拉（学年学期即方案）', 'id="ldPlan"' in html)
+        html = c.get('/academic/teacher-links').get_data(as_text=True)
+        case('映射页（教务侧）：「历史记录」入口 + 当前方案徽标',
+             'id="tcHistory"' in html and 'planModal' in html and '当前方案' in html)
+        case('映射页（成绩侧）可访问', c.get('/grades/teachers').status_code == 200)
+
+        # ── 学科组长方案：新建 → 重命名 → 使用 → 删除 ──
+        r = jpost('/academic/leaders/plans/create',
+                  {'name': '回归·2098-2099学年 第一学期', 'school_year': '2098-2099',
+                   'term': '第一学期', 'copy_from': 'blank', 'use_now': False})
+        body = r.get_json() or {}
+        case('组长：新建方案成功', r.status_code == 200 and body.get('success'), str(body))
+        pid = (body.get('data') or {}).get('id')
+        r = jpost('/academic/leaders/plans/create',
+                  {'school_year': '2098-2099', 'term': '第一学期', 'copy_from': 'blank'})
+        case('组长：同一学年学期重复新建被拒（400）', r.status_code == 400, str(r.status_code))
+        r = jpost('/academic/leaders/plans/rename', {'plan_id': pid, 'name': '回归·改名后'})
+        case('组长：重命名成功', r.status_code == 200 and (r.get_json() or {}).get('success'))
+        r = jpost('/academic/leaders/plans/use', {'plan_id': pid})
+        j = r.get_json() or {}
+        case('组长：使用方案返回页面跳转地址',
+             r.status_code == 200
+             and '/academic/leaders' in ((j.get('data') or {}).get('redirect') or ''),
+             str(j))
+        with app.app_context():
+            case('组长：切换后当前方案唯一',
+                 SubjectLeaderPlan.query.filter_by(is_current=True).count() == 1)
+        case('组长：删除方案成功',
+             jpost('/academic/leaders/plans/delete', {'plan_id': pid}).status_code == 200)
+        with app.app_context():
+            case('组长：方案操作不动组长登记数据', SubjectLeader.query.count() == base_leaders)
+
+        # ── 任课映射方案：复制当前 → 切换 → 切回 → 删除 ──
+        r = c.get('/academic/teacher-links/plans')
+        items = (r.get_json() or {}).get('data', {}).get('items', [])
+        case('映射：方案清单可用且条数＝主表有效映射',
+             r.status_code == 200 and bool(items) and items[0]['count'] == base_links,
+             f'{r.status_code} {items[:1]}')
+        cur_id = items[0]['id'] if items else None
+        r = jpost('/academic/teacher-links/plans/create',
+                  {'name': '回归·映射副本', 'copy_from': 'current', 'use_now': False})
+        body = r.get_json() or {}
+        pid2 = (body.get('data') or {}).get('id')
+        case('映射：新建（复制当前）成功', r.status_code == 200 and body.get('success'),
+             str(body))
+        r = c.get('/academic/teacher-links/plans')
+        row = next((i for i in (r.get_json() or {}).get('data', {}).get('items', [])
+                    if i['id'] == pid2), {})
+        case('映射：副本条数与主表一致', row.get('count') == base_links, str(row.get('count')))
+        case('映射：切换方案成功（物化回主表）',
+             jpost('/academic/teacher-links/plans/use',
+                   {'plan_id': pid2}).status_code == 200)
+        with app.app_context():
+            case('映射：切换后主表有效映射数不变',
+                 TeacherSubjectLink.query.filter_by(active=True).count() == base_links)
+            case('映射：当前方案唯一',
+                 TeacherLinkPlan.query.filter_by(is_current=True).count() == 1)
+        case('映射：当前生效方案不可删除（400）',
+             jpost('/academic/teacher-links/plans/delete',
+                   {'plan_id': pid2}).status_code == 400)
+        jpost('/academic/teacher-links/plans/use', {'plan_id': cur_id})
+        case('映射：删除历史方案成功',
+             jpost('/academic/teacher-links/plans/delete',
+                   {'plan_id': pid2}).status_code == 200)
+        case('映射：删除不存在的方案返回 400',
+             jpost('/academic/teacher-links/plans/delete',
+                   {'plan_id': pid2}).status_code == 400)
+
+        # 保存矩阵 → 当前方案快照同步（快照必须等于主表有效映射）
+        with app.app_context():
+            from app.modules.grades.services.scope import _all_active_grades
+            g = (_all_active_grades() or [''])[0]
+            cid = TeacherLinkPlan.query.filter_by(is_current=True).first().id
+        if g:
+            r = jpost('/academic/teacher-links/api/save', {'grade': g, 'cells': {}})
+            with app.app_context():
+                rows = TeacherLinkPlanRow.query.filter_by(plan_id=cid).count()
+                act = TeacherSubjectLink.query.filter_by(active=True).count()
+            case('映射：保存后当前方案快照与主表一致',
+                 r.status_code == 200 and rows == act, f'{rows} vs {act}')
+
+        # 空白方案「立即使用」→ 主表清空；切回原方案 → 完全恢复（历史方案真的可用）
+        if base_links:
+            r = jpost('/academic/teacher-links/plans/create',
+                      {'name': '回归·空白方案', 'copy_from': 'blank', 'use_now': True})
+            pid3 = ((r.get_json() or {}).get('data') or {}).get('id')
+            with app.app_context():
+                emptied = TeacherSubjectLink.query.filter_by(active=True).count()
+            case('映射：空白方案启用后主表无有效映射', emptied == 0, str(emptied))
+            jpost('/academic/teacher-links/plans/use', {'plan_id': cur_id})
+            with app.app_context():
+                restored = TeacherSubjectLink.query.filter_by(active=True).count()
+            case('映射：切回原方案后主表完全恢复（历史方案可用）',
+                 restored == base_links, f'{restored} vs {base_links}')
+            jpost('/academic/teacher-links/plans/delete', {'plan_id': pid3})
+
+    # ── 清场：删除本用例造的映射 / 账号 / 方案，避免影响其它项 ──
+    with app.app_context():
+        for _g, _c, _s, _u in seeded_cells:
+            row = (TeacherSubjectLink.query
+                   .filter_by(grade=_g, class_name=_c, subject=_s).first())
+            if row:
+                db.session.delete(row)
+        for _uid in seed_uids:
+            u = User.query.get(_uid)
+            if u:
+                db.session.delete(u)
+        for p in TeacherLinkPlan.query.filter(TeacherLinkPlan.name.like('回归·%')).all():
+            TeacherLinkPlanRow.query.filter_by(plan_id=p.id).delete(synchronize_session=False)
+            db.session.delete(p)
+        db.session.commit()
+
+
+@item('AUDITP3')
+def check_audit_p3_inspection_swap_kind():
+    """查课「单节总览」发起调课必须按**调课**落库（2026-10-14 第三轮审计 SEC-02）。
+
+    修复前：`academic/routes/inspection.py` 的 quick-swap 把 `kind='cover'` 写死，
+    用户选「调课(exchange)」也按「代课」落库 —— 对方课条目不校验、`exchange_kind`
+    记错、通知文案变成"请你代课"。
+    """
+    import inspect as _inspect
+
+    from app.modules.academic.services import swap_service
+
+    path = os.path.join(BASE, 'app', 'modules', 'academic', 'routes', 'inspection.py')
+    with open(path, encoding='utf-8') as f:
+        src = f.read()
+    case('AUDITP3 源码：quick-swap 透传已校验的 kind',
+         'items=[item], kind=kind, is_permanent=is_permanent' in src)
+    case('AUDITP3 源码：不再写死 kind=\'cover\'',
+         "items=[item], kind='cover'" not in src)
+    # 契约锁：服务端确实按传入 kind 落库（exchange_kind=kind）
+    svc_src = _inspect.getsource(swap_service.apply_exchange_batch)
+    case('AUDITP3 服务：exchange_kind 记录传入的 kind', 'exchange_kind=kind' in svc_src)
 
 
 if __name__ == '__main__':

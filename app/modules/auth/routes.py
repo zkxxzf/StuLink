@@ -82,7 +82,7 @@ def login():
             return render_template('auth/login.html', form=form)
 
         # M-3：账号维度锁定（多 IP 分布式爆破时，IP 限流形同虚设）
-        # v1.19.47.30 S-7：归一化 —— strip().lower() 避免“ Admin”“ADMIN” 重置计数绕过锁定
+        # v1.19.49.31 S-7：归一化 —— strip().lower() 避免“ Admin”“ADMIN” 重置计数绕过锁定
         # 2026-10-13 #11：锁定键加入来源 IP（login_lock_<ip>_<username>），
         # 防止"知道用户名即可把别人锁在门外"的拒绝服务（详见上方常量注释）。
         username_typed = (form.username.data or '').strip().lower()
@@ -167,7 +167,7 @@ def change_password():
         if not current_user.check_password(form.old_password.data):
             flash('原密码不正确', 'danger')
         else:
-            # v1.19.47.30 M-15：新口令必须过弱口令黑名单与强度校验，防止把弱口令写入库
+            # v1.19.49.31 M-15：新口令必须过弱口令黑名单与强度校验，防止把弱口令写入库
             from app.utils.password_policy import validate_password
             ok, msg = validate_password(form.new_password.data,
                                         username=current_user.username,
@@ -232,7 +232,7 @@ def _my_permission_rows():
 @login_required
 def my_settings():
     """用户设置：改密码入口 + 我的 AI（本地 Key）+ 我的权限 + 界面偏好"""
-    pg = current_user.permission_group
+    pg = current_user.active_group
     scope = (getattr(pg, 'scope_type', '') or 'none') if pg else (
         'school' if current_user.role == 'admin' else 'none')
     # 供应商清单（含自定义 OpenAI 兼容）：前端下拉用，避免在模板里再维护一份
@@ -253,6 +253,32 @@ def my_settings():
         scope_label=SCOPE_LABELS.get(scope, scope),
         is_admin=is_admin,
     )
+
+
+@bp.route('/switch-identity', methods=['POST'])
+@login_required
+def switch_identity():
+    """切换「当前身份」（多身份改造 P3）。
+
+    仅允许切换到本人所属的权限组；写入 session.active_group_id。
+    切换后：侧栏菜单、工作台内容、数据范围均按该身份判定（基础能力如
+    通知收件箱不受影响）。切回主组同样走本接口。
+    """
+    data = request.get_json(silent=True) or request.form
+    try:
+        gid = int(data.get('group_id'))
+    except (TypeError, ValueError):
+        gid = None
+    valid = {l.group_id for l in current_user.group_links}
+    if gid is None or gid not in valid:
+        return jsonify(success=False, message='无效的身份'), 400
+    session['active_group_id'] = gid
+    session.modified = True
+    grp = current_user.active_group
+    log_operation(current_user, '切换', '当前身份', gid,
+                  f'切换为「{grp.name if grp else gid}」', module='system')
+    return jsonify(success=True, message='身份已切换',
+                    group_name=(grp.name if grp else ''))
 
 
 @bp.route('/my/ai/whitelist', methods=['POST'])

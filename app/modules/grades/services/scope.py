@@ -1,45 +1,35 @@
-# StuLink v1.19.47.30 2026-10-10
-# 成绩模块数据范围解析（复用现有角色/权限组体系，参照宿舍统计模块范式）
+# StuLink v1.19.49.31 2026-10-14
+# 成绩模块数据范围解析（P2：委托 app.utils.scope 唯一口径，保留本模块公开 API）
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
+"""成绩模块数据范围（唯一口径的薄封装）
+
+P2（多身份改造）：解析规则已收敛到 ``app.utils.scope``；本模块保留原有公开函数
+（get_scope / visible_grades / visible_classes / check_exam_visible / student_in_scope /
+user_grade_scope / has_user_scope / teacher_links），供各业务模块继续 import，
+行为与改造前一致。
+"""
 from app.models import UserClassLink, Student
 from app.models.user_data_scope import get_user_scope_classes
 from app.utils.helpers import get_graduated_grades
-from app.models.grades import TeacherSubjectLink
-
-SCOPE_SCHOOL = 'school'
-SCOPE_GRADE = 'grade'
-SCOPE_CLASS = 'class'
+from app.utils.scope import (
+    SCOPE_SCHOOL, SCOPE_GRADE, SCOPE_CLASS,
+    user_scope_grades as user_grade_scope,     # 兼容旧名（多处 import 旧名）
+    class_pairs, teaching_links, teaching_grades,
+)
 
 
 def get_scope(user):
     """返回 (scope_type, grade)，与宿舍统计模块一致
 
-    2026-10-12 审计修复（P0-2）：admin 无权限组时原返回 ('none', None)，
-    导致 visible_grades/visible_classes 把管理员关进空集（分析页考试下拉空、
-    班级对比被 fail-closed 挡死）。与 check_exam_visible/student_in_scope/
-    _guard_tab/access_scope 的特判同口径：admin 恒为全校。
+    2026-10-12 审计修复（P0-2）：admin 恒为全校（不再落 ('none', None)）。
     """
     if user.role == 'admin':
         return SCOPE_SCHOOL, None
-    pg = user.permission_group
+    pg = getattr(user, 'active_group', None) or getattr(user, 'permission_group', None)
     if not pg:
         return 'none', None
-    return pg.scope_type, (user.grade or None)
-
-
-def user_grade_scope(user):
-    """v1.9.2 用户级数据范围授权（权限管理页第二张表）。
-
-    返回授权年级列表；None = 未配置（调用方回落到原有组级规则）。
-    admin 不受限，恒返回 None。
-    """
-    if user.role == 'admin':
-        return None
-    from app.models import UserDataScope
-    rows = UserDataScope.query.filter_by(user_id=user.id).all()
-    if not rows:
-        return None
-    return sorted({r.grade for r in rows})
+    from app.utils.scope import scope_type_of
+    return scope_type_of(user), (user.grade or None)
 
 
 def has_user_scope(user):
@@ -63,10 +53,8 @@ def visible_grades(user):
     # 班主任/任课教师：所辖班级所在年级
     # 任课教师通常没有 UserClassLink，必须并入本人任课映射的年级，
     # 否则其可见年级为空 → 分析页考试下拉选不到任何考试
-    links = UserClassLink.query.filter_by(user_id=user.id).all()
-    grades = {l.grade for l in links}
-    for l in TeacherSubjectLink.query.filter_by(user_id=user.id, active=True).all():
-        grades.add(l.grade)
+    grades = {g for g, _c in class_pairs(user)}
+    grades |= teaching_grades(user)
     return sorted(grades)
 
 
@@ -77,15 +65,15 @@ def visible_classes(user):
     if user_grade_scope(user) is not None:
         return None  # 用户级授权：不限班（年级级过滤在上层完成）
     scope, grade = get_scope(user)
-    links = UserClassLink.query.filter_by(user_id=user.id).all()
     if scope == SCOPE_SCHOOL or scope == SCOPE_GRADE:
         return None  # 全校/全年级（不限班）
-    return [(l.grade, l.class_name) for l in links]
+    return [(l.grade, l.class_name)
+            for l in UserClassLink.query.filter_by(user_id=user.id).all()]
 
 
 def teacher_links(user):
     """任课教师映射（active）列表：[(grade, class_name, subject, user_id)]"""
-    return TeacherSubjectLink.query.filter_by(user_id=user.id, active=True).all()
+    return teaching_links(user)
 
 
 def check_exam_visible(user, exam):
@@ -100,9 +88,7 @@ def check_exam_visible(user, exam):
         return
     # 任课教师：按本人任课映射所在年级
     if user.has_role('teacher'):
-        grades = {l.grade for l in
-                  TeacherSubjectLink.query.filter_by(user_id=user.id, active=True).all()}
-        if exam.grade not in grades:
+        if exam.grade not in teaching_grades(user):
             raise PermissionError
         return
     scope, grade = get_scope(user)
@@ -112,7 +98,7 @@ def check_exam_visible(user, exam):
     if scope == SCOPE_GRADE and exam.grade != grade:
         raise PermissionError
     if scope in (SCOPE_CLASS,):
-        grades = {l.grade for l in UserClassLink.query.filter_by(user_id=user.id).all()}
+        grades = {g for g, _c in class_pairs(user)}
         if exam.grade not in grades:
             raise PermissionError
     if scope not in (SCOPE_SCHOOL, SCOPE_GRADE, SCOPE_CLASS):
@@ -155,9 +141,7 @@ def student_in_scope(user, student_no):
             raise PermissionError
         return
     if user.has_role('teacher'):
-        grades = {l.grade for l in
-                  TeacherSubjectLink.query.filter_by(user_id=user.id, active=True).all()}
-        if st_obj.grade not in grades:
+        if st_obj.grade not in teaching_grades(user):
             raise PermissionError
         return
     scope, grade = get_scope(user)
@@ -168,9 +152,7 @@ def student_in_scope(user, student_no):
             raise PermissionError
         return
     if scope == SCOPE_CLASS:
-        links = UserClassLink.query.filter_by(user_id=user.id).all()
-        allowed = {(l.grade, l.class_name) for l in links}
-        if (st_obj.grade, st_obj.class_name) not in allowed:
+        if (st_obj.grade, st_obj.class_name) not in class_pairs(user):
             raise PermissionError
         return
     raise PermissionError

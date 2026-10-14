@@ -28,6 +28,15 @@ import sys
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DEFAULT_DATA = os.path.join(BASE_DIR, 'data')
 
+# 2026-10-14 第三轮审计（TOOL3-01）：Windows 默认控制台是 GBK，脚本摘要里出现
+# '↔' 等非 GBK 字符时 print 会抛 UnicodeEncodeError，整条核对命令**中途终止**
+# （源码 docstring 里的 ↔ 实际触发过）。改为把不可编码字符替换成 '?'，不再崩。
+for _stream in (sys.stdout, sys.stderr):
+    try:
+        _stream.reconfigure(errors='replace')
+    except Exception:  # noqa: BLE001  旧环境无 reconfigure 时忽略
+        pass
+
 # 库结构脚本的扫描范围（迁移 + 建表/建索引/权限类脚本）
 PATTERNS = ('scripts/migrate*.py', 'scripts/add_*.py', 'scripts/backfill*.py')
 
@@ -39,7 +48,10 @@ def _doc_summary(path):
     """取脚本 docstring 的第一段有效文字作为「作用」说明。"""
     try:
         with open(path, encoding='utf-8') as f:
-            text = f.read(6000)
+            # 2026-10-14（CONS3-01）：原只读 6000 字符，长脚本（如
+            # migrate_subject_leader_category_20261014.py）的 `_mig_log.record(...)`
+            # 落在窗口之外 → 被判成"没有登记机制"。窗口放大到 30k 以覆盖全文。
+            text = f.read(30000)
     except Exception:  # noqa: BLE001  读不到就留空，不影响清单
         return '', ''
     m = _DOC_RE.search(text)
@@ -64,7 +76,12 @@ def _scan():
                 'script': rel,
                 'date': m.group(1) if m else '',
                 'summary': summary,
-                'auto': ('_mig_log' in text and 'is_applied' in text),
+                # 2026-10-14 第三轮审计（CONS3-01）：判据放宽为「带 _mig_log 且
+                # 会 is_applied 早退 或 会 record 登记」—— 结构幂等脚本（如
+                # migrate_link_plans_20261014.py 等三个）刻意不做 is_applied 早退，
+                # 只 record；旧判据把它们永久留在「人工核对」，按 --pending 核对会漏看。
+                'auto': ('_mig_log' in text
+                         and ('is_applied' in text or '.record(' in text)),
             })
     out.sort(key=lambda x: (x['date'] or '00000000', x['script']))
     return out

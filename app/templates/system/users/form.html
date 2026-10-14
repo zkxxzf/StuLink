@@ -36,8 +36,9 @@
                             {{ form.role(class="form-select", id="roleSelect") }}
                         </div>
                         <div class="col-md-6 mb-3">
-                            <label class="form-label">权限组 <small class="text-muted">(决定菜单可见范围)</small></label>
-                            {{ form.permission_group_id(class="form-select") }}
+                            <label class="form-label">权限组 <small class="text-muted">(可多选；第一个为主身份)</small></label>
+                            {{ form.permission_group_ids(class="form-select", size=6) }}
+                            <div class="form-text text-muted">一人可挂多个身份；在顶栏 / 工作台可切换当前身份。</div>
                         </div>
                         <div class="col-md-6 mb-3">
                             <label class="form-label">密码 {% if not form.password.data %}(默认123456){% endif %}</label>

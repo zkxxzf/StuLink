@@ -1,4 +1,4 @@
-# StuLink v1.19.47.30 2026-10-10
+# StuLink v1.19.49.31 2026-10-10
 # AI 分析服务：权限收敛取数（本次+上次原始成绩）→ payload 组装 → LLM 转发
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 import json
@@ -18,7 +18,7 @@ from app.utils.url_guard import assert_outbound_url_allowed
 DEFAULT_TEMPERATURE = 0.4
 DEFAULT_TIMEOUT = 180
 
-# v1.19.47.30 S-4：不自动跟随 3xx，防 SSRF 以 approved.com → 302 → 169.254.169.254 绕过 url_guard
+# v1.19.49.31 S-4：不自动跟随 3xx，防 SSRF 以 approved.com → 302 → 1.19.49.30 绕过 url_guard
 
 class _NoRedirect(urllib.request.HTTPRedirectHandler):
     def redirect_request(self, req, fp, code, msg, headers, newurl):
@@ -148,7 +148,11 @@ def build_payload(user, exam):
     def collect(ex):
         if ex is None:
             return None
-        rows = ExamScore.query.filter_by(exam_id=ex.id).all()
+        # 2026-10-14 第四轮审计修复（PERF-101）：原先每次追问都在这里重查全量
+        # （本次 + 上次两场 ≈ 1.1 万行 ORM 实例，AI 对话每条追问都跑一次）。
+        # 改为复用共享的 ExamData 只读缓存（900s TTL，导入/改分时会失效）。
+        from app.modules.grades.services import stats_service as _stats
+        rows = _stats.cached_exam_data(ex.id).rows
         # v1.19.0 修复：原先“总分行直接替换整张卡”，若总分行在科目行之后被处理，
         # 会把已收集的 subjects 整片覆盖掉（payload 里出现 subjects:{}）。
         # 改为两趟收集：先各自归集总分行卡与科目分，再合并。
@@ -566,7 +570,7 @@ def build_stats(payload):
                    'values': [_mean(subj[k]) for k in sorted(subj.keys())]}
 
     # 4) 进退步分布
-    # v1.19.47.30 修复：move_rank = 本场方向排名 − 上一场方向排名，
+    # v1.19.49.31 修复：move_rank = 本场方向排名 − 上一场方向排名，
     # 负值 = 名次数字变小 = 进步、正值 = 退步（与成绩单、个人查询同口径）。
     # 原实现把 ≥50 记成"大幅进步"、≤-50 记成"大幅退步"，饼图标签整体标反，此处纠正。
     moves = {'大幅进步(≤-50)': 0, '进步': 0, '持平': 0, '退步': 0, '大幅退步(≥50)': 0}

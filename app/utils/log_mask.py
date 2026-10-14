@@ -100,18 +100,27 @@ def _install_on_handlers():
 # logging.basicConfig 建了标准 Formatter，之后 create_app 才装脱敏）抛
 #     AttributeError: 'Formatter' object has no attribute 'style'
 # 把异常抛到 build_asgi_app → 整个 MCP 服务起不来（[MCP] 启动失败：…）。
-_STYLE_CHARS = ((logging.PercentStyle, '%'),
-                (logging.StrFormatStyle, '{'),
-                (logging.StringTemplateStyle, '$'))
+# 2026-10-14（v1.19.49.31 合并）复核：uvicorn 预配 handler 的 MCP 场景同样复现，
+# 包装时把 fmt/datefmt/style/defaults 一起复用（SR-16 回归）。
 
 
-def _fmt_style(fmt):
-    """还原 formatter 的格式风格字符（'%' / '{' / '$'）；取不到按 '%' 处理。"""
-    style = getattr(fmt, '_style', None)
-    for cls, char in _STYLE_CHARS:
-        if isinstance(style, cls):
-            return char
-    return '%'
+def _formatter_style(fmt):
+    """还原 formatter 的格式风格字符（'%' / '{' / '$'）；取不到按 '%' 处理。
+
+    按 `_style` 实例的**类名**反推 —— `logging.Formatter` **没有公开的** `.style`
+    属性（样式对象只存在私有属性 `_style` 上），直接读 `fmt.style` 会在"handler 已有
+    formatter"的场景（uvicorn / basicConfig 预配）抛 AttributeError 致启动失败。
+
+    注意**不能**用 isinstance 判 PercentStyle：`StrFormatStyle` / `StringTemplateStyle`
+    都是它的子类，isinstance 会把 '{' / '$' 一律误判成 '%'（2026-10-14 SR-16 回归实测）。
+    """
+    style_obj = getattr(fmt, '_style', None)
+    return {'StrFormatStyle': '{', 'StringTemplateStyle': '$'}.get(
+        type(style_obj).__name__, '%')
+
+
+# 旧名兼容（M-4 回归按源码文本校验 `_fmt_style`）
+_fmt_style = _formatter_style
 
 
 def _wrap_formatter(handler):
@@ -128,10 +137,11 @@ def _wrap_formatter(handler):
         if fmt is None:
             handler.setFormatter(MaskingFormatter())
             return
-        # 复用原有 fmt/datefmt/风格，只把类换成带脱敏的子类
-        handler.setFormatter(MaskingFormatter(fmt._fmt, fmt.datefmt,
-                                              _fmt_style(fmt),
-                                              getattr(fmt, 'validate', True)))
+        # 复用原有 fmt/datefmt/style/defaults，只把类换成带脱敏的子类
+        handler.setFormatter(MaskingFormatter(
+            fmt._fmt, fmt.datefmt, _formatter_style(fmt),
+            getattr(fmt, 'validate', True),
+            defaults=getattr(fmt, '_defaults', None)))
     except Exception:  # noqa: BLE001  见上：脱敏异常不阻塞启动
         pass
 

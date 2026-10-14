@@ -85,15 +85,32 @@ run_mig scripts/migrate_morality_tables_20261013.py       # 德育独立成库
 run_mig scripts/migrate_affair_invig_exclude_20261013.py  # 考务：监考排除名单
 run_mig scripts/migrate_ai_tasks_20261013.py              # 成绩：AI 任务表（与下一行成对）
 run_mig scripts/migrate_ai_report_kind_20261013.py        # 成绩：AI 报告 kind/trace
+run_mig scripts/migrate_ai_prompt_tpl_20261014.py         # 成绩：AI 提示词模板表 + ai_tasks.gen
+# 2026-10-14 第三轮审计（CONS3-03）：建表必须排在「重建表」之前 —— 重建脚本对
+# "无表库"是 SKIP，若先重建后建表，缺表的存量库会停在旧结构（无 category、唯一键 4 列）
+run_mig scripts/migrate_subject_leaders.py                # 学科组长：建表（缺失时，目标结构）
 run_mig scripts/migrate_subject_leader_category_20261014.py # 学科组长：category 列 + 重建唯一键
+run_mig scripts/migrate_link_plans_20261014.py            # 任课映射：方案留档表 + 初始方案收拢
+run_mig scripts/migrate_subject_leader_plans_20261014.py  # 学科组长：方案表 + 按已有学期补建
+run_mig scripts/migrate_room_group_map_sort_20261014.py    # 考务：考场分组顺序（group_map.sort_order）
+# 2026-10-14 第四轮审计（SEC-03 / PERF-117·118）：调课单「代办人」两列 + 补 6 个性能索引
+run_mig scripts/migrate_swap_operator_20261014.py         # 调课：schedule_swaps 加 operator_uid/operator_name
+run_mig scripts/migrate_perf_indexes_20261014.py          # 性能索引：oplog 4 条 + 证书/课表各 1 条
+run_mig scripts/migrate_plan_current_unique_20261014.py   # 方案表 is_current 部分唯一索引（有重复会拒跑）
 # ── 数据 / 权限类（幂等）──────────────────────────────────────────────────
-run_mig scripts/migrate_subject_leaders.py
+# 2026-10-14 第三轮审计（CONS3-02）：多身份改造的两个脚本原先**完全未登记**（只在
+# docs/权限体系多身份改造执行计划.md 里点名）→ 上线必漏跑。按设计文档顺序：
+# 先补 scope_kind 等列，再建 user_permission_groups 关联表并灌主组。
+run_mig scripts/migrate_perm_multi_20261014.py            # 权限组：scope_kind/scope_grades/scope_classes + 废弃组清理
+run_mig scripts/migrate_user_groups_p1.py                 # 权限组：user_permission_groups 关联表 + 主组灌入
 run_mig scripts/migrate_oplog_http_fields.py
 run_mig scripts/migrate_score_edit_perm_20261011.py
 run_mig scripts/migrate_swap_perm_roles_20261011.py
 run_mig scripts/migrate_admin_perm_academic_edit_20261013.py # 管理员组补 academic.edit
 run_mig scripts/migrate_sensitive_perm_20261013.py           # 敏感字段权限（先）
 run_mig scripts/migrate_sensitive_perm_v2_20261013.py        # 敏感字段权限收敛（后）
+# 2026-10-14 第四轮审计（SEC-04）：AI 全局 Key 独立权限点 —— 给原有 system.users 的组补齐
+run_mig scripts/migrate_ai_key_perm_20261014.py              # 权限组：补 grades.ai_manage
 
 echo "[5/6] 兜底：补齐模型声明但现网缺失的列（改库前自动备份对应库）"
 docker run --rm -v "$DATA":/app/data -w /app \

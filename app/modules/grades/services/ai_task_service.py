@@ -35,11 +35,14 @@ EVENT_KEEP = 300                         # 每任务保留的事件条数
 SSE_IDLE_TIMEOUT = 900                   # 订阅最长等待（秒）
 SSE_PING_EVERY = 20                      # 空闲 ping 间隔（waitress channel_timeout 默认 120s）
 DB_POLL_EVERY = 5.0                      # 订阅时查库兜底的间隔（秒）
+MAX_QUESTION = 2000                      # 最终提示词上限（生成器拼装 + 手动编辑）
 
 _BOOT = datetime.now()                   # 进程启动时间：早于它的 running 任务 = 上次运行遗留
 _LOCK = threading.RLock()
 _EVENTS = {}                             # task_id -> [事件 dict]
 _RUNNING = set()                         # 进程内正在执行的任务 id
+_STOP = set()                            # 已请求停止的任务 id（2026-10-14「停止」按钮）
+
 
 
 # ==================== 进程内进度缓冲 ====================
@@ -74,6 +77,34 @@ def drop_events(task_id):
     """任务与报告都删掉后清缓冲（避免无主事件常驻内存）。"""
     with _LOCK:
         _EVENTS.pop(task_id, None)
+        _STOP.discard(task_id)
+
+
+# ==================== 停止（取消） ====================
+
+def request_stop(task_id):
+    """请求停止一个正在跑的任务（进程内标记；执行线程在轮次/工具边界检查）。
+
+    返回 False = 本进程内没在跑（已结束、或服务重启后的孤儿任务），
+    调用方应提示用户刷新查看真实状态。
+    """
+    with _LOCK:
+        if task_id in _RUNNING:
+            _STOP.add(task_id)
+            return True
+        return False
+
+
+def stop_requested(task_id):
+    """执行线程查询：本任务是否被请求停止。"""
+    with _LOCK:
+        return task_id in _STOP
+
+
+def _clear_stop(task_id):
+    with _LOCK:
+        _STOP.discard(task_id)
+
 
 
 # ==================== 僵尸任务 ====================
@@ -108,8 +139,13 @@ def sweep_zombies():
 
 # ==================== 提交任务 ====================
 
-def submit(user, exam, question, direction='', layer='', client_cfg=None, history=None):
-    """创建任务并起后台线程；返回 (ok, task_id 或 失败原因)。"""
+def submit(user, exam, question, direction='', layer='', client_cfg=None, history=None,
+           gen=None):
+    """创建任务并起后台线程；返回 (ok, task_id 或 失败原因)。
+
+    gen：提示词生成器的结构化选项（dict，可为空）——只做留档/回填，不参与执行；
+    真正的提问文本是 `question`（生成器拼装后用户仍可手动编辑）。
+    """
     try:
         sweep_zombies()
     except Exception:                      # noqa: BLE001
@@ -127,7 +163,14 @@ def submit(user, exam, question, direction='', layer='', client_cfg=None, histor
         score_guard.resolve(user)          # 无可见范围直接拒，不浪费一次模型调用
     except PermissionError as e:
         return False, str(e)
-    task = AiTask(user_id=user.id, exam_id=exam.id, question=question[:500],
+    gen_text = ''
+    if isinstance(gen, dict) and gen:
+        try:
+            gen_text = json.dumps(gen, ensure_ascii=False)[:4000]
+        except Exception:                  # noqa: BLE001  选项留档失败不影响任务
+            gen_text = ''
+    task = AiTask(user_id=user.id, exam_id=exam.id, question=question[:MAX_QUESTION],
+                  gen=gen_text,
                   direction=(direction or '')[:10], layer=(layer or '')[:30],
                   status='running', stage='已提交，正在准备成绩数据…',
                   tool_count=0, heartbeat=datetime.now(), created_at=datetime.now())
@@ -157,12 +200,16 @@ def _run(app, task_id, user_id, exam_id, question, direction, layer, cfg, histor
             desc = score_guard.resolve(user).describe()
             scope_text = '可见年级：%s' % (desc.get('visible_grades'),)
             for ev in ai_agent.run(cfg, user, exam, question, direction=direction,
-                                   layer=layer, scope_desc=scope_text, history=history):
+                                   layer=layer, scope_desc=scope_text, history=history,
+                                   cancel_check=lambda: stop_requested(task_id)):
                 _push(task_id, ev)
                 _touch(task_id, ev)
                 if ev.get('type') == 'html':
                     html_text = ev.get('text') or ''
                     trace = ev.get('trace') or []
+                elif ev.get('type') == 'canceled':
+                    status, err = 'canceled', str(ev.get('text') or '已按你的要求停止')
+                    break
                 elif ev.get('type') == 'error':
                     status, err = 'error', str(ev.get('text') or '')
                     break
@@ -179,6 +226,7 @@ def _run(app, task_id, user_id, exam_id, question, direction, layer, cfg, histor
                 logger.warning('AI 任务收尾失败 task=%s', task_id, exc_info=True)
                 db.session.rollback()
             _mark_running(task_id, False)
+            _clear_stop(task_id)
             _push(task_id, {'type': 'done'})
 
 
@@ -229,6 +277,16 @@ def _finish(task_id, status, err, html_text, trace, scope_text, cfg, question):
                           f'（工具 {len(trace)} 次）', module='grades')
         except Exception:                   # noqa: BLE001  留痕失败不影响结果
             logger.warning('AI 任务留痕失败 task=%s', task_id, exc_info=True)
+    elif status == 'canceled':
+        task.stage = '已停止'
+        try:
+            from app.utils.helpers import log_operation
+            user = db.session.get(User, task.user_id)
+            exam = db.session.get(Exam, task.exam_id)
+            log_operation(user, '停止', 'AI 任务', task_id,
+                          f'{exam.name if exam else ""}：{(question or "")[:60]}', module='grades')
+        except Exception:                   # noqa: BLE001  留痕失败不影响结果
+            logger.warning('AI 任务停止留痕失败 task=%s', task_id, exc_info=True)
     elif status != 'done':
         task.stage = '已失败'
     db.session.commit()

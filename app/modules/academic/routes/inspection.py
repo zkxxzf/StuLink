@@ -1,4 +1,4 @@
-# StuLink v1.19.47.30 2026-10-10
+# StuLink v1.19.49.31 2026-10-10
 # 教务 · 查课：统计页（列表筛选 / 月度统计 / 导出 / 图表API）+ 独立录入页（单条/批量）
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 import io
@@ -21,6 +21,7 @@ from app.modules.academic.services.access_scope import (
 )
 from app.modules.academic.services import swap_service
 from app.modules.academic.services import inspection_service  # 2026-10-11 抽出
+from app.modules.academic.services import inspection_lookup  # 2026-10-14 录入自动带出
 from app.modules.notifications.services import notification_service
 from app.utils.decorators import perm_required
 from app.utils.helpers import log_operation
@@ -55,6 +56,21 @@ def _visible_active_teachers(user):
     return (Teacher.query.filter(Teacher.status == 'active',
                                  Teacher.teacher_uid.in_(teacher_uids))
             .order_by(Teacher.teacher_uid).all())
+
+
+def _period_options():
+    """节次下拉选项（2026-10-14）：本学期作息里的节次定义 —— [{number, name}]。
+
+    节次名口径与 `app/utils/period_label.py` 一致（period_number 只是行号：
+    1=早读、2=第1节），录入 / 编辑一律用下拉，避免手填数字错位；
+    无学期课表或未配节次时返回 []，模板回落为数字输入。
+    """
+    sched = swap_service.get_active_schedule()
+    if not sched:
+        return []
+    return [{'number': p.period_number,
+             'name': (p.period_name or '').strip() or f'第{p.period_number}节'}
+            for p in swap_service.get_periods(sched.id)]
 
 
 def _grade_options():
@@ -141,6 +157,7 @@ def inspection_page():
                            records=records, pagination=pagination, inspectors=inspectors,
                            teachers=_visible_active_teachers(current_user),
                            results=INSPECTION_RESULTS, grade_opts=grade_opts,
+                           period_opts=_period_options(),
                            f_teacher=teacher_uid, f_result=result_f, f_grade=grade_f,
                            f_from=d_from, f_to=d_to,
                            month_total=month_total, month_abnormal=month_abnormal,
@@ -168,6 +185,7 @@ def inspection_entry_page():
     return render_template('academic/inspection_entry.html',
                            teachers=_visible_active_teachers(current_user),
                            results=INSPECTION_RESULTS, grade_opts=grade_opts,
+                           period_opts=_period_options(),
                            today=date.today().isoformat(), mode=mode)
 
 
@@ -277,6 +295,38 @@ def inspection_batch():
     return back
 
 
+@bp.route('/api/inspection/teacher-courses')
+@login_required
+@perm_required('academic.edit')
+def api_inspection_teacher_courses():
+    """查课录入「自动带出」：按日期 + 教师反查当天生效课表的班级 / 科目 / 节次。
+
+    2026-10-14 用户口径：录入查课时选中教师后自动追踪班级与科目（仍可手动修改）。
+    数据口径与查课核对页同源（常规周课表 + 当天临时调课 / 代课叠加），
+    见 services/inspection_lookup.py；只返回当前账号可见范围内的课。
+    返回 {success, date, teacher_uid, courses:[{period, grade, class_name, subject,
+    room, teacher_uid, teacher_name, entry_id, is_temp_swap}], message?}
+    """
+    uid = (request.args.get('teacher_uid') or '').strip()
+    target_date = _parse_iso_date(request.args.get('date')) or date.today()
+    if not uid:
+        return jsonify({'success': False, 'message': '缺少教师编号'}), 400
+    sched = swap_service.get_active_schedule()
+    if not sched:
+        return jsonify({'success': True, 'date': target_date.isoformat(),
+                        'teacher_uid': uid, 'courses': [],
+                        'message': '尚未建立学期课表'})
+    courses = inspection_lookup.teacher_courses_on(sched.id, target_date, uid)
+    # 与录入页下拉同口径：受限账号只看得到自己范围内的年级 / 班级
+    ug = visible_academic_grades(current_user)
+    if ug is not None:
+        courses = [c for c in courses if c['grade'] in ug]
+    courses = [c for c in courses
+               if academic_class_is_visible(current_user, c['grade'], c['class_name'])]
+    return jsonify({'success': True, 'date': target_date.isoformat(),
+                    'teacher_uid': uid, 'courses': courses})
+
+
 @bp.route('/inspection/export')
 @login_required
 @perm_required('academic.edit')
@@ -285,6 +335,7 @@ def inspection_export():
     import openpyxl
     from openpyxl.styles import Font, Alignment, PatternFill, Border, Side
     from app.utils.export_helpers import xl_safe
+    from app.utils.period_label import period_label      # 节次名口径（1=早读→第1节=2）
 
     ug = visible_academic_grades(current_user)
     teacher_uid = (request.args.get('teacher_uid') or '').strip()
@@ -324,7 +375,7 @@ def inspection_export():
     result_map = dict(INSPECTION_RESULTS)
     columns = ['日期', '年级', '节次', '教师编号', '教师姓名',
                '班级', '科目', '结果', '检查人', '备注']
-    widths = [12, 8, 6, 14, 12, 10, 12, 8, 8, 20]
+    widths = [12, 8, 9, 14, 12, 10, 12, 8, 8, 20]
 
     wb = openpyxl.Workbook()
     ws = wb.active
@@ -345,7 +396,7 @@ def inspection_export():
         row_data = [
             r.inspect_date.strftime('%Y-%m-%d'),
             r.grade or '',
-            r.period or '',
+            period_label(r.period) if r.period else '',
             r.teacher_uid or '',
             r.teacher_name or '',
             r.class_name or '',
@@ -747,14 +798,17 @@ def _timetable_leaders():
     站内通知按 uid 精确推送（notify_users → target_type='users'），所以这里返回
     账号的 username（= uid），而不是 users.id。
     """
-    from app.models import User
+    from app.models import User, UserPermissionGroup
     from app.models.permission_group import PermissionGroup
     groups = PermissionGroup.query.filter(
         PermissionGroup.menu_keys.like('%"academic.timetable"%')).all()
     gids = [g.id for g in groups if g.id]
     conds = [User.role == 'admin']
     if gids:
-        conds.append(User.permission_group_id.in_(gids))
+        # P1：改走多身份关联表（等价于原 permission_group_id.in_(gids)）
+        _uids = db.session.query(UserPermissionGroup.user_id).filter(
+            UserPermissionGroup.group_id.in_(gids)).subquery()
+        conds.append(User.id.in_(_uids))
     users = User.query.filter(User.is_active.is_(True), db.or_(*conds)).all()
     return [u.username for u in users if getattr(u, 'username', None)]
 
@@ -988,10 +1042,25 @@ def inspection_quick_swap():
     if not is_permanent:
         item['swap_date'] = _parse_iso_date(payload.get('swap_date')) or date.today()
 
+    # 2026-10-14 第四轮审计修复（SEC-03）：本入口申请人记原任课教师（教务/领导
+    # 代办），但单据原先**看不出是谁操作的**（对方收到的通知也像是教师本人发的）。
+    # 现在把实际操作人写入 operator_uid / operator_name，通知文案与详情页都会标注。
+    from app.modules.academic.services import teacher_service
+    _op_teacher = teacher_service.teacher_of_user(current_user)
+    if _op_teacher:
+        op_uid, op_name = _op_teacher.teacher_uid, _op_teacher.name
+    else:
+        op_uid = (getattr(current_user, 'username', None) or str(current_user.id))[:16]
+        op_name = current_user.real_name or current_user.username or ''
+
+    # 2026-10-14 第三轮审计修复（SEC-02）：kind 原写死 'cover' —— 用户在上面选了
+    # 「调课(exchange)」时，单据仍按「代课」落库/通知（对方课条目不校验、exchange_kind
+    # 记错、通知文案变成"请你代课"）。改为透传上面已校验过的 kind。
     ok, msg, result = swap_service.apply_exchange_batch(
         applicant_uid=entry.teacher_uid,
         applicant_name=entry.teacher_name or '',
-        items=[item], kind='cover', is_permanent=is_permanent, reason=reason)
+        items=[item], kind=kind, is_permanent=is_permanent, reason=reason,
+        operator_uid=op_uid, operator_name=op_name)
     if not ok:
         db.session.rollback()
         return jsonify({'success': False, 'message': msg}), 400

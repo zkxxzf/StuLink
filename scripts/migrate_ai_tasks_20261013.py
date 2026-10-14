@@ -16,6 +16,22 @@ import os
 import shutil
 import sqlite3
 from datetime import datetime
+import sys
+
+# 2026-10-14 第四轮审计（CONS-02）：补迁移登记（只登记不早退）
+SCRIPT_NAME = os.path.basename(__file__)
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+try:
+    import _mig_log
+except Exception as _e:  # noqa: BLE001
+    _mig_log = None
+    print(f'[WARN] 迁移登记模块不可用（迁移照常执行，仅不登记）：{_e}')
+
+
+def _record():
+    if _mig_log:
+        _mig_log.record(SCRIPT_NAME, note='grades.db 建 ai_tasks 表（AI 分析任务持久化）')
+
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DB = os.path.join(BASE_DIR, 'data', 'grades.db')
@@ -58,6 +74,7 @@ def backup(path):
 def main():
     if not os.path.exists(DB):
         print('grades.db 不存在，跳过')
+        _record()
         return
     print('备份 ->', os.path.basename(backup(DB)))
     conn = sqlite3.connect(DB)
@@ -68,6 +85,7 @@ def main():
     conn.commit()
     conn.close()
     print('完成。请重启应用。')
+    _record()
 
 
 if __name__ == '__main__':

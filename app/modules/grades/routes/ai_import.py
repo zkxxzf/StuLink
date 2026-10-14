@@ -951,6 +951,11 @@ def exam_ai_import_apply(exam_id):
 def _write_raw_scores(exam, rows):
     """把原始分写入 exam_scores.raw_score（store_service 不处理该列）"""
     from app.models.grades import ExamScore
+    # 2026-10-14 第四轮审计修复（PERF-102）：原先按 (student_no, subject) 逐条
+    # filter_by(...).first() —— 504 学生 ×（约 10 科 + 总分）≈ 5,500 次单行 SELECT，
+    # 且全在写事务内。改为一次预取整场行、建 (student_no, subject) → row 字典。
+    existing = {(r.student_no, r.subject): r
+                for r in ExamScore.query.filter_by(exam_id=exam.id).all()}
     n = 0
     for r in rows:
         raw = r.get('raw_subjects') or {}
@@ -959,8 +964,7 @@ def _write_raw_scores(exam, rows):
         for sub, val in list(raw.items()) + [(TOTAL_SUBJECT, r.get('raw_total'))]:
             if val is None:
                 continue
-            row = ExamScore.query.filter_by(exam_id=exam.id, student_no=r['no'],
-                                            subject=sub).first()
+            row = existing.get((r['no'], sub))
             if row is not None and row.raw_score != val:
                 row.raw_score = val
                 n += 1

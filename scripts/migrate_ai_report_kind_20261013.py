@@ -12,6 +12,21 @@ import os
 import sqlite3
 import sys
 
+# 2026-10-14 第四轮审计（CONS-02）：补迁移登记（只登记不早退）
+SCRIPT_NAME = os.path.basename(__file__)
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+try:
+    import _mig_log
+except Exception as _e:  # noqa: BLE001
+    _mig_log = None
+    print(f'[WARN] 迁移登记模块不可用（迁移照常执行，仅不登记）：{_e}')
+
+
+def _record():
+    if _mig_log:
+        _mig_log.record(SCRIPT_NAME, note='ai_reports 补 kind/trace 两列（扫描 data/*.db，幂等）')
+
+
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DATA_DIR = os.path.join(BASE_DIR, 'data')
 
@@ -19,6 +34,7 @@ NEW_COLUMNS = [('kind', "VARCHAR(10) DEFAULT 'md'"), ('trace', 'TEXT')]
 
 if not os.path.isdir(DATA_DIR):
     print(f'[SKIP] 数据目录不存在: {DATA_DIR}')
+    _record()
     sys.exit(0)
 
 touched = 0
@@ -45,6 +61,7 @@ for db_path in sorted(glob.glob(os.path.join(DATA_DIR, '*.db'))):
         print(f'[ERR]  {os.path.basename(db_path)}: {e}')
 
 print(f'[DONE] 迁移完成，共新增 {touched} 列')
+_record()
 
 # StuLink v1.19.47.29 2026-10-13
 # Copyright (c) 2026 zkxxzf. Apache License 2.0

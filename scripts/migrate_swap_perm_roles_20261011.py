@@ -39,6 +39,20 @@ from app import create_app  # noqa: E402
 from app.extensions import db  # noqa: E402
 from app.models import PermissionGroup  # noqa: E402
 
+# 2026-10-14 第四轮审计（CONS-02）：补迁移登记（只登记不早退）
+SCRIPT_NAME = os.path.basename(__file__)
+try:
+    import _mig_log
+except Exception as _e:  # noqa: BLE001
+    _mig_log = None
+    print(f'[WARN] 迁移登记模块不可用（迁移照常执行，仅不登记）：{_e}')
+
+
+def _record():
+    if _mig_log:
+        _mig_log.record(SCRIPT_NAME, note='调课权限口径修正：年级长补 swap/swap_approve，教务去一级审批，拆 swap_bulk')
+
+
 APPLY_KEY = 'academic.swap'            # 自助申请调课
 APPROVE_KEY = 'academic.swap_approve'  # 一级调课审批（仅年级长）
 BULK_KEY = 'academic.swap_bulk'        # 统一调课（整批），2026-10-11 拆点
@@ -82,6 +96,7 @@ def main():
         if changed:
             db.session.commit()
         print('Done. 更新 %d 个权限组。' % changed)
+    _record()
 
 
 if __name__ == '__main__':

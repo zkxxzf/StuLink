@@ -104,7 +104,7 @@
 </div>
 
 {% if d.exchange_kind %}
-{# 2026-10-12 换课（v1.19.47.30）：对方信息与确认状态 #}
+{# 2026-10-12 换课（v1.19.49.31）：对方信息与确认状态 #}
 <div class="alert {% if d.partner_status == 'pending' %}alert-warning{% elif d.partner_status == 'refused' %}alert-danger{% elif d.partner_status == 'agreed' %}alert-success{% else %}alert-info{% endif %} py-2 small mb-3">
     <i class="bi bi-people-fill"></i>
     <b>{{ d.exchange_kind_text }}{% if d.exchange_content_text %} · {{ d.exchange_content_text }}{% endif %}</b>
@@ -219,6 +219,9 @@
             <div class="card-body py-2">
                 <table class="table table-sm mb-0">
                     <tr><th style="width:110px" class="text-muted fw-normal">申请人</th><td>{{ d.applicant_name or '-' }}（{{ d.applicant_uid }}）</td></tr>
+                    {% if d.operator_uid and d.operator_uid != d.applicant_uid %}
+                    <tr><th class="text-muted fw-normal">代办人</th><td>{{ d.operator_name or d.operator_uid }}（{{ d.operator_uid }}，由教务/领导代办）</td></tr>
+                    {% endif %}
                     <tr><th class="text-muted fw-normal">调课理由</th><td>{{ d.reason or '（未填写）' }}</td></tr>
                     <tr><th class="text-muted fw-normal">申请时间</th><td>{{ d.created_at or '-' }}</td></tr>
                     {% if d.reviewed_at %}

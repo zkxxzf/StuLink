@@ -1,4 +1,4 @@
-# StuLink v1.19.47.30 2026-10-10
+# StuLink v1.19.49.31 2026-10-10
 # 教师工作台：我的信息 / 今日课程 / 我的课表 / 我的业绩 / 手机号修改
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 import re
@@ -66,11 +66,11 @@ def index():
     pending_swaps = []
     partner_pending = []
     active_term = None
-    # 2026-10-13（v1.19.47.30）：调课入口挂到工作台 —— 能否申请由 academic.swap 决定，
+    # 2026-10-13（v1.19.49.31）：调课入口挂到工作台 —— 能否申请由 academic.swap 决定，
     # 菜单/按钮可见性与 perm_required 保持一致，避免"看得见、点了 403"。
     can_swap = current_user.has_perm('academic.swap')
     is_head = (current_user.role == 'homeroom_teacher')
-    # 2026-10-13（v1.19.47.30）：左侧「个人工作」菜单已精简，工作台内需自备这些入口
+    # 2026-10-13（v1.19.49.31）：左侧「个人工作」菜单已精简，工作台内需自备这些入口
     can_class_view = current_user.has_perm('workbench.class_view')
     can_records = current_user.has_perm('workbench.records')
     can_attendance = current_user.has_perm('workbench.attendance_view')
@@ -143,7 +143,7 @@ def index():
                                          teacher.teacher_uid)
             partner_pending = []
 
-    # 2026-10-13（v1.19.47.30）：班主任在工作台直接看**本班班级课表**（多个班用页签切换）。
+    # 2026-10-13（v1.19.49.31）：班主任在工作台直接看**本班班级课表**（多个班用页签切换）。
     # 取数与教务端班级课表同源（get_class_view），并沿用同一套可见范围，避免越权。
     class_schedules = []
     if is_head and active_term:
@@ -164,7 +164,7 @@ def index():
                                          current_user.id)
             class_schedules = []
 
-    # 2026-10-13（v1.19.47.30）：待办与通知 —— 换课待我确认 / 问卷待填 / 最近通知 + 未读数
+    # 2026-10-13（v1.19.49.31）：待办与通知 —— 换课待我确认 / 问卷待填 / 最近通知 + 未读数
     try:
         todo = todo_service.get_teacher_todo(current_user, teacher)
     except Exception:                       # 聚合层已逐项降级，这里只兜底
@@ -182,8 +182,8 @@ def index():
     return render_template('workbench/index.html', teacher=teacher,
                            todo=todo,
                            greet=greet,
-                           # 欢迎卡片上的身份/权限组徽章（与个人中心页同口径）
-                           pg=current_user.permission_group,
+                           # 欢迎卡片上的身份/权限组徽章（P3：显示「当前身份」）
+                           pg=current_user.active_group,
                            class_schedules=class_schedules,
                            can_class_view=can_class_view,
                            can_records=can_records,
@@ -301,9 +301,11 @@ def profile():
     也能正常打开，教师相关字段以「未关联」占位。
     """
     teacher = teacher_service.teacher_of_user(current_user)
-    pg = current_user.permission_group
-    scope = (getattr(pg, 'scope_type', '') or 'none') if pg else (
-        'school' if current_user.role == 'admin' else 'none')
+    # 2026-10-14 第四轮审计修复：范围文案统一走 active_group 口径（切换多身份后
+    # 原读旧单值 permission_group 会显示与实际权限不符的范围）。
+    from app.utils.scope import scope_type_of
+    pg = current_user.active_group
+    scope = scope_type_of(current_user)
     return render_template('workbench/profile.html',
                            teacher=teacher, pg=pg,
                            scope_label=_SCOPE_LABELS.get(scope, scope))

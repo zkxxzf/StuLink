@@ -2,9 +2,9 @@
 {% block title %}考务向导 - 成绩管理{% endblock %}
 {% block extra_css %}
 <style>
-  /* v1.19.47.30 步骤①「参考」徽标：点一下切换参考状态 */
+  /* v1.19.49.31 步骤①「参考」徽标：点一下切换参考状态 */
   .attend-toggle { cursor: pointer; user-select: none; }
-  /* v1.19.47.30 步骤② 双栏美化：统一卡片 / 表头 / 悬停 / 输入控件 */
+  /* v1.19.49.31 步骤② 双栏美化：统一卡片 / 表头 / 悬停 / 输入控件 */
   /* 2026-10-13：全部改用主题变量（--sl-*）——原来写死浅灰字面量，暗黑模式下卡片头
      仍是浅色渐变、hover 仍是白灰底，与深色底突兀（用户反馈「色块很突兀」）。 */
   #t2 .t2-card {
@@ -21,9 +21,12 @@
     background: var(--sl-head-bg); font-size: .76rem; color: var(--sl-head-text); font-weight: 600;
     border-bottom: 1px solid var(--sl-head-border);
   }
-  #t2 .rm-subj, #t2 .rm-cap, #t2 .rm-note { border-color: var(--sl-border); }
+  #t2 .rm-subj, #t2 .rm-cap, #t2 .rm-note, #t2 .rm-no { border-color: var(--sl-border); }
   /* 2026-10-13：字号放大两档后容量框要跟着放宽，否则三位数会被数字微调按钮压住 */
   #t2 .rm-cap { max-width: 84px; }
+  /* 2026-10-14 考场编号可直接改（原地输入框，宽度只容两位数字）；
+     「清空」是卡片头的**一键全清**按钮（clearAllRoomNo），行内不再放 × —— 一个个点太慢 */
+  #t2 .rm-no { max-width: 64px; text-align: center; font-variant-numeric: tabular-nums; }
   /* 2026-10-14 步骤② 左侧「考场库」候选区：整行淡底标「已加入」；
      「删」降为行内小图标（平时半透明、悬停行才变红），候选区视觉焦点回到「状态」上 */
   #libTable tbody tr.lib-added > td { background: var(--sl-soft-success-bg); }
@@ -44,16 +47,34 @@
                     border-color: var(--sl-head-border); }
   #invigMatrix th, #invigMatrix td { min-width: 78px; padding: .2rem .25rem; }
   #invigMatrix th:first-child, #invigMatrix td:first-child { min-width: 56px; }
+  /* 2026-10-14 第四轮审计（UI-17）：首列（班级）独立 sticky 冻结 —— 容器横向滚动时
+     班级名一直在（全局冻结规则只作用于 .table-responsive，本矩阵未包在其中）。
+     需要不透明底色，否则滚动时下层文字会穿透。 */
+  #invigMatrix th:first-child, #invigMatrix td:first-child {
+      position: sticky; left: 0; z-index: 2;
+      background: var(--sl-surface);
+      box-shadow: 2px 0 4px -2px rgba(15, 30, 61, .25);
+  }
+  #invigMatrix thead th:first-child { z-index: 4; background: var(--sl-head-bg); }
   #invigMatrix th:nth-child(2), #invigMatrix td:nth-child(2) { min-width: 72px; }
   #invigMatrix th:nth-child(3), #invigMatrix td:nth-child(3) { min-width: 48px; }
-  #invigMatrix .iv-mat-sel { border: 0; background: transparent; text-align: center;
-                             font-size: .8rem; padding: .1rem .2rem; cursor: pointer; }
+  /* 2026-10-14 用户反馈「监考编排的下拉列表颜色不对」：
+     原生 <select> 展开的弹层是拿**元素自身**的 background-color / color 去画的。
+     原来写 background: transparent，弹层背景就回落成白色，而文字仍是深色主题的浅色
+     → 展开后一长条白底浅字、选项几乎看不见。
+     改为与单元格同色（表体底色 = --bs-body-bg），深浅主题都读得清，
+     格子里也不会多出一块异色矩形（仍是「隐形下拉」）；option 也显式给一遍，
+     Chromium 弹层内逐项才稳。 */
+  #invigMatrix .iv-mat-sel { border: 0; background: var(--bs-body-bg);
+                            color: var(--sl-text); text-align: center;
+                            font-size: .8rem; padding: .1rem .2rem; cursor: pointer; }
+  #invigMatrix .iv-mat-sel option { background-color: var(--bs-body-bg); color: var(--sl-text); }
   #invigMatrix .iv-mat-sel:hover, #invigMatrix .iv-mat-sel:focus {
     border: 1px solid var(--sl-border); }
 </style>
 {% endblock %}
 {% block content %}
-{# v1.19.47.30 页头：以「本场考试」为主（名字 / 类型 / 时间 / 年级）。
+{# v1.19.49.31 页头：以「本场考试」为主（名字 / 类型 / 时间 / 年级）。
    绑定考试时用考试信息；未绑定的孤儿批次回落用批次自身字段。 #}
 {% set _ex = linked_exam %}
 {% set _head_name = _ex.name if _ex else affair.name %}
@@ -61,36 +82,38 @@
 <div class="card px-3 py-2 mb-2">
     <div class="d-flex justify-content-between align-items-start flex-wrap gap-2">
         <div class="flex-grow-1" style="min-width:0">
-            {# v1.19.47.30：考务已并入考试管理，面包屑直接返回考试列表 #}
+            {# v1.19.49.31：考务已并入考试管理，面包屑直接返回考试列表 #}
             <a href="{{ url_for('grades.exams_list') }}" class="text-decoration-none text-muted small">
                 <i class="bi bi-arrow-left"></i> 返回考试管理</a>
-            <h5 class="mb-1 mt-1 text-break">
-                <i class="bi bi-clipboard-check"></i> {{ _head_name }}
-            </h5>
-            <div class="d-flex flex-wrap align-items-center gap-1 small">
+{# 2026-10-14 用户口径：考试信息（年级/性质/阶段/日期/学年/口径/状态）与名称同一行，
+   不再单独占一行 —— 与成绩录入页 exam_detail.html 的标题行写法保持一致 #}
+            <div class="d-flex flex-wrap align-items-center gap-1 mt-1">
+                <h5 class="mb-0 me-1 text-break">
+                    <i class="bi bi-clipboard-check"></i> {{ _head_name }}
+                </h5>
                 <span class="badge bg-secondary">{{ affair.grade }}</span>
                 {% if _ex and _ex.kind_label() %}<span class="badge bg-primary">{{ _ex.kind_label() }}</span>{% endif %}
                 {% if _ex and _ex.stage_label() %}<span class="badge bg-info text-dark">{{ _ex.stage_label() }}</span>{% endif %}
-                {% if _head_date %}<span class="text-muted"><i class="bi bi-calendar3"></i> {{ _head_date.strftime('%Y-%m-%d') }}</span>{% endif %}
-                {% if _ex and _ex.term %}<span class="text-muted">· 学年 {{ _ex.term }}</span>{% endif %}
-                {% if _ex and _ex.score_mode %}<span class="text-muted">· 口径 {{ _ex.score_mode_label() }}</span>{% endif %}
+                {% if _head_date %}<span class="text-muted small"><i class="bi bi-calendar3"></i> {{ _head_date.strftime('%Y-%m-%d') }}</span>{% endif %}
+                {% if _ex and _ex.term %}<span class="text-muted small">· 学年 {{ _ex.term }}</span>{% endif %}
+                {% if _ex and _ex.score_mode %}<span class="text-muted small">· 口径 {{ _ex.score_mode_label() }}</span>{% endif %}
                 {% if affair.status == 'linked' %}<span class="badge bg-info">已关联成绩</span>
                 {% elif affair.status == 'arranged' %}<span class="badge bg-success">已编排</span>
                 {% else %}<span class="badge bg-light text-dark border">草稿</span>{% endif %}
                 {% if not _ex %}<span class="badge bg-warning text-dark">未绑定考试</span>{% endif %}
             </div>
         </div>
+        {# 2026-10-14 用户口径：页头只放元信息（v1.12.1 的「批次设置」按钮撤下）
+           —— 它里面的「选科考号前后缀」与步骤③ 自定义模式重复、已删；
+           余下的「编排模式 / 非参考学生处理」是编排口径，入口挪到步骤③ 工具栏右侧齿轮 #}
         <div class="d-flex align-items-center gap-2 text-muted small flex-shrink-0">
             参考 {{ scope_students|length }} 人 · 已编排 {{ arranged|length }} 人 · 考场 {{ rooms|length }} 个
-            {# v1.12.1 批次设置入口：编排模式 / 非参考处理 / 选科考号前后缀 #}
-            <button class="btn btn-outline-secondary btn-sm py-0" onclick="openSettings()">
-                <i class="bi bi-gear"></i> 批次设置</button>
         </div>
     </div>
 </div>
 
 <!-- v1.12.2 移除步骤⑤成绩关联：功能使用率低，按考场查成绩走成绩模块自身入口即可 -->
-{# v1.19.47.30：删掉与下方页签重复的「1-7 步骤胶囊条」——完成状态已由页签上的对勾体现 #}
+{# v1.19.49.31：删掉与下方页签重复的「1-7 步骤胶囊条」——完成状态已由页签上的对勾体现 #}
 {% set _s1 = stats.students > 0 %}
 {% set _s2 = rooms|length > 0 %}
 {% set _s3 = (arranged|length > 0) or (numbered > 0) %}
@@ -108,19 +131,44 @@
 </ul>
 
 <div class="tab-content">
-    <!-- v1.19.47.30 编排容量统计：选科明细默认展开（不再折叠），且改考场/科目/容量后实时刷新 -->
-    <div class="card px-3 py-2 mb-3 small">
+    <!-- v1.19.49.31 编排容量统计：改考场/科目/容量后实时刷新；
+         2026-10-14 用户口径：这条统计只服务步骤②（改考场/容量）与步骤③（编排考号），
+         其余环节不显示 —— 由 JS `_syncCapBar()` 按当前页签显隐（初始 d-none，避免闪一下）。
+         2026-10-14 用户口径（再一轮「提示信息压缩位置」）：① 选科明细默认**折叠**（只有多选科批次
+         才需要展开，原先默认展开白占一行）；② 原步骤③ 顶部单列的「已完成编排」状态条并到本行尾
+         （仅步骤③ 且已编排时显示），「再次编排会覆盖」的警告改为点主按钮时二次确认。 -->
+    <div class="card px-3 py-2 mb-2 small d-none" id="capBar">
         <div class="d-flex flex-wrap align-items-center gap-3">
+            {# 2026-10-14 用户口径：步骤② 的「导入 Excel」「手动新增」并到本行，落在「编排容量」统计**前面**
+               （原来是单独占一行）；只在步骤② 显示，由 `_syncCapBar()` 切 d-none，③ 沿用本行只看统计 #}
+            <span id="capActs" class="d-none"><span class="d-flex flex-wrap align-items-center gap-2">
+                {# v1.19.49.31：「导入考生安排 / 考场位置」入口下线 —— AI 导入统一走每场考试的
+                   「AI 智能导入」（/grades/exams/<id>/ai-import，同页已能写入本场考务批次） #}
+                <button class="btn btn-outline-primary btn-sm py-0"
+                        onclick="document.getElementById('roomFile').click()">
+                    <i class="bi bi-upload"></i> 导入 Excel</button>
+                <input type="file" id="roomFile" accept=".xlsx,.xls" style="display:none"
+                       onchange="importRooms(this)">
+                <button class="btn btn-outline-success btn-sm py-0" onclick="openRoomModal()">
+                    <i class="bi bi-plus-lg"></i> 手动新增</button>
+                {# 2026-10-14 用户口径：整段操作说明撤下（按钮文案 / 输入框占位已自解释），要点收进 ⓘ #}
+                <i class="bi bi-question-circle text-muted"
+                   title="左侧「考场库」逐行「加入」，或选「考场模板」后点右侧「一键带入」整组加入本批次（编号按模板里的顺序从 01 起）；右侧科目 / 容量 / 备注改完自动保存；编号可改、可一键清空（卡片头「清空编号」）、可用每行的 ↑↓ 调整先后，改完点「保存编号」统一提交（保存时查重、空号自动补最小空号；改编号会同步名单的考场号 / 考号与监考表）。"></i>
+            </span></span>
             <span class="fw-bold text-nowrap"><i class="bi bi-clipboard-data"></i> 编排容量</span>
             <span class="text-nowrap">学生 <b>{{ stats.students }}</b> · 参考 <b>{{ stats.attend }}</b></span>
             <span class="text-nowrap">考场 <b>{{ stats.rooms }}</b> 个 · 容量 <b>{{ stats.capacity }}</b> 座</span>
             <span id="capWarn" class="{{ 'text-danger' if stats.attend > stats.capacity else 'text-success' }} text-nowrap">
                 {% if stats.attend > stats.capacity %}⚠ 缺 {{ stats.attend - stats.capacity }} 座{% else %}✓ 容量充足{% endif %}
             </span>
-            <button class="btn btn-link btn-sm p-0 ms-auto text-nowrap" data-bs-toggle="collapse"
-                    data-bs-target="#statsDetail" aria-expanded="true">选科明细 <i class="bi bi-chevron-down small"></i></button>
+            <button class="btn btn-link btn-sm p-0 text-nowrap" data-bs-toggle="collapse"
+                    data-bs-target="#statsDetail" aria-expanded="false">选科明细 <i class="bi bi-chevron-down small"></i></button>
+            <span id="arrangeState" data-on="{{ 1 if _s3 else 0 }}"
+                  class="text-success text-nowrap ms-auto d-none">
+                <i class="bi bi-check-circle"></i> 已编排 <b>{{ arranged|length }}</b> 人{% if numbered %} · 已有考号 <b>{{ numbered }}</b> 人{% endif %}
+            </span>
         </div>
-        <div class="collapse show" id="statsDetail">
+        <div class="collapse" id="statsDetail">
             <div class="d-flex flex-wrap gap-2 pt-2" id="selDetailBox">
                 {% for sel, v in stats.per_sel.items() %}
                 <span class="badge bg-light text-dark border fw-normal">
@@ -134,72 +182,107 @@
             </div>
         </div>
     </div>
-    <!-- ===== 步骤① 学生名单（v1.19.47.30：名单统计 + 左右分栏） ===== -->
+    <!-- ===== 步骤① 学生名单（v1.19.49.31：名单统计 + 左右分栏） ===== -->
     <div class="tab-pane fade show active" id="t1">
         {# 本步只做「名单维护」：只允许从学生库同步/选取，不允许编辑学生信息；
            左=参加考试、右=不参加考试，两侧都按「班级 → 姓氏」排序；上方给年级与各班统计 #}
-        <div class="d-flex gap-2 mb-2 flex-wrap align-items-center">
+        {# 2026-10-14 用户口径：顶部压成一行（按钮 + 名单统计，小字号）；
+           筛选控件并进「参加考试」卡片头（与计数同一行），说明文字作为脚注放在名单下方 #}
+        <div class="d-flex flex-wrap align-items-center gap-2 mb-2 small">
             <button class="btn btn-primary btn-sm" onclick="syncStudents()">
                 <i class="bi bi-cloud-download"></i> 从学生库导入</button>
             <button class="btn btn-outline-success btn-sm" onclick="openPick()">
                 <i class="bi bi-person-plus"></i> 加入学生</button>
             <button class="btn btn-outline-danger btn-sm" onclick="clearStudents()">
                 <i class="bi bi-trash"></i> 清空名单</button>
-            <span class="small text-muted ms-1">
-                <i class="bi bi-info-circle"></i> 名单只从学生库同步/选取；不分班、已转出、已毕业等无班级学生不进入；
-                同步时会自动沿用上一场「不参加考试」的学生；两侧均按 <b>班级 · 姓氏</b> 排序
-            </span>
+            {# 2026-10-14：三个数字带 id —— 步骤① 搬行/删除后前端要就地 ±1（不再整页刷新重算） #}
+            <span class="text-nowrap ms-2">实际 <b id="gsTotal">{{ grade_stat.total }}</b> 人 ·
+                参加 <b class="text-success" id="gsJoin">{{ grade_stat.join }}</b> ·
+                不参加 <b class="text-secondary" id="gsSkip">{{ grade_stat.skip }}</b></span>
+            <button class="btn btn-link btn-sm p-0 ms-auto text-nowrap" data-bs-toggle="collapse"
+                    data-bs-target="#clsStat" aria-expanded="false">各班明细
+                <i class="bi bi-chevron-down small"></i></button>
         </div>
-        {# 名单统计：年级汇总（常显）+ 各班明细（折叠） #}
-        <div class="card px-3 py-2 mb-2 small">
-            <div class="d-flex flex-wrap align-items-center gap-3">
-                <span class="fw-bold text-nowrap"><i class="bi bi-bar-chart"></i> 名单统计</span>
-                <span class="text-nowrap">年级：实际 <b>{{ grade_stat.total }}</b> 人 ·
-                    参加 <b class="text-success">{{ grade_stat.join }}</b> ·
-                    不参加 <b class="text-secondary">{{ grade_stat.skip }}</b></span>
-                <button class="btn btn-link btn-sm p-0 ms-auto text-nowrap" data-bs-toggle="collapse"
-                        data-bs-target="#clsStat" aria-expanded="false">各班明细
-                    <i class="bi bi-chevron-down small"></i></button>
-            </div>
-            <div class="collapse" id="clsStat">
-                <div class="table-responsive mt-2">
-                    <table class="table table-sm mb-0" style="max-width:520px">
-                        <thead><tr><th>班级</th><th class="text-end">实际人数</th>
-                            <th class="text-end">参加考试</th><th class="text-end">不参加</th></tr></thead>
-                        <tbody>
-                        {% for c in class_stats %}
-                        <tr><td>{{ c.name }}</td><td class="text-end">{{ c.total }}</td>
-                            <td class="text-end text-success">{{ c.join }}</td>
-                            <td class="text-end text-secondary">{{ c.skip }}</td></tr>
-                        {% else %}
-                        <tr><td colspan="4" class="text-center text-muted py-3">暂无学生</td></tr>
-                        {% endfor %}
-                        </tbody>
-                    </table>
-                </div>
+        <div class="collapse mb-2" id="clsStat">
+            <div class="table-responsive">
+                <table class="table table-sm mb-0" style="max-width:520px">
+                    <thead><tr><th>班级</th><th class="text-end">实际人数</th>
+                        <th class="text-end">参加考试</th><th class="text-end">不参加</th></tr></thead>
+                    <tbody>
+                    {% for c in class_stats %}
+                    {# data-cls：步骤① 搬行/删除后就地更新该班的 实际/参加/不参加 #}
+                    <tr data-cls="{{ c.name }}"><td>{{ c.name }}</td>
+                        <td class="text-end" data-total>{{ c.total }}</td>
+                        <td class="text-end text-success" data-join>{{ c.join }}</td>
+                        <td class="text-end text-secondary" data-skip>{{ c.skip }}</td></tr>
+                    {% else %}
+                    <tr><td colspan="4" class="text-center text-muted py-3">暂无学生</td></tr>
+                    {% endfor %}
+                    </tbody>
+                </table>
             </div>
         </div>
         {# 左右分栏名单：左=参加考试，右=不参加考试（按钮即在两侧间移动） #}
-        {% macro roster(rows, tid, title, icon, badge_cls, count, target, btn_cls, btn_text, tip, empty_msg) %}
+        {% macro roster(rows, tid, title, icon, badge_cls, count, target, btn_cls, btn_text, tip, empty_msg,
+                        show_fixed=True, show_filter=False) %}
         <div class="card h-100">
-            <div class="card-header py-2 d-flex justify-content-between align-items-center gap-2">
+            <div class="card-header py-2 d-flex align-items-center gap-2">
                 <span class="fw-bold text-nowrap"><i class="bi {{ icon }}"></i> {{ title }}
                     <span class="badge {{ badge_cls }} ms-1" id="{{ tid }}Badge"
                           data-total="{{ count }}">{{ count }}</span></span>
-                {# 2026-10-14 用户口径：筛选集中到上方一条（班级 + 学号/姓名），两侧同时过滤；
-                   卡片头不再各挂一个搜索框，避免「一个班级筛选、一个姓名筛选」分散在各处 #}
-                <span class="text-muted small d-none d-lg-inline">班级 · 姓氏</span>
+                {% if show_filter %}
+                {# 2026-10-14 用户口径：筛选控件并进「参加考试」卡片头 —— 与计数同一行，不再单独占一行；
+                   仍是同一条、同时作用于左右两栏；关键词与班级存 sessionStorage
+                   —— toggleAttend / delStu 会 reload，不存就得重输 #}
+                <span class="text-muted ms-1 d-none d-md-inline" title="筛选同时作用于左右两栏">
+                    <i class="bi bi-funnel"></i></span>
+                <select class="form-select form-select-sm py-0 w-auto" id="fltClass"
+                        title="按班级筛选（两侧同时生效）" onchange="filterRosterAll()">
+                    <option value="">全部班级</option>
+                    {% for c in class_stats %}<option value="{{ c.name }}">{{ c.name }}</option>{% endfor %}
+                </select>
+                <input type="search" class="form-control form-control-sm py-0 flex-grow-1"
+                       style="max-width:160px" id="fltStu" placeholder="学号 / 姓名" autocomplete="off"
+                       aria-label="按学号或姓名筛选（两侧同时生效）" oninput="filterRosterAll()">
+                <button class="btn btn-link btn-sm py-0 px-1 d-none" type="button" id="fltClear"
+                        onclick="clearRosterFilter()" title="清空筛选">清空</button>
+                {% endif %}
             </div>
             <div class="table-responsive" style="max-height:56vh;overflow:auto">
                 <table class="table table-sm table-hover align-middle mb-0" id="{{ tid }}">
                     <thead class="sticky-top bg-white"><tr>
                         <th>学号</th><th>姓名</th><th>班级</th><th>选科组合</th>
+                        {# 2026-10-14 用户口径：混编排考场 —— 把不同选科的学生固定到同一考场；
+                           右侧「不参加考试」的学生不参与编排，故不显示这一列（show_fixed=False） #}
+                        {% if show_fixed %}
+                        <th title="固定考场/座号：填了的学生编排时优先安置；只填考场号时编排在该考场内自动选座；用于把不同选科的学生混编进同一考场">固定考场/座号</th>
+                        {% endif %}
                         <th class="text-end">操作</th></tr></thead>
                     <tbody>
                     {% for s in rows %}
-                    <tr{% if not s.is_attend %} class="table-warning"{% endif %}>
+                    {# 2026-10-14：data-idx = 服务端「班级 → 姓氏」排序序号，搬行时按它插回正确位置；
+                       data-fixed-* 挂在行上 —— 搬到右栏会撤掉固定列，值仍留在行上，移回时还原 #}
+                    <tr{% if not s.is_attend %} class="table-warning"{% endif %}
+                       data-sid="{{ s.id }}" data-idx="{{ s.roster_idx }}"
+                       data-fixed-room="{{ s.fixed_room or '' }}"
+                       data-fixed-seat="{{ s.fixed_seat or '' }}">
                         <td>{{ s.student_no }}</td><td>{{ s.name }}</td><td>{{ s.class_name }}</td>
                         <td class="small text-muted">{{ s.subject_selection }}</td>
+                        {% if show_fixed %}
+                        <td data-saved-room="{{ s.fixed_room or '' }}" data-saved-seat="{{ s.fixed_seat or '' }}">
+                            <div class="d-flex align-items-center gap-1">
+                                <input class="form-control form-control-sm py-0 px-1 fx-room" style="width:56px"
+                                       value="{{ s.fixed_room or '' }}" data-sid="{{ s.id }}"
+                                       placeholder="考场" title="固定考场号，如 05；留空=不固定"
+                                       onchange="saveFixed(this)" onkeydown="if(event.key==='Enter')this.blur()">
+                                <input class="form-control form-control-sm py-0 px-1 fx-seat" style="width:48px"
+                                       value="{{ s.fixed_seat or '' }}" data-sid="{{ s.id }}"
+                                       placeholder="座号" inputmode="numeric"
+                                       title="固定座号；留空时编排在该考场内自动找空位"
+                                       onchange="saveFixed(this)" onkeydown="if(event.key==='Enter')this.blur()">
+                            </div>
+                        </td>
+                        {% endif %}
                         <td class="text-end text-nowrap">
                             <button class="btn btn-sm {{ btn_cls }} py-0" title="{{ tip }}"
                                     onclick="toggleAttend({{ s.id }}, {{ target }})">{{ btn_text }}</button>
@@ -208,61 +291,40 @@
                         </td>
                     </tr>
                     {% else %}
-                    <tr><td colspan="5" class="text-center text-muted py-4">{{ empty_msg }}</td></tr>
+                    <tr><td colspan="{{ 6 if show_fixed else 5 }}" class="text-center text-muted py-4">{{ empty_msg }}</td></tr>
                     {% endfor %}
                     </tbody>
                 </table>
             </div>
         </div>
         {% endmacro %}
-        {# 2026-10-14 用户口径：筛选收成一条（班级 + 学号/姓名），同时作用于左右两栏；
-           关键词与班级存 sessionStorage —— toggleAttend / delStu 会 reload，不存就得重输 #}
-        <div class="card px-3 py-2 mb-2 small">
-            <div class="d-flex flex-wrap align-items-center gap-2">
-                <span class="fw-bold text-nowrap"><i class="bi bi-funnel"></i> 筛选</span>
-                <select class="form-select form-select-sm py-0 w-auto" id="fltClass"
-                        title="按班级筛选（两侧同时生效）" onchange="filterRosterAll()">
-                    <option value="">全部班级</option>
-                    {% for c in class_stats %}<option value="{{ c.name }}">{{ c.name }}</option>{% endfor %}
-                </select>
-                <input type="search" class="form-control form-control-sm py-0" style="max-width:220px"
-                       id="fltStu" placeholder="学号 / 姓名" autocomplete="off"
-                       aria-label="按学号或姓名筛选" oninput="filterRosterAll()">
-                <button class="btn btn-link btn-sm py-0 px-1 d-none" type="button" id="fltClear"
-                        onclick="clearRosterFilter()" title="清空筛选">清空</button>
-                <span class="text-muted ms-auto d-none d-lg-inline">两侧同时过滤 · 均按 班级 · 姓氏 排序</span>
-            </div>
-        </div>
+        {# 2026-10-14 用户口径：筛选控件已并进「参加考试」卡片头（与计数同一行），不再单独占一行；
+           说明小字留在名单下方 #}
         <div class="row g-2">
             <div class="col-lg-6">
                 {{ roster(join_students, 'stuTable', '参加考试', 'bi-check-circle-fill', 'bg-success',
                           grade_stat.join, 0, 'btn-outline-secondary', '→ 不参加',
-                          '把该生移到右侧「不参加考试」', '暂无参加考试的学生（点上方「从学生库导入」）') }}
+                          '把该生移到右侧「不参加考试」', '暂无参加考试的学生（点上方「从学生库导入」）',
+                          show_filter=True) }}
             </div>
             <div class="col-lg-6">
                 {{ roster(skip_students, 'stuSkipTable', '不参加考试', 'bi-dash-circle', 'bg-secondary',
                           grade_stat.skip, 1, 'btn-outline-success', '← 参加',
-                          '把该生移回左侧「参加考试」', '暂无「不参加考试」的学生') }}
+                          '把该生移回左侧「参加考试」', '暂无「不参加考试」的学生', show_fixed=False) }}
             </div>
+        </div>
+        {# 2026-10-14 用户口径：筛选条已上移到名单上方，这里只留说明脚注 #}
+        <div class="text-muted small mt-2">
+            <i class="bi bi-info-circle"></i> 名单只从学生库同步/选取；不分班、已转出、已毕业等无班级学生不进入；
+            同步时会自动沿用上一场「不参加考试」的学生；「<b>固定考场/座号</b>」改动即存，
+            用于把<b>不同选科</b>的学生混编进同一考场
         </div>
     </div>
 
     <!-- ===== 步骤② 考场设置（左右双列表：考场库 ↔ 本批次考场） ===== -->
     <div class="tab-pane fade" id="t2">
-        <div class="d-flex gap-2 mb-3 flex-wrap align-items-center">
-            {# v1.19.47.30：「导入考生安排 / 考场位置」入口下线 —— AI 导入统一走每场考试的
-               「AI 智能导入」（/grades/exams/<id>/ai-import，同页已能写入本场考务批次） #}
-            <button class="btn btn-outline-primary btn-sm" onclick="document.getElementById('roomFile').click()">
-                <i class="bi bi-upload"></i> 导入 Excel</button>
-            <input type="file" id="roomFile" accept=".xlsx,.xls" style="display:none" onchange="importRooms(this)">
-            <button class="btn btn-outline-success btn-sm" onclick="openRoomModal()">
-                <i class="bi bi-plus-lg"></i> 手动新增</button>
-            <span class="small text-muted ms-1">
-                <i class="bi bi-info-circle"></i> 左侧「考场库」按位置搜索房间 → 逐行「加入」；
-                或选「考场模板」后点右侧「一键带入」整组加入本批次。
-                右侧可<b>直接修改</b>科目 / 容量 / 备注，改完自动保存
-            </span>
-        </div>
+        {# 2026-10-14 用户口径：本步的「导入 Excel」「手动新增」两个按钮已上移到「编排容量」那行（#capActs），
+           本页不再单独占一行，直接进左右双列 #}
         <div class="row g-3">
             {# 左：考场库列表，可选取加入本批次 #}
             <div class="col-5">
@@ -302,8 +364,8 @@
                         <span class="small fw-bold"><i class="bi bi-list-check"></i> 本批次考场
                             <span class="badge bg-primary ms-1" id="roomStat">{{ rooms|length }}</span> 个 ·
                             容量 <span class="badge bg-info text-dark" id="capStat">{{ stats.capacity }}</span> 座</span>
-                        {# v1.19.47.30 由顶部工具栏移来：这两个功能服务的就是「本批次考场」；
-                           v1.19.47.31 「一键带入」也归这一侧；2026-10-14 用户口径：模板下拉是
+                        {# v1.19.49.31 由顶部工具栏移来：这两个功能服务的就是「本批次考场」；
+                           v1.19.49.31 「一键带入」也归这一侧；2026-10-14 用户口径：模板下拉是
                            「一键带入」的**选源**（不是左侧筛选），挪到按钮旁，两者成一组 #}
                         <span class="d-flex gap-1 align-items-center flex-wrap">
                             <select class="form-select form-select-sm py-0" id="libGroup"
@@ -321,6 +383,21 @@
                             <button class="btn btn-outline-secondary btn-sm py-0" onclick="fillCapacityFromPrev()"
                                     title="同年级、同一房间（位置优先）沿用上一场考试的容量">
                                 <i class="bi bi-clock-history"></i> 带入上次容量</button>
+                            <button class="btn btn-outline-secondary btn-sm py-0" onclick="renumberRooms()"
+                                    title="把本批次考场编号重排为 01 起的连续编号（同步名单的考场号/考号与监考表）">
+                                <i class="bi bi-sort-numeric-down"></i> 重排编号</button>
+                            {# 2026-10-14 用户口径：清空要**一键全部清空**（一行一个 × 太慢）——
+                               清空只写草稿（不即时提交），点「保存编号」时才查重 / 自动补号、才写库并同步名单与监考 #}
+                            <button class="btn btn-outline-secondary btn-sm py-0" onclick="clearAllRoomNo()"
+                                    title="把本批次全部考场的编号一次清空，改成一清二楚再自己填；只是草稿，点「保存编号」才生效（全部留空保存 = 按 01 起自动补号）">
+                                <i class="bi bi-eraser"></i> 清空编号</button>
+                            {# 2026-10-14 用户口径：编号是草稿列 —— 改/清空不即时提交（否则换号、清空重打就弹「被占用」），
+                               点这里统一保存；保存时才查重，空号按「从 01 起补最小空号」自动补 #}
+                            <button class="btn btn-warning btn-sm py-0 d-none" id="saveNoBtn"
+                                    onclick="saveRoomNumbers()"
+                                    title="保存改过 / 清空的考场编号（只在这里查重；空号自动补最小空号）">
+                                <i class="bi bi-save"></i> 保存编号
+                                <span class="badge bg-dark ms-1" id="saveNoCnt">0</span></button>
                         </span>
                     </div>
                     <div class="table-responsive" style="max-height:55vh;overflow:auto">
@@ -331,12 +408,18 @@
                                 <th style="min-width:120px">备注</th>
                                 <th class="text-end">操作</th></tr></thead>
                             <tbody>
-                            {# v1.19.47.30 步骤②：去掉「编辑」按钮，科目/容量/备注在本行直接改（失焦/切换即存）；
+                            {# v1.19.49.31 步骤②：去掉「编辑」按钮，科目/容量/备注在本行直接改（失焦/切换即存）；
                                去掉「考号前缀」列（前缀改在步骤③自定义模式里按选科设置） #}
                             {% for r in rooms %}
                             <tr data-rid="{{ r.id }}">
-                                {# 2026-10-13 用户口径：考场号 / 座号一律两位（01 考场、01 座） #}
-                                <td>{{ pad2(r.room_no) }}</td><td>{{ r.location }}</td>
+                                {# 2026-10-13 用户口径：考场号 / 座号一律两位（01 考场、01 座）；
+                                   2026-10-14 用户口径：编号可改、可清空 —— **草稿列**，改动只记在本地，
+                                   点卡片头「保存编号」才统一提交（保存时查重；空号自动补最小空号） #}
+                                <td><input class="form-control form-control-sm py-0 rm-no"
+                                           value="{{ pad2(r.room_no) }}" maxlength="10"
+                                           title="考场编号：可改、可清空，改完点卡片头「保存编号」统一保存"
+                                           oninput="_roomNoInput(this)"></td>
+                                <td>{{ r.location }}</td>
                                 <td>
                                     <select class="form-select form-select-sm py-0 rm-subj" onchange="saveRoomField(this)">
                                         {% for opt in room_subject_options %}
@@ -350,7 +433,15 @@
                                            value="{{ r.capacity }}" onchange="saveRoomField(this)"></td>
                                 <td><input class="form-control form-control-sm py-0 rm-note"
                                            value="{{ r.note or '' }}" placeholder="备注" onchange="saveRoomField(this)"></td>
-                                <td class="text-end">
+                                <td class="text-end text-nowrap">
+                                    {# 2026-10-14 用户口径：考场要能「上移 / 下移」按序走 —— 表格是按编号排的，
+                                       所以上下移 = 与相邻行**交换编号**（草稿），点卡片头「保存编号」统一提交 #}
+                                    <button type="button" class="btn btn-sm btn-outline-secondary py-0 px-1 rm-up"
+                                            title="上移一位：与该行上面的考场交换编号（改完点卡片头「保存编号」生效）"
+                                            onclick="moveRoom({{ r.id }}, -1)"><i class="bi bi-arrow-up"></i></button>
+                                    <button type="button" class="btn btn-sm btn-outline-secondary py-0 px-1 rm-dn"
+                                            title="下移一位：与该行下面的考场交换编号（改完点卡片头「保存编号」生效）"
+                                            onclick="moveRoom({{ r.id }}, 1)"><i class="bi bi-arrow-down"></i></button>
                                     {# v1.19.47.31 用户口径：右侧是「已加入本批次」的考场，按钮说「不加入」
                                        （把该考场移出本批次，不动考场库） #}
                                     <button class="btn btn-sm btn-outline-danger py-0" onclick="delRoom({{ r.id }})"
@@ -370,131 +461,101 @@
 
     <!-- ===== 步骤③ 编排与考号生成 ===== -->
     <div class="tab-pane fade" id="t3">
-        {# v1.19.47.30：已编排/已带考号（如 AI 导入）时明确标注「无需再执行」，并提示重排会覆盖 #}
-        {% if _s3 %}
-        <div class="alert alert-success py-2 small">
-            <i class="bi bi-check-circle"></i>
-            本批次<b>已完成编排</b>：已编排 <b>{{ arranged|length }}</b> 人{% if numbered %}，其中已有考号 <b>{{ numbered }}</b> 人{% endif %}。
-            <span class="text-muted">（用 Excel/AI 导入已带考场·座号·考号时，本步骤视为已完成，无需再点下方按钮；
-                若再次点击「开始编排并生成考号」会<b>覆盖</b>现有考场/座号/考号）</span>
-        </div>
-        {% endif %}
+        {# 2026-10-14 用户口径：「已完成编排」状态并入顶部「编排容量」条行尾（#arrangeState，
+           见 `_syncCapBar()`），这里不再单独占一条；覆盖警告改到点主按钮时二次确认。 #}
         {% set _m = affair.mode if affair.mode in (0, 1, 2) else 0 %}
         <div class="card p-3">
-            <h6 class="mb-2">考号生成模式</h6>
-            {# v1.19.47.30 改为「左侧选模式 + 右侧该模式的设置」两栏：学号模式 / 自定义模式（规则生成 或 批量导入考号） #}
-            <div class="row g-3">
-                <!-- 左：模式选择 -->
-                <div class="col-lg-4 col-md-5">
-                    <div class="border rounded p-2">
-                        <div class="form-check mb-1">
-                            <input class="form-check-input" type="radio" name="mode" id="modeStudent" value="1"
-                                   onchange="syncModePanes()" {% if _m == 1 %}checked{% endif %}>
-                            <label class="form-check-label" for="modeStudent">
-                                <b>学号模式</b>
-                                <span class="text-muted small d-block">考号 = 学生学号，仅分配考场与座号</span>
-                            </label>
+            {# 2026-10-14 用户口径：本卡只留一行「模式 + 分层 + 主按钮」；模式含义 / 分层规则 /
+               编排规则等细则一律收进 title 悬浮提示，不再铺大段说明文字 #}
+            <div class="d-flex flex-wrap align-items-center gap-3">
+                <span class="small fw-bold text-nowrap">考号生成</span>
+                <div class="btn-group btn-group-sm" role="group" aria-label="考号生成模式">
+                    <input type="radio" class="btn-check" name="mode" id="modeStudent" value="1"
+                           onchange="syncModePanes()" {% if _m == 1 %}checked{% endif %}>
+                    <label class="btn btn-outline-primary" for="modeStudent"
+                           title="考号 = 学生学号；系统只分配考场与座号，不生成新考号">学号模式</label>
+                    <input type="radio" class="btn-check" name="mode" id="modeCustom" value="0"
+                           onchange="syncModePanes()" {% if _m != 1 %}checked{% endif %}>
+                    <label class="btn btn-outline-primary" for="modeCustom"
+                           title="按「前缀 + 考场号 + 座号 + 后缀」生成考号，或用 Excel 批量导入现成考号">自定义模式</label>
+                </div>
+                <div class="form-check mb-0">
+                    <input class="form-check-input" type="checkbox" id="layeredChk">
+                    <label class="form-check-label small" for="layeredChk">按成绩分层编排
+                        <i class="bi bi-question-circle text-muted"
+                           title="推荐。同一选科组合内，按上一场同阶段考试（同年级 + 同阶段）的校内方向排名升序填座：考场按房间号顺序、座位从前往后依次填满；固定考场/座号优先；首次考试无历史成绩时自动退化为随机。"></i></label>
+                </div>
+                <span class="ms-auto d-flex align-items-center gap-2">
+                    <span id="arrangeMsg" class="small"></span>
+                    <button class="btn btn-primary btn-sm" onclick="runArrange()">
+                        <i class="bi bi-shuffle"></i> 开始编排并生成考号</button>
+                    <i class="bi bi-question-circle text-muted"
+                       title="编排规则：先安置「固定考场 / 固定座号」学生（步骤① 名单里填写）—— 只填考场号、座号留空时，编排会在该考场内自动取靠前的空位，用于不同选科混编考场；其余按选科分组（未勾选分层时：同班邻座 ≤1 随机分配）。"></i>
+                    {# 2026-10-14 用户口径：v1.12.1 的「批次设置」从页头撤下 —— 里面的选科前后缀
+                       与下方自定义模式重复（已删），余下的「编排模式 / 非参考学生处理」都是编排口径，
+                       入口收在这里（低频设置，不占主界面）；打开后同样走 /affairs/<aid>/settings #}
+                    <button class="btn btn-outline-secondary btn-sm py-0 px-2" onclick="openSettings()"
+                            title="编排设置：编排模式（按选科分组 / 全体通用）、非参考学生处理">
+                        <i class="bi bi-gear"></i></button>
+                </span>
+            </div>
+            <div id="paneCustom" class="d-none border rounded p-2 mt-3">
+                <div class="btn-group btn-group-sm mb-2" role="group" aria-label="自定义考号来源">
+                    <input type="radio" class="btn-check" name="customSub" id="subRule" value="0"
+                           onchange="syncModePanes()" {% if _m != 2 %}checked{% endif %}>
+                    <label class="btn btn-outline-secondary" for="subRule"
+                           title="考号 = 前缀 + 考场号 + 座号 + 后缀">按规则生成</label>
+                    <input type="radio" class="btn-check" name="customSub" id="subImport" value="2"
+                           onchange="syncModePanes()" {% if _m == 2 %}checked{% endif %}>
+                    <label class="btn btn-outline-secondary" for="subImport"
+                           title="考号取自 Excel 导入（表头含「学号」「考号」两列），导入后点「开始编排」生效">用导入的考号</label>
+                </div>
+                <!-- 规则生成：各选科前缀/后缀（学科编号）+ 批次默认前缀 -->
+                <div id="paneRule">
+                    <div class="row g-2">
+                        {% for sel in sel_options %}
+                        {% set cfg = (affair.get_subject_prefixes() or {}).get(sel, {}) %}
+                        <div class="col-6 col-md-4 col-xl-3">
+                            <div class="border rounded p-2 small">
+                                <div class="fw-bold mb-1">{{ sel }}</div>
+                                <div class="d-flex gap-1">
+                                    <input class="form-control form-control-sm py-0 selCfgPrefix" data-sel="{{ sel }}"
+                                           value="{{ cfg.prefix or '' }}" placeholder="前缀">
+                                    <input class="form-control form-control-sm py-0 selCfgSuffix" data-sel="{{ sel }}"
+                                           value="{{ cfg.suffix or '' }}" placeholder="后缀">
+                                </div>
+                            </div>
                         </div>
-                        <div class="form-check">
-                            <input class="form-check-input" type="radio" name="mode" id="modeCustom" value="0"
-                                   onchange="syncModePanes()" {% if _m != 1 %}checked{% endif %}>
-                            <label class="form-check-label" for="modeCustom">
-                                <b>自定义模式</b>
-                                <span class="text-muted small d-block">按前缀/后缀/学科编号生成，或批量导入现成考号</span>
-                            </label>
-                        </div>
+                        {% else %}
+                        <div class="text-muted small">暂无选科学生，从学生库同步/加入后自动带出</div>
+                        {% endfor %}
+                    </div>
+                    <div class="d-flex flex-wrap gap-2 align-items-center mt-2">
+                        <span class="small text-muted text-nowrap">默认前缀</span>
+                        <input id="defPrefix" class="form-control form-control-sm py-0" style="width:96px"
+                               value="{{ affair.default_prefix or '' }}" placeholder="1701"
+                               title="各选科未单独设置前缀时使用；留空按 1701">
+                        <span class="text-muted small">各选科前后缀填学科编号，优先于默认前缀
+                            <i class="bi bi-question-circle" title="全校同一前缀：所有选科填同一前缀；文理分别前缀：按选科分别填。"></i></span>
+                        <button class="btn btn-outline-primary btn-sm py-0 ms-auto" onclick="saveSelCfg()">
+                            <i class="bi bi-check2"></i> 保存前后缀</button>
                     </div>
                 </div>
-                <!-- 右：该模式的设置 -->
-                <div class="col-lg-8 col-md-7">
-                    <div id="paneStudent">
-                        <div class="border rounded p-3 small text-muted">
-                            学号模式下，考号直接使用学生学号；系统只负责分配考场与座号，不生成新考号。
-                        </div>
-                    </div>
-                    <div id="paneCustom">
-                        <div class="d-flex gap-3 mb-2 flex-wrap">
-                            <div class="form-check">
-                                <input class="form-check-input" type="radio" name="customSub" id="subRule" value="0"
-                                       onchange="syncModePanes()" {% if _m != 2 %}checked{% endif %}>
-                                <label class="form-check-label" for="subRule">按规则生成
-                                    <span class="text-muted small">（前缀 + 考场号 + 座号 + 后缀）</span></label>
-                            </div>
-                            <div class="form-check">
-                                <input class="form-check-input" type="radio" name="customSub" id="subImport" value="2"
-                                       onchange="syncModePanes()" {% if _m == 2 %}checked{% endif %}>
-                                <label class="form-check-label" for="subImport">使用批量导入的自定义考号</label>
-                            </div>
-                        </div>
-                        <!-- 规则生成：各选科前缀/后缀（学科编号）+ 批次默认前缀 -->
-                        <div id="paneRule">
-                            <div class="d-flex justify-content-between align-items-center mb-2">
-                                <span class="small fw-bold">各选科考号前/后缀（= 学科编号）</span>
-                                <button class="btn btn-outline-primary btn-sm py-0" onclick="saveSelCfg()">
-                                    <i class="bi bi-check2"></i> 保存前后缀</button>
-                            </div>
-                            <div class="row g-2">
-                                {% for sel in sel_options %}
-                                {% set cfg = (affair.get_subject_prefixes() or {}).get(sel, {}) %}
-                                <div class="col-6 col-md-4">
-                                    <div class="border rounded p-2 small">
-                                        <div class="fw-bold mb-1">{{ sel }}</div>
-                                        <div class="d-flex gap-1">
-                                            <input class="form-control form-control-sm py-0 selCfgPrefix" data-sel="{{ sel }}"
-                                                   value="{{ cfg.prefix or '' }}" placeholder="前缀">
-                                            <input class="form-control form-control-sm py-0 selCfgSuffix" data-sel="{{ sel }}"
-                                                   value="{{ cfg.suffix or '' }}" placeholder="后缀">
-                                        </div>
-                                    </div>
-                                </div>
-                                {% else %}
-                                <div class="text-muted small">暂无选科学生，从学生库同步/加入后自动带出</div>
-                                {% endfor %}
-                            </div>
-                            <div class="d-flex gap-2 align-items-center mt-2">
-                                <span class="small text-muted text-nowrap">批次默认前缀</span>
-                                <input id="defPrefix" class="form-control form-control-sm py-0" style="width:110px"
-                                       value="{{ affair.default_prefix or '' }}" placeholder="1701">
-                                <span class="form-text mb-0">未按选科单独设置时使用；留空按 1701。</span>
-                            </div>
-                            <div class="form-text">全校同一前缀：所有选科填同一前缀；文理分别前缀：按选科分别填写（优先于批次默认前缀）。</div>
-                        </div>
-                        <!-- 批量导入自定义考号 -->
-                        <div id="paneImport" class="d-none">
-                            <div class="border rounded p-3 small">
-                                <div class="mb-2">
-                                    上传 Excel（表头需含「<b>学号</b>」与「<b>考号</b>」两列，列顺序不限），
-                                    考号写入名单的「自定义考号」；再点下方「开始编排并生成考号」，
-                                    即按导入的考号 + 分配的考场/座号生效。
-                                </div>
-                                <button class="btn btn-outline-primary btn-sm"
-                                        onclick="document.getElementById('numFile').click()">
-                                    <i class="bi bi-upload"></i> 批量导入考号</button>
-                                <input type="file" id="numFile" accept=".xlsx,.xls" style="display:none"
-                                       onchange="importNumbers(this)">
-                                <span id="numMsg" class="ms-2 small"></span>
-                            </div>
-                        </div>
+                <!-- 批量导入自定义考号 -->
+                <div id="paneImport" class="d-none">
+                    <div class="d-flex flex-wrap gap-2 align-items-center">
+                        <button class="btn btn-outline-primary btn-sm"
+                                onclick="document.getElementById('numFile').click()">
+                            <i class="bi bi-upload"></i> 批量导入考号</button>
+                        <span class="text-muted small">表头需含「学号」「考号」，导入后点「开始编排」生效</span>
+                        <input type="file" id="numFile" accept=".xlsx,.xls" style="display:none"
+                               onchange="importNumbers(this)">
+                        <span id="numMsg" class="small"></span>
                     </div>
                 </div>
             </div>
-            {# 2026-10-14 用户口径：分层编排与「考号生成模式」是平级的两件事，单独占一整行 ——
-               原先挤在左列里，导致左列比右列高出一截、三块高低不齐 #}
-            <div class="form-check border rounded p-2 mt-3 bg-light">
-                <input class="form-check-input" type="checkbox" id="layeredChk">
-                <label class="form-check-label" for="layeredChk"><b>按成绩分层编排</b>（推荐）</label>
-                <div class="text-muted small mt-1">
-                    同一<b>选科组合</b>内按<b>上一场同阶段考试</b>（同年级 + 同考试阶段）的
-                    <b>校内方向排名</b>升序填座：考场按房间号顺序、座位从前往后依次填满。
-                    固定考场/座号优先；<b>首次考试无历史成绩时自动退化为随机</b>。
-                </div>
-            </div>
-            <div class="text-muted small mt-2">编排规则：先安置「固定考场/固定座号」学生，其余按选科分组（未勾选分层时：同班邻座≤1 随机分配）。</div>
-            <button class="btn btn-primary btn-sm mt-1" onclick="runArrange()">
-                <i class="bi bi-shuffle"></i> 开始编排并生成考号</button>
-            <span id="arrangeMsg" class="ms-2 small"></span>
         </div>
-        {# v1.19.47.30 已编排时在下方列出学生名单，默认按「考场 → 座号」排序 #}
+        {# v1.19.49.31 已编排时在下方列出学生名单，默认按「考场 → 座号」排序 #}
         {% if arranged_sorted %}
         <div class="card mt-2">
             <div class="card-header py-1 d-flex justify-content-between align-items-center">
@@ -570,9 +631,10 @@
         <div id="schedMsg" class="small mb-2"></div>
         <div class="table-responsive" style="max-height:60vh;overflow:auto">
             <table class="table table-sm table-hover align-middle mb-0">
+                {# 2026-10-14 用户口径：科目列提到日期右侧 —— 先选科目，再（自动/手选）起始时间，结束时间自动算 #}
                 <thead class="sticky-top bg-white"><tr>
-                    <th style="width:150px">考试日期</th><th style="width:110px">开始</th>
-                    <th style="width:110px">结束</th><th style="width:140px">考试科目</th>
+                    <th style="width:150px">考试日期</th><th style="width:140px">考试科目</th>
+                    <th style="width:110px">开始</th><th style="width:110px">结束</th>
                     <th style="width:110px">选科</th><th>备注</th><th style="width:96px"></th>
                 </tr></thead>
                 <tbody id="schedBody">
@@ -580,8 +642,6 @@
                 <tr data-sid="{{ s.id }}">
                     <td><input type="date" class="form-control form-control-sm sc-date"
                                value="{{ s.exam_date.strftime('%Y-%m-%d') if s.exam_date else '' }}"></td>
-                    <td><input type="time" class="form-control form-control-sm sc-start" value="{{ s.start_time or '' }}"></td>
-                    <td><input type="time" class="form-control form-control-sm sc-end" value="{{ s.end_time or '' }}"></td>
                     <td>
                         {# 2026-10-13：科目从自由文本改为**多选下拉**（科目字典勾选，支持一场多科如四选二） #}
                         {% set _picked = (s.subject or '').replace('，', '、').replace(',', '、').split('、') %}
@@ -601,6 +661,8 @@
                         </div>
                         <input type="hidden" class="sc-subj" value="{{ s.subject or '' }}">
                     </td>
+                    <td><input type="time" class="form-control form-control-sm sc-start" value="{{ s.start_time or '' }}"></td>
+                    <td><input type="time" class="form-control form-control-sm sc-end" value="{{ s.end_time or '' }}"></td>
                     <td><input class="form-control form-control-sm sc-sel" value="{{ s.selection or '' }}"></td>
                     <td><input class="form-control form-control-sm sc-note" value="{{ s.note or '' }}"></td>
                     <td class="text-nowrap">
@@ -833,12 +895,10 @@
 <!-- 考场编辑弹窗 -->
 <div class="modal fade" id="roomModal" tabindex="-1"><div class="modal-dialog">
     <div class="modal-content">
-        <div class="modal-header"><h6 class="modal-title">考场</h6><button class="btn-close" data-bs-dismiss="modal"></button></div>
+        <div class="modal-header"><h6 class="modal-title">手动新增考场</h6><button class="btn-close" data-bs-dismiss="modal"></button></div>
         <div class="modal-body">
             <input type="hidden" id="roomId">
-            {# v1.12.2 编辑已有考场时：编号/位置/容量锁定只读（由考场库带出，改动破坏编排一致性） #}
-            <div id="roomLockTip" class="alert alert-secondary py-1 px-2 small d-none mb-2">
-                编号、位置、容量由考场库带出不可修改；如需调整请先删除本批次考场，改完考场库后重新选取。</div>
+            {# 2026-10-14：只用于新增 —— 已加入的考场在行内直接改编号 / 科目 / 容量 / 备注 #}
             <div class="row g-2">
                 <div class="col-6"><label class="form-label">考场编号 *</label><input id="roomNo" class="form-control form-control-sm"></div>
                 <div class="col-6"><label class="form-label">容量</label><input id="roomCap" type="number" class="form-control form-control-sm" value="30"></div>
@@ -891,47 +951,32 @@
     </div>
 </div>
 
-<!-- v1.12.1 批次设置弹窗：编排模式 / 非参考处理 / 选科考号前后缀 -->
-<div class="modal fade" id="settingsModal" tabindex="-1"><div class="modal-dialog">
+<!-- 2026-10-14 编排设置弹窗（原 v1.12.1「批次设置」）：只留「编排模式 / 非参考学生处理」。
+     原「选科考号前后缀」表格与步骤③ 自定义模式重复 —— 那条走 saveSelCfg()，同一个 /settings 接口。 -->
+<div class="modal fade" id="settingsModal" tabindex="-1">
+    {# 2026-10-14：内容只剩两组选项 → 弹窗会塌成很窄一条（Bootstrap 的 modal-dialog 宽度随内容），
+       这里固定宽度；两组选项**竖排**，长文案不换行、不被裁 #}
+    <div class="modal-dialog modal-dialog-centered" style="width:420px;max-width:92vw">
     <div class="modal-content">
-        <div class="modal-header"><h6 class="modal-title">批次设置</h6><button class="btn-close" data-bs-dismiss="modal"></button></div>
+        <div class="modal-header py-2"><h6 class="modal-title">编排设置</h6><button class="btn-close" data-bs-dismiss="modal"></button></div>
         <div class="modal-body">
-            <label class="form-label">编排模式</label>
-            <div class="d-flex gap-3 mb-1">
+            <label class="form-label mb-1">编排模式</label>
+            <div class="d-flex flex-column gap-1 mb-3">
                 <div class="form-check"><input class="form-check-input" type="radio" name="setMode" id="smSel" value="selected" {% if affair.selection_mode != 'plain' %}checked{% endif %}>
                     <label class="form-check-label" for="smSel">选科模式（按选科分组分配考场）</label></div>
                 <div class="form-check"><input class="form-check-input" type="radio" name="setMode" id="smPlain" value="plain" {% if affair.selection_mode == 'plain' %}checked{% endif %}>
                     <label class="form-check-label" for="smPlain">不选科模式（全体一组，考场全通用）</label></div>
             </div>
-            <label class="form-label mt-2">非参考学生处理</label>
-            <div class="d-flex gap-3 mb-1">
+            <label class="form-label mb-1">非参考学生处理</label>
+            <div class="d-flex flex-column gap-1">
                 <div class="form-check"><input class="form-check-input" type="radio" name="setNonAttend" id="naSkip" value="skip" {% if affair.non_attend_mode != 'tail' %}checked{% endif %}>
                     <label class="form-check-label" for="naSkip">不安排考场（不参与编排）</label></div>
                 <div class="form-check"><input class="form-check-input" type="radio" name="setNonAttend" id="naTail" value="tail" {% if affair.non_attend_mode == 'tail' %}checked{% endif %}>
                     <label class="form-check-label" for="naTail">安排到同选科考场尾场（尾座）</label></div>
             </div>
-            <label class="form-label mt-2">选科考号前后缀（模式0，优先于考场/批次默认前缀）</label>
-            <div class="table-responsive">
-                <table class="table table-sm mb-0 small" id="selCfgTable">
-                    <thead><tr><th>选科组合</th><th>前缀</th><th>后缀</th></tr></thead>
-                    <tbody>
-                    {% for sel in sel_options %}
-                    {% set cfg = (affair.get_subject_prefixes() or {}).get(sel, {}) %}
-                    <tr>
-                        <td>{{ sel }}<input type="hidden" class="selKey" value="{{ sel }}"></td>
-                        <td><input class="form-control form-control-sm py-0 selPrefix" value="{{ cfg.prefix or '' }}" placeholder="留空用默认"></td>
-                        <td><input class="form-control form-control-sm py-0 selSuffix" value="{{ cfg.suffix or '' }}"></td>
-                    </tr>
-                    {% else %}
-                    <tr><td colspan="3" class="text-center text-muted">暂无选科学生，从学生库同步后自动带出</td></tr>
-                    {% endfor %}
-                    </tbody>
-                </table>
-            </div>
-            <div class="form-text">全校同一前缀：所有选科填同一前缀；文理分别前缀：按选科分别填写。</div>
         </div>
-        <div class="modal-footer"><button class="btn btn-sm btn-secondary" data-bs-dismiss="modal">取消</button>
-            <button class="btn btn-sm btn-primary" onclick="saveSettings()">保存设置</button></div>
+        <div class="modal-footer py-1"><button class="btn btn-sm btn-secondary" data-bs-dismiss="modal">取消</button>
+            <button class="btn btn-sm btn-primary" onclick="saveSettings()">保存</button></div>
     </div>
 </div></div>
 
@@ -1001,7 +1046,7 @@
                 不在科目字典内的写法会被跳过。
             </div>
             <textarea id="schedPasteText" class="form-control font-monospace" rows="10"
-                      placeholder="考试日期&#9;开始时间&#9;结束时间&#9;考试科目&#9;选科&#9;备注&#10;2026-10-08&#9;09:00&#9;10:30&#9;语文&#10;2026-10-08&#9;14:00&#9;15:30&#9;数学&#10;（也可以只贴科目：物理）"></textarea>
+                      placeholder="考试日期&#9;考试科目&#9;开始时间&#9;结束时间&#9;选科&#9;备注&#10;2026-10-08&#9;语文&#9;09:00&#9;10:30&#10;2026-10-08&#9;数学&#9;14:00&#9;15:30&#10;（也可以只贴科目：物理）"></textarea>
             <div id="schedPasteMsg" class="small mt-2"></div>
         </div>
         <div class="modal-footer py-2">
@@ -1027,9 +1072,9 @@ const SCHED_DURATION_FALLBACK = {{ sched_duration_fallback }};
 function csrf(){ return csrfToken; }
 
 // v1.12.1 记忆当前 tab：切换时写 URL hash，刷新后自动恢复（避免操作后跳回学生名单）
-// v1.19.47.30：改用 history.replaceState 写 hash —— 直接赋 location.hash 会让浏览器
+// v1.19.49.31：改用 history.replaceState 写 hash —— 直接赋 location.hash 会让浏览器
 // 跳到该锚点（#t1~#t7），表现为「点环节标签时屏幕滚动」；replaceState 只改地址栏不滚动。
-// v1.19.47.30：切页签时同步左侧悬浮栏的 7 个环节圆点（只亮当前这一步，前面不全亮）。
+// v1.19.49.31：切页签时同步左侧悬浮栏的 7 个环节圆点（只亮当前这一步，前面不全亮）。
 document.querySelectorAll('#affairTabs button[data-bs-toggle="tab"]').forEach(function(btn){
     btn.addEventListener('shown.bs.tab', function(){
         var hash = btn.dataset.bsTarget;   // #t1 ~ #t7
@@ -1041,7 +1086,7 @@ document.querySelectorAll('#affairTabs button[data-bs-toggle="tab"]').forEach(fu
         syncSidebarSteps(hash);
     });
 });
-// v1.19.47.30 把侧栏圆点的高亮改到「当前环节」上（done 状态保持不变）
+// v1.19.49.31 把侧栏圆点的高亮改到「当前环节」上（done 状态保持不变）
 function syncSidebarSteps(hash){
     var dots = document.querySelectorAll('.sidebar-float .efn-steps .efn-dot');
     if(!dots.length) return;
@@ -1057,19 +1102,38 @@ if(location.hash){
     var triggerEl = document.querySelector('#affairTabs button[data-bs-target="'+location.hash+'"]');
     if(triggerEl){
         new bootstrap.Tab(triggerEl).show();
-        // v1.19.47.30：带 #tN 打开/刷新时浏览器会自动跳到该锚点，落回顶部，
+        // v1.19.49.31：带 #tN 打开/刷新时浏览器会自动跳到该锚点，落回顶部，
         // 与「点环节标签不滚动」保持一致（目标元素在本脚本之前已解析，故直接滚即可）。
         window.scrollTo(0, 0);
     }
 }
-// v1.19.47.30 步骤③ 模式面板联动：初始按服务端保存的模式展示，切到该步骤时再同步一次
+// v1.19.49.31 步骤③ 模式面板联动：初始按服务端保存的模式展示，切到该步骤时再同步一次
 syncModePanes();
 document.querySelector('#affairTabs button[data-bs-target="#t3"]').addEventListener('shown.bs.tab', syncModePanes);
+// 2026-10-14 用户口径：「编排容量」卡只服务步骤②/③（改考场·容量 / 编排考号），
+// 其它环节不显示 —— 不再每个分页都挂一条统计。
+function _syncCapBar(){
+    var bar = document.getElementById('capBar');
+    if(!bar) return;
+    var act = document.querySelector('#affairTabs button.active');
+    var tgt = act ? act.dataset.bsTarget : '#t1';
+    bar.classList.toggle('d-none', !(tgt === '#t2' || tgt === '#t3'));
+    // 2026-10-14 用户口径：「已编排」状态并进本行行尾，只在步骤③ 且确已编排时显示
+    var st = document.getElementById('arrangeState');
+    if(st) st.classList.toggle('d-none', !(tgt === '#t3' && st.dataset.on === '1'));
+    // 2026-10-14 用户口径：「导入 Excel / 手动新增」是步骤② 的按钮，并进本行后仍只在②显示
+    var acts = document.getElementById('capActs');
+    if(acts) acts.classList.toggle('d-none', tgt !== '#t2');
+}
+document.querySelectorAll('#affairTabs button[data-bs-toggle="tab"]').forEach(function(b){
+    b.addEventListener('shown.bs.tab', _syncCapBar);
+});
+_syncCapBar();
 
 // v1.12.1 学生名单从学籍库同步导入（增量：新增+刷新基本信息）
-// v1.19.47.30 取消 remove_missing 参数：无班级/已转出/已毕业学生一律不进入成绩模块，
+// v1.19.49.31 取消 remove_missing 参数：无班级/已转出/已毕业学生一律不进入成绩模块，
 // 名单中不再符合条件的学生（学籍已删等）由服务端默认自动剔除。
-// v1.19.47.30 同步后会「自动沿用上一场不参加考试的学生」（服务端 matched_non_attend）。
+// v1.19.49.31 同步后会「自动沿用上一场不参加考试的学生」（服务端 matched_non_attend）。
 function syncStudents(){
     var fd = new FormData();
     fetch('/grades/affairs/'+AID+'/students/sync', {method:'POST', body:fd, headers:{'X-CSRFToken':csrf()}})
@@ -1099,7 +1163,7 @@ function _fltApply(tid, cls, q){
     if (!tb) return 0;
     var n = 0;
     tb.querySelectorAll('tbody tr').forEach(function (tr) {
-        if (tr.cells.length < 5) return;              // 空态行（colspan）不参与
+        if (tr.querySelector('td[colspan]')) return;  // 空态行不参与（列数变化不受影响）
         var hitC = !cls || tr.cells[2].textContent.trim() === cls;      // 第 3 列 = 班级
         var hitQ = !q || tr.cells[0].textContent.toLowerCase().indexOf(q) >= 0
                       || tr.cells[1].textContent.toLowerCase().indexOf(q) >= 0;
@@ -1141,17 +1205,197 @@ function clearRosterFilter(){
     b.value = q;
     if (cls || q) filterRosterAll();
 })();
-// v1.19.47.30 步骤① 左右分栏：把学生移到「参加 / 不参加」一侧（保存后刷新以重排与更新统计）
+// ===== 2026-10-14 步骤① 搬行：局部更新 DOM，不再整页刷新 =====
+// 起因（用户反馈）：点「→ 不参加」会闪屏 —— reload 先渲染**全量**名单，再由 JS 重放筛选
+//（sessionStorage）瞬间隐藏不匹配的行，同时丢掉滚动位置与筛选框焦点。
+// 做法：接口成功后把该行在两个表格间搬移（两栏列结构不同 → 撤 / 补「固定考场·座号」列）、
+// 按 data-idx（服务端「班级 → 姓氏」序号）插回正确位置，并就地 ±1 更新各处计数。
+var ROSTER = {
+    join: 'stuTable', skip: 'stuSkipTable',
+    emptyJoin: '暂无参加考试的学生（点上方「从学生库导入」）',
+    emptySkip: '暂无「不参加考试」的学生'
+};
+function _tbodyOf(tid){
+    var t = document.getElementById(tid);
+    return t ? t.querySelector('tbody') : null;
+}
+// 空态行：某侧最后一人被搬走 / 删除时补上，否则移除
+function _syncEmpty(tid){
+    var tb = _tbodyOf(tid);
+    if (!tb) return;
+    var hasData = !!tb.querySelector('tr[data-sid]');
+    var emptyTd = tb.querySelector('tr td[colspan]');
+    if (hasData) {
+        if (emptyTd) emptyTd.parentNode.remove();
+    } else if (!emptyTd) {
+        var tr = document.createElement('tr'), td = document.createElement('td');
+        td.className = 'text-center text-muted py-4';
+        td.colSpan = (tid === ROSTER.join) ? 6 : 5;
+        td.textContent = (tid === ROSTER.join) ? ROSTER.emptyJoin : ROSTER.emptySkip;
+        tr.appendChild(td);
+        tb.appendChild(tr);
+    }
+}
+// 右栏 → 左栏：补回「固定考场 / 座号」列（值一直挂在行上的 data-fixed-*，没丢）
+function _mkFixedTd(tr){
+    var td = document.createElement('td');
+    td.dataset.savedRoom = tr.dataset.fixedRoom || '';
+    td.dataset.savedSeat = tr.dataset.fixedSeat || '';
+    var wrap = document.createElement('div');
+    wrap.className = 'd-flex align-items-center gap-1';
+    [['fx-room', '考场', '56', '固定考场号，如 05；留空=不固定', tr.dataset.fixedRoom || ''],
+     ['fx-seat', '座号', '48', '固定座号；留空时编排在该考场内自动找空位', tr.dataset.fixedSeat || '']
+    ].forEach(function (cfg) {
+        var inp = document.createElement('input');
+        inp.className = 'form-control form-control-sm py-0 px-1 ' + cfg[0];
+        inp.style.width = cfg[2] + 'px';
+        inp.value = cfg[4];
+        inp.placeholder = cfg[1];
+        inp.title = cfg[3];
+        inp.dataset.sid = tr.dataset.sid;
+        if (cfg[0] === 'fx-seat') inp.inputMode = 'numeric';
+        inp.setAttribute('onchange', 'saveFixed(this)');
+        inp.setAttribute('onkeydown', "if(event.key==='Enter')this.blur()");
+        wrap.appendChild(inp);
+    });
+    td.appendChild(wrap);
+    return td;
+}
+// 行上的两处随「参加 / 不参加」变化的装饰：黄色底纹 + 操作按钮
+// toAttend = 该行**现在所处的侧**：在参加侧 → 按钮写「→ 不参加」(动作 0)；在不参加侧 → 「← 参加」(动作 1)。
+// 三处必须与模板初始渲染一致（文案 / 配色 / onclick 参数）
+function _fixRowChrome(tr, toAttend){
+    tr.classList.toggle('table-warning', !toAttend);
+    var b = tr.querySelector('td:last-child button');
+    if (!b) return;
+    b.textContent = toAttend ? '→ 不参加' : '← 参加';
+    b.className = 'btn btn-sm py-0 ' + (toAttend ? 'btn-outline-secondary' : 'btn-outline-success');
+    b.title = toAttend ? '把该生移到右侧「不参加考试」' : '把该生移回左侧「参加考试」';
+    b.setAttribute('onclick', 'toggleAttend(' + tr.dataset.sid + ', ' + (toAttend ? '0' : '1') + ')');
+}
+function _moveRowDom(sid, toAttend){
+    var fromTid = toAttend ? ROSTER.skip : ROSTER.join;
+    var toTid = toAttend ? ROSTER.join : ROSTER.skip;
+    var tb = _tbodyOf(fromTid);
+    var tr = tb ? tb.querySelector('tr[data-sid="' + sid + '"]') : null;
+    if (!tr) return null;                     // 源表找不到（页面已过期）→ 调用方退回刷新
+    tr.parentNode.removeChild(tr);
+    var fx = tr.querySelector('td[data-saved-room]');
+    if (fx) fx.parentNode.removeChild(fx);    // 搬去右栏：撤掉固定列（值留在 tr 的 data 上）
+    else tr.insertBefore(_mkFixedTd(tr), tr.querySelector('td:last-child'));   // 搬回左栏：补回固定列
+    _fixRowChrome(tr, toAttend);
+    var dst = _tbodyOf(toTid);
+    var idx = parseInt(tr.dataset.idx || '0', 10);
+    var ref = null;
+    Array.prototype.slice.call(dst.querySelectorAll('tr[data-sid]')).some(function (r) {
+        if (parseInt(r.dataset.idx || '0', 10) > idx) { ref = r; return true; }
+        return false;
+    });
+    if (ref) dst.insertBefore(tr, ref); else dst.appendChild(tr);
+    _syncEmpty(fromTid);
+    _syncEmpty(toTid);
+    return tr;
+}
+// 计数就地 ±1：顶部「实际 / 参加 / 不参加」+「各班明细」该班一行；
+// 两栏徽标只改 data-total，文本交给 filterRosterAll() 重算（筛选态下要显示 n/总数）。
+function _bumpNum(el, d){
+    if (el && d) el.textContent = String((parseInt(el.textContent, 10) || 0) + d);
+}
+function _bumpCounts(dJoin, dSkip, cls){
+    _bumpNum(document.querySelector('#gsTotal'), dJoin + dSkip);
+    _bumpNum(document.querySelector('#gsJoin'), dJoin);
+    _bumpNum(document.querySelector('#gsSkip'), dSkip);
+    var jb = document.querySelector('#stuTableBadge'), sb = document.querySelector('#stuSkipTableBadge');
+    if (jb) jb.dataset.total = String((parseInt(jb.dataset.total, 10) || 0) + dJoin);
+    if (sb) sb.dataset.total = String((parseInt(sb.dataset.total, 10) || 0) + dSkip);
+    if (cls) {
+        Array.prototype.slice.call(document.querySelectorAll('#clsStat tbody tr')).some(function (tr) {
+            if ((tr.cells[0].textContent || '').trim() !== cls) return false;
+            _bumpNum(tr.querySelector('[data-total]'), dJoin + dSkip);
+            _bumpNum(tr.querySelector('[data-join]'), dJoin);
+            _bumpNum(tr.querySelector('[data-skip]'), dSkip);
+            return true;
+        });
+    }
+    filterRosterAll();
+}
+// v1.19.49.31 步骤① 左右分栏：把学生移到「参加 / 不参加」一侧
 function toggleAttend(sid, toAttend){
+    toAttend = !!toAttend;
     var fd = new FormData(); fd.append('is_attend', toAttend ? '1' : '0');
     fetch('/grades/affairs/'+AID+'/students/'+sid+'/attend',
           {method:'POST', body:fd, headers:{'X-CSRFToken':csrf()}})
         .then(r=>r.json()).then(d=>{
             if(!d.ok){ alert(d.msg||'保存失败'); return; }
-            location.reload();
-        });
+            var tr = _moveRowDom(sid, toAttend);
+            if (!tr) { location.reload(); return; }   // 兜底：行不在了（名单被别人改过）
+            _bumpCounts(toAttend ? 1 : -1, toAttend ? -1 : 1, (tr.cells[2].textContent || '').trim());
+        })
+        .catch(function(){ alert('保存失败，请重试'); });
 }
-// v1.19.47.30 步骤② 行内编辑：科目下拉 / 容量 / 备注 改动即存（不再有「编辑」按钮弹窗）
+// 2026-10-14 步骤① 固定考场/座号：改动即存（失焦或回车触发）。
+// 成功用服务端返回值回填（考场号会补零：5 → 05）并闪一下绿色；失败还原为最近一次有效值。
+// 注意两处竞态：① 先填考场、再填座号会发出两次保存，**旧响应晚到时不许覆盖新输入**
+//（按行 seq 丢弃过期响应 + 只回填未被再改动的框）；② 失败不要刷新页面（会丢掉筛选与滚动位置）。
+function _fxRevert(td){
+    td.querySelector('.fx-room').value = td.dataset.savedRoom || '';
+    td.querySelector('.fx-seat').value = td.dataset.savedSeat || '';
+}
+function saveFixed(el){
+    var td = el.closest('td');
+    var roomEl = td.querySelector('.fx-room'), seatEl = td.querySelector('.fx-seat');
+    var sentRoom = roomEl.value.trim(), sentSeat = seatEl.value.trim();
+    var seq = (parseInt(td.dataset.fxSeq || '0', 10) || 0) + 1;
+    td.dataset.fxSeq = String(seq);
+    var fd = new FormData();
+    fd.append('fixed_room', sentRoom);
+    fd.append('fixed_seat', sentSeat);
+    fetch('/grades/affairs/'+AID+'/students/'+el.dataset.sid+'/fixed',
+          {method:'POST', body:fd, headers:{'X-CSRFToken':csrf()}})
+        .then(r=>r.json()).then(d=>{
+            if(!d.ok){
+                alert(d.msg||'保存失败');
+                _fxRevert(td);
+                return;
+            }
+            if(parseInt(td.dataset.fxSeq, 10) !== seq) return;   // 已有更新的保存发出，丢弃本次回填
+            if(roomEl.value.trim() === sentRoom) roomEl.value = d.fixed_room || '';
+            if(seatEl.value.trim() === sentSeat) seatEl.value = d.fixed_seat || '';
+            td.dataset.savedRoom = d.fixed_room || '';
+            td.dataset.savedSeat = d.fixed_seat || '';
+            // 2026-10-14：同步到行上 —— 学生若被搬到右栏（固定列被撤掉），移回左栏时靠这里取值还原
+            var rowTr = td.closest('tr');
+            if(rowTr){
+                rowTr.dataset.fixedRoom = d.fixed_room || '';
+                rowTr.dataset.fixedSeat = d.fixed_seat || '';
+            }
+            td.classList.add('table-success');
+            setTimeout(function(){ td.classList.remove('table-success'); }, 900);
+            if(d.warn) alert(d.warn);
+        })
+        .catch(function(){ alert('保存失败，请重试'); _fxRevert(td); });
+}
+// 2026-10-14 步骤②「重排编号」：把本批次考场编号重排为 01 起的连续编号。
+// 缘由：编号原来按「现有最大 + 1」分配且空号不回收，反复带入/移出会滚大（如被带成 29~43）；
+// 重排会同步名单的考场号、固定考场、考号（模式0）与监考表，故先确认再执行。
+function renumberRooms(){
+    if(!_batchRooms.length){ alert('本批次还没有考场'); return; }
+    if(_roomNoDirty() && !confirm('编号有未保存的改动，「重排编号」会整页刷新并丢弃它们。\n继续重排？')) return;
+    if(!confirm('把本批次 ' + _batchRooms.length + ' 个考场重排为 01~'
+                + String(_batchRooms.length).padStart(2, '0') + ' 连续编号？\n'
+                + '名单里的考场号、考号与监考表会同步更新（位置 / 科目 / 容量不变）。')) return;
+    fetch('/grades/affairs/'+AID+'/rooms/renumber', {method:'POST', headers:{'X-CSRFToken':csrf()}})
+        .then(r=>r.json()).then(d=>{
+            if(!d.ok){ alert(d.msg||'重排失败'); return; }
+            alert(d.changed ? ('已重排 ' + d.changed + ' 个考场编号；同步名单 ' + d.students
+                               + ' 人、监考 ' + d.invigs + ' 格')
+                            : (d.msg||'无需重排'));
+            location.reload();
+        })
+        .catch(function(){ alert('重排失败，请重试'); });
+}
+// v1.19.49.31 步骤② 行内编辑：科目下拉 / 容量 / 备注 改动即存
+//（编号列已改「草稿 + 保存编号」：见 _roomNoInput / saveRoomNumbers，不在这里提交）
 function saveRoomField(el){
     var tr = el.closest('tr');
     var rid = tr.dataset.rid;
@@ -1166,11 +1410,128 @@ function saveRoomField(el){
             if(rm){ rm.subject=d.subject; rm.capacity=d.capacity; rm.note=d.note; }
             tr.querySelector('.rm-cap').value = d.capacity;
             _roomCapStat();
-            // v1.19.47.30：科目/容量已变 → 实时重算选科明细
+            // v1.19.49.31：科目/容量已变 → 实时重算选科明细
             refreshStats();
         });
 }
-// v1.19.47.30 步骤② 容量批量操作：一键给全部考场设同一容量
+// ---------- 2026-10-14 编号列：草稿 + 「保存编号」----------
+// 用户口径：编号可以改也可以清空，但**改一下就弹「被占用/不能为空」太打断** ——
+// 改动先只记在本地（草稿），点卡片头「保存编号」才统一提交（保存时才查重、空号自动补）。
+function _roomNoInput(el){
+    var tr = el.closest('tr');
+    var rm = _batchRooms.find(r=>String(r.id)===String(tr.dataset.rid));
+    if(!rm) return;
+    rm.room_no = el.value.trim();
+    _roomNoSync();
+}
+// 2026-10-14 用户口径（二次修订）：编号要**一键全部清空**（一行一个 × 太慢）——
+// 清空只写草稿（不即时提交），点「保存编号」时才查重 / 自动补号；
+// 全部留空后保存 = 按 01 起自动补号（与「重排编号」结果相同），也可以清空后自己逐个填。
+function clearAllRoomNo(){
+    if(!_batchRooms.length){ alert('本批次还没有考场'); return; }
+    if(!confirm('把本批次 ' + _batchRooms.length + ' 个考场的编号全部清空？\n'
+                + '（只是草稿：点卡片头「保存编号」才生效；全部留空 = 保存时按 01 起自动补号。'
+                + '想放弃，刷新页面即可回到原编号）')) return;
+    _batchRooms.forEach(function(r){ r.room_no = ''; });
+    document.querySelectorAll('#roomTable tbody tr').forEach(function(tr){
+        var inp = tr.querySelector('.rm-no');
+        if(inp) inp.value = '';
+    });
+    _roomNoSync();          // 同步草稿计数 → 顶上「保存编号」亮起
+}
+function _roomNoDirty(){
+    return _batchRooms.some(r=>String(r.room_no||'').trim() !== String(r.orig_no||'').trim());
+}
+// 轻提示（不弹窗、不还原）：与别的行撞号 → 红框；清空 → 占位提示「保存时自动补号」
+function _roomNoSync(){
+    var seen = {};
+    _batchRooms.forEach(function(r){
+        var k = String(r.room_no||'').trim();
+        if(k) seen[k] = (seen[k]||0) + 1;
+    });
+    document.querySelectorAll('#roomTable tbody tr').forEach(function(tr){
+        var rm = _batchRooms.find(r=>String(r.id)===String(tr.dataset.rid));
+        var inp = tr.querySelector('.rm-no');
+        if(!rm || !inp) return;
+        var v = String(rm.room_no||'').trim();
+        inp.placeholder = '自动补号';
+        inp.classList.toggle('is-invalid', !!v && seen[v] > 1);
+        inp.title = (!v ? '编号留空：保存时自动补最小空号'
+                        : (seen[v] > 1 ? '这个编号和多行重复了，保存会被拒绝'
+                                       : '考场编号：可改、可清空，改完点卡片头「保存编号」统一保存'));
+    });
+    // 2026-10-14：首行不能上移、末行不能下移 —— 每行左侧的 ↑↓ 就地禁用（不整表重渲染）
+    var trs = Array.prototype.slice.call(document.querySelectorAll('#roomTable tbody tr'));
+    trs.forEach(function(tr, i){
+        var up = tr.querySelector('.rm-up');
+        var dn = tr.querySelector('.rm-dn');
+        if(up) up.disabled = (i === 0);
+        if(dn) dn.disabled = (i === trs.length - 1);
+    });
+    var btn = document.getElementById('saveNoBtn');
+    if(!btn) return;
+    btn.classList.toggle('d-none', !_roomNoDirty());
+    document.getElementById('saveNoCnt').textContent = _batchRooms.filter(
+        r=>String(r.room_no||'').trim() !== String(r.orig_no||'').trim()).length;
+}
+// 2026-10-14 用户口径：考场要能「上移 / 下移」按序走。
+// 表格是按**编号**排的（服务端 order_by(room_no)，前端渲染数组同序），所以「上下移一格」
+// 等价于与相邻行**交换编号**：视觉上该行移动了一格、编号仍然连续，顺序也就跟着编号走了。
+// 与编号列同为**草稿**（不即时提交）—— 点卡片头「保存编号」统一提交，
+// 后端 `apply_room_renames` 两阶段写入支持互换，并同步名单的考场号 / 考号与监考表。
+function _noSortKey(v){
+    var s = String(v == null ? '' : v).trim();
+    return /^\d+$/.test(s) ? +s : 1e9;      // 纯数字按数值比；空 / 非数字统一排最后
+}
+function _sortBatchRooms(){
+    _batchRooms.sort(function(a, b){
+        var ka = _noSortKey(a.room_no), kb = _noSortKey(b.room_no);
+        if(ka !== kb) return ka - kb;
+        return String(a.room_no).localeCompare(String(b.room_no));
+    });
+}
+function moveRoom(rid, dir){
+    if(!_batchRooms.length) return;
+    _sortBatchRooms();
+    var i = -1;
+    _batchRooms.forEach(function(r, k){ if(String(r.id) === String(rid)) i = k; });
+    var j = i + dir;
+    if(i < 0 || j < 0 || j >= _batchRooms.length) return;   // 已在首 / 末行（按钮本就 disabled）
+    var a = _batchRooms[i], b = _batchRooms[j];
+    var t = a.room_no; a.room_no = b.room_no; b.room_no = t;
+    _sortBatchRooms();
+    renderRooms();      // 内含 _roomNoSync：刷新「保存编号」计数与首末行的按钮禁用态
+}
+function saveRoomNumbers(){
+    var items = _batchRooms.map(function(r){ return {id: r.id, room_no: String(r.room_no||'').trim()}; });
+    var fd = new FormData();
+    fd.append('items', JSON.stringify(items));
+    fetch('/grades/affairs/'+AID+'/rooms/rename', {method:'POST', body:fd, headers:{'X-CSRFToken':csrf()}})
+        .then(r=>r.json()).then(function(d){
+            if(!d.ok){ alert(d.msg||'保存失败'); return; }   // 保留草稿，改完再存
+            var msg = d.changed
+                ? ('已保存考场编号：改 ' + d.changed + ' 个；同步名单 ' + d.students
+                   + ' 人、监考 ' + d.invigs + ' 格')
+                : '编号没有变化';
+            if((d.filled||[]).length){
+                msg += '\n自动补号：' + d.filled.map(function(f){
+                    return f.room_no + '（' + (f.location||'—') + '）'; }).join('、');
+            }
+            // 先认下已保存的值，避免整页刷新时触发「有未保存改动」的离开确认
+            _batchRooms.forEach(function(r){ r.orig_no = String(r.room_no||'').trim(); });
+            alert(msg);
+            location.reload();
+        })
+        .catch(function(){ alert('保存失败，请重试'); });
+}
+// 改动没保存就离开（关页签 / 刷新 / 点别的会刷新页面的按钮）时提醒一次
+window.addEventListener('beforeunload', function(e){
+    if(!_roomNoDirty()) return undefined;
+    e.preventDefault();
+    e.returnValue = '考场编号有未保存的改动（点卡片头「保存编号」保存）';
+    return e.returnValue;
+});
+// v1.19.49.31 步骤② 容量批量操作：一键给全部考场设同一容量
 function setAllCapacity(){
     if(!_batchRooms.length){ alert('本批次还没有考场'); return; }
     var n = prompt('给本批次全部 ' + _batchRooms.length + ' 个考场设置容量：', '42');
@@ -1183,13 +1544,14 @@ function setAllCapacity(){
             if(!d.ok){ alert(d.msg||'设置失败'); return; }
             _batchRooms.forEach(function(r){ r.capacity = d.capacity; });
             renderRooms();
-            // v1.19.47.30：批量改容量后实时重算选科明细
+            // v1.19.49.31：批量改容量后实时重算选科明细
             refreshStats();
         });
 }
-// v1.19.47.30 步骤② 沿用上一场（同年级 + 同一房间）的考场容量
+// v1.19.49.31 步骤② 沿用上一场（同年级 + 同一房间）的考场容量
 function fillCapacityFromPrev(){
     if(!_batchRooms.length){ alert('本批次还没有考场'); return; }
+    if(_roomNoDirty() && !confirm('编号有未保存的改动，这个操作会整页刷新并丢弃它们。\n继续？')) return;
     if(!confirm('按「同年级 + 同一房间（位置优先）」把上一场考试的考场容量带入本批次？\n（会覆盖本批次现有容量）')) return;
     var fd = new FormData(); fd.append('mode', 'prev');
     fetch('/grades/affairs/'+AID+'/rooms/capacity', {method:'POST', body:fd, headers:{'X-CSRFToken':csrf()}})
@@ -1200,30 +1562,30 @@ function fillCapacityFromPrev(){
                   + (d.unmatched ? ('（' + d.unmatched + ' 个房间在上一场没有对应）') : ''));
             location.reload();
         });
-    // v1.19.47.30 说明：本操作会覆盖本批次全部考场容量，走整页刷新以保持与列表一致，
+    // v1.19.49.31 说明：本操作会覆盖本批次全部考场容量，走整页刷新以保持与列表一致，
     // 无需在此 refreshStats()。
 }
-// v1.19.25.0 步骤③ 模式联动：学号模式 / 自定义模式（规则生成 或 批量导入考号）
+// v1.19.25.0 步骤③ 模式联动：学号模式（无设置项）/ 自定义模式（规则生成 或 批量导入考号）
+// 2026-10-14：学号模式不再有提示面板（文案已收进模式按钮的 tooltip），只切自定义设置区
 function syncModePanes(){
     var custom = document.getElementById('modeCustom').checked;
-    document.getElementById('paneStudent').classList.toggle('d-none', custom);
     document.getElementById('paneCustom').classList.toggle('d-none', !custom);
     if(!custom) return;
     var imp = document.getElementById('subImport').checked;
     document.getElementById('paneRule').classList.toggle('d-none', imp);
     document.getElementById('paneImport').classList.toggle('d-none', !imp);
 }
-// v1.19.47.30 步骤③ 批量导入考号（Excel：学号 + 考号）→ 写入名单的「自定义考号」
+// v1.19.49.31 步骤③ 批量导入考号（Excel：学号 + 考号）→ 写入名单的「自定义考号」
 function importNumbers(input){
     if(!input.files.length) return;
     var fd = new FormData(); fd.append('file', input.files[0]);
     var msg = document.getElementById('numMsg');
-    msg.className = 'ms-2 small text-muted'; msg.textContent = '导入中…';
+    msg.className = 'small text-muted'; msg.textContent = '导入中…';
     fetch('/grades/affairs/'+AID+'/numbers/import', {method:'POST', body:fd, headers:{'X-CSRFToken':csrf()}})
         .then(r=>r.json()).then(d=>{
             input.value = '';
-            if(!d.ok){ msg.className='ms-2 small text-danger'; msg.textContent=d.msg; return; }
-            msg.className = 'ms-2 small text-success';
+            if(!d.ok){ msg.className='small text-danger'; msg.textContent=d.msg; return; }
+            msg.className = 'small text-success';
             msg.textContent = '已写入 '+d.updated+' 条' + (d.missing?('，'+d.missing+' 条学号不在名单中'):'')
                             + (d.empty?('，'+d.empty+' 条考号为空'):'');
         });
@@ -1291,7 +1653,7 @@ function confirmPick(){
 }
 
 // v1.12.2 步骤③ 各选科前后缀保存（复用 /settings 接口，仅提交 sels + 前后缀，不动模式）
-// v1.19.47.30 一并提交「批次默认前缀」（原「考场前缀」列已移除，默认前缀成为兜底）
+// v1.19.49.31 一并提交「批次默认前缀」（原「考场前缀」列已移除，默认前缀成为兜底）
 function saveSelCfg(){
     var sels = Array.from(document.querySelectorAll('.selCfgPrefix')).map(i=>i.dataset.sel);
     var fd = new FormData();
@@ -1306,30 +1668,30 @@ function saveSelCfg(){
         .then(r=>r.json()).then(d=>{
             var el = document.getElementById('arrangeMsg');
             el.textContent = d.ok ? '前后缀已保存' : ('保存失败：'+d.msg);
-            el.className = 'ms-2 small ' + (d.ok ? 'text-success' : 'text-danger');
+            el.className = 'small ' + (d.ok ? 'text-success' : 'text-danger');
         });
 }
-// v1.12.1 批次设置：编排模式/非参考处理/选科考号前后缀
+// 2026-10-14 编排设置（原 v1.12.1「批次设置」）：只改「编排模式 / 非参考学生处理」——
+// 选科考号前后缀改由步骤③ 自定义模式统一维护（saveSelCfg，同一个 /settings 接口），此处不再提交 sels
 function openSettings(){ new bootstrap.Modal(document.getElementById('settingsModal')).show(); }
 function saveSettings(){
     var fd = new FormData();
     fd.append('selection_mode', document.querySelector('input[name=setMode]:checked').value);
     fd.append('non_attend_mode', document.querySelector('input[name=setNonAttend]:checked').value);
-    var keys = Array.from(document.querySelectorAll('#selCfgTable .selKey')).map(i=>i.value);
-    fd.append('sels', JSON.stringify(keys));
-    keys.forEach(k=>{
-        var tr = document.querySelector('#selCfgTable .selKey[value="'+k+'"]').closest('tr');
-        fd.append('prefix_'+k, tr.querySelector('.selPrefix').value.trim());
-        fd.append('suffix_'+k, tr.querySelector('.selSuffix').value.trim());
-    });
     fetch('/grades/affairs/'+AID+'/settings', {method:'POST', body:fd, headers:{'X-CSRFToken':csrf()}})
-        .then(r=>r.json()).then(d=>{ if(d.ok) location.reload(); else alert(d.msg); });
+        .then(r=>r.json()).then(d=>{
+            if(!d.ok){ alert(d.msg); return; }
+            // 2026-10-14：入口在步骤③ —— 保存后仍回到该步骤（reload 不保留 bootstrap 页签状态）
+            location.hash = 't3';
+            location.reload();
+        });
 }
 // v1.12.2 考场库内联双列表：纯前端渲染，加入/删除即时更新，无刷新闪烁
 // 本批次考场（服务端初值，之后由 JS 增删维护）：{id, room_no, location, capacity, subject, note}
-// v1.19.47.30 科目可选值（系统「选科」字典 + 全科），供行内下拉使用
+// v1.19.49.31 科目可选值（系统「选科」字典 + 全科），供行内下拉使用
 var _SUBJ_OPTS = {{ room_subject_options|tojson }};
-var _batchRooms = [{% for r in rooms %}{id:{{ r.id }},room_no:{{ (r.room_no or '')|tojson }},location:{{ (r.location or '')|tojson }},capacity:{{ r.capacity or 0 }},subject:{{ (r.subject or '默认')|tojson }},note:{{ (r.note or '')|tojson }}},
+// orig_no = 库里存的编号（编号列是草稿：room_no 是本地值，两者不同即「未保存」）
+var _batchRooms = [{% for r in rooms %}{id:{{ r.id }},room_no:{{ (r.room_no or '')|tojson }},orig_no:{{ (r.room_no or '')|tojson }},location:{{ (r.location or '')|tojson }},capacity:{{ r.capacity or 0 }},subject:{{ (r.subject or '默认')|tojson }},note:{{ (r.note or '')|tojson }}},
                    {% endfor %}];
 var _libData = [];   // 考场库全量，loadLib 后填充
 var _libGroups = []; // v1.19.47.31 考场模板（= 考场维护页的分组）：[{id,name,count}]
@@ -1337,7 +1699,7 @@ var _libGroupInit = false;   // 首次载入时自动匹配本批次年级的模
 
 function _locSet(){ return new Set(_batchRooms.map(r=>r.location)); }
 
-// v1.19.47.30 批次考场数与总容量（行内改容量后同步刷新）
+// v1.19.49.31 批次考场数与总容量（行内改容量后同步刷新）
 function _roomCapStat(){
     var cap = _batchRooms.reduce((s,r)=>s+(r.capacity||0),0);
     var el = document.getElementById('roomStat');
@@ -1346,7 +1708,7 @@ function _roomCapStat(){
     if(c2) c2.textContent = cap;
 }
 
-// v1.19.47.30 改考场/科目/容量后**实时**刷新「编排容量 + 选科明细」：
+// v1.19.49.31 改考场/科目/容量后**实时**刷新「编排容量 + 选科明细」：
 // 调 /affairs/<aid>/stats 拿最新口径，直接改 DOM（不刷新页面，老师调容量时能连续看效果）。
 function refreshStats(){
     fetch('/grades/affairs/'+AID+'/stats').then(r=>r.json()).then(function(d){
@@ -1381,7 +1743,7 @@ function refreshStats(){
     });
 }
 
-// v1.19.47.30 科目行内下拉：通用考场显示为「全科」
+// v1.19.49.31 科目行内下拉：通用考场显示为「全科」
 function _subjSel(r){
     var cur = r.subject || '默认';
     var universal = ['默认','通用','','全部'].indexOf(cur) >= 0;
@@ -1401,13 +1763,23 @@ function renderRooms(){
     }
     tb.innerHTML = _batchRooms.map(r=>
         // H-5：location / note 由用户填写（服务端仅 strip），必须转义
-        '<tr data-rid="'+r.id+'"><td>'+escHtml(stuPad2(r.room_no))+'</td><td>'+escHtml(r.location)+'</td>'+
+        '<tr data-rid="'+r.id+'"><td><input class="form-control form-control-sm py-0 rm-no" maxlength="10"'+
+        ' value="'+escHtml(stuPad2(r.room_no))+'" title="考场编号：可改、可清空，改完点卡片头「保存编号」统一保存"'+
+        ' oninput="_roomNoInput(this)"></td><td>'+escHtml(r.location)+'</td>'+
         '<td>'+_subjSel(r)+'</td>'+
         '<td><input type="number" min="1" max="500" class="form-control form-control-sm py-0 text-end rm-cap" value="'+escHtml(r.capacity)+'" onchange="saveRoomField(this)"></td>'+
         '<td><input class="form-control form-control-sm py-0 rm-note" value="'+escHtml(r.note||'')+'" placeholder="备注" onchange="saveRoomField(this)"></td>'+
-        '<td class="text-end"><button class="btn btn-sm btn-outline-danger py-0" title="把该考场移出本批次（考场库中的房间不受影响）"'+
+        '<td class="text-end text-nowrap">'+
+        '<button type="button" class="btn btn-sm btn-outline-secondary py-0 px-1 rm-up"'+
+        ' title="上移一位：与该行上面的考场交换编号（改完点卡片头「保存编号」生效）"'+
+        ' onclick="moveRoom('+r.id+', -1)"><i class="bi bi-arrow-up"></i></button>'+
+        '<button type="button" class="btn btn-sm btn-outline-secondary py-0 px-1 rm-dn"'+
+        ' title="下移一位：与该行下面的考场交换编号（改完点卡片头「保存编号」生效）"'+
+        ' onclick="moveRoom('+r.id+', 1)"><i class="bi bi-arrow-down"></i></button>'+
+        '<button class="btn btn-sm btn-outline-danger py-0" title="把该考场移出本批次（考场库中的房间不受影响）"'+
         ' onclick="delRoom('+r.id+')">不加入</button></td></tr>'
     ).join('');
+    _roomNoSync();          // 重渲染后恢复「保存编号」按钮状态与撞号提示
 }
 
 function loadLib(){
@@ -1542,9 +1914,11 @@ function addLibGroup(){
         .then(r=>r.json()).then(d=>{
             if(!d.ok){ alert(d.msg||'带入失败'); return; }
             (d.added||[]).forEach(function(r){
-                _batchRooms.push({id:r.id, room_no:r.room_no, location:r.location,
+                _batchRooms.push({id:r.id, room_no:r.room_no, orig_no:r.room_no,
+                                  location:r.location,
                                   capacity:r.capacity, subject:r.subject, note:''});
             });
+            _sortBatchRooms();      // 表格始终按编号排（与「上移 / 下移」的排序口径一致）
             renderRooms();
             refreshStats();
             _renderLibList();
@@ -1570,8 +1944,10 @@ function pickLib(libId){
                                                      headers:{'X-CSRFToken':csrf()}})
         .then(r=>r.json()).then(function(d){
             if(!d.ok){ alert(d.msg || '加入失败'); return; }
-            _batchRooms.push({id:d.id, room_no:d.room_no, location:d.location,
+            _batchRooms.push({id:d.id, room_no:d.room_no, orig_no:d.room_no,
+                              location:d.location,
                               capacity:d.capacity, subject:d.subject, note:''});
+            _sortBatchRooms();  // 表格始终按编号排（与「上移 / 下移」的排序口径一致）
             renderRooms();
             refreshStats();
             _renderLibList();   // 该行转「已加入」，徽标与「一键带入」计数同步
@@ -1602,38 +1978,32 @@ function clearStudents(){
     fetch('/grades/affairs/'+AID+'/students/clear', {method:'POST', headers:{'X-CSRFToken':csrf()}})
         .then(r=>r.json()).then(d=>{ if(d.ok) location.reload(); });
 }
-// v1.19.47.30 移除「手动新增 / 编辑学生」弹窗（用户：本页不允许编辑学生信息，只允许从学生库选取），
+// v1.19.49.31 移除「手动新增 / 编辑学生」弹窗（用户：本页不允许编辑学生信息，只允许从学生库选取），
 // openStuModal / saveStu 一并删除；后端 /students/save 接口保留给外部工具使用。
 function delStu(id){
     if(!confirm('删除该学生？')) return;
     fetch('/grades/affairs/'+AID+'/students/'+id+'/delete', {method:'POST', headers:{'X-CSRFToken':csrf()}})
-        .then(r=>r.json()).then(d=>{ if(d.ok) location.reload(); });
+        .then(r=>r.json()).then(d=>{
+            if(!d.ok) return;
+            // 2026-10-14：同样不再整页刷新 —— 删掉该行并就地 ±1（与搬行同一套计数逻辑）
+            var tr = document.querySelector('#stuTable tr[data-sid="' + id + '"]')
+                  || document.querySelector('#stuSkipTable tr[data-sid="' + id + '"]');
+            if (!tr) { location.reload(); return; }
+            var tid = tr.closest('table').id;
+            var cls = (tr.cells[2].textContent || '').trim();
+            tr.parentNode.removeChild(tr);
+            _syncEmpty(tid);
+            _bumpCounts(tid === ROSTER.join ? -1 : 0, tid === ROSTER.join ? 0 : -1, cls);
+        })
+        .catch(function(){ alert('删除失败，请重试'); });
 }
-function openRoomModal(id){
+// 2026-10-14：本弹窗只服务「手动新增」——已加入的考场在行内直接改
+// 编号 / 科目 / 容量 / 备注，故原「编辑已有考场 → 编号/位置/容量只读锁定」的死分支已删
+function openRoomModal(){
     ['roomNo','roomLoc','roomNote'].forEach(i=>document.getElementById(i).value='');
     document.getElementById('roomSubj').value = '全科';
     document.getElementById('roomCap').value=30;
-    document.getElementById('roomId').value=id||'';
-    // v1.12.2 编辑已有考场：编号/位置/容量只读锁定（后端同样忽略这三项改动）
-    var lock = !!id;
-    ['roomNo','roomLoc','roomCap'].forEach(i=>{
-        var el = document.getElementById(i);
-        el.readOnly = lock;
-        el.classList.toggle('bg-light', lock);
-    });
-    document.getElementById('roomLockTip').classList.toggle('d-none', !lock);
-    if(id){
-        fetch('/grades/affairs/'+AID+'/rooms/'+id).then(r=>r.json()).then(s=>{
-            document.getElementById('roomNo').value=s.room_no;
-            document.getElementById('roomLoc').value=s.location||'';
-            // v1.19.47.30 科目改下拉：通用（默认/通用/空）映射为「全科」
-            var sub = s.subject || '默认';
-            document.getElementById('roomSubj').value =
-                (['默认','通用','','全部'].indexOf(sub) >= 0) ? '全科' : sub;
-            document.getElementById('roomCap').value=s.capacity;
-            document.getElementById('roomNote').value=s.note||'';
-        });
-    }
+    document.getElementById('roomId').value='';
     new bootstrap.Modal(document.getElementById('roomModal')).show();
 }
 function saveRoom(){
@@ -1648,8 +2018,18 @@ function saveRoom(){
     fetch('/grades/affairs/'+AID+'/rooms/save', {method:'POST', body:fd, headers:{'X-CSRFToken':csrf()}})
         .then(r=>r.json()).then(d=>{ if(d.ok) location.reload(); else alert(d.msg); });
 }
+// 2026-10-14：本批次是否已有编排 —— 读 #arrangeState 的 data-on。
+// ⚠ 本 JS 在 extra_js 块里（不是 content 块），取不到 content 块里 set 的 _s3，
+// 所以判定值必须由服务端渲染进 DOM 属性（data-on），JS 里别再直接写该模板变量。
+// （注释里也不能出现 Jinja 的块标记，否则会被模板引擎解析 —— 上一版就这么炸的）
+function _hasArranged(){
+    var st = document.getElementById('arrangeState');
+    return !!(st && st.dataset.on === '1');
+}
 function runArrange(){
-    // v1.19.47.30 模式：学号模式=1；自定义模式=0（按规则生成）/ 2（用导入的自定义考号）
+    // 2026-10-14 用户口径：重排会覆盖现有考场 / 座号 / 考号，改在点击时确认，页面不再占位
+    if(_hasArranged() && !confirm('本批次已完成编排：再次编排会覆盖现有考场 / 座号 / 考号。继续？')) return;
+    // v1.19.49.31 模式：学号模式=1；自定义模式=0（按规则生成）/ 2（用导入的自定义考号）
     var mode = document.getElementById('modeStudent').checked ? '1'
              : (document.getElementById('subImport').checked ? '2' : '0');
     var fd = new FormData(); fd.append('mode', mode);
@@ -1661,6 +2041,8 @@ function runArrange(){
         .then(r=>r.json()).then(d=>{
             if(!d.ok){ alert(d.msg); document.getElementById('arrangeMsg').textContent=''; return; }
             document.getElementById('arrangeMsg').textContent='分配 '+d.assigned+'/'+d.scope+' 人，失败 '+d.failed+' 人';
+            var st = document.getElementById('arrangeState');
+            if(st) st.dataset.on = '1';   // 已编排 → 下次点击要二次确认
             document.getElementById('logBody').textContent = d.log.join('\n');
             new bootstrap.Modal(document.getElementById('logModal')).show();
         });
@@ -1668,7 +2050,7 @@ function runArrange(){
 // v1.12.2 步骤⑤成绩关联已移除：linkExam/unlinkExam/filterRoom 前端入口删除，
 // 后端 /link-exam 接口保留，供其他模块调用
 
-/* ============ v1.19.47.30 考务环节④⑤⑥⑦ ============ */
+/* ============ v1.19.49.31 考务环节④⑤⑥⑦ ============ */
 // 环节④ 首次进入时加载任课核对矩阵
 var _affTeachers = null;   // {classes, subjects, cells, users}
 var _invigData = null;     // 环节⑥ 数据
@@ -1901,12 +2283,12 @@ function addScheduleRow(){
     }).join('');
     var h = '<tr data-sid="">'
         + '<td><input type="date" class="form-control form-control-sm sc-date" value="' + nextSchedDate() + '"></td>'
-        + '<td><input type="time" class="form-control form-control-sm sc-start"></td>'
-        + '<td><input type="time" class="form-control form-control-sm sc-end"></td>'
         + '<td><div class="dropdown"><button type="button" class="btn btn-outline-secondary btn-sm py-0 subj-btn text-truncate" '
         + 'data-bs-toggle="dropdown" data-popper-fixed style="max-width:132px">选科目</button>'
         + '<div class="dropdown-menu px-2" style="min-width:120px;max-height:280px;overflow:auto">' + cbs + '</div></div>'
         + '<input type="hidden" class="sc-subj" value=""></td>'
+        + '<td><input type="time" class="form-control form-control-sm sc-start"></td>'
+        + '<td><input type="time" class="form-control form-control-sm sc-end"></td>'
         + '<td><input class="form-control form-control-sm sc-sel"></td>'
         + '<td><input class="form-control form-control-sm sc-note"></td>'
         + '<td class="text-nowrap"><button class="btn btn-outline-primary btn-sm py-0" onclick="saveSchedule(this)">存</button> '

@@ -21,7 +21,9 @@
         running: { text: '进行中', cls: 'bg-warning-subtle text-warning-emphasis' },
         done: { text: '已完成', cls: 'bg-success-subtle text-success-emphasis' },
         error: { text: '失败', cls: 'bg-danger-subtle text-danger-emphasis' },
-        interrupted: { text: '已中断', cls: 'bg-secondary-subtle text-secondary-emphasis' }
+        interrupted: { text: '已中断', cls: 'bg-secondary-subtle text-secondary-emphasis' },
+        // 2026-10-14：用户点「停止」后由服务端标记（当前步骤完成即停）
+        canceled: { text: '已停止', cls: 'bg-secondary-subtle text-secondary-emphasis' }
     };
     function statusMeta(status) {
         return STATUS_META[status]
@@ -74,6 +76,9 @@
                 if (handlers.onSaved) { handlers.onSaved(data.report_id); }
             } else if (data.type === 'error') {
                 if (handlers.onError) { handlers.onError(data.text || '未知错误'); }
+            } else if (data.type === 'canceled') {
+                // 用户点了「停止」：服务端随后仍会补 done 帧收尾（调用方自行保护状态）
+                if (handlers.onCanceled) { handlers.onCanceled(data.text || '已停止'); }
             } else if (data.type === 'done') {
                 if (handlers.onDone) { handlers.onDone(); }
                 close();

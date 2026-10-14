@@ -9,6 +9,8 @@ from app.forms.user_forms import UserForm
 from app.utils.decorators import perm_required
 from app.utils.helpers import log_operation
 from app.modules.academic.services import teacher_sync
+# 2026-10-14：教师名单子页复用教务侧视图函数（挂到 /users/teachers，见文件末尾）
+from app.modules.academic.routes import teachers as _ac_teachers
 import io
 
 bp = Blueprint('users', __name__, url_prefix='/users')
@@ -36,6 +38,35 @@ def _store_one_time_password(username, real_name, password):
     session.modified = True
 
 
+def _set_user_groups(user, group_ids):
+    """设置用户的权限组（多身份，P5）：列表首个为主组。
+
+    同步旧字段 permission_group_id 与多身份关联表 user_permission_groups，
+    并移除未选中的关联（cascade delete-orphan）。
+
+    2026-10-14 第四轮审计修复（多身份 B 项）：组 id 先与 permission_groups 实际
+    存在的 id 求交 —— SQLite 不强制外键，原实现可写入指向不存在组的悬空关联
+    （group_links 里 group=None，该"身份"静默消失）。
+    """
+    from app.models import UserPermissionGroup, PermissionGroup
+    valid_ids = {g.id for g in PermissionGroup.query.all()}
+    gids = []
+    for g in (group_ids or []):
+        if g and g not in gids and g in valid_ids:
+            gids.append(g)
+    user.permission_group_id = gids[0] if gids else None
+    keep = set(gids)
+    for l in list(user.group_links):
+        if l.group_id not in keep:
+            user.group_links.remove(l)
+    for i, gid in enumerate(gids):
+        link = next((l for l in user.group_links if l.group_id == gid), None)
+        if link is None:
+            link = UserPermissionGroup(group_id=gid)
+            user.group_links.append(link)
+        link.is_primary = (i == 0)
+
+
 @bp.route('/')
 @perm_required('system.users')
 def list_users():
@@ -47,7 +78,8 @@ def list_users():
     from collections import OrderedDict
     grouped = OrderedDict()
     for u in users:
-        gname = u.permission_group.name if u.permission_group else '未分组'
+        pg = u.primary_group
+        gname = pg.name if pg else '未分组'
         grouped.setdefault(gname, []).append(u)
     group_order = {g.name: g.id for g in PermissionGroup.query.all()}
     groups = OrderedDict(
@@ -91,14 +123,15 @@ def create():
             role=role,
             grade=grade,
             class_name=class_name,
-            permission_group_id=form.permission_group_id.data if form.permission_group_id.data else None,
             must_change_pwd=True,
         )
+        # P5：多身份（权限组），列表首个为主组
+        _set_user_groups(user, form.permission_group_ids.data)
         generated_pwd = form.password.data or _generate_password()
         user.set_password(generated_pwd)
         db.session.add(user)
         db.session.commit()
-        # v1.19.47.30：非管理员自动同步创建教师档案（admin 不写入）
+        # v1.19.49.31：非管理员自动同步创建教师档案（admin 不写入）
         _sync_state, _ = teacher_sync.sync_from_user(user)
         db.session.commit()
         log_operation(current_user, '创建', '用户', user.id, f'{user.real_name} ({user.role_display})')
@@ -118,6 +151,9 @@ def create():
 def edit(id):
     user = User.query.get_or_404(id)
     form = UserForm(obj=user)
+    # P5：多身份多选的回显（GET 时按当前所属组预选；首个为主组）
+    if not form.is_submitted():
+        form.permission_group_ids.data = [g.id for g in user.permission_groups]
     if form.validate_on_submit():
         existing = User.query.filter(
             User.username == form.username.data, User.id != user.id).first()
@@ -158,11 +194,12 @@ def edit(id):
         user.role = role
         user.grade = grade
         user.class_name = class_name
-        user.permission_group_id = form.permission_group_id.data if form.permission_group_id.data else None
+        # P5：多身份（权限组），列表首个为主组
+        _set_user_groups(user, form.permission_group_ids.data)
         if form.password.data:
             user.set_password(form.password.data)
         db.session.commit()
-        # v1.19.47.30：教师角色变更 → 同步到 academic.teachers（admin 自动 skip）
+        # v1.19.49.31：教师角色变更 → 同步到 academic.teachers（admin 自动 skip）
         teacher_sync.sync_from_user(user)
         db.session.commit()
         log_operation(current_user, '更新', '用户', user.id, f'{user.real_name} 信息已更新')
@@ -184,7 +221,7 @@ def toggle(id):
         return redirect(url_for('users.list_users'))
     user.is_active = not user.is_active
     db.session.commit()
-    # v1.19.47.30：启禁变更 → 同步 Teacher.status (active/left)
+    # v1.19.49.31：启禁变更 → 同步 Teacher.status (active/left)
     teacher_sync.sync_from_user(user)
     db.session.commit()
     status = '启用' if user.is_active else '禁用'
@@ -289,7 +326,7 @@ def import_teachers():
 
         created = 0
         errors = []
-        _new_users = []                          # v1.19.47.30：导入后同步至 teachers
+        _new_users = []                          # v1.19.49.31：导入后同步至 teachers
 
         for row_idx in range(2, ws.max_row + 1):
             phone = str(ws.cell(row=row_idx, column=phone_col).value or '').strip()
@@ -316,13 +353,14 @@ def import_teachers():
             user.set_password(one_time_pwd)
             db.session.add(user)
             db.session.flush()
+            user.sync_primary_link()   # P5：同步多身份关联表
             _store_one_time_password(phone, name, one_time_pwd)
             _new_users.append(user)
             existing_phones.add(phone)
             created += 1
 
         db.session.commit()
-        # v1.19.47.30：批量导入后同步到 academic.teachers
+        # v1.19.49.31：批量导入后同步到 academic.teachers
         for u in _new_users:
             teacher_sync.sync_from_user(u)
         db.session.commit()
@@ -343,5 +381,30 @@ def import_teachers():
         flash(f'导入失败：{str(e)}', 'danger')
 
     return redirect(url_for('users.list_users'))
+
+
+# ==================== 教师名单子页（2026-10-14） ====================
+# 用户要求：系统管理「教师管理」拆成两个子页 —— 教师名单 / 教师权限管理（本页）。
+# 教师名单与教务管理的 /academic/teachers 是**同一份数据、同一批视图函数**
+# （档案在 academic.db.teachers，权限 academic.view），故这里用 add_url_rule 把**整条链路**
+# 挂到 /users 前缀下（零逻辑复制，与 academic/routes/teacher_links.py 复用 grades 视图同款；
+# 视图内的重定向/表单 action 由 academic/routes/teachers.py 的 _ep() 按蓝图自适应，
+# 页面顶部 tab 栏见 app/templates/system/_user_tabs.html）。
+#
+# 为什么两边都要有入口：教务主任 / 教务员 / 校长 / 副校长 / 备课组长 / 教研组长都有
+# academic.view 但**没有 system.users**（见 permission_map 与权限组实测），
+# 只留系统管理一侧会让这些身份看不到教师名单。
+bp.add_url_rule('/teachers', 'teachers_page', _ac_teachers.teachers_page)
+bp.add_url_rule('/teachers/export', 'teachers_export', _ac_teachers.teachers_export)
+bp.add_url_rule('/teachers/template.xlsx', 'teachers_template',
+                _ac_teachers.teachers_template)
+bp.add_url_rule('/teachers/import/upload', 'teachers_import_upload',
+                _ac_teachers.teachers_import_upload, methods=['POST'])
+bp.add_url_rule('/teachers/import/confirm', 'teachers_import_confirm',
+                _ac_teachers.teachers_import_confirm, methods=['POST'])
+bp.add_url_rule('/teachers/import/passwords/<token>.csv', 'teachers_import_passwords',
+                _ac_teachers.teachers_import_passwords)
+bp.add_url_rule('/teachers/<int:tid>/edit', 'teacher_edit', _ac_teachers.teacher_edit,
+                methods=['GET', 'POST'])
 
 

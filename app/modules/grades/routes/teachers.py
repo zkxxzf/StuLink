@@ -1,4 +1,4 @@
-# StuLink v1.19.47.30 2026-10-10
+# StuLink v1.19.49.31 2026-10-10
 # 任课教师映射：矩阵维护（按年级）+ 教师安排表批量导入 + 自动开户
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 import io
@@ -18,6 +18,7 @@ from app.models import User, Student, PermissionGroup, UserClassLink
 from app.models.grades import TeacherSubjectLink, SUBJECTS
 from app.modules.grades import bp
 from app.modules.grades.services import teacher_import, user_account
+from app.modules.grades.services import link_plan_service as link_plan
 from app.modules.grades.services.scope import visible_grades, _all_active_grades
 from app.modules.grades.utils import numeric_classes
 from app.utils.decorators import perm_required
@@ -44,13 +45,13 @@ def _grade_classes(grade):
 
 
 def _teacher_roles_filter():
-    """v1.19.47.30：教师候选的合法角色集合（明确排除 admin）"""
+    """v1.19.49.31：教师候选的合法角色集合（明确排除 admin）"""
     return ('teacher', 'homeroom_teacher', 'grade_leader',
             'dorm_manager', 'school_viewer', 'staff')
 
 
 def _teacher_candidates():
-    """v1.19.47.30：所有启用且属于教师类角色的账号 id 集合"""
+    """v1.19.49.31：所有启用且属于教师类角色的账号 id 集合"""
     rows = db.session.query(User.id).filter(
         User.role.in_(_teacher_roles_filter()),
         User.is_active.is_(True)
@@ -61,10 +62,10 @@ def _teacher_candidates():
 def _matrix_users(grade):
     """下拉候选教师：启用 + 教师类角色（明确排除 admin）。
 
-    v1.19.47.30：历史逻辑“已绑定 user_id 即可入选”会导致 admin 错配后一直显示在下拉里，
+    v1.19.49.31：历史逻辑“已绑定 user_id 即可入选”会导致 admin 错配后一直显示在下拉里，
     现改为仅按角色过滤；已绑定但非教师类的行依旧可在矩阵中显示历史名字（由 _build_matrix 侧），
     但下拉中不再提供 admin 作为新选择。
-    v1.19.47.30：候选**按老师名字首字母排序**（拼音 A→Z；无姓名时用账号拼音兜底）。"""
+    v1.19.49.31：候选**按老师名字首字母排序**（拼音 A→Z；无姓名时用账号拼音兜底）。"""
     valid = _teacher_candidates()
     if not valid:
         return []
@@ -77,7 +78,7 @@ def _matrix_users(grade):
 def _name_sort_key(name, username):
     """姓名 → 拼音排序键：(首字母, 全拼, 姓名)。
 
-    v1.19.47.30：用 pypinyin 把「付冰洋」排到 f、把「何楠」排到 h；
+    v1.19.49.31：用 pypinyin 把「付冰洋」排到 f、把「何楠」排到 h；
     没有姓名（real_name 为空）的账号退化为用账号（pinyin）排序，仍保证稳定有序。"""
     py = user_account.pinyin_of(name) if name else None
     py = (py or '').lower() or (username or '').lower() or (name or '')
@@ -96,6 +97,12 @@ _ACADEMIC_ENDPOINTS = {
     'teachers_import_upload': 'academic.teacher_links_import_upload',
     'teachers_import_confirm': 'academic.teacher_links_import_confirm',
     'teacher_template_download': 'academic.teacher_links_template',
+    # 方案（历史记录）2026-10-14
+    'teachers_plans': 'academic.teacher_links_plans',
+    'teachers_plans_create': 'academic.teacher_links_plans_create',
+    'teachers_plans_use': 'academic.teacher_links_plans_use',
+    'teachers_plans_rename': 'academic.teacher_links_plans_rename',
+    'teachers_plans_delete': 'academic.teacher_links_plans_delete',
 }
 
 
@@ -116,8 +123,12 @@ def teachers_page():
     grade = request.args.get('grade', '')
     if grade not in grades:
         grade = grades[0] if grades else ''
+    # 2026-10-14 方案：页面顶部显示「当前方案」，右上角「历史记录」管理全部方案。
+    # ensure 幂等：存量库（迁移已建「初始方案」）直接返回；空库首次进入自动建。
+    plan = link_plan.ensure_current_plan(operator_id=current_user.id)
     return render_template('grades/teachers.html', grade_options=grades, grade=grade,
-                           ep=_ep)
+                           ep=_ep, plan=plan,
+                           plan_count=link_plan.row_count(plan.id) if plan else 0)
 
 
 @bp.route('/api/teachers')
@@ -132,9 +143,13 @@ def teachers_get():
     if not grade:
         return jsonify(success=False, message='年级无效'), 400
     links = TeacherSubjectLink.query.filter_by(grade=grade, active=True).all()
+    # 单元格带姓名：候选下拉只列「启用 + 教师类角色」，历史方案里已停用/已删账号
+    # 的绑定仍要能显示出来（否则前端会误显示为「未指定」）
+    names = link_plan.user_names({l.user_id for l in links})
     cells = {}
     for l in links:
-        cells[f'{l.class_name}|{l.subject}'] = {'user_id': l.user_id}
+        cells[f'{l.class_name}|{l.subject}'] = {'user_id': l.user_id,
+                                               'user_name': names.get(l.user_id, '')}
     return jsonify(success=True, data={
         'grade': grade,
         'classes': _grade_classes(grade),
@@ -145,7 +160,7 @@ def teachers_get():
 
 
 def _json_body():
-    """请求体 → dict（v1.19.47.30 兼容两种提交方式）。
+    """请求体 → dict（v1.19.49.31 兼容两种提交方式）。
 
     背景：前端历史上用 `$.post(url, JSON.stringify({...}))`，jQuery 会以
     `application/x-www-form-urlencoded` 发送**JSON 文本**，而 Flask 的
@@ -224,10 +239,108 @@ def teachers_save():
                 link.active = False
                 changes['released'] += 1
     db.session.commit()
+    # 2026-10-14 方案：主表变更后把「当前方案」的快照同步刷新（快照不落后于主表）
+    plan = link_plan.sync_current(operator_id=current_user.id)
     log_operation(current_user, '维护', '教师映射', None,
-                  f'{grade} 矩阵保存：{json.dumps(changes, ensure_ascii=False)}',
+                  f'{grade} 矩阵保存：{json.dumps(changes, ensure_ascii=False)}'
+                  + (f'；当前方案「{plan.name}」' if plan else ''),
                   module='grades')
-    return jsonify(success=True, message='已保存', changes=changes)
+    return jsonify(success=True, message='已保存', changes=changes,
+                   plan=(plan.to_dict() if plan else None))
+
+
+# ==================== 方案（历史记录，2026-10-14） ====================
+# 用户口径：每学期任课都会变，要有记录、可新增方案、可切回历史方案。
+# 方案 = 整套任课映射的留档；「使用」＝把该方案物化回当前生效映射（全站即时生效）。
+
+@bp.route('/teachers/plans')
+@login_required
+@perm_required('grades.teachers')
+def teachers_plans():
+    """方案清单（「历史记录」弹窗的数据源）。"""
+    return jsonify(success=True, data={'items': link_plan.list_items()})
+
+
+@bp.route('/teachers/plans/create', methods=['POST'])
+@login_required
+@perm_required('grades.teachers')
+def teachers_plans_create():
+    """新建方案（可沿用当前映射 / 空白 / 复制某历史方案，可选立即使用）。"""
+    data = _json_body()
+    try:
+        plan = link_plan.create_plan(
+            name=data.get('name') or '',
+            school_year=data.get('school_year') or '',
+            term=data.get('term') or '',
+            note=data.get('note') or '',
+            copy_from=data.get('copy_from') or 'current',
+            use_now=bool(data.get('use_now', True)),
+            operator_id=current_user.id)
+    except ValueError as e:
+        return jsonify(success=False, message=str(e)), 400
+    log_operation(current_user, '新建', '任课映射方案', None,
+                  f'方案「{plan.name}」（{plan.school_year or "未标学年"} '
+                  f'{plan.term or "整学年"}，'
+                  f'{"已切换为当前" if plan.is_current else "未启用"}）',
+                  module='grades')
+    return jsonify(success=True, data={'id': plan.id, 'is_current': plan.is_current},
+                   message=f'已新建方案「{plan.name}」'
+                           + ('，并切换为当前任课映射' if plan.is_current else ''))
+
+
+@bp.route('/teachers/plans/use', methods=['POST'])
+@login_required
+@perm_required('grades.teachers')
+def teachers_plans_use():
+    """使用某方案：切换为当前生效任课映射（物化到 teacher_subject_links）。"""
+    data = _json_body()
+    try:
+        plan, stats = link_plan.use_plan(data.get('plan_id'),
+                                         operator_id=current_user.id)
+    except (ValueError, TypeError) as e:
+        return jsonify(success=False, message=str(e) or '参数不正确'), 400
+    log_operation(current_user, '使用', '任课映射方案', None,
+                  f'切换为方案「{plan.name}」'
+                  + (f'：{json.dumps(stats, ensure_ascii=False)}' if stats else '（本就当前）'),
+                  module='grades')
+    msg = f'已切换为「{plan.name}」'
+    if stats:
+        msg += (f'：新增 {stats["added"]} / 恢复 {stats["restored"]} / '
+                f'改派 {stats["changed"]} / 失效 {stats["released"]} 格')
+    return jsonify(success=True, message=msg, data={'id': plan.id, 'stats': stats})
+
+
+@bp.route('/teachers/plans/rename', methods=['POST'])
+@login_required
+@perm_required('grades.teachers')
+def teachers_plans_rename():
+    """重命名方案 / 改说明。"""
+    data = _json_body()
+    try:
+        plan = link_plan.rename_plan(data.get('plan_id'), name=data.get('name') or '',
+                                     note=data.get('note'),
+                                     operator_id=current_user.id)
+    except (ValueError, TypeError) as e:
+        return jsonify(success=False, message=str(e) or '参数不正确'), 400
+    log_operation(current_user, '重命名', '任课映射方案', None, f'方案改为「{plan.name}」',
+                  module='grades')
+    return jsonify(success=True, message='已保存', data=plan.to_dict())
+
+
+@bp.route('/teachers/plans/delete', methods=['POST'])
+@login_required
+@perm_required('grades.teachers')
+def teachers_plans_delete():
+    """删除方案（当前生效方案不可删）。"""
+    data = _json_body()
+    try:
+        plan = link_plan.delete_plan(data.get('plan_id'), operator_id=current_user.id)
+    except (ValueError, TypeError) as e:
+        return jsonify(success=False, message=str(e) or '参数不正确'), 400
+    log_operation(current_user, '删除', '任课映射方案', None,
+                  f'方案「{plan.name}」（{plan.school_year or "未标学年"} '
+                  f'{plan.term or "整学年"}）', module='grades')
+    return jsonify(success=True, message=f'已删除方案「{plan.name}」')
 
 
 # ==================== 批量导入（教师安排表） ====================
@@ -403,6 +516,7 @@ def teachers_import_confirm():
                 bg = PermissionGroup.query.filter_by(name='班主任组').first()
                 if bg:
                     user.permission_group_id = bg.id
+                    user.sync_primary_link()   # P1 双写
             if not user.grade or not user.class_name:
                 meta = head_meta.get(item['teacher_name'])
                 if meta:
@@ -465,8 +579,11 @@ def teachers_import_confirm():
                             tg = PermissionGroup.query.filter_by(name='任课教师组').first()
                             if tg:
                                 user.permission_group_id = tg.id
+                                user.sync_primary_link()   # P1 双写
                         demoted += 1
         db.session.commit()
+        # 2026-10-14 方案：导入写入主表后同步「当前方案」快照
+        link_plan.sync_current(operator_id=current_user.id)
     except Exception as e:
         db.session.rollback()
         flash(f'导入失败，已回滚：{e}', 'danger')

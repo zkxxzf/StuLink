@@ -1,19 +1,42 @@
 {% extends "base.html" %}
 {% block title %}任课教师映射 - {{ '教务管理' if request.blueprint == 'academic' else '成绩管理' }}{% endblock %}
 {% block content %}
+{% if request.blueprint == 'academic' %}
+{# 2026-10-14：教务侧与「教师名单 / 学科组长」合成一个入口，顶部 tab 互切；
+   成绩管理侧（/grades/teachers）是同源另一入口，不显示教务 tab，也不隐藏返回按钮 #}
+{% with active = 'links' %}{% include 'academic/_staff_tabs.html' %}{% endwith %}
+{% endif %}
 <div class="d-flex align-items-center mb-3 flex-wrap gap-2">
+    {% if request.blueprint != 'academic' %}
     <a href="{{ url_for(ep('index')) }}" class="btn btn-sm btn-outline-secondary" title="返回" aria-label="返回">
         <i class="bi bi-arrow-left"></i>
     </a>
-    <h5 class="mb-0"><i class="bi bi-person-workspace"></i> 任课教师映射</h5>
+    {% endif %}
+    <h4 class="fw-bold mb-0"><i class="bi bi-person-workspace"></i> 任课教师映射</h4>
     <span class="text-muted small">按年级维护：科目 × 班级 → 任课教师（账号制，同一教师可跨年级/跨班带课）</span>
-    <div class="ms-auto d-flex gap-2">
-        <a href="{{ url_for(ep('teachers_import_page')) }}" class="btn btn-primary btn-sm">
-            <i class="bi bi-upload"></i> 批量导入教师安排表
-        </a>
-        <a href="{{ url_for(ep('teacher_template_download')) }}" class="btn btn-outline-primary btn-sm">
-            <i class="bi bi-download"></i> 下载模板
-        </a>
+    {# 2026-10-14 方案：右上角「历史记录」＝使用历史方案 / 使用其他方案 / 新建方案 #}
+    <div class="ms-auto d-flex gap-2 flex-wrap">
+        <button type="button" class="btn btn-sm btn-outline-secondary" id="tcHistory">
+            <i class="bi bi-clock-history"></i> 历史记录
+        </button>
+        <div class="dropdown">
+            <button type="button" class="btn btn-sm btn-outline-secondary dropdown-toggle"
+                    data-bs-toggle="dropdown" aria-expanded="false">
+                <i class="bi bi-three-dots"></i> 更多
+            </button>
+            <ul class="dropdown-menu dropdown-menu-end">
+                <li>
+                    <a class="dropdown-item" href="{{ url_for(ep('teachers_import_page')) }}">
+                        <i class="bi bi-upload"></i> 批量导入教师安排表
+                    </a>
+                </li>
+                <li>
+                    <a class="dropdown-item" href="{{ url_for(ep('teacher_template_download')) }}">
+                        <i class="bi bi-download"></i> 下载导入模板
+                    </a>
+                </li>
+            </ul>
+        </div>
     </div>
 </div>
 
@@ -27,6 +50,11 @@
                 <option value="{{ g }}" {% if g == grade %}selected{% endif %}>{{ g }}</option>
                 {% endfor %}
             </select>
+            <span class="badge text-bg-light"
+                  title="任课映射按方案留档：右上「历史记录」可切换历史方案 / 新建方案">
+                <i class="bi bi-bookmark"></i> 当前方案：{{ plan.name if plan else '未建立' }}
+                {%- if plan %} · {{ plan_count }} 条{% endif %}
+            </span>
             <span class="text-muted small">教师账号须先在「系统管理-教师管理」创建；导入安排表时无账号将自动开户。</span>
             <button class="btn btn-sm btn-success ms-auto" id="tcSave"><i class="bi bi-save"></i> 保存全部</button>
         </div>
@@ -62,9 +90,15 @@ $(function(){
         return buf.join('');
     }
     // 单元格"轻量态"只放当前值一项：初见页面时把 1440×49 个 option 降到 1440 个
-    function singleOptHtml(v){
+    // 2026-10-14：候选下拉只列「启用 + 教师类角色」，历史方案里已停用 / 已删账号的
+    // 绑定要按 user_name 显示出来，否则会被误显示成「未指定」（值其实还在 cells 里）。
+    function singleOptHtml(v, name){
         var u = v ? usersStore.filter(function(x){ return String(x.id) === String(v); })[0] : null;
-        return u ? userOptHtml(u) : '<option value="">— 未指定 —</option>';
+        if (u){ return userOptHtml(u); }
+        if (v && name){
+            return '<option value="' + esc(v) + '">' + esc(name) + '（已停用 / 不在候选）</option>';
+        }
+        return '<option value="">— 未指定 —</option>';
     }
     // 悬停/聚焦时才按需注入完整下拉项（一个单元格只注入一次）
     function hydrate(sel){
@@ -109,10 +143,12 @@ $(function(){
             var tds = ['<td><strong>' + esc(sub) + '</strong></td>'];
             d.classes.forEach(function(cls){
                 var key = cls + '|' + sub;
-                var cur = d.cells[key] && d.cells[key].user_id != null ? String(d.cells[key].user_id) : '';
+                var cell = d.cells[key];
+                var cur = cell && cell.user_id != null ? String(cell.user_id) : '';
                 cells[key] = cur;
                 tds.push('<td class="text-center"><select class="form-select form-select-sm tcell" ' +
-                    'data-key="' + esc(key) + '">' + singleOptHtml(cur) + '</select></td>');
+                    'data-key="' + esc(key) + '">' + singleOptHtml(cur, cell ? cell.user_name : '') +
+                    '</select></td>');
             });
             rows.push('<tr>' + tds.join('') + '</tr>');
         });
@@ -149,11 +185,13 @@ $(function(){
         });
     });
     $('#tcGrade').change(load);
+    // 2026-10-14 方案：右上角「历史记录」弹窗（新建 / 使用历史方案 / 编辑 / 删除）
+    $('#tcHistory').on('click', function () { window.slPlans['planModal'].open(); });
     $('#tcSave').on('click', function(){
         var grade = $('#tcGrade').val();
         if (!grade) { alert('请先选择年级'); return; }
         $('#tcMsg').text('保存中…');
-        // v1.19.47.30：必须显式声明 JSON —— 原来 $.post(url, JSON.stringify(...)) 会以
+        // v1.19.49.31：必须显式声明 JSON —— 原来 $.post(url, JSON.stringify(...)) 会以
         // application/x-www-form-urlencoded 发送 JSON 文本，后端 get_json 取不到 → 保存静默失效
         $.ajax({
             url: app.data('saveUrl'), type: 'POST',
@@ -171,4 +209,17 @@ $(function(){
     load();
 });
 </script>
+
+{# 2026-10-14 方案 · 历史记录（新建 / 使用 / 编辑 / 删除），与学科组长页共用组件。
+   必须放在 extra_js（base.html 在 jQuery 之后渲染）——放 content 里会在 jQuery
+   之前执行，$ 未定义 → 弹窗按钮点了没反应。 #}
+{% from '_plan_manager.html' import plan_manager %}
+{{ plan_manager('planModal', '任课映射方案 · 历史记录',
+                '每学期的任课映射各留一套方案；「使用」＝把该方案的整套映射切回当前生效。',
+                url_for(ep('teachers_plans')), url_for(ep('teachers_plans_create')),
+                url_for(ep('teachers_plans_use')), url_for(ep('teachers_plans_rename')),
+                url_for(ep('teachers_plans_delete')),
+                count_label='映射条数',
+                use_confirm='把该方案的整套任课映射切回当前；成绩 / 教务 / 考务等按任课映射判断范围的地方会立即按新方案生效。',
+                reload_after_use=True) }}
 {% endblock %}

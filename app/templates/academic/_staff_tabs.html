@@ -1,0 +1,29 @@
+{# StuLink 2026-10-14
+   教务「教师」三页共用的顶部 Tab 栏 —— 教师名单 / 任课教师映射 / 学科组长合成一个入口，
+   进来后由这条 tab 切换（侧栏不再分挂三项）。
+   三个页面各自 URL 仍独立（可收藏 / 分享 / 后退），tab 只是导航；
+   与「调课两页」「课表查询三项」同款交互（_swap_tabs.html / _schedule_parts.html）。
+   用法：{% with active = 'roster'|'links'|'leaders' %}{% include 'academic/_staff_tabs.html' %}{% endwith %}
+   data-tab 供回归脚本定位当前高亮项。 #}
+<ul class="nav nav-pills gap-1 mb-3 no-print" id="staffTabs">
+    <li class="nav-item">
+        <a class="nav-link py-1 px-3 {{ 'active' if active == 'roster' }}"
+           href="{{ url_for('academic.teachers_page') }}" data-tab="roster">
+            <i class="bi bi-people"></i> 教师名单
+        </a>
+    </li>
+    {% if current_user.has_perm('grades.teachers') %}
+    <li class="nav-item">
+        <a class="nav-link py-1 px-3 {{ 'active' if active == 'links' }}"
+           href="{{ url_for('academic.teacher_links_page') }}" data-tab="links">
+            <i class="bi bi-person-workspace"></i> 任课教师映射
+        </a>
+    </li>
+    {% endif %}
+    <li class="nav-item">
+        <a class="nav-link py-1 px-3 {{ 'active' if active == 'leaders' }}"
+           href="{{ url_for('academic.subject_leaders') }}" data-tab="leaders">
+            <i class="bi bi-people-fill"></i> 学科组长
+        </a>
+    </li>
+</ul>
