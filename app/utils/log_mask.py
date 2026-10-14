@@ -94,6 +94,20 @@ def _install_on_handlers():
         _wrap_formatter(h)
 
 
+def _formatter_style(fmt):
+    """从 Formatter 实例推断 style（'%' / '{' / '$'）。
+
+    2026-10-14 修复：`logging.Formatter` **没有公开的** `.style` 属性，样式对象只存在
+    私有属性 `_style` 上。原代码直接读 `fmt.style`，在 **raw handler 已有 formatter**
+    的场景（如 MCP 服务经 uvicorn 启动，日志 handler 由 uvicorn 预先配置）下会抛
+    `'Formatter' object has no attribute 'style'` 导致启动失败。这里按 `_style` 的
+    类名反推，取不到时保守回落 '%'。
+    """
+    style_obj = getattr(fmt, '_style', None)
+    return {'StrFormatStyle': '{', 'StringTemplateStyle': '$'}.get(
+        type(style_obj).__name__, '%')
+
+
 def _wrap_formatter(handler):
     """把 handler 的 formatter 换成 MaskingFormatter（幂等，保留原有格式串）。"""
     fmt = handler.formatter
@@ -102,9 +116,11 @@ def _wrap_formatter(handler):
     if fmt is None:
         handler.setFormatter(MaskingFormatter())
         return
-    # 复用原有 fmt/datefmt，只把类换成带脱敏的子类
-    handler.setFormatter(MaskingFormatter(fmt._fmt, fmt.datefmt,
-                                          fmt.style, getattr(fmt, 'validate', True)))
+    # 复用原有 fmt/datefmt/style/defaults，只把类换成带脱敏的子类
+    handler.setFormatter(MaskingFormatter(
+        fmt._fmt, fmt.datefmt, _formatter_style(fmt),
+        getattr(fmt, 'validate', True),
+        defaults=getattr(fmt, '_defaults', None)))
 
 
 def install_masking_factory():
