@@ -1,4 +1,4 @@
-# StuLink v1.19.47.29 2026-10-13
+# StuLink v1.19.47.30 2026-10-13
 # 成绩汇报区「AI 一句话分析」：只读成绩分析工具集（OpenAI 兼容 tool schema + 分发）
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 """Web 端只读成绩分析工具集（供 AI 一句话分析做 tool calling）。

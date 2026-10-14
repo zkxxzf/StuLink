@@ -168,7 +168,7 @@ def list_students():
                    .filter(Student.graduation_school.isnot(None), Student.graduation_school != '')
                    .distinct().order_by(Student.graduation_school).all()
                    if s[0]]
-    # v1.19.47.29 调班记录：当前页学生的班级变更次数（列表「调班」列用）
+    # v1.19.47.30 调班记录：当前页学生的班级变更次数（列表「调班」列用）
     change_counts = class_change_counts([s.id for s in students])
     # v1.19.47.4 宿舍信息（只读展示）：宿舍号/住校走读等归宿舍管理模块维护，
     # 本模块只读呈现，不允许在此修改。批量预取避免模板内逐行懒加载（N+1）。
@@ -219,7 +219,7 @@ def list_students():
 @bp.route('/class-changes')
 @perm_required('students.view')
 def class_changes():
-    """v1.19.47.29 调班记录总览：入校分班/重新分班/个别调班/修正班级
+    """v1.19.47.30 调班记录总览：入校分班/重新分班/个别调班/修正班级
 
     按当前用户数据范围过滤（apply_student_scope），支持年级/班级/类型/日期/关键字筛选。
     """
@@ -294,7 +294,7 @@ def create():
         db.session.add(student)
         db.session.commit()
         log_operation(current_user, '创建', '学生', student.id, f'{student.name} {student.grade}{student.class_name}')
-        # v1.19.47.29 调班记录：新增学生 = 入校分班（含班型·方向）
+        # v1.19.47.30 调班记录：新增学生 = 入校分班（含班型·方向）
         try:
             if student.class_name:
                 write_change_log('enroll', [{'id': student.id,
@@ -327,7 +327,7 @@ def detail(id):
     if not _student_in_scope(student):
         flash('无权查看该学生信息', 'danger')
         return redirect(url_for('students.list_students'))
-    # v1.19.47.29 变更记录：调班 / 转科 / 转出 / 学籍变更 / 毕业 全量（调班记录页与详情页同源）
+    # v1.19.47.30 变更记录：调班 / 转科 / 转出 / 学籍变更 / 毕业 全量（调班记录页与详情页同源）
     change_logs = student_change_logs(student.id)
     return render_template('system/students/detail.html', student=student, change_logs=change_logs)
 
@@ -342,9 +342,9 @@ def edit(id):
         flash('无权编辑该学生', 'danger')
         return redirect(url_for('students.list_students'))
     form = StudentForm(obj=student)
-    # v1.19.47.29 选科/方向留痕：旧值需在填充前取
+    # v1.19.47.30 选科/方向留痕：旧值需在填充前取
     _old_sel = (student.subject_selection or '')
-    # v1.19.47.29 学籍驱动班级联动：旧学籍与旧位置需在填充前取
+    # v1.19.47.30 学籍驱动班级联动：旧学籍与旧位置需在填充前取
     _old_status = (student.enrollment_status or '').strip()
     _old_loc = student_location_desc(student)
     # v1.19.47.4 离校联动：旧住宿状态需在变更前取（用于变更留痕）
@@ -377,7 +377,7 @@ def edit(id):
                 return render_template('system/students/form.html', form=form, title='编辑学生')
         
         _populate_student_for_edit(student, form)
-        # v1.19.47.29 学籍驱动的班级自动联动（用户口径）：
+        # v1.19.47.30 学籍驱动的班级自动联动（用户口径）：
         #   学籍已转出 → 班级自动置「已转出」；在籍不在校 → 班级自动置「不分班」
         _new_status = (student.enrollment_status or '').strip()
         _auto_kind = _auto_desc = None
@@ -405,7 +405,7 @@ def edit(id):
         db.session.commit()
         log_operation(current_user, '更新', '学生', student.id, f'{student.name} {student.grade}{student.class_name}')
         # 注：年级/班级在本页不可改（never_update_fields），调班请走「调班」弹窗 /students/<id>/transfer
-        # v1.19.47.29 变更留痕：① 学籍情况变更 ② 学籍驱动的班级归置 ③ 选科/方向变更
+        # v1.19.47.30 变更留痕：① 学籍情况变更 ② 学籍驱动的班级归置 ③ 选科/方向变更
         _logs = []
         if _new_status != _old_status:
             _logs.append(('enrollment', _old_status or '（空）', _new_status,
@@ -446,7 +446,7 @@ def edit(id):
                                student.id, _t, _e)
         flash('学生信息已更新', 'success')
         return redirect(url_for('students.detail', id=student.id))
-    # v1.19.47.29 编辑页也展示变更记录（调班/转科/转出/学籍变更），避免打开编辑页看不到历史
+    # v1.19.47.30 编辑页也展示变更记录（调班/转科/转出/学籍变更），避免打开编辑页看不到历史
     return render_template('system/students/form.html', form=form, title='编辑学生',
                            student=student, change_logs=student_change_logs(student.id))
 
@@ -1029,7 +1029,7 @@ def import_students():
             # 部分导入：正确的行导入，错误的行报告
             # 2026-10-13 H-2：两阶段提交 + 补偿（见 _save_new_students 注释）
             _save_new_students(students_to_add)
-            # v1.19.47.29 调班记录：导入新生 = 入校分班（逐人写入带班级）
+            # v1.19.47.30 调班记录：导入新生 = 入校分班（逐人写入带班级）
             try:
                 for _st, _acc in students_to_add:
                     if _st.class_name:
@@ -1059,7 +1059,7 @@ def import_students():
         else:
             # 2026-10-13 H-2：两阶段提交 + 补偿（见 _save_new_students 注释）
             _save_new_students(students_to_add)
-            # v1.19.47.29 调班记录：导入新生 = 入校分班（逐人写入带班级）
+            # v1.19.47.30 调班记录：导入新生 = 入校分班（逐人写入带班级）
             try:
                 for _st, _acc in students_to_add:
                     if _st.class_name:
@@ -1173,7 +1173,7 @@ def transfer(id):
         return redirect(url_for('students.list_students'))
 
     old_info = f'{student.grade} {student.class_name}'
-    # v1.19.47.29 调班记录：变更性质由操作人声明
+    # v1.19.47.30 调班记录：变更性质由操作人声明
     #   transfer 个别调班（学生真实换班，默认）｜correct 修正班级（此前录入有误）
     change_kind = (request.form.get('class_change_kind') or 'transfer').strip()
     if change_kind not in ('transfer', 'correct'):
@@ -1369,7 +1369,7 @@ def batch_transfer():
 
         errors = []
         updated_count = 0
-        # v1.19.47.29 调班记录：循环内收集变更（含旧/新位置），供 reassign 日志使用
+        # v1.19.47.30 调班记录：循环内收集变更（含旧/新位置），供 reassign 日志使用
         changed_rows = []
 
         for row_idx in range(2, ws.max_row + 1):
@@ -1413,7 +1413,7 @@ def batch_transfer():
                                      'name': student.name, 'old': old_loc, 'new': new_loc})
 
         def _log_reassign():
-            """v1.19.47.29 批量调班 → 重新分班；逐人记录旧→新位置（含班型·方向）"""
+            """v1.19.47.30 批量调班 → 重新分班；逐人记录旧→新位置（含班型·方向）"""
             for c in changed_rows:
                 write_change_log('reassign',
                                  [{'id': c['id'], 'student_number': c['student_number'],
