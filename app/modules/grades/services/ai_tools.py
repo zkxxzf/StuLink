@@ -7,9 +7,14 @@
   · **取数只复用既有服务**：stats_service / pivot_service / report_service /
     report_pivot_service / report_warning_service —— 与汇报区、分析页同一套
     `cached_exam_data` 缓存与口径，不另写统计逻辑。
-  · **权限只走 score_guard**（app.modules.grades.services.score_guard，与 MCP 同源）：
-    年级级（require_exam）→ 班级级（visible_classes / require_class）→ 学科级
-    （class_subjects）→ 总分口径（class_total_visible：任课教师不给总分与排名）。
+  · **权限只走 score_guard**（app.modules.grades.services.score_guard，与 MCP 同源）。
+    **两层口径（2026-10-15 用户裁决）**：
+      - 聚合层（年级/班级/学科统计、分布、上线率、班级对比）＝"年级成绩分析结果"→
+        **公开**（能看该考试的账号都能看全年级，AI 做班级分析时必须带年级对照；
+        塑形唯一实现在 `grade_context.py`）；
+      - 逐生层（学生个人成绩、名单）→ **只给自己的班**：年级级 `require_exam` →
+        班级级（`require_class` / `can_view_class`）→ 学科级（`class_subjects`）→
+        总分口径（`class_total_visible`，任课教师不给逐生总分与排名）。
   · **全部只读**：本模块不提供任何写入口（不 insert/update/delete）。
   · 结果统一截断（行数 + 字符数），避免一次把整库灌进模型上下文。
 
@@ -20,7 +25,7 @@
 import json
 import logging
 
-from app.models.grades import Exam, TOTAL_SUBJECT, SUBJECTS, subject_display
+from app.models.grades import Exam, TOTAL_SUBJECT, SUBJECTS
 from app.modules.grades.services import (pivot_service, report_pivot_service as rps,
                                          report_service as rs,
                                          report_warning_service as rws,
@@ -32,10 +37,6 @@ logger = logging.getLogger(__name__)
 MAX_ROWS = 60            # 单个工具的表格行上限
 MAX_CHARS = 14000        # 单个工具返回的 JSON 字符上限
 _CUT_KEYS = ('rows', 'students', 'trend', 'classes')   # 需要限行的列表键
-
-# 总分口径的字段名：任课教师（只见所教学科）必须整体隐藏这些
-_TOTAL_FIELDS = ('avg', 'std', 'max', 'min', 'score', 'total_score', 'rank_class',
-                 'rank_dir', 'move', 'layers', 'pass_rate', 'prev_avg')
 
 # 工具描述里的通用口径说明，避免每个工具重复
 _NOTE = '（只读；数据范围与登录账号在网页端可见范围一致）'
@@ -52,24 +53,6 @@ def _exam(user, exam_id, default_exam_id=None):
                          '可先调用 list_exams 查看账号可见的考试')
     scope = score_guard.require_exam(user, exam)
     return exam, scope
-
-
-def _rows_for_scope(rows, scope, grade, key='class_name'):
-    """按班级可见范围过滤表格行（visible_classes 为 None = 全部班）。"""
-    visible = scope.visible_classes(grade)
-    if visible is None:
-        return rows
-    return [r for r in rows if (r.get(key) or '') in visible]
-
-
-def _hide_total(row, scope, grade, class_name):
-    """不可见该班总分口径时，抹掉总分相关字段（任课教师只被授予单科）。"""
-    if scope.class_total_visible(grade, class_name):
-        return row
-    for key in _TOTAL_FIELDS:
-        row.pop(key, None)
-    row['total_hidden'] = True
-    return row
 
 
 def _subject_filter(allowed, names):
@@ -122,71 +105,46 @@ def _t_list_exams(user, grade='', limit=20, **kw):
 def _t_exam_overview(user, exam_id=0, **kw):
     exam, scope = _exam(user, exam_id, kw.get('default_exam_id'))
     data = st.cached_exam_data(exam.id)
-    visible = scope.visible_classes(exam.grade)
-    snaps = [s for s in data.snap.values()
-             if visible is None or s['class_name'] in visible]
-    allowed = scope.grade_subjects(exam.grade)
-    imported = _subject_filter(allowed, data.imported_subjects)
-    expected = _subject_filter(allowed, data.expected_subjects)
-    class_names = {s['class_name'] for s in snaps}
-    total_ok = bool(class_names) and all(
-        scope.class_total_visible(exam.grade, c) for c in class_names)
-    totals = [s['score'] for s in snaps if isinstance(s.get('score'), (int, float))]
-    out = {
-        'exam_id': exam.id, 'exam_name': exam.name, 'grade': exam.grade,
-        'exam_date': exam.exam_date.strftime('%Y-%m-%d') if exam.exam_date else '',
-        'visible_classes': sorted(visible) if visible is not None else '全部班级',
-        'visible_subjects': sorted(allowed) if allowed is not None else '全部学科',
-        'student_count': len(snaps),
-        'class_count': len(class_names),
-        'directions': sorted({s['direction'] for s in snaps if s['direction']}),
-        'imported_subjects': imported,
-        'expected_subjects': expected,
-        'missing_subjects': [s for s in expected if s not in imported],
-        'avg_total': round(sum(totals) / len(totals), 1) if (totals and total_ok) else None,
-        'max_total': max(totals) if (totals and total_ok) else None,
-        'min_total': min(totals) if (totals and total_ok) else None,
-    }
-    if not total_ok:
-        out['total_hidden'] = True
-        out['note'] = '任课教师仅可见所教学科成绩，总分口径已隐藏'
-    return out, f'{len(snaps)} 名学生 · {len(class_names)} 个班'
+    out = {'exam_id': exam.id, 'exam_name': exam.name, 'grade': exam.grade,
+           'exam_date': exam.exam_date.strftime('%Y-%m-%d') if exam.exam_date else ''}
+    # 口径塑形与 MCP 服务共用同一份（避免"网页端 AI 与 MCP 数字打架"）
+    from app.modules.grades.services import score_overview
+    out.update(score_overview.build(exam, scope, data))
+    return out, f'{out["student_count"]} 名学生 · {out["class_count"]} 个班'
 
 
 def _t_class_summary(user, exam_id=0, direction='', **kw):
+    """年级各班汇总（聚合口径，公开）＋ 年级基准与班级位次（与 MCP 同一份塑形）。
+
+    2026-10-15 用户口径：年级成绩分析结果可公开，AI 分析某班时必须带年级对照；
+    逐生明细仍按班级/学科收敛（每行 `detail_visible` 指出能否下钻）。
+    """
     exam, scope = _exam(user, exam_id, kw.get('default_exam_id'))
     data = st.cached_exam_data(exam.id)
-    rows = st.class_summary_table(data, direction or None)
-    rows = _rows_for_scope(rows, scope, exam.grade)
-    for row in rows:
-        _hide_total(row, scope, exam.grade, row['class_name'])
+    from app.modules.grades.services import grade_context
+    out = grade_context.class_rows(scope, exam, data, direction or None)
     return ({'exam_id': exam.id, 'exam_name': exam.name, 'direction': direction or '全部',
-             'rows': rows}, f'{len(rows)} 个班')
+             'grade_baseline': out['grade'], 'rows': out['classes']},
+            f'{len(out["classes"])} 个班（年级均分 {out["grade"].get("avg")}）')
 
 
 def _t_subject_summary(user, exam_id=0, direction='', **kw):
+    """年级学科分析总表（聚合口径，公开；不再按所教学科收窄）。"""
     exam, scope = _exam(user, exam_id, kw.get('default_exam_id'))
     data = st.cached_exam_data(exam.id)
     rows = st.subject_table(data, direction or None)
-    allowed = scope.grade_subjects(exam.grade)
-    rows = [r for r in rows if allowed is None or r['subject'] in allowed]
     return ({'exam_id': exam.id, 'exam_name': exam.name, 'direction': direction or '全部',
+             'subject_scope': '全部学科（年级学科分析为聚合口径，公开）',
              'rows': rows}, f'{len(rows)} 个科目')
 
 
 def _t_score_segments(user, exam_id=0, class_name='', by_rank=False, **kw):
+    """分数段/名次段分布（聚合口径，公开；不再按可见班级收窄 counts）。"""
     exam, scope = _exam(user, exam_id, kw.get('default_exam_id'))
     if class_name:
         score_guard.require_class(scope, exam.grade, class_name)
     data = st.cached_exam_data(exam.id)
     rows = st.segment_table(data, class_name=class_name or None, by_rank=bool(by_rank))
-    if not class_name:
-        # 段表的 counts 是逐班人数：任课教师只能看到自己可见的班
-        visible = scope.visible_classes(exam.grade)
-        if visible is not None:
-            for r in rows:
-                if isinstance(r.get('counts'), dict):
-                    r['counts'] = {k: v for k, v in r['counts'].items() if k in visible}
     return ({'exam_id': exam.id, 'exam_name': exam.name,
              'class_name': class_name or '全部班级',
              'mode': '名次段' if by_rank else '分数段', 'rows': rows},
@@ -194,23 +152,19 @@ def _t_score_segments(user, exam_id=0, class_name='', by_rank=False, **kw):
 
 
 def _t_layer_online(user, exam_id=0, subject=TOTAL_SUBJECT, **kw):
+    """分层上线统计（各层上线人数/上线率，全年级）。
+
+    2026-10-15 用户口径：属年级成绩分析结果 → **公开**（不再按所教学科或总分口径收窄）；
+    逐生名单仍按班/科收敛。
+    """
     exam, scope = _exam(user, exam_id, kw.get('default_exam_id'))
     data = st.cached_exam_data(exam.id)
-    allowed = scope.grade_subjects(exam.grade)
-    if subject != TOTAL_SUBJECT and allowed is not None and subject not in allowed:
-        raise PermissionError(f'无权查看 {exam.grade} 的「{subject}」成绩'
-                              '（任课教师仅能查看自己所教学科）')
     stats = pivot_service.layer_pass_stats(data, subject)
     if not stats:
         raise ValueError(f'该考试「{subject}」尚未划线，无法统计上线人数')
     # stats 形如 {'layers': [...], 'rows': [{class_name:…, 层名…}]}
     rows = stats.get('rows') if isinstance(stats, dict) else stats
     if isinstance(stats, dict) and isinstance(rows, list):
-        rows[:] = _rows_for_scope(rows, scope, exam.grade)
-        if subject == TOTAL_SUBJECT:
-            # 总分上线对任课教师不可见：只保留其可见总分的班
-            rows[:] = [r for r in rows
-                       if scope.class_total_visible(exam.grade, r.get('class_name') or '')]
         return ({'exam_id': exam.id, 'exam_name': exam.name, 'subject': subject,
                  'layers': stats.get('layers'), 'rows': rows}, f'{len(rows)} 个班')
     return ({'exam_id': exam.id, 'exam_name': exam.name, 'subject': subject,
@@ -218,63 +172,42 @@ def _t_layer_online(user, exam_id=0, subject=TOTAL_SUBJECT, **kw):
 
 
 def _t_class_subject_report(user, exam_id=0, class_name='', **kw):
+    """某班各科报表（班级级聚合，公开口径，不再按所教学科/总分口径收窄）。"""
     exam, scope = _exam(user, exam_id, kw.get('default_exam_id'))
     if not class_name:
-        raise ValueError('请指定 class_name（可用 list_classes 或 exam_overview 核对班级名）')
-    score_guard.require_class(scope, exam.grade, class_name)
+        raise ValueError('请指定 class_name（可用 class_summary 或 exam_overview 核对班级名）')
     out = rps.class_subject_report(exam.id, class_name)
     if out.get('error'):
         raise ValueError(out['error'])
-    allowed = scope.class_subjects(exam.grade, class_name)
-    rows = out.get('rows') or []
-    if allowed is not None:
-        rows = [r for r in rows if r.get('subject') == '总分' or r.get('subject') in allowed]
-    if not scope.class_total_visible(exam.grade, class_name):
-        rows = [r for r in rows if r.get('subject') != '总分']
-        out['total_hidden'] = True
-    out['rows'] = rows
-    return out, f'{class_name} · {len(rows)} 行'
+    return out, f'{class_name} · {len(out.get("rows") or [])} 行'
 
 
 def _t_subject_class_report(user, exam_id=0, subject='', direction='', **kw):
+    """某科的各班报表（学科×班级聚合，公开口径）。"""
     exam, scope = _exam(user, exam_id, kw.get('default_exam_id'))
     if not subject:
         raise ValueError('请指定 subject（如 语文/数学/英语/物理…，或 总分）')
-    allowed = scope.grade_subjects(exam.grade)
-    if subject != TOTAL_SUBJECT and allowed is not None and subject not in allowed:
-        raise PermissionError(f'无权查看 {exam.grade} 的「{subject}」成绩'
-                              '（任课教师仅能查看自己所教学科）')
     out = rps.subject_class_report(exam.id, direction, subject)
     if out.get('error'):
         raise ValueError(out['error'])
-    visible = scope.visible_classes(exam.grade)
-    if visible is not None and isinstance(out.get('rows'), list):
-        out['rows'] = [r for r in out['rows'] if (r.get('class_name') or '') in visible]
     return out, f'{subject} · {len(out.get("rows") or [])} 个班'
 
 
 def _t_grade_subject_layer(user, exam_id=0, direction='', layer='', **kw):
+    """年级各科分层表（聚合口径，公开）。"""
     exam, scope = _exam(user, exam_id, kw.get('default_exam_id'))
     out = rs.subject_layer_report(exam.id, direction, layer, no_compare=True)
     if out.get('error'):
         raise ValueError(out['error'])
-    allowed = scope.grade_subjects(exam.grade)
-    if allowed is not None:
-        # 本表的 subject 列是**展示名**（学科如「语文」），收窄时按展示名比对
-        disp = {subject_display(s) for s in allowed}
-        out['rows'] = [r for r in (out.get('rows') or []) if r.get('subject') in disp]
-        if out.get('teachers'):
-            out['teachers'] = {k: v for k, v in out['teachers'].items() if k in disp}
     return out, f'{out.get("direction") or "全部"} · {len(out.get("rows") or [])} 个科目'
 
 
 def _t_class_overview(user, exam_id=0, direction='', **kw):
+    """年级各班概况（聚合口径，公开）。"""
     exam, scope = _exam(user, exam_id, kw.get('default_exam_id'))
     out = rs.class_overview_report(exam.id, direction)
     if out.get('error'):
         raise ValueError(out['error'])
-    if isinstance(out.get('rows'), list):
-        out['rows'] = _rows_for_scope(out['rows'], scope, exam.grade)
     return out, f'{len(out.get("rows") or [])} 个班概况'
 
 
@@ -288,6 +221,8 @@ def _t_near_line(user, exam_id=0, direction='', layer='', above=10, below=20,
     data = rws.near_line_report(exam.id, direction, layer, above, below, class_name)
     if data.get('error'):
         raise ValueError(data['error'])
+    # 收口必须是**逐班的总分口径**（不能再拿 visible_classes 当闸门：任课授权是
+    # "年级 × 学科"，对该年级它返回 None，会让"含逐生总分"的临界生名单整块漏出去）。
     visible = scope.visible_classes(exam.grade)
     rows = []
     for r in data.get('rows') or []:
@@ -320,6 +255,7 @@ def _t_student_scores(user, student_no='', exam_id=0, **kw):
     scope = score_guard.resolve(user)
     score_guard.require_student(scope, student)
     total_ok = scope.class_total_visible(student.grade, student.class_name)
+    rank_ok = scope.total_rank_visible(student.grade, student.class_name)
     if not int(exam_id or 0):
         from app.models.grades import ExamScore
         rows = (ExamScore.query.filter_by(student_no=student_no, subject=TOTAL_SUBJECT)
@@ -337,12 +273,17 @@ def _t_student_scores(user, student_no='', exam_id=0, **kw):
             if total_ok:
                 item.update({'total_score': r.score, 'rank_class': r.rank_class,
                              'rank_dir': r.rank_dir})
+            elif rank_ok:
+                item['rank_dir'] = r.rank_dir    # 仅名次：总分年级名次
             items.append(item)
         out = {'student_no': student_no, 'name': student.name, 'grade': student.grade,
                'class_name': student.class_name, 'total_visible': total_ok,
+               'total_rank_visible': bool(rank_ok),
                'count': len(items), 'exams': items}
         if not total_ok:
             out['total_hidden'] = True
+            if rank_ok:
+                out['note'] = 'rank_dir＝该生的总分年级名次（仅名次，不含总分分数）'
         return out, f'{student.name} · {len(items)} 场考试'
     exam, scope = _exam(user, exam_id, kw.get('default_exam_id'))
     data = st.cached_exam_data(exam.id)
@@ -361,6 +302,11 @@ def _t_student_scores(user, student_no='', exam_id=0, **kw):
         out['total_score'] = snap.get('score')
         out['rank_class'] = snap.get('rank_class')
         out['rank_dir'] = snap.get('rank_dir')
+    elif scope.total_rank_visible(student.grade, student.class_name):
+        # 2026-10-15：任课教师可见该生所教科 + **总分年级名次**（不给总分分数）
+        out['rank_dir'] = snap.get('rank_dir')
+        out['total_hidden'] = True
+        out['note'] = 'rank_dir＝该生的总分年级名次（仅名次，不含总分分数）'
     else:
         out['total_hidden'] = True
     return out, f'{student.name} · {len(subjects)} 科'
@@ -494,8 +440,10 @@ TOOLS = [
             '分析任何考试前建议先调它确认数据完整性（看清是否缺科目、缺班级）。',
             {'exam_id': _P_EXAM}, ('exam_id',)),
     _schema('class_summary',
-            '年级各班总分汇总：人数、均分、标准差、最高、最低、各分层人数。'
-            '做班级横向对比、找最强/最弱班时用它。',
+            '年级各班总分汇总（**全年级各班**，聚合口径公开）：人数、均分、标准差、最高、'
+            '最低、各分层人数、各科均分、**班级位次**，并附**年级基准**'
+            '（年级均分/最高/最低/参考人数）。做班级横向对比、判断"某班在年级什么水平"用它；'
+            '每行 detail_visible 指出该班能否下钻逐生明细。',
             {'exam_id': _P_EXAM, 'direction': _P_DIR}, ('exam_id',)),
     _schema('class_detail',
             '某班**逐生成绩明细**：每个学生的各科分数（班主任及以上另含总分与排名）。'
@@ -504,8 +452,8 @@ TOOLS = [
              'subject': {'type': 'string', 'description': '科目名，如 数学；留空返回全部可见学科'}},
             ('exam_id', 'class_name')),
     _schema('subject_summary',
-            '年级各学科总表：参考数、满分、均分、最高、最低、标准差、及格率、优秀率。'
-            '判断学科整体强弱、偏科时用它。',
+            '年级各学科总表（**全学科**，聚合口径公开）：参考数、满分、均分、最高、最低、'
+            '标准差、及格率、优秀率。判断学科整体强弱、偏科时用它。',
             {'exam_id': _P_EXAM, 'direction': _P_DIR}, ('exam_id',)),
     _schema('score_segments',
             '分数段（或名次段）分布：每档人数 × 各班 + 合计。'

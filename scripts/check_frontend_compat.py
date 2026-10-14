@@ -40,6 +40,14 @@ TOKENS = ('?.', '??', '.replaceAll(', 'Object.fromEntries', '.flatMap(', '.at(',
 
 _SCRIPT_RE = re.compile(r'<script\b(?![^>]*\bsrc=)[^>]*>(.*?)</script>', re.S | re.I)
 
+# ── 属性引号冲突（2026-10-15 全站点击测试发现，共 16 处，一天内被点出来的真 bug）──
+# `onclick="…{{ x|tojson }}…"` / `data-x="{{ x|tojson }}"`：
+# `|tojson` 输出**带双引号**的 JSON，直接把双引号属性的值截断 →
+#   · 事件属性：整段内联脚本变成半句 → 浏览器报 `Unexpected end of input`，按钮点了没反应；
+#   · data-* 属性：值被截断 → JS 读到空/残值，功能静默失效。
+# 正确写法：属性外层用**单引号**（Flask 的 tojson 会把 ' 转义成 \u0027，安全）。
+_ATTR_JSON_RE = re.compile(r'[\w-]+="[^"\n]*\|\s*tojson')
+
 
 def strip_js(code):
     """剥掉 // 与 /* */ 注释、'…' “…” `…` 字符串（保留换行数，便于报行号）。"""
@@ -95,11 +103,25 @@ def targets():
     return items
 
 
+def attr_quote_hits():
+    """属性双引号 ↔ |tojson 冲突（逐行扫模板原文）"""
+    hits = []
+    for f in sorted(glob.glob(os.path.join(BASE, 'app', 'templates', '**', '*.html'),
+                              recursive=True)):
+        rel = os.path.relpath(f, BASE)
+        with open(f, encoding='utf-8', errors='replace') as fh:
+            for i, line in enumerate(fh, 1):
+                if _ATTR_JSON_RE.search(line):
+                    hits.append((rel, i, line.strip()[:110]))
+    return hits
+
+
 def main():
     try:
         sys.stdout.reconfigure(errors='replace')
     except Exception:  # noqa: BLE001
         pass
+    attr_hits = attr_quote_hits()
     hits = []
     for rel, code in targets():
         clean = strip_js(code)
@@ -113,6 +135,16 @@ def main():
                 hits.append((rel, line, tok))
                 start = idx + len(tok)
     total_files = len(targets())
+    if attr_hits:
+        print('[FAIL] 属性引号冲突自检：命中 %d 处 —— 双引号属性里用了 |tojson，'
+              '属性值会被 JSON 的第一个双引号截断' % len(attr_hits))
+        for rel, line_no, txt in attr_hits[:20]:
+            print('   %s:%d  →  %s' % (rel, line_no, txt))
+        if len(attr_hits) > 20:
+            print('   … 其余 %d 处略' % (len(attr_hits) - 20))
+        print("   改法：属性外层改单引号（onclick='f({{ x|tojson }})'、"
+              "data-x='{{ x|tojson }}'）——Flask 的 tojson 会把 ' 转义为 \\u0027，安全。")
+        return 1
     if not hits:
         print('[OK]   前端兼容自检：%d 个文件（模板内联脚本 + 手写 JS），'
               'ES2020+ 语法 0 命中' % total_files)

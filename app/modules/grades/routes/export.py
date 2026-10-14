@@ -90,9 +90,12 @@ def export_tab(tab):
     # 班级对比：classes=01班,02班…（顺序=对比展示顺序）
     raw_classes = (request.args.get('classes') or '').strip()
     compare_classes = [c.strip() for c in raw_classes.split(',') if c.strip()]
-    if current_user.has_role('homeroom_teacher'):
+    # 2026-10-15 用户口径：班主任 / 任课教师也能看「所在年级的成绩分析」，
+    # 导出与本文件的既有设计口径「能看就能导」保持一致（_guard_tab 已放行 grade/subject）。
+    # 班主任导出**本班明细**（tab=class）时仍然要过班级白名单校验，越班 403。
+    if current_user.has_role('homeroom_teacher') and tab == 'class':
         allowed = {(g, c) for g, c in (scope_service.visible_classes(current_user) or [])}
-        if tab != 'class' or (exam.grade, class_name) not in allowed:
+        if (exam.grade, class_name) not in allowed:
             abort(403)
     try:
         if tab == 'grade':

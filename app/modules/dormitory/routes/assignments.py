@@ -64,30 +64,32 @@ def _unassigned_stats():
     返回 (stats, total, total_male, total_female)。
     """
     graduated = get_graduated_grades()
-    boarding_ids = [sa.student_id for sa in StudentAccommodation.query.filter(
-        StudentAccommodation.boarding_type == '住校'
-    ).all()]
-    assigned_ids = [b.student_id for b in BedAssignment.query.filter(
-        BedAssignment.student_id.isnot(None)
-    ).all()]
-    query = student_scope_query(Student.query.filter(
-        Student.id.in_(boarding_ids) if boarding_ids else False
-    ))
+    # 2026-10-15 性能优化（200 VU 压测：本页 P50 5.2s）：
+    # ① 只取 id 列（with_entities），不再构造整表 ORM 对象；
+    # ② 「已分配」判断移到 Python 集合差 —— 原 `~Student.id.in_(2000+ ids)`
+    #    会生成巨型 NOT IN 表达式（SQL 解析与查询计划都吃亏）；
+    # ③ 最终只取 (id, grade, class_name, gender) 四列，分组内存开销同步下降。
+    # 范围收敛仍在 SQL 侧走 student_scope_query（fail-closed 口径不变）。
+    boarding_ids = [r[0] for r in StudentAccommodation.query.with_entities(
+        StudentAccommodation.student_id).filter(
+        StudentAccommodation.boarding_type == '住校').all()]
+    assigned_ids = {r[0] for r in BedAssignment.query.with_entities(
+        BedAssignment.student_id).filter(
+        BedAssignment.student_id.isnot(None)).all()}
+    query = student_scope_query(Student.query.with_entities(
+        Student.id, Student.grade, Student.class_name, Student.gender).filter(
+        Student.id.in_(boarding_ids) if boarding_ids else False))
     if graduated:
         query = query.filter(~Student.grade.in_(graduated))
-    if assigned_ids:
-        query = query.filter(~Student.id.in_(assigned_ids))
-    rows = query.order_by(
-        Student.grade.desc(), Student.class_name, Student.gender.desc()
-    ).all()
+    rows = [r for r in query.all() if r[0] not in assigned_ids]
 
     grouped = {}
     total = total_male = total_female = 0
-    for s in rows:
-        key = (s.grade, s.class_name)
+    for sid, s_grade, s_class, s_gender in rows:
+        key = (s_grade, s_class)
         if key not in grouped:
             grouped[key] = {'male': 0, 'female': 0}
-        if s.gender == '男':
+        if s_gender == '男':
             grouped[key]['male'] += 1
             total_male += 1
         else:

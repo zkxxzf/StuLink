@@ -926,6 +926,50 @@ class ScoreChangeLog(db.Model):
     )
 
 
+class ScoreReviewRequest(db.Model):
+    """v1.19.49.32 成绩复核申请（教师申请调分 → 有改分权限者审批）
+
+    2026-10-15 用户口径：任课教师 / 班主任发现分数有误时可提交复核申请，写清
+    「学生 + 学科 + 题号 + 增减分数」；审批通过后可选**直接应用到成绩单** ——
+    走与手动改分同一条链路（重算总分 → 重算排名 → 写 ScoreChangeLog 留痕）。
+
+    · 题号是说明性字段（成绩表 exam_scores 的粒度是「考试 × 学生 × 学科」，无题号列），
+      允许 "12" / "12-15" 这类写法，留空表示整卷；
+    · status：pending 待审核 / approved 已批准 / rejected 已驳回 / withdrawn 已撤回；
+    · applied=True 表示批准时已把增减分写入成绩单（否则只是批准记录，由管理员另行处理）。
+    """
+    __bind_key__ = 'grades'
+    __tablename__ = 'score_review_requests'
+
+    id = db.Column(db.Integer, primary_key=True)
+    exam_id = db.Column(db.Integer, nullable=False)
+    exam_name = db.Column(db.String(100))                  # 快照，考试改名不影响留痕
+    grade = db.Column(db.String(10))                       # 考试当时班级口径（exam_scores 快照）
+    class_name = db.Column(db.String(10))
+    student_no = db.Column(db.String(20), nullable=False)
+    student_name = db.Column(db.String(50))
+    subject = db.Column(db.String(10), nullable=False)     # 9 科之一（不含总分）
+    question_no = db.Column(db.String(40))                 # 题号 / 题号段；空 = 整卷
+    delta = db.Column(db.Float, nullable=False)            # 增减分数（可正可负）
+    reason = db.Column(db.String(500))
+    status = db.Column(db.String(12), nullable=False, default='pending')
+    applicant_id = db.Column(db.Integer)
+    applicant_name = db.Column(db.String(50))
+    created_at = db.Column(db.DateTime, default=datetime.now)
+    reviewer_id = db.Column(db.Integer)
+    reviewer_name = db.Column(db.String(50))
+    reviewed_at = db.Column(db.DateTime)
+    review_note = db.Column(db.String(200))
+    applied = db.Column(db.Boolean, default=False)         # 已应用到成绩单
+    applied_at = db.Column(db.DateTime)
+
+    __table_args__ = (
+        db.Index('idx_score_review_exam_status', 'exam_id', 'status'),
+        db.Index('idx_score_review_student', 'exam_id', 'student_no'),
+        db.Index('idx_score_review_applicant', 'applicant_id', 'status'),
+    )
+
+
 # ============ v1.19.49.32 考务环节④⑤⑥：任课核对 / 考试时间表 / 监考编排 ============
 #
 # 设计口径（用户 2026-10-12 定案）：

@@ -258,7 +258,7 @@ th.col-dorm-head { background: #eef2f7 !important; }
                         {% if current_user.has_perm('students.transfer') %}
                         <button type="button" class="btn btn-sm btn-outline-info" title="调班" aria-label="调班"
                                 {# M-10：内联处理器中的字符串参数必须 |tojson（|e 的 &#39; 会在交 JS 引擎前还原为 ' 从而打断字符串） #}
-                                onclick="openTransferModal({{ s.id }}, {{ s.name|tojson }}, {{ s.grade|tojson }}, {{ s.class_name|tojson }})">
+                                onclick='openTransferModal({{ s.id }}, {{ s.name|tojson }}, {{ s.grade|tojson }}, {{ s.class_name|tojson }})'>
                             <i class="bi bi-arrow-left-right"></i>
                         </button>
                         {% endif %}

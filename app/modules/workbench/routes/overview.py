@@ -121,13 +121,15 @@ def students_api():
 def grades_page():
     """我的成绩页：按考试展示本人任教班级×科目的成绩（口径收紧到任教映射）"""
     teacher = _teacher_or_none()
-    if not teacher or not teacher.user_id:
-        return render_template('workbench/grades.html', exam_data=[], links=[],
-                               grade_options=[], selected_grade='', teacher=None)
-
-    links = svc.get_teaching_links(teacher.user_id)
+    # 2026-10-15 用户口径：班主任不一定挂在"教师名单"里也要能看到本班的成绩，
+    # 故账号 id 兜底（任课/带班范围由 get_visible_combos 按权限引擎判定，
+    # 什么都没有的账号仍得到空列表 → 走空态）。
+    uid = (teacher.user_id if teacher and teacher.user_id else current_user.id)
+    # 班级/学科的可见清单 = 本人任课 ∪ 本人所带班（含全部科目），
+    # 与主表 get_grade_summary 同一份口径（徽章、年级筛选、走势卡片都据此渲染）。
+    links = svc.get_visible_combos(uid)
     grade = request.args.get('grade', '')
-    exam_data = svc.get_grade_summary(teacher.user_id, grade=grade or None)
+    exam_data = svc.get_grade_summary(uid, grade=grade or None)
     return render_template('workbench/grades.html',
                            exam_data=exam_data, links=links,
                            grade_options=sorted({lk['grade'] for lk in links}),

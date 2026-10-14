@@ -60,7 +60,7 @@
             <div class="row g-2">
             {% for e in group|sort(attribute='period_number') %}
             <div class="col-6 col-md-4 col-lg-3">
-                <div class="entry-pick" data-id="{{ e.id }}" data-entry="{{ e|tojson }}">
+                <div class="entry-pick" data-id="{{ e.id }}" data-entry='{{ e|tojson }}'>
                     <span class="ep-badge" data-badge></span>
                     <div class="ep-pn">{{ period_label(e.period_number) }}</div>
                     <div class="ep-subj">{{ e.subject }}</div>

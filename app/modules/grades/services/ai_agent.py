@@ -197,7 +197,9 @@ def run(cfg, user, exam, question, direction='', layer='', scope_desc='',
             fn = call.get('function') or {}
             name = fn.get('name') or ''
             raw_args = fn.get('arguments') or '{}'
-            started = time.time()
+            # 注意：不能复用外层 `started`（总计时）——此前这里覆盖它，导致
+            # TIME_BUDGET 预算与 stage 里的"已用 N 秒"每次工具调用后归零（恒显示 0 秒）。
+            t0 = time.time()
             try:
                 args = json.loads(raw_args) if isinstance(raw_args, str) else dict(raw_args)
                 if not isinstance(args, dict):
@@ -208,7 +210,7 @@ def run(cfg, user, exam, question, direction='', layer='', scope_desc='',
                                    '参数解析失败，请用合法 JSON 重新调用本工具', '')
             else:
                 okc, text, summ = ai_tools.dispatch(name, args, user, exam.id)
-            elapsed = int((time.time() - started) * 1000)
+            elapsed = int((time.time() - t0) * 1000)
             if okc:
                 yield {'type': 'tool', 'name': name, 'summary': summ or '已取数',
                        'ok': True, 'args': args, 'ms': elapsed}

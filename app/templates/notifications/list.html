@@ -117,7 +117,7 @@
 <div class="d-flex flex-column gap-2">
     {% for n in notifications %}
     <div class="card notif-card {% if not n.is_read %}unread{% endif %} {% if n.priority == 'urgent' %}urgent{% endif %}"
-         onclick="window.location.href={{ url_for('notifications.notification_detail', notification_id=n.id)|tojson }}">
+         onclick='window.location.href={{ url_for('notifications.notification_detail', notification_id=n.id)|tojson }}'>
         <div class="card-body py-3 px-3">
             <div class="d-flex align-items-start justify-content-between">
                 <div class="d-flex align-items-center gap-2 flex-grow-1 min-w-0">

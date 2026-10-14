@@ -87,6 +87,27 @@ def exam_nav():
     return val
 
 
+def _can_open_scoresheet(exam):
+    """侧栏「考试概览·成绩单」入口是否该显示。
+
+    与 `app/modules/grades/routes/exams.py::_scoresheet_scope` 同一份判断
+    （`services/scoresheet.py`），避免"看得见点不进"的 403 死链。
+    2026-10-15 用户口径：成绩单是学生成绩，任课教师/班主任也能看，但只看本班
+    （仅任课映射的班不含总分口径，不计入）。任何异常一律按"不显示"处理。
+    """
+    try:
+        from flask_login import current_user
+        if not getattr(current_user, 'is_authenticated', False):
+            return False
+        if current_user.has_perm('grades.edit'):        # 有编辑权的人本来就能看全量
+            return True
+        from app.modules.grades.services import scoresheet
+        _allowed, classes = scoresheet.visible(current_user, exam)
+        return bool(classes)
+    except Exception:                                   # noqa: BLE001  导航判定绝不影响渲染
+        return False
+
+
 def _resolve():
     from app.models.grades import Exam, ExamAffair, ExamBand
     ep = request.endpoint or ''
@@ -164,4 +185,5 @@ def _resolve():
     return {'exam': exam, 'exam_id': exam.id, 'section': sec or 'overview',
             'affair_id': (affair.id if affair else None),
             'affair': affair, 'steps': steps,
-            'affair_steps': affair_steps}
+            'affair_steps': affair_steps,
+            'can_scoresheet': _can_open_scoresheet(exam)}

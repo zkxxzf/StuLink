@@ -32,7 +32,20 @@ def _visible_exam(exam_id):
 
 
 def _guard_report():
-    """班主任/任课教师不开放年级汇报；管理员/校领导/年级长可用"""
+    """年级级分析（成绩汇报区 / 全年级对比）的准入门槛。
+
+    2026-10-15 用户口径：任课教师 / 班主任也要能看「所在年级的成绩分析」
+    （原口径把他们一律挡在门外，用户明确认为不合理）。
+
+    放开的只是"能不能进这个页面"——**数据仍然是考试级收敛**：
+      · 页面本身不携带数据（模板空壳，数据走 /api/report/* 与 /api/global-compare/*）；
+      · 所有数据接口第一步都是 _visible_exam(exam_id) → scope.check_exam_visible，
+        可见范围收敛到「本人任教年级 ∪ 班主任所带班年级」（管理员/校级 = 全校）；
+      · 一场考试只属于一个年级，所以教师看到的始终是自己那个年级的整体情况，
+        不会出现跨年级数据。
+
+    fail-closed 兜底：连一个可见年级都没有（scope=none）的账号仍然拒绝。
+    """
     if current_user.role == 'admin':
         return
     if scope_service.has_user_scope(current_user):
@@ -40,6 +53,9 @@ def _guard_report():
         return
     scope_type, _ = scope_service.get_scope(current_user)
     if scope_type in ('school', 'grade'):
+        return
+    # 任课教师 / 班主任：在成绩模块有可见年级即放行（数据靠 _visible_exam 收敛）
+    if scope_service.visible_grades(current_user):
         return
     abort(403)
 

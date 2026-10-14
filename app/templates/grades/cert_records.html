@@ -79,7 +79,7 @@
                     {% if not c.invalid and (current_user.role=='admin' or c.generated_by==current_user.id) %}
                     <button class="btn btn-sm btn-outline-danger py-0"
                             {# M-10：防伪码统一 |tojson #}
-                            onclick="invalidCert({{ c.code|tojson }})">作废</button>
+                            onclick='invalidCert({{ c.code|tojson }})'>作废</button>
                     {% endif %}
                 </td>
             </tr>

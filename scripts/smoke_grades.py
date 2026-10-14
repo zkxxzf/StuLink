@@ -892,37 +892,42 @@ with app.test_client() as c:
     login_as('banzhu01')
     r = c.get('/grades/api/options')
     tabs = r.get_json()['data']['tabs']
-    check('班主任 tabs 仅班级', tabs == {'grade': False, 'class': True,
-                                        'subject': False, 'teacher': False,
-                                        'compare': False})
+    # 2026-10-15 用户口径：班主任除本班外，还要能看「所在年级的成绩分析」
+    check('班主任 tabs=班级+年级分析', tabs == {'grade': True, 'class': True,
+                                            'subject': False, 'teacher': False,
+                                            'compare': False}, str(tabs))
     r = c.get(f'/grades/api/analysis/class?exam_id={eid}&class_name=01%E7%8F%AD')
     check('班主任可看本班分析', r.status_code == 200)
     r = c.get(f'/grades/api/analysis/class?exam_id={eid}&class_name=02%E7%8F%AD')
     check('班主任不可看别班（403）', r.status_code == 403)
     r = c.get(f'/grades/api/analysis/grade?exam_id={eid}')
-    check('班主任不可看年级分析（403）', r.status_code == 403)
+    check('班主任可看年级分析（200，仅本年级）', r.status_code == 200, r.status_code)
     _pair2 = quote('01班') + ',' + quote('02班')
     r = c.get(f'/grades/api/analysis/compare?exam_id={eid}&classes={_pair2}')
     check('班主任不可看班级对比（403）', r.status_code == 403)
     r = c.get(f'/grades/export/compare?exam_id={eid}&classes={_pair2}')
     check('班主任不可导出班级对比（403）', r.status_code == 403)
+    # 2026-10-15：年级分析已对班主任 / 任课教师开放，导出与其保持一致（本文件既定口径"能看就能导"）
     r = c.get(f'/grades/export/grade?exam_id={eid}')
-    check('班主任不可导出年级分析（403）', r.status_code == 403)
+    check('班主任可导出年级分析（200）', r.status_code == 200, r.status_code)
+    r = c.get(f'/grades/export/class?exam_id={eid}&class_name=02%E7%8F%AD')
+    check('班主任不可导出别班明细（403）', r.status_code == 403, r.status_code)
     logout()
 
     # 任课教师：仅 teacher tab（本人 01班数学）
     login_as('renke01')
     r = c.get('/grades/api/options')
     tabs = r.get_json()['data']['tabs']
-    check('教师 tabs 仅任课教师', tabs == {'grade': False, 'class': False,
-                                          'subject': False, 'teacher': True,
-                                          'compare': False})
+    # 2026-10-15 用户口径：任课教师也要能看「所在年级的成绩分析」+ 学科分析
+    check('教师 tabs=年级+学科+本人', tabs == {'grade': True, 'class': False,
+                                          'subject': True, 'teacher': True,
+                                          'compare': False}, str(tabs))
     r = c.get(f'/grades/api/analysis/teacher?exam_id={eid}&subject=%E6%95%B0%E5%AD%A6')
     js = r.get_json()['data']['tables']['teacher_data']
     check('教师仅见本人数据', js['rows'] and js['rows'][0]['teacher'] == '测试任课教师'
           and js['rows'][0]['class_name'] == '01班', str(js['rows']))
     r = c.get(f'/grades/api/analysis/grade?exam_id={eid}')
-    check('教师不可看年级分析（403）', r.status_code == 403)
+    check('教师可看年级分析（200，仅本年级）', r.status_code == 200, r.status_code)
     logout()
 
     # 年级长：全部 tab（仅本年级考试）
@@ -948,7 +953,7 @@ with app.test_client() as c:
     login_as(bz_name)
     r = c.get('/grades/api/options')
     tabs = r.get_json()['data']['tabs']
-    check('导入班主任 tabs 仅班级', tabs == {'grade': False, 'class': True,
+    check('导入班主任 tabs=班级+年级分析', tabs == {'grade': True, 'class': True,
                                              'subject': False, 'teacher': False,
                                              'compare': False},
           str(tabs))
@@ -1303,17 +1308,81 @@ with app.test_client() as c:
             db.session.commit()
         okc, text, summ = _tools.dispatch('class_summary', {}, ru, eid)
         d = _json.loads(text) if okc else {}
-        classes = [x['class_name'] for x in (d.get('rows') or [])]
-        check('AI工具：任课教师只见本班', okc and classes == ['01班'], f'{okc} {classes} {text[:200]}')
-        check('AI工具：任课教师总分口径被隐藏',
-              bool(d.get('rows')) and d['rows'][0].get('total_hidden')
-              and 'avg' not in d['rows'][0])
+        rows = d.get('rows') or []
+        classes = [x['class_name'] for x in rows]
+        # 2026-10-15 用户口径：年级成绩分析结果公开 → 任课教师也拿到全年级各班 + 年级基准
+        check('AI工具：任课教师拿到年级各班（聚合公开）',
+              okc and len(classes) >= 2, f'{okc} {classes} {text[:200]}')
+        check('AI工具：班级汇总含年级基准与班级位次',
+              (d.get('grade_baseline') or {}).get('avg') is not None
+              and all(r.get('class_rank') for r in rows), text[:200])
+        check('AI工具：每行标明能否下钻逐生（detail_visible）',
+              all(isinstance(r.get('detail_visible'), bool) for r in rows)
+              and any(r.get('detail_visible') for r in rows), text[:200])
+        # R1（2026-10-15）：任课＝年级×学科 → 同年级他班**所教学科**可查，但无总分；
+        # 他科必须仍被拒（负向对照保留，防止"年级×学科"被误读成"整年级全科"）
+        okd2, textd2, _sd2 = _tools.dispatch('class_detail',
+                                             {'class_name': '02班', 'subject': '数学'},
+                                             ru, eid)
+        d2 = _json.loads(textd2) if okd2 else {}
+        r2 = d2.get('students') or []
+        check('AI工具：他班逐生明细＝仅所教学科、无总分（年级×学科）',
+              okd2 and bool(r2)
+              and all(set(x.get('scores') or {}) <= {'数学'} and 'total_score' not in x
+                      for x in r2), textd2[:140])
+        okd3, textd3, _sd3 = _tools.dispatch('class_detail',
+                                             {'class_name': '02班', 'subject': '语文'},
+                                             ru, eid)
+        check('AI工具：他班非所教学科仍被拒（负向对照）',
+              not okd3 and '权限' in textd3, textd3[:140])
         okc2, text2, _s2 = _tools.dispatch('student_trend', {'student_no': '20250101'}, ru, eid)
         check('AI工具：越权查他班学生被拒', not okc2 and '权限不足' in text2, text2[:120])
         okc3, text3, _s3 = _tools.dispatch('no_such_tool', {}, ru, eid)
         check('AI工具：未知工具被拒', not okc3 and '未知工具' in text3)
         okc4, text4, _s4 = _tools.dispatch('list_my_score_scope', {}, ru, eid)
-        check('AI工具：范围说明可用', okc4 and '01班' in text4, text4[:160])
+        check('AI工具：范围说明可用',
+              okc4 and '2025级' in text4 and '数学' in text4, text4[:160])
+
+    # ---- 2026-10-15 用户口径：成绩单 / 临界生"只展示他们班的" ----
+    # 口径：可用班 = 账号可见班 ∩ 总分口径已授权（班主任本班 / 年级长及以上 / 校级）；
+    # 仅任课映射的班不含总分口径 → 不计入（成绩单含总分与排名，不能靠它绕过总分口径）。
+    with app.app_context():
+        from app.modules.grades.services import scoresheet
+        from app.modules.grades.services.report_warning_service import near_line_report
+        exam_obj = Exam.query.get(eid)
+        bz_user = User.query.filter_by(username='banzhu01').first()
+        adm_user = User.query.filter_by(username='admin').first()
+        bz_allowed, bz_cls = scoresheet.visible(bz_user, exam_obj)
+        check('成绩单范围：班主任可用班级＝本班',
+              bz_allowed == {'01班'} and bz_cls == ['01班'], f'{bz_allowed} {bz_cls}')
+        t_allowed, t_cls = scoresheet.visible(ru, exam_obj)
+        check('成绩单范围：任课班不含总分口径 → 无可用班（fail-closed）',
+              t_allowed == set() and t_cls == [], f'{t_allowed} {t_cls}')
+        a_allowed, a_cls = scoresheet.visible(adm_user, exam_obj)
+        check('成绩单范围：管理员不限班', a_allowed is None and '01班' in a_cls)
+        nl_all = near_line_report(eid, '', '', 10, 20)
+        nl_bz = near_line_report(eid, '', '', 10, 20, allowed_classes=bz_allowed)
+        nl_teach = near_line_report(eid, '', '', 10, 20, allowed_classes=t_allowed)
+        all_cls = {(r.get('class_name') or '') for r in (nl_all.get('rows') or [])}
+        bz_rows = nl_bz.get('rows') or []
+        check('临界生：不限班时名单含数据（对照；未划线则跳过）',
+              bool(nl_all.get('error')) or len(all_cls) >= 1,
+              f'err={nl_all.get("error")} classes={sorted(all_cls)}')
+        # 按班收窄必须真的生效（否则"只含本班"可能只是因为名单本来就只到本班）
+        _other = sorted(all_cls - {'01班'})
+        if _other:
+            nl_other = near_line_report(eid, '', '', 10, 20, allowed_classes={_other[0]})
+            _other_rows = nl_other.get('rows') or []
+            check('临界生：按班收窄后只含该班（对照）',
+                  bool(_other_rows) and all((r.get('class_name') or '') == _other[0]
+                                            for r in _other_rows),
+                  f'目标={_other[0]} rows={len(_other_rows)}')
+        check('临界生：班主任名单只含本班（无跨班泄漏）',
+              bool(nl_bz.get('error')) or all((r.get('class_name') or '') == '01班'
+                                             for r in bz_rows),
+              f'err={nl_bz.get("error")} rows={len(bz_rows)}')
+        check('临界生：任课教师名单为空（fail-closed）',
+              not (nl_teach.get('rows') or []), str(nl_teach.get('error') or '空'))
 
     # ---- 与 MCP 服务同一份实现的两个工具 + 口径一致性（防两套封装漂移） ----
     with app.app_context():

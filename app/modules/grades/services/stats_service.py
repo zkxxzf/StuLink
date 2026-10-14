@@ -357,9 +357,14 @@ def class_summary_table(data, direction=None):
             if idx is not None and 0 <= idx < len(bands):
                 name = bands[idx][0]
                 layers[name] = layers.get(name, 0) + 1
+        # 班级方向按**本班学生**的方向取多数（2026-10-15 修）。
+        # 原实现取 data.directions[0]（全考试方向列表首项，中文序 '历史' < '物理'），
+        # 于是物理班全被标成"历史"（AI 报告据此写出错误方向）；选科前（directions 为空）
+        # 还会 IndexError。个别插班生不改变班级方向（如历史班混入 2 名物理生仍是历史班）。
+        dirs = [t['direction'] for t in totals if t['direction']]
         row = {
             'class_name': cls,
-            'direction': data.directions[0] if len({t['direction'] for t in totals}) == 1 else '混合',
+            'direction': max(set(dirs), key=dirs.count) if dirs else '',
             'count': len(totals),
             'avg': mean(scores),
             'std': round(_stddev(scores), 1),

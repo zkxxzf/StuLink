@@ -1,0 +1,18 @@
+{
+  "base_url": "https://www.zhixue.com",
+  "login_url": "https://www.zhixue.com/login.html",
+  "grade_url": "",
+  "browser_channel": "msedge",
+  "headless": false,
+  "selectors": {
+    "exam_item": [],
+    "exam_link": [],
+    "export_button": [
+      {
+        "text": "导出"
+      }
+    ]
+  },
+  "wait_timeout_ms": 15000,
+  "post_click_wait_ms": 2500
+}

@@ -14,7 +14,7 @@ from flask_login import login_required, current_user
 from app.extensions import db
 from app.models.grades import (Exam, ExamScore, SUBJECTS, TOTAL_SUBJECT,
                               ExamAffair, AffairRoom, AffairStudent, ScoreChangeLog,
-                              ExamTeacherLink)
+                              ExamTeacherLink, ExamBand)
 from app.modules.grades import bp
 from app.modules.grades.services import import_service, store_service, ranking, tab_service
 from app.modules.grades.services.exam_guard import assert_exam_visible, assert_grade_visible
@@ -52,7 +52,11 @@ def _exam_date_from(value):
 
 @bp.route('/exams')
 @login_required
-@perm_required('grades.edit')
+# 2026-10-15 用户口径：任课教师 / 班主任也要能看「历次考试」（只读成绩分析）。
+# 门槛放成 grades.view，页面按 grades.edit 分「管理视图 / 教师视图」渲染：
+# 新建 / 考务 / 导入 / 划线 / 删除 / 孤儿考务批次只在管理视图出现。
+# 数据范围不放宽：未传 grade 时仍走 visible_grades 收敛，显式传 grade 时先 assert_grade_visible。
+@perm_required('grades.view')
 def exams_list():
     # 2026-10-12 安全审计 H-3：原先 ?grade= 直接 filter_by 信任 URL 参数，
     # 2025 级年级长传 ?grade=2024级 即可看到 2024 级全部考试的
@@ -79,10 +83,13 @@ def exams_list():
     # 这类批次从考试列表无法进入，以前只能直连 /grades/affairs 才能看到，现在底部统一列出
     # 2026-10-12 安全审计 H-3：孤儿批次同样按可见年级收敛（未传 grade 时），
     # 否则跨年级用户仍能从此区读到不该看的年级的批次元数据。
+    # 2026-10-15：孤儿考务批次属"考务"数据，只对管理侧（grades.edit）下发；
+    # 教师视图不查询也不渲染该区块（既不泄漏考务元数据，也少两条聚合查询）。
+    can_manage = current_user.has_perm('grades.edit')
     live_exam_ids = {e.id for e in Exam.query.with_entities(Exam.id).all()}
     _vis_grade = grade if grade else set(_grade_options())
     orphan_affairs = []
-    for a in ExamAffair.query.order_by(ExamAffair.id.desc()).all():
+    for a in (ExamAffair.query.order_by(ExamAffair.id.desc()).all() if can_manage else []):
         if a.exam_id is None or a.exam_id not in live_exam_ids:
             if _vis_grade and a.grade not in _vis_grade:
                 continue
@@ -96,7 +103,7 @@ def exams_list():
     return render_template('grades/exam_list.html', exams=exams, counts=counts,
                            grade=grade, grade_options=_grade_options(),
                            orphan_affairs=orphan_affairs,
-                           steps_map=steps_map,
+                           steps_map=steps_map, can_manage=can_manage,
                            status_label=EXAM_STATUS_LABEL)
 
 
@@ -204,6 +211,22 @@ def _exam_classes(exam_id):
     return sorted({r[0] for r in rows})
 
 
+def _scoresheet_scope(exam):
+    """成绩单（考试概览）的数据范围：返回 (allowed_classes, 可用班级列表)。
+
+    规则见 `services/scoresheet.py`（与侧栏入口显隐共用同一份判断）；
+    这里只负责把"无权限"翻成 403 —— fail-closed。
+    """
+    from app.modules.grades.services import scoresheet
+    try:
+        allowed, classes = scoresheet.visible(current_user, exam)
+    except PermissionError:
+        abort(403)
+    if allowed is not None and not allowed:
+        abort(403)
+    return allowed, classes
+
+
 # v1.19.49.32 成绩单表头可排序列 → 总分行（每生一行）字段名；
 # 各科成绩用 's:科目名' 前缀（见 _exam_page_rows），不在此表内。
 _SORT_COLS = {
@@ -227,7 +250,7 @@ def _sort_args(args):
 
 
 def _exam_page_rows(exam_id, page, size, class_name=None, direction=None,
-                    sort_key='', order='desc'):
+                    sort_key='', order='desc', allowed_classes=None):
     """服务端分页：仅查询当前页的学生成绩，避免整场 8000 人一次性载入。
 
     返回 (students, page, total_pages, total)：
@@ -245,6 +268,8 @@ def _exam_page_rows(exam_id, page, size, class_name=None, direction=None,
         因此**不会影响其他用户**；不传参数时回到「方向 → 总分名次」默认榜。
     """
     q = ExamScore.query.filter_by(exam_id=exam_id, subject=TOTAL_SUBJECT)
+    if allowed_classes is not None:      # 账号班级范围（None = 不限；空集不会走到这里）
+        q = q.filter(ExamScore.class_name.in_(sorted(allowed_classes)))
     if class_name:
         q = q.filter(ExamScore.class_name == class_name)
     if direction:
@@ -405,14 +430,15 @@ def _four_step_status(exam, user=None):
 
 @bp.route('/exams/<int:exam_id>')
 @login_required
-@perm_required('grades.edit')
+@perm_required('grades.view')            # 2026-10-15：只读成绩单对班主任/任课教师开放
 def exam_detail(exam_id):
     exam = assert_exam_visible(exam_id)   # H-4：校验考试所属年级范围
     page = _safe_int(request.args.get('page'), 1)
     size = _safe_int(request.args.get('size'), 50)
     # v1.19.0：成绩单支持按班级查看（cls=班级名，空/非法=全部）
     # v1.19.49.32：再支持按方向查看（dir=物理/历史）；两者互斥，传 cls 时忽略 dir
-    classes = _exam_classes(exam_id)
+    # 2026-10-15：班级范围按账号收敛（只给总分口径已授权的班；见 _scoresheet_scope）
+    allowed_classes, classes = _scoresheet_scope(exam)
     cur_class = (request.args.get('cls') or '').strip()
     if cur_class not in classes:
         cur_class = ''
@@ -424,7 +450,7 @@ def exam_detail(exam_id):
     cur_sort, cur_order = _sort_args(request.args)      # v1.19.49.32 表头排序
     students, page, total_pages, total = _exam_page_rows(
         exam_id, page, size, class_name=cur_class or None, direction=cur_dir or None,
-        sort_key=cur_sort, order=cur_order)
+        sort_key=cur_sort, order=cur_order, allowed_classes=allowed_classes)
     info = None
     if exam.import_info:
         try:
@@ -467,20 +493,23 @@ def exam_detail(exam_id):
 
 @bp.route('/exams/<int:exam_id>/scores')
 @login_required
-@perm_required('grades.edit')
+@perm_required('grades.view')             # 与成绩单页同门槛（翻页片段不能比页更严/更松）
 def exam_scores_page(exam_id):
     """成绩单分页片段：仅返回 <tr> 行，供前端 AJAX 翻页时局部替换 tbody。"""
     exam = assert_exam_visible(exam_id)   # H-4：校验考试所属年级范围
+    allowed_classes, classes = _scoresheet_scope(exam)
     page = _safe_int(request.args.get('page'), 1)
     size = _safe_int(request.args.get('size'), 50)
     cur_class = (request.args.get('cls') or '').strip()   # v1.19.0 按班级查看
+    if cur_class not in classes:                          # 越界班级一律回退为"全部可见班"
+        cur_class = ''
     cur_dir = (request.args.get('dir') or '').strip()     # v1.19.15.0 按方向查看
     if cur_dir not in ('物理', '历史'):
         cur_dir = ''
     cur_sort, cur_order = _sort_args(request.args)        # v1.19.49.32 表头排序
     students, _page, _total_pages, _total = _exam_page_rows(
         exam_id, page, size, class_name=cur_class or None, direction=cur_dir or None,
-        sort_key=cur_sort, order=cur_order)
+        sort_key=cur_sort, order=cur_order, allowed_classes=allowed_classes)
     return render_template('grades/exam_detail_rows.html',
                            students=students, subjects=SUBJECTS,
                            can_edit_scores=current_user.has_perm('grades.score_edit'))

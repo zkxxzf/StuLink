@@ -16,6 +16,7 @@ from app.models.grades import Exam, ExamScore, ExamBand, TeacherSubjectLink, \
 from app.models.grades import TeacherLinkPlan, TeacherLinkPlanRow  # 任课映射方案（2026-10-14）
 from app.models.grades import AffairTeacher, AffairSchedule, AffairInvigilator, \
     AffairInvigilation  # v1.19.49.32 考务环节④⑤⑥：任课核对 / 考试时间表 / 监考编排
+from app.models.grades import ScoreChangeLog, ScoreReviewRequest  # 分数修改留痕 / 成绩复核申请
 from app.models.points import PointRecord, PointRuleTemplate
 from app.models.morality import (RewardPunishment, RewardPunishmentAttachment,
                                  KINDS, REWARD_CATEGORIES, PUNISH_CATEGORIES,

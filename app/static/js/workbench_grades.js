@@ -26,6 +26,17 @@
             '</div></div>';
     }
 
+    // ── 本年级同科其他班（默认折叠，点卡片头按钮展开）────────────
+    // 2026-10-15：任教 (年级, 学科) → 该年级该科所有班都在表里，但默认只显示
+    // 本人任教/所带的班，避免"教一个班冒出十几行"。
+    $(document).on('click', '.btn-toggle-grade', function () {
+        var btn = this;
+        var rows = $(document).find('tbody[data-exam="' + btn.dataset.exam + '"] tr.row-grade');
+        var hidden = rows.filter('.d-none').length > 0;
+        if (hidden) { rows.removeClass('d-none'); } else { rows.addClass('d-none'); }
+        $('i', this).attr('class', hidden ? 'bi bi-dash-circle' : 'bi bi-plus-circle');
+    });
+
     // ── 学生明细抽屉 ───────────────────────────────────────────
     var drawerEl = document.getElementById('gradeDetailDrawer');
     var drawer = (drawerEl && window.bootstrap) ? new window.bootstrap.Offcanvas(drawerEl) : null;
@@ -81,8 +92,12 @@
         );
 
         var rows = res.rows || [];
+        // 2026-10-15：任课教师可看到学生的**总分年级名次**（只名次、不给总分分数）
+        var withRank = !!res.total_rank_visible;
+        $('#gdThRank').prop('hidden', !withRank);
         if (!rows.length) {
-            $('#gdRows').html('<tr><td colspan="4" class="text-center text-muted py-3">暂无成绩记录</td></tr>');
+            $('#gdRows').html('<tr><td colspan="' + (withRank ? 5 : 4) +
+                '" class="text-center text-muted py-3">暂无成绩记录</td></tr>');
             return;
         }
         var full = Number(res.full || 100);
@@ -96,7 +111,9 @@
             html += '<tr><td>' + txt(r.rank) + '</td>' +
                 '<td>' + esc(r.student_name) + '</td>' +
                 '<td class="text-muted small">' + esc(r.student_no) + '</td>' +
-                '<td class="text-end ' + scoreCls + '">' + txt(r.score) + '</td></tr>';
+                '<td class="text-end ' + scoreCls + '">' + txt(r.score) + '</td>' +
+                (withRank ? '<td class="text-center">' + txt(r.rank_dir) + '</td>' : '') +
+                '</tr>';
         });
         $('#gdRows').html(html);
     }

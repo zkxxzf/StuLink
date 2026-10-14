@@ -97,7 +97,7 @@
                         {% if t.status == 'archived' %}
                         <form method="POST" class="d-inline"
                               action="{{ url_for('academic.schedule_activate', sid=t.id) }}"
-                              onsubmit="return confirm({{ ('重新启用「' ~ t.name ~ '」？该学期将从历史课表恢复为启用中；当前启用中的学期会自动归档进「历史课表」（含快照）。') | tojson }})">
+                              onsubmit='return confirm({{ ('重新启用「' ~ t.name ~ '」？该学期将从历史课表恢复为启用中；当前启用中的学期会自动归档进「历史课表」（含快照）。') | tojson }})'>
                             <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                             <button class="btn btn-sm btn-success py-0"><i class="bi bi-broadcast"></i> 重新启用</button>
                         </form>

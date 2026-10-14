@@ -1,0 +1,267 @@
+{% extends "base.html" %}
+{% block title %}成绩复核 - 成绩管理{% endblock %}
+{% block content %}
+{# 2026-10-15 用户口径：教师 / 班主任可提交「成绩复核（申请调分）」——
+   填学生的信息、学科、题号、增减分数；有改分权限的人审批，批准时可直接写入成绩单。 #}
+<div class="d-flex justify-content-between align-items-start mb-3 flex-wrap gap-2">
+    <div class="d-flex align-items-baseline flex-wrap gap-2">
+        <h4 class="mb-0"><i class="bi bi-clipboard-check"></i> 成绩复核</h4>
+        <span class="text-muted small">
+            对本人所教 / 所带班级的成绩有疑问时提交调分申请，由成绩管理员审核；批准后可自动写入成绩单并留痕
+        </span>
+    </div>
+    {% if can_audit %}
+    <a href="{{ url_for('grades.reviews_manage_page') }}" class="btn btn-outline-primary">
+        <i class="bi bi-inbox"></i> 复核审批
+    </a>
+    {% endif %}
+</div>
+
+{# ── 提交申请 ────────────────────────────────────────────── #}
+<div class="card mb-3">
+    <div class="card-header py-2 d-flex justify-content-between align-items-center">
+        <span class="fw-bold small"><i class="bi bi-plus-circle"></i> 提交复核申请</span>
+        <span class="text-muted small">
+            可申请范围：本人任教的年级学科（该年级全部班）{% if combos | selectattr('source', 'equalto', 'head') | list %} + 本人所带班级的全部科目{% endif %}
+        </span>
+    </div>
+    <div class="card-body py-3">
+        <form method="POST" action="{{ url_for('grades.review_new') }}" id="rvForm">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <div class="row g-2 align-items-end">
+                <div class="col-md-3">
+                    <label class="form-label small mb-1">考试 <span class="text-danger">*</span></label>
+                    <select class="form-select form-select-sm" name="exam_id" id="rvExam" required>
+                        <option value="">请选择考试</option>
+                        {% for e in exams %}
+                        <option value="{{ e.id }}">{{ e.grade }} · {{ e.name }}{% if e.exam_date %}（{{ e.exam_date.strftime('%Y-%m-%d') }}）{% endif %}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div class="col-md-2">
+                    <label class="form-label small mb-1">班级</label>
+                    <select class="form-select form-select-sm" id="rvClass">
+                        <option value="">全部班级</option>
+                    </select>
+                </div>
+                <div class="col-md-2">
+                    <label class="form-label small mb-1">学号 / 姓名</label>
+                    <input class="form-control form-control-sm" id="rvKw" placeholder="可留空">
+                </div>
+                <div class="col-md-2">
+                    <button type="button" class="btn btn-sm btn-outline-secondary w-100" id="rvSearch">
+                        <i class="bi bi-search"></i> 查询学生
+                    </button>
+                </div>
+                <div class="col-md-3">
+                    <label class="form-label small mb-1">学生 <span class="text-danger">*</span></label>
+                    <select class="form-select form-select-sm" name="student_no" id="rvStudent" required>
+                        <option value="">请先查询</option>
+                    </select>
+                </div>
+            </div>
+            <div class="row g-2 align-items-end mt-2">
+                <div class="col-md-3">
+                    <label class="form-label small mb-1">学科 <span class="text-danger">*</span></label>
+                    <select class="form-select form-select-sm" name="subject" id="rvSubject" required>
+                        <option value="">请先选择学生</option>
+                    </select>
+                </div>
+                <div class="col-md-2">
+                    <label class="form-label small mb-1">题号</label>
+                    <input class="form-control form-control-sm" name="question_no"
+                           placeholder="如 12 或 12-15，留空=整卷" maxlength="40">
+                </div>
+                <div class="col-md-2">
+                    <label class="form-label small mb-1">增减分数 <span class="text-danger">*</span></label>
+                    <input type="number" step="0.5" class="form-control form-control-sm"
+                           name="delta" placeholder="如 3 或 -2" required>
+                </div>
+                <div class="col-md-5">
+                    <label class="form-label small mb-1">申请理由 <span class="text-danger">*</span></label>
+                    <input class="form-control form-control-sm" name="reason" maxlength="500"
+                           placeholder="如：第 12 题漏统计，核对答题卡后应为 8 分" required>
+                </div>
+            </div>
+            <div class="mt-2 d-flex align-items-center gap-2">
+                <button type="submit" class="btn btn-sm btn-primary">
+                    <i class="bi bi-send"></i> 提交申请
+                </button>
+                <span class="text-muted small" id="rvHint">
+                    先选考试并点「查询学生」，学生下拉会列出您在范围内可申请的学生
+                </span>
+            </div>
+        </form>
+    </div>
+</div>
+
+{# ── 我的申请 ────────────────────────────────────────────── #}
+<div class="card">
+    <div class="card-header py-2 d-flex justify-content-between align-items-center flex-wrap gap-2">
+        <span class="fw-bold small"><i class="bi bi-list-check"></i> 我的申请（{{ rows|length }}）</span>
+        <div class="d-flex align-items-center gap-2">
+            <select class="form-select form-select-sm" id="rvStatusFilter" style="width:auto">
+                <option value="">全部状态</option>
+                {% for k, v in status_label.items() %}
+                <option value="{{ k }}">{{ v }}</option>
+                {% endfor %}
+            </select>
+            <button type="button" class="btn btn-sm btn-outline-secondary" id="rvClear">
+                <i class="bi bi-eraser"></i> 清空
+            </button>
+        </div>
+    </div>
+    <div class="table-responsive">
+        <table class="table table-sm table-hover align-middle mb-0">
+            <thead class="table-light">
+            <tr>
+                <th>提交时间</th>
+                <th>考试</th>
+                <th>班级</th>
+                <th>学生</th>
+                <th>学科</th>
+                <th>题号</th>
+                <th class="text-end">增减</th>
+                <th>理由</th>
+                <th>状态</th>
+                <th>审核意见</th>
+                <th class="text-end">操作</th>
+            </tr>
+            </thead>
+            <tbody>
+            {% for r in rows %}
+            <tr data-status="{{ r.status }}">
+                <td class="text-nowrap small text-muted">{{ r.created_at.strftime('%Y-%m-%d %H:%M') if r.created_at else '—' }}</td>
+                <td class="wrap small">{{ r.exam_name or ('#' ~ r.exam_id) }}</td>
+                <td class="text-nowrap small">{{ r.grade }}{{ r.class_name }}</td>
+                <td class="text-nowrap">{{ r.student_name or r.student_no }}
+                    <span class="text-muted small">{{ r.student_no }}</span></td>
+                <td>{{ r.subject }}</td>
+                <td class="small">{{ r.question_no or '整卷' }}</td>
+                <td class="text-end fw-bold {% if r.delta > 0 %}text-success{% else %}text-danger{% endif %}">
+                    {{ '%+g'|format(r.delta) }}</td>
+                <td class="wrap small text-muted">{{ r.reason or '—' }}</td>
+                <td><span class="badge {{ status_badge.get(r.status, 'bg-secondary') }}">
+                    {{ status_label.get(r.status, r.status) }}</span>
+                    {% if r.applied %}<span class="badge bg-success-subtle text-success-emphasis"
+                        title="已写入成绩单">已应用</span>{% endif %}
+                </td>
+                <td class="wrap small text-muted">
+                    {{ r.review_note or '—' }}
+                    {% if r.reviewed_at %}<div class="text-muted">（{{ r.reviewer_name or '—' }} {{ r.reviewed_at.strftime('%m-%d %H:%M') }}）</div>{% endif %}
+                </td>
+                <td class="text-end">
+                    {% if r.status == 'pending' %}
+                    <form method="POST" class="d-inline"
+                          action="{{ url_for('grades.review_withdraw', rid=r.id) }}">
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                        <button type="submit" class="btn btn-sm btn-outline-secondary">撤回</button>
+                    </form>
+                    {% else %}<span class="text-muted small">—</span>{% endif %}
+                </td>
+            </tr>
+            {% else %}
+            <tr><td colspan="11" class="text-center text-muted py-4">
+                还没有提交过复核申请。上方选择考试与学生即可提交。
+            </td></tr>
+            {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+{# 学生候选（学生 × 科目）在前端按班/关键词过滤：一次查询即可反复筛选，减少请求。
+   用 ES5 写法（旧微信 X5 兼容，前端自检会拦 ES2020+ 语法）。 #}
+var RVDATA = [];
+
+function rvFillClasses(){
+    var seen = {}, opts = ['<option value="">全部班级</option>'];
+    for (var i = 0; i < RVDATA.length; i++){
+        var c = RVDATA[i].class_name_full;
+        if (!seen[c]){ seen[c] = 1; opts.push('<option value="' + c + '">' + c + '</option>'); }
+    }
+    $('#rvClass').html(opts.join(''));
+}
+
+function rvRenderStudents(){
+    var cls = $('#rvClass').val() || '';
+    var kw = ($('#rvKw').val() || '') .trim();
+    var by = {}, order = [];
+    for (var i = 0; i < RVDATA.length; i++){
+        var it = RVDATA[i];
+        if (cls && it.class_name_full !== cls) { continue; }
+        if (kw && it.student_no.indexOf(kw) < 0 && (it.student_name || '').indexOf(kw) < 0) { continue; }
+        if (!by[it.student_no]){
+            by[it.student_no] = {name: it.student_name, cls: it.class_name_full, subs: []};
+            order.push(it.student_no);
+        }
+        by[it.student_no].subs.push(it);
+    }
+    window.RVBY = by;
+    var opts = ['<option value="">请选择学生</option>'];
+    for (var j = 0; j < order.length; j++){
+        var no = order[j], b = by[no];
+        opts.push('<option value="' + no + '">' + b.cls + ' '
+                  + (b.name || '') + '（' + no + '） · ' + b.subs.length + ' 科</option>');
+    }
+    $('#rvStudent').html(opts.join(''));
+    $('#rvSubject').html('<option value="">请先选择学生</option>');
+    $('#rvHint').text(order.length ? ('命中 ' + order.length + ' 名学生') : '没有符合条件的学生（可能不在您的申请范围内）');
+}
+
+function rvLoadStudents(){
+    var examId = $('#rvExam').val();
+    if (!examId){ alert('请先选择考试'); return; }
+    $('#rvHint').text('查询中…');
+    $.getJSON('{{ url_for("grades.reviews_students_api") }}',
+              {exam_id: examId, q: ''},
+              function(res){
+        if (!res.success){ $('#rvHint').text(res.message || '查询失败'); return; }
+        RVDATA = res.data || [];
+        rvFillClasses();
+        rvRenderStudents();
+    }).fail(function(){
+        $('#rvHint').text('查询失败，请稍后重试');
+    });
+}
+
+$(function(){
+    $('#rvSearch').on('click', rvLoadStudents);
+    $('#rvExam').on('change', function(){
+        RVDATA = [];
+        $('#rvClass').html('<option value="">全部班级</option>');
+        $('#rvStudent').html('<option value="">请先查询</option>');
+        $('#rvSubject').html('<option value="">请先选择学生</option>');
+        $('#rvHint').text('考试已切换，请重新点「查询学生」');
+    });
+    $('#rvClass, #rvKw').on('change', rvRenderStudents);
+    $('#rvStudent').on('change', function(){
+        var no = $(this).val();
+        var b = (window.RVBY || {})[no];
+        var opts = ['<option value="">请选择学科</option>'];
+        if (b){
+            for (var i = 0; i < b.subs.length; i++){
+                var it = b.subs[i];
+                opts.push('<option value="' + it.subject + '">' + it.subject
+                          + '（当前 ' + (it.score === null || it.score === undefined ? '—' : it.score) + ' 分）</option>');
+            }
+        }
+        $('#rvSubject').html(opts.join(''));
+    });
+    $('#rvStatusFilter').on('change', function(){
+        var v = $(this).val();
+        $('tr[data-status]').each(function(){
+            var show = !v || $(this).data('status') === v;
+            $(this).toggle(show);
+        });
+    });
+    $('#rvClear').on('click', function(){
+        $('#rvStatusFilter').val('');
+        $('tr[data-status]').show();
+    });
+});
+</script>
+{% endblock %}

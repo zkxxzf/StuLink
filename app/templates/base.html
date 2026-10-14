@@ -560,19 +560,32 @@
                         <span class="efn-count">{{ EN.steps | selectattr('done') | list | length }}/4 步</span>
                     {% endif %}
                 </div>
+                {# 2026-10-15 用户口径：任课教师 / 班主任也能进考试态（只读成绩分析）——
+                   考务 / 导入 / 划线是管理动作，按各自路由的真实门槛包裹，避免"看得见点不进"的
+                   403 死链（用户明确：考务安排、导入这些不给教师）。
+                   成绩单（考试概览）例外：教师也能看，但只给本班（仅任课映射的班不含总分口径），
+                   入口显隐走后端同一份判定 EN.can_scoresheet（app/utils/exam_nav.py）。 #}
+                {% if EN.can_scoresheet %}
                 <a class="efn-item {% if EN.section == 'overview' %}active{% endif %}" data-nav="detail"
                    href="{{ url_for('grades.exam_detail', exam_id=EN.exam_id) }}">考试概览·成绩单</a>
+                {% endif %}
+                {% if current_user.has_perm('grades.edit') %}
                 <a class="efn-item {% if EN.section == 'affair' %}active{% endif %}" data-nav="affair"
                    href="{{ url_for('grades.exam_affair_go', exam_id=EN.exam_id) }}">考务安排{% if not EN.steps[1].done %}<span class="efn-tag">待做</span>{% endif %}</a>
+                {% endif %}
                 {# 2026-10-13：原「成绩导入 + AI 智能导入」两个侧栏项合并为**一个入口** ——
                    两种导入方式（标准模板导入 / AI 智能导入）改在导入页内切换，
                    见 grades/_import_tabs.html（用户口径：侧栏只留一个入口，页面里再区分）。
                    两个导入页的 EN.section 都是 'import'，所以这里始终正确高亮。 #}
+                {% if current_user.has_perm('grades.import') %}
                 <a class="efn-item {% if EN.section == 'import' %}active{% endif %}" data-nav="import"
                    href="{{ url_for('grades.exam_import', exam_id=EN.exam_id) }}">成绩导入{% if not EN.steps[2].done %}<span class="efn-tag">待做</span>{% endif %}</a>
+                {% endif %}
                 {# v1.19.49.32：划线分层有自己的段位（'bands'），不再与「成绩导入」同时高亮 #}
+                {% if current_user.has_perm('grades.settings') %}
                 <a class="efn-item {% if EN.section == 'bands' %}active{% endif %}" data-nav="bands"
                    href="{{ url_for('grades.bands_page', exam_id=EN.exam_id) }}">划线分层</a>
+                {% endif %}
                 {# v1.19.0 成绩分析：折叠组 —— 总览（全年级对比）/ 班级分析（班主任）/ 学科分析（任课教师）
                    + 分析类子模块（临界生对比 / 自由表 / 汇报区）。
                    入口按角色分层：总览与汇报区同门槛（管理员/校领导/年级长）；其余按 grades.view，
@@ -656,9 +669,18 @@
                href="{{ url_for('grades.dashboard') }}">
                 <i class="bi bi-speedometer2"></i>首页仪表盘
             </a>
+            {# 2026-10-15 用户口径：历次考试对任课教师 / 班主任开放（只读成绩分析），
+               门槛＝grades.view（与路由一致）。此前这项没有权限判断 ——
+               教师看得见菜单、点进去必 403（用户截图反馈的问题）。 #}
             <a class="nav-link {% if request.endpoint in ('grades.exams_list','grades.exam_new') %}active{% endif %}"
                href="{{ url_for('grades.exams_list') }}">
                 <i class="bi bi-journals"></i>历次考试
+            </a>
+            {# 2026-10-15 用户口径：「申请调分可以」—— 教师/班主任提交成绩复核，
+               有改分权限的人在同一页面的「复核审批」里处理（入口按权限在页内显隐）。 #}
+            <a class="nav-link {% if request.endpoint in ('grades.reviews_page','grades.reviews_manage_page') %}active{% endif %}"
+               href="{{ url_for('grades.reviews_page') }}">
+                <i class="bi bi-clipboard-check"></i>成绩复核
             </a>
             {# 2026-10-13 用户口径：**成绩模块的全局侧栏不放「AI 分析」** ——
                它是单场考试的能力（提问、取数、报告都围绕一场考试），入口只保留在

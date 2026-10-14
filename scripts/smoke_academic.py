@@ -286,8 +286,12 @@ with app.test_client() as c:
 
     r = c.get('/workbench/grades')
     html = r.get_data(as_text=True)
-    check('我的成绩页只列任教班科', r.status_code == 200 and '我的成绩' in html
-          and '2025级01班' in html and '年级名次' in html)
+    # 2026-10-15 R1：任教＝年级×学科 → 我的成绩页按"所教科目"给出该年级的班（不止自己
+    # 教的班）；断言只锁口径相关的元素，不锁具体班级文案（缺项会在 detail 里打印出来）
+    check('我的成绩页列出任教学科（年级×学科口径）', r.status_code == 200
+          and '我的成绩' in html and '数学' in html,
+          f'status={r.status_code} 含我的成绩={"我的成绩" in html} '
+          f'含数学={"数学" in html} 含年级名次={"年级名次" in html}')
     r = c.get(f'/workbench/api/grade-detail?exam_id={exam_id}'
               '&class_name=01班&subject=数学')
     detail = r.get_json() or {}
@@ -297,7 +301,15 @@ with app.test_client() as c:
           f'status={r.status_code}')
     r = c.get(f'/workbench/api/grade-detail?exam_id={exam_id}'
               '&class_name=02班&subject=数学')
-    check('非任教班科明细 403', r.status_code == 403, f'status={r.status_code}')
+    detail2 = r.get_json() or {}
+    # R1 新口径：同年级他班的**所教学科**可看（不再 403）
+    check('非任教班·所教学科可看（年级×学科口径）', r.status_code == 200
+          and any(row.get('student_name') == '丙同学' for row in detail2.get('rows', [])),
+          f'status={r.status_code}')
+    r = c.get(f'/workbench/api/grade-detail?exam_id={exam_id}'
+              '&class_name=02班&subject=语文')
+    check('非任教班·非所教学科 403（负向对照）', r.status_code == 403,
+          f'status={r.status_code}')
     r = c.get('/workbench/api/grade-trend?class_name=01班&subject=数学&grade=2025级')
     check('任教班科走势可看', r.status_code == 200
           and '"points"' in r.get_data(as_text=True))

@@ -823,9 +823,12 @@ def check_H10():
         src = f.read()
     case('H-10 模板不再内联 editComment(...) 拼接',
          'onclick="editComment(' not in src)
-    case('H-10 评语数据改用 data-* + tojson',
-         'data-content="{{ c.content|tojson }}"' in src
-         and 'data-type="{{ c.comment_type|tojson }}"' in src)
+    # 2026-10-15 全站点击测试：原写成 data-x="{{ …|tojson }}"
+    # —— |tojson 输出**带双引号**的 JSON，会把双引号属性值截断（JS 读到残值，功能静默失效）。
+    # 属性外层必须单引号；tojson 仍会把 ' 转义成 \u0027，防注入口径不变。
+    case('H-10 评语数据改用 data-* + tojson（外层单引号，避免属性被截断）',
+         "data-content='{{ c.content|tojson }}'" in src
+         and "data-type='{{ c.comment_type|tojson }}'" in src)
     case('H-10 改用事件委托读取 dataset',
          "closest('.edit-comment-btn')" in src and 'JSON.parse' in src)
 

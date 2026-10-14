@@ -31,12 +31,32 @@ def exam_near_line(exam_id):
     默认 10 / 20 分，可在页面上调；复用 report_warning_service.near_line_report 的计算。
     cls（可选）：按班级筛选，与成绩单「按班级查看」同名同口径（总分行＝考试当时班级）。
     本页在“考试上下文”内（侧栏会切成该场考试的悬浮流程栏）。
+
+    2026-10-15 用户口径（数据范围）：名单是**逐生总分/各科明细**，必须按账号范围收敛——
+    班主任只见本班、年级长及以上见整年级（口径与 MCP/AI 同一份 `score_guard`；
+    侧栏原本就写着"数据范围由后端 scope 过滤"，此前漏在本页落地）。
+    另外：临界生是"总分划线上下"的概念，**任课班级（仅单科授权）不含总分口径**，
+    与其他页面一致不进名单（否则等于用临界生名单绕过总分口径）。
     """
     from app.modules.grades.services.exam_guard import assert_exam_visible
     from app.modules.grades.services import (report_warning_service as rws,
                                              report_service as rs)
+    from app.modules.grades.services import score_guard
     from app.models.grades import ExamBand, TOTAL_SUBJECT
     exam = assert_exam_visible(exam_id)
+    try:                       # fail-closed：解析不出范围（无授权/毕业年级）一律不放行
+        scope = score_guard.resolve(current_user)
+    except PermissionError as exc:
+        abort(403, description=str(exc))
+    # 2026-10-15：任课授权放宽成"年级 × 学科"后，`visible_classes()` 对有任课的年级
+    # 也返回 None（只代表"班级不成约束"，学科/总分另有收口）。临界生名单含**逐生总分
+    # 与各科明细**，必须按"总分口径"收班级 → 走 `total_visible_classes()`，
+    # 纯任课教师（无总分口径）得到空集 → fail-closed。
+    allowed_classes = scope.total_visible_classes(exam.grade)
+    _visible_now = scope.visible_classes(exam.grade)
+    dropped_classes = (sorted(_visible_now - (allowed_classes or set()))
+                       if _visible_now is not None and allowed_classes is not None
+                       else [])
 
     cfg_max = rs.NEAR_LINE_MAX
     direction = (request.args.get('direction') or '').strip()
@@ -56,7 +76,8 @@ def exam_near_line(exam_id):
         if row.name and row.name not in layers:
             layers.append(row.name)
 
-    data = rws.near_line_report(exam_id, direction, layer, above, below, cls)
+    data = rws.near_line_report(exam_id, direction, layer, above, below, cls,
+                                allowed_classes=allowed_classes)
     err = data.get('error') if isinstance(data, dict) else '计算失败'
     by_class = []
     if not err:
@@ -70,11 +91,27 @@ def exam_near_line(exam_id):
                 b['headteacher'] = r['headteacher']
         by_class = sorted(agg.values(),
                           key=lambda x: (-(x['above'] + x['below']), x['class_name']))
+    if allowed_classes is None:
+        scope_label, scope_tip = '', ''
+    elif not allowed_classes:
+        scope_label = '无本班数据'
+        scope_tip = ('临界生按总分划线统计，只对总分口径已授权的班级开放'
+                     + ('（你只有任教班级：' + '、'.join(dropped_classes) + '）' if dropped_classes
+                        else '（任课教师只授予单科，不含总分口径）'))
+    elif len(allowed_classes) <= 3:
+        scope_label = '仅 ' + '、'.join(sorted(allowed_classes))
+        scope_tip = '临界生名单含逐生总分与各科成绩，只显示你数据范围内的班级'
+    else:
+        scope_label = f'仅你的 {len(allowed_classes)} 个班'
+        scope_tip = '临界生名单含逐生总分与各科成绩，只显示你数据范围内的班级'
+    if dropped_classes:
+        scope_tip += ('；任教班级 ' + '、'.join(dropped_classes)
+                      + ' 仅授予单科，不含总分口径，未计入临界生')
     return render_template('grades/near_line.html', exam=exam, data=data, error=err,
                            layers=layers, direction=direction, layer=layer,
                            above=above, below=below, cfg_max=cfg_max,
-                           by_class=by_class,
-                           title='临界生对比')
+                           by_class=by_class, scope_label=scope_label,
+                           scope_tip=scope_tip, title='临界生对比')
 
 
 @bp.route('/analysis')
@@ -213,12 +250,13 @@ def api_options():
     elif scope_type == 'grade':
         tabs = {'grade': True, 'class': True, 'subject': True, 'teacher': True,
                 'compare': True}
-    elif current_user.has_role('homeroom_teacher'):
-        tabs = {'grade': False, 'class': True, 'subject': False, 'teacher': False,
-                'compare': False}
-    elif current_user.has_role('teacher'):
-        tabs = {'grade': False, 'class': False, 'subject': False, 'teacher': True,
-                'compare': False}
+    else:
+        # 2026-10-15 用户口径（与 _guard_tab 保持同一份判定，别让"前端显示 / 后端放行"漂移）：
+        # 班主任 = 年级分析 + 本班分析；任课教师 = 年级分析 + 学科分析 + 本人。
+        if current_user.has_role('homeroom_teacher'):
+            tabs.update({'grade': True, 'class': True})
+        if current_user.has_role('teacher'):
+            tabs.update({'grade': True, 'subject': True, 'teacher': True})
     # 班主任/教师锁定范围
     locked = {'grade': '', 'classes': []}
     if scope_type == 'grade':
@@ -283,12 +321,17 @@ def _guard_tab(tab):
             allowed = {'grade', 'class', 'subject', 'teacher', 'compare'}
         elif current_user.role == 'grade_leader' or scope_type == 'grade':
             allowed = {'grade', 'class', 'subject', 'teacher', 'compare'}
-        elif current_user.has_role('homeroom_teacher'):
-            allowed = {'class'}
-        elif current_user.has_role('teacher'):
-            allowed = {'teacher'}
         else:
+            # 2026-10-15 用户口径：班主任 / 任课教师不再只给"本班 / 本人"这一档 ——
+            #   · 班主任：本班分析 + **所在年级的成绩分析**（看本班在年级中的位置）；
+            #   · 任课教师：本人（教师维度）+ 学科分析 + **所在年级的成绩分析**。
+            # 多身份取并集（一个人可能同时是班主任和任课教师）。
+            # 注意：放开的是"页签可见性"，数据明细仍由 scope 收敛，不放开跨班逐生明细。
             allowed = set()
+            if current_user.has_role('homeroom_teacher'):
+                allowed |= {'grade', 'class'}
+            if current_user.has_role('teacher'):
+                allowed |= {'grade', 'subject', 'teacher'}
     if tab not in allowed:
         abort(403)
 

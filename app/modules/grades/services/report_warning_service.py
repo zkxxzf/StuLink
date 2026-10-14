@@ -6,13 +6,19 @@ from app.modules.grades.services import stats_service as st
 from app.modules.grades.services import report_service as rs
 
 
-def near_line_report(exam_id, direction, layer_name, above, below, class_name=None):
+def near_line_report(exam_id, direction, layer_name, above, below, class_name=None,
+                     allowed_classes=None):
     """压线临界生名单。
 
     方向/层口径与板块一一致；区间：线下 [L-below, L)、线上 [L, L+above]。
     排序：线下组在前（组内总分降序＝最接近线的最靠前），线上组在后（组内升序＝最危险的靠前）。
     class_name（可选）：按班级筛选（总分行口径＝考试当时班级）；空/非法值一律视为全部，
     返回值 classes 给出该方向出现过的班级（供页面下拉），class_name 回显实际生效值。
+    allowed_classes（可选）：**账号可见班级**（None = 不限）。临界生名单带逐生总分、距线、
+    各科分数与方向排名，属"跨班逐生明细"，必须按数据范围收敛——班主任只见本班、
+    任课教师只见任教班、年级长及以上见整年级/全校（2026-10-15 用户口径）。
+      · 传集合时：只保留这些班的行，班级下拉也随之收敛（非法 cls 仍回退为全部可见班）；
+      · 传空集时：返回空名单（fail-closed，不回落成"全部班级"）。
     """
     data = st.cached_exam_data(exam_id)
     if not data.total_rows:
@@ -28,6 +34,8 @@ def near_line_report(exam_id, direction, layer_name, above, below, class_name=No
 
     rows_all = [r for r in data.total_rows if (not direction or r.direction == direction)
                 and r.score is not None]
+    if allowed_classes is not None:
+        rows_all = [r for r in rows_all if (r.class_name or '') in allowed_classes]
     # 班级下拉：该方向下出现过的班级（总分行口径＝考试当时班级，与班排/方向排一致）；
     # 非法值（手工改 URL）回退为空＝全部，避免只剩半截名单却看不出被筛过
     classes = sorted({(r.class_name or '') for r in rows_all if r.class_name})

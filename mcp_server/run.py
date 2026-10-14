@@ -17,6 +17,8 @@ R3 年级长及以上（本年级，校级/管理员=全校）。无任何写入
 （require_token=true 时另加 X-StuLink-Token；token 兼容模式见 config.json。）
 认证设计见 docs/MCP服务-认证与授权设计.md。
 """
+import functools
+import ipaddress
 import logging
 import os
 import socket
@@ -38,22 +40,30 @@ logger = logging.getLogger('stulink.mcp')
 
 INSTRUCTIONS = (
     '本服务只提供 StuLink 教务系统的「成绩分析」只读能力，无任何写入操作。\n'
-    '可见范围＝接入账号在网页端成绩模块的可见范围，细粒度规则：\n'
-    '1. 任课教师：仅当同时任教某班级所在年级与该班级时，才能查看该班成绩，'
-    '且只能看到自己在该年级所教学科的成绩；\n'
-    '2. 班主任（班型设置）：可查看本班成绩；\n'
-    '3. 年级长及以上（含校级/管理员）：可查看所在年级（校级/管理员为全校）成绩。\n'
+    '可见范围＝接入账号在网页端成绩模块的可见范围，**分两层**（2026-10-15 用户口径）：\n'
+    '· 聚合层（＝年级成绩分析结果）**公开**：年级各班汇总（人数、总分均分/最高/最低、'
+    '分层人数、各科均分、**班级位次**）＋年级基准、年级学科分析、分数段分布、分层上线率、'
+    '班级对比 —— 能看该考试的账号都能看**全年级**；分析某个班时请用 '
+    'get_class_score_summary / compare_classes 拿年级对照，别只报一个孤立的本班数字。\n'
+    '· 逐生层（学生个人成绩、班级逐生明细）**只给自己的班**：任课教师＝所教班级×所教学科，'
+    '班主任＝本班全科，年级长及以上＝本年级，管理员/校级＝全校；班级汇总行里的 '
+    'detail_visible 指出该班能否下钻 get_class_score_detail。\n'
     '使用约定：\n'
     '1. 先调用 list_my_score_scope 确认自己能看到哪些年级/班级/学科；\n'
-    '2. 用 list_exams 取 exam_id、list_classes 核对班级名（如 "01班"）；\n'
+    '2. 用 list_exams 取 exam_id；list_classes 给的是"可下钻逐生"的班级，'
+    '要看全年级各班用 get_class_score_summary；\n'
     '3. 越权查询一律返回 {"ok": false, "error": "权限不足：…"}，不要绕过提示继续尝试；\n'
-    '4. 任课教师查看班级时，"总分/班均分/排名"会显示为已隐藏（其只被授予单科）；\n'
+    '4. 逐生明细里的总分/排名对任课教师仍会隐藏（其只被授予单科）；\n'
     '5. 返回值为 JSON 文本，形如 {"ok": true, "data": ...} 或 {"ok": false, "error": "原因"}。'
 )
 
 
-def _lan_ip():
-    """探测本机局域网 IP（UDP connect 只查路由表，不真正发包）。"""
+_FAKE_IP_NETS = (ipaddress.ip_network('198.18.0.0/15'),)
+"""代理 TUN（Clash 等）的 fake-ip 段，兼 RFC 2544 保留段：不是真实网卡地址，必须排除。"""
+
+
+def _route_probe_ip():
+    """路由探测：UDP connect 只查路由表、不真正发包；但经代理 TUN 时会拿到 fake-ip。"""
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     try:
         sock.connect(('10.255.255.255', 1))
@@ -64,18 +74,64 @@ def _lan_ip():
         sock.close()
 
 
+@functools.lru_cache(maxsize=1)
+def _local_ipv4s():
+    """本机可用的 IPv4 列表（路由探测在前，其后是各网卡地址），供白名单与启动横幅共用。
+
+    剔除环回 / 链路本地 / 多播 / 未指定地址，以及代理 TUN 的 fake-ip 段：否则
+    「本机局域网地址」会被探测成 198.18.0.1，白名单与横幅一起指错地方（Host 头 421）。
+    """
+    raw = [_route_probe_ip()]
+    try:
+        raw.extend(socket.gethostbyname_ex(socket.gethostname())[2])
+    except Exception:  # noqa: BLE001  主机名解析失败不影响启动
+        pass
+    out = []
+    for ip in raw:
+        if not ip or ip in out:
+            continue
+        try:
+            addr = ipaddress.ip_address(ip)
+        except ValueError:
+            continue
+        if (addr.is_loopback or addr.is_link_local or addr.is_multicast
+                or addr.is_unspecified or any(addr in net for net in _FAKE_IP_NETS)):
+            continue
+        out.append(ip)
+    return out
+
+
+def _lan_ip():
+    """挑一个最可能被别的设备访问到的本机地址。
+
+    首选路由探测结果（默认路由所在网卡）；它被剔除（如代理 fake-ip）或不是内网地址时，
+    再按 192.168 → 10 → 172.16-31 的优先级挑，避免选中虚拟网卡。
+    """
+    ips = _local_ipv4s()
+    if not ips:
+        return ''
+    first = ips[0]
+    if first.startswith(('192.168.', '10.', '172.')):
+        return first
+
+    def rank(ip):
+        return (0 if ip.startswith('192.168.') else
+                1 if ip.startswith('10.') else
+                2 if ip.startswith('172.') else 3)
+
+    return min(ips, key=rank)
+
+
 def _allowed_hosts(cfg):
-    """DNS 重绑定防护的 Host 白名单：本机 + 监听地址 + 局域网 IP（含端口形式）。"""
+    """DNS 重绑定防护的 Host 白名单：本机名 + 监听地址 + 各网卡 IP（含端口形式）。"""
     if cfg.get('allowed_hosts'):
         return list(cfg['allowed_hosts'])
     port = int(cfg['port'])
-    names = {'localhost', '127.0.0.1'}
+    names = {'localhost', '127.0.0.1', socket.gethostname()}
     host = (cfg.get('host') or '').strip()
     if host and host not in ('0.0.0.0', '::', '::0'):
         names.add(host)
-    lan = _lan_ip()
-    if lan:
-        names.add(lan)
+    names.update(_local_ipv4s())
     out = []
     for name in sorted(names):
         out.extend([name, f'{name}:{port}'])
@@ -161,7 +217,8 @@ def _print_banner(cfg, me):
         + ('必填' if mode == 'token' or cfg.get('require_token') else '可选') + '）',
         identity_line,
         '  工具集   : 成绩分析（12 个只读工具，无写入能力）',
-        '  权限口径 : 任课教师=所教班级×所教学科 / 班主任=本班 / 年级长及以上=本年级',
+        '  权限口径 : 聚合层（年级/班级/学科统计·分布·上线率·班级对比）公开，',
+        '             逐生明细=任课教师 所教班级×所教学科 / 班主任 本班全科',
         '',
     ]
     lines.extend(_client_example(cfg, url, mode))

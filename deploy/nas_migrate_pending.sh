@@ -98,6 +98,8 @@ run_mig scripts/migrate_swap_operator_20261014.py         # 调课：schedule_sw
 run_mig scripts/migrate_perf_indexes_20261014.py          # 性能索引：oplog 4 条 + 证书/课表各 1 条
 run_mig scripts/migrate_plan_current_unique_20261014.py   # 方案表 is_current 部分唯一索引（有重复会拒跑）
 run_mig scripts/migrate_leader_group_single_20261014.py   # 综合组旧形态记录归并为「整组一位」（无记录则空跑）
+# 2026-10-15：成绩复核（申请调分）申请表 —— 教师提交 / 有改分权限者审批
+run_mig scripts/migrate_score_review_20261015.py           # 成绩复核：新建 score_review_requests 表
 # ── 数据 / 权限类（幂等）──────────────────────────────────────────────────
 # 2026-10-14 第三轮审计（CONS3-02）：多身份改造的两个脚本原先**完全未登记**（只在
 # docs/权限体系多身份改造执行计划.md 里点名）→ 上线必漏跑。按设计文档顺序：

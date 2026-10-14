@@ -86,9 +86,12 @@ def check_exam_visible(user, exam):
         if exam.grade not in ug:
             raise PermissionError
         return
-    # 任课教师：按本人任课映射所在年级
+    # 任课教师：按本人任课映射所在年级；并上「班主任所带班」的年级
+    # （2026-10-15 用户口径：班主任带某班、但不在该班任课时，也应当能看该班成绩。
+    #  纯班主任账号本就走下面的 SCOPE_CLASS 分支，这里补的是"既任教又带班"的并集。）
     if user.has_role('teacher'):
-        if exam.grade not in teaching_grades(user):
+        grades = teaching_grades(user) | {g for g, _c in class_pairs(user)}
+        if exam.grade not in grades:
             raise PermissionError
         return
     scope, grade = get_scope(user)

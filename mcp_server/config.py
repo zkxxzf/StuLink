@@ -53,7 +53,8 @@ DEFAULTS = {
     'login_source_fail_limit': (20, '单来源（客户端 IP）在窗口内认证失败总数达到该次数后，'
                                     '该来源一律 429（跨账号，防"换账号扫口令"）；0=不限制'),
     'login_source_window': (300, '单来源失败总数的统计窗口（秒）'),
-    'allowed_hosts': ([], '允许的 Host 头（DNS 重绑定防护）；留空则自动放行本机与监听地址'),
+    'allowed_hosts': ([], '允许的 Host 头（DNS 重绑定防护）；留空则自动放行本机全部网卡地址、'
+                         '主机名与监听地址（各含端口形式）'),
 }
 
 _cache = None

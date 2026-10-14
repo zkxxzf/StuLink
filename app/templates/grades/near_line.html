@@ -13,6 +13,9 @@
     {% if not error %}
     <span class="badge bg-primary ms-1">{{ data.direction }} · {{ data.layer }}线 {{ data.line }}</span>
     {% if cur_cls %}<span class="badge bg-secondary ms-1">班级：{{ cur_cls }}</span>{% endif %}
+    {# 数据范围：名单含逐生总分与排名，按账号可见班级（且总分口径）收敛，细则进 tooltip #}
+    {% if scope_label %}<span class="badge bg-light text-dark border ms-1"
+                              title="{{ scope_tip or '只显示你数据范围内的班级' }}">{{ scope_label }}</span>{% endif %}
     {% endif %}
 </div>
 

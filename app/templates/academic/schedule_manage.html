@@ -147,7 +147,7 @@
                     {% if ts.status != 'active' %}
                     <form method="POST" class="d-inline" action="{{ url_for('academic.schedule_activate', sid=ts.id) }}"
                           {# M-10：学期名可能含引号，confirm 文本整体走 |tojson #}
-                          onsubmit="return confirm({{ ('重新启用' if archived else '激活') ~ '「' ~ ts.name ~ '」？' ~ ('该学期将从历史课表恢复为启用中；' if archived else '') ~ '当前启用中的学期将归档进「历史课表」（含快照）。' | tojson }})">
+                          onsubmit='return confirm({{ ('重新启用' if archived else '激活') ~ '「' ~ ts.name ~ '」？' ~ ('该学期将从历史课表恢复为启用中；' if archived else '') ~ '当前启用中的学期将归档进「历史课表」（含快照）。' | tojson }})'>
                         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                         <button class="btn btn-sm btn-success py-0"><i class="bi bi-broadcast"></i> {{ '重新启用' if archived else '激活' }}</button>
                     </form>
@@ -182,7 +182,7 @@
                             {# 2026-10-10：与「归档 / 激活」区分开——只切「当前学期」标记 #}
                             <li>
                                 <form method="POST" action="{{ url_for('academic.schedule_set_current', sid=ts.id) }}"
-                                      onsubmit="return confirm({{ ('将「' ~ ts.name ~ '」设为当前学期？其他学期将取消当前标记（不影响各自的启用 / 归档状态）。') | tojson }})">
+                                      onsubmit='return confirm({{ ('将「' ~ ts.name ~ '」设为当前学期？其他学期将取消当前标记（不影响各自的启用 / 归档状态）。') | tojson }})'>
                                     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                                     <button type="submit" class="dropdown-item"><i class="bi bi-star"></i> 设为当前</button>
                                 </form>
@@ -193,7 +193,7 @@
                                所以手动归档入口只给未启用（draft）学期；启用中的由"激活别的学期"自动归档 #}
                             <li>
                                 <form method="POST" action="{{ url_for('academic.schedule_archive_term', sid=ts.id) }}"
-                                      onsubmit="return confirm({{ ('归档未启用学期「' ~ ts.name ~ '」并移入「历史课表」？将生成归档快照，归档后只读回看，需要时还能重新启用。') | tojson }})">
+                                      onsubmit='return confirm({{ ('归档未启用学期「' ~ ts.name ~ '」并移入「历史课表」？将生成归档快照，归档后只读回看，需要时还能重新启用。') | tojson }})'>
                                     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                                     <button type="submit" class="dropdown-item"><i class="bi bi-archive"></i> 归档进历史课表</button>
                                 </form>
@@ -215,7 +215,7 @@
                             {% if ts.status == 'draft' %}
                             <li>
                                 <form method="POST" action="{{ url_for('academic.schedule_delete', sid=ts.id) }}"
-                                      onsubmit="return confirm({{ ('删除未启用学期「' ~ ts.name ~ '」？其节次与课表条目将一并删除，不可恢复。') | tojson }})">
+                                      onsubmit='return confirm({{ ('删除未启用学期「' ~ ts.name ~ '」？其节次与课表条目将一并删除，不可恢复。') | tojson }})'>
                                     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                                     <button type="submit" class="dropdown-item text-danger"><i class="bi bi-trash"></i> 删除学期</button>
                                 </form>
