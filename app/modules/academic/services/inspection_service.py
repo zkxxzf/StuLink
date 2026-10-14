@@ -323,7 +323,7 @@ def notify_leaders(user, inspect_date, period, grade='', expected=0,
                    checked=0, unchecked=None):
     """把某节次查课情况推送给课表管理员（领导）。返回 (ok, message, data)。"""
     from app.extensions import db as _db
-    from app.models import User
+    from app.models import User, UserPermissionGroup
     from app.models.permission_group import PermissionGroup
     from app.modules.notifications.services import notification_service
 
@@ -341,7 +341,10 @@ def notify_leaders(user, inspect_date, period, grade='', expected=0,
     gids = [g.id for g in groups if g.id]
     conds = [User.role == 'admin']
     if gids:
-        conds.append(User.permission_group_id.in_(gids))
+        # P1：改走多身份关联表（等价于原 permission_group_id.in_(gids)）
+        _uids = _db.session.query(UserPermissionGroup.user_id).filter(
+            UserPermissionGroup.group_id.in_(gids)).subquery()
+        conds.append(User.id.in_(_uids))
     users = User.query.filter(User.is_active.is_(True), _db.or_(*conds)).all()
     uids = [u.username for u in users if getattr(u, 'username', None)]
     if not uids:

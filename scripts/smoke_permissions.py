@@ -75,8 +75,18 @@ def get_csrf(c, path='/login'):
 # ---------- 1. 新身份组与子功能三档映射 ----------
 with app.app_context():
     names = {g.name for g in PermissionGroup.query.all()}
-    check('7 个新身份组已创建', {'校长', '副校长', '教务主任', '教务员',
-                                 '备课组长', '教研组长', '学生发展中心'} <= names)
+    check('11 个系统身份组已创建', {'管理员组', '年级长组', '班主任组', '宿管组',
+                                   '任课教师组', '教务主任', '教务员',
+                                   '考试管理员', '生活处', '政教主任',
+                                   '政教员'} <= names)
+
+    # P4：原用种子「校长」组做「全校只读」验证；校长等 5 组已按用户裁决删除，
+    # 改为测试内自建只读组，避免依赖种子身份名。
+    ro = PermissionGroup(name='冒烟只读组', role='staff', scope_type='school')
+    ro.set_menu_keys(['students.view', 'dormitory.view', 'statistics.view',
+                      'grades.view', 'points.view', 'academic.view'])
+    db.session.add(ro)
+    db.session.commit()
 
     jwy_g = PermissionGroup.query.filter_by(name='教务员').first()
     lv = keys_to_item_levels(jwy_g.get_menu_keys())
@@ -85,13 +95,12 @@ with app.app_context():
     check('教务员矩阵：教务录入=写入', lv.get('academic:edit') == 'write')
     check('教务员矩阵：系统管理=不可见', lv.get('system:users') == 'none')
 
-    xz_g = PermissionGroup.query.filter_by(name='校长').first()
-    lv2 = keys_to_item_levels(xz_g.get_menu_keys())
-    check('校长矩阵：全校只读且无系统管理', lv2.get('grades:view') == 'read'
+    lv2 = keys_to_item_levels(ro.get_menu_keys())
+    check('只读组矩阵：全校只读且无系统管理', lv2.get('grades:view') == 'read'
           and lv2.get('grades:manage') == 'none'
           and lv2.get('academic:edit') == 'none'
           and lv2.get('system:users') == 'none', str(lv2))
-    check('校长矩阵：宿舍分床位/宿舍分配均不可写', lv2.get('dormitory:assign') == 'none'
+    check('只读组矩阵：宿舍分床位/宿舍分配均不可写', lv2.get('dormitory:assign') == 'none'
           and lv2.get('dormitory:beds') == 'none')
 
     check('子功能→keys：教学管理写入含 edit/import/settings',
@@ -109,8 +118,8 @@ with app.app_context():
               permission_group_id=jwy_g.id, must_change_pwd=False)
     zs.set_password('pw123456')
     db.session.add(zs)
-    xz_g = PermissionGroup.query.filter_by(name='校长').first()
-    xz = User(username='xz001', real_name='校长测试', role='staff',
+    xz_g = PermissionGroup.query.filter_by(name='冒烟只读组').first()
+    xz = User(username='xz001', real_name='只读用户', role='staff',
               permission_group_id=xz_g.id, must_change_pwd=False)
     xz.set_password('pw123456')
     db.session.add(xz)
@@ -146,9 +155,9 @@ with app.app_context():
         check('非授权年级考试拦截', False, '未拦截！')
     except PermissionError:
         check('非授权年级考试拦截', True)
-    check('校长无数据范围配置（回落组级）', user_grade_scope(xz) is None)
-    check('校长只读：无 academic.edit', not xz.has_perm('academic.edit'))
-    check('校长可见全校年级', len(visible_grades(xz)) >= 2, str(visible_grades(xz)))
+    check('只读组无数据范围配置（回落组级）', user_grade_scope(xz) is None)
+    check('只读组：无 academic.edit', not xz.has_perm('academic.edit'))
+    check('只读组可见全校年级', len(visible_grades(xz)) >= 2, str(visible_grades(xz)))
 
 # ---------- 3. 权限管理页面与 API ----------
 with app.test_client() as c:
@@ -161,11 +170,11 @@ with app.test_client() as c:
     r = c.get('/perm-groups/')
     html = r.get_data(as_text=True)
     check('权限页 200 且含子功能表头', r.status_code == 200
-          and '功能权限：身份 × 子功能' in html and '数据范围：用户 × 年级' in html
+          and '功能权限：身份 × 子功能' in html and '专职行政人员管理年级' in html
           and '系统保留' in html)
 
     with app.app_context():
-        xz_gid = PermissionGroup.query.filter_by(name='校长').first().id
+        xz_gid = PermissionGroup.query.filter_by(name='冒烟只读组').first().id
     r = c.post('/perm-groups/save-perms', json={'items': [
         {'id': xz_gid, 'levels': {'students:view': 'read', 'dormitory:view': 'read',
                                   'grades:manage': 'write', 'points:view': 'read',
@@ -174,8 +183,8 @@ with app.test_client() as c:
     check('矩阵保存 API', r.status_code == 200 and r.get_json()['success'])
     with app.app_context():
         xz_g = PermissionGroup.query.get(xz_gid)
-        check('保存后校长教学管理=写入', 'grades.edit' in xz_g.get_menu_keys())
-        check('保存后校长宿舍分配=不可见',
+        check('保存后只读组教学管理=写入', 'grades.edit' in xz_g.get_menu_keys())
+        check('保存后只读组宿舍分配=不可见',
               'dormitory.assign' not in xz_g.get_menu_keys())
 
     r = c.post('/perm-groups/data-scope/save',
@@ -253,9 +262,9 @@ with app.test_client() as c:
     c.post('/login', data={'csrf_token': csrf, 'username': 'xz001',
                            'password': 'pw123456'}, follow_redirects=True)
     r = c.get('/academic/teachers')
-    check('校长（只读）可查看教务页', r.status_code == 200, str(r.status_code))
+    check('只读用户可查看教务页', r.status_code == 200, str(r.status_code))
     r = c.post('/academic/teachers/import/upload', data={})
-    check('校长（只读）不可导入（非 200）', r.status_code in (400, 403),
+    check('只读用户不可导入（非 200）', r.status_code in (400, 403),
           str(r.status_code))
 
 print(f'\n===== 权限验证完成：通过 {ok} / 失败 {fail} =====')

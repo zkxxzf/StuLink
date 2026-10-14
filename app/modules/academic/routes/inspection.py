@@ -1,4 +1,4 @@
-# StuLink v1.19.47.29 2026-10-10
+# StuLink v1.19.47.30 2026-10-10
 # 教务 · 查课统计：记录录入 / 列表筛选 / 月度统计 / 批量录入 / 导出 / 图表API
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 import io
@@ -696,14 +696,17 @@ def _timetable_leaders():
     站内通知按 uid 精确推送（notify_users → target_type='users'），所以这里返回
     账号的 username（= uid），而不是 users.id。
     """
-    from app.models import User
+    from app.models import User, UserPermissionGroup
     from app.models.permission_group import PermissionGroup
     groups = PermissionGroup.query.filter(
         PermissionGroup.menu_keys.like('%"academic.timetable"%')).all()
     gids = [g.id for g in groups if g.id]
     conds = [User.role == 'admin']
     if gids:
-        conds.append(User.permission_group_id.in_(gids))
+        # P1：改走多身份关联表（等价于原 permission_group_id.in_(gids)）
+        _uids = db.session.query(UserPermissionGroup.user_id).filter(
+            UserPermissionGroup.group_id.in_(gids)).subquery()
+        conds.append(User.id.in_(_uids))
     users = User.query.filter(User.is_active.is_(True), db.or_(*conds)).all()
     return [u.username for u in users if getattr(u, 'username', None)]
 

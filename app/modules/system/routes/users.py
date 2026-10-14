@@ -36,6 +36,30 @@ def _store_one_time_password(username, real_name, password):
     session.modified = True
 
 
+def _set_user_groups(user, group_ids):
+    """设置用户的权限组（多身份，P5）：列表首个为主组。
+
+    同步旧字段 permission_group_id 与多身份关联表 user_permission_groups，
+    并移除未选中的关联（cascade delete-orphan）。
+    """
+    from app.models import UserPermissionGroup
+    gids = []
+    for g in (group_ids or []):
+        if g and g not in gids:
+            gids.append(g)
+    user.permission_group_id = gids[0] if gids else None
+    keep = set(gids)
+    for l in list(user.group_links):
+        if l.group_id not in keep:
+            user.group_links.remove(l)
+    for i, gid in enumerate(gids):
+        link = next((l for l in user.group_links if l.group_id == gid), None)
+        if link is None:
+            link = UserPermissionGroup(group_id=gid)
+            user.group_links.append(link)
+        link.is_primary = (i == 0)
+
+
 @bp.route('/')
 @perm_required('system.users')
 def list_users():
@@ -47,7 +71,8 @@ def list_users():
     from collections import OrderedDict
     grouped = OrderedDict()
     for u in users:
-        gname = u.permission_group.name if u.permission_group else '未分组'
+        pg = u.primary_group
+        gname = pg.name if pg else '未分组'
         grouped.setdefault(gname, []).append(u)
     group_order = {g.name: g.id for g in PermissionGroup.query.all()}
     groups = OrderedDict(
@@ -91,14 +116,15 @@ def create():
             role=role,
             grade=grade,
             class_name=class_name,
-            permission_group_id=form.permission_group_id.data if form.permission_group_id.data else None,
             must_change_pwd=True,
         )
+        # P5：多身份（权限组），列表首个为主组
+        _set_user_groups(user, form.permission_group_ids.data)
         generated_pwd = form.password.data or _generate_password()
         user.set_password(generated_pwd)
         db.session.add(user)
         db.session.commit()
-        # v1.19.47.29：非管理员自动同步创建教师档案（admin 不写入）
+        # v1.19.47.30：非管理员自动同步创建教师档案（admin 不写入）
         _sync_state, _ = teacher_sync.sync_from_user(user)
         db.session.commit()
         log_operation(current_user, '创建', '用户', user.id, f'{user.real_name} ({user.role_display})')
@@ -118,6 +144,9 @@ def create():
 def edit(id):
     user = User.query.get_or_404(id)
     form = UserForm(obj=user)
+    # P5：多身份多选的回显（GET 时按当前所属组预选；首个为主组）
+    if not form.is_submitted():
+        form.permission_group_ids.data = [g.id for g in user.permission_groups]
     if form.validate_on_submit():
         existing = User.query.filter(
             User.username == form.username.data, User.id != user.id).first()
@@ -158,11 +187,12 @@ def edit(id):
         user.role = role
         user.grade = grade
         user.class_name = class_name
-        user.permission_group_id = form.permission_group_id.data if form.permission_group_id.data else None
+        # P5：多身份（权限组），列表首个为主组
+        _set_user_groups(user, form.permission_group_ids.data)
         if form.password.data:
             user.set_password(form.password.data)
         db.session.commit()
-        # v1.19.47.29：教师角色变更 → 同步到 academic.teachers（admin 自动 skip）
+        # v1.19.47.30：教师角色变更 → 同步到 academic.teachers（admin 自动 skip）
         teacher_sync.sync_from_user(user)
         db.session.commit()
         log_operation(current_user, '更新', '用户', user.id, f'{user.real_name} 信息已更新')
@@ -184,7 +214,7 @@ def toggle(id):
         return redirect(url_for('users.list_users'))
     user.is_active = not user.is_active
     db.session.commit()
-    # v1.19.47.29：启禁变更 → 同步 Teacher.status (active/left)
+    # v1.19.47.30：启禁变更 → 同步 Teacher.status (active/left)
     teacher_sync.sync_from_user(user)
     db.session.commit()
     status = '启用' if user.is_active else '禁用'
@@ -289,7 +319,7 @@ def import_teachers():
 
         created = 0
         errors = []
-        _new_users = []                          # v1.19.47.29：导入后同步至 teachers
+        _new_users = []                          # v1.19.47.30：导入后同步至 teachers
 
         for row_idx in range(2, ws.max_row + 1):
             phone = str(ws.cell(row=row_idx, column=phone_col).value or '').strip()
@@ -316,13 +346,14 @@ def import_teachers():
             user.set_password(one_time_pwd)
             db.session.add(user)
             db.session.flush()
+            user.sync_primary_link()   # P5：同步多身份关联表
             _store_one_time_password(phone, name, one_time_pwd)
             _new_users.append(user)
             existing_phones.add(phone)
             created += 1
 
         db.session.commit()
-        # v1.19.47.29：批量导入后同步到 academic.teachers
+        # v1.19.47.30：批量导入后同步到 academic.teachers
         for u in _new_users:
             teacher_sync.sync_from_user(u)
         db.session.commit()

@@ -1,4 +1,4 @@
-# StuLink v1.19.47.29 2026-10-10
+# StuLink v1.19.47.30 2026-10-10
 # 德育管理：单页记录（独立库 points.db）+ 范围权限过滤 + 批量导入导出 + 可视化
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 import io
@@ -23,21 +23,22 @@ CATEGORIES = ['纪律', '学习', '卫生', '活动', '其他']
 def _scope():
     """返回 (scope_type, grade, 范围明细 or None)
 
-    范围明细：scope='class' 时为班级白名单 [(grade, class_name)]；
-    scope='user_grades' 时为授权年级清单（v1.9.2 用户级数据范围，优先于组级规则）。
+    范围明细：scope='class' 时为班级白名单 {(grade, class_name)}；
+    scope='user_grades' 时为授权年级清单（用户级数据范围，优先于组级规则）。
+
+    P2：解析委托 app.utils.scope 唯一口径（行为与改造前一致）。
     """
-    from app.modules.grades.services.scope import user_grade_scope
-    ug = user_grade_scope(current_user)
-    if ug is not None:
-        return 'user_grades', '', ug
-    pg = current_user.permission_group
-    scope = pg.scope_type if pg else 'none'
-    grade = current_user.grade or ''
-    classes = None
-    if scope == 'class':
-        links = UserClassLink.query.filter_by(user_id=current_user.id).all()
-        classes = [(l.grade, l.class_name) for l in links]
-    return scope, grade, classes
+    from app.utils.scope import resolve_scope
+    s = resolve_scope(current_user)
+    if s.origin == 'user_grades':
+        return 'user_grades', '', set(s.grades)
+    if s.origin in ('admin', 'school'):
+        return 'school', '', None
+    if s.origin == 'grade':
+        return 'grade', (current_user.grade or ''), None
+    if s.origin == 'class':
+        return 'class', '', set(s.classes)
+    return 'none', '', None
 
 
 def _apply_scope(q, scope, grade, classes):

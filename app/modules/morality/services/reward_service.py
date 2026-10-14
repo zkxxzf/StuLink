@@ -1,4 +1,4 @@
-# StuLink v1.19.47.29 2026-10-13
+# StuLink v1.19.47.30 2026-10-13
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 """德育奖惩服务层
 
@@ -57,22 +57,19 @@ def scope_of(user):
     """返回 (scope_type, grade, classes)
 
     scope_type: 'school' / 'user_grades' / 'grade' / 'class' / 'none'
+    P2：解析委托 app.utils.scope 唯一口径（行为与改造前一致）。
     """
-    if getattr(user, 'role', '') == 'admin':
+    from app.utils.scope import resolve_scope
+    s = resolve_scope(user)
+    if s.origin in ('admin', 'school'):
         return 'school', '', None
-    from app.modules.grades.services.scope import user_grade_scope
-    ug = user_grade_scope(user)
-    if ug is not None:
-        return 'user_grades', '', ug
-    pg = getattr(user, 'permission_group', None)
-    s = pg.scope_type if pg else 'none'
-    grade = getattr(user, 'grade', '') or ''
-    classes = None
-    if s == 'class':
-        from app.models import UserClassLink
-        classes = [(l.grade, l.class_name)
-                   for l in UserClassLink.query.filter_by(user_id=user.id).all()]
-    return s, grade, classes
+    if s.origin == 'user_grades':
+        return 'user_grades', '', set(s.grades)
+    if s.origin == 'grade':
+        return 'grade', (getattr(user, 'grade', '') or ''), None
+    if s.origin == 'class':
+        return 'class', '', set(s.classes)
+    return 'none', '', None
 
 
 def apply_scope(q, user):
