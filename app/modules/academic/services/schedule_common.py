@@ -1,4 +1,4 @@
-# StuLink v1.19.47.29 2026-10-10
+# StuLink v1.19.47.30 2026-10-10
 # 课表公共辅助函数（schedule_service 与 swap_service 共享）
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 """课表模块公共辅助层。
@@ -152,7 +152,7 @@ def pick_conflict(entries, week_range=None, week=None):
       （单周课与双周课可共用同一格子）。
     - week：只校验某一周（临时调课按具体日期所属教学周判断）。
     """
-    for e in entries:
+    for e in (entries or []):
         if week_range is not None and not week_ranges_overlap(e.week_range, week_range):
             continue
         if week is not None and not week_range_covers(e.week_range, week):
@@ -181,7 +181,7 @@ def temp_target_ids(schedule_id):
             return cache[schedule_id]
     rows = None
     out = None
-    # v1.19.47.29 换课：临时换课会同时产生「我方 / 对方」两条当天条目，两条都要排除；
+    # v1.19.47.30 换课：临时换课会同时产生「我方 / 对方」两条当天条目，两条都要排除；
     # 列未迁移的历史库降级为旧口径（只排除我方），不让课表读路径因缺列而崩。
     try:
         rows = (ScheduleSwap.query

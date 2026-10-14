@@ -1,4 +1,4 @@
-# StuLink v1.19.47.29 2026-10-13
+# StuLink v1.19.47.30 2026-10-13
 # 成绩汇报区「AI 一句话分析」：工具调用循环（agent loop）+ HTML 报告产出
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 """AI 一句话分析：让模型自己挑工具取数，最后产出可直接渲染的 HTML 报告。

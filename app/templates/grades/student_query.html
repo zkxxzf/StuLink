@@ -9,6 +9,14 @@
 {{ sq_tabs('grades') }}
 <div id="sqApp" class="no-print">
     <div class="g-filter-bar d-flex flex-wrap gap-2 align-items-center mb-3">
+        {# 2026-10-14 用户口径：选学生要有「年级 / 班级」下拉先缩小范围 ——
+           原先只能在关键词框里盲搜，候选又被后端截成 20 人（实际只剩一个班）。 #}
+        <select id="sqGrade" class="form-select form-select-sm w-auto" title="年级">
+            <option value="">全部年级</option>
+        </select>
+        <select id="sqClass" class="form-select form-select-sm w-auto" title="班级">
+            <option value="">全部班级</option>
+        </select>
         <div class="position-relative" style="min-width:240px;">
             <div class="input-group input-group-sm">
                 <input id="sqStudent" class="form-control" placeholder="输入学号或姓名搜索…" autocomplete="off" aria-label="学号或姓名">
@@ -16,8 +24,9 @@
                     <i class="bi bi-search"></i>
                 </button>
             </div>
+            {# 候选多时内部滚动，避免长列表把页面往下顶 #}
             <ul id="sqStudentMenu" class="list-group position-absolute w-100 shadow d-none"
-                style="z-index:1050; top:100%; left:0;"></ul>
+                style="z-index:1050; top:100%; left:0; max-height:340px; overflow-y:auto;"></ul>
         </div>
         <select id="sqTerm" class="form-select form-select-sm w-auto" title="学期"><option value="">学期</option></select>
         <select id="sqType" class="form-select form-select-sm w-auto" title="考试类型"><option value="">考试类型</option></select>

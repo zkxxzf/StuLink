@@ -16,7 +16,7 @@
     /* 2026-10-10：加载出的课程列表加滚动条（课程多时不再把整页撑得很长），表头吸附 */
     .entry-scroll { max-height: 340px; overflow: auto; border: 1px solid var(--sl-line); border-radius: 8px; }
     .entry-scroll thead th { position: sticky; top: 0; z-index: 2; background: var(--sl-surface-2); }
-    /* 2026-10-13（v1.19.47.29）课程多时按班级分组 + 吸底操作栏，不再需要滚到页面底部 */
+    /* 2026-10-13（v1.19.47.30）课程多时按班级分组 + 吸底操作栏，不再需要滚到页面底部 */
     tr.grp-head td { background: var(--sl-surface-3); font-size: 13px; }
     tr.grp-head .grp-toggle { cursor: pointer; user-select: none; }
     .bulk-bar { position: sticky; bottom: 0; z-index: 5; background: var(--sl-surface);
@@ -349,7 +349,12 @@
             var $tr = $(this), id = $tr.data('id'), $st = $tr.find('[data-st]');
             var t = targetOf($tr);
             $st.attr('class', 'st-idle').text('检测中…');
-            $.getJSON(cfg.slotsUrl, { entry_id: id }).done(function (res) {
+            // 2026-10-14（单双周）：带上日期/永久口径，占用按周次判定
+            $.getJSON(cfg.slotsUrl, {
+                entry_id: id,
+                swap_date: $('#swPermanent').is(':checked') ? '' : ($('#swapDate').val() || ''),
+                is_permanent: $('#swPermanent').is(':checked') ? 1 : ''
+            }).done(function (res) {
                 var slots = (res && res.data && res.data.slots) || [];
                 var hit = null;
                 for (var i = 0; i < slots.length; i++) {

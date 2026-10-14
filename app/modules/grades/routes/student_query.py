@@ -1,4 +1,4 @@
-# StuLink v1.19.47.29 2026-10-10
+# StuLink v1.19.47.30 2026-10-10
 # 个人成绩查询与分析：页面 + 数据API + 学生搜索 + 成绩证明生成/公开核验
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 import hashlib
@@ -169,17 +169,46 @@ def cert_records_page():
 
 # ============ API ============
 
+def _class_sort_key(class_name):
+    """班级自然序：让 '10班' 排在 '05班' 之后（纯字符串序会反过来）。"""
+    digits = ''.join(ch for ch in (class_name or '') if ch.isdigit())
+    return (int(digits) if digits else 9999, class_name or '')
+
+
 @bp.route('/api/student-query/search')
 @login_required
 @perm_required('grades.student_query')
 def api_search():
+    """学生候选搜索（2026-10-14 用户口径：候选要够，不能只剩一个班）。
+
+    原先固定 `limit(20)` 且无班级筛选，无关键词时只给出按年级/班级排序的前 20 人
+    —— 实际就是**某一个班**，老师翻不到别的班的学生。现在：
+      · 支持 `grade` / `class_name` 先缩小范围（下拉联动，级联条件与权限范围叠加）；
+      · 上限默认 100、最大 300，并回传 `total` / `truncated` 让前端提示需继续缩小；
+      · 排序补上学号，保证同班内顺序稳定（分页/展示不跳）。
+    """
     q = (request.args.get('q') or '').strip()
+    grade = (request.args.get('grade') or '').strip()
+    class_name = (request.args.get('class_name') or '').strip()
+    try:
+        limit = int(request.args.get('limit') or 100)
+    except (TypeError, ValueError):
+        limit = 100
+    limit = max(1, min(limit, 300))
+
     base = _student_query_in_scope(current_user)
+    if grade:
+        base = base.filter(Student.grade == grade)
+    if class_name:
+        base = base.filter(Student.class_name == class_name)
     if q:
         like = f'%{q}%'
         base = base.filter(or_(Student.student_number.like(like), Student.name.like(like)))
-    rows = base.order_by(Student.grade.desc(), Student.class_name).limit(20).all()
-    return jsonify(success=True, data=[
+    total = base.count()
+    rows = (base.order_by(Student.grade.desc(), Student.class_name, Student.student_number)
+            .limit(limit).all())
+    return jsonify(success=True, total=total, limit=limit, truncated=total > len(rows),
+                   data=[
         {'no': s.student_number, 'name': s.name, 'grade': s.grade, 'class_name': s.class_name}
         for s in rows
     ])
@@ -196,9 +225,17 @@ def api_sq_options():
     # 否则下拉里只剩有 term 的那一场，选了就查不到往年成绩。
     terms = sorted({t for t in (student_service.exam_term(e) for e in exams) if t})
     types = sorted({e.exam_type for e in exams if e.exam_type})
+    # 2026-10-14：班级候选（按年级分组），供「年级 → 班级」联动下拉先缩小范围；
+    # 班级按数字自然序排（01班 / 02班 / … / 10班，避免字符串排序把 10班排到 05班前）
+    classes = {}
+    for g, cn in base.with_entities(Student.grade, Student.class_name).distinct().all():
+        if g and cn:
+            classes.setdefault(g, set()).add(cn)
+    classes = {g: sorted(v, key=_class_sort_key) for g, v in classes.items()}
     from app.models.grades import SUBJECTS
     return jsonify(success=True, data={
-        'grades': grades, 'terms': terms, 'exam_types': types, 'subjects': SUBJECTS,
+        'grades': grades, 'classes': classes,
+        'terms': terms, 'exam_types': types, 'subjects': SUBJECTS,
         # 证明说明默认文案（生成弹窗的文本框预填它，经办人可改写）
         'cert_note_default': student_service.DEFAULT_CERT_NOTE,
     })

@@ -33,7 +33,7 @@ config_mod.Config.SQLALCHEMY_BINDS = {
     'history': 'sqlite:///' + os.path.join(_TMP, 'history.db'),
     'grades': 'sqlite:///' + os.path.join(_TMP, 'grades.db'),
     'points': 'sqlite:///' + os.path.join(_TMP, 'points.db'),
-    # 2026-10-13（v1.19.47.29）：德育奖惩库
+    # 2026-10-13（v1.19.47.30）：德育奖惩库
     'morality': 'sqlite:///' + os.path.join(_TMP, 'morality.db'),
     'academic': 'sqlite:///' + os.path.join(_TMP, 'academic.db'),
     # 2026-10-10：教务分库——查课 / 业绩 / 表单 各自独立库
@@ -214,10 +214,8 @@ def _urls():
         # 2026-10-10：任课安排（/academic/duty*）已下线 ——
         # 教师-学科关系以「任课教师映射」为唯一依据，故此处不再取 duty 地址
         'leaders': url_for('academic.subject_leaders'),
-        'leaders_save': url_for('academic.subject_leader_save'),
-        'leaders_del': url_for('academic.subject_leader_delete'),
         'leaders_export': url_for('academic.subject_leader_export'),
-        'leaders_can': url_for('academic.subject_leader_candidates'),
+        'matrix_save': url_for('academic.subject_leader_matrix_save'),
         'home': url_for('academic.academic_home'),
         'teachers': url_for('academic.teachers_page'),
         'teachers_export': url_for('academic.teachers_export'),
@@ -1542,111 +1540,175 @@ def check_duty_offline():
 # ══════════════════════════════════════════════════════════════════════════════
 @item('LEADER')
 def check_leader():
+    """页面矩阵渲染 + 命名 / 导出字段 + 「职责 / 组范围」整功能已删除。"""
     with app.app_context():
         u = _urls()
     with app.test_client() as c:
         login(c, 'ac_admin', TEST_PWD)
         token = get_csrf(c, u['leaders'])
-        payload = {'csrf_token': token, 'school_year': '2026-2027', 'term': '',
-                   'grade': '高一', 'subject': '语文', 'category': '备课组长',
-                   'leader_name': '张语文', 'leader_uid': 'T900001',
-                   'members': '高一语文备课组（5人）',
-                   'duty': '① 统筹进度 ② 组织集体备课'}
-        r = c.post(u['leaders_save'], data=payload, follow_redirects=True)
-        case('新增备课组长（年级 × 学科）',
-             r.status_code == 200 and '张语文' in r.get_data(as_text=True))
-        with app.app_context():
-            case('落库唯一', SubjectLeader.query.count() == 1)
+        hdrs = {'X-CSRFToken': token}
 
-        # 教研组长：只按学科，年级留空＝全校（与高一备课组长共存，不撞唯一键）
-        r = c.post(u['leaders_save'],
-                   data=dict(payload, category='教研组长', grade='',
-                             members='语文教研组（12人）', duty='① 全校教研计划'),
-                   follow_redirects=True)
+        # 备课组长（高一语文）+ 教研组长（语文，不分年级）共存：唯一键必须含类别
+        c.post(u['matrix_save'], headers=hdrs, json={
+            'school_year': '2026-2027', 'term': '',
+            'cells': {'高一|语文': 'T900001', '教研组|语文': 'T900001'}})
         with app.app_context():
-            rows = SubjectLeader.query.all()
-            case('教研组长不分年级（与备课组长共存）',
-                 len(rows) == 2 and any(x.category == '教研组长' and x.grade == '' for x in rows),
-                 f'{len(rows)}')
-
-        # 备课组长缺年级 → 拒绝（口径：高一 / 高二 / 高三 必选）
-        r = c.post(u['leaders_save'],
-                   data=dict(payload, grade='', subject='数学', leader_name='李数学'),
-                   follow_redirects=True)
-        with app.app_context():
-            n = SubjectLeader.query.count()
-        case('备课组长必须选年级', n == 2 and '必须选年级' in r.get_data(as_text=True), f'{n}')
-
-        # 跨学科教师不能当组长（李数学教数学，不能当语文组长）
-        r = c.post(u['leaders_save'],
-                   data=dict(payload, subject='语文', leader_name='李数学'),
-                   follow_redirects=True)
-        with app.app_context():
-            n = SubjectLeader.query.count()
-        case('组长必须是本学科教师（跨学科被拒）',
-             n == 2 and '必须是本学科教师' in r.get_data(as_text=True), f'{n}')
-
-        # 本学科教师正常落库：高二数学备课组长（李数学）
-        c.post(u['leaders_save'],
-               data=dict(payload, grade='高二', subject='数学', leader_name='李数学',
-                         leader_uid='T900002'), follow_redirects=True)
-        # 综合组：体育归「综合组」（孙体育在课表教体育，任课映射没有音体美）
-        c.post(u['leaders_save'],
-               data=dict(payload, grade='高一', subject='体育', leader_name='孙体育',
-                         leader_uid='T900006'), follow_redirects=True)
-        with app.app_context():
-            n = SubjectLeader.query.count()
-        case('本学科教师 + 综合组学科都能保存', n == 4, f'{n}')
-
-        # 同键重复保存=更新（不产生新行）
-        c.post(u['leaders_save'], data=dict(payload, duty='更新后的职责'),
-               follow_redirects=True)
-        with app.app_context():
-            rows = SubjectLeader.query.all()
-            ld0 = SubjectLeader.query.filter_by(grade='高一', subject='语文').first()
-            case('同键重复保存=更新', len(rows) == 4 and ld0.duty == '更新后的职责',
-                 f'{len(rows)}')
+            rows = SubjectLeader.query.filter_by(school_year='2026-2027').all()
+        case('备课组长与教研组长可共存（唯一键含类别）',
+             len(rows) == 2 and {(x.category, x.grade) for x in rows}
+             == {('备课组长', '高一'), ('教研组长', '')},
+             str([(x.category, x.grade) for x in rows]))
 
         lh = c.get(u['leaders']).get_data(as_text=True)
-        case('页面两类组长都有（备课组长 / 教研组长）',
-             '备课组长' in lh and '教研组长' in lh)
-        case('按学科组分组展示 + 职责',
-             '语文' in lh and '李数学' in lh and '更新后的职责' in lh)
+        case('页面是学科组长矩阵（两类组长 + 年级列）',
+             '学科组长' in lh and '备课组长' in lh and '教研组长' in lh
+             and 'id="ldMatrix"' in lh)
         case('音体美信通心合并为综合组', '综合组' in lh and '孙体育' in lh)
-        case('备课组范围渲染', '高一语文备课组（5人）' in lh)
-        r = c.get(u['leaders'], query_string={'category': '教研组长'})
-        rh = r.get_data(as_text=True)
-        case('类别筛选生效（只留教研组长）',
-             '张语文' in rh and '李数学' not in rh and '孙体育' not in rh)
-        r = c.get(u['leaders'], query_string={'subject': '综合组'})
-        case('综合组筛选生效', '孙体育' in r.get_data(as_text=True) and '李数学' not in r.get_data(as_text=True))
+        case('页面不再有职责 / 组范围（整功能删除）',
+             not any(k in lh for k in ('职责与组范围', '主要职责', '备课组范围',
+                                       '教研组范围', '填入常用职责', 'ldDuty',
+                                       'leaderModal')), '页面仍残留职责相关元素')
 
-        # 候选接口：只给本学科教师
-        r = c.get(u['leaders_can'], query_string={'subject': '语文'})
-        try:
-            names = [t['name'] for t in r.get_json()['data']]
-            case('候选组长只含本学科教师',
-                 '张语文' in names and '李数学' not in names, str(names))
-        except Exception as e:  # noqa: BLE001
-            case('候选组长接口可用', False, str(e))
+        # 已删除的路由必须 404（不留死 API）
+        for path in ('/academic/leaders/save', '/academic/leaders/delete',
+                     '/academic/leaders/candidates'):
+            r = c.post(path, data={'csrf_token': token})
+            case(f'旧接口已删除 {path}', r.status_code == 404, f'status={r.status_code}')
 
         r = c.get(u['leaders_export'], query_string={'school_year': '2026-2027'})
         try:
             texts = sheet_texts(r.data)
-            case('组长名单导出（含类别 / 学科组 / 职责列）',
-                 any('学科组长名单' in t for t in texts)
-                 and any('李数学' in t for t in texts)
-                 and any('主要职责' in t for t in texts))
+            joined = ' '.join(texts)
+            case('导出含类别 / 学科组列',
+                 any('学科组长名单' in t for t in texts) and '学科组' in joined
+                 and '张语文' in joined)
+            case('导出不再含职责 / 组范围列',
+                 '主要职责' not in joined and '组范围' not in joined)
         except Exception as e:  # noqa: BLE001
             case('组长名单导出可解析', False, str(e))
 
         with app.app_context():
-            ids = [x.id for x in SubjectLeader.query.all()]
-        for lid in ids:
-            c.post(u['leaders_del'], data={'csrf_token': token, 'id': lid,
-                                           'school_year': '2026-2027'}, follow_redirects=True)
+            SubjectLeader.query.filter_by(school_year='2026-2027').delete()
+            db.session.commit()
+            case('组长用例清理干净', SubjectLeader.query.count() == 0)
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# 学科组长矩阵（2026-10-14：行＝学科、列＝高一/高二/高三/教研组，格内选本学科教师）
+# ══════════════════════════════════════════════════════════════════════════════
+@item('LEADMATRIX')
+def check_leader_matrix():
+    """矩阵视图：服务端渲染 15 学科 × 4 列；批量保存在应用层逐格校验本学科教师。"""
+    with app.app_context():
+        u = _urls()
+    with app.test_client() as c:
+        login(c, 'ac_admin', TEST_PWD)
+        html = c.get(u['leaders']).get_data(as_text=True)
+        case('矩阵渲染：三类班长列 + 综合组分带',
+             all(k in html for k in ('高一', '高二', '高三', '教研组（不分年级）', '综合组'))
+             and 'id="ldMatrix"' in html)
+        case('矩阵格内是本学科教师下拉',
+             'class="form-select form-select-sm lcell"' in html and 'data-key="高一|语文"' in html)
+        case('矩阵行含 15 个学科（9 文化 + 6 综合）',
+             all(f'data-key="教研组|{s}"' in html for s in
+                 ('语文', '数学', '外语', '物理', '化学', '生物', '政治', '历史', '地理',
+                  '体育', '音乐', '美术', '信息技术', '通用技术', '心理')))
+        token = get_csrf(c, u['leaders'])
+        hdrs = {'X-CSRFToken': token}       # JSON 接口：CSRF 走请求头
+
+        # 批量保存：备课组长（高一语文）+ 教研组长（语文，不分年级）
+        r = c.post(u['matrix_save'], headers=hdrs, json={
+            'school_year': '2026-2027', 'term': '',
+            'cells': {'高一|语文': 'T900001', '教研组|语文': 'T900001'}})
+        res = r.get_json() or {}
+        case('矩阵保存：备课组长 + 教研组长各 1 条',
+             res.get('success') and res['changes']['set'] == 2, str(res))
         with app.app_context():
-            case('删除组长记录', SubjectLeader.query.count() == 0)
+            rows = SubjectLeader.query.filter_by(school_year='2026-2027').all()
+            case('矩阵落库口径正确（类别 / 年级）',
+                 len(rows) == 2 and {(x.category, x.grade) for x in rows}
+                 == {('备课组长', '高一'), ('教研组长', '')},
+                 str([(x.category, x.grade, x.leader_name) for x in rows]))
+            case('矩阵自动带出教师姓名与编号',
+                 all(x.leader_name == '张语文' and x.leader_uid == 'T900001' for x in rows))
+
+        # 跨学科教师：李数学不能当语文组长（该格被忽略，不写库）
+        r = c.post(u['matrix_save'], headers=hdrs, json={
+            'school_year': '2026-2027', 'term': '',
+            'cells': {'高二|语文': 'T900002'}})
+        res = r.get_json() or {}
+        with app.app_context():
+            n = SubjectLeader.query.filter_by(school_year='2026-2027').count()
+        case('矩阵拒绝跨学科教师', res.get('skipped') and n == 2 and not res['changes']['set'],
+             str(res))
+
+        # 改派（换成另一位语文老师）+ 清空教研组长格
+        with app.app_context():
+            from app.models.academic import Teacher
+            db.session.add(Teacher(teacher_uid='T900010', name='赵语文', subject='语文',
+                                   status='active'))
+            db.session.commit()
+        r = c.post(u['matrix_save'], headers=hdrs, json={
+            'school_year': '2026-2027', 'term': '',
+            'cells': {'高一|语文': 'T900010', '教研组|语文': ''}})
+        res = r.get_json() or {}
+        with app.app_context():
+            row = SubjectLeader.query.filter_by(school_year='2026-2027',
+                                                category='备课组长').first()
+            left = SubjectLeader.query.filter_by(school_year='2026-2027').all()
+        case('矩阵改派 1 条 + 清空 1 条',
+             res['changes']['changed'] == 1 and res['changes']['cleared'] == 1
+             and row is not None and row.leader_name == '赵语文' and len(left) == 1,
+             str(res))
+
+        # 综合组学科（体育）：走课表兜底候选，能正常保存
+        r = c.post(u['matrix_save'], headers=hdrs, json={
+            'school_year': '2026-2027', 'term': '',
+            'cells': {'高一|体育': 'T900006'}})
+        res = r.get_json() or {}
+        case('矩阵可维护综合组学科（体育）', res.get('success') and res['changes']['set'] == 1,
+             str(res))
+
+        # 未提交的格子不动（局部保存）
+        r = c.post(u['matrix_save'], headers=hdrs,
+                   json={'school_year': '2026-2027', 'term': '', 'cells': {}})
+        res = r.get_json() or {}
+        with app.app_context():
+            n = SubjectLeader.query.filter_by(school_year='2026-2027').count()
+        case('矩阵局部保存：未提交的格子不动', n == 2, f'{n}')
+
+        # 学年必填 + 非 JSON body 容错
+        r = c.post(u['matrix_save'], headers=hdrs, json={'cells': {}})
+        case('矩阵保存校验学年必填', r.status_code == 400)
+        r = c.post(u['matrix_save'], headers=hdrs, data=json.dumps(
+            {'school_year': '2026-2027', 'term': '', 'cells': {}}),
+            content_type='application/x-www-form-urlencoded')
+        msg = (r.get_json() or {}).get('success')
+        case('矩阵兼容非 JSON body（jQuery 老写法）', msg,
+             f'status={r.status_code} body={r.get_data(as_text=True)[:120]}')
+
+        # 学期隔离：第一学期的登记不该出现在「整学年」矩阵里
+        c.post(u['matrix_save'], headers=hdrs, json={
+            'school_year': '2026-2027', 'term': '第一学期',
+            'cells': {'高三|数学': 'T900002'}})
+        with app.app_context():
+            from app.modules.academic.services import subject_leader_service as _svc
+            mx = _svc.matrix_data('2026-2027', '')
+            term1 = _svc.matrix_data('2026-2027', '第一学期')
+        case('矩阵按学期隔离',
+             (mx['cells']['高三|数学'] or {}).get('uid') in (None, '')
+             and (term1['cells']['高三|数学'] or {}).get('name') == '李数学',
+             str(term1['cells']['高三|数学']))
+
+        with app.app_context():
+            from app.models.academic import Teacher
+            for x in SubjectLeader.query.filter_by(school_year='2026-2027').all():
+                db.session.delete(x)
+            t = Teacher.query.filter_by(teacher_uid='T900010').first()
+            if t:
+                db.session.delete(t)
+            db.session.commit()
+            case('矩阵用例清理干净', SubjectLeader.query.count() == 0)
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -2050,7 +2112,7 @@ def check_inspection_mark():
 
 @item('SWAPEXCH')
 def check_two_person_exchange():
-    """两人换课（v1.19.47.29）：换时段 / 换班上课 / 请人代课 × 临时与永久，
+    """两人换课（v1.19.47.30）：换时段 / 换班上课 / 请人代课 × 临时与永久，
     覆盖「对方先确认 → 教务审批 → 执行」全链路 + 拒绝 / 越权 / 校验路径。"""
     from app.modules.academic.services import swap_service
 
@@ -2222,12 +2284,14 @@ def check_two_person_exchange():
         b6.week_range = '2-20'
         db.session.commit()
         entry_ids += [a6.id, b6.id]
-        ok7, msg7, _ = swap_service.apply_exchange_batch(
+        # 2026-10-14：两节课周次不同**也可以对调**（各保留自己的周次），不再拒绝
+        ok7, msg7, res7 = swap_service.apply_exchange_batch(
             applicant_uid='TX0001', applicant_name='甲语文',
             items=[{'entry_id': a6.id, 'partner_uid': 'TX0002', 'partner_entry_id': b6.id, 'swap_time': True, 'swap_class': False}],
             kind='exchange', is_permanent=True, reason='单双周回归')
-        case('换课：两节课单双周设置不同 → 拒绝',
-             (not ok7) and '单双周' in msg7, msg7)
+        swap_ids.append(res7.get('rep_id'))
+        case('换课：两节课单双周设置不同 → 允许对调（各保留自己的周次）',
+             bool(ok7 and res7.get('created') == 1), f'{msg7} {res7}')
 
         # ── 清理本次自建数据（临时库，保持其他项互不干扰）──
         for eid in entry_ids:
@@ -2373,7 +2437,7 @@ def check_swap_exchange_batch():
 
 @item('SWAPMIXED')
 def check_swap_mixed_batch():
-    """调课页合并（v1.19.47.29）：一次提交 = 几节调空档 + 几节与同事换上课时间（同一批次）；
+    """调课页合并（v1.19.47.30）：一次提交 = 几节调空档 + 几节与同事换上课时间（同一批次）；
     2026-10-14：对调只换时间（不再连班级一起换）。"""
     from app.models.timetable import ScheduleEntry, ScheduleSwap
     from app.modules.academic.services import swap_service
@@ -2455,6 +2519,122 @@ def check_swap_mixed_batch():
             db.session.delete(t)
         for s in ScheduleSwap.query.filter_by(batch_id=batch_id).all():
             db.session.delete(s)
+        db.session.commit()
+
+
+@item('SWAPPARITY')
+def check_swap_parity():
+    """单双周调课（2026-10-14）：同格的单/双周课不算冲突、跨周次也能对调、
+    临时调到"不是上课周"的那天要被拒绝。"""
+    from app.models.timetable import ScheduleEntry, ScheduleSwap
+    from app.modules.academic.services import swap_service
+
+    def _mk(g, cn, wd, pn, subj, tuid, tname, wr):
+        e = ScheduleEntry(term_schedule_id=TS_ID, grade=g, class_name=cn,
+                          weekday=wd, period_number=pn, subject=subj,
+                          teacher_uid=tuid, teacher_name=tname,
+                          week_range=wr, entry_type='normal')
+        db.session.add(e)
+        return e
+
+    entry_ids, swap_ids = [], []
+    with app.app_context():
+        # 96班：甲 双周 信息技术 与 乙 单周 心理健康 共用 周三第2节（典型单双周排法）
+        a = _mk('高二', '96班', 3, 2, '信息技术', 'PZ0001', '甲老师', '双周')
+        b = _mk('高二', '96班', 3, 2, '心理健康', 'PZ0002', '乙老师', '单周')
+        # 97班：丙 双周课 / 丁 每周课（用于跨周次对调）
+        c = _mk('高二', '97班', 3, 2, '信息技术', 'PZ0003', '丙老师', '双周')
+        d = _mk('高二', '97班', 4, 3, '数学', 'PZ0004', '丁老师', '1-18')
+        # 98班：戊 双周课（用于临时调课的周次校验）
+        f = _mk('高二', '98班', 3, 2, '信息技术', 'PZ0005', '戊老师', '双周')
+        db.session.commit()
+        entry_ids += [a.id, b.id, c.id, d.id, f.id]
+
+        # ① 目标格：双周课看"单周占用的那一格"= 自习空档（不是冲突、也不是对调）
+        slots = swap_service.get_available_slots(
+            TS_ID, '高二', '96班', 'PZ0001', exclude_entry_id=a.id, include_all=True,
+            week_range='双周')
+        wed2 = [s for s in slots if s['weekday'] == 3 and s['period_number'] == 2]
+        case('单双周：双周课看单周占用格 = 自习空档（不再标冲突/对调）',
+             bool(wed2) and wed2[0]['available'] and not wed2[0]['swappable'],
+             f'{wed2}')
+        slots_b = swap_service.get_available_slots(
+            TS_ID, '高二', '96班', 'PZ0002', exclude_entry_id=b.id, include_all=True,
+            week_range='单周')
+        wed2b = [s for s in slots_b if s['weekday'] == 3 and s['period_number'] == 2]
+        case('单双周：反过来（单周课看双周占用格）同样是空档',
+             bool(wed2b) and wed2b[0]['available'] and not wed2b[0]['swappable'],
+             f'{wed2b}')
+        # 不传周次上下文时保守按占用处理（老口径兜底，避免误判）
+        slots0 = swap_service.get_available_slots(
+            TS_ID, '高二', '96班', 'PZ0001', exclude_entry_id=a.id, include_all=True)
+        wed2c = [s for s in slots0 if s['weekday'] == 3 and s['period_number'] == 2]
+        case('单双周：不传周次上下文时保守标为占用（老口径兜底）',
+             bool(wed2c) and not wed2c[0]['available'] and wed2c[0]['swappable'],
+             f'{wed2c}')
+
+        # ② 跨周次对调：丙（双周）↔ 丁（每周）—— 各保留自己的周次
+        ok, msg, res = swap_service.apply_swap_batch(
+            applicant_uid='PZ0003', applicant_name='丙老师',
+            items=[{'entry_id': c.id, 'new_weekday': 4, 'new_period': 3,
+                    'partner_entry_id': d.id}],
+            is_permanent=True, reason='单双周对调回归')
+        sid = res.get('rep_id')
+        swap_ids.append(sid)
+        sw = db.session.get(ScheduleSwap, sid) if sid else None
+        case('单双周：双周课与每周课可以对调（不再拒绝）',
+             bool(ok and sw and sw.partner_entry_id == d.id and sw.swap_time
+                  and not sw.swap_class), f'{msg} {res}')
+        swap_service.respond_exchange(sid, 'agree', 1, '丁老师')
+        swap_service.review_swap(sid, 1, '教务主任', 'approve')
+        swap_service.review_swap(sid, 1, '课表管理', 'approve')
+        ok_e, msg_e, _ = swap_service.execute_swap(sid, 1, '课表管理')
+        db.session.expire_all()
+        sw = db.session.get(ScheduleSwap, sid)
+        n1 = db.session.get(ScheduleEntry, sw.target_entry_id) if sw.target_entry_id else None
+        n2 = (db.session.get(ScheduleEntry, sw.partner_target_entry_id)
+              if sw.partner_target_entry_id else None)
+        case('单双周：执行后各自保留自己的周次（双周 → 周四第3节仍双周）',
+             bool(ok_e and n1 and n2
+                  and n1.weekday == 4 and n1.period_number == 3 and n1.week_range == '双周'
+                  and n2.weekday == 3 and n2.period_number == 2 and n2.week_range == '1-18'),
+             f'{msg_e} n1={n1.week_range if n1 else None} n2={n2.week_range if n2 else None}')
+        if n1:
+            entry_ids.append(n1.id)
+        if n2:
+            entry_ids.append(n2.id)
+
+        # ③ 临时调课：目标日期不是这节课的上课周 → 拒绝并说明是第几周
+        ok_bad, msg_bad, res_bad = swap_service.apply_swap_batch(
+            applicant_uid='PZ0005', applicant_name='戊老师',
+            items=[{'entry_id': f.id, 'new_weekday': 4, 'new_period': 3,
+                    'swap_date': date(2026, 9, 15)}],       # 第3周 = 单周
+            is_permanent=False, reason='单周日期调双周课')
+        bad_desc = ((res_bad.get('conflicts') or [{}])[0]).get('desc', '')
+        case('单双周：临时调到"不是上课周"的那天 → 拒绝（明细说明周次）',
+             (not ok_bad) and ('周次' in bad_desc or '上课周' in bad_desc),
+             f'{msg_bad} / {bad_desc}')
+        ok_ok, msg_ok, res_ok = swap_service.apply_swap_batch(
+            applicant_uid='PZ0005', applicant_name='戊老师',
+            items=[{'entry_id': f.id, 'new_weekday': 4, 'new_period': 3,
+                    'swap_date': date(2026, 9, 8)}],        # 第2周 = 双周
+            is_permanent=False, reason='双周日期调双周课')
+        swap_ids.append(res_ok.get('rep_id'))
+        case('单双周：临时调到它的上课周那天 → 正常创建',
+             bool(ok_ok and res_ok.get('created') == 1), f'{msg_ok} {res_ok}')
+
+        # ── 清理 ──
+        for s in ScheduleSwap.query.filter(
+                ScheduleSwap.id.in_([i for i in swap_ids if i])).all():
+            db.session.delete(s)
+        db.session.commit()
+        for eid in entry_ids:
+            e = db.session.get(ScheduleEntry, eid)
+            if e:
+                db.session.delete(e)
+        for t in ScheduleEntry.query.filter(
+                ScheduleEntry.note.like('%换课%'), ScheduleEntry.note.isnot(None)).all():
+            db.session.delete(t)
         db.session.commit()
 
 
@@ -2596,7 +2776,7 @@ def check_swap_bulk_offset():
 
 @item('WORKBENCHSWAP')
 def check_workbench_swap():
-    """教师工作台里的调课区块（v1.19.47.29）：入口 + 待我确认 + 我的申请。"""
+    """教师工作台里的调课区块（v1.19.47.30）：入口 + 待我确认 + 我的申请。"""
     with app.test_client() as c:
         login(c, 'ac_admin', TEST_PWD)
         r = c.get('/workbench/')      # 蓝图前缀 /workbench + 路由 '/'（不带斜杠会 308）

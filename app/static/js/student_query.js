@@ -278,6 +278,9 @@ function init() {
         fillSelect('#sqTerm', opts.terms);
         fillSelect('#sqType', opts.exam_types);
         fillSelect('#sqSubject', opts.subjects);
+        // 2026-10-14：年级 / 班级下拉（选学生先缩小范围，候选不再只剩一个班）
+        fillSelect('#sqGrade', opts.grades);
+        refreshClassOptions();
         $('#sqEmpty').removeClass('d-none');
     }).fail(function () { $('#sqEmpty').removeClass('d-none'); });
 
@@ -300,7 +303,7 @@ function autoOpenFromUrl() {
         var hit = (res.data || []).filter(function (s) { return String(s.no) === String(no); })[0];
         if (!hit) { $('#sqEmpty').removeClass('d-none'); return; }
         state.student_no = hit.no;
-        $('#sqStudent').val(hit.name + '（' + hit.no + '）');
+        $('#sqStudent').val(hit.no);   // 2026-10-14：框里只放学号，不带「姓名（学号）」
         loadData();
     });
 }
@@ -311,52 +314,117 @@ function fillSelect(sel, items) {
     items.forEach(function (v) { el.append('<option value="' + escHtml(v) + '">' + escHtml(v) + '</option>'); });
 }
 
+/* ---------- 学生候选：年级 / 班级下拉联动（2026-10-14 用户口径） ----------
+   选学生要"能选就别盲搜"：先选年级 → 班级 → （可选）学号/姓名，
+   候选按范围列出；后端返回 total/truncated，超量时提示继续缩小范围。 */
+function classListOf(grade) {
+    var all = (opts && opts.classes) || {};
+    if (grade) { return (all[grade] || []).slice(); }
+    var out = [];
+    Object.keys(all).forEach(function (g) { out = out.concat(all[g] || []); });
+    return out.sort();
+}
+
+function refreshClassOptions() {
+    var sel = $('#sqClass');
+    var keep = sel.val();
+    sel.empty().append('<option value="">全部班级</option>');
+    fillSelect('#sqClass', classListOf($('#sqGrade').val()));
+    if (keep) { sel.val(keep); }
+    if (!sel.val()) { sel.val(''); }      // 原班级不属于新年级时回到「全部班级」
+}
+
+/* 关键词规范化（2026-10-14 用户口径："直接填学号或者姓名就可以了"）：
+   搜索框里只应有「学号」或「姓名」。若残留「姓名（学号）」「姓名 学号」这类复合显示值，
+   一律取学号去搜 —— 否则整串拿去做 LIKE 永远匹配不到
+   （用户实测：选中学生后再点搜索 → 「无匹配学生」）。 */
+function cleanQuery(raw) {
+    var s = String(raw == null ? '' : raw).trim();
+    if (!s) { return ''; }
+    var m = s.match(/[（(]\s*([0-9A-Za-z_-]{4,})\s*[)）]\s*$/)
+        || s.match(/^[\u4e00-\u9fa5A-Za-z·]+[\s·]+([0-9A-Za-z_-]{4,})$/);
+    return m ? m[1] : s;
+}
+
+function searchParams() {
+    var p = {};
+    var g = ($('#sqGrade').val() || ''), c = ($('#sqClass').val() || '');
+    var q = cleanQuery($('#sqStudent').val());
+    if (g) { p.grade = g; }
+    if (c) { p.class_name = c; }
+    if (q) { p.q = q; }
+    return p;
+}
+
+function hasFilterOrKeyword() {
+    return !!(cleanQuery($('#sqStudent').val())
+        || $('#sqGrade').val() || $('#sqClass').val());
+}
+
 function bindSearch() {
     var timer = null;
     $('#sqStudent').on('input', function () {
-        var q = $(this).val().trim();
         clearTimeout(timer);
-        if (q.length < 1) { $('#sqStudentMenu').addClass('d-none').empty(); return; }
-        timer = setTimeout(function () { doSearch(q); }, 250);
+        if (!hasFilterOrKeyword()) { $('#sqStudentMenu').addClass('d-none').empty(); return; }
+        timer = setTimeout(function () { doSearch(); }, 250);
     });
     $('#sqSearchBtn').on('click', function () {
-        var q = $('#sqStudent').val().trim();
-        if (q) doSearch(q);
+        var q = cleanQuery($('#sqStudent').val());
+        // 框里正好是已选中学生的学号 → 直接查询本人成绩（不必再弹一次候选）
+        if (state.student_no && q === String(state.student_no)) { loadData(); return; }
+        if (hasFilterOrKeyword()) { doSearch(); }
     });
+    // 下拉一变就刷新候选 —— 选完班级即可直接看到该班学生，不必再敲关键词
+    $('#sqGrade').on('change', function () { refreshClassOptions(); doSearch(); });
+    $('#sqClass').on('change', function () { doSearch(); });
     $(document).on('click', function (e) {
         if (!$(e.target).closest('#sqStudent, #sqStudentMenu').length) {
             $('#sqStudentMenu').addClass('d-none');
         }
     });
-    $('#sqStudentMenu').on('click', 'li', function () {
+    $('#sqStudentMenu').on('click', 'li[data-no]', function () {
         var no = $(this).data('no'), name = $(this).data('name');
         state.student_no = no;
         state.certChosen = [];   // 换学生时清空证明自选口径
-        $('#sqStudent').val(name + '（' + no + '）');
+        // 2026-10-14 用户口径：框里只填学号（姓名/班级见下方「当前学生」条与结果区），
+        // 避免「姓名（学号）」整串被当成关键词，一点搜索就"无匹配学生"
+        $('#sqStudent').val(no);
         $('#sqStudentMenu').addClass('d-none').empty();
         loadData();
     });
 }
 
-function doSearch(q) {
-    $.getJSON('/grades/api/student-query/search?q=' + encodeURIComponent(q), function (res) {
-        var menu = $('#sqStudentMenu').empty();
-        var list = res.data || [];
-        if (!list.length) {
-            menu.append('<li class="list-group-item text-muted small">无匹配学生（或超出您的权限范围）</li>');
-        } else {
-            list.forEach(function (s) {
-                menu.append('<li class="list-group-item list-group-item-action" data-no="' + escHtml(s.no)
-                    + '" data-name="' + escHtml(s.name) + '">' + escHtml(s.name)
-                    + ' <span class="text-muted">(' + escHtml(s.no) + ' · ' + escHtml(s.grade)
-                    + ' ' + escHtml(s.class_name) + ')</span></li>');
-            });
-        }
-        menu.removeClass('d-none');
+function doSearch() {
+    var p = searchParams();
+    if (!p.q && !p.grade && !p.class_name) { return; }
+    $.getJSON('/grades/api/student-query/search?' + $.param(p), function (res) {
+        renderCandidates(res);
     }).fail(function () {
         $('#sqStudentMenu').removeClass('d-none').empty()
             .append('<li class="list-group-item text-danger small">搜索失败</li>');
     });
+}
+
+function renderCandidates(res) {
+    var menu = $('#sqStudentMenu').empty();
+    var list = (res && res.data) || [];
+    if (!list.length) {
+        menu.append('<li class="list-group-item text-muted small">'
+            + '无匹配学生（或超出您的权限范围）</li>');
+    } else {
+        list.forEach(function (s) {
+            menu.append('<li class="list-group-item list-group-item-action" data-no="' + escHtml(s.no)
+                + '" data-name="' + escHtml(s.name) + '">' + escHtml(s.name)
+                + ' <span class="text-muted">(' + escHtml(s.no) + ' · ' + escHtml(s.grade)
+                + ' ' + escHtml(s.class_name) + ')</span></li>');
+        });
+        if (res && res.truncated) {
+            menu.append('<li class="list-group-item text-warning small">共 ' + res.total
+                + ' 人，仅显示前 ' + res.limit
+                + ' 人 —— 请再选班级或用学号/姓名缩小范围</li>');
+        }
+    }
+    menu.removeClass('d-none');
 }
 
 function buildQuery() {

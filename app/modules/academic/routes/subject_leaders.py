@@ -2,7 +2,8 @@
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 """学科组长（2026-09-25 建，2026-10-14 由「备课组长」升级）。
 
-`/academic/leaders`：学科组长名单，一页两类 ——
+`/academic/leaders`：学科组长矩阵 —— 行＝学科（含综合组），
+列＝高一 / 高二 / 高三 / 教研组（不分年级），格子里选本学科教师。
 
 - **备课组长**：年级 × 学科（高一 / 高二 / 高三 各学科各一名），年级必填；
 - **教研组长**：只按学科（不分年级），年级留空＝全校；
@@ -11,21 +12,22 @@
 
 落库在 academic.db.subject_leaders。
 
+2026-10-14：原「职责 / 组范围」明细页签、新增/编辑弹窗、单条保存与删除接口
+**整功能删除**（用户确认从未使用），页面只保留矩阵维护 + 导出 + 打印。
+
 已下线（2026-10-10）：
 - 任课安排（原 `/academic/duty`）：教师-学科关系以「任课教师映射」
   （TeacherSubjectLink）为唯一依据；
 - 晚自习值班（原 `/academic/night-duty`、`/academic/schedule/<sid>/night-duty`）：
   晚自习在「全校总课表」里本就按节次列出并带值班教师，独立页面重复，整功能删除。
 """
+import json
 import logging
 from datetime import datetime
 
-from flask import (jsonify, render_template, request, redirect, url_for, flash,
-                   send_file)
+from flask import jsonify, render_template, request, send_file
 from flask_login import login_required, current_user
 
-from app.models.academic import (COMPREHENSIVE_GROUP, LEADER_CATEGORIES,
-                                 LEADER_GRADES, SUBJECT_ORDER)
 from app.modules.academic import bp
 from app.modules.academic.services import subject_leader_service as svc
 from app.utils.decorators import perm_required
@@ -38,123 +40,65 @@ logger = logging.getLogger(__name__)
 _XLSX_MIME = ('application/vnd.openxmlformats-officedocument'
               '.spreadsheetml.sheet')
 
-# ── 学科组长名单 ───────────────────────────────────────────────────────────
 
+# ── 学科组长矩阵 ───────────────────────────────────────────────────────────
 
-def _leader_filters():
-    return {
-        'school_year': (request.args.get('school_year') or '').strip(),
-        'term': (request.args.get('term') or '').strip(),
-        'subject': (request.args.get('subject') or '').strip(),
-        'grade': (request.args.get('grade') or '').strip(),
-        'category': (request.args.get('category') or '').strip(),
-        'keyword': (request.args.get('q') or '').strip(),
-    }
-
-
-def _subject_options():
-    """学科下拉：常规学科 + 综合组（音体美信通心的合并项）。"""
-    return list(SUBJECT_ORDER) + [COMPREHENSIVE_GROUP]
-
-
-def _collect_leaders(f):
+def _context():
+    """学年 / 学期口径：默认取最近有登记的学年，其次当前学年。"""
     years = svc.leader_years()
-    school_year = f['school_year'] or (years[0] if years else '')
-    leaders = svc.list_leaders(school_year=school_year or None,
-                               term=f['term'] or None,
-                               subject=f['subject'] or None,
-                               grade=f['grade'] or None,
-                               keyword=f['keyword'] or None,
-                               category=f['category'] or None)
-    return years, school_year, leaders
+    school_year = (request.args.get('school_year') or '').strip()
+    if not school_year:
+        school_year = years[0] if years else ''
+    term = (request.args.get('term') or '').strip()
+    return years, school_year, term
 
 
 @bp.route('/leaders')
 @login_required
 @perm_required('academic.view')
 def subject_leaders():
-    """学科组长名单：教研组长（不分年级）＋ 备课组长（年级 × 学科）"""
-    f = _leader_filters()
-    years, school_year, leaders = _collect_leaders(f)
-    cats = [f['category']] if f['category'] in LEADER_CATEGORIES else list(LEADER_CATEGORIES)
+    """学科组长矩阵（行＝学科、列＝高一/高二/高三/教研组，格内选本学科教师）。"""
+    years, school_year, term = _context()
     return render_template('academic/subject_leaders.html',
-                           leaders=leaders,
-                           grouped=svc.group_leaders_by_category(leaders, cats),
-                           years=years, school_year=school_year,
-                           subjects=_subject_options(),
-                           categories=list(LEADER_CATEGORIES),
-                           duty_templates={c: svc.duty_templates(c) for c in LEADER_CATEGORIES},
-                           grades=_grade_options(),
-                           f=f, can_edit=current_user.has_perm('academic.edit'))
+                           matrix=svc.matrix_data(school_year, term),
+                           years=years, school_year=school_year, term=term,
+                           can_edit=current_user.has_perm('academic.edit'))
 
 
-def _grade_options():
-    """年级下拉候选：备课组长固定高中三个年级，班级档案里的年级兜底。"""
-    grades = list(LEADER_GRADES)
-    try:
-        from app.models import ClassProfile
-        for g in sorted({cp.grade for cp in ClassProfile.query.all() if cp.grade}):
-            if g not in grades:
-                grades.append(g)
-    except Exception as _e:  # noqa: BLE001
-        logger.warning('subject_leaders::_grade_options 异常（已降级处理）: %s', _e)
-    return grades
-
-
-@bp.route('/leaders/candidates')
-@login_required
-@perm_required('academic.view')
-def subject_leader_candidates():
-    """本学科候选组长 JSON（下拉只给本学科教师，兼作前端提示依据）。"""
-    subject = (request.args.get('subject') or '').strip()
-    keyword = (request.args.get('q') or '').strip()
-    return jsonify(success=True, subject=subject,
-                   data=svc.teacher_candidates(subject, keyword=keyword or None))
-
-
-@bp.route('/leaders/save', methods=['POST'])
+@bp.route('/leaders/matrix/save', methods=['POST'])
 @login_required
 @perm_required('academic.edit')
-def subject_leader_save():
-    """新增/更新学科组长（同学年×学期×年级×学科×类别重复保存即更新）"""
-    data = request.get_json(silent=True) if request.is_json else request.form.to_dict()
-    data = data or {}
+def subject_leader_matrix_save():
+    """矩阵批量保存：{'school_year','term','cells': {'高一|语文': 教师编号 或 ''}}
+
+    空值＝清空该格（删除这条登记）；未提交的格子不动。保存前逐格校验「组长是本学科教师」。
+    """
+    data = request.get_json(silent=True)
+    if not isinstance(data, dict):
+        # 兼容「JSON 文本 + 表单 content-type」的老写法（jQuery $.post 不声明 JSON）：
+        # 此时 CSRF 校验已把 body 当表单解析，get_data() 取不到原文，
+        # 但 JSON 文本会原样成为表单的**字段名**，从 request.form 的键里捞回来。
+        raw = (request.get_data(as_text=True) or '').strip()
+        if not raw.startswith('{'):
+            raw = next((k.strip() for k in request.form if k.strip().startswith('{')), '')
+        try:
+            data = json.loads(raw) if raw.startswith('{') else {}
+        except (ValueError, TypeError):
+            data = {}
     try:
-        leader, created, known = svc.save_leader(data, operator_id=current_user.id)
+        changes, skipped = svc.save_matrix(data, operator_id=current_user.id)
     except ValueError as e:
-        flash(str(e), 'danger')
-        return redirect(url_for('academic.subject_leaders',
-                                school_year=(data.get('school_year') or '').strip()))
-    if not known:
-        flash(f'教师档案里没有「{leader.leader_name}」（已按手填姓名保存）。'
-              f'如需自动带出教师编号，请先在「教师名单」补建该教师并维护任课学科', 'warning')
-    log_operation(current_user, '创建' if created else '更新', '学科组长', leader.id,
-                  f'{leader.school_year} {leader.grade or "全校"}{leader.subject}'
-                  f' {leader.category} {leader.leader_name}', module='academic')
-    flash(f'{leader.category}「{leader.leader_name}」（{leader.grade or "全校"}'
-          f'{leader.subject}）已{"新增" if created else "更新"}', 'success')
-    return redirect(url_for('academic.subject_leaders',
-                            school_year=leader.school_year,
-                            subject=leader.subject or None,
-                            category=leader.category or None))
-
-
-@bp.route('/leaders/delete', methods=['POST'])
-@login_required
-@perm_required('academic.edit')
-def subject_leader_delete():
-    """删除学科组长记录"""
-    lid = request.form.get('id', type=int)
-    if not lid and request.is_json:
-        lid = (request.get_json(silent=True) or {}).get('id')
-    info = svc.delete_leader(lid)
-    if not info:
-        flash('记录不存在或已删除', 'warning')
-    else:
-        log_operation(current_user, '删除', '学科组长', lid, info, module='academic')
-        flash(f'已删除：{info}', 'success')
-    return redirect(url_for('academic.subject_leaders',
-                            school_year=request.form.get('school_year') or None))
+        return jsonify(success=False, message=str(e)), 400
+    msg = (f'已保存：新增 {changes["set"]} 条 / 变更 {changes["changed"]} 条'
+           f' / 清空 {changes["cleared"]} 条')
+    if skipped:
+        msg += f'；{len(skipped)} 格未保存（{skipped[0]}）'
+    log_operation(current_user, '维护', '学科组长', None,
+                  f'{(data.get("school_year") or "")} {data.get("term") or "整学年"} '
+                  f'矩阵保存：{json.dumps(changes, ensure_ascii=False)}'
+                  + (f'；忽略 {skipped}' if skipped else ''),
+                  module='academic')
+    return jsonify(success=True, message=msg, changes=changes, skipped=skipped)
 
 
 @bp.route('/leaders/export')
@@ -162,10 +106,9 @@ def subject_leader_delete():
 @perm_required('academic.view')
 def subject_leader_export():
     """导出学科组长名单 Excel（备课组长 + 教研组长）"""
-    f = _leader_filters()
-    years, school_year, leaders = _collect_leaders(f)
-    buf = svc.export_leaders_workbook(leaders, school_year=school_year)
+    years, school_year, term = _context()
+    leaders = svc.leaders_of_term(school_year, term) if school_year else []
+    buf = svc.export_leaders_workbook(leaders, school_year=school_year, term=term)
     stamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-    return send_file(buf, as_attachment=True,
-                     download_name=f'学科组长名单_{school_year or ""}_{stamp}.xlsx',
-                     mimetype=_XLSX_MIME)
+    name = f'学科组长名单_{school_year or ""}_{term or "整学年"}_{stamp}.xlsx'
+    return send_file(buf, as_attachment=True, download_name=name, mimetype=_XLSX_MIME)

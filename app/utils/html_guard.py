@@ -1,4 +1,4 @@
-# StuLink v1.19.47.29 2026-10-13
+# StuLink v1.19.47.30 2026-10-13
 # AI 报告 HTML 白名单消毒：模型产出的 HTML 片段必须先过这里再进页面
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 """AI 报告 HTML 消毒（白名单重建）。

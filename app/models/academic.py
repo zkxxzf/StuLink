@@ -1,4 +1,4 @@
-# StuLink v1.19.47.29 2026-10-10
+# StuLink v1.19.47.30 2026-10-10
 # 教务模块模型（2026-10-10 按「一个功能一个库」分库）：
 #   academic.db    师资基础（教师名单 / 学科组长 / 班主任记录 / 考勤）
 #   timetable.db   课表与晚自习值班
@@ -594,8 +594,10 @@ class SubjectLeader(db.Model):
 
     - `category`：备课组长（年级 × 学科，年级必填）/ 教研组长（只按学科，年级留空＝全校）；
     - `term=''` 表示"整学年"；`grade=''` 表示全校（教研组长即用此形态）；
-    - `leader_uid` 关联 academic.db 的 teachers.teacher_uid（快照式，跨库不建外键）；
-    - `members` 备课组范围或成员；`duty` 主要职责（可套用 DUTY_TEMPLATES 预设）。
+    - `leader_uid` 关联 academic.db 的 teachers.teacher_uid（快照式，跨库不建外键）。
+
+    2026-10-14：职责 / 组范围（原 members / duty / sort_order）**整功能删除** ——
+    页面只保留「谁当组长」的矩阵维护，不再登记职责文本。
     """
     __bind_key__ = 'academic'
     __tablename__ = 'subject_leaders'
@@ -609,9 +611,6 @@ class SubjectLeader(db.Model):
                          default=LEADER_CATEGORY_DEFAULT)  # 备课组长 / 教研组长
     leader_uid = db.Column(db.String(16))                # Teacher.teacher_uid
     leader_name = db.Column(db.String(50), nullable=False)
-    members = db.Column(db.String(300))                  # 备课组范围/成员
-    duty = db.Column(db.String(500))                     # 主要职责
-    sort_order = db.Column(db.Integer, default=0)
     updated_by = db.Column(db.Integer)                   # users.id
     created_at = db.Column(db.DateTime, default=datetime.now)
     updated_at = db.Column(db.DateTime, default=datetime.now, onupdate=datetime.now)
@@ -635,9 +634,6 @@ class SubjectLeader(db.Model):
             'category': self.category or LEADER_CATEGORY_DEFAULT,
             'leader_uid': self.leader_uid or '',
             'leader_name': self.leader_name,
-            'members': self.members or '',
-            'duty': self.duty or '',
-            'sort_order': self.sort_order or 0,
             'updated_at': self.updated_at.strftime('%Y-%m-%d %H:%M') if self.updated_at else '',
         }
 
@@ -646,39 +642,7 @@ class SubjectLeader(db.Model):
                 f'{self.category} {self.leader_name}>')
 
 
-# 学科固定展示顺序（任课表列序、学科组长分组顺序都用它；未列入的学科排在后面）
+# 学科固定展示顺序（任课表列序、学科组长矩阵行序都用它；未列入的学科排在后面）
 SUBJECT_ORDER = ['语文', '数学', '英语', '物理', '化学', '生物', '政治', '历史',
                  '地理', '体育', '音乐', '美术', '信息技术', '通用技术', '心理',
                  '劳动', '班会', '自习', '晚自习']
-
-# 备课组长职责预设（前端「填入常用职责」按钮用；可按校情自行修改）
-DUTY_TEMPLATES = {
-    'default': ('① 统筹本年级本学科教学进度，组织每周集体备课并留存记录；'
-                '② 组织单元主备、公开课与听评课，指导青年教师；'
-                '③ 统一作业量、命题与阅卷标准，汇总月考质量分析；'
-                '④ 建设与维护本学科教学资源库，及时传达教研通知。'),
-    '毕业年级': ('① 牵头制定备考方案与复习进度表，组织命题与模拟考试；'
-                 '② 组织考纲研读、专题突破与错题归因分析；'
-                 '③ 关注临界生与学科短板，配合年级组制定补弱措施；'
-                 '④ 汇总每次考试质量分析，动态调整复习策略。'),
-    '综合组': ('① 统筹本年级音体美信通心课程开设与活动安排；'
-               '② 组织跨年级教研与器材/场地管理；'
-               '③ 负责校内外竞赛、展演与社团指导；'
-               '④ 完成学校交办的其他教研任务。'),
-}
-
-# 教研组长职责预设（2026-10-14：教研组长不分年级，侧重全校学科建设）
-RESEARCH_DUTY_TEMPLATES = {
-    'default': ('① 制定全校本学科教研计划与学期进度，组织每月教研活动并留存记录；'
-                '② 统筹各年级备课组，指导集体备课、公开课与听评课；'
-                '③ 组织命题、考试质量分析与学科竞赛，建设学科资源库；'
-                '④ 负责本学科教师培养与教学视导，汇总学期教研总结。'),
-    '毕业年级': ('① 牵头全校备考方案与三轮复习安排，统筹模拟命题与质量分析；'
-                 '② 组织考纲研读、专题突破与错题归因的跨年级共享；'
-                 '③ 统筹临界生与学科短板补弱措施，配合年级组落实；'
-                 '④ 汇总每次大考数据，动态调整复习策略与资源投放。'),
-    '综合组': ('① 统筹全校音体美信通心课程开设、课时与活动安排；'
-               '② 组织跨年级教研与器材/场地/功能室管理；'
-               '③ 负责校内外竞赛、展演、社团与体质健康等专项工作；'
-               '④ 完成学校交办的其他教研任务。'),
-}

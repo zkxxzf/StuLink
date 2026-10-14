@@ -20,6 +20,12 @@
                             background: var(--sl-sidebar-accent); color: var(--sl-surface); border-radius: 10px; padding: 0 7px;
                             font-size: 11px; font-weight: 700; }
     .entry-pick.selected .ep-badge { display: inline-block; }
+    /* 单双周：那天不在这一周的课（灰掉不可选） + 课程自带的周次小标 */
+    .entry-pick.disabled { opacity: .55; cursor: not-allowed; background: var(--sl-surface-2, var(--sl-surface)); }
+    .entry-pick.disabled:hover { border-color: var(--sl-border); background: var(--sl-surface-2, var(--sl-surface)); }
+    .entry-pick .ep-week { font-size: 11px; font-weight: 700; color: var(--sl-soft-amber-fg);
+                           background: var(--sl-soft-amber-bg); border: 1px solid var(--sl-soft-amber-bd);
+                           border-radius: 6px; padding: 0 5px; }
     .slot-card { border: 1px solid var(--sl-soft-success-bd); background: var(--sl-soft-success-bg); color: var(--sl-soft-success-fg);
                  border-radius: 10px; padding: 8px 6px; cursor: pointer; text-align: center; transition: all .12s; height: 100%; }
     .slot-card:hover { transform: translateY(-1px); box-shadow: 0 2px 6px rgba(0,0,0,.1); }
@@ -270,8 +276,10 @@
     }
 
     // ── 步骤 1：加载"我（或指定班级）那天周几的课" ──
+    // 2026-10-14（单双周）：带上调课日期，服务端按周次标出 week_ok / week_label ——
+    // 双周课在单周那天本来不上，卡片置灰不可选，避免"调了一节那天根本不上的课"。
     function loadEntries() {
-        var params = { weekday: $('#srcWeekday').val() };
+        var params = { weekday: $('#srcWeekday').val(), swap_date: $('#srcDate').val() };
         if ($('#onlyMine').is(':checked')) {
             params.teacher_uid = cfg.myUid;
         } else {
@@ -281,22 +289,42 @@
         $('#entryList').html('<div class="col-12 muted-tip">加载中…</div>');
         $.getJSON(cfg.entriesUrl, params).done(function (res) {
             var list = (res && res.data) || [];
+            var weekText = (res && res.week_text) || '';
             if (!list.length) {
                 $('#entryList').html('<div class="col-12 muted-tip">'
-                    + (cfg.weekdays[$('#srcWeekday').val()] || '') + '这天没有你任教的课程（可取消勾选「只看我的课」按班级查）。</div>');
+                    + (cfg.weekdays[$('#srcWeekday').val()] || '')
+                    + (weekText ? '（' + esc(weekText) + '）' : '')
+                    + '这天没有你任教的课程（可取消勾选「只看我的课」按班级查）。</div>');
                 return;
             }
+            var anyOk = list.some(function (e) { return e.week_ok !== false; });
             list.sort(function (a, b) { return (a.period_number || 0) - (b.period_number || 0); });
             var html = '';
+            // 列表只按"所选日期那天（周几）"过滤 —— 把口径写在明面上，避免误以为"少了别的年级"
+            html += '<div class="col-12 small text-muted mb-1">只列出 <b>'
+                + esc($('#srcDate').val() || '') + '（' + esc(cfg.weekdays[$('#srcWeekday').val()] || '')
+                + (weekText ? ' · ' + esc(weekText) : '') + '）</b>你任教的课，共 '
+                + list.length + ' 节；要看别的天请改上面的日期。'
+                + (weekText ? '　标注「那天不上」的课不在这一周，灰掉不可选。' : '') + '</div>';
+            if (!anyOk) {
+                html += '<div class="col-12 alert alert-light border small mb-2">'
+                    + '这天（' + esc(weekText || '') + '）你没有要上的课 —— 你的课都在别的周次，改上面的日期试试。</div>';
+            }
             list.forEach(function (e) {
+                var ok = e.week_ok !== false;
+                var lbl = e.week_label ? '（' + e.week_label + '）' : '';
                 html += '<div class="col-6 col-md-4 col-lg-3">'
-                    + '<div class="entry-pick" data-id="' + esc(e.id) + '" data-entry=\'' + esc(JSON.stringify(e)) + '\'>'
+                    + '<div class="entry-pick' + (ok ? '' : ' disabled') + '"'
+                    + ' data-id="' + esc(e.id) + '" data-entry=\'' + esc(JSON.stringify(e)) + '\'>'
                     + '<span class="ep-badge" data-badge></span>'
-                    + '<div class="ep-pn">' + esc(pn(e.period_number)) + '</div>'
+                    + '<div class="ep-pn">' + esc(pn(e.period_number))
+                    + (e.week_label ? ' <span class="ep-week">' + esc(e.week_label) + '</span>' : '')
+                    + '</div>'
                     + '<div class="ep-subj">' + esc(e.subject) + '</div>'
                     + '<div class="small text-muted">' + esc(e.grade) + esc(e.class_name)
                     + ' · ' + esc(e.teacher_name || '-') + '</div>'
                     + '<div class="small text-muted">' + esc(e.room || '无教室') + '</div>'
+                    + (ok ? '' : '<div class="small text-danger">那天不上' + esc(lbl) + '</div>')
                     + '</div></div>';
             });
             $('#entryList').html(html);
@@ -321,9 +349,14 @@
         });
     }
 
-    // 点击卡片 = 加入 / 移出待调清单
+    // 点击卡片 = 加入 / 移出待调清单（"那天不上"的卡片不可选）
     function toggleEntry() {
-        var entry = JSON.parse($(this).attr('data-entry'));
+        var $el = $(this);
+        if ($el.hasClass('disabled')) {
+            alert('这节课不在所选日期的那一周（单双周），那天本来就不上，换个日期或换一节课。');
+            return;
+        }
+        var entry = JSON.parse($el.attr('data-entry'));
         var it = itemOf(entry.id);
         if (it) {
             items.splice(items.indexOf(it), 1);
@@ -395,6 +428,7 @@
                 + '<td class="fw-bold">' + circNum(i + 1) + '</td>'
                 + '<td class="small">' + esc(e.subject) + ' · ' + esc(e.grade) + esc(e.class_name)
                 + ' · ' + esc(cfg.weekdays[entryWeekday(e)] || '') + esc(pn(e.period_number))
+                + (e.week_label ? ' <span class="wd-badge">' + esc(e.week_label) + '</span>' : '')
                 + ' · ' + esc(e.teacher_name || '-') + '</td>'
                 + '<td class="small">' + targetText(it)
                 + (it.target && it.target.partner_entry_id && !it.target.swap_self
@@ -434,13 +468,23 @@
         loadSlotsFor(it);
     }
 
-    // 每行 slots 按 entry_id 缓存，切行不重复请求
-    function loadSlotsFor(it) {
+    // 每行 slots 按 (entry_id + 周次上下文) 缓存：永久调课按本课周次、临时按目标日期那周，
+    // 2026-10-14（单双周）：占用按周次判定 —— 单周课与双周课同格不算冲突
+    function slotsKey(it) {
+        return it.entry.id + '|' + (isPermanent() ? 'P' : ('T' + ($('#tgtDate').val() || '')));
+    }
+    function loadSlotsFor(it, force) {
         var id = it.entry.id;
-        if (slotsCache[id]) { renderSlots(); return; }
+        var key = slotsKey(it);
+        if (!force && slotsCache[key]) { renderSlots(); return; }
         $('#slotArea').html('<div class="muted-tip">检测可调整到哪些节次…</div>');
-        $.getJSON(cfg.slotsUrl, { entry_id: id }).done(function (res) {
-            slotsCache[id] = (res && res.data && res.data.slots) || [];
+        $.getJSON(cfg.slotsUrl, {
+            entry_id: id,
+            swap_date: isPermanent() ? '' : ($('#tgtDate').val() || ''),
+            is_permanent: isPermanent() ? 1 : ''
+        }).done(function (res) {
+            slotsCache[key] = (res && res.data && res.data.slots) || [];
+            slotsCache[key + '|meta'] = (res && res.data) || {};
             if (String(activeId) === String(id)) { renderSlots(); }
         }).fail(function () {
             if (String(activeId) === String(id)) {
@@ -449,13 +493,21 @@
         });
     }
 
+    // 目标日期 / 永久开关变了 → 周次上下文变了，重拉当前行的格子
+    function refreshActiveSlots() {
+        var it = activeItem();
+        if (it) { loadSlotsFor(it, true); }
+    }
+
     function renderSlots() {
         var it = activeItem();
         if (!it) {
             $('#slotArea').html('<div class="muted-tip">请先在上方清单里点选一行。</div>');
             return;
         }
-        var slots = slotsCache[it.entry.id] || [];
+        var cacheKey = slotsKey(it);
+        var slots = slotsCache[cacheKey] || [];
+        var meta = slotsCache[cacheKey + '|meta'] || {};
         var wd = $('#tgtWeekday').val();
         var rows = slots.filter(function (s) { return String(s.weekday) === String(wd); });
         var avail = rows.filter(function (s) { return s.available; });
@@ -467,8 +519,17 @@
         }
         var selP = it.target ? String(it.target.new_period) : '';
         var selW = it.target ? String(it.target.new_weekday) : '';
+        // 单双周：说清这次是按哪个周次判定的（永久＝本课周次；临时＝目标日期那周）
+        var parity = '';
+        if (isPermanent()) {
+            parity = meta.week_range_label ? ('本课周次：' + esc(meta.week_range_label)) : '本课每周都上';
+        } else if (meta.week_text) {
+            parity = '按调到那天算：' + esc(meta.week_text);
+        }
         var html = '<div class="small text-muted mb-2">' + (cfg.weekdays[wd] || '') + '：可选 '
-            + avail.length + ' / ' + rows.length + ' 个节次</div><div class="row g-2">';
+            + avail.length + ' / ' + rows.length + ' 个节次'
+            + (parity ? '　<span class="wd-badge">' + parity + '</span>' : '')
+            + '</div><div class="row g-2">';
         show.forEach(function (s) {
             var pickable = s.available || s.swappable;
             var cls = s.available ? 'slot-card'
@@ -507,7 +568,7 @@
         var it = activeItem();
         if (!it) { alert('请先在上方清单里点选一行'); return; }
         var wd = $('#tgtWeekday').val();
-        var slot = (slotsCache[it.entry.id] || []).filter(function (s) {
+        var slot = (slotsCache[slotsKey(it)] || []).filter(function (s) {
             return String(s.weekday) === String(wd)
                 && String(s.period_number) === String($el.data('p'));
         })[0] || {};
@@ -629,6 +690,7 @@
             renderPicked();
             renderSummary();
         }
+        refreshActiveSlots();      // 单双周：换了日期就是换了周次，格子重算
     });
     $('#swPermanent').on('change', function () {
         var perm = $(this).is(':checked');
@@ -644,6 +706,7 @@
         }
         renderPicked();
         renderSummary();
+        refreshActiveSlots();      // 永久按本课周次、临时按目标日期那周 —— 口径变了要重算
     });
     $('#btnApplyAll').on('click', applyAll);
 

@@ -4,6 +4,8 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>成绩认定证明核验 - StuLink</title>
+    {# 2026-10-14：本页免登录独立（不走 base.html），图标单独声明，同样避免 /favicon.ico 404 #}
+    <link rel="icon" type="image/x-icon" href="{{ su('logo.ico') }}">
     <link href="{{ url_for('static', filename='css/bootstrap.min.css') }}" rel="stylesheet">
     <link href="{{ url_for('static', filename='css/bootstrap-icons.min.css') }}" rel="stylesheet">
     {# 2026-10-12 UI 审计 M8：本页是免登录独立页（不走 base.html），

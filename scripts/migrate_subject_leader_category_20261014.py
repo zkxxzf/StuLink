@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""学科组长升级（2026-10-14）：subject_leaders 加 category 列 + 重建唯一约束。
+"""学科组长升级（2026-10-14）：subject_leaders 加 category 列 + 重建唯一约束 + 删职责列。
 
 背景
 ----
@@ -13,18 +13,20 @@
 1. 新增 `category` 列（'备课组长' / '教研组长'），历史数据统一回填为「备课组长」
    （老数据都是年级 × 学科形态；确属全校教研组长的请到页面改类别）；
 2. 唯一键从 (school_year, term, grade, subject) 扩到 (…, category)，
-   否则同一学科无法同时登记「高一备课组长」与「全校教研组长」。
+   否则同一学科无法同时登记「高一备课组长」与「全校教研组长」；
+3. **删除职责 / 组范围三列**（`members` / `duty` / `sort_order`）：该功能（明细页签 +
+   编辑弹窗 + 职责文本）2026-10-14 用户确认从未使用，已整功能下线，页面只留矩阵维护。
 
 实现方式
 --------
-SQLite 不支持 ALTER CONSTRAINT，故走「建新表 → 拷数据 → 换名」：
+SQLite 不支持 ALTER CONSTRAINT / DROP COLUMN 组合，故走「建新表 → 拷数据 → 换名」：
 
-    subject_leaders          →  subject_leaders_old_20261014
     subject_leaders_new      →  subject_leaders
 
-拷数据用显式列名（不依赖列序），id 原样保留，AUTOINCREMENT 续用不丢号。
+拷数据用显式列名（不依赖列序），职责三列直接不拷（等于删除），
+id 原样保留，AUTOINCREMENT 续用不丢号。
 
-- 幂等：列已存在且唯一键已含 category 时整体跳过（由 _mig_log 二次兜底）；
+- 幂等：**唯一键已含 category 且职责三列都已不存在**时整体跳过（由 _mig_log 二次兜底）；
 - 表名 / 列名全部来自本文件常量，无外部输入拼接（无注入面）；
 - 只处理教务库（含 teachers 表的库），不在其它模块库里建无关表。
 """
@@ -39,16 +41,21 @@ DATA_DIR = os.path.join(BASE_DIR, 'data')
 
 SCRIPT_NAME = os.path.basename(__file__)
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-# 迁移登记（幂等）——已登记过则整体跳过；登记查询失败不阻塞迁移
+# 迁移登记（只用于事后核对 migration_status.py，不作为早退条件）
+#
+# 为什么不按登记早退：本脚本先后有两个版本 —— 第一版只加 category 列 + 重建唯一键，
+# 第二版（删除职责 / 组范围三列）沿用同一脚本名。若按登记早退，跑过第一版的库
+# 会永远跳过「删列」，结构就停在中间态。故幂等只由「结构是否已是目标形态」判定。
 try:
     import _mig_log
-    if _mig_log.is_applied(SCRIPT_NAME):
-        print(f'[SKIP] {SCRIPT_NAME} 已登记为已应用，跳过迁移')
-        sys.exit(0)
 except Exception as _e:  # noqa: BLE001
-    print(f'[WARN] 读取迁移登记失败（继续执行迁移）：{_e}')
+    _mig_log = None
+    print(f'[WARN] 迁移登记模块不可用（迁移照常执行，仅不登记）：{_e}')
 
 DEFAULT_CATEGORY = '备课组长'
+
+# 已下线的职责 / 组范围列（2026-10-14 整功能删除；重建表时不再拷入）
+LEGACY_DUTY_COLUMNS = ('members', 'duty', 'sort_order')
 
 # 新表结构（与 app/models/academic.py::SubjectLeader 一致）
 DDL_NEW = """
@@ -61,9 +68,6 @@ CREATE TABLE subject_leaders_new (
     category VARCHAR(10) NOT NULL DEFAULT '备课组长',
     leader_uid VARCHAR(16),
     leader_name VARCHAR(50) NOT NULL,
-    members VARCHAR(300),
-    duty VARCHAR(500),
-    sort_order INTEGER DEFAULT 0,
     updated_by INTEGER,
     created_at DATETIME,
     updated_at DATETIME,
@@ -74,10 +78,10 @@ CREATE TABLE subject_leaders_new (
 COPY_SQL = """
 INSERT INTO subject_leaders_new
     (id, school_year, term, grade, subject, category, leader_uid, leader_name,
-     members, duty, sort_order, updated_by, created_at, updated_at)
+     updated_by, created_at, updated_at)
 SELECT id, school_year, term, grade, subject,
        COALESCE(NULLIF(TRIM(category), ''), '备课组长'),
-       leader_uid, leader_name, members, duty, sort_order,
+       leader_uid, leader_name,
        updated_by, created_at, updated_at
 FROM subject_leaders
 """
@@ -111,6 +115,13 @@ def _has_category_in_unique(conn, table):
     return False
 
 
+def _is_target_structure(conn, table, cols):
+    """是否已是目标结构：唯一键含 category 且职责三列都已不存在。"""
+    if not _has_category_in_unique(conn, table):
+        return False
+    return not (set(LEGACY_DUTY_COLUMNS) & set(cols))
+
+
 touched = skipped = 0
 for db_path in sorted(glob.glob(os.path.join(DATA_DIR, '*.db'))):
     name = os.path.basename(db_path)
@@ -140,15 +151,19 @@ for db_path in sorted(glob.glob(os.path.join(DATA_DIR, '*.db'))):
             conn.commit()
             print(f'[OK]   {name} 已加列 category（默认「{DEFAULT_CATEGORY}」）')
 
-        if _has_category_in_unique(conn, 'subject_leaders'):
+        if _is_target_structure(conn, 'subject_leaders', cols):
             conn.execute("UPDATE subject_leaders SET category=? "
                          "WHERE category IS NULL OR TRIM(category)=''",
                          (DEFAULT_CATEGORY,))
             conn.commit()
             conn.close()
             skipped += 1
-            print(f'[SKIP] {name} 唯一键已含 category，仅补齐空值')
+            print(f'[SKIP] {name} 已是目标结构（含 category、无职责列），仅补齐空值')
             continue
+
+        legacy = sorted(set(LEGACY_DUTY_COLUMNS) & cols)
+        if legacy:
+            print(f'[INFO] {name} 将删除已下线的职责 / 组范围列：{"、".join(legacy)}')
 
         conn.execute("UPDATE subject_leaders SET category=? "
                      "WHERE category IS NULL OR TRIM(category)=''",
@@ -173,10 +188,12 @@ for db_path in sorted(glob.glob(os.path.join(DATA_DIR, '*.db'))):
 print(f'[DONE] 迁移完成：重建 {touched} 张表，跳过 {skipped} 张')
 
 # 迁移登记（失败不得阻塞迁移）
-try:
-    _mig_log.record(SCRIPT_NAME, note=f'subject_leaders 加 category + 重建唯一键（{touched} 张）')
-except Exception as _e:  # noqa: BLE001
-    print(f'[WARN] 迁移登记失败（不影响迁移结果）：{_e}')
+if _mig_log is not None:
+    try:
+        _mig_log.record(SCRIPT_NAME,
+                        note=f'subject_leaders 加 category + 重建唯一键 + 删职责列（{touched} 张）')
+    except Exception as _e:  # noqa: BLE001
+        print(f'[WARN] 迁移登记失败（不影响迁移结果）：{_e}')
 
 # StuLink v1.19.48.1 2026-10-14
 # Copyright (c) 2026 zkxxzf. Apache License 2.0

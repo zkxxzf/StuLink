@@ -12,9 +12,9 @@ from app.models.user_class_link import UserClassLink
 from app.models.grade_setting import GradeSetting
 from app.models.grades import Exam, ExamScore, ExamBand, TeacherSubjectLink, \
     AiKey, AiGlobalKey, AiReport, AiChatMessage, AffairRoomLib, \
-    ExamTeacherLink, ExamAffair, AffairRoom, AffairStudent  # v1.19.47.29 考试任课快照 / 考务
+    ExamTeacherLink, ExamAffair, AffairRoom, AffairStudent  # v1.19.47.30 考试任课快照 / 考务
 from app.models.grades import AffairTeacher, AffairSchedule, AffairInvigilator, \
-    AffairInvigilation  # v1.19.47.29 考务环节④⑤⑥：任课核对 / 考试时间表 / 监考编排
+    AffairInvigilation  # v1.19.47.30 考务环节④⑤⑥：任课核对 / 考试时间表 / 监考编排
 from app.models.points import PointRecord, PointRuleTemplate
 from app.models.morality import (RewardPunishment, RewardPunishmentAttachment,
                                  KINDS, REWARD_CATEGORIES, PUNISH_CATEGORIES,
@@ -26,7 +26,7 @@ from app.models.academic import Teacher, \
     InspectionRecord, TeacherAchievement, \
     FormCategory, FormTemplate, FormQuestion, FormSubmission, FormAnswer, \
     WorkRecord, AttendanceRecord, RECORD_TYPES, ATTENDANCE_STATUS, \
-    SubjectLeader, SUBJECT_ORDER, DUTY_TEMPLATES, \
+    SubjectLeader, SUBJECT_ORDER, \
     WorkloadRule, ExamPeriod, WORKLOAD_KINDS
 from app.models.notification import Notification, NotificationRead, \
     NotificationRecipient, CATEGORY_LABELS
@@ -48,7 +48,7 @@ __all__ = ['User', 'Student', 'Room', 'BedAssignment', 'StudentAccommodation',
            'ExamAffair', 'AffairRoom', 'AffairStudent',
            'AiKey', 'AiGlobalKey', 'AiReport', 'AiChatMessage',
            'AffairRoomLib', 'PointRecord', 'PointRuleTemplate',
-           # 德育奖惩（morality.db，2026-10-13 v1.19.47.29）
+           # 德育奖惩（morality.db，2026-10-13 v1.19.47.30）
            'RewardPunishment', 'RewardPunishmentAttachment',
            'REWARD_CATEGORIES', 'PUNISH_CATEGORIES', 'REWARD_LEVELS',
            'PUNISH_LEVELS', 'DOC_TYPES', 'category_options', 'category_label',
