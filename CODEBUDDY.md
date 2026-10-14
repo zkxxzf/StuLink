@@ -4,6 +4,10 @@
 
 - **唯一数据源**：`TeacherSubjectLink`（成绩管理模块维护），决定"谁教哪个班哪一科"、
   谁能看哪些成绩、教师维度的教学成绩归属。
+- **科目范围（2026-10-15 扩容）**：映射可维护的科目 = `LINK_SUBJECTS`
+  （`app/models/grades.py`）＝ 9 个文化科 + 综合组六科（体育/音乐/美术/信息技术/通用技术/心理），
+  页面上六科归到「综合组」分组带；**成绩链路仍只认 `SUBJECTS`（9 科）**，
+  不要把 `SUBJECTS` 改成 15 科。
 - **页面（同一批视图函数、同一份数据）**：
   - 教务管理：`/academic/teacher-links`（端点 `academic.teacher_links_*`）
   - 成绩管理：`/grades/teachers`（端点 `grades.teachers_*`，批量导入入口 `grades.teachers_import_page`）

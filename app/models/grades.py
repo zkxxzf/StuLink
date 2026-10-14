@@ -1,4 +1,4 @@
-# StuLink v1.19.49.31 2026-10-10
+# StuLink v1.19.49.32 2026-10-10
 # 成绩管理与可视化分析系统：数据模型（独立库 grades.db）
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 import json
@@ -6,6 +6,10 @@ import logging
 import re
 from datetime import datetime
 from app.extensions import db
+# 综合组六科（体育/音乐/美术/信息技术/通用技术/心理）的**唯一真值**在教务模型；
+# 成绩侧只在「教师-学科映射可维护科目」（LINK_SUBJECTS）里引用它。
+# 依赖方向：models.grades → models.academic 单向（academic 不反向 import grades 模型）。
+from app.models.academic import COMPREHENSIVE_SUBJECTS
 
 # 2026-10-10 架构审计：本模块解析 JSON 配置时原有静默 except，配置损坏时
 # 会悄悄回落到默认值（页面照常显示，但满分/配置其实没生效）。用 debug 级留痕
@@ -46,6 +50,14 @@ def normalize_subject(name):
     return SUBJECT_ALIAS.get(t, t)
 # 默认满分：语数外 150，其余 100（河南 3+1+2）
 DEFAULT_FULL_MARKS = {s: (150 if s in ('语文', '数学', '外语') else 100) for s in SUBJECTS}
+
+# 教师-学科映射（TeacherSubjectLink）可维护的科目集合 —— 2026-10-15 用户口径
+# 「教师映射扩容，增加综合组」：成绩科目 9 科 + 综合组 6 科（体育/音乐/美术/信息技术/
+# 通用技术/心理，各占一列，页面上归到「综合组」分组带，与学科组长页同一份口径）。
+# ⚠ 成绩链路仍以 SUBJECTS（9 科）为准：成绩导入白名单 / 分析报表 / 分数线 /
+#   DEFAULT_FULL_MARKS / AI 成绩口径**一律不扩** —— 六科只在「任课映射维护 +
+#   课表导入核对」里流动（成绩表里本就没有这些科目）。
+LINK_SUBJECTS = SUBJECTS + list(COMPREHENSIVE_SUBJECTS)
 
 # 选科组合字符 → 科目全名（用于由选科组合推断应考科目）
 _SEL_CHAR_MAP = {'物': '物理', '化': '化学', '生': '生物', '政': '政治', '史': '历史', '地': '地理'}
@@ -149,7 +161,7 @@ def _default_config():
 EXAM_KINDS = ('联考', '本校考', '小测验')
 # 阶段：教学进度节点 —— 用于“上一场同阶段考试”的定位（分层依据）
 EXAM_STAGES = ('期末考', '期中考', '月考', '限时练', '高三一测', '高三二测')
-# 分数口径（v1.19.49.31）：**仅作标记**，不参与导入解析/排名/划线口径判断
+# 分数口径（v1.19.49.32）：**仅作标记**，不参与导入解析/排名/划线口径判断
 # （口径在导入时按数据确定：有赋分进主分，只给原始分时原始分顶上主分）。
 # 允许留空 = 未指定，由导入时的文件决定。
 SCORE_MODES = ('converted', 'raw')
@@ -163,7 +175,7 @@ class Exam(db.Model):
     v1.19.0 四段式重构：新增两个维度
       exam_kind  考试性质（联考 / 本校考 / 小测验）
       exam_type  考试阶段（期末考 / 期中考 / 月考 / 限时练 / 高三一测 / 高三二测）
-    以及 score_mode（分数口径**标记**——v1.19.49.31 起允许不选；见字段注释）。
+    以及 score_mode（分数口径**标记**——v1.19.49.32 起允许不选；见字段注释）。
     """
     __bind_key__ = 'grades'
     __tablename__ = 'exams'
@@ -174,7 +186,7 @@ class Exam(db.Model):
     # v1.19.0 考试性质（字典 exam_kind：联考/本校考/小测验）
     exam_kind = db.Column(db.String(20))
     # 分数口径标记：converted=赋分 / raw=原始分 / 空=未指定（默认，导入时按文件确定）
-    # v1.19.49.31 起允许留空。注意它只是"标记"：导入解析、排名、划线都不读它——
+    # v1.19.49.32 起允许留空。注意它只是"标记"：导入解析、排名、划线都不读它——
     # exam_scores.score 在导入时已按「有赋分进主分、只给原始分则原始分顶上」定型。
     score_mode = db.Column(db.String(10), default='')
     grade = db.Column(db.String(10), nullable=False)  # 2024级/2025级…（与字典一致）
@@ -200,7 +212,7 @@ class Exam(db.Model):
     def score_mode_label(self):
         """分数口径展示名：赋分 / 原始分 / 按导入确定（未指定）
 
-        v1.19.49.31：未指定显示「按导入确定」，不再回落成「赋分」——
+        v1.19.49.32：未指定显示「按导入确定」，不再回落成「赋分」——
         否则老师没选却被显示成"赋分"，与本场实际口径不符。
         """
         return SCORE_MODE_LABELS.get((self.score_mode or '').strip(), SCORE_MODE_AUTO_LABEL)
@@ -310,7 +322,7 @@ class ExamScore(db.Model):
     class_name = db.Column(db.String(10))                   # 班级快照（换班不影响历史）
     # v1.19.0 考号快照（联考等第三方编排的号，第三方未给时为空）
     exam_no = db.Column(db.String(20))
-    # v1.19.49.31 班型快照（强基班/卓越班…）：导入时取自班型设置，使去差均分等分析
+    # v1.19.49.32 班型快照（强基班/卓越班…）：导入时取自班型设置，使去差均分等分析
     # 永远用「考试当时」的班型；此前实时读 ClassProfile，班型一改历史全部失真
     class_type = db.Column(db.String(20))
     direction = db.Column(db.String(4))                     # 物理/历史 快照
@@ -503,7 +515,7 @@ class TeacherLinkPlanRow(db.Model):
 
 
 class ExamTeacherLink(db.Model):
-    """v1.19.49.31 考试任课快照：考试 × 班级 × 科目的**当时**任课教师
+    """v1.19.49.32 考试任课快照：考试 × 班级 × 科目的**当时**任课教师
 
     为什么需要：TeacherSubjectLink 只存"当前"映射，教师一换（尤其分班后）
     历史考试的教师维度分析会全部错位。本表把每场考试的任课教师映射定格，
@@ -741,7 +753,7 @@ class ExamAffair(db.Model):
     selection_mode = db.Column(db.String(10), default='selected')  # 编排分组模式：selected 按选科分组 / plain 不选科（全体一组，考场全通用）
     non_attend_mode = db.Column(db.String(10), default='skip')     # 非参考学生处理：skip 不安排考场 / tail 安排到同选科考场尾场
     subject_prefixes = db.Column(db.Text)                          # 选科考号前后缀 JSON：{"物化生":{"prefix":"1701","suffix":""}}
-    # v1.19.49.31 监考编排：每考场默认监考人数（1/2/3，用户口径默认 1 人）
+    # v1.19.49.32 监考编排：每考场默认监考人数（1/2/3，用户口径默认 1 人）
     invig_slots = db.Column(db.Integer, default=1)
     status = db.Column(db.String(10), default='draft')     # draft / arranged / linked
     note = db.Column(db.Text)
@@ -881,7 +893,7 @@ class ExamRoomGroupMap(db.Model):
 
 
 class ScoreChangeLog(db.Model):
-    """v1.19.49.31 分数修改记录（改分/删分留痕）
+    """v1.19.49.32 分数修改记录（改分/删分留痕）
 
     每次在成绩单改分（含赋分/原始分、标记缺考）都写一条，供全校查询：
     谁、什么时候、改了哪场考试哪个学生的哪一科、改前改后各是多少、什么动作。
@@ -914,7 +926,7 @@ class ScoreChangeLog(db.Model):
     )
 
 
-# ============ v1.19.49.31 考务环节④⑤⑥：任课核对 / 考试时间表 / 监考编排 ============
+# ============ v1.19.49.32 考务环节④⑤⑥：任课核对 / 考试时间表 / 监考编排 ============
 #
 # 设计口径（用户 2026-10-12 定案）：
 #   · 三者都是**本批次（本次考试）**的数据，不回写全局任课映射；

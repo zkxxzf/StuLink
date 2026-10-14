@@ -1,5 +1,13 @@
 {% extends "base.html" %}
 {% block title %}任课教师映射 - {{ '教务管理' if request.blueprint == 'academic' else '成绩管理' }}{% endblock %}
+{% block extra_css %}
+<style>
+/* 2026-10-15 用户口径「教师映射扩容，增加综合组」：科目行按 文化科目 / 综合组 分段
+   （与学科组长页的分组带同形） */
+#tcTable .subj-band td { background: var(--bs-tertiary-bg, #f1f3f5);
+                         font-weight: 700; letter-spacing: .5px; text-align: left; }
+</style>
+{% endblock %}
 {% block content %}
 {% if request.blueprint == 'academic' %}
 {# 2026-10-14：教务侧与「教师名单 / 学科组长」合成一个入口，顶部 tab 互切；
@@ -138,19 +146,28 @@ $(function(){
             $head.append(th);
         });
         // 性能优化：整表 tbody 一次性拼 HTML 写入（单次解析），远快于逐格 jQuery 构建
+        // 2026-10-15：按 subject_groups 分段渲染（文化科目 / 综合组，组间一条分组带）
         var rows = [];
-        d.subjects.forEach(function(sub){
-            var tds = ['<td><strong>' + esc(sub) + '</strong></td>'];
-            d.classes.forEach(function(cls){
-                var key = cls + '|' + sub;
-                var cell = d.cells[key];
-                var cur = cell && cell.user_id != null ? String(cell.user_id) : '';
-                cells[key] = cur;
-                tds.push('<td class="text-center"><select class="form-select form-select-sm tcell" ' +
-                    'data-key="' + esc(key) + '">' + singleOptHtml(cur, cell ? cell.user_name : '') +
-                    '</select></td>');
+        var groups = d.subject_groups && d.subject_groups.length
+            ? d.subject_groups : [{name: '', subjects: d.subjects || []}];
+        groups.forEach(function(g){
+            if (g.name){
+                rows.push('<tr class="subj-band"><td colspan="' + (d.classes.length + 1) + '">' +
+                    esc(g.name) + '（' + g.subjects.length + ' 科）</td></tr>');
+            }
+            g.subjects.forEach(function(sub){
+                var tds = ['<td><strong>' + esc(sub) + '</strong></td>'];
+                d.classes.forEach(function(cls){
+                    var key = cls + '|' + sub;
+                    var cell = d.cells[key];
+                    var cur = cell && cell.user_id != null ? String(cell.user_id) : '';
+                    cells[key] = cur;
+                    tds.push('<td class="text-center"><select class="form-select form-select-sm tcell" ' +
+                        'data-key="' + esc(key) + '">' + singleOptHtml(cur, cell ? cell.user_name : '') +
+                        '</select></td>');
+                });
+                rows.push('<tr>' + tds.join('') + '</tr>');
             });
-            rows.push('<tr>' + tds.join('') + '</tr>');
         });
         $('#tcTable tbody').html(rows.join(''));
     }
@@ -191,7 +208,7 @@ $(function(){
         var grade = $('#tcGrade').val();
         if (!grade) { alert('请先选择年级'); return; }
         $('#tcMsg').text('保存中…');
-        // v1.19.49.31：必须显式声明 JSON —— 原来 $.post(url, JSON.stringify(...)) 会以
+        // v1.19.49.32：必须显式声明 JSON —— 原来 $.post(url, JSON.stringify(...)) 会以
         // application/x-www-form-urlencoded 发送 JSON 文本，后端 get_json 取不到 → 保存静默失效
         $.ajax({
             url: app.data('saveUrl'), type: 'POST',

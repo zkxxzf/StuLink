@@ -34,7 +34,7 @@ config_mod.Config.SQLALCHEMY_BINDS = {
     'history': 'sqlite:///' + os.path.join(_TMP, 'history.db'),
     'grades': 'sqlite:///' + os.path.join(_TMP, 'grades.db'),
     'points': 'sqlite:///' + os.path.join(_TMP, 'points.db'),
-    # 2026-10-13（v1.19.49.31）：德育奖惩库
+    # 2026-10-13（v1.19.49.32）：德育奖惩库
     'morality': 'sqlite:///' + os.path.join(_TMP, 'morality.db'),
     'academic': 'sqlite:///' + os.path.join(_TMP, 'academic.db'),
     # 2026-10-10：教务分库——查课 / 业绩 / 表单 各自独立库
@@ -1783,6 +1783,96 @@ def check_leader():
 
 
 # ══════════════════════════════════════════════════════════════════════════════
+# 教师映射扩容（2026-10-15 用户口径「教师映射扩容，增加综合组」）
+# 科目列 = 9 文化科 + 综合组 6 科（体育/音乐/美术/信息技术/通用技术/心理）
+# ══════════════════════════════════════════════════════════════════════════════
+@item('LINKEXPAND')
+def check_link_subjects_expand():
+    """任课映射的科目维度扩到 15 科：矩阵接口 / 保存白名单 / 导入模板 / 导入解析 全同步。"""
+    import io as _io
+
+    import openpyxl
+
+    from app.models.academic import COMPREHENSIVE_SUBJECTS
+    from app.models.grades import LINK_SUBJECTS, SUBJECTS, TeacherSubjectLink
+
+    case('常量口径：LINK_SUBJECTS = 9 文化科 + 综合组 6 科（去重、顺序稳定）',
+         len(LINK_SUBJECTS) == 15 and len(set(LINK_SUBJECTS)) == 15
+         and LINK_SUBJECTS[:9] == SUBJECTS
+         and set(LINK_SUBJECTS[9:]) == set(COMPREHENSIVE_SUBJECTS), str(LINK_SUBJECTS))
+
+    with app.test_client() as c:
+        login(c, 'ac_admin', TEST_PWD)
+        r = c.get('/academic/teacher-links/api?grade=高一')
+        d = (r.get_json() or {}).get('data') or {}
+        case('矩阵接口：科目列 15 科（含综合组）',
+             d.get('subjects') == LINK_SUBJECTS, str(d.get('subjects')))
+        groups = d.get('subject_groups') or []
+        case('矩阵接口：两段分组（文化科目 9 / 综合组 6）',
+             len(groups) == 2 and len(groups[0]['subjects']) == 9
+             and groups[1].get('name') == '综合组'
+             and set(groups[1]['subjects']) == set(COMPREHENSIVE_SUBJECTS), str(groups))
+
+        with app.app_context():
+            u = User.query.filter_by(username='ac_admin').first()
+        # 班级名与年级取接口实际返回的（测试库的活跃年级/班级名与真实库不同）；
+        # `_grade_classes` 以 students 表为口径 —— 空年级没有教学班，先补一个班
+        _grade = (d.get('grade') or '高一').strip()
+        _cls = (d.get('classes') or [None])[0]
+        if not _cls:
+            _cls = '01班'
+            from app.models import Student
+            with app.app_context():
+                db.session.add(Student(grade=_grade, class_name=_cls, name='映射测试生',
+                                       student_number='T9999001', gender='男'))
+                db.session.commit()
+        token = get_csrf(c, '/academic/teacher-links')
+        hdrs = {'X-CSRFToken': token}
+        key = f'{_cls}|体育'
+        r = c.post('/academic/teacher-links/api/save', headers=hdrs,
+                   json={'grade': _grade,
+                         'cells': {f'{_cls}|语文': u.id, key: u.id}})
+        j = r.get_json() or {}
+        with app.app_context():
+            row = TeacherSubjectLink.query.filter_by(
+                grade=_grade, class_name=_cls, subject='体育', active=True).first()
+            _yw = TeacherSubjectLink.query.filter_by(
+                grade=_grade, class_name=_cls, subject='语文', active=True).first()
+        case('保存：体育科目能落库（旧口径下该键会被静默丢弃）',
+             j.get('success') and row is not None and row.user_id == u.id,
+             f'{j} row={row} 语文={_yw} grade={_grade} cls={_cls}')
+        c.post('/academic/teacher-links/api/save', headers=hdrs,
+               json={'grade': _grade, 'cells': {key: ''}})
+        with app.app_context():
+            left = TeacherSubjectLink.query.filter_by(
+                grade=_grade, class_name=_cls, subject='体育', active=True).count()
+        case('清空：综合组科目的映射可释放', left == 0, str(left))
+
+        # 导入模板表头
+        r = c.get('/academic/teacher-links/template.xlsx')
+        wb = openpyxl.load_workbook(_io.BytesIO(r.data))
+        head = [c0.value for c0 in wb.active[1]]
+        case('导入模板：表头含综合组六科',
+             r.status_code == 200
+             and all(s in head for s in COMPREHENSIVE_SUBJECTS), str(head[-8:]))
+
+    # 导入解析：综合组列 + 常见写法（信息 → 信息技术、心理健康 → 心理）
+    from app.modules.grades.services import teacher_import as ti
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.append(['年级', '班级', '语文', '体育', '信息', '心理健康'])
+    ws.append(['2025级', '01班', '张语文', '李体育', '王信息', '赵心理'])
+    buf = _io.BytesIO()
+    wb.save(buf)
+    buf.seek(0)
+    res = ti.parse_teacher_excel(buf)
+    got = {(lk['subject'], lk['teacher_name']) for lk in res['links']}
+    case('导入解析：综合组列识别 + 科名归一（体育 / 信息→信息技术 / 心理健康→心理）',
+         ('体育', '李体育') in got and ('信息技术', '王信息') in got
+         and ('心理', '赵心理') in got and ('语文', '张语文') in got, str(sorted(got)))
+
+
+# ══════════════════════════════════════════════════════════════════════════════
 # 学科组长矩阵（2026-10-14：行＝学科、列＝高一/高二/高三/教研组，格内选本学科教师）
 # ══════════════════════════════════════════════════════════════════════════════
 @item('LEADMATRIX')
@@ -1798,10 +1888,14 @@ def check_leader_matrix():
              and 'id="ldMatrix"' in html)
         case('矩阵格内是本学科教师下拉',
              'class="form-select form-select-sm lcell"' in html and 'data-key="高一|语文"' in html)
-        case('矩阵行含 15 个学科（9 文化 + 6 综合）',
+        # 2026-10-14 用户口径（二次修订）：整个综合组只设 1 名组长 —— 矩阵里综合组
+        # 只渲染一行一格（键「综合组|综合组」），不再按 6 科 × 4 列铺格子
+        case('矩阵行：文化科 9 行 + 综合组一行一格',
              all(f'data-key="教研组|{s}"' in html for s in
-                 ('语文', '数学', '外语', '物理', '化学', '生物', '政治', '历史', '地理',
-                  '体育', '音乐', '美术', '信息技术', '通用技术', '心理')))
+                 ('语文', '数学', '外语', '物理', '化学', '生物', '政治', '历史', '地理'))
+             and 'data-key="综合组|综合组"' in html
+             and 'data-key="高一|体育"' not in html
+             and 'data-key="教研组|体育"' not in html)
         token = get_csrf(c, u['leaders'])
         hdrs = {'X-CSRFToken': token}       # JSON 接口：CSRF 走请求头
 
@@ -1850,13 +1944,28 @@ def check_leader_matrix():
              and row is not None and row.leader_name == '赵语文' and len(left) == 1,
              str(res))
 
-        # 综合组学科（体育）：走课表兜底候选，能正常保存
+        # 综合组：整组一格（体育老师走课表兜底候选也能当综合组组长）
         r = c.post(u['matrix_save'], headers=hdrs, json={
             'school_year': '2026-2027', 'term': '',
-            'cells': {'高一|体育': 'T900006'}})
+            'cells': {'综合组|综合组': 'T900006'}})
         res = r.get_json() or {}
-        case('矩阵可维护综合组学科（体育）', res.get('success') and res['changes']['set'] == 1,
-             str(res))
+        with app.app_context():
+            _g = SubjectLeader.query.filter_by(school_year='2026-2027',
+                                               subject='综合组').first()
+        case('矩阵可维护综合组（整组一格，体育老师可当）',
+             res.get('success') and res['changes']['set'] == 1
+             and _g is not None and _g.leader_uid == 'T900006'
+             and (_g.grade or '') == '' and _g.category == '综合组组长',
+             str(res) + str(_g and (_g.subject, _g.grade, _g.category)))
+
+        # 综合组整组一格：按年级 / 按具体学科另开格子一律被拒（skipped，不写库）
+        for _bad in ('高一|体育', '教研组|体育'):
+            r = c.post(u['matrix_save'], headers=hdrs, json={
+                'school_year': '2026-2027', 'term': '', 'cells': {_bad: 'T900006'}})
+            res = r.get_json() or {}
+            case(f'综合组整组一格：{_bad} 被拒',
+                 res.get('success') and not res['changes']['set'] and res.get('skipped'),
+                 str(res))
 
         # 未提交的格子不动（局部保存）
         r = c.post(u['matrix_save'], headers=hdrs,
@@ -2499,7 +2608,7 @@ def check_inspection_mark():
 
 @item('SWAPEXCH')
 def check_two_person_exchange():
-    """两人换课（v1.19.49.31）：换时段 / 换班上课 / 请人代课 × 临时与永久，
+    """两人换课（v1.19.49.32）：换时段 / 换班上课 / 请人代课 × 临时与永久，
     覆盖「对方先确认 → 教务审批 → 执行」全链路 + 拒绝 / 越权 / 校验路径。"""
     from app.modules.academic.services import swap_service
 
@@ -2824,7 +2933,7 @@ def check_swap_exchange_batch():
 
 @item('SWAPMIXED')
 def check_swap_mixed_batch():
-    """调课页合并（v1.19.49.31）：一次提交 = 几节调空档 + 几节与同事换上课时间（同一批次）；
+    """调课页合并（v1.19.49.32）：一次提交 = 几节调空档 + 几节与同事换上课时间（同一批次）；
     2026-10-14：对调只换时间（不再连班级一起换）。"""
     from app.models.timetable import ScheduleEntry, ScheduleSwap
     from app.modules.academic.services import swap_service
@@ -3163,7 +3272,7 @@ def check_swap_bulk_offset():
 
 @item('WORKBENCHSWAP')
 def check_workbench_swap():
-    """教师工作台里的调课区块（v1.19.49.31）：入口 + 待我确认 + 我的申请。"""
+    """教师工作台里的调课区块（v1.19.49.32）：入口 + 待我确认 + 我的申请。"""
     with app.test_client() as c:
         login(c, 'ac_admin', TEST_PWD)
         r = c.get('/workbench/')      # 蓝图前缀 /workbench + 路由 '/'（不带斜杠会 308）
@@ -5000,8 +5109,18 @@ def check_clear_parse_mapping_1012():
         case('映射核对：主科条目被核对（checked=1）', m0['checked'] == 1, str(m0['checked']))
         case('映射核对：该班该科无映射 → no_link',
              {i['kind'] for i in m0['issues']} == {'no_link'}, str(m0['issues']))
-        case('映射核对：非映射体系科目（体育）不参与核对',
-             svc.check_teacher_mapping([dict(entries[0], subject='体育')])['checked'] == 0)
+        # 2026-10-15 用户口径「教师映射扩容，增加综合组」：体育等综合组六科**已进映射体系**，
+        # 同样参与核对（旧口径是"体育不参与核对"，此处按新口径反向断言）
+        _m_sport = svc.check_teacher_mapping([dict(entries[0], subject='体育')])
+        case('映射核对：综合组科目（体育）参与核对 → no_link',
+             _m_sport['checked'] == 1
+             and {i['kind'] for i in _m_sport['issues']} == {'no_link'}, str(_m_sport))
+        _m_alias = svc.check_teacher_mapping([dict(entries[0], subject='心理健康')])
+        case('映射核对：综合组科名归一后仍参与核对（心理健康→心理）',
+             _m_alias['checked'] == 1
+             and {i['kind'] for i in _m_alias['issues']} == {'no_link'}, str(_m_alias))
+        case('映射核对：非映射科目（自习）仍跳过，不刷噪音',
+             svc.check_teacher_mapping([dict(entries[0], subject='自习')])['checked'] == 0)
 
         # 造映射：高一01班语文 → 临时账号「陈丽莉」（并绑一条教师名单记录，用于测编号替换）
         tmp_user = User(username='t_map1012', real_name='陈丽莉', role='teacher',

@@ -3,22 +3,24 @@
 """学科组长（2026-10-14 由「备课组长」升级）。
 
 页面 `/academic/leaders` 只有一张**矩阵表**（与「任课教师映射」同形）：
-行＝学科（9 个文化科 + 综合组 6 科），列＝高一 / 高二 / 高三 / 教研组（不分年级），
+行＝学科（9 个文化科 + 综合组），列＝高一 / 高二 / 高三 / 教研组（不分年级），
 格子里选本学科教师。落库 academic.db.subject_leaders（无法从课表推导）。
 
-**两类组长**：
+**三类组长**：
 
 - **备课组长**：年级 × 学科（高一 / 高二 / 高三 各学科各一名），年级必填；
-- **教研组长**：只按学科（不分年级），年级留空＝全校。
+- **教研组长**：只按学科（不分年级），年级留空＝全校；
+- **综合组组长**（2026-10-14 用户口径二次修订）：**整个综合组只设 1 名** ——
+  体育 / 音乐 / 美术 / 信息技术 / 通用技术 / 心理 六科**合用一位组长**，
+  不分年级、不分学科；矩阵里综合组只渲染一行一格，落库为
+  `subject='综合组'` / `grade=''` / `category='综合组组长'` 的一条记录。
 
 同一 学年 × 学期 × 年级 × 学科 × 类别 重复保存即更新。
 
 **组长必须是本学科教师**：以「任课教师映射」（TeacherSubjectLink）为唯一依据，
 课表条目兜底（音体美信通心在任课映射里通常没有，只有课表），教师档案学科最后兜底；
 三处都没有任课数据时放行（外聘 / 新教师），有数据但不含该学科则拒绝保存。
-
-**综合组**：体育 / 音乐 / 美术 / 信息技术 / 通用技术 / 心理 在展示与导出里
-合并成一个「综合组」，落库仍按具体学科（不同年级可各设备课组长）。
+综合组的候选＝**六科教师并集**。
 
 2026-10-14：原「职责 / 组范围」（members / duty / sort_order 三列 + 编辑弹窗 + 明细页签）
 **整功能删除** —— 用户确认从未使用过，页面只留矩阵维护。
@@ -34,8 +36,9 @@ from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.utils import get_column_letter
 
 from app.extensions import db
-from app.models.academic import (COMPREHENSIVE_GROUP, COMPREHENSIVE_SUBJECTS,
-                                 LEADER_CATEGORIES, LEADER_CATEGORY_DEFAULT,
+from app.models.academic import (COMPREHENSIVE_ALIAS, COMPREHENSIVE_GROUP,
+                                 COMPREHENSIVE_SUBJECTS, LEADER_CATEGORIES,
+                                 LEADER_CATEGORY_COMPREHENSIVE, LEADER_CATEGORY_DEFAULT,
                                  LEADER_CATEGORY_LESSON, LEADER_CATEGORY_RESEARCH,
                                  SUBJECT_ORDER, SubjectLeader, SubjectLeaderPlan,
                                  leader_group_name)
@@ -45,13 +48,10 @@ from app.utils.export_helpers import xl_safe
 # 统一加 logger 记录 warning（仅留痕，不改变任何降级行为与返回值）。
 logger = logging.getLogger(__name__)
 
-# 学科别名字面差异（课表 / 档案里常见写法 → 组长页标准科名）
-_SUBJECT_LITERAL_ALIAS = {
-    '心理健康': '心理', '心理课': '心理', '心理健康教育': '心理',
-    '信息': '信息技术', '微机': '信息技术', '计算机': '信息技术',
-    '通用': '通用技术', '通技': '通用技术',
-    '体育与健康': '体育', '音': '音乐', '美': '美术', '体': '体育',
-}
+# 学科别名字面差异（课表 / 档案里常见写法 → 组长页标准科名）。
+# 2026-10-15：改成引用模型层唯一真值（`academic.COMPREHENSIVE_ALIAS`），
+# 任课映射导入（grades.services.teacher_import）用同一份，避免两处漂移。
+_SUBJECT_LITERAL_ALIAS = COMPREHENSIVE_ALIAS
 
 
 # ── 公共小工具 ─────────────────────────────────────────────────────────────
@@ -149,14 +149,22 @@ def _teacher_subjects_of(uid, idx=None):
     return set(), ''
 
 
-def teacher_candidates(subject, keyword=None, index=None):
-    """某学科的候选组长（只返回本学科教师）。"""
+def _candidate_subject_set(subject):
+    """候选匹配用的学科集合：综合组＝六科并集（整组一位组长，教这六科的都能当）。"""
+    if (subject or '').strip() == COMPREHENSIVE_GROUP:
+        return {_canon_subject(s) for s in COMPREHENSIVE_SUBJECTS}
     std = _canon_subject(subject)
+    return {std} if std else set()
+
+
+def teacher_candidates(subject, keyword=None, index=None):
+    """某学科的候选组长（只返回本学科教师；综合组＝体育/音乐/美术/信息技术/通用技术/心理 并集）。"""
+    wanted = _candidate_subject_set(subject)
     idx = index or teacher_subject_index()
     out = []
     for uid, info in idx.items():
         subjects, _src = _teacher_subjects_of(uid, idx)
-        if std and std not in subjects:
+        if wanted and not (wanted & subjects):
             continue
         if keyword and keyword not in (info.get('name') or '') and keyword not in uid:
             continue
@@ -197,8 +205,15 @@ def _leader_index(leaders):
 # 备课组长＝年级 × 学科；教研组长＝只按学科（列即「教研组」）。格子里选本学科教师。
 
 # 矩阵行（外语＝含英语与小语种，与成绩模块的科目口径一致）
-MATRIX_SUBJECTS = (['语文', '数学', '外语', '物理', '化学', '生物', '政治', '历史', '地理']
-                   + list(COMPREHENSIVE_SUBJECTS))
+MATRIX_SUBJECTS = ['语文', '数学', '外语', '物理', '化学', '生物', '政治', '历史', '地理']
+
+# 2026-10-14 用户口径（二次修订）：**整个综合组只设 1 名组长**（六科共用一位，不分年级、
+# 不分学科）—— 综合组不再占 6 行，矩阵里只渲染"综合组"一行一格。
+MATRIX_GROUP_SUBJECTS = [COMPREHENSIVE_GROUP]
+# 可维护的学科键全集（候选 / 保存校验都以此为准）＝文化科 + 综合组
+MATRIX_ALL_SUBJECTS = MATRIX_SUBJECTS + MATRIX_GROUP_SUBJECTS
+# 综合组那一格的键：列键与学科都是「综合组」（不出现在列头里）
+COMPREHENSIVE_CELL_KEY = f'{COMPREHENSIVE_GROUP}|{COMPREHENSIVE_GROUP}'
 
 # 矩阵列：(键, 表头, 组长类别, 存的年级)
 MATRIX_COLUMNS = (
@@ -213,7 +228,18 @@ def _column_of(key):
     for k, label, cat, grade in MATRIX_COLUMNS:
         if k == key:
             return {'key': k, 'label': label, 'category': cat, 'grade': grade}
+    if key == COMPREHENSIVE_GROUP:            # 综合组整组一格（不分年级、不分学科）
+        return {'key': COMPREHENSIVE_GROUP, 'label': COMPREHENSIVE_GROUP,
+                'category': LEADER_CATEGORY_COMPREHENSIVE, 'grade': ''}
     return None
+
+
+def _cell_of(ld, cand_uids):
+    """格子的当前值（None＝未设置）。历史组长可能不在候选（换学科 / 没编号）→ 标出来但保留原值。"""
+    if ld is None:
+        return None
+    return {'id': ld.id, 'uid': ld.leader_uid or '', 'name': ld.leader_name,
+            'selectable': (not cand_uids) or (ld.leader_uid in cand_uids)}
 
 
 def matrix_data(school_year=None, term=None):
@@ -226,17 +252,12 @@ def matrix_data(school_year=None, term=None):
     all_teachers = sorted(({'uid': u, 'name': i.get('name') or ''}
                            for u, i in idx.items()), key=lambda x: x['name'])
     candidates, fallback = {}, []
-    for subj in MATRIX_SUBJECTS:
-        std = _canon_subject(subj)
-        rows = []
-        for uid, info in idx.items():
-            subjects, _src = _teacher_subjects_of(uid, idx)
-            if std and std in subjects:
-                rows.append({'uid': uid, 'name': info.get('name') or ''})
+    for subj in MATRIX_ALL_SUBJECTS:
+        rows = [{'uid': c['uid'], 'name': c['name']}
+                for c in teacher_candidates(subj, index=idx)]
         if not rows:
             fallback.append(subj)
             rows = list(all_teachers)
-        rows.sort(key=lambda x: x['name'])
         candidates[subj] = rows
 
     leaders = leaders_of_term(school_year, term) if school_year else []
@@ -245,21 +266,22 @@ def matrix_data(school_year=None, term=None):
     for col_key, _label, col_cat, col_grade in MATRIX_COLUMNS:
         for subj in MATRIX_SUBJECTS:
             ld = lookup.get((_canon_subject(subj), col_grade, col_cat))
-            cand_uids = {c['uid'] for c in candidates[subj]}
-            cells[f'{col_key}|{subj}'] = (
-                {'id': ld.id, 'uid': ld.leader_uid or '', 'name': ld.leader_name,
-                 # 历史数据里的组长可能不在候选（换了学科 / 没有编号）→ 页面标出来但保留原值
-                 'selectable': (not cand_uids) or (ld.leader_uid in cand_uids)}
-                if ld else None)
+            cells[f'{col_key}|{subj}'] = _cell_of(ld, {c['uid'] for c in candidates[subj]})
+    # 综合组：整组一格（不分年级、不分学科）
+    cells[COMPREHENSIVE_CELL_KEY] = _cell_of(
+        lookup.get((COMPREHENSIVE_GROUP, '', LEADER_CATEGORY_COMPREHENSIVE)),
+        {c['uid'] for c in candidates[COMPREHENSIVE_GROUP]})
     return {
         'school_year': school_year or '',
         'term': term or '',
         'columns': [dict(key=k, label=label, category=cat, grade=grade)
                     for k, label, cat, grade in MATRIX_COLUMNS],
         'subjects': list(MATRIX_SUBJECTS),
-        'groups': [('文化科目', [s for s in MATRIX_SUBJECTS
-                             if s not in COMPREHENSIVE_SUBJECTS]),
-                   (COMPREHENSIVE_GROUP, list(COMPREHENSIVE_SUBJECTS))],
+        'groups': [('文化科目', list(MATRIX_SUBJECTS)),
+                   # 综合组整组一行（模板对该组特殊渲染：一格搞定）
+                   (COMPREHENSIVE_GROUP, list(MATRIX_GROUP_SUBJECTS))],
+        'group_key': COMPREHENSIVE_CELL_KEY,
+        'group_subjects': list(COMPREHENSIVE_SUBJECTS),
         'cells': cells,
         'candidates': candidates,
         'fallback': fallback,
@@ -268,7 +290,8 @@ def matrix_data(school_year=None, term=None):
 
 
 def save_matrix(data, operator_id=None):
-    """矩阵批量保存：{'school_year','term','cells': {'高一|语文': teacher_uid 或 ''}}
+    """矩阵批量保存：{'school_year','term','cells': {'高一|语文': teacher_uid 或 '',
+    '综合组|综合组': teacher_uid 或 ''}}
 
     - 有值＝登记/改派（必须是本学科教师；该学科候选为空时放行任意教师）；
     - 空值＝清空该格（删除这条组长登记）；
@@ -287,7 +310,7 @@ def save_matrix(data, operator_id=None):
     idx = teacher_subject_index()
     by_uid = {u: (i.get('name') or '') for u, i in idx.items()}
     candidates = {subj: {c['uid'] for c in teacher_candidates(subj, index=idx)}
-                  for subj in MATRIX_SUBJECTS}
+                  for subj in MATRIX_ALL_SUBJECTS}
 
     leaders = leaders_of_term(school_year, term)
     lookup = _leader_index(leaders)
@@ -297,8 +320,14 @@ def save_matrix(data, operator_id=None):
     for key, uid in cells.items():
         col_key, _, subject = str(key).partition('|')
         col = _column_of(col_key)
-        if not col or subject not in MATRIX_SUBJECTS:
+        if not col or subject not in MATRIX_ALL_SUBJECTS:
             skipped.append(f'{key}（未知的格子）')
+            continue
+        # 综合组整组只有「综合组|综合组」一个格子：既不许按年级（高一|综合组），
+        # 也不许按具体学科（教研组|体育）另开格子
+        if (subject == COMPREHENSIVE_GROUP or col_key == COMPREHENSIVE_GROUP) \
+                and key != COMPREHENSIVE_CELL_KEY:
+            skipped.append(f'{key}（综合组整组只有「{COMPREHENSIVE_CELL_KEY}」一个格子）')
             continue
         uid = str(uid or '').strip()
         lkey = (_canon_subject(subject), col['grade'], col['category'])
@@ -311,15 +340,17 @@ def save_matrix(data, operator_id=None):
                 changes['cleared'] += 1
             continue
 
+        # 提示文案里的位置：综合组整组一格，不重复写「综合组综合组」
+        _where = COMPREHENSIVE_GROUP if subject == COMPREHENSIVE_GROUP else f'{col["label"]}{subject}'
         allowed = candidates.get(subject) or set()
         if allowed and uid not in allowed and uid != ((cur.leader_uid or '') if cur else ''):
             # 该学科无候选（任课数据缺失）→ 放行任意教师；否则必须是本学科教师
-            # （原值照旧放行：换了学科的历史记录不因批量保存被静默抹掉）
-            skipped.append(f'{col["label"]}{subject}：该教师不是本学科教师')
+            # （综合组＝六科并集；原值照旧放行：换了学科的历史记录不因批量保存被静默抹掉）
+            skipped.append(f'{_where}：该教师不是本学科教师')
             continue
         name = by_uid.get(uid, '')
         if not name:
-            skipped.append(f'{col["label"]}{subject}：教师编号 {uid} 不在教师名单里')
+            skipped.append(f'{_where}：教师编号 {uid} 不在教师名单里')
             continue
 
         if cur is None:
@@ -532,8 +563,12 @@ def export_leaders_workbook(leaders, school_year=None, term=None):
                                           x.leader_name or ''))
     ri = 3
     for ld in rows:
+        # 综合组整组一位（不分年级）→ 年级列写「不分年级」而不是「全校」
+        _cat = ld.category or LEADER_CATEGORY_DEFAULT
+        grade_txt = ('不分年级' if _cat == LEADER_CATEGORY_COMPREHENSIVE
+                     else (ld.grade or '全校'))
         vals = [ld.category or LEADER_CATEGORY_DEFAULT, leader_group_name(ld.subject),
-                ld.subject, ld.grade or '全校', ld.term or '整学年',
+                ld.subject, grade_txt, ld.term or '整学年',
                 ld.leader_name, ld.leader_uid or '']
         for ci, v in enumerate(vals, 1):
             c = ws.cell(row=ri, column=ci, value=xl_safe(v))

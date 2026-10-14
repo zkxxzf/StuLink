@@ -81,7 +81,8 @@
             <span class="text-muted small">
                 学年 <b>{{ school_year or '—' }}</b> · {{ term or '整学年' }}：
                 在格子里选本学科教师（下拉只列本学科教师）；
-                <b>备课组长</b>＝年级 × 学科，<b>教研组长</b>＝只按学科、不分年级。
+                <b>备课组长</b>＝年级 × 学科，<b>教研组长</b>＝只按学科、不分年级，
+                <b>综合组</b>＝整组一位、不分年级。
                 清空格子＝删除该条登记。
             </span>
             <span class="ms-auto small" id="mMsg"></span>
@@ -105,8 +106,40 @@
                 {% for gname, subs in matrix.groups %}
                 {% if gname == '综合组' %}
                 <tr class="ld-band"><td colspan="{{ matrix.columns|length + 1 }}"
-                                      class="py-1">综合组（体育 / 音乐 / 美术 / 信息技术 / 通用技术 / 心理）</td></tr>
-                {% endif %}
+                                      class="py-1">综合组（{{ matrix.group_subjects|join(' / ') }}）</td></tr>
+                {# 2026-10-14 用户口径：整个综合组只设 1 名组长 —— 六科共用一位，不分年级、不分学科，
+                   所以这里只渲染一行一格（候选＝六科教师并集） #}
+                {% set gcell = matrix.cells.get(matrix.group_key) %}
+                <tr>
+                    <td class="fw-bold">
+                        综合组
+                        {% if gname in matrix.fallback %}
+                        <i class="bi bi-info-circle text-muted"
+                           title="任课数据里没有该组教师（课表未填教师），这里可选全部教师"></i>
+                        {% endif %}
+                    </td>
+                    <td colspan="{{ matrix.columns|length }}" class="text-center">
+                        {% if can_edit %}
+                        <select class="form-select form-select-sm lcell mx-auto" style="max-width:260px;"
+                                data-key="{{ matrix.group_key }}">
+                            <option value="" {% if not gcell or not gcell.uid %}selected{% endif %}>
+                                {%- if gcell and not gcell.uid %}{{ gcell.name }}（历史记录 · 未绑定编号）
+                                {%- else %}— 未设置 —{% endif -%}
+                            </option>
+                            {% for t in matrix.candidates[gname] %}
+                            <option value="{{ t.uid }}" {% if gcell and gcell.uid == t.uid %}selected{% endif %}>{{ t.name }}</option>
+                            {% endfor %}
+                            {% if gcell and gcell.uid and not gcell.selectable %}
+                            <option value="{{ gcell.uid }}" selected>{{ gcell.name }}（不在本组候选）</option>
+                            {% endif %}
+                        </select>
+                        <div class="text-muted small">整组一位 · 不分年级</div>
+                        {% else %}
+                        <span class="{% if not gcell %}text-muted{% endif %}">{{ gcell.name if gcell else '—' }}</span>
+                        {% endif %}
+                    </td>
+                </tr>
+                {% else %}
                 {% for sub in subs %}
                 <tr>
                     <td class="fw-bold">
@@ -139,6 +172,7 @@
                     {% endfor %}
                 </tr>
                 {% endfor %}
+                {% endif %}
                 {% endfor %}
                 </tbody>
             </table>
@@ -146,7 +180,7 @@
         <div class="alert alert-light border small mt-2 mb-0 no-print">
             <i class="bi bi-info-circle"></i>
             组长必须是本学科教师（任课教师映射为唯一依据，课表兜底）；
-            体育 / 音乐 / 美术 / 信息技术 / 通用技术 / 心理 归「综合组」。
+            <b>综合组整组只设 1 名组长</b>（{{ matrix.group_subjects|join(' / ') }} 共用一位，不分年级）。
             带 <i class="bi bi-info-circle"></i> 的学科在任课数据里查不到教师，该行可选全部教师。
             改动格子后点右上「保存全部」；切换学期（方案）走顶部下拉或右上「历史记录」。
         </div>

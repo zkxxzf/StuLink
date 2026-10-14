@@ -1,4 +1,4 @@
-# StuLink v1.19.49.31 2026-10-10
+# StuLink v1.19.49.32 2026-10-10
 # 任课教师映射：矩阵维护（按年级）+ 教师安排表批量导入 + 自动开户
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 import io
@@ -15,7 +15,8 @@ from flask import render_template, request, jsonify, abort, redirect, url_for, f
 from flask_login import login_required, current_user
 from app.extensions import db
 from app.models import User, Student, PermissionGroup, UserClassLink
-from app.models.grades import TeacherSubjectLink, SUBJECTS
+from app.models.grades import (COMPREHENSIVE_SUBJECTS, LINK_SUBJECTS, SUBJECTS,
+                               TeacherSubjectLink)
 from app.modules.grades import bp
 from app.modules.grades.services import teacher_import, user_account
 from app.modules.grades.services import link_plan_service as link_plan
@@ -45,13 +46,13 @@ def _grade_classes(grade):
 
 
 def _teacher_roles_filter():
-    """v1.19.49.31：教师候选的合法角色集合（明确排除 admin）"""
+    """v1.19.49.32：教师候选的合法角色集合（明确排除 admin）"""
     return ('teacher', 'homeroom_teacher', 'grade_leader',
             'dorm_manager', 'school_viewer', 'staff')
 
 
 def _teacher_candidates():
-    """v1.19.49.31：所有启用且属于教师类角色的账号 id 集合"""
+    """v1.19.49.32：所有启用且属于教师类角色的账号 id 集合"""
     rows = db.session.query(User.id).filter(
         User.role.in_(_teacher_roles_filter()),
         User.is_active.is_(True)
@@ -62,10 +63,10 @@ def _teacher_candidates():
 def _matrix_users(grade):
     """下拉候选教师：启用 + 教师类角色（明确排除 admin）。
 
-    v1.19.49.31：历史逻辑“已绑定 user_id 即可入选”会导致 admin 错配后一直显示在下拉里，
+    v1.19.49.32：历史逻辑“已绑定 user_id 即可入选”会导致 admin 错配后一直显示在下拉里，
     现改为仅按角色过滤；已绑定但非教师类的行依旧可在矩阵中显示历史名字（由 _build_matrix 侧），
     但下拉中不再提供 admin 作为新选择。
-    v1.19.49.31：候选**按老师名字首字母排序**（拼音 A→Z；无姓名时用账号拼音兜底）。"""
+    v1.19.49.32：候选**按老师名字首字母排序**（拼音 A→Z；无姓名时用账号拼音兜底）。"""
     valid = _teacher_candidates()
     if not valid:
         return []
@@ -78,7 +79,7 @@ def _matrix_users(grade):
 def _name_sort_key(name, username):
     """姓名 → 拼音排序键：(首字母, 全拼, 姓名)。
 
-    v1.19.49.31：用 pypinyin 把「付冰洋」排到 f、把「何楠」排到 h；
+    v1.19.49.32：用 pypinyin 把「付冰洋」排到 f、把「何楠」排到 h；
     没有姓名（real_name 为空）的账号退化为用账号（pinyin）排序，仍保证稳定有序。"""
     py = user_account.pinyin_of(name) if name else None
     py = (py or '').lower() or (username or '').lower() or (name or '')
@@ -153,14 +154,21 @@ def teachers_get():
     return jsonify(success=True, data={
         'grade': grade,
         'classes': _grade_classes(grade),
-        'subjects': SUBJECTS,
+        # 2026-10-15 用户口径「教师映射扩容，增加综合组」：科目列 = 成绩科目 9 科 +
+        # 综合组 6 科（体育/音乐/美术/信息技术/通用技术/心理，各占一列）
+        'subjects': LINK_SUBJECTS,
+        # 页面按 文化科目 / 综合组 两段渲染（与学科组长页同形）
+        'subject_groups': [
+            {'name': '', 'subjects': list(SUBJECTS)},
+            {'name': '综合组', 'subjects': list(COMPREHENSIVE_SUBJECTS)},
+        ],
         'cells': cells,
         'users': _matrix_users(grade),
     })
 
 
 def _json_body():
-    """请求体 → dict（v1.19.49.31 兼容两种提交方式）。
+    """请求体 → dict（v1.19.49.32 兼容两种提交方式）。
 
     背景：前端历史上用 `$.post(url, JSON.stringify({...}))`，jQuery 会以
     `application/x-www-form-urlencoded` 发送**JSON 文本**，而 Flask 的
@@ -219,7 +227,8 @@ def teachers_save():
             class_name, subject = cls_sub.split('|', 1)
         except ValueError:
             continue
-        if subject not in SUBJECTS or class_name not in _grade_classes(grade):
+        # 2026-10-15：白名单放宽到 LINK_SUBJECTS（含综合组 6 科），否则「体育」等键被静默丢弃
+        if subject not in LINK_SUBJECTS or class_name not in _grade_classes(grade):
             continue
         link = _link_index.get((class_name, subject))
         if user_id:
@@ -608,15 +617,21 @@ def teacher_template_download():
     wb = openpyxl.Workbook()
     ws = wb.active
     ws.title = '教师安排表'
-    ws.append(['年级', '班级', '选科', '正班', '副班1', '副班2',
-               '语文', '数学', '英语', '物理', '化学', '生物', '政治', '历史', '地理'])
+    # 2026-10-15 用户口径「教师映射扩容，增加综合组」：表头 = 9 个文化科（展示名用「英语」）
+    # + 综合组 6 科，六科同样按列填写（导入解析见 teacher_import 的 _parse_subject_columns）
+    _show = ['语文', '数学', '英语', '物理', '化学', '生物', '政治', '历史', '地理']
+    _comp = list(COMPREHENSIVE_SUBJECTS)
+    ws.append(['年级', '班级', '选科', '正班', '副班1', '副班2'] + _show + _comp)
     ws.append(['2025级', '01班', '史政地', '王慧敏', '李雅婷', '',
-               '李雅婷', '赵俊杰', '陈思远', '', '', '', '孙晓芸', '王慧敏', '周立诚'])
+               '李雅婷', '赵俊杰', '陈思远', '', '', '', '孙晓芸', '王慧敏', '周立诚']
+              + [''] * len(_comp))
     ws.append(['2025级', '02班', '史政地', '吴梦琪', '郑文静', '',
-               '吴梦琪', '高振宇', '林嘉怡', '', '', '', '郑文静', '冯天佑', '宋天宇'])
+               '吴梦琪', '高振宇', '林嘉怡', '', '', '', '郑文静', '冯天佑', '宋天宇']
+              + [''] * len(_comp))
     ws.append(['2024级', '01班', '史政地', '徐建华', '何雨欣', '',
-               '徐建华', '罗志强', '唐佳琪', '', '', '', '汪雪莉', '何雨欣', '秦若彤'])
-    widths = [10, 8, 8, 10, 10, 10] + [10] * 9
+               '徐建华', '罗志强', '唐佳琪', '', '', '', '汪雪莉', '何雨欣', '秦若彤']
+              + [''] * len(_comp))
+    widths = [10, 8, 8, 10, 10, 10] + [10] * (len(_show) + len(_comp))
     for i, w in enumerate(widths, 1):
         ws.column_dimensions[openpyxl.utils.get_column_letter(i)].width = w
     ws2 = wb.create_sheet('填表说明')
@@ -630,7 +645,8 @@ def teacher_template_download():
         ['4. 系统按“教师姓名”核对账号：已有账号直接绑定；没有账号将自动新建（账号=姓名拼音，可在预览页修改），'],
         ['   初始密码随机生成、首次登录强制修改；班主任自动归属“班主任组”。'],
         ['5. 重复导入以本次文件为准：文件涉及的班级中，原班主任不在本次名单将自动移除（不再任班主任的账号降为任课教师）。'],
-        ['6. 体育/音乐/美术/信息/心理/教室位置/班型等列可保留，导入时自动忽略。'],
+        ['6. 体育 / 音乐 / 美术 / 信息技术 / 通用技术 / 心理 六科（综合组）同样按列填写，会写入任课映射；'],
+        ['   教室位置 / 班型等其它列可保留，导入时自动忽略。'],
     ]
     for row in tips:
         ws2.append(row)
