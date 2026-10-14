@@ -1836,6 +1836,31 @@ def check_SR15():
                  resolve_scope().kind == 'school', str(resolve_scope()))
 
 
+@item('SR-16')
+def check_SR16():
+    """日志脱敏 Formatter 包装：handler 已预先有 formatter 时不得崩溃。2026-10-14"""
+    import logging as _log
+    from app.utils.log_mask import (MaskingFormatter, _formatter_style,
+                                    _wrap_formatter)
+    # 三种 style 推断正确
+    for style, fmt, expect in (('%', '%(levelname)s %(message)s', '%'),
+                               ('{', '{levelname} {message}', '{'),
+                               ('$', '${levelname} ${message}', '$')):
+        f = _log.Formatter(fmt, style=style)
+        case('SR-16 推断 style=%s' % style, _formatter_style(f) == expect,
+             _formatter_style(f))
+    # 回归：handler 已有 formatter（uvicorn 场景）时不得抛 AttributeError
+    h = _log.StreamHandler()
+    h.setFormatter(_log.Formatter('%(levelname)s %(message)s'))
+    try:
+        _wrap_formatter(h)
+        case('SR-16 包装已有 formatter 不崩溃',
+             isinstance(h.formatter, MaskingFormatter)
+             and h.formatter._fmt == '%(levelname)s %(message)s')
+    except AttributeError as e:
+        case('SR-16 包装已有 formatter 不崩溃', False, repr(e))
+
+
 def main(argv):
     selected = [a.upper() for a in argv if a.upper() in ITEMS]
     if not selected:
