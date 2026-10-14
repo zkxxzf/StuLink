@@ -31,7 +31,7 @@ class User(UserMixin, db.Model):
     created_at = db.Column(db.DateTime, default=datetime.now)
     updated_at = db.Column(db.DateTime, default=datetime.now, onupdate=datetime.now)
 
-    # v1.19.48.29（多身份改造 P1）：一人可属多组的关联（含主组标记）。
+    # v1.19.49.29（多身份改造 P1）：一人可属多组的关联（含主组标记）。
     # 旧字段 permission_group_id 保留做兼容，由 sync_primary_link() 双写保持一致。
     group_links = db.relationship('UserPermissionGroup', backref='user',
                                   lazy='select', cascade='all, delete-orphan')
