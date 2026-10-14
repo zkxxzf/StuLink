@@ -1,4 +1,4 @@
-# StuLink v1.19.48.29 2026-10-14
+# StuLink v1.19.49.29 2026-10-14
 # 用户 ↔ 权限组 多对多关联（一人多身份）
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 """用户 ↔ 权限组 多对多关联表
