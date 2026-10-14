@@ -520,10 +520,18 @@ def swap_bulk():
             period_offset=period_offset)
         if not ok:
             db.session.rollback()
+            # 2026-10-14：整批被冲突拦下时回填勾选状态（本次条目 + 冲突条目），
+            # 页面会自动重新加载并勾回"除冲突外"的条目，几十上百条不必重勾。
             return render_template('academic/swap_bulk.html',
                                    schedule=sched, class_opts=class_opts, periods=periods,
                                    weekdays=WEEKDAY_NAMES,
                                    bulk_error=msg, bulk_conflicts=result.get('conflicts', []),
+                                   bulk_retry={
+                                       'ids': entry_ids,
+                                       'conflict_ids': [c.get('entry_id')
+                                                        for c in result.get('conflicts', [])
+                                                        if c.get('entry_id')],
+                                   },
                                    f_grade=request.form.get('grade', ''),
                                    f_class=request.form.get('class_name', ''),
                                    f_weekday=request.form.get('weekday', ''))
@@ -823,13 +831,63 @@ def api_swap_available_slots():
     slots = swap_service.get_available_slots(
         entry.term_schedule_id, entry.grade, entry.class_name, entry.teacher_uid,
         exclude_entry_id=entry.id, include_all=True,
-        week_range=week_range, week=week)
+        week_range=week_range, week=week,
+        teaching_class=entry.teaching_class)
     return jsonify({'success': True, 'message': 'ok', 'data': {
         'entry': entry.to_dict(), 'slots': slots,
         'week_range': entry.week_range,
         'week_range_label': swap_service.week_range_label(entry.week_range),
         'week': week,
         'week_text': swap_service.week_badge(week),
+    }})
+
+
+@bp.route('/api/swap/bulk-check', methods=['POST'])
+@login_required
+@perm_required('academic.swap_bulk')
+def api_swap_bulk_check():
+    """统一调课：**一次性**返回所选条目的逐条目标检测结果（与提交同一口径）。
+
+    2026-10-14（用户报障"提交一整天的课，数据量大时直接崩"）：提交页原来对每一条
+    各发一次 `/api/swap/available-slots`——选一整天的课就是几百个并发请求，
+    浏览器排队几十秒、提交请求排在队尾，观感就是"卡死/崩掉"。现在改为一次请求，
+    且检测逻辑与 `bulk_apply_swap` 共用 `evaluate_bulk_targets`（含整批让位与
+    走班并行课口径），不会再出现"页面显示可用、提交却报冲突"。
+
+    表单：entry_ids（重复字段或逗号分隔）、new_weekday、new_period、period_offset、
+    mode、swap_date、is_permanent。
+    返回 {'data': {'rows': [{'entry_id','subject','class','weekday','period','ok','desc'}],
+                   'conflict_count': n, 'total': n}}
+    """
+    raw = request.form.getlist('entry_ids')
+    if len(raw) == 1 and ',' in raw[0]:
+        raw = raw[0].split(',')
+    entries, seen = [], set()
+    for x in raw:
+        x = str(x).strip()
+        if not x.isdigit():
+            continue
+        eid = int(x)
+        if eid in seen:
+            continue
+        seen.add(eid)
+        entry = db.session.get(ScheduleEntry, eid)
+        if entry and not entry.is_deleted:
+            entries.append(entry)
+
+    mode = (request.form.get('mode') or 'target').strip()
+    period_offset = (request.form.get('period_offset', type=int)
+                     if mode == 'offset' else None)
+    new_weekday = request.form.get('new_weekday', type=int)
+    new_period = request.form.get('new_period', type=int)
+    is_permanent = _bool_flag(request.form.get('is_permanent'))
+    swap_date = _parse_date(request.form.get('swap_date'))
+
+    _final, conflicts, rows = swap_service.evaluate_bulk_targets(
+        entries, new_weekday, new_period, swap_date,
+        is_permanent=is_permanent, period_offset=period_offset)
+    return jsonify({'success': True, 'message': 'ok', 'data': {
+        'rows': rows, 'total': len(entries), 'conflict_count': len(conflicts),
     }})
 
 

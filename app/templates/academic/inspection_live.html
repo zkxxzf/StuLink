@@ -42,8 +42,16 @@
     .pov-card .subj { font-size: 11.5px; color: var(--bs-secondary-color); }
     .pov-card .tch { font-size: 13px; font-weight: 600; margin-top: 1px; }
     .pov-card .tch.none { color: var(--bs-secondary-color); font-weight: 400; }
-    .pov-tag { position: absolute; top: 6px; right: 6px; font-size: 10px;
-               padding: 1px 5px; border-radius: 6px; }
+    /* 2026-10-14：单节视图也能标记查课 —— 卡片顶行＝班级 + 临调标签 + 「换人」按钮；
+       底行＝教师 + 查课结果徽标（徽标复用矩阵的 .ovw-chk 配色，这里改为行内定位）。 */
+    .pov-head { display: flex; align-items: center; gap: 6px; }
+    .pov-card .tch { display: flex; align-items: center; justify-content: space-between; gap: 6px; }
+    .pov-card .ovw-chk { position: static; font-size: 10.5px; padding: 1px 6px; border-radius: 6px; }
+    .pov-act { margin-left: auto; flex: none; border: 1px solid var(--bs-border-color);
+               background: transparent; color: var(--bs-secondary-color);
+               font-size: 11px; line-height: 18px; padding: 0 7px; border-radius: 6px; }
+    .pov-act:hover { border-color: var(--bs-primary); color: var(--bs-primary); }
+    .pov-tag { font-size: 10px; padding: 1px 5px; border-radius: 6px; }
     .pov-tag.temp { background: #e0e7ff; color: #3730a3; }
     [data-bs-theme="dark"] .pov-tag.temp { background: #312e81; color: #c7d2fe; }
     .pov-empty { text-align: center; color: var(--bs-secondary-color); padding: 40px 0; }
@@ -66,10 +74,17 @@
             {% if grade %} · 只看 {{ grade }}{% endif %}
         </div>
     </div>
+    {# 2026-10-14：单节视图的覆盖率按**这一节**算（pov_stats），不再沿用全天口径 #}
     <div class="live-stat">
+        {% if view == 'period' %}
+        <div class="item"><span class="n" id="statChecked">{{ pov_stats.checked or 0 }}</span><span class="t">已标记</span></div>
+        <div class="item"><span class="n" id="statExpected">{{ pov_stats.expected or 0 }}</span><span class="t">应查(有课)</span></div>
+        <div class="item"><span class="n" id="statRate">{{ pov_stats.rate or 0 }}%</span><span class="t">覆盖率</span></div>
+        {% else %}
         <div class="item"><span class="n" id="statChecked">{{ data.checked_total or 0 }}</span><span class="t">已标记</span></div>
         <div class="item"><span class="n" id="statExpected">{{ data.expected_total or 0 }}</span><span class="t">应查(有课)</span></div>
         <div class="item"><span class="n" id="statRate">{% if data.expected_total %}{{ (data.checked_total * 100 // data.expected_total) }}{% else %}0{% endif %}%</span><span class="t">覆盖率</span></div>
+        {% endif %}
     </div>
     <div class="text-end">
         <div class="clock" id="clockTime"><span id="clockHM">{{ now_str }}</span><small class="ms-2" id="clockPeriod">{% if data.current_period_number and is_today %}· {{ period_label(data.current_period_number) }}{% else %}· 非当堂{% endif %}</small></div>
@@ -83,8 +98,9 @@
         <div class="d-flex align-items-center flex-wrap gap-3">
             {# 2026-10-13：查课本页的双视图 ——
                「全天矩阵」= 原有版式（行班级 · 列节次，用于**标记**查课结果）；
-               「单节课表」= 只看一节：按年级分块列出每个班这节课的任课教师，
-                            可就地发起**代课**（教务调度视角）。 #}
+               「单节课表」= 只看一节：按年级分块列出每个班这节课的任课教师。
+               2026-10-14：**两个视图都能标记查课**（单击=正常 / 双击=迟到 / 右键=更多）；
+               单节视图的卡片另带「换人」按钮，可就地发起**代课 / 调课**（教务调度视角）。 #}
             <div class="btn-group btn-group-sm">
                 <a class="btn btn-outline-secondary {{ 'active' if view != 'period' }}"
                    href="{{ url_for('academic.inspection_live_schedule', date=target_date.isoformat(), grade=grade) }}">
@@ -119,11 +135,13 @@
                 </select>
             </div>
             <button class="btn btn-sm btn-outline-secondary" id="btnToday"><i class="bi bi-calendar-day"></i> 今天</button>
-            {# 2026-10-13：这两个按钮只对「全天矩阵」有意义（单节课表视图没有格子可标），切到单节视图时隐藏 #}
-            {% if can_mark and view != 'period' %}
+            {# 2026-10-14：单节视图也能标记 ——「未标记的全部正常」按当前这一节生效；
+               「本节 + 保存本节」仍只对全天矩阵有意义（单节视图本身只看一节）。 #}
+            {% if can_mark %}
             <button class="btn btn-sm btn-success" id="btnMarkAllNormal" title="把当前页面上还没标记的格子一次性标为正常">
                 <i class="bi bi-check2-all"></i> 未标记的全部正常
             </button>
+            {% if view != 'period' %}
             {# 2026-10-10：本节保存 —— 本节班都查完直接保存；未查完则询问是否通知领导 #}
             <div class="d-flex align-items-center gap-2 ms-2">
                 <label class="form-label small mb-0 text-muted">本节</label>
@@ -138,6 +156,7 @@
                 </button>
             </div>
             {% endif %}
+            {% endif %}
             <span class="ms-auto chk-legend">
                 <span><i style="background:#e2e8f0"></i>未查</span>
                 <span><i style="background:#d1fae5"></i>正常</span>
@@ -145,7 +164,7 @@
                 <span><i style="background:#fee2e2"></i>缺勤</span>
                 <span><i style="background:#e0e7ff"></i>调课</span>
                 <span><i style="background:#e0f2fe"></i>考试</span>
-                {% if can_mark %}<span class="text-muted">（单击=正常 · 双击=迟到 · 右键=缺勤/调课/考试…）</span>{% endif %}
+                {% if can_mark %}<span class="text-muted">（单击=正常 · 双击=迟到 · 右键=缺勤/调课/考试…{% if view == 'period' %} · 「换人」=代课/调课{% endif %}）</span>{% endif %}
             </span>
         </div>
     </div>
@@ -163,17 +182,25 @@
         </div>
         <div class="pov-grid">
             {% for r in b.rows %}
-            {% set clickable = r.subject and can_schedule and r.entry_id %}
-            <div class="pov-card{{ ' can' if clickable else ('' if r.subject else ' empty') }}"
-                 {% if clickable %}data-entry="{{ r.entry_id }}"
-                 data-cls="{{ r.grade }}{{ r.class_name }}"
-                 data-subj="{{ r.subject }}" data-tch="{{ r.teacher_name or '' }}"
-                 data-tuid="{{ r.teacher_uid or '' }}" data-room="{{ r.room or '' }}"
-                 title="点击发起代课"{% endif %}>
-                {% if r.is_temp_swap %}<span class="pov-tag temp">临调</span>{% endif %}
-                <div class="cls">{{ r.class_name }}</div>
+            {# markable：这一节有课 + 有查课权限 → 卡片可单击/双击/右键标记；
+               swappable：有课 + 有课表管理权限 → 多一个「换人」按钮（代课 / 调课申请）。 #}
+            {% set markable = r.subject and can_mark %}
+            {% set swappable = r.subject and can_schedule and r.entry_id %}
+            <div class="pov-card{{ ' can' if markable else ('' if r.subject else ' empty') }}"
+                 {% if r.subject %}data-grade="{{ r.grade }}" data-class="{{ r.class_name }}"
+                 data-period="{{ r.period_number }}" data-entry="{{ r.entry_id }}"
+                 data-subject="{{ r.subject or '' }}" data-teacher="{{ r.teacher_name or '' }}"
+                 data-uid="{{ r.teacher_uid or '' }}" data-room="{{ r.room or '' }}"
+                 data-temp="{{ 1 if r.is_temp_swap else 0 }}"
+                 {% if markable %}data-check="{{ r.check.result if r.check else '' }}"{% endif %}
+                 title="{{ r.subject or '' }} {{ r.teacher_name or '' }}{% if r.check %} · 已标记{{ r.check.label }}{% if r.check.note %}（{{ r.check.note }}）{% endif %}{% elif markable %} · 点此标记查课结果{% endif %}"{% endif %}>
+                <div class="pov-head">
+                    <span class="cls">{{ r.class_name }}</span>
+                    {% if r.is_temp_swap %}<span class="pov-tag temp">临调</span>{% endif %}
+                    {% if swappable %}<button type="button" class="pov-act" title="代课 / 调课…"><i class="bi bi-arrow-left-right"></i> 换人</button>{% endif %}
+                </div>
                 <div class="subj">{% if r.subject %}{{ r.subject }}{% if r.room %} · {{ r.room }}{% endif %}{% else %}空档{% endif %}</div>
-                <div class="tch{{ '' if r.subject else ' none' }}">{% if r.subject %}{{ r.teacher_name or '未指定教师' }}{% else %}—{% endif %}</div>
+                <div class="tch{{ '' if r.subject else ' none' }}"><span>{% if r.subject %}{{ r.teacher_name or '未指定教师' }}{% else %}—{% endif %}</span>{% if markable %}<span class="ovw-chk ovw-chk-{{ r.check.result if r.check else 'none' }}">{{ r.check.label if r.check else '未查' }}</span>{% endif %}</div>
             </div>
             {% endfor %}
         </div>

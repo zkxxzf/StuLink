@@ -21,8 +21,9 @@ from flask_login import login_required, current_user
 from app.extensions import db
 from app.models import User
 from app.models.grades import (AffairTeacher, AffairSchedule, AffairInvigilator,
-                               AffairInvigilation, AffairRoom, AffairStudent,
-                               TeacherSubjectLink, SUBJECTS, Exam, normalize_subject)
+                               AffairInvigExclude, AffairInvigilation, AffairRoom,
+                               AffairStudent, ExamAffair, TeacherSubjectLink,
+                               SUBJECTS, Exam, normalize_subject)
 from app.modules.grades import bp
 from app.modules.grades.utils import numeric_classes
 from app.utils.decorators import perm_required
@@ -37,6 +38,15 @@ _MAX_SLOTS = 3
 # （_auto_arrange 按 {sch.subject} 回避任教该科老师），此前任意文本可入库 →
 # 手写「化学(」之类的值会让回避规则静默失配，排出来就是化学老师监考化学。
 _SUBJ_SET = set(SUBJECTS)
+
+# 2026-10-14 用户口径：内置「每科考试时长」——选了科目就自动算出结束时间，不用自己按科目心算。
+#   · 语文 2.5 小时（150 分钟）；数学 / 英语（外语）2 小时（120 分钟）；其它科目 75 分钟；
+#   · 一场考多科（如「四选二」写成「物理、化学」）取**最长**的那一科；
+#   · 开始时间缺省用 SCHED_DEFAULT_START —— 只在**手填**（save）与环境⑤ 新增行时兜底，
+#     导入路径（Excel / 粘贴 / AI）不替用户猜开始时间，只把「有开始、缺结束」的补全。
+SCHED_DEFAULT_START = '08:00'
+SCHED_DURATION_MINUTES = {'语文': 150, '数学': 120, '英语': 120, '外语': 120}
+SCHED_DURATION_FALLBACK = 75
 
 
 # ==================== 公共小工具 ====================
@@ -307,6 +317,41 @@ def _sched_blank_row():
             'subject': '', 'selection': '', 'note': ''}
 
 
+# ---------- 内置每科时长（2026-10-14 用户口径：自动算结束时间） ----------
+
+def sched_duration_minutes(subject):
+    """本场次的默认考试时长（分钟）：一场多科取**最长**那一科；没科目时用兜底 75 分钟。"""
+    mins = [SCHED_DURATION_MINUTES.get(s, SCHED_DURATION_FALLBACK)
+            for s in _split_subjects(subject)]
+    return max(mins) if mins else SCHED_DURATION_FALLBACK
+
+
+def add_minutes(hhmm, minutes):
+    """'HH:MM' + N 分钟 → 'HH:MM'（跨午夜按 24 小时回绕；考场不跨天，仅防呆）。"""
+    m = re.match(r'^(\d{1,2}):(\d{2})$', str(hhmm or '').strip())
+    if not m or not minutes:
+        return hhmm or ''
+    total = (int(m.group(1)) * 60 + int(m.group(2)) + int(minutes)) % (24 * 60)
+    return '%02d:%02d' % (total // 60, total % 60)
+
+
+def fill_sched_end(row, default_start=None):
+    """给一行场次补时间（原地改 row 字典）：
+
+    · 结束缺、开始有值 → 结束 = 开始 + 本科内置时长；
+    · 开始也缺且传了 default_start（手填场景）→ 先用 default_start 兜底开始，再补结束；
+    · 用户已经填了结束 → 一律不动（手填优先）。
+    返回是否补出了结束时间。
+    """
+    if not row.get('start_time') and default_start:
+        row['start_time'] = default_start
+    if row.get('start_time') and not row.get('end_time'):
+        row['end_time'] = add_minutes(row['start_time'],
+                                      sched_duration_minutes(row.get('subject')))
+        return True
+    return False
+
+
 def _fill_date(row, value):
     d = _parse_date(value)
     if d is None:
@@ -474,7 +519,7 @@ def _sched_apply(affair, parsed, default_date):
     """按「每天最多 _SCHED_DAILY_MAX 场」排日期后入库。
 
     已在批次里的场次也占当天名额；当天排满则顺延到次日（导入后用户可手动改回）。
-    返回 (新增数, 顺延数)。
+    返回 (新增数, 顺延数, 按内置时长自动补结束时间的场次数)。
     """
     used = {}
     for s in AffairSchedule.query.filter_by(affair_id=affair.id).all():
@@ -482,7 +527,12 @@ def _sched_apply(affair, parsed, default_date):
             used[s.exam_date] = used.get(s.exam_date, 0) + 1
     base_order = AffairSchedule.query.filter_by(affair_id=affair.id).count()
     added = shifted = 0
+    filled = 0
     for r in parsed:
+        # 2026-10-14 用户口径：结束时间留空 → 按内置每科时长补（语文 2.5h / 数学·英语 2h / 其它 75min）。
+        # 导入路径**不替用户猜开始时间**（没写就保持留空），只补「有开始、缺结束」这种半截数据。
+        if fill_sched_end(r):
+            filled += 1
         want = r['exam_date'] if r['exam_date'] else default_date
         d = want
         while used.get(d, 0) >= _SCHED_DAILY_MAX:
@@ -496,7 +546,7 @@ def _sched_apply(affair, parsed, default_date):
             subject=r['subject'], selection=r['selection'], note=r['note'],
             sort_order=base_order + added))
         added += 1
-    return added, shifted
+    return added, shifted, filled
 
 
 @bp.route('/affairs/<int:aid>/schedules/template')
@@ -508,8 +558,10 @@ def affair_schedules_template(aid):
     ws = wb.active
     ws.title = '考试时间表'
     ws.append(['考试日期', '开始时间', '结束时间', '考试科目', '选科', '备注'])
-    ws.append(['2026-10-08', '09:00', '10:30', '语文', '', ''])
-    ws.append(['2026-10-08', '14:00', '15:30', '数学', '', ''])
+    # 2026-10-14：示例行按**内置每科时长**给（语文 150 分钟 → 09:00-11:30；数学 120 分钟 → 14:00-16:00），
+    # 结束时间也可以留空 —— 导入时系统会按科目自动补（见 fill_sched_end）。
+    ws.append(['2026-10-08', '09:00', '11:30', '语文', '', ''])
+    ws.append(['2026-10-08', '14:00', '16:00', '数学', '', ''])
     for ci in range(1, 7):
         c = ws.cell(row=1, column=ci)
         c.font = openpyxl.styles.Font(bold=True, color='FFFFFF')
@@ -581,12 +633,14 @@ def affair_schedules_import(aid):
         parsed.append(row)
     # 2026-10-13 用户口径：日期缺省用「创建考试时填的考试日期」；
     # 每天最多 _SCHED_DAILY_MAX 场，排满自动顺延到次日（与粘贴导入同一条规则）
-    added, shifted = _sched_apply(affair, parsed, default_date)
+    added, shifted, auto_end = _sched_apply(affair, parsed, default_date)
     db.session.commit()
     log_operation(current_user, '导入', '考试时间表', aid,
                   f'Excel 导入 {added} 场（跳过 {skipped} 行，'
-                  f'{shifted} 场因当天已满 {_SCHED_DAILY_MAX} 场顺延）', module='grades')
-    return jsonify({'ok': True, 'added': added, 'skipped': skipped, 'shifted': shifted})
+                  f'{shifted} 场因当天已满 {_SCHED_DAILY_MAX} 场顺延，'
+                  f'{auto_end} 场按科目时长自动补结束时间）', module='grades')
+    return jsonify({'ok': True, 'added': added, 'skipped': skipped, 'shifted': shifted,
+                    'auto_end': auto_end})
 
 
 @bp.route('/affairs/<int:aid>/schedules/paste', methods=['POST'])
@@ -616,12 +670,14 @@ def affair_schedules_paste(aid):
     if len(parsed) > 500:
         return jsonify({'ok': False, 'msg': f'一次最多导入 500 场（本次 {len(parsed)} 场），请分批'})
     default_date = _sched_default_date(affair)
-    added, shifted = _sched_apply(affair, parsed, default_date)
+    added, shifted, auto_end = _sched_apply(affair, parsed, default_date)
     db.session.commit()
     log_operation(current_user, '导入', '考试时间表', aid,
                   f'粘贴导入 {added} 场（跳过 {skipped} 行，'
-                  f'{shifted} 场因当天已满 {_SCHED_DAILY_MAX} 场顺延）', module='grades')
+                  f'{shifted} 场因当天已满 {_SCHED_DAILY_MAX} 场顺延，'
+                  f'{auto_end} 场按科目时长自动补结束时间）', module='grades')
     return jsonify({'ok': True, 'added': added, 'skipped': skipped, 'shifted': shifted,
+                    'auto_end': auto_end,
                     'daily_max': _SCHED_DAILY_MAX,
                     'default_date': default_date.strftime('%Y-%m-%d')})
 
@@ -658,8 +714,15 @@ def affair_schedules_save(aid):
                                  affair_id=affair.id).count())
         db.session.add(row)
     row.exam_date = _parse_date(request.form.get('exam_date'))
-    row.start_time = _parse_time(request.form.get('start_time'))
-    row.end_time = _parse_time(request.form.get('end_time'))
+    # 2026-10-14 用户口径：结束时间留空 → 开始 + 本场科目内置时长
+    # （语文 2.5 小时 / 数学·英语 2 小时 / 其它 75 分钟；多科取最长）。
+    # 开始时间也留空时整行保持留空（时间仍可不填）；前端「选科目自动带出时间」是同一套规则。
+    _times = {'start_time': _parse_time(request.form.get('start_time')),
+              'end_time': _parse_time(request.form.get('end_time')),
+              'subject': subj}
+    fill_sched_end(_times)
+    row.start_time = _times['start_time']
+    row.end_time = _times['end_time']
     row.subject = subj
     row.selection = sanitize_label(request.form.get('selection'), 30)
     row.note = sanitize_label(request.form.get('note'), 100)
@@ -856,6 +919,79 @@ def affair_invig_others_add(aid):
     return jsonify({'ok': True})
 
 
+@bp.route('/affairs/<int:aid>/invig/teacher-candidates', methods=['GET'])
+@login_required
+@perm_required('grades.edit')
+def affair_invig_teacher_candidates(aid):
+    """2026-10-14 用户口径：加监考员要**从教师名单里勾选**（尤其是其他学科 / 其他年级的老师），
+    不该再用 prompt 一个个手输姓名和学科。校外无账号老师仍走「手工添加 / 导入名单」。
+
+    返回全校在职教师（姓名 + 学科 + 关联账号）+ 已在本批次教师池里的姓名，供前端置灰。
+    """
+    affair = _affair(aid)
+    from app.models.academic import Teacher       # 教师库（academic 库）
+    # 学科口径：**以任课教师映射 TeacherSubjectLink 为唯一依据**（项目约定；Teacher.subject
+    # 多为空）。一位老师可能教多科，故回传 subjects 数组，前端按学科分组展开。
+    subs_by_uid = {}
+    for lk in TeacherSubjectLink.query.filter_by(active=True).all():
+        s = (lk.subject or '').strip()
+        if s:
+            subs_by_uid.setdefault(lk.user_id, set()).add(s)
+    rows = (Teacher.query.filter(Teacher.status == 'active')
+            .order_by(Teacher.name).all())
+    teachers, seen = [], set()
+    for t in rows:
+        nm = (t.name or '').strip()
+        if not nm or nm in seen:
+            continue
+        seen.add(nm)
+        subs = sorted(subs_by_uid.get(t.user_id, set()))
+        teachers.append({'name': nm, 'subjects': subs,
+                         'subject': '、'.join(subs),   # 展示 / 去重串（与教师池 subject 同格式）
+                         'user_id': t.user_id})
+    return jsonify({'success': True, 'data': {
+        'teachers': teachers,
+        'in_pool': sorted({p['name'] for p in invig_pool(affair)}),
+        'others': sorted(o.name for o in
+                         AffairInvigilator.query.filter_by(affair_id=affair.id).all()),
+    }})
+
+
+@bp.route('/affairs/<int:aid>/invig/others/add-batch', methods=['POST'])
+@login_required
+@perm_required('grades.edit')
+def affair_invig_others_add_batch(aid):
+    """从教师名单**批量**加入监考员（弹窗勾选后一次提交）。
+
+    body：JSON `[{'name': ..., 'subject': ...}, ...]`；按姓名去重（已存在的计入 dup）。
+    字段仍走 sanitize_label 白名单（与单条新增同一防线）。
+    """
+    affair = _affair(aid)
+    items = request.get_json(silent=True)
+    if not isinstance(items, list):
+        return jsonify({'ok': False, 'msg': '参数格式不正确'})
+    exist = {o.name for o in AffairInvigilator.query.filter_by(affair_id=affair.id).all()}
+    added = dup = 0
+    for it in items[:500]:                        # 上限：防一次塞几千行
+        if not isinstance(it, dict):
+            continue
+        name = sanitize_label(it.get('name'), 30)
+        if not name or name in exist:
+            dup += 1
+            continue
+        db.session.add(AffairInvigilator(
+            affair_id=affair.id, name=name,
+            subject=sanitize_label(it.get('subject'), 20),
+            note=sanitize_label(it.get('note'), 100)))
+        exist.add(name)
+        added += 1
+    db.session.commit()
+    if added:
+        log_operation(current_user, '新增', '其他监考员', aid,
+                      f'勾选加入 {added} 人', module='grades')
+    return jsonify({'ok': True, 'added': added, 'dup': dup})
+
+
 @bp.route('/affairs/<int:aid>/invig/others/<int:oid>/delete', methods=['POST'])
 @login_required
 @perm_required('grades.edit')
@@ -928,6 +1064,119 @@ def affair_invig_others_import(aid):
     db.session.commit()
     log_operation(current_user, '导入', '其他监考员', aid, f'新增 {added} 人', module='grades')
     return jsonify({'ok': True, 'added': added, 'dup': dup})
+
+
+@bp.route('/affairs/<int:aid>/invig/copy-sources', methods=['GET'])
+@login_required
+@perm_required('grades.edit')
+def affair_invig_copy_sources(aid):
+    """可复用的监考配置来源：同年级历次考务批次（按考试日期倒序）+ 各自配置摘要。
+
+    2026-10-14 用户口径：「要能复用上次考试的配置，上一次是哪一场**可以选择**」。
+    只列出确实配过监考的批次（有其他监考员 / 排除名单 / 已排监考表 / 人数 > 1）。
+    """
+    affair = _affair(aid)
+    rows = (ExamAffair.query
+            .filter(ExamAffair.grade == affair.grade, ExamAffair.id != affair.id)
+            .order_by(ExamAffair.exam_date.desc(), ExamAffair.id.desc()).all())
+    out = []
+    for a in rows:
+        others = AffairInvigilator.query.filter_by(affair_id=a.id).count()
+        excludes = AffairInvigExclude.query.filter_by(affair_id=a.id).count()
+        whole = AffairInvigExclude.query.filter_by(affair_id=a.id,
+                                                   schedule_id=None).count()
+        invig = AffairInvigilation.query.filter_by(affair_id=a.id).count()
+        slots = a.invig_slots or 1
+        if not (others or excludes or invig or slots > 1):
+            continue
+        out.append({'id': a.id, 'name': a.name,
+                    'date': a.exam_date.strftime('%Y-%m-%d') if a.exam_date else '',
+                    'slots': slots, 'others': others, 'excludes': excludes,
+                    'whole': whole, 'invig': invig})
+    return jsonify({'success': True, 'data': {'sources': out,
+                                              'cur_slots': affair.invig_slots or 1}})
+
+
+@bp.route('/affairs/<int:aid>/invig/copy-from', methods=['POST'])
+@login_required
+@perm_required('grades.edit')
+def affair_invig_copy_from(aid):
+    """复用指定批次的监考配置（人口径见下），2026-10-14 用户需求。
+
+    · 每考场监考人数：**覆盖**为源批次的值；
+    · 其他监考员：按姓名去重**追加**；
+    · 排除名单：整批排除（schedule_id 为空）直接搬；按场次排除按「科目 + 同科第几场」
+      映射到本批次场次，映射不上（本批次没这门科 / 同科场次不够）或已存在则跳过并报数。
+    · **不搬**已编排的监考表格子 —— 本批次考场与场次一般与源批次不同，搬过来无意义。
+    """
+    affair = _affair(aid)
+    body = request.get_json(silent=True) or {}
+    src_id = request.form.get('src_aid', type=int) or body.get('src_aid')
+    try:
+        src = ExamAffair.query.get(int(src_id)) if src_id else None
+    except (TypeError, ValueError):
+        src = None
+    if src is None or src.grade != affair.grade or src.id == affair.id:
+        return jsonify({'ok': False, 'msg': '源批次不存在、跨年级或就是本批次'})
+
+    # ① 每考场监考人数（覆盖）
+    old_slots = affair.invig_slots or 1
+    affair.invig_slots = src.invig_slots or 1
+
+    # ② 其他监考员（去重追加）
+    exist_o = {o.name for o in AffairInvigilator.query.filter_by(affair_id=affair.id).all()}
+    o_added = o_dup = 0
+    for r in AffairInvigilator.query.filter_by(affair_id=src.id).all():
+        if r.name in exist_o:
+            o_dup += 1
+            continue
+        db.session.add(AffairInvigilator(affair_id=affair.id, name=r.name,
+                                         subject=r.subject, note=r.note))
+        exist_o.add(r.name)
+        o_added += 1
+
+    # ③ 排除名单
+    src_scheds = (AffairSchedule.query.filter_by(affair_id=src.id)
+                  .order_by(AffairSchedule.id).all())
+    dst_scheds = (AffairSchedule.query.filter_by(affair_id=affair.id)
+                  .order_by(AffairSchedule.id).all())
+    src_ki, dst_pool = {}, {}
+    for s in src_scheds:                    # 源场次 id → (科目, 同科第几场)
+        k = (s.subject or '').strip()
+        src_ki[s.id] = (k, sum(1 for x in src_scheds
+                               if (x.subject or '').strip() == k and x.id <= s.id))
+    for t in dst_scheds:                    # 本批次：科目 → [场次 id...]
+        dst_pool.setdefault((t.subject or '').strip(), []).append(t.id)
+    src2dst = {}
+    for sid, (k, idx) in src_ki.items():
+        lst = dst_pool.get(k) or []
+        src2dst[sid] = lst[idx - 1] if len(lst) >= idx else None
+
+    exist_e = {(e.name, e.schedule_id) for e in
+               AffairInvigExclude.query.filter_by(affair_id=affair.id).all()}
+    e_added = e_dup = e_skip = 0
+    for e in AffairInvigExclude.query.filter_by(affair_id=src.id).all():
+        sid = e.schedule_id
+        if sid is not None:
+            sid = src2dst.get(sid)
+            if sid is None:
+                e_skip += 1                  # 本批次没有对应场次（科目对不上）
+                continue
+        if (e.name, sid) in exist_e:
+            e_dup += 1
+            continue
+        db.session.add(AffairInvigExclude(affair_id=affair.id, name=e.name,
+                                          user_id=e.user_id, schedule_id=sid))
+        exist_e.add((e.name, sid))
+        e_added += 1
+    db.session.commit()
+    # 2026-10-14：复用配置会改变后续自动编排的结果，按纪律记业务日志
+    log_operation(current_user, '复用', '监考配置', aid,
+                  f'来自批次{src.id}：人数 {old_slots}→{affair.invig_slots}'
+                  f'，其他监考员 +{o_added}，排除 +{e_added}', module='grades')
+    return jsonify({'ok': True, 'src': src.name, 'slots': affair.invig_slots,
+                    'old_slots': old_slots, 'others_added': o_added, 'others_dup': o_dup,
+                    'excl_added': e_added, 'excl_dup': e_dup, 'excl_skipped': e_skip})
 
 
 @bp.route('/affairs/<int:aid>/invig/exclude', methods=['POST'])

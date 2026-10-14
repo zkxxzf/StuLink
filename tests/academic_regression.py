@@ -401,6 +401,32 @@ def check_overview():
                      for cell in row if cell.value))
         except Exception as e:  # noqa: BLE001
             case('总课表 Excel 可解析', False, str(e))
+        # 2026-10-14（用户报障「导出的 Excel 只有各个班的表」）：整校导出＝全校 + 年级 + 班级三层
+        r = c.get(u['export'], query_string={'view_type': 'all'})
+        try:
+            wb = excel_sheets(r.data)
+            names = wb.sheetnames
+            case('整校导出：全校表在最前 + 各年级表 + 各班表齐全',
+                 names and names[0] == '全校总课表'
+                 and {'高一总课表', '高二总课表'} <= set(names)
+                 and {'高一01班', '高一02班', '高二01班'} <= set(names),
+                 str(names))
+            _gt = ' '.join(str(v) for row in wb['高一总课表'].iter_rows()
+                           for v in (cell.value for cell in row) if v)
+            case('年级总课表内容＝该年级各班并列（不含其它年级）',
+                 '高一01班' in _gt and '高一02班' in _gt and '张语文' in _gt
+                 and '高二01班' not in _gt)
+        except Exception as e:  # noqa: BLE001
+            case('整校导出可解析', False, str(e))
+        # 年级导出同样先给年级总课表，再给各班表
+        r = c.get(u['export'], query_string={'view_type': 'grade', 'grade': '高一'})
+        try:
+            names = excel_sheets(r.data).sheetnames
+            case('年级导出：年级总课表 + 该年级各班表',
+                 names and names[0] == '高一总课表'
+                 and {'高一01班', '高一02班'} <= set(names), str(names))
+        except Exception as e:  # noqa: BLE001
+            case('年级导出可解析', False, str(e))
         token = get_csrf(c, u['overview'])
         r = c.post(u['share'], json={'view': 'overview'}, headers={'X-CSRFToken': token})
         j = r.get_json() or {}
@@ -637,6 +663,14 @@ def check_sched_v2():
              '更多' in html and 'dropdown-menu' in html
              and f'/schedule/{TS_ID}/grade/' in html,
              '更多下拉缺失或年级课表入口丢失')
+        # 2026-10-14（用户要求）：还没导入课表的学期，主按钮 = 「导入课表」
+        # （原先把「全校总课表」摆在最前，空表点进去什么都没有，还挡着导入引导）
+        draft_import_hits = html.count(f'/schedule/{draft_sid}/smart-import')
+        case('学期管理页：空课表学期标出「尚未导入」', '尚未导入' in html)
+        case('学期管理页：空课表学期主按钮为「导入课表」（不再是全校总课表）',
+             draft_import_hits == 1 and f'/schedule/{draft_sid}/overview' not in html,
+             f'导入入口 {draft_import_hits} 个；'
+             + ('总课表按钮仍在' if f'/schedule/{draft_sid}/overview' in html else '已撤'))
         # 2026-10-12（用户要求）：侧栏「全校总课表」入口删除 —— 学期卡片上已有该按钮，
         # 侧栏再挂一个是重复入口；原来只为侧栏服务、无 sid 的跳转路由随之下线
         case('侧栏不再挂「全校总课表」重复入口',
@@ -1016,6 +1050,158 @@ def check_swap_batch_one_record():
                 synchronize_session=False)
         ScheduleSwap.query.filter(
             ScheduleSwap.batch_id.in_([bid, bid2])).delete(
+                synchronize_session=False)
+        db.session.commit()
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# 统一调课「整天一起挪」口径（2026-10-14 用户报障：提交一整天的课直接崩）
+#  ① 整批让位（与审批/执行同口径）② 走班并行课 ③ 批量检测接口 ④ 失败页回填勾选
+# ══════════════════════════════════════════════════════════════════════════════
+
+@item('BULKOFF')
+def check_bulk_swap_day_offsets():
+    """整天课统一调整的提交口径（2026-10-14 修复）。
+
+    修复前实测（真实学期数据，周三 266 条）：
+    - "整体后移 1 节"报 235 条冲突 —— 提交时逐条只排除自己，同批其它条目还占着目标格；
+    - "整天挪到周六"报 5 条冲突 —— 并行走班课（不同教学班同格）被判成班级冲突；
+    - 前端对每一行各发一次 available-slots（266 个并发请求），页面与提交一起被拖死。
+    """
+    from app.modules.academic.services import swap_service
+    grade, cname = '高三', '88班'
+
+    with app.app_context():
+        made = []
+        for pn, subj in ((2, '语文'), (3, '数学'), (4, '英语')):
+            e = ScheduleEntry(term_schedule_id=TS_ID, grade=grade, class_name=cname,
+                              weekday=4, period_number=pn, subject=subj,
+                              week_range='1-20', entry_type='normal')
+            db.session.add(e)
+            made.append(e)
+        db.session.commit()
+        eids = [e.id for e in made]
+
+        # ① 永久调课整批让位：第 2/3/4 节一起后移 1 节（第 2→3、3→4、4→5）
+        ok, msg, res = swap_service.bulk_apply_swap(
+            applicant_uid='bulkoff', applicant_name='整天回归',
+            entry_ids=eids, new_weekday=None, new_period=None,
+            is_permanent=True, reason='整天后移一节', period_offset=1)
+        bid = res.get('batch_id')
+        case('整批让位：同一班 3 节课整体后移 1 节可一次提交（不再自撞）',
+             ok and res.get('created') == 3, f'{msg} conflicts={res.get("conflicts")}')
+
+        # 临时调课不动常规课表 → 原格仍被占，不套用让位口径（该冲突要照报）
+        ok_t, msg_t, res_t = swap_service.bulk_apply_swap(
+            applicant_uid='bulkoff', applicant_name='整天回归',
+            entry_ids=eids[:2], new_weekday=None, new_period=None,
+            swap_date=date(2026, 10, 15), is_permanent=False,
+            reason='临时整天后移', period_offset=1)
+        case('临时调课不套用让位口径（原格仍占用，冲突照报）',
+             (not ok_t) and bool(res_t.get('conflicts')), f'{msg_t}')
+
+        # ② 走班并行课：同班同格两条不同教学班（不同教师）一起挪
+        par = []
+        for tc, subj, tuid in (('地政·地理', '地理', 't_geo'),
+                               ('地政·政治', '政治', 't_zz')):
+            e = ScheduleEntry(term_schedule_id=TS_ID, grade=grade, class_name=cname,
+                              weekday=4, period_number=8, subject=subj,
+                              teacher_uid=tuid, teacher_name=subj + '老师',
+                              week_range='1-20', teaching_class=tc,
+                              entry_type='normal')
+            db.session.add(e)
+            par.append(e)
+        db.session.commit()
+        par_ids = [e.id for e in par]
+        ok2, msg2, res2 = swap_service.bulk_apply_swap(
+            applicant_uid='bulkoff', applicant_name='整天回归',
+            entry_ids=par_ids, new_weekday=7, new_period=8,
+            is_permanent=True, reason='走班并行课一起挪')
+        bid2 = res2.get('batch_id')
+        case('走班并行课：不同教学班同格一起调课不再被误判冲突',
+             ok2 and res2.get('created') == 2, f'{msg2} conflicts={res2.get("conflicts")}')
+
+        # 同名教学班（同一次走班课占多班课表）不算教师冲突：
+        # 目标格上有一条"同教师 + 同教学班"的课（另一个班），应放行
+        ok3 = False
+        bid3 = None
+        ex_id = None
+        if ok2:
+            e_x = ScheduleEntry(term_schedule_id=TS_ID, grade=grade, class_name='89班',
+                                weekday=6, period_number=5, subject='地理',
+                                teacher_uid='t_geo', teacher_name='地理老师',
+                                week_range='1-20', teaching_class='地政·地理',
+                                entry_type='normal')
+            db.session.add(e_x)
+            db.session.commit()
+            ex_id = e_x.id
+            ok3, msg3, res3 = swap_service.bulk_apply_swap(
+                applicant_uid='bulkoff', applicant_name='整天回归',
+                entry_ids=[par[0].id], new_weekday=6, new_period=5,
+                is_permanent=True, reason='走班课挪到同名教学班那格')
+            bid3 = res3.get('batch_id')
+            case('走班课：目标格是"同教师 + 同名教学班"的另一行 → 不算教师冲突',
+                 ok3, f'{msg3} conflicts={res3.get("conflicts")}')
+
+        # 执行整批：教学班必须随行（丢了它，同格另一条执行时会被判"本班已有课"）
+        done = 0
+        if ok2:
+            for _i in range(4):
+                rep = (ScheduleSwap.query.filter_by(batch_id=bid2, status='pending')
+                       .order_by(ScheduleSwap.id).first())
+                if not rep:
+                    break
+                swap_service.review_swap_batch(rep.id, 1, '整天回归', 'approve')
+            for s in ScheduleSwap.query.filter_by(batch_id=bid2,
+                                                  status='approved').all():
+                o, _m, _s = swap_service.execute_swap(s.id, 1, '整天回归')
+                done += 1 if o else 0
+            tcs = sorted((e.teaching_class or '') for e in ScheduleEntry.query.filter_by(
+                term_schedule_id=TS_ID, grade=grade, class_name=cname,
+                weekday=7, period_number=8, is_deleted=False).all())
+            case('整批执行：走班并行两条都成功、教学班随行不丢',
+                 done == 2 and tcs == ['地政·地理', '地政·政治'],
+                 f'done={done} teaching_class={tcs}')
+
+    # ③ 批量检测接口（一次请求算全部条目的目标格）＋ ④ 失败页回填勾选
+    with app.test_client() as c:
+        login(c, 'ac_admin', TEST_PWD)
+        token = get_csrf(c, '/academic/swap/bulk')
+        hdrs = {'X-CSRFToken': token}
+        # 语文(第 2 节) 的目标格选第 3 节 —— 本班数学还在（未执行），必冲突
+        r = c.post('/academic/api/swap/bulk-check', data={
+            'entry_ids': str(eids[0]), 'mode': 'target',
+            'new_weekday': '4', 'new_period': '3', 'is_permanent': '1'}, headers=hdrs)
+        data = (r.get_json() or {}).get('data') or {}
+        rows = data.get('rows') or []
+        case('批量检测接口：一次请求返回逐条结果（与提交同口径）',
+             r.status_code == 200 and data.get('total') == 1 and len(rows) == 1
+             and rows[0].get('ok') is False and '本班已有' in (rows[0].get('desc') or ''),
+             f'{r.status_code} {str(data)[:160]}')
+        r2 = c.post('/academic/swap/bulk', data={
+            'csrf_token': token, 'entry_ids': str(eids[0]), 'mode': 'target',
+            'new_weekday': '4', 'new_period': '3', 'is_permanent': '1',
+            'reason': '回填回归'}, headers=hdrs)
+        page = r2.get_data(as_text=True)
+        case('提交失败页：带回填数据与批量检测地址（自动勾回非冲突条目）',
+             'bulkRetryData' in page and 'bulkCheckUrl' in page
+             and '"conflict_ids"' in page, f'status={r2.status_code}')
+
+    # 清理（含执行产生的条目与版本记录，别影响其它用例）
+    with app.app_context():
+        all_ids = list(eids) + list(par_ids)
+        if ex_id:
+            all_ids.append(ex_id)
+        new_ids = [e.id for e in ScheduleEntry.query.filter(
+            ScheduleEntry.original_entry_id.in_(all_ids)).all()]
+        ScheduleVersion.query.filter(
+            ScheduleVersion.entry_id.in_(all_ids + new_ids)).delete(
+                synchronize_session=False)
+        ScheduleEntry.query.filter(
+            ScheduleEntry.id.in_(all_ids + new_ids)).delete(synchronize_session=False)
+        bids = [b for b in (bid, bid2, bid3) if b]
+        if bids:
+            ScheduleSwap.query.filter(ScheduleSwap.batch_id.in_(bids)).delete(
                 synchronize_session=False)
         db.session.commit()
 

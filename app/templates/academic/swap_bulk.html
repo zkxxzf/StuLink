@@ -190,11 +190,16 @@
 <script id="bulkData" type="application/json">
 {
     "entriesUrl": {{ url_for('academic.api_swap_entries')|tojson }},
-    "slotsUrl": {{ url_for('academic.api_swap_available_slots')|tojson }},
+    "bulkCheckUrl": {{ url_for('academic.api_swap_bulk_check')|tojson }},
     "gradeClasses": {{ class_opts.grade_classes|tojson }},
     "weekdays": {{ weekdays|tojson }},
     "scheduleName": {{ (schedule.name if schedule else '')|tojson }}
 }
+</script>
+{# 2026-10-14：提交被整批拦下时回填勾选状态 —— 数据量大（一整天的课几百条）时
+   让用户重新勾一遍是不现实的；冲突的那几条自动取消勾选，其余保持选中可直接重试。 #}
+<script id="bulkRetryData" type="application/json">
+{{ (bulk_retry or none)|tojson }}
 </script>
 {% endblock %}
 
@@ -266,6 +271,7 @@
             $('#entryTable').show();
             $('#fltPeriod').prop('disabled', false).val('');
             updateSummary();
+            if (pendingRestore) { restoreSelection(); }   // 提交失败回填：勾回本次提交的条目
         }).fail(function () { $('#entryEmpty').text('加载失败').show(); });
     });
 
@@ -323,61 +329,57 @@
         else { $('#selSummary').hide(); }
     }
 
-    // 实时冲突检测（对每个已选条目查询其目标时段可用性；防抖）
+    // 冲突检测：**一次请求批量算**（2026-10-14 用户报障"提交一整天的课，数据量大直接崩"）
+    // 原实现对每一行各发一次 /api/swap/available-slots —— 选一整天的课就是几百个并发
+    // 请求，浏览器排队几十秒、提交请求被排在队尾，观感就是"卡死/崩掉"。
+    // 现在一次 POST 交给后端（与提交共用 evaluate_bulk_targets，含整批让位与
+    // 走班并行课口径），页面只刷新一次「目标冲突」列。
     var debounceTimer = null;
     function checkConflicts() {
         clearTimeout(debounceTimer);
         debounceTimer = setTimeout(runCheck, 350);
     }
-    // 每行的实际目标格：平移模式 = 自己原节次 + offset
-    function targetOf($tr) {
-        if ($('#mode').val() === 'offset') {
-            var off = parseInt($('#offsetSel').val(), 10) || 0;
-            return { w: $('#tgtWeekday').val() || $tr.data('weekday'),
-                     p: parseInt($tr.data('period'), 10) + off };
-        }
-        return { w: $('#tgtWeekday').val(), p: $('#tgtPeriod').val() };
-    }
+    var checkXhr = null, checkSeq = 0;
     function runCheck() {
         var mode = $('#mode').val();
         var $rows = selectedRows();
-        $rows.find('[data-st]').attr('class', 'st-idle').data('st', '—').text('—');
-        if (!$rows.length) { $('#selSummary').removeClass('text-danger'); return; }
+        $rows.find('[data-st]').attr('class', 'st-idle').text('—');
+        $('#selSummary').removeClass('text-danger');
+        if (!$rows.length) { return; }
         if (mode === 'offset' && !$('#offsetSel').val()) { return; }
         if (mode === 'target' && (!$('#tgtWeekday').val() || !$('#tgtPeriod').val())) { return; }
-        $rows.each(function () {
-            var $tr = $(this), id = $tr.data('id'), $st = $tr.find('[data-st]');
-            var t = targetOf($tr);
-            $st.attr('class', 'st-idle').text('检测中…');
-            // 2026-10-14（单双周）：带上日期/永久口径，占用按周次判定
-            $.getJSON(cfg.slotsUrl, {
-                entry_id: id,
-                swap_date: $('#swPermanent').is(':checked') ? '' : ($('#swapDate').val() || ''),
-                is_permanent: $('#swPermanent').is(':checked') ? 1 : ''
-            }).done(function (res) {
-                var slots = (res && res.data && res.data.slots) || [];
-                var hit = null;
-                for (var i = 0; i < slots.length; i++) {
-                    if (String(slots[i].weekday) === String(t.w)
-                        && String(slots[i].period_number) === String(t.p)) { hit = slots[i]; break; }
-                }
-                if (!hit) { $st.attr('class', 'st-idle').text('—'); return; }
-                if (hit.available) { $st.attr('class', 'st-ok').text('✓ 可用'); }
-                else { $st.attr('class', 'st-bad').text('✕ ' + (hit.conflict_desc || '冲突')); }
-            }).fail(function () { $st.attr('class', 'st-idle').text('—'); });
-        });
-        // 批内互撞提示仅对「统一落到同一节」有意义：平移各自错开，不会撞在一起
-        if (mode === 'target') {
-            var seenClass = {}, seenTeacher = {}, warn = [];
-            $rows.each(function () {
-                var c = $(this).data('class'), t = $(this).data('teacher');
-                if (seenClass[c]) { warn.push('同班「' + c + '」选中多条到同一时段，将冲突'); }
-                if (t && seenTeacher[t]) { warn.push('同教师选中多条到同一时段，将冲突'); }
-                seenClass[c] = 1; if (t) { seenTeacher[t] = 1; }
+        $rows.find('[data-st]').attr('class', 'st-idle').text('检测中…');
+        var ids = $rows.map(function () { return $(this).data('id'); }).get();
+        var seq = ++checkSeq;
+        if (checkXhr) { checkXhr.abort(); }          // 旧请求作废，避免结果互相覆盖
+        checkXhr = $.post(cfg.bulkCheckUrl, {
+            entry_ids: ids.join(','),
+            mode: mode,
+            new_weekday: $('#tgtWeekday').val() || '',
+            new_period: $('#tgtPeriod').val() || '',
+            period_offset: mode === 'offset' ? ($('#offsetSel').val() || '') : '',
+            swap_date: $('#swPermanent').is(':checked') ? '' : ($('#swapDate').val() || ''),
+            is_permanent: $('#swPermanent').is(':checked') ? 1 : ''
+        }).done(function (res) {
+            if (seq !== checkSeq) { return; }        // 已有更新的一次检测在飞，丢弃旧结果
+            var rows = (res && res.data && res.data.rows) || [];
+            var bad = 0;
+            rows.forEach(function (r) {
+                var $st = $('tr.entry-row[data-id="' + r.entry_id + '"] [data-st]');
+                if (!$st.length) { return; }
+                if (r.ok) { $st.attr('class', 'st-ok').text('✓ 可用'); }
+                else { bad += 1; $st.attr('class', 'st-bad').text('✕ ' + (r.desc || '冲突')); }
             });
-            if (warn.length) { $('#selSummary').addClass('text-danger').html('⚠ ' + warn.join('；')); }
-            else { $('#selSummary').removeClass('text-danger'); }
-        }
+            if (bad) {
+                $('#selSummary').addClass('text-danger').html(
+                    '⚠ 有 <b>' + bad + '</b> 条与目标时段冲突，整批提交会被拦下（详见各行「目标冲突」列）');
+            } else {
+                $('#selSummary').removeClass('text-danger');
+            }
+        }).fail(function (xhr, status) {
+            if (status === 'abort') { return; }
+            $rows.find('[data-st]').attr('class', 'st-idle').text('—');
+        });
     }
     $('#tgtWeekday, #tgtPeriod').on('change', checkConflicts);
 
@@ -402,6 +404,38 @@
         if (!$('#swPermanent').is(':checked') && !$('#swapDate').val()) { e.preventDefault(); alert('临时调课请选择具体日期'); return; }
         if (!confirm('确认提交统一调课？\n选中的 ' + selectedRows().length + ' 条课程会合成 1 条记录，审批一次整批生效。')) { e.preventDefault(); }
     });
+
+    // 提交失败回填（2026-10-14）：整批被冲突拦下时，服务端带回本次的条目 id 与冲突 id，
+    // 这里自动重新加载课程列表并**勾回除冲突外的全部条目** —— 一整天的课几百条，
+    // 让用户重新勾一遍等于白干（这也是"数据量大就崩"的一部分体感）。
+    var pendingRestore = null;
+    function restoreSelection() {
+        var data = pendingRestore;
+        pendingRestore = null;
+        var sel = {}, conf = {};
+        (data.ids || []).forEach(function (i) { sel[String(i)] = 1; });
+        (data.conflict_ids || []).forEach(function (i) { conf[String(i)] = 1; });
+        var n = 0, skipped = 0;
+        $('tr.entry-row').each(function () {
+            var id = String($(this).data('id'));
+            if (!sel[id]) { return; }
+            if (conf[id]) { skipped += 1; return; }
+            $(this).find('.row-chk').prop('checked', true);
+            n += 1;
+        });
+        updateSummary();
+        checkConflicts();
+        if (skipped) {
+            alert('已自动取消勾选 ' + skipped + ' 条冲突课程，其余 ' + n
+                  + ' 条已保持选中，可直接重新提交。');
+        }
+    }
+    var retryData = null;
+    try { retryData = JSON.parse($('#bulkRetryData').text() || 'null'); } catch (err) { retryData = null; }
+    if (retryData && retryData.ids && retryData.ids.length) {
+        pendingRestore = retryData;
+        $('#btnLoad').click();
+    }
 })();
 </script>
 {% endblock %}

@@ -631,13 +631,19 @@ def _apply_schedules(exam, sheet_items, body_sessions, mode='replace', dry=False
     base_order = AffairSchedule.query.filter_by(affair_id=affair.id).count()
     key_exact = {}
     key_ds, key_ss = {}, {}
+    # 2026-10-14 用户口径：AI 只认出开始时间、没认出结束时间时，按内置每科时长补齐
+    # （语文 2.5 小时 / 数学·英语 2 小时 / 其它 75 分钟），与手填 / Excel 导入同一条规则。
+    from app.modules.grades.routes import affair_invig as _ai_ivig
     for i, s in enumerate(ordered):
+        _tm = {'start_time': (s.get('start') or '')[:10], 'end_time': (s.get('end') or '')[:10],
+               'subject': _subj(s.get('subject'))}
+        _ai_ivig.fill_sched_end(_tm)
         row = AffairSchedule(
             affair_id=affair.id,
             exam_date=(date.fromisoformat(s['date']) if s.get('date') else None),
-            start_time=(s.get('start') or '')[:10],
-            end_time=(s.get('end') or '')[:10],
-            subject=_subj(s.get('subject')),
+            start_time=_tm['start_time'],
+            end_time=_tm['end_time'],
+            subject=_tm['subject'],
             selection=sanitize_label(s.get('selection'), 20),
             sort_order=base_order + i)
         db.session.add(row)

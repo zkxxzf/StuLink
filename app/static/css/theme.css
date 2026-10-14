@@ -1038,12 +1038,21 @@ table.tt thead th {
    两套主题下这类亮底都配深色字（不分主题，因为 bg-warning/bg-info 在深色下仍是亮块）。
    ⚠️ .bg-light 要单独限定 light：深色下它已被 L2 改成深面板(--sl-surface)，
       字必须继续走 --sl-text（浅），否则深底深字 = 1.11（2026-10-14 踩过）。 */
-.badge.bg-warning,
-.badge.bg-info,
+.badge.bg-warning:not([class*="bg-opacity"]),
+.badge.bg-info:not([class*="bg-opacity"]),
 .bg-warning.text-dark,
 .bg-info.text-dark { color: #1f2937 !important; }
 [data-bs-theme="light"] .badge.bg-light,
 [data-bs-theme="light"] .bg-light.text-dark { color: #1f2937 !important; }
+/* ⚠️ 必须排除 bg-opacity-*：`bg-primary bg-opacity-10 text-primary` 这类徽标（宿舍看板
+   状态列就是这么写的）底色是**半透明**的，叠在深底上实际是深色块 —— 再配深字就是
+   深底深字（对比 1.01，2026-10-14 实测踩到）。半透明底的徽标交给下一条：深色下提亮字色。 */
+[data-bs-theme="dark"] .text-primary { color: #7cb0f7 !important; }
+[data-bs-theme="dark"] .text-info { color: #67e8f9 !important; }
+[data-bs-theme="dark"] .text-success { color: #34d399 !important; }
+[data-bs-theme="dark"] .text-danger { color: #f87171 !important; }
+[data-bs-theme="dark"] .text-warning { color: #fbbf24 !important; }
+[data-bs-theme="dark"] .text-secondary { color: var(--sl-text-muted) !important; }
 /* ⑤ 课表总览「上午/下午」分组列：底色由模板注入的内联 --grp-bg（浅橙/浅蓝），
    不在 L2 兜底清单里 → 深色下亮块 + 浅字（1.08）。按面板色处理。 */
 [data-bs-theme="dark"] .ovw-grp-row th,

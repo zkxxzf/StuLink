@@ -22,7 +22,9 @@ from app.models import Student
 from app.models.grades import (ExamAffair, AffairRoom, AffairRoomLib, AffairStudent,
                                Exam, AffairTeacher, AffairSchedule,
                                AffairInvigilator, AffairInvigilation,
+                               ExamRoomGroup, ExamRoomGroupMap,
                                SUBJECTS)  # 2026-10-13：时间表科目下拉用科目字典
+#   v1.19.47.31 加 ExamRoomGroup/Map：步骤②「考场模板」直接复用「考场维护」页的分组
 #   v1.19.47.30 加环节④⑤⑥：任课核对 / 考试时间表 / 监考编排
 from app.modules.grades import bp
 from app.utils.decorators import perm_required
@@ -64,6 +66,24 @@ _pad2 = pad2
 def _norm_room_no(no):
     s = str(no).strip()
     return s.zfill(2) if s.isdigit() else s
+
+
+def _int_or_none(v):
+    """宽松取整（表单里的可选 id / 逗号列表元素），非法值返回 None"""
+    try:
+        return int(str(v).strip())
+    except (TypeError, ValueError):
+        return None
+
+
+def _room_next_no(exist_rooms):
+    """下一个可用考场编号（int：现有最大数字 + 1，无数字编号则从 1 开始）"""
+    nums = []
+    for r in exist_rooms:
+        digits = ''.join(ch for ch in (r.room_no or '') if ch.isdigit())
+        if digits:
+            nums.append(int(digits))
+    return (max(nums) + 1) if nums else 1
 
 
 def _inherit_rooms_from_prev(affair):
@@ -399,7 +419,11 @@ def affair_detail(aid):
                            stats=stats, sel_options=sel_options,
                            # 2026-10-13：⑤ 考试时间表「粘贴导入」的默认考试日期与每天场次上限
                            sched_default_date=_ai._sched_default_date(affair),
-                           sched_daily_max=_ai._SCHED_DAILY_MAX)
+                           sched_daily_max=_ai._SCHED_DAILY_MAX,
+                           # 2026-10-14 用户口径：⑤ 内置每科考试时长（选科目自动算结束时间）
+                           sched_default_start=_ai.SCHED_DEFAULT_START,
+                           sched_duration=_ai.SCHED_DURATION_MINUTES,
+                           sched_duration_fallback=_ai.SCHED_DURATION_FALLBACK)
 
 
 # ==================== 步骤① 学生名单：导入 / 模板 / 增删改 ====================
@@ -1035,10 +1059,28 @@ def affair_room_delete(aid, rid):
 @login_required
 @perm_required('grades.edit')
 def affair_room_lib_list():
+    """考场房间库数据源（步骤②左栏）。
+
+    v1.19.47.31：一并带出「考场模板」（= 考场维护页的分组：exam_room_groups /
+    exam_room_group_map），供步骤②按模板筛选与一键加入；分组只做筛选依据，
+    不改动任何历史场次的考场。
+    """
     rows = AffairRoomLib.query.order_by(AffairRoomLib.location).all()
+    gmap = {}
+    for m in ExamRoomGroupMap.query.all():
+        gmap.setdefault(m.lib_id, []).append(m.group_id)
+    groups = ExamRoomGroup.query.order_by(ExamRoomGroup.sort_order,
+                                          ExamRoomGroup.id).all()
+    gcount = {}
+    for gids in gmap.values():
+        for gid in gids:
+            gcount[gid] = gcount.get(gid, 0) + 1
     return jsonify({'ok': True, 'rooms': [
-        {'id': r.id, 'location': r.location, 'capacity': r.capacity, 'note': r.note}
-        for r in rows]})
+        {'id': r.id, 'location': r.location, 'capacity': r.capacity, 'note': r.note,
+         'group_ids': sorted(gmap.get(r.id, []))}
+        for r in rows],
+        'groups': [{'id': g.id, 'name': g.name, 'count': gcount.get(g.id, 0)}
+                   for g in groups]})
 
 
 @bp.route('/affairs/room-lib/<int:lid>/delete', methods=['POST'])
@@ -1065,13 +1107,8 @@ def affair_room_from_lib(aid):
     exist_rooms = AffairRoom.query.filter_by(affair_id=aid).all()
     if lib_row.location in {r.location for r in exist_rooms}:
         return jsonify({'ok': False, 'msg': f'考场位置 {lib_row.location} 已在本批次中'})
-    nums = []
-    for r in exist_rooms:
-        digits = ''.join(ch for ch in r.room_no if ch.isdigit())
-        if digits:
-            nums.append(int(digits))
     # v1.12.2 考场编号统一补零为两位（01、02…）
-    new_no = _norm_room_no((max(nums) + 1) if nums else 1)
+    new_no = _norm_room_no(_room_next_no(exist_rooms))
     room = AffairRoom(affair_id=aid, room_no=new_no, location=lib_row.location,
                       subject='默认', capacity=lib_row.capacity or 30)
     db.session.add(room)
@@ -1080,6 +1117,62 @@ def affair_room_from_lib(aid):
                   f'从库选房间 {lib_row.location} → 考场{new_no}', module='grades')
     return jsonify({'ok': True, 'id': room.id, 'room_no': room.room_no,
                     'location': room.location, 'capacity': room.capacity, 'subject': room.subject})
+
+
+@bp.route('/affairs/<int:aid>/rooms/from-lib-batch', methods=['POST'])
+@login_required
+@perm_required('grades.edit')
+def affair_rooms_from_lib_batch(aid):
+    """v1.19.47.31 批量加入考场（步骤②「考场模板」一键加入）。
+
+    参数二选一：
+    - `group_id`：考场模板（考场维护页的分组）id，取该分组下**全部房间**；
+    - `lib_ids`：逗号分隔的房间 id（按提交顺序）。
+    口径与单条加入一致：按「位置」去重（已在本批次的自动跳过）、考场编号从现有
+    最大数字递增、科目默认「全科」、容量带出考场库默认值（可再行内改 / 带入上次容量）。
+    返回 `{ok, added:[...], skipped}`（skipped=已在批次中或不存在的房间数）。
+    """
+    _get_affair_checked(aid)
+    gid = _int_or_none(request.form.get('group_id'))
+    ids = []
+    if gid is not None:
+        ids = [m.lib_id for m in ExamRoomGroupMap.query.filter_by(group_id=gid)
+               .order_by(ExamRoomGroupMap.id).all()]
+    else:
+        for tok in (request.form.get('lib_ids') or '').split(','):
+            v = _int_or_none(tok)
+            if v is not None:
+                ids.append(v)
+    if not ids:
+        return jsonify({'ok': False, 'msg': '未选择考场模板或房间'})
+
+    libs = {r.id: r for r in
+            AffairRoomLib.query.filter(AffairRoomLib.id.in_(ids)).all()}
+    exist_rooms = AffairRoom.query.filter_by(affair_id=aid).all()
+    used = {r.location for r in exist_rooms}
+    nxt = _room_next_no(exist_rooms)
+    added, skipped = [], 0
+    for lid in ids:
+        row = libs.get(lid)
+        if row is None or row.location in used:
+            skipped += 1
+            continue
+        used.add(row.location)
+        room = AffairRoom(affair_id=aid, room_no=_norm_room_no(nxt),
+                          location=row.location, subject='默认',
+                          capacity=row.capacity or 30)
+        db.session.add(room)
+        added.append(room)
+        nxt += 1
+    db.session.commit()
+    if added:
+        log_operation(current_user, '选取', '考务考场', aid,
+                      f'按考场模板批量加入 {len(added)} 个考场'
+                      f'（{added[0].location} 起）', module='grades')
+    return jsonify({'ok': True, 'added': [
+        {'id': r.id, 'room_no': r.room_no, 'location': r.location,
+         'capacity': r.capacity, 'subject': r.subject} for r in added],
+        'skipped': skipped})
 
 
 # ==================== v1.12.1 批次设置：编排模式 / 非参考处理 / 选科前后缀 ====================

@@ -1305,6 +1305,16 @@ def get_schedule_versions(schedule_id, page=1, per_page=50):
 # Excel 导出
 # ═══════════════════════════════════════════════════════════════════════════════
 
+def _sheet_name(base, fallback='课表'):
+    """工作表名合法化：去掉 [ ] : * ? / \\ 与首尾单引号，截断 31 字符（Excel 上限）。
+
+    年级 / 班级名由用户维护，可能带斜杠或超长，非法名会让 Excel 打开时报错；
+    全校表、年级表、班级表的 sheet 名统一走本函数收口。
+    """
+    name = re.sub(r'[\[\]:*?/\\]', '', str(base or '')).strip().strip("'")
+    return name[:31].strip() or fallback
+
+
 def export_schedule(schedule_id, view_type='class', grade=None, class_name=None,
                     teacher_uid=None, week=None, allowed_grades=None,
                     allowed_classes=None):
@@ -1323,24 +1333,40 @@ def export_schedule(schedule_id, view_type='class', grade=None, class_name=None,
         data = get_grade_view(schedule_id, grade, week=week,
                               allowed_grades=allowed_grades,
                               allowed_classes=allowed_classes)
+        # 2026-10-14（用户要求）：年级导出 = 年级总课表（该年级各班并列）+ 各班逐张，
+        # 总表走 get_overview_view 的单个 block，与整校导出同一渲染口径。
+        ov = get_overview_view(schedule_id, week=week, grades=[grade],
+                               allowed_grades=allowed_grades,
+                               allowed_classes=allowed_classes)
+        if ov['blocks']:
+            _write_overview_sheet(wb, f'{grade}总课表', ov['blocks'], periods, title,
+                                  ov['max_weekday'])
         for cn in data['classes']:
             _export_class_sheet(wb, schedule_id, grade, cn, periods,
-                                f'{title} {grade}{cn}', week,
+                                f'{grade}{cn}', week,
                                 allowed_grades, allowed_classes)
     elif view_type == 'teacher' and teacher_uid:
         _export_teacher_sheet(wb, schedule_id, teacher_uid, periods, title, week,
                               allowed_grades, allowed_classes)
     elif view_type == 'all':
-        # 整校：一个班一张 sheet（2026-10-10 由原 `else`/master 分支改名而来）。
-        # 大课表页已下线，但"整校分班导出"这个能力仍被「学期管理」卡片的导出按钮使用，
-        # 所以只把名字与页面解耦，不删功能。
-        grade_classes = get_grade_class_list(
-            schedule_id, allowed_grades=allowed_grades,
-            allowed_classes=allowed_classes)
-        for g, cls_list in grade_classes.items():
-            for cn in cls_list:
-                _export_class_sheet(wb, schedule_id, g, cn, periods, f'{g}{cn}',
-                                    week, allowed_grades, allowed_classes)
+        # 整校全套（2026-10-14 用户报障「导出的 Excel 只有各个班的表」）：
+        # ① 全校总课表（按年级分块，一张看全校）② 每个年级一张年级总课表
+        # ③ 每个班一张班级课表。三层矩阵同源渲染（_write_overview_sheet）。
+        # `all` 由原 master 分支改名而来（2026-10-10），学期管理卡片的「导出 Excel」用它。
+        ov = get_overview_view(schedule_id, week=week,
+                               allowed_grades=allowed_grades,
+                               allowed_classes=allowed_classes)
+        if ov['blocks']:
+            _write_overview_sheet(wb, '全校总课表', ov['blocks'], periods, title,
+                                  ov['max_weekday'])
+            for b in ov['blocks']:
+                _write_overview_sheet(wb, f"{b['grade']}总课表", [b], periods, title,
+                                      ov['max_weekday'])
+            for b in ov['blocks']:
+                for cn in b['classes']:
+                    _export_class_sheet(wb, schedule_id, b['grade'], cn, periods,
+                                        f"{b['grade']}{cn}", week,
+                                        allowed_grades, allowed_classes)
     else:
         # 'overview' 及任何未知 view_type（含旧分享短链里的 'master'）→ 全校总课表一张表
         _export_overview_sheet(wb, schedule_id, periods, title, week,
@@ -1358,15 +1384,22 @@ def export_schedule(schedule_id, view_type='class', grade=None, class_name=None,
 
 def _export_overview_sheet(wb, schedule_id, periods, title, week=None,
                            allowed_grades=None, allowed_classes=None):
-    """全校总课表工作表（2026-09-25）：按年级分块、班级并列，一张表看全校。
-
-    行＝星期 × 节次（星期列纵向合并），列＝年级内各班，格内「学科 + 教师」，
-    与页面 /schedule/<sid>/overview 的形态一致，方便直接打印或二次编辑。
-    """
+    """全校总课表工作表（2026-09-25）：按年级分块、班级并列，一张表看全校。"""
     view = get_overview_view(schedule_id, week=week,
                              allowed_grades=allowed_grades,
                              allowed_classes=allowed_classes)
-    ws = wb.create_sheet('全校总课表'[:31])
+    _write_overview_sheet(wb, '全校总课表', view['blocks'], periods, title,
+                          view['max_weekday'])
+
+
+def _write_overview_sheet(wb, sheet_name, blocks, periods, title, max_weekday):
+    """把「按年级分块、班级并列」的矩阵写进一张新工作表（全校 / 年级导出共用）。
+
+    行＝星期 × 节次（星期列纵向合并），列＝年级内各班，格内「学科 + 教师」，
+    与页面 /schedule/<sid>/overview 的形态一致，方便直接打印或二次编辑。
+    blocks 传全部年级＝全校总课表，传单个年级的 block＝年级总课表（2026-10-14 拆分）。
+    """
+    ws = wb.create_sheet(_sheet_name(sheet_name))
 
     hf = Font(bold=True, color='FFFFFF', size=10)
     hfl = PatternFill(start_color='4472C4', end_color='4472C4', fill_type='solid')
@@ -1388,7 +1421,7 @@ def _export_overview_sheet(wb, schedule_id, periods, title, week=None,
     ri = 1
     put(ri, 1, title, font=gf, align=Alignment(horizontal='left', vertical='center'))
     ri += 2
-    for b in view['blocks']:
+    for b in blocks:
         classes = b['classes']
         put(ri, 1, f"{b['grade']}（{len(classes)} 个班 · {b['total']} 节/周）", font=gf,
             align=Alignment(horizontal='left', vertical='center'))
@@ -1398,7 +1431,7 @@ def _export_overview_sheet(wb, schedule_id, periods, title, week=None,
         for ci, cn in enumerate(classes, 3):
             put(ri, ci, f'{b["grade"]}{cn}', font=hf, fill=hfl)
         ri += 1
-        for wd in range(1, view['max_weekday'] + 1):
+        for wd in range(1, max_weekday + 1):
             first = ri
             for p in periods:
                 time_label = (f'{p.period_name}\n{p.start_time}-{p.end_time}'
@@ -1416,7 +1449,7 @@ def _export_overview_sheet(wb, schedule_id, periods, title, week=None,
 
     ws.column_dimensions['A'].width = 8
     ws.column_dimensions['B'].width = 15
-    max_cols = 3 + max((len(b['classes']) for b in view['blocks']), default=1) - 1
+    max_cols = 3 + max((len(b['classes']) for b in blocks), default=1) - 1
     for i in range(3, max_cols + 1):
         ws.column_dimensions[get_column_letter(i)].width = 13
 
@@ -1442,7 +1475,7 @@ def _cell_lines(items, with_class=False):
 def _export_class_sheet(wb, schedule_id, grade, class_name, periods, sheet_title,
                         week=None, allowed_grades=None, allowed_classes=None):
     """导出单个班级课表工作表"""
-    ws = wb.create_sheet(sheet_title[:31])  # Excel sheet名最长31字符
+    ws = wb.create_sheet(_sheet_name(sheet_title))
     view = get_class_view(schedule_id, grade, class_name, week=week,
                           allowed_grades=allowed_grades,
                           allowed_classes=allowed_classes)
@@ -1485,7 +1518,7 @@ def _export_class_sheet(wb, schedule_id, grade, class_name, periods, sheet_title
 def _export_teacher_sheet(wb, schedule_id, teacher_uid, periods, sheet_title,
                           week=None, allowed_grades=None, allowed_classes=None):
     """导出教师个人课表工作表"""
-    ws = wb.create_sheet(sheet_title[:31])
+    ws = wb.create_sheet(_sheet_name(sheet_title))
     view = get_teacher_view(schedule_id, teacher_uid, week=week,
                             allowed_grades=allowed_grades,
                             allowed_classes=allowed_classes)

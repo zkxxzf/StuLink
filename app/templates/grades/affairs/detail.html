@@ -24,6 +24,18 @@
   #t2 .rm-subj, #t2 .rm-cap, #t2 .rm-note { border-color: var(--sl-border); }
   /* 2026-10-13：字号放大两档后容量框要跟着放宽，否则三位数会被数字微调按钮压住 */
   #t2 .rm-cap { max-width: 84px; }
+  /* 2026-10-14 步骤② 左侧「考场库」候选区：整行淡底标「已加入」；
+     「删」降为行内小图标（平时半透明、悬停行才变红），候选区视觉焦点回到「状态」上 */
+  #libTable tbody tr.lib-added > td { background: var(--sl-soft-success-bg); }
+  #libTable .lib-del { padding: 0 .12rem; line-height: 1; opacity: .55; }
+  #libTable tbody tr:hover .lib-del { opacity: 1; }
+  #libTable tbody tr:hover .lib-del .bi { color: var(--bs-danger); }
+  /* 状态列胶囊：用语义软底变量，深浅主题都自适应 */
+  .lib-st { font-weight: 400; }
+  .lib-st-on { background: var(--sl-soft-success-bg); color: var(--sl-soft-success-fg);
+               border: 1px solid var(--sl-soft-success-bd); }
+  /* 未加入 = 可点的「加入」按钮（2026-10-14 用户要求恢复逐行加入） */
+  #libTable .lib-add { padding: 0 .42rem; font-size: .76rem; }
   /* 2026-10-13：环节⑥ 矩阵视图（学校张贴格式）——格子做成"隐形下拉"，
      看上去就是一张表，点开即可换人；表头用主题变量，深色模式一并适配。 */
   #invigMatrix { width: auto; min-width: 100%; }
@@ -174,10 +186,8 @@
                 <span class="fw-bold text-nowrap"><i class="bi {{ icon }}"></i> {{ title }}
                     <span class="badge {{ badge_cls }} ms-1" id="{{ tid }}Badge"
                           data-total="{{ count }}">{{ count }}</span></span>
-                {# 2026-10-13（v1.19.47.30）：按学号 / 姓名即时筛选（前端过滤，操作刷新后不丢） #}
-                <input type="search" class="form-control form-control-sm" style="max-width:150px"
-                       id="flt-{{ tid }}" placeholder="筛学号 / 姓名" autocomplete="off"
-                       data-target="{{ tid }}" oninput="filterRoster(this)">
+                {# 2026-10-14 用户口径：筛选集中到上方一条（班级 + 学号/姓名），两侧同时过滤；
+                   卡片头不再各挂一个搜索框，避免「一个班级筛选、一个姓名筛选」分散在各处 #}
                 <span class="text-muted small d-none d-lg-inline">班级 · 姓氏</span>
             </div>
             <div class="table-responsive" style="max-height:56vh;overflow:auto">
@@ -205,6 +215,24 @@
             </div>
         </div>
         {% endmacro %}
+        {# 2026-10-14 用户口径：筛选收成一条（班级 + 学号/姓名），同时作用于左右两栏；
+           关键词与班级存 sessionStorage —— toggleAttend / delStu 会 reload，不存就得重输 #}
+        <div class="card px-3 py-2 mb-2 small">
+            <div class="d-flex flex-wrap align-items-center gap-2">
+                <span class="fw-bold text-nowrap"><i class="bi bi-funnel"></i> 筛选</span>
+                <select class="form-select form-select-sm py-0 w-auto" id="fltClass"
+                        title="按班级筛选（两侧同时生效）" onchange="filterRosterAll()">
+                    <option value="">全部班级</option>
+                    {% for c in class_stats %}<option value="{{ c.name }}">{{ c.name }}</option>{% endfor %}
+                </select>
+                <input type="search" class="form-control form-control-sm py-0" style="max-width:220px"
+                       id="fltStu" placeholder="学号 / 姓名" autocomplete="off"
+                       aria-label="按学号或姓名筛选" oninput="filterRosterAll()">
+                <button class="btn btn-link btn-sm py-0 px-1 d-none" type="button" id="fltClear"
+                        onclick="clearRosterFilter()" title="清空筛选">清空</button>
+                <span class="text-muted ms-auto d-none d-lg-inline">两侧同时过滤 · 均按 班级 · 姓氏 排序</span>
+            </div>
+        </div>
         <div class="row g-2">
             <div class="col-lg-6">
                 {{ roster(join_students, 'stuTable', '参加考试', 'bi-check-circle-fill', 'bg-success',
@@ -230,7 +258,8 @@
             <button class="btn btn-outline-success btn-sm" onclick="openRoomModal()">
                 <i class="bi bi-plus-lg"></i> 手动新增</button>
             <span class="small text-muted ms-1">
-                <i class="bi bi-info-circle"></i> 从左侧「考场库」点「加入」选进本批次；
+                <i class="bi bi-info-circle"></i> 左侧「考场库」按位置搜索房间 → 逐行「加入」；
+                或选「考场模板」后点右侧「一键带入」整组加入本批次。
                 右侧可<b>直接修改</b>科目 / 容量 / 备注，改完自动保存
             </span>
         </div>
@@ -240,12 +269,27 @@
                 <div class="card t2-card" style="max-height:66vh">
                     <div class="card-header d-flex justify-content-between align-items-center py-2">
                         <span class="small fw-bold"><i class="bi bi-collection"></i> 考场库</span>
-                        <span class="badge bg-light text-secondary border fw-normal" id="libCount">—</span>
+                        <span class="badge fw-normal" id="libCount">—</span>
                     </div>
-                    <div class="table-responsive" style="max-height:53vh;overflow:auto">
+                    {# 2026-10-14 用户口径（第五轮）：
+                       ①「考场模板」不是候选区的筛选条件 —— 它是「一键带入」的选源，移到右侧卡片头按钮旁；
+                       ②候选区只按「位置 / 备注」搜索 + 看「已加入 / 未加入」状态，逐行「加入」；
+                       ③表格独立「状态」列，「删」为行内小图标（悬停该行才变红） #}
+                    <div class="px-2 py-2 d-flex gap-1 align-items-center">
+                        <div class="input-group input-group-sm" style="flex:1 1 auto">
+                            <span class="input-group-text py-0 px-2"><i class="bi bi-search"></i></span>
+                            <input class="form-control form-control-sm py-0" id="libSearch"
+                                   placeholder="搜索位置 / 备注" oninput="_renderLibList()">
+                            <button class="btn btn-outline-secondary py-0 px-1 d-none" type="button"
+                                    id="libClear" onclick="clearLibSearch()" title="清空搜索">
+                                <i class="bi bi-x-lg" style="font-size:.68rem"></i></button>
+                        </div>
+                    </div>
+                    <div class="table-responsive" style="max-height:47vh;overflow:auto">
                         <table class="table table-sm table-hover mb-0" id="libTable">
                             <thead class="sticky-top"><tr>
-                                <th>位置</th><th class="text-end">容量</th><th class="text-end">操作</th></tr></thead>
+                                <th>位置</th><th class="text-end">容量</th>
+                                <th class="text-center">状态</th><th class="text-end">操作</th></tr></thead>
                             <tbody id="libBody"></tbody>
                         </table>
                     </div>
@@ -258,8 +302,19 @@
                         <span class="small fw-bold"><i class="bi bi-list-check"></i> 本批次考场
                             <span class="badge bg-primary ms-1" id="roomStat">{{ rooms|length }}</span> 个 ·
                             容量 <span class="badge bg-info text-dark" id="capStat">{{ stats.capacity }}</span> 座</span>
-                        {# v1.19.47.30 由顶部工具栏移来：这两个功能服务的就是「本批次考场」 #}
-                        <span class="d-flex gap-1">
+                        {# v1.19.47.30 由顶部工具栏移来：这两个功能服务的就是「本批次考场」；
+                           v1.19.47.31 「一键带入」也归这一侧；2026-10-14 用户口径：模板下拉是
+                           「一键带入」的**选源**（不是左侧筛选），挪到按钮旁，两者成一组 #}
+                        <span class="d-flex gap-1 align-items-center flex-wrap">
+                            <select class="form-select form-select-sm py-0" id="libGroup"
+                                    style="width:auto;min-width:150px;max-width:215px"
+                                    title="先选考场模板 → 再点「一键带入」整组加入本批次"
+                                    onchange="_tplFillBtn()">
+                                <option value="">选择考场模板…</option>
+                            </select>
+                            <button class="btn btn-outline-primary btn-sm py-0" id="tplFillBtn"
+                                    onclick="addLibGroup()" disabled>
+                                <i class="bi bi-box-arrow-in-down"></i> <span id="tplFillTxt">一键带入</span></button>
                             <button class="btn btn-outline-secondary btn-sm py-0" onclick="setAllCapacity()"
                                     title="给本批次全部考场设同一容量">
                                 <i class="bi bi-123"></i> 批量设置容量</button>
@@ -296,7 +351,10 @@
                                 <td><input class="form-control form-control-sm py-0 rm-note"
                                            value="{{ r.note or '' }}" placeholder="备注" onchange="saveRoomField(this)"></td>
                                 <td class="text-end">
-                                    <button class="btn btn-sm btn-outline-danger py-0" onclick="delRoom({{ r.id }})">删</button>
+                                    {# v1.19.47.31 用户口径：右侧是「已加入本批次」的考场，按钮说「不加入」
+                                       （把该考场移出本批次，不动考场库） #}
+                                    <button class="btn btn-sm btn-outline-danger py-0" onclick="delRoom({{ r.id }})"
+                                            title="把该考场移出本批次（考场库中的房间不受影响）">不加入</button>
                                 </td>
                             </tr>
                             {% else %}
@@ -344,15 +402,6 @@
                                 <b>自定义模式</b>
                                 <span class="text-muted small d-block">按前缀/后缀/学科编号生成，或批量导入现成考号</span>
                             </label>
-                        </div>
-                    </div>
-                    <div class="form-check border rounded p-2 bg-light mt-2">
-                        <input class="form-check-input" type="checkbox" id="layeredChk">
-                        <label class="form-check-label" for="layeredChk"><b>按成绩分层编排</b>（推荐）</label>
-                        <div class="text-muted small mt-1">
-                            同一<b>选科组合</b>内按<b>上一场同阶段考试</b>（同年级 + 同考试阶段）的
-                            <b>校内方向排名</b>升序填座：考场按房间号顺序、座位从前往后依次填满。
-                            固定考场/座号优先；<b>首次考试无历史成绩时自动退化为随机</b>。
                         </div>
                     </div>
                 </div>
@@ -429,6 +478,17 @@
                     </div>
                 </div>
             </div>
+            {# 2026-10-14 用户口径：分层编排与「考号生成模式」是平级的两件事，单独占一整行 ——
+               原先挤在左列里，导致左列比右列高出一截、三块高低不齐 #}
+            <div class="form-check border rounded p-2 mt-3 bg-light">
+                <input class="form-check-input" type="checkbox" id="layeredChk">
+                <label class="form-check-label" for="layeredChk"><b>按成绩分层编排</b>（推荐）</label>
+                <div class="text-muted small mt-1">
+                    同一<b>选科组合</b>内按<b>上一场同阶段考试</b>（同年级 + 同考试阶段）的
+                    <b>校内方向排名</b>升序填座：考场按房间号顺序、座位从前往后依次填满。
+                    固定考场/座号优先；<b>首次考试无历史成绩时自动退化为随机</b>。
+                </div>
+            </div>
             <div class="text-muted small mt-2">编排规则：先安置「固定考场/固定座号」学生，其余按选科分组（未勾选分层时：同班邻座≤1 随机分配）。</div>
             <button class="btn btn-primary btn-sm mt-1" onclick="runArrange()">
                 <i class="bi bi-shuffle"></i> 开始编排并生成考号</button>
@@ -500,6 +560,10 @@
             {# 2026-10-13：从 Excel 直接复制粘贴批量导入（不必先另存文件） #}
             <button class="btn btn-outline-primary btn-sm" onclick="openSchedPaste()">
                 <i class="bi bi-clipboard-plus"></i> 粘贴导入</button>
+            {# 2026-10-14 用户口径：已选科目但没填时间的场次，一键按内置每科时长补齐并保存 #}
+            <button class="btn btn-outline-secondary btn-sm" onclick="autoFillAllSchedTimes()"
+                    title="按内置时长补时间：语文 2.5 小时、数学/英语 2 小时、其它 75 分钟（一场多科取最长）；只补空着的时间，手填过的不动">
+                <i class="bi bi-stopwatch"></i> 按科目补时间</button>
             <button class="btn btn-primary btn-sm" onclick="addScheduleRow()">
                 <i class="bi bi-plus-lg"></i> 新增场次</button>
         </div>
@@ -549,9 +613,18 @@
             </table>
         </div>
         {# 2026-10-13 用户口径：新增场次的日期不再留空（原先是空的 yyyy/mm/dd 要自己填） #}
+        {# 2026-10-14 用户口径：内置每科考试时长 —— 选科目就自动算出结束时间（语文 2.5 小时 /
+           数学·英语 2 小时 / 其它 75 分钟），开始时间接同一天上一场的结束（当天首场
+           {{ sched_default_start }}），都不用自己算。 #}
         <div class="form-text mt-1">点「新增场次」的日期默认沿用上一场（表格为空时用本场考试日期
-            {{ sched_default_date.strftime('%Y-%m-%d') }}），同一天满 {{ sched_daily_max }} 场自动顺延到次日，都可手动改；
-            时间可留空；科目必填。</div>
+            {{ sched_default_date.strftime('%Y-%m-%d') }}），同一天满 {{ sched_daily_max }} 场自动顺延到次日，都可手动改。<br>
+            <b>时间自动算</b>：选完科目自动带出开始/结束 —— 结束 = 开始 + 本场科目时长
+            （语文 {{ sched_duration['语文'] }} 分钟〔2.5 小时〕 ·
+            数学/英语 {{ sched_duration['数学'] }} 分钟〔2 小时〕 ·
+            其它 {{ sched_duration_fallback }} 分钟，一场多科取最长），
+            开始时间接同一天上一场的结束（当天首场 {{ sched_default_start }}）；
+            手改过开始/结束就按你填的存，都可留空。老数据一键补齐：点上方「按科目补时间」。
+            科目必填。</div>
     </div>
 
     <!-- ===== 环节⑥ 编排监考表 ===== -->
@@ -567,21 +640,14 @@
             {# 2026-10-13 用户口径：按老师统计监考工作量（格数 × 场次时长） #}
             <button class="btn btn-outline-primary btn-sm" onclick="openWorkload()">
                 <i class="bi bi-stopwatch"></i> 工作量统计</button>
-            {# 2026-10-13 用户口径：学校下发的是「考场 × 时段」矩阵表（张贴/打印），
-               系统长表是编排视图 —— 这里一键切换，矩阵同样支持下拉换人。 #}
-            <div class="btn-group btn-group-sm ms-auto" role="group" aria-label="监考表视图">
-                <input type="radio" class="btn-check" name="invigView" id="invigViewList"
-                       value="list" checked>
-                <label class="btn btn-outline-secondary" for="invigViewList">
-                    <i class="bi bi-list-ul"></i> 列表视图</label>
-                <input type="radio" class="btn-check" name="invigView" id="invigViewMatrix"
-                       value="matrix">
-                <label class="btn btn-outline-secondary" for="invigViewMatrix">
-                    <i class="bi bi-grid-3x3-gap"></i> 教师安排（学校格式）</label>
-            </div>
+            {# 2026-10-14 用户口径：能复用上次考试的监考配置，且**复用哪一场可选** #}
+            <button class="btn btn-outline-secondary btn-sm" onclick="openCopyInvig()">
+                <i class="bi bi-files"></i> 复用上次配置</button>
+            {# 2026-10-14 用户口径：**不要列表视图** —— 只留「教师安排（学校格式）」矩阵表，
+               原列表/矩阵切换按钮与长表渲染一并删除（别再恢复）。 #}
             {# 2026-10-13 用户口径：监考表只留一个导出 —— 教师安排矩阵 + 工作量统计在同一个文件里 #}
             <a href="{{ url_for('grades.affair_export_invig', aid=affair.id) }}"
-               class="btn btn-outline-success btn-sm">
+               class="btn btn-outline-success btn-sm ms-auto">
                <i class="bi bi-file-earmark-excel"></i> 导出监考表（含工作量统计）</a>
         </div>
         <div id="invigMsg" class="small mb-2"></div>
@@ -591,7 +657,9 @@
                 <div class="card">
                     <div class="card-header py-2 d-flex align-items-center">
                         <span class="fw-bold small"><i class="bi bi-people"></i> 监考教师池</span>
-                        <button class="btn btn-outline-primary btn-sm py-0 ms-auto" onclick="addOther()">+ 其他监考员</button>
+                        {# 2026-10-14 用户口径：加监考员改为**从教师名单里勾选**（弹窗），不再 prompt 手输 #}
+                        <button class="btn btn-outline-primary btn-sm py-0 ms-auto"
+                                onclick="openPickInvig()">+ 其他监考员</button>
                     </div>
                     <div class="card-body p-2" style="max-height:60vh;overflow:auto">
                         <div class="text-muted small mb-1">任课教师（环节④，自动带入）</div>
@@ -632,21 +700,13 @@
             </div>
             <div class="col-lg-8">
                 <div class="card">
-                    <div class="card-header py-2 small fw-bold"><i class="bi bi-table"></i> 监考表（一人一格，可下拉改）</div>
+                    <div class="card-header py-2 small fw-bold"><i class="bi bi-table"></i> 监考表（教师安排 · 学校格式，一格一人 · 可直接下拉换人）</div>
                     <div class="card-body p-0" style="max-height:62vh;overflow:auto">
-                        <div id="invigListWrap">
-                            <table class="table table-sm table-bordered align-middle mb-0" id="invigTable">
-                                <thead class="sticky-top bg-white"></thead>
-                                <tbody></tbody>
-                            </table>
-                        </div>
-                        <div id="invigMatrixWrap" class="d-none">
-                            <table class="table table-sm table-bordered align-middle mb-0 text-center"
-                                   id="invigMatrix">
-                                <thead></thead>
-                                <tbody></tbody>
-                            </table>
-                        </div>
+                        <table class="table table-sm table-bordered align-middle mb-0 text-center"
+                               id="invigMatrix">
+                            <thead></thead>
+                            <tbody></tbody>
+                        </table>
                     </div>
                 </div>
             </div>
@@ -702,6 +762,72 @@
     </div>
 
     <!-- v1.12.2 步骤⑤成绩关联面板已移除 -->
+</div>
+
+<!-- 2026-10-14 环节⑥：从教师名单勾选监考员（含其他学科 / 其他年级的老师） -->
+<div class="modal fade" id="pickInvigModal" tabindex="-1">
+  <div class="modal-dialog modal-lg modal-dialog-scrollable">
+    <div class="modal-content">
+        <div class="modal-header py-2">
+            <h6 class="modal-title"><i class="bi bi-person-plus"></i> 添加监考员（从教师名单勾选）</h6>
+            <button class="btn-close" data-bs-dismiss="modal"></button>
+        </div>
+        <div class="modal-body py-2">
+            <div class="d-flex flex-wrap gap-2 align-items-center mb-2">
+                <input id="piSearch" class="form-control form-control-sm" style="width:180px"
+                       placeholder="搜索姓名 / 学科" oninput="renderPickInvig()" aria-label="搜索教师">
+                <select id="piSubj" class="form-select form-select-sm w-auto"
+                        onchange="renderPickInvig()"><option value="">全部学科</option></select>
+                <div class="form-check">
+                    <input class="form-check-input" type="checkbox" id="piHideIn"
+                           onchange="renderPickInvig()" checked>
+                    <label class="form-check-label small" for="piHideIn">只看未加入的</label>
+                </div>
+                <span class="ms-auto small text-nowrap">已选 <b id="piCount">0</b> 人</span>
+            </div>
+            <div id="piBody" class="border rounded p-2" style="max-height:52vh;overflow:auto"></div>
+            <div class="form-text mt-1">
+                勾选的是「教师名单」里的老师（含其他学科 / 其他年级）；已在教师池里的会置灰不可选。
+                没有账号的校外老师请用左下「手工添加」或「导入名单」。
+            </div>
+        </div>
+        <div class="modal-footer py-2">
+            <button class="btn btn-sm btn-outline-secondary" onclick="promptAddOther()">手工添加校外老师</button>
+            <span class="ms-auto"></span>
+            <button class="btn btn-sm btn-secondary" data-bs-dismiss="modal">取消</button>
+            <button class="btn btn-sm btn-primary" onclick="confirmPickInvig()">加入本批次</button>
+        </div>
+    </div>
+  </div>
+</div>
+
+<!-- 2026-10-14 环节⑥：复用某一场考试的监考配置（人数 / 其他监考员 / 排除名单） -->
+<div class="modal fade" id="copyInvigModal" tabindex="-1">
+  <div class="modal-dialog">
+    <div class="modal-content">
+        <div class="modal-header py-2">
+            <h6 class="modal-title"><i class="bi bi-files"></i> 复用某一场考试的监考配置</h6>
+            <button class="btn-close" data-bs-dismiss="modal"></button>
+        </div>
+        <div class="modal-body py-2">
+            <div id="ciEmpty" class="alert alert-light border py-2 small d-none">
+                同年级还没有配置过监考的考试（有其他监考员 / 排除名单 / 人数 &gt; 1 的批次才会列出来）。
+            </div>
+            <label class="form-label small mb-1" for="ciSource">选择要复用的考试（同年级，按日期倒序）</label>
+            <select id="ciSource" class="form-select form-select-sm" onchange="renderCopySummary()"></select>
+            <div id="ciSummary" class="small mt-2"></div>
+            <div class="alert alert-light border p-2 small mt-2 mb-0">
+                复制内容：<b>每考场监考人数</b>（覆盖本批次）、<b>其他监考员</b>（按姓名去重追加）、
+                <b>排除名单</b>（整批的直接搬；按场次的按「同科目场次」对应，本批次没有该科的会跳过）。
+                <b>不复制</b>已排好的监考格 —— 复用后点「自动编排监考」即可。
+            </div>
+        </div>
+        <div class="modal-footer py-2">
+            <button class="btn btn-sm btn-secondary" data-bs-dismiss="modal">取消</button>
+            <button class="btn btn-sm btn-primary" id="ciDo" onclick="doCopyInvig()">复制过来</button>
+        </div>
+    </div>
+  </div>
 </div>
 
 <!-- 考场编辑弹窗 -->
@@ -868,6 +994,9 @@
                 <br>
                 没写日期时默认用本场考试的<b>考试日期 {{ sched_default_date.strftime('%Y-%m-%d') }}</b>；
                 同一天最多 <b>{{ sched_daily_max }}</b> 场，超出会自动顺延到第二天（导入后可手动改）；
+                <b>只写了开始时间、没写结束时间</b>时，按内置科目时长自动补
+                （语文 {{ sched_duration['语文'] }} 分钟 · 数学/英语 {{ sched_duration['数学'] }} 分钟 ·
+                其它 {{ sched_duration_fallback }} 分钟，多科取最长）；
                 科目写「英语 / 日语」等会自动归到「外语」，多科用「、」连接；
                 不在科目字典内的写法会被跳过。
             </div>
@@ -886,10 +1015,15 @@
 {% block extra_js %}
 <script>
 const AID = {{ affair.id }};
+const AFFAIR_GRADE = {{ affair.grade | tojson }};   // v1.19.47.31：步骤② 自动选同名考场模板用
 const _SUBJECTS = {{ subjects | tojson }};   // 科目字典（时间表科目多选下拉用）
 // 2026-10-13 用户口径：⑤ 新增场次的日期默认口径 —— 与导入（缺省日期 / 每天上限）同源
 const SCHED_DEFAULT_DATE = '{{ sched_default_date.strftime("%Y-%m-%d") }}';
 const SCHED_DAILY_MAX = {{ sched_daily_max }};
+// 2026-10-14 用户口径：内置每科考试时长（分钟）—— 选科目自动算结束时间（后端同表，见 affair_invig.py）
+const SCHED_DEFAULT_START = '{{ sched_default_start }}';
+const SCHED_DURATION = {{ sched_duration | tojson }};
+const SCHED_DURATION_FALLBACK = {{ sched_duration_fallback }};
 function csrf(){ return csrfToken; }
 
 // v1.12.1 记忆当前 tab：切换时写 URL hash，刷新后自动恢复（避免操作后跳回学生名单）
@@ -952,34 +1086,60 @@ function syncStudents(){
             else alert(d.msg);
         });
 }
-// v1.19.47.30 名单筛选（学号/姓名，前端过滤行）：
-// 筛选词存 sessionStorage —— toggleAttend / delStu 都会 location.reload()，
+// 2026-10-14 用户口径：名单筛选收成一条 —— 班级 + 学号/姓名，**同时作用于左右两栏**。
+// 班级与关键词都存 sessionStorage：toggleAttend / delStu 都会 location.reload()，
 // 不存的话连续处理多个学生时每操作一次就得重输一遍。
-function filterRoster(inp) {
-    var q = (inp.value || '').trim().toLowerCase();
-    var tid = inp.dataset.target;
-    try { sessionStorage.setItem('flt:' + tid, q); } catch (e) {}
-    var tb = document.getElementById(tid).querySelector('tbody');
+function _fltCtx(){
+    var cls = (document.getElementById('fltClass') || {}).value || '';
+    var q = ((document.getElementById('fltStu') || {}).value || '').trim().toLowerCase();
+    return {cls: cls, q: q};
+}
+function _fltApply(tid, cls, q){
+    var tb = document.getElementById(tid);
+    if (!tb) return 0;
     var n = 0;
-    tb.querySelectorAll('tr').forEach(function (tr) {
-        if (tr.cells.length < 2) return;              // 空态行（colspan）不参与
-        var hit = !q
-            || tr.cells[0].textContent.toLowerCase().indexOf(q) >= 0
-            || tr.cells[1].textContent.toLowerCase().indexOf(q) >= 0;
-        tr.style.display = hit ? '' : 'none';
-        if (hit) n++;
+    tb.querySelectorAll('tbody tr').forEach(function (tr) {
+        if (tr.cells.length < 5) return;              // 空态行（colspan）不参与
+        var hitC = !cls || tr.cells[2].textContent.trim() === cls;      // 第 3 列 = 班级
+        var hitQ = !q || tr.cells[0].textContent.toLowerCase().indexOf(q) >= 0
+                      || tr.cells[1].textContent.toLowerCase().indexOf(q) >= 0;
+        var show = hitC && hitQ;
+        tr.style.display = show ? '' : 'none';
+        if (show) n++;
     });
     var badge = document.getElementById(tid + 'Badge');
-    if (badge) badge.textContent = q ? (n + '/' + badge.dataset.total)
-                                      : badge.dataset.total;
+    if (badge) badge.textContent = (cls || q) ? (n + '/' + badge.dataset.total)
+                                             : badge.dataset.total;
+    return n;
+}
+function filterRosterAll(){
+    var c = _fltCtx();
+    try {
+        sessionStorage.setItem('flt:cls', c.cls);
+        sessionStorage.setItem('flt:q', c.q);
+    } catch (e) {}
+    var btn = document.getElementById('fltClear');
+    if (btn) btn.classList.toggle('d-none', !c.cls && !c.q);
+    ['stuTable', 'stuSkipTable'].forEach(function (tid) { _fltApply(tid, c.cls, c.q); });
+}
+function clearRosterFilter(){
+    var a = document.getElementById('fltClass'), b = document.getElementById('fltStu');
+    if (a) a.value = '';
+    if (b) b.value = '';
+    filterRosterAll();
+    if (b) b.focus();
 }
 (function restoreRosterFilter() {
-    ['stuTable', 'stuSkipTable'].forEach(function (tid) {
-        var q = '';
-        try { q = sessionStorage.getItem('flt:' + tid) || ''; } catch (e) {}
-        var inp = document.getElementById('flt-' + tid);
-        if (inp && q) { inp.value = q; filterRoster(inp); }
-    });
+    var cls = '', q = '';
+    try {
+        cls = sessionStorage.getItem('flt:cls') || '';
+        q = sessionStorage.getItem('flt:q') || '';
+    } catch (e) {}
+    var a = document.getElementById('fltClass'), b = document.getElementById('fltStu');
+    if (!a || !b) return;
+    a.value = cls;
+    b.value = q;
+    if (cls || q) filterRosterAll();
 })();
 // v1.19.47.30 步骤① 左右分栏：把学生移到「参加 / 不参加」一侧（保存后刷新以重排与更新统计）
 function toggleAttend(sid, toAttend){
@@ -1171,7 +1331,9 @@ function saveSettings(){
 var _SUBJ_OPTS = {{ room_subject_options|tojson }};
 var _batchRooms = [{% for r in rooms %}{id:{{ r.id }},room_no:{{ (r.room_no or '')|tojson }},location:{{ (r.location or '')|tojson }},capacity:{{ r.capacity or 0 }},subject:{{ (r.subject or '默认')|tojson }},note:{{ (r.note or '')|tojson }}},
                    {% endfor %}];
-var _libData = [];  // 考场库全量，loadLib 后填充
+var _libData = [];   // 考场库全量，loadLib 后填充
+var _libGroups = []; // v1.19.47.31 考场模板（= 考场维护页的分组）：[{id,name,count}]
+var _libGroupInit = false;   // 首次载入时自动匹配本批次年级的模板（只做一次，不覆盖用户选择）
 
 function _locSet(){ return new Set(_batchRooms.map(r=>r.location)); }
 
@@ -1234,7 +1396,7 @@ function renderRooms(){
     _roomCapStat();
     var tb = document.querySelector('#roomTable tbody');
     if(!_batchRooms.length){
-        tb.innerHTML = '<tr><td colspan="6" class="text-center text-muted py-4">本批次尚未选考场。从左侧考场库点「加入」即可。</td></tr>';
+        tb.innerHTML = '<tr><td colspan="6" class="text-center text-muted py-4">本批次尚未选考场。在左侧「考场库」选好考场模板后点「一键带入」即可。</td></tr>';
         return;
     }
     tb.innerHTML = _batchRooms.map(r=>
@@ -1243,66 +1405,177 @@ function renderRooms(){
         '<td>'+_subjSel(r)+'</td>'+
         '<td><input type="number" min="1" max="500" class="form-control form-control-sm py-0 text-end rm-cap" value="'+escHtml(r.capacity)+'" onchange="saveRoomField(this)"></td>'+
         '<td><input class="form-control form-control-sm py-0 rm-note" value="'+escHtml(r.note||'')+'" placeholder="备注" onchange="saveRoomField(this)"></td>'+
-        '<td class="text-end"><button class="btn btn-sm btn-outline-danger py-0" onclick="delRoom('+r.id+')">删</button></td></tr>'
+        '<td class="text-end"><button class="btn btn-sm btn-outline-danger py-0" title="把该考场移出本批次（考场库中的房间不受影响）"'+
+        ' onclick="delRoom('+r.id+')">不加入</button></td></tr>'
     ).join('');
 }
 
 function loadLib(){
     fetch('/grades/affairs/room-lib/list').then(r=>r.json()).then(d=>{
         _libData = d.rooms||[];
-        var used = _locSet();
-        var html = _libData.map(r=>{
-            var u = used.has(r.location);
-            return '<tr class="'+(u?'table-success':'')+'" data-loc="'+escHtml(r.location)+'">'+
-                '<td>'+escHtml(r.location)+(u?' <span class="badge bg-success">已选</span>':'')+'</td>'+
-                '<td class="text-end">'+escHtml(r.capacity)+'</td>'+
-                '<td class="text-end">'+
-                (u?'<span class="text-muted small">—</span>':
-                 '<button class="btn btn-sm btn-outline-primary py-0" onclick="pickLib('+r.id+')">加入</button>')+
-                ' <button class="btn btn-sm btn-outline-danger py-0" onclick="libDel('+r.id+')">删</button></td></tr>';
-        }).join('') || '<tr><td colspan="3" class="text-center text-muted py-3">考场库为空（请用 scripts/seed_exam_rooms.py 导入）</td></tr>';
-        document.getElementById('libBody').innerHTML = html;
-        document.getElementById('libCount').textContent = _libData.length + ' 个房间';
+        _libGroups = d.groups||[];
+        var sel = document.getElementById('libGroup');
+        var cur = sel.value;                    // 保留用户/上次选择
+        sel.innerHTML = '<option value="">选择考场模板…</option>' + _libGroups.map(g=>
+            '<option value="'+g.id+'">'+escHtml(g.name)+'（'+g.count+'）</option>').join('');
+        sel.value = cur;
+        if(!sel.value && !_libGroupInit){
+            _libGroupInit = true;
+            // v1.19.47.31 默认选中与本批次年级同名的模板（如「2026级考场」），省得每次手选
+            var hit = _libGroups.find(g=>g.name.indexOf(AFFAIR_GRADE) >= 0);
+            if(hit) sel.value = String(hit.id);
+        }
+        _renderLibList();
     });
 }
-// 加入：调接口生成考场 → 前端追加行 + 左侧该行就地标记已选（不刷新）
-function pickLib(id){
-    var lib = _libData.find(r=>r.id===id);
-    var fd = new FormData(); fd.append('lib_id', id);
-    fetch('/grades/affairs/'+AID+'/rooms/from-lib', {method:'POST', body:fd, headers:{'X-CSRFToken':csrf()}})
+
+// 2026-10-14 用户口径：模板**不是候选区的筛选条件**（它是右侧「一键带入」的选源），
+// 候选区只看搜索词 —— 这样未归组 / 其它模板的房间也会出现，才能逐行「加入」
+function _curLibRows(){
+    var kw = (document.getElementById('libSearch').value || '').trim().toLowerCase();
+    return _libData.filter(function(r){
+        if(kw && ((r.location||'')+' '+(r.note||'')).toLowerCase().indexOf(kw) < 0) return false;
+        return true;
+    });
+}
+
+function _renderLibList(){
+    var rows = _curLibRows();
+    var used = _locSet();
+    // v1.19.47.31 候选区只读：只标「已加入 / 未加入」状态，不带入、不改写（带入在右侧「一键带入」）
+    // 2026-10-14 用户口径「更紧凑、状态更清楚」：状态独立成列（软底胶囊）；备注以小字挂在位置下方
+    //（能搜备注就要看得见）；「删」= 行内小图标，平时半透明、悬停该行才变红
+    // 2026-10-14 用户要求**恢复逐行「加入」**（未归组/其它模板的房间「一键带入」带不进来）：
+    //   未加入 = 可点的「加入」按钮，已加入 = 绿色胶囊；批量仍可用右侧「一键带入」
+    var added = 0;
+    var html = rows.map(function(r){
+        var u = used.has(r.location);
+        if(u) added += 1;
+        return '<tr class="'+(u?'lib-added':'')+'" data-loc="'+escHtml(r.location)+'">'+
+            '<td>'+escHtml(r.location)+
+            (r.note ? ' <span class="text-muted" style="font-size:.72rem">'+escHtml(r.note)+'</span>'
+                    : '')+'</td>'+
+            '<td class="text-end">'+escHtml(r.capacity)+'</td>'+
+            '<td class="text-center">'+(u
+                ? '<span class="badge lib-st lib-st-on">已加入</span>'
+                : '<button class="btn btn-sm btn-outline-primary py-0 lib-add"'+
+                  ' title="把该房间加入本批次（自动生成考场编号）"'+
+                  ' onclick="pickLib('+r.id+')">加入</button>')+'</td>'+
+            '<td class="text-end"><button class="btn btn-link btn-sm lib-del"'+
+            ' title="从考场库删除该房间（不影响已带入的考场）"'+
+            ' onclick="libDel('+r.id+')"><i class="bi bi-trash3"></i></button></td></tr>';
+    }).join('') || '<tr><td colspan="4" class="text-center text-muted py-3">'+
+        (_libData.length ? '没有匹配的房间（清空搜索试试）'
+                         : '考场库为空（可在「考场维护」页新增 / 导入 Excel）')+'</td></tr>';
+    document.getElementById('libBody').innerHTML = html;
+    _libStat(rows.length, added);
+    var clr = document.getElementById('libClear');          // 有输入才出现「清空」
+    if(clr) clr.classList.toggle('d-none', !document.getElementById('libSearch').value.trim());
+    _tplFillBtn();
+}
+
+// 2026-10-14 卡片头徽标（原「N 个房间」只是重复筛选结果）→ 改为可行动的信息：
+// 还剩几个没带入（黄）/ 已全部带入（绿）/ 无匹配（灰）；完整口径放 title
+function _libStat(total, added){
+    var el = document.getElementById('libCount');
+    if(!el) return;
+    var pend = total - added;
+    var st = !total ? ['—', 'var(--sl-surface-3)', 'var(--sl-text-muted)', 'var(--sl-border)']
+           : !pend  ? ['已全部加入', 'var(--sl-soft-success-bg)', 'var(--sl-soft-success-fg)',
+                       'var(--sl-soft-success-bd)']
+           :          ['未加入 ' + pend, 'var(--sl-soft-warn-bg)', 'var(--sl-soft-warn-fg)',
+                       'var(--sl-soft-warn-bd)'];
+    el.textContent = st[0];
+    // 注：不能靠 Bootstrap 的 .bg-* / .border / .text-* 工具类，它们都带 !important，会盖掉这里的主题变量
+    el.style.background = st[1]; el.style.color = st[2];
+    el.style.border = '1px solid ' + st[3];
+    el.title = total ? ('当前列表（搜索范围内）共 ' + total + ' 个房间，已在批次中 ' + added + ' 个')
+                     : '没有匹配的房间';
+}
+
+// 2026-10-14 搜索框「清空」：一键回全量列表并继续聚焦，方便接着搜
+function clearLibSearch(){
+    var inp = document.getElementById('libSearch');
+    if(!inp) return;
+    inp.value = '';
+    _renderLibList();
+    inp.focus();
+}
+
+// v1.19.47.31 右侧「一键带入」：显示左侧所选模板中「尚未带入」的房间数；未选模板 / 已带完则置灰
+function _tplFillBtn(){
+    var btn = document.getElementById('tplFillBtn');
+    if(!btn) return;
+    var txt = document.getElementById('tplFillTxt');
+    var sel = document.getElementById('libGroup');
+    var gid = parseInt(sel.value, 10) || 0;
+    if(!gid){
+        btn.disabled = true;
+        if(txt) txt.textContent = '一键带入';
+        btn.title = '先选择一个考场模板'; return;
+    }
+    var gname = sel.options[sel.selectedIndex].text;
+    var used = _locSet();
+    var pend = _libData.filter(r=>(r.group_ids||[]).indexOf(gid) >= 0
+                                   && !used.has(r.location)).length;
+    btn.disabled = pend === 0;
+    if(txt) txt.textContent = pend ? ('一键带入（'+pend+'）') : '已全部带入';
+    btn.title = pend ? ('把「'+gname+'」中尚未带入的 '+pend+' 个房间加入本批次')
+                     : '该模板的房间已全部在本批次中';
+}
+
+// v1.19.47.31 一键带入（右侧「本批次考场」卡片头）：按左侧所选模板一次请求批量建考场
+// （未带入的才加、编号自动递增、容量带出考场库默认值；已在批次的由服务端按位置跳过）
+function addLibGroup(){
+    var sel = document.getElementById('libGroup');
+    var gid = parseInt(sel.value, 10) || 0;
+    if(!gid) return;
+    var used = _locSet();
+    var pend = _libData.filter(r=>(r.group_ids||[]).indexOf(gid) >= 0
+                                   && !used.has(r.location)).length;
+    if(!pend){ alert('该模板的房间都已在本批次中'); return; }
+    var gname = sel.options[sel.selectedIndex].text;
+    if(!confirm('把「'+gname+'」中尚未带入的 '+pend+' 个房间带入本批次？\n'+
+                '（自动生成考场编号，容量带出考场库默认值，之后可逐个调整）')) return;
+    var fd = new FormData(); fd.append('group_id', gid);
+    fetch('/grades/affairs/'+AID+'/rooms/from-lib-batch', {method:'POST', body:fd, headers:{'X-CSRFToken':csrf()}})
         .then(r=>r.json()).then(d=>{
-            if(!d.ok){ alert(d.msg); return; }
-            _batchRooms.push({id:d.id, room_no:d.room_no, location:d.location, capacity:d.capacity, subject:d.subject, note:''});
+            if(!d.ok){ alert(d.msg||'带入失败'); return; }
+            (d.added||[]).forEach(function(r){
+                _batchRooms.push({id:r.id, room_no:r.room_no, location:r.location,
+                                  capacity:r.capacity, subject:r.subject, note:''});
+            });
             renderRooms();
             refreshStats();
-            if(lib) _markLibUsed(lib.location, true);
+            _renderLibList();
         });
 }
-// 删除：调接口 → 前端移除行 + 解除左侧已选（不刷新）
+// 「不加入」：把该考场移出本批次（考场库房间不动）→ 前端移除行 + 左侧状态回「未加入」
+// 2026-10-14 用户要求：不再弹确认框，点「不加入」直接执行
 function delRoom(id){
-    if(!confirm('删除该考场？')) return;
     fetch('/grades/affairs/'+AID+'/rooms/'+id+'/delete', {method:'POST', headers:{'X-CSRFToken':csrf()}})
         .then(r=>r.json()).then(d=>{
             if(!d.ok) return;
-            var rm = _batchRooms.find(r=>r.id===id);
             _batchRooms = _batchRooms.filter(r=>r.id!==id);
             renderRooms();
             refreshStats();
-            if(rm) _markLibUsed(rm.location, false);
+            _renderLibList();
         });
 }
-// 左侧某行标记/解除「已选」并切换操作按钮
-function _markLibUsed(loc, used){
-    var tr = document.querySelector('#libBody tr[data-loc="'+loc+'"]');
-    if(!tr) return;
-    var lib = _libData.find(r=>r.location===loc);
-    var td0 = tr.querySelector('td');
-    td0.innerHTML = escHtml(loc) + (used?' <span class="badge bg-success">已选</span>':'');
-    tr.className = used ? 'table-success' : '';
-    var opTd = tr.querySelector('td:last-child');
-    opTd.innerHTML = (used?'<span class="text-muted small">—</span>':
-        '<button class="btn btn-sm btn-outline-primary py-0" onclick="pickLib('+lib.id+')">加入</button>')+
-        ' <button class="btn btn-sm btn-outline-danger py-0" onclick="libDel('+lib.id+')">删</button>';
+// 2026-10-14 用户要求恢复「点击加入」：把考场库里的某个房间加入本批次
+//（未归组 / 不属于当前模板的房间，「一键带入」带不进来，只能逐行点）
+function pickLib(libId){
+    var fd = new FormData(); fd.append('lib_id', libId);
+    fetch('/grades/affairs/'+AID+'/rooms/from-lib', {method:'POST', body:fd,
+                                                     headers:{'X-CSRFToken':csrf()}})
+        .then(r=>r.json()).then(function(d){
+            if(!d.ok){ alert(d.msg || '加入失败'); return; }
+            _batchRooms.push({id:d.id, room_no:d.room_no, location:d.location,
+                              capacity:d.capacity, subject:d.subject, note:''});
+            renderRooms();
+            refreshStats();
+            _renderLibList();   // 该行转「已加入」，徽标与「一键带入」计数同步
+        });
 }
 function libDel(id){
     if(!confirm('从考场库删除该房间？不影响已生成的考场。')) return;
@@ -1469,7 +1742,8 @@ function importSchedules(input){
             input.value='';
             if(!d.ok){ msg.className='small text-danger'; msg.textContent=d.msg; return; }
             msg.className='small text-success';
-            msg.textContent='已导入 '+d.added+' 场'+(d.skipped?('，跳过 '+d.skipped+' 行（无科目）'):'');
+            msg.textContent='已导入 '+d.added+' 场'+(d.skipped?('，跳过 '+d.skipped+' 行（无科目）'):'')
+                + (d.auto_end?('，其中 '+d.auto_end+' 场按科目时长自动补了结束时间'):'');
             setTimeout(()=>location.reload(), 600);
         });
 }
@@ -1503,6 +1777,7 @@ function submitSchedPaste(){
             msg.className = 'small mt-2 text-success';
             msg.textContent = '已导入 '+d.added+' 场'
                 + (d.shifted ? ('，'+d.shifted+' 场因当天已满 '+d.daily_max+' 场自动顺延到次日') : '')
+                + (d.auto_end ? ('，其中 '+d.auto_end+' 场按科目时长自动补了结束时间') : '')
                 + (d.skipped ? ('，跳过 '+d.skipped+' 行') : '');
             setTimeout(function(){ location.reload(); }, 800);
         })
@@ -1535,6 +1810,90 @@ function nextSchedDate(){
     while((counts[d] || 0) >= SCHED_DAILY_MAX && guard++ < 3650) d = _nextDayIso(d);
     return d;
 }
+// ---------- 2026-10-14 用户口径：按内置每科时长自动算时间 ----------
+// 语文 2.5 小时 / 数学·英语 2 小时 / 其它 75 分钟（一场多科取最长）；
+// 开始时间空着就接「同一天上一场的结束」，当天首场用 SCHED_DEFAULT_START。
+function schedDurationMin(subjText){
+    var best = 0;
+    String(subjText || '').split(/[、，,/\s]+/).forEach(function(s){
+        if(!s) return;
+        var v = Object.prototype.hasOwnProperty.call(SCHED_DURATION, s)
+            ? SCHED_DURATION[s] : SCHED_DURATION_FALLBACK;
+        best = Math.max(best, v);
+    });
+    return best || SCHED_DURATION_FALLBACK;
+}
+function addMinutes(hhmm, mins){
+    var m = /^(\d{1,2}):(\d{2})$/.exec((hhmm || '').trim());
+    if(!m || !mins) return (hhmm || '').trim();
+    var t = (parseInt(m[1], 10) * 60 + parseInt(m[2], 10) + mins) % 1440;   // 跨午夜回绕（防呆）
+    return ('0' + Math.floor(t / 60)).slice(-2) + ':' + ('0' + (t % 60)).slice(-2);
+}
+// 同一天里、本行**之前**最后一场的结束时间（那行没结束就用它的开始 + 时长推）
+function prevEndTime(tr){
+    var day = (tr.querySelector('.sc-date').value || '').trim();
+    var rows = Array.prototype.slice.call(document.querySelectorAll('#schedBody tr'));
+    var out = '';
+    rows.slice(0, rows.indexOf(tr)).forEach(function(r){
+        if(((r.querySelector('.sc-date').value || '').trim()) !== day) return;
+        var e = (r.querySelector('.sc-end').value || '').trim();
+        var st = (r.querySelector('.sc-start').value || '').trim();
+        if(e) out = e;
+        else if(st) out = addMinutes(st, schedDurationMin(r.querySelector('.sc-subj').value));
+    });
+    return out;
+}
+// 按科目 / 开始时间自动带出时间；结束时间被用户手改过（无 data-auto 标记）就不覆盖
+function autoSchedTimes(tr){
+    if(!tr) return;
+    var subj = (tr.querySelector('.sc-subj').value || '').trim();
+    if(!subj) return;                      // 还没选科目：不猜时长
+    var startEl = tr.querySelector('.sc-start'), endEl = tr.querySelector('.sc-end');
+    if(!(startEl.value || '').trim()){
+        startEl.value = prevEndTime(tr) || SCHED_DEFAULT_START;
+        startEl.dataset.auto = '1';
+    }
+    if(!(endEl.value || '').trim() || endEl.dataset.auto === '1'){
+        endEl.value = addMinutes(startEl.value, schedDurationMin(subj));
+        endEl.dataset.auto = '1';
+    }
+}
+// 一键补齐：已选科目、却缺开始/结束的**已保存**场次 → 按内置时长补并保存
+function autoFillAllSchedTimes(){
+    var msg = document.getElementById('schedMsg');
+    var rows = Array.prototype.slice.call(document.querySelectorAll('#schedBody tr'));
+    var todo = rows.filter(function(tr){
+        var subj = (tr.querySelector('.sc-subj').value || '').trim();
+        var st = (tr.querySelector('.sc-start').value || '').trim();
+        var en = (tr.querySelector('.sc-end').value || '').trim();
+        return subj && (!st || !en);
+    });
+    var saved = todo.filter(function(tr){ return !!tr.dataset.sid; });
+    var unsaved = todo.length - saved.length;
+    if(!saved.length){
+        msg.className = 'small text-muted';
+        msg.textContent = unsaved
+            ? ('这 ' + unsaved + ' 行还没保存过：选完科目会自动带出时间，点行尾「存」即可。')
+            : '所有填了科目的场次都有开始/结束时间了，无需补。';
+        setTimeout(function(){ msg.textContent = ''; }, 5000);
+        return;
+    }
+    saved.forEach(function(tr){ autoSchedTimes(tr); });
+    msg.className = 'small text-muted';
+    msg.textContent = '正在保存 ' + saved.length + ' 场…';
+    var done = 0, failed = 0, chain = Promise.resolve();
+    saved.forEach(function(tr){
+        chain = chain.then(function(){ return saveScheduleRow(tr); })
+                     .then(function(ok){ ok ? done++ : failed++; });
+    });
+    chain.then(function(){
+        msg.className = failed ? 'small text-danger' : 'small text-success';
+        msg.textContent = '已按科目时长补 ' + done + ' 场'
+            + (failed ? ('，' + failed + ' 场保存失败') : '')
+            + (unsaved ? ('；另有 ' + unsaved + ' 行未保存，未处理') : '');
+        setTimeout(function(){ msg.textContent = ''; }, 6000);
+    });
+}
 function addScheduleRow(){
     var cbs = (_SUBJECTS || []).map(function(s){
         return '<label class="dropdown-item-text form-check mb-0" style="font-size:.85rem">'
@@ -1557,17 +1916,37 @@ function addScheduleRow(){
     // 2026-10-13：新行的科目下拉也要走固定定位（容器 overflow:auto 会裁剪菜单）
     initPopperFixedDropdowns(tb.lastElementChild);
 }
-// 科目多选：勾选即更新按钮文本与隐藏值（「、」连接，与环节⑥同科回避的拆分口径一致）
+// 表格内事件：① 科目多选（勾选即更新按钮文本与隐藏值，「、」连接，与环节⑥同科回避拆分口径一致）；
+//             ② 2026-10-14 用户口径：选完科目 / 改开始时间 / 换日期 → 按内置时长自动带出时间
 document.getElementById('schedBody').addEventListener('change', function(e){
-    if (!e.target.classList.contains('subj-cb')) return;
     var tr = e.target.closest('tr');
-    var picked = Array.prototype.slice.call(tr.querySelectorAll('.subj-cb:checked'))
-        .map(function(c){ return c.value; });
-    tr.querySelector('.sc-subj').value = picked.join('、');
-    tr.querySelector('.subj-btn').textContent = picked.length ? picked.join('+') : '选科目';
+    if (!tr) return;
+    if (e.target.classList.contains('subj-cb')) {
+        var picked = Array.prototype.slice.call(tr.querySelectorAll('.subj-cb:checked'))
+            .map(function(c){ return c.value; });
+        tr.querySelector('.sc-subj').value = picked.join('、');
+        tr.querySelector('.subj-btn').textContent = picked.length ? picked.join('+') : '选科目';
+        autoSchedTimes(tr);
+        return;
+    }
+    if (e.target.classList.contains('sc-start')) { autoSchedTimes(tr); return; }
+    if (e.target.classList.contains('sc-end')) {
+        // 手改过结束 = 不再自动覆盖（去掉标记）；清空 = 恢复自动，下次改科目/开始会重算
+        if ((e.target.value || '').trim()) delete e.target.dataset.auto;
+        else e.target.dataset.auto = '1';
+        return;
+    }
+    if (e.target.classList.contains('sc-date')) {
+        var s = tr.querySelector('.sc-start');
+        if (!(s.value || '').trim() || s.dataset.auto === '1') {
+            s.value = '';                       // 交给 autoSchedTimes 按新那天重新续排
+            autoSchedTimes(tr);
+        }
+    }
 });
-function saveSchedule(btn){
-    var tr = btn.closest('tr');
+// 保存一行（返回 Promise<true|false>）；批量补时间也复用它
+function saveScheduleRow(tr){
+    var msg = document.getElementById('schedMsg');
     var fd = new FormData();
     fd.append('id', tr.dataset.sid || '');
     fd.append('exam_date', tr.querySelector('.sc-date').value);
@@ -1579,21 +1958,31 @@ function saveSchedule(btn){
     // 2026-10-13：保存改为**局部更新**（不再 location.reload）——
     // 刷新会把其他行还没保存的内容一起冲掉（用户实测反馈）。
     // 新增行保存后把返回 id 写回行，后续再点「存」就是更新同一条。
-    fetch('/grades/affairs/'+AID+'/schedules/save', {method:'POST', body:fd, headers:{'X-CSRFToken':csrf()}})
-        .then(r=>r.json()).then(d=>{
-            var msg = document.getElementById('schedMsg');
-            if (!d.ok){ msg.className = 'small text-danger'; msg.textContent = d.msg || '保存失败'; return; }
+    return fetch('/grades/affairs/'+AID+'/schedules/save', {method:'POST', body:fd, headers:{'X-CSRFToken':csrf()}})
+        .then(r=>r.json()).then(function(d){
+            if (!d.ok){ msg.className = 'small text-danger'; msg.textContent = d.msg || '保存失败'; return false; }
             if (d.id) tr.dataset.sid = d.id;
-            btn.classList.replace('btn-outline-primary', 'btn-success');
-            btn.textContent = '已存';
-            setTimeout(function(){
-                btn.classList.replace('btn-success', 'btn-outline-primary');
-                btn.textContent = '存';
-            }, 1500);
-            msg.className = 'small text-success';
-            msg.textContent = '该场次已保存，其他行未保存的内容不受影响';
-            setTimeout(function(){ msg.textContent = ''; }, 3000);
+            return true;
+        })
+        .catch(function(){
+            msg.className = 'small text-danger'; msg.textContent = '保存失败：网络或服务异常';
+            return false;
         });
+}
+function saveSchedule(btn){
+    saveScheduleRow(btn.closest('tr')).then(function(ok){
+        if (!ok) return;
+        btn.classList.replace('btn-outline-primary', 'btn-success');
+        btn.textContent = '已存';
+        setTimeout(function(){
+            btn.classList.replace('btn-success', 'btn-outline-primary');
+            btn.textContent = '存';
+        }, 1500);
+        var msg = document.getElementById('schedMsg');
+        msg.className = 'small text-success';
+        msg.textContent = '该场次已保存，其他行未保存的内容不受影响';
+        setTimeout(function(){ msg.textContent = ''; }, 3000);
+    });
 }
 function delSchedule(btn){
     var tr = btn.closest('tr');
@@ -1608,20 +1997,8 @@ function delSchedule(btn){
 initPopperFixedDropdowns(document.getElementById('t5'));
 // 2026-10-13：排除名单的两个多选下拉也在滚动容器里（教师池卡片 max-height:60vh）
 initPopperFixedDropdowns(document.getElementById('t6'));
-// 2026-10-13 用户口径：监考表两种视图 —— 列表（逐条编排）/ 教师安排矩阵（对齐学校张贴表）
-document.querySelectorAll('input[name="invigView"]').forEach(function(el){
-    el.addEventListener('change', function(){ applyInvigView(); });
-});
-function invigView(){
-    return (document.querySelector('input[name="invigView"]:checked')||{}).value || 'list';
-}
-function applyInvigView(){
-    var v = invigView();
-    document.getElementById('invigListWrap').classList.toggle('d-none', v !== 'list');
-    document.getElementById('invigMatrixWrap').classList.toggle('d-none', v !== 'matrix');
-    if(v === 'matrix' && _invigData){ renderInvigMatrix(_invigData); }
-}
-
+// 2026-10-14 用户口径：监考表**不要逐条长表** —— 只有「教师安排（学校格式）」矩阵一种渲染
+// （长表渲染函数与两种视图的切换按钮已删，勿恢复）。
 // ---------- 环节⑥ 监考编排 ----------
 function loadInvig(){
     fetch('/grades/affairs/'+AID+'/invig').then(r=>r.json()).then(d=>{
@@ -1633,8 +2010,7 @@ function renderInvig(){
     var d = _invigData; if(!d) return;
     document.getElementById('invigSlots').value = String(d.slots||1);
     renderPool(d);
-    renderInvigTable(d);
-    if(invigView() === 'matrix'){ renderInvigMatrix(d); }
+    renderInvigMatrix(d);
 }
 function renderPool(d){
     var t = d.pool.filter(p=>p.source==='teacher');
@@ -1832,52 +2208,7 @@ function delExclude(id){
     fetch('/grades/affairs/'+AID+'/invig/exclude/delete', {method:'POST', body:fd, headers:{'X-CSRFToken':csrf()}})
         .then(r=>r.json()).then(d=>{ if(d.ok) loadInvig(); else alert(d.msg||'失败'); });
 }
-function renderInvigTable(d){
-    var thead = document.querySelector('#invigTable thead');
-    var tbody = document.querySelector('#invigTable tbody');
-    var slots = d.slots || 1;
-    var th = '<tr><th style="width:130px">考试时间</th><th style="width:110px">科目</th>'
-           + '<th style="width:78px">考场</th><th style="width:130px">考场位置</th>';
-    for(var n=1;n<=slots;n++){ th += '<th>监考老师'+n+'</th>'; }
-    thead.innerHTML = th + '</tr>';
-    if(!d.schedules.length || !d.rooms.length){
-        tbody.innerHTML = '<tr><td colspan="'+(4+slots)+'" class="text-center text-muted py-3">'
-            + (d.schedules.length?'请先导入考试时间表（环节⑤）':'请先设置考场（环节②）')+'</td></tr>';
-        return;
-    }
-    var poolNames = d.pool.map(p=>p.name);
-    var rows = [];
-    d.schedules.forEach(function(s){
-        var when = [s.date, (s.start||s.end)?(s.start+'-'+s.end):''].filter(Boolean).join(' ');
-        var avoid = s.subject ? [s.subject] : [];
-        d.rooms.forEach(function(rm){
-            var key = s.id+'|'+rm.room_no;
-            var cur = d.invig[key] || {};
-            var tds = ['<td class="small">'+escHtml(when)+'</td>',
-                       '<td class="small fw-bold">'+escHtml(s.subject)+(s.selection?('<span class="text-muted">('+escHtml(s.selection)+')</span>'):'')+'</td>',
-                       // 2026-10-13 用户口径：展示用考场号两位（01/02…）；data-room 仍是原值（提交给后端做键匹配）
-                       '<td class="text-center">'+escHtml(stuPad2(rm.room_no))+'</td>',
-                       '<td class="small text-muted">'+escHtml(rm.location||'')+'</td>'];
-            for(var n=1;n<=slots;n++){
-                var val = (cur[n] && cur[n].name) || '';
-                var opts = '<option value="">—</option>' + poolNames.map(function(nm){
-                    var p = d.pool.find(x=>x.name===nm) || {};
-                    var conf = (p.subjects||[]).some(sj=>avoid.indexOf(sj)>=0);
-                    return '<option value="'+escHtml(nm)+'"'+(nm===val?' selected':'')+(conf?' data-conf="1"':'')+'>'
-                         + escHtml(nm)+(conf?'（回避）':'')+'</option>';
-                }).join('');
-                tds.push('<td><select class="form-select form-select-sm iv-sel" data-sid="'+s.id
-                         +'" data-room="'+escHtml(rm.room_no)+'" data-slot="'+n+'">'+opts+'</select></td>');
-            }
-            rows.push('<tr>'+tds.join('')+'</tr>');
-        });
-    });
-    tbody.innerHTML = rows.join('');
-    tbody.querySelectorAll('.iv-sel').forEach(function(el){
-        el.addEventListener('change', function(){ setInvig(el); });
-    });
-}
-// 2026-10-13：教师安排矩阵（对齐学校张贴表）——行=考场（号/位置/人数），
+// 2026-10-14：教师安排矩阵（对齐学校张贴表）——行=考场（号/位置/人数），
 // 列=日期 × 科目（含时段），一格一位老师；格内是"隐形下拉"，点开即可换人。
 function _cnDay(s){
     var m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(s || '');
@@ -2071,13 +2402,163 @@ function autoInvig(){
             loadInvig();
         });
 }
-function addOther(){
+// 2026-10-14 用户口径：主入口改为「从教师名单勾选」（弹窗）；此处只留**校外无账号老师**的手工添加
+function promptAddOther(){
     var name = prompt('其他监考员姓名（可为无账号的校外老师）：');
     if(!name) return;
     var subj = prompt('任教学科（可留空；多科用顿号分隔，用于回避）：','') || '';
     var fd = new FormData(); fd.append('name', name.trim()); fd.append('subject', subj.trim());
     fetch('/grades/affairs/'+AID+'/invig/others/add', {method:'POST', body:fd, headers:{'X-CSRFToken':csrf()}})
         .then(r=>r.json()).then(d=>{ if(d.ok) loadInvig(); else alert(d.msg||'失败'); });
+}
+// 2026-10-14：Bootstrap 在前一个弹窗的关闭过渡未走完时，show() 会被**静默忽略**
+// —— 实测「勾选监考员」关掉后立刻点「复用上次配置」，弹窗不显示、要点第二次；
+// 同时关闭过渡被打断会留下孤儿 backdrop（页面变灰、点不动）。
+// 统一走这里：先清残留，再延后一帧 + 过渡时长后打开。
+function _openModal(id){
+    document.querySelectorAll('.modal-backdrop').forEach(function(b){ b.remove(); });
+    document.body.classList.remove('modal-open');
+    document.body.style.removeProperty('overflow');
+    document.body.style.removeProperty('padding-right');
+    setTimeout(function(){
+        bootstrap.Modal.getOrCreateInstance(document.getElementById(id)).show();
+    }, 260);
+}
+// ---------- 环节⑥ 从教师名单勾选监考员（2026-10-14） ----------
+var _piAll = [], _piIn = new Set(), _piSel = new Set();
+function openPickInvig(){
+    fetch('/grades/affairs/'+AID+'/invig/teacher-candidates').then(r=>r.json()).then(function(d){
+        if(!d.success){ alert('读取教师名单失败'); return; }
+        _piAll = d.data.teachers || [];
+        _piIn = new Set(d.data.in_pool || []);
+        _piSel = new Set();
+        var subs = [...new Set(_piAll.map(t=>t.subject).filter(Boolean))].sort(_subjRank);
+        document.getElementById('piSubj').innerHTML = '<option value="">全部学科</option>' +
+            subs.map(s=>'<option>'+escHtml(s)+'</option>').join('');
+        document.getElementById('piSearch').value = '';
+        renderPickInvig();
+        _openModal('pickInvigModal');
+    }).catch(function(){ alert('读取教师名单失败：网络或服务异常'); });
+}
+function _piGroupName(t){ return t.subject || '未标注学科'; }
+// 一位老师可能教多科（subjects 数组）→ 在各学科组里都出现，勾选状态按姓名联动
+function _piGroups(t){ return (t.subjects && t.subjects.length) ? t.subjects : ['未标注学科']; }
+function renderPickInvig(){
+    var q = (document.getElementById('piSearch').value || '').trim().toLowerCase();
+    var sj = document.getElementById('piSubj').value || '';
+    var hideIn = document.getElementById('piHideIn').checked;
+    var groups = {}, order = [];
+    _piAll.forEach(function(t){
+        if(hideIn && _piIn.has(t.name)) return;
+        if(q && ((t.name||'') + ' ' + (t.subject||'')).toLowerCase().indexOf(q) < 0) return;
+        _piGroups(t).forEach(function(k){
+            if(sj && k !== sj) return;
+            if(!groups[k]){ groups[k] = []; order.push(k); }
+            if(!groups[k].some(function(x){ return x.name === t.name; })) groups[k].push(t);
+        });
+    });
+    order.sort(function(a, b){ return _subjRank(a) - _subjRank(b) || (a < b ? -1 : (a > b ? 1 : 0)); });
+    document.getElementById('piBody').innerHTML = order.length ? order.map(function(k){
+        var items = groups[k];
+        var avail = items.filter(function(t){ return !_piIn.has(t.name); });
+        var allOn = avail.length > 0 && avail.every(function(t){ return _piSel.has(t.name); });
+        return '<div class="d-flex align-items-center justify-content-between mt-1">'
+            + '<span class="small text-muted fw-bold">' + escHtml(k) + '（' + items.length + '）</span>'
+            + (avail.length ? '<button type="button" class="btn btn-link btn-sm py-0 px-1"'
+                + ' data-subj="' + escHtml(k) + '" onclick="piToggleGroup(this)">'
+                + (allOn ? '取消本组' : '全选本组') + '</button>' : '')
+            + '</div><div class="mb-1">'
+            + items.map(function(t){
+                  var already = _piIn.has(t.name);
+                  return '<label class="form-check form-check-inline mb-0" style="font-size:.85rem">'
+                      + '<input class="form-check-input pi-ck" type="checkbox" data-name="'
+                      + escHtml(t.name) + '"' + (already ? ' disabled' : (_piSel.has(t.name) ? ' checked' : ''))
+                      + ' onchange="piToggle(this)">'
+                      + '<span class="form-check-label' + (already ? ' text-muted' : '') + '">'
+                      + escHtml(t.name) + (already ? '（已在池中）' : '') + '</span></label>';
+              }).join('') + '</div>';
+    }).join('') : '<div class="text-muted small">没有匹配的教师</div>';
+    document.getElementById('piCount').textContent = _piSel.size;
+}
+function piToggleGroup(btn){
+    var subj = btn.dataset.subj || '';
+    var items = _piAll.filter(function(t){
+        return _piGroups(t).indexOf(subj) >= 0 && !_piIn.has(t.name);
+    });
+    var allOn = items.length > 0 && items.every(function(t){ return _piSel.has(t.name); });
+    items.forEach(function(t){ allOn ? _piSel.delete(t.name) : _piSel.add(t.name); });
+    renderPickInvig();
+}
+function piToggle(inp){
+    var nm = inp.dataset.name;
+    if(inp.checked) _piSel.add(nm); else _piSel.delete(nm);
+    document.getElementById('piCount').textContent = _piSel.size;
+}
+function confirmPickInvig(){
+    if(!_piSel.size){ alert('请先勾选要加入的教师'); return; }
+    var payload = _piAll.filter(function(t){ return _piSel.has(t.name); })
+                        .map(function(t){ return {name: t.name, subject: t.subject || ''}; });
+    fetch('/grades/affairs/'+AID+'/invig/others/add-batch', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json', 'X-CSRFToken': csrf()},
+        body: JSON.stringify(payload)})
+        .then(r=>r.json()).then(function(d){
+            if(!d.ok){ alert(d.msg || '加入失败'); return; }
+            bootstrap.Modal.getInstance(document.getElementById('pickInvigModal')).hide();
+            var msg = document.getElementById('invigMsg');
+            msg.className = 'small text-success';
+            msg.textContent = '已加入 ' + d.added + ' 位监考员' + (d.dup ? ('，跳过重复 ' + d.dup + ' 人') : '');
+            loadInvig();
+        }).catch(function(){ alert('加入失败：网络或服务异常'); });
+}
+// ---------- 环节⑥ 复用某一场考试的监考配置（2026-10-14） ----------
+var _ciSources = [];
+function openCopyInvig(){
+    fetch('/grades/affairs/'+AID+'/invig/copy-sources').then(r=>r.json()).then(function(d){
+        if(!d.success){ alert('读取可复用考试失败'); return; }
+        _ciSources = d.data.sources || [];
+        document.getElementById('ciSource').innerHTML = _ciSources.map(function(s){
+            return '<option value="' + s.id + '">' + escHtml(s.name)
+                 + (s.date ? ('（' + s.date + '）') : '') + '</option>';
+        }).join('');
+        document.getElementById('ciEmpty').classList.toggle('d-none', !!_ciSources.length);
+        document.getElementById('ciDo').disabled = !_ciSources.length;
+        renderCopySummary();
+        _openModal('copyInvigModal');
+    }).catch(function(){ alert('读取可复用考试失败：网络或服务异常'); });
+}
+function renderCopySummary(){
+    var id = parseInt(document.getElementById('ciSource').value, 10);
+    var s = _ciSources.find(function(x){ return x.id === id; });
+    if(!s){ document.getElementById('ciSummary').innerHTML = ''; return; }
+    var bySched = s.excludes - s.whole;
+    document.getElementById('ciSummary').innerHTML =
+        '<div class="text-muted">这一场的配置：</div><ul class="mb-0 ps-3">'
+        + '<li>每考场监考人数：<b>' + s.slots + ' 人</b>（本批次当前 '
+        + (document.getElementById('invigSlots').value || '1') + ' 人）</li>'
+        + '<li>其他监考员：<b>' + s.others + ' 人</b></li>'
+        + '<li>排除名单：<b>' + s.excludes + ' 条</b>（整批 ' + s.whole + ' · 按场次 ' + bySched + '）</li>'
+        + (s.invig ? ('<li class="text-muted">已排监考 ' + s.invig + ' 格（不复制）</li>') : '')
+        + '</ul>';
+}
+function doCopyInvig(){
+    var id = document.getElementById('ciSource').value;
+    if(!id) return;
+    if(!confirm('把该场考试的监考配置复制到本批次？\n（人数覆盖；其他监考员与排除名单按姓名去重追加）')) return;
+    var fd = new FormData(); fd.append('src_aid', id);
+    fetch('/grades/affairs/'+AID+'/invig/copy-from', {method: 'POST', body: fd,
+                                                     headers: {'X-CSRFToken': csrf()}})
+        .then(r=>r.json()).then(function(d){
+            if(!d.ok){ alert(d.msg || '复制失败'); return; }
+            bootstrap.Modal.getInstance(document.getElementById('copyInvigModal')).hide();
+            var msg = document.getElementById('invigMsg');
+            msg.className = 'small text-success';
+            msg.textContent = '已复用「' + d.src + '」的配置：每考场人数 ' + d.old_slots + '→' + d.slots
+                + '，其他监考员 +' + d.others_added + (d.others_dup ? ('（重复 ' + d.others_dup + '）') : '')
+                + '，排除名单 +' + d.excl_added + (d.excl_dup ? ('（重复 ' + d.excl_dup + '）') : '')
+                + (d.excl_skipped ? ('（本批次无对应场次，跳过 ' + d.excl_skipped + '）') : '');
+            loadInvig();
+        }).catch(function(){ alert('复制失败：网络或服务异常'); });
 }
 function delOther(id){
     // 2026-10-12 UI 审计 M10：删除原先无 confirm、且无失败分支 ——

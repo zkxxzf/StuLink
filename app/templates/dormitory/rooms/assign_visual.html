@@ -54,7 +54,7 @@
     height: 45px;
     margin: 3px;
     padding: 4px 5px;
-    border: 2px solid #dee2e6;
+    border: 2px solid var(--sl-border);
     border-radius: 4px;
     cursor: move;
     font-size: 0.65rem;
@@ -166,15 +166,15 @@
     padding: 5px 8px;
     font-weight: bold;
     font-size: 0.85rem;
-    border-bottom: 1px solid #dee2e6;
+    border-bottom: 1px solid var(--sl-border);
     cursor: pointer;
 }
 
 .class-card .class-stats {
     padding: 4px 8px;
     font-size: 0.75rem;
-    color: #6c757d;
-    border-bottom: 1px solid #f0f0f0;
+    color: var(--sl-text-muted);
+    border-bottom: 1px solid var(--sl-border);
     display: flex;
     gap: 12px;
 }
@@ -226,9 +226,12 @@
     min-height: 40px;
     padding: 4px;
     margin-top: 4px;
-    border: 2px dashed #dee2e6;
+    /* 2026-10-14：原来是 rgba(255,255,255,.8) 半透明白 —— 深色主题下叠成浅灰块，
+       而方块里的文字已是浅色（--sl-text）→ 对比 1.34，房间号/班级基本看不清。
+       班级卡片默认折叠，静态整页审计扫不到，是"展开折叠区 + 拖拽态"审计抓出来的。 */
+    border: 2px dashed var(--sl-border);
     border-radius: 4px;
-    background: rgba(255,255,255,0.8);
+    background: var(--sl-surface-2);
     transition: all 0.2s;
     display: flex;
     flex-wrap: wrap;
@@ -307,18 +310,18 @@
     display: none;
 }
 
-/* 宿舍楼分组 */
+/* 宿舍楼分组（2026-10-14：边框/分组头底色写死浅色，深色下成亮块 → 主题变量） */
 .building-group {
     margin-bottom: 12px;
-    border: 1px solid #dee2e6;
+    border: 1px solid var(--sl-border);
     border-radius: 6px;
 }
 
 .building-group .building-header {
-    background: #f8f9fa;
+    background: var(--sl-surface-2);
     padding: 6px 10px;
     font-weight: bold;
-    border-bottom: 1px solid #dee2e6;
+    border-bottom: 1px solid var(--sl-border);
     cursor: pointer;
 }
 

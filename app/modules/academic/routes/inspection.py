@@ -641,6 +641,9 @@ def inspection_live_schedule():
         pov_period = (request.args.get('period', type=int) or current_period
                       or (period_defs[0].period_number if period_defs else 1))
         pov_blocks, pov_stats = _period_overview_data(sched, target_date, pov_period, grade)
+        # 2026-10-14：单节视图同样可标记查课 —— 附上该节已有标记与覆盖率口径
+        pov_stats.update(_attach_period_checks(pov_blocks, target_date, pov_period,
+                                               current_user))
 
     grade_opts = swap_service.get_class_options(sched.id)['grades']
     if visible is not None:
@@ -876,6 +879,38 @@ def _period_overview_data(sched, target_date, period, grade):
     stats = {'grades': len(blocks), 'classes': total_classes,
              'scheduled': total_scheduled, 'empty': total_classes - total_scheduled}
     return blocks, stats
+
+
+def _attach_period_checks(blocks, target_date, period, user):
+    """把「某天 + 某节」已有的查课标记附到单节总览卡片上，并返回该节统计。
+
+    2026-10-14：单节视图也支持标记查课（与全天矩阵共用 inspection_records）：
+    卡片右下角显示"未查 / 正常 / 迟到 / …"徽标，顶部覆盖率改成**这一节**的口径。
+    空档（这节课没排课）不参与统计，也不可标记 —— 与矩阵里没有格子一致。
+    """
+    labels = dict(INSPECTION_RESULTS)
+    rows = apply_academic_scope(
+        InspectionRecord.query.filter(InspectionRecord.inspect_date == target_date,
+                                      InspectionRecord.period == period),
+        user, InspectionRecord).all()
+    marks = {(r.grade, r.class_name): r for r in rows}
+    checked = expected = 0
+    for b in (blocks or []):
+        for r in (b.get('rows') or []):
+            if not r.get('subject'):
+                r['check'] = None
+                continue
+            expected += 1
+            rec = marks.get((b.get('grade'), r.get('class_name')))
+            if rec:
+                checked += 1
+                r['check'] = {'id': rec.id, 'result': rec.result,
+                              'label': labels.get(rec.result, rec.result),
+                              'note': rec.note or ''}
+            else:
+                r['check'] = None
+    return {'expected': expected, 'checked': checked,
+            'rate': (checked * 100 // expected) if expected else 0}
 
 
 @bp.route('/inspection/quick-swap', methods=['POST'])

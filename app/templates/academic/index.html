@@ -8,21 +8,23 @@
 /* 2026-10-12：学期信息跟在标题后面同一行（原在标题下方、右上角另有一排按钮，已删） */
 .ac-hero .ac-hero-meta { opacity: .88; }
 .ac-hero .ac-hero-meta strong { color: #fff; }
-.ac-kpi { border: 1px solid #e2e8f0; border-radius: 10px; background: #fff; height: 100%;
+/* 2026-10-14：KPI/入口卡原先写死 #fff —— 深色主题下是白卡 + 浅字（KPI 数字看不清，
+   审计报 1.96）→ 一律走主题变量 */
+.ac-kpi { border: 1px solid var(--sl-border); border-radius: 10px; background: var(--sl-surface); height: 100%;
           transition: box-shadow .15s, transform .15s; }
 .ac-kpi:hover { box-shadow: 0 6px 18px rgba(15,23,42,.06); transform: translateY(-1px); }
 .ac-kpi .v { font-size: 26px; font-weight: 700; line-height: 1.1; }
-.ac-kpi .l { color: #64748b; font-size: 12px; }
+.ac-kpi .l { color: var(--sl-text-muted); font-size: 12px; }
 .ac-kpi .i { font-size: 20px; }
-.ac-tile { display: block; text-decoration: none; color: inherit; border: 1px solid #e2e8f0;
-           border-radius: 10px; padding: 10px 12px; background: #fff; height: 100%;
+.ac-tile { display: block; text-decoration: none; color: inherit; border: 1px solid var(--sl-border);
+           border-radius: 10px; padding: 10px 12px; background: var(--sl-surface); height: 100%;
            transition: box-shadow .15s, transform .15s; }
 .ac-tile:hover { box-shadow: 0 6px 18px rgba(15,23,42,.08); transform: translateY(-1px);
-                 color: inherit; }
+                color: inherit; }
 .ac-tile .t { font-weight: 700; font-size: 13.5px; }
-.ac-tile .d { color: #94a3b8; font-size: 11.5px; }
+.ac-tile .d { color: var(--sl-text-subtle); font-size: 11.5px; }
 .ac-todo-item { display: flex; justify-content: space-between; align-items: center;
-                padding: 8px 0; border-bottom: 1px dashed #e2e8f0; }
+               padding: 8px 0; border-bottom: 1px dashed var(--sl-border); }
 .ac-todo-item:last-child { border-bottom: none; }
 /* 左侧描述再长也不挤右侧操作列（否则窄卡里「去审批」会被拆成两行） */
 .ac-todo-item .text-end { flex-shrink: 0; }
@@ -30,7 +32,7 @@
 .ac-flow .btn { white-space: nowrap; }
 /* 2026-10-12：KPI 卡可点（进对应子页面）；风险类（迟到/缺勤·待办）有值时红框红底 */
 a.ac-kpi-link { display: block; text-decoration: none; color: inherit; height: 100%; }
-.ac-kpi.risk { border-color: #fecaca; background: #fff5f5; }
+.ac-kpi.risk { border-color: var(--sl-soft-danger-bd); background: var(--sl-soft-danger-bg); }
 </style>
 {% endblock %}
 
@@ -224,7 +226,7 @@ a.ac-kpi-link { display: block; text-decoration: none; color: inherit; height: 1
                 <div class="small text-muted mb-2">其他教务工具</div>
                 <div class="d-flex gap-3 flex-wrap small">
                     {% if current_user.has_perm('grades.teachers') %}
-                    <a href="{{ url_for('academic.teacher_links_page') }}">任课教师映射</a>
+                    <a href="{{ url_for('academic.teacher_links_page') }}">任课教师</a>
                     {% endif %}
                     <a href="{{ url_for('academic.subject_leaders') }}">学科组长</a>
                     <a href="{{ url_for('academic.teachers_page') }}">教师名单</a>

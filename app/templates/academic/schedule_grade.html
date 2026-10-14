@@ -18,6 +18,7 @@
         </button>
         {% endif %}
         <a class="btn btn-sm btn-outline-info text-white"
+           title="导出 Excel：本年级总课表 + 本年级各班课表"
            href="{{ url_for('academic.schedule_export', sid=ts.id, view_type='grade', grade=grade, week=week) }}">
             <i class="bi bi-download"></i> 导出本年级
         </a>

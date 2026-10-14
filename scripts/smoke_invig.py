@@ -11,6 +11,7 @@
 用法：python scripts/smoke_invig.py
 """
 import io
+import json
 import os
 import re
 import sys
@@ -136,8 +137,14 @@ with app.test_client() as c:
     check('页面只保留一个监考表导出入口（含工作量统计；无 PDF / 长表）',
           '导出监考表（含工作量统计）' in ph
           and '监考表 PDF' not in ph and '导出监考表 Excel' not in ph)
+    # 2026-10-14 用户口径：监考表**不要列表视图** —— 只留「教师安排（学校格式）」矩阵，
+    # 切换按钮 / 长表 DOM（#invigListWrap、#invigTable）与 renderInvigTable 都必须消失
     check('页面含监考矩阵视图与工作量统计入口',
-          '教师安排（学校格式）' in ph and '工作量统计' in ph and 'wlModal' in ph)
+          'renderInvigMatrix' in ph and '工作量统计' in ph and 'wlModal' in ph)
+    check('环节⑥ 只有学校格式矩阵一种视图（无列表视图 / 无切换按钮）',
+          '列表视图' not in ph and 'renderInvigTable' not in ph
+          and 'invigListWrap' not in ph and 'invigTable' not in ph
+          and 'name="invigView"' not in ph and 'applyInvigView' not in ph)
     # v1.19.47.3 页头与去重
     check('重复步骤条已删除（无 step-pill）', 'step-pill' not in ph)
     check('页头显示本场考试名字', '2025级2026-2027学年第一学期期中考（冒烟）' in ph)
@@ -169,6 +176,21 @@ with app.test_client() as c:
           and 'const SCHED_DAILY_MAX = 6' in ph
           and 'function nextSchedDate()' in ph
           and 'sc-date" value="\' + nextSchedDate()' in ph)
+    # 2026-10-14 用户口径：⑤ 内置每科时长（语文 2.5h / 数学·英语 2h / 其它 75min）→
+    # 选科目自动带出结束时间；另有「按科目补时间」一键补齐入口
+    _m = re.search(r'const SCHED_DURATION = (\{.*?\});', ph)
+    _dur = json.loads(_m.group(1)) if _m else {}
+    check('环节⑤ 内置每科时长已下发（语文 150 / 数学·英语 120 分钟）',
+          _dur.get('语文') == 150 and _dur.get('数学') == 120 and _dur.get('外语') == 120,
+          str(_dur))
+    check('环节⑤ 自动算时间的常量 / 函数 / 一键补齐按钮都在页面上',
+          "const SCHED_DEFAULT_START = '08:00'" in ph
+          and 'const SCHED_DURATION_FALLBACK = 75' in ph
+          and 'function schedDurationMin' in ph
+          and 'function prevEndTime' in ph
+          and 'function autoSchedTimes' in ph
+          and 'function autoFillAllSchedTimes' in ph
+          and '按科目补时间' in ph)
     # 2026-10-13 用户口径：⑥ 教师池去掉「不监考」开关（改按学科分组展示），
     # 排除名单的老师 / 场次两侧都能多选，一次批量加
     check('环节⑥ 教师池按学科分组、已无「不监考」开关',
@@ -428,6 +450,92 @@ with app.test_client() as c:
     check('环节⑥ 排除后容量不足：自动编排 400 + 缺格说明',
           r.status_code == 400 and jd.get('ok') is False and '格' in (jd.get('msg') or ''),
           str(jd))
+
+    # ==================== 环节⑤ 内置每科时长：自动算结束时间（2026-10-14 用户口径） ====================
+    # 规则：语文 150 分钟 · 数学/英语（外语）120 分钟 · 其它 75 分钟；一场多科取最长。
+    #      手填：结束留空 → 开始 + 时长；开始也留空 → 整行留空（时间可留空）。
+    #      导入（Excel / 粘贴）：只补「有开始、缺结束」，不替用户猜开始时间。
+    with app.app_context():
+        _a2 = ExamAffair(name='时长冒烟', grade='2025级', exam_date=date(2026, 10, 8),
+                         status='draft')
+        db.session.add(_a2)
+        db.session.commit()
+        aid2 = _a2.id
+
+    def _save_sched(subj, start='', end='', day='2026-10-08'):
+        _r = c.post(f'/grades/affairs/{aid2}/schedules/save',
+                    data={'subject': subj, 'exam_date': day,
+                          'start_time': start, 'end_time': end}, headers=H)
+        _j = _r.get_json() or {}
+        assert _j.get('ok'), _j
+        return _j['id']
+
+    def _times(sid):
+        with app.app_context():
+            _s = AffairSchedule.query.get(sid)
+            return (_s.start_time or '', _s.end_time or '', _s.subject)
+
+    _s = _save_sched('语文', '09:00')
+    check('⑤ 语文 09:00 无结束 → 按 2.5 小时补 11:30', _times(_s) == ('09:00', '11:30', '语文'),
+          str(_times(_s)))
+    _s = _save_sched('数学', '14:00')
+    check('⑤ 数学 14:00 无结束 → 按 2 小时补 16:00', _times(_s) == ('14:00', '16:00', '数学'),
+          str(_times(_s)))
+    _s = _save_sched('化学', '08:00')
+    check('⑤ 化学（其它科）08:00 → 按 75 分钟补 09:15',
+          _times(_s) == ('08:00', '09:15', '化学'), str(_times(_s)))
+    _s = _save_sched('物理、语文', '09:00')
+    check('⑤ 一场多科（物理+语文）取最长 → 09:00-11:30',
+          _times(_s) == ('09:00', '11:30', '物理、语文'), str(_times(_s)))
+    _s = _save_sched('语文')
+    check('⑤ 开始也留空 → 整行保持留空（时间仍可不填）',
+          _times(_s) == ('', '', '语文'), str(_times(_s)))
+    _s = _save_sched('语文', '10:00', '10:30')
+    check('⑤ 用户手填了结束 → 不覆盖（10:00-10:30）',
+          _times(_s) == ('10:00', '10:30', '语文'), str(_times(_s)))
+    # 粘贴导入：只给「科目 + 开始」→ 补结束；只给科目 → 不猜开始
+    r = c.post(f'/grades/affairs/{aid2}/schedules/paste',
+               data={'text': '化学\t11:00\n历史'}, headers=H)
+    jd = r.get_json() or {}
+    check('⑤ 粘贴导入：有开始缺结束 → 自动补（并回报 auto_end=1）',
+          jd.get('ok') and jd.get('added') == 2 and jd.get('auto_end') == 1, str(jd))
+    with app.app_context():
+        _chem = AffairSchedule.query.filter_by(affair_id=aid2, subject='化学').order_by(
+            AffairSchedule.id.desc()).first()
+        _hist = AffairSchedule.query.filter_by(affair_id=aid2, subject='历史').first()
+        check('⑤ 粘贴导入 化学 11:00 → 结束 12:15',
+              _chem and (_chem.start_time, _chem.end_time) == ('11:00', '12:15'),
+              f'{_chem and (_chem.start_time, _chem.end_time)}')
+        check('⑤ 粘贴导入只写科目 → 不替用户猜开始时间（都留空）',
+              _hist and (_hist.start_time or '', _hist.end_time or '') == ('', ''),
+              f'{_hist and (_hist.start_time, _hist.end_time)}')
+    # Excel 导入：只给开始时间列 → 同样自动补结束
+    _wb = openpyxl.Workbook()
+    _ws = _wb.active
+    _ws.append(['考试日期', '开始时间', '结束时间', '考试科目'])
+    _ws.append(['2026-10-09', '09:00', None, '外语'])
+    _buf = io.BytesIO()
+    _wb.save(_buf)
+    _buf.seek(0)
+    r = c.post(f'/grades/affairs/{aid2}/schedules/import',
+               data={'file': (_buf, 'sched2.xlsx')},
+               content_type='multipart/form-data', headers=H)
+    jd = r.get_json() or {}
+    check('⑤ Excel 导入：外语 09:00 → 结束 11:00（2 小时）+ auto_end=1',
+          jd.get('ok') and jd.get('added') == 1 and jd.get('auto_end') == 1, str(jd))
+    with app.app_context():
+        _eng = AffairSchedule.query.filter_by(affair_id=aid2, subject='外语').first()
+        check('⑤ Excel 导入落库 09:00-11:00',
+              _eng and (_eng.start_time, _eng.end_time) == ('09:00', '11:00'),
+              f'{_eng and (_eng.start_time, _eng.end_time)}')
+    # 下载模板的示例行也按内置时长（语文 09:00-11:30 / 数学 14:00-16:00）
+    r = c.get(f'/grades/affairs/{aid2}/schedules/template')
+    _wb2 = openpyxl.load_workbook(io.BytesIO(r.data))
+    _ws2 = _wb2.active
+    _rows = [[ _ws2.cell(row=i, column=j).value for j in range(1, 5)] for i in (2, 3)]
+    check('⑤ 下载模板示例行按内置时长（语文 09:00-11:30 / 数学 14:00-16:00）',
+          _rows[0][:4] == ['2026-10-08', '09:00', '11:30', '语文']
+          and _rows[1][:4] == ['2026-10-08', '14:00', '16:00', '数学'], str(_rows))
 
 print(f'\n===== 考务监考冒烟：{ok} 通过 / {fail} 失败 =====')
 sys.exit(1 if fail else 0)

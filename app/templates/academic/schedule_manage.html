@@ -44,6 +44,9 @@
 <div class="row g-3">
     {% for ts in schedules %}
     {% set archived = ts.status == 'archived' %}
+    {# 2026-10-14（用户要求）：没有课程条目＝还没导入过课表 →
+       这张卡的主按钮从「全校总课表」换成「导入课表」，先把导入引导放第一位 #}
+    {% set entry_count = counts.get(ts.id, 0) or 0 %}
     <div class="col-md-6 col-xl-4">
         <div class="card h-100 {{ 'border-secondary-subtle' if archived else '' }}"
              style="{{ 'opacity:.72;border:1px dashed #cbd5e1 !important;' if archived else '' }}">
@@ -82,7 +85,11 @@
                 </div>
                 <div class="d-flex justify-content-between mb-1">
                     <span class="text-muted">课程条目</span>
-                    <span class="fw-bold">{{ counts.get(ts.id, 0) }} 节</span>
+                    {% if entry_count %}
+                    <span class="fw-bold">{{ entry_count }} 节</span>
+                    {% else %}
+                    <span class="fw-bold text-danger" title="该学期还没有任何课程条目，请先导入课表">尚未导入</span>
+                    {% endif %}
                 </div>
                 <div class="d-flex justify-content-between mb-1">
                     <span class="text-muted">创建时间</span>
@@ -104,8 +111,11 @@
                    「导入课表 / 导出」不常用，一并移入「更多」下拉；未启用学期才额外出现「激活」。
                    「更多」内顺序：导入课表 / 导出 Excel / 作息时间 / 变更历史 / 配置日期 /
                    以此为底版新建 / 设为当前 / 归档进历史课表 / 清空课表 / 删除学期。
-                   （2026-10-12 那轮已把这批低频/危险操作从卡片收进本下拉。） #}
+                   （2026-10-12 那轮已把这批低频/危险操作从卡片收进本下拉。）
+                   2026-10-14（用户要求）：**还没导入课表的学期**（课程条目为 0）例外 ——
+                   主按钮换成「导入课表」（导入是这时唯一该做的事），「更多」里不再重复该入口。 #}
                 <div class="d-flex flex-wrap gap-1">
+                    {% if entry_count %}
                     <div class="btn-group btn-group-sm">
                         <a class="btn btn-sm btn-outline-primary py-0" href="{{ url_for('academic.schedule_overview', sid=ts.id) }}">
                             <i class="bi bi-list-columns-reverse"></i> 全校总课表
@@ -128,6 +138,12 @@
                             {% endfor %}
                         </ul>
                     </div>
+                    {% elif not archived %}
+                    {# 2026-10-14（用户要求）：还没导入课表 —— 主按钮位置直接给「导入课表」 #}
+                    <a class="btn btn-sm btn-primary py-0" href="{{ url_for('academic.schedule_smart_import', sid=ts.id) }}">
+                        <i class="bi bi-upload"></i> 导入课表
+                    </a>
+                    {% endif %}
                     {% if ts.status != 'active' %}
                     <form method="POST" class="d-inline" action="{{ url_for('academic.schedule_activate', sid=ts.id) }}"
                           {# M-10：学期名可能含引号，confirm 文本整体走 |tojson #}
@@ -144,14 +160,15 @@
                             <i class="bi bi-three-dots"></i> 更多
                         </button>
                         <ul class="dropdown-menu">
-                            {# 2026-10-13：导入 / 导出不常用，卡片上不再常驻，收进这里（排在最前） #}
-                            {% if not archived %}
+                            {# 2026-10-13：导入 / 导出不常用，卡片上不再常驻，收进这里（排在最前）；
+                               2026-10-14：空课表学期的该入口已提到卡片主按钮，这里不重复 #}
+                            {% if not archived and entry_count %}
                             <li><a class="dropdown-item" href="{{ url_for('academic.schedule_smart_import', sid=ts.id) }}">
                                 <i class="bi bi-upload"></i> 导入课表</a></li>
                             {% endif %}
-                            <li><a class="dropdown-item" title="导出 Excel：整校一个班一张 sheet"
+                            <li><a class="dropdown-item" title="导出 Excel：全校总课表 + 各年级总课表 + 各班课表"
                                    href="{{ url_for('academic.schedule_export', sid=ts.id, view_type='all') }}">
-                                <i class="bi bi-download"></i> 导出 Excel</a></li>
+                                <i class="bi bi-download"></i> 导出 Excel（全校 / 年级 / 班级）</a></li>
                             <li><hr class="dropdown-divider"></li>
                             <li><a class="dropdown-item" href="{{ url_for('academic.schedule_periods', sid=ts.id) }}">
                                 <i class="bi bi-clock-history"></i> 作息时间</a></li>

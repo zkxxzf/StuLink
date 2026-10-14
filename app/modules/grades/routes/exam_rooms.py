@@ -56,7 +56,9 @@ def exam_rooms():
     for r in ExamRoomGroupMap.query.all():
         gmap.setdefault(r.lib_id, []).append(r.group_id)
     rooms = AffairRoomLib.query.order_by(AffairRoomLib.location).all()
-    room_rows = [{'id': r.id, 'location': r.location,
+    # v1.19.47.31：房间带出「容量（人）」——分组面板里维护，考务编排「一键带入」时作为
+    # 各考场的默认容量（每场考务的容量仍各自存在 affair_rooms.capacity，可再调整）
+    room_rows = [{'id': r.id, 'location': r.location, 'capacity': r.capacity or 30,
                   'note': r.note or '', 'group_ids': sorted(gmap.get(r.id, []))}
                  for r in rooms]
     # 分组卡片：每组带出成员房间（避免在模板里做“包含”判断）
@@ -201,6 +203,71 @@ def exam_rooms_import():
     log_operation(current_user, '导入', '考场房间', 0,
                   f'新增{added}个/更新{updated}个/跳过{skipped}个', module='grades')
     return jsonify({'ok': True, 'added': added, 'updated': updated, 'skipped': skipped})
+
+
+@bp.route('/rooms/<int:lid>/capacity', methods=['POST'])
+@login_required
+@perm_required('grades.edit')
+def exam_room_capacity(lid):
+    """v1.19.47.31 设置房间的「容量（人）」——考务编排带入时的默认容量。
+
+    用户口径（2026-10-14）：容量在「考场维护」的分组面板里维护（已选入分组的房间
+    才有），考务步骤②选模板「一键带入」时直接带出。**只改房间库默认值**：每场考务的
+    容量仍各自存在 `affair_rooms.capacity`，已生成的考场不受影响。
+    """
+    row = db.session.get(AffairRoomLib, lid)
+    if not row:
+        return jsonify({'ok': False, 'msg': '房间不存在'})
+    try:
+        cap = int(str(request.form.get('capacity') or '').strip())
+    except (TypeError, ValueError):
+        return jsonify({'ok': False, 'msg': '容量必须是整数'})
+    if cap < 1 or cap > 500:
+        return jsonify({'ok': False, 'msg': '容量需在 1~500 之间'})
+    row.capacity = cap
+    db.session.commit()
+    log_operation(current_user, '设置', '考场房间', lid,
+                  f'{row.location} 容量={cap}', module='grades')
+    return jsonify({'ok': True, 'capacity': cap})
+
+
+@bp.route('/rooms/capacity-batch', methods=['POST'])
+@login_required
+@perm_required('grades.edit')
+def exam_room_capacity_batch():
+    """2026-10-14 用户要求：**一键批量设置容量** —— 把一个分组（或勾选的几个房间）
+    的容量统一设成同一个值（现实中一个年级的考场容量基本一致，逐个填太慢）。
+
+    body：`lib_ids`（逗号分隔，前端按「整组」或「已勾选」算好）+ `capacity`。
+    与单条设置同口径：**只改房间库默认值**（考务步骤②「一键带入」时的默认容量），
+    每场考务的容量仍各自存在 `affair_rooms.capacity`，已生成的考场不受影响。
+    """
+    ids = []
+    for tok in (request.form.get('lib_ids') or '').split(','):
+        v = _int(tok)
+        if v is not None:
+            ids.append(v)
+    ids = list(dict.fromkeys(ids))[:500]        # 去重 + 上限，防一次塞几万行
+    if not ids:
+        return jsonify({'ok': False, 'msg': '请先选择要设置容量的房间'})
+    try:
+        cap = int(str(request.form.get('capacity') or '').strip())
+    except (TypeError, ValueError):
+        return jsonify({'ok': False, 'msg': '容量必须是整数'})
+    if cap < 1 or cap > 500:
+        return jsonify({'ok': False, 'msg': '容量需在 1~500 之间'})
+    rows = AffairRoomLib.query.filter(AffairRoomLib.id.in_(ids)).all()
+    if not rows:
+        return jsonify({'ok': False, 'msg': '房间不存在'})
+    changed = 0
+    for r in rows:
+        if (r.capacity or 30) != cap:
+            r.capacity = cap
+            changed += 1
+    db.session.commit()
+    log_operation(current_user, '批量设置', '考场房间', 0,
+                  f'{len(rows)} 个房间容量={cap}', module='grades')
+    return jsonify({'ok': True, 'count': len(rows), 'changed': changed, 'capacity': cap})
 
 
 @bp.route('/rooms/<int:lid>/groups', methods=['POST'])
