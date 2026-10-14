@@ -102,6 +102,45 @@ def alumni():
 
 # ==================== 筛选选项 ====================
 
+# PERF-06/12：「每场考试的班级」原先对 exam_scores（数十万行）做无 WHERE 的
+# DISTINCT 全表扫描 + 临时 B-tree 去重，且每次打开分析页都跑一次（首屏第一个请求，
+# 300~800ms）。改为 ①GROUP BY 走 (exam_id, class_name) 索引前缀（免排序）
+# ②结果按进程缓存 300s（班级枚举低频变化，成绩导入时由 invalidate_exam_cache 清除）。
+_CLASSES_BY_EXAM_KEY = 'grades_options_classes_by_exam'
+_CLASSES_BY_EXAM_TTL = 300
+
+
+def _classes_by_exam():
+    """每场考试的班级（考试当时班级口径），带进程内缓存"""
+    from app.utils.cache import cache
+    cached_value = cache.get(_CLASSES_BY_EXAM_KEY)
+    if cached_value is not None:
+        return cached_value
+    out = {}
+    try:
+        from app.models.grades import ExamScore, ExamTeacherLink
+        from app.extensions import db
+        tmp = {}
+        for eid, cn in (db.session.query(ExamScore.exam_id, ExamScore.class_name)
+                        .group_by(ExamScore.exam_id, ExamScore.class_name).all()):
+            tmp.setdefault(eid, set()).add(cn)
+        try:
+            for eid, cn in (db.session.query(ExamTeacherLink.exam_id,
+                                             ExamTeacherLink.class_name)
+                            .group_by(ExamTeacherLink.exam_id,
+                                      ExamTeacherLink.class_name).all()):
+                tmp.setdefault(eid, set()).add(cn)
+        except Exception as _e:  # noqa: BLE001
+            # 旧库无任课快照表时只靠学生名册；留 debug 便于排查（2026-10-11 审计补）
+            current_app.logger.debug('任课快照表不可用，按学生名册取班级: %s', _e)
+        out = {str(k): numeric_classes(list(v)) for k, v in tmp.items()}
+    except Exception as e:
+        current_app.logger.warning(f'按考试取班级失败: {e}')
+        out = {}
+    cache.set(_CLASSES_BY_EXAM_KEY, out, timeout=_CLASSES_BY_EXAM_TTL)
+    return out
+
+
 @bp.route('/api/options')
 @login_required
 @perm_required('grades.view')
@@ -132,26 +171,7 @@ def api_options():
     # v1.19.47.29 每场考试自己的班级：**班级筛选仅限本场考试**
     # 来源 = 该场考试的学生名册（exam_scores.class_name）∪ 任课教师表（exam_teacher_links）
     # 不能用主库当前班级：考试是自包含的独立单元，其参与者是整个年级、且班级为考试当时
-    classes_by_exam = {}
-    try:
-        from app.models.grades import ExamScore, ExamTeacherLink
-        from app.extensions import db
-        tmp = {}
-        for eid, cn in (db.session.query(ExamScore.exam_id, ExamScore.class_name)
-                        .distinct().all()):
-            tmp.setdefault(eid, set()).add(cn)
-        try:
-            for eid, cn in (db.session.query(ExamTeacherLink.exam_id,
-                                              ExamTeacherLink.class_name)
-                            .distinct().all()):
-                tmp.setdefault(eid, set()).add(cn)
-        except Exception as _e:  # noqa: BLE001
-            # 旧库无任课快照表时只靠学生名册；留 debug 便于排查（2026-10-11 审计补）
-            current_app.logger.debug('任课快照表不可用，按学生名册取班级: %s', _e)
-        classes_by_exam = {str(k): numeric_classes(list(v)) for k, v in tmp.items()}
-    except Exception as e:
-        current_app.logger.warning(f'按考试取班级失败: {e}')
-        classes_by_exam = {}
+    classes_by_exam = _classes_by_exam()
     # tab 可见性（恒返回 5 键，前端据此显隐）
     tabs = {'grade': False, 'class': False, 'subject': False, 'teacher': False,
             'compare': False}

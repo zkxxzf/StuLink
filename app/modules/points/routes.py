@@ -272,7 +272,10 @@ def api_record_update(rid):
     rec = PointRecord.query.get_or_404(rid)
     scope, grade, classes = _scope()
     student = Student.query.filter_by(student_number=rec.student_no).first()
-    if student and not _in_scope(student, scope, grade, classes):
+    # 2026-10-14 审计 API-02：原写法 `if student and not _in_scope(...)` 在
+    # 学生已不存在（转学/毕业删档）时短路跳过校验 → fail-open。改为学生缺失即 403，
+    # 与新增接口（api_record_create）同形态。
+    if student is None or not _in_scope(student, scope, grade, classes):
         return jsonify(success=False, message='该记录不在您的管理范围内'), 403
     payload, err = _parse_payload()
     if err:
@@ -293,7 +296,8 @@ def api_record_delete(rid):
     rec = PointRecord.query.get_or_404(rid)
     scope, grade, classes = _scope()
     student = Student.query.filter_by(student_number=rec.student_no).first()
-    if student and not _in_scope(student, scope, grade, classes):
+    # 2026-10-14 审计 API-02：同 api_record_update，学生缺失时不得短路放行
+    if student is None or not _in_scope(student, scope, grade, classes):
         return jsonify(success=False, message='该记录不在您的管理范围内'), 403
     db.session.delete(rec)
     db.session.commit()

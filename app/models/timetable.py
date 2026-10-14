@@ -414,7 +414,10 @@ class ScheduleSwap(db.Model):
     approvals_json = db.Column(db.Text)
     # 2026-10-10：统一调课批次号 —— 同一次「统一调课」生成的多条记录共享同一 batch_id，
     # 列表按批次展示、整批一次性审批/执行，避免几十条一个个点。
-    batch_id = db.Column(db.String(32), index=True)
+    # 2026-10-14：索引改由 __table_args__ 的 idx_swap_batch **统一声明**（这里不能再写
+    # index=True）——否则同一列会被声明两个索引（隐式 ix_schedule_swaps_batch_id +
+    # 显式 idx_swap_batch），索引自检每次都报「1 个缺失」，谁都补不完。
+    batch_id = db.Column(db.String(32))
     # ── 2026-10-12（v1.19.47.29）两人换课 ───────────────────────────────────
     # exchange_kind：换课类型（EXCHANGE_KINDS）；空 = 普通调课（含旧数据与统一调课）
     exchange_kind = db.Column(db.String(10))
@@ -442,6 +445,15 @@ class ScheduleSwap(db.Model):
     __table_args__ = (
         db.Index('idx_swap_status_created', 'status', 'created_at'),
         db.Index('idx_swap_applicant', 'applicant_uid'),
+        # 2026-10-14 性能审计（PERF-03）：批量调课/统一调课会在循环里按
+        # (original_entry_id, status) 查重、按 batch_id 展开整批、按 partner_uid 查
+        # 待对方确认项，三列此前均无索引 → 每次查询全表扫描 schedule_swaps，
+        # 一次 260 门的统一调课即 260 次全表扫描。
+        db.Index('idx_swap_entry_status', 'original_entry_id', 'status'),
+        db.Index('idx_swap_ts_status_created', 'term_schedule_id', 'status',
+                 'created_at'),
+        db.Index('idx_swap_batch', 'batch_id'),
+        db.Index('idx_swap_partner', 'partner_uid', 'partner_status', 'status'),
     )
 
     def to_dict(self):

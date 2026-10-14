@@ -1618,11 +1618,15 @@ def list_subject_options(schedule_id, grade=None):
 def leader_roles(schedule_id, subject, grade=None):
     """组长标注 {teacher_uid: [角色标签]}（来自 SubjectLeader 落库数据）。
 
-    - grade=None（教研组页）：全校级登记（grade=''）标「教研组长」，各年级登记标「高一备课组长」；
+    2026-10-14：学科组长分两类 —— 教研组长（不分年级，年级留空＝全校）与
+    备课组长（年级 × 学科）；标签按 `category` 判定，不再只看年级是否为空。
+
+    - grade=None（教研组页）：教研组长标「教研组长」，各年级备课组长标「高一备课组长」；
     - 给了 grade（备课组页）：只取该年级的备课组长。
     学期口径：登记为空（''＝整学年）或与本学期一致才算数。
     """
-    from app.models.academic import SubjectLeader
+    from app.models.academic import (LEADER_CATEGORY_DEFAULT, LEADER_CATEGORY_RESEARCH,
+                                     SubjectLeader)
     ts = db.session.get(TermSchedule, schedule_id)
     roles = {}
     if not ts or not subject:
@@ -1635,10 +1639,12 @@ def leader_roles(schedule_id, subject, grade=None):
             continue
         if not ld.leader_uid:
             continue
-        if (ld.grade or ''):
+        if (ld.category or LEADER_CATEGORY_DEFAULT) == LEADER_CATEGORY_RESEARCH:
+            label = '教研组长'
+        elif (ld.grade or ''):
             label = f'{ld.grade}备课组长'
         else:
-            label = '教研组长' if grade is None else '备课组长'
+            label = '备课组长'
         labels = roles.setdefault(ld.leader_uid, [])
         if label not in labels:
             labels.append(label)

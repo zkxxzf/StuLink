@@ -226,7 +226,7 @@ a.ac-kpi-link { display: block; text-decoration: none; color: inherit; height: 1
                     {% if current_user.has_perm('grades.teachers') %}
                     <a href="{{ url_for('academic.teacher_links_page') }}">任课教师映射</a>
                     {% endif %}
-                    <a href="{{ url_for('academic.subject_leaders') }}">备课组长</a>
+                    <a href="{{ url_for('academic.subject_leaders') }}">学科组长</a>
                     <a href="{{ url_for('academic.teachers_page') }}">教师名单</a>
                     {% if current_user.has_perm('academic.edit') %}
                     <a href="{{ url_for('academic.achievements_page') }}">教师业绩库</a>

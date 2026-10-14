@@ -240,9 +240,24 @@
         .sidebar-float .efn-group .bi[data-bs-toggle][aria-expanded="false"] {
             transform: rotate(-90deg);
         }
+        /* 2026-10-14 UI 审计 H1：原先这里写的是 .sidebar.sidebar-float { display: none; } ——
+           考试态悬浮流程栏在手机上被整个隐藏，而汉堡按钮又因为 exam_mode 不渲染，
+           进入 /grades/exams/<id> 后「概览 / 考务 / 导入 / 划线 / 分析」之间**完全无法跳转**
+           （用户实测：手机上没有任何菜单入口）。
+           改为复用常规侧栏的位移方案：默认移出视口，点汉堡加 .show 滑入（桌面端不受影响）。 */
         @media (max-width: 767.98px) {
-            .sidebar.sidebar-float { display: none; }
+            .sidebar.sidebar-float { transform: translateX(-100%); }
+            .sidebar.sidebar-float.show { transform: translateX(0); box-shadow: 2px 0 14px rgba(15, 23, 42, .28); }
         }
+        /* ===== 2026-10-14 UI 审计 M6：移动端侧栏遮罩 =====
+           原先只有 classList.toggle('show')：点开后没有蒙层、点侧栏外不收起、也没有 ESC。
+           这里补一层 backdrop（z-index 99，低于侧栏 100、高于内容；navbar 200 仍在最上层），
+           点击即收起侧栏；显示状态与侧栏的 .show 同步。 */
+        .sidebar-backdrop {
+            display: none; position: fixed; top: 56px; left: 0; right: 0; bottom: 0;
+            background: rgba(15, 23, 42, .45); z-index: 99;
+        }
+        .sidebar-backdrop.show { display: block; }
         /* ===== 2026-10-12 UI 审计 M7：全局打印基线 =====
            原先只有 grades.css 里有一份 @media print，且要求页面自己引 grades.css、
            自己给元素加 .no-print/.g-filter-bar。成绩单/临界生/证明台账/考务等页面
@@ -273,8 +288,13 @@
 <body class="{{ 'exam-ctx' if exam_mode }}">
     <!-- 顶部导航 -->
     <nav class="navbar navbar-expand-lg navbar-dark bg-dark fixed-top px-3" style="height:56px;">
-        {% if not exam_mode %}
-        <button class="btn btn-dark d-md-none me-2" onclick="document.querySelector('.sidebar').classList.toggle('show')" aria-label="切换菜单">
+        {# 2026-10-14 UI 审计 H1：考试态下也要渲染汉堡按钮 —— 原先 {% if not exam_mode %} 把它整个
+           吞掉，配合窄屏 .sidebar-float 的 display:none，手机上进入考试页后**没有任何菜单入口**。
+           渲染条件与下方侧栏保持一致（登录页 / welcome 页本来就没有侧栏，按钮跟着不渲染，
+           也就不会出现「点了没反应」）。点击行为由底部脚本统一处理（含遮罩 / ESC / 链接后收起）。 #}
+        {% if current_user.is_authenticated and request.blueprint != 'welcome' %}
+        <button type="button" class="btn btn-dark d-md-none me-2" id="sidebarToggle"
+                aria-label="切换菜单" aria-controls="appSidebar" aria-expanded="false">
             <i class="bi bi-list"></i>
         </button>
         {% endif %}
@@ -347,7 +367,7 @@
 
     {% if current_user.is_authenticated and request.blueprint != 'welcome' %}
     <!-- 侧边栏：按模块显示对应菜单；考试态套 .sidebar-float 变为独立悬浮卡片 -->
-    <div class="sidebar{% if exam_mode %} sidebar-float{% endif %}">
+    <div class="sidebar{% if exam_mode %} sidebar-float{% endif %}" id="appSidebar">
         <nav class="nav flex-column pt-2">
             {% if request.blueprint in ('dashboard','rooms','assignments','statistics') or request.endpoint == 'students.search' %}
             <a class="nav-link" href="{{ url_for('dashboard.index') }}">
@@ -526,7 +546,8 @@
                        href="{{ url_for('grades.global_compare_page', exam=EN.exam_id) if _is_lead
                                  else url_for('grades.index', exam=EN.exam_id, tab='class') }}">成绩分析</a>
                     <i class="bi bi-chevron-down" data-bs-toggle="collapse" href="#efnAnalysis"
-                       role="button" title="展开 / 收起" aria-expanded="true"></i>
+                       role="button" title="展开 / 收起" aria-expanded="true"
+                       aria-label="展开 / 收起 成绩分析" aria-controls="efnAnalysis"></i>
                 </div>
                 <div class="collapse show" id="efnAnalysis">
                     {% if _is_lead %}
@@ -613,7 +634,8 @@
                                'grades.teachers_page', 'grades.teachers_import_page',
                                'grades.exam_rooms') %}
             <a class="nav-link d-flex align-items-center" data-bs-toggle="collapse" href="#navCfg"
-               role="button" aria-expanded="false" data-nav="cfg">
+               role="button" aria-expanded="false" data-nav="cfg"
+               aria-label="展开 / 收起 基础配置" aria-controls="navCfg">
                 <i class="bi bi-sliders"></i>基础配置
                 <i class="bi bi-chevron-down small ms-auto"></i>
             </a>
@@ -683,7 +705,7 @@
                （2026-10-12：全校总课表入口只留在学期卡片上，侧栏不再单独挂；跨学期对比已
                整体下线；教师/备课组/教研组课表合成**一个入口**放在教务工作台，页内 tab 互切）；
                查课 → 实时查课 / 查课统计；调课 → 申请 / 统一调课 / 审批 / 统计；
-               教师 → 教师名单 / 任课教师映射 / 备课组长；
+               教师 → 教师名单 / 任课教师映射 / 学科组长；
                表单 → 表单管理 / 填写问卷 / 我的提交 / 教师业绩库。 #}
             {% if request.blueprint == 'academic' and current_user.has_perm('academic.view') %}
             {# 2026-10-10：菜单高亮用的当前端点变量命名为 aca_ep —— 不能用 ep！
@@ -728,6 +750,7 @@
             {# ── 查课 ── #}
             <a class="nav-link d-flex align-items-center aca-group" data-bs-toggle="collapse"
                href="#navAcaChk" role="button"
+               aria-label="展开 / 收起 查课" aria-controls="navAcaChk"
                aria-expanded="{{ 'true' if aca_ep in chk_eps else 'false' }}">
                 <i class="bi bi-clipboard2-check"></i>查课
                 <i class="bi bi-chevron-down small ms-auto aca-caret"></i>
@@ -756,6 +779,7 @@
             {% set swap_open = aca_ep.startswith('academic.swap') %}
             <a class="nav-link d-flex align-items-center aca-group" data-bs-toggle="collapse"
                href="#navAcaSwap" role="button"
+               aria-label="展开 / 收起 调课" aria-controls="navAcaSwap"
                aria-expanded="{{ 'true' if swap_open else 'false' }}">
                 <i class="bi bi-arrow-repeat"></i>调课
                 <i class="bi bi-chevron-down small ms-auto aca-caret"></i>
@@ -787,6 +811,7 @@
             {# ── 教师 ── #}
             <a class="nav-link d-flex align-items-center aca-group" data-bs-toggle="collapse"
                href="#navAcaTch" role="button"
+               aria-label="展开 / 收起 教师" aria-controls="navAcaTch"
                aria-expanded="{{ 'true' if aca_ep in tch_eps else 'false' }}">
                 <i class="bi bi-person-vcard"></i>教师
                 <i class="bi bi-chevron-down small ms-auto aca-caret"></i>
@@ -804,13 +829,14 @@
                 {% endif %}
                 <a class="nav-link ps-4 {% if aca_ep == 'academic.subject_leaders' %}active{% endif %}"
                    href="{{ url_for('academic.subject_leaders') }}">
-                    <i class="bi bi-people-fill"></i>备课组长
+                    <i class="bi bi-people-fill"></i>学科组长
                 </a>
             </div>
 
             {# ── 表单 ── #}
             <a class="nav-link d-flex align-items-center aca-group" data-bs-toggle="collapse"
                href="#navAcaForm" role="button"
+               aria-label="展开 / 收起 表单" aria-controls="navAcaForm"
                aria-expanded="{{ 'true' if aca_ep in form_eps else 'false' }}">
                 <i class="bi bi-ui-checks-grid"></i>表单
                 <i class="bi bi-chevron-down small ms-auto aca-caret"></i>
@@ -856,6 +882,8 @@
             {% endif %}
         </nav>
     </div>
+    {# 2026-10-14：移动端侧栏遮罩（点它关闭侧栏、ESC 关闭），由底部脚本控制 .show #}
+    <div class="sidebar-backdrop" id="sidebarBackdrop"></div>
     {% endif %}
 
     <!-- 主内容区 -->
@@ -945,6 +973,57 @@
 
             syncUI(current());
             window.StuLinkTheme = { toggle: toggle, apply: apply, current: current };
+        })();
+    </script>
+    <script>
+        // ===== 2026-10-14 UI 审计 H1 / M6：移动端侧栏开关（含遮罩、ESC、链接后自动收起）=====
+        // 原先是内联 onclick="document.querySelector('.sidebar').classList.toggle('show')"：
+        // 没有遮罩、点侧栏外不收起、没有 ESC、也不同步 aria-expanded；
+        // 且考试态下按钮根本不渲染（H1）。这里统一到一处。
+        (function () {
+            var sb = document.getElementById('appSidebar');
+            var bd = document.getElementById('sidebarBackdrop');
+            var btn = document.getElementById('sidebarToggle');
+            if (!sb) { return; }
+
+            function isNarrow() {
+                return window.matchMedia('(max-width: 767.98px)').matches;
+            }
+
+            function setOpen(open) {
+                sb.classList.toggle('show', open);
+                if (bd) { bd.classList.toggle('show', open); }
+                if (btn) { btn.setAttribute('aria-expanded', open ? 'true' : 'false'); }
+            }
+
+            function close() { setOpen(false); }
+
+            if (btn) {
+                btn.addEventListener('click', function () {
+                    setOpen(!sb.classList.contains('show'));
+                });
+            }
+            if (bd) { bd.addEventListener('click', close); }
+
+            document.addEventListener('keydown', function (e) {
+                if ((e.key === 'Escape' || e.key === 'Esc') && sb.classList.contains('show')) { close(); }
+            });
+
+            // 窄屏点侧栏里的链接后自动收起：否则跳完页面菜单还盖在内容上
+            sb.addEventListener('click', function (e) {
+                if (isNarrow() && e.target.closest('a')) { close(); }
+            });
+
+            // 转回桌面宽度时收起，避免遮罩残留在宽屏上（桌面侧栏常驻，不需要 .show）
+            window.addEventListener('resize', function () {
+                if (!isNarrow() && sb.classList.contains('show')) { close(); }
+            });
+
+            window.StuLinkSidebar = {
+                open: function () { setOpen(true); },
+                close: close,
+                toggle: function () { setOpen(!sb.classList.contains('show')); }
+            };
         })();
     </script>
     <script>

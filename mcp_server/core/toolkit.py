@@ -45,7 +45,12 @@ async def _dispatch(fn, *, tool, params, write, perm=None):
     # DB 线程——loop.run_in_executor 不复制 contextvars。
     user_id = identity.current_user_id()
     if user_id is None:
+        # 2026-10-14 审计 API-03：走到这里说明是 token 模式——没有请求级身份，
+        # 全部调用共用 bind_user（默认 admin）。留痕以便事后追溯。
         user_id = bootstrap.default_user_id()
+        if user_id is not None:
+            logger.warning('MCP 工具 %s 以 token 模式固定身份执行（bind_user id=%s），'
+                           '无请求级账号归属', tool, user_id)
     if user_id is None:
         return fail('未通过身份验证：请在客户端配置中提供 StuLink 账号密码'
                     '（token 模式则由 bind_user 提供身份）')

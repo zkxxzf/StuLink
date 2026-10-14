@@ -2,8 +2,19 @@
  * 五 tab 联动加载 / 统一表格渲染 / 每张指标卡「表格 | 图表」双视图 / ECharts 图表渲染
  */
 (function(){
-var PALETTE = ['#3b82f6', '#8b5cf6', '#10b981', '#f59e0b', '#ef4444',
-               '#06b6d4', '#ec4899', '#84cc16', '#f97316', '#6366f1'];
+/* 2026-10-14 审计修复：调色板改为「实时读主题变量」（theme.css 的 --sl-chart-1..10），
+   ECharts 的颜色是 JS 字面量、CSS 兜底够不到，深色下会出现刺眼白块 / 看不见的线。
+   取不到（脚本未加载 / 老缓存）时回落到原字面量，保证图表不空、不报错。 */
+var PALETTE_FALLBACK = ['#3b82f6', '#8b5cf6', '#10b981', '#f59e0b', '#ef4444',
+                        '#06b6d4', '#ec4899', '#84cc16', '#f97316', '#6366f1'];
+function palette(){
+    return (window.stulinkPalette && window.stulinkPalette()) || PALETTE_FALLBACK;
+}
+/* 语义单色（参考线、状态色）：红/黄/绿在三套主题下都保持可区分 */
+function sem(){
+    return (window.stulinkSemantic && window.stulinkSemantic()) ||
+           {ok: '#10b981', warn: '#f59e0b', danger: '#ef4444', info: '#3b82f6'};
+}
 var state = {grade: '', examId: '', tab: 'grade', class_name: '', subject: '', direction: '',
              classes: []};   // classes：班级对比 Tab 选中的班级
 // tab 业务顺序。注意：Flask jsonify 默认按键名排序，Object.keys(opts.tabs) 的首项会是
@@ -11,6 +22,7 @@ var state = {grade: '', examId: '', tab: 'grade', class_name: '', subject: '', d
 var TAB_ORDER = ['grade', 'class', 'subject', 'teacher', 'compare'];
 var opts = null;
 var charts = {};
+var chartSpecs = {};   // 图表原始配置（按 key），主题切换重绘时用
 // v1.19.47.29：?exam=（本场考试）只在首次填充时应用一次；
 // 之后用户手动切换年级/考试不再被拉回本场，也避免「切换年级」被误判为本场不可见。
 var initExamApplied = false;
@@ -790,11 +802,31 @@ function chartOption(c){
 function renderChart(dom, key, c){
     var chart = echarts.init(dom);
     charts[key] = chart;
+    chartSpecs[key] = c;   // 主题切换时用它按新色板重绘
     chart.setOption(chartOption(c), true);
 }
 
+/* 2026-10-14：切换主题后按新调色板重设已渲染的图表（notMerge，颜色整体替换）。
+   未切换主题时不会触发，零开销。 */
+function repaintCharts(){
+    Object.keys(charts).forEach(function(k){
+        var c = chartSpecs[k];
+        if (!c) return;
+        try { charts[k].setOption(chartOption(c), true); } catch (e) {}
+    });
+}
+if (window.stuOnThemeChange) { window.stuOnThemeChange(repaintCharts); }
+
 function baseGrid(){ return {left: 60, right: 40, top: 50, bottom: 40, containLabel: true}; }
-function colorOf(i){ return PALETTE[i % PALETTE.length]; }
+function colorOf(i){ var p = palette(); return p[i % p.length]; }
+/* 热力图渐变：深色为深→亮逆序（--sl-heat-1..4），浅色保持原浅蓝→深蓝 */
+function heatColors(){
+    return (window.stulinkHeatColors && window.stulinkHeatColors()) ||
+           ['#eff6ff', '#93c5fd', '#3b82f6', '#1d4ed8'];
+}
+function heatLabel(){
+    return (window.stulinkHeatLabel && window.stulinkHeatLabel()) || '#0f172a';
+}
 function yFmt(){ return {type: 'value', axisLabel: {formatter: '{value}'}}; }
 
 /* 横轴类目多时倾斜标签（班级/科目/日期一多就会糊成一片） */
@@ -842,18 +874,18 @@ function barOption(c, grouped){
             // 年级均值参考线 + 该科各层划线参考线
             var ml = [];
             if (c.markLine != null){
-                ml.push({yAxis: c.markLine, lineStyle: {color: '#f59e0b', type: 'dashed'},
+                ml.push({yAxis: c.markLine, lineStyle: {color: sem().warn, type: 'dashed'},
                     label: {formatter: '年级均值 {c}'}});
             }
             (c.bandLines || []).forEach(function(b){
-                ml.push({yAxis: b.value, lineStyle: {color: '#ef4444', type: 'dashed'},
+                ml.push({yAxis: b.value, lineStyle: {color: sem().danger, type: 'dashed'},
                     label: {formatter: b.name + ' {c}'}});
             });
             if (ml.length){ item.markLine = {silent: true, symbol: 'none', data: ml}; }
         }
         return item;
     });
-    return {color: PALETTE, tooltip: {trigger: 'axis'}, legend: grouped ? {top: 0} : undefined,
+    return {color: palette(), tooltip: {trigger: 'axis'}, legend: grouped ? {top: 0} : undefined,
         grid: gridOf(c), xAxis: catAxisOf(c), dataZoom: zoomOf(c),
         yAxis: yFmt(), series: series};
 }
@@ -874,7 +906,7 @@ function boxOption(c){
         yAxis: yFmt(),
         series: (c.series || []).map(function(s){
             return {name: s.name || '总分分布', type: 'boxplot', data: s.data || [],
-                itemStyle: {color: '#3b82f6'}};
+                itemStyle: {color: palette()[0]}};
         })};
 }
 
@@ -886,7 +918,7 @@ function lineOption(c){
     var hasSel = !!(sel && Object.keys(sel).length);
     var selected = {};
     (c.series || []).forEach(function(s){ selected[s.name] = hasSel ? !!sel[s.name] : true; });
-    return {color: PALETTE, tooltip: {trigger: 'axis'},
+    return {color: palette(), tooltip: {trigger: 'axis'},
         legend: {top: 0, type: 'scroll', selected: selected},
         grid: gridOf(c), xAxis: catAxisOf(c), dataZoom: zoomOf(c),
         yAxis: yFmt(),
@@ -897,7 +929,7 @@ function lineOption(c){
 }
 
 function dualOption(c){
-    return {color: PALETTE, tooltip: {trigger: 'axis'},
+    return {color: palette(), tooltip: {trigger: 'axis'},
         legend: {top: 0},
         grid: gridOf(c), xAxis: catAxisOf(c), dataZoom: zoomOf(c),
         yAxis: [{type: 'value', name: '均分'}, {type: 'value', name: '%', max: 100}],
@@ -908,7 +940,7 @@ function dualOption(c){
 }
 
 function radarOption(c){
-    return {color: PALETTE, tooltip: {},
+    return {color: palette(), tooltip: {},
         legend: {top: 0},
         radar: {indicator: (c.indicators || []), radius: '65%'},
         series: [{type: 'radar', data: (c.series || []).map(function(s){
@@ -942,8 +974,9 @@ function heatOption(c){
         dataZoom: hz,
         visualMap: {min: Math.floor(min), max: Math.ceil(max), calculable: true,
             orient: 'horizontal', left: 'center', bottom: 0,
-            inRange: {color: ['#eff6ff', '#93c5fd', '#3b82f6', '#1d4ed8']}},
-        series: [{type: 'heatmap', data: cells, label: {show: true, fontSize: 10}}]};
+            inRange: {color: heatColors()}},
+        series: [{type: 'heatmap', data: cells,
+            label: {show: true, fontSize: 10, color: heatLabel()}}]};
 }
 
 function buildQuery(){
@@ -1272,7 +1305,52 @@ $(function(){
     }
 
     // ---- 图表渲染（ECharts，数据由后端本地统计，非模型生成）----
-    var PALETTE = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#06b6d4'];
+    // 2026-10-14：改读主题调色板（AI 生成的图表同样要跟随深色，不能永远浅色字面量）
+    var AI_PALETTE_FALLBACK = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#06b6d4'];
+    function aiPalette(){
+        var p = (window.stulinkPalette && window.stulinkPalette()) || AI_PALETTE_FALLBACK;
+        // 语义槽位对齐原顺序：蓝 / 绿 / 橙 / 红 / 紫 / 青 → 主题色板 1/3/4/5/2/6
+        return [p[0], p[2], p[3], p[4], p[1], p[5]].filter(function(c){ return !!c; });
+    }
+    var aiCharts = [];   // {chart, spec} —— 主题切换时按新色板重绘
+    function aiChartOption(s){
+        var P = aiPalette();
+        var opt;
+        if (s[2] === 'pie'){
+            opt = {
+                tooltip: {trigger: 'item'},
+                legend: {bottom: 0, itemWidth: 10, itemHeight: 10, textStyle: {fontSize: 11}},
+                color: P,
+                series: [{
+                    type: 'pie', radius: ['40%', '65%'], center: ['50%', '45%'],
+                    label: {formatter: '{b}\n{c}人', fontSize: 11},
+                    data: s[3].map(function(k, i){ return {name: k, value: s[4][i]}; })
+                        .filter(function(x){ return x.value > 0; })
+                }]
+            };
+        } else {
+            opt = {
+                tooltip: {trigger: 'axis', axisPointer: {type: 'shadow'}},
+                grid: {left: 8, right: 12, top: 24, bottom: 24, containLabel: true},
+                xAxis: {type: 'category', data: s[3], axisLabel: {fontSize: 10, interval: 0,
+                    rotate: (s[3].length > 8 ? 30 : 0)}},
+                yAxis: {type: 'value', name: s[5], nameTextStyle: {fontSize: 10}},
+                series: [{
+                    type: 'bar', data: s[4], barMaxWidth: 28,
+                    itemStyle: {color: P[0], borderRadius: [4, 4, 0, 0]},
+                    label: {show: true, position: 'top', fontSize: 10}
+                }]
+            };
+        }
+        return opt;
+    }
+    if (window.stuOnThemeChange) {
+        window.stuOnThemeChange(function () {
+            aiCharts.forEach(function (x) {
+                try { x.chart.setOption(aiChartOption(x.spec), true); } catch (e) {}
+            });
+        });
+    }
     function chartCard(title, domId){
         return '<div class="col-md-6"><div class="ai-chart-card">'
             + '<div class="ai-chart-title">' + esc(title) + '</div>'
@@ -1312,7 +1390,7 @@ $(function(){
                 opt = {
                     tooltip: {trigger: 'item'},
                     legend: {bottom: 0, itemWidth: 10, itemHeight: 10, textStyle: {fontSize: 11}},
-                    color: PALETTE,
+                    color: aiPalette(),
                     series: [{
                         type: 'pie', radius: ['40%', '65%'], center: ['50%', '45%'],
                         label: {formatter: '{b}\n{c}人', fontSize: 11},
@@ -1329,12 +1407,13 @@ $(function(){
                     yAxis: {type: 'value', name: s[5], nameTextStyle: {fontSize: 10}},
                     series: [{
                         type: 'bar', data: s[4], barMaxWidth: 28,
-                        itemStyle: {color: PALETTE[0], borderRadius: [4, 4, 0, 0]},
+                        itemStyle: {color: aiPalette()[0], borderRadius: [4, 4, 0, 0]},
                         label: {show: true, position: 'top', fontSize: 10}
                     }]
                 };
             }
             chart.setOption(opt);
+            aiCharts.push({chart: chart, spec: s});
             window.addEventListener('resize', function(){ chart.resize(); });
         });
     }

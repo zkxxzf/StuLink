@@ -2,22 +2,25 @@
 {% block title %}统一调课{% endblock %}
 {% block extra_css %}
 <style>
-    .bulk-card { border: 1px solid #e2e8f0; border-radius: 12px; padding: 18px; margin-bottom: 18px; background: #fff; }
+    /* 2026-10-13（调课页颜色调整）：颜色一律取主题变量 —— 原先写死 #fff 白底，
+       深色主题下卡片仍是白底而文字已转浅色（--sl-text），整卡文字看不见。 */
+    .bulk-card { border: 1px solid var(--sl-border); border-radius: 12px; padding: 18px; margin-bottom: 18px; background: var(--sl-surface); }
     .bulk-card h6 { font-weight: 700; }
     .entry-row td { vertical-align: middle; }
-    .st-ok { color: #059669; font-size: 12px; font-weight: 600; }
-    .st-bad { color: #dc2626; font-size: 12px; font-weight: 600; }
-    .st-idle { color: #94a3b8; font-size: 12px; }
-    .sel-summary { background: #eff6ff; border: 1px solid #bfdbfe; border-radius: 8px; padding: 8px 12px; font-size: 13px; color: #1e40af; }
+    .st-ok { color: var(--sl-soft-success-fg); font-size: 12px; font-weight: 600; }
+    .st-bad { color: var(--sl-soft-danger-fg); font-size: 12px; font-weight: 600; }
+    .st-idle { color: var(--sl-text-subtle); font-size: 12px; }
+    .sel-summary { background: var(--sl-soft-info-bg); border: 1px solid var(--sl-soft-info-bd);
+                   border-radius: 8px; padding: 8px 12px; font-size: 13px; color: var(--sl-soft-info-fg); }
     .conflict-table td { font-size: 13px; }
     /* 2026-10-10：加载出的课程列表加滚动条（课程多时不再把整页撑得很长），表头吸附 */
-    .entry-scroll { max-height: 340px; overflow: auto; border: 1px solid #eef2f7; border-radius: 8px; }
-    .entry-scroll thead th { position: sticky; top: 0; z-index: 2; background: #f8f9fa; }
+    .entry-scroll { max-height: 340px; overflow: auto; border: 1px solid var(--sl-line); border-radius: 8px; }
+    .entry-scroll thead th { position: sticky; top: 0; z-index: 2; background: var(--sl-surface-2); }
     /* 2026-10-13（v1.19.47.29）课程多时按班级分组 + 吸底操作栏，不再需要滚到页面底部 */
-    tr.grp-head td { background: #f1f5f9; font-size: 13px; }
+    tr.grp-head td { background: var(--sl-surface-3); font-size: 13px; }
     tr.grp-head .grp-toggle { cursor: pointer; user-select: none; }
-    .bulk-bar { position: sticky; bottom: 0; z-index: 5; background: #fff;
-                border-top: 2px solid #2563eb; box-shadow: 0 -4px 14px rgba(0,0,0,.08);
+    .bulk-bar { position: sticky; bottom: 0; z-index: 5; background: var(--sl-surface);
+                border-top: 2px solid var(--sl-sidebar-accent); box-shadow: 0 -4px 14px rgba(0,0,0,.08);
                 padding: 10px 14px; border-radius: 10px 10px 0 0; }
 </style>
 {% endblock %}

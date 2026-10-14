@@ -5,23 +5,25 @@
 
 {% block extra_css %}
 <style>
+    /* 2026-10-13（调课页颜色调整）：颜色一律取主题变量 —— 原先写死 #fff 白底，
+       深色主题下卡片仍是白底而文字已转浅色（--sl-text），整卡文字看不见。 */
     .step-head { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; }
-    .step-num { width: 28px; height: 28px; border-radius: 50%; background: #1e293b; color: #fff; display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: 14px; flex: 0 0 auto; }
+    .step-num { width: 28px; height: 28px; border-radius: 50%; background: var(--sl-sidebar-accent); color: var(--sl-surface); display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: 14px; flex: 0 0 auto; }
     .step-title { font-weight: 700; font-size: 15px; }
-    .step-hint { font-size: 12px; color: #64748b; font-weight: 400; }
-    .step-card { border: 1px solid #e2e8f0; border-radius: 12px; padding: 18px; margin-bottom: 18px; background: #fff; }
-    .entry-pick { position: relative; border: 1px solid #e2e8f0; border-radius: 10px; padding: 8px 10px; cursor: pointer; transition: all .15s; background: #fff; height: 100%; }
-    .entry-pick:hover { border-color: #93c5fd; background: #f8fbff; }
-    .entry-pick.selected { border-color: #2563eb; background: #eff6ff; box-shadow: 0 0 0 2px rgba(37,99,235,.15); }
-    .entry-pick .ep-pn { font-weight: 700; color: #1e293b; font-size: 13px; }
-    .entry-pick .ep-subj { font-weight: 700; color: #0f172a; }
-    .entry-pick .ep-badge { position: absolute; top: 6px; right: 8px; display: none; background: #2563eb; color: #fff; border-radius: 10px; padding: 0 7px; font-size: 11px; font-weight: 700; }
+    .step-hint { font-size: 12px; color: var(--sl-text-muted); font-weight: 400; }
+    .step-card { border: 1px solid var(--sl-border); border-radius: 12px; padding: 18px; margin-bottom: 18px; background: var(--sl-surface); }
+    .entry-pick { position: relative; border: 1px solid var(--sl-border); border-radius: 10px; padding: 8px 10px; cursor: pointer; transition: all .15s; background: var(--sl-surface); height: 100%; }
+    .entry-pick:hover { border-color: var(--sl-sidebar-accent); background: var(--sl-sidebar-active); }
+    .entry-pick.selected { border-color: var(--sl-sidebar-accent); background: var(--sl-sidebar-active); box-shadow: 0 0 0 2px rgba(37,99,235,.15); }
+    .entry-pick .ep-pn { font-weight: 700; color: var(--sl-text); font-size: 13px; }
+    .entry-pick .ep-subj { font-weight: 700; color: var(--sl-text); }
+    .entry-pick .ep-badge { position: absolute; top: 6px; right: 8px; display: none; background: var(--sl-sidebar-accent); color: var(--sl-surface); border-radius: 10px; padding: 0 7px; font-size: 11px; font-weight: 700; }
     .entry-pick.selected .ep-badge { display: inline-block; }
-    .wd-badge { display: inline-block; background: #fff7ed; color: #9a3412; border: 1px solid #fed7aa; border-radius: 6px; padding: 1px 6px; font-size: 11px; }
-    .muted-tip { color: #94a3b8; font-size: 13px; }
+    .wd-badge { display: inline-block; background: var(--sl-soft-amber-bg); color: var(--sl-soft-amber-fg); border: 1px solid var(--sl-soft-amber-bd); border-radius: 6px; padding: 1px 6px; font-size: 11px; }
+    .muted-tip { color: var(--sl-text-subtle); font-size: 13px; }
     .picked-row { cursor: pointer; }
-    .picked-row.row-active { background: #eff6ff; box-shadow: inset 3px 0 0 #2563eb; }
-    .tgt-badge { display: inline-block; background: #ecfdf5; color: #065f46; border: 1px solid #a7f3d0; border-radius: 6px; padding: 0 8px; font-size: 12px; }
+    .picked-row.row-active { background: var(--sl-sidebar-active); box-shadow: inset 3px 0 0 var(--sl-sidebar-accent); }
+    .tgt-badge { display: inline-block; background: var(--sl-soft-success-bg); color: var(--sl-soft-success-fg); border: 1px solid var(--sl-soft-success-bd); border-radius: 6px; padding: 0 8px; font-size: 12px; }
     .picked-row select, .picked-row input { font-size: 12px; }
 </style>
 {% endblock %}

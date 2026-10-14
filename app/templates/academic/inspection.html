@@ -19,6 +19,10 @@
            href="{{ url_for('academic.inspection_export', teacher_uid=f_teacher, result=f_result, grade=f_grade, date_from=f_from, date_to=f_to) }}">
             <i class="bi bi-file-earmark-excel"></i> 导出 Excel
         </a>
+        {# 2026-10-13：课时量导出带**配置项**——课型折算与「考试期间」都在里面 #}
+        <button class="btn btn-sm btn-outline-success" data-bs-toggle="modal" data-bs-target="#workloadModal">
+            <i class="bi bi-calculator"></i> 导出课时量
+        </button>
         {% endif %}
     </div>
 </div>
@@ -201,13 +205,13 @@
                     <td class="small text-muted">{{ r.note or '' }}</td>
                     <td class="text-nowrap">
                         {% if r.period %}
-                        <a class="btn btn-sm btn-outline-primary" title="查看该节课表"
+                        <a class="btn btn-sm btn-outline-primary" title="查看该节课表" aria-label="查看该节课表"
                            href="{{ url_for('academic.inspection_live_schedule', date=r.inspect_date.strftime('%Y-%m-%d'), period=r.period, grade=r.grade or '') }}">
                             <i class="bi bi-broadcast"></i>
                         </a>
                         {% endif %}
                         {% if can_edit %}
-                        <button type="button" class="btn btn-sm btn-outline-warning py-0" title="编辑"
+                        <button type="button" class="btn btn-sm btn-outline-warning py-0" title="编辑" aria-label="编辑"
                                 data-bs-toggle="modal" data-bs-target="#editInspModal"
                                 data-id="{{ r.id }}" data-teacher="{{ r.teacher_name or '' }}"
                                 data-result="{{ r.result }}" data-class-name="{{ r.class_name or '' }}"
@@ -216,7 +220,7 @@
                         {% endif %}
                         {# 2026-10-10：删除改走页面底部单一隐藏表单（原每行一个 form+csrf，改为 data-url 按钮） #}
                         <button type="button" class="btn btn-sm btn-outline-danger js-insp-del"
-                                title="删除" data-url="{{ url_for('academic.inspection_delete', rid=r.id) }}">
+                                title="删除" aria-label="删除" data-url="{{ url_for('academic.inspection_delete', rid=r.id) }}">
                             <i class="bi bi-trash"></i>
                         </button>
                     </td>
@@ -334,12 +338,172 @@ document.addEventListener('DOMContentLoaded', function () {
     {# 2026-10-10：教师表改紧凑二元组 [uid,name]，省去每项 ~14 字节的键名（inspection.js 同步读取） #}
     "teachers": [{% for t in teachers %}[{{ t.teacher_uid|tojson }},{{ t.name|tojson }}]{% if not loop.last %},{% endif %}{% endfor %}],
     "grades": [{% for g in grade_opts %}{{ g|tojson }}{% if not loop.last %},{% endif %}{% endfor %}],
-    "results": [{% for k, label in results %}{"key":{{ k|tojson }},"label":{{ label|tojson }}}{% if not loop.last %},{% endif %}{% endfor %}]
+    "results": [{% for k, label in results %}{"key":{{ k|tojson }},"label":{{ label|tojson }}}{% if not loop.last %},{% endif %}{% endfor %}],
+    {# 2026-10-13：课时量统计/导出（workload.js 读这几项） #}
+    "workload": {
+        "configUrl": {{ url_for('academic.inspection_workload_config')|tojson }},
+        "rulesUrl": {{ url_for('academic.inspection_workload_rules_save')|tojson }},
+        "examAddUrl": {{ url_for('academic.inspection_exam_period_add')|tojson }},
+        "examDelTpl": {{ url_for('academic.inspection_exam_period_delete', pid=0)|tojson }},
+        "exportUrl": {{ url_for('academic.inspection_workload_export')|tojson }}
+    }
 }
 </script>
+
+{# ===== 课时量统计与导出（2026-10-13 用户口径：统计页负责统计与导出课时量）=====
+    导出支持两项配置：① 课型折算（第五节/早读/早自习/晚自习/下午最后一节课/监考
+    各一行，单独设置折算）；② 考试期间（某班某段时间不计工作量、不计违纪迟到）。 #}
+{% if can_edit %}
+<div class="modal fade" id="workloadModal" tabindex="-1">
+    <div class="modal-dialog modal-xl modal-dialog-scrollable">
+        <div class="modal-content">
+            <div class="modal-header py-2">
+                <h6 class="modal-title"><i class="bi bi-calculator"></i> 课时量统计与导出
+                    <span class="text-muted small ms-2" id="wlTerm"></span></h6>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <ul class="nav nav-pills nav-sm mb-3" id="wlTabs">
+                    <li class="nav-item"><button class="nav-link active" data-bs-toggle="pill"
+                            data-bs-target="#wlPaneExport" type="button">导出课时量</button></li>
+                    <li class="nav-item"><button class="nav-link" data-bs-toggle="pill"
+                            data-bs-target="#wlPaneRules" type="button">课型折算规则</button></li>
+                    <li class="nav-item"><button class="nav-link" data-bs-toggle="pill"
+                            data-bs-target="#wlPaneExam" type="button">考试期间</button></li>
+                </ul>
+                <div class="tab-content">
+                    <div class="tab-pane fade show active" id="wlPaneExport">
+                        <div class="row g-2 align-items-end mb-3">
+                            <div class="col-6 col-md-3">
+                                <label class="form-label small mb-1">开始日期</label>
+                                <input type="date" id="wlFrom" class="form-control form-control-sm">
+                            </div>
+                            <div class="col-6 col-md-3">
+                                <label class="form-label small mb-1">结束日期</label>
+                                <input type="date" id="wlTo" class="form-control form-control-sm">
+                            </div>
+                            <div class="col-6 col-md-2">
+                                <label class="form-label small mb-1">年级</label>
+                                <select id="wlGrade" class="form-select form-select-sm">
+                                    <option value="">全部年级</option>
+                                    {% for g in grade_opts %}<option value="{{ g }}">{{ g }}</option>{% endfor %}
+                                </select>
+                            </div>
+                            <div class="col-6 col-md-2">
+                                <label class="form-label small mb-1">班级（可选）</label>
+                                <input id="wlClass" class="form-control form-control-sm" maxlength="10" placeholder="如 01班">
+                            </div>
+                            <div class="col-12 col-md-2">
+                                <button class="btn btn-sm btn-success w-100" id="btnWlExport">
+                                    <i class="bi bi-file-earmark-excel"></i> 导出 Excel
+                                </button>
+                            </div>
+                        </div>
+                        <div class="small text-muted">
+                            课时量按<b>课表</b>统计（不依赖查课覆盖率）：区间内每位教师的有课节次 × 该课型的折算系数；
+                            被标记为「考试期间」的班级在该区间<b>不计工作量</b>；
+                            按年级/班级筛选时，监考场次无法归属到具体班级（考务数据不带班级），<b>不计入</b>。
+                        </div>
+                    </div>
+
+                    <div class="tab-pane fade" id="wlPaneRules">
+                        <div class="table-responsive">
+                            <table class="table table-sm table-bordered align-middle mb-2">
+                                <thead class="table-light">
+                                    <tr>
+                                        <th>课型（按学校作息的节次）</th>
+                                        <th style="width:160px">一节课折算（课时）</th>
+                                        <th class="small text-muted">说明</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="wlRuleBody">
+                                    <tr><td colspan="3" class="text-muted">加载中…</td></tr>
+                                </tbody>
+                            </table>
+                        </div>
+                        <div class="row g-2 align-items-end">
+                            <div class="col-md-3">
+                                <label class="form-label small mb-1">监考折算（课时 / 场）</label>
+                                <input type="number" step="0.1" min="0" id="wlInvigFactor"
+                                       class="form-control form-control-sm">
+                            </div>
+                            <div class="col-md-9 text-end">
+                                <button class="btn btn-sm btn-primary" id="btnWlSaveRules">
+                                    <i class="bi bi-check-lg"></i> 保存折算规则
+                                </button>
+                            </div>
+                        </div>
+                        <div class="small text-muted mt-2">
+                            填 <b>0</b> = 该课型不计入课时量；<b>留空</b> = 恢复默认（1 课时 / 节）。
+                            第五节、早读、早自习、晚自习、下午最后一节课都对应上面某个节次，逐行设置即可；
+                            监考单独按「场次」折算。
+                        </div>
+                    </div>
+
+                    <div class="tab-pane fade" id="wlPaneExam">
+                        <div class="row g-2 align-items-end mb-3">
+                            <div class="col-6 col-md-2">
+                                <label class="form-label small mb-1">年级</label>
+                                <select id="wlExGrade" class="form-select form-select-sm">
+                                    <option value="">--</option>
+                                    {% for g in grade_opts %}<option value="{{ g }}">{{ g }}</option>{% endfor %}
+                                </select>
+                            </div>
+                            <div class="col-6 col-md-2">
+                                <label class="form-label small mb-1">班级（空=全年级）</label>
+                                <input id="wlExClass" class="form-control form-control-sm" maxlength="10" placeholder="如 01班">
+                            </div>
+                            <div class="col-6 col-md-2">
+                                <label class="form-label small mb-1">开始日期</label>
+                                <input type="date" id="wlExFrom" class="form-control form-control-sm">
+                            </div>
+                            <div class="col-6 col-md-2">
+                                <label class="form-label small mb-1">结束日期</label>
+                                <input type="date" id="wlExTo" class="form-control form-control-sm">
+                            </div>
+                            <div class="col-8 col-md-2">
+                                <label class="form-label small mb-1">备注</label>
+                                <input id="wlExNote" class="form-control form-control-sm" maxlength="100" placeholder="如 月考">
+                            </div>
+                            <div class="col-4 col-md-2">
+                                <button class="btn btn-sm btn-success w-100" id="btnWlExamAdd">
+                                    <i class="bi bi-plus-lg"></i> 标记
+                                </button>
+                            </div>
+                        </div>
+                        <div class="table-responsive">
+                            <table class="table table-sm table-bordered align-middle mb-2">
+                                <thead class="table-light">
+                                    <tr>
+                                        <th>年级</th><th>班级</th><th>起止日期</th>
+                                        <th>天数</th><th>备注</th><th style="width:60px"></th>
+                                    </tr>
+                                </thead>
+                                <tbody id="wlExamBody">
+                                    <tr><td colspan="6" class="text-muted">加载中…</td></tr>
+                                </tbody>
+                            </table>
+                        </div>
+                        <div class="small text-muted">
+                            标记期间该班的课<b>不计课时工作量</b>，期间的查课记录也<b>不计违纪 / 迟到</b>
+                            —— 考试期间教师有正常的考务工作量（监考、考务），不能算缺勤。
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer py-2">
+                <span class="text-muted small me-auto" id="wlMsg"></span>
+                <button type="button" class="btn btn-sm btn-secondary" data-bs-dismiss="modal">关闭</button>
+            </div>
+            <input type="hidden" id="wlCsrf" value="{{ csrf_token() }}">
+        </div>
+    </div>
+</div>
+{% endif %}
 {% endblock %}
 
 {% block extra_js %}
 <script src="{{ su('js/echarts.min.js') }}"></script>
 <script src="{{ su('js/inspection.js') }}"></script>
+<script src="{{ su('js/workload.js') }}"></script>
 {% endblock %}

@@ -26,7 +26,8 @@ from app.models.academic import Teacher, \
     InspectionRecord, TeacherAchievement, \
     FormCategory, FormTemplate, FormQuestion, FormSubmission, FormAnswer, \
     WorkRecord, AttendanceRecord, RECORD_TYPES, ATTENDANCE_STATUS, \
-    SubjectLeader, SUBJECT_ORDER, DUTY_TEMPLATES
+    SubjectLeader, SUBJECT_ORDER, DUTY_TEMPLATES, \
+    WorkloadRule, ExamPeriod, WORKLOAD_KINDS
 from app.models.notification import Notification, NotificationRead, \
     NotificationRecipient, CATEGORY_LABELS
 from app.models.portrait import StudentPortrait, PortraitComment, PortraitEvent
@@ -57,6 +58,7 @@ __all__ = ['User', 'Student', 'Room', 'BedAssignment', 'StudentAccommodation',
            'InspectionRecord', 'TeacherAchievement',
            'FormCategory', 'FormTemplate', 'FormQuestion', 'FormSubmission', 'FormAnswer',
            'WorkRecord', 'AttendanceRecord', 'RECORD_TYPES', 'ATTENDANCE_STATUS',
+           'WorkloadRule', 'ExamPeriod', 'WORKLOAD_KINDS',
            'Notification', 'NotificationRead', 'NotificationRecipient',
            'CATEGORY_LABELS',
            'StudentPortrait', 'PortraitComment', 'PortraitEvent', 'UserDataScope',

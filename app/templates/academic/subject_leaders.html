@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% block title %}备课组长名单{% endblock %}
+{% block title %}学科组长名单{% endblock %}
 {% block extra_css %}
 <style>
 .ld-block { margin-bottom: 14px; border: 1px solid #e2e8f0; border-radius: 10px;
@@ -7,6 +7,8 @@
 .ld-head { background: linear-gradient(90deg, #1e293b, #334155); color: #f1f5f9;
            padding: 6px 10px; font-weight: 700; font-size: 13px;
            display: flex; justify-content: space-between; align-items: center; }
+.ld-sec { font-size: 15px; font-weight: 700; margin: 18px 0 8px; padding-left: 8px;
+          border-left: 4px solid #2563eb; }
 .ld-duty { white-space: pre-wrap; text-align: left !important; font-size: 11.5px;
            color: #334155; line-height: 1.45; }
 .ld-members { text-align: left !important; font-size: 11.5px; color: #475569; }
@@ -21,7 +23,7 @@
 {% block content %}
 <div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
     <div class="d-flex align-items-center gap-2 flex-wrap">
-        <h4 class="fw-bold mb-0"><i class="bi bi-people"></i> 备课组长名单</h4>
+        <h4 class="fw-bold mb-0"><i class="bi bi-people"></i> 学科组长名单</h4>
         <form class="d-flex gap-2 flex-wrap align-items-center" method="get">
             <input name="school_year" class="form-control form-control-sm" style="width:130px"
                    list="yearList" value="{{ school_year }}" placeholder="学年 2026-2027">
@@ -31,10 +33,22 @@
                 <option value="第一学期" {% if f.term == '第一学期' %}selected{% endif %}>第一学期</option>
                 <option value="第二学期" {% if f.term == '第二学期' %}selected{% endif %}>第二学期</option>
             </select>
+            <select name="category" class="form-select form-select-sm" style="width:120px">
+                <option value="">全部类别</option>
+                {% for c in categories %}
+                <option value="{{ c }}" {% if f.category == c %}selected{% endif %}>{{ c }}</option>
+                {% endfor %}
+            </select>
             <select name="subject" class="form-select form-select-sm" style="width:120px">
                 <option value="">全部学科</option>
                 {% for s in subjects %}
                 <option value="{{ s }}" {% if f.subject == s %}selected{% endif %}>{{ s }}</option>
+                {% endfor %}
+            </select>
+            <select name="grade" class="form-select form-select-sm" style="width:100px">
+                <option value="">全部年级</option>
+                {% for g in grades %}
+                <option value="{{ g }}" {% if f.grade == g %}selected{% endif %}>{{ g }}</option>
                 {% endfor %}
             </select>
             <input name="q" class="form-control form-control-sm" style="width:150px"
@@ -50,7 +64,7 @@
         </button>
         {% endif %}
         <a class="btn btn-sm btn-outline-info text-white"
-           href="{{ url_for('academic.subject_leader_export', school_year=school_year, term=f.term, subject=f.subject, q=f.keyword) }}">
+           href="{{ url_for('academic.subject_leader_export', school_year=school_year, term=f.term, subject=f.subject, category=f.category, grade=f.grade, q=f.keyword) }}">
             <i class="bi bi-file-earmark-excel"></i> 导出 Excel
         </a>
         <button class="btn btn-sm btn-outline-dark no-print" onclick="window.print()">
@@ -59,38 +73,53 @@
     </div>
 </div>
 
-{% if not groups %}
+{% if not leaders %}
 <div class="card">
     <div class="card-body text-center py-5 text-muted">
         <i class="bi bi-people" style="font-size:40px;"></i>
-        <p class="mt-3 mb-1">{% if school_year %}{{ school_year }} {% endif %}暂无备课组长记录</p>
+        <p class="mt-3 mb-1">{% if school_year %}{{ school_year }} {% endif %}暂无学科组长记录</p>
         <p class="small mb-0">
-            {% if can_edit %}点右上「新增组长」按 学科 × 年级 登记，同一学科可在不同年级设不同组长。{% else %}请联系教务维护。{% endif %}
+            {% if can_edit %}点右上「新增组长」登记：<b>备课组长</b>按 年级 × 学科（高一/高二/高三各一名），
+            <b>教研组长</b>只按学科、不分年级。{% else %}请联系教务维护。{% endif %}
         </p>
     </div>
 </div>
 {% else %}
 <div class="text-muted small mb-2">
-    共 {{ leaders|length }} 条记录 · {{ groups|length }} 个学科
+    共 {{ leaders|length }} 条记录
     {% if school_year %} · 学年 {{ school_year }}{% endif %}{% if f.term %} · {{ f.term }}{% endif %}
+    {% if f.category %} · {{ f.category }}{% endif %}
 </div>
-{% for subject, rows in groups %}
+{% for cat, groups in grouped %}
+<div class="ld-sec">
+    {{ cat }}
+    <span class="fw-normal small text-muted">
+        {% if cat == '教研组长' %}只按学科，不分年级{% else %}年级 × 学科（高一 / 高二 / 高三）{% endif %}
+    </span>
+</div>
+{% if not groups %}
+<div class="text-muted small mb-3 ps-2">
+    暂无{{ cat }}记录{% if can_edit %}，可点右上「新增组长」登记{% endif %}。
+</div>
+{% else %}
+{% for group, rows in groups %}
 <div class="ld-block">
     <div class="ld-head">
-        <span><i class="bi bi-bookmark-star"></i> {{ subject }}
-            <span class="fw-normal small ms-2">{{ rows|length }} 个年级组</span>
+        <span><i class="bi bi-bookmark-star"></i> {{ group }}
+            <span class="fw-normal small ms-2">共 {{ rows|length }} 条</span>
         </span>
-        <span class="fw-normal small">共 {{ rows|length }} 条记录</span>
+        <span class="fw-normal small">{% if cat == '教研组长' %}全校{% else %}本组{% endif %}</span>
     </div>
     <div class="table-responsive">
         <table class="table table-sm align-middle mb-0">
             <thead class="table-light">
                 <tr>
-                    <th style="width:80px">年级</th>
+                    {% if group == '综合组' %}<th style="width:80px">学科</th>{% endif %}
+                    {% if cat != '教研组长' %}<th style="width:80px">年级</th>{% endif %}
                     <th style="width:90px">学期</th>
                     <th style="width:100px">组长</th>
                     <th style="width:90px">教师编号</th>
-                    <th style="width:200px">备课组范围</th>
+                    <th style="width:200px">{% if cat == '教研组长' %}教研组范围{% else %}备课组范围{% endif %}</th>
                     <th>主要职责</th>
                     {% if can_edit %}<th style="width:110px" class="no-print">操作</th>{% endif %}
                 </tr>
@@ -98,7 +127,8 @@
             <tbody>
                 {% for ld in rows %}
                 <tr>
-                    <td class="fw-bold">{{ ld.grade or '全校' }}</td>
+                    {% if group == '综合组' %}<td>{{ ld.subject }}</td>{% endif %}
+                    {% if cat != '教研组长' %}<td class="fw-bold">{{ ld.grade or '全校' }}</td>{% endif %}
                     <td class="text-muted small">{{ ld.term or '整学年' }}</td>
                     <td class="fw-bold">{{ ld.leader_name }}</td>
                     <td class="text-muted small">{{ ld.leader_uid or '—' }}</td>
@@ -109,13 +139,14 @@
                         <button class="btn btn-sm btn-outline-primary py-0 btn-edit-leader"
                                 data-id="{{ ld.id }}" data-school-year="{{ ld.school_year }}"
                                 data-term="{{ ld.term }}" data-grade="{{ ld.grade }}"
-                                data-subject="{{ ld.subject }}" data-leader-name="{{ ld.leader_name }}"
+                                data-subject="{{ ld.subject }}" data-category="{{ cat }}"
+                                data-leader-name="{{ ld.leader_name }}"
                                 data-leader-uid="{{ ld.leader_uid or '' }}"
                                 data-members="{{ ld.members or '' }}" data-duty="{{ ld.duty or '' }}"
                                 data-sort-order="{{ ld.sort_order }}">编辑</button>
                         <form method="post" class="d-inline"
                               action="{{ url_for('academic.subject_leader_delete') }}"
-                              onsubmit="return confirm('删除「{{ ld.grade or '全校' }}{{ ld.subject }} · {{ ld.leader_name }}」这条备课组长记录？')">
+                              onsubmit="return confirm('删除「{{ ld.grade or '全校' }}{{ ld.subject }} · {{ cat }} {{ ld.leader_name }}」这条记录？')">
                             <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                             <input type="hidden" name="id" value="{{ ld.id }}">
                             <input type="hidden" name="school_year" value="{{ school_year }}">
@@ -131,12 +162,15 @@
 </div>
 {% endfor %}
 {% endif %}
+{% endfor %}
+{% endif %}
 
 <div class="alert alert-light border small mb-0 no-print">
     <i class="bi bi-info-circle"></i>
-    同名学年 × 学期 × 年级 × 学科重复保存会自动更新（不会产生重复行）；
-    「整学年」表示该学年通用，若某学期单独设置，请把学期选到具体学期。
-    职责可点「填入常用职责」套用模板后自行修改。
+    <b>备课组长</b>按 年级 × 学科 登记（高一 / 高二 / 高三 每学科各一名），
+    <b>教研组长</b>只按学科、不分年级；同一 学年 + 学期 + 年级 + 学科 + 类别 重复保存会自动更新。
+    组长必须是本学科教师（任课教师映射为唯一依据，课表兜底），姓名下拉只列出本学科教师。
+    体育 / 音乐 / 美术 / 信息技术 / 通用技术 / 心理 合并展示为「综合组」。
 </div>
 
 {% if can_edit %}
@@ -146,11 +180,19 @@
             <form method="post" action="{{ url_for('academic.subject_leader_save') }}" id="leaderForm">
                 <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                 <div class="modal-header py-2">
-                    <h6 class="modal-title"><i class="bi bi-person-badge"></i> <span id="leaderModalTitle">新增备课组长</span></h6>
+                    <h6 class="modal-title"><i class="bi bi-person-badge"></i> <span id="leaderModalTitle">新增学科组长</span></h6>
                     <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
                 </div>
                 <div class="modal-body">
                     <div class="row g-2">
+                        <div class="col-md-4">
+                            <label class="form-label small mb-1">组长类别 <span class="text-danger">*</span></label>
+                            <select name="category" id="ldCategory" class="form-select form-select-sm">
+                                {% for c in categories %}
+                                <option value="{{ c }}">{{ c }}</option>
+                                {% endfor %}
+                            </select>
+                        </div>
                         <div class="col-md-4">
                             <label class="form-label small mb-1">学年 <span class="text-danger">*</span></label>
                             <input name="school_year" id="ldYear" class="form-control form-control-sm"
@@ -166,34 +208,44 @@
                             </select>
                         </div>
                         <div class="col-md-4">
-                            <label class="form-label small mb-1">年级</label>
-                            <input name="grade" id="ldGrade" class="form-control form-control-sm"
-                                   list="gradeList" placeholder="留空＝全校/综合组">
-                            <datalist id="gradeList">
-                                {% for g in grades %}<option value="{{ g }}"></option>{% endfor %}
-                            </datalist>
+                            <label class="form-label small mb-1">学科 <span class="text-danger">*</span></label>
+                            {# 2026-10-14 用户口径：学科**直接下拉选**（不再手输）；教研组长含「综合组」 #}
+                            <select name="subject" id="ldSubject" class="form-select form-select-sm" required>
+                                <option value="">请选择学科</option>
+                                {% for s in subjects %}
+                                <option value="{{ s }}">{{ s }}</option>
+                                {% endfor %}
+                            </select>
                         </div>
                         <div class="col-md-4">
-                            <label class="form-label small mb-1">学科 <span class="text-danger">*</span></label>
-                            <input name="subject" id="ldSubject" class="form-control form-control-sm"
-                                   list="subjectList" required>
-                            <datalist id="subjectList">
-                                {% for s in subjects %}<option value="{{ s }}"></option>{% endfor %}
-                            </datalist>
+                            <label class="form-label small mb-1">
+                                <span id="ldGradeLabel">年级 <span class="text-danger">*</span></span>
+                            </label>
+                            <select name="grade" id="ldGrade" class="form-select form-select-sm">
+                                <option value="">请选择年级</option>
+                                {% for g in grades %}
+                                <option value="{{ g }}">{{ g }}</option>
+                                {% endfor %}
+                            </select>
+                            <div class="form-text" id="ldGradeTip">备课组长按年级 × 学科设置（高一 / 高二 / 高三）</div>
                         </div>
                         <div class="col-md-4">
                             <label class="form-label small mb-1">组长姓名 <span class="text-danger">*</span></label>
-                            <input name="leader_name" id="ldName" class="form-control form-control-sm"
-                                   list="teacherNameList" required>
-                            <datalist id="teacherNameList"></datalist>
+                            {# 2026-10-14 用户口径：先选学科 → 这里**下拉列出本学科教师**（不再手输）；
+                               选中即带出教师编号；真实提交字段仍是 leader_name + leader_uid #}
+                            <select id="ldNamePick" class="form-select form-select-sm" required>
+                                <option value="">先选学科</option>
+                            </select>
+                            <input type="hidden" name="leader_name" id="ldName">
+                            <div class="form-text" id="ldTeacherTip">先选学科，再选本学科教师</div>
                         </div>
                         <div class="col-md-4">
                             <label class="form-label small mb-1">教师编号</label>
                             <input name="leader_uid" id="ldUid" class="form-control form-control-sm"
-                                   placeholder="选择教师后自动带出">
+                                   placeholder="选择教师后自动带出" readonly>
                         </div>
                         <div class="col-12">
-                            <label class="form-label small mb-1">备课组范围 / 成员</label>
+                            <label class="form-label small mb-1" id="ldMembersLabel">备课组范围 / 成员</label>
                             <input name="members" id="ldMembers" class="form-control form-control-sm"
                                    maxlength="300" placeholder="如：高一语文备课组（6 人）">
                         </div>
@@ -214,7 +266,7 @@
                         <input type="hidden" name="id" id="ldId" value="">
                     </div>
                     <div class="form-text mt-2">
-                        同一 学年 + 学期 + 年级 + 学科 重复保存会更新已有记录（不会重复）。
+                        同一 学年 + 学期 + 年级 + 学科 + 类别 重复保存会更新已有记录（不会重复）。
                     </div>
                 </div>
                 <div class="modal-footer py-2">
@@ -233,46 +285,132 @@
 (function () {
     'use strict';
     var DUTY_TPL = {{ duty_templates|tojson }};
+    var COMPREHENSIVE = ['体育', '音乐', '美术', '信息技术', '通用技术', '心理'];
     var TEACHERS = [];
-    var teachersUrl = {{ url_for('academic.api_schedule_teachers')|tojson }};
+    var candidatesUrl = {{ url_for('academic.subject_leader_candidates')|tojson }};
+    var $ = function (id) { return document.getElementById(id); };
 
-    // 教师名/编号自动匹配
-    fetch(teachersUrl, { headers: { 'X-Requested-With': 'XMLHttpRequest' } })
-        .then(function (r) { return r.json(); })
-        .then(function (res) {
-            if (!res || !res.success) { return; }
-            TEACHERS = res.data || [];
-            var dl = document.getElementById('teacherNameList');
-            if (dl) {
-                // v1.19.47.29 审核（🟡-2）：教师名经 innerHTML 注入前转义，防 XSS
-                dl.innerHTML = TEACHERS.map(function (t) {
-                    var safe = String(t.name == null ? '' : t.name)
-                        .replace(/&/g, '&amp;').replace(/</g, '&lt;')
-                        .replace(/>/g, '&gt;').replace(/"/g, '&quot;')
-                        .replace(/'/g, '&#39;');
-                    return '<option value="' + safe + '"></option>';
-                }).join('');
-            }
-        }).catch(function () { });
+    // 只读用户页面不渲染弹窗，直接结束（避免拿不到表单元素报错）
+    if (!$('leaderForm')) { return; }
 
-    var $name = document.getElementById('ldName');
-    if ($name) {
-        $name.addEventListener('blur', function () {
-            var val = $name.value.trim();
-            var hit = null;
-            TEACHERS.forEach(function (t) { if (t.name === val) { hit = t; } });
-            document.getElementById('ldUid').value = hit ? hit.uid : '';
-        });
+    function esc(s) {
+        return String(s == null ? '' : s)
+            .replace(/&/g, '&amp;').replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;').replace(/"/g, '&quot;')
+            .replace(/'/g, '&#39;');
     }
 
-    // 新增
-    var btnNew = document.getElementById('btnNewLeader');
+    // 学科变化 → 只拉本学科教师（组长必须是本学科教师）
+    var reqSeq = 0;
+    var NO_SUBJECT = '<option value="">先选学科</option>';
+
+    // 把候选教师填进姓名下拉：value=序号，姓名/编号挂 data-*；
+    // 真实提交字段仍是隐藏的 leader_name + leader_uid（后端口径不变）
+    function fillNameOptions(list, keepName) {
+        var sel = $('ldNamePick');
+        if (!sel) { return; }
+        var cur = keepName ? ($('ldName').value || '').trim() : '';
+        var curUid = keepName ? ($('ldUid').value || '').trim() : '';
+        var html = '<option value="">请选择教师</option>';
+        list.forEach(function (t, i) {
+            html += '<option value="' + i + '" data-name="' + esc(t.name || '')
+                 + '" data-uid="' + esc(t.uid || '') + '"'
+                 + ((t.name || '') === cur ? ' selected' : '') + '>'
+                 + esc(t.name || '') + '</option>';
+        });
+        // 编辑历史记录：原组长可能已不在候选（离职 / 任教科目变了）→ 补一条，避免保存时丢名字
+        if (cur && !list.some(function (t) { return (t.name || '') === cur; })) {
+            html += '<option value="__cur" data-name="' + esc(cur) + '" data-uid="'
+                 + esc(curUid) + '" selected>' + esc(cur) + '（当前记录）</option>';
+        }
+        sel.innerHTML = html;
+        applyPick();
+    }
+
+    function applyPick() {
+        var sel = $('ldNamePick');
+        if (!sel) { return; }
+        var opt = sel.options[sel.selectedIndex];
+        var chosen = sel.value !== '' && opt;
+        $('ldName').value = chosen ? (opt.dataset.name || '') : '';
+        $('ldUid').value = chosen ? (opt.dataset.uid || '') : '';
+    }
+
+    // 编辑历史记录时，若其学科已不在下拉里（改过学科口径），补一个选项，避免选不回来
+    function ensureSubjectOption(subject) {
+        if (!subject) { return; }
+        var sel = $('ldSubject');
+        var exists = Array.prototype.some.call(sel.options, function (o) {
+            return o.value === subject;
+        });
+        if (!exists) {
+            sel.insertAdjacentHTML('beforeend', '<option value="' + esc(subject) + '">'
+                + esc(subject) + '（历史）</option>');
+        }
+    }
+
+    function loadCandidates(keepName) {
+        var sel = $('ldNamePick');
+        var subject = ($('ldSubject').value || '').trim();
+        if (!subject) {
+            if (sel) { sel.innerHTML = NO_SUBJECT; }
+            TEACHERS = [];
+            $('ldName').value = '';
+            $('ldUid').value = '';
+            return;
+        }
+        var seq = ++reqSeq;
+        fetch(candidatesUrl + '?subject=' + encodeURIComponent(subject),
+              { headers: { 'X-Requested-With': 'XMLHttpRequest' } })
+            .then(function (r) { return r.json(); })
+            .then(function (res) {
+                if (seq !== reqSeq) { return; }
+                TEACHERS = (res && res.data) || [];
+                fillNameOptions(TEACHERS, keepName);
+                var tip = $('ldTeacherTip');
+                if (tip) {
+                    tip.textContent = TEACHERS.length
+                        ? ('本学科教师 ' + TEACHERS.length + ' 人（下拉只列本学科，其余不可选）')
+                        : '任课数据里暂无本学科教师：请先到「教师名单 / 任课教师映射」维护该学科任课';
+                }
+            }).catch(function () { });
+    }
+
+    $('ldSubject').addEventListener('change', function () { loadCandidates(false); });
+    $('ldNamePick').addEventListener('change', applyPick);
+
+    // 类别切换：教研组长不分年级 → 年级禁用并置空
+    function syncCategory() {
+        var isResearch = ($('ldCategory').value === '教研组长');
+        $('ldGrade').disabled = isResearch;
+        if (isResearch) { $('ldGrade').value = ''; }
+        $('ldGradeLabel').innerHTML = isResearch
+            ? '年级（教研组长不分年级）' : '年级 <span class="text-danger">*</span>';
+        $('ldGradeTip').textContent = isResearch
+            ? '教研组长只按学科设置，年级固定为「全校」'
+            : '备课组长按年级 × 学科设置（高一 / 高二 / 高三）';
+        $('ldMembersLabel').textContent = isResearch ? '教研组范围 / 成员' : '备课组范围 / 成员';
+        $('ldMembers').placeholder = isResearch ? '如：语文教研组（12 人）' : '如：高一语文备课组（6 人）';
+    }
+    $('ldCategory').addEventListener('change', syncCategory);
+    syncCategory();
+
+    // 新增（无编辑权限时页面不渲染按钮 / 弹窗，此处做空值保护）
+    var btnNew = $('btnNewLeader');
     if (btnNew) {
         btnNew.addEventListener('click', function () {
-            document.getElementById('leaderModalTitle').textContent = '新增备课组长';
-            document.getElementById('leaderForm').reset();
-            document.getElementById('ldYear').value = {{ school_year|tojson }};
-            document.getElementById('ldId').value = '';
+            $('leaderModalTitle').textContent = '新增学科组长';
+            $('leaderForm').reset();
+            $('ldYear').value = {{ school_year|tojson }};
+            $('ldId').value = '';
+            $('ldSort').value = '0';
+            syncCategory();
+            TEACHERS = [];
+            $('ldSubject').value = '';
+            $('ldNamePick').innerHTML = NO_SUBJECT;
+            $('ldName').value = '';
+            $('ldUid').value = '';
+            $('ldTeacherTip').textContent = '先选学科，再选本学科教师';
         });
     }
 
@@ -280,29 +418,38 @@
     document.querySelectorAll('.btn-edit-leader').forEach(function (btn) {
         btn.addEventListener('click', function () {
             var d = this.dataset;
-            document.getElementById('leaderModalTitle').textContent =
-                '编辑：' + (d.grade || '全校') + d.subject + ' · ' + d.leaderName;
-            document.getElementById('ldYear').value = d.schoolYear || '';
-            document.getElementById('ldTerm').value = d.term || '';
-            document.getElementById('ldGrade').value = d.grade || '';
-            document.getElementById('ldSubject').value = d.subject || '';
-            document.getElementById('ldName').value = d.leaderName || '';
-            document.getElementById('ldUid').value = d.leaderUid || '';
-            document.getElementById('ldMembers').value = d.members || '';
-            document.getElementById('ldDuty').value = d.duty || '';
-            document.getElementById('ldSort').value = d.sortOrder || '0';
-            bootstrap.Modal.getOrCreateInstance(document.getElementById('leaderModal')).show();
+            $('leaderModalTitle').textContent =
+                '编辑：' + d.category + ' · ' + (d.grade || '全校') + d.subject + ' · ' + d.leaderName;
+            $('ldYear').value = d.schoolYear || '';
+            $('ldTerm').value = d.term || '';
+            $('ldCategory').value = d.category || '备课组长';
+            syncCategory();
+            $('ldGrade').value = d.grade || '';
+            ensureSubjectOption(d.subject || '');
+            $('ldSubject').value = d.subject || '';
+            // 先写隐藏字段（姓名/编号），再拉候选 —— 回调据此把姓名下拉选中到本人
+            $('ldName').value = d.leaderName || '';
+            $('ldUid').value = d.leaderUid || '';
+            loadCandidates(true);
+            $('ldMembers').value = d.members || '';
+            $('ldDuty').value = d.duty || '';
+            $('ldSort').value = d.sortOrder || '0';
+            bootstrap.Modal.getOrCreateInstance($('leaderModal')).show();
         });
     });
 
-    // 常用职责模板
-    var btnFill = document.getElementById('btnFillDuty');
+    // 常用职责模板（按类别取）
+    var btnFill = $('btnFillDuty');
     if (btnFill) {
         btnFill.addEventListener('click', function () {
-            var grade = (document.getElementById('ldGrade').value || '').trim();
-            var key = grade.indexOf('高三') >= 0 ? '毕业年级' : (grade ? 'default' : '综合组');
-            var text = DUTY_TPL[key] || DUTY_TPL['default'] || '';
-            var box = document.getElementById('ldDuty');
+            var tpl = DUTY_TPL[$('ldCategory').value] || DUTY_TPL['备课组长'] || {};
+            var grade = ($('ldGrade').value || '').trim();
+            var subject = ($('ldSubject').value || '').trim();
+            var key = (tpl['综合组'] && COMPREHENSIVE.indexOf(subject) >= 0)
+                ? '综合组'
+                : (tpl['毕业年级'] && grade.indexOf('高三') >= 0 ? '毕业年级' : 'default');
+            var text = tpl[key] || tpl['default'] || '';
+            var box = $('ldDuty');
             if (box.value.trim() && !window.confirm('会覆盖当前已填职责，确定继续？')) { return; }
             box.value = text;
         });

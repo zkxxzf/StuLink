@@ -37,7 +37,7 @@
         {% endfor %}
     </select>
     <input type="text" name="search" class="form-control form-control-sm" style="width:180px;"
-           placeholder="搜索姓名或学号..." value="{{ search }}">
+           placeholder="搜索姓名或学号..." value="{{ search }}" aria-label="搜索姓名或学号">
     <button type="submit" class="btn btn-sm btn-outline-primary"><i class="bi bi-search"></i> 搜索</button>
     {% if search %}
     <a href="{{ url_for('overview.students_page', grade=selected_grade, class_name=selected_class) }}"

@@ -122,16 +122,34 @@
 </div>
 
 <!-- 分页 -->
+{# 2026-10-14 UI 审计 H3：原先 {% for p in range(1, pages + 1) %} 把**全部页码平铺** ——
+   2107 名学生 ≈ 88 页，1440px 桌面也横向溢出（实测页码最右到 1718px），手机上溢出 2157px。
+   改为窗口式页码：首 2 + 当前 ±2 + 末 2，中间用省略号；容器再兜一层横向滚动 + flex-wrap。 #}
 {% if pages > 1 %}
-<nav class="mt-4">
+<style>
+    .pg-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+    .pg-wrap .pagination { flex-wrap: wrap; row-gap: 4px; }
+</style>
+<nav class="mt-4 pg-wrap">
     <ul class="pagination justify-content-center">
         <li class="page-item {% if page <= 1 %}disabled{% endif %}">
             <a class="page-link" href="{{ url_for('portrait.index', page=page-1, grade=grade, class_name=class_name, level=level) }}">上一页</a>
         </li>
+        {% set _shown = namespace(list=[]) %}
         {% for p in range(1, pages + 1) %}
+            {% if p <= 2 or p > pages - 2 or (p >= page - 2 and p <= page + 2) %}
+                {% set _shown.list = _shown.list + [p] %}
+            {% endif %}
+        {% endfor %}
+        {% set _last = namespace(v=0) %}
+        {% for p in _shown.list %}
+            {% if _last.v and p > _last.v + 1 %}
+        <li class="page-item disabled" aria-hidden="true"><span class="page-link">…</span></li>
+            {% endif %}
         <li class="page-item {% if p == page %}active{% endif %}">
             <a class="page-link" href="{{ url_for('portrait.index', page=p, grade=grade, class_name=class_name, level=level) }}">{{ p }}</a>
         </li>
+            {% set _last.v = p %}
         {% endfor %}
         <li class="page-item {% if page >= pages %}disabled{% endif %}">
             <a class="page-link" href="{{ url_for('portrait.index', page=page+1, grade=grade, class_name=class_name, level=level) }}">下一页</a>

@@ -34,7 +34,12 @@ def _set_sqlite_pragma(dbapi_conn, _connection_record):
     cur = dbapi_conn.cursor()
     try:
         cur.execute('PRAGMA synchronous=NORMAL')
-        cur.execute('PRAGMA busy_timeout=5000')
+        # 2026-10-14 性能审计（PERF-25）：5s → 15s。非 WAL 下 SQLite 锁是库级的，
+        # 成绩导入/排名重算这类长写事务会阻塞该库全部读请求；原 5s 一到就直接抛
+        # "database is locked"，表现为导入期间其它人打开成绩页白屏报错。等待更久
+        # 换来的是"慢"而不是"错"。⚠ 与 config.py 的 connect_args.timeout 必须一致
+        # （PRAGMA 会覆盖 connect_args，两处数字不同会造成文档与实际漂移）。
+        cur.execute('PRAGMA busy_timeout=15000')
         cur.execute('PRAGMA foreign_keys=ON')
         if getattr(Config, 'SQLITE_ENABLE_WAL', False):
             cur.execute('PRAGMA journal_mode=WAL')

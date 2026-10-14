@@ -106,4 +106,116 @@
     }
 
     window.stuPad2 = pad2;
+
+    /* =========================================================================
+       2026-10-14 主题取色（审计修复）：图表色不再写死字面量
+       -------------------------------------------------------------------------
+       背景：ECharts 的颜色是 JS 字面量（grades.js / student_query.js /
+       inspection.js / points.js …），CSS 的 `[data-bs-theme="dark"] ...` 兜底
+       完全够不到 → 深色下出现刺眼白块（热力图）与看不见的线。
+       做法：theme.css 提供两套 --sl-chart-1..10 / --sl-heat-1..4 / 语义色变量，
+       这里只负责「读变量 + 兜底」。页面脚本一律调用本组函数，不要在各自文件里
+       再写一份字面量。读不到（老缓存 / 变量未定义）时回落到原浅色字面量，
+       保证图表不空、不报错。
+       ========================================================================= */
+    /** 读 CSS 变量；读不到用兜底值（与 grades_dashboard.js 的 v() 同一口径） */
+    function stuCssVar(name, fallback) {
+        var v = '';
+        try {
+            v = (window.getComputedStyle(document.documentElement)
+                .getPropertyValue(name) || '').trim();
+        } catch (e) { v = ''; }
+        return v || fallback;
+    }
+
+    window.stuCssVar = stuCssVar;
+
+    /** 按前缀批量读 --prefix-1..count，缺哪个用 fallbacks 补哪个 */
+    function stuCssVarList(prefix, count, fallbacks) {
+        var out = [], i, v;
+        for (i = 1; i <= count; i++) {
+            v = stuCssVar(prefix + i, '');
+            out.push(v || (fallbacks && fallbacks[i - 1]) || '#3b82f6');
+        }
+        return out;
+    }
+
+    /** 图表主色板（10 槽，语义固定：蓝紫绿橙红青粉黄绿橙红靛，两套主题只换明度） */
+    window.stulinkPalette = function () {
+        return stuCssVarList('--sl-chart-', 10, [
+            '#3b82f6', '#8b5cf6', '#10b981', '#f59e0b', '#ef4444',
+            '#06b6d4', '#ec4899', '#84cc16', '#f97316', '#6366f1'
+        ]);
+    };
+
+    /** 热力图渐变色（低值 → 高值）；深色下为深→亮逆序，不再是刺眼白块 */
+    window.stulinkHeatColors = function () {
+        return stuCssVarList('--sl-heat-', 4, ['#eff6ff', '#93c5fd', '#3b82f6', '#1d4ed8']);
+    };
+
+    /** 热力图格内数字色（保证在 4 段色上都读得清） */
+    window.stulinkHeatLabel = function () {
+        return stuCssVar('--sl-heat-label', '#0f172a');
+    };
+
+    /** 语义单色：状态柱 / 参考线 / 面积图。红黄绿仍要能区分，只提亮不换色相。 */
+    window.stulinkSemantic = function () {
+        return {
+            ok: stuCssVar('--sl-chart-ok', '#10b981'),
+            warn: stuCssVar('--sl-chart-warn', '#f59e0b'),
+            danger: stuCssVar('--sl-chart-danger', '#ef4444'),
+            info: stuCssVar('--sl-chart-info', '#3b82f6'),
+            purple: stuCssVar('--sl-chart-purple', '#6366f1'),
+            cyan: stuCssVar('--sl-chart-cyan', '#0ea5e9'),
+            muted: stuCssVar('--sl-chart-muted', '#94a3b8'),
+            line: stuCssVar('--sl-border', '#e2e8f0'),
+            text: stuCssVar('--sl-text', '#1e293b')
+        };
+    };
+
+    /** 当前是否深色（少数必须二选一的场景用，能走变量就别用这个） */
+    window.stulinkIsDark = function () {
+        return document.documentElement.getAttribute('data-bs-theme') === 'dark';
+    };
+
+    /* 主题切换广播：base.html 的 StuLinkTheme.apply() 无法在本次改动范围内修改，
+       这里用 MutationObserver 监听 <html data-bs-theme> 变化并广播同一事件，
+       使已渲染的 ECharts 实例可以就地重设颜色（无需刷新页面）。
+       只在真正发生变化时触发一次，且做了 try/catch 兜底（老浏览器无 MO 就降级为
+       「刷新页面后生效」）。 */
+    var THEME_EVT = 'stulink:themechange';
+    var _themeHandlers = [];
+    var _lastTheme = document.documentElement.getAttribute('data-bs-theme');
+
+    window.stuOnThemeChange = function (fn) {
+        if (typeof fn !== 'function') { return; }
+        _themeHandlers.push(fn);
+    };
+
+    function broadcastTheme() {
+        try {
+            document.dispatchEvent(new Event(THEME_EVT));
+        } catch (e) {
+            /* IE / 老 X5 不支持 Event 构造 → 走下面的直接回调 */
+        }
+        for (var i = 0; i < _themeHandlers.length; i++) {
+            try { _themeHandlers[i](); } catch (e) { /* 单个页面出错不影响其余 */ }
+        }
+    }
+
+    try {
+        if (window.MutationObserver) {
+            new window.MutationObserver(function (muts) {
+                for (var i = 0; i < muts.length; i++) {
+                    var now = document.documentElement.getAttribute('data-bs-theme');
+                    if (now !== _lastTheme) {
+                        _lastTheme = now;
+                        broadcastTheme();
+                        return;
+                    }
+                }
+            }).observe(document.documentElement,
+                { attributes: true, attributeFilter: ['data-bs-theme'] });
+        }
+    } catch (e) { /* 不支持就只保证「刷新页面后生效」 */ }
 })(window);

@@ -817,7 +817,7 @@
         <div class="modal-body py-2">
             <div class="d-flex gap-2 mb-2 flex-wrap align-items-center">
                 <input id="pkSearch" class="form-control form-control-sm" style="width:180px"
-                       placeholder="搜索姓名/学号" oninput="renderPick()">
+                       placeholder="搜索姓名/学号" oninput="renderPick()" aria-label="搜索姓名 / 学号">
                 <select id="pkCls" class="form-select form-select-sm w-auto" onchange="renderPick()"><option value="">全部班级</option></select>
                 <select id="pkSel" class="form-select form-select-sm w-auto" onchange="renderPick()"><option value="">全部选科</option></select>
                 <div class="form-check"><input class="form-check-input" type="checkbox" id="pkUnadded" onchange="renderPick()">

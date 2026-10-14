@@ -134,6 +134,10 @@
             peersChart = window.echarts.init(dom);
             charts.push(peersChart);
         }
+        // 2026-10-14 审计修复：灰柱 #cbd5e1 / 参考线 #94a3b8 在深色下几乎看不见，
+        // 改读主题语义色（--sl-chart-muted 等），两套主题都保持可辨。
+        var SEM = (window.stulinkSemantic && window.stulinkSemantic()) ||
+            { muted: '#94a3b8', warn: '#f59e0b', purple: '#6366f1' };
         peersChart.setOption({
             tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' } },
             grid: { left: 8, right: 32, top: 8, bottom: 8, containLabel: true },
@@ -146,12 +150,12 @@
             series: [{
                 type: 'bar', barMaxWidth: 14,
                 data: shown.map(function (p) {
-                    return { value: p.avg, itemStyle: { color: p.mine ? '#6366f1' : '#cbd5e1' } };
+                    return { value: p.avg, itemStyle: { color: p.mine ? SEM.purple : SEM.muted } };
                 }),
                 label: { show: true, position: 'right', fontSize: 10, formatter: '{c}' },
                 markLine: (gradeAvg === null || gradeAvg === undefined) ? undefined : {
                     silent: true, symbol: 'none',
-                    lineStyle: { type: 'dashed', color: '#94a3b8' },
+                    lineStyle: { type: 'dashed', color: SEM.muted },
                     label: { formatter: '年级均值 ' + gradeAvg, fontSize: 10, position: 'insideEndTop' },
                     data: [{ xAxis: gradeAvg }]
                 }
@@ -180,6 +184,9 @@
                 }
                 var chart = window.echarts.init(dom);
                 charts.push(chart);
+                // 2026-10-14：走势图配色同样改读主题语义色
+                var TSEM = (window.stulinkSemantic && window.stulinkSemantic()) ||
+                    { warn: '#f59e0b', purple: '#6366f1' };
                 chart.setOption({
                     tooltip: { trigger: 'axis' },
                     legend: { top: 0, textStyle: { fontSize: 10 } },
@@ -197,12 +204,12 @@
                         {
                             name: '均分', type: 'line', smooth: true, symbolSize: 6,
                             data: pts.map(function (p) { return p.avg; }),
-                            itemStyle: { color: '#6366f1' }, areaStyle: { opacity: 0.08 }
+                            itemStyle: { color: TSEM.purple }, areaStyle: { opacity: 0.08 }
                         },
                         {
                             name: '及格率', type: 'line', smooth: true, symbolSize: 6, yAxisIndex: 1,
                             data: pts.map(function (p) { return p.pass_rate; }),
-                            itemStyle: { color: '#f59e0b' }, lineStyle: { type: 'dashed' }
+                            itemStyle: { color: TSEM.warn }, lineStyle: { type: 'dashed' }
                         }
                     ]
                 });

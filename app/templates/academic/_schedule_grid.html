@@ -95,6 +95,15 @@
                 color: var(--sl-text-subtle); opacity: 0; transition: opacity .12s; z-index: 2; }
 .sch-cell.sch-has.sch-editable:hover .sch-add-mini { opacity: 1; color: #10b981; }
 
+/* 2026-10-14 UI 审计：触屏无 hover —— 「再排一门 / +」入口默认 opacity:0，
+   手机 / 平板上永远看不见（无法新增课程）。对不支持悬停的设备改为半透明常显：
+   既看得到是"可点的新增入口"，又不像实心那样喧宾夺主盖住课程文字。 */
+@media (hover: none) {
+    .sch-cell.sch-empty .sch-add,
+    .sch-add-mini { opacity: .45; }
+    .sch-cell.sch-empty .sch-add { color: #10b981; }
+}
+
 /* ── 拖拽换格调课（batch B） ──────────────────────────────────── */
 .sch-item[draggable="true"] { cursor: grab; }
 .sch-item.sch-dragging { opacity: .4; }

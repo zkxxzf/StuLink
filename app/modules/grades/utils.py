@@ -87,14 +87,39 @@ def delete_cache_prefix(prefix):
         logger.warning('utils.py::delete_cache_prefix 异常（已降级处理）: %s', _e)
 
 
+def delete_cache_exam_reports(exam_id):
+    """按考试精确失效汇报缓存（键形如 grades_report_<kind>_<exam_id>_<...>）
+
+    PERF-19：此前用 delete_cache_prefix('grades_report_') 全清，改一科学分会把全部
+    21 场考试的汇报缓存一起作废。改为只清本场（键第 4 段即 exam_id）。
+    注意 grades_report_ld_*（全局对比）跨考试取数，不在此列，需单独整体失效。
+    """
+    try:
+        from app.utils.cache import cache
+        eid = str(exam_id)
+        for key in list(cache._cache.keys()):
+            if not key.startswith('grades_report_') or key.startswith('grades_report_ld_'):
+                continue
+            parts = key.split('_')
+            if len(parts) > 3 and parts[3] == eid:
+                cache.delete(key)
+    except Exception as _e:  # noqa: BLE001
+        logger.warning('utils.py::delete_cache_exam_reports 异常（已降级处理）: %s', _e)
+
+
 def invalidate_exam_cache(exam_id):
     """成绩/划线变更后失效该考试的全部分析缓存（四 tab + 汇报区）"""
     delete_cache_prefix(f'grades_tab_{exam_id}_')
-    # 汇报缓存键含方向/层等后缀，按考试段清除；划线低频，顺带清掉其他考试也无副作用
-    delete_cache_prefix('grades_report_')
-    # v1.13.1：ExamData 进程级共享缓存同步清空（跨请求只读快照，改分/划线后必须重建）
+    # 全局对比（grades_report_ld_*）跨考试取数，任何一场变动都会影响其它场次的对比结果，
+    # 故仍需整体失效；其余汇报缓存（cs/sc/nl/tr/sl/co）按考试精确失效（PERF-19）
+    delete_cache_prefix('grades_report_ld_')
+    delete_cache_exam_reports(exam_id)
+    # PERF-06/12：/api/options 的「每场考试班级」缓存（班级可能随导入变化）
+    delete_cache_prefix('grades_options_')
+    # v1.13.1：ExamData 进程级共享缓存同步失效（跨请求只读快照，改分/划线后必须重建）
+    # PERF-19：只丢该场，避免连带丢弃其它考试的常驻快照（每场 2 万+ 行全量重拉）
     try:
         from app.modules.grades.services.stats_service import clear_exam_data_cache
-        clear_exam_data_cache()
+        clear_exam_data_cache(exam_id)
     except Exception as _e:  # noqa: BLE001
         logger.warning('utils.py::invalidate_exam_cache 异常（已降级处理）: %s', _e)

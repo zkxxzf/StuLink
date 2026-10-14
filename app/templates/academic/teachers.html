@@ -25,17 +25,17 @@
         <form class="row g-2 align-items-center" method="get">
             <div class="col-auto">
                 <input name="kw" value="{{ kw }}" class="form-control form-control-sm"
-                       style="width:230px" placeholder="姓名 / 教师编号 / 手机号 / 学科">
+                       style="width:230px" placeholder="姓名 / 教师编号 / 手机号 / 学科" aria-label="姓名 / 教师编号 / 手机号 / 学科">
             </div>
             <div class="col-auto">
-                <select name="status" class="form-select form-select-sm" style="width:110px">
+                <select name="status" class="form-select form-select-sm" style="width:110px" aria-label="在职状态">
                     <option value="">全部状态</option>
                     <option value="active" {% if status == 'active' %}selected{% endif %}>在职</option>
                     <option value="left" {% if status == 'left' %}selected{% endif %}>离职</option>
                 </select>
             </div>
             <div class="col-auto">
-                <select name="subject" class="form-select form-select-sm" style="width:120px">
+                <select name="subject" class="form-select form-select-sm" style="width:120px" aria-label="学科">
                     <option value="">全部学科</option>
                     {% for s in subjects %}
                     <option value="{{ s }}" {% if subject == s %}selected{% endif %}>{{ s }}</option>
@@ -85,7 +85,7 @@
                         {% else %}<span class="badge bg-secondary">离职</span>{% endif %}
                     </td>
                     <td>
-                        <a class="btn btn-sm btn-outline-warning" title="编辑"
+                        <a class="btn btn-sm btn-outline-warning" title="编辑" aria-label="编辑"
                            href="{{ url_for('academic.teacher_edit', tid=r.t.id) }}">
                             <i class="bi bi-pencil"></i>
                         </a>

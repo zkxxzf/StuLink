@@ -31,12 +31,17 @@ def _stddev(values):
 # 汇报区 5 个板块各自构造 ExamData 会把同一场考试的全量明细重复拉取 8~10 次，
 # 是首屏加载慢的主因。ExamData 构造后只读（惰性属性均为缓存派生值、无懒加载关系），
 # 故可跨请求共享；成绩/划线变更入口统一调 invalidate_exam_cache → clear_exam_data_cache。
-# LRU 上限 3 场（一场全量约几 MB），TTL 900s 与汇报 payload 缓存一致。
+# LRU 上限 3 场。一场含 2 万+ ExamScore ORM 对象，常驻约 30~50MB/场（3 场合计
+# 90~150MB）——原注释写"一场全量约几 MB"与实际差一个量级（2026-10-14 性能审计更正）。
+# TTL 900s 与汇报 payload 缓存一致。
 _EXAM_DATA_TTL = 900
 _EXAM_DATA_MAX = 3
 _exam_data_cache = OrderedDict()
 # waitress 多线程下 OrderedDict 的 move_to_end/popitem 非原子，需锁保护；
-# 构建（全量拉取，耗时）也在锁内，配合双重检查使并发冷启动只算一次。
+# 构建（全量拉取，耗时）也在锁内。
+# ⚠ 2026-10-14 更正：这里**没有**双重检查（旧注释误称有）。并发冷启动时 N 个线程
+# 会依次进锁各构建一次（慢但结果一致，最后一个覆盖前面的）。若要真正"只算一次"，
+# 需按 exam_id 加构建中占位标记 + 每场一把锁，属后续优化，本次未改（避免并发语义风险）。
 _exam_data_lock = threading.Lock()
 
 # 趋势均值聚合（exam_score_means）进程级缓存：key=(grade, frozenset(subjects),
@@ -80,14 +85,21 @@ def _detach_shared(data):
             logger.debug('expunge 跳过（对象不在当前会话）: %s', _e)
 
 
-def clear_exam_data_cache():
+def clear_exam_data_cache(exam_id=None):
     """成绩/划线变更后清空，防止读到旧快照（由 invalidate_exam_cache 调用）
+
+    exam_id：指定时只丢弃该场的 ExamData（PERF-19）。此前无参数即全清，改一科学分
+    会把全部 3 场常驻快照（每场 2 万+ ORM 对象、约 30~50MB）一起丢弃重建，
+    导致任何人在改分后打开任意一场考试的分析页都要重新全量拉取。
 
     v1.19.47.29 审核修正：两个缓存都受 _exam_data_lock 保护，清空时同样持锁，
     避免与 cached_exam_data / exam_score_means 的读写产生 LRU 一致性问题（
     OrderedDict.clear() 在 CPython GIL 下虽安全，但与 move_to_end/popitem 无锁读写同存时仍不严谨）。"""
     with _exam_data_lock:
-        _exam_data_cache.clear()
+        if exam_id is None:
+            _exam_data_cache.clear()
+        else:
+            _exam_data_cache.pop(exam_id, None)
         # 趋势均值聚合按年级缓存，与具体考试无关；成绩/划线变动同样使其失效，
         # 否则重导后年级趋势图会残留旧均值（与 ExamData 同样 900s TTL 口径）
         _exam_means_cache.clear()

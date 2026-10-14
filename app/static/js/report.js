@@ -27,7 +27,9 @@
         thDark: 'border:1.5px solid #2b5f9e;padding:7px 8px;text-align:center;font-weight:700;color:#fff;background:#1f4e79;font-size:14px;',
         td: 'border:1.5px solid #2b5f9e;padding:6px 8px;text-align:center;font-weight:700;color:#222;',
         tdAlt: 'background:#f3f5f9;',
-        green: 'background:#70ad47;color:#fff;font-size:16px;',
+        // 2026-10-14：原「绿底白字」对比度仅 2.6:1（两套主题都不达标）→ 改深字，
+        // 深字压在 #70ad47 上约 6:1，浅色/深色/打印三种场景都可读。
+        green: 'background:#70ad47;color:#10281a;font-size:16px;',
         label: 'font-weight:400;color:#666;font-size:13px;',
         rank: 'color:#1f4e79;background:#eef3fa;'
     };

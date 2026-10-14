@@ -2,46 +2,53 @@
 {% block title %}个人调课申请{% endblock %}
 {% block extra_css %}
 <style>
+    /* 2026-10-13（调课页颜色调整）：颜色一律取主题变量 —— 原先写死 #fff 白底，
+       深色主题下卡片仍是白底而文字已转浅色（--sl-text），整卡文字看不见。 */
     .step-head { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; }
-    .step-num { width: 28px; height: 28px; border-radius: 50%; background: #1e293b; color: #fff;
+    .step-num { width: 28px; height: 28px; border-radius: 50%; background: var(--sl-sidebar-accent); color: var(--sl-surface);
                 display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: 14px; flex: 0 0 auto; }
     .step-title { font-weight: 700; font-size: 15px; }
-    .step-hint { font-size: 12px; color: #64748b; font-weight: 400; }
-    .step-card { border: 1px solid #e2e8f0; border-radius: 12px; padding: 18px; margin-bottom: 18px; background: #fff; }
-    .entry-pick { position: relative; border: 1px solid #e2e8f0; border-radius: 10px; padding: 8px 10px; cursor: pointer;
-                  transition: all .15s; background: #fff; height: 100%; }
-    .entry-pick:hover { border-color: #93c5fd; background: #f8fbff; }
-    .entry-pick.selected { border-color: #2563eb; background: #eff6ff; box-shadow: 0 0 0 2px rgba(37,99,235,.15); }
-    .entry-pick .ep-pn { font-weight: 700; color: #1e293b; font-size: 13px; }
-    .entry-pick .ep-subj { font-weight: 700; color: #0f172a; }
+    .step-hint { font-size: 12px; color: var(--sl-text-muted); font-weight: 400; }
+    .step-card { border: 1px solid var(--sl-border); border-radius: 12px; padding: 18px; margin-bottom: 18px; background: var(--sl-surface); }
+    .entry-pick { position: relative; border: 1px solid var(--sl-border); border-radius: 10px; padding: 8px 10px; cursor: pointer;
+                  transition: all .15s; background: var(--sl-surface); height: 100%; }
+    .entry-pick:hover { border-color: var(--sl-sidebar-accent); background: var(--sl-sidebar-active); }
+    .entry-pick.selected { border-color: var(--sl-sidebar-accent); background: var(--sl-sidebar-active); box-shadow: 0 0 0 2px rgba(37,99,235,.15); }
+    .entry-pick .ep-pn { font-weight: 700; color: var(--sl-text); font-size: 13px; }
+    .entry-pick .ep-subj { font-weight: 700; color: var(--sl-text); }
     .entry-pick .ep-badge { position: absolute; top: 6px; right: 8px; display: none;
-                            background: #2563eb; color: #fff; border-radius: 10px; padding: 0 7px;
+                            background: var(--sl-sidebar-accent); color: var(--sl-surface); border-radius: 10px; padding: 0 7px;
                             font-size: 11px; font-weight: 700; }
     .entry-pick.selected .ep-badge { display: inline-block; }
-    .slot-card { border: 1px solid #d1fae5; background: #ecfdf5; color: #065f46; border-radius: 10px;
-                 padding: 8px 6px; cursor: pointer; text-align: center; transition: all .12s; height: 100%; }
+    .slot-card { border: 1px solid var(--sl-soft-success-bd); background: var(--sl-soft-success-bg); color: var(--sl-soft-success-fg);
+                 border-radius: 10px; padding: 8px 6px; cursor: pointer; text-align: center; transition: all .12s; height: 100%; }
     .slot-card:hover { transform: translateY(-1px); box-shadow: 0 2px 6px rgba(0,0,0,.1); }
-    .slot-card.conflict { background: #fef2f2; border-color: #fecaca; color: #b91c1c; cursor: not-allowed; opacity: .7; }
+    .slot-card.conflict { background: var(--sl-soft-danger-bg); border-color: var(--sl-soft-danger-bd); color: var(--sl-soft-danger-fg);
+                          cursor: not-allowed; opacity: .7; }
     .slot-card.conflict:hover { transform: none; box-shadow: none; }
-    .slot-card.selected { background: #2563eb; border-color: #1d4ed8; color: #fff; box-shadow: 0 0 0 3px rgba(37,99,235,.25); }
-    /* 黄格：这一节有同事的课 → 不是不能用，而是可以和他换（需对方确认） */
-    .slot-card.swappable { background: #fef9c3; border-color: #fde047; color: #854d0e; }
+    .slot-card.selected { background: var(--sl-sidebar-accent); border-color: var(--sl-sidebar-accent); color: var(--sl-surface);
+                          box-shadow: 0 0 0 3px rgba(37,99,235,.25); }
+    /* 黄格：这一节有同事的课 → 不是不能用，而是**和他换上课时间**（2026-10-14：不再换班） */
+    .slot-card.swappable { background: var(--sl-soft-warn-bg); border-color: var(--sl-soft-warn-bd); color: var(--sl-soft-warn-fg); }
     .slot-card.swappable:hover { transform: translateY(-1px); box-shadow: 0 2px 6px rgba(0,0,0,.1); }
     .slot-card.swappable.selected { background: #ca8a04; border-color: #a16207; color: #fff; }
     /* 紫格：这一节是我自己的另一节课 → 点它就是把这两节互换（不需要谁确认） */
-    .slot-card.selfswap { background: #f3e8ff; border-color: #d8b4fe; color: #6b21a8; }
+    .slot-card.selfswap { background: var(--sl-soft-purple-bg); border-color: var(--sl-soft-purple-bd); color: var(--sl-soft-purple-fg); }
     .slot-card.selfswap:hover { transform: translateY(-1px); box-shadow: 0 2px 6px rgba(0,0,0,.1); }
     .slot-card.selfswap.selected { background: #9333ea; border-color: #7e22ce; color: #fff; }
     .slot-card .sc-pn { font-weight: 700; font-size: 13px; }
     .slot-card .sc-time { font-size: 11px; opacity: .8; }
     .slot-card .sc-note { font-size: 11px; margin-top: 2px; }
-    .muted-tip { color: #94a3b8; font-size: 13px; }
-    .wd-badge { display: inline-block; background: #fff7ed; color: #9a3412; border: 1px solid #fed7aa;
-                border-radius: 6px; padding: 1px 6px; font-size: 11px; }
+    .muted-tip { color: var(--sl-text-subtle); font-size: 13px; }
+    .wd-badge { display: inline-block; background: var(--sl-soft-amber-bg); color: var(--sl-soft-amber-fg);
+                border: 1px solid var(--sl-soft-amber-bd); border-radius: 6px; padding: 1px 6px; font-size: 11px; }
     .picked-row { cursor: pointer; }
-    .picked-row.row-active { background: #eff6ff; box-shadow: inset 3px 0 0 #2563eb; }
-    .tgt-badge { display: inline-block; background: #ecfdf5; color: #065f46; border: 1px solid #a7f3d0;
-                 border-radius: 6px; padding: 0 8px; font-size: 12px; }
+    .picked-row.row-active { background: var(--sl-sidebar-active); box-shadow: inset 3px 0 0 var(--sl-sidebar-accent); }
+    .tgt-badge { display: inline-block; background: var(--sl-soft-success-bg); color: var(--sl-soft-success-fg);
+                 border: 1px solid var(--sl-soft-success-bd); border-radius: 6px; padding: 0 8px; font-size: 12px; }
+    /* 待调清单里的对调说明（JS 输出，两套主题下都要可读） */
+    .tgt-self { color: var(--sl-soft-purple-fg); }
+    .tgt-partner { color: var(--sl-soft-amber-fg); }
 </style>
 {% endblock %}
 {% block content %}
@@ -120,7 +127,9 @@
         <div class="step-head">
             <div class="step-num">2</div>
             <div class="step-title">选择调到哪一天 / 第几节
-                <div class="step-hint">每节课可各自指定目标时段；绿色=可选，红色=冲突（鼠标悬停看原因）。</div>
+                <div class="step-hint">每节课可各自指定目标时段；<span class="text-success">绿色=自习空档</span>、
+                    <span class="text-warning">黄色=同事的课（换上课时间）</span>、紫色=我自己的另一节课、
+                    <span class="text-danger">红色=冲突</span>（鼠标悬停看原因）。</div>
             </div>
         </div>
 
@@ -161,10 +170,7 @@
                     </select>
                 </div>
                 <div class="col-12 col-md-6 d-flex align-items-end">
-                    <div class="form-check mb-1">
-                        <input class="form-check-input" type="checkbox" id="onlyAvail" checked>
-                        <label class="form-check-label small" for="onlyAvail">只显示可选的节次</label>
-                    </div>
+                    <div class="text-muted small mb-1">下方展示当天<b>全部节次</b>：绿色=自习空档，黄色=同事的课（换时间），紫色=我自己的课（两节互换），红色=冲突（悬停看原因）。</div>
                 </div>
             </div>
             <div id="slotArea" class="muted-tip">请先在上方清单里点选一行。</div>
@@ -199,7 +205,7 @@
     </div>
 </form>
 
-{# ══ 2026-10-12 两人换课（v1.19.47.29）：换时段 / 换班上课 / 请人代课 ══ #}
+{# ══ 2026-10-14（用户口径）：对调只换上课时间 —— 不再"连班级一起换（换班上课）" ══ #}
 
 <script id="applyData" type="application/json">
 {
@@ -209,10 +215,7 @@
     "weekdays": {{ weekdays|tojson }},
     "periodLabels": {{ period_name_map()|tojson }},
     "myUid": {{ applicant_uid|tojson }},
-    "myName": {{ applicant_name|tojson }},
-    "myEntries": {{ my_entries|tojson }},
-    "partnerTeachersUrl": {{ url_for('academic.api_swap_partner_teachers')|tojson }},
-    "partnerEntriesUrl": {{ url_for('academic.api_swap_partner_entries')|tojson }}
+    "myName": {{ applicant_name|tojson }}
 }
 </script>
 {% endblock %}
@@ -362,14 +365,15 @@
         var html = '<span class="tgt-badge">' + s + '</span>';
         if (t.partner_entry_id) {
             if (t.swap_self) {
-                html += '<div class="small mt-1" style="color:#7e22ce">'
+                html += '<div class="small mt-1 tgt-self">'
                     + '<i class="bi bi-arrow-repeat"></i> 与我自己的另一节课<b>互换</b>'
                     + '（不需要谁确认）</div>';
             } else {
-                html += '<div class="small mt-1" style="color:#a16207">'
+                html += '<div class="small mt-1 tgt-partner">'
                     + '<i class="bi bi-people"></i> 与 <b>'
-                    + esc(t.swap_teacher_name || '该节任课老师') + '</b> 对调（需他/她确认）'
-                    + (t.swap_class ? ' · 连班级一起换' : ' · 只换时间') + '</div>';
+                    + esc(t.swap_teacher_name || '该节任课老师') + '</b> 对调'
+                    + '（只换上课时间，各自还在自己的班上）'
+                    + (t.skip_confirm ? '' : ' · 需他/她确认') + '</div>';
             }
         }
         return html;
@@ -393,11 +397,6 @@
                 + ' · ' + esc(cfg.weekdays[entryWeekday(e)] || '') + esc(pn(e.period_number))
                 + ' · ' + esc(e.teacher_name || '-') + '</td>'
                 + '<td class="small">' + targetText(it)
-                + (it.target && it.target.partner_entry_id
-                    ? '<div class="form-check mt-1 mb-0"><input class="form-check-input" type="checkbox"'
-                      + ' data-act="swapclass"' + (it.target.swap_class ? ' checked' : '')
-                      + '><label class="form-check-label small">连班级一起对调</label></div>'
-                    : '')
                 + (it.target && it.target.partner_entry_id && !it.target.swap_self
                     ? '<div class="form-check mt-1 mb-0"><input class="form-check-input" type="checkbox"'
                       + ' data-act="needconfirm"' + (it.target.skip_confirm ? '' : ' checked')
@@ -458,14 +457,12 @@
         }
         var slots = slotsCache[it.entry.id] || [];
         var wd = $('#tgtWeekday').val();
-        var only = $('#onlyAvail').is(':checked');
         var rows = slots.filter(function (s) { return String(s.weekday) === String(wd); });
         var avail = rows.filter(function (s) { return s.available; });
-        var show = only ? avail : rows;
+        var show = rows;    // 始终展示当天全部节次，可选/冲突用颜色区分
         if (!show.length) {
             $('#slotArea').html('<div class="muted-tip">'
-                + (cfg.weekdays[wd] || '') + '没有可调整的节次（'
-                + rows.length + ' 个节次全部冲突），换个周几或换一天试试。</div>');
+                + (cfg.weekdays[wd] || '') + '当天没有排课节次，换个周几或换一天试试。</div>');
             return;
         }
         var selP = it.target ? String(it.target.new_period) : '';
@@ -480,16 +477,16 @@
             if (pickable && selP && String(s.period_number) === selP && String(wd) === selW) {
                 cls += ' selected';
             }
-            var note = s.available ? '空'
+            var note = s.available ? '自习'
                 : (s.swappable ? (s.swap_self ? ('我的' + esc(s.swap_subject || '') + '·两节互换')
                                               : ('换 ' + esc(s.swap_teacher_name || '同事')
                                                  + '·' + esc(s.swap_subject || '')))
                                : esc(s.conflict_desc || '冲突'));
-            var tip = s.available ? '空闲：直接调过去'
+            var tip = s.available ? '自习：直接调过去'
                 : (s.swappable ? (s.swap_self
                         ? ('这节是我自己的' + (s.swap_subject || '') + '，点它把这两节互换（不用谁确认）')
                         : ('这节是' + (s.swap_teacher_name || '同事') + '的'
-                           + (s.swap_subject || '') + '，点它与他/她对调'))
+                           + (s.swap_subject || '') + '，点它与他/她换上课时间（各自还上自己的班）'))
                                : (s.conflict_desc || '冲突'));
             html += '<div class="col-6 col-md-3 col-lg-2">'
                 + '<div class="' + cls + '" data-p="' + esc(s.period_number) + '"'
@@ -503,7 +500,7 @@
         $('#slotArea').html(html);
     }
 
-    // 点格子：绿=空档直接调；黄=那节有同事的课 → 和他换（需对方确认）
+    // 点格子：绿=自习空档直接调；黄=那节有同事的课 → 和他换上课时间；紫=自己的两节互换
     function pickSlot() {
         var $el = $(this);
         if ($el.hasClass('conflict')) { return; }
@@ -528,11 +525,12 @@
             new_weekday: wd,
             new_period: $el.data('p'),
             swap_date: dateVal,
+            // 对调只换上课时间（2026-10-14：不再提供"连班级一起换"）
             partner_entry_id: slot.swappable ? (slot.swap_entry_id || null) : null,
             swap_teacher_name: slot.swap_teacher_name || '',
             swap_self: !!slot.swap_self,
             swap_class: false,
-            skip_confirm: true,                 // 无需对方同意确认 —— 默认勾选
+            skip_confirm: true,                 // 无需对方同意确认 —— 默认不勾选
             partner_swap_date: dateVal
         };
         $('#btnApplyAll').prop('disabled', false);
@@ -585,15 +583,6 @@
     }
 
     // ── 事件绑定 ──
-    // 与人对调时：是否连班级一起换（默认只换时间）
-    $(document).on('change', '#pickedBody [data-act=swapclass]', function () {
-        var it = itemOf($(this).closest('tr').data('id'));
-        if (it && it.target) {
-            it.target.swap_class = $(this).is(':checked');
-            renderPicked();
-            renderSummary();
-        }
-    });
     // 与人对调时：默认**无需**对方同意确认（勾选此项才需要他点【同意】）
     $(document).on('change', '#pickedBody [data-act=needconfirm]', function () {
         var it = itemOf($(this).closest('tr').data('id'));
@@ -633,7 +622,6 @@
         if (!$('#onlyMine').is(':checked')) { loadEntries(); }
     });
     $('#tgtWeekday').on('change', renderSlots);
-    $('#onlyAvail').on('change', renderSlots);
     $('#tgtDate').on('change', function () {
         var it = activeItem();
         if (it && it.target && !isPermanent()) {
@@ -662,11 +650,15 @@
     $(document).on('click', '.entry-pick', toggleEntry);
     $(document).on('click', '.slot-card', pickSlot);
     $(document).on('click', '#pickedBody tr', function (e) {
+        // 行内的勾选框（如"需要对方同意确认"）不能被整行重渲染吞掉 ——
+        // 以前点一下勾选，紧接着整行重画把勾选状态冲掉，看起来"勾不上"。
+        if ($(e.target).closest('.form-check').length) { return; }
         var $btn = $(e.target).closest('[data-act]');
         var id = $(this).data('id');
         if ($btn.length) {
             if ($btn.data('act') === 'remove') { removeItem(id); return; }
             if ($btn.data('act') === 'set') { activateRow(id); return; }
+            return;      // 其它 data-act 元素（勾选框）交给各自的 change 处理
         }
         activateRow(id);
     });
@@ -696,9 +688,9 @@
                 new_period: parseInt(it.target.new_period, 10),
                 swap_date: perm ? '' : (it.target.swap_date || '')
             };
-            if (it.target.partner_entry_id) {          // 那格有人 → 与他对调
+            if (it.target.partner_entry_id) {          // 那格有人 → 与他换上课时间
                 row.partner_entry_id = it.target.partner_entry_id;
-                row.swap_class = !!it.target.swap_class;
+                row.swap_class = false;                // 2026-10-14：不再连班级一起换
                 row.partner_swap_date = perm ? '' : (it.target.partner_swap_date
                                                       || it.target.swap_date || '');
                 // 默认「无需对方同意确认」；勾选 needconfirm 才需要他答复
@@ -716,7 +708,7 @@
         var needOk = items.filter(function (o) {
             return o.target && o.target.partner_entry_id && !o.target.swap_self;
         }).length;
-        var tail = needOk ? ('\n其中 ' + needOk + ' 节是和同事对调，需他们点【同意】后才进入教务审批。')
+        var tail = needOk ? ('\n其中 ' + needOk + ' 节是和同事换上课时间，需他们点【同意】后才进入教务审批。')
                           : '\n提交后按审批链路整批一次审批。';
         if (!confirm('确认提交调课申请？\n共 ' + items.length + ' 节：' + names + tail)) {
             e.preventDefault();

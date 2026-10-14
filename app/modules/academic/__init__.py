@@ -8,8 +8,9 @@ bp = Blueprint('academic', __name__, url_prefix='/academic')
 # 各子模块通过 @bp.route 注册（延迟 import，保证 bp 已定义）
 # 注意 subject_leaders 不能删：任课安排（/academic/duty*）确已于 2026-10-10 下线
 # （旧址一律 404 是刻意行为），但该文件（2026-10-12 由 duty.py 重命名，消除误导）
-# 现承载「备课组长」路由（/academic/leaders*）；删掉此 import 会让 /academic/leaders
-# 直接 404、备课组长功能整体失效（见 smoke_academic / academic_regression）。
+# 现承载「学科组长」路由（/academic/leaders*；2026-10-14 由「备课组长」升级，
+# 一页两类：备课组长＝年级×学科、教研组长＝只按学科）；删掉此 import 会让
+# /academic/leaders 直接 404、学科组长功能整体失效（见 smoke_academic / academic_regression）。
 from app.modules.academic.routes import (home, teachers,  # noqa: E402,F401
                                          inspection, achievements, swap, forms,
                                          subject_leaders)

@@ -213,6 +213,8 @@ def get_available_slots(schedule_id, grade, class_name, teacher_uid,
     每项为 dict：weekday / weekday_text / period_number / period_name /
       start_time / end_time / period_type / class_conflict / teacher_conflict /
       available / conflict_desc。
+    2026-10-14（用户口径）：对调**只换上课时间**（不再连班级一起换），绿＝自习空档、
+    黄＝同事的课（swappable，可换时间）、紫＝我自己的另一节课（swap_self）。
     """
     pmap = _period_map(schedule_id)
     # 该学期还没定义节次时，按**默认模板的节数**占位（不是上限：一天几节由学校自定义）
@@ -254,8 +256,8 @@ def get_available_slots(schedule_id, grade, class_name, teacher_uid,
             # 本班这一格就是**我自己的另一节课**时，不算"教师冲突"（那正是自交换的对象）
             teacher_conflict = te is not None and (ce is None or te.id != ce.id)
             available = not class_conflict and not teacher_conflict
-            # 本班这一格有课 → 不是"不能用"，而是"可以和它换"：
-            #   他人任教 = 与同事对调（黄格，需对方确认）；本人任教 = 我自己的两节互换（紫格）
+            # 本班这一格有课 → 不是"不能用"，而是"可以和它换上课时间"：
+            #   他人任教 = 与同事对调（黄格）；本人任教 = 我自己的两节互换（紫格）
             swap_entry = None
             if ce and ce.teacher_uid and ce.id not in temp_ids:
                 swap_entry = ce
@@ -277,7 +279,7 @@ def get_available_slots(schedule_id, grade, class_name, teacher_uid,
                 'teacher_conflict': teacher_conflict,
                 'available': available,
                 'conflict_desc': conflict_desc,
-                # 对调对象（绿=空档直接调；黄=与同事对调需确认；紫=我自己的两节互换）
+                # 对调对象（绿=自习空档直接调；黄=与同事换时间；紫=我自己的两节互换）
                 'swappable': swap_entry is not None,
                 'swap_self': bool(swap_entry and swap_entry.teacher_uid == teacher_uid),
                 'swap_entry_id': swap_entry.id if swap_entry else None,
@@ -782,14 +784,17 @@ def apply_swap_batch(applicant_uid, applicant_name, items, is_permanent=False,
     """调课 / 与人对调的**混合批量**提交（v1.19.47.29，用户口径 2026-10-13）。
 
     用户口径：普通调课与两人换课是**同一个动作**，差别只在目标格现在有没有人 ——
-      - 目标格**空着** → 我把课挪过去（普通调课）；
-      - 目标格**有人** → 与那位老师对调（多一步"对方确认"，各自确认自己的那条）。
+      - 目标格**空着（自习）** → 我把课挪过去（普通调课）；
+      - 目标格**有人** → 与那位老师**换上课时间**（多一步"对方确认"，各自确认自己的那条）。
+
+    **2026-10-14：对调只换上课时间** —— 班级 / 教室 / 学生都不动（`swap_class`
+    一律按 False 处理，"换班上课"已删除）。
 
     items: [{'entry_id': int, 'new_weekday': int, 'new_period': int,
              'swap_date': date|None,
-             'partner_entry_id': int(可选；有值 = 与那节课对调),
-             'swap_class': bool(可选；对调时是否连班级一起换，默认只换时间),
-             'partner_swap_date': date(可选；对方那天，默认同 swap_date)}]
+             'partner_entry_id': int(可选；有值 = 与那节课换时间),
+             'partner_swap_date': date(可选；对方那天，默认同 swap_date),
+             'need_partner_confirm': bool(可选；默认 False = 免确认)}]
 
     一次提交可以混着来（几节调空档 + 几节和不同老师换）：共享 batch_id 整批审批 /
     执行 / 撤销，对调的那些行各自等自己的 partner 确认。**全成全败**。
@@ -875,8 +880,10 @@ def apply_swap_batch(applicant_uid, applicant_name, items, is_permanent=False,
             continue
         prepared.append({
             'idx': idx, 'entry': entry, 'twd': twd, 'tpd': tpd, 'sdate': sdate,
-            'e2': e2, 'swap_class': bool(it.get('swap_class')),
-            # 「无需对方同意确认」默认勾选 → 前端不传即为 False（不需要确认）
+            'e2': e2,
+            # 2026-10-14：对调**只换上课时间**（不再有"连班级一起换"选项）
+            'swap_class': False,
+            # 「无需对方同意确认」默认不勾选 → 前端不传即为 False（不需要确认）
             'need_confirm': bool(it.get('need_partner_confirm')),
             'partner_swap_date': (None if is_permanent
                                   else (it.get('partner_swap_date') or sdate)),
@@ -2535,21 +2542,26 @@ def build_live_schedule(schedule_id, target_date, period_number, grade_filter=No
                     temp_in[(te['grade'], te['class_name'])] = te
 
     data = {}
+    # 2026-10-13（单节总览）：每行补 entry_id / teacher_uid —— 新的「单节总览」页要
+    # 就地把这节课发起代课/调课，落库需要原条目 id 与原任课教师 uid（既有调用方不受影响）。
     for grade, class_name in classes:
         row = {'grade': grade, 'class_name': class_name, 'period_number': period_number,
                'subject': None, 'teacher_name': None, 'room': None,
-               'entry_type': None, 'is_temp_swap': False}
+               'entry_type': None, 'is_temp_swap': False,
+               'entry_id': None, 'teacher_uid': None}
         key = (grade, class_name)
         if key in temp_in:
             te = temp_in[key]
             row.update({'subject': te['subject'], 'teacher_name': te['teacher_name'],
                         'room': te['room'], 'entry_type': te['entry_type'],
+                        'entry_id': te.get('id'), 'teacher_uid': te.get('teacher_uid'),
                         'is_temp_swap': True})
         else:
             be = base_map.get(key)
             if be and be.id not in moved_away:
                 row.update({'subject': be.subject, 'teacher_name': be.teacher_name,
                             'room': be.room, 'entry_type': be.entry_type,
+                            'entry_id': be.id, 'teacher_uid': be.teacher_uid,
                             'is_temp_swap': False})
         data.setdefault(grade, []).append(row)
     for g in data:

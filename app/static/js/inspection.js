@@ -70,10 +70,31 @@ function renderCoverage(cov) {
     $('#statMonthRate').text(rateOf(cov.month_checked, cov.month_expected) + '%');
 }
 
+/* 2026-10-14 审计修复：查课状态色改读主题变量（theme.css --sl-chart-*），
+   深色下提亮一档（如 #ef4444 → #f87171），色相不变 → 红/黄/绿语义不丢。
+   取不到时回落到原字面量。 */
+function sem() {
+    return (window.stulinkSemantic && window.stulinkSemantic()) ||
+        {ok: '#10b981', warn: '#f59e0b', danger: '#ef4444', info: '#3b82f6',
+         purple: '#6366f1', cyan: '#0ea5e9', muted: '#94a3b8'};
+}
+/* 各图表的最后一次数据：主题切换后据此重绘（ECharts 颜色是 JS 字面量，CSS 够不到） */
+var _last = {};
+function repaintCharts() {
+    try {
+        if (_last.cls) renderClassChart(_last.cls);
+        if (_last.period) renderPeriodChart(_last.period);
+        if (_last.pie) renderPie(_last.pie);
+        if (_last.trend) renderLine(_last.trend);
+    } catch (e) { /* 重绘失败不影响页面使用（刷新即可） */ }
+}
+if (window.stuOnThemeChange) { window.stuOnThemeChange(repaintCharts); }
+
 /* 异常最多的班级（横向条形，第一名在最上面） */
 function renderClassChart(rows) {
     var el = document.getElementById('chartClass');
     if (!el || typeof echarts === 'undefined') return;
+    _last.cls = rows;
     if (!charts.cls) charts.cls = echarts.init(el);
     var data = rows.slice().reverse();
     charts.cls.setOption({
@@ -85,7 +106,7 @@ function renderClassChart(rows) {
             data: data.map(function (d) { return d.label || ''; })
         },
         series: [{
-            type: 'bar', barMaxWidth: 14, itemStyle: { color: '#ef4444' },
+            type: 'bar', barMaxWidth: 14, itemStyle: { color: sem().danger },
             label: { show: true, position: 'right', fontSize: 10 },
             data: data.map(function (d) { return d.count || 0; })
         }]
@@ -96,6 +117,7 @@ function renderClassChart(rows) {
 function renderPeriodChart(rows) {
     var el = document.getElementById('chartPeriod');
     if (!el || typeof echarts === 'undefined') return;
+    _last.period = rows;
     if (!charts.period) charts.period = echarts.init(el);
     var names = rows.map(function (d) { return '第' + d.period + '节'; });
     var normal = rows.map(function (d) { return Math.max(0, (d.count || 0) - (d.abnormal || 0)); });
@@ -107,8 +129,8 @@ function renderPeriodChart(rows) {
         xAxis: { type: 'category', data: names, axisLabel: { fontSize: 10 } },
         yAxis: { type: 'value', minInterval: 1, axisLabel: { fontSize: 10 } },
         series: [
-            { name: '正常', type: 'bar', stack: 'p', itemStyle: { color: '#10b981' }, data: normal },
-            { name: '异常', type: 'bar', stack: 'p', itemStyle: { color: '#ef4444' }, data: bad }
+            { name: '正常', type: 'bar', stack: 'p', itemStyle: { color: sem().ok }, data: normal },
+            { name: '异常', type: 'bar', stack: 'p', itemStyle: { color: sem().danger }, data: bad }
         ]
     });
 }
@@ -150,9 +172,12 @@ function renderPie(data) {
         if (!el) return;
         charts.pie = echarts.init(el);
     }
+    _last.pie = data;
     // 2026-10-13：'缺课'统一改为'缺勤'，新增'考试'（与 models/academic.py 的 INSPECTION_RESULTS 同步）
-    var colorMap = { '正常': '#10b981', '迟到': '#f59e0b', '缺勤': '#ef4444', '调课': '#6366f1',
-                     '考试': '#0ea5e9', '其他': '#94a3b8' };
+    // 2026-10-14：色值改读主题变量（深色下提亮一档，色相不变）
+    var c = sem();
+    var colorMap = { '正常': c.ok, '迟到': c.warn, '缺勤': c.danger, '调课': c.purple,
+                     '考试': c.cyan, '其他': c.muted };
     var pieData = data.map(function (d) {
         return { name: d.name, value: d.value, itemStyle: { color: colorMap[d.name] || undefined } };
     });
@@ -176,6 +201,8 @@ function renderLine(trend) {
         if (!el) return;
         charts.line = echarts.init(el);
     }
+    _last.trend = trend;
+    var c = sem();
     var months = trend.map(function (d) { return d.month; });
     charts.line.setOption({
         tooltip: { trigger: 'axis' },
@@ -185,16 +212,18 @@ function renderLine(trend) {
         yAxis: { type: 'value', axisLabel: { fontSize: 11 }, minInterval: 1 },
         series: [
             { name: '正常', type: 'line', data: trend.map(function (d) { return d.normal; }),
-              smooth: true, lineStyle: { color: '#10b981', width: 2 }, itemStyle: { color: '#10b981' },
-              areaStyle: { color: 'rgba(16,185,129,0.08)' } },
+              smooth: true, lineStyle: { color: c.ok, width: 2 }, itemStyle: { color: c.ok },
+              /* 原 rgba(16,185,129,.08) 是写死的浅绿，深色下完全看不见；
+                 改用「主题色 + opacity」，两套主题都随底色自动调整。 */
+              areaStyle: { color: c.ok, opacity: 0.12 } },
             { name: '迟到', type: 'line', data: trend.map(function (d) { return d.late; }),
-              smooth: true, lineStyle: { color: '#f59e0b', width: 2 }, itemStyle: { color: '#f59e0b' } },
+              smooth: true, lineStyle: { color: c.warn, width: 2 }, itemStyle: { color: c.warn } },
             { name: '缺勤', type: 'line', data: trend.map(function (d) { return d.absent; }),
-              smooth: true, lineStyle: { color: '#ef4444', width: 2 }, itemStyle: { color: '#ef4444' } },
+              smooth: true, lineStyle: { color: c.danger, width: 2 }, itemStyle: { color: c.danger } },
             { name: '调课', type: 'line', data: trend.map(function (d) { return d.swap; }),
-              smooth: true, lineStyle: { color: '#6366f1', width: 2 }, itemStyle: { color: '#6366f1' } },
+              smooth: true, lineStyle: { color: c.purple, width: 2 }, itemStyle: { color: c.purple } },
             { name: '考试', type: 'line', data: trend.map(function (d) { return d.exam; }),
-              smooth: true, lineStyle: { color: '#0ea5e9', width: 2 }, itemStyle: { color: '#0ea5e9' } }
+              smooth: true, lineStyle: { color: c.cyan, width: 2 }, itemStyle: { color: c.cyan } }
         ]
     });
 }

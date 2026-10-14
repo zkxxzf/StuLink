@@ -127,10 +127,10 @@ with app.test_client() as c:
     check('成绩管理侧任课映射不受影响',
           r.status_code == 200 and '/grades/api/teachers' in html,
           f'status={r.status_code}')
-    # 下线「任课安排」时，同文件的路由（备课组长）必须不受影响
+    # 下线「任课安排」时，同文件的路由（学科组长）必须不受影响
     r = c.get('/academic/leaders')
-    check('备课组长页未受影响',
-          r.status_code == 200 and '备课组长' in r.get_data(as_text=True),
+    check('学科组长页未受影响',
+          r.status_code == 200 and '学科组长' in r.get_data(as_text=True),
           f'status={r.status_code}')
     # 2026-10-10：课表矩阵 CSS 从内联抽成静态文件（每页省 ~8KB 且可被浏览器缓存）。
     # 页面是否引用它由回归 OVERVIEW 项断言（本脚本账号对课表页权限路径不同）。

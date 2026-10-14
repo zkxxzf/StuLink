@@ -66,7 +66,7 @@
                 <option value="{{ t }}" {% if filter_type == t %}selected{% endif %}>{{ lab }}</option>
                 {% endfor %}
             </select>
-            <input type="text" name="keyword" value="{{ filter_keyword }}" placeholder="姓名 / 学号" style="width:130px">
+            <input type="text" name="keyword" value="{{ filter_keyword }}" placeholder="姓名 / 学号" style="width:130px" aria-label="姓名 / 学号">
             <input type="date" name="date_from" value="{{ filter_from }}" title="起始日期">
             <span class="text-muted small">至</span>
             <input type="date" name="date_to" value="{{ filter_to }}" title="结束日期">

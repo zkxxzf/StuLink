@@ -17,14 +17,15 @@
 <style>
     /* 表一双向悬挂：表头 sticky top + 首列 sticky left */
     #permTableWrap { max-height: 62vh; overflow: auto; }
+    /* 2026-10-14：表头/冻结列写死浅底在深色下是「白块 + 浅字」（对比 1.1）→ 主题变量 */
     #permTable thead tr:first-child th { position: sticky; top: 0; z-index: 3;
-        background: #f8f9fa; height: 38px; white-space: nowrap; }
+        background: var(--sl-surface-2); height: 38px; white-space: nowrap; }
     #permTable thead tr:nth-child(2) th { position: sticky; top: 38px; z-index: 3;
-        background: #f8f9fa; }
+        background: var(--sl-surface-2); }
     #permTable th.sticky-col, #permTable td.sticky-col {
-        position: sticky; left: 0; z-index: 2; background: #fff; }
+        position: sticky; left: 0; z-index: 2; background: var(--sl-surface); }
     #permTable thead th.sticky-col { top: 0; left: 0; z-index: 6; }
-    #permTable tr.table-warning td.sticky-col { background: #fff3cd; }
+    #permTable tr.table-warning td.sticky-col { background: var(--sl-soft-warn-bg); }
     /* 紧凑档位徽章 */
     .lvl { display: inline-block; width: 56px; padding: 1px 0; border-radius: 10px;
         cursor: pointer; font-size: 12px; user-select: none; line-height: 18px;
@@ -35,8 +36,8 @@
     .lvl.disabled { cursor: not-allowed; opacity: .55; }
     /* 表二首列悬挂（表头已 sticky） */
     #scopeTable th.sticky-col, #scopeTable td.sticky-col {
-        position: sticky; left: 0; z-index: 2; background: #fff; }
-    #scopeTable thead th.sticky-col { top: 0; left: 0; z-index: 6; background: #f8f9fa; }
+        position: sticky; left: 0; z-index: 2; background: var(--sl-surface); }
+    #scopeTable thead th.sticky-col { top: 0; left: 0; z-index: 6; background: var(--sl-surface-2); }
 </style>
 
 <!-- ============ 表一：功能权限（身份 × 子功能 × 三档，点击切换） ============ -->
@@ -106,14 +107,14 @@
                     <td>{{ row.user_count }}</td>
                     <td class="text-nowrap">
                         {% if row.protected %}
-                        <button class="btn btn-sm btn-outline-secondary" disabled title="系统保留身份，不可修改">
+                        <button class="btn btn-sm btn-outline-secondary" disabled title="系统保留身份，不可修改" aria-label="系统保留身份，不可修改">
                             <i class="bi bi-lock"></i>
                         </button>
                         {% else %}
-                        <button class="btn btn-sm btn-outline-warning btn-edit-group" data-gid="{{ row.g.id }}" title="编辑身份">
+                        <button class="btn btn-sm btn-outline-warning btn-edit-group" data-gid="{{ row.g.id }}" title="编辑身份" aria-label="编辑身份">
                             <i class="bi bi-pencil"></i>
                         </button>
-                        <button class="btn btn-sm btn-outline-danger btn-del-group" data-gid="{{ row.g.id }}" title="删除身份">
+                        <button class="btn btn-sm btn-outline-danger btn-del-group" data-gid="{{ row.g.id }}" title="删除身份" aria-label="删除身份">
                             <i class="bi bi-trash"></i>
                         </button>
                         {% endif %}
@@ -143,7 +144,7 @@
                 {% endfor %}
             </select>
             <input id="dsSearch" class="form-control form-control-sm" style="width:180px"
-                   placeholder="搜索姓名 / 账号">
+                   placeholder="搜索姓名 / 账号" aria-label="搜索姓名 / 账号">
             <button class="btn btn-sm btn-success" id="btnSaveScope">
                 <i class="bi bi-check-lg"></i> 保存数据范围
             </button>

@@ -116,7 +116,7 @@
     }
 
     /* ── 快速标记（2026-10-10 改版）──────────────────────────────────
-       单击 = 正常；双击 = 迟到；右键 = 更多（缺课 / 调课 / 迟到说明 / 其他 / 撤销）。
+       单击 = 正常；双击 = 迟到；右键 = 更多（缺勤 / 调课 / 考试 / 迟到说明 / 其他 / 撤销）。
        原先每次都要"点格子 → 弹面板 → 再点按钮"，二次操作太慢；现在单/双击直达，
        需要写原因的（如迟到几分钟）走右键。 */
     function cellPayload($el, result, note) {
@@ -287,4 +287,186 @@
     });
 
     recount();
+
+    /* ═══════════════════════════════════════════════════════════════════
+       单节课表视图（2026-10-13）：点班级卡片 → 就地发起「代课 / 调课」
+         - 只选教师                = 代课（时间班级都不动，exchange_kind='cover'）
+         - 再选这位教师的某一节课  = 调课（两节课**换上课时间**，
+                                    2026-10-14 起不再换班级 / 教室 / 学生）
+       提交走 POST /academic/inspection/quick-swap：服务端以**原任课教师**为申请人落库，
+       与「请人代课 / 调课申请」页同一条「对方确认 → 教务审批 → 执行生效」链路。
+       独立 IIFE + 原生 fetch / DOM，不依赖 jQuery，也不与上面的矩阵交互抢事件。
+       ═══════════════════════════════════════════════════════════════════ */
+    (function () {
+        'use strict';
+        var pov = {};
+        try { pov = JSON.parse(document.getElementById('liveData').textContent || '{}'); } catch (e) { pov = {}; }
+        if (!pov.canSchedule) { return; }               // 无权限：纯展示
+        var box = document.getElementById('povContainer');
+        if (!box) { return; }                           // 当前不在单节课表视图
+
+        var WEEK = { 1: '周一', 2: '周二', 3: '周三', 4: '周四', 5: '周五', 6: '周六', 7: '周日' };
+        var cur = null;              // 当前操作的班级行
+        var teachers = null;         // 教师清单缓存
+        var modal = null;
+
+        function el(id) { return document.getElementById(id); }
+        function escHtml(s) {
+            return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
+                return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+            });
+        }
+
+        /* ── 节次切换：与日期 / 年级一致，走整页刷新（服务端渲染）── */
+        function gotoPeriod(step) {
+            var sel = el('povPeriodPick');
+            if (!sel) { return; }
+            if (step) {
+                var i = sel.selectedIndex + step;
+                if (i < 0 || i >= sel.options.length) { return; }
+                sel.selectedIndex = i;
+            }
+            window.location.href = pov.pageUrl + '?view=period&date=' + encodeURIComponent(pov.date)
+                + '&period=' + encodeURIComponent(sel.value)
+                + (pov.grade ? '&grade=' + encodeURIComponent(pov.grade) : '');
+        }
+        el('povPeriodPick').addEventListener('change', function () { gotoPeriod(0); });
+        el('povPrevPeriod').addEventListener('click', function () { gotoPeriod(-1); });
+        el('povNextPeriod').addEventListener('click', function () { gotoPeriod(1); });
+
+        /* ── 教师清单 / 某位教师的课（复用调课模块既有接口）── */
+        function loadTeachers() {
+            if (teachers) { return Promise.resolve(teachers); }
+            return fetch(pov.teachersUrl, { headers: { 'Accept': 'application/json' } })
+                .then(function (r) { return r.json(); })
+                .then(function (res) { teachers = (res && res.data && res.data.teachers) || []; return teachers; })
+                .catch(function () { return (teachers = []); });
+        }
+
+        function loadPartnerEntries(uid) {
+            var sel = el('swPartnerEntry');
+            sel.innerHTML = '<option value="">加载中…</option>';
+            fetch(pov.entriesUrl + '?uid=' + encodeURIComponent(uid),
+                  { headers: { 'Accept': 'application/json' } })
+                .then(function (r) { return r.json(); })
+                .then(function (res) {
+                    var list = (res && res.data && res.data.entries) || [];
+                    if (!list.length) { sel.innerHTML = '<option value="">该教师本学期暂无其它课</option>'; return; }
+                    var opts = ['<option value="">请选择他/她的某一节课…</option>'];
+                    list.forEach(function (e) {
+                        opts.push('<option value="' + escHtml(e.id) + '">' + escHtml(
+                            (e.weekday_text || WEEK[e.weekday] || '') + ' 第' + e.period_number + '节'
+                            + ' · ' + (e.grade || '') + (e.class_name || '') + ' · ' + (e.subject || ''))
+                            + '</option>');
+                    });
+                    sel.innerHTML = opts.join('');
+                })
+                .catch(function () { sel.innerHTML = '<option value="">加载失败</option>'; });
+        }
+
+        /* ── 打开弹窗 ── */
+        function openModal(card) {
+            cur = {
+                entry: card.getAttribute('data-entry'),
+                cls: card.getAttribute('data-cls'),
+                subj: card.getAttribute('data-subj'),
+                tch: card.getAttribute('data-tch'),
+                tuid: card.getAttribute('data-tuid'),
+                room: card.getAttribute('data-room')
+            };
+            el('swTargetClass').textContent = cur.cls + ' · 第 ' + (pov.povPeriod || '') + ' 节';
+            el('swTargetInfo').textContent = cur.subj + ' · 当前任课：' + (cur.tch || '未指定')
+                + (cur.room ? ' · 教室 ' + cur.room : '');
+            el('swReason').value = '';
+            el('swDate').value = pov.date || '';
+            el('swPermanent').checked = false;
+            el('swEntryWrap').classList.add('d-none');
+            el('swPartnerEntry').innerHTML = '<option value="">请先选择教师</option>';
+            el('swKindCover').checked = true;
+            el('swTeacherLabel').textContent = '代课教师';
+            el('swHint').textContent = '';
+            loadTeachers().then(function (list) {
+                var opts = ['<option value="">请选择教师…</option>'];
+                list.forEach(function (t) {
+                    if (t.uid === cur.tuid) { return; }        // 不能选原任课教师本人
+                    opts.push('<option value="' + escHtml(t.uid) + '">' + escHtml(t.name || t.uid)
+                        + '（' + t.count + ' 节）</option>');
+                });
+                el('swTeacher').innerHTML = opts.join('');
+            });
+            if (!modal) { modal = new bootstrap.Modal(el('swapModal')); }
+            modal.show();
+        }
+
+        function onKindChange() {
+            var ex = el('swKindExchange').checked;
+            el('swEntryWrap').classList.toggle('d-none', !ex);
+            el('swTeacherLabel').textContent = ex ? '对调教师' : '代课教师';
+            if (ex && el('swTeacher').value) { loadPartnerEntries(el('swTeacher').value); }
+        }
+
+        function submit() {
+            if (!cur) { return; }
+            var kind = el('swKindExchange').checked ? 'exchange' : 'cover';
+            var uid = el('swTeacher').value;
+            if (!uid) {
+                el('swHint').textContent = '请先选择' + (kind === 'exchange' ? '对调' : '代课') + '教师';
+                return;
+            }
+            var reason = (el('swReason').value || '').trim();
+            if (!reason) { el('swHint').textContent = '请填写事由'; return; }
+            var payload = {
+                entry_id: cur.entry, kind: kind, partner_uid: uid, reason: reason,
+                is_permanent: el('swPermanent').checked, swap_date: el('swDate').value
+            };
+            if (kind === 'exchange') {
+                if (!el('swPartnerEntry').value) {
+                    el('swHint').textContent = '请再选中对方的具体一节课';
+                    return;
+                }
+                // 2026-10-14：只换上课时间（不换班级 / 教室 / 学生）
+                payload.partner_entry_id = el('swPartnerEntry').value;
+                payload.swap_time = true;
+                payload.swap_class = false;
+            }
+            var btn = el('swSubmit');
+            btn.disabled = true;
+            el('swHint').textContent = '提交中…';
+            fetch(pov.submitUrl, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json', 'Accept': 'application/json',
+                    'X-CSRFToken': window.csrfToken || ''   // jQuery 有 ajaxSetup 钩子，fetch 必须手动带
+                },
+                body: JSON.stringify(payload)
+            }).then(function (r) { return r.json().then(function (j) { return { ok: r.ok, j: j || {} }; }); })
+              .then(function (res) {
+                  btn.disabled = false;
+                  if (!res.ok || !res.j.success) {
+                      el('swHint').textContent = res.j.message || '提交失败';
+                      return;
+                  }
+                  modal.hide();
+                  notify(res.j.message || '已提交申请', 'success');
+              })
+              .catch(function () {
+                  btn.disabled = false;
+                  el('swHint').textContent = '网络错误，请重试';
+              });
+        }
+
+        box.addEventListener('click', function (ev) {
+            var card = ev.target.closest ? ev.target.closest('.pov-card.can') : null;
+            if (card) { openModal(card); }
+        });
+        Array.prototype.forEach.call(document.querySelectorAll('input[name="swKind"]'), function (r) {
+            r.addEventListener('change', onKindChange);
+        });
+        el('swTeacher').addEventListener('change', function () {
+            if (el('swKindExchange').checked && el('swTeacher').value) {
+                loadPartnerEntries(el('swTeacher').value);
+            }
+        });
+        el('swSubmit').addEventListener('click', submit);
+    })();
 })();

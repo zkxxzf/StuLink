@@ -165,6 +165,17 @@ def _print_banner(cfg, me):
         '',
     ]
     lines.extend(_client_example(cfg, url, mode))
+    # 2026-10-14 审计 API-03：token 模式 = 一个静态令牌 + 固定 bind_user（默认 admin）
+    # 身份，令牌泄露即该账号可见数据全部泄露，且无法区分客户端。启动就说清楚。
+    if mode == 'token':
+        lines.extend([
+            '',
+            '  【风险提示】当前为 token 兼容模式：所有客户端共用固定账号'
+            f" {cfg.get('bind_user') or 'admin'} 的身份执行，",
+            '         令牌一旦泄露 = 该账号可见的成绩数据全部可读，且无法追溯到具体人。',
+            '         生产请在 config.json 中把 auth_mode 改回 account（每请求校验账号密码），',
+            '         或至少把 bind_user 改成权限最小化的专用账号。',
+        ])
     # 2026-10-13（全面审计 M-5）：局域网暴露时的准入自检 —— 只认账号密码，等于让
     # 同网段任何设备都能拿真实教师账号反复试探本端口，这里显式提醒一次。
     if (host in ('0.0.0.0', '::', '::0')

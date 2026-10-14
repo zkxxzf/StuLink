@@ -273,10 +273,12 @@ def swap_page():
 @login_required
 @perm_required('academic.swap')
 def swap_apply():
-    """个人调课申请：选原课程（可多节，各自指定目标时段）→ 填理由/日期/是否永久。
+    """个人调课申请：选原课程（可多节，各自指定目标空档）→ 填理由/日期/是否永久。
 
-    2026-10-12：一次可提交多节 —— 明细走 `items_json`（服务层 apply_swap_multi
+    2026-10-12：一次可提交多节 —— 明细走 `items_json`（服务层 apply_swap_batch
     共享 batch_id，整批一次审批/执行/撤销），同时兼容旧的单条字段。
+    目标格：空档（自习）直接调 / 有人则与那位老师**换上课时间**（2026-10-14 起
+    不再提供"连班级一起换"）。
     """
     sched = swap_service.get_active_schedule()
     if not sched:
@@ -288,8 +290,9 @@ def swap_apply():
         reason = (request.form.get('reason') or '').strip()
         is_permanent = _bool_flag(request.form.get('is_permanent'))
         new_room = (request.form.get('new_room') or '').strip()
-        # 2026-10-13（v1.19.47.29）：普通调课与「与人对调」合并 —— items 可带
-        # partner_entry_id（有 = 那格有人，和对调；没有 = 空档，直接调）。
+        # 2026-10-13（v1.19.47.29）：普通调课与「与人对调（只换上课时间）」合并 ——
+        # items 可带 partner_entry_id（有 = 那格有人，和他换时间；没有 = 空档，直接调）。
+        # 2026-10-14：删除"连班级一起换（换班上课）"，对调只换时间。
         items = _parse_json_items(request.form, required=('entry_id',))
         if not items:
             items = _parse_swap_items(request.form)   # 兼容旧的单条字段提交
@@ -340,20 +343,11 @@ def swap_apply():
     uid, name = _applicant()
     periods = swap_service.get_periods(sched.id)
     class_opts = _swap_class_options(sched.id)
-    # 2026-10-12 换课：我的课程清单（供换课表单选「我的课」；排除临时调课条目）
-    temp_ids = swap_service._temp_target_ids(sched.id)
-    my_entries = (ScheduleEntry.query
-                  .filter(ScheduleEntry.term_schedule_id == sched.id,
-                          ScheduleEntry.teacher_uid == uid,
-                          ScheduleEntry.is_deleted.is_(False))
-                  .order_by(ScheduleEntry.weekday, ScheduleEntry.period_number).all())
-    my_entries = [e.to_dict() for e in my_entries if e.id not in temp_ids]
     return render_template('academic/swap_apply.html',
                            schedule=sched, periods=periods, class_opts=class_opts,
                            weekdays=WEEKDAY_NAMES,
                            applicant_uid=uid, applicant_name=name,
                            today=date.today().isoformat(),
-                           my_entries=my_entries,
                            chain=swap_service.approval_chain())
 
 

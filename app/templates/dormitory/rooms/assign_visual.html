@@ -59,7 +59,7 @@
     cursor: move;
     font-size: 0.65rem;
     position: relative;
-    background: #fff;
+    background: var(--sl-surface);
     transition: all 0.2s;
     user-select: none;
     display: flex;
@@ -72,15 +72,17 @@
     box-shadow: 0 2px 8px rgba(0,0,0,0.15);
 }
 
+/* 2026-10-14：底色是**半透明**的（叠在页面底色上），深色主题下整体变深，
+   写死的深色字就变成「深底深字」看不见 → 改成跟随主题的文字色。 */
 .room-block.male {
     background: rgba(13,110,253,0.08);
-    color: #1e293b;
+    color: var(--sl-text);
     border-color: #93c5fd;
 }
 
 .room-block.female {
     background: rgba(220,53,69,0.08);
-    color: #1e293b;
+    color: var(--sl-text);
     border-color: #f9a8d4;
 }
 
@@ -141,13 +143,14 @@
     cursor: default;
 }
 
-/* 班级卡片 */
+/* 班级卡片（2026-10-14：写死 #fff 在深色下是白卡，叠上半透明性别底后
+   变成「浅粉底 + 浅字」对比 1.13） → 主题变量 */
 .class-card {
     margin-bottom: 8px;
     border-radius: 8px;
-    border: 1px solid #e2e8f0;
+    border: 1px solid var(--sl-border);
     transition: all 0.2s;
-    background: #fff;
+    background: var(--sl-surface);
     box-shadow: 0 1px 2px rgba(0,0,0,.05);
 }
 
@@ -280,10 +283,10 @@
 
 /* 年级分组 */
 .grade-section {
-    border: 1px solid #dee2e6;
+    border: 1px solid var(--sl-border);
     border-radius: 6px;
     padding: 8px;
-    background: #fff;
+    background: var(--sl-surface);
     margin-bottom: 12px;
 }
 

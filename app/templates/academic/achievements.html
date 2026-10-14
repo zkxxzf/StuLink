@@ -270,13 +270,13 @@
                             <i class="bi bi-eye"></i>{% if n_att %} <span class="badge bg-secondary" style="font-size:9px">{{ n_att }}</span>{% endif %}
                         </button>
                         {% if a.status == 'pending' and can_edit %}
-                        <button type="button" class="btn btn-sm btn-outline-success py-0" title="通过"
+                        <button type="button" class="btn btn-sm btn-outline-success py-0" title="通过" aria-label="通过"
                                 data-bs-toggle="modal" data-bs-target="#reviewModal"
                                 data-id="{{ a.id }}" data-teacher="{{ a.teacher_name }}"
                                 data-title="{{ a.title }}" data-action="approve">
                             <i class="bi bi-check-lg"></i>
                         </button>
-                        <button type="button" class="btn btn-sm btn-outline-warning py-0" title="驳回（需填意见）"
+                        <button type="button" class="btn btn-sm btn-outline-warning py-0" title="驳回（需填意见）" aria-label="驳回（需填意见）"
                                 data-bs-toggle="modal" data-bs-target="#reviewModal"
                                 data-id="{{ a.id }}" data-teacher="{{ a.teacher_name }}"
                                 data-title="{{ a.title }}" data-action="reject">
@@ -286,7 +286,7 @@
                         {% if can_edit %}
                         {# 2026-10-10：删除改走页面底部单一隐藏表单（原每行一个 form+csrf，改为 data-url 按钮） #}
                         <button type="button" class="btn btn-sm btn-outline-danger js-ach-del"
-                                title="删除" data-url="{{ url_for('academic.achievements_delete', aid=a.id) }}">
+                                title="删除" aria-label="删除" data-url="{{ url_for('academic.achievements_delete', aid=a.id) }}">
                             <i class="bi bi-trash"></i>
                         </button>
                         {% endif %}

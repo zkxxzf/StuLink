@@ -17,9 +17,26 @@ from flask_login import login_required, current_user
 
 from app.modules.grades import bp
 from app.modules.grades.services import dashboard_service
+from app.utils.cache import cache
 from app.utils.decorators import perm_required
 
 logger = logging.getLogger(__name__)
+
+# PERF-15：仪表盘是成绩模块的默认落地页且前端每 30s 轮询一次，未缓存时
+# 100 人在线 = 每分钟约 200 次请求，每次 3 条跨数十万行的 COUNT(DISTINCT)，
+# 是 grades.db 读压力最大的单一来源。数据本身是准实时看板（考试数/证明数/参与人数），
+# 60s TTL 完全够用，命中后 DB 压力归零。
+_DASHBOARD_TTL = 60
+
+
+def _overview_for(user):
+    """取仪表盘数据（按用户缓存 60s；含数据范围，key 必须带 user.id）"""
+    key = f'grades_dashboard_v1_{user.id}'
+    data = cache.get(key)
+    if data is None:
+        data = dashboard_service.build_overview(user)
+        cache.set(key, data, timeout=_DASHBOARD_TTL)
+    return data
 
 
 @bp.route('/')
@@ -27,7 +44,7 @@ logger = logging.getLogger(__name__)
 @perm_required('grades.view')
 def dashboard():
     """首页仪表盘（成绩模块默认落地页）"""
-    data = dashboard_service.build_overview(current_user)
+    data = _overview_for(current_user)
     return render_template('grades/dashboard.html', d=data)
 
 
@@ -36,4 +53,4 @@ def dashboard():
 @perm_required('grades.view')
 def dashboard_api():
     """仪表盘数据接口（前端定时轮询，实现实时更新；只读）"""
-    return jsonify(dashboard_service.build_overview(current_user))
+    return jsonify(_overview_for(current_user))

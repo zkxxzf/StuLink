@@ -33,12 +33,17 @@
 {% block content %}
 <div id="gdApp"
      data-can-edit="{{ 1 if d.can_edit_exam else 0 }}">
+    {# PERF-15：轮询 30s → 120s。仪表盘是准实时看板（考试数/证明数/参与人数），
+       后端已加 60s 结果缓存，30s 轮询只会让上百个在线客户端反复打同一份缓存，
+       却把请求量放大 4 倍。手动「刷新」按钮仍可随时拉最新数据。
+       注意：注释文本里不要出现 Jinja 的注释结束符，否则会提前闭合本注释、
+       把后半段当字面量渲染到页面上（本文件曾因此泄漏过注释文字）。 #}
     <script type="application/json" id="gd-cfg">{{ {
         'api': url_for('grades.dashboard_api'),
         'exam_tpl': url_for('grades.exam_detail', exam_id=0),
         'analysis': url_for('grades.index'),
         'list': url_for('grades.exams_list'),
-        'interval': 30000,
+        'interval': 120000,
     } | tojson }}</script>
     <script type="application/json" id="gd-data">{{ d | tojson }}</script>
 

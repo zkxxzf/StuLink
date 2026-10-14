@@ -14,6 +14,11 @@
 # 只 docker cp 代码、不跑迁移（脚本头部自己写明「涉及数据库迁移请走整包脚本」）。
 # 且 app/__init__.py 启动时的 create_all() **只建缺失的表、不给已有表补列**。
 #
+# 2026-10-14 更新：清单已补齐 —— 追加 10-13/10-14 新增的 5 个（AI 任务表、AI 报告
+# kind/trace、管理员组 academic.edit、敏感字段权限 v1/v2）与学科组长 category 重建键。
+# **上线要跑哪些迁移，以 docs/数据库迁移清单.md 为唯一真值**（本文件是执行器）：
+#   py -3.12 scripts/migration_status.py --data-dir <生产数据目录> --pending
+#
 # 用法（在本地机器执行；该账号在 docker 组，docker 命令无需 sudo）
 #   ssh 17752560383@10.193.191.210 "bash -s" < deploy/nas_migrate_pending.sh
 #
@@ -78,11 +83,17 @@ run_mig scripts/migrate_swap_exchange_v2_20261012.py      # 换课：swap_time/s
 run_mig scripts/migrate_swap_auto_confirm_20261013.py     # 调课：need_partner_confirm
 run_mig scripts/migrate_morality_tables_20261013.py       # 德育独立成库
 run_mig scripts/migrate_affair_invig_exclude_20261013.py  # 考务：监考排除名单
+run_mig scripts/migrate_ai_tasks_20261013.py              # 成绩：AI 任务表（与下一行成对）
+run_mig scripts/migrate_ai_report_kind_20261013.py        # 成绩：AI 报告 kind/trace
+run_mig scripts/migrate_subject_leader_category_20261014.py # 学科组长：category 列 + 重建唯一键
 # ── 数据 / 权限类（幂等）──────────────────────────────────────────────────
 run_mig scripts/migrate_subject_leaders.py
 run_mig scripts/migrate_oplog_http_fields.py
 run_mig scripts/migrate_score_edit_perm_20261011.py
 run_mig scripts/migrate_swap_perm_roles_20261011.py
+run_mig scripts/migrate_admin_perm_academic_edit_20261013.py # 管理员组补 academic.edit
+run_mig scripts/migrate_sensitive_perm_20261013.py           # 敏感字段权限（先）
+run_mig scripts/migrate_sensitive_perm_v2_20261013.py        # 敏感字段权限收敛（后）
 
 echo "[5/6] 兜底：补齐模型声明但现网缺失的列（改库前自动备份对应库）"
 docker run --rm -v "$DATA":/app/data -w /app \

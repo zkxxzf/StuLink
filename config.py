@@ -66,19 +66,22 @@ class Config:
     TEMPLATES_AUTO_RELOAD = os.environ.get(
         'STULINK_RELOAD_TEMPLATES', '0').strip() == '1'
     
-    # 缓存配置 - 使用简单内存缓存
+    # 缓存配置（2026-10-14 性能审计 PERF-14：本项目**未接入 flask-caching**，
+    # 下面两项目前没有被任何代码读取，改它们不会生效。真实的进程内缓存是
+    # app/utils/cache.py 的 `cache = SimpleCache(default_timeout=300, maxsize=1024)`，
+    # 另有若干处自持 SimpleCache。要调缓存时长/容量请改那里，不要只改这里。）
     CACHE_TYPE = 'simple'
-    CACHE_DEFAULT_TIMEOUT = 300  # 5分钟缓存
+    CACHE_DEFAULT_TIMEOUT = 300  # 5分钟缓存（现状为死配置，见上）
     
     # SQLAlchemy 优化配置
-    # busy 等待：真正生效的是 app/__init__.py 连接事件里的 `PRAGMA busy_timeout=5000`（5s），
+    # busy 等待：真正生效的是 app/__init__.py 连接事件里的 `PRAGMA busy_timeout=15000`（15s），
     # 它以 PRAGMA 覆盖本项的 connect_args.timeout。两处数字保持一致，避免"文档写 15s、
-    # 实际 5s"的漂移（2026-10-10 实测发现并修正）。
+    # 实际 5s"的漂移（2026-10-10 实测发现并修正；2026-10-14 随 PERF-25 一并提到 15s）。
     SQLALCHEMY_ENGINE_OPTIONS = {
         'pool_size': 10,
         'pool_recycle': 3600,
         'pool_pre_ping': True,
-        'connect_args': {'timeout': 5},
+        'connect_args': {'timeout': 15},
     }
 
     # SQLite WAL 开关：默认关闭。

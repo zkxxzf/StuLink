@@ -2,10 +2,27 @@
  * 表/图渲染复用 grades.js 的同一套 CSS 类与 ECharts 配置生成器，保证风格一致
  */
 (function () {
-var PALETTE = ['#3b82f6', '#8b5cf6', '#10b981', '#f59e0b', '#ef4444',
-               '#06b6d4', '#ec4899', '#84cc16', '#f97316', '#6366f1'];
+/* 2026-10-14 审计修复：调色板改读主题变量（theme.css 的 --sl-chart-1..10），
+   与 grades.js 同一口径；取不到时回落到原字面量。 */
+var PALETTE_FALLBACK = ['#3b82f6', '#8b5cf6', '#10b981', '#f59e0b', '#ef4444',
+                        '#06b6d4', '#ec4899', '#84cc16', '#f97316', '#6366f1'];
+function palette() {
+    return (window.stulinkPalette && window.stulinkPalette()) || PALETTE_FALLBACK;
+}
+function sem() {
+    return (window.stulinkSemantic && window.stulinkSemantic()) ||
+        {ok: '#10b981', warn: '#f59e0b', danger: '#ef4444', info: '#3b82f6'};
+}
+function heatColors() {
+    return (window.stulinkHeatColors && window.stulinkHeatColors()) ||
+        ['#eff6ff', '#93c5fd', '#3b82f6', '#1d4ed8'];
+}
+function heatLabel() {
+    return (window.stulinkHeatLabel && window.stulinkHeatLabel()) || '#0f172a';
+}
 var state = {student_no: '', examId: '', certExams: [], certRepIds: [], certChosen: []};
 var charts = {};
+var chartSpecs = {};   // 图表原始配置（按 key），主题切换重绘时用
 var opts = null;
 
 function fmt(v) {
@@ -91,23 +108,37 @@ function renderCharts(area, chartsData) {
 function renderChart(dom, key, c) {
     var chart = echarts.init(dom);
     charts[key] = chart;
-    var option;
+    chartSpecs[key] = c;   // 主题切换重绘用
+    chart.setOption(chartOption(c), true);
+}
+
+/* 2026-10-14：切换主题后按新调色板重设已渲染图表（notMerge，整体换色） */
+function repaintCharts() {
+    Object.keys(charts).forEach(function (k) {
+        var c = chartSpecs[k];
+        if (!c) return;
+        try { charts[k].setOption(chartOption(c), true); } catch (e) {}
+    });
+}
+if (window.stuOnThemeChange) { window.stuOnThemeChange(repaintCharts); }
+
+/* 与 renderChart 同一套 type → option 映射，抽出来供重绘复用 */
+function chartOption(c) {
     switch (c.type) {
-        case 'bar': option = barOption(c, false); break;
-        case 'groupbar': option = barOption(c, true); break;
-        case 'stack': option = stackOption(c); break;
-        case 'boxplot': option = boxOption(c); break;
-        case 'line': option = lineOption(c); break;
-        case 'dual': option = dualOption(c); break;
-        case 'radar': option = radarOption(c); break;
-        case 'heatmap': option = heatOption(c); break;
-        default: option = {};
+        case 'bar': return barOption(c, false);
+        case 'groupbar': return barOption(c, true);
+        case 'stack': return stackOption(c);
+        case 'boxplot': return boxOption(c);
+        case 'line': return lineOption(c);
+        case 'dual': return dualOption(c);
+        case 'radar': return radarOption(c);
+        case 'heatmap': return heatOption(c);
+        default: return {};
     }
-    chart.setOption(option, true);
 }
 
 function baseGrid() { return {left: 60, right: 40, top: 50, bottom: 40, containLabel: true}; }
-function colorOf(i) { return PALETTE[i % PALETTE.length]; }
+function colorOf(i) { var p = palette(); return p[i % p.length]; }
 function yFmt() { return {type: 'value', axisLabel: {formatter: '{value}'}}; }
 
 function barOption(c, grouped) {
@@ -116,18 +147,18 @@ function barOption(c, grouped) {
         if (!grouped && i === 0) {
             var ml = [];
             if (c.markLine != null) {
-                ml.push({yAxis: c.markLine, lineStyle: {color: '#f59e0b', type: 'dashed'},
+                ml.push({yAxis: c.markLine, lineStyle: {color: sem().warn, type: 'dashed'},
                     label: {formatter: '该生 {c}'}});
             }
             (c.bandLines || []).forEach(function (b) {
-                ml.push({yAxis: b.value, lineStyle: {color: '#ef4444', type: 'dashed'},
+                ml.push({yAxis: b.value, lineStyle: {color: sem().danger, type: 'dashed'},
                     label: {formatter: b.name + ' {c}'}});
             });
             if (ml.length) { item.markLine = {silent: true, symbol: 'none', data: ml}; }
         }
         return item;
     });
-    return {color: PALETTE, tooltip: {trigger: 'axis'}, legend: grouped ? {top: 0} : undefined,
+    return {color: palette(), tooltip: {trigger: 'axis'}, legend: grouped ? {top: 0} : undefined,
         grid: baseGrid(), xAxis: {type: 'category', data: c.xAxis || [], axisLabel: {interval: 0}},
         yAxis: yFmt(), series: series};
 }
@@ -145,7 +176,7 @@ function boxOption(c) {
         xAxis: {type: 'category', data: c.xAxis || []},
         yAxis: yFmt(),
         series: (c.series || []).map(function (s) {
-            return {name: s.name || '总分分布', type: 'boxplot', data: s.data || [], itemStyle: {color: '#3b82f6'}};
+            return {name: s.name || '总分分布', type: 'boxplot', data: s.data || [], itemStyle: {color: palette()[0]}};
         })};
 }
 function lineOption(c) {
@@ -155,7 +186,7 @@ function lineOption(c) {
     // inverse=true：Y 轴反向（排名用，名次 1 显示在最上方）
     var yAxis = yFmt();
     if (c.inverse) { yAxis.inverse = true; }
-    return {color: PALETTE, tooltip: {trigger: 'axis'},
+    return {color: palette(), tooltip: {trigger: 'axis'},
         legend: {top: 0, type: 'scroll', selected: selected},
         grid: baseGrid(),
         xAxis: {type: 'category', data: c.xAxis || []},
@@ -165,7 +196,7 @@ function lineOption(c) {
         })};
 }
 function dualOption(c) {
-    return {color: PALETTE, tooltip: {trigger: 'axis'},
+    return {color: palette(), tooltip: {trigger: 'axis'},
         legend: {top: 0},
         grid: baseGrid(),
         xAxis: {type: 'category', data: c.xAxis || []},
@@ -175,7 +206,7 @@ function dualOption(c) {
         })};
 }
 function radarOption(c) {
-    return {color: PALETTE, tooltip: {},
+    return {color: palette(), tooltip: {},
         legend: {top: 0},
         radar: {indicator: (c.indicators || []), radius: '65%'},
         series: [{type: 'radar', data: (c.series || []).map(function (s) {
@@ -201,8 +232,9 @@ function heatOption(c) {
         yAxis: {type: 'category', data: ys},
         visualMap: {min: Math.floor(min), max: Math.ceil(max), calculable: true,
             orient: 'horizontal', left: 'center', bottom: 0,
-            inRange: {color: ['#eff6ff', '#93c5fd', '#3b82f6', '#1d4ed8']}},
-        series: [{type: 'heatmap', data: cells, label: {show: true, fontSize: 10}}]};
+            inRange: {color: heatColors()}},
+        series: [{type: 'heatmap', data: cells,
+            label: {show: true, fontSize: 10, color: heatLabel()}}]};
 }
 
 /* ---------- 成绩认定矩阵（考试 × 科目，与纸质证明同版式） ---------- */

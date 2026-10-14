@@ -102,7 +102,7 @@
                 <div class="d-flex gap-1 flex-shrink-0">
                     <button class="btn btn-outline-primary btn-sm"
                             onclick="openEditModal({{ rec.id }})"
-                            title="编辑">
+                            title="编辑" aria-label="编辑">
                         <i class="bi bi-pencil"></i>
                     </button>
                     <form method="POST"
@@ -110,7 +110,7 @@
                           onsubmit="return confirm('确认删除这条记录？此操作不可恢复。')"
                           class="d-inline">
                         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                        <button class="btn btn-outline-danger btn-sm" title="删除">
+                        <button class="btn btn-outline-danger btn-sm" title="删除" aria-label="删除">
                             <i class="bi bi-trash"></i>
                         </button>
                     </form>

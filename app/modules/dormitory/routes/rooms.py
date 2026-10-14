@@ -27,6 +27,19 @@ def _class_sort_key(name):
     return (0, int(m.group(1))) if m else (1, name)
 
 
+def _room_checked(id):
+    """取房间并校验数据范围（唯一口径：room_scope_query）。
+
+    2026-10-14 审计 API-01：edit/delete 原为 `Room.query.get_or_404(id)` 后直接用，
+    与详情/互换/导出三处已有的范围校验不一致。这里收敛成单一实现——
+    school 范围（admin/宿管组）原样放行，越界一律 403（fail-closed）。
+    """
+    room = Room.query.get_or_404(id)
+    if room_scope_query(Room.query.filter_by(id=room.id)).first() is None:
+        abort(403)
+    return room
+
+
 @bp.route('/')
 @perm_required('dormitory.view')   # H-2
 def list_rooms():
@@ -115,10 +128,8 @@ def list_rooms():
 @bp.route('/<int:id>')
 @perm_required('dormitory.view')   # H-2
 def detail(id):
-    room = Room.query.get_or_404(id)
     # 2026-10-11 审计修复：详情页同样需范围校验，越界 403
-    if room_scope_query(Room.query.filter_by(id=room.id)).first() is None:
-        abort(403)
+    room = _room_checked(id)
     beds = BedAssignment.query.filter_by(room_id=room.id).order_by(
         BedAssignment.bed_number).all()
     
@@ -139,7 +150,8 @@ def detail(id):
 @bp.route('/<int:id>/edit', methods=['GET', 'POST'])
 @perm_required('dormitory.manage')
 def edit(id):
-    room = Room.query.get_or_404(id)
+    # 2026-10-14 审计 API-01：补数据范围校验（与详情/互换/导出同口径）
+    room = _room_checked(id)
     if request.method == 'POST':
         new_gender = request.form.get('gender', room.gender)
         new_capacity = to_int(request.form.get('capacity'), room.capacity)
@@ -263,7 +275,8 @@ def create():
 @bp.route('/<int:id>/delete', methods=['POST'])
 @perm_required('dormitory.manage')
 def delete(id):
-    room = Room.query.get_or_404(id)
+    # 2026-10-14 审计 API-01：补数据范围校验（与详情/互换/导出同口径）
+    room = _room_checked(id)
     occupied = BedAssignment.query.filter(
         BedAssignment.room_id == room.id,
         BedAssignment.student_id.isnot(None)

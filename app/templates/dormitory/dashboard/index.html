@@ -7,8 +7,9 @@
         box-shadow: 0 1px 4px rgba(0,0,0,.05); transition: box-shadow .2s;
     }
     .dash-card:hover { box-shadow: 0 4px 12px rgba(0,0,0,.08); }
+    /* 2026-10-14：写死 #fff 在深色主题下是白块 + 浅字（对比 1.01）→ 跟随主题面板色 */
     .dash-card .card-header {
-        background: #fff; border-bottom: 1px solid #f1f5f9;
+        background: var(--sl-surface); border-bottom: 1px solid var(--sl-border);
         padding: 13px 20px; border-radius: 14px 14px 0 0 !important;
     }
     /* 概览指标行 */

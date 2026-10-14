@@ -212,12 +212,12 @@
                             </div>
                             {% if current_user.has_role('admin', 'dorm_manager') %}
                             <div class="mt-1 d-flex gap-1" onclick="event.stopPropagation()">
-                                <a href="{{ url_for('rooms.edit', id=room.id) }}" class="btn btn-sm btn-outline-secondary py-0 px-1" title="编辑">
+                                <a href="{{ url_for('rooms.edit', id=room.id) }}" class="btn btn-sm btn-outline-secondary py-0 px-1" title="编辑" aria-label="编辑">
                                     <i class="bi bi-pencil" style="font-size:10px;"></i>
                                 </a>
                                 <form method="POST" action="{{ url_for('rooms.delete', id=room.id) }}" class="d-inline delete-form">
                                     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                                    <button type="submit" class="btn btn-sm btn-outline-danger py-0 px-1" title="删除">
+                                    <button type="submit" class="btn btn-sm btn-outline-danger py-0 px-1" title="删除" aria-label="删除">
                                         <i class="bi bi-trash" style="font-size:10px;"></i>
                                     </button>
                                 </form>

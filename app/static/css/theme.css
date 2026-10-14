@@ -90,6 +90,49 @@
     --bs-tertiary-bg: #f8f9fa;
     --bs-secondary-color: #64748b;
     --bs-emphasis-color: #1e293b;
+
+    /* —— 语义软底（调课格 / 状态胶囊 / 提示块）——
+       2026-10-13（调课页颜色调整）：调课各页在模板 <style> 里写死了浅底深字
+       （#ecfdf5/#fef9c3/#f3e8ff …），深色主题下模板类声明不在 L2 兜底范围内，
+       会"浅底浅字"直接看不见。这里把语义色提为变量：浅色值 = 原字面量，
+       深色值 = 低饱和半透明底 + 亮字，模板只引用变量，不再写死颜色。 */
+    --sl-soft-info-bg: #eff6ff;    --sl-soft-info-fg: #1e40af;    --sl-soft-info-bd: #bfdbfe;
+    --sl-soft-success-bg: #ecfdf5; --sl-soft-success-fg: #065f46; --sl-soft-success-bd: #a7f3d0;
+    --sl-soft-warn-bg: #fef9c3;    --sl-soft-warn-fg: #854d0e;    --sl-soft-warn-bd: #fde047;
+    --sl-soft-amber-bg: #fff7ed;   --sl-soft-amber-fg: #9a3412;   --sl-soft-amber-bd: #fed7aa;
+    --sl-soft-danger-bg: #fef2f2;  --sl-soft-danger-fg: #b91c1c;  --sl-soft-danger-bd: #fecaca;
+    --sl-soft-purple-bg: #f3e8ff;  --sl-soft-purple-fg: #6b21a8;  --sl-soft-purple-bd: #d8b4fe;
+
+    /* —— 图表调色板 / 语义单色 / 热力图渐变（2026-10-14）——
+       ECharts 的颜色写在 JS 里（grades.js / student_query.js / inspection.js …），
+       CSS 兜底选择器够不到，只能由脚本读变量后再交给 setOption。
+       槽位语义固定：1 蓝 2 紫 3 绿 4 橙 5 红 6 青 7 粉 8 黄绿 9 橙红 10 靛，
+       两套主题只换明度、不换槽位 → 同一张图在深浅两模式下「哪根是哪根」不变。
+       浅色值 = 改造前的字面量，保证既有页面观感不变。 */
+    --sl-chart-1: #3b82f6;
+    --sl-chart-2: #8b5cf6;
+    --sl-chart-3: #10b981;
+    --sl-chart-4: #f59e0b;
+    --sl-chart-5: #ef4444;
+    --sl-chart-6: #06b6d4;
+    --sl-chart-7: #ec4899;
+    --sl-chart-8: #84cc16;
+    --sl-chart-9: #f97316;
+    --sl-chart-10: #6366f1;
+    /* 语义单色（参考线 / 状态柱 / 面积图）：红黄绿仍要能区分，只提亮不换色相 */
+    --sl-chart-ok: #10b981;
+    --sl-chart-warn: #f59e0b;
+    --sl-chart-danger: #ef4444;
+    --sl-chart-info: #3b82f6;
+    --sl-chart-purple: #6366f1;
+    --sl-chart-cyan: #0ea5e9;
+    --sl-chart-muted: #94a3b8;   /* 灰柱 / 参考线（workbench_grades 的“其它班”） */
+    /* 热力图渐变：低值 → 高值。浅色 = 浅蓝 → 深蓝（原值） */
+    --sl-heat-1: #eff6ff;
+    --sl-heat-2: #93c5fd;
+    --sl-heat-3: #3b82f6;
+    --sl-heat-4: #1d4ed8;
+    --sl-heat-label: #0f172a;    /* 格内数字：深色底上用亮字，浅色底上用深字 */
 }
 
 /* ============================ 深色 ============================ */
@@ -153,6 +196,41 @@
     --bs-heading-color: #f1f5f9;
     --bs-link-color: #7cb0f7;
     --bs-link-hover-color: #a5c8fa;
+
+    /* 语义软底（深色）：低饱和半透明底 + 亮字，供调课格 / 状态胶囊等引用 */
+    --sl-soft-info-bg: rgba(59, 130, 246, .18);    --sl-soft-info-fg: #93c5fd;    --sl-soft-info-bd: rgba(59, 130, 246, .40);
+    --sl-soft-success-bg: rgba(16, 185, 129, .16); --sl-soft-success-fg: #6ee7b7; --sl-soft-success-bd: rgba(16, 185, 129, .38);
+    --sl-soft-warn-bg: rgba(234, 179, 8, .18);     --sl-soft-warn-fg: #fcd34d;    --sl-soft-warn-bd: rgba(234, 179, 8, .40);
+    --sl-soft-amber-bg: rgba(249, 115, 22, .16);   --sl-soft-amber-fg: #fdba74;   --sl-soft-amber-bd: rgba(249, 115, 22, .38);
+    --sl-soft-danger-bg: rgba(239, 68, 68, .16);   --sl-soft-danger-fg: #fca5a5;  --sl-soft-danger-bd: rgba(239, 68, 68, .38);
+    --sl-soft-purple-bg: rgba(168, 85, 247, .18);  --sl-soft-purple-fg: #d8b4fe;  --sl-soft-purple-bd: rgba(168, 85, 247, .40);
+
+    /* 图表调色板（深色）：同一槽位整体提亮一档（400 级），压在 #172033 面板上
+       对比度 ≥ 3:1（图形/大字下限），且色相与浅色一一对应，语义不丢。 */
+    --sl-chart-1: #60a5fa;
+    --sl-chart-2: #a78bfa;
+    --sl-chart-3: #34d399;
+    --sl-chart-4: #fbbf24;
+    --sl-chart-5: #f87171;
+    --sl-chart-6: #22d3ee;
+    --sl-chart-7: #f472b6;
+    --sl-chart-8: #a3e635;
+    --sl-chart-9: #fb923c;
+    --sl-chart-10: #818cf8;
+    --sl-chart-ok: #34d399;
+    --sl-chart-warn: #fbbf24;
+    --sl-chart-danger: #f87171;
+    --sl-chart-info: #60a5fa;
+    --sl-chart-purple: #818cf8;
+    --sl-chart-cyan: #38bdf8;
+    --sl-chart-muted: #64748b;
+    /* 热力图（深色）：深 → 亮逆序，低值贴近面板底色（不再是一块刺眼白），
+       并刻意**不**拉到最亮，保证格内亮字在 4 段色上都能读（≥3.4:1）。 */
+    --sl-heat-1: #12263f;
+    --sl-heat-2: #16375f;
+    --sl-heat-3: #1d4ed8;
+    --sl-heat-4: #3b82f6;
+    --sl-heat-label: #f8fafc;
 
     color-scheme: dark;
 }
@@ -461,6 +539,12 @@ body {
     --bs-table-bg: var(--sl-surface-3);
     --bs-table-color: var(--sl-text);
 }
+/* .table-primary：调课详情「当前批次成员行」用，同样是写死浅蓝底 */
+[data-bs-theme="dark"] .table-primary {
+    --bs-table-bg: rgba(13, 110, 253, .18);
+    --bs-table-color: var(--sl-text);
+    --bs-table-border-color: rgba(13, 110, 253, .34);
+}
 /* .table-light 写死浅灰：深色下按面板色处理（表头 / 斑马行都用得多） */
 [data-bs-theme="dark"] .table-light,
 [data-bs-theme="dark"] thead.table-light > tr > * {
@@ -480,7 +564,10 @@ body {
    操作列 56px，下限 min(100%, 620px) 免得缩成一张小卡片；
    分科（两组 × 7 科）内容更宽，在 .table-responsive 里横向滚动 ——
    与「全局对比」等宽表同一套交互。 */
-#bandTable { width: max-content; min-width: min(100%, 620px); }
+/* 2026-10-14 浏览器兼容：旧版微信 X5（Chrome 57/66 内核）不认识 min()，
+   整条声明会被丢弃 → 先写一条所有内核都懂的固定下限，再用 min() 提升。
+   不支持的浏览器用第一行，支持的用第二行（后来者胜）。 */
+#bandTable { width: max-content; min-width: 620px; min-width: min(100%, 620px); }
 /* 字号随表格规模一起放大（2026-10-13 用户反馈"表格的宽度和文字大小很不协调"）：
    18 列铺到 2300px 宽时，12px 表头 / 12.5px 数字在大格子里显得又小又散。
    口径：表头 13px、格内数字 13.5px（其余成绩表仍是 12/12.5 —— 那些表列窄、行密，
@@ -555,7 +642,10 @@ table.tt thead th {
 .ovw-block { border-color: var(--sl-border); }
 .ovw-block-head {
     background: linear-gradient(90deg, var(--sl-sidebar-bg), var(--sl-surface-2)) !important;
-    color: var(--sl-sidebar-text-hover);
+    /* color 也必须 !important：schedule_matrix.css 是**页面引入**的（在 theme.css 之后加载），
+       里面写死 `color:#f1f5f9`（当年块头是深色渐变时的配套字色）。背景已被本条改成浅色，
+       字色没有 !important 就被它赢回浅色 → 浅色主题下「白底浅字」整条块头看不见（对比 1.1）。 */
+    color: var(--sl-sidebar-text-hover) !important;
 }
 .ovw-block-head .ovw-sub { color: var(--sl-sidebar-muted); }
 .ovw-table thead th { background: var(--sl-surface-2); color: var(--sl-text); }
@@ -650,8 +740,6 @@ table.tt thead th {
 [data-bs-theme="dark"] ::-webkit-scrollbar-track { background: var(--sl-bg); }
 [data-bs-theme="dark"] ::-webkit-scrollbar-thumb { background: #35465f; border-radius: 5px; }
 
-/* 图表中常见的浅色辅助线：深色下调暗，避免刺眼 */
-[data-bs-theme="dark"] .chartjs-render-monitor { filter: brightness(.9); }
 
 /* 反向问题：模板里写死的「深色文字」（宿舍床位姓名、调课节次等）在深色卡片上看不清 */
 [data-bs-theme="dark"] .bed-student,
@@ -764,6 +852,194 @@ table.tt thead th {
 /* —— 无主题变体的浅色容器（课表网格外壳）—— */
 [data-bs-theme="dark"] .sch-grid-wrap {
     background: var(--sl-surface) !important;
+    border-color: var(--sl-border) !important;
+}
+
+/* =============================================================================
+   L4：深色补漏 · 第二批（2026-10-14 全项目审计 B 组）
+   -----------------------------------------------------------------------------
+   前几批只覆盖了「内联 style 属性」与少数类；模板 <style> 与其它业务 css 里的
+   **类选择器**仍是浅底深字（属性选择器兜底管不到类声明），深色下要么刺眼白块、
+   要么与面板糊成一片。这批逐条点名，全部只用 var(--sl-*)，不新增写死色。
+   涉及的源文件（模板 / grades.css / schedule_matrix.css / global_compare.css）
+   都不在本批可改清单内，故一律在此覆盖。
+   ============================================================================= */
+
+/* —— 课表网格表头（_schedule_grid.html 写死 #1e293b→#273549 渐变 + 浅字）——
+   浅色模式下是一条黑条（与浅色表体割裂），深色下又与表体同深度糊成一片。
+   两套主题统一为「表头语义色 + 同族明度差」，sticky 定位不动。 */
+.sch-grid thead th {
+    background: var(--sl-head-bg) !important;
+    color: var(--sl-head-text) !important;
+    box-shadow: inset 0 -1px 0 var(--sl-head-border), 0 2px 6px var(--sl-shadow) !important;
+}
+.sch-grid thead th.sch-period-col { background: var(--sl-head-bg) !important; }
+
+/* —— 查课 6 个状态徽标（schedule_matrix.css 写死浅底深字）——
+   深色下改「低饱和半透明底 + 400 明度字」，色相不换：绿/黄/红/靛/蓝/灰仍可区分。 */
+[data-bs-theme="dark"] .ovw-chk-normal { background: rgba(16, 185, 129, .18);  color: #6ee7b7; }
+[data-bs-theme="dark"] .ovw-chk-late   { background: rgba(245, 158, 11, .18);  color: #fcd34d; }
+[data-bs-theme="dark"] .ovw-chk-absent { background: rgba(239, 68, 68, .18);   color: #fca5a5; }
+[data-bs-theme="dark"] .ovw-chk-swap   { background: rgba(99, 102, 241, .20);  color: #a5b4fc; }
+[data-bs-theme="dark"] .ovw-chk-exam   { background: rgba(14, 165, 233, .20);  color: #7dd3fc; }
+[data-bs-theme="dark"] .ovw-chk-other  { background: rgba(148, 163, 184, .18); color: #cbd5e1; }
+
+/* —— 宿舍床位 / 学生条目（base.html 内联：#eff6ff 底、性别粉蓝底与 hover）—— */
+[data-bs-theme="dark"] .bed-slot.occupied {
+    background: var(--sl-surface-3) !important;
+    border-color: var(--sl-sidebar-accent) !important;
+}
+[data-bs-theme="dark"] .bed-slot.empty:hover {
+    background: rgba(16, 185, 129, .16) !important;
+    border-color: #34d399 !important;
+}
+[data-bs-theme="dark"] .student-item.male-student {
+    background: rgba(59, 130, 246, .10) !important;
+    border-left-color: #60a5fa !important;
+}
+[data-bs-theme="dark"] .student-item.female-student {
+    background: rgba(236, 72, 153, .10) !important;
+    border-left-color: #f472b6 !important;
+}
+[data-bs-theme="dark"] .student-item.male-student:hover { background: rgba(59, 130, 246, .20) !important; }
+[data-bs-theme="dark"] .student-item.female-student:hover { background: rgba(236, 72, 153, .20) !important; }
+
+/* —— AI 对话区（grades.css 整块白底白卡：ai-chat / bubble / think / chart-card）——
+   grades.css 在 base.html 里排在 theme.css **之前**，且本规则带属性选择器，必然胜出。 */
+[data-bs-theme="dark"] .ai-chat {
+    background: var(--sl-surface-2) !important;
+    border-color: var(--sl-border) !important;
+}
+[data-bs-theme="dark"] .ai-bubble {
+    background: var(--sl-surface) !important;
+    border-color: var(--sl-border) !important;
+    color: var(--sl-text) !important;
+}
+[data-bs-theme="dark"] .ai-msg-user .ai-bubble {
+    background: var(--sl-sidebar-active) !important;
+    border-color: var(--sl-sidebar-accent) !important;
+    color: var(--sl-text) !important;
+}
+[data-bs-theme="dark"] .ai-bubble table th,
+[data-bs-theme="dark"] .ai-bubble table td { border-color: var(--sl-border) !important; }
+[data-bs-theme="dark"] .ai-bubble table th { background: var(--sl-surface-3) !important; }
+[data-bs-theme="dark"] .ai-bubble code {
+    background: var(--sl-surface-3) !important;
+    color: var(--sl-text) !important;
+}
+[data-bs-theme="dark"] .ai-bubble blockquote {
+    border-left-color: var(--sl-border) !important;
+    color: var(--sl-text-muted) !important;
+}
+[data-bs-theme="dark"] .ai-think {
+    background: var(--sl-surface-2) !important;
+    border-color: var(--sl-border) !important;
+}
+[data-bs-theme="dark"] .ai-think summary,
+[data-bs-theme="dark"] .ai-stage { color: var(--sl-text-muted) !important; }
+[data-bs-theme="dark"] .ai-caret { background: var(--sl-sidebar-accent) !important; }
+[data-bs-theme="dark"] .ai-chart-card {
+    background: var(--sl-surface) !important;
+    border-color: var(--sl-border) !important;
+}
+[data-bs-theme="dark"] .ai-chart-title { color: var(--sl-text) !important; }
+
+/* —— 方向彩标 / 选科标签（global_compare.css + base.html 内联）—— */
+[data-bs-theme="dark"] .ld-dir-phy { background: rgba(59, 130, 246, .18); color: #93c5fd; }
+[data-bs-theme="dark"] .ld-dir-his { background: rgba(239, 68, 68, .16);  color: #fca5a5; }
+[data-bs-theme="dark"] .subj-physics {
+    background: rgba(59, 130, 246, .18); color: #93c5fd; border-color: rgba(59, 130, 246, .38) !important;
+}
+[data-bs-theme="dark"] .subj-history {
+    background: rgba(249, 115, 22, .16); color: #fdba74; border-color: rgba(249, 115, 22, .38) !important;
+}
+[data-bs-theme="dark"] .sidebar-float .efn-tag {
+    background: rgba(245, 158, 11, .18) !important;
+    color: #fcd34d !important;
+}
+[data-bs-theme="dark"] .sidebar-float .efn-dot.on {
+    background: #22c55e !important;
+    color: #06210f !important;
+}
+
+/* —— 表单汇总迷你条（_fx_style.html 内联 #edf1f8，模板不在可改清单）—— */
+[data-bs-theme="dark"] .fx-mini-bar { background: var(--sl-surface-3) !important; }
+
+/* =============================================================================
+   移动端点击区（2026-10-14 审计）：触屏下把 12~24px 的小按钮撑到 40×40
+   （WCAG 2.5.5 / 微信 X5 与手机浏览器点不准）。
+   只在「无 hover + 粗指针」的触屏生效 —— 桌面（有 hover 的鼠标）观感完全不变。
+   ============================================================================= */
+@media (hover: none) and (pointer: coarse) {
+    .btn.btn-sm.py-0.px-1,
+    .btn-close-sm {
+        min-width: 40px;
+        min-height: 40px;
+    }
+}
+
+/* =============================================================================
+   L4：语义色对比度兜底（2026-10-14 全站低对比审计）
+   -----------------------------------------------------------------------------
+   用 Playwright 遍历全站页面、按 WCAG 算实际对比度后发现的一类共性问题：
+   Bootstrap 的语义色是「按深色底设计」的字面量，页面主题化后落在浅底上就偏淡
+   甚至隐身 —— 与 L2/L3 不同，这类问题**与主题无关、任何页面都可能踩**：
+     1) .btn-outline-* 是**透明底**；业务模板里常写成 btn-outline-info text-white
+        （当年页面底是深色，白字可读）→ 浅色下白字透明底，对比 1.06（等于看不见）；
+     2) .btn-info/.btn-warning 自带**黑字**，叠加 text-white 后反而降到 1.96；
+     3) .text-info(#0dcaf0) / .text-warning(#ffc107) 在白底上只有 1.96 / 1.45。
+   这里按「语义不变、对比度达标」就地修正，不去逐个模板改（模板里这类写法有 40+ 处）。
+   ============================================================================= */
+/* ① outline 按钮 + text-white = 白字透明底 → 补成实心语义底（用 Bootstrap 自己的 hover 配色） */
+.btn-outline-info.text-white,
+.btn-outline-primary.text-white,
+.btn-outline-success.text-white,
+.btn-outline-warning.text-white,
+.btn-outline-danger.text-white,
+.btn-outline-secondary.text-white,
+.btn-outline-dark.text-white,
+.btn-outline-light.text-white {
+    /* .text-white 是 Bootstrap 工具类且自带 !important，这里必须同等级才能压住 */
+    background-color: var(--bs-btn-hover-bg) !important;
+    border-color: var(--bs-btn-hover-border-color) !important;
+    color: var(--bs-btn-hover-color) !important;
+}
+/* ② 实心按钮自带深色字，被 text-white 压成白字 → 恢复 Bootstrap 自带字色 */
+.btn-info.text-white,
+.btn-warning.text-white,
+.btn-light.text-white { color: var(--bs-btn-color) !important; }
+/* ③ 浅色主题下这几个语义字色太淡（.text-info 1.96 / .text-warning 1.45；
+   outline 按钮的字色同理：青 #0dcaf0、黄 #ffc107 在白底上几乎看不清）——
+   换成同语义的深色，描边与边框一起加深，保持"outline"的轻量观感。
+   深色主题下维持 Bootstrap 原值（亮色在深底上足够）。 */
+[data-bs-theme="light"] .text-info { color: #0a8bab !important; }
+[data-bs-theme="light"] .text-warning { color: #a16207 !important; }
+[data-bs-theme="light"] .btn-outline-info {
+    color: #0a8bab !important; border-color: #0a8bab !important; }
+[data-bs-theme="light"] .btn-outline-warning,
+[data-bs-theme="light"] .btn-warning {
+    color: #854d0e !important; border-color: #d97706 !important; }
+/* ④ 亮色语义底（bg-warning 黄 / bg-info 青）上的字：Bootstrap 默认是白字，对比只有
+   1.6~2.0；且深色下 L2 会把 .text-dark 提亮成 --sl-text →「黄底浅字」1.32。
+   两套主题下这类亮底都配深色字（不分主题，因为 bg-warning/bg-info 在深色下仍是亮块）。
+   ⚠️ .bg-light 要单独限定 light：深色下它已被 L2 改成深面板(--sl-surface)，
+      字必须继续走 --sl-text（浅），否则深底深字 = 1.11（2026-10-14 踩过）。 */
+.badge.bg-warning,
+.badge.bg-info,
+.bg-warning.text-dark,
+.bg-info.text-dark { color: #1f2937 !important; }
+[data-bs-theme="light"] .badge.bg-light,
+[data-bs-theme="light"] .bg-light.text-dark { color: #1f2937 !important; }
+/* ⑤ 课表总览「上午/下午」分组列：底色由模板注入的内联 --grp-bg（浅橙/浅蓝），
+   不在 L2 兜底清单里 → 深色下亮块 + 浅字（1.08）。按面板色处理。 */
+[data-bs-theme="dark"] .ovw-grp-row th,
+[data-bs-theme="dark"] th.ovw-grp {
+    background: var(--sl-surface-3) !important;
+    color: var(--sl-text) !important;
+}
+/* ⑥ .btn-outline-dark 在深色下仍是 Bootstrap 的深色字面量字 → 深底深字（1.16） */
+[data-bs-theme="dark"] .btn-outline-dark {
+    color: var(--sl-text) !important;
     border-color: var(--sl-border) !important;
 }
 
