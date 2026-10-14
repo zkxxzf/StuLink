@@ -3,7 +3,7 @@
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
 [![Python](https://img.shields.io/badge/python-3.11+-green.svg)](https://python.org)
 [![Flask](https://img.shields.io/badge/flask-3.x-lightgrey.svg)](https://flask.palletsprojects.com/)
-[![Version](https://img.shields.io/badge/version-1.19.47.29-orange.svg)](https://gitee.com/zkxxzf/StuLink)
+[![Version](https://img.shields.io/badge/version-1.19.47.30-orange.svg)](https://gitee.com/zkxxzf/StuLink)
 
 面向中学的综合学生管理平台，采用 **双站点 + 多模块 + 一模块一库** 的故障隔离架构：
 
@@ -301,6 +301,7 @@ StuLink/
 
 | 版本 | 日期 | 亮点 |
 |---|---|---|
+| **1.19.47.30** | 2026-10-14 | **权限体系多身份改造（P1–P6）**：一人可挂多个权限组 + **身份切换**（顶栏 / 工作台）；数据范围收敛为唯一口径（`app/utils/scope.py`，6 处委托）；范围类型扩为 7 档（全校/本人年级/指定年级/本人班级/指定班级/本人任课/无）；预置身份重排为 **11 组**（新增考试管理员/生活处/政教主任/政教员，删除校长/副校长/备课组长/教研组长/学生发展中心）；管理界面支持组范围 7 档与用户多身份分配 |
 | **1.19.47.29** | 2026-10-13 | **学生身份证号 / 联系电话明文收敛为「仅管理员 + 班主任」**（班主任补身份证明文、宿管收回联系电话，其余身份一律脱敏） |
 | **1.19.47.28** | 2026-10-13 | **权限体系文档**（新增《权限体系说明》：权限模型 / 41 子功能 56 权限点全清单 / 12 身份矩阵 / 敏感字段字段级权限 / 数据范围口径）· 修复教务权限文档 28 处失效链接 · 管理员组种子补漏列的 `academic.edit` |
 | **1.19.47.27** | 2026-10-13 | **`dormitory.assign` 权限接线**（15 条分配类路由脱离 manage，四档语义落地）· 宿舍总览图表**本地化**（去公网 CDN，离线可显示） |
