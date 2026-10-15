@@ -131,7 +131,7 @@ def create():
         user.set_password(generated_pwd)
         db.session.add(user)
         db.session.commit()
-        # v1.19.49.32：非管理员自动同步创建教师档案（admin 不写入）
+        # v1.19.49.33：非管理员自动同步创建教师档案（admin 不写入）
         _sync_state, _ = teacher_sync.sync_from_user(user)
         db.session.commit()
         log_operation(current_user, '创建', '用户', user.id, f'{user.real_name} ({user.role_display})')
@@ -199,7 +199,7 @@ def edit(id):
         if form.password.data:
             user.set_password(form.password.data)
         db.session.commit()
-        # v1.19.49.32：教师角色变更 → 同步到 academic.teachers（admin 自动 skip）
+        # v1.19.49.33：教师角色变更 → 同步到 academic.teachers（admin 自动 skip）
         teacher_sync.sync_from_user(user)
         db.session.commit()
         log_operation(current_user, '更新', '用户', user.id, f'{user.real_name} 信息已更新')
@@ -221,7 +221,7 @@ def toggle(id):
         return redirect(url_for('users.list_users'))
     user.is_active = not user.is_active
     db.session.commit()
-    # v1.19.49.32：启禁变更 → 同步 Teacher.status (active/left)
+    # v1.19.49.33：启禁变更 → 同步 Teacher.status (active/left)
     teacher_sync.sync_from_user(user)
     db.session.commit()
     status = '启用' if user.is_active else '禁用'
@@ -326,7 +326,7 @@ def import_teachers():
 
         created = 0
         errors = []
-        _new_users = []                          # v1.19.49.32：导入后同步至 teachers
+        _new_users = []                          # v1.19.49.33：导入后同步至 teachers
 
         for row_idx in range(2, ws.max_row + 1):
             phone = str(ws.cell(row=row_idx, column=phone_col).value or '').strip()
@@ -360,7 +360,7 @@ def import_teachers():
             created += 1
 
         db.session.commit()
-        # v1.19.49.32：批量导入后同步到 academic.teachers
+        # v1.19.49.33：批量导入后同步到 academic.teachers
         for u in _new_users:
             teacher_sync.sync_from_user(u)
         db.session.commit()
