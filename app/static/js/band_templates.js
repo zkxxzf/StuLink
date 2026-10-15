@@ -28,9 +28,18 @@ function load() {
             return;
         }
         list.forEach(function (t) {
+            /* 后缀随下界方式变化：比例→%、名次→第N名、分数→分。
+               原先一律拼 %，名次模板会显示成「前10 10%」造成误读 */
+            var mode = t.lower_mode;
             var names = (t.layers || []).map(function (x) {
-                var r = (x.ratio === null || x.ratio === undefined) ? '' : (x.ratio + '%');
-                return esc(x.name) + (r ? '<span class="text-muted small"> ' + r + '</span>' : '');
+                var v = (x.ratio === null || x.ratio === undefined) ? null : x.ratio;
+                var suffix = '';
+                if (v !== null && v !== '') {
+                    suffix = mode === 'rank' ? ('第' + v + '名')
+                           : (mode === 'ratio' ? (v + '%') : (v + '分'));
+                }
+                return esc(x.name)
+                    + (suffix ? '<span class="text-muted small"> ' + suffix + '</span>' : '');
             }).join(' ＞ ');
             var tr = $('<tr>');
             tr.append($('<td>').append(esc(t.name))
@@ -60,8 +69,10 @@ function renderLayers(layers) {
         var tr = $('<tr>');
         tr.append($('<td class="text-muted">').text(i + 1));
         tr.append($('<td>').append($('<input class="form-control form-control-sm tl-name">').val(x.name || '')));
-        tr.append($('<td>').append($('<input type="number" step="0.1" min="0" max="100" class="form-control form-control-sm tl-ratio">')
-            .val((x.ratio === null || x.ratio === undefined) ? '' : x.ratio)));
+        var $num = $('<input type="number" class="form-control form-control-sm tl-ratio">')
+            .val((x.ratio === null || x.ratio === undefined) ? '' : x.ratio);
+        applyNumConstraints($num);      // 名次可能 > 100（如 550），不可被 max=100 卡住
+        tr.append($('<td>').append($num));
         var op = $('<td>');
         op.append('<button class="btn btn-sm btn-outline-secondary tl-up" title="上移">↑</button> ');
         op.append('<button class="btn btn-sm btn-outline-secondary tl-down" title="下移">↓</button> ');
@@ -95,11 +106,21 @@ function swap(a, b) {
     renderLayers(rows);
 }
 
+/* 第三列输入约束随模式变化：比例 0-100，名次 ≥1（可到几百），分数 ≥0 */
+function applyNumConstraints($inp) {
+    var m = $('#tplMode').val();
+    return $inp.attr('step', m === 'ratio' ? 0.1 : 1)
+               .attr('min', m === 'rank' ? 1 : 0)
+               .attr('max', m === 'ratio' ? 100 : '');
+}
+
 /* 第三列含义随下界方式变化：比例→百分比、名次→第几名、分数→分数线 */
 function syncUnitLabel() {
     var m = $('#tplMode').val();
     $('#tplRatioTh').text(m === 'rank' ? '默认名次（选填）'
                           : (m === 'ratio' ? '默认比例%（选填）' : '固定分数（选填）'));
+    // 切换模式时就地更新已渲染行的输入约束，不然 rank 模式会被旧的 max=100 拦住
+    $('#tplLayers .tl-ratio').each(function () { applyNumConstraints($(this)); });
 }
 
 /* 适用考试类型：不勾=通用；勾选后该类型的新考试会自动默认选中本模板 */
@@ -156,7 +177,7 @@ $(function () {
         renderLayers(readLayers().concat([{name: '', ratio: null}]));
         $('#tplLayers tbody tr').last().find('.tl-name').focus();
     });
-    /* v1.19.49.32 支持从 Markdown / Excel / 纯文本直接粘贴多行层名
+    /* v1.19.49.33 支持从 Markdown / Excel / 纯文本直接粘贴多行层名
        （表格形式：一行一层；自动去掉 | - 等表格符号与表头行）*/
     $('#tplLayers').on('paste', '.tl-name', function (e) {
         var txt = (e.originalEvent && e.originalEvent.clipboardData

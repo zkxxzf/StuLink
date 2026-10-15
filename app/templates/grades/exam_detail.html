@@ -2,9 +2,9 @@
 {% block title %}{{ exam.name }} - 考试详情{% endblock %}
 {% block extra_css %}
 <style>
-  /* v1.19.49.32：仅单科分数可点击修改（总分由各科自动汇总，不可改） */
+  /* v1.19.49.33：仅单科分数可点击修改（总分由各科自动汇总，不可改） */
   #scoreTable td.score-cell { cursor: pointer; }
-  /* v1.19.49.32 压缩「学号→进退步」这些登记列，把横向空间让给成绩 */
+  /* v1.19.49.33 压缩「学号→进退步」这些登记列，把横向空间让给成绩 */
   /* 2026-10-13：颜色一律改用主题变量 —— 原来写死 #475569/#111827/#0f172a，
      暗黑模式下是「深字压深底」，这一页几乎啥也看不见（用户反馈）。 */
   /* 2026-10-13 用户反馈「字体太小」：成绩单字号整体放大两档（约 +2px / +17%）。
@@ -34,26 +34,26 @@
   #scoreTable th.c-sub, #scoreTable td.c-sub {
       font-size: var(--sc-fs-sub); padding-left: .5rem; padding-right: .5rem;
   }
-  /* v1.19.49.32 名次类列（方向排/班排/进退步）内容就一个数字，收到最窄 */
+  /* v1.19.49.33 名次类列（方向排/班排/进退步）内容就一个数字，收到最窄 */
   #scoreTable th.c-rank, #scoreTable td.c-rank {
       width: 1%; white-space: nowrap; font-size: var(--sc-fs-meta); color: var(--sl-text-muted);
       padding-left: .12rem; padding-right: .12rem;
   }
-  /* v1.19.49.32 进退步：进步=上升箭头（深绿 #15803d，比 Bootstrap text-success 更深），
+  /* v1.19.49.33 进退步：进步=上升箭头（深绿 #15803d，比 Bootstrap text-success 更深），
      退步=下降箭头（深红 #b91c1c）；不再用 ± 号，避免把 "+N" 误读成进步 */
   #scoreTable td.c-rank.move-up { color: #15803d; font-weight: 600; }
   #scoreTable td.c-rank.move-down { color: #b91c1c; font-weight: 600; }
   #scoreTable td.c-rank.move-up i, #scoreTable td.c-rank.move-down i {
       font-size: .8rem; vertical-align: -.02em;
   }
-  /* v1.19.49.32 表格两端留白：学号左侧、最后一列（地理）右侧；
+  /* v1.19.49.33 表格两端留白：学号左侧、最后一列（地理）右侧；
      放在 c-meta/c-rank 之后，用等特异性的后置规则覆盖它们的左右内边距 */
   #scoreTable th:first-child, #scoreTable td:first-child { padding-left: .7rem; }
   #scoreTable th:last-child, #scoreTable td:last-child { padding-right: .7rem; }
-  /* v1.19.49.32 表头排序：点一下按该列从高到低，再点切换升序 */
+  /* v1.19.49.33 表头排序：点一下按该列从高到低，再点切换升序 */
   #scoreTable th a.th-sort { white-space: nowrap; color: inherit; text-decoration: none; }
   #scoreTable th a.th-sort:hover { color: var(--sl-sidebar-accent-text); }
-  /* v1.19.49.32 三角统一放在文字**后面**；未点选时也要看得清（原 opacity-25 太淡） */
+  /* v1.19.49.33 三角统一放在文字**后面**；未点选时也要看得清（原 opacity-25 太淡） */
   #scoreTable th a.th-sort i { font-size: .75rem; margin-left: 2px; vertical-align: .08em; }
   #scoreTable th a.th-sort i.sort-off { color: var(--sl-text-subtle); }
   #scoreTable th.text-end a.th-sort { position: relative; display: inline-block; }
@@ -92,7 +92,7 @@
         · {{ exam.exam_type or '其他' }}
         · <span class="badge bg-light text-dark border" title="本场划线/排名/分析采用的分数口径">{{ exam.score_mode_label() }}</span></span>
     <div class="ms-auto d-flex gap-2">
-        {# v1.19.49.32：已导入/待重算都要给「重新计算排名」，否则 dirty 状态下按钮消失找不着 #}
+        {# v1.19.49.33：已导入/待重算都要给「重新计算排名」，否则 dirty 状态下按钮消失找不着 #}
         {% if exam.status not in ('imported', 'dirty') %}
         <a href="{{ url_for('grades.exam_import', exam_id=exam.id) }}" class="btn btn-primary btn-sm">
             <i class="bi bi-upload"></i> 导入成绩
@@ -112,7 +112,7 @@
         <a href="{{ url_for('grades.bands_page', exam_id=exam.id) }}" class="btn btn-outline-info btn-sm">
             <i class="bi bi-bar-chart"></i> 划线分层
         </a>
-        {# v1.19.49.32：分数修改记录（谁在什么时候改了谁的分），任何登录用户可查 #}
+        {# v1.19.49.33：分数修改记录（谁在什么时候改了谁的分），任何登录用户可查 #}
         <a href="{{ url_for('grades.score_changes') }}?exam={{ exam.id }}" class="btn btn-outline-secondary btn-sm">
             <i class="bi bi-clock-history"></i> 分数修改记录
         </a>
@@ -190,14 +190,14 @@
                 {% if cur_class %}（{{ cur_class }} · {{ total }} 人）
                 {% elif cur_dir %}（{{ cur_dir }}方向 · {{ total }} 人）
                 {% else %}（{{ total }} 人）{% endif %}</h6>
-            {# v1.19.49.32 页头操作说明整行删除（用户：这一行字不需要）——
+            {# v1.19.49.33 页头操作说明整行删除（用户：这一行字不需要）——
                默认排序/改分/「未选」等口径不再在页面上写文字；
                要回到默认次序：点左上「全部 / 历史方向 / 物理方向」或刷新即可（这些入口不带排序参数） #}
         </div>
-        {# v1.19.49.32 改分结果提示（保存成功后在页面上短暂显示） #}
+        {# v1.19.49.33 改分结果提示（保存成功后在页面上短暂显示） #}
         <div id="scFlash" class="alert alert-success py-1 px-2 small d-none mt-2 mb-0"></div>
         {# v1.19.0 按班级查看：服务端筛选（链接可分享/收藏），不选=全部 #}
-        {# v1.19.49.32 新增两个方向分组（历史方向 / 物理方向），排在「全部」之后、班级之前；与班级互斥 #}
+        {# v1.19.49.33 新增两个方向分组（历史方向 / 物理方向），排在「全部」之后、班级之前；与班级互斥 #}
         {% if classes %}
         <div class="d-flex flex-wrap gap-1 mt-2">
             <a class="btn btn-sm {{ 'btn-primary' if not cur_class and not cur_dir else 'btn-outline-secondary' }}"
@@ -214,13 +214,13 @@
         {% endif %}
     </div>
     <div class="table-responsive" style="max-height:70vh;">
-        {# v1.19.49.32 表头排序宏：点一下按该列从高到低，再点切换升序；
+        {# v1.19.49.33 表头排序宏：点一下按该列从高到低，再点切换升序；
            排序在服务端做（页面只加载当前页），筛选/翻页都带着 sort/order #}
         {% macro th_sort(key, label, ctype='c-meta', align='') %}
         {% set active = (cur_sort == key) %}
         {% set nxt = 'asc' if (active and cur_order == 'desc') else 'desc' %}
         {% set caret %}{% if active %}<i class="bi {{ 'bi-caret-up-fill' if cur_order == 'asc' else 'bi-caret-down-fill' }}"></i>{% else %}<i class="bi bi-caret-down sort-off"></i>{% endif %}{% endset %}
-        {# v1.19.49.32 排序三角统一放在表头文字**后面**（此前右对齐列放在前面，导致有前有后）；
+        {# v1.19.49.33 排序三角统一放在表头文字**后面**（此前右对齐列放在前面，导致有前有后）；
            右对齐列由 CSS 把三角绝对定位进该列预留的「三角位」，文字右缘仍与数字右缘严格对齐。 #}
         <th class="{{ ctype }} {{ align }}{{ ' th-active' if active else '' }}"><a class="th-sort" title="按「{{ label }}」{{ '升序' if nxt == 'asc' else '从高到低' }}排序" href="{{ url_for('grades.exam_detail', exam_id=exam.id, cls=(cur_class or none), dir=(cur_dir or none), sort=key, order=nxt) }}">{{ label }}{{ caret }}</a></th>
         {% endmacro %}
@@ -234,7 +234,7 @@
                 {{ th_sort('dir', '方向') }}
                 {{ th_sort('sel', '选科') }}
                 {{ th_sort('rank_dir', '方向排', 'c-rank', 'text-end') }}
-                {# v1.19.49.32 进退步紧跟方向排（同为方向口径的名次列） #}
+                {# v1.19.49.33 进退步紧跟方向排（同为方向口径的名次列） #}
                 {{ th_sort('move', '进退步', 'c-rank', 'text-end') }}
                 {{ th_sort('rank_class', '班排', 'c-rank', 'text-end') }}
                 {{ th_sort('total', '总分', 'c-total', 'text-end') }}
@@ -242,7 +242,7 @@
             </tr>
             </thead>
             <tbody>
-            {# v1.19.49.32：行片段改为**复用** AJAX 分页同一模板，避免「初始页内联副本」与
+            {# v1.19.49.33：行片段改为**复用** AJAX 分页同一模板，避免「初始页内联副本」与
                「翻页片段」两处各改一遍而漏改（本次就踩过：列宽类只加到了片段上） #}
             {% include 'grades/exam_detail_rows.html' %}
             </tbody>
@@ -303,7 +303,7 @@
     </div>
 </div>
 
-{# v1.19.49.32 单科改分：弹窗二次确认 + 满分校验（总分不可改） #}
+{# v1.19.49.33 单科改分：弹窗二次确认 + 满分校验（总分不可改） #}
 <div class="modal fade" id="scoreModal" tabindex="-1">
     <div class="modal-dialog modal-dialog-centered">
         <div class="modal-content">
@@ -465,7 +465,7 @@ $(function(){
     var meta = $('#pageMeta').data();
     var curCls = meta.cls || '';
     var curDir = meta.dir || '';
-    var curSort = meta.sort || '';        // v1.19.49.32 表头排序（服务端）
+    var curSort = meta.sort || '';        // v1.19.49.33 表头排序（服务端）
     var curOrder = meta.order || 'desc';
     // 按「班级 | 方向 | 排序」各自记各的翻页位置（换排序=新列表，从第 1 页开始）
     var PAGE_KEY = 'examPage_' + examId + '|' + curCls + '|' + curDir + '|' + curSort + '|' + curOrder;
@@ -602,7 +602,7 @@ $(function(){
         var v = $(this).val();
         pageSize = (v === '全部') ? 500 : parseInt(v, 10);
         if (pageSize > 500) pageSize = 500;   // 单页上限，防止「全部」拖垮
-        // v1.19.49.32 审核修正：切页大小时同步重算 totalPages，
+        // v1.19.49.33 审核修正：切页大小时同步重算 totalPages，
         // 否则“第 X / Y 页”的 Y 仍为旧值，导致 Next 能翻到实际不存在的页，服务端 clamp 后回回重页
         totalPages = Math.max(1, Math.ceil(total / pageSize));
         sessionStorage.setItem(PAGE_KEY, 1);
