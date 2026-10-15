@@ -1,4 +1,4 @@
-# StuLink v1.19.49.33 2026-10-10
+# StuLink v1.19.49.34 2026-10-10
 # AI 分析服务：权限收敛取数（本次+上次原始成绩）→ payload 组装 → LLM 转发
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 import json
@@ -18,7 +18,7 @@ from app.utils.url_guard import assert_outbound_url_allowed
 DEFAULT_TEMPERATURE = 0.4
 DEFAULT_TIMEOUT = 180
 
-# v1.19.49.33 S-4：不自动跟随 3xx，防 SSRF 以 approved.com → 302 → 1.19.49.30 绕过 url_guard
+# v1.19.49.34 S-4：不自动跟随 3xx，防 SSRF 以 approved.com → 302 → 1.19.49.30 绕过 url_guard
 
 class _NoRedirect(urllib.request.HTTPRedirectHandler):
     def redirect_request(self, req, fp, code, msg, headers, newurl):
@@ -570,7 +570,7 @@ def build_stats(payload):
                    'values': [_mean(subj[k]) for k in sorted(subj.keys())]}
 
     # 4) 进退步分布
-    # v1.19.49.33 修复：move_rank = 本场方向排名 − 上一场方向排名，
+    # v1.19.49.34 修复：move_rank = 本场方向排名 − 上一场方向排名，
     # 负值 = 名次数字变小 = 进步、正值 = 退步（与成绩单、个人查询同口径）。
     # 原实现把 ≥50 记成"大幅进步"、≤-50 记成"大幅退步"，饼图标签整体标反，此处纠正。
     moves = {'大幅进步(≤-50)': 0, '进步': 0, '持平': 0, '退步': 0, '大幅退步(≥50)': 0}

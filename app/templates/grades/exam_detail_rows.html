@@ -1,6 +1,6 @@
 {# 考试详情「成绩单」分页片段：仅渲染 <tr> 行，供 AJAX 翻页局部替换 tbody #}
 {% for stu in students %}
-{# v1.19.49.33 进退步：进步=上升箭头（深绿）、退步=下降箭头（深红），不再用 ± 号（+N 曾被读成"进步"）
+{# v1.19.49.34 进退步：进步=上升箭头（深绿）、退步=下降箭头（深红），不再用 ± 号（+N 曾被读成"进步"）
    move_rank = 本场方向排名 − 上一场方向排名：< 0 即名次数字变小 = 进步 #}
 {% set mv = stu.move %}
 {% set mv_cls = 'move-up' if mv is not none and mv < 0 else ('move-down' if mv is not none and mv > 0 else '') %}
@@ -15,18 +15,18 @@
     <td class="c-meta">{{ stu.class_name }}</td>
     <td class="c-meta">{{ stu.direction }}</td>
     <td class="small text-muted c-meta">{{ stu.selection }}</td>
-    {# v1.19.49.33 名次三列：单元内容一律写成一行、右对齐且内部无空白（行尾空白会把数字往左推） #}
+    {# v1.19.49.34 名次三列：单元内容一律写成一行、右对齐且内部无空白（行尾空白会把数字往左推） #}
     <td class="text-end c-rank">{{ stu.rank if stu.rank else '—' }}</td>
     <td class="text-end c-rank {{ mv_cls }}" title="{{ mv_tip }}">{% if mv is not none and mv < 0 %}<i class="bi bi-arrow-up"></i>{{ -mv }}{% elif mv is not none and mv > 0 %}<i class="bi bi-arrow-down"></i>{{ mv }}{% elif mv is not none %}<span class="text-muted">0</span>{% else %}<span class="text-muted">—</span>{% endif %}</td>
     <td class="text-end c-rank">{{ stu.rank_class if stu.rank_class else '—' }}</td>
-    {# v1.19.49.33：总分移到语文（成绩区）前面；总分由各科自动汇总，不可点击修改 #}
-    {# v1.19.49.33：右对齐单元格内容写成一行（内部无空白），保证与表头右缘严格对齐 #}
+    {# v1.19.49.34：总分移到语文（成绩区）前面；总分由各科自动汇总，不可点击修改 #}
+    {# v1.19.49.34：右对齐单元格内容写成一行（内部无空白），保证与表头右缘严格对齐 #}
     <td class="text-end c-total" title="总分 = 各科成绩之和（自动汇总，不可直接修改）{% if stu.total_raw is defined and stu.total_raw is not none %}｜原始分 {{ stu.total_raw }}{% endif %}">{{ stu.total if stu.total is not none else '—' }}{% if stu.total_raw is defined and stu.total_raw is not none %}<span class="d-block text-muted small fw-normal">原{{ stu.total_raw }}</span>{% endif %}</td>
     {% for s in subjects %}
     {% set cell = stu.subjects.get(s) %}
     {% set unsel = s in (stu.unselected or []) %}
     {% set base = '点击修改（赋分/原始分）' if can_edit_scores else '赋分/原始分' %}
-    {# v1.19.49.33：有成绩且具改分权限的单科才是可点的 score-cell；缺考黄色高亮但不可点；未选灰字 #}
+    {# v1.19.49.34：有成绩且具改分权限的单科才是可点的 score-cell；缺考黄色高亮但不可点；未选灰字 #}
     <td class="text-end small c-sub {{ 'text-muted' if unsel else ('table-warning' if cell is none else ('score-cell' if can_edit_scores else '')) }}"
         data-sid="{{ cell.id if cell else '' }}"
         data-score="{{ cell.score if cell and cell.score is not none else '' }}"
