@@ -244,7 +244,7 @@
                             {% else %}
                             <form method="POST" class="d-inline"
                                   action="{{ url_for('academic.schedule_smart_mapping_fix', sid=ts.id) }}"
-                                  onsubmit="return confirm({{ ('确认 ' ~ it.grade ~ it.class_name ~ '「' ~ it.subject ~ '」的课表教师就是映射里的「' ~ (it.expected or '') ~ '」？\n本次导入将按映射的姓名与编号写入该班该科的课程；不会修改任课教师映射。') | tojson }})">
+                                  onsubmit='return confirm({{ ('确认 ' ~ it.grade ~ it.class_name ~ '「' ~ it.subject ~ '」的课表教师就是映射里的「' ~ (it.expected or '') ~ '」？\n本次导入将按映射的姓名与编号写入该班该科的课程；不会修改任课教师映射。') | tojson }})'>
                                 <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                                 <input type="hidden" name="token" value="{{ token }}">
                                 <input type="hidden" name="grade" value="{{ it.grade }}">

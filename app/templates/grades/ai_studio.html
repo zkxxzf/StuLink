@@ -1,0 +1,228 @@
+{% extends "base.html" %}
+{% block title %}AI 分析{% endblock %}
+{# 2026-10-13：AI 分析工作台（合并原「AI 报告历史」）。
+   提问 = 服务端任务（落库），生成在后台线程跑；本页可随时（重新）订阅进度，
+   切页/刷新不丢。样式只跟随主题变量 var(--sl-*) 与既有 Bootstrap 类，不写死颜色。 #}
+{% set _exam_id = exam_id|default(request.args.get('exam') or '', true) %}
+{% set _task_id = task_id|default(request.args.get('task') or '', true) %}
+{% block extra_css_head %}
+<link href="{{ su('css/ai_report.css') }}" rel="stylesheet">
+<style>
+    .ai-studio-list { max-height: 62vh; overflow: auto; }
+    .ai-stage-err { color: var(--bs-danger); }
+    /* 任务卡 / 报告排版 / 推荐问题胶囊：统一样式在 css/ai_report.css（与汇报区共用） */
+</style>
+{% endblock %}
+{% block content %}
+<div class="container-fluid py-3" id="aiStudioApp">
+    {# 头部 Hero：渐变横幅 + 返回胶囊 #}
+    <div class="ai-hero mb-3">
+        <i class="bi bi-stars ai-hero-deco"></i>
+        <a href="{{ url_for('grades.index') }}{% if _exam_id %}?exam={{ _exam_id }}{% endif %}"
+           class="ai-hero-back" title="返回成绩分析">
+            <i class="bi bi-arrow-left"></i> 返回成绩分析
+        </a>
+        <div class="ai-hero-title"><i class="bi bi-stars"></i> AI 分析</div>
+        <div class="ai-hero-sub">
+            用一句话提问，AI 结合本场考试成绩给出分析；生成的报告由 AI 产出，仅供参考，不代表学校评价结论。
+        </div>
+    </div>
+
+    <div class="row g-3">
+        {# ---------------- 左栏：我的 AI 分析 ---------------- #}
+        <div class="col-lg-4 col-xl-3">
+            <div class="card shadow-sm h-100">
+                <div class="card-header py-2 d-flex align-items-center gap-2">
+                    <h6 class="mb-0"><i class="bi bi-clock-history"></i> 我的 AI 分析</h6>
+                    <button class="btn btn-sm btn-outline-secondary ms-auto" type="button" id="aiRefresh"
+                            title="刷新列表" aria-label="刷新列表">
+                        <i class="bi bi-arrow-clockwise"></i>
+                    </button>
+                </div>
+                <div class="card-body">
+                    <div class="text-muted small mb-2">
+                        进行中的任务会在后台继续，切走再回来仍可查看。
+                    </div>
+                    <div id="aiTaskList" class="ai-studio-list"></div>
+                </div>
+            </div>
+        </div>
+
+        {# ---------------- 右栏：提问 + 进度 + 报告 ---------------- #}
+        <div class="col-lg-8 col-xl-9">
+            <div class="card shadow-sm">
+                <div class="card-body">
+                    <div class="ai-ask-head mb-3">
+                        <span class="ai-ask-icon"><i class="bi bi-stars"></i></span>
+                        <div class="me-auto">
+                            <div class="ai-ask-title">提问</div>
+                            <div class="ai-ask-sub">Key 只存本机浏览器，服务器不留存；提问会建成后台任务，切页仍可继续</div>
+                        </div>
+                        <button type="button" class="btn btn-sm btn-outline-primary" id="aiGenToggle"
+                                aria-expanded="false" aria-controls="aiGenPanel">
+                            <i class="bi bi-sliders"></i> 提示词生成器
+                        </button>
+                    </div>
+
+                    <div class="row g-2 align-items-end mb-2">
+                        <div class="col-sm-7">
+                            <label class="form-label small text-muted mb-1" for="aiExamSel">考试</label>
+                            <select id="aiExamSel" class="form-select form-select-sm"></select>
+                        </div>
+                        <div class="col-sm-5 d-flex justify-content-sm-end">
+                            <span class="text-muted small">选好考试再提问，数据只取你有权限看的部分</span>
+                        </div>
+                    </div>
+
+                    {# ---------- 提示词生成器（2026-10-14，默认收起） ----------
+                       老师点选「范围（年级/班级/学科）→ 侧重 → 输出格式 → 附加要求」，
+                       服务端校验并拼装成完整提示词；拼出的内容填入下方文本框，仍可手动编辑。 #}
+                    <div id="aiGenPanel" class="ai-gen-panel border rounded-3 p-3 mb-2 d-none">
+                        <div class="d-flex flex-wrap align-items-center gap-2 mb-2">
+                            <span class="fw-semibold small"><i class="bi bi-magic"></i> 选一选，自动拼好提示词</span>
+                            <span class="text-muted small ms-auto">选项随时可改；拼出的提示词在下面仍可手动编辑</span>
+                        </div>
+
+                        {# 年级不在面板里选：每场考试自带年级（上面「考试」下拉已标），
+                           生成器只在**本场考试内**收窄范围（2026-10-14 用户口径）。 #}
+                        <div>
+                            <label class="form-label small text-muted mb-1">
+                                班级 <span class="text-muted">（可多选，不选＝本场考试全部班级）</span>
+                            </label>
+                            <div id="aiGenClasses" class="d-flex flex-wrap gap-1 ai-gen-chips"></div>
+                        </div>
+
+                        <div class="mt-2">
+                            <label class="form-label small text-muted mb-1">
+                                学科 <span class="text-muted">（可多选，不选＝全部学科）</span>
+                            </label>
+                            <div id="aiGenSubjects" class="d-flex flex-wrap gap-1 ai-gen-chips"></div>
+                        </div>
+
+                        <div class="row g-2 mt-1">
+                            <div class="col-md-6">
+                                <label class="form-label small text-muted mb-1" for="aiGenFocus">分析侧重</label>
+                                <select id="aiGenFocus" class="form-select form-select-sm"></select>
+                            </div>
+                            <div class="col-md-6">
+                                <label class="form-label small text-muted mb-1" for="aiGenOutput">输出格式</label>
+                                <select id="aiGenOutput" class="form-select form-select-sm"></select>
+                            </div>
+                        </div>
+
+                        <div class="mt-2">
+                            <label class="form-label small text-muted mb-1" for="aiGenExtra">
+                                附加要求 <span class="text-muted">（可留空；也可点下面常用要求快速填入）</span>
+                            </label>
+                            <textarea id="aiGenExtra" class="form-control form-control-sm" rows="2"
+                                      maxlength="500"
+                                      placeholder="例如：只陈述客观数据，不做人格化评价"></textarea>
+                            <div id="aiGenExtraPresets" class="d-flex flex-wrap gap-1 mt-1 ai-gen-chips"></div>
+                        </div>
+
+                        <div class="d-flex flex-wrap align-items-center gap-2 mt-3 pt-2 border-top">
+                            <input type="text" id="aiGenTplName" class="form-control form-control-sm"
+                                   style="max-width:150px" maxlength="30" placeholder="模板名（如：月考班级对比）">
+                            <button type="button" class="btn btn-sm btn-outline-secondary" id="aiGenTplSave">
+                                <i class="bi bi-bookmark-plus"></i> 存为模板
+                            </button>
+                            <select id="aiGenTpl" class="form-select form-select-sm" style="max-width:210px"></select>
+                            <button type="button" class="btn btn-sm btn-outline-danger" id="aiGenTplDel" disabled>
+                                <i class="bi bi-trash"></i> 删除模板
+                            </button>
+                            <button type="button" class="btn btn-sm btn-primary ms-auto" id="aiGenBuild">
+                                <i class="bi bi-magic"></i> 生成提示词
+                            </button>
+                        </div>
+                    </div>
+
+                    {# ---------- 最终提示词（生成器拼装 / 一句话 / 手动编辑都落到这里） ---------- #}
+                    <textarea id="aiQ" class="form-control form-control-sm" rows="3" autocomplete="off"
+                              placeholder="一句话分析：本次考试各班物理成绩差异，并找出临界生最多的班（也可用上方「提示词生成器」拼装）"></textarea>
+                    <div class="d-flex flex-wrap align-items-center gap-2 mt-2">
+                        <button class="btn btn-primary btn-sm ai-go" type="button" id="aiSubmit">
+                            <i class="bi bi-stars"></i> <span class="ai-run-label">开始分析</span>
+                        </button>
+                        <button class="btn btn-sm btn-outline-secondary" type="button" id="aiCopyPrompt">
+                            <i class="bi bi-clipboard"></i> 复制提示词
+                        </button>
+                        <span class="text-muted small">
+                            提示词会原样发给 AI；报告只使用你有权限看到的成绩数据
+                        </span>
+                    </div>
+                    <div class="d-flex flex-wrap gap-2 mt-2" id="aiChips">
+                        <button type="button" class="ai-chip">本次考试整体情况与各班差距</button>
+                        <button type="button" class="ai-chip">哪个班临界生最多，分别是谁（只列客观数据）</button>
+                        <button type="button" class="ai-chip">物理/历史方向各科强弱对比</button>
+                        <button type="button" class="ai-chip">与上次考试相比，进退步最明显的班级</button>
+                    </div>
+
+                    {# 进度 + 报告（选中/新建任务后显示） #}
+                    <div id="aiProgress" class="mt-4 d-none">
+                        <div id="aiStage" class="small text-muted mb-2"></div>
+                        <div id="aiTools" class="ai-tools mb-3"></div>
+                        <div class="ai-doc-paper">
+                            <div class="ai-doc-head">
+                                <i class="bi bi-file-earmark-text"></i> 分析报告
+                            </div>
+                            <div class="ai-report-body ai-doc"></div>
+                        </div>
+                        <div class="d-flex flex-wrap gap-2 mt-3 pt-2 border-top">
+                            {# 进行中：可请求停止（当前步骤完成即停）；结束后：可把当时的选择+提示词带回生成器改 #}
+                            <button class="btn btn-sm btn-outline-warning d-none" type="button" id="aiStop">
+                                <i class="bi bi-stop-circle"></i> 停止
+                            </button>
+                            <button class="btn btn-sm btn-outline-primary d-none" type="button" id="aiReedit">
+                                <i class="bi bi-pencil-square"></i> 重新编辑提示词
+                            </button>
+                            <button class="btn btn-sm btn-outline-secondary" type="button" id="aiCopy">
+                                <i class="bi bi-clipboard"></i> 复制
+                            </button>
+                            <button class="btn btn-sm btn-outline-secondary" type="button" id="aiExport">
+                                <i class="bi bi-filetype-html"></i> 导出 HTML
+                            </button>
+                            <button class="btn btn-sm btn-outline-danger" type="button" id="aiDel" disabled>
+                                <i class="bi bi-trash"></i> 删除
+                            </button>
+                            <a class="btn btn-sm btn-outline-secondary ms-auto"
+                               href="{{ url_for('grades.index') }}{% if _exam_id %}?exam={{ _exam_id }}{% endif %}">
+                                <i class="bi bi-bar-chart"></i> 返回成绩分析
+                            </a>
+                        </div>
+                        <div class="alert alert-light border small mt-3 mb-0">
+                            <i class="bi bi-info-circle"></i> 本报告由 AI 生成，仅供参考，不代表学校评价结论。
+                        </div>
+                    </div>
+
+                    {# 空态：没选任务时的引导 #}
+                    <div id="aiEmpty" class="text-center text-muted py-5">
+                        <i class="bi bi-stars fs-2 d-block mb-2"></i>
+                        还没有选择任务。左侧会列出你最近的分析记录；
+                        在右侧选一场考试、输入一句话问题，点「开始分析」即可。
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+{# 路径一律由服务端注入，JS 不硬编码 #}
+<script type="application/json" id="aiStudioCfg">{
+    "exam_id": {{ _exam_id|tojson }},
+    "task_id": {{ _task_id|tojson }},
+    "ask_url": {{ url_for('grades.ai_ask')|tojson }},
+    "tasks_url": {{ '/grades/ai/tasks'|tojson }},
+    "reports_url": {{ '/grades/ai/reports'|tojson }},
+    "exam_opts_url": {{ url_for('grades.api_options')|tojson }},
+    "prompt_options_url": {{ url_for('grades.ai_prompt_options')|tojson }},
+    "prompt_build_url": {{ url_for('grades.ai_prompt_build')|tojson }},
+    "prompt_tpl_url": {{ url_for('grades.ai_prompt_templates')|tojson }}
+}</script>
+{% endblock %}
+{% block extra_js %}
+{# grades_md.js：旧口径 Markdown 报告（负数 id 的历史条目）用 renderGradeMd 渲染 #}
+<script src="{{ su('js/grades_md.js') }}"></script>
+<script src="{{ su('js/ai_task_ui.js') }}"></script>
+<script src="{{ su('js/ai_prompt_gen.js') }}"></script>
+<script src="{{ su('js/ai_studio.js') }}"></script>
+{% endblock %}

@@ -12,6 +12,18 @@
     function layerVal() { return $('#rpLayer').val() || ''; }
     function ready() { return !!(window._rpUI && examId()); }
 
+    /* 层名/层线文案（2026-10-15）：
+       · 层名自带「线」时不重复（原写死 +'线' → 「本科线线」）；
+       · 组合级划线各组合线不一致时后端返回 line='按组合'（字符串），此时列出各组合的线，
+         不再拼出「按组合 分」这种半截文案。 */
+    function layerLabel(d) { return (d.layer || '') + (/线$/.test(d.layer || '') ? '' : '线'); }
+    function lineText(d) {
+        if (typeof d.line === 'number') return d.line + ' 分';
+        var lines = d.lines || {};
+        var txt = Object.keys(lines).map(function (k) { return k + ' ' + lines[k]; }).join(' / ');
+        return (d.line || '—') + (txt ? '（' + txt + '）' : '');
+    }
+
     /* 考试/方向切换、层列表重建都要重查；首屏下拉开就绪前限时等待（≤12 秒），不重复请求 */
     function tryBoot() {
         if (ready()) { waiting = false; U = window._rpUI; loadNearLine(); }
@@ -30,8 +42,8 @@
             + '线下 <input id="rpBelow" type="number" min="0" max="100" value="' + U.esc(d.below)
             + '" class="form-control form-control-sm d-inline-block w-auto"> 分以内　'
             + '<button id="rpNearGo" class="btn btn-sm btn-danger">查询压线名单</button>'
-            + '<span class="text-muted small ms-2">层线：' + U.esc(d.layer) + ' ' + U.num(d.line)
-            + ' 分　线上 <b class="text-success">' + d.above_n + '</b> 人，'
+            + '<span class="text-muted small ms-2">层线：' + U.esc(d.layer) + ' ' + U.esc(lineText(d))
+            + '　线上 <b class="text-success">' + d.above_n + '</b> 人，'
             + '线下 <b class="text-danger">' + d.below_n + '</b> 人（线下在前）</span></div>';
     }
 
@@ -52,8 +64,8 @@
             if (!res.success) { box.html(U.sectionHead('压线提醒', '') + U.errHtml(res.message)); return; }
             var d = res.data;
             range.above = d.above; range.below = d.below;
-            box.html('').append(U.sectionHead('压线提醒（' + d.direction + ' · ' + d.layer + '线 '
-                + d.line + ' 分）', d.exam.name));
+            box.html('').append(U.sectionHead('压线提醒（' + d.direction + ' · ' + layerLabel(d)
+                + ' ' + lineText(d) + '）', d.exam.name));
             box.append(toolbarHtml(d));
             if (!d.rows.length) {
                 box.append(U.errHtml('该范围内没有学生'));

@@ -11,7 +11,10 @@
         <span class="text-muted small">在用 / 待启用的学期：创建、导入、激活、归档、删除</span>
     </div>
     <div class="d-flex gap-2 flex-wrap">
-        <a class="btn btn-sm btn-outline-dark" href="{{ url_for('academic.schedule_history') }}">
+        {# 2026-10-13（用户反馈"历史课表在哪、没看到"）：入口本来就在，但用的是
+           btn-outline-dark（浅色下深灰描边）——在部分浏览器/缓存旧 CSS 时对比度过低，
+           容易被当成禁用状态忽略。改为蓝色描边 + 加粗，位置仍在右上角、创建学期左侧。 #}
+        <a class="btn btn-sm btn-outline-primary fw-semibold" href="{{ url_for('academic.schedule_history') }}">
             <i class="bi bi-clock-history"></i> 历史课表
             {% if archived_count %}<span class="badge bg-secondary ms-1">{{ archived_count }}</span>{% endif %}
         </a>
@@ -41,6 +44,9 @@
 <div class="row g-3">
     {% for ts in schedules %}
     {% set archived = ts.status == 'archived' %}
+    {# 2026-10-14（用户要求）：没有课程条目＝还没导入过课表 →
+       这张卡的主按钮从「全校总课表」换成「导入课表」，先把导入引导放第一位 #}
+    {% set entry_count = counts.get(ts.id, 0) or 0 %}
     <div class="col-md-6 col-xl-4">
         <div class="card h-100 {{ 'border-secondary-subtle' if archived else '' }}"
              style="{{ 'opacity:.72;border:1px dashed #cbd5e1 !important;' if archived else '' }}">
@@ -57,7 +63,7 @@
                             data-id="{{ ts.id }}" data-name="{{ ts.name }}"
                             data-year="{{ ts.school_year }}" data-term="{{ ts.term }}"
                             data-desc="{{ ts.description or '' }}"
-                            title="编辑学期名称 / 学年 / 学期 / 说明">
+                            title="编辑学期名称 / 学年 / 学期 / 说明" aria-label="编辑学期名称 / 学年 / 学期 / 说明">
                         <i class="bi bi-pencil"></i>
                     </button>
                     {% endif %}
@@ -79,7 +85,11 @@
                 </div>
                 <div class="d-flex justify-content-between mb-1">
                     <span class="text-muted">课程条目</span>
-                    <span class="fw-bold">{{ counts.get(ts.id, 0) }} 节</span>
+                    {% if entry_count %}
+                    <span class="fw-bold">{{ entry_count }} 节</span>
+                    {% else %}
+                    <span class="fw-bold text-danger" title="该学期还没有任何课程条目，请先导入课表">尚未导入</span>
+                    {% endif %}
                 </div>
                 <div class="d-flex justify-content-between mb-1">
                     <span class="text-muted">创建时间</span>
@@ -96,13 +106,16 @@
                 {% endif %}
             </div>
             <div class="card-footer py-2 bg-transparent">
-                {# 2026-10-12（用户要求精简界面）：卡片按钮从 11+ 个收敛为 4 个 ——
-                   ① 全校总课表（右侧箭头展开各年级课表，原每个年级一个按钮）
-                   ② 导入课表  ③ 导出  ④ 激活（未启用时）
-                   其余低频 / 危险操作一律收进「更多」下拉（作息时间 / 变更历史 / 配置日期 /
-                   以此为底版新建 / 归档进历史课表 / 设为当前 / 清空课表 / 删除学期）。
-                   同时删掉「切换启用其他学期时自动归档」这条状态提示（用户要求）。 #}
+                {# 2026-10-13（用户要求再精简一轮）：卡片常驻按钮收敛为**两个** ——
+                   ① 全校总课表（右侧箭头展开各年级课表）② 更多（下拉）；
+                   「导入课表 / 导出」不常用，一并移入「更多」下拉；未启用学期才额外出现「激活」。
+                   「更多」内顺序：导入课表 / 导出 Excel / 作息时间 / 变更历史 / 配置日期 /
+                   以此为底版新建 / 设为当前 / 归档进历史课表 / 清空课表 / 删除学期。
+                   （2026-10-12 那轮已把这批低频/危险操作从卡片收进本下拉。）
+                   2026-10-14（用户要求）：**还没导入课表的学期**（课程条目为 0）例外 ——
+                   主按钮换成「导入课表」（导入是这时唯一该做的事），「更多」里不再重复该入口。 #}
                 <div class="d-flex flex-wrap gap-1">
+                    {% if entry_count %}
                     <div class="btn-group btn-group-sm">
                         <a class="btn btn-sm btn-outline-primary py-0" href="{{ url_for('academic.schedule_overview', sid=ts.id) }}">
                             <i class="bi bi-list-columns-reverse"></i> 全校总课表
@@ -125,20 +138,16 @@
                             {% endfor %}
                         </ul>
                     </div>
-                    {% if not archived %}
-                    <a class="btn btn-sm btn-outline-success py-0" href="{{ url_for('academic.schedule_smart_import', sid=ts.id) }}">
+                    {% elif not archived %}
+                    {# 2026-10-14（用户要求）：还没导入课表 —— 主按钮位置直接给「导入课表」 #}
+                    <a class="btn btn-sm btn-primary py-0" href="{{ url_for('academic.schedule_smart_import', sid=ts.id) }}">
                         <i class="bi bi-upload"></i> 导入课表
                     </a>
                     {% endif %}
-                    <a class="btn btn-sm btn-outline-info py-0"
-                       title="导出 Excel：整校一个班一张 sheet"
-                       href="{{ url_for('academic.schedule_export', sid=ts.id, view_type='all') }}">
-                        <i class="bi bi-download"></i> 导出
-                    </a>
                     {% if ts.status != 'active' %}
                     <form method="POST" class="d-inline" action="{{ url_for('academic.schedule_activate', sid=ts.id) }}"
                           {# M-10：学期名可能含引号，confirm 文本整体走 |tojson #}
-                          onsubmit="return confirm({{ ('重新启用' if archived else '激活') ~ '「' ~ ts.name ~ '」？' ~ ('该学期将从历史课表恢复为启用中；' if archived else '') ~ '当前启用中的学期将归档进「历史课表」（含快照）。' | tojson }})">
+                          onsubmit='return confirm({{ ('重新启用' if archived else '激活') ~ '「' ~ ts.name ~ '」？' ~ ('该学期将从历史课表恢复为启用中；' if archived else '') ~ '当前启用中的学期将归档进「历史课表」（含快照）。' | tojson }})'>
                         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                         <button class="btn btn-sm btn-success py-0"><i class="bi bi-broadcast"></i> {{ '重新启用' if archived else '激活' }}</button>
                     </form>
@@ -151,6 +160,16 @@
                             <i class="bi bi-three-dots"></i> 更多
                         </button>
                         <ul class="dropdown-menu">
+                            {# 2026-10-13：导入 / 导出不常用，卡片上不再常驻，收进这里（排在最前）；
+                               2026-10-14：空课表学期的该入口已提到卡片主按钮，这里不重复 #}
+                            {% if not archived and entry_count %}
+                            <li><a class="dropdown-item" href="{{ url_for('academic.schedule_smart_import', sid=ts.id) }}">
+                                <i class="bi bi-upload"></i> 导入课表</a></li>
+                            {% endif %}
+                            <li><a class="dropdown-item" title="导出 Excel：全校总课表 + 各年级总课表 + 各班课表"
+                                   href="{{ url_for('academic.schedule_export', sid=ts.id, view_type='all') }}">
+                                <i class="bi bi-download"></i> 导出 Excel（全校 / 年级 / 班级）</a></li>
+                            <li><hr class="dropdown-divider"></li>
                             <li><a class="dropdown-item" href="{{ url_for('academic.schedule_periods', sid=ts.id) }}">
                                 <i class="bi bi-clock-history"></i> 作息时间</a></li>
                             <li><a class="dropdown-item" href="{{ url_for('academic.schedule_versions', sid=ts.id) }}">
@@ -163,7 +182,7 @@
                             {# 2026-10-10：与「归档 / 激活」区分开——只切「当前学期」标记 #}
                             <li>
                                 <form method="POST" action="{{ url_for('academic.schedule_set_current', sid=ts.id) }}"
-                                      onsubmit="return confirm({{ ('将「' ~ ts.name ~ '」设为当前学期？其他学期将取消当前标记（不影响各自的启用 / 归档状态）。') | tojson }})">
+                                      onsubmit='return confirm({{ ('将「' ~ ts.name ~ '」设为当前学期？其他学期将取消当前标记（不影响各自的启用 / 归档状态）。') | tojson }})'>
                                     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                                     <button type="submit" class="dropdown-item"><i class="bi bi-star"></i> 设为当前</button>
                                 </form>
@@ -174,7 +193,7 @@
                                所以手动归档入口只给未启用（draft）学期；启用中的由"激活别的学期"自动归档 #}
                             <li>
                                 <form method="POST" action="{{ url_for('academic.schedule_archive_term', sid=ts.id) }}"
-                                      onsubmit="return confirm({{ ('归档未启用学期「' ~ ts.name ~ '」并移入「历史课表」？将生成归档快照，归档后只读回看，需要时还能重新启用。') | tojson }})">
+                                      onsubmit='return confirm({{ ('归档未启用学期「' ~ ts.name ~ '」并移入「历史课表」？将生成归档快照，归档后只读回看，需要时还能重新启用。') | tojson }})'>
                                     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                                     <button type="submit" class="dropdown-item"><i class="bi bi-archive"></i> 归档进历史课表</button>
                                 </form>
@@ -196,7 +215,7 @@
                             {% if ts.status == 'draft' %}
                             <li>
                                 <form method="POST" action="{{ url_for('academic.schedule_delete', sid=ts.id) }}"
-                                      onsubmit="return confirm({{ ('删除未启用学期「' ~ ts.name ~ '」？其节次与课表条目将一并删除，不可恢复。') | tojson }})">
+                                      onsubmit='return confirm({{ ('删除未启用学期「' ~ ts.name ~ '」？其节次与课表条目将一并删除，不可恢复。') | tojson }})'>
                                     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                                     <button type="submit" class="dropdown-item text-danger"><i class="bi bi-trash"></i> 删除学期</button>
                                 </form>

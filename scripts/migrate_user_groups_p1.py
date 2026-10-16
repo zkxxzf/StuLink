@@ -25,6 +25,23 @@ from app.extensions import db
 from app.models import User, UserPermissionGroup
 from scripts._db_backup import backup_db
 
+# 2026-10-14 第三轮审计（CONS3-02）：本脚本原属 master 侧"多身份改造"，未按本仓库
+# 约定登记迁移；补 `_mig_log` 登记（只 record，不 early-exit —— 脚本自身幂等，
+# 每次跑都能核对到达目标状态），这样 `scripts/migration_status.py --pending` 可反查。
+SCRIPT_NAME = os.path.basename(__file__)
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+try:
+    import _mig_log
+except Exception as _e:  # noqa: BLE001
+    _mig_log = None
+    print(f'[WARN] 迁移登记模块不可用（迁移照常执行，仅不登记）：{_e}')
+
+
+def _record():
+    if _mig_log:
+        _mig_log.record(SCRIPT_NAME,
+                        note='多身份 P1：users.permission_group_id → user_permission_groups 主组关联')
+
 
 def main():
     app = create_app()
@@ -33,18 +50,23 @@ def main():
         print('[OK] 数据表已确保（含 user_permission_groups）')
 
         users = User.query.all()
-        existing = {(l.user_id, l.group_id) for l in UserPermissionGroup.query.all()}
-        pending = []
+        existing = {(l.user_id, l.group_id): l
+                    for l in UserPermissionGroup.query.all()}
+        pending = []        # 需新建的主组关联 (user, gid)
+        fix_primary = []    # 已有同组关联但未标 is_primary（2026-10-14 第四轮审计补）
         for u in users:
             gid = u.permission_group_id
             if not gid:
                 continue
-            if (u.id, gid) in existing:
-                continue
-            pending.append((u, gid))
+            link = existing.get((u.id, gid))
+            if link is None:
+                pending.append((u, gid))
+            elif not link.is_primary:
+                fix_primary.append(link)
 
-        if not pending:
+        if not pending and not fix_primary:
             print('[SKIP] 关联表已是最新，无需改动')
+            _record()
             return
 
         from flask import current_app
@@ -58,14 +80,17 @@ def main():
         for u, gid in pending:
             db.session.add(UserPermissionGroup(user_id=u.id, group_id=gid,
                                                is_primary=True))
+        for link in fix_primary:      # 已有同组关联但未标主组 → 补标记（幂等）
+            link.is_primary = True
         db.session.commit()
-        print(f'[DONE] 已为 {len(pending)} 个用户建立主组关联')
+        print(f'[DONE] 新建主组关联 {len(pending)} 条，补主组标记 {len(fix_primary)} 条')
 
         # 校验
         n_links = UserPermissionGroup.query.count()
         n_users_with_group = User.query.filter(
             User.permission_group_id.isnot(None)).count()
         print(f'[CHECK] 关联行数={n_links}，有组用户数={n_users_with_group}')
+        _record()
 
 
 if __name__ == '__main__':

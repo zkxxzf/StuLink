@@ -1,6 +1,9 @@
 {% extends "base.html" %}
 {% block title %}教师管理{% endblock %}
 {% block content %}
+{# 2026-10-14：教师管理拆成两个子页（教师名单 / 教师权限管理），顶部 tab 互切；
+   教师名单即教务侧同一页面（/users/teachers 复用 /academic/teachers 的视图与数据） #}
+{% with active = 'perms' %}{% include 'system/_user_tabs.html' %}{% endwith %}
 <div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
     <h4 class="fw-bold mb-0">
         <i class="bi bi-person-gear"></i> 教师管理
@@ -48,7 +51,7 @@
         <div class="row g-2 align-items-center">
             <div class="col-auto">
                 <input id="userSearch" class="form-control form-control-sm" style="width:280px"
-                       placeholder="搜索姓名 / 用户名 / 分组（自动定位分组）">
+                       placeholder="搜索姓名 / 用户名 / 分组（自动定位分组）" aria-label="搜索姓名 / 用户名 / 分组">
             </div>
             <div class="col-auto">
                 <button id="expandAll" class="btn btn-sm btn-outline-secondary">
@@ -94,25 +97,26 @@
                         </td>
                         <td>{% if u.is_active %}<span class="badge bg-success">启用</span>{% else %}<span class="badge bg-secondary">禁用</span>{% endif %}</td>
                         <td>
-                            <a href="{{ url_for('users.edit', id=u.id) }}" class="btn btn-sm btn-outline-warning"><i class="bi bi-pencil"></i></a>
+                            <a href="{{ url_for('users.edit', id=u.id) }}" class="btn btn-sm btn-outline-warning" aria-label="编辑用户"><i class="bi bi-pencil"></i></a>
                             <form method="POST" action="{{ url_for('users.toggle', id=u.id) }}" style="display:inline;">
                                 <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                                 {% if u.role == 'admin' and u.is_active %}
                                 <button type="button" class="btn btn-sm btn-outline-secondary" disabled
-                                        title="管理员账号不可禁用">
+                                        title="管理员账号不可禁用" aria-label="管理员账号不可禁用">
                                     <i class="bi bi-shield-lock"></i>
                                 </button>
                                 {% else %}
                                 <button type="submit" class="btn btn-sm btn-outline-{% if u.is_active %}secondary{% else %}success{% endif %}"
-                                        title="{% if u.is_active %}禁用{% else %}启用{% endif %}">
+                                        title="{% if u.is_active %}禁用{% else %}启用{% endif %}" aria-label="{% if u.is_active %}禁用{% else %}启用{% endif %}">
                                     <i class="bi bi-{% if u.is_active %}pause{% else %}play{% endif %}-circle"></i>
                                 </button>
                                 {% endif %}
                             </form>
+                            {# M-10（2026-10-15 审计补漏）：姓名可能含单引号 → 提示文案整体 |tojson + 单引号属性 #}
                             <form method="POST" action="{{ url_for('users.reset_password', id=u.id) }}" style="display:inline;"
-                                  onsubmit="return confirm('确定重置 {{ u.real_name }} 的密码为 123456？')">
+                                  onsubmit='return confirm({{ ("确定重置 " + (u.real_name or u.username or "") + " 的密码为 123456？")|tojson }})'>
                                 <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                                <button type="submit" class="btn btn-sm btn-outline-info" title="重置密码"><i class="bi bi-key"></i></button>
+                                <button type="submit" class="btn btn-sm btn-outline-info" title="重置密码" aria-label="重置密码"><i class="bi bi-key"></i></button>
                             </form>
                         </td>
                     </tr>

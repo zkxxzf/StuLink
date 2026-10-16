@@ -57,7 +57,15 @@
     'use strict';
     var stats = JSON.parse($('#statsData').text());
     var charts = {};
-    var statusColors = { pending:'#f59e0b', approved:'#3b82f6', rejected:'#ef4444', executed:'#10b981' };
+    // 2026-10-14 第四轮审计（UI-18）：图表色改读主题变量（common.js stuCssVar，读不到时
+    // 回落原字面量）——写死色在深色模式下与暗底撞色。运行时读取，主题切换后重绘即生效。
+    var _cv = window.stuCssVar || function (n, f) { return f; };
+    var statusColors = {
+        pending: _cv('--sl-chart-warn', '#f59e0b'),
+        approved: _cv('--sl-chart-info', '#3b82f6'),
+        rejected: _cv('--sl-chart-danger', '#ef4444'),
+        executed: _cv('--sl-chart-ok', '#10b981')
+    };
 
     function optStatus() {
         var labels = stats.status_labels || {};
@@ -79,7 +87,9 @@
             xAxis: { type: 'category', data: sd.map(function (d) { return d.name; }), axisLabel: { interval: 0, rotate: sd.length > 6 ? 30 : 0, fontSize: 11 } },
             yAxis: { type: 'value', minInterval: 1 },
             series: [{ type: 'bar', data: sd.map(function (d) { return d.value; }), barMaxWidth: 40,
-                itemStyle: { color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [{ offset: 0, color: '#6366f1' }, { offset: 1, color: '#a5b4fc' }]), borderRadius: [6, 6, 0, 0] } }]
+                itemStyle: { color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
+                    { offset: 0, color: _cv('--sl-chart-purple', '#6366f1') },
+                    { offset: 1, color: _cv('--sl-chart-2', '#a5b4fc') }]), borderRadius: [6, 6, 0, 0] } }]
         };
     }
     function optTrend() {
@@ -90,7 +100,8 @@
             xAxis: { type: 'category', data: tr.map(function (d) { return d.date; }), axisLabel: { fontSize: 10, rotate: 40 } },
             yAxis: { type: 'value', minInterval: 1 },
             series: [{ type: 'line', smooth: true, data: tr.map(function (d) { return d.count; }),
-                lineStyle: { color: '#2563eb', width: 2 }, itemStyle: { color: '#2563eb' },
+                lineStyle: { color: _cv('--sl-chart-info', '#2563eb'), width: 2 },
+                itemStyle: { color: _cv('--sl-chart-info', '#2563eb') },
                 areaStyle: { color: 'rgba(37,99,235,0.10)' } }]
         };
     }

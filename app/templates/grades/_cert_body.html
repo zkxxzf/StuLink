@@ -41,8 +41,10 @@
         </tbody>
     </table>
     {% if m.exam_names %}
+    {# 2026-10-13：自选考试时不能再说“取学期末考试”（与实际纳入不符）；
+       m.chosen 由 build_cert_matrix 给出，历史快照无该键 → 走默认口径文案。 #}
     <div class="cert-note">
-        说明：各时段成绩取该学期末考试成绩{% for n in m.exam_names %}（{{ loop.index }}）{{ n }}{% if not loop.last %}；{% endif %}{% endfor %}。
+        说明：{% if m.chosen %}本证明成绩取自以下考试{% else %}各时段成绩取该时段代表考试（优先期末）{% endif %}{% for n in m.exam_names %}（{{ loop.index }}）{{ n }}{% if not loop.last %}；{% endif %}{% endfor %}。
     </div>
     {% endif %}
     {% else %}

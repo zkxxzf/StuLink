@@ -26,6 +26,21 @@ from app.extensions import db
 from app.models import PermissionGroup
 from scripts._db_backup import backup_db
 
+# 2026-10-14 第四轮审计（CONS-02）：补迁移登记（只登记不早退）
+SCRIPT_NAME = os.path.basename(__file__)
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+try:
+    import _mig_log
+except Exception as _e:  # noqa: BLE001
+    _mig_log = None
+    print(f'[WARN] 迁移登记模块不可用（迁移照常执行，仅不登记）：{_e}')
+
+
+def _record():
+    if _mig_log:
+        _mig_log.record(SCRIPT_NAME, note='管理员组补回漏列权限 academic.edit（纯显示修正）')
+
+
 GROUP = '管理员组'
 KEY = 'academic.edit'
 
@@ -39,11 +54,13 @@ def main():
         g = PermissionGroup.query.filter_by(name=GROUP).first()
         if g is None:
             print(f'[SKIP] 未找到权限组「{GROUP}」（库可能未初始化，请先建库/初始化权限组）')
+            _record()
             return
 
         cur = list(g.get_menu_keys() or [])
         if KEY in cur:
             print(f'[SKIP] {GROUP} 已含 {KEY}，无需改动')
+            _record()
             return
 
         from flask import current_app
@@ -57,6 +74,7 @@ def main():
         db.session.commit()
         print(f'[OK] {GROUP} 已追加 [{KEY}]（共 {len(cur) + 1} 个 key）')
         print('[DONE] 纯显示修正：管理员 has_perm 恒 True，实际权限不受影响')
+    _record()
 
 
 if __name__ == '__main__':

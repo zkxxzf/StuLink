@@ -4,7 +4,7 @@
 生成内容（围绕既有 students 数据，默认取每个年级前 N 个班）：
   1. 一个启用中的学期 + 13 节默认作息
   2. 班级周课表（避开同班/同教师/同教室三重冲突；含少量单双周交替课与调课条目）
-  3. 备课组长登记（学科 × 年级，含职责与备课组范围）
+  3. 学科组长登记（备课组长＝学科 × 年级，教研组长＝只按学科，不分年级）
   4. 查课记录（近 30 个工作日）与教师业绩（含待审/已驳回样本）
 
 教师名单不在这里生成 —— 请先运行：
@@ -36,8 +36,9 @@ if BASE_DIR not in sys.path:
 from app import create_app  # noqa: E402
 from app.extensions import db
 from app.models import Student, User
-from app.models.academic import (DUTY_TEMPLATES, InspectionRecord, SubjectLeader,
-                                 Teacher, TeacherAchievement)
+from app.models.academic import (LEADER_CATEGORY_LESSON, LEADER_CATEGORY_RESEARCH,
+                                 InspectionRecord, SubjectLeader, Teacher,
+                                 TeacherAchievement)
 from app.models.timetable import (PeriodDef, ScheduleEntry,
                                   ScheduleSwap, ScheduleVersion, TermSchedule,
                                   get_default_periods)
@@ -508,7 +509,8 @@ def seed(commit: bool, classes_per_grade: int, seed_no: int):
             swaps += 1
         db.session.commit()
 
-        # ── 备课组长：学科 × 年级 ──
+        # ── 学科组长（2026-10-14）：备课组长＝学科 × 年级，教研组长＝只按学科 ──
+        # 只登记「谁当组长」（矩阵维护）；职责 / 组范围功能同一批已整功能删除。
         leader_count = 0
         subjects = ['语文', '数学', '外语', '物理', '化学', '生物', '政治', '历史',
                     '地理', '体育']
@@ -516,15 +518,21 @@ def seed(commit: bool, classes_per_grade: int, seed_no: int):
             for subj in subjects:
                 lst = pools.get(subj) or teachers
                 lead = lst[0]
-                members = '、'.join(t.name for t in lst[:4])
-                key = '毕业年级' if grade.startswith('2024') else 'default'
                 db.session.add(SubjectLeader(
                     school_year=SCHOOL_YEAR, term=TERM, grade=grade, subject=subj,
+                    category=LEADER_CATEGORY_LESSON,
                     leader_uid=lead.teacher_uid, leader_name=lead.name,
-                    members=f'{grade}{subj}备课组（{members}）',
-                    duty=DUTY_TEMPLATES[key],
                     updated_by=1))
                 leader_count += 1
+        for subj in subjects:                      # 教研组长：不分年级（grade 留空）
+            lst = pools.get(subj) or teachers
+            lead = lst[1] if len(lst) > 1 else lst[0]
+            db.session.add(SubjectLeader(
+                school_year=SCHOOL_YEAR, term=TERM, grade='', subject=subj,
+                category=LEADER_CATEGORY_RESEARCH,
+                leader_uid=lead.teacher_uid, leader_name=lead.name,
+                updated_by=1))
+            leader_count += 1
         db.session.commit()
 
         # ── 查课记录（近 30 个工作日） ──
@@ -566,7 +574,8 @@ def seed(commit: bool, classes_per_grade: int, seed_no: int):
         print(f'     课表条目 {ScheduleEntry.query.filter_by(term_schedule_id=ts.id).count()} 条'
               f'（未排上 {missed} 条）')
         print(f'     单双周交替 {merged} 组 · 调课演示 {swaps} 条')
-        print(f'     备课组长 {leader_count} 条 · 查课 {insp_count} 条 · 业绩 {ach_count} 条')
+        print(f'     学科组长 {leader_count} 条（备课组长+教研组长）'
+              f' · 查课 {insp_count} 条 · 业绩 {ach_count} 条')
 
         # 2026-10-10：晚自习值班功能已整体删除（晚自习在「全校总课表」里按节次呈现），
         # 演示数据不再生成值班记录。

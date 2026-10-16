@@ -1,4 +1,4 @@
-# StuLink v1.19.49.29 2026-10-10
+# StuLink v1.19.49.35 2026-10-10
 # 课表模块模型：学期课表 / 节次定义 / 课表明细 / 调课记录 / 变更版本（独立库 timetable.db）
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 import re
@@ -15,7 +15,7 @@ SCHEDULE_STATUS = {'draft': '未启用', 'active': '启用中', 'archived': '已
 ENTRY_TYPES = {'normal': '正常', 'swap': '调课'}
 SWAP_STATUS = {'pending': '待审核', 'approved': '已通过', 'rejected': '已驳回', 'executed': '已执行'}
 SWAP_TYPES = {'personal': '个人调课', 'bulk': '统一调课', 'exchange': '两人换课'}
-# 2026-10-12（v1.19.49.29）两人换课：模式收敛为「对调」与「代课」两种。
+# 2026-10-12（v1.19.49.35）两人换课：模式收敛为「对调」与「代课」两种。
 # 原先的 time（换时段）/ class（换班上课）被用户指出"重复"，已合并 ——
 # 「对调什么」不再由类型决定，改为 ScheduleSwap.swap_time / swap_class 两个勾选的组合：
 #   time ✔ class ✔ → 整条互换（我去上他那节、他来上我这节）
@@ -316,6 +316,11 @@ class ScheduleEntry(db.Model):
         db.Index('idx_entry_class', 'term_schedule_id', 'grade', 'class_name', 'weekday', 'period_number'),
         db.Index('idx_entry_teacher', 'term_schedule_id', 'teacher_uid', 'weekday', 'period_number'),
         db.Index('idx_entry_teaching', 'term_schedule_id', 'grade', 'teaching_class'),
+        # 2026-10-14 第四轮审计修复（PERF-118②）：按 (term, is_deleted, teacher_uid)
+        # 过滤的查询（今日课表 / 查课 / 教师课表）此前只能走 idx_entry_teacher
+        # 再回表过滤 is_deleted。
+        db.Index('idx_entry_deleted_teacher',
+                 'term_schedule_id', 'is_deleted', 'teacher_uid'),
     )
 
     def week_badge(self):
@@ -414,16 +419,19 @@ class ScheduleSwap(db.Model):
     approvals_json = db.Column(db.Text)
     # 2026-10-10：统一调课批次号 —— 同一次「统一调课」生成的多条记录共享同一 batch_id，
     # 列表按批次展示、整批一次性审批/执行，避免几十条一个个点。
-    batch_id = db.Column(db.String(32), index=True)
-    # ── 2026-10-12（v1.19.49.29）两人换课 ───────────────────────────────────
+    # 2026-10-14：索引改由 __table_args__ 的 idx_swap_batch **统一声明**（这里不能再写
+    # index=True）——否则同一列会被声明两个索引（隐式 ix_schedule_swaps_batch_id +
+    # 显式 idx_swap_batch），索引自检每次都报「1 个缺失」，谁都补不完。
+    batch_id = db.Column(db.String(32))
+    # ── 2026-10-12（v1.19.49.35）两人换课 ───────────────────────────────────
     # exchange_kind：换课类型（EXCHANGE_KINDS）；空 = 普通调课（含旧数据与统一调课）
     exchange_kind = db.Column(db.String(10))
-    # 2026-10-12（v1.19.49.29）「对调内容」两个勾选（取代原 time/class 类型）
+    # 2026-10-12（v1.19.49.35）「对调内容」两个勾选（取代原 time/class 类型）
     swap_time = db.Column(db.Boolean, default=True)     # 是否对调上课时间（星期 + 节次）
     swap_class = db.Column(db.Boolean, default=True)    # 是否对调上课班级（年级/班/学科/教室）
     # 对方那节课所在的日期（临时换课用 —— 换课有"两个日期"，不再是只有我这边）
     partner_swap_date = db.Column(db.Date)
-    # 2026-10-13（v1.19.49.29）「无需对方同意确认」：
+    # 2026-10-13（v1.19.49.35）「无需对方同意确认」：
     #   False（默认）＝不需要对方点同意，教务审批通过即生效，对方只收到知会；
     #   True          ＝走「对方确认 → 教务审批」，没确认前不进待审队列。
     need_partner_confirm = db.Column(db.Boolean, default=False,
@@ -437,11 +445,25 @@ class ScheduleSwap(db.Model):
     partner_responded_at = db.Column(db.DateTime)
     # 对方侧落位条目 id（临时换课生成两条「当天」条目；永久换课生成两条新条目）
     partner_target_entry_id = db.Column(db.Integer)
+    # 2026-10-14 第四轮审计修复（SEC-03）：代办标记 —— 教务/领导在「单节总览」
+    # 替原任课教师发起申请（applicant 仍记原任课教师）时，这里记**实际操作人**，
+    # 让单据与通知可区分「本人申请 / 代办」；本人申请时两列为空。
+    operator_uid = db.Column(db.String(16))
+    operator_name = db.Column(db.String(50))
     created_at = db.Column(db.DateTime, default=datetime.now)
 
     __table_args__ = (
         db.Index('idx_swap_status_created', 'status', 'created_at'),
         db.Index('idx_swap_applicant', 'applicant_uid'),
+        # 2026-10-14 性能审计（PERF-03）：批量调课/统一调课会在循环里按
+        # (original_entry_id, status) 查重、按 batch_id 展开整批、按 partner_uid 查
+        # 待对方确认项，三列此前均无索引 → 每次查询全表扫描 schedule_swaps，
+        # 一次 260 门的统一调课即 260 次全表扫描。
+        db.Index('idx_swap_entry_status', 'original_entry_id', 'status'),
+        db.Index('idx_swap_ts_status_created', 'term_schedule_id', 'status',
+                 'created_at'),
+        db.Index('idx_swap_batch', 'batch_id'),
+        db.Index('idx_swap_partner', 'partner_uid', 'partner_status', 'status'),
     )
 
     def to_dict(self):
@@ -469,7 +491,7 @@ class ScheduleSwap(db.Model):
             'exchange_kind': self.exchange_kind,
             'exchange_kind_text': (EXCHANGE_KINDS.get(self.exchange_kind, '')
                                    if self.exchange_kind else ''),
-            # 2026-10-12（v1.19.49.29）对调内容（getattr 兼容未跑迁移的旧库）
+            # 2026-10-12（v1.19.49.35）对调内容（getattr 兼容未跑迁移的旧库）
             'swap_time': bool(getattr(self, 'swap_time', False)),
             'swap_class': bool(getattr(self, 'swap_class', False)),
             'exchange_content_text': (exchange_content_text(
@@ -491,6 +513,9 @@ class ScheduleSwap(db.Model):
             'partner_responded_at': (self.partner_responded_at.strftime('%Y-%m-%d %H:%M:%S')
                                      if self.partner_responded_at else None),
             'partner_target_entry_id': self.partner_target_entry_id,
+            # 2026-10-14 SEC-03：代办操作人（getattr 兼容未跑迁移的旧库）
+            'operator_uid': getattr(self, 'operator_uid', None),
+            'operator_name': getattr(self, 'operator_name', None),
             'is_permanent': self.is_permanent,
             'reason': self.reason,
             'status': self.status,

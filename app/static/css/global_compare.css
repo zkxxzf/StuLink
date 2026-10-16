@@ -1,5 +1,5 @@
-/* StuLink v1.19.49.29 2026-10-10 全局对比：多级表头宽表
- * 结构：固定列（年级/班级/人数/方向/属性）+ 每科目组（去差均分 + 各分数线）
+/* StuLink v1.19.49.35 2026-10-10 全局对比：多级表头宽表
+ * 结构：固定列（年级/班级/人数/方向/组合/属性）+ 每科目组（去差均分 + 各分数线）
  * 交互：分数线勾选显隐 + 横向滚动 + 表头两级吸顶 + 前两列冻结；打印按 A3 横向输出。
  * 列宽尽量压缩（小字号/窄内边距/表头换行），窄屏/宽表在容器内滚动，页面不横向溢出。 */
 .ld-lines {
@@ -90,13 +90,37 @@ table.ld-table {
 .ld-dir-his { background: #fde8e8; color: #9b1c1c; }
 .ld-dir-all { background: var(--sl-surface-3); color: var(--sl-text); }
 .ld-type { font-size: 10.5px; color: var(--sl-text-muted); }
+/* 组合列（2026-10-15）：本行选科组合分布（人数降序）。多组合竖排压列宽，人数小字右随；
+   未分科无组合时为「—」（.ld-none） */
+.ld-sels {
+    display: inline-flex;
+    flex-direction: column;
+    align-items: center;
+    line-height: 1.15;
+}
+.ld-sel-i { white-space: nowrap; font-size: 10.5px; color: var(--sl-text); }
+.ld-sel-i .n {
+    margin-left: 2px;
+    font-size: 9.5px;
+    color: var(--sl-text-muted);
+    font-variant-numeric: tabular-nums;
+}
 /* 小计 / 总计 / 悬停行：全部走变量（原先写死浅蓝并带 !important，
    本文件在 theme.css 之后加载 → 深色模式下这几行会变成亮白条） */
 .ld-table tbody tr.sub td { background: var(--sl-subtotal-bg) !important; font-weight: 700; }
 .ld-table tbody tr.grand td { background: var(--sl-grand-bg) !important; font-weight: 700; }
+/* 2026-10-16 用户口径「分组的统计不用加粗，其他的都加粗。做区分」：
+   表体默认加粗（班级行 / 班级合计行 / 方向小计 / 全年级），只有**按选科组合拆出的
+   明细行**不加粗 —— 汇总与分组明细一眼分清（明细行的底色仍随父行） */
+.ld-table tbody td { font-weight: 700; }
+.ld-table tbody tr.combo td { font-weight: 400; }
 .ld-table tbody tr:hover td { background: var(--sl-row-hover) !important; }
 .ld-table tbody tr.sub:hover td { background: var(--sl-subtotal-bg) !important; }
 .ld-table tbody tr.grand:hover td { background: var(--sl-grand-bg) !important; }
+.ld-table tbody tr.combo:hover td { background: var(--sl-row-hover) !important; }
+/* 2026-10-16 第九轮审计（PERF-P11）：未勾选的层列整列隐藏（列头 + 数据格都带 data-line），
+   勾选时只切显隐、不重建表格；分组表头 colspan 由 JS 同步缩 */
+.ld-table .ld-line-off { display: none; }
 /* 上线单元格：人数在上、上线率在下（竖排以压缩列宽，避免整表横向滚动） */
 .ld-online {
     display: inline-flex;
@@ -109,6 +133,16 @@ table.ld-table {
 .ld-online .r { color: var(--sl-text-muted); font-size: 9.5px; }
 .ld-none { color: var(--sl-text-subtle); }
 .ld-avg { font-variant-numeric: tabular-nums; }
+/* 全体均分（2026-10-16 用户要求「不带去差均分的那种」）：去差均分下方的浅色小字，
+   括号内＝含被剔学生的全体均分；与去差一致（没剔过人）时后端就不下发差异、不渲染 */
+.ld-table .ld-avg-all {
+    font-size: 9.5px;
+    font-weight: 400;
+    color: var(--sl-text-subtle);
+    line-height: 1.1;
+    margin-top: 1px;
+    font-variant-numeric: tabular-nums;
+}
 /* 成绩下方的小字：总分格＝班主任、其余格＝该科任课教师（小字弱化，可换行以压列宽） */
 .ld-table .ld-teacher {
     font-size: 9.5px;
@@ -119,6 +153,11 @@ table.ld-table {
     white-space: normal;
     overflow-wrap: anywhere;
 }
+/* 2026-10-16 第八轮真机实测（verify_motion_ui.py UI-1）：375px 窄屏下整页横向溢出 49px
+   （宽表 ld-table + w-auto 下拉把 container-fluid 撑破）→ 根容器开横向滚动兜底，
+   表内仍可左右滑动查看，不再顶破整页。 */
+#ldApp { overflow-x: auto; }
+
 /* 打印：隐藏工具条/勾选区、放开滚动区、A3 横向 */
 @media print {
     .no-print { display: none !important; }

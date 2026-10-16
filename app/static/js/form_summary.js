@@ -70,7 +70,21 @@
             if (r.success) { cache.trend = r.data.trend || []; tryRender('trend'); }
         });
 
-        var PALETTE = ['#2f5496', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#06b6d4', '#e0699a', '#4a72c4'];
+        // 2026-10-14 审计修复：图表色改读主题变量（theme.css --sl-chart-* / --sl-border），
+        // 深色下自动提亮；读不到时回落到原字面量。
+        var PALETTE_FALLBACK = ['#2f5496', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#06b6d4', '#e0699a', '#4a72c4'];
+        function sem() {
+            return (window.stulinkSemantic && window.stulinkSemantic()) ||
+                {ok: '#10b981', warn: '#f59e0b', danger: '#ef4444', info: '#2f5496',
+                 purple: '#8b5cf6', cyan: '#06b6d4', muted: '#8a97b1',
+                 line: '#eef1f7', text: '#1e293b'};
+        }
+        /* 网格线：浅色 #eef1f7，深色跟着 --sl-border 走（不再是一道亮线） */
+        function lineColor() { return sem().line; }
+        function palette() {
+            var p = (window.stulinkPalette && window.stulinkPalette());
+            return p || PALETTE_FALLBACK;
+        }
 
         function initChart(id) {
             var el = document.getElementById(id);
@@ -89,11 +103,11 @@
                 tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' } },
                 legend: { data: ['已交', '未交'], right: 10, top: 0 },
                 grid: { left: 8, right: 20, top: 34, bottom: 8, containLabel: true },
-                xAxis: { type: 'value', splitLine: { lineStyle: { color: '#eef1f7' } } },
+                xAxis: { type: 'value', splitLine: { lineStyle: { color: lineColor() } } },
                 yAxis: { type: 'category', data: labels, inverse: true, axisLabel: { fontSize: 11 } },
                 series: [
-                    { name: '已交', type: 'bar', stack: 't', data: sub, itemStyle: { color: '#10b981', borderRadius: [3, 0, 0, 3] }, barMaxWidth: 16 },
-                    { name: '未交', type: 'bar', stack: 't', data: miss, itemStyle: { color: '#ef4444', borderRadius: [0, 3, 3, 0] }, barMaxWidth: 16 }
+                    { name: '已交', type: 'bar', stack: 't', data: sub, itemStyle: { color: sem().ok, borderRadius: [3, 0, 0, 3] }, barMaxWidth: 16 },
+                    { name: '未交', type: 'bar', stack: 't', data: miss, itemStyle: { color: sem().danger, borderRadius: [0, 3, 3, 0] }, barMaxWidth: 16 }
                 ]
             });
         }
@@ -105,12 +119,14 @@
                 legend: { bottom: 0 },
                 series: [{
                     type: 'pie', radius: ['42%', '68%'], center: ['50%', '44%'],
-                    avoidLabelOverlap: true, itemStyle: { borderColor: '#fff', borderWidth: 2 },
+                    /* 原写死白描边：深色下扇区之间是一道白圈 → 跟随面板色 */
+                    avoidLabelOverlap: true,
+                    itemStyle: { borderColor: (window.stuCssVar ? window.stuCssVar('--sl-surface', '#ffffff') : '#ffffff'), borderWidth: 2 },
                     label: { formatter: '{b}\n{c}' },
                     data: [
-                        { name: '待审核', value: s.pending || 0, itemStyle: { color: '#f59e0b' } },
-                        { name: '已通过', value: s.approved || 0, itemStyle: { color: '#10b981' } },
-                        { name: '已驳回', value: s.rejected || 0, itemStyle: { color: '#ef4444' } }
+                        { name: '待审核', value: s.pending || 0, itemStyle: { color: sem().warn } },
+                        { name: '已通过', value: s.approved || 0, itemStyle: { color: sem().ok } },
+                        { name: '已驳回', value: s.rejected || 0, itemStyle: { color: sem().danger } }
                     ]
                 }]
             });
@@ -118,16 +134,18 @@
         function renderTrend() {
             if (!cache.trend) { return; }
             var c = initChart('fxChartTrend'); if (!c) { return; }
-            if (!cache.trend.length) { c.setOption({ title: { text: '暂无提交趋势数据', left: 'center', top: 'center', textStyle: { color: '#8a97b1', fontSize: 13, fontWeight: 'normal' } } }); return; }
+            if (!cache.trend.length) { c.setOption({ title: { text: '暂无提交趋势数据', left: 'center', top: 'center', textStyle: { color: sem().muted, fontSize: 13, fontWeight: 'normal' } } }); return; }
             c.setOption({
                 tooltip: { trigger: 'axis' },
                 grid: { left: 8, right: 20, top: 20, bottom: 8, containLabel: true },
                 xAxis: { type: 'category', data: cache.trend.map(function (x) { return x.date.slice(5); }), boundaryGap: false },
-                yAxis: { type: 'value', minInterval: 1, splitLine: { lineStyle: { color: '#eef1f7' } } },
+                yAxis: { type: 'value', minInterval: 1, splitLine: { lineStyle: { color: lineColor() } } },
                 series: [{
                     type: 'line', smooth: true, data: cache.trend.map(function (x) { return x.count; }),
-                    areaStyle: { color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [{ offset: 0, color: 'rgba(47,84,150,.35)' }, { offset: 1, color: 'rgba(47,84,150,.02)' }]) },
-                    lineStyle: { color: '#2f5496', width: 2.5 }, itemStyle: { color: '#2f5496' }
+                    /* 原渐变是写死的 rgba(47,84,150,...)，深色下是一摊死蓝；
+                       改用「主题色 + opacity」，两套主题自动适配。 */
+                    areaStyle: { color: sem().info, opacity: 0.14 },
+                    lineStyle: { color: sem().info, width: 2.5 }, itemStyle: { color: sem().info }
                 }]
             });
         }
@@ -148,12 +166,12 @@
             var c = initChart('fxChartChoice'); if (!c) { return; }
             var opts = q.options || [];
             c.setOption({
-                title: { text: q.title, left: 'center', top: 0, textStyle: { fontSize: 12, color: '#6b7a99', fontWeight: 'normal' } },
+                title: { text: q.title, left: 'center', top: 0, textStyle: { fontSize: 12, color: sem().muted, fontWeight: 'normal' } },
                 tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' }, formatter: function (p) { var o = opts[p[0].dataIndex]; return o.label + ': ' + o.count + ' (' + o.percent + '%)'; } },
                 grid: { left: 8, right: 30, top: 30, bottom: 8, containLabel: true },
-                xAxis: { type: 'value', minInterval: 1, splitLine: { lineStyle: { color: '#eef1f7' } } },
+                xAxis: { type: 'value', minInterval: 1, splitLine: { lineStyle: { color: lineColor() } } },
                 yAxis: { type: 'category', data: opts.map(function (o) { return o.label; }), inverse: true, axisLabel: { fontSize: 11 } },
-                series: [{ type: 'bar', data: opts.map(function (o, i) { return { value: o.count, itemStyle: { color: PALETTE[i % PALETTE.length], borderRadius: [0, 4, 4, 0] } }; }), barMaxWidth: 18, label: { show: true, position: 'right', formatter: '{c}', fontSize: 11 } }]
+                series: [{ type: 'bar', data: opts.map(function (o, i) { return { value: o.count, itemStyle: { color: palette()[i % palette().length], borderRadius: [0, 4, 4, 0] } }; }), barMaxWidth: 18, label: { show: true, position: 'right', formatter: '{c}', fontSize: 11 } }]
             }, true);
         }
         function tryRender(kind) {
@@ -260,7 +278,7 @@
                 if (cell.files.length > 2) { $td.append($('<span class="fx-more">').text(' +' + (cell.files.length - 2)).css('cursor', 'pointer').on('click', function () { openFiles(cell.files, row); })); }
             } else {
                 var txt = cell.display || '';
-                if (!txt) { $td.text('—').css('color', '#c3cad9'); return $td; }
+                if (!txt) { $td.text('—').css('color', sem().muted); return $td; }
                 if (txt.length > 24) {
                     $td.append($('<span class="fx-cell-text">').text(txt.slice(0, 24) + '…').attr('title', '点击查看全文').on('click', function () { openText(txt); }));
                 } else { $td.text(txt); }
@@ -275,7 +293,7 @@
         function openFiles(files, row) {
             $('#fxCellTitle').text((row.name || '') + ' 的材料（' + files.length + '）');
             var html = files.map(function (f) {
-                return '<div class="d-flex align-items-center justify-content-between border-bottom py-2" style="border-color:#eef1f7!important">' +
+                return '<div class="d-flex align-items-center justify-content-between border-bottom py-2" style="border-color:' + lineColor() + '!important">' +
                     '<span><i class="bi bi-file-earmark-arrow-down text-primary me-2"></i>' + esc(f.filename) + ' <span class="fx-hint">' + esc(f.size_text || '') + '</span></span>' +
                     '<a class="btn btn-sm btn-outline-primary" target="_blank" href="' + esc(f.url) + '"><i class="bi bi-box-arrow-up-right"></i> 打开</a></div>';
             }).join('');

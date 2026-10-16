@@ -15,6 +15,9 @@ from reportlab.pdfbase.cidfonts import UnicodeCIDFont
 from reportlab.platypus import (SimpleDocTemplate, Table, TableStyle,
                                 Paragraph, PageBreak)
 
+# 2026-10-13：考场号 / 座号补零统一走 pad2（用户口径：01 考场、01 座）
+from app.utils.text_guard import pad2
+
 _FONT = 'STSong-Light'
 _registered = False
 
@@ -57,11 +60,8 @@ def desk_cards_pdf(students, room_loc_fn=None):
         """在 (ox, oy)=标签左下角 绘制一张两行桌签（实线边框，裁线在间隙虚线处）"""
         c.setStrokeColor(colors.black)
         c.setLineWidth(gw)
-        rn = s.room_no or ''
-        try:
-            seat = '%02d' % int(s.seat_no) if s.seat_no not in (None, '') else ''
-        except (TypeError, ValueError):
-            seat = str(s.seat_no or '')
+        rn = pad2(s.room_no)                 # 01 / 02 …（非纯数字原样）
+        seat = pad2(s.seat_no)               # 01 / 02 …
         vals = [s.exam_number or '', s.name or '', s.class_name or '',
                 f"{rn}-{seat}" if rn or seat else '']
         # 整格边框 + 表头/数据分隔横线
@@ -111,7 +111,7 @@ def desk_cards_pdf(students, room_loc_fn=None):
             # 页顶标注：考场号 + 位置（有 room_loc_fn 时）+ 续页序号
             c.setFont(_FONT, 8)
             c.setFillColor(colors.HexColor('#475569'))
-            note = f'考场 {rn}'
+            note = f'考场 {pad2(rn)}'
             if room_loc_fn:
                 loc = room_loc_fn(rn)
                 if loc:

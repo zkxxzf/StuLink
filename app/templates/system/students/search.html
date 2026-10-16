@@ -52,7 +52,7 @@
                     <th><input type="text" name="student_number" placeholder="学号"
                            value="{{ request.args.get('student_number','') }}" onkeydown="if(event.key==='Enter')document.getElementById('filterForm').submit()"></th>
                     <th><input type="text" name="name" placeholder="姓名"
-                           value="{{ request.args.get('name','') }}" onkeydown="if(event.key==='Enter')document.getElementById('filterForm').submit()"></th>
+                           value="{{ request.args.get('name','') }}" onkeydown="if(event.key==='Enter')document.getElementById('filterForm').submit()" aria-label="姓名"></th>
                     <th><select name="gender" onchange="document.getElementById('filterForm').submit()">
                         <option value="">全部</option>
                         <option value="男" {{ 'selected' if request.args.get('gender')=='男' }}>男</option>
@@ -115,7 +115,7 @@
                     <td>{% if s.id in bed_map %}{{ bed_map[s.id]['bed_number'] }}床{% else %}-{% endif %}</td>
                     <td>{{ field_value(s.phone1, 'phone') or '-' }}</td>
                     <td>{{ field_value(s.phone2, 'phone') or '-' }}</td>
-                    <td><a href="{{ url_for('students.detail', id=s.id) }}" class="btn btn-sm btn-outline-primary"><i class="bi bi-eye"></i></a></td>
+                    <td><a href="{{ url_for('students.detail', id=s.id) }}" class="btn btn-sm btn-outline-primary" aria-label="查看学生详情"><i class="bi bi-eye"></i></a></td>
                 </tr>
                 {% endfor %}
                 {% if not students %}

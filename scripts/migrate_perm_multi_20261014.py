@@ -27,8 +27,26 @@ import config as config_mod
 from app import create_app, PERMISSION_GROUPS
 from app.extensions import db
 from app.models import PermissionGroup, User
+from app.models.user_permission_group import UserPermissionGroup
 from app.models.permission_group import KIND_TO_LEGACY, LEGACY_TO_KIND
 from scripts._db_backup import backup_db
+
+# 2026-10-14 第三轮审计（CONS3-02）：本脚本原属 master 侧"多身份改造"，未按本仓库
+# 约定登记迁移；补 `_mig_log` 登记（只 record，不 early-exit —— 脚本自身幂等，
+# 每次跑都能核对到达目标结构），这样 `scripts/migration_status.py --pending` 可反查。
+SCRIPT_NAME = os.path.basename(__file__)
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+try:
+    import _mig_log
+except Exception as _e:  # noqa: BLE001
+    _mig_log = None
+    print(f'[WARN] 迁移登记模块不可用（迁移照常执行，仅不登记）：{_e}')
+
+def _record():
+    if _mig_log:
+        _mig_log.record(SCRIPT_NAME,
+                        note='多身份 P4：权限组 scope_kind 升级 / 废弃组清理 / 系统组补齐')
+
 
 DEPRECATED = ['校长', '副校长', '备课组长', '教研组长', '学生发展中心']
 RENAME = ('考务数据管理员', '考试管理员')
@@ -81,14 +99,19 @@ def main():
                 changes.append(f'[kind] {g.name}: scope_type {g.scope_type} → {new_st}')
                 g.scope_type = new_st
 
-        # 2) 删除废弃组（组内无用户才删）
+        # 2) 删除废弃组（组内无用户、且无多身份关联才删）
+        # 2026-10-14 第四轮审计修复（多身份 B 项）：原判据只看旧字段
+        # user.permission_group_id —— 用户若仅通过 user_permission_groups 关联
+        # 挂在该组（多身份），计数为 0 会**误删仍被引用的组**，留下悬空 link。
         for name in DEPRECATED:
             g = PermissionGroup.query.filter_by(name=name).first()
             if not g:
                 continue
             n = User.query.filter_by(permission_group_id=g.id).count()
-            if n:
-                changes.append(f'[SKIP] {name}: 组内仍有 {n} 个用户，未删除（请先转移）')
+            n_link = UserPermissionGroup.query.filter_by(group_id=g.id).count()
+            if n or n_link:
+                changes.append(f'[SKIP] {name}: 组内仍有 {n} 个用户 / {n_link} 条身份关联，'
+                               f'未删除（请先转移）')
                 continue
             changes.append(f'[DEL] 删除废弃组 {name}')
             db.session.delete(g)
@@ -100,7 +123,20 @@ def main():
             if dst and dst.id != src.id:
                 moved = (User.query.filter_by(permission_group_id=src.id)
                          .update({'permission_group_id': dst.id}))
-                changes.append(f'[MERGE] {RENAME[0]} → {RENAME[1]}（转移用户 {moved}）')
+                # 同上：多身份关联一并迁移；用户已属目标组时删除重复关联并保主组标记。
+                moved_link = 0
+                for link in UserPermissionGroup.query.filter_by(group_id=src.id).all():
+                    dup = UserPermissionGroup.query.filter_by(
+                        user_id=link.user_id, group_id=dst.id).first()
+                    if dup:
+                        if link.is_primary and not dup.is_primary:
+                            dup.is_primary = True
+                        db.session.delete(link)
+                    else:
+                        link.group_id = dst.id
+                        moved_link += 1
+                changes.append(f'[MERGE] {RENAME[0]} → {RENAME[1]}'
+                               f'（转移用户 {moved}，身份关联 {moved_link}）')
                 db.session.delete(src)
             else:
                 src.name = RENAME[1]
@@ -123,6 +159,7 @@ def main():
 
         if not changes:
             print('[SKIP] 已是最新结构，无需改动')
+            _record()
             return
 
         from flask import current_app
@@ -141,6 +178,7 @@ def main():
             n = User.query.filter_by(permission_group_id=g.id).count()
             print(f'   [{g.id}] {g.name}  范围={g.effective_kind}({g.scope_type})  '
                   f'用户数={n}')
+        _record()
 
 
 if __name__ == '__main__':

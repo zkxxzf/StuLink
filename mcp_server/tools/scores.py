@@ -2,7 +2,8 @@
 """成绩查询工具（**全部只读**）：考试 / 班级 / 学生三个维度的取数。
 
 权限模型（三条规则，取并集；详见 docs/MCP服务-成绩分析权限设计.md）：
-  R1 任课教师：仅当同时任教该班所在年级与该班时可看该班成绩，且只看自己所教学科；
+  R1 任课教师：任教某年级某科 → 该年级**全部班级**的该科成绩可见（2026-10-15 口径），
+              并附带每名学生的总分年级名次（名次可见、总分分数不可见）；
   R2 班主任（班型设置）：可看本班全部学科成绩；
   R3 年级长及以上：可看所在年级成绩（校级/管理员 = 全校）。
 成绩分析类工具（学科分析 / 分数段 / 分层上线 / 班级对比）见 `score_analysis.py`；
@@ -17,8 +18,8 @@ from app.extensions import db
 from app.models.grades import TOTAL_SUBJECT, Exam, ExamScore
 
 from ..core import examdata, guards, respond, score_guard, toolkit
-from ._score_common import (EXAM_FIELDS, NON_CLASS_NAMES, apply_total_visibility,
-                            exam_and_scope, filter_subjects, subject_avgs)
+from ._score_common import (EXAM_FIELDS, NON_CLASS_NAMES, exam_and_scope,
+                            filter_subjects)
 
 
 def _my_scope(user):
@@ -87,76 +88,61 @@ def _list_classes(user, grade, exam_id):
             'total_visible': scope.class_total_visible(g, c),
         })
     return {'count': len(out), 'classes': respond.limit_rows(out),
-            'note': '班级清单取自考试成绩（考试当时的班级），不是当前花名册；'
+            'note': '本清单＝**可下钻逐生明细**的班级（班主任＝本班全部学科；'
+                    '任课教师＝所教年级的全部班级，但只能看所教那一科）；'
+                    '年级级各班汇总（公开口径，含全部班级）见 get_class_score_summary。'
+                    '班级取自考试成绩（考试当时的班级），不是当前花名册；'
                     '"不分班 / 已转出 / 离校"不计入。'}
 
 
 def _exam_overview(user, exam_id):
+    """考试概览：口径塑形在 `app.modules.grades.services.score_overview`（与网页端 AI 同一份）。"""
+    from app.modules.grades.services import score_overview
+
     exam, scope = exam_and_scope(user, exam_id)
     data = examdata.get_exam_data(exam.id)
-    visible = scope.visible_classes(exam.grade)
-    snaps = [s for s in data.snap.values()
-             if visible is None or s['class_name'] in visible]
-    allowed = scope.grade_subjects(exam.grade)
-    imported = filter_subjects(data.imported_subjects, allowed)
-    expected = filter_subjects(data.expected_subjects, allowed)
-    missing = [s for s in expected if s not in imported]
-    class_names = {s['class_name'] for s in snaps}
-    total_ok = bool(class_names) and all(
-        scope.class_total_visible(exam.grade, c) for c in class_names)
-    totals = [s['score'] for s in snaps if isinstance(s.get('score'), (int, float))]
-    overview = {
-        'exam': respond.pick(exam, EXAM_FIELDS),
-        'visible_classes': sorted(visible) if visible is not None else '全部班级',
-        'visible_subjects': sorted(allowed) if allowed is not None else '全部学科',
-        'student_count': len(snaps),
-        'score_count': len(totals) if total_ok else None,
-        'avg_total': round(sum(totals) / len(totals), 1) if (totals and total_ok) else None,
-        'max_total': max(totals) if (totals and total_ok) else None,
-        'min_total': min(totals) if (totals and total_ok) else None,
-        'class_count': len(class_names),
-        'directions': sorted({s['direction'] for s in snaps if s['direction']}),
-        'imported_subjects': imported,
-        'expected_subjects': expected,
-        'partial_import': ({'imported': imported, 'expected': expected,
-                            'missing': missing} if missing else None),
-    }
-    if not total_ok:
-        overview['total_hidden'] = True
-        overview['note'] = '任课教师仅可见所教学科成绩，总分口径已隐藏'
+    overview = {'exam': respond.pick(exam, EXAM_FIELDS)}
+    overview.update(score_overview.build(exam, scope, data))
     return overview
 
 
 def _class_scores(user, exam_id, class_name):
-    from app.modules.grades.services import stats_service
+    """年级各班成绩汇总（聚合口径）+ 年级基准 + 班级位次。
+
+    2026-10-15 用户口径：**年级成绩分析的结果可以公开**，AI 分析某班必须能拿到年级对照
+    （年级均分/本班位次/各班横向数据），因此本工具返回**本场考试全部班级**，
+    不再按 `visible_classes` 收窄（原先任课教师只看得到自己那几个班，AI 无法做年级对比）。
+    每行附 `detail_visible`（能否下钻到逐生明细）与 `total_visible`（能否看逐生总分）——
+    逐生层仍按班级/学科收敛（见 `get_class_score_detail`）。
+    """
+    from app.modules.grades.services import grade_context
     exam, scope = exam_and_scope(user, exam_id)
-    if class_name:
-        score_guard.require_class(scope, exam.grade, class_name)
     data = examdata.get_exam_data(exam.id)
-    rows = stats_service.class_summary_table(data)
-    visible = scope.visible_classes(exam.grade)
-    if visible is not None:
-        rows = [r for r in rows if r['class_name'] in visible]
+    out = grade_context.class_rows(scope, exam, data)
+    rows = out['classes']
     if class_name:
         rows = [r for r in rows if r['class_name'] == class_name]
         if not rows:
             raise ValueError(f'该考试没有班级 {class_name} 的成绩（可用 list_classes 核对班级名）')
-    for row in rows:
-        allowed = scope.class_subjects(exam.grade, row['class_name'])
-        row['subject_avg'] = subject_avgs(data, row['class_name'], allowed)
-        apply_total_visibility(row, scope, exam.grade, row['class_name'])
     return {'exam_id': exam.id, 'exam_name': exam.name, 'grade': exam.grade,
-            'classes': respond.limit_rows(rows)}
+            'grade_baseline': out['grade'],
+            'classes': respond.limit_rows(rows),
+            'note': '各班汇总/各科均分/班级位次/年级基准属「年级成绩分析结果」，公开；'
+                    '`detail_visible=false` 的班不能下钻逐生成绩'}
 
 
 def _class_score_detail(user, exam_id, class_name, subject):
     """某场考试某班的**逐生成绩明细**（班级层面的概况见 get_class_score_summary）。
 
     范围收敛：
-      · 科目只返回账号在该班的可见学科（任课教师＝所教学科）；
-      · 总分与排名仅对班主任及以上开放（任课教师只被授予单科）。
+      · 班级：任课教师对该年级**全部班级**都可下钻（2026-10-15 用户口径：
+              教高一化学 → 高一所有班的化学成绩都对他开放），不再限本人任教的那几个班；
+      · 科目：只返回账号在该班的可见学科（任课教师＝所教的那科）；
+      · 总分：仅班主任及以上（`class_total_visible`）；任课教师不给总分分数，
+              但给每名学生的**总分年级名次** `rank_dir`（"只暴露名次，不暴露分数"）。
     subject 留空返回全部可见学科；传单科（如 "数学"）则只返回该科。
     """
+    from app.modules.grades.services import grade_context
     exam, scope = exam_and_scope(user, exam_id)
     if not class_name:
         raise ValueError('请指定班级名 class_name（如 "01班"；可用 list_classes 核对）')
@@ -175,6 +161,9 @@ def _class_score_detail(user, exam_id, class_name, subject):
         raise ValueError(f'该考试没有 {exam.grade} {class_name} 的可见学科成绩'
                          '（可用 get_exam_overview 查看该场已导入科目）')
     total_ok = scope.class_total_visible(exam.grade, class_name)
+    # 2026-10-15 用户口径：任课教师能看到该年级该科全部学生的成绩，同时给出每名学生的
+    # **总分年级名次**（rank_dir）—— 只给名次，不给总分分数（total_score 仍不下发）。
+    rank_ok = scope.total_rank_visible(exam.grade, class_name)
 
     rows = []
     for snap in data.totals_of(class_name=class_name):
@@ -187,6 +176,8 @@ def _class_score_detail(user, exam_id, class_name, subject):
             item['total_score'] = snap.get('score')
             item['rank_class'] = snap.get('rank_class')
             item['rank_dir'] = snap.get('rank_dir')
+        elif rank_ok:
+            item['rank_dir'] = snap.get('rank_dir')      # 仅名次（总分年级名次）
         rows.append(item)
     if not rows:
         raise ValueError(f'该考试没有班级 {class_name} 的成绩（可用 list_classes 核对班级名）')
@@ -198,10 +189,15 @@ def _class_score_detail(user, exam_id, class_name, subject):
     result = {'exam': respond.pick(exam, EXAM_FIELDS),
               'grade': exam.grade, 'class_name': class_name,
               'student_count': len(rows), 'visible_subjects': subjects,
-              'total_visible': total_ok,
+              'total_visible': total_ok, 'total_rank_visible': bool(rank_ok),
+              # 年级维度对照（聚合公开）：本班均分/位次 + 年级基准 + 各班横向数据
+              'grade_context': grade_context.class_vs_grade(
+                  scope, exam, data, class_name),
               'students': respond.limit_rows(rows)}
     if not total_ok:
-        result['note'] = '任课教师仅可见所教学科成绩，总分与排名已隐藏'
+        result['note'] = ('任课教师可见本年级所教科目的逐生成绩，rank_dir＝该生的总分年级名次'
+                          '（仅名次，不含总分分数）' if rank_ok
+                          else '任课教师仅可见所教学科成绩，总分与排名已隐藏')
     return result
 
 
@@ -211,6 +207,7 @@ def _student_scores(user, student_no, exam_id):
     scope = score_guard.resolve(user)
     score_guard.require_student(scope, student)
     total_ok = scope.class_total_visible(student.grade, student.class_name)
+    rank_ok = scope.total_rank_visible(student.grade, student.class_name)
 
     if not exam_id:
         rows = (ExamScore.query
@@ -229,12 +226,16 @@ def _student_scores(user, student_no, exam_id):
             if total_ok:
                 item.update({'total_score': r.score, 'rank_class': r.rank_class,
                              'rank_dir': r.rank_dir, 'move_rank': r.move_rank})
+            elif rank_ok:
+                item['rank_dir'] = r.rank_dir        # 仅名次：总分年级名次
             items.append(item)
         out = {'student_no': student_no, 'name': student.name, 'grade': student.grade,
                'class_name': student.class_name, 'total_visible': total_ok,
-               'count': len(items), 'exams': items}
+               'total_rank_visible': bool(rank_ok), 'count': len(items), 'exams': items}
         if not total_ok:
-            out['note'] = '任课教师仅可见所教学科成绩，总分与排名已隐藏'
+            out['note'] = ('任课教师可见所教科目的成绩，rank_dir＝该生的总分年级名次'
+                           '（仅名次，不含总分分数）' if rank_ok
+                           else '任课教师仅可见所教学科成绩，总分与排名已隐藏')
         return out
 
     exam, scope = exam_and_scope(user, exam_id)
@@ -248,14 +249,24 @@ def _student_scores(user, student_no, exam_id):
         value = data.subj.get((student_no, subject))
         if value is not None:
             subjects.append({'subject': subject, 'score': value})
+    rank_ok = scope.total_rank_visible(student.grade, student.class_name)
     student_out = dict(snap)
-    if not total_ok:
+    if total_ok:
+        pass
+    elif rank_ok:
+        # 2026-10-15：任课教师可见该生所教科 + **总分年级名次**（不给总分分数）
+        for key in ('score', 'rank_class', 'move'):
+            student_out.pop(key, None)
+        student_out['total_hidden'] = True
+        student_out['note'] = 'rank_dir＝该生的总分年级名次（仅名次，不含总分分数）'
+    else:
         for key in ('score', 'rank_class', 'rank_dir', 'move'):
             student_out.pop(key, None)
         student_out['total_hidden'] = True
         student_out['note'] = '任课教师仅可见所教学科成绩，总分与排名已隐藏'
     return {'exam': respond.pick(exam, EXAM_FIELDS),
             'visible_subjects': sorted(allowed) if allowed is not None else '全部学科',
+            'total_rank_visible': bool(rank_ok),
             'student': student_out, 'subjects': subjects}
 
 
@@ -334,8 +345,11 @@ def register(server):
                                      params={'exam_id': exam_id}, perm='grades.view')
 
     @server.tool(name='get_class_score_summary',
-                 description='查询班级成绩概况（人数、总分均分/标准差/最高/最低、分层人数、各科均分）；'
-                             'class_name 留空返回可见范围内的全部班级。任课教师只会看到自己所教学科')
+                 description='查询**年级各班成绩汇总**（人数、总分均分/标准差/最高/最低、分层人数、'
+                             '各科均分、班级位次）＋ 年级基准（年级均分/最高/最低）——'
+                             '"年级成绩分析结果"属公开口径，返回本场考试**全部班级**；'
+                             '每行 detail_visible 指出哪些班可下钻逐生明细。'
+                             'class_name 可留空；分析某个班时用它同拿年级对照')
     async def get_class_score_summary(exam_id: int, class_name: str = '') -> str:
         return await toolkit.db_call(lambda u: _class_scores(u, exam_id, class_name),
                                      tool='get_class_score_summary',
@@ -344,7 +358,8 @@ def register(server):
 
     @server.tool(name='get_class_score_detail',
                  description='查询某场考试某班的**逐生成绩明细**（每个学生的各科分数；'
-                             '班主任及以上另含总分与排名）；'
+                             '班主任及以上另含总分与排名；任课教师只见所教科目，'
+                             '另附每名学生的总分年级名次 rank_dir——只给名次不给分数）；'
                              'subject 留空返回全部可见学科，传单科（如 "数学"）只看该科')
     async def get_class_score_detail(exam_id: int, class_name: str,
                                      subject: str = '') -> str:

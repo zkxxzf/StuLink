@@ -3,25 +3,27 @@
 
 {% block extra_css %}
 <style>
+    /* 2026-10-14：与列表页同批——写死浅色改引 theme.css 的 --sl-* 变量（深色下浅底浅字会隐身）。 */
     .detail-card { border-radius: 12px; }
-    .detail-header { border-bottom: 1px solid #f1f5f9; padding-bottom: 16px; margin-bottom: 20px; }
+    .detail-header { border-bottom: 1px solid var(--sl-border); padding-bottom: 16px; margin-bottom: 20px; }
     .detail-meta { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
     .priority-badge { font-size: 12px; padding: 3px 10px; border-radius: 10px; font-weight: 600; }
-    .priority-urgent { background: #fef2f2; color: #dc2626; border: 1px solid #fecaca; }
-    .priority-normal { background: #eff6ff; color: #2563eb; border: 1px solid #bfdbfe; }
-    .target-tag { font-size: 12px; background: #f1f5f9; color: #475569; padding: 3px 8px; border-radius: 6px; }
+    .priority-urgent { background: var(--sl-soft-danger-bg); color: var(--sl-soft-danger-fg); border: 1px solid var(--sl-soft-danger-bd); }
+    .priority-normal { background: var(--sl-soft-info-bg); color: var(--sl-soft-info-fg); border: 1px solid var(--sl-soft-info-bd); }
+    .target-tag { font-size: 12px; background: var(--sl-surface-2); color: var(--sl-text-muted); padding: 3px 8px; border-radius: 6px; }
     .category-badge { font-size: 11px; padding: 2px 8px; border-radius: 8px; font-weight: 600; }
-    .cat-system { background: #eff6ff; color: #2563eb; }
-    .cat-reminder { background: #fef3c7; color: #b45309; }
-    .cat-academic { background: #ecfdf5; color: #059669; }
-    .cat-workbench { background: #f5f3ff; color: #7c3aed; }
-    .cat-other { background: #f1f5f9; color: #475569; }
-    .detail-content { font-size: 15px; line-height: 1.8; color: #1e293b; white-space: pre-wrap; }
-    .back-link { font-size: 14px; color: #64748b; text-decoration: none; }
-    .back-link:hover { color: #3b82f6; }
-    .progress-mini { height: 6px; border-radius: 3px; background: #e2e8f0; }
-    .progress-mini .bar { height: 100%; border-radius: 3px; background: #10b981; transition: width .3s; }
-    .scope-text { font-size: 12px; color: #64748b; }
+    .cat-system { background: var(--sl-soft-info-bg); color: var(--sl-soft-info-fg); }
+    .cat-reminder { background: var(--sl-soft-warn-bg); color: var(--sl-soft-warn-fg); }
+    .cat-academic { background: var(--sl-soft-success-bg); color: var(--sl-soft-success-fg); }
+    .cat-collect { background: var(--sl-soft-amber-bg); color: var(--sl-soft-amber-fg); }
+    .cat-workbench { background: var(--sl-soft-purple-bg); color: var(--sl-soft-purple-fg); }
+    .cat-other { background: var(--sl-surface-2); color: var(--sl-text-muted); }
+    .detail-content { font-size: 15px; line-height: 1.8; color: var(--sl-text); white-space: pre-wrap; }
+    .back-link { font-size: 14px; color: var(--sl-text-muted); text-decoration: none; }
+    .back-link:hover { color: var(--sl-sidebar-accent-text); }
+    .progress-mini { height: 6px; border-radius: 3px; background: var(--sl-border); }
+    .progress-mini .bar { height: 100%; border-radius: 3px; background: var(--sl-chart-ok); transition: width .3s; }
+    .scope-text { font-size: 12px; color: var(--sl-text-muted); }
 </style>
 {% endblock %}
 

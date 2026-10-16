@@ -1,4 +1,4 @@
-# StuLink v1.19.49.29 2026-10-10
+# StuLink v1.19.49.35 2026-10-10
 # 分层模板管理：自定义模板 + 考试与模板绑定
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 from flask import render_template, request, jsonify, abort
@@ -14,7 +14,7 @@ from app.utils.decorators import perm_required
 from app.utils.helpers import log_operation
 
 # 内置模板：首次访问时自动写入（幂等），保证「四层 / 默认模板」一直在
-# v1.19.49.29 用户口径：默认模板改为 985线 / 211线 / 特控线 / 本科线 四层，
+# v1.19.49.35 用户口径：默认模板改为 985线 / 211线 / 特控线 / 本科线 四层，
 # 低于本科线即「未上线」（不单列一层，由“不落任何层”自然得出）。
 BUILTIN_LAYERS_NAME = '默认模板'      # 默认模板名（内置不可删）
 BUILTIN_TEMPLATES = [
@@ -64,7 +64,7 @@ def ensure_builtin_templates():
                            sort_order=t['sort_order'])
         obj.set_layers(t['layers'])
         db.session.add(obj)
-    # v1.19.49.29 修正 bug：历史上给 is_builtin 加字段时，迁移把已有行全标成了内置，
+    # v1.19.49.35 修正 bug：历史上给 is_builtin 加字段时，迁移把已有行全标成了内置，
     # 导致用户手工建的模板也没有删除按钮。内置与否以**名字**为唯一依据：
     # 不在规范定义（含旧内置名）里的-list 全部归为可删。
     builtin_names = {t['name'] for t in BUILTIN_TEMPLATES} | set(LEGACY_RENAME)
@@ -107,7 +107,7 @@ def _norm_line(name):
 
 @bp.route('/api/band-templates')
 @login_required
-@perm_required('grades.settings')
+@perm_required('grades.view')      # 只读列表：划线页（含教师只读视图）要显示「本场绑定模板」
 def api_band_templates():
     """模板列表；带 exam_id 时返回该考试已绑定的模板，未绑定则推荐一个
 
@@ -117,6 +117,11 @@ def api_band_templates():
       ③ 按考试适用类型推荐（原口径）
     suggest_reason: 'lines' | 'exam_type' | ''（推荐依据，前端展示用）
     suggest_hit / suggest_extra：命中几条已保存的线 / 模板里还有几层待填（②用）
+
+    2026-10-15：本接口为只读（模块定义，无学生成绩），门槛与划线页一致放开到
+    grades.view —— 否则教师只读视图加载不到「本场绑定模板」这一行。
+    写操作（save/delete/bind）仍为 grades.settings。ensure_builtin_templates()
+    是幂等初始化（只在缺失时补齐内置模板），不构成越权写。
     """
     ensure_builtin_templates()
     exam_id = request.args.get('exam_id', type=int)

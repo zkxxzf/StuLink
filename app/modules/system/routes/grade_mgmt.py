@@ -24,7 +24,7 @@ def _prune_backups(backups_dir, keep=20, max_age_days=180):
     此前 `data/backups/` 只增不清理，明文整库副本（含口令哈希、身份证密文）
     会长期累积并随同步盘扩散。
 
-    v1.19.49.29 S-5：仅清理自动生成的、名字严格匹配
+    v1.19.49.35 S-5：仅清理自动生成的、名字严格匹配
     `(graduate|system|history)_<年级>_YYYYMMDD_HHMMSS.db` 的文件，
     不误删手工改名的历史备份（如 `_local_before_repro/` 、`academic.db.bak-*` 等）。
     """
@@ -56,8 +56,22 @@ def _prune_backups(backups_dir, keep=20, max_age_days=180):
     return removed
 
 
+# 2026-10-14 审计 API-09：历史库表名白名单。裸 sqlite3 不支持参数化表名，
+# 只能用 f-string 拼接；这里是唯一合法取值（与 _undo_history_archive 的 pairs 同源），
+# 后续改造若引入外部输入，白名单会直接拒绝，杜绝表名注入。
+_HISTORY_TABLES = ('graduated_students', 'graduated_rooms', 'graduated_beds')
+
+
+def _check_history_table(table):
+    """表名白名单校验：不在白名单内直接抛错（fail-closed）。"""
+    if table not in _HISTORY_TABLES:
+        raise ValueError(f'非法的历史库表名: {table!r}（白名单: {_HISTORY_TABLES}）')
+    return table
+
+
 def _history_watermark(conn, table):
     """记录历史库某表的 rowid 水位（用于失败补偿时只删本次新增的行）"""
+    _check_history_table(table)
     try:
         return conn.execute(f'SELECT IFNULL(MAX(rowid), 0) FROM {table}').fetchone()[0]
     except Exception:  # noqa: BLE001  表还不存在时视为 0
@@ -73,15 +87,16 @@ def _undo_history_archive(grade, wm_students=None, wm_rooms=None, wm_beds=None):
     """
     from config import BASE_DIR
     history_db_path = os.path.join(BASE_DIR, 'data', 'history.db')
-    pairs = (('graduated_students', wm_students),
-             ('graduated_rooms', wm_rooms),
-             ('graduated_beds', wm_beds))
+    pairs = ((_HISTORY_TABLES[0], wm_students),
+             (_HISTORY_TABLES[1], wm_rooms),
+             (_HISTORY_TABLES[2], wm_beds))
     try:
         conn = sqlite3.connect(history_db_path)
         removed = 0
         for table, wm in pairs:
             if not wm:
                 continue
+            _check_history_table(table)
             cur = conn.execute(
                 f'DELETE FROM {table} WHERE rowid > ? AND graduated_grade = ?',
                 (wm, grade))

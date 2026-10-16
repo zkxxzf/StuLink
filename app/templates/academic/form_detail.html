@@ -216,7 +216,7 @@
                     <td class="text-nowrap">
                         {% if sub.status == 'submitted' %}
                         <button class="btn btn-sm btn-outline-success" data-bs-toggle="modal"
-                                data-bs-target="#reviewModal{{ sub.id }}" title="审核">
+                                data-bs-target="#reviewModal{{ sub.id }}" title="审核" aria-label="审核">
                             <i class="bi bi-check-circle"></i>
                         </button>
                         {% endif %}

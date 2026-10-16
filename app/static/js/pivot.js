@@ -2,8 +2,14 @@
  * 行维度 × 列维度 × 指标 自由组合；渲染为交叉表 + （单指标时）分组柱状图
  */
 (function () {
-var PALETTE = ['#3b82f6', '#8b5cf6', '#10b981', '#f59e0b', '#ef4444',
-               '#06b6d4', '#ec4899', '#84cc16', '#f97316', '#6366f1'];
+/* 2026-10-14 第四轮审计（UI-18 同族 · UI-05）：调色板改读主题变量
+   （common.js stulinkPalette，读不到时回落原浅色字面量）——写死字面量在深色模式下
+   会与暗底撞色。运行时读取，主题切换后新渲染的图表即用新色。 */
+var PALETTE_FALLBACK = ['#3b82f6', '#8b5cf6', '#10b981', '#f59e0b', '#ef4444',
+                        '#06b6d4', '#ec4899', '#84cc16', '#f97316', '#6366f1'];
+function palette() {
+    return (window.stulinkPalette ? window.stulinkPalette() : PALETTE_FALLBACK);
+}
 var meta = null;
 var chart = null;
 
@@ -48,14 +54,14 @@ function fillGrades() {
     else if (first) { sel.val(first); }
     else if (grades.length) { sel.val(grades[0]); }
     if (initial && !ie) {
-        // v1.19.49.29 本场考试不在可见列表（已删除 / 超出数据范围 / 已毕业）：
+        // v1.19.49.35 本场考试不在可见列表（已删除 / 超出数据范围 / 已毕业）：
         // 不能静默显示最近一场让用户误当本场 —— 恢复两个下拉并明确提示。
         $('#pvGrade, #pvExam').removeClass('d-none');
         pvNotice('本场考试不可见（可能已删除或不在您的数据范围），已改为显示最近一场，请重新选择。');
     }
     fillExams(initial);
 }
-/* v1.19.49.29 筛选栏上方的警示条（重复调用只保留一条） */
+/* v1.19.49.35 筛选栏上方的警示条（重复调用只保留一条） */
 function pvNotice(msg) {
     $('#pvNotice').remove();
     $('<div id="pvNotice" class="alert alert-warning py-2 small mb-2"></div>')
@@ -183,10 +189,11 @@ function render(d, measures) {
         cx.append($('<div class="card-body p-2">').append(box));
         area.append(cx);
         chart = echarts.init(box[0]);
+        var pal = palette();
         var series = cols.map(function (ck, i) {
             return {
                 name: d.col_label ? String(ck) : ms[0].label, type: 'bar',
-                itemStyle: {color: PALETTE[i % PALETTE.length]},
+                itemStyle: {color: pal[i % pal.length]},
                 data: rows.map(function (rk) {
                     var v = ((d.cells || {})[rk + '|' + ck] || {})[ms[0].key];
                     return (v === null || v === undefined) ? 0 : v;
@@ -194,7 +201,7 @@ function render(d, measures) {
             };
         });
         chart.setOption({
-            color: PALETTE, tooltip: {trigger: 'axis'},
+            color: pal, tooltip: {trigger: 'axis'},
             legend: {top: 0, type: 'scroll'},
             grid: {left: 60, right: 40, top: 50, bottom: 60, containLabel: true},
             xAxis: {type: 'category', data: rows, axisLabel: {interval: 0, rotate: rows.length > 12 ? 40 : 0}},

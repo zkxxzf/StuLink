@@ -1,4 +1,4 @@
-# StuLink v1.19.49.29 2026-10-10
+# StuLink v1.19.49.35 2026-10-10
 # 德育管理：单页记录（独立库 points.db）+ 范围权限过滤 + 批量导入导出 + 可视化
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 import io
@@ -31,6 +31,9 @@ def _scope():
     from app.utils.scope import resolve_scope
     s = resolve_scope(current_user)
     if s.origin == 'user_grades':
+        # 2026-10-14 第四轮审计修复：用户级范围带班级白名单时精确到班（不再放大为整年级）
+        if s.kind == 'classes':
+            return 'class', '', set(s.classes)
         return 'user_grades', '', set(s.grades)
     if s.origin in ('admin', 'school'):
         return 'school', '', None
@@ -273,7 +276,10 @@ def api_record_update(rid):
     rec = PointRecord.query.get_or_404(rid)
     scope, grade, classes = _scope()
     student = Student.query.filter_by(student_number=rec.student_no).first()
-    if student and not _in_scope(student, scope, grade, classes):
+    # 2026-10-14 审计 API-02：原写法 `if student and not _in_scope(...)` 在
+    # 学生已不存在（转学/毕业删档）时短路跳过校验 → fail-open。改为学生缺失即 403，
+    # 与新增接口（api_record_create）同形态。
+    if student is None or not _in_scope(student, scope, grade, classes):
         return jsonify(success=False, message='该记录不在您的管理范围内'), 403
     payload, err = _parse_payload()
     if err:
@@ -294,7 +300,8 @@ def api_record_delete(rid):
     rec = PointRecord.query.get_or_404(rid)
     scope, grade, classes = _scope()
     student = Student.query.filter_by(student_number=rec.student_no).first()
-    if student and not _in_scope(student, scope, grade, classes):
+    # 2026-10-14 审计 API-02：同 api_record_update，学生缺失时不得短路放行
+    if student is None or not _in_scope(student, scope, grade, classes):
         return jsonify(success=False, message='该记录不在您的管理范围内'), 403
     db.session.delete(rec)
     db.session.commit()

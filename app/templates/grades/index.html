@@ -2,7 +2,21 @@
 {% block title %}成绩分析{% endblock %}
 {# 2026-10-12 UI 审计 M8：grades.css 已由 base.html 统一引入 #}
 {% block content %}
-{# v1.19.49.29 考试态（从侧栏「班级分析 / 学科分析」进入，带 ?exam=<id>）：
+{# 2026-10-16：分析人群（方向/组合）筛选器的浅底容器 #}
+<style>
+    .g-pop {
+        background: var(--sl-surface-2);
+        border: 1px solid var(--sl-border);
+        border-radius: 8px; padding: 2px 8px 2px 6px;
+    }
+    .g-pop-label {
+        font-size: 12px; color: var(--sl-text-muted); font-weight: 600;
+        padding-right: 2px; border-right: 1px solid var(--sl-border); margin-right: 4px;
+    }
+    .g-pop select { border-color: var(--sl-border); }
+    .g-pop select:disabled { background: var(--sl-surface-3); color: var(--sl-text-muted); }
+</style>
+{# v1.19.49.35 考试态（从侧栏「班级分析 / 学科分析」进入，带 ?exam=<id>）：
    本页只看这一场，顶部不再让用户选年级/考试 —— 直接按本场加载（initial_exam_id 已由服务端带入，
    JS 会选中它；这里把两个下拉隐藏）。非考试态（全局成绩分析）保持原样。 #}
 {% set _en = exam_nav() %}
@@ -14,11 +28,18 @@
     <select id="gExam" class="form-select form-select-sm w-auto{% if _en %} d-none{% endif %}" style="min-width:200px;" title="考试">
         <option value="">考试…</option>
     </select>
-    <select id="gDir" class="form-select form-select-sm w-auto d-none" title="方向">
-        <option value="">全部方向</option>
-        <option value="物理">物理</option>
-        <option value="历史">历史</option>
-    </select>
+    {# 2026-10-16 分析人群：方向 + 选科组合（组合内含方向语义，选了组合就以组合为准） #}
+    <div class="g-pop d-inline-flex align-items-center gap-1" id="gPopWrap">
+        <span class="g-pop-label" title="按谁来看数据：方向（物理/历史）或选科组合（物化生…）">人群</span>
+        <select id="gDir" class="form-select form-select-sm w-auto" title="方向">
+            <option value="">全部方向</option>
+            <option value="物理">物理类</option>
+            <option value="历史">历史类</option>
+        </select>
+        <select id="gSel" class="form-select form-select-sm w-auto d-none" title="选科组合">
+            <option value="">全部组合</option>
+        </select>
+    </div>
     <select id="gClass" class="form-select form-select-sm w-auto d-none" title="班级">
         <option value="">班级…</option>
     </select>
@@ -53,12 +74,17 @@
         <button class="btn btn-sm btn-outline-secondary" id="gAi" title="AI 分析（需配置个人 API Key 或使用管理员公共 Key）">
             <i class="bi bi-stars"></i> AI 分析
         </button>
-        <a class="btn btn-sm btn-outline-dark" id="gAiHistory" href="{{ url_for('grades.ai_reports') }}" title="查看历史 AI 报告">
+        <a class="btn btn-sm btn-outline-dark" id="gAiHistory" href="{{ url_for('grades.ai_studio') }}" title="AI 分析工作台（提问与历史报告）">
             <i class="bi bi-clock-history"></i> AI 报告
         </a>
         <button class="btn btn-sm btn-outline-success" id="gExport" title="导出当前模块全部表格为 Excel">
             <i class="bi bi-file-earmark-excel"></i> 导出 Excel
         </button>
+        {# 2026-10-16：汇总打印版（A4 网格：每科目一张班级汇总表，直接打印/存 PDF） #}
+        <a class="btn btn-sm btn-outline-success" id="gPrintSummary" href="#" target="_blank"
+           rel="noopener" title="打开汇总打印版（A4 网格，每科目一张班级汇总表）">
+            <i class="bi bi-printer"></i> 汇总打印
+        </a>
         <button class="btn btn-sm btn-outline-primary" id="gPrint" title="打印/另存 PDF（仅当前页签）">
             <i class="bi bi-printer"></i> 打印 / PDF
         </button>
@@ -95,6 +121,7 @@
 {% endblock %}
 {% block extra_js %}
 <script src="{{ su('js/echarts.min.js') }}"></script>
+<script src="{{ su('js/table_cols.js') }}"></script>
 <script src="{{ su('js/grades_md.js') }}"></script>
 <script src="{{ su('js/grades.js') }}"></script>
 {% endblock %}

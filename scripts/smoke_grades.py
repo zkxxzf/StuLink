@@ -30,6 +30,8 @@ config_mod.Config.SQLALCHEMY_BINDS = {
     # 2026-10-10：补 system 绑定 —— 启动建表会遍历 'system'，缺它会有 WARN 噪音
     'system': 'sqlite:///' + os.path.join(_TMP, 'system.db'),
     'portrait': 'sqlite:///' + os.path.join(_TMP, 'portrait.db'),
+    'timetable': 'sqlite:///' + os.path.join(_TMP, 'timetable.db'),
+    'morality': 'sqlite:///' + os.path.join(_TMP, 'morality.db'),
 }
 # config._get_secret_key 基于 BASE_DIR 读取密钥文件，临时目录下会自动生成
 config_mod.Config.SECRET_KEY = 'smoke-test-secret'
@@ -100,7 +102,7 @@ with app.app_context():
     db.session.commit()
     db.session.add(AffairStudent(affair_id=_prev_af.id, student_no='20250001',
                                  name='历生01', class_name='01班', is_attend=False))
-    # v1.19.49.29 容量用例：上一场 东211=44；本场同房间初始 30
+    # v1.19.49.35 容量用例：上一场 东211=44；本场同房间初始 30
     db.session.add(AffairRoom(affair_id=_prev_af.id, room_no='01', location='东211',
                               subject='默认', capacity=44))
     db.session.add(AffairRoom(affair_id=_cur_af.id, room_no='01', location='东211',
@@ -235,9 +237,11 @@ with app.test_client() as c:
     check('班级对比：各班核心指标含极差/分差',
           ct.get('cmp_overview', {}).get('rows') and
           'range' in ct['cmp_overview']['rows'][0] and 'diff' in ct['cmp_overview']['rows'][0])
-    check('班级对比：科目/及格率/优秀率三张横表 + 图表规格',
-          all(k in ct for k in ('cmp_subject', 'cmp_pass', 'cmp_good'))
-          and bool(ct['cmp_subject'].get('chartHint')), str(list(ct.keys())))
+    # 2026-10-15 口径：及格率/优秀率按本场划线（最高/最低层；四层模板=优秀/及格层），
+    # 未划线不出这两张表 → 这里只断言科目横表；划线后的断言见「分层模板应用」之后
+    check('班级对比：科目横表 + 图表规格（未划线时不出划线率表）',
+          'cmp_subject' in ct and bool(ct['cmp_subject'].get('chartHint'))
+          and 'cmp_pass' not in ct and 'cmp_good' not in ct, str(list(ct.keys())))
     check('班级对比：堆叠分段表图表规格',
           bool(ct.get('cmp_score_seg', {}).get('chartHint'))
           and ct['cmp_score_seg']['chartHint']['type'] == 'stack')
@@ -258,19 +262,39 @@ with app.test_client() as c:
     r = c.get(f'/grades/export/compare?exam_id={eid}&classes={pair}')
     check('导出班级对比 Excel', r.status_code == 200 and r.data[:2] == b'PK')
 
-    # ---- 分层模板应用 ----
+    # ---- 分层模板应用（2026-10-15：all_subjects 连单科线一起划，率列表头按层名） ----
     r = c.post('/grades/api/bands/apply', json={'exam_id': eid, 'template': '4',
-                                                'both': True},
+                                                'both': True, 'all_subjects': True},
                headers={'X-CSRFToken': csrf})
     check('分层模板应用', r.status_code == 200 and r.get_json()['success'],
           f'status={r.status_code} body={r.get_data(as_text=True)[:300]}')
     with app.app_context():
-        bands = ExamBand.query.filter_by(exam_id=eid, direction='物理') \
-            .order_by(ExamBand.seq).all()
+        bands = ExamBand.query.filter_by(exam_id=eid, direction='物理',
+                                         subject='总分').order_by(ExamBand.seq).all()
         check('分层落库4层', len(bands) == 4 and bands[-1].lower_value == 0)
         # 20% 比例 → 物理 6 人 → 第2名分数（ceil(6*0.2)=2 → 610.5）
         check('比例换算正确', abs(bands[0].lower_value - 610.5) < 0.01,
               f"lower={bands[0].lower_value}")
+    # 2026-10-15 组合维度（划线页「划线维度」= 按方向 / 物化生…）：非法组合必须被拒
+    r = c.post('/grades/api/bands/batch',
+               json={'exam_id': eid, 'mode': 'score', 'scope': 'per_subject',
+                     'layers': [{'seq': 1, 'name': '特控线',
+                                 'values': {'无此组合|总分': 500}}],
+                     'selection': '无此组合'},
+               headers={'X-CSRFToken': csrf})
+    check('组合维度：非法组合被拒（400）', r.status_code == 400, f'status={r.status_code}')
+    r = c.get(f'/grades/api/bands/matrix?exam_id={eid}')
+    _mx = r.get_json()['data']
+    _sels = sorted({b['selection'] for _rows in _mx.values() for b in _rows
+                    if b.get('selection')})
+    if _sels:
+        _d = c.get(f'/grades/api/bands/matrix?exam_id={eid}&selection={_sels[0]}').get_json()['data']
+        check('组合维度：键空间=组合|科目 且不带 selection 字段（可编辑）',
+              any(k.startswith(_sels[0] + '|') for k in _d)
+              and all('selection' not in b for _rows in _d.values() for b in _rows),
+              f'sels={_sels} keys={sorted(_d)[:5]}')
+    else:
+        check('组合维度：本场无组合线，跳过键空间断言', True)
     r = c.get(f'/grades/api/analysis/grade?exam_id={eid}')
     rows = r.get_json()['data']['tables']['class_summary']['rows']
     check('分层列进入汇总表',
@@ -280,6 +304,20 @@ with app.test_client() as c:
     check('分层分布正确（优秀层=前20%）',
           r2['01班'].get('l_0') == '2' and r2['02班'].get('l_0') == '2',
           str({k: v.get('l_0') for k, v in r2.items()}))
+    # 2026-10-15 口径：划线后「及格率/优秀率」列 = 及格层/优秀层的**单科上线率**
+    r = c.get(f'/grades/api/analysis/grade?exam_id={eid}')
+    tt = r.get_json()['data']['tables']['subject_total']
+    cols = [x['label'] for x in tt['columns']]
+    check('科目总表率列按划线层名（四层模板 → 及格率%/优秀率%）',
+          '及格率%' in cols and '优秀率%' in cols
+          and any(x.get('pass_rate') is not None for x in tt['rows']), str(cols))
+    r = c.get(f'/grades/api/analysis/compare?exam_id={eid}&classes={pair}')
+    ctb = r.get_json()['data']['tables']
+    check('划线后对比页出及格率/优秀率横表（表名/列名=层名）',
+          'cmp_pass' in ctb and 'cmp_good' in ctb
+          and ctb['cmp_pass']['title'] == '对比班各科及格率%'
+          and ctb['cmp_good']['title'] == '对比班各科优秀率%',
+          str(list(ctb.keys())))
 
     # ---- 分批补导（模式 A 只更新 02班 数学；历史方向不动） ----
     wb2 = openpyxl.Workbook()
@@ -411,10 +449,11 @@ with app.test_client() as c:
     check('导出年级分析 Excel', r.status_code == 200 and r.data[:2] == b'PK')
 
     # ---- 页面可访问 ----
-    # 2026-10-10 合并 master（v1.19.0）：/grades/ 落地页改为「历次考试列表」，
-    # 原成绩分析页迁走、旧链接保留为重定向 —— 断言随之更新。
+    # 2026-10-13：/grades/ 由「重定向到历次考试列表」改为成绩模块默认落地页「首页仪表盘」
+    # （routes/dashboard.py::dashboard），旧的重定向断言随之作废。
     r = c.get('/grades/')
-    check('页面 /grades/（重定向到考试列表）', r.status_code in (301, 302),
+    check('页面 /grades/（首页仪表盘）',
+          r.status_code == 200 and '首页仪表盘' in r.get_data(as_text=True),
           str(r.status_code))
     for url in ('/grades/exams', f'/grades/exams/{eid}',
                 f'/grades/exams/{eid}/import', f'/grades/exams/{eid}/bands',
@@ -422,7 +461,52 @@ with app.test_client() as c:
         r = c.get(url)
         check(f'页面 {url}', r.status_code == 200, str(r.status_code))
 
-    # ---- v1.19.49.29 排序三角：统一在文字后面 + 未点选也看得清 + 右对齐列仍与数字对齐 ----
+    # ---- 临界生对比：班级筛选（cls；总分行口径＝考试当时班级，按方向收敛，非法值＝全部） ----
+    nl = c.get(f'/grades/exams/{eid}/near-line').get_data(as_text=True)
+    check('临界生页：班级筛选下拉出现且列出本方向班级',
+          'name="cls"' in nl and '全部班级' in nl and '<option value="02班"' in nl,
+          nl[:200])
+    check('临界生页：方向内的班级才进下拉（默认物理 → 不下拉 01班）',
+          '<option value="01班"' not in nl)
+    nl_cls = c.get(f'/grades/exams/{eid}/near-line?cls={quote("02班")}'
+                   '&above=10&below=20').get_data(as_text=True)
+    check('临界生页：选中班级后只显示该班（表头标注「仅 X」）',
+          re.search(r'仅\s*02班', nl_cls) is not None and 'name="cls"' in nl_cls)
+    hrefs = re.findall(r'href="([^"]*near-line\?[^"]*)"', nl_cls)
+    check('临界生页：清除班级链接保留分数区间（且不带 cls）',
+          any('cls=' not in h and 'above=10' in h and 'below=20' in h for h in hrefs),
+          str(hrefs))
+    check('临界生页：班级对比里的班名可点该班下钻',
+          any('cls=02' in h for h in hrefs), str(hrefs))
+    nl_hist = c.get(f'/grades/exams/{eid}/near-line?direction={quote("历史")}'
+                    f'&cls={quote("01班")}').get_data(as_text=True)
+    check('临界生页：切历史方向后下拉/筛选跟着换（01班生效）',
+          '<option value="01班" selected' in nl_hist and re.search(r'仅\s*01班', nl_hist))
+    nl_bad = c.get(f'/grades/exams/{eid}/near-line?cls={quote("不存在的班")}') \
+        .get_data(as_text=True)
+    check('临界生页：非法班级回退为全部（不残留「仅」标注）',
+          'name="cls"' in nl_bad and re.search(r'仅\s*不存在的班', nl_bad) is None)
+    # ---- 明细分页（展示层）：行带 nl-row 标记、分页条在卡片脚、页码 scope 随筛选变化 ----
+    check('临界生页：明细行带分页标记且分页条就位（每页可选「全部」）',
+          'id="nlBody"' in nl and '<tr class="nl-row">' in nl
+          and 'id="nlPager"' in nl and 'id="nlInfo"' in nl and 'value="all"' in nl)
+    scope_all = re.findall(r'data-scope="([^"]*)"', nl)
+    scope_cls = re.findall(r'data-scope="([^"]*)"', nl_cls)
+    check('临界生页：页码按筛选条件分区（班级进 scope → 换班/换方向即回第 1 页）',
+          bool(scope_all) and scope_all[0].startswith('||')
+          and bool(scope_cls) and scope_cls[0].startswith('02班|'),
+          f'{scope_all[:1]} / {scope_cls[:1]}')
+    nl_empty = c.get(f'/grades/exams/{eid}/near-line?above=0&below=0').get_data(as_text=True)
+    check('临界生页：区间内没人时不渲染分页条',
+          '<tr class="nl-row">' in nl_empty or 'id="nlPager"' not in nl_empty)
+
+    # ---- 成绩汇报区：AI 一句话分析入口（2026-10-13，工具调用 → HTML 报告） ----
+    hr = c.get(f'/grades/report?exam={eid}').get_data(as_text=True)
+    check('汇报区：AI 一句话分析入口就位',
+          'id="rpAiCard"' in hr and 'id="rpAiQ"' in hr and 'id="rpAiRun"' in hr
+          and 'rp-ai-chip' in hr and 'js/report_ai.js' in hr)
+
+    # ---- v1.19.49.35 排序三角：统一在文字后面 + 未点选也看得清 + 右对齐列仍与数字对齐 ----
     html = c.get(f'/grades/exams/{eid}').get_data(as_text=True)
     check('表头：三角统一在文字后面',
           all((lbl + '<i') in html for lbl in
@@ -438,7 +522,7 @@ with app.test_client() as c:
     check('页头：默认排序/改分说明整行已移除',
           '默认按' not in html and '恢复默认排序' not in html
           and '点击单科分数可修改' not in html)
-    # ---- v1.19.49.29 侧栏「成绩分析」标题本身即入口（直接进总览），展开/收起交给箭头 ----
+    # ---- v1.19.49.35 侧栏「成绩分析」标题本身即入口（直接进总览），展开/收起交给箭头 ----
     check('侧栏：成绩分析标题指向总览（全年级对比）',
           'class="efn-group-title"' in html
           and ('/grades/global-compare?exam=%d' % eid) in html
@@ -446,7 +530,7 @@ with app.test_client() as c:
     check('侧栏：分析组展开仍由箭头负责',
           'data-bs-toggle="collapse" href="#efnAnalysis"' in html)
 
-    # ---- v1.19.49.29 表头/数字严格对齐 + 名次列次序 + 进退步悬浮说明 ----
+    # ---- v1.19.49.35 表头/数字严格对齐 + 名次列次序 + 进退步悬浮说明 ----
     # th 内若残留空白，右对齐时行尾空格不会被折掉，会把表头文字往左推几个像素 → 与数字错开
     _thead = html.split('<thead')[1].split('</thead>')[0]
     check('表头：th 内部无空白', '</a></th>' in _thead and re.search(r'\s</th>', _thead) is None)
@@ -456,7 +540,7 @@ with app.test_client() as c:
           re.search(r'<td class="text-end c-rank">\d+</td>', html) is not None)
     check('进退步悬浮：写明同方向进退步', 'title="同方向进退步：' in html)
 
-    # ---- v1.19.49.29 导航高亮唯一性 + 分析子模块「考试态」锁本场 ----
+    # ---- v1.19.49.35 导航高亮唯一性 + 分析子模块「考试态」锁本场 ----
     hb = c.get(f'/grades/exams/{eid}/bands').get_data(as_text=True)
     check('导航：划线分层页只高亮「划线分层」',
           re.search(r'class="efn-item active" data-nav="bands"', hb) is not None
@@ -478,7 +562,7 @@ with app.test_client() as c:
     check('非考试态：年级下拉仍可选',
           'id="gGrade" class="form-select form-select-sm w-auto d-none"' not in hn)
 
-    # ---- v1.19.49.29 考务步骤① 名单维护：只读名单 + 沿用上一场不参考 + 不参考排最上 ----
+    # ---- v1.19.49.35 考务步骤① 名单维护：只读名单 + 沿用上一场不参考 + 不参考排最上 ----
     r = c.post(f'/grades/affairs/{_AFF_CUR}/students/sync', headers={'X-CSRFToken': csrf})
     d = r.get_json()
     check('考务同步：自动沿用上一场不参考 1 人',
@@ -489,23 +573,35 @@ with app.test_client() as c:
     check('考务步骤①：无手动新增/编辑',
           'onclick="openStuModal' not in h2 and 'id="stuModal"' not in h2
           and '>编辑</button>' not in h2)
-    # ---- v1.19.49.29 考务步骤① 左右分栏（左=参加/右=不参加）+ 名单统计 ----
+    # ---- v1.19.49.35 考务步骤① 左右分栏（左=参加/右=不参加）+ 名单统计 ----
     check('考务步骤①：左右分栏（参加 / 不参加 两张表）',
           '参加考试' in h2 and '不参加考试' in h2
           and 'id="stuTable"' in h2 and 'id="stuSkipTable"' in h2)
-    check('考务步骤①：左表只含名单列（无考号/座号/参考）',
-          all(k in hd2 for k in ('学号', '姓名', '班级', '选科组合'))
-          and '考号' not in hd2 and '座号' not in hd2 and '参考' not in hd2, hd2[:200])
+    # 2026-10-14 用户口径：左表加「固定考场/座号」输入列（混编排考场用），故只断言没有
+    # 考号 / 参考列；右表的学生不参与编排，不应出现这一列
+    check('考务步骤①：左表含名单列 + 固定考场/座号（无考号/参考）',
+          all(k in hd2 for k in ('学号', '姓名', '班级', '选科组合', '固定考场/座号'))
+          and '考号' not in hd2 and '参考' not in hd2, hd2[:200])
     ts2 = h2.split('id="stuSkipTable"')[1].split('</table>')[0]
+    check('考务步骤①：右表（不参加）无固定考场列',
+          '固定考场' not in ts2.split('</thead>')[0])
     check('考务步骤①：不参加的学生在右表（不在左表）',
           '20250001' in ts2 and '20250001' not in tb2)
     check('考务步骤①：不参加学生整行标黄',
-          '<tr class="table-warning">' in ts2, ts2[:200])
+          'class="table-warning"' in ts2, ts2[:200])
     check('考务步骤①：两侧可按「参加/不参加」互移',
           'toggleAttend(' in h2 and '→ 不参加' in h2 and '← 参加' in h2)
-    check('考务步骤①：名单统计（年级汇总 + 各班明细）',
-          '名单统计' in h2 and '各班明细' in h2 and '年级：实际' in h2
-          and '实际人数' in h2)
+    # 2026-10-14 用户口径：统计压成顶部一行（实际/参加/不参加）+「各班明细」折叠表（含实际人数）
+    check('考务步骤①：名单统计一行 + 各班明细',
+          all(k in h2 for k in ('实际', '参加', '不参加', '各班明细', '实际人数')))
+    # 2026-10-14 用户口径（二次修订）：筛选控件**并进「参加考试」卡片头**（与计数同一行，
+    # 不再单独占一行），同一条同时作用于左右两栏。
+    # 2026-10-14 第四轮审计：原断言要求"卡片头不含搜索框/提示另收一行"，与二次修订后的
+    # 实现相反（恒失败）；按当前实现更新，并保留"一条、两侧同时生效"的语义检查。
+    _ch1 = h2.split('id="stuTableBadge"')[1].split('</div>')[0]
+    check('考务步骤①：筛选控件并进卡片头（一条、两侧同时生效）',
+          'id="fltClass"' in _ch1 and 'id="fltStu"' in _ch1
+          and '同时作用于左右两栏' in h2 and 'id="stuSkipTable"' in h2)
     # 排序：两侧均按 班级 → 姓氏（拼音）；fixture 中班级与学号/姓名同序，故断言学号升序
     _ln = re.findall(r'<td>(\d{8})</td>', tb2)
     _rn = re.findall(r'<td>(\d{8})</td>', ts2)
@@ -523,12 +619,14 @@ with app.test_client() as c:
     # ---- v1.19.36.0 步骤② 考场容量：批量设置 / 沿用上一场（同房间）----
     check('步骤② 有容量批量入口',
           '批量设置容量' in h2 and '带入上次容量' in h2)
-    # v1.19.49.29：这两个按钮属于「本批次考场」侧 → 应在右卡片头内（不在顶部工具栏）
-    _rh = h2.split('id="roomStat"')[1][:900]
+    # v1.19.49.35：这两个按钮属于「本批次考场」侧 → 应在右卡片头内（不在顶部工具栏）
+    # 2026-10-14：2026-10-14 用户口径把「考场模板下拉 + 一键带入」也挪进这一行后，
+    #   原 900 字符窗口在「带入上次容量」之前就截断了（假失败）→ 改为按右卡片头截取
+    _rh = h2.split('id="roomStat"')[1].split('</div>')[0]
     check('步骤②：容量按钮已移到「本批次考场」卡片头',
           '批量设置容量' in _rh and '带入上次容量' in _rh
           and 'setAllCapacity()' in _rh)
-    # v1.19.49.29 考务页单独的 AI 导入入口已下线（统一走每场考试「AI 智能导入」）
+    # v1.19.49.35 考务页单独的 AI 导入入口已下线（统一走每场考试「AI 智能导入」）
     check('步骤②：考务页 AI 导入入口已下线',
           '导入考生安排' not in h2
           and ('/grades/affairs/%d/ai-import' % _AFF_CUR) not in h2)
@@ -549,7 +647,213 @@ with app.test_client() as c:
                for x in AffairRoom.query.filter_by(affair_id=_AFF_CUR).all()}
         check('容量落库 = 上一场 44', got == {'东211': 44}, got)
 
-    # ---- v1.19.49.29 任课教师映射：下拉按姓名首字母排序 + 保存不再静默失效 ----
+    # ---- 2026-10-14 步骤② 考场编号可直接改：查重 + 同步名单（考场号/固定考场/考号）与监考 ----
+    from app.models.grades import AffairInvigilation, AffairSchedule
+    with app.app_context():
+        _r01 = AffairRoom.query.filter_by(affair_id=_AFF_CUR, room_no='01').first()
+        _r02 = AffairRoom(affair_id=_AFF_CUR, room_no='02', location='东215',
+                          subject='默认', capacity=30)
+        db.session.add(_r02)
+        _sch = AffairSchedule(affair_id=_AFF_CUR, exam_date=_date(2019, 2, 5),
+                              subject='数学', sort_order=1)
+        db.session.add(_sch)
+        db.session.flush()
+        # 复用同步进来的 20250001（uq_affair_stu 下同批次不可重复建行），改成已编排状态
+        _st = AffairStudent.query.filter_by(affair_id=_AFF_CUR,
+                                           student_no='20250001').first()
+        _st.room_no, _st.seat_no = '01', 3
+        _st.fixed_room, _st.fixed_seat = '01', 3
+        _st.exam_number = '17010103'
+        db.session.add(AffairInvigilation(affair_id=_AFF_CUR, schedule_id=_sch.id,
+                                          room_no='01', slot=1, name='测试监考甲'))
+        # 两个考场各挂一格监考：互换编号时同场次的 01/02 两格会互相撞唯一键
+        # （uq_affair_invigilation 含 room_no），专门用来兜住「监考表也要两阶段改」
+        db.session.add(AffairInvigilation(affair_id=_AFF_CUR, schedule_id=_sch.id,
+                                          room_no='02', slot=1, name='测试监考乙'))
+        db.session.commit()
+        _RID01, _RID02, _SCHID = _r01.id, _r02.id, _sch.id
+    r = c.post(f'/grades/affairs/{_AFF_CUR}/rooms/{_RID01}/patch',
+               data={'room_no': '03'}, headers={'X-CSRFToken': csrf})
+    d = r.get_json()
+    check('步骤② 改考场编号：改成功并回传同步数',
+          d.get('ok') is True and d.get('room_no') == '03' and d.get('renamed') is True
+          and d.get('students') == 1 and d.get('invigs') == 1, d)
+    with app.app_context():
+        _st2 = AffairStudent.query.filter_by(affair_id=_AFF_CUR,
+                                            student_no='20250001').first()
+        _iv = AffairInvigilation.query.filter_by(affair_id=_AFF_CUR, schedule_id=_SCHID,
+                                                 name='测试监考甲').first()
+        check('改编号：学生考场号 / 固定考场 / 考号一并同步',
+              _st2.room_no == '03' and _st2.fixed_room == '03'
+              and _st2.exam_number == '17010303',
+              (_st2.room_no, _st2.fixed_room, _st2.exam_number))
+        check('改编号：监考安排同步到新编号', _iv is not None and _iv.room_no == '03',
+              _iv and _iv.room_no)
+    r = c.post(f'/grades/affairs/{_AFF_CUR}/rooms/{_RID02}/patch',
+               data={'room_no': '03'}, headers={'X-CSRFToken': csrf})
+    check('改编号：同批次重号被拒', r.get_json().get('ok') is False, r.get_json())
+    r = c.post(f'/grades/affairs/{_AFF_CUR}/rooms/{_RID02}/patch',
+               data={'room_no': '   '}, headers={'X-CSRFToken': csrf})
+    check('改编号：空编号被拒', r.get_json().get('ok') is False, r.get_json())
+    r = c.post(f'/grades/affairs/{_AFF_CUR}/rooms/{_RID02}/patch',
+               data={'room_no': '5'}, headers={'X-CSRFToken': csrf})
+    d = r.get_json()
+    check('改编号：纯数字补零为两位（5 → 05）',
+          d.get('ok') is True and d.get('room_no') == '05', d)
+    h3 = c.get(f'/grades/affairs/{_AFF_CUR}').get_data(as_text=True)
+    _rb = h3.split('id="roomTable"')[1].split('</tbody>')[0]
+    # 只取编号输入框那一段（科目/容量仍是 onchange 即存）；不能用 split('rm-no')[1]——
+    # 「清空」按钮的类名 rm-no-x 也含 rm-no，会把这一段截断
+    _i = _rb.find('rm-no"')
+    _rn = _rb[_i:_rb.index('</td>', _i)]
+    check('步骤② 考场编号渲染为草稿输入框（改/清空不即时提交）',
+          'py-0 rm-no' in _rb and 'oninput="_roomNoInput(this)"' in _rn
+          and 'onchange="saveRoomField(this)"' not in _rn)
+    check('步骤② 有「保存编号」按钮 + 离开页面前提醒',
+          'id="saveNoBtn"' in h3 and '保存编号' in h3
+          and 'beforeunload' in h3 and '_roomNoDirty()' in h3)
+    # 2026-10-14 用户口径：编号行内给「清空」小按钮（×）；② 的「导入 Excel / 手动新增」上移到
+    # 「编排容量」那一行（#capActs，仅步骤② 显示，由 _syncCapBar 切显隐）
+    # 2026-10-14 用户口径（二次修订）：编号清空要「一键全部清空」——卡片头「清空编号」按钮 +
+    # 前端 `clearAllRoomNo()`（只写草稿），行内不再放 ×
+    check('步骤② 编号行内只有输入框（行内 × 已撤）',
+          'rm-no-x' not in _rb and 'clearRoomNo' not in h3)
+    check('步骤② 卡片头有「清空编号」（一键全清、只写草稿）',
+          'clearAllRoomNo()' in h3 and '清空编号' in h3
+          and "r.room_no = '';" in h3 and '_roomNoSync()' in h3
+          and h3.index('clearAllRoomNo()') < h3.index('id="roomTable"'),
+          '按钮不在卡片头（跑到表格里了）')
+    _t2 = h3.split('id="t2"')[1].split('步骤③')[0]
+    check('步骤② 的「导入 Excel / 手动新增」已上移到「编排容量」那行（按钮在提示前）',
+          'id="capActs"' in h3 and 'importRooms(this)' in h3 and 'openRoomModal()' in h3
+          and h3.index('id="capActs"') < h3.index('bi-clipboard-data')
+          and 'id="roomFile"' not in _t2, repr(_t2[:120]))
+    check('步骤② 顶部按钮仍只在② 显示（_syncCapBar 按页签切显隐）',
+          "getElementById('capActs')" in h3 and "tgt !== '#t2'" in h3)
+    # 2026-10-14 用户口径：考场要能「上移 / 下移」按序走 —— 行序即编号序，上下移 = 与相邻行
+    # **交换编号**（草稿），复用「保存编号」提交（后端两阶段写入）
+    check('步骤② 每行有「上移 / 下移」（moveRoom + 草稿交换编号）',
+          'rm-up' in _rb and 'rm-dn' in _rb and 'onclick="moveRoom(' in _rb
+          and 'function moveRoom(' in h3 and 'function _sortBatchRooms(' in h3
+          and "a.room_no = b.room_no" in h3 and 'b.room_no = t;' in h3, repr(_rb[:120]))
+    check('步骤② 首行/末行的上移/下移会禁用（_roomNoSync 里就地切 disabled）',
+          'up.disabled = (i === 0)' in h3 and 'dn.disabled = (i === trs.length - 1)' in h3)
+
+    # ---- 2026-10-14 考场维护：分组内「上移 / 下移」+ 顺序落库 + 一键带入沿用顺序 ----
+    from app.models.grades import AffairRoomLib, ExamRoomGroup, ExamRoomGroupMap
+    with app.app_context():
+        _grp = ExamRoomGroup(name='冒烟排序组')
+        db.session.add(_grp)
+        db.session.flush()
+        _lib4 = []
+        for _nm in ('排序东1', '排序东2', '排序东3', '排序东4'):
+            _l = AffairRoomLib(location=_nm, capacity=30)
+            db.session.add(_l)
+            db.session.flush()
+            _lib4.append(_l)
+        # 故意让 sort_order 与 id 顺序**不一致**：东3(10) → 东1(20) → 东2(30)
+        for _i, _idx in enumerate((2, 0, 1)):
+            db.session.add(ExamRoomGroupMap(group_id=_grp.id, lib_id=_lib4[_idx].id,
+                                            sort_order=(_i + 1) * 10))
+        _af2 = ExamAffair(name='冒烟排序带入场', grade='2025级', exam_date=_date(2019, 2, 6),
+                          status='draft')
+        db.session.add(_af2)
+        db.session.commit()
+        _GID, _LIDS, _AFF2 = _grp.id, [x.id for x in _lib4], _af2.id
+    r = c.post(f'/grades/affairs/{_AFF2}/rooms/from-lib-batch',
+               data={'group_id': _GID}, headers={'X-CSRFToken': csrf})
+    d = r.get_json()
+    _added = {x['location']: x['room_no'] for x in (d.get('added') or [])}
+    check('一键带入：按分组排好的顺序生成编号（东3→01 / 东1→02 / 东2→03）',
+          d.get('ok') is True
+          and _added == {'排序东3': '01', '排序东1': '02', '排序东2': '03'}, _added)
+    # 上移第 3 位（东2）→ 顺序变成 东3、东2、东1
+    r = c.post(f'/grades/rooms/groups/{_GID}/reorder',
+               data={'lib_id': _LIDS[1], 'dir': -1}, headers={'X-CSRFToken': csrf})
+    d = r.get_json()
+    check('考场维护：分组内「上移」返回新顺序（东3、东2、东1）',
+          d.get('ok') is True and d.get('order') == [_LIDS[2], _LIDS[1], _LIDS[0]], d)
+    with app.app_context():
+        _gr = (ExamRoomGroupMap.query.filter_by(group_id=_GID)
+               .order_by(ExamRoomGroupMap.sort_order, ExamRoomGroupMap.id).all())
+        check('考场维护：顺序落库为 10 / 20 / 30（无并列，界面照它渲染）',
+              [x.lib_id for x in _gr] == [_LIDS[2], _LIDS[1], _LIDS[0]]
+              and [x.sort_order for x in _gr] == [10, 20, 30],
+              [(x.lib_id, x.sort_order) for x in _gr])
+    r = c.post(f'/grades/rooms/groups/{_GID}/reorder',
+               data={'lib_id': _LIDS[2], 'dir': -1}, headers={'X-CSRFToken': csrf})
+    check('考场维护：已在最前时上移被拒', r.get_json().get('ok') is False, r.get_json())
+    r = c.post(f'/grades/rooms/groups/{_GID}/reorder',
+               data={'lib_id': 99999999, 'dir': 1}, headers={'X-CSRFToken': csrf})
+    check('考场维护：不在该分组的房间不能被排序',
+          r.get_json().get('ok') is False, r.get_json())
+    # 新房间加入分组（set_groups）：不能把已排好的顺序冲掉，新房间排到末尾（40）
+    c.post(f'/grades/rooms/{_LIDS[3]}/groups', data={'group_ids': str(_GID)},
+           headers={'X-CSRFToken': csrf})
+    with app.app_context():
+        _gr2 = (ExamRoomGroupMap.query.filter_by(group_id=_GID)
+                .order_by(ExamRoomGroupMap.sort_order, ExamRoomGroupMap.id).all())
+        check('考场维护：新加入分组的房间排到末尾（不打乱已有顺序）',
+              [x.lib_id for x in _gr2] == [_LIDS[2], _LIDS[1], _LIDS[0], _LIDS[3]]
+              and _gr2[-1].sort_order == 40,
+              [(x.lib_id, x.sort_order) for x in _gr2])
+    h5 = c.get('/grades/rooms').get_data(as_text=True)
+    check('考场维护：页面带出组内顺序 + 右侧列表「上移 / 下移」按钮',
+          'lib_ids' in h5 and 'moveRoomInGroup(' in h5 and 'rm-up' in h5
+          and '/reorder' in h5 and 'bi-arrow-down' in h5)
+
+    # ---- 2026-10-14 「保存编号」：整批提交（互换 / 重号拒绝不落库 / 空号自动补最小空号） ----
+    # 此刻：东211 = 03（学生 20250001 + 监考甲）、东215 = 05（监考乙）
+    _items = json.dumps([{'id': _RID01, 'room_no': '05'}, {'id': _RID02, 'room_no': '03'}])
+    r = c.post(f'/grades/affairs/{_AFF_CUR}/rooms/rename',
+               data={'items': _items}, headers={'X-CSRFToken': csrf})
+    d = r.get_json()
+    check('保存编号：支持两考场互换编号',
+          d.get('ok') is True and d.get('changed') == 2, d)
+    with app.app_context():
+        _swap = {x.id: x.room_no
+                 for x in AffairRoom.query.filter_by(affair_id=_AFF_CUR).all()}
+        _st3 = AffairStudent.query.filter_by(affair_id=_AFF_CUR,
+                                            student_no='20250001').first()
+        _iv3 = {x.name: x.room_no for x in AffairInvigilation.query.filter_by(
+            affair_id=_AFF_CUR, schedule_id=_SCHID).all()}
+        check('保存编号：互换后落库正确（东211=05 / 东215=03）',
+              _swap.get(_RID01) == '05' and _swap.get(_RID02) == '03', _swap)
+        check('保存编号：互换后名单与考号同步（考场 05 + 考号 17010503）',
+              _st3.room_no == '05' and _st3.exam_number == '17010503',
+              (_st3.room_no, _st3.exam_number))
+        # 两个考场的监考格子对调（唯一键 uq_affair_invigilation 含 room_no，必须两阶段改）
+        check('保存编号：互换后监考表两格都对调（甲→05 / 乙→03）',
+              _iv3.get('测试监考甲') == '05' and _iv3.get('测试监考乙') == '03', _iv3)
+    _items = json.dumps([{'id': _RID01, 'room_no': '03'}, {'id': _RID02, 'room_no': '03'}])
+    r = c.post(f'/grades/affairs/{_AFF_CUR}/rooms/rename',
+               data={'items': _items}, headers={'X-CSRFToken': csrf})
+    d = r.get_json()
+    check('保存编号：重号整批拒绝并给出占用的房间',
+          d.get('ok') is False and '重复' in (d.get('msg') or ''), d)
+    with app.app_context():
+        _swap2 = {x.id: x.room_no
+                  for x in AffairRoom.query.filter_by(affair_id=_AFF_CUR).all()}
+        check('保存编号：重号时不落库（编号仍为 05 / 03）',
+              _swap2.get(_RID01) == '05' and _swap2.get(_RID02) == '03', _swap2)
+    _items = json.dumps([{'id': _RID01, 'room_no': '  '}])
+    r = c.post(f'/grades/affairs/{_AFF_CUR}/rooms/rename',
+               data={'items': _items}, headers={'X-CSRFToken': csrf})
+    d = r.get_json()
+    check('保存编号：空号自动补最小空号（→ 01）',
+          d.get('ok') is True and [x.get('room_no') for x in (d.get('filled') or [])] == ['01'], d)
+    with app.app_context():
+        _st4 = AffairStudent.query.filter_by(affair_id=_AFF_CUR,
+                                            student_no='20250001').first()
+        check('保存编号：自动补号后名单 / 考号同步（01 / 17010103）',
+              _st4.room_no == '01' and _st4.exam_number == '17010103',
+              (_st4.room_no, _st4.exam_number))
+    _items = json.dumps([{'id': 99999999, 'room_no': '07'}])
+    r = c.post(f'/grades/affairs/{_AFF_CUR}/rooms/rename',
+               data={'items': _items}, headers={'X-CSRFToken': csrf})
+    check('保存编号：非本批次考场被拒', r.get_json().get('ok') is False, r.get_json())
+
+    # ---- v1.19.49.35 任课教师映射：下拉按姓名首字母排序 + 保存不再静默失效 ----
     # 排序键与后端一致：(拼音首字母, 全拼, 姓名)；无 pypinyin 时后端退化为账号（本身即拼音）
     from app.modules.grades.services.user_account import pinyin_of as _py_of
 
@@ -624,37 +928,42 @@ with app.test_client() as c:
     login_as('banzhu01')
     r = c.get('/grades/api/options')
     tabs = r.get_json()['data']['tabs']
-    check('班主任 tabs 仅班级', tabs == {'grade': False, 'class': True,
-                                        'subject': False, 'teacher': False,
-                                        'compare': False})
+    # 2026-10-15 用户口径：班主任除本班外，还要能看「所在年级的成绩分析」
+    check('班主任 tabs=班级+年级分析', tabs == {'grade': True, 'class': True,
+                                            'subject': False, 'teacher': False,
+                                            'compare': False}, str(tabs))
     r = c.get(f'/grades/api/analysis/class?exam_id={eid}&class_name=01%E7%8F%AD')
     check('班主任可看本班分析', r.status_code == 200)
     r = c.get(f'/grades/api/analysis/class?exam_id={eid}&class_name=02%E7%8F%AD')
     check('班主任不可看别班（403）', r.status_code == 403)
     r = c.get(f'/grades/api/analysis/grade?exam_id={eid}')
-    check('班主任不可看年级分析（403）', r.status_code == 403)
+    check('班主任可看年级分析（200，仅本年级）', r.status_code == 200, r.status_code)
     _pair2 = quote('01班') + ',' + quote('02班')
     r = c.get(f'/grades/api/analysis/compare?exam_id={eid}&classes={_pair2}')
     check('班主任不可看班级对比（403）', r.status_code == 403)
     r = c.get(f'/grades/export/compare?exam_id={eid}&classes={_pair2}')
     check('班主任不可导出班级对比（403）', r.status_code == 403)
+    # 2026-10-15：年级分析已对班主任 / 任课教师开放，导出与其保持一致（本文件既定口径"能看就能导"）
     r = c.get(f'/grades/export/grade?exam_id={eid}')
-    check('班主任不可导出年级分析（403）', r.status_code == 403)
+    check('班主任可导出年级分析（200）', r.status_code == 200, r.status_code)
+    r = c.get(f'/grades/export/class?exam_id={eid}&class_name=02%E7%8F%AD')
+    check('班主任不可导出别班明细（403）', r.status_code == 403, r.status_code)
     logout()
 
     # 任课教师：仅 teacher tab（本人 01班数学）
     login_as('renke01')
     r = c.get('/grades/api/options')
     tabs = r.get_json()['data']['tabs']
-    check('教师 tabs 仅任课教师', tabs == {'grade': False, 'class': False,
-                                          'subject': False, 'teacher': True,
-                                          'compare': False})
+    # 2026-10-15 用户口径：任课教师也要能看「所在年级的成绩分析」+ 学科分析
+    check('教师 tabs=年级+学科+本人', tabs == {'grade': True, 'class': False,
+                                          'subject': True, 'teacher': True,
+                                          'compare': False}, str(tabs))
     r = c.get(f'/grades/api/analysis/teacher?exam_id={eid}&subject=%E6%95%B0%E5%AD%A6')
     js = r.get_json()['data']['tables']['teacher_data']
     check('教师仅见本人数据', js['rows'] and js['rows'][0]['teacher'] == '测试任课教师'
           and js['rows'][0]['class_name'] == '01班', str(js['rows']))
     r = c.get(f'/grades/api/analysis/grade?exam_id={eid}')
-    check('教师不可看年级分析（403）', r.status_code == 403)
+    check('教师可看年级分析（200，仅本年级）', r.status_code == 200, r.status_code)
     logout()
 
     # 年级长：全部 tab（仅本年级考试）
@@ -680,7 +989,7 @@ with app.test_client() as c:
     login_as(bz_name)
     r = c.get('/grades/api/options')
     tabs = r.get_json()['data']['tabs']
-    check('导入班主任 tabs 仅班级', tabs == {'grade': False, 'class': True,
+    check('导入班主任 tabs=班级+年级分析', tabs == {'grade': True, 'class': True,
                                              'subject': False, 'teacher': False,
                                              'compare': False},
           str(tabs))
@@ -815,8 +1124,11 @@ with app.test_client() as c:
     stu0 = payload['exam']['students'][0]
     check('AI：教师 payload 仅6人且科目仅数学', len(payload['exam']['students']) == 6
           and list(stu0.get('subjects', {}).keys()) == ['数学'], str(stu0))
-    check('AI：教师发送的是原始成绩字段',
-          'total' in stu0 and 'rank_dir' in stu0 and 'name' in stu0 and 'no' in stu0)
+    # 2026-10-15 用户拍板「不能把学生的总分发了，可以发名次」：payload 只带名次类字段，
+    # 逐生总分（total）一律不发（改动前这里是 `'total' in stu0` —— 旧口径断言）
+    check('AI：教师发送的是原始成绩字段（名次类，且已无 total）',
+          'rank_dir' in stu0 and 'rank_class' in stu0 and 'name' in stu0
+          and 'no' in stu0 and 'total' not in stu0, str(sorted(stu0)))
     logout()
 
     # 恢复测试班主任身份（换人同步用例将其随旧班主任一并移除/降级）
@@ -841,18 +1153,18 @@ with app.test_client() as c:
           and s['scope_desc'] == '所辖班级：01班', str(s))
     logout()
 
-    # 8) 报告历史权限：本人可见、admin 全量、跨用户 403
+    # 8) AI 分析列表权限：本人可见、admin 全量、跨用户 403
     login_as('renke01')
-    r = c.get('/grades/ai/reports/list')
-    rows = r.get_json()['data']
-    check('AI：教师报告列表仅本人', len(rows) == 1 and rows[0]['id'] == rid_teacher)
+    rows = (c.get('/grades/ai/tasks').get_json() or {}).get('data') or []
+    check('AI：教师工作台列表仅本人（历史报告以负数 id 呈现）',
+          len(rows) == 1 and rows[0]['id'] == -rid_teacher, str(rows)[:200])
     r = c.get(f'/grades/ai/reports/{rid_admin}')
     check('AI：教师不可看他人报告（403）', r.status_code == 403)
     logout()
     acsrf = login_admin()
-    r = c.get('/grades/ai/reports/list')
-    rows = r.get_json()['data']
-    check('AI：admin 报告列表全量', len(rows) == 2)
+    rows = (c.get('/grades/ai/tasks').get_json() or {}).get('data') or []
+    check('AI：admin 工作台列表全量（含他人历史报告）',
+          any((x.get('id') or 0) == -rid_teacher for x in rows), str(rows)[:200])
     # 9) 删除
     r = c.post(f'/grades/ai/reports/{rid_teacher}/delete', headers={'X-CSRFToken': acsrf})
     check('AI：admin 可删他人报告', r.status_code == 200)
@@ -860,6 +1172,329 @@ with app.test_client() as c:
         from app.models.grades import AiReport as AiR
         check('AI：删除生效', AiR.query.get(rid_teacher) is None)
     logout()
+
+    # ==================== AI 一句话分析（服务端任务 + 后台执行，mock 模型） ====================
+    import time as _time
+    from app.modules.grades.services import ai_tools as _tools
+    csrf = login_admin()
+    rounds = []
+
+    def fake_chat(cfg, messages, **kw):
+        """第 1 轮让模型调工具；第 2 轮返回带脏标签的 HTML（验证消毒）。"""
+        rounds.append({'tools': kw.get('tools'), 'messages': messages})
+        if len(rounds) == 1:
+            return True, {'choices': [{'message': {
+                'content': '',
+                'tool_calls': [{'id': 'call_1', 'type': 'function', 'function': {
+                    'name': 'class_summary',
+                    'arguments': _json.dumps({'exam_id': eid})}}]}}]}, 0.1
+        return True, {'choices': [{'message': {'content': (
+            '<h5>结论</h5><p class="text-danger">01班总分最高</p>'
+            '<script>alert(1)</script><a href="javascript:alert(1)">x</a>'
+            '<img src=x onerror=alert(1)>'
+            '<table class="table table-sm"><tr><td colspan="2">a</td></tr></table>')}}]}, 0.1
+
+    ai_svc._chat_completions = fake_chat
+    r = c.post('/grades/ai/ask', json={'exam_id': eid, 'question': '分析各班总分差距'},
+               headers={'X-CSRFToken': csrf})
+    d = r.get_json()
+    check('AI任务：提交只建任务并返回 task_id',
+          r.status_code == 200 and d.get('success') and d['data'].get('task_id'), str(d)[:200])
+    tid = (d.get('data') or {}).get('task_id')
+
+    status, detail = 'running', {}
+    for _ in range(80):                     # 后台线程异步：轮询到结束（上限 ~16s）
+        _time.sleep(0.2)
+        rr = c.get(f'/grades/ai/tasks/{tid}')
+        detail = (rr.get_json() or {}).get('data') or {}
+        status = detail.get('status') or ''
+        if status != 'running':
+            break
+    check('AI任务：后台执行完成', status == 'done', f'{status} {detail.get("error")}')
+    check('AI任务：模型收到工具清单', bool(rounds) and bool(rounds[0]['tools'])
+          and any(t['function']['name'] == 'near_line' for t in rounds[0]['tools']))
+    check('AI任务：工具结果已回灌模型',
+          any(m.get('role') == 'tool' and 'class_name' in (m.get('content') or '')
+              for m in (rounds[1]['messages'] if len(rounds) > 1 else [])))
+    check('AI任务：进度可回放（工具事件）',
+          any(ev.get('type') == 'tool' and ev.get('name') == 'class_summary'
+              for ev in detail.get('events') or []), str(detail.get('events'))[:200])
+    html_out = detail.get('html') or ''
+    check('AI任务：报告已消毒',
+          '<h5>' in html_out and 'text-danger' in html_out and 'colspan' in html_out
+          and '<script' not in html_out.lower() and 'onerror' not in html_out.lower()
+          and 'javascript:' not in html_out.lower() and '<img' not in html_out.lower())
+    check('AI任务：落库 kind=html + trace',
+          bool(detail.get('report_id'))
+          and 'class_summary' in _json.dumps(detail.get('trace') or []))
+    r = c.get(f'/grades/ai/tasks/{tid}/stream')
+    body = r.get_data(as_text=True)
+    check('AI任务：SSE 订阅可用且能补发',
+          r.status_code == 200 and 'text/event-stream' in (r.headers.get('Content-Type') or '')
+          and '"type": "done"' in body, body[:200])
+    rows = (c.get('/grades/ai/tasks?limit=50').get_json() or {}).get('data') or []
+    check('AI任务：列表含本任务', any(x.get('id') == tid for x in rows), str(rows)[:200])
+    check('AI任务：历史报告以负数 id 兼容进同一列表',
+          any((x.get('id') or 0) < 0 for x in rows))
+    hr = c.get(f'/grades/ai?exam={eid}')
+    htxt = hr.get_data(as_text=True)
+    check('AI任务：工作台页面元素齐备',
+          hr.status_code == 200 and 'id="aiTaskList"' in htxt and 'id="aiQ"' in htxt
+          and 'id="aiSubmit"' in htxt and 'id="aiStudioCfg"' in htxt
+          and 'js/ai_task_ui.js' in htxt and 'js/ai_studio.js' in htxt)
+    _ai_miss = [k for k in ('id="aiGenPanel"', 'id="aiGenToggle"', 'id="aiCopyPrompt"',
+                            'id="aiStop"', 'id="aiReedit"', 'js/ai_prompt_gen.js')
+                if k not in htxt]
+    check('AI任务：工作台含提示词生成器与停止/重新编辑入口', not _ai_miss, str(_ai_miss))
+    # 2026-10-14 用户口径：年级内置在考试里，面板不再有年级下拉（范围只在场次内收窄）
+    check('提示词生成器：面板不再出现年级下拉（年级内置考试）',
+          'id="aiGenGrade"' not in htxt)
+    check('AI任务：旧历史页 302 到工作台',
+          c.get('/grades/ai/reports').status_code in (301, 302))
+    r = c.post(f'/grades/ai/tasks/{tid}/delete', headers={'X-CSRFToken': csrf})
+    check('AI任务：可删除已结束的任务', r.status_code == 200)
+
+    # ---- 提示词生成器（2026-10-14：范围/侧重/输出格式 → 拼装 / 模板 / 停止 / 回填） ----
+    r = c.get(f'/grades/ai/prompt/options?exam_id={eid}')
+    d = r.get_json()
+    opt = (d or {}).get('data') or {}
+    check('提示词生成器：选项接口返回年级/班级/学科/侧重',
+          r.status_code == 200 and d.get('success')
+          and '2025级' in (opt.get('grades') or [])
+          and '01班' in (opt.get('classes') or [])
+          and len(opt.get('subjects') or []) >= 2
+          and '总分' not in (opt.get('subjects') or [])
+          and len(opt.get('focus') or []) >= 5 and len(opt.get('output') or []) >= 2,
+          str(opt)[:200])
+
+    r = c.post('/grades/ai/prompt/build', json={
+        'exam_id': eid,
+        'gen': {'classes': ['01班'], 'subjects': ['数学'], 'focus': 'near_line',
+                'output': 'brief', 'extra': '只陈述客观数据'}},
+        headers={'X-CSRFToken': csrf})
+    d = r.get_json()
+    prompt = ((d or {}).get('data') or {}).get('prompt') or ''
+    check('提示词生成器：拼装含范围/侧重/输出/数据纪律',
+          r.status_code == 200 and '仅统计以下班级：01班' in prompt
+          and '仅统计以下学科：数学' in prompt and '临界生' in prompt
+          and '简要小结' in prompt and '只陈述客观数据' in prompt and '禁止编造' in prompt,
+          prompt[:200])
+
+    r = c.post('/grades/ai/prompt/build', json={
+        'exam_id': eid, 'gen': {'classes': ['不存在的班']}},
+        headers={'X-CSRFToken': csrf})
+    check('提示词生成器：不存在的班级被拒（400）',
+          r.status_code == 400 and '不在本场考试' in ((r.get_json() or {}).get('message') or ''))
+
+    r = c.post('/grades/ai/prompt/templates', json={
+        'name': '冒烟模板', 'gen': {'classes': ['01班'], 'focus': 'overall',
+                                    'output': 'html', 'extra': 'x'},
+        'prompt': '测试提示词'}, headers={'X-CSRFToken': csrf})
+    d = r.get_json()
+    tpl_id = ((d or {}).get('data') or {}).get('id')
+    check('提示词生成器：模板保存', r.status_code == 200 and bool(tpl_id), str(d)[:200])
+    rows = (c.get('/grades/ai/prompt/templates').get_json() or {}).get('data') or []
+    check('提示词生成器：模板列表含刚保存的（选项无损）',
+          any(x.get('id') == tpl_id and x.get('name') == '冒烟模板'
+              and (x.get('payload') or {}).get('classes') == ['01班'] for x in rows),
+          str(rows)[:200])
+    r = c.post(f'/grades/ai/prompt/templates/{tpl_id}/delete',
+               headers={'X-CSRFToken': csrf})
+    check('提示词生成器：模板删除', r.status_code == 200)
+    rows = (c.get('/grades/ai/prompt/templates').get_json() or {}).get('data') or []
+    check('提示词生成器：删除后列表不含', all(x.get('id') != tpl_id for x in rows))
+
+    # gen 留档 + 详情回填（「重新编辑提示词」的数据源）
+    r = c.post('/grades/ai/ask', json={
+        'exam_id': eid, 'question': '各班数学对比',
+        'gen': {'classes': ['01班'], 'subjects': ['数学'], 'focus': 'class_diff',
+                'output': 'html', 'extra': ''}},
+        headers={'X-CSRFToken': csrf})
+    tid2 = ((r.get_json() or {}).get('data') or {}).get('task_id')
+    det = {}
+    for _ in range(60):
+        _time.sleep(0.2)
+        det = (c.get(f'/grades/ai/tasks/{tid2}').get_json() or {}).get('data') or {}
+        if det.get('status') != 'running':
+            break
+    check('提示词生成器：任务详情可回填 gen + 提示词',
+          det.get('status') == 'done' and (det.get('gen') or {}).get('classes') == ['01班']
+          and (det.get('gen') or {}).get('focus') == 'class_diff'
+          and det.get('question') == '各班数学对比',
+          str(det.get('gen'))[:200])
+    r = c.post(f'/grades/ai/tasks/{tid2}/stop', headers={'X-CSRFToken': csrf})
+    check('提示词生成器：已结束任务不可再停止（400）', r.status_code == 400)
+    from app.modules.grades.services import ai_task_service as _ats
+    check('停止：不在执行中的任务拒绝标记', _ats.request_stop(999999) is False)
+    c.post(f'/grades/ai/tasks/{tid2}/delete', headers={'X-CSRFToken': csrf})
+
+    # 汇报区：生成器面板 + 停止/重新编辑入口
+    hr = c.get(f'/grades/report?exam={eid}').get_data(as_text=True)
+    check('汇报区：提示词生成器 + 停止/重新编辑入口就位',
+          'id="rpGenPanel"' in hr and 'id="rpGenToggle"' in hr
+          and 'id="rpAiStop"' in hr and 'id="rpAiReedit"' in hr
+          and 'js/ai_prompt_gen.js' in hr)
+    check('汇报区：生成器面板同样无年级下拉', 'id="rpGenGrade"' not in hr)
+    logout()
+
+    # ---- 工具层权限收窄（单元级：直接打 dispatch） ----
+    with app.app_context():
+        lk = TeacherSubjectLink.query.filter_by(grade='2025级', class_name='01班',
+                                                subject='数学').first()
+        ru = User.query.filter_by(username='renke01').first()
+        if lk:
+            lk.user_id = ru.id
+            db.session.commit()
+        okc, text, summ = _tools.dispatch('class_summary', {}, ru, eid)
+        d = _json.loads(text) if okc else {}
+        rows = d.get('rows') or []
+        classes = [x['class_name'] for x in rows]
+        # 2026-10-15 用户口径：年级成绩分析结果公开 → 任课教师也拿到全年级各班 + 年级基准
+        check('AI工具：任课教师拿到年级各班（聚合公开）',
+              okc and len(classes) >= 2, f'{okc} {classes} {text[:200]}')
+        check('AI工具：班级汇总含年级基准与班级位次',
+              (d.get('grade_baseline') or {}).get('avg') is not None
+              and all(r.get('class_rank') for r in rows), text[:200])
+        check('AI工具：每行标明能否下钻逐生（detail_visible）',
+              all(isinstance(r.get('detail_visible'), bool) for r in rows)
+              and any(r.get('detail_visible') for r in rows), text[:200])
+        # R1（2026-10-15）：任课＝年级×学科 → 同年级他班**所教学科**可查，但无总分；
+        # 他科必须仍被拒（负向对照保留，防止"年级×学科"被误读成"整年级全科"）
+        okd2, textd2, _sd2 = _tools.dispatch('class_detail',
+                                             {'class_name': '02班', 'subject': '数学'},
+                                             ru, eid)
+        d2 = _json.loads(textd2) if okd2 else {}
+        r2 = d2.get('students') or []
+        check('AI工具：他班逐生明细＝仅所教学科、无总分（年级×学科）',
+              okd2 and bool(r2)
+              and all(set(x.get('scores') or {}) <= {'数学'} and 'total_score' not in x
+                      for x in r2), textd2[:140])
+        okd3, textd3, _sd3 = _tools.dispatch('class_detail',
+                                             {'class_name': '02班', 'subject': '语文'},
+                                             ru, eid)
+        check('AI工具：他班非所教学科仍被拒（负向对照）',
+              not okd3 and '权限' in textd3, textd3[:140])
+        okc2, text2, _s2 = _tools.dispatch('student_trend', {'student_no': '20250101'}, ru, eid)
+        check('AI工具：越权查他班学生被拒', not okc2 and '权限不足' in text2, text2[:120])
+        okc3, text3, _s3 = _tools.dispatch('no_such_tool', {}, ru, eid)
+        check('AI工具：未知工具被拒', not okc3 and '未知工具' in text3)
+        okc4, text4, _s4 = _tools.dispatch('list_my_score_scope', {}, ru, eid)
+        check('AI工具：范围说明可用',
+              okc4 and '2025级' in text4 and '数学' in text4, text4[:160])
+
+    # ---- 2026-10-15 用户口径：成绩单 / 临界生"只展示他们班的" ----
+    # 口径：可用班 = 账号可见班 ∩ 总分口径已授权（班主任本班 / 年级长及以上 / 校级）；
+    # 仅任课映射的班不含总分口径 → 不计入（成绩单含总分与排名，不能靠它绕过总分口径）。
+    with app.app_context():
+        from app.modules.grades.services import scoresheet
+        from app.modules.grades.services.report_warning_service import near_line_report
+        exam_obj = Exam.query.get(eid)
+        bz_user = User.query.filter_by(username='banzhu01').first()
+        adm_user = User.query.filter_by(username='admin').first()
+        bz_allowed, bz_cls = scoresheet.visible(bz_user, exam_obj)
+        check('成绩单范围：班主任可用班级＝本班',
+              bz_allowed == {'01班'} and bz_cls == ['01班'], f'{bz_allowed} {bz_cls}')
+        t_allowed, t_cls = scoresheet.visible(ru, exam_obj)
+        check('成绩单范围：任课班不含总分口径 → 无可用班（fail-closed）',
+              t_allowed == set() and t_cls == [], f'{t_allowed} {t_cls}')
+        a_allowed, a_cls = scoresheet.visible(adm_user, exam_obj)
+        check('成绩单范围：管理员不限班', a_allowed is None and '01班' in a_cls)
+        nl_all = near_line_report(eid, '', '', 10, 20)
+        nl_bz = near_line_report(eid, '', '', 10, 20, allowed_classes=bz_allowed)
+        nl_teach = near_line_report(eid, '', '', 10, 20, allowed_classes=t_allowed)
+        all_cls = {(r.get('class_name') or '') for r in (nl_all.get('rows') or [])}
+        bz_rows = nl_bz.get('rows') or []
+        check('临界生：不限班时名单含数据（对照；未划线则跳过）',
+              bool(nl_all.get('error')) or len(all_cls) >= 1,
+              f'err={nl_all.get("error")} classes={sorted(all_cls)}')
+        # 按班收窄必须真的生效（否则"只含本班"可能只是因为名单本来就只到本班）
+        _other = sorted(all_cls - {'01班'})
+        if _other:
+            nl_other = near_line_report(eid, '', '', 10, 20, allowed_classes={_other[0]})
+            _other_rows = nl_other.get('rows') or []
+            check('临界生：按班收窄后只含该班（对照）',
+                  bool(_other_rows) and all((r.get('class_name') or '') == _other[0]
+                                            for r in _other_rows),
+                  f'目标={_other[0]} rows={len(_other_rows)}')
+        check('临界生：班主任名单只含本班（无跨班泄漏）',
+              bool(nl_bz.get('error')) or all((r.get('class_name') or '') == '01班'
+                                             for r in bz_rows),
+              f'err={nl_bz.get("error")} rows={len(bz_rows)}')
+        check('临界生：任课教师名单为空（fail-closed）',
+              not (nl_teach.get('rows') or []), str(nl_teach.get('error') or '空'))
+
+    # ---- 与 MCP 服务同一份实现的两个工具 + 口径一致性（防两套封装漂移） ----
+    with app.app_context():
+        from app.models import User as U2
+        from mcp_server.tools import scores as _mcp
+        admin_user = U2.query.filter_by(username='admin').first()
+        okc, text, _s = _tools.dispatch('list_classes', {'exam_id': eid}, admin_user)
+        check('AI工具：班级清单（直接复用 MCP 的 list_classes）',
+              okc and '01班' in text and 'visible_subjects' in text, f'{okc} {text[:120]}')
+        okd, textd, _sd = _tools.dispatch('class_detail',
+                                          {'exam_id': eid, 'class_name': '01班'}, admin_user)
+        check('AI工具：逐生明细（直接复用 MCP 的 get_class_score_detail）',
+              okd and '"students"' in textd and '"student_no"' in textd, f'{okd} {textd[:120]}')
+        web, _sw = _tools.HANDLERS['class_summary'](admin_user, exam_id=eid)
+        mcp = _mcp._class_scores(admin_user, eid, '')
+        check('AI工具：Web 与 MCP 同口径（班级数 + 首班均分逐项一致）',
+              len(web['rows']) == len(mcp['classes'])
+              and web['rows'][0].get('avg') == mcp['classes'][0].get('avg'),
+              f"{len(web['rows'])}/{len(mcp['classes'])} "
+              f"{web['rows'][0].get('avg')}/{mcp['classes'][0].get('avg')}")
+
+    # ---- 收敛：轮数用尽时必须"只准出报告"（tool_choice=none），不再无限磨蹭 ----
+    with app.app_context():
+        from app.modules.grades.services import ai_agent as _agent
+        from app.models import User as U3
+        from app.models.grades import Exam as _Exam
+        admin_user = U3.query.filter_by(username='admin').first()
+        _exam = _Exam.query.get(eid)
+        choices = []
+
+        def fake_converge(cfg, messages, **kw):
+            choices.append(kw.get('tool_choice'))
+            if len(choices) == 1:
+                return True, {'choices': [{'message': {'content': '', 'tool_calls': [
+                    {'id': 'c1', 'type': 'function',
+                     'function': {'name': 'class_summary',
+                                  'arguments': _json.dumps({'exam_id': eid})}}]}}]}, 0.1
+            return True, {'choices': [{'message': {'content': '<h5>收敛</h5>'}}]}, 0.1
+
+        ai_svc._chat_completions = fake_converge
+        evs = list(_agent.run({'provider': 'deepseek', 'model': 'x', 'api_key': 'k'},
+                              admin_user, _exam, '各班差距', max_rounds=2))
+        check('AI收敛：最后一轮带 tool_choice=none（强制出报告）',
+              choices == [None, 'none'], str(choices))
+        check('AI收敛：仍产出 html 报告',
+              any(e.get('type') == 'html' and '<h5>' in (e.get('text') or '') for e in evs))
+
+    # ---- 2026-10-13 成绩证明矩阵（单元级）：缺 term 的历史考试不能丢 ----
+    # 回归的是「勾选多场考试 → 生成 PDF 只有一场」：历史导入的 exam.term 为 NULL，
+    # 旧实现要求 term 非空才纳入矩阵，结果 2024/2025 级学生的历次考试被整体丢弃。
+    with app.app_context():
+        from datetime import date as _date
+        from types import SimpleNamespace as _NS
+        from app.modules.grades.services import student_service as _ss
+
+        def _mk(i, d, ty, term=None):
+            return _NS(id=i, name=f'X{i}', exam_date=_date(*d), exam_type=ty,
+                       term=term, grade='2025级')
+
+        _ex = [_mk(1, (2025, 9, 20), '月考'),        # term 缺失（历史数据）
+               _mk(2, (2026, 1, 10), '期末'),
+               _mk(3, (2026, 3, 20), '月考', '2025-2026')]
+        _default = _ss.build_cert_matrix('2025级', _ex, {}, {}, None)
+        check('证明矩阵：缺 term 的历史考试不被丢弃（默认口径每时段一场）',
+              len(_default['rows']) == 2 and _default['rep_ids'] == [2, 3],
+              str(_default['rep_ids']))
+        _pick = _ss.build_cert_matrix('2025级', _ex, {}, {}, {1, 2})
+        check('证明矩阵：同段勾选多场全部进矩阵（不再只留一场）',
+              len(_pick['rows']) == 2 and _pick['exam_ids'] == [1, 2]
+              and _pick['chosen'] is True, str(_pick['exam_ids']))
+        check('证明矩阵：行标签＝年级学期口径（高一上·月考）',
+              _pick['rows'][0]['exam_label'].startswith('高一上·月考'),
+              _pick['rows'][0]['exam_label'])
 
 print(f'\n===== 冒烟测试完成：通过 {ok} / 失败 {fail} =====')
 sys.exit(1 if fail else 0)

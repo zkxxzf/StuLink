@@ -43,6 +43,7 @@ def login():
 
 
 @bp.route('/logout')
+@login_required   # 2026-10-14 审计 API-11：与主站 auth.logout 对齐，未登录不得触发登出流程
 def logout():
     logout_user()
     return redirect(url_for('basic.login'))

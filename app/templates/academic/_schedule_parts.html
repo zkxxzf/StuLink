@@ -22,7 +22,7 @@
      data-mode="{{ 'query' if query_mode else 'path' }}"
      data-endpoint="{{ base_endpoint or request.endpoint }}"
      data-query-mode="{{ query_mode or '' }}"
-     data-kw="{{ (base_kwargs or {})|tojson }}"
+     data-kw='{{ (base_kwargs or {})|tojson }}'
      data-week="{{ week or '' }}">
     <span class="text-muted small text-nowrap"><i class="bi bi-calendar-range"></i> 学期</span>
     <select class="form-select form-select-sm" id="termSelect" style="width:auto;min-width:230px">

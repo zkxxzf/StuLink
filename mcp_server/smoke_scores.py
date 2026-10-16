@@ -5,14 +5,21 @@
     mcp_server\\.venv\\Scripts\\python.exe mcp_server\\smoke_scores.py
 
 覆盖：
-  1. 只读工具集注册（12 个，且不含任何写工具）；
-  2. 权限引擎（core/score_guard.py）三条规则的纯逻辑矩阵：
-     任课教师=年级×班级同时命中且仅所教学科 / 班主任=本班全部学科 /
-     年级长及以上=本年级全部班级全部学科 / 无范围=一律拒绝；
-  3. 真实账号端到端：管理员（全校）、班主任（本班 vs 他班）、任课教师
-     （所教班级 vs 同年级他班、所教学科 vs 他科）；
-  4. 年级长（库中无该角色账号时用等价身份对象验证解析结果）；
-  5. 接入认证端到端（account 模式，用例在 smoke_auth.py）：401 / 429 拒绝策略。
+ 1. 只读工具集注册（12 个，且不含任何写工具）；
+ 2. 权限引擎（core/score_guard.py）三条规则的纯逻辑矩阵：
+    任课教师=年级×班级同时命中且仅所教学科 / 班主任=本班全部学科 /
+    年级长及以上=本年级全部班级全部学科 / 无范围=一律拒绝；
+ 3. 真实账号端到端：管理员（全校）、班主任（本班 vs 他班）、任课教师
+    （所教班级 vs 同年级他班、所教学科 vs 他科）；
+ 4. 年级长（库中无该角色账号时用等价身份对象验证解析结果）；
+ 5. 接入认证端到端（account 模式，用例在 smoke_auth.py）：401 / 429 拒绝策略。
+
+两层口径（2026-10-15 用户裁决，本文件即按此断言，改口径须同步改这里）：
+ · **聚合层公开**：年级各班汇总/年级基准/班级位次、学科分析、分数段、分层上线、
+   班级对比 —— 能看该考试的账号都能看全年级（班主任/任课教师不再只看自己班）；
+ · **逐生层收敛**：学生个人成绩、班级逐生明细、逐生总分与排名 —— 任课教师＝所教班级×
+   所教学科，班主任＝本班全科，他班/他科一律拒绝。
+
 
 运行前提：mcp_server/config.json 存在；库中有真实数据。
 本脚本只读、不改动任何真实账号；认证用例（smoke_auth.py）会新建一个临时账号并在结束时删除。
@@ -88,16 +95,28 @@ def _data(text):
 
 def engine_matrix():
     """三条规则的判定矩阵：引擎层直接验证，不经过数据库。"""
-    teach = score_guard.ScoreScope(teach={('2024级', '01班', '数学')})
-    expect('R1 任课：命中任教年级+任教班级 → 允许', teach.can_view_class('2024级', '01班'))
-    expect('R1 任课：同年级非任教班级 → 拒绝', not teach.can_view_class('2024级', '02班'))
+    # 2026-10-15 用户口径：任课授权＝(年级, 学科)——教某年级某科，该年级**全部班**的
+    # 该科成绩都开放（不再只限自己教的几个班）；总分**分数**仍不开放，但给"总分年级名次"；
+    # 逐生总分的收口走 `total_visible_classes()`（任课教师＝空集，fail-closed）。
+    teach = score_guard.ScoreScope(teach={('2024级', '数学')})
+    expect('R1 任课：任教班级 → 允许', teach.can_view_class('2024级', '01班'))
+    expect('R1 任课：同年级非任教班级 → 也允许（年级×学科口径）',
+           teach.can_view_class('2024级', '02班'))
     expect('R1 任课：非任教年级 → 拒绝', not teach.can_view_class('2025级', '01班'))
-    expect('R1 任课：班内可见学科=所教学科',
+    expect('R1 任课：任教班可见学科=所教学科',
            teach.class_subjects('2024级', '01班') == {'数学'})
+    expect('R1 任课：非任教班可见学科同样只有所教学科',
+           teach.class_subjects('2024级', '02班') == {'数学'})
     expect('R1 任课：年级可见学科=该年级所教学科',
            teach.grade_subjects('2024级') == {'数学'})
-    expect('R1 任课：总分口径不可见（非所教学科）',
+    expect('R1 任课：可见班级=任教年级全部班（None，学科另行收窄）',
+           teach.visible_classes('2024级') is None)
+    expect('R1 任课：总分分数不可见',
            not teach.class_total_visible('2024级', '01班'))
+    expect('R1 任课：总分年级名次可见（只给名次，不给分数）',
+           teach.total_rank_visible('2024级', '02班'))
+    expect('R1 任课：逐生总分收口＝空集（fail-closed）',
+           teach.total_visible_classes('2024级') == set())
     expect('R1 任课：可见年级=任教年级',
            teach.visible_grades() == {'2024级'})
 
@@ -196,7 +215,10 @@ def _pick_accounts():
                     }
                     break
 
-        if picked['homeroom'] is None and classes:
+        # 班主任：**优先挑没有任课映射的纯班主任**——这样"同年级他班被拒"才是干净断言；
+        # 库里全是"班主任+任课"双身份时退而求其次，并把 has_teach 带出去给断言分支用
+        # （2026-10-15 R1 放宽成 年级×学科 后，兼任课的账号对本年级他班也能查所教学科）。
+        if classes:
             grade, cls = classes[0].grade, classes[0].class_name
             all_classes = {c for (c,) in Student.query.filter_by(grade=grade)
                            .with_entities(Student.class_name).distinct().all() if c}
@@ -204,12 +226,18 @@ def _pick_accounts():
             mine = Student.query.filter_by(grade=grade, class_name=cls).first()
             other_stu = (Student.query.filter_by(grade=grade, class_name=others[0]).first()
                          if others else None)
-            if others and mine is not None:
+            has_teach = bool(links)
+            better = (picked['homeroom'] is None
+                      or (picked['homeroom'].get('has_teach') and not has_teach))
+            if better and others and mine is not None:
                 picked['homeroom'] = {
                     'username': user.username, 'grade': grade, 'class_name': cls,
                     'other_class': others[0],
                     'student_no': mine.student_number,
                     'other_student_no': other_stu.student_number if other_stu else None,
+                    'has_teach': has_teach,
+                    'teach_subjects': sorted({l.subject for l in links
+                                              if l.grade == grade}),
                 }
         if all(picked.values()):
             break
@@ -293,10 +321,8 @@ async def main():
     if home:
         bootstrap.warm_up(home['username'])
         scope_text = await call('list_my_score_scope', {})
-        scope_data = _data(scope_text)
         check('班主任：范围含本班', scope_text,
               must_contain=[f'{home["grade"]} {home["class_name"]}'])
-        has_teach = bool(scope_data.get('subject_grants'))
         exam_id = core_db.run(
             lambda: _pick_exam(home['grade'], home['class_name']))
         if exam_id:
@@ -307,22 +333,26 @@ async def main():
             expect('班主任：本班总分口径可见（非任课收窄）',
                    bool(rows) and all(not r.get('total_hidden') and r.get('avg') is not None
                                       for r in rows))
-            check('班主任：同年级他班被拒',
+            # 2026-10-15 用户口径：年级成绩分析结果公开 —— 他班汇总不再拒绝
+            check('班主任：他班汇总可查（年级聚合公开）',
                   await call('get_class_score_summary',
                              {'exam_id': exam_id, 'class_name': home['other_class']}),
-                  expect_ok=False, must_contain=['无权'])
-            if has_teach:
-                # 该账号同时是任课教师：年级级学科分析按 R1 只返回其任教学科
-                check('班主任(兼任课)：年级级学科分析仅返回所教学科',
-                      await call('get_subject_analysis', {'exam_id': exam_id}),
-                      must_contain=['"subjects"'])
-            else:
-                check('班主任：年级级学科分析被拒（无年级授权）',
-                      await call('get_subject_analysis', {'exam_id': exam_id}),
-                      expect_ok=False, must_contain=['无权'])
-            check('班主任：年级级分数段被拒',
+                  must_contain=['subject_avg'])
+            whole = _data(await call('get_class_score_summary', {'exam_id': exam_id}))
+            whole_rows = whole.get('classes') or []
+            expect('年级维度：各班汇总＝全年级 + 年级基准 + 班级位次',
+                   len(whole_rows) >= 2
+                   and (whole.get('grade_baseline') or {}).get('avg') is not None
+                   and all(r.get('class_rank') for r in whole_rows),
+                   f'班数={len(whole_rows)} 基准={whole.get("grade_baseline")}')
+            expect('年级维度：每行标明能否下钻逐生（detail_visible 布尔）',
+                   all(isinstance(r.get('detail_visible'), bool) for r in whole_rows))
+            check('班主任：年级级学科分析可查（聚合公开）',
+                  await call('get_subject_analysis', {'exam_id': exam_id}),
+                  must_contain=['"subjects"'])
+            check('班主任：年级级分数段可查（聚合公开）',
                   await call('get_exam_score_segments', {'exam_id': exam_id}),
-                  expect_ok=False, must_contain=['年级级分数段'])
+                  must_contain=['distribution'])
             check('班主任：本班分数段可查',
                   await call('get_exam_score_segments',
                              {'exam_id': exam_id, 'class_name': home['class_name']}),
@@ -348,20 +378,33 @@ async def main():
                                  {'student_no': student_no, 'exam_id': exam_id}),
                       must_contain=['"subjects"'])
             if home.get('other_student_no'):
-                check('班主任：他班学生成绩被拒',
-                      await call('get_student_scores',
-                                 {'student_no': home['other_student_no'], 'exam_id': exam_id}),
-                      expect_ok=False, must_contain=['无权'])
+                if home.get('has_teach'):
+                    # 兼任课：R1＝年级×学科 → 他班学生可见，但只给所教学科、不给总分
+                    stu = _data(await call('get_student_scores',
+                                           {'student_no': home['other_student_no'],
+                                            'exam_id': exam_id}))
+                    expect('班主任(兼任课)：他班学生成绩＝仅所教学科、无总分',
+                           bool(stu.get('subjects'))
+                           and all(s.get('subject') in (home.get('teach_subjects') or [])
+                                   for s in (stu.get('subjects') or []))
+                           and 'score' not in (stu.get('student') or {}),
+                           f'样例={(stu.get("subjects") or [])[:1]}')
+                else:
+                    check('班主任：他班学生成绩被拒',
+                          await call('get_student_scores',
+                                     {'student_no': home['other_student_no'],
+                                      'exam_id': exam_id}),
+                          expect_ok=False, must_contain=['无权'])
         else:
             print(f'注意：{home["grade"]} 没有带成绩的考试，跳过班主任成绩用例')
 
-    # 任课教师：所教班级×所教学科可见，他班/他科拒绝
+    # 任课教师：任教年级×所教学科可见（同年级任意班），他科/他年级拒绝
     teacher = picked['teacher']
     if teacher:
         bootstrap.warm_up(teacher['username'])
-        check('任课教师：范围含任教班级+学科',
+        check('任课教师：范围含任教年级+任教学科',
               await call('list_my_score_scope', {}),
-              must_contain=[f'{teacher["grade"]} {teacher["class_name"]} {teacher["subject"]}'])
+              must_contain=[f'{teacher["grade"]} {teacher["subject"]}'])
         exam_id = core_db.run(
             lambda: _pick_exam(teacher['grade'], teacher['class_name']))
         if exam_id:
@@ -371,14 +414,37 @@ async def main():
             data = _data(text)
             rows = data.get('classes') or []
             subjects = [s['subject'] for r in rows for s in (r.get('subject_avg') or [])]
-            expect('任课教师：只返回所教学科',
-                   bool(subjects) and all(s == teacher['subject'] for s in subjects),
-                   f'返回学科：{subjects}')
-            expect('任课教师：总分口径隐藏',
-                   bool(rows) and all(r.get('total_hidden') for r in rows))
-            check('任课教师：list_classes 只含任教班级（考试口径）',
-                  await call('list_classes', {'exam_id': exam_id}),
-                  must_contain=[teacher['class_name']])
+            # 2026-10-15 用户口径：班级/年级聚合公开（含各科均分与总分均分/位次）
+            expect('任课教师：班级汇总含全部学科（聚合公开）',
+                   bool(subjects) and any(s != teacher['subject'] for s in subjects),
+                   f'返回学科：{sorted(set(subjects))}')
+            expect('任课教师：班级级总分聚合可见（聚合公开）',
+                   bool(rows) and all(not r.get('total_hidden') and r.get('avg') is not None
+                                      for r in rows))
+            whole = _data(await call('get_class_score_summary', {'exam_id': exam_id}))
+            whole_rows = whole.get('classes') or []
+            expect('年级维度：任课教师也拿到全年级各班 + 年级基准 + 位次',
+                   len(whole_rows) >= 2
+                   and (whole.get('grade_baseline') or {}).get('avg') is not None
+                   and all(r.get('class_rank') for r in whole_rows),
+                   f'班数={len(whole_rows)}')
+            check('任课教师：他班汇总可查（年级聚合公开）',
+                  await call('get_class_score_summary',
+                             {'exam_id': exam_id, 'class_name': teacher['other_class']}),
+                  must_contain=['subject_avg'])
+            # R1 新口径：任课＝年级×学科 → 清单给出该年级**全部班**（含非任教班），
+            # 但每行仍标出"可见学科＝所教学科、总分口径不可见"（清单只影响可下钻范围）
+            cls_rows = _data(await call('list_classes',
+                                        {'exam_id': exam_id})).get('classes') or []
+            expect('任课教师：班级清单含同年级非任教班（年级×学科口径）',
+                   any(r.get('class_name') == teacher['other_class'] for r in cls_rows),
+                   f'清单={[r.get("class_name") for r in cls_rows]}')
+            expect('任课教师：清单每行仍标出"仅所教学科、总分不可见"',
+                   bool(cls_rows) and all(isinstance(r.get('visible_subjects'), list)
+                                          and teacher['subject'] in r['visible_subjects']
+                                          and r.get('total_visible') is False
+                                          for r in cls_rows),
+                   f'样例={cls_rows[:1]}')
             detail = await call('get_class_score_detail',
                                 {'exam_id': exam_id, 'class_name': teacher['class_name']})
             check('任课教师：逐生明细可查', detail, must_contain=['student_count'])
@@ -388,33 +454,67 @@ async def main():
                        set(r.get('scores') or {}) <= {teacher['subject']}
                        and 'total_score' not in r for r in detail_rows),
                    f'样例：{detail_rows[:1]}')
+            ctx = _data(detail).get('grade_context') or {}
+            expect('年级维度：逐生明细附"本班位次 + 年级基准 + 各班横向"',
+                   bool(ctx.get('class_rank'))
+                   and (ctx.get('grade') or {}).get('avg') is not None
+                   and len(ctx.get('classes') or []) >= 2,
+                   f'ctx键={sorted(ctx)}')
+            # 注：他班逐生明细的"所教学科可查 / 他科被拒 / 无总分"断言在下方成对给出
             other_subject = '语文' if teacher['subject'] != '语文' else '数学'
             check('任课教师：逐生明细指定他科被拒',
                   await call('get_class_score_detail',
                              {'exam_id': exam_id, 'class_name': teacher['class_name'],
                               'subject': other_subject}),
                   expect_ok=False, must_contain=['无权'])
-            check('任课教师：同年级非任教班级被拒',
-                  await call('get_class_score_summary',
-                             {'exam_id': exam_id, 'class_name': teacher['other_class']}),
+            # R1 新口径：任教年级的他班也能查，但同样**只给所教学科、不给总分分数**
+            other_rows = _data(await call('get_class_score_detail',
+                                          {'exam_id': exam_id,
+                                           'class_name': teacher['other_class'],
+                                           'subject': teacher['subject']})
+                               ).get('students') or []
+            expect('任课教师：他班逐生明细＝仅所教学科、无总分（年级×学科）',
+                   bool(other_rows) and all(
+                       set(r.get('scores') or {}) <= {teacher['subject']}
+                       and 'total_score' not in r for r in other_rows),
+                   f'样例={other_rows[:1]}')
+            check('任课教师：他班逐生明细指定他科被拒',
+                  await call('get_class_score_detail',
+                             {'exam_id': exam_id, 'class_name': teacher['other_class'],
+                              'subject': other_subject}),
                   expect_ok=False, must_contain=['无权'])
-            check('任课教师：年级级分数段被拒',
+            other_stu = core_db.run(
+                lambda: _student_in_exam(exam_id, teacher['other_class']))
+            if other_stu:
+                stu = _data(await call('get_student_scores',
+                                       {'student_no': other_stu, 'exam_id': exam_id}))
+                stu_subjects = stu.get('subjects') or []
+                expect('任课教师：他班学生成绩＝仅所教学科、无总分（年级×学科）',
+                       bool(stu_subjects)
+                       and all(s.get('subject') == teacher['subject'] for s in stu_subjects)
+                       and 'score' not in (stu.get('student') or {}),
+                       f'样例={stu_subjects[:1]}')
+            check('任课教师：年级级分数段可查（聚合公开）',
                   await call('get_exam_score_segments', {'exam_id': exam_id}),
-                  expect_ok=False, must_contain=['年级级分数段'])
-            check('任课教师：分层上线统计被拒（年级口径）',
-                  await call('get_layer_online_stats', {'exam_id': exam_id}),
-                  expect_ok=False, must_contain=['年级长及以上'])
+                  must_contain=['distribution'])
+            _nl = await call('get_layer_online_stats', {'exam_id': exam_id})
+            check('任课教师：分层上线统计可查（聚合公开；未划线属正常）',
+                  _nl, expect_ok=None)
+            if '"ok": true' in _nl:
+                # 2026-10-15：网页「划线分层」对全体教师只读展示 → AI 端同口径带上分数线
+                expect('任课教师：已划线场次的返回体带各层分数线（lines + lower）',
+                       '"lines"' in _nl and '"lower"' in _nl, _nl[:200])
             if teacher.get('second_class'):
                 check('任课教师：对比自己任教的两个班',
                       await call('compare_classes',
                                  {'exam_id': exam_id,
                                   'class_names': f'{teacher["class_name"]},{teacher["second_class"]}'}),
                       must_contain=['"classes"'])
-                check('任课教师：对比中含他班 → 明确拒绝',
+                check('任课教师：对比含他班也可（聚合公开）',
                       await call('compare_classes',
                                  {'exam_id': exam_id,
                                   'class_names': f'{teacher["class_name"]},{teacher["other_class"]}'}),
-                      expect_ok=False, must_contain=['不足 2 个'])
+                      must_contain=['"classes"'])
         else:
             print(f'注意：{teacher["grade"]} 没有考试，跳过任课教师成绩用例')
 

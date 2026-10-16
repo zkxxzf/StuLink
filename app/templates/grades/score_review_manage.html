@@ -1,0 +1,184 @@
+{% extends "base.html" %}
+{% block title %}成绩复核审批 - 成绩管理{% endblock %}
+{% block content %}
+{# 2026-10-15：成绩复核审批台（有 grades.score_edit「成绩修改（改分）」权限者可见）。
+   「批准并应用」会把增减分真正写进成绩单（重算总分 + 重算排名 + 写分数修改记录）。 #}
+<div class="d-flex justify-content-between align-items-start mb-3 flex-wrap gap-2">
+    <div class="d-flex align-items-baseline flex-wrap gap-2">
+        <h4 class="mb-0"><i class="bi bi-inbox"></i> 成绩复核审批</h4>
+        <span class="text-muted small">
+            「批准并应用」= 直接改分（自动重算总分与排名，并写入分数修改记录留痕）
+        </span>
+    </div>
+    <a href="{{ url_for('grades.reviews_page') }}" class="btn btn-outline-secondary">
+        <i class="bi bi-arrow-left"></i> 我的申请
+    </a>
+</div>
+
+<div class="card">
+    <div class="card-header py-2 d-flex justify-content-between align-items-center flex-wrap gap-2">
+        <div class="d-flex align-items-center flex-wrap gap-1">
+            {% for k, v in status_label.items() %}
+            <a class="btn btn-sm {{ 'btn-primary' if status == k else 'btn-outline-secondary' }}"
+               href="{{ url_for('grades.reviews_manage_page') }}?status={{ k }}{% if grade %}&grade={{ grade }}{% endif %}">
+                {{ v }} <span class="badge bg-light text-dark ms-1">{{ counts.get(k, 0) }}</span>
+            </a>
+            {% endfor %}
+        </div>
+        <div class="d-flex align-items-center gap-2">
+            <select class="form-select form-select-sm" id="rvGrade" style="width:auto">
+                <option value="">全部年级</option>
+                {% for g in grades %}
+                <option value="{{ g }}" {% if g == grade %}selected{% endif %}>{{ g }}</option>
+                {% endfor %}
+            </select>
+            <span class="text-muted small">本页 {{ rows|length }} 条</span>
+        </div>
+    </div>
+    <div class="table-responsive">
+        <table class="table table-sm table-hover align-middle mb-0">
+            <thead class="table-light">
+            <tr>
+                <th>提交时间</th>
+                <th>申请人</th>
+                <th>考试</th>
+                <th>班级</th>
+                <th>学生</th>
+                <th>学科</th>
+                <th>题号</th>
+                <th class="text-end">增减</th>
+                <th>理由</th>
+                <th>状态</th>
+                <th class="text-end">操作</th>
+            </tr>
+            </thead>
+            <tbody>
+            {% for r in rows %}
+            <tr>
+                <td class="text-nowrap small text-muted">{{ r.created_at.strftime('%m-%d %H:%M') if r.created_at else '—' }}</td>
+                <td class="text-nowrap">{{ r.applicant_name or '—' }}</td>
+                <td class="wrap small">{{ r.exam_name or ('#' ~ r.exam_id) }}</td>
+                <td class="text-nowrap small">{{ r.grade }}{{ r.class_name }}</td>
+                <td class="text-nowrap">{{ r.student_name or r.student_no }}
+                    <div class="text-muted small">{{ r.student_no }}</div></td>
+                <td>{{ r.subject }}</td>
+                <td class="small">{{ r.question_no or '整卷' }}</td>
+                <td class="text-end fw-bold {% if r.delta > 0 %}text-success{% else %}text-danger{% endif %}">
+                    {{ '%+g'|format(r.delta) }}</td>
+                <td class="wrap small text-muted" style="max-width:260px">{{ r.reason or '—' }}</td>
+                <td>
+                    <span class="badge {{ status_badge.get(r.status, 'bg-secondary') }}">
+                        {{ status_label.get(r.status, r.status) }}</span>
+                    {% if r.applied %}<span class="badge bg-success-subtle text-success-emphasis">已应用</span>{% endif %}
+                    {% if r.reviewed_at %}
+                    <div class="text-muted small text-nowrap">
+                        {{ r.reviewer_name or '—' }} {{ r.reviewed_at.strftime('%m-%d %H:%M') }}
+                        {% if r.review_note %}<br>{{ r.review_note }}{% endif %}
+                    </div>
+                    {% endif %}
+                </td>
+                <td class="text-end text-nowrap">
+                    {% if r.status == 'pending' %}
+                    {# 卡片常驻按钮 ≤2：主操作（批准并应用）+ 更多（仅批准 / 驳回） #}
+                    <button type="button" class="btn btn-sm btn-primary btn-rv-audit"
+                            data-rid="{{ r.id }}" data-action="approve" data-apply="1"
+                            data-info="{{ r.grade }}{{ r.class_name }} {{ r.student_name or r.student_no }} · {{ r.subject }} {{ '%+g'|format(r.delta) }} 分">
+                        批准并应用
+                    </button>
+                    <div class="btn-group btn-group-sm">
+                        <button type="button" class="btn btn-outline-secondary dropdown-toggle"
+                                data-bs-toggle="dropdown" aria-expanded="false">更多</button>
+                        <ul class="dropdown-menu dropdown-menu-end">
+                            <li><button type="button" class="dropdown-item btn-rv-audit"
+                                        data-rid="{{ r.id }}" data-action="approve" data-apply="0"
+                                        data-info="{{ r.grade }}{{ r.class_name }} {{ r.student_name or r.student_no }} · {{ r.subject }} {{ '%+g'|format(r.delta) }} 分（仅批准，不改分）">
+                                仅批准（不改成绩单）</button></li>
+                            <li><hr class="dropdown-divider"></li>
+                            <li><button type="button" class="dropdown-item text-danger btn-rv-audit"
+                                        data-rid="{{ r.id }}" data-action="reject" data-apply="0"
+                                        data-info="{{ r.grade }}{{ r.class_name }} {{ r.student_name or r.student_no }} · {{ r.subject }} {{ '%+g'|format(r.delta) }} 分">
+                                驳 回</button></li>
+                        </ul>
+                    </div>
+                    {% else %}
+                    <span class="text-muted small">已处理</span>
+                    {% endif %}
+                </td>
+            </tr>
+            {% else %}
+            <tr><td colspan="11" class="text-center text-muted py-4">
+                当前状态下没有复核申请。
+            </td></tr>
+            {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<!-- 审核确认弹窗（批准 / 驳回共用；驳回时意见必填） -->
+<div class="modal fade" id="rvAuditModal" tabindex="-1">
+    <div class="modal-dialog">
+        <form method="POST" id="rvAuditForm" action="">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="rvAuditTitle">审核复核申请</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                    <input type="hidden" name="action" id="rvAction" value="">
+                    <input type="hidden" name="apply" id="rvApply" value="0">
+                    <p class="mb-2" id="rvAuditInfo"></p>
+                    <div class="alert alert-warning py-2 small mb-2" id="rvAuditWarn" style="display:none">
+                        将对成绩单实际改分：自动重算该生总分与本场排名，并写入「分数修改记录」。
+                    </div>
+                    <label class="form-label small mb-1" id="rvNoteLabel">审核意见（选填）</label>
+                    <textarea class="form-control form-control-sm" name="review_note" id="rvNote"
+                              rows="2" maxlength="200" placeholder="如：已核对答题卡，确认漏统计"></textarea>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">取消</button>
+                    <button type="submit" class="btn btn-sm" id="rvAuditSubmit">确定</button>
+                </div>
+            </div>
+        </form>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+// 审核弹窗：单弹窗复用（Bootstrap 覆盖式串接会留孤儿 backdrop，这里只用一个实例）
+$(function(){
+    var modalEl = document.getElementById('rvAuditModal');
+    var modalObj = new bootstrap.Modal(modalEl);
+
+    $('.btn-rv-audit').on('click', function(){
+        var rid = $(this).data('rid');
+        var action = $(this).data('action');
+        var apply = String($(this).data('apply')) === '1';
+        var info = $(this).data('info') || '';
+        $('#rvAuditForm').attr('action', '/grades/reviews/' + rid + '/review');
+        $('#rvAction').val(action);
+        $('#rvApply').val(apply ? '1' : '0');
+        $('#rvAuditInfo').text(info);
+        $('#rvAuditWarn').toggle(action === 'approve' && apply);
+        $('#rvNoteLabel').text(action === 'reject' ? '驳回意见（建议填写）' : '审核意见（选填）');
+        $('#rvAuditSubmit')
+            .removeClass('btn-primary btn-danger')
+            .addClass(action === 'reject' ? 'btn-danger' : 'btn-primary')
+            .text(action === 'reject' ? '确认驳回' : (apply ? '确认批准并改分' : '确认批准'));
+        $('#rvNote').val('');
+        modalObj.show();
+    });
+
+    $('#rvGrade').on('change', function(){
+        // 用字符串拼接（ES5，旧微信 X5 不支持 URL/searchParams）
+        var g = $(this).val();
+        var base = '{{ url_for("grades.reviews_manage_page") }}';
+        window.location.href = base + '?status={{ status }}'
+            + (g ? ('&grade=' + encodeURIComponent(g)) : '');
+    });
+});
+</script>
+{% endblock %}

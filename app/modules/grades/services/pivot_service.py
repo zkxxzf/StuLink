@@ -1,4 +1,4 @@
-# StuLink v1.19.49.29 2026-10-10
+# StuLink v1.19.49.35 2026-10-10
 # 分层上线统计（各班各层上线人数/上线率）+ 自由表（行/列/指标自由组合的交叉分析）
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 import statistics
@@ -70,17 +70,22 @@ def layer_pass_stats(data, subject=TOTAL_SUBJECT):
 
     acc = {}          # 班级 -> {'n': 参考人数, 'c': {层名: 累计上线人数}}
     for d, bl in bands_by_dir.items():
-        for r in data.total_rows:
-            if d and r.direction != d:          # d='' 表示未分科，不过滤方向
-                continue
-            sc = (r.score if subject == TOTAL_SUBJECT
-                  else data.subj.get((r.student_no, subject)))
+        # 2026-10-16：data 可能是 ExamData.population() 人群视图（按方向×组合收窄），
+        # 这里必须走 totals_of（代理会带上组合过滤）而不是直接遍历 total_rows
+        for r in data.totals_of(direction=d):
+            if subject == TOTAL_SUBJECT:
+                sc = r.get('score')
+            else:
+                sc = data.subj.get((r.get('no'), subject))
             if sc is None:
                 continue
-            cls = r.class_name or '—'
+            cls = r.get('class_name') or '—'
             a = acc.setdefault(cls, {'n': 0, 'c': {}})
             a['n'] += 1
-            for name, lower in bl:
+            # 总分线按学生自身组合取线（组合总分线优先，回落方向线）
+            _sel = r.get('selection') or ''
+            bl_stu = data.band_list(d, subject, _sel) if _sel else bl
+            for name, lower in bl_stu:
                 if sc >= lower:
                     a['c'][name] = a['c'].get(name, 0) + 1
 
@@ -167,27 +172,30 @@ def _build_records(data, need_subject, subject, direction):
     trimmed_nos = report_service.trimmed_nos(data)
     total_bands = {}
 
-    def bands_of(d, sub):
-        key = (d, sub)
+    def bands_of(d, sub, sel=''):
+        key = (d, sub, sel)
         if key not in bands_cache:
-            bl = data.band_list(d, sub)
+            bl = data.band_list(d, sub, sel)
             bands_cache[key] = bl
             for name, _lower in bl:
                 if name not in layer_names:
                     layer_names.append(name)
         return bands_cache[key]
 
-    def total_bands_of(d):
-        if d not in total_bands:
-            total_bands[d] = data.band_list(d, TOTAL_SUBJECT)
-        return total_bands[d]
+    def total_bands_of(d, sel=''):
+        key = (d, sel)
+        if key not in total_bands:
+            # 总分线按学生自身组合取线（组合总分线优先，回落方向线）
+            total_bands[key] = data.band_list(d, TOTAL_SUBJECT, sel)
+        return total_bands[key]
 
     for r in data.total_rows:
         if direction and r.direction != direction:
             continue
+        sel = r.subject_selection or ''
         # 该生总分在各总分层的达标情况（双上线＝单科过线且总分过同名层线）
         total_pass = {}
-        for name, lower in total_bands_of(r.direction or ''):
+        for name, lower in total_bands_of(r.direction or '', sel):
             if r.score is not None and r.score >= lower:
                 total_pass[name] = True
         is_trimmed = r.student_no in trimmed_nos
@@ -200,7 +208,7 @@ def _build_records(data, need_subject, subject, direction):
             pairs = [(subject, v)] if v is not None else []
         for sub, sc in pairs:
             pass_layers, in_layer = {}, None
-            for name, lower in bands_of(r.direction or '', sub):
+            for name, lower in bands_of(r.direction or '', sub, sel):
                 if sc >= lower:
                     pass_layers[name] = True
                     if in_layer is None:

@@ -14,6 +14,21 @@ import sys
 BASE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DB = os.path.join(BASE, 'data', 'grades.db')
 
+# 2026-10-14 第四轮审计（CONS-02）：补迁移登记（只登记不早退）
+SCRIPT_NAME = os.path.basename(__file__)
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+try:
+    import _mig_log
+except Exception as _e:  # noqa: BLE001
+    _mig_log = None
+    print(f'[WARN] 迁移登记模块不可用（迁移照常执行，仅不登记）：{_e}')
+
+
+def _record():
+    if _mig_log:
+        _mig_log.record(SCRIPT_NAME, note='grades.db 新建考试任课快照表 exam_teacher_links')
+
+
 DDL = """
 CREATE TABLE IF NOT EXISTS exam_teacher_links (
     id INTEGER NOT NULL,
@@ -36,6 +51,7 @@ IDX = 'CREATE INDEX IF NOT EXISTS idx_exam_teacher_exam ON exam_teacher_links (e
 def main():
     if not os.path.exists(DB):
         print(f'未找到 {DB}，跳过（首次启动会自动建表）')
+        _record()
         return 0
     conn = sqlite3.connect(DB)
     cur = conn.cursor()
@@ -46,6 +62,7 @@ def main():
         n = cur.execute('SELECT count(1) FROM exam_teacher_links').fetchone()[0]
         print(f'exam_teacher_links 已存在，跳过（当前 {n} 行）')
         conn.close()
+        _record()
         return 0
     try:
         cur.execute(DDL)
@@ -65,6 +82,7 @@ def main():
         return 1
     print('迁移完成：已创建 exam_teacher_links（考试任课快照表）')
     print('提示：新导入的成绩会自动写入快照；历史考试可由 Excel 任课表回填。')
+    _record()
     return 0
 
 

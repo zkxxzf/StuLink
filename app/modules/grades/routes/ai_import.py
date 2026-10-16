@@ -528,8 +528,17 @@ def _apply_schedules(exam, sheet_items, body_sessions, mode='replace', dry=False
     default_year = exam.exam_date.year if exam.exam_date else None
 
     def _subj(v):
-        """场次科目：先按「、」合并写法归一（保留多科语义），再走标签白名单"""
-        return sanitize_label(aisvc.normalize_schedule_subject(v), 20) or '待定'
+        """场次科目：先按「、」合并写法归一（保留多科语义），再做科目白名单兜底。
+
+        2026-10-13：别名归一后**仍不在白名单内的（如「体育」）回落「待定」**——
+        否则非法科目会被写进考试时间表，令环节⑥「同科回避」静默失配。
+        保持原返回结构（始终返回 str），不抛异常。
+        """
+        t = sanitize_label(aisvc.normalize_schedule_subject(v), 20)
+        parts = [p for p in t.split('、') if p]
+        if not parts or any(p not in aisvc.SUBJECT_SET for p in parts):
+            return '待定'
+        return t
 
     sess_list, invig_src, room_src, errs = [], [], [], []
     excel_sess = []
@@ -622,13 +631,19 @@ def _apply_schedules(exam, sheet_items, body_sessions, mode='replace', dry=False
     base_order = AffairSchedule.query.filter_by(affair_id=affair.id).count()
     key_exact = {}
     key_ds, key_ss = {}, {}
+    # 2026-10-14 用户口径：AI 只认出开始时间、没认出结束时间时，按内置每科时长补齐
+    # （语文 2.5 小时 / 数学·英语 2 小时 / 其它 75 分钟），与手填 / Excel 导入同一条规则。
+    from app.modules.grades.routes import affair_invig as _ai_ivig
     for i, s in enumerate(ordered):
+        _tm = {'start_time': (s.get('start') or '')[:10], 'end_time': (s.get('end') or '')[:10],
+               'subject': _subj(s.get('subject'))}
+        _ai_ivig.fill_sched_end(_tm)
         row = AffairSchedule(
             affair_id=affair.id,
             exam_date=(date.fromisoformat(s['date']) if s.get('date') else None),
-            start_time=(s.get('start') or '')[:10],
-            end_time=(s.get('end') or '')[:10],
-            subject=_subj(s.get('subject')),
+            start_time=_tm['start_time'],
+            end_time=_tm['end_time'],
+            subject=_tm['subject'],
             selection=sanitize_label(s.get('selection'), 20),
             sort_order=base_order + i)
         db.session.add(row)
@@ -936,6 +951,11 @@ def exam_ai_import_apply(exam_id):
 def _write_raw_scores(exam, rows):
     """把原始分写入 exam_scores.raw_score（store_service 不处理该列）"""
     from app.models.grades import ExamScore
+    # 2026-10-14 第四轮审计修复（PERF-102）：原先按 (student_no, subject) 逐条
+    # filter_by(...).first() —— 504 学生 ×（约 10 科 + 总分）≈ 5,500 次单行 SELECT，
+    # 且全在写事务内。改为一次预取整场行、建 (student_no, subject) → row 字典。
+    existing = {(r.student_no, r.subject): r
+                for r in ExamScore.query.filter_by(exam_id=exam.id).all()}
     n = 0
     for r in rows:
         raw = r.get('raw_subjects') or {}
@@ -944,8 +964,7 @@ def _write_raw_scores(exam, rows):
         for sub, val in list(raw.items()) + [(TOTAL_SUBJECT, r.get('raw_total'))]:
             if val is None:
                 continue
-            row = ExamScore.query.filter_by(exam_id=exam.id, student_no=r['no'],
-                                            subject=sub).first()
+            row = existing.get((r['no'], sub))
             if row is not None and row.raw_score != val:
                 row.raw_score = val
                 n += 1

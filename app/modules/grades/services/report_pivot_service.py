@@ -1,4 +1,4 @@
-# StuLink v1.19.49.29 2026-10-10
+# StuLink v1.19.49.35 2026-10-10
 # 成绩汇报区指标引擎（板块三/四）：单班各科分析、单科各班分析（含任课教师）
 # 口径与 report_service 完全一致，复用其层线/去差/百分比公共函数
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
@@ -15,7 +15,7 @@ def _teacher_names(grade, class_name=None, subject=None, exam_id=None):
     """任课教师姓名映射：(班级,科目)→'姓名'；可只传班级或只传科目。
 
     同班同科多任教师（换师记录）按教师去重顿号连接。
-    v1.19.49.29：传 exam_id 时优先读**本场考试的任课快照**（考试当时）。
+    v1.19.49.35：传 exam_id 时优先读**本场考试的任课快照**（考试当时）。
     """
     pairs = []          # [(class_name, subject, 姓名)]
     if exam_id:
@@ -71,17 +71,25 @@ def class_subject_report(exam_id, class_name):
     total_l2 = rs.pick_layer(data, direction, TOTAL_SUBJECT, l2) if l2 else None
     t_low1 = total_l1[1] if total_l1 else None
     t_low2 = total_l2[1] if total_l2 else None
+    # 2026-10-15 组合级划线：总分线按学生自身组合展开（物化生/物化地/物化政/史地政各一条）
+    _, t_sels1 = rs.layer_lowers(data, direction, TOTAL_SUBJECT, l1, rows_all)
+    _, t_sels2 = (rs.layer_lowers(data, direction, TOTAL_SUBJECT, l2, rows_all)
+                  if l2 else (None, {}))
     trimmed = rs.trimmed_nos(data)
     teachers = _teacher_names(data.exam.grade, class_name=class_name,
                               exam_id=data.exam.id)
     from app.modules.grades.services import teacher_snapshot_service as _tss
-    # v1.19.49.29 班主任与任课均取本场考试当时快照（快照优先、缺则回落当前）
+    # v1.19.49.35 班主任与任课均取本场考试当时快照（快照优先、缺则回落当前）
     ht = _tss.headteacher_map_of(data.exam.id, grade=data.exam.grade).get(
         (data.exam.grade, class_name), '')
 
     def subject_row(sub):
-        sl1 = rs.pick_layer(data, direction, sub, l1)
-        sl2 = rs.pick_layer(data, direction, sub, l2) if l2 else None
+        # 单科线同样按学生自身组合取线（再选四科各组合一条；语数外+首选科=方向线）
+        sl1_base, sl1 = rs.layer_lowers(data, direction, sub, l1, rows_all)
+        sl2_base, sl2 = (rs.layer_lowers(data, direction, sub, l2, rows_all)
+                         if l2 else (None, {}))
+        has1 = sl1_base is not None or bool(sl1)
+        has2 = sl2_base is not None or bool(sl2)
         n = s1 = d1 = s2 = 0
         vals = []
         for r in rows_all:
@@ -91,18 +99,22 @@ def class_subject_report(exam_id, class_name):
             n += 1
             if r.student_no not in trimmed:
                 vals.append(sc)
-            if sl1 and sc >= sl1[1]:
+            sel = r.subject_selection or ''
+            line1 = sl1.get(sel, sl1_base)
+            if line1 is not None and sc >= line1:
                 s1 += 1
-                if t_low1 is not None and r.score is not None and r.score >= t_low1:
+                tl = t_sels1.get(sel, t_low1)
+                if tl is not None and r.score is not None and r.score >= tl:
                     d1 += 1
-            if sl2 and sc >= sl2[1]:
+            line2 = sl2.get(sel, sl2_base)
+            if line2 is not None and sc >= line2:
                 s2 += 1
         # 某科未划该层单科线时对应指标为 None（前端显示「—」），与「0 人上线」区分
         return {'subject': subject_display(sub), 'teacher': teachers.get((class_name, sub), ''),
                 'count': n,
-                'l1_n': s1 if sl1 else None, 'l1_rate': rs._pct(s1, n) if sl1 else None,
-                'dual_n': d1 if sl1 else None, 'dual_rate': rs._pct(d1, n) if sl1 else None,
-                'l2_n': s2 if sl2 else None, 'l2_rate': rs._pct(s2, n) if sl2 else None,
+                'l1_n': s1 if has1 else None, 'l1_rate': rs._pct(s1, n) if has1 else None,
+                'dual_n': d1 if has1 else None, 'dual_rate': rs._pct(d1, n) if has1 else None,
+                'l2_n': s2 if has2 else None, 'l2_rate': rs._pct(s2, n) if has2 else None,
                 'trim_avg': rs._avg(vals)}
 
     out_rows = [subject_row(s) for s in SUBJECTS
@@ -111,8 +123,15 @@ def class_subject_report(exam_id, class_name):
     tn = len(rows_all)
     tv = [r.score for r in rows_all
           if r.student_no not in trimmed and r.score is not None]
-    p1 = sum(1 for r in rows_all if t_low1 is not None and r.score is not None and r.score >= t_low1)
-    p2 = sum(1 for r in rows_all if t_low2 is not None and r.score is not None and r.score >= t_low2)
+    # 总分行上线数同样逐生按自身组合取总分线
+    def _total_hits(sels, base):
+        n = 0
+        for r in rows_all:
+            lo = sels.get(r.subject_selection or '', base)
+            if r.score is not None and lo is not None and r.score >= lo:
+                n += 1
+        return n
+    p1, p2 = _total_hits(t_sels1, t_low1), _total_hits(t_sels2, t_low2)
     out_rows.append({'subject': '总分', 'teacher': ht, 'count': tn,
                      'l1_n': p1, 'l1_rate': rs._pct(p1, tn),
                      'dual_n': None, 'dual_rate': None,
@@ -137,20 +156,27 @@ def subject_class_report(exam_id, direction, subject_disp):
     if not layer_names:
         return {'error': '总分尚未划线，请先在「划线分层」设置特控/本科线'}
     l1, l2 = layer_names[0], (layer_names[1] if len(layer_names) > 1 else None)
-    sl1 = rs.pick_layer(data, direction, sub, l1)
-    sl2 = rs.pick_layer(data, direction, sub, l2) if l2 else None
-    if not sl1 and not sl2:
+    rows_scope = [r for r in data.total_rows
+                  if not direction or r.direction == direction]
+    # 2026-10-15 组合级划线：单科线与总分线都按学生自身组合取线
+    sl1_base, sl1 = rs.layer_lowers(data, direction, sub, l1, rows_scope)
+    sl2_base, sl2 = (rs.layer_lowers(data, direction, sub, l2, rows_scope)
+                     if l2 else (None, {}))
+    has1 = sl1_base is not None or bool(sl1)
+    has2 = sl2_base is not None or bool(sl2)
+    if not has1 and not has2:
         return {'error': f'{direction}方向「{subject_disp}」尚未划线'}
     t1 = rs.pick_layer(data, direction, TOTAL_SUBJECT, l1)
     t2 = rs.pick_layer(data, direction, TOTAL_SUBJECT, l2) if l2 else None
     t_low1, t_low2 = (t1[1] if t1 else None), (t2[1] if t2 else None)
+    _, t_sels1 = rs.layer_lowers(data, direction, TOTAL_SUBJECT, l1, rows_scope)
+    _, t_sels2 = (rs.layer_lowers(data, direction, TOTAL_SUBJECT, l2, rows_scope)
+                  if l2 else (None, {}))
     trimmed = rs.trimmed_nos(data)
     teachers = _teacher_names(data.exam.grade, subject=sub, exam_id=data.exam.id)
 
     by_class = {}
-    for r in data.total_rows:
-        if direction and r.direction != direction:
-            continue
+    for r in rows_scope:
         sc = data.subj.get((r.student_no, sub))
         if sc is None:
             continue
@@ -167,11 +193,15 @@ def subject_class_report(exam_id, direction, subject_disp):
             n += 1
             if r.student_no not in trimmed:
                 vals.append(sc)
-            if sl1 and sc >= sl1[1]:
+            sel = r.subject_selection or ''
+            line1 = sl1.get(sel, sl1_base)
+            if line1 is not None and sc >= line1:
                 s1 += 1
-                if t_low1 is not None and r.score is not None and r.score >= t_low1:
+                tl = t_sels1.get(sel, t_low1)
+                if tl is not None and r.score is not None and r.score >= tl:
                     d1 += 1
-            if sl2 and sc >= sl2[1]:
+            line2 = sl2.get(sel, sl2_base)
+            if line2 is not None and sc >= line2:
                 s2 += 1
         g_n += n
         g_s1 += s1
@@ -179,12 +209,12 @@ def subject_class_report(exam_id, direction, subject_disp):
         g_trim_cnt += len(vals)
         out_rows.append({'class_name': cls, 'teacher': teachers.get((cls, sub), ''),
                          'count': n,
-                         'l1_n': s1 if sl1 else None,
-                         'l1_rate': rs._pct(s1, n) if sl1 else None,
-                         'dual_n': d1 if sl1 else None,
-                         'dual_rate': rs._pct(d1, n) if sl1 else None,
-                         'l2_n': s2 if sl2 else None,
-                         'l2_rate': rs._pct(s2, n) if sl2 else None,
+                         'l1_n': s1 if has1 else None,
+                         'l1_rate': rs._pct(s1, n) if has1 else None,
+                         'dual_n': d1 if has1 else None,
+                         'dual_rate': rs._pct(d1, n) if has1 else None,
+                         'l2_n': s2 if has2 else None,
+                         'l2_rate': rs._pct(s2, n) if has2 else None,
                          'trim_avg': rs._avg(vals)})
     grade = {'l1_rate': rs._pct(g_s1, g_n),
              'trim_avg': round(g_trim_sum / g_trim_cnt, 1) if g_trim_cnt else None,

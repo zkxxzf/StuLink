@@ -53,19 +53,26 @@ def exam_rooms():
     groups = ExamRoomGroup.query.order_by(ExamRoomGroup.sort_order,
                                           ExamRoomGroup.id).all()
     gmap = {}
-    for r in ExamRoomGroupMap.query.all():
-        gmap.setdefault(r.lib_id, []).append(r.group_id)
+    gorder = {}     # 2026-10-14：组内房间顺序（lib_id 列表）—— 页面上可直接上移 / 下移，
+    #                 考务步骤②「一键带入」按这个顺序生成 01、02… 考场编号
+    for m in ExamRoomGroupMap.query.order_by(ExamRoomGroupMap.sort_order,
+                                             ExamRoomGroupMap.id).all():
+        gmap.setdefault(m.lib_id, []).append(m.group_id)
+        gorder.setdefault(m.group_id, []).append(m.lib_id)
     rooms = AffairRoomLib.query.order_by(AffairRoomLib.location).all()
-    room_rows = [{'id': r.id, 'location': r.location,
+    # v1.19.47.31：房间带出「容量（人）」——分组面板里维护，考务编排「一键带入」时作为
+    # 各考场的默认容量（每场考务的容量仍各自存在 affair_rooms.capacity，可再调整）
+    room_rows = [{'id': r.id, 'location': r.location, 'capacity': r.capacity or 30,
                   'note': r.note or '', 'group_ids': sorted(gmap.get(r.id, []))}
                  for r in rooms]
-    # 分组卡片：每组带出成员房间（避免在模板里做“包含”判断）
-    group_rows = [{'id': g.id, 'name': g.name,
+    # 分组卡片：每组带出成员房间（避免在模板里做“包含”判断）+ 组内顺序（lib_ids）
+    group_rows = [{'id': g.id, 'name': g.name, 'lib_ids': gorder.get(g.id, []),
                    'rooms': [r for r in room_rows if g.id in r['group_ids']]}
                   for g in groups]
     return render_template('grades/rooms.html', groups=group_rows, rooms=room_rows,
                            group_ids=[g['id'] for g in group_rows],
-                           group_names=[g['name'] for g in group_rows])
+                           group_names=[g['name'] for g in group_rows],
+                           group_lib_ids=[g['lib_ids'] for g in group_rows])
 
 
 @bp.route('/rooms/save', methods=['POST'])
@@ -122,7 +129,7 @@ def exam_room_delete(lid):
 @login_required
 @perm_required('grades.edit')
 def exam_rooms_template():
-    """v1.19.49.29 房间库批量导入模板（只需「位置」列，「备注」可选）"""
+    """v1.19.49.35 房间库批量导入模板（只需「位置」列，「备注」可选）"""
     wb = openpyxl.Workbook()
     ws = wb.active
     ws.title = '房间'
@@ -143,7 +150,7 @@ def exam_rooms_template():
 @login_required
 @perm_required('grades.edit')
 def exam_rooms_import():
-    """v1.19.49.29 批量导入学校房间（写入房间库 affair_room_libs）。
+    """v1.19.49.35 批量导入学校房间（写入房间库 affair_room_libs）。
 
     表头容错：位置/房间/地点/考场 任一即可，备注/说明 可选（大小写与空格不敏感）。
     按「位置」去重：库里已有 → 仅更新备注；没有 → 新增。返回新增/更新/跳过条数。
@@ -203,6 +210,71 @@ def exam_rooms_import():
     return jsonify({'ok': True, 'added': added, 'updated': updated, 'skipped': skipped})
 
 
+@bp.route('/rooms/<int:lid>/capacity', methods=['POST'])
+@login_required
+@perm_required('grades.edit')
+def exam_room_capacity(lid):
+    """v1.19.47.31 设置房间的「容量（人）」——考务编排带入时的默认容量。
+
+    用户口径（2026-10-14）：容量在「考场维护」的分组面板里维护（已选入分组的房间
+    才有），考务步骤②选模板「一键带入」时直接带出。**只改房间库默认值**：每场考务的
+    容量仍各自存在 `affair_rooms.capacity`，已生成的考场不受影响。
+    """
+    row = db.session.get(AffairRoomLib, lid)
+    if not row:
+        return jsonify({'ok': False, 'msg': '房间不存在'})
+    try:
+        cap = int(str(request.form.get('capacity') or '').strip())
+    except (TypeError, ValueError):
+        return jsonify({'ok': False, 'msg': '容量必须是整数'})
+    if cap < 1 or cap > 500:
+        return jsonify({'ok': False, 'msg': '容量需在 1~500 之间'})
+    row.capacity = cap
+    db.session.commit()
+    log_operation(current_user, '设置', '考场房间', lid,
+                  f'{row.location} 容量={cap}', module='grades')
+    return jsonify({'ok': True, 'capacity': cap})
+
+
+@bp.route('/rooms/capacity-batch', methods=['POST'])
+@login_required
+@perm_required('grades.edit')
+def exam_room_capacity_batch():
+    """2026-10-14 用户要求：**一键批量设置容量** —— 把一个分组（或勾选的几个房间）
+    的容量统一设成同一个值（现实中一个年级的考场容量基本一致，逐个填太慢）。
+
+    body：`lib_ids`（逗号分隔，前端按「整组」或「已勾选」算好）+ `capacity`。
+    与单条设置同口径：**只改房间库默认值**（考务步骤②「一键带入」时的默认容量），
+    每场考务的容量仍各自存在 `affair_rooms.capacity`，已生成的考场不受影响。
+    """
+    ids = []
+    for tok in (request.form.get('lib_ids') or '').split(','):
+        v = _int(tok)
+        if v is not None:
+            ids.append(v)
+    ids = list(dict.fromkeys(ids))[:500]        # 去重 + 上限，防一次塞几万行
+    if not ids:
+        return jsonify({'ok': False, 'msg': '请先选择要设置容量的房间'})
+    try:
+        cap = int(str(request.form.get('capacity') or '').strip())
+    except (TypeError, ValueError):
+        return jsonify({'ok': False, 'msg': '容量必须是整数'})
+    if cap < 1 or cap > 500:
+        return jsonify({'ok': False, 'msg': '容量需在 1~500 之间'})
+    rows = AffairRoomLib.query.filter(AffairRoomLib.id.in_(ids)).all()
+    if not rows:
+        return jsonify({'ok': False, 'msg': '房间不存在'})
+    changed = 0
+    for r in rows:
+        if (r.capacity or 30) != cap:
+            r.capacity = cap
+            changed += 1
+    db.session.commit()
+    log_operation(current_user, '批量设置', '考场房间', 0,
+                  f'{len(rows)} 个房间容量={cap}', module='grades')
+    return jsonify({'ok': True, 'count': len(rows), 'changed': changed, 'capacity': cap})
+
+
 @bp.route('/rooms/<int:lid>/groups', methods=['POST'])
 @login_required
 @perm_required('grades.edit')
@@ -219,11 +291,60 @@ def exam_room_set_groups(lid):
     if ids:
         valid = {g.id for g in
                  ExamRoomGroup.query.filter(ExamRoomGroup.id.in_(ids)).all()}
+    # 2026-10-14：顺序（sort_order）要保住 —— 原来「整条删了重插」会把组内顺序重置成
+    # 「最后加入的排最后」，用户在分组里调好的顺序会被一次改归属抹掉，也带不进考务批次。
+    # 口径：已有的组保留原 sort_order；本次新加入的组追加到该组末尾（max + 10）。
+    old = {m.group_id: (m.sort_order or 0)
+           for m in ExamRoomGroupMap.query.filter_by(lib_id=lid).all()}
     ExamRoomGroupMap.query.filter_by(lib_id=lid).delete()
     for gid in sorted(valid):
-        db.session.add(ExamRoomGroupMap(group_id=gid, lib_id=lid))
+        so = old.get(gid)
+        if so is None:
+            mx = (db.session.query(db.func.max(ExamRoomGroupMap.sort_order))
+                  .filter(ExamRoomGroupMap.group_id == gid).scalar() or 0)
+            so = mx + 10
+        db.session.add(ExamRoomGroupMap(group_id=gid, lib_id=lid, sort_order=so))
     db.session.commit()
     return jsonify({'ok': True})
+
+
+@bp.route('/rooms/groups/<int:gid>/reorder', methods=['POST'])
+@login_required
+@perm_required('grades.edit')
+def exam_room_group_reorder(gid):
+    """分组内房间「上移 / 下移」（2026-10-14 用户口径：顺序要能调，而且要能带着复用）。
+
+    参数：`lib_id` + `dir`（-1 上移 / 1 下移）。
+    组内按下标互换相邻两行，交换后**整组重排**为 10、20、30…（避免历史 0 值并列导致
+    顺序不稳），落库在 `exam_room_group_map.sort_order`；
+    考务步骤②「一键带入」按这个顺序生成 01、02… 编号（`affair_rooms_from_lib_batch`）。
+    返回 `{ok, order:[lib_id…]}`，前端照它重渲染右侧列表。
+    """
+    group = db.session.get(ExamRoomGroup, gid)
+    if not group:
+        return jsonify({'ok': False, 'msg': '分组不存在'})
+    lid = _int(request.form.get('lib_id'))
+    dirn = _int(request.form.get('dir')) or 0
+    rows = (ExamRoomGroupMap.query.filter_by(group_id=gid)
+            .order_by(ExamRoomGroupMap.sort_order, ExamRoomGroupMap.id).all())
+    idx = [i for i, m in enumerate(rows) if m.lib_id == lid]
+    if not idx:
+        return jsonify({'ok': False, 'msg': '该房间不在这个分组里'})
+    i = idx[0]
+    j = i + (1 if dirn >= 0 else -1)
+    if j < 0 or j >= len(rows):
+        return jsonify({'ok': False, 'msg': '已经在最前 / 最后了'})
+    rows[i], rows[j] = rows[j], rows[i]
+    for pos, m in enumerate(rows, start=1):
+        m.sort_order = pos * 10
+    db.session.commit()
+    order = [m.lib_id for m in
+             ExamRoomGroupMap.query.filter_by(group_id=gid)
+             .order_by(ExamRoomGroupMap.sort_order, ExamRoomGroupMap.id).all()]
+    log_operation(current_user, '排序', '考场分组', gid,
+                  f'「{group.name}」房间顺序：{lid} {"上移" if dirn < 0 else "下移"}'
+                  f'（第 {i + 1} → {j + 1} 位）', module='grades')
+    return jsonify({'ok': True, 'order': order})
 
 
 @bp.route('/rooms/groups/save', methods=['POST'])

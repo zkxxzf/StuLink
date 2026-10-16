@@ -22,6 +22,21 @@ from app import create_app
 from app.extensions import db
 from app.models import PermissionGroup
 
+# 2026-10-14 第四轮审计（CONS-02）：补迁移登记（只登记不早退）
+SCRIPT_NAME = os.path.basename(__file__)
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+try:
+    import _mig_log
+except Exception as _e:  # noqa: BLE001
+    _mig_log = None
+    print(f'[WARN] 迁移登记模块不可用（迁移照常执行，仅不登记）：{_e}')
+
+
+def _record():
+    if _mig_log:
+        _mig_log.record(SCRIPT_NAME, note='权限组同步 grades.score_edit（仅管理员组，撤销教务主任/教务员）')
+
+
 KEY = 'grades.score_edit'
 GRANT_GROUPS = {'管理员组'}          # 只有管理员组默认持有
 REVOKE_GROUPS = {'教务主任', '教务员'}   # 早前误加，予以撤销
@@ -59,6 +74,7 @@ def main():
         for g in PermissionGroup.query.all():
             if g.name in (GRANT_GROUPS | REVOKE_GROUPS):
                 print('   %s -> %s' % (g.name, KEY in (g.get_menu_keys() or [])))
+    _record()
 
 
 if __name__ == '__main__':

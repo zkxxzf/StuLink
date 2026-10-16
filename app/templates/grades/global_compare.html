@@ -7,7 +7,7 @@
 {% block content %}
 {# 全局对比：班级 × 学科宽表（去差均分 / 特优线 / 本科线）
    入口条件与「成绩汇报区」一致（管理员/校级领导/年级长），后端 _guard_report 硬校验 #}
-{# v1.19.49.29 考试态：侧栏入口带的是 ?exam=<id>（此前这里只认 exam_id，参数被丢掉 →
+{# v1.19.49.35 考试态：侧栏入口带的是 ?exam=<id>（此前这里只认 exam_id，参数被丢掉 →
    退化成下拉第一项并提示「该考试暂无成绩」）。改为统一先问 exam_nav()（认 ?exam / exam_id / 路径），
    考试态下把「考试」下拉隐藏（只看本场），非考试态保持可选。 #}
 {% set _en = exam_nav() %}
@@ -20,13 +20,16 @@
         <select id="ldExam" class="form-select form-select-sm w-auto{% if _en %} d-none{% endif %}" title="考试"></select>
         <select id="ldDir" class="form-select form-select-sm w-auto" title="方向"></select>
         <span class="ms-auto"></span>
-        <button class="btn btn-sm btn-outline-dark" onclick="window.print()">
-            <i class="bi bi-printer"></i> 打印</button>
+        {# 2026-10-16：打印改指**专用打印版**（横向 A4，一页装下整校对比表）。
+           原为 window.print() 直接打当前页 —— 34 列挤在纵向 A4 里，字被压到看不清。 #}
+        <a class="btn btn-sm btn-outline-dark" id="ldPrint" href="#" target="_blank" rel="noopener"
+           title="打开打印版（横向 A4，可存 PDF）">
+            <i class="bi bi-printer"></i> 打印</a>
         <button class="btn btn-sm btn-outline-success" id="ldExport">
             <i class="bi bi-file-earmark-excel"></i> 导出 Excel</button>
     </div>
     <div id="ldMeta" class="text-muted small mb-2"></div>
-    {# v1.19.49.29 分数线勾选：默认 211/特控/本科，其余层（清北/985…）勾选才显示 #}
+    {# v1.19.49.35 分数线勾选：默认 211/特控/本科，其余层（清北/985…）勾选才显示 #}
     <div id="ldLines" class="ld-lines mb-2 no-print"></div>
     <div id="ldBody">
         <div class="text-center text-muted py-5"><div class="spinner-border"></div>
@@ -37,4 +40,25 @@
 {# 脚本放在 base.html 底部 jQuery 引入之后 #}
 {% block extra_js %}
 <script src="{{ su('js/global_compare.js') }}"></script>
+<script>
+/* 打印版链接跟随当前考试/方向/勾选的分数线（2026-10-16）：打印版是服务端渲染，
+   需要带 exam/direction/lines（层数封顶 5，与页面所见一致） */
+(function () {
+    function sync() {
+        var eid = $('#ldExam').val() || $('#ldApp').data('exam-id') || '';
+        var dir = $('#ldDir').val() || '';
+        if (!eid) return;
+        var lines = $('#ldLines input[type=checkbox]:checked').map(function () {
+            return this.value;
+        }).get().join(',');
+        $('#ldPrint').attr('href', '/grades/global-compare/print?exam='
+            + encodeURIComponent(eid)
+            + (dir ? '&direction=' + encodeURIComponent(dir) : '')
+            + (lines ? '&lines=' + encodeURIComponent(lines) : ''));
+    }
+    $(document).on('change', '#ldExam, #ldDir, #ldLines input[type=checkbox]', sync);
+    setTimeout(sync, 300);      // 下拉由 JS 异步填充，填完再同步一次
+    setTimeout(sync, 1500);
+})();
+</script>
 {% endblock %}

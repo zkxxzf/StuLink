@@ -1,4 +1,4 @@
-# StuLink v1.19.49.29 2026-10-10
+# StuLink v1.19.49.35 2026-10-10
 # AI 分析服务：权限收敛取数（本次+上次原始成绩）→ payload 组装 → LLM 转发
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 import json
@@ -18,7 +18,7 @@ from app.utils.url_guard import assert_outbound_url_allowed
 DEFAULT_TEMPERATURE = 0.4
 DEFAULT_TIMEOUT = 180
 
-# v1.19.49.29 S-4：不自动跟随 3xx，防 SSRF 以 approved.com → 302 → 169.254.169.254 绕过 url_guard
+# v1.19.49.35 S-4：不自动跟随 3xx，防 SSRF 以 approved.com → 302 → 1.19.49.30 绕过 url_guard
 
 class _NoRedirect(urllib.request.HTTPRedirectHandler):
     def redirect_request(self, req, fp, code, msg, headers, newurl):
@@ -34,7 +34,8 @@ def _safe_urlopen(req, timeout):
 
 SYSTEM_PROMPT = (
     '你是一名严谨的中学考试成绩数据分析助手。你将收到一次（或两次）考试的 JSON 原始成绩数据'
-    '（学号、姓名、班级、方向、选科、总分、方向内排名、班内排名、进退步、各科分数）。\n'
+    '（学号、姓名、班级、方向、选科、方向内排名、班内排名、进退步、各科分数；'
+    '**逐生不含总分**，总分只提供聚合统计）。\n'
     '要求：\n'
     '1. 只依据提供的数据进行分析，禁止编造或推测数据中不存在的信息；数据缺失处明确说明。\n'
     '2. 输出中文 Markdown 报告，建议章节：总体情况（参考人数/均分/最高最低分）、'
@@ -84,6 +85,17 @@ def scope_of(user, exam):
     if ug is not None:
         if exam.grade not in ug:
             return set(), '授权年级不含本场考试', None
+        # 2026-10-16 第七轮审计修复（S1）：与 score_guard.resolve 的 R4 同口径 ——
+        # 该年级存在班级白名单（user_data_scopes.class_name）时**按班收窄**。
+        # 此前忽略白名单，「只授权 01 班」的账号会把全年级逐生数据（学号/姓名/
+        # 单科分/名次）整份发给 AI/第三方 LLM，与「个人成绩按班×科收敛」相悖。
+        from app.models.user_data_scope import get_user_scope_classes
+        _wl = get_user_scope_classes(user.id, exam.grade)
+        if _wl:
+            allow = set()
+            for _c in _wl:
+                allow |= set(by_class.get(_c, []))
+            return allow, '授权班级：' + '、'.join(sorted(_wl)), None
         return nos, '授权年级：' + exam.grade, None
     scope, my_grade = scope_service.get_scope(user)
     if scope == scope_service.SCOPE_SCHOOL:
@@ -129,10 +141,16 @@ def prev_exam_of(exam):
 
 
 def _student_card(r, subjects_allow=None):
-    """总分行 → 学生卡（含科目分；任课教师仅返回任教科目）"""
+    """总分行 → 学生卡（含科目分；任课教师仅返回任教科目）
+
+    2026-10-15 用户拍板（第六轮审计 P0-1）：「**不能把学生的总分发了，可以发名次**」
+    —— 逐生**总分不进 payload**（payload 会整份发给 AI/第三方 LLM），只带名次类字段
+    （`rank_dir` 方向排名、`rank_class` 班排、`move` 进退步 = 名次变化）。
+    总分级统计（均分/分数段/及格率）由 `build_stats` 在**服务端本地**算，只外发聚合值。
+    """
     card = {'no': r.student_no, 'name': r.student_name, 'class': r.class_name,
             'direction': r.direction, 'selection': r.subject_selection,
-            'total': r.score, 'rank_dir': r.rank_dir, 'rank_class': r.rank_class,
+            'rank_dir': r.rank_dir, 'rank_class': r.rank_class,
             'move': r.move_rank}
     return card
 
@@ -148,7 +166,11 @@ def build_payload(user, exam):
     def collect(ex):
         if ex is None:
             return None
-        rows = ExamScore.query.filter_by(exam_id=ex.id).all()
+        # 2026-10-14 第四轮审计修复（PERF-101）：原先每次追问都在这里重查全量
+        # （本次 + 上次两场 ≈ 1.1 万行 ORM 实例，AI 对话每条追问都跑一次）。
+        # 改为复用共享的 ExamData 只读缓存（900s TTL，导入/改分时会失效）。
+        from app.modules.grades.services import stats_service as _stats
+        rows = _stats.cached_exam_data(ex.id).rows
         # v1.19.0 修复：原先“总分行直接替换整张卡”，若总分行在科目行之后被处理，
         # 会把已收集的 subjects 整片覆盖掉（payload 里出现 subjects:{}）。
         # 改为两趟收集：先各自归集总分行卡与科目分，再合并。
@@ -338,12 +360,15 @@ def _send_once(url, cfg, body, timeout):
         return False, f'调用失败：{e}', round(time.time() - started, 2), 0
 
 
-def _chat_completions(cfg, messages, timeout=None, max_tokens=None, temperature=None):
+def _chat_completions(cfg, messages, timeout=None, max_tokens=None, temperature=None,
+                      tools=None, tool_choice=None):
     """统一的 OpenAI 兼容 chat/completions 调用，返回 (ok, payload_or_error, 秒)
 
     payload 为厂商原始 JSON；调用方按需取用。
     v1.19.0：用户在“用户设置”里填的 **输出上限 / 思考强度 / 输入上限** 优先于代码默认值；
     三者都不填时完全不传，由服务商自行决定（与以前行为一致）。
+    2026-10-13：新增 tools / tool_choice（OpenAI 兼容 function calling），
+    供成绩汇报区「AI 一句话分析」的 agent 循环使用；不传则请求体与以前完全一致。
     """
     provider = cfg.get('provider') or ai_providers.DEFAULT_PROVIDER
     base = (cfg.get('base_url') or ai_providers.resolve_base_url(provider)).rstrip('/')
@@ -371,6 +396,10 @@ def _chat_completions(cfg, messages, timeout=None, max_tokens=None, temperature=
                 body['max_tokens'] = max_tokens
     if effort in REASONING_EFFORTS:
         body['reasoning_effort'] = effort
+    if tools:
+        body['tools'] = tools
+        if tool_choice:
+            body['tool_choice'] = tool_choice
 
     ok, out, sec, code = _send_once(url, cfg, body, timeout)
     if (not ok) and effort and code == 400:
@@ -507,6 +536,26 @@ def _total_pass_rate(payload, totals):
         return None
 
 
+def _server_total_rows(exam_id):
+    """服务端本地取该场逐生总分 → [(班级, 总分)]（复用共享 ExamData 缓存）
+
+    ⚠️ 只用于**聚合统计**（均分/最高最低/分数段/及格率），**绝不进 payload 或提示词**：
+    2026-10-15 用户拍板「不能把学生的总分发了，可以发名次」——逐生总分不入 payload，
+    统计在本地算完只把聚合结果给 AI。
+    """
+    if not exam_id:
+        return []
+    try:
+        from app.modules.grades.services import stats_service as _stats
+        rows = _stats.cached_exam_data(int(exam_id)).rows
+        return [(r.class_name or '未分班', r.score) for r in rows
+                if r.subject == TOTAL_SUBJECT and isinstance(r.score, (int, float))]
+    except Exception:  # noqa: BLE001  统计口径不应让报告生成失败
+        from flask import current_app
+        current_app.logger.warning('AI 统计：总分取数失败 exam_id=%s', exam_id)
+        return []
+
+
 def build_stats(payload):
     """由成绩 payload 计算图表数据与概览，返回可直给 ECharts 的结构
 
@@ -517,13 +566,16 @@ def build_stats(payload):
       move_dist   进退步分布（饼）
       compare     本次 vs 上次 均分（双柱，无上次则空）
     summary: 参考人数/均分/最高/最低/班级数/及格率等
+
+    2026-10-15：总分统计改为**服务端本地**取数（payload 已不含逐生总分，见 `_student_card`），
+    外发的内容只有聚合值（均分/分数段人数/及格率…）。
     """
     exam = payload.get('exam') or {}
     prev = payload.get('prev')
     students = exam.get('students') or []
 
-    totals = [c.get('total') for c in students]
-    totals = [t for t in totals if isinstance(t, (int, float))]
+    _rows = _server_total_rows(exam.get('id'))
+    totals = [s for _c, s in _rows]
 
     # 1) 分数段分布（按总分，段宽自适应为 50 分）
     bands = {}
@@ -541,11 +593,10 @@ def build_stats(payload):
             cur += width
         bands = {'labels': labels, 'values': values}
 
-    # 2) 班级均分
+    # 2) 班级均分（服务端本地取数，payload 无逐生总分）
     by_class = {}
-    for c in students:
-        if isinstance(c.get('total'), (int, float)):
-            by_class.setdefault(c.get('class') or '未分班', []).append(c['total'])
+    for _cls, _s in _rows:
+        by_class.setdefault(_cls, []).append(_s)
     class_avg = {'labels': sorted(by_class.keys()),
                  'values': [_mean(by_class[k]) for k in sorted(by_class.keys())]}
 
@@ -559,7 +610,7 @@ def build_stats(payload):
                    'values': [_mean(subj[k]) for k in sorted(subj.keys())]}
 
     # 4) 进退步分布
-    # v1.19.49.29 修复：move_rank = 本场方向排名 − 上一场方向排名，
+    # v1.19.49.35 修复：move_rank = 本场方向排名 − 上一场方向排名，
     # 负值 = 名次数字变小 = 进步、正值 = 退步（与成绩单、个人查询同口径）。
     # 原实现把 ≥50 记成"大幅进步"、≤-50 记成"大幅退步"，饼图标签整体标反，此处纠正。
     moves = {'大幅进步(≤-50)': 0, '进步': 0, '持平': 0, '退步': 0, '大幅退步(≥50)': 0}
@@ -583,8 +634,7 @@ def build_stats(payload):
     compare = {'labels': [], 'values': []}
     prev_totals = []
     if prev:
-        prev_totals = [c.get('total') for c in (prev.get('students') or [])
-                       if isinstance(c.get('total'), (int, float))]
+        prev_totals = [s for _c, s in _server_total_rows(prev.get('id'))]
     if prev_totals:
         compare = {'labels': [prev.get('name') or '上次', exam.get('name') or '本次'],
                    'values': [_mean(prev_totals), _mean(totals)]}

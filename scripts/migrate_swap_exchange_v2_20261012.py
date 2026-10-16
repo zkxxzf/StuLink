@@ -28,6 +28,21 @@ from app.extensions import db                                # noqa: E402
 from scripts._db_backup import backup_db                     # noqa: E402
 from scripts._ddl_guard import assert_ident, assert_table    # noqa: E402
 
+# 2026-10-14 第四轮审计（CONS-02）：补迁移登记（只登记不早退）
+SCRIPT_NAME = os.path.basename(__file__)
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+try:
+    import _mig_log
+except Exception as _e:  # noqa: BLE001
+    _mig_log = None
+    print(f'[WARN] 迁移登记模块不可用（迁移照常执行，仅不登记）：{_e}')
+
+
+def _record():
+    if _mig_log:
+        _mig_log.record(SCRIPT_NAME, note='两人换课对调双勾选 3 列 + exchange_kind 旧口径回填')
+
+
 TABLE = 'schedule_swaps'
 BIND = 'timetable'
 COLUMNS = [
@@ -55,6 +70,7 @@ def main():
         insp = sa.inspect(engine)
         if not insp.has_table(TABLE):
             print(f'[SKIP] {TABLE} 表不存在（尚未建过课表，无需迁移）')
+            _record()
             return 0
         assert_table(TABLE)
         cols = {c['name'] for c in insp.get_columns(TABLE)}
@@ -80,6 +96,7 @@ def main():
                 n = r.rowcount or 0
                 print(f'[OK] 回填 {old} → {new}(time={st}, class={sc})：{n} 行')
         print(f'[OK] 迁移完成：{TABLE}')
+        _record()
         return 0
 
 

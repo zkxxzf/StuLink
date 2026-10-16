@@ -207,8 +207,8 @@
                      var base = d.grade.l1_rate, v = r.l1_rate;
                      if (v == null || base == null) return '';
                      var diff = v - base;
-                     if (diff >= d.grade.rate_pp) return 'color:#548235;';
-                     if (diff <= -d.grade.rate_pp) return 'color:#c00000;';
+                     if (diff >= d.grade.rate_pp) return deltaColor(true);
+                     if (diff <= -d.grade.rate_pp) return deltaColor(false);
                      return '';
                  }, get: function (r) { return r.l1_rate; }},
                 {key: 'dual_n', label: '双上线数', get: function (r) { return r.dual_n; }},
@@ -228,12 +228,21 @@
                  var base = d.grade.trim_avg, v = r.trim_avg;
                  if (v == null || base == null) return '';
                  var diff = v - base;
-                 if (diff >= d.grade.avg_diff) return 'color:#548235;';
-                 if (diff <= -d.grade.avg_diff) return 'color:#c00000;';
+                 if (diff >= d.grade.avg_diff) return deltaColor(true);
+                 if (diff <= -d.grade.avg_diff) return deltaColor(false);
                  return '';
              }, get: function (r) { return r.trim_avg; }}
         ]});
         return U.makeRankTable({id: tblId, group: group, rows: d.rows, cols: cols, groups: groups});
+    }
+
+    /* 2026-10-14 审计修复：进退步红绿标注原为写死 #548235 / #c00000，
+       深色面板上对比度仅约 2.1:1（几乎分不出正负）。深色下改用亮一档的绿/红，
+       色相不变（仍靠颜色方向传达「好 / 差」），对比度约 6~9:1。 */
+    function deltaColor(good) {
+        var dark = !!(window.stulinkIsDark && window.stulinkIsDark());
+        if (dark) { return good ? 'color:#4ade80;' : 'color:#f87171;'; }
+        return good ? 'color:#548235;' : 'color:#c00000;';
     }
 
     function ensureBox(id) {

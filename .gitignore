@@ -106,6 +106,11 @@ _v*.sh
 # 数据备份目录（2026-10-10：曾误提交含 223MB grades.db 的备份目录，被 Gitee 单文件 100MB 限制拒收）
 data_backup_*/
 
+# 脚本备份目录（2026-10-16 第七轮审计：仓库根 backups/ 未被任何规则覆盖，
+# 内含 fix_exam_selection_snapshot 写出的学生成绩行级备份 JSON —— 可能含姓名/学号/分数）
+backups/
+.ruff_cache/
+
 # QA 过程产物（勿入库）：如 tests/qa_20261010/backup_before_delete 这类"删除前备份"副本目录
 tests
 

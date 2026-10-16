@@ -1,11 +1,16 @@
 <!DOCTYPE html>
-{# v1.19.49.29：主题挂在 <html> 上，Bootstrap 5.3.3 原生识别 data-bs-theme；
+{# v1.19.49.35：主题挂在 <html> 上，Bootstrap 5.3.3 原生识别 data-bs-theme；
    默认值由上面 head 内的脚本按「本地存储 → 系统偏好」改写，这里只是兜底。 #}
 <html lang="zh-CN" data-bs-theme="light">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>{% block title %}学生管理系统{% endblock %}</title>
+    {# 2026-10-14：站点图标。此前全站没有任何 icon 声明，浏览器自动去请求 /favicon.ico，
+       命中 404（每个页面控制台都会留一条 404）—— 统一用 app/static/logo.ico。
+       su() 会带上按 mtime 生成的版本参数，换图标后客户端不会吃旧缓存。 #}
+    <link rel="icon" type="image/x-icon" href="{{ su('logo.ico') }}">
+    <link rel="shortcut icon" type="image/x-icon" href="{{ su('logo.ico') }}">
     <!-- 全部使用本地静态资源：避免外网 CDN 不可达导致样式丢失、或 jQuery 未加载报 $ is not defined -->
     <link href="{{ su('css/bootstrap.min.css') }}" rel="stylesheet">
     <link href="{{ su('css/bootstrap-icons.min.css') }}" rel="stylesheet">
@@ -15,7 +20,7 @@
        打印规则全部不生效（这是"4 套表头风格并存"的根因之一）。
        成绩模块页面占全站相当比例，直接并入 base.html，一处引入全站生效。 #}
     <link href="{{ su('css/grades.css') }}" rel="stylesheet">
-    {# 2026-10-13（v1.19.49.29）：主题层必须在 bootstrap / grades.css **之后**加载，
+    {# 2026-10-13（v1.19.49.35）：主题层必须在 bootstrap / grades.css **之后**加载，
        才能覆盖业务 css 里的字面量颜色（同特异性，后来者胜）。 #}
     <link href="{{ su('css/theme.css') }}" rel="stylesheet">
     {# 主题提前应用：在 body 渲染前定好 data-bs-theme，避免深色下先闪一帧白屏（FOUC） #}
@@ -42,8 +47,11 @@
     </script>
     {% block extra_css_head %}{% endblock %}
     <style>
-        :root { --sidebar-width: 220px; }
-        /* 2026-10-13（v1.19.49.29）：颜色一律取主题变量（见 static/css/theme.css），
+        :root { --sidebar-width: 220px;
+            /* 2026-10-14 第四轮审计（UI-14）：两行表头的第二行 sticky 偏移量变量化
+               （原多处写死 38px，导航栏/表头高度调整后容易失配） */
+            --sl-thead-h: 38px; }
+        /* 2026-10-13（v1.19.49.35）：颜色一律取主题变量（见 static/css/theme.css），
            不再写字面量 —— 否则内联样式会压过主题层，深浅两模式切换不生效。 */
         body { font-family: -apple-system, "Microsoft YaHei", sans-serif; background: var(--sl-bg); color: var(--sl-text); padding-top: 56px; }
         .sidebar {
@@ -77,7 +85,9 @@
         .sidebar .nav-link[data-bs-toggle="collapse"][aria-expanded="false"] .bi-chevron-down {
             transform: rotate(-90deg);
         }
-        .main-content { margin-left: var(--sidebar-width); padding: 20px 24px 24px; min-height: 100vh; }
+        /* 2026-10-14 第四轮审计（UI-15）：min-height 用 dvh（移动端浏览器工具栏
+           会算进 100vh，导致底部被遮）；老浏览器忽略 dvh 行自动退回 100vh */
+        .main-content { margin-left: var(--sidebar-width); padding: 20px 24px 24px; min-height: 100vh; min-height: 100dvh; }
         /* 2026-10-13：考试态侧栏已改为**贴左全高**（与常规侧栏同位同宽），
            main-content 的 margin-left:220px 直接生效，原先给浮层让位的
            padding-left:252px 补偿不再需要 —— 那正是"侧栏与内容之间大空白"的来源。 */
@@ -90,7 +100,10 @@
         .bed-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
         .bed-slot {
             border: 2px dashed #d1d5db; border-radius: 8px; padding: 10px;
-            text-align: center; font-size: 13px; cursor: pointer; transition: all .2s;
+            /* 2026-10-16 第八轮审计（U-13）：原为 transition:all .2s —— 单页可达 100+ 个
+               床位格，hover 时连 padding/border-width 一起过渡会掉帧。收敛到实际会变的属性。 */
+            text-align: center; font-size: 13px; cursor: pointer;
+            transition: background-color .2s, border-color .2s, transform .2s, opacity .2s;
             min-height: 70px; display: flex; flex-direction: column; justify-content: center;
         }
         .bed-slot.occupied { border-color: #3b82f6; border-style: solid; background: #eff6ff; }
@@ -108,6 +121,11 @@
         /* 拒绝动效 */
         @keyframes bedReject { 0% { transform: translateX(0); } 20% { transform: translateX(-6px); background: #fef2f2; } 40% { transform: translateX(6px); } 60% { transform: translateX(-4px); } 80% { transform: translateX(4px); } 100% { transform: translateX(0); } }
         .bed-slot.bed-reject { animation: bedReject 0.45s ease-in-out; }
+        /* 搬移/移除的源床淡出（2026-10-16 第八轮审计 U-12：原先是 manage.html 里的
+           内联 style，请求失败时床位会永久停在半透明缩小态 —— 改由 class 承载，
+           失败分支 removeClass 即可复位）。 */
+        .bed-slot.bed-move-out { opacity: .4; transform: scale(.9); }
+        .bed-slot.bed-removing { opacity: .5; transform: scale(.9); }
         /* 性别区分 */
         .student-item.male-student { border-left: 3px solid #3b82f6; background: #f0f7ff; }
         .student-item.female-student { border-left: 3px solid #ec4899; background: #fdf2f8; }
@@ -117,8 +135,9 @@
         .student-item:hover { background: #f1f5f9; }
         .bed-slot.male-room { border-color: #93c5fd; }
         .bed-slot.female-room { border-color: #f9a8d4; }
-        .bed-number { font-weight: 600; color: #64748b; font-size: 11px; }
-        .bed-student { font-weight: 500; color: #1e293b; }
+        /* 2026-10-14 第四轮审计（UI-10）：床号/姓名颜色改主题变量（深色下不再是浅底浅字） */
+        .bed-number { font-weight: 600; color: var(--sl-text-muted); font-size: 11px; }
+        .bed-student { font-weight: 500; color: var(--sl-text); }
         .badge-role { font-size: 12px; }
         /* 选科组合配色：物理方向 / 历史方向 */
         .subj-physics, .subj-history {
@@ -135,25 +154,27 @@
             color: var(--sl-head-text);
             border-color: var(--sl-head-border);
         }
-        /* v1.19.49.29：两行表头时第 2 行浅一档，靠同族明度差区分层级 */
+        /* v1.19.49.35：两行表头时第 2 行浅一档，靠同族明度差区分层级 */
         .table-responsive thead tr:nth-child(2) th { background: var(--sl-head-bg-2); }
-        .table-responsive thead tr:nth-child(2) th { top: 38px; }
+        /* 2026-10-14 第四轮审计（UI-14）：第二行 sticky 偏移量走变量（原写死 38px） */
+        .table-responsive thead tr:nth-child(2) th { top: var(--sl-thead-h, 38px); }
         .table-responsive td:first-child,
         .table-responsive th:first-child {
             position: sticky; left: 0; z-index: 1;
         }
         .table-responsive thead th:first-child { z-index: 3; }
-        /* v1.19.49.29 首列 sticky 的背景跟随「行状态」——用 --bs-table-bg（Bootstrap 的表变量）。
+        /* v1.19.49.35 首列 sticky 的背景跟随「行状态」——用 --bs-table-bg（Bootstrap 的表变量）。
            原先写死 var(--bs-body-bg)，导致 .table-warning 等"整行变黄"时首列仍是白底：
            考务步骤①「不参加考试」的学生就是这么被看漏的（学号列不变色）。 */
         .table-responsive tbody td:first-child {
             background: var(--bs-table-bg, var(--sl-surface));
         }
-        /* 手机端导航栏紧凑 */
+        /* 手机端导航栏紧凑（2026-10-14 第四轮审计 UI-15：补重置左右 padding ——
+           原 24px 在窄屏白吃宽度，表格刚开屏就横向溢出） */
         @media (max-width: 768px) {
             .sidebar { transform: translateX(-100%); }
             .sidebar.show { transform: translateX(0); }
-            .main-content { margin-left: 0; }
+            .main-content { margin-left: 0; padding: 16px 12px 16px; }
             .navbar { padding-left: 8px; padding-right: 8px; }
             .navbar .ms-auto { gap: 4px; }
         }
@@ -162,15 +183,15 @@
             /* 2026-10-13：恢复**贴顶落底全高** —— 原先垂直居中浮卡（top:50% + max-height）
                上不到顶、下不到底，和主内容之间还空一大块（用户实测反馈）。
                贴左占满视口高，宽度与常规侧栏一致。
-               v1.19.49.29：底色改用**与常规侧栏同一个变量** —— 原先是白卡，
+               v1.19.49.35：底色改用**与常规侧栏同一个变量** —— 原先是白卡，
                与其它模块的深色侧栏不一致（用户反馈「成绩分析侧栏是白的」）。 */
             top: 56px; bottom: 0; transform: none;
             left: 0; width: var(--sidebar-width); max-height: none;
             background: var(--sl-sidebar-bg); border: none; border-radius: 0;
             box-shadow: 2px 0 8px rgba(15, 23, 42, .06);
-            /* v1.19.49.29 横向间距统一：卡片左右各 8px、下面每一行左右各 10px，
+            /* v1.19.49.35 横向间距统一：卡片左右各 8px、下面每一行左右各 10px，
                整张卡「左 18px = 右 18px」；旧版 efn-item 带 2px 左描边（左 14 / 右 12）不对称 */
-            /* v1.19.49.29 overflow-x: hidden：卡片只纵向滚动，杜绝底部横向滚动条 */
+            /* v1.19.49.35 overflow-x: hidden：卡片只纵向滚动，杜绝底部横向滚动条 */
             padding: 8px; overflow-y: auto; overflow-x: hidden;
         }
         .sidebar-float .nav.flex-column { padding-top: 0 !important; }
@@ -186,7 +207,7 @@
         .sidebar-float .efn-back:hover { color: var(--sl-sidebar-accent-text); background: var(--sl-sidebar-hover); }
         .sidebar-float .efn-title {
             padding: 4px 10px 6px; color: var(--sl-sidebar-title); font-weight: 600; font-size: 12.5px;
-            /* v1.19.49.29：考试名可能很长 → 允许换行。
+            /* v1.19.49.35：考试名可能很长 → 允许换行。
                原先 white-space:nowrap 会让该项的 min-content 超过卡片宽度，
                作为 flex 项又无法收缩 → 撑出底部横向滚动条（用户反馈）。 */
             white-space: normal; overflow-wrap: anywhere; line-height: 1.35;
@@ -201,7 +222,7 @@
             background: var(--sl-sidebar-chip); color: var(--sl-sidebar-text);
         }
         .sidebar-float .efn-dot.on { background: #16a34a; color: #fff; }
-        /* v1.19.49.29 已完成但非当前的环节：浅绿底绿字（不与「当前」的深绿实心混淆） */
+        /* v1.19.49.35 已完成但非当前的环节：浅绿底绿字（不与「当前」的深绿实心混淆） */
         .sidebar-float .efn-dot.done {
             background: var(--sl-sidebar-done-bg); color: var(--sl-sidebar-done-text);
         }
@@ -230,7 +251,7 @@
         }
         .sidebar-float .efn-group:hover { background: var(--sl-sidebar-hover); }
         .sidebar-float .efn-group .bi { font-size: 11px; color: var(--sl-sidebar-muted); }
-        /* v1.19.49.29：「成绩分析」标题本身是入口链接，右侧箭头单独负责展开/收起 */
+        /* v1.19.49.35：「成绩分析」标题本身是入口链接，右侧箭头单独负责展开/收起 */
         .sidebar-float .efn-group-title { flex: 1 1 auto; color: inherit; }
         .sidebar-float .efn-group-title:hover { color: var(--sl-sidebar-accent-text); }
         .sidebar-float .efn-group .bi[data-bs-toggle] {
@@ -240,13 +261,24 @@
         .sidebar-float .efn-group .bi[data-bs-toggle][aria-expanded="false"] {
             transform: rotate(-90deg);
         }
-        /* ---- 2026-10-13：AI 智能导入紧跟「成绩导入」（同一种事的两个入口），
-               不再放侧栏最下方、也不再用那条细线分隔 ---- */
-        .sidebar-float .efn-ai { color: var(--sl-sidebar-text); }
-        .sidebar-float .efn-ai .bi { margin-right: 4px; }
+        /* 2026-10-14 UI 审计 H1：原先这里写的是 .sidebar.sidebar-float { display: none; } ——
+           考试态悬浮流程栏在手机上被整个隐藏，而汉堡按钮又因为 exam_mode 不渲染，
+           进入 /grades/exams/<id> 后「概览 / 考务 / 导入 / 划线 / 分析」之间**完全无法跳转**
+           （用户实测：手机上没有任何菜单入口）。
+           改为复用常规侧栏的位移方案：默认移出视口，点汉堡加 .show 滑入（桌面端不受影响）。 */
         @media (max-width: 767.98px) {
-            .sidebar.sidebar-float { display: none; }
+            .sidebar.sidebar-float { transform: translateX(-100%); }
+            .sidebar.sidebar-float.show { transform: translateX(0); box-shadow: 2px 0 14px rgba(15, 23, 42, .28); }
         }
+        /* ===== 2026-10-14 UI 审计 M6：移动端侧栏遮罩 =====
+           原先只有 classList.toggle('show')：点开后没有蒙层、点侧栏外不收起、也没有 ESC。
+           这里补一层 backdrop（z-index 99，低于侧栏 100、高于内容；navbar 200 仍在最上层），
+           点击即收起侧栏；显示状态与侧栏的 .show 同步。 */
+        .sidebar-backdrop {
+            display: none; position: fixed; top: 56px; left: 0; right: 0; bottom: 0;
+            background: rgba(15, 23, 42, .45); z-index: 99;
+        }
+        .sidebar-backdrop.show { display: block; }
         /* ===== 2026-10-12 UI 审计 M7：全局打印基线 =====
            原先只有 grades.css 里有一份 @media print，且要求页面自己引 grades.css、
            自己给元素加 .no-print/.g-filter-bar。成绩单/临界生/证明台账/考务等页面
@@ -271,23 +303,33 @@
 {# v1.19.0：进入某场考试（考试态）后，左侧深色侧栏改为「独立悬浮栏」——
    侧栏元素保留（仅此页含本场考试菜单），套 .sidebar-float 变成描边白卡浮在左槽位。
    考试态由 exam_nav() 判定（本请求内已缓存，重复调用无额外查询）。
-   v1.19.49.29 起 body 加 .exam-ctx：为悬浮浮层让出左内边距（UI 审计 H1）。 #}
+   v1.19.49.35 起 body 加 .exam-ctx：为悬浮浮层让出左内边距（UI 审计 H1）。 #}
 {% set EN = exam_nav() if request.blueprint == 'grades' else None %}
 {% set exam_mode = (request.blueprint == 'grades' and EN) %}
 <body class="{{ 'exam-ctx' if exam_mode }}">
     <!-- 顶部导航 -->
     <nav class="navbar navbar-expand-lg navbar-dark bg-dark fixed-top px-3" style="height:56px;">
-        {% if not exam_mode %}
-        <button class="btn btn-dark d-md-none me-2" onclick="document.querySelector('.sidebar').classList.toggle('show')" aria-label="切换菜单">
+        {# 2026-10-14 UI 审计 H1：考试态下也要渲染汉堡按钮 —— 原先 {% if not exam_mode %} 把它整个
+           吞掉，配合窄屏 .sidebar-float 的 display:none，手机上进入考试页后**没有任何菜单入口**。
+           渲染条件与下方侧栏保持一致（登录页 / welcome 页本来就没有侧栏，按钮跟着不渲染，
+           也就不会出现「点了没反应」）。点击行为由底部脚本统一处理（含遮罩 / ESC / 链接后收起）。 #}
+        {% if current_user.is_authenticated and request.blueprint != 'welcome' %}
+        <button type="button" class="btn btn-dark d-md-none me-2" id="sidebarToggle"
+                aria-label="切换菜单" aria-controls="appSidebar" aria-expanded="false">
             <i class="bi bi-list"></i>
         </button>
         {% endif %}
+        {# 2026-10-14 用户口径：品牌后面标出当前所在的工作台/模块，
+           一眼分清是 成绩工作台 / 教务工作台 / 我的工作台（其它模块显示各自分区名）。
+           取值见 app/utils/workbench_name.py（与下方侧栏同一套分区口径）；
+           登录页 / 首页 / 通知公告无归属 → 不渲染后缀。 #}
+        {% set brand_module = workbench_name() %}
         <a class="navbar-brand fw-bold" href="{{ url_for('welcome.index') if current_user.is_authenticated else '#' }}">
-            <i class="bi bi-building"></i> StuLink
+            <i class="bi bi-building"></i> StuLink{% if brand_module %}<span class="brand-module">{{ brand_module }}</span>{% endif %}
         </a>
         <div class="ms-auto d-flex align-items-center">
             {% if current_user.is_authenticated %}
-            {# 2026-10-13（v1.19.49.29）：主题切换入口 —— 与铃铛/用户菜单同级，
+            {# 2026-10-13（v1.19.49.35）：主题切换入口 —— 与铃铛/用户菜单同级，
                图标与文案由底部脚本按当前主题同步（☀ 切深色 / 🌙 切浅色）。 #}
             <button type="button" class="btn btn-sm btn-outline-light me-2" id="themeToggle"
                     style="border-radius:8px;" title="切换深色 / 浅色模式" aria-label="切换主题">
@@ -380,18 +422,18 @@
 
     {% if current_user.is_authenticated and request.blueprint != 'welcome' %}
     <!-- 侧边栏：按模块显示对应菜单；考试态套 .sidebar-float 变为独立悬浮卡片 -->
-    <div class="sidebar{% if exam_mode %} sidebar-float{% endif %}">
+    <div class="sidebar{% if exam_mode %} sidebar-float{% endif %}" id="appSidebar">
         <nav class="nav flex-column pt-2">
             {% if request.blueprint in ('dashboard','rooms','assignments','statistics') or request.endpoint == 'students.search' %}
             <a class="nav-link" href="{{ url_for('dashboard.index') }}">
                 <i class="bi bi-house"></i>宿舍管理
             </a>
             {% elif request.blueprint == 'grades' %}
-            {# v1.19.0：成绩模块落地页＝「历次考试」列表，不再单列「成绩管理」入口。
-               原入口 url_for('grades.index') 指向的是 /grades/analysis（分析页）而非考试列表，
-               且与下方同名小节标题重复；入口统一由下方「历次考试」承担。 #}
+            {# v1.19.0：成绩模块不单列「成绩管理」入口（与下方同名小节标题重复），
+               落地页由下方首项承担；2026-10-13 起该首项为「首页仪表盘」（/grades/），
+               其后 历次考试 / 个人成绩 / 基础配置。 #}
             {% elif request.blueprint in ('points', 'morality') %}
-            {# 2026-10-13（v1.19.49.29）：奖惩页（morality 蓝图）与积分同属德育，共用这一栏菜单 #}
+            {# 2026-10-13（v1.19.49.35）：奖惩页（morality 蓝图）与积分同属德育，共用这一栏菜单 #}
             <a class="nav-link" href="{{ url_for('points.index') }}">
                 <i class="bi bi-house"></i>德育管理
             </a>
@@ -411,7 +453,7 @@
             </a>
             {% endif %}
             {% if current_user.has_perm('morality.view') %}
-            {# 2026-10-13（v1.19.49.29）：德育奖惩信息（含附件）——与积分并列。
+            {# 2026-10-13（v1.19.49.35）：德育奖惩信息（含附件）——与积分并列。
                注意：必须与上面的 points 写权限条件**平级**，不能嵌在其中，
                否则仅授予 morality.view 的自定义身份看不到本入口。 #}
             <a class="nav-link {% if request.blueprint == 'morality' %}active{% endif %}"
@@ -504,10 +546,10 @@
                 <a class="efn-back" href="{{ url_for('grades.exams_list') }}">
                     <i class="bi bi-arrow-left"></i>返回考试列表
                 </a>
-                {# v1.19.49.29 侧栏头部只显示**考试名字**（此前显示「年级·性质·阶段·日期」，
+                {# v1.19.49.35 侧栏头部只显示**考试名字**（此前显示「年级·性质·阶段·日期」，
                    用户反馈"不是名字"）；名字过长时换行显示，不再截断/撑出横向滚动条。 #}
                 <div class="efn-title" title="{{ EN.exam.name or EN.exam.title_with_dimensions() }}">{{ EN.exam.name or EN.exam.title_with_dimensions() }}</div>
-                {# v1.19.49.29 考务页（affair 段）显示 7 个环节圆点，与考务向导页签一一对应；
+                {# v1.19.49.35 考务页（affair 段）显示 7 个环节圆点，与考务向导页签一一对应；
                    **只亮当前所处环节**（EN.affair_steps[].current），不是把前面的全点亮；
                    已完成但非当前的环节用浅绿勾，一眼能看出进度又不喧宾夺主。
                    非考务页仍用原来的 4 步（建考试/考务/导入/分析）。 #}
@@ -526,31 +568,48 @@
                         <span class="efn-count">{{ EN.steps | selectattr('done') | list | length }}/4 步</span>
                     {% endif %}
                 </div>
+                {# 2026-10-15 用户口径：任课教师 / 班主任也能进考试态（只读成绩分析）——
+                   考务 / 导入 / 划线是管理动作，按各自路由的真实门槛包裹，避免"看得见点不进"的
+                   403 死链（用户明确：考务安排、导入这些不给教师）。
+                   成绩单（考试概览）例外：教师也能看，但只给本班（仅任课映射的班不含总分口径），
+                   入口显隐走后端同一份判定 EN.can_scoresheet（app/utils/exam_nav.py）。 #}
+                {% if EN.can_scoresheet %}
                 <a class="efn-item {% if EN.section == 'overview' %}active{% endif %}" data-nav="detail"
                    href="{{ url_for('grades.exam_detail', exam_id=EN.exam_id) }}">考试概览·成绩单</a>
+                {% endif %}
+                {% if current_user.has_perm('grades.edit') %}
                 <a class="efn-item {% if EN.section == 'affair' %}active{% endif %}" data-nav="affair"
                    href="{{ url_for('grades.exam_affair_go', exam_id=EN.exam_id) }}">考务安排{% if not EN.steps[1].done %}<span class="efn-tag">待做</span>{% endif %}</a>
+                {% endif %}
+                {# 2026-10-13：原「成绩导入 + AI 智能导入」两个侧栏项合并为**一个入口** ——
+                   两种导入方式（标准模板导入 / AI 智能导入）改在导入页内切换，
+                   见 grades/_import_tabs.html（用户口径：侧栏只留一个入口，页面里再区分）。
+                   两个导入页的 EN.section 都是 'import'，所以这里始终正确高亮。 #}
+                {% if current_user.has_perm('grades.import') %}
                 <a class="efn-item {% if EN.section == 'import' %}active{% endif %}" data-nav="import"
                    href="{{ url_for('grades.exam_import', exam_id=EN.exam_id) }}">成绩导入{% if not EN.steps[2].done %}<span class="efn-tag">待做</span>{% endif %}</a>
-                {# 2026-10-13：AI 智能导入紧跟「成绩导入」—— 两者是同一种事（把成绩送进本场考试）的
-                   两个入口。原先放在侧栏最下方，中间隔着「划线分层」和整块「成绩分析」，
-                   导入时要往下找很久（用户反馈：放到成绩导入的下边或上边）。 #}
-                <a class="efn-item efn-ai {% if request.endpoint and request.endpoint.startswith('grades.exam_ai_import') %}active{% endif %}" data-nav="ai"
-                   href="{{ url_for('grades.exam_ai_import', exam_id=EN.exam_id) }}"><i class="bi bi-robot"></i>AI 智能导入</a>
-                {# v1.19.49.29：划线分层有自己的段位（'bands'），不再与「成绩导入」同时高亮 #}
+                {% endif %}
+                {# v1.19.49.35：划线分层有自己的段位（'bands'），不再与「成绩导入」同时高亮。
+                   2026-10-15 用户口径：划线分层向所有老师展示（只读），只有教务员 / 管理员 /
+                   年级长可改 → 入口门槛与页面一致取 grades.view（页面内按 grades.settings
+                   分只读 / 可编辑，写接口仍是 grades.settings）。 #}
+                {% if current_user.has_perm('grades.view') %}
                 <a class="efn-item {% if EN.section == 'bands' %}active{% endif %}" data-nav="bands"
                    href="{{ url_for('grades.bands_page', exam_id=EN.exam_id) }}">划线分层</a>
+                {% endif %}
                 {# v1.19.0 成绩分析：折叠组 —— 总览（全年级对比）/ 班级分析（班主任）/ 学科分析（任课教师）
                    + 分析类子模块（临界生对比 / 自由表 / 汇报区）。
                    入口按角色分层：总览与汇报区同门槛（管理员/校领导/年级长）；其余按 grades.view，
                    数据范围由后端 scope 过滤（班主任只见本班、任课教师只见任教班）。 #}
+                {# 2026-10-14 第四轮审计修复：身份判断统一走 active_group（当前身份），
+                   原读旧单值 permission_group —— 切换多身份后与实际权限不一致。 #}
                 {% if current_user.has_perm('grades.view') or current_user.role == 'admin' or
-                     (current_user.permission_group and current_user.permission_group.scope_type in ('school', 'grade')) %}
+                     (current_user.active_group and current_user.active_group.scope_type in ('school', 'grade')) %}
                 {% set _ana_ep = ('grades.index', 'grades.global_compare_page', 'grades.pivot_page',
                                   'grades.report_page', 'grades.exam_near_line') %}
-                {% set _is_lead = current_user.role == 'admin' or (current_user.permission_group and
-                     current_user.permission_group.scope_type in ('school', 'grade')) %}
-                {# v1.19.49.29：点「成绩分析」文字直接进入本场分析（领导=总览（全年级对比），
+                {% set _is_lead = current_user.role == 'admin' or (current_user.active_group and
+                     current_user.active_group.scope_type in ('school', 'grade')) %}
+                {# v1.19.49.35：点「成绩分析」文字直接进入本场分析（领导=总览（全年级对比），
                    其他角色=班级分析，避免非领导点总览被 403）；展开/收起改由右侧箭头负责。
                    2026-10-13：**不再随当前页面自动展开 / 折叠** —— 原先进分析页自动展开、
                    回到导入页又自动收起，每次导航侧栏高度都在变（用户反馈"画面跳动感"）。
@@ -560,7 +619,8 @@
                        href="{{ url_for('grades.global_compare_page', exam=EN.exam_id) if _is_lead
                                  else url_for('grades.index', exam=EN.exam_id, tab='class') }}">成绩分析</a>
                     <i class="bi bi-chevron-down" data-bs-toggle="collapse" href="#efnAnalysis"
-                       role="button" title="展开 / 收起" aria-expanded="true"></i>
+                       role="button" title="展开 / 收起" aria-expanded="true"
+                       aria-label="展开 / 收起 成绩分析" aria-controls="efnAnalysis"></i>
                 </div>
                 <div class="collapse show" id="efnAnalysis">
                     {% if _is_lead %}
@@ -576,6 +636,9 @@
                        href="{{ url_for('grades.exam_near_line', exam_id=EN.exam_id) }}">临界生对比</a>
                     <a class="efn-item ps-4 {% if request.endpoint == 'grades.pivot_page' %}active{% endif %}" data-nav="pivot"
                        href="{{ url_for('grades.pivot_page') }}?exam={{ EN.exam_id }}">成绩分析自由表</a>
+                    {# 2026-10-13：AI 分析工作台（一句话提问 → 工具取数 → HTML 报告；任务在后台跑，切页可续看） #}
+                    <a class="efn-item ps-4 {% if request.endpoint == 'grades.ai_studio' %}active{% endif %}" data-nav="ai"
+                       href="{{ url_for('grades.ai_studio') }}?exam={{ EN.exam_id }}">AI 分析</a>
                     {% endif %}
                     {% if _is_lead %}
                     <a class="efn-item ps-4 {% if request.endpoint == 'grades.report_page' %}active{% endif %}" data-nav="report"
@@ -610,20 +673,41 @@
             </div>
             {% else %}
             {# ---------- 全局态：精简菜单 ----------
-               不再重复「成绩管理」小节标题（与模块入口同名），首项「历次考试」即模块入口 #}
+               2026-10-13 用户口径：成绩模块落地页＝「首页仪表盘」（跨考试总览），
+               其后依次 历次考试 / 个人成绩 / 基础配置；
+               「个人成绩查询」按用户要求更名「个人成绩」（仅展示名，权限 key 不变）。 #}
+            <a class="nav-link {% if request.endpoint == 'grades.dashboard' %}active{% endif %}"
+               href="{{ url_for('grades.dashboard') }}">
+                <i class="bi bi-speedometer2"></i>首页仪表盘
+            </a>
+            {# 2026-10-15 用户口径：历次考试对任课教师 / 班主任开放（只读成绩分析），
+               门槛＝grades.view（与路由一致）。此前这项没有权限判断 ——
+               教师看得见菜单、点进去必 403（用户截图反馈的问题）。 #}
             <a class="nav-link {% if request.endpoint in ('grades.exams_list','grades.exam_new') %}active{% endif %}"
                href="{{ url_for('grades.exams_list') }}">
                 <i class="bi bi-journals"></i>历次考试
             </a>
+            {# 2026-10-15 用户口径：「申请调分可以」—— 教师/班主任提交成绩复核，
+               有改分权限的人在同一页面的「复核审批」里处理（入口按权限在页内显隐）。 #}
+            <a class="nav-link {% if request.endpoint in ('grades.reviews_page','grades.reviews_manage_page') %}active{% endif %}"
+               href="{{ url_for('grades.reviews_page') }}">
+                <i class="bi bi-clipboard-check"></i>成绩复核
+            </a>
+            {# 2026-10-13 用户口径：**成绩模块的全局侧栏不放「AI 分析」** ——
+               它是单场考试的能力（提问、取数、报告都围绕一场考试），入口只保留在
+               该场考试的「成绩分析」段里（见上方 efnAnalysis 内的 AI 分析项）。
+               全局态再放一个 = 同一功能两个入口，且会让人误以为它属于考试列表这一层。 #}
             {# v1.19.0 全局态只放“跨多次考试”的内容；分析类子模块已收进本场考试的分析段 #}
             {% if current_user.has_perm('grades.student_query') %}
-            <a class="nav-link {% if request.endpoint == 'grades.student_query_page' %}active{% endif %}"
+            {# 个人成绩分区＝两页（个人成绩/成绩证明），侧栏同一入口；两页都算本项 active。
+               2026-10-13：「成绩核验」页已删除（核验入口在证明台账每行的「核验」按钮） #}
+            <a class="nav-link {% if request.endpoint in ('grades.student_query_page','grades.cert_records_page') %}active{% endif %}"
                href="{{ url_for('grades.student_query_page') }}">
-                <i class="bi bi-person-vcard"></i>个人成绩查询
+                <i class="bi bi-person-vcard"></i>个人成绩
             </a>
             {% endif %}
-            {# v1.19.49.29 移除「分数修改记录」全局入口：它属于单场考试的数据，只在该场成绩单页右上角进入 #}
-            {# v1.19.49.29 移除「毕业生成绩（二期）」入口：暂无用处，后期单独做毕业生数据库 #}
+            {# v1.19.49.35 移除「分数修改记录」全局入口：它属于单场考试的数据，只在该场成绩单页右上角进入 #}
+            {# v1.19.49.35 移除「毕业生成绩（二期）」入口：暂无用处，后期单独做毕业生数据库 #}
 
             {# v1.19.0 基础配置：长期基础数据，不属于四段流程，默认折叠
                2026-10-13：同样**不再随当前页面自动展开**（进「选科维护」展开、离开又收起，
@@ -632,7 +716,8 @@
                                'grades.teachers_page', 'grades.teachers_import_page',
                                'grades.exam_rooms') %}
             <a class="nav-link d-flex align-items-center" data-bs-toggle="collapse" href="#navCfg"
-               role="button" aria-expanded="false" data-nav="cfg">
+               role="button" aria-expanded="false" data-nav="cfg"
+               aria-label="展开 / 收起 基础配置" aria-controls="navCfg">
                 <i class="bi bi-sliders"></i>基础配置
                 <i class="bi bi-chevron-down small ms-auto"></i>
             </a>
@@ -702,7 +787,8 @@
                （2026-10-12：全校总课表入口只留在学期卡片上，侧栏不再单独挂；跨学期对比已
                整体下线；教师/备课组/教研组课表合成**一个入口**放在教务工作台，页内 tab 互切）；
                查课 → 实时查课 / 查课统计；调课 → 申请 / 统一调课 / 审批 / 统计；
-               教师 → 教师名单 / 任课教师映射 / 备课组长；
+               教师 → 合并为**一个入口**（教师名单 / 任课教师映射 / 学科组长 页内 tab 互切，
+               2026-10-14 用户要求，见 app/templates/academic/_staff_tabs.html）；
                表单 → 表单管理 / 填写问卷 / 我的提交 / 教师业绩库。 #}
             {% if request.blueprint == 'academic' and current_user.has_perm('academic.view') %}
             {# 2026-10-10：菜单高亮用的当前端点变量命名为 aca_ep —— 不能用 ep！
@@ -717,8 +803,11 @@
                               'academic.schedule_teacher', 'academic.schedule_dates',
                               'academic.schedule_versions', 'academic.schedule_periods',
                               'academic.schedule_copy', 'academic.schedule_smart_import'] %}
-            {% set chk_eps = ['academic.inspection_live_schedule', 'academic.inspection_page'] %}
-            {% set tch_eps = ['academic.teachers_page', 'academic.teacher_links_page',
+            {% set chk_eps = ['academic.inspection_entry_page',
+                              'academic.inspection_live_schedule', 'academic.inspection_page'] %}
+            {% set tch_eps = ['academic.teachers_page', 'academic.teacher_edit',
+                              'academic.teacher_links_page',
+                              'academic.teacher_links_import_page',
                               'academic.subject_leaders'] %}
             {% set form_eps = ['academic.form_list', 'academic.form_fill_list',
                                'academic.form_my_submissions', 'academic.achievements_page'] %}
@@ -730,43 +819,35 @@
             {# 2026-10-10：原「晚自习值班」独立入口已删除 —— 晚自习在「全校总课表」里
                本就按节次列出并带值班教师，独立页面重复，不再保留。 #}
 
-            {# ── 课表 ── #}
-            <a class="nav-link d-flex align-items-center aca-group" data-bs-toggle="collapse"
-               href="#navAcaSch" role="button"
-               aria-expanded="{{ 'true' if aca_ep in sch_eps else 'false' }}">
+            {# ── 课表（2026-10-13 用户口径：侧栏入口收敛为一个）──
+               点「课表」直接进**学期课表**（当前学期卡片就在该页最前，卡片上可进全校总课表）；
+               「历史课表」入口移到学期课表页右上角（带归档数量徽标），侧栏不再展开子项。
+               沿革：2026-10-12 侧栏「全校总课表」入口已删（学期卡片上就有按钮）；
+               教师 / 备课组 / 教研组课表合成一个入口放在教务工作台（页内 tab 互切）；
+               「跨学期对比」随该功能整体下线。 #}
+            {% if current_user.has_perm('academic.timetable') %}
+            <a class="nav-link {% if aca_ep in sch_eps %}active{% endif %}"
+               href="{{ url_for('academic.schedule_manage') }}">
                 <i class="bi bi-calendar-range"></i>课表
-                <i class="bi bi-chevron-down small ms-auto aca-caret"></i>
             </a>
-            <div class="collapse {% if aca_ep in sch_eps %}show{% endif %}" id="navAcaSch">
-                {% if current_user.has_perm('academic.timetable') %}
-                <a class="nav-link ps-4 {% if aca_ep == 'academic.schedule_manage' %}active{% endif %}"
-                   href="{{ url_for('academic.schedule_manage') }}">
-                    <i class="bi bi-calendar-week"></i>学期课表
-                </a>
-                {% endif %}
-                {# 2026-10-12（用户要求）：侧栏「全校总课表」入口已删除 —— 学期管理卡片上
-                   就有「全校总课表」按钮，侧栏再挂一个是重复入口；原来只为侧栏服务、
-                   无 sid 的 /schedule/overview 跳转路由也随之下线。 #}
-                {# 2026-10-12（用户要求）：教师 / 备课组 / 教研组课表**合成一个入口**——
-                   统一入口放在教务工作台「课表」块的「课表查询」按钮，页内用 tab 互切，
-                   侧栏不再分挂三项（三个页面本身仍是查看类，academic.view）。 #}
-                {% if current_user.has_perm('academic.timetable') %}
-                <a class="nav-link ps-4 {% if aca_ep in ['academic.schedule_history', 'academic.schedule_history_detail'] %}active{% endif %}"
-                   href="{{ url_for('academic.schedule_history') }}">
-                    <i class="bi bi-clock-history"></i>历史课表
-                </a>
-                {# 2026-10-12（用户要求）：原「跨学期对比」侧栏入口已随该功能整体下线删除。 #}
-                {% endif %}
-            </div>
+            {% endif %}
 
             {# ── 查课 ── #}
             <a class="nav-link d-flex align-items-center aca-group" data-bs-toggle="collapse"
                href="#navAcaChk" role="button"
+               aria-label="展开 / 收起 查课" aria-controls="navAcaChk"
                aria-expanded="{{ 'true' if aca_ep in chk_eps else 'false' }}">
                 <i class="bi bi-clipboard2-check"></i>查课
                 <i class="bi bi-chevron-down small ms-auto aca-caret"></i>
             </a>
             <div class="collapse {% if aca_ep in chk_eps %}show{% endif %}" id="navAcaChk">
+                {# 2026-10-13：录入（单条 + 批量）从查课统计页拆出为独立页 #}
+                {% if current_user.has_perm('academic.edit') %}
+                <a class="nav-link ps-4 {% if aca_ep == 'academic.inspection_entry_page' %}active{% endif %}"
+                   href="{{ url_for('academic.inspection_entry_page') }}">
+                    <i class="bi bi-pencil-square"></i>查课录入
+                </a>
+                {% endif %}
                 <a class="nav-link ps-4 {% if aca_ep == 'academic.inspection_live_schedule' %}active{% endif %}"
                    href="{{ url_for('academic.inspection_live_schedule') }}">
                     <i class="bi bi-broadcast"></i>实时查课
@@ -783,6 +864,7 @@
             {% set swap_open = aca_ep.startswith('academic.swap') %}
             <a class="nav-link d-flex align-items-center aca-group" data-bs-toggle="collapse"
                href="#navAcaSwap" role="button"
+               aria-label="展开 / 收起 调课" aria-controls="navAcaSwap"
                aria-expanded="{{ 'true' if swap_open else 'false' }}">
                 <i class="bi bi-arrow-repeat"></i>调课
                 <i class="bi bi-chevron-down small ms-auto aca-caret"></i>
@@ -811,33 +893,18 @@
             </div>
             {% endif %}
 
-            {# ── 教师 ── #}
-            <a class="nav-link d-flex align-items-center aca-group" data-bs-toggle="collapse"
-               href="#navAcaTch" role="button"
-               aria-expanded="{{ 'true' if aca_ep in tch_eps else 'false' }}">
+            {# ── 教师（2026-10-14 用户要求：列表入口收敛为一个）──
+               教师名单 / 任课教师映射 / 学科组长三个页面合成一个入口，
+               进来后页内 tab 互切（各页 URL 仍独立，可收藏 / 后退）。 #}
+            <a class="nav-link {% if aca_ep in tch_eps %}active{% endif %}"
+               href="{{ url_for('academic.teachers_page') }}">
                 <i class="bi bi-person-vcard"></i>教师
-                <i class="bi bi-chevron-down small ms-auto aca-caret"></i>
             </a>
-            <div class="collapse {% if aca_ep in tch_eps %}show{% endif %}" id="navAcaTch">
-                <a class="nav-link ps-4 {% if aca_ep == 'academic.teachers_page' %}active{% endif %}"
-                   href="{{ url_for('academic.teachers_page') }}">
-                    <i class="bi bi-people"></i>教师名单
-                </a>
-                {% if current_user.has_perm('grades.teachers') %}
-                <a class="nav-link ps-4 {% if aca_ep == 'academic.teacher_links_page' %}active{% endif %}"
-                   href="{{ url_for('academic.teacher_links_page') }}">
-                    <i class="bi bi-person-workspace"></i>任课教师映射
-                </a>
-                {% endif %}
-                <a class="nav-link ps-4 {% if aca_ep == 'academic.subject_leaders' %}active{% endif %}"
-                   href="{{ url_for('academic.subject_leaders') }}">
-                    <i class="bi bi-people-fill"></i>备课组长
-                </a>
-            </div>
 
             {# ── 表单 ── #}
             <a class="nav-link d-flex align-items-center aca-group" data-bs-toggle="collapse"
                href="#navAcaForm" role="button"
+               aria-label="展开 / 收起 表单" aria-controls="navAcaForm"
                aria-expanded="{{ 'true' if aca_ep in form_eps else 'false' }}">
                 <i class="bi bi-ui-checks-grid"></i>表单
                 <i class="bi bi-chevron-down small ms-auto aca-caret"></i>
@@ -867,7 +934,7 @@
             {# ========= 教师工作台侧边栏（v1.9.3 全量子导航） ========= #}
             {# v1.17.0：个人工作菜单仅在教师工作台及其子页面显示，不在教务管理等其他模块出现 #}
             {% if request.blueprint in ('workbench', 'overview', 'attendance', 'records') %}
-            {# 2026-10-13（v1.19.49.29）：工作台已把这些功能都收进首页（班级概览 / 学生信息 /
+            {# 2026-10-13（v1.19.49.35）：工作台已把这些功能都收进首页（班级概览 / 学生信息 /
                 积分 / 考勤 / 我的成绩 / 我的课表 / 工作记录 均有入口），左侧只留工作台首页，
                 不再重复一套导航。功能页面本身都在，只是入口统一从工作台进。 #}
             <div class="nav-section">个人工作</div>
@@ -883,6 +950,8 @@
             {% endif %}
         </nav>
     </div>
+    {# 2026-10-14：移动端侧栏遮罩（点它关闭侧栏、ESC 关闭），由底部脚本控制 .show #}
+    <div class="sidebar-backdrop" id="sidebarBackdrop"></div>
     {% endif %}
 
     <!-- 主内容区 -->
@@ -903,8 +972,10 @@
         {% block content %}{% endblock %}
 
         {% if current_user.is_authenticated %}
-        <footer class="text-center text-muted small mt-4 pt-3 border-top">
-            StuLink v1.19.49.29（2026-10-14） · © 2026 @zkxxzf · 感谢协作开发 @Sakaay
+        {# 第七轮审计（U-M2）：补 .footer 类 —— 上面 @media print 的隐藏清单匹配的是
+           .footer，此前 footer 元素无此类，导致打印时多打一条版权/版本行。 #}
+        <footer class="footer text-center text-muted small mt-4 pt-3 border-top">
+            StuLink v1.19.49.35（2026-10-14） · © 2026 @zkxxzf · 感谢协作开发 @Sakaay
         </footer>
         {% endif %}
     </div>
@@ -917,7 +988,7 @@
     <script src="{{ su('js/jquery-3.7.1.min.js') }}"></script>
     <script src="{{ su('js/bootstrap.bundle.min.js') }}"></script>
     <script>
-        // ===== v1.19.49.29 主题切换（浅色 / 深色）=====
+        // ===== v1.19.49.35 主题切换（浅色 / 深色）=====
         // 存储键 stulink-theme；切换只改 <html data-bs-theme>，Bootstrap 5.3.3 与
         // theme.css 的变量表负责其余部分；head 内的脚本负责首屏不闪白。
         (function () {
@@ -972,6 +1043,60 @@
 
             syncUI(current());
             window.StuLinkTheme = { toggle: toggle, apply: apply, current: current };
+        })();
+    </script>
+    <script>
+        // ===== 2026-10-14 UI 审计 H1 / M6：移动端侧栏开关（含遮罩、ESC、链接后自动收起）=====
+        // 原先是内联 onclick="document.querySelector('.sidebar').classList.toggle('show')"：
+        // 没有遮罩、点侧栏外不收起、没有 ESC、也不同步 aria-expanded；
+        // 且考试态下按钮根本不渲染（H1）。这里统一到一处。
+        (function () {
+            var sb = document.getElementById('appSidebar');
+            var bd = document.getElementById('sidebarBackdrop');
+            var btn = document.getElementById('sidebarToggle');
+            if (!sb) { return; }
+
+            function isNarrow() {
+                return window.matchMedia('(max-width: 767.98px)').matches;
+            }
+
+            function setOpen(open) {
+                sb.classList.toggle('show', open);
+                if (bd) { bd.classList.toggle('show', open); }
+                if (btn) { btn.setAttribute('aria-expanded', open ? 'true' : 'false'); }
+                // 2026-10-14 第四轮审计（UI-22）：窄屏侧栏展开时锁背景滚动（防滚动穿透）；
+                // 桌面侧栏常驻（不靠 .show），正常不会走到 open=true 的分支
+                document.body.style.overflow = (open && isNarrow()) ? 'hidden' : '';
+            }
+
+            function close() { setOpen(false); }
+
+            if (btn) {
+                btn.addEventListener('click', function () {
+                    setOpen(!sb.classList.contains('show'));
+                });
+            }
+            if (bd) { bd.addEventListener('click', close); }
+
+            document.addEventListener('keydown', function (e) {
+                if ((e.key === 'Escape' || e.key === 'Esc') && sb.classList.contains('show')) { close(); }
+            });
+
+            // 窄屏点侧栏里的链接后自动收起：否则跳完页面菜单还盖在内容上
+            sb.addEventListener('click', function (e) {
+                if (isNarrow() && e.target.closest('a')) { close(); }
+            });
+
+            // 转回桌面宽度时收起，避免遮罩残留在宽屏上（桌面侧栏常驻，不需要 .show）
+            window.addEventListener('resize', function () {
+                if (!isNarrow() && sb.classList.contains('show')) { close(); }
+            });
+
+            window.StuLinkSidebar = {
+                open: function () { setOpen(true); },
+                close: close,
+                toggle: function () { setOpen(!sb.classList.contains('show')); }
+            };
         })();
     </script>
     <script>

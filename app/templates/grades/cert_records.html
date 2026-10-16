@@ -1,16 +1,21 @@
 {% extends "base.html" %}
-{% block title %}成绩证明记录 - 成绩管理{% endblock %}
+{% from "grades/_sq_tabs.html" import sq_tabs %}
+{% block title %}成绩证明 - 成绩管理{% endblock %}
 {% block content %}
-<div class="d-flex justify-content-between align-items-center mb-3">
-    <h5 class="mb-0"><i class="bi bi-card-checklist"></i> 成绩证明记录</h5>
-    <a href="{{ url_for('grades.student_query_page') }}" class="btn btn-sm btn-outline-secondary">
-        <i class="bi bi-arrow-left"></i> 返回成绩查询</a>
+{# 2026-10-13 用户口径：本页＝个人成绩分区的「成绩证明」页（证明台账 + 生成入口指引） #}
+{{ sq_tabs('cert') }}
+<div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
+    <span class="text-muted small">
+        证明在「个人成绩」页选中学生后生成；这里查看已出具的证明（打印 / 核验 / 作废）。
+    </span>
+    <a href="{{ url_for('grades.student_query_page') }}" class="btn btn-sm btn-outline-success">
+        <i class="bi bi-file-earmark-plus"></i> 去生成成绩证明</a>
 </div>
 
 {# 筛选条：关键字 / 状态 / 生成日期区间 #}
 <form class="row g-2 mb-3" method="get">
     <div class="col-auto">
-        <input name="kw" class="form-control form-control-sm" placeholder="姓名/学号/防伪码" value="{{ kw }}">
+        <input name="kw" class="form-control form-control-sm" placeholder="姓名/学号/防伪码" value="{{ kw }}" aria-label="姓名 / 学号 / 防伪码">
     </div>
     <div class="col-auto">
         <select name="status" class="form-select form-select-sm">
@@ -74,7 +79,7 @@
                     {% if not c.invalid and (current_user.role=='admin' or c.generated_by==current_user.id) %}
                     <button class="btn btn-sm btn-outline-danger py-0"
                             {# M-10：防伪码统一 |tojson #}
-                            onclick="invalidCert({{ c.code|tojson }})">作废</button>
+                            onclick='invalidCert({{ c.code|tojson }})'>作废</button>
                     {% endif %}
                 </td>
             </tr>

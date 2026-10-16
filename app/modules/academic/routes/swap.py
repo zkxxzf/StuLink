@@ -1,4 +1,4 @@
-# StuLink v1.19.49.29 2026-10-10
+# StuLink v1.19.49.35 2026-10-10
 # 教务 · 调课管理（重构版，基于 timetable.db）：
 #   个人调课 / 统一调课 / 审核 / 执行 / 撤销 / 详情 / 统计 / 联动 API
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
@@ -273,10 +273,12 @@ def swap_page():
 @login_required
 @perm_required('academic.swap')
 def swap_apply():
-    """个人调课申请：选原课程（可多节，各自指定目标时段）→ 填理由/日期/是否永久。
+    """个人调课申请：选原课程（可多节，各自指定目标空档）→ 填理由/日期/是否永久。
 
-    2026-10-12：一次可提交多节 —— 明细走 `items_json`（服务层 apply_swap_multi
+    2026-10-12：一次可提交多节 —— 明细走 `items_json`（服务层 apply_swap_batch
     共享 batch_id，整批一次审批/执行/撤销），同时兼容旧的单条字段。
+    目标格：空档（自习）直接调 / 有人则与那位老师**换上课时间**（2026-10-14 起
+    不再提供"连班级一起换"）。
     """
     sched = swap_service.get_active_schedule()
     if not sched:
@@ -288,8 +290,9 @@ def swap_apply():
         reason = (request.form.get('reason') or '').strip()
         is_permanent = _bool_flag(request.form.get('is_permanent'))
         new_room = (request.form.get('new_room') or '').strip()
-        # 2026-10-13（v1.19.49.29）：普通调课与「与人对调」合并 —— items 可带
-        # partner_entry_id（有 = 那格有人，和对调；没有 = 空档，直接调）。
+        # 2026-10-13（v1.19.49.35）：普通调课与「与人对调（只换上课时间）」合并 ——
+        # items 可带 partner_entry_id（有 = 那格有人，和他换时间；没有 = 空档，直接调）。
+        # 2026-10-14：删除"连班级一起换（换班上课）"，对调只换时间。
         items = _parse_json_items(request.form, required=('entry_id',))
         if not items:
             items = _parse_swap_items(request.form)   # 兼容旧的单条字段提交
@@ -340,20 +343,11 @@ def swap_apply():
     uid, name = _applicant()
     periods = swap_service.get_periods(sched.id)
     class_opts = _swap_class_options(sched.id)
-    # 2026-10-12 换课：我的课程清单（供换课表单选「我的课」；排除临时调课条目）
-    temp_ids = swap_service._temp_target_ids(sched.id)
-    my_entries = (ScheduleEntry.query
-                  .filter(ScheduleEntry.term_schedule_id == sched.id,
-                          ScheduleEntry.teacher_uid == uid,
-                          ScheduleEntry.is_deleted.is_(False))
-                  .order_by(ScheduleEntry.weekday, ScheduleEntry.period_number).all())
-    my_entries = [e.to_dict() for e in my_entries if e.id not in temp_ids]
     return render_template('academic/swap_apply.html',
                            schedule=sched, periods=periods, class_opts=class_opts,
                            weekdays=WEEKDAY_NAMES,
                            applicant_uid=uid, applicant_name=name,
                            today=date.today().isoformat(),
-                           my_entries=my_entries,
                            chain=swap_service.approval_chain())
 
 
@@ -381,7 +375,7 @@ def _commit_exchange_batch(items, uid, name, reason, is_permanent,
 @login_required
 @perm_required('academic.swap')
 def swap_cover():
-    """请人代课（v1.19.49.29）：我的课请别的老师来上，**支持批量**（多人代多节）。
+    """请人代课（v1.19.49.35）：我的课请别的老师来上，**支持批量**（多人代多节）。
 
     时间 / 班级都不变，只换授课人；每条记录各自等代课老师确认。
     """
@@ -516,7 +510,7 @@ def swap_bulk():
         is_permanent = _bool_flag(request.form.get('is_permanent'))
         swap_date = _parse_date(request.form.get('swap_date'))
 
-        # 2026-10-13（v1.19.49.29）：两种目标模式 —— 统一落到同一格 / 整体平移 N 节
+        # 2026-10-13（v1.19.49.35）：两种目标模式 —— 统一落到同一格 / 整体平移 N 节
         mode = (request.form.get('mode') or 'target').strip()
         period_offset = request.form.get('period_offset', type=int) if mode == 'offset' else None
         ok, msg, result = swap_service.bulk_apply_swap(
@@ -526,10 +520,18 @@ def swap_bulk():
             period_offset=period_offset)
         if not ok:
             db.session.rollback()
+            # 2026-10-14：整批被冲突拦下时回填勾选状态（本次条目 + 冲突条目），
+            # 页面会自动重新加载并勾回"除冲突外"的条目，几十上百条不必重勾。
             return render_template('academic/swap_bulk.html',
                                    schedule=sched, class_opts=class_opts, periods=periods,
                                    weekdays=WEEKDAY_NAMES,
                                    bulk_error=msg, bulk_conflicts=result.get('conflicts', []),
+                                   bulk_retry={
+                                       'ids': entry_ids,
+                                       'conflict_ids': [c.get('entry_id')
+                                                        for c in result.get('conflicts', [])
+                                                        if c.get('entry_id')],
+                                   },
                                    f_grade=request.form.get('grade', ''),
                                    f_class=request.form.get('class_name', ''),
                                    f_weekday=request.form.get('weekday', ''))
@@ -767,11 +769,17 @@ def swap_cancel(swap_id):
 @login_required
 @perm_required('academic.swap')
 def api_swap_entries():
-    """按 grade/class_name/weekday/teacher_uid 返回可选原课程条目（申请表单级联）。"""
+    """按 grade/class_name/weekday/teacher_uid 返回可选原课程条目（申请表单级联）。
+
+    2026-10-14（单双周）：带上 `swap_date` 时逐条标出 `week_ok`
+    （那天是否落在该节课的上课周内）与本课的 `week_range`，
+    前端据此给单双周课打标、并禁用"那天本来不上"的课。
+    """
     grade = (request.args.get('grade') or '').strip()
     class_name = (request.args.get('class_name') or '').strip()
     weekday = request.args.get('weekday', type=int)
     teacher_uid = (request.args.get('teacher_uid') or '').strip()
+    swap_date = _parse_date(request.args.get('swap_date'))
     sched = swap_service.get_active_schedule()
     entries = swap_service.query_entries(
         schedule_id=sched.id if sched else None, grade=grade or None,
@@ -783,14 +791,28 @@ def api_swap_entries():
               if entries else {})
     entries = [item for item in entries
                if item['id'] in models and allowed(models[item['id']])]
-    return jsonify({'success': True, 'message': 'ok', 'data': entries})
+    week = None
+    if swap_date and sched:
+        from app.modules.academic.services.schedule_common import week_range_covers
+        week = swap_service._week_of_date(sched.id, swap_date)
+        for item in entries:
+            item['week_label'] = swap_service.week_range_label(item.get('week_range'))
+            item['week_ok'] = (True if week is None
+                               else bool(week_range_covers(item.get('week_range'), week)))
+    return jsonify({'success': True, 'message': 'ok', 'data': entries, 'week': week,
+                    'week_text': swap_service.week_badge(week)})
 
 
 @bp.route('/api/swap/available-slots')
 @login_required
 @perm_required('academic.swap')
 def api_swap_available_slots():
-    """按 entry_id 返回该课程可用的目标时段（含节次名称/时间/冲突标记）。"""
+    """按 entry_id 返回该课程可用的目标时段（含节次名称/时间/冲突标记）。
+
+    2026-10-14（单双周）：带 `swap_date`（调到哪一天）/ `is_permanent` 时按周次
+    判定占用 —— 单周课与双周课占同一格**不算冲突**，那格对另一周次就是自习空档；
+    不传时按旧口径（忽略周次、保守标冲突）。
+    """
     entry_id = request.args.get('entry_id', type=int)
     if not entry_id:
         return jsonify({'success': False, 'message': '缺少 entry_id 参数'}), 400
@@ -799,11 +821,73 @@ def api_swap_available_slots():
         return jsonify({'success': False, 'message': '原课表条目不存在或已删除'}), 404
     if not swap_entry_authorizer(current_user)(entry):
         return jsonify({'success': False, 'message': '无权为该课程提交调课申请'}), 403
+    is_permanent = _bool_flag(request.args.get('is_permanent'))
+    swap_date = _parse_date(request.args.get('swap_date'))
+    week_range = week = None
+    if is_permanent:
+        week_range = entry.week_range
+    elif swap_date:
+        week = swap_service._week_of_date(entry.term_schedule_id, swap_date)
     slots = swap_service.get_available_slots(
         entry.term_schedule_id, entry.grade, entry.class_name, entry.teacher_uid,
-        exclude_entry_id=entry.id, include_all=True)
+        exclude_entry_id=entry.id, include_all=True,
+        week_range=week_range, week=week,
+        teaching_class=entry.teaching_class)
     return jsonify({'success': True, 'message': 'ok', 'data': {
         'entry': entry.to_dict(), 'slots': slots,
+        'week_range': entry.week_range,
+        'week_range_label': swap_service.week_range_label(entry.week_range),
+        'week': week,
+        'week_text': swap_service.week_badge(week),
+    }})
+
+
+@bp.route('/api/swap/bulk-check', methods=['POST'])
+@login_required
+@perm_required('academic.swap_bulk')
+def api_swap_bulk_check():
+    """统一调课：**一次性**返回所选条目的逐条目标检测结果（与提交同一口径）。
+
+    2026-10-14（用户报障"提交一整天的课，数据量大时直接崩"）：提交页原来对每一条
+    各发一次 `/api/swap/available-slots`——选一整天的课就是几百个并发请求，
+    浏览器排队几十秒、提交请求排在队尾，观感就是"卡死/崩掉"。现在改为一次请求，
+    且检测逻辑与 `bulk_apply_swap` 共用 `evaluate_bulk_targets`（含整批让位与
+    走班并行课口径），不会再出现"页面显示可用、提交却报冲突"。
+
+    表单：entry_ids（重复字段或逗号分隔）、new_weekday、new_period、period_offset、
+    mode、swap_date、is_permanent。
+    返回 {'data': {'rows': [{'entry_id','subject','class','weekday','period','ok','desc'}],
+                   'conflict_count': n, 'total': n}}
+    """
+    raw = request.form.getlist('entry_ids')
+    if len(raw) == 1 and ',' in raw[0]:
+        raw = raw[0].split(',')
+    entries, seen = [], set()
+    for x in raw:
+        x = str(x).strip()
+        if not x.isdigit():
+            continue
+        eid = int(x)
+        if eid in seen:
+            continue
+        seen.add(eid)
+        entry = db.session.get(ScheduleEntry, eid)
+        if entry and not entry.is_deleted:
+            entries.append(entry)
+
+    mode = (request.form.get('mode') or 'target').strip()
+    period_offset = (request.form.get('period_offset', type=int)
+                     if mode == 'offset' else None)
+    new_weekday = request.form.get('new_weekday', type=int)
+    new_period = request.form.get('new_period', type=int)
+    is_permanent = _bool_flag(request.form.get('is_permanent'))
+    swap_date = _parse_date(request.form.get('swap_date'))
+
+    _final, conflicts, rows = swap_service.evaluate_bulk_targets(
+        entries, new_weekday, new_period, swap_date,
+        is_permanent=is_permanent, period_offset=period_offset)
+    return jsonify({'success': True, 'message': 'ok', 'data': {
+        'rows': rows, 'total': len(entries), 'conflict_count': len(conflicts),
     }})
 
 

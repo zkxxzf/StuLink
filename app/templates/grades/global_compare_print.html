@@ -1,0 +1,199 @@
+{% extends "base.html" %}
+{% block title %}全局对比打印版{% endblock %}
+{% block extra_css_head %}
+<style>
+    /* ============ 全局对比 · 打印版（2026-10-16 用户要求）============
+       原页直接 window.print()：34 列硬塞纵向 A4，字被压到看不清。
+       本页：**横向 A4**、固定列精简（年级写一次／方向变分组行）、
+       每科＝「去差均分 + 每层一列（格内"人数上 / 率下"）」，表头跨页重复。 */
+    .gc-wrap { background: var(--sl-bg); padding: 14px 0 36px; }
+    .gc-bar {
+        /* 第七轮审计（U-H2）：站点 navbar 是 fixed-top（56px、z-index 200），
+           吸附在 0 会被整条盖住 → 让开 56px（与宿舍页既有写法一致） */
+        position: sticky; top: 56px; z-index: 10;
+        background: var(--sl-surface); border-bottom: 1px solid var(--sl-border);
+        padding: 8px 16px; display: flex; flex-wrap: wrap; gap: 8px; align-items: center;
+    }
+    .gc-bar .gc-title { font-weight: 700; font-size: 14px; }
+    .gc-bar .gc-sub { font-size: 12px; color: var(--sl-text-muted); }
+
+    /* 屏幕预览：横向 A4 纸 */
+    .gc-page {
+        width: 297mm; margin: 12px auto; padding: 6mm;
+        background: #fff; color: #000;
+        box-shadow: 0 2px 14px rgba(0, 0, 0, .18); border-radius: 2px;
+        box-sizing: border-box;
+    }
+    .gc-head { text-align: center; margin-bottom: 2mm; }
+    .gc-head h1 { font-size: 13pt; font-weight: 700; margin: 0 0 1mm; letter-spacing: .5px; }
+    .gc-head .gc-meta { font-size: 7.5pt; color: #333; }
+    .gc-logic { font-size: 6.4pt; color: #555; margin: 1mm 0 2mm; line-height: 1.4; }
+
+    table.gc-t {
+        width: 100%; border-collapse: collapse;
+        font-size: 5.6pt; line-height: 1.08; table-layout: fixed;
+    }
+    table.gc-t th, table.gc-t td {
+        border: .6pt solid #666; text-align: center; padding: .25mm .3mm;
+        overflow: hidden; white-space: nowrap;
+    }
+    table.gc-t th { background: #f2f2f2; font-weight: 700; }
+    table.gc-t th.grp { background: #e8e8e8; }
+    table.gc-t th.fix { background: #f7f7f7; }
+    /* 2026-10-16 用户口径（与页面同款）「分组的统计不用加粗，其他的都加粗。做区分」：
+       表体默认加粗，只有按选科组合拆出的明细行不加粗（下方 .rt 小字仍为 400） */
+    table.gc-t td { font-weight: 700; }
+    table.gc-t td.cls { font-weight: 600; text-align: left; padding-left: .8mm; }
+    table.gc-t td.lv { font-weight: 600; }
+    table.gc-t td.lv .rt { display: block; font-weight: 400; color: #444; }
+    table.gc-t td.avg { background: #fafafa; }
+    table.gc-t td.avg .rt { display: block; font-weight: 400; color: #555; font-size: 5pt; }
+    table.gc-t td.na { color: #999; font-weight: 400; }
+    table.gc-t td.sel { font-size: 5pt; text-align: left; padding-left: .8mm; }
+    /* 分组 / 小计 / 全年级 */
+    table.gc-t tr.grp td { background: #dfe6ee; font-weight: 700; text-align: left; padding-left: 1mm; }
+    table.gc-t tr.sub td { background: #f2f5f9; font-weight: 700; }
+    table.gc-t tr.grand td { background: #e2e8f0; font-weight: 700; }
+    /* 组合明细行（小计/总计/混组合班按选科组合拆出）：底色随父行、不加粗。
+       ⚠️ 必须放在 tr.sub/tr.grand **之后**并带 .combo 组合选择器：同为 (0,2,3) 特异性时
+       后声明者胜出，原先写在前面 → 小计的组合明细行被打成 700（第九轮审计 UI-U01，
+       页面 CSS 顺序相反所以是对的，打印版一度与页面分叉）。 */
+    table.gc-t tr.combo td,
+    table.gc-t tr.sub.combo td,
+    table.gc-t tr.grand.combo td { font-weight: 400; }
+    .gc-foot { font-size: 6.4pt; color: #666; text-align: right; margin-top: 1mm; }
+
+    /* 打印：横向 A4，表头跨页重复，行不被切断 */
+    @media print {
+        @page { size: A4 landscape; margin: 6mm; }
+        .gc-bar, .no-print { display: none !important; }
+        .gc-wrap { background: #fff; padding: 0; }
+        .gc-page { width: auto; margin: 0; padding: 0; box-shadow: none; border-radius: 0; }
+        table.gc-t thead { display: table-header-group; }
+        table.gc-t tr { break-inside: avoid; page-break-inside: avoid; }
+        table.gc-t th, table.gc-t tr.grp td, table.gc-t tr.sub td, table.gc-t tr.grand td {
+            -webkit-print-color-adjust: exact; print-color-adjust: exact;
+        }
+    }
+</style>
+{% endblock %}
+{% block content %}
+{% set NC_FIX = 4 %}
+{% set NLV = (lines | length) %}
+{% set NC = NC_FIX + (gc.subjects | length) * (1 + NLV) %}
+
+{# 一个数据行：固定列 + 每科「去差均分 + 各层（人数上/率下）」 #}
+{% macro row_tds(r) %}
+    <td class="cls">{{ r.class_name }}</td>
+    <td>{{ r.count }}</td>
+    <td class="sel">{% for s in r.selections %}{{ s.name }}{% if not loop.last %} {% endif %}{% endfor %}</td>
+    <td>{{ r.class_type }}</td>
+    {% for s in gc.subjects %}
+    {% set c = (r.cells or {}).get(s) or {} %}
+    {# 2026-10-16：去差均分下方括号＝全体均分（不去差、不剔人）；一致时不重复显示。
+       跨组合的合计行（hide_avg）不给均分，只给右侧各线列的上线率。 #}
+    <td class="avg{% if r.get('hide_avg') %} na{% endif %}">{% if r.get('hide_avg') %}—
+        {%- else %}{{ c.get('trim_avg') if c.get('trim_avg') is not none else '—' }}
+        {%- set _ca = c.get('avg') -%}
+        {%- if _ca is not none and _ca != c.get('trim_avg') %}<span class="rt">({{ _ca }})</span>{% endif %}{% endif %}</td>
+    {% for L in lines %}
+    {% set ln = (c.get('lines') or {}).get(L) %}
+    {% if ln %}
+    <td class="lv">{{ ln.get('n') }}<span class="rt">{{ ln.get('rate') }}%</span></td>
+    {% else %}
+    <td class="na">—</td>
+    {% endif %}
+    {% endfor %}
+    {% endfor %}
+{% endmacro %}
+
+<div class="gc-wrap">
+    <div class="gc-bar">
+        <span class="gc-title"><i class="bi bi-printer"></i> 全局对比 · 打印版</span>
+        <span class="gc-sub">{{ gc.exam.grade }}（{{ gc.exam.grade_label }}）· {{ gc.exam.name }}
+            · {{ gc.exam.date }} · 共 {{ gc.subject_count }} 科</span>
+        <span class="ms-auto"></span>
+        <button class="btn btn-sm btn-primary" type="button" onclick="window.print()">
+            <i class="bi bi-printer"></i> 打印 / 存 PDF
+        </button>
+        <a class="btn btn-sm btn-outline-secondary"
+           href="{{ url_for('grades.global_compare_page') }}?exam={{ exam_id }}">返回全局对比</a>
+    </div>
+
+    <div class="gc-page">
+        <div class="gc-head">
+            <h1>{{ gc.exam.grade }}（{{ gc.exam.grade_label }}）成绩全局对比表</h1>
+            <div class="gc-meta">考试：{{ gc.exam.name }}　·　{{ gc.exam.date }}　·　
+                共 {{ gc.subject_count }} 科　·　{{ lines | join(' / ') }}</div>
+        </div>
+        <div class="gc-logic">
+            口径：去差均分＝按班型剔除总分末尾 N 人后均分（下方括号＝全体均分，不去差）；混选科组合的合计行不给均分（灰色「—」），看其下按组合明细行；
+            每科每层两行＝上线人数（上）／上线率（下）；上线按**各生自身选科组合**的同名单科线逐生判定（物理/历史方向各自取线）；组合明细行不加粗。
+            层数超过 5 层时只印前 5 层（与页面勾选一致）。单位：分。
+        </div>
+
+        <table class="gc-t">
+            {# 第七轮审计（U-H1）：列宽由固定 mm 改**百分比**自适应 —— 原固定宽度
+               43mm + 每科(8mm + 层数×7.5mm)，10 科 × 3 层 = 348mm，超出 A4 横向
+               可打印宽度（297−2×6=285mm）63mm，右侧科目被裁掉。百分比随科目数缩放。 #}
+            {% set NSUB = gc.subjects | length %}
+            {% set GRP_W = (85.0 / NSUB) if NSUB else 85.0 %}
+            {% set UNIT_W = 8.0 + 7.5 * NLV %}
+            {% set AVG_W = (GRP_W * 8.0 / UNIT_W) if UNIT_W else GRP_W %}
+            {% set LV_W = (GRP_W * 7.5 / UNIT_W) if UNIT_W else 0 %}
+            <colgroup>
+                <col style="width:4.2%"><col style="width:2.4%"><col style="width:4.5%"><col style="width:3.9%">
+                {% for s in gc.subjects %}
+                <col style="width:{{ AVG_W | round(2) }}%">{% for L in lines %}<col style="width:{{ LV_W | round(2) }}%">{% endfor %}
+                {% endfor %}
+            </colgroup>
+            <thead>
+                <tr>
+                    <th class="fix" rowspan="2">班级</th>
+                    <th class="fix" rowspan="2">人数</th>
+                    <th class="fix" rowspan="2">组合</th>
+                    <th class="fix" rowspan="2">属性</th>
+                    {% for s in gc.subjects %}
+                    <th class="grp" colspan="{{ 1 + NLV }}">{{ s }}</th>
+                    {% endfor %}
+                </tr>
+                <tr>
+                    {% for s in gc.subjects %}
+                    <th>去差<br>均分</th>
+                    {% for L in lines %}
+                    <th>{{ L | replace('线', '') }}</th>
+                    {% endfor %}
+                    {% endfor %}
+                </tr>
+            </thead>
+            <tbody>
+                {% for g in gc.groups %}
+                {% if gc.groups | length > 1 %}
+                <tr class="grp"><td colspan="{{ NC }}">{{ g.label }}</td></tr>
+                {% endif %}
+                {% for r in g.rows %}
+                <tr{% if r.get('is_combo') %} class="combo"{% endif %}>{{ row_tds(r) }}</tr>
+                {% endfor %}
+                {% if g.subtotal %}
+                <tr class="sub">{{ row_tds(g.subtotal) }}</tr>
+                {% for r in g.subtotal.combo_rows or [] %}
+                <tr class="sub combo">{{ row_tds(r) }}</tr>
+                {% endfor %}
+                {% endif %}
+                {% endfor %}
+                {% if gc.grand %}
+                <tr class="grand">{{ row_tds(gc.grand) }}</tr>
+                {% for r in gc.grand.combo_rows or [] %}
+                <tr class="grand combo">{{ row_tds(r) }}</tr>
+                {% endfor %}
+                {% endif %}
+            </tbody>
+        </table>
+
+        {% if gc.partial %}
+        <div class="gc-logic">⚠️ 本场为分批导入，缺科的部分以已导入科目合计，口径不完整。</div>
+        {% endif %}
+        <div class="gc-foot">生成时间：{{ now }}　·　StuLink 成绩分析</div>
+    </div>
+</div>
+{% endblock %}

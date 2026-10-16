@@ -94,33 +94,56 @@ def _install_on_handlers():
         _wrap_formatter(h)
 
 
-def _formatter_style(fmt):
-    """从 Formatter 实例推断 style（'%' / '{' / '$'）。
+# 风格字符 ← Formatter 内部 style 对象。**注意**：logging.Formatter 没有公开的
+# `.style` 属性（风格存于 `_style`，格式串存于 `_fmt`）。2026-10-13 现场：这里曾写成
+# `fmt.style`，于是"handler 已经带了普通 Formatter"时（MCP 进程先调
+# logging.basicConfig 建了标准 Formatter，之后 create_app 才装脱敏）抛
+#     AttributeError: 'Formatter' object has no attribute 'style'
+# 把异常抛到 build_asgi_app → 整个 MCP 服务起不来（[MCP] 启动失败：…）。
+# 2026-10-14（v1.19.49.35 合并）复核：uvicorn 预配 handler 的 MCP 场景同样复现，
+# 包装时把 fmt/datefmt/style/defaults 一起复用（SR-16 回归）。
 
-    2026-10-14 修复：`logging.Formatter` **没有公开的** `.style` 属性，样式对象只存在
-    私有属性 `_style` 上。原代码直接读 `fmt.style`，在 **raw handler 已有 formatter**
-    的场景（如 MCP 服务经 uvicorn 启动，日志 handler 由 uvicorn 预先配置）下会抛
-    `'Formatter' object has no attribute 'style'` 导致启动失败。这里按 `_style` 的
-    类名反推，取不到时保守回落 '%'。
+
+def _formatter_style(fmt):
+    """还原 formatter 的格式风格字符（'%' / '{' / '$'）；取不到按 '%' 处理。
+
+    按 `_style` 实例的**类名**反推 —— `logging.Formatter` **没有公开的** `.style`
+    属性（样式对象只存在私有属性 `_style` 上），直接读 `fmt.style` 会在"handler 已有
+    formatter"的场景（uvicorn / basicConfig 预配）抛 AttributeError 致启动失败。
+
+    注意**不能**用 isinstance 判 PercentStyle：`StrFormatStyle` / `StringTemplateStyle`
+    都是它的子类，isinstance 会把 '{' / '$' 一律误判成 '%'（2026-10-14 SR-16 回归实测）。
     """
     style_obj = getattr(fmt, '_style', None)
     return {'StrFormatStyle': '{', 'StringTemplateStyle': '$'}.get(
         type(style_obj).__name__, '%')
 
 
+# 旧名兼容（M-4 回归按源码文本校验 `_fmt_style`）
+_fmt_style = _formatter_style
+
+
 def _wrap_formatter(handler):
-    """把 handler 的 formatter 换成 MaskingFormatter（幂等，保留原有格式串）。"""
-    fmt = handler.formatter
-    if isinstance(fmt, MaskingFormatter):
-        return
-    if fmt is None:
-        handler.setFormatter(MaskingFormatter())
-        return
-    # 复用原有 fmt/datefmt/style/defaults，只把类换成带脱敏的子类
-    handler.setFormatter(MaskingFormatter(
-        fmt._fmt, fmt.datefmt, _formatter_style(fmt),
-        getattr(fmt, 'validate', True),
-        defaults=getattr(fmt, '_defaults', None)))
+    """把 handler 的 formatter 换成 MaskingFormatter（幂等，保留原有格式串）。
+
+    整体 try/except：脱敏是**兜底**能力，绝不能因为它的内部细节把应用/服务卡在启动
+    阶段（2026-10-13 MCP 起不来即此因）；包装失败就退回未包装的 formatter —— 该条
+    记录仍会被 LogRecord 工厂那一层掩码，只是异常栈少一道保险。
+    """
+    try:
+        fmt = handler.formatter
+        if isinstance(fmt, MaskingFormatter):
+            return
+        if fmt is None:
+            handler.setFormatter(MaskingFormatter())
+            return
+        # 复用原有 fmt/datefmt/style/defaults，只把类换成带脱敏的子类
+        handler.setFormatter(MaskingFormatter(
+            fmt._fmt, fmt.datefmt, _formatter_style(fmt),
+            getattr(fmt, 'validate', True),
+            defaults=getattr(fmt, '_defaults', None)))
+    except Exception:  # noqa: BLE001  见上：脱敏异常不阻塞启动
+        pass
 
 
 def install_masking_factory():

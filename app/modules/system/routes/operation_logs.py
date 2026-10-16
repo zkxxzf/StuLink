@@ -16,6 +16,30 @@ logger = logging.getLogger(__name__)
 
 bp = Blueprint('operation_logs', __name__, url_prefix='/operation-logs')
 
+# PERF-07：操作日志页的三个筛选下拉（action / module / target_type）原先每次翻页
+# 都各做一次全表 DISTINCT 扫描。这三个值域极小，且只有新增模块或新操作类型时才会变，
+# 缓存 600s 完全够；缓存的是纯字符串列表，不涉及 ORM 对象（避免 detach/expire 问题）。
+_LOG_ENUMS_KEY = 'oplog_filter_enums_v1'
+_LOG_ENUMS_TTL = 600
+
+
+def _cached_log_enums():
+    """日志筛选下拉的取值枚举（带进程内缓存，返回 3 个 sorted list）"""
+    from app.utils.cache import cache
+    cached_value = cache.get(_LOG_ENUMS_KEY)
+    if cached_value is not None:
+        return cached_value
+    actions = sorted({a[0] for a in
+                      db.session.query(OperationLog.action).distinct().all() if a[0]})
+    modules = sorted({m[0] for m in
+                      db.session.query(OperationLog.module).distinct().all() if m[0]})
+    target_types = sorted({t[0] for t in
+                           db.session.query(OperationLog.target_type).distinct().all()
+                           if t[0]})
+    enums = (actions, modules, target_types)
+    cache.set(_LOG_ENUMS_KEY, enums, timeout=_LOG_ENUMS_TTL)
+    return enums
+
 
 @bp.route('/')
 @perm_required('system.users')   # M-1：审计日志不再对全体登录用户开放
@@ -60,13 +84,9 @@ def list_logs():
 
     # 审计加固：module 下拉不再硬编码 4 个值（academic/workbench/portrait/auth
     # 等模块的日志此前在页面上筛不出来），改为按库中实际值动态列出。
-    actions = db.session.query(OperationLog.action).distinct().all()
-    actions = sorted({a[0] for a in actions if a[0]})
-    modules = db.session.query(OperationLog.module).distinct().all()
-    modules = sorted({m[0] for m in modules if m[0]})
-
-    target_types = db.session.query(OperationLog.target_type).distinct().all()
-    target_types = [t[0] for t in target_types if t[0]]
+    # PERF-07：三个值域的 DISTINCT 都是全表扫描，原先每次翻页都重算一遍；
+    # 值域极小且只有新增模块/操作类型才会变，缓存 600s 足够（见 _cached_log_enums）。
+    actions, modules, target_types = _cached_log_enums()
 
     logs_with_detail = []
     for log in pagination.items:

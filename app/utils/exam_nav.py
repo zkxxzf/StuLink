@@ -22,7 +22,7 @@ SECTION_LABELS = {
     'analysis': '成绩分析',
 }
 
-# v1.19.49.29 考务向导 7 个环节（/grades/affairs/<aid> 的页签 #t1~#t7）。
+# v1.19.49.35 考务向导 7 个环节（/grades/affairs/<aid> 的页签 #t1~#t7）。
 # 侧栏悬浮栏原先只画 4 个圆点（建考试/考务/导入/分析），与考务页真实的 7 个环节对不上；
 # 这里给出 7 环节的标签与完成判定，供模板渲染「当前所处环节」高亮 —— 只亮当前这一步，
 # 不是把前面的全部点亮（用户口径 2026-10-12）。
@@ -40,7 +40,7 @@ AFFAIR_STEPS = (
 _EP_SECTION = (
     ('grades.exam_ai_import', 'import'),
     ('grades.exam_import', 'import'),
-    # v1.19.49.29 划线分层单独一段：原先归到 'import' 导致侧栏「成绩导入」「划线分层」同时高亮
+    # v1.19.49.35 划线分层单独一段：原先归到 'import' 导致侧栏「成绩导入」「划线分层」同时高亮
     ('grades.bands_page', 'bands'),
     ('grades.exam_affair_go', 'affair'),
     ('grades.affair', 'affair'),
@@ -50,7 +50,7 @@ _EP_SECTION = (
     ('grades.score_update', 'overview'),
     ('grades.score_delete', 'overview'),
     ('grades.exam_recalc', 'overview'),
-    ('grades.exam_rename', 'overview'),
+    ('grades.exam_update', 'overview'),
     ('grades.exam_delete', 'overview'),
     ('grades.index', 'analysis'),
     ('grades.pivot_page', 'analysis'),
@@ -87,6 +87,27 @@ def exam_nav():
     return val
 
 
+def _can_open_scoresheet(exam):
+    """侧栏「考试概览·成绩单」入口是否该显示。
+
+    与 `app/modules/grades/routes/exams.py::_scoresheet_scope` 同一份判断
+    （`services/scoresheet.py`），避免"看得见点不进"的 403 死链。
+    2026-10-15 用户口径：成绩单是学生成绩，任课教师/班主任也能看，但只看本班
+    （仅任课映射的班不含总分口径，不计入）。任何异常一律按"不显示"处理。
+    """
+    try:
+        from flask_login import current_user
+        if not getattr(current_user, 'is_authenticated', False):
+            return False
+        if current_user.has_perm('grades.edit'):        # 有编辑权的人本来就能看全量
+            return True
+        from app.modules.grades.services import scoresheet
+        _allowed, classes = scoresheet.visible(current_user, exam)
+        return bool(classes)
+    except Exception:                                   # noqa: BLE001  导航判定绝不影响渲染
+        return False
+
+
 def _resolve():
     from app.models.grades import Exam, ExamAffair, ExamBand
     ep = request.endpoint or ''
@@ -110,7 +131,7 @@ def _resolve():
     if exam is None:
         return None
     if affair is None:
-        # v1.19.49.29：**任何**进入考试态的页面都要取本场考务批次。
+        # v1.19.49.35：**任何**进入考试态的页面都要取本场考务批次。
         # 此前只在 sec == 'affair' 时查，导致成绩导入/划线分层/分数修改记录等页面里
         # affair 恒为 None → 侧栏「考务安排」永远挂「待做」、进度显示 3/4 步，
         # 而本场考务其实早已编排完成（有考场·座号·考号）。
@@ -126,7 +147,7 @@ def _resolve():
         {'label': '成绩分析', 'done': banded, 'key': 'analysis'},
     ]
 
-    # v1.19.49.29 考务向导 7 环节：完成状态 + 当前所处环节（由 URL hash / 查询参数决定）。
+    # v1.19.49.35 考务向导 7 环节：完成状态 + 当前所处环节（由 URL hash / 查询参数决定）。
     # 仅考务页（affair 段）需要，其他页为 []（侧栏仍按 4 步渲染）。
     affair_steps = []
     if sec == 'affair' and affair is not None:
@@ -164,4 +185,5 @@ def _resolve():
     return {'exam': exam, 'exam_id': exam.id, 'section': sec or 'overview',
             'affair_id': (affair.id if affair else None),
             'affair': affair, 'steps': steps,
-            'affair_steps': affair_steps}
+            'affair_steps': affair_steps,
+            'can_scoresheet': _can_open_scoresheet(exam)}

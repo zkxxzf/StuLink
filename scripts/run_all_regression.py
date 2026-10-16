@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""StuLink 一键回归：3 项自检 + 4 套回归（2026-10-13 全面审计 P2 产出）。
+"""StuLink 一键回归：4 项自检 + 4 套回归（2026-10-13 全面审计 P2 产出）。
 
 用法（在项目根目录）：
     py -3.12 scripts\\run_all_regression.py             # 自检 + 4 套回归
@@ -23,12 +23,29 @@ SELF_CHECKS = [
     ('安全模式扫描', ['scripts/scan_security_patterns.py']),
     ('列结构自检', ['scripts/check_columns.py']),
     ('索引自检', ['scripts/check_indexes.py']),
+    # 2026-10-14 第三轮审计：手写 JS 的 ES2020+ 语法（旧微信 X5 会整段 ScriptError）
+    # 曾被修过又回归（portrait/detail.html），固化成第 4 项自检。
+    ('前端兼容自检', ['scripts/check_frontend_compat.py']),
 ]
 SUITES = [
     ('教务回归', ['tests/academic_regression.py']),
     ('安全回归', ['tests/sec_regression.py']),
     ('宿舍回归', ['tests/dormitory_regression.py']),
     ('班级范围回归', ['tests/class_scope_regression.py']),
+]
+# 2026-10-14 第四轮审计（CONS-07）：把 smoke_*.py 挂进一键回归 —— 新功能（监考表导出 /
+# AI 任务 / 方案中心 / 考务编排 / 划线分层）此前只在单独脚本里，改坏无人发现。
+# 8 个脚本全部使用临时目录沙箱（不触碰 data/），实测合计约 30s。
+# smoke_points_http.py 依赖常驻 127.0.0.1:5000 服务，保持手动执行。
+SMOKES = [
+    ('冒烟·成绩端到端', ['scripts/smoke_grades.py']),
+    ('冒烟·教务端到端', ['scripts/smoke_academic.py']),
+    ('冒烟·权限体系', ['scripts/smoke_permissions.py']),
+    ('冒烟·考务监考', ['scripts/smoke_invig.py']),
+    ('冒烟·考务分层分配', ['scripts/smoke_affair_arrange.py']),
+    ('冒烟·AI 识图排场次', ['scripts/smoke_ai_schedule.py']),
+    ('冒烟·全校对比口径', ['scripts/smoke_global_compare.py']),
+    ('冒烟·学生宿舍视图', ['scripts/smoke_student_dorm_view.py']),
 ]
 # 结果行样例：「===== 教务回归完成：通过 505 / 失败 0 =====」「结果：PASS 8 / FAIL 0」
 _PATTERNS = (
@@ -98,6 +115,9 @@ def main():
         results.append(_run(title, argv))
     if not quick:
         for title, argv in SUITES:
+            results.append(_run(title, argv))
+        # 2026-10-14 第四轮审计（CONS-07）：smoke 端到端（临时库沙箱，约 30s）
+        for title, argv in SMOKES:
             results.append(_run(title, argv))
         if with_mcp:
             if os.path.exists(MCP_PY):

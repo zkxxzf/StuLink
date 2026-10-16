@@ -1,4 +1,4 @@
-# StuLink v1.19.49.29 2026-10-10
+# StuLink v1.19.49.35 2026-10-10
 # 考务管理：完整考务流程（对应 Excel 宏工作簿 2025考场学生考号与考场信息编排v1.2）
 #   步骤：① 学生名单（学生信息表） → ② 考场设置（考场信息表）
 #        → ③ 编排与考号生成（三种模式，镜像宏 编排考场考号2）
@@ -22,15 +22,17 @@ from app.models import Student
 from app.models.grades import (ExamAffair, AffairRoom, AffairRoomLib, AffairStudent,
                                Exam, AffairTeacher, AffairSchedule,
                                AffairInvigilator, AffairInvigilation,
+                               ExamRoomGroup, ExamRoomGroupMap,
                                SUBJECTS)  # 2026-10-13：时间表科目下拉用科目字典
-#   v1.19.49.29 加环节④⑤⑥：任课核对 / 考试时间表 / 监考编排
+#   v1.19.49.35 加 ExamRoomGroup/Map：步骤②「考场模板」直接复用「考场维护」页的分组
+#   v1.19.49.35 加环节④⑤⑥：任课核对 / 考试时间表 / 监考编排
 from app.modules.grades import bp
 from app.utils.decorators import perm_required
 from app.utils.helpers import log_operation, get_dict_values
 from app.modules.grades.utils import is_teaching_class
 from app.modules.grades.services.exam_guard import assert_grade_visible
 from app.utils.text_guard import (sanitize_label, sanitize_prefix,
-                                  safe_download_name)
+                                  safe_download_name, pad2)
 from app.utils.upload_guard import validate_upload   # L-8：导入文件类型校验
 from app.utils.export_helpers import xl_row   # M-4：公式注入防护
 
@@ -55,15 +57,49 @@ def _get_affair_checked(aid):
     return affair
 
 
-def _pad2(v):
-    s = str(v)
-    return s.zfill(2) if s.isdigit() else s
+# 2026-10-13：编号补零统一走 app.utils.text_guard.pad2（考场号 / 座号两位），
+# 本文件内的导出代码继续用 _pad2 这个名字，避免大范围改名。
+_pad2 = pad2
 
 
 # v1.12.2 考场编号规范：纯数字编号统一补零为两位（01、02…），保证排序与考号拼接一致
 def _norm_room_no(no):
     s = str(no).strip()
     return s.zfill(2) if s.isdigit() else s
+
+
+def _int_or_none(v):
+    """宽松取整（表单里的可选 id / 逗号列表元素），非法值返回 None"""
+    try:
+        return int(str(v).strip())
+    except (TypeError, ValueError):
+        return None
+
+
+def _room_next_no(exist_rooms, extra=()):
+    """下一个可用考场编号（int）：**从 1 起取最小空号**。
+
+    2026-10-14 用户口径：原实现是「现有最大数字 + 1」且空号不回收 —— 反复
+    「一键带入 / 移出」会让编号越滚越大（某批次被带成 29~43）。改为补最小空号，
+    编号始终从 01 起连续；移出中间的考场后，下次带入会补回该空号。
+    `extra`：本次批量新增中已占用的编号，避免同一批内撞号。
+    """
+    used = set()
+    for r in exist_rooms:
+        s = (r.room_no or '').strip()
+        if s.isdigit():
+            used.add(int(s))
+    used.update(int(x) for x in extra)
+    n = 1
+    while n in used:
+        n += 1
+    return n
+
+
+def _room_sort_key(r):
+    """考场排序键：纯数字编号按数值排前，其余（自定义编号）按字符串排后"""
+    s = (r.room_no or '').strip()
+    return (0, int(s), '') if s.isdigit() else (1, 0, s)
 
 
 def _inherit_rooms_from_prev(affair):
@@ -105,11 +141,11 @@ def _grade_options():
 
 
 def delete_affair_cascade(aid):
-    """v1.19.49.29：删除考务批次并级联清理其考场与学生名单。
+    """v1.19.49.35：删除考务批次并级联清理其考场与学生名单。
 
     AffairRoom / AffairStudent 的 affair_id 无外键约束（多库快照式设计，不建跨表外键），
     直接 `db.session.delete(affair)` 会留下孤儿行；此处显式按 affair_id 批量删除。
-    v1.19.49.29：一并清理环节④⑤⑥ 的任课核对 / 考试时间表 / 其他监考员 / 监考安排。
+    v1.19.49.35：一并清理环节④⑤⑥ 的任课核对 / 考试时间表 / 其他监考员 / 监考安排。
     调用方负责 commit。返回 (考场数, 名单数)。
     """
     n_rooms = AffairRoom.query.filter_by(affair_id=aid).delete()
@@ -127,7 +163,7 @@ def delete_affair_cascade(aid):
 @login_required
 @perm_required('grades.edit')
 def affairs_list():
-    """v1.17.0 考试/考务合并收尾（v1.19.49.29）：考务批次列表已并入考试管理，
+    """v1.17.0 考试/考务合并收尾（v1.19.49.35）：考务批次列表已并入考试管理，
     本页保留为兼容入口（旧书签/外链），统一重定向到考试列表；
     未关联考试的孤儿批次由考试列表底部“待处理的考务批次”区兑底展示。"""
     return redirect(url_for('grades.exams_list'))
@@ -258,7 +294,7 @@ def exam_affair_go(exam_id):
 def affair_delete(aid):
     affair = _get_affair_checked(aid)
     name = affair.name
-    # v1.19.49.29：级联清理考场与名单（无外键约束，不显式删会留孤儿行）
+    # v1.19.49.35：级联清理考场与名单（无外键约束，不显式删会留孤儿行）
     n_rooms, n_stus = delete_affair_cascade(aid)
     db.session.commit()
     log_operation(current_user, '删除', '考务批次', aid,
@@ -276,7 +312,7 @@ def _class_sort_key(name):
 
 
 def _student_sort_key(s):
-    """v1.19.49.29 名单排序键：班级 → 姓氏（姓名以姓氏开头，故用姓名拼音）→ 学号。
+    """v1.19.49.35 名单排序键：班级 → 姓氏（姓名以姓氏开头，故用姓名拼音）→ 学号。
 
     拼音不可用时退化为汉字本身，仍保持稳定次序。
     """
@@ -285,7 +321,7 @@ def _student_sort_key(s):
 
 
 def _build_stats(scope_students, rooms):
-    """v1.19.49.29 抽出为纯函数：步骤② 改考场/科目/容量后要实时重算选科明细。
+    """v1.19.49.35 抽出为纯函数：步骤② 改考场/科目/容量后要实时重算选科明细。
 
     学生总数/参考数、考场总数/总容量、各选科人数与可用容量差额（通用考场容量
     计入每个有参考学生的选科，与 v1.12.1 口径一致）。
@@ -316,7 +352,7 @@ def _build_stats(scope_students, rooms):
 @login_required
 @perm_required('grades.edit')
 def affair_stats(aid):
-    """v1.19.49.29 编排容量/选科明细的实时数据（改考场/科目/容量后前端即时刷新）"""
+    """v1.19.49.35 编排容量/选科明细的实时数据（改考场/科目/容量后前端即时刷新）"""
     affair = _get_affair_checked(aid)
     scope = AffairStudent.query.filter_by(affair_id=aid, is_attend=True).all()
     rooms = AffairRoom.query.filter_by(affair_id=aid).order_by(AffairRoom.room_no).all()
@@ -330,21 +366,26 @@ def affair_detail(aid):
     affair = _get_affair_checked(aid)
     students = (AffairStudent.query.filter_by(affair_id=aid)
                 .order_by(AffairStudent.class_name, AffairStudent.student_no).all())
-    # v1.19.49.29 名单次序（用户口径）：按「班级 → 姓氏」排序（不再把不参考的提到最上，
+    # v1.19.49.35 名单次序（用户口径）：按「班级 → 姓氏」排序（不再把不参考的提到最上，
     # 而是左右分栏展示：左=参加考试，右=不参加考试）
     students.sort(key=_student_sort_key)
+    # 2026-10-14：给每名学生标上排序序号 —— 步骤① 点「→ 不参加 / ← 参加」时前端**就地搬行**
+    #（不再整页刷新，否则会先渲染全量名单再重放筛选 → 闪屏 + 丢滚动位置），
+    # 插入位置按该序号比较（前端拿不到姓名拼音，故序号由服务端算好）。
+    for _i, _s in enumerate(students):
+        _s.roster_idx = _i
     rooms = (AffairRoom.query.filter_by(affair_id=aid)
              .order_by(AffairRoom.room_no).all())
     join_students = [s for s in students if s.is_attend]          # 左栏：参加考试
     skip_students = [s for s in students if not s.is_attend]      # 右栏：不参加考试
     scope_students = join_students
     arranged = [s for s in scope_students if s.room_no]
-    # v1.19.49.29：步骤条状态用 —— 已生成考号的人数（AI 导入会带考号，此时步骤③应显示已完成）
+    # v1.19.49.35：步骤条状态用 —— 已生成考号的人数（AI 导入会带考号，此时步骤③应显示已完成）
     numbered = sum(1 for s in scope_students if s.exam_number)
 
     # v1.12.2 步骤⑤成绩关联 UI 已移除，不再查询考试与成绩（省去每次访问的无用查询）
 
-    # v1.19.49.29 名单统计：年级汇总 + 各班（实际 / 参加 / 不参加）
+    # v1.19.49.35 名单统计：年级汇总 + 各班（实际 / 参加 / 不参加）
     grade_stat = {'total': len(students), 'join': len(join_students),
                   'skip': len(skip_students)}
     per_class = {}
@@ -357,21 +398,26 @@ def affair_detail(aid):
                    sorted(per_class.items(), key=lambda kv: _class_sort_key(kv[0]))]
 
     # v1.12.1 编排容量统计：学生总数/参考数、考场总数/总容量、各选科人数与可用容量差额
-    # v1.19.49.29 复用 _build_stats（与 /affairs/<aid>/stats 实时接口同一口径）
+    # v1.19.49.35 复用 _build_stats（与 /affairs/<aid>/stats 实时接口同一口径）
     stats = _build_stats(scope_students, rooms)
     # v1.12.1 选科选项（批次设置弹窗中按选科设前后缀）
     sel_options = sorted({s.subject_selection for s in students if s.subject_selection})
-    # v1.19.49.29 步骤③下方学生名单：已编排者按「考场 → 座号」升序（考场号已补零，可直接字符串比较）
+    # v1.19.49.35 步骤③下方学生名单：已编排者按「考场 → 座号」升序（考场号已补零，可直接字符串比较）
     arranged_sorted = sorted(arranged,
                              key=lambda s: (str(s.room_no or ''), s.seat_no or 0,
                                             s.student_no or ''))
-    # v1.19.49.29 步骤②科目下拉：系统字典「选科」12 种 + 「全科」（= 通用/不限），
+    # v1.19.49.35 步骤②科目下拉：系统字典「选科」12 种 + 「全科」（= 通用/不限），
     # 再兜底补上本批次考场里出现过的历史值（如旧写法的「史政地」），避免下拉丢失当前值
-    room_subject_options = ['全科'] + list(get_dict_values('subject') or [])
+    # 2026-10-15 用户报「下拉里俩全科」：字典「选科」里也有一条手工加的「全科」
+    # （sort_order=-1，数据字典页加的）→ 硬编码再拼一次就重复 → 保序去重
+    room_subject_options = []
+    for _v in ['全科'] + list(get_dict_values('subject') or []):
+        if _v and _v not in room_subject_options:
+            room_subject_options.append(_v)
     for r in rooms:
         if r.subject and not r.is_universal and r.subject not in room_subject_options:
             room_subject_options.append(r.subject)
-    # v1.19.49.29 考务环节④⑤⑥：任课核对 / 考试时间表 / 监考编排 的步骤条状态与时间表
+    # v1.19.49.35 考务环节④⑤⑥：任课核对 / 考试时间表 / 监考编排 的步骤条状态与时间表
     from app.modules.grades.routes import affair_invig as _ai
     _ai.ensure_teachers_synced(affair)        # 首次自动带入当前任课安排
     _t_scheds = (AffairSchedule.query.filter_by(affair_id=aid)
@@ -382,7 +428,7 @@ def affair_detail(aid):
         'n_invig': AffairInvigilation.query.filter_by(affair_id=aid).count(),
         'schedules': _t_scheds,
     }
-    # v1.19.49.29 页头要显示「本场考试」信息（名字 / 类型 / 时间）：
+    # v1.19.49.35 页头要显示「本场考试」信息（名字 / 类型 / 时间）：
     # 取本批次绑定的考试；未绑定（孤儿批次）时为 None，模板回落用批次自身字段。
     linked_exam = Exam.query.get(affair.exam_id) if affair.exam_id else None
     return render_template('grades/affairs/detail.html',
@@ -396,7 +442,14 @@ def affair_detail(aid):
                            room_subject_options=room_subject_options,
                            mode_label=MODE_LABEL, invig_stat=invig_stat,
                            subjects=SUBJECTS,
-                           stats=stats, sel_options=sel_options)
+                           stats=stats, sel_options=sel_options,
+                           # 2026-10-13：⑤ 考试时间表「粘贴导入」的默认考试日期与每天场次上限
+                           sched_default_date=_ai._sched_default_date(affair),
+                           sched_daily_max=_ai._SCHED_DAILY_MAX,
+                           # 2026-10-14 用户口径：⑤ 内置每科考试时长（选科目自动算结束时间）
+                           sched_default_start=_ai.SCHED_DEFAULT_START,
+                           sched_duration=_ai.SCHED_DURATION_MINUTES,
+                           sched_duration_fallback=_ai.SCHED_DURATION_FALLBACK)
 
 
 # ==================== 步骤① 学生名单：导入 / 模板 / 增删改 ====================
@@ -419,7 +472,7 @@ def affair_students_template(aid):
         c.alignment = _CENTER
         c.border = _TB
     # 预填系统该年级学生（与 Excel「学生信息表」口径一致，考务人员可直接编辑）
-    # v1.19.49.29：只预填数字教学班且年级未毕业的学生（不分班/已转出/已毕业不进入成绩模板）
+    # v1.19.49.35：只预填数字教学班且年级未毕业的学生（不分班/已转出/已毕业不进入成绩模板）
     from app.utils.helpers import get_graduated_grades
     _graduated = set(get_graduated_grades() or [])
     _grade_ok = affair.grade not in _graduated
@@ -522,7 +575,7 @@ def affair_students_import(aid):
             name = name or sys_stu.name
             cls = cls or sys_stu.class_name
             sel = sel or (sys_stu.subject_selection or '')
-        # v1.19.49.29：补全后仍无数字教学班的学生不导入成绩名单
+        # v1.19.49.35：补全后仍无数字教学班的学生不导入成绩名单
         if not is_teaching_class(cls):
             skipped_no_class += 1
             continue
@@ -551,7 +604,7 @@ def affair_students_import(aid):
 def affair_students_sync(aid):
     """v1.12.1 从学生学籍库同步本年级学生到考务名单（增量：新增+补全信息）
 
-    v1.19.49.29 口径调整（用户明确）：
+    v1.19.49.35 口径调整（用户明确）：
     - 无班级学生（不分班 / 已转出 / 离校 等非数字班级）与已毕业年级学生
       **不进入成绩治理模块**，同步时直接过滤掉；
     - 原「同时移除学籍已删的学生」复选框取消，改为**默认自动移除**：
@@ -588,7 +641,7 @@ def affair_students_sync(aid):
             db.session.delete(row)
             removed += 1
     skipped = len(all_stus) - len(sys_stus)   # 因无班级/已毕业而未导入的学籍数
-    # v1.19.49.29 自动匹配「上一场不参加考试的学生」：取本年级**日期早于本批次**的最近一场考务批次，
+    # v1.19.49.35 自动匹配「上一场不参加考试的学生」：取本年级**日期早于本批次**的最近一场考务批次，
     # 把其中标记为不参考的学号，在本批次一律同步为不参考（只 是→否；不反向把「否」改回「是」）。
     prev_affair = (ExamAffair.query
                    .filter(ExamAffair.grade == affair.grade,
@@ -624,7 +677,7 @@ def affair_students_pick(aid):
     """v1.12.2 「加入学生」选择器数据源：返回本年级学籍学生，
     带 in_batch 标记（是否已在当前考务名单），供前端筛选/排序/搜索。
 
-    v1.19.49.29：与 sync 同口径，只列数字教学班且年级未毕业的学生（无班级/已毕业不展示）。"""
+    v1.19.49.35：与 sync 同口径，只列数字教学班且年级未毕业的学生（无班级/已毕业不展示）。"""
     affair = _get_affair_checked(aid)
     from app.utils.helpers import get_graduated_grades
     graduated = set(get_graduated_grades() or [])
@@ -653,7 +706,7 @@ def affair_students_batch_add(aid):
     for st in Student.query.filter(Student.student_number.in_(nos)).all():
         if st.student_number in exist:
             continue
-        # v1.19.49.29：无班级学生（不分班/已转出/离校等）不加入成绩治理名单
+        # v1.19.49.35：无班级学生（不分班/已转出/离校等）不加入成绩治理名单
         if not is_teaching_class(st.class_name):
             skipped += 1
             continue
@@ -673,27 +726,52 @@ def affair_students_batch_add(aid):
 @login_required
 @perm_required('grades.edit')
 def affair_student_fixed(aid, sid):
-    """v1.12.2 表格内直接编辑固定考场/固定座号（失焦即时保存）"""
+    """v1.12.2 表格内直接编辑固定考场/固定座号（失焦即时保存）。
+
+    2026-10-14：固定考场/座号的主要用途是**混编排考场** —— 把不同选科的学生
+    指定到同一考场。编排时优先安置固定学生：
+      固定考场 + 座号都填 → 按指定座位落座；
+      只填考场（座号留空）→ 在该考场内自动找最靠前的空位（不必手工算座号）；
+      两个都留空 → 取消固定，恢复按选科分组自动分配。
+    """
+    _get_affair_checked(aid)
     st = AffairStudent.query.get_or_404(sid)
     if st.affair_id != aid:
         abort(403)
-    room = (request.form.get('fixed_room') or '').strip() or None
-    seat_raw = (request.form.get('fixed_seat') or '').strip()
-    try:
-        seat = int(seat_raw) if seat_raw else None
-    except ValueError:
-        seat = None
+    room = _norm_room_no((request.form.get('fixed_room') or '').strip()) or None
+    seat = _int_or_none(request.form.get('fixed_seat'))
+    if seat is not None and seat < 1:
+        return jsonify({'ok': False, 'msg': '座号需为正整数'})
+    room_by_no = {r.room_no: r for r in AffairRoom.query.filter_by(affair_id=aid).all()}
+    if room and room not in room_by_no:
+        return jsonify({'ok': False, 'msg': f'本批次没有 {room} 考场，请先在「② 考场设置」中添加'})
+    if seat is not None and not room:
+        return jsonify({'ok': False, 'msg': '填了座号就要先填考场号'})
+    if seat is not None and seat > (room_by_no[room].capacity or 0):
+        return jsonify({'ok': False,
+                        'msg': f'座号 {seat} 超出 {room} 考场容量（{room_by_no[room].capacity}）'})
     st.fixed_room, st.fixed_seat = room, seat
     db.session.commit()
-    return jsonify({'ok': True})
+    log_operation(current_user, '修改', '考务学生', sid,
+                  f'[{st.name}] 固定考场={room or "-"} 座号={seat or "-"}', module='grades')
+    warn = ''
+    if room and seat:
+        other = AffairStudent.query.filter(
+            AffairStudent.affair_id == aid, AffairStudent.id != st.id,
+            AffairStudent.fixed_room == room, AffairStudent.fixed_seat == seat).first()
+        if other:
+            warn = (f'{room} 考场 {seat} 号座已固定给 [{other.name}]，'
+                    f'编排时该座只安置先到者，另一人会被跳过')
+    return jsonify({'ok': True, 'fixed_room': room, 'fixed_seat': seat, 'warn': warn})
 
 
 @bp.route('/affairs/<int:aid>/students/<int:sid>/attend', methods=['POST'])
 @login_required
 @perm_required('grades.edit')
 def affair_student_attend(aid, sid):
-    """v1.19.49.29 步骤①「参考」就地点一下切换（本页不再提供「编辑学生信息」弹窗，
+    """v1.19.49.35 步骤①「参考」就地点一下切换（本页不再提供「编辑学生信息」弹窗，
     但「是否参加本场考试」属考务信息，需要能手工修正，例如上一场缺考、本场恢复参考）。"""
+    _get_affair_checked(aid)   # H-4：批次年级范围（2026-10-16 第八轮审计补，此前只校子资源归属）
     st = AffairStudent.query.get_or_404(sid)
     if st.affair_id != aid:
         abort(403)
@@ -709,6 +787,7 @@ def affair_student_attend(aid, sid):
 @login_required
 @perm_required('grades.edit')
 def affair_student_detail(aid, sid):
+    _get_affair_checked(aid)   # H-4：批次年级范围（2026-10-16 第八轮审计补）
     st = AffairStudent.query.get_or_404(sid)
     if st.affair_id != aid:
         abort(403)
@@ -871,6 +950,7 @@ def affair_rooms_import(aid):
 @login_required
 @perm_required('grades.edit')
 def affair_room_detail(aid, rid):
+    _get_affair_checked(aid)   # H-4：批次年级范围（2026-10-16 第八轮审计补）
     room = AffairRoom.query.get_or_404(rid)
     if room.affair_id != aid:
         abort(403)
@@ -891,8 +971,9 @@ def affair_room_save(aid):
         room = AffairRoom.query.get_or_404(int(rid))
         if room.affair_id != aid:
             abort(403)
-        # v1.12.2 编辑时编号与容量锁定不可改：编号由选取时自动生成、容量由考场库带出，
-        # 改动会破坏已生成考号与编排一致性
+        # v1.12.2 本接口只服务「手动新增」（弹窗）；带 rid 时编号 / 容量仍不在此更新
+        # 2026-10-14：编号要改请走 `rooms/<rid>/patch`（带查重与名单/监考同步），
+        # 容量改走同接口或 `rooms/capacity` —— 两者都不破坏已生成考号
     else:
         if not no:
             return jsonify({'ok': False, 'msg': '考场编号必填'})
@@ -926,15 +1007,28 @@ def affair_room_save(aid):
 @login_required
 @perm_required('grades.edit')
 def affair_room_patch(aid, rid):
-    """v1.19.49.29 步骤② 行内编辑：科目 / 容量 / 备注 就地修改（不再走「编辑」按钮弹窗）。
+    """v1.19.49.35 步骤② 行内编辑：考场编号 / 科目 / 容量 / 备注 就地修改（不再走「编辑」按钮弹窗）。
 
     只更新提交上来的字段（部分更新），避免前端行内编辑互相覆盖。
     科目「全科」等价于通用考场（存为「默认」，`is_universal` 为真）。
+    v1.19.49.35 起**考场编号也可改**（2026-10-14 用户口径）：改编号会查重（同批次内不可重号），
+    并同步名单的考场号 / 固定考场 / 考号（模式 0）与监考安排的考场号（见 `rename_room_no`）。
     """
-    _get_affair_checked(aid)
+    affair = _get_affair_checked(aid)
     room = AffairRoom.query.get_or_404(rid)
     if room.affair_id != aid:
         abort(403)
+    renamed, n_stu, n_inv = None, 0, 0
+    if 'room_no' in request.form:
+        new_no = _norm_room_no(sanitize_label(request.form.get('room_no'), 10))
+        if not new_no:
+            return jsonify({'ok': False, 'msg': '考场编号不能为空'})
+        dup = (AffairRoom.query.filter_by(affair_id=aid, room_no=new_no)
+               .filter(AffairRoom.id != rid).first())
+        if dup is not None:
+            return jsonify({'ok': False,
+                            'msg': f'考场编号 {new_no} 已被「{dup.location or "其它考场"}」占用'})
+        renamed, n_stu, n_inv = rename_room_no(affair, room, new_no)
     if 'subject' in request.form:
         sub = sanitize_label(request.form.get('subject'), 20) or '默认'
         room.subject = '默认' if sub in ('全科', '通用', '全部') else sub
@@ -950,9 +1044,13 @@ def affair_room_patch(aid, rid):
         room.note = sanitize_label(request.form.get('note'), 100)
     db.session.commit()
     log_operation(current_user, '修改', '考务考场', rid,
-                  f'考场{room.room_no} 科目={room.subject} 容量={room.capacity}',
+                  (f'考场编号 {renamed}→{room.room_no}（同步名单 {n_stu} 人 / 监考 {n_inv} 格）'
+                   if renamed else '')
+                  + f'考场{room.room_no} 科目={room.subject} 容量={room.capacity}',
                   module='grades')
-    return jsonify({'ok': True, 'subject': room.subject, 'capacity': room.capacity,
+    return jsonify({'ok': True, 'room_no': room.room_no, 'renamed': bool(renamed),
+                    'students': n_stu, 'invigs': n_inv,
+                    'subject': room.subject, 'capacity': room.capacity,
                     'is_universal': bool(room.is_universal), 'note': room.note or ''})
 
 
@@ -960,7 +1058,7 @@ def affair_room_patch(aid, rid):
 @login_required
 @perm_required('grades.edit')
 def affair_rooms_capacity(aid):
-    """v1.19.49.29 步骤② 考场容量批量操作。
+    """v1.19.49.35 步骤② 考场容量批量操作。
 
     - `mode=all`：把本批次**全部考场**容量设为 `capacity`（1~500）；
     - `mode=prev`：按「同年级 + **同一房间**」沿用上一场（日期更早的最近一批次）的容量；
@@ -1018,6 +1116,7 @@ def affair_rooms_capacity(aid):
 @login_required
 @perm_required('grades.edit')
 def affair_room_delete(aid, rid):
+    _get_affair_checked(aid)   # H-4：批次年级范围（2026-10-16 第八轮审计补；删除是写操作，优先级最高）
     room = AffairRoom.query.get_or_404(rid)
     if room.affair_id != aid:
         abort(403)
@@ -1032,10 +1131,28 @@ def affair_room_delete(aid, rid):
 @login_required
 @perm_required('grades.edit')
 def affair_room_lib_list():
+    """考场房间库数据源（步骤②左栏）。
+
+    v1.19.47.31：一并带出「考场模板」（= 考场维护页的分组：exam_room_groups /
+    exam_room_group_map），供步骤②按模板筛选与一键加入；分组只做筛选依据，
+    不改动任何历史场次的考场。
+    """
     rows = AffairRoomLib.query.order_by(AffairRoomLib.location).all()
+    gmap = {}
+    for m in ExamRoomGroupMap.query.all():
+        gmap.setdefault(m.lib_id, []).append(m.group_id)
+    groups = ExamRoomGroup.query.order_by(ExamRoomGroup.sort_order,
+                                          ExamRoomGroup.id).all()
+    gcount = {}
+    for gids in gmap.values():
+        for gid in gids:
+            gcount[gid] = gcount.get(gid, 0) + 1
     return jsonify({'ok': True, 'rooms': [
-        {'id': r.id, 'location': r.location, 'capacity': r.capacity, 'note': r.note}
-        for r in rows]})
+        {'id': r.id, 'location': r.location, 'capacity': r.capacity, 'note': r.note,
+         'group_ids': sorted(gmap.get(r.id, []))}
+        for r in rows],
+        'groups': [{'id': g.id, 'name': g.name, 'count': gcount.get(g.id, 0)}
+                   for g in groups]})
 
 
 @bp.route('/affairs/room-lib/<int:lid>/delete', methods=['POST'])
@@ -1053,7 +1170,7 @@ def affair_room_lib_delete(lid):
 @perm_required('grades.edit')
 def affair_room_from_lib(aid):
     """v1.12.1 从考场房间库选取房间生成考场：
-    自动生成考场编号（现有最大数字+1）、确定考场科目（默认，可再编辑）、带出默认容量"""
+    自动生成考场编号（从 01 起补最小空号）、确定考场科目（默认，可再编辑）、带出默认容量"""
     # 2026-10-13 全面审计 M-2：本处原只做 ExamAffair 存在性校验（H-4 漏网的第 24 处），
     # 任何 grades.edit 持有者都能向他年级批次写考场；改走统一入口（存在性 + 年级范围）。
     _get_affair_checked(aid)
@@ -1062,13 +1179,8 @@ def affair_room_from_lib(aid):
     exist_rooms = AffairRoom.query.filter_by(affair_id=aid).all()
     if lib_row.location in {r.location for r in exist_rooms}:
         return jsonify({'ok': False, 'msg': f'考场位置 {lib_row.location} 已在本批次中'})
-    nums = []
-    for r in exist_rooms:
-        digits = ''.join(ch for ch in r.room_no if ch.isdigit())
-        if digits:
-            nums.append(int(digits))
     # v1.12.2 考场编号统一补零为两位（01、02…）
-    new_no = _norm_room_no((max(nums) + 1) if nums else 1)
+    new_no = _norm_room_no(_room_next_no(exist_rooms))
     room = AffairRoom(affair_id=aid, room_no=new_no, location=lib_row.location,
                       subject='默认', capacity=lib_row.capacity or 30)
     db.session.add(room)
@@ -1077,6 +1189,167 @@ def affair_room_from_lib(aid):
                   f'从库选房间 {lib_row.location} → 考场{new_no}', module='grades')
     return jsonify({'ok': True, 'id': room.id, 'room_no': room.room_no,
                     'location': room.location, 'capacity': room.capacity, 'subject': room.subject})
+
+
+@bp.route('/affairs/<int:aid>/rooms/from-lib-batch', methods=['POST'])
+@login_required
+@perm_required('grades.edit')
+def affair_rooms_from_lib_batch(aid):
+    """v1.19.47.31 批量加入考场（步骤②「考场模板」一键加入）。
+
+    参数二选一：
+    - `group_id`：考场模板（考场维护页的分组）id，取该分组下**全部房间**；
+    - `lib_ids`：逗号分隔的房间 id（按提交顺序）。
+    口径与单条加入一致：按「位置」去重（已在本批次的自动跳过）、考场编号从 01 起
+    补最小空号（2026-10-14）、科目默认「全科」、容量带出考场库默认值（可再行内改）。
+    **顺序**（2026-10-14 用户口径「带着顺序，可以直接复用」）：按考场维护页分组里排好的
+    先后（`exam_room_group_map.sort_order`）依次生成编号 —— 谁在前谁是 01。
+    返回 `{ok, added:[...], skipped}`（skipped=已在批次中或不存在的房间数）。
+    """
+    _get_affair_checked(aid)
+    gid = _int_or_none(request.form.get('group_id'))
+    ids = []
+    if gid is not None:
+        ids = [m.lib_id for m in ExamRoomGroupMap.query.filter_by(group_id=gid)
+               .order_by(ExamRoomGroupMap.sort_order, ExamRoomGroupMap.id).all()]
+    else:
+        for tok in (request.form.get('lib_ids') or '').split(','):
+            v = _int_or_none(tok)
+            if v is not None:
+                ids.append(v)
+    if not ids:
+        return jsonify({'ok': False, 'msg': '未选择考场模板或房间'})
+
+    libs = {r.id: r for r in
+            AffairRoomLib.query.filter(AffairRoomLib.id.in_(ids)).all()}
+    exist_rooms = AffairRoom.query.filter_by(affair_id=aid).all()
+    used = {r.location for r in exist_rooms}
+    batch_nos = set()          # 2026-10-14：本批已分配编号 —— 逐个取最小空号，编号从 01 起连续
+    added, skipped = [], 0
+    for lid in ids:
+        row = libs.get(lid)
+        if row is None or row.location in used:
+            skipped += 1
+            continue
+        used.add(row.location)
+        no = _room_next_no(exist_rooms, batch_nos)
+        batch_nos.add(no)
+        room = AffairRoom(affair_id=aid, room_no=_norm_room_no(no),
+                          location=row.location, subject='默认',
+                          capacity=row.capacity or 30)
+        db.session.add(room)
+        added.append(room)
+    db.session.commit()
+    if added:
+        log_operation(current_user, '选取', '考务考场', aid,
+                      f'按考场模板批量加入 {len(added)} 个考场'
+                      f'（{added[0].location} 起）', module='grades')
+    return jsonify({'ok': True, 'added': [
+        {'id': r.id, 'room_no': r.room_no, 'location': r.location,
+         'capacity': r.capacity, 'subject': r.subject} for r in added],
+        'skipped': skipped})
+
+
+@bp.route('/affairs/<int:aid>/rooms/renumber', methods=['POST'])
+@login_required
+@perm_required('grades.edit')
+def affair_rooms_renumber(aid):
+    """步骤② 「重排编号」：把本批次考场编号重排为从 01 起的连续编号。
+
+    2026-10-14 用户口径：编号原来按「现有最大 + 1」分配且空号不回收，反复带入/移出
+    会把编号滚大（某批次成了 29~43）。本接口按当前编号顺序重排为 01、02…，
+    并同步名单的考场号 / 固定考场 / 考号与监考安排（细节见 `renumber_rooms`）。
+    """
+    affair = _get_affair_checked(aid)
+    try:
+        mapping, n_stu, n_inv = renumber_rooms(affair)
+        if not mapping:
+            db.session.rollback()
+            return jsonify({'ok': True, 'changed': 0,
+                            'msg': '考场编号已经是从 01 起的连续编号，无需重排'})
+        db.session.commit()
+    except Exception as _e:  # noqa: BLE001
+        db.session.rollback()
+        current_app.logger.error('考场重排编号失败（已回滚）affair=%s: %s', aid, _e,
+                                 exc_info=True)
+        return jsonify({'ok': False, 'msg': '重排失败，本次未改动，请重试'}), 500
+    log_operation(current_user, '重排', '考务考场', aid,
+                  f'重排 {len(mapping)} 个考场编号（同步名单 {n_stu} 人 / 监考 {n_inv} 格）',
+                  module='grades')
+    return jsonify({'ok': True, 'changed': len(mapping), 'students': n_stu,
+                    'invigs': n_inv, 'mapping': sorted(mapping.items())})
+
+
+@bp.route('/affairs/<int:aid>/rooms/rename', methods=['POST'])
+@login_required
+@perm_required('grades.edit')
+def affair_rooms_rename(aid):
+    """步骤② 「保存编号」：按提交的映射**整批**改考场编号（2026-10-14 用户口径）。
+
+    前端编号列是**草稿**：改 / 清空时只动本地、立刻不打扰（原来失焦即存，换号或清空重打
+    时马上弹「被占用」，打断操作）；点「保存编号」才提交到这里。
+    - `items`：JSON `[{"id": 3, "room_no": "05"}, ...]`；编号**可留空** —— 按「从 01 起补
+      最小空号」自动补（返回 `filled` 说明补成了几号）；
+    - **支持互换 / 循环**（两阶段写入，见 `apply_room_renames`）；
+    - 校验：id 必须属于本批次；补全后**不得重号**（与本次未提交的其它考场也不得撞号）。
+      失败**整批不落库**并返回冲突明细，由前端标红让人改完再存。
+    返回 `{ok, changed, students, invigs, filled:[{room_no, location}], mapping:[[旧,新]]}`。
+    """
+    affair = _get_affair_checked(aid)
+    try:
+        items = json.loads(request.form.get('items') or '[]')
+    except (TypeError, ValueError, json.JSONDecodeError):
+        return jsonify({'ok': False, 'msg': '提交的数据格式不对'})
+    if not isinstance(items, list) or not items:
+        return jsonify({'ok': False, 'msg': '没有要保存的编号'})
+    rooms = {r.id: r for r in AffairRoom.query.filter_by(affair_id=aid).all()}
+    draft = {}
+    for it in items:
+        if not isinstance(it, dict):
+            return jsonify({'ok': False, 'msg': '提交的数据格式不对'})
+        room = rooms.get(_int_or_none(it.get('id')))
+        if room is None:
+            return jsonify({'ok': False, 'msg': '考场不存在或不属于本批次'})
+        draft[room.id] = (room, _norm_room_no(sanitize_label(it.get('room_no'), 10)))
+    # 撞号检查：本次未提交的考场编号保持不变，也算占用
+    used = {}
+    for r in rooms.values():
+        if r.id not in draft:
+            used.setdefault(r.room_no, []).append(r)
+    for room, no in draft.values():
+        if no:
+            used.setdefault(no, []).append(room)
+    filled = []
+    finals = []
+    for room, no in draft.values():          # 空号 → 从 01 起补最小空号（与「一键带入」同口径）
+        if not no:
+            n = 1
+            while f'{n:02d}' in used:
+                n += 1
+            no = f'{n:02d}'
+            used.setdefault(no, []).append(room)
+            filled.append({'room_no': no, 'location': room.location or ''})
+        finals.append((room, no))
+    dup = [(no, rs) for no, rs in used.items() if len(rs) > 1]
+    if dup:
+        detail = '；'.join(
+            f'{no} 被 ' + ' / '.join((x.location or f'考场{x.id}') for x in rs)
+            for no, rs in sorted(dup))
+        return jsonify({'ok': False, 'msg': f'考场编号重复：{detail}'})
+    try:
+        mapping, n_stu, n_inv = apply_room_renames(affair, finals)
+        db.session.commit()
+    except Exception as _e:  # noqa: BLE001
+        db.session.rollback()
+        current_app.logger.error('批量保存考场编号失败（已回滚）affair=%s: %s', aid, _e,
+                                 exc_info=True)
+        return jsonify({'ok': False, 'msg': '保存失败，本次未改动，请重试'}), 500
+    log_operation(current_user, '修改', '考务考场', aid,
+                  f'保存考场编号：改 {len(mapping)} 个（同步名单 {n_stu} 人 / 监考 {n_inv} 格）'
+                  + (f'，自动补号 {len(filled)} 个' if filled else ''), module='grades')
+    return jsonify({'ok': True, 'changed': len(mapping), 'students': n_stu,
+                    'invigs': n_inv, 'filled': filled,
+                    'mapping': sorted(mapping.items())})
 
 
 # ==================== v1.12.1 批次设置：编排模式 / 非参考处理 / 选科前后缀 ====================
@@ -1092,25 +1365,28 @@ def affair_settings(aid):
     nm = request.form.get('non_attend_mode')
     if nm in ('skip', 'tail'):
         affair.non_attend_mode = nm
-    # v1.19.49.29 步骤② 去掉「考场前缀」列后，批次默认前缀成为唯一兜底 —— 允许在步骤③设置
+    # v1.19.49.35 步骤② 去掉「考场前缀」列后，批次默认前缀成为唯一兜底 —— 允许在步骤③设置
     if 'default_prefix' in request.form:
         affair.default_prefix = sanitize_prefix(request.form.get('default_prefix'), 16) or None
-    # 选科考号前后缀：前端以 prefix_<选科> / suffix_<选科> 成对提交，sels 为选科列表 JSON
-    try:
-        sel_list = json.loads(request.form.get('sels') or '[]')
-    except (TypeError, ValueError, json.JSONDecodeError):
-        sel_list = []
-    if isinstance(sel_list, list):
-        cfg = {}
-        for sel in sel_list:
-            sel = str(sel).strip()
-            if not sel:
-                continue
-            p = sanitize_prefix(request.form.get(f'prefix_{sel}'), 16)    # H-5
-            sfx = sanitize_prefix(request.form.get(f'suffix_{sel}'), 16)  # H-5
-            if p or sfx:
-                cfg[sel] = {'prefix': p, 'suffix': sfx}
-        affair.subject_prefixes = json.dumps(cfg, ensure_ascii=False) if cfg else None
+    # 选科考号前后缀：前端以 prefix_<选科> / suffix_<选科> 成对提交，sels 为选科列表 JSON。
+    # 2026-10-14：只有请求**确实带了 sels** 才覆盖 —— 编排设置弹窗已不含前后缀（改由步骤③ 维护），
+    # 不带 sels 的调用（如只改编排模式/非参考处理）不能把已有前后缀清成 None；带 sels 时仍是全量覆盖。
+    if 'sels' in request.form:
+        try:
+            sel_list = json.loads(request.form.get('sels') or '[]')
+        except (TypeError, ValueError, json.JSONDecodeError):
+            sel_list = []
+        if isinstance(sel_list, list):
+            cfg = {}
+            for sel in sel_list:
+                sel = str(sel).strip()
+                if not sel:
+                    continue
+                p = sanitize_prefix(request.form.get(f'prefix_{sel}'), 16)    # H-5
+                sfx = sanitize_prefix(request.form.get(f'suffix_{sel}'), 16)  # H-5
+                if p or sfx:
+                    cfg[sel] = {'prefix': p, 'suffix': sfx}
+            affair.subject_prefixes = json.dumps(cfg, ensure_ascii=False) if cfg else None
     db.session.commit()
     log_operation(current_user, '设置', '考务批次', aid,
                   f'模式={affair.selection_mode}/非参考={affair.non_attend_mode}', module='grades')
@@ -1143,6 +1419,108 @@ def _prev_stage_rank_map(affair):
     return ({r.student_no: (r.rank_dir or 10 ** 9) for r in rows}, prev.name)
 
 
+def _exam_number_for(affair, room_by_no, sel_cfg, mode, student, room_no, seat):
+    """考号生成（与编排同一口径，供 `_arrange` 与「考场重排」共用）。
+
+    模式 0：前缀 + 考场号 + 座号 + 后缀
+      前后缀优先级：选科配置 > 考场前缀 > 批次默认前缀（满足全校同前缀或文理分别前缀）；
+    模式 1：考号 = 学号；模式 2：自定义考号（未填给占位提示）。
+    """
+    if mode == 0:
+        cfg = sel_cfg.get((student.subject_selection or '') or '')
+        prefix = ((cfg or {}).get('prefix')
+                  or (room_by_no[room_no].prefix or affair.default_prefix or '1701'))
+        suffix = (cfg or {}).get('suffix') or ''
+        return f'{prefix}{_pad2(room_no)}{_pad2(seat)}{suffix}'
+    if mode == 1:
+        return student.student_no
+    return student.custom_number or f'未填考号_{student.name}'
+
+
+def apply_room_renames(affair, pairs):
+    """批量改考场编号（两阶段写入，**支持互换 / 循环**），并同步名单与监考。
+
+    `pairs` = `[(room, new_no), ...]`（`room` 为 AffairRoom 实例）。两阶段：先全部置临时值
+    `~id`，再写终值 —— 否则 `unique(affair_id, room_no)` 下做不了「01 ↔ 02」这类互换。
+    改完后同步（全库只有这三处存考场号，与卡片头「重排编号」同一口径）：
+      ① 名单 `affair_students`：考场号 `room_no`、固定考场 `fixed_room`，
+         以及考号 `exam_number`（模式 0 的考号含考场号，按当前前后缀重算）；
+      ② 监考安排 `affair_invigilations.room_no`（否则监考表 / 桌签与考场对不上）。
+    只改编号，不动位置 / 科目 / 容量 / 备注。查重与 `db.session.commit()` 交给调用方。
+    返回 `(mapping{旧→新}, 名单更新人数, 监考更新格数)`；编号都没变时 mapping 为空。
+    """
+    changes = [(r, n) for r, n in pairs if n and (r.room_no or '') != n]
+    if not changes:
+        return {}, 0, 0
+    old_by_id = {r.id: r.room_no for r, _ in changes}
+    for r, _ in changes:
+        r.room_no = f'~{r.id}'
+    db.session.flush()
+    for r, n in changes:
+        r.room_no = n
+    db.session.flush()
+    mapping = {old_by_id[r.id]: n for r, n in changes}
+    mode = affair.mode if affair.mode in (0, 1, 2) else 0
+    sel_cfg = affair.get_subject_prefixes()
+    room_by_no = {r.room_no: r for r in
+                  AffairRoom.query.filter_by(affair_id=affair.id).all()}
+    n_stu = 0
+    for st in AffairStudent.query.filter_by(affair_id=affair.id).all():
+        touched = False
+        if st.room_no in mapping:
+            st.room_no = mapping[st.room_no]
+            touched = True
+        if st.fixed_room in mapping:
+            st.fixed_room = mapping[st.fixed_room]
+            touched = True
+        if touched and st.room_no and st.seat_no:
+            st.exam_number = _exam_number_for(affair, room_by_no, sel_cfg, mode,
+                                              st, st.room_no, st.seat_no)
+        if touched:
+            n_stu += 1
+    # 监考表也要两阶段：unique(affair_id, schedule_id, room_no, slot) **含考场号** ——
+    # 互换时同一场次的 01/02 两格会在同一条 UPDATE 里互相撞键（IntegrityError）；
+    # 名单不受影响（uq_affair_stu 不含考场号）
+    ivs = [iv for iv in AffairInvigilation.query.filter_by(affair_id=affair.id).all()
+           if iv.room_no in mapping]
+    iv_old = {iv.id: iv.room_no for iv in ivs}
+    for iv in ivs:
+        iv.room_no = f'~{iv.id}'
+    db.session.flush()
+    for iv in ivs:
+        iv.room_no = mapping[iv_old[iv.id]]
+    db.session.flush()
+    return mapping, n_stu, len(ivs)
+
+
+def renumber_rooms(affair):
+    """把本批次考场编号重排为从 01 起的连续编号（2026-10-14 用户口径）。
+
+    历史遗留：编号原来按「现有最大 + 1」分配且空号不回收，反复带入/移出会让编号
+    越滚越大（某批次成了 29~43）。本函数按当前编号顺序（数字在前）重排为 01、02…，
+    同步逻辑见 `apply_room_renames`。
+    返回 `(mapping{旧→新}, 名单更新人数, 监考更新格数)`；编号本来就连续时 mapping 为空。
+    """
+    rooms = AffairRoom.query.filter_by(affair_id=affair.id).all()
+    if not rooms:
+        return {}, 0, 0
+    ordered = sorted(rooms, key=_room_sort_key)
+    return apply_room_renames(affair, [(r, f'{i:02d}')
+                                       for i, r in enumerate(ordered, start=1)])
+
+
+def rename_room_no(affair, room, new_no):
+    """给**单个考场**改编号（`apply_room_renames` 的单条包装，供行内编辑接口 / 外部工具用）。
+
+    返回 `(旧编号, 名单更新人数, 监考更新格数)`；编号没变时返回 `(None, 0, 0)`。
+    """
+    old = room.room_no
+    mapping, n_stu, n_inv = apply_room_renames(affair, [(room, new_no)])
+    if not mapping:
+        return None, 0, 0
+    return old, n_stu, n_inv
+
+
 def _arrange(affair, students, rooms, mode, log, layered=False, rank_map=None):
     """镜像 Excel 宏的编排逻辑：固定座位优先 → 同班邻座限制 → 随机分配。
     v1.12.1：支持不选科模式、非参考学生尾场处理、选科考号前后缀。
@@ -1169,15 +1547,8 @@ def _arrange(affair, students, rooms, mode, log, layered=False, rank_map=None):
         return n
 
     def exam_number_for(student, room_no, seat):
-        if mode == 0:
-            # v1.12.1 前后缀优先级：选科配置 > 考场前缀 > 批次默认前缀（满足全校同前缀或文理分别前缀）
-            cfg = sel_cfg.get((student.subject_selection or '') or '')
-            prefix = (cfg or {}).get('prefix') or (room_by_no[room_no].prefix or affair.default_prefix or '1701')
-            suffix = (cfg or {}).get('suffix') or ''
-            return f'{prefix}{_pad2(room_no)}{_pad2(seat)}{suffix}'
-        if mode == 1:
-            return student.student_no
-        return student.custom_number or f'未填考号_{student.name}'
+        # 2026-10-14：抽到模块级 _exam_number_for，供「考场重排」重算考号时共用同一口径
+        return _exam_number_for(affair, room_by_no, sel_cfg, mode, student, room_no, seat)
 
     assigned = 0
     failed = 0
@@ -1197,6 +1568,28 @@ def _arrange(affair, students, rooms, mode, log, layered=False, rank_map=None):
         s.room_no = room.room_no
         s.seat_no = s.fixed_seat
         s.exam_number = exam_number_for(s, room.room_no, s.fixed_seat)
+        assigned += 1
+
+    # 1.5) 2026-10-14 只固定考场（混编排考场）：未指定座号时，在该考场内取最靠前的空位，
+    #      使「把不同选科的学生混编进同一考场」不必手工逐个算座号；
+    #      先到先得（按名单顺序），满员或考场不存在则跳过（随后仍可参与按选科自动分配）。
+    for s in students:
+        if not (s.is_attend and s.fixed_room and not s.fixed_seat):
+            continue
+        room = room_by_no.get(s.fixed_room)
+        if not room:
+            log.append(f'【固定考场】[{s.name}] 指定考场 {s.fixed_room} 不存在，跳过')
+            continue
+        seat = next((i + 1 for i in range(room.capacity)
+                     if (i + 1) not in used[room.room_no]), None)
+        if not seat:
+            log.append(f'【固定考场】[{s.name}] 考场 {s.fixed_room} 已无空位，跳过')
+            continue
+        seats[room.room_no][seat - 1] = s
+        used[room.room_no].add(seat)
+        s.room_no = room.room_no
+        s.seat_no = seat
+        s.exam_number = exam_number_for(s, room.room_no, seat)
         assigned += 1
 
     # 2) 按选科分组，分配无固定座位学生
@@ -1325,7 +1718,7 @@ def affair_arrange(aid):
 @login_required
 @perm_required('grades.edit')
 def affair_numbers_import(aid):
-    """v1.19.49.29 步骤③「自定义模式 → 使用自定义考号」的批量导入考号。
+    """v1.19.49.35 步骤③「自定义模式 → 使用自定义考号」的批量导入考号。
 
     上传 Excel（表头需含「学号」与「考号」两列），把考号写入名单的 `custom_number`；
     之后以「自定义考号」模式编排时，即用该值作为最终考号（`_arrange` 模式2）。
@@ -1446,7 +1839,7 @@ def affair_export_class(aid):
     ws.title = '按班级学生信息'
     _write_sheet(ws, ['班级', '姓名', '考场位置', '考号', '考场编号', '座号'],
                  [[s.class_name, s.name, _room_loc(affair, s.room_no),
-                   s.exam_number, s.room_no, _pad2(s.seat_no)] for s in stus])
+                   s.exam_number, _pad2(s.room_no), _pad2(s.seat_no)] for s in stus])
     out = io.BytesIO()
     wb.save(out)
     out.seek(0)
@@ -1467,7 +1860,7 @@ def affair_export_room(aid):
     ws = wb.active
     ws.title = '按考场学生信息'
     _write_sheet(ws, ['考场编号', '座号', '考号', '姓名', '班级', '考场位置'],
-                 [[s.room_no, _pad2(s.seat_no), s.exam_number, s.name,
+                 [[_pad2(s.room_no), _pad2(s.seat_no), s.exam_number, s.name,
                    s.class_name, _room_loc(affair, s.room_no)] for s in stus])
     out = io.BytesIO()
     wb.save(out)
@@ -1530,7 +1923,7 @@ def affair_export_class_pdf(aid):
     groups = {}
     for s in stus:
         groups.setdefault(s.class_name or '未分班', []).append(
-            [s.name, s.exam_number, s.room_no, _pad2(s.seat_no),
+            [s.name, s.exam_number, _pad2(s.room_no), _pad2(s.seat_no),
              loc_map.get(s.room_no, '')])
     sections = [(f'{cls}（共 {len(rows)} 人）', rows) for cls, rows in groups.items()]
     buf = seating_list_sections(
@@ -1555,7 +1948,7 @@ def affair_export_room_pdf(aid):
     for s in stus:
         groups.setdefault(s.room_no or '未分配', []).append(
             [_pad2(s.seat_no), s.exam_number, s.name, s.class_name])
-    sections = [(f'考场 {rn}（{loc_map.get(rn, "")}，共 {len(rows)} 人）', rows)
+    sections = [(f'考场 {_pad2(rn)}（{loc_map.get(rn, "")}，共 {len(rows)} 人）', rows)
                 for rn, rows in groups.items()]
     buf = seating_list_sections(
         f'{affair.name}　按考场学生名单（共 {len(stus)} 人 {len(sections)} 个考场）',
@@ -1594,7 +1987,8 @@ def affair_cards_export(aid):
         chunk = stus[i:i + per]
         row = []
         for s in chunk:
-            row += [s.exam_number, s.name, s.class_name, f'{s.room_no}-{_pad2(s.seat_no)}']
+            row += [s.exam_number, s.name, s.class_name,
+                    f'{_pad2(s.room_no)}-{_pad2(s.seat_no)}']
         while len(row) < per * 4:
             row += ['', '', '', '']
         rows.append(row)

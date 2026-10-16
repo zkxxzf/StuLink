@@ -32,6 +32,8 @@ config_mod.Config.SQLALCHEMY_BINDS = {
     # 2026-10-10：补 system 绑定 —— 启动建表会遍历 'system'，缺它会有 WARN 噪音
     'system': 'sqlite:///' + os.path.join(_TMP, 'system.db'),
     'portrait': 'sqlite:///' + os.path.join(_TMP, 'portrait.db'),
+    'timetable': 'sqlite:///' + os.path.join(_TMP, 'timetable.db'),
+    'morality': 'sqlite:///' + os.path.join(_TMP, 'morality.db'),
 }
 config_mod.Config.SECRET_KEY = 'perm-verify-secret'
 
@@ -255,7 +257,7 @@ with app.test_client() as c:
     r = c.get('/academic/teachers')
     check('教务员可访问教务页', r.status_code == 200, str(r.status_code))
     r = c.get('/academic/inspection')
-    check('教务员可访问查课页', r.status_code == 200)
+    check('教务员可访问查课页', r.status_code == 200, str(r.status_code))
     c.get('/logout', follow_redirects=True)
 
     csrf = get_csrf(c)

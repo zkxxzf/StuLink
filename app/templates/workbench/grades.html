@@ -32,9 +32,21 @@
     <div class="card-body py-2 d-flex justify-content-between align-items-center flex-wrap gap-2">
         <div class="d-flex align-items-center flex-wrap gap-1">
             <span class="text-muted small me-1"><i class="bi bi-person-check"></i> 本学期任教：</span>
-            {% for lk in links %}
+            {# 2026-10-15 用户口径：班主任所带班的**全部科目**也可见 →
+               "我教的"与"我带的班"用两种徽章区分，一眼看清来源。 #}
+            {% for lk in links if lk.source != 'head' %}
             <span class="badge bg-light text-dark border fw-normal">{{ lk.class_name_full }} · {{ lk.subject }}</span>
+            {% else %}
+            <span class="text-muted small">暂无任课记录</span>
             {% endfor %}
+            {% set _heads = links | selectattr('source', 'equalto', 'head') | list %}
+            {% if _heads %}
+            <span class="text-muted small ms-2 me-1"><i class="bi bi-people"></i> 所带班：</span>
+            {% for lk in _heads %}
+            <span class="badge bg-primary-subtle text-primary-emphasis border fw-normal"
+                  title="班主任可见本班全部科目">{{ lk.class_name_full }} · {{ lk.subject }}</span>
+            {% endfor %}
+            {% endif %}
         </div>
         {% if grade_options|length > 1 or selected_grade %}
         <div class="btn-group btn-group-sm" role="group" aria-label="年级筛选">
@@ -62,7 +74,8 @@
         {% else %}
         <p class="mt-3 mb-1">暂无成绩数据</p>
         <p class="small mb-0">
-            您的任教范围内暂无考试数据。如需查看，请联系管理员在「成绩管理 - 任课教师」中为您分配任课班级。
+            您的范围（所教科目 / 所带班级）内暂无考试数据。如需查看，请联系管理员在
+            「成绩管理 - 任课教师映射」中为您分配任课班级，或登记您所带的班级。
         </p>
         {% endif %}
     </div>
@@ -77,7 +90,17 @@
             {% if exam.exam_type %}
             <span class="badge bg-light text-dark border ms-2">{{ exam.exam_type }}</span>
             {% endif %}
-            <span class="badge bg-primary-subtle text-primary-emphasis ms-1">{{ exam.classes|length }} 个班科</span>
+            <span class="badge bg-primary-subtle text-primary-emphasis ms-1">{{ (exam.classes | rejectattr('source', 'equalto', 'grade') | list) | length }} 个班科</span>
+            {# 2026-10-15 二次口径：任教 (年级, 学科) → 该年级该科**全部班**都进表，
+               但这些行默认折叠，点卡片头按钮才展开，避免"教一个班冒出十几行"。 #}
+            {% set _grade_rows = exam.classes | selectattr('source', 'equalto', 'grade') | list %}
+            {% if _grade_rows %}
+            <button type="button" class="btn btn-sm btn-link p-0 ms-2 btn-toggle-grade"
+                    data-exam="{{ exam.exam_id }}"
+                    title="任教该年级该学科 → 该年级全部班的这科成绩对你开放">
+                <i class="bi bi-plus-circle"></i> 本年级同科其他班（{{ _grade_rows | length }}）
+            </button>
+            {% endif %}
         </div>
         <small class="text-muted"><i class="bi bi-calendar3"></i> {{ exam.exam_date }}</small>
     </div>
@@ -96,10 +119,15 @@
                     <th class="text-center">学生明细</th>
                 </tr>
             </thead>
-            <tbody>
+            <tbody data-exam="{{ exam.exam_id }}">
                 {% for c in exam.classes %}
-                <tr>
-                    <td class="fw-bold">{{ c.class_name }}</td>
+                <tr{% if c.source == 'grade' %} class="row-grade d-none"{% endif %}>
+                    {# 2026-10-15：标出该行是"本人所教"还是"本人所带班"（班主任可见本班全部科） #}
+                    <td class="fw-bold">{{ c.class_name }}{% if c.source == 'head' %}
+                        <span class="badge bg-primary-subtle text-primary-emphasis fw-normal ms-1"
+                              title="本人所带班：班主任可见本班全部科目">班主任</span>{% elif c.source == 'grade' %}
+                        <span class="badge bg-light text-dark border fw-normal ms-1"
+                              title="任教该年级该学科 → 该年级全部班的这科成绩对你开放">同科</span>{% endif %}</td>
                     <td>{{ c.subject }}</td>
                     <td class="text-center">{{ c.count }}</td>
                     <td class="text-center">
@@ -161,7 +189,12 @@
             {% for lk in links %}
             <div class="col-lg-6">
                 <div class="border rounded p-2 h-100">
-                    <div class="small fw-bold mb-1">{{ lk.class_name_full }} · {{ lk.subject }}</div>
+                    <div class="small fw-bold mb-1">{{ lk.class_name_full }} · {{ lk.subject }}
+                        {% if lk.source == 'head' %}
+                        <span class="badge bg-primary-subtle text-primary-emphasis fw-normal"
+                              title="本人所带班：班主任可见本班全部科目">班主任</span>
+                        {% endif %}
+                    </div>
                     <div class="trend-chart" style="height:200px;"
                          data-class="{{ lk.class_name }}"
                          data-grade="{{ lk.grade }}"
@@ -202,6 +235,11 @@
                         <th>姓名</th>
                         <th>学号</th>
                         <th class="text-end" style="width:88px;">分数</th>
+                        {# 2026-10-15：任课教师也能看到学生的**总分年级名次**（只名次、不给总分） #}
+                        <th class="text-center" style="width:104px;" id="gdThRank" hidden
+                            title="该生总分在年级（本选科方向）内的名次 — 只给名次，不给总分分数">
+                            总分年级名次
+                        </th>
                     </tr>
                 </thead>
                 <tbody id="gdRows"></tbody>

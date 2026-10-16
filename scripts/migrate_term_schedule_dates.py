@@ -28,6 +28,20 @@ sys.path.insert(0, BASE)
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from _db_backup import backup_db  # noqa: E402  改库前先备份（项目约定）
 
+# 2026-10-14 第四轮审计（CONS-02）：补迁移登记（只登记不早退）
+SCRIPT_NAME = os.path.basename(__file__)
+try:
+    import _mig_log
+except Exception as _e:  # noqa: BLE001
+    _mig_log = None
+    print(f'[WARN] 迁移登记模块不可用（迁移照常执行，仅不登记）：{_e}')
+
+
+def _record():
+    if _mig_log:
+        _mig_log.record(SCRIPT_NAME, note='term_schedules 补齐学期周期字段（起止日期/总周数/当前学期）并回填')
+
+
 DATA_DIR = os.path.join(BASE, 'data')
 TIMETABLE_DB = os.path.join(DATA_DIR, 'timetable.db')
 
@@ -195,6 +209,7 @@ def main():
           f'当前学期={stats["is_current_set"]}')
     if not ok:
         sys.exit(1)
+    _record()
 
 
 if __name__ == '__main__':
