@@ -3,7 +3,7 @@
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
 [![Python](https://img.shields.io/badge/python-3.11+-green.svg)](https://python.org)
 [![Flask](https://img.shields.io/badge/flask-3.x-lightgrey.svg)](https://flask.palletsprojects.com/)
-[![Version](https://img.shields.io/badge/version-1.19.50.35-orange.svg)](https://gitee.com/zkxxzf/StuLink)
+[![Version](https://img.shields.io/badge/version-1.19.49.36-orange.svg)](https://gitee.com/zkxxzf/StuLink)
 
 面向中学的综合学生管理平台，采用 **双站点 + 多模块 + 一模块一库** 的故障隔离架构：
 
@@ -195,7 +195,7 @@
 
 - **后端**：Python 3.11+ / Flask 3.x / Flask-Login / Flask-SQLAlchemy 2.x（多库 binds）/ Waitress / openpyxl / reportlab / python-pptx
 - **前端**：Bootstrap 5 / jQuery / Jinja2 / ECharts（成绩可视化）/ Chart.js（画像）
-- **安全（v1.19.50.35）**：
+- **安全（v1.19.49.36）**：
   - **身份**：管理员首启随机口令 + 强制改密 · 一次性初始口令展示 · 会话口令摘要（改密即踢）· IP + 账号双维限流与锁定（锁键含来源，防账号被恶意锁定）
   - **数据**：AES 身份证与 AI Key 加密 · CSRF 8h 时效 · 二维权限（功能三档 × 数据范围）· 白名单式教师候选过滤
   - **传输**：`url_guard` 出站白名单 + DNS 解析 + 禁 302 跟随 · CSP（Report-Only 起步，可切 enforce）· HTTPS Cookie Secure
@@ -216,7 +216,7 @@ python run.py --dev
 cd alumni_app && python run.py
 
 # Docker 部署（三个容器：主应用 + 往届查询 + MCP 服务）
-docker build -t stulink:v1.19.50.35 .
+docker build -t stulink:v1.19.49.36 .
 docker build -t stulink-alumni:v1.0.0 ./alumni_app
 docker build -f Dockerfile.mcp -t stulink-mcp:v1.0.0 .
 docker-compose up -d
@@ -301,7 +301,7 @@ StuLink/
 
 | 版本 | 日期 | 亮点 |
 |---|---|---|
-| **1.19.50.35** | 2026-10-17 | **合并 sakaay 分支（教务 / 成绩新功能）+ 第 10 轮审计补修 6 项**：学科组长三类（备课 / 教研 / 综合组「整组一位」）· 任课映射扩容 15 科 · 课时量统计 · 成绩复核（申请调分）· 成绩看板 / AI 工作室 · 全局对比按选科组合拆行；本次补修：复核候选接口数据范围下推到 SQL、课时量导出越权、课时量重复计临时调课、组长徽章科目名归一、AI 报告净化器空元素吞内容、复核增减分 NaN 校验（新增 SR-17 防回归） |
+| **1.19.49.36** | 2026-10-17 | **合并 sakaay 分支（教务 / 成绩新功能）+ 第 10 轮审计补修 6 项**：学科组长三类（备课 / 教研 / 综合组「整组一位」）· 任课映射扩容 15 科 · 课时量统计 · 成绩复核（申请调分）· 成绩看板 / AI 工作室 · 全局对比按选科组合拆行；本次补修：复核候选接口数据范围下推到 SQL、课时量导出越权、课时量重复计临时调课、组长徽章科目名归一、AI 报告净化器空元素吞内容、复核增减分 NaN 校验（新增 SR-17 防回归） |
 | **1.19.49.29** | 2026-10-14 | **日志脱敏修复**：`log_mask` 包装已有 formatter 时误读 `Formatter.style`（不存在）导致启动崩溃——MCP 服务（uvicorn 预配 handler）场景实测暴露，改为按 `_style` 类名推断 style，并保留 `fmt/datefmt/defaults`；新增 SR-16 防回归 |
 | **1.19.48.29** | 2026-10-14 | **权限体系多身份改造（P1–P6）**：一人可挂多个权限组 + **身份切换**（顶栏 / 工作台）；数据范围收敛为唯一口径（`app/utils/scope.py`，6 处委托）；范围类型扩为 7 档（全校/本人年级/指定年级/本人班级/指定班级/本人任课/无）；预置身份重排为 **11 组**（新增考试管理员/生活处/政教主任/政教员，删除校长/副校长/备课组长/教研组长/学生发展中心）；管理界面支持组范围 7 档与用户多身份分配 |
 | **1.19.47.29** | 2026-10-13 | **学生身份证号 / 联系电话明文收敛为「仅管理员 + 班主任」**（班主任补身份证明文、宿管收回联系电话，其余身份一律脱敏） |
