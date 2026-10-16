@@ -383,6 +383,8 @@ class AccessGuard:
         self.mode = (cfg.get('auth_mode') or 'account').strip().lower()
         self.token = cfg.get('token') or ''
         self.require_token = bool(cfg.get('require_token'))
+        # 2026-10-14 审计 API-03：token 模式的固定执行账号，仅用于风险留痕
+        self.bind_user = cfg.get('bind_user') or ''
         # 2026-10-13 审计修复 #12：来源总闸原先只认 TCP 源 IP。校园网普遍
         # NAT / 反向代理，一个出口 IP 背后是全校用户，攻击者刷满阈值会让
         # 同出口的所有合法客户端被挡。可信代理下改信 X-Forwarded-For。
@@ -426,6 +428,12 @@ class AccessGuard:
                     'error': 'invalid_token',
                     'message': '缺少或错误的访问令牌（Authorization: Bearer <token>）'})
                 return
+            # 2026-10-14 审计 API-03：token 模式下所有客户端共用 bind_user（默认 admin）
+            # 身份，令牌一旦泄露等于把该账号可见的全校数据交出去。默认 auth_mode=account
+            # 不走这里；一旦有人切到 token 模式，每次请求都留一条 warning 便于追溯。
+            logger.warning('MCP token 模式调用：client=%s path=%s bind_user=%s'
+                           '（该模式以固定账号执行，等同该账号可见数据全部可读）',
+                           client or '-', scope.get('path', ''), self.bind_user or '-')
             handle = identity.set_current(bootstrap.default_user_id())
             try:
                 await self.app(scope, receive, send)

@@ -5,13 +5,13 @@
     <a href="{{ url_for('grades.exam_detail', exam_id=exam.id) }}" class="btn btn-sm btn-outline-secondary" title="返回" aria-label="返回">
         <i class="bi bi-arrow-left"></i>
     </a>
-    <h5 class="mb-0"><i class="bi bi-stars"></i> AI 智能导入</h5>
+    <h5 class="mb-0"><i class="bi bi-stars"></i> 导入成绩 · AI 智能导入</h5>
     <span class="text-muted small">{{ exam.title_with_dimensions() }}</span>
     <span class="badge bg-light text-dark border ms-1">分数口径：{{ exam.score_mode_label() }}</span>
-    <a class="btn btn-sm btn-outline-secondary ms-auto" href="{{ url_for('grades.exam_import', exam_id=exam.id) }}">
-        <i class="bi bi-upload"></i> 改用标准模板导入
-    </a>
 </div>
+
+{# 2026-10-13：与「标准模板导入」同一个侧栏入口下的两种方式，页面内切换（见 _import_tabs.html） #}
+{% set import_tab = 'ai' %}{% include 'grades/_import_tabs.html' %}
 
 <div class="alert alert-light border small">
     <b>怎么用</b>：把任意格式的成绩表直接拖进来（<b>不用改模板</b>）。

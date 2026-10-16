@@ -7,8 +7,10 @@ from app.extensions import db
 from app.models import Room, BedAssignment, Student, StudentAccommodation, UserClassLink
 from app.utils.decorators import perm_required
 from app.utils.helpers import get_dict_values, get_active_grades, log_operation, get_graduated_grades
-# 2026-10-11 审计：宿舍数据范围唯一口径（班级归属 / 学生归属）
-from app.utils.dormitory_scope import class_in_scope, student_in_dorm_scope
+# 2026-10-11 审计：宿舍数据范围唯一口径（班级归属 / 学生归属 / 房间与学生查询）
+from app.utils.dormitory_scope import (class_in_scope, resolve_scope,
+                                       room_scope_query, student_in_dorm_scope,
+                                       student_scope_query)
 from app.services.history_service import record_assignment
 from sqlalchemy import and_, exists
 import threading
@@ -52,6 +54,59 @@ def _homeroom_class_or_default(grade, class_name):
     return grade, class_name
 
 
+def _unassigned_stats():
+    """可见范围内「未分配床位的住校生」按年级+班级+性别聚合。
+
+    2026-10-14 第三轮审计（SEC-01）：原实现写在 `abort(403)` 之后的死代码分支里，
+    且用**全校**范围统计 → 不带参数的越权请求能直接读到它。现在统一走
+    `student_scope_query`（无范围即空集，fail-closed）。
+
+    返回 (stats, total, total_male, total_female)。
+    """
+    graduated = get_graduated_grades()
+    # 2026-10-15 性能优化（200 VU 压测：本页 P50 5.2s）：
+    # ① 只取 id 列（with_entities），不再构造整表 ORM 对象；
+    # ② 「已分配」判断移到 Python 集合差 —— 原 `~Student.id.in_(2000+ ids)`
+    #    会生成巨型 NOT IN 表达式（SQL 解析与查询计划都吃亏）；
+    # ③ 最终只取 (id, grade, class_name, gender) 四列，分组内存开销同步下降。
+    # 范围收敛仍在 SQL 侧走 student_scope_query（fail-closed 口径不变）。
+    boarding_ids = [r[0] for r in StudentAccommodation.query.with_entities(
+        StudentAccommodation.student_id).filter(
+        StudentAccommodation.boarding_type == '住校').all()]
+    assigned_ids = {r[0] for r in BedAssignment.query.with_entities(
+        BedAssignment.student_id).filter(
+        BedAssignment.student_id.isnot(None)).all()}
+    query = student_scope_query(Student.query.with_entities(
+        Student.id, Student.grade, Student.class_name, Student.gender).filter(
+        Student.id.in_(boarding_ids) if boarding_ids else False))
+    if graduated:
+        query = query.filter(~Student.grade.in_(graduated))
+    rows = [r for r in query.all() if r[0] not in assigned_ids]
+
+    grouped = {}
+    total = total_male = total_female = 0
+    for sid, s_grade, s_class, s_gender in rows:
+        key = (s_grade, s_class)
+        if key not in grouped:
+            grouped[key] = {'male': 0, 'female': 0}
+        if s_gender == '男':
+            grouped[key]['male'] += 1
+            total_male += 1
+        else:
+            grouped[key]['female'] += 1
+            total_female += 1
+        total += 1
+
+    def _sort_key(x):
+        g = (x[0][0] or '').replace('级', '')
+        return (-int(g) if g.isdigit() else 0, x[0][1])
+
+    stats = [{'grade': g, 'class_name': c, 'male': n['male'], 'female': n['female'],
+              'total': n['male'] + n['female']}
+             for (g, c), n in sorted(grouped.items(), key=_sort_key)]
+    return stats, total, total_male, total_female
+
+
 @bp.route('/manage')
 @perm_required('dormitory.beds')
 def manage():
@@ -59,72 +114,42 @@ def manage():
     graduated = get_graduated_grades()
     grades = [g for g in grades if g not in graduated]
 
+    # 2026-10-14 第三轮审计修复（SEC-01）：
+    # ① 范围解析前置：无任何宿舍范围 → 403（fail-closed，与 /statistics/ 同口径）；
+    # ② 非全校账号的年级下拉只列可见年级（原先列全校，选到范围外才 403）。
+    kind, scope_grades, scope_pairs = resolve_scope(current_user)
+    if kind == 'none':
+        abort(403)
+    if kind != 'school':
+        _allowed = ({g for g, _ in (scope_pairs or set())} if kind == 'class'
+                    else set(scope_grades or ()))
+        grades = [g for g in grades if g in _allowed]
+
     # 2026-10-12 P1：班级来源与范围校验统一收敛（原班主任分支只信
     # user.grade/class_name 字段且不经 class_in_scope，非班主任走 URL 参数）
     grade, class_name = _homeroom_class_or_default(
         request.args.get('grade', ''), request.args.get('class_name', ''))
     if grade and class_name and not class_in_scope(current_user, grade, class_name):
         abort(403)
-        # 非班主任必须指定班级
-        if not grade or not class_name:
-            # 计算全校未分配住校学生统计（按年级+班级+性别分组）
-            graduated = get_graduated_grades()
-            boarding_ids = [sa.student_id for sa in StudentAccommodation.query.filter(
-                StudentAccommodation.boarding_type == '住校'
-            ).all()]
-            assigned_ids = [b.student_id for b in BedAssignment.query.filter(
-                BedAssignment.student_id.isnot(None)
-            ).all()]
-            unassigned_query = Student.query.filter(
-                Student.id.in_(boarding_ids) if boarding_ids else False
-            )
-            if graduated:
-                unassigned_query = unassigned_query.filter(~Student.grade.in_(graduated))
-            if assigned_ids:
-                unassigned_query = unassigned_query.filter(~Student.id.in_(assigned_ids))
-            unassigned_all = unassigned_query.order_by(
-                Student.grade.desc(), Student.class_name, Student.gender.desc()
-            ).all()
-            
-            # 按年级+班级+性别分组统计
-            unassigned_stats = []
-            total_unassigned = 0
-            total_unassigned_male = 0
-            total_unassigned_female = 0
-            grade_class_map = {}
-            for s in unassigned_all:
-                key = (s.grade, s.class_name)
-                if key not in grade_class_map:
-                    grade_class_map[key] = {'male': 0, 'female': 0}
-                if s.gender == '男':
-                    grade_class_map[key]['male'] += 1
-                    total_unassigned_male += 1
-                else:
-                    grade_class_map[key]['female'] += 1
-                    total_unassigned_female += 1
-                total_unassigned += 1
-            
-            # 按年级降序、班级升序排列
-            for (g, c), counts in sorted(grade_class_map.items(), key=lambda x: (-int(x[0][0].replace('级', '')) if x[0][0].replace('级', '').isdigit() else 0, x[0][1])):
-                unassigned_stats.append({
-                    'grade': g,
-                    'class_name': c,
-                    'male': counts['male'],
-                    'female': counts['female'],
-                    'total': counts['male'] + counts['female']
-                })
-            
-            return render_template('dormitory/assignments/manage.html',
-                                   rooms_data=[], unassigned_students=[],
-                                   current_grade='', current_class='',
-                                   grades=grades, need_filter=True,
-                                   unassigned_stats=unassigned_stats,
-                                   total_unassigned=total_unassigned,
-                                   total_unassigned_male=total_unassigned_male,
-                                   total_unassigned_female=total_unassigned_female)
+
+    # 2026-10-14 第三轮审计修复（SEC-01）：这段「非班主任必须指定班级」原先写在
+    # abort(403) 之后 → 永不执行的死代码；于是不带参数的请求会直落下方全库查询，
+    # 越界读「全校房间 + 全校未分配住校生名单」。现在与 abort 同级、真实可达，
+    # 且名单与统计都按可见范围收敛（_unassigned_stats → student_scope_query）。
+    if not grade or not class_name:
+        stats, total, total_male, total_female = _unassigned_stats()
+        return render_template('dormitory/assignments/manage.html',
+                               rooms_data=[], unassigned_students=[],
+                               current_grade='', current_class='',
+                               grades=grades, need_filter=True,
+                               unassigned_stats=stats,
+                               total_unassigned=total,
+                               total_unassigned_male=total_male,
+                               total_unassigned_female=total_female)
 
     # 查找已分配给该班级的宿舍
-    room_query = Room.query.filter_by(is_active=True)
+    # 2026-10-14（SEC-01）：套 room_scope_query，与 rooms / statistics 同口径
+    room_query = room_scope_query(Room.query.filter_by(is_active=True))
     if grade:
         room_query = room_query.filter_by(grade=grade)
     if class_name:
@@ -198,9 +223,11 @@ def manage():
         rooms_data.append({'room': room, 'beds': bed_list})
 
     # 未分配床位的学生
-    student_query = Student.query.filter(
+    # 2026-10-14（SEC-01）：再套一层可见范围（上面 grade/class 已过 class_in_scope，
+    # 这里是纵深防御，口径统一走 student_scope_query）
+    student_query = student_scope_query(Student.query.filter(
         Student.id.in_(boarding_ids) if boarding_ids else False
-    )
+    ))
     if graduated:
         student_query = student_query.filter(~Student.grade.in_(graduated))
     if grade:

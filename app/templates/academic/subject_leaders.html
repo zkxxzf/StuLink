@@ -1,312 +1,242 @@
 {% extends "base.html" %}
-{% block title %}备课组长名单{% endblock %}
+{% block title %}学科组长名单{% endblock %}
 {% block extra_css %}
 <style>
-.ld-block { margin-bottom: 14px; border: 1px solid #e2e8f0; border-radius: 10px;
-            overflow: hidden; background: #fff; }
-.ld-head { background: linear-gradient(90deg, #1e293b, #334155); color: #f1f5f9;
-           padding: 6px 10px; font-weight: 700; font-size: 13px;
-           display: flex; justify-content: space-between; align-items: center; }
-.ld-duty { white-space: pre-wrap; text-align: left !important; font-size: 11.5px;
-           color: #334155; line-height: 1.45; }
-.ld-members { text-align: left !important; font-size: 11.5px; color: #475569; }
+/* 矩阵：学科列吸附 + 格内下拉轻量化（与任课教师映射同形的观感） */
+#ldMatrix td:first-child, #ldMatrix th:first-child {
+    position: sticky; left: 0; z-index: 2; background: var(--bs-body-bg, #fff); }
+#ldMatrix thead th { position: sticky; top: 0; z-index: 3;
+                     background: var(--bs-tertiary-bg, #f1f3f5); }
+#ldMatrix thead th:first-child { z-index: 4; }
+#ldMatrix .ld-band td { background: var(--bs-tertiary-bg, #f1f3f5);
+                        font-weight: 700; letter-spacing: .5px; }
+#ldMatrix select.lcell { min-width: 130px; }
+#ldMatrix tr.ld-dirty td { background: rgba(255, 193, 7, .12); }
 @media print {
-    @page { size: A4 portrait; margin: 12mm; }
-    .ld-block { break-inside: avoid; page-break-inside: avoid; border-color: #9ca3af; }
-    .ld-head { background: #e5e7eb !important; color: #000 !important; }
-    .ld-duty, .ld-members { color: #000; }
+    @page { size: A4 landscape; margin: 10mm; }
+    #ldMatrix thead th, #ldMatrix td:first-child { position: static; }
+    .no-print { display: none !important; }
+    #ldMatrix select.lcell { border: 0; padding: 0; appearance: none; color: #000; }
 }
 </style>
 {% endblock %}
 {% block content %}
+{# 2026-10-14：教师名单 / 任课教师映射 / 学科组长合成一个入口，顶部 tab 互切 #}
+{% with active = 'leaders' %}{% include 'academic/_staff_tabs.html' %}{% endwith %}
 <div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
     <div class="d-flex align-items-center gap-2 flex-wrap">
-        <h4 class="fw-bold mb-0"><i class="bi bi-people"></i> 备课组长名单</h4>
-        <form class="d-flex gap-2 flex-wrap align-items-center" method="get">
-            <input name="school_year" class="form-control form-control-sm" style="width:130px"
-                   list="yearList" value="{{ school_year }}" placeholder="学年 2026-2027">
-            <datalist id="yearList">{% for y in years %}<option value="{{ y }}"></option>{% endfor %}</datalist>
-            <select name="term" class="form-select form-select-sm" style="width:120px">
-                <option value="">全部学期</option>
-                <option value="第一学期" {% if f.term == '第一学期' %}selected{% endif %}>第一学期</option>
-                <option value="第二学期" {% if f.term == '第二学期' %}selected{% endif %}>第二学期</option>
-            </select>
-            <select name="subject" class="form-select form-select-sm" style="width:120px">
-                <option value="">全部学科</option>
-                {% for s in subjects %}
-                <option value="{{ s }}" {% if f.subject == s %}selected{% endif %}>{{ s }}</option>
-                {% endfor %}
-            </select>
-            <input name="q" class="form-control form-control-sm" style="width:150px"
-                   value="{{ f.keyword }}" placeholder="组长/职责关键词">
-            <button class="btn btn-sm btn-outline-primary"><i class="bi bi-search"></i> 筛选</button>
-        </form>
+        <h4 class="fw-bold mb-0"><i class="bi bi-people"></i> 学科组长名单</h4>
+        {# 2026-10-14 方案：学年 × 学期即方案，下拉直接切换；新建 / 使用其他方案走右上「历史记录」 #}
+        <select class="form-select form-select-sm w-auto no-print" id="ldPlan"
+                aria-label="切换方案"
+                onchange="if (this.value) { location.href = this.value; }">
+            {% for p in plans %}
+            <option value="{{ url_for('academic.subject_leaders', school_year=p.school_year, term=p.term) }}"
+                    {% if p.school_year == school_year and p.term == term %}selected{% endif %}>
+                {{ p.name }}{% if p.is_current %} · 当前{% endif %}（{{ p.count }} 条）
+            </option>
+            {% endfor %}
+            {% if not plans %}
+            <option value="">{{ school_year or '暂无方案' }}{% if can_edit %}（点「历史记录」新建）{% endif %}</option>
+            {% endif %}
+        </select>
+        <span class="badge text-bg-light">已登记 {{ matrix.count }} 条</span>
     </div>
+    {# 卡片常驻按钮收敛为「主操作 + 更多」：导出 / 打印都进下拉（2026-10-14） #}
     <div class="d-flex gap-2 flex-wrap">
         {% if can_edit %}
-        <button class="btn btn-sm btn-primary no-print" data-bs-toggle="modal" data-bs-target="#leaderModal"
-                id="btnNewLeader">
-            <i class="bi bi-plus-lg"></i> 新增组长
+        {# 历史记录里的新建 / 使用 / 编辑 / 删除都需 academic.edit，只看不改的账号不显示入口 #}
+        <button type="button" class="btn btn-sm btn-outline-secondary no-print" id="ldHistory">
+            <i class="bi bi-clock-history"></i> 历史记录
+        </button>
+        <button class="btn btn-sm btn-success no-print" id="btnSaveMatrix">
+            <i class="bi bi-save"></i> 保存全部
         </button>
         {% endif %}
-        <a class="btn btn-sm btn-outline-info text-white"
-           href="{{ url_for('academic.subject_leader_export', school_year=school_year, term=f.term, subject=f.subject, q=f.keyword) }}">
-            <i class="bi bi-file-earmark-excel"></i> 导出 Excel
-        </a>
-        <button class="btn btn-sm btn-outline-dark no-print" onclick="window.print()">
-            <i class="bi bi-printer"></i> 打印
-        </button>
-    </div>
-</div>
-
-{% if not groups %}
-<div class="card">
-    <div class="card-body text-center py-5 text-muted">
-        <i class="bi bi-people" style="font-size:40px;"></i>
-        <p class="mt-3 mb-1">{% if school_year %}{{ school_year }} {% endif %}暂无备课组长记录</p>
-        <p class="small mb-0">
-            {% if can_edit %}点右上「新增组长」按 学科 × 年级 登记，同一学科可在不同年级设不同组长。{% else %}请联系教务维护。{% endif %}
-        </p>
-    </div>
-</div>
-{% else %}
-<div class="text-muted small mb-2">
-    共 {{ leaders|length }} 条记录 · {{ groups|length }} 个学科
-    {% if school_year %} · 学年 {{ school_year }}{% endif %}{% if f.term %} · {{ f.term }}{% endif %}
-</div>
-{% for subject, rows in groups %}
-<div class="ld-block">
-    <div class="ld-head">
-        <span><i class="bi bi-bookmark-star"></i> {{ subject }}
-            <span class="fw-normal small ms-2">{{ rows|length }} 个年级组</span>
-        </span>
-        <span class="fw-normal small">共 {{ rows|length }} 条记录</span>
-    </div>
-    <div class="table-responsive">
-        <table class="table table-sm align-middle mb-0">
-            <thead class="table-light">
-                <tr>
-                    <th style="width:80px">年级</th>
-                    <th style="width:90px">学期</th>
-                    <th style="width:100px">组长</th>
-                    <th style="width:90px">教师编号</th>
-                    <th style="width:200px">备课组范围</th>
-                    <th>主要职责</th>
-                    {% if can_edit %}<th style="width:110px" class="no-print">操作</th>{% endif %}
-                </tr>
-            </thead>
-            <tbody>
-                {% for ld in rows %}
-                <tr>
-                    <td class="fw-bold">{{ ld.grade or '全校' }}</td>
-                    <td class="text-muted small">{{ ld.term or '整学年' }}</td>
-                    <td class="fw-bold">{{ ld.leader_name }}</td>
-                    <td class="text-muted small">{{ ld.leader_uid or '—' }}</td>
-                    <td class="ld-members">{{ ld.members or '—' }}</td>
-                    <td class="ld-duty">{{ ld.duty or '—' }}</td>
-                    {% if can_edit %}
-                    <td class="no-print">
-                        <button class="btn btn-sm btn-outline-primary py-0 btn-edit-leader"
-                                data-id="{{ ld.id }}" data-school-year="{{ ld.school_year }}"
-                                data-term="{{ ld.term }}" data-grade="{{ ld.grade }}"
-                                data-subject="{{ ld.subject }}" data-leader-name="{{ ld.leader_name }}"
-                                data-leader-uid="{{ ld.leader_uid or '' }}"
-                                data-members="{{ ld.members or '' }}" data-duty="{{ ld.duty or '' }}"
-                                data-sort-order="{{ ld.sort_order }}">编辑</button>
-                        <form method="post" class="d-inline"
-                              action="{{ url_for('academic.subject_leader_delete') }}"
-                              onsubmit="return confirm('删除「{{ ld.grade or '全校' }}{{ ld.subject }} · {{ ld.leader_name }}」这条备课组长记录？')">
-                            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                            <input type="hidden" name="id" value="{{ ld.id }}">
-                            <input type="hidden" name="school_year" value="{{ school_year }}">
-                            <button class="btn btn-sm btn-outline-danger py-0">删除</button>
-                        </form>
-                    </td>
-                    {% endif %}
-                </tr>
-                {% endfor %}
-            </tbody>
-        </table>
-    </div>
-</div>
-{% endfor %}
-{% endif %}
-
-<div class="alert alert-light border small mb-0 no-print">
-    <i class="bi bi-info-circle"></i>
-    同名学年 × 学期 × 年级 × 学科重复保存会自动更新（不会产生重复行）；
-    「整学年」表示该学年通用，若某学期单独设置，请把学期选到具体学期。
-    职责可点「填入常用职责」套用模板后自行修改。
-</div>
-
-{% if can_edit %}
-<div class="modal fade" id="leaderModal" tabindex="-1">
-    <div class="modal-dialog modal-lg">
-        <div class="modal-content">
-            <form method="post" action="{{ url_for('academic.subject_leader_save') }}" id="leaderForm">
-                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                <div class="modal-header py-2">
-                    <h6 class="modal-title"><i class="bi bi-person-badge"></i> <span id="leaderModalTitle">新增备课组长</span></h6>
-                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
-                </div>
-                <div class="modal-body">
-                    <div class="row g-2">
-                        <div class="col-md-4">
-                            <label class="form-label small mb-1">学年 <span class="text-danger">*</span></label>
-                            <input name="school_year" id="ldYear" class="form-control form-control-sm"
-                                   list="yearList" value="{{ school_year }}" required
-                                   placeholder="如 2026-2027">
-                        </div>
-                        <div class="col-md-4">
-                            <label class="form-label small mb-1">学期</label>
-                            <select name="term" id="ldTerm" class="form-select form-select-sm">
-                                <option value="">整学年</option>
-                                <option value="第一学期">第一学期</option>
-                                <option value="第二学期">第二学期</option>
-                            </select>
-                        </div>
-                        <div class="col-md-4">
-                            <label class="form-label small mb-1">年级</label>
-                            <input name="grade" id="ldGrade" class="form-control form-control-sm"
-                                   list="gradeList" placeholder="留空＝全校/综合组">
-                            <datalist id="gradeList">
-                                {% for g in grades %}<option value="{{ g }}"></option>{% endfor %}
-                            </datalist>
-                        </div>
-                        <div class="col-md-4">
-                            <label class="form-label small mb-1">学科 <span class="text-danger">*</span></label>
-                            <input name="subject" id="ldSubject" class="form-control form-control-sm"
-                                   list="subjectList" required>
-                            <datalist id="subjectList">
-                                {% for s in subjects %}<option value="{{ s }}"></option>{% endfor %}
-                            </datalist>
-                        </div>
-                        <div class="col-md-4">
-                            <label class="form-label small mb-1">组长姓名 <span class="text-danger">*</span></label>
-                            <input name="leader_name" id="ldName" class="form-control form-control-sm"
-                                   list="teacherNameList" required>
-                            <datalist id="teacherNameList"></datalist>
-                        </div>
-                        <div class="col-md-4">
-                            <label class="form-label small mb-1">教师编号</label>
-                            <input name="leader_uid" id="ldUid" class="form-control form-control-sm"
-                                   placeholder="选择教师后自动带出">
-                        </div>
-                        <div class="col-12">
-                            <label class="form-label small mb-1">备课组范围 / 成员</label>
-                            <input name="members" id="ldMembers" class="form-control form-control-sm"
-                                   maxlength="300" placeholder="如：高一语文备课组（6 人）">
-                        </div>
-                        <div class="col-12">
-                            <label class="form-label small mb-1 d-flex justify-content-between">
-                                <span>主要职责</span>
-                                <button type="button" class="btn btn-sm btn-outline-secondary py-0"
-                                        id="btnFillDuty">填入常用职责</button>
-                            </label>
-                            <textarea name="duty" id="ldDuty" class="form-control form-control-sm"
-                                      rows="4" maxlength="500"></textarea>
-                        </div>
-                        <div class="col-md-3">
-                            <label class="form-label small mb-1">排序</label>
-                            <input name="sort_order" id="ldSort" type="number" value="0"
-                                   class="form-control form-control-sm">
-                        </div>
-                        <input type="hidden" name="id" id="ldId" value="">
-                    </div>
-                    <div class="form-text mt-2">
-                        同一 学年 + 学期 + 年级 + 学科 重复保存会更新已有记录（不会重复）。
-                    </div>
-                </div>
-                <div class="modal-footer py-2">
-                    <button type="button" class="btn btn-sm btn-secondary" data-bs-dismiss="modal">取消</button>
-                    <button type="submit" class="btn btn-sm btn-primary"><i class="bi bi-check-lg"></i> 保存</button>
-                </div>
-            </form>
+        <div class="dropdown">
+            <button type="button" class="btn btn-sm btn-outline-secondary dropdown-toggle no-print"
+                    data-bs-toggle="dropdown" aria-expanded="false">
+                <i class="bi bi-three-dots"></i> 更多
+            </button>
+            <ul class="dropdown-menu dropdown-menu-end">
+                <li>
+                    <a class="dropdown-item"
+                       href="{{ url_for('academic.subject_leader_export', school_year=school_year, term=term) }}">
+                        <i class="bi bi-file-earmark-excel"></i> 导出 Excel
+                    </a>
+                </li>
+                <li>
+                    <button type="button" class="dropdown-item" onclick="window.print()">
+                        <i class="bi bi-printer"></i> 打印
+                    </button>
+                </li>
+            </ul>
         </div>
     </div>
 </div>
-{% endif %}
+
+<div class="card">
+    <div class="card-body">
+        <div class="d-flex align-items-center mb-2 flex-wrap gap-2">
+            <span class="text-muted small">
+                学年 <b>{{ school_year or '—' }}</b> · {{ term or '整学年' }}：
+                在格子里选本学科教师（下拉只列本学科教师）；
+                <b>备课组长</b>＝年级 × 学科，<b>教研组长</b>＝只按学科、不分年级，
+                <b>综合组</b>＝整组一位、不分年级。
+                清空格子＝删除该条登记。
+            </span>
+            <span class="ms-auto small" id="mMsg"></span>
+        </div>
+        <div class="table-responsive" style="max-height:70vh;">
+            <table class="table table-sm align-middle mb-0" id="ldMatrix"
+                   data-save-url="{{ url_for('academic.subject_leader_matrix_save') }}"
+                   data-year="{{ school_year }}" data-term="{{ term }}">
+                <thead>
+                <tr>
+                    <th style="min-width:110px;">学科</th>
+                    {% for col in matrix.columns %}
+                    <th class="text-center" style="min-width:170px;">
+                        {{ col.label }}
+                        <div class="fw-normal small text-muted">{{ col.category }}</div>
+                    </th>
+                    {% endfor %}
+                </tr>
+                </thead>
+                <tbody>
+                {% for gname, subs in matrix.groups %}
+                {% if gname == '综合组' %}
+                <tr class="ld-band"><td colspan="{{ matrix.columns|length + 1 }}"
+                                      class="py-1">综合组（{{ matrix.group_subjects|join(' / ') }}）</td></tr>
+                {# 2026-10-14 用户口径：整个综合组只设 1 名组长 —— 六科共用一位，不分年级、不分学科，
+                   所以这里只渲染一行一格（候选＝六科教师并集） #}
+                {% set gcell = matrix.cells.get(matrix.group_key) %}
+                <tr>
+                    <td class="fw-bold">
+                        综合组
+                        {% if gname in matrix.fallback %}
+                        <i class="bi bi-info-circle text-muted"
+                           title="任课数据里没有该组教师（课表未填教师），这里可选全部教师"></i>
+                        {% endif %}
+                    </td>
+                    <td colspan="{{ matrix.columns|length }}" class="text-center">
+                        {% if can_edit %}
+                        <select class="form-select form-select-sm lcell mx-auto" style="max-width:260px;"
+                                data-key="{{ matrix.group_key }}">
+                            <option value="" {% if not gcell or not gcell.uid %}selected{% endif %}>
+                                {%- if gcell and not gcell.uid %}{{ gcell.name }}（历史记录 · 未绑定编号）
+                                {%- else %}— 未设置 —{% endif -%}
+                            </option>
+                            {% for t in matrix.candidates[gname] %}
+                            <option value="{{ t.uid }}" {% if gcell and gcell.uid == t.uid %}selected{% endif %}>{{ t.name }}</option>
+                            {% endfor %}
+                            {% if gcell and gcell.uid and not gcell.selectable %}
+                            <option value="{{ gcell.uid }}" selected>{{ gcell.name }}（不在本组候选）</option>
+                            {% endif %}
+                        </select>
+                        <div class="text-muted small">整组一位 · 不分年级</div>
+                        {% else %}
+                        <span class="{% if not gcell %}text-muted{% endif %}">{{ gcell.name if gcell else '—' }}</span>
+                        {% endif %}
+                    </td>
+                </tr>
+                {% else %}
+                {% for sub in subs %}
+                <tr>
+                    <td class="fw-bold">
+                        {{ sub }}
+                        {% if sub in matrix.fallback %}
+                        <i class="bi bi-info-circle text-muted" title="任课数据里没有该学科教师（课表未填教师），本行可选全部教师"></i>
+                        {% endif %}
+                    </td>
+                    {% for col in matrix.columns %}
+                    {% set key = col.key ~ '|' ~ sub %}
+                    {% set cell = matrix.cells.get(key) %}
+                    <td class="text-center">
+                        {% if can_edit %}
+                        <select class="form-select form-select-sm lcell" data-key="{{ key }}">
+                            <option value="" {% if not cell or not cell.uid %}selected{% endif %}>
+                                {%- if cell and not cell.uid %}{{ cell.name }}（历史记录 · 未绑定编号）
+                                {%- else %}— 未设置 —{% endif -%}
+                            </option>
+                            {% for t in matrix.candidates[sub] %}
+                            <option value="{{ t.uid }}" {% if cell and cell.uid == t.uid %}selected{% endif %}>{{ t.name }}</option>
+                            {% endfor %}
+                            {% if cell and cell.uid and not cell.selectable %}
+                            <option value="{{ cell.uid }}" selected>{{ cell.name }}（不在本学科候选）</option>
+                            {% endif %}
+                        </select>
+                        {% else %}
+                        <span class="{% if not cell %}text-muted{% endif %}">{{ cell.name if cell else '—' }}</span>
+                        {% endif %}
+                    </td>
+                    {% endfor %}
+                </tr>
+                {% endfor %}
+                {% endif %}
+                {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        <div class="alert alert-light border small mt-2 mb-0 no-print">
+            <i class="bi bi-info-circle"></i>
+            组长必须是本学科教师（任课教师映射为唯一依据，课表兜底）；
+            <b>综合组整组只设 1 名组长</b>（{{ matrix.group_subjects|join(' / ') }} 共用一位，不分年级）。
+            带 <i class="bi bi-info-circle"></i> 的学科在任课数据里查不到教师，该行可选全部教师。
+            改动格子后点右上「保存全部」；切换学期（方案）走顶部下拉或右上「历史记录」。
+        </div>
+    </div>
+</div>
 {% endblock %}
 
 {% block extra_js %}
 <script>
-(function () {
+$(function () {
     'use strict';
-    var DUTY_TPL = {{ duty_templates|tojson }};
-    var TEACHERS = [];
-    var teachersUrl = {{ url_for('academic.api_schedule_teachers')|tojson }};
-
-    // 教师名/编号自动匹配
-    fetch(teachersUrl, { headers: { 'X-Requested-With': 'XMLHttpRequest' } })
-        .then(function (r) { return r.json(); })
-        .then(function (res) {
-            if (!res || !res.success) { return; }
-            TEACHERS = res.data || [];
-            var dl = document.getElementById('teacherNameList');
-            if (dl) {
-                // v1.19.49.29 审核（🟡-2）：教师名经 innerHTML 注入前转义，防 XSS
-                dl.innerHTML = TEACHERS.map(function (t) {
-                    var safe = String(t.name == null ? '' : t.name)
-                        .replace(/&/g, '&amp;').replace(/</g, '&lt;')
-                        .replace(/>/g, '&gt;').replace(/"/g, '&quot;')
-                        .replace(/'/g, '&#39;');
-                    return '<option value="' + safe + '"></option>';
-                }).join('');
-            }
-        }).catch(function () { });
-
-    var $name = document.getElementById('ldName');
-    if ($name) {
-        $name.addEventListener('blur', function () {
-            var val = $name.value.trim();
-            var hit = null;
-            TEACHERS.forEach(function (t) { if (t.name === val) { hit = t; } });
-            document.getElementById('ldUid').value = hit ? hit.uid : '';
-        });
-    }
-
-    // 新增
-    var btnNew = document.getElementById('btnNewLeader');
-    if (btnNew) {
-        btnNew.addEventListener('click', function () {
-            document.getElementById('leaderModalTitle').textContent = '新增备课组长';
-            document.getElementById('leaderForm').reset();
-            document.getElementById('ldYear').value = {{ school_year|tojson }};
-            document.getElementById('ldId').value = '';
-        });
-    }
-
-    // 编辑：把行数据填回表单
-    document.querySelectorAll('.btn-edit-leader').forEach(function (btn) {
-        btn.addEventListener('click', function () {
-            var d = this.dataset;
-            document.getElementById('leaderModalTitle').textContent =
-                '编辑：' + (d.grade || '全校') + d.subject + ' · ' + d.leaderName;
-            document.getElementById('ldYear').value = d.schoolYear || '';
-            document.getElementById('ldTerm').value = d.term || '';
-            document.getElementById('ldGrade').value = d.grade || '';
-            document.getElementById('ldSubject').value = d.subject || '';
-            document.getElementById('ldName').value = d.leaderName || '';
-            document.getElementById('ldUid').value = d.leaderUid || '';
-            document.getElementById('ldMembers').value = d.members || '';
-            document.getElementById('ldDuty').value = d.duty || '';
-            document.getElementById('ldSort').value = d.sortOrder || '0';
-            bootstrap.Modal.getOrCreateInstance(document.getElementById('leaderModal')).show();
+    // 2026-10-14 方案：右上角「历史记录」（新建 / 使用其他方案 / 编辑 / 删除）
+    $('#ldHistory').on('click', function () { window.slPlans['ldPlanModal'].open(); });
+    var $mx = $('#ldMatrix');
+    if (!$mx.length) { return; }
+    var saveUrl = $mx.data('save-url'), dirty = {};
+    $mx.on('change', '.lcell', function () {
+        var $c = $(this);
+        dirty[$c.data('key')] = $c.val();
+        $c.closest('tr').addClass('ld-dirty');
+    });
+    $('#btnSaveMatrix').on('click', function () {
+        if (!Object.keys(dirty).length) {
+            $('#mMsg').removeClass('text-danger').text('没有改动');
+            return;
+        }
+        $('#mMsg').removeClass('text-danger').text('保存中…');
+        // CSRF：base.html 的 $.ajaxSetup 统一加 X-CSRFToken；contentType 必须显式声明 JSON
+        $.ajax({
+            url: saveUrl, type: 'POST', contentType: 'application/json',
+            data: JSON.stringify({school_year: $mx.data('year'), term: $mx.data('term'),
+                                  cells: dirty})
+        }).done(function (res) {
+            dirty = {};
+            $('#mMsg').text(res.message || '已保存');
+            setTimeout(function () { location.reload(); }, 900);
+        }).fail(function (x) {
+            $('#mMsg').addClass('text-danger')
+                .text((x.responseJSON && x.responseJSON.message) || '保存失败，请重试');
         });
     });
-
-    // 常用职责模板
-    var btnFill = document.getElementById('btnFillDuty');
-    if (btnFill) {
-        btnFill.addEventListener('click', function () {
-            var grade = (document.getElementById('ldGrade').value || '').trim();
-            var key = grade.indexOf('高三') >= 0 ? '毕业年级' : (grade ? 'default' : '综合组');
-            var text = DUTY_TPL[key] || DUTY_TPL['default'] || '';
-            var box = document.getElementById('ldDuty');
-            if (box.value.trim() && !window.confirm('会覆盖当前已填职责，确定继续？')) { return; }
-            box.value = text;
-        });
-    }
-})();
+});
 </script>
+
+{# 2026-10-14 方案 · 历史记录（新建 / 使用 / 编辑 / 删除），与任课映射页共用组件。
+   必须放在 extra_js（base.html 在 jQuery 之后渲染），否则 $ 未定义、按钮点了没反应。 #}
+{% from '_plan_manager.html' import plan_manager %}
+{{ plan_manager('ldPlanModal', '学科组长方案 · 历史记录',
+                '每学期的组长各留一套方案；「使用」＝页面切到该学期（各学期互不影响）。',
+                url_for('academic.subject_leader_plans'),
+                url_for('academic.subject_leader_plans_create'),
+                url_for('academic.subject_leader_plans_use'),
+                url_for('academic.subject_leader_plans_rename'),
+                url_for('academic.subject_leader_plans_delete'),
+                count_label='组长条数',
+                use_confirm='页面将切到该学期（各学期的组长登记互相独立，不受影响）。',
+                reload_after_use=False,
+                source_year=school_year, source_term=term) }}
 {% endblock %}

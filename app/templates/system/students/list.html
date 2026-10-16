@@ -11,13 +11,22 @@
 .col-dorm { background: #f8fafc; }
 .col-dorm .bi-lock { color: #94a3b8; font-size: 10px; }
 th.col-dorm-head { background: #eef2f7 !important; }
+/* 2026-10-14 UI 审计 H4：手机端（≤768px）表格崩坏 ——
+   18 列在 390px 下被压到 min-content，姓名 / 选科 / 毕业学校等中文列**逐字换行变成竖排**，
+   整表还把页面顶出横向滚动条（实测溢出 764px）。
+   ①外层补 .table-responsive：横向滚动收进卡片内，页面本身不再横滚；
+   ②窄屏关键列 nowrap：不再逐字竖排（列宽由内容决定，横向滚动查看其余列）；
+   ③标题行与按钮区允许换行：不再相互挤压重叠。 */
+@media (max-width: 768px) {
+    #studentsTable th, #studentsTable td { white-space: nowrap; }
+}
 </style>
-<div class="d-flex justify-content-between align-items-center mb-3">
+<div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
     <h4 class="fw-bold mb-0"><i class="bi bi-people"></i> 学生列表</h4>
     {# 2026-10-13：按钮改按权限点显示（原按角色 → 收掉班主任 students.import/transfer 后
        会出现「看得见按钮、点了 403」） #}
     {% if current_user.has_perm('students.view') %}
-    <div class="d-flex gap-2">
+    <div class="d-flex gap-2 flex-wrap">
         {% if current_user.has_perm('students.import') %}
         <button class="btn btn-success" data-bs-toggle="modal" data-bs-target="#importModal">
             <i class="bi bi-file-earmark-excel"></i> 批量导入
@@ -28,7 +37,7 @@ th.col-dorm-head { background: #eef2f7 !important; }
             <i class="bi bi-arrow-left-right"></i> 批量调班
         </button>
         {% endif %}
-        {# v1.19.49.29 调班记录总览 #}
+        {# v1.19.49.35 调班记录总览 #}
         <a href="{{ url_for('students.class_changes') }}" class="btn btn-outline-info">
             <i class="bi bi-clock-history"></i> 调班记录
         </a>
@@ -64,9 +73,9 @@ th.col-dorm-head { background: #eef2f7 !important; }
 
 <div class="card">
     <div class="card-body">
-        <div class="d-flex justify-content-between align-items-center mb-2">
+        <div class="d-flex justify-content-between align-items-center mb-2 flex-wrap gap-2">
             <small class="text-muted">共 {{ pagination.total if pagination else 0 }} 条</small>
-            <div class="d-flex gap-2">
+            <div class="d-flex gap-2 flex-wrap">
                 {% if current_user.has_perm('students.export') %}
                 <button class="btn btn-sm btn-outline-success" onclick="openExportModal()"><i class="bi bi-file-earmark-excel"></i> 导出</button>
                 {% endif %}
@@ -74,6 +83,10 @@ th.col-dorm-head { background: #eef2f7 !important; }
             </div>
         </div>
         <form method="GET">
+        {# 2026-10-14 UI 审计 H4：补 .table-responsive —— 原先裸 <table> 直接把横向溢出顶到整页
+           （手机实测页面溢出 764px），现在横向滚动收在这层容器里，页面本身不再横滚，
+           并顺带启用 base.html 的表头 / 首列 sticky 规则。 #}
+        <div class="table-responsive">
         <table id="studentsTable" class="table table-hover table-sm" style="width:100%">
             <thead class="table-light">
                 <tr>
@@ -106,34 +119,34 @@ th.col-dorm-head { background: #eef2f7 !important; }
                     <th></th>
                     {% endif %}
                     <th><input type="text" name="student_number" placeholder="学号"
-                           value="{{ request.args.get('student_number','') }}" onkeydown="if(event.key==='Enter')this.form.submit()"></th>
+                           value="{{ request.args.get('student_number','') }}" onkeydown="if(event.key==='Enter')this.form.submit()" aria-label="学号"></th>
                     <th><input type="text" name="name" placeholder="姓名"
-                           value="{{ request.args.get('name','') }}" onkeydown="if(event.key==='Enter')this.form.submit()"></th>
-                    <th><select name="gender" onchange="this.form.submit()">
+                           value="{{ request.args.get('name','') }}" onkeydown="if(event.key==='Enter')this.form.submit()" aria-label="姓名"></th>
+                    <th><select name="gender" onchange="this.form.submit()" aria-label="性别">
                         <option value="">全部</option>
                         <option value="男" {% if filter_gender == '男' %}selected{% endif %}>男</option>
                         <option value="女" {% if filter_gender == '女' %}selected{% endif %}>女</option>
                     </select></th>
-                    <th><select name="grade" onchange="this.form.submit()">
+                    <th><select name="grade" onchange="this.form.submit()" aria-label="年级">
                         <option value="">全部</option>
                         {% for g in grades %}
                         <option value="{{ g }}" {% if filter_grade == g %}selected{% endif %}>{{ g }}</option>
                         {% endfor %}
                     </select></th>
-                    <th><select name="class_name" onchange="if(this.value && document.querySelector('[name=grade]').value===''){alert('请先选择年级，再选择班级');this.value='';return;}this.form.submit()">
+                    <th><select name="class_name" onchange="if(this.value && document.querySelector('[name=grade]').value===''){alert('请先选择年级，再选择班级');this.value='';return;}this.form.submit()" aria-label="班级">
                         <option value="">全部</option>
                         {% for c in classes %}
                         <option value="{{ c }}" {% if filter_class == c %}selected{% endif %}>{{ c }}</option>
                         {% endfor %}
                     </select></th>
                     <th></th>
-                    <th><select name="subject_selection" onchange="this.form.submit()">
+                    <th><select name="subject_selection" onchange="this.form.submit()" aria-label="选科">
                         <option value="">全部</option>
                         {% for s in subjects %}
                         <option value="{{ s }}" {% if filter_subject == s %}selected{% endif %}>{{ s }}</option>
                         {% endfor %}
                     </select></th>
-                    <th><select name="graduation_school" onchange="this.form.submit()">
+                    <th><select name="graduation_school" onchange="this.form.submit()" aria-label="毕业学校">
                         <option value="">全部</option>
                         {% for s in school_list %}
                         <option value="{{ s }}" {% if filter_school == s %}selected{% endif %}>{{ s }}</option>
@@ -141,7 +154,7 @@ th.col-dorm-head { background: #eef2f7 !important; }
                     </select></th>
                     <th></th>
                     <th></th>
-                    <th><select name="enrollment_status" onchange="this.form.submit()">
+                    <th><select name="enrollment_status" onchange="this.form.submit()" aria-label="学籍状态">
                         <option value="">全部</option>
                         {% for v in enrollment_statuses %}
                         <option value="{{ v }}" {% if filter_enrollment == v %}selected{% endif %}>{{ v }}</option>
@@ -162,7 +175,8 @@ th.col-dorm-head { background: #eef2f7 !important; }
                     {% if current_user.has_role('admin') %}
                     <td class="text-center">
                         <input type="checkbox" class="form-check-input student-check"
-                               form="batchDeleteForm" name="student_ids" value="{{ s.id }}">
+                               form="batchDeleteForm" name="student_ids" value="{{ s.id }}"
+                               aria-label="选择 {{ s.name }}">
                     </td>
                     {% endif %}
                     <td>
@@ -182,7 +196,7 @@ th.col-dorm-head { background: #eef2f7 !important; }
                     </td>
                     <td>{{ s.grade }}</td>
                     <td>{{ s.class_name }}</td>
-                    {# v1.19.49.29 调班次数：点击跳到调班记录（按学号筛选） #}
+                    {# v1.19.49.35 调班次数：点击跳到调班记录（按学号筛选） #}
                     <td class="text-center">
                         {% set cc = change_counts.get(s.id, 0) %}
                         {% if cc %}
@@ -233,18 +247,18 @@ th.col-dorm-head { background: #eef2f7 !important; }
                         {% if s.id in bed_map and bed_map[s.id]['has_room'] %}{{ bed_map[s.id]['bed_number'] }} 床{% else %}<span class="text-muted">-</span>{% endif %}
                     </td>
                     <td>
-                        <a href="{{ url_for('students.detail', id=s.id) }}" class="btn btn-sm btn-outline-primary" title="查看">
+                        <a href="{{ url_for('students.detail', id=s.id) }}" class="btn btn-sm btn-outline-primary" title="查看" aria-label="查看">
                             <i class="bi bi-eye"></i>
                         </a>
                         {% if current_user.has_perm('students.edit') %}
-                        <a href="{{ url_for('students.edit', id=s.id) }}" class="btn btn-sm btn-outline-warning" title="编辑">
+                        <a href="{{ url_for('students.edit', id=s.id) }}" class="btn btn-sm btn-outline-warning" title="编辑" aria-label="编辑">
                             <i class="bi bi-pencil"></i>
                         </a>
                         {% endif %}
                         {% if current_user.has_perm('students.transfer') %}
-                        <button type="button" class="btn btn-sm btn-outline-info" title="调班"
+                        <button type="button" class="btn btn-sm btn-outline-info" title="调班" aria-label="调班"
                                 {# M-10：内联处理器中的字符串参数必须 |tojson（|e 的 &#39; 会在交 JS 引擎前还原为 ' 从而打断字符串） #}
-                                onclick="openTransferModal({{ s.id }}, {{ s.name|tojson }}, {{ s.grade|tojson }}, {{ s.class_name|tojson }})">
+                                onclick='openTransferModal({{ s.id }}, {{ s.name|tojson }}, {{ s.grade|tojson }}, {{ s.class_name|tojson }})'>
                             <i class="bi bi-arrow-left-right"></i>
                         </button>
                         {% endif %}
@@ -253,6 +267,7 @@ th.col-dorm-head { background: #eef2f7 !important; }
                 {% endfor %}
             </tbody>
         </table>
+        </div>
         </form>
         
         <!-- 分页组件 -->
@@ -378,7 +393,7 @@ th.col-dorm-head { background: #eef2f7 !important; }
                             </select>
                         </div>
                     </div>
-                    {# v1.19.49.29 调班记录：变更性质（写入变迁日志，用于区分真实换班与改错） #}
+                    {# v1.19.49.35 调班记录：变更性质（写入变迁日志，用于区分真实换班与改错） #}
                     <div class="mb-2">
                         <label for="transferKind" class="form-label">变更性质</label>
                         <select class="form-select" id="transferKind" name="class_change_kind">
@@ -474,14 +489,14 @@ th.col-dorm-head { background: #eef2f7 !important; }
             </div>
             <form id="exportForm" method="POST" action="{{ url_for('students.export_students') }}">
                 <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                <input type="hidden" name="gender" value="{{ filter_gender }}">
-                <input type="hidden" name="grade" value="{{ filter_grade }}">
-                <input type="hidden" name="class_name" value="{{ filter_class }}">
-                <input type="hidden" name="subject_selection" value="{{ filter_subject }}">
-                <input type="hidden" name="graduation_school" value="{{ filter_school }}">
-                <input type="hidden" name="enrollment_status" value="{{ filter_enrollment }}">
-                <input type="hidden" name="name" value="{{ request.args.get('name','') }}">
-                <input type="hidden" name="student_number" value="{{ request.args.get('student_number','') }}">
+                <input type="hidden" name="gender" value="{{ filter_gender }}" aria-label="性别">
+                <input type="hidden" name="grade" value="{{ filter_grade }}" aria-label="年级">
+                <input type="hidden" name="class_name" value="{{ filter_class }}" aria-label="班级">
+                <input type="hidden" name="subject_selection" value="{{ filter_subject }}" aria-label="选科">
+                <input type="hidden" name="graduation_school" value="{{ filter_school }}" aria-label="毕业学校">
+                <input type="hidden" name="enrollment_status" value="{{ filter_enrollment }}" aria-label="学籍状态">
+                <input type="hidden" name="name" value="{{ request.args.get('name','') }}" aria-label="姓名">
+                <input type="hidden" name="student_number" value="{{ request.args.get('student_number','') }}" aria-label="学号">
                 <div class="modal-body">
                     <div class="alert alert-warning alert-dismissible fade show mb-4" role="alert">
                         <i class="bi bi-shield-exclamation"></i> <strong>信息保密提醒：</strong>

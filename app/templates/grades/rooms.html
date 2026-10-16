@@ -2,14 +2,17 @@
 {% block title %}考场维护{% endblock %}
 {% block extra_css %}
 <style>
-  /* v1.19.49.29 考场维护：左（全部房间）— 中（箭头）— 右（分组）三栏，页面不再铺满全宽 */
+  /* v1.19.49.35 考场维护：左（全部房间）— 中（箭头）— 右（分组）三栏，页面不再铺满全宽 */
   .rm-list { max-height: 62vh; overflow: auto; padding: 4px; }
   .rm-item {
     display: flex; align-items: center; gap: 8px;
     padding: 4px 6px; border-radius: 6px; cursor: pointer;
   }
-  .rm-item:hover { background: #f1f5f9; }
-  .rm-item + .rm-item { border-top: 1px solid #f1f5f9; }
+  /* 2026-10-14 用户口径（鼠标移到行上颜色不好 / 看不清）：原来写死 #f1f5f9 ——
+     深色主题下 hover 整行发白、浅色文字直接糊掉（与 dormitory/statistics/overview
+     那次「写死浅底」是同一个坑）。颜色一律取主题变量，深浅两模式自动跟随。 */
+  .rm-item:hover { background: var(--sl-surface-3); }
+  .rm-item + .rm-item { border-top: 1px solid var(--sl-line); }
   .rm-item .form-check-input { margin: 0; flex: none; }
   .rm-item .badge { font-weight: 500; }
 </style>
@@ -24,6 +27,11 @@
     （不同年级考试时间错开，可共用）。分组只用于归集与后续建场筛选，
     <strong>不会改动任何历史场次的考场安排</strong>。
     批量导入 Excel 表头只需「<b>位置</b>」列（可选「<b>备注</b>」列）。
+</div>
+<div class="alert alert-light border small mb-3">
+    <i class="bi bi-people"></i> <b>容量（人）在右侧分组里直接填</b>（已选入分组的房间才有）——
+    考务编排页②选考场模板点「一键带入」时，按这里的容量带入各考场；
+    每场考试的容量仍可在「考务安排」里单独调整，<strong>不影响历史场次</strong>。
 </div>
 
 <div class="row g-3">
@@ -42,11 +50,11 @@
                 <input type="file" id="roomImpFile" accept=".xlsx,.xls" style="display:none"
                        onchange="importRooms(this)">
                 <a class="btn btn-sm btn-outline-secondary py-0"
-                   href="{{ url_for('grades.exam_rooms_template') }}" title="下载导入模板（位置 / 备注）">
+                   href="{{ url_for('grades.exam_rooms_template') }}" title="下载导入模板（位置 / 备注）" aria-label="下载导入模板（位置 / 备注）">
                     <i class="bi bi-download"></i></a>
             </div>
             <div class="p-2 border-bottom">
-                <input id="rmSearch" class="form-control form-control-sm" placeholder="搜索位置 / 备注">
+                <input id="rmSearch" class="form-control form-control-sm" placeholder="搜索位置 / 备注" aria-label="搜索考场位置 / 备注">
             </div>
             <div class="rm-list" id="leftList"></div>
         </div>
@@ -65,6 +73,11 @@
             <div class="card-header py-2 d-flex align-items-center gap-1">
                 <span class="fw-bold text-nowrap"><i class="bi bi-collection"></i> 分组</span>
                 <select id="grpSel" class="form-select form-select-sm w-auto ms-auto"></select>
+                {# 2026-10-14 用户要求：一键批量设置容量（整组 / 已勾选的房间）——
+                   一个年级的考场容量基本一致，逐个填太慢 #}
+                <button class="btn btn-sm btn-outline-primary py-0 px-1" onclick="openBatchCap()"
+                        title="批量设置容量（整组 / 已勾选的房间）" aria-label="批量设置容量">
+                    <i class="bi bi-sliders"></i></button>
                 {# 2026-10-12 UI 审计 M6：文本符号按钮换成全站统一的 bi-* 图标，
                    并补 aria-label（title 原本已有）。 #}
                 <button class="btn btn-sm btn-outline-primary py-0 px-1" onclick="addGroup()" title="新增分组" aria-label="新增分组"><i class="bi bi-plus-lg"></i></button>
@@ -96,11 +109,43 @@
                     <label class="form-label small mb-0">备注</label>
                     <input class="form-control form-control-sm" id="roomNote" placeholder="如 2楼·北侧">
                 </div>
-                <div class="form-text">容量不在这里设置，改在各场考试的「考务安排」里（同一房间不同考试容量可能不同）。</div>
+                <div class="form-text">容量（人）在右侧分组里直接填 —— 那是考务「一键带入」的默认值；
+                    每场考试仍可在「考务安排」里单独调整。</div>
             </div>
             <div class="modal-footer py-2">
                 <button class="btn btn-sm btn-secondary" data-bs-dismiss="modal">取消</button>
                 <button class="btn btn-sm btn-primary" onclick="saveRoom()">保存</button>
+            </div>
+        </div>
+    </div>
+</div>
+{# ===== 2026-10-14 批量设置容量（整组 / 已勾选） ===== #}
+<div class="modal fade" id="capModal" tabindex="-1">
+    <div class="modal-dialog modal-sm">
+        <div class="modal-content">
+            <div class="modal-header py-2">
+                <h6 class="modal-title fw-bold">批量设置容量</h6>
+                <button class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body py-2">
+                <div class="small mb-2" id="capRange"></div>
+                <div class="form-check">
+                    <input class="form-check-input" type="radio" name="capScope" id="capScopeAll" value="all">
+                    <label class="form-check-label small" for="capScopeAll" id="capScopeAllLab">当前分组全部</label>
+                </div>
+                <div class="form-check mb-2">
+                    <input class="form-check-input" type="radio" name="capScope" id="capScopeSel" value="sel">
+                    <label class="form-check-label small" for="capScopeSel" id="capScopeSelLab">已勾选的房间</label>
+                </div>
+                <label class="form-label small mb-0" for="capVal">容量（人）</label>
+                <input type="number" min="1" max="500" step="1" class="form-control form-control-sm"
+                       id="capVal" value="30" aria-label="容量（人）">
+                <div class="form-text">只改房间库默认值 —— 考务步骤②「一键带入」时按它带入各考场；
+                    每场考试仍可在「考务安排」里单独调整，<b>不影响历史场次</b>。</div>
+            </div>
+            <div class="modal-footer py-2">
+                <button class="btn btn-sm btn-secondary" data-bs-dismiss="modal">取消</button>
+                <button class="btn btn-sm btn-primary" onclick="doBatchCap()">应用</button>
             </div>
         </div>
     </div>
@@ -113,25 +158,32 @@ var URL_ROOMS = '{{ url_for("grades.exam_rooms") }}';            // /grades/room
 var URL_ROOM_SAVE = '{{ url_for("grades.exam_room_save") }}';
 var URL_GROUP_SAVE = '{{ url_for("grades.exam_room_group_save") }}';
 
-// v1.19.49.29 三栏式房间归集：状态全部放前端，增删改后就地重渲染（不再整页刷新）
+// v1.19.49.35 三栏式房间归集：状态全部放前端，增删改后就地重渲染（不再整页刷新）
 var state = {
     rooms: {{ rooms|tojson }}.map(function (r) {
         return {id: r.id, location: r.location, note: r.note || '',
+                capacity: r.capacity || 30,
                 group_ids: (r.group_ids || []).slice()};
     }),
     groups: (function () {
         var ids = {{ group_ids|tojson }}, names = {{ group_names|tojson }};
-        return ids.map(function (id, i) { return {id: id, name: names[i]}; });
+        // 2026-10-14：lib_ids = 组内房间顺序（落库在 exam_room_group_map.sort_order）。
+        // 右侧列表按它渲染、↑↓ 按它交换；考务步骤②「一键带入」也按这个顺序生成考场编号。
+        var orders = {{ group_lib_ids|tojson }};
+        return ids.map(function (id, i) {
+            return {id: id, name: names[i], lib_ids: (orders[i] || []).slice()};
+        });
     })(),
     cur: null,     // 当前分组 id
     kw: ''         // 左侧搜索词
 };
 
-function post(url, data, cb) {
+function post(url, data, cb, err) {
+    // err（可选）：失败回调 —— 「上移 / 下移」要先动界面，失败时得把界面回滚
     $.post(url, data).done(function (d) {
         if (d && d.ok) { if (cb) cb(d); }
-        else { alert((d && d.msg) || '操作失败'); }
-    }).fail(function () { alert('请求失败'); });
+        else { alert((d && d.msg) || '操作失败'); if (err) err(d); }
+    }).fail(function () { alert('请求失败'); if (err) err(); });
 }
 
 function esc(s) { return escHtml(s == null ? '' : String(s)); }
@@ -182,14 +234,35 @@ function renderRight() {
         $('#rightList').html('<div class="text-muted small p-2">暂无分组：点右上角 ＋ 新增</div>');
         return;
     }
+    var order = (g.lib_ids || []);
     var members = state.rooms.filter(function (r) { return inGroup(r, g.id); });
+    // 组内顺序 = lib_ids（落库顺序）；没记录到的（理论上不该有）按 id 补在最后
+    members.sort(function (a, b) {
+        var ia = order.indexOf(a.id), ib = order.indexOf(b.id);
+        if (ia < 0) ia = 1e9 + a.id;
+        if (ib < 0) ib = 1e9 + b.id;
+        return ia - ib;
+    });
     $('#grpMeta').html('当前分组「<b>' + esc(g.name) + '</b>」共 <b>' + members.length + '</b> 个房间'
         + ' · 从左侧勾选后点「加入 →」');
-    var html = members.map(function (r) {
+    // v1.19.47.31 用户口径：容量（人）只在「已选入分组」的房间上维护（未选入的不显示），
+    // 考务编排「一键带入」时按这个值带入各考场
+    var html = members.map(function (r, idx) {
+        // 2026-10-14 用户口径：这里也能排顺序（↑↓），顺序随分组落库、考务「一键带入」沿用
         return '<div class="rm-item" data-id="' + r.id + '">'
             + '<input class="form-check-input rm-chk-r" type="checkbox" data-id="' + r.id + '">'
             + '<span class="flex-grow-1 text-truncate"><b>' + esc(r.location) + '</b> '
             + '<span class="text-muted small">' + esc(r.note) + '</span></span>'
+            + '<button class="btn btn-sm btn-outline-secondary py-0 px-1 rm-up" title="上移一位'
+            + '（顺序会被考务「一键带入」沿用）"' + (idx === 0 ? ' disabled' : '')
+            + ' onclick="moveRoomInGroup(' + r.id + ', -1)"><i class="bi bi-arrow-up"></i></button>'
+            + '<button class="btn btn-sm btn-outline-secondary py-0 px-1 rm-dn" title="下移一位'
+            + '（顺序会被考务「一键带入」沿用）"' + (idx === members.length - 1 ? ' disabled' : '')
+            + ' onclick="moveRoomInGroup(' + r.id + ', 1)"><i class="bi bi-arrow-down"></i></button>'
+            + '<input type="number" min="1" max="500" step="1" data-id="' + r.id + '"'
+            + ' class="form-control form-control-sm py-0 rm-cap" style="width:72px"'
+            + ' title="容量（人）· 考务「一键带入」时的默认容量" aria-label="容量"'
+            + ' value="' + (r.capacity || 30) + '">'
             + '<button class="btn btn-sm btn-outline-danger py-0" title="移出该分组"'
             + ' onclick="removeRoom(' + r.id + ')">×</button></div>';
     }).join('');
@@ -204,8 +277,40 @@ function checkedIds(sel) {
 }
 function _setGroups(room, ids, done) {
     post(URL_ROOMS + '/' + room.id + '/groups', {group_ids: ids.join(',')}, function () {
-        room.group_ids = ids; done();
+        room.group_ids = ids;
+        _syncLibIds(room);      // 归属变了，组内顺序跟着改（与服务端「新加入排末尾」口径一致）
+        done();
     });
+}
+// 2026-10-14：房间归属变化后同步各组 lib_ids —— 保留原有顺序，新加入的追加到末尾
+function _syncLibIds(room) {
+    state.groups.forEach(function (g) {
+        g.lib_ids = g.lib_ids || [];
+        var i = g.lib_ids.indexOf(room.id);
+        if (inGroup(room, g.id)) {
+            if (i < 0) g.lib_ids.push(room.id);
+        } else if (i >= 0) {
+            g.lib_ids.splice(i, 1);
+        }
+    });
+}
+// 2026-10-14 用户口径：分组里的房间要能「上移 / 下移」，而且**顺序要能带着复用** ——
+// 先动界面（即时反馈），服务端落库（exam_room_group_map.sort_order）成功后以它返回的顺序为准；
+// 失败则回滚成操作前的顺序。考务步骤②「一键带入」按这个顺序生成 01、02… 考场编号。
+function moveRoomInGroup(id, dir) {
+    var g = curGroup();
+    if (!g) return;
+    var order = (g.lib_ids || []).slice();
+    var i = order.indexOf(id), j = i + dir;
+    if (i < 0 || j < 0 || j >= order.length) return;     // 已在最前 / 最后
+    var prev = (g.lib_ids || []).slice();
+    order.splice(i, 1);
+    order.splice(j, 0, id);
+    g.lib_ids = order;
+    renderRight();
+    post(URL_ROOMS + '/groups/' + g.id + '/reorder', {lib_id: id, dir: dir},
+        function (d) { g.lib_ids = d.order || order; renderRight(); },
+        function () { g.lib_ids = prev; renderRight(); });
 }
 function addSel() {
     if (state.cur == null) { alert('请先在右上角选择或新增分组'); return; }
@@ -301,7 +406,7 @@ function delRoom(id) {
     });
 }
 
-// v1.19.49.29 批量导入学校房间（Excel：位置 / 备注；按位置去重，已有则更新备注）
+// v1.19.49.35 批量导入学校房间（Excel：位置 / 备注；按位置去重，已有则更新备注）
 function importRooms(input) {
     if (!input.files.length) return;
     var fd = new FormData();
@@ -326,16 +431,96 @@ $('#rmSearch').on('input', function () {
     state.kw = this.value.trim(); renderLeft();
 });
 // 点整行即勾选（按钮区域除外）
+// 2026-10-13 修复：点在复选框本体上时**必须**跳过 —— 浏览器原生已切换一次，
+// 这里再取反等于没点（用户表现为「有些房间点不动」，实际是看点在哪儿、与房间无关）。
 $('#leftList').on('click', '.rm-item', function (e) {
-    if ($(e.target).closest('button').length) return;
+    if ($(e.target).closest('button, input').length) return;
     var c = $(this).find('.rm-chk');
     c.prop('checked', !c.prop('checked'));
 });
 $('#rightList').on('click', '.rm-item', function (e) {
-    if ($(e.target).closest('button').length) return;
+    if ($(e.target).closest('button, input').length) return;
     var c = $(this).find('.rm-chk-r');
     c.prop('checked', !c.prop('checked'));
 });
+// v1.19.47.31 分组内房间的「容量（人）」：行内改、失焦即存（考务「一键带入」的默认容量）
+// 只写房间库默认值，不影响任何已生成的考场（各场容量仍在考务页各自维护）
+$('#rightList').on('change', '.rm-cap', function () {
+    var id = parseInt(this.dataset.id, 10);
+    var r = roomById(id);
+    if (!r) return;
+    var v = parseInt(this.value, 10);
+    if (!(v >= 1 && v <= 500)) {
+        alert('容量需在 1~500 之间');
+        this.value = r.capacity || 30;
+        return;
+    }
+    var el = this;
+    post(URL_ROOMS + '/' + id + '/capacity', {capacity: v}, function (d) {
+        r.capacity = d.capacity;
+        el.value = d.capacity;
+    });
+});
+
+// 2026-10-14 用户要求：**一键批量设置容量** —— 一个年级的考场容量基本一致，
+// 逐个房间填太慢。范围二选一：当前分组全部 / 右侧已勾选的房间。
+var capModal;
+function _capTargets(scope) {
+    var g = curGroup();
+    if (!g) return [];
+    var members = state.rooms.filter(function (r) { return inGroup(r, g.id); });
+    if (scope === 'sel') {
+        var ids = checkedIds('#rightList .rm-chk-r:checked');
+        return members.filter(function (r) { return ids.indexOf(r.id) >= 0; });
+    }
+    return members;
+}
+function _capRange() {
+    var el = document.querySelector('input[name="capScope"]:checked');
+    var n = _capTargets(el ? el.value : 'all').length;
+    $('#capRange').html('将设置 <b>' + n + '</b> 个房间的容量');
+}
+function openBatchCap() {
+    var g = curGroup();
+    if (!g) { alert('请先在右上角选择分组'); return; }
+    var all = _capTargets('all'), sel = _capTargets('sel');
+    if (!all.length) { alert('当前分组还没有房间：从左侧勾选后点「加入 →」'); return; }
+    capModal = capModal || new bootstrap.Modal(document.getElementById('capModal'));
+    // 有勾选就默认改勾选的（用户已经指了范围），否则整组
+    var useSel = sel.length > 0;
+    var rSel = document.getElementById('capScopeSel');
+    rSel.disabled = !sel.length;
+    document.getElementById('capScopeAll').checked = !useSel;
+    rSel.checked = useSel;
+    document.getElementById('capScopeAllLab').textContent = '当前分组全部（' + all.length + ' 个）';
+    document.getElementById('capScopeSelLab').textContent = sel.length
+        ? ('已勾选的 ' + sel.length + ' 个房间') : '已勾选的房间（先在右侧勾选）';
+    // 默认值取目标房间的**众数**容量（多是统一值），没有则 30
+    var pool = useSel ? sel : all, cnt = {}, best = 30, bestN = 0;
+    pool.forEach(function (r) { var c = r.capacity || 30; cnt[c] = (cnt[c] || 0) + 1; });
+    Object.keys(cnt).forEach(function (k) {
+        if (cnt[k] > bestN) { bestN = cnt[k]; best = parseInt(k, 10); }
+    });
+    document.getElementById('capVal').value = best;
+    _capRange();
+    capModal.show();
+}
+function doBatchCap() {
+    var el = document.querySelector('input[name="capScope"]:checked');
+    var targets = _capTargets(el ? el.value : 'all');
+    if (!targets.length) { alert('没有要设置的房间'); return; }
+    var v = parseInt(document.getElementById('capVal').value, 10);
+    if (!(v >= 1 && v <= 500)) { alert('容量需在 1~500 之间'); return; }
+    var ids = targets.map(function (r) { return r.id; });
+    post(URL_ROOMS + '/capacity-batch', {lib_ids: ids.join(','), capacity: v}, function (d) {
+        targets.forEach(function (r) { r.capacity = v; });
+        if (capModal) capModal.hide();
+        renderRight();
+        alert('已把 ' + d.count + ' 个房间的容量设为 ' + d.capacity + ' 人'
+              + (d.changed ? '' : '（原本就是这个值，未变动）'));
+    });
+}
+$('#capModal').on('change', 'input[name="capScope"]', _capRange);
 
 renderAll();
 </script>

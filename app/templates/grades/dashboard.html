@@ -1,0 +1,292 @@
+{% extends "base.html" %}
+{# 成绩工作台·首页仪表盘（2026-10-13）
+   数据由 dashboard_service.build_overview 统一提供（与 /grades/api/dashboard 同口径）：
+   考试总次数 / 各年级考试次数 / 限时练·期中·期末·月考数量 / 已开具证明条数 /
+   各类别参与人数 / 每个年级参与人数 / 当前动态。
+   首屏服务端渲染（无 JS 也能看数），JS 只负责「定时刷新 + 图表」。 #}
+{% block title %}首页仪表盘 - 成绩管理{% endblock %}
+
+{% block extra_css %}
+<style>
+    /* 仪表盘专用样式：颜色一律取主题变量，深浅色自动跟随（见 theme.css） */
+    .gd-kpi { border: none; border-radius: 12px; box-shadow: var(--sl-shadow); height: 100%; }
+    .gd-kpi .gd-num { font-size: 1.75rem; font-weight: 600; line-height: 1.15;
+                      font-variant-numeric: tabular-nums; color: var(--sl-text); }
+    .gd-kpi.gd-kpi-sm .gd-num { font-size: 1.35rem; }
+    .gd-kpi .gd-label { font-size: .82rem; color: var(--sl-text-muted); }
+    .gd-kpi .gd-sub { font-size: .74rem; color: var(--sl-text-subtle); }
+    a.gd-kpi { text-decoration: none; display: block; transition: transform .15s, box-shadow .15s; }
+    a.gd-kpi:hover { transform: translateY(-2px); box-shadow: 0 4px 12px rgba(0, 0, 0, .12); }
+    .gd-chart { width: 100%; height: 260px; }
+    .gd-tl { list-style: none; margin: 0; padding: 0; max-height: 430px; overflow: auto; }
+    .gd-tl li { display: flex; gap: .55rem; padding: .45rem .2rem;
+                border-bottom: 1px dashed var(--sl-border); }
+    .gd-tl li:last-child { border-bottom: none; }
+    .gd-tl .gd-tl-ic { width: 26px; height: 26px; flex: 0 0 26px; border-radius: 50%;
+                       display: inline-flex; align-items: center; justify-content: center;
+                       background: var(--sl-surface-3); font-size: .8rem; }
+    .gd-tl .gd-tl-time { font-size: .72rem; color: var(--sl-text-subtle); white-space: nowrap; }
+    .gd-live { font-size: .75rem; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div id="gdApp"
+     data-can-edit="{{ 1 if d.can_edit_exam else 0 }}">
+    {# PERF-15：轮询 30s → 120s。仪表盘是准实时看板（考试数/证明数/参与人数），
+       后端已加 60s 结果缓存，30s 轮询只会让上百个在线客户端反复打同一份缓存，
+       却把请求量放大 4 倍。手动「刷新」按钮仍可随时拉最新数据。
+       注意：注释文本里不要出现 Jinja 的注释结束符，否则会提前闭合本注释、
+       把后半段当字面量渲染到页面上（本文件曾因此泄漏过注释文字）。 #}
+    <script type="application/json" id="gd-cfg">{{ {
+        'api': url_for('grades.dashboard_api'),
+        'exam_tpl': url_for('grades.exam_detail', exam_id=0),
+        'analysis': url_for('grades.index'),
+        'list': url_for('grades.exams_list'),
+        'interval': 120000,
+    } | tojson }}</script>
+    <script type="application/json" id="gd-data">{{ d | tojson }}</script>
+
+    {# ---------- 页头：范围说明 + 实时状态 + 操作 ---------- #}
+    <div class="d-flex justify-content-between align-items-start mb-3 flex-wrap gap-2">
+        <div>
+            <h4 class="mb-0"><i class="bi bi-speedometer2"></i> 首页仪表盘</h4>
+            <div class="text-muted small mt-1">
+                数据范围：{{ d.grades | join('、') if d.grades else '暂无可查看年级' }}
+                <span class="text-secondary">（已排除毕业年级）</span>
+                <span class="ms-2 gd-live" id="gdLive">
+                    <i class="bi bi-clock-history"></i> 更新于 <span id="gdUpdated">{{ d.generated_at }}</span>
+                    <span id="gdState" class="ms-1"></span>
+                </span>
+            </div>
+        </div>
+        <div class="d-flex align-items-center gap-2 flex-wrap">
+            <div class="form-check form-switch mb-0 small" title="每 30 秒自动拉取一次（页面切到后台时暂停）">
+                <input class="form-check-input" type="checkbox" id="gdAuto" checked>
+                <label class="form-check-label" for="gdAuto">自动刷新</label>
+            </div>
+            <button type="button" class="btn btn-sm btn-outline-secondary" id="gdRefresh">
+                <i class="bi bi-arrow-clockwise"></i> 刷新
+            </button>
+            {% if d.can_edit_exam %}
+            <a class="btn btn-sm btn-primary" href="{{ url_for('grades.exam_new') }}">
+                <i class="bi bi-plus-lg"></i> 新建考试
+            </a>
+            {% endif %}
+        </div>
+    </div>
+
+    {% if not d.has_data %}
+    <div class="card mb-3">
+        <div class="card-body text-center py-5">
+            <i class="bi bi-inbox text-muted" style="font-size:2.5rem;"></i>
+            <p class="mt-3 mb-2">当前范围内还没有任何考试数据。</p>
+            <div class="d-flex justify-content-center gap-2">
+                {% if d.can_edit_exam %}
+                <a class="btn btn-primary btn-sm" href="{{ url_for('grades.exam_new') }}">
+                    <i class="bi bi-plus-lg"></i> 新建考试
+                </a>
+                {% endif %}
+                <a class="btn btn-outline-secondary btn-sm" href="{{ url_for('grades.exams_list') }}">
+                    <i class="bi bi-journals"></i> 历次考试
+                </a>
+            </div>
+        </div>
+    </div>
+    {% endif %}
+
+    {# ---------- 关键指标 ---------- #}
+    <div class="row g-2 mb-2">
+        <div class="col-12 col-md-4">
+            <a class="card gd-kpi" href="{{ url_for('grades.exams_list') }}"
+               title="点击进入「历次考试」">
+                <div class="card-body py-3">
+                    <div class="gd-label"><i class="bi bi-journals"></i> 考试总次数</div>
+                    <div class="gd-num" id="gdKpiExams">{{ d.kpi.total_exams }}</div>
+                    <div class="gd-sub">最近一场：{{ d.kpi.latest_date or '—' }}</div>
+                </div>
+            </a>
+        </div>
+        <div class="col-12 col-md-4">
+            <div class="card gd-kpi">
+                <div class="card-body py-3">
+                    <div class="gd-label"><i class="bi bi-people"></i> 参与学生（去重）</div>
+                    <div class="gd-num" id="gdKpiParts">{{ d.kpi.participants }}</div>
+                    <div class="gd-sub">按「总分」行统计，同一学生多场只计 1 人</div>
+                </div>
+            </div>
+        </div>
+        <div class="col-12 col-md-4">
+            {% if d.can_view_certs %}
+            <a class="card gd-kpi" href="{{ url_for('grades.cert_records_page') }}"
+               title="点击进入「成绩证明台账」（{{ d.cert_scope }}口径）">
+                <div class="card-body py-3">
+                    <div class="gd-label"><i class="bi bi-patch-check"></i> 已开具证明</div>
+                    <div class="gd-num" id="gdKpiCerts">{{ d.kpi.cert_total }}</div>
+                    <div class="gd-sub">{{ d.cert_scope }}口径 · 已作废 <span id="gdKpiCertInvalid">{{ d.kpi.cert_invalid }}</span> 条</div>
+                </div>
+            </a>
+            {% else %}
+            <div class="card gd-kpi">
+                <div class="card-body py-3">
+                    <div class="gd-label"><i class="bi bi-patch-check"></i> 已开具证明</div>
+                    <div class="gd-num">{{ d.kpi.cert_total }}</div>
+                    <div class="gd-sub">{{ d.cert_scope }}口径 · 已作废 {{ d.kpi.cert_invalid }} 条</div>
+                </div>
+            </div>
+            {% endif %}
+        </div>
+    </div>
+
+    <div class="row g-2 mb-3">
+        {% for c in d.kpi.stage_cards %}
+        <div class="col-6 col-md-3">
+            <div class="card gd-kpi gd-kpi-sm">
+                <div class="card-body py-2 px-3">
+                    <div class="gd-label">{{ c.name }}</div>
+                    <div class="gd-num gd-stage-num" data-stage="{{ c.name }}">{{ c.exams }}</div>
+                </div>
+            </div>
+        </div>
+        {% endfor %}
+    </div>
+
+    {# ---------- 图表：各年级考试次数 / 各类别参与人数 ---------- #}
+    <div class="row g-3 mb-3">
+        <div class="col-12 col-lg-7">
+            <div class="card chart-card h-100">
+                <div class="card-header d-flex justify-content-between align-items-center py-2">
+                    <span class="fw-semibold small"><i class="bi bi-bar-chart"></i> 各年级考试次数</span>
+                    <a class="small text-decoration-none" href="{{ url_for('grades.exams_list') }}">历次考试 →</a>
+                </div>
+                <div class="card-body">
+                    <div class="gd-chart" id="gdChartGrade"></div>
+                    <div class="table-responsive mt-2">
+                        <table class="table table-sm g-table mb-0">
+                            <thead>
+                            <tr>
+                                <th>年级</th>
+                                <th class="num">考试次数</th>
+                                <th class="num">参与人数</th>
+                                <th>最近一场</th>
+                            </tr>
+                            </thead>
+                            <tbody id="gdGradeBody">
+                            {% for r in d.grade_rows %}
+                            <tr>
+                                <td><a href="{{ url_for('grades.exams_list') }}?grade={{ r.grade }}">{{ r.grade }}</a></td>
+                                <td class="num">{{ r.exams }}</td>
+                                <td class="num">{{ r.participants }}</td>
+                                <td class="wrap"><span class="text-muted small">{{ r.latest }}</span>
+                                    {{ r.latest_name }}</td>
+                            </tr>
+                            {% else %}
+                            <tr><td colspan="4" class="text-center text-muted py-3">暂无数据</td></tr>
+                            {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <div class="col-12 col-lg-5">
+            <div class="card chart-card h-100">
+                <div class="card-header py-2">
+                    <span class="fw-semibold small"><i class="bi bi-pie-chart"></i> 各类别参与人数</span>
+                    <span class="text-muted small ms-1">（合计 <span id="gdStageTotal">{{ d.kpi.participants }}</span> 人，去重）</span>
+                </div>
+                <div class="card-body">
+                    <div class="gd-chart" id="gdChartStage"></div>
+                    <div class="table-responsive mt-2">
+                        <table class="table table-sm g-table mb-0">
+                            <thead>
+                            <tr><th>考试类别</th><th class="num">场次</th><th class="num">参与人数</th></tr>
+                            </thead>
+                            <tbody id="gdStageBody">
+                            {% for r in d.stage_rows %}
+                            <tr>
+                                <td>{{ r.name }}</td>
+                                <td class="num">{{ r.exams }}</td>
+                                <td class="num">{{ r.participants }}</td>
+                            </tr>
+                            {% else %}
+                            <tr><td colspan="3" class="text-center text-muted py-3">暂无数据</td></tr>
+                            {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    {# ---------- 最近考试 / 当前动态 ---------- #}
+    <div class="row g-3">
+        <div class="col-12 col-lg-7">
+            <div class="card tbl-card h-100">
+                <div class="card-header d-flex justify-content-between align-items-center">
+                    <span class="fw-semibold small"><i class="bi bi-clock-history"></i> 最近考试</span>
+                    <a class="small text-decoration-none" href="{{ url_for('grades.exams_list') }}">全部 →</a>
+                </div>
+                <div class="table-responsive">
+                    <table class="table table-hover table-sm g-table align-middle mb-0">
+                        <thead>
+                        <tr>
+                            <th>考试名称</th><th>年级</th><th>阶段</th><th>日期</th>
+                            <th>状态</th><th class="num">参考人数</th>
+                        </tr>
+                        </thead>
+                        <tbody id="gdRecentBody">
+                        {% for e in d.recent_exams %}
+                        <tr class="stu-link gd-exam-row" data-exam-id="{{ e.id }}">
+                            <td class="wrap">{{ e.name }}</td>
+                            <td>{{ e.grade }}</td>
+                            <td>{{ e.stage }}</td>
+                            <td class="text-nowrap">{{ e.date }}</td>
+                            <td>
+                                {% if e.status == 'imported' %}<span class="badge bg-success">{{ e.status_label }}</span>
+                                {% elif e.status == 'dirty' %}<span class="badge bg-warning text-dark">{{ e.status_label }}</span>
+                                {% else %}<span class="badge bg-secondary">{{ e.status_label }}</span>{% endif %}
+                            </td>
+                            <td class="num">{{ e.participants }}</td>
+                        </tr>
+                        {% else %}
+                        <tr><td colspan="6" class="text-center text-muted py-3">暂无考试</td></tr>
+                        {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+        <div class="col-12 col-lg-5">
+            <div class="card tbl-card h-100">
+                <div class="card-header">
+                    <span class="fw-semibold small"><i class="bi bi-activity"></i> 当前动态</span>
+                    <span class="text-muted small ms-1">考试登记 · 证明开具 · 分数修改</span>
+                </div>
+                <div class="card-body py-2">
+                    <ul class="gd-tl" id="gdActivity">
+                        {% for a in d.activity %}
+                        <li>
+                            <span class="gd-tl-ic text-{{ a.tone }}"><i class="bi {{ a.icon }}"></i></span>
+                            <div class="flex-grow-1">
+                                <div class="small">{{ a.title }}</div>
+                                <div class="text-muted small">{{ a.meta }}</div>
+                            </div>
+                            <span class="gd-tl-time">{{ a.time }}</span>
+                        </li>
+                        {% else %}
+                        <li><span class="text-muted small py-3">暂无动态</span></li>
+                        {% endfor %}
+                    </ul>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script src="{{ su('js/echarts.min.js') }}"></script>
+<script src="{{ su('js/grades_dashboard.js') }}"></script>
+{% endblock %}

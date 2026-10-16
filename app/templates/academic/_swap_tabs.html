@@ -1,9 +1,9 @@
-{# v1.19.49.29 调课两页共用的顶部 Tab 栏 —— include 时传 active='apply'|'cover' #}
+{# v1.19.49.35 调课两页共用的顶部 Tab 栏 —— include 时传 active='apply'|'cover' #}
 <ul class="nav nav-tabs nav-fill mb-3" id="swapTabs">
     <li class="nav-item">
         <a class="nav-link {% if active == 'apply' %}active{% endif %}"
            href="{{ url_for('academic.swap_apply') }}">
-            <i class="bi bi-arrow-left-right"></i> 调课（含与同事对调）
+            <i class="bi bi-arrow-left-right"></i> 调课（可与同事换时间）
         </a>
     </li>
     <li class="nav-item">
@@ -15,13 +15,14 @@
 </ul>
 <div class="alert alert-light border small mb-3">
     {% if active == 'apply' %}
-        <b>调课</b>：选我的课 → 再选<b>调到哪一格</b>。目标格有三类 ——
-        <span class="text-success fw-semibold">绿色＝空档</span>（那节本班和我都没课，直接调过去）、
-        <span class="fw-semibold" style="color:#a16207">黄色＝那节有同事的课</span>（点它就是<b>和他换</b>：
-        我上他那节、他上我这节，<b>需要他点【同意】</b>）、
-        <span class="fw-semibold" style="color:#7e22ce">紫色＝那节是我自己的另一节课</span>（点它＝把这两节互换，<b>不需要谁确认</b>）、
+        <b>调课</b>：选我的课 → 再选<b>调到哪一格</b>（列出当天<b>全部节次</b>）。目标格四类 ——
+        <span class="text-success fw-semibold">绿色＝自习空档</span>（那节本班和我都没课，直接调过去）、
+        <span class="fw-semibold" style="color:var(--sl-soft-amber-fg)">黄色＝那节有同事的课</span>（点它就是<b>和他换上课时间</b>：
+        我俩各上各的班、只换时段，<b>默认不用他确认</b>，需要他同意就勾上清单里的选项）、
+        <span class="fw-semibold" style="color:var(--sl-soft-purple-fg)">紫色＝那节是我自己的另一节课</span>（点它＝把这两节互换，<b>不需要谁确认</b>）、
         <span class="text-danger fw-semibold">红色＝我在别处有课</span>（换不了）。
-        一次可以选好几节，也可以同时和好几位老师换，算一批提交、一次审批。
+        一次可以选好几节，算一批提交、一次审批。<b>只换上课时间，不换班级 / 教室 / 学生</b>；
+        要请别人来上我的课请用「请人代课」。
     {% else %}
         <b>请人代课</b>：我的课<b>请别的老师来上</b> —— 时间、班级都不动，只换授课人。
         一次可以请多位老师代多节课，每位老师各自确认。

@@ -411,6 +411,25 @@ STDIO 定位为"连接本地运行的程序"——即 HTTP 请求极可能由豆
 [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes("你的账号:你的密码"))
 ```
 
+**更省事的做法：仓库自带接入助手脚本**（生成 Basic 头 + 真实探活 initialize/tools/list +
+逐字段打印豆包对话框要填的内容 + 可选输出客户端 JSON）：
+
+```powershell
+# 只生成配置并打印要填的字段（不联网）
+powershell -ExecutionPolicy Bypass -File scripts\mcp_doubao_connector.ps1 `
+    -User <你的账号> -Password '<你的密码>' -SkipProbe
+
+# 生成 + 探活（推荐：先用它自证服务可达、凭据有效，再去豆包里填）
+powershell -ExecutionPolicy Bypass -File scripts\mcp_doubao_connector.ps1 `
+    -User <你的账号> -Password '<你的密码>' -Json -Copy
+
+# 端点不是默认 8765 时（如直接跑 mcp_server\run.py 的 8766 端口）
+... -Url http://127.0.0.1:8766/mcp
+```
+
+脚本输出里会直接给出「服务器名称 / 传输类型 / 服务器 URL / 自定义 Headers」四项填法，
+并提示回环地址在豆包 HTTP 模式下连不上时该怎么改（隧道 / 公网 / 改 STDIO）。
+
 > 若不确定豆包 HTTP 是否接受内网/本地地址，先按上表试隧道地址；填 `http://` 被拒就换 `https://`。
 
 #### 常见坑

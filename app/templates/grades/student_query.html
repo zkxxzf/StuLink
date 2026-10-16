@@ -1,19 +1,32 @@
 {% extends "base.html" %}
-{% block title %}个人成绩查询与分析{% endblock %}
+{% from "grades/_sq_tabs.html" import sq_tabs %}
+{% block title %}个人成绩{% endblock %}
 {# 2026-10-12 UI 审计 M8：grades.css 已由 base.html 统一引入 #}
+{# 2026-10-13：按用户口径，菜单与页面统一叫「个人成绩」（原「个人成绩查询」） #}
 {% block content %}
+{# 2026-10-13 用户口径：本分区两页（个人成绩 / 成绩证明），共用页签导航；
+   「成绩核验」页已删除（核验入口在成绩证明台账每行的「核验」按钮） #}
+{{ sq_tabs('grades') }}
 <div id="sqApp" class="no-print">
     <div class="g-filter-bar d-flex flex-wrap gap-2 align-items-center mb-3">
-        <h5 class="mb-0 me-1"><i class="bi bi-person-vcard"></i> 个人成绩查询与分析</h5>
+        {# 2026-10-14 用户口径：选学生要有「年级 / 班级」下拉先缩小范围 ——
+           原先只能在关键词框里盲搜，候选又被后端截成 20 人（实际只剩一个班）。 #}
+        <select id="sqGrade" class="form-select form-select-sm w-auto" title="年级">
+            <option value="">全部年级</option>
+        </select>
+        <select id="sqClass" class="form-select form-select-sm w-auto" title="班级">
+            <option value="">全部班级</option>
+        </select>
         <div class="position-relative" style="min-width:240px;">
             <div class="input-group input-group-sm">
-                <input id="sqStudent" class="form-control" placeholder="输入学号或姓名搜索…" autocomplete="off">
-                <button class="btn btn-outline-secondary" id="sqSearchBtn" type="button">
+                <input id="sqStudent" class="form-control" placeholder="输入学号或姓名搜索…" autocomplete="off" aria-label="学号或姓名">
+                <button class="btn btn-outline-secondary" id="sqSearchBtn" type="button" aria-label="搜索学生">
                     <i class="bi bi-search"></i>
                 </button>
             </div>
+            {# 候选多时内部滚动，避免长列表把页面往下顶 #}
             <ul id="sqStudentMenu" class="list-group position-absolute w-100 shadow d-none"
-                style="z-index:1050; top:100%; left:0;"></ul>
+                style="z-index:1050; top:100%; left:0; max-height:340px; overflow-y:auto;"></ul>
         </div>
         <select id="sqTerm" class="form-select form-select-sm w-auto" title="学期"><option value="">学期</option></select>
         <select id="sqType" class="form-select form-select-sm w-auto" title="考试类型"><option value="">考试类型</option></select>
@@ -22,10 +35,8 @@
         <select id="sqSubject" class="form-select form-select-sm w-auto" title="科目(分析聚焦)"><option value="">科目(分析聚焦)</option></select>
         <select id="sqExam" class="form-select form-select-sm w-auto d-none" title="指定单场"></select>
         <button class="btn btn-sm btn-primary" id="sqQuery"><i class="bi bi-graph-up"></i> 查询</button>
-        {# v1.12.2 成绩证明记录入口：查看历史生成台账（防伪码/学生/范围/生成人/时间/状态） #}
-        <a href="{{ url_for('grades.cert_records_page') }}" class="btn btn-sm btn-outline-secondary ms-auto">
-            <i class="bi bi-card-checklist"></i> 证明记录</a>
-        <button class="btn btn-sm btn-outline-success" id="sqCert"><i class="bi bi-file-earmark-check"></i> 生成成绩证明</button>
+        {# v1.12.2 生成证明；台账/核验入口已移到上方页签（不再重复放按钮） #}
+        <button class="btn btn-sm btn-outline-success ms-auto" id="sqCert"><i class="bi bi-file-earmark-check"></i> 生成成绩证明</button>
     </div>
 
     <div id="sqStudentInfo" class="alert alert-light border py-2 small d-none"></div>

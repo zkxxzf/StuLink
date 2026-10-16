@@ -68,12 +68,16 @@
 .g-table tbody tr:nth-child(even) { --bs-table-bg: #f8fafc; }
 .g-table tbody tr:nth-child(even) td:first-child { background: var(--bs-table-bg, #f8fafc); }
 .g-table tbody tr.stu-link:hover td:first-child { background: #e0ecff !important; }
-/* 行状态类（缺考黄 / 已选绿等）在冻结列上同样生效 */
-.g-table tbody tr.table-warning { --bs-table-bg: var(--bs-table-warning-bg, #fff3cd); }
+/* 行状态类（缺考黄 / 已选绿等）在冻结列上同样生效。
+   2026-10-13：原来写的是 --bs-table-warning-bg / --bs-table-success-bg /
+   --bs-table-danger-bg —— 这几个变量 Bootstrap 里**根本不存在**，所以永远回落到
+   浅色字面量，深色模式下这些行一定是一整块亮黄/亮绿/亮红（用户反馈「色块突兀」）。
+   改用真实存在的 --bs-*-bg-subtle（Bootstrap 在深色主题下会重定义它）。 */
+.g-table tbody tr.table-warning { --bs-table-bg: var(--bs-warning-bg-subtle, #fff3cd); }
 .g-table tbody tr.table-warning td:first-child { background: var(--bs-table-bg, #fff3cd); }
-.g-table tbody tr.table-success { --bs-table-bg: var(--bs-table-success-bg, #d1e7dd); }
+.g-table tbody tr.table-success { --bs-table-bg: var(--bs-success-bg-subtle, #d1e7dd); }
 .g-table tbody tr.table-success td:first-child { background: var(--bs-table-bg, #d1e7dd); }
-.g-table tbody tr.table-danger { --bs-table-bg: var(--bs-table-danger-bg, #f8d7da); }
+.g-table tbody tr.table-danger { --bs-table-bg: var(--bs-danger-bg-subtle, #f8d7da); }
 .g-table tbody tr.table-danger td:first-child { background: var(--bs-table-bg, #f8d7da); }
 
 /* 表头排序（点击表头切换 升序 → 降序 → 还原） */

@@ -1,0 +1,27 @@
+{# StuLink 2026-10-14
+   系统管理「教师管理」两个子页共用的顶部 Tab 栏（用户要求：教师管理 = 教师名单 + 教师权限管理）。
+
+   - 「教师名单」→ `users.teachers_page`（/users/teachers，复用教务侧同一视图函数与同一份数据：
+     academic.db.teachers，权限 `academic.view`），需 academic.view 才显示；
+   - 「教师权限管理」→ `users.list_users`（/users/，账号 / 角色 / 权限组，权限 `system.users`）。
+
+   与教务侧「教师名单 / 任课教师映射 / 学科组长」那组 tab（academic/_staff_tabs.html）**不是同一组**：
+   教务员没有 system.users、系统管理员不一定有 academic.view，两边各自入口、数据同源。
+   用法：{% with active = 'roster'|'perms' %}{% include 'system/_user_tabs.html' %}{% endwith %}
+   data-tab 供回归脚本定位当前高亮项。 #}
+<ul class="nav nav-pills gap-1 mb-3 no-print" id="userTabs">
+    {% if current_user.has_perm('academic.view') %}
+    <li class="nav-item">
+        <a class="nav-link py-1 px-3 {{ 'active' if active == 'roster' }}"
+           href="{{ url_for('users.teachers_page') }}" data-tab="roster">
+            <i class="bi bi-person-vcard"></i> 教师名单
+        </a>
+    </li>
+    {% endif %}
+    <li class="nav-item">
+        <a class="nav-link py-1 px-3 {{ 'active' if active == 'perms' }}"
+           href="{{ url_for('users.list_users') }}" data-tab="perms">
+            <i class="bi bi-shield-lock"></i> 教师权限管理
+        </a>
+    </li>
+</ul>

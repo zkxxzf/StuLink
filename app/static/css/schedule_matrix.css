@@ -1,6 +1,6 @@
 /* ── 年级块 ─────────────────────────────────────────────────────── */
-.ovw-block { margin-bottom: 12px; border: 1px solid #e2e8f0; border-radius: 10px;
-            overflow: hidden; background: #fff; }
+.ovw-block { margin-bottom: 12px; border: 1px solid var(--sl-border); border-radius: 10px;
+            overflow: hidden; background: var(--sl-surface); }
 .ovw-block-head { background: linear-gradient(90deg, #1e293b, #334155); color: #f1f5f9;
                  padding: 5px 10px; display: flex; justify-content: space-between;
                  align-items: center; font-weight: 700; font-size: 12.5px; }
@@ -12,42 +12,42 @@
 /* ── 矩阵：行＝班级，列＝节次 ─────────────────────────────────── */
 table.ovw-table { width: auto; min-width: 100%; border-collapse: separate;
                   border-spacing: 0; font-size: 11.5px; }
-table.ovw-table th, table.ovw-table td { border-right: 1px solid #eef2f7;
-                                        border-bottom: 1px solid #eef2f7;
+table.ovw-table th, table.ovw-table td { border-right: 1px solid var(--sl-line);
+                                        border-bottom: 1px solid var(--sl-line);
                                         padding: 2px 3px; text-align: center;
                                         vertical-align: middle; }
 
 /* 表头：两行（作息分组 + 节次），纵向吸附；班级列左上角双向吸附 */
-.ovw-table thead th { background: #eef2f7; color: #334155; font-weight: 700;
+.ovw-table thead th { background: var(--sl-head-soft); color: var(--sl-head-text); font-weight: 700;
                      z-index: 3; }
 .ovw-grp-row th { position: sticky; top: 0; height: 22px; font-size: 11px;
                  white-space: nowrap; letter-spacing: .5px; }
 .ovw-per-row th { position: sticky; top: 22px; height: 42px; white-space: nowrap; }
 th.ovw-class-col { position: sticky !important; left: 0; top: 0; z-index: 5 !important;
-                  width: 112px; background: #eef2f7 !important; font-size: 12px; }
-th.ovw-per-col { width: 88px; background: #f8fafc !important; }
-th.ovw-break-col { width: 44px; background: #f1f5f9 !important; }
-.ovw-period-name { display: block; font-weight: 700; color: #334155; font-size: 11.5px;
+                  width: 112px; background: var(--sl-head-soft) !important; font-size: 12px; }
+th.ovw-per-col { width: 88px; background: var(--sl-surface-2) !important; }
+th.ovw-break-col { width: 44px; background: var(--sl-surface-3) !important; }
+.ovw-period-name { display: block; font-weight: 700; color: var(--sl-head-text); font-size: 11.5px;
                   line-height: 1.2; white-space: nowrap; }
-th.ovw-per-col small { display: block; color: #94a3b8; font-size: 8.5px; font-weight: 400;
+th.ovw-per-col small { display: block; color: var(--sl-text-subtle); font-size: 8.5px; font-weight: 400;
                       font-variant-numeric: tabular-nums; line-height: 1.2; }
-.ovw-grp-break { color: #64748b !important; }
+.ovw-grp-break { color: var(--sl-text-muted) !important; }
 
 /* 班级列（第一列）：横向滚动时冻结 */
 th.ovw-class-cell { position: sticky; left: 0; z-index: 2; width: 112px;
-                   background: #f8fafc !important; text-align: left !important;
+                   background: var(--sl-surface-2) !important; text-align: left !important;
                    padding: 3px 6px !important; }
-th.ovw-class-cell a { color: #1d4ed8; text-decoration: none; font-weight: 700;
+th.ovw-class-cell a { color: var(--sl-accent); text-decoration: none; font-weight: 700;
                      font-size: 12px; }
 th.ovw-class-cell a:hover { text-decoration: underline; }
-.ovw-cmeta { display: block; font-weight: 400; font-size: 9px; color: #94a3b8;
+.ovw-cmeta { display: block; font-weight: 400; font-size: 9px; color: var(--sl-text-subtle);
             line-height: 1.25; }
 
 /* 作息语义：早读暖色 / 晚自习冷色 / 午休等空档斜纹 */
 th.ovw-p-reading { background: #fffbeb !important; }
 th.ovw-p-evening { background: #eef2ff !important; }
-td.ovw-p-break { background: repeating-linear-gradient(45deg, #fbfdff, #fbfdff 6px,
-                                                       #f1f5f9 6px, #f1f5f9 12px); }
+td.ovw-p-break { background: repeating-linear-gradient(45deg, var(--sl-surface), var(--sl-surface) 6px,
+                                                       var(--sl-surface-3) 6px, var(--sl-surface-3) 12px); }
 
 /* 今日课表：当前节次整列高亮（一眼看到"现在该上什么"） */
 th.ovw-cur-col { background: #d1fae5 !important; color: #065f46 !important; }
@@ -60,12 +60,12 @@ td.ovw-cur-col { background: #ecfdf5 !important; }
 .ovw-cell { height: 38px; }
 .ovw-cell.ovw-multi { height: auto; }
 .ovw-item { position: relative; text-align: left; border-radius: 4px; padding: 1px 4px;
-           background: var(--sch-bg, #f1f5f9); box-shadow: inset 2px 0 0 var(--sch, #94a3b8); }
+           background: var(--sch-bg, var(--sl-surface-3)); box-shadow: inset 2px 0 0 var(--sch, var(--sl-text-subtle)); }
 .ovw-item + .ovw-item { margin-top: 2px; }
-.ovw-subj { display: block; font-weight: 700; color: var(--sch-fg, #0f172a);
+.ovw-subj { display: block; font-weight: 700; color: var(--sch-fg, var(--sl-text));
            font-size: 11.5px; line-height: 1.25; overflow: hidden;
            white-space: nowrap; text-overflow: ellipsis; }
-.ovw-teacher { display: block; color: #64748b; font-size: 10px; line-height: 1.3;
+.ovw-teacher { display: block; color: var(--sl-text-muted); font-size: 10px; line-height: 1.3;
               overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 .ovw-flag { display: inline-block; font-size: 8.5px; line-height: 1.2; padding: 0 3px;
            border-radius: 3px; margin-left: 3px; vertical-align: 1px; font-weight: 400; }
@@ -78,11 +78,12 @@ td.ovw-cur-col { background: #ecfdf5 !important; }
 .ovw-check-mode .ovw-subj { padding-right: 24px; }
 .ovw-chk { position: absolute; top: 1px; right: 2px; font-size: 8.5px; line-height: 1.35;
           padding: 0 3px; border-radius: 3px; font-weight: 400; white-space: nowrap; }
-.ovw-chk-none { background: #e2e8f0; color: #64748b; }
+.ovw-chk-none { background: var(--sl-border); color: var(--sl-text-muted); }
 .ovw-chk-normal { background: #d1fae5; color: #065f46; }
 .ovw-chk-late { background: #fef3c7; color: #92400e; }
 .ovw-chk-absent { background: #fee2e2; color: #991b1b; }
 .ovw-chk-swap { background: #e0e7ff; color: #3730a3; }
+.ovw-chk-exam { background: #e0f2fe; color: #075985; }   /* 2026-10-13 新增：考试 */
 .ovw-chk-other { background: #e5e7eb; color: #4b5563; }
 
 /* ── 移动端：压缩、隐藏时间与教师 ─────────────────────────────── */
@@ -135,8 +136,8 @@ td.ovw-cur-col { background: #ecfdf5 !important; }
            gap: 14px; flex-wrap: wrap; margin-bottom: 14px; }
 .ovv-head-l { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
 .ovv-title { font-size: 21px; font-weight: 800; margin: 0; letter-spacing: .5px;
-            color: #0f172a; }
-.ovv-title i { color: #1d4ed8; margin-right: 4px; }
+            color: var(--sl-text); }
+.ovv-title i { color: var(--sl-accent); margin-right: 4px; }
 .ovv-head-r { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
 .ovv-head-r .btn { font-size: 13px; padding: 6px 13px; border-radius: 9px;
                   font-weight: 600; }
@@ -144,41 +145,41 @@ td.ovw-cur-col { background: #ecfdf5 !important; }
                              border-radius: 9px; height: auto; }
 
 /* ── 筛选栏（分段控件，比一排零散小按钮更好点、更整齐）──────────────── */
-.ovv-filters { background: #fff; border: 1px solid #e6ebf2; border-radius: 14px;
+.ovv-filters { background: var(--sl-surface); border: 1px solid var(--sl-border); border-radius: 14px;
               padding: 9px 16px; margin-bottom: 14px;
               box-shadow: 0 1px 2px rgba(15, 23, 42, .04); }
 .ovv-frow { display: flex; align-items: center; gap: 11px; flex-wrap: wrap;
            padding: 6px 0; }
-.ovv-frow + .ovv-frow { border-top: 1px dashed #eef2f7; }
-.ovv-flabel { font-size: 13px; color: #64748b; font-weight: 700; letter-spacing: .3px;
+.ovv-frow + .ovv-frow { border-top: 1px dashed var(--sl-line); }
+.ovv-flabel { font-size: 13px; color: var(--sl-text-muted); font-weight: 700; letter-spacing: .3px;
              display: inline-flex; align-items: center; gap: 5px; white-space: nowrap; }
-.ovv-flabel i { color: #94a3b8; }
-.ovv-seg { display: inline-flex; flex-wrap: wrap; gap: 3px; background: #f1f5f9;
+.ovv-flabel i { color: var(--sl-text-subtle); }
+.ovv-seg { display: inline-flex; flex-wrap: wrap; gap: 3px; background: var(--sl-surface-3);
           border-radius: 10px; padding: 3px; }
 .ovv-seg-item { font-size: 13.5px; line-height: 1.55; padding: 5px 13px;
-               border-radius: 8px; color: #475569; text-decoration: none;
+               border-radius: 8px; color: var(--sl-text-muted); text-decoration: none;
                white-space: nowrap; transition: background .15s, color .15s,
                box-shadow .15s; }
-.ovv-seg-item:hover { background: #e2e8f0; color: #0f172a; }
-.ovv-seg-item.is-on { background: #fff; color: #1d4ed8; font-weight: 700;
+.ovv-seg-item:hover { background: var(--sl-border); color: var(--sl-text); }
+.ovv-seg-item.is-on { background: var(--sl-surface); color: var(--sl-accent); font-weight: 700;
                      box-shadow: 0 1px 3px rgba(15, 23, 42, .13); }
 .ovv-seg-item em { font-style: normal; font-size: 10.5px; margin-left: 5px;
                   padding: 1px 5px; border-radius: 6px; background: #f59e0b;
                   color: #fff; vertical-align: 1px; }
-.ovv-fdiv { width: 1px; height: 22px; background: #e2e8f0; }
-.ovv-stat { font-size: 12.5px; color: #94a3b8; font-weight: 600;
+.ovv-fdiv { width: 1px; height: 22px; background: var(--sl-border); }
+.ovv-stat { font-size: 12.5px; color: var(--sl-text-subtle); font-weight: 600;
            font-variant-numeric: tabular-nums; }
 
 /* ── 表体 ──────────────────────────────────────────────────────────── */
-.ovv-block { background: #fff; border: 1px solid #e2e8f0; border-radius: 14px;
+.ovv-block { background: var(--sl-surface); border: 1px solid var(--sl-border); border-radius: 14px;
             overflow: hidden; box-shadow: 0 1px 3px rgba(15, 23, 42, .05); }
 .ovv-scroll { overflow: auto; max-height: calc(100vh - 250px);
              -webkit-overflow-scrolling: touch; isolation: isolate; }
 
 table.ovv-table { width: auto; min-width: 100%; border-collapse: separate;
                  border-spacing: 0; font-size: 13.5px; }
-table.ovv-table th, table.ovv-table td { border-right: 1px solid #eef2f7;
-                                        border-bottom: 1px solid #eef2f7;
+table.ovv-table th, table.ovv-table td { border-right: 1px solid var(--sl-line);
+                                        border-bottom: 1px solid var(--sl-line);
                                         text-align: center; vertical-align: middle; }
 
 /* 表头两级：年级（跨列，深色）→ 班级列；左侧两列在两级表头上都吸附 */
@@ -191,50 +192,50 @@ table.ovv-table th, table.ovv-table td { border-right: 1px solid #eef2f7;
 .ovv-grade-sub { display: inline-block; margin-left: 9px; font-size: 11.5px;
                 font-weight: 500; opacity: .78; }
 .ovv-class-row th.ovv-class { position: sticky; top: 40px; z-index: 4; height: 48px;
-                             width: 106px; min-width: 106px; background: #f8fafc;
-                             font-size: 14.5px; font-weight: 800; color: #1d4ed8;
+                             width: 106px; min-width: 106px; background: var(--sl-surface-2);
+                             font-size: 14.5px; font-weight: 800; color: var(--sl-accent);
                              padding: 4px 6px; }
 .ovv-class a { color: inherit; text-decoration: none; }
 .ovv-class a:hover { text-decoration: underline; }
 .ovv-cmeta { display: block; margin-top: 2px; font-size: 11px; font-weight: 500;
-            color: #94a3b8; letter-spacing: normal; }
-.ovv-grade-start { border-left: 2px solid #cbd5e1 !important; }
+            color: var(--sl-text-subtle); letter-spacing: normal; }
+.ovv-grade-start { border-left: 2px solid var(--sl-border) !important; }
 
 /* 左侧两列：作息分组（纵向文字）+ 节次名与起止时间 */
-th.ovv-axis { position: sticky; top: 0; z-index: 6; background: #eef2f7;
-             color: #475569; font-size: 12.5px; font-weight: 800; letter-spacing: 1px; }
+th.ovv-axis { position: sticky; top: 0; z-index: 6; background: var(--sl-head-soft);
+             color: var(--sl-text-muted); font-size: 12.5px; font-weight: 800; letter-spacing: 1px; }
 th.ovv-axis-g { left: 0; width: 36px; min-width: 36px; }
 th.ovv-axis-p { left: 36px; width: 96px; min-width: 96px; }
 
 th.ovv-period { position: sticky; left: 36px; z-index: 3; width: 96px; min-width: 96px;
-               height: 54px; background: #f8fafc; padding: 6px 4px !important; }
-.ovv-pname { display: block; font-size: 13.5px; font-weight: 800; color: #334155;
+               height: 54px; background: var(--sl-surface-2); padding: 6px 4px !important; }
+.ovv-pname { display: block; font-size: 13.5px; font-weight: 800; color: var(--sl-head-text);
             white-space: nowrap; }
 .ovv-ptime { display: block; margin-top: 3px; font-size: 11px; font-weight: 500;
-            color: #94a3b8; font-variant-numeric: tabular-nums; }
+            color: var(--sl-text-subtle); font-variant-numeric: tabular-nums; }
 .ovv-ptime i { font-style: normal; margin: 0 1px; }
 th.ovv-p-reading { background: #fffbeb; }
 th.ovv-p-evening { background: #eef2ff; }
 
 th.ovv-group { width: 36px; min-width: 36px; padding: 0 !important;
-              background: var(--grp-bg, #f1f5f9) !important; position: sticky;
+              background: var(--grp-bg, var(--sl-surface-3)) !important; position: sticky;
               left: 0; z-index: 2; }
 .ovv-group-t { display: block; writing-mode: vertical-rl; text-orientation: upright;
-              letter-spacing: 3px; font-size: 12.5px; font-weight: 800; color: #475569;
+              letter-spacing: 3px; font-size: 12.5px; font-weight: 800; color: var(--sl-text-muted);
               margin: 0 auto; }
 
 /* 数据行：一班一格，行高统一、条目多时自动长高 */
-.ovv-row > td.ovv-cell { height: 54px; padding: 5px 6px !important; background: #fff; }
+.ovv-row > td.ovv-cell { height: 54px; padding: 5px 6px !important; background: var(--sl-surface); }
 .ovv-row > td.ovv-cell.ovv-multi { height: auto; }
 .ovv-row.ovv-group-start > th, .ovv-row.ovv-group-start > td {
-    border-top: 1px solid #dde4ec; }
+    border-top: 1px solid var(--sl-border); }
 
 /* 午休/课间：斜纹空档行（时间空档，不是课） */
 .ovv-row.ovv-break-row > td.ovv-cell {
-    background: repeating-linear-gradient(45deg, #fbfdff, #fbfdff 6px,
-                                          #f1f5f9 6px, #f1f5f9 12px); }
-.ovv-row.ovv-break-row > th.ovv-period { height: 34px; background: #f1f5f9; }
-.ovv-row.ovv-break-row .ovv-pname { font-size: 12px; font-weight: 600; color: #94a3b8; }
+    background: repeating-linear-gradient(45deg, var(--sl-surface), var(--sl-surface) 6px,
+                                          var(--sl-surface-3) 6px, var(--sl-surface-3) 12px); }
+.ovv-row.ovv-break-row > th.ovv-period { height: 34px; background: var(--sl-surface-3); }
+.ovv-row.ovv-break-row .ovv-pname { font-size: 12px; font-weight: 600; color: var(--sl-text-subtle); }
 .ovv-row.ovv-break-row .ovv-ptime { font-size: 10.5px; }
 
 /* 当前节次（查课实时课表复用）：整行高亮 */
@@ -247,7 +248,7 @@ th.ovv-group { width: 36px; min-width: 36px; padding: 0 !important;
 
 /* 格内条目：字号放大（学科 14.5px / 教师 12px），左侧学科色条更粗 */
 .ovv-cell .ovw-item { padding: 6px 8px 6px 11px; border-radius: 8px;
-                     box-shadow: inset 3px 0 0 var(--sch, #94a3b8); }
+                     box-shadow: inset 3px 0 0 var(--sch, var(--sl-text-subtle)); }
 .ovv-cell .ovw-item + .ovw-item { margin-top: 4px; }
 .ovv-cell .ovw-subj { font-size: 14.5px; line-height: 1.35; }
 .ovv-cell .ovw-teacher { font-size: 12px; line-height: 1.35; margin-top: 1px; }
@@ -288,7 +289,7 @@ th.ovv-group { width: 36px; min-width: 36px; padding: 0 !important;
     background: #f0f7ff !important;
 }
 .ovv-edit-mode .ovw-item { cursor: grab; }
-.ovv-edit-mode .ovw-item:hover { box-shadow: inset 3px 0 0 var(--sch, #94a3b8), 0 0 0 2px #93c5fd; }
+.ovv-edit-mode .ovw-item:hover { box-shadow: inset 3px 0 0 var(--sch, var(--sl-text-subtle)), 0 0 0 2px #93c5fd; }
 .ovv-edit-mode .ovw-item.ovv-dragging { opacity: .45; cursor: grabbing; }
 .ovv-edit-mode td.ovv-cell.ovv-drop-hover {
     outline: 2px dashed #10b981; outline-offset: -2px; background: #ecfdf5 !important;
@@ -311,4 +312,48 @@ th.ovv-group { width: 36px; min-width: 36px; padding: 0 !important;
     .ovv-cell .ovw-subj { color: #000 !important; font-size: 10.5px; }
     .ovv-cell .ovw-teacher { color: #374151 !important; font-size: 9px; }
     .ovv-cmeta, .ovv-cur-flag, .ovv-grade-sub { display: none !important; }
+}
+/* ══════════════════════════════════════════════════════════════════════════
+   深色模式补丁（2026-10-13 用户反馈「课表页面在深色下没匹配」）
+   --------------------------------------------------------------------------
+   课表原来整套写死浅色。上面已把**能等值替换**的中性色改成主题变量
+   （浅色视觉零变化，深色自动跟随）；这里只处理两类「变量替不掉」的：
+     ① 模板 / JS 以 hex 注入 CSS 变量的学科配色（--sch / --sch-bg / --sch-fg /
+        --grp-bg）：变量替换够不着，只能靠更高特异性覆盖；
+     ② 语义浅底（早读暖色 / 晚自习冷色 / 当前节次绿 / 编辑与拖拽态）：这些颜色
+        浅色下有明确含义，深色下改成**同色系半透明**，保住语义。
+   整段包在 @media screen 内：打印时 html 上仍带 data-bs-theme="dark"，
+   不加 screen 限定会压过文件下面的 @media print 黑白段。
+   ══════════════════════════════════════════════════════════════════════════ */
+@media screen {
+    /* ① 学科配色：底色压成深面板色（保留左侧学科色条）；支持 color-mix 的
+       浏览器再叠一层淡学科色，不支持则回落到上一行的纯面板色 */
+    [data-bs-theme="dark"] .ovw-item { background: var(--sl-surface-3); }
+    [data-bs-theme="dark"] .ovw-item {
+        background: color-mix(in srgb, var(--sch-bg, var(--sl-surface-3)) 18%, var(--sl-surface-3)); }
+    [data-bs-theme="dark"] .ovw-subj { color: var(--sl-text); }
+    [data-bs-theme="dark"] .ovv-cell .ovw-item { background: var(--sl-surface-3); }
+    [data-bs-theme="dark"] .ovv-cell .ovw-item {
+        background: color-mix(in srgb, var(--sch-bg, var(--sl-surface-3)) 18%, var(--sl-surface-3)); }
+    [data-bs-theme="dark"] .ovv-cell .ovw-subj { color: var(--sl-text); }
+    /* ② 作息分组列（模板注入 --grp-bg）→ 深面板色，避免整条亮色块 */
+    [data-bs-theme="dark"] th.ovv-group { background: var(--sl-surface-3) !important; }
+    /* ③ 早读（暖）/ 晚自习（冷） */
+    [data-bs-theme="dark"] th.ovw-p-reading,
+    [data-bs-theme="dark"] th.ovv-p-reading { background: rgba(245, 158, 11, .14) !important; }
+    [data-bs-theme="dark"] th.ovw-p-evening,
+    [data-bs-theme="dark"] th.ovv-p-evening { background: rgba(99, 102, 241, .16) !important; }
+    /* ④ 当前节次（今日课表高亮列 / 行） */
+    [data-bs-theme="dark"] th.ovw-cur-col {
+        background: rgba(16, 185, 129, .22) !important; color: #6ee7b7 !important; }
+    [data-bs-theme="dark"] td.ovw-cur-col { background: rgba(16, 185, 129, .10) !important; }
+    [data-bs-theme="dark"] .ovv-row.ovv-cur-row > th.ovv-period {
+        background: rgba(16, 185, 129, .22) !important; color: #6ee7b7 !important; }
+    [data-bs-theme="dark"] .ovv-row.ovv-cur-row > td.ovv-cell {
+        background: rgba(16, 185, 129, .10); }
+    /* ⑤ 编辑 / 拖拽悬停态 */
+    [data-bs-theme="dark"] .ovv-edit-mode td.ovv-cell.ovv-editable:hover {
+        background: rgba(59, 130, 246, .18) !important; }
+    [data-bs-theme="dark"] .ovv-edit-mode td.ovv-cell.ovv-drop-hover {
+        background: rgba(16, 185, 129, .16) !important; }
 }

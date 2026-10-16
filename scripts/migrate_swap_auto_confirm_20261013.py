@@ -27,6 +27,21 @@ from app.extensions import db                                # noqa: E402
 from scripts._db_backup import backup_db                     # noqa: E402
 from scripts._ddl_guard import assert_ident, assert_table    # noqa: E402
 
+# 2026-10-14 第四轮审计（CONS-02）：补迁移登记（只登记不早退）
+SCRIPT_NAME = os.path.basename(__file__)
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+try:
+    import _mig_log
+except Exception as _e:  # noqa: BLE001
+    _mig_log = None
+    print(f'[WARN] 迁移登记模块不可用（迁移照常执行，仅不登记）：{_e}')
+
+
+def _record():
+    if _mig_log:
+        _mig_log.record(SCRIPT_NAME, note='schedule_swaps 增 need_partner_confirm（无需对方确认）列')
+
+
 TABLE = 'schedule_swaps'
 BIND = 'timetable'
 COLUMN = 'need_partner_confirm'
@@ -45,6 +60,7 @@ def main():
         insp = sa.inspect(engine)
         if not insp.has_table(TABLE):
             print(f'[SKIP] {TABLE} 表不存在（尚未建过课表，无需迁移）')
+            _record()
             return 0
         assert_table(TABLE)
         assert_ident(COLUMN, '列名')
@@ -68,6 +84,7 @@ def main():
             n = conn.exec_driver_sql(
                 f'SELECT COUNT(*) FROM {TABLE} WHERE {COLUMN} = 1').scalar()
         print(f'[OK] schedule_swaps 共 {n} 条记录选择了「需对方确认」')
+    _record()
     return 0
 
 

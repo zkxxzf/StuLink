@@ -7,15 +7,16 @@
         box-shadow: 0 1px 4px rgba(0,0,0,.05); transition: box-shadow .2s;
     }
     .dash-card:hover { box-shadow: 0 4px 12px rgba(0,0,0,.08); }
+    /* 2026-10-14：写死 #fff 在深色主题下是白块 + 浅字（对比 1.01）→ 跟随主题面板色 */
     .dash-card .card-header {
-        background: #fff; border-bottom: 1px solid #f1f5f9;
+        background: var(--sl-surface); border-bottom: 1px solid var(--sl-border);
         padding: 13px 20px; border-radius: 14px 14px 0 0 !important;
     }
     /* 概览指标行 */
     .metric-row { display: flex; gap: 12px; flex-wrap: wrap; }
     .metric-box {
         flex: 1; min-width: 150px; border-radius: 12px; padding: 16px 18px;
-        background: #f8fafc; border: 1px solid #f1f5f9; position: relative; overflow: hidden;
+        background: var(--sl-surface-2, #f8fafc); border: 1px solid var(--sl-border, #f1f5f9); position: relative; overflow: hidden;
     }
     .metric-box::before {
         content: ''; position: absolute; top: 0; left: 0; width: 4px; height: 100%;
@@ -26,17 +27,18 @@
     .metric-box.m-rose::before { background: #f43f5e; }
     .metric-box.m-violet::before { background: #8b5cf6; }
     .metric-box.m-cyan::before { background: #06b6d4; }
-    .metric-title { font-size: 12px; color: #94a3b8; font-weight: 500; margin-bottom: 6px; }
-    .metric-num { font-size: 24px; font-weight: 700; color: #1e293b; line-height: 1; }
-    .metric-num small { font-size: 13px; font-weight: 400; color: #94a3b8; }
-    .metric-sub { font-size: 11px; color: #64748b; margin-top: 6px; display: flex; gap: 10px; }
+    /* 2026-10-14 第四轮审计（UI-10 / UI-20）：文字与底色改主题变量（深色下不再浅底浅字） */
+    .metric-title { font-size: 12px; color: var(--sl-text-subtle, #94a3b8); font-weight: 500; margin-bottom: 6px; }
+    .metric-num { font-size: 24px; font-weight: 700; color: var(--sl-text, #1e293b); line-height: 1; }
+    .metric-num small { font-size: 13px; font-weight: 400; color: var(--sl-text-subtle, #94a3b8); }
+    .metric-sub { font-size: 11px; color: var(--sl-text-muted, #64748b); margin-top: 6px; display: flex; gap: 10px; }
     .metric-sub .tag-m { color: #3b82f6; }
     .metric-sub .tag-f { color: #ec4899; }
     /* 性别分布 */
-    .gender-item { text-align: center; padding: 14px 8px; border-radius: 12px; background: #f8fafc; border: 1px solid #f1f5f9; }
+    .gender-item { text-align: center; padding: 14px 8px; border-radius: 12px; background: var(--sl-surface-2, #f8fafc); border: 1px solid var(--sl-border, #f1f5f9); }
     .gender-item .g-icon { font-size: 28px; margin-bottom: 4px; }
-    .gender-item .g-num { font-size: 22px; font-weight: 700; color: #1e293b; }
-    .gender-item .g-label { font-size: 11px; color: #94a3b8; margin-top: 2px; }
+    .gender-item .g-num { font-size: 22px; font-weight: 700; color: var(--sl-text, #1e293b); }
+    .gender-item .g-label { font-size: 11px; color: var(--sl-text-subtle, #94a3b8); margin-top: 2px; }
 </style>
 {% endblock %}
 {% block content %}
@@ -231,15 +233,15 @@
             type: 'category',
             data: labels,
             axisTick: { show: false },
-            axisLine: { lineStyle: { color: '#e2e8f0' } },
-            axisLabel: { color: '#64748b', fontSize: 12, fontWeight: 600, interval: 0 }
+            axisLine: { lineStyle: { color: (window.stuCssVar ? stuCssVar('--sl-border', '#e2e8f0') : '#e2e8f0') } },
+            axisLabel: { color: (window.stuCssVar ? stuCssVar('--sl-text-muted', '#64748b') : '#64748b'), fontSize: 12, fontWeight: 600, interval: 0 }
         },
         yAxis: {
             type: 'value',
             splitLine: { lineStyle: { color: 'rgba(0,0,0,0.04)' } },
             axisLine: { show: false },
             axisTick: { show: false },
-            axisLabel: { color: '#94a3b8', fontSize: 11 }
+            axisLabel: { color: (window.stuCssVar ? stuCssVar('--sl-text-subtle', '#94a3b8') : '#94a3b8'), fontSize: 11 }
         },
         series: [
             {

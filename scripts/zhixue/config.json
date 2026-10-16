@@ -1,0 +1,26 @@
+{
+  "base_url": "https://www.zhixue.com",
+  "login_url": "https://www.zhixue.com/login.html",
+  "grade_url": "https://www.zhixue.com/htm-freshreport/#/schoolReportList/schoolReportListIndex",
+  "browser_channel": "msedge",
+  "headless": false,
+  "selectors": {
+    "exam_item": [
+      ".report-list-area .report-item"
+    ],
+    "exam_link": [],
+    "export_button": [
+      {
+        "css": "a.one-key-export"
+      },
+      {
+        "text": "一键导出"
+      }
+    ],
+    "exam_open": [
+      ".view-btn"
+    ]
+  },
+  "wait_timeout_ms": 15000,
+  "post_click_wait_ms": 2500
+}

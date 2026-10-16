@@ -36,6 +36,9 @@
     <div class="card-body p-0">
         {% if students is defined %}
         <form method="GET" id="filterForm">
+        {# 2026-10-14 第三轮审计（UI-09）：宽表移动端把整页撑破（实测 +357px），
+           补 table-responsive 容器，窄屏改为表内横滚 #}
+        <div class="table-responsive">
         <table class="table table-hover table-sm mb-0" style="width:100%" id="studentsTable">
             <thead class="table-light">
                 <tr>
@@ -54,46 +57,46 @@
                     {% if current_user.has_role('admin') %}
                     <th></th>
                     {% endif %}
-                    <th><input type="text" name="student_number" placeholder="学号"
+                    <th><input type="text" name="student_number" placeholder="学号" aria-label="按学号筛选"
                            value="{{ request.args.get('student_number','') }}" onkeydown="if(event.key==='Enter')document.getElementById('filterForm').submit()"></th>
-                    <th><input type="text" name="name" placeholder="姓名"
+                    <th><input type="text" name="name" placeholder="姓名" aria-label="按姓名筛选"
                            value="{{ request.args.get('name','') }}" onkeydown="if(event.key==='Enter')document.getElementById('filterForm').submit()"></th>
-                    <th><select name="gender" onchange="document.getElementById('filterForm').submit()">
+                    <th><select name="gender" aria-label="按性别筛选" onchange="document.getElementById('filterForm').submit()">
                         <option value="">全部</option>
                         <option value="男" {{ 'selected' if request.args.get('gender')=='男' }}>男</option>
                         <option value="女" {{ 'selected' if request.args.get('gender')=='女' }}>女</option>
                     </select></th>
-                    <th><select name="grade" onchange="document.getElementById('filterForm').submit()">
+                    <th><select name="grade" aria-label="按年级筛选" onchange="document.getElementById('filterForm').submit()">
                         <option value="">全部</option>
                         {% for g in grades %}
                         <option value="{{ g }}" {{ 'selected' if request.args.get('grade')==g }}>{{ g }}</option>
                         {% endfor %}
                     </select></th>
-                    <th><select name="class_name" onchange="if(this.value && document.querySelector('[name=grade]').value===''){alert('请先选择年级，再选择班级');this.value='';return;}document.getElementById('filterForm').submit()">
+                    <th><select name="class_name" aria-label="按班级筛选" onchange="if(this.value && document.querySelector('[name=grade]').value===''){alert('请先选择年级，再选择班级');this.value='';return;}document.getElementById('filterForm').submit()">
                         <option value="">全部</option>
                         {% for c in classes %}
                         <option value="{{ c }}" {{ 'selected' if request.args.get('class_name')==c }}>{{ c }}</option>
                         {% endfor %}
                     </select></th>
-                    <th><select name="subject_selection" onchange="document.getElementById('filterForm').submit()">
+                    <th><select name="subject_selection" aria-label="按选科筛选" onchange="document.getElementById('filterForm').submit()">
                         <option value="">全部</option>
                         {% for s in subjects %}
                         <option value="{{ s }}" {{ 'selected' if request.args.get('subject_selection')==s }}>{{ s }}</option>
                         {% endfor %}
                     </select></th>
-                    <th><select name="boarding_type" onchange="document.getElementById('filterForm').submit()">
+                    <th><select name="boarding_type" aria-label="按住校/走读筛选" onchange="document.getElementById('filterForm').submit()">
                         <option value="">全部</option>
                         {% for bt in boarding_types %}
                         <option value="{{ bt }}" {{ 'selected' if request.args.get('boarding_type')==bt }}>{{ bt }}</option>
                         {% endfor %}
                     </select></th>
-                    <th><select name="day_student_type" onchange="document.getElementById('filterForm').submit()">
+                    <th><select name="day_student_type" aria-label="按走读类型筛选" onchange="document.getElementById('filterForm').submit()">
                         <option value="">全部</option>
                         {% for dst in day_student_types %}
                         <option value="{{ dst }}" {{ 'selected' if request.args.get('day_student_type')==dst }}>{{ dst }}</option>
                         {% endfor %}
                     </select></th>
-                    <th><input type="text" name="room_number" placeholder="宿舍（如 西201）"
+                    <th><input type="text" name="room_number" placeholder="宿舍（如 西201）" aria-label="按宿舍号筛选"
                            value="{{ request.args.get('room_number','') }}" onchange="document.getElementById('filterForm').submit()"></th>
                     <th></th><th></th><th></th>
                 </tr>
@@ -126,6 +129,7 @@
                 {% endif %}
             </tbody>
         </table>
+        </div>{# /table-responsive（UI-09） #}
         </form>
 
         {% if pagination and pagination.pages > 1 %}

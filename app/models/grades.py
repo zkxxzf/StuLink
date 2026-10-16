@@ -1,4 +1,4 @@
-# StuLink v1.19.49.29 2026-10-10
+# StuLink v1.19.49.35 2026-10-10
 # 成绩管理与可视化分析系统：数据模型（独立库 grades.db）
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 import json
@@ -6,6 +6,10 @@ import logging
 import re
 from datetime import datetime
 from app.extensions import db
+# 综合组六科（体育/音乐/美术/信息技术/通用技术/心理）的**唯一真值**在教务模型；
+# 成绩侧只在「教师-学科映射可维护科目」（LINK_SUBJECTS）里引用它。
+# 依赖方向：models.grades → models.academic 单向（academic 不反向 import grades 模型）。
+from app.models.academic import COMPREHENSIVE_SUBJECTS
 
 # 2026-10-10 架构审计：本模块解析 JSON 配置时原有静默 except，配置损坏时
 # 会悄悄回落到默认值（页面照常显示，但满分/配置其实没生效）。用 debug 级留痕
@@ -15,8 +19,45 @@ logger = logging.getLogger(__name__)
 # ============ 科目常量（与字典 exam_subject 预置值保持一致） ============
 SUBJECTS = ['语文', '数学', '外语', '物理', '历史', '化学', '生物', '政治', '地理']
 TOTAL_SUBJECT = '总分'
+# 2026-10-13 科目别名自动映射（**唯一维护点**，用户口径「英语→外语、日语→外语」等）。
+# 用户粘贴 / 导入 Excel / 手填时习惯写「英语」「日语」等，实际都指系统的标准科「外语」；
+# 此前各模块各写一份 {'英语': '外语'}，日语/俄语等小语种一律被判非法（整行丢弃/列被忽略）。
+# 口径：先归一、再过白名单；**未命中别名时原样返回** —— 不认识的值仍会被白名单挡下并给
+# 用户明确报错，绝不把未知值悄悄变成合法值。
+SUBJECT_ALIAS = {
+    # 外语系：小语种统一归到系统标准科「外语」
+    '英语': '外语', '日语': '外语', '俄语': '外语', '德语': '外语', '法语': '外语',
+    '西班牙语': '外语', '韩语': '外语', '朝鲜语': '外语', '意大利语': '外语',
+    '葡萄牙语': '外语', '阿拉伯语': '外语',
+    # 政治系
+    '思想政治': '政治', '思想品德': '政治', '思品': '政治',
+    '道法': '政治', '道德与法治': '政治',
+    # 常见单字简称（教务 / 粘贴表格里很常见）
+    '语': '语文', '数': '数学', '英': '外语', '物': '物理', '化': '化学',
+    '生': '生物', '政': '政治', '史': '历史', '地': '地理',
+}
+
+
+def normalize_subject(name):
+    """科目名归一：去首尾空白（含全角空格）→ 查别名表 → 返回标准科名。
+
+    2026-10-13：各导入 / 手填 / 粘贴入口统一调用它，再各自做白名单校验。
+    未命中别名时**原样返回**；None 返回 ''（同样会被白名单挡下，不抛异常）。
+    """
+    if name is None:
+        return ''
+    t = str(name).replace('\u3000', ' ').strip()
+    return SUBJECT_ALIAS.get(t, t)
 # 默认满分：语数外 150，其余 100（河南 3+1+2）
 DEFAULT_FULL_MARKS = {s: (150 if s in ('语文', '数学', '外语') else 100) for s in SUBJECTS}
+
+# 教师-学科映射（TeacherSubjectLink）可维护的科目集合 —— 2026-10-15 用户口径
+# 「教师映射扩容，增加综合组」：成绩科目 9 科 + 综合组 6 科（体育/音乐/美术/信息技术/
+# 通用技术/心理，各占一列，页面上归到「综合组」分组带，与学科组长页同一份口径）。
+# ⚠ 成绩链路仍以 SUBJECTS（9 科）为准：成绩导入白名单 / 分析报表 / 分数线 /
+#   DEFAULT_FULL_MARKS / AI 成绩口径**一律不扩** —— 六科只在「任课映射维护 +
+#   课表导入核对」里流动（成绩表里本就没有这些科目）。
+LINK_SUBJECTS = SUBJECTS + list(COMPREHENSIVE_SUBJECTS)
 
 # 选科组合字符 → 科目全名（用于由选科组合推断应考科目）
 _SEL_CHAR_MAP = {'物': '物理', '化': '化学', '生': '生物', '政': '政治', '史': '历史', '地': '地理'}
@@ -120,7 +161,7 @@ def _default_config():
 EXAM_KINDS = ('联考', '本校考', '小测验')
 # 阶段：教学进度节点 —— 用于“上一场同阶段考试”的定位（分层依据）
 EXAM_STAGES = ('期末考', '期中考', '月考', '限时练', '高三一测', '高三二测')
-# 分数口径（v1.19.49.29）：**仅作标记**，不参与导入解析/排名/划线口径判断
+# 分数口径（v1.19.49.35）：**仅作标记**，不参与导入解析/排名/划线口径判断
 # （口径在导入时按数据确定：有赋分进主分，只给原始分时原始分顶上主分）。
 # 允许留空 = 未指定，由导入时的文件决定。
 SCORE_MODES = ('converted', 'raw')
@@ -134,7 +175,7 @@ class Exam(db.Model):
     v1.19.0 四段式重构：新增两个维度
       exam_kind  考试性质（联考 / 本校考 / 小测验）
       exam_type  考试阶段（期末考 / 期中考 / 月考 / 限时练 / 高三一测 / 高三二测）
-    以及 score_mode（分数口径**标记**——v1.19.49.29 起允许不选；见字段注释）。
+    以及 score_mode（分数口径**标记**——v1.19.49.35 起允许不选；见字段注释）。
     """
     __bind_key__ = 'grades'
     __tablename__ = 'exams'
@@ -145,7 +186,7 @@ class Exam(db.Model):
     # v1.19.0 考试性质（字典 exam_kind：联考/本校考/小测验）
     exam_kind = db.Column(db.String(20))
     # 分数口径标记：converted=赋分 / raw=原始分 / 空=未指定（默认，导入时按文件确定）
-    # v1.19.49.29 起允许留空。注意它只是"标记"：导入解析、排名、划线都不读它——
+    # v1.19.49.35 起允许留空。注意它只是"标记"：导入解析、排名、划线都不读它——
     # exam_scores.score 在导入时已按「有赋分进主分、只给原始分则原始分顶上」定型。
     score_mode = db.Column(db.String(10), default='')
     grade = db.Column(db.String(10), nullable=False)  # 2024级/2025级…（与字典一致）
@@ -171,7 +212,7 @@ class Exam(db.Model):
     def score_mode_label(self):
         """分数口径展示名：赋分 / 原始分 / 按导入确定（未指定）
 
-        v1.19.49.29：未指定显示「按导入确定」，不再回落成「赋分」——
+        v1.19.49.35：未指定显示「按导入确定」，不再回落成「赋分」——
         否则老师没选却被显示成"赋分"，与本场实际口径不符。
         """
         return SCORE_MODE_LABELS.get((self.score_mode or '').strip(), SCORE_MODE_AUTO_LABEL)
@@ -281,7 +322,7 @@ class ExamScore(db.Model):
     class_name = db.Column(db.String(10))                   # 班级快照（换班不影响历史）
     # v1.19.0 考号快照（联考等第三方编排的号，第三方未给时为空）
     exam_no = db.Column(db.String(20))
-    # v1.19.49.29 班型快照（强基班/卓越班…）：导入时取自班型设置，使去差均分等分析
+    # v1.19.49.35 班型快照（强基班/卓越班…）：导入时取自班型设置，使去差均分等分析
     # 永远用「考试当时」的班型；此前实时读 ClassProfile，班型一改历史全部失真
     class_type = db.Column(db.String(20))
     direction = db.Column(db.String(4))                     # 物理/历史 快照
@@ -311,10 +352,14 @@ class ExamScore(db.Model):
 
 
 class ExamBand(db.Model):
-    """分层配置：考试 × 方向 × 学科 × 有序层（seq=1 最高层，无上界）
+    """分层配置：考试 × 方向 × [选科组合] × 学科 × 有序层（seq=1 最高层，无上界）
 
     subject='总分' 为总分线（原行为）；subject=学科名 为该科单科线，
     两者独立配置，故同一学科在物理/历史方向下可有不同分数线。
+    2026-10-15 组合维度：selection 非空 = 该选科组合（如 物化生）自己的线
+    （组合总分线挂在所属方向下，direction 必填）；空 = 按方向/全体（原口径）。
+    判层（band_of_score / band_list）按学生自身组合取线，组合线优先，
+    无组合线回落方向线（stats_service）。
     """
     __bind_key__ = 'grades'
     __tablename__ = 'exam_bands'
@@ -322,6 +367,7 @@ class ExamBand(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     exam_id = db.Column(db.Integer, nullable=False)
     direction = db.Column(db.String(4), default='')   # 空串=双向套用
+    selection = db.Column(db.String(10), nullable=False, default='')  # 选科组合（物化生…）；空=按方向
     subject = db.Column(db.String(10), nullable=False,
                         default=TOTAL_SUBJECT)        # 总分 或 9 科之一
     seq = db.Column(db.Integer, nullable=False)       # 1=最高层
@@ -330,7 +376,8 @@ class ExamBand(db.Model):
     lower_value = db.Column(db.Float, nullable=False)  # 下界分数或比例(0~100)
 
     __table_args__ = (
-        db.UniqueConstraint('exam_id', 'direction', 'subject', 'seq', name='uq_band_seq'),
+        db.UniqueConstraint('exam_id', 'direction', 'selection', 'subject', 'seq',
+                            name='uq_band_seq'),
     )
 
 
@@ -407,8 +454,74 @@ class TeacherSubjectLink(db.Model):
     )
 
 
+# ── 任课映射方案（2026-10-14）────────────────────────────────────────────────
+# 为什么需要：高中每学期任课安排都会变（分班 / 换老师 / 学科组调整），而
+# TeacherSubjectLink 只存「当前」一套，改完就没法回看上一学期谁教哪个班。
+# 「方案」＝某个学期（或某次调整）的整套任课映射留档 + 一个明确的「当前生效」。
+#
+# 关键取舍（重要，勿改）：
+# - **teacher_subject_links 仍是"当前生效映射"的唯一运行真值**，语义与列都不动 ——
+#   成绩 / 教务 / 考务 / 工作台 / MCP 等 20+ 处读取点零改动（它们只认 active=True）；
+# - 每个方案（含当前方案）在 teacher_link_plan_rows 里各存一份完整快照，
+#   「使用某方案」＝把该方案快照物化回主表（服务层 link_plan_service 负责）；
+# - is_current=True 全局至多一个（服务层保证），页面据此显示/编辑"当前方案"。
+
+class TeacherLinkPlan(db.Model):
+    """任课映射方案（学年 × 学期 / 自定义名称，可任意多个）"""
+    __bind_key__ = 'grades'
+    __tablename__ = 'teacher_link_plans'
+
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(80), nullable=False)      # 方案名（如「2026-2027学年 第一学期」）
+    school_year = db.Column(db.String(20), default='')   # 如 2026-2027（可空＝未标注）
+    term = db.Column(db.String(10), default='')          # ''=整学年 / 第一学期 / 第二学期
+    note = db.Column(db.String(200), default='')         # 说明（可空）
+    is_current = db.Column(db.Boolean, default=False, index=True)  # 当前生效方案（至多一个）
+    created_by = db.Column(db.Integer)                   # users.id
+    created_at = db.Column(db.DateTime, default=datetime.now)
+    updated_at = db.Column(db.DateTime, default=datetime.now, onupdate=datetime.now)
+
+    # 2026-10-14 第四轮审计（DATA3-01）：至多一个「当前方案」由 DB 级**部分唯一索引**兜底
+    # （服务层循环翻转只保正常路径；手工改库 / 并发提交仍可能留下两个 is_current=1）
+    __table_args__ = (
+        db.Index('uq_link_plan_current', 'is_current', unique=True,
+                 sqlite_where=db.text('is_current = 1')),
+    )
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'name': self.name,
+            'school_year': self.school_year or '',
+            'term': self.term or '',
+            'term_text': self.term or '整学年',
+            'note': self.note or '',
+            'is_current': bool(self.is_current),
+            'created_at': self.created_at.strftime('%Y-%m-%d %H:%M') if self.created_at else '',
+            'updated_at': self.updated_at.strftime('%Y-%m-%d %H:%M') if self.updated_at else '',
+        }
+
+
+class TeacherLinkPlanRow(db.Model):
+    """任课映射方案明细（方案 × 年级 × 班级 × 科目 → 教师账号快照）"""
+    __bind_key__ = 'grades'
+    __tablename__ = 'teacher_link_plan_rows'
+
+    id = db.Column(db.Integer, primary_key=True)
+    plan_id = db.Column(db.Integer, nullable=False, index=True)
+    grade = db.Column(db.String(10), nullable=False)
+    class_name = db.Column(db.String(10), nullable=False)
+    subject = db.Column(db.String(10), nullable=False)
+    user_id = db.Column(db.Integer, nullable=False)
+
+    __table_args__ = (
+        db.UniqueConstraint('plan_id', 'grade', 'class_name', 'subject',
+                            name='uq_plan_link_cell'),
+    )
+
+
 class ExamTeacherLink(db.Model):
-    """v1.19.49.29 考试任课快照：考试 × 班级 × 科目的**当时**任课教师
+    """v1.19.49.35 考试任课快照：考试 × 班级 × 科目的**当时**任课教师
 
     为什么需要：TeacherSubjectLink 只存"当前"映射，教师一换（尤其分班后）
     历史考试的教师维度分析会全部错位。本表把每场考试的任课教师映射定格，
@@ -480,6 +593,11 @@ class AiReport(db.Model):
     model = db.Column(db.String(50))
     content = db.Column(db.Text)               # 报告原文
     charts = db.Column(db.Text)                # 图表数据（JSON，本地统计，随报告固化）
+    # 2026-10-13「AI 一句话分析」：kind=md（旧口径 Markdown 报告）/ html（工具调用后
+    # 直接产出的 HTML 片段，已由 app/utils/html_guard.py 白名单消毒，前端直插）；
+    # trace 记录这轮的工具调用轨迹（JSON：[{tool,args,ok,summary,ms}]），便于回溯数据来源。
+    kind = db.Column(db.String(10), default='md')
+    trace = db.Column(db.Text)
     created_at = db.Column(db.DateTime, default=datetime.now)
 
     __table_args__ = (
@@ -504,6 +622,78 @@ class AiChatMessage(db.Model):
 
     __table_args__ = (
         db.Index('idx_ai_chat_user_exam', 'user_id', 'exam_id'),
+    )
+
+
+class AiTask(db.Model):
+    """AI 一句话分析任务（服务端持久化）。
+
+    为什么落库：生成一次报告要跑多轮工具调用（几十秒~几分钟），
+    若只靠"一次 SSE 请求直通"，用户切页/刷新就断了、看不到进度也找不到结果。
+    现在改成：**提问即建任务**（本表）→ 后台线程执行 → 进度事件进进程内缓冲
+    并可随时（重新）订阅 → 完成后写 `AiReport` 并回填 `report_id`。
+
+    status:
+      running     进行中（`heartbeat` 心跳，进程内 `_RUNNING` 集合用于识别僵尸）
+      done        已完成（`report_id` 指向 ai_reports）
+      error       失败（`error` 是给用户看的原因）
+      interrupted 服务重启/进程丢失导致的中断（可重新提问）
+    """
+    __bind_key__ = 'grades'
+    __tablename__ = 'ai_tasks'
+
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, nullable=False)
+    exam_id = db.Column(db.Integer, nullable=False)
+    # 2026-10-14 提示词生成器：question 就是最终提示词（可能由生成器拼装、可手动编辑），
+    # 500 字太短（生成器模板本身约 200~400 字 + 附加要求），放宽到 2000。
+    question = db.Column(db.String(2000), nullable=False)
+    # gen = 提示词生成器的**结构化选项** JSON（{grades,classes,subjects,focus,output,extra,prompt}）。
+    # 为什么与 question 分开存：question 是"最终发出去的那段话"（可能被手动改过），
+    # gen 是"当时选了哪些维度" —— 中断/失败后「重新编辑提示词」靠它无损回填表单。
+    gen = db.Column(db.Text, default='')
+    direction = db.Column(db.String(10), default='')
+    layer = db.Column(db.String(30), default='')
+    status = db.Column(db.String(12), default='running')
+    stage = db.Column(db.String(200), default='')        # 最近一条阶段文案（列表里直接显示）
+    error = db.Column(db.String(500), default='')
+    tool_count = db.Column(db.Integer, default=0)
+    report_id = db.Column(db.Integer)                    # 完成后指向 ai_reports.id
+    trace = db.Column(db.Text)                           # 工具调用轨迹（JSON，与报告同一份）
+    heartbeat = db.Column(db.DateTime, default=datetime.now)   # 心跳：识别僵尸任务
+    created_at = db.Column(db.DateTime, default=datetime.now)
+    finished_at = db.Column(db.DateTime)
+
+    __table_args__ = (
+        db.Index('idx_ai_task_user', 'user_id'),
+        db.Index('idx_ai_task_exam', 'exam_id'),
+        db.Index('idx_ai_task_status', 'status'),
+    )
+
+
+class AiPromptTemplate(db.Model):
+    """AI 成绩分析「提示词生成器」模板（2026-10-14）。
+
+    老师用下拉选项（分析范围＝年级/班级/学科 → 分析侧重 → 输出格式 → 附加要求）
+    拼出一次分析的提示词；本表把**这套选项**存成命名模板，下次直接套用、再改再跑。
+
+    存的是 `payload`（JSON）= 结构化选项 + 当时生成的 prompt 文本：
+      · 结构化选项 → 套用后表单可无损回填（选项仍可改、可重新生成）；
+      · prompt 文本   → 「当时是这么拼的 / 我手动改成了这样」的留档。
+    仅本人可见（列表/删除都按 user_id 过滤）。
+    """
+    __bind_key__ = 'grades'
+    __tablename__ = 'ai_prompt_templates'
+
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, nullable=False)
+    name = db.Column(db.String(50), nullable=False)
+    payload = db.Column(db.Text)                 # JSON：生成器选项 + prompt 文本
+    created_at = db.Column(db.DateTime, default=datetime.now)
+    updated_at = db.Column(db.DateTime, default=datetime.now)
+
+    __table_args__ = (
+        db.Index('idx_ai_prompt_tpl_user', 'user_id'),
     )
 
 
@@ -543,6 +733,9 @@ class Certificate(db.Model):
     __table_args__ = (
         db.Index('idx_cert_code', 'code'),
         db.Index('idx_cert_stu', 'student_no'),
+        # 2026-10-14 第四轮审计修复（PERF-118①）：按生成人追溯/统计（谁开了多少份
+        # 证明）此前无索引；带 generated_at 支持时间范围过滤。
+        db.Index('idx_cert_generated_by', 'generated_by', 'generated_at'),
     )
 
 
@@ -566,7 +759,7 @@ class ExamAffair(db.Model):
     selection_mode = db.Column(db.String(10), default='selected')  # 编排分组模式：selected 按选科分组 / plain 不选科（全体一组，考场全通用）
     non_attend_mode = db.Column(db.String(10), default='skip')     # 非参考学生处理：skip 不安排考场 / tail 安排到同选科考场尾场
     subject_prefixes = db.Column(db.Text)                          # 选科考号前后缀 JSON：{"物化生":{"prefix":"1701","suffix":""}}
-    # v1.19.49.29 监考编排：每考场默认监考人数（1/2/3，用户口径默认 1 人）
+    # v1.19.49.35 监考编排：每考场默认监考人数（1/2/3，用户口径默认 1 人）
     invig_slots = db.Column(db.Integer, default=1)
     status = db.Column(db.String(10), default='draft')     # draft / arranged / linked
     note = db.Column(db.Text)
@@ -684,13 +877,20 @@ class ExamRoomGroup(db.Model):
 
 
 class ExamRoomGroupMap(db.Model):
-    """v1.19.0 考场房间 ↔ 分组 关联（多对多）"""
+    """v1.19.0 考场房间 ↔ 分组 关联（多对多）
+
+    2026-10-14 用户口径：分组里的房间**顺序**也要能调（上移 / 下移），而且要能「带着顺序复用」——
+    考务步骤② 从某个分组「一键带入」时按本字段排出来的先后生成 01、02… 考场编号
+    （见 ``exam_affairs.affair_rooms_from_lib_batch``；迁移脚本
+    ``scripts/migrate_room_group_map_sort_20261014.py``）。
+    """
     __bind_key__ = 'grades'
     __tablename__ = 'exam_room_group_map'
 
     id = db.Column(db.Integer, primary_key=True)
     group_id = db.Column(db.Integer, nullable=False)
     lib_id = db.Column(db.Integer, nullable=False)     # → affair_room_libs.id
+    sort_order = db.Column(db.Integer, default=0)      # 组内顺序（10、20、30… 步进）
 
     __table_args__ = (
         db.UniqueConstraint('group_id', 'lib_id', name='uq_room_group_map'),
@@ -699,7 +899,7 @@ class ExamRoomGroupMap(db.Model):
 
 
 class ScoreChangeLog(db.Model):
-    """v1.19.49.29 分数修改记录（改分/删分留痕）
+    """v1.19.49.35 分数修改记录（改分/删分留痕）
 
     每次在成绩单改分（含赋分/原始分、标记缺考）都写一条，供全校查询：
     谁、什么时候、改了哪场考试哪个学生的哪一科、改前改后各是多少、什么动作。
@@ -732,7 +932,51 @@ class ScoreChangeLog(db.Model):
     )
 
 
-# ============ v1.19.49.29 考务环节④⑤⑥：任课核对 / 考试时间表 / 监考编排 ============
+class ScoreReviewRequest(db.Model):
+    """v1.19.49.35 成绩复核申请（教师申请调分 → 有改分权限者审批）
+
+    2026-10-15 用户口径：任课教师 / 班主任发现分数有误时可提交复核申请，写清
+    「学生 + 学科 + 题号 + 增减分数」；审批通过后可选**直接应用到成绩单** ——
+    走与手动改分同一条链路（重算总分 → 重算排名 → 写 ScoreChangeLog 留痕）。
+
+    · 题号是说明性字段（成绩表 exam_scores 的粒度是「考试 × 学生 × 学科」，无题号列），
+      允许 "12" / "12-15" 这类写法，留空表示整卷；
+    · status：pending 待审核 / approved 已批准 / rejected 已驳回 / withdrawn 已撤回；
+    · applied=True 表示批准时已把增减分写入成绩单（否则只是批准记录，由管理员另行处理）。
+    """
+    __bind_key__ = 'grades'
+    __tablename__ = 'score_review_requests'
+
+    id = db.Column(db.Integer, primary_key=True)
+    exam_id = db.Column(db.Integer, nullable=False)
+    exam_name = db.Column(db.String(100))                  # 快照，考试改名不影响留痕
+    grade = db.Column(db.String(10))                       # 考试当时班级口径（exam_scores 快照）
+    class_name = db.Column(db.String(10))
+    student_no = db.Column(db.String(20), nullable=False)
+    student_name = db.Column(db.String(50))
+    subject = db.Column(db.String(10), nullable=False)     # 9 科之一（不含总分）
+    question_no = db.Column(db.String(40))                 # 题号 / 题号段；空 = 整卷
+    delta = db.Column(db.Float, nullable=False)            # 增减分数（可正可负）
+    reason = db.Column(db.String(500))
+    status = db.Column(db.String(12), nullable=False, default='pending')
+    applicant_id = db.Column(db.Integer)
+    applicant_name = db.Column(db.String(50))
+    created_at = db.Column(db.DateTime, default=datetime.now)
+    reviewer_id = db.Column(db.Integer)
+    reviewer_name = db.Column(db.String(50))
+    reviewed_at = db.Column(db.DateTime)
+    review_note = db.Column(db.String(200))
+    applied = db.Column(db.Boolean, default=False)         # 已应用到成绩单
+    applied_at = db.Column(db.DateTime)
+
+    __table_args__ = (
+        db.Index('idx_score_review_exam_status', 'exam_id', 'status'),
+        db.Index('idx_score_review_student', 'exam_id', 'student_no'),
+        db.Index('idx_score_review_applicant', 'applicant_id', 'status'),
+    )
+
+
+# ============ v1.19.49.35 考务环节④⑤⑥：任课核对 / 考试时间表 / 监考编排 ============
 #
 # 设计口径（用户 2026-10-12 定案）：
 #   · 三者都是**本批次（本次考试）**的数据，不回写全局任课映射；

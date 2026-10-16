@@ -308,13 +308,14 @@
     .gender-title.female { background: #fce4ec; color: #c62828; }
     .room-detail-table { width: 100%; table-layout: fixed; }
     .student-list-cell { white-space: normal; }
+    /* 2026-10-14：写死浅底 #f1f5f9 在深色下与浅色文字同色（对比 1.0，完全隐形）→ 主题变量 */
     .stu-badge {
         display: inline-block; padding: 1px 6px; margin: 1px 2px;
-        border-radius: 4px; background: #f1f5f9; border: 1px solid #e2e8f0;
+        border-radius: 4px; background: var(--sl-surface-2); border: 1px solid var(--sl-border);
         font-size: 11px; line-height: 1.6; white-space: nowrap;
     }
-    .stu-badge .stu-bed { color: #94a3b8; margin: 0 1px; font-size: 10px; }
-    .stu-badge .stu-cls { color: #0d6efd; margin-left: 3px; font-size: 10px; }
+    .stu-badge .stu-bed { color: var(--sl-text-subtle); margin: 0 1px; font-size: 10px; }
+    .stu-badge .stu-cls { color: var(--sl-sidebar-accent-text); margin-left: 3px; font-size: 10px; }
     .section-card { margin-bottom: 0; }
 </style>
 {% endblock %}

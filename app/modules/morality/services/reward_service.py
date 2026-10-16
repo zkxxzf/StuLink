@@ -1,4 +1,4 @@
-# StuLink v1.19.49.29 2026-10-13
+# StuLink v1.19.49.35 2026-10-13
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 """德育奖惩服务层
 
@@ -64,6 +64,9 @@ def scope_of(user):
     if s.origin in ('admin', 'school'):
         return 'school', '', None
     if s.origin == 'user_grades':
+        # 2026-10-14 第四轮审计修复：用户级范围带班级白名单时精确到班（不再放大为整年级）
+        if s.kind == 'classes':
+            return 'class', '', set(s.classes)
         return 'user_grades', '', set(s.grades)
     if s.origin == 'grade':
         return 'grade', (getattr(user, 'grade', '') or ''), None

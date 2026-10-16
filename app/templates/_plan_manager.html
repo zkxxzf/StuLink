@@ -1,0 +1,355 @@
+{# StuLink 2026-10-14
+   「方案 · 历史记录」通用弹窗（任课教师映射 / 学科组长共用）。
+
+   用户口径（2026-10-14）：每学期任课与组长都会变，所以要有记录 ——
+   页面右上角「历史记录」里可以①使用历史方案 ②使用其他方案 ③新建方案。
+
+   用法（在页面模板里）：
+     {% from '_plan_manager.html' import plan_manager %}
+     {{ plan_manager('planModal', '任课映射方案 · 历史记录', '说明文本',
+                     url_for(ep('teachers_plans')), url_for(ep('teachers_plans_create')),
+                     url_for(ep('teachers_plans_use')), url_for(ep('teachers_plans_rename')),
+                     url_for(ep('teachers_plans_delete')),
+                     count_label='映射条数',
+                     use_confirm='全站当前任课映射将变为此方案。',
+                     reload_after_use=True) }}
+   按钮（页面自己放）：
+     <button onclick="window.slPlans['planModal'].open()"><i class="bi bi-clock-history"></i> 历史记录</button>
+
+   后端约定（四个接口均返回 {success, message, data}）：
+     GET  list_url            → data.items = [{id,name,school_year,term,term_text,note,
+                                               is_current,count,scope,creator,created_at,updated_at}]
+     POST create_url          ← {name, school_year, term, note, copy_from, use_now}
+     POST use_url             ← {plan_id}
+     POST rename_url          ← {plan_id, name, note}
+     POST delete_url          ← {plan_id}
+#}
+{% macro plan_manager(modal_id, title, hint, list_url, create_url, use_url, rename_url,
+                      delete_url, count_label='条数', use_confirm='', reload_after_use=True,
+                      source_year='', source_term='') %}
+<div class="modal fade" id="{{ modal_id }}" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-lg modal-dialog-scrollable">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title"><i class="bi bi-clock-history"></i> {{ title }}</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="关闭"></button>
+            </div>
+            <div class="modal-body">
+                <div class="d-flex justify-content-between align-items-center mb-2 gap-2 flex-wrap">
+                    <span class="text-muted small">{{ hint }}</span>
+                    <button type="button" class="btn btn-sm btn-primary" data-sl-new>
+                        <i class="bi bi-plus-lg"></i> 新建方案
+                    </button>
+                </div>
+                <div data-sl-list>
+                    <div class="text-muted small py-4 text-center">加载中…</div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="modal fade" id="{{ modal_id }}New" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title"><i class="bi bi-plus-lg"></i> 新建方案</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="关闭"></button>
+            </div>
+            <div class="modal-body">
+                <div class="mb-2">
+                    <label class="form-label">方案名称 <span class="text-danger">*</span></label>
+                    <input class="form-control form-control-sm" data-n-name maxlength="80"
+                           placeholder="如：2026-2027学年 第一学期">
+                </div>
+                <div class="row g-2 mb-2">
+                    <div class="col-7">
+                        <label class="form-label">学年</label>
+                        <input class="form-control form-control-sm" data-n-year maxlength="20"
+                               placeholder="2026-2027（可留空）">
+                    </div>
+                    <div class="col-5">
+                        <label class="form-label">学期</label>
+                        <select class="form-select form-select-sm" data-n-term>
+                            <option value="">整学年</option>
+                            <option value="第一学期">第一学期</option>
+                            <option value="第二学期">第二学期</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="mb-2">
+                    <label class="form-label">起点</label>
+                    <select class="form-select form-select-sm" data-n-copy></select>
+                    <div class="form-text">「复制」会把所选方案的整套内容拷贝到新方案，之后互不影响。</div>
+                </div>
+                <div class="mb-2">
+                    <label class="form-label">说明（可选）</label>
+                    <input class="form-control form-control-sm" data-n-note maxlength="200">
+                </div>
+                <div class="form-check">
+                    <input class="form-check-input" type="checkbox" data-n-use id="{{ modal_id }}Use" checked>
+                    <label class="form-check-label" for="{{ modal_id }}Use">
+                        创建后立即使用（切换为当前方案）
+                    </label>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <span class="text-danger small me-auto" data-n-msg></span>
+                <button type="button" class="btn btn-sm btn-outline-secondary" data-bs-dismiss="modal">取消</button>
+                <button type="button" class="btn btn-sm btn-primary" data-n-save>创建</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="modal fade" id="{{ modal_id }}Edit" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title"><i class="bi bi-pencil"></i> 编辑方案</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="关闭"></button>
+            </div>
+            <div class="modal-body">
+                <div class="mb-2">
+                    <label class="form-label">方案名称 <span class="text-danger">*</span></label>
+                    <input class="form-control form-control-sm" data-e-name maxlength="80">
+                </div>
+                <div class="mb-2">
+                    <label class="form-label">说明（可选）</label>
+                    <input class="form-control form-control-sm" data-e-note maxlength="200">
+                </div>
+                <div class="text-muted small" data-e-meta></div>
+            </div>
+            <div class="modal-footer">
+                <span class="text-danger small me-auto" data-e-msg></span>
+                <button type="button" class="btn btn-sm btn-outline-secondary" data-bs-dismiss="modal">取消</button>
+                <button type="button" class="btn btn-sm btn-primary" data-e-save>保存</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+$(function () {
+    'use strict';
+    var MID = '{{ modal_id }}';
+    var CFG = {
+        list: '{{ list_url }}', create: '{{ create_url }}', use: '{{ use_url }}',
+        rename: '{{ rename_url }}', del: '{{ delete_url }}',
+        countLabel: '{{ count_label }}', useConfirm: '{{ use_confirm }}',
+        reloadAfterUse: {{ 'true' if reload_after_use else 'false' }},
+        // 「起点＝复制当前」时后端要知道"当前"指哪个学年学期（学科组长用；任课映射为空）
+        sourceYear: '{{ source_year }}', sourceTerm: '{{ source_term }}'
+    };
+    var $m = $('#' + MID), $new = $('#' + MID + 'New'), $edit = $('#' + MID + 'Edit');
+    var items = [], editing = null;
+
+    function esc(s) { return escHtml(s == null ? '' : String(s)); }
+
+    function modalOf($el) { return bootstrap.Modal.getOrCreateInstance($el[0]); }
+
+    // Bootstrap 在关闭过渡未走完时 show() 会被静默忽略，且打断过渡会留孤儿 backdrop；
+    // 弹窗串接（关 A 开 B）统一走「先清残留 → 延时再开」。
+    function cleanBackdrop() {
+        document.querySelectorAll('.modal-backdrop').forEach(function (b) { b.remove(); });
+        document.body.classList.remove('modal-open');
+        document.body.style.removeProperty('overflow');
+        document.body.style.removeProperty('padding-right');
+    }
+    function openModal($el, fromEl) {
+        var from = fromEl ? bootstrap.Modal.getInstance(fromEl) : null;
+        if (from) {
+            from.hide();
+            cleanBackdrop();
+            setTimeout(function () { modalOf($el).show(); }, 300);
+        } else {
+            modalOf($el).show();
+        }
+    }
+
+    function post(url, payload) {
+        return $.ajax({url: url, type: 'POST', contentType: 'application/json',
+                       data: JSON.stringify(payload || {})});
+    }
+    function failMsg(x, fallback) {
+        return (x && x.responseJSON && x.responseJSON.message) || fallback || '操作失败，请重试';
+    }
+
+    // ── 列表 ──────────────────────────────────────────────────────────────
+    function loadList() {
+        $m.find('[data-sl-list]').html('<div class="text-muted small py-4 text-center">加载中…</div>');
+        $.getJSON(CFG.list).done(function (res) {
+            items = (res && res.data && res.data.items) || [];
+            renderList();
+        }).fail(function (x) {
+            $m.find('[data-sl-list]').html(
+                '<div class="text-danger small py-3 text-center">加载失败：'
+                + esc(failMsg(x)) + '</div>');
+        });
+    }
+
+    function renderList() {
+        if (!items.length) {
+            $m.find('[data-sl-list]').html(
+                '<div class="text-muted small py-4 text-center">'
+                + '还没有方案。点右上「新建方案」即可创建第一套记录。</div>');
+            return;
+        }
+        var rows = items.map(function (it) {
+            var badges = it.is_current
+                ? '<span class="badge text-bg-success">当前</span>' : '';
+            var ops = [];
+            if (!it.is_current) {
+                ops.push('<button type="button" class="btn btn-sm btn-outline-success me-1" data-sl-use="'
+                    + it.id + '"><i class="bi bi-check2-circle"></i> 使用</button>');
+            }
+            ops.push('<button type="button" class="btn btn-sm btn-outline-secondary me-1" data-sl-edit="'
+                + it.id + '"><i class="bi bi-pencil"></i> 编辑</button>');
+            if (!it.is_current) {
+                ops.push('<button type="button" class="btn btn-sm btn-outline-danger" data-sl-del="'
+                    + it.id + '"><i class="bi bi-trash"></i> 删除</button>');
+            }
+            var meta = [];
+            if (it.school_year || it.term) {
+                meta.push((it.school_year || '未标学年') + ' · ' + (it.term_text || '整学年'));
+            }
+            if (it.scope) { meta.push('年级 ' + it.scope); }
+            if (it.creator) { meta.push('创建人 ' + it.creator); }
+            var times = '创建 ' + (it.created_at || '—')
+                + (it.updated_at && it.updated_at !== it.created_at
+                   ? '<br>更新 ' + it.updated_at : '');
+            return '<tr class="' + (it.is_current ? 'table-success' : '') + '">'
+                + '<td><div class="fw-bold">' + esc(it.name) + ' ' + badges + '</div>'
+                + (meta.length ? '<div class="text-muted small">' + esc(meta.join(' · ')) + '</div>' : '')
+                + (it.note ? '<div class="text-muted small">' + esc(it.note) + '</div>' : '')
+                + '</td>'
+                + '<td class="text-center text-nowrap">' + (it.count || 0)
+                + '<div class="text-muted small">' + esc(CFG.countLabel) + '</div></td>'
+                + '<td class="text-muted small text-nowrap">' + times + '</td>'
+                + '<td class="text-end text-nowrap">' + ops.join('') + '</td>'
+                + '</tr>';
+        }).join('');
+        $m.find('[data-sl-list]').html(
+            '<div class="table-responsive"><table class="table table-sm align-middle mb-0">'
+            + '<thead><tr><th>方案</th><th class="text-center">' + esc(CFG.countLabel) + '</th>'
+            + '<th>时间</th><th class="text-end">操作</th></tr></thead>'
+            + '<tbody>' + rows + '</tbody></table></div>'
+            + '<div class="text-muted small mt-2"><i class="bi bi-info-circle"></i> '
+            + '「使用」＝把该方案的整套内容切回当前；当前方案不能删除。</div>');
+    }
+
+    $m.on('click', '[data-sl-new]', function () { openNew(); });
+    $m.on('click', '[data-sl-use]', function () {
+        var id = $(this).data('sl-use');
+        var it = items.filter(function (x) { return String(x.id) === String(id); })[0];
+        if (!it) { return; }
+        if (!confirm('确定使用方案「' + it.name + '」？\n\n' + (CFG.useConfirm || ''))) { return; }
+        post(CFG.use, {plan_id: it.id}).done(function (res) {
+            var to = res && res.data && res.data.redirect;
+            if (to) { location.href = to; return; }        // 学科组长：跳到该方案
+            if (CFG.reloadAfterUse) { location.reload(); }  // 任课映射：刷新当前页
+            else { alert(res.message || '已切换'); loadList(); }
+        }).fail(function (x) { alert(failMsg(x, '切换失败')); });
+    });
+    $m.on('click', '[data-sl-edit]', function () {
+        var id = $(this).data('sl-edit');
+        var it = items.filter(function (x) { return String(x.id) === String(id); })[0];
+        if (!it) { return; }
+        editing = it;
+        $edit.find('[data-e-name]').val(it.name);
+        $edit.find('[data-e-note]').val(it.note || '');
+        $edit.find('[data-e-msg]').text('');
+        $edit.find('[data-e-meta]').text(
+            (it.school_year || '未标学年') + ' · ' + (it.term_text || '整学年')
+            + '（学年学期是导出与筛选的口径，不支持修改）');
+        openModal($edit, $m[0]);
+    });
+    $m.on('click', '[data-sl-del]', function () {
+        var id = $(this).data('sl-del');
+        var it = items.filter(function (x) { return String(x.id) === String(id); })[0];
+        if (!it) { return; }
+        if (!confirm('确定删除方案「' + it.name + '」？\n\n删除后该方案的留档不可恢复（不影响其他方案）。')) { return; }
+        post(CFG.del, {plan_id: it.id}).done(function (res) {
+            loadList();
+        }).fail(function (x) { alert(failMsg(x, '删除失败')); });
+    });
+
+    // ── 新建 ──────────────────────────────────────────────────────────────
+    function defaultName(year, term) {
+        return year ? (year + '学年 ' + (term || '整学年')) : '';
+    }
+    function openNew() {
+        var $n = $new;
+        $n.find('[data-n-name]').val('');
+        $n.find('[data-n-year]').val('');
+        $n.find('[data-n-term]').val('');
+        $n.find('[data-n-note]').val('');
+        $n.find('[data-n-use]').prop('checked', true);
+        $n.find('[data-n-msg]').text('');
+        var opts = ['<option value="current">复制当前方案（推荐）</option>',
+                    '<option value="blank">空白方案（从零开始）</option>'];
+        items.forEach(function (it) {
+            opts.push('<option value="plan:' + it.id + '">复制方案「' + esc(it.name) + '」</option>');
+        });
+        $n.find('[data-n-copy]').html(opts.join(''));
+        openModal($n, $m[0]);
+    }
+    $new.on('input change', '[data-n-year],[data-n-term]', function () {
+        var $name = $new.find('[data-n-name]');
+        var cur = $name.val().trim();
+        if (cur && cur !== $name.data('auto')) { return; }   // 用户自己改过名 → 不覆盖
+        var v = defaultName($new.find('[data-n-year]').val().trim(),
+                            $new.find('[data-n-term]').val());
+        $name.val(v).data('auto', v);
+    });
+    $new.on('click', '[data-n-save]', function () {
+        var self = this;
+        var name = $new.find('[data-n-name]').val().trim();
+        var year = $new.find('[data-n-year]').val().trim();
+        var term = $new.find('[data-n-term]').val();
+        if (!name && !year) {
+            $new.find('[data-n-msg]').text('请填写方案名称（或学年）');
+            return;
+        }
+        $(self).prop('disabled', true);
+        post(CFG.create, {name: name, school_year: year, term: term,
+                          note: $new.find('[data-n-note]').val().trim(),
+                          copy_from: $new.find('[data-n-copy]').val(),
+                          source_year: CFG.sourceYear, source_term: CFG.sourceTerm,
+                          use_now: $new.find('[data-n-use]').is(':checked')})
+            .done(function (res) {
+                var to = res && res.data && res.data.redirect;
+                if (to) { location.href = to; return; }
+                var used = res && res.data && res.data.is_current;
+                if (used && CFG.reloadAfterUse) { location.reload(); return; }
+                modalOf($new).hide();
+                loadList();
+                alert((res && res.message) || '已创建');
+            })
+            .fail(function (x) { $new.find('[data-n-msg]').text(failMsg(x, '创建失败')); })
+            .always(function () { $(self).prop('disabled', false); });
+    });
+
+    // ── 编辑 ──────────────────────────────────────────────────────────────
+    $edit.on('click', '[data-e-save]', function () {
+        if (!editing) { return; }
+        var self = this;
+        $(self).prop('disabled', true);
+        post(CFG.rename, {plan_id: editing.id,
+                          name: $edit.find('[data-e-name]').val().trim(),
+                          note: $edit.find('[data-e-note]').val().trim()})
+            .done(function () {
+                modalOf($edit).hide();
+                loadList();
+            })
+            .fail(function (x) { $edit.find('[data-e-msg]').text(failMsg(x, '保存失败')); })
+            .always(function () { $(self).prop('disabled', false); });
+    });
+
+    window.slPlans = window.slPlans || {};
+    window.slPlans[MID] = {
+        open: function () { openModal($m, null); loadList(); }
+    };
+});
+</script>
+{% endmacro %}

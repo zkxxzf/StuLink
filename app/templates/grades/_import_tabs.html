@@ -1,0 +1,31 @@
+{# 2026-10-13：侧栏原「成绩导入 / AI 智能导入」两项合并为**一个入口**，
+   两种导入方式改在页面内切换（本片段）。两个页面共用，靠 import_tab 决定高亮：
+     std = 标准模板导入（下载 A/B 模板 → 按模板填好 → 上传，确定性解析，数据规范时首选）
+     ai  = AI 智能导入（任意格式表格 / 截图直接上传，AI 只识别列映射，数据仍由系统逐行解析）
+   调用方式：{% set import_tab = 'std' %}{% include 'grades/_import_tabs.html' %} #}
+<div class="card border mb-3">
+    <div class="card-body py-2">
+        <div class="d-flex flex-wrap align-items-center gap-2">
+            <span class="small text-muted text-nowrap"><i class="bi bi-signpost-split"></i> 导入方式</span>
+            <div class="btn-group btn-group-sm" role="group" aria-label="成绩导入方式切换">
+                <a class="btn {% if import_tab == 'std' %}btn-primary{% else %}btn-outline-primary{% endif %}"
+                   href="{{ url_for('grades.exam_import', exam_id=exam.id) }}"
+                   {% if import_tab == 'std' %}aria-current="page"{% endif %}>
+                    <i class="bi bi-file-earmark-spreadsheet"></i> 标准模板导入</a>
+                <a class="btn {% if import_tab == 'ai' %}btn-primary{% else %}btn-outline-primary{% endif %}"
+                   href="{{ url_for('grades.exam_ai_import', exam_id=exam.id) }}"
+                   {% if import_tab == 'ai' %}aria-current="page"{% endif %}>
+                    <i class="bi bi-stars"></i> AI 智能导入</a>
+            </div>
+            <span class="small text-muted">
+                {% if import_tab == 'ai' %}
+                当前是 <b>AI 智能导入</b>：任意格式的表格、照片或截图直接上传，AI 只判断「哪列是什么」，
+                数据由系统确定性解析（不改模板也能导）。
+                {% else %}
+                当前是 <b>标准模板导入</b>：先下载 A/B 模板、按模板整理好再上传，
+                解析口径最确定 —— 数据本来就规范时用它最快。
+                {% endif %}
+            </span>
+        </div>
+    </div>
+</div>

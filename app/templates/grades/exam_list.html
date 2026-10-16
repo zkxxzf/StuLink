@@ -3,33 +3,21 @@
 {% block content %}
 {# v1.19.0 成绩模块落地页（第一屏）：历次考试看板 #}
 <div class="d-flex justify-content-between align-items-start mb-3 flex-wrap gap-2">
-    <div>
+    <div class="d-flex align-items-baseline flex-wrap gap-2">
         <h4 class="mb-0"><i class="bi bi-journals"></i> 历次考试</h4>
-        <div class="text-muted small mt-1">
-            点任意一场考试进入它的工作台：<b>考务安排 → 成绩导入 → 成绩分析</b>
-        </div>
+        {# 2026-10-13 用户口径：该提示紧跟标题右侧，不再单独占一行 #}
+        {# 2026-10-15 用户口径：任课教师 / 班主任也能进本页，但只给成绩分析
+           （考务安排、成绩导入这些不给）。按 grades.edit 分两套提示。 #}
+        <span class="text-muted small">
+            {% if can_manage %}点任意一场考试进入它的工作台：<b>考务安排 → 成绩导入 → 成绩分析</b>
+            {% else %}点任意一场考试查看<b>成绩分析</b>（只展示您所教 / 所带班级与所在年级）{% endif %}
+        </span>
     </div>
+    {% if can_manage %}
     <a href="{{ url_for('grades.exam_new') }}" class="btn btn-primary">
         <i class="bi bi-plus-lg"></i> 新建考试
     </a>
-</div>
-
-{# 概览卡片（当前筛选范围内） #}
-<div class="row g-2 mb-3">
-    {% for k, lbl, cls in [('total', '考试场次', 'primary'),
-                           ('imported', '已导入成绩', 'success'),
-                           ('pending', '待导入', 'warning'),
-                           ('affair', '已有考务', 'info'),
-                           ('banded', '已划线', 'secondary')] %}
-    <div class="col-6 col-md">
-        <div class="card h-100 border-0 shadow-sm">
-            <div class="card-body py-2 px-3">
-                <div class="text-muted small">{{ lbl }}</div>
-                <div class="fs-4 fw-semibold text-{{ cls }}">{{ stats[k] }}</div>
-            </div>
-        </div>
-    </div>
-    {% endfor %}
+    {% endif %}
 </div>
 
 {# 年级筛选（胶囊） #}
@@ -61,9 +49,14 @@
             </thead>
             <tbody>
             {% for e in exams %}
-            {# v1.19.0 整行可点：直接进本场考试工作台（不再需要“详情”按钮） #}
-            <tr class="exam-row" data-href="{{ url_for('grades.exam_detail', exam_id=e.id) }}"
-                style="cursor:pointer" title="点击进入本场考试工作台">
+            {# v1.19.0 整行可点：直接进本场考试工作台（不再需要“详情”按钮）
+               2026-10-15：无 grades.edit 的账号（任课教师 / 班主任）改跳本场「成绩分析」——
+               考试工作台（成绩单 / 考务 / 导入）都需要管理权限，对他们会 403。 #}
+            <tr class="exam-row"
+                data-href="{{ url_for('grades.exam_detail', exam_id=e.id) if can_manage
+                             else url_for('grades.index', exam=e.id, tab='grade') }}"
+                style="cursor:pointer"
+                title="点击进入{{ '本场考试工作台' if can_manage else '本场成绩分析' }}">
                 {# 2026-10-12 UI 审计 M1：考试名可能很长 → 文本列允许换行（.wrap），
                    不再把整表撑出横向滚动条 #}
                 <td class="wrap">{{ e.name }}</td>
@@ -90,17 +83,27 @@
                 </td>
                 <td class="text-end">{{ counts.get(e.id, 0) }}</td>
                 <td class="text-end" onclick="event.stopPropagation()">
+                    {% if can_manage %}
                     <a href="{{ url_for('grades.exam_affair_go', exam_id=e.id) }}" class="btn btn-sm btn-outline-success">考务安排</a>
                     <a href="{{ url_for('grades.exam_import', exam_id=e.id) }}" class="btn btn-sm btn-outline-warning">成绩导入</a>
                     <a href="{{ url_for('grades.bands_page', exam_id=e.id) }}" class="btn btn-sm btn-outline-info">划线分层</a>
                     <button type="button" class="btn btn-sm btn-outline-danger btn-del-exam"
                             data-id="{{ e.id }}" data-name="{{ e.grade }} {{ e.name }}"
                             data-count="{{ counts.get(e.id, 0) }}">删除</button>
+                    {% else %}
+                    {# 教师视图：只留成绩分析（数据范围由后端 scope 收敛） #}
+                    <a href="{{ url_for('grades.index', exam=e.id, tab='grade') }}"
+                       class="btn btn-sm btn-outline-primary">成绩分析</a>
+                    {# 2026-10-15 用户口径：划线分层向所有老师展示（只读，写入口径仍是 grades.settings） #}
+                    <a href="{{ url_for('grades.bands_page', exam_id=e.id) }}"
+                       class="btn btn-sm btn-outline-info">划线分层</a>
+                    {% endif %}
                 </td>
             </tr>
             {% else %}
             <tr><td colspan="8" class="text-center text-muted py-4">
-                暂无考试。先 <a href="{{ url_for('grades.exam_new') }}">新建考试</a>，再导入成绩。
+                {% if can_manage %}暂无考试。先 <a href="{{ url_for('grades.exam_new') }}">新建考试</a>，再导入成绩。
+                {% else %}暂无考试。{% endif %}
             </td></tr>
             {% endfor %}
             </tbody>
@@ -108,8 +111,9 @@
     </div>
 </div>
 
-{# v1.19.49.29：待处理的考务批次（孤儿兜底）——考试已删或未关联考试的批次 #}
-{% if orphan_affairs %}
+{# v1.19.49.35：待处理的考务批次（孤儿兜底）——考试已删或未关联考试的批次
+   2026-10-15：考务类内容，只对管理侧（can_manage）渲染；教师视图整体不出现。 #}
+{% if can_manage and orphan_affairs %}
 <div class="card border-warning mt-3">
     <div class="card-header bg-warning bg-opacity-10 d-flex justify-content-between align-items-center">
         <span class="fw-bold small text-warning-emphasis">
@@ -142,9 +146,10 @@
                     <td class="text-end">
                         <a href="{{ url_for('grades.affair_detail', aid=o.a.id) }}"
                            class="btn btn-sm btn-outline-primary">进入编排</a>
+                        {# M-10（2026-10-15 审计补漏）：批次名可能含单引号 → 文案整体 |tojson + 单引号属性 #}
                         <form method="POST" style="display:inline"
                               action="{{ url_for('grades.affair_delete', aid=o.a.id) }}"
-                              onsubmit="return confirm('确定删除批次「{{ o.a.name }}」？将同时删除其 {{ o.rooms }} 个考场与 {{ o.students }} 条名单记录，不可恢复。')">
+                              onsubmit='return confirm({{ ("确定删除批次「" + (o.a.name or "") + "」？将同时删除其 " + (o.rooms|string) + " 个考场与 " + (o.students|string) + " 条名单记录，不可恢复。")|tojson }})'>
                             <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                             <button type="submit" class="btn btn-sm btn-outline-danger">删除批次</button>
                         </form>
@@ -157,7 +162,8 @@
 </div>
 {% endif %}
 
-<!-- 删除考试：账号密码二次确认 -->
+{% if can_manage %}
+<!-- 删除考试：账号密码二次确认（仅管理侧渲染：教师视图没有删除入口） -->
 <div class="modal fade" id="delExamModal" tabindex="-1">
     <div class="modal-dialog">
         <div class="modal-content">
@@ -189,9 +195,11 @@
         </div>
     </div>
 </div>
+{% endif %}
 {% endblock %}
 {% block extra_js %}
 <script>
+{% if can_manage %}
 var delExamId = null;
 var delExamModalObj = null;
 
@@ -203,8 +211,18 @@ $(function(){
         $('#delExamUser').val('');
         $('#delExamPwd').val('');
         $('#delExamErr').hide();
-        delExamModalObj = new bootstrap.Modal(document.getElementById('delExamModal'));
+        // 2026-10-16 第八轮审计（U-03）：原先每次点击 new 一个新实例 → 旧实例的
+        // _isShown 状态与新实例互不知情，重复点击会出现双 backdrop。改用
+        // getOrCreateInstance（全站其余 21 处模板已是这个写法）。
+        delExamModalObj = bootstrap.Modal.getOrCreateInstance(document.getElementById('delExamModal'));
         delExamModalObj.show();
+    });
+    // 2026-10-16 第八轮真机实测（verify_motion_ui.py FX-3/FX-2a）：本弹窗由 JS
+    // show() 打开，**焦点没有落进弹窗** → 键盘用户开弹窗后要多次 Tab 才能开始，
+    // 且 Bootstrap 的 document keydown 监听随之挂不上 → 按 Esc 关不掉。
+    // 挂在 shown.bs.modal（过渡完成后再聚焦，不会被 Bootstrap 的自动聚焦覆盖）：
+    document.getElementById('delExamModal').addEventListener('shown.bs.modal', function(){
+        document.getElementById('delExamUser').focus();
     });
 });
 
@@ -227,6 +245,7 @@ function doDelExam(){
         }
     });
 }
+{% endif %}
 
 // v1.19.0 整行可点：直接进本场考试工作台（按钮/链接/输入框不触发）
 $(function(){

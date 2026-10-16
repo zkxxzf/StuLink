@@ -19,6 +19,11 @@
     academic.teacher_links_import_upload   POST 上传解析并核对账号
     academic.teacher_links_import_confirm  POST 确认导入
     academic.teacher_links_template        GET  下载导入模板
+    academic.teacher_links_plans           GET  方案清单（历史记录）
+    academic.teacher_links_plans_create    POST 新建方案
+    academic.teacher_links_plans_use       POST 使用方案（切为当前生效）
+    academic.teacher_links_plans_rename    POST 重命名方案
+    academic.teacher_links_plans_delete    POST 删除方案
 """
 from app.modules.academic import bp
 from app.modules.grades.routes import teachers as gt  # noqa: F401  （复用其视图函数）
@@ -40,3 +45,14 @@ bp.add_url_rule('/teacher-links/import/confirm', 'teacher_links_import_confirm',
 # 导入模板下载
 bp.add_url_rule('/teacher-links/template.xlsx', 'teacher_links_template',
                 gt.teacher_template_download)
+
+# 方案 / 历史记录（2026-10-14）：新建 / 使用（切为当前）/ 重命名 / 删除
+bp.add_url_rule('/teacher-links/plans', 'teacher_links_plans', gt.teachers_plans)
+bp.add_url_rule('/teacher-links/plans/create', 'teacher_links_plans_create',
+                gt.teachers_plans_create, methods=['POST'])
+bp.add_url_rule('/teacher-links/plans/use', 'teacher_links_plans_use',
+                gt.teachers_plans_use, methods=['POST'])
+bp.add_url_rule('/teacher-links/plans/rename', 'teacher_links_plans_rename',
+                gt.teachers_plans_rename, methods=['POST'])
+bp.add_url_rule('/teacher-links/plans/delete', 'teacher_links_plans_delete',
+                gt.teachers_plans_delete, methods=['POST'])

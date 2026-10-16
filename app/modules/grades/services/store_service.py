@@ -1,8 +1,21 @@
-# StuLink v1.19.49.29 2026-10-10
+# StuLink v1.19.49.35 2026-10-10
 # 成绩落库服务：解析结果按 模式A(增量覆盖)/模式B(整场重置) 合并写入 exam_scores
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
+from collections import defaultdict
+
 from app.extensions import db
 from app.models.grades import ExamScore, TOTAL_SUBJECT, subjects_of_selection
+
+
+def _detach(by_no, no, row):
+    """从倒排索引里摘掉一行（删除成绩行时同步维护，避免索引与 existing 不一致）"""
+    rows = by_no.get(no)
+    if not rows:
+        return
+    try:
+        rows.remove(row)
+    except ValueError:
+        pass
 
 
 def apply_import(exam, parsed, mode='A', remove_missing=False):
@@ -18,13 +31,19 @@ def apply_import(exam, parsed, mode='A', remove_missing=False):
                'created_rows': 0, 'unseen': 0, 'total_auto': 0, 'total_external': 0}
 
     existing = {}   # (no, subject) -> ExamScore
+    # PERF-01：学号倒排索引 no -> [ExamScore]。
+    # 原先每次刷新快照都要全量遍历 existing（本场 2 万+ 行），导入 2 千学生即 4 千万次
+    # 无谓迭代；改为按学号直取，整体由 O(人数×行数) 降到 O(人数×每人行数)。
+    by_no = defaultdict(list)
     for row in ExamScore.query.filter_by(exam_id=exam.id).all():
         existing[(row.student_no, row.subject)] = row
+        by_no[row.student_no].append(row)
     initial_nos = {no for (no, _sub) in existing}
 
     if mode == 'B':
         for key in list(existing.keys()):
             db.session.delete(existing.pop(key))
+        by_no.clear()
         summary['deleted_rows'] = 0  # 重置计数（整场清空不计入"缺考删除"）
         # 修复：模式B删除后立即 flush，确保 DELETE 先于后续 INSERT 落库，
         # 避免重导文件包含本场已有学生时同事务内触发
@@ -47,6 +66,7 @@ def apply_import(exam, parsed, mode='A', remove_missing=False):
                 else:
                     old = ExamScore(exam_id=exam.id, student_no=r['no'], subject=sub)
                     existing[key] = old
+                    by_no[r['no']].append(old)
                     db.session.add(old)
                     summary['created_rows'] += 1
                 old.score = score
@@ -56,9 +76,11 @@ def apply_import(exam, parsed, mode='A', remove_missing=False):
                 if old is not None:
                     db.session.delete(old)
                     del existing[key]
+                    _detach(by_no, r['no'], old)
                     summary['deleted_rows'] += 1
-        # 刷新该生全部行的快照（姓名/班级/方向/选科，本场考试内统一）
-        _refresh_snapshot(existing, r, skip_deleted=True)
+        # 注：此处原有一句 `_refresh_snapshot(..., skip_deleted=True)`，
+        # 该参数会让循环内每行直接 continue（纯空转，一次导入白跑 4 千万次迭代）。
+        # 快照刷新统一由下方总分行 upsert 之后的 _refresh_snapshot 完成（覆盖该生全部行）。
 
         # 总分行（upsert）
         key_total = (r['no'], TOTAL_SUBJECT)
@@ -83,27 +105,34 @@ def apply_import(exam, parsed, mode='A', remove_missing=False):
             if total_row is not None:
                 db.session.delete(total_row)
                 del existing[key_total]
+                _detach(by_no, r['no'], total_row)
                 summary['deleted_rows'] += 1
         else:
             if total_row is None:
                 total_row = ExamScore(exam_id=exam.id, student_no=r['no'],
                                       subject=TOTAL_SUBJECT)
                 existing[key_total] = total_row
+                by_no[r['no']].append(total_row)
                 db.session.add(total_row)
                 summary['created_rows'] += 1
             total_row.score = total_score
             total_row.raw_score = raw_map.get(TOTAL_SUBJECT)   # v1.19.0 总分原始分（可选）
-        _refresh_snapshot(existing, r)
+        _refresh_snapshot(by_no.get(r['no'], ()), r)
 
-    # 未出现学生处理
+    # 未出现学生处理（PERF-02：原先对每个未出现学号再全量扫一遍 existing，
+    # 整场换人时是 4 千万次迭代；改为一次遍历收集待删键）
     unseen_nos = set()
-    for (no, sub) in list(existing.keys()):
+    stale_keys = []
+    for key in existing:
+        no = key[0]
         if no not in nos_in_file:
             unseen_nos.add(no)
+            stale_keys.append(key)
     if remove_missing:
+        for key in stale_keys:
+            db.session.delete(existing.pop(key))
         for no in unseen_nos:
-            for key in [k for k in existing if k[0] == no]:
-                db.session.delete(existing.pop(key))
+            by_no.pop(no, None)
     summary['unseen'] = len(unseen_nos)
     summary['new_students'] = len([no for no in nos_in_file if no not in initial_nos])
 
@@ -142,17 +171,20 @@ def refresh_student_total(exam, student_no):
     total_row.score = total
 
 
-def _refresh_snapshot(existing, r, skip_deleted=False):
-    """把 r 对应学生在本场全部行的快照字段刷新（统一以主库当前信息为准）"""
-    for key, row in existing.items():
-        if key[0] != r['no']:
-            continue
-        if skip_deleted:
-            continue
+def _refresh_snapshot(rows, r, skip_deleted=False):
+    """把 r 对应学生在本场全部行的快照字段刷新（统一以主库当前信息为准）
+
+    rows：该学生的成绩行集合（由调用方按学号倒排索引直取，避免全量扫描）。
+    skip_deleted：保留仅为向后兼容，恒为 False 时行为不变（为 True 会跳过全部刷新，
+    历史上曾因此造成每次导入纯空转一次全量遍历）。
+    """
+    if skip_deleted:
+        return
+    for row in rows:
         row.student_name = r.get('name', row.student_name)
         row.grade = r.get('grade', row.grade)
         row.class_name = r.get('class_name', row.class_name)
-        row.class_type = r.get('class_type', row.class_type)   # v1.19.49.29 班型快照
+        row.class_type = r.get('class_type', row.class_type)   # v1.19.49.35 班型快照
         row.direction = r.get('direction', row.direction)
         row.subject_selection = r.get('subject_selection', row.subject_selection)
         if r.get('exam_no'):

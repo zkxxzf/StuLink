@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {% block title %}调班记录{% endblock %}
 {% block content %}
-{# v1.19.49.29 展示顺序与范围（不含旧 class 兼容类型时也不丢失） #}
+{# v1.19.49.35 展示顺序与范围（不含旧 class 兼容类型时也不丢失） #}
 {% set CT_LIST = ('enroll', 'reassign', 'transfer', 'correct', 'direction', 'subject_selection', 'withdraw', 'enrollment', 'number', 'class') %}
 <style>
 .filter-bar select, .filter-bar input { font-size: 12px; padding: 3px 6px; border: 1px solid #dee2e6; border-radius: 3px; }
@@ -66,7 +66,7 @@
                 <option value="{{ t }}" {% if filter_type == t %}selected{% endif %}>{{ lab }}</option>
                 {% endfor %}
             </select>
-            <input type="text" name="keyword" value="{{ filter_keyword }}" placeholder="姓名 / 学号" style="width:130px">
+            <input type="text" name="keyword" value="{{ filter_keyword }}" placeholder="姓名 / 学号" style="width:130px" aria-label="姓名 / 学号">
             <input type="date" name="date_from" value="{{ filter_from }}" title="起始日期">
             <span class="text-muted small">至</span>
             <input type="date" name="date_to" value="{{ filter_to }}" title="结束日期">

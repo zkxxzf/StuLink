@@ -7,6 +7,13 @@ var curTab = 'records';
 var modal = null;
 var charts = { trend: null, category: null, ranking: null };
 
+/* 2026-10-14 审计修复：图表色改读主题变量（theme.css --sl-chart-*），
+   深色下提亮一档（如 #ef4444 → #f87171），色相不变 → 红/绿语义不丢。 */
+function SEM() {
+    return (window.stulinkSemantic && window.stulinkSemantic()) ||
+        { ok: '#10b981', danger: '#ef4444', info: '#3b82f6' };
+}
+
 function esc(v) {
     return String(v == null ? '' : v).replace(/&/g, '&amp;').replace(/</g, '&lt;')
         .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
@@ -243,9 +250,11 @@ function loadTrendChart() {
                 type: 'line',
                 data: totals,
                 smooth: true,
-                lineStyle: { color: '#3b82f6', width: 2 },
-                areaStyle: { color: 'rgba(59,130,246,0.1)' },
-                itemStyle: { color: '#3b82f6' }
+                /* 2026-10-14：改读主题色（--sl-chart-info）；面积用「色 + opacity」
+                   而非写死 rgba(59,130,246,.1)（深色下是一摊死蓝）。 */
+                lineStyle: { color: SEM().info, width: 2 },
+                areaStyle: { color: SEM().info, opacity: 0.12 },
+                itemStyle: { color: SEM().info }
             }]
         });
     });
@@ -297,7 +306,7 @@ function loadRankingChart() {
                 data: totals,
                 itemStyle: {
                     color: function(params) {
-                        return params.value >= 0 ? '#10b981' : '#ef4444';
+                        return params.value >= 0 ? SEM().ok : SEM().danger;
                     }
                 },
                 barMaxWidth: 40

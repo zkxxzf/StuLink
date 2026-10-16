@@ -33,6 +33,9 @@ ALLOWED_TABLES = {
     'timetables',           # 旧版课表下线删表（migrate_drop_legacy_timetable_20261010.py）
     'timetable_entries',    # 旧课表明细删表（同上）
     'affair_invig_excludes',  # 监考排除名单建表（migrate_affair_invig_exclude_20261013.py）
+    'operation_logs',       # 性能索引补建（migrate_perf_indexes_20261014.py）
+    'teacher_link_plans',   # 方案表部分唯一索引（migrate_plan_current_unique_20261014.py）
+    'subject_leader_plans',  # 同上
 }
 
 

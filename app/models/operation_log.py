@@ -23,6 +23,16 @@ class OperationLog(db.Model):
     request_id = db.Column(db.String(36))    # 同一次请求的多条日志串联
     created_at = db.Column(db.DateTime, default=datetime.now)
 
+    # 2026-10-14 第四轮审计修复（PERF-117）：operation_logs 此前**零索引**，
+    # 操作日志页 / 审计页按时间倒序翻页、按模块/动作/用户筛选全部全表扫描
+    # （日志表是全库增长最快的表）。四条覆盖最常用的查询形态。
+    __table_args__ = (
+        db.Index('idx_oplog_created', 'created_at'),
+        db.Index('idx_oplog_module_created', 'module', 'created_at'),
+        db.Index('idx_oplog_action_created', 'action', 'created_at'),
+        db.Index('idx_oplog_user_created', 'user_id', 'created_at'),
+    )
+
     user = db.relationship('User', foreign_keys=[user_id])
 
 

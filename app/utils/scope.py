@@ -24,12 +24,16 @@ workbench.scope / dormitory_scope / points / morality），口径互有漂移，
 
 本模块只依赖 app.models（模型）与 flask_login，不依赖任何业务模块，避免循环依赖。
 """
+import logging
+
 from sqlalchemy import and_, or_, false
 
 from app.models.permission_group import (
     KIND_TO_LEGACY as _KIND_TO_LEGACY,
     LEGACY_TO_KIND as _LEGACY_TO_KIND,
 )
+
+logger = logging.getLogger(__name__)
 
 SCOPE_SCHOOL = 'school'
 SCOPE_GRADE = 'grade'
@@ -64,19 +68,39 @@ def is_admin(user):
     return getattr(user, 'role', None) == 'admin'
 
 
+def user_scope_detail(user):
+    """用户级数据范围（UserDataScope）明细 → (has_scope, grade_wide, class_pairs)。
+
+    - has_scope=False：未配置（回落组级规则）；
+    - grade_wide：整年级授权的年级（class_name 为空的行）；
+    - class_pairs：班级级授权 {(grade, class_name)}（class_name 有值的行）。
+
+    2026-10-14 第四轮审计修复（多身份 B 项）：此前各处只读「年级清单」，
+    把 class_name（仅授权某班）静默放大为整个年级 —— 与成绩侧
+    （student_in_scope 会查班级白名单）口径分裂。统一从本函数取明细。
+    admin 不受限，恒返回 (False, set(), set())。
+    """
+    u = _current(user)
+    if is_admin(u):
+        return False, set(), set()
+    from app.models import UserDataScope
+    rows = UserDataScope.query.filter_by(user_id=u.id).all()
+    if not rows:
+        return False, set(), set()
+    grade_wide = {r.grade for r in rows if not r.class_name}
+    pairs = {(r.grade, r.class_name) for r in rows if r.class_name}
+    return True, grade_wide, pairs
+
+
 def user_scope_grades(user):
     """用户级数据范围（UserDataScope）授权年级清单；None=未配置（回落组级规则）。
 
     admin 不受限，恒返回 None。
     """
-    u = _current(user)
-    if is_admin(u):
+    has_scope, grade_wide, pairs = user_scope_detail(user)
+    if not has_scope:
         return None
-    from app.models import UserDataScope
-    rows = UserDataScope.query.filter_by(user_id=u.id).all()
-    if not rows:
-        return None
-    return sorted({r.grade for r in rows})
+    return sorted(grade_wide | {g for g, _ in pairs})
 
 
 def _pg_of(user):
@@ -147,9 +171,24 @@ def resolve_scope(user=None, *, class_fallback=False):
     u = _current(user)
     if is_admin(u):
         return Scope('school', origin='admin')
-    ug = user_scope_grades(u)
-    if ug is not None:
-        return Scope('grades', grades=ug, origin='user_grades')
+    # 用户级数据范围优先（含班级白名单，2026-10-14 第四轮审计修复）。
+    has_scope, grade_wide, pairs = user_scope_detail(u)
+    if has_scope:
+        if not pairs:
+            # 全部是整年级授权 —— 与改造前完全一致
+            return Scope('grades', grades=sorted(grade_wide), origin='user_grades')
+        if not grade_wide:
+            # 全部是班级级授权 —— 精确到班（此前被放大为整年级）
+            return Scope('classes', classes=pairs, origin='user_grades')
+        # 混合形态（部分年级整年级 + 部分年级个别班）：Scope 单 kind 无法同时表达，
+        # 取舍＝数据完整优先（按整年级，宁可多不可漏），并记 warning 提示配置收敛。
+        logger.warning(
+            'UserDataScope 混合形态（整年级 %s + 班级级 %s）user_id=%s，'
+            '按整年级口径解析；建议该用户统一按年级或统一按班级配置',
+            sorted(grade_wide), sorted(pairs), u.id)
+        return Scope('grades',
+                     grades=sorted(grade_wide | {g for g, _ in pairs}),
+                     origin='user_grades')
     kind = scope_kind_of(u)
     pg = _pg_of(u)
     if kind == SCOPE_SCHOOL:

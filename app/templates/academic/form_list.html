@@ -100,27 +100,27 @@
                     <td class="small text-muted">{{ tpl.created_at.strftime('%m-%d %H:%M') if tpl.created_at else '-' }}</td>
                     <td class="text-nowrap">
                         {% if tpl.status == 'draft' %}
-                        <a class="btn btn-sm btn-outline-primary" href="{{ url_for('academic.form_edit', form_id=tpl.id) }}" title="编辑">
+                        <a class="btn btn-sm btn-outline-primary" href="{{ url_for('academic.form_edit', form_id=tpl.id) }}" title="编辑" aria-label="编辑">
                             <i class="bi bi-pencil"></i>
                         </a>
                         <form method="POST" style="display:inline" action="{{ url_for('academic.form_publish', form_id=tpl.id) }}">
                             <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                            <button class="btn btn-sm btn-outline-success" title="发布"><i class="bi bi-send"></i></button>
+                            <button class="btn btn-sm btn-outline-success" title="发布" aria-label="发布"><i class="bi bi-send"></i></button>
                         </form>
                         <form method="POST" style="display:inline"
                               action="{{ url_for('academic.form_delete', form_id=tpl.id) }}"
                               onsubmit="return confirm('确定删除此表单？')">
                             <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                            <button class="btn btn-sm btn-outline-danger" title="删除"><i class="bi bi-trash"></i></button>
+                            <button class="btn btn-sm btn-outline-danger" title="删除" aria-label="删除"><i class="bi bi-trash"></i></button>
                         </form>
                         {% elif tpl.status == 'open' %}
                         <form method="POST" style="display:inline" action="{{ url_for('academic.form_close', form_id=tpl.id) }}">
                             <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                            <button class="btn btn-sm btn-outline-warning" title="关闭"><i class="bi bi-x-circle"></i></button>
+                            <button class="btn btn-sm btn-outline-warning" title="关闭" aria-label="关闭"><i class="bi bi-x-circle"></i></button>
                         </form>
                         {% elif tpl.status == 'closed' %}
                         {# 2026-10-10：重新开放（data-* 回填页面底部唯一 modal，避免每行一个 modal）#}
-                        <button type="button" class="btn btn-sm btn-outline-success reopen-btn" title="重新开放"
+                        <button type="button" class="btn btn-sm btn-outline-success reopen-btn" title="重新开放" aria-label="重新开放"
                                 data-bs-toggle="modal" data-bs-target="#reopenFormModal"
                                 data-action="{{ url_for('academic.form_reopen', form_id=tpl.id) }}"
                                 data-title="{{ tpl.title }}"
@@ -129,13 +129,13 @@
                             <i class="bi bi-arrow-counterclockwise"></i>
                         </button>
                         {% endif %}
-                       <a class="btn btn-sm btn-outline-info" href="{{ url_for('academic.form_submissions', form_id=tpl.id) }}" title="查看提交">
+                       <a class="btn btn-sm btn-outline-info" href="{{ url_for('academic.form_submissions', form_id=tpl.id) }}" title="查看提交" aria-label="查看提交">
                             <i class="bi bi-list-check"></i>
                         </a>
-                        <a class="btn btn-sm btn-outline-primary" href="{{ url_for('academic.form_summary_page', form_id=tpl.id) }}" title="汇总看板">
+                        <a class="btn btn-sm btn-outline-primary" href="{{ url_for('academic.form_summary_page', form_id=tpl.id) }}" title="汇总看板" aria-label="汇总看板">
                             <i class="bi bi-speedometer2"></i>
                         </a>
-                        <a class="btn btn-sm btn-outline-warning" href="{{ url_for('academic.form_package_page', form_id=tpl.id) }}" title="材料包下载">
+                        <a class="btn btn-sm btn-outline-warning" href="{{ url_for('academic.form_package_page', form_id=tpl.id) }}" title="材料包下载" aria-label="材料包下载">
                             <i class="bi bi-file-earmark-zip"></i>
                         </a>
                     </td>

@@ -6,12 +6,15 @@
     <a href="{{ url_for('grades.exam_detail', exam_id=exam.id) }}" class="btn btn-sm btn-outline-secondary" title="返回" aria-label="返回">
         <i class="bi bi-arrow-left"></i>
     </a>
-    <h5 class="mb-0"><i class="bi bi-upload"></i> 导入成绩：{{ exam.name }}</h5>
-    <span class="text-muted small">{{ exam.grade }} · {{ exam.exam_date.strftime('%Y-%m-%d') }} · 状态：{{ status_label[exam.status] }}</span>
+    <h5 class="mb-0"><i class="bi bi-upload"></i> 导入成绩 · 标准模板</h5>
+    <span class="text-muted small">{{ exam.name }} · {{ exam.grade }} · {{ exam.exam_date.strftime('%Y-%m-%d') }} · 状态：{{ status_label[exam.status] }}</span>
     <a href="{{ url_for('grades.template_download') }}" class="btn btn-outline-primary btn-sm ms-auto">
         <i class="bi bi-download"></i> 下载成绩导入模板
     </a>
 </div>
+
+{# 2026-10-13：与「AI 智能导入」同一个侧栏入口下的两种方式，页面内切换（见 _import_tabs.html） #}
+{% set import_tab = 'std' %}{% include 'grades/_import_tabs.html' %}
 
 {% if step == 'upload' %}
 <div class="card" style="max-width:760px;">

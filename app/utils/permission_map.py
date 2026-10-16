@@ -1,4 +1,4 @@
-# StuLink v1.19.49.29 2026-10-10
+# StuLink v1.19.49.35 2026-10-10
 # 模块权限映射：功能权限表格（身份 × 子功能 × 三档）与细粒度 menu_keys 的转换层
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 """模块权限映射（转换层）
@@ -64,13 +64,19 @@ MODULES = [
             {'key': 'manage', 'name': '教学管理',
              'read': [],
              'write': ['grades.edit', 'grades.import', 'grades.settings']},
-            # v1.19.49.29：成绩单改分单独授权。standalone=True 表示**不随模块「写入」批发**，
+            # v1.19.49.35：成绩单改分单独授权。standalone=True 表示**不随模块「写入」批发**，
             # 只能单独勾选（默认所有人不可见，管理员角色天然可用）；「考务管理员」另行建组授予。
             {'key': 'score_edit', 'name': '成绩修改（改分）', 'standalone': True,
              'read': [], 'write': ['grades.score_edit']},
             {'key': 'teachers', 'name': '任课映射',
              'read': [], 'write': ['grades.teachers']},
-            {'key': 'query', 'name': '个人成绩查询',
+            # 2026-10-14 第四轮审计修复（SEC-04）：AI 全局 Key 管理独立权限点。
+            # standalone=True：不随模块「写入」批发（全局 Key 涉及外部 API 费用与
+            # 全校可用性，必须单独勾选）；无此权限时全局 Key 端点 403。
+            {'key': 'ai_manage', 'name': 'AI 全局 Key', 'standalone': True,
+             'read': [], 'write': ['grades.ai_manage']},
+            # 2026-10-13：展示名与侧栏统一为「个人成绩」（权限 key 不变）
+            {'key': 'query', 'name': '个人成绩',
              'read': [], 'write': ['grades.student_query']},
             {'key': 'subject', 'name': '选科维护',
              'read': [], 'write': ['grades.subject_mgmt']},
@@ -90,7 +96,7 @@ MODULES = [
              'read': [], 'write': ['points.export']},
             {'key': 'rules', 'name': '规则模板',
              'read': [], 'write': ['points.rules']},
-            # 2026-10-13（v1.19.49.29）德育奖惩信息：与积分并列，独立页面 /morality/rewards
+            # 2026-10-13（v1.19.49.35）德育奖惩信息：与积分并列，独立页面 /morality/rewards
             {'key': 'reward', 'name': '奖惩信息',
              'read': ['morality.view'], 'write': ['morality.edit']},
         ],
@@ -118,7 +124,7 @@ MODULES = [
              'read': [], 'write': ['academic.inspection_export']},
             {'key': 'forms', 'name': '问卷收集',
              'read': ['academic.forms_view'], 'write': ['academic.forms']},
-            # 2026-10-13（v1.19.49.29）教师手机号明文查看：standalone，不随模块写入批发。
+            # 2026-10-13（v1.19.49.35）教师手机号明文查看：standalone，不随模块写入批发。
             # 无此权限时教师名单/导出只显示脱敏手机号。
             {'key': 'teacher_phone', 'name': '教师手机号明文', 'standalone': True,
              'read': [], 'write': ['academic.view_teacher_phone']},

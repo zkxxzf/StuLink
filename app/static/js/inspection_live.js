@@ -1,7 +1,11 @@
 /* StuLink v1.18.8.0 · 查课核对页（2026-10-09 改版）
- * 页面版式：与全校总课表同款矩阵 —— 行＝班级、列＝节次，一天所有节次一次铺开。
- * 交互：点格子弹出标记面板（正常/迟到/缺课/调课/其他 + 备注）→
+ * 页面版式：双视图 ——「全天矩阵」（行＝班级、列＝节次，一天所有节次一次铺开）
+ *           与「单节课表」（只看一节，按年级铺成班级卡片墙）。
+ * 交互：单击=正常 / 双击=迟到 / 右键=缺勤·调课·考试等（2026-10-13 起「缺课」改叫「缺勤」，
+ *       并新增「考试」：该格是考试而非正常上课，不计课时工作量、也不算违纪/迟到）→
  *       POST /inspection/mark 写回 inspection_records，就地更新徽标与"覆盖率"。
+ *       2026-10-14：**两个视图共用这套标记交互**（单节卡片同样可单击/双击/右键）；
+ *       单节卡片上的「换人」按钮才是发起代课 / 调课申请（原为点卡片打开，已让位给标记）。
  *       支持"未标记的全部正常"一键巡课；筛选（日期/年级）走服务端渲染整页刷新。
  */
 (function () {
@@ -11,7 +15,10 @@
     var $ = window.jQuery;
     if (!$) { return; }
 
-    var RESULT_TEXT = { normal: '正常', late: '迟到', absent: '缺课', swap: '调课', other: '其他' };
+    // 2026-10-13：'缺课'统一改为'缺勤'；新增 'exam'（考试：该格是考试而非正常上课，
+    // 不计课时工作量、也不算违纪/迟到 —— 考试期间有正常考务工作量）
+    var RESULT_TEXT = { normal: '正常', late: '迟到', absent: '缺勤', swap: '调课',
+                        exam: '考试', other: '其他' };
 
     function notify(msg, type) {
         if (typeof window.toast === 'function') { window.toast(msg, type || 'success'); return; }
@@ -60,20 +67,24 @@
     $('#btnToday').on('click', function () { navNow({ date: cfg.today }); });
     $('#btnPrint').on('click', function () { window.print(); });
 
-    /* ── 覆盖率计数 ── */
+    /* ── 覆盖率计数 ──
+       2026-10-14：矩阵格子与单节卡片共用同一套计数（两个视图不会同时出现，
+       单节视图下也能就地刷新"已标记 / 应查 / 覆盖率"）。 */
     function recount() {
-        var total = $('#liveContainer .ovw-item[data-check]').length;
-        var done = $('#liveContainer .ovw-item[data-check!=""]').length;
+        var $cells = $('.ovw-item[data-check], .pov-card[data-check]');
+        var total = $cells.length;
+        var done = $cells.filter('[data-check!=""]').length;
         $('#statChecked').text(done);
         $('#statExpected').text(total);
         $('#statRate').text(total ? Math.floor(done * 100 / total) + '%' : '0%');
     }
 
-    /* ── 就地更新一格 ── */
+    /* ── 就地更新一格（矩阵格子 / 单节卡片同款 data 属性）── */
     function cellSelector(c) {
-        return '#liveContainer .ovw-item[data-grade="' + c.grade + '"]'
+        var key = '[data-grade="' + c.grade + '"]'
             + '[data-class="' + c.class_name + '"]'
             + '[data-period="' + c.period_number + '"]';
+        return '#liveContainer .ovw-item' + key + ', #povContainer .pov-card' + key;
     }
     function applyResult($el, result, note) {
         var label = RESULT_TEXT[result] || '';
@@ -112,7 +123,7 @@
     }
 
     /* ── 快速标记（2026-10-10 改版）──────────────────────────────────
-       单击 = 正常；双击 = 迟到；右键 = 更多（缺课 / 调课 / 迟到说明 / 其他 / 撤销）。
+       单击 = 正常；双击 = 迟到；右键 = 更多（缺勤 / 调课 / 考试 / 迟到说明 / 其他 / 撤销）。
        原先每次都要"点格子 → 弹面板 → 再点按钮"，二次操作太慢；现在单/双击直达，
        需要写原因的（如迟到几分钟）走右键。 */
     function cellPayload($el, result, note) {
@@ -135,8 +146,9 @@
     }
 
     // 单击 vs 双击：单击延迟 260ms 执行，期间若再来一击则判为双击（迟到）
+    // 2026-10-14：矩阵格子（.ovw-item）与单节卡片（.pov-card）共用这套交互
     var clickTimer = null;
-    $('#liveContainer').on('click', '.ovw-item[data-check]', function () {
+    $(document).on('click', '.ovw-item[data-check], .pov-card[data-check]', function () {
         var $el = $(this);
         if (clickTimer) {
             clearTimeout(clickTimer); clickTimer = null;
@@ -149,7 +161,7 @@
         }, 260);
     });
 
-    /* ── 右键菜单：缺课 / 调课 / 迟到说明 / 其他 / 撤销 ── */
+    /* ── 右键菜单：正常 / 缺勤 / 迟到（含说明）/ 调课 / 考试 / 其他 / 撤销 ── */
     var $menu = null;
     function closeMenu() { if ($menu) { $menu.remove(); $menu = null; } }
     function openMenu($el, x, y) {
@@ -157,10 +169,11 @@
         $menu = $('<div class="chk-menu"></div>').css({ left: x + 'px', top: y + 'px' });
         var items = [
             ['normal', '正常', 'success'],
+            ['absent', '缺勤', 'danger'],
             ['late', '迟到', 'warning'],
             ['late-note', '迟到说明…（如迟到 5 分钟）', 'warning'],
-            ['absent', '缺课', 'danger'],
             ['swap', '调课', 'primary'],
+            ['exam', '考试', 'info'],
             ['other', '其他', 'secondary'],
             ['clear', '撤销标记', 'secondary']
         ];
@@ -184,7 +197,7 @@
         });
         $('body').append($menu);
     }
-    $('#liveContainer').on('contextmenu', '.ovw-item[data-check]', function (ev) {
+    $(document).on('contextmenu', '.ovw-item[data-check], .pov-card[data-check]', function (ev) {
         ev.preventDefault();
         openMenu($(this), ev.pageX, ev.pageY);
     });
@@ -192,10 +205,11 @@
     $(window).on('scroll', closeMenu);
     $(document).on('keydown', function (e) { if (e.keyCode === 27) { closeMenu(); } });
 
-    /* ── 一键：当前页面未标记的全部正常（巡课一圈点一下）── */
+    /* ── 一键：当前页面未标记的全部正常（巡课一圈点一下）──
+       2026-10-14：单节视图同样可用 ——「当前页面」就是这一节，一次把未查的班全标正常。 */
     $('#btnMarkAllNormal').on('click', function () {
         var cells = [];
-        $('#liveContainer .ovw-item[data-check=""]').each(function () {
+        $('.ovw-item[data-check=""], .pov-card[data-check=""]').each(function () {
             var $el = $(this);
             cells.push({
                 grade: $el.data('grade'), class_name: $el.data('class'),
@@ -282,4 +296,194 @@
     });
 
     recount();
+
+    /* ═══════════════════════════════════════════════════════════════════
+       单节课表视图（2026-10-13）：点卡片上的「换人」按钮 → 就地发起「代课 / 调课」
+         - 只选教师                = 代课（时间班级都不动，exchange_kind='cover'）
+         - 再选这位教师的某一节课  = 调课（两节课**换上课时间**，
+                                    2026-10-14 起不再换班级 / 教室 / 学生）
+       提交走 POST /academic/inspection/quick-swap：服务端以**原任课教师**为申请人落库，
+       与「请人代课 / 调课申请」页同一条「对方确认 → 教务审批 → 执行生效」链路。
+       独立 IIFE + 原生 fetch / DOM，不依赖 jQuery；按钮点击 stopPropagation，
+       与上面的"单击卡片=标记查课"互不干扰（2026-10-14）。
+       ═══════════════════════════════════════════════════════════════════ */
+    (function () {
+        'use strict';
+        var pov = {};
+        try { pov = JSON.parse(document.getElementById('liveData').textContent || '{}'); } catch (e) { pov = {}; }
+        if (!pov.canSchedule) { return; }               // 无权限：纯展示
+        var box = document.getElementById('povContainer');
+        if (!box) { return; }                           // 当前不在单节课表视图
+
+        var WEEK = { 1: '周一', 2: '周二', 3: '周三', 4: '周四', 5: '周五', 6: '周六', 7: '周日' };
+        var cur = null;              // 当前操作的班级行
+        var teachers = null;         // 教师清单缓存
+        var modal = null;
+
+        function el(id) { return document.getElementById(id); }
+        function escHtml(s) {
+            return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
+                return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+            });
+        }
+
+        /* ── 节次切换：与日期 / 年级一致，走整页刷新（服务端渲染）── */
+        function gotoPeriod(step) {
+            var sel = el('povPeriodPick');
+            if (!sel) { return; }
+            if (step) {
+                var i = sel.selectedIndex + step;
+                if (i < 0 || i >= sel.options.length) { return; }
+                sel.selectedIndex = i;
+            }
+            window.location.href = pov.pageUrl + '?view=period&date=' + encodeURIComponent(pov.date)
+                + '&period=' + encodeURIComponent(sel.value)
+                + (pov.grade ? '&grade=' + encodeURIComponent(pov.grade) : '');
+        }
+        el('povPeriodPick').addEventListener('change', function () { gotoPeriod(0); });
+        el('povPrevPeriod').addEventListener('click', function () { gotoPeriod(-1); });
+        el('povNextPeriod').addEventListener('click', function () { gotoPeriod(1); });
+
+        /* ── 教师清单 / 某位教师的课（复用调课模块既有接口）── */
+        function loadTeachers() {
+            if (teachers) { return Promise.resolve(teachers); }
+            return fetch(pov.teachersUrl, { headers: { 'Accept': 'application/json' } })
+                .then(function (r) { return r.json(); })
+                .then(function (res) { teachers = (res && res.data && res.data.teachers) || []; return teachers; })
+                .catch(function () { return (teachers = []); });
+        }
+
+        function loadPartnerEntries(uid) {
+            var sel = el('swPartnerEntry');
+            sel.innerHTML = '<option value="">加载中…</option>';
+            fetch(pov.entriesUrl + '?uid=' + encodeURIComponent(uid),
+                  { headers: { 'Accept': 'application/json' } })
+                .then(function (r) { return r.json(); })
+                .then(function (res) {
+                    var list = (res && res.data && res.data.entries) || [];
+                    if (!list.length) { sel.innerHTML = '<option value="">该教师本学期暂无其它课</option>'; return; }
+                    var opts = ['<option value="">请选择他/她的某一节课…</option>'];
+                    list.forEach(function (e) {
+                        opts.push('<option value="' + escHtml(e.id) + '">' + escHtml(
+                            (e.weekday_text || WEEK[e.weekday] || '') + ' 第' + e.period_number + '节'
+                            + ' · ' + (e.grade || '') + (e.class_name || '') + ' · ' + (e.subject || ''))
+                            + '</option>');
+                    });
+                    sel.innerHTML = opts.join('');
+                })
+                .catch(function () { sel.innerHTML = '<option value="">加载失败</option>'; });
+        }
+
+        /* ── 打开弹窗 ── */
+        function openModal(card) {
+            // 2026-10-14：卡片 data 属性与矩阵格子对齐（data-cls/subj/tch 等旧名已撤）
+            cur = {
+                entry: card.getAttribute('data-entry'),
+                cls: (card.getAttribute('data-grade') || '') + (card.getAttribute('data-class') || ''),
+                subj: card.getAttribute('data-subject') || '',
+                tch: card.getAttribute('data-teacher') || '',
+                tuid: card.getAttribute('data-uid') || '',
+                room: card.getAttribute('data-room') || ''
+            };
+            el('swTargetClass').textContent = cur.cls + ' · 第 ' + (pov.povPeriod || '') + ' 节';
+            el('swTargetInfo').textContent = cur.subj + ' · 当前任课：' + (cur.tch || '未指定')
+                + (cur.room ? ' · 教室 ' + cur.room : '');
+            el('swReason').value = '';
+            el('swDate').value = pov.date || '';
+            el('swPermanent').checked = false;
+            el('swEntryWrap').classList.add('d-none');
+            el('swPartnerEntry').innerHTML = '<option value="">请先选择教师</option>';
+            el('swKindCover').checked = true;
+            el('swTeacherLabel').textContent = '代课教师';
+            el('swHint').textContent = '';
+            loadTeachers().then(function (list) {
+                var opts = ['<option value="">请选择教师…</option>'];
+                list.forEach(function (t) {
+                    if (t.uid === cur.tuid) { return; }        // 不能选原任课教师本人
+                    opts.push('<option value="' + escHtml(t.uid) + '">' + escHtml(t.name || t.uid)
+                        + '（' + t.count + ' 节）</option>');
+                });
+                el('swTeacher').innerHTML = opts.join('');
+            });
+            if (!modal) { modal = new bootstrap.Modal(el('swapModal')); }
+            modal.show();
+        }
+
+        function onKindChange() {
+            var ex = el('swKindExchange').checked;
+            el('swEntryWrap').classList.toggle('d-none', !ex);
+            el('swTeacherLabel').textContent = ex ? '对调教师' : '代课教师';
+            if (ex && el('swTeacher').value) { loadPartnerEntries(el('swTeacher').value); }
+        }
+
+        function submit() {
+            if (!cur) { return; }
+            var kind = el('swKindExchange').checked ? 'exchange' : 'cover';
+            var uid = el('swTeacher').value;
+            if (!uid) {
+                el('swHint').textContent = '请先选择' + (kind === 'exchange' ? '对调' : '代课') + '教师';
+                return;
+            }
+            var reason = (el('swReason').value || '').trim();
+            if (!reason) { el('swHint').textContent = '请填写事由'; return; }
+            var payload = {
+                entry_id: cur.entry, kind: kind, partner_uid: uid, reason: reason,
+                is_permanent: el('swPermanent').checked, swap_date: el('swDate').value
+            };
+            if (kind === 'exchange') {
+                if (!el('swPartnerEntry').value) {
+                    el('swHint').textContent = '请再选中对方的具体一节课';
+                    return;
+                }
+                // 2026-10-14：只换上课时间（不换班级 / 教室 / 学生）
+                payload.partner_entry_id = el('swPartnerEntry').value;
+                payload.swap_time = true;
+                payload.swap_class = false;
+            }
+            var btn = el('swSubmit');
+            btn.disabled = true;
+            el('swHint').textContent = '提交中…';
+            fetch(pov.submitUrl, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json', 'Accept': 'application/json',
+                    'X-CSRFToken': window.csrfToken || ''   // jQuery 有 ajaxSetup 钩子，fetch 必须手动带
+                },
+                body: JSON.stringify(payload)
+            }).then(function (r) { return r.json().then(function (j) { return { ok: r.ok, j: j || {} }; }); })
+              .then(function (res) {
+                  btn.disabled = false;
+                  if (!res.ok || !res.j.success) {
+                      el('swHint').textContent = res.j.message || '提交失败';
+                      return;
+                  }
+                  modal.hide();
+                  notify(res.j.message || '已提交申请', 'success');
+              })
+              .catch(function () {
+                  btn.disabled = false;
+                  el('swHint').textContent = '网络错误，请重试';
+              });
+        }
+
+        /* 2026-10-14：卡片本身交给上面的矩阵交互做查课标记（单击=正常…），
+           代课 / 调课改由卡片上的「换人」按钮打开弹窗；按钮点击要拦住冒泡，
+           否则会被 document 上的标记委托当成"单击=正常"。 */
+        box.addEventListener('click', function (ev) {
+            var btn = ev.target.closest ? ev.target.closest('.pov-act') : null;
+            if (!btn) { return; }
+            ev.stopPropagation();
+            var card = btn.closest('.pov-card');
+            if (card && card.getAttribute('data-entry')) { openModal(card); }
+        });
+        Array.prototype.forEach.call(document.querySelectorAll('input[name="swKind"]'), function (r) {
+            r.addEventListener('change', onKindChange);
+        });
+        el('swTeacher').addEventListener('change', function () {
+            if (el('swKindExchange').checked && el('swTeacher').value) {
+                loadPartnerEntries(el('swTeacher').value);
+            }
+        });
+        el('swSubmit').addEventListener('click', submit);
+    })();
 })();

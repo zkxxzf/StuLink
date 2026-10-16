@@ -1,4 +1,4 @@
-# StuLink v1.19.49.29 2026-10-10
+# StuLink v1.19.49.35 2026-10-10
 # 个人成绩查询与分析：教职工在自身权限范围内查询单个学生
 # 聚合口径复用 stats_service（排名等已落库 exam_scores，不重算）
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
@@ -9,6 +9,7 @@ from app.models.grades import Exam, ExamScore, TOTAL_SUBJECT, SUBJECTS, \
 from app.models import Student
 from app.modules.grades.services import stats_service as st
 from app.modules.grades.services.scope import student_in_scope
+from app.modules.grades.utils import term_of_date
 
 # 成绩证明底部默认说明（生成时可由经办人在弹窗中改写；改写内容随证明快照固化并参与防伪签名）
 DEFAULT_CERT_NOTE = '本证明由系统依据已导入成绩数据生成，排名按方向内统计；仅作在校成绩凭证，不代表最终学历结论。'
@@ -71,16 +72,31 @@ def cert_header(student_no):
     }
 
 
+def exam_term(exam):
+    """考试所属学年（如 2025-2026）：库中 term 优先，缺失时按考试日期推导。
+
+    2026-10-13 修复：历史导入的考试 `term` 为 NULL（term 由保存时自动计算，早期数据没有），
+    旧实现要求 `term` 非空才纳入证明矩阵 → 2024/2025 级学生的历次考试被整体丢弃，
+    表现为「勾选了很多场考试，生成的证明只有一场」。学年口径仍与 Exam.term 一致
+    （term 本身就是保存时用 term_of_date 算出来的），不影响新数据。
+    """
+    term = (exam.term or '').strip()
+    if term:
+        return term
+    return term_of_date(exam.exam_date) if exam.exam_date else ''
+
+
 def build_cert_matrix(grade, exams, student_scores, student_sel, chosen_ids=None):
     """成绩认定矩阵——列=科目（带满分）、行=每次考试。
 
     单元格口径：未选/未参加/分数/满分（语数外150，其余100）。
     chosen_ids=None：每个时段取代表考试（优先期末）；
     chosen_ids=集合：仅纳入用户勾选的考试（同一时段可多场）。
+    时段 = (学年, 学期)；学年缺失时按考试日期推导（exam_term）。
     """
     buckets = {}
     for e in exams:
-        term, sem = (e.term or ''), semester_of(e.exam_date)
+        term, sem = exam_term(e), semester_of(e.exam_date)
         if not term or not sem:
             continue
         buckets.setdefault((term, sem), []).append(e)
@@ -101,7 +117,7 @@ def build_cert_matrix(grade, exams, student_scores, student_sel, chosen_ids=None
             reps.append((k, _rep(lst)))
     if not reps:
         return {'cols': [], 'rows': [], 'exam_names': [],
-                'exam_ids': [], 'rep_ids': rep_ids}
+                'exam_ids': [], 'rep_ids': rep_ids, 'chosen': bool(chosen_ids)}
 
     # 列头：科目（按 CERT_SUBJECT_ORDER 顺序，附带满分）
     cols = []
@@ -109,10 +125,14 @@ def build_cert_matrix(grade, exams, student_scores, student_sel, chosen_ids=None
         cols.append({'key': sub, 'label': subject_display(sub),
                      'full': DEFAULT_FULL_MARKS.get(sub, 100)})
 
-    # 行：每次考试
+    # 行：每次考试（标签＝「高一上·期末考试」这类年级学期口径，跨学年不重名）
     rows = []
     for (term, sem), e in reps:
-        label = sem + (e.exam_type or '')
+        # 学期简写：上学期→上 / 下学期→下；年级由 学年 - 入学年 + 1 推出（推算不出时退回「上学期」写法）
+        short_sem = {'上学期': '上', '下学期': '下'}.get(sem, '')
+        level = grade_level_label(e.grade or grade, term)
+        core = f'{level}{short_sem}' if (level and short_sem) else f'{sem}'
+        label = core + ('·' + e.exam_type if e.exam_type else '')
         if sum(1 for (k2, _e2) in reps if k2 == (term, sem)) > 1:
             label += '·' + e.exam_date.strftime('%m-%d')
         row = {'exam_label': label, 'term': term, 'sem': sem}
@@ -130,14 +150,13 @@ def build_cert_matrix(grade, exams, student_scores, student_sel, chosen_ids=None
 
     return {'cols': cols, 'rows': rows,
             'exam_names': [e.name for _k, e in reps],
-            'exam_ids': [e.id for _k, e in reps], 'rep_ids': rep_ids}
+            'exam_ids': [e.id for _k, e in reps], 'rep_ids': rep_ids,
+            'chosen': bool(chosen_ids)}
 
 
 def student_exams(student_no, grade, term='', exam_type='', date_from='', date_to=''):
     """该生在范围内、且满足筛选条件、且有总分行记录的考试（时间升序）"""
     q = Exam.query.filter(Exam.grade == grade)
-    if term:
-        q = q.filter(Exam.term == term)
     if exam_type:
         q = q.filter(Exam.exam_type == exam_type)
     df, dt = _parse_date(date_from), _parse_date(date_to)
@@ -146,6 +165,10 @@ def student_exams(student_no, grade, term='', exam_type='', date_from='', date_t
     if dt:
         q = q.filter(Exam.exam_date <= dt)
     exams = q.order_by(Exam.exam_date.asc(), Exam.id.asc()).all()
+    # 2026-10-13：学年用 exam_term 口径（缺 term 的历史考试按日期推导），
+    # 否则「学期」筛选项与筛选结果都只剩有 term 的那一场（同证明矩阵的老问题）。
+    if term:
+        exams = [e for e in exams if exam_term(e) == term]
     # v1.13.2 性能：只取 exam_id 列（覆盖索引 idx_scores_stu_subject_exam），
     # 不再实例化该生全部总分 ExamScore ORM 对象
     have = {r[0] for r in
@@ -420,7 +443,7 @@ def build_data(user, student_no, filters):
         'student': basic,
         'cert_matrix': cert_matrix,
         'exams': [{'id': e.id, 'name': e.name, 'date': e.exam_date.strftime('%Y-%m-%d'),
-                   'type': e.exam_type or '', 'term': e.term or '',
+                   'type': e.exam_type or '', 'term': exam_term(e),
                    'semester': semester_of(e.exam_date)} for e in exams],
         'selected_exam_id': sel_id,
         'tables': tables, 'charts': charts,

@@ -23,6 +23,21 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+# 2026-10-14 第四轮审计（CONS-02）：补迁移登记（只登记不早退）
+SCRIPT_NAME = os.path.basename(__file__)
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+try:
+    import _mig_log
+except Exception as _e:  # noqa: BLE001
+    _mig_log = None
+    print(f'[WARN] 迁移登记模块不可用（迁移照常执行，仅不登记）：{_e}')
+
+
+def _record():
+    if _mig_log:
+        _mig_log.record(SCRIPT_NAME, note='四段式一期：exams/exam_scores 补列 + 字典补项 + 老考试性质/阶段回填')
+
+
 BASE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 GRADES_DB = os.path.join(BASE, 'data', 'grades.db')
 
@@ -209,6 +224,9 @@ def main():
     print('\n合计：结构改动 %d 项，数据改动 %d 项' % (n1, n2))
     if not apply:
         print('\n确认无误后执行：python -m scripts.migrate_exam_four_stage --apply')
+    if apply:
+        # 2026-10-14 第四轮审计（CONS-02）：dry-run 未改库，不登记；实跑才登记
+        _record()
     return 0
 
 

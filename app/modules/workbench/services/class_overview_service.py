@@ -1,4 +1,4 @@
-# StuLink v1.19.49.29 2026-10-10
+# StuLink v1.19.49.35 2026-10-10
 # 班级概览服务：聚合班主任管辖班级数据（跨库查询）
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 from datetime import date, datetime
@@ -8,7 +8,7 @@ from app.extensions import db
 from app.models.user_class_link import UserClassLink
 from app.models.student import Student
 from app.models.points import PointRecord
-from app.models.grades import Exam, ExamScore, TeacherSubjectLink
+from app.models.grades import Exam, ExamScore, TeacherSubjectLink, TOTAL_SUBJECT
 from app.models.academic import AttendanceRecord
 
 # 2026-10-10 架构审计修复：月份参数解析原为静默 except，非法值会悄悄回落本月。
@@ -54,7 +54,7 @@ def get_class_overview(user_id, month_str=None, user=None):
     返回: [{class_name, grade, student_count, points_plus, points_minus,
             latest_exam_name, latest_exam_avg, attendance_rate}, ...]
 
-    v1.19.49.29：班级来源改用**统一可见班级口径** `wb_scope.managed_class_pairs(user)`
+    v1.19.49.35：班级来源改用**统一可见班级口径** `wb_scope.managed_class_pairs(user)`
     —— 任课教师（凭 TeacherSubjectLink 任教班）也能看到自己教的班；
     此前只认 UserClassLink（班主任关联），任课教师的班级概览恒为空。
     不传 user 时沿用旧口径，保持向后兼容。
@@ -191,6 +191,70 @@ def get_teaching_links(user_id):
              'subject': lk.subject} for lk in links]
 
 
+def _score_scope(user_id):
+    """本人成绩可见范围（唯一口径：grades.services.score_guard.ScoreScope）。
+
+    2026-10-15 用户口径：工作台「我的成绩」不再只认任课映射 ——
+    班主任所带班级的全部科目同样可见（与成绩分析页 / MCP / AI 共用同一份口径，
+    避免"同一个老师在不同页面看到的范围不一样"）。
+    """
+    from app.models import User
+    from app.modules.grades.services import score_guard
+    user = db.session.get(User, user_id)
+    if user is None:
+        raise PermissionError('账号不存在')
+    return score_guard.resolve(user)
+
+
+def get_head_teacher_combos(user_id):
+    """班主任所带 (年级, 班级, 科目) 组合（科目＝该班最近一场考试实际出现的科目）。
+
+    返回 [{grade, class_name, class_name_full, subject, source: 'head'}]。
+    该班没有任何成绩时给不出科目 → 返回空（此时主表也不会出现该班，两边行为一致）。
+    """
+    sc = _score_scope(user_id)
+    head_pairs = sorted(sc.classes)
+    if not head_pairs:
+        return []
+    out = []
+    for g, c in head_pairs:
+        subs = sc.class_subjects(g, c)
+        if subs is None:
+            last_id = (db.session.query(func.max(ExamScore.exam_id))
+                       .filter(ExamScore.grade == g, ExamScore.class_name == c).scalar())
+            if not last_id:
+                continue
+            subs = {r[0] for r in db.session.query(ExamScore.subject)
+                    .filter(ExamScore.exam_id == last_id,
+                            ExamScore.class_name == c).distinct().all()}
+        for s in sorted(x for x in subs if x):
+            if s == TOTAL_SUBJECT and not sc.class_total_visible(g, c):
+                continue
+            out.append({'grade': g, 'class_name': c, 'class_name_full': f'{g}{c}',
+                        'subject': s, 'source': 'head'})
+    return out
+
+
+def get_visible_combos(user_id):
+    """「我教的 + 我带的班」的 (年级, 班级, 学科) 组合。
+
+    徽章 / 年级筛选 / 走势卡片共用；主表以 get_grade_summary 为准。
+    """
+    teach = get_teaching_links(user_id)
+    for t in teach:
+        t['source'] = 'teach'
+    seen = {(t['grade'], t['class_name'], t['subject']) for t in teach}
+    out = list(teach)
+    for h in get_head_teacher_combos(user_id):
+        key = (h['grade'], h['class_name'], h['subject'])
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(h)
+    out.sort(key=lambda x: (x['grade'], x['class_name'], x['subject']))
+    return out
+
+
 def get_grade_summary(user_id, grade=None):
     """获取教师成绩摘要（按考试聚合本人任教班级×科目的均分/最高/最低/及格率/年级名次）
 
@@ -205,16 +269,29 @@ def get_grade_summary(user_id, grade=None):
         grade, class_name, class_name_raw, subject, count, avg, max, min,
         pass_rate, grade_avg, grade_rank, grade_class_count}]}, ...]
     """
-    # 获取任课班级（唯一准入依据）
+    # 准入集合（2026-10-15 用户口径，二次修订）：
+    #   R1 任课 = 任教 **(年级, 学科)** → 该年级**全部班级**的该科都进表
+    #     （"他教哪一个年级的某一个学科，那这个年级这个学科所有的学生，这一科的成绩
+    #       现在公开"），行的 source 标 'grade' 以便前端折叠；
+    #   R2 班主任 = 所带班级的**全部科目 + 总分**。
+    # 两者取并集；年级长及以上的"整年级"不在本页展开（避免页面爆炸，
+    # 年级级视图在成绩分析页的「年级分析」tab）。
     links_q = TeacherSubjectLink.query.filter_by(user_id=user_id, active=True)
     if grade:
         links_q = links_q.filter_by(grade=grade)
     links = links_q.all()
-    if not links:
+    try:
+        sc = _score_scope(user_id)
+    except PermissionError:
+        sc = None
+    head_pairs = {(g, c) for g, c in (sc.classes if sc else set())
+                  if not grade or g == grade}
+    if not links and not head_pairs:
         return []
 
-    allowed = {(lk.grade, lk.class_name, lk.subject) for lk in links}
-    grades = sorted({lk.grade for lk in links})
+    teach_allowed = {(lk.grade, lk.subject) for lk in links}         # 年级 × 学科
+    teach_own = {(lk.grade, lk.class_name, lk.subject) for lk in links}   # 本人的班（区分用）
+    grades = sorted({g for g, _s in teach_allowed} | {g for g, _c in head_pairs})
 
     exams = (Exam.query.filter(Exam.grade.in_(grades))
              .order_by(Exam.exam_date.desc(), Exam.id.desc()).limit(10).all())
@@ -261,10 +338,25 @@ def get_grade_summary(user_id, grade=None):
             by_subject.setdefault(r.subject, []).append(
                 {'class_name': r.class_name, 'avg': raw_avg, 'count': cnt})
 
-        exam_classes = []
-        for g, cn, subj in sorted(allowed):
+        # 本场要展示的 (班, 科) 组合 = 任课(年级×学科) ∪ 班主任整班（按本场实际科目展开）
+        # 任课：教该年级该科 → **该年级所有班**（source: teach=本人的班 / grade=同科的别班）
+        want = {}
+        teach_subjects = {s for g, s in teach_allowed if g == exam.grade}
+        for (cn, s) in by_class_subject:
+            if s in teach_subjects:
+                want[(cn, s)] = 'teach' if (exam.grade, cn, s) in teach_own else 'grade'
+        for g, cn in head_pairs:
             if g != exam.grade:
                 continue
+            for (c2, s) in by_class_subject:
+                if c2 != cn:
+                    continue
+                if s == TOTAL_SUBJECT and not (sc and sc.class_total_visible(g, cn)):
+                    continue
+                want.setdefault((cn, s), 'head')
+
+        exam_classes = []
+        for (cn, subj), _src in sorted(want.items()):
             stat = by_class_subject.get((cn, subj))
             if not stat:
                 continue
@@ -277,10 +369,12 @@ def get_grade_summary(user_id, grade=None):
             grade_avg = (round(sum(x['avg'] * x['count'] for x in ordered) / total_cnt, 1)
                          if total_cnt else None)
             exam_classes.append({
-                'grade': g,
-                'class_name': f'{g}{cn}',
+                'grade': exam.grade,
+                'class_name': f'{exam.grade}{cn}',
                 'class_name_raw': cn,
                 'subject': subj,
+                # teach=本人任教 / grade=同年级同学科的其他班 / head=本人所带班
+                'source': _src,
                 'count': stat['count'],
                 'avg': stat['avg'],
                 'max': stat['max'],
@@ -290,7 +384,9 @@ def get_grade_summary(user_id, grade=None):
                 'grade_rank': rank,
                 'grade_class_count': len(ordered),
                 # 同年级各班均分（仅聚合值，供"我教的班 vs 同年级"对比图，不暴露他班明细）
-                'peers': [{'class_name': f'{g}{x["class_name"]}',
+                # 2026-10-15：原实现靠上层 `for g, cn, s in teach_allowed` 循环变量 g，
+                # 该循环随"年级×学科"口径删除 → 显式取 exam.grade。
+                'peers': [{'class_name': f'{exam.grade}{x["class_name"]}',
                            'avg': round(x['avg'], 1),
                            'mine': x['class_name'] == cn} for x in ordered],
             })
@@ -308,35 +404,55 @@ def get_grade_summary(user_id, grade=None):
 
 
 def _require_teaching_link(user_id, grade, class_name, subject):
-    """归属校验：该 (年级, 班级, 学科) 必须属于本人任课映射，否则 PermissionError。
+    """归属校验：任课三元组 或 班主任整班（含总分）→ 放行，否则 PermissionError。
 
-    工作台成绩页的唯一准入依据就是 TeacherSubjectLink(user_id, active=True)，
-    与 grades 模块「只到年级级」的宽口径解耦，避免越权看到别的班/别的科。
+    2026-10-15 用户口径：原口径只认 TeacherSubjectLink，班主任因此看不到本班其他
+    科目（用户反馈"这不合理"）。现在统一走成绩访问权限引擎 score_guard.ScoreScope
+    （与成绩分析页 / MCP / AI 同一份口径）：
+      · 任课教师：**(年级, 学科)** —— 该年级**全部班级**的该科（二次修订）；
+      · 班主任：所带班级的全部科目 + 总分；
+      · 年级长及以上：本年级 / 全校。
     """
-    link = (TeacherSubjectLink.query
-            .filter_by(user_id=user_id, active=True, grade=grade,
-                       class_name=class_name, subject=subject).first())
-    if not link:
-        raise PermissionError('该班级学科不在您的任教范围内')
-    return link
+    sc = _score_scope(user_id)
+    if not sc.can_view_class(grade, class_name):
+        raise PermissionError('该班级学科不在您的可见范围内')
+    if subject == TOTAL_SUBJECT:
+        if not sc.class_total_visible(grade, class_name):
+            raise PermissionError('该班级学科不在您的可见范围内')
+    elif not sc.can_view_subject(grade, class_name, subject):
+        raise PermissionError('该班级学科不在您的可见范围内')
+    return sc
 
 
 def get_grade_detail(user_id, exam_id, class_name, subject):
-    """某次考试某班某科的学生明细（含班内名次），仅限本人任教范围。
+    """某次考试某班某科的学生明细（含班内名次、总分年级名次）。
+
+    2026-10-15 用户口径：任课教师对本年级**任意班**的该科都可下钻（仅在 claim 范围内），
+    明细里附每名学生的**总分年级名次** `rank_dir`（只给名次，不给总分分数）。
 
     越权（不在 TeacherSubjectLink）抛 PermissionError，由路由转 403 JSON。
     返回: {exam_id, exam_name, exam_date, grade, class_name, class_name_raw,
-           subject, rows: [{rank, student_no, student_name, score, rank_class}],
+           subject, rows: [{rank, student_no, student_name, score, rank_class,
+                            rank_dir}], total_rank_visible,
            stats: {count, avg, max, min, pass_rate}}
     """
     exam = db.session.get(Exam, exam_id)
     if not exam:
         raise ValueError('考试不存在')
-    _require_teaching_link(user_id, exam.grade, class_name, subject)
+    sc = _require_teaching_link(user_id, exam.grade, class_name, subject)
+    rank_ok = bool(sc and sc.total_rank_visible(exam.grade, class_name))
 
     scores = (ExamScore.query
               .filter_by(exam_id=exam.id, class_name=class_name, subject=subject)
               .order_by(ExamScore.score.desc(), ExamScore.student_no).all())
+
+    # 总分年级名次（rank_dir 总分行）——任课教师只拿名次，总分分数不在这里出现
+    total_ranks = {}
+    if rank_ok:
+        total_ranks = dict(db.session.query(ExamScore.student_no, ExamScore.rank_dir)
+                           .filter(ExamScore.exam_id == exam.id,
+                                   ExamScore.class_name == class_name,
+                                   ExamScore.subject == TOTAL_SUBJECT).all())
 
     rows = []
     for i, s in enumerate(scores, 1):
@@ -346,6 +462,7 @@ def get_grade_detail(user_id, exam_id, class_name, subject):
             'student_name': s.student_name or '',
             'score': float(s.score) if s.score is not None else None,
             'rank_class': s.rank_class,
+            'rank_dir': total_ranks.get(s.student_no) if rank_ok else None,
         })
 
     vals = [r['score'] for r in rows if r['score'] is not None]
@@ -367,6 +484,7 @@ def get_grade_detail(user_id, exam_id, class_name, subject):
         'class_name': f'{exam.grade}{class_name}',
         'class_name_raw': class_name,
         'subject': subject,
+        'total_rank_visible': rank_ok,
         'full': full,       # 满分（前端按比例做分数颜色/分数段）
         'rows': rows,
         'stats': stats,
@@ -378,14 +496,22 @@ def get_grade_trend(user_id, class_name, subject, grade=None, limit=8):
 
     仅限本人任教范围（越权抛 PermissionError）；按考试日期升序返回最近 limit 场。
     """
-    lk_q = TeacherSubjectLink.query.filter_by(user_id=user_id, active=True,
-                                              class_name=class_name, subject=subject)
+    # 2026-10-15：准入换统一口径（任课三元组 或 班主任整班）——
+    # 班主任看本班任意科的走势不再被 403；任课教师范围不变。
+    sc = _score_scope(user_id)
     if grade:
-        lk_q = lk_q.filter_by(grade=grade)
-    links = lk_q.all()
-    if not links:
-        raise PermissionError('该班级学科不在您的任教范围内')
-    grades = sorted({lk.grade for lk in links})
+        _require_teaching_link(user_id, grade, class_name, subject)
+        grades = [grade]
+    else:
+        vg = sc.visible_grades()
+        cand = sorted(vg) if vg is not None else sorted(
+            {r[0] for r in db.session.query(Exam.grade).distinct().all() if r[0]})
+        grades = [g for g in cand
+                  if sc.can_view_class(g, class_name)
+                  and (sc.class_total_visible(g, class_name) if subject == TOTAL_SUBJECT
+                       else sc.can_view_subject(g, class_name, subject))]
+        if not grades:
+            raise PermissionError('该班级学科不在您的可见范围内')
 
     exams = (Exam.query.filter(Exam.grade.in_(grades))
              .order_by(Exam.exam_date.desc(), Exam.id.desc())
@@ -421,8 +547,8 @@ def get_grade_trend(user_id, class_name, subject, grade=None, limit=8):
         })
 
     return {
-        'grade': links[0].grade,
-        'class_name': f'{links[0].grade}{class_name}',
+        'grade': grades[0],
+        'class_name': f'{grades[0]}{class_name}',
         'class_name_raw': class_name,
         'subject': subject,
         'points': points,

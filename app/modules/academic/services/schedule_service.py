@@ -1,4 +1,4 @@
-# StuLink v1.19.49.29 2026-10-10
+# StuLink v1.19.49.35 2026-10-10
 # 课表服务层：学期管理 / 作息时间（节次与时间） / 视图查询 / 条目CRUD / 冲突检测 / Excel导入导出 / 版本快照
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 """课表核心服务（独立库 timetable.db）。
@@ -1099,8 +1099,10 @@ def check_teacher_mapping(entries, subjects=None):
     页面上的处理建议也只是"去任课教师映射页改"。
 
     口径：
-    - 只核对映射体系覆盖的 9 个学科（SUBJECTS：语数外物历化生政地）；
-      体育/美术/信息技术/心理健康/自习这些不在映射体系里，跳过以免整屏噪音；
+    - 核对映射体系覆盖的科目（LINK_SUBJECTS：9 个文化科 + 综合组 6 科）。
+      2026-10-15 用户口径「教师映射扩容，增加综合组」后，音体美信通心六科也进了映射体系，
+      所以这里一并核对（没填映射的会报 no_link，正是提示去映射页补）；
+      自习 / 班会等非映射科目仍跳过以免整屏噪音；
     - 课表里的教师先经 `Teacher.user_id` 换算到 users.id 再与映射比对（两库主键不同，
       直接比会把同一个人全报成不一致）；没绑账号的（如学校表里只写姓氏「陈」「邓」）
       退化为姓名比对；
@@ -1111,11 +1113,20 @@ def check_teacher_mapping(entries, subjects=None):
       mismatch — 该班该科映射的任课教师不是课表里的这位
     """
     from app.models import User
-    from app.models.academic import Teacher
-    from app.models.grades import TeacherSubjectLink, SUBJECTS
+    from app.models.academic import COMPREHENSIVE_ALIAS, Teacher
+    from app.models.grades import LINK_SUBJECTS, TeacherSubjectLink, normalize_subject
 
-    want = set(subjects or SUBJECTS)
-    rows = [e for e in (entries or []) if (e.get('subject') or '') in want]
+    def _canon_sub(sub):
+        """课表科目写法归一：先走成绩别名（英语→外语），再走综合组别名（信息→信息技术）。"""
+        s = normalize_subject(sub or '')
+        return COMPREHENSIVE_ALIAS.get(s, s)
+
+    want = {_canon_sub(s) for s in (subjects or LINK_SUBJECTS)}
+    rows = []
+    for e in (entries or []):
+        std = _canon_sub(e.get('subject'))
+        if std in want:
+            rows.append(dict(e, subject=std))   # 归一后比对（不改调用方原对象）
     if not rows:
         return {'checked': 0, 'issues': [], 'counts': {}}
 
@@ -1305,6 +1316,16 @@ def get_schedule_versions(schedule_id, page=1, per_page=50):
 # Excel 导出
 # ═══════════════════════════════════════════════════════════════════════════════
 
+def _sheet_name(base, fallback='课表'):
+    """工作表名合法化：去掉 [ ] : * ? / \\ 与首尾单引号，截断 31 字符（Excel 上限）。
+
+    年级 / 班级名由用户维护，可能带斜杠或超长，非法名会让 Excel 打开时报错；
+    全校表、年级表、班级表的 sheet 名统一走本函数收口。
+    """
+    name = re.sub(r'[\[\]:*?/\\]', '', str(base or '')).strip().strip("'")
+    return name[:31].strip() or fallback
+
+
 def export_schedule(schedule_id, view_type='class', grade=None, class_name=None,
                     teacher_uid=None, week=None, allowed_grades=None,
                     allowed_classes=None):
@@ -1323,24 +1344,40 @@ def export_schedule(schedule_id, view_type='class', grade=None, class_name=None,
         data = get_grade_view(schedule_id, grade, week=week,
                               allowed_grades=allowed_grades,
                               allowed_classes=allowed_classes)
+        # 2026-10-14（用户要求）：年级导出 = 年级总课表（该年级各班并列）+ 各班逐张，
+        # 总表走 get_overview_view 的单个 block，与整校导出同一渲染口径。
+        ov = get_overview_view(schedule_id, week=week, grades=[grade],
+                               allowed_grades=allowed_grades,
+                               allowed_classes=allowed_classes)
+        if ov['blocks']:
+            _write_overview_sheet(wb, f'{grade}总课表', ov['blocks'], periods, title,
+                                  ov['max_weekday'])
         for cn in data['classes']:
             _export_class_sheet(wb, schedule_id, grade, cn, periods,
-                                f'{title} {grade}{cn}', week,
+                                f'{grade}{cn}', week,
                                 allowed_grades, allowed_classes)
     elif view_type == 'teacher' and teacher_uid:
         _export_teacher_sheet(wb, schedule_id, teacher_uid, periods, title, week,
                               allowed_grades, allowed_classes)
     elif view_type == 'all':
-        # 整校：一个班一张 sheet（2026-10-10 由原 `else`/master 分支改名而来）。
-        # 大课表页已下线，但"整校分班导出"这个能力仍被「学期管理」卡片的导出按钮使用，
-        # 所以只把名字与页面解耦，不删功能。
-        grade_classes = get_grade_class_list(
-            schedule_id, allowed_grades=allowed_grades,
-            allowed_classes=allowed_classes)
-        for g, cls_list in grade_classes.items():
-            for cn in cls_list:
-                _export_class_sheet(wb, schedule_id, g, cn, periods, f'{g}{cn}',
-                                    week, allowed_grades, allowed_classes)
+        # 整校全套（2026-10-14 用户报障「导出的 Excel 只有各个班的表」）：
+        # ① 全校总课表（按年级分块，一张看全校）② 每个年级一张年级总课表
+        # ③ 每个班一张班级课表。三层矩阵同源渲染（_write_overview_sheet）。
+        # `all` 由原 master 分支改名而来（2026-10-10），学期管理卡片的「导出 Excel」用它。
+        ov = get_overview_view(schedule_id, week=week,
+                               allowed_grades=allowed_grades,
+                               allowed_classes=allowed_classes)
+        if ov['blocks']:
+            _write_overview_sheet(wb, '全校总课表', ov['blocks'], periods, title,
+                                  ov['max_weekday'])
+            for b in ov['blocks']:
+                _write_overview_sheet(wb, f"{b['grade']}总课表", [b], periods, title,
+                                      ov['max_weekday'])
+            for b in ov['blocks']:
+                for cn in b['classes']:
+                    _export_class_sheet(wb, schedule_id, b['grade'], cn, periods,
+                                        f"{b['grade']}{cn}", week,
+                                        allowed_grades, allowed_classes)
     else:
         # 'overview' 及任何未知 view_type（含旧分享短链里的 'master'）→ 全校总课表一张表
         _export_overview_sheet(wb, schedule_id, periods, title, week,
@@ -1358,15 +1395,22 @@ def export_schedule(schedule_id, view_type='class', grade=None, class_name=None,
 
 def _export_overview_sheet(wb, schedule_id, periods, title, week=None,
                            allowed_grades=None, allowed_classes=None):
-    """全校总课表工作表（2026-09-25）：按年级分块、班级并列，一张表看全校。
-
-    行＝星期 × 节次（星期列纵向合并），列＝年级内各班，格内「学科 + 教师」，
-    与页面 /schedule/<sid>/overview 的形态一致，方便直接打印或二次编辑。
-    """
+    """全校总课表工作表（2026-09-25）：按年级分块、班级并列，一张表看全校。"""
     view = get_overview_view(schedule_id, week=week,
                              allowed_grades=allowed_grades,
                              allowed_classes=allowed_classes)
-    ws = wb.create_sheet('全校总课表'[:31])
+    _write_overview_sheet(wb, '全校总课表', view['blocks'], periods, title,
+                          view['max_weekday'])
+
+
+def _write_overview_sheet(wb, sheet_name, blocks, periods, title, max_weekday):
+    """把「按年级分块、班级并列」的矩阵写进一张新工作表（全校 / 年级导出共用）。
+
+    行＝星期 × 节次（星期列纵向合并），列＝年级内各班，格内「学科 + 教师」，
+    与页面 /schedule/<sid>/overview 的形态一致，方便直接打印或二次编辑。
+    blocks 传全部年级＝全校总课表，传单个年级的 block＝年级总课表（2026-10-14 拆分）。
+    """
+    ws = wb.create_sheet(_sheet_name(sheet_name))
 
     hf = Font(bold=True, color='FFFFFF', size=10)
     hfl = PatternFill(start_color='4472C4', end_color='4472C4', fill_type='solid')
@@ -1388,7 +1432,7 @@ def _export_overview_sheet(wb, schedule_id, periods, title, week=None,
     ri = 1
     put(ri, 1, title, font=gf, align=Alignment(horizontal='left', vertical='center'))
     ri += 2
-    for b in view['blocks']:
+    for b in blocks:
         classes = b['classes']
         put(ri, 1, f"{b['grade']}（{len(classes)} 个班 · {b['total']} 节/周）", font=gf,
             align=Alignment(horizontal='left', vertical='center'))
@@ -1398,7 +1442,7 @@ def _export_overview_sheet(wb, schedule_id, periods, title, week=None,
         for ci, cn in enumerate(classes, 3):
             put(ri, ci, f'{b["grade"]}{cn}', font=hf, fill=hfl)
         ri += 1
-        for wd in range(1, view['max_weekday'] + 1):
+        for wd in range(1, max_weekday + 1):
             first = ri
             for p in periods:
                 time_label = (f'{p.period_name}\n{p.start_time}-{p.end_time}'
@@ -1416,7 +1460,7 @@ def _export_overview_sheet(wb, schedule_id, periods, title, week=None,
 
     ws.column_dimensions['A'].width = 8
     ws.column_dimensions['B'].width = 15
-    max_cols = 3 + max((len(b['classes']) for b in view['blocks']), default=1) - 1
+    max_cols = 3 + max((len(b['classes']) for b in blocks), default=1) - 1
     for i in range(3, max_cols + 1):
         ws.column_dimensions[get_column_letter(i)].width = 13
 
@@ -1442,7 +1486,7 @@ def _cell_lines(items, with_class=False):
 def _export_class_sheet(wb, schedule_id, grade, class_name, periods, sheet_title,
                         week=None, allowed_grades=None, allowed_classes=None):
     """导出单个班级课表工作表"""
-    ws = wb.create_sheet(sheet_title[:31])  # Excel sheet名最长31字符
+    ws = wb.create_sheet(_sheet_name(sheet_title))
     view = get_class_view(schedule_id, grade, class_name, week=week,
                           allowed_grades=allowed_grades,
                           allowed_classes=allowed_classes)
@@ -1485,7 +1529,7 @@ def _export_class_sheet(wb, schedule_id, grade, class_name, periods, sheet_title
 def _export_teacher_sheet(wb, schedule_id, teacher_uid, periods, sheet_title,
                           week=None, allowed_grades=None, allowed_classes=None):
     """导出教师个人课表工作表"""
-    ws = wb.create_sheet(sheet_title[:31])
+    ws = wb.create_sheet(_sheet_name(sheet_title))
     view = get_teacher_view(schedule_id, teacher_uid, week=week,
                             allowed_grades=allowed_grades,
                             allowed_classes=allowed_classes)
@@ -1618,16 +1662,28 @@ def list_subject_options(schedule_id, grade=None):
 def leader_roles(schedule_id, subject, grade=None):
     """组长标注 {teacher_uid: [角色标签]}（来自 SubjectLeader 落库数据）。
 
-    - grade=None（教研组页）：全校级登记（grade=''）标「教研组长」，各年级登记标「高一备课组长」；
+    2026-10-14：学科组长分三类 —— 教研组长（不分年级，年级留空＝全校）、
+    备课组长（年级 × 学科）与综合组组长（整个综合组一位，音体美信通心六科共用）；
+    标签按 `category` 判定，不再只看年级是否为空。
+
+    - grade=None（教研组页）：教研组长标「教研组长」，各年级备课组长标「高一备课组长」；
     - 给了 grade（备课组页）：只取该年级的备课组长。
     学期口径：登记为空（''＝整学年）或与本学期一致才算数。
     """
-    from app.models.academic import SubjectLeader
+    from app.models.academic import (COMPREHENSIVE_GROUP, COMPREHENSIVE_SUBJECTS,
+                                     LEADER_CATEGORY_COMPREHENSIVE,
+                                     LEADER_CATEGORY_DEFAULT, LEADER_CATEGORY_RESEARCH,
+                                     SubjectLeader)
     ts = db.session.get(TermSchedule, schedule_id)
     roles = {}
     if not ts or not subject:
         return roles
-    for ld in SubjectLeader.query.filter_by(subject=subject,
+    # 2026-10-14 用户口径：整个综合组只设 1 名组长 —— 音体美信通心六科共用一位，
+    # 所以这些学科的课表都去查「综合组」那条登记，标签写「综合组组长」。
+    q_subject = (COMPREHENSIVE_GROUP
+                 if (subject in COMPREHENSIVE_SUBJECTS or subject == COMPREHENSIVE_GROUP)
+                 else subject)
+    for ld in SubjectLeader.query.filter_by(subject=q_subject,
                                             school_year=ts.school_year).all():
         if (ld.term or '') not in ('', ts.term or ''):
             continue
@@ -1635,10 +1691,14 @@ def leader_roles(schedule_id, subject, grade=None):
             continue
         if not ld.leader_uid:
             continue
-        if (ld.grade or ''):
+        if (ld.category or LEADER_CATEGORY_DEFAULT) == LEADER_CATEGORY_COMPREHENSIVE:
+            label = '综合组组长'
+        elif (ld.category or LEADER_CATEGORY_DEFAULT) == LEADER_CATEGORY_RESEARCH:
+            label = '教研组长'
+        elif (ld.grade or ''):
             label = f'{ld.grade}备课组长'
         else:
-            label = '教研组长' if grade is None else '备课组长'
+            label = '备课组长'
         labels = roles.setdefault(ld.leader_uid, [])
         if label not in labels:
             labels.append(label)

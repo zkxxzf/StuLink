@@ -1,0 +1,197 @@
+/* ============================================================
+   AI 报告排版与提问区（2026-10-15/16 视觉改造，第二版）
+   适用：AI 分析工作台（ai_studio.html）+ 成绩汇报区（report.html）
+   规则：全部走 --sl-* 主题变量，深浅色自动适配，不写死颜色。
+   ============================================================ */
+
+/* 渐变专用色（light/dark 各一组，写在这里避免页面内联） */
+[data-bs-theme="light"] {
+    --ai-grad-a: #1d4ed8;
+    --ai-grad-b: #4f7cf0;
+    --ai-grad-text: #ffffff;
+    --ai-grad-soft: #eef4ff;
+    --ai-on-accent: #ffffff;   /* 压在 --sl-accent 上的前景色（第七轮审计 U-M1） */
+}
+[data-bs-theme="dark"] {
+    --ai-grad-a: #1e3a8a;
+    --ai-grad-b: #2563eb;
+    --ai-grad-text: #f1f5f9;
+    --ai-grad-soft: #16233d;
+    /* 深色 --sl-accent 是浅蓝（#93c5fd），白字对比仅 ≈1.9:1 → 用深色文字 */
+    --ai-on-accent: #0f172a;
+}
+
+/* ---------- 页面 Hero（AI 分析工作台头部） ---------- */
+.ai-hero {
+    position: relative; overflow: hidden;
+    border-radius: 16px;
+    background: linear-gradient(135deg, var(--ai-grad-a), var(--ai-grad-b));
+    color: var(--ai-grad-text);
+    padding: 20px 24px;
+    box-shadow: 0 6px 18px rgba(29, 78, 216, .18);
+}
+.ai-hero .ai-hero-back {
+    display: inline-flex; align-items: center; gap: 5px;
+    font-size: 12.5px; color: var(--ai-grad-text);
+    background: rgba(255, 255, 255, .16);
+    border: 1px solid rgba(255, 255, 255, .28);
+    border-radius: 999px; padding: 3px 12px; margin-bottom: 12px;
+    transition: background .15s ease;
+}
+.ai-hero .ai-hero-back:hover { background: rgba(255, 255, 255, .3); text-decoration: none; }
+.ai-hero .ai-hero-title {
+    font-size: 21px; font-weight: 700; letter-spacing: .01em;
+    display: flex; align-items: center; gap: 9px;
+}
+.ai-hero .ai-hero-sub {
+    font-size: 13px; opacity: .85; margin-top: 6px; max-width: 720px; line-height: 1.6;
+}
+/* 右上角装饰星（低透明度，不抢内容） */
+.ai-hero .ai-hero-deco {
+    position: absolute; right: -8px; top: -22px;
+    font-size: 130px; line-height: 1; opacity: .12; pointer-events: none;
+}
+
+/* ---------- 提问区卡片头（两页共用） ---------- */
+.ai-ask-head {
+    display: flex; align-items: center; gap: 10px;
+    background: var(--ai-grad-soft);
+    border-radius: 10px; padding: 10px 14px;
+}
+.ai-ask-head .ai-ask-icon {
+    width: 32px; height: 32px; flex: 0 0 32px;
+    display: inline-flex; align-items: center; justify-content: center;
+    border-radius: 9px; background: var(--sl-accent); color: var(--ai-on-accent); font-size: 16px;
+}
+.ai-ask-head .ai-ask-title { font-weight: 700; font-size: 14.5px; color: var(--sl-text); }
+.ai-ask-head .ai-ask-sub { font-size: 12px; color: var(--sl-text-muted); margin-top: 1px; }
+
+/* ---------- 主按钮（开始分析） ---------- */
+.btn.ai-go {
+    background: linear-gradient(135deg, var(--ai-grad-a), var(--ai-grad-b));
+    border-color: transparent; color: #fff; font-weight: 600;
+    padding: 6px 18px;
+    box-shadow: 0 3px 10px rgba(29, 78, 216, .22);
+    transition: transform .12s ease, box-shadow .15s ease, filter .15s ease;
+}
+.btn.ai-go:hover { filter: brightness(1.06); transform: translateY(-1px); box-shadow: 0 5px 14px rgba(29, 78, 216, .3); color: #fff; }
+.btn.ai-go:active { transform: translateY(0); box-shadow: none; }
+.btn.ai-go:disabled, .btn.ai-go.disabled { filter: none; opacity: .75; }
+
+/* ---------- 报告纸张容器（加阴影、更透气） ---------- */
+.ai-doc-paper {
+    background: var(--sl-surface-2);
+    border: 1px solid var(--sl-border);
+    border-radius: 14px;
+    padding: 20px 24px 16px;
+    box-shadow: var(--sl-shadow);
+}
+
+/* ---------- 报告正文排版（容器加 .ai-doc） ----------
+   AI 输出的 h4/h5/p/ul/table 之前直接吃全局样式，没有"报告感"：
+   大小标题几乎同字号、表格素、列表挤。这里按文档层级给足对比。 */
+.ai-doc { font-size: 14px; line-height: 1.85; color: var(--sl-text); }
+.ai-doc > :first-child { margin-top: 0; }
+.ai-doc > :last-child { margin-bottom: 0; }
+
+.ai-doc h4 {                      /* 报告大标题 */
+    font-size: 19px; font-weight: 700; line-height: 1.45;
+    margin: 4px 0 18px; padding-bottom: 10px;
+    border-bottom: 2px solid var(--sl-accent);
+}
+.ai-doc h5 {                      /* 小节标题（一、结论摘要…） */
+    font-size: 15.5px; font-weight: 700;
+    margin: 26px 0 10px; padding: 2px 0 2px 10px;
+    border-left: 3px solid var(--sl-accent);
+}
+.ai-doc h6 { font-size: 14px; font-weight: 600; margin: 16px 0 8px; }
+.ai-doc p { margin: 0 0 10px; }
+.ai-doc ul, .ai-doc ol { margin: 0 0 12px; padding-left: 20px; }
+.ai-doc li { margin-bottom: 6px; }
+.ai-doc li::marker { color: var(--sl-accent); font-weight: 600; }
+.ai-doc strong { font-weight: 600; }
+
+.ai-doc table {
+    width: 100%; border-collapse: collapse;
+    margin: 12px 0 16px; font-size: 13px;
+}
+.ai-doc table th, .ai-doc table td {
+    padding: 7px 10px; text-align: left;
+    border-bottom: 1px solid var(--sl-line);
+}
+.ai-doc table thead th {
+    background: var(--sl-head-soft); color: var(--sl-text);
+    font-weight: 600; white-space: nowrap;
+}
+.ai-doc table tbody tr:nth-child(even) { background: var(--sl-surface-2); }
+.ai-doc table tbody tr:hover { background: var(--sl-surface-3); }
+
+.ai-doc blockquote {
+    margin: 10px 0; padding: 8px 14px;
+    border-left: 3px solid var(--sl-border); border-radius: 0 8px 8px 0;
+    background: var(--sl-surface-2); color: var(--sl-text-muted);
+}
+.ai-doc hr { border: 0; border-top: 1px dashed var(--sl-border); margin: 18px 0; }
+.ai-doc small { color: var(--sl-text-muted); }
+
+/* ---------- 报告纸张容器：.ai-doc-paper 定义见文件头部（带阴影） ---------- */
+.ai-doc-head {
+    display: flex; align-items: center; gap: 6px;
+    font-size: 12.5px; font-weight: 600; color: var(--sl-text-muted);
+    letter-spacing: .04em; text-transform: uppercase;
+    margin-bottom: 10px;
+}
+.ai-doc-head i { color: var(--sl-accent); }
+
+/* ---------- 提问输入框（两页共用） ---------- */
+#aiQ, #rpAiQ {
+    border-radius: 10px; font-size: 13.5px; line-height: 1.6;
+    padding: 10px 12px; resize: vertical;
+}
+#aiQ:focus, #rpAiQ:focus {
+    border-color: var(--sl-accent);
+    box-shadow: 0 0 0 .18rem rgba(29, 78, 216, .12);
+}
+
+/* ---------- 推荐问题胶囊（替代原灰色 outline 按钮） ---------- */
+.ai-chip, .rp-ai-chip {
+    display: inline-flex; align-items: center;
+    font-size: 12.5px; line-height: 1.5; cursor: pointer; user-select: none;
+    color: var(--sl-accent);
+    background: var(--sl-surface-3);
+    border: 1px solid var(--sl-border);
+    border-radius: 999px; padding: 4px 13px;
+    transition: background .15s ease, color .15s ease, border-color .15s ease;
+}
+.ai-chip:hover, .rp-ai-chip:hover,
+.ai-chip:focus, .rp-ai-chip:focus {
+    background: var(--sl-accent); color: var(--ai-on-accent); border-color: var(--sl-accent);
+    text-decoration: none;
+}
+
+/* ---------- 进度/工具事件行（两页共用形态） ---------- */
+.ai-tools .ai-tool, .rp-ai-tools .rp-ai-tool {
+    display: flex; align-items: center; gap: 6px;
+    font-size: 12px; color: var(--sl-text-muted);
+    background: var(--sl-surface-2);
+    border: 1px solid var(--sl-border);
+    border-radius: 8px; padding: 4px 10px;
+}
+
+/* ---------- 任务卡（AI 分析工作台左栏） ---------- */
+.ai-studio-task {
+    cursor: pointer;
+    border: 1px solid var(--sl-border);
+    border-radius: 10px;
+    padding: 9px 12px; margin-bottom: 8px;
+    background: var(--sl-surface-2);
+    transition: border-color .15s ease, background .15s ease;
+}
+.ai-studio-task:hover { background: var(--sl-surface-3); border-color: var(--sl-accent); }
+.ai-studio-task.active {
+    border-color: var(--sl-accent);
+    box-shadow: inset 3px 0 0 0 var(--sl-accent);
+    background: var(--sl-surface-3);
+}
+.ai-studio-task .t-q { color: var(--sl-text); font-size: 13.5px; line-height: 1.5; }
+.ai-studio-task .t-meta { color: var(--sl-text-muted); font-size: 12px; }

@@ -54,12 +54,12 @@
     height: 45px;
     margin: 3px;
     padding: 4px 5px;
-    border: 2px solid #dee2e6;
+    border: 2px solid var(--sl-border);
     border-radius: 4px;
     cursor: move;
     font-size: 0.65rem;
     position: relative;
-    background: #fff;
+    background: var(--sl-surface);
     transition: all 0.2s;
     user-select: none;
     display: flex;
@@ -72,15 +72,17 @@
     box-shadow: 0 2px 8px rgba(0,0,0,0.15);
 }
 
+/* 2026-10-14：底色是**半透明**的（叠在页面底色上），深色主题下整体变深，
+   写死的深色字就变成「深底深字」看不见 → 改成跟随主题的文字色。 */
 .room-block.male {
     background: rgba(13,110,253,0.08);
-    color: #1e293b;
+    color: var(--sl-text);
     border-color: #93c5fd;
 }
 
 .room-block.female {
     background: rgba(220,53,69,0.08);
-    color: #1e293b;
+    color: var(--sl-text);
     border-color: #f9a8d4;
 }
 
@@ -141,13 +143,14 @@
     cursor: default;
 }
 
-/* 班级卡片 */
+/* 班级卡片（2026-10-14：写死 #fff 在深色下是白卡，叠上半透明性别底后
+   变成「浅粉底 + 浅字」对比 1.13） → 主题变量 */
 .class-card {
     margin-bottom: 8px;
     border-radius: 8px;
-    border: 1px solid #e2e8f0;
+    border: 1px solid var(--sl-border);
     transition: all 0.2s;
-    background: #fff;
+    background: var(--sl-surface);
     box-shadow: 0 1px 2px rgba(0,0,0,.05);
 }
 
@@ -163,15 +166,15 @@
     padding: 5px 8px;
     font-weight: bold;
     font-size: 0.85rem;
-    border-bottom: 1px solid #dee2e6;
+    border-bottom: 1px solid var(--sl-border);
     cursor: pointer;
 }
 
 .class-card .class-stats {
     padding: 4px 8px;
     font-size: 0.75rem;
-    color: #6c757d;
-    border-bottom: 1px solid #f0f0f0;
+    color: var(--sl-text-muted);
+    border-bottom: 1px solid var(--sl-border);
     display: flex;
     gap: 12px;
 }
@@ -223,9 +226,12 @@
     min-height: 40px;
     padding: 4px;
     margin-top: 4px;
-    border: 2px dashed #dee2e6;
+    /* 2026-10-14：原来是 rgba(255,255,255,.8) 半透明白 —— 深色主题下叠成浅灰块，
+       而方块里的文字已是浅色（--sl-text）→ 对比 1.34，房间号/班级基本看不清。
+       班级卡片默认折叠，静态整页审计扫不到，是"展开折叠区 + 拖拽态"审计抓出来的。 */
+    border: 2px dashed var(--sl-border);
     border-radius: 4px;
-    background: rgba(255,255,255,0.8);
+    background: var(--sl-surface-2);
     transition: all 0.2s;
     display: flex;
     flex-wrap: wrap;
@@ -280,10 +286,10 @@
 
 /* 年级分组 */
 .grade-section {
-    border: 1px solid #dee2e6;
+    border: 1px solid var(--sl-border);
     border-radius: 6px;
     padding: 8px;
-    background: #fff;
+    background: var(--sl-surface);
     margin-bottom: 12px;
 }
 
@@ -304,18 +310,18 @@
     display: none;
 }
 
-/* 宿舍楼分组 */
+/* 宿舍楼分组（2026-10-14：边框/分组头底色写死浅色，深色下成亮块 → 主题变量） */
 .building-group {
     margin-bottom: 12px;
-    border: 1px solid #dee2e6;
+    border: 1px solid var(--sl-border);
     border-radius: 6px;
 }
 
 .building-group .building-header {
-    background: #f8f9fa;
+    background: var(--sl-surface-2);
     padding: 6px 10px;
     font-weight: bold;
-    border-bottom: 1px solid #dee2e6;
+    border-bottom: 1px solid var(--sl-border);
     cursor: pointer;
 }
 

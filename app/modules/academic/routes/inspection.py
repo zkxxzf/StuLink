@@ -1,5 +1,5 @@
-# StuLink v1.19.49.29 2026-10-10
-# 教务 · 查课统计：记录录入 / 列表筛选 / 月度统计 / 批量录入 / 导出 / 图表API
+# StuLink v1.19.49.35 2026-10-10
+# 教务 · 查课：统计页（列表筛选 / 月度统计 / 导出 / 图表API）+ 独立录入页（单条/批量）
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 import io
 import json
@@ -10,7 +10,8 @@ from flask_login import login_required, current_user
 from sqlalchemy import func
 
 from app.extensions import db
-from app.models.academic import (InspectionRecord, Teacher, INSPECTION_RESULTS)
+from app.models.academic import (InspectionRecord, Teacher,
+                                 INSPECTION_EXEMPT_KEYS, INSPECTION_RESULTS)
 from app.models.timetable import WEEKDAY_NAMES
 from app.modules.academic import bp
 from app.modules.academic.services.access_scope import (
@@ -20,6 +21,7 @@ from app.modules.academic.services.access_scope import (
 )
 from app.modules.academic.services import swap_service
 from app.modules.academic.services import inspection_service  # 2026-10-11 抽出
+from app.modules.academic.services import inspection_lookup  # 2026-10-14 录入自动带出
 from app.modules.notifications.services import notification_service
 from app.utils.decorators import perm_required
 from app.utils.helpers import log_operation
@@ -54,6 +56,21 @@ def _visible_active_teachers(user):
     return (Teacher.query.filter(Teacher.status == 'active',
                                  Teacher.teacher_uid.in_(teacher_uids))
             .order_by(Teacher.teacher_uid).all())
+
+
+def _period_options():
+    """节次下拉选项（2026-10-14）：本学期作息里的节次定义 —— [{number, name}]。
+
+    节次名口径与 `app/utils/period_label.py` 一致（period_number 只是行号：
+    1=早读、2=第1节），录入 / 编辑一律用下拉，避免手填数字错位；
+    无学期课表或未配节次时返回 []，模板回落为数字输入。
+    """
+    sched = swap_service.get_active_schedule()
+    if not sched:
+        return []
+    return [{'number': p.period_number,
+             'name': (p.period_name or '').strip() or f'第{p.period_number}节'}
+            for p in swap_service.get_periods(sched.id)]
 
 
 def _grade_options():
@@ -121,8 +138,9 @@ def inspection_page():
         InspectionRecord.query.filter(InspectionRecord.inspect_date >= month_start),
         current_user, InspectionRecord)
     month_total = month_q.count()
+    # 「考试」不算异常（考试期间有正常考务工作量，不能计为违纪/迟到）
     month_abnormal = month_q.filter(
-        InspectionRecord.result != 'normal').count()
+        InspectionRecord.result.notin_(tuple(INSPECTION_EXEMPT_KEYS))).count()
     teacher_month_q = apply_academic_scope(
         InspectionRecord.query.filter(InspectionRecord.inspect_date >= month_start),
         current_user, InspectionRecord)
@@ -139,11 +157,36 @@ def inspection_page():
                            records=records, pagination=pagination, inspectors=inspectors,
                            teachers=_visible_active_teachers(current_user),
                            results=INSPECTION_RESULTS, grade_opts=grade_opts,
+                           period_opts=_period_options(),
                            f_teacher=teacher_uid, f_result=result_f, f_grade=grade_f,
                            f_from=d_from, f_to=d_to,
                            month_total=month_total, month_abnormal=month_abnormal,
-                           by_teacher=by_teacher, today=today.isoformat(),
+                           by_teacher=by_teacher,
                            can_edit=current_user.has_perm('academic.edit'))
+
+
+@bp.route('/inspection/entry')
+@login_required
+@perm_required('academic.edit')
+def inspection_entry_page():
+    """查课录入（2026-10-13 从查课统计页拆出为**独立页**）。
+
+    页内二选一：单条录入（日常补录）/ 批量录入（巡课回来一屏几十条）。
+    统计页只负责统计与导出，不再承载任何录入入口；本页提交后仍回到本页，
+    便于连续录入。默认进入单条方式，?mode=batch 直达批量。
+    """
+    mode = (request.args.get('mode') or 'single').strip()
+    if mode not in ('single', 'batch'):
+        mode = 'single'
+    grade_opts = _grade_options()
+    ug = visible_academic_grades(current_user)
+    if ug is not None:
+        grade_opts = [g for g in grade_opts if g in ug]
+    return render_template('academic/inspection_entry.html',
+                           teachers=_visible_active_teachers(current_user),
+                           results=INSPECTION_RESULTS, grade_opts=grade_opts,
+                           period_opts=_period_options(),
+                           today=date.today().isoformat(), mode=mode)
 
 
 @bp.route('/inspection/<int:rid>/edit', methods=['POST'])
@@ -183,8 +226,11 @@ def inspection_edit(rid):
 @login_required
 @perm_required('academic.edit')
 def inspection_add():
-    """录入一条查课记录（年级必选；用户级数据范围时仅限授权年级）"""
-    back = redirect(url_for('academic.inspection_page'))
+    """录入一条查课记录（年级必选；用户级数据范围时仅限授权年级）
+
+    2026-10-13：入口移到独立录入页，提交后回录入页（连续录入不跳走）。
+    """
+    back = redirect(url_for('academic.inspection_entry_page'))
     date_str = (request.form.get('inspect_date') or '').strip()
     grade = (request.form.get('grade') or '').strip()
     teacher_uid = (request.form.get('teacher_uid') or '').strip()
@@ -222,8 +268,8 @@ def inspection_add():
 @login_required
 @perm_required('academic.edit')
 def inspection_batch():
-    """批量录入查课记录"""
-    back = redirect(url_for('academic.inspection_page'))
+    """批量录入查课记录（提交后回独立录入页的批量方式）"""
+    back = redirect(url_for('academic.inspection_entry_page', mode='batch'))
     date_str = (request.form.get('inspect_date') or '').strip()
     try:
         inspect_date = date.fromisoformat(date_str)
@@ -249,6 +295,38 @@ def inspection_batch():
     return back
 
 
+@bp.route('/api/inspection/teacher-courses')
+@login_required
+@perm_required('academic.edit')
+def api_inspection_teacher_courses():
+    """查课录入「自动带出」：按日期 + 教师反查当天生效课表的班级 / 科目 / 节次。
+
+    2026-10-14 用户口径：录入查课时选中教师后自动追踪班级与科目（仍可手动修改）。
+    数据口径与查课核对页同源（常规周课表 + 当天临时调课 / 代课叠加），
+    见 services/inspection_lookup.py；只返回当前账号可见范围内的课。
+    返回 {success, date, teacher_uid, courses:[{period, grade, class_name, subject,
+    room, teacher_uid, teacher_name, entry_id, is_temp_swap}], message?}
+    """
+    uid = (request.args.get('teacher_uid') or '').strip()
+    target_date = _parse_iso_date(request.args.get('date')) or date.today()
+    if not uid:
+        return jsonify({'success': False, 'message': '缺少教师编号'}), 400
+    sched = swap_service.get_active_schedule()
+    if not sched:
+        return jsonify({'success': True, 'date': target_date.isoformat(),
+                        'teacher_uid': uid, 'courses': [],
+                        'message': '尚未建立学期课表'})
+    courses = inspection_lookup.teacher_courses_on(sched.id, target_date, uid)
+    # 与录入页下拉同口径：受限账号只看得到自己范围内的年级 / 班级
+    ug = visible_academic_grades(current_user)
+    if ug is not None:
+        courses = [c for c in courses if c['grade'] in ug]
+    courses = [c for c in courses
+               if academic_class_is_visible(current_user, c['grade'], c['class_name'])]
+    return jsonify({'success': True, 'date': target_date.isoformat(),
+                    'teacher_uid': uid, 'courses': courses})
+
+
 @bp.route('/inspection/export')
 @login_required
 @perm_required('academic.edit')
@@ -257,6 +335,7 @@ def inspection_export():
     import openpyxl
     from openpyxl.styles import Font, Alignment, PatternFill, Border, Side
     from app.utils.export_helpers import xl_safe
+    from app.utils.period_label import period_label      # 节次名口径（1=早读→第1节=2）
 
     ug = visible_academic_grades(current_user)
     teacher_uid = (request.args.get('teacher_uid') or '').strip()
@@ -296,7 +375,7 @@ def inspection_export():
     result_map = dict(INSPECTION_RESULTS)
     columns = ['日期', '年级', '节次', '教师编号', '教师姓名',
                '班级', '科目', '结果', '检查人', '备注']
-    widths = [12, 8, 6, 14, 12, 10, 12, 8, 8, 20]
+    widths = [12, 8, 9, 14, 12, 10, 12, 8, 8, 20]
 
     wb = openpyxl.Workbook()
     ws = wb.active
@@ -317,7 +396,7 @@ def inspection_export():
         row_data = [
             r.inspect_date.strftime('%Y-%m-%d'),
             r.grade or '',
-            r.period or '',
+            period_label(r.period) if r.period else '',
             r.teacher_uid or '',
             r.teacher_name or '',
             r.class_name or '',
@@ -378,11 +457,11 @@ def inspection_stats():
         by_result[res] = by_result.get(res, 0) + 1
         if res == 'normal':
             normal_cnt += 1
-        # 与 SQL 的 result != 'normal' 语义一致：NULL 不算异常
-        abnormal = res is not None and res != 'normal'
+        # 与 SQL 同口径：NULL 不算异常；「考试」也不算异常（考试期间有正常考务工作量）
+        abnormal = res is not None and res not in INSPECTION_EXEMPT_KEYS
         m = d.strftime('%Y-%m') if d else None
         mm = monthly_map.setdefault(m, {'month': m, 'normal': 0, 'late': 0,
-                                        'absent': 0, 'swap': 0, 'other': 0})
+                                        'absent': 0, 'swap': 0, 'exam': 0, 'other': 0})
         if res in mm:
             mm[res] = mm[res] + 1
         if abnormal:
@@ -399,8 +478,14 @@ def inspection_stats():
             if d >= this_month_start:
                 this_month += 1
 
-    normal_rate = round(normal_cnt * 100.0 / total, 1) if total else 0
-    abnormal_cnt = total - normal_cnt
+    # 2026-10-13「考试」口径：考试格既不算正常、也不算异常 ——
+    # 正常率的分母排除考试格；异常只数 INSPECTION_EXEMPT_KEYS 之外的结果
+    # （与上面 SQL notin_ 口径、以及 NULL 不算异常的行为保持一致）。
+    exam_cnt = by_result.get('exam', 0)
+    rated_total = total - exam_cnt
+    normal_rate = round(normal_cnt * 100.0 / rated_total, 1) if rated_total else 0
+    abnormal_cnt = sum(cnt for k, cnt in by_result.items()
+                       if k is not None and k not in INSPECTION_EXEMPT_KEYS)
 
     # 结果分布
     result_distribution = [{'name': result_map.get(k, k), 'value': cnt}
@@ -574,13 +659,14 @@ def inspection_live_schedule():
     """查课核对页：某天全校「行＝班级、列＝节次」矩阵，格内可直接标记查课结果。
 
     2026-10-09 改版：原来是"先选节次、再看一张单节次的班级列表"，巡课要反复切节次，
-    看完还得回记录页手工补录（没法标记 正常/迟到/缺课/调课）。现在与全校总课表
-    同款版式 —— 一天所有节次一次铺开、班级占第一列、格内上学科下教师，点格子即
-    弹出标记面板（正常/迟到/缺课/调课/其他 + 备注），状态写回 inspection_records，
+    看完还得回记录页手工补录（没法标记 正常/迟到/缺勤/调课）。现在与全校总课表
+    同款版式 —— 一天所有节次一次铺开、班级占第一列、格内上学科下教师，单击=正常、
+    双击=迟到、右键=缺勤/调课/考试等（状态写回 inspection_records），
     顶部实时显示"已查/应查"。
     """
     from app.modules.academic.services import schedule_service, term_service
 
+    view = (request.args.get('view') or 'matrix').strip()
     target_date = _parse_iso_date(request.args.get('date')) or date.today()
     grade = (request.args.get('grade') or '').strip()
     sched, week = term_service.resolve_schedule_by_date(target_date)
@@ -597,6 +683,19 @@ def inspection_live_schedule():
         allowed_classes=class_scope)
     _attach_checks(data, target_date, current_user)
 
+    # 2026-10-13：单节课表视图 —— 只看一节，按年级分块列出各班任课教师（可就地发起代课/调课）
+    pov_period = None
+    pov_blocks, pov_stats = None, None
+    if view == 'period':
+        period_defs = swap_service.get_periods(sched.id)
+        current_period = swap_service.current_period_number(period_defs)
+        pov_period = (request.args.get('period', type=int) or current_period
+                      or (period_defs[0].period_number if period_defs else 1))
+        pov_blocks, pov_stats = _period_overview_data(sched, target_date, pov_period, grade)
+        # 2026-10-14：单节视图同样可标记查课 —— 附上该节已有标记与覆盖率口径
+        pov_stats.update(_attach_period_checks(pov_blocks, target_date, pov_period,
+                                               current_user))
+
     grade_opts = swap_service.get_class_options(sched.id)['grades']
     if visible is not None:
         grade_opts = [g for g in grade_opts if g in visible]
@@ -608,6 +707,9 @@ def inspection_live_schedule():
                            is_today=(target_date == date.today()),
                            today_iso=date.today().isoformat(),
                            results=INSPECTION_RESULTS,
+                           view=view, pov_period=pov_period,
+                           pov_blocks=pov_blocks, pov_stats=pov_stats,
+                           can_schedule=_can_schedule(current_user),
                            can_mark=current_user.has_perm('academic.edit'),
                            now_str=datetime.now().strftime('%H:%M'))
 
@@ -760,3 +862,376 @@ def inspection_notify():
         current_user, '通知', 0,
         f'{target_date} 第{period}节：通知 {data.get("notified", 0)} 人')
     return jsonify({'success': True, 'message': msg, 'data': data})
+
+
+# ══════════════════════════════════════════════════════════════════════
+# 单节总览（2026-10-13 新增）：某天某一节课 × 多年级 × 各班任课教师
+# ══════════════════════════════════════════════════════════════════════
+#
+# 与「实时查课」的分工：
+#   - 实时查课 = 全天所有节次的矩阵（行=班级、列=节次），用于**标记**查课结果；
+#   - 本页     = **单节课**铺开成"班级卡片墙"，用于一眼看清这一节全校每个班谁在上课，
+#                并可就地发起**代课 / 调课**（教务调度视角）。
+#
+# 班级数量完全由课表数据派生（build_live_schedule 按 distinct 班级取），
+# 不假设"每年级 10 个班"—— 12 班 / 20 班等规模自动适应。
+#
+# 代课 / 调课的落库口径见 inspection_quick_swap 的 docstring。
+
+def _truthy(value, default=False):
+    """表单 / JSON 布尔解析：'1'、'true'、'on'、'yes' → True；None → default。"""
+    if value is None:
+        return default
+    if isinstance(value, bool):
+        return value
+    return str(value).strip().lower() in ('1', 'true', 'on', 'yes', 'y')
+
+
+def _can_schedule(user):
+    """单节总览能否就地发起代课/调课：课表管理 或 调课审批 权限（教务 / 领导）。"""
+    return bool(user.has_perm('academic.timetable')
+                or user.has_perm('academic.swap_approve'))
+
+
+def _period_blocks(data):
+    """把 build_live_schedule 的 {grade: [rows]} 组装成按年级分块的 blocks（含统计）。
+
+    年级顺序沿用系统既有口径：毕业年级在前（高三 → 高二 → 高一）。
+    """
+    from app.modules.academic.services.grade_utils import grade_labels, grade_sort_key
+    grades = [g for g in (data or {}).keys() if g]
+    labels = grade_labels(grades)
+    blocks = []
+    for g in sorted(grades, key=lambda x: grade_sort_key(x, labels), reverse=True):
+        rows = data.get(g) or []
+        blocks.append({
+            'grade': g,
+            'grade_label': labels.get(g, g),
+            'total': len(rows),
+            'scheduled': sum(1 for r in rows if r.get('subject')),
+            'rows': rows,
+        })
+    return blocks
+
+
+def _period_overview_data(sched, target_date, period, grade):
+    """单节总览数据（页面首屏与 JSON 接口共用）：返回 (blocks, stats)。
+
+    - 受限账号（年级 / 班级数据范围）只下发范围内的班级，越界年级直接 403；
+    - 班级数量按课表数据动态派生，不假设每年级固定班数。
+    """
+    visible = visible_academic_grades(current_user)
+    class_scope = visible_academic_class_scope(current_user)
+    if visible is not None and grade and grade not in visible:
+        abort(403)
+    grade_filter = grade or (sorted(visible) if visible is not None else None)
+    data = swap_service.build_live_schedule(sched.id, target_date, period, grade_filter,
+                                            allowed_classes=class_scope)
+    blocks = _period_blocks(data)
+    total_classes = sum(b['total'] for b in blocks)
+    total_scheduled = sum(b['scheduled'] for b in blocks)
+    stats = {'grades': len(blocks), 'classes': total_classes,
+             'scheduled': total_scheduled, 'empty': total_classes - total_scheduled}
+    return blocks, stats
+
+
+def _attach_period_checks(blocks, target_date, period, user):
+    """把「某天 + 某节」已有的查课标记附到单节总览卡片上，并返回该节统计。
+
+    2026-10-14：单节视图也支持标记查课（与全天矩阵共用 inspection_records）：
+    卡片右下角显示"未查 / 正常 / 迟到 / …"徽标，顶部覆盖率改成**这一节**的口径。
+    空档（这节课没排课）不参与统计，也不可标记 —— 与矩阵里没有格子一致。
+    """
+    labels = dict(INSPECTION_RESULTS)
+    rows = apply_academic_scope(
+        InspectionRecord.query.filter(InspectionRecord.inspect_date == target_date,
+                                      InspectionRecord.period == period),
+        user, InspectionRecord).all()
+    marks = {(r.grade, r.class_name): r for r in rows}
+    checked = expected = 0
+    for b in (blocks or []):
+        for r in (b.get('rows') or []):
+            if not r.get('subject'):
+                r['check'] = None
+                continue
+            expected += 1
+            rec = marks.get((b.get('grade'), r.get('class_name')))
+            if rec:
+                checked += 1
+                r['check'] = {'id': rec.id, 'result': rec.result,
+                              'label': labels.get(rec.result, rec.result),
+                              'note': rec.note or ''}
+            else:
+                r['check'] = None
+    return {'expected': expected, 'checked': checked,
+            'rate': (checked * 100 // expected) if expected else 0}
+
+
+@bp.route('/inspection/quick-swap', methods=['POST'])
+@login_required
+@perm_required('academic.swap')   # 2026-10-16 第八轮审计：发起调课/代课属写操作，
+#                                  此前本文件唯一只挂 login 的写端点（其余 19 个均有权限点），
+#                                  任何登录账号都能发起调课链路；权限点与 swap_apply/swap_cover 一致。
+def inspection_quick_swap():
+    """单节总览 → 就地发起「代课 / 调课」（2026-10-13 新增）。
+
+    请求体（JSON，兼容表单）：
+      entry_id:         本班这节课的条目 id（从卡片带过来）
+      kind:             'cover'（代课：只换授课人）/ 'exchange'（调课：两节课换上课时间）
+      partner_uid:      代课教师 / 对调教师 uid
+      partner_entry_id: 对调教师的某一节课（kind=exchange 必填）
+      swap_date:        临时调课日期（默认今天；is_permanent=true 时忽略）
+      is_permanent:     是否长期（默认 false）
+      reason:           事由（必填）
+
+    2026-10-14（用户口径）：对调**只换上课时间**（班级 / 教室 / 学生不动），
+    旧参数 swap_class 一律按 False 处理（"换班上课"已删除）。
+
+    落库口径：以**原任课教师**为申请人（教务 / 领导代办），复用
+    swap_service.apply_exchange_batch —— 与「请人代课」页完全同一条链路
+    （对方确认 → 教务审批 → 执行生效），不绕过任何环节。
+
+    权限：课表管理(academic.timetable) 或 调课审批(academic.swap_approve)。
+    普通教师请走 /swap/cover、/swap/apply（申请人＝本人的课）。
+    """
+    from app.models.timetable import ScheduleEntry  # 局部导入（与 _visible_active_teachers 同风格）
+
+    if not _can_schedule(current_user):
+        return jsonify({'success': False, 'message': '需要课表管理或调课审批权限'}), 403
+
+    payload = request.get_json(silent=True)
+    if not isinstance(payload, dict):
+        payload = request.form.to_dict()
+
+    try:
+        entry = db.session.get(ScheduleEntry, int(payload.get('entry_id') or 0))
+    except (TypeError, ValueError):
+        entry = None
+    if not entry or entry.is_deleted:
+        return jsonify({'success': False, 'message': '这节课不存在或已调整，请刷新页面'}), 400
+    if not academic_class_is_visible(current_user, entry.grade, entry.class_name):
+        return jsonify({'success': False, 'message': '没有该班级的操作权限'}), 403
+    if not entry.teacher_uid:
+        return jsonify({'success': False, 'message': '这节课还没排任课教师，无法代课'}), 400
+
+    kind = (payload.get('kind') or 'cover').strip()
+    if kind not in ('cover', 'exchange'):
+        return jsonify({'success': False, 'message': '类型只能是代课或调课'}), 400
+    partner_uid = (payload.get('partner_uid') or '').strip()
+    if not partner_uid:
+        return jsonify({'success': False,
+                        'message': '请选择' + ('代课教师' if kind == 'cover' else '对调教师')}), 400
+    reason = (payload.get('reason') or '').strip()
+    if not reason:
+        return jsonify({'success': False, 'message': '请填写事由'}), 400
+
+    is_permanent = _truthy(payload.get('is_permanent'))
+    item = {'entry_id': entry.id, 'partner_uid': partner_uid,
+            'swap_time': _truthy(payload.get('swap_time'), True),
+            'swap_class': _truthy(payload.get('swap_class'), True)}
+    if kind == 'exchange':
+        try:
+            item['partner_entry_id'] = int(payload.get('partner_entry_id') or 0)
+        except (TypeError, ValueError):
+            item['partner_entry_id'] = 0
+        if not item['partner_entry_id']:
+            return jsonify({'success': False, 'message': '调课请再选中对方的具体一节课'}), 400
+        # 2026-10-14（用户口径）：对调**只换上课时间** —— 不再换班级 / 教室 / 学生
+        item['swap_time'] = True
+        item['swap_class'] = False
+    else:
+        # 代课：时间、班级都不动，只换授课人
+        item['swap_time'] = item['swap_class'] = True
+    if not is_permanent:
+        item['swap_date'] = _parse_iso_date(payload.get('swap_date')) or date.today()
+
+    # 2026-10-14 第四轮审计修复（SEC-03）：本入口申请人记原任课教师（教务/领导
+    # 代办），但单据原先**看不出是谁操作的**（对方收到的通知也像是教师本人发的）。
+    # 现在把实际操作人写入 operator_uid / operator_name，通知文案与详情页都会标注。
+    from app.modules.academic.services import teacher_service
+    _op_teacher = teacher_service.teacher_of_user(current_user)
+    if _op_teacher:
+        op_uid, op_name = _op_teacher.teacher_uid, _op_teacher.name
+    else:
+        op_uid = (getattr(current_user, 'username', None) or str(current_user.id))[:16]
+        op_name = current_user.real_name or current_user.username or ''
+
+    # 2026-10-14 第三轮审计修复（SEC-02）：kind 原写死 'cover' —— 用户在上面选了
+    # 「调课(exchange)」时，单据仍按「代课」落库/通知（对方课条目不校验、exchange_kind
+    # 记错、通知文案变成"请你代课"）。改为透传上面已校验过的 kind。
+    ok, msg, result = swap_service.apply_exchange_batch(
+        applicant_uid=entry.teacher_uid,
+        applicant_name=entry.teacher_name or '',
+        items=[item], kind=kind, is_permanent=is_permanent, reason=reason,
+        operator_uid=op_uid, operator_name=op_name)
+    if not ok:
+        db.session.rollback()
+        return jsonify({'success': False, 'message': msg}), 400
+
+    log_operation(current_user, '新增', '代课申请', result.get('rep_id') or 0,
+                  f'单节总览：{entry.grade}{entry.class_name} {entry.subject}'
+                  f'（周{entry.weekday}第{entry.period_number}节，{entry.teacher_name}）'
+                  f'→ {partner_uid}',
+                  module='academic')
+    rep_id = result.get('rep_id')
+    return jsonify({'success': True, 'message': msg, 'data': {
+        'swap_id': rep_id,
+        'detail_url': (url_for('academic.swap_detail', swap_id=rep_id)
+                       if rep_id else None),
+    }})
+
+
+# ── 课时量统计（2026-10-13 用户口径）──────────────────────────────
+# 查课统计页负责「统计与导出课时量」：课型折算规则与「考试期间」标记都在统计页的
+# 弹窗里维护，这里只提供**读写配置 + 导出**两个能力；统计口径全部在
+# services/workload_service.py（考试期间同时影响课时量与查课异常，口径只有一处）。
+
+def _iso_d(value):
+    """'YYYY-MM-DD' → date；非法/空返回 None"""
+    try:
+        return date.fromisoformat((value or '').strip())
+    except (ValueError, AttributeError):
+        return None
+
+
+@bp.route('/inspection/workload/config')
+@login_required
+@perm_required('academic.edit')
+def inspection_workload_config():
+    """课时量配置：每个节次（课型）的折算系数 + 监考折算 + 考试期间清单。"""
+    from app.modules.academic.services import workload_service as wl
+
+    term = wl.resolve_term(date.today())
+    term_id = term.id if term else 0
+    rules = wl.rules_of(term_id)
+    periods = wl.period_options(term)
+    for p in periods:
+        p['factor'] = wl.factor_of(rules, 'period', p['number'])
+    rows = wl.exam_rows()
+    grades = _grade_options()
+    ug = visible_academic_grades(current_user)
+    if ug is not None:
+        grades = [g for g in grades if g in ug]
+    return jsonify({'success': True, 'data': {
+        'term_name': term.name if term else '',
+        'periods': periods,
+        'invigilation_factor': wl.factor_of(rules, 'invigilation', 0),
+        'exam_periods': [{'id': r.id, 'grade': r.grade,
+                          'class_name': r.class_name or '',
+                          'start_date': r.start_date.isoformat(),
+                          'end_date': r.end_date.isoformat(),
+                          'note': r.note or ''} for r in rows],
+        'grades': grades,
+    }})
+
+
+@bp.route('/inspection/workload/rules', methods=['POST'])
+@login_required
+@perm_required('academic.edit')
+def inspection_workload_rules_save():
+    """保存课型折算规则：每一项（节次 / 监考）单独设置一个折算值。
+
+    折算值含义：**一节课算几课时**；0 = 不计入；留空 = 恢复默认 1。
+    """
+    from app.modules.academic.services import workload_service as wl
+    from app.modules.academic.services.inspection_service import log_inspection
+
+    payload = request.get_json(silent=True) or request.form
+    items = payload.get('items') or []
+    if not isinstance(items, list):
+        return jsonify({'success': False, 'message': '参数错误：items 应为数组'}), 400
+    term = wl.resolve_term(date.today())
+    try:
+        changed = wl.save_rules(term.id if term else 0, items)
+        db.session.commit()
+    except Exception as e:  # noqa: BLE001
+        db.session.rollback()
+        return jsonify({'success': False, 'message': f'保存失败：{e}'}), 400
+    log_inspection(current_user, '保存课时量折算规则', 0, f'{changed} 项变更')
+    return jsonify({'success': True, 'message': f'已保存 {changed} 项折算规则'})
+
+
+@bp.route('/inspection/exam-periods', methods=['POST'])
+@login_required
+@perm_required('academic.edit')
+def inspection_exam_period_add():
+    """标记一段「考试期间」（年级+班级+起止日期）。
+
+    期间该班的课**不计课时工作量**，查课记录也**不计违纪/迟到** ——
+    考试期间教师有正常考务工作量（监考/考务），不能算缺勤。
+    """
+    from app.modules.academic.services import workload_service as wl
+    from app.modules.academic.services.inspection_service import log_inspection
+
+    src = request.get_json(silent=True) or request.form
+    grade = (src.get('grade') or '').strip()
+    class_name = (src.get('class_name') or '').strip()
+    start_d, end_d = _iso_d(src.get('start_date')), _iso_d(src.get('end_date'))
+    if not academic_class_is_visible(current_user, grade, class_name or None):
+        return jsonify({'success': False, 'message': '该班级不在你的可见范围内'}), 403
+    ok, msg, row = wl.add_exam_period(grade, class_name, start_d, end_d,
+                                      (src.get('note') or '').strip(),
+                                      current_user.id)
+    if not ok:
+        return jsonify({'success': False, 'message': msg}), 400
+    try:
+        db.session.commit()
+    except Exception as e:  # noqa: BLE001
+        db.session.rollback()
+        return jsonify({'success': False, 'message': f'保存失败：{e}'}), 400
+    log_inspection(current_user, '标记考试期间', row.id,
+                   f'{grade}{class_name} {start_d}~{end_d}')
+    return jsonify({'success': True, 'message': msg, 'data': {'id': row.id}})
+
+
+@bp.route('/inspection/exam-periods/<int:pid>/delete', methods=['POST'])
+@login_required
+@perm_required('academic.edit')
+def inspection_exam_period_delete(pid):
+    from app.modules.academic.services import workload_service as wl
+    from app.modules.academic.services.inspection_service import log_inspection
+
+    ok, msg = wl.delete_exam_period(pid)
+    if not ok:
+        return jsonify({'success': False, 'message': msg}), 404
+    try:
+        db.session.commit()
+    except Exception as e:  # noqa: BLE001
+        db.session.rollback()
+        return jsonify({'success': False, 'message': f'删除失败：{e}'}), 400
+    log_inspection(current_user, '删除考试期间', pid, '')
+    return jsonify({'success': True, 'message': msg})
+
+
+@bp.route('/inspection/workload/export')
+@login_required
+@perm_required('academic.edit')
+def inspection_workload_export():
+    """导出课时量统计 Excel（按当前折算规则 + 考试期间口径）。"""
+    from app.modules.academic.services import workload_service as wl
+    from app.modules.academic.services.inspection_service import log_inspection
+
+    from_d = _iso_d(request.args.get('date_from'))
+    to_d = _iso_d(request.args.get('date_to'))
+    if not from_d:
+        from_d = date.today().replace(day=1)
+    if not to_d:
+        to_d = date.today()
+    grade = (request.args.get('grade') or '').strip()
+    class_name = (request.args.get('class_name') or '').strip()
+    ug = visible_academic_grades(current_user)
+    if ug is not None and grade and grade not in ug:
+        flash('该年级不在你的可见范围内', 'warning')
+        return redirect(url_for('academic.inspection_page'))
+    try:
+        out, data = wl.export_workload(from_d, to_d, grade=grade,
+                                       class_name=class_name)
+    except ValueError as e:
+        flash(str(e), 'warning')
+        return redirect(url_for('academic.inspection_page'))
+    log_inspection(current_user, '导出课时量', 0,
+                   f'{from_d}~{to_d} {grade}{class_name}'
+                   f' 共 {data["summary"]["teachers"]} 位教师')
+    return send_file(out, as_attachment=True,
+                     download_name=f'课时量统计_{from_d}_{to_d}.xlsx',
+                     mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')

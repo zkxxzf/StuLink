@@ -1,4 +1,4 @@
-# StuLink v1.19.49.29 2026-10-10
+# StuLink v1.19.49.35 2026-10-10
 # 成绩汇报区 · 教师排名引擎：同方向同科目全体任课教师按指标聚合后排名
 # 口径：同一位老师教多个班时，所教学生合并计算（率/去差均分才公平）；
 #       去差仍按学生所在行政班的班型规则剔除；并列同名次，竞赛排名（1,2,2,4）。
@@ -28,11 +28,13 @@ def _rank_teachers(teachers, keys):
 def _aggregate(data, direction, rows, layer_name):
     """一层内按 (科目, 教师) 聚合所教全部学生的指标。
     返回 {科目展示名: [教师指标...]}；该科该层未划单科线时 online/dual 为 None。"""
-    total_line = rs.pick_layer(data, direction, TOTAL_SUBJECT, layer_name)
-    total_lower = total_line[1] if total_line else None
+    # 2026-10-15 组合级划线：总分线与各科单科线都按**学生自身组合**取线
+    # （再选四科=各组合各一条线；语数外+首选科=方向线，band_list 内部回落）
+    total_lower, total_sels = rs.layer_lowers(data, direction, TOTAL_SUBJECT,
+                                              layer_name, rows)
     trimmed = rs.trimmed_nos(data)
     # 班级×科目 → 教师（表上有唯一约束，一班一科一师）
-    # v1.19.49.29 优先读**本场考试的任课快照**（考试当时），而不是当前映射：
+    # v1.19.49.35 优先读**本场考试的任课快照**（考试当时），而不是当前映射：
     # 教师调动/重新分班后，历史考试仍归属到当时的教师名下
     from app.modules.grades.services import teacher_snapshot_service as _tss
     teacher_of = _tss.teacher_user_map(data.exam.id, grade=data.exam.grade)
@@ -43,14 +45,14 @@ def _aggregate(data, direction, rows, layer_name):
     uids = set(teacher_of.values())
     users = User.query.filter(User.id.in_(uids), User.is_active.is_(True)).all() if uids else []
     name_of = {u.id: u.real_name for u in users}
-    # 各科该层单科线下界（预算一次，band_list 有实例缓存但避免循环内重复排序）
-    sub_lower = {}
+    # 各科该层单科线：按学生自身组合展开（再选四科各组合一条），并保留方向级兜底
+    sub_base, sub_sels = {}, {}
     for s in SUBJECTS:
-        sl = rs.pick_layer(data, direction, s, layer_name)
-        sub_lower[s] = sl[1] if sl else None
+        sub_base[s], sub_sels[s] = rs.layer_lowers(data, direction, s, layer_name, rows)
 
     buckets = {}
     for r in rows:
+        sel = r.subject_selection or ''
         for s in SUBJECTS:
             sc = data.subj.get((r.student_no, s))
             if sc is None:
@@ -62,17 +64,16 @@ def _aggregate(data, direction, rows, layer_name):
             b['n'] += 1
             if r.student_no not in trimmed:
                 b['vals'].append(sc)
-            line = sub_lower[s]
+            line = sub_sels[s].get(sel, sub_base[s])
             if line is not None and sc >= line:
                 b['on'] += 1
-                if (total_lower is not None and r.score is not None
-                        and r.score >= total_lower):
+                tl = total_sels.get(sel, total_lower)
+                if tl is not None and r.score is not None and r.score >= tl:
                     b['dual'] += 1
 
     out = {}
     for (s, uid), b in buckets.items():
-        line = sub_lower[s]
-        has_line = line is not None
+        has_line = sub_base[s] is not None or bool(sub_sels[s])
         t = {'uid': uid, 'name': name_of.get(uid, '—'),
              'count': b['n'],
              'online_n': b['on'] if has_line else None,

@@ -3,7 +3,7 @@
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
 [![Python](https://img.shields.io/badge/python-3.11+-green.svg)](https://python.org)
 [![Flask](https://img.shields.io/badge/flask-3.x-lightgrey.svg)](https://flask.palletsprojects.com/)
-[![Version](https://img.shields.io/badge/version-1.19.49.29-orange.svg)](https://gitee.com/zkxxzf/StuLink)
+[![Version](https://img.shields.io/badge/version-1.19.49.30-orange.svg)](https://gitee.com/zkxxzf/StuLink)
 
 面向中学的综合学生管理平台，采用 **双站点 + 多模块 + 一模块一库** 的故障隔离架构：
 
@@ -113,7 +113,7 @@
   - 查课巡课：记录录入/批量/编辑/删除 · 导出 · 统计图表 · 实时课表核对页 · 格内标记 · 通知推送
   - 调课：个人调课 / 统一（批量）调课 + **分级审批流**（调课审批 → 课表管理终审）· **两人换课**（换时段 / 换班上课 / 请人代课）· 执行 / 撤销 · 统计
   - 教师业绩库：录入 / 审核（通过/驳回）· 标签 · 附件（白名单 + magic 校验 + 图片/PDF 预览）
-  - 备课组长管理 · 表单收集（多题型 / 文件上传 / 审核 / 汇总看板 / 材料包 / 催交 / Excel 导出）
+  - 学科组长管理（备课组长 / 教研组长）· 表单收集（多题型 / 文件上传 / 审核 / 汇总看板 / 材料包 / 催交 / Excel 导出）
 - **已下线 / 不做**
   - 晚自习值班（服务保留但无路由）· 走班教学班课表页（2026-10-10 下线）· 旧课表体系（`routes/timetable.py` 为未注册死代码）
   - 注：「课本」实为学生住宿信息字段，**不在教务模块**
@@ -185,7 +185,7 @@
   data/grades.db       成绩库（考试/成绩/分层/任课映射/考务/AI/证明）
   data/points.db       德育库（加减分记录/规则模板）
   data/morality.db     德育奖惩库（奖惩记录/附件）
-  data/academic.db     教务基础库（教师名单/备课组长/班主任工作记录/考勤）
+  data/academic.db     教务基础库（教师名单/学科组长/班主任工作记录/考勤）
   data/timetable.db    课表库（学期课表/节次/调课/版本）
   data/inspection.db   查课库（巡课检查记录）
   data/achievement.db  业绩库（教师业绩 + 附件材料）
@@ -195,7 +195,7 @@
 
 - **后端**：Python 3.11+ / Flask 3.x / Flask-Login / Flask-SQLAlchemy 2.x（多库 binds）/ Waitress / openpyxl / reportlab / python-pptx
 - **前端**：Bootstrap 5 / jQuery / Jinja2 / ECharts（成绩可视化）/ Chart.js（画像）
-- **安全（v1.19.49.29）**：
+- **安全（v1.19.49.35）**：
   - **身份**：管理员首启随机口令 + 强制改密 · 一次性初始口令展示 · 会话口令摘要（改密即踢）· IP + 账号双维限流与锁定（锁键含来源，防账号被恶意锁定）
   - **数据**：AES 身份证与 AI Key 加密 · CSRF 8h 时效 · 二维权限（功能三档 × 数据范围）· 白名单式教师候选过滤
   - **传输**：`url_guard` 出站白名单 + DNS 解析 + 禁 302 跟随 · CSP（Report-Only 起步，可切 enforce）· HTTPS Cookie Secure
@@ -216,7 +216,7 @@ python run.py --dev
 cd alumni_app && python run.py
 
 # Docker 部署（三个容器：主应用 + 往届查询 + MCP 服务）
-docker build -t stulink:v1.19.49.29 .
+docker build -t stulink:v1.19.49.35 .
 docker build -t stulink-alumni:v1.0.0 ./alumni_app
 docker build -f Dockerfile.mcp -t stulink-mcp:v1.0.0 .
 docker-compose up -d

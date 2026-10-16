@@ -27,22 +27,7 @@ def filter_subjects(subjects, allowed):
     return [s for s in (subjects or []) if s in allowed]
 
 
-def subject_avgs(data, class_name, allowed):
-    """班级各科均分（只算可见学科）。"""
-    out = []
-    for subject in filter_subjects(data.imported_subjects, allowed):
-        values = data.scores_of_subject(subject, class_name=class_name)
-        out.append({'subject': subject, 'count': len(values),
-                    'avg': round(sum(values) / len(values), 1) if values else None})
-    return out
-
-
-def apply_total_visibility(row, scope, grade, class_name):
-    """任课教师只被授予所教学科：总分口径（均分/最高/最低/分层）不对其开放。"""
-    if scope.class_total_visible(grade, class_name):
-        return row
-    row['total_hidden'] = True
-    row['avg'] = row['std'] = row['max'] = row['min'] = None
-    row['layers'] = {}
-    row['note'] = '任课教师仅可见所教学科成绩，该班总分口径已隐藏'
-    return row
+# 说明（2026-10-15）：原 `subject_avgs` / `apply_total_visibility` 两个 helper 已删除——
+# 前者移入 `app/modules/grades/services/grade_context.py`（与 Web 端 AI 共用同一份）；
+# 后者是"总分聚合不对任课教师开放"的旧口径，用户已明确"年级成绩分析结果可公开，
+# 只有学生个人成绩不公开"，班级级总分聚合不再隐藏，隐藏逻辑只保留在逐生工具里。

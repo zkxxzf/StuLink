@@ -265,16 +265,17 @@
     }
     .rd-berth.is-empty .rd-berth-no { color: #94a3b8; background: #f4f6f8; border: 1px dashed #cbd5e1; }
     .rd-berth-main { flex: 1 1 auto; min-width: 0; }
+    /* 2026-10-14 第四轮审计（UI-10）：颜色改主题变量 */
     .rd-berth-name {
-        font-size: 14px; font-weight: 600; color: #1e293b; line-height: 1.35;
+        font-size: 14px; font-weight: 600; color: var(--sl-text, #1e293b); line-height: 1.35;
         white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
     }
-    .rd-berth-name.rd-berth-none { font-size: 12.5px; font-weight: 400; color: #94a3b8; }
+    .rd-berth-name.rd-berth-none { font-size: 12.5px; font-weight: 400; color: var(--sl-text-subtle, #94a3b8); }
     .rd-berth-sub {
-        font-size: 11.5px; color: #6b7280; line-height: 1.5;
+        font-size: 11.5px; color: var(--sl-text-muted, #6b7280); line-height: 1.5;
         white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
     }
-    .rd-dot { color: #cbd5e1; margin: 0 4px; }
+    .rd-dot { color: var(--sl-border, #cbd5e1); margin: 0 4px; }
     .rd-gender-male { color: #3b82f6; font-size: 12px; }
     .rd-gender-female { color: #ec4899; font-size: 12px; }
     .rd-berth-tier {

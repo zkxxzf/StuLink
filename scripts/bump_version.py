@@ -33,8 +33,10 @@
 
 默认行为：扫描项目 → 替换所有形如 vX.Y.Z.W / vX.Y.Z 的"当前版本"引用 → 若 git 干净则自动 commit。
 不修改：scripts/migrate_*.py、代码内联变更注释、data/、聊天总结/（2026-10-13 起位于
-docs/聊天总结/；SKIP_DIRS 按**目录名**匹配路径各部分，与层级无关）等目录。
-详细规范见 docs/版本号管理规范.md。
+docs/聊天总结/；SKIP_DIRS 按**目录名**匹配路径各部分，与层级无关）、
+版本历史/（2026-10-16 起位于 docs/版本历史/ —— **历史记录里的版本号必须保持原样**，
+改了历史等于伪造历史）等目录。
+详细规范见 docs/版本号管理规范.md；版本内容记录见 docs/版本历史/README.md。
 """
 from __future__ import annotations
 
@@ -47,7 +49,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 CURRENT_HEAD = ROOT / 'config.py'   # 从 config.py 首行提取当前版本
 SKIP_DIRS = {'.git', 'data', 'deploy', 'uploads', '__pycache__',
-             '参考表格', '聊天总结', 'node_modules', 'backup',
+             '参考表格', '聊天总结', '版本历史', 'node_modules', 'backup',
              '.qoder', '.trae', '.vscode', '.venv', 'venv', 'env'}
 ALLOWED_EXT = {'.py', '.html', '.js', '.css', '.md', '.txt', '.yml', '.yaml'}
 # 路径过滤：迁移脚本与备份文件不改

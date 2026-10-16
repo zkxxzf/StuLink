@@ -1,14 +1,16 @@
-# StuLink v1.19.49.29 2026-10-10
+# StuLink v1.19.49.35 2026-10-10
 # 教师安排表解析：兼容《教师安排表.xlsx》总任课表横表（多年级区段 / 英语别名 / 忽略非高考科目列）
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 import re
 
 import openpyxl
 
-from app.models.grades import SUBJECTS
+from app.models.academic import COMPREHENSIVE_ALIAS
+from app.models.grades import LINK_SUBJECTS, SUBJECT_ALIAS
 from app.modules.grades.utils import parse_grade_any
 
-_SUBJECT_ALIAS = {'英语': '外语'}
+# 2026-10-13：引用 models.grades 公共别名表（唯一维护点，含小语种）
+_SUBJECT_ALIAS = SUBJECT_ALIAS
 _CLASS_RE = re.compile(r'^\s*(\d{1,2})班\s*$')
 _SECTION_MARKERS = ('任课安排', '备课组长', '任课表')
 _MAX_ROWS = 3000
@@ -25,7 +27,8 @@ def parse_teacher_excel(stream):
     - 含"任课安排/备课组长"的标题行与空行直接跳过；"数量"统计行忽略
     - 表头行：含 班级 且 含任一高考科目列（语文/数学/英语/外语…）
     - 数据行：含 'xx班'；年级取行内 '20xx级' 形式（不认 高三/高二 称谓）
-    - 只提取 9 个高考科目列与班主任列（正班/副班1/副班2）；其余忽略
+    - 只提取 15 个科目列（9 个文化科 + 综合组 6 科，2026-10-15 扩容）与班主任列
+      （正班/副班1/副班2）；其余忽略
     """
     wb = openpyxl.load_workbook(stream, data_only=True, read_only=True)
     ws = wb.worksheets[0] if wb.worksheets else None
@@ -60,10 +63,14 @@ def parse_teacher_excel(stream):
             idx = {}
             hi = {}
             for i, c in enumerate(cells):
-                if c in SUBJECTS:
-                    idx[c] = i
+                # 2026-10-15：白名单扩到 LINK_SUBJECTS（9 文化科 + 综合组 6 科），
+                # 综合组常见写法（信息/微机/通用/心理健康/体/音/美）走 COMPREHENSIVE_ALIAS
+                if c in LINK_SUBJECTS:
+                    idx.setdefault(c, i)
                 elif c in _SUBJECT_ALIAS and _SUBJECT_ALIAS[c] not in idx:
                     idx[_SUBJECT_ALIAS[c]] = i
+                elif c in COMPREHENSIVE_ALIAS and COMPREHENSIVE_ALIAS[c] not in idx:
+                    idx[COMPREHENSIVE_ALIAS[c]] = i
                 elif c in HEAD_COLS:
                     hi[c] = i
             subj_idx = idx or None

@@ -1,6 +1,6 @@
-# StuLink v1.19.49.29 2026-10-10
+# StuLink v1.19.49.35 2026-10-10
 # 教务模块模型（2026-10-10 按「一个功能一个库」分库）：
-#   academic.db    师资基础（教师名单 / 备课组长 / 班主任记录 / 考勤）
+#   academic.db    师资基础（教师名单 / 学科组长 / 班主任记录 / 考勤）
 #   timetable.db   课表与晚自习值班
 #   inspection.db  查课记录
 #   achievement.db 教师业绩 + 附件
@@ -222,9 +222,92 @@ ACHIEVEMENT_FIELDS = {
     'other': [('detail', '补充说明')],
 }
 INSPECTION_RESULTS = [
-    ('normal', '正常'), ('late', '迟到'), ('absent', '缺课'),
-    ('swap', '调课'), ('other', '其他'),
+    ('normal', '正常'), ('absent', '缺勤'), ('late', '迟到'),
+    ('swap', '调课'), ('exam', '考试'), ('other', '其他'),
 ]
+# 2026-10-13：
+# ① 'absent' 显示名由「缺课」统一改为「缺勤」（用户口径，值不变，历史数据不受影响）；
+# ② 新增 'exam'（考试）：该格是考试而非正常上课 —— 不计课时工作量、也不算异常
+#    （考试期间有正常考务工作量，不能算违纪/迟到）。判定异常的位置统一用
+#    INSPECTION_NORMAL_KEYS 之外的集合，避免各页各写一份。
+INSPECTION_EXEMPT_KEYS = frozenset({'normal', 'exam'})   # 不算「异常」的结果
+
+
+# ── 课时量统计（2026-10-13 新增）─────────────────────────────────
+# 用户口径：查课统计页负责「统计与导出课时量」，导出要能按课型分别设置计算规则
+#   （第五节 / 早读 / 早自习 / 晚自习 / 下午最后一节课 / 监考…各自可设）；
+#   并支持把某些班级标为「考试期间」——期间不记工作量，也不计违纪/迟到
+#   （考试期间教师有正常考务工作量）。
+# 两张表与 InspectionRecord 同域、同库（inspection.db）。
+
+WORKLOAD_KINDS = {'period': '节次', 'invigilation': '监考'}
+
+
+class WorkloadRule(db.Model):
+    """课时量折算规则：某种课型的一「节」折算成几课时。
+
+    kind + period_number 唯一确定一种课型：
+      kind='period'        → period_number 为节次号（早读/第1节/晚自习1…都只是一个节次）
+      kind='invigilation'  → period_number 固定 0（监考场次）
+    factor=0 表示**不计入**课时量；查不到规则 = 默认 1.0，所以学校不配置也能出结果。
+    term_schedule_id=0 为通用（跨学期）默认值，正常应在当前学期下配。
+    """
+    __bind_key__ = 'inspection'
+    __tablename__ = 'workload_rules'
+
+    id = db.Column(db.Integer, primary_key=True)
+    term_schedule_id = db.Column(db.Integer, nullable=False, default=0, index=True)
+    kind = db.Column(db.String(16), nullable=False, default='period')
+    # nullable=False + 默认 0：SQLite 的唯一约束把 NULL 视为互不相等，
+    # period_number 允许 NULL 会让同一条监考规则被重复插入。
+    period_number = db.Column(db.Integer, nullable=False, default=0)
+    factor = db.Column(db.Float, nullable=False, default=1.0)
+    updated_at = db.Column(db.DateTime, default=datetime.now, onupdate=datetime.now)
+
+    __table_args__ = (
+        db.UniqueConstraint('term_schedule_id', 'kind', 'period_number',
+                            name='uq_workload_rule'),
+    )
+
+    def __repr__(self):
+        return f'<WorkloadRule {self.kind}#{self.period_number} x{self.factor}>'
+
+
+class ExamPeriod(db.Model):
+    """考试期间：某个班（或整个年级）在某段日期内处于考试期。
+
+    与单格结果的 result='exam' 语义一致、粒度更粗（一段「班 × 日」），期间两条口径：
+      ① 这些日子该班的课**不计课时工作量**；
+      ② 该班的查课记录**不计异常**（缺勤/迟到不算违纪 —— 考试期间教师有正常
+         考务工作量）。查课异常统计与课时量统计共用本表，口径只有一处。
+    class_name 为空 = 该年级**所有班**（月考/统考常见整年级停课）。
+    """
+    __bind_key__ = 'inspection'
+    __tablename__ = 'exam_periods'
+
+    id = db.Column(db.Integer, primary_key=True)
+    grade = db.Column(db.String(10), nullable=False)
+    class_name = db.Column(db.String(10))            # 空 = 年级全部班
+    start_date = db.Column(db.Date, nullable=False, index=True)
+    end_date = db.Column(db.Date, nullable=False)
+    note = db.Column(db.String(100))
+    created_by = db.Column(db.Integer)
+    created_at = db.Column(db.DateTime, default=datetime.now)
+
+    __table_args__ = (
+        db.Index('idx_exam_period_class', 'grade', 'class_name'),
+    )
+
+    def covers(self, target_date, grade=None, class_name=None):
+        """该条是否覆盖「某天某班」（班级为空=年级全部班）。"""
+        if grade and self.grade and self.grade != grade:
+            return False
+        if self.class_name and class_name and self.class_name != class_name:
+            return False
+        return bool(self.start_date <= target_date <= self.end_date)
+
+    def __repr__(self):
+        return f'<ExamPeriod {self.grade}{self.class_name or ""} {self.start_date}~{self.end_date}>'
 
 
 # 2026-10-10：CourseSwap（course_swaps 表，长期 0 行）已删除 ——
@@ -474,17 +557,64 @@ class AttendanceRecord(db.Model):
 ATTENDANCE_STATUS = [('present', '出勤'), ('absent', '缺勤'), ('late', '迟到'), ('leave', '请假')]
 
 
-# ── 备课组长（2026-09-25）───────────────────────────────────────────────────
+# ── 学科组长（2026-10-14：原「备课组长」升级为「学科组长」）──────────────────
 # 任课安排（原 /academic/duty）已于 2026-10-10 下线，教师-学科关系以任课教师
-# 映射（TeacherSubjectLink）为唯一依据；此处保留备课组长（SubjectLeader）相关常量。
-# 备课组长信息无法从课表自动推导，故落库（academic.db.subject_leaders）。
+# 映射（TeacherSubjectLink）为唯一依据；此处保留学科组长（SubjectLeader）相关常量。
+# 学科组长信息无法从课表自动推导，故落库（academic.db.subject_leaders）。
+#
+# 三类组长（2026-10-14 定口径）：
+# - 备课组长：年级 × 学科（高一/高二/高三各学科各一名），年级必填；
+# - 教研组长：只按学科（不分年级），年级留空表示全校；
+# - 综合组组长：**整个综合组只设 1 名**（体育/音乐/美术/信息技术/通用技术/心理 六科
+#   合用一个组长，不分年级、不分学科；落库 subject='综合组'、grade=''）。
+# 组长必须是本学科教师（任课映射优先、课表兜底、教师档案学科最后兜底）；
+# 综合组的候选＝六科教师并集。
+# 体育/音乐/美术/信息技术/通用技术/心理 六个学科在展示与导出里合并为「综合组」。
+
+# 组长类别（顺序＝页面分块顺序）
+LEADER_CATEGORIES = ('备课组长', '教研组长', '综合组组长')
+LEADER_CATEGORY_LESSON = '备课组长'        # 年级 × 学科
+LEADER_CATEGORY_RESEARCH = '教研组长'      # 只按学科，不分年级
+LEADER_CATEGORY_COMPREHENSIVE = '综合组组长'   # 综合组整组一位（不分年级、不分学科）
+LEADER_CATEGORY_DEFAULT = LEADER_CATEGORY_LESSON
+
+# 备课组长年级候选（高中：只有这三个年级；留空＝全校，仅供历史数据兼容）
+LEADER_GRADES = ('高一', '高二', '高三')
+
+# 综合组：音体美信通心六个学科合并成一个组；
+# 2026-10-14 用户口径（二次修订）：**整个综合组只设 1 名组长**（不分年级、不分学科），
+# 落库为 subject='综合组' / grade='' / category='综合组组长' 的一条记录，
+# 矩阵里综合组只渲染一行一格；候选教师＝六科教师并集。
+COMPREHENSIVE_GROUP = '综合组'
+COMPREHENSIVE_SUBJECTS = ('体育', '音乐', '美术', '信息技术', '通用技术', '心理')
+
+# 综合组六科的**字面别名（唯一真值）**：教务表 / 课表 / 教师档案里常见的缩写写法
+# → 系统标准科名。两处消费：①学科组长候选与校验（subject_leader_service._SUBJECT_LITERAL_ALIAS）；
+# ②任课映射的批量导入表头识别（grades.services.teacher_import）。
+COMPREHENSIVE_ALIAS = {
+    '心理健康': '心理', '心理课': '心理', '心理健康教育': '心理',
+    '信息': '信息技术', '微机': '信息技术', '计算机': '信息技术',
+    '通用': '通用技术', '通技': '通用技术',
+    '体育与健康': '体育', '音': '音乐', '美': '美术', '体': '体育',
+}
+
+
+def leader_group_name(subject):
+    """学科 → 学科组名：综合组学科合并为「综合组」，其余学科自成一科一组。"""
+    s = (subject or '').strip()
+    return COMPREHENSIVE_GROUP if s in COMPREHENSIVE_SUBJECTS else s
+
 
 class SubjectLeader(db.Model):
-    """备课组长登记（按 学年 × 学期 × 年级 × 学科 唯一）
+    """学科组长登记（按 学年 × 学期 × 年级 × 学科 × 类别 唯一）
 
-    - `term=''` 表示"整学年"；`grade=''` 表示全校/综合组（如信息技术、心理）；
-    - `leader_uid` 关联 academic.db 的 teachers.teacher_uid（快照式，跨库不建外键）；
-    - `members` 备课组范围或成员；`duty` 主要职责（可套用 DUTY_TEMPLATES 预设）。
+    - `category`：备课组长（年级 × 学科，年级必填）/ 教研组长（只按学科，年级留空＝全校）/
+      综合组组长（综合组整组一位：`subject='综合组'`、`grade=''`）；
+    - `term=''` 表示"整学年"；`grade=''` 表示全校（教研组长 / 综合组组长即用此形态）；
+    - `leader_uid` 关联 academic.db 的 teachers.teacher_uid（快照式，跨库不建外键）。
+
+    2026-10-14：职责 / 组范围（原 members / duty / sort_order）**整功能删除** ——
+    页面只保留「谁当组长」的矩阵维护，不再登记职责文本。
     """
     __bind_key__ = 'academic'
     __tablename__ = 'subject_leaders'
@@ -492,19 +622,18 @@ class SubjectLeader(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     school_year = db.Column(db.String(20), nullable=False, index=True)  # 如 2026-2027
     term = db.Column(db.String(10), default='')          # ''=整学年 / 第一学期 / 第二学期
-    grade = db.Column(db.String(10), default='')         # ''=全校/综合组
+    grade = db.Column(db.String(10), default='')         # ''=全校（教研组长）
     subject = db.Column(db.String(20), nullable=False, index=True)
+    category = db.Column(db.String(10), nullable=False,
+                         default=LEADER_CATEGORY_DEFAULT)  # 备课组长 / 教研组长
     leader_uid = db.Column(db.String(16))                # Teacher.teacher_uid
     leader_name = db.Column(db.String(50), nullable=False)
-    members = db.Column(db.String(300))                  # 备课组范围/成员
-    duty = db.Column(db.String(500))                     # 主要职责
-    sort_order = db.Column(db.Integer, default=0)
     updated_by = db.Column(db.Integer)                   # users.id
     created_at = db.Column(db.DateTime, default=datetime.now)
     updated_at = db.Column(db.DateTime, default=datetime.now, onupdate=datetime.now)
 
     __table_args__ = (
-        db.UniqueConstraint('school_year', 'term', 'grade', 'subject',
+        db.UniqueConstraint('school_year', 'term', 'grade', 'subject', 'category',
                             name='uq_subject_leader'),
         db.Index('idx_leader_year_subject', 'school_year', 'subject'),
     )
@@ -518,35 +647,69 @@ class SubjectLeader(db.Model):
             'grade': self.grade or '',
             'grade_text': self.grade or '全校',
             'subject': self.subject,
+            'group_name': leader_group_name(self.subject),
+            'category': self.category or LEADER_CATEGORY_DEFAULT,
             'leader_uid': self.leader_uid or '',
             'leader_name': self.leader_name,
-            'members': self.members or '',
-            'duty': self.duty or '',
-            'sort_order': self.sort_order or 0,
             'updated_at': self.updated_at.strftime('%Y-%m-%d %H:%M') if self.updated_at else '',
         }
 
     def __repr__(self):
-        return f'<SubjectLeader {self.school_year} {self.grade}{self.subject} {self.leader_name}>'
+        return (f'<SubjectLeader {self.school_year} {self.grade}{self.subject}'
+                f'{self.category} {self.leader_name}>')
 
 
-# 学科固定展示顺序（任课表列序、备课组长分组顺序都用它；未列入的学科排在后面）
+class SubjectLeaderPlan(db.Model):
+    """学科组长方案 ＝ 一个「学年 × 学期」（2026-10-14 加，与任课映射方案同款交互）
+
+    为什么需要：组长登记本就按 学年 × 学期 并存（课表「备课组 / 教研组课表」的徽章
+    按课表自己的学年学期回查），但页面上只能"手输学年 + 选学期"切换，没有方案记录
+    （谁建的、叫什么、什么时候更新的）。方案表把每个学期显式化，页面右上角
+    「历史记录」即可使用历史方案 / 使用其他方案 / 新建方案。
+
+    - 唯一键 `学年 × 学期`：一个学期只能有一套组长登记（与 subject_leaders 的
+      唯一键口径一致），故方案与登记一一对应，重名/重复学期会被拒绝；
+    - `is_current=True` ＝ 页面默认打开的「当前学期方案」（至多一个）；
+    - 删除方案会连同该学期的组长登记一起删除（服务层负责，UI 二次确认）。
+    """
+    __bind_key__ = 'academic'
+    __tablename__ = 'subject_leader_plans'
+
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(80), nullable=False)
+    school_year = db.Column(db.String(20), nullable=False)   # 如 2026-2027
+    term = db.Column(db.String(10), default='')              # ''=整学年 / 第一学期 / 第二学期
+    note = db.Column(db.String(200), default='')
+    is_current = db.Column(db.Boolean, default=False, index=True)
+    created_by = db.Column(db.Integer)                       # users.id
+    created_at = db.Column(db.DateTime, default=datetime.now)
+    updated_at = db.Column(db.DateTime, default=datetime.now, onupdate=datetime.now)
+
+    __table_args__ = (
+        db.UniqueConstraint('school_year', 'term', name='uq_leader_plan_term'),
+        # 2026-10-14 第四轮审计（DATA3-01）：至多一个「当前学期方案」由 DB 级部分唯一索引兜底
+        db.Index('uq_leader_plan_current', 'is_current', unique=True,
+                 sqlite_where=db.text('is_current = 1')),
+    )
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'name': self.name,
+            'school_year': self.school_year or '',
+            'term': self.term or '',
+            'term_text': self.term or '整学年',
+            'note': self.note or '',
+            'is_current': bool(self.is_current),
+            'created_at': self.created_at.strftime('%Y-%m-%d %H:%M') if self.created_at else '',
+            'updated_at': self.updated_at.strftime('%Y-%m-%d %H:%M') if self.updated_at else '',
+        }
+
+    def __repr__(self):
+        return f'<SubjectLeaderPlan {self.school_year} {self.term} {self.name}>'
+
+
+# 学科固定展示顺序（任课表列序、学科组长矩阵行序都用它；未列入的学科排在后面）
 SUBJECT_ORDER = ['语文', '数学', '英语', '物理', '化学', '生物', '政治', '历史',
                  '地理', '体育', '音乐', '美术', '信息技术', '通用技术', '心理',
                  '劳动', '班会', '自习', '晚自习']
-
-# 备课组长职责预设（前端「填入常用职责」按钮用；可按校情自行修改）
-DUTY_TEMPLATES = {
-    'default': ('① 统筹本年级本学科教学进度，组织每周集体备课并留存记录；'
-                '② 组织单元主备、公开课与听评课，指导青年教师；'
-                '③ 统一作业量、命题与阅卷标准，汇总月考质量分析；'
-                '④ 建设与维护本学科教学资源库，及时传达教研通知。'),
-    '毕业年级': ('① 牵头制定备考方案与复习进度表，组织命题与模拟考试；'
-                 '② 组织考纲研读、专题突破与错题归因分析；'
-                 '③ 关注临界生与学科短板，配合年级组制定补弱措施；'
-                 '④ 汇总每次考试质量分析，动态调整复习策略。'),
-    '综合组': ('① 统筹全校本学科课程开设与活动安排；'
-               '② 组织跨年级教研与器材/场地管理；'
-               '③ 负责校内外竞赛、展演与社团指导；'
-               '④ 完成学校交办的其他教研任务。'),
-}

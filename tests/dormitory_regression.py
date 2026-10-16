@@ -50,7 +50,7 @@ from sqlalchemy import func  # noqa: E402
 from app import create_app  # noqa: E402
 from app.extensions import db  # noqa: E402
 from app.models import (BedAssignment, PermissionGroup, Room,  # noqa: E402
-                        Student, User, UserClassLink)
+                        Student, StudentAccommodation, User, UserClassLink)
 
 app = create_app()
 TEST_PWD = 'Dorm#2026x'
@@ -111,22 +111,32 @@ with app.app_context():
               capacity=2, is_active=True)
     r3 = Room(building='1号楼', floor=1, room_number='103', gender='男',
               capacity=2, is_active=True)
-    db.session.add_all([r1, r2, r3])
+    # 2026-10-14 SEC-01 回归用：高二房间（容量 4，不影响 FILTER 项"容量=2 命中 3 间"）
+    r4 = Room(building='2号楼', floor=1, room_number='201', gender='男',
+              capacity=4, is_active=True, grade='高二', class_name='01班')
+    db.session.add_all([r1, r2, r3, r4])
     db.session.flush()
 
-    for rn, room in ((1, r1), (2, r1), (1, r2), (2, r2), (1, r3), (2, r3)):
+    for rn, room in ((1, r1), (2, r1), (1, r2), (2, r2), (1, r3), (2, r3),
+                     (1, r4), (2, r4)):
         db.session.add(BedAssignment(room_id=room.id, bed_number=rn))
 
     s1 = Student(student_number='D001', name='张三', grade='高一', class_name='01班',
                  gender='男')
     s2 = Student(student_number='D002', name='李四', grade='高一', class_name='01班',
                  gender='女')
-    db.session.add_all([s1, s2])
+    # 2026-10-14 SEC-01 回归用：高二未分配住校生（范围外账号不得看到）
+    s3 = Student(student_number='D003', name='王五', grade='高二', class_name='01班',
+                 gender='男')
+    db.session.add_all([s1, s2, s3])
     db.session.flush()
 
     # 张三住 101-1，李四住 102-1
     BedAssignment.query.filter_by(room_id=r1.id, bed_number=1).first().student_id = s1.id
     BedAssignment.query.filter_by(room_id=r2.id, bed_number=1).first().student_id = s2.id
+    # 三人均住校（李四/王五未分配床位 → 进入"未分配住校生"统计）
+    for _s in (s1, s2, s3):
+        db.session.add(StudentAccommodation(student_id=_s.id, boarding_type='住校'))
     db.session.commit()
 
     # 2026-10-13：范围类账号（验证 /statistics/ 统一走 dormitory_scope）
@@ -167,10 +177,22 @@ with app.app_context():
     for _u in (u_room, u_asg):
         _u.set_password(TEST_PWD)
     db.session.add_all([u_room, u_asg])
+
+    # 2026-10-14 SEC-01 回归：有 dormitory.beds 但**无任何范围**（scope_type='none'）
+    # → 分配页必须 fail-closed 403（修复前会 200，并显示全校房间 + 全校未分配住校生）
+    g_none = _PG(name='DM无范围', scope_type='none', role='staff')
+    g_none.set_menu_keys(['dormitory.view', 'dormitory.beds'])
+    db.session.add(g_none)
+    db.session.flush()
+    u_none = User(username='dm_noscope', real_name='无范围宿管', role='staff',
+                  must_change_pwd=False, permission_group_id=g_none.id)
+    u_none.set_password(TEST_PWD)
+    db.session.add(u_none)
     db.session.commit()
 
-    IDS.update(admin=admin.id, r1=r1.id, r2=r2.id, r3=r3.id, s1=s1.id, s2=s2.id,
-               homeroom=ht.id, leader=gl.id, office=off.id)
+    IDS.update(admin=admin.id, r1=r1.id, r2=r2.id, r3=r3.id, r4=r4.id,
+               s1=s1.id, s2=s2.id, s3=s3.id,
+               homeroom=ht.id, leader=gl.id, office=off.id, noscope=u_none.id)
 
 
 # ==================== 批量占用统计（group_by 口径） ====================
@@ -446,6 +468,55 @@ def check_dashboard_local_chart():
     case('CHART 本地文件存在',
          __import__('os').path.isfile(
              BASE + '/app/static/js/echarts.min.js'))
+
+
+# ==================== 分配页数据范围（2026-10-14 第三轮审计 SEC-01） ====================
+@item('ASGSCOPE')
+def check_assign_page_scope():
+    """`/assignments/manage` 数据范围收敛（SEC-01）。
+
+    修复前：`abort(403)` 之后的「非班主任必须指定班级」整段是死代码；**不带参数**
+    的请求会直落下方全库查询 → 越界读「全校房间 + 全校未分配住校生名单」，
+    且该页只要求 `dormitory.beds`，范围账号同样能越界。
+    """
+    def _client(username):
+        return _login(username, TEST_PWD)
+
+    # 全校（管理员）：不带参数 200，高二未分配住校生进统计（全校口径正常）
+    r = _client('dm_admin').get('/assignments/manage')
+    html = r.get_data(as_text=True)
+    case('ASGSCOPE 管理员不带参数 200', r.status_code == 200, f'status={r.status_code}')
+    case('ASGSCOPE 管理员可见高二（全校口径）', '高二' in html)
+
+    # 班主任（class 范围＝高一01班）：不带参数 200 且页面无高二数据
+    # （修复前该请求也 200，但页面里是全校房间与全校未分配住校生）
+    r = _client('dm_homeroom').get('/assignments/manage')
+    html = r.get_data(as_text=True)
+    case('ASGSCOPE 班主任不带参数 200', r.status_code == 200, f'status={r.status_code}')
+    case('ASGSCOPE 班主任看不到高二', '高二' not in html)
+    case('ASGSCOPE 班主任看得到本班', '01班' in html)
+
+    # 班主任跨范围参数 → 403（2026-10-12 起的既有行为，保持）
+    r = _client('dm_homeroom').get('/assignments/manage?grade=高二&class_name=01班')
+    case('ASGSCOPE 班主任跨范围参数 403', r.status_code == 403,
+         f'status={r.status_code}')
+
+    # 年级长（grade 范围＝高一）：不带参数 200，看不到高二
+    r = _client('dm_leader').get('/assignments/manage')
+    case('ASGSCOPE 年级长不带参数 200', r.status_code == 200, f'status={r.status_code}')
+    case('ASGSCOPE 年级长看不到高二', '高二' not in r.get_data(as_text=True))
+
+    # 有 dormitory.beds 但无任何范围 → fail-closed 403（修复前 200 且为全校数据）
+    r = _client('dm_noscope').get('/assignments/manage')
+    case('ASGSCOPE 无范围账号 403（fail-closed）', r.status_code == 403,
+         f'status={r.status_code}')
+
+    # 源码口径：房间/学生查询必须走唯一口径函数（防回归成内联全库查询）
+    src = _read('app/modules/dormitory/routes/assignments.py')
+    case('ASGSCOPE 源码：房间查询套 room_scope_query',
+         'room_query = room_scope_query(Room.query.filter_by(is_active=True))' in src)
+    case('ASGSCOPE 源码：未分配名单套 student_scope_query',
+         'student_scope_query(Student.query.filter(' in src)
 
 
 # ── 执行 ────────────────────────────────────────────────────────────────────

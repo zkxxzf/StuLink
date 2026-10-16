@@ -1,5 +1,6 @@
 # StuLink v1.7.0 2026-08-02
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
+import ipaddress
 import os
 import socket
 import sys
@@ -25,29 +26,54 @@ def _set_console_title(title):
         pass
 
 
+# 不能当作「别的设备能访问到的本机地址」的网段：代理 TUN 的 fake-ip 段（兼 RFC 2544
+# 保留段）、VirtualBox / Docker Toolbox 虚拟网卡段
+_EXCLUDED_NETS = tuple(ipaddress.ip_network(n) for n in (
+    '198.18.0.0/15', '192.168.56.0/24', '192.168.99.0/24'))
+
+
 def _lan_ip():
-    """探测本机局域网 IP：UDP connect 只查本机路由表、不真正发包；
-    离线时兜底枚举网卡（排除回环/常见虚拟网卡段）。失败返回空串。"""
+    """探测本机局域网 IP：UDP connect 只查本机路由表、不真正发包；取不到时枚举网卡。
+    失败返回空串。
+
+    必须剔除代理 TUN 的 fake-ip 段：本机开着 Clash 之类代理时，默认路由会落在它的虚拟
+    网卡上，探测结果会变成保留段 198.18.0.1（同时它也不是别人能访问的地址）。
+    """
+    cands = []
     s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     try:
         s.connect(('10.255.255.255', 1))   # 走默认路由的网卡即首选内网 IP
-        ip = s.getsockname()[0]
-        if ip and not ip.startswith('169.254.'):
-            return ip
+        cands.append(s.getsockname()[0])
     except Exception:
         pass
     finally:
         s.close()
     # 兜底：枚举主机名解析结果（离线/无网关环境）
     try:
-        for info in socket.getaddrinfo(socket.gethostname(), None, socket.AF_INET):
-            ip = info[4][0]
-            if (not ip.startswith(('127.', '169.254.'))
-                    and not ip.startswith(('192.168.56.', '192.168.99.'))):  # 排除 VirtualBox/Docker 虚拟网卡
-                return ip
+        cands.extend(info[4][0] for info in
+                     socket.getaddrinfo(socket.gethostname(), None, socket.AF_INET))
     except Exception:
         pass
-    return ''
+    out = []
+    for ip in cands:
+        if not ip or ip in out:
+            continue
+        try:
+            addr = ipaddress.ip_address(ip)
+        except ValueError:
+            continue
+        if (addr.is_loopback or addr.is_link_local or addr.is_multicast
+                or addr.is_unspecified or any(addr in net for net in _EXCLUDED_NETS)):
+            continue
+        out.append(ip)
+    if not out:
+        return ''
+    first = out[0]                     # 路由探测结果：默认路由所在网卡，最可能是它
+    if first.startswith(('192.168.', '10.', '172.')):
+        return first
+    return min(out, key=lambda ip: (0 if ip.startswith('192.168.') else
+                                    1 if ip.startswith('10.') else
+                                    2 if ip.startswith('172.') else 3))
 
 
 def _print_keep_running_notice(url):

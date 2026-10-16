@@ -31,6 +31,7 @@ config_mod.Config.SQLALCHEMY_BINDS = {
     # 2026-10-10：补 system 绑定 —— 启动建表会遍历 'system'，缺它会有 WARN 噪音
     'system': 'sqlite:///' + os.path.join(_TMP, 'system.db'),
     'portrait': 'sqlite:///' + os.path.join(_TMP, 'portrait.db'),
+    'morality': 'sqlite:///' + os.path.join(_TMP, 'morality.db'),
     # 2026-10-10：教师工作台首页读 timetable.db（课表/调课），缺该 bind 会让
     # 教师身份访问 /workbench/ 直接 500（此前两条工作台断言失败的根因）
     'timetable': 'sqlite:///' + os.path.join(_TMP, 'timetable.db'),
@@ -95,8 +96,14 @@ with app.test_client() as c:
 
     # 2026-10-10：教务管理侧新增同款「任课教师映射」（复用成绩管理视图函数与源数据，
     # URL 与接口都在 /academic 前缀下，页面不跳转到成绩模块）
+    # 2026-10-14：教师名单 / 任课教师映射 / 学科组长合成一个入口（页内 tab 互切）——
+    # 工作台上是一条「教师」链接，映射页从该入口页的 tab 进入
     r = c.get('/academic/')
-    check('教务工作台含任课教师映射入口',
+    check('教务工作台含教师入口',
+          r.status_code == 200 and '/academic/teachers' in r.get_data(as_text=True),
+          f'status={r.status_code}')
+    r = c.get('/academic/teachers')
+    check('教师页 tab 含任课教师映射入口',
           r.status_code == 200 and '/academic/teacher-links' in r.get_data(as_text=True),
           f'status={r.status_code}')
     r = c.get('/academic/teacher-links')
@@ -117,20 +124,22 @@ with app.test_client() as c:
     check('教务侧导入页表单归教务',
           r.status_code == 200 and '/academic/teacher-links/import/upload' in html,
           f'status={r.status_code}')
-    # 矩阵页整页不出现 /grades/ 链接：教务内的页面不把用户送回成绩模块
+    # 矩阵页整页不出现指向成绩模块的链接：教务内的页面不把用户送回成绩模块
+    # （2026-10-14：base.html 的 <style> 里有一段含 /grades/exams/<id> 字样的 CSS 注释，
+    #   原断言查字面量 '/grades/' 会被它误伤，这里只查真正的链接 href）
     r = c.get('/academic/teacher-links')
     check('教务映射页不跳成绩模块',
-          r.status_code == 200 and '/grades/' not in r.get_data(as_text=True),
+          r.status_code == 200 and 'href="/grades/' not in r.get_data(as_text=True),
           f'status={r.status_code}')
     r = c.get('/grades/teachers')
     html = r.get_data(as_text=True)
     check('成绩管理侧任课映射不受影响',
           r.status_code == 200 and '/grades/api/teachers' in html,
           f'status={r.status_code}')
-    # 下线「任课安排」时，同文件的路由（备课组长）必须不受影响
+    # 下线「任课安排」时，同文件的路由（学科组长）必须不受影响
     r = c.get('/academic/leaders')
-    check('备课组长页未受影响',
-          r.status_code == 200 and '备课组长' in r.get_data(as_text=True),
+    check('学科组长页未受影响',
+          r.status_code == 200 and '学科组长' in r.get_data(as_text=True),
           f'status={r.status_code}')
     # 2026-10-10：课表矩阵 CSS 从内联抽成静态文件（每页省 ~8KB 且可被浏览器缓存）。
     # 页面是否引用它由回归 OVERVIEW 项断言（本脚本账号对课表页权限路径不同）。
@@ -277,8 +286,12 @@ with app.test_client() as c:
 
     r = c.get('/workbench/grades')
     html = r.get_data(as_text=True)
-    check('我的成绩页只列任教班科', r.status_code == 200 and '我的成绩' in html
-          and '2025级01班' in html and '年级名次' in html)
+    # 2026-10-15 R1：任教＝年级×学科 → 我的成绩页按"所教科目"给出该年级的班（不止自己
+    # 教的班）；断言只锁口径相关的元素，不锁具体班级文案（缺项会在 detail 里打印出来）
+    check('我的成绩页列出任教学科（年级×学科口径）', r.status_code == 200
+          and '我的成绩' in html and '数学' in html,
+          f'status={r.status_code} 含我的成绩={"我的成绩" in html} '
+          f'含数学={"数学" in html} 含年级名次={"年级名次" in html}')
     r = c.get(f'/workbench/api/grade-detail?exam_id={exam_id}'
               '&class_name=01班&subject=数学')
     detail = r.get_json() or {}
@@ -288,7 +301,15 @@ with app.test_client() as c:
           f'status={r.status_code}')
     r = c.get(f'/workbench/api/grade-detail?exam_id={exam_id}'
               '&class_name=02班&subject=数学')
-    check('非任教班科明细 403', r.status_code == 403, f'status={r.status_code}')
+    detail2 = r.get_json() or {}
+    # R1 新口径：同年级他班的**所教学科**可看（不再 403）
+    check('非任教班·所教学科可看（年级×学科口径）', r.status_code == 200
+          and any(row.get('student_name') == '丙同学' for row in detail2.get('rows', [])),
+          f'status={r.status_code}')
+    r = c.get(f'/workbench/api/grade-detail?exam_id={exam_id}'
+              '&class_name=02班&subject=语文')
+    check('非任教班·非所教学科 403（负向对照）', r.status_code == 403,
+          f'status={r.status_code}')
     r = c.get('/workbench/api/grade-trend?class_name=01班&subject=数学&grade=2025级')
     check('任教班科走势可看', r.status_code == 200
           and '"points"' in r.get_data(as_text=True))

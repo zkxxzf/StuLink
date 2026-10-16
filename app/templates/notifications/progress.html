@@ -3,21 +3,22 @@
 
 {% block extra_css %}
 <style>
+    /* 2026-10-14：与通知中心列表/详情同批——写死浅色改引 --sl-*（深色下 #1e293b 标题会隐身） */
     .stat-cards { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; margin-bottom: 24px; }
-    .stat-card-item { background: #fff; border-radius: 12px; padding: 20px; text-align: center;
-        box-shadow: 0 1px 3px rgba(0,0,0,.08); }
+    .stat-card-item { background: var(--sl-surface); border-radius: 12px; padding: 20px; text-align: center;
+        box-shadow: var(--sl-shadow); }
     .stat-card-item .number { font-size: 32px; font-weight: 700; line-height: 1.2; }
-    .stat-card-item .label { font-size: 13px; color: #64748b; margin-top: 4px; }
-    .stat-card-item.total .number { color: #1e293b; }
-    .stat-card-item.read .number { color: #10b981; }
-    .stat-card-item.unread .number { color: #ef4444; }
-    .stat-card-item.percent .number { color: #3b82f6; }
-    .progress-bar-wrap { height: 12px; border-radius: 6px; background: #e2e8f0; margin-bottom: 24px; overflow: hidden; }
-    .progress-bar-fill { height: 100%; border-radius: 6px; background: linear-gradient(90deg, #10b981, #34d399);
+    .stat-card-item .label { font-size: 13px; color: var(--sl-text-muted); margin-top: 4px; }
+    .stat-card-item.total .number { color: var(--sl-text); }
+    .stat-card-item.read .number { color: var(--sl-chart-ok); }
+    .stat-card-item.unread .number { color: var(--sl-chart-danger); }
+    .stat-card-item.percent .number { color: var(--sl-chart-info); }
+    .progress-bar-wrap { height: 12px; border-radius: 6px; background: var(--sl-border); margin-bottom: 24px; overflow: hidden; }
+    .progress-bar-fill { height: 100%; border-radius: 6px; background: var(--sl-chart-ok);
         transition: width .5s ease; }
-    .section-title { font-size: 16px; font-weight: 600; margin-bottom: 12px; color: #1e293b; }
-    .back-link { font-size: 14px; color: #64748b; text-decoration: none; }
-    .back-link:hover { color: #3b82f6; }
+    .section-title { font-size: 16px; font-weight: 600; margin-bottom: 12px; color: var(--sl-text); }
+    .back-link { font-size: 14px; color: var(--sl-text-muted); text-decoration: none; }
+    .back-link:hover { color: var(--sl-sidebar-accent-text); }
     #readTrendChart { width: 100%; height: 250px; margin-bottom: 24px; }
     @media (max-width: 768px) { .stat-cards { grid-template-columns: repeat(2, 1fr); } }
 </style>
@@ -124,8 +125,10 @@
         var chart = echarts.init(chartDom);
         var readCount = {{ progress.read_count if progress else 0 }};
         var unreadCount = {{ progress.unread_count if progress else 0 }};
+        // ECharts 字色读主题变量（写死 #333 在深色面板上不可读）
+        var tColor = (getComputedStyle(document.documentElement).getPropertyValue('--sl-text') || '').trim() || '#333';
         chart.setOption({
-            title: { text: '已读/未读分布', left: 'center', textStyle: { fontSize: 14 } },
+            title: { text: '已读/未读分布', left: 'center', textStyle: { fontSize: 14, color: tColor } },
             tooltip: { trigger: 'item' },
             series: [{
                 type: 'pie', radius: ['40%', '70%'],
@@ -133,7 +136,7 @@
                     { value: readCount, name: '已读', itemStyle: { color: '#10b981' } },
                     { value: unreadCount, name: '未读', itemStyle: { color: '#ef4444' } }
                 ],
-                label: { formatter: '{b}: {c} ({d}%)' }
+                label: { formatter: '{b}: {c} ({d}%)', color: tColor }
             }]
         });
         window.addEventListener('resize', function() { chart.resize(); });

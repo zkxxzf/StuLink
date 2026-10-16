@@ -7,7 +7,7 @@
     <div class="card-header">
         <form method="GET" class="row g-3">
             <div class="col-md-2">
-                <select name="action" class="form-select form-select-sm">
+                <select name="action" class="form-select form-select-sm" aria-label="按操作类型筛选">
                     <option value="">全部操作</option>
                     {% for action in actions %}
                     <option value="{{ action }}" {% if current_action == action %}selected{% endif %}>{{ action }}</option>
@@ -15,7 +15,7 @@
                 </select>
             </div>
             <div class="col-md-2">
-                <select name="module" class="form-select form-select-sm">
+                <select name="module" class="form-select form-select-sm" aria-label="按模块筛选">
                     <option value="">全部模块</option>
                     {% for module in modules %}
                     <option value="{{ module }}" {% if current_module == module %}selected{% endif %}>{{ module }}</option>
@@ -23,7 +23,7 @@
                 </select>
             </div>
             <div class="col-md-2">
-                <select name="target_type" class="form-select form-select-sm">
+                <select name="target_type" class="form-select form-select-sm" aria-label="按目标类型筛选">
                     <option value="">全部类型</option>
                     {% for tt in target_types %}
                     <option value="{{ tt }}" {% if current_target_type == tt %}selected{% endif %}>{{ tt }}</option>
@@ -31,7 +31,7 @@
                 </select>
             </div>
             <div class="col-md-2">
-                <select name="user_id" class="form-select form-select-sm">
+                <select name="user_id" class="form-select form-select-sm" aria-label="按操作用户筛选">
                     <option value="">全部用户</option>
                     {% for user in users %}
                     <option value="{{ user.id }}" {% if current_user_id == user.id %}selected{% endif %}>{{ user.real_name }} ({{ user.username }})</option>
@@ -39,13 +39,13 @@
                 </select>
             </div>
             <div class="col-md-2">
-                <input type="date" name="date_start" class="form-control form-control-sm" value="{{ date_start }}">
+                <input type="date" name="date_start" class="form-control form-control-sm" aria-label="开始日期" value="{{ date_start }}">
             </div>
             <div class="col-md-2">
-                <input type="date" name="date_end" class="form-control form-control-sm" value="{{ date_end }}">
+                <input type="date" name="date_end" class="form-control form-control-sm" aria-label="结束日期" value="{{ date_end }}">
             </div>
             <div class="col-md-3">
-                <input type="text" name="keyword" class="form-control form-control-sm" placeholder="搜索详情..." value="{{ keyword }}">
+                <input type="text" name="keyword" class="form-control form-control-sm" placeholder="搜索详情..." value="{{ keyword }}" aria-label="搜索操作详情">
             </div>
             <div class="col-md-2">
                 <button type="submit" class="btn btn-sm btn-primary w-100"><i class="bi bi-search"></i> 查询</button>
@@ -56,6 +56,9 @@
         </form>
     </div>
     <div class="card-body p-0">
+        {# 2026-10-14 第三轮审计（UI-08）：9 列宽表在移动端把整页撑破（实测 +251px），
+           补 table-responsive 容器，窄屏改为表内横滚 #}
+        <div class="table-responsive">
         <table class="table table-hover table-sm mb-0" style="width:100%">
             <thead class="table-light">
                 <tr>
@@ -126,13 +129,14 @@
                 {% endif %}
             </tbody>
         </table>
+        </div>{# /table-responsive（UI-08） #}
     </div>
     {% if pagination and pagination.pages > 1 %}
     <div class="card-footer">
         <nav aria-label="Page navigation">
             <ul class="pagination justify-content-center mb-0">
                 <li class="page-item {% if not pagination.has_prev %}disabled{% endif %}">
-                    <a class="page-link" href="?page={{ pagination.prev_num }}{% if request.query_string %}&{{ request.query_string.decode().replace('page='+pagination.page|string,'').strip('&') }}{% endif %}"><i class="bi bi-chevron-left"></i></a>
+                    <a class="page-link" href="?page={{ pagination.prev_num }}{% if request.query_string %}&{{ request.query_string.decode().replace('page='+pagination.page|string,'').strip('&') }}{% endif %}" aria-label="上一页"><i class="bi bi-chevron-left"></i></a>
                 </li>
                 {% for page_num in pagination.iter_pages(left_edge=1, right_edge=1, left_current=2, right_current=2) %}
                     {% if page_num %}
@@ -144,7 +148,7 @@
                     {% endif %}
                 {% endfor %}
                 <li class="page-item {% if not pagination.has_next %}disabled{% endif %}">
-                    <a class="page-link" href="?page={{ pagination.next_num }}{% if request.query_string %}&{{ request.query_string.decode().replace('page='+pagination.page|string,'').strip('&') }}{% endif %}"><i class="bi bi-chevron-right"></i></a>
+                    <a class="page-link" href="?page={{ pagination.next_num }}{% if request.query_string %}&{{ request.query_string.decode().replace('page='+pagination.page|string,'').strip('&') }}{% endif %}" aria-label="下一页"><i class="bi bi-chevron-right"></i></a>
                 </li>
             </ul>
         </nav>

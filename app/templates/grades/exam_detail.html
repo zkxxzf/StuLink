@@ -2,46 +2,60 @@
 {% block title %}{{ exam.name }} - 考试详情{% endblock %}
 {% block extra_css %}
 <style>
-  /* v1.19.49.29：仅单科分数可点击修改（总分由各科自动汇总，不可改） */
+  /* v1.19.49.35：仅单科分数可点击修改（总分由各科自动汇总，不可改） */
   #scoreTable td.score-cell { cursor: pointer; }
-  /* v1.19.49.29 压缩「学号→进退步」这些登记列，把横向空间让给成绩 */
+  /* v1.19.49.35 压缩「学号→进退步」这些登记列，把横向空间让给成绩 */
+  /* 2026-10-13：颜色一律改用主题变量 —— 原来写死 #475569/#111827/#0f172a，
+     暗黑模式下是「深字压深底」，这一页几乎啥也看不见（用户反馈）。 */
+  /* 2026-10-13 用户反馈「字体太小」：成绩单字号整体放大两档（约 +2px / +17%）。
+     字号集中在这里，后续要再调只改这几个变量即可。
+     注：表格原本就顶满容器（1330/1332），放大后容器内会横向滚动
+     （table-responsive 本来就支持横向滚动，不影响功能）。 */
+  #scoreTable {
+      --sc-fs-head: 13.5px;    /* 表头（原 11.5px） */
+      --sc-fs-meta: 13.5px;    /* 学号/班级/名次等登记列（原 11.5px） */
+      --sc-fs-name: 15px;      /* 姓名（原 13px） */
+      --sc-fs-sub: 16px;       /* 各科成绩（原 14px） */
+      --sc-fs-total: 17px;     /* 总分（原 15px） */
+  }
+  #scoreTable thead th { font-size: var(--sc-fs-head); }
   #scoreTable th.c-meta, #scoreTable td.c-meta {
-      white-space: nowrap; font-size: .72rem; color: #475569;
+      white-space: nowrap; font-size: var(--sc-fs-meta); color: var(--sl-text-muted);
       padding-left: .16rem; padding-right: .16rem;
   }
-  /* 姓名列不跟着缩：加黑（font-size 覆盖上面的 .72rem），便于在密集信息里定位学生 */
-  #scoreTable td.c-name { font-size: .82rem; font-weight: 700; color: #111827; }
+  /* 姓名列不跟着缩：加黑（font-size 覆盖上面的登记列字号），便于在密集信息里定位学生 */
+  #scoreTable td.c-name { font-size: var(--sc-fs-name); font-weight: 700; color: var(--sl-text); }
   /* 总分：成绩区第一列，紧挨语文，保持醒目 */
   #scoreTable th.c-total, #scoreTable td.c-total {
-      white-space: nowrap; font-size: .95rem; font-weight: 700; color: #0f172a;
+      white-space: nowrap; font-size: var(--sc-fs-total); font-weight: 700; color: var(--sl-text);
       padding-left: .3rem; padding-right: .3rem;
   }
-  /* 成绩列（各科）留出更多留白，字号略大 */
+  /* 成绩列（各科）留出更多留白 */
   #scoreTable th.c-sub, #scoreTable td.c-sub {
-      font-size: .88rem; padding-left: .5rem; padding-right: .5rem;
+      font-size: var(--sc-fs-sub); padding-left: .5rem; padding-right: .5rem;
   }
-  /* v1.19.49.29 名次类列（方向排/班排/进退步）内容就一个数字，收到最窄 */
+  /* v1.19.49.35 名次类列（方向排/班排/进退步）内容就一个数字，收到最窄 */
   #scoreTable th.c-rank, #scoreTable td.c-rank {
-      width: 1%; white-space: nowrap; font-size: .72rem; color: #475569;
+      width: 1%; white-space: nowrap; font-size: var(--sc-fs-meta); color: var(--sl-text-muted);
       padding-left: .12rem; padding-right: .12rem;
   }
-  /* v1.19.49.29 进退步：进步=上升箭头（深绿 #15803d，比 Bootstrap text-success 更深），
+  /* v1.19.49.35 进退步：进步=上升箭头（深绿 #15803d，比 Bootstrap text-success 更深），
      退步=下降箭头（深红 #b91c1c）；不再用 ± 号，避免把 "+N" 误读成进步 */
   #scoreTable td.c-rank.move-up { color: #15803d; font-weight: 600; }
   #scoreTable td.c-rank.move-down { color: #b91c1c; font-weight: 600; }
   #scoreTable td.c-rank.move-up i, #scoreTable td.c-rank.move-down i {
-      font-size: .68rem; vertical-align: -.02em;
+      font-size: .8rem; vertical-align: -.02em;
   }
-  /* v1.19.49.29 表格两端留白：学号左侧、最后一列（地理）右侧；
+  /* v1.19.49.35 表格两端留白：学号左侧、最后一列（地理）右侧；
      放在 c-meta/c-rank 之后，用等特异性的后置规则覆盖它们的左右内边距 */
   #scoreTable th:first-child, #scoreTable td:first-child { padding-left: .7rem; }
   #scoreTable th:last-child, #scoreTable td:last-child { padding-right: .7rem; }
-  /* v1.19.49.29 表头排序：点一下按该列从高到低，再点切换升序 */
+  /* v1.19.49.35 表头排序：点一下按该列从高到低，再点切换升序 */
   #scoreTable th a.th-sort { white-space: nowrap; color: inherit; text-decoration: none; }
-  #scoreTable th a.th-sort:hover { color: #2563eb; }
-  /* v1.19.49.29 三角统一放在文字**后面**；未点选时也要看得清（原 opacity-25 太淡） */
-  #scoreTable th a.th-sort i { font-size: .6rem; margin-left: 2px; vertical-align: .08em; }
-  #scoreTable th a.th-sort i.sort-off { color: #94a3b8; }
+  #scoreTable th a.th-sort:hover { color: var(--sl-sidebar-accent-text); }
+  /* v1.19.49.35 三角统一放在文字**后面**；未点选时也要看得清（原 opacity-25 太淡） */
+  #scoreTable th a.th-sort i { font-size: .75rem; margin-left: 2px; vertical-align: .08em; }
+  #scoreTable th a.th-sort i.sort-off { color: var(--sl-text-subtle); }
   #scoreTable th.text-end a.th-sort { position: relative; display: inline-block; }
   /* 右对齐列（名次/总分/各科）：表头与数据单元预留同样宽度的「三角位」，
      三角绝对定位进预留区 → 表头文字右缘仍与数字右缘严格对齐（不会被三角挤走）。
@@ -49,7 +63,13 @@
   #scoreTable th.text-end,
   #scoreTable td.c-rank, #scoreTable td.c-total, #scoreTable td.c-sub { padding-right: 12px; }
   #scoreTable th.text-end a.th-sort i { position: absolute; left: 100%; margin-left: 2px; }
-  #scoreTable th.th-active { background: #eef2ff; color: #1d4ed8; }
+  /* 排序激活列高亮：必须带 !important —— theme.css 的
+     `.g-table thead th { background: ... !important; color: ... !important; }`
+     无视特异性，原先的高亮规则被压掉，点了表头看不出哪列在排（第八轮审计 U-07）。 */
+  #scoreTable th.th-active { background: var(--sl-surface-3) !important; color: var(--sl-sidebar-accent-text) !important; }
+  /* 2026-10-13 暗黑模式：进退步箭头换亮一档的绿/红（原深绿 #15803d / 深红 #b91c1c 压在深底上发闷） */
+  [data-bs-theme="dark"] #scoreTable td.c-rank.move-up { color: #4ade80; }
+  [data-bs-theme="dark"] #scoreTable td.c-rank.move-down { color: #f87171; }
   #scoreTable tbody tr { cursor: default; }
 </style>
 {% endblock %}
@@ -58,10 +78,15 @@
     <a href="{{ url_for('grades.exams_list') }}" class="btn btn-sm btn-outline-secondary" title="返回" aria-label="返回">
         <i class="bi bi-arrow-left"></i>
     </a>
-    <h5 class="mb-0 me-2" id="examName" role="button" title="点击修改考试名称">
+    {% if current_user.has_perm('grades.edit') %}
+    <h5 class="mb-0 me-2" id="examName" role="button" title="点击修改考试信息（名称 / 年级 / 日期 / 性质 / 阶段）">
         <i class="bi bi-journal-text"></i> {{ exam.name }}
         <i class="bi bi-pencil-square small text-muted"></i>
     </h5>
+    {% else %}
+    {# 只读（任课教师 / 班主任）：标题不出「可编辑」样式，避免点开 403 的编辑弹窗 #}
+    <h5 class="mb-0 me-2"><i class="bi bi-journal-text"></i> {{ exam.name }}</h5>
+    {% endif %}
     {% if exam.status == 'imported' %}
     <span class="badge bg-success">已导入</span>
     {% elif exam.status == 'dirty' %}
@@ -75,7 +100,11 @@
         · {{ exam.exam_type or '其他' }}
         · <span class="badge bg-light text-dark border" title="本场划线/排名/分析采用的分数口径">{{ exam.score_mode_label() }}</span></span>
     <div class="ms-auto d-flex gap-2">
-        {# v1.19.49.29：已导入/待重算都要给「重新计算排名」，否则 dirty 状态下按钮消失找不着 #}
+        {# 2026-10-15：本页对任课教师 / 班主任也开放（grades.view，成绩单按班收敛）——
+           导入 / 重算 / 改分记录 / 删除都是管理动作，按各自真实门槛包裹，
+           避免"看得见点不进"的 403 死链；划线分层对所有人可见，只读视图由 bands.html 自理。 #}
+        {% if current_user.has_perm('grades.edit') %}
+        {# v1.19.49.35：已导入/待重算都要给「重新计算排名」，否则 dirty 状态下按钮消失找不着 #}
         {% if exam.status not in ('imported', 'dirty') %}
         <a href="{{ url_for('grades.exam_import', exam_id=exam.id) }}" class="btn btn-primary btn-sm">
             <i class="bi bi-upload"></i> 导入成绩
@@ -92,16 +121,19 @@
             </button>
         </form>
         {% endif %}
+        {% endif %}
         <a href="{{ url_for('grades.bands_page', exam_id=exam.id) }}" class="btn btn-outline-info btn-sm">
             <i class="bi bi-bar-chart"></i> 划线分层
         </a>
-        {# v1.19.49.29：分数修改记录（谁在什么时候改了谁的分），任何登录用户可查 #}
+        {% if current_user.has_perm('grades.edit') %}
+        {# v1.19.49.35：分数修改记录（谁在什么时候改了谁的分），与改分同档（grades.edit） #}
         <a href="{{ url_for('grades.score_changes') }}?exam={{ exam.id }}" class="btn btn-outline-secondary btn-sm">
             <i class="bi bi-clock-history"></i> 分数修改记录
         </a>
         <button class="btn btn-outline-danger btn-sm" data-bs-toggle="modal" data-bs-target="#delModal">
             <i class="bi bi-trash"></i> 删除考试
         </button>
+        {% endif %}
     </div>
 </div>
 
@@ -173,14 +205,14 @@
                 {% if cur_class %}（{{ cur_class }} · {{ total }} 人）
                 {% elif cur_dir %}（{{ cur_dir }}方向 · {{ total }} 人）
                 {% else %}（{{ total }} 人）{% endif %}</h6>
-            {# v1.19.49.29 页头操作说明整行删除（用户：这一行字不需要）——
+            {# v1.19.49.35 页头操作说明整行删除（用户：这一行字不需要）——
                默认排序/改分/「未选」等口径不再在页面上写文字；
                要回到默认次序：点左上「全部 / 历史方向 / 物理方向」或刷新即可（这些入口不带排序参数） #}
         </div>
-        {# v1.19.49.29 改分结果提示（保存成功后在页面上短暂显示） #}
+        {# v1.19.49.35 改分结果提示（保存成功后在页面上短暂显示） #}
         <div id="scFlash" class="alert alert-success py-1 px-2 small d-none mt-2 mb-0"></div>
         {# v1.19.0 按班级查看：服务端筛选（链接可分享/收藏），不选=全部 #}
-        {# v1.19.49.29 新增两个方向分组（历史方向 / 物理方向），排在「全部」之后、班级之前；与班级互斥 #}
+        {# v1.19.49.35 新增两个方向分组（历史方向 / 物理方向），排在「全部」之后、班级之前；与班级互斥 #}
         {% if classes %}
         <div class="d-flex flex-wrap gap-1 mt-2">
             <a class="btn btn-sm {{ 'btn-primary' if not cur_class and not cur_dir else 'btn-outline-secondary' }}"
@@ -197,13 +229,13 @@
         {% endif %}
     </div>
     <div class="table-responsive" style="max-height:70vh;">
-        {# v1.19.49.29 表头排序宏：点一下按该列从高到低，再点切换升序；
+        {# v1.19.49.35 表头排序宏：点一下按该列从高到低，再点切换升序；
            排序在服务端做（页面只加载当前页），筛选/翻页都带着 sort/order #}
         {% macro th_sort(key, label, ctype='c-meta', align='') %}
         {% set active = (cur_sort == key) %}
         {% set nxt = 'asc' if (active and cur_order == 'desc') else 'desc' %}
         {% set caret %}{% if active %}<i class="bi {{ 'bi-caret-up-fill' if cur_order == 'asc' else 'bi-caret-down-fill' }}"></i>{% else %}<i class="bi bi-caret-down sort-off"></i>{% endif %}{% endset %}
-        {# v1.19.49.29 排序三角统一放在表头文字**后面**（此前右对齐列放在前面，导致有前有后）；
+        {# v1.19.49.35 排序三角统一放在表头文字**后面**（此前右对齐列放在前面，导致有前有后）；
            右对齐列由 CSS 把三角绝对定位进该列预留的「三角位」，文字右缘仍与数字右缘严格对齐。 #}
         <th class="{{ ctype }} {{ align }}{{ ' th-active' if active else '' }}"><a class="th-sort" title="按「{{ label }}」{{ '升序' if nxt == 'asc' else '从高到低' }}排序" href="{{ url_for('grades.exam_detail', exam_id=exam.id, cls=(cur_class or none), dir=(cur_dir or none), sort=key, order=nxt) }}">{{ label }}{{ caret }}</a></th>
         {% endmacro %}
@@ -217,7 +249,7 @@
                 {{ th_sort('dir', '方向') }}
                 {{ th_sort('sel', '选科') }}
                 {{ th_sort('rank_dir', '方向排', 'c-rank', 'text-end') }}
-                {# v1.19.49.29 进退步紧跟方向排（同为方向口径的名次列） #}
+                {# v1.19.49.35 进退步紧跟方向排（同为方向口径的名次列） #}
                 {{ th_sort('move', '进退步', 'c-rank', 'text-end') }}
                 {{ th_sort('rank_class', '班排', 'c-rank', 'text-end') }}
                 {{ th_sort('total', '总分', 'c-total', 'text-end') }}
@@ -225,7 +257,7 @@
             </tr>
             </thead>
             <tbody>
-            {# v1.19.49.29：行片段改为**复用** AJAX 分页同一模板，避免「初始页内联副本」与
+            {# v1.19.49.35：行片段改为**复用** AJAX 分页同一模板，避免「初始页内联副本」与
                「翻页片段」两处各改一遍而漏改（本次就踩过：列宽类只加到了片段上） #}
             {% include 'grades/exam_detail_rows.html' %}
             </tbody>
@@ -286,7 +318,7 @@
     </div>
 </div>
 
-{# v1.19.49.29 单科改分：弹窗二次确认 + 满分校验（总分不可改） #}
+{# v1.19.49.35 单科改分：弹窗二次确认 + 满分校验（总分不可改） #}
 <div class="modal fade" id="scoreModal" tabindex="-1">
     <div class="modal-dialog modal-dialog-centered">
         <div class="modal-content">
@@ -329,6 +361,80 @@
         </div>
     </div>
 </div>
+
+{# 2026-10-13：考试信息编辑弹窗（原先是浏览器 prompt，只能改名）。
+   年级字段：**已导入成绩后锁定**（成绩行绑的是考试当时的班级与学号，
+   改年级等于把历史成绩挂到另一个年级），未导入时可自由改。
+   日期改动会把学年（term）一并按新日期重算。 #}
+<div class="modal fade" id="examInfoModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header py-2">
+                <h6 class="modal-title fw-bold">修改考试信息</h6>
+                <button class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <div class="row g-2">
+                    <div class="col-md-6">
+                        <label class="form-label small mb-1" for="eiGrade">年级 <span class="text-danger">*</span></label>
+                        <select class="form-select form-select-sm" id="eiGrade"{% if has_scores %} disabled{% endif %}>
+                            {% for g in grade_options %}
+                            <option value="{{ g }}"{% if g == exam.grade %} selected{% endif %}>{{ g }}</option>
+                            {% endfor %}
+                        </select>
+                        {% if has_scores %}
+                        <div class="form-text text-danger">
+                            <i class="bi bi-lock-fill"></i> 已导入成绩，年级不可修改
+                        </div>
+                        {% else %}
+                        <div class="form-text">本场还没有成绩，年级可以修改</div>
+                        {% endif %}
+                    </div>
+                    <div class="col-md-6">
+                        <label class="form-label small mb-1" for="eiDate">考试日期 <span class="text-danger">*</span></label>
+                        <input type="date" class="form-control form-control-sm" id="eiDate"
+                               value="{{ exam.exam_date.strftime('%Y-%m-%d') }}">
+                        <div class="form-text">学年（{{ exam.term or '—' }}）随日期自动重算</div>
+                    </div>
+                    <div class="col-md-6">
+                        <label class="form-label small mb-1" for="eiKind">考试性质</label>
+                        <select class="form-select form-select-sm" id="eiKind">
+                            <option value=""{% if not exam.exam_kind %} selected{% endif %}>（未指定）</option>
+                            {% for k in kind_options %}
+                            <option value="{{ k }}"{% if k == exam.exam_kind %} selected{% endif %}>{{ k }}</option>
+                            {% endfor %}
+                            {% if exam.exam_kind and exam.exam_kind not in kind_options %}
+                            <option value="{{ exam.exam_kind }}" selected>{{ exam.exam_kind }}（当前值）</option>
+                            {% endif %}
+                        </select>
+                    </div>
+                    <div class="col-md-6">
+                        <label class="form-label small mb-1" for="eiStage">考试阶段</label>
+                        <select class="form-select form-select-sm" id="eiStage">
+                            {% for s in stage_options %}
+                            <option value="{{ s }}"{% if s == exam.exam_type %} selected{% endif %}>{{ s }}</option>
+                            {% endfor %}
+                            {% if exam.exam_type and exam.exam_type not in stage_options %}
+                            <option value="{{ exam.exam_type }}" selected>{{ exam.exam_type }}（当前值）</option>
+                            {% endif %}
+                        </select>
+                    </div>
+                    <div class="col-12">
+                        <label class="form-label small mb-1" for="eiName">考试名称 <span class="text-danger">*</span></label>
+                        <input type="text" class="form-control form-control-sm" id="eiName" maxlength="100"
+                               value="{{ exam.name }}">
+                        <div class="form-text">同年级内不能重名。</div>
+                    </div>
+                </div>
+                <div class="form-text text-danger d-none mt-2" id="eiErr"></div>
+            </div>
+            <div class="modal-footer py-2">
+                <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">取消</button>
+                <button type="button" class="btn btn-primary btn-sm" id="eiSave">保存</button>
+            </div>
+        </div>
+    </div>
+</div>
 {% endblock %}
 {% block extra_js %}
 <script>
@@ -337,22 +443,36 @@ $(function(){
     // 各科满分（用于改分弹窗的范围校验）；总分不在此列，也不可改
     var FULL_MARKS = {{ full_marks|tojson }};
 
-    /* ---------- 点击考试名称：就地改名（同年级内需唯一） ---------- */
+    /* ---------- 点击考试名称：打开「修改考试信息」弹窗 ----------
+       2026-10-13：原先只弹 prompt 改名，日期/性质/阶段都改不了。
+       年级字段在「已导入成绩」后由后端锁定（模板里已 disabled）。 ---------- */
     $('#examName').on('click', function(){
-        var cur = $.trim($(this).text());
-        var input = prompt('修改考试名称（同年级内不能重名）：', cur);
-        if(input === null){ return; }
-        var v = $.trim(input);
-        if(!v || v === cur){ return; }
-        $.post('/grades/exams/' + examId + '/rename', {name: v})
+        bootstrap.Modal.getOrCreateInstance(document.getElementById('examInfoModal')).show();
+    });
+    function _eiFail(msg){
+        $('#eiErr').removeClass('d-none').text(msg);
+        $('#eiSave').prop('disabled', false).text('保存');
+    }
+    $('#eiSave').on('click', function(){
+        var fd = {
+            name: $.trim($('#eiName').val()),
+            grade: $('#eiGrade').val() || '',
+            exam_date: $('#eiDate').val(),
+            exam_kind: $('#eiKind').val(),
+            exam_type: $('#eiStage').val()
+        };
+        if(!fd.name){ $('#eiErr').removeClass('d-none').text('考试名称不能为空'); return; }
+        $('#eiErr').addClass('d-none').text('');
+        $(this).prop('disabled', true).text('保存中…');
+        $.post('/grades/exams/' + examId + '/update', fd)
             .done(function(res){
                 if(res && res.success){ location.reload(); }
-                else { alert((res && res.message) || '修改失败'); }
+                else { _eiFail((res && res.message) || '修改失败'); }
             })
             .fail(function(xhr){
                 var m = '修改失败';
                 try { m = JSON.parse(xhr.responseText).message || m; } catch(e){}
-                alert(m);
+                _eiFail(m);
             });
     });
 
@@ -360,7 +480,7 @@ $(function(){
     var meta = $('#pageMeta').data();
     var curCls = meta.cls || '';
     var curDir = meta.dir || '';
-    var curSort = meta.sort || '';        // v1.19.49.29 表头排序（服务端）
+    var curSort = meta.sort || '';        // v1.19.49.35 表头排序（服务端）
     var curOrder = meta.order || 'desc';
     // 按「班级 | 方向 | 排序」各自记各的翻页位置（换排序=新列表，从第 1 页开始）
     var PAGE_KEY = 'examPage_' + examId + '|' + curCls + '|' + curDir + '|' + curSort + '|' + curOrder;
@@ -497,7 +617,7 @@ $(function(){
         var v = $(this).val();
         pageSize = (v === '全部') ? 500 : parseInt(v, 10);
         if (pageSize > 500) pageSize = 500;   // 单页上限，防止「全部」拖垮
-        // v1.19.49.29 审核修正：切页大小时同步重算 totalPages，
+        // v1.19.49.35 审核修正：切页大小时同步重算 totalPages，
         // 否则“第 X / Y 页”的 Y 仍为旧值，导致 Next 能翻到实际不存在的页，服务端 clamp 后回回重页
         totalPages = Math.max(1, Math.ceil(total / pageSize));
         sessionStorage.setItem(PAGE_KEY, 1);

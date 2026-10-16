@@ -22,6 +22,21 @@ from app.models.morality import (RewardPunishment,           # noqa: E402
                                  RewardPunishmentAttachment)
 from scripts._db_backup import backup_db                      # noqa: E402
 
+# 2026-10-14 第四轮审计（CONS-02）：补迁移登记（只登记不早退）
+SCRIPT_NAME = os.path.basename(__file__)
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+try:
+    import _mig_log
+except Exception as _e:  # noqa: BLE001
+    _mig_log = None
+    print(f'[WARN] 迁移登记模块不可用（迁移照常执行，仅不登记）：{_e}')
+
+
+def _record():
+    if _mig_log:
+        _mig_log.record(SCRIPT_NAME, note='morality.db 建奖惩记录 / 奖惩附件两表')
+
+
 BIND = 'morality'
 
 
@@ -67,6 +82,7 @@ def main():
                 print(f'[FAIL] reward_punishments 缺列：{must}')
                 return 1
         print('[OK] 表结构校验通过')
+        _record()
         return 0
 
 

@@ -73,14 +73,14 @@
     <div class="card-body py-2">
         <form class="row g-2 align-items-center" method="get">
             <div class="col-auto">
-                <select name="kind" class="form-select form-select-sm" style="width:110px" onchange="this.form.submit()">
+                <select name="kind" class="form-select form-select-sm" style="width:110px" onchange="this.form.submit()" aria-label="奖惩类型">
                     <option value="">全部类型</option>
                     <option value="reward" {% if f.kind=='reward' %}selected{% endif %}>奖励</option>
                     <option value="punish" {% if f.kind=='punish' %}selected{% endif %}>惩罚</option>
                 </select>
             </div>
             <div class="col-auto">
-                <select name="category" class="form-select form-select-sm" style="width:140px" onchange="this.form.submit()">
+                <select name="category" class="form-select form-select-sm" style="width:140px" onchange="this.form.submit()" aria-label="类别">
                     <option value="">全部类别</option>
                     {% for k, v in reward_categories %}
                     <option value="{{ k }}" {% if f.category==k %}selected{% endif %}>奖励·{{ v }}</option>
@@ -91,7 +91,7 @@
                 </select>
             </div>
             <div class="col-auto">
-                <select name="status" class="form-select form-select-sm" style="width:110px" onchange="this.form.submit()">
+                <select name="status" class="form-select form-select-sm" style="width:110px" onchange="this.form.submit()" aria-label="状态">
                     <option value="">全部状态</option>
                     <option value="draft" {% if f.status=='draft' %}selected{% endif %}>待确认</option>
                     <option value="confirmed" {% if f.status=='confirmed' %}selected{% endif %}>已生效</option>
@@ -99,14 +99,14 @@
                 </select>
             </div>
             <div class="col-auto">
-                <select name="grade" class="form-select form-select-sm" style="width:110px" onchange="this.form.submit()">
+                <select name="grade" class="form-select form-select-sm" style="width:110px" onchange="this.form.submit()" aria-label="年级">
                     <option value="">全部年级</option>
                     {% for g in grades %}<option value="{{ g }}" {% if f.grade==g %}selected{% endif %}>{{ g }}</option>{% endfor %}
                 </select>
             </div>
             <div class="col-auto">
                 <input type="text" name="kw" class="form-control form-control-sm" style="width:150px"
-                       placeholder="学号 / 姓名 / 事由" value="{{ f.kw }}">
+                       placeholder="学号 / 姓名 / 事由" value="{{ f.kw }}" aria-label="学号 / 姓名 / 事由">
             </div>
             <div class="col-auto">
                 <input type="date" name="date_from" class="form-control form-control-sm" style="width:145px" value="{{ f.date_from }}" title="起始日期">
@@ -166,14 +166,14 @@
                         {% if n %}<span class="badge bg-light text-muted border"><i class="bi bi-paperclip"></i> {{ n }}</span>{% else %}<span class="text-muted">—</span>{% endif %}
                     </td>
                     <td class="text-nowrap">
-                        <button class="btn btn-sm btn-outline-secondary py-0 px-1" data-act="detail" data-id="{{ r.id }}" title="详情">
+                        <button class="btn btn-sm btn-outline-secondary py-0 px-1" data-act="detail" data-id="{{ r.id }}" title="详情" aria-label="详情">
                             <i class="bi bi-eye"></i>
                         </button>
                         {% if can_edit %}
-                        <button class="btn btn-sm btn-outline-primary py-0 px-1" data-act="edit" data-id="{{ r.id }}" title="编辑">
+                        <button class="btn btn-sm btn-outline-primary py-0 px-1" data-act="edit" data-id="{{ r.id }}" title="编辑" aria-label="编辑">
                             <i class="bi bi-pencil"></i>
                         </button>
-                        <button class="btn btn-sm btn-outline-danger py-0 px-1" data-act="del" data-id="{{ r.id }}" title="删除">
+                        <button class="btn btn-sm btn-outline-danger py-0 px-1" data-act="del" data-id="{{ r.id }}" title="删除" aria-label="删除">
                             <i class="bi bi-trash"></i>
                         </button>
                         {% endif %}
@@ -230,7 +230,7 @@
                     <div class="col-12">
                         <label class="form-label small mb-1">学生 <span class="text-danger">*</span></label>
                         <div class="input-group input-group-sm mb-1">
-                            <input type="text" id="stuKw" class="form-control" placeholder="输入姓名或学号后点「查找」">
+                            <input type="text" id="stuKw" class="form-control" placeholder="输入姓名或学号后点「查找」" aria-label="输入姓名或学号">
                             <button class="btn btn-outline-secondary" type="button" id="stuFind">查找</button>
                         </div>
                         <select id="stuPick" class="form-select form-select-sm" size="4" style="display:none"></select>
@@ -246,7 +246,7 @@
                     </div>
                     <div class="col-6 col-md-3">
                         <label class="form-label small mb-1">年级</label>
-                        <input type="text" name="grade" id="fGrade" class="form-control form-control-sm" placeholder="2024级">
+                        <input type="text" name="grade" id="fGrade" class="form-control form-control-sm" placeholder="2024级" aria-label="年级">
                     </div>
                     <div class="col-6 col-md-3">
                         <label class="form-label small mb-1">班级</label>
@@ -254,14 +254,14 @@
                     </div>
                     <div class="col-6 col-md-3">
                         <label class="form-label small mb-1">类型 <span class="text-danger">*</span></label>
-                        <select name="kind" id="fKind" class="form-select form-select-sm">
+                        <select name="kind" id="fKind" class="form-select form-select-sm" aria-label="奖惩类型">
                             <option value="reward">奖励</option>
                             <option value="punish">惩罚</option>
                         </select>
                     </div>
                     <div class="col-6 col-md-3">
                         <label class="form-label small mb-1">类别</label>
-                        <select name="category" id="fCategory" class="form-select form-select-sm"></select>
+                        <select name="category" id="fCategory" class="form-select form-select-sm" aria-label="类别"></select>
                     </div>
                     <div class="col-6 col-md-3">
                         <label class="form-label small mb-1"><span id="lvlLabel">级别</span></label>
@@ -378,7 +378,7 @@
 </form>
 <form method="POST" id="statusForm" class="d-none">
     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-    <input type="hidden" name="status" id="statusVal">
+    <input type="hidden" name="status" id="statusVal" aria-label="状态">
     <input type="hidden" name="reason" id="statusReason">
 </form>
 
@@ -502,9 +502,9 @@
                + '<div class="small text-truncate">' + esc(a.file_name) + '</div>'
                + '<div class="text-muted" style="font-size:11px">' + esc(a.doc_type_text) + ' · ' + esc(a.size_text) + ' · ' + esc(a.uploaded_name) + '</div>'
                + '</div>'
-               + '<a class="btn btn-sm btn-outline-secondary py-0 px-1" target="_blank" href="/morality/rewards/attachment/' + a.id + '" title="预览"><i class="bi bi-eye"></i></a>'
-               + '<a class="btn btn-sm btn-outline-secondary py-0 px-1" href="/morality/rewards/attachment/' + a.id + '/download" title="下载"><i class="bi bi-download"></i></a>'
-               + (CAN_EDIT ? '<button class="btn btn-sm btn-outline-danger py-0 px-1" data-att-del="' + a.id + '" data-rid="' + rid + '" title="删除"><i class="bi bi-trash"></i></button>' : '')
+               + '<a class="btn btn-sm btn-outline-secondary py-0 px-1" target="_blank" href="/morality/rewards/attachment/' + a.id + '" title="预览" aria-label="预览"><i class="bi bi-eye"></i></a>'
+               + '<a class="btn btn-sm btn-outline-secondary py-0 px-1" href="/morality/rewards/attachment/' + a.id + '/download" title="下载" aria-label="下载"><i class="bi bi-download"></i></a>'
+               + (CAN_EDIT ? '<button class="btn btn-sm btn-outline-danger py-0 px-1" data-att-del="' + a.id + '" data-rid="' + rid + '" title="删除" aria-label="删除"><i class="bi bi-trash"></i></button>' : '')
                + '</div></div>';
         });
         return h || '<div class="col-12 text-muted small">暂无附件</div>';

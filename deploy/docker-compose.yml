@@ -53,6 +53,12 @@
       - DATABASE_URL=sqlite:////app/data/system.db
       # 容器内必须监听 0.0.0.0 才能被外部访问；认证默认 account（每请求校验账号密码）
       - STULINK_MCP_HOST=0.0.0.0
+      # Host 头白名单（DNS 重绑定防护）：容器内自动探测到的是容器自身 IP，
+      # 从宿主机 IP 直接访问、或走本机端口转发（127.0.0.1:8765 → 本机）访问时，
+      # Host 不在白名单里 → 421 Invalid Host header。显式配置后会**覆盖**自动探测，
+      # 所以本机/回环地址也要一并保留（本机调试与端口转发都靠它）。
+      # 注意 IP 与 IP:端口 是两种形式，都要写；换域名/换 IP 访问时在此追加，逗号分隔。
+      - STULINK_MCP_ALLOWED_HOSTS=127.0.0.1,127.0.0.1:8765,localhost,localhost:8765,10.193.191.210,10.193.191.210:8765
       # 生产建议：固定服务令牌并设为必填（防端口被随意扫描）
       # - STULINK_MCP_REQUIRE_TOKEN=true
       # - STULINK_MCP_TOKEN=<用 secrets.token_urlsafe(32) 生成>
