@@ -11,50 +11,93 @@
     .live-stat .item { background: rgba(255, 255, 255, .12); border-radius: 10px; padding: 4px 12px; min-width: 92px; }
     .live-stat .item .n { font-size: 20px; font-weight: 700; font-variant-numeric: tabular-nums; display: block; line-height: 1.15; }
     .live-stat .item .t { font-size: 11px; opacity: .8; }
-    .chk-legend { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; font-size: 11px; color: #64748b; }
-    .chk-legend i { display: inline-block; width: 10px; height: 10px; border-radius: 3px; margin-right: 3px; vertical-align: -1px; }
-    /* 2026-10-10：右键快捷菜单；2026-10-13 起「缺课」改叫「缺勤」并新增「考试」 */
-    .chk-menu { position: absolute; z-index: 3000; background: #fff; border: 1px solid #e2e8f0;
-                border-radius: 8px; box-shadow: 0 8px 24px rgba(15, 23, 42, .16); padding: 4px;
+    .chk-legend { display: flex; gap: 8px; flex-wrap: wrap; align-items: center;
+                  font-size: 11px; color: var(--sl-text-muted); }
+    /* 2026-10-16：图例直接复用徽标类（原来手抄一份色值，改一次要改两处、还缺两项 → 容易漂移） */
+    .chk-legend .ovw-chk { position: static; font-size: 11px; padding: 1px 7px; border-radius: 6px; }
+    .chk-legend .hint { cursor: help; }
+    /* 2026-10-10：右键快捷菜单；2026-10-13 起「缺课」改叫「缺勤」并新增「考试」
+       2026-10-16：底色/字色改走 --sl-* 变量 —— 原先写死白底，深色主题下白底配浅字几乎不可读 */
+    .chk-menu { position: absolute; z-index: 3000; background: var(--sl-surface);
+                border: 1px solid var(--sl-border); color: var(--sl-text);
+                border-radius: 8px; box-shadow: var(--sl-shadow); padding: 4px;
                 min-width: 200px; }
     .chk-menu-item { display: block; width: 100%; text-align: left; border: 0; background: transparent;
-                     padding: 6px 10px; font-size: 13px; border-radius: 6px; }
-    .chk-menu-item:hover { background: #f1f5f9; }
+                     color: inherit; padding: 6px 10px; font-size: 13px; border-radius: 6px; }
+    .chk-menu-item:hover { background: var(--sl-row-hover); }
     /* ── 单节课表视图（2026-10-13）：班级卡片墙 ──
-       配色走 Bootstrap 5.3 变量，自动跟随 data-bs-theme 暗色适配；
+       2026-10-16 UI 优化（巡课视角）：卡片底色与左侧 4px 色条＝查课状态，
+       **未查最醒目**（琥珀）→ 正常最安静（白底绿条）→ 异常再跳出来（黄/红/紫/蓝）；
+       学科沿用课表网格的学科配色（--sch，与矩阵同一套 subject_tone）；
        minmax 固定下限 → 每行自动排满，10 / 12 / 20 个班都不用改列数。 */
     .pov-block { margin-bottom: 16px; }
     .pov-block-head { display: flex; justify-content: space-between; align-items: baseline;
                       gap: 8px; flex-wrap: wrap; padding: 0 2px 6px; }
     .pov-block-head .ttl { font-weight: 700; font-size: 14px; }
-    .pov-block-head .sub { font-size: 11px; color: var(--bs-secondary-color); }
-    .pov-grid { display: grid; gap: 9px;
-                grid-template-columns: repeat(auto-fill, minmax(168px, 1fr)); }
-    .pov-card { position: relative; border: 1px solid var(--bs-border-color);
-                border-radius: 10px; padding: 7px 10px; background: var(--bs-body-bg);
+    .pov-block-head .sub { font-size: 11px; color: var(--sl-text-muted); }
+    .pov-grid { display: grid; gap: 8px;
+                grid-template-columns: repeat(auto-fill, minmax(164px, 1fr)); }
+    .pov-card { position: relative; border: 1px solid var(--sl-border);
+                border-radius: 10px; padding: 7px 10px 8px 14px; background: var(--sl-surface);
                 transition: .12s; }
+    .pov-card::before { content: ''; position: absolute; left: 0; top: 0; bottom: 0; width: 4px;
+                        border-radius: 10px 0 0 10px; background: var(--sl-border); }
+    .pov-card.chk-none { background: var(--sl-soft-amber-bg); border-color: var(--sl-soft-amber-bd); }
+    .pov-card.chk-none::before { background: var(--sl-soft-amber-fg); }
+    .pov-card.chk-normal::before { background: var(--sl-soft-success-fg); }
+    .pov-card.chk-late { background: var(--sl-soft-warn-bg); }
+    .pov-card.chk-late::before { background: var(--sl-soft-warn-fg); }
+    .pov-card.chk-absent { background: var(--sl-soft-danger-bg); border-color: var(--sl-soft-danger-bd); }
+    .pov-card.chk-absent::before { background: var(--sl-soft-danger-fg); }
+    .pov-card.chk-swap { background: var(--sl-soft-purple-bg); }
+    .pov-card.chk-swap::before { background: var(--sl-soft-purple-fg); }
+    .pov-card.chk-exam { background: var(--sl-soft-info-bg); }
+    .pov-card.chk-exam::before { background: var(--sl-soft-info-fg); }
+    .pov-card.chk-other::before { background: var(--sl-text-subtle); }
     .pov-card.can { cursor: pointer; }
-    .pov-card.can:hover { border-color: var(--bs-primary);
+    .pov-card.can:hover { border-color: var(--sl-accent);
                           box-shadow: 0 4px 14px rgba(37, 99, 235, .16);
                           transform: translateY(-1px); }
-    .pov-card.empty { opacity: .58; border-style: dashed; }
-    .pov-card .cls { font-weight: 700; font-size: 13px; }
-    .pov-card .subj { font-size: 11.5px; color: var(--bs-secondary-color); }
-    .pov-card .tch { font-size: 13px; font-weight: 600; margin-top: 1px; }
-    .pov-card .tch.none { color: var(--bs-secondary-color); font-weight: 400; }
+    .pov-card.can:focus-visible { outline: 2px solid var(--sl-accent); outline-offset: 1px; }
+    .pov-card.is-pending { opacity: .5; }
+    /* 空档（这节课本没排课）与「调走」（临时调课被换出去）：都不参与统计、不可标记 */
+    .pov-card.empty, .pov-card.moved { opacity: .6; border-style: dashed;
+                                        background: var(--sl-surface-2); }
+    .pov-card .cls { font-weight: 700; font-size: 14px; }
+    .pov-card .subj { font-size: 12px; color: var(--sl-text-muted);
+                      display: flex; align-items: center; gap: 5px; }
+    .pov-card .subj .dot { width: 8px; height: 8px; border-radius: 3px; flex: none;
+                           background: var(--sch, var(--sl-border)); }
+    .pov-card .subj .room { color: var(--sl-text-subtle); }
+    .pov-card .subj .room::before { content: '·'; margin: 0 4px; }
     /* 2026-10-14：单节视图也能标记查课 —— 卡片顶行＝班级 + 临调标签 + 「换人」按钮；
        底行＝教师 + 查课结果徽标（徽标复用矩阵的 .ovw-chk 配色，这里改为行内定位）。 */
     .pov-head { display: flex; align-items: center; gap: 6px; }
-    .pov-card .tch { display: flex; align-items: center; justify-content: space-between; gap: 6px; }
-    .pov-card .ovw-chk { position: static; font-size: 10.5px; padding: 1px 6px; border-radius: 6px; }
-    .pov-act { margin-left: auto; flex: none; border: 1px solid var(--bs-border-color);
-               background: transparent; color: var(--bs-secondary-color);
-               font-size: 11px; line-height: 18px; padding: 0 7px; border-radius: 6px; }
-    .pov-act:hover { border-color: var(--bs-primary); color: var(--bs-primary); }
+    .pov-card .tch { display: flex; align-items: center; justify-content: space-between;
+                     gap: 6px; font-size: 13px; font-weight: 600; margin-top: 1px; }
+    .pov-card .tch.none { color: var(--sl-text-muted); font-weight: 400; }
+    .pov-card .ovw-chk { position: static; font-size: 11px; padding: 1px 7px; border-radius: 6px; }
+    /* 「换人」是低频的教务调度动作：默认淡出，hover / focus / 触屏才显形
+       （原来 30 张卡 30 个按钮常驻，抢了"标记查课"这个主操作的视觉） */
+    .pov-act { margin-left: auto; flex: none; border: 1px solid var(--sl-border);
+               background: var(--sl-surface); color: var(--sl-text-muted);
+               font-size: 11px; line-height: 18px; padding: 0 7px; border-radius: 6px;
+               opacity: 0; transition: .12s; }
+    .pov-card:hover .pov-act, .pov-card:focus-within .pov-act,
+    .pov-card .pov-act:focus-visible { opacity: 1; }
+    .pov-act:hover { border-color: var(--sl-accent); color: var(--sl-accent); }
+    @media (hover: none) { .pov-act { opacity: 1; } }
     .pov-tag { font-size: 10px; padding: 1px 5px; border-radius: 6px; }
-    .pov-tag.temp { background: #e0e7ff; color: #3730a3; }
-    [data-bs-theme="dark"] .pov-tag.temp { background: #312e81; color: #c7d2fe; }
-    .pov-empty { text-align: center; color: var(--bs-secondary-color); padding: 40px 0; }
+    .pov-tag.temp { background: var(--sl-soft-purple-bg); color: var(--sl-soft-purple-fg); }
+    .pov-tag.moved { background: var(--sl-surface-3); color: var(--sl-text-muted); }
+    .pov-empty { text-align: center; color: var(--sl-text-muted); padding: 40px 0; }
+    /* 窄屏（375px 巡课）：卡片下限收小、内边距收紧，保证两列不抖动 */
+    @media (max-width: 575.98px) {
+        .pov-grid { grid-template-columns: repeat(auto-fill, minmax(132px, 1fr)); gap: 6px; }
+        .pov-card { padding: 6px 8px 7px 12px; }
+        .pov-card .cls { font-size: 13px; }
+        .pov-card .tch { font-size: 12px; }
+    }
     @media print {
         .sidebar, .navbar, .no-print, footer { display: none !important; }
         .main-content { margin-left: 0 !important; padding: 0 !important; }
@@ -95,12 +138,14 @@
 
 <div class="card mb-3 no-print">
     <div class="card-body py-2">
-        <div class="d-flex align-items-center flex-wrap gap-3">
+        <div class="d-flex align-items-center flex-wrap gap-2">
             {# 2026-10-13：查课本页的双视图 ——
                「全天矩阵」= 原有版式（行班级 · 列节次，用于**标记**查课结果）；
                「单节课表」= 只看一节：按年级分块列出每个班这节课的任课教师。
                2026-10-14：**两个视图都能标记查课**（单击=正常 / 双击=迟到 / 右键=更多）；
-               单节视图的卡片另带「换人」按钮，可就地发起**代课 / 调课**（教务调度视角）。 #}
+               单节视图的卡片另带「换人」按钮，可就地发起**代课 / 调课**（教务调度视角）。
+               2026-10-16 UI 优化：按「视图 / 节次 / 日期年级 / 批量+图例」分组成一条，
+               组间用竖分隔线；长句操作说明收进 ⓘ 的 title（页面上不再挂操作手册）。 #}
             <div class="btn-group btn-group-sm">
                 <a class="btn btn-outline-secondary {{ 'active' if view != 'period' }}"
                    href="{{ url_for('academic.inspection_live_schedule', date=target_date.isoformat(), grade=grade) }}">
@@ -109,62 +154,86 @@
                    href="{{ url_for('academic.inspection_live_schedule', view='period', date=target_date.isoformat(), grade=grade) }}">
                     <i class="bi bi-grid-3x3-gap"></i> 单节课表</a>
             </div>
+            <span class="vr d-none d-md-inline"></span>
             {% if view == 'period' %}
             <div class="d-flex align-items-center gap-2">
-                <label class="form-label small mb-0 text-muted">节次</label>
+                <label class="form-label small mb-0 text-muted" for="povPeriodPick">节次</label>
                 <div class="btn-group btn-group-sm">
                     <button class="btn btn-outline-secondary" id="povPrevPeriod" title="上一节"><i class="bi bi-chevron-left"></i></button>
-                    <select id="povPeriodPick" class="form-select form-select-sm" style="width:122px">
+                    {# 选项带「有课数」：夜里打开会落到无课的节次，用户一眼能挑到有课的节（空档标「空」） #}
+                    <select id="povPeriodPick" class="form-select form-select-sm" style="width:150px">
                         {% for p in data.periods %}
-                        <option value="{{ p.period_number }}" {% if p.period_number == pov_period %}selected{% endif %}>{{ p.period_name }}</option>
+                        <option value="{{ p.period_number }}" {% if p.period_number == pov_period %}selected{% endif %}>{{ p.period_name }}{% if p.period_type == 'break' %} · 休息{% elif p.has_class %} · {{ p.has_class }}课{% else %} · 空{% endif %}</option>
                         {% endfor %}
                     </select>
                     <button class="btn btn-outline-secondary" id="povNextPeriod" title="下一节"><i class="bi bi-chevron-right"></i></button>
                 </div>
             </div>
+            <span class="vr d-none d-md-inline"></span>
             {% endif %}
             <div class="d-flex align-items-center gap-2">
-                <label class="form-label small mb-0 text-muted">日期</label>
-                <input type="date" id="datePick" class="form-control form-control-sm" style="width:160px" value="{{ target_date.isoformat() }}">
+                <label class="form-label small mb-0 text-muted" for="datePick">日期</label>
+                <input type="date" id="datePick" class="form-control form-control-sm" style="width:158px" value="{{ target_date.isoformat() }}">
             </div>
             <div class="d-flex align-items-center gap-2">
-                <label class="form-label small mb-0 text-muted">年级</label>
-                <select id="gradePick" class="form-select form-select-sm" style="width:130px">
+                <label class="form-label small mb-0 text-muted" for="gradePick">年级</label>
+                <select id="gradePick" class="form-select form-select-sm" style="width:126px">
                     <option value="">全部年级</option>
                     {% for g in grade_opts %}<option value="{{ g }}" {% if grade == g %}selected{% endif %}>{{ g }}</option>{% endfor %}
                 </select>
             </div>
             <button class="btn btn-sm btn-outline-secondary" id="btnToday"><i class="bi bi-calendar-day"></i> 今天</button>
             {# 2026-10-14：单节视图也能标记 ——「未标记的全部正常」按当前这一节生效；
-               「本节 + 保存本节」仍只对全天矩阵有意义（单节视图本身只看一节）。 #}
-            {% if can_mark %}
-            <button class="btn btn-sm btn-success" id="btnMarkAllNormal" title="把当前页面上还没标记的格子一次性标为正常">
-                <i class="bi bi-check2-all"></i> 未标记的全部正常
-            </button>
-            {% if view != 'period' %}
-            {# 2026-10-10：本节保存 —— 本节班都查完直接保存；未查完则询问是否通知领导 #}
-            <div class="d-flex align-items-center gap-2 ms-2">
-                <label class="form-label small mb-0 text-muted">本节</label>
-                <select id="periodPick" class="form-select form-select-sm" style="width:120px">
-                    {% for p in data.periods %}
-                    <option value="{{ p.period_number }}" {% if data.current_period_number and p.period_number == data.current_period_number %}selected{% endif %}>{{ p.period_name }}</option>
-                    {% endfor %}
-                </select>
+               「本节 + 保存本节」仍只对全天矩阵有意义（单节视图的节次由上面那个下拉决定）。 #}
+            <span class="ms-auto d-flex align-items-center flex-wrap gap-2">
+                {% if can_mark %}
+                <button class="btn btn-sm btn-success" id="btnMarkAllNormal"
+                        title="把当前页面上还没标记的卡片一次性标为正常">
+                    <i class="bi bi-check2-all"></i> 未标记的全部正常
+                </button>
+                {# 2026-10-16：误触一键的退路 —— 只在批量操作之后才出现（平时不占工具栏） #}
+                <button class="btn btn-sm btn-outline-secondary d-none" id="btnUndoBatch"
+                        title="把上一次「未标记的全部正常」标过的卡片改回未查">
+                    <i class="bi bi-arrow-counterclockwise"></i> 撤销上一次批量（<span id="undoBatchN">0</span>）
+                </button>
+                {% if view != 'period' %}
+                {# 2026-10-10：本节保存 —— 本节班都查完直接保存；未查完则询问是否通知领导 #}
+                <div class="d-flex align-items-center gap-2">
+                    <label class="form-label small mb-0 text-muted" for="periodPick">本节</label>
+                    <select id="periodPick" class="form-select form-select-sm" style="width:120px">
+                        {% for p in data.periods %}
+                        <option value="{{ p.period_number }}" {% if data.current_period_number and p.period_number == data.current_period_number %}selected{% endif %}>{{ p.period_name }}</option>
+                        {% endfor %}
+                    </select>
+                    <button class="btn btn-sm btn-primary" id="btnSavePeriod"
+                            title="保存本节次查课结果；若还有班级未查，可选择是否通知领导">
+                        <i class="bi bi-save"></i> 保存本节
+                    </button>
+                </div>
+                {% endif %}
+                {% if view == 'period' %}
+                {# 2026-10-16：单节视图也补上收口动作 —— 这一节正是「跑完了 → 通知领导」的场景，
+                   节次由上面的下拉决定，不再重复给一个「本节」下拉。 #}
                 <button class="btn btn-sm btn-primary" id="btnSavePeriod"
-                        title="保存本节次查课结果；若还有班级未查，可选择是否通知领导">
+                        title="这一节查完了：若还有班级未查，可选择把情况通知领导">
                     <i class="bi bi-save"></i> 保存本节
                 </button>
-            </div>
-            {% endif %}
-            {% endif %}
-            <span class="ms-auto chk-legend">
-                <span><i style="background:#e2e8f0"></i>未查</span>
-                <span><i style="background:#d1fae5"></i>正常</span>
-                <span><i style="background:#fef3c7"></i>迟到</span>
-                <span><i style="background:#fee2e2"></i>缺勤</span>
-                <span><i style="background:#e0e7ff"></i>调课</span>
-                <span><i style="background:#e0f2fe"></i>考试</span>
-                {% if can_mark %}<span class="text-muted">（单击=正常 · 双击=迟到 · 右键=缺勤/调课/考试…{% if view == 'period' %} · 「换人」=代课/调课{% endif %}）</span>{% endif %}
+                {% endif %}
+                {% endif %}
+                {# 图例直接复用徽标类（改徽标配色时图例自动跟着变） #}
+                <span class="chk-legend">
+                    <span class="ovw-chk ovw-chk-none">未查</span>
+                    <span class="ovw-chk ovw-chk-normal">正常</span>
+                    <span class="ovw-chk ovw-chk-late">迟到</span>
+                    <span class="ovw-chk ovw-chk-absent">缺勤</span>
+                    <span class="ovw-chk ovw-chk-swap">调课</span>
+                    <span class="ovw-chk ovw-chk-exam">考试</span>
+                    <span class="ovw-chk ovw-chk-other">其他</span>
+                    {% if can_mark %}
+                    <i class="bi bi-info-circle hint"
+                       title="单击=正常 · 双击=迟到 · 右键=缺勤 / 调课 / 考试 / 迟到说明 / 撤销标记（触屏长按卡片=同一菜单）{% if view == 'period' %}；卡片上的「换人」=发起代课 / 调课申请{% endif %}"></i>
+                    {% endif %}
+                </span>
             </span>
         </div>
     </div>
@@ -182,32 +251,47 @@
         </div>
         <div class="pov-grid">
             {% for r in b.rows %}
-            {# markable：这一节有课 + 有查课权限 → 卡片可单击/双击/右键标记；
-               swappable：有课 + 有课表管理权限 → 多一个「换人」按钮（代课 / 调课申请）。 #}
+            {# markable：这一节有课 + 有查课权限 → 卡片可单击/双击/右键/回车标记；
+               swappable：有课 + 有课表管理权限 → hover 时多一个「换人」按钮（代课 / 调课申请）。
+               2026-10-16：state＝查课状态（琥珀=未查最醒目 / 白底绿条=正常 / 黄红紫蓝=异常），
+               无标记权限的账号也照样渲染状态色（只是不可点）。 #}
             {% set markable = r.subject and can_mark %}
             {% set swappable = r.subject and can_schedule and r.entry_id %}
-            <div class="pov-card{{ ' can' if markable else ('' if r.subject else ' empty') }}"
-                 {% if r.subject %}data-grade="{{ r.grade }}" data-class="{{ r.class_name }}"
+            {% set state = (r.check.result if r.check else 'none') if r.subject else '' %}
+            {% set tone = subject_tone(r.subject) %}
+            <div class="pov-card{{ ' can' if markable else '' }}{{ ' chk-' ~ state if state else '' }}{{ ' empty' if not r.subject and not r.is_moved_away else '' }}{{ ' moved' if r.is_moved_away else '' }}"
+                 {% if r.subject %}role="{{ 'button' if markable else 'group' }}"
+                 {%- if markable %} tabindex="0" aria-label="{{ r.class_name }} {{ r.subject }} {{ r.teacher_name or '' }}，{{ r.check.label if r.check else '未查' }}，回车标记为正常"{% endif %}
+                 data-grade="{{ r.grade }}" data-class="{{ r.class_name }}"
                  data-period="{{ r.period_number }}" data-entry="{{ r.entry_id }}"
                  data-subject="{{ r.subject or '' }}" data-teacher="{{ r.teacher_name or '' }}"
                  data-uid="{{ r.teacher_uid or '' }}" data-room="{{ r.room or '' }}"
                  data-temp="{{ 1 if r.is_temp_swap else 0 }}"
-                 {% if markable %}data-check="{{ r.check.result if r.check else '' }}"{% endif %}
-                 title="{{ r.subject or '' }} {{ r.teacher_name or '' }}{% if r.check %} · 已标记{{ r.check.label }}{% if r.check.note %}（{{ r.check.note }}）{% endif %}{% elif markable %} · 点此标记查课结果{% endif %}"{% endif %}>
+                 {% if markable %}data-check="{{ r.check.result if r.check else '' }}"{% endif %}{% endif %}
+                 title="{% if r.subject %}{{ r.subject }} {{ r.teacher_name or '' }}{% if r.room %} · {{ r.room }}{% endif %}{% if r.check %} · 已标记{{ r.check.label }}{% if r.check.note %}（{{ r.check.note }}）{% endif %}{% elif markable %} · 点此标记查课结果{% endif %}{% elif r.is_moved_away %}临时调课：本节课已换到别的时间（不计入应查）{% elif r.week_miss %}课表标注「{{ r.week_miss }}」，本周不排这节课（不计入应查）{% else %}本节课本班没有排课{% endif %}">
                 <div class="pov-head">
                     <span class="cls">{{ r.class_name }}</span>
                     {% if r.is_temp_swap %}<span class="pov-tag temp">临调</span>{% endif %}
+                    {% if r.is_moved_away %}<span class="pov-tag moved">调走</span>{% endif %}
                     {% if swappable %}<button type="button" class="pov-act" title="代课 / 调课…"><i class="bi bi-arrow-left-right"></i> 换人</button>{% endif %}
                 </div>
-                <div class="subj">{% if r.subject %}{{ r.subject }}{% if r.room %} · {{ r.room }}{% endif %}{% else %}空档{% endif %}</div>
-                <div class="tch{{ '' if r.subject else ' none' }}"><span>{% if r.subject %}{{ r.teacher_name or '未指定教师' }}{% else %}—{% endif %}</span>{% if markable %}<span class="ovw-chk ovw-chk-{{ r.check.result if r.check else 'none' }}">{{ r.check.label if r.check else '未查' }}</span>{% endif %}</div>
+                <div class="subj">
+                    {%- if r.subject %}<span class="dot" style="--sch:{{ tone.c }}"></span>{{ r.subject }}{% if r.room %}<span class="room">{{ r.room }}</span>{% endif %}
+                    {%- elif r.is_moved_away %}临时调课 · 本节已换出
+                    {%- elif r.week_miss %}本周不上（{{ r.week_miss }}）
+                    {%- else %}空档{% endif %}</div>
+                <div class="tch{{ '' if r.subject else ' none' }}"><span>{% if r.subject %}{{ r.teacher_name or '未指定教师' }}{% else %}—{% endif %}</span>{% if markable %}<span class="ovw-chk ovw-chk-{{ state }}">{{ r.check.label if r.check else '未查' }}</span>{% endif %}</div>
             </div>
             {% endfor %}
         </div>
     </section>
     {% endfor %}
 {% else %}
-    <div class="pov-empty"><i class="bi bi-calendar-x"></i> 这节课没有排课，换个日期 / 节次或年级看看</div>
+    <div class="pov-empty">
+        <i class="bi bi-calendar-x" style="font-size:30px"></i>
+        <div class="mt-2">本节（{{ period_label(pov_period) }}）没有排课</div>
+        <div class="small mt-1">用上面的 ‹ › 或节次下拉换一节，也可以换个日期 / 年级</div>
+    </div>
 {% endif %}
 </div>
 {% else %}
@@ -338,6 +422,7 @@
     "teachersUrl": {{ url_for('academic.api_swap_partner_teachers')|tojson }},
     "entriesUrl": {{ url_for('academic.api_swap_partner_entries')|tojson }},
     "grade": {{ grade|tojson }},
+    "view": {{ view|tojson }},
     "povPeriod": {{ pov_period if pov_period else 'null' }},
     "canSchedule": {{ (can_schedule|string|lower) }},
     "markUrl": {{ url_for('academic.inspection_mark')|tojson }},

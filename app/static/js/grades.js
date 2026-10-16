@@ -1,4 +1,4 @@
-/* StuLink 成绩管理：分析页前端 v1.19.49.34
+/* StuLink 成绩管理：分析页前端 v1.19.49.35
  * 五 tab 联动加载 / 统一表格渲染 / 每张指标卡「表格 | 图表」双视图 / ECharts 图表渲染
  */
 (function(){
@@ -16,14 +16,15 @@ function sem(){
            {ok: '#10b981', warn: '#f59e0b', danger: '#ef4444', info: '#3b82f6'};
 }
 var state = {grade: '', examId: '', tab: 'grade', class_name: '', subject: '', direction: '',
-             classes: []};   // classes：班级对比 Tab 选中的班级
+             selection: '', classes: []};   // classes：班级对比 Tab 选中的班级
+                                        // selection：选科组合（2026-10-16，如 物化生）
 // tab 业务顺序。注意：Flask jsonify 默认按键名排序，Object.keys(opts.tabs) 的首项会是
 // 'class' 而不是 'grade'，因此不能用它决定默认 tab，必须按此固定顺序取第一个可见项。
 var TAB_ORDER = ['grade', 'class', 'subject', 'teacher', 'compare'];
 var opts = null;
 var charts = {};
 var chartSpecs = {};   // 图表原始配置（按 key），主题切换重绘时用
-// v1.19.49.34：?exam=（本场考试）只在首次填充时应用一次；
+// v1.19.49.35：?exam=（本场考试）只在首次填充时应用一次；
 // 之后用户手动切换年级/考试不再被拉回本场，也避免「切换年级」被误判为本场不可见。
 var initExamApplied = false;
 
@@ -67,7 +68,7 @@ function fillGrades(){
     if (opts.locked.grade){
         $('#gGrade').val(opts.locked.grade).prop('disabled', true);
     } else {
-        // v1.19.49.34 侧栏带进来的本场考试（?exam=）**优先落到它所在的年级**：
+        // v1.19.49.35 侧栏带进来的本场考试（?exam=）**优先落到它所在的年级**：
         // 此前无脑默认「第一个有考试的年级」（= 年份最大 = 最新年级），
         // 跨年级进入（如在 2024/2025 级考试里点「班级分析 / 学科分析」）时
         // 本场 id 在最新年级的列表里找不到 → fillExams 回落「该年级最近一场已导入」
@@ -110,7 +111,7 @@ function fillExams(){
         sel.append('<option value="'+e.id+'" data-status="'+e.status+'">'+label+'</option>');
     });
     // v1.19.0 优先用侧栏带进来的本场考试（?exam=），否则按原逻辑默认选最近一场已导入
-    // v1.19.49.34 only-once：只有首次填充应用 ?exam=，用户手动换年级/考试后不再强制回本场
+    // v1.19.49.35 only-once：只有首次填充应用 ?exam=，用户手动换年级/考试后不再强制回本场
     var want = '';
     if (!initExamApplied){
         want = ($('#gInitialExam').text() || '').trim();
@@ -129,9 +130,10 @@ function fillExams(){
     state.grade = grade;
     syncExamNav();
     fillClasses();
+    fillCombos();           // 2026-10-16 组合随考试变（初始化也要填）
 }
 
-/* v1.19.49.34 筛选栏上方的警示条（重复调用只保留一条） */
+/* v1.19.49.35 筛选栏上方的警示条（重复调用只保留一条） */
 function gradeAppNotice(msg){
     $('#gAppNotice').remove();
     $('<div id="gAppNotice" class="alert alert-warning py-2 small mb-2"></div>')
@@ -161,7 +163,7 @@ function syncExamNav(){
         report: '/grades/report?exam=' + eid,
         global: '/grades/global-compare?exam=' + eid
     };
-    // v1.19.49.34 侧栏「成绩分析」文字入口（领导=总览（全年级对比）/ 其余=班级分析）此前
+    // v1.19.49.35 侧栏「成绩分析」文字入口（领导=总览（全年级对比）/ 其余=班级分析）此前
     // 未纳入同步：页面内切换考试后点它会回到**进入本页时**的考试，与当前选中不一致。
     // 有无「总览」项即区分领导入口（与 base.html 的 _is_lead 分支一致）。
     urls.ana_home = $nav.find('a[data-nav="global"]').length
@@ -172,7 +174,7 @@ function syncExamNav(){
     });
 }
 
-/* v1.19.49.34 班级筛选仅限本场考试：优先用该场考试自己的班级
+/* v1.19.49.35 班级筛选仅限本场考试：优先用该场考试自己的班级
    （该场学生名册 ∪ 该场任课教师表）；未选考试/旧库无快照时回落年级班级 */
 function classListFor(grade){
     var eid = state.examId || $('#gExam').val() || '';
@@ -216,12 +218,34 @@ function fillSubject(){
     }
 }
 
+/* 2026-10-16 组合维度：本场考试出现过的选科组合 → 「组合」下拉。
+   没有选科快照的考试（未分科/老数据）下拉自动隐藏，界面不留无用控件。 */
+function fillCombos(){
+    var sel = $('#gSel').empty().append('<option value="">全部组合</option>');
+    var list = (opts.combos_by_exam && opts.combos_by_exam[String(state.examId)]) || [];
+    list.forEach(function(s){ sel.append('<option value="'+s+'">'+s+'</option>'); });
+    if (!list.length || !list.includes(state.selection)) state.selection = '';
+    sel.val(state.selection);
+    syncPopFilter();
+}
+
+/* 方向 / 组合的级联：组合本身带方向语义 —— 选了组合就以组合为准，方向下拉置灰；
+   取消组合则恢复方向筛选。两者都空 = 全场全部学生。 */
+function syncPopFilter(){
+    var on = !!state.selection;
+    $('#gSel').prop('disabled', false);
+    $('#gDir').prop('disabled', on)
+              .attr('title', on ? '已按选科组合查看（组合已含方向）' : '方向');
+    if (on){ state.direction = ''; $('#gDir').val(''); }
+}
+
 function bindFilters(){
     $('#gGrade').on('change', fillExams);
     $('#gExam').on('change', function(){
         state.examId = $(this).val();
         syncExamNav();          // v1.19.0 同步侧栏本场流程链接
-        fillClasses();          // v1.19.49.34 班级随考试变：仅列本场考试的班级
+        fillClasses();          // v1.19.49.35 班级随考试变：仅列本场考试的班级
+        fillCombos();           // 2026-10-16 组合随考试变
         loadCurrent();
     });
     $('#gClass').on('change', function(){ state.class_name = $(this).val(); loadCurrent(); });
@@ -234,10 +258,19 @@ function bindFilters(){
         state.direction = $(this).val() || '';
         loadCurrent();
     });
+    // 2026-10-16 组合筛选：选了组合就以组合为准（方向自动置灰），否则按方向
+    $('#gSel').on('change', function(){
+        state.selection = $(this).val() || '';
+        syncPopFilter();
+        loadCurrent();
+    });
     $('#gExport').on('click', function(){
         var q = buildQuery();
         window.location.href = '/grades/export/' + state.tab + q;
     });
+    // 2026-10-16 汇总打印版：链接跟着当前考试走（考试态 ?exam= 已由服务端带入，
+    // 这里兜底用 state.examId；新窗口打开，不影响当前分析页的筛选状态）
+    $('#gPrintSummary').attr('href', '/grades/print-summary?exam=' + (state.examId || ''));
     $('#gPrint').on('click', function(){ window.print(); });
     // v1.13.0 汇报区入口已移至左侧菜单栏（base.html），顶部按钮及相关逻辑同步移除
 }
@@ -343,10 +376,13 @@ function bindViewToggle(){
 
 function activateTab(tab, fromClick){
     state.tab = tab;
-    // 筛选器显隐：方向仅年级/学科分析可用；班级仅班级分析；科目按 tab；班级多选仅对比 tab
+    // 筛选器显隐：班级仅班级分析；科目按 tab；班级多选仅对比 tab；
+    // 人群（方向/组合）用于年级/学科/班级分析（2026-10-16 班级分析也支持按组合）
     $('#gClass').toggleClass('d-none', tab !== 'class');
     $('#gClassMulti').toggleClass('d-none', tab !== 'compare');
-    $('#gDir').toggleClass('d-none', tab !== 'grade' && tab !== 'subject');
+    var _popOn = (tab === 'grade' || tab === 'subject' || tab === 'class');
+    $('#gPopWrap').toggleClass('d-none', !_popOn);
+    $('#gSel').toggleClass('d-none', !_popOn);
     // 修复：原条件写反——学科/教师分析 tab 需要显示科目筛选器，年级/班级 tab 隐藏
     $('#gSubject').toggleClass('d-none', tab !== 'subject' && tab !== 'teacher');
     if (tab === 'subject' || tab === 'teacher') fillSubject();
@@ -538,6 +574,10 @@ function autoChartSpec(t, key){
     return spec;
 }
 
+/* 当前生效的列（列显隐组件过滤后；未设置过 = 全部列）。
+   注意不要改 t.columns 本身——图表 autoChartSpec 依赖全列口径。 */
+function visColsOf(t){ return t.visCols || t.columns || []; }
+
 function buildTbody(t, rows){
     var tbody = $('<tbody>');
     (rows || []).forEach(function(r){
@@ -545,7 +585,7 @@ function buildTbody(t, rows){
         if (t.link && r.no !== null && r.no !== undefined){
             tr.addClass('stu-link').attr('data-no', r.no);
         }
-        (t.columns || []).forEach(function(c){
+        visColsOf(t).forEach(function(c){
             var val = r[c.key];
             var td = $('<td' + (c.type !== 'text' ? ' class="num"' : '') + '>').text(fmt(val));
             // 变动列着色（客观展示，无文字评价）
@@ -622,16 +662,37 @@ function updateSortHead(card){
     });
 }
 
-function buildTableHtml(t){
-    var table = $('<table class="table table-hover g-table mb-0">');
+function buildThead(t){
     var thead = $('<thead><tr></tr></thead>');
-    (t.columns || []).forEach(function(c){
+    visColsOf(t).forEach(function(c){
         thead.find('tr').append(
             '<th class="sortable' + (c.type !== 'text' ? ' num' : '') + '" data-key="'
             + escHtml(c.key) + '" data-type="' + escHtml(c.type || 'text') + '">'
             + escHtml(c.label) + '<i class="bi bi-arrow-down-up th-sort"></i></th>');
     });
-    table.append(thead);
+    return thead;
+}
+
+/* 表头排序绑定：升序 → 降序 → 还原原始顺序（数据、图表同份，导出仍取后端原序）。
+   列显隐重建表头后需重新绑定（旧 th 随 replaceWith 一起移除，事件不残留） */
+function bindSortHead(card){
+    card.find('.tbl-wrap thead th.sortable').on('click', function(){
+        var ckey = $(this).data('key'), ctype = $(this).data('type');
+        var curKey = card.data('sortKey'), curDir = card.data('sortDir');
+        var dir = (curKey === ckey && curDir === 'asc') ? 'desc' : 'asc';
+        if (curKey === ckey && curDir === 'desc'){
+            card.data('sortKey', null).data('sortDir', null);
+            applyCardRows(card, card.data('baseRows').slice());
+            return;
+        }
+        card.data('sortKey', ckey).data('sortDir', dir);
+        applyCardRows(card, sortRows(card.data('baseRows'), ckey, ctype, dir));
+    });
+}
+
+function buildTableHtml(t){
+    var table = $('<table class="table table-hover g-table mb-0">');
+    table.append(buildThead(t));
     table.append(buildTbody(t, t.rows || []));
     return table;
 }
@@ -692,6 +753,12 @@ function renderTables(area, tables){
         card.data({view: masterView, spec: spec, chartKey: ck, chartReady: false,
                    table: t, tableKey: key, rows: t.rows || [],
                    baseRows: (t.rows || []).slice(), sortKey: null, sortDir: null});
+        // 列显隐（勾选即显示、不勾选隐藏；选择按表持久化，见 table_cols.js）
+        var colsAll = t.columns || [];
+        if (window.TableCols){
+            var visKeys = TableCols.visible(ck, colsAll);
+            t.visCols = colsAll.filter(function(c){ return visKeys.indexOf(c.key) >= 0; });
+        }
 
         var titleHtml = '<h6 class="mb-0"><i class="bi bi-table me-1"></i>' + escHtml(t.title || key);
         // 带 link 的表（如学生明细表）：整行可点击跳转个人成绩查询
@@ -709,6 +776,16 @@ function renderTables(area, tables){
                 + '" data-view="table"><i class="bi bi-table"></i> 表格</button>'
                 + '<button type="button" class="btn btn-outline-primary' + (masterView === 'chart' ? ' active' : '')
                 + '" data-view="chart"><i class="bi bi-bar-chart"></i> 图表</button></div>');
+        }
+        if (window.TableCols){
+            controls.append(TableCols.menu(ck, colsAll, function(keys){
+                t.visCols = colsAll.filter(function(c){ return keys.indexOf(c.key) >= 0; });
+                // 重建表头 + 行（当前行序保持；排序状态与图表同源不变）
+                var $tbl = card.find('.tbl-wrap table').first();
+                $tbl.find('thead').replaceWith(buildThead(t));
+                bindSortHead(card);
+                applyCardRows(card, card.data('rows') || []);
+            }));
         }
         controls.append('<button class="btn btn-sm btn-outline-secondary tbl-fold">折叠</button>');
         card.append($('<div class="card-header d-flex justify-content-between align-items-center">')
@@ -728,18 +805,7 @@ function renderTables(area, tables){
             setCardView(card, $(this).data('view'));
         });
         // 表头排序：升序 → 降序 → 还原原始顺序（数据、图表同份，导出仍取后端原序）
-        card.find('.tbl-wrap thead th.sortable').on('click', function(){
-            var ckey = $(this).data('key'), ctype = $(this).data('type');
-            var curKey = card.data('sortKey'), curDir = card.data('sortDir');
-            var dir = (curKey === ckey && curDir === 'asc') ? 'desc' : 'asc';
-            if (curKey === ckey && curDir === 'desc'){
-                card.data('sortKey', null).data('sortDir', null);
-                applyCardRows(card, card.data('baseRows').slice());
-                return;
-            }
-            card.data('sortKey', ckey).data('sortDir', dir);
-            applyCardRows(card, sortRows(card.data('baseRows'), ckey, ctype, dir));
-        });
+        bindSortHead(card);
         if (masterView === 'chart') setCardView(card, 'chart');
         card.find('.tbl-fold').on('click', function(){
             var visible = body.is(':visible');
@@ -987,8 +1053,13 @@ function buildQuery(){
         qs.push('classes=' + encodeURIComponent(state.classes.join(',')));
     if ((state.tab === 'subject' || state.tab === 'teacher') && state.subject)
         qs.push('subject=' + encodeURIComponent(state.subject));
-    if ((state.tab === 'grade' || state.tab === 'subject') && state.direction)
+    if ((state.tab === 'grade' || state.tab === 'subject' || state.tab === 'class')
+            && state.direction)
         qs.push('direction=' + encodeURIComponent(state.direction));
+    // 2026-10-16 组合维度：年级/学科/班级分析都支持按选科组合收窄
+    if ((state.tab === 'grade' || state.tab === 'subject' || state.tab === 'class')
+            && state.selection)
+        qs.push('selection=' + encodeURIComponent(state.selection));
     return qs.length ? '?' + qs.join('&') : '';
 }
 
@@ -1263,7 +1334,14 @@ $(function(){
         // ① 未配置“本机浏览器里的 Key”时先提醒并引导去用户设置（不再用服务器存的私人 Key）
         // ② 已配置则把 Key 随请求带上（服务器只用不存）
         if (url.indexOf('/grades/ai/') === 0){
-            if (!window.StuLinkAI || !window.StuLinkAI.ensure()) return;
+            if (!window.StuLinkAI || !window.StuLinkAI.ensure()){
+                // 2026-10-16 第八轮审计（U-19）：原实现直接 return，而调用方
+                // （runAnalyze 等）已把按钮置 disabled、aiBusy=true → 没配 Key 时点一次
+                // 「AI 分析」，按钮从此永久变灰、aiBusy 卡死连追问也全被挡。
+                // ensure() 自己已弹引导框，这里只补收尾回调（恢复按钮与 busy 态）。
+                handlers.onDone && handlers.onDone();
+                return;
+            }
             payload = $.extend({}, payload, {ai: window.StuLinkAI.payload()});
         }
         fetch(url, {
@@ -1300,7 +1378,10 @@ $(function(){
             }
             return pump();
         }).catch(function(e){
+            // 2026-10-16 第八轮审计（U-20）：原先只报 onError、不收尾 → 网络异常时
+            // 按钮与 aiBusy 同样卡死（与 U-19 同一后果），这里成对回调。
             handlers.onError && handlers.onError((e && e.message) || '网络异常');
+            handlers.onDone && handlers.onDone();
         });
     }
 
@@ -1503,7 +1584,7 @@ $(function(){
         $('#aiToPage').on('click', function(){
             var txt = lastReportText;
             if (!txt){ alert('还没有生成报告'); return; }
-            // 2026-10-13（v1.19.49.34）：原提示「已保存到 AI 报告历史」是假的 ——
+            // 2026-10-13（v1.19.49.35）：原提示「已保存到 AI 报告历史」是假的 ——
             // 这里只把报告插入页面，并不写库；报告只有在「AI 分析」成功时才自动落库，
             // 聊天追问生成的内容不会进历史。文案必须与事实一致，别误导用户。
             showReport(txt, '已插入到当前页签（仅「AI 分析」生成的报告会存入报告历史）');

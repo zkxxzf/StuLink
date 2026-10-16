@@ -1,4 +1,4 @@
-# StuLink v1.19.49.34 2026-10-10
+# StuLink v1.19.49.35 2026-10-10
 # 成绩分析导出：四大模块表格 → Excel（openpyxl，与页面所见一致）
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 import io
@@ -87,23 +87,26 @@ def export_tab(tab):
     class_name = request.args.get('class_name', '').strip()
     subject = request.args.get('subject', '').strip()
     direction = (request.args.get('direction') or '').strip()
+    selection = (request.args.get('selection') or '').strip()   # 2026-10-16 组合维度
     # 班级对比：classes=01班,02班…（顺序=对比展示顺序）
     raw_classes = (request.args.get('classes') or '').strip()
     compare_classes = [c.strip() for c in raw_classes.split(',') if c.strip()]
     # 2026-10-15 用户口径：班主任 / 任课教师也能看「所在年级的成绩分析」，
     # 导出与本文件的既有设计口径「能看就能导」保持一致（_guard_tab 已放行 grade/subject）。
-    # 班主任导出**本班明细**（tab=class）时仍然要过班级白名单校验，越班 403。
-    if current_user.has_role('homeroom_teacher') and tab == 'class':
-        allowed = {(g, c) for g, c in (scope_service.visible_classes(current_user) or [])}
-        if (exam.grade, class_name) not in allowed:
+    # 导出**班级明细**（tab=class）含逐生全科 + 总分/班排 → 与 API 端点同闸门：
+    # 「该班总分口径可见」。2026-10-15 审计修复（P0）：此前只校验 homeroom_teacher，
+    # 用户级按班授权账号与「班主任+任课」看**他班**都能导出整班逐生总分。
+    if tab == 'class':
+        from app.modules.grades.services import score_guard as _sg
+        if not _sg.resolve(current_user).class_total_visible(exam.grade, class_name):
             abort(403)
     try:
         if tab == 'grade':
-            payload = tab_service.grade_tab(exam_id, direction)
+            payload = tab_service.grade_tab(exam_id, direction, selection)
         elif tab == 'class':
-            payload = tab_service.class_tab(exam_id, class_name)
+            payload = tab_service.class_tab(exam_id, class_name, direction, selection)
         elif tab == 'subject':
-            payload = tab_service.subject_tab(exam_id, subject, direction)
+            payload = tab_service.subject_tab(exam_id, subject, direction, selection)
         elif tab == 'compare':
             # 多班对比：班级可见性过滤与 API 端点同口径
             # 2026-10-11 审计修复：`if limited:` 空列表时 fail-open → 改 is not None（fail-closed）

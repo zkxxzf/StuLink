@@ -1,4 +1,4 @@
-# StuLink v1.19.49.34 2026-10-10
+# StuLink v1.19.49.35 2026-10-10
 # 任课教师映射：矩阵维护（按年级）+ 教师安排表批量导入 + 自动开户
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 import io
@@ -46,13 +46,13 @@ def _grade_classes(grade):
 
 
 def _teacher_roles_filter():
-    """v1.19.49.34：教师候选的合法角色集合（明确排除 admin）"""
+    """v1.19.49.35：教师候选的合法角色集合（明确排除 admin）"""
     return ('teacher', 'homeroom_teacher', 'grade_leader',
             'dorm_manager', 'school_viewer', 'staff')
 
 
 def _teacher_candidates():
-    """v1.19.49.34：所有启用且属于教师类角色的账号 id 集合"""
+    """v1.19.49.35：所有启用且属于教师类角色的账号 id 集合"""
     rows = db.session.query(User.id).filter(
         User.role.in_(_teacher_roles_filter()),
         User.is_active.is_(True)
@@ -63,10 +63,10 @@ def _teacher_candidates():
 def _matrix_users(grade):
     """下拉候选教师：启用 + 教师类角色（明确排除 admin）。
 
-    v1.19.49.34：历史逻辑“已绑定 user_id 即可入选”会导致 admin 错配后一直显示在下拉里，
+    v1.19.49.35：历史逻辑“已绑定 user_id 即可入选”会导致 admin 错配后一直显示在下拉里，
     现改为仅按角色过滤；已绑定但非教师类的行依旧可在矩阵中显示历史名字（由 _build_matrix 侧），
     但下拉中不再提供 admin 作为新选择。
-    v1.19.49.34：候选**按老师名字首字母排序**（拼音 A→Z；无姓名时用账号拼音兜底）。"""
+    v1.19.49.35：候选**按老师名字首字母排序**（拼音 A→Z；无姓名时用账号拼音兜底）。"""
     valid = _teacher_candidates()
     if not valid:
         return []
@@ -79,7 +79,7 @@ def _matrix_users(grade):
 def _name_sort_key(name, username):
     """姓名 → 拼音排序键：(首字母, 全拼, 姓名)。
 
-    v1.19.49.34：用 pypinyin 把「付冰洋」排到 f、把「何楠」排到 h；
+    v1.19.49.35：用 pypinyin 把「付冰洋」排到 f、把「何楠」排到 h；
     没有姓名（real_name 为空）的账号退化为用账号（pinyin）排序，仍保证稳定有序。"""
     py = user_account.pinyin_of(name) if name else None
     py = (py or '').lower() or (username or '').lower() or (name or '')
@@ -168,7 +168,7 @@ def teachers_get():
 
 
 def _json_body():
-    """请求体 → dict（v1.19.49.34 兼容两种提交方式）。
+    """请求体 → dict（v1.19.49.35 兼容两种提交方式）。
 
     背景：前端历史上用 `$.post(url, JSON.stringify({...}))`，jQuery 会以
     `application/x-www-form-urlencoded` 发送**JSON 文本**，而 Flask 的
@@ -248,6 +248,9 @@ def teachers_save():
                 link.active = False
                 changes['released'] += 1
     db.session.commit()
+    # 第七轮审计（P-M8）：教师映射变更 → 失效教师相关分析缓存（否则最长 900s 旧教师）
+    from app.modules.grades.utils import invalidate_teacher_cache
+    invalidate_teacher_cache()
     # 2026-10-14 方案：主表变更后把「当前方案」的快照同步刷新（快照不落后于主表）
     plan = link_plan.sync_current(operator_id=current_user.id)
     log_operation(current_user, '维护', '教师映射', None,
@@ -308,6 +311,9 @@ def teachers_plans_use():
                                          operator_id=current_user.id)
     except (ValueError, TypeError) as e:
         return jsonify(success=False, message=str(e) or '参数不正确'), 400
+    # 第七轮审计（P-M8）：方案「使用」= 物化回主表 → 教师列全变，必须失效
+    from app.modules.grades.utils import invalidate_teacher_cache
+    invalidate_teacher_cache()
     log_operation(current_user, '使用', '任课映射方案', None,
                   f'切换为方案「{plan.name}」'
                   + (f'：{json.dumps(stats, ensure_ascii=False)}' if stats else '（本就当前）'),
@@ -591,6 +597,9 @@ def teachers_import_confirm():
                                 user.sync_primary_link()   # P1 双写
                         demoted += 1
         db.session.commit()
+        # 第七轮审计（P-M8）：导入也改教师映射 → 同失效
+        from app.modules.grades.utils import invalidate_teacher_cache
+        invalidate_teacher_cache()
         # 2026-10-14 方案：导入写入主表后同步「当前方案」快照
         link_plan.sync_current(operator_id=current_user.id)
     except Exception as e:

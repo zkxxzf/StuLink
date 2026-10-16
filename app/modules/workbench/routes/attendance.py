@@ -1,5 +1,5 @@
 """考勤管理路由"""
-# StuLink v1.19.49.34 2026-10-10：补权限校验与班级归属校验（PR#5 安全审查 S1）
+# StuLink v1.19.49.35 2026-10-10：补权限校验与班级归属校验（PR#5 安全审查 S1）
 from datetime import date
 
 from flask import (Blueprint, render_template, request, jsonify, flash,
@@ -14,7 +14,6 @@ from app.modules.workbench.services.attendance_service import (
 from app.modules.workbench.services import scope as wb_scope
 from app.models.academic import ATTENDANCE_STATUS
 from app.utils.helpers import to_date
-from app.utils.decorators import perm_required
 
 bp = Blueprint('attendance', __name__, url_prefix='/workbench/attendance')
 

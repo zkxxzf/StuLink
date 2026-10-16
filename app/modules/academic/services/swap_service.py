@@ -1,4 +1,4 @@
-# StuLink v1.19.49.34 2026-10-10
+# StuLink v1.19.49.35 2026-10-10
 # 调课服务（基于 timetable.db 新模型）：申请 / 批量 / 审核 / 执行 / 撤销 / 统计 / 实时生效
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 #
@@ -272,7 +272,7 @@ def get_available_slots(schedule_id, grade, class_name, teacher_uid,
         for e in tq.all():
             teacher_busy.setdefault((e.weekday, e.period_number), []).append(e)
 
-    # 2026-10-13（v1.19.49.34）：临时调课产生的条目不能作为对调对象
+    # 2026-10-13（v1.19.49.35）：临时调课产生的条目不能作为对调对象
     temp_ids = _temp_target_ids(schedule_id)
     # 2026-10-14 走班并行课：与提交/执行同一口径 —— 不同教学班的并开课不算本班占用，
     # 同名教学班（同一次走班课）不算教师占用；否则网格标红与提交判定会不一致。
@@ -635,7 +635,7 @@ def bulk_apply_swap(applicant_uid, applicant_name, entry_ids, new_weekday,
                     reason='', period_offset=None):
     """统一调课：一次把多个条目调到同一新时段，**或整体平移 N 节**。
 
-    两种目标模式（v1.19.49.34 新增平移，专治"一整天的课一起挪"）：
+    两种目标模式（v1.19.49.35 新增平移，专治"一整天的课一起挪"）：
       - 统一目标：全部落到同一个 (new_weekday, new_period)（不同班之间才可能）；
       - 整体平移：每条目落到「自己原节次 + period_offset」（可 +1 后移 / -1 前移），
         星期沿用各自原值或统一指定 new_weekday。
@@ -928,7 +928,7 @@ def apply_swap_multi(applicant_uid, applicant_name, items, is_permanent=False,
 def apply_swap_batch(applicant_uid, applicant_name, items, is_permanent=False,
                      reason='', new_room=None, source_date=None,
                      source_weekday=None):
-    """调课 / 与人对调的**混合批量**提交（v1.19.49.34，用户口径 2026-10-13）。
+    """调课 / 与人对调的**混合批量**提交（v1.19.49.35，用户口径 2026-10-13）。
 
     用户口径：普通调课与两人换课是**同一个动作**，差别只在目标格现在有没有人 ——
       - 目标格**空着（自习）** → 我把课挪过去（普通调课）；
@@ -1317,7 +1317,7 @@ def count_pending(schedule_id=None, applicant_uid=None):
     """
     q = ScheduleSwap.query.filter(ScheduleSwap.status == 'pending',
                                  batch_rep_filter())
-    # v1.19.49.34：换课「待对方确认」还没到教务这一步，不计入待审数 / 侧栏徽章
+    # v1.19.49.35：换课「待对方确认」还没到教务这一步，不计入待审数 / 侧栏徽章
     q = q.filter(db.or_(ScheduleSwap.partner_status.is_(None),
                         ScheduleSwap.partner_status == 'agreed'))
     if schedule_id:
@@ -1329,7 +1329,7 @@ def count_pending(schedule_id=None, applicant_uid=None):
 
 
 def get_partner_pending(partner_uid, limit=20):
-    """待**我**（作为 partner）确认的换课 / 代课记录（v1.19.49.34，教师工作台用）。
+    """待**我**（作为 partner）确认的换课 / 代课记录（v1.19.49.35，教师工作台用）。
 
     批量换课时每条记录各有自己的 partner → 这里**不做批次折叠**，逐条列出，
     让教师在工作台里就能逐条同意 / 拒绝（换课每条各自确认，互不影响）。
@@ -1527,7 +1527,7 @@ def can_review(sw, user):
     """当前用户能否审批这条申请的"当前这一级"（管理员可审任何一级）。"""
     if not sw or sw.status != 'pending':
         return False
-    # v1.19.49.34 换课：对方确认前不进教务审批队列（避免"教务批了、对方还没同意"）
+    # v1.19.49.35 换课：对方确认前不进教务审批队列（避免"教务批了、对方还没同意"）
     if getattr(sw, 'partner_status', None) == 'pending':
         return False
     step = review_step_of(sw)
@@ -1585,7 +1585,7 @@ def review_swap(swap_id, reviewer_id, reviewer_name, action, review_note='',
     entry = db.session.get(ScheduleEntry, sw.original_entry_id) if sw.original_entry_id else None
     if not entry or entry.is_deleted:
         return False, '原课表条目不存在或已删除，无法通过', None
-    # v1.19.49.34 换课：复检按"对调后"口径（普通调课仍按新时段单点复检）
+    # v1.19.49.35 换课：复检按"对调后"口径（普通调课仍按新时段单点复检）
     if getattr(sw, 'exchange_kind', None):
         e2 = db.session.get(ScheduleEntry, sw.partner_entry_id) if sw.partner_entry_id else None
         if sw.exchange_kind != 'cover' and (not e2 or e2.is_deleted):
@@ -1682,7 +1682,7 @@ def review_swap_batch(swap_id, reviewer_id, reviewer_name, action, review_note='
     sibs = batch_pending_siblings(sw)
     if not sibs:
         return False, '没有待审核的记录', None
-    # 2026-10-12（v1.19.49.34）批量换课 / 代课：批内每条都有自己的 partner，
+    # 2026-10-12（v1.19.49.35）批量换课 / 代课：批内每条都有自己的 partner，
     # 通过前必须**全部答复过** —— 避免教务单方面把别人的课批掉。
     if action == 'approve':
         waiting = [s for s in sibs
@@ -1790,7 +1790,7 @@ def _execute_permanent(sw, entry, operator_id, operator_name):
     """永久调课执行（在 execute_swap 的事务内调用）。
 
     2026-10-10：目标星期/节次可留空（只换教室/只调日期），留空的维度沿用原条目值。
-    2026-10-12（v1.19.49.34）：换课（exchange_kind）走专用执行分支。
+    2026-10-12（v1.19.49.35）：换课（exchange_kind）走专用执行分支。
     """
     if getattr(sw, 'exchange_kind', None):
         return _execute_exchange_permanent(sw, entry, operator_id, operator_name)
@@ -1862,7 +1862,7 @@ def _execute_permanent(sw, entry, operator_id, operator_name):
 def _execute_temp(sw, entry, operator_id, operator_name):
     """临时调课执行（在 execute_swap 的事务内调用）。
 
-    2026-10-12（v1.19.49.34）：换课（exchange_kind）走专用执行分支。
+    2026-10-12（v1.19.49.35）：换课（exchange_kind）走专用执行分支。
     """
     if getattr(sw, 'exchange_kind', None):
         return _execute_exchange_temp(sw, entry, operator_id, operator_name)
@@ -1987,7 +1987,7 @@ def _revoke_one(sw, operator_id, operator_name):
                 remark=f'撤销调课#{sw.id}执行：恢复原课表条目'[:200],
                 operated_at=datetime.now(),
             ))
-    # 2026-10-12（v1.19.49.34）换课：对方侧条目同样回退（删对方当天条目 / 恢复对方原条目）
+    # 2026-10-12（v1.19.49.35）换课：对方侧条目同样回退（删对方当天条目 / 恢复对方原条目）
     if getattr(sw, 'partner_target_entry_id', None):
         p_new = db.session.get(ScheduleEntry, sw.partner_target_entry_id)
         if p_new and not p_new.is_deleted:
@@ -2046,7 +2046,7 @@ def revoke_executed_swap(swap_id, operator_id, operator_name):
 
 
 # ══════════════════════════════════════════════════════════════════════
-# 两人换课（v1.19.49.34）：申请 → 对方确认 → 教务审批 → 执行
+# 两人换课（v1.19.49.35）：申请 → 对方确认 → 教务审批 → 执行
 #   类型：time 换时段 / class 换班上课 / cover 请人代课
 #   范围：is_permanent=False 只影响某一天；True 改常规课表
 # ══════════════════════════════════════════════════════════════════════
@@ -2072,7 +2072,7 @@ def exchange_plan(e1, e2, kind, swap_time=True, swap_class=True,
     各 plan 键：weekday / period_number / grade / class_name / subject / room /
                 teacher_uid / teacher_name
 
-    v1.19.49.34：原先三种类型（time / class / cover）里 time 与 class 被用户指出重复，
+    v1.19.49.35：原先三种类型（time / class / cover）里 time 与 class 被用户指出重复，
     合并为一个 `exchange` + 两个勾选 —— **勾什么就换什么**（教师始终各归各位）：
 
         swap_time  ✔ → 星期 / 节次互换；否则各自保持
@@ -2125,7 +2125,7 @@ def check_exchange_conflicts(schedule_id, e1, e2, kind, is_permanent, swap_date,
     但与**第三方**不得在同一格撞车；代课只动我方教师 → 对方在该时段不能另有课
     （代课不排除 e2）。
 
-    v1.19.49.34：换课有**两个日期**（我方那天 / 对方那天），两侧按各自日期算单双周，
+    v1.19.49.35：换课有**两个日期**（我方那天 / 对方那天），两侧按各自日期算单双周，
     不再用同一个 swap_date 兜底。
 
     2026-10-14（单双周）：**两节课周次不同也可以对调** —— 各侧保留自己的周次
@@ -2248,7 +2248,7 @@ def _notify_exchange(sw, audience, event='', note=''):
 def apply_exchange_batch(applicant_uid, applicant_name, items, kind='exchange',
                          is_permanent=False, reason='',
                          operator_uid=None, operator_name=''):
-    """批量发起「两人换课 / 请人代课」申请（v1.19.49.34）。
+    """批量发起「两人换课 / 请人代课」申请（v1.19.49.35）。
 
     items：[{'entry_id': int, 'partner_uid': str, 'partner_entry_id': int(换课时必填),
              'swap_time': bool, 'swap_class': bool,
@@ -2597,7 +2597,7 @@ def get_temp_swaps_by_date(schedule_id, target_date):
     ).all()
     result = []
     # 2026-10-10 N+1 优化：当天全部原/目标条目一次 in_ 取回，替代循环内逐条 get
-    # 2026-10-12（v1.19.49.34）换课：对方侧的「原条目 / 当天条目」一并取回
+    # 2026-10-12（v1.19.49.35）换课：对方侧的「原条目 / 当天条目」一并取回
     entry_map = _build_entry_map(
         [i for sw in swaps
          for i in (sw.original_entry_id, sw.target_entry_id,
@@ -2656,7 +2656,7 @@ def resolve_effective_entry(schedule_id, grade, class_name, weekday, period_numb
          for i in (sw.target_entry_id, getattr(sw, 'partner_target_entry_id', None))
          if i])
     for sw in temp_swaps:
-        # v1.19.49.34 换课：我方 / 对方两条当天条目都要参与"调入本时段"判定
+        # v1.19.49.35 换课：我方 / 对方两条当天条目都要参与"调入本时段"判定
         for eid in (sw.target_entry_id, getattr(sw, 'partner_target_entry_id', None)):
             te = tgt_map.get(eid) if eid else None
             if (te and not te.is_deleted and te.grade == grade
@@ -2682,12 +2682,15 @@ def _temp_target_ids(schedule_id):
 
 
 def build_live_schedule(schedule_id, target_date, period_number, grade_filter=None,
-                        allowed_classes=None):
+                        allowed_classes=None, week=None):
     """构建某天某节次全校（或指定年级）实时课表，按年级分区。
 
-    返回 {grade: [ {class_name, grade, subject, teacher_name, room,
-                    entry_type, is_temp_swap, period_number} ]}。
-    叠加当天临时调课：调入标记 is_temp_swap=True，被调走的常规课显示为无课。
+    返回 {grade: [ {class_name, grade, subject, teacher_name, room, entry_type,
+                   is_temp_swap, is_moved_away, period_number} ]}。
+    叠加当天临时调课：调入标记 is_temp_swap=True；被调走的条目 subject 为空且
+    is_moved_away=True（供页面与"本节本来没排课"区分）。
+    week 给定时按周次过滤常规条目（与全天矩阵 get_day_matrix(week=…) 同口径）；
+    None = 不过滤（旧的调用行为）。
     """
     weekday = target_date.isoweekday()
     if grade_filter is None:
@@ -2726,17 +2729,27 @@ def build_live_schedule(schedule_id, target_date, period_number, grade_filter=No
     if grade_filters is not None:
         bq = bq.filter(ScheduleEntry.grade.in_(grade_filters))
     base_map = {}
+    # 2026-10-16（口径对齐）：与全天矩阵 get_day_matrix(week=…) 同源过滤周次 ——
+    # 原来单节视图不看周次，单双周/限定周次开的课在本周不上也会显示成"有课"，
+    # 领导按单节视图巡课会跑到空教室（两个视图的"应查数"也对不上）。
+    # 被周次过滤掉的课记进 week_miss：卡片上写「本周不上」，
+    # 否则用户看到一片空档不知道是"本来没课"还是"单双周这周不排"。
+    week_miss = {}
     for e in bq.all():
         if not class_visible(e.grade, e.class_name):
             continue
-        if e.id not in temp_ids:
-            base_map[(e.grade, e.class_name)] = e
+        if e.id in temp_ids:
+            continue
+        if week is not None and not _week_covers(e.week_range, week):
+            week_miss[(e.grade, e.class_name)] = e.week_range
+            continue
+        base_map[(e.grade, e.class_name)] = e
 
     # 当天临时调课：调入映射 + 被调走原条目 id
     temp_swaps = get_temp_swaps_by_date(schedule_id, target_date)
     moved_away, temp_in = set(), {}
     for ts in temp_swaps:
-        # v1.19.49.34 换课：对方侧条目同样参与"调入 / 调走"叠加
+        # v1.19.49.35 换课：对方侧条目同样参与"调入 / 调走"叠加
         for oe in (ts.get('original_entry'), ts.get('partner_original_entry')):
             if oe and class_visible(oe.get('grade'), oe.get('class_name')):
                 moved_away.add(oe['id'])
@@ -2753,7 +2766,8 @@ def build_live_schedule(schedule_id, target_date, period_number, grade_filter=No
     for grade, class_name in classes:
         row = {'grade': grade, 'class_name': class_name, 'period_number': period_number,
                'subject': None, 'teacher_name': None, 'room': None,
-               'entry_type': None, 'is_temp_swap': False,
+               'entry_type': None, 'is_temp_swap': False, 'is_moved_away': False,
+               'week_miss': None,
                'entry_id': None, 'teacher_uid': None}
         key = (grade, class_name)
         if key in temp_in:
@@ -2769,10 +2783,65 @@ def build_live_schedule(schedule_id, target_date, period_number, grade_filter=No
                             'room': be.room, 'entry_type': be.entry_type,
                             'entry_id': be.id, 'teacher_uid': be.teacher_uid,
                             'is_temp_swap': False})
+            elif be:
+                # 2026-10-16：这节课被临时调课换出去了 —— 标出来，别和"本来就没排课"混成一团
+                # （查课单节视图原先两者都渲染成"空档"，领导会跑去一个没课的班）
+                row['is_moved_away'] = True
+        if not row['subject'] and key in week_miss:
+            row['week_miss'] = week_miss[key]      # 课表里有，但本周不排（单双周 / 限定周次）
         data.setdefault(grade, []).append(row)
     for g in data:
         data[g].sort(key=lambda r: r['class_name'])
     return data
+
+
+def _norm_grades(g):
+    """年级筛选归一成列表（None 表示不限）。
+
+    2026-10-16：调用方（查课页 grade=2024级）常常直接传**单个年级字符串**，
+    而 `ScheduleEntry.grade.in_('2024级')` 在 SQLAlchemy 2.0 下会抛
+    `ArgumentError: IN expression list ... expected` → 单节视图 + 年级筛选整页 500。
+    这里统一收口，避免每个调用点各写一遍。
+    """
+    if g is None:
+        return None
+    if isinstance(g, str):
+        return [g] if g.strip() else None
+    return [x for x in g]
+
+
+def count_period_classes(schedule_id, target_date, week=None, grade_filter=None,
+                         allowed_classes=None):
+    """某天各节次「有课」的班级数：{period_number: n}。
+
+    2026-10-16 新增：单节视图的节次下拉用它标注「N 课 / 空」，并据此挑缺省节次 ——
+    夜里打开页面时 current_period_number 为 None，原先会退到第一个节次（早读，无课），
+    整页渲染成空档，用户以为功能坏了。
+    口径与 build_live_schedule 一致：排除临时调课产生的目标条目、按周次过滤、
+    只算有 subject 的条目、受数据范围（年级 / 班级白名单）约束。
+    """
+    weekday = target_date.isoweekday()
+    temp_ids = _temp_target_ids(schedule_id)
+    q = ScheduleEntry.query.filter(
+        ScheduleEntry.term_schedule_id == schedule_id,
+        ScheduleEntry.weekday == weekday,
+        ScheduleEntry.is_deleted.is_(False),
+    )
+    _gf = _norm_grades(grade_filter)      # 单年级字符串 → 列表（否则 in_() 抛 ArgumentError）
+    if _gf is not None:
+        q = q.filter(ScheduleEntry.grade.in_(_gf))
+    counts = {}
+    for e in q.all():
+        if e.id in temp_ids or not (e.subject or '').strip():
+            continue
+        if week is not None and not _week_covers(e.week_range, week):
+            continue
+        if allowed_classes is not None:
+            allowed = allowed_classes.get(e.grade, set())
+            if allowed is not None and (e.class_name or '') not in allowed:
+                continue
+        counts[e.period_number] = counts.get(e.period_number, 0) + 1
+    return counts
 
 
 def current_period_number(periods, now=None):

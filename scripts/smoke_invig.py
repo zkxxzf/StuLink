@@ -326,7 +326,7 @@ with app.test_client() as c:
     check('环节⑥ 手动指派回避教师被拒', (r.get_json() or {}).get('ok') is False,
           str(r.get_json()))
     # 手动指定：派一个从未被编排的校外监考员 → 允许
-    # 2026-10-13 审计修复：v1.19.49.34 起手动指派与自动编排共用
+    # 2026-10-13 审计修复：v1.19.49.35 起手动指派与自动编排共用
     # 「一人一场次一考场」硬约束，而自动编排已把 12 格填满，
     # 已入池的老师（含校外陈老师）都已被排到某场某考场 —— 再派他们都会被拒
     # （这是产品的正确行为，不是缺陷）。
@@ -359,17 +359,21 @@ with app.test_client() as c:
         check('环节⑦ 标题写明「监考表」（同一张表内含工作量）',
               '监考表' in str(ws.cell(row=1, column=1).value or ''),
               str(ws.cell(row=1, column=1).value))
-        _hdr = [ws.cell(row=5, column=i).value for i in range(1, 4)]
-        check('环节⑦ 上段矩阵列头（考场号/容纳人数/考场位置）',
-              _hdr == ['考场号', '容纳人数', '考场位置'], str(_hdr))
+        _hdr = [ws.cell(row=5, column=i).value for i in range(1, 5)]
+        # 2026-10-16 用户口径「监考表缺个科目」：左侧固定列 3 → 4（末列为「科目」）
+        check('环节⑦ 上段矩阵列头（考场号/容纳人数/考场位置/科目）',
+              _hdr == ['考场号', '容纳人数', '考场位置', '科目'], str(_hdr))
+        _subj = ws.cell(row=6, column=4).value
+        check('环节⑦ 科目列有值（默认/空 → 显示「全科」）',
+              bool(_subj) and str(_subj) != '默认', str(_subj))
         check('环节⑦ 日期层=10月8日（周四）',
-              ws.cell(row=2, column=4).value == '10月8日（周四）',
-              str(ws.cell(row=2, column=4).value))
+              ws.cell(row=2, column=5).value == '10月8日（周四）',
+              str(ws.cell(row=2, column=5).value))
         check('环节⑦ 上午/下午层（09:00→上午 / 14:00→下午）',
-              ws.cell(row=3, column=4).value == '上午'
-              and ws.cell(row=3, column=5).value == '下午',
-              f"{ws.cell(row=3, column=4).value}/{ws.cell(row=3, column=5).value}")
-        _cell = ws.cell(row=6, column=4).value
+              ws.cell(row=3, column=5).value == '上午'
+              and ws.cell(row=3, column=6).value == '下午',
+              f"{ws.cell(row=3, column=5).value}/{ws.cell(row=3, column=6).value}")
+        _cell = ws.cell(row=6, column=5).value
         check('环节⑦ 一格并排 2 位监考（、连接）',
               bool(_cell) and '、' in str(_cell), str(_cell))
         # 下段：工作量统计（与矩阵同一张表）

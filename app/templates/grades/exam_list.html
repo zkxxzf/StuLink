@@ -94,6 +94,9 @@
                     {# 教师视图：只留成绩分析（数据范围由后端 scope 收敛） #}
                     <a href="{{ url_for('grades.index', exam=e.id, tab='grade') }}"
                        class="btn btn-sm btn-outline-primary">成绩分析</a>
+                    {# 2026-10-15 用户口径：划线分层向所有老师展示（只读，写入口径仍是 grades.settings） #}
+                    <a href="{{ url_for('grades.bands_page', exam_id=e.id) }}"
+                       class="btn btn-sm btn-outline-info">划线分层</a>
                     {% endif %}
                 </td>
             </tr>
@@ -108,7 +111,7 @@
     </div>
 </div>
 
-{# v1.19.49.34：待处理的考务批次（孤儿兜底）——考试已删或未关联考试的批次
+{# v1.19.49.35：待处理的考务批次（孤儿兜底）——考试已删或未关联考试的批次
    2026-10-15：考务类内容，只对管理侧（can_manage）渲染；教师视图整体不出现。 #}
 {% if can_manage and orphan_affairs %}
 <div class="card border-warning mt-3">
@@ -143,9 +146,10 @@
                     <td class="text-end">
                         <a href="{{ url_for('grades.affair_detail', aid=o.a.id) }}"
                            class="btn btn-sm btn-outline-primary">进入编排</a>
+                        {# M-10（2026-10-15 审计补漏）：批次名可能含单引号 → 文案整体 |tojson + 单引号属性 #}
                         <form method="POST" style="display:inline"
                               action="{{ url_for('grades.affair_delete', aid=o.a.id) }}"
-                              onsubmit="return confirm('确定删除批次「{{ o.a.name }}」？将同时删除其 {{ o.rooms }} 个考场与 {{ o.students }} 条名单记录，不可恢复。')">
+                              onsubmit='return confirm({{ ("确定删除批次「" + (o.a.name or "") + "」？将同时删除其 " + (o.rooms|string) + " 个考场与 " + (o.students|string) + " 条名单记录，不可恢复。")|tojson }})'>
                             <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                             <button type="submit" class="btn btn-sm btn-outline-danger">删除批次</button>
                         </form>
@@ -207,8 +211,18 @@ $(function(){
         $('#delExamUser').val('');
         $('#delExamPwd').val('');
         $('#delExamErr').hide();
-        delExamModalObj = new bootstrap.Modal(document.getElementById('delExamModal'));
+        // 2026-10-16 第八轮审计（U-03）：原先每次点击 new 一个新实例 → 旧实例的
+        // _isShown 状态与新实例互不知情，重复点击会出现双 backdrop。改用
+        // getOrCreateInstance（全站其余 21 处模板已是这个写法）。
+        delExamModalObj = bootstrap.Modal.getOrCreateInstance(document.getElementById('delExamModal'));
         delExamModalObj.show();
+    });
+    // 2026-10-16 第八轮真机实测（verify_motion_ui.py FX-3/FX-2a）：本弹窗由 JS
+    // show() 打开，**焦点没有落进弹窗** → 键盘用户开弹窗后要多次 Tab 才能开始，
+    // 且 Bootstrap 的 document keydown 监听随之挂不上 → 按 Esc 关不掉。
+    // 挂在 shown.bs.modal（过渡完成后再聚焦，不会被 Bootstrap 的自动聚焦覆盖）：
+    document.getElementById('delExamModal').addEventListener('shown.bs.modal', function(){
+        document.getElementById('delExamUser').focus();
     });
 });
 

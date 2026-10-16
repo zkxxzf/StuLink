@@ -1,4 +1,4 @@
-# StuLink v1.19.49.34 2026-10-10
+# StuLink v1.19.49.35 2026-10-10
 # 成绩汇报区指标引擎：对标年级汇报 PPT 口径
 #  - 单上线：单科（或总分）≥ 对应层下界
 #  - 双上线：单科过该科层线 且 总分过同层线（如一本双上线）
@@ -32,12 +32,13 @@ STRONG_AVG_DIFF = 5
 
 # ============ 公共口径 ============
 
-def layers_desc(data, direction, subject=TOTAL_SUBJECT):
-    """某方向×学科的层线，按下界从高到低返回 [(层名, 下界)]；无划线返回 []。
+def layers_desc(data, direction, subject=TOTAL_SUBJECT, selection=''):
+    """某方向×[组合]×学科的层线，按下界从高到低返回 [(层名, 下界)]；无划线返回 []。
     band_list 会同时命中该方向线与历史遗留的通用线(direction='')，同名时只保留一条，
-    避免汇报统计把同一层算两遍（上线率超 100%）。"""
+    避免汇报统计把同一层算两遍（上线率超 100%）。
+    selection 非空 = 该选科组合的线（组合总分线，band_list 内部回落方向线）。"""
     seen, out = set(), []
-    for name, lower in sorted(data.band_list(direction or '', subject),
+    for name, lower in sorted(data.band_list(direction or '', subject, selection),
                               key=lambda x: -(x[1] or 0)):
         if name in seen:
             continue
@@ -46,12 +47,40 @@ def layers_desc(data, direction, subject=TOTAL_SUBJECT):
     return out
 
 
-def pick_layer(data, direction, subject=TOTAL_SUBJECT, layer_name=''):
+def layer_lowers(data, direction, subject, layer_name, rows, cache=None):
+    """把某层线按「学生自身组合」展开为下界，供逐生判层（2026-10-15 组合级划线）。
+
+    返回 (base_lower, {组合: 下界})：
+    - base_lower：方向级下界（无组合维度时的兜底；也可能为 None）；
+    - {组合: 下界}：只收录该组合确实有这条线的（组合线或 band_list 回落的方向线）。
+    rows：该群体的学生行（含 subject_selection）；cache 可选，避免同层多科重复取线。
+    """
+    key = (direction, subject, layer_name)
+    if cache is not None and key in cache:
+        return cache[key]
+    base = pick_layer(data, direction, subject, layer_name)
+    base_lower = base[1] if base else None
+    out = {}
+    for r in rows:
+        sel = (getattr(r, 'subject_selection', '') or '').strip()
+        if not sel or sel in out:
+            continue
+        line = pick_layer(data, direction, subject, layer_name, selection=sel)
+        if line:
+            out[sel] = line[1]
+    res = (base_lower, out)
+    if cache is not None:
+        cache[key] = res
+    return res
+
+
+def pick_layer(data, direction, subject=TOTAL_SUBJECT, layer_name='', selection=''):
     """取指定层 (名, 下界)。
     - 显式传 layer_name：必须精确匹配，找不到返回 None（绝不回退到别的层，防止张冠李戴）；
     - 不传：按 PREFER_LAYERS 顺序精确匹配，都没有时取最高层。
+    - selection 非空 = 按该选科组合的线取（组合总分线；band_list 内部回落方向线）。
     """
-    bl = layers_desc(data, direction, subject)
+    bl = layers_desc(data, direction, subject, selection)
     if not bl:
         return None
     if layer_name:
@@ -69,7 +98,7 @@ def pick_layer(data, direction, subject=TOTAL_SUBJECT, layer_name=''):
 def trimmed_nos(data):
     """去差学生学号集合：各班按班型规则剔除总分末尾 N 人
 
-    v1.19.49.34 班型取数改为**快照优先**：
+    v1.19.49.35 班型取数改为**快照优先**：
       ① 优先用成绩行上的 class_type（该场考试导入时的「当时班型」）；
       ② 快照为空（迁移前导入的历史考试）→ 回落读 ClassProfile（过渡兼容）。
     这样班型一旦调整（强基↔卓越），历史考试的去差口径不会跟着变。
@@ -111,7 +140,7 @@ def subject_teacher_map(grade, exam_id=None):
     """{科目展示名: '教师A、教师B'}：该年级各班任课教师按科目去重合并。
 
     板块一「任课教师」列数据源——不依赖划线，教师未配置/停用则科目对应空串。
-    v1.19.49.34：传入 exam_id 时优先读**本场考试的任课快照**（考试当时），
+    v1.19.49.35：传入 exam_id 时优先读**本场考试的任课快照**（考试当时），
     教师调动/重新分班后历史考试的展示不会跟着变。
     """
     pairs = []          # [(subject, 姓名)]
@@ -189,25 +218,36 @@ def resolve_direction(data, direction=''):
 # ============ 板块一：年级各科「层上线」对比表（本次 vs 上次） ============
 
 def _subject_layer_row(data, direction, sub, layer_name, layer_lower, trimmed):
-    """单科目本次口径：线分/参考数/单上线数率/双上线数率/去差均分"""
+    """单科目本次口径：线分/参考数/单上线数率/双上线数率/去差均分
+
+    2026-10-15 组合级划线：**单科线**与双上线的**总分线**都按学生自身组合取线
+    （再选四科＝各组合各一条线，语数外+首选科＝方向线；band_list 内部回落方向线）。"""
     rows = _dir_rows(data, direction)
-    total_line = pick_layer(data, direction, TOTAL_SUBJECT, layer_name)
-    total_lower = total_line[1] if total_line else None
+    total_lower, total_sels = layer_lowers(data, direction, TOTAL_SUBJECT, layer_name, rows)
+    sub_base, sub_sels = layer_lowers(data, direction, sub, layer_name, rows)
+    if sub_base is None:
+        sub_base = layer_lower      # 该科该层无组合维度线时沿用调用方给的方向线
     scores, single_n, dual_n = [], 0, 0
     for r in rows:
         sc = data.subj.get((r.student_no, sub))
         if sc is None:
             continue
         scores.append(sc)
-        if sc >= layer_lower:
+        sel = r.subject_selection or ''
+        sl = sub_sels.get(sel, sub_base)
+        if sl is not None and sc >= sl:
             single_n += 1
-            if total_lower is not None and r.score is not None and r.score >= total_lower:
+            tl = total_sels.get(sel, total_lower)
+            if tl is not None and r.score is not None and r.score >= tl:
                 dual_n += 1
     trim_vals = [data.subj.get((r.student_no, sub)) for r in rows
                  if r.student_no not in trimmed]
     trim_vals = [v for v in trim_vals if v is not None]
     n = len(scores)
-    return {'subject': subject_display(sub), 'line': layer_lower, 'count': n,
+    # 线分展示：该科只有一条线时显示分数；按组合多线时显示「按组合」（上线数已逐生按各自组合算）
+    _lows = set(sub_sels.values()) | ({sub_base} if sub_base is not None else set())
+    line_show = layer_lower if len(_lows) <= 1 else '按组合'
+    return {'subject': subject_display(sub), 'line': line_show, 'lines': sub_sels, 'count': n,
             'online_n': single_n, 'online_rate': _pct(single_n, n),
             'dual_n': dual_n, 'dual_rate': _pct(dual_n, n),
             'trim_avg': _avg(trim_vals)}
@@ -306,7 +346,9 @@ def class_overview_report(exam_id, direction=''):
         a['n'] += 1
         if r.student_no not in trimmed and r.score is not None:
             a['trim_vals'].append(r.score)
-        for name, lower in layers_desc(data, r.direction or ''):
+        # 总分线按学生自身组合取线（组合总分线优先，回落方向线）
+        for name, lower in layers_desc(data, r.direction or '',
+                                       selection=r.subject_selection or ''):
             if r.score is not None and r.score >= lower:
                 a['pass'][name] = a['pass'].get(name, 0) + 1
 

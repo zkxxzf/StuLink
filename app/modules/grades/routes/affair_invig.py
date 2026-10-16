@@ -1,4 +1,4 @@
-# StuLink v1.19.49.34 2026-10-12
+# StuLink v1.19.49.35 2026-10-12
 # 考务环节④⑤⑥⑦：核对任课教师 / 考试时间表 / 监考编排 / 监考表导出
 #
 # 用户口径（2026-10-12 定案）：
@@ -792,8 +792,11 @@ def affair_invig_get(aid):
                        'start': s.start_time or '', 'end': s.end_time or '',
                        'subject': s.subject, 'selection': s.selection or ''} for s in schedules],
         # 2026-10-13：补 capacity —— 矩阵视图（学校张贴格式）行头要显示「容纳人数」
+        # 2026-10-16 用户口径「监考表缺个科目」：补 subject（考场科目/适用选科）——
+        # 此前监考表只显考场号/位置/人数，看不出某个考场是按哪一科（或哪一选科组合）设的。
         'rooms': [{'room_no': r.room_no, 'location': r.location or '',
-                   'capacity': r.capacity} for r in rooms],
+                   'capacity': r.capacity,
+                   'subject': (r.subject or '')} for r in rooms],
         'invig': {f'{k[0]}|{k[1]}': v for k, v in by_key.items()},
     })
 
@@ -1539,6 +1542,19 @@ _WEEKS_CN = ('周一', '周二', '周三', '周四', '周五', '周六', '周日
 _SRC_CN = {'teacher': '任课教师', 'other': '其他监考员', 'unknown': ''}
 
 
+def _room_subject_label(room):
+    """考场科目的显示文案（监考表页面与导出共用）
+
+    2026-10-16 用户口径「监考表缺个科目」。内部约定：``默认``/``通用``/``全部``/空
+    都表示"不限科目"，页面上统一显示「全科」（与环节②考场设置的下拉口径一致），
+    避免把内部词「默认」直接贴到学校张贴表上。
+    """
+    s = (getattr(room, 'subject', '') or '').strip()
+    if s in ('', '默认', '通用', '全部'):
+        return '全科'
+    return s
+
+
 def _matrix_days(schedules):
     """场次按日期分组（组内保持 _schedule_key 顺序）→ [{'date': date, 'items': [s]}]"""
     days = []
@@ -1587,7 +1603,7 @@ def affair_export_invig(aid):
 
     days = _matrix_days(schedules)
     ordered = [s for d in days for s in d['items']]
-    lead = 3                       # 左侧固定列：考场号 / 容纳人数 / 考场位置
+    lead = 4                       # 左侧固定列：考场号 / 容纳人数 / 考场位置 / 科目（2026-10-16 加）
     ncol = lead + len(ordered)
 
     thin = Side(style='thin', color='9AA5B1')
@@ -1651,10 +1667,12 @@ def affair_export_invig(aid):
                   font=head_font, fill=head_fill)
         col += span
 
-    # ⑤ 左侧三个列头
+    # ⑤ 左侧列头（2026-10-16 用户口径「监考表缺个科目」：末列补「科目」，
+    #    与页面监考表矩阵同源显示考场科目/适用选科）
     paint(5, 1, 5, 1, '考场号', font=head_font, fill=head_fill)
     paint(5, 2, 5, 2, '容纳人数', font=head_font, fill=head_fill)
     paint(5, 3, 5, 3, '考场位置', font=head_font, fill=head_fill)
+    paint(5, 4, 5, 4, '科目', font=head_font, fill=head_fill)
 
     # ⑥ 数据行（一格一位老师；多监考位用「、」并列；空格标「待排」）
     row = 6
@@ -1662,6 +1680,7 @@ def affair_export_invig(aid):
         paint(row, 1, row, 1, pad2(rm.room_no))
         paint(row, 2, row, 2, rm.capacity if rm.capacity else '')
         paint(row, 3, row, 3, rm.location or '')
+        paint(row, 4, row, 4, _room_subject_label(rm))
         for i, s in enumerate(ordered):
             names = [n for n in (at.get((s.id, rm.room_no), {}).get(k, '')
                                  for k in range(1, slots + 1)) if n]
@@ -1709,9 +1728,10 @@ def affair_export_invig(aid):
     ws.column_dimensions['A'].width = 13
     ws.column_dimensions['B'].width = 12
     ws.column_dimensions['C'].width = 16
+    ws.column_dimensions['D'].width = 12      # 科目（2026-10-16 新增列）
     for i in range(lead + 1, ncol + 1):
         ws.column_dimensions[get_column_letter(i)].width = 12
-    ws.freeze_panes = 'D6'
+    ws.freeze_panes = 'E6'                   # 左侧 4 列固定（新增科目列后右移一格）
     ws.print_title_rows = '1:5'          # 打印时每页重复表头
     ws.page_setup.orientation = 'landscape'
 

@@ -34,7 +34,7 @@ config_mod.Config.SQLALCHEMY_BINDS = {
     'history': 'sqlite:///' + os.path.join(_TMP, 'history.db'),
     'grades': 'sqlite:///' + os.path.join(_TMP, 'grades.db'),
     'points': 'sqlite:///' + os.path.join(_TMP, 'points.db'),
-    # 2026-10-13（v1.19.49.34）：德育奖惩库
+    # 2026-10-13（v1.19.49.35）：德育奖惩库
     'morality': 'sqlite:///' + os.path.join(_TMP, 'morality.db'),
     'academic': 'sqlite:///' + os.path.join(_TMP, 'academic.db'),
     # 2026-10-10：教务分库——查课 / 业绩 / 表单 各自独立库
@@ -2284,12 +2284,23 @@ def check_inspection():
         r = c.get(u['insp_lookup'] + f'?date={today_str}&teacher_uid=T900001')
         look = r.get_json() or {}
         courses = look.get('courses') or []
+        # 2026-10-17：原先断言 `len(courses) == 2`（今天补的两条课）。
+        # 但前面的 BULKOFF 夹具会把「高一01班 语文」换到**周六第 8 节**并留下生效记录，
+        # 于是"今天是周六"时反查会多出一条 → 全量跑必红（单独跑 INSPECTION 却绿，
+        # 典型的跨 item 残留 + 星期依赖）。断言本意是"按教师带出班级/科目/节次"，
+        # 改成校验今天那两条都在、且返回的都确实是这位教师的语文课，
+        # 不再把其它夹具的残留当成失败（改动前的代码今天跑同样红，已对照确认）。
         case('反查接口：按教师带出当天课（班级 / 科目 / 节次）',
-             r.status_code == 200 and look.get('success') and len(courses) == 2
+             r.status_code == 200 and look.get('success')
              and any(cc['class_name'] == '01班' and cc['subject'] == '语文'
                      and cc['grade'] == '高一' and cc['period'] == 3
+                     for cc in courses)
+             and any(cc['class_name'] == '01班' and cc['subject'] == '语文'
+                     and cc['grade'] == '高二' and cc['period'] == 4
+                     for cc in courses)
+             and all(cc['teacher_uid'] == 'T900001' and cc['subject'] == '语文'
                      for cc in courses),
-             f'{r.status_code} {str(look)[:160]}')
+             f'{r.status_code} {str(look)[:200]}')
 
         # 叠加当天临时调课：把「李数学 周一第3节」调到今天第9节 ——
         # 反查应带出调入的第9节（is_temp_swap=True），且当天不再出现原时段。
@@ -2499,8 +2510,67 @@ def check_inspection_mark():
         # 右键=缺课·调课·迟到说明（快捷直达，页面顶部写明操作方式）
         case('标记改版：页面写明 单击/双击/右键（缺课 → 缺勤）',
              '单击=正常' in html and '双击=迟到' in html and '右键=缺勤' in html)
+        # 2026-10-16 UI 优化：那行长句操作说明不再常驻工具栏，收进 ⓘ 的 title
+        # （用户口径「页面少放说明文字，细则进悬浮提示」）；文案不变，只是位置变了。
+        case('操作说明收进信息图标悬浮提示（不再常驻页面）',
+             'bi-info-circle' in html and 'title="单击=正常' in html)
         case('图例含「考试」新状态', '>考试</span>' in html)
         case('原「标记面板」五大结果按钮已移除', 'data-result=' not in html)
+
+        # ── 2026-10-16 单节查课 UI 优化（巡课视角：一眼看出哪些班还没查）──
+        pov = c.get(u['insp_live'] + '?view=period&date=' + today.isoformat()).get_data(as_text=True)
+        case('单节视图：卡片带查课状态类（未查/已标记一眼可分）',
+             'pov-card can chk-' in pov)
+        case('单节视图：学科色点复用课表配色（--sch）',
+             'class="dot" style="--sch:' in pov)
+        case('单节视图：卡片可键盘操作（role=button + tabindex + aria-label）',
+             'role="button"' in pov and 'tabindex="0"' in pov and 'aria-label=' in pov)
+        case('单节视图：「换人」默认淡出、hover 才显形（不再 30 个按钮常驻）',
+             '.pov-act {' in pov and 'opacity: 0;' in pov and '.pov-card:hover .pov-act' in pov)
+        case('单节视图：节次下拉标注有课数 / 空档',
+             '课</option>' in pov and '· 空</option>' in pov)
+        case('单节视图：图例直接复用徽标类（不再手抄一份色值）',
+             'chk-legend' in pov and 'ovw-chk ovw-chk-exam' in pov)
+        case('单节视图：右键菜单走 --sl-* 变量（深色主题可读）',
+             '.chk-menu { position: absolute; z-index: 3000; background: var(--sl-surface);' in pov)
+        case('单节视图：窄屏有断点（375px 下也不抖动）', 'max-width: 575.98px' in pov)
+        case('单节视图：「调走」与「空档」样式分开',
+             '.pov-card.moved' in pov and '.pov-card.empty' in pov)
+
+        js = io.open(os.path.join(BASE, 'app/static/js/inspection_live.js'),
+                     encoding='utf-8').read()
+        case('交互修复：连点不同卡片不再误标迟到（timer 挂元素）',
+             "$el.data('clickTimer'" in js and 'var clickTimer = null;' not in js)
+        case('交互修复：切日期/点「今天」保留单节视图与节次',
+             "p.view = 'period';" in js and 'p.period = pn;' in js)
+        case('交互修复：只读账号的覆盖率不被 JS 清零',
+             'if (!cfg.canMark) { return; }' in js)
+        case('交互修复：触屏长按开菜单 + 菜单贴边收敛',
+             'touchstart' in js and 'pressMoved' in js and 'window.innerWidth - w' in js)
+        case('交互修复：键盘 Enter/空格＝正常',
+             "ev.key !== 'Enter'" in js and "markCell($(this), 'normal', '')" in js)
+        case('交互修复：toast 走全局 stuToast（不再自拼白底）',
+             "typeof window.stuToast === 'function'" in js
+             and "typeof window.toast === 'function'" not in js)
+        case('单节视图：「保存本节 / 通知领导」可统计卡片（periodCells 扩到 .pov-card）',
+             'povContainer .pov-card[data-check][data-period=' in js
+             and 'function currentSavePeriod()' in js)
+        case('单节视图：标记后卡片状态色跟着变（不只是徽标）',
+             "removeClass('chk-none chk-normal chk-late chk-absent chk-swap chk-exam chk-other')" in js)
+        # ── 2026-10-16 收尾（遗留项）──
+        case('单节视图：批量操作后有「撤销上一次批量」入口（平时隐藏）',
+             'btnUndoBatch' in pov and 'd-none' in pov and 'undoBatchN' in pov)
+        case('撤销批量：把上次那批格子改回未查（result=空串）',
+             'lastBatch' in js and "$.extend({}, c, { result: '' })" in js)
+        src = io.open(os.path.join(BASE, 'app/modules/academic/routes/inspection.py'),
+                      encoding='utf-8').read()
+        _j = src.find('data = schedule_service.get_day_matrix')
+        case('单节视图不再装配全天矩阵（get_day_matrix 只在 else 分支）',
+             _j > 0 and src.rfind('else:', 0, _j) > src.rfind("if view == 'period':", 0, _j))
+        _css = io.open(os.path.join(BASE, 'app/static/css/theme.css'),
+                       encoding='utf-8').read()
+        case('主题层不再有 .ovw-chk-none 死规则（生效的是 schedule_matrix.css）',
+             '.ovw-chk-none { background: var(--sl-surface-3)' not in _css)
 
         token = get_csrf(c, u['insp_live'])
         hdrs = {'X-CSRFToken': token}
@@ -2605,10 +2675,53 @@ def check_inspection_mark():
              r.status_code in (400, 403) and leaked == 0,
              f'{r.status_code}/leaked={leaked}')
 
+    # 2026-10-16：单节视图的数据层口径（周次过滤 / 「调走」标志 / 节次有课数）
+    with app.app_context():
+        from app.modules.academic.services import swap_service as _sw
+        from app.modules.academic.services import term_service as _ts
+        sched, wk = _ts.resolve_schedule_by_date(today)
+        case('单节视图：节次有课数（供下拉标注与缺省节次）',
+             bool(sched) and _sw.count_period_classes(sched.id, today, week=wk).get(3, 0) >= 1)
+        rows = _sw.build_live_schedule(sched.id, today, 3, week=wk)
+        case('单节视图：每行都带 is_moved_away 标志（区分"调走"与"空档"）',
+             all('is_moved_away' in r for rs in rows.values() for r in rs))
+        # 2026-10-16 边界遍历抓到的 500：年级筛选传的是**单个年级字符串**，
+        # `column.in_(str)` 在 SQLAlchemy 2.0 下抛 ArgumentError → 单节视图整页 500
+        try:
+            _c1 = _sw.count_period_classes(sched.id, today, week=wk, grade_filter='高一')
+            case('count_period_classes 接受单年级字符串（不抛 ArgumentError）',
+                 isinstance(_c1, dict), str(_c1))
+        except Exception as _e:      # noqa: BLE001
+            case('count_period_classes 接受单年级字符串（不抛 ArgumentError）',
+                 False, f'{type(_e).__name__}: {_e}')
+        if wk is not None:
+            # 造一条"周次不覆盖本周"的课：单节视图应与全天矩阵一样按空档处理
+            far = f'{wk + 30}-{wk + 31}'
+            e = ScheduleEntry(term_schedule_id=TS_ID, grade='高一', class_name='01班',
+                              weekday=today.isoweekday(), period_number=9,
+                              subject='地理', teacher_uid='T900001',
+                              teacher_name='张语文', room='101',
+                              week_range=far, entry_type='normal')
+            db.session.add(e)
+            db.session.commit()
+            try:
+                off = _sw.build_live_schedule(sched.id, today, 9, week=wk)
+                on = _sw.build_live_schedule(sched.id, today, 9, week=None)
+                n_off = sum(1 for rs in off.values() for r in rs if r.get('subject'))
+                n_on = sum(1 for rs in on.values() for r in rs if r.get('subject'))
+                case('单节视图：周次不覆盖的课按空档处理（与全天矩阵同口径）',
+                     n_off == 0 and n_on >= 1, f'{n_off}/{n_on}')
+                case('单节视图：周次不覆盖的课标出 week_miss（卡片写「本周不上」）',
+                     any(r.get('week_miss') == far for rs in off.values() for r in rs),
+                     str([r.get('week_miss') for rs in off.values() for r in rs if r.get('week_miss')]))
+            finally:
+                db.session.delete(e)
+                db.session.commit()
+
 
 @item('SWAPEXCH')
 def check_two_person_exchange():
-    """两人换课（v1.19.49.34）：换时段 / 换班上课 / 请人代课 × 临时与永久，
+    """两人换课（v1.19.49.35）：换时段 / 换班上课 / 请人代课 × 临时与永久，
     覆盖「对方先确认 → 教务审批 → 执行」全链路 + 拒绝 / 越权 / 校验路径。"""
     from app.modules.academic.services import swap_service
 
@@ -2933,7 +3046,7 @@ def check_swap_exchange_batch():
 
 @item('SWAPMIXED')
 def check_swap_mixed_batch():
-    """调课页合并（v1.19.49.34）：一次提交 = 几节调空档 + 几节与同事换上课时间（同一批次）；
+    """调课页合并（v1.19.49.35）：一次提交 = 几节调空档 + 几节与同事换上课时间（同一批次）；
     2026-10-14：对调只换时间（不再连班级一起换）。"""
     from app.models.timetable import ScheduleEntry, ScheduleSwap
     from app.modules.academic.services import swap_service
@@ -3272,7 +3385,7 @@ def check_swap_bulk_offset():
 
 @item('WORKBENCHSWAP')
 def check_workbench_swap():
-    """教师工作台里的调课区块（v1.19.49.34）：入口 + 待我确认 + 我的申请。"""
+    """教师工作台里的调课区块（v1.19.49.35）：入口 + 待我确认 + 我的申请。"""
     with app.test_client() as c:
         login(c, 'ac_admin', TEST_PWD)
         r = c.get('/workbench/')      # 蓝图前缀 /workbench + 路由 '/'（不带斜杠会 308）

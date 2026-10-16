@@ -152,23 +152,27 @@ def _t_score_segments(user, exam_id=0, class_name='', by_rank=False, **kw):
 
 
 def _t_layer_online(user, exam_id=0, subject=TOTAL_SUBJECT, **kw):
-    """分层上线统计（各层上线人数/上线率，全年级）。
+    """分层上线统计（各层分数线 + 上线人数/上线率，全年级）。
 
     2026-10-15 用户口径：属年级成绩分析结果 → **公开**（不再按所教学科或总分口径收窄）；
     逐生名单仍按班/科收敛。
+    同日补：带上各层分数线 `lines`（按方向/选科组合分别划）——与网页「划线分层」
+    只读展示、MCP `get_layer_online_stats` 三端口径一致。
     """
     exam, scope = _exam(user, exam_id, kw.get('default_exam_id'))
     data = st.cached_exam_data(exam.id)
     stats = pivot_service.layer_pass_stats(data, subject)
     if not stats:
         raise ValueError(f'该考试「{subject}」尚未划线，无法统计上线人数')
+    lines = st.band_lines(exam.id, subject)      # 各层分数线（方向级 + 组合级）
     # stats 形如 {'layers': [...], 'rows': [{class_name:…, 层名…}]}
     rows = stats.get('rows') if isinstance(stats, dict) else stats
     if isinstance(stats, dict) and isinstance(rows, list):
         return ({'exam_id': exam.id, 'exam_name': exam.name, 'subject': subject,
-                 'layers': stats.get('layers'), 'rows': rows}, f'{len(rows)} 个班')
+                 'lines': lines, 'layers': stats.get('layers'), 'rows': rows},
+                f'{len(rows)} 个班 · 分数线 {len(lines)} 条')
     return ({'exam_id': exam.id, 'exam_name': exam.name, 'subject': subject,
-             'stats': stats}, '分层上线统计')
+             'lines': lines, 'stats': stats}, '分层上线统计')
 
 
 def _t_class_subject_report(user, exam_id=0, class_name='', **kw):
@@ -462,8 +466,9 @@ TOOLS = [
              'by_rank': {'type': 'boolean', 'description': 'true=名次段，默认 false=分数段'}},
             ('exam_id',)),
     _schema('layer_online',
-            '各班 × 各分层线的累计上线人数与上线率（subject 默认"总分"，也可传单科）。'
-            '做"特控/本科上线率"类分析用它。未划线会报错。',
+            '各班 × 各分层线的累计上线人数与上线率（subject 默认"总分"，也可传单科），'
+            '并给出各层**分数线**（lines：按方向/选科组合分别划）。'
+            '做"特控/本科上线率"类分析、或回答"这次本科线多少分"都用它。未划线会报错。',
             {'exam_id': _P_EXAM,
              'subject': {'type': 'string', 'description': '科目名，默认 "总分"'}},
             ('exam_id',)),

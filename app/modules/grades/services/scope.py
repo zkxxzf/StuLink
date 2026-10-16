@@ -1,4 +1,4 @@
-# StuLink v1.19.49.34 2026-10-14
+# StuLink v1.19.49.35 2026-10-14
 # 成绩模块数据范围解析（P2：委托 app.utils.scope 唯一口径，保留本模块公开 API）
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 """成绩模块数据范围（唯一口径的薄封装）
@@ -59,11 +59,22 @@ def visible_grades(user):
 
 
 def visible_classes(user):
-    """可见 (grade, class_name) 列表"""
+    """可见 (grade, class_name) 列表；None = 不受班级约束（全校 / 整年级授权）"""
     if user.role == 'admin':
         return None  # 管理员不限班（2026-10-12 P0-2，与 get_scope 特判同口径）
-    if user_grade_scope(user) is not None:
-        return None  # 用户级授权：不限班（年级级过滤在上层完成）
+    # 2026-10-15 审计修复（P0）：用户级数据范围（UserDataScope）**可能带班级白名单**
+    # （user_data_scopes.class_name 有值 = 仅该班）。此前一律返回 None（=不限班）→
+    # 「只授权 01 班」的账号在分析/导出/对比里能读别的班逐生数据，与
+    # student_in_scope / MCP score_guard（R4 按班收窄）相矛盾。
+    from app.utils.scope import user_scope_detail
+    _has, _grade_wide, _pairs = user_scope_detail(user)
+    if _has:
+        if not _pairs:
+            return None                     # 全部整年级授权（行为与改造前一致）
+        if not _grade_wide:
+            return sorted(_pairs)           # 全部班级级授权：精确到班（fail-closed）
+        # 混合形态：与 utils.scope.resolve_scope 同一取舍（数据完整优先＝按整年级）
+        return None
     scope, grade = get_scope(user)
     if scope == SCOPE_SCHOOL or scope == SCOPE_GRADE:
         return None  # 全校/全年级（不限班）

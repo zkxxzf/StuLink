@@ -1,4 +1,4 @@
-# StuLink v1.19.49.34 2026-10-10
+# StuLink v1.19.49.35 2026-10-10
 # 教务 · 查课：统计页（列表筛选 / 月度统计 / 导出 / 图表API）+ 独立录入页（单条/批量）
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 import io
@@ -599,7 +599,10 @@ def inspection_delete(rid):
 # ══════════════════════════════════════════════════════════════════════
 
 def _resolve_live_params():
-    """解析实时课表公共参数：返回 (schedule, periods, target_date, period, grade, current_period)。"""
+    """解析实时课表公共参数。
+
+    返回 (schedule, periods, target_date, period, grade, current_period, week)。
+    """
     sched = swap_service.get_active_schedule()
     periods = swap_service.get_periods(sched.id) if sched else []
     date_str = (request.args.get('date') or '').strip()
@@ -609,7 +612,10 @@ def _resolve_live_params():
     if not period:
         period = current_period or (periods[0].period_number if periods else 1)
     grade = (request.args.get('grade') or '').strip()
-    return sched, periods, target_date, period, grade, current_period
+    # 2026-10-16：单节 JSON 也带周次，供 build_live_schedule 与全天矩阵同口径过滤
+    from app.modules.academic.services import term_service
+    _week = term_service.resolve_schedule_by_date(target_date)[1]
+    return sched, periods, target_date, period, grade, current_period, _week
 
 
 def _parse_iso_date(value):
@@ -678,10 +684,19 @@ def inspection_live_schedule():
     if visible is not None and grade and grade not in visible:
         abort(403)
     grade_filter = grade or (sorted(visible) if visible is not None else None)
-    data = schedule_service.get_day_matrix(
-        sched.id, target_date, week=week, grade=grade_filter,
-        allowed_classes=class_scope)
-    _attach_checks(data, target_date, current_user)
+    # 2026-10-16：单节视图**不渲染**全天矩阵 → 不再装配它（原实现无条件跑一遍
+    # get_day_matrix + _attach_checks，等于多一次全天课表查询 + 一次全天查课记录查询，
+    # 结果整份 data 一个格子都没用上）。单节视图只需要节次表与当前节次。
+    if view == 'period':
+        _pds = swap_service.get_periods(sched.id)
+        data = {'periods': [p.to_dict() for p in _pds],
+                'current_period_number': swap_service.current_period_number(_pds),
+                'checked_total': 0, 'expected_total': 0}
+    else:
+        data = schedule_service.get_day_matrix(
+            sched.id, target_date, week=week, grade=grade_filter,
+            allowed_classes=class_scope)
+        _attach_checks(data, target_date, current_user)
 
     # 2026-10-13：单节课表视图 —— 只看一节，按年级分块列出各班任课教师（可就地发起代课/调课）
     pov_period = None
@@ -689,9 +704,18 @@ def inspection_live_schedule():
     if view == 'period':
         period_defs = swap_service.get_periods(sched.id)
         current_period = swap_service.current_period_number(period_defs)
-        pov_period = (request.args.get('period', type=int) or current_period
-                      or (period_defs[0].period_number if period_defs else 1))
-        pov_blocks, pov_stats = _period_overview_data(sched, target_date, pov_period, grade)
+        # 2026-10-16：各节次「有课数」——下拉里标出来（第2节 · 30课 / 空档标「空」），
+        # 缺省节次也不再落到无课的节次（夜里打开时 current_period 为 None，
+        # 原先退到第一个节次 = 早读，整页空档，看起来像坏了）
+        counts = swap_service.count_period_classes(
+            sched.id, target_date, week=week, grade_filter=grade_filter,
+            allowed_classes=class_scope)
+        pov_period = (request.args.get('period', type=int)
+                      or _pick_period(period_defs, counts, current_period))
+        for _p in (data.get('periods') or []):
+            _p['has_class'] = counts.get(_p.get('period_number'), 0)
+        pov_blocks, pov_stats = _period_overview_data(sched, target_date, pov_period,
+                                                      grade, week=week)
         # 2026-10-14：单节视图同样可标记查课 —— 附上该节已有标记与覆盖率口径
         pov_stats.update(_attach_period_checks(pov_blocks, target_date, pov_period,
                                                current_user))
@@ -719,7 +743,7 @@ def inspection_live_schedule():
 @perm_required('academic.view')
 def api_inspection_live_schedule():
     """实时课表 JSON：供前端切换节次/年级时无刷新局部加载。"""
-    sched, periods, target_date, period, grade, current_period = _resolve_live_params()
+    sched, periods, target_date, period, grade, current_period, week = _resolve_live_params()
     if not sched:
         return jsonify({'success': False, 'message': '尚未建立学期课表'}), 400
     visible = visible_academic_grades(current_user)
@@ -729,7 +753,7 @@ def api_inspection_live_schedule():
     grade_filter = grade or (sorted(visible) if visible is not None else None)
     data = swap_service.build_live_schedule(
         sched.id, target_date, period, grade_filter,
-        allowed_classes=class_scope)
+        allowed_classes=class_scope, week=week)
     return jsonify({'success': True, 'message': 'ok', 'data': {
         'date': target_date.isoformat(),
         'period': period,
@@ -914,11 +938,31 @@ def _period_blocks(data):
     return blocks
 
 
-def _period_overview_data(sched, target_date, period, grade):
+def _pick_period(period_defs, counts, current_period):
+    """单节视图的缺省节次：当前节次有课就用它；否则就近找有课的节次。
+
+    2026-10-16：夜里（非当堂）打开页面时 current_period 为 None，原实现退到第一个
+    节次（早读 / 课间，通常无课）→ 整页空档。现在改成「从当前节次起就近找一个有课的」，
+    再退到当前节次 / 第一节。
+    """
+    nums = [p.period_number for p in (period_defs or [])]
+    if not nums:
+        return current_period or 1
+    if current_period and counts.get(current_period):
+        return current_period
+    start = nums.index(current_period) if current_period in nums else 0
+    for n in nums[start:] + list(reversed(nums[:start])):
+        if counts.get(n):
+            return n
+    return current_period or nums[0]
+
+
+def _period_overview_data(sched, target_date, period, grade, week=None):
     """单节总览数据（页面首屏与 JSON 接口共用）：返回 (blocks, stats)。
 
     - 受限账号（年级 / 班级数据范围）只下发范围内的班级，越界年级直接 403；
-    - 班级数量按课表数据动态派生，不假设每年级固定班数。
+    - 班级数量按课表数据动态派生，不假设每年级固定班数；
+    - week 与全天矩阵同口径（单双周 / 限定周次的课不在本周就显示为空档）。
     """
     visible = visible_academic_grades(current_user)
     class_scope = visible_academic_class_scope(current_user)
@@ -926,7 +970,7 @@ def _period_overview_data(sched, target_date, period, grade):
         abort(403)
     grade_filter = grade or (sorted(visible) if visible is not None else None)
     data = swap_service.build_live_schedule(sched.id, target_date, period, grade_filter,
-                                            allowed_classes=class_scope)
+                                            allowed_classes=class_scope, week=week)
     blocks = _period_blocks(data)
     total_classes = sum(b['total'] for b in blocks)
     total_scheduled = sum(b['scheduled'] for b in blocks)
@@ -969,6 +1013,9 @@ def _attach_period_checks(blocks, target_date, period, user):
 
 @bp.route('/inspection/quick-swap', methods=['POST'])
 @login_required
+@perm_required('academic.swap')   # 2026-10-16 第八轮审计：发起调课/代课属写操作，
+#                                  此前本文件唯一只挂 login 的写端点（其余 19 个均有权限点），
+#                                  任何登录账号都能发起调课链路；权限点与 swap_apply/swap_cover 一致。
 def inspection_quick_swap():
     """单节总览 → 就地发起「代课 / 调课」（2026-10-13 新增）。
 
