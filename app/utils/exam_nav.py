@@ -22,7 +22,7 @@ SECTION_LABELS = {
     'analysis': '成绩分析',
 }
 
-# v1.19.49.35 考务向导 7 个环节（/grades/affairs/<aid> 的页签 #t1~#t7）。
+# v1.19.50.35 考务向导 7 个环节（/grades/affairs/<aid> 的页签 #t1~#t7）。
 # 侧栏悬浮栏原先只画 4 个圆点（建考试/考务/导入/分析），与考务页真实的 7 个环节对不上；
 # 这里给出 7 环节的标签与完成判定，供模板渲染「当前所处环节」高亮 —— 只亮当前这一步，
 # 不是把前面的全部点亮（用户口径 2026-10-12）。
@@ -40,7 +40,7 @@ AFFAIR_STEPS = (
 _EP_SECTION = (
     ('grades.exam_ai_import', 'import'),
     ('grades.exam_import', 'import'),
-    # v1.19.49.35 划线分层单独一段：原先归到 'import' 导致侧栏「成绩导入」「划线分层」同时高亮
+    # v1.19.50.35 划线分层单独一段：原先归到 'import' 导致侧栏「成绩导入」「划线分层」同时高亮
     ('grades.bands_page', 'bands'),
     ('grades.exam_affair_go', 'affair'),
     ('grades.affair', 'affair'),
@@ -131,7 +131,7 @@ def _resolve():
     if exam is None:
         return None
     if affair is None:
-        # v1.19.49.35：**任何**进入考试态的页面都要取本场考务批次。
+        # v1.19.50.35：**任何**进入考试态的页面都要取本场考务批次。
         # 此前只在 sec == 'affair' 时查，导致成绩导入/划线分层/分数修改记录等页面里
         # affair 恒为 None → 侧栏「考务安排」永远挂「待做」、进度显示 3/4 步，
         # 而本场考务其实早已编排完成（有考场·座号·考号）。
@@ -147,7 +147,7 @@ def _resolve():
         {'label': '成绩分析', 'done': banded, 'key': 'analysis'},
     ]
 
-    # v1.19.49.35 考务向导 7 环节：完成状态 + 当前所处环节（由 URL hash / 查询参数决定）。
+    # v1.19.50.35 考务向导 7 环节：完成状态 + 当前所处环节（由 URL hash / 查询参数决定）。
     # 仅考务页（affair 段）需要，其他页为 []（侧栏仍按 4 步渲染）。
     affair_steps = []
     if sec == 'affair' and affair is not None:

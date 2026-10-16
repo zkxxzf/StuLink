@@ -1,4 +1,4 @@
-# StuLink v1.19.49.35 2026-10-10
+# StuLink v1.19.50.35 2026-10-10
 # 成绩统计分析服务：一次载入考试成绩数据，提供各 tab 需要的聚合（纯函数 + 内存计算）
 # 口径遵循设计文档第 8 章：参考学生=有总分行（至少一应考科有分），不分学籍状态
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
@@ -92,7 +92,7 @@ def clear_exam_data_cache(exam_id=None):
     会把全部 3 场常驻快照（每场 2 万+ ORM 对象、约 30~50MB）一起丢弃重建，
     导致任何人在改分后打开任意一场考试的分析页都要重新全量拉取。
 
-    v1.19.49.35 审核修正：两个缓存都受 _exam_data_lock 保护，清空时同样持锁，
+    v1.19.50.35 审核修正：两个缓存都受 _exam_data_lock 保护，清空时同样持锁，
     避免与 cached_exam_data / exam_score_means 的读写产生 LRU 一致性问题（
     OrderedDict.clear() 在 CPython GIL 下虽安全，但与 move_to_end/popitem 无锁读写同存时仍不严谨）。"""
     with _exam_data_lock:
@@ -205,7 +205,7 @@ class ExamData:
                 rows = [t for t in rows if t['direction'] == direction]
             if selection:
                 rows = [t for t in rows if (t.get('selection') or '') == selection]
-            # v1.19.49.35 审核修正：不直接返回内部共享 list（_by_class 值），
+            # v1.19.50.35 审核修正：不直接返回内部共享 list（_by_class 值），
             # 防止 caller 一旦 append/sort/pop 就会污染进程级 ExamData 缓存 900s。
             # list(rows) 仅拷贝外层引用，内层 snap 字典依旧只读共享，开销 O(班人数) 仍可接受。
             return list(rows)
@@ -835,7 +835,7 @@ def exam_score_means(grade, subjects, direction=None, class_name=None):
     with _exam_data_lock:
         ent = _exam_means_cache.get(key)
         if ent is not None and time.time() - ent[0] < _EXAM_DATA_TTL:
-            # v1.19.49.35 审核修正：返回时拷贝外层与 means/counts 内层，
+            # v1.19.50.35 审核修正：返回时拷贝外层与 means/counts 内层，
             # 避免 caller 就地修改污染进程级缓存（当前 caller 均为只读，修修正防未来变更）。
             cached = ent[1]
             return {eid: {**info,

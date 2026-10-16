@@ -10,7 +10,7 @@
 </style>
 {% endblock %}
 {% block content %}
-{# v1.19.49.35 考试态：侧栏入口带 ?exam=<id>（此前这里只认 exam_id，本场 id 被丢掉）。
+{# v1.19.50.35 考试态：侧栏入口带 ?exam=<id>（此前这里只认 exam_id，本场 id 被丢掉）。
    统一先问 exam_nav()（认 ?exam / exam_id / 路径），考试态下隐藏「考试」下拉（只看本场）。 #}
 {% set _en = exam_nav() %}
 {% set _eid = _en.exam_id if _en else (request.args.get('exam') or request.args.get('exam_id') or '') %}
