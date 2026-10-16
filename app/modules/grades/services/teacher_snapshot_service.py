@@ -1,6 +1,6 @@
-# StuLink v1.19.49.34 2026-10-10
+# StuLink v1.19.49.35 2026-10-10
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
-"""考试任课快照服务（v1.19.49.34）
+"""考试任课快照服务（v1.19.49.35）
 
 背景：`TeacherSubjectLink` 只存"当前"任课映射。教师一换（尤其重新分班后），
 历史考试的教师维度分析会全部归到现在的教师名下，上线率/去差均分排名失真。
@@ -19,10 +19,16 @@
 """
 from __future__ import annotations
 
+import logging
+
+from sqlalchemy.exc import IntegrityError
+
 from app.extensions import db
 from app.models.grades import ExamTeacherLink, TeacherSubjectLink
 
-# v1.19.49.34 班主任也归入同一张快照表：它和任课教师一样是“本场考试该班的老师”，
+logger = logging.getLogger(__name__)
+
+# v1.19.49.35 班主任也归入同一张快照表：它和任课教师一样是“本场考试该班的老师”，
 # 区别仅在于任课老师看单科成绩、班主任看总分。用伪科目名占位，不污染 SUBJECTS。
 HEAD_SUBJECT = '班主任'
 
@@ -81,7 +87,7 @@ def snapshot_exam(exam, source='import', rows=None, replace=False):
             for l in TeacherSubjectLink.query.filter_by(
                 grade=exam.grade, active=True).all()
         ]
-        # v1.19.49.34 班主任一并快照（以前只存了任课老师，历史考试的班主任会跟到现在）
+        # v1.19.49.35 班主任一并快照（以前只存了任课老师，历史考试的班主任会跟到现在）
         rows += _current_headteacher_rows(exam.grade)
 
     # 姓名补全（无 user_id 时留空，由调用方给 teacher_name）
@@ -117,6 +123,11 @@ def links_of(exam_id, grade='', auto_backfill=True):
     """读某场考试的任课快照；为空且 auto_backfill → 用当前映射生成（source=backfill）。
 
     返回 ExamTeacherLink 列表（可能为空）。惰性生成会自行 commit。
+
+    2026-10-16 第九轮审计（PERF-P07）：惰性回填发生在**GET 读路径**上，多个请求同时
+    看到空表会各插同一批 `(exam_id, class_name, subject)`，后提交者撞唯一索引
+    `uq_exam_cls_subj` → IntegrityError → 500。改为撞索引就回滚重读（对方已写好，
+    结果一致），把并发冷启从 500 变成正常返回。
     """
     rows = ExamTeacherLink.query.filter_by(exam_id=exam_id).all()
     if rows or not auto_backfill:
@@ -127,7 +138,11 @@ def links_of(exam_id, grade='', auto_backfill=True):
         return []
     n = snapshot_exam(exam, source='backfill')
     if n:
-        db.session.commit()
+        try:
+            db.session.commit()
+        except IntegrityError:
+            db.session.rollback()
+            logger.info('links_of 并发回填撞唯一索引，已回滚重读（exam_id=%s）', exam_id)
         rows = ExamTeacherLink.query.filter_by(exam_id=exam_id).all()
     return rows
 

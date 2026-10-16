@@ -1,5 +1,5 @@
-/* StuLink v1.19.49.34 2026-10-10 全局对比
- * 班级 × 学科宽表：固定列（年级/班级/人数/方向/属性）+ 每科（去差均分 + 各分数线）。
+/* StuLink v1.19.49.35 2026-10-10 全局对比
+ * 班级 × 学科宽表：固定列（年级/班级/人数/方向/组合/属性）+ 每科（去差均分 + 各分数线）。
  * 分数线可选：默认勾选 211线/特控线/本科线，其余层（清北/985…）勾选才显示；
  * 班主任并入「总分」格下方（不再单列），各科成绩下方为本场任课教师快照。
  * 依赖：jQuery（base.html 全局）；数据源 /grades/api/global-compare/report。
@@ -41,6 +41,18 @@
         var cls = d === '物理' ? 'ld-dir-phy' : (d === '历史' ? 'ld-dir-his' : 'ld-dir-all');
         return '<span class="ld-dir ' + cls + '">' + esc(d) + '</span>';
     }
+    /* 2026-10-15 组合列：本行（班级/小计/总计）的选科组合分布。
+       多组合竖排（人数降序，后端已排好），title 给完整明细；未分科无组合 → 「—」。 */
+    function selHtml(list) {
+        if (!list || !list.length) { return '<span class="ld-none">—</span>'; }
+        var tip = list.map(function (s) { return s.name + ' ' + s.count + '人'; }).join('、');
+        var html = '<span class="ld-sels" title="选科组合分布：' + esc(tip) + '">';
+        list.forEach(function (s) {
+            html += '<span class="ld-sel-i">' + esc(s.name)
+                + '<span class="n">' + s.count + '</span></span>';
+        });
+        return html + '</span>';
+    }
 
     /* ---------- 初始化：考试下拉复用成绩模块 /grades/api/options ---------- */
     $.getJSON('/grades/api/options', function (res) {
@@ -60,7 +72,7 @@
             return;
         }
         if (missed) {
-            // v1.19.49.34 本场考试不在可见列表（已删除 / 超出数据范围 / 已毕业）：
+            // v1.19.49.35 本场考试不在可见列表（已删除 / 超出数据范围 / 已毕业）：
             // 不能静默显示最近一场让用户误当本场（考试态下下拉原本隐藏）——
             // 恢复下拉并明确提示。
             $('#ldExam').removeClass('d-none');
@@ -149,7 +161,14 @@
             } else {
                 checkedLines = checkedLines.filter(function (x) { return x !== name; });
             }
-            renderTable(lastData);
+            // 2026-10-16 第九轮审计（PERF-P11）：原先整表重建 innerHTML（22+ 行 × 36 列
+            // ≈2600 节点 + 自动表格布局重排，单次勾选 30-120ms，连点就卡）。
+            // 现在列头与数据格都带 data-line，只切该层显隐；分组表头的 colspan 要跟着
+            // 可见层数缩，否则剩下的列会错位。
+            var key = (window.CSS && window.CSS.escape) ? window.CSS.escape(name) : name;
+            $('#ldTable [data-line="' + key + '"]').toggle(this.checked);
+            $('#ldTable thead tr:first-child th.grp')
+                .attr('colspan', 1 + activeLines().length);
         });
     }
 
@@ -162,9 +181,14 @@
             + ' · ' + (ex.name || '') + (ex.date ? ' · ' + ex.date : '')
             + ' · 共 ' + (d.subject_count != null ? d.subject_count
                 : Math.max(0, (d.subjects || []).length - 1)) + ' 科';
-        var note = '口径：去差均分＝按班型剔除总分末尾 N 人（卓越班 2 人）后均分'
-            + '（总分格下方为班主任、各科格下方为该科任课教师，取本场考试当时的快照）；'
-            + '上线单元格＝人数 / 上线率（按各方向同名单科线判定）；分数线可勾选显示。';
+        var note = '口径：去差均分＝按班型剔除总分末尾 N 人（卓越班 2 人）后均分，'
+            + '其下方小字＝全体均分（不剔人；与去差一致时不显示）；'
+            + '混组合班的班级合计行与其下方各组合明细行：合计行给人数与上线率、'
+            + '不给均分（组合线不同、混算无意义，显示「—」），均分看各组合明细行；'
+            + '方向小计/全年级同款（总计的组合明细与方向小计重复，不再重复列）；'
+            + '上线率按每生各自选科组合的同名单科线逐生判定；'
+            + '总分格下方为班主任、各科格下方为该科任课教师（取本场考试当时的快照）；'
+            + '上线单元格＝人数 / 上线率；分数线可勾选显示。';
         if (d.partial) {
             note += ' ⚠ 本场为分批导入（缺 ' + (d.partial.missing || []).join('、')
                 + '），总分口径不完整。';
@@ -184,11 +208,14 @@
     function renderTable(d) {
         if (!d) { return; }
         var subjects = d.subjects || [];
+        // 2026-10-16 第九轮审计（PERF-P11）：全部层都建列、未勾选的先藏（.ld-line-off），
+        // 勾选时只切显隐，不再整表重建；分组表头 colspan 按**可见**层数算
+        var allLines = d.layers || [];
         var lines = activeLines();
         var per = 1 + lines.length;
 
         var h = ['<div class="ld-wrap"><table class="ld-table" id="ldTable"><thead><tr>'];
-        ['年级', '班级', '班级人数', '方向', '属性'].forEach(function (b, i) {
+        ['年级', '班级', '班级人数', '方向', '组合', '属性'].forEach(function (b, i) {
             h.push('<th rowspan="2" class="'
                 + (i === 0 ? 'c-year' : (i === 1 ? 'c-cls' : '')) + '">' + b + '</th>');
         });
@@ -198,17 +225,24 @@
         h.push('</tr><tr>');
         subjects.forEach(function () {
             h.push('<th class="c-avg">去差<br>均分</th>');
-            lines.forEach(function (n) { h.push('<th>' + esc(lineLabel(n)) + '</th>'); });
+            allLines.forEach(function (n) {
+                h.push('<th data-line="' + esc(n) + '"'
+                    + (lines.indexOf(n) >= 0 ? '' : ' class="ld-line-off"') + '>'
+                    + esc(lineLabel(n)) + '</th>');
+            });
         });
         h.push('</tr></thead><tbody>');
 
         function rowHtml(r) {
             var cls = r.is_grand ? 'grand' : (r.is_subtotal ? 'sub' : '');
+            /* 2026-10-16 组合明细行（小计/总计按选科组合拆出）：底色随父行、去掉加粗 */
+            if (r.is_combo) { cls += (cls ? ' ' : '') + 'combo'; }
             var tds = [
                 '<td class="c-year">' + esc(r.grade || '') + '</td>',
                 '<td class="c-cls">' + esc(r.class_name || '') + '</td>',
                 '<td>' + (r.count == null ? '—' : r.count) + '</td>',
                 '<td>' + dirBadge(r.direction) + '</td>',
+                '<td class="ld-sel">' + selHtml(r.selections) + '</td>',
                 '<td class="ld-type">' + esc(r.class_type || '—') + '</td>'
             ];
             var cells = r.cells || {};
@@ -225,21 +259,47 @@
                     extra = '<div class="ld-teacher" title="本场考试的任课教师">'
                         + esc(c.teacher) + '</div>';
                 }
-                tds.push('<td class="ld-avg">' + fmtAvg(c.trim_avg) + extra + '</td>');
+                /* 2026-10-16 用户要「不'去差'的那种均分」：人数是全体人数，均分也补一个
+                   全体口径（含被剔学生）的小字；两者一致（没剔过人）时不重复显示 */
+                var allAvg = '';
+                if (c.avg !== null && c.avg !== undefined && c.avg !== c.trim_avg) {
+                    allAvg = '<div class="ld-avg-all" title="全体均分（不去差、不剔人）">('
+                        + c.avg + ')</div>';
+                }
+                /* 跨组合的合计行不给均分（物化生/物化地/物化政线各不相同，混算没有可比性）——
+                   2026-10-16 用户口径：班级合计 / 方向小计 / 全年级都是这一档，
+                   均分位显示「—」（班主任/任课教师仍照常显示在下方）。 */
+                if (r.hide_avg) {
+                    tds.push('<td class="ld-avg"><span class="ld-none" title="跨组合合计：'
+                        + '组合不同、线不同，混算均分没有可比性；请看按组合明细行、'
+                        + '上线率见右侧各线列">—</span>' + extra + '</td>');
+                } else {
+                    tds.push('<td class="ld-avg">' + fmtAvg(c.trim_avg) + allAvg + extra + '</td>');
+                }
                 var lm = c.lines || {};
-                lines.forEach(function (n) {
+                allLines.forEach(function (n) {
                     var ln = lm[n] || {};
-                    tds.push('<td class="ld-on">' + fmtOnline(ln.n, ln.rate) + '</td>');
+                    tds.push('<td class="ld-on'
+                        + (lines.indexOf(n) >= 0 ? '' : ' ld-line-off')
+                        + '" data-line="' + esc(n) + '">'
+                        + fmtOnline(ln.n, ln.rate) + '</td>');
                 });
             });
             return '<tr class="' + cls + '">' + tds.join('') + '</tr>';
         }
 
+        /* 小计/总计行 + 其后按组合拆出的明细行（2026-10-16 用户要求：组合列既有
+           分组合人数，去差均分/上线也要按组合给）——同源数据，三个消费方（页面/
+           导出/打印版）都渲染 combo_rows。 */
+        function pushSummary(r) {
+            h.push(rowHtml(r));
+            (r.combo_rows || []).forEach(function (x) { h.push(rowHtml(x)); });
+        }
         (d.groups || []).forEach(function (g) {
             (g.rows || []).forEach(function (r) { h.push(rowHtml(r)); });
-            if (g.subtotal) { h.push(rowHtml(g.subtotal)); }
+            if (g.subtotal) { pushSummary(g.subtotal); }
         });
-        if (d.grand) { h.push(rowHtml(d.grand)); }
+        if (d.grand) { pushSummary(d.grand); }
         h.push('</tbody></table></div>');
         $body.html(h.join(''));
 
