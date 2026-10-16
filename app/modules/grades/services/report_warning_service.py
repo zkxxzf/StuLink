@@ -1,4 +1,4 @@
-# StuLink v1.19.49.34 2026-10-10
+# StuLink v1.19.49.35 2026-10-10
 # 成绩汇报区 · 压线提醒：总分层线上下浮动范围内的临界生名单（含各科成绩与方向排名）
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 from app.models.grades import SUBJECTS, TOTAL_SUBJECT, subject_display
@@ -42,11 +42,24 @@ def near_line_report(exam_id, direction, layer_name, above, below, class_name=No
     class_name = class_name if class_name in classes else ''
     if class_name:
         rows_all = [r for r in rows_all if (r.class_name or '') == class_name]
+    # 2026-10-15 组合级划线：总分线按**学生自身组合**取线（物化生/物化地/物化政/史地政各一条），
+    # 距线按各自组合的线算（回落方向线）
+    line_of = {}
+    for r in rows_all:
+        sel = r.subject_selection or ''
+        if sel and sel not in line_of:
+            _l = rs.pick_layer(data, direction, TOTAL_SUBJECT, lname, selection=sel)
+            if _l:
+                line_of[sel] = _l[1]
+
+    def _line_of(r):
+        return line_of.get(r.subject_selection or '', line)
+
     below_rows, above_rows = [], []
     # 科目列取范围内学生实际有成绩的科目并集（走班选科不一致时列也能对齐）
     nos = set()
     for r in rows_all:
-        gap = r.score - line
+        gap = r.score - _line_of(r)
         if -below <= gap < 0:
             below_rows.append(r)
             nos.add(r.student_no)
@@ -62,7 +75,7 @@ def near_line_report(exam_id, direction, layer_name, above, below, class_name=No
     ht = rs.headteacher_map(data.exam.grade)  # 名单附班主任，便于临界生分包盯人
 
     def to_row(r, status):
-        gap = round(r.score - line, 1)
+        gap = round(r.score - _line_of(r), 1)
         row = {'class_name': r.class_name or '—',
                'headteacher': ht.get((data.exam.grade, r.class_name or '—'), ''),
                'name': r.student_name,
@@ -73,8 +86,12 @@ def near_line_report(exam_id, direction, layer_name, above, below, class_name=No
         return row
 
     rows = [to_row(r, '线下') for r in below_rows] + [to_row(r, '线上') for r in above_rows]
+    # 线分展示：各组合线一致时显示分数，否则显示「按组合」（距线已逐生按各自组合的线算）
+    _lows = set(line_of.values()) | {line}
     return {'exam': {'id': data.exam.id, 'name': data.exam.name},
-            'direction': direction or '全部', 'layer': lname, 'line': line,
+            'direction': direction or '全部', 'layer': lname,
+            'line': (line if len(_lows) <= 1 else '按组合'),
+            'lines': line_of,          # 各组合的线（组合级划线，前端展示/核对用）
             'above': above, 'below': below,
             'above_n': len(above_rows), 'below_n': len(below_rows),
             'classes': classes, 'class_name': class_name,

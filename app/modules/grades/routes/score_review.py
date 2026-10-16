@@ -1,4 +1,4 @@
-# StuLink v1.19.49.34 2026-10-15
+# StuLink v1.19.49.35 2026-10-15
 # 成绩复核（申请调分）：教师提交 → 有改分权限者审批 → 可选应用到成绩单
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 """成绩复核申请（用户口径 2026-10-15）
@@ -261,13 +261,23 @@ def reviews_manage_page():
     if status not in STATUS_LABEL:
         status = 'pending'
     grade = (request.args.get('grade') or '').strip()
+    # 2026-10-15 审计修复（P0）：审批列表必须按**数据范围**收敛 ——
+    # 此前只按 ?grade= 手选过滤，持 grades.score_edit 的年级长/教务员能列出
+    # （并在下一屏审批、甚至直接改分）**别的年级**的复核单（含学生姓名/科目/分数）。
+    vis = scope_service.visible_grades(current_user)
     q = ScoreReviewRequest.query.filter_by(status=status)
+    if vis is not None:
+        q = q.filter(ScoreReviewRequest.grade.in_(list(vis) or ['']))
     if grade:
         q = q.filter_by(grade=grade)
     rows = q.order_by(ScoreReviewRequest.id.desc()).limit(300).all()
-    grades = scope_service.visible_grades(current_user)
-    counts = {st: ScoreReviewRequest.query.filter_by(status=st).count()
-              for st in STATUS_LABEL}
+    grades = list(vis) if vis is not None else None
+    counts = {}
+    for st in STATUS_LABEL:
+        cq = ScoreReviewRequest.query.filter_by(status=st)
+        if vis is not None:
+            cq = cq.filter(ScoreReviewRequest.grade.in_(list(vis) or ['']))
+        counts[st] = cq.count()
     return render_template('grades/score_review_manage.html', rows=rows,
                            status=status, counts=counts, grades=grades,
                            grade=grade, status_label=STATUS_LABEL,
@@ -285,6 +295,18 @@ def review_audit(rid):
     """
     r = _review_or_404(rid)
     back = redirect(url_for('grades.reviews_manage_page'))
+    # 2026-10-15 审计修复（P0）：审批（「批准并应用」会直接改分并重算排名）必须先过
+    # **数据范围**校验。此前只有 grades.score_edit 功能权限 + status 检查，
+    # 持该权限的年级长/教务员可以对别的年级的复核单直接改分（越权写）。
+    _r_exam = db.session.get(Exam, r.exam_id)
+    if _r_exam is not None:
+        try:
+            scope_service.check_exam_visible(current_user, _r_exam)
+        except PermissionError:
+            abort(403)
+    _sc = score_guard.resolve(current_user)
+    if not _sc.can_view_class(r.grade or (_r_exam.grade if _r_exam else ''), r.class_name):
+        abort(403)
     if r.status != 'pending':
         flash('该申请已处理过，不能重复审核', 'warning')
         return back
@@ -348,7 +370,8 @@ def review_audit(rid):
         r.status = 'approved'
         db.session.commit()
         invalidate_exam_cache(exam.id)
-        tab_service.clear_exam_cache(exam.id)
+        # 第七轮审计（P-L1）：原此处紧跟一次 tab_service 的缓存清理调用，
+        # 而它内部就是 invalidate_exam_cache —— 同一次提交后清两遍（纯重复），删。
         log_operation(current_user, '批准并应用', '成绩复核', r.exam_id,
                       f'复核单 #{r.id}：{srow.student_name or srow.student_no} '
                       f'{r.subject} {r.delta:+g}（新分 {srow.score}，排名重算 {n} 条）',

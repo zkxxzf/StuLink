@@ -1,4 +1,4 @@
-# StuLink v1.19.49.34 2026-10-10
+# StuLink v1.19.49.35 2026-10-10
 # 教务 · 查课：统计页（列表筛选 / 月度统计 / 导出 / 图表API）+ 独立录入页（单条/批量）
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 import io
@@ -969,6 +969,9 @@ def _attach_period_checks(blocks, target_date, period, user):
 
 @bp.route('/inspection/quick-swap', methods=['POST'])
 @login_required
+@perm_required('academic.swap')   # 2026-10-16 第八轮审计：发起调课/代课属写操作，
+#                                  此前本文件唯一只挂 login 的写端点（其余 19 个均有权限点），
+#                                  任何登录账号都能发起调课链路；权限点与 swap_apply/swap_cover 一致。
 def inspection_quick_swap():
     """单节总览 → 就地发起「代课 / 调课」（2026-10-13 新增）。
 

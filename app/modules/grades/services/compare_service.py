@@ -1,4 +1,4 @@
-# StuLink v1.19.49.34 2026-10-10
+# StuLink v1.19.49.35 2026-10-10
 # 班级对比分析：多班横向对比的数据组装（供 /api/analysis/compare 与 Excel 导出共用）
 # 输出结构与 tab_service 四模块完全一致：{exam, tables, charts, meta}
 # 口径沿用 tab_service：全部基于 stats_service.cached_exam_data 的内存视图，所选班一次遍历分组，
@@ -106,23 +106,44 @@ def compare_tab(exam_id, class_names, direction=''):
                       'markLine': grade_avg},
     }
 
-    # ---- T2/T3/T4 科目 × 班（均分 / 及格率% / 优秀率%）----
+    # ---- T2/T3/T4 科目 × 班（均分 / 划线率）----
+    # 2026-10-15 用户口径：原「及格率/优秀率」按满分 60%/90% 固定线算 → 改为按本场划线：
+    # 及格率位=最低层（四层模板=及格层）、优秀率位=最高层（=优秀层），逐生按自身方向/
+    # 组合取线，值为单科上线率；本场未划线时这两张表不出现。
     subs_all = _subject_union(data, classes)
+    rate_names = {}       # 科目 -> (及格位层名, 优秀位层名)
+    for s in subs_all:
+        _p, _g = st.rate_names_for(data, s)
+        if _p or _g:
+            rate_names[s] = (_p, _g)
     per = {}
+    rate_hit = {}         # (班, 科目, 'pass'/'good') -> [上线数, 参考数]
     for t in rows_all:
         c = t['class_name']
         if c not in by_class:
             continue
+        _dir, _sel = t['direction'] or '', t.get('selection') or ''
         for s in subs_all:
             v = data.subj.get((t['no'], s))
-            if v is not None:
-                per.setdefault((c, s), []).append(v)
-    lines_map = {s: data.subject_lines(s) for s in subs_all}
+            if v is None:
+                continue
+            per.setdefault((c, s), []).append(v)
+            if s not in rate_names:
+                continue
+            _p, _g = st.rate_layer_pair(data.band_list(_dir, s, _sel))
+            for _mode, _pair in (('pass', _p), ('good', _g)):
+                cell = rate_hit.setdefault((c, s, _mode), [0, 0])
+                cell[1] += 1
+                if _pair and v >= _pair[1]:
+                    cell[0] += 1
 
     def _wide_rows(mode):
-        """mode: 'avg' | 'pass' | 'good' → 行=科目，列=各班该口径值"""
+        """mode: 'avg' | 'pass' | 'good' → 行=科目，列=各班该口径值
+        （pass/good 按本场划线口径；本场未划线的科目不出行）"""
         out = []
         for s in subs_all:
+            if mode != 'avg' and s not in rate_names:
+                continue
             cells = {}
             for i, c in enumerate(classes):
                 vs = per.get((c, s)) or []
@@ -132,8 +153,8 @@ def compare_tab(exam_id, class_names, direction=''):
                 if mode == 'avg':
                     cells[i] = st.mean(vs)
                 else:
-                    key = 'pass' if mode == 'pass' else 'excellent'
-                    cells[i] = st.fmt_rate(sum(1 for v in vs if v >= lines_map[s][key]), len(vs))
+                    hit, tot = rate_hit.get((c, s, mode), (0, 0))
+                    cells[i] = st.fmt_rate(hit, tot) if tot else None
             if all(v is None for v in cells.values()):
                 continue    # 所选班均未考该科目
             out.append({'subject': s, **{'c%d' % i: cells[i] for i in range(len(classes))}})
@@ -161,20 +182,25 @@ def compare_tab(exam_id, class_names, direction=''):
         'rows': [_spread_row(r, len(classes)) for r in t2],
         'chartHint': _wide_chart(t2, '%s'),
     }
+    # 表名/列名用本场层名（各科层名一致，取第一个有划线的科目）；本场未划线不出这两张表
+    _pname = next((v[0] for v in rate_names.values() if v[0]), None)
+    _gname = next((v[1] for v in rate_names.values() if v[1]), None)
     t3 = _wide_rows('pass')
-    tables['cmp_pass'] = {
-        'title': '对比班各科及格率%',
-        'columns': _wide_columns([('c', '及格率%', 'num')]),
-        'rows': t3,
-        'chartHint': _wide_chart(t3, '%s及格率'),
-    }
+    if _pname:
+        tables['cmp_pass'] = {
+            'title': f'对比班各科{_pname}率%',
+            'columns': _wide_columns([('c', f'{_pname}率%', 'num')]),
+            'rows': t3,
+            'chartHint': _wide_chart(t3, '%s' + _pname + '率'),
+        }
     t4 = _wide_rows('good')
-    tables['cmp_good'] = {
-        'title': '对比班各科优秀率%',
-        'columns': _wide_columns([('c', '优秀率%', 'num')]),
-        'rows': t4,
-        'chartHint': _wide_chart(t4, '%s优秀率'),
-    }
+    if _gname and _gname != _pname:
+        tables['cmp_good'] = {
+            'title': f'对比班各科{_gname}率%',
+            'columns': _wide_columns([('c', f'{_gname}率%', 'num')]),
+            'rows': t4,
+            'chartHint': _wide_chart(t4, '%s' + _gname + '率'),
+        }
 
     # ---- T5/T6 分数段 / 名次段分布（所选班，堆叠）----
     def _seg_table(by_rank):

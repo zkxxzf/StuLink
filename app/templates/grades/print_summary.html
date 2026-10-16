@@ -1,0 +1,221 @@
+﻿{% extends "base.html" %}
+{% block title %}汇总打印版{% endblock %}
+{% block extra_css_head %}
+<style>
+    /* ============ 汇总打印版（2026-10-16 按用户样表 1:1 复刻）============
+       每科目一张「班级 × 指标」网格：表头三行（考试名 / 列组 / 列名），
+       表内按方向分组（物理类 / 历史类 各一条分组标签行），组末「班均」「年级」两行。
+       目标：整份（9 科）压进 A4 正反两页 —— 字号 6.6pt、行高 1.12、边距 8mm。 */
+    .ps-wrap { background: var(--sl-bg); padding: 14px 0 36px; }
+    .ps-toolbar {
+        /* 第七轮审计（U-H2）：站点 navbar 是 fixed-top（56px、z-index 200），
+           吸附在 0 会被整条盖住 → 让开 56px（与宿舍页既有写法一致） */
+        position: sticky; top: 56px; z-index: 10;
+        background: var(--sl-surface); border-bottom: 1px solid var(--sl-border);
+        padding: 8px 16px; display: flex; flex-wrap: wrap; gap: 8px; align-items: center;
+    }
+    .ps-toolbar .ps-title { font-weight: 700; font-size: 14px; }
+    .ps-toolbar .ps-sub { font-size: 12px; color: var(--sl-text-muted); }
+
+    .ps-page {
+        width: 210mm; margin: 12px auto; padding: 6mm 5mm;
+        background: #fff; color: #000;
+        box-shadow: 0 2px 14px rgba(0, 0, 0, .18); border-radius: 2px;
+        box-sizing: border-box;
+    }
+    .ps-head { text-align: center; margin-bottom: 1.2mm; }
+    .ps-head h1 { font-size: 15px; font-weight: 700; margin: 0; letter-spacing: 1px; }
+
+    /* ---- 科目网格 ---- */
+    .ps-block { break-inside: avoid; page-break-inside: avoid; margin-bottom: 1.1mm; }
+    table.ps-t {
+        width: 100%; border-collapse: collapse;
+        font-size: 6.1pt; line-height: 1.05; table-layout: fixed;
+    }
+    table.ps-t th, table.ps-t td {
+        border: .6pt solid #666; padding: .2mm .3mm; text-align: center;
+        overflow: hidden; white-space: nowrap;
+    }
+    table.ps-t th { background: #f2f2f2; font-weight: 700; }
+    /* 左上角科目名格：样表是亮黄底 */
+    table.ps-t th.ps-subj {
+        background: #ffeb3b; width: 9mm; font-size: 8pt; font-weight: 700;
+        letter-spacing: .5px;
+    }
+    table.ps-t th.ps-exam { background: #fff; font-weight: 600; font-size: 7.2pt; }
+    table.ps-t td.cls { font-weight: 600; }
+    table.ps-t td.name { font-size: 6.2pt; }
+    /* 方向标签行（物理类 / 历史类）—— 本行同时承载「年级」汇总数据（2026-10-16 用户口径） */
+    table.ps-t tr.grp td { background: #ececec; font-weight: 700; }
+    table.ps-t tr.grp td.cls { text-align: left; padding-left: 1mm; }
+    table.ps-t tr.sum td { background: #f7f7f7; font-weight: 700; }
+    table.ps-t tr.grade td { background: #ececec; font-weight: 700; }
+    table.ps-t td.pos { color: #c00; }
+    table.ps-t td.neg { color: #060; }
+    table.ps-t td.na { color: #999; }
+    .ps-foot { font-size: 6.5pt; color: #666; text-align: right; margin-top: 1mm; }
+
+    @media print {
+        @page { size: A4 portrait; margin: 6mm; }
+        .ps-toolbar, .no-print { display: none !important; }
+        .ps-wrap { background: #fff; padding: 0; }
+        .ps-page { width: auto; margin: 0; padding: 0; box-shadow: none; border-radius: 0; }
+        table.ps-t th, table.ps-t th.ps-subj, table.ps-t tr.grp td,
+        table.ps-t tr.sum td, table.ps-t tr.grade td {
+            -webkit-print-color-adjust: exact; print-color-adjust: exact;
+        }
+    }
+</style>
+{% endblock %}
+{% block content %}
+{% set S = ps %}
+{% set NC = 15 %}   {# 班级 姓名 参考数 + 211上线2 + 特控上线4 + 本科上线3 + 均分3 #}
+<div class="ps-wrap">
+    <div class="ps-toolbar">
+        <span class="ps-title"><i class="bi bi-printer"></i> 汇总打印版</span>
+        <span class="ps-sub">
+            {{ S.exam.name }}（{{ S.exam.grade }} · {{ S.exam.date }}）
+            {% if S.prev_name %}· 对比场次：{{ S.prev_name }}{% endif %}
+        </span>
+        <span class="ms-auto"></span>
+        <button class="btn btn-sm btn-primary" type="button" onclick="window.print()">
+            <i class="bi bi-printer"></i> 打印 / 存 PDF
+        </button>
+        <a class="btn btn-sm btn-outline-secondary"
+           href="{{ url_for('grades.index') }}?exam={{ exam_id }}">返回成绩分析</a>
+    </div>
+
+    <div class="ps-page">
+        <div class="ps-head">
+            <h1>{{ S.exam.grade }}学业成绩汇总表</h1>
+        </div>
+
+        {% for b in S.blocks %}
+        <div class="ps-block">
+            <table class="ps-t">
+                <colgroup>
+                    <col style="width:9mm"><col style="width:11mm"><col style="width:10mm">
+                    <col style="width:8mm"><col style="width:9mm">
+                    <col style="width:8mm"><col style="width:9mm"><col style="width:9mm"><col style="width:8mm">
+                    <col style="width:8mm"><col style="width:9mm"><col style="width:8mm">
+                    <col style="width:11mm"><col style="width:8mm"><col style="width:11mm">
+                </colgroup>
+                <thead>
+                    {# 第 1 行：左科目名格（黄色，**只占本行第 1 列**）+ 考试名。
+                       ⚠️ 这里**不能**写 rowspan="2"：科目格若竖跨两行，第 2 行的第 1 列也被它占掉，
+                       而第 2 行还要放满 15 列（班级…均分），于是多出 1 列被浏览器挤到行尾 ——
+                       用户看到的正是「表头和内容不对应」（本科上线与均分之间莫名空一格）。
+                       2026-10-16 修：三行都严格 15 列对 15 列。 #}
+                    <tr>
+                        <th class="ps-subj">{{ b.subject }}</th>
+                        <th class="ps-exam" colspan="{{ NC - 1 }}">本次　{{ S.exam.name }}</th>
+                    </tr>
+                    {# 第 2 行：列组 #}
+                    <tr>
+                        <th>班级</th><th>姓名</th><th>参考数</th>
+                        <th colspan="2">211上线</th>
+                        <th colspan="4">特控上线</th>
+                        <th colspan="3">本科上线</th>
+                        <th colspan="3">均分</th>
+                    </tr>
+                    {# 第 3 行：具体列名 #}
+                    <tr>
+                        <th></th><th></th><th></th>
+                        <th>单上线</th><th>上线率</th>
+                        <th>单上线</th><th>进退步</th><th>上线率</th><th>本排名</th>
+                        <th>单上线</th><th>上线率</th><th>本排名</th>
+                        <th>上次均分</th><th>排名</th><th>最高分</th>
+                    </tr>
+                </thead>
+                <tbody>
+                {% for g in b.groups %}
+                    {# 2026-10-16 用户口径：「年级」不单独占一行，直接并入方向标签行 ——
+                       第 1 列＝方向（物理类/历史类），第 2 列＝「年级」，其余＝年级汇总数据。 #}
+                    {% set _gr = g.sum_rows[1] %}
+                    <tr class="grp">
+                        <td class="cls">{{ g.direction }}{{ '类' if g.direction != '全体' else '' }}</td>
+                        <td>年级</td>
+                        <td>{{ _gr.n }}</td>
+                        {% for key in ['211', '特控', '本科'] %}
+                        {% set it = _gr.bands.get(key) %}
+                        {% if it %}
+                        <td>{{ it.get('n') if it.get('n') is not none else '—' }}</td>
+                        {% if key == '特控' %}<td>—</td>{% endif %}
+                        <td>{{ ('%.0f%%' % it.get('rate')) if it.get('rate') is not none else '—' }}</td>
+                        {% if key != '211' %}<td>—</td>{% endif %}
+                        {% else %}
+                        <td>—</td>{% if key == '特控' %}<td>—</td>{% endif %}<td>—</td>
+                        {% if key != '211' %}<td>—</td>{% endif %}
+                        {% endif %}
+                        {% endfor %}
+                        <td>{{ _gr.prev_avg if _gr.prev_avg is not none else '—' }}</td>
+                        <td>—</td>
+                        <td>{{ _gr.max if _gr.max is not none else '—' }}</td>
+                    </tr>
+                    {% for r in g.rows %}
+                    <tr>
+                        <td class="cls">{{ r.cls }}</td>
+                        <td class="name">{{ r.teacher or '' }}</td>
+                        <td>{{ r.n }}</td>
+                        {# 211 组 2 列（单上线/上线率）；特控组 4 列；本科组 3 列 —— 与表头严格对齐 #}
+                        {% for key in ['211', '特控', '本科'] %}
+                        {% set it = r.bands.get(key) %}
+                        {% if it %}
+                        <td>{{ it.get('n') if it.get('n') is not none else '—' }}</td>
+                        {% if key == '特控' %}
+                        {% set _mv = it.get('move') %}
+                        <td class="{{ 'pos' if (_mv or 0) > 0 else ('neg' if (_mv or 0) < 0 else '') }}">
+                            {{ ('%+d' % _mv) if _mv is not none else '—' }}</td>
+                        {% endif %}
+                        <td>{{ ('%.0f%%' % it.get('rate')) if it.get('rate') is not none else '—' }}</td>
+                        {% if key != '211' %}
+                        <td>{{ it.get('rank') if it.get('rank') is not none else '—' }}</td>
+                        {% endif %}
+                        {% else %}
+                        <td class="na">—</td>
+                        {% if key == '特控' %}<td class="na">—</td>{% endif %}
+                        <td class="na">—</td>
+                        {% if key != '211' %}<td class="na">—</td>{% endif %}
+                        {% endif %}
+                        {% endfor %}
+                        <td>{{ r.prev_avg if r.prev_avg is not none else '—' }}</td>
+                        <td>{{ r.avg_rank if r.avg_rank is not none else '—' }}</td>
+                        <td>{{ r.max if r.max is not none else '—' }}</td>
+                    </tr>
+                    {% endfor %}
+                    {# 底部只留「班均」（「年级」已并入上方方向标签行） #}
+                    {% for r in g.sum_rows if r.cls == '班均' %}
+                    <tr class="sum">
+                        <td class="cls">{{ r.cls }}</td>
+                        <td></td>
+                        <td>{{ r.n }}</td>
+                        {% for key in ['211', '特控', '本科'] %}
+                        {% set it = r.bands.get(key) %}
+                        {% if it %}
+                        <td>{{ it.get('n') if it.get('n') is not none else '—' }}</td>
+                        {% if key == '特控' %}<td>—</td>{% endif %}
+                        <td>{{ ('%.0f%%' % it.get('rate')) if it.get('rate') is not none else '—' }}</td>
+                        {% if key != '211' %}<td>—</td>{% endif %}
+                        {% else %}
+                        <td>—</td>{% if key == '特控' %}<td>—</td>{% endif %}<td>—</td>
+                        {% if key != '211' %}<td>—</td>{% endif %}
+                        {% endif %}
+                        {% endfor %}
+                        <td>{{ r.prev_avg if r.prev_avg is not none else '—' }}</td>
+                        <td>—</td>
+                        <td>{{ r.max if r.max is not none else '—' }}</td>
+                    </tr>
+                    {% endfor %}
+                {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% endfor %}
+
+        {% if not S.blocks %}
+        <div class="text-muted">该考试暂无成绩数据。</div>
+        {% endif %}
+        <div class="ps-foot">生成时间：{{ now }}　·　StuLink 成绩分析</div>
+    </div>
+</div>
+{% endblock %}

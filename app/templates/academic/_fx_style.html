@@ -212,7 +212,9 @@ table.fx-table thead .fx-sticky-1, table.fx-table thead .fx-sticky-2, table.fx-t
 @keyframes fxUp { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: none; } }
 .fx-tabs { display: flex; gap: 6px; flex-wrap: wrap; }
 .fx-tab { padding: 6px 14px; border-radius: 999px; font-size: 12.5px; font-weight: 600; cursor: pointer; border: 1px solid var(--fx-line); background: var(--sl-surface, #fff); color: var(--fx-muted); }
-.fx-tab.active { background: var(--fx-accent); color: #fff; border-color: var(--fx-accent); }
+/* 前景色跟随主题：深色下 --fx-accent = --sl-accent（浅蓝 #93c5fd），白字对比仅 ≈1.6:1
+   看不见（第八轮审计 U-18）；正解在同项目 notifications/list.html 用 --sl-surface。 */
+.fx-tab.active { background: var(--fx-accent); color: var(--sl-surface, #fff); border-color: var(--fx-accent); }
 @media (max-width: 768px) {
     .fx-hero h1 { font-size: 19px; }
     .fx-stat .fx-value { font-size: 27px; }

@@ -1,4 +1,4 @@
-# StuLink v1.19.49.34 2026-10-10
+# StuLink v1.19.49.35 2026-10-10
 # 成绩管理：通用小工具
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 import re
@@ -23,7 +23,7 @@ def numeric_classes(class_names):
 
 
 def is_teaching_class(class_name):
-    """v1.19.49.34：单个班级是否为教学班（01班~99班）。
+    """v1.19.49.35：单个班级是否为教学班（01班~99班）。
 
     不分班 / 已转出 / 离校 等非数字班级返回 False。
     与 numeric_classes 同一正则口径，供成绩治理模块统一过滤无班级学生。
@@ -31,13 +31,13 @@ def is_teaching_class(class_name):
     return bool(class_name and _NUM_CLASS_RE.match(str(class_name).strip()))
 
 
-# v1.19.49.34 班级名归一化：把外部 Excel 的各种写法统一成系统口径
+# v1.19.49.35 班级名归一化：把外部 Excel 的各种写法统一成系统口径
 _CLS_TAIL_RE = re.compile(r'(\d{1,2})\s*班')
 _SPECIAL_CLASSES = ('不分班', '已转出', '离校')
 
 
 def normalize_class_name(value):
-    """把外部/历史写法归一化为系统班级名（v1.19.49.34）
+    """把外部/历史写法归一化为系统班级名（v1.19.49.35）
 
     支持：
         '高一03班' / '2024级01班' / '高三10班' → '03班' / '01班' / '10班'
@@ -129,3 +129,15 @@ def invalidate_exam_cache(exam_id):
         clear_exam_data_cache(exam_id)
     except Exception as _e:  # noqa: BLE001
         logger.warning('utils.py::invalidate_exam_cache 异常（已降级处理）: %s', _e)
+
+
+def invalidate_teacher_cache():
+    """教师映射等「跨考试基础数据」变更后的失效钩子（2026-10-16 第七轮审计 P-M8）。
+
+    教师姓名/任课快照参与 grades_tab_*（教师 tab、班级 tab 的教师列）与
+    grades_report_*（冷热/学科/教师报表）的取值；教师映射（矩阵保存、批量导入、
+    方案切换）此前写后不失效，最长 900s 仍显示旧教师。跨所有考试生效 → 按前缀
+    全清（低频操作，正确性优先；与汇报区 ld 的"整体失效"取舍一致）。
+    """
+    delete_cache_prefix('grades_tab_')
+    delete_cache_prefix('grades_report_')

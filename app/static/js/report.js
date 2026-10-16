@@ -80,7 +80,7 @@
         var missed = !!(examId && sel.val() !== String(examId));
         if (!sel.val() && sel.find('option').length) sel.prop('selectedIndex', 0);
         if (missed) {
-            // v1.19.49.34 本场考试不在可见列表（已删除 / 超出数据范围 / 已毕业）：
+            // v1.19.49.35 本场考试不在可见列表（已删除 / 超出数据范围 / 已毕业）：
             // 不能静默显示最近一场让用户误当本场（考试态下下拉原本隐藏）——
             // 恢复下拉并明确提示。
             $('#rpExam').removeClass('d-none');
@@ -193,7 +193,20 @@
      * 勾选 cfg.group 下任意列 key → 该列右侧即时插入「名次」列（竞赛排名，同分同名次）。 */
     function makeRankTable(cfg) {
         var checked = state.checked[cfg.group] || [];
-        var hasGroups = !!(cfg.groups && cfg.groups.length);
+        // 列显隐（2026-10-15）：勾选即显示、不勾选隐藏；fixed 列（行标识）始终显示；
+        // 空组（列全被隐藏）连组头一起去掉，避免表头出现「有组名没列」
+        var pickCols = [];
+        (cfg.cols || []).forEach(function (c) { if (!c.fixed) pickCols.push(c); });
+        (cfg.groups || []).forEach(function (g) {
+            (g.cols || []).forEach(function (c) { pickCols.push(c); });
+        });
+        var visKeys = (window.TableCols ? TableCols.visible('rp::' + cfg.id, pickCols) : null);
+        function vis(c) { return !visKeys || visKeys.indexOf(c.key) >= 0; }
+        var colsR = (cfg.cols || []).filter(function (c) { return c.fixed || vis(c); });
+        var groupsR = (cfg.groups || []).map(function (g) {
+            return { label: g.label, cols: (g.cols || []).filter(vis) };
+        }).filter(function (g) { return g.cols.length; });
+        var hasGroups = groupsR.length > 0;
         var t = el('table', S.table); t.id = cfg.id;
         var thead = el('thead');
         var tr1 = el('tr'), tr2 = el('tr');
@@ -216,7 +229,7 @@
         function rankHead() {
             return el('th', S.th + 'background:#dbe7f5;color:#1f4e79;font-size:13px;', '名次');
         }
-        (cfg.cols || []).forEach(function (col) {
+        colsR.forEach(function (col) {
             var rankable = !col.fixed && col.rankable !== false;
             if (hasGroups) {
                 var th = headOf(col, false);
@@ -229,7 +242,7 @@
             flat.push({col: col, rankable: hasGroups ? false : rankable});
         });
         if (hasGroups) {
-            cfg.groups.forEach(function (g) {
+            groupsR.forEach(function (g) {
                 // 组头跨列 = 组内列数 + 已勾选列数（每勾选一列右侧多一个名次列）
                 var gh = el('th', S.thDark, g.label);
                 gh.colSpan = g.cols.length +
@@ -282,6 +295,25 @@
         var wrap = el('div', '');
         wrap.className = 'rp-table-wrap';
         wrap.appendChild(t);
+        // 列显隐按钮（右上角浮标）：勾选变化时就地重建整表（组头 colspan/名次列随列数变），
+        // 选择按表 id 持久化；重建后自动重开下拉，方便连续勾选
+        if (window.TableCols) {
+            var $wrap = $(wrap).css('position', 'relative');
+            var $m = TableCols.menu('rp::' + cfg.id, pickCols, function () {
+                var old = document.getElementById(cfg.id);
+                if (!old) return;
+                var newWrap = makeRankTable(cfg);
+                old.closest('.rp-table-wrap').replaceWith(newWrap);
+                var btn = $(newWrap).find('.tc-col-menu .dropdown-toggle').get(0);
+                if (btn && window.bootstrap && bootstrap.Dropdown) {
+                    try { bootstrap.Dropdown.getOrCreateInstance(btn).show(); } catch (e) {}
+                }
+            });
+            $m.addClass('tc-col-float').css({
+                position: 'absolute', top: '2px', right: '6px', zIndex: 5
+            });
+            $wrap.append($m);
+        }
         return wrap;
     }
 

@@ -1,13 +1,14 @@
-# StuLink v1.19.49.34 2026-10-10
+# StuLink v1.19.49.35 2026-10-10
 # 成绩分析：主页（四 tab）+ options/analysis API + AI 预留
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 import hashlib
 
-from flask import (render_template, request, jsonify, abort,
-                   current_app)  # current_app 为 2026-10-11 修复 L163 未定义引用所补
+from flask import (render_template, request, jsonify, abort, current_app,
+                   flash, redirect, url_for)
 # 2026-10-13：redirect / url_for 随 index_legacy 一并移除（/grades/ 已改由 dashboard 承担）
+# 2026-10-16：汇总打印版又需要 flash/redirect/url_for（无 exam 参数时引路），故重新引入
 from flask_login import login_required, current_user
-from app.models.grades import Exam, TeacherSubjectLink
+from app.models.grades import Exam, ExamScore, TeacherSubjectLink
 from app.models import Student
 from app.modules.grades import bp
 from app.modules.grades.services import tab_service, scope as scope_service
@@ -182,6 +183,70 @@ def _classes_by_exam():
     return out
 
 
+_COMBOS_BY_EXAM_KEY = 'grades_options_combos_by_exam'
+_COMBOS_BY_EXAM_TTL = 300
+
+
+def _combos_by_exam():
+    """每场考试出现过的选科组合（总分行的 subject_selection 快照），带进程内缓存
+
+    2026-10-16 第七轮审计修复（P-M4）：原实现挂在 /api/options 内**逐场**一条
+    DISTINCT 查询（可见 20-40 场 → 每次打开分析页 20-40 条跨行扫描），且不随
+    grades_options_ 前缀失效。改为单条 GROUP BY 一次取回 + 300s 进程缓存
+    （与班级枚举同一 TTL / 同一失效前缀）。
+    """
+    from app.utils.cache import cache
+    cached_value = cache.get(_COMBOS_BY_EXAM_KEY)
+    if cached_value is not None:
+        return cached_value
+    out = {}
+    try:
+        from app.models.grades import ExamScore, TOTAL_SUBJECT
+        from app.extensions import db
+        rows = (db.session.query(ExamScore.exam_id, ExamScore.subject_selection)
+                .filter(ExamScore.subject == TOTAL_SUBJECT)
+                .group_by(ExamScore.exam_id, ExamScore.subject_selection).all())
+        tmp = {}
+        for eid, sel in rows:
+            sel = (sel or '').strip()
+            if sel:
+                tmp.setdefault(str(eid), set()).add(sel)
+        out = {k: sorted(v) for k, v in tmp.items()}
+    except Exception as e:  # noqa: BLE001
+        current_app.logger.warning(f'按考试取选科组合失败: {e}')
+        out = {}
+    cache.set(_COMBOS_BY_EXAM_KEY, out, timeout=_COMBOS_BY_EXAM_TTL)
+    return out
+
+
+@bp.route('/print-summary')
+@login_required
+@perm_required('grades.view')
+def print_summary_page():
+    """汇总打印版（2026-10-16 用户要求）：A4 网格，每科目一张「班级 × 指标」表。
+
+    数据口径与分析页完全同源（同一份 ExamData / 同一套分层线），只是排版成
+    可直接打印/存 PDF 的网格；不需要"重算"，也没有额外写库。
+    """
+    raw = (request.args.get('exam') or request.args.get('exam_id') or '').strip()
+    exam = _get_exam(int(raw)) if raw.isdigit() else None
+    if exam is None:
+        flash('请从成绩分析页进入（需带 ?exam=<考试 id>）', 'warning')
+        return redirect(url_for('grades.index'))
+    from app.modules.grades.services import stats_service as _stats
+    from datetime import datetime
+    # 2026-10-16 第七轮审计修复（P-M3）：该页原为**零缓存**逐请求重算（≈90-100 万次
+    # 内层遍历 + 逐班 User 单查）。结果只由 (exam_id, prev_id) 决定 → 挂 900s 缓存；
+    # 键名 grades_report_ps_*，被 delete_cache_exam_reports 的「键段匹配考试」覆盖
+    # （本场或上一场改分都会失效），与汇报区共用同一套失效契约。
+    _prev = _stats.cached_exam_data(exam.id).prev_exam
+    _ps_key = f'grades_report_ps_{exam.id}_{_prev.id if _prev is not None else 0}'
+    from app.modules.grades.routes.report import _cached
+    ps = _cached(_ps_key, lambda: _stats.print_summary(exam.id))
+    return render_template('grades/print_summary.html', ps=ps, exam_id=exam.id,
+                           now=datetime.now().strftime('%Y-%m-%d %H:%M'))
+
+
 @bp.route('/api/options')
 @login_required
 @perm_required('grades.view')
@@ -204,7 +269,7 @@ def api_options():
             'id': e.id, 'name': e.name, 'date': e.exam_date.strftime('%Y-%m-%d'),
             'type': e.exam_type or '', 'status': e.status, 'banded': e.id in banded_ids,
         })
-    # v1.19.49.34 每场考试自己的班级：**班级筛选仅限本场考试**
+    # v1.19.49.35 每场考试自己的班级：**班级筛选仅限本场考试**
     # 来源 = 该场考试的学生名册（exam_scores.class_name）∪ 任课教师表（exam_teacher_links）
     # 不能用主库当前班级：考试是自包含的独立单元，其参与者是整个年级、且班级为考试当时
     #
@@ -279,11 +344,17 @@ def api_options():
     if cat:
         subjects = [i.value for i in cat.items.filter_by(is_active=True)
                     .order_by('sort_order').all()]
+    # 2026-10-16 组合维度：每场考试出现过的选科组合（物化生/物化地/物化政/史地政…）
+    # 供分析页「组合」下拉使用；没有选科快照的考试为空数组（下拉自动隐藏）。
+    # 第七轮审计（P-M4）：改为一次 GROUP BY + 进程缓存（原为逐场 DISTINCT 查询）。
+    _all_combos = _combos_by_exam()
+    combos_by_exam = {k: v for k, v in _all_combos.items() if k in classes_by_exam}
     return jsonify(success=True, data={
         'grades': grades,
         'exams': by_grade,
         'classes': classes_by_grade,
         'classes_by_exam': classes_by_exam,
+        'combos_by_exam': combos_by_exam,
         'subjects': subjects,
         'tabs': tabs,
         'locked': locked,
@@ -368,10 +439,11 @@ def api_grade_tab():
     _guard_tab('grade')
     exam_id = request.args.get('exam_id', type=int)
     direction = (request.args.get('direction') or '').strip()
+    selection = (request.args.get('selection') or '').strip()
     exam = _get_exam(exam_id)
     return jsonify(success=True, data=_fetch(
-        f'grades_tab_{exam_id}_grade_{direction}',
-        lambda: tab_service.grade_tab(exam_id, direction)))
+        f'grades_tab_{exam_id}_grade_{direction}_{selection}',
+        lambda: tab_service.grade_tab(exam_id, direction, selection)))
 
 
 @bp.route('/api/analysis/class')
@@ -381,15 +453,20 @@ def api_class_tab():
     _guard_tab('class')
     exam_id = request.args.get('exam_id', type=int)
     class_name = request.args.get('class_name', '').strip()
+    direction = (request.args.get('direction') or '').strip()
+    selection = (request.args.get('selection') or '').strip()
     exam = _get_exam(exam_id)
-    scope_type, _ = scope_service.get_scope(current_user)
-    if current_user.has_role('homeroom_teacher'):
-        allowed = {(g, c) for g, c in (scope_service.visible_classes(current_user) or [])}
-        if (exam.grade, class_name) not in allowed:
-            abort(403)
+    # 2026-10-15 审计修复（P0）：班级 tab 的表格含**逐生全科 + 总分/班排/进退步**，
+    # 闸门必须是「该班总分口径可见」（class_total_visible）—— 此前只校验
+    # homeroom_teacher，用户级数据范围账号（按班授权）与「班主任+任课」看**他班**
+    # 都能整班读逐生总分，与 score_guard/成绩单口径相矛盾。
+    from app.modules.grades.services import score_guard as _sg
+    _sc = _sg.resolve(current_user)
+    if not _sc.class_total_visible(exam.grade, class_name):
+        abort(403)
     return jsonify(success=True, data=_fetch(
-        f'grades_tab_{exam_id}_class_{class_name}',
-        lambda: tab_service.class_tab(exam_id, class_name)))
+        f'grades_tab_{exam_id}_class_{class_name}_{direction}_{selection}',
+        lambda: tab_service.class_tab(exam_id, class_name, direction, selection)))
 
 
 @bp.route('/api/analysis/subject')
@@ -400,10 +477,11 @@ def api_subject_tab():
     exam_id = request.args.get('exam_id', type=int)
     subject = request.args.get('subject', '').strip()
     direction = (request.args.get('direction') or '').strip()
+    selection = (request.args.get('selection') or '').strip()
     exam = _get_exam(exam_id)
     return jsonify(success=True, data=_fetch(
-        f'grades_tab_{exam_id}_subject_{subject}_{direction}',
-        lambda: tab_service.subject_tab(exam_id, subject, direction)))
+        f'grades_tab_{exam_id}_subject_{subject}_{direction}_{selection}',
+        lambda: tab_service.subject_tab(exam_id, subject, direction, selection)))
 
 
 @bp.route('/api/analysis/compare')

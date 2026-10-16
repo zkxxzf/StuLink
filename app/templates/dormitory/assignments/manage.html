@@ -147,7 +147,8 @@
                 {% for s in unassigned_students %}
                 <div class="student-item p-2 border-bottom d-flex justify-content-between align-items-center {% if s.gender == '男' %}male-student{% else %}female-student{% endif %}"
                      draggable="true" data-student-id="{{ s.id }}" data-student-name="{{ s.name }}"
-                     ondragstart="dragStart(event, {{ s.id }}, '{{ s.name }}')"
+                     {# M-10（2026-10-15 审计补漏）：姓名可能含单引号 → 必须走 |tojson，属性用单引号 #}
+                     ondragstart='dragStart(event, {{ s.id }}, {{ s.name|tojson }})'
                      ondragend="dragEnd(event)"
                      style="cursor:grab;font-size:13px;">
                     <div>
@@ -198,11 +199,12 @@
                                  data-bed-id="{{ bd.bed.id }}"
                                  {% if bd.student %}data-student-id="{{ bd.student.id }}" data-student-name="{{ bd.student.name }}"{% endif %}
                                  {% if bd.student %}draggable="true"{% endif %}
-                                 ondragstart="{% if bd.student %}dragStartBed(event, {{ bd.bed.id }}, {{ bd.student.id }}, '{{ bd.student.name }}'){% endif %}"
+                                 {# M-10（2026-10-15 审计补漏）：拖拽三处姓名一律 |tojson + 单引号属性 #}
+                                 ondragstart='{% if bd.student %}dragStartBed(event, {{ bd.bed.id }}, {{ bd.student.id }}, {{ bd.student.name|tojson }}){% endif %}'
                                  ondragend="{% if bd.student %}dragEnd(event){% endif %}"
                                  ondragover="dragOver(event)"
                                  ondragleave="dragLeave(event)"
-                                 ondrop="dropStudent(event, {{ bd.bed.id }}, {{ bd.student.id if bd.student else 0 }}, '{{ bd.student.name if bd.student else '' }}')"
+                                 ondrop='dropStudent(event, {{ bd.bed.id }}, {{ bd.student.id if bd.student else 0 }}, {{ (bd.student.name if bd.student else "")|tojson }})'
                                  {# M-10：学生姓名可能含单引号，必须 |tojson #}
                                  onclick='{% if bd.student %}removeBed({{ bd.bed.id }}, {{ bd.student.name|tojson }}){% endif %}'><!-- 空床点击无反应，等待拖放 -->
                                 <div class="bed-number">{{ bd.bed.bed_number }}床 {% if bd.bed.bed_number % 2 == 1 %}(下铺){% else %}(上铺){% endif %}</div>
@@ -272,7 +274,10 @@ var draggedStudentName = '';
 var draggedFromBedId = null;  // null=左侧列表, 有值=从某床位拖出
 var students = [
     {% for s in unassigned_students %}
-    {id: {{ s.id }}, name: "{{ s.name }}", number: "{{ s.student_number }}", gender: "{{ s.gender }}", cls: "{{ s.class_name }}"},
+    {# 第七轮审计（U-M4）：raw script 段里用 "{{ s.name }}" 拼 JS 字符串 —— Jinja 的 HTML
+       转义在 script 内不还原（显示 &#34;），且姓名含反斜杠会把收尾引号转义掉 → 整段
+       SyntaxError（拖拽/自动分配全失效）。改 |tojson 输出合法 JSON 字符串。 #}
+    {id: {{ s.id }}, name: {{ s.name|tojson }}, number: {{ s.student_number|tojson }}, gender: {{ s.gender|tojson }}, cls: {{ s.class_name|tojson }}},
     {% endfor %}
 ];
 
@@ -347,37 +352,44 @@ function dropStudent(e, toBedId, toStudentId, toStudentName) {
 
     // 情形1: 从左侧列表拖到空床 → 新分配（绿色脉冲，动效与请求并行）
     if (fromBed === null && toStudentId === 0) {
-        $('.bed-slot[data-bed-id="' + toBedId + '"]').addClass('bed-assign');
+        flashBed(toBedId, 'bed-assign');
         doAssign(sid, toBedId);
         return;
     }
 
     // 情形2: 从床位拖到空床 → 搬移（紫色脉冲+源床淡出，动效与请求并行）
     if (fromBed !== null && toStudentId === 0) {
-        var srcSlot = $('.bed-slot[data-bed-id="' + fromBed + '"]');
-        srcSlot.css({opacity: 0.4, transform: 'scale(0.9)', transition: 'all 0.3s'});
-        $('.bed-slot[data-bed-id="' + toBedId + '"]').addClass('bed-move-in');
+        $('.bed-slot[data-bed-id="' + fromBed + '"]').addClass('bed-move-out');
+        flashBed(toBedId, 'bed-move-in');
         doMove(sid, fromBed, toBedId);
         return;
     }
 
     // 情形3: 从床位拖到另一个有人的床位 → 互换（橙色双闪，动效与请求并行）
     if (fromBed !== null && toStudentId !== 0 && fromBed !== toBedId) {
-        var fromSlot = $('.bed-slot[data-bed-id="' + fromBed + '"]');
-        var toSlot = $('.bed-slot[data-bed-id="' + toBedId + '"]');
-        fromSlot.add(toSlot).addClass('bed-swapping');
+        flashBed(fromBed, 'bed-swapping');
+        flashBed(toBedId, 'bed-swapping');
         doSwap(sid, fromBed, toStudentId, toBedId);
         return;
     }
 
     // 情形4: 从左侧列表拖到已占床位 → 拒绝（红色抖动）
     if (fromBed === null && toStudentId !== 0) {
-        $('.bed-slot[data-bed-id="' + toBedId + '"]').addClass('bed-reject');
-        setTimeout(function() {
-            $('.bed-slot[data-bed-id="' + toBedId + '"]').removeClass('bed-reject');
-        }, 400);
+        flashBed(toBedId, 'bed-reject');
         return;
     }
+}
+
+/* 床位动效统一入口（2026-10-16 第八轮审计 U-12）
+   原先各处只 addClass 不 removeClass：同一张床第二次触发时同名动画不再重放，
+   用户看到「点了没反应」。这里强制回流 → 重新加 class → 延时移除（ES5 写法）。 */
+function flashBed(bedId, cls){
+    var $b = $('.bed-slot[data-bed-id="' + bedId + '"]');
+    if (!$b.length) return;
+    $b.removeClass(cls);
+    void $b[0].offsetWidth;          /* 强制回流，保证同名动画能重放 */
+    $b.addClass(cls);
+    setTimeout(function(){ $b.removeClass(cls); }, 600);
 }
 
 /* ========== 分配/移除 ========== */
@@ -404,6 +416,7 @@ function doAssign(studentId, bedId) {
 
 /* ========== 搬移/互换 ========== */
 function doMove(studentId, fromBedId, toBedId) {
+    var srcSlot = $('.bed-slot[data-bed-id="' + fromBedId + '"]');
     $.ajax({
         url: "{{ url_for('assignments.move') }}",
         method: 'POST',
@@ -412,11 +425,12 @@ function doMove(studentId, fromBedId, toBedId) {
         data: JSON.stringify({student_id: studentId, from_bed_id: fromBedId, to_bed_id: toBedId}),
         success: function(res) {
             if(res.success) { location.reload(); }
-            else { alert(res.message); }
+            else { alert(res.message); srcSlot.removeClass('bed-move-out'); }
         },
         error: function(xhr) {
             var msg = xhr.responseJSON ? xhr.responseJSON.message : '操作失败';
             alert(msg);
+            srcSlot.removeClass('bed-move-out');   /* 失败复位源床淡出（U-12） */
         }
     });
 }
@@ -442,7 +456,9 @@ function doSwap(studentIdA, fromBedId, studentIdB, toBedId) {
 /* ========== 移除 ========== */
 function removeBed(bedId, studentName) {
     var slot = $('.bed-slot[data-bed-id="' + bedId + '"]');
-    slot.css({opacity: 0.5, transform: 'scale(0.9)', transition: 'all 0.25s ease-out'});
+    /* 2026-10-16 第八轮审计（U-12）：原为内联 style（opacity/transform/transition），
+       请求失败时床位会永久停在半透明缩小态 → 改用 class，失败分支可 removeClass 复位。 */
+    slot.addClass('bed-removing');
     $.ajax({
         url: "{{ url_for('assignments.unassign') }}",
         method: 'POST',
@@ -451,11 +467,12 @@ function removeBed(bedId, studentName) {
         data: JSON.stringify({bed_id: bedId}),
         success: function(res) {
             if(res.success) { location.reload(); }
-            else { alert(res.message); }
+            else { alert(res.message); slot.removeClass('bed-removing'); }
         },
         error: function(xhr) {
             var msg = xhr.responseJSON ? xhr.responseJSON.message : '操作失败';
             alert(msg);
+            slot.removeClass('bed-removing');
         }
     });
 }
@@ -530,16 +547,25 @@ $('#studentFilter').on('input', function(){
 });
 
 function renderStudentList(filter) {
-    var html = '';
+    /* 第七轮审计（U-M5）：原实现把姓名/班级拼进 innerHTML 字符串（.html()）。
+       与上方 students 的 |tojson 修复配对：改 DOM 构造 + .text()，彻底断开注入面。 */
+    var $box = $('#studentListModal').empty();
+    var shown = 0;
     students.forEach(function(s){
         if(filter && s.name.toLowerCase().indexOf(filter) < 0 && s.number.indexOf(filter) < 0) return;
-        html += '<div class="d-flex justify-content-between align-items-center p-2 border-bottom" style="cursor:pointer;" onclick="doAssign('+s.id+', null)">';
-        html += '<div><strong>'+s.name+'</strong> <span class="text-muted small">'+s.number+'</span></div>';
-        html += '<span class="badge bg-light text-dark">'+s.cls+'</span>';
-        html += '</div>';
+        shown++;
+        var $row = $('<div class="d-flex justify-content-between align-items-center p-2 border-bottom" style="cursor:pointer;"></div>');
+        $row.on('click', function(){ doAssign(s.id, null); });
+        var $left = $('<div></div>');
+        $('<strong></strong>').text(s.name).appendTo($left);
+        $('<span class="text-muted small"></span>').text(' ' + s.number).appendTo($left);
+        $row.append($left);
+        $('<span class="badge bg-light text-dark"></span>').text(s.cls).appendTo($row);
+        $box.append($row);
     });
-    if(!html) html = '<div class="text-center text-muted py-3">没有可分配的学生</div>';
-    $('#studentListModal').html(html);
+    if(!shown) {
+        $box.append($('<div class="text-center text-muted py-3"></div>').text('没有可分配的学生'));
+    }
 }
 
 /* 全部自动分配 */

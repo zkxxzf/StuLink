@@ -28,6 +28,10 @@ TEMPLATES = {
     'gaokao': [('清北', 3), ('985', 8), ('211', 20), ('特控', 60), ('本科', 95), ('未上线', 0)],
 }
 
+# 按「选科组合」划线的科目（2026-10-15 用户口径）：再选四科各组合一条线；
+# 语文/数学/外语 + 首选科（物理/历史）仍按方向划。划线脚本与页面共用这一处定义。
+COMBO_SUBJECTS = ('化学', '生物', '政治', '地理')
+
 
 def _log():
     """划线专用日志：写 StuLink/logs/bands.log，同时输出到 Flask 默认日志（stderr）
@@ -60,11 +64,61 @@ def _is_subject(value):
     return value == TOTAL_SUBJECT or value in SUBJECTS
 
 
-def _scope_scores(data, direction, subject):
-    """（方向 × 学科）参考人群的分数列表"""
+def _scope_scores(data, direction, subject, selection=''):
+    """（方向 × [组合] × 学科）参考人群的分数列表
+
+    selection 非空 = 该选科组合（如 物化生）的人群（组合总分线用，direction 必填）；
+    空 = 按方向/全体（原口径）。
+    """
+    if selection:
+        rows = [t for t in data.totals_of(direction=direction)
+                if t.get('selection') == selection]
+        if subject == TOTAL_SUBJECT:
+            return [t['score'] for t in rows if t['score'] is not None]
+        return [v for v in (data.subj.get((t['no'], subject)) for t in rows)
+                if v is not None]
     if subject == TOTAL_SUBJECT:
         return [t['score'] for t in data.totals_of(direction=direction)]
     return list(data.scores_of_subject(subject, direction=direction))
+
+
+def sel_meta(data):
+    """本场各选科组合 → {组合: {'direction': 方向, 'subjects': [该组合实际开考科目]}}
+
+    2026-10-15 用户口径（三次定案）：**只有总分按组合**，其余各科按方向；页面用
+    **列级「按组合」开关**（`bands.html` 的 `q-combo-chk`）逐列决定该科是否按组合填，
+    不再有整表「划线维度」下拉（`matrix?selection=` 仅保留给脚本/测试）。
+    `band_subjects` = 该组合按组合级划线的科目（再选四科；语数外+首选科按方向，不在内），
+    也是写入口的科目白名单（审计 A3）。
+    """
+    rows = data.totals_of()          # dict 行（total_rows 是 ORM 对象，无 .get）
+    out = {}
+    for t in rows:
+        sel = (t.get('selection') or '').strip()
+        if not sel:
+            continue
+        rec = out.setdefault(sel, {'direction': t.get('direction') or '',
+                                   'subjects': set(), 'count': 0})
+        rec['count'] += 1        # 该组合人数（组合维度下算「比例 → 约 N 人」用）
+        if not rec['direction'] and t.get('direction'):
+            rec['direction'] = t['direction']
+    if not out:
+        return {}
+    nos = {t['no']: (t.get('selection') or '').strip() for t in rows}
+    for (no, sub), v in data.subj.items():
+        sel = nos.get(no)
+        # 总分不是单科（前端会单独补一列），这里只收单科
+        if v is not None and sel in out and sub != TOTAL_SUBJECT:
+            out[sel]['subjects'].add(sub)
+    # 固定顺序（下拉选项顺序稳定）：物理类三组合 → 史地政；未知组合排最后
+    order = ['物化生', '物化地', '物化政', '史地政']
+    return {k: {'direction': v['direction'], 'subjects': sorted(v['subjects']),
+                # 该组合按「组合级」划线的科目（再选四科；语数外+首选科按方向，不在内）
+                'band_subjects': [s for s in sorted(v['subjects']) if s in COMBO_SUBJECTS],
+                'count': v['count']}
+            for k, v in sorted(out.items(),
+                               key=lambda kv: (order.index(kv[0])
+                                               if kv[0] in order else 99, kv[0]))}
 
 
 def _ratio_from_sorted(desc, ratio):
@@ -80,19 +134,20 @@ def _ratio_from_sorted(desc, ratio):
     return desc[min(idx, n - 1)]
 
 
-def _ratio_to_score(data, direction, subject, ratio):
+def _ratio_to_score(data, direction, subject, ratio, selection=''):
     """按参考人数比例换算下界；无参考返回 0"""
-    return _ratio_from_sorted(sorted(_scope_scores(data, direction, subject), reverse=True),
+    return _ratio_from_sorted(sorted(_scope_scores(data, direction, subject, selection),
+                                     reverse=True),
                               ratio)
 
 
-def _rank_to_score(data, direction, subject, rank):
+def _rank_to_score(data, direction, subject, rank, selection=''):
     """按名次换算下界：第 rank 名（1 起）的分数；参考人数不足时取最后一名。
 
-    例：填 50 → 取该（方向×学科）第 50 名的分数作为该层下界，
+    例：填 50 → 取该（方向×[组合]×学科）第 50 名的分数作为该层下界，
     即「前 50 名」这一层。落库与比例模式一样换算成实际分数线（统一存 score）。
     """
-    desc = sorted(_scope_scores(data, direction, subject), reverse=True)
+    desc = sorted(_scope_scores(data, direction, subject, selection), reverse=True)
     if not desc:
         return 0.0
     try:
@@ -102,13 +157,13 @@ def _rank_to_score(data, direction, subject, rank):
     return desc[min(max(r - 1, 0), len(desc) - 1)]
 
 
-def _band_counts(data, direction, subject, bands):
+def _band_counts(data, direction, subject, bands, selection=''):
     """bands: [(name, lower)]（seq 升序，最高层在前）→ 每层人数（含占比）
     取首个 lower<=score 的层（高分落入高层）
     """
     counts = [0] * len(bands)
     total = 0
-    for s in _scope_scores(data, direction, subject):
+    for s in _scope_scores(data, direction, subject, selection):
         if s is None:
             continue
         total += 1
@@ -122,9 +177,15 @@ def _band_counts(data, direction, subject, bands):
     return counts, total
 
 
+# ==================== 读（所有能看成绩的账号）====================
+# 2026-10-15 用户口径：「划线分层应该可以向所有老师展示，但是他们不能修改，
+# 因为这个是教务员/管理员、年级长整的。」——页面与两个读取接口放到 grades.view，
+# 页面按 can_edit（grades.settings）渲染只读视图；
+# 三个写入接口（save / batch / apply）**保持 grades.settings**（管理员/教务员/
+# 年级长/考试管理员的「教学管理」写入档），只读账号即使伪造请求也会被 403。
 @bp.route('/exams/<int:exam_id>/bands')
 @login_required
-@perm_required('grades.settings')
+@perm_required('grades.view')
 def bands_page(exam_id):
     exam = assert_exam_visible(exam_id)   # H-4：分档线页同样校验考试年级范围
     data = st.cached_exam_data(exam_id)
@@ -136,15 +197,21 @@ def bands_page(exam_id):
                     for d in directions}
     return render_template('grades/bands.html', exam=exam, directions=directions,
                            dir_subjects=dir_subjects,
+                           sel_meta=sel_meta(data),
+                           # 组合级科目白名单（单一来源＝COMBO_SUBJECTS，审计 S2-1：
+                           # 前端不再自己复制一份，兜底路径也用这份）
+                           combo_subjects=list(COMBO_SUBJECTS),
+                           can_edit=current_user.has_perm('grades.settings'),
                            total_count=len(data.total_rows))
 
 
-def _bands_payload(exam_id, direction, subject, data=None):
-    """返回该（方向 × 学科）bands（含预览）JSON 列表
+def _bands_payload(exam_id, direction, subject, data=None, selection=''):
+    """返回该（方向 × [组合] × 学科）bands（含预览）JSON 列表
 
     data 可传入已构造好的 ExamData 以复用（批量接口用，避免逐列重复加载明细行）。
     """
-    rows = (ExamBand.query.filter_by(exam_id=exam_id, subject=subject)
+    rows = (ExamBand.query.filter_by(exam_id=exam_id, subject=subject,
+                                     selection=selection)
             .filter(ExamBand.direction.in_([direction, '']))
             .order_by(ExamBand.seq.asc()).all())
     if not rows:
@@ -155,14 +222,15 @@ def _bands_payload(exam_id, direction, subject, data=None):
         real = rows
     bands = [(r.name, r.lower_value) for r in real]
     data = data or st.cached_exam_data(exam_id)
-    counts, total = _band_counts(data, direction, subject, bands)
+    counts, total = _band_counts(data, direction, subject, bands, selection)
     # 比例模式预览：排序一次复用，避免每层都重排全量分数
     sorted_desc = None
     out = []
     for i, r in enumerate(real):
         if r.lower_mode == 'ratio':
             if sorted_desc is None:
-                sorted_desc = sorted(_scope_scores(data, direction, subject), reverse=True)
+                sorted_desc = sorted(_scope_scores(data, direction, subject, selection),
+                                     reverse=True)
             preview = _ratio_from_sorted(sorted_desc, r.lower_value)
         else:
             preview = r.lower_value
@@ -177,20 +245,22 @@ def _bands_payload(exam_id, direction, subject, data=None):
 
 @bp.route('/api/bands')
 @login_required
-@perm_required('grades.settings')
+@perm_required('grades.view')      # 只读接口（2026-10-15 口径，见 bands_page 注释）
 def bands_get():
     exam_id = request.args.get('exam_id', type=int)
     direction = request.args.get('direction', '').strip()
     subject = request.args.get('subject', '').strip() or TOTAL_SUBJECT
+    selection = request.args.get('selection', '').strip()
     assert_exam_visible(exam_id)          # H-4
     if not _is_subject(subject):
         return jsonify(success=False, message='学科无效'), 400
-    return jsonify(success=True, data=_bands_payload(exam_id, direction, subject))
+    return jsonify(success=True, data=_bands_payload(exam_id, direction, subject,
+                                                     selection=selection))
 
 
 @bp.route('/api/bands/matrix')
 @login_required
-@perm_required('grades.settings')
+@perm_required('grades.view')      # 只读接口（2026-10-15 口径，见 bands_page 注释）
 def bands_matrix():
     """一次返回全部（方向 × 学科）划线，供划线页整表回填
 
@@ -199,28 +269,65 @@ def bands_matrix():
     改为单次请求、全程共用一份 ExamData。
     """
     exam_id = request.args.get('exam_id', type=int)
+    selection = (request.args.get('selection') or '').strip()
     assert_exam_visible(exam_id)          # H-4
     data = st.cached_exam_data(exam_id)
     directions = data.directions or ['']
+    meta = sel_meta(data)
     out = {}
     for d in directions:
         subs = [s for s in SUBJECTS if data.scores_of_subject(s, direction=d or None)]
+        if selection:
+            # 「按组合」维度（2026-10-15）：只回该组合自己的线（总分＋该组合开考科目），
+            # 且**不带 selection 字段** —— 前端直接填进编辑格，保存即写回该组合
+            m = meta.get(selection) or {}
+            if d != (m.get('direction') or d):
+                continue
+            # 只回「总分 + 该组合的组合级科目（band_subjects：再选四科）」——
+            # 语数外/首选科按方向划，不从组合维度回值（审计 A3：否则整表切组合时
+            # 会把方向线当组合线编辑，写入口径漂移）
+            allowed = set(m.get('band_subjects') or []) | {TOTAL_SUBJECT}
+            for sub in [TOTAL_SUBJECT] + subs:
+                if sub not in allowed:
+                    continue
+                payload = _bands_payload(exam_id, d, sub, data=data, selection=selection)
+                out[f'{selection}|{sub}'] = [
+                    {k: v for k, v in b.items() if k != 'selection'} for b in payload]
+            continue
         for sub in [TOTAL_SUBJECT] + subs:
-            out[f'{d}|{sub}'] = _bands_payload(exam_id, d, sub, data=data)
+            payload = _bands_payload(exam_id, d, sub, data=data)
+            # 「按方向」维度：把该 (方向×学科) 的**组合线**一并返回 —— 渲染成只读小字
+            # 备注格（不进编辑格、批量保存不带它；要改组合线请把上方维度切到对应组合）
+            sel_rows = (ExamBand.query
+                        .filter(ExamBand.exam_id == exam_id,
+                                ExamBand.subject == sub,
+                                ExamBand.direction == d,
+                                ExamBand.selection != '')
+                        .order_by(ExamBand.selection, ExamBand.seq).all())
+            if sel_rows:
+                payload = list(payload) + [
+                    {'seq': r.seq, 'name': r.name, 'lower_value': r.lower_value,
+                     'selection': r.selection} for r in sel_rows]
+            out[f'{d}|{sub}'] = payload
     return jsonify(success=True, data=out)
 
 
-def _save_bands(exam_id, direction, subject, payload):
+def _save_bands(exam_id, direction, subject, payload, selection='', data=None):
     """payload: [{seq,name,lower_mode,lower_value}]（seq 升序=最高层在前，下界分数依次降低）
     ratio 模式在保存时按当前参考人数换算为实际分数线落库（统一存 score）
+    selection 非空 = 写「该选科组合」的线（组合总分线，direction 必填），
+    覆盖写入只删同 (方向,组合,学科) 的旧行，不影响方向线。
+    data 可传入已构造的 ExamData 复用（审计 W8-a：脚本逐科调用时避免每次重建全量明细）。
     """
-    data = st.ExamData(exam_id)
+    data = data if data is not None else st.ExamData(exam_id)
     # 2026-10-12 数据可信度审计（§3.6-7）：没成绩就划线时，_ratio_to_score /
     # _rank_to_score 对"无参考"都返回 0.0 → 会划出「所有层下界都是 0」的线
     # 并**保存成功**，之后所有分层统计/上线人数全部失真，且很难被发现。
-    # 这里在该（方向×学科）没有任何参考分数时直接拒绝。
-    if not _scope_scores(data, direction, subject):
-        return None, f'{direction or "全体"}·{subject} 暂无成绩，请先导入成绩再划线'
+    # 这里在该（方向×[组合]×学科）没有任何参考分数时直接拒绝。
+    if not _scope_scores(data, direction, subject, selection):
+        label = f'{direction or "全体"}·{selection}·{subject}' if selection \
+            else f'{direction or "全体"}·{subject}'
+        return None, f'{label} 暂无成绩，请先导入成绩再划线'
     # 2026-10-13：科目名白名单校验 —— AI 导入的解析器对别名表外的科目名会原样透传
     # （如「英语」），落库后 matrix 只认 SUBJECTS+总分，这些行永远查不到也不报错。
     from app.models.grades import SUBJECTS, TOTAL_SUBJECT
@@ -247,11 +354,11 @@ def _save_bands(exam_id, direction, subject, payload):
         if mode == 'score' and value < 0:
             return None, f'第 {seq} 层（{name}）下界分数不能为负'
         if mode == 'ratio':
-            # 按（方向×学科）参考人数比例换算为分数线
-            value = _ratio_to_score(data, direction, subject, value)
+            # 按（方向×[组合]×学科）参考人数比例换算为分数线
+            value = _ratio_to_score(data, direction, subject, value, selection)
         elif mode == 'rank':
             # 按名次换算为分数线（「前 N 名」）
-            value = _rank_to_score(data, direction, subject, value)
+            value = _rank_to_score(data, direction, subject, value, selection)
         # 修复：允许相邻两层下界相等——不同比例换算落在同一同分段时必然相等
         #（同分学生无法用分数线切分，等界=高层优先收录）；仅拦截逆序（高于上一层）
         if prev_lower is not None and value > prev_lower:
@@ -260,11 +367,12 @@ def _save_bands(exam_id, direction, subject, payload):
         seen_seq.add(seq)
         items.append({'seq': seq, 'name': name, 'lower_mode': 'score',
                       'lower_value': value})
-    # 覆盖保存（仅覆盖该 方向×学科 组合）
-    ExamBand.query.filter_by(exam_id=exam_id, direction=direction,
-                             subject=subject).delete()
+    # 覆盖保存（仅覆盖该 方向×[组合]×学科 组合）
+    ExamBand.query.filter_by(exam_id=exam_id, direction=direction, subject=subject,
+                             selection=selection).delete()
     for it in items:
         db.session.add(ExamBand(exam_id=exam_id, direction=direction, subject=subject,
+                                selection=selection,
                                 seq=it['seq'], name=it['name'],
                                 lower_mode=it['lower_mode'],
                                 lower_value=it['lower_value']))
@@ -273,18 +381,20 @@ def _save_bands(exam_id, direction, subject, payload):
 
 @bp.route('/api/bands/save', methods=['POST'])
 @login_required
-@perm_required('grades.settings')
+@perm_required('grades.settings')      # 写入：教务员/管理员/年级长/考试管理员
 def bands_save():
     data = request.get_json(silent=True) or {}
     exam_id = int(data.get('exam_id') or 0)
     direction = (data.get('direction') or '').strip()
     subject = (data.get('subject') or '').strip() or TOTAL_SUBJECT
+    selection = (data.get('selection') or '').strip()
     exam = assert_exam_visible(exam_id)   # H-4
     if direction not in ('物理', '历史'):
         return jsonify(success=False, message='方向无效'), 400
     if not _is_subject(subject):
         return jsonify(success=False, message='学科无效'), 400
-    items, err = _save_bands(exam_id, direction, subject, data.get('bands') or [])
+    items, err = _save_bands(exam_id, direction, subject, data.get('bands') or [],
+                             selection)
     if err:
         _log().warning('单个保存失败 exam_id=%s %s·%s：%s', exam_id, direction, subject, err)
         return jsonify(success=False, message=err), 400
@@ -294,12 +404,13 @@ def bands_save():
     invalidate_exam_cache(exam_id)
     log_operation(current_user, '划线', '考试', exam_id,
                   f'{exam.name} {direction}·{subject}分层保存', module='grades')
-    return jsonify(success=True, data=_bands_payload(exam_id, direction, subject))
+    return jsonify(success=True, data=_bands_payload(exam_id, direction, subject,
+                                                     selection=selection))
 
 
 @bp.route('/api/bands/batch', methods=['POST'])
 @login_required
-@perm_required('grades.settings')
+@perm_required('grades.settings')      # 写入：教务员/管理员/年级长/考试管理员
 def bands_batch():
     """一次性批量划线：按「层 ×（方向 × 学科）」矩阵写入
 
@@ -322,18 +433,34 @@ def bands_batch():
     if not layers:
         return jsonify(success=False, message='没有可保存的层'), 400
 
-    _log().info('=== 批量划线请求 exam_id=%s 用户=%s mode=%s scope=%s 含总分=%s 层数=%s',
-                exam_id, current_user.username, mode, scope, include_total, len(layers))
+    selection = (data.get('selection') or '').strip()   # 非空=「按组合」维度
+    _log().info('=== 批量划线请求 exam_id=%s 用户=%s mode=%s scope=%s 含总分=%s 组合=%s 层数=%s',
+                exam_id, current_user.username, mode, scope, include_total,
+                selection or '（按方向）', len(layers))
     edata = st.ExamData(exam_id)
-    directions = edata.directions or ['']     # 选科前：空串=全体
+    meta = sel_meta(edata)
+    if selection:
+        # 「按组合」维度（2026-10-15）：方向由组合推出，科目限该组合实际开考的（＋总分）
+        m = meta.get(selection)
+        if not m:
+            return jsonify(success=False,
+                           message=f'选科组合无效或本场无该组合学生：{selection}'), 400
+        targets = [(m.get('direction') or '', selection,
+                    list(m.get('subjects') or []))]
+    else:
+        # 原「按方向」维度：选科前 directions=['']（空串=全体）
+        targets = [(d, '',
+                    [s for s in SUBJECTS
+                     if edata.scores_of_subject(s, direction=d or None)])
+                   for d in (edata.directions or [''])]
     applied, skipped = [], []
-    for direction in directions:
-        subs = [s for s in SUBJECTS
-                if edata.scores_of_subject(s, direction=direction or None)]
+    for direction, sel, subs in targets:
         if include_total:
             subs = [TOTAL_SUBJECT] + subs
+        # 前端列键：按组合='物化生|化学'（组合名当列头），按方向='物理|化学'
+        key_d = sel or direction
         for sub in subs:
-            label = f'{direction or "全体"}·{sub}'
+            label = f'{key_d or "全体"}·{sub}'
             payload = []
             for lay in layers:
                 try:
@@ -345,7 +472,7 @@ def bands_batch():
                 if scope == 'all':
                     value = lay.get('value')
                 else:
-                    value = (lay.get('values') or {}).get(f'{direction}|{sub}')
+                    value = (lay.get('values') or {}).get(f'{key_d}|{sub}')
                 if value is None or value == '':
                     continue        # 该格未填 → 该组合不划线
                 payload.append({'seq': seq, 'name': name, 'lower_mode': mode,
@@ -354,11 +481,12 @@ def bands_batch():
                 _log().info('  跳过 %s：未填任何下界值', label)
                 skipped.append(label)      # 整列未填
                 continue
-            if not _scope_scores(edata, direction, sub):
+            if not _scope_scores(edata, direction, sub, sel):
                 _log().info('  跳过 %s：无参考学生', label)
                 skipped.append(label)      # 该组合无参考学生
                 continue
-            items, err = _save_bands(exam_id, direction, sub, payload)
+            # 第七轮审计 P-H1：复用入口 ExamData（原实现每列重建全场明细 ≈21 次/次批量）
+            items, err = _save_bands(exam_id, direction, sub, payload, sel, data=edata)
             if err:
                 db.session.rollback()
                 _log().warning('  校验失败 %s：%s（提交值 %s）', label, err,
@@ -367,6 +495,56 @@ def bands_batch():
             _log().info('  写入 %s：%s', label,
                         [(i['name'], i['lower_value']) for i in items])
             applied.append(label)
+
+    # 2026-10-15：「按方向」视图里**格内逐组合**填的值 —— layers[i].sel_values =
+    #   {'物理|总分': {'物化生': 496.5, '物化地': 427.5, ...}, ...}
+    # 直接写各组合自己的线（selection=组合），与方向线互不影响
+    extra = {}
+    for lay in layers:
+        try:
+            _seq = int(lay.get('seq'))
+        except (TypeError, ValueError):
+            continue
+        _name = (lay.get('name') or '').strip()
+        for _key, _by_sel in (lay.get('sel_values') or {}).items():
+            if '|' not in _key or not isinstance(_by_sel, dict):
+                # 结构必须是 {列键: {组合: 值}}；写错一层直接 400，不要 500
+                #（第六轮审计自测发现：传 {'物化生|化学': 57} 会 AttributeError）
+                return jsonify(success=False,
+                               message='sel_values 结构应为 {"方向|科目": {"组合": 值}}'), 400
+            _kd, _sub = _key.split('|', 1)
+            if _sub not in SUBJECTS and _sub != TOTAL_SUBJECT:
+                return jsonify(success=False, message=f'科目名无效：{_sub}'), 400
+            for _sel, _val in (_by_sel or {}).items():
+                if _val is None or _val == '':
+                    continue
+                _m = meta.get(_sel)
+                if not _m:
+                    return jsonify(success=False,
+                                   message=f'选科组合无效或本场无该组合学生：{_sel}'), 400
+                # 组合级线只允许「总分 + 该组合的组合级科目」——语数外/首选科按方向划
+                #（审计 A3：否则页面/脚本能把已按方向划的科目又写成组合线，两端口径漂移）
+                if _sub != TOTAL_SUBJECT and _sub not in (_m.get('band_subjects') or []):
+                    return jsonify(success=False,
+                                   message=f'{_sel} 的「{_sub}」不按组合划线（该科按方向）'), 400
+                extra.setdefault((_m.get('direction') or '', _sel, _sub), []).append(
+                    {'seq': _seq, 'name': _name, 'lower_mode': mode, 'lower_value': _val})
+    for (direction, sel, sub), payload in sorted(extra.items()):
+        label = f'{sel}·{sub}'
+        if not _scope_scores(edata, direction, sub, sel):
+            _log().info('  跳过 %s：无参考学生', label)
+            skipped.append(label)
+            continue
+        items, err = _save_bands(exam_id, direction, sub, payload, sel, data=edata)
+        if err:
+            db.session.rollback()
+            _log().warning('  校验失败 %s：%s（提交值 %s）', label, err,
+                           [(p['name'], p['lower_value']) for p in payload])
+            return jsonify(success=False, message=f'{label}：{err}'), 400
+        _log().info('  写入（格内组合） %s：%s', label,
+                    [(i['name'], i['lower_value']) for i in items])
+        applied.append(label)
+
     if not applied:
         db.session.rollback()
         _log().warning('结果：无组合可写入（跳过 %d 个：%s）', len(skipped), skipped)
@@ -402,7 +580,7 @@ def bands_batch():
 
 @bp.route('/api/bands/apply', methods=['POST'])
 @login_required
-@perm_required('grades.settings')
+@perm_required('grades.settings')      # 写入：教务员/管理员/年级长/考试管理员
 def bands_apply():
     data = request.get_json(silent=True) or {}
     exam_id = int(data.get('exam_id') or 0)
@@ -447,7 +625,7 @@ def bands_apply():
                 else:
                     payload.append({'seq': seq, 'name': name, 'lower_mode': 'ratio',
                                     'lower_value': float(ratio)})
-            items, err = _save_bands(exam_id, direction, sub, payload)
+            items, err = _save_bands(exam_id, direction, sub, payload, data=edata)
             if err:
                 db.session.rollback()
                 return jsonify(success=False, message=f'{direction}·{sub}: {err}'), 400

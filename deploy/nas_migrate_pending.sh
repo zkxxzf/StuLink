@@ -66,11 +66,13 @@ docker commit "$CT" "$IMG" >/dev/null || fail "docker commit 失败"
 
 echo "[4/6] 按序补跑缺失的迁移"
 run_mig() {
-    echo "  --> $1"
+    # 2026-10-15：支持脚本参数（如「修数据」类脚本的 --apply）；原有单参调用不受影响
+    local script="$1"; shift
+    echo "  --> $script $*"
     docker run --rm -v "$DATA":/app/data -w /app \
-        --entrypoint python "$IMG" "$1" 2>&1 | tail -n 6
+        --entrypoint python "$IMG" "$script" "$@" 2>&1 | tail -n 6
     rc=${PIPESTATUS[0]}
-    [ "$rc" = "0" ] || fail "迁移失败：$1（rc=$rc）"
+    [ "$rc" = "0" ] || fail "迁移失败：$script（rc=$rc）"
 }
 # ── 结构类：加列 / 建表 / 索引 / 回填 ──────────────────────────────────────
 run_mig scripts/migrate_term_schedule_dates.py            # 学期起止日期（教学周计算）
@@ -100,6 +102,13 @@ run_mig scripts/migrate_plan_current_unique_20261014.py   # 方案表 is_current
 run_mig scripts/migrate_leader_group_single_20261014.py   # 综合组旧形态记录归并为「整组一位」（无记录则空跑）
 # 2026-10-15：成绩复核（申请调分）申请表 —— 教师提交 / 有改分权限者审批
 run_mig scripts/migrate_score_review_20261015.py           # 成绩复核：新建 score_review_requests 表
+# 2026-10-15：组合总分线 —— exam_bands 加 selection 列 + 唯一键扩维（重建表，须停应用，见脚本头）
+run_mig scripts/migrate_exam_band_selection_20261015.py     # 划线：exam_bands.selection（物化生等组合总分线）
+# 2026-10-15：考试选科快照滞后修正（学生转科后 exam_scores 的选科/方向没跟上；幂等，须 --apply）
+run_mig scripts/fix_exam_selection_snapshot_20261015.py --apply  # 修数据：按实考科目+名册刷新快照并重算排名
+run_mig scripts/apply_gaokao_bands.py --apply               # 划线：按修正后的方向人群重算特控/本科线（幂等）
+# 2026-10-16 第七轮审计（C-H1）：官方线表录入 —— exam 33（20260712 期末）特控/本科纯分数线（整场先删后插，幂等）
+run_mig scripts/import_bands_20260712.py --apply            # 划线：该场无成绩/无该场时脚本自行中止，不误伤
 # ── 数据 / 权限类（幂等）──────────────────────────────────────────────────
 # 2026-10-14 第三轮审计（CONS3-02）：多身份改造的两个脚本原先**完全未登记**（只在
 # docs/权限体系多身份改造执行计划.md 里点名）→ 上线必漏跑。按设计文档顺序：

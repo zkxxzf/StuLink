@@ -1,4 +1,4 @@
-# StuLink v1.19.49.34 2026-10-15
+# StuLink v1.19.49.35 2026-10-15
 # 考试级概览的授权塑形（Web 端 AI 工具与 MCP 服务共用同一份，避免口径漂移）
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 """考试级概览（考试概览 / get_exam_overview / exam_overview）的授权塑形。
@@ -99,4 +99,23 @@ def build(exam, scope, data):
     else:
         out['total_hidden'] = True
         out['note'] = '任课教师仅可见所教学科成绩，总分口径已隐藏'
+
+    # 2026-10-15：本场划线（层名 + 各方向/组合的分数线）——划线是学校口径、聚合层信息，
+    # 网页端「划线分层」对所有能看该场成绩的账号只读展示；AI 端（Web AI 与 MCP 共用本函数）
+    # 同口径带上，让"这次本科线多少分"这类问题两个入口都能直接答，不再"网页能看 AI 拿不到"。
+    from app.models.grades import TOTAL_SUBJECT as _TOTAL
+    from app.modules.grades.services.stats_service import band_lines as _band_lines
+    _lines = _band_lines(exam.id, _TOTAL)
+    if _lines:
+        _layers = []
+        for _b in _lines:
+            if _b['layer'] not in _layers:
+                _layers.append(_b['layer'])
+        out['bands'] = {
+            'layers': _layers,
+            'lines': _lines,
+            'note': ('层线按「方向 / 选科组合」分别划（组合线优先、方向线兜底），'
+                     '这是学校划线口径、聚合层信息，能看该场成绩的账号都可读；'
+                     '单科分数线用 layer_online（subject=科目名）查询'),
+        }
     return out

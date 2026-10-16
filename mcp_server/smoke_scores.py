@@ -497,9 +497,13 @@ async def main():
             check('任课教师：年级级分数段可查（聚合公开）',
                   await call('get_exam_score_segments', {'exam_id': exam_id}),
                   must_contain=['distribution'])
+            _nl = await call('get_layer_online_stats', {'exam_id': exam_id})
             check('任课教师：分层上线统计可查（聚合公开；未划线属正常）',
-                  await call('get_layer_online_stats', {'exam_id': exam_id}),
-                  expect_ok=None)
+                  _nl, expect_ok=None)
+            if '"ok": true' in _nl:
+                # 2026-10-15：网页「划线分层」对全体教师只读展示 → AI 端同口径带上分数线
+                expect('任课教师：已划线场次的返回体带各层分数线（lines + lower）',
+                       '"lines"' in _nl and '"lower"' in _nl, _nl[:200])
             if teacher.get('second_class'):
                 check('任课教师：对比自己任教的两个班',
                       await call('compare_classes',

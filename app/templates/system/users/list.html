@@ -112,8 +112,9 @@
                                 </button>
                                 {% endif %}
                             </form>
+                            {# M-10（2026-10-15 审计补漏）：姓名可能含单引号 → 提示文案整体 |tojson + 单引号属性 #}
                             <form method="POST" action="{{ url_for('users.reset_password', id=u.id) }}" style="display:inline;"
-                                  onsubmit="return confirm('确定重置 {{ u.real_name }} 的密码为 123456？')">
+                                  onsubmit='return confirm({{ ("确定重置 " + (u.real_name or u.username or "") + " 的密码为 123456？")|tojson }})'>
                                 <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                                 <button type="submit" class="btn btn-sm btn-outline-info" title="重置密码" aria-label="重置密码"><i class="bi bi-key"></i></button>
                             </form>

@@ -51,12 +51,15 @@ def _score_segments(user, exam_id, class_name, by_rank):
 
 
 def _layer_online(user, exam_id, subject):
-    """分层上线统计（各层上线人数与上线率）。
+    """分层上线统计（各层分数线 + 上线人数与上线率）。
 
     2026-10-15 用户口径：属年级成绩分析结果 → **公开**（不再仅限年级长及以上，
     也不再按所教学科收窄）；逐生名单仍按班/科收敛。
+    同日补：**带上各层分数线本身**（`lines`，按方向/选科组合分别划）——网页端
+    「划线分层」对所有老师只读展示，AI 端（本服务与网页 AI）同口径，避免
+    "老师网页能看线、问 AI 却说拿不到"。
     """
-    from app.modules.grades.services import pivot_service
+    from app.modules.grades.services import pivot_service, stats_service
     exam, scope = exam_and_scope(user, exam_id)
     subj = (subject or TOTAL_SUBJECT).strip() or TOTAL_SUBJECT
     stats = pivot_service.layer_pass_stats(examdata.get_exam_data(exam.id), subj)
@@ -64,6 +67,8 @@ def _layer_online(user, exam_id, subject):
         raise ValueError('该考试未配置分层线（或所选科目无分层配置），'
                          '可先调用 get_exam_overview 查看科目，或在系统内配置分层')
     return {'exam_id': exam.id, 'exam_name': exam.name, 'subject': stats.get('subject', subj),
+            # 各层分数线（方向级 + 选科组合级；组合线优先、方向线兜底）
+            'lines': stats_service.band_lines(exam.id, subj),
             'layers': stats.get('layers'),
             'rows': respond.limit_rows(stats.get('rows')), 'total': stats.get('total')}
 
@@ -129,8 +134,9 @@ def register(server):
             tool='get_exam_score_segments', params=params, perm='grades.view')
 
     @server.tool(name='get_layer_online_stats',
-                 description='查询分层上线统计（各层上线人数与上线率，全年级口径）——'
-                             '聚合口径，公开；subject 默认 "总分"')
+                 description='查询分层上线统计：各层分数线（lines：按方向/选科组合分别划）'
+                             '＋各层上线人数与上线率（全年级口径）——聚合口径，公开；'
+                             '问"这次考试特控线/本科线多少分"也用它；subject 默认 "总分"')
     async def get_layer_online_stats(exam_id: int, subject: str = '总分') -> str:
         return await toolkit.db_call(lambda u: _layer_online(u, exam_id, subject),
                                      tool='get_layer_online_stats',

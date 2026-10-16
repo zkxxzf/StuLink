@@ -1,5 +1,5 @@
 /* =============================================================================
-   StuLink 主题层（浅色 / 深色）—— v1.19.49.34（2026-10-13）
+   StuLink 主题层（浅色 / 深色）—— v1.19.49.35（2026-10-13）
    -----------------------------------------------------------------------------
    背景：此前全站颜色是「字面量满天飞」——base.html 内联 56 处、业务 css 201 处、
    模板内联 style 665 处；成绩分析（考试态 .sidebar-float）侧栏是白底卡，
@@ -19,7 +19,7 @@
 :root,
 [data-bs-theme="light"] {
     /* —— 页面与面板 —— */
-    /* 2026-10-13（v1.19.49.34）：页面底色原 #f0f2f5 偏灰，整体提亮一档 */
+    /* 2026-10-13（v1.19.49.35）：页面底色原 #f0f2f5 偏灰，整体提亮一档 */
     --sl-bg: #f6f8fb;                  /* 页面底色 */
     --sl-surface: #ffffff;             /* 卡片 / 面板 / 弹层 */
     --sl-surface-2: #f8fafc;           /* 次级面：表头、卡片头、斑马行 */
@@ -61,7 +61,7 @@
     --sl-navbar-border: #e2e8f0;
 
     /* —— 表格 ——
-       2026-10-13（v1.19.49.34）：成绩类表头原是写死的深色 #1e293b + 白字
+       2026-10-13（v1.19.49.35）：成绩类表头原是写死的深色 #1e293b + 白字
        （grades.css 加了 !important）。页面整体主题化后这条黑表头就成了突兀的
        「黑条」（用户反馈「页面区域还有黑色的，比如表头」）→ 改为跟随主题：
        浅色 = 浅灰底深字，深色 = 深底浅字。 */
@@ -382,7 +382,7 @@ body {
 /* =============================================================================
    两行表头 / 合并分组单元格：**层级用同族色阶**（纵深靠明度，不靠黑白对比）
    -----------------------------------------------------------------------------
-   2026-10-13（v1.19.49.34）用户反馈：宽表「两行表头 + 合并单元格」样式割裂 ——
+   2026-10-13（v1.19.49.35）用户反馈：宽表「两行表头 + 合并单元格」样式割裂 ——
    第 1 行 #1e293b 深、第 2 行 #334155 次深、冻结列又回 #1e293b，
    与浅色表体拼在一起像三张表。现统一为：
      第 1 行（分组/大标题）→ --sl-head-bg（稍深）
@@ -619,6 +619,30 @@ body {
 }
 #bandTable td .q-name { min-width: 120px; }
 #bandTable td .q-cell { text-align: center; font-variant-numeric: tabular-nums; }
+/* —— 组合线格（.q-selrow / .q-sel-name / .q-selcell，2026-10-15）——
+   上面「td .form-control」把全表 input 的边框与底色去掉了，组合格因此看不出
+   「这里能填」（用户反馈原话「你这个框不是很明显啊」）：给组合格一个
+   2px 强调色实线框 + 面板底，深浅色都走变量；
+   组合名做成小标签，与右侧输入框成一组，一眼能读出「哪个组合的线」。 */
+#bandTable td .q-selrow { gap: 4px; }
+#bandTable td .q-sel-name {
+    font-size: 11px;
+    line-height: 1.35;
+    padding: 1px 5px;
+    border-radius: 4px;
+    border: 1px solid var(--sl-border);
+    background: var(--sl-surface-3);
+    color: var(--sl-text-muted);
+    white-space: nowrap;
+}
+#bandTable td .q-selcell {
+    width: 5em;
+    flex: 0 0 auto;
+    border: 2px solid var(--sl-accent);
+    background: var(--sl-surface);
+    text-align: center;
+    font-variant-numeric: tabular-nums;
+}
 #bandTable td .form-control:focus {
     background: var(--sl-surface);
     box-shadow: 0 0 0 2px var(--sl-sidebar-accent);
@@ -1095,11 +1119,35 @@ table.tt thead th {
 .ai-report-body { overflow-x: auto; }
 .ai-report-body table { margin-bottom: .5rem; }
 
+/* ========== 动效降级：尊重系统的「减少动态效果」（2026-10-16 第八轮审计 U-05）============
+   全站自研动画（床位动效、表格淡入、AI 光标闪烁、查课 fx 系列）此前 0 覆盖
+   prefers-reduced-motion —— 前庭障碍用户无法关闭；旧微信 X5 对 steps()/forwards
+   的支持度也不一。
+   注意用「把时长压到 0.001ms + 迭代 1 次」而不是 animation:none —— .fx-stagger 这类
+   「初始 opacity:0 + forwards」的写法，只有动画立即完成才不会永久隐身。
+   （theme.css 不含任何 transition/animation 声明，色与动效分层，这里是全局唯一的降级入口）*/
+@media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after {
+        animation-duration: .001ms !important;
+        animation-delay: 0s !important;
+        animation-iteration-count: 1 !important;
+        transition-duration: .001ms !important;
+        transition-delay: 0s !important;
+        scroll-behavior: auto !important;
+    }
+}
+
 @media print {
     :root, [data-bs-theme="dark"] {
         --sl-bg: #fff; --sl-surface: #fff; --sl-surface-2: #fff;
         --sl-surface-3: #f1f5f9; --sl-border: #e2e8f0;
         --sl-text: #000; --sl-text-muted: #333; --sl-text-subtle: #666;
+        /* 第七轮审计（U-M6）：表头变量此前未重置（深色下 head=#253149 底 + 浅字）
+           ——浏览器默认不打印背景色，深色用户打印成绩单/划线/考务等普通业务表时
+           表头浅色文字留在白纸上近乎不可见。补浅色值（与 :root 一致）。 */
+        --sl-head-bg: #e7ecf3; --sl-head-bg-2: #f1f4f9;
+        --sl-head-text: #334155; --sl-head-border: #d5dde8;
+        --sl-th-bg: #f1f4f9; --sl-th-text: #64748b;
     }
     body { background: #fff !important; color: #000 !important; }
 }

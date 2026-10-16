@@ -11,7 +11,8 @@
     <h5 class="mb-0"><i class="bi bi-bullseye"></i> 临界生对比</h5>
     <span class="text-muted small">{{ exam.title_with_dimensions() }}</span>
     {% if not error %}
-    <span class="badge bg-primary ms-1">{{ data.direction }} · {{ data.layer }}线 {{ data.line }}</span>
+    {# 层名自带「线」时不再补（原写死 {{ data.layer }}线 → 「本科线线」） #}
+    <span class="badge bg-primary ms-1">{{ data.direction }} · {{ data.layer }}{{ '' if data.layer.endswith('线') else '线' }} {{ data.line }}</span>
     {% if cur_cls %}<span class="badge bg-secondary ms-1">班级：{{ cur_cls }}</span>{% endif %}
     {# 数据范围：名单含逐生总分与排名，按账号可见班级（且总分口径）收敛，细则进 tooltip #}
     {% if scope_label %}<span class="badge bg-light text-dark border ms-1"
@@ -72,11 +73,20 @@
     <i class="bi bi-exclamation-triangle"></i> {{ error }}
 </div>
 {% else %}
+{# 2026-10-15 组合级划线：各组合线不一致时服务层返回 line='按组合'（字符串），
+   模板不能再对它做加减（此前区间文案直接减 → exam 23 这类组合线场次整页 500）。
+   line_is_num=False 时改列各组合的线，距线由服务层逐生按自身组合判定。 #}
+{% set line_is_num = data.line is number %}
 <div class="row g-2 mb-3">
     <div class="col-6 col-md-3">
         <div class="card border-0 shadow-sm h-100"><div class="card-body py-2 px-3">
             <div class="text-muted small">当前层级线</div>
             <div class="fs-4 fw-semibold">{{ data.line }}</div>
+            {% if not line_is_num and data.lines %}
+            <div class="small text-muted">
+                {% for sel, v in data.lines.items() %}{{ sel }} {{ v }}{% if not loop.last %} · {% endif %}{% endfor %}
+            </div>
+            {% endif %}
         </div></div>
     </div>
     <div class="col-6 col-md-3">
@@ -103,7 +113,10 @@
 <div class="card mb-3">
     <div class="card-header py-2">
         <i class="bi bi-people"></i> 班级对比（按临界生人数降序）
-        <span class="text-muted small ms-2">线下 = {{ data.line - data.below }} ~ {{ data.line }} 分；线上 = {{ data.line }} ~ {{ data.line + data.above }} 分</span>
+        <span class="text-muted small ms-2">
+            {% if line_is_num %}线下 = {{ data.line - data.below }} ~ {{ data.line }} 分；线上 = {{ data.line }} ~ {{ data.line + data.above }} 分
+            {% else %}线下 = 各组合线 −{{ data.below }} 分内、线上 = +{{ data.above }} 分内（逐生按各自组合的线判定）{% endif %}
+        </span>
         {% if cur_cls %}
         <span class="badge bg-secondary ms-2">仅 {{ cur_cls }}</span>
         <a class="small ms-1" href="{{ clear_url }}">查看全部班级</a>

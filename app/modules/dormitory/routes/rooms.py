@@ -1539,7 +1539,6 @@ def report_export():
     from flask import send_file
     from app.models import OperationLog
     from app.extensions import db
-    import json
 
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     filename = f'宿舍分配报表_{grade_filter or "全部"}_{timestamp}.xlsx'

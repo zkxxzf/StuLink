@@ -2,23 +2,15 @@
 {% block title %}成绩汇报区{% endblock %}
 {% block extra_css_head %}
 <link href="{{ su('css/report.css') }}" rel="stylesheet">
+<link href="{{ su('css/ai_report.css') }}" rel="stylesheet">
 <style>
-    /* AI 一句话分析：只跟随主题变量，深浅色自动适配（不写死颜色） */
+    /* AI 一句话分析：报告排版 / 胶囊 / 工具行统一样式在 css/ai_report.css（与 AI 分析工作台共用） */
     .rp-ai-card { border: 1px solid var(--sl-border); }
-    .rp-ai-chip { font-size: 12px; }
-    .rp-ai-tools { display: flex; flex-direction: column; gap: 2px; }
-    .rp-ai-tools .rp-ai-tool {
-        font-size: 12px; color: var(--sl-text-muted);
-        background: var(--sl-surface-2); border: 1px solid var(--sl-border);
-        border-radius: 6px; padding: 2px 8px;
-    }
-    .rp-ai-report { border-top: 1px dashed var(--sl-border); padding-top: 10px; }
-    .rp-ai-report:empty { border-top: 0; padding-top: 0; }
     .rp-ai-stage-err { color: var(--bs-danger, #dc3545); }
 </style>
 {% endblock %}
 {% block content %}
-{# v1.19.49.34 考试态：侧栏入口带 ?exam=<id>（此前这里只认 exam_id，本场 id 被丢掉）。
+{# v1.19.49.35 考试态：侧栏入口带 ?exam=<id>（此前这里只认 exam_id，本场 id 被丢掉）。
    统一先问 exam_nav()（认 ?exam / exam_id / 路径），考试态下隐藏「考试」下拉（只看本场）。 #}
 {% set _en = exam_nav() %}
 {% set _eid = _en.exam_id if _en else (request.args.get('exam') or request.args.get('exam_id') or '') %}
@@ -56,10 +48,13 @@
        进行中可停止，中断/失败/停止后可「重新编辑提示词」回填选项与提示词。 #}
     <div class="card shadow-sm mb-3 rp-ai-card" id="rpAiCard">
         <div class="card-body py-3">
-            <div class="d-flex flex-wrap align-items-center gap-2 mb-2">
-                <h6 class="mb-0"><i class="bi bi-stars text-primary"></i> AI 一句话分析</h6>
-                <span class="text-muted small">用一句话提问，AI 结合本场考试成绩给出分析；Key 只存本机浏览器，服务器不留存</span>
-                <button type="button" class="btn btn-sm btn-outline-primary ms-auto" id="rpGenToggle"
+            <div class="ai-ask-head mb-3">
+                <span class="ai-ask-icon"><i class="bi bi-stars"></i></span>
+                <div class="me-auto">
+                    <div class="ai-ask-title">AI 一句话分析</div>
+                    <div class="ai-ask-sub">一句话提问，AI 结合本场成绩生成分析；Key 只存本机浏览器，服务器不留存</div>
+                </div>
+                <button type="button" class="btn btn-sm btn-outline-primary" id="rpGenToggle"
                         aria-expanded="false" aria-controls="rpGenPanel">
                     <i class="bi bi-sliders"></i> 提示词生成器
                 </button>
@@ -121,7 +116,7 @@
             <textarea id="rpAiQ" class="form-control form-control-sm" rows="2" autocomplete="off"
                       placeholder="一句话分析：本次考试各班物理成绩差异，并找出临界生最多的班（也可用右上「提示词生成器」拼装）"></textarea>
             <div class="d-flex flex-wrap align-items-center gap-2 mt-2">
-                <button class="btn btn-primary btn-sm" type="button" id="rpAiRun">
+                <button class="btn btn-primary btn-sm ai-go" type="button" id="rpAiRun">
                     <i class="bi bi-stars"></i> <span class="rp-ai-run-label">AI 分析</span>
                 </button>
                 <button class="btn btn-sm btn-outline-secondary" type="button" id="rpAiCopyPrompt">
@@ -129,16 +124,21 @@
                 </button>
             </div>
             <div class="d-flex flex-wrap gap-2 mt-2" id="rpAiChips">
-                <button type="button" class="btn btn-sm btn-outline-secondary rp-ai-chip">本次考试整体情况与各班差距</button>
-                <button type="button" class="btn btn-sm btn-outline-secondary rp-ai-chip">哪个班临界生最多，分别是谁（只列客观数据）</button>
-                <button type="button" class="btn btn-sm btn-outline-secondary rp-ai-chip">物理/历史方向各科强弱对比</button>
-                <button type="button" class="btn btn-sm btn-outline-secondary rp-ai-chip">与上次考试相比，进退步最明显的班级</button>
+                <button type="button" class="rp-ai-chip">本次考试整体情况与各班差距</button>
+                <button type="button" class="rp-ai-chip">哪个班临界生最多，分别是谁（只列客观数据）</button>
+                <button type="button" class="rp-ai-chip">物理/历史方向各科强弱对比</button>
+                <button type="button" class="rp-ai-chip">与上次考试相比，进退步最明显的班级</button>
             </div>
 
-            <div id="rpAiOut" class="mt-3 d-none">
-                <div id="rpAiStage" class="small text-muted mb-1"></div>
-                <div id="rpAiTools" class="rp-ai-tools mb-2"></div>
-                <div class="rp-ai-report"></div>
+            <div id="rpAiOut" class="mt-4 d-none">
+                <div id="rpAiStage" class="small text-muted mb-2"></div>
+                <div id="rpAiTools" class="rp-ai-tools mb-3"></div>
+                <div class="ai-doc-paper">
+                    <div class="ai-doc-head">
+                        <i class="bi bi-file-earmark-text"></i> 分析报告
+                    </div>
+                    <div class="rp-ai-report ai-doc"></div>
+                </div>
                 <div class="d-flex flex-wrap gap-2 mt-3 pt-2 border-top">
                     {# 进行中可停止；中断/失败/停止后可把当时的选择与提示词带回生成器 #}
                     <button class="btn btn-sm btn-outline-warning d-none" type="button" id="rpAiStop">
@@ -174,6 +174,8 @@
 <script src="{{ su('js/ai_task_ui.js') }}"></script>
 {# ai_prompt_gen.js：提示词生成器（工厂，本页在 report_ai.js 里自建实例） #}
 <script src="{{ su('js/ai_prompt_gen.js') }}"></script>
+{# table_cols.js：表格列显隐（勾选即显示；report.js/report_pivot.js 的列驱动表共用） #}
+<script src="{{ su('js/table_cols.js') }}"></script>
 <script src="{{ su('js/report.js') }}"></script>
 <script src="{{ su('js/report_pivot.js') }}"></script>
 <script src="{{ su('js/report_warning.js') }}"></script>

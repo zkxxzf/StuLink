@@ -1,4 +1,4 @@
-# StuLink v1.19.49.34 2026-10-10
+# StuLink v1.19.49.35 2026-10-10
 # 四大分析模块数据组装（供 /api/analysis/* 与 Excel 导出共用）
 # 表/图编号与设计文档 2.3 对应：A1(年级) A2(班级) A3(学科) A4(任课教师)
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
@@ -37,8 +37,10 @@ def _layer_online_counts(data, subject, class_name=None, direction=None):
             continue
         total_score = t['score']
         dir_key = t['direction'] or ''
-        subj_bands = data.band_list(dir_key, subject)
-        total_bands = data.band_list(dir_key, TOTAL_SUBJECT)
+        sel = t.get('selection') or ''
+        # 总分线按学生自身组合取线（组合总分线优先，回落方向线）；单科线同口径回落
+        subj_bands = data.band_list(dir_key, subject, sel)
+        total_bands = data.band_list(dir_key, TOTAL_SUBJECT, sel)
         total_map = {n: lo for n, lo in total_bands}
         for name, lower in subj_bands:
             d = out.setdefault(name, {'single_n': 0, 'dual_n': 0})
@@ -63,8 +65,10 @@ def _layer_online_counts_by_class(data, subject, direction=None):
             continue
         total_score = t['score']
         dir_key = t['direction'] or ''
-        subj_bands = data.band_list(dir_key, subject)
-        total_bands = data.band_list(dir_key, TOTAL_SUBJECT)
+        sel = t.get('selection') or ''
+        # 总分线按学生自身组合取线（组合总分线优先，回落方向线）；单科线同口径回落
+        subj_bands = data.band_list(dir_key, subject, sel)
+        total_bands = data.band_list(dir_key, TOTAL_SUBJECT, sel)
         total_map = {n: lo for n, lo in total_bands}
         out = by_cls.setdefault(cls, {})
         for name, lower in subj_bands:
@@ -82,10 +86,56 @@ def _fmt_pct(n, d):
     return st.fmt_rate(n, d) if d else None
 
 
+# 原「及格率/优秀率」两列在本场划线里对应的层名（统一实现见 stats_service.rate_names_for）
+_rate_names_for = st.rate_names_for
+
+
+def _rate_columns(pass_name, good_name):
+    """原「及格率%/优秀率%」两列的列定义：列名=实际层名（如 特控线率%/本科线率%）；
+    两层同名（单层模板）时只出一列；未划线返回空列表（不出这两列）。"""
+    cols = []
+    if pass_name:
+        cols.append({'key': 'pass_rate', 'label': f'{pass_name}率%', 'type': 'num'})
+    if good_name and good_name != pass_name:
+        cols.append({'key': 'good_rate', 'label': f'{good_name}率%', 'type': 'num'})
+    return cols
+
+
+def _uniq_band_lines(band_lines):
+    """把 {(方向, 组合): [(层名, 下界)]} 转成图表参考线，同一条线只保留一条。
+
+    2026-10-15 组合级单科线：语数外各组合共享方向线、再选四科各组合各一条 →
+    去重后语数外只显示一次、化学显示三条（组合名标注）。
+    """
+    seen, out = set(), []
+    for (d, sel), bl in band_lines.items():
+        for name, lower in bl:
+            key = (name, lower)
+            if key in seen:
+                continue
+            seen.add(key)
+            out.append({'name': f'{sel or d}·{name}', 'value': lower})
+    return out
+
+
+def _rate_of(online, name, denom):
+    """单科上线率：online 为 _layer_online_counts* 输出 {层名: {'single_n': n}}。
+
+    该层缺失（该科/该方向没划过这条线）或未划线时返回 None（前端显示 —，
+    不再回落到满分 60%/90% 固定线）。
+    """
+    if not name or not denom:
+        return None
+    od = (online or {}).get(name)
+    if not od:
+        return None
+    return _fmt_pct(od.get('single_n', 0), denom)
+
+
 # ==================== A1 年级分析 ====================
 
-def grade_tab(exam_id, direction=''):
-    """A1 年级分析；direction=物理/历史 时仅统计该方向（空串=全部）"""
+def grade_tab(exam_id, direction='', selection=''):
+    """A1 年级分析；direction=物理/历史 时仅统计该方向，selection=选科组合时仅统计该组合"""
     # v1.13.2 性能：改用进程级共享缓存，避免每次打开分析页重复全量拉取明细行
     data = st.cached_exam_data(exam_id)
     exam = data.exam
@@ -93,6 +143,9 @@ def grade_tab(exam_id, direction=''):
         return _empty(exam)
     tables, charts = {}, {}
     dr = direction or None   # None=全部
+    sel = selection or None  # None=全部组合（2026-10-16 组合维度）
+    # 人群视图：之后本函数所有 totals_of/scores_of_subject 都按 (方向×组合) 收窄
+    data = data.population(dr, sel)
 
     # A1-T1 各班汇总表
     summary = st.class_summary_table(data, dr)
@@ -116,7 +169,26 @@ def grade_tab(exam_id, direction=''):
                               for i, name in enumerate(layer_names)})
                  for row in summary],
     }
-    # A1-T2 科目总表
+    # A1-T2 科目总表（2026-10-15 用户口径：原「及格率/优秀率」按满分 60%/90% 固定线算，
+    # 与本场划线无关；改为**按本场划线**——及格率位=最低层（四层模板=及格层）、
+    # 优秀率位=最高层（=优秀层），逐生按自身方向/组合取单科线，值为单科上线率；
+    # 未划线不出这两列，某科技未划线时该格显示 —）
+    subj_rows = st.subject_table(data, dr)
+    subj_rate_names = (None, None)
+    subj_online = {}
+    for _r in subj_rows:
+        _sub = _r['subject']
+        _pname, _gname = _rate_names_for(data, _sub)
+        if not (_pname or _gname):
+            _r['pass_rate'] = _r['good_rate'] = None
+            continue
+        if subj_rate_names == (None, None):
+            subj_rate_names = (_pname, _gname)
+        _online = subj_online.get(_sub)
+        if _online is None:
+            _online = subj_online[_sub] = _layer_online_counts(data, _sub, direction=dr)
+        _r['pass_rate'] = _rate_of(_online, _pname, _r['count'])
+        _r['good_rate'] = _rate_of(_online, _gname, _r['count'])
     tables['subject_total'] = {
         'title': '年级科目总表',
         'columns': [
@@ -127,10 +199,8 @@ def grade_tab(exam_id, direction=''):
             {'key': 'max', 'label': '最高分', 'type': 'num'},
             {'key': 'min', 'label': '最低分', 'type': 'num'},
             {'key': 'std', 'label': '标准差', 'type': 'num'},
-            {'key': 'pass_rate', 'label': '及格率%', 'type': 'num'},
-            {'key': 'good_rate', 'label': '优秀率%', 'type': 'num'},
-        ],
-        'rows': st.subject_table(data, dr),
+        ] + _rate_columns(*subj_rate_names),
+        'rows': subj_rows,
     }
     # A1-T6 各班分层上线统计（累计口径：达该层下界及以上，按方向各自划线判定）
     pass_stats = pv.layer_pass_stats(data, TOTAL_SUBJECT)
@@ -284,11 +354,13 @@ def _trend_lines(grade, means=None, direction=None):
 
 # ==================== A2 班级分析 ====================
 
-def class_tab(exam_id, class_name):
+def class_tab(exam_id, class_name, direction='', selection=''):
     data = st.cached_exam_data(exam_id)
     exam = data.exam
     if not data.total_rows or class_name not in data.classes:
         return _empty(exam)
+    # 2026-10-16 组合维度：班里也按 (方向×组合) 收窄（行政班内混组合时有用）
+    data = data.population(direction or None, selection or None)
     tables, charts = {}, {}
     totals = data.totals_of(class_name=class_name)
     grade_avg = st.mean([r.score for r in data.total_rows])
@@ -327,31 +399,43 @@ def class_tab(exam_id, class_name):
                       'series': [{'name': '本班', 'data': [cls_avg, grade_avg,
                                                           len(totals), len(data.total_rows)]}]},
     }
-    # A2-T2 班级-年级科目对标
+    # A2-T2 班级-年级科目对标（2026-10-15 用户口径：原「及格率」按满分 60% 固定线算 →
+    # 改为按本场划线的「及格率位」层（最低层；四层模板=及格层）单科上线率；
+    # 逐生按自身方向/组合取线；未划线不出现这两列）
     subs = data.class_subjects(class_name)
     t2 = []
+    rate_pass = None
     for sub in subs:
         cls_s = data.scores_of_subject(sub, class_name=class_name)
         grd_s = data.scores_of_subject(sub)
         if not cls_s:
             continue
-        lines = data.subject_lines(sub)
-        cls_pass = st.fmt_rate(sum(1 for s in cls_s if s >= lines['pass']), len(cls_s))
-        grd_pass = st.fmt_rate(sum(1 for s in grd_s if s >= lines['pass']), len(grd_s))
+        pname, _gname = _rate_names_for(data, sub)
+        cls_pass = grd_pass = None
+        if pname:
+            rate_pass = rate_pass or pname
+            by_cls = _layer_online_counts_by_class(data, sub)
+            od = (by_cls.get(class_name) or {}).get(pname)
+            cls_pass = _fmt_pct(od.get('single_n', 0), len(cls_s)) if od else None
+            grd_n = sum(((v.get(pname) or {}).get('single_n') or 0)
+                        for v in by_cls.values())
+            grd_pass = _fmt_pct(grd_n, len(grd_s)) if grd_s else None
         cls_m, grd_m = st.mean(cls_s), st.mean(grd_s)
         t2.append({'subject': sub, 'cls_count': len(cls_s), 'cls_avg': cls_m,
                    'grd_avg': grd_m,
                    'diff': round(cls_m - grd_m, 1) if cls_m is not None and grd_m is not None else None,
                    'cls_pass': cls_pass, 'grd_pass': grd_pass})
+    t2_cols = [{'key': 'subject', 'label': '科目', 'type': 'text'},
+               {'key': 'cls_count', 'label': '本班参考人数', 'type': 'int'},
+               {'key': 'cls_avg', 'label': '本班平均分', 'type': 'num'},
+               {'key': 'grd_avg', 'label': '年级平均分', 'type': 'num'},
+               {'key': 'diff', 'label': '分差', 'type': 'num'}]
+    if rate_pass:
+        t2_cols += [{'key': 'cls_pass', 'label': f'本班{rate_pass}率%', 'type': 'num'},
+                    {'key': 'grd_pass', 'label': f'年级{rate_pass}率%', 'type': 'num'}]
     tables['subject_compare'] = {
         'title': '班级-年级科目对标表',
-        'columns': [{'key': 'subject', 'label': '科目', 'type': 'text'},
-                    {'key': 'cls_count', 'label': '本班参考人数', 'type': 'int'},
-                    {'key': 'cls_avg', 'label': '本班平均分', 'type': 'num'},
-                    {'key': 'grd_avg', 'label': '年级平均分', 'type': 'num'},
-                    {'key': 'diff', 'label': '分差', 'type': 'num'},
-                    {'key': 'cls_pass', 'label': '本班及格率%', 'type': 'num'},
-                    {'key': 'grd_pass', 'label': '年级及格率%', 'type': 'num'}],
+        'columns': t2_cols,
         'rows': t2,
     }
     # A2-T3 学生明细（每生 × 应考科目分数 + 本次/上次总分排名；前端点行跳个人成绩查询）
@@ -402,17 +486,21 @@ def class_tab(exam_id, class_name):
                    + [{'key': 'total', 'label': '总分', 'type': 'num'}],
         'rows': t3b,
     }
-    # A2-T4 分层统计（按本班学生自身方向判定）
+    # A2-T4 分层统计（按本班学生自身方向判定；总分线按学生组合取线）
     t4 = []
     layers_map = {}
+    layer_idx = {}       # (方向, 层名) -> 层序号（band_list 按 seq 升序，0=最高层）
     for t in totals:
-        idx = data.band_of_score(t['direction'], t['score'])
+        sel = t.get('selection') or ''
+        idx = data.band_of_score(t['direction'], t['score'], selection=sel)
         if idx is None:
             continue
-        bands = data.band_list(t['direction'])
+        bands = data.band_list(t['direction'], selection=sel)
         if not (0 <= idx < len(bands)):
             continue
-        layers_map.setdefault((t['direction'], bands[idx][0]), []).append(t)
+        _key = (t['direction'], bands[idx][0])
+        layers_map.setdefault(_key, []).append(t)
+        layer_idx[_key] = idx
     for (direction, lname), members in layers_map.items():
         row = {'layer': lname, 'direction': direction, 'count': len(members),
                'ratio': st.fmt_rate(len(members), len(totals)),
@@ -425,7 +513,15 @@ def class_tab(exam_id, class_name):
                     vals.append(s)
             row[sub] = st.mean(vals)
         t4.append(row)
-    t4.sort(key=lambda r: r['layer'])
+    # ⚠️ 必须按**层序号**排，不能按层名字符串排：
+    # 层名可能是"前10 / 前20 / 前50 / 前80 / 前100 / 前300"（限时练按名次分层），
+    # 字符串序会排成 前10 < 前100 < 前20 < 前300 < 前50 < 前80
+    # —— 2026-10-16 用户报「限时练分层这个有点子问题哈」就是这个。
+    # 层序号来自 band_of_score（band_list 按 seq 升序，0=最高层/最严格层）。
+    # 方向固定物理在前（中文排序会把"历史"排到前面）。
+    _dir_order = {'物理': 0, '历史': 1}
+    t4.sort(key=lambda r: (_dir_order.get(r['direction'], 9),
+                           layer_idx.get((r['direction'], r['layer']), 99)))
     tables['layer_stat'] = {
         'title': '班级分层统计表',
         'columns': [{'key': 'layer', 'label': '层', 'type': 'text'},
@@ -501,40 +597,59 @@ def _class_trend(grade, class_name):
 
 # ==================== A3 学科分析 ====================
 
-def subject_tab(exam_id, subject, direction=''):
-    """A3 学科分析；direction=物理/历史 时仅统计该方向（空串=全部）"""
+def subject_tab(exam_id, subject, direction='', selection=''):
+    """A3 学科分析；direction=物理/历史 时仅统计该方向，selection=选科组合时仅统计该组合"""
     data = st.cached_exam_data(exam_id)
     exam = data.exam
     if not data.total_rows:
         return _empty(exam)
+    dr = direction or None   # None=全部
+    sel = selection or None  # None=全部组合（2026-10-16 组合维度）
+    # 人群视图：本 tab 内所有取数都按 (方向×组合) 收窄
+    data = data.population(dr, sel)
     tables, charts = {}, {}
-    dr = direction or None
     scores_map = {}   # class -> scores
-    grd_scores = data.scores_of_subject(subject, direction=dr)
+    grd_scores = data.scores_of_subject(subject)
     grd_avg = st.mean(grd_scores)
     lines = data.subject_lines(subject)
-    # 该科「方向 × 学科」单科线（未划线时为空，表格不出现分层列）
+    # 该科「方向 × 组合」单科线（未划线时为空，表格不出现分层列）。
+    # 2026-10-15 二次口径：再选四科（化/生/政/地）**按组合**划（化学=物化生/物化地/物化政
+    # 各一条），语数外+首选科按方向划 → 一律按**学生自身组合**取线（组合优先，回落方向线）
     sel_dirs = data.directions if not dr else [direction]
-    band_lines = {d: data.band_list(d, subject) for d in sel_dirs}
+    band_keys = []          # [(方向, 组合)]：本场该科出现的组合（判层/取线用）
+    for t in data.totals_of(direction=dr):
+        k = (t['direction'] or '', t.get('selection') or '')
+        if k not in band_keys:
+            band_keys.append(k)
+    band_lines = {k: data.band_list(k[0], subject, k[1]) for k in band_keys}
     layer_names = []
-    for d in sel_dirs:
-        for name, _lower in band_lines[d]:
+    for k in band_keys:
+        for name, _lower in band_lines[k]:
             if name not in layer_names:
                 layer_names.append(name)
+    # 原「及格率/优秀率」两列 → 本场划线口径（2026-10-15 用户口径）：
+    # 及格率位=最低层（四层模板=及格层）、优秀率位=最高层（=优秀层）；未划线不出这两列
+    rate_pass = rate_good = None
+    for k in band_keys:
+        _p, _g = st.rate_layer_pair(band_lines.get(k) or [])
+        if _p or _g:
+            rate_pass = _p[0] if _p else None
+            rate_good = _g[0] if _g else None
+            break
 
     def _layer_counts(cls):
-        """该班学生在本学科各层的人数（按学生自身方向的单科线判定，落入层/互斥）"""
+        """该班学生在本学科各层的人数（按学生自身「方向×组合」的单科线判定，落入层/互斥）"""
         counts = {name: 0 for name in layer_names}
         for t in data.totals_of(class_name=cls, direction=dr):
             s = data.subj.get((t['no'], subject))
             if s is None:
                 continue
-            idx = data.band_of_score(t['direction'], s, subject)
-            if idx is None:
+            k = (t['direction'] or '', t.get('selection') or '')
+            bl = band_lines.get(k) or []
+            idx = data.band_of_score(k[0], s, subject, k[1])
+            if idx is None or idx < 0 or idx >= len(bl):
                 continue
-            bl = band_lines.get(t['direction']) or []
-            if 0 <= idx < len(bl):
-                counts[bl[idx][0]] = counts.get(bl[idx][0], 0) + 1
+            counts[bl[idx][0]] = counts.get(bl[idx][0], 0) + 1
         return counts
 
     # v1.13.2 双上线：预算一次按班级分组，班级循环里直接查（O(n) 而非 O(班级数 × n)）
@@ -546,18 +661,18 @@ def subject_tab(exam_id, subject, direction=''):
         if not cls_s:
             continue
         scores_map[cls] = cls_s
+        online = online_by_cls.get(cls, {})
         row = {
             'subject': subject, 'class_name': cls, 'count': len(cls_s),
             'avg': st.mean(cls_s),
-            'pass_rate': st.fmt_rate(sum(1 for s in cls_s if s >= lines['pass']), len(cls_s)),
-            'good_rate': st.fmt_rate(sum(1 for s in cls_s if s >= lines['excellent']), len(cls_s)),
+            'pass_rate': _rate_of(online, rate_pass, len(cls_s)),
+            'good_rate': _rate_of(online, rate_good, len(cls_s)),
             'max': max(cls_s),
             'low_count': sum(1 for s in cls_s if s < lines['low']),
             'diff': round(st.mean(cls_s) - grd_avg, 1) if grd_avg is not None else None,
         }
         if layer_names:
             lc = _layer_counts(cls)
-            online = online_by_cls.get(cls, {})
             for i, name in enumerate(layer_names):
                 row['l_%d' % i] = lc.get(name, 0)
                 od = online.get(name, {})
@@ -568,15 +683,14 @@ def subject_tab(exam_id, subject, direction=''):
                 row['lo_%d_dr' % i] = _fmt_pct(dn, len(cls_s))
         t1.append(row)
     t1.sort(key=lambda r: -(r['avg'] or 0))
-    cmp_cols = [{'key': 'subject', 'label': '科目', 'type': 'text'},
-                {'key': 'class_name', 'label': '班级', 'type': 'text'},
-                {'key': 'count', 'label': '参考人数', 'type': 'int'},
-                {'key': 'avg', 'label': '平均分', 'type': 'num'},
-                {'key': 'pass_rate', 'label': '及格率%', 'type': 'num'},
-                {'key': 'good_rate', 'label': '优秀率%', 'type': 'num'},
-                {'key': 'max', 'label': '最高分', 'type': 'num'},
-                {'key': 'low_count', 'label': '低分人数', 'type': 'int'},
-                {'key': 'diff', 'label': '与年级均分差', 'type': 'num'}]
+    cmp_cols = ([{'key': 'subject', 'label': '科目', 'type': 'text'},
+                 {'key': 'class_name', 'label': '班级', 'type': 'text'},
+                 {'key': 'count', 'label': '参考人数', 'type': 'int'},
+                 {'key': 'avg', 'label': '平均分', 'type': 'num'}]
+                + _rate_columns(rate_pass, rate_good)
+                + [{'key': 'max', 'label': '最高分', 'type': 'num'},
+                   {'key': 'low_count', 'label': '低分人数', 'type': 'int'},
+                   {'key': 'diff', 'label': '与年级均分差', 'type': 'num'}])
     if layer_names:
         # v1.13.2 双上线：每层 4 列（落层人数 / 单上线人数 / 双上线人数 / 双上线率%）
         # 落层人数：该科实际分数落入该层的学生数（互斥，每人只属一层）
@@ -593,78 +707,121 @@ def subject_tab(exam_id, subject, direction=''):
         'columns': cmp_cols,
         'rows': t1,
     }
-    # A3-T2 学科历次（聚合查询，避免逐场构造 ExamData）
+    # A3-T2 学科历次（聚合查询，避免逐场构造 ExamData；率按**各场自己**的划线算，
+    # 未划线的场次显示 —；列名用本场层名）
     t2 = []
-    for _r in st.exam_trend_series(exam.grade, subject, direction=dr, need_rates=True):
+    for _r in st.exam_trend_series(exam.grade, subject, direction=dr, need_rates=True,
+                                   pass_name=rate_pass, good_name=rate_good):
         t2.append({'exam': _r['name'], 'date': _r['date'], 'count': _r['count'],
                    'avg': _r['avg'], 'pass_rate': _r['pass_rate'], 'good_rate': _r['good_rate']})
+    _his_cols = [{'key': 'exam', 'label': '考试', 'type': 'text'},
+                 {'key': 'date', 'label': '日期', 'type': 'text'},
+                 {'key': 'count', 'label': '参考人数', 'type': 'int'},
+                 {'key': 'avg', 'label': '平均分', 'type': 'num'}]
+    if any(r['pass_rate'] is not None for r in t2):
+        _his_cols.append({'key': 'pass_rate',
+                          'label': f"{rate_pass or '最低层'}率%", 'type': 'num'})
+    if (not (rate_pass and rate_good == rate_pass)
+            and any(r['good_rate'] is not None for r in t2)):
+        _his_cols.append({'key': 'good_rate',
+                          'label': f"{rate_good or '最高层'}率%", 'type': 'num'})
     tables['history'] = {
         'title': f'{subject}学科历次考试统计表',
-        'columns': [{'key': 'exam', 'label': '考试', 'type': 'text'},
-                    {'key': 'date', 'label': '日期', 'type': 'text'},
-                    {'key': 'count', 'label': '参考人数', 'type': 'int'},
-                    {'key': 'avg', 'label': '平均分', 'type': 'num'},
-                    {'key': 'pass_rate', 'label': '及格率%', 'type': 'num'},
-                    {'key': 'good_rate', 'label': '优秀率%', 'type': 'num'}],
+        'columns': _his_cols,
         'rows': t2,
     }
-    # A3-T3 分层内得分（指定方向时仅该方向分层）
+    # A3-T3 分层内得分（指定方向时仅该方向分层；总分线按学生组合取线）
     t3 = []
     for direction in sel_dirs:
         for lname, _lower in data.band_list(direction):
             members = []
             for t in data.totals_of(direction=direction):
-                idx = data.band_of_score(t['direction'], t['score'])
+                sel = t.get('selection') or ''
+                idx = data.band_of_score(t['direction'], t['score'], selection=sel)
                 if idx is None:
                     continue
-                bands = data.band_list(t['direction'])
+                bands = data.band_list(t['direction'], selection=sel)
                 if 0 <= idx < len(bands) and bands[idx][0] == lname:
                     members.append(t)
-            vals = [data.subj.get((m['no'], subject)) for m in members]
-            vals = [v for v in vals if v is not None]
-            if not members:
+            # 原「该科及格率%」按满分固定线 → 按「及格率位」层线（最低层/及格层）；
+            # 再选四科按**学生自身组合**取线（化学=物化生/物化地/物化政各一条）
+            vals, hit = [], 0
+            for m in members:
+                sv = data.subj.get((m['no'], subject))
+                if sv is None:
+                    continue
+                vals.append(sv)
+                _p_pair, _g_pair = st.rate_layer_pair(
+                    band_lines.get((m['direction'] or '', m.get('selection') or '')) or [])
+                if _p_pair and sv >= _p_pair[1]:
+                    hit += 1
+            if not members or not vals:
                 continue
-            l2 = data.subject_lines(subject)
             t3.append({'layer': lname, 'direction': direction,
                        'count': len(members),
-                       'avg': st.mean(vals) if vals else None,
-                       'pass_rate': st.fmt_rate(sum(1 for s in vals if s >= l2['pass']),
-                                                len(vals)) if vals else None})
+                       'avg': st.mean(vals),
+                       'pass_rate': st.fmt_rate(hit, len(vals)) if rate_pass else None})
+    _ls_cols = [{'key': 'direction', 'label': '方向', 'type': 'text'},
+                {'key': 'layer', 'label': '层', 'type': 'text'},
+                {'key': 'count', 'label': '该层人数', 'type': 'int'},
+                {'key': 'avg', 'label': '该科均分', 'type': 'num'}]
+    if rate_pass:
+        _ls_cols.append({'key': 'pass_rate', 'label': f'该科{rate_pass}率%', 'type': 'num'})
     tables['layer_score'] = {
         'title': f'{subject}总分分层内得分统计表',
-        'columns': [{'key': 'direction', 'label': '方向', 'type': 'text'},
-                    {'key': 'layer', 'label': '层', 'type': 'text'},
-                    {'key': 'count', 'label': '该层人数', 'type': 'int'},
-                    {'key': 'avg', 'label': '该科均分', 'type': 'num'},
-                    {'key': 'pass_rate', 'label': '该科及格率%', 'type': 'num'}],
+        'columns': _ls_cols,
         'rows': t3,
     }
     # A3-T4 该科单科线分层统计（按该科自身分数线划分，而非总分分层）
-    t4 = []
-    for d in sel_dirs:
-        bl = band_lines.get(d) or []
+    # 2026-10-15：单科线可能按组合各一条（页面手工勾列时）→ 线内容相同的组合合并成一行；
+    # 该方向全部组合共用一条线（单科按方向划的常态）时，标注「全方向」而不是罗列组合名
+    dir_sels = {}       # 方向 -> 该方向出现过的组合集合
+    for k in band_keys:
+        if k[1]:
+            dir_sels.setdefault(k[0], set()).add(k[1])
+    t4_groups = []      # [{'d': 方向, 'sels': [组合…], 'bl': 线}]
+    for k in band_keys:
+        bl = band_lines.get(k) or []
         if not bl:
             continue
+        for g in t4_groups:
+            if g['d'] == k[0] and g['bl'] == bl:
+                g['sels'].append(k[1])
+                break
+        else:
+            t4_groups.append({'d': k[0], 'sels': [k[1]], 'bl': bl})
+    t4 = []
+    for g in t4_groups:
+        d, bl, sels = g['d'], g['bl'], g['sels']
         members = {name: [] for name, _lower in bl}
         for t in data.totals_of(direction=d):
+            sel = t.get('selection') or ''
+            if sel not in sels:
+                continue
             s = data.subj.get((t['no'], subject))
             if s is None:
                 continue
-            idx = data.band_of_score(d, s, subject)
+            idx = data.band_of_score(d, s, subject, sel)
             if idx is not None and 0 <= idx < len(bl):
                 members[bl[idx][0]].append(s)
         n_total = sum(len(v) for v in members.values())
+        # 该方向全部组合共用同一条线 → 标「全方向」（单科按方向划时就是这种）
+        if sels and set(sels) == dir_sels.get(d):
+            label = '全方向'
+        else:
+            label = '、'.join(x or '全方向' for x in sels)
         for name, lower in bl:
             vals = members.get(name) or []
             if not vals:
                 continue
-            t4.append({'direction': d, 'layer': name, 'lower': lower,
+            t4.append({'direction': d, 'selection': label, 'layer': name, 'lower': lower,
                        'count': len(vals),
                        'ratio': st.fmt_rate(len(vals), n_total) if n_total else None,
                        'avg': st.mean(vals)})
     tables['subject_layer'] = {
         'title': f'{subject}单科划线分层统计表',
         'columns': [{'key': 'direction', 'label': '方向', 'type': 'text'},
+                    {'key': 'selection', 'label': '适用组合', 'type': 'text'},
                     {'key': 'layer', 'label': '层', 'type': 'text'},
                     {'key': 'lower', 'label': '分数线', 'type': 'num'},
                     {'key': 'count', 'label': '人数', 'type': 'int'},
@@ -679,16 +836,16 @@ def subject_tab(exam_id, subject, direction=''):
         'xAxis': [r['class_name'] for r in t1],
         'series': [{'name': subject, 'data': [r['avg'] for r in t1]}],
         'markLine': grd_avg,
-        # 该科各层分数线（参考线）；未划线时为空数组
-        'bandLines': [{'name': f'{d}·{name}', 'value': lower}
-                      for d in sel_dirs for name, lower in (band_lines.get(d) or [])],
+        # 该科各层分数线（参考线，按去重后的方向/组合标注）；未划线时为空数组
+        'bandLines': _uniq_band_lines(band_lines),
     }
+    _rate_label = f"{rate_pass or '及格'}率"
     charts['trend'] = {
-        'type': 'dual', 'title': f'{subject}历次全年级平均分/及格率',
+        'type': 'dual', 'title': f'{subject}历次全年级平均分/{_rate_label}',
         'xAxis': [r['exam'] for r in t2],
         'series': [
             {'name': '平均分', 'yAxis': 0, 'data': [r['avg'] for r in t2]},
-            {'name': '及格率%', 'yAxis': 1, 'data': [r['pass_rate'] for r in t2]},
+            {'name': _rate_label + '%', 'yAxis': 1, 'data': [r['pass_rate'] for r in t2]},
         ],
     }
     return {'exam': {'id': exam.id, 'name': exam.name, 'grade': exam.grade,
@@ -727,7 +884,7 @@ def teacher_tab(exam_id, subject=None, links=None, grade=None):
     if not data.total_rows:
         return _empty(exam)
     if links is None:
-        # v1.19.49.34 优先读本场考试的任课快照（考试当时）；无则惰性生成，
+        # v1.19.49.35 优先读本场考试的任课快照（考试当时）；无则惰性生成，
         # 生成失败（旧库无表）再从当前映射回落
         from app.modules.grades.services import teacher_snapshot_service as _tss
         _snap = _tss.links_of(exam_id, grade=grade)
@@ -756,6 +913,9 @@ def teacher_tab(exam_id, subject=None, links=None, grade=None):
         _first_subj = subject or SUBJECTS[0]
     _first_dir = (data.directions or [''])[0]
     subject_layer_names = [n for n, _ in data.band_list(_first_dir, _first_subj)]
+    # 原「及格率/优秀率」两列 → 本场划线口径（2026-10-15 用户口径）：
+    # 及格率位=最低层（四层模板=及格层）、优秀率位=最高层（=优秀层）；未划线不出这两列
+    rate_pass, rate_good = _rate_names_for(data, _first_subj)
     all_subjects = sorted({l.subject for l in links if not subject or l.subject == subject})
     online_cache = {}  # (class_name, subject) -> online_counts
     if subject_layer_names:
@@ -771,7 +931,7 @@ def teacher_tab(exam_id, subject=None, links=None, grade=None):
             continue
         grd_s = data.scores_of_subject(link.subject)
         grd_avg = st.mean(grd_s)
-        l2 = data.subject_lines(link.subject)
+        online = online_cache.get((link.class_name, link.subject), {})
         row = {
             'teacher': users.get(link.user_id, f'#{link.user_id}'),
             'class_name': link.class_name, 'subject': link.subject,
@@ -780,11 +940,10 @@ def teacher_tab(exam_id, subject=None, links=None, grade=None):
             'avg': st.mean(cls_s),
             'grd_avg': grd_avg,
             'diff': round(st.mean(cls_s) - grd_avg, 1) if grd_avg is not None else None,
-            'pass_rate': st.fmt_rate(sum(1 for s in cls_s if s >= l2['pass']), len(cls_s)),
-            'good_rate': st.fmt_rate(sum(1 for s in cls_s if s >= l2['excellent']), len(cls_s)),
+            'pass_rate': _rate_of(online, rate_pass, len(cls_s)),
+            'good_rate': _rate_of(online, rate_good, len(cls_s)),
         }
         if subject_layer_names:
-            online = online_cache.get((link.class_name, link.subject), {})
             for i, name in enumerate(subject_layer_names):
                 od = online.get(name, {})
                 sn = od.get('single_n', 0)
@@ -803,9 +962,7 @@ def teacher_tab(exam_id, subject=None, links=None, grade=None):
         {'key': 'avg', 'label': '科目平均分', 'type': 'num'},
         {'key': 'grd_avg', 'label': '年级该科平均分', 'type': 'num'},
         {'key': 'diff', 'label': '分差', 'type': 'num'},
-        {'key': 'pass_rate', 'label': '及格率%', 'type': 'num'},
-        {'key': 'good_rate', 'label': '优秀率%', 'type': 'num'},
-    ]
+    ] + _rate_columns(rate_pass, rate_good)
     if subject_layer_names:
         for i, name in enumerate(subject_layer_names):
             teacher_cols += [
@@ -826,12 +983,16 @@ def teacher_tab(exam_id, subject=None, links=None, grade=None):
         combos.append({'grade': link.grade, 'class_name': link.class_name,
                        'subject': link.subject, 'user_id': link.user_id,
                        'teacher': users.get(link.user_id, '')})
-    # 教师历次跟踪（按第一个有数据的组合或传入 combos[0]）
+    # 教师历次跟踪（按第一个有数据的组合或传入 combos[0]；率按各场自己的划线算，
+    # 未划线的场次显示 —，列名用本场层名）
     combo = combos[0] if combos else None
     t2 = []
+    _track_pass = _track_good = None
     if combo:
+        _track_pass, _track_good = _rate_names_for(data, combo['subject'])
         _cls_track = st.exam_trend_series(exam.grade, combo['subject'],
-                                          class_name=combo['class_name'], need_rates=True)
+                                          class_name=combo['class_name'], need_rates=True,
+                                          pass_name=_track_pass, good_name=_track_good)
         _grd_track = {_r['id']: _r for _r in
                       st.exam_trend_series(exam.grade, combo['subject'])}
         for _r in _cls_track:
@@ -839,14 +1000,17 @@ def teacher_tab(exam_id, subject=None, links=None, grade=None):
                        'avg': _r['avg'],
                        'grd_avg': _grd_track.get(_r['id'], {}).get('avg'),
                        'pass_rate': _r['pass_rate']})
+    _track_cols = [{'key': 'exam', 'label': '考试', 'type': 'text'},
+                   {'key': 'date', 'label': '日期', 'type': 'text'},
+                   {'key': 'count', 'label': '参考人数', 'type': 'int'},
+                   {'key': 'avg', 'label': '该班该科均分', 'type': 'num'},
+                   {'key': 'grd_avg', 'label': '年级该科均分', 'type': 'num'}]
+    if any(r['pass_rate'] is not None for r in t2):
+        _track_cols.append({'key': 'pass_rate',
+                            'label': f"{_track_pass or '最低层'}率%", 'type': 'num'})
     tables['teacher_track'] = {
         'title': '教师历次考试跟踪表',
-        'columns': [{'key': 'exam', 'label': '考试', 'type': 'text'},
-                    {'key': 'date', 'label': '日期', 'type': 'text'},
-                    {'key': 'count', 'label': '参考人数', 'type': 'int'},
-                    {'key': 'avg', 'label': '该班该科均分', 'type': 'num'},
-                    {'key': 'grd_avg', 'label': '年级该科均分', 'type': 'num'},
-                    {'key': 'pass_rate', 'label': '及格率%', 'type': 'num'}],
+        'columns': _track_cols,
         'rows': t2,
     }
     # 图：G12 同科目不同教师柱状对比；G13 组合走势
