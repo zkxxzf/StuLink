@@ -3,7 +3,7 @@
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
 [![Python](https://img.shields.io/badge/python-3.11+-green.svg)](https://python.org)
 [![Flask](https://img.shields.io/badge/flask-3.x-lightgrey.svg)](https://flask.palletsprojects.com/)
-[![Version](https://img.shields.io/badge/version-1.19.49.30-orange.svg)](https://gitee.com/zkxxzf/StuLink)
+[![Version](https://img.shields.io/badge/version-1.19.50.35-orange.svg)](https://gitee.com/zkxxzf/StuLink)
 
 面向中学的综合学生管理平台，采用 **双站点 + 多模块 + 一模块一库** 的故障隔离架构：
 
@@ -301,6 +301,7 @@ StuLink/
 
 | 版本 | 日期 | 亮点 |
 |---|---|---|
+| **1.19.50.35** | 2026-10-17 | **合并 sakaay 分支（教务 / 成绩新功能）+ 第 10 轮审计补修 6 项**：学科组长三类（备课 / 教研 / 综合组「整组一位」）· 任课映射扩容 15 科 · 课时量统计 · 成绩复核（申请调分）· 成绩看板 / AI 工作室 · 全局对比按选科组合拆行；本次补修：复核候选接口数据范围下推到 SQL、课时量导出越权、课时量重复计临时调课、组长徽章科目名归一、AI 报告净化器空元素吞内容、复核增减分 NaN 校验（新增 SR-17 防回归） |
 | **1.19.49.29** | 2026-10-14 | **日志脱敏修复**：`log_mask` 包装已有 formatter 时误读 `Formatter.style`（不存在）导致启动崩溃——MCP 服务（uvicorn 预配 handler）场景实测暴露，改为按 `_style` 类名推断 style，并保留 `fmt/datefmt/defaults`；新增 SR-16 防回归 |
 | **1.19.48.29** | 2026-10-14 | **权限体系多身份改造（P1–P6）**：一人可挂多个权限组 + **身份切换**（顶栏 / 工作台）；数据范围收敛为唯一口径（`app/utils/scope.py`，6 处委托）；范围类型扩为 7 档（全校/本人年级/指定年级/本人班级/指定班级/本人任课/无）；预置身份重排为 **11 组**（新增考试管理员/生活处/政教主任/政教员，删除校长/副校长/备课组长/教研组长/学生发展中心）；管理界面支持组范围 7 档与用户多身份分配 |
 | **1.19.47.29** | 2026-10-13 | **学生身份证号 / 联系电话明文收敛为「仅管理员 + 班主任」**（班主任补身份证明文、宿管收回联系电话，其余身份一律脱敏） |
