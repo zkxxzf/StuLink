@@ -21,6 +21,7 @@
   · 审批 = `grades.score_edit`（与"改分"同一把钥匙，不新增权限 key）；
   · 已审过的单子不可再审；同考试同学生同科同题号的待审单不重复提交。
 """
+import math
 from datetime import datetime
 
 from flask import (render_template, request, jsonify, redirect, url_for,
@@ -135,6 +136,23 @@ def reviews_students_api():
                           ExamScore.class_name, ExamScore.subject, ExamScore.score)
          .filter(ExamScore.exam_id == exam_id,
                  ExamScore.subject != TOTAL_SUBJECT))
+    # 2026-10-16 审计修复：原实现先 limit(300) 再在 Python 里按范围过滤 —— 排序为
+    # (班名, 学号, 科目)，前 300 行往往被前几个班占满，导致班级名靠后的班主任/任课
+    # 教师在「空关键词」浏览态（前端固定以 q='' 调用）取不到本班学生。改为把范围条件
+    # 下推到 SQL 后再 limit：班级授权 → class_name 白名单；学科授权 → subject 白名单
+    # （两者取或，与 can_view_class / can_view_subject 的判定一致）。
+    _grade = exam.grade
+    if not (sc.full_school or _grade in sc.grades):
+        _teach_subjects = {s for g, s in sc.teach if g == _grade}
+        _granted_classes = {c for g, c in sc.classes if g == _grade}
+        if not _teach_subjects and not _granted_classes:
+            return jsonify(success=True, grade=_grade, data=[])
+        _conds = []
+        if _teach_subjects:
+            _conds.append(ExamScore.subject.in_(list(_teach_subjects)))
+        if _granted_classes:
+            _conds.append(ExamScore.class_name.in_(list(_granted_classes)))
+        q = q.filter(db.or_(*_conds))
     if kw:
         q = q.filter(db.or_(ExamScore.student_no.like(f'%{kw}%'),
                             ExamScore.student_name.like(f'%{kw}%')))
@@ -166,6 +184,11 @@ def review_new():
     try:
         delta = round(float(request.form.get('delta') or 0), 1)
     except (TypeError, ValueError):
+        flash('增减分数格式不正确', 'danger')
+        return back
+    # 2026-10-16 审计修复：float('nan') 能解析成功，而 nan==0 / abs(nan)>上限 全为假，
+    # 会绕过下面所有校验并写进成绩单。显式拒绝非有限值。
+    if not math.isfinite(delta):
         flash('增减分数格式不正确', 'danger')
         return back
 

@@ -234,6 +234,16 @@ def calc_workload(from_d, to_d, grade=None, class_name=None, term=None):
     if class_name:
         q = q.filter(ScheduleEntry.class_name == class_name)
     entries = q.all()
+    # 2026-10-16 审计修复：临时调课产生的「当天条目」只在调课当天生效、不进常规周课表
+    # （课表读路径用 schedule_common.temp_target_ids 排除），统计侧此前漏排除 —— 它与
+    # 原条目 week_range 相同，会被逐周展开计入，同一节课重复计课时（口径与课表不一致）。
+    try:
+        from app.modules.academic.services.schedule_common import temp_target_ids
+        _temp_ids = temp_target_ids(term_id) if term_id else set()
+    except Exception:  # noqa: BLE001  历史库缺列时降级为不排除，不影响统计出数
+        _temp_ids = set()
+    if _temp_ids:
+        entries = [e for e in entries if e.id not in _temp_ids]
     by_weekday = {}
     for e in entries:
         by_weekday.setdefault(e.weekday, []).append(e)

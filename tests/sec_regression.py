@@ -2064,6 +2064,35 @@ def check_audit4():
 ITEMS['AUDIT4'] = check_audit4
 
 
+@item('SR-17')
+def check_SR17():
+    """2026-10-16 审计修复防回归：html_guard 空元素吞内容 / 课时量范围与临时条目 / 组长科目归一。"""
+    import inspect as _ins
+    from app.utils.html_guard import sanitize_report_html
+    # ① DROP 集合中的空元素（input/meta）与自闭合标签不得吞掉其后内容
+    case('SR-17 input 之后内容保留',
+         'World' in sanitize_report_html('<p>Hello</p><input type="text"><p>World</p>'))
+    case('SR-17 meta 之后内容保留',
+         'b' in sanitize_report_html('<p>a</p><meta charset="utf-8"><p>b</p>'))
+    case('SR-17 自闭合 script 之后内容保留',
+         'b' in sanitize_report_html('<p>a</p><script/><p>b</p>'))
+    case('SR-17 script 块后内容保留',
+         'b' in sanitize_report_html('<p>a</p><script>alert(1)</script><p>b</p>'))
+    case('SR-17 XSS 仍被中和',
+         'onerror' not in sanitize_report_html('<img src=x onerror=alert(1)>'))
+    with app.app_context():
+        from app.modules.academic.services import workload_service as _wl
+        case('SR-17 课时量统计排除临时调课条目',
+             'temp_target_ids' in _ins.getsource(_wl.calc_workload))
+        from app.modules.academic.services import schedule_service as _ss
+        case('SR-17 组长徽章科目名归一',
+             'normalize_subject' in _ins.getsource(_ss.leader_roles))
+        from app.modules.academic.routes.inspection import (
+            inspection_workload_export as _exp)
+        case('SR-17 课时量导出：受限账号须落在可见年级',
+             'academic_class_authorizer' in _ins.getsource(_exp))
+
+
 def main(argv):
     selected = [a.upper() for a in argv if a.upper() in ITEMS]
     if not selected:
