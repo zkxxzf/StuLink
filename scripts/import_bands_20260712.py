@@ -20,7 +20,7 @@
 - 幂等口径 ＝ **整场先删后插**（`delete from exam_bands where exam_id=?`）——
   会一并清掉该场旧的方向线/组合线；如该场还有组合级总分线（apply_gaokao_bands
   生成），重跑 `scripts/apply_gaokao_bands.py --exam-id <本场> --apply` 即可补回；
-- 已登记进 `docs/数据库迁移清单.md`（B 组 #37）与 `deploy/nas_migrate_pending.sh`；
+- 已登记进 `docs/规范与说明/数据库迁移清单.md`（B 组 #37）与 `deploy/nas_migrate_pending.sh`；
   跑完在本函数末尾调 `_mig_log` 登记（幂等，登记失败不阻塞）。
 """
 import argparse

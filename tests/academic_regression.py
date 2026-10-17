@@ -2529,6 +2529,16 @@ def check_inspection_mark():
              '.pov-act {' in pov and 'opacity: 0;' in pov and '.pov-card:hover .pov-act' in pov)
         case('单节视图：节次下拉标注有课数 / 空档',
              '课</option>' in pov and '· 空</option>' in pov)
+        # ── 2026-10-17 二轮复核新增（打印 / 空年级块折叠 / 本周不上）──
+        case('单节视图：打印态去底色、隐藏「换人」、卡片不跨页断',
+             '@media print' in pov and '.pov-card .pov-act { display: none !important; }' in pov
+             and 'break-inside: avoid' in pov)
+        # 折叠逻辑在 Jinja 标签里，渲染后的 HTML 里没有 → 读模板源断言
+        _tpl = io.open(os.path.join(BASE, 'app/templates/academic/inspection_live.html'),
+                       encoding='utf-8').read()
+        case('单节视图：整年级都没排课时折成一行（不铺相同空档卡）',
+             'pov-grid-na' in pov and '{% if b.scheduled %}' in _tpl
+             and '本节没有排课（{{ b.total }} 个班全部空档）' in _tpl)
         case('单节视图：图例直接复用徽标类（不再手抄一份色值）',
              'chk-legend' in pov and 'ovw-chk ovw-chk-exam' in pov)
         case('单节视图：右键菜单走 --sl-* 变量（深色主题可读）',
@@ -3624,7 +3634,7 @@ def check_band_template_suggest():
 
 @item('AUDITP0')
 def check_audit_p0_scope_guards():
-    """全面审计 P0 修复回归（2026-10-13，docs/全面审计报告_20261013.md）：
+    """全面审计 P0 修复回归（2026-10-13，docs/审计报告/全面审计报告_20261013.md）：
 
     · H-1 业绩附件删除：改走 `ach_svc.can_view`（academic.view 持有者 OR 提交者本人）
       —— 「只勾 academic.edit、没勾 academic.view」的权限组不得删他人附件（403）

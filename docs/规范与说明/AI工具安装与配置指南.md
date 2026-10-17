@@ -184,7 +184,7 @@ mcp_server\.venv\Scripts\python.exe mcp_server\run.py
 ```
 
 > Docker 部署（NAS / 服务器）：`docker build -f Dockerfile.mcp -t stulink-mcp:v1.0.0 .`，
-> 再由 `deploy/docker-compose.yml` 的 `mcp` 服务承载。详见 [MCP 服务技术文档](MCP服务技术文档.md)。
+> 再由 `deploy/docker-compose.yml` 的 `mcp` 服务承载。详见 [MCP 服务技术文档](../mcp/MCP服务技术文档.md)。
 
 **③ 关键配置项**（`config.json`，改完需重启服务）
 
@@ -684,8 +684,8 @@ mcp_server/config.json  ←──  各 AI 工具的接入配置
 
 ### D. 相关文档
 
-- [MCP 服务技术文档](MCP服务技术文档.md)：MCP 服务架构、工具清单、依赖、Docker 部署与验证
-- [MCP 服务认证与授权设计](MCP服务-认证与授权设计.md)：账号密码认证、权限一致性、拒绝策略
+- [MCP 服务技术文档](../mcp/MCP服务技术文档.md)：MCP 服务架构、工具清单、依赖、Docker 部署与验证
+- [MCP 服务认证与授权设计](../mcp/MCP服务-认证与授权设计.md)：账号密码认证、权限一致性、拒绝策略
 - [部署文档](部署文档.md)：主应用 Docker/NAS/云服务器部署
 - [用户文档](用户文档.md)：系统功能使用说明
 - `mcp_server/config.json`：MCP 服务全部配置项（含逐键中文说明，首次启动自动生成）

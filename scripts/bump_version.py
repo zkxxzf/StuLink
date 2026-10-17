@@ -36,7 +36,7 @@
 docs/聊天总结/；SKIP_DIRS 按**目录名**匹配路径各部分，与层级无关）、
 版本历史/（2026-10-16 起位于 docs/版本历史/ —— **历史记录里的版本号必须保持原样**，
 改了历史等于伪造历史）等目录。
-详细规范见 docs/版本号管理规范.md；版本内容记录见 docs/版本历史/README.md。
+详细规范见 docs/规范与说明/版本号管理规范.md；版本内容记录见 docs/版本历史/README.md。
 """
 from __future__ import annotations
 

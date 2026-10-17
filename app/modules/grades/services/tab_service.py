@@ -134,8 +134,12 @@ def _rate_of(online, name, denom):
 
 # ==================== A1 年级分析 ====================
 
-def grade_tab(exam_id, direction='', selection=''):
-    """A1 年级分析；direction=物理/历史 时仅统计该方向，selection=选科组合时仅统计该组合"""
+def grade_tab(exam_id, direction='', selection='', denom='ref'):
+    """A1 年级分析；direction=物理/历史 时仅统计该方向，selection=选科组合时仅统计该组合
+
+    denom（2026-10-17）：ref=参考数（成绩>0 才算参考）/ enrolled=班级实际在籍人数，
+    影响所有「人数/率/均分」口径；全程随 population 视图下传，不逐个改函数签名。
+    """
     # v1.13.2 性能：改用进程级共享缓存，避免每次打开分析页重复全量拉取明细行
     data = st.cached_exam_data(exam_id)
     exam = data.exam
@@ -144,8 +148,9 @@ def grade_tab(exam_id, direction='', selection=''):
     tables, charts = {}, {}
     dr = direction or None   # None=全部
     sel = selection or None  # None=全部组合（2026-10-16 组合维度）
-    # 人群视图：之后本函数所有 totals_of/scores_of_subject 都按 (方向×组合) 收窄
-    data = data.population(dr, sel)
+    # 人群视图：之后本函数所有 totals_of/scores_of_subject 都按 (方向×组合×口径) 收窄
+    data = data.population(dr, sel, denom)
+    n_label = '在籍人数' if data.denom == st.DENOM_ENROLLED else '参考人数'
 
     # A1-T1 各班汇总表
     summary = st.class_summary_table(data, dr)
@@ -160,7 +165,7 @@ def grade_tab(exam_id, direction='', selection=''):
     tables['class_summary'] = {
         'title': '年级各班汇总表',
         'columns': ([{'key': 'class_name', 'label': '班级', 'type': 'text'},
-                     {'key': 'count', 'label': '参考人数', 'type': 'int'},
+                     {'key': 'count', 'label': n_label, 'type': 'int'},
                      {'key': 'avg', 'label': '总分均值', 'type': 'num'},
                      {'key': 'std', 'label': '标准差', 'type': 'num'},
                      {'key': 'max', 'label': '最高分', 'type': 'num'},
@@ -193,7 +198,7 @@ def grade_tab(exam_id, direction='', selection=''):
         'title': '年级科目总表',
         'columns': [
             {'key': 'subject', 'label': '科目', 'type': 'text'},
-            {'key': 'count', 'label': '参考人数', 'type': 'int'},
+            {'key': 'count', 'label': n_label, 'type': 'int'},
             {'key': 'full', 'label': '满分', 'type': 'int'},
             {'key': 'avg', 'label': '年级平均分', 'type': 'num'},
             {'key': 'max', 'label': '最高分', 'type': 'num'},
@@ -234,11 +239,16 @@ def grade_tab(exam_id, direction='', selection=''):
 
     # ---- 图表 ----
     # G1 各班总分均值柱状
+    # 年级均分参考线用**人数加权**（2026-10-17 修）：原为各班均分的简单平均，
+    # 各班人数不等时与"全体参考学生均分"不同（手册「参考数口径」要求基于参考学生）。
+    _w_num = sum((r['avg'] or 0) * (r['count'] or 0)
+                 for r in summary if r['avg'] is not None)
+    _w_den = sum((r['count'] or 0) for r in summary if r['avg'] is not None)
     charts['avg_bar'] = {
         'type': 'bar', 'title': '各班总分均值对比',
         'xAxis': shown_classes,
         'series': [{'name': '总分均值', 'data': [r['avg'] for r in summary]}],
-        'markLine': st.mean([r['avg'] for r in summary if r['avg'] is not None]) or 0,
+        'markLine': (_w_num / _w_den) if _w_den else 0,
     }
     # G2 分数段堆叠柱（复用上面已算好的 segs/seg_rows，避免再统计一遍全年级）
     charts['seg_stack'] = {
@@ -276,6 +286,7 @@ def grade_tab(exam_id, direction='', selection=''):
             'tables': tables, 'charts': charts,
             'meta': {'classes': shown_classes, 'directions': data.directions,
                      'layers': layer_names, 'direction': direction,
+                     'denom': data.denom,
                      'partial': data.partial_import()}}
 
 
@@ -354,17 +365,21 @@ def _trend_lines(grade, means=None, direction=None):
 
 # ==================== A2 班级分析 ====================
 
-def class_tab(exam_id, class_name, direction='', selection=''):
+def class_tab(exam_id, class_name, direction='', selection='', denom='ref'):
     data = st.cached_exam_data(exam_id)
     exam = data.exam
     if not data.total_rows or class_name not in data.classes:
         return _empty(exam)
     # 2026-10-16 组合维度：班里也按 (方向×组合) 收窄（行政班内混组合时有用）
-    data = data.population(direction or None, selection or None)
+    data = data.population(direction or None, selection or None, denom)
+    n_label = '在籍人数' if data.denom == st.DENOM_ENROLLED else '参考人数'
     tables, charts = {}, {}
     totals = data.totals_of(class_name=class_name)
-    grade_avg = st.mean([r.score for r in data.total_rows])
-    cls_avg = st.mean([t['score'] for t in totals])
+    # 2026-10-17 口径：人数/均分随 denom（enrolled 时缺考按 0 分计入均分）
+    cls_n = st.base_count(data, class_name=class_name)
+    grd_n = st.base_count(data)
+    grade_avg = st.avg_by_denom(st.ref_scores(data), grd_n)
+    cls_avg = st.avg_by_denom(st.ref_scores(data, class_name=class_name), cls_n)
     fm = data.full_marks()
 
     # A2-T1 班级概况
@@ -386,8 +401,8 @@ def class_tab(exam_id, class_name, direction='', selection=''):
         'columns': [{'key': 'k', 'label': '指标', 'type': 'text'},
                     {'key': 'v', 'label': '数值', 'type': 'text'}],
         'rows': [
-            {'k': '参考人数', 'v': len(totals)},
-            {'k': '年级参考人数', 'v': len(data.total_rows)},
+            {'k': n_label, 'v': cls_n},
+            {'k': f'年级{n_label}', 'v': grd_n},
             {'k': '总分均值', 'v': cls_avg},
             {'k': '年级均值', 'v': grade_avg},
             {'k': '与年级均值差', 'v': (round(cls_avg - grade_avg, 1)
@@ -395,9 +410,9 @@ def class_tab(exam_id, class_name, direction='', selection=''):
         ],
         # 键值表无法被前端自动推断（第二列是混合量纲的文本）→ 显式给图：仅画可比的 4 个数值项
         'chartHint': {'type': 'bar',
-                      'xAxis': ['总分均值', '年级均值', '参考人数', '年级参考人数'],
+                      'xAxis': ['总分均值', '年级均值', n_label, f'年级{n_label}'],
                       'series': [{'name': '本班', 'data': [cls_avg, grade_avg,
-                                                          len(totals), len(data.total_rows)]}]},
+                                                          cls_n, grd_n]}]},
     }
     # A2-T2 班级-年级科目对标（2026-10-15 用户口径：原「及格率」按满分 60% 固定线算 →
     # 改为按本场划线的「及格率位」层（最低层；四层模板=及格层）单科上线率；
@@ -406,27 +421,31 @@ def class_tab(exam_id, class_name, direction='', selection=''):
     t2 = []
     rate_pass = None
     for sub in subs:
-        cls_s = data.scores_of_subject(sub, class_name=class_name)
-        grd_s = data.scores_of_subject(sub)
+        # 2026-10-17 口径：单科分子只算实考（>0），分母按所选口径（enrolled 含缺考）
+        cls_s = st.ref_scores(data, sub, class_name=class_name)
+        grd_s = st.ref_scores(data, sub)
         if not cls_s:
             continue
+        cls_sub_n = st.base_count(data, sub, class_name=class_name)
+        grd_sub_n = st.base_count(data, sub)
         pname, _gname = _rate_names_for(data, sub)
         cls_pass = grd_pass = None
         if pname:
             rate_pass = rate_pass or pname
             by_cls = _layer_online_counts_by_class(data, sub)
             od = (by_cls.get(class_name) or {}).get(pname)
-            cls_pass = _fmt_pct(od.get('single_n', 0), len(cls_s)) if od else None
-            grd_n = sum(((v.get(pname) or {}).get('single_n') or 0)
-                        for v in by_cls.values())
-            grd_pass = _fmt_pct(grd_n, len(grd_s)) if grd_s else None
-        cls_m, grd_m = st.mean(cls_s), st.mean(grd_s)
-        t2.append({'subject': sub, 'cls_count': len(cls_s), 'cls_avg': cls_m,
+            cls_pass = _fmt_pct(od.get('single_n', 0), cls_sub_n) if od else None
+            grd_hit = sum(((v.get(pname) or {}).get('single_n') or 0)
+                          for v in by_cls.values())
+            grd_pass = _fmt_pct(grd_hit, grd_sub_n) if grd_s else None
+        cls_m = st.avg_by_denom(cls_s, cls_sub_n)
+        grd_m = st.avg_by_denom(grd_s, grd_sub_n)
+        t2.append({'subject': sub, 'cls_count': cls_sub_n, 'cls_avg': cls_m,
                    'grd_avg': grd_m,
                    'diff': round(cls_m - grd_m, 1) if cls_m is not None and grd_m is not None else None,
                    'cls_pass': cls_pass, 'grd_pass': grd_pass})
     t2_cols = [{'key': 'subject', 'label': '科目', 'type': 'text'},
-               {'key': 'cls_count', 'label': '本班参考人数', 'type': 'int'},
+               {'key': 'cls_count', 'label': f'本班{n_label}', 'type': 'int'},
                {'key': 'cls_avg', 'label': '本班平均分', 'type': 'num'},
                {'key': 'grd_avg', 'label': '年级平均分', 'type': 'num'},
                {'key': 'diff', 'label': '分差', 'type': 'num'}]
@@ -503,7 +522,7 @@ def class_tab(exam_id, class_name, direction='', selection=''):
         layer_idx[_key] = idx
     for (direction, lname), members in layers_map.items():
         row = {'layer': lname, 'direction': direction, 'count': len(members),
-               'ratio': st.fmt_rate(len(members), len(totals)),
+               'ratio': st.fmt_rate(len(members), cls_n),
                'avg': st.mean([m['score'] for m in members])}
         for sub in subs:
             vals = []
@@ -559,7 +578,8 @@ def class_tab(exam_id, class_name, direction='', selection=''):
                      'date': exam.exam_date.strftime('%Y-%m-%d'), 'status': exam.status},
             'class_name': class_name,
             'tables': tables, 'charts': charts,
-            'meta': {'classes': data.classes, 'partial': data.partial_import()}}
+            'meta': {'classes': data.classes, 'denom': data.denom,
+                     'partial': data.partial_import()}}
 
 
 def _score_rate(t, fm, key):
@@ -597,7 +617,7 @@ def _class_trend(grade, class_name):
 
 # ==================== A3 学科分析 ====================
 
-def subject_tab(exam_id, subject, direction='', selection=''):
+def subject_tab(exam_id, subject, direction='', selection='', denom='ref'):
     """A3 学科分析；direction=物理/历史 时仅统计该方向，selection=选科组合时仅统计该组合"""
     data = st.cached_exam_data(exam_id)
     exam = data.exam
@@ -605,12 +625,14 @@ def subject_tab(exam_id, subject, direction='', selection=''):
         return _empty(exam)
     dr = direction or None   # None=全部
     sel = selection or None  # None=全部组合（2026-10-16 组合维度）
-    # 人群视图：本 tab 内所有取数都按 (方向×组合) 收窄
-    data = data.population(dr, sel)
+    # 人群视图：本 tab 内所有取数都按 (方向×组合×口径) 收窄
+    data = data.population(dr, sel, denom)
+    n_label = '在籍人数' if data.denom == st.DENOM_ENROLLED else '参考人数'
     tables, charts = {}, {}
     scores_map = {}   # class -> scores
-    grd_scores = data.scores_of_subject(subject)
-    grd_avg = st.mean(grd_scores)
+    grd_scores = st.ref_scores(data, subject)
+    grd_n = st.base_count(data, subject)
+    grd_avg = st.avg_by_denom(grd_scores, grd_n)
     lines = data.subject_lines(subject)
     # 该科「方向 × 组合」单科线（未划线时为空，表格不出现分层列）。
     # 2026-10-15 二次口径：再选四科（化/生/政/地）**按组合**划（化学=物化生/物化地/物化政
@@ -657,19 +679,22 @@ def subject_tab(exam_id, subject, direction='', selection=''):
                      if layer_names else {})
     t1 = []
     for cls in data.classes:
-        cls_s = data.scores_of_subject(subject, class_name=cls, direction=dr)
+        cls_s = st.ref_scores(data, subject, class_name=cls, direction=dr)
         if not cls_s:
             continue
         scores_map[cls] = cls_s
+        # 2026-10-17 口径：人数/率/均分全按所选分母（enrolled 含缺考，缺考按 0 分计入均分）
+        cls_n = st.base_count(data, subject, class_name=cls, direction=dr)
         online = online_by_cls.get(cls, {})
+        cls_avg = st.avg_by_denom(cls_s, cls_n)
         row = {
-            'subject': subject, 'class_name': cls, 'count': len(cls_s),
-            'avg': st.mean(cls_s),
-            'pass_rate': _rate_of(online, rate_pass, len(cls_s)),
-            'good_rate': _rate_of(online, rate_good, len(cls_s)),
+            'subject': subject, 'class_name': cls, 'count': cls_n,
+            'avg': cls_avg,
+            'pass_rate': _rate_of(online, rate_pass, cls_n),
+            'good_rate': _rate_of(online, rate_good, cls_n),
             'max': max(cls_s),
             'low_count': sum(1 for s in cls_s if s < lines['low']),
-            'diff': round(st.mean(cls_s) - grd_avg, 1) if grd_avg is not None else None,
+            'diff': round(cls_avg - grd_avg, 1) if grd_avg is not None else None,
         }
         if layer_names:
             lc = _layer_counts(cls)
@@ -680,12 +705,12 @@ def subject_tab(exam_id, subject, direction='', selection=''):
                 dn = od.get('dual_n', 0)
                 row['lo_%d_n' % i] = sn
                 row['lo_%d_dn' % i] = dn
-                row['lo_%d_dr' % i] = _fmt_pct(dn, len(cls_s))
+                row['lo_%d_dr' % i] = _fmt_pct(dn, cls_n)
         t1.append(row)
     t1.sort(key=lambda r: -(r['avg'] or 0))
     cmp_cols = ([{'key': 'subject', 'label': '科目', 'type': 'text'},
                  {'key': 'class_name', 'label': '班级', 'type': 'text'},
-                 {'key': 'count', 'label': '参考人数', 'type': 'int'},
+                 {'key': 'count', 'label': n_label, 'type': 'int'},
                  {'key': 'avg', 'label': '平均分', 'type': 'num'}]
                 + _rate_columns(rate_pass, rate_good)
                 + [{'key': 'max', 'label': '最高分', 'type': 'num'},
@@ -851,7 +876,7 @@ def subject_tab(exam_id, subject, direction='', selection=''):
     return {'exam': {'id': exam.id, 'name': exam.name, 'grade': exam.grade,
                      'date': exam.exam_date.strftime('%Y-%m-%d'), 'status': exam.status},
             'subject': subject, 'tables': tables, 'charts': charts,
-            'meta': {'classes': data.classes}}
+            'meta': {'classes': data.classes, 'denom': data.denom}}
 
 
 def _heatmap(data, direction=None):
@@ -863,8 +888,9 @@ def _heatmap(data, direction=None):
     for sub in SUBJECTS:
         col = []
         for cls in shown_classes:
-            s = data.scores_of_subject(sub, class_name=cls, direction=direction)
-            col.append(st.mean(s) if s else None)
+            s = st.ref_scores(data, sub, class_name=cls, direction=direction)
+            n = st.base_count(data, sub, class_name=cls, direction=direction)
+            col.append(st.avg_by_denom(s, n) if s else None)
         if not any(col):
             continue  # 该方向未开考科目不显示（避免全空行）
         y_labels.append(sub)
@@ -875,14 +901,19 @@ def _heatmap(data, direction=None):
 
 # ==================== A4 任课教师分析 ====================
 
-def teacher_tab(exam_id, subject=None, links=None, grade=None):
-    """links: 允许展示的 (grade,class_name,subject,user_id) 列表（None=全部 active）"""
+def teacher_tab(exam_id, subject=None, links=None, grade=None, denom='ref'):
+    """links: 允许展示的 (grade,class_name,subject,user_id) 列表（None=全部 active）
+
+    denom（2026-10-17）：ref=参考数 / enrolled=班级实际人数，影响人数/率/均分口径。
+    """
     from app.models.grades import TeacherSubjectLink
     from app.models import User
     data = st.cached_exam_data(exam_id)
     exam = data.exam
     if not data.total_rows:
         return _empty(exam)
+    data = data.population(None, None, denom)
+    n_label = '在籍人数' if data.denom == st.DENOM_ENROLLED else '参考人数'
     if links is None:
         # v1.19.49.35 优先读本场考试的任课快照（考试当时）；无则惰性生成，
         # 生成失败（旧库无表）再从当前映射回落
@@ -926,22 +957,26 @@ def teacher_tab(exam_id, subject=None, links=None, grade=None):
     for link in links:
         if subject and link.subject != subject:
             continue
-        cls_s = data.scores_of_subject(link.subject, class_name=link.class_name)
+        cls_s = st.ref_scores(data, link.subject, class_name=link.class_name)
         if not cls_s:
             continue
-        grd_s = data.scores_of_subject(link.subject)
-        grd_avg = st.mean(grd_s)
+        grd_s = st.ref_scores(data, link.subject)
+        # 2026-10-17 口径：人数/率/均分随 denom
+        cls_n = st.base_count(data, link.subject, class_name=link.class_name)
+        grd_n = st.base_count(data, link.subject)
+        grd_avg = st.avg_by_denom(grd_s, grd_n)
+        cls_avg = st.avg_by_denom(cls_s, cls_n)
         online = online_cache.get((link.class_name, link.subject), {})
         row = {
             'teacher': users.get(link.user_id, f'#{link.user_id}'),
             'class_name': link.class_name, 'subject': link.subject,
             'grade': link.grade,
-            'count': len(cls_s),
-            'avg': st.mean(cls_s),
+            'count': cls_n,
+            'avg': cls_avg,
             'grd_avg': grd_avg,
-            'diff': round(st.mean(cls_s) - grd_avg, 1) if grd_avg is not None else None,
-            'pass_rate': _rate_of(online, rate_pass, len(cls_s)),
-            'good_rate': _rate_of(online, rate_good, len(cls_s)),
+            'diff': round(cls_avg - grd_avg, 1) if grd_avg is not None else None,
+            'pass_rate': _rate_of(online, rate_pass, cls_n),
+            'good_rate': _rate_of(online, rate_good, cls_n),
         }
         if subject_layer_names:
             for i, name in enumerate(subject_layer_names):
@@ -950,7 +985,7 @@ def teacher_tab(exam_id, subject=None, links=None, grade=None):
                 dn = od.get('dual_n', 0)
                 row['t_lo_%d_n' % i] = sn
                 row['t_lo_%d_dn' % i] = dn
-                row['t_lo_%d_dr' % i] = _fmt_pct(dn, len(cls_s))
+                row['t_lo_%d_dr' % i] = _fmt_pct(dn, cls_n)
         t1.append(row)
     # 列定义
     teacher_cols = [
@@ -958,7 +993,7 @@ def teacher_tab(exam_id, subject=None, links=None, grade=None):
         {'key': 'grade', 'label': '年级', 'type': 'text'},
         {'key': 'class_name', 'label': '班级', 'type': 'text'},
         {'key': 'subject', 'label': '科目', 'type': 'text'},
-        {'key': 'count', 'label': '参考人数', 'type': 'int'},
+        {'key': 'count', 'label': n_label, 'type': 'int'},
         {'key': 'avg', 'label': '科目平均分', 'type': 'num'},
         {'key': 'grd_avg', 'label': '年级该科平均分', 'type': 'num'},
         {'key': 'diff', 'label': '分差', 'type': 'num'},

@@ -40,6 +40,11 @@
             <option value="">全部组合</option>
         </select>
     </div>
+    {# 2026-10-17 统计口径：参考数（实考）/ 班级实际人数（在籍），默认参考数 #}
+    <select id="gDenom" class="form-select form-select-sm w-auto" title="统计口径：分母按参考数（有分数且>0）还是班级实际在籍人数">
+        <option value="ref">口径：参考数</option>
+        <option value="enrolled">口径：班级实际人数</option>
+    </select>
     <select id="gClass" class="form-select form-select-sm w-auto d-none" title="班级">
         <option value="">班级…</option>
     </select>

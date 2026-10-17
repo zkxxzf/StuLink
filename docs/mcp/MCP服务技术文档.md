@@ -3,7 +3,7 @@
 > 面向开发与运维：说明 MCP 服务的定位、架构、工具清单、依赖、启动方式（本地 / Docker）、
 > 配置、与主应用的边界、运维与验证。
 > 认证与授权的完整设计另见 [MCP 服务认证与授权设计](MCP服务-认证与授权设计.md)；
-> 客户端侧安装与排查见 [AI 工具安装与配置指南](AI工具安装与配置指南.md)。
+> 客户端侧安装与排查见 [AI 工具安装与配置指南](../规范与说明/AI工具安装与配置指南.md)。
 
 ---
 
@@ -80,7 +80,7 @@ AI 客户端（IDE 插件 / 桌面应用 / 豆包）
 
 ## 四、依赖与运行环境
 
-依赖清单见 [mcp_server/requirements.txt](../mcp_server/requirements.txt)，由三部分组成：
+依赖清单见 [mcp_server/requirements.txt](../../mcp_server/requirements.txt)，由三部分组成：
 
 | 组成 | 内容 | 说明 |
 |---|---|---|
@@ -211,7 +211,7 @@ docker build -f Dockerfile.mcp -t stulink-mcp:v1.0.0 .
 ### 7.2 NAS 部署（绿联 UGOS）
 
 - 主应用沿用既有轻量更新链路：整包脚本 `deploy/nas_update_v*.sh` 或增量 `deploy/hot_update.ps1`
-  （`docker cp` 进容器 + 重启）。详见 [部署文档](部署文档.md)。
+  （`docker cp` 进容器 + 重启）。详见 [部署文档](../规范与说明/部署文档.md)。
 - **MCP 容器为新增服务**，需**先有 `stulink-mcp:v1.0.0` 镜像**再用 compose 起容器；
   仅 `docker cp` 代码不会带来 `mcp`/`uvicorn` 依赖（依赖在镜像层，不在可写层）。
 - 若当前 NAS 账号权限不足（无法 `docker build` / 无镜像导入权限），
@@ -281,5 +281,5 @@ docker exec stulink-mcp python mcp_server/smoke_scores.py
 
 - [MCP 服务认证与授权设计](MCP服务-认证与授权设计.md)：认证模型、授权三层、拒绝策略、审计
 - [MCP 服务成绩分析权限设计](MCP服务-成绩分析权限设计.md)：成绩分析专用服务的三条授权规则与工具清单
-- [AI 工具安装与配置指南](AI工具安装与配置指南.md)：客户端接入（HTTP/stdio）、L0–L6 验证、排障
-- [部署文档](部署文档.md)：主应用 Docker / NAS / 云服务器部署与升级
+- [AI 工具安装与配置指南](../规范与说明/AI工具安装与配置指南.md)：客户端接入（HTTP/stdio）、L0–L6 验证、排障
+- [部署文档](../规范与说明/部署文档.md)：主应用 Docker / NAS / 云服务器部署与升级

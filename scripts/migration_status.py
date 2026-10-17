@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
-"""迁移清单核对：列出 scripts/ 下所有库结构脚本及其执行状态（配合 docs/数据库迁移清单.md）。
+"""迁移清单核对：列出 scripts/ 下所有库结构脚本及其执行状态（配合 docs/规范与说明/数据库迁移清单.md）。
 
 用法
 ----
@@ -159,7 +159,7 @@ def main():
         if s['summary']:
             print('    ' + s['summary'][:76])
     print('-' * 78)
-    print('提醒：状态以 docs/数据库迁移清单.md 为真值；新迁移请同步登记到该文档。')
+    print('提醒：状态以 docs/规范与说明/数据库迁移清单.md 为真值；新迁移请同步登记到该文档。')
     return 0
 
 

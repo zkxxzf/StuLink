@@ -1,4 +1,4 @@
-# StuLink v1.19.49.35 2026-10-10
+﻿# StuLink v1.19.49.35 2026-10-10
 # 成绩统计分析服务：一次载入考试成绩数据，提供各 tab 需要的聚合（纯函数 + 内存计算）
 # 口径遵循设计文档第 8 章：参考学生=有总分行（至少一应考科有分），不分学籍状态
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
@@ -11,8 +11,22 @@ from collections import OrderedDict
 
 from sqlalchemy import func
 
+from app.extensions import db
+from app.modules.grades.utils import numeric_classes
 from app.models.grades import Exam, ExamScore, ExamBand, SUBJECTS, TOTAL_SUBJECT, \
     subjects_of_selection
+
+# ---- 统计口径（2026-10-17 用户需求）----
+# ref      = 参考数：单科/总分有分数且 > 0 才算参加考试（0 分按未参考）
+# enrolled = 班级实际人数：该班在籍学生数（缺考按 0 分计入均分），
+#            单科分母再按「该生选科是否应考该科」收窄（语数外全考）
+DENOM_REF = 'ref'
+DENOM_ENROLLED = 'enrolled'
+DENOM_CHOICES = (DENOM_REF, DENOM_ENROLLED)
+# 选科组合（如「物化生」）里能标识某科的字；语数外不在组合里，默认全考
+_SEL_CHAR = {'物理': '物', '历史': '史', '化学': '化',
+             '生物': '生', '政治': '政', '地理': '地'}
+_CORE_SUBJECTS = ('语文', '数学', '外语', '英语')
 
 # 2026-10-11 审计：为缓存清理路径的异常留痕提供 logger
 logger = logging.getLogger(__name__)
@@ -113,12 +127,19 @@ class _Population:
     这样 tab_service 只需在入口 `data = data.population(dr, sel)`，
     下游所有统计（表格、图、分层、临界生）就自动只算该人群，无需逐个改签名。
     """
-    __slots__ = ('_d', '_dr', '_sel')
+    __slots__ = ('_d', '_dr', '_sel', '_denom')
 
-    def __init__(self, data, direction=None, selection=None):
+    def __init__(self, data, direction=None, selection=None, denom=DENOM_REF):
         self._d = data
         self._dr = (direction or '') or None
         self._sel = (selection or '') or None
+        # 统计口径随人群视图一起下传：下游只读 data.denom，无需层层加参
+        self._denom = denom if denom in DENOM_CHOICES else DENOM_REF
+
+    @property
+    def denom(self):
+        """当前统计口径：ref=参考数 / enrolled=班级实际人数"""
+        return self._denom
 
     def __getattr__(self, name):
         return getattr(self._d, name)
@@ -138,6 +159,9 @@ class _Population:
 
 class ExamData:
     """一场考试的只读内存数据视图"""
+
+    # 默认口径：参考数（有分数且 >0 才算参加考试）；population() 可切成 enrolled
+    denom = DENOM_REF
 
     def __init__(self, exam_id):
         self.exam = Exam.query.get(exam_id)
@@ -174,6 +198,8 @@ class ExamData:
         # 惰性：仅班级分析（进退步对比）需要上一场成绩，年级/学科/教师分析用不到，
         # 故改为首次访问时才查，避免每次构造 ExamData 都白拉一场全量总分行
         self._prev_totals = None
+        # 惰性：班级在籍名单（enrolled 口径才用，跨库查系统库 students）
+        self._enrolled = None
 
     @property
     def prev_totals(self):
@@ -233,14 +259,55 @@ class ExamData:
                 out.append(s)
         return out
 
-    def population(self, direction=None, selection=None):
-        """只读「人群视图」：把 (方向, 组合) 作为默认过滤条件绑到取数方法上。
+    def population(self, direction=None, selection=None, denom=DENOM_REF):
+        """只读「人群视图」：把 (方向, 组合, 统计口径) 绑到取数方法上。
 
         下游（tab_service / stats_service / pivot_service）无需改签名 —— 在 tab 入口
-        把 data 换成 population(dr, sel)，里面所有 totals_of/scores_of_subject 就自动
-        按该人群收窄（取线仍走学生自身组合，组合优先）。共享底层缓存，零拷贝。
+        把 data 换成 population(dr, sel, denom)，里面所有 totals_of/scores_of_subject
+        就自动按该人群收窄（取线仍走学生自身组合，组合优先）。共享底层缓存，零拷贝。
         """
-        return _Population(self, direction, selection)
+        return _Population(self, direction, selection, denom)
+
+    # ---------- 在籍人数（enrolled 口径） ----------
+    def enrolled_stats(self):
+        """{班级: [选科组合, ...]} —— 本场年级在籍学生（惰性查系统库 students）。
+
+        成绩库与学籍库分离（grades.db / system.db），不能 JOIN，只能先聚合再内存拼；
+        借读/在籍不在校也算在籍（用户 2026-10-17 口径：班级实际人数）。
+
+        ⚠ 按 Student 的**当前**班级统计：重新分班后回看历史考试，人员会与成绩总分行
+        的「考试当时班级」不一致（成绩口径仍以 exam_scores 总分行 为权威，见 CODEBUDDY）。
+        """
+        if self._enrolled is None:
+            from app.models import Student
+            rows = (db.session.query(Student.class_name, Student.subject_selection)
+                    .filter(Student.grade == self.exam.grade).all())
+            out = {}
+            for cls, sel in rows:
+                out.setdefault(cls, []).append((sel or '').strip())
+            self._enrolled = out
+        return self._enrolled
+
+    def enrolled_n(self, class_name=None, direction=None, selection=None, subject=None):
+        """在籍人数：按班（可再按方向/组合收窄）；单科只算该生应考该科的人。
+
+        返回 0 表示查不到学籍（调用方回落到参考数，避免分母为 0 出空表）。
+        """
+        stats = self.enrolled_stats()
+        classes = [class_name] if class_name else list(stats)
+        total = 0
+        for cls in classes:
+            for sel in stats.get(cls, []):
+                if selection and sel != selection:
+                    continue
+                if direction and _direction_of(sel) != direction:
+                    continue
+                # 总分（TOTAL_SUBJECT）不分科：在籍学生全都计入
+                if subject and subject != TOTAL_SUBJECT \
+                        and not _subject_required(sel, subject):
+                    continue
+                total += 1
+        return total
 
     # ---------- 分层（exam_bands） ----------
     def band_list(self, direction, subject=TOTAL_SUBJECT, selection=''):
@@ -416,15 +483,71 @@ def fmt_rate(n, d):
     return round(n / d * 100, 1) if d else None
 
 
+def _direction_of(selection):
+    """选科组合 → 方向（物化生=物理、史政地=历史）；无选科（高一）返回 ''。"""
+    first = (selection or '')[:1]
+    if first == '物':
+        return '物理'
+    if first == '史':
+        return '历史'
+    return ''
+
+
+def _subject_required(selection, subject):
+    """该生是否应考某科：语数外全考；无选科（高一）全考；否则看组合里有没有该科字。"""
+    if not selection or subject in _CORE_SUBJECTS:
+        return True
+    return _SEL_CHAR.get(subject, '') in selection
+
+
+def ref_scores(data, subject=None, class_name=None, direction=None):
+    """实考分数（口径 ref 的分子与分母来源）：只有 >0 的分数才算参加考试。"""
+    if subject in (None, TOTAL_SUBJECT):
+        rows = data.totals_of(class_name=class_name, direction=direction)
+        return [t['score'] for t in rows if (t['score'] or 0) > 0]
+    scores = data.scores_of_subject(subject, class_name=class_name, direction=direction)
+    return [s for s in scores if (s or 0) > 0]
+
+
+def base_count(data, subject=None, class_name=None, direction=None):
+    """按当前口径取分母人数。
+
+    ref      → 实考人数（有分数且 >0）
+    enrolled → 该班在籍人数（单科按应考科目收窄）；查不到学籍时回落实考人数
+    """
+    if getattr(data, 'denom', DENOM_REF) == DENOM_ENROLLED:
+        n = data.enrolled_n(
+            class_name=class_name,
+            direction=direction if direction is not None else getattr(data, '_dr', None),
+            selection=getattr(data, '_sel', None), subject=subject)
+        if n:
+            return n
+    return len(ref_scores(data, subject, class_name, direction))
+
+
+def avg_by_denom(scores, n):
+    """口径均分：enrolled 口径下缺考按 0 分计入（总分÷在籍人数），其余按实际分数平均。"""
+    if not scores:
+        return None
+    if n and n > len(scores):
+        return round(sum(scores) / n, 1)
+    return mean(scores)
+
+
 def class_summary_table(data, direction=None):
     """A1-T1 年级各班汇总表行（含分层计数列）"""
     fm = data.full_marks()
     rows = []
-    for cls in data.classes:
+    # 只统计正规教学班（排除 不分班/已转出/离校 等），与全局对比页 numeric_classes 口径一致
+    for cls in numeric_classes(data.classes):
         totals = data.totals_of(class_name=cls, direction=direction)
         if not totals:
             continue
-        scores = [t['score'] for t in totals]
+        # 2026-10-17 口径开关：count/avg 随 data.denom（enrolled 时缺考按 0 计入均分）
+        scores = ref_scores(data, class_name=cls, direction=direction)
+        if not scores:
+            continue
+        n_base = base_count(data, class_name=cls, direction=direction)
         # 分层按学生自身方向判定后并入班级；组合总分线按学生自身组合取线（组合优先）
         layers = {}
         for t in totals:
@@ -444,8 +567,8 @@ def class_summary_table(data, direction=None):
         row = {
             'class_name': cls,
             'direction': max(set(dirs), key=dirs.count) if dirs else '',
-            'count': len(totals),
-            'avg': mean(scores),
+            'count': n_base,
+            'avg': avg_by_denom(scores, n_base),
             'std': round(_stddev(scores), 1),
             'max': max(scores),
             'min': min(scores),
@@ -524,22 +647,24 @@ def subject_table(data, direction=None):
     """A1-T2 年级科目总表"""
     rows = []
     for sub in SUBJECTS:
-        scores = data.scores_of_subject(sub, direction=direction)
+        scores = ref_scores(data, sub, direction=direction)
         if not scores:
             continue
+        # 2026-10-17 口径开关：count/avg/pass_rate/good_rate 均按所选分母
+        n_base = base_count(data, sub, direction=direction)
         lines = data.subject_lines(sub)
         pass_n = sum(1 for s in scores if s >= lines['pass'])
         good_n = sum(1 for s in scores if s >= lines['excellent'])
         rows.append({
             'subject': sub,
-            'count': len(scores),
+            'count': n_base,
             'full': data.full_marks().get(sub, 100),
-            'avg': mean(scores),
+            'avg': avg_by_denom(scores, n_base),
             'max': max(scores),
             'min': min(scores),
             'std': round(_stddev(scores), 1),
-            'pass_rate': fmt_rate(pass_n, len(scores)),
-            'good_rate': fmt_rate(good_n, len(scores)),
+            'pass_rate': fmt_rate(pass_n, n_base),
+            'good_rate': fmt_rate(good_n, n_base),
         })
     return rows
 
@@ -682,10 +807,22 @@ def _ps_metrics(sc, bands, on_map=None, prev_n=None, prev_avg=None):
 
 
 def _ps_rank(rows, value_of, key='rank'):
-    """组内按某指标降序排名（None 排最后）"""
+    """组内按某指标降序**竞争排名**：同值同名次，下一名次按人数顺延（1,1,3…）。
+
+    ⚠️ 2026-10-17 修：原实现 `enumerate(order, 1)` 直接编号（1,2,3），
+    两班同分时名次会各差一位，与《成绩分析算法手册》3. 排名算法第 2 条
+    「分数相同 → 名次相同（并列），下一名次按人数顺延」不一致。
+    """
     order = sorted(rows, key=lambda r: -(value_of(r) if value_of(r) is not None else -1e9))
+    prev_v, prev_rank = object(), 0
     for i, r in enumerate(order, 1):
-        r.setdefault('rank', {})[key] = i
+        v = value_of(r)
+        if v is not None and v == prev_v:
+            rank = prev_rank                      # 与上一个同值 → 同名次
+        else:
+            rank = i
+            prev_v, prev_rank = v, i
+        r.setdefault('rank', {})[key] = rank
 
 
 def print_summary(exam_id):
@@ -711,7 +848,8 @@ def print_summary(exam_id):
         for d in directions:
             # 本方向有哪些班：该科该方向有分数行即算（班可能混方向，按有数据归属）
             cls_rows = []
-            for cls in data.classes:
+            # 只统计正规教学班（排除 不分班/已转出/离校），否则这些班会当成一个班显示、还参与排名
+            for cls in numeric_classes(data.classes):
                 # 逐生按各自选科组合取线（2026-10-16 复查上线数口径后统一，见 _ps_class_pass）
                 sc, on_map, bands = _ps_class_pass(data, sub, cls, d)
                 if not sc:
@@ -782,21 +920,33 @@ def _ps_sum_rows(rows, sub, direction, data, pdata=None):
                           for k, _k2, _l in _PS_TAGS},
                 'avg_rank': None}
 
-    # 「班均」行：均分＝各班均分的平均；参考数/上线人数＝各班求和（比率才是对的，
-    # 2026-10-16 自测时误用班级数当分母 → 上线率算出 1000% 那种荒唐值）
+    all_sc = _ps_scores(data, sub, None, direction) if hasattr(data, 'classes') else []
+
+    # 「班均」行（2026-10-17 修）：
+    #   均分必须＝**全体参考学生的加权均分**，不能是「各班均分的简单平均」——
+    #   各班人数不等时两者不同（手册《成绩分析算法手册》1. 术语表「参考数口径」：
+    #   所有均值/率/分层/排名类指标均只基于参考学生）。举例：50 人班 400 分 + 10 人班 600 分，
+    #   简单平均 500、全体均分 433，差 67 分。原来「参考数=各班求和、均分=各班简单平均」口径自相矛盾。
+    #   参考数/上线人数仍＝各班求和（比率才对；2026-10-16 曾误用班级数当分母 → 上线率 1000%）。
     n_cls = len(rows)
+    # 参考数与均分都只基于「正规教学班的学生」（rows 已排除 不分班/已转出），
+    # 否则会出现「人数=正规班之和、均分=全部学生」的分子分母口径错位。
     n_stu = sum(r['n'] or 0 for r in rows)
-    cls_avg = mean([r['avg'] for r in rows if r['avg'] is not None])
+    _den = sum(r['n'] or 0 for r in rows if r['avg'] is not None)
+    _num = sum((r['avg'] or 0) * (r['n'] or 0) for r in rows if r['avg'] is not None)
+    _avgs = [r['avg'] for r in rows if r['avg'] is not None]
+    cls_avg = round(_num / _den, 1) if _den else (mean(_avgs) if _avgs else None)
     cls_n = {'211': sum((r['bands'].get('211') or {}).get('n') or 0 for r in rows),
              '特控': sum((r['bands'].get('特控') or {}).get('n') or 0 for r in rows),
              '本科': sum((r['bands'].get('本科') or {}).get('n') or 0 for r in rows)}
+    _prev_all = _ps_scores(pdata, sub, None, direction)
+    if not _prev_all:
+        _prev_all = _ps_scores(pdata, sub, None, None)
     avg_row = _agg('班均', n_stu, cls_avg,
-                   max([r['max'] for r in rows if r['max'] is not None] or [None]),
-                   cls_n, mean([r['prev_avg'] for r in rows
-                                if r['prev_avg'] is not None]))
+                   max(all_sc) if all_sc else max([r['max'] for r in rows
+                                                   if r['max'] is not None] or [None]),
+                   cls_n, mean(_prev_all) if _prev_all else None)
     avg_row['n_cls'] = n_cls
-
-    all_sc = _ps_scores(data, sub, None, direction) if hasattr(data, 'classes') else []
 
     # 年级行的上线人数＝**各班逐生结果之和**（口径与班级行严格一致；
     # 2026-10-16 复查前这里用"方向一条线 + 全体分数"重算，会与班级行口径不一致）

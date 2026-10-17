@@ -510,10 +510,15 @@ def _mean(values):
 
 
 def _total_pass_rate(payload, totals):
-    """总分及格率：口径与成绩分析/汇报区一致（读本场考试总分行三线的 pass 线）。
+    """总分及格率：**与成绩分析页/汇报区同一口径**（2026-10-17 修）。
 
-    取不到及格线（考试未划线、无成绩、payload 未带 exam id）时返回 None，
-    由前端显示「-」——不给一个会误导的数字。
+    ⚠️ 原来读 `ex.subject_lines(总分)['pass']`——那是「满分 × 60%」的**固定线**，
+    而且不区分选科组合。成绩分析页/汇报区早就改成「**本场划线的最低层（及格位）**、
+    **逐生按自己选科组合取线**」（见 stats_service.rate_layer_pair / rate_names_for），
+    两边**不是同一个数**，前端却都标成「及格率」→ 页面之间互相矛盾
+    （旧代码注释里已经点明了这个矛盾，但一直没修）。
+
+    现改为与分析页一致；未划线/无成绩返回 None，前端显示「-」，不给误导性数字。
     """
     if not totals:
         return None
@@ -521,14 +526,29 @@ def _total_pass_rate(payload, totals):
     if not exam_id:
         return None
     try:
-        from app.models.grades import Exam, TOTAL_SUBJECT
-        ex = db.session.get(Exam, int(exam_id))
-        if ex is None:
+        from app.modules.grades.services import stats_service as st
+        data = st.cached_exam_data(int(exam_id))
+        p_name, _g = st.rate_names_for(data, st.TOTAL_SUBJECT)
+        if not p_name:
             return None
-        line = (ex.subject_lines(TOTAL_SUBJECT) or {}).get('pass')
-        if line is None:
-            return None
-        return round(sum(1 for t in totals if t >= line) / len(totals) * 100, 1)
+        hit = n = 0
+        cache = {}
+        for r in data.totals_of():
+            sc = r.get('score')
+            if sc is None:
+                continue
+            n += 1
+            d = (r.get('direction') or '') if isinstance(r, dict) else (r.direction or '')
+            sel = ((r.get('selection') or '') if isinstance(r, dict)
+                   else (getattr(r, 'subject_selection', '') or ''))
+            key = (d, sel)
+            if key not in cache:
+                cache[key] = st.rate_layer_pair(
+                    data.band_list(d, st.TOTAL_SUBJECT, sel))[0]
+            p_pair = cache[key]
+            if p_pair and sc >= p_pair[1]:
+                hit += 1
+        return round(hit / n * 100, 1) if n else None
     except Exception:  # noqa: BLE001  统计口径不应让报告生成失败
         from flask import current_app
         current_app.logger.warning('AI 统计：总分及格率计算失败 exam_id=%s', exam_id,

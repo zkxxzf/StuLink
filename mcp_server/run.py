@@ -4,7 +4,7 @@
 服务范围：只暴露 12 个成绩分析只读工具，权限按三条规则细粒度裁决——
 R1 任课教师（年级+班级同时命中，且仅所教学科）/ R2 班主任（本班）/
 R3 年级长及以上（本年级，校级/管理员=全校）。无任何写入能力。
-详见 docs/MCP服务-成绩分析权限设计.md。
+详见 docs/mcp/MCP服务-成绩分析权限设计.md。
 
 启动方式（二选一）：
   · 双击 mcp_server\\start_mcp.bat（首次会自动创建虚拟环境并装依赖）
@@ -15,7 +15,7 @@ R3 年级长及以上（本年级，校级/管理员=全校）。无任何写入
   · X-StuLink-User: <账号> + X-StuLink-Password: <密码>
   · Authorization: Basic base64(账号:密码)
 （require_token=true 时另加 X-StuLink-Token；token 兼容模式见 config.json。）
-认证设计见 docs/MCP服务-认证与授权设计.md。
+认证设计见 docs/mcp/MCP服务-认证与授权设计.md。
 """
 import functools
 import ipaddress

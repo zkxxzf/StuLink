@@ -78,7 +78,9 @@
 </style>
 {% endblock %}
 {% block content %}
-{% set NC_FIX = 4 %}
+{# 2026-10-17：本场无选科组合（高一未选科）时不印「组合」列 —— 与页面同口径 #}
+{% set FIX_SEL = gc.has_selection is not false %}
+{% set NC_FIX = 4 if FIX_SEL else 3 %}
 {% set NLV = (lines | length) %}
 {% set NC = NC_FIX + (gc.subjects | length) * (1 + NLV) %}
 
@@ -86,7 +88,9 @@
 {% macro row_tds(r) %}
     <td class="cls">{{ r.class_name }}</td>
     <td>{{ r.count }}</td>
+    {% if FIX_SEL %}
     <td class="sel">{% for s in r.selections %}{{ s.name }}{% if not loop.last %} {% endif %}{% endfor %}</td>
+    {% endif %}
     <td>{{ r.class_type }}</td>
     {% for s in gc.subjects %}
     {% set c = (r.cells or {}).get(s) or {} %}
@@ -142,7 +146,9 @@
             {% set AVG_W = (GRP_W * 8.0 / UNIT_W) if UNIT_W else GRP_W %}
             {% set LV_W = (GRP_W * 7.5 / UNIT_W) if UNIT_W else 0 %}
             <colgroup>
-                <col style="width:4.2%"><col style="width:2.4%"><col style="width:4.5%"><col style="width:3.9%">
+                <col style="width:4.2%"><col style="width:2.4%">
+                {% if FIX_SEL %}<col style="width:4.5%">{% endif %}
+                <col style="width:3.9%">
                 {% for s in gc.subjects %}
                 <col style="width:{{ AVG_W | round(2) }}%">{% for L in lines %}<col style="width:{{ LV_W | round(2) }}%">{% endfor %}
                 {% endfor %}
@@ -151,7 +157,7 @@
                 <tr>
                     <th class="fix" rowspan="2">班级</th>
                     <th class="fix" rowspan="2">人数</th>
-                    <th class="fix" rowspan="2">组合</th>
+                    {% if FIX_SEL %}<th class="fix" rowspan="2">组合</th>{% endif %}
                     <th class="fix" rowspan="2">属性</th>
                     {% for s in gc.subjects %}
                     <th class="grp" colspan="{{ 1 + NLV }}">{{ s }}</th>

@@ -25,6 +25,21 @@ from app.utils.helpers import log_operation
 _BASE_HEADS = ['年级', '班级', '班级人数', '方向', '组合', '属性']
 
 
+def _base_heads(data):
+    """按本场数据决定固定列（2026-10-17 用户口径）。
+
+    高一未选科时整场没有方向/组合 → 这两列不导出（页面、打印版同口径）；
+    payload 里缺字段（旧缓存）时按「有」处理，保持原行为。
+    """
+    heads = ['年级', '班级', '班级人数']
+    if data.get('has_direction', True) is not False:
+        heads.append('方向')
+    if data.get('has_selection', True) is not False:
+        heads.append('组合')
+    heads.append('属性')
+    return heads
+
+
 @bp.route('/global-compare')
 @login_required
 @perm_required('grades.view')
@@ -145,14 +160,19 @@ def _sel_text(selections):
     return '\n'.join(f'{s["name"]} {s["count"]}' for s in selections)
 
 
-def _row_values(row, subjects, lines):
+def _row_values(row, subjects, lines, heads=None):
     """一行的单元格值：固定列 + 每科（去差均分 + 各层上线）。
 
     总分格下方显示班主任；其余科目格下方显示该科任课教师（均为本场快照）。
+    heads 决定固定列（无方向/无组合的场次不出这两列，见 _base_heads）。
     """
-    vals = [row.get('grade', ''), row.get('class_name', ''), row.get('count', ''),
-            row.get('direction', ''), _sel_text(row.get('selections')),
-            row.get('class_type', '')]
+    heads = heads or _BASE_HEADS
+    vals = [row.get('grade', ''), row.get('class_name', ''), row.get('count', '')]
+    if '方向' in heads:
+        vals.append(row.get('direction', ''))
+    if '组合' in heads:
+        vals.append(_sel_text(row.get('selections')))
+    vals.append(row.get('class_type', ''))
     cells = row.get('cells') or {}
     for sub in subjects:
         c = cells.get(sub) or {}
@@ -187,8 +207,9 @@ def _build_workbook(data, lines):
     ws = wb.active
     ws.title = '全局对比'
     subjects = data['subjects']
+    heads = _base_heads(data)      # 2026-10-17：无方向/无组合的场次不出这两列
     per = 1 + len(lines)   # 每科列数：去差均分 + 各层
-    ncol = len(_BASE_HEADS) + len(subjects) * per
+    ncol = len(heads) + len(subjects) * per
 
     # 第 1 行：口径注释（横向拉满整表宽 → 合并 + 自动换行）
     nc = ws.cell(row=1, column=1, value=_GC_NOTE)
@@ -197,13 +218,13 @@ def _build_workbook(data, lines):
     ws.row_dimensions[1].height = 30
 
     # 第 2 行：固定列 rowSpan=2 + 科目组 colSpan=per
-    heads1 = list(_BASE_HEADS)
+    heads1 = list(heads)
     for sub in subjects:
         heads1.extend([sub] + [''] * (per - 1))
     for ci, v in enumerate(xl_row(heads1), start=1):
         ws.cell(row=2, column=ci, value=v)
     # 第 3 行：指标名（固定列位置留空）
-    heads2 = [''] * len(_BASE_HEADS)
+    heads2 = [''] * len(heads)
     for _sub in subjects:
         heads2.append('去差均分')
         heads2.extend(ld.line_label(n) for n in lines)
@@ -211,10 +232,10 @@ def _build_workbook(data, lines):
         ws.cell(row=3, column=ci, value=v)
 
     # 合并固定列表头（竖向）+ 科目组表头（横向）
-    for ci in range(1, len(_BASE_HEADS) + 1):
+    for ci in range(1, len(heads) + 1):
         ws.merge_cells(start_row=2, start_column=ci, end_row=3, end_column=ci)
     for gi, _sub in enumerate(subjects):
-        c0 = len(_BASE_HEADS) + gi * per + 1
+        c0 = len(heads) + gi * per + 1
         ws.merge_cells(start_row=2, start_column=c0, end_row=2, end_column=c0 + per - 1)
 
     # 数据行：组内班级（含班级合计 + 组合明细）→ 方向小计（+ 按组合明细）→ 末尾总计
@@ -235,7 +256,8 @@ def _build_workbook(data, lines):
             body.append((r, 'grand'))
     for i, (r, kind) in enumerate(body):
         ri = _ROW0 + i
-        for ci, v in enumerate(xl_row(_row_values(r, subjects, lines)), start=1):
+        for ci, v in enumerate(xl_row(_row_values(r, subjects, lines, heads)),
+                               start=1):
             ws.cell(row=ri, column=ci, value=v)
 
     # 样式

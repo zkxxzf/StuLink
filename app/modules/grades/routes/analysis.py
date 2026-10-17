@@ -424,6 +424,15 @@ def _get_exam(exam_id):
 CACHE_TIMEOUT = 900
 
 
+def _denom():
+    """分母口径参数（2026-10-17）：ref=参考数（成绩>0）/ enrolled=班级实际人数。
+
+    非法值静默回落 ref —— 与前端默认一致，避免旧前端/手工 URL 把统计打空。
+    """
+    d = (request.args.get('denom') or '').strip()
+    return d if d in ('ref', 'enrolled') else 'ref'
+
+
 def _fetch(key, builder):
     data = cache.get(key)
     if data is None:
@@ -441,9 +450,10 @@ def api_grade_tab():
     direction = (request.args.get('direction') or '').strip()
     selection = (request.args.get('selection') or '').strip()
     exam = _get_exam(exam_id)
+    denom = _denom()
     return jsonify(success=True, data=_fetch(
-        f'grades_tab_{exam_id}_grade_{direction}_{selection}',
-        lambda: tab_service.grade_tab(exam_id, direction, selection)))
+        f'grades_tab_{exam_id}_grade_{direction}_{selection}_{denom}',
+        lambda: tab_service.grade_tab(exam_id, direction, selection, denom)))
 
 
 @bp.route('/api/analysis/class')
@@ -464,9 +474,10 @@ def api_class_tab():
     _sc = _sg.resolve(current_user)
     if not _sc.class_total_visible(exam.grade, class_name):
         abort(403)
+    denom = _denom()
     return jsonify(success=True, data=_fetch(
-        f'grades_tab_{exam_id}_class_{class_name}_{direction}_{selection}',
-        lambda: tab_service.class_tab(exam_id, class_name, direction, selection)))
+        f'grades_tab_{exam_id}_class_{class_name}_{direction}_{selection}_{denom}',
+        lambda: tab_service.class_tab(exam_id, class_name, direction, selection, denom)))
 
 
 @bp.route('/api/analysis/subject')
@@ -479,9 +490,10 @@ def api_subject_tab():
     direction = (request.args.get('direction') or '').strip()
     selection = (request.args.get('selection') or '').strip()
     exam = _get_exam(exam_id)
+    denom = _denom()
     return jsonify(success=True, data=_fetch(
-        f'grades_tab_{exam_id}_subject_{subject}_{direction}_{selection}',
-        lambda: tab_service.subject_tab(exam_id, subject, direction, selection)))
+        f'grades_tab_{exam_id}_subject_{subject}_{direction}_{selection}_{denom}',
+        lambda: tab_service.subject_tab(exam_id, subject, direction, selection, denom)))
 
 
 @bp.route('/api/analysis/compare')
@@ -509,8 +521,10 @@ def api_compare_tab():
     classes = classes[:20]
     # 班级名单可能很长 → 用摘要做缓存键（前缀仍为 grades_tab_{id}_，命中现有失效钩子）
     digest = hashlib.md5(','.join(classes).encode('utf-8')).hexdigest()[:10]
-    payload = _fetch(f'grades_tab_{exam_id}_compare_{digest}_{direction}',
-                     lambda: compare_service.compare_tab(exam_id, classes, direction))
+    denom = _denom()
+    payload = _fetch(f'grades_tab_{exam_id}_compare_{digest}_{direction}_{denom}',
+                     lambda: compare_service.compare_tab(exam_id, classes, direction,
+                                                         denom))
     # 传入的班级在本场可能全部无效（如已停考班级）→ 与前端「至少 2 个班」校验同一口径
     if len(((payload.get('meta') or {}).get('selected')) or []) < 2:
         return jsonify(success=False, message='有效班级不足 2 个，请重新选择'), 400
@@ -525,6 +539,7 @@ def api_teacher_tab():
     exam_id = request.args.get('exam_id', type=int)
     subject = request.args.get('subject', '').strip() or None
     exam = _get_exam(exam_id)
+    denom = _denom()
     scope_type, _ = scope_service.get_scope(current_user)
     # 修复：数据构建移入 _fetch 的构建函数——原实现在缓存命中时也会先全量计算一遍，
     # 缓存既不省时、未命中时相当于计算两遍
@@ -535,18 +550,18 @@ def api_teacher_tab():
             if not links:
                 return tab_service._empty(exam)
             return tab_service.teacher_tab(exam_id, subject=subject, links=links,
-                                           grade=exam.grade)
+                                           grade=exam.grade, denom=denom)
         if (current_user.role == 'admin' or scope_type == 'school'
                 or scope_service.has_user_scope(current_user)):
             # 管理员 / 校级领导 / 用户级数据范围：本年级全体任课教师
             return tab_service.teacher_tab(exam_id, subject=subject,
-                                           links=None, grade=exam.grade)
+                                           links=None, grade=exam.grade, denom=denom)
         if scope_type == 'grade':
             # 年级长：本年级
             grade = scope_service.get_scope(current_user)[1]
             links = TeacherSubjectLink.query.filter_by(grade=grade, active=True).all()
             return tab_service.teacher_tab(exam_id, subject=subject, links=links,
-                                           grade=grade)
+                                           grade=grade, denom=denom)
         abort(403)
-    cache_key = f'grades_tab_{exam_id}_teacher_{subject or "*"}_{current_user.id}'
+    cache_key = f'grades_tab_{exam_id}_teacher_{subject or "*"}_{current_user.id}_{denom}'
     return jsonify(success=True, data=_fetch(cache_key, _build))

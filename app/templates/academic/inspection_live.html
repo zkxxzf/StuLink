@@ -91,12 +91,24 @@
     .pov-tag.temp { background: var(--sl-soft-purple-bg); color: var(--sl-soft-purple-fg); }
     .pov-tag.moved { background: var(--sl-surface-3); color: var(--sl-text-muted); }
     .pov-empty { text-align: center; color: var(--sl-text-muted); padding: 40px 0; }
+    /* 整年级都没排课时的一行说明（替代铺 10 张相同空档卡） */
+    .pov-grid-na { padding: 2px 0 6px; }
     /* 窄屏（375px 巡课）：卡片下限收小、内边距收紧，保证两列不抖动 */
     @media (max-width: 575.98px) {
         .pov-grid { grid-template-columns: repeat(auto-fill, minmax(132px, 1fr)); gap: 6px; }
         .pov-card { padding: 6px 8px 7px 12px; }
         .pov-card .cls { font-size: 13px; }
         .pov-card .tch { font-size: 12px; }
+    }
+    /* 打印（2026-10-17 二轮复核补）：黑白/省墨友好 —— 去掉状态底色与 hover 效果，
+       保留左侧状态色条与徽标文字（纸上仍分得清"查没查"）；「换人」是屏幕操作，纸上隐藏；
+       卡片与年级块头都不允许跨页断开。 */
+    @media print {
+        .pov-card { background: #fff !important; box-shadow: none !important;
+                    transform: none !important; }
+        .pov-card .pov-act { display: none !important; }
+        .pov-card, .pov-block-head { break-inside: avoid; }
+        .pov-block { break-inside: auto; }
     }
     @media print {
         .sidebar, .navbar, .no-print, footer { display: none !important; }
@@ -249,6 +261,9 @@
             <span class="ttl"><i class="bi bi-mortarboard"></i> {{ b.grade_label or b.grade }}</span>
             <span class="sub">{{ b.total }} 个班 · {{ b.scheduled }} 节有课{% if b.total - b.scheduled > 0 %} · 空档 {{ b.total - b.scheduled }}{% endif %}</span>
         </div>
+        {# 2026-10-17 二轮复核：整个年级这节课都没排课时，不再铺 10 张一模一样的「空档」卡，
+           折成一行说明（块头仍有统计；有课的年级照常铺卡，其中空档的班也照常显示）。 #}
+        {% if b.scheduled %}
         <div class="pov-grid">
             {% for r in b.rows %}
             {# markable：这一节有课 + 有查课权限 → 卡片可单击/双击/右键/回车标记；
@@ -268,7 +283,7 @@
                  data-uid="{{ r.teacher_uid or '' }}" data-room="{{ r.room or '' }}"
                  data-temp="{{ 1 if r.is_temp_swap else 0 }}"
                  {% if markable %}data-check="{{ r.check.result if r.check else '' }}"{% endif %}{% endif %}
-                 title="{% if r.subject %}{{ r.subject }} {{ r.teacher_name or '' }}{% if r.room %} · {{ r.room }}{% endif %}{% if r.check %} · 已标记{{ r.check.label }}{% if r.check.note %}（{{ r.check.note }}）{% endif %}{% elif markable %} · 点此标记查课结果{% endif %}{% elif r.is_moved_away %}临时调课：本节课已换到别的时间（不计入应查）{% elif r.week_miss %}课表标注「{{ r.week_miss }}」，本周不排这节课（不计入应查）{% else %}本节课本班没有排课{% endif %}">
+                 title="{% if r.subject %}{{ r.subject }} {{ r.teacher_name or '' }}{% if r.room %} · {{ r.room }}{% endif %}{% if r.check %} · 已标记{{ r.check.label }}{% if r.check.note %}（{{ r.check.note }}）{% endif %}{% elif markable %} · 点此标记查课结果{% endif %}{% elif r.is_moved_away %}临时调课：本节课已换到别的时间（不计入应查）{% elif r.week_miss %}课表周次「{{ r.week_miss }}」，本周不排这节课（不计入应查）{% else %}本节课本班没有排课{% endif %}">
                 <div class="pov-head">
                     <span class="cls">{{ r.class_name }}</span>
                     {% if r.is_temp_swap %}<span class="pov-tag temp">临调</span>{% endif %}
@@ -284,6 +299,11 @@
             </div>
             {% endfor %}
         </div>
+        {% else %}
+        <div class="pov-grid-na small text-muted ps-1">
+            <i class="bi bi-dash-circle"></i> 本节没有排课（{{ b.total }} 个班全部空档）
+        </div>
+        {% endif %}
     </section>
     {% endfor %}
 {% else %}
