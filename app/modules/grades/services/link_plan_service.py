@@ -282,6 +282,21 @@ def delete_plan(plan_id, operator_id=None):
         raise ValueError('方案不存在（可能已被删除）')
     if plan.is_current:
         raise ValueError('当前生效方案不能删除，请先「使用」其他方案')
+    # 2026-10-18 审计加固：方案明细是"当时的班×科映射"，删掉后只能靠现在的映射
+    # 近似重建（等于失真）。删前整组快照，回收站可按原 id 整体恢复。
+    rows = TeacherLinkPlanRow.query.filter_by(plan_id=plan.id).all()
+    from app.utils.trash import archive_snapshot
+    from app.models import User
+    _op = db.session.get(User, operator_id) if operator_id else None
+    _snap = archive_snapshot(
+        'grades', 'link_plan_bundle', '任课映射方案',
+        tables=[(TeacherLinkPlan, plan), (TeacherLinkPlanRow, rows)],
+        summary=f'{plan.name}：{len(rows)} 条班级×科目明细',
+        operator=_op)
+    if _snap is None:
+        db.session.rollback()
+        raise ValueError('删除前归档失败，已中止（避免方案不可恢复）')
+    db.session.commit()          # 归档先落库，再删
     TeacherLinkPlanRow.query.filter_by(plan_id=plan.id).delete(synchronize_session=False)
     db.session.delete(plan)
     db.session.commit()

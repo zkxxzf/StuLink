@@ -93,8 +93,12 @@ def _wrap_plain(text):
 def _context_note(user, exam, direction='', layer='', scope_desc=''):
     parts = [
         '【本次分析对象】',
-        f'考试：{exam.name}（{exam.grade}'
+        # 2026-10-18：必须写明 exam_id。此前只给考试名，模型会从名字里"猜"数字
+        # （2024级202505月考 → exam_id=202505292024），工具回"找不到考试"，整轮作废。
+        f'考试：{exam.name}（exam_id={exam.id}；{exam.grade}'
         + (f'，{exam.exam_date.strftime("%Y-%m-%d")}' if exam.exam_date else '') + '）',
+        f'调用工具时 exam_id 一律用 {exam.id}（本场考试），不要从考试名、日期或'
+        '页面元素里推测数字；要换别的考试，先用 list_exams 拿到真实 id。',
         f'页面当前筛选：方向={direction or "未指定"}，层级={layer or "未指定"}',
         f'你的数据范围：{scope_desc or "由账号权限决定"}',
         '提示：不确定能看什么时可先调用 list_my_score_scope；'

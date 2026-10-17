@@ -1,7 +1,7 @@
 # StuLink v1.7.0 2026-08-02
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 from flask import Blueprint, render_template, redirect, url_for, flash, request
-from flask_login import login_required
+from flask_login import current_user, login_required
 from app.extensions import db
 from app.models import DictCategory, DictItem
 from app.utils.decorators import perm_required
@@ -90,19 +90,29 @@ def add_item():
 def delete_item(item_id):
     """删除字典值（仅未使用的可以删除）"""
     item = DictItem.query.get_or_404(item_id)
-    cat_code = item.category.code
+    # 2026-10-18：category 缺失（脏外键）时不要 AttributeError → 500
+    cat_code = (item.category.code if item.category else '')
 
     if is_dict_value_in_use(cat_code, item.value):
         flash(f'"{item.value}" 已被使用，无法删除', 'danger')
         return redirect(url_for('dictionary.list_items', tab=cat_code))
 
+    # 2026-10-18（口径）：字典项删除接回收站 —— 误删会让下拉框缺项，必须可恢复
+    from app.utils.trash import archive
+    archive('system', 'dictionary_item', '字典项', item,
+            summary=f'{item.category.name if item.category else cat_code} · {item.value}',
+            operator=current_user)
+    # 归档先提交、再删除：非 WAL 模式下 SQLite 是**库级锁**，同一事务里
+    # "先读后写 + 再删" 容易触发读锁升级失败（database is locked）。
+    # 拆成两个事务后，与 students.delete 的做法保持一致。
+    db.session.commit()
     db.session.delete(item)
     db.session.commit()
-    
+
     # 清除字典缓存
     clear_dict_cache()
-    
-    flash(f'已删除 "{item.value}"', 'success')
+
+    flash(f'已删除 "{item.value}"（已进回收站，可恢复）', 'success')
     return redirect(url_for('dictionary.list_items', tab=cat_code))
 
 

@@ -1,0 +1,241 @@
+# StuLink 2026-10-18
+# 删除归档 / 恢复工具（回收站）
+# Copyright (c) 2026 zkxxzf. Apache License 2.0
+"""删除前归档、恢复时重建 —— 与 `models/trash.py` 配套。
+
+用法（在 `db.session.delete()` / `query.delete()` **之前**调用）：
+
+    from app.utils.trash import archive
+    archive('grades', 'affair_student', '考务名单', rows,
+            summary=f'{affair.name}：{len(rows)} 人', operator=current_user)
+    AffairStudent.query.filter_by(affair_id=aid).delete()
+
+约定：
+- `rows` 传单个对象或列表；`payload` 单行存 dict、整批存 list；
+- 归档异常**不抛出**（只打日志），保证删除流程不被回收站拖垮；
+- 恢复用**新 id**（避免与现存行撞主键），唯一约束冲突的行跳过并计入失败。
+"""
+import importlib
+import json
+import logging
+from datetime import date, datetime
+
+from app.extensions import db
+from app.models.trash import TrashRecord
+
+logger = logging.getLogger(__name__)
+
+# kind → (模块路径, 模型类名)；恢复时动态取，避免循环 import
+_MODELS = {
+    'affair_student': ('app.models.grades', 'AffairStudent'),
+    'affair_room': ('app.models.grades', 'AffairRoom'),
+    'affair': ('app.models.grades', 'ExamAffair'),
+    'affair_invigilator': ('app.models.grades', 'AffairInvigilator'),
+    'room': ('app.models.room', 'Room'),
+    'bed_assignment': ('app.models.room', 'BedAssignment'),
+    'student_accommodation': ('app.models.room', 'StudentAccommodation'),
+    'schedule_entry': ('app.models.timetable', 'ScheduleEntry'),
+    'exam_score': ('app.models.grades', 'ExamScore'),
+    'student': ('app.models.student', 'Student'),
+    # 2026-10-18（口径）：字典项删除接回收站，误删可恢复
+    # 注：旧课表模块（routes/timetable.py 的 Timetable/TimetableEntry）已下线 ——
+    # 模型与蓝图都不存在，当前课表统一走 schedule 模块，故不在此登记。
+    'dictionary_item': ('app.models.dictionary', 'DictItem'),
+}
+
+
+def _dump(obj, keep_id=False):  # noqa: D401
+    """整行 → dict（默认跳过主键；datetime 转 isoformat）。
+
+    keep_id=True 只给 `archive_snapshot` 用：整批级联删除必须保留原 id，
+    否则恢复后子行的 exam_id / affair_id 会指向不存在的父行（假恢复）。
+    """
+    data = {}
+    for col in obj.__table__.columns:
+        if col.name == 'id' and not keep_id:
+            continue
+        val = getattr(obj, col.name, None)
+        # 2026-10-18：`date` 也必须序列化 —— Exam.exam_date 是 date 类型，
+        # 只判 datetime 会让整场考试快照 json.dumps 抛 TypeError，
+        # 再被上层 except 吞掉变成"静默失败"（归档没存，删除照做）。
+        data[col.name] = (val.isoformat()
+                          if isinstance(val, (datetime, date)) else val)
+    return data
+
+
+def archive(module, kind, label, rows, summary='', operator=None, count=None):
+    """把 rows 序列化进回收站，返回 TrashRecord（失败返回 None，不抛异常）。"""
+    try:
+        items = list(rows) if isinstance(rows, (list, tuple)) else [rows]
+        if not items:
+            return None
+        payload = [_dump(x) for x in items]
+        rec = TrashRecord(
+            module=module, kind=kind, kind_label=label,
+            ref_id=(getattr(items[0], 'id', None) if len(items) == 1 else None),
+            summary=(summary or '')[:250],
+            payload=json.dumps(payload if len(payload) > 1 else payload[0],
+                               ensure_ascii=False),
+            item_count=(count if count is not None else len(items)),
+        )
+        if operator is not None:
+            rec.operator_id = getattr(operator, 'id', None)
+            rec.operator_name = (getattr(operator, 'real_name', None)
+                                 or getattr(operator, 'username', '') or '')
+        db.session.add(rec)
+        return rec
+    except Exception:                       # noqa: BLE001
+        logger.warning('回收站归档失败 module=%s kind=%s', module, kind, exc_info=True)
+        return None
+
+
+def archive_snapshot(module, kind, label, tables, summary='', operator=None):
+    """一次归档**一组关联表**，恢复时按**原 id** 重建。
+
+    用于"整场考试 / 整批考务"这类级联删除：普通 `archive()` 恢复时会丢弃 id
+    重新编号，父行换了新 id 后，子行的 exam_id / affair_id 全部变成孤儿 ——
+    页面看着"恢复了"，其实数据全断链。快照模式把 id 一并存下、按原值插回，
+    并且**父表在前、子表在后**，外键因此始终有效。
+
+    tables: [(模型类, 行或行列表), ...]，顺序必须"父表 → 子表"。
+    """
+    try:
+        groups, total = [], 0
+        for model, rows in tables:
+            if rows is None:
+                continue
+            items = list(rows) if isinstance(rows, (list, tuple)) else [rows]
+            items = [x for x in items if x is not None]
+            if not items:
+                continue
+            groups.append({
+                'model': f'{model.__module__}.{model.__name__}',
+                'rows': [_dump(x, keep_id=True) for x in items],
+            })
+            total += len(items)
+        if not total:
+            return None
+        payload = {'keep_ids': True, 'tables': groups}
+        rec = TrashRecord(
+            module=module, kind=kind, kind_label=label,
+            ref_id=None,
+            summary=(summary or '')[:250],
+            payload=json.dumps(payload, ensure_ascii=False),
+            item_count=total,
+        )
+        if operator is not None:
+            rec.operator_id = getattr(operator, 'id', None)
+            rec.operator_name = (getattr(operator, 'real_name', None)
+                                 or getattr(operator, 'username', '') or '')
+        db.session.add(rec)
+        return rec
+    except Exception:                       # noqa: BLE001  归档失败不阻断删除流程
+        logger.warning('回收站快照归档失败 module=%s kind=%s', module, kind, exc_info=True)
+        return None
+
+
+def model_of(kind):
+    """kind → 模型类（未知类型抛 ValueError）。"""
+    path, cls = _MODELS.get(kind) or (None, None)
+    if not path:
+        raise ValueError(f'未知归档类型：{kind}')
+    return getattr(importlib.import_module(path), cls)
+
+
+def restore(rec):
+    """恢复一条归档。返回 (ok, message, 成功行数)。"""
+    try:
+        data = json.loads(rec.payload or 'null')
+    except (TypeError, ValueError):
+        return False, '归档内容损坏（JSON 解析失败）', 0
+    if not data:
+        return False, '归档内容为空', 0
+    # 快照模式（整场考试 / 整批考务的级联删除）：按原 id 重建，
+    # 父表在前、子表在后。必须在 model_of 之前分流 —— 快照的 kind
+    # 不在 _MODELS 白名单里（它一次对应多张表）。
+    if isinstance(data, dict) and data.get('keep_ids'):
+        return _restore_snapshot(rec, data)
+    try:
+        model = model_of(rec.kind)
+    except ValueError as e:
+        return False, str(e), 0
+
+    items = data if isinstance(data, list) else [data]
+    cols = {c.name: c for c in model.__table__.columns}
+    okn, skipped = 0, []
+    for row in items:
+        clean = {k: v for k, v in (row or {}).items() if k in cols}
+        # datetime 字符串还原成对象（否则 SQLite 存字符串、ORM 读出会报类型错）
+        for name in list(clean):
+            val = clean[name]
+            if isinstance(val, str) and cols[name].type.__class__.__name__ == 'DateTime':
+                try:
+                    clean[name] = datetime.fromisoformat(val)
+                except ValueError:
+                    clean[name] = None
+        savepoint = db.session.begin_nested()
+        try:
+            db.session.add(model(**clean))
+            savepoint.commit()
+            okn += 1
+        except Exception as e:              # noqa: BLE001  唯一约束冲突等 → 跳过该行
+            savepoint.rollback()
+            skipped.append(f'{type(e).__name__}')
+            logger.info('回收站恢复跳过一行 kind=%s err=%s', rec.kind, e)
+    rec.restored_at = datetime.now()
+    db.session.commit()
+    # 2026-10-18：字典项恢复后必须清缓存，否则下拉框在缓存 TTL 内仍看不到它
+    if okn and rec.kind == 'dictionary_item':
+        try:
+            from app.utils.helpers import clear_dict_cache
+            clear_dict_cache()
+        except Exception:                  # noqa: BLE001  缓存清理失败不影响恢复结果
+            logger.warning('回收站恢复后清除字典缓存失败', exc_info=True)
+    msg = f'已恢复 {okn} / {len(items)} 行'
+    if skipped:
+        msg += f'；{len(skipped)} 行与现存数据冲突（已跳过）'
+    return (okn > 0), msg, okn
+
+
+def _restore_snapshot(rec, data):
+    """按原 id 恢复整组关联表（与 `archive_snapshot` 配套）。
+
+    逐表、逐行用保存点插入：任何一行与现存数据冲突只跳过它，不牵连其它行。
+    父表先插入，子行因此能找到自己的 exam_id / affair_id，不会变成孤儿。
+    """
+    total, okn = 0, 0
+    for tbl in data.get('tables') or []:
+        path = (tbl or {}).get('model') or ''
+        try:
+            mod_name, cls_name = path.rsplit('.', 1)
+            model = getattr(importlib.import_module(mod_name), cls_name)
+        except Exception:                   # noqa: BLE001  模型已下线/改名 → 跳过该表
+            logger.warning('快照恢复找不到模型 %s', path, exc_info=True)
+            continue
+        cols = {c.name: c for c in model.__table__.columns}
+        for row in tbl.get('rows') or []:
+            total += 1
+            clean = {k: v for k, v in (row or {}).items() if k in cols}
+            for name in list(clean):
+                val = clean[name]
+                type_name = cols[name].type.__class__.__name__
+                if isinstance(val, str) and type_name in ('DateTime', 'Date'):
+                    try:
+                        # Date 列必须还原成 date（传 datetime 会被 SQLAlchemy 拒）
+                        clean[name] = (datetime.fromisoformat(val)
+                                       if type_name == 'DateTime'
+                                       else date.fromisoformat(val[:10]))
+                    except ValueError:
+                        clean[name] = None
+            savepoint = db.session.begin_nested()
+            try:
+                db.session.add(model(**clean))
+                savepoint.commit()
+                okn += 1
+            except Exception as e:          # noqa: BLE001  主键/唯一约束冲突 → 跳过
+                savepoint.rollback()
+                logger.info('快照恢复跳过一行 %s err=%s', path, e)
+    rec.restored_at = datetime.now()
+    db.session.commit()
+    msg = f'已恢复 {okn} / {total} 行（按原 id，外键保持有效）'
+    return (okn > 0), msg, okn

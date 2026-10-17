@@ -73,6 +73,10 @@
             if (t.status === 'error' && t.error) {
                 $item.append($('<div class="t-meta text-danger"></div>').text('错误：' + t.error));
             }
+            // 2026-10-18：列表项可删除（原来只有"当前打开的报告"能删，列表里删不掉）
+            // 旧口径报告在列表里是负数 id（-报告id），删除时走报告接口
+            $item.append($('<button type="button" class="ai-del-btn" title="删除这条记录">&times;</button>')
+                .attr('data-del', t.id).attr('aria-label', '删除这条记录'));
             $list.append($item);
         });
     }
@@ -386,6 +390,52 @@
         });
     }
 
+    /** 删除列表里的一条记录（任务 id > 0；旧口径报告是负数 id，走报告接口） */
+    function deleteListItem(id) {
+        var n = Number(id);
+        if (!n) { return; }
+        var isReport = n < 0;
+        var url = isReport
+            ? (REPORTS + '/' + Math.abs(n) + '/delete')
+            : (TASKS + '/' + encodeURIComponent(n) + '/delete');
+        if (!window.confirm(isReport
+                ? '确认删除这条分析记录（含报告正文）？'
+                : '确认删除这条分析任务（连同它生成的报告）？')) { return; }
+        $.ajax({ url: url, method: 'POST', headers: { 'X-CSRFToken': csrf() } })
+            .done(function (res) {
+                if (res && res.success === false) {
+                    toast(res.message || '删除失败', 'err'); return;
+                }
+                toast('已删除', 'ok');
+                if (String(state.id) === String(id)) { clearStage(); }
+                loadTasks();
+            })
+            .fail(function (x) {
+                var msg = '删除失败' + (x && x.status ? '（HTTP ' + x.status + '）' : '');
+                if (x && x.responseJSON && x.responseJSON.message) {
+                    msg = x.responseJSON.message;
+                }
+                toast(msg, 'err');
+            });
+    }
+
+    /* 2026-10-18：一键「清空」入口已移除 —— 用户误点一次把全部分析删光。
+       现在只保留逐条删除（列表项右上角 ×，二次确认），后端也要求 confirm=CLEAR 且删前归档。 */
+
+    /** 右侧回到"未选择任务"的空状态 */
+    function clearStage() {
+        state.id = null;
+        state.task = null;
+        if (state.closeStream) {
+            try { state.closeStream(); } catch (e) { /* 已关闭 */ }
+            state.closeStream = null;
+        }
+        UI.renderReport(reportBody(), '');
+        $('#aiProgress').addClass('d-none');
+        $('#aiEmpty').removeClass('d-none');
+        refreshDelBtn();
+    }
+
     /* ================= 启动 ================= */
     $(function () {
         if (!UI) { return; }
@@ -394,6 +444,12 @@
             var id = $(this).attr('data-id');
             if (id) { openTask(id); }
         });
+        // 列表项上的删除按钮：阻止冒泡，避免顺带打开任务
+        $('#aiTaskList').on('click', '.ai-del-btn', function (ev) {
+            ev.stopPropagation();
+            deleteListItem($(this).attr('data-del'));
+        });
+
         $('#aiRefresh').on('click', function () { loadTasks(); });
         $('#aiExamSel').on('change', function () {
             var eid = $(this).val();

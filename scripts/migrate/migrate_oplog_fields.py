@@ -1,0 +1,47 @@
+"""为 operation_logs 表增加 module 和 severity 列"""
+import os as _os
+import sys as _sys
+_HERE = _os.path.dirname(_os.path.abspath(__file__))
+_SCRIPTS = _os.path.dirname(_HERE)
+_ROOT = _os.path.dirname(_SCRIPTS)
+for _p in (_ROOT, _SCRIPTS):
+    if _p not in _sys.path:
+        _sys.path.insert(0, _p)
+
+import sqlite3
+import os
+import sys
+
+BASE_DIR = _ROOT
+DB_PATH = os.path.join(BASE_DIR, 'data', 'dormitory.db')
+
+if not os.path.exists(DB_PATH):
+    print(f'[SKIP] 数据库文件不存在: {DB_PATH}')
+    sys.exit(0)
+
+conn = sqlite3.connect(DB_PATH)
+cursor = conn.cursor()
+
+cursor.execute("PRAGMA table_info(operation_logs)")
+columns = [col[1] for col in cursor.fetchall()]
+
+if 'module' not in columns:
+    cursor.execute("ALTER TABLE operation_logs ADD COLUMN module VARCHAR(30) DEFAULT 'system'")
+    print('[OK] 已添加 operation_logs.module 列 (DEFAULT system)')
+else:
+    print('[SKIP] operation_logs.module 列已存在')
+
+if 'severity' not in columns:
+    cursor.execute("ALTER TABLE operation_logs ADD COLUMN severity VARCHAR(10) DEFAULT 'INFO'")
+    print('[OK] 已添加 operation_logs.severity 列 (DEFAULT INFO)')
+else:
+    print('[SKIP] operation_logs.severity 列已存在')
+
+conn.commit()
+conn.close()
+print('[DONE] 迁移完成')
+
+# StuLink v1.7.0 2026-08-02
+# Copyright (c) 2026 zkxxzf. Apache License 2.0
+
+

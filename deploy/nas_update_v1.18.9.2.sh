@@ -74,14 +74,14 @@ run_mig() {
     rc=${PIPESTATUS[0]}
     [ "$rc" = "0" ] || fail "迁移失败：$1（rc=$rc）"
 }
-run_mig scripts/migrate_class_active_20261009.py
-run_mig scripts/migrate_achievement_pdf_20261009.py
-run_mig scripts/migrate_form_achievement_20261010.py
-run_mig scripts/migrate_split_academic_20261010.py
-run_mig scripts/migrate_swap_approval_20261009.py
-run_mig scripts/migrate_teaching_links_20261010.py
-run_mig scripts/migrate_scope_and_cleanup_20261010.py
-run_mig scripts/add_performance_indexes.py
+run_mig scripts/migrate/migrate_class_active_20261009.py
+run_mig scripts/migrate/migrate_achievement_pdf_20261009.py
+run_mig scripts/migrate/migrate_form_achievement_20261010.py
+run_mig scripts/migrate/migrate_split_academic_20261010.py
+run_mig scripts/migrate/migrate_swap_approval_20261009.py
+run_mig scripts/migrate/migrate_teaching_links_20261010.py
+run_mig scripts/migrate/migrate_scope_and_cleanup_20261010.py
+run_mig scripts/seed/add_performance_indexes.py
 
 echo "[7/9] 启动容器"
 docker start "$CT" >/dev/null || fail "启动容器失败"

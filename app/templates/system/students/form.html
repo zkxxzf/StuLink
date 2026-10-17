@@ -106,7 +106,10 @@
                     {{ form.phone1(class="form-control") }}
                     {% else %}
                     <input type="text" class="form-control bg-light" value="{{ field_value(form.phone1.data, 'phone') }}" readonly>
-                    <input type="hidden" name="phone1" value="{{ form.phone1.data or '' }}">
+                    {# 2026-10-18 审计修复（P1）：原来这里 hidden 回传**完整号码** —— 界面虽脱敏，
+                       按 F12 就能看到全号，等于没脱敏。现改为不回传值；
+                       后端 _populate_student_for_edit 在无权限时跳过 phone 字段，保留库中原值。 #}
+                    <input type="hidden" name="phone1" value="" data-phone-locked="1">
                     {% endif %}
                 </div>
                 <div class="col-md-6">
@@ -115,7 +118,7 @@
                     {{ form.phone2(class="form-control") }}
                     {% else %}
                     <input type="text" class="form-control bg-light" value="{{ field_value(form.phone2.data, 'phone') }}" readonly>
-                    <input type="hidden" name="phone2" value="{{ form.phone2.data or '' }}">
+                    <input type="hidden" name="phone2" value="" data-phone-locked="1">
                     {% endif %}
                 </div>
             </div>

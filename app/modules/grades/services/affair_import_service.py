@@ -185,10 +185,21 @@ def apply_arrangement(affair, rows, rooms, replace=True):
             st.custom_number = r['custom_number']
     removed = 0
     if replace:
-        for no, st in list(exist.items()):
-            if no not in keep:
-                db.session.delete(st)
-                removed += 1
+        drop = [st for no, st in list(exist.items()) if no not in keep]
+        if drop:
+            # 2026-10-18：replace 会删掉"本次没覆盖到"的名单（最多整批 8000 人，
+            # 含考场/座号/考号）。删前整组快照，回收站可整体恢复。
+            from app.utils.trash import archive_snapshot
+            _snap = archive_snapshot(
+                'grades', 'affair_student_bundle', '考务名单(replace前)',
+                tables=[(AffairStudent, drop)],
+                summary=f'批次#{getattr(affair, "id", "")}：replace 前 {len(drop)} 人')
+            if _snap is None:
+                raise ValueError('删除前归档失败，已中止（避免名单不可恢复）')
+            db.session.commit()      # 归档先落库，再执行删除
+        for st in drop:
+            db.session.delete(st)
+        removed = len(drop)
     if room_nos:
         affair.status = 'arranged'
     return added, updated, removed, len(room_nos)

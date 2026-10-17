@@ -3,6 +3,7 @@
 #          分析生成 / 报告历史
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 import json
+import logging
 from datetime import datetime
 
 from flask import (render_template, request, jsonify, abort, redirect, url_for,
@@ -10,7 +11,7 @@ from flask import (render_template, request, jsonify, abort, redirect, url_for,
 from flask_login import login_required, current_user
 from app.extensions import db
 from app.models.grades import (Exam, AiKey, AiGlobalKey, AiReport, AiChatMessage,
-                               AiTask)
+                               AiTask, AiTrash)
 from app.modules.grades import bp
 from app.modules.grades.services import (ai_prompt, ai_service, ai_task_service,
                                          scope as scope_service)
@@ -19,7 +20,28 @@ from app.utils.crypto import encrypt_rand, decrypt
 from app.utils.decorators import perm_required
 from app.utils.helpers import log_operation
 
+logger = logging.getLogger(__name__)
 MAX_KEY_LEN = 300
+
+
+def _archive_ai_row(kind, row):
+    """删除前把整行写进 ai_trash（可按 ref_id 恢复）。
+
+    2026-10-18：用户误点"清空"一次删光全部 AI 分析，而报告正文无法重新生成一致。
+    归档只花几 KB，却能把"删错了"从不可挽回变成一条 SQL 就能救。
+    """
+    try:
+        data = {}
+        for col in row.__table__.columns:
+            if col.name == 'id':
+                continue
+            val = getattr(row, col.name, None)
+            data[col.name] = val.isoformat() if hasattr(val, 'isoformat') else val
+        db.session.add(AiTrash(user_id=row.user_id, kind=kind, ref_id=row.id,
+                               payload=json.dumps(data, ensure_ascii=False)))
+    except Exception:                       # noqa: BLE001  归档失败不阻塞删除
+        logger.warning('AI 记录归档失败 kind=%s id=%s', kind,
+                       getattr(row, 'id', None), exc_info=True)
 
 
 def _client_ai_cfg():
@@ -76,12 +98,17 @@ def _guard_key_manage():
     2026-10-14 第四轮审计修复（SEC-04）：原判据是「admin 或 system.users」，
     但三个全局 Key 端点的**装饰器**只要求 grades.view —— 一旦重构漏拷函数体
     守卫，任何只读账号即可改写全局 AI Key。现在装饰器与函数体统一用独立权限点
-    `grades.ai_manage`（迁移 scripts/migrate_ai_key_perm_20261014.py 已给原
+    `grades.ai_manage`（迁移 scripts/migrate/migrate_ai_key_perm_20261014.py 已给原
     「有 system.users 的组」补齐该 key，行为不倒退）。
     """
     if current_user.has_perm('grades.ai_manage'):
         return
     abort(403)
+
+
+# 2026-10-18（用户最终口径）：AI 分析的报告 / 任务 / 追问对话**仅对生成者本人可见**，
+# 管理员也不例外 —— 不设 `?scope=all` 之类的审计后门。原来的 `role == 'admin'` 放行
+# 让管理员默认看到全校教师的报告（含逐生成绩与评语），观感就是"所有人都能看"，已删除。
 
 
 def _normalize_config(data, old=None):
@@ -657,12 +684,11 @@ def ai_tasks():
     """我的 AI 分析条目：任务（进行中/已完成）+ 无对应任务的旧报告。"""
     exam_id = request.args.get('exam_id', type=int)
     limit = max(1, min(request.args.get('limit', default=30, type=int) or 30, 100))
-    is_admin = current_user.role == 'admin'
-    tasks = ai_task_service.list_tasks(current_user, exam_id, limit, scope_all=is_admin)
+    # 2026-10-18（用户最终口径）：AI 分析**仅对本人生效** —— 管理员也只列自己的，
+    # 不做"全部用户"的审计视图。
+    tasks = ai_task_service.list_tasks(current_user, exam_id, limit)
     linked = {t.report_id for t in tasks if t.report_id}
-    q = AiReport.query
-    if not is_admin:
-        q = q.filter_by(user_id=current_user.id)
+    q = AiReport.query.filter_by(user_id=current_user.id)
     if exam_id:
         q = q.filter_by(exam_id=exam_id)
     reports = [r for r in q.order_by(AiReport.id.desc()).limit(limit).all()
@@ -688,7 +714,8 @@ def ai_task_detail(tid):
             abort(403)
         return jsonify(success=True, data=_report_as_task(report))
     task = AiTask.query.get_or_404(tid)
-    if task.user_id != current_user.id and current_user.role != 'admin':
+    # 2026-10-18（用户最终口径）：AI 分析仅对生成者本人可见 —— 管理员也不例外
+    if task.user_id != current_user.id:
         abort(403)
     return jsonify(success=True, data=_task_json(task, with_body=True))
 
@@ -708,7 +735,8 @@ def ai_task_stream(tid):
             yield _sse({'type': 'done'})
         return Response(stream_with_context(gen_old()), headers=_sse_headers())
     task = AiTask.query.get_or_404(tid)
-    if task.user_id != current_user.id and current_user.role != 'admin':
+    # 2026-10-18（用户最终口径）：AI 分析仅对生成者本人可见 —— 管理员也不例外
+    if task.user_id != current_user.id:
         abort(403)
 
     def gen():
@@ -730,15 +758,64 @@ def ai_task_stream(tid):
 def ai_task_delete(tid):
     """删除一条任务记录（进行中的不可删：线程还在写回状态）。"""
     task = AiTask.query.get_or_404(tid)
-    if task.user_id != current_user.id and current_user.role != 'admin':
+    # 2026-10-18（用户最终口径）：AI 分析仅对生成者本人可见 —— 管理员也不例外
+    if task.user_id != current_user.id:
         abort(403)
     if task.status == 'running':
         return jsonify(success=False, message='任务进行中，请等它跑完再删除'), 400
+    # 2026-10-18：删任务时把它生成的报告**一起删掉**。否则列表里会残留一条
+    # "旧口径报告"（id 为负），用户点了删除发现"还在"，就是删不干净。
+    rid = task.report_id
+    _archive_ai_row('task', task)
+    if rid:
+        rep = db.session.get(AiReport, rid)
+        if rep is not None and rep.user_id == current_user.id:
+            _archive_ai_row('report', rep)
+            db.session.delete(rep)
     db.session.delete(task)
     db.session.commit()
     ai_task_service.drop_events(tid)
     log_operation(current_user, '删除', 'AI 任务', tid, '', module='grades')
     return jsonify(success=True, message='已删除')
+
+
+@bp.route('/ai/tasks/clear', methods=['POST'])
+@login_required
+@perm_required('grades.view')
+def ai_clear():
+    """清空**我自己的**全部 AI 分析记录（任务 + 报告）；进行中的任务保留。
+
+    2026-10-18：用户误点后一次删光。现在两道闸：
+    ① 前端入口已移除（界面不再有一键清空）；
+    ② 接口要求 `confirm=CLEAR` 才执行，且**删除前逐条归档**到 ai_trash（可恢复）。
+    仅本人生效（AI 分析属个人内容，管理员也不例外）。
+    """
+    if (request.form.get('confirm') or request.args.get('confirm') or '') != 'CLEAR':
+        return jsonify(success=False,
+                       message='清空操作需要显式确认（confirm=CLEAR）'), 400
+    reports = AiReport.query.filter_by(user_id=current_user.id).all()
+    tasks = (AiTask.query.filter(AiTask.user_id == current_user.id,
+                                 AiTask.status != 'running').all())
+    running = AiTask.query.filter_by(user_id=current_user.id,
+                                     status='running').count()
+    for r in reports:
+        _archive_ai_row('report', r)
+    for t in tasks:
+        _archive_ai_row('task', t)
+    db.session.flush()
+    n_rep, n_task = len(reports), len(tasks)
+    for r in reports:
+        db.session.delete(r)
+    for t in tasks:
+        db.session.delete(t)
+    db.session.commit()
+    log_operation(current_user, '清空', 'AI 分析记录', None,
+                  f'任务 {n_task} 条、报告 {n_rep} 条', module='grades')
+    msg = f'已清空 {n_task} 条任务记录、{n_rep} 份报告'
+    if running:
+        msg += f'；{running} 个任务仍在进行中，已保留（跑完可再清空）'
+    return jsonify(success=True, message=msg, deleted_tasks=n_task,
+                   deleted_reports=n_rep, running=running)
 
 
 @bp.route('/ai/tasks/<int:tid>/stop', methods=['POST'])
@@ -752,7 +829,8 @@ def ai_task_stop(tid):
     前端随即给出「重新编辑提示词」（用 task.gen 无损回填生成器）。
     """
     task = AiTask.query.get_or_404(tid)
-    if task.user_id != current_user.id and current_user.role != 'admin':
+    # 2026-10-18（用户最终口径）：AI 分析仅对生成者本人可见 —— 管理员也不例外
+    if task.user_id != current_user.id:
         abort(403)
     if task.status != 'running':
         return jsonify(success=False, message='任务已结束，无需停止'), 400
@@ -847,8 +925,11 @@ def ai_studio():
 # ==================== 报告历史 ====================
 
 def _report_visible(report):
-    if current_user.role == 'admin':
-        return True
+    """AI 报告可见性（2026-10-18 用户最终口径）：**仅生成者本人**，管理员也不例外。
+
+    原来 `role == 'admin' → True`：管理员一进工作台就看到全校教师的报告
+    （含逐生成绩、评语），观感就是"所有人都能看"。现在无任何例外。
+    """
     return report.user_id == current_user.id
 
 
@@ -903,6 +984,7 @@ def ai_report_delete(rid):
     r = AiReport.query.get_or_404(rid)
     if not _report_visible(r):
         abort(403)
+    _archive_ai_row('report', r)      # 2026-10-18：删除前归档，误删可恢复
     db.session.delete(r)
     db.session.commit()
     log_operation(current_user, '删除', 'AI 报告', rid, '', module='grades')

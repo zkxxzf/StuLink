@@ -71,7 +71,16 @@ def _set_user_groups(user, group_ids):
 @perm_required('system.users')
 def list_users():
     from flask import session
-    users = User.query.order_by(User.role, User.username).all()
+    # 2026-10-18 审计（N+1）：此前每个用户访问 u.primary_group 都懒加载一次，
+    # 97 个账号 = 97 条 SQL（实测整页 102 条）。改成 selectinload 预加载，
+    # 一次查回 group_links + group + permission_group，SQL 降到个位数。
+    from sqlalchemy.orm import selectinload
+    from app.models.user_permission_group import UserPermissionGroup
+    users = (User.query
+             .options(selectinload(User.group_links)
+                      .selectinload(UserPermissionGroup.group),
+                      selectinload(User.permission_group))
+             .order_by(User.role, User.username).all())
     # L-7：取出一次性初始口令（显示后立即失效）
     one_time_passwords = session.pop('_pwd_once', []) if users is not None else []
     # v1.14.0：按权限组分组展示（组内按角色/用户名排序），支持分组折叠与搜索
@@ -101,6 +110,12 @@ def create():
         role = form.role.data
         grade = form.grade.data or None
         class_name = form.class_name.data or None
+
+        # 2026-10-18 审计修复（P1 横向提权）：非超管不得新建管理员账号
+        # （否则任何有 system.users 的账号都能造一个 admin 给自己用）。
+        if role == 'admin' and (current_user.username or '') != 'admin':
+            flash('只有超管（admin 账号）能新建管理员账号', 'danger')
+            return render_template('system/users/form.html', form=form, title='新建用户')
 
         if role == 'homeroom_teacher':
             if not grade or not class_name:
@@ -186,6 +201,23 @@ def edit(id):
             flash('年级长必须指定管理年级', 'danger')
             return render_template('system/users/form.html', form=form, title='编辑用户')
 
+        # 2026-10-18 审计修复（P1 横向提权）：此页可以改 role / 权限组 / **密码**，
+        # 原来没有任何授权上限 —— 非超管管理员能编辑其他管理员（含超管），
+        # 也能借 password 字段直接改他人密码，绕过 reset_password 的口径。
+        # 现在：① 非超管不得编辑其他管理员；② 非超管不得把账号设为 admin。
+        is_super = (current_user.username or '') == 'admin'
+        if not is_super:
+            if user.role == 'admin' and user.id != current_user.id:
+                log_operation(current_user, '编辑被拒', '用户', user.id,
+                              f'{user.real_name}（非超管不得编辑管理员）',
+                              module='system', severity='WARNING')
+                flash('只有超管（admin 账号）能编辑其他管理员', 'danger')
+                return render_template('system/users/form.html', form=form,
+                                       title='编辑用户')
+            if role == 'admin' and user.role != 'admin':
+                flash('只有超管能把账号设为管理员', 'danger')
+                return render_template('system/users/form.html', form=form,
+                                       title='编辑用户')
         user.username = form.username.data
         # 姓名锁定：真实姓名与任课教师映射/成绩归属绑定，一经创建不可修改（成绩模块约定）
         new_name = (form.real_name.data or '').strip()
@@ -234,6 +266,19 @@ def toggle(id):
 @perm_required('system.users')
 def reset_password(id):
     user = User.query.get_or_404(id)
+    # 2026-10-18 审计修复（P1 横向提权）：此前只要拥有 system.users 权限，就能重置
+    # **任何账号**的口令（含其他管理员），被授权者可以接管同级账号。用户口径：
+    #   ① 只有超管（内置 admin 账号）能重置其他管理员；
+    #   ② 管理员可以重置普通教师/班主任等非管理员；
+    #   ③ 任何人都可以重置自己（相当于改密，仍需登录态）。
+    is_super = (current_user.username or '') == 'admin'
+    if (user.role == 'admin' and not is_super
+            and user.id != current_user.id):
+        log_operation(current_user, '重置被拒', '用户', user.id,
+                      f'{user.real_name}（非超管不得重置管理员）', module='system',
+                      severity='WARNING')
+        flash('只有超管（admin 账号）能重置其他管理员的口令', 'danger')
+        return redirect(url_for('users.list_users'))
     new_pwd = _generate_password()
     user.set_password(new_pwd)
     user.must_change_pwd = True

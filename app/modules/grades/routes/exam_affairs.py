@@ -6,6 +6,8 @@
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 import io
 import json  # v1.12.1 选科前后缀配置解析
+import logging
+import os
 import random
 from datetime import date, datetime
 
@@ -18,6 +20,7 @@ from flask import (render_template, request, jsonify, abort, redirect,
 from flask_login import login_required, current_user
 
 from app.extensions import db
+logger = logging.getLogger(__name__)
 from app.models import Student
 from app.models.grades import (ExamAffair, AffairRoom, AffairRoomLib, AffairStudent,
                                Exam, AffairTeacher, AffairSchedule,
@@ -294,6 +297,39 @@ def exam_affair_go(exam_id):
 def affair_delete(aid):
     affair = _get_affair_checked(aid)
     name = affair.name
+    # 2026-10-18 审计加固：整批删除会级联清 7 张表、不可逆。
+    # ① 服务端要求显式确认 —— 前端 confirm() 可被直接调接口绕过；
+    # ② 删除前把 7 张表按**原 id** 打成一份快照，回收站可整体恢复。
+    #    （普通 archive 会丢 id → 子表 affair_id 断链，看着"恢复了"其实全是孤儿）
+    if (request.form.get('confirm') or request.args.get('confirm') or '') != 'CLEAR':
+        flash('删除整批考务需要显式确认（confirm=CLEAR）', 'danger')
+        return redirect(url_for('grades.affair_detail', aid=aid))
+
+    from app.utils.trash import archive_snapshot
+    n_rooms_pre = AffairRoom.query.filter_by(affair_id=aid).count()
+    n_stus_pre = AffairStudent.query.filter_by(affair_id=aid).count()
+    _snap = archive_snapshot(
+        'grades', 'affair_bundle', '考务批次(整批)',
+        tables=[
+            (ExamAffair, affair),
+            (AffairRoom, AffairRoom.query.filter_by(affair_id=aid).all()),
+            (AffairStudent, AffairStudent.query.filter_by(affair_id=aid).all()),
+            (AffairInvigilation, AffairInvigilation.query.filter_by(affair_id=aid).all()),
+            (AffairSchedule, AffairSchedule.query.filter_by(affair_id=aid).all()),
+            (AffairInvigilator, AffairInvigilator.query.filter_by(affair_id=aid).all()),
+            (AffairTeacher, AffairTeacher.query.filter_by(affair_id=aid).all()),
+        ],
+        summary=f'{name}：考场{n_rooms_pre}个 / 名单{n_stus_pre}人 / 含场次·监考·任课',
+        operator=current_user)
+    if _snap is None:
+        # 归档失败就不删（fail-closed）：宁可让用户重试，也不做不可恢复的删除
+        db.session.rollback()
+        flash('删除前归档失败，已中止（避免数据不可恢复）', 'danger')
+        return redirect(url_for('grades.affair_detail', aid=aid))
+    # 归档先落库、再执行删除：非 WAL 的 SQLite 是库级锁，同一事务里
+    # "多表先读后写"容易读锁升级失败（database is locked）
+    db.session.commit()
+
     # v1.19.49.35：级联清理考场与名单（无外键约束，不显式删会留孤儿行）
     n_rooms, n_stus = delete_affair_cascade(aid)
     db.session.commit()
@@ -703,7 +739,12 @@ def affair_students_batch_add(aid):
         return jsonify({'ok': False, 'msg': '未选择学生'})
     exist = {s.student_no for s in AffairStudent.query.filter_by(affair_id=aid).all()}
     added = skipped = 0
-    for st in Student.query.filter(Student.student_number.in_(nos)).all():
+    # 2026-10-18 审计修复：原来按学号直接从学籍库取，不校验年级 ——
+    # 可把任意年级的学生拉进本人批次。现在只接受与批次同年级的学生。
+    _sq = Student.query.filter(Student.student_number.in_(nos))
+    if affair.grade:
+        _sq = _sq.filter(Student.grade == affair.grade)
+    for st in _sq.all():
         if st.student_number in exist:
             continue
         # v1.19.49.35：无班级学生（不分班/已转出/离校等）不加入成绩治理名单
@@ -869,9 +910,57 @@ def affair_student_delete(aid, sid):
 @login_required
 @perm_required('grades.edit')
 def affair_students_clear(aid):
+    """清空本批次全部考生名单（2026-10-18 审计加固）。
+
+    原来是**裸删**：不校验批次归属、不要求确认、不留痕、不备份，前端只有一层
+    confirm —— 一点就把整个批次（真实数据 8000 人）连同已编排的考场/座位删光，
+    且不可恢复（与 AI 分析「清空」同类事故）。现在与「学期课表清空」对齐：
+    归属校验 → 显式确认（confirm=CLEAR）→ **先备份 JSON** → 记操作日志。
+    """
+    affair = _get_affair_checked(aid)
+    if (request.form.get('confirm') or '') != 'CLEAR':
+        n = AffairStudent.query.filter_by(affair_id=aid).count()
+        return jsonify({'ok': False,
+                        'msg': f'清空名单需要显式确认（confirm=CLEAR）；'
+                               f'当前批次 {n} 人'}), 400
+    rows = AffairStudent.query.filter_by(affair_id=aid).all()
+    if not rows:
+        return jsonify({'ok': True, 'deleted': 0, 'msg': '名单本来就是空的'})
+    backup = ''
+    try:
+        d = os.path.join(current_app.root_path, '..', 'data', 'affair_backup')
+        os.makedirs(d, exist_ok=True)
+        fn = f'affair_{aid}_{datetime.now():%Y%m%d_%H%M%S}.json'
+        payload = {'affair_id': aid, 'affair': affair.name, 'count': len(rows),
+                   'rows': [{'student_no': r.student_no, 'name': r.name,
+                             'class_name': r.class_name,
+                             'is_attend': bool(r.is_attend),
+                             'room_no': r.room_no, 'seat_no': r.seat_no,
+                             'exam_number': r.exam_number,
+                             'fixed_room': r.fixed_room, 'fixed_seat': r.fixed_seat,
+                             # 名次字段当前模型里不存在（历史版本的列），用 getattr 兜底
+                             'rank_no': getattr(r, 'rank_no', None),
+                             'total_score': getattr(r, 'total_score', None),
+                             'subject_selection': r.subject_selection}
+                            for r in rows]}
+        with open(os.path.join(d, fn), 'w', encoding='utf-8') as f:
+            json.dump(payload, f, ensure_ascii=False, indent=1)
+        backup = fn
+    except Exception:                       # noqa: BLE001  备份失败不阻塞，但要留痕
+        logger.warning('考务名单清空前备份失败 aid=%s', aid, exc_info=True)
+    # 2026-10-18：同时进「回收站」（页面可查看/恢复整批名单，比 JSON 文件更好用）
+    from app.utils.trash import archive
+    archive('grades', 'affair_student', '考务名单', rows,
+            summary=f'{affair.name}：{len(rows)} 人（含考场/座位/考号）',
+            operator=current_user)
     AffairStudent.query.filter_by(affair_id=aid).delete()
     db.session.commit()
-    return jsonify({'ok': True})
+    log_operation(current_user, '清空', '考务名单', aid,
+                  f'{affair.name}：{len(rows)} 人；备份={backup or "失败"}',
+                  module='grades')
+    msg = f'已清空 {len(rows)} 人'
+    msg += (f'（已备份：{backup}）' if backup else '（备份失败，请谨慎）')
+    return jsonify({'ok': True, 'deleted': len(rows), 'backup': backup, 'msg': msg})
 
 
 # ==================== 步骤② 考场设置：导入 / 模板 / 增删改 ====================
@@ -1116,10 +1205,16 @@ def affair_rooms_capacity(aid):
 @login_required
 @perm_required('grades.edit')
 def affair_room_delete(aid, rid):
-    _get_affair_checked(aid)   # H-4：批次年级范围（2026-10-16 第八轮审计补；删除是写操作，优先级最高）
+    affair = _get_affair_checked(aid)   # H-4：批次年级范围（2026-10-16 第八轮审计补）
     room = AffairRoom.query.get_or_404(rid)
     if room.affair_id != aid:
         abort(403)
+    # 2026-10-18：删考场前归档（回收站可恢复），避免"排好的考场点没了"
+    from app.utils.trash import archive
+    archive('grades', 'affair_room', '考务考场', room,
+            summary=f'{affair.name} · 考场 {room.room_no}'
+                    f'{("（" + room.location + "）") if room.location else ""}',
+            operator=current_user)
     db.session.delete(room)
     db.session.commit()
     return jsonify({'ok': True})

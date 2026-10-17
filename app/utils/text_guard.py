@@ -38,7 +38,7 @@ def pad2(value):
     """编号补零到两位：'1' → '01'；非纯数字原样返回（'A1' → 'A1'）。
 
     2026-10-13 用户口径（考务编排结果的输出）：考场号 / 座号一律两位
-    （一考场 = 01 考场、1 号座 = 01 座），与 scripts/migrate_room_no_pad.py
+    （一考场 = 01 考场、1 号座 = 01 座），与 scripts/migrate/migrate_room_no_pad.py
     的入库口径一致。页面与各类导出统一走它，不要再各写一份 zfill / '%02d'。
     """
     s = str(value if value is not None else '').strip()

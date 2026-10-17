@@ -24,7 +24,7 @@ class Teacher(db.Model):
     __tablename__ = 'teachers'
     # 2026-10-12：教师名单高频筛选补索引。user_id（账号绑定反查）/ subject（任课学科）
     # / status（在职过滤）三列此前无索引，教师映射矩阵与教师管理列表均为全表扫。
-    # 索引名与 scripts/add_teacher_indexes.py 保持一致：新装环境由 create_all 建，
+    # 索引名与 scripts/seed/add_teacher_indexes.py 保持一致：新装环境由 create_all 建，
     # 存量 academic.db 由该脚本幂等补建，避免"模型有、库里没有"的静默缺口。
     __table_args__ = (
         db.Index('idx_teacher_user_id', 'user_id'),
@@ -530,7 +530,7 @@ class AttendanceRecord(db.Model):
     """考勤记录"""
     __tablename__ = 'attendance_records'
     __bind_key__ = 'academic'
-    # 2026-10-10：性能复合索引进模型声明（原先只写在 scripts/add_performance_indexes.py，
+    # 2026-10-10：性能复合索引进模型声明（原先只写在 scripts/seed/add_performance_indexes.py，
     # 新装环境 create_all 拿不到、会重演"脚本有、库里没有"的静默缺口）。
     # 索引名与现网完全一致，避免同表重复索引；脚本条目保留，作历史库补建载体（IF NOT EXISTS 幂等）。
     __table_args__ = (

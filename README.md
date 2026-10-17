@@ -228,7 +228,7 @@ docker-compose up -d
 - **存量部署**：若 `admin` 仍是历史默认口令，启动时会打印显著告警，请立即修改。
 - **密码复杂度**：强制 ≥8 位 + 含字母与数字 + 非弱口令黑名单 + 不等于用户名/姓名/手机号。
 - **升级即全站掉登录**（会话口令摘要：旧会话缺 `_pwd_fp` 视为无效）。
-- **教务分库版本需依次执行两条幂等脚本**：`py -3.12 scripts/migrate_split_academic_20261010.py`（教务分库 + 搬数据）与 `py -3.12 scripts/add_performance_indexes.py`（补历史漏建索引）——改动数据库前自动备份。
+- **教务分库版本需依次执行两条幂等脚本**：`py -3.12 scripts/migrate/migrate_split_academic_20261010.py`（教务分库 + 搬数据）与 `py -3.12 scripts/seed/add_performance_indexes.py`（补历史漏建索引）——改动数据库前自动备份。
 - **模型加新字段后，存量库必须补列**（`create_all` 只建缺表、不加列）：跑 `py -3.12 scripts/check_columns.py` 只读自检，`--fix` 幂等补列（改前自动备份）。
 - **本次合并新增 5 个迁移脚本**（morality 建表 / 调课换课两版 / 调课自动确认 / 监考排除名单），按需执行；脚本均已幂等且改库前自动备份。
 - 生产启用 HTTPS 后建议设置：`STULINK_SESSION_COOKIE_SECURE=1`、`STULINK_CSP_MODE=enforce`、`STULINK_SESSION_LIFETIME=28800`、`STULINK_CSRF_TIME_LIMIT=28800`。

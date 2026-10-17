@@ -300,7 +300,12 @@ def teacher_edit(tid):
     if request.method == 'POST':
         name = (request.form.get('name') or '').strip()
         subject = (request.form.get('subject') or '').strip()
-        phone = (request.form.get('phone') or '').strip()
+        # 2026-10-18 审计修复（P1）：无 academic.view_teacher_phone 时模板不再回传号码，
+        # 这里也不能把空值写回去（会把手机号清空）；直接用库中原值，禁止改号。
+        if current_user.has_perm('academic.view_teacher_phone'):
+            phone = (request.form.get('phone') or '').strip()
+        else:
+            phone = (t.phone or '').strip()
         note = (request.form.get('note') or '').strip()
         status = request.form.get('status') or 'active'
         id_card_raw = id_card_util.normalize(request.form.get('id_card'))

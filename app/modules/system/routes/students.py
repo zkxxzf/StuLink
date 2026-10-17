@@ -376,7 +376,10 @@ def edit(id):
                 flash('该学号已存在', 'danger')
                 return render_template('system/students/form.html', form=form, title='编辑学生')
         
-        _populate_student_for_edit(student, form)
+        # 无查看手机号权限时，不接受表单回传的号码（模板也不再输出），保留库中原值
+        _populate_student_for_edit(
+            student, form,
+            allow_phone_edit=current_user.has_perm('students.view_phone'))
         # v1.19.49.35 学籍驱动的班级自动联动（用户口径）：
         #   学籍已转出 → 班级自动置「已转出」；在籍不在校 → 班级自动置「不分班」
         _new_status = (student.enrollment_status or '').strip()
@@ -460,14 +463,30 @@ def delete(id):
     if not _student_in_scope(student):
         flash('无权删除该学生', 'danger')
         return redirect(url_for('students.list_students'))
-    # 先删除床位分配
+    # 2026-10-18 审计（加大修复）：删学籍前归档 —— 学籍/住宿/床位一起进回收站，
+    # 误删可在「回收站」按原样恢复（学号唯一，冲突行会跳过）。
+    from app.utils.trash import archive
+    _who = f'{student.name} {student.grade}{student.class_name}（学号 {student.student_number}）'
     if student.bed_assignment:
-        student.bed_assignment.student_id = None
+        archive('dormitory', 'bed_assignment', '床位分配',
+                student.bed_assignment, summary=f'{_who} 的床位',
+                operator=current_user)
     # 同步删除住宿记录（跨库 dormitory）：否则残留记录会在重新导入时因
     # student_id 复用（SQLite 无 AUTOINCREMENT）触发 UNIQUE 冲突
     acc = StudentAccommodation.query.filter_by(student_id=student.id).first()
     if acc:
+        archive('dormitory', 'student_accommodation', '住宿记录', acc,
+                summary=f'{_who} 的住宿记录', operator=current_user)
+    archive('system', 'student', '学籍', student, summary=_who,
+            operator=current_user)
+    # 先把归档提交掉，再执行删除：SQLite 下 system / dormitory 两个库文件
+    # 同时持写锁容易 `database is locked`（跨库事务顺序问题），拆成两个事务更稳。
+    db.session.commit()
+    acc = StudentAccommodation.query.filter_by(student_id=student.id).first()
+    if acc:
         db.session.delete(acc)
+    if student.bed_assignment:
+        student.bed_assignment.student_id = None
     db.session.delete(student)
     db.session.commit()
     log_operation(current_user, '删除', '学生', id, f'{student.name} {student.grade}{student.class_name}')
@@ -695,17 +714,24 @@ def _populate_student(student, form):
         setattr(student, field_name, getattr(form, field_name).data or None)
 
 
-def _populate_student_for_edit(student, form):
-    """从表单填充学生对象（编辑时使用）"""
+def _populate_student_for_edit(student, form, allow_phone_edit=True):
+    """从表单填充学生对象（编辑时使用）。
+
+    2026-10-18 审计修复（P1）：无 `students.view_phone` 时**不写** phone1/phone2 ——
+    模板已不再回传完整号码（原来 hidden 里是明文，F12 即可看到），这里也必须跳过，
+    否则保存会把号码清空。
+    """
     readonly_fields = ['name', 'gender', 'student_number', 'id_card_number', 'ethnicity',
                        'graduation_school_code', 'graduation_school']
     never_update_fields = ['grade', 'class_name']
-    editable_fields = ['phone1', 'phone2', 'subject_selection', 'enrollment_status', 'enrollment_notes']
-    
+    editable_fields = ['subject_selection', 'enrollment_status', 'enrollment_notes']
+    if allow_phone_edit:
+        editable_fields = ['phone1', 'phone2'] + editable_fields
+
     for field_name in readonly_fields:
         if not getattr(student, field_name) and getattr(form, field_name).data:
             setattr(student, field_name, getattr(form, field_name).data or None)
-    
+
     for field_name in editable_fields:
         setattr(student, field_name, getattr(form, field_name).data or None)
 
@@ -1142,16 +1168,31 @@ def batch_delete():
         return redirect(url_for('students.list_students'))
 
     count = len(students)
+    # 2026-10-18 审计（加大修复）：批量删学籍前逐人归档（学籍 + 住宿 + 床位），
+    # 误删可在「回收站」按原样恢复。
+    from app.utils.trash import archive
     for s in students:
+        _who = f'{s.name} {s.grade}{s.class_name}（学号 {s.student_number}）'
         if s.bed_assignment:
-            s.bed_assignment.student_id = None
-        # 同步删除住宿记录（跨库 dormitory），防止残留导致重新导入时 id 复用冲突
+            archive('dormitory', 'bed_assignment', '床位分配', s.bed_assignment,
+                    summary=f'{_who} 的床位', operator=current_user)
+        acc = StudentAccommodation.query.filter_by(student_id=s.id).first()
+        if acc:
+            archive('dormitory', 'student_accommodation', '住宿记录', acc,
+                    summary=f'{_who} 的住宿记录', operator=current_user)
+        archive('system', 'student', '学籍', s, summary=_who, operator=current_user)
+    # 归档先落库，再执行删除（避免 system/dormitory 跨库同时持写锁）
+    db.session.commit()
+    for s in students:
         acc = StudentAccommodation.query.filter_by(student_id=s.id).first()
         if acc:
             db.session.delete(acc)
+        if s.bed_assignment:
+            s.bed_assignment.student_id = None
         db.session.delete(s)
     db.session.commit()
-    log_operation(current_user, '删除', '学生', None, f'批量删除 {count} 名学生')
+    log_operation(current_user, '删除', '学生', None,
+                  f'批量删除 {count} 名学生（已进回收站）')
     flash(f'已删除 {count} 名学生', 'success')
     return redirect(url_for('students.list_students'))
 
@@ -1400,6 +1441,13 @@ def batch_transfer():
 
             if not student:
                 errors.append(f'{row_label}（{match_val}）：未找到该学生')
+                continue
+
+            # 2026-10-18 审计修复（P1）：批量调班此前**没有数据范围校验** ——
+            # 任何有 students.transfer 的账号都能上传 Excel 把任意学生调到任意班级
+            # （含跨年级）。现在逐行复用 _student_in_scope，越权行跳过并计入错误。
+            if not _student_in_scope(student):
+                errors.append(f'{row_label}（{match_val}）：不在你的数据范围内，已跳过')
                 continue
 
             old_loc = student_location_desc(student)

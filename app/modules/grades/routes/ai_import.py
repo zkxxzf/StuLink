@@ -623,7 +623,20 @@ def _apply_schedules(exam, sheet_items, body_sessions, mode='replace', dry=False
         return info, errs
 
     if mode == 'replace':
-        # 覆盖：先清空本批次全部场次与监考安排，再按新数据重建（口径可预测）
+        # 2026-10-18：覆盖模式会整批清空场次与监考，删前先整组快照（回收站可恢复）；
+        # 归档失败就中止覆盖 —— 宁可让用户重试，也不做不可恢复的清空。
+        from app.utils.trash import archive_snapshot
+        _old_sch = AffairSchedule.query.filter_by(affair_id=affair.id).all()
+        _old_inv = AffairInvigilation.query.filter_by(affair_id=affair.id).all()
+        _snap = archive_snapshot(
+            'grades', 'affair_schedule_bundle', '考务场次(覆盖前)',
+            tables=[(AffairSchedule, _old_sch), (AffairInvigilation, _old_inv)],
+            summary=f'{affair.name}：覆盖前 {len(_old_sch)} 场 / {len(_old_inv)} 格监考',
+            operator=current_user)
+        if _snap is None:
+            return info, ['删除前归档失败，已中止覆盖（避免数据不可恢复）']
+        # 归档先落库再清空（跨库写入，非 WAL 下需分段提交）
+        db.session.commit()
         AffairInvigilation.query.filter_by(affair_id=affair.id).delete()
         AffairSchedule.query.filter_by(affair_id=affair.id).delete()
         db.session.flush()

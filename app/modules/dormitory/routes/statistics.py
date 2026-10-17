@@ -596,11 +596,13 @@ def export_bed_detail():
     sel_grade = request.args.get('grade', '')
 
     # 查询所有已分配床位的房间
-    rq = Room.query.filter(
+    # 2026-10-18 审计修复（P1 越权导出）：原来直接 Room.query —— 只要 statistics.view
+    # 就能导出全校各年级学生的姓名/学号/班级/床位。改为走宿舍统一范围（与 L203/L293 一致）。
+    rq = room_scope_query(Room.query.filter(
         Room.is_active == True,
         Room.class_name.isnot(None),
         Room.class_name != ''
-    )
+    ))
     if sel_grade:
         rq = rq.filter_by(grade=sel_grade)
     rooms = rq.order_by(

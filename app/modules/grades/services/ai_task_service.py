@@ -340,15 +340,17 @@ def _db_status(task_id):
 
 # ==================== 查询 ====================
 
-def list_tasks(user, exam_id=None, limit=30, scope_all=False):
-    """任务列表（scope_all=True 返回全部用户 → admin 审计用；默认仅本人）。"""
+def list_tasks(user, exam_id=None, limit=30):
+    """任务列表（**仅本人**：AI 分析属个人内容，2026-10-18 用户口径）。
+
+    原先有个 `scope_all=True` 的"管理员看全部"分支 —— 已删除：连管理员也不该
+    看到别人的 AI 分析（含逐生成绩与评语），需要排查时走操作日志，而不是读正文。
+    """
     try:
         sweep_zombies()
     except Exception:                       # noqa: BLE001
         logger.warning('AI 任务列表清理僵尸失败', exc_info=True)
-    q = AiTask.query
-    if not scope_all:
-        q = q.filter_by(user_id=user.id)
+    q = AiTask.query.filter_by(user_id=user.id)
     if exam_id:
         q = q.filter_by(exam_id=int(exam_id))
     return q.order_by(AiTask.id.desc()).limit(max(1, min(int(limit or 30), 100))).all()

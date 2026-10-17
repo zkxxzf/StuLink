@@ -8,7 +8,7 @@
 - sync_from_teacher(teacher, renamed_from=None):
     在 academic.teacher_edit 中调用；把 teachers 的姓名/手机号/状态回写到 users
 
-角色口径与 scripts/sync_users_to_teachers.py 保持一致：
+角色口径与 scripts/fix/sync_users_to_teachers.py 保持一致：
     TEACHER_ROLES = ('teacher','homeroom_teacher','grade_leader',
                      'dorm_manager','school_viewer','staff')
 """

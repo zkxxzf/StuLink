@@ -46,7 +46,7 @@ PATTERNS = ('scripts/migrate*.py', 'scripts/add_*.py', 'scripts/backfill*.py',
             # 2026-10-16 第七轮审计 C-H1：`import_bands_*`（官方线表录入，整场
             # DELETE+INSERT exam_bands）同样改库却不在扫描范围；只放这一个系列，
             # 不把 import_demo/import_school_timetable 等非迁移导入卷进来
-            'scripts/import_bands_*.py')
+            'scripts/seed/import_bands_*.py')
 
 _DOC_RE = re.compile(r'"""(.*?)"""', re.S)
 _DATE_RE = re.compile(r'_(\d{8})\.py$')

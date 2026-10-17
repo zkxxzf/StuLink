@@ -1,0 +1,221 @@
+{% extends "base.html" %}
+{% block title %}{{ title }}{% endblock %}
+{% block extra_css_head %}
+<link href="{{ su('css/honor.css') }}" rel="stylesheet">
+{% endblock %}
+
+{# ---------------- 表格宏 ---------------- #}
+{% macro rank_badge(rank) -%}
+<span class="honor-rank{% if rank == 1 %} honor-top1{% elif rank == 2 %} honor-top2{% elif rank == 3 %} honor-top3{% endif %}">{{ rank }}</span>
+{%- endmacro %}
+
+{% macro row_class(rank) -%}
+{% if rank <= 3 %} hn-top{% if rank == 1 %} hn-top1{% endif %}{% endif %}
+{%- endmacro %}
+
+{# 总分榜：名次 / 学号 / 姓名 / 班级 / 班型 / 组合 / 总分 + 各科 #}
+{% macro total_table(rows, subjects) %}
+<div class="honor-table-wrap">
+    <table class="table table-sm align-middle honor-table honor-table-total">
+        <thead>
+        <tr>
+            <th>名次</th><th>学号</th><th>姓名</th><th>班级</th><th>班型</th>
+            <th>组合</th><th class="text-end">总分</th>
+            {% for s in subjects %}<th class="text-end">{{ s }}</th>{% endfor %}
+        </tr>
+        </thead>
+        <tbody>
+        {% for r in rows %}
+        <tr class="{{ row_class(r.rank) }}" data-class="{{ r.class_name }}"
+            data-key="{{ r.no }} {{ r.name }} {{ r.class_name }}">
+            <td>{{ rank_badge(r.rank) }}</td>
+            <td class="hn-no">{{ r.no }}</td>
+            <td class="hn-name">{{ r.name }}</td>
+            <td>{{ r.class_name }}</td>
+            <td>{% if r.class_type %}<span class="honor-type{% if r.class_type == '卓越班' %} is-elite{% endif %}">{{ r.class_type }}</span>{% endif %}</td>
+            <td class="text-muted">{{ r.selection or '—' }}</td>
+            <td class="text-end hn-total">{{ r.total }}</td>
+            {% for s in subjects %}
+            <td class="text-end">{{ r.scores[s] if r.scores[s] is not none else '—' }}</td>
+            {% endfor %}
+        </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% endmacro %}
+
+{# 单科榜：名次 / 学号 / 姓名 / 班级 / 班型 / 该科成绩 / 总分 #}
+{% macro subject_table(rows, subject) %}
+<div class="honor-table-wrap">
+    <table class="table table-sm align-middle honor-table honor-table-slim">
+        <thead>
+        <tr>
+            <th>名次</th><th>学号</th><th>姓名</th><th>班级</th><th>班型</th>
+            <th class="text-end">{{ subject }}</th><th class="text-end">总分</th>
+        </tr>
+        </thead>
+        <tbody>
+        {% for r in rows %}
+        <tr class="{{ row_class(r.rank) }}" data-class="{{ r.class_name }}"
+            data-key="{{ r.no }} {{ r.name }} {{ r.class_name }}">
+            <td>{{ rank_badge(r.rank) }}</td>
+            <td class="hn-no">{{ r.no }}</td>
+            <td class="hn-name">{{ r.name }}</td>
+            <td>{{ r.class_name }}</td>
+            <td>{% if r.class_type %}<span class="honor-type{% if r.class_type == '卓越班' %} is-elite{% endif %}">{{ r.class_type }}</span>{% endif %}</td>
+            <td class="text-end hn-total">{{ r.score }}</td>
+            <td class="text-end text-muted">{{ r.total }}</td>
+        </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% endmacro %}
+
+{% block content %}
+<div class="honor-page" id="honorApp" data-exam="{{ exam.id if exam else '' }}">
+    <div class="honor-head no-print">
+        <h5><i class="bi bi-trophy honor-title-icon"></i> 表彰名单</h5>
+        {% if exams %}
+        <select id="hnExam" class="form-select form-select-sm w-auto" title="考试">
+            {% for g, items in by_grade.items() %}
+            <optgroup label="{{ g }}">
+                {% for e in items %}
+                <option value="{{ e.id }}" {% if exam and e.id == exam.id %}selected{% endif %}>{{ e.name }}（{{ e.exam_date.strftime('%m-%d') }}）</option>
+                {% endfor %}
+            </optgroup>
+            {% endfor %}
+        </select>
+        {% endif %}
+        {% if data %}
+        <select id="hnGroup" class="form-select form-select-sm w-auto" title="榜单分组维度">
+            {% for m in data.mode_options %}
+            <option value="{{ m.key }}" {% if m.key == data.mode %}selected{% endif %}>{{ m.label }}（{{ m.desc }}）</option>
+            {% endfor %}
+        </select>
+        {% endif %}
+        <span class="ms-auto"></span>
+        <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('grades.index') }}{% if exam %}?exam={{ exam.id }}{% endif %}">
+            <i class="bi bi-graph-up"></i> 成绩分析</a>
+        <button class="btn btn-sm btn-outline-dark" id="hnPrint" type="button" title="打印当前页签（卓越班会展开全部班级与科目）">
+            <i class="bi bi-printer"></i> 打印</button>
+    </div>
+
+    {% if not data %}
+    <div class="honor-empty">
+        <i class="bi bi-inbox"></i>
+        <p class="mb-2">暂无已导入成绩的考试</p>
+        <a href="{{ url_for('grades.exams_list') }}" class="btn btn-sm btn-outline-primary">去历次考试</a>
+    </div>
+    {% else %}
+    {% set cur = (data.mode_options | selectattr('key', 'equalto', data.mode) | list | first) %}
+    <div class="honor-meta">
+        <span class="fw-semibold">{{ data.exam.name }}</span>
+        <span class="hn-dot"></span><span>{{ data.exam.date }}</span>
+        <span class="hn-dot"></span><span>{{ data.stats.students }} 人参考 · {{ data.stats.classes }} 个班</span>
+        <span class="hn-dot"></span><span>{{ cur.desc if cur else '' }}</span>
+        {% if data.gap %}<span class="hn-dot"></span><span class="text-warning">{{ data.gap }}</span>{% endif %}
+    </div>
+
+    <div class="honor-filter no-print">
+        <select id="hnClass" class="form-select form-select-sm w-auto" title="按班级筛选">
+            <option value="">全部班级</option>
+            {% for c in data.class_names %}<option value="{{ c }}">{{ c }}</option>{% endfor %}
+        </select>
+        <input id="hnKw" class="form-control form-control-sm" style="width:200px;"
+               placeholder="搜索学号 / 姓名" autocomplete="off">
+        <button class="btn btn-sm btn-outline-secondary" id="hnClear" type="button">清空</button>
+        <span class="hn-count">当前页签显示 <b id="hnShown">0</b> / <span id="hnTotal">0</span> 行</span>
+    </div>
+
+    <div class="honor-tabs no-print">
+        <button class="hn-tab active" type="button" data-pane="total">
+            年级总分榜 <span class="badge">{{ data.groups | length }} 组</span></button>
+        <button class="hn-tab" type="button" data-pane="elite">
+            卓越班榜 <span class="badge">{{ data.stats.elite_classes }} 班</span></button>
+        <button class="hn-tab" type="button" data-pane="subject">
+            年级单科榜 <span class="badge">{{ data.subject_board | length }} 科</span></button>
+    </div>
+
+    {# ---------- 年级总分榜 ---------- #}
+    <div class="honor-pane" id="pane-total">
+        {% for g in data.groups %}
+        <div class="honor-card" data-group="{{ g.key }}">
+            <div class="honor-card-head">
+                <span class="honor-group">{{ g.label }}</span>
+                <span class="honor-note">{{ g.note }}</span>
+                {% if g.rows | length > 0 %}
+                <span class="honor-limit">前 {{ g.top_n }} 名 · 实列 {{ g.rows | length }} 人（同分并列全列）</span>
+                {% endif %}
+            </div>
+            {{ total_table(g.rows, data.subjects) }}
+        </div>
+        {% endfor %}
+    </div>
+
+    {# ---------- 卓越班榜 ---------- #}
+    <div class="honor-pane d-none" id="pane-elite">
+        {% if not data.elite.classes %}
+        <div class="honor-empty"><i class="bi bi-inbox"></i>本场没有卓越班（班型设置里未标记）</div>
+        {% else %}
+        <div class="honor-class-chips no-print">
+            {% for c in data.elite.classes %}
+            <button type="button" class="{% if loop.first %}active{% endif %}"
+                    data-elite-class="{{ c.class_name }}">{{ c.class_name }}</button>
+            {% endfor %}
+        </div>
+        {% for c in data.elite.classes %}
+        <section class="honor-elite-class{% if not loop.first %} d-none{% endif %}"
+                 data-class="{{ c.class_name }}">
+            <div class="honor-card">
+                <div class="honor-card-head">
+                    <span class="honor-group">{{ c.class_name }} 卓越班</span>
+                    <span class="honor-note">{{ c.students }} 人参考</span>
+                    <span class="honor-limit">总分前 {{ data.elite.total_limit }} 名</span>
+                </div>
+                {{ total_table(c.total, data.subjects) }}
+                <h6 class="honor-sub-h">单科前 {{ data.elite.subject_limit }} 名（点科目切换）</h6>
+                <div class="honor-subj-chips no-print">
+                    {% for b in c.subjects %}
+                    <button type="button" class="{% if loop.first %}active{% endif %}"
+                            data-subject="{{ b.subject }}">{{ b.subject }}</button>
+                    {% endfor %}
+                </div>
+                {% for b in c.subjects %}
+                <div class="honor-subj-box{% if not loop.first %} d-none{% endif %}"
+                     data-subject="{{ b.subject }}">
+                    {{ subject_table(b.rows, b.subject) }}
+                </div>
+                {% endfor %}
+            </div>
+        </section>
+        {% endfor %}
+        {% endif %}
+    </div>
+
+    {# ---------- 年级单科榜（两列排布，省一半纵向长度） ---------- #}
+    <div class="honor-pane d-none" id="pane-subject">
+        <div class="row g-2 honor-row">
+            {% for b in data.subject_board %}
+            <div class="col-12 col-xxl-6">
+                <div class="honor-card">
+                    <div class="honor-card-head">
+                        <span class="honor-group">{{ b.subject }}</span>
+                        <span class="honor-note">全年级最高分 {{ b.top }}</span>
+                        {% if b.tied > 1 %}<span class="honor-tie">{{ b.tied }} 人并列第一</span>{% endif %}
+                        <span class="honor-limit">前 {{ b.top_n }} 名 · 实列 {{ b.rows | length }} 人</span>
+                    </div>
+                    {{ subject_table(b.rows, b.subject) }}
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+    </div>
+    {% endif %}
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script src="{{ su('js/grades_honor.js') }}"></script>
+{% endblock %}

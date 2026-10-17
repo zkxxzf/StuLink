@@ -32,7 +32,7 @@
     python -m scripts.bump_version sakay --no-commit   # 写盘但不 git commit
 
 默认行为：扫描项目 → 替换所有形如 vX.Y.Z.W / vX.Y.Z 的"当前版本"引用 → 若 git 干净则自动 commit。
-不修改：scripts/migrate_*.py、代码内联变更注释、data/、聊天总结/（2026-10-13 起位于
+不修改：scripts/migrate/migrate_*.py、代码内联变更注释、data/、聊天总结/（2026-10-13 起位于
 docs/聊天总结/；SKIP_DIRS 按**目录名**匹配路径各部分，与层级无关）、
 版本历史/（2026-10-16 起位于 docs/版本历史/ —— **历史记录里的版本号必须保持原样**，
 改了历史等于伪造历史）等目录。

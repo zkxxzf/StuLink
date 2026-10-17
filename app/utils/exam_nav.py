@@ -53,6 +53,7 @@ _EP_SECTION = (
     ('grades.exam_update', 'overview'),
     ('grades.exam_delete', 'overview'),
     ('grades.index', 'analysis'),
+    ('grades.honor', 'analysis'),
     ('grades.pivot_page', 'analysis'),
     ('grades.report_page', 'analysis'),
     ('grades.global_compare_page', 'analysis'),

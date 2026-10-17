@@ -806,6 +806,46 @@ def exam_delete(exam_id):
         return _fail('密码不正确')
 
     exam_name = f'{exam.grade} {exam.name}'
+    # 2026-10-18 审计加固：整场删除级联 11 张表，此前**没有归档**，误删即永久丢失
+    # （成绩、分层划线、AI 报告、改分留痕、任课快照、考务批次全没）。
+    # 这里按**原 id** 打整组快照：父表 Exam 在前，子表在后，回收站恢复后
+    # exam_id / affair_id / schedule_id 仍然有效，不会变成孤儿。
+    from app.utils.trash import archive_snapshot
+    from app.models.grades import (AffairInvigilation, AffairInvigilator, AffairRoom,
+                                   AffairSchedule, AffairStudent, AffairTeacher,
+                                   ExamAffair)
+    _affairs = ExamAffair.query.filter_by(exam_id=exam_id).all()
+    _tables = [
+        (exam.__class__, exam),
+        (ExamScore, ExamScore.query.filter_by(exam_id=exam_id).all()),
+        (ExamBand, ExamBand.query.filter_by(exam_id=exam_id).all()),
+        (AiReport, AiReport.query.filter_by(exam_id=exam_id).all()),
+        (ScoreChangeLog, ScoreChangeLog.query.filter_by(exam_id=exam_id).all()),
+        (ExamTeacherLink, ExamTeacherLink.query.filter_by(exam_id=exam_id).all()),
+    ]
+    for _a in _affairs:
+        _tables += [
+            (ExamAffair, _a),
+            (AffairRoom, AffairRoom.query.filter_by(affair_id=_a.id).all()),
+            (AffairStudent, AffairStudent.query.filter_by(affair_id=_a.id).all()),
+            (AffairInvigilation,
+             AffairInvigilation.query.filter_by(affair_id=_a.id).all()),
+            (AffairSchedule, AffairSchedule.query.filter_by(affair_id=_a.id).all()),
+            (AffairInvigilator,
+             AffairInvigilator.query.filter_by(affair_id=_a.id).all()),
+            (AffairTeacher, AffairTeacher.query.filter_by(affair_id=_a.id).all()),
+        ]
+    _snapshot = archive_snapshot(
+        'grades', 'exam_bundle', '整场考试', tables=_tables,
+        summary=f'{exam_name}：含成绩/分层/报告/改分留痕/任课/考务批次',
+        operator=current_user)
+    if _snapshot is None:
+        # 2026-10-18：归档失败就**不删**（fail-closed）。此前归档异常被 except 吞掉，
+        # 删除照做 —— 用户以为"进了回收站"，其实什么都没存，数据永久丢失。
+        db.session.rollback()
+        return _fail('删除前归档失败，已中止（避免数据不可恢复）', 500)
+    # 归档先落库、再执行删除（非 WAL 下 SQLite 是库级锁，多表先读后写易锁冲突）
+    db.session.commit()
     # 2026-10-12 安全/质量审计 P0-1：原先漏删两张关联表 → 孤儿行永久残留：
     #   · score_change_logs（改分留痕，含学生姓名/班级快照）——表注释写"只增不改不删"，
     #     与删考试行为矛盾，删完考试后流水还挂在已不存在的 exam_id 上；

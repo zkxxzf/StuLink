@@ -34,6 +34,7 @@
             <div class="card shadow-sm h-100">
                 <div class="card-header py-2 d-flex align-items-center gap-2">
                     <h6 class="mb-0"><i class="bi bi-clock-history"></i> 我的 AI 分析</h6>
+                    {# 2026-10-18：一键清空入口已移除（误点一次全删）。删除只在每条记录右上角的 × #}
                     <button class="btn btn-sm btn-outline-secondary ms-auto" type="button" id="aiRefresh"
                             title="刷新列表" aria-label="刷新列表">
                         <i class="bi bi-arrow-clockwise"></i>
@@ -42,6 +43,10 @@
                 <div class="card-body">
                     <div class="text-muted small mb-2">
                         进行中的任务会在后台继续，切走再回来仍可查看。
+                        {# 2026-10-18（用户最终口径）：AI 分析的报告/对话/任务仅生成者本人可见，管理员也不例外 #}
+                        <div class="mt-1">
+                            <i class="bi bi-lock"></i> 只显示<b>我</b>生成的分析，其他人看不到我的，我也看不到其他人的。
+                        </div>
                     </div>
                     <div id="aiTaskList" class="ai-studio-list"></div>
                 </div>

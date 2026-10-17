@@ -739,9 +739,31 @@ def affair_schedule_delete(aid, sid):
     row = AffairSchedule.query.get_or_404(sid)
     if row.affair_id != affair.id:
         return jsonify({'ok': False, 'msg': '场次不属于本批次'})
-    n_inv = AffairInvigilation.query.filter_by(
-        affair_id=affair.id, schedule_id=sid).delete()
+    invs = AffairInvigilation.query.filter_by(
+        affair_id=affair.id, schedule_id=sid).all()
+    # 2026-10-18：删除前整组快照（场次 + 全部监考格 + 排除项），可整体恢复；
+    # 同时把 AffairInvigExclude 里同 schedule_id 的排除行一并清掉 ——
+    # 原来只删监考格，排除项会变成孤儿（既看不见也删不掉）。
+    from app.utils.trash import archive_snapshot
+    excl = AffairInvigExclude.query.filter_by(
+        affair_id=affair.id, schedule_id=sid).all()
     _desc = f'{row.exam_date or ""} {row.subject}'
+    _snap = archive_snapshot(
+        'grades', 'affair_schedule_bundle', '考务场次(含监考)',
+        tables=[(AffairSchedule, row),
+                (AffairInvigilation, invs),
+                (AffairInvigExclude, excl)],
+        summary=f'{_desc}：监考 {len(invs)} 格 / 排除 {len(excl)} 条',
+        operator=current_user)
+    if _snap is None:
+        return jsonify({'ok': False, 'msg': '删除前归档失败，已中止'}), 500
+    db.session.commit()
+    n_inv = len(invs)
+    AffairInvigilation.query.filter_by(
+        affair_id=affair.id, schedule_id=sid).delete()
+    if excl:
+        AffairInvigExclude.query.filter_by(
+            affair_id=affair.id, schedule_id=sid).delete()
     db.session.delete(row)
     db.session.commit()
     # 2026-10-12 数据可信度审计（§3.8）：删场次会连带删该场次全部监考安排，
@@ -1424,6 +1446,18 @@ def _auto_arrange(affair):
             '请增加监考员（环节⑥「其他监考员」）、取消部分排除，或减少每考场监考人数。'
             % (total_cells, len(schedules), len(rooms), slots,
                capacity, avail, total_cells - capacity))
+    # 2026-10-18：自动重排会整批清空旧安排，删前先快照（回收站可恢复）；
+    # 归档失败就中止重排，避免"排了一次，旧安排再也找不回来"。
+    from app.utils.trash import archive_snapshot
+    _old_inv = AffairInvigilation.query.filter_by(affair_id=affair.id).all()
+    _snap = archive_snapshot(
+        'grades', 'affair_invig_bundle', '监考安排(重排前)',
+        tables=[(AffairInvigilation, _old_inv)],
+        summary=f'{affair.name}：重排前 {len(_old_inv)} 格监考',
+        operator=current_user)
+    if _snap is None:
+        raise ValueError('删除前归档失败，已中止重排（避免监考安排不可恢复）')
+    db.session.commit()      # 归档先落库，再清空旧安排
     AffairInvigilation.query.filter_by(affair_id=affair.id).delete()
     load = {p['name']: 0 for p in pool}
     busy = {p['name']: [] for p in pool}        # name -> 已排入的场次（判时间冲突）

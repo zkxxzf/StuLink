@@ -504,7 +504,7 @@
             {% endif %}
 
             {# ========= 系统管理模块侧边栏 ========= #}
-            {% if request.blueprint in ('system_dashboard','students','users','dictionary','class_profile','perm_groups','grade_mgmt','operation_logs') and request.endpoint != 'students.search' %}
+            {% if request.blueprint in ('system_dashboard','students','users','dictionary','class_profile','perm_groups','grade_mgmt','operation_logs','trash') and request.endpoint != 'students.search' %}
             <div class="nav-section">系统管理</div>
             <a class="nav-link {% if request.endpoint == 'students.list_students' %}active{% endif %}"
                href="{{ url_for('students.list_students') }}">
@@ -533,6 +533,11 @@
             <a class="nav-link {% if request.endpoint and request.endpoint.startswith('operation_logs.') %}active{% endif %}"
                href="{{ url_for('operation_logs.list_logs') }}">
                 <i class="bi bi-journal-text"></i>操作日志
+            </a>
+            {# 2026-10-18：删除前自动归档，可在这里查看/恢复（30 天） #}
+            <a class="nav-link {% if request.endpoint and request.endpoint.startswith('trash.') %}active{% endif %}"
+               href="{{ url_for('trash.list_trash') }}">
+                <i class="bi bi-trash3"></i>回收站
             </a>
             {% endif %}
 
@@ -636,6 +641,9 @@
                        href="{{ url_for('grades.exam_near_line', exam_id=EN.exam_id) }}">临界生对比</a>
                     <a class="efn-item ps-4 {% if request.endpoint == 'grades.pivot_page' %}active{% endif %}" data-nav="pivot"
                        href="{{ url_for('grades.pivot_page') }}?exam={{ EN.exam_id }}">成绩分析自由表</a>
+                    {# 2026-10-18 表彰名单：年级前 30 / 卓越班前 10 / 单科前 10（并列全列） #}
+                    <a class="efn-item ps-4 {% if request.endpoint == 'grades.honor' %}active{% endif %}" data-nav="honor"
+                       href="{{ url_for('grades.honor') }}?exam={{ EN.exam_id }}">表彰名单</a>
                     {# 2026-10-13：AI 分析工作台（一句话提问 → 工具取数 → HTML 报告；任务在后台跑，切页可续看） #}
                     <a class="efn-item ps-4 {% if request.endpoint == 'grades.ai_studio' %}active{% endif %}" data-nav="ai"
                        href="{{ url_for('grades.ai_studio') }}?exam={{ EN.exam_id }}">AI 分析</a>

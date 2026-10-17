@@ -15,7 +15,7 @@ class ClassProfile(db.Model):
     subject_direction = db.Column(db.String(10), nullable=True)  # 物理 / 历史
     # 2026-10-09：是否启用（在用班级）。班级档案里可能混着历史/批量导入的班级，
     # 教务各页（课表 / 查课 / 调课 / 晚自习）的班级下拉只取 is_active=True 的班，
-    # 避免几百个未启用班级把下拉撑爆。由 scripts/migrate_class_active_20261009.py 按课表回填。
+    # 避免几百个未启用班级把下拉撑爆。由 scripts/migrate/migrate_class_active_20261009.py 按课表回填。
     is_active = db.Column(db.Boolean, default=True, nullable=False)
     created_at = db.Column(db.DateTime, default=datetime.now)
     updated_at = db.Column(db.DateTime, default=datetime.now, onupdate=datetime.now)

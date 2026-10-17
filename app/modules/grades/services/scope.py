@@ -14,7 +14,7 @@ from app.utils.helpers import get_graduated_grades
 from app.utils.scope import (
     SCOPE_SCHOOL, SCOPE_GRADE, SCOPE_CLASS,
     user_scope_grades as user_grade_scope,     # 兼容旧名（多处 import 旧名）
-    class_pairs, teaching_links, teaching_grades,
+    class_pairs, teaching_links, teaching_grades, teaching_pairs,
 )
 
 
@@ -155,6 +155,14 @@ def student_in_scope(user, student_no):
             raise PermissionError
         return
     if user.has_role('teacher'):
+        # 2026-10-18 审计修复（P1）：此前只校验年级，任课教师能按学号逐个读取
+        # **同年级任意班**学生的成绩（实测 licancan 只教 01/04 班，可读 02 班）。
+        # 改为精确到任教班级；只有"整年级任教"（class_name 为空）才按年级兜底。
+        tps = teaching_pairs(user)
+        if tps:
+            if (st_obj.grade, st_obj.class_name) not in tps:
+                raise PermissionError
+            return
         if st_obj.grade not in teaching_grades(user):
             raise PermissionError
         return
