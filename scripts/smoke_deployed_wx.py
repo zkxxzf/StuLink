@@ -59,6 +59,8 @@ def main():
         '/api/wx/grades/class-summary?exam_id=%d' % exam.id,
         '/api/wx/grades/subjects?exam_id=%d' % exam.id,
         '/api/wx/grades/segments?exam_id=%d' % exam.id,
+        '/api/wx/grades/analysis/grade?exam_id=%d' % exam.id,
+        '/api/wx/grades/analysis/subject?exam_id=%d' % exam.id,
         '/api/wx/grades/student/%s' % student.student_number,
         '/api/wx/inspection/mine',
         '/api/wx/achievements/mine',

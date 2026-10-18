@@ -31,6 +31,7 @@ from app.modules.wxapi.core import (  # noqa: E402,F401
 from app.modules.wxapi.auth import routes_auth  # noqa: E402,F401
 from app.modules.wxapi.workbench import routes_workbench  # noqa: E402,F401
 from app.modules.wxapi.grades import (  # noqa: E402,F401
+    routes_analysis,
     routes_grades,
     routes_grades_compare,
     routes_grades_honor,

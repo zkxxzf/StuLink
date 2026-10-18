@@ -128,8 +128,39 @@ def main():
         check('单科趋势图已返回',
               'trend_subject' in ((stu_sub or {}).get('charts') or {}))
     if exam_id:
-        expect_ok(client, headers,
-                  '/grades/class-summary?exam_id=%d' % exam_id)
+        cs = expect_ok(client, headers,
+                       '/grades/class-summary?exam_id=%d' % exam_id) or {}
+        check('班级汇总含 rows', isinstance(cs.get('rows'), list))
+        cls = [r.get('class_name') for r in (cs.get('rows') or [])
+               if r.get('class_name')]
+        a_tab = expect_ok(client, headers,
+                          '/grades/analysis/grade?exam_id=%d' % exam_id) or {}
+        check('分析年级 tab 含表格',
+              bool((a_tab.get('tables') or {})))
+        if cls:
+            c_tab = expect_ok(
+                client, headers,
+                '/grades/analysis/class?exam_id=%d&class_name=%s'
+                % (exam_id, cls[0])) or {}
+            check('分析班级 tab 含表格',
+                  bool((c_tab.get('tables') or {})))
+        s_tab = expect_ok(client, headers,
+                          '/grades/analysis/subject?exam_id=%d'
+                          % exam_id) or {}
+        check('分析学科 tab 含表格',
+              bool((s_tab.get('tables') or {})))
+        t_tab = expect_ok(client, headers,
+                          '/grades/analysis/teacher?exam_id=%d'
+                          % exam_id) or {}
+        check('分析教师 tab 含表格',
+              bool((t_tab.get('tables') or {})))
+        if len(cls) >= 2:
+            cp_tab = expect_ok(
+                client, headers,
+                '/grades/analysis/compare?exam_id=%d&classes=%s'
+                % (exam_id, ','.join(cls[:2]))) or {}
+            check('分析对比 tab 含表格',
+                  bool((cp_tab.get('tables') or {})))
         expect_ok(client, headers, '/grades/subjects?exam_id=%d' % exam_id)
         seg = expect_ok(client, headers,
                         '/grades/segments?exam_id=%d' % exam_id)
