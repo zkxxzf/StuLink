@@ -9,6 +9,7 @@
 from datetime import datetime
 
 from app.extensions import db
+from app.utils.crypto import blind_index, decrypt, encrypt_rand
 
 
 class Teacher(db.Model):
@@ -36,7 +37,29 @@ class Teacher(db.Model):
     teacher_uid = db.Column(db.String(16), unique=True, nullable=False, index=True)
     name = db.Column(db.String(50), nullable=False)
     id_card_enc = db.Column(db.String(128), unique=True)   # 身份证号密文（唯一，可空）
-    phone = db.Column(db.String(20))
+    # 2026-10-19（与 Student 同一方案 C）：随机 IV 加密 + HMAC 盲索引。
+    # 登录名 users.username 仍是可读的（它本身是账号标识），加密的是本表的展示用号码。
+    _phone_encrypted = db.Column('phone', db.String(256))
+    phone_idx = db.Column(db.String(64))
+
+    @property
+    def phone(self):
+        if not self._phone_encrypted:
+            return None
+        try:
+            return decrypt(self._phone_encrypted)
+        except Exception:
+            return None
+
+    @phone.setter
+    def phone(self, value):
+        self._phone_encrypted = encrypt_rand(value) if value else None
+        self.phone_idx = blind_index(value) if value else None
+
+    @staticmethod
+    def phone_index(value):
+        """手机号盲索引（加密后的精确等值查询）"""
+        return blind_index(value)
     subject = db.Column(db.String(20))                     # 任教学科
     status = db.Column(db.String(10), default='active')    # active=在职 / left=离职
     user_id = db.Column(db.Integer)                        # 关联 users.id（快照式）

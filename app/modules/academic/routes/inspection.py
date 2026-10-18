@@ -1190,7 +1190,10 @@ def inspection_workload_rules_save():
         db.session.commit()
     except Exception as e:  # noqa: BLE001
         db.session.rollback()
-        return jsonify({'success': False, 'message': f'保存失败：{e}'}), 400
+        # 2026-10-18：异常原文不外露（含 SQL / 路径），详情进日志
+        from flask import current_app
+        current_app.logger.error('保存失败: %s', e, exc_info=True)
+        return jsonify({'success': False, 'message': '保存失败，请稍后重试'}), 400
     log_inspection(current_user, '保存课时量折算规则', 0, f'{changed} 项变更')
     return jsonify({'success': True, 'message': f'已保存 {changed} 项折算规则'})
 
@@ -1222,7 +1225,10 @@ def inspection_exam_period_add():
         db.session.commit()
     except Exception as e:  # noqa: BLE001
         db.session.rollback()
-        return jsonify({'success': False, 'message': f'保存失败：{e}'}), 400
+        # 2026-10-18：异常原文不外露（含 SQL / 路径），详情进日志
+        from flask import current_app
+        current_app.logger.error('保存失败: %s', e, exc_info=True)
+        return jsonify({'success': False, 'message': '保存失败，请稍后重试'}), 400
     log_inspection(current_user, '标记考试期间', row.id,
                    f'{grade}{class_name} {start_d}~{end_d}')
     return jsonify({'success': True, 'message': msg, 'data': {'id': row.id}})

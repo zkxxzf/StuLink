@@ -1,0 +1,115 @@
+# StuLink v1.19.49.35 2026-10-18
+# Copyright (c) 2026 zkxxzf. Apache License 2.0
+"""小程序接口守卫：令牌校验、身份装载、权限校验、限流。
+
+设计要点：校验通过后调用 flask-login 的 login_user 装载会话，
+使既有服务层里所有依赖 `current_user` / `session['active_group_id']`
+的逻辑（权限、数据范围）无需改动即可复用。
+"""
+import time
+from functools import wraps
+
+from flask import g, request, session
+from flask_login import login_user
+
+from app.extensions import db
+from app.models import User
+from app.modules.wxapi.response import CODE_TOO_MANY, wx_err
+from app.modules.wxapi.tokens import parse_token
+from app.utils.cache import cache
+
+TOKEN_HEADERS = ('X-Wx-Token',)
+
+
+def client_ip():
+    """取客户端 IP（仅在可信反向代理后部署时才应信任 X-Forwarded-For）。"""
+    return request.headers.get('X-Real-IP') or request.remote_addr or '0.0.0.0'
+
+
+def hit_limit(key, limit, window):
+    """滑动窗口限流：窗口内已命中 limit 次则返回 False。
+
+    入参：key=限流维度键（自行带上 ip / 账号等）；limit=窗口内允许次数；
+    window=窗口秒数。返回：True=放行，False=拒绝。
+    """
+    now = time.time()
+    cache_key = 'wxrl_%s' % key
+    hits = [t for t in (cache.get(cache_key) or []) if now - t < window]
+    if len(hits) >= limit:
+        cache.set(cache_key, hits, timeout=window)
+        return False
+    hits.append(now)
+    cache.set(cache_key, hits, timeout=window)
+    return True
+
+
+def _extract_token():
+    """从 X-Wx-Token 头或 Authorization: Bearer 中提取令牌。"""
+    for name in TOKEN_HEADERS:
+        val = request.headers.get(name)
+        if val:
+            return val.strip()
+    auth = request.headers.get('Authorization') or ''
+    if auth.lower().startswith('bearer '):
+        return auth[7:].strip()
+    return None
+
+
+def _load_user(payload):
+    """按载荷取用户；不存在或未启用返回 None。"""
+    user = db.session.get(User, payload.get('uid'))
+    if user is None or not user.is_active:
+        return None
+    return user
+
+
+def _attach_identity(user, group_id):
+    """装载登录态与身份组（复用网页端多身份判定）。
+
+    入参：user=用户对象；group_id=请求的身份组 id（须属于该用户）。
+    注意：必须写 session_guard 的口令摘要，否则下一个请求会被全局
+    `_enforce_session_validity` 判定为失效会话并 302 到登录页。
+    """
+    from app.utils.session_guard import stamp
+    login_user(user, remember=False, fresh=True)
+    stamp(user)
+    if group_id:
+        owned = {l.group_id for l in user.group_links}
+        if group_id in owned:
+            session['active_group_id'] = group_id
+
+
+def wx_login_required(f):
+    """要求携带有效令牌；通过后 `g.wx_user` 即当前用户。"""
+
+    @wraps(f)
+    def wrapper(*args, **kwargs):
+        payload = parse_token(_extract_token())
+        if not payload:
+            return wx_err('登录已失效，请重新登录', 401)
+        user = _load_user(payload)
+        if user is None:
+            return wx_err('账号不可用', 401)
+        if not hit_limit('ip_%s' % client_ip(), 600, 300):
+            return wx_err('请求过于频繁，请稍后再试', CODE_TOO_MANY)
+        _attach_identity(user, payload.get('gid'))
+        g.wx_user = user
+        return f(*args, **kwargs)
+
+    return wrapper
+
+
+def wx_perm_required(perm_key):
+    """要求当前身份具备指定权限键（admin 恒通过）。"""
+
+    def decorator(f):
+        @wraps(f)
+        @wx_login_required
+        def wrapper(*args, **kwargs):
+            if not g.wx_user.has_perm(perm_key):
+                return wx_err('暂无该模块的访问权限', 403)
+            return f(*args, **kwargs)
+
+        return wrapper
+
+    return decorator

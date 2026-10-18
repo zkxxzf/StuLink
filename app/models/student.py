@@ -2,7 +2,7 @@
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 from datetime import datetime
 from app.extensions import db
-from app.utils.crypto import encrypt, decrypt
+from app.utils.crypto import blind_index, decrypt, encrypt, encrypt_rand
 
 
 class Student(db.Model):
@@ -13,8 +13,14 @@ class Student(db.Model):
     _id_card_encrypted = db.Column('id_card_number', db.String(256))
     name = db.Column(db.String(50), nullable=False)
     ethnicity = db.Column(db.String(20), default='汉族')
-    phone1 = db.Column(db.String(20))
-    phone2 = db.Column(db.String(20))
+    # 2026-10-18（用户定方案 C）：手机号改成**随机 IV 加密**存储 ——
+    # 确定性加密（身份证那套）对手机号不安全：号段有限，可被枚举对照。
+    # 精确查询改走 phone1_idx / phone2_idx（HMAC 盲索引，不可逆）；
+    # 模糊/片段查询走"解密候选集后内存过滤"（全校 2114 人，毫秒级）。
+    _phone1_encrypted = db.Column('phone1', db.String(256))
+    _phone2_encrypted = db.Column('phone2', db.String(256))
+    phone1_idx = db.Column(db.String(64))
+    phone2_idx = db.Column(db.String(64))
     gender = db.Column(db.String(2), nullable=False)  # 男/女
     student_number = db.Column(db.String(20), unique=True, nullable=False)  # 业务主键，必填
     grade = db.Column(db.String(10), nullable=False)     # 2025级
@@ -64,6 +70,38 @@ class Student(db.Model):
     def encrypt_id_card(plaintext):
         """加密身份证号（用于查询时构造等值条件）"""
         return encrypt(plaintext) if plaintext else None
+
+    # ---- 手机号透明加解密（随机 IV + 盲索引） ----
+    def _get_phone(self, enc):
+        if not enc:
+            return None
+        try:
+            return decrypt(enc)
+        except Exception:
+            return None
+
+    @property
+    def phone1(self):
+        return self._get_phone(self._phone1_encrypted)
+
+    @phone1.setter
+    def phone1(self, value):
+        self._phone1_encrypted = encrypt_rand(value) if value else None
+        self.phone1_idx = blind_index(value) if value else None
+
+    @property
+    def phone2(self):
+        return self._get_phone(self._phone2_encrypted)
+
+    @phone2.setter
+    def phone2(self, value):
+        self._phone2_encrypted = encrypt_rand(value) if value else None
+        self.phone2_idx = blind_index(value) if value else None
+
+    @staticmethod
+    def phone_index(value):
+        """手机号盲索引（用于加密后的**精确**等值查询）"""
+        return blind_index(value)
 
     __table_args__ = (
         db.Index('idx_student_grade_class', 'grade', 'class_name'),

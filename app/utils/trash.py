@@ -44,6 +44,18 @@ _MODELS = {
 }
 
 
+def _attr_key(model_or_obj, col):
+    """列 → ORM 属性名（类属性名）。
+
+    加密字段列名是 `phone1`（property 会解密），而真实列属性名是
+    `_phone1_encrypted`（密文）。归档/恢复都必须用后者。
+    """
+    try:
+        return model_or_obj.__mapper__.get_property_by_column(col).key
+    except Exception:                   # noqa: BLE001
+        return col.name
+
+
 def _dump(obj, keep_id=False):  # noqa: D401
     """整行 → dict（默认跳过主键；datetime 转 isoformat）。
 
@@ -54,7 +66,12 @@ def _dump(obj, keep_id=False):  # noqa: D401
     for col in obj.__table__.columns:
         if col.name == 'id' and not keep_id:
             continue
-        val = getattr(obj, col.name, None)
+        # 2026-10-18：取 **mapper 的属性 key**（类属性名），不能用 col.name ——
+        # 加密字段的 property 会把密文解密成明文，用 col.name 会把明文身份证/
+        # 手机号写进回收站 payload（等于换个地方裸奔）。
+        # 注意 Column.key 默认就等于 col.name，必须用 __mapper__ 查真正的属性名。
+        # 普通列两者相同，行为不变。
+        val = getattr(obj, _attr_key(obj, col), None)
         # 2026-10-18：`date` 也必须序列化 —— Exam.exam_date 是 date 类型，
         # 只判 datetime 会让整场考试快照 json.dumps 抛 TypeError，
         # 再被上层 except 吞掉变成"静默失败"（归档没存，删除照做）。
@@ -162,17 +179,22 @@ def restore(rec):
 
     items = data if isinstance(data, list) else [data]
     cols = {c.name: c for c in model.__table__.columns}
+    # 2026-10-18：恢复时按 col.key 赋值（绕过 property setter）——
+    # 否则密文会被 setter **二次加密**（密文 → 密文的密文），恢复出来全是乱码。
+    key_of = {c.name: _attr_key(model, c) for c in model.__table__.columns}
     okn, skipped = 0, []
     for row in items:
-        clean = {k: v for k, v in (row or {}).items() if k in cols}
-        # datetime 字符串还原成对象（否则 SQLite 存字符串、ORM 读出会报类型错）
-        for name in list(clean):
-            val = clean[name]
-            if isinstance(val, str) and cols[name].type.__class__.__name__ == 'DateTime':
+        clean = {}
+        for name, val in (row or {}).items():
+            if name not in cols:
+                continue
+            if isinstance(val, str) and \
+                    cols[name].type.__class__.__name__ == 'DateTime':
                 try:
-                    clean[name] = datetime.fromisoformat(val)
+                    val = datetime.fromisoformat(val)
                 except ValueError:
-                    clean[name] = None
+                    val = None
+            clean[key_of.get(name, name)] = val
         savepoint = db.session.begin_nested()
         try:
             db.session.add(model(**clean))
@@ -213,20 +235,23 @@ def _restore_snapshot(rec, data):
             logger.warning('快照恢复找不到模型 %s', path, exc_info=True)
             continue
         cols = {c.name: c for c in model.__table__.columns}
+        key_of = {c.name: _attr_key(model, c) for c in model.__table__.columns}
         for row in tbl.get('rows') or []:
             total += 1
-            clean = {k: v for k, v in (row or {}).items() if k in cols}
-            for name in list(clean):
-                val = clean[name]
+            clean = {}
+            for name, val in (row or {}).items():
+                if name not in cols:
+                    continue
                 type_name = cols[name].type.__class__.__name__
                 if isinstance(val, str) and type_name in ('DateTime', 'Date'):
                     try:
                         # Date 列必须还原成 date（传 datetime 会被 SQLAlchemy 拒）
-                        clean[name] = (datetime.fromisoformat(val)
-                                       if type_name == 'DateTime'
-                                       else date.fromisoformat(val[:10]))
+                        val = (datetime.fromisoformat(val)
+                               if type_name == 'DateTime'
+                               else date.fromisoformat(val[:10]))
                     except ValueError:
-                        clean[name] = None
+                        val = None
+                clean[key_of.get(name, name)] = val
             savepoint = db.session.begin_nested()
             try:
                 db.session.add(model(**clean))

@@ -108,10 +108,18 @@ def validate_upload(filename, allowed_exts=None, stream=None, head=None):
 
 
 def is_static_uploads_path(path):
-    """H-8：/static/uploads 直链判定（Windows 大小写不敏感 + 反斜杠/多斜杠归一）"""
+    """H-8：/static/uploads 直链判定（大小写/反斜杠/多斜杠/**点段**归一）"""
     if not path:
         return False
-    normalized = os.path.normcase(str(path)).replace('\\', '/')
-    while '//' in normalized:
-        normalized = normalized.replace('//', '/')
-    return normalized.startswith('/static/uploads')
+    import posixpath
+    s = os.path.normcase(str(path)).replace('\\', '/')
+    # 2026-10-18 审计修复（高危）：原来只归一了反斜杠与多斜杠，**没有消去点段** ——
+    # "/static/./uploads/xxx" 不以 "/static/uploads" 开头 → 守卫判定为"不是上传目录"
+    # 从而放行，未登录也能直接下载学生材料包 / 业绩附件 / 奖惩附件。
+    # posixpath.normpath 会同时消掉 "//"、"/./" 与 "/../"，归一后再比对前缀。
+    while '//' in s:                    # 先压多斜杠（含 UNC 形式的 //），再归一
+        s = s.replace('//', '/')
+    s = posixpath.normpath(s)
+    # 精确按"目录边界"判定：/static/uploads 本身或其子路径，避免误伤
+    # 未来可能出现的 /static/uploads_xxx 之类目录。
+    return s == '/static/uploads' or s.startswith('/static/uploads/')

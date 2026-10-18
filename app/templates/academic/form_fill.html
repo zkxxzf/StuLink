@@ -162,7 +162,21 @@ document.addEventListener('DOMContentLoaded', function() {
                 }
 
                 const sizeMB = (file.size / 1024 / 1024).toFixed(2);
-                preview.innerHTML = `<div class="alert alert-info py-1 small"><i class="bi bi-file-earmark"></i> ${file.name} (${sizeMB}MB)</div>`;
+                // 2026-10-18 审计：文件名是**用户可控输入**，直接拼进 innerHTML
+                // 会形成 XSS（构造 <img onerror> 之类的文件名即可触发）。
+                // 改为 DOM API 构建 + textContent —— 走文本节点，天然不解析 HTML。
+                preview.innerHTML = '';
+                var box = document.createElement('div');
+                box.className = 'alert alert-info py-1 small';
+                var ico = document.createElement('i');
+                ico.className = 'bi bi-file-earmark';
+                var nm = document.createElement('strong');
+                nm.textContent = file.name;
+                box.appendChild(ico);
+                box.appendChild(document.createTextNode(' '));
+                box.appendChild(nm);
+                box.appendChild(document.createTextNode(' (' + sizeMB + 'MB)'));
+                preview.appendChild(box);
             }
         });
     });

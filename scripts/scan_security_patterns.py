@@ -86,6 +86,18 @@ def _is_third_party(rel):
     return rel.endswith(THIRD_PARTY_SUFFIX) or '/static/vendor/' in rel
 
 
+# 行内豁免：命中行末尾写 `# sec-allow: <规则id>` 即跳过该条（须同行写清理由）。
+# 用于"规则要求有充分理由并说明"的场景（如小程序接口豁免 CSRF 改走令牌鉴权），
+# 比整文件进 WHITELIST 精确，不会顺带放过该文件的其它问题。
+_INLINE_ALLOW = re.compile(r'#\s*sec-allow:\s*([\w\u4e00-\u9fa5\-]+)')
+
+
+def _allowed_inline(line, rule_id):
+    """命中行是否带本规则的豁免标记。"""
+    m = _INLINE_ALLOW.search(line)
+    return bool(m) and m.group(1) == rule_id
+
+
 def iter_files():
     for root, dirs, files in os.walk(BASE):
         # 备份快照（backup_* 目录）不属于现行代码：扫描目标是现网 .py/.html/.js，
@@ -170,6 +182,8 @@ def main():
                         if ext not in rule['files']:
                             continue
                         if rule['pattern'].search(line):
+                            if _allowed_inline(line, rule['id']):
+                                continue
                             hits.append((rule['id'], rel, ln,
                                          line.strip()[:120], rule['msg']))
         except Exception:  # noqa: BLE001
