@@ -20,6 +20,10 @@ from app.utils.cache import cache
 
 TOKEN_HEADERS = ('X-Wx-Token',)
 
+# 初始口令未修改的账号：只放行引导类接口，业务接口一律 403
+# （小程序不提供改密入口，改密必须走网页端，避免绕过强制改密策略）
+MUST_CHANGE_ALLOW = ('wxapi.wx_bootstrap', 'wxapi.wx_profile')
+
 
 def client_ip():
     """取客户端 IP（仅在可信反向代理后部署时才应信任 X-Forwarded-For）。"""
@@ -92,11 +96,24 @@ def wx_login_required(f):
             return wx_err('账号不可用', 401)
         if not hit_limit('ip_%s' % client_ip(), 600, 300):
             return wx_err('请求过于频繁，请稍后再试', CODE_TOO_MANY)
+        if _must_change_blocked(user):
+            return wx_err('首次登录请先在电脑端修改密码后再使用', 403)
         _attach_identity(user, payload.get('gid'))
         g.wx_user = user
         return f(*args, **kwargs)
 
     return wrapper
+
+
+def _must_change_blocked(user):
+    """是否因「初始口令未修改」而拦截本次请求。
+
+    引导类接口（bootstrap / profile）放行，好让前端能拿到标记并提示；
+    其余业务接口一律拦截，避免绕过网页端的强制改密策略。
+    """
+    if not user.must_change_pwd:
+        return False
+    return request.endpoint not in MUST_CHANGE_ALLOW
 
 
 def wx_perm_required(perm_key):

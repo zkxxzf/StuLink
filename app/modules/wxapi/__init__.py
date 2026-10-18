@@ -23,6 +23,7 @@ from app.modules.wxapi import (  # noqa: E402,F401
     routes_dorm,
     routes_dorm_search,
     routes_grades,
+    routes_grades_stats,
     routes_notice,
     routes_schedule,
     serializers,
