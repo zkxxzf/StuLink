@@ -68,6 +68,13 @@ def register_blueprints(app):
     from app.modules.notifications.routes import bp as notifications_bp
     app.register_blueprint(notifications_bp)
 
+    # 微信小程序 API（2026-10-18）：令牌鉴权（X-Wx-Token 头），
+    # 小程序拿不到网页的 CSRF cookie，故整块豁免 CSRF，改由令牌本身防冒用。
+    from app.modules.wxapi import bp as wx_bp
+    app.register_blueprint(wx_bp)
+    from app.extensions import csrf
+    csrf.exempt(wx_bp)
+
 # StuLink v1.7.0 2026-08-02
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 

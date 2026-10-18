@@ -1015,7 +1015,9 @@ def exam_import_confirm(exam_id):
     except Exception as e:
         db.session.rollback()
         current_app.logger.error(f'成绩导入失败: {e}', exc_info=True)
-        flash(f'导入失败，数据已回滚：{e}', 'danger')
+        # 2026-10-18：异常原文可能含 SQL / 内部路径，不再外露到页面；
+        # 详情已由上一行 logger.error(..., exc_info=True) 完整记录。
+        flash('导入失败，数据已回滚（详情已记入系统日志）', 'danger')
         return redirect(url_for('grades.exam_import', exam_id=exam_id))
     # 修复：按本场考试清除分析页 grades_tab_ 缓存（原前缀无人写入，等于没清）
     tab_service.clear_exam_cache(exam_id)

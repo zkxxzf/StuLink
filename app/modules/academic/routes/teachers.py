@@ -284,6 +284,12 @@ def teachers_import_passwords(token):
         flash('密码清单已失效，请在教师管理页重置相应账号密码', 'warning')
         return redirect(url_for(_ep('teachers_page')))
     data = teacher_import_service.accounts_csv(draft['result']['accounts'])
+    # 2026-10-18 审计修复（高危）：下载**明文初始口令**此前没有任何审计留痕 ——
+    # 谁在什么时候导走了哪些账号的口令，事后完全无法追溯；且这是 GET，
+    # after_request 的兜底网只拦写方法，正好覆盖不到。
+    log_operation(current_user, '导出', '教师初始密码', None,
+                  f'下载明文口令清单（{len(draft["result"]["accounts"])} 个账号）',
+                  module=_log_module(), severity='WARNING')
     return send_file(io.BytesIO(data), as_attachment=True,
                      download_name='教师初始账号密码.csv', mimetype='text/csv')
 

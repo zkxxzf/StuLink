@@ -263,7 +263,10 @@ def ai_key_test():
         try:
             api_key = ai_service.decrypt_key(old.api_key_enc)
         except ValueError as e:
-            return jsonify(success=False, message=str(e)), 400
+            # 2026-10-18：解密异常的原文可能带出密钥材料线索，不外露；改为固定文案
+            from flask import current_app
+            current_app.logger.warning('AI 密钥解密失败: %s', e)
+            return jsonify(success=False, message='密钥解析失败，请重新配置'), 400
 
     cfg, err = _normalize_config(data, old)
     if err:

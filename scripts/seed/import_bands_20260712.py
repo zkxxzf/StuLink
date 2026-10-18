@@ -19,7 +19,11 @@
 2026-10-16 第七轮审计（C-H1/L5）修正与补充：
 - 幂等口径 ＝ **整场先删后插**（`delete from exam_bands where exam_id=?`）——
   会一并清掉该场旧的方向线/组合线；如该场还有组合级总分线（apply_gaokao_bands
+<<<<<<< HEAD:scripts/seed/import_bands_20260712.py
   生成），重跑 `scripts/seed/apply_gaokao_bands.py --exam-id <本场> --apply` 即可补回；
+=======
+  生成），重跑 `scripts/apply_gaokao_bands.py --exam-id <本场> --apply` 即可补回；
+>>>>>>> 7a9869904398c02c2598877c06be55f164f8876c:scripts/import_bands_20260712.py
 - 已登记进 `docs/规范与说明/数据库迁移清单.md`（B 组 #37）与 `deploy/nas_migrate_pending.sh`；
   跑完在本函数末尾调 `_mig_log` 登记（幂等，登记失败不阻塞）。
 """

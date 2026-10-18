@@ -1,0 +1,130 @@
+# StuLink v1.19.49.35 2026-10-18
+# Copyright (c) 2026 zkxxzf. Apache License 2.0
+"""小程序认证与引导接口：登录 / 当前用户 / 首页入口。
+
+- POST /api/wx/login      账号密码换令牌（可指定身份组）
+- GET  /api/wx/profile    当前用户概要
+- GET  /api/wx/bootstrap  一次性拿到用户 + 身份组 + 可访问模块 + 服务端信息
+"""
+from flask import current_app, request
+
+from app.models import User
+from app.modules.wxapi import bp
+from app.modules.wxapi.guards import (
+    client_ip,
+    hit_limit,
+    wx_login_required,
+)
+from app.modules.wxapi.response import CODE_TOO_MANY, wx_err, wx_ok
+from app.modules.wxapi.serializers import group_options, user_brief
+from app.modules.wxapi.tokens import issue_token
+
+# 模块入口表：权限键 → 小程序分包路径（顺序即首页卡片顺序）
+MODULE_DEFS = (
+    ('grades', '成绩查询', 'grades.student_query',
+     '/package-grades/pages/index/index'),
+    ('schedule', '课表', 'academic.view',
+     '/package-academic/pages/schedule/index'),
+    ('dorm', '宿舍管理', 'dormitory.view',
+     '/package-dorm/pages/index/index'),
+)
+
+
+def _payload():
+    """兼容 JSON / 表单两种提交方式。"""
+    if request.is_json:
+        return request.get_json(silent=True) or {}
+    return request.form.to_dict()
+
+
+def _resolve_group(user, group_id):
+    """确定本次登录使用的身份组 id：指定且属于本人时用，否则回落主组。"""
+    if group_id:
+        try:
+            gid = int(group_id)
+        except (TypeError, ValueError):
+            gid = None
+        if gid and gid in {g['id'] for g in group_options(user)}:
+            return gid
+    pg = user.primary_group
+    return pg.id if pg is not None else None
+
+
+def _modules_of(user):
+    """按权限生成可访问模块列表（首页据此渲染卡片）。"""
+    out = []
+    for key, title, perm, path in MODULE_DEFS:
+        if user.has_perm(perm):
+            out.append({'key': key, 'title': title, 'path': path})
+    return out
+
+
+def _server_info():
+    """服务端信息：环境标识（dev/prod）+ 学校名 + 服务器时间。"""
+    from datetime import datetime
+    return {
+        'env': current_app.config.get('WX_ENV', 'prod'),
+        'school_name': current_app.config.get('SCHOOL_NAME', ''),
+        'time': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+    }
+
+
+@bp.route('/login', methods=['POST'])
+def wx_login():
+    """账号密码登录，返回访问令牌。"""
+    data = _payload()
+    username = (data.get('username') or '').strip()
+    password = data.get('password') or ''
+    if not username or not password:
+        return wx_err('请输入账号和密码')
+    ip = client_ip()
+    if not hit_limit('login_ip_%s' % ip, 30, 300):
+        return wx_err('尝试过于频繁，请稍后再试', CODE_TOO_MANY)
+    if not hit_limit('login_acc_%s_%s' % (ip, username), 10, 600):
+        return wx_err('错误次数过多，请 10 分钟后再试', CODE_TOO_MANY)
+    user = User.query.filter_by(username=username).first()
+    if user is None or not user.check_password(password):
+        return wx_err('账号或密码不正确', 401)
+    if not user.is_active:
+        return wx_err('账号已停用', 403)
+    gid = _resolve_group(user, data.get('group_id'))
+    ttl = int(current_app.config.get('WX_TOKEN_TTL', 43200))
+    token, real_ttl = issue_token(user.id, gid, ttl)
+    return wx_ok({
+        'token': token,
+        'expires_in': real_ttl,
+        'group_id': gid,
+        'user': user_brief(user),
+        'groups': group_options(user),
+        'modules': _modules_of(user),
+        'server': _server_info(),
+    })
+
+
+@bp.route('/profile')
+@wx_login_required
+def wx_profile():
+    """当前登录用户概要。"""
+    from flask import g
+    return wx_ok(user_brief(g.wx_user))
+
+
+@bp.route('/bootstrap')
+@wx_login_required
+def wx_bootstrap():
+    """首页引导数据：用户 + 身份组 + 可访问模块 + 服务端信息。"""
+    from flask import g
+    user = g.wx_user
+    return wx_ok({
+        'user': user_brief(user),
+        'groups': group_options(user),
+        'modules': _modules_of(user),
+        'server': _server_info(),
+    })
+
+
+@bp.route('/logout', methods=['POST'])
+@wx_login_required
+def wx_logout():
+    """登出：令牌本身无状态，这里只做语义响应（客户端应清除本地令牌）。"""
+    return wx_ok(message='已退出登录')

@@ -45,6 +45,11 @@ def _student_in_scope(student):
 @perm_required('students.export')   # H-2：此前只有 @login_required
 def export_students():
     from app.utils.export_helpers import do_export_students
+    # 2026-10-18 审计修复：导出学生名单（含身份证、家长联系方式）此前**无审计留痕**；
+    # 且 GET 触发的导出不在 after_request 兜底网内（兜底只拦写方法），是审计空洞。
+    log_operation(current_user, '导出', '学生名单', None,
+                  '导出学生名单（含身份证/联系方式，已按数据范围收敛）',
+                  module='system')
     if request.method == 'POST':
         return do_export_students(request.form)
     return do_export_students(request.args)
@@ -56,7 +61,11 @@ _import_errors = {}
 def _save_import_errors(errors):
     """保存导入错误，返回uuid key"""
     key = uuid.uuid4().hex
-    _import_errors[key] = (errors, time.time() + 3600)  # 1小时过期
+    # 2026-10-18 审计修复：原来只存 (errors, expiry)，**不绑定归属用户** ——
+    # 任何有 students.import 的人拿到（或猜到）key 就能下载别人的导入明细，
+    # 而明细里是原始行的身份证号等敏感内容。现在追加 owner_id 并在下载时校验。
+    _import_errors[key] = (errors, time.time() + 3600,
+                           getattr(current_user, 'id', None))
     return key
 
 
@@ -1129,11 +1138,16 @@ def import_students():
 def download_import_errors(key):
     """下载导入错误日志"""
     _clean_expired_errors()
-    data = _import_errors.pop(key, None)
+    data = _import_errors.get(key)
     if not data:
         flash('错误日志已过期或不存在', 'warning')
         return redirect(url_for('students.list_students'))
-    errors, _ = data
+    # 2026-10-18：导入明细含原始行的身份证号等敏感内容，只给导入者本人下载
+    if len(data) > 2 and data[2] is not None and data[2] != current_user.id:
+        flash('无权下载该导入日志（它不属于你）', 'danger')
+        return redirect(url_for('students.list_students'))
+    errors = data[0]
+    _import_errors.pop(key, None)
     content = '\r\n'.join(errors)
     from io import BytesIO
     buf = BytesIO()

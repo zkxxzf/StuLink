@@ -2289,9 +2289,18 @@ function autoFillAllSchedTimes(){
     });
 }
 function addScheduleRow(){
+    // 2026-10-18 审计：科目名来自后端配置，原样拼进 HTML 属性与文本位，
+    // 若值里含引号/尖括号会截断属性或注入标签 —— 拼接前统一转义。
+    function _escHtml(v){
+        return String(v == null ? '' : v).replace(/[<>&"]/g, function(c){
+            return {'<': '&lt;', '>': '&gt;', '&': '&amp;', '"': '&quot;'}[c];
+        });
+    }
     var cbs = (_SUBJECTS || []).map(function(s){
+        var es = _escHtml(s);
         return '<label class="dropdown-item-text form-check mb-0" style="font-size:.85rem">'
-            + '<input type="checkbox" class="form-check-input mt-0 me-1 subj-cb" value="' + s + '">' + s + '</label>';
+            + '<input type="checkbox" class="form-check-input mt-0 me-1 subj-cb" value="'
+            + es + '">' + es + '</label>';
     }).join('');
     var h = '<tr data-sid="">'
         + '<td><input type="date" class="form-control form-control-sm sc-date" value="' + nextSchedDate() + '"></td>'

@@ -553,7 +553,10 @@ def affair_students_import(aid):
     try:
         wb = openpyxl.load_workbook(f.stream, read_only=True, data_only=True)
     except Exception as e:
-        return jsonify({'ok': False, 'msg': f'Excel 解析失败：{e}'})
+        # 2026-10-18：openpyxl 异常原文会带出内部路径/结构，不外露给调用方
+        from flask import current_app
+        current_app.logger.warning('Excel 解析失败: %s', e, exc_info=True)
+        return jsonify({'ok': False, 'msg': 'Excel 解析失败，请检查文件格式'})
     ws = wb.active
     idx = _header_index(ws, {'学号', '姓名', '班级', '选科组合', '是否参与考试',
                              '固定考场', '固定座号', '考试科目', '自定义考号'})
@@ -1005,7 +1008,10 @@ def affair_rooms_import(aid):
     try:
         wb = openpyxl.load_workbook(f.stream, read_only=True, data_only=True)
     except Exception as e:
-        return jsonify({'ok': False, 'msg': f'Excel 解析失败：{e}'})
+        # 2026-10-18：openpyxl 异常原文会带出内部路径/结构，不外露给调用方
+        from flask import current_app
+        current_app.logger.warning('Excel 解析失败: %s', e, exc_info=True)
+        return jsonify({'ok': False, 'msg': 'Excel 解析失败，请检查文件格式'})
     ws = wb.active
     idx = _header_index(ws, {'考场编号', '考场位置', '考场科目', '考场容量', '备注', '考号前缀'})
     if '考场编号' not in idx:
@@ -1828,7 +1834,10 @@ def affair_numbers_import(aid):
     try:
         wb = openpyxl.load_workbook(f.stream, read_only=True, data_only=True)
     except Exception as e:
-        return jsonify({'ok': False, 'msg': f'Excel 解析失败：{e}'})
+        # 2026-10-18：openpyxl 异常原文会带出内部路径/结构，不外露给调用方
+        from flask import current_app
+        current_app.logger.warning('Excel 解析失败: %s', e, exc_info=True)
+        return jsonify({'ok': False, 'msg': 'Excel 解析失败，请检查文件格式'})
     ws = wb.active
     idx = _header_index(ws, {'学号', '考号', '自定义考号'})
     if '学号' not in idx:
@@ -1938,6 +1947,10 @@ def affair_export_class(aid):
     out = io.BytesIO()
     wb.save(out)
     out.seek(0)
+    # 2026-10-18 审计：导出全量考生信息（含考号/座号/姓名）此前**无审计留痕**，
+    # 且这是 GET，after_request 兜底网只拦写方法，正好覆盖不到。
+    log_operation(current_user, '导出', '考务名单', aid,
+                  f'{affair.name}：按班级导出 {len(stus)} 名考生信息', module='grades')
     return send_file(out, as_attachment=True,
                      download_name=safe_download_name(   # L-9
                          f'按班级学生信息_{affair.name}.xlsx', '按班级学生信息.xlsx'),
@@ -1960,6 +1973,9 @@ def affair_export_room(aid):
     out = io.BytesIO()
     wb.save(out)
     out.seek(0)
+    # 2026-10-18 审计：同上，按考场导出全量考生信息补审计留痕
+    log_operation(current_user, '导出', '考务名单', aid,
+                  f'{affair.name}：按考场导出 {len(stus)} 名考生信息', module='grades')
     return send_file(out, as_attachment=True,
                      download_name=safe_download_name(   # L-9
                          f'按考场学生信息_{affair.name}.xlsx', '按考场学生信息.xlsx'),
