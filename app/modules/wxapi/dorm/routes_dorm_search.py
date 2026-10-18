@@ -11,9 +11,9 @@ from sqlalchemy import or_
 
 from app.models import BedAssignment, Room, Student, StudentAccommodation
 from app.modules.wxapi import bp
-from app.modules.wxapi.guards import wx_perm_required
-from app.modules.wxapi.response import wx_err, wx_ok
-from app.modules.wxapi.routes_dorm import PERM, _room_item
+from app.modules.wxapi.core.guards import wx_perm_required
+from app.modules.wxapi.core.response import wx_err, wx_ok
+from app.modules.wxapi.dorm.routes_dorm import PERM, _room_item
 from app.utils.dormitory_scope import room_scope_query, student_scope_query
 
 SEARCH_LIMIT = 20

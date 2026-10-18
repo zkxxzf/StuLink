@@ -60,6 +60,17 @@ def decrypt(ciphertext_b64):
         return ciphertext_b64
 
 
+def mask_phone(phone):
+    """手机号掩码：前 3 后 4（139****1234）。
+
+    与主站 `app/utils/sensitive.py::mask_phone` 同口径。
+    """
+    s = (phone or '').strip()
+    if len(s) >= 7:
+        return s[:3] + '****' + s[-4:]
+    return ('***' if s else '')
+
+
 def mask_id_card(id_card):
     """身份证号脱敏：显示前6位和后4位，中间用*替换"""
     if not id_card:

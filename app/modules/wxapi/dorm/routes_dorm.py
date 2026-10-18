@@ -11,8 +11,8 @@ from sqlalchemy import func
 from app.extensions import db
 from app.models import BedAssignment, Room, Student
 from app.modules.wxapi import bp
-from app.modules.wxapi.guards import wx_perm_required
-from app.modules.wxapi.response import wx_err, wx_ok
+from app.modules.wxapi.core.guards import wx_perm_required
+from app.modules.wxapi.core.response import wx_err, wx_ok
 from app.utils.dormitory_scope import room_scope_query
 
 PERM = 'dormitory.view'
@@ -104,14 +104,52 @@ def wx_dorm_summary():
 @bp.route('/dorm/rooms')
 @wx_perm_required(PERM)
 def wx_dorm_rooms():
-    """房间列表（query: building/gender/grade/class_name/floor/page）。"""
+    """房间列表（query: building/gender/grade/class_name/floor/page）。
+
+    返回 {items, total, page, page_size}，total 供小程序显示"共 N 间"。
+    """
     q = _apply_filters(_scoped_rooms(g.wx_user))
+    total = q.count()
     page = max(1, request.args.get('page', type=int) or 1)
     q = (q.order_by(Room.building, Room.floor, Room.room_number)
          .offset((page - 1) * PAGE_SIZE).limit(PAGE_SIZE))
     rooms = q.all()
     occ = _occupancy_map(rooms)
-    return wx_ok([_room_item(r, occ.get(r.id, 0)) for r in rooms])
+    return wx_ok({
+        'items': [_room_item(r, occ.get(r.id, 0)) for r in rooms],
+        'total': total,
+        'page': page,
+        'page_size': PAGE_SIZE,
+    })
+
+
+@bp.route('/dorm/filters')
+@wx_perm_required(PERM)
+def wx_dorm_filters():
+    """筛选选项：楼栋 / 性别 / 年级 / 楼层 / 班级（按可见房间聚合）。"""
+    rows = (_scoped_rooms(g.wx_user)
+            .with_entities(Room.building, Room.gender, Room.grade,
+                           Room.floor, Room.class_name)
+            .distinct().all())
+    buildings, genders, grades, floors, classes = set(), set(), set(), set(), set()
+    for building, gender, grade, floor, cls in rows:
+        if building:
+            buildings.add(building)
+        if gender:
+            genders.add(gender)
+        if grade:
+            grades.add(grade)
+        if floor:
+            floors.add(int(floor))
+        if cls:
+            classes.add(cls)
+    return wx_ok({
+        'buildings': sorted(buildings),
+        'genders': sorted(genders),
+        'grades': sorted(grades),
+        'floors': sorted(floors),
+        'classes': sorted(classes),
+    })
 
 
 @bp.route('/dorm/room/<int:rid>')

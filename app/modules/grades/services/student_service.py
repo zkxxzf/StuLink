@@ -237,7 +237,8 @@ def build_data(user, student_no, filters):
         tr = student_total.get(e.id)
         if not tr:
             continue
-        t1.append({'exam': e.name, 'date': e.exam_date.strftime('%Y-%m-%d'),
+        t1.append({'exam': e.name, 'exam_id': e.id,
+                   'date': e.exam_date.strftime('%Y-%m-%d'),
                    'type': e.exam_type or '', 'total': tr.score,
                    'rank_class': tr.rank_class, 'rank_dir': tr.rank_dir,
                    'move': tr.move_rank, 'class_name': tr.class_name,
@@ -273,10 +274,12 @@ def build_data(user, student_no, filters):
         grd_s = data.scores_of_subject(sub)
         lines = data.subject_lines(sub)
         full = fm.get(sub, 100)
+        rank_dir, rank_class = student_ranks.get((sel_id, sub)) or (None, None)
         t2.append({'subject': sub, 'score': sc, 'full': full,
                    'rate': round(sc / full * 100, 1) if full else None,
                    'cls_avg': st.mean(cls_s), 'grd_avg': st.mean(grd_s),
                    'pass_line': lines['pass'],
+                   'rank_dir': rank_dir, 'rank_class': rank_class,
                    'is_pass': '是' if sc >= lines['pass'] else '否'})
     if tr:
         t2.append({'subject': '总分', 'score': tr.score,
@@ -284,7 +287,8 @@ def build_data(user, student_no, filters):
                    'rate': None,
                    'cls_avg': st.mean([t['score'] for t in data.totals_of(class_name=cls_name)]),
                    'grd_avg': st.mean([r.score for r in data.total_rows]),
-                   'pass_line': '—', 'is_pass': '—'})
+                   'pass_line': '—', 'is_pass': '—',
+                   'rank_dir': tr.rank_dir, 'rank_class': tr.rank_class})
     tables['subject_detail'] = {
         'title': f'{sel_exam.name} 科目明细（标注班均/年级均）',
         'columns': [{'key': 'subject', 'label': '科目', 'type': 'text'},

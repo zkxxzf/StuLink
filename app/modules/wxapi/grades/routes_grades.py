@@ -13,9 +13,9 @@ from app.modules.grades.routes.student_query import _student_query_in_scope
 from app.modules.grades.services import scope as scope_service
 from app.modules.grades.services import student_service
 from app.modules.wxapi import bp
-from app.modules.wxapi.guards import wx_perm_required
-from app.modules.wxapi.response import wx_err, wx_ok
-from app.modules.wxapi.serializers import (
+from app.modules.wxapi.core.guards import wx_perm_required
+from app.modules.wxapi.core.response import wx_err, wx_ok
+from app.modules.wxapi.core.serializers import (
     exam_item,
     grade_payload,
     student_item,
@@ -41,10 +41,13 @@ def _filters():
     f = {}
     exam_id = request.args.get('exam_id', type=int)
     term = (request.args.get('term') or '').strip()
+    subject = (request.args.get('subject') or '').strip()
     if exam_id:
         f['exam_id'] = exam_id
     if term:
         f['term'] = term
+    if subject:
+        f['subject'] = subject
     return f
 
 
@@ -77,6 +80,28 @@ def wx_grades_students():
         query = query.filter(Student.class_name == class_name)
     rows = query.order_by(Student.student_number).limit(limit).all()
     return wx_ok([student_item(s) for s in rows])
+
+
+@bp.route('/grades/classes')
+@wx_perm_required(PERM)
+def wx_grades_classes():
+    """可见年级 / 班级列表（供小程序筛选器级联）。
+
+    只取「本人可见学生」的年级班级组合，不查全校花名册。
+    """
+    rows = (_student_query_in_scope(g.wx_user)
+            .with_entities(Student.grade, Student.class_name)
+            .distinct().all())
+    buckets = {}
+    for grade, cls in rows:
+        if not grade:
+            continue
+        buckets.setdefault(grade, set())
+        if cls:
+            buckets[grade].add(cls)
+    out = [{'grade': g, 'classes': sorted(cs)}
+           for g, cs in sorted(buckets.items())]
+    return wx_ok(out)
 
 
 @bp.route('/grades/student/<no>')

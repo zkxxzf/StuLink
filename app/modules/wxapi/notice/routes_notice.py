@@ -12,8 +12,8 @@ from flask import g, request
 from app.models.notification import CATEGORY_LABELS
 from app.modules.notifications.services import notification_service as svc
 from app.modules.wxapi import bp
-from app.modules.wxapi.guards import wx_login_required
-from app.modules.wxapi.response import wx_err, wx_ok
+from app.modules.wxapi.core.guards import wx_login_required
+from app.modules.wxapi.core.response import wx_err, wx_ok
 
 PAGE_SIZE = 20
 SUMMARY_LEN = 120

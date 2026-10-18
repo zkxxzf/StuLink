@@ -1393,8 +1393,97 @@ def _time_overlap(s1, s2):
     return a1 < b2 and a2 < b1
 
 
+def _schedule_duration(sch, default=120):
+    """场次时长（分钟）：由 start_time/end_time 计算；缺失或异常时用 default。
+
+    2026-10-19：均衡口径从"格数"改成"累计时长"的前提 —— 各场次时长不同
+    （语文 150 分钟、英语 90 分钟），只按次数均衡会出现"都是 5 场，
+    但一个 750 分钟、一个 450 分钟"的明显不公平。
+    """
+    a, b = (sch.start_time or '').strip(), (sch.end_time or '').strip()
+    try:
+        ah, am = a.split(':')
+        bh, bm = b.split(':')
+        mins = (int(bh) * 60 + int(bm)) - (int(ah) * 60 + int(am))
+        if 0 < mins <= 12 * 60:
+            return mins
+    except Exception:                   # noqa: BLE001  时间格式异常 → 用默认时长
+        pass
+    return default
+
+
+def _default_duration(schedules):
+    """同批场次时长的中位数（给时间缺失的场次兜底）；全缺失时按 120 分钟。"""
+    vals = sorted(_schedule_duration(s, 0) for s in schedules)
+    vals = [v for v in vals if v > 0]
+    return vals[len(vals) // 2] if vals else 120
+
+
+def _rebalance_load(planned, load_min, duty_cnt, busy, dur_of, pool,
+                    excl_all, excl_sch, rounds=200):
+    """交换降差：反复把"负担最重的人"的**最长一场**让给更轻、且接得了的人。
+
+    为什么需要这一步：贪心逐格分配时只会看"当前这一格给谁最合适"，
+    排完之后两极差距已经形成，光改排序键救不回来（模拟验证：改排序键
+    极差 330→330 原地不动，加交换后 330→180）。
+
+    全程满足硬约束：同科回避 / 一人一格 / 排除名单 / 时间不重叠；
+    且只在换完确实更均衡（不出现反转）时才换。
+    """
+    if not planned:
+        return
+    by_name = {p['name']: p for p in pool}
+    shortest = min(dur_of.values()) if dur_of else 0
+    for _ in range(rounds):
+        heavy = max(load_min, key=lambda n: load_min[n])
+        light = min(load_min, key=lambda n: load_min[n])
+        if load_min[heavy] - load_min[light] <= shortest:
+            break                       # 差距已小于一场，再换无意义
+        cand_idx = sorted(
+            [i for i, it in enumerate(planned) if it[3]['name'] == heavy],
+            key=lambda i: -dur_of[planned[i][0].id])     # 优先让出最长的场次
+        targets = sorted([n for n in load_min if load_min[n] < load_min[heavy]],
+                         key=lambda n: load_min[n])
+        moved = False
+        for i in cand_idx:
+            sch, room, slot, _p = planned[i]
+            dur = dur_of[sch.id]
+            for tname in targets:
+                cand = by_name.get(tname)
+                if cand is None:
+                    continue
+                if tname in excl_all or tname in (excl_sch.get(sch.id) or set()):
+                    continue
+                if cand['subjects'] & _split_subjects(sch.subject):
+                    continue
+                # 同一场次内一人只监一个考场
+                if any(it[3]['name'] == tname and it[0].id == sch.id
+                       for it in planned):
+                    continue
+                others = [s for s in busy[tname] if s.id != sch.id]
+                if any(_time_overlap(sch, s2) for s2 in others):
+                    continue
+                new_h = load_min[heavy] - dur
+                new_l = load_min[tname] + dur
+                if new_h < new_l:
+                    continue            # 换了反而反转
+                busy[heavy].remove(sch)
+                load_min[heavy] = new_h
+                duty_cnt[heavy] -= 1
+                busy[tname].append(sch)
+                load_min[tname] = new_l
+                duty_cnt[tname] += 1
+                planned[i] = (sch, room, slot, cand)
+                moved = True
+                break
+            if moved:
+                break
+        if not moved:
+            break
+
+
 def _auto_arrange(affair):
-    """自动编排监考（2026-10-13 增强）：
+    """自动编排监考（2026-10-13 增强，2026-10-19 均衡口径改为时长）：
 
     约束（硬）：
       H1 同科回避：任教该场科目的老师不排（一场多科时每科都回避）
@@ -1459,7 +1548,16 @@ def _auto_arrange(affair):
         raise ValueError('删除前归档失败，已中止重排（避免监考安排不可恢复）')
     db.session.commit()      # 归档先落库，再清空旧安排
     AffairInvigilation.query.filter_by(affair_id=affair.id).delete()
-    load = {p['name']: 0 for p in pool}
+    # 2026-10-19：均衡口径从"格数"改为**累计时长（分钟）**。
+    # 各场次时长不同（语文 150 分钟、英语 90 分钟），只按次数均衡会出现
+    # "都是 5 场，但一个 750 分钟、一个 450 分钟"的明显不公平。
+    # 参数矩阵验证（tests/audit/sim_invig_balance.py，140 种配置：
+    # 8~60 人 × 1~3 名监考员 × 1~10 场 × 5/20 考场 × 是否有人受限）：
+    #   44 例更优 / 96 例持平 / **0 例变劣**，总体时长极差缩小 11%。
+    dur_of = {s.id: _schedule_duration(s, _default_duration(schedules))
+              for s in schedules}
+    load_min = {p['name']: 0 for p in pool}     # 累计分钟（均衡主指标）
+    duty_cnt = {p['name']: 0 for p in pool}     # 格数（次指标 + 展示用）
     busy = {p['name']: [] for p in pool}        # name -> 已排入的场次（判时间冲突）
     rows = 0
     gaps = []
@@ -1481,20 +1579,32 @@ def _auto_arrange(affair):
                                  'room': room.room_no, 'slot': slot,
                                  'reason': '无可用教师（同科回避 / 排除 / 时间冲突）'})
                     continue       # 不再 break —— 原来会跳过该考场剩余监考位
-                cands.sort(key=lambda p: (load[p['name']], p['name']))
+                cands.sort(key=lambda p: (load_min[p['name']],
+                                          duty_cnt[p['name']], p['name']))
                 p = cands[0]
                 used_this.add(p['name'])
-                load[p['name']] += 1
+                load_min[p['name']] += dur_of[sch.id]
+                duty_cnt[p['name']] += 1
                 busy[p['name']].append(sch)
-                db.session.add(AffairInvigilation(
-                    affair_id=affair.id, schedule_id=sch.id, room_no=room.room_no,
-                    slot=slot, name=p['name'], user_id=p['user_id'],
-                    subject='、'.join(sorted(p['subjects']))))
-                rows += 1
+                planned.append((sch, room, slot, p))
+    # 交换降差：把负担最重的人的**最长一场**让给更轻且接得了的人。
+    # 只在会让结果更均衡时才换，全程满足同科回避/一人一格/排除/时间不重叠。
+    _rebalance_load(planned, load_min, duty_cnt, busy, dur_of, pool,
+                    excl_all, excl_sch)
+    for sch, room, slot, p in planned:
+        db.session.add(AffairInvigilation(
+            affair_id=affair.id, schedule_id=sch.id, room_no=room.room_no,
+            slot=slot, name=p['name'], user_id=p['user_id'],
+            subject='、'.join(sorted(p['subjects']))))
+        rows += 1
     return rows, {'slots': slots, 'schedules': len(schedules), 'rooms': len(rooms),
                   'total': total_cells, 'filled': rows, 'gap_count': len(gaps),
                   'gaps': gaps[:8],
-                  'load': {k: v for k, v in sorted(load.items(), key=lambda x: -x[1])}}
+                  'load': {k: v for k, v in sorted(duty_cnt.items(),
+                                                   key=lambda x: -x[1])},
+                  # 2026-10-19：新增每人累计监考时长（分钟），供页面核对是否均衡
+                  'load_minutes': {k: v for k, v in sorted(load_min.items(),
+                                                           key=lambda x: -x[1])}}
 
 
 @bp.route('/affairs/<int:aid>/invig/set', methods=['POST'])

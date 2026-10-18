@@ -72,8 +72,8 @@
             <div class="col-md-3"><span class="text-muted">住校/走读：</span>{{ s.boarding_type or '-' }}</div>
             <div class="col-md-3"><span class="text-muted">学籍：</span>{{ s.enrollment_status or '-' }}</div>
             <div class="col-md-3"><span class="text-muted">毕业学校：</span>{{ s.graduation_school or '-' }}{% if s.graduation_school_code %} ({{ s.graduation_school_code }}){% endif %}</div>
-            <div class="col-md-3"><span class="text-muted">电话1：</span>{{ s.phone1 or '-' }}</div>
-            <div class="col-md-3"><span class="text-muted">电话2：</span>{{ s.phone2 or '-' }}</div>
+            <div class="col-md-3"><span class="text-muted">电话1：</span>{{ s.phone1_masked or '-' }}</div>
+            <div class="col-md-3"><span class="text-muted">电话2：</span>{{ s.phone2_masked or '-' }}</div>
         </div>
         {% set logs = change_logs.get(s.original_id, []) %}
         {% if logs %}

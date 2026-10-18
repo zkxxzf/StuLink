@@ -12,29 +12,58 @@ from flask import current_app, request
 
 from app.models import User
 from app.modules.wxapi import bp
-from app.modules.wxapi.guards import (
+from app.modules.wxapi.core.guards import (
     client_ip,
     hit_limit,
     wx_login_required,
 )
-from app.modules.wxapi.response import CODE_TOO_MANY, wx_err, wx_ok
-from app.modules.wxapi.serializers import group_options, user_brief
-from app.modules.wxapi.tokens import issue_token
+from app.modules.wxapi.core.response import CODE_TOO_MANY, wx_err, wx_ok
+from app.modules.wxapi.core.serializers import group_options, user_brief
+from app.modules.wxapi.core.tokens import issue_token
 
 logger = logging.getLogger(__name__)
 
 # 模块入口表：(key, 标题, 所需权限键或 None, 分包路径)
 # 顺序即首页卡片顺序；permission=None 表示登录即可访问（如通知公告）。
+# permission 也可以是元组 = 任一满足即可（课表：教务端 academic.view，
+# 教师端 workbench.class_view —— 两个权限种子里教师组不一致，网页端同口径）。
 MODULE_DEFS = (
     ('notice', '通知公告', None,
      '/package-notice/pages/index/index'),
+    ('exam', '考务监考', None,
+     '/package-exam/pages/index/index'),
     ('grades', '成绩查询', 'grades.student_query',
      '/package-grades/pages/index/index'),
-    ('schedule', '课表', 'academic.view',
+    ('schedule', '课表', ('academic.view', 'workbench.class_view'),
      '/package-academic/pages/schedule/index'),
     ('dorm', '宿舍管理', 'dormitory.view',
      '/package-dorm/pages/index/index'),
 )
+
+
+def _has_any(user, perm):
+    """权限判定：字符串＝单权限，元组＝任一满足。"""
+    if not perm:
+        return True
+    if isinstance(perm, (tuple, list)):
+        return any(user.has_perm(p) for p in perm)
+    return user.has_perm(perm)
+
+
+def _caps(user):
+    """前端能力开关：决定页面里哪些入口可见（不代替接口鉴权）。"""
+    return {
+        # 班级 / 教师课表属于教务视角；教师只有「我的课表」
+        'schedule_others': bool(user.has_perm('academic.view')),
+        'grades_analysis': bool(user.has_perm('grades.student_query')),
+        # 应用页按模块权限决定入口是否展示（接口仍各自鉴权）
+        'points': bool(user.has_perm('points.view')),
+        'morality': bool(user.has_perm('morality.view')),
+        'portrait': bool(user.has_perm('portrait.view')),
+        'attendance': bool(user.has_perm('workbench.attendance_view')),
+        'dorm': bool(user.has_perm('dormitory.view')),
+        'admin': getattr(user, 'role', '') == 'admin',
+    }
 
 
 def _payload():
@@ -61,7 +90,7 @@ def _modules_of(user):
     """按权限生成可访问模块列表（首页据此渲染卡片）。"""
     out = []
     for key, title, perm, path in MODULE_DEFS:
-        if perm and not user.has_perm(perm):
+        if not _has_any(user, perm):
             continue
         out.append({'key': key, 'title': title, 'path': path})
     return out
@@ -117,6 +146,7 @@ def wx_login():
         'user': user_brief(user),
         'groups': group_options(user),
         'modules': _modules_of(user),
+        'caps': _caps(user),
         'server': _server_info(),
     })
 
@@ -139,6 +169,7 @@ def wx_bootstrap():
         'user': user_brief(user),
         'groups': group_options(user),
         'modules': _modules_of(user),
+        'caps': _caps(user),
         'server': _server_info(),
         'notice_unread': _unread(user),
     })

@@ -74,6 +74,7 @@ def _history_row(row):
     """历次总分行：考试名 / 总分 / 班名 / 校名 / 变化。"""
     return {
         'exam': _pick(row, 'exam') or '',
+        'exam_id': _pick(row, 'exam_id'),
         'date': str(_pick(row, 'date') or ''),
         'type': _pick(row, 'type') or '',
         'total': _pick(row, 'total'),
@@ -94,7 +95,7 @@ def _pass_flag(raw):
 
 
 def _subject_row(row):
-    """科目明细行：学科 / 得分 / 满分 / 得分率 / 班均 / 校均 / 是否及格。"""
+    """科目明细行：学科 / 得分 / 满分 / 得分率 / 班均 / 校均 / 排名 / 是否及格。"""
     return {
         'subject': _pick(row, 'subject') or '',
         'score': _pick(row, 'score'),
@@ -102,15 +103,74 @@ def _subject_row(row):
         'rate': _pick(row, 'rate'),
         'cls_avg': _pick(row, 'cls_avg'),
         'grd_avg': _pick(row, 'grd_avg'),
+        'pass_line': _pick(row, 'pass_line'),
+        'rank_dir': _pick(row, 'rank_dir'),
+        'rank_class': _pick(row, 'rank_class'),
         'is_pass': _pass_flag(_pick(row, 'is_pass')),
     }
+
+
+# 小程序只渲染这 5 张图（其余图表是网页专用的大表/矩阵，透传会白耗流量）
+CHART_KEYS = ('trend_total', 'trend_subject', 'subject_trend',
+              'subject_compare', 'subject_radar', 'rank_trend')
+
+
+def _chart(chart):
+    """裁剪一张图表：只保留渲染必需字段（xAxis / series / 指标 / 参考线）。"""
+    if not isinstance(chart, dict):
+        return None
+    out = {
+        'title': chart.get('title') or '',
+        'type': chart.get('type') or '',
+        'xAxis': chart.get('xAxis') or [],
+        'series': [
+            {'name': s.get('name') or '', 'data': s.get('data') or []}
+            for s in (chart.get('series') or [])
+        ],
+    }
+    if chart.get('indicators'):
+        out['indicators'] = chart['indicators']
+    if chart.get('markLine') is not None:
+        out['markLine'] = chart['markLine']
+    if chart.get('inverse'):
+        out['inverse'] = True
+    return out
+
+
+def _charts(raw):
+    """把 build_data 的 charts 裁成小程序图表字典。"""
+    if not isinstance(raw, dict):
+        return {}
+    out = {}
+    for key in CHART_KEYS:
+        item = _chart(raw.get(key))
+        if item and item.get('series'):
+            out[key] = item
+    return out
+
+
+def _rank_rows(tables):
+    """各科最新成绩与排名波动（表格转数组，前端直接渲染）。"""
+    rows = _rows((tables or {}).get('subject_rank'))
+    return [{
+        'subject': _pick(r, 'subject') or '',
+        'exam': _pick(r, 'exam') or '',
+        'score': _pick(r, 'score'),
+        'full': _pick(r, 'full'),
+        'rate': _pick(r, 'rate'),
+        'rank_dir': _pick(r, 'rank_dir'),
+        'rank_class': _pick(r, 'rank_class'),
+        'score_diff': _pick(r, 'score_diff'),
+        'rank_move': _pick(r, 'rank_move'),
+    } for r in rows]
 
 
 def grade_payload(data, history_limit=HISTORY_LIMIT):
     """把 build_data 结果裁成小程序结构。
 
     入参：data=student_service.build_data 的返回值。
-    返回：dict {student, exams, history, latest}；入参无数据时返回 None。
+    返回：dict {student, exams, history, latest, charts, tables}；
+    入参无数据时返回 None。
     """
     if not isinstance(data, dict) or data.get('error'):
         return None
@@ -123,14 +183,24 @@ def grade_payload(data, history_limit=HISTORY_LIMIT):
         'exams': exams,
         'history': history[:history_limit],
         'latest': latest,
+        'charts': _charts(data.get('charts')),
+        'tables': {'subject_rank': _rank_rows(tables)},
+        'meta': data.get('meta') or {},
     }
 
 
 def _latest_block(data, exams, tables):
-    """最近一场考试的科目明细块（含考试名，便于前端直接展示）。"""
-    subjects = [_subject_row(r) for r in _rows(tables.get('subject_detail'))]
+    """最近一场考试的科目明细块（含考试名 / 总分块，便于前端直接展示）。"""
+    rows = _rows(tables.get('subject_detail'))
+    subjects = [_subject_row(r) for r in rows]
     if not subjects:
         return None
     sel_id = data.get('selected_exam_id')
     name = next((e['name'] for e in exams if e.get('id') == sel_id), '')
-    return {'exam_id': sel_id, 'exam_name': name, 'subjects': subjects}
+    total = next((s for s in subjects if s['subject'] == '总分'), None)
+    return {
+        'exam_id': sel_id,
+        'exam_name': name,
+        'subjects': [s for s in subjects if s['subject'] != '总分'],
+        'total': total,
+    }
