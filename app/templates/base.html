@@ -497,7 +497,7 @@
             {% elif request.blueprint == 'grades' %}
             {# v1.19.0：成绩模块不单列「成绩管理」入口（与下方同名小节标题重复），
                落地页由下方首项承担；2026-10-13 起该首项为「首页仪表盘」（/grades/），
-               其后 历次考试 / 个人成绩 / 基础配置。 #}
+               其后 历次考试 / 学生成绩 / 基础配置。 #}
             {% elif request.blueprint in ('points', 'morality') %}
             {# 2026-10-13（v1.19.49.35）：奖惩页（morality 蓝图）与积分同属德育，共用这一栏菜单 #}
             <a class="nav-link" href="{{ url_for('points.index') }}">
@@ -711,7 +711,7 @@
                     <a class="efn-item ps-4 {% if request.endpoint == 'grades.exam_near_line' %}active{% endif %}" data-nav="near"
                        href="{{ url_for('grades.exam_near_line', exam_id=EN.exam_id) }}">临界生对比</a>
                     <a class="efn-item ps-4 {% if request.endpoint == 'grades.pivot_page' %}active{% endif %}" data-nav="pivot"
-                       href="{{ url_for('grades.pivot_page') }}?exam={{ EN.exam_id }}">成绩分析自由表</a>
+                       href="{{ url_for('grades.pivot_page') }}?exam={{ EN.exam_id }}">自由分析</a>
                     {# 2026-10-18 表彰名单：年级前 30 / 卓越班前 10 / 单科前 10（并列全列） #}
                     <a class="efn-item ps-4 {% if request.endpoint == 'grades.honor' %}active{% endif %}" data-nav="honor"
                        href="{{ url_for('grades.honor') }}?exam={{ EN.exam_id }}">表彰名单</a>
@@ -753,8 +753,8 @@
             {% else %}
             {# ---------- 全局态：精简菜单 ----------
                2026-10-13 用户口径：成绩模块落地页＝「首页仪表盘」（跨考试总览），
-               其后依次 历次考试 / 个人成绩 / 基础配置；
-               「个人成绩查询」按用户要求更名「个人成绩」（仅展示名，权限 key 不变）。 #}
+               其后依次 历次考试 / 学生成绩 / 基础配置；
+               「个人成绩查询」按用户要求更名「学生成绩」（仅展示名，权限 key 不变）。 #}
             <a class="nav-link {% if request.endpoint == 'grades.dashboard' %}active{% endif %}"
                href="{{ url_for('grades.dashboard') }}">
                 <i class="bi bi-speedometer2"></i>首页仪表盘
@@ -778,11 +778,11 @@
                全局态再放一个 = 同一功能两个入口，且会让人误以为它属于考试列表这一层。 #}
             {# v1.19.0 全局态只放“跨多次考试”的内容；分析类子模块已收进本场考试的分析段 #}
             {% if current_user.has_perm('grades.student_query') %}
-            {# 个人成绩分区＝两页（个人成绩/成绩证明），侧栏同一入口；两页都算本项 active。
+            {# 学生成绩分区＝两页（学生成绩/成绩证明），侧栏同一入口；两页都算本项 active。
                2026-10-13：「成绩核验」页已删除（核验入口在证明台账每行的「核验」按钮） #}
             <a class="nav-link {% if request.endpoint in ('grades.student_query_page','grades.cert_records_page') %}active{% endif %}"
                href="{{ url_for('grades.student_query_page') }}">
-                <i class="bi bi-person-vcard"></i>个人成绩
+                <i class="bi bi-person-vcard"></i>学生成绩
             </a>
             {% endif %}
             {# v1.19.49.35 移除「分数修改记录」全局入口：它属于单场考试的数据，只在该场成绩单页右上角进入 #}

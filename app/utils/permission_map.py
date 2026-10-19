@@ -75,8 +75,8 @@ MODULES = [
             # 全校可用性，必须单独勾选）；无此权限时全局 Key 端点 403。
             {'key': 'ai_manage', 'name': 'AI 全局 Key', 'standalone': True,
              'read': [], 'write': ['grades.ai_manage']},
-            # 2026-10-13：展示名与侧栏统一为「个人成绩」（权限 key 不变）
-            {'key': 'query', 'name': '个人成绩',
+            # 2026-10-19：展示名与侧栏统一为「学生成绩」（权限 key 不变）
+            {'key': 'query', 'name': '学生成绩',
              'read': [], 'write': ['grades.student_query']},
             {'key': 'subject', 'name': '选科维护',
              'read': [], 'write': ['grades.subject_mgmt']},

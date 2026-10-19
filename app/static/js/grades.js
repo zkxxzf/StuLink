@@ -191,6 +191,8 @@ function classListFor(grade){
     return (opts && opts.classes && opts.classes[grade]) ? opts.classes[grade].slice() : [];
 }
 
+/* 2026-10-19 用户口径：班级筛选改成和成绩单「按班级查看」一样的一排按钮
+   （01班、02班…），点一次即切换，不再用下拉。只在「班级分析」页签显示。 */
 function fillClasses(){
     var grade = $('#gGrade').val() || state.grade;
     var list = classListFor(grade);
@@ -199,31 +201,76 @@ function fillClasses(){
             return opts.locked.classes.some(function(l){ return l.grade === grade && l.class_name === c; });
         });
     }
-    var sel = $('#gClass').empty().append('<option value="">班级…</option>');
-    list.forEach(function(c){ sel.append('<option value="'+c+'">'+c+'</option>'); });
-    if (list.length) sel.val(list[0]);
-    state.class_name = sel.val() || '';
+    var bar = $('#gClassBar').empty();
+    list.forEach(function(c){
+        $('<button type="button" class="btn btn-sm g-class-btn"></button>')
+            .attr('data-cls', c).text(c).appendTo(bar);
+    });
+    if (!list.length){
+        bar.append('<span class="text-muted small">本场考试暂无班级</span>');
+    }
+    // 与原下拉一致：进入/切换考试时默认选第一个班
+    state.class_name = list[0] || '';
+    paintClassBar();
     fillSubject();
 }
 
+/* 班级按钮选中态：当前班=实心主色，其余=描边（与成绩单页按钮同一套观感） */
+function paintClassBar(){
+    $('#gClassBar .g-class-btn').each(function(){
+        var on = $(this).attr('data-cls') === state.class_name;
+        $(this).toggleClass('btn-primary', on)
+               .toggleClass('btn-outline-secondary', !on)
+               .attr('aria-pressed', on ? 'true' : 'false');
+    });
+}
+
+/* 2026-10-19 用户口径：学科筛选同样改成一排按钮（语文、数学…），
+   与班级筛选/成绩单页一致；只在「学科分析」「任课教师」页签显示。 */
 function fillSubject(){
-    var sel = $('#gSubject').empty();
+    var bar = $('#gSubjectBar').empty();
+    var mine = opts.teacher_combos || [];
+    var list = [];
     if (state.tab === 'subject'){
-        opts.subjects.forEach(function(s){ sel.append('<option value="'+s+'">'+s+'</option>'); });
-        if (!state.subject || !opts.subjects.includes(state.subject)) state.subject = opts.subjects[0] || '';
-        sel.val(state.subject);
+        list = opts.subjects.slice();
     } else if (state.tab === 'teacher'){
-        sel.append('<option value="">全部科目</option>');
-        var used = {};
-        opts.subjects.forEach(function(s){ used[s] = true; });
-        if (opts.teacher_combos && opts.teacher_combos.length){
-            opts.subjects.forEach(function(s){
-                if (opts.teacher_combos.some(function(c){ return c.subject === s; }))
-                    sel.append('<option value="'+s+'">'+s+'（仅我任课）</option>');
-            });
-        }
-        state.subject = '';
+        // 教师表只做「同学科教师」对比 → 不再提供「全部科目」，
+        // 默认落到第一个可选科目；教师角色只列本人任课科目（按钮 title 标注）。
+        list = mine.length
+            ? opts.subjects.filter(function(s){
+                  return mine.some(function(c){ return c.subject === s; });
+              })
+            : opts.subjects.slice();
+    } else {
+        return;                       // 其他页签不展示学科筛选
     }
+    if (!state.subject || list.indexOf(state.subject) < 0)
+        state.subject = list[0] || '';
+    list.forEach(function(s){
+        var own = (state.tab === 'teacher') && mine.some(function(c){
+            return c.subject === s;
+        });
+        appendSubjectBtn(bar, s, own);
+    });
+    paintSubjectBar();
+}
+
+/* 生成单个学科按钮（own=true 表示教师页签里"仅我任课"的科目） */
+function appendSubjectBtn(bar, subject, own){
+    $('<button type="button" class="btn btn-sm g-subject-btn"></button>')
+        .attr('data-subject', subject)
+        .attr('title', own ? '仅我任课的科目' : '')
+        .text(subject).appendTo(bar);
+}
+
+/* 学科按钮选中态：当前科目=实心主色，其余=描边（与班级按钮同一套观感） */
+function paintSubjectBar(){
+    $('#gSubjectBar .g-subject-btn').each(function(){
+        var on = $(this).attr('data-subject') === state.subject;
+        $(this).toggleClass('btn-primary', on)
+               .toggleClass('btn-outline-secondary', !on)
+               .attr('aria-pressed', on ? 'true' : 'false');
+    });
 }
 
 /* 2026-10-16 组合维度：本场考试出现过的选科组合 → 「组合」下拉。
@@ -256,10 +303,20 @@ function bindFilters(){
         fillCombos();           // 2026-10-16 组合随考试变
         loadCurrent();
     });
-    $('#gClass').on('change', function(){ state.class_name = $(this).val(); loadCurrent(); });
-    $('#gSubject').on('change', function(){
-        state.subject = $(this).val();
-        if (state.tab === 'teacher' && $(this).val() === '') state.subject = '';
+    // 班级按钮：点一次即切换（同成绩单页「按班级查看」），重复点当前班不重复请求
+    $('#gClassBar').on('click', '.g-class-btn', function(){
+        var cls = $(this).attr('data-cls') || '';
+        if (!cls || cls === state.class_name) return;
+        state.class_name = cls;
+        paintClassBar();
+        loadCurrent();
+    });
+    // 学科按钮：点一次即切换（与班级按钮/成绩单页同一交互）
+    $('#gSubjectBar').on('click', '.g-subject-btn', function(){
+        var sub = $(this).attr('data-subject') || '';
+        if (!sub || sub === state.subject) return;
+        state.subject = sub;
+        paintSubjectBar();
         loadCurrent();
     });
     $('#gDir').on('change', function(){
@@ -432,20 +489,20 @@ function activateTab(tab, fromClick){
     state.tab = tab;
     // 筛选器显隐：班级仅班级分析；科目按 tab；班级多选仅对比 tab；
     // 人群（方向/组合）用于年级/学科/班级分析（2026-10-16 班级分析也支持按组合）
-    $('#gClass').toggleClass('d-none', tab !== 'class');
+    // 班级按钮组（班级分析专用）随 tab 显隐
+    $('#gClassBar').toggleClass('d-none', tab !== 'class');
     $('#gClassMulti').toggleClass('d-none', tab !== 'compare');
     var _popOn = (tab === 'grade' || tab === 'subject' || tab === 'class');
     $('#gPopWrap').toggleClass('d-none', !_popOn);
     $('#gSel').toggleClass('d-none', !_popOn);
     // 修复：原条件写反——学科/教师分析 tab 需要显示科目筛选器，年级/班级 tab 隐藏
-    $('#gSubject').toggleClass('d-none', tab !== 'subject' && tab !== 'teacher');
+    $('#gSubjectBar').toggleClass('d-none', tab !== 'subject' && tab !== 'teacher');
     if (tab === 'subject' || tab === 'teacher') fillSubject();
     if (tab === 'compare') renderClassList();
     $('#gTabs a[href="#pane-'+tab+'"]').tab('show');
-    // 班级下拉只随 tab 显隐，**绝不清空其值**：一旦清空，切回班级分析时
-    // state.class_name 读到空 → 后端查不到班级 → 前端误报"该考试尚未导入成绩"。
+    // 班级只随 tab 显隐，**绝不清空其值**：清空会让后端查不到班级 →
+    // 前端误报"该考试尚未导入成绩"。state.class_name 由 fillClasses/点击按钮维护。
     // （buildQuery 仅在 tab==='class' 时带 class_name，其他 tab 保留该值无副作用）
-    state.class_name = $('#gClass').val() || '';
     syncUrlTab(tab);
     syncSidebarTab(tab);
     loadCurrent();
@@ -527,30 +584,22 @@ var escHtml = window.escHtml || function (s) {
 };
 
 function buildExamInfo(data){
-    if (!data.exam) return null;
-    var wrap = $('<div>');
-    wrap.append($('<div class="alert alert-light border py-2 small mb-2">').append(
-        '<i class="bi bi-info-circle"></i> ' +
-        '当前考试：<strong>' + escHtml(data.exam.name) + '</strong> · ' +
-        escHtml(data.exam.grade) + ' · ' + escHtml(data.exam.date) +
-        (data.class_name ? ' · 班级：' + escHtml(data.class_name) : '') +
-        ((data.classes || []).length ? ' · 对比班级：' + escHtml(data.classes.join('、')) : '') +
-        (data.subject ? ' · 科目：' + escHtml(data.subject) : '')
-    ));
-    // 分批导入（一次导一科）时，总分只是「已导入科目合计」，必须显式提示避免误读
+    // 2026-10-19 用户口径：内容区不再重复「当前考试：…」提示条
+    // （考试态页头已写明本场、全局态顶部有考试下拉，此条属冗余）。
+    // 分批导入（一次导一科）时，总分只是「已导入科目合计」，必须显式提示避免误读。
     var p = data.meta && data.meta.partial;
-    if (p){
-        wrap.append($('<div class="alert alert-warning py-2 small mb-2">').append(
-            // 注：expected 是全年级选科并集（可能 9 科），不是某个学生的应考科，
-            // 所以这里不写「x/y 科」的比例，避免误以为学生要考 9 科
-            '<i class="bi bi-exclamation-triangle"></i> <b>分批导入中</b>：本场已导入 '
-            + escHtml((p.imported || []).join('、') || '—') + '；'
-            + '本年级涉及的科目中尚未导入：<b>' + escHtml((p.missing || []).join('、')) + '</b>。'
-            + '此时<b>总分、总分排名、分数段/名次段及基于总分的上线统计</b>都只是'
-            + '「已导入科目合计」的口径，全部科目导完后才准确；'
-            + '单科分析（科目均分、及格率、单科排名）不受影响。'
-        ));
-    }
+    if (!p) return null;
+    var wrap = $('<div>');
+    wrap.append($('<div class="alert alert-warning py-2 small mb-2">').append(
+        // 注：expected 是全年级选科并集（可能 9 科），不是某个学生的应考科，
+        // 所以这里不写「x/y 科」的比例，避免误以为学生要考 9 科
+        '<i class="bi bi-exclamation-triangle"></i> <b>分批导入中</b>：本场已导入 '
+        + escHtml((p.imported || []).join('、') || '—') + '；'
+        + '本年级涉及的科目中尚未导入：<b>' + escHtml((p.missing || []).join('、')) + '</b>。'
+        + '此时<b>总分、总分排名、分数段/名次段及基于总分的上线统计</b>都只是'
+        + '「已导入科目合计」的口径，全部科目导完后才准确；'
+        + '单科分析（科目均分、及格率、单科排名）不受影响。'
+    ));
     return wrap;
 }
 

@@ -39,8 +39,12 @@ from app.modules.wxapi.grades import (  # noqa: E402,F401
     routes_grades_compare,
     routes_grades_honor,
     routes_grades_stats,
+    routes_manage,
+    routes_manage_edit,
+    routes_manage_views,
     routes_portrait_list,
     routes_reviews,
+    routes_scores,
     routes_student_profile,
 )
 from app.modules.wxapi.academic import (  # noqa: E402,F401

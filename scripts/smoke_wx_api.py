@@ -173,6 +173,26 @@ def main():
                          '/grades/segments?exam_id=%d&by_rank=1' % exam_id)
         check('名次分层标记 by_rank',
               (rank or {}).get('by_rank') is True)
+        sc = expect_ok(client, headers,
+                       '/grades/scores?exam_id=%d&size=30' % exam_id) or {}
+        check('成绩单含 rows/subjects',
+              isinstance(sc.get('rows'), list)
+              and isinstance(sc.get('subjects'), list))
+        check('成绩单分页字段完整',
+              sc.get('page') == 1 and (sc.get('total_pages') or 0) >= 1
+              and sc.get('size') == 30)
+        check('成绩单行含总分与科目',
+              bool(sc.get('rows')) and 'subjects' in sc['rows'][0]
+              and 'rank_class' in sc['rows'][0])
+        if cls and sc.get('rows'):
+            from urllib.parse import quote
+            one = expect_ok(
+                client, headers,
+                '/grades/scores?exam_id=%d&class_name=%s&size=5'
+                % (exam_id, quote(cls[0]))) or {}
+            check('成绩单按班级过滤',
+                  all(r.get('class_name') == cls[0]
+                      for r in (one.get('rows') or [])))
         honor = maybe_ok(client, headers,
                          '/grades/honor?exam_id=%d' % exam_id)
         if honor:

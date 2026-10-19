@@ -15,6 +15,9 @@
     }
     .g-pop select { border-color: var(--sl-border); }
     .g-pop select:disabled { background: var(--sl-surface-3); color: var(--sl-text-muted); }
+    /* 2026-10-19 班级/学科筛选都改成一排按钮（01班…、语文…），同成绩单「按班级查看」 */
+    .g-class-bar, .g-subject-bar { display: flex; flex-wrap: wrap; gap: 4px; }
+    .g-class-bar .btn, .g-subject-bar .btn { min-width: 52px; }
 </style>
 {# v1.19.49.35 考试态（从侧栏「班级分析 / 学科分析」进入，带 ?exam=<id>）：
    本页只看这一场，顶部不再让用户选年级/考试 —— 直接按本场加载（initial_exam_id 已由服务端带入，
@@ -44,11 +47,6 @@
     <select id="gDenom" class="form-select form-select-sm w-auto" title="统计口径：分母按参考数（有分数且>0）还是班级实际在籍人数">
         <option value="ref">口径：参考数</option>
         <option value="enrolled">口径：班级实际人数</option>
-    </select>
-    <select id="gClass" class="form-select form-select-sm w-auto d-none" title="班级">
-        <option value="">班级…</option>
-    </select>
-    <select id="gSubject" class="form-select form-select-sm w-auto d-none" title="科目">
     </select>
     {# 班级多选（仅「班级对比」显示）：下拉里勾选若干班，默认约班级总数的 1/3 #}
     <div class="dropdown d-none" id="gClassMulti">
@@ -103,6 +101,11 @@
         {# v1.13.0 汇报区入口移至左侧菜单栏（base.html 成绩管理侧边栏），顶部按钮区不再放置 #}
     </div>
 </div>
+
+{# 2026-10-19 用户口径：班级/学科筛选从下拉改成一排按钮（01班…、语文…），
+   与成绩单「按班级查看」一致；只在对应用页签显示，点击即切换。 #}
+<div id="gClassBar" class="g-class-bar no-print mb-3 d-none" role="group" aria-label="班级筛选"></div>
+<div id="gSubjectBar" class="g-subject-bar no-print mb-3 d-none" role="group" aria-label="学科筛选"></div>
 
 <ul class="nav nav-tabs mb-3" id="gTabs" role="tablist">
     <li class="nav-item" data-tab="grade"><a class="nav-link" data-bs-toggle="tab" href="#pane-grade">年级分析</a></li>

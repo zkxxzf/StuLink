@@ -8,11 +8,12 @@
 from flask import g, request
 
 from app.extensions import db
-from app.models.grades import Exam, ExamScore, TeacherSubjectLink
+from app.models.grades import Exam, ExamScore, TOTAL_SUBJECT, TeacherSubjectLink
 from app.modules.grades.services import compare_service
 from app.modules.grades.services import scope as scope_service
 from app.modules.grades.services import score_guard
 from app.modules.grades.services import tab_service
+from app.modules.grades.utils import numeric_classes
 from app.modules.wxapi import bp
 from app.modules.wxapi.core.guards import wx_perm_required
 from app.modules.wxapi.core.response import wx_err, wx_ok
@@ -55,10 +56,16 @@ def _subjects(exam_id):
 
 
 def _classes(exam_id):
+    """本场教学班（总分行快照 + 排除 不分班/已转出/离校）。
+
+    与网页 analysis._classes_by_exam 同一口径；此前按全部成绩行去重，
+    会把科目行上的旧班级和非教学班一并带进来。
+    """
     rows = (db.session.query(ExamScore.class_name)
-            .filter(ExamScore.exam_id == exam_id)
+            .filter(ExamScore.exam_id == exam_id,
+                    ExamScore.subject == TOTAL_SUBJECT)
             .distinct().all())
-    return sorted({r[0] for r in rows if r[0]})
+    return numeric_classes(sorted({r[0] for r in rows if r[0]}))
 
 
 def _compact(data):
