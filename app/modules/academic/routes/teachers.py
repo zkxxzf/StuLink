@@ -77,8 +77,19 @@ def _teacher_query(filters):
     kw = filters.get('kw')
     if kw:
         like = f'%{kw}%'
-        q = q.filter(or_(Teacher.name.like(like), Teacher.teacher_uid.like(like),
-                         Teacher.phone.like(like), Teacher.subject.like(like)))
+        conds = [Teacher.name.like(like), Teacher.teacher_uid.like(like),
+                 Teacher.subject.like(like)]
+        # 2026-10-19：手机号已加密，不能再 LIKE。两条路补回来：
+        #   ① 输入完整号码 → 盲索引精确匹配（覆盖 138-0000-0000 这类格式差异）
+        #   ② 输入片段     → 教师是百人级，解密后内存过滤出 id 再并入
+        if any(ch.isdigit() for ch in kw):
+            _idx = Teacher.phone_index(kw)
+            if _idx:
+                conds.append(Teacher.phone_idx == _idx)
+            extra = [t.id for t in Teacher.query.all() if kw in (t.phone or '')]
+            if extra:
+                conds.append(Teacher.id.in_(extra))
+        q = q.filter(or_(*conds))
     if filters.get('status') in ('active', 'left'):
         q = q.filter_by(status=filters['status'])
     if filters.get('subject'):
@@ -284,6 +295,12 @@ def teachers_import_passwords(token):
         flash('密码清单已失效，请在教师管理页重置相应账号密码', 'warning')
         return redirect(url_for(_ep('teachers_page')))
     data = teacher_import_service.accounts_csv(draft['result']['accounts'])
+    # 2026-10-18 审计修复（高危）：下载**明文初始口令**此前没有任何审计留痕 ——
+    # 谁在什么时候导走了哪些账号的口令，事后完全无法追溯；且这是 GET，
+    # after_request 的兜底网只拦写方法，正好覆盖不到。
+    log_operation(current_user, '导出', '教师初始密码', None,
+                  f'下载明文口令清单（{len(draft["result"]["accounts"])} 个账号）',
+                  module=_log_module(), severity='WARNING')
     return send_file(io.BytesIO(data), as_attachment=True,
                      download_name='教师初始账号密码.csv', mimetype='text/csv')
 
@@ -300,7 +317,12 @@ def teacher_edit(tid):
     if request.method == 'POST':
         name = (request.form.get('name') or '').strip()
         subject = (request.form.get('subject') or '').strip()
-        phone = (request.form.get('phone') or '').strip()
+        # 2026-10-18 审计修复（P1）：无 academic.view_teacher_phone 时模板不再回传号码，
+        # 这里也不能把空值写回去（会把手机号清空）；直接用库中原值，禁止改号。
+        if current_user.has_perm('academic.view_teacher_phone'):
+            phone = (request.form.get('phone') or '').strip()
+        else:
+            phone = (t.phone or '').strip()
         note = (request.form.get('note') or '').strip()
         status = request.form.get('status') or 'active'
         id_card_raw = id_card_util.normalize(request.form.get('id_card'))

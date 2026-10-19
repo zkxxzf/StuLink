@@ -235,7 +235,7 @@ def global_compare_report(exam_id, direction=''):
             'cells': cells,
         }
 
-    def class_rows(cls):
+    def class_rows_by_dir(cls):
         """一个班的展示行：混组合班 = **班级合计行 + 各组合明细行**；纯组合班一行。
 
         2026-10-16 用户要求「那你算均分不也得按组合整嘛」——
@@ -251,18 +251,29 @@ def global_compare_report(exam_id, direction=''):
         rows = [r for r in data.total_rows if (r.class_name or '—') == cls]
         if not rows:
             return []
-        d = dir_of[cls]
-        combos = _combo_split(rows)
-        if len(combos) <= 1:
-            return [_one_row(cls, d, rows)]          # 纯组合班 / 未分科：一行
-        total = _one_row(cls, d, rows)
-        total['hide_avg'] = True
-        out = [total]
-        for _sel, rs_rows in combos:
-            row = _one_row(cls, d, rs_rows)
-            row['is_combo'] = True
-            row['headteacher'] = ''      # 班主任只写在班级合计行，组合明细行不重复
-            out.append(row)
+        # ⚠️ 2026-10-17 修：按**学生自己的方向**拆，不能用班级众数方向（dir_of[cls]）。
+        # 实测 exam 33 的 01班 = 历史 46 + 物理 1：用班级方向会把那名物理生塞进历史块、
+        # 按历史线判上线 → 本科合计比打印版/分层表少 1 人（跨模块对账查出来的）。
+        # 现在「方向 × 组合」两维一起拆：方向决定归到哪个块、组合决定取哪条线。
+        groups = {}
+        for r in rows:
+            groups.setdefault((r.direction or '', r.subject_selection or ''), []).append(r)
+        out = []
+        for d in sorted({k[0] for k in groups}, key=lambda x: _DIR_ORDER.get(x, 3)):
+            combos = [(k[1], groups[k]) for k in groups if k[0] == d]
+            combos.sort(key=lambda x: (-len(x[1]), x[0]))
+            all_rows = [r for _s, v in combos for r in v]
+            if len(combos) <= 1:
+                out.append(_one_row(cls, d, all_rows))     # 纯组合班 / 未分科：一行
+                continue
+            total = _one_row(cls, d, all_rows)
+            total['hide_avg'] = True
+            out.append(total)
+            for _sel, rs_rows in combos:
+                row = _one_row(cls, d, rs_rows)
+                row['is_combo'] = True
+                row['headteacher'] = ''   # 班主任只写在班级合计行，组合明细行不重复
+                out.append(row)
         return out
 
     def _combo_split(rows):
@@ -324,6 +335,13 @@ def global_compare_report(exam_id, direction=''):
         row['hide_avg'] = bool(row['combo_rows'])
         return row
 
+    # 先算好所有展示行，再**按行自己的方向**归组 —— 混方向班的少数派学生会回到自己方向，
+    # 而不是被塞进班级主方向的块里（2026-10-17 修，见 class_rows_by_dir 注释）。
+    _rows_all = [r for c in classes for r in class_rows_by_dir(c)]
+    _rows_by_dir = {}
+    for _r in _rows_all:
+        _rows_by_dir.setdefault(_r['direction'], []).append(_r)
+
     # mode=split：存在方向（物理/历史）即按方向分组出小计；全科只有一组时不出小计
     dir_keys = [d for d in sorted(by_dir, key=lambda x: (_DIR_ORDER.get(x, 3), x)) if d]
     mode = 'split' if dir_keys else 'all'
@@ -332,7 +350,7 @@ def global_compare_report(exam_id, direction=''):
         groups.append({
             'key': d or 'all',
             'label': (d + '方向') if d else '全科',
-            'rows': [r for c in by_dir[d] for r in class_rows(c)],
+            'rows': _rows_by_dir.get(d, []),
             'subtotal': subtotal_row(d) if (mode == 'split' and d) else None,
         })
 
@@ -348,11 +366,19 @@ def global_compare_report(exam_id, direction=''):
         # 跨组合总计不给混算均分（组合线不同）；未分科（全科）时只有一个口径，保留均分
         grand['hide_avg'] = len(_combo_split(_all)) > 1
 
+    # 2026-10-17 用户口径：高一未让学生选科时，本场没有方向/组合 → 页面与打印版
+    # 直接不显示这两列（原来固定出「方向 / 组合」两列，整列全是「—」白占宽度）。
+    has_direction = any((r.direction or '').strip() for r in data.total_rows)
+    has_selection = any((r.subject_selection or '').strip() not in ('', '全科')
+                        for r in data.total_rows)
     return {
         'exam': {'id': data.exam.id, 'name': data.exam.name,
                  'date': data.exam.exam_date.strftime('%Y-%m-%d') if data.exam.exam_date else '',
                  'grade': data.exam.grade,
                  'grade_label': grade_level_label(data.exam.grade, data.exam.term)},
+        # 本场是否有方向 / 选科组合（决定「方向」「组合」两列显隐）
+        'has_direction': has_direction,
+        'has_selection': has_selection,
         'mode': mode,
         # 列顺序：总分在科目之前（全局对比按「先看总分，再看各科」阅读）
         'subjects': [TOTAL_SUBJECT] + subjects,

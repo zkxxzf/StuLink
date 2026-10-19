@@ -88,6 +88,9 @@ def export_tab(tab):
     subject = request.args.get('subject', '').strip()
     direction = (request.args.get('direction') or '').strip()
     selection = (request.args.get('selection') or '').strip()   # 2026-10-16 组合维度
+    # 2026-10-17 统计口径：导出必须与页面所见一致（ref=参考数 / enrolled=在籍人数）
+    denom = (request.args.get('denom') or '').strip()
+    denom = denom if denom in ('ref', 'enrolled') else 'ref'
     # 班级对比：classes=01班,02班…（顺序=对比展示顺序）
     raw_classes = (request.args.get('classes') or '').strip()
     compare_classes = [c.strip() for c in raw_classes.split(',') if c.strip()]
@@ -102,11 +105,11 @@ def export_tab(tab):
             abort(403)
     try:
         if tab == 'grade':
-            payload = tab_service.grade_tab(exam_id, direction, selection)
+            payload = tab_service.grade_tab(exam_id, direction, selection, denom)
         elif tab == 'class':
-            payload = tab_service.class_tab(exam_id, class_name, direction, selection)
+            payload = tab_service.class_tab(exam_id, class_name, direction, selection, denom)
         elif tab == 'subject':
-            payload = tab_service.subject_tab(exam_id, subject, direction, selection)
+            payload = tab_service.subject_tab(exam_id, subject, direction, selection, denom)
         elif tab == 'compare':
             # 多班对比：班级可见性过滤与 API 端点同口径
             # 2026-10-11 审计修复：`if limited:` 空列表时 fail-open → 改 is not None（fail-closed）
@@ -116,25 +119,29 @@ def export_tab(tab):
                 compare_classes = [c for c in compare_classes if c in allowed]
             if len(compare_classes) < 2:
                 abort(400, description='请至少选择 2 个班级进行对比')
-            payload = compare_service.compare_tab(exam_id, compare_classes[:20], direction)
+            payload = compare_service.compare_tab(exam_id, compare_classes[:20],
+                                                  direction, denom)
         else:
             # 教师分析：与 analysis API 同权限
             scope_type, _ = scope_service.get_scope(current_user)
             if current_user.has_role('teacher'):
                 links = scope_service.teacher_links(current_user)
                 payload = tab_service.teacher_tab(exam_id, subject=subject or None,
-                                                  links=links, grade=exam.grade)
+                                                  links=links, grade=exam.grade,
+                                                  denom=denom)
             elif (current_user.role == 'admin'
                     or scope_service.has_user_scope(current_user)):
                 payload = tab_service.teacher_tab(exam_id, subject=subject or None,
-                                                  links=None, grade=exam.grade)
+                                                  links=None, grade=exam.grade,
+                                                  denom=denom)
             elif scope_type == 'grade':
                 from app.models.grades import TeacherSubjectLink
                 links = TeacherSubjectLink.query.filter_by(
                     grade=scope_service.get_scope(current_user)[1], active=True).all()
                 payload = tab_service.teacher_tab(exam_id, subject=subject or None,
                                                   links=links,
-                                                  grade=scope_service.get_scope(current_user)[1])
+                                                  grade=scope_service.get_scope(current_user)[1],
+                                                  denom=denom)
             else:
                 abort(403)
         tables = payload.get('tables') or {}

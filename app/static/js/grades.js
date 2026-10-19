@@ -16,8 +16,9 @@ function sem(){
            {ok: '#10b981', warn: '#f59e0b', danger: '#ef4444', info: '#3b82f6'};
 }
 var state = {grade: '', examId: '', tab: 'grade', class_name: '', subject: '', direction: '',
-             selection: '', classes: []};   // classes：班级对比 Tab 选中的班级
-                                        // selection：选科组合（2026-10-16，如 物化生）
+             selection: '', classes: [], denom: 'ref'};   // classes：班级对比 Tab 选中的班级
+                                       // selection：选科组合（2026-10-16，如 物化生）
+                                       // denom：统计口径（2026-10-17，ref=参考数 / enrolled=班级实际人数）
 // tab 业务顺序。注意：Flask jsonify 默认按键名排序，Object.keys(opts.tabs) 的首项会是
 // 'class' 而不是 'grade'，因此不能用它决定默认 tab，必须按此固定顺序取第一个可见项。
 var TAB_ORDER = ['grade', 'class', 'subject', 'teacher', 'compare'];
@@ -262,6 +263,11 @@ function bindFilters(){
     $('#gSel').on('change', function(){
         state.selection = $(this).val() || '';
         syncPopFilter();
+        loadCurrent();
+    });
+    // 2026-10-17 统计口径：参考数（实考）↔ 班级实际人数（在籍），切完立即重算
+    $('#gDenom').on('change', function(){
+        state.denom = $(this).val() || 'ref';
         loadCurrent();
     });
     $('#gExport').on('click', function(){
@@ -1060,6 +1066,8 @@ function buildQuery(){
     if ((state.tab === 'grade' || state.tab === 'subject' || state.tab === 'class')
             && state.selection)
         qs.push('selection=' + encodeURIComponent(state.selection));
+    // 2026-10-17 统计口径：所有 tab 都带（enrolled 时人数/率/均分按班级在籍人数算）
+    if (state.denom && state.denom !== 'ref') qs.push('denom=' + state.denom);
     return qs.length ? '?' + qs.join('&') : '';
 }
 

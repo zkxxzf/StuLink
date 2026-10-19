@@ -5,6 +5,7 @@ import statistics
 
 from app.models.grades import SUBJECTS, TOTAL_SUBJECT
 from app.modules.grades.services import report_service
+from app.modules.grades.utils import numeric_classes
 
 # ============ 维度 ============
 DIM_NONE = ''
@@ -90,23 +91,38 @@ def layer_pass_stats(data, subject=TOTAL_SUBJECT):
                     a['c'][name] = a['c'].get(name, 0) + 1
 
     order = {c: i for i, c in enumerate(data.classes)}
+    # 2026-10-17 口径开关：上线率分母随 data.denom（ref=实考人数 / enrolled=在籍人数）
+    # 上线人数（分子）不变，缺考学生只会拉低率，不会凭空上线
+    from app.modules.grades.services import stats_service as _st
+    for cls, a in acc.items():
+        n_base = _st.base_count(data, subject, class_name=cls)
+        if n_base:
+            a['denom'] = n_base
+    # 只出正规教学班（排除 不分班/已转出/离校 等）：与全局对比页 numeric_classes、
+    # 年级汇总表 class_summary_table、汇总打印版 print_summary 口径一致
+    # （2026-10-17 跨模块口径总账查出的不一致：这三处已排除，分层表原来没排除）
+    _numeric = set(numeric_classes(data.classes))
     rows = []
-    for cls in sorted(acc.keys(), key=lambda c: order.get(c, 999)):
+    for cls in sorted((c for c in acc.keys() if c in _numeric),
+                      key=lambda c: order.get(c, 999)):
         a = acc[cls]
+        dn = a.get('denom') or a['n']
         rows.append({
-            'class_name': cls, 'count': a['n'],
+            'class_name': cls, 'count': dn,
             'pass': {n: a['c'].get(n, 0) for n in layer_names},
-            'rate': {n: (round(a['c'].get(n, 0) / a['n'] * 100, 1) if a['n'] else None)
+            'rate': {n: (round(a['c'].get(n, 0) / dn * 100, 1) if dn else None)
                      for n in layer_names},
         })
-    tn = sum(a['n'] for a in acc.values())
+    tn = sum((a.get('denom') or a['n']) for a in acc.values())
     total = {
         'class_name': '年级合计', 'count': tn,
         'pass': {n: sum(a['c'].get(n, 0) for a in acc.values()) for n in layer_names},
         'rate': {n: (round(sum(a['c'].get(n, 0) for a in acc.values()) / tn * 100, 1)
                      if tn else None) for n in layer_names},
     }
-    return {'layers': layer_names, 'rows': rows, 'total': total, 'subject': subject}
+    label = '在籍人数' if getattr(data, 'denom', 'ref') == _st.DENOM_ENROLLED else '参考人数'
+    return {'layers': layer_names, 'rows': rows, 'total': total,
+            'subject': subject, 'count_label': label}
 
 
 def layer_pass_table(stats):
@@ -115,7 +131,8 @@ def layer_pass_table(stats):
         return None
     layers = stats['layers']
     cols = [{'key': 'class_name', 'label': '班级', 'type': 'text'},
-            {'key': 'count', 'label': '参考人数', 'type': 'int'}]
+            {'key': 'count', 'label': stats.get('count_label', '参考人数'),
+             'type': 'int'}]
     for n in layers:
         cols.append({'key': 'p_' + n, 'label': n + '上线人数', 'type': 'int'})
         cols.append({'key': 'r_' + n, 'label': n + '上线率%', 'type': 'num'})

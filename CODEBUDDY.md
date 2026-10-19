@@ -26,7 +26,7 @@
   ＝学年 × 学期，只影响页面显示，课表组长徽章仍按课表自己的学年学期回查。
 - **不受影响**：备课组长 `/academic/leaders`、晚自习值班 `/academic/schedule/<sid>/night-duty`、
   学期课表 `/academic/schedule/*`。
-- 背景与版本记录见 `docs/教务管理设计手册.md`（第 3、4、7 节）。
+- 背景与版本记录见 `docs/设计手册/教务管理设计手册.md`（第 3、4、7 节）。
 
 ## 版本号规则（2026-10-17 用户明确要求：**写入长期记忆，只要更新就按规矩执行**）
 
@@ -83,7 +83,7 @@
 
 ## 数据库改动必须登记迁移清单（2026-10-14 起，用户明确要求）
 
-- **唯一真值文档：`docs/数据库迁移清单.md`**。任何库改动（新增/改 `scripts/migrate_*`、
+- **唯一真值文档：`docs/规范与说明/数据库迁移清单.md`**。任何库改动（新增/改 `scripts/migrate/migrate_*`、
   `add_*`、`backfill_*` 脚本；模型增删表 / 增删列 / 改唯一键或索引；需要回填、修数据、
   删表删列）都必须在「三、待执行清单」追加条目，写清：脚本 / 库·表 / 作用 / 运行要求 /
   状态；上线后改成 `✅ 已在生产执行 · 日期` 并补「四、生产执行记录」。
@@ -109,9 +109,9 @@
   右侧列表每行 ↑↓ → `POST /rooms/groups/<gid>/reorder`（`lib_id` + `dir`，交换后整组重排，
   不并列）；考务②「一键带入」按 `(sort_order, id)` 依次发号（谁在前谁是 01）。
   `exam_room_set_groups` 必须**保留已有 sort_order、新成员追加 max+10** —— 原来「整条删了重插」
-  会把用户排好的顺序冲掉。迁移 `scripts/migrate_room_group_map_sort_20261014.py`
+  会把用户排好的顺序冲掉。迁移 `scripts/migrate/migrate_room_group_map_sort_20261014.py`
   （补列 + 按 `affair_room_libs.location` 回填，保持迁移前显示顺序），已在
-  `docs/数据库迁移清单.md` A5/B25 与 `deploy/nas_migrate_pending.sh` 登记。
+  `docs/规范与说明/数据库迁移清单.md` A5/B25 与 `deploy/nas_migrate_pending.sh` 登记。
   分组即考务页的**「考场模板」**（「一键带入」的选源，下拉在考务步骤②右侧卡片头）。
 - **历史考务名单从成绩反推**（`exam_scores` 总分行：学号/姓名/考试当时班级/选科），
   不要用「当前学籍」同步历史场次。

@@ -87,54 +87,58 @@ run_mig() {
     fi
 }
 # ── 结构类：加列 / 建表 / 索引 / 回填 ──────────────────────────────────────
-run_mig scripts/migrate_term_schedule_dates.py            # 学期起止日期（教学周计算）
-run_mig scripts/migrate_drop_legacy_timetable_20261010.py # 清 academic.db 里的旧课表表
-run_mig scripts/migrate_exam_teacher_links.py             # 成绩：考试-教师映射
-run_mig scripts/migrate_exam_four_stage.py                # 成绩：四段式（exam_kind 等）
-run_mig scripts/migrate_swap_batch_20261010.py            # 调课：batch_id + 索引 + 历史归批
-run_mig scripts/migrate_swap_exchange_20261012.py         # 换课：partner_* 共 8 列
-run_mig scripts/migrate_swap_exchange_v2_20261012.py      # 换课：swap_time/swap_class/partner_swap_date
-run_mig scripts/migrate_swap_auto_confirm_20261013.py     # 调课：need_partner_confirm
-run_mig scripts/migrate_morality_tables_20261013.py       # 德育独立成库
-run_mig scripts/migrate_affair_invig_exclude_20261013.py  # 考务：监考排除名单
-run_mig scripts/migrate_ai_tasks_20261013.py              # 成绩：AI 任务表（与下一行成对）
-run_mig scripts/migrate_ai_report_kind_20261013.py        # 成绩：AI 报告 kind/trace
-run_mig scripts/migrate_ai_prompt_tpl_20261014.py         # 成绩：AI 提示词模板表 + ai_tasks.gen
+run_mig scripts/migrate/migrate_term_schedule_dates.py            # 学期起止日期（教学周计算）
+run_mig scripts/migrate/migrate_drop_legacy_timetable_20261010.py # 清 academic.db 里的旧课表表
+run_mig scripts/migrate/migrate_exam_teacher_links.py             # 成绩：考试-教师映射
+run_mig scripts/migrate/migrate_exam_four_stage.py                # 成绩：四段式（exam_kind 等）
+run_mig scripts/migrate/migrate_swap_batch_20261010.py            # 调课：batch_id + 索引 + 历史归批
+run_mig scripts/migrate/migrate_swap_exchange_20261012.py         # 换课：partner_* 共 8 列
+run_mig scripts/migrate/migrate_swap_exchange_v2_20261012.py      # 换课：swap_time/swap_class/partner_swap_date
+run_mig scripts/migrate/migrate_swap_auto_confirm_20261013.py     # 调课：need_partner_confirm
+run_mig scripts/migrate/migrate_morality_tables_20261013.py       # 德育独立成库
+run_mig scripts/migrate/migrate_affair_invig_exclude_20261013.py  # 考务：监考排除名单
+run_mig scripts/migrate/migrate_ai_tasks_20261013.py              # 成绩：AI 任务表（与下一行成对）
+run_mig scripts/migrate/migrate_ai_report_kind_20261013.py        # 成绩：AI 报告 kind/trace
+run_mig scripts/migrate/migrate_ai_prompt_tpl_20261014.py         # 成绩：AI 提示词模板表 + ai_tasks.gen
 # 2026-10-14 第三轮审计（CONS3-03）：建表必须排在「重建表」之前 —— 重建脚本对
 # "无表库"是 SKIP，若先重建后建表，缺表的存量库会停在旧结构（无 category、唯一键 4 列）
-run_mig scripts/migrate_subject_leaders.py                # 学科组长：建表（缺失时，目标结构）
-run_mig scripts/migrate_subject_leader_category_20261014.py # 学科组长：category 列 + 重建唯一键
-run_mig scripts/migrate_link_plans_20261014.py            # 任课映射：方案留档表 + 初始方案收拢
-run_mig scripts/migrate_subject_leader_plans_20261014.py  # 学科组长：方案表 + 按已有学期补建
-run_mig scripts/migrate_room_group_map_sort_20261014.py    # 考务：考场分组顺序（group_map.sort_order）
+run_mig scripts/migrate/migrate_subject_leaders.py                # 学科组长：建表（缺失时，目标结构）
+run_mig scripts/migrate/migrate_subject_leader_category_20261014.py # 学科组长：category 列 + 重建唯一键
+run_mig scripts/migrate/migrate_link_plans_20261014.py            # 任课映射：方案留档表 + 初始方案收拢
+run_mig scripts/migrate/migrate_subject_leader_plans_20261014.py  # 学科组长：方案表 + 按已有学期补建
+run_mig scripts/migrate/migrate_room_group_map_sort_20261014.py    # 考务：考场分组顺序（group_map.sort_order）
 # 2026-10-14 第四轮审计（SEC-03 / PERF-117·118）：调课单「代办人」两列 + 补 6 个性能索引
-run_mig scripts/migrate_swap_operator_20261014.py         # 调课：schedule_swaps 加 operator_uid/operator_name
-run_mig scripts/migrate_perf_indexes_20261014.py          # 性能索引：oplog 4 条 + 证书/课表各 1 条
-run_mig scripts/migrate_plan_current_unique_20261014.py   # 方案表 is_current 部分唯一索引（有重复会拒跑）
-run_mig scripts/migrate_leader_group_single_20261014.py   # 综合组旧形态记录归并为「整组一位」（无记录则空跑）
+run_mig scripts/migrate/migrate_swap_operator_20261014.py         # 调课：schedule_swaps 加 operator_uid/operator_name
+run_mig scripts/migrate/migrate_perf_indexes_20261014.py          # 性能索引：oplog 4 条 + 证书/课表各 1 条
+run_mig scripts/migrate/migrate_plan_current_unique_20261014.py   # 方案表 is_current 部分唯一索引（有重复会拒跑）
+run_mig scripts/migrate/migrate_leader_group_single_20261014.py   # 综合组旧形态记录归并为「整组一位」（无记录则空跑）
 # 2026-10-15：成绩复核（申请调分）申请表 —— 教师提交 / 有改分权限者审批
-run_mig scripts/migrate_score_review_20261015.py           # 成绩复核：新建 score_review_requests 表
+run_mig scripts/migrate/migrate_score_review_20261015.py           # 成绩复核：新建 score_review_requests 表
 # 2026-10-15：组合总分线 —— exam_bands 加 selection 列 + 唯一键扩维（重建表，须停应用，见脚本头）
-run_mig scripts/migrate_exam_band_selection_20261015.py     # 划线：exam_bands.selection（物化生等组合总分线）
+run_mig scripts/migrate/migrate_exam_band_selection_20261015.py     # 划线：exam_bands.selection（物化生等组合总分线）
 # 2026-10-15：考试选科快照滞后修正（学生转科后 exam_scores 的选科/方向没跟上；幂等，须 --apply）
-run_mig scripts/fix_exam_selection_snapshot_20261015.py --allow-fail --apply  # 修数据：按实考科目+名册刷新快照并重算排名（无不符行时输出「无需修正」）
-run_mig scripts/apply_gaokao_bands.py --allow-fail --apply               # 划线：按修正后的方向人群重算特控/本科线（幂等；该场无成绩时主动中止）
+run_mig scripts/fix/fix_exam_selection_snapshot_20261015.py --allow-fail --apply  # 修数据：按实考科目+名册刷新快照并重算排名（无不符行时输出「无需修正」）
+run_mig scripts/seed/apply_gaokao_bands.py --allow-fail --apply              # 划线：按修正后的方向人群重算特控/本科线（幂等；该场无成绩时主动中止）
 # 2026-10-16 第七轮审计（C-H1）：官方线表录入 —— exam 33（20260712 期末）特控/本科纯分数线（整场先删后插，幂等）
-run_mig scripts/import_bands_20260712.py --allow-fail --apply            # 划线：该场无成绩/无该场时脚本自行中止，不误伤
+run_mig scripts/seed/import_bands_20260712.py --allow-fail --apply           # 划线：该场无成绩/无该场时脚本自行中止，不误伤
 # ── 数据 / 权限类（幂等）──────────────────────────────────────────────────
 # 2026-10-14 第三轮审计（CONS3-02）：多身份改造的两个脚本原先**完全未登记**（只在
 # docs/权限体系多身份改造执行计划.md 里点名）→ 上线必漏跑。按设计文档顺序：
 # 先补 scope_kind 等列，再建 user_permission_groups 关联表并灌主组。
-run_mig scripts/migrate_perm_multi_20261014.py            # 权限组：scope_kind/scope_grades/scope_classes + 废弃组清理
-run_mig scripts/migrate_user_groups_p1.py                 # 权限组：user_permission_groups 关联表 + 主组灌入
-run_mig scripts/migrate_oplog_http_fields.py
-run_mig scripts/migrate_score_edit_perm_20261011.py
-run_mig scripts/migrate_swap_perm_roles_20261011.py
-run_mig scripts/migrate_admin_perm_academic_edit_20261013.py # 管理员组补 academic.edit
-run_mig scripts/migrate_sensitive_perm_20261013.py           # 敏感字段权限（先）
-run_mig scripts/migrate_sensitive_perm_v2_20261013.py        # 敏感字段权限收敛（后）
+run_mig scripts/migrate/migrate_perm_multi_20261014.py            # 权限组：scope_kind/scope_grades/scope_classes + 废弃组清理
+run_mig scripts/migrate/migrate_user_groups_p1.py                 # 权限组：user_permission_groups 关联表 + 主组灌入
+run_mig scripts/migrate/migrate_oplog_http_fields.py
+run_mig scripts/migrate/migrate_score_edit_perm_20261011.py
+run_mig scripts/migrate/migrate_swap_perm_roles_20261011.py
+run_mig scripts/migrate/migrate_admin_perm_academic_edit_20261013.py # 管理员组补 academic.edit
+run_mig scripts/migrate/migrate_sensitive_perm_20261013.py           # 敏感字段权限（先）
+run_mig scripts/migrate/migrate_sensitive_perm_v2_20261013.py        # 敏感字段权限收敛（后）
 # 2026-10-14 第四轮审计（SEC-04）：AI 全局 Key 独立权限点 —— 给原有 system.users 的组补齐
-run_mig scripts/migrate_ai_key_perm_20261014.py              # 权限组：补 grades.ai_manage
+run_mig scripts/migrate/migrate_ai_key_perm_20261014.py              # 权限组：补 grades.ai_manage
+# 2026-10-19：手机号加密（方案 C：随机 IV + HMAC 盲索引，只支持精确等值查询）；
+# 脚本自带 --apply 门控与执行前备份，幂等（库里已是密文的行跳过）
+run_mig scripts/migrate/migrate_encrypt_student_phone_20261019.py --apply  # 学生 phone1/phone2 + phone1_idx/phone2_idx
+run_mig scripts/migrate/migrate_encrypt_teacher_phone_20261019.py --apply  # 教师 phone + phone_idx
 
 echo "[5/6] 兜底：补齐模型声明但现网缺失的列（改库前自动备份对应库）"
 docker run --rm -v "$DATA":/app/data -w /app \

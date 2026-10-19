@@ -6,7 +6,7 @@ from flask_login import login_required, login_user, logout_user, current_user
 from werkzeug.security import check_password_hash
 from config import Config
 from app.auth import AlumniUser, is_alumni_role_allowed
-from app.utils.crypto import decrypt, mask_id_card
+from app.utils.crypto import decrypt, mask_id_card, mask_phone
 
 bp = Blueprint('basic', __name__)
 _log = logging.getLogger('alumni.basic')
@@ -122,6 +122,20 @@ def index():
                 else:
                     r['id_card_masked'] = ''
                 r.pop('id_card_number', None)
+                # 2026-10-19：手机号与身份证同口径 —— 只把**掩码**放进模板上下文，
+                # 明文一律 pop，避免任何一次模板改动把完整号码带进响应。
+                # （此前 phone1/phone2 是明文直出，是校友站唯一的明文泄露点）
+                for _k in ('phone1', 'phone2'):
+                    if r.get(_k):
+                        try:
+                            r[_k + '_masked'] = mask_phone(decrypt(r[_k]))
+                        except Exception:
+                            _log.exception('alumni 手机号解密失败 student_id=%s',
+                                           r.get('original_id'))
+                            r[_k + '_masked'] = ''
+                    else:
+                        r[_k + '_masked'] = ''
+                    r.pop(_k, None)
                 results.append(r)
 
             if results:

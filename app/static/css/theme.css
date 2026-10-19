@@ -692,7 +692,11 @@ table.tt thead th {
 .ovw-grp-break { color: var(--sl-text-muted) !important; }
 .ovw-teacher { color: var(--sl-text-muted); }
 .ovw-cell, .ovw-blank { border-color: var(--sl-border); }
-.ovw-chk-none { background: var(--sl-surface-3); color: var(--sl-text-muted); }
+/* 2026-10-16 删除：这里原有一条 `.ovw-chk-none{background:var(--sl-surface-3)}`，
+   但 schedule_matrix.css 在 theme.css **之后**加载、特异性相同（0,1,0）→ 实际生效的是
+   schedule_matrix.css:81 的 `background:var(--sl-border)`（实测 rgb(226,232,240)），
+   本条从未生效（死规则）。删掉避免后人"改这里没反应"；
+   深色下 6 个状态徽标由下面的 [data-bs-theme="dark"] .ovw-chk-* 接管。 */
 
 /* =============================================================================
    L2：兜底 —— 覆盖「改不到的」模板内联 style 与 Bootstrap 浅色工具类

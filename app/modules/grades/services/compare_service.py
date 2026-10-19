@@ -48,11 +48,12 @@ def _median(values):
     return round(statistics.median(values), 1) if values else None
 
 
-def compare_tab(exam_id, class_names, direction=''):
+def compare_tab(exam_id, class_names, direction='', denom='ref'):
     """多班横向对比。
 
     class_names: 班名列表（顺序=用户选择顺序）；不在本场/无参考学生的班级自动剔除。
     direction: 物理/历史，空串=全部方向。
+    denom: ref=参考数（成绩>0）/ enrolled=班级在籍人数（2026-10-17 口径开关）。
     """
     data = st.cached_exam_data(exam_id)
     exam = data.exam
@@ -60,6 +61,9 @@ def compare_tab(exam_id, class_names, direction=''):
     if not data.total_rows or not classes:
         return _empty(exam)
     dr = direction or None
+    # 2026-10-17 口径开关：人数/率/均分随 denom 走（population 视图统一承载）
+    data = data.population(dr, None, denom)
+    n_label = '在籍人数' if data.denom == st.DENOM_ENROLLED else '参考人数'
 
     # ---- 一次遍历按班分组（后续所有指标都基于该分组，避免重复扫描）----
     rows_all = data.totals_of(direction=dr)
@@ -72,17 +76,17 @@ def compare_tab(exam_id, class_names, direction=''):
     if len(classes) < 2:
         return _empty(exam)
 
-    score_map = {c: [t['score'] for t in by_class[c]] for c in classes}
-    count_map = {c: len(by_class[c]) for c in classes}
-    grade_scores = [t['score'] for t in rows_all]
-    grade_avg = st.mean(grade_scores)
+    score_map = {c: st.ref_scores(data, class_name=c) for c in classes}
+    count_map = {c: st.base_count(data, class_name=c) for c in classes}
+    grd_n = st.base_count(data)
+    grade_avg = st.avg_by_denom(st.ref_scores(data), grd_n)
     tables, charts = {}, {}
 
     # ---- T1 对比班概况（行=班，列=核心指标）----
     t1 = []
     for c in classes:
         vs = score_map[c]
-        avg = st.mean(vs)
+        avg = st.avg_by_denom(vs, count_map[c])
         t1.append({'class_name': c, 'count': count_map[c], 'avg': avg,
                    'median': _median(vs), 'std': _stddev(vs),
                    'max': max(vs), 'min': min(vs),
@@ -91,7 +95,7 @@ def compare_tab(exam_id, class_names, direction=''):
     tables['cmp_overview'] = {
         'title': '对比班核心指标表',
         'columns': [{'key': 'class_name', 'label': '班级', 'type': 'text'},
-                    {'key': 'count', 'label': '参考人数', 'type': 'int'},
+                    {'key': 'count', 'label': n_label, 'type': 'int'},
                     {'key': 'avg', 'label': '总分均值', 'type': 'num'},
                     {'key': 'median', 'label': '中位数', 'type': 'num'},
                     {'key': 'std', 'label': '标准差', 'type': 'num'},
@@ -150,11 +154,12 @@ def compare_tab(exam_id, class_names, direction=''):
                 if not vs:
                     cells[i] = None
                     continue
+                n_sub = st.base_count(data, s, class_name=c)
                 if mode == 'avg':
-                    cells[i] = st.mean(vs)
+                    cells[i] = st.avg_by_denom(vs, n_sub)
                 else:
-                    hit, tot = rate_hit.get((c, s, mode), (0, 0))
-                    cells[i] = st.fmt_rate(hit, tot) if tot else None
+                    hit, _tot = rate_hit.get((c, s, mode), (0, 0))
+                    cells[i] = st.fmt_rate(hit, n_sub) if n_sub else None
             if all(v is None for v in cells.values()):
                 continue    # 所选班均未考该科目
             out.append({'subject': s, **{'c%d' % i: cells[i] for i in range(len(classes))}})
@@ -271,7 +276,9 @@ def compare_tab(exam_id, class_names, direction=''):
             t7.append(item)
         if t7:
             layer_cols = [{'key': 'class_name', 'label': '班级', 'type': 'text'},
-                          {'key': 'count', 'label': '参考人数', 'type': 'int'}]
+                          {'key': 'count',
+                           'label': pass_stats.get('count_label', '参考人数'),
+                           'type': 'int'}]
             for i, name in enumerate(layers):
                 layer_cols += [{'key': 'p_%d' % i, 'label': f'{name}上线人数', 'type': 'int'},
                                {'key': 'r_%d' % i, 'label': f'{name}上线率%', 'type': 'num'}]
@@ -302,7 +309,7 @@ def compare_tab(exam_id, class_names, direction=''):
         tables['cmp_box'] = {
             'title': '对比班总分分布五数概括',
             'columns': [{'key': 'class_name', 'label': '班级', 'type': 'text'},
-                        {'key': 'count', 'label': '参考人数', 'type': 'int'},
+                        {'key': 'count', 'label': n_label, 'type': 'int'},
                         {'key': 'min', 'label': '最低分', 'type': 'num'},
                         {'key': 'q1', 'label': '下四分位', 'type': 'num'},
                         {'key': 'median', 'label': '中位数', 'type': 'num'},
@@ -319,6 +326,7 @@ def compare_tab(exam_id, class_names, direction=''):
             'tables': tables, 'charts': charts,
             'meta': {'classes': data.classes, 'selected': classes,
                      'directions': data.directions, 'direction': direction,
+                     'denom': data.denom,
                      'partial': data.partial_import()}}
 
 

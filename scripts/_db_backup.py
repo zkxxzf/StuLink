@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 """迁移脚本共用工具：改动 .db 之前先备份。
 
-项目约定（与 scripts/migrate_cert_encrypt_v1125.py 同款写法）：
+项目约定（与 scripts/migrate/migrate_cert_encrypt_v1125.py 同款写法）：
 **任何会修改数据库文件的迁移脚本，动手前必须先备份**，出错可直接用备份还原。
 备份文件名 ``<原文件>.bak-<YYYYmmdd_HHMMSS>``，同名时间戳冲突时自动加序号。
 

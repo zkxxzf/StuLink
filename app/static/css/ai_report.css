@@ -195,3 +195,19 @@
 }
 .ai-studio-task .t-q { color: var(--sl-text); font-size: 13.5px; line-height: 1.5; }
 .ai-studio-task .t-meta { color: var(--sl-text-muted); font-size: 12px; }
+
+/* 2026-10-18 任务卡右上角的删除按钮：平时隐形（避免误点），悬停或聚焦时出现 */
+.ai-studio-task { position: relative; }
+.ai-studio-task .ai-del-btn {
+    position: absolute; top: 4px; right: 4px;
+    border: 0; background: transparent; color: var(--sl-text-muted);
+    font-size: 17px; line-height: 1; padding: 2px 6px 3px;
+    border-radius: 6px; opacity: 0; transition: opacity .12s ease;
+    cursor: pointer;
+}
+.ai-studio-task:hover .ai-del-btn,
+.ai-studio-task .ai-del-btn:focus-visible { opacity: 1; }
+.ai-studio-task .ai-del-btn:hover,
+.ai-studio-task .ai-del-btn:focus-visible {
+    color: #dc3545; background: rgba(220, 53, 69, .10);
+}

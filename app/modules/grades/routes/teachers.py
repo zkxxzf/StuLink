@@ -604,7 +604,10 @@ def teachers_import_confirm():
         link_plan.sync_current(operator_id=current_user.id)
     except Exception as e:
         db.session.rollback()
-        flash(f'导入失败，已回滚：{e}', 'danger')
+        # 2026-10-18：异常原文不外露（含 SQL / 路径），详情进日志
+        from flask import current_app
+        current_app.logger.error('教师导入失败: %s', e, exc_info=True)
+        flash('导入失败，已回滚（详情已记入系统日志）', 'danger')
         return redirect(url_for(_ep('teachers_import_page')))
     _DRAFT.pop(token, None)
     log_operation(current_user, '导入', '教师映射', None,

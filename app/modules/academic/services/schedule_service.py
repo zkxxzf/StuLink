@@ -1068,7 +1068,7 @@ def delete_entry(entry_id, operator=None):
 def clear_entries(schedule_id, operator=None):
     """清空学期**全部课表条目**（软删除 + 汇总版本留痕）→ {'deleted': n}
 
-    - 与 `scripts/import_school_timetable.py --replace` 同口径：只软删除课表条目，
+    - 与 `scripts/seed/import_school_timetable.py --replace` 同口径：只软删除课表条目，
       **不动学期本身与作息时间配置**（要删整个学期用 delete_schedule）；
     - 已归档学期的只读拦截由路由层 `_readonly_guard` 负责，这里不做状态判断；
     - 写一条汇总版本（action='clear'，entry_id 为空），在页面「变更历史」可追溯，

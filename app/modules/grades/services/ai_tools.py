@@ -49,8 +49,11 @@ def _exam(user, exam_id, default_exam_id=None):
     eid = int(exam_id or default_exam_id or 0)
     exam = Exam.query.get(eid) if eid else None
     if exam is None:
+        # 带上"当前考试 id"，让模型直接改正，而不是继续猜考试名里的数字
         raise ValueError(f'找不到考试（exam_id={eid or "空"}）：'
-                         '可先调用 list_exams 查看账号可见的考试')
+                         f'当前考试 id={default_exam_id or "未指定"}，'
+                         '请直接用该 id 重新调用；或先调用 list_exams '
+                         '查看账号可见的考试（不要从考试名/日期里推测 id）')
     scope = score_guard.require_exam(user, exam)
     return exam, scope
 
@@ -110,6 +113,11 @@ def _t_exam_overview(user, exam_id=0, **kw):
     # 口径塑形与 MCP 服务共用同一份（避免"网页端 AI 与 MCP 数字打架"）
     from app.modules.grades.services import score_overview
     out.update(score_overview.build(exam, scope, data))
+    if not out.get('student_count'):
+        # 2026-10-18：选了还没导入成绩的考试时，别给模型"0 名学生"让它继续瞎猜，
+        # 直接说清原因与下一步（换一场 / 先导成绩）。
+        raise ValueError(f'「{exam.name}」还没有成绩记录（exam_id={exam.id}）：'
+                         '先在成绩模块导入这场考试的总分，或改选一场有成绩的考试')
     return out, f'{out["student_count"]} 名学生 · {out["class_count"]} 个班'
 
 
@@ -521,15 +529,37 @@ def dispatch(name, args, user, default_exam_id=None):
     """
     fn = HANDLERS.get(name)
     if fn is None:
-        return False, f'未知工具：{name}', ''
+        # 2026-10-18：模型偶尔把"一句话 / 考试名 / 页面上的串"当成工具名
+        # （线上出现过「我不会读「exam_ui_2e5s5j」…」这种 trace）。回给它
+        # **正确的工具名清单**，让下一轮能自我修正，而不是把废话说成报告。
+        names = '、'.join(sorted(HANDLERS))
+        return (False,
+                f'工具名不存在：{str(name)[:60]}；请只用这些工具名：{names}',
+                '')
     params = dict(args or {})
+    # 2026-10-18 修复「找不到考试」：模型会把考试名里的数字（如 202505292024）、
+    # 日期、或页面上的临时串（exam_ui_2e5s5j）当成 exam_id 传进来 —— 此时工具
+    # 只会回"找不到考试"，整轮分析颗粒无收。若该 id 在库里不存在、而本轮有确定的
+    # 当前考试，就按当前考试取数，并在摘要里明确告知"改用了哪一场"。
+    eid_raw = params.get('exam_id')
+    fix_note = ''
+    if eid_raw not in (None, '', 0, '0'):
+        try:
+            eid_int = int(eid_raw)
+        except (TypeError, ValueError):
+            eid_int = 0
+        if (not eid_int) or (Exam.query.get(eid_int) is None):
+            if default_exam_id:
+                params['exam_id'] = default_exam_id
+                fix_note = (f'（exam_id={str(eid_raw)[:24]} 不存在，'
+                            f'已按当前考试 id={default_exam_id} 取数）')
     if default_exam_id and not params.get('exam_id'):
         params['exam_id'] = default_exam_id
     params['default_exam_id'] = default_exam_id
     try:
         out = fn(user, **params)
         data, summary = out if isinstance(out, tuple) else (out, '')
-        return True, _cut(data), summary
+        return True, _cut(data), ((summary or '') + fix_note)
     except PermissionError as e:
         return False, f'权限不足：{e}', ''
     except ValueError as e:
