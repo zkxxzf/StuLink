@@ -16,3 +16,4 @@ python-pptx~=1.0.2      # v1.13.1 汇报区导出 PPTX 交付物
 waitress~=3.0.2
 cryptography~=50.0.1
 pypinyin~=0.55.0
+qrcode~=8.2          # 微信扫码登录二维码（SVG，无 Pillow 依赖）

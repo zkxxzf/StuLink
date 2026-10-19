@@ -36,6 +36,11 @@ from app.models.notification import Notification, NotificationRead, \
 from app.models.portrait import StudentPortrait, PortraitComment, PortraitEvent
 from app.models.user_data_scope import UserDataScope
 from app.models.user_permission_group import UserPermissionGroup
+from app.models.wechat import (  # 微信绑定 / 扫码票据
+    MAX_WECHAT_BINDINGS,
+    WeChatBinding,
+    WeChatTicket,
+)
 from app.models.timetable import (
     TermSchedule, PeriodDef, ScheduleEntry, ScheduleSwap, ScheduleVersion,
     get_default_periods,
@@ -73,5 +78,6 @@ __all__ = ['User', 'Student', 'Room', 'BedAssignment', 'StudentAccommodation',
            'TermSchedule', 'PeriodDef', 'ScheduleEntry', 'ScheduleSwap', 'ScheduleVersion',
            'get_default_periods',
            'SCHEDULE_STATUS', 'ENTRY_TYPES', 'TT_SWAP_STATUS', 'TT_SWAP_TYPES',
-           'PERIOD_TYPES', 'WEEKDAY_NAMES', 'PERIOD_NUMBER_CEILING']
+           'PERIOD_TYPES', 'WEEKDAY_NAMES', 'PERIOD_NUMBER_CEILING',
+           'WeChatBinding', 'WeChatTicket', 'MAX_WECHAT_BINDINGS']
 

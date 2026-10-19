@@ -137,6 +137,8 @@ def main():
                           '/grades/analysis/grade?exam_id=%d' % exam_id) or {}
         check('分析年级 tab 含表格',
               bool((a_tab.get('tables') or {})))
+        check('分析年级 tab 含图表',
+              bool((a_tab.get('charts') or {})))
         if cls:
             c_tab = expect_ok(
                 client, headers,

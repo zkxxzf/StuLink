@@ -118,6 +118,22 @@ def _server_info():
     }
 
 
+def login_payload(user, group_id=None, openid=None):
+    """统一的登录返回：令牌 + 用户 + 身份组 + 模块 + 能力开关。"""
+    ttl = int(current_app.config.get('WX_TOKEN_TTL', 43200))
+    token, real_ttl = issue_token(user.id, group_id, ttl, openid)
+    return {
+        'token': token,
+        'expires_in': real_ttl,
+        'group_id': group_id,
+        'user': user_brief(user),
+        'groups': group_options(user),
+        'modules': _modules_of(user),
+        'caps': _caps(user),
+        'server': _server_info(),
+    }
+
+
 @bp.route('/login', methods=['POST'])
 def wx_login():
     """账号密码登录，返回访问令牌。"""
@@ -137,18 +153,7 @@ def wx_login():
     if not user.is_active:
         return wx_err('账号已停用', 403)
     gid = _resolve_group(user, data.get('group_id'))
-    ttl = int(current_app.config.get('WX_TOKEN_TTL', 43200))
-    token, real_ttl = issue_token(user.id, gid, ttl)
-    return wx_ok({
-        'token': token,
-        'expires_in': real_ttl,
-        'group_id': gid,
-        'user': user_brief(user),
-        'groups': group_options(user),
-        'modules': _modules_of(user),
-        'caps': _caps(user),
-        'server': _server_info(),
-    })
+    return wx_ok(login_payload(user, gid))
 
 
 @bp.route('/profile')

@@ -1,0 +1,80 @@
+{% extends "base.html" %}
+{% block title %}微信扫码登录 - 学生管理系统{% endblock %}
+{% block content %}
+<div class="d-flex justify-content-center align-items-center" style="min-height:78vh;">
+  <div class="card shadow" style="width:420px;max-width:100%;">
+    <div class="card-body p-4 text-center">
+      <h5 class="fw-bold mb-1">微信扫码登录</h5>
+      <p class="text-muted small mb-3">用已绑定 StuLink 的小程序扫一扫</p>
+      <div id="qr-box" class="d-flex justify-content-center align-items-center"
+           style="min-height:240px;">
+        <div class="spinner-border text-primary" role="status"></div>
+      </div>
+      <div id="qr-msg" class="text-muted small mt-3">正在生成二维码…</div>
+      <button id="qr-refresh" class="btn btn-outline-primary btn-sm mt-3 d-none"
+              onclick="startQr()">刷新二维码</button>
+      <hr>
+      <a href="{{ url_for('auth.login') }}" class="small">返回账号密码登录</a>
+    </div>
+  </div>
+</div>
+<style>
+  #qr-box svg { width: 230px; height: 230px; }
+</style>
+<script>
+let qrTimer = null;
+let qrTicket = '';
+
+function setMsg(text, cls) {
+  const el = document.getElementById('qr-msg');
+  el.textContent = text;
+  el.className = 'small mt-3 ' + (cls || 'text-muted');
+}
+
+function stopPoll() {
+  if (qrTimer) { clearInterval(qrTimer); qrTimer = null; }
+}
+
+function startQr() {
+  stopPoll();
+  qrTicket = '';
+  document.getElementById('qr-box').innerHTML =
+    '<div class="spinner-border text-primary"></div>';
+  document.getElementById('qr-refresh').classList.add('d-none');
+  setMsg('正在生成二维码…');
+  fetch('{{ url_for("auth.qr_new") }}').then(r => r.json()).then(d => {
+    if (!d.ok) { setMsg(d.message || '生成失败', 'text-danger'); return; }
+    qrTicket = d.ticket;
+    document.getElementById('qr-box').innerHTML = d.svg;
+    setMsg('请用小程序「扫一扫」确认登录');
+    qrTimer = setInterval(poll, 2000);
+  }).catch(() => setMsg('网络异常，请刷新', 'text-danger'));
+}
+
+function poll() {
+  if (!qrTicket) return;
+  fetch('{{ url_for("auth.qr_status", ticket="__T__") }}'
+    .replace('__T__', encodeURIComponent(qrTicket)))
+    .then(r => r.json()).then(d => {
+      if (d.status === 'approved') {
+        stopPoll();
+        setMsg('已确认，正在登录…', 'text-success');
+        fetch('{{ url_for("auth.qr_consume") }}', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({ticket: qrTicket}),
+        }).then(r => r.json()).then(x => {
+          if (x.ok) { location.href = x.redirect || '/'; }
+          else { setMsg(x.message || '登录失败', 'text-danger'); }
+        });
+      } else if (d.status === 'expired' || d.status === 'consumed') {
+        stopPoll();
+        setMsg('二维码已过期，请刷新', 'text-warning');
+        document.getElementById('qr-refresh').classList.remove('d-none');
+      }
+    }).catch(() => {});
+}
+
+startQr();
+</script>
+{% endblock %}

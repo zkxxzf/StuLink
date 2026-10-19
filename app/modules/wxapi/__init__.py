@@ -28,7 +28,10 @@ from app.modules.wxapi.core import (  # noqa: E402,F401
     serializers,
     tokens,
 )
-from app.modules.wxapi.auth import routes_auth  # noqa: E402,F401
+from app.modules.wxapi.auth import (  # noqa: E402,F401
+    routes_auth,
+    routes_wechat,
+)
 from app.modules.wxapi.workbench import routes_workbench  # noqa: E402,F401
 from app.modules.wxapi.grades import (  # noqa: E402,F401
     routes_analysis,
