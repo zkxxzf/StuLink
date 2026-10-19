@@ -9,7 +9,7 @@
 import time
 from functools import wraps
 
-from flask import g, request, session
+from flask import current_app, g, request, session
 from flask_login import login_user
 
 from app.extensions import db
@@ -26,8 +26,19 @@ MUST_CHANGE_ALLOW = ('wxapi.wx_bootstrap', 'wxapi.wx_profile')
 
 
 def client_ip():
-    """取客户端 IP（仅在可信反向代理后部署时才应信任 X-Forwarded-For）。"""
-    return request.headers.get('X-Real-IP') or request.remote_addr or '0.0.0.0'
+    """取客户端 IP；只有来自可信反向代理时才信转发头。
+
+    2026-10-19 审计：原实现无条件信任 ``X-Real-IP``，攻击者每次随机填一个
+    就能重置 IP 级与账号级限流计数（登录可无限猜口令）。``TRUSTED_PROXIES``
+    为空（默认）＝直连部署，永不读转发头；反代部署请显式配置代理地址。
+    """
+    remote = request.remote_addr or '0.0.0.0'
+    trusted = current_app.config.get('TRUSTED_PROXIES') or ()
+    if not trusted or (remote not in trusted and '*' not in trusted):
+        return remote
+    fwd = (request.headers.get('X-Real-IP')
+           or (request.headers.get('X-Forwarded-For') or '').split(',')[0].strip())
+    return fwd or remote
 
 
 def hit_limit(key, limit, window):

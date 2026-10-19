@@ -297,6 +297,52 @@
             .tab-pane { display: none !important; }
             .tab-pane.active { display: block !important; }
         }
+        /* 2026-10-19 用户口径：考试成绩单 / 数据导入等页面顶部固定展示本场考试标题，
+           原来的页头位置改为各页面自己的标题。 */
+        .exam-topbar-context {
+            min-width: 0;
+            gap: .55rem;
+        }
+        .exam-topbar-divider {
+            width: 1px;
+            height: 20px;
+            flex-shrink: 0;
+            background: var(--sl-navbar-border, #dee2e6);
+        }
+        .exam-topbar-name {
+            max-width: 38vw;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+            color: var(--sl-navbar-text, #1e293b);
+            font-size: 15px;
+            font-weight: 650;
+            text-decoration: none;
+        }
+        .exam-topbar-name:hover {
+            color: var(--sl-navbar-text, #1e293b);
+            text-decoration: underline;
+        }
+        .exam-topbar-meta {
+            max-width: 27vw;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+            color: var(--sl-text-muted, #64748b);
+            font-size: 12px;
+        }
+        .exam-topbar-context .badge { flex-shrink: 0; font-size: 11px; }
+        @media (max-width: 1199.98px) {
+            .exam-topbar-meta { display: none; }
+            .exam-topbar-name { max-width: 42vw; }
+        }
+        @media (max-width: 991.98px) {
+            .exam-topbar-name { max-width: 30vw; font-size: 14px; }
+        }
+        @media (max-width: 575.98px) {
+            .exam-topbar-name { max-width: 34vw; }
+            .exam-topbar-context .badge { display: none; }
+        }
     </style>
     {% block extra_css %}{% endblock %}
 </head>
@@ -325,8 +371,28 @@
            登录页 / 首页 / 通知公告无归属 → 不渲染后缀。 #}
         {% set brand_module = workbench_name() %}
         <a class="navbar-brand fw-bold" href="{{ url_for('welcome.index') if current_user.is_authenticated else '#' }}">
-            <i class="bi bi-building"></i> StuLink{% if brand_module %}<span class="brand-module">{{ brand_module }}</span>{% endif %}
+            <i class="bi bi-building"></i> StuLink{% if brand_module and not EN %}<span class="brand-module">{{ brand_module }}</span>{% endif %}
         </a>
+        {% if EN %}
+        {# 本场考试标题：只要请求带考试上下文（exam_id 或 ?exam=）就一直在顶部，
+           成绩单 / 数据导入 / 划线分层 / 分析页共用，不再各页重复写标题。 #}
+        <div class="exam-topbar-context d-none d-sm-flex align-items-center ms-1">
+            <span class="exam-topbar-divider"></span>
+            <a class="exam-topbar-name"
+               href="{{ url_for('grades.exam_detail', exam_id=EN.exam_id) }}"
+               title="{{ EN.exam.name or EN.exam.title_with_dimensions() }}（点击返回成绩单）">
+                {{ EN.exam.name or EN.exam.title_with_dimensions() }}
+            </a>
+            {% if EN.exam.status == 'imported' %}
+            <span class="badge bg-success">已导入</span>
+            {% elif EN.exam.status == 'dirty' %}
+            <span class="badge bg-warning text-dark">待重算</span>
+            {% else %}
+            <span class="badge bg-secondary">未导入</span>
+            {% endif %}
+            <span class="exam-topbar-meta">{{ EN.exam.title_with_dimensions() }}</span>
+        </div>
+        {% endif %}
         <div class="ms-auto d-flex align-items-center">
             {% if current_user.is_authenticated %}
             {# 2026-10-13（v1.19.49.35）：主题切换入口 —— 与铃铛/用户菜单同级，
@@ -564,7 +630,7 @@
                         <span class="efn-dot {{ 'on' if s.current }}{{ ' done' if s.done and not s.current }}"
                               title="环节{{ loop.index }} {{ s.label }}{% if s.current %}（当前）{% elif s.done %}（已完成）{% else %}（未完成）{% endif %}">{{ loop.index }}</span>
                         {% endfor %}
-                        <span class="efn-count">{{ EN.affair_steps | length }}/{{ EN.affair_steps | length }} 环节</span>
+                        <span class="efn-count">{{ EN.affair_steps | selectattr('done') | list | length }}/{{ EN.affair_steps | length }} 环节</span>
                     {% else %}
                         {% for s in EN.steps %}
                         <span class="efn-dot {{ 'on' if s.done }}"
@@ -626,6 +692,11 @@
                        href="{{ url_for('grades.global_compare_page') }}?exam={{ EN.exam_id }}">总览（全年级对比）</a>
                     {% endif %}
                     {% if current_user.has_perm('grades.view') %}
+                    {# 2026-10-19 用户口径：「你左侧缺一个年级分析呀」——分析组补上
+                       年级分析入口，顺序与页内页签一致（年级 → 班级 → 学科）。
+                       年级分析就是分析页的默认页签（不带 tab 或 tab=grade）。 #}
+                    <a class="efn-item ps-4 {% if request.endpoint == 'grades.index' and request.args.get('tab', 'grade') == 'grade' %}active{% endif %}" data-nav="ana_grade"
+                       href="{{ url_for('grades.index') }}?exam={{ EN.exam_id }}&tab=grade">年级分析</a>
                     <a class="efn-item ps-4 {% if request.endpoint == 'grades.index' and request.args.get('tab') == 'class' %}active{% endif %}" data-nav="ana_class"
                        href="{{ url_for('grades.index') }}?exam={{ EN.exam_id }}&tab=class">班级分析</a>
                     <a class="efn-item ps-4 {% if request.endpoint == 'grades.index' and request.args.get('tab') == 'subject' %}active{% endif %}" data-nav="ana_subject"

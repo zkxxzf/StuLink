@@ -9,8 +9,9 @@
     <a href="{{ url_for('grades.exam_detail', exam_id=exam.id) }}" class="btn btn-sm btn-outline-secondary" title="返回" aria-label="返回">
         <i class="bi bi-arrow-left"></i>
     </a>
-    <h5 class="mb-0"><i class="bi bi-bar-chart"></i> 划线分层：{{ exam.name }}</h5>
-    <span class="text-muted small">{{ exam.grade }} · 参考学生 {{ total_count }} 人</span>
+    {# 顶部导航栏固定展示本场考试；这里是本页标题。 #}
+    <h4 class="mb-0"><i class="bi bi-bar-chart"></i> 划线分层</h4>
+    <span class="text-muted small">参考学生 {{ total_count }} 人</span>
     {% if not can_edit %}
     <span class="badge bg-secondary-subtle text-secondary-emphasis border" title="划线由教务员 / 管理员 / 年级长维护，本页仅供查看">只读</span>
     {% endif %}

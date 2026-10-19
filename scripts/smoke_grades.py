@@ -214,13 +214,20 @@ with app.test_client() as c:
     check('年级分析 API 表', r.status_code == 200 and 'class_summary' in tables
           and len(tables['class_summary']['rows']) == 2)
     charts = js['data']['charts']
-    check('年级分析 API 图（含箱线/堆叠/折线）',
-          'box' in charts and 'seg_stack' in charts and 'trend_line' in charts)
+    # 2026-10-19 用户口径：「历次考试总览下面的东西全部删了」——
+    # 历次考试总览表 + 其后全部图表（均分柱/箱线/分层率/堆叠/趋势折线）已下线
+    check('年级分析 API 已无图表区（历次总览及以下已删）',
+          charts == {} and 'trend_overview' not in tables,
+          f'charts={sorted(charts)} tables={sorted(tables)}')
     r = c.get(f'/grades/api/analysis/class?exam_id={eid}&class_name=01%E7%8F%AD')
     js = r.get_json()
     t2 = js['data']['tables']
-    check('班级分析 API', 'class_meta' in t2 and 'student_detail' in t2
-          and len(t2['student_detail']['rows']) == 6)
+    # 2026-10-19 用户口径：删除「班级学生历次成绩明细表」；
+    # 「班级学生各科成绩表」保留但只出表格（noChart）
+    check('班级分析 API', 'class_meta' in t2 and 'student_detail' not in t2
+          and len(t2['student_scores']['rows']) == 6
+          and t2['student_scores'].get('noChart') is True,
+          f"tables={sorted(t2)}")
     r = c.get(f'/grades/api/analysis/subject?exam_id={eid}&subject=%E6%95%B0%E5%AD%A6')
     js = r.get_json()
     check('学科分析 API（含热力）',
@@ -297,13 +304,20 @@ with app.test_client() as c:
         check('组合维度：本场无组合线，跳过键空间断言', True)
     r = c.get(f'/grades/api/analysis/grade?exam_id={eid}')
     rows = r.get_json()['data']['tables']['class_summary']['rows']
-    check('分层列进入汇总表',
-          'l_0' in rows[0] and rows[0]['l_0'] is not None, str(rows[0]))
-    # 分层分布校验：物理(02班)6 人，前20%线=610.5 → 优秀 2 人（641/610.5）；历史(01班)前20%=590 → 优秀 2 人
+    # 2026-10-19：分层上线统计已并入汇总表（累计口径列 p_层名 / r_层名），
+    # 不再是单独的 layer_pass 表、也不再出 l_0 计数列
+    check('分层上线列进入汇总表',
+          'p_优秀' in rows[0] and rows[0]['p_优秀'] is not None, str(rows[0]))
+    check('不再单独出分层上线表',
+          'layer_pass' not in r.get_json()['data']['tables'],
+          str(list(r.get_json()['data']['tables'])))
+    # 累计上线人数校验：物理(02班)6 人，前20%线=610.5 → 优秀 2 人；历史(01班)前20%=590 → 优秀 2 人
     r2 = {row['class_name']: row for row in rows}
-    check('分层分布正确（优秀层=前20%）',
-          r2['01班'].get('l_0') == '2' and r2['02班'].get('l_0') == '2',
-          str({k: v.get('l_0') for k, v in r2.items()}))
+    check('分层上线人数正确（累计口径，优秀层=前20%）',
+          r2['01班'].get('p_优秀') == 2 and r2['02班'].get('p_优秀') == 2,
+          str({k: v.get('p_优秀') for k, v in r2.items()}))
+    check('汇总表末行为年级总计',
+          rows[-1]['class_name'] == '年级总计', str(rows[-1]['class_name']))
     # 2026-10-15 口径：划线后「及格率/优秀率」列 = 及格层/优秀层的**单科上线率**
     r = c.get(f'/grades/api/analysis/grade?exam_id={eid}')
     tt = r.get_json()['data']['tables']['subject_total']
@@ -421,18 +435,23 @@ with app.test_client() as c:
     r = c.get(f'/grades/api/analysis/grade?exam_id={eid}&direction=%E5%8E%86%E5%8F%B2')  # 历史
     js = r.get_json()['data']
     rows = js['tables']['class_summary']['rows']
+    # 2026-10-19：合并表末行固定是「年级总计」，班级行要排除它再断言
+    cls_rows = [x for x in rows if x['class_name'] != '年级总计']
     subs = js['tables']['subject_total']['rows']
-    check('方向筛选-历史：仅历史班', len(rows) == 1 and rows[0]['class_name'] == '01班'
-          and rows[0]['count'] == 6, str(rows))
+    check('方向筛选-历史：仅历史班',
+          len(cls_rows) == 1 and cls_rows[0]['class_name'] == '01班'
+          and cls_rows[0]['count'] == 6, str(rows))
     check('方向筛选-历史：无物理科', all(x['subject'] != '物理' for x in subs))
-    check('方向筛选-历史：均值口径', rows[0]['avg'] == 561.7, str(rows[0]['avg']))
-    check('方向筛选-历史：箱线仅01班', js['charts']['box']['xAxis'] == ['01班'])
+    check('方向筛选-历史：均值口径', cls_rows[0]['avg'] == 561.7,
+          str(cls_rows[0]['avg']))
+    # 2026-10-19：箱线图随「历次总览以下」一并下线，这里不再断言 charts['box']
     r = c.get(f'/grades/api/analysis/grade?exam_id={eid}&direction=%E7%89%A9%E7%90%86')  # 物理
     js = r.get_json()['data']
     rows = js['tables']['class_summary']['rows']
+    cls_rows = [x for x in rows if x['class_name'] != '年级总计']
     subs = js['tables']['subject_total']['rows']
     check('方向筛选-物理：仅物理班且含物理科',
-          len(rows) == 1 and rows[0]['class_name'] == '02班'
+          len(cls_rows) == 1 and cls_rows[0]['class_name'] == '02班'
           and any(x['subject'] == '物理' for x in subs)
           and all(x['subject'] != '历史' for x in subs))
     r = c.get(f'/grades/api/analysis/subject?exam_id={eid}&subject=%E6%95%B0%E5%AD%A6'

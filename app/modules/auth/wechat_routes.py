@@ -115,6 +115,7 @@ def wechat_bind():
             .order_by(WeChatBinding.id).all())
     bindings = [{
         'id': r.id,
+        'openid': r.openid or '',
         'openid_tail': (r.openid or '')[-6:],
         'created_at': r.created_at,
         'last_login_at': r.last_login_at,

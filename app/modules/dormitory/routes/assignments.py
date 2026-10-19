@@ -49,7 +49,7 @@ def _homeroom_class_or_default(grade, class_name):
             grade = grade or link.grade
             class_name = class_name or link.class_name
         else:
-            grade = grade or (current_user.grade or '')
+            grade = grade or (current_user.grades[0] if current_user.grades else '')
             class_name = class_name or (current_user.class_name or '')
     return grade, class_name
 

@@ -14,10 +14,7 @@ from app.modules.grades.services import scope as scope_service
 from app.modules.grades.services import score_guard
 from app.modules.grades.services import tab_service
 from app.modules.wxapi import bp
-from app.modules.wxapi.core.guards import (
-    wx_login_required,
-    wx_perm_required,
-)
+from app.modules.wxapi.core.guards import wx_perm_required
 from app.modules.wxapi.core.response import wx_err, wx_ok
 from app.modules.wxapi.grades.routes_grades import PERM
 
@@ -110,17 +107,17 @@ def _teacher_data(user, exam, subject, denom):
             exam.id, subject=subject, links=None,
             grade=exam.grade, denom=denom)
     if scope_type == 'grade':
+        # 2026-10-19：管理年级可多选，取本场考试年级（已校验可见）
         links = TeacherSubjectLink.query.filter_by(
-            grade=grade, active=True).all()
+            grade=exam.grade, active=True).all()
         return tab_service.teacher_tab(
             exam.id, subject=subject, links=links,
-            grade=grade, denom=denom)
+            grade=exam.grade, denom=denom)
     raise PermissionError('无权查看教师分析')
 
 
 @bp.route('/grades/analysis/<tab>')
-@wx_login_required
-@wx_perm_required(PERM)
+@wx_perm_required(PERM)     # 内含 wx_login_required，勿再叠一层（会双倍限流）
 def wx_grades_analysis(tab):
     """query: exam_id / class_name / subject / classes / denom。"""
     if tab not in TABS:

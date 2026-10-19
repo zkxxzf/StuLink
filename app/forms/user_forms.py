@@ -23,7 +23,9 @@ class UserForm(FlaskForm):
     # 2026-10-14（P5）：一人可挂多个身份（权限组）；列表首个为「主组」。
     permission_group_ids = SelectMultipleField('权限组', validators=[Optional()],
                                                coerce=int)
-    grade = SelectField('管理年级', validators=[Optional()])
+    # 2026-10-19：管理年级支持多选（年级长可管多个年级）；班主任仍强制 1 个
+    # （一个班只属于一个年级），由 users.py 保存时校验。
+    grade = SelectMultipleField('管理年级', validators=[Optional()])
     class_name = SelectField('管理班级', validators=[Optional()])
     password = PasswordField('密码', validators=[Optional(), Length(min=MIN_LENGTH, message=f'密码至少{MIN_LENGTH}位')])
 
@@ -41,7 +43,7 @@ class UserForm(FlaskForm):
         super().__init__(*args, **kwargs)
         from app.utils.helpers import get_dict_items
         from app.models import PermissionGroup
-        self.grade.choices = [('', '不限')] + get_dict_items('grade')
+        self.grade.choices = get_dict_items('grade')      # 不选 = 不限
         self.class_name.choices = [('', '不限')] + get_dict_items('class')
         groups = PermissionGroup.query.order_by(PermissionGroup.id).all()
         self.permission_group_ids.choices = [(g.id, g.name) for g in groups]

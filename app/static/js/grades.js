@@ -513,8 +513,10 @@ function showEmpty(tab, msg){
 }
 
 /* ============ 指标卡双视图：表格 / 图表 ============ */
-// 每张指标卡默认视图（可被页顶总开关批量改写，也可单卡覆盖）
-var masterView = 'table';
+// 每张指标卡默认视图（可被页顶总开关批量改写）。
+// 2026-10-19 用户口径：默认「图 + 表」同屏（有图的卡片上方画图、下方紧凑数据表），
+// 页顶总开关「表格」只用于需要纯表格（打印 / 抄数）时整体切换。
+var masterView = 'chart';
 
 function isNumVal(v){
     if (v === null || v === undefined || v === '') return false;
@@ -525,6 +527,8 @@ function isNumVal(v){
    优先级：后端 chartHint（完整规格） > chartHint 部分字段 > 自动推断。 */
 function autoChartSpec(t, key){
     var hint = t.chartHint || null;
+    // 后端显式 noChart（如「班级学生各科成绩表」）→ 该卡只出表格，不画图
+    if (t.noChart || hint === false) return null;
     // hint 带 xAxis+series（或 indicators）= 完整规格，直接用
     if (hint && ((hint.xAxis && hint.series) || hint.indicators)){
         return $.extend({title: t.title || key}, hint);
@@ -588,9 +592,6 @@ function buildTbody(t, rows){
     var tbody = $('<tbody>');
     (rows || []).forEach(function(r){
         var tr = $('<tr>');
-        if (t.link && r.no !== null && r.no !== undefined){
-            tr.addClass('stu-link').attr('data-no', r.no);
-        }
         visColsOf(t).forEach(function(c){
             var val = r[c.key];
             var td = $('<td' + (c.type !== 'text' ? ' class="num"' : '') + '>').text(fmt(val));
@@ -605,14 +606,6 @@ function buildTbody(t, rows){
         });
         tbody.append(tr);
     });
-    if (t.link){
-        tbody.on('click', 'tr.stu-link', function(){
-            var no = $(this).data('no');
-            if (no !== null && no !== undefined){
-                window.open('/grades/' + t.link + '?student_no=' + encodeURIComponent(no), '_blank');
-            }
-        });
-    }
     return tbody;
 }
 
@@ -645,9 +638,11 @@ function applyCardRows(card, rows){
     var spec = autoChartSpec($.extend({}, t, {rows: rows}), key);
     card.data('spec', spec);
     card.find('.tbl-wrap table tbody').replaceWith(buildTbody(t, rows));
+    // 图表视图下方的紧凑表与上方图共用同一份行数据 → 排序/列显隐后一起刷新
+    card.find('.chart-data table tbody').replaceWith(buildTbody(t, rows));
     updateSortHead(card);
     var tip = spec ? (spec.title + (spec.note ? '（' + spec.note + '）' : '')) : '';
-    card.find('.chart-tip').text(tip ? '图表数据同上表：' + tip : '');
+    card.find('.chart-tip').text(tip ? '图表数据见右侧数据表：' + tip : '');
     if (card.data('chartReady')){
         var inst = charts[card.data('chartKey')];
         if (inst && spec){
@@ -703,9 +698,20 @@ function buildTableHtml(t){
     return table;
 }
 
+/* 图表视图下方的「紧凑数据表」（2026-10-19 用户口径：上方图、下方表的数据，
+   表格紧凑一点）。与上方图同源（同一份 rows），跟随列显隐/排序刷新；
+   本身不绑排序交互（排序仍走「表格」视图），表头图标由 CSS 隐藏。 */
+function buildCompactTable(t){
+    var table = $('<table class="table g-table g-table-compact mb-0">');
+    table.append(buildThead(t));
+    table.append(buildTbody(t, t.rows || []));
+    return table;
+}
+
 /* 切换单卡的视图：'table' | 'chart'。图表首次切到时才初始化，之后仅显隐。 */
 function setCardView(card, view){
     var spec = card.data('spec');
+    if (view === 'chart' && !spec) view = 'table';   // 无图卡片不能被切成空白
     var tPane = card.find('.view-pane[data-view="table"]');
     var cPane = card.find('.view-pane[data-view="chart"]');
     card.find('.view-switch .btn').each(function(){
@@ -766,29 +772,21 @@ function renderTables(area, tables){
             t.visCols = colsAll.filter(function(c){ return visKeys.indexOf(c.key) >= 0; });
         }
 
-        var titleHtml = '<h6 class="mb-0"><i class="bi bi-table me-1"></i>' + escHtml(t.title || key);
-        // 带 link 的表（如学生明细表）：整行可点击跳转个人成绩查询
-        if (t.link){
-            titleHtml += ' <span class="text-muted small fw-normal ms-2">'
-                + '<i class="bi bi-box-arrow-up-right"></i> 点击行查看学生个人成绩</span>';
-        }
-        titleHtml += '</h6>';
+        var titleHtml = '<h6 class="mb-0"><i class="bi bi-table me-1"></i>'
+            + escHtml(t.title || key) + '</h6>';
 
         var controls = $('<div class="d-flex align-items-center gap-2">');
-        if (spec){
-            controls.append(
-                '<div class="btn-group btn-group-sm view-switch" role="group">'
-                + '<button type="button" class="btn btn-outline-primary' + (masterView === 'table' ? ' active' : '')
-                + '" data-view="table"><i class="bi bi-table"></i> 表格</button>'
-                + '<button type="button" class="btn btn-outline-primary' + (masterView === 'chart' ? ' active' : '')
-                + '" data-view="chart"><i class="bi bi-bar-chart"></i> 图表</button></div>');
-        }
+        // 2026-10-19 用户口径：卡片头的「表格 | 图表」切换去掉 ——
+        // 有图的卡片固定「上方图 + 下方紧凑数据表」，无图的仍是纯表格；
+        // 需要整体只看表格时用页顶总开关。
         if (window.TableCols){
             controls.append(TableCols.menu(ck, colsAll, function(keys){
                 t.visCols = colsAll.filter(function(c){ return keys.indexOf(c.key) >= 0; });
                 // 重建表头 + 行（当前行序保持；排序状态与图表同源不变）
+                // 图表视图下方的紧凑表也要跟着换表头（同一份列显隐口径）
                 var $tbl = card.find('.tbl-wrap table').first();
                 $tbl.find('thead').replaceWith(buildThead(t));
+                card.find('.chart-data table thead').replaceWith(buildThead(t));
                 bindSortHead(card);
                 applyCardRows(card, card.data('rows') || []);
             }));
@@ -801,9 +799,11 @@ function renderTables(area, tables){
         body.append($('<div class="tbl-wrap view-pane" data-view="table">').append(buildTableHtml(t)));
         if (spec){
             body.append($('<div class="view-pane chart-pane" data-view="chart" hidden>')
-                .append('<div class="chart-tip px-3 pt-2 pb-1">图表数据同上表：' + escHtml(t.title || key)
+                .append('<div class="chart-tip px-3 pt-2 pb-1">图表数据见右侧数据表：'
+                    + escHtml(t.title || key)
                     + (spec.note ? '（' + escHtml(spec.note) + '）' : '') + '</div>')
-                .append('<div class="tbl-chart"></div>'));
+                .append('<div class="tbl-chart"></div>')
+                .append($('<div class="chart-data">').append(buildCompactTable(t))));
         }
         card.append(body);
 
@@ -812,7 +812,8 @@ function renderTables(area, tables){
         });
         // 表头排序：升序 → 降序 → 还原原始顺序（数据、图表同份，导出仍取后端原序）
         bindSortHead(card);
-        if (masterView === 'chart') setCardView(card, 'chart');
+        // 只有真的能出图的卡片才切图表视图，否则会把表格藏起来、卡片变空白
+        if (masterView === 'chart' && spec) setCardView(card, 'chart');
         card.find('.tbl-fold').on('click', function(){
             var visible = body.is(':visible');
             body.toggle();
@@ -865,6 +866,7 @@ function chartOption(c){
         case 'boxplot': return boxOption(c);
         case 'line': return lineOption(c);
         case 'dual': return dualOption(c);
+        case 'combo': return comboOption(c);
         case 'radar': return radarOption(c);
         case 'heatmap': return heatOption(c);
         default: return {};
@@ -963,7 +965,11 @@ function barOption(c, grouped){
 }
 
 function stackOption(c){
-    return {tooltip: {trigger: 'axis'}, legend: {top: 0, type: 'scroll'},
+    // 2026-10-19 左图右表后图宽只有卡片的 42%，默认 12px 图例放不下 8 个名次段
+    // → 图例字号/间距压小，仍保留 scroll 分页兜底
+    return {tooltip: {trigger: 'axis'},
+        legend: {top: 0, type: 'scroll', itemGap: 8, itemWidth: 10,
+                 itemHeight: 10, textStyle: {fontSize: 10}},
         grid: gridOf(c), xAxis: catAxisOf(c), dataZoom: zoomOf(c),
         yAxis: yFmt(),
         series: (c.series || []).map(function(s, i){
@@ -1008,6 +1014,28 @@ function dualOption(c){
         series: (c.series || []).map(function(s){
             return {name: s.name, type: 'line', data: s.data, yAxisIndex: s.yAxis || 0,
                 smooth: true, symbolSize: 5};
+        })};
+}
+
+/* 柱+折线组合（2026-10-19 年级汇总表）：人数走左轴柱形，率% 走右轴折线。 */
+function comboOption(c){
+    var names = c.yAxisNames || ['人数', '上线率%'];
+    return {color: palette(), tooltip: {trigger: 'axis'},
+        legend: {top: 0, type: 'scroll'},
+        grid: gridOf(c), xAxis: catAxisOf(c), dataZoom: zoomOf(c),
+        yAxis: [
+            {type: 'value', name: names[0], axisLabel: {formatter: '{value}'}},
+            {type: 'value', name: names[1], max: 100,
+             axisLabel: {formatter: '{value}%'}}
+        ],
+        series: (c.series || []).map(function(s){
+            var yi = s.axis === 1 ? 1 : 0;
+            if (s.type === 'line'){
+                return {name: s.name, type: 'line', yAxisIndex: yi,
+                    data: s.data, smooth: true, symbolSize: 6,
+                    connectNulls: false};
+            }
+            return {name: s.name, type: 'bar', yAxisIndex: yi, data: s.data};
         })};
 }
 

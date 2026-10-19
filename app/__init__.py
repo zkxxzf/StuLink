@@ -716,6 +716,10 @@ def create_app():
 
     @app.errorhandler(500)
     def internal_error(e):
+        # 生产环境 500 页面只给用户看简短提示，但服务端必须留下堆栈；
+        # MaskingFilter 已在 create_app 里安装，手机号/身份证等会被脱敏。
+        logging.getLogger('stulink.error').exception(
+            '未处理异常: %s', getattr(e, 'description', '') or e)
         return render_template('error.html', code=500, message='服务器内部错误，请联系管理员'), 500
 
     # M-9：为后续切换到 enforcing CSP 预留 nonce（每请求一个，模板可用 {{ csp_nonce }}）

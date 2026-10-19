@@ -15,7 +15,7 @@ from flask_login import current_user
 from app.extensions import db
 from app.models.grades import Exam, TeacherSubjectLink
 from app.modules.grades.services.scope import (
-    check_exam_visible, user_grade_scope, get_scope,
+    check_exam_visible, user_grade_scope, get_scope, get_scope_grades,
     SCOPE_SCHOOL, SCOPE_GRADE)
 
 
@@ -51,7 +51,8 @@ def assert_grade_visible(grade):
     if scope == SCOPE_SCHOOL:
         return True
     if scope == SCOPE_GRADE:
-        if grade != g:
+        # 2026-10-19：管理年级可多选，逐个年级判断
+        if grade not in get_scope_grades(current_user):
             abort(403)
         return True
     # v1.19.49.35 S-3：班主任/任课教师 scope=SCOPE_CLASS 时兜底放行——

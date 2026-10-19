@@ -642,7 +642,6 @@
             <button class="btn btn-primary btn-sm" onclick="addScheduleRow()">
                 <i class="bi bi-plus-lg"></i> 新增场次</button>
         </div>
-        <div id="schedMsg" class="small mb-2"></div>
         <div class="table-responsive" style="max-height:60vh;overflow:auto">
             <table class="table table-sm table-hover align-middle mb-0">
                 {# 2026-10-14 用户口径：科目列提到日期右侧 —— 先选科目，再（自动/手选）起始时间，结束时间自动算 #}
@@ -680,7 +679,7 @@
                     <td><input class="form-control form-control-sm sc-sel" value="{{ s.selection or '' }}"></td>
                     <td><input class="form-control form-control-sm sc-note" value="{{ s.note or '' }}"></td>
                     <td class="text-nowrap">
-                        <button class="btn btn-outline-primary btn-sm py-0" onclick="saveSchedule(this)">存</button>
+                        {# 2026-10-19 用户口径：改完即存，不再点「存」 #}
                         <button class="btn btn-outline-danger btn-sm py-0" onclick="delSchedule(this)">删</button>
                     </td>
                 </tr>
@@ -688,6 +687,8 @@
                 </tbody>
             </table>
         </div>
+        {# 2026-10-19 用户口径：自动保存/批量操作提示放表格**下方**，表格上方只留操作按钮 #}
+        <div id="schedMsg" class="small mt-2"></div>
         {# 2026-10-13 用户口径：新增场次的日期不再留空（原先是空的 yyyy/mm/dd 要自己填） #}
         {# 2026-10-14 用户口径：内置每科考试时长 —— 选科目就自动算出结束时间（语文 2.5 小时 /
            数学·英语 2 小时 / 其它 75 分钟），开始时间接同一天上一场的结束（当天首场
@@ -699,8 +700,9 @@
             数学/英语 {{ sched_duration['数学'] }} 分钟〔2 小时〕 ·
             其它 {{ sched_duration_fallback }} 分钟，一场多科取最长），
             开始时间接同一天上一场的结束（当天首场 {{ sched_default_start }}）；
-            手改过开始/结束就按你填的存，都可留空。老数据一键补齐：点上方「按科目补时间」。
-            科目必填。</div>
+            <b>改开始时间或换科目，结束按科目时长自动重排</b>；只改结束则按你填的存；时间都可留空。
+            老数据缺时间的，点上方「按科目补时间」。
+            <b>改完即自动保存</b>（日期/科目/时间/选科/备注，失焦就存），不用再点保存；科目必填。</div>
     </div>
 
     <!-- ===== 环节⑥ 编排监考表 ===== -->
@@ -2150,9 +2152,13 @@ function syncAffairTeachers(){
 // ---------- 环节⑤ 考试时间表 ----------
 function importSchedules(input){
     if(!input.files.length) return;
-    // 2026-10-13：导入完成会刷新页面 —— 有未点「存」的行时先提醒，避免无声丢内容
-    if (document.querySelector('#schedBody tr[data-sid=""]')
-        && !confirm('导入完成会刷新页面，还没点「存」的场次内容会丢失。继续导入？')) {
+    // 2026-10-13：导入完成会刷新页面 —— 有没保存成功的行时先提醒，避免无声丢内容
+    // 2026-10-19：改成自动保存后，只有"选了科目却没存成"的行才算有内容会丢
+    var _dirty = Array.prototype.slice.call(
+        document.querySelectorAll('#schedBody tr[data-sid=""]')).some(function(tr){
+        return ((tr.querySelector('.sc-subj') || {}).value || '').trim() !== '';
+    });
+    if (_dirty && !confirm('导入完成会刷新页面，有场次还没保存成功，内容会丢失。继续导入？')) {
         input.value = ''; return;
     }
     var fd = new FormData(); fd.append('file', input.files[0]);
@@ -2264,8 +2270,12 @@ function prevEndTime(tr){
     });
     return out;
 }
-// 按科目 / 开始时间自动带出时间；结束时间被用户手改过（无 data-auto 标记）就不覆盖
-function autoSchedTimes(tr){
+// 按科目 / 开始时间自动带出时间。
+// 2026-10-19 用户口径：「语文这些科目的时长不是固定的吗？为啥不会自动变化了」——
+// 科目时长固定，所以**改开始时间 / 换科目**一律按「开始 + 本场时长」重排结束
+// （forceEnd=true；此前页面已有结束值且没有 data-auto 标记时不会重算，
+// 手改开始后结束就卡在旧时间）。只改结束时间仍按老师填的存，不再自动覆盖。
+function autoSchedTimes(tr, forceEnd){
     if(!tr) return;
     var subj = (tr.querySelector('.sc-subj').value || '').trim();
     if(!subj) return;                      // 还没选科目：不猜时长
@@ -2274,7 +2284,7 @@ function autoSchedTimes(tr){
         startEl.value = prevEndTime(tr) || SCHED_DEFAULT_START;
         startEl.dataset.auto = '1';
     }
-    if(!(endEl.value || '').trim() || endEl.dataset.auto === '1'){
+    if(forceEnd || !(endEl.value || '').trim() || endEl.dataset.auto === '1'){
         endEl.value = addMinutes(startEl.value, schedDurationMin(subj));
         endEl.dataset.auto = '1';
     }
@@ -2294,7 +2304,7 @@ function autoFillAllSchedTimes(){
     if(!saved.length){
         msg.className = 'small text-muted';
         msg.textContent = unsaved
-            ? ('这 ' + unsaved + ' 行还没保存过：选完科目会自动带出时间，点行尾「存」即可。')
+            ? ('这 ' + unsaved + ' 行还没保存过：选完科目会自动带出时间并保存。')
             : '所有填了科目的场次都有开始/结束时间了，无需补。';
         setTimeout(function(){ msg.textContent = ''; }, 5000);
         return;
@@ -2339,8 +2349,8 @@ function addScheduleRow(){
         + '<td><input type="time" class="form-control form-control-sm sc-end"></td>'
         + '<td><input class="form-control form-control-sm sc-sel"></td>'
         + '<td><input class="form-control form-control-sm sc-note"></td>'
-        + '<td class="text-nowrap"><button class="btn btn-outline-primary btn-sm py-0" onclick="saveSchedule(this)">存</button> '
-        + '<button class="btn btn-outline-danger btn-sm py-0" onclick="delSchedule(this)">删</button></td></tr>';
+        + '<td class="text-nowrap"><button class="btn btn-outline-danger btn-sm py-0" '
+        + 'onclick="delSchedule(this)">删</button></td></tr>';
     var tb = document.getElementById('schedBody');
     tb.insertAdjacentHTML('beforeend', h);
     // 2026-10-13：新行的科目下拉也要走固定定位（容器 overflow:auto 会裁剪菜单）
@@ -2356,23 +2366,31 @@ document.getElementById('schedBody').addEventListener('change', function(e){
             .map(function(c){ return c.value; });
         tr.querySelector('.sc-subj').value = picked.join('、');
         tr.querySelector('.subj-btn').textContent = picked.length ? picked.join('+') : '选科目';
-        autoSchedTimes(tr);
+        autoSchedTimes(tr, true);          // 科目变了 → 时长为新科目，重排结束
+        autoSaveSched(tr);
         return;
     }
-    if (e.target.classList.contains('sc-start')) { autoSchedTimes(tr); return; }
+    if (e.target.classList.contains('sc-start')) {
+        autoSchedTimes(tr, true);          // 改开始 → 结束 = 开始 + 本场时长
+        autoSaveSched(tr);
+        return;
+    }
     if (e.target.classList.contains('sc-end')) {
         // 手改过结束 = 不再自动覆盖（去掉标记）；清空 = 恢复自动，下次改科目/开始会重算
         if ((e.target.value || '').trim()) delete e.target.dataset.auto;
         else e.target.dataset.auto = '1';
+        autoSaveSched(tr);
         return;
     }
     if (e.target.classList.contains('sc-date')) {
         var s = tr.querySelector('.sc-start');
         if (!(s.value || '').trim() || s.dataset.auto === '1') {
             s.value = '';                       // 交给 autoSchedTimes 按新那天重新续排
-            autoSchedTimes(tr);
+            autoSchedTimes(tr, true);
         }
     }
+    // 日期 / 选科 / 备注（文本框失焦即 change）都走这里
+    autoSaveSched(tr);
 });
 // 保存一行（返回 Promise<true|false>）；批量补时间也复用它
 function saveScheduleRow(tr){
@@ -2387,7 +2405,7 @@ function saveScheduleRow(tr){
     fd.append('note', tr.querySelector('.sc-note').value.trim());
     // 2026-10-13：保存改为**局部更新**（不再 location.reload）——
     // 刷新会把其他行还没保存的内容一起冲掉（用户实测反馈）。
-    // 新增行保存后把返回 id 写回行，后续再点「存」就是更新同一条。
+    // 新增行保存后把返回 id 写回行，后续自动保存就是更新同一条。
     return fetch('/grades/affairs/'+AID+'/schedules/save', {method:'POST', body:fd, headers:{'X-CSRFToken':csrf()}})
         .then(r=>r.json()).then(function(d){
             if (!d.ok){ msg.className = 'small text-danger'; msg.textContent = d.msg || '保存失败'; return false; }
@@ -2399,20 +2417,29 @@ function saveScheduleRow(tr){
             return false;
         });
 }
-function saveSchedule(btn){
-    saveScheduleRow(btn.closest('tr')).then(function(ok){
-        if (!ok) return;
-        btn.classList.replace('btn-outline-primary', 'btn-success');
-        btn.textContent = '已存';
-        setTimeout(function(){
-            btn.classList.replace('btn-success', 'btn-outline-primary');
-            btn.textContent = '存';
-        }, 1500);
-        var msg = document.getElementById('schedMsg');
-        msg.className = 'small text-success';
-        msg.textContent = '该场次已保存，其他行未保存的内容不受影响';
-        setTimeout(function(){ msg.textContent = ''; }, 3000);
-    });
+// 2026-10-19 用户口径：改完即存，不再点「存」按钮。
+// 串行保存（同一行连续改字段时，后一次一定拿到前一次写入的 id，不会重复新增）。
+function autoSaveSched(tr){
+    var msg = document.getElementById('schedMsg');
+    var subj = (tr.querySelector('.sc-subj').value || '').trim();
+    if (!subj){
+        msg.className = 'small text-muted';
+        msg.textContent = '这一行还没选科目：选完科目才会自动保存（科目必填）';
+        return null;
+    }
+    tr._saveChain = (tr._saveChain || Promise.resolve())
+        .then(function(){ return saveScheduleRow(tr); })
+        .then(function(ok){
+            if (!ok) return false;
+            msg.className = 'small text-success';
+            msg.textContent = '已自动保存';
+            clearTimeout(tr._saveTimer);
+            tr._saveTimer = setTimeout(function(){
+                if (msg.textContent === '已自动保存') msg.textContent = '';
+            }, 1500);
+            return true;
+        });
+    return tr._saveChain;
 }
 function delSchedule(btn){
     var tr = btn.closest('tr');

@@ -290,7 +290,7 @@ def api_search_users():
                             User.username.like(kw)))
              .limit(20).all())
     results = [{'uid': u.username, 'name': u.real_name or u.username,
-                'role': u.role or '', 'grade': u.grade or '',
+                'role': u.role or '', 'grade': u.grade_display,
                 'class_name': u.class_name or ''} for u in users]
     return jsonify(results)
 

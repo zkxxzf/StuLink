@@ -318,7 +318,8 @@ def create():
         return redirect(url_for('students.list_students'))
     # 班主任默认填入自己管理的年级班级
     if current_user.role == 'homeroom_teacher':
-        form.grade.data = form.grade.data or current_user.grade
+        form.grade.data = form.grade.data or (
+            current_user.grades[0] if current_user.grades else '')
         form.class_name.data = form.class_name.data or current_user.class_name
     return render_template('system/students/form.html', form=form, title='新增学生')
 

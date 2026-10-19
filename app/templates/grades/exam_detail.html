@@ -75,63 +75,40 @@
 {% endblock %}
 {% block content %}
 <div class="d-flex align-items-center mb-3 flex-wrap gap-2" id="examToolbar" data-exam-id="{{ exam.id }}">
-    <a href="{{ url_for('grades.exams_list') }}" class="btn btn-sm btn-outline-secondary" title="返回" aria-label="返回">
+    <a href="{{ url_for('grades.exams_list') }}" class="btn btn-sm btn-outline-secondary" title="返回考试列表" aria-label="返回考试列表">
         <i class="bi bi-arrow-left"></i>
     </a>
+    {# 2026-10-19 用户口径：顶部固定展示本场考试标题；这个位置改回本页标题。 #}
+    <h4 class="mb-0"><i class="bi bi-table"></i> 成绩单</h4>
     {% if current_user.has_perm('grades.edit') %}
-    <h5 class="mb-0 me-2" id="examName" role="button" title="点击修改考试信息（名称 / 年级 / 日期 / 性质 / 阶段）">
-        <i class="bi bi-journal-text"></i> {{ exam.name }}
-        <i class="bi bi-pencil-square small text-muted"></i>
-    </h5>
-    {% else %}
-    {# 只读（任课教师 / 班主任）：标题不出「可编辑」样式，避免点开 403 的编辑弹窗 #}
-    <h5 class="mb-0 me-2"><i class="bi bi-journal-text"></i> {{ exam.name }}</h5>
+    <button type="button" class="btn btn-sm btn-outline-secondary"
+            id="examEditBtn" title="修改考试信息（名称 / 年级 / 日期 / 性质 / 阶段）">
+        <i class="bi bi-pencil-square"></i>
+    </button>
     {% endif %}
-    {% if exam.status == 'imported' %}
-    <span class="badge bg-success">已导入</span>
-    {% elif exam.status == 'dirty' %}
-    <span class="badge bg-warning text-dark">待重算</span>
-    {% else %}
-    <span class="badge bg-secondary">未导入</span>
-    {% endif %}
-    <span class="text-muted small">{{ exam.grade }}
-        {% if exam.exam_kind %}· {{ exam.exam_kind }}{% endif %}
-        · {{ exam.exam_date.strftime('%Y-%m-%d') }}
-        · {{ exam.exam_type or '其他' }}
-        · <span class="badge bg-light text-dark border" title="本场划线/排名/分析采用的分数口径">{{ exam.score_mode_label() }}</span></span>
-    <div class="ms-auto d-flex gap-2">
-        {# 2026-10-15：本页对任课教师 / 班主任也开放（grades.view，成绩单按班收敛）——
-           导入 / 重算 / 改分记录 / 删除都是管理动作，按各自真实门槛包裹，
-           避免"看得见点不进"的 403 死链；划线分层对所有人可见，只读视图由 bands.html 自理。 #}
+    <div class="ms-auto d-flex align-items-center gap-2 flex-wrap">
         {% if current_user.has_perm('grades.edit') %}
-        {# v1.19.49.35：已导入/待重算都要给「重新计算排名」，否则 dirty 状态下按钮消失找不着 #}
-        {% if exam.status not in ('imported', 'dirty') %}
-        <a href="{{ url_for('grades.exam_import', exam_id=exam.id) }}" class="btn btn-primary btn-sm">
-            <i class="bi bi-upload"></i> 数据导入
+        <a href="{{ url_for('grades.exam_import', exam_id=exam.id) }}"
+           class="btn btn-sm {{ 'btn-outline-primary' if exam.status in ('imported', 'dirty') else 'btn-primary' }}"
+           title="导入 / 覆盖成绩、分数线、考务名单">
+            <i class="bi bi-upload"></i>
+            {{ '数据导入 / 覆盖' if exam.status in ('imported', 'dirty') else '数据导入' }}
         </a>
-        {% else %}
-        <a href="{{ url_for('grades.exam_import', exam_id=exam.id) }}" class="btn btn-outline-primary btn-sm"
-           title="成绩 / 分数线 / 考务名单 / 场次都可以在这里导入">
-            <i class="bi bi-upload"></i> 数据导入 / 覆盖
-        </a>
-        <form method="post" action="{{ url_for('grades.exam_recalc', exam_id=exam.id) }}">
+        {% if exam.status in ('imported', 'dirty') %}
+        <form method="post" action="{{ url_for('grades.exam_recalc', exam_id=exam.id) }}" class="d-inline">
             <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-            <button type="submit" class="btn btn-outline-warning btn-sm"
+            <button type="submit" class="btn btn-sm btn-outline-warning"
                     title="改分后系统会自动重算，此处用于手动补算">
                 <i class="bi bi-arrow-repeat"></i> 重新计算排名
             </button>
         </form>
         {% endif %}
         {% endif %}
-        <a href="{{ url_for('grades.bands_page', exam_id=exam.id) }}" class="btn btn-outline-info btn-sm">
+        <a href="{{ url_for('grades.bands_page', exam_id=exam.id) }}" class="btn btn-sm btn-outline-info">
             <i class="bi bi-bar-chart"></i> 划线分层
         </a>
         {% if current_user.has_perm('grades.edit') %}
-        {# v1.19.49.35：分数修改记录（谁在什么时候改了谁的分），与改分同档（grades.edit） #}
-        <a href="{{ url_for('grades.score_changes') }}?exam={{ exam.id }}" class="btn btn-outline-secondary btn-sm">
-            <i class="bi bi-clock-history"></i> 分数修改记录
-        </a>
-        <button class="btn btn-outline-danger btn-sm" data-bs-toggle="modal" data-bs-target="#delModal">
+        <button class="btn btn-sm btn-outline-danger" data-bs-toggle="modal" data-bs-target="#delModal">
             <i class="bi bi-trash"></i> 删除考试
         </button>
         {% endif %}
@@ -202,10 +179,13 @@
 <div class="card">
     <div class="card-header py-2">
         <div class="d-flex align-items-center flex-wrap gap-2">
-            <h6 class="mb-0"><i class="bi bi-people"></i> 成绩单
-                {% if cur_class %}（{{ cur_class }} · {{ total }} 人）
-                {% elif cur_dir %}（{{ cur_dir }}方向 · {{ total }} 人）
-                {% else %}（{{ total }} 人）{% endif %}</h6>
+            {# 页头已显示「成绩单」标题与总人数；这里只显示当前筛选口径，避免重复标题。 #}
+            <span class="text-muted small">
+                <i class="bi bi-people"></i>
+                {% if cur_class %}当前：{{ cur_class }} · {{ total }} 人
+                {% elif cur_dir %}当前：{{ cur_dir }}方向 · {{ total }} 人
+                {% else %}全部学生 · {{ total }} 人{% endif %}
+            </span>
             {# v1.19.49.35 页头操作说明整行删除（用户：这一行字不需要）——
                默认排序/改分/「未选」等口径不再在页面上写文字；
                要回到默认次序：点左上「全部 / 历史方向 / 物理方向」或刷新即可（这些入口不带排序参数） #}
@@ -213,12 +193,14 @@
         {# v1.19.49.35 改分结果提示（保存成功后在页面上短暂显示） #}
         <div id="scFlash" class="alert alert-success py-1 px-2 small d-none mt-2 mb-0"></div>
         {# v1.19.0 按班级查看：服务端筛选（链接可分享/收藏），不选=全部 #}
-        {# v1.19.49.35 新增两个方向分组（历史方向 / 物理方向），排在「全部」之后、班级之前；与班级互斥 #}
-        {% if classes %}
+        {# v1.19.49.35 两个方向分组（历史方向 / 物理方向），排在「全部」之后、班级之前；与班级互斥。
+           2026-10-19 用户口径：选科「全科」的场次没有方向之分 → 只渲染本场实际存在的方向，
+           一个都没有（高一不分科）时整组按钮不出现，避免点进去是空列表。 #}
+        {% if classes or directions %}
         <div class="d-flex flex-wrap gap-1 mt-2">
             <a class="btn btn-sm {{ 'btn-primary' if not cur_class and not cur_dir else 'btn-outline-secondary' }}"
                href="{{ url_for('grades.exam_detail', exam_id=exam.id) }}">全部</a>
-            {% for d in ('历史', '物理') %}
+            {% for d in directions %}
             <a class="btn btn-sm {{ 'btn-primary' if cur_dir == d else 'btn-outline-secondary' }}"
                href="{{ url_for('grades.exam_detail', exam_id=exam.id, dir=d) }}">{{ d }}方向</a>
             {% endfor %}
@@ -447,7 +429,7 @@ $(function(){
     /* ---------- 点击考试名称：打开「修改考试信息」弹窗 ----------
        2026-10-13：原先只弹 prompt 改名，日期/性质/阶段都改不了。
        年级字段在「已导入成绩」后由后端锁定（模板里已 disabled）。 ---------- */
-    $('#examName').on('click', function(){
+    $('#examEditBtn').on('click', function(){
         bootstrap.Modal.getOrCreateInstance(document.getElementById('examInfoModal')).show();
     });
     function _eiFail(msg){

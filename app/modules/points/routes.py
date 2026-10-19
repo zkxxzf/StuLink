@@ -38,7 +38,8 @@ def _scope():
     if s.origin in ('admin', 'school'):
         return 'school', '', None
     if s.origin == 'grade':
-        return 'grade', (current_user.grade or ''), None
+        # 2026-10-19：管理年级可多选，返回完整列表
+        return 'grade', list(current_user.grades or []), None
     if s.origin == 'class':
         return 'class', '', set(s.classes)
     return 'none', '', None
@@ -51,7 +52,7 @@ def _apply_scope(q, scope, grade, classes):
     if scope == 'user_grades':
         return q.filter(PointRecord.grade.in_(classes or []))
     if scope == 'grade' and grade:
-        return q.filter_by(grade=grade)
+        return q.filter(PointRecord.grade.in_(grade))
     if scope == 'class' and classes:
         from sqlalchemy import or_, and_
         conds = [and_(PointRecord.grade == g, PointRecord.class_name == c)
@@ -67,7 +68,7 @@ def _in_scope(student, scope, grade, classes):
     if scope == 'user_grades':
         return student.grade in (classes or [])
     if scope == 'grade':
-        return student.grade == grade
+        return student.grade in (grade or [])
     if scope == 'class':
         return (student.grade, student.class_name) in (classes or [])
     return False

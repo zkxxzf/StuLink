@@ -108,6 +108,75 @@
 .tbl-chart { width: 100%; height: 360px; }
 .tbl-chart.tall { height: 460px; }
 .chart-tip { color: #64748b; font-size: 12px; }
+/* ==================== 图表视图：左图 + 右表（2026-10-19 用户口径） ====================
+   「图也变小一点，不要直接铺满；图和表格左右并排」——
+   左栏固定 38%（图不铺满），右栏数据表（同源同列），窄屏自动回上下堆叠。
+   表头不做吸附（右栏滚动时首行始终可见反而更好，故这里保留静态）。 */
+.chart-pane { display: flex; flex-wrap: wrap; align-items: flex-start; }
+.chart-pane .chart-tip { flex: 0 0 100%; }
+.chart-pane .tbl-chart {
+    flex: 0 0 42%;
+    width: auto;
+    height: 300px;
+    box-sizing: border-box;
+    padding: 0 .5rem 0 .75rem;
+}
+.chart-data {
+    flex: 1 1 0;
+    min-width: 0;
+    max-height: 460px;
+    overflow: auto;
+    border-left: 1px solid var(--sl-border);
+}
+.tbl-card .chart-data .g-table thead th {
+    position: static;
+    padding: .32rem .55rem;
+    font-size: 18px;
+}
+.tbl-card .chart-data .g-table tbody td {
+    padding: .28rem .55rem;
+    font-size: 18px;
+}
+.chart-data .g-table thead th.sortable { cursor: default; }
+.chart-data .g-table thead th .th-sort { display: none; }
+/* 窄屏（<992px）放不下左右两栏 → 回到「上图下表」 */
+@media (max-width: 991.98px) {
+    .chart-pane .tbl-chart {
+        flex: 0 0 100%;
+        width: 100%;
+        height: 280px;
+        padding: 0;
+    }
+    .chart-data {
+        flex: 0 0 100%;
+        border-left: 0;
+        border-top: 1px solid var(--sl-border);
+    }
+}
+
+/* 卡片内的表：按内容自适应、整表水平居中，不强制铺满容器；
+   但给一个适中的下限宽度 —— 否则列少的表（科目总表）被压得太窄。 */
+.tbl-card .g-table {
+    width: auto;
+    max-width: 100%;
+    margin-left: auto;
+    margin-right: auto;
+}
+@media (min-width: 768px) {
+    .tbl-card .g-table { min-width: 760px; }
+}
+/* 字号 18px（2026-10-19 用户口径）；列间留白同步放大 */
+.tbl-card .g-table thead th { font-size: 18px; padding: .42rem .6rem; }
+.tbl-card .g-table tbody td { font-size: 18px; padding: .32rem .6rem; }
+.tbl-card .g-table thead th:not(.num),
+.tbl-card .g-table tbody td:not(.num) {
+    white-space: normal;
+    overflow-wrap: anywhere;
+    max-width: 260px;
+}
+/* 首列（名次段/班级/科目）是行标签：不换行，宽度跟着内容走 */
+.tbl-card .g-table thead th:first-child,
+.tbl-card .g-table tbody td:first-child { white-space: nowrap; }
 
 /* 班级多选下拉 */
 #gCmList .cm-item {
@@ -117,7 +186,7 @@
 #gCmList .cm-item:hover { background: #f1f5f9; }
 #gCmList .cm-item input { cursor: pointer; }
 
-/* 可点击跳转个人成绩查询的学生明细行 */
+/* 可点击行（考试列表行等，整行可跳转） */
 .g-table tbody tr.stu-link { cursor: pointer; }
 .g-table tbody tr.stu-link:hover { background: #e0ecff !important; }
 
@@ -232,6 +301,13 @@
     .view-pane[hidden] { display: none !important; }
     .tbl-chart { height: 300px !important; }
     .chart-box { height: 260px !important; }
+    /* 打印时数据表不截断（屏幕上右栏滚动，纸上要看到全部行） */
+    .chart-data { max-height: none !important; overflow: visible !important; }
+    /* 打印：左右并排改回上下（A4 分两栏会挤成一团） */
+    .chart-pane { display: block; }
+    .chart-pane .tbl-chart { width: 100% !important; padding: 0; }
+    /* 屏幕上给表留的 760px 下限在 A4 上会溢出 → 打印按内容宽度 */
+    .tbl-card .g-table { min-width: 0 !important; }
     .g-table thead th { position: static; }
     table { page-break-inside: auto; }
     tr { page-break-inside: avoid; }

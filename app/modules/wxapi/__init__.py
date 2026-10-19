@@ -40,6 +40,7 @@ from app.modules.wxapi.grades import (  # noqa: E402,F401
     routes_grades_honor,
     routes_grades_stats,
     routes_portrait_list,
+    routes_reviews,
     routes_student_profile,
 )
 from app.modules.wxapi.academic import (  # noqa: E402,F401
@@ -48,6 +49,8 @@ from app.modules.wxapi.academic import (  # noqa: E402,F401
     routes_schedule,
     routes_schedule_overview,
     routes_schedule_views,
+    routes_swap,
+    routes_swap_apply,
     routes_teachers,
 )
 from app.modules.wxapi.dorm import (  # noqa: E402,F401

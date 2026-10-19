@@ -11,7 +11,7 @@ from flask import request
 
 from app.modules.academic.services import schedule_service as svc
 from app.modules.wxapi import bp
-from app.modules.wxapi.core.guards import wx_login_required
+from app.modules.wxapi.core.guards import wx_perm_required
 from app.modules.wxapi.core.response import wx_err, wx_ok
 from app.modules.wxapi.academic.routes_schedule import (
     _term,
@@ -23,7 +23,7 @@ CELL_ENTRIES = 2
 
 
 @bp.route('/schedule/overview')
-@wx_login_required
+@wx_perm_required('academic.view')
 def wx_schedule_overview():
     """全校总课表（query: sid / week / day / grade）。"""
     ts = _term(request.args.get('sid', type=int))

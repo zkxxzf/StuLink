@@ -50,87 +50,151 @@
     <div class="card-body py-2">
         <div class="row g-2 align-items-center">
             <div class="col-auto">
-                <input id="userSearch" class="form-control form-control-sm" style="width:280px"
-                       placeholder="搜索姓名 / 用户名 / 分组（自动定位分组）" aria-label="搜索姓名 / 用户名 / 分组">
+                <input id="userSearch" class="form-control form-control-sm" style="width:300px"
+                       placeholder="搜索姓名 / 用户名 / 微信 ID / UID"
+                       aria-label="搜索姓名 / 用户名 / 微信 ID / UID">
             </div>
-            <div class="col-auto">
-                <button id="expandAll" class="btn btn-sm btn-outline-secondary">
-                    <i class="bi bi-arrows-expand"></i> 全部展开
-                </button>
-                <button id="collapseAll" class="btn btn-sm btn-outline-secondary">
-                    <i class="bi bi-arrows-collapse"></i> 全部折叠
-                </button>
+            <div class="col-auto text-muted small">
+                按权限组切换，搜索会自动跳到命中的分组
             </div>
-            <div class="col-auto text-muted small">按权限组分组展示，点击组标题可折叠</div>
         </div>
     </div>
 </div>
 
-{% for gname, gusers in groups.items() %}
-<div class="card mb-3 user-group">
-    <div class="card-header d-flex justify-content-between align-items-center user-group-head"
-         style="cursor:pointer" data-bs-toggle="collapse" data-bs-target="#grp-{{ loop.index }}"
-         aria-expanded="true">
-        <span class="fw-bold">
-            <i class="bi bi-chevron-down caret me-1"></i>{{ gname }}
-            <span class="badge bg-secondary ms-1">{{ gusers|length }} 人</span>
-        </span>
-        <small class="text-muted">点击折叠 / 展开</small>
-    </div>
-    <div class="collapse show" id="grp-{{ loop.index }}">
-        <div class="table-responsive">
-            <table class="table table-hover mb-0 align-middle">
-                <thead class="table-light">
-                    <tr><th>用户名</th><th>姓名</th><th>角色</th><th>状态</th><th>操作</th></tr>
-                </thead>
-                <tbody>
-                    {% for u in gusers %}
-                    <tr data-search="{{ (u.real_name ~ ' ' ~ u.username ~ ' ' ~ gname)|lower }}">
-                        <td>{{ u.username }}</td>
-                        <td class="fw-bold">{{ u.real_name }}</td>
-                        <td><span class="badge bg-{% if u.role=='admin' %}danger{% elif u.role=='dorm_manager' %}warning text-dark{% elif u.role=='homeroom_teacher' %}primary{% elif u.role=='grade_leader' %}info{% elif u.role=='school_viewer' %}success{% else %}secondary{% endif %}">{{ u.display_role }}</span>
-                            {% set _ids = u.permission_groups %}
-                            {% if _ids|length > 1 %}
-                            <span class="badge bg-light text-dark border ms-1"
-                                  title="{% for g in _ids %}{{ g.name }}{{ '、' if not loop.last }}{% endfor %}">+{{ _ids|length - 1 }} 身份</span>
-                            {% endif %}
-                        </td>
-                        <td>{% if u.is_active %}<span class="badge bg-success">启用</span>{% else %}<span class="badge bg-secondary">禁用</span>{% endif %}</td>
-                        <td>
-                            <a href="{{ url_for('users.edit', id=u.id) }}" class="btn btn-sm btn-outline-warning" aria-label="编辑用户"><i class="bi bi-pencil"></i></a>
-                            <form method="POST" action="{{ url_for('users.toggle', id=u.id) }}" style="display:inline;">
-                                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                                {% if u.role == 'admin' and u.is_active %}
-                                <button type="button" class="btn btn-sm btn-outline-secondary" disabled
-                                        title="管理员账号不可禁用" aria-label="管理员账号不可禁用">
-                                    <i class="bi bi-shield-lock"></i>
-                                </button>
+<style>
+.user-group-tabs {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    overflow-y: hidden;
+    scrollbar-width: thin;
+}
+.user-group-tabs .nav-link {
+    white-space: nowrap;
+    color: var(--sl-text-muted);
+}
+.user-group-tabs .nav-link.active {
+    font-weight: 600;
+}
+.wx-id {
+    display: inline-block;
+    max-width: 210px;
+    font-size: 11px;
+    line-height: 1.35;
+    word-break: break-all;
+    white-space: normal;
+    vertical-align: middle;
+}
+.wx-sub { font-size: 11px; color: var(--sl-text-subtle); margin-top: 2px; }
+</style>
+
+{% if groups %}
+<ul class="nav nav-tabs user-group-tabs mb-3" id="userGroupTabs" role="tablist">
+    {% for gname, gusers in groups.items() %}
+    <li class="nav-item" role="presentation">
+        <button class="nav-link user-group-tab {{ 'active' if loop.first }}"
+                id="grp-tab-{{ loop.index }}"
+                data-bs-toggle="tab"
+                data-bs-target="#grp-{{ loop.index }}"
+                data-group="{{ gname }}"
+                type="button" role="tab"
+                aria-controls="grp-{{ loop.index }}"
+                aria-selected="{{ 'true' if loop.first else 'false' }}">
+            {{ gname }}
+            <span class="badge rounded-pill text-bg-light border ms-1">{{ gusers|length }}</span>
+        </button>
+    </li>
+    {% endfor %}
+</ul>
+
+<div class="tab-content" id="userGroupPanes">
+    {% for gname, gusers in groups.items() %}
+    <div class="tab-pane fade {{ 'show active' if loop.first }}"
+         id="grp-{{ loop.index }}" role="tabpanel"
+         aria-labelledby="grp-tab-{{ loop.index }}">
+        <div class="card">
+            <div class="table-responsive">
+                <table class="table table-hover mb-0 align-middle">
+                    <thead class="table-light">
+                        <tr>
+                            <th>用户名</th>
+                            <th>姓名</th>
+                            <th>微信绑定</th>
+                            <th>系统 UID</th>
+                            <th>角色</th>
+                            <th>状态</th>
+                            <th>操作</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for u in gusers %}
+                        {% set wx_items = wx_bindings.get(u.id, []) %}
+                        {% set wx_ids = wx_items|map(attribute='openid')|join(' ') %}
+                        <tr data-search="{{ (u.real_name ~ ' ' ~ u.username ~ ' ' ~ gname ~ ' UID ' ~ u.id ~ ' ' ~ wx_ids)|lower }}">
+                            <td>{{ u.username }}</td>
+                            <td class="fw-bold">{{ u.real_name }}</td>
+                            <td>
+                                {% if wx_items %}
+                                <span class="badge bg-success">已绑定 {{ wx_items|length }}</span>
+                                {% for b in wx_items %}
+                                <div class="mt-1">
+                                    <code class="wx-id" title="openid: {{ b.openid }}{% if b.unionid %} | unionid: {{ b.unionid }}{% endif %}">{{ b.openid }}</code>
+                                </div>
+                                <div class="wx-sub">
+                                    绑定 #{{ b.id }} · UID {{ b.user_id }}
+                                    {% if b.last_login_at %} · {{ b.last_login_at.strftime('%m-%d %H:%M') }}{% endif %}
+                                </div>
+                                {% endfor %}
                                 {% else %}
-                                <button type="submit" class="btn btn-sm btn-outline-{% if u.is_active %}secondary{% else %}success{% endif %}"
-                                        title="{% if u.is_active %}禁用{% else %}启用{% endif %}" aria-label="{% if u.is_active %}禁用{% else %}启用{% endif %}">
-                                    <i class="bi bi-{% if u.is_active %}pause{% else %}play{% endif %}-circle"></i>
-                                </button>
+                                <span class="badge bg-light text-secondary border">未绑定</span>
                                 {% endif %}
-                            </form>
-                            {# M-10（2026-10-15 审计补漏）：姓名可能含单引号 → 提示文案整体 |tojson + 单引号属性 #}
-                            <form method="POST" action="{{ url_for('users.reset_password', id=u.id) }}" style="display:inline;"
-                                  onsubmit='return confirm({{ ("确定重置 " + (u.real_name or u.username or "") + " 的密码？新口令是随机生成的，重置后在本页一次性显示。")|tojson }})'>
-                                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                                <button type="submit" class="btn btn-sm btn-outline-info" title="重置密码" aria-label="重置密码"><i class="bi bi-key"></i></button>
-                            </form>
-                        </td>
-                    </tr>
-                    {% endfor %}
-                </tbody>
-            </table>
+                            </td>
+                            <td class="text-nowrap"><code>{{ u.id }}</code></td>
+                            <td><span class="badge bg-{% if u.role=='admin' %}danger{% elif u.role=='dorm_manager' %}warning text-dark{% elif u.role=='homeroom_teacher' %}primary{% elif u.role=='grade_leader' %}info{% elif u.role=='school_viewer' %}success{% else %}secondary{% endif %}">{{ u.display_role }}</span>
+                                {% set _ids = u.permission_groups %}
+                                {% if _ids|length > 1 %}
+                                <span class="badge bg-light text-dark border ms-1"
+                                      title="{% for g in _ids %}{{ g.name }}{{ '、' if not loop.last }}{% endfor %}">+{{ _ids|length - 1 }} 身份</span>
+                                {% endif %}
+                            </td>
+                            <td>{% if u.is_active %}<span class="badge bg-success">启用</span>{% else %}<span class="badge bg-secondary">禁用</span>{% endif %}</td>
+                            <td>
+                                <a href="{{ url_for('users.edit', id=u.id) }}" class="btn btn-sm btn-outline-warning" aria-label="编辑用户"><i class="bi bi-pencil"></i></a>
+                                <form method="POST" action="{{ url_for('users.toggle', id=u.id) }}" style="display:inline;">
+                                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                                    {% if u.role == 'admin' and u.is_active %}
+                                    <button type="button" class="btn btn-sm btn-outline-secondary" disabled
+                                            title="管理员账号不可禁用" aria-label="管理员账号不可禁用">
+                                        <i class="bi bi-shield-lock"></i>
+                                    </button>
+                                    {% else %}
+                                    <button type="submit" class="btn btn-sm btn-outline-{% if u.is_active %}secondary{% else %}success{% endif %}"
+                                            title="{% if u.is_active %}禁用{% else %}启用{% endif %}" aria-label="{% if u.is_active %}禁用{% else %}启用{% endif %}">
+                                        <i class="bi bi-{% if u.is_active %}pause{% else %}play{% endif %}-circle"></i>
+                                    </button>
+                                    {% endif %}
+                                </form>
+                                {# M-10（2026-10-15 审计补漏）：姓名可能含单引号 → 提示文案整体 |tojson + 单引号属性 #}
+                                <form method="POST" action="{{ url_for('users.reset_password', id=u.id) }}" style="display:inline;"
+                                      onsubmit='return confirm({{ ("确定重置 " + (u.real_name or u.username or "") + " 的密码？新口令是随机生成的，重置后在本页一次性显示。")|tojson }})'>
+                                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                                    <button type="submit" class="btn btn-sm btn-outline-info" title="重置密码" aria-label="重置密码"><i class="bi bi-key"></i></button>
+                                </form>
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
         </div>
     </div>
+    {% endfor %}
 </div>
+<div id="userNoMatch" class="text-center text-muted py-4 d-none">没有匹配的账号</div>
 {% else %}
 <div class="card">
     <div class="card-body text-center text-muted py-5">暂无账号，请点击右上角「新建教师」或「批量导入」</div>
 </div>
-{% endfor %}
+{% endif %}
 
 <!-- 批量导入教师弹窗 -->
 <div class="modal fade" id="importTeacherModal" tabindex="-1">
@@ -177,38 +241,39 @@
 {% block extra_js %}
 <script>
 (function () {
-    // v1.14.0：分组折叠 + 搜索定位（人数多时快速找人）
+    // 2026-10-19：分组改为顶部选项卡；搜索时自动切到第一个命中分组。
     var $search = $('#userSearch');
+    var $tabs = $('.user-group-tab');
+    var $noMatch = $('#userNoMatch');
 
     function applyFilter() {
         var kw = ($search.val() || '').trim().toLowerCase();
-        $('.user-group').each(function () {
-            var $g = $(this), hit = 0;
-            $g.find('tbody tr[data-search]').each(function () {
-                var ok = !kw || ($(this).attr('data-search') || '').indexOf(kw) >= 0;
+        var firstHit = null;
+        var totalHit = 0;
+
+        $tabs.each(function () {
+            var $tab = $(this);
+            var target = $tab.attr('data-bs-target');
+            var $pane = $(target);
+            var hit = 0;
+            $pane.find('tbody tr[data-search]').each(function () {
+                var ok = !kw
+                    || ($(this).attr('data-search') || '').indexOf(kw) >= 0;
                 $(this).toggle(ok);
                 if (ok) { hit++; }
             });
-            $g.toggle(!kw || hit > 0);
-            if (kw && hit > 0) {
-                $g.find('.collapse').addClass('show');   // 搜索时自动展开命中的组
-            }
+            $tab.toggle(!kw || hit > 0);
+            if (hit > 0 && !firstHit) { firstHit = $tab; }
+            totalHit += hit;
         });
+
+        if (kw && firstHit && !$('.user-group-tab.active').is(':visible')) {
+            firstHit.trigger('click');
+        }
+        $noMatch.toggleClass('d-none', !kw || totalHit > 0);
     }
 
     $search.on('input', applyFilter);
-    $('#expandAll').on('click', function () { $('.user-group .collapse').addClass('show'); });
-    $('#collapseAll').on('click', function () { $('.user-group .collapse').removeClass('show'); });
-
-    // 折叠状态时箭头旋转
-    function syncCaret($collapse) {
-        var $caret = $collapse.closest('.user-group').find('.caret');
-        var open = $collapse.hasClass('show');
-        $caret.toggleClass('bi-chevron-down', open);
-        $caret.toggleClass('bi-chevron-right', !open);
-    }
-    $('.user-group .collapse').each(function () { syncCaret($(this)); })
-        .on('shown.bs.collapse hidden.bs.collapse', function () { syncCaret($(this)); });
 })();
 </script>
 {% endblock %}

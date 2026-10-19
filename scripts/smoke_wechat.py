@@ -128,6 +128,11 @@ def main():
         ok('登录后能访问用户设置', r.status_code == 200)
         r = client.get('/wechat-bind')
         ok('微信绑定页可访问', r.status_code == 200)
+        r = client.get('/users/')
+        page = r.get_data(as_text=True)
+        ok('教师管理显示微信列与分组选项卡',
+           r.status_code == 200 and '微信绑定' in page
+           and '系统 UID' in page and 'user-group-tabs' in page)
 
         # 网页扫码绑定
         r = client.get('/wechat-bind/new')

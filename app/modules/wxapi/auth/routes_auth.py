@@ -62,6 +62,9 @@ def _caps(user):
         'portrait': bool(user.has_perm('portrait.view')),
         'attendance': bool(user.has_perm('workbench.attendance_view')),
         'dorm': bool(user.has_perm('dormitory.view')),
+        # 教师自助：申请调课 / 提交成绩复核
+        'swap': bool(user.has_perm('academic.swap')),
+        'score_review': bool(user.has_perm('grades.view')),
         'admin': getattr(user, 'role', '') == 'admin',
     }
 
@@ -126,6 +129,7 @@ def login_payload(user, group_id=None, openid=None):
         'token': token,
         'expires_in': real_ttl,
         'group_id': group_id,
+        'openid': openid or '',
         'user': user_brief(user),
         'groups': group_options(user),
         'modules': _modules_of(user),
@@ -145,7 +149,9 @@ def wx_login():
     ip = client_ip()
     if not hit_limit('login_ip_%s' % ip, 30, 300):
         return wx_err('尝试过于频繁，请稍后再试', CODE_TOO_MANY)
-    if not hit_limit('login_acc_%s_%s' % (ip, username), 10, 600):
+    # 账号级键不能拼 IP：拼了以后换一个出口 IP 计数就归零，等于对同一
+    # 账号无限次猜口令（2026-10-19 审计）。
+    if not hit_limit('login_acc_%s' % username.lower(), 10, 600):
         return wx_err('错误次数过多，请 10 分钟后再试', CODE_TOO_MANY)
     user = User.query.filter_by(username=username).first()
     if user is None or not user.check_password(password):

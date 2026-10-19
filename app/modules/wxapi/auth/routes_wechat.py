@@ -45,6 +45,7 @@ def _account_rows(openid):
     for binding, user in wechat.binding_users(openid):
         rows.append({
             'binding_id': binding.id,
+            'openid': binding.openid,
             'user_id': user.id,
             'username': user.username,
             'real_name': user.real_name,
@@ -168,6 +169,7 @@ def wx_wechat_bindings():
     for item in items:
         item['is_current'] = item['user_id'] == g.wx_user.id
     return wx_ok({
+        'openid': openid,
         'max_bindings': wechat.MAX_WECHAT_BINDINGS,
         'items': items,
     })

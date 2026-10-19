@@ -38,15 +38,21 @@ for _stream in (sys.stdout, sys.stderr):
         pass
 
 # 库结构脚本的扫描范围（迁移 + 建表/建索引/权限类脚本）
-PATTERNS = ('scripts/migrate*.py', 'scripts/add_*.py', 'scripts/backfill*.py',
-            # 2026-10-15 第五轮审计 P1-5 / 第六轮 S1-1：`fix_*`（数据修正）与
-            # `apply_*`（按口径重划分数线，会 DELETE+INSERT exam_bands）同样会改库，
-            # 原盲区导致它们在 --pending 里永不出现（生产漏跑风险）
-            'scripts/fix*.py', 'scripts/apply*.py',
-            # 2026-10-16 第七轮审计 C-H1：`import_bands_*`（官方线表录入，整场
-            # DELETE+INSERT exam_bands）同样改库却不在扫描范围；只放这一个系列，
-            # 不把 import_demo/import_school_timetable 等非迁移导入卷进来
-            'scripts/seed/import_bands_*.py')
+PATTERNS = (
+    # 2026-10-19 审计：原来只写 `scripts/migrate*.py` / `scripts/fix*.py`
+    # （非递归），而实际脚本都在 scripts/migrate/ 与 scripts/fix/ 子目录
+    # → --pending 只能看到 1 个脚本，其余 80+ 个（含 10-19 手机号加密）
+    # 永远不可见。子目录模式必须写在前面。
+    'scripts/migrate/*.py', 'scripts/fix/*.py',
+    'scripts/migrate*.py', 'scripts/add_*.py', 'scripts/backfill*.py',
+    # 2026-10-15 第五轮审计 P1-5 / 第六轮 S1-1：`fix_*`（数据修正）与
+    # `apply_*`（按口径重划分数线，会 DELETE+INSERT exam_bands）同样会改库，
+    # 原盲区导致它们在 --pending 里永不出现（生产漏跑风险）
+    'scripts/fix*.py', 'scripts/apply*.py',
+    # 2026-10-16 第七轮审计 C-H1：`import_bands_*`（官方线表录入，整场
+    # DELETE+INSERT exam_bands）同样改库却不在扫描范围；只放这一个系列，
+    # 不把 import_demo/import_school_timetable 等非迁移导入卷进来
+    'scripts/seed/import_bands_*.py')
 
 _DOC_RE = re.compile(r'"""(.*?)"""', re.S)
 _DATE_RE = re.compile(r'_(\d{8})\.py$')
@@ -75,9 +81,16 @@ def _doc_summary(path):
 
 def _scan():
     out = []
+    seen = set()
     for pat in PATTERNS:
         for p in sorted(glob.glob(os.path.join(BASE_DIR, pat))):
-            rel = 'scripts/' + os.path.basename(p)
+            if not os.path.isfile(p):      # 目录 / 其它类型不算脚本
+                continue
+            key = os.path.normcase(os.path.abspath(p))
+            if key in seen:                # 多个模式命中同一文件时去重
+                continue
+            seen.add(key)
+            rel = os.path.relpath(p, BASE_DIR).replace('\\', '/')
             summary, text = _doc_summary(p)
             m = _DATE_RE.search(os.path.basename(p))
             out.append({

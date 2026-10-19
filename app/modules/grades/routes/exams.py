@@ -275,7 +275,19 @@ def _exam_page_rows(exam_id, page, size, class_name=None, direction=None,
     if class_name:
         q = q.filter(ExamScore.class_name == class_name)
     if direction:
-        q = q.filter(ExamScore.direction == direction)
+        # 2026-10-19 用户口径：有方向的学生就该能筛出来。个别考试的总分行
+        # 少了方向快照（导入时未填），但科目行有方向（页面「方向」列照样显示），
+        # 只看总分行会让这批学生在这类筛选里凭空消失 → 总分行缺方向时按
+        # 该生**任意行**的方向兜底。总分行有方向的数据行为完全不变。
+        _dnos = (db.session.query(ExamScore.student_no)
+                 .filter(ExamScore.exam_id == exam_id,
+                         ExamScore.direction == direction)
+                 .distinct())
+        q = q.filter(db.or_(
+            ExamScore.direction == direction,
+            db.and_(db.or_(ExamScore.direction.is_(None),
+                           ExamScore.direction == ''),
+                    ExamScore.student_no.in_(_dnos))))
     total = q.count()
     if total == 0:
         return [], 1, 0, 0
@@ -444,8 +456,19 @@ def exam_detail(exam_id):
     cur_class = (request.args.get('cls') or '').strip()
     if cur_class not in classes:
         cur_class = ''
+    # 2026-10-19 用户口径：选科「全科」的场次（高一不分科）没有方向数据，
+    # 不显示「历史方向 / 物理方向」；只要有方向的学生（考试/年级层面存在）
+    # 就必须显示两个按钮。**按本场全部成绩行判断**（不只是总分行）：
+    # 个别考试总分行少了方向快照，但科目行有方向，页面「方向」列照样有值，
+    # 只查总分行会误判为「全科」而把按钮藏掉（2026-10-19 用户实测报障）。
+    # 空集=不显示；只有一个方向=只显示那一个。
+    _dirs = {r[0] for r in (db.session.query(ExamScore.direction)
+                            .filter(ExamScore.exam_id == exam_id)
+                            .distinct().all())
+             if r[0] in ('物理', '历史')}
+    directions = [d for d in ('历史', '物理') if d in _dirs]
     cur_dir = (request.args.get('dir') or '').strip()
-    if cur_dir not in ('物理', '历史'):
+    if cur_dir not in directions:
         cur_dir = ''
     if cur_class:
         cur_dir = ''
@@ -492,6 +515,7 @@ def exam_detail(exam_id):
                            full_marks=exam.full_marks(),
                            can_edit_scores=current_user.has_perm('grades.score_edit'),
                            classes=classes, cur_class=cur_class, cur_dir=cur_dir,
+                           directions=directions,
                            cur_sort=cur_sort, cur_order=cur_order,
                            page=page, total_pages=total_pages, total=total, size=size)
 
@@ -832,8 +856,9 @@ def score_delete(exam_id, score_id):
 def score_changes():
     """分数修改记录（v1.19.49.35）：**只看某一场考试**
 
-    该记录属于单场考试的数据，入口只有一处：成绩单页右上角「分数修改记录」按钮
-    （带 ?exam=<id>）。不再提供跨考试视图，也不在左侧栏出现；缺 ?exam= 时回考试列表。
+    该记录属于单场考试的数据，主入口在「数据导入」页底部（最近 50 条），
+    完整流水由本页展示（带 ?exam=<id>）。不再提供跨考试视图，
+    也不在左侧栏出现；缺 ?exam= 时回考试列表。
 
     2026-10-12 安全审计 H-1：原先只有 @login_required，既无功能权限也无**数据范围**
     校验，任意已登录用户（含权限极窄账号）可借 ?exam=<id> 读取任意考试、任意年级的
@@ -844,7 +869,7 @@ def score_changes():
     raw = (request.args.get('exam') or '').strip()
     exam = assert_exam_visible(int(raw)) if raw.isdigit() else None
     if exam is None:
-        flash('请从「考试详情 → 分数修改记录」进入', 'warning')
+        flash('请从「数据导入 → 分数修改记录」进入', 'warning')
         return redirect(url_for('grades.exams_list'))
     logs = (ScoreChangeLog.query.filter_by(exam_id=exam.id)
             .order_by(ScoreChangeLog.operated_at.desc(), ScoreChangeLog.id.desc())
@@ -1005,10 +1030,20 @@ def data_import_context(exam):
     （/ai-import 旧地址，仍渲染同一页，保证旧链接与 smoke 脚本不断）。
     """
     from app.modules.grades.services import ai_import_service as aisvc
+    # 2026-10-19 用户口径：分数修改记录从成绩单页移到「数据导入」页，
+    # 这里带最近 50 条 + 总数；完整流水仍由 score_changes 页提供。
+    change_logs = (ScoreChangeLog.query.filter_by(exam_id=exam.id)
+                   .order_by(ScoreChangeLog.operated_at.desc(),
+                             ScoreChangeLog.id.desc())
+                   .limit(50).all())
+    change_log_count = ScoreChangeLog.query.filter_by(
+        exam_id=exam.id).count()
     return dict(exam=exam, step='upload', mode='A',
                 status_label=EXAM_STATUS_LABEL,
                 band_summary=_band_summary(exam),
                 can_view_bands=current_user.has_perm('grades.view'),
+                change_logs=change_logs,
+                change_log_count=change_log_count,
                 subjects=SUBJECTS, score_kinds=aisvc.SCORE_KIND_LABEL,
                 affair_fields=aisvc.AFFAIR_FIELD_LABELS,
                 schedule_kind=aisvc.SCHEDULE_KIND,

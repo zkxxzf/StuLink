@@ -66,13 +66,15 @@
             <div id="gCmList" class="small"></div>
         </div>
     </div>
-    {# 表格/图表总开关：一键批量切换当前模块所有指标卡 #}
+    {# 视图总开关（2026-10-19 用户口径）：默认「图表」=上方图+下方数据表；
+       「表格」=只显示数据表（打印/抄数用）。卡片头不再有单卡切换。 #}
     <div class="btn-group btn-group-sm" role="group" aria-label="视图总开关" id="gViewToggle">
-        <input type="radio" class="btn-check" name="gView" id="gViewTable" value="table" checked>
-        <label class="btn btn-outline-primary" for="gViewTable" title="所有指标显示表格">
+        <input type="radio" class="btn-check" name="gView" id="gViewTable" value="table">
+        <label class="btn btn-outline-primary" for="gViewTable" title="只显示数据表（不画图）">
             <i class="bi bi-table"></i> 表格</label>
-        <input type="radio" class="btn-check" name="gView" id="gViewChart" value="chart">
-        <label class="btn btn-outline-primary" for="gViewChart" title="所有指标显示图表">
+        <input type="radio" class="btn-check" name="gView" id="gViewChart" value="chart" checked>
+        <label class="btn btn-outline-primary" for="gViewChart"
+               title="上方图表 + 下方数据表">
             <i class="bi bi-bar-chart"></i> 图表</label>
     </div>
     <div class="ms-auto g-actions">

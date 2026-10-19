@@ -32,7 +32,7 @@ def user_brief(user):
         'role': user.role,
         'role_display': user.role_display,
         'display_role': user.display_role,
-        'grade': user.grade or '',
+        'grade': user.grade_display,
         'class_name': user.class_name or '',
         'must_change_pwd': bool(user.must_change_pwd),
     }

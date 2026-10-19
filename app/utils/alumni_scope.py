@@ -26,7 +26,7 @@ def alumni_visible_grades(user):
     if scope == SCOPE_SCHOOL:
         return None
     if scope == SCOPE_GRADE:
-        return {user.grade} if user.grade else set()
+        return set(user.grades)      # 2026-10-19：管理年级可多选
     # 班主任 / 任课教师 / 无有效范围：往届数据一律不可见
     return set()
 

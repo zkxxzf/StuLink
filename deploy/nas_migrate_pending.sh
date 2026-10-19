@@ -123,6 +123,10 @@ run_mig scripts/migrate/migrate_sensitive_perm_20261013.py           # 敏感字
 run_mig scripts/migrate/migrate_sensitive_perm_v2_20261013.py        # 敏感字段权限收敛（后）
 # 2026-10-14 第四轮审计（SEC-04）：AI 全局 Key 独立权限点 —— 给原有 system.users 的组补齐
 run_mig scripts/migrate/migrate_ai_key_perm_20261014.py              # 权限组：补 grades.ai_manage
+# 2026-10-19 审计补登记：手机号明文→密文 + 盲索引（原先清单/执行器/ _mig_log 三处都缺，
+# 生产会漏跑；必须在 check_columns --fix 之前跑，否则补出来的 idx 列是 NULL）
+run_mig scripts/migrate/migrate_encrypt_student_phone_20261019.py --apply
+run_mig scripts/migrate/migrate_encrypt_teacher_phone_20261019.py --apply
 
 echo "[5/6] 兜底：补齐模型声明但现网缺失的列（改库前自动备份对应库）"
 docker run --rm -v "$DATA":/app/data -w /app \
