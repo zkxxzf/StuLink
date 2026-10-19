@@ -50,7 +50,8 @@ def review_item(r, uid):
 def visible_exams(user):
     """本人可见的成绩考试（只列已导入的，倒序）。"""
     grades = scope_service.visible_grades(user)
-    q = Exam.query.filter(Exam.status == 'imported')
+    # 2026-10-19：dirty（已导入待重算）也算已导入，不能从复核下拉里消失
+    q = Exam.query.filter(Exam.status != 'draft')
     if grades is not None:
         q = q.filter(Exam.grade.in_(list(grades) or ['']))
     rows = (q.order_by(Exam.exam_date.desc(), Exam.id.desc())

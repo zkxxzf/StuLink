@@ -226,6 +226,38 @@ def _norm(rec, form):
     rec.notify_parent = bool(form.get('notify_parent'))
 
 
+def _class_in_scope(user, grade, class_name):
+    """(grade, class_name) 是否在德育可见范围（与 can_see 同口径，未配置 → False）"""
+    if getattr(user, 'role', '') == 'admin':
+        return True
+    s, g, classes = scope_of(user)
+    if s == 'school':
+        return True
+    if s == 'user_grades':
+        return bool(grade) and grade in (classes or set())
+    if s == 'grade':
+        return bool(grade) and grade == g
+    if s == 'class':
+        return (grade or '', class_name or '') in (classes or set())
+    return False
+
+
+def _student_in_scope(user, student):
+    """学生是否在德育可见范围（按学籍当前年级/班级）"""
+    if student is None:
+        return False
+    return _class_in_scope(user, student.grade, student.class_name)
+
+
+def _student_of(form):
+    """按学号取学籍学生（不存在返回 None）"""
+    from app.models import Student
+    sn = (form.get('student_no') or '').strip()
+    if not sn:
+        return None
+    return Student.query.filter_by(student_number=sn).first()
+
+
 def _validate(form):
     if not (form.get('student_no') or '').strip():
         return '请选择/填写学号'
@@ -247,8 +279,21 @@ def create(form, user, files=None):
     err = _validate(form)
     if err:
         return False, err, None
+    # 2026-10-19 第十三轮审计：原实现把表单里的年级/班级直接落库，
+    # 只校验「学号非空」→ 持 morality.edit 的班主任可替他年级学生登记奖惩
+    # （写入后自己反而看不到，等于匿名登记处分）。现校验学籍 + 数据范围，
+    # 年级/班级/姓名一律以学籍档案为准。
+    student = _student_of(form)
+    if student is None:
+        return False, '学号不存在，请从学生列表中选择', None
+    if not _student_in_scope(user, student):
+        return False, '无权登记该学生的奖惩（不在你的数据范围内）', None
     rec = RewardPunishment()
     _norm(rec, form)
+    rec.student_no = student.student_number
+    rec.student_name = student.name
+    rec.grade = student.grade
+    rec.class_name = student.class_name
     rec.operator_id = getattr(user, 'id', None)
     rec.operator_name = (getattr(user, 'real_name', None)
                          or getattr(user, 'username', None))
@@ -268,31 +313,43 @@ def update(rec, form, user):
     err = _validate(form)
     if err:
         return False, err
+    # 2026-10-19 第十三轮审计：编辑同样要校验目标范围（可把本班记录
+    # 改成他年级）——有学籍的按学籍判定，无学籍的历史记录按表单班级判定。
+    student = _student_of(form)
+    if student is not None:
+        if not _student_in_scope(user, student):
+            return False, '无权修改为该学生的记录'
+    elif not _class_in_scope(user, (form.get('grade') or '').strip(),
+                             (form.get('class_name') or '').strip()):
+        return False, '无权修改到该班级'
     _norm(rec, form)
+    if student is not None:
+        rec.student_no = student.student_number
+        rec.student_name = student.name
+        rec.grade = student.grade
+        rec.class_name = student.class_name
     db.session.commit()
     return True, '已保存'
 
 
 def delete(rec):
-    """删除记录（含落盘附件清理）"""
+    """删除记录 → 先归档进回收站，再删库。
+
+    2026-10-19 第十三轮审计：原实现直接 `os.remove` 附件 + 删行，误删后
+    库与文件同时不可恢复（用户级规则：一切删除可恢复）。现在记录与附件
+    元数据都进回收站；落盘文件**保留**，恢复后仍可下载。
+    """
     atts = RewardPunishmentAttachment.query.filter_by(record_id=rec.id).all()
+    from app.utils.trash import archive
+    archive('morality', 'reward_punishment', '奖惩记录', rec,
+            summary=f'{rec.student_name} {rec.title}')
+    if atts:
+        archive('morality', 'reward_attachment', '奖惩附件', atts,
+                summary=f'奖惩记录 #{rec.id}：{len(atts)} 个附件')
     for att in atts:
-        root, stored = attachment_path(att)
-        if root:
-            try:
-                os.remove(os.path.join(root, stored))
-            except OSError:
-                pass
         db.session.delete(att)
     db.session.delete(rec)
     db.session.commit()
-    # 目录空了就清掉，避免留下空文件夹
-    try:
-        root = attachment_root(rec.id)
-        if os.path.isdir(root) and not os.listdir(root):
-            os.rmdir(root)
-    except OSError:
-        pass
 
 
 def set_status(rec, status, user, reason=''):

@@ -25,33 +25,15 @@ logger = logging.getLogger(__name__)
 # ============ 范围过滤（复用现有角色/权限组体系，不新增角色） ============
 
 def _student_query_in_scope(user):
-    """返回 Student 查询（已按当前用户成绩可见范围过滤）"""
-    q = Student.query
-    # 2026-10-12 P1：用户级数据范围优先（与 student_scope/dormitory_scope 同口径）。
-    # 原实现 `admin or scope=='school'` 先短路，staff+校级组再配用户级范围时
-    # 会忽略用户级范围放行全校（口径漂移）。
-    ug = scope_service.user_grade_scope(user)
-    if ug is not None:
-        return q.filter(Student.grade.in_(ug))
-    scope, grade = scope_service.get_scope(user)
-    if user.role == 'admin' or scope == 'school':
-        pass
-    elif user.has_role('teacher'):
-        grades = {l.grade for l in scope_service.teacher_links(user)}
-        q = q.filter(Student.grade.in_(grades)) if grades else q.filter(False)
-    elif scope == 'grade':
-        # 2026-10-19：管理年级可多选
-        q = q.filter(Student.grade.in_(scope_service.get_scope_grades(user)))
-    elif scope == 'class':
-        links = scope_service.visible_classes(user) or []
-        if links:
-            conds = [((Student.grade == g) & (Student.class_name == c)) for g, c in links]
-            q = q.filter(or_(*conds))
-        else:
-            q = q.filter(False)
-    else:
-        q = q.filter(False)
-    return q
+    """返回 Student 查询（已按当前用户成绩可见范围过滤）。
+
+    2026-10-19 第十三轮审计：原实现只按「用户级范围的年级清单」过滤，
+    把「仅授权某班」静默放大成整个年级（api/search 返回姓名+学号+班级，
+    等于可枚举整年级花名册）。统一改走 apply_student_scope（与学生列表、
+    宿舍、导出同口径，吸收 UserDataScope 的班级白名单）。
+    """
+    from app.utils.student_scope import apply_student_scope
+    return apply_student_scope(Student.query, user)
 
 
 # ============ 页面 ============

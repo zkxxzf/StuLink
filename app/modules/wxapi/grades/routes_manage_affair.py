@@ -15,7 +15,7 @@ from app.modules.grades.routes.exam_affairs import (
     _build_stats, _class_sort_key, _get_affair_checked, _inherit_rooms_from_prev,
     _student_sort_key)
 from app.modules.grades.routes.affair_invig import ensure_teachers_synced
-from app.modules.grades.services.scope import _all_active_grades
+from app.modules.grades.services import scope as scope_service
 from app.modules.wxapi import bp
 from app.modules.wxapi.core.guards import wx_perm_required
 from app.modules.wxapi.core.response import wx_err, wx_ok
@@ -27,8 +27,14 @@ PERM = 'grades.edit'
 @bp.route('/grades/affairs')
 @wx_perm_required(PERM)
 def wx_affairs():
-    """考务批次列表（按可见年级收敛）+ 每批统计。"""
-    grades = [x for x in (_all_active_grades() or []) if x]
+    """考务批次列表（按可见年级收敛）+ 每批统计。
+
+    2026-10-19 第十三轮审计：原用 `_all_active_grades()`（字典里全部未毕业
+    年级），与注释「按可见年级收敛」不符 —— 年级长可看到外年级批次的
+    名称/日期/人数/编排进度（详情接口有校验，泄露面仅元数据）。
+    现与网页 `affairs_overview` 同源，改走 visible_grades(g.wx_user)。
+    """
+    grades = [x for x in (scope_service.visible_grades(g.wx_user) or []) if x]
     grade = (request.args.get('grade') or '').strip()
     if grade:
         if grade not in grades:

@@ -86,6 +86,13 @@ def compare_tab(exam_id, class_names, direction='', denom='ref'):
     t1 = []
     for c in classes:
         vs = score_map[c]
+        # 2026-10-19 第十三轮审计：ref_scores 只保留 score>0，
+        # 整班缺考/全 0 时 vs 为空 → max()/min() ValueError 500。
+        if not vs:
+            t1.append({'class_name': c, 'count': count_map[c], 'avg': None,
+                       'median': None, 'std': None, 'max': None,
+                       'min': None, 'range': None, 'diff': None})
+            continue
         avg = st.avg_by_denom(vs, count_map[c])
         t1.append({'class_name': c, 'count': count_map[c], 'avg': avg,
                    'median': _median(vs), 'std': _stddev(vs),

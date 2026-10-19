@@ -768,8 +768,11 @@ def import_dormitory():
             flash(f'Excel缺少必填列：{", ".join(missing)}', 'danger')
             return redirect(url_for('statistics.index'))
 
+        # 2026-10-19 第十三轮审计：导入原为 Student.query.all()，
+        # 年级长/宿管上传含他年级学号的 Excel 即可批量改住宿属性。
+        from app.utils.student_scope import apply_student_scope
         all_students = {}
-        for s in Student.query.all():
+        for s in apply_student_scope(Student.query).all():
             all_students[s.student_number] = s
 
         updated_count = 0
@@ -792,7 +795,8 @@ def import_dormitory():
                     continue
 
                 if student_number not in all_students:
-                    errors.append(f'第{row_idx}行（{name}）：学号 {student_number} 在基础数据中不存在')
+                    errors.append(f'第{row_idx}行（{name}）：学号 {student_number} '
+                                  f'不存在或不在你的数据范围内')
                     continue
 
                 student = all_students[student_number]

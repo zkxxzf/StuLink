@@ -125,7 +125,9 @@ def _list_steps_map(exams):
                         .filter(ExamBand.exam_id.in_(ids)).distinct().all()}
         except Exception:                  # 进度只是展示信息，失败不影响列表
             affair_ids, band_ids = set(), set()
-    return {e.id: (True, e.id in affair_ids, e.status == 'imported',
+    # 2026-10-19 第十三轮审计：`dirty`（已导入、改过分待重算）也是已导入，
+    # 原判定会让这类场次的「成绩导入」步骤显示未完成。
+    return {e.id: (True, e.id in affair_ids, e.status != 'draft',
                    e.id in band_ids) for e in exams}
 
 
@@ -406,7 +408,8 @@ def _four_step_status(exam, user=None):
     """
     from app.models.grades import ExamBand
     affair = ExamAffair.query.filter_by(exam_id=exam.id).first()
-    imported = (exam.status == 'imported')
+    # 2026-10-19：dirty（已导入待重算）同样算已完成导入
+    imported = (exam.status != 'draft')
     banded = ExamBand.query.filter_by(exam_id=exam.id).count() > 0
     # v1.19.49.35：第④步落点与**侧栏「成绩分析」标题同口径**（base.html 同一套判断）——
     #   领导（管理员 / 校级·年级权限组）→「总览（全年级对比）」global_compare_page；
@@ -489,7 +492,7 @@ def exam_detail(exam_id):
     # 但页面从未消费 → 老师只能靠自己记得"还有两科没导"。
     # 这里在成绩单页顶部给出明确提示。
     partial = None
-    if exam.status == 'imported':
+    if exam.status != 'draft':
         try:
             # 2026-10-15 审计修复（PERF）：原 `ExamData(exam.id)` 绕开进程共享缓存，
             # 每次开成绩单页都全量重拉 1 万+ 行只为一个"仍有 X 科未导入"提示；

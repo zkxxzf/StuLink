@@ -30,11 +30,27 @@ logger = logging.getLogger(__name__)
 bp = Blueprint('students', __name__, url_prefix='/students')
 
 
+def _transfer_target_in_scope(user, grade, class_name):
+    """目标 (年级, 班级) 是否在当前用户的数据范围内（唯一口径 resolve_scope）"""
+    from app.utils.scope import resolve_scope
+    s = resolve_scope(user)
+    if s.kind == 'school':
+        return True
+    if s.kind == 'grades':
+        return bool(grade) and grade in s.grades
+    if s.kind == 'classes':
+        return (grade, class_name) in s.classes
+    return False
+
+
 def _transfer_target_error(student, new_grade, new_class):
-    """M-20：调班目标校验（字典内 + 已毕业冻结）。
+    """M-20：调班目标校验（字典内 + 已毕业冻结 + 目标数据范围）。
 
     返回错误文案；None 表示可调。年级/班级字典为空时跳过字典校验
     （空库/首次部署不至于完全不能调班），但毕业状态始终校验。
+
+    2026-10-19 第十三轮审计：原来只校验「字典内 + 未毕业」，源学生校验了
+    范围而目标不校验 → 年级长可把本年级学生调进他年级花名册（并从本年级消失）。
     """
     if not new_grade or not new_class:
         return '年级和班级不能为空'
@@ -49,6 +65,8 @@ def _transfer_target_error(student, new_grade, new_class):
         return f'{student.grade} 已毕业归档，不能调班'
     if new_grade in graduated:
         return f'{new_grade} 已毕业归档，不能调入'
+    if not _transfer_target_in_scope(current_user, new_grade, new_class):
+        return f'无权把学生调入「{new_grade} {new_class}」（不在你的数据范围内）'
     return None
 
 

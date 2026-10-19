@@ -189,8 +189,12 @@ class ExamData:
         for sn in self.snap.values():
             self._by_class.setdefault(sn['class_name'], []).append(sn)
         # 上一场同年级考试（趋势/进退步对比基准）
+        # 2026-10-19 第十三轮审计：排除 draft（结构建好未导成绩）——
+        # 与 trend_exams 的 status='imported' 同口径，否则新建草稿会让
+        # 进退步/趋势基准变成一场没有成绩的考试。
         self.prev_exam = (Exam.query
                           .filter(Exam.grade == self.exam.grade,
+                                  Exam.status != 'draft',
                                   (Exam.exam_date < self.exam.exam_date) |
                                   ((Exam.exam_date == self.exam.exam_date) &
                                    (Exam.id < self.exam.id)))
@@ -310,7 +314,10 @@ class ExamData:
         key = (direction, subject, selection)
         if key not in cache:
             q = ExamBand.query.filter_by(exam_id=self.exam.id, subject=subject)
-            if selection:
+            # 2026-10-19 第十三轮审计：只有**总分**按组合取线，其余各科按方向
+            # （既有硬口径）。此前 selection 非空即走组合分支，任何场次残留
+            # 单科组合线都会让该科判层/上线率与「按方向」口径分裂。
+            if selection and subject == TOTAL_SUBJECT:
                 bands = (q.filter(ExamBand.direction == direction,
                                   ExamBand.selection == selection)
                          .order_by(ExamBand.seq).all())
@@ -674,8 +681,13 @@ def segment_table(data, class_name=None, direction=None, by_rank=False):
 
 
 def trend_exams(grade):
-    """历次考试（imported）列表（时间升序）"""
-    return (Exam.query.filter_by(grade=grade, status='imported')
+    """历次考试（已导入）列表（时间升序）
+
+    2026-10-19 第十三轮审计：原按 status='imported' 过滤，会漏掉
+    `dirty`（已导入、改过分待重算）的场次 —— 它同样是有效考试。
+    排除未导入的 draft 即可。
+    """
+    return (Exam.query.filter(Exam.grade == grade, Exam.status != 'draft')
             .order_by(Exam.exam_date.asc(), Exam.id.asc()).all())
 
 
@@ -714,10 +726,13 @@ def _ps_class_teachers(grade):
     try:
         from app.models import User, UserClassLink
         links = UserClassLink.query.filter_by(grade=grade).all()
+        # 2026-10-19 第十三轮审计：原循环内 User.query.get()（N+1，20~60 条额外 SQL）
+        users = {u.id: u for u in User.query.filter(
+            User.id.in_({lk.user_id for lk in links})).all()} if links else {}
         for lk in links:
             if lk.class_name in out:
                 continue
-            u = User.query.get(lk.user_id)
+            u = users.get(lk.user_id)
             if u is not None and (u.real_name or u.username):
                 out[lk.class_name] = u.real_name or u.username
     except Exception as _e:  # noqa: BLE001  用户名只是附注，取不到不该让打印页 500

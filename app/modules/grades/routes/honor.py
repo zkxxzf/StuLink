@@ -24,8 +24,12 @@ _XLSX_MIME = ('application/vnd.openxmlformats-officedocument'
 
 
 def _exam_list():
-    """可选考试：只列已导入成绩的场次（draft/dirty 不出现）。"""
-    return (Exam.query.filter(Exam.status == 'imported')
+    """可选考试：只列已导入成绩的场次（draft 不出现）。
+
+    2026-10-19 第十三轮审计：dirty（已导入、改过分待重算）同样有成绩，
+    原来被一起排除 → 刚改过分的那场考试在表彰名单里"消失"。
+    """
+    return (Exam.query.filter(Exam.status != 'draft')
             .order_by(Exam.exam_date.desc(), Exam.id.desc()).all())
 
 

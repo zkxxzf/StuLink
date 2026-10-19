@@ -1,8 +1,12 @@
 """往届生宿舍查询"""
+import logging
 import sqlite3
-from flask import Blueprint, render_template, request, flash
-from flask_login import login_required
+from flask import Blueprint, abort, render_template, request, flash
+from flask_login import login_required, current_user
 from config import Config
+from app.scope import filter_grades, grade_visible
+
+_log = logging.getLogger('alumni.dormitory')
 
 bp = Blueprint('dormitory', __name__)
 
@@ -20,8 +24,12 @@ def index():
         conn.close()
     except Exception:
         pass
+    # 2026-10-19 第十三轮审计：与 basic.index 同口径（此前宿舍往届页同样零范围）
+    graduated_grades = filter_grades(current_user, graduated_grades)
 
     search_grade = request.args.get('grade', '')
+    if search_grade and not grade_visible(current_user, search_grade):
+        abort(403)
     search_room = request.args.get('room_number', '').strip()
     search_building = request.args.get('building', '').strip()
     search_class = request.args.get('class_name', '').strip()
@@ -73,8 +81,10 @@ def index():
                 beds = [dict(b) for b in bed_rows]
 
             conn.close()
-        except Exception as e:
-            flash(f'查询失败：{str(e)}', 'danger')
+        except Exception:
+            # L-02 同类：内部异常文本（含路径/SQL）不回传前端
+            _log.exception('往届宿舍查询异常')
+            flash('查询失败，请稍后重试', 'danger')
 
     return render_template('dormitory_search.html',
                            graduated_grades=graduated_grades,

@@ -210,8 +210,9 @@
         background: #e7f1ff; color: #0b5ed7; border: 1px solid #cfe2ff; font-size: 12px;
     }
     .rd-notes {
-        background: #f8f9fa; border: 1px dashed #dee2e6; border-radius: 8px;
-        padding: 8px 10px; font-size: 13px; color: #495057;
+        background: var(--sl-surface-2); border: 1px dashed var(--sl-border);
+        border-radius: 8px; padding: 8px 10px; font-size: 13px;
+        color: var(--sl-text-muted);
     }
     /* 上下铺：每两个床号一组，一个外框代表一张双层床 */
     .rd-bunks {
@@ -220,7 +221,8 @@
     }
     .rd-bunk {
         position: relative; padding: 10px 12px 12px;
-        border: 1px solid #d9dee3; border-radius: 12px; background: #fbfcfd;
+        border: 1px solid var(--sl-border); border-radius: 12px;
+        background: var(--sl-surface-2);
     }
     /* 左右床柱 */
     .rd-bunk::before, .rd-bunk::after {
@@ -231,8 +233,8 @@
     .rd-bunk::after { right: 4px; }
     .rd-bunk-label {
         position: absolute; top: -9px; left: 14px; z-index: 1;
-        background: #f1f5f9; color: #64748b; border-radius: 999px;
-        padding: 1px 8px; font-size: 11px;
+        background: var(--sl-surface-3); color: var(--sl-text-muted);
+        border-radius: 999px; padding: 1px 8px; font-size: 11px;
     }
     .rd-bunk-divider {
         text-align: center; color: #cbd5e1; font-size: 12px; line-height: 1;
@@ -240,30 +242,31 @@
     }
     .rd-bunk-divider::before {
         content: ''; position: absolute; left: 8px; right: 8px; top: 50%;
-        border-top: 1px dashed #e2e8f0; z-index: 0;
+        border-top: 1px dashed var(--sl-border); z-index: 0;
     }
-    .rd-bunk-divider i { position: relative; background: #fbfcfd; padding: 0 6px; }
+    .rd-bunk-divider i { position: relative; background: var(--sl-surface-2); padding: 0 6px; }
 
     .rd-berth {
         display: flex; align-items: center; gap: 10px;
-        border: 1px solid #e5e7eb; border-radius: 9px;
-        padding: 8px 10px; background: #fff;
+        border: 1px solid var(--sl-border); border-radius: 9px;
+        padding: 8px 10px; background: var(--sl-surface);
         transition: box-shadow .15s ease, border-color .15s ease;
     }
     .rd-berth:hover { box-shadow: 0 4px 12px rgba(0,0,0,.06); }
-    .rd-berth.is-occupied { border-left: 3px solid #3b82f6; background: #f8fbff; }
+    .rd-berth.is-occupied { border-left: 3px solid #3b82f6; background: var(--sl-surface-2); }
     .rd-berth.is-empty { border-style: dashed; }
     .rd-berth.is-empty:hover { border-color: #10b981; }
     .rd-berth-missing {
-        border-style: dotted; background: #f8f9fa; justify-content: center;
-        min-height: 44px; color: #adb5bd;
+        border-style: dotted; background: var(--sl-surface-3); justify-content: center;
+        min-height: 44px; color: var(--sl-text-muted);
     }
     .rd-berth-no {
         flex: 0 0 auto; width: 34px; height: 34px; border-radius: 8px;
         display: flex; align-items: center; justify-content: center;
-        font-size: 19px; font-weight: 700; color: #334155; background: #eef2f7;
+        font-size: 19px; font-weight: 700; color: var(--sl-text);
+        background: var(--sl-surface-3);
     }
-    .rd-berth.is-empty .rd-berth-no { color: #94a3b8; background: #f4f6f8; border: 1px dashed #cbd5e1; }
+    .rd-berth.is-empty .rd-berth-no { color: var(--sl-text-muted); background: var(--sl-surface-3); border: 1px dashed var(--sl-border); }
     .rd-berth-main { flex: 1 1 auto; min-width: 0; }
     /* 2026-10-14 第四轮审计（UI-10）：颜色改主题变量 */
     .rd-berth-name {

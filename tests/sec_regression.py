@@ -934,11 +934,16 @@ def check_H7():
     if not r:
         case('H-7 alumni 回归可执行', False, '子进程无结果')
         return
-    case('H-7 任课教师登录往届站被 403 拒绝', r.get('teacher_login_rejected'))
-    case('H-7 宿管教师登录往届站被 403 拒绝', r.get('dorm_login_rejected'))
+    case('H-7 任课教师登录往届站被拒绝', r.get('teacher_login_rejected'))
+    case('H-7 宿管教师登录往届站被拒绝', r.get('dorm_login_rejected'))
     case('H-7 白名单角色（admin）仍可正常登录', r.get('admin_login_ok'))
     case('H-7 首页响应不含解密后的身份证明文', r.get('no_id_card_plaintext'))
     case('H-7 已禁用账号在往届站不可登录', r.get('disabled_login_rejected'))
+    # 2026-10-19 第十三轮审计：往届站原先无年级范围，年级长可枚举全部毕业年级
+    case('H-7b 年级长登录往届站成功', r.get('grade_login_ok'))
+    case('H-7b 年级长看得到本人当前年级', r.get('grade_sees_own'))
+    case('H-7b 年级长看不到其他毕业年级', r.get('grade_hidden_other'))
+    case('H-7b 年级长越界查询被 403', r.get('grade_out_of_scope_403'))
 
 
 # ======================================================================

@@ -28,7 +28,8 @@ SEARCH_LIMIT = 50
 def _visible_exams(user, grade=''):
     """按成绩可见年级列出已导入考试（倒序）。"""
     grades = scope_service.visible_grades(user)
-    q = Exam.query.filter(Exam.status == 'imported')
+    # 2026-10-19：dirty（已导入待重算）也算已导入
+    q = Exam.query.filter(Exam.status != 'draft')
     if grades is not None:
         q = q.filter(Exam.grade.in_(list(grades)))
     if grade:

@@ -9,7 +9,8 @@ from app.utils.helpers import get_dict_values, get_active_grades, get_class_opti
 from app.utils.err_safe import safe_error   # M-12
 from app.utils.text_guard import sanitize_label   # M-04：班级名入库清洗
 # 2026-10-11 审计：宿舍数据范围唯一口径（房间查询 / 班级归属）
-from app.utils.dormitory_scope import room_scope_query, class_in_scope
+from app.utils.dormitory_scope import (room_scope_query, class_in_scope,
+                                       scope_kind)
 from sqlalchemy import func
 import json
 import logging
@@ -34,11 +35,23 @@ def _room_checked(id):
     2026-10-14 审计 API-01：edit/delete 原为 `Room.query.get_or_404(id)` 后直接用，
     与详情/互换/导出三处已有的范围校验不一致。这里收敛成单一实现——
     school 范围（admin/宿管组）原样放行，越界一律 403（fail-closed）。
+
+    2026-10-19 第十三轮审计：分配类 5 个写接口此前仍用 `Room.query.get()`
+    （assign/unassign/set-combined/update-room-assignment/save-assignments），
+    年级长可改他年级房间归属；现统一走本函数。
     """
     room = Room.query.get_or_404(id)
     if room_scope_query(Room.query.filter_by(id=room.id)).first() is None:
         abort(403)
     return room
+
+
+def _classes_in_scope(grade, class_name):
+    """目标 (年级, 班级) 是否在范围内；合班名逐班校验（唯一口径：class_in_scope）"""
+    parts = [p.strip() for p in (class_name or '').split('+') if p.strip()]
+    if not parts:
+        return False
+    return all(class_in_scope(current_user, grade, p) for p in parts)
 
 
 @bp.route('/')
@@ -418,11 +431,11 @@ def assign_room():
     
     if not room_id or not grade or not class_name:
         return jsonify({'success': False, 'message': '参数不完整'}), 400
-    
-    room = Room.query.get(room_id)
-    if not room:
-        return jsonify({'success': False, 'message': '宿舍不存在'}), 404
-    
+
+    room = _room_checked(room_id)
+    if not _classes_in_scope(grade, class_name):
+        return jsonify({'success': False, 'message': '无权分配到该班级'}), 403
+
     # 更新宿舍分配信息
     room.grade = grade
     room.class_name = class_name
@@ -432,8 +445,11 @@ def assign_room():
         room.combined_class = class_name
     else:
         room.combined_class = None
+    log_operation(current_user, '分配', '宿舍分配', room.id,
+                  f'{room.display_name} → {grade} {class_name}',
+                  module='dormitory')
     db.session.commit()
-    
+
     return jsonify({'success': True, 'message': '分配成功'})
 
 
@@ -448,18 +464,18 @@ def unassign_room():
     
     if not room_id:
         return jsonify({'success': False, 'message': '参数不完整'}), 400
-    
-    room = Room.query.get(room_id)
-    if not room:
-        return jsonify({'success': False, 'message': '宿舍不存在'}), 404
-    
+
+    room = _room_checked(room_id)
+
     # 取消分配
     room.grade = None
     room.class_name = None
     room.combined_class = None
     room.combined_details = None
+    log_operation(current_user, '取消分配', '宿舍分配', room.id,
+                  room.display_name, module='dormitory')
     db.session.commit()
-    
+
     return jsonify({'success': True, 'message': '取消成功'})
 
 
@@ -475,11 +491,9 @@ def set_combined():
     
     if not room_id:
         return jsonify({'success': False, 'message': '参数不完整'}), 400
-    
-    room = Room.query.get(room_id)
-    if not room:
-        return jsonify({'success': False, 'message': '宿舍不存在'}), 404
-    
+
+    room = _room_checked(room_id)
+
     # 设置合班标记（兼容保留：合班识别现已由 class_name 含多个班自动判定）
     if is_combined:
         room.combined_class = room.class_name if room.class_name and '+' in room.class_name else '合班'
@@ -512,6 +526,11 @@ def save_assignments():
                            '若只想保存本次分配，请传非空 assignments',
             }), 400
         from app.utils.trash import archive
+        # 2026-10-19 第十三轮审计：清空是「全校」语义，只有 school 范围可执行；
+        # 年级长/班主任调用会连带清掉他年级房间与床位。
+        if scope_kind(current_user) != 'school':
+            return jsonify({'success': False,
+                            'message': '仅全校范围账号可清空宿舍分配'}), 403
         rooms = Room.query.filter(Room.grade.isnot(None) | Room.class_name.isnot(None) | Room.combined_class.isnot(None)).all()
         bed_rows = BedAssignment.query.filter(
             BedAssignment.student_id.isnot(None)).all()
@@ -573,11 +592,25 @@ def save_assignments():
 
     # 2026-10-10 架构审计修复：原实现在循环内逐个 Room.query.get(rid)（N+1），
     # 保存整栋宿舍楼时是明显瓶颈。改为一次性批量取出，赋值逻辑与顺序完全不变。
+    # 2026-10-19 第十三轮审计：批量保存同样要过房间范围 + 目标班级范围，
+    # 越界整批拒绝（不能"部分保存成功"才报错）。
     count = 0
     room_map = {}
     if room_assign:
-        room_map = {r.id: r for r in
-                    Room.query.filter(Room.id.in_(list(room_assign.keys()))).all()}
+        room_map = {r.id: r for r in room_scope_query(
+            Room.query.filter(Room.id.in_(list(room_assign.keys())))).all()}
+    for info in room_assign.values():
+        info['classes'] = [c for c in info['classes'] if c]
+    room_assign = {rid: info for rid, info in room_assign.items()
+                   if info['classes']}
+    for rid, info in room_assign.items():
+        if rid not in room_map:
+            return jsonify({'success': False,
+                            'message': '无权保存这些宿舍分配'}), 403
+        names = '+'.join(sorted(info['classes'], key=_class_sort_key))
+        if not _classes_in_scope(info['grade'], names):
+            return jsonify({'success': False,
+                            'message': '无权分配到该班级'}), 403
     for rid, info in room_assign.items():
         room = room_map.get(rid)
         if not room:
@@ -708,11 +741,11 @@ def update_room_assignment():
     
     if not room_id:
         return jsonify({'success': False, 'message': '房间 ID 不能为空'}), 400
-    
-    room = Room.query.get(room_id)
-    if not room:
-        return jsonify({'success': False, 'message': '房间不存在'}), 404
-    
+
+    room = _room_checked(room_id)
+    if class_name and not _classes_in_scope(grade, class_name):
+        return jsonify({'success': False, 'message': '无权分配到该班级'}), 403
+
     # 更新房间分配信息
     room.grade = grade or None
     room.class_name = class_name or None
@@ -723,7 +756,7 @@ def update_room_assignment():
     else:
         room.combined_class = None
     db.session.commit()
-    
+
     return jsonify({'success': True, 'message': '更新成功'})
 
 

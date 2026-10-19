@@ -107,9 +107,17 @@ def main():
             print(f'[SKIP] {SCRIPT_NAME} 已登记为已应用，跳过重算')
             return
 
+        # 2026-10-19 第十三轮审计：原传相对文件名 'grades.db'，
+        # backup_db 找不到文件会静默「跳过」并继续写库（等于没备份）。
+        # 改为绝对路径，且备份失败一律中止（fail-closed）。
+        from config import BASE_DIR
         from scripts._db_backup import backup_db
-        backup = backup_db('grades.db', tag='before_recalc_ranks_20261019')
-        print(f'  已备份：{backup}')
+        db_file = _os.path.join(BASE_DIR, 'data', 'grades.db')
+        backup = backup_db(db_file, tag='before_recalc_ranks_20261019')
+        if not backup or not backup[0][1]:
+            print(f'  [ABORT] 备份失败（{db_file}），已中止，未写库')
+            return
+        print(f'  已备份：{backup[0][1]}')
 
         for exam, _n in todo:
             recalc_exam(exam.id)

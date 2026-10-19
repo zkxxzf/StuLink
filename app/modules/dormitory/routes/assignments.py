@@ -369,8 +369,13 @@ def assign():
         return jsonify({'success': False, 'message': '无权分配该学生'}), 403
 
     # 性别校验：学生性别必须与房间性别匹配
+    # 2026-10-19 第十三轮审计：补房间数据范围校验。此前只校验学生范围，
+    # 合班房又跳过班级匹配 → 本班学生可被占进他年级/他楼房间。
     room = Room.query.get(bed.room_id)
-    if room and room.gender and room.gender != '不限':
+    if room is None or room_scope_query(
+            Room.query.filter_by(id=room.id)).first() is None:
+        return jsonify({'success': False, 'message': '无权分配该房间'}), 403
+    if room.gender and room.gender != '不限':
         if student.gender != room.gender:
             return jsonify({
                 'success': False,
@@ -490,8 +495,12 @@ def move():
         return jsonify({'success': False, 'message': f'{student.name}所在{student.grade}已毕业，无法搬移床位'}), 400
 
     # 性别校验
+    # 2026-10-19 第十三轮审计：目标房间同样要过房间范围（合班房曾可跨年级搬入）
     room = Room.query.get(to_bed.room_id)
-    if room and room.gender and room.gender != '不限':
+    if room is None or room_scope_query(
+            Room.query.filter_by(id=room.id)).first() is None:
+        return jsonify({'success': False, 'message': '无权搬移到该房间'}), 403
+    if room.gender and room.gender != '不限':
         if student.gender != room.gender:
             return jsonify({'success': False, 'message': f'性别不匹配：{student.name}是{student.gender}生'}), 400
 
@@ -571,8 +580,13 @@ def swap():
         return jsonify({'success': False, 'message': '已毕业年级的学生无法互换床位'}), 400
 
     # 性别校验（互换后各自性别匹配）
+    # 2026-10-19 第十三轮审计：两个房间都要过数据范围
     room_a = Room.query.get(bed_a.room_id)
     room_b = Room.query.get(bed_b.room_id)
+    for _r in (room_a, room_b):
+        if _r is None or room_scope_query(
+                Room.query.filter_by(id=_r.id)).first() is None:
+            return jsonify({'success': False, 'message': '无权互换该房间的床位'}), 403
     for room, stu, name in [(room_b, stu_a, 'A'), (room_a, stu_b, 'B')]:
         if room and room.gender and room.gender != '不限':
             if stu.gender != room.gender:

@@ -14,6 +14,7 @@ import hashlib
 from flask import g, request
 
 from app.modules.grades.services import (report_pivot_service, report_service,
+                                        report_teacher_service,
                                         report_warning_service, score_guard)
 from app.modules.wxapi import bp
 from app.modules.wxapi.core.guards import wx_perm_required
@@ -58,6 +59,22 @@ def wx_report_subject_classes():
         'grades_report_sc_%s_%s_%s' % (exam.id, direction, subject),
         lambda: report_pivot_service.subject_class_report(
             exam.id, direction, subject))
+    if 'error' in data:
+        return wx_err(data['error'])
+    return wx_ok(data)
+
+
+@bp.route('/grades/report/teacher-ranks')
+@wx_perm_required(PERM)
+def wx_report_teacher_ranks():
+    """教师×学科名次（表头勾选指标后插入名次列的数据源）。"""
+    exam, err = _visible_exam(request.args.get('exam_id', type=int))
+    if err:
+        return err
+    direction = (request.args.get('direction') or '').strip()
+    data = _cached(
+        'grades_report_tr_%s_%s' % (exam.id, direction),
+        lambda: report_teacher_service.teacher_rank_report(exam.id, direction))
     if 'error' in data:
         return wx_err(data['error'])
     return wx_ok(data)

@@ -308,6 +308,11 @@ def api_record_delete(rid):
     # 2026-10-14 审计 API-02：同 api_record_update，学生缺失时不得短路放行
     if student is None or not _in_scope(student, scope, grade, classes):
         return jsonify(success=False, message='该记录不在您的管理范围内'), 403
+    # 2026-10-19 第十三轮审计：删除前先进回收站（此前删了只剩一行操作日志）
+    from app.utils.trash import archive
+    archive('points', 'point_record', '积分记录', rec,
+            summary=f'{rec.student_name} {rec.points:+d}分 {rec.reason}',
+            operator=current_user)
     db.session.delete(rec)
     db.session.commit()
     log_operation(current_user, '删除', '积分', rid, f'{rec.student_name} {rec.points:+d}', module='points')

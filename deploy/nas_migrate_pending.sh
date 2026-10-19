@@ -109,6 +109,9 @@ run_mig scripts/fix/fix_exam_selection_snapshot_20261015.py --apply  # 修数据
 run_mig scripts/seed/apply_gaokao_bands.py --apply               # 划线：按修正后的方向人群重算特控/本科线（幂等）
 # 2026-10-16 第七轮审计（C-H1）：官方线表录入 —— exam 33（20260712 期末）特控/本科纯分数线（整场先删后插，幂等）
 run_mig scripts/seed/import_bands_20260712.py --apply            # 划线：该场无成绩/无该场时脚本自行中止，不误伤
+# 2026-10-19 第十三轮审计：历史名次 1,1,3 跳号重算（代码已是 1,1,3，存量库还是旧的 1,1,2）。
+# 幂等；--apply 前自动整库备份，备份失败直接中止。
+run_mig scripts/fix/recalc_exam_ranks_20261019.py --apply        # 修数据：重算全部考试的方向/班排名
 # ── 数据 / 权限类（幂等）──────────────────────────────────────────────────
 # 2026-10-14 第三轮审计（CONS3-02）：多身份改造的两个脚本原先**完全未登记**（只在
 # docs/权限体系多身份改造执行计划.md 里点名）→ 上线必漏跑。按设计文档顺序：
@@ -129,7 +132,13 @@ run_mig scripts/migrate/migrate_encrypt_student_phone_20261019.py --apply
 run_mig scripts/migrate/migrate_encrypt_teacher_phone_20261019.py --apply
 # 2026-10-19 审计 H-06：身份证确定性 IV → 随机 IV + 盲索引（两库；停机窗口；
 # 脚本内部会先 backup_db，--apply 必须带 --confirm）
-run_mig scripts/migrate/migrate_encrypt_id_card_20261019.py --apply --confirm
+# 2026-10-19 第十三轮审计：清单 A17 状态是「⏸ 暂缓（用户决定）」，执行器却无条件跑。
+# 默认跳过，上线前需要时显式 `RUN_A17=1 ./deploy/nas_migrate_pending.sh`。
+if [ "${RUN_A17:-0}" = "1" ]; then
+    run_mig scripts/migrate/migrate_encrypt_id_card_20261019.py --apply --confirm
+else
+    echo "  --  跳过 A17 身份证重加密（清单：⏸ 暂缓；需要时 RUN_A17=1 重跑）"
+fi
 # 2026-10-19 P1（M-01/M-03）：登录限流持久化表 + 小程序令牌版本列（仅结构，幂等）
 run_mig scripts/migrate/migrate_login_throttle_20261019.py --apply
 run_mig scripts/migrate/migrate_wx_token_ver_20261019.py --apply

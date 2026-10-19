@@ -43,6 +43,12 @@ _MODELS = {
     # 注：旧课表模块（routes/timetable.py 的 Timetable/TimetableEntry）已下线 ——
     # 模型与蓝图都不存在，当前课表统一走 schedule 模块，故不在此登记。
     'dictionary_item': ('app.models.dictionary', 'DictItem'),
+    # 2026-10-19 第十三轮审计：三类"删除即永久消失"的记录接回收站
+    # （用户级规则：一切删除都要删前 archive）。
+    'inspection_record': ('app.models.academic', 'InspectionRecord'),
+    'point_record': ('app.models.points', 'PointRecord'),
+    'reward_punishment': ('app.models.morality', 'RewardPunishment'),
+    'reward_attachment': ('app.models.morality', 'RewardPunishmentAttachment'),
 }
 
 
