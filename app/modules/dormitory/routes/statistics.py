@@ -13,6 +13,7 @@ from app.utils.helpers import (get_dict_values, get_active_grades, get_class_opt
 from app.utils.decorators import perm_required
 from app.utils.alumni_scope import filter_alumni_grades, assert_alumni_grade_visible
 from app.utils.dormitory_scope import resolve_scope, room_scope_query
+from app.utils.err_safe import safe_error
 import io
 import uuid
 import time
@@ -418,8 +419,9 @@ def dormitory_history():
                 beds = [dict(b) for b in bed_rows]
 
             conn.close()
-        except Exception as e:
-            flash(f'查询失败：{str(e)}', 'danger')
+        except Exception as e:  # noqa: BLE001
+            # L-02：异常原文可能带表名/SQL 片段，统一走脱敏文案
+            flash(safe_error(e, '查询失败，请稍后重试'), 'danger')
 
     return render_template('dormitory/statistics/history.html',
                            graduated_grades=graduated_grades,
@@ -493,8 +495,9 @@ def alumni():
                 beds = [dict(b) for b in bed_rows]
 
             conn.close()
-        except Exception as e:
-            flash(f'查询失败：{str(e)}', 'danger')
+        except Exception as e:  # noqa: BLE001
+            # L-02：异常原文可能带表名/SQL 片段，统一走脱敏文案
+            flash(safe_error(e, '查询失败，请稍后重试'), 'danger')
 
     return render_template('dormitory/statistics/alumni.html',
                            graduated_grades=graduated_grades,
@@ -825,9 +828,10 @@ def import_dormitory():
         else:
             flash('Excel中没有有效的宿舍数据', 'warning')
 
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         db.session.rollback()
-        flash(f'导入失败：{str(e)}', 'danger')
+        # L-02：不把 SQLite/表名等内部异常原文回显给前端
+        flash(safe_error(e, '导入失败，请检查文件格式后重试'), 'danger')
 
     return redirect(url_for('statistics.index'))
 

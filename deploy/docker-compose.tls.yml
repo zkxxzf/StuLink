@@ -17,6 +17,8 @@ services:
       - STULINK_TRUST_PROXY=1
       - STULINK_HTTPS=1
       - STULINK_SESSION_COOKIE_SECURE=1
+      # L-04：应用端口只绑 127.0.0.1，前面只有 Caddy，可信其转发头
+      - STULINK_TRUSTED_PROXIES=*
 
   caddy:
     image: caddy:2-alpine

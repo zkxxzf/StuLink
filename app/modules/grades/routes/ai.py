@@ -16,6 +16,7 @@ from app.modules.grades import bp
 from app.modules.grades.services import (ai_prompt, ai_service, ai_task_service,
                                          scope as scope_service)
 from app.modules.grades.services import ai_providers
+from app.utils import ai_quota
 from app.utils.crypto import encrypt_rand, decrypt
 from app.utils.decorators import perm_required
 from app.utils.helpers import log_operation
@@ -404,6 +405,12 @@ def ai_analyze():
     if not payload['exam']['students']:
         return jsonify(success=False, message='当前权限范围内没有可发送的成绩数据'), 400
 
+    # P2：每日 AI 配额（发起即计数；失败不返还）
+    _ok, _used, _limit = ai_quota.consume(current_user.id)
+    if not _ok:
+        return jsonify(success=False,
+                       message=f'今日 AI 调用次数已用完（{_used}/{_limit} 次），请明天再试'), 429
+
     charts = ai_service.build_stats(payload)
     charts_json = json.dumps(charts, ensure_ascii=False)
     messages = ai_service.build_messages(payload)
@@ -503,6 +510,11 @@ def ai_chat():
         return jsonify(success=False, message=str(e)), 400
     if not cfg:
         return jsonify(success=False, message='尚未配置 AI API Key'), 400
+
+    _ok, _used, _limit = ai_quota.consume(current_user.id)
+    if not _ok:
+        return jsonify(success=False,
+                       message=f'今日 AI 调用次数已用完（{_used}/{_limit} 次），请明天再试'), 429
 
     # 保存用户提问
     user_msg = AiChatMessage(user_id=current_user.id, exam_id=exam.id, role='user',

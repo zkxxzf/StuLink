@@ -19,17 +19,15 @@ logger = logging.getLogger(__name__)
 
 
 def _client_ip():
-    return request.headers.get('X-Real-IP') or request.remote_addr or '?'
+    """L-04：统一口径，只有可信反代才信 X-Real-IP（见 utils/client_ip）。"""
+    from app.utils.client_ip import get_client_ip
+    return get_client_ip('?')
 
 
 def _rate(key, limit, window):
     k = 'qrweb_%s_%s' % (key, _client_ip())
-    hits = [t for t in (cache.get(k) or []) if t > 0]
-    if len(hits) >= limit:
-        return False
-    hits.append(1)
-    cache.set(k, hits, timeout=window)
-    return True
+    # L-10：原子自增，避免并发 get→set 超限
+    return cache.incr(k, 1, timeout=window) <= limit
 
 
 def _qr_payload(row):
@@ -59,6 +57,9 @@ def qr_new():
 
 @bp.route('/qr/status/<ticket>')
 def qr_status(ticket):
+    # L-04：公开轮询端点也要限流，防票据枚举/刷接口
+    if not _rate('status', 120, 60):
+        return jsonify({'ok': False, 'message': '请求过于频繁'}), 429
     row = wechat.get_ticket(ticket)
     if row is None:
         return jsonify({'ok': False, 'status': 'missing'}), 404

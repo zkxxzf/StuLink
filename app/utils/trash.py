@@ -18,6 +18,7 @@
 import importlib
 import json
 import logging
+import os
 from datetime import date, datetime
 
 from app.extensions import db
@@ -29,6 +30,7 @@ logger = logging.getLogger(__name__)
 _MODELS = {
     'affair_student': ('app.models.grades', 'AffairStudent'),
     'affair_room': ('app.models.grades', 'AffairRoom'),
+    'affair_room_lib': ('app.models.grades', 'AffairRoomLib'),
     'affair': ('app.models.grades', 'ExamAffair'),
     'affair_invigilator': ('app.models.grades', 'AffairInvigilator'),
     'room': ('app.models.room', 'Room'),
@@ -106,7 +108,8 @@ def archive(module, kind, label, rows, summary='', operator=None, count=None):
         return None
 
 
-def archive_snapshot(module, kind, label, tables, summary='', operator=None):
+def archive_snapshot(module, kind, label, tables, summary='', operator=None,
+                     update_existing=False):
     """一次归档**一组关联表**，恢复时按**原 id** 重建。
 
     用于"整场考试 / 整批考务"这类级联删除：普通 `archive()` 恢复时会丢弃 id
@@ -115,6 +118,8 @@ def archive_snapshot(module, kind, label, tables, summary='', operator=None):
     并且**父表在前、子表在后**，外键因此始终有效。
 
     tables: [(模型类, 行或行列表), ...]，顺序必须"父表 → 子表"。
+    update_existing=True：用于"只清字段、不删行"的操作（重排/清空分配），
+    恢复时按 id 更新现有行，而不是插入新行。
     """
     try:
         groups, total = [], 0
@@ -132,7 +137,8 @@ def archive_snapshot(module, kind, label, tables, summary='', operator=None):
             total += len(items)
         if not total:
             return None
-        payload = {'keep_ids': True, 'tables': groups}
+        payload = {'keep_ids': True, 'update_existing': bool(update_existing),
+                   'tables': groups}
         rec = TrashRecord(
             module=module, kind=kind, kind_label=label,
             ref_id=None,
@@ -149,6 +155,73 @@ def archive_snapshot(module, kind, label, tables, summary='', operator=None):
     except Exception:                       # noqa: BLE001  归档失败不阻断删除流程
         logger.warning('回收站快照归档失败 module=%s kind=%s', module, kind, exc_info=True)
         return None
+
+
+def purge_expired_records(dry_run=True, export_dir=None,
+                          include_restored=True, module=None):
+    """P2：清理已过期归档（expires_at < now）。
+
+    返回 dict：count（命中条数）、deleted（实际删除）、export（导出文件）、
+    sample（前 5 条元数据）、error（失败原因）。默认 dry-run；
+    apply 前先导出 JSONL 元数据（不含 payload，避免 PII 再扩散）。
+    expires_at 为空的历史行走“不自动删”策略，避免误删。
+    """
+    now = datetime.now()
+    q = TrashRecord.query.filter(TrashRecord.expires_at.isnot(None),
+                                 TrashRecord.expires_at < now)
+    if not include_restored:
+        q = q.filter(TrashRecord.restored_at.is_(None))
+    if module:
+        q = q.filter(TrashRecord.module == module)
+    rows = q.order_by(TrashRecord.id).all()
+    sample = [{
+        'id': r.id, 'module': r.module, 'kind': r.kind,
+        'summary': (r.summary or '')[:120],
+        'created_at': r.created_at.strftime('%Y-%m-%d %H:%M:%S')
+                      if r.created_at else '',
+        'expires_at': r.expires_at.strftime('%Y-%m-%d %H:%M:%S')
+                      if r.expires_at else '',
+        'restored': bool(r.restored_at),
+    } for r in rows[:5]]
+    result = {'count': len(rows), 'deleted': 0, 'export': None,
+              'sample': sample, 'error': None}
+    if dry_run or not rows:
+        return result
+
+    if export_dir:
+        try:
+            os.makedirs(export_dir, exist_ok=True)
+            ts = now.strftime('%Y%m%d_%H%M%S')
+            path = os.path.join(export_dir, f'trash_{ts}.jsonl')
+            with open(path, 'w', encoding='utf-8') as f:
+                for r in rows:
+                    f.write(json.dumps({
+                        'id': r.id, 'module': r.module, 'kind': r.kind,
+                        'kind_label': r.kind_label, 'ref_id': r.ref_id,
+                        'summary': r.summary, 'item_count': r.item_count,
+                        'operator_id': r.operator_id,
+                        'operator_name': r.operator_name,
+                        'created_at': r.created_at.isoformat() if r.created_at else None,
+                        'expires_at': r.expires_at.isoformat() if r.expires_at else None,
+                        'restored_at': r.restored_at.isoformat() if r.restored_at else None,
+                    }, ensure_ascii=False) + '\n')
+            result['export'] = path
+        except OSError as exc:
+            logger.warning('回收站过期导出失败，已中止删除: %s', exc)
+            result['error'] = f'导出失败，已中止删除：{exc}'
+            return result
+
+    try:
+        ids = [r.id for r in rows]
+        deleted = (TrashRecord.query.filter(TrashRecord.id.in_(ids))
+                   .delete(synchronize_session=False))
+        db.session.commit()
+        result['deleted'] = deleted
+    except Exception as exc:  # noqa: BLE001
+        db.session.rollback()
+        logger.warning('回收站过期清理失败: %s', exc, exc_info=True)
+        result['error'] = f'删除失败：{exc}'
+    return result
 
 
 def model_of(kind):
@@ -226,6 +299,7 @@ def _restore_snapshot(rec, data):
     父表先插入，子行因此能找到自己的 exam_id / affair_id，不会变成孤儿。
     """
     total, okn = 0, 0
+    update_existing = bool(data.get('update_existing'))
     for tbl in data.get('tables') or []:
         path = (tbl or {}).get('model') or ''
         try:
@@ -252,6 +326,17 @@ def _restore_snapshot(rec, data):
                     except ValueError:
                         val = None
                 clean[key_of.get(name, name)] = val
+            if update_existing:
+                pk = (row or {}).get('id')
+                obj = db.session.get(model, pk) if pk is not None else None
+                if obj is None:
+                    logger.info('快照恢复找不到现有行 %s id=%s，跳过', path, pk)
+                    continue
+                for key, val in clean.items():
+                    if key != 'id':
+                        setattr(obj, key, val)
+                okn += 1
+                continue
             savepoint = db.session.begin_nested()
             try:
                 db.session.add(model(**clean))
@@ -260,6 +345,10 @@ def _restore_snapshot(rec, data):
             except Exception as e:          # noqa: BLE001  主键/唯一约束冲突 → 跳过
                 savepoint.rollback()
                 logger.info('快照恢复跳过一行 %s err=%s', path, e)
+    # 先提交业务行，释放默认 bind 的读事务；否则 TrashRecord（system bind）
+    # 与业务表同文件时，两个 SQLite 连接会互相锁住（database is locked）。
+    if update_existing:
+        db.session.commit()
     rec.restored_at = datetime.now()
     db.session.commit()
     msg = f'已恢复 {okn} / {total} 行（按原 id，外键保持有效）'

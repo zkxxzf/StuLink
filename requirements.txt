@@ -2,6 +2,9 @@
 # 版本取自 2026-09-23 本机实际运行环境（pip freeze），用 ~= 允许补丁/次版本修复，
 # 但不允许跨次版本升级（防止 SQLAlchemy 2.x→3.x、Flask-WTF 行为变更等）。
 # 升级依赖时：先在测试环境 pip install -U，再回来改这里的下限并跑 scripts/smoke_*.py。
+# P2 M-21：生产镜像使用 requirements.lock（--require-hashes）；改完本文件后重跑：
+#   pip-compile --generate-hashes --no-emit-index-url --no-emit-trusted-host \
+#       --output-file requirements.lock requirements.txt
 Flask~=3.1.1
 Flask-SQLAlchemy~=3.1.1
 Flask-Login~=0.6.3
@@ -18,3 +21,4 @@ cryptography~=50.0.1
 pypinyin~=0.55.0
 qrcode~=8.2          # 微信扫码登录二维码（SVG，无 Pillow 依赖）
 python-dotenv~=1.0    # 读取本地 .env（微信 AppID/Secret 不入库）
+defusedxml~=0.7.1     # P2：任何 XML 解析统一走 app/utils/xml_safe.py（防 XXE/实体膨胀）

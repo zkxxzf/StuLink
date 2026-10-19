@@ -316,8 +316,25 @@ def edit(id):
         user.grade = ','.join(grades) or None
         user.class_name = class_name
         # P5：多身份（权限组），列表首个为主组
-        _set_user_groups(user, form.permission_group_ids.data,
-                         allow_admin_group=is_super)
+        # L-05：编辑页若请求里完全没有权限组字段（旧表单/脚本/半截请求），
+        # 不能把用户的组静默清空；只有显式提交过才覆盖。
+        _groups_submitted = (
+            request.form.get('permission_group_ids_present') == '1'
+            or 'permission_group_ids' in request.form)
+        if _groups_submitted:
+            _old_groups = {g.name for g in user.permission_groups}
+            _set_user_groups(user, form.permission_group_ids.data,
+                             allow_admin_group=is_super)
+            _new_groups = {g.name for g in user.permission_groups}
+            if _old_groups != _new_groups:
+                log_operation(
+                    current_user, '权限组变更', '用户', user.id,
+                    f'{user.real_name}: {sorted(_old_groups)} -> {sorted(_new_groups)}',
+                    module='system', severity='WARNING')
+        else:
+            log_operation(current_user, '更新', '用户', user.id,
+                          '未提交权限组字段，保留原权限组', module='system',
+                          severity='WARNING')
         if form.password.data:
             user.set_password(form.password.data)
         db.session.commit()

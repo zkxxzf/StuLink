@@ -19,6 +19,19 @@ from app.utils.url_guard import assert_outbound_url_allowed
 DEFAULT_TEMPERATURE = 0.4
 DEFAULT_TIMEOUT = 180
 
+
+def _request_timeout():
+    """P2：优先读 app 配置的 AI_REQUEST_TIMEOUT（秒），无上下文时用默认值。"""
+    try:
+        from flask import current_app, has_app_context
+        if has_app_context():
+            value = int(current_app.config.get('AI_REQUEST_TIMEOUT',
+                                               DEFAULT_TIMEOUT) or DEFAULT_TIMEOUT)
+            return max(10, value)
+    except Exception:  # noqa: BLE001
+        pass
+    return DEFAULT_TIMEOUT
+
 # v1.19.49.35 S-4：不自动跟随 3xx，防 SSRF 以 approved.com → 302 → 1.19.49.30 绕过 url_guard
 
 class _NoRedirect(urllib.request.HTTPRedirectHandler):
@@ -387,6 +400,8 @@ def _chat_completions(cfg, messages, timeout=None, max_tokens=None, temperature=
     2026-10-13：新增 tools / tool_choice（OpenAI 兼容 function calling），
     供成绩汇报区「AI 一句话分析」的 agent 循环使用；不传则请求体与以前完全一致。
     """
+    if timeout is None:
+        timeout = _request_timeout()
     provider = cfg.get('provider') or ai_providers.DEFAULT_PROVIDER
     base = (cfg.get('base_url') or ai_providers.resolve_base_url(provider)).rstrip('/')
     if not base:
@@ -774,7 +789,7 @@ def stream_chat(cfg, messages):
                  'Accept': 'text/event-stream'})
 
     try:
-        with _safe_urlopen(req, timeout=DEFAULT_TIMEOUT) as resp:
+        with _safe_urlopen(req, timeout=_request_timeout()) as resp:
             yield {'type': 'stage', 'text': '已连接服务商，正在生成…'}
             for raw in resp:
                 line = raw.decode('utf-8', 'replace').strip()

@@ -312,23 +312,30 @@ def check_M3():
                        follow_redirects=True).get_data(as_text=True)
 
     from app.utils.cache import cache
+    from app.utils import login_throttle
     with app.test_client() as c0:
         # 2026-10-13 #11：锁定/计数键已改为「来源 IP + 账号」，清理时需带前缀。
+        # 2026-10-19 P1 M-01：计数已落 SQLite（login_throttles），旧 cache 键还要清，
+        # 但必须同时清 DB 键，否则测试会把真实账号锁住。
         # test_client 的 remote_addr 固定为 127.0.0.1。
         for k in ('login_fail_sec_lockme', 'login_lock_sec_lockme',
                   'login_fail_127.0.0.1_sec_lockme',
                   'login_lock_127.0.0.1_sec_lockme'):
             cache.delete(k)
+        for k in ('ip:127.0.0.1', 'acct:127.0.0.1:sec_lockme'):
+            login_throttle.clear(k)
         for _ in range(5):
             try_login('wrong-password')
         html = try_login('Lock#Test2026')   # 正确口令也应被锁定挡住
         case('M-3 连续失败后账号被锁定', '临时锁定' in html, html[:120])
-    # 解锁后恢复使用（清缓存模拟锁定过期）
+    # 解锁后恢复使用（清 cache + DB 限流键，模拟锁定过期）
     with app.app_context():
         for k in ('login_fail_sec_lockme', 'login_lock_sec_lockme',
                   'login_fail_127.0.0.1_sec_lockme',
                   'login_lock_127.0.0.1_sec_lockme'):
             cache.delete(k)
+        for k in ('ip:127.0.0.1', 'acct:127.0.0.1:sec_lockme'):
+            login_throttle.clear(k)
     with app.test_client() as c1:
         r0 = c1.get('/login')
         m = re.search(r'name="csrf_token"[^>]*value="([^"]+)"', r0.get_data(as_text=True))

@@ -749,12 +749,13 @@ def get_read_progress(notification_id):
     }
 
 
-def get_notification_detail(notification_id, user=None):
+def get_notification_detail(notification_id, user=None, mark_read_now=True):
     """获取通知详情。
 
     user 为 None（旧签名）→ 仅返回 Notification 对象（向后兼容）。
     传 user → 返回 (notif, meta)：校验可见性（收件人行优先，旧逻辑兜底）、
-    自动标记已读（保持现有行为）、发布者/管理员附已读进度。
+    可选标记已读、发布者/管理员附已读进度。
+    mark_read_now=False：只读详情，不写已读（L-01：GET 不应产生副作用）。
     meta 为 None 表示当前用户不可见。
     """
     notif = db.session.get(Notification, notification_id)
@@ -770,13 +771,14 @@ def get_notification_detail(notification_id, user=None):
         visible = _user_matches_target(user, notif)
     if not visible:
         return notif, None
-    # 自动标记已读（保持 v1.x 行为）
-    mark_read(notification_id, user.id)
+    was_read = bool(row.is_read) if row is not None else False
+    if mark_read_now:
+        mark_read(notification_id, user.id)
     can_manage = bool(user.role == 'admin'
                       or user.has_perm('system.settings')
                       or notif.published_by == user.id)
     meta = {
-        'is_read': True,
+        'is_read': True if mark_read_now else was_read,
         'can_manage': can_manage,
         'progress': get_read_progress(notification_id) if can_manage else None,
     }

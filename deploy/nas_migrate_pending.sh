@@ -130,6 +130,11 @@ run_mig scripts/migrate/migrate_encrypt_teacher_phone_20261019.py --apply
 # 2026-10-19 审计 H-06：身份证确定性 IV → 随机 IV + 盲索引（两库；停机窗口；
 # 脚本内部会先 backup_db，--apply 必须带 --confirm）
 run_mig scripts/migrate/migrate_encrypt_id_card_20261019.py --apply --confirm
+# 2026-10-19 P1（M-01/M-03）：登录限流持久化表 + 小程序令牌版本列（仅结构，幂等）
+run_mig scripts/migrate/migrate_login_throttle_20261019.py --apply
+run_mig scripts/migrate/migrate_wx_token_ver_20261019.py --apply
+# 2026-10-19 P2：AI 每日配额表（仅结构，幂等）
+run_mig scripts/migrate/migrate_ai_usage_20261019.py --apply
 
 echo "[5/6] 兜底：补齐模型声明但现网缺失的列（改库前自动备份对应库）"
 docker run --rm -v "$DATA":/app/data -w /app \

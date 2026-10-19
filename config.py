@@ -115,6 +115,17 @@ class Config:
     # 关闭仅用于校内自查：AI_ANONYMIZE=0。
     AI_ANONYMIZE = os.environ.get(
         'AI_ANONYMIZE', '1').strip().lower() not in ('0', 'false', 'no', 'off')
+    # P2：AI 每日配额（按用户；0=不限制）与单次请求超时（秒）
+    AI_DAILY_QUOTA = int(os.environ.get('AI_DAILY_QUOTA', '50'))
+    AI_REQUEST_TIMEOUT = int(os.environ.get('AI_REQUEST_TIMEOUT', '180'))
+    # L-04：只有来自可信反代的请求才信 X-Real-IP / X-Forwarded-For。
+    # 逗号分隔 IP；'*' 表示信任所有来源（仅当应用端口只绑回环时使用）。
+    TRUSTED_PROXIES = tuple(
+        p.strip() for p in os.environ.get('STULINK_TRUSTED_PROXIES', '').split(',')
+        if p.strip())
+    # L-01：小程序通知详情 GET 默认不写已读；兼容期可设 1 恢复旧行为。
+    WX_NOTICE_DETAIL_AUTO_READ = os.environ.get(
+        'WX_NOTICE_DETAIL_AUTO_READ', '0').strip().lower() in ('1', 'true', 'yes', 'on')
 
     # 生产环境关闭模板自动重载（性能）；改版/迭代期间可临时用环境变量打开
     # STULINK_RELOAD_TEMPLATES=1 —— 这样改 .html 不必重启服务。重启会打断正在后台

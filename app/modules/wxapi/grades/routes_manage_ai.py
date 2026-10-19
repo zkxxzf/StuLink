@@ -115,10 +115,17 @@ def wx_ai_tasks():
     return wx_ok(items)
 
 
-@bp.route('/grades/ai/tasks/<int:tid>')
+@bp.route('/grades/ai/tasks/<tid>')
 @wx_perm_required(PERM)
 def wx_ai_task_detail(tid):
-    """任务详情（含进度回放与报告正文）；负数 = 旧口径报告。"""
+    """任务详情（含进度回放与报告正文）；负数 = 旧口径报告。
+
+    用字符串路由再转 int：Flask 的 `<int:>` 不匹配负号，旧报告（负 id）会 404。
+    """
+    try:
+        tid = int(tid)
+    except (TypeError, ValueError):
+        return wx_err('任务不存在', 404)
     user = g.wx_user
     if tid < 0:
         report = db.session.get(AiReport, -tid)

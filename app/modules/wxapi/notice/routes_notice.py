@@ -83,13 +83,22 @@ def wx_notice_unread():
 @bp.route('/notices/<int:nid>')
 @wx_login_required
 def wx_notice_detail(nid):
-    """通知详情（服务层会自动标记已读）。"""
-    notif, meta = svc.get_notification_detail(nid, g.wx_user)
+    """通知详情。
+
+    L-01：GET 默认不再写已读；客户端看完后调 POST /notices/<id>/read。
+    兼容期可用 WX_NOTICE_DETAIL_AUTO_READ=1 恢复旧的“打开即已读”。
+    """
+    from flask import current_app
+    auto_read = bool(current_app.config.get(
+        'WX_NOTICE_DETAIL_AUTO_READ', False))
+    notif, meta = svc.get_notification_detail(
+        nid, g.wx_user, mark_read_now=auto_read)
     if meta is None:
         return wx_err('通知不存在或无权限查看', 404)
     data = _item(notif)
     data['content'] = notif.content or ''
-    data['is_read'] = True
+    data['is_read'] = bool(meta.get('is_read'))
+    data['mark_read_required'] = not auto_read and not data['is_read']
     return wx_ok(data)
 
 

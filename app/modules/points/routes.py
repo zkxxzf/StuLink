@@ -291,6 +291,10 @@ def api_record_update(rid):
     rec.remark = payload['remark']
     rec.recorded_at = payload['recorded_at']
     db.session.commit()
+    # P1 M-19：积分修改此前无审计（新增/删除都有），补一条精确埋点
+    log_operation(current_user, '修改', '积分', rec.id,
+                  f"{rec.student_name} {rec.points:+d}分 {rec.reason}",
+                  module='points')
     return jsonify(success=True, message='已更新', data=rec.to_dict())
 
 

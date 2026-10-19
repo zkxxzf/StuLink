@@ -1303,8 +1303,14 @@ def affair_room_lib_list():
 @perm_required('grades.edit')
 def affair_room_lib_delete(lid):
     row = AffairRoomLib.query.get_or_404(lid)
+    # P1 M-19：考场房间库删除此前无归档/无审计；删前进回收站并留痕
+    from app.utils.trash import archive
+    archive('grades', 'affair_room_lib', '考场房间库', row,
+            summary=f'考场 {row.location or row.id}', operator=current_user)
     db.session.delete(row)
     db.session.commit()
+    log_operation(current_user, '删除', '考场房间库', lid,
+                  f'删除考场房间库：{row.location or row.id}', module='grades')
     return jsonify({'ok': True})
 
 
@@ -1827,14 +1833,31 @@ def affair_arrange(aid):
         mode = 0
     if mode not in (0, 1, 2):
         mode = 0
+    rooms = AffairRoom.query.filter_by(affair_id=aid).all()
+    if not rooms:
+        return jsonify({'ok': False, 'msg': '请先在「考场设置」中添加考场'})
+
+    # P2：重排会先清空旧考场/座号/考号，属不可逆操作。先整组快照，
+    # 归档失败就中止；后续 _arrange 异常时回滚清空，旧编排仍可用。
+    old_rows = [s for s in AffairStudent.query.filter_by(affair_id=aid).all()
+                if s.room_no or s.seat_no or s.exam_number]
+    if old_rows:
+        from app.utils.trash import archive_snapshot
+        snap = archive_snapshot(
+            'grades', 'affair_arrange_before', '考务重排前',
+            tables=[(AffairStudent, old_rows)],
+            summary=f'批次#{aid}：重排前 {len(old_rows)} 人已有考场/座号/考号',
+            operator=current_user, update_existing=True)
+        if snap is None:
+            return jsonify({'ok': False,
+                            'msg': '重排前归档失败，已中止（避免旧编排不可恢复）'}), 500
+        db.session.commit()
+
     # 重新编排前清空旧结果
     AffairStudent.query.filter_by(affair_id=aid).update(
         {AffairStudent.room_no: None, AffairStudent.seat_no: None, AffairStudent.exam_number: None})
     affair.mode = mode
     students = AffairStudent.query.filter_by(affair_id=aid).all()
-    rooms = AffairRoom.query.filter_by(affair_id=aid).all()
-    if not rooms:
-        return jsonify({'ok': False, 'msg': '请先在「考场设置」中添加考场'})
     scope = [s for s in students if s.is_attend]
     # v1.19.0 分层分配：同一选科组内按上一场同阶段考试的校内排名填座
     # （首次考试无历史成绩 → 自然退化为随机，不阻断）
@@ -1847,10 +1870,15 @@ def affair_arrange(aid):
         log.append('分层依据：' + (
             f'上一场同阶段考试「{prev_name}」的校内排名（{len(rank_map)} 人有排名）'
             if rank_map else '无上一场同阶段成绩，本次退化为随机编排'))
-    assigned, failed = _arrange(affair, students, rooms, mode, log,
-                                layered=layered, rank_map=rank_map)
-    affair.status = 'arranged' if assigned else 'draft'
-    db.session.commit()
+    try:
+        assigned, failed = _arrange(affair, students, rooms, mode, log,
+                                    layered=layered, rank_map=rank_map)
+        affair.status = 'arranged' if assigned else 'draft'
+        db.session.commit()
+    except Exception:
+        db.session.rollback()
+        current_app.logger.error('考务重排失败，已回滚', exc_info=True)
+        return jsonify({'ok': False, 'msg': '重排失败，已回滚（旧编排仍可用）'}), 500
     log_operation(current_user, '编排', '考务批次', aid,
                   f'{MODE_LABEL[mode]}，分配{assigned}人/失败{failed}人', module='grades')
     return jsonify({'ok': True, 'assigned': assigned, 'failed': failed,

@@ -66,6 +66,13 @@ WX_ROUTES = {
     'pivot': '/package-grades/pages/pivot/index',
     'report': '/package-grades/pages/report/index',
     'ai': '/package-grades/pages/ai/index',
+    'subjects': '/package-grades/pages/subjects/index',
+    'band_templates': '/package-grades/pages/band-templates/index',
+    'teachers': '/package-grades/pages/teachers/index',
+    'teachers_import': '/package-grades/pages/teachers-import/index',
+    'rooms': '/package-grades/pages/rooms/index',
+    'affair': '/package-grades/pages/affair/index',
+    'ai_import': '/package-grades/pages/ai-import/index',
 }
 
 EXAM_LIMIT = 300

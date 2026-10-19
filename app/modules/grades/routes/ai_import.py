@@ -234,27 +234,32 @@ def exam_ai_import_analyze(exam_id):
     suggest, ai_err = {}, ''
     cfg = _ai_cfg_from_request()
     if sheets and cfg:
-        from app.modules.grades.services import ai_service
-        try:
-            resolved = ai_service.resolve_key(current_user, cfg)
-            system, user = aisvc.build_ai_prompt({'sheets': sheets}, exam)
-            ok, payload, _sec = ai_service._chat_completions(
-                resolved, [{'role': 'system', 'content': system},
-                           {'role': 'user', 'content': user}],
-                timeout=90, max_tokens=3000)
-            if ok:
-                text = ''
-                try:
-                    text = payload['choices'][0]['message']['content']
-                except (KeyError, IndexError, TypeError):
+        from app.utils import ai_quota
+        _allowed, _used, _limit = ai_quota.consume(current_user.id)
+        if not _allowed:
+            ai_err = f'今日 AI 调用次数已用完（{_used}/{_limit}），已跳过 AI 建议'
+        else:
+            from app.modules.grades.services import ai_service
+            try:
+                resolved = ai_service.resolve_key(current_user, cfg)
+                system, user = aisvc.build_ai_prompt({'sheets': sheets}, exam)
+                ok, payload, _sec = ai_service._chat_completions(
+                    resolved, [{'role': 'system', 'content': system},
+                               {'role': 'user', 'content': user}],
+                    timeout=90, max_tokens=3000)
+                if ok:
                     text = ''
-                suggest = aisvc.parse_ai_mapping(text) or {}
-                if not suggest:
-                    ai_err = 'AI 返回内容无法解析为映射，请手工指定列'
-            else:
-                ai_err = 'AI 调用失败：%s' % str(payload)[:160]
-        except Exception as e:
-            ai_err = 'AI 调用异常：%s' % str(e)[:160]
+                    try:
+                        text = payload['choices'][0]['message']['content']
+                    except (KeyError, IndexError, TypeError):
+                        text = ''
+                    suggest = aisvc.parse_ai_mapping(text) or {}
+                    if not suggest:
+                        ai_err = 'AI 返回内容无法解析为映射，请手工指定列'
+                else:
+                    ai_err = 'AI 调用失败：%s' % str(payload)[:160]
+            except Exception as e:
+                ai_err = 'AI 调用异常：%s' % str(e)[:160]
     elif sheets:
         ai_err = '未检测到本机 AI Key，已跳过 AI 识别，请在下方手工指定每列的用途'
 

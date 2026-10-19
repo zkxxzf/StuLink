@@ -10,6 +10,7 @@ import uuid
 from flask import (Flask, render_template, request, url_for, abort, redirect,
                    session, flash, g)
 from sqlalchemy import event as _sa_event
+from sqlalchemy import text as _sa_text
 from sqlalchemy.engine import Engine as _SAEngine
 
 try:  # 本地 .env 读取微信 AppID/Secret 等；显式环境变量优先
@@ -831,23 +832,31 @@ def create_app():
             response.headers['Strict-Transport-Security'] = (
                 'max-age=31536000; includeSubDomains')
 
-        # M-9：CSP。项目内联 <script>/onclick 数量大，直接 enforcing 会白屏，
-        # 因此默认 Report-Only（只上报不拦截），收集一轮违规后再切换：
-        #   STULINK_CSP_MODE=enforce → 直接下发 CSP（script-src 带 nonce、允许内联样式）
-        #   STULINK_CSP_MODE=off     → 不下发
-        mode = os.environ.get('STULINK_CSP_MODE', 'report').strip().lower()
+        # M-9/P2：CSP。项目内联 <script>/onclick 数量大，默认允许 unsafe-inline，
+        # 但仍用 enforcing 拦外链脚本/对象/表单外发，避免“只上报、实际没防”。
+        #   STULINK_CSP_MODE=enforce（默认）→ 下发 Content-Security-Policy
+        #   STULINK_CSP_MODE=report        → 只上报（排障用）
+        #   STULINK_CSP_MODE=off           → 不下发
+        #   STULINK_CSP_NONCE=1            → 改用 nonce（需模板逐步补 nonce，未补前会白屏）
+        mode = os.environ.get('STULINK_CSP_MODE', 'enforce').strip().lower()
         if mode != 'off':
             nonce = getattr(request, 'csp_nonce', '') or ''
-            script_src = "'self'"
-            if nonce:
-                script_src += f" 'nonce-{nonce}'"
+            if _env_flag('STULINK_CSP_NONCE') and nonce:
+                script_src = f"'self' 'nonce-{nonce}'"
+            else:
+                script_src = "'self' 'unsafe-inline'"
             policy = ("default-src 'self'; "
-                      f"script-src {script_src} 'unsafe-inline'; "
+                      f"script-src {script_src}; "
                       "style-src 'self' 'unsafe-inline'; "
-                      "img-src 'self' data:; "
+                      "img-src 'self' data: blob:; "
                       "font-src 'self' data:; "
                       "connect-src 'self'; "
+                      "media-src 'self'; "
+                      "worker-src 'self'; "
+                      "manifest-src 'self'; "
+                      "frame-src 'none'; "
                       "frame-ancestors 'none'; "
+                      "form-action 'self'; "
                       "object-src 'none'; "
                       "base-uri 'self'")
             header = ('Content-Security-Policy' if mode == 'enforce'
@@ -868,6 +877,17 @@ def create_app():
         except Exception:  # noqa: BLE001  审计失败绝不能影响正常响应
             app.logger.warning('[audit] 请求审计写入失败', exc_info=True)
         return response
+
+    # P2 M-16：真实健康检查（此前 compose 只看 .secret_key 是否存在，假健康）。
+    # 只查数据库连通性，不查外部 AI/微信，避免第三方抖动导致容器反复重启。
+    @app.route('/health')
+    def health():
+        try:
+            db.session.execute(_sa_text('SELECT 1'))
+            return {'status': 'ok', 'service': 'stulink'}, 200
+        except Exception:  # noqa: BLE001
+            app.logger.exception('health check failed')
+            return {'status': 'error'}, 503
 
     # 注册蓝图（模块化架构）
     from app.modules import register_blueprints

@@ -5,6 +5,7 @@ from flask import (Blueprint, render_template, redirect, url_for, flash, request
 from flask_login import login_user, logout_user, login_required, current_user
 from app.forms.auth_forms import LoginForm, ChangePasswordForm
 from app.models import User
+from app.utils.client_ip import get_client_ip
 from app.utils.helpers import log_operation
 from app.utils.login_throttle import (check as throttle_check,
                                       clear as throttle_clear,
@@ -71,7 +72,8 @@ def login():
     form = LoginForm()
     if form.validate_on_submit():
         # 频率限制检查（P1 M-01：SQLite 持久化，重启/多线程仍生效）
-        client_ip = request.remote_addr or 'unknown'
+        # L-04：反代后按真实客户端 IP 限流；直连时该函数仍回退 remote_addr
+        client_ip = get_client_ip('unknown')
         ip_key = f'ip:{client_ip}'
         allowed, retry = throttle_check(
             ip_key, _LOGIN_RATE_LIMIT, _LOGIN_RATE_WINDOW, 0)

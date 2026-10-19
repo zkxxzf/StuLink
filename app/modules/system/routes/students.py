@@ -30,6 +30,28 @@ logger = logging.getLogger(__name__)
 bp = Blueprint('students', __name__, url_prefix='/students')
 
 
+def _transfer_target_error(student, new_grade, new_class):
+    """M-20：调班目标校验（字典内 + 已毕业冻结）。
+
+    返回错误文案；None 表示可调。年级/班级字典为空时跳过字典校验
+    （空库/首次部署不至于完全不能调班），但毕业状态始终校验。
+    """
+    if not new_grade or not new_class:
+        return '年级和班级不能为空'
+    valid_grades = set(get_dict_values('grade'))
+    if valid_grades and new_grade not in valid_grades:
+        return f'目标年级「{new_grade}」不在年级字典中'
+    valid_classes = set(get_dict_values('class'))
+    if valid_classes and new_class not in valid_classes:
+        return f'目标班级「{new_class}」不在班级字典中'
+    graduated = set(get_graduated_grades())
+    if student.grade in graduated:
+        return f'{student.grade} 已毕业归档，不能调班'
+    if new_grade in graduated:
+        return f'{new_grade} 已毕业归档，不能调入'
+    return None
+
+
 def _student_in_scope(student):
     """单个学生是否对当前用户可见（H-2 唯一口径）。
 
@@ -1236,8 +1258,9 @@ def transfer(id):
     new_grade = request.form.get('new_grade', '').strip()
     new_class = request.form.get('new_class', '').strip()
 
-    if not new_grade or not new_class:
-        flash('年级和班级不能为空', 'danger')
+    _target_err = _transfer_target_error(student, new_grade, new_class)
+    if _target_err:
+        flash(_target_err, 'danger')
         return redirect(url_for('students.list_students'))
 
     old_info = f'{student.grade} {student.class_name}'
@@ -1476,6 +1499,12 @@ def batch_transfer():
             # （含跨年级）。现在逐行复用 _student_in_scope，越权行跳过并计入错误。
             if not _student_in_scope(student):
                 errors.append(f'{row_label}（{match_val}）：不在你的数据范围内，已跳过')
+                continue
+
+            # M-20：批量调班同样校验目标年级/班级字典与毕业冻结
+            _target_err = _transfer_target_error(student, new_grade, new_class)
+            if _target_err:
+                errors.append(f'{row_label}（{match_val}）：{_target_err}')
                 continue
 
             old_loc = student_location_desc(student)

@@ -314,6 +314,14 @@ def set_status(rec, status, user, reason=''):
         rec.revoked_at = None
         rec.revoke_reason = None
     db.session.commit()
+    # P1 M-19：状态流转（登记→确认/撤销）补审计
+    try:
+        from app.utils.helpers import log_operation
+        log_operation(user, '状态变更', '德育奖惩', rec.id,
+                      f"{getattr(rec, 'student_name', '') or rec.id} → {status}",
+                      module='morality')
+    except Exception:  # noqa: BLE001 审计失败不阻断业务
+        pass
     return True, '状态已更新'
 
 

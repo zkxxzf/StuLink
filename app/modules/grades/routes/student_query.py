@@ -91,13 +91,11 @@ def cert_verify(code):
     from app.utils.cert_sign import verify, is_legacy, load_content
 
     # 免登录端点，做简单的按 IP 限流，避免被批量探测刷库（60 秒内最多 30 次）
+    # L-10：改原子自增，get→set 在并发下可同时读到 29 而超限。
     from app.utils.cache import cache
-    rate_key = f'cert_verify_rate_{request.remote_addr or "unknown"}'
-    hits = (cache.get(rate_key) or 0) + 1
-    try:
-        cache.set(rate_key, hits, timeout=60)
-    except Exception as _e:  # noqa: BLE001
-        logger.warning('student_query.py::cert_verify 异常（已降级处理）: %s', _e)
+    from app.utils.client_ip import get_client_ip
+    rate_key = f'cert_verify_rate_{get_client_ip("unknown")}'
+    hits = cache.incr(rate_key, 1, timeout=60)
     if hits > 30:
         abort(429, description='核验请求过于频繁，请稍后再试')
 

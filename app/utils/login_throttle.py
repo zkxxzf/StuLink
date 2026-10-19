@@ -12,6 +12,7 @@
 `scripts/migrate/migrate_login_throttle_20261019.py` 显式建表（幂等）。
 """
 import logging
+import os
 import sqlite3
 import time
 
@@ -34,9 +35,17 @@ _last_cleanup = 0.0
 
 
 def _db_path():
-    """主库（system.db）路径；必须处于 app context。"""
-    from app.extensions import db
-    return db.engine.url.database
+    """主库（system.db）路径。
+
+    优先进 app context 取 db.engine（测试/多库绑定下路径可能被改）；
+    脚本或 after_request 之外的调用没有 app context 时，退回 config.BASE_DIR/data。
+    """
+    try:
+        from app.extensions import db
+        return db.engine.url.database
+    except RuntimeError:
+        from config import BASE_DIR
+        return os.path.join(BASE_DIR, 'data', 'system.db')
 
 
 def _connect():
