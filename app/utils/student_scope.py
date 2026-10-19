@@ -46,10 +46,15 @@ def apply_student_scope(query, user=None):
             sorted(grade_wide | {g for g, _ in pairs})))
 
     # 2) 班主任 / 年级长沿用原有字段口径
+    # 2026-10-19：管理年级可多选。班主任在保存时已强制只能 1 个年级
+    # （一个班只属于一个年级），这里取首个防止历史脏数据跨年级同名班误伤。
     if user.role == 'homeroom_teacher':
-        return query.filter_by(grade=user.grade, class_name=user.class_name)
+        if not user.grades:
+            return query.filter(Student.id == -1)
+        return query.filter_by(grade=user.grades[0], class_name=user.class_name)
     if user.role == 'grade_leader':
-        return query.filter_by(grade=user.grade)
+        return query.filter(Student.grade.in_(user.grades or [])) \
+            if user.grades else query.filter(Student.id == -1)
 
     # 3) 任课教师等：班级映射 > 任课映射年级 > 组级范围
     # 2026-10-18 审计修复（P1 数据范围过宽）：此前只取 UserClassLink（class_pairs），
@@ -69,7 +74,11 @@ def apply_student_scope(query, user=None):
     scope, grade = get_scope(user)
     if scope == SCOPE_SCHOOL:
         return query
-    if scope == SCOPE_GRADE and grade:
-        return query.filter_by(grade=grade)
+    if scope == SCOPE_GRADE:
+        from app.modules.grades.services.scope import get_scope_grades
+        grades = get_scope_grades(user)
+        if grades:
+            return query.filter(Student.grade.in_(grades))
+        return query.filter(Student.id == -1)
     # 无任何可见范围（如未配置身份/范围的账号）→ 空集，杜绝"回落全校"
     return query.filter(Student.id == -1)

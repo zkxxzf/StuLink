@@ -136,11 +136,12 @@ def export_tab(tab):
                                                   denom=denom)
             elif scope_type == 'grade':
                 from app.models.grades import TeacherSubjectLink
+                # 2026-10-19：管理年级可多选，取本场考试年级（已校验可见）
                 links = TeacherSubjectLink.query.filter_by(
-                    grade=scope_service.get_scope(current_user)[1], active=True).all()
+                    grade=exam.grade, active=True).all()
                 payload = tab_service.teacher_tab(exam_id, subject=subject or None,
                                                   links=links,
-                                                  grade=scope_service.get_scope(current_user)[1],
+                                                  grade=exam.grade,
                                                   denom=denom)
             else:
                 abort(403)

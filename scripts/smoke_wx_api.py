@@ -137,8 +137,10 @@ def main():
                           '/grades/analysis/grade?exam_id=%d' % exam_id) or {}
         check('分析年级 tab 含表格',
               bool((a_tab.get('tables') or {})))
-        check('分析年级 tab 含图表',
-              bool((a_tab.get('charts') or {})))
+        # 2026-10-19：年级分析页的图表区已按用户口径下线（tab_service 恒返回
+        # charts={}），旧断言"含图表"必然失败；与 smoke_grades 的断言对齐。
+        check('分析年级 tab 图表区已下线（charts 为空）',
+              (a_tab.get('charts') or {}) == {})
         if cls:
             c_tab = expect_ok(
                 client, headers,
@@ -315,6 +317,31 @@ def main():
         if work is not None:
             check('批次工作量含 cells/detail',
                   'cells' in work and isinstance(work.get('detail'), list))
+
+    print('[调课 / 成绩复核]')
+    swaps = expect_ok(client, headers, '/swap/list') or {}
+    check('调课列表含 items/statuses',
+          isinstance(swaps.get('items'), list)
+          and isinstance(swaps.get('statuses'), list))
+    check('调课列表含待确认数', 'confirm_count' in swaps)
+    entries = expect_ok(client, headers, '/swap/entries') or {}
+    check('调课可选课程已返回', isinstance(entries.get('entries'), list))
+    confirms = expect_ok(client, headers, '/swap/confirm') or {}
+    check('换课待确认已返回', isinstance(confirms.get('items'), list))
+    reviews = expect_ok(client, headers, '/grades/reviews') or {}
+    check('复核列表含 items/counts',
+          isinstance(reviews.get('items'), list)
+          and isinstance(reviews.get('counts'), dict))
+    rexams = expect_ok(client, headers, '/grades/reviews/exams') or []
+    check('复核考试列表已返回', isinstance(rexams, list))
+    if rexams and sample_no:
+        found = maybe_ok(client, headers,
+                         '/grades/reviews/search?exam_id=%d&q=%s'
+                         % (rexams[0]['id'], sample_no))
+        if found:
+            check('复核搜学生含全科成绩',
+                  'subjects' in found[0]
+                  and 'hidden_subjects' in found[0])
 
     print('[通知]')
     notices = expect_ok(client, headers, '/notices?page=1') or {}

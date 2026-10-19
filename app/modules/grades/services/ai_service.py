@@ -101,8 +101,9 @@ def scope_of(user, exam):
     if scope == scope_service.SCOPE_SCHOOL:
         return nos, f'{exam.grade}全年级', None
     if scope == scope_service.SCOPE_GRADE or user.has_role('grade_leader'):
-        my_grade = my_grade or user.grade
-        if my_grade and exam.grade != my_grade:
+        # 2026-10-19：管理年级可多选（user.grades）
+        my_grades = set(scope_service.get_scope_grades(user)) or set(user.grades)
+        if my_grades and exam.grade not in my_grades:
             return set(), '非本人年级', None
         return nos, f'{exam.grade}全年级', None
     if user.has_role('homeroom_teacher'):

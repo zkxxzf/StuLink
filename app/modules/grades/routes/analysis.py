@@ -488,11 +488,11 @@ def api_teacher_tab():
             return tab_service.teacher_tab(exam_id, subject=subject,
                                            links=None, grade=exam.grade, denom=denom)
         if scope_type == 'grade':
-            # 年级长：本年级
-            grade = scope_service.get_scope(current_user)[1]
-            links = TeacherSubjectLink.query.filter_by(grade=grade, active=True).all()
+            # 年级长：本场考试年级（管理年级可多选，考试已校验在可见范围内）
+            links = TeacherSubjectLink.query.filter_by(
+                grade=exam.grade, active=True).all()
             return tab_service.teacher_tab(exam_id, subject=subject, links=links,
-                                           grade=grade, denom=denom)
+                                           grade=exam.grade, denom=denom)
         abort(403)
     cache_key = f'grades_tab_{exam_id}_teacher_{subject or "*"}_{current_user.id}_{denom}'
     return jsonify(success=True, data=_fetch(cache_key, _build))

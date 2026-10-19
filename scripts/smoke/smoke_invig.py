@@ -159,9 +159,13 @@ with app.test_client() as c:
     check('页头显示本场考试名字', '2025级2026-2027学年第一学期期中考（冒烟）' in ph)
     check('页头显示考试类型（性质/阶段）', '联考' in ph and '期中考' in ph)
     check('页头显示考试时间', '2026-10-08' in ph)
+    # 2026-10-19 审计：断言原先查整页，但顶部导航的 exam-topbar-meta 也按
+    # 设计显示「年级·性质·阶段」串 → 整页永远命中。改为只看侧栏标题元素。
+    _tm = re.search(r'class="efn-title"[^>]*>(.*?)</div>', ph, re.S)
+    _side_title = re.sub(r'\s+', ' ', _tm.group(1)).strip() if _tm else ''
     check('侧栏标题=考试名字（非「年级·性质·阶段·日期」串）',
-          '2025级2026-2027学年第一学期期中考（冒烟）' in ph
-          and '2025级·联考·期中考' not in ph)
+          '2025级2026-2027学年第一学期期中考（冒烟）' in _side_title
+          and '2025级·联考·期中考' not in _side_title)
     # v1.19.47.3 点环节标签不滚动：改用 history.replaceState 写 hash（不再直接赋 location.hash）
     check('点环节标签不滚动（用 history.replaceState）', 'history.replaceState' in ph)
     # v1.19.47.3 侧栏 7 环节：断言**渲染产物**（affair_steps 是 Jinja 变量名，

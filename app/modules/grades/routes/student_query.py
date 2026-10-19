@@ -40,7 +40,8 @@ def _student_query_in_scope(user):
         grades = {l.grade for l in scope_service.teacher_links(user)}
         q = q.filter(Student.grade.in_(grades)) if grades else q.filter(False)
     elif scope == 'grade':
-        q = q.filter(Student.grade == grade)
+        # 2026-10-19：管理年级可多选
+        q = q.filter(Student.grade.in_(scope_service.get_scope_grades(user)))
     elif scope == 'class':
         links = scope_service.visible_classes(user) or []
         if links:

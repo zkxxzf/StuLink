@@ -4,7 +4,7 @@ import secrets
 from flask import Blueprint, render_template, redirect, url_for, flash, request, send_file
 from flask_login import login_required, current_user
 from app.extensions import db
-from app.models import User, PermissionGroup
+from app.models import User, PermissionGroup, WeChatBinding
 from app.forms.user_forms import UserForm
 from app.utils.decorators import perm_required
 from app.utils.helpers import log_operation
@@ -93,8 +93,19 @@ def list_users():
     group_order = {g.name: g.id for g in PermissionGroup.query.all()}
     groups = OrderedDict(
         (g, grouped[g]) for g in sorted(grouped, key=lambda x: (group_order.get(x, 9999), x)))
+    # 2026-10-19：教师管理展示微信绑定状态 / openid / 绑定 UID。
+    # 一次查回，避免每个用户 N+1。
+    wx_bindings = {}
+    user_ids = [u.id for u in users]
+    if user_ids:
+        rows = (WeChatBinding.query
+                .filter(WeChatBinding.user_id.in_(user_ids))
+                .order_by(WeChatBinding.user_id, WeChatBinding.id).all())
+        for row in rows:
+            wx_bindings.setdefault(row.user_id, []).append(row)
     return render_template('system/users/list.html', users=users, groups=groups,
-                           one_time_passwords=one_time_passwords)
+                           one_time_passwords=one_time_passwords,
+                           wx_bindings=wx_bindings)
 
 
 @bp.route('/create', methods=['GET', 'POST'])
@@ -108,7 +119,9 @@ def create():
 
         # 校验：班主任最多3人/班，且年级班级必填
         role = form.role.data
-        grade = form.grade.data or None
+        # 2026-10-19：管理年级多选（年级长可多个）；班主任强制 1 个。
+        grades = [g for g in (form.grade.data or []) if g]
+        grade = grades[0] if grades else None
         class_name = form.class_name.data or None
 
         # 2026-10-18 审计修复（P1 横向提权）：非超管不得新建管理员账号
@@ -118,8 +131,8 @@ def create():
             return render_template('system/users/form.html', form=form, title='新建用户')
 
         if role == 'homeroom_teacher':
-            if not grade or not class_name:
-                flash('班主任必须指定年级和班级', 'danger')
+            if len(grades) != 1 or not class_name:
+                flash('班主任必须指定 1 个管理年级和班级（一个班只属于一个年级）', 'danger')
                 return render_template('system/users/form.html', form=form, title='新建用户')
             existing_count = User.query.filter_by(
                 role='homeroom_teacher', grade=grade, class_name=class_name, is_active=True
@@ -128,15 +141,15 @@ def create():
                 flash(f'{grade}{class_name} 已有 {existing_count} 名班主任，最多设置3名', 'danger')
                 return render_template('system/users/form.html', form=form, title='新建用户')
 
-        if role == 'grade_leader' and not grade:
-            flash('年级长必须指定管理年级', 'danger')
+        if role == 'grade_leader' and not grades:
+            flash('年级长必须指定管理年级（可多选）', 'danger')
             return render_template('system/users/form.html', form=form, title='新建用户')
 
         user = User(
             username=form.username.data,
             real_name=form.real_name.data,
             role=role,
-            grade=grade,
+            grade=','.join(grades) or None,
             class_name=class_name,
             must_change_pwd=True,
         )
@@ -169,6 +182,7 @@ def edit(id):
     # P5：多身份多选的回显（GET 时按当前所属组预选；首个为主组）
     if not form.is_submitted():
         form.permission_group_ids.data = [g.id for g in user.permission_groups]
+        form.grade.data = user.grades     # 管理年级多选回显（库内是逗号串）
     if form.validate_on_submit():
         existing = User.query.filter(
             User.username == form.username.data, User.id != user.id).first()
@@ -178,7 +192,9 @@ def edit(id):
 
         # 校验
         role = form.role.data
-        grade = form.grade.data or None
+        # 2026-10-19：管理年级多选（年级长可多个）；班主任强制 1 个。
+        grades = [g for g in (form.grade.data or []) if g]
+        grade = grades[0] if grades else None
         class_name = form.class_name.data or None
 
         # v1.9.2 防误操作：管理员账号的角色不可修改
@@ -187,8 +203,8 @@ def edit(id):
             return render_template('system/users/form.html', form=form, title='编辑用户')
 
         if role == 'homeroom_teacher':
-            if not grade or not class_name:
-                flash('班主任必须指定年级和班级', 'danger')
+            if len(grades) != 1 or not class_name:
+                flash('班主任必须指定 1 个管理年级和班级（一个班只属于一个年级）', 'danger')
                 return render_template('system/users/form.html', form=form, title='编辑用户')
             existing_count = User.query.filter_by(
                 role='homeroom_teacher', grade=grade, class_name=class_name, is_active=True
@@ -197,8 +213,8 @@ def edit(id):
                 flash(f'{grade}{class_name} 已有 {existing_count} 名班主任，最多设置3名', 'danger')
                 return render_template('system/users/form.html', form=form, title='编辑用户')
 
-        if role == 'grade_leader' and not grade:
-            flash('年级长必须指定管理年级', 'danger')
+        if role == 'grade_leader' and not grades:
+            flash('年级长必须指定管理年级（可多选）', 'danger')
             return render_template('system/users/form.html', form=form, title='编辑用户')
 
         # 2026-10-18 审计修复（P1 横向提权）：此页可以改 role / 权限组 / **密码**，
@@ -224,7 +240,7 @@ def edit(id):
         if new_name and new_name != user.real_name:
             flash('真实姓名不可修改（与任课教师映射/成绩归属绑定），已保留原姓名', 'warning')
         user.role = role
-        user.grade = grade
+        user.grade = ','.join(grades) or None
         user.class_name = class_name
         # P5：多身份（权限组），列表首个为主组
         _set_user_groups(user, form.permission_group_ids.data)

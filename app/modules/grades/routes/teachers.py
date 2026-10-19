@@ -532,7 +532,7 @@ def teachers_import_confirm():
                 if bg:
                     user.permission_group_id = bg.id
                     user.sync_primary_link()   # P1 双写
-            if not user.grade or not user.class_name:
+            if not user.grades or not user.class_name:
                 meta = head_meta.get(item['teacher_name'])
                 if meta:
                     user.grade = meta['grade']

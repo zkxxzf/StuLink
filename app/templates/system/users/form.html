@@ -71,8 +71,12 @@
                             {% for e in form.password.errors %}<div class="text-danger small">{{ e }}</div>{% endfor %}
                         </div>
                         <div class="col-md-6 mb-3" id="gradeField">
-                            <label class="form-label">管理年级 <small class="text-muted">(班主任/年级长必填)</small></label>
-                            {{ form.grade(class="form-select") }}
+                            <label class="form-label">管理年级
+                                <small class="text-muted">(可多选；班主任须与班级同年级)</small>
+                            </label>
+                            {{ form.grade(class="form-select", size=5) }}
+                            <div class="form-text text-muted">年级长可多选，按住 Ctrl / ⌘ 点选。</div>
+                            {% for e in form.grade.errors %}<div class="text-danger small">{{ e }}</div>{% endfor %}
                         </div>
                         <div class="col-md-6 mb-3" id="classField">
                             <label class="form-label">管理班级 <small class="text-muted">(班主任必填)</small></label>

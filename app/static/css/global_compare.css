@@ -159,6 +159,44 @@ table.ld-table {
 #ldApp { overflow-x: auto; }
 
 /* 打印：隐藏工具条/勾选区、放开滚动区、A3 横向 */
+/* 2026-10-19 总览页下方图表：分层上线人数堆积柱（总分 + 各科 10 图）+ 上线率折线 */
+#ldCharts { margin-top: 16px; }
+.ld-chart-sec { margin-bottom: 20px; }
+.ld-chart-head {
+    display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px;
+    margin-bottom: 8px;
+}
+.ld-chart-head h6 { margin: 0; font-size: 14px; color: var(--sl-text); }
+.ld-chart-hint { font-size: 12px; color: var(--sl-text-muted); }
+/* 横轴排序方式勾选框（班型优先 / 方向优先），靠右放，不挤标题 */
+.ld-sort-toggle {
+    display: inline-flex; align-items: center; gap: 4px;
+    margin-left: auto; margin-bottom: 0;
+    font-size: 12px; color: var(--sl-text-muted); cursor: pointer;
+    white-space: nowrap;
+}
+.ld-sort-toggle input { margin: 0; cursor: pointer; }
+.ld-chart-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 10px;
+}
+.ld-chart-card {
+    border: 1px solid var(--sl-border);
+    border-radius: 8px;
+    background: var(--sl-surface);
+    padding: 6px 8px 2px;
+}
+.ld-chart-title {
+    font-size: 12.5px; font-weight: 600; color: var(--sl-text);
+    margin-bottom: 2px;
+}
+/* 人数堆积柱 + 上线率折线（双轴），图例占一行 → 比纯柱状图高一些 */
+.ld-chart { height: 260px; }
+@media (max-width: 900px) {
+    .ld-chart-grid { grid-template-columns: 1fr; }
+}
+
 @media print {
     .no-print { display: none !important; }
     .ld-wrap { max-height: none; overflow: visible; border: none; border-radius: 0; }

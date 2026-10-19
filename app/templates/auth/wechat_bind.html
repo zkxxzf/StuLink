@@ -35,7 +35,7 @@
           <tbody>
           {% for b in bindings %}
             <tr>
-              <td>…{{ b.openid_tail }}</td>
+              <td><code class="small" style="word-break:break-all">{{ b.openid or '…' + b.openid_tail }}</code></td>
               <td>{{ b.created_at.strftime('%Y-%m-%d %H:%M') if b.created_at else '—' }}</td>
               <td>{{ b.last_login_at.strftime('%Y-%m-%d %H:%M') if b.last_login_at else '—' }}</td>
               <td class="text-end">

@@ -219,7 +219,8 @@ def resolve(user):
                           reasons=['管理员：全校成绩'])
 
     scope_type, _scope_grade = scope_service.get_scope(user)
-    user_grade = getattr(user, 'grade', None)
+    # 2026-10-19：管理年级可多选（user.grades 列表）
+    user_grades = list(getattr(user, 'grades', []) or [])
     # R0 校级（权限组数据范围为 school）：全校
     if scope_type == 'school':
         return ScoreScope(uid, username, role, full_school=True,
@@ -253,13 +254,13 @@ def resolve(user):
 
     grades, classes, teach, reasons = set(), set(), set(), []
 
-    # R3 年级长及以上：本年级（校级/管理员已在上面返回）
-    if role == 'grade_leader' and user_grade:
-        grades.add(user_grade)
-        reasons.append(f'年级长：{user_grade}')
-    elif scope_type == 'grade' and user_grade:
-        grades.add(user_grade)
-        reasons.append(f'年级范围（权限组）：{user_grade}')
+    # R3 年级长及以上：本人管理年级（校级/管理员已在上面返回；可多选）
+    if role == 'grade_leader' and user_grades:
+        grades.update(user_grades)
+        reasons.append('年级长：' + '、'.join(user_grades))
+    elif scope_type == 'grade' and user_grades:
+        grades.update(user_grades)
+        reasons.append('年级范围（权限组）：' + '、'.join(user_grades))
 
     # R2 班主任：所辖班级（UserClassLink 为准，一班最多 3 名班主任，无主副之分）
     links = UserClassLink.query.filter_by(user_id=uid).all()
@@ -267,9 +268,11 @@ def resolve(user):
         classes.add((link.grade, link.class_name))
     if links:
         reasons.append(f'班主任：{len(links)} 个班')
-    # 兼容网页端口径：homereoom_teacher 角色还会按 User.grade/class_name 兜底
-    if role == 'homeroom_teacher' and getattr(user, 'grade', None) and getattr(user, 'class_name', None):
-        classes.add((user.grade, user.class_name))
+    # 兼容网页端口径：homeroom_teacher 角色还会按 User.grade/class_name 兜底
+    # （班主任保存时强制 1 个年级；历史脏数据多值也逐个加入）
+    if role == 'homeroom_teacher' and getattr(user, 'class_name', None):
+        for _g in user_grades:
+            classes.add((_g, user.class_name))
 
     # R1 任课教师：**(年级, 学科)** 二元组（2026-10-15 用户口径）
     # 教高一化学 → 高一全部班级的化学成绩都开放；粒度只到"年级 × 学科"，

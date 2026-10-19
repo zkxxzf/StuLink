@@ -1,8 +1,6 @@
 # StuLink v1.19.49.35 2026-10-19
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 """小程序成绩进阶（二）：班级对比 / 全局对比（只读）。"""
-import time
-
 from flask import g, request
 
 from app.modules.grades.services import (
@@ -15,12 +13,15 @@ from app.modules.wxapi.core.guards import wx_perm_required
 from app.modules.wxapi.core.response import wx_err, wx_ok
 from app.modules.wxapi.grades.routes_grades import PERM
 from app.modules.wxapi.grades.routes_grades_stats import _visible_exam
+from app.utils.cache import cache
 
 COMPARE_MIN = 2
 COMPARE_MAX = 20
+# 与网页端共用 grades_report_ld_ 前缀 → 改分/划线/导入时被
+# invalidate_exam_cache 一并清掉（2026-10-19 审计：原来用模块内 dict，
+# 不在任何失效前缀内，网页改完分小程序仍能看 10 分钟旧数）。
+GC_CACHE_PREFIX = 'grades_report_ld_wxgc_'
 GC_TTL = 600
-GC_MAX = 32
-_GC_CACHE = {}
 
 
 @bp.route('/grades/compare')
@@ -91,18 +92,17 @@ def wx_grades_global_compare():
 
 
 def _gc_cached(exam_id, direction):
-    """全局对比结果缓存（避免手机反复进页面重算）。"""
-    key = (exam_id, direction)
-    hit = _GC_CACHE.get(key)
-    if hit and time.time() - hit[0] < GC_TTL:
-        return hit[1]
+    """全局对比结果缓存（避免手机反复进页面重算）。
+
+    键必须落在 ``grades_report_ld_`` 前缀下：``invalidate_exam_cache``
+    用该前缀做整体失效，否则改分/划线后两端数字会不一致。
+    """
+    key = '%s%s_%s' % (GC_CACHE_PREFIX, exam_id, direction or '')
+    hit = cache.get(key)
+    if hit is not None:
+        return hit
     val = global_compare_service.global_compare_report(exam_id, direction)
-    # 进程内缓存必须有上限：考试 × 方向数量会慢慢增长，
-    # 超限时淘汰最旧的一条，避免长期运行内存只增不减。
-    if len(_GC_CACHE) >= GC_MAX:
-        oldest = min(_GC_CACHE, key=lambda k: _GC_CACHE[k][0])
-        _GC_CACHE.pop(oldest, None)
-    _GC_CACHE[key] = (time.time(), val)
+    cache.set(key, val, timeout=GC_TTL)
     return val
 
 

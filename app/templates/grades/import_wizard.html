@@ -3,11 +3,14 @@
 {% block content %}
 {% set info = {'A': '增量覆盖（默认）', 'B': '整场重置'} %}
 <div class="d-flex align-items-center mb-3 flex-wrap gap-2">
-    <a href="{{ url_for('grades.exam_detail', exam_id=exam.id) }}" class="btn btn-sm btn-outline-secondary" title="返回" aria-label="返回">
+    <a href="{{ url_for('grades.exam_detail', exam_id=exam.id) }}" class="btn btn-sm btn-outline-secondary" title="返回成绩单" aria-label="返回成绩单">
         <i class="bi bi-arrow-left"></i>
     </a>
-    <h5 class="mb-0"><i class="bi bi-box-arrow-in-down"></i> 数据导入</h5>
-    <span class="text-muted small">{{ exam.name }} · {{ exam.grade }} · {{ exam.exam_date.strftime('%Y-%m-%d') }} · 状态：{{ status_label[exam.status] }}</span>
+    {# 顶部导航栏已固定展示本场考试；这里是本页标题。 #}
+    <h4 class="mb-0"><i class="bi bi-box-arrow-in-down"></i> 数据导入</h4>
+    <span class="badge bg-{{ 'success' if exam.status == 'imported' else ('warning text-dark' if exam.status == 'dirty' else 'secondary') }}">
+        {{ status_label[exam.status] }}
+    </span>
 </div>
 
 {# 2026-10-19：原「成绩导入」升级为「数据导入」——
@@ -108,6 +111,75 @@
 
 {# 划线分层状态条：两栏下方直接展示，不再套卡片 #}
 {% include 'grades/_band_summary.html' %}
+
+{# 2026-10-19 用户口径：分数修改记录属于导入后的数据核对环节，放在数据导入页。 #}
+{% if current_user.has_perm('grades.edit') %}
+<div class="card mt-3" id="scoreChanges">
+    <div class="card-header py-2 d-flex align-items-center flex-wrap gap-2">
+        <span class="fw-semibold">
+            <i class="bi bi-clock-history"></i> 分数修改记录
+        </span>
+        <span class="badge bg-secondary">{{ change_log_count }} 条</span>
+        <span class="text-muted small">最近 {{ change_logs|length }} 条</span>
+        <a href="{{ url_for('grades.score_changes') }}?exam={{ exam.id }}"
+           class="btn btn-sm btn-outline-secondary ms-auto">
+            查看完整记录 <i class="bi bi-arrow-right"></i>
+        </a>
+    </div>
+    <div class="table-responsive" style="max-height:360px;">
+        <table class="table table-sm table-hover align-middle mb-0">
+            <thead class="table-light sticky-top">
+            <tr>
+                <th style="width:140px;">时间</th>
+                <th>学生</th>
+                <th>科目</th>
+                <th class="text-end">赋分（前 → 后）</th>
+                <th class="text-end">原始分（前 → 后）</th>
+                <th>类型</th>
+                <th>操作人</th>
+            </tr>
+            </thead>
+            <tbody>
+            {% for g in change_logs %}
+            <tr>
+                <td class="small text-muted">{{ g.operated_at.strftime('%m-%d %H:%M:%S') if g.operated_at else '—' }}</td>
+                <td>
+                    <span class="fw-semibold">{{ g.student_name or '—' }}</span>
+                    <span class="small text-muted">{{ g.student_no }}{% if g.class_name %} · {{ g.class_name }}{% endif %}</span>
+                </td>
+                <td>{{ g.subject }}</td>
+                <td class="text-end">
+                    {% if g.action == 'add' %}<span class="text-muted">缺考</span>
+                    {% else %}{{ '—' if g.old_score is none else g.old_score }}{% endif %} →
+                    {% if g.action == 'delete' %}<span class="text-danger">缺考</span>
+                    {% else %}<b>{{ '—' if g.new_score is none else g.new_score }}</b>{% endif %}
+                </td>
+                <td class="text-end text-muted">
+                    {% if g.action == 'add' %}—{% else %}{{ '—' if g.old_raw is none else g.old_raw }}{% endif %} →
+                    {% if g.action == 'delete' %}—
+                    {% else %}{{ '—' if g.new_raw is none else g.new_raw }}{% endif %}
+                </td>
+                <td>
+                    {% if g.action == 'delete' %}
+                    <span class="badge bg-warning text-dark">标记缺考</span>
+                    {% elif g.action == 'add' %}
+                    <span class="badge bg-success">补录</span>
+                    {% else %}
+                    <span class="badge bg-info text-dark">修改</span>
+                    {% endif %}
+                </td>
+                <td>{{ g.operator_name or '—' }}</td>
+            </tr>
+            {% else %}
+            <tr><td colspan="7" class="text-center text-muted py-4">
+                本场考试还没有改分记录
+            </td></tr>
+            {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+{% endif %}
 
 {# ② AI 结论 + 待确认问题 #}
 <div class="card mb-3 d-none" id="aiBox">
