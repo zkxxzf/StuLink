@@ -499,6 +499,16 @@ def history():
                 else:
                     r['id_card_decrypted'] = ''
                     r['id_card_masked'] = ''
+                # 2026-10-19：手机号已改为加密存储，毕业生表里搬过来的也是密文。
+                # 模板的 field_value(..., 'phone') 是对**明文**做掩码的，
+                # 直接喂密文会显示成乱码 —— 这里先解密（decrypt 兼容 11 位明文，
+                # 所以迁移前归档的历史数据也照常显示）。
+                for _k in ('phone1', 'phone2'):
+                    if r.get(_k):
+                        try:
+                            r[_k] = decrypt(r[_k])
+                        except Exception:
+                            r[_k] = ''
                 results.append(r)
             conn.close()
         except Exception as e:
@@ -593,6 +603,16 @@ def alumni():
                 else:
                     r['id_card_decrypted'] = ''
                     r['id_card_masked'] = ''
+                # 2026-10-19：手机号已改为加密存储，毕业生表里搬过来的也是密文。
+                # 模板的 field_value(..., 'phone') 是对**明文**做掩码的，
+                # 直接喂密文会显示成乱码 —— 这里先解密（decrypt 兼容 11 位明文，
+                # 所以迁移前归档的历史数据也照常显示）。
+                for _k in ('phone1', 'phone2'):
+                    if r.get(_k):
+                        try:
+                            r[_k] = decrypt(r[_k])
+                        except Exception:
+                            r[_k] = ''
                 results.append(r)
 
             # 查变迁日志

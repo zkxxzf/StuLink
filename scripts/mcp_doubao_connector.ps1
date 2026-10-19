@@ -186,7 +186,7 @@ Write-Host '  └ 自定义 Headers    Authorization = ' -NoNewline -ForegroundC
 Write-Host $basic -ForegroundColor Green
 Write-Host ''
 Write-Host '  保存后：「我安装的」里确认开关已开 → 任务框用 / 或 @ 唤起 StuLink。' -ForegroundColor DarkGray
-Write-Host '  公网暴露前请过一遍 docs/AI工具安装与配置指南.md 的加固清单' -ForegroundColor DarkGray
+Write-Host '  公网暴露前请过一遍 docs/规范与说明/AI工具安装与配置指南.md 的加固清单' -ForegroundColor DarkGray
 Write-Host '  （HTTPS / require_token=true / allow_write=false / 专用最小权限账号 / allowed_hosts）。' -ForegroundColor DarkGray
 
 # ---------------------------------------------------------------- 现成 JSON

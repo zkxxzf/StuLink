@@ -263,7 +263,9 @@ def change_phone():
         flash('该手机号已被其他账号使用', 'danger')
         return _back()
     if teacher:
-        dup = Teacher.query.filter_by(phone=new_phone).first()
+        # 2026-10-19：手机号加密存储，查重改走盲索引
+        dup = Teacher.query.filter_by(
+            phone_idx=Teacher.phone_index(new_phone)).first()
         if dup and dup.id != teacher.id:
             flash('该手机号已被其他教师使用', 'danger')
             return _back()

@@ -214,8 +214,17 @@
         var lines = activeLines();
         var per = 1 + lines.length;
 
+        /* 2026-10-17 口径：高一未选科时本场没有方向/组合（后端 has_direction /
+           has_selection），这两列整列都是「—」→ 直接不显示（undefined 视为显示，兼容旧缓存） */
+        var hasDir = d.has_direction !== false;
+        var hasSel = d.has_selection !== false;
+        var fixHeads = ['年级', '班级', '班级人数'];
+        if (hasDir) { fixHeads.push('方向'); }
+        if (hasSel) { fixHeads.push('组合'); }
+        fixHeads.push('属性');
+
         var h = ['<div class="ld-wrap"><table class="ld-table" id="ldTable"><thead><tr>'];
-        ['年级', '班级', '班级人数', '方向', '组合', '属性'].forEach(function (b, i) {
+        fixHeads.forEach(function (b, i) {
             h.push('<th rowspan="2" class="'
                 + (i === 0 ? 'c-year' : (i === 1 ? 'c-cls' : '')) + '">' + b + '</th>');
         });
@@ -240,11 +249,12 @@
             var tds = [
                 '<td class="c-year">' + esc(r.grade || '') + '</td>',
                 '<td class="c-cls">' + esc(r.class_name || '') + '</td>',
-                '<td>' + (r.count == null ? '—' : r.count) + '</td>',
-                '<td>' + dirBadge(r.direction) + '</td>',
-                '<td class="ld-sel">' + selHtml(r.selections) + '</td>',
-                '<td class="ld-type">' + esc(r.class_type || '—') + '</td>'
+                '<td>' + (r.count == null ? '—' : r.count) + '</td>'
             ];
+            // 与表头同口径：无方向不出方向列、无组合不出组合列
+            if (hasDir) { tds.push('<td>' + dirBadge(r.direction) + '</td>'); }
+            if (hasSel) { tds.push('<td class="ld-sel">' + selHtml(r.selections) + '</td>'); }
+            tds.push('<td class="ld-type">' + esc(r.class_type || '—') + '</td>');
             var cells = r.cells || {};
             subjects.forEach(function (s, si) {
                 var c = cells[s] || {};

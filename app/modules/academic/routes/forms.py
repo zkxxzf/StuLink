@@ -508,7 +508,11 @@ def form_round_new(form_id):
         flash(str(e), 'danger')
     except Exception as e:  # noqa: BLE001
         db.session.rollback()
-        flash(f'发起失败：{e}', 'danger')
+        # 2026-10-18：异常原文不外露（含 SQL / 路径），详情进日志
+        # （上面的 ValueError 分支是业务校验，语义明确，保留原文）
+        from flask import current_app
+        current_app.logger.error('发起失败: %s', e, exc_info=True)
+        flash('发起失败，请稍后重试（详情已记入系统日志）', 'danger')
     return redirect(url_for('academic.form_submissions', form_id=form_id))
 
 

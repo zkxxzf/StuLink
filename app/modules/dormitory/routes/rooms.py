@@ -285,11 +285,28 @@ def delete(id):
         flash(f'{room.room_number} 还有 {occupied} 名学生入住，无法删除', 'danger')
         return redirect(url_for('rooms.list_rooms'))
 
+    # 2026-10-18：删宿舍前把房间与床位一起归档（回收站可恢复）
+    # 2026-10-19 审计修复：归档失败即中止（fail-closed）
+    from app.utils.trash import archive
+    beds = BedAssignment.query.filter_by(room_id=room.id).all()
+    _recs = []
+    if beds:
+        _recs.append(archive('dormitory', 'bed_assignment', '宿舍床位', beds,
+                             summary=f'{room.display_name}：{len(beds)} 个床位',
+                             operator=current_user))
+    _recs.append(archive('dormitory', 'room', '宿舍', room,
+                         summary=f'{room.display_name}（{room.room_number}）',
+                         operator=current_user))
+    if any(r is None for r in _recs):
+        db.session.rollback()
+        flash('删除前归档失败，已中止（避免数据不可恢复）', 'danger')
+        return redirect(url_for('rooms.list_rooms'))
     BedAssignment.query.filter_by(room_id=room.id).delete()
     db.session.delete(room)
     db.session.commit()
-    log_operation(current_user, '删除', '宿舍', room.id, f'{room.display_name}')
-    flash(f'宿舍 {room.room_number} 已删除', 'success')
+    log_operation(current_user, '删除', '宿舍', room.id,
+                  f'{room.display_name}（可到回收站恢复）')
+    flash(f'宿舍 {room.room_number} 已删除（已进回收站，可恢复）', 'success')
     return redirect(url_for('rooms.list_rooms'))
 
 @bp.route('/assign-visual')
@@ -485,8 +502,31 @@ def save_assignments():
     
     # 如果没有分配数据，清空所有宿舍的分配状态
     if not assignments:
-        # 清空所有房间分配（包括合班标记）
+        # 2026-10-18 审计修复（P1）：原来**传空数组就会清空全校房间归属 + 全部床位**
+        # （前端一次误点 / 一次空保存即不可恢复，且无日志）。现在三道闸：
+        #   ① 必须显式 confirm=CLEAR；② 清空前归档进回收站；③ 记操作日志。
+        if (data.get('confirm') or request.args.get('confirm') or '') != 'CLEAR':
+            return jsonify({
+                'success': False,
+                'message': '清空全校宿舍分配是危险操作，需要显式确认（confirm=CLEAR）；'
+                           '若只想保存本次分配，请传非空 assignments',
+            }), 400
+        from app.utils.trash import archive
         rooms = Room.query.filter(Room.grade.isnot(None) | Room.class_name.isnot(None) | Room.combined_class.isnot(None)).all()
+        bed_rows = BedAssignment.query.filter(
+            BedAssignment.student_id.isnot(None)).all()
+        # 2026-10-19 审计修复：快照归档失败即中止清空（fail-closed）
+        _recs = []
+        if rooms:
+            _recs.append(archive('dormitory', 'room', '宿舍分配(清空前快照)', rooms,
+                                 summary=f'清空全校分配前：{len(rooms)} 间房间', operator=current_user))
+        if bed_rows:
+            _recs.append(archive('dormitory', 'bed_assignment', '床位分配(清空前快照)', bed_rows,
+                                 summary=f'清空全校分配前：{len(bed_rows)} 个床位', operator=current_user))
+        if any(r is None for r in _recs):
+            db.session.rollback()
+            return jsonify({'success': False,
+                            'message': '清空前快照归档失败，已中止（避免数据不可恢复）'}), 500
         room_count = 0
         for room in rooms:
             room.grade = None
@@ -494,14 +534,22 @@ def save_assignments():
             room.combined_class = None
             room_count += 1
         # 同时清空所有床位
-        bed_count = BedAssignment.query.filter(
-            BedAssignment.student_id.isnot(None)
-        ).update({'student_id': None, 'assigned_by': None, 'assigned_at': None}, synchronize_session=False)
+        bed_count = len(bed_rows)
+        if bed_rows:
+            BedAssignment.query.filter(
+                BedAssignment.student_id.isnot(None)
+            ).update({'student_id': None, 'assigned_by': None, 'assigned_at': None},
+                     synchronize_session=False)
         # 同时清空合班详情残留
         for room in Room.query.filter(Room.combined_details.isnot(None)).all():
             room.combined_details = None
         db.session.commit()
-        return jsonify({'success': True, 'message': f'已清空 {room_count} 间房间分配、{bed_count} 个床位'})
+        log_operation(current_user, '清空', '宿舍分配', None,
+                      f'全校 {room_count} 间房间分配、{bed_count} 个床位（已进回收站）',
+                      module='dormitory', severity='WARNING')
+        return jsonify({'success': True,
+                        'message': f'已清空 {room_count} 间房间分配、{bed_count} 个床位'
+                                   f'（清空前快照已进回收站，可恢复）'})
     
     # 保存新的分配数据（按房间聚合：同一房间多个班级自动组成合班名，不分主次）
     room_assign = {}
@@ -714,8 +762,11 @@ def batch_setting():
         room_map = {}
         occupied_room_ids = set()
         if wanted_ids:
+            # 2026-10-18 审计修复：批量改性别/床位前先按宿舍范围过滤 room_ids，
+            # 否则可构造 id 列表改到任意年级的宿舍。
             room_map = {r.id: r for r in
-                        Room.query.filter(Room.id.in_(wanted_ids)).all()}
+                        room_scope_query(
+                            Room.query.filter(Room.id.in_(wanted_ids))).all()}
             occupied_room_ids = {
                 row[0] for row in db.session.query(BedAssignment.room_id).filter(
                     BedAssignment.room_id.in_(wanted_ids),

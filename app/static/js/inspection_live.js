@@ -20,16 +20,22 @@
     var RESULT_TEXT = { normal: '正常', late: '迟到', absent: '缺勤', swap: '调课',
                         exam: '考试', other: '其他' };
 
+    /* 2026-10-16：改用全局 stuToast（base.html 已全局引 grades.css）——
+       原来那次判断的是不存在的 window.toast，实际每次都走自拼的「写死白底」toast，
+       深色主题下很突兀；这里做类型映射（本页 success/danger/warning/secondary
+       → stuToast 的 ok/err/warn），无 stuToast 时兜底仍用 --sl-* 变量配色。 */
     function notify(msg, type) {
-        if (typeof window.toast === 'function') { window.toast(msg, type || 'success'); return; }
-        // 2026-10-10：轻量 toast（单击即标记会高频触发，不能用 alert 打断巡课）
-        var color = type === 'danger' ? '#dc2626' : (type === 'warning' ? '#b45309'
-            : (type === 'secondary' ? '#64748b' : '#059669'));
+        var t = (type === 'danger') ? 'err'
+            : (type === 'warning' || type === 'secondary') ? 'warn' : 'ok';
+        if (typeof window.stuToast === 'function') { window.stuToast(msg, t); return; }
+        var color = (t === 'err') ? 'var(--sl-soft-danger-fg)'
+            : (t === 'warn') ? 'var(--sl-soft-amber-fg)' : 'var(--sl-soft-success-fg)';
         var $t = $('<div></div>').text(msg).css({
             position: 'fixed', top: '72px', left: '50%', transform: 'translateX(-50%)',
-            zIndex: 3000, background: '#fff', color: color, border: '1px solid ' + color,
-            borderLeft: '4px solid ' + color, borderRadius: '8px', padding: '8px 14px',
-            boxShadow: '0 6px 20px rgba(15,23,42,.12)', fontSize: '13px', maxWidth: '80vw'
+            zIndex: 3000, background: 'var(--sl-surface)', color: color,
+            border: '1px solid ' + color, borderLeft: '4px solid ' + color,
+            borderRadius: '8px', padding: '8px 14px', boxShadow: 'var(--sl-shadow)',
+            fontSize: '13px', maxWidth: '80vw'
         });
         $('body').append($t);
         setTimeout(function () { $t.fadeOut(220, function () { $(this).remove(); }); }, 1600);
@@ -59,6 +65,13 @@
     }
     function navNow(extra) {
         var p = { date: $('#datePick').val() || cfg.today, grade: $('#gradePick').val() || '' };
+        // 2026-10-16 修复：原先只带 {date, grade} → 在单节视图里改日期 / 点「今天」会静默
+        // 跳回「全天矩阵」并丢掉当前节次（巡课最高频的两个操作，用户反复迷路）。
+        if (cfg.view === 'period') {
+            p.view = 'period';
+            var pn = $('#povPeriodPick').val();
+            if (pn) { p.period = pn; }
+        }
         if (extra) { Object.keys(extra).forEach(function (k) { p[k] = extra[k]; }); }
         nav(p);
     }
@@ -71,6 +84,10 @@
        2026-10-14：矩阵格子与单节卡片共用同一套计数（两个视图不会同时出现，
        单节视图下也能就地刷新"已标记 / 应查 / 覆盖率"）。 */
     function recount() {
+        // 2026-10-16 修复：只读账号（无 academic.edit）的卡片不带 data-check，
+        // 跑一遍会把服务端渲染的真实「已标记/应查/覆盖率」覆写成 0 / 0 / 0%
+        // （给领导看的完成度仪表盘直接归零）。无标记权限就保持服务端值。
+        if (!cfg.canMark) { return; }
         var $cells = $('.ovw-item[data-check], .pov-card[data-check]');
         var total = $cells.length;
         var done = $cells.filter('[data-check!=""]').length;
@@ -89,6 +106,12 @@
     function applyResult($el, result, note) {
         var label = RESULT_TEXT[result] || '';
         $el.attr('data-check', result || '');
+        // 2026-10-16：单节卡片的**状态色**（底色 + 左侧色条）要跟着标记结果走 ——
+        // 原先只换徽标文字，卡片外观停在"未查"，扫一眼还以为是没查的班。
+        if ($el.hasClass('pov-card')) {
+            $el.removeClass('chk-none chk-normal chk-late chk-absent chk-swap chk-exam chk-other')
+                .addClass('chk-' + (result || 'none'));
+        }
         $el.find('.ovw-chk').attr('class', 'ovw-chk ovw-chk-' + (result || 'none'))
             .text(label || '未查');
         var t = ($el.data('subject') || '') + ' ' + ($el.data('teacher') || '');
@@ -97,7 +120,7 @@
         $el.attr('title', t);
     }
 
-    function post(cells, ok) {
+    function post(cells, ok, always) {
         if (!cells || !cells.length) { return; }
         $.ajax({
             url: cfg.markUrl,
@@ -119,6 +142,8 @@
             var msg = '标记失败';
             try { msg = JSON.parse(xhr.responseText).message || msg; } catch (e) { /* 忽略解析失败 */ }
             notify(msg, 'danger');
+        }).always(function () {
+            if (always) { always(); }
         });
     }
 
@@ -137,28 +162,47 @@
 
     function markCell($el, result, note) {
         if (!$el || !$el.length) { return; }
+        // 2026-10-16：点击立即给回执（单击要等 260ms 双击判定 + 一次 RTT 才有反馈，
+        // 巡课时用户会以为没点上而重复点 → 又踩「连点误标」）
+        $el.addClass('is-pending');
         post([cellPayload($el, result, note)], function () {
             $el.data('note', note || '');
-            applyResult($el, result, note || '');
-            if (result) { notify('已标记：' + (RESULT_TEXT[result] || result)); }
-            else { notify('已撤销该格标记', 'warning'); }
-        });
+            // post() 的 done 里已按 res.cells 调过 applyResult → 这里不再重复渲染一遍。
+            // 且高频巡课（一圈 30+ 下）不再每次弹 toast，只在「撤销 / 例外状态」时提示。
+            if (!result) { notify('已撤销该格标记', 'warning'); }
+            else if (result !== 'normal') { notify('已标记：' + (RESULT_TEXT[result] || result)); }
+        }, function () { $el.removeClass('is-pending'); });
     }
 
-    // 单击 vs 双击：单击延迟 260ms 执行，期间若再来一击则判为双击（迟到）
+    var suppressClick = false;   // 触屏长按已弹菜单 → 吞掉紧随其后的那次 click
+    // 单击 vs 双击：单击延迟 260ms 执行，期间若**同一张卡/格**再来一击则判为双击（迟到）
     // 2026-10-14：矩阵格子（.ovw-item）与单节卡片（.pov-card）共用这套交互
-    var clickTimer = null;
+    // 2026-10-16 修复：timer 原先是**一个全局变量** → 260ms 内先点 A 卡再点 B 卡时，
+    //   A 的「正常」被 clearTimeout 静默丢弃（A 永远没标记），B 被误标成「迟到」；
+    //   巡课连续快速点多个班恰恰是常态，同时造成"漏查"和"误标"两种最不能错的错。
+    //   现在 timer 挂在元素上（只有同一元素上的第二击才算双击）。
     $(document).on('click', '.ovw-item[data-check], .pov-card[data-check]', function () {
+        if (suppressClick) { suppressClick = false; return; }   // 长按已开菜单，吞掉这一击
         var $el = $(this);
-        if (clickTimer) {
-            clearTimeout(clickTimer); clickTimer = null;
+        var t = $el.data('clickTimer');
+        if (t) {
+            clearTimeout(t); $el.removeData('clickTimer');
             markCell($el, 'late', $el.data('note') || '');
             return;
         }
-        clickTimer = setTimeout(function () {
-            clickTimer = null;
-            markCell($el, 'normal', $el.data('note') || '');
-        }, 260);
+        // 单击=正常：不带旧备注（原来把「迟到 5 分钟」这类说明一并继承到"正常"上）
+        $el.data('clickTimer', setTimeout(function () {
+            $el.removeData('clickTimer');
+            markCell($el, 'normal', '');
+        }, 260));
+    });
+
+    /* 2026-10-16：键盘可达（原来卡片只能鼠标点；矩阵格子虽有 tabindex 也没有处理器）
+       Enter / 空格＝正常，与单击同义；右键菜单里的其余状态仍走菜单。 */
+    $(document).on('keydown', '.pov-card[data-check]', function (ev) {
+        if (ev.key !== 'Enter' && ev.key !== ' ' && ev.key !== 'Spacebar') { return; }
+        ev.preventDefault();
+        markCell($(this), 'normal', '');
     });
 
     /* ── 右键菜单：正常 / 缺勤 / 迟到（含说明）/ 调课 / 考试 / 其他 / 撤销 ── */
@@ -196,10 +240,41 @@
                 .appendTo($menu);
         });
         $('body').append($menu);
+        // 2026-10-16：靠右 / 靠下的卡片上右键，200px 宽的菜单会溢出视口（出横向滚动条或被裁）
+        var w = $menu.outerWidth(), h = $menu.outerHeight();
+        var sx = window.pageXOffset || 0, sy = window.pageYOffset || 0;
+        if (x + w > sx + window.innerWidth - 4) {
+            $menu.css('left', Math.max(sx + 4, sx + window.innerWidth - w - 4) + 'px');
+        }
+        if (y + h > sy + window.innerHeight - 4) {
+            $menu.css('top', Math.max(sy + 4, sy + window.innerHeight - h - 4) + 'px');
+        }
     }
     $(document).on('contextmenu', '.ovw-item[data-check], .pov-card[data-check]', function (ev) {
+        // 「换人」按钮上右键不弹查课菜单（左键已 stopPropagation，右键此前漏了）
+        if ($(ev.target).closest('.pov-act').length) { return; }
         ev.preventDefault();
         openMenu($(this), ev.pageX, ev.pageY);
+    });
+    /* 2026-10-16：触屏（iPad / 手机巡课）没有右键 → 长按 500ms 打开同一菜单，
+       否则「缺勤 / 调课 / 考试 / 撤销」在触屏上完全不可达。 */
+    var pressTimer = null, pressMoved = false;
+    $(document).on('touchstart', '.ovw-item[data-check], .pov-card[data-check]', function (ev) {
+        if ($(ev.target).closest('.pov-act').length) { return; }
+        var $el = $(this);
+        var tt = ev.originalEvent && ev.originalEvent.touches && ev.originalEvent.touches[0];
+        var x = tt ? tt.pageX : 0, y = tt ? tt.pageY : 0;
+        pressMoved = false;
+        pressTimer = setTimeout(function () {
+            pressTimer = null;
+            if (pressMoved) { return; }
+            suppressClick = true;
+            openMenu($el, x, y);
+        }, 500);
+    });
+    $(document).on('touchmove', function () { pressMoved = true; });
+    $(document).on('touchend touchcancel', function () {
+        if (pressTimer) { clearTimeout(pressTimer); pressTimer = null; }
     });
     $(document).on('click', function () { closeMenu(); });
     $(window).on('scroll', closeMenu);
@@ -222,14 +297,58 @@
         if (!window.confirm('把当前页面上 ' + cells.length + ' 个未标记格子全部标为「正常」？')) { return; }
         post(cells, function (res) {
             notify('已标记 ' + (res.updated || 0) + ' 格为正常');
+            // 2026-10-16：留一条退路 —— 一键之后不必逐张右键撤销（误触成本从
+            // "N 次右键"降到"点一下"）。按钮平时 d-none，批量之后才出现。
+            lastBatch = cells;
+            showUndo(res.updated || cells.length);
+        });
+    });
+
+    /* ── 撤销上一次批量（2026-10-16）── */
+    var lastBatch = null;
+    function showUndo(n) {
+        var $b = $('#btnUndoBatch');
+        if (!$b.length || !n) { return; }
+        $('#undoBatchN').text(n);
+        $b.removeClass('d-none');
+    }
+    function hideUndo() {
+        $('#btnUndoBatch').addClass('d-none');
+        lastBatch = null;
+    }
+    $('#btnUndoBatch').on('click', function () {
+        if (!lastBatch || !lastBatch.length) { hideUndo(); return; }
+        if (!window.confirm('撤销上一次批量：把这 ' + lastBatch.length + ' 个格子改回「未查」？')) {
+            return;
+        }
+        var cells = lastBatch.map(function (c) { return $.extend({}, c, { result: '' }); });
+        post(cells, function (res) {
+            notify('已撤销 ' + (res.updated || 0) + ' 格', 'warning');
+            hideUndo();
         });
     });
 
     /* ── 本节保存 + 通知领导（2026-10-10）──
        选中某一节次：本节所有班都查完 → 直接保存并提示；
        还有未查的 → 弹窗让用户决定是否把情况站内通知课表管理员（领导）。 */
+    /* 2026-10-16：单节视图同样支持「保存本节 / 通知领导」——
+       卡片与矩阵格子共用同一套 data 属性，选择器扩到 #povContainer .pov-card 即可；
+       节次来源：单节视图取当前节次（下拉），矩阵视图取「本节」下拉。 */
+    function currentSavePeriod() {
+        if (cfg.view === 'period') {
+            return $('#povPeriodPick').val() || cfg.povPeriod;
+        }
+        return $('#periodPick').val();
+    }
+    function currentSaveLabel(pn) {
+        var sel = (cfg.view === 'period') ? '#povPeriodPick option:selected'
+                                          : '#periodPick option:selected';
+        var t = $(sel).text();
+        return t || ('第' + pn + '节');
+    }
     function periodCells(pn) {
-        return $('#liveContainer .ovw-item[data-check][data-period="' + pn + '"]');
+        return $('#liveContainer .ovw-item[data-check][data-period="' + pn + '"], '
+            + '#povContainer .pov-card[data-check][data-period="' + pn + '"]');
     }
     function periodStat(pn) {
         var $cells = periodCells(pn);
@@ -263,9 +382,9 @@
     }
 
     $('#btnSavePeriod').on('click', function () {
-        var pn = $('#periodPick').val();
+        var pn = currentSavePeriod();
         if (!pn) { notify('请先选择节次', 'secondary'); return; }
-        var label = $('#periodPick option:selected').text();
+        var label = currentSaveLabel(pn);
         var stat = periodStat(pn);
         if (!stat.expected) { notify('本节没有排课，无需保存', 'secondary'); return; }
         if (!stat.unchecked.length) {

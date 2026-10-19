@@ -149,7 +149,7 @@
                         {# M-10（2026-10-15 审计补漏）：批次名可能含单引号 → 文案整体 |tojson + 单引号属性 #}
                         <form method="POST" style="display:inline"
                               action="{{ url_for('grades.affair_delete', aid=o.a.id) }}"
-                              onsubmit='return confirm({{ ("确定删除批次「" + (o.a.name or "") + "」？将同时删除其 " + (o.rooms|string) + " 个考场与 " + (o.students|string) + " 条名单记录，不可恢复。")|tojson }})'>
+                              onsubmit='return _confirmAffairDelete(this, {{ ("删除批次「" + (o.a.name or "") + "」会同时删除 " + (o.rooms|string) + " 个考场、" + (o.students|string) + " 条名单，以及场次/监考/任课核对，不可撤销。\n\n整批快照会自动进回收站，可在「回收站」按原样恢复。\n确认请输入「删除」：")|tojson }})'>
                             <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                             <button type="submit" class="btn btn-sm btn-outline-danger">删除批次</button>
                         </form>
@@ -255,5 +255,16 @@ $(function(){
         if (href) window.location.href = href;
     });
 });
+
+// 2026-10-18：整批删除需要在服务端带 confirm=CLEAR（前端 confirm 可被直接调接口绕过），
+// 这里输入「删除」二字才提交，并注入隐藏字段。
+function _confirmAffairDelete(form, msg){
+    var t = window.prompt(msg);
+    if (t !== '删除') { return false; }
+    var i = document.createElement('input');
+    i.type = 'hidden'; i.name = 'confirm'; i.value = 'CLEAR';
+    form.appendChild(i);
+    return true;
+}
 </script>
 {% endblock %}

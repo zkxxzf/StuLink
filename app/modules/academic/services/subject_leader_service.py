@@ -528,7 +528,25 @@ def delete_plan(plan_id, operator_id=None):
         q = q.filter(SubjectLeader.term == plan.term)
     else:
         q = q.filter(db.or_(SubjectLeader.term == '', SubjectLeader.term.is_(None)))
-    removed = q.delete(synchronize_session=False)
+    rows = q.all()
+    # 2026-10-18 审计加固：方案连同整学期全部组长登记一起删，且**组长无法由课表推导**
+    # （删了就真没了）。删前打整组快照，回收站可按原 id 整体恢复。
+    from app.utils.trash import archive_snapshot
+    from app.models import User
+    _op = db.session.get(User, operator_id) if operator_id else None
+    _snap = archive_snapshot(
+        'academic', 'leader_plan_bundle', '学科组长方案',
+        tables=[(SubjectLeaderPlan, plan), (SubjectLeader, rows)],
+        summary=f'{plan.name}（{plan.school_year}{plan.term or "整学年"}）：'
+                f'{len(rows)} 条组长登记',
+        operator=_op)
+    if _snap is None:
+        # 归档失败就不删（fail-closed），避免不可恢复的数据丢失
+        db.session.rollback()
+        raise ValueError('删除前归档失败，已中止（避免数据不可恢复）')
+    db.session.commit()
+    removed = len(rows)
+    q.delete(synchronize_session=False)
     db.session.delete(plan)
     db.session.commit()
     return plan, removed

@@ -45,6 +45,11 @@ def _student_in_scope(student):
 @perm_required('students.export')   # H-2：此前只有 @login_required
 def export_students():
     from app.utils.export_helpers import do_export_students
+    # 2026-10-18 审计修复：导出学生名单（含身份证、家长联系方式）此前**无审计留痕**；
+    # 且 GET 触发的导出不在 after_request 兜底网内（兜底只拦写方法），是审计空洞。
+    log_operation(current_user, '导出', '学生名单', None,
+                  '导出学生名单（含身份证/联系方式，已按数据范围收敛）',
+                  module='system')
     if request.method == 'POST':
         return do_export_students(request.form)
     return do_export_students(request.args)
@@ -56,7 +61,11 @@ _import_errors = {}
 def _save_import_errors(errors):
     """保存导入错误，返回uuid key"""
     key = uuid.uuid4().hex
-    _import_errors[key] = (errors, time.time() + 3600)  # 1小时过期
+    # 2026-10-18 审计修复：原来只存 (errors, expiry)，**不绑定归属用户** ——
+    # 任何有 students.import 的人拿到（或猜到）key 就能下载别人的导入明细，
+    # 而明细里是原始行的身份证号等敏感内容。现在追加 owner_id 并在下载时校验。
+    _import_errors[key] = (errors, time.time() + 3600,
+                           getattr(current_user, 'id', None))
     return key
 
 
@@ -168,7 +177,7 @@ def list_students():
                    .filter(Student.graduation_school.isnot(None), Student.graduation_school != '')
                    .distinct().order_by(Student.graduation_school).all()
                    if s[0]]
-    # v1.19.49.36 调班记录：当前页学生的班级变更次数（列表「调班」列用）
+    # v1.19.49.35 调班记录：当前页学生的班级变更次数（列表「调班」列用）
     change_counts = class_change_counts([s.id for s in students])
     # v1.19.47.4 宿舍信息（只读展示）：宿舍号/住校走读等归宿舍管理模块维护，
     # 本模块只读呈现，不允许在此修改。批量预取避免模板内逐行懒加载（N+1）。
@@ -219,7 +228,7 @@ def list_students():
 @bp.route('/class-changes')
 @perm_required('students.view')
 def class_changes():
-    """v1.19.49.36 调班记录总览：入校分班/重新分班/个别调班/修正班级
+    """v1.19.49.35 调班记录总览：入校分班/重新分班/个别调班/修正班级
 
     按当前用户数据范围过滤（apply_student_scope），支持年级/班级/类型/日期/关键字筛选。
     """
@@ -294,7 +303,7 @@ def create():
         db.session.add(student)
         db.session.commit()
         log_operation(current_user, '创建', '学生', student.id, f'{student.name} {student.grade}{student.class_name}')
-        # v1.19.49.36 调班记录：新增学生 = 入校分班（含班型·方向）
+        # v1.19.49.35 调班记录：新增学生 = 入校分班（含班型·方向）
         try:
             if student.class_name:
                 write_change_log('enroll', [{'id': student.id,
@@ -327,7 +336,7 @@ def detail(id):
     if not _student_in_scope(student):
         flash('无权查看该学生信息', 'danger')
         return redirect(url_for('students.list_students'))
-    # v1.19.49.36 变更记录：调班 / 转科 / 转出 / 学籍变更 / 毕业 全量（调班记录页与详情页同源）
+    # v1.19.49.35 变更记录：调班 / 转科 / 转出 / 学籍变更 / 毕业 全量（调班记录页与详情页同源）
     change_logs = student_change_logs(student.id)
     return render_template('system/students/detail.html', student=student, change_logs=change_logs)
 
@@ -342,9 +351,9 @@ def edit(id):
         flash('无权编辑该学生', 'danger')
         return redirect(url_for('students.list_students'))
     form = StudentForm(obj=student)
-    # v1.19.49.36 选科/方向留痕：旧值需在填充前取
+    # v1.19.49.35 选科/方向留痕：旧值需在填充前取
     _old_sel = (student.subject_selection or '')
-    # v1.19.49.36 学籍驱动班级联动：旧学籍与旧位置需在填充前取
+    # v1.19.49.35 学籍驱动班级联动：旧学籍与旧位置需在填充前取
     _old_status = (student.enrollment_status or '').strip()
     _old_loc = student_location_desc(student)
     # v1.19.47.4 离校联动：旧住宿状态需在变更前取（用于变更留痕）
@@ -376,8 +385,11 @@ def edit(id):
                 flash('该学号已存在', 'danger')
                 return render_template('system/students/form.html', form=form, title='编辑学生')
         
-        _populate_student_for_edit(student, form)
-        # v1.19.49.36 学籍驱动的班级自动联动（用户口径）：
+        # 无查看手机号权限时，不接受表单回传的号码（模板也不再输出），保留库中原值
+        _populate_student_for_edit(
+            student, form,
+            allow_phone_edit=current_user.has_perm('students.view_phone'))
+        # v1.19.49.35 学籍驱动的班级自动联动（用户口径）：
         #   学籍已转出 → 班级自动置「已转出」；在籍不在校 → 班级自动置「不分班」
         _new_status = (student.enrollment_status or '').strip()
         _auto_kind = _auto_desc = None
@@ -405,7 +417,7 @@ def edit(id):
         db.session.commit()
         log_operation(current_user, '更新', '学生', student.id, f'{student.name} {student.grade}{student.class_name}')
         # 注：年级/班级在本页不可改（never_update_fields），调班请走「调班」弹窗 /students/<id>/transfer
-        # v1.19.49.36 变更留痕：① 学籍情况变更 ② 学籍驱动的班级归置 ③ 选科/方向变更
+        # v1.19.49.35 变更留痕：① 学籍情况变更 ② 学籍驱动的班级归置 ③ 选科/方向变更
         _logs = []
         if _new_status != _old_status:
             _logs.append(('enrollment', _old_status or '（空）', _new_status,
@@ -446,7 +458,7 @@ def edit(id):
                                student.id, _t, _e)
         flash('学生信息已更新', 'success')
         return redirect(url_for('students.detail', id=student.id))
-    # v1.19.49.36 编辑页也展示变更记录（调班/转科/转出/学籍变更），避免打开编辑页看不到历史
+    # v1.19.49.35 编辑页也展示变更记录（调班/转科/转出/学籍变更），避免打开编辑页看不到历史
     return render_template('system/students/form.html', form=form, title='编辑学生',
                            student=student, change_logs=student_change_logs(student.id))
 
@@ -460,14 +472,37 @@ def delete(id):
     if not _student_in_scope(student):
         flash('无权删除该学生', 'danger')
         return redirect(url_for('students.list_students'))
-    # 先删除床位分配
+    # 2026-10-18 审计（加大修复）：删学籍前归档 —— 学籍/住宿/床位一起进回收站，
+    # 误删可在「回收站」按原样恢复（学号唯一，冲突行会跳过）。
+    # 2026-10-19 审计修复：归档返回 None（失败）时必须**中止删除**（fail-closed），
+    # 否则提示"已进回收站可恢复"却实际不可恢复 —— 静默丢数据。
+    from app.utils.trash import archive
+    _who = f'{student.name} {student.grade}{student.class_name}（学号 {student.student_number}）'
+    _recs = []
     if student.bed_assignment:
-        student.bed_assignment.student_id = None
+        _recs.append(archive('dormitory', 'bed_assignment', '床位分配',
+                             student.bed_assignment, summary=f'{_who} 的床位',
+                             operator=current_user))
     # 同步删除住宿记录（跨库 dormitory）：否则残留记录会在重新导入时因
     # student_id 复用（SQLite 无 AUTOINCREMENT）触发 UNIQUE 冲突
     acc = StudentAccommodation.query.filter_by(student_id=student.id).first()
     if acc:
+        _recs.append(archive('dormitory', 'student_accommodation', '住宿记录', acc,
+                             summary=f'{_who} 的住宿记录', operator=current_user))
+    _recs.append(archive('system', 'student', '学籍', student, summary=_who,
+                         operator=current_user))
+    if any(r is None for r in _recs):
+        db.session.rollback()
+        flash('删除前归档失败，已中止（避免数据不可恢复）', 'danger')
+        return redirect(url_for('students.list_students'))
+    # 先把归档提交掉，再执行删除：SQLite 下 system / dormitory 两个库文件
+    # 同时持写锁容易 `database is locked`（跨库事务顺序问题），拆成两个事务更稳。
+    db.session.commit()
+    acc = StudentAccommodation.query.filter_by(student_id=student.id).first()
+    if acc:
         db.session.delete(acc)
+    if student.bed_assignment:
+        student.bed_assignment.student_id = None
     db.session.delete(student)
     db.session.commit()
     log_operation(current_user, '删除', '学生', id, f'{student.name} {student.grade}{student.class_name}')
@@ -695,17 +730,24 @@ def _populate_student(student, form):
         setattr(student, field_name, getattr(form, field_name).data or None)
 
 
-def _populate_student_for_edit(student, form):
-    """从表单填充学生对象（编辑时使用）"""
+def _populate_student_for_edit(student, form, allow_phone_edit=True):
+    """从表单填充学生对象（编辑时使用）。
+
+    2026-10-18 审计修复（P1）：无 `students.view_phone` 时**不写** phone1/phone2 ——
+    模板已不再回传完整号码（原来 hidden 里是明文，F12 即可看到），这里也必须跳过，
+    否则保存会把号码清空。
+    """
     readonly_fields = ['name', 'gender', 'student_number', 'id_card_number', 'ethnicity',
                        'graduation_school_code', 'graduation_school']
     never_update_fields = ['grade', 'class_name']
-    editable_fields = ['phone1', 'phone2', 'subject_selection', 'enrollment_status', 'enrollment_notes']
-    
+    editable_fields = ['subject_selection', 'enrollment_status', 'enrollment_notes']
+    if allow_phone_edit:
+        editable_fields = ['phone1', 'phone2'] + editable_fields
+
     for field_name in readonly_fields:
         if not getattr(student, field_name) and getattr(form, field_name).data:
             setattr(student, field_name, getattr(form, field_name).data or None)
-    
+
     for field_name in editable_fields:
         setattr(student, field_name, getattr(form, field_name).data or None)
 
@@ -1029,7 +1071,7 @@ def import_students():
             # 部分导入：正确的行导入，错误的行报告
             # 2026-10-13 H-2：两阶段提交 + 补偿（见 _save_new_students 注释）
             _save_new_students(students_to_add)
-            # v1.19.49.36 调班记录：导入新生 = 入校分班（逐人写入带班级）
+            # v1.19.49.35 调班记录：导入新生 = 入校分班（逐人写入带班级）
             try:
                 for _st, _acc in students_to_add:
                     if _st.class_name:
@@ -1059,7 +1101,7 @@ def import_students():
         else:
             # 2026-10-13 H-2：两阶段提交 + 补偿（见 _save_new_students 注释）
             _save_new_students(students_to_add)
-            # v1.19.49.36 调班记录：导入新生 = 入校分班（逐人写入带班级）
+            # v1.19.49.35 调班记录：导入新生 = 入校分班（逐人写入带班级）
             try:
                 for _st, _acc in students_to_add:
                     if _st.class_name:
@@ -1103,11 +1145,16 @@ def import_students():
 def download_import_errors(key):
     """下载导入错误日志"""
     _clean_expired_errors()
-    data = _import_errors.pop(key, None)
+    data = _import_errors.get(key)
     if not data:
         flash('错误日志已过期或不存在', 'warning')
         return redirect(url_for('students.list_students'))
-    errors, _ = data
+    # 2026-10-18：导入明细含原始行的身份证号等敏感内容，只给导入者本人下载
+    if len(data) > 2 and data[2] is not None and data[2] != current_user.id:
+        flash('无权下载该导入日志（它不属于你）', 'danger')
+        return redirect(url_for('students.list_students'))
+    errors = data[0]
+    _import_errors.pop(key, None)
     content = '\r\n'.join(errors)
     from io import BytesIO
     buf = BytesIO()
@@ -1142,16 +1189,38 @@ def batch_delete():
         return redirect(url_for('students.list_students'))
 
     count = len(students)
+    # 2026-10-18 审计（加大修复）：批量删学籍前逐人归档（学籍 + 住宿 + 床位），
+    # 误删可在「回收站」按原样恢复。
+    from app.utils.trash import archive
+    # 2026-10-19 审计修复：任一行归档失败即中止整批（fail-closed），
+    # 避免提示"已进回收站可恢复"却实际不可恢复。
     for s in students:
+        _who = f'{s.name} {s.grade}{s.class_name}（学号 {s.student_number}）'
+        _recs = []
         if s.bed_assignment:
-            s.bed_assignment.student_id = None
-        # 同步删除住宿记录（跨库 dormitory），防止残留导致重新导入时 id 复用冲突
+            _recs.append(archive('dormitory', 'bed_assignment', '床位分配', s.bed_assignment,
+                                 summary=f'{_who} 的床位', operator=current_user))
+        acc = StudentAccommodation.query.filter_by(student_id=s.id).first()
+        if acc:
+            _recs.append(archive('dormitory', 'student_accommodation', '住宿记录', acc,
+                                 summary=f'{_who} 的住宿记录', operator=current_user))
+        _recs.append(archive('system', 'student', '学籍', s, summary=_who, operator=current_user))
+        if any(r is None for r in _recs):
+            db.session.rollback()
+            flash('删除前归档失败，已中止（避免数据不可恢复）', 'danger')
+            return redirect(url_for('students.list_students'))
+    # 归档先落库，再执行删除（避免 system/dormitory 跨库同时持写锁）
+    db.session.commit()
+    for s in students:
         acc = StudentAccommodation.query.filter_by(student_id=s.id).first()
         if acc:
             db.session.delete(acc)
+        if s.bed_assignment:
+            s.bed_assignment.student_id = None
         db.session.delete(s)
     db.session.commit()
-    log_operation(current_user, '删除', '学生', None, f'批量删除 {count} 名学生')
+    log_operation(current_user, '删除', '学生', None,
+                  f'批量删除 {count} 名学生（已进回收站）')
     flash(f'已删除 {count} 名学生', 'success')
     return redirect(url_for('students.list_students'))
 
@@ -1173,7 +1242,7 @@ def transfer(id):
         return redirect(url_for('students.list_students'))
 
     old_info = f'{student.grade} {student.class_name}'
-    # v1.19.49.36 调班记录：变更性质由操作人声明
+    # v1.19.49.35 调班记录：变更性质由操作人声明
     #   transfer 个别调班（学生真实换班，默认）｜correct 修正班级（此前录入有误）
     change_kind = (request.form.get('class_change_kind') or 'transfer').strip()
     if change_kind not in ('transfer', 'correct'):
@@ -1369,7 +1438,7 @@ def batch_transfer():
 
         errors = []
         updated_count = 0
-        # v1.19.49.36 调班记录：循环内收集变更（含旧/新位置），供 reassign 日志使用
+        # v1.19.49.35 调班记录：循环内收集变更（含旧/新位置），供 reassign 日志使用
         changed_rows = []
 
         for row_idx in range(2, ws.max_row + 1):
@@ -1402,6 +1471,13 @@ def batch_transfer():
                 errors.append(f'{row_label}（{match_val}）：未找到该学生')
                 continue
 
+            # 2026-10-18 审计修复（P1）：批量调班此前**没有数据范围校验** ——
+            # 任何有 students.transfer 的账号都能上传 Excel 把任意学生调到任意班级
+            # （含跨年级）。现在逐行复用 _student_in_scope，越权行跳过并计入错误。
+            if not _student_in_scope(student):
+                errors.append(f'{row_label}（{match_val}）：不在你的数据范围内，已跳过')
+                continue
+
             old_loc = student_location_desc(student)
             student.grade = new_grade
             student.class_name = new_class
@@ -1413,7 +1489,7 @@ def batch_transfer():
                                      'name': student.name, 'old': old_loc, 'new': new_loc})
 
         def _log_reassign():
-            """v1.19.49.36 批量调班 → 重新分班；逐人记录旧→新位置（含班型·方向）"""
+            """v1.19.49.35 批量调班 → 重新分班；逐人记录旧→新位置（含班型·方向）"""
             for c in changed_rows:
                 write_change_log('reassign',
                                  [{'id': c['id'], 'student_number': c['student_number'],

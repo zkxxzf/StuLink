@@ -1,4 +1,4 @@
-# StuLink v1.19.49.36 2026-10-10
+# StuLink v1.19.49.35 2026-10-10
 # 考务管理：完整考务流程（对应 Excel 宏工作簿 2025考场学生考号与考场信息编排v1.2）
 #   步骤：① 学生名单（学生信息表） → ② 考场设置（考场信息表）
 #        → ③ 编排与考号生成（三种模式，镜像宏 编排考场考号2）
@@ -6,6 +6,8 @@
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 import io
 import json  # v1.12.1 选科前后缀配置解析
+import logging
+import os
 import random
 from datetime import date, datetime
 
@@ -18,14 +20,15 @@ from flask import (render_template, request, jsonify, abort, redirect,
 from flask_login import login_required, current_user
 
 from app.extensions import db
+logger = logging.getLogger(__name__)
 from app.models import Student
 from app.models.grades import (ExamAffair, AffairRoom, AffairRoomLib, AffairStudent,
                                Exam, AffairTeacher, AffairSchedule,
                                AffairInvigilator, AffairInvigilation,
                                ExamRoomGroup, ExamRoomGroupMap,
                                SUBJECTS)  # 2026-10-13：时间表科目下拉用科目字典
-#   v1.19.49.36 加 ExamRoomGroup/Map：步骤②「考场模板」直接复用「考场维护」页的分组
-#   v1.19.49.36 加环节④⑤⑥：任课核对 / 考试时间表 / 监考编排
+#   v1.19.49.35 加 ExamRoomGroup/Map：步骤②「考场模板」直接复用「考场维护」页的分组
+#   v1.19.49.35 加环节④⑤⑥：任课核对 / 考试时间表 / 监考编排
 from app.modules.grades import bp
 from app.utils.decorators import perm_required
 from app.utils.helpers import log_operation, get_dict_values
@@ -141,11 +144,11 @@ def _grade_options():
 
 
 def delete_affair_cascade(aid):
-    """v1.19.49.36：删除考务批次并级联清理其考场与学生名单。
+    """v1.19.49.35：删除考务批次并级联清理其考场与学生名单。
 
     AffairRoom / AffairStudent 的 affair_id 无外键约束（多库快照式设计，不建跨表外键），
     直接 `db.session.delete(affair)` 会留下孤儿行；此处显式按 affair_id 批量删除。
-    v1.19.49.36：一并清理环节④⑤⑥ 的任课核对 / 考试时间表 / 其他监考员 / 监考安排。
+    v1.19.49.35：一并清理环节④⑤⑥ 的任课核对 / 考试时间表 / 其他监考员 / 监考安排。
     调用方负责 commit。返回 (考场数, 名单数)。
     """
     n_rooms = AffairRoom.query.filter_by(affair_id=aid).delete()
@@ -163,7 +166,7 @@ def delete_affair_cascade(aid):
 @login_required
 @perm_required('grades.edit')
 def affairs_list():
-    """v1.17.0 考试/考务合并收尾（v1.19.49.36）：考务批次列表已并入考试管理，
+    """v1.17.0 考试/考务合并收尾（v1.19.49.35）：考务批次列表已并入考试管理，
     本页保留为兼容入口（旧书签/外链），统一重定向到考试列表；
     未关联考试的孤儿批次由考试列表底部“待处理的考务批次”区兑底展示。"""
     return redirect(url_for('grades.exams_list'))
@@ -294,7 +297,40 @@ def exam_affair_go(exam_id):
 def affair_delete(aid):
     affair = _get_affair_checked(aid)
     name = affair.name
-    # v1.19.49.36：级联清理考场与名单（无外键约束，不显式删会留孤儿行）
+    # 2026-10-18 审计加固：整批删除会级联清 7 张表、不可逆。
+    # ① 服务端要求显式确认 —— 前端 confirm() 可被直接调接口绕过；
+    # ② 删除前把 7 张表按**原 id** 打成一份快照，回收站可整体恢复。
+    #    （普通 archive 会丢 id → 子表 affair_id 断链，看着"恢复了"其实全是孤儿）
+    if (request.form.get('confirm') or request.args.get('confirm') or '') != 'CLEAR':
+        flash('删除整批考务需要显式确认（confirm=CLEAR）', 'danger')
+        return redirect(url_for('grades.affair_detail', aid=aid))
+
+    from app.utils.trash import archive_snapshot
+    n_rooms_pre = AffairRoom.query.filter_by(affair_id=aid).count()
+    n_stus_pre = AffairStudent.query.filter_by(affair_id=aid).count()
+    _snap = archive_snapshot(
+        'grades', 'affair_bundle', '考务批次(整批)',
+        tables=[
+            (ExamAffair, affair),
+            (AffairRoom, AffairRoom.query.filter_by(affair_id=aid).all()),
+            (AffairStudent, AffairStudent.query.filter_by(affair_id=aid).all()),
+            (AffairInvigilation, AffairInvigilation.query.filter_by(affair_id=aid).all()),
+            (AffairSchedule, AffairSchedule.query.filter_by(affair_id=aid).all()),
+            (AffairInvigilator, AffairInvigilator.query.filter_by(affair_id=aid).all()),
+            (AffairTeacher, AffairTeacher.query.filter_by(affair_id=aid).all()),
+        ],
+        summary=f'{name}：考场{n_rooms_pre}个 / 名单{n_stus_pre}人 / 含场次·监考·任课',
+        operator=current_user)
+    if _snap is None:
+        # 归档失败就不删（fail-closed）：宁可让用户重试，也不做不可恢复的删除
+        db.session.rollback()
+        flash('删除前归档失败，已中止（避免数据不可恢复）', 'danger')
+        return redirect(url_for('grades.affair_detail', aid=aid))
+    # 归档先落库、再执行删除：非 WAL 的 SQLite 是库级锁，同一事务里
+    # "多表先读后写"容易读锁升级失败（database is locked）
+    db.session.commit()
+
+    # v1.19.49.35：级联清理考场与名单（无外键约束，不显式删会留孤儿行）
     n_rooms, n_stus = delete_affair_cascade(aid)
     db.session.commit()
     log_operation(current_user, '删除', '考务批次', aid,
@@ -312,7 +348,7 @@ def _class_sort_key(name):
 
 
 def _student_sort_key(s):
-    """v1.19.49.36 名单排序键：班级 → 姓氏（姓名以姓氏开头，故用姓名拼音）→ 学号。
+    """v1.19.49.35 名单排序键：班级 → 姓氏（姓名以姓氏开头，故用姓名拼音）→ 学号。
 
     拼音不可用时退化为汉字本身，仍保持稳定次序。
     """
@@ -321,7 +357,7 @@ def _student_sort_key(s):
 
 
 def _build_stats(scope_students, rooms):
-    """v1.19.49.36 抽出为纯函数：步骤② 改考场/科目/容量后要实时重算选科明细。
+    """v1.19.49.35 抽出为纯函数：步骤② 改考场/科目/容量后要实时重算选科明细。
 
     学生总数/参考数、考场总数/总容量、各选科人数与可用容量差额（通用考场容量
     计入每个有参考学生的选科，与 v1.12.1 口径一致）。
@@ -352,7 +388,7 @@ def _build_stats(scope_students, rooms):
 @login_required
 @perm_required('grades.edit')
 def affair_stats(aid):
-    """v1.19.49.36 编排容量/选科明细的实时数据（改考场/科目/容量后前端即时刷新）"""
+    """v1.19.49.35 编排容量/选科明细的实时数据（改考场/科目/容量后前端即时刷新）"""
     affair = _get_affair_checked(aid)
     scope = AffairStudent.query.filter_by(affair_id=aid, is_attend=True).all()
     rooms = AffairRoom.query.filter_by(affair_id=aid).order_by(AffairRoom.room_no).all()
@@ -366,7 +402,7 @@ def affair_detail(aid):
     affair = _get_affair_checked(aid)
     students = (AffairStudent.query.filter_by(affair_id=aid)
                 .order_by(AffairStudent.class_name, AffairStudent.student_no).all())
-    # v1.19.49.36 名单次序（用户口径）：按「班级 → 姓氏」排序（不再把不参考的提到最上，
+    # v1.19.49.35 名单次序（用户口径）：按「班级 → 姓氏」排序（不再把不参考的提到最上，
     # 而是左右分栏展示：左=参加考试，右=不参加考试）
     students.sort(key=_student_sort_key)
     # 2026-10-14：给每名学生标上排序序号 —— 步骤① 点「→ 不参加 / ← 参加」时前端**就地搬行**
@@ -380,12 +416,12 @@ def affair_detail(aid):
     skip_students = [s for s in students if not s.is_attend]      # 右栏：不参加考试
     scope_students = join_students
     arranged = [s for s in scope_students if s.room_no]
-    # v1.19.49.36：步骤条状态用 —— 已生成考号的人数（AI 导入会带考号，此时步骤③应显示已完成）
+    # v1.19.49.35：步骤条状态用 —— 已生成考号的人数（AI 导入会带考号，此时步骤③应显示已完成）
     numbered = sum(1 for s in scope_students if s.exam_number)
 
     # v1.12.2 步骤⑤成绩关联 UI 已移除，不再查询考试与成绩（省去每次访问的无用查询）
 
-    # v1.19.49.36 名单统计：年级汇总 + 各班（实际 / 参加 / 不参加）
+    # v1.19.49.35 名单统计：年级汇总 + 各班（实际 / 参加 / 不参加）
     grade_stat = {'total': len(students), 'join': len(join_students),
                   'skip': len(skip_students)}
     per_class = {}
@@ -398,15 +434,15 @@ def affair_detail(aid):
                    sorted(per_class.items(), key=lambda kv: _class_sort_key(kv[0]))]
 
     # v1.12.1 编排容量统计：学生总数/参考数、考场总数/总容量、各选科人数与可用容量差额
-    # v1.19.49.36 复用 _build_stats（与 /affairs/<aid>/stats 实时接口同一口径）
+    # v1.19.49.35 复用 _build_stats（与 /affairs/<aid>/stats 实时接口同一口径）
     stats = _build_stats(scope_students, rooms)
     # v1.12.1 选科选项（批次设置弹窗中按选科设前后缀）
     sel_options = sorted({s.subject_selection for s in students if s.subject_selection})
-    # v1.19.49.36 步骤③下方学生名单：已编排者按「考场 → 座号」升序（考场号已补零，可直接字符串比较）
+    # v1.19.49.35 步骤③下方学生名单：已编排者按「考场 → 座号」升序（考场号已补零，可直接字符串比较）
     arranged_sorted = sorted(arranged,
                              key=lambda s: (str(s.room_no or ''), s.seat_no or 0,
                                             s.student_no or ''))
-    # v1.19.49.36 步骤②科目下拉：系统字典「选科」12 种 + 「全科」（= 通用/不限），
+    # v1.19.49.35 步骤②科目下拉：系统字典「选科」12 种 + 「全科」（= 通用/不限），
     # 再兜底补上本批次考场里出现过的历史值（如旧写法的「史政地」），避免下拉丢失当前值
     # 2026-10-15 用户报「下拉里俩全科」：字典「选科」里也有一条手工加的「全科」
     # （sort_order=-1，数据字典页加的）→ 硬编码再拼一次就重复 → 保序去重
@@ -417,7 +453,7 @@ def affair_detail(aid):
     for r in rooms:
         if r.subject and not r.is_universal and r.subject not in room_subject_options:
             room_subject_options.append(r.subject)
-    # v1.19.49.36 考务环节④⑤⑥：任课核对 / 考试时间表 / 监考编排 的步骤条状态与时间表
+    # v1.19.49.35 考务环节④⑤⑥：任课核对 / 考试时间表 / 监考编排 的步骤条状态与时间表
     from app.modules.grades.routes import affair_invig as _ai
     _ai.ensure_teachers_synced(affair)        # 首次自动带入当前任课安排
     _t_scheds = (AffairSchedule.query.filter_by(affair_id=aid)
@@ -428,7 +464,7 @@ def affair_detail(aid):
         'n_invig': AffairInvigilation.query.filter_by(affair_id=aid).count(),
         'schedules': _t_scheds,
     }
-    # v1.19.49.36 页头要显示「本场考试」信息（名字 / 类型 / 时间）：
+    # v1.19.49.35 页头要显示「本场考试」信息（名字 / 类型 / 时间）：
     # 取本批次绑定的考试；未绑定（孤儿批次）时为 None，模板回落用批次自身字段。
     linked_exam = Exam.query.get(affair.exam_id) if affair.exam_id else None
     return render_template('grades/affairs/detail.html',
@@ -472,7 +508,7 @@ def affair_students_template(aid):
         c.alignment = _CENTER
         c.border = _TB
     # 预填系统该年级学生（与 Excel「学生信息表」口径一致，考务人员可直接编辑）
-    # v1.19.49.36：只预填数字教学班且年级未毕业的学生（不分班/已转出/已毕业不进入成绩模板）
+    # v1.19.49.35：只预填数字教学班且年级未毕业的学生（不分班/已转出/已毕业不进入成绩模板）
     from app.utils.helpers import get_graduated_grades
     _graduated = set(get_graduated_grades() or [])
     _grade_ok = affair.grade not in _graduated
@@ -517,7 +553,10 @@ def affair_students_import(aid):
     try:
         wb = openpyxl.load_workbook(f.stream, read_only=True, data_only=True)
     except Exception as e:
-        return jsonify({'ok': False, 'msg': f'Excel 解析失败：{e}'})
+        # 2026-10-18：openpyxl 异常原文会带出内部路径/结构，不外露给调用方
+        from flask import current_app
+        current_app.logger.warning('Excel 解析失败: %s', e, exc_info=True)
+        return jsonify({'ok': False, 'msg': 'Excel 解析失败，请检查文件格式'})
     ws = wb.active
     idx = _header_index(ws, {'学号', '姓名', '班级', '选科组合', '是否参与考试',
                              '固定考场', '固定座号', '考试科目', '自定义考号'})
@@ -575,7 +614,7 @@ def affair_students_import(aid):
             name = name or sys_stu.name
             cls = cls or sys_stu.class_name
             sel = sel or (sys_stu.subject_selection or '')
-        # v1.19.49.36：补全后仍无数字教学班的学生不导入成绩名单
+        # v1.19.49.35：补全后仍无数字教学班的学生不导入成绩名单
         if not is_teaching_class(cls):
             skipped_no_class += 1
             continue
@@ -604,7 +643,7 @@ def affair_students_import(aid):
 def affair_students_sync(aid):
     """v1.12.1 从学生学籍库同步本年级学生到考务名单（增量：新增+补全信息）
 
-    v1.19.49.36 口径调整（用户明确）：
+    v1.19.49.35 口径调整（用户明确）：
     - 无班级学生（不分班 / 已转出 / 离校 等非数字班级）与已毕业年级学生
       **不进入成绩治理模块**，同步时直接过滤掉；
     - 原「同时移除学籍已删的学生」复选框取消，改为**默认自动移除**：
@@ -641,7 +680,7 @@ def affair_students_sync(aid):
             db.session.delete(row)
             removed += 1
     skipped = len(all_stus) - len(sys_stus)   # 因无班级/已毕业而未导入的学籍数
-    # v1.19.49.36 自动匹配「上一场不参加考试的学生」：取本年级**日期早于本批次**的最近一场考务批次，
+    # v1.19.49.35 自动匹配「上一场不参加考试的学生」：取本年级**日期早于本批次**的最近一场考务批次，
     # 把其中标记为不参考的学号，在本批次一律同步为不参考（只 是→否；不反向把「否」改回「是」）。
     prev_affair = (ExamAffair.query
                    .filter(ExamAffair.grade == affair.grade,
@@ -677,7 +716,7 @@ def affair_students_pick(aid):
     """v1.12.2 「加入学生」选择器数据源：返回本年级学籍学生，
     带 in_batch 标记（是否已在当前考务名单），供前端筛选/排序/搜索。
 
-    v1.19.49.36：与 sync 同口径，只列数字教学班且年级未毕业的学生（无班级/已毕业不展示）。"""
+    v1.19.49.35：与 sync 同口径，只列数字教学班且年级未毕业的学生（无班级/已毕业不展示）。"""
     affair = _get_affair_checked(aid)
     from app.utils.helpers import get_graduated_grades
     graduated = set(get_graduated_grades() or [])
@@ -703,10 +742,15 @@ def affair_students_batch_add(aid):
         return jsonify({'ok': False, 'msg': '未选择学生'})
     exist = {s.student_no for s in AffairStudent.query.filter_by(affair_id=aid).all()}
     added = skipped = 0
-    for st in Student.query.filter(Student.student_number.in_(nos)).all():
+    # 2026-10-18 审计修复：原来按学号直接从学籍库取，不校验年级 ——
+    # 可把任意年级的学生拉进本人批次。现在只接受与批次同年级的学生。
+    _sq = Student.query.filter(Student.student_number.in_(nos))
+    if affair.grade:
+        _sq = _sq.filter(Student.grade == affair.grade)
+    for st in _sq.all():
         if st.student_number in exist:
             continue
-        # v1.19.49.36：无班级学生（不分班/已转出/离校等）不加入成绩治理名单
+        # v1.19.49.35：无班级学生（不分班/已转出/离校等）不加入成绩治理名单
         if not is_teaching_class(st.class_name):
             skipped += 1
             continue
@@ -769,7 +813,7 @@ def affair_student_fixed(aid, sid):
 @login_required
 @perm_required('grades.edit')
 def affair_student_attend(aid, sid):
-    """v1.19.49.36 步骤①「参考」就地点一下切换（本页不再提供「编辑学生信息」弹窗，
+    """v1.19.49.35 步骤①「参考」就地点一下切换（本页不再提供「编辑学生信息」弹窗，
     但「是否参加本场考试」属考务信息，需要能手工修正，例如上一场缺考、本场恢复参考）。"""
     _get_affair_checked(aid)   # H-4：批次年级范围（2026-10-16 第八轮审计补，此前只校子资源归属）
     st = AffairStudent.query.get_or_404(sid)
@@ -869,9 +913,60 @@ def affair_student_delete(aid, sid):
 @login_required
 @perm_required('grades.edit')
 def affair_students_clear(aid):
+    """清空本批次全部考生名单（2026-10-18 审计加固）。
+
+    原来是**裸删**：不校验批次归属、不要求确认、不留痕、不备份，前端只有一层
+    confirm —— 一点就把整个批次（真实数据 8000 人）连同已编排的考场/座位删光，
+    且不可恢复（与 AI 分析「清空」同类事故）。现在与「学期课表清空」对齐：
+    归属校验 → 显式确认（confirm=CLEAR）→ **先备份 JSON** → 记操作日志。
+    """
+    affair = _get_affair_checked(aid)
+    if (request.form.get('confirm') or '') != 'CLEAR':
+        n = AffairStudent.query.filter_by(affair_id=aid).count()
+        return jsonify({'ok': False,
+                        'msg': f'清空名单需要显式确认（confirm=CLEAR）；'
+                               f'当前批次 {n} 人'}), 400
+    rows = AffairStudent.query.filter_by(affair_id=aid).all()
+    if not rows:
+        return jsonify({'ok': True, 'deleted': 0, 'msg': '名单本来就是空的'})
+    backup = ''
+    try:
+        d = os.path.join(current_app.root_path, '..', 'data', 'affair_backup')
+        os.makedirs(d, exist_ok=True)
+        fn = f'affair_{aid}_{datetime.now():%Y%m%d_%H%M%S}.json'
+        payload = {'affair_id': aid, 'affair': affair.name, 'count': len(rows),
+                   'rows': [{'student_no': r.student_no, 'name': r.name,
+                             'class_name': r.class_name,
+                             'is_attend': bool(r.is_attend),
+                             'room_no': r.room_no, 'seat_no': r.seat_no,
+                             'exam_number': r.exam_number,
+                             'fixed_room': r.fixed_room, 'fixed_seat': r.fixed_seat,
+                             # 名次字段当前模型里不存在（历史版本的列），用 getattr 兜底
+                             'rank_no': getattr(r, 'rank_no', None),
+                             'total_score': getattr(r, 'total_score', None),
+                             'subject_selection': r.subject_selection}
+                            for r in rows]}
+        with open(os.path.join(d, fn), 'w', encoding='utf-8') as f:
+            json.dump(payload, f, ensure_ascii=False, indent=1)
+        backup = fn
+    except Exception:                       # noqa: BLE001  备份失败不阻塞，但要留痕
+        logger.warning('考务名单清空前备份失败 aid=%s', aid, exc_info=True)
+    # 2026-10-18：同时进「回收站」（页面可查看/恢复整批名单，比 JSON 文件更好用）
+    from app.utils.trash import archive
+    # 2026-10-19 审计修复：回收站归档失败即中止清空（fail-closed）
+    if archive('grades', 'affair_student', '考务名单', rows,
+               summary=f'{affair.name}：{len(rows)} 人（含考场/座位/考号）',
+               operator=current_user) is None:
+        db.session.rollback()
+        return jsonify({'ok': False, 'msg': '清空前归档失败，已中止（避免数据不可恢复）'}), 500
     AffairStudent.query.filter_by(affair_id=aid).delete()
     db.session.commit()
-    return jsonify({'ok': True})
+    log_operation(current_user, '清空', '考务名单', aid,
+                  f'{affair.name}：{len(rows)} 人；备份={backup or "失败"}',
+                  module='grades')
+    msg = f'已清空 {len(rows)} 人'
+    msg += (f'（已备份：{backup}）' if backup else '（备份失败，请谨慎）')
+    return jsonify({'ok': True, 'deleted': len(rows), 'backup': backup, 'msg': msg})
 
 
 # ==================== 步骤② 考场设置：导入 / 模板 / 增删改 ====================
@@ -916,7 +1011,10 @@ def affair_rooms_import(aid):
     try:
         wb = openpyxl.load_workbook(f.stream, read_only=True, data_only=True)
     except Exception as e:
-        return jsonify({'ok': False, 'msg': f'Excel 解析失败：{e}'})
+        # 2026-10-18：openpyxl 异常原文会带出内部路径/结构，不外露给调用方
+        from flask import current_app
+        current_app.logger.warning('Excel 解析失败: %s', e, exc_info=True)
+        return jsonify({'ok': False, 'msg': 'Excel 解析失败，请检查文件格式'})
     ws = wb.active
     idx = _header_index(ws, {'考场编号', '考场位置', '考场科目', '考场容量', '备注', '考号前缀'})
     if '考场编号' not in idx:
@@ -1007,11 +1105,11 @@ def affair_room_save(aid):
 @login_required
 @perm_required('grades.edit')
 def affair_room_patch(aid, rid):
-    """v1.19.49.36 步骤② 行内编辑：考场编号 / 科目 / 容量 / 备注 就地修改（不再走「编辑」按钮弹窗）。
+    """v1.19.49.35 步骤② 行内编辑：考场编号 / 科目 / 容量 / 备注 就地修改（不再走「编辑」按钮弹窗）。
 
     只更新提交上来的字段（部分更新），避免前端行内编辑互相覆盖。
     科目「全科」等价于通用考场（存为「默认」，`is_universal` 为真）。
-    v1.19.49.36 起**考场编号也可改**（2026-10-14 用户口径）：改编号会查重（同批次内不可重号），
+    v1.19.49.35 起**考场编号也可改**（2026-10-14 用户口径）：改编号会查重（同批次内不可重号），
     并同步名单的考场号 / 固定考场 / 考号（模式 0）与监考安排的考场号（见 `rename_room_no`）。
     """
     affair = _get_affair_checked(aid)
@@ -1058,7 +1156,7 @@ def affair_room_patch(aid, rid):
 @login_required
 @perm_required('grades.edit')
 def affair_rooms_capacity(aid):
-    """v1.19.49.36 步骤② 考场容量批量操作。
+    """v1.19.49.35 步骤② 考场容量批量操作。
 
     - `mode=all`：把本批次**全部考场**容量设为 `capacity`（1~500）；
     - `mode=prev`：按「同年级 + **同一房间**」沿用上一场（日期更早的最近一批次）的容量；
@@ -1116,10 +1214,19 @@ def affair_rooms_capacity(aid):
 @login_required
 @perm_required('grades.edit')
 def affair_room_delete(aid, rid):
-    _get_affair_checked(aid)   # H-4：批次年级范围（2026-10-16 第八轮审计补；删除是写操作，优先级最高）
+    affair = _get_affair_checked(aid)   # H-4：批次年级范围（2026-10-16 第八轮审计补）
     room = AffairRoom.query.get_or_404(rid)
     if room.affair_id != aid:
         abort(403)
+    # 2026-10-18：删考场前归档（回收站可恢复），避免"排好的考场点没了"
+    from app.utils.trash import archive
+    # 2026-10-19 审计修复：归档失败即中止删除（fail-closed）
+    if archive('grades', 'affair_room', '考务考场', room,
+               summary=f'{affair.name} · 考场 {room.room_no}'
+                       f'{("（" + room.location + "）") if room.location else ""}',
+               operator=current_user) is None:
+        db.session.rollback()
+        return jsonify({'ok': False, 'msg': '删除前归档失败，已中止（避免数据不可恢复）'}), 500
     db.session.delete(room)
     db.session.commit()
     return jsonify({'ok': True})
@@ -1365,7 +1472,7 @@ def affair_settings(aid):
     nm = request.form.get('non_attend_mode')
     if nm in ('skip', 'tail'):
         affair.non_attend_mode = nm
-    # v1.19.49.36 步骤② 去掉「考场前缀」列后，批次默认前缀成为唯一兜底 —— 允许在步骤③设置
+    # v1.19.49.35 步骤② 去掉「考场前缀」列后，批次默认前缀成为唯一兜底 —— 允许在步骤③设置
     if 'default_prefix' in request.form:
         affair.default_prefix = sanitize_prefix(request.form.get('default_prefix'), 16) or None
     # 选科考号前后缀：前端以 prefix_<选科> / suffix_<选科> 成对提交，sels 为选科列表 JSON。
@@ -1718,7 +1825,7 @@ def affair_arrange(aid):
 @login_required
 @perm_required('grades.edit')
 def affair_numbers_import(aid):
-    """v1.19.49.36 步骤③「自定义模式 → 使用自定义考号」的批量导入考号。
+    """v1.19.49.35 步骤③「自定义模式 → 使用自定义考号」的批量导入考号。
 
     上传 Excel（表头需含「学号」与「考号」两列），把考号写入名单的 `custom_number`；
     之后以「自定义考号」模式编排时，即用该值作为最终考号（`_arrange` 模式2）。
@@ -1733,7 +1840,10 @@ def affair_numbers_import(aid):
     try:
         wb = openpyxl.load_workbook(f.stream, read_only=True, data_only=True)
     except Exception as e:
-        return jsonify({'ok': False, 'msg': f'Excel 解析失败：{e}'})
+        # 2026-10-18：openpyxl 异常原文会带出内部路径/结构，不外露给调用方
+        from flask import current_app
+        current_app.logger.warning('Excel 解析失败: %s', e, exc_info=True)
+        return jsonify({'ok': False, 'msg': 'Excel 解析失败，请检查文件格式'})
     ws = wb.active
     idx = _header_index(ws, {'学号', '考号', '自定义考号'})
     if '学号' not in idx:
@@ -1843,6 +1953,10 @@ def affair_export_class(aid):
     out = io.BytesIO()
     wb.save(out)
     out.seek(0)
+    # 2026-10-18 审计：导出全量考生信息（含考号/座号/姓名）此前**无审计留痕**，
+    # 且这是 GET，after_request 兜底网只拦写方法，正好覆盖不到。
+    log_operation(current_user, '导出', '考务名单', aid,
+                  f'{affair.name}：按班级导出 {len(stus)} 名考生信息', module='grades')
     return send_file(out, as_attachment=True,
                      download_name=safe_download_name(   # L-9
                          f'按班级学生信息_{affair.name}.xlsx', '按班级学生信息.xlsx'),
@@ -1865,6 +1979,9 @@ def affair_export_room(aid):
     out = io.BytesIO()
     wb.save(out)
     out.seek(0)
+    # 2026-10-18 审计：同上，按考场导出全量考生信息补审计留痕
+    log_operation(current_user, '导出', '考务名单', aid,
+                  f'{affair.name}：按考场导出 {len(stus)} 名考生信息', module='grades')
     return send_file(out, as_attachment=True,
                      download_name=safe_download_name(   # L-9
                          f'按考场学生信息_{affair.name}.xlsx', '按考场学生信息.xlsx'),

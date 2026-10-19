@@ -2682,12 +2682,15 @@ def _temp_target_ids(schedule_id):
 
 
 def build_live_schedule(schedule_id, target_date, period_number, grade_filter=None,
-                        allowed_classes=None):
+                        allowed_classes=None, week=None):
     """构建某天某节次全校（或指定年级）实时课表，按年级分区。
 
-    返回 {grade: [ {class_name, grade, subject, teacher_name, room,
-                    entry_type, is_temp_swap, period_number} ]}。
-    叠加当天临时调课：调入标记 is_temp_swap=True，被调走的常规课显示为无课。
+    返回 {grade: [ {class_name, grade, subject, teacher_name, room, entry_type,
+                   is_temp_swap, is_moved_away, period_number} ]}。
+    叠加当天临时调课：调入标记 is_temp_swap=True；被调走的条目 subject 为空且
+    is_moved_away=True（供页面与"本节本来没排课"区分）。
+    week 给定时按周次过滤常规条目（与全天矩阵 get_day_matrix(week=…) 同口径）；
+    None = 不过滤（旧的调用行为）。
     """
     weekday = target_date.isoweekday()
     if grade_filter is None:
@@ -2726,11 +2729,21 @@ def build_live_schedule(schedule_id, target_date, period_number, grade_filter=No
     if grade_filters is not None:
         bq = bq.filter(ScheduleEntry.grade.in_(grade_filters))
     base_map = {}
+    # 2026-10-16（口径对齐）：与全天矩阵 get_day_matrix(week=…) 同源过滤周次 ——
+    # 原来单节视图不看周次，单双周/限定周次开的课在本周不上也会显示成"有课"，
+    # 领导按单节视图巡课会跑到空教室（两个视图的"应查数"也对不上）。
+    # 被周次过滤掉的课记进 week_miss：卡片上写「本周不上」，
+    # 否则用户看到一片空档不知道是"本来没课"还是"单双周这周不排"。
+    week_miss = {}
     for e in bq.all():
         if not class_visible(e.grade, e.class_name):
             continue
-        if e.id not in temp_ids:
-            base_map[(e.grade, e.class_name)] = e
+        if e.id in temp_ids:
+            continue
+        if week is not None and not _week_covers(e.week_range, week):
+            week_miss[(e.grade, e.class_name)] = e.week_range
+            continue
+        base_map[(e.grade, e.class_name)] = e
 
     # 当天临时调课：调入映射 + 被调走原条目 id
     temp_swaps = get_temp_swaps_by_date(schedule_id, target_date)
@@ -2753,7 +2766,8 @@ def build_live_schedule(schedule_id, target_date, period_number, grade_filter=No
     for grade, class_name in classes:
         row = {'grade': grade, 'class_name': class_name, 'period_number': period_number,
                'subject': None, 'teacher_name': None, 'room': None,
-               'entry_type': None, 'is_temp_swap': False,
+               'entry_type': None, 'is_temp_swap': False, 'is_moved_away': False,
+               'week_miss': None,
                'entry_id': None, 'teacher_uid': None}
         key = (grade, class_name)
         if key in temp_in:
@@ -2769,10 +2783,65 @@ def build_live_schedule(schedule_id, target_date, period_number, grade_filter=No
                             'room': be.room, 'entry_type': be.entry_type,
                             'entry_id': be.id, 'teacher_uid': be.teacher_uid,
                             'is_temp_swap': False})
+            elif be:
+                # 2026-10-16：这节课被临时调课换出去了 —— 标出来，别和"本来就没排课"混成一团
+                # （查课单节视图原先两者都渲染成"空档"，领导会跑去一个没课的班）
+                row['is_moved_away'] = True
+        if not row['subject'] and key in week_miss:
+            row['week_miss'] = week_miss[key]      # 课表里有，但本周不排（单双周 / 限定周次）
         data.setdefault(grade, []).append(row)
     for g in data:
         data[g].sort(key=lambda r: r['class_name'])
     return data
+
+
+def _norm_grades(g):
+    """年级筛选归一成列表（None 表示不限）。
+
+    2026-10-16：调用方（查课页 grade=2024级）常常直接传**单个年级字符串**，
+    而 `ScheduleEntry.grade.in_('2024级')` 在 SQLAlchemy 2.0 下会抛
+    `ArgumentError: IN expression list ... expected` → 单节视图 + 年级筛选整页 500。
+    这里统一收口，避免每个调用点各写一遍。
+    """
+    if g is None:
+        return None
+    if isinstance(g, str):
+        return [g] if g.strip() else None
+    return [x for x in g]
+
+
+def count_period_classes(schedule_id, target_date, week=None, grade_filter=None,
+                         allowed_classes=None):
+    """某天各节次「有课」的班级数：{period_number: n}。
+
+    2026-10-16 新增：单节视图的节次下拉用它标注「N 课 / 空」，并据此挑缺省节次 ——
+    夜里打开页面时 current_period_number 为 None，原先会退到第一个节次（早读，无课），
+    整页渲染成空档，用户以为功能坏了。
+    口径与 build_live_schedule 一致：排除临时调课产生的目标条目、按周次过滤、
+    只算有 subject 的条目、受数据范围（年级 / 班级白名单）约束。
+    """
+    weekday = target_date.isoweekday()
+    temp_ids = _temp_target_ids(schedule_id)
+    q = ScheduleEntry.query.filter(
+        ScheduleEntry.term_schedule_id == schedule_id,
+        ScheduleEntry.weekday == weekday,
+        ScheduleEntry.is_deleted.is_(False),
+    )
+    _gf = _norm_grades(grade_filter)      # 单年级字符串 → 列表（否则 in_() 抛 ArgumentError）
+    if _gf is not None:
+        q = q.filter(ScheduleEntry.grade.in_(_gf))
+    counts = {}
+    for e in q.all():
+        if e.id in temp_ids or not (e.subject or '').strip():
+            continue
+        if week is not None and not _week_covers(e.week_range, week):
+            continue
+        if allowed_classes is not None:
+            allowed = allowed_classes.get(e.grade, set())
+            if allowed is not None and (e.class_name or '') not in allowed:
+                continue
+        counts[e.period_number] = counts.get(e.period_number, 0) + 1
+    return counts
 
 
 def current_period_number(periods, now=None):

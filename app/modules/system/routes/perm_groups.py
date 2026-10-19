@@ -234,6 +234,11 @@ def delete(id):
                         'message': f'该身份下还有 {user_count} 个用户，请先移走用户'}), 400
     db.session.delete(group)
     db.session.commit()
+    # 2026-10-18 审计：删除身份（权限组）此前**没有埋点**，同文件的
+    # save / save_perms / save_data_scope 都有，唯独 delete 漏了。
+    log_operation(current_user, '删除', '权限组', id,
+                  f'{group.name}（身份及其权限配置）',
+                  module='system', severity='WARNING')
     # v1.16.0：删除权限组后失效其菜单缓存
     invalidate_group_menu_cache(id)
     return jsonify({'success': True, 'message': '身份已删除'})

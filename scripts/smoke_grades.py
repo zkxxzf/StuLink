@@ -1162,15 +1162,28 @@ with app.test_client() as c:
     check('AI：教师不可看他人报告（403）', r.status_code == 403)
     logout()
     acsrf = login_admin()
+    # 2026-10-18 用户最终口径：AI 分析的报告/对话/任务**仅生成者本人可见，管理员也不例外**
+    # （不设 ?scope=all 之类的审计后门）。
     rows = (c.get('/grades/ai/tasks').get_json() or {}).get('data') or []
-    check('AI：admin 工作台列表全量（含他人历史报告）',
-          any((x.get('id') or 0) == -rid_teacher for x in rows), str(rows)[:200])
-    # 9) 删除
+    check('AI：admin 列表不含他人历史报告（仅本人可见）',
+          not any((x.get('id') or 0) == -rid_teacher for x in rows), str(rows)[:200])
+    r = c.get(f'/grades/ai/reports/{rid_teacher}')
+    check('AI：admin 读他人报告被拒（403）', r.status_code == 403)
+    rows = (c.get('/grades/ai/tasks?scope=all').get_json() or {}).get('data') or []
+    check('AI：admin 加 ?scope=all 也不再放行他人（无审计后门）',
+          not any((x.get('id') or 0) == -rid_teacher for x in rows), str(rows)[:200])
+    # 9) 删除：管理员不能删他人的；本人可删自己的
     r = c.post(f'/grades/ai/reports/{rid_teacher}/delete', headers={'X-CSRFToken': acsrf})
-    check('AI：admin 可删他人报告', r.status_code == 200)
+    check('AI：admin 删他人报告被拒（403）', r.status_code == 403)
     with app.app_context():
         from app.models.grades import AiReport as AiR
-        check('AI：删除生效', AiR.query.get(rid_teacher) is None)
+        check('AI：他人报告未被删除', AiR.query.get(rid_teacher) is not None)
+    csrf_t = login_as('renke01')
+    r = c.post(f'/grades/ai/reports/{rid_teacher}/delete', headers={'X-CSRFToken': csrf_t})
+    check('AI：本人可删自己的报告', r.status_code == 200)
+    with app.app_context():
+        from app.models.grades import AiReport as AiR
+        check('AI：本人删除生效', AiR.query.get(rid_teacher) is None)
     logout()
 
     # ==================== AI 一句话分析（服务端任务 + 后台执行，mock 模型） ====================
@@ -1377,7 +1390,15 @@ with app.test_client() as c:
         okc2, text2, _s2 = _tools.dispatch('student_trend', {'student_no': '20250101'}, ru, eid)
         check('AI工具：越权查他班学生被拒', not okc2 and '权限不足' in text2, text2[:120])
         okc3, text3, _s3 = _tools.dispatch('no_such_tool', {}, ru, eid)
-        check('AI工具：未知工具被拒', not okc3 and '未知工具' in text3)
+        # 2026-10-18：报错文案改为"工具名不存在 + 可用工具清单"，让模型下一轮能自我纠正
+        check('AI工具：未知工具被拒并给出可用工具清单',
+              not okc3 and '工具名不存在' in text3 and 'exam_overview' in text3,
+              text3[:120])
+        # 2026-10-18「找不到考试」修复：模型猜错 exam_id 时按当前考试兜底
+        okc5, text5, summ5 = _tools.dispatch('exam_overview', {'exam_id': 'exam_ui_x'},
+                                             ru, eid)
+        check('AI工具：乱 string exam_id 自动回退当前考试',
+              okc5 and '已按当前考试' in (summ5 or ''), summ5)
         okc4, text4, _s4 = _tools.dispatch('list_my_score_scope', {}, ru, eid)
         check('AI工具：范围说明可用',
               okc4 and '2025级' in text4 and '数学' in text4, text4[:160])

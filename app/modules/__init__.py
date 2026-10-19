@@ -27,6 +27,7 @@ def register_blueprints(app):
     from app.modules.system.routes.perm_groups import bp as perm_groups_bp
     from app.modules.system.routes.grade_mgmt import bp as grade_mgmt_bp
     from app.modules.system.routes.operation_logs import bp as operation_logs_bp
+    from app.modules.system.routes.trash import bp as trash_bp
     app.register_blueprint(system_dashboard_bp)
     app.register_blueprint(students_bp)
     app.register_blueprint(users_bp)
@@ -35,6 +36,7 @@ def register_blueprints(app):
     app.register_blueprint(perm_groups_bp)
     app.register_blueprint(grade_mgmt_bp)
     app.register_blueprint(operation_logs_bp)
+    app.register_blueprint(trash_bp)      # 2026-10-18：删除记录回收站
 
     # 占位模块
     from app.modules.points.routes import bp as points_bp
@@ -65,6 +67,13 @@ def register_blueprints(app):
     # 通知公告模块（v1.9.3，独立模块）
     from app.modules.notifications.routes import bp as notifications_bp
     app.register_blueprint(notifications_bp)
+
+    # 微信小程序 API（2026-10-18）：令牌鉴权（X-Wx-Token 头），
+    # 小程序拿不到网页的 CSRF cookie，故整块豁免 CSRF，改由令牌本身防冒用。
+    from app.modules.wxapi import bp as wx_bp
+    app.register_blueprint(wx_bp)
+    from app.extensions import csrf
+    csrf.exempt(wx_bp)  # sec-allow: CSRF-豁免（小程序改由 X-Wx-Token 鉴权）
 
 # StuLink v1.7.0 2026-08-02
 # Copyright (c) 2026 zkxxzf. Apache License 2.0

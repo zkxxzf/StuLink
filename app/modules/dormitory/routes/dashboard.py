@@ -316,9 +316,13 @@ def batch_edit_dormitory():
         flash('参数错误', 'danger')
         return redirect(url_for('dashboard.search_student_accommodation'))
 
-    students = Student.query.filter(Student.id.in_(id_list)).all()
+    # 2026-10-18 审计修复（P1）：原来直接按 id 列表取学生，**没有数据范围** ——
+    # 任何有 dormitory.manage 的账号可构造 student_ids 批量改别年级/别班学生的住宿属性。
+    # 统一走 apply_student_scope（与学生列表/导出同口径），越权的 id 会被直接过滤掉。
+    from app.utils.student_scope import apply_student_scope
+    students = apply_student_scope(Student.query.filter(Student.id.in_(id_list))).all()
     if not students:
-        flash('未找到选中的学生', 'warning')
+        flash('未找到选中的学生（或不在你的数据范围内）', 'warning')
         return redirect(url_for('dashboard.search_student_accommodation'))
 
     acc_fields = {

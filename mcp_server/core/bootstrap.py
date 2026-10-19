@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """Flask 应用引导：创建 app 单例、准备执行身份。
 
-认证有两条路径（见 core/auth.py 与 docs/MCP服务-认证与授权设计.md）：
+认证有两条路径（见 core/auth.py 与 docs/mcp/MCP服务-认证与授权设计.md）：
   · account 模式（默认）：每个请求带自己的 StuLink 账号密码，认证通过后由
     core/identity.py 的请求上下文给出执行身份（toolkit 调 load_user(uid)）；
   · token 模式（兼容）：启动时校验 bind_user 并缓存其 id（warm_up），

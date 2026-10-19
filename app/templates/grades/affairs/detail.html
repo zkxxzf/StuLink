@@ -1973,10 +1973,22 @@ function importRooms(input){
     fetch('/grades/affairs/'+AID+'/rooms/import', {method:'POST', body:fd, headers:{'X-CSRFToken':csrf()}})
         .then(r=>r.json()).then(d=>{ if(d.ok){ location.reload(); } else alert(d.msg); });
 }
+// 2026-10-18 审计加固：清空整个名单是危险操作 —— 输入「清空」才执行，
+// 服务端还会先备份成 JSON（data/affair_backup/）再删，并记操作日志。
 function clearStudents(){
-    if(!confirm('确定清空全部学生名单？')) return;
-    fetch('/grades/affairs/'+AID+'/students/clear', {method:'POST', headers:{'X-CSRFToken':csrf()}})
-        .then(r=>r.json()).then(d=>{ if(d.ok) location.reload(); });
+    var total = (document.getElementById('gsTotal') || {}).textContent || '';
+    var txt = window.prompt('清空本批次全部考生名单（含已编排的考场/座位）？\n'
+        + '当前 ' + total + ' 人。服务器会先自动备份，但页面上无法一键撤销。\n'
+        + '确认请输入「清空」：');
+    if(txt !== '清空'){ return; }
+    var fd = new FormData();
+    fd.append('confirm', 'CLEAR');
+    fetch('/grades/affairs/'+AID+'/students/clear',
+          {method:'POST', body:fd, headers:{'X-CSRFToken':csrf()}})
+        .then(r=>r.json()).then(function(d){
+            if(d.ok){ alert(d.msg || '已清空'); location.reload(); }
+            else { alert(d.msg || '清空失败'); }
+        }).catch(function(){ alert('网络错误'); });
 }
 // v1.19.49.36 移除「手动新增 / 编辑学生」弹窗（用户：本页不允许编辑学生信息，只允许从学生库选取），
 // openStuModal / saveStu 一并删除；后端 /students/save 接口保留给外部工具使用。
@@ -2277,9 +2289,18 @@ function autoFillAllSchedTimes(){
     });
 }
 function addScheduleRow(){
+    // 2026-10-18 审计：科目名来自后端配置，原样拼进 HTML 属性与文本位，
+    // 若值里含引号/尖括号会截断属性或注入标签 —— 拼接前统一转义。
+    function _escHtml(v){
+        return String(v == null ? '' : v).replace(/[<>&"]/g, function(c){
+            return {'<': '&lt;', '>': '&gt;', '&': '&amp;', '"': '&quot;'}[c];
+        });
+    }
     var cbs = (_SUBJECTS || []).map(function(s){
+        var es = _escHtml(s);
         return '<label class="dropdown-item-text form-check mb-0" style="font-size:.85rem">'
-            + '<input type="checkbox" class="form-check-input mt-0 me-1 subj-cb" value="' + s + '">' + s + '</label>';
+            + '<input type="checkbox" class="form-check-input mt-0 me-1 subj-cb" value="'
+            + es + '">' + es + '</label>';
     }).join('');
     var h = '<tr data-sid="">'
         + '<td><input type="date" class="form-control form-control-sm sc-date" value="' + nextSchedDate() + '"></td>'

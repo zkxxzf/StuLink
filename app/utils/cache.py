@@ -12,7 +12,7 @@
 向后兼容说明：
 - get/set/delete/clear 签名与旧 SimpleCache 一致（clear 新增可选 prefix 参数）
 - `_cache` 仍为「键 → 条目」的 dict（OrderedDict），旧代码对其 keys() 的
-  遍历（helpers.clear_dict_cache / grades.utils / scripts/clear_cache.py）不受影响；
+  遍历（helpers.clear_dict_cache / grades.utils / scripts/fix/clear_cache.py）不受影响；
   条目内部结构为 (value, expires_at)，取值请一律走 get()，不要直接下标访问
 """
 import threading

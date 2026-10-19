@@ -1377,13 +1377,13 @@ def check_R11():
     case('R-11 合法标识符放行', _ddl_guard.safe_ident('student_no'))
     case('R-11 注入型标识符被拒',
          not _ddl_guard.safe_ident('a; DROP TABLE students'))
-    used = [f for f in ('scripts/cleanup_student_columns.py',
-                        'scripts/migrate_notification_recipients.py',
-                        'scripts/migrate_cert_sign_v1122.py',
-                        'scripts/migrate_affair_v1121.py',
-                        'scripts/migrate_term_schedule_dates.py',
-                        'scripts/add_performance_indexes.py',
-                        'scripts/migrate_split_db.py')
+    used = [f for f in ('scripts/fix/cleanup_student_columns.py',
+                        'scripts/migrate/migrate_notification_recipients.py',
+                        'scripts/migrate/migrate_cert_sign_v1122.py',
+                        'scripts/migrate/migrate_affair_v1121.py',
+                        'scripts/migrate/migrate_term_schedule_dates.py',
+                        'scripts/seed/add_performance_indexes.py',
+                        'scripts/migrate/migrate_split_db.py')
             if '_ddl_guard' in _read(f)]
     case('R-11 拼接 DDL 的脚本已接入守卫', len(used) >= 6, str(len(used)))
 
@@ -2024,11 +2024,11 @@ def check_audit4():
          'user_scope_detail(user)' in _read_src('app/utils/student_scope.py'))
     case('多身份 用户组保存校验组存在性（防悬空关联）',
          'valid_ids' in _read_src('app/modules/system/routes/users.py'))
-    pm = _read_src('scripts/migrate_perm_multi_20261014.py')
+    pm = _read_src('scripts/migrate/migrate_perm_multi_20261014.py')
     case('多身份 废弃组删除前同时统计 user_permission_groups 引用',
          'UserPermissionGroup.query.filter_by(group_id=g.id).count()' in pm)
     case('多身份 P1 迁移补 is_primary 标记',
-         'fix_primary' in _read_src('scripts/migrate_user_groups_p1.py'))
+         'fix_primary' in _read_src('scripts/migrate/migrate_user_groups_p1.py'))
 
     gm = _read_src('app/models/grades.py')
     ac = _read_src('app/models/academic.py')

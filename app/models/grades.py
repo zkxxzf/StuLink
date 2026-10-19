@@ -671,6 +671,33 @@ class AiTask(db.Model):
     )
 
 
+class AiTrash(db.Model):
+    """AI 分析记录的删除归档（2026-10-18）。
+
+    背景：用户误点"清空"把全部 AI 分析一次删光，而报告正文只存在 ai_reports 里
+    （重新生成要几十秒~几分钟，结论也不会完全一致；数据库备份是按天/小时的，当天的
+    记录覆盖不到）。所以删除前把**整行**序列化存到这里，几 KB 换一次可恢复。
+
+    kind: report / task；payload: 原表整行 JSON（datetime 已转 isoformat）；
+    restored_at 非空表示已被恢复过（避免重复恢复）。
+    """
+    __bind_key__ = 'grades'
+    __tablename__ = 'ai_trash'
+
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, nullable=False)
+    kind = db.Column(db.String(10), nullable=False)
+    ref_id = db.Column(db.Integer)
+    payload = db.Column(db.Text)
+    deleted_at = db.Column(db.DateTime, default=datetime.now)
+    restored_at = db.Column(db.DateTime)
+
+    __table_args__ = (
+        db.Index('idx_ai_trash_user', 'user_id'),
+        db.Index('idx_ai_trash_kind_ref', 'kind', 'ref_id'),
+    )
+
+
 class AiPromptTemplate(db.Model):
     """AI 成绩分析「提示词生成器」模板（2026-10-14）。
 
@@ -882,7 +909,7 @@ class ExamRoomGroupMap(db.Model):
     2026-10-14 用户口径：分组里的房间**顺序**也要能调（上移 / 下移），而且要能「带着顺序复用」——
     考务步骤② 从某个分组「一键带入」时按本字段排出来的先后生成 01、02… 考场编号
     （见 ``exam_affairs.affair_rooms_from_lib_batch``；迁移脚本
-    ``scripts/migrate_room_group_map_sort_20261014.py``）。
+    ``scripts/migrate/migrate_room_group_map_sort_20261014.py``）。
     """
     __bind_key__ = 'grades'
     __tablename__ = 'exam_room_group_map'

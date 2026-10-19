@@ -1,0 +1,186 @@
+/* StuLink 表彰名单（2026-10-18）
+ * 颜色一律走 --sl-* 变量：深色主题由 theme.css 覆盖，勿写死色值。
+ * 结构：榜单卡片 + 粘性表头 + 名次徽章（前三金/银/铜）+ 打印展开。
+ */
+
+.honor-page { --hn-radius: 12px; }
+
+/* ---------- 头部与筛选 ---------- */
+.honor-head {
+    display: flex; flex-wrap: wrap; align-items: center; gap: 8px;
+    margin-bottom: 10px;
+}
+.honor-head h5 { margin: 0; font-weight: 600; }
+.honor-head .honor-title-icon { color: var(--sl-accent); }
+
+.honor-meta {
+    font-size: 12.5px; color: var(--sl-text-muted);
+    display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px;
+    margin-bottom: 10px;
+}
+.honor-meta .hn-dot { width: 3px; height: 3px; border-radius: 50%;
+    background: var(--sl-text-subtle); display: inline-block; }
+
+.honor-filter {
+    display: flex; flex-wrap: wrap; align-items: center; gap: 8px;
+    padding: 8px 10px; margin-bottom: 12px;
+    background: var(--sl-surface); border: 1px solid var(--sl-border);
+    border-radius: 10px; box-shadow: var(--sl-shadow);
+}
+.honor-filter .form-select-sm, .honor-filter .form-control-sm {
+    border-color: var(--sl-border);
+}
+.honor-filter .hn-count { font-size: 12px; color: var(--sl-text-muted); }
+.honor-filter .hn-count b { color: var(--sl-accent); }
+
+/* ---------- 页签（年级总分 / 卓越班 / 单科） ---------- */
+.honor-tabs { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 12px;
+    border: none; }
+.honor-tabs .hn-tab {
+    border: 1px solid var(--sl-border); background: var(--sl-surface);
+    color: var(--sl-text-muted); font-size: 13px; font-weight: 600;
+    padding: 5px 14px; border-radius: 999px; line-height: 20px;
+    transition: background-color .15s ease, color .15s ease, border-color .15s ease;
+}
+.honor-tabs .hn-tab:hover { background: var(--sl-surface-3); color: var(--sl-text); }
+.honor-tabs .hn-tab.active {
+    background: var(--sl-accent); border-color: var(--sl-accent); color: #fff;
+}
+.honor-tabs .hn-tab .badge { background: rgba(255, 255, 255, .25); }
+
+/* ---------- 榜单卡片 ---------- */
+.honor-card {
+    border: 1px solid var(--sl-border); border-radius: var(--hn-radius);
+    background: var(--sl-surface); box-shadow: var(--sl-shadow);
+    margin-bottom: 16px; overflow: hidden;
+}
+.honor-card > .honor-card-head {
+    display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px;
+    padding: 10px 14px; background: var(--sl-surface-2);
+    border-bottom: 1px solid var(--sl-border);
+}
+.honor-card-head .honor-group {
+    font-size: 15px; font-weight: 700; color: var(--sl-text);
+}
+.honor-card-head .honor-note { font-size: 12px; color: var(--sl-text-muted); }
+.honor-card-head .honor-limit {
+    margin-left: auto; font-size: 12px; color: var(--sl-text-muted);
+}
+
+.honor-table-wrap { overflow-x: auto; }
+.honor-table { margin: 0; font-size: 12.5px; white-space: nowrap; }
+.honor-table thead th {
+    position: sticky; top: 0; z-index: 1;
+    background: var(--sl-th-bg); color: var(--sl-th-text);
+    font-weight: 600; font-size: 11.5px; letter-spacing: .3px;
+    border-bottom: 1px solid var(--sl-head-border);
+    padding: 7px 8px;
+}
+.honor-table tbody td {
+    padding: 6px 8px; border-color: var(--sl-line);
+    color: var(--sl-text); vertical-align: middle;
+}
+.honor-table tbody tr:nth-child(even) td { background: var(--sl-zebra-bg); }
+.honor-table tbody tr:hover td { background: var(--sl-row-hover); }
+/* 单科表列少：宽度按内容走，别被 .table{width:100%} 拉成大空格 */
+.honor-table.honor-table-slim { width: auto; min-width: 620px; }
+.honor-table.honor-table-slim th,
+.honor-table.honor-table-slim td { padding-right: 26px; }
+.honor-table tbody tr.hn-top td:first-child { box-shadow: inset 3px 0 0 var(--sl-accent); }
+.honor-table tbody tr.hn-top1 td:first-child { box-shadow: inset 3px 0 0 #d97706; }
+.honor-table .hn-no { color: var(--sl-text-muted); font-variant-numeric: tabular-nums; }
+.honor-table .hn-name { font-weight: 600; }
+.honor-table .hn-total { font-variant-numeric: tabular-nums; font-weight: 700;
+    color: var(--sl-accent); }
+
+/* 名次徽章：前三金银铜，其余浅灰胶囊 */
+.honor-rank {
+    display: inline-flex; align-items: center; justify-content: center;
+    min-width: 24px; height: 24px; padding: 0 6px; border-radius: 8px;
+    font-size: 12px; font-weight: 700; font-variant-numeric: tabular-nums;
+    color: var(--sl-text-muted); background: var(--sl-surface-3);
+}
+.honor-rank.honor-top1 { color: #7c2d12; background: linear-gradient(135deg, #fde68a, #f59e0b); }
+.honor-rank.honor-top2 { color: #334155; background: linear-gradient(135deg, #e2e8f0, #cbd5e1); }
+.honor-rank.honor-top3 { color: #7c2d12; background: linear-gradient(135deg, #fed7aa, #fdba74); }
+
+/* 班型标签 */
+.honor-type {
+    font-size: 11px; padding: 1px 6px; border-radius: 999px;
+    color: var(--sl-soft-info-fg); background: var(--sl-soft-info-bg);
+    border: 1px solid var(--sl-soft-info-bd);
+}
+.honor-type.is-elite {
+    color: var(--sl-soft-purple-fg); background: var(--sl-soft-purple-bg);
+    border-color: var(--sl-soft-purple-bd);
+}
+
+/* 并列提示 */
+.honor-tie {
+    font-size: 11.5px; color: var(--sl-soft-amber-fg);
+    background: var(--sl-soft-amber-bg); border: 1px solid var(--sl-soft-amber-bd);
+    border-radius: 999px; padding: 1px 8px;
+}
+
+/* ---------- 卓越班：班级胶囊 + 单科切换 ---------- */
+.honor-class-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 12px; }
+.honor-class-chips button {
+    border: 1px solid var(--sl-border); background: var(--sl-surface);
+    color: var(--sl-text-muted); font-size: 13px; font-weight: 600;
+    padding: 4px 14px; border-radius: 9px;
+}
+.honor-class-chips button.active {
+    background: var(--sl-soft-purple-bg); color: var(--sl-soft-purple-fg);
+    border-color: var(--sl-soft-purple-bd);
+}
+.honor-subj-chips { display: flex; flex-wrap: wrap; gap: 5px; padding: 8px 14px 0; }
+.honor-subj-chips button {
+    border: 1px solid var(--sl-border); background: var(--sl-surface);
+    color: var(--sl-text-muted); font-size: 12px; padding: 2px 10px;
+    border-radius: 999px;
+}
+.honor-subj-chips button.active {
+    background: var(--sl-soft-info-bg); color: var(--sl-soft-info-fg);
+    border-color: var(--sl-soft-info-bd); font-weight: 600;
+}
+.honor-subj-box { padding: 4px 0 8px; }
+.honor-sub-h { font-size: 12.5px; font-weight: 600; color: var(--sl-text-muted);
+    padding: 8px 14px 4px; margin: 0; }
+
+/* 单科榜两列排布：卡片等高、去掉行内额外下边距 */
+.honor-row > [class*="col-"] { display: flex; }
+.honor-row .honor-card { width: 100%; margin-bottom: 0; }
+
+/* 空态 / 筛选无匹配 */
+.honor-empty { padding: 28px 14px; text-align: center; color: var(--sl-text-muted); }
+.honor-empty .bi { font-size: 26px; display: block; margin-bottom: 6px;
+    color: var(--sl-text-subtle); }
+.hn-hidden { display: none !important; }
+
+/* ---------- 打印：只打当前页签，但展开该页签内的全部班级/科目 ---------- */
+@media print {
+    @page { size: A4 landscape; margin: 10mm; }
+    .sidebar, .navbar, .no-print, .honor-filter { display: none !important; }
+    .main-content { margin: 0 !important; padding: 0 !important; }
+    .honor-pane.d-none { display: none !important; }
+    .honor-elite-class.d-none { display: block !important; }
+    .honor-subj-box.d-none { display: block !important; }
+    .honor-card { break-inside: auto; box-shadow: none; }
+    .honor-row > [class*="col-"] { flex: 0 0 100%; max-width: 100%; }
+    .honor-table { font-size: 9px; }
+    .honor-table thead th { position: static; padding: 3px 4px; }
+    .honor-table tbody td { padding: 2px 4px; }
+    .honor-table.honor-table-slim { min-width: 0; }
+    /* 总分表 16 列：固定布局 + 显式列宽，保证 A4 横向一整行装得下 */
+    .honor-table.honor-table-total { table-layout: fixed; width: 100%; }
+    .honor-table-total th:nth-child(1) { width: 46px; }
+    .honor-table-total th:nth-child(2) { width: 66px; }
+    .honor-table-total th:nth-child(3) { width: 56px; }
+    .honor-table-total th:nth-child(4) { width: 42px; }
+    .honor-table-total th:nth-child(5) { width: 50px; }
+    .honor-table-total th:nth-child(6) { width: 54px; }
+    .honor-table-total th:nth-child(7) { width: 52px; }
+    .honor-table-total th,
+    .honor-table-total td { overflow: hidden; white-space: nowrap; }
+    tr, .honor-sub-h { break-inside: avoid; }
+}

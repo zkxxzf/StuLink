@@ -92,6 +92,40 @@ def encrypt_rand(plaintext):
     return base64.b64encode(iv + ciphertext).decode()
 
 
+def _get_index_key():
+    """盲索引密钥：由主密钥派生（主密钥 || 用途串 再哈希）。
+
+    与主加密密钥**隔离**：即便盲索引被离线撞库，也推不出加密密钥。
+    """
+    return hashlib.sha256(_ENCRYPTION_KEY + b'|blind-index-v1').digest()
+
+
+def normalize_phone(value):
+    """手机号规范化：只保留数字，去掉 +86 / 横线 / 空格。
+
+    避免"138-0000-0000"与"13800000000"算出不同的索引而互相查不到。
+    """
+    if not value:
+        return None
+    digits = ''.join(ch for ch in str(value) if ch.isdigit())
+    if digits.startswith('86') and len(digits) == 13:
+        digits = digits[2:]
+    return digits or None
+
+
+def blind_index(value):
+    """敏感字段盲索引：HMAC-SHA256(规范化值)，用于**加密后**的精确等值查询。
+
+    只支持"完全等于"，不支持模糊/前缀（模糊请用 decrypt 后内存过滤）。
+    相同明文 → 相同索引；索引本身不可逆，无法还原号码。
+    """
+    import hmac as _hmac
+    norm = normalize_phone(value)
+    if not norm:
+        return None
+    return _hmac.new(_get_index_key(), norm.encode(), hashlib.sha256).hexdigest()
+
+
 def decrypt(ciphertext_b64):
     """解密密文（base64 字符串，兼容 随机IV/确定性IV 两种密文），返回明文；空值/明文直接返回"""
     if not ciphertext_b64:
@@ -101,6 +135,10 @@ def decrypt(ciphertext_b64):
         return None
     # 兼容旧数据：看起来像身份证号的明文直接返回
     if len(ciphertext_b64) == 18 and (ciphertext_b64[:-1].isdigit() or ciphertext_b64[-1].upper() == 'X'):
+        return ciphertext_b64
+    # 2026-10-18：兼容**迁移前**的明文手机号（11 位纯数字），
+    # 否则存量数据在跑迁移脚本之前会全部解密失败变成空值。
+    if len(ciphertext_b64) == 11 and ciphertext_b64.isdigit():
         return ciphertext_b64
     try:
         raw = base64.b64decode(ciphertext_b64)

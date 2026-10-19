@@ -97,6 +97,11 @@ class Config:
     #      故 history.db 必须保持非 WAL。
     SQLITE_ENABLE_WAL = os.environ.get('STULINK_ENABLE_WAL', '0').strip() == '1'
 
+    # 微信小程序接入（2026-10-18）：环境标识 dev/prod，小程序据此提示当前环境；
+    # 令牌有效时长（秒，默认 12 小时）。均由环境变量注入，不写死在代码里。
+    WX_ENV = os.environ.get('STULINK_WX_ENV', 'prod').strip().lower()
+    WX_TOKEN_TTL = int(os.environ.get('STULINK_WX_TOKEN_TTL', '43200'))
+
     # 学校名称：成绩证明等对外文书抬头
     # 优先级：环境变量 SCHOOL_NAME > 数据库 system_settings（系统设置页）> 化名占位
     # 注意：默认值必须为化名占位，真实校名只通过环境变量或系统设置页注入，避免写入公开仓库

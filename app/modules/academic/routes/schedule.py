@@ -110,13 +110,66 @@ def _editable(ts):
 
 
 def _view_scope():
-    """查看类页面的数据范围：统一放开为「全部年级 / 全部班级」（2026-10-10）。
+    """查看类页面的数据范围：**按老师所在/任教年级**（2026-10-18 口径调整）。
 
-    背景：用户要求「移除按年级筛选的限制，确保所有年级的课表均可显示」。
-    写操作（录课 / 导入 / 调课 / 审批）的范围校验不受影响，仍在各自入口把关。
+    历史：2026-10-10 曾按要求统一放开为「全部年级 / 全部班级」，理由是当时
+    大课表需要在页内跨年级切换；该页已下线，放开的前提不再成立。
+    2026-10-18 用户重新明确：课表属校内公开信息，但**就老师所在年级可查看**
+    —— 管理员仍全校，其余账号按 visible_academic_grades（含任课映射年级）。
     返回 (allowed_grades, allowed_classes)，None = 不过滤。
     """
-    return None, None
+    from app.modules.academic.services.access_scope import (
+        visible_academic_class_scope, visible_academic_grades)
+    grades = visible_academic_grades(current_user)
+    if grades is None:
+        return None, None
+    # 注意：allowed_classes 必须是 **{年级: set|None} 的 dict**，不能压成扁平 set ——
+    # 服务层（schedule_service._apply_class_scope / get_overview_view）都用 .get()/.keys()，
+    # 扁平静默变成 `'set' object has no attribute 'get'` → 非管理员访问直接 500。
+    return set(grades), visible_academic_class_scope(current_user)
+
+
+def _assert_grade_view(grade):
+    """年级级课表入口的范围校验（2026-10-18）。
+
+    管理员全校放行；其余账号只能看 visible_academic_grades 内的年级。
+    """
+    if not grade:
+        return
+    from app.modules.academic.services.access_scope import visible_academic_grades
+    allowed = visible_academic_grades(current_user)
+    if allowed is None:
+        return
+    if grade not in set(allowed):
+        abort(403)
+
+
+def _assert_teacher_view(uid):
+    """教师课表入口的范围校验（2026-10-18）。
+
+    本人始终可看自己的课表；看别人的课表要求"该教师任教年级"与"我的可见年级"
+    有交集，否则 403（避免用 teacher_uid 遍历全校教师课表）。
+    """
+    from app.modules.academic.services.access_scope import visible_academic_grades
+    allowed = visible_academic_grades(current_user)
+    if allowed is None:
+        return
+    try:
+        from app.models.academic import Teacher
+        from app.models.grades import TeacherSubjectLink
+        t = Teacher.query.filter_by(teacher_uid=uid).first()
+        if t is None:
+            return
+        if t.user_id and t.user_id == current_user.id:
+            return
+        grades = {r.grade for r in
+                  TeacherSubjectLink.query.filter_by(user_id=t.user_id).all()
+                  if r.grade}
+        if grades & set(allowed):
+            return
+    except Exception as _e:      # noqa: BLE001  查询异常不放大成 500，按无权处理
+        logger.warning('课表范围校验异常 uid=%s: %s', uid, _e)
+    abort(403)
 
 
 def _readonly_guard(ts, back_endpoint, **back_kwargs):
@@ -305,6 +358,7 @@ def schedule_clear_entries(sid):
 def schedule_grade(sid, grade):
     """年级课表：年级内班级标签切换（?class= 指定班级）"""
     ts = _get_schedule_or_404(sid)
+    _assert_grade_view(grade)      # 2026-10-18：按老师所在年级收敛
     week = _week_param(ts)
     data = svc.get_grade_view(sid, grade, week=week)
     classes = data['classes']
@@ -313,8 +367,12 @@ def schedule_grade(sid, grade):
         cur_class = classes[0] if classes else ''
     view = svc.get_class_view(sid, grade, cur_class, week=week) if cur_class else \
         {'grid': {}, 'periods': data['periods'], 'stats': {}, 'total': 0}
-    # 2026-10-10：页内年级切换（所有年级均可显示，不再只有入口那一个年级）
+    # 2026-10-18：页内年级切换只列**可见年级**（2026-10-10 曾放开全校，
+    # 现在按老师所在年级收敛；列出不可见年级只会点了 403）
     all_grades = sorted(svc.get_grade_class_list(sid))
+    _ag, _ac = _view_scope()
+    if _ag is not None:
+        all_grades = [g for g in all_grades if g in _ag]
     if grade and grade not in all_grades:
         all_grades = sorted(all_grades + [grade])
     return render_template('academic/schedule_grade.html',
@@ -331,6 +389,7 @@ def schedule_grade(sid, grade):
 def schedule_class(sid, grade, class_name):
     """班级课表：13x7 网格 + 学科课时统计"""
     ts = _get_schedule_or_404(sid)
+    _assert_grade_view(grade)      # 2026-10-18：按老师所在年级收敛
     week = _week_param(ts)
     view = svc.get_class_view(sid, grade, class_name, week=week)
     # 高中：班型 + 选科方向 + 选科组合（新高考 3+1+2），班级档案里有就显示
@@ -352,6 +411,7 @@ def schedule_class(sid, grade, class_name):
 def schedule_teacher(sid, uid):
     """教师个人课表：搜索选择 + 网格 + 课时统计"""
     ts = _get_schedule_or_404(sid)
+    _assert_teacher_view(uid)      # 2026-10-18：本人放行，其余按任教年级相交
     week = _week_param(ts)
     view = svc.get_teacher_view(sid, uid, week=week)
     teacher = None
@@ -396,6 +456,8 @@ def schedule_teacher_query():
     """
     ts = _query_term()
     uid = (request.args.get('uid') or '').strip()
+    if ts and uid:
+        _assert_teacher_view(uid)      # 2026-10-18：禁止用 uid 遍历全校教师课表
     week = _week_param(ts) if ts else None
     teacher, view = None, None
     if ts and uid:
@@ -433,7 +495,13 @@ def _render_group(scope):
     subject = (request.args.get('subject') or '').strip()
     if need_grade and not grade:
         grades = svc.list_grade_options(ts.id)
+        # 2026-10-18：缺参数自动落"第一个年级"时也要落在**可见年级**上
+        _ag, _ac = _view_scope()
+        if _ag is not None:
+            grades = [g for g in grades if g in _ag]
         grade = grades[0] if grades else ''
+    if need_grade:
+        _assert_grade_view(grade)      # 2026-10-18：组课表按老师所在年级收敛
     if not subject:
         subjects = svc.list_subject_options(ts.id, grade if need_grade else None)
         subject = subjects[0] if subjects else ''
@@ -569,10 +637,11 @@ def schedule_overview(sid):
     ts = _get_schedule_or_404(sid)
     week = _week_param(ts)   # 2026-10-10：缺省 = 当前教学周（已去掉「全部周」）
     grades = [g.strip() for g in (request.args.get('grades') or '').split(',') if g.strip()]
-    # 2026-10-10：查看类页面不再按年级限制可见范围（用户要求「所有年级的课表均可显示」）。
-    # grades= 仍作为「自己选看哪个年级」的筛选参数；写操作/导入的范围校验保持不变。
-    allowed_grades = None
-    allowed_classes = None
+    # 2026-10-18：恢复按老师所在/任教年级收敛（覆盖 2026-10-10 的"所有年级可见"）。
+    # grades= 仍在可见范围内做二级筛选 —— 传了范围外的年级会被剔除，不再放开。
+    allowed_grades, allowed_classes = _view_scope()
+    if grades and allowed_grades is not None:
+        grades = [g for g in grades if g in allowed_grades]
     include_break = request.args.get('main') != '1'
     # 高中场景：按选科方向（物理/历史）与班型（强基班等）看总课表
     direction = (request.args.get('direction') or '').strip() or None
@@ -1182,6 +1251,8 @@ def schedule_export(sid):
     grade = (request.args.get('grade') or '').strip() or None
     class_name = (request.args.get('class') or '').strip() or None
     teacher_uid = (request.args.get('teacher') or '').strip() or None
+    if teacher_uid:
+        _assert_teacher_view(teacher_uid)   # 2026-10-18：导出教师课表也要收敛
     allowed_grades = visible_academic_grades(current_user)
     allowed_classes = visible_academic_class_scope(current_user)
     if grade and allowed_grades is not None and grade not in allowed_grades:
@@ -1405,6 +1476,7 @@ def api_schedule_entry_detail(eid):
     detail = svc.get_entry_detail(eid)
     if not detail:
         return _json_err('条目不存在', 404)
+    _assert_grade_view(detail.get('grade'))      # 2026-10-18：按条目所在年级收敛
     versions = [v.to_dict() for v in svc.get_entry_versions(eid, limit=20)]
     return _json_ok({'entry': detail, 'versions': versions})
 

@@ -9,6 +9,7 @@
 from datetime import datetime
 
 from app.extensions import db
+from app.utils.crypto import blind_index, decrypt, encrypt_rand
 
 
 class Teacher(db.Model):
@@ -24,7 +25,7 @@ class Teacher(db.Model):
     __tablename__ = 'teachers'
     # 2026-10-12：教师名单高频筛选补索引。user_id（账号绑定反查）/ subject（任课学科）
     # / status（在职过滤）三列此前无索引，教师映射矩阵与教师管理列表均为全表扫。
-    # 索引名与 scripts/add_teacher_indexes.py 保持一致：新装环境由 create_all 建，
+    # 索引名与 scripts/seed/add_teacher_indexes.py 保持一致：新装环境由 create_all 建，
     # 存量 academic.db 由该脚本幂等补建，避免"模型有、库里没有"的静默缺口。
     __table_args__ = (
         db.Index('idx_teacher_user_id', 'user_id'),
@@ -36,7 +37,29 @@ class Teacher(db.Model):
     teacher_uid = db.Column(db.String(16), unique=True, nullable=False, index=True)
     name = db.Column(db.String(50), nullable=False)
     id_card_enc = db.Column(db.String(128), unique=True)   # 身份证号密文（唯一，可空）
-    phone = db.Column(db.String(20))
+    # 2026-10-19（与 Student 同一方案 C）：随机 IV 加密 + HMAC 盲索引。
+    # 登录名 users.username 仍是可读的（它本身是账号标识），加密的是本表的展示用号码。
+    _phone_encrypted = db.Column('phone', db.String(256))
+    phone_idx = db.Column(db.String(64))
+
+    @property
+    def phone(self):
+        if not self._phone_encrypted:
+            return None
+        try:
+            return decrypt(self._phone_encrypted)
+        except Exception:
+            return None
+
+    @phone.setter
+    def phone(self, value):
+        self._phone_encrypted = encrypt_rand(value) if value else None
+        self.phone_idx = blind_index(value) if value else None
+
+    @staticmethod
+    def phone_index(value):
+        """手机号盲索引（加密后的精确等值查询）"""
+        return blind_index(value)
     subject = db.Column(db.String(20))                     # 任教学科
     status = db.Column(db.String(10), default='active')    # active=在职 / left=离职
     user_id = db.Column(db.Integer)                        # 关联 users.id（快照式）
@@ -530,7 +553,7 @@ class AttendanceRecord(db.Model):
     """考勤记录"""
     __tablename__ = 'attendance_records'
     __bind_key__ = 'academic'
-    # 2026-10-10：性能复合索引进模型声明（原先只写在 scripts/add_performance_indexes.py，
+    # 2026-10-10：性能复合索引进模型声明（原先只写在 scripts/seed/add_performance_indexes.py，
     # 新装环境 create_all 拿不到、会重演"脚本有、库里没有"的静默缺口）。
     # 索引名与现网完全一致，避免同表重复索引；脚本条目保留，作历史库补建载体（IF NOT EXISTS 幂等）。
     __table_args__ = (

@@ -32,11 +32,11 @@
     python -m scripts.bump_version sakay --no-commit   # 写盘但不 git commit
 
 默认行为：扫描项目 → 替换所有形如 vX.Y.Z.W / vX.Y.Z 的"当前版本"引用 → 若 git 干净则自动 commit。
-不修改：scripts/migrate_*.py、代码内联变更注释、data/、聊天总结/（2026-10-13 起位于
+不修改：scripts/migrate/migrate_*.py、代码内联变更注释、data/、聊天总结/（2026-10-13 起位于
 docs/聊天总结/；SKIP_DIRS 按**目录名**匹配路径各部分，与层级无关）、
 版本历史/（2026-10-16 起位于 docs/版本历史/ —— **历史记录里的版本号必须保持原样**，
 改了历史等于伪造历史）等目录。
-详细规范见 docs/版本号管理规范.md；版本内容记录见 docs/版本历史/README.md。
+详细规范见 docs/规范与说明/版本号管理规范.md；版本内容记录见 docs/版本历史/README.md。
 """
 from __future__ import annotations
 
@@ -54,7 +54,9 @@ SKIP_DIRS = {'.git', 'data', 'deploy', 'uploads', '__pycache__',
 ALLOWED_EXT = {'.py', '.html', '.js', '.css', '.md', '.txt', '.yml', '.yaml'}
 # 路径过滤：迁移脚本与备份文件不改
 EXCLUDE_PATH_RX = re.compile(
-    r'(^scripts/migrate_|^scripts/_db_backup|^scripts/bump_version\.py|\.bak-\d{8}'
+    # 2026-10-19：scripts/ 重组后迁移脚本移入 scripts/migrate|fix/ 子目录，
+    # 原 `^scripts/migrate_` 不再匹配 → 会被 bump 误改脚本内记录的当时版本号
+    r'(^scripts/(?:migrate|fix)/|^scripts/_db_backup|^scripts/bump_version\.py|\.bak-\d{8}'
     r'|\.min\.(js|css)$)'          # 第三方库（jquery/bootstrap 等自带版本号，与本项目无关）
 )
 # 四条硬规则的生效起点：此之前的版本号迁跃属于「规则定稿前的历史」，只提示不判错

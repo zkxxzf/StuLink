@@ -43,7 +43,9 @@
                             <input name="phone" class="form-control" maxlength="11" value="{{ t.phone or '' }}">
                             {% else %}
                             <input type="text" class="form-control bg-light" value="{{ field_value(t.phone, 'teacher_phone') }}" readonly>
-                            <input type="hidden" name="phone" value="{{ t.phone or '' }}">
+                            {# 2026-10-18 审计修复（P1）：无 academic.view_teacher_phone 时不再把完整手机号
+                               写进 hidden（F12 可见 = 脱敏失效）；后端按权限忽略该字段并保留原值。 #}
+                            <input type="hidden" name="phone" value="" data-phone-locked="1">
                             {% endif %}
                         </div>
                         <div class="col-md-6 mb-3">

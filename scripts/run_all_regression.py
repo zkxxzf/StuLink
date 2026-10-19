@@ -41,11 +41,11 @@ SMOKES = [
     ('冒烟·成绩端到端', ['scripts/smoke_grades.py']),
     ('冒烟·教务端到端', ['scripts/smoke_academic.py']),
     ('冒烟·权限体系', ['scripts/smoke_permissions.py']),
-    ('冒烟·考务监考', ['scripts/smoke_invig.py']),
-    ('冒烟·考务分层分配', ['scripts/smoke_affair_arrange.py']),
-    ('冒烟·AI 识图排场次', ['scripts/smoke_ai_schedule.py']),
-    ('冒烟·全校对比口径', ['scripts/smoke_global_compare.py']),
-    ('冒烟·学生宿舍视图', ['scripts/smoke_student_dorm_view.py']),
+    ('冒烟·考务监考', ['scripts/smoke/smoke_invig.py']),
+    ('冒烟·考务分层分配', ['scripts/smoke/smoke_affair_arrange.py']),
+    ('冒烟·AI 识图排场次', ['scripts/smoke/smoke_ai_schedule.py']),
+    ('冒烟·全校对比口径', ['scripts/smoke/smoke_global_compare.py']),
+    ('冒烟·学生宿舍视图', ['scripts/smoke/smoke_student_dorm_view.py']),
 ]
 # 结果行样例：「===== 教务回归完成：通过 505 / 失败 0 =====」「结果：PASS 8 / FAIL 0」
 _PATTERNS = (

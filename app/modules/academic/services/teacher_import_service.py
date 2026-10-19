@@ -160,7 +160,9 @@ def build_plan(rows):
         if r['id_card']:
             target = teacher_service.find_by_id_card(r['id_card'])
         if target is None and r['phone']:
-            target = Teacher.query.filter_by(phone=r['phone']).first()
+            # 2026-10-19：手机号已改为加密存储，等值查询走盲索引（不能 filter_by(phone=)）
+            target = Teacher.query.filter_by(
+                phone_idx=Teacher.phone_index(r['phone'])).first()
         if target is None:
             same = Teacher.query.filter_by(name=r['name']).all()
             if len(same) == 1:

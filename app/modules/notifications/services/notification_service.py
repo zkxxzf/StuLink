@@ -640,11 +640,26 @@ def delete_notification(notification_id, operator_id=None):
     notif = db.session.get(Notification, notification_id)
     if not notif:
         return False
+    # 2026-10-18 审计加固：通知本体只是软删，但**收件人行是硬删**且含"已读"状态，
+    # 删了无法重建（谁看过、谁没看过全丢）。删前整组快照，可整体恢复。
+    recps = NotificationRecipient.query.filter_by(
+        notification_id=notification_id).all()
+    if recps:
+        from app.utils.trash import archive_snapshot
+        _op = db.session.get(User, operator_id) if operator_id else None
+        _snap = archive_snapshot(
+            'notifications', 'notification_recipients', '通知收件人',
+            tables=[(NotificationRecipient, recps)],
+            summary=f'{(notif.title or "")[:40]}：{len(recps)} 位收件人（含已读状态）',
+            operator=_op)
+        if _snap is None:
+            return False        # 归档失败就不删（fail-closed）
+        db.session.commit()     # 归档先落库，再执行删除
     notif.is_active = False
     NotificationRecipient.query.filter_by(
         notification_id=notification_id).delete(synchronize_session=False)
-    notif.recipient_count = 0
-    notif.read_count = 0
+    # 2026-10-18：不再把 recipient_count / read_count 清零 ——
+    # 收件人已进回收站，保留原计数，恢复后人数与已读进度才对得上。
     db.session.commit()
     # 删除通知影响全体用户可见集，清除所有未读数缓存与该通知 scope 缓存
     _invalidate_unread()

@@ -15,7 +15,8 @@ P2（多身份改造）：底层原语（UserDataScope / UserClassLink / Teacher
 from sqlalchemy import and_, or_
 
 from app.models import Student
-from app.utils.scope import (user_scope_detail, class_pairs, teaching_grades)
+from app.utils.scope import (user_scope_detail, class_pairs, teaching_grades,
+                             teaching_pairs)
 
 
 def apply_student_scope(query, user=None):
@@ -51,7 +52,13 @@ def apply_student_scope(query, user=None):
         return query.filter_by(grade=user.grade)
 
     # 3) 任课教师等：班级映射 > 任课映射年级 > 组级范围
-    pairs = class_pairs(user)
+    # 2026-10-18 审计修复（P1 数据范围过宽）：此前只取 UserClassLink（class_pairs），
+    # **没有**并入 TeacherSubjectLink 里的精确班级（teaching_pairs），于是任课教师
+    # 直接退化到"整个年级"。实测：licancan 只教 2024级 01/04 班，却能打开 02 班
+    # 学生详情（页面含身份证号），可遍历全年级 30 个班。
+    # 现在优先用精确班级（UserClassLink ∪ TeacherSubjectLink）；只有确实存在
+    # "整年级任教"（class_name 为空）时才按年级兜底。
+    pairs = class_pairs(user) | teaching_pairs(user)
     if pairs:
         return query.filter(or_(*[and_(Student.grade == g, Student.class_name == c)
                                   for g, c in sorted(pairs)]))
