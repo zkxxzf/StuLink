@@ -1,6 +1,12 @@
-"""AES-256-CBC 对称加密工具 — 用于加密身份证号等敏感字段
+"""AES-256-CBC 对称加密工具 — 用于加密身份证号、手机号等敏感字段
 
-使用确定性 IV：同一明文 → 同一密文 → 支持数据库等值查询
+IV 策略（2026-10-19 H-06 起）：
+  - encrypt_rand()：随机 IV，同一明文每次密文不同，抗枚举对照（推荐默认）；
+  - encrypt()：确定性 IV（SHA256(明文)[:16]），仅为兼容存量数据而保留，
+    新代码禁止再用它写敏感字段 —— 它等于把可枚举的短号码做成了可离线撞库的指纹；
+  - decrypt()：两种 IV 都能解（随机 IV 密文与历史确定性密文混存期必需）。
+密文等值查询一律改用盲索引：身份证 id_card_index() / 手机号 blind_index()，
+两者用不同用途串派生索引密钥，互不可推导。
 密钥来源：环境变量 ENCRYPTION_KEY，否则从 data/.encryption_key 自动生成
 """
 # StuLink v1.7.0 2026-08-02
@@ -21,29 +27,75 @@ from config import BASE_DIR
 _log = logging.getLogger('stulink.crypto')
 
 
+def _looks_synced(path):
+    """路径是否落在常见同步盘（与 config.py 同口径，不依赖其私有函数）。"""
+    p = os.path.abspath(path).replace('\\', '/').lower()
+    return any(m in p for m in ('同步', 'onedrive', 'dropbox', 'nutstore',
+                                '百度网盘', '坚果云'))
+
+
+def _warn_key_location(path):
+    under_data = os.path.abspath(path).startswith(
+        os.path.join(BASE_DIR, 'data') + os.sep)
+    if under_data or _looks_synced(path):
+        _log.warning('[H-07] 加密密钥位于 data/ 或同步盘：%s；'
+                     '建议移出并设置 STULINK_ENCRYPTION_KEY_FILE', path)
+
+
 def _get_encryption_key():
-    """获取加密密钥：环境变量 > 持久化文件 > 自动生成"""
+    """获取加密密钥：环境变量 > 显式文件 > data/.encryption_key > 首次生成。
+
+    2026-10-19 H-07：
+    - 新增 STULINK_ENCRYPTION_KEY_FILE；显式指定但缺失/长度不对 → 启动失败；
+    - 旧的 data/.encryption_key 存在但读不到 → 启动失败（绝不再静默生成新钥，
+      否则历史密文永久无法解密）。
+    """
     env_key = os.environ.get('ENCRYPTION_KEY', '').strip()
     if env_key:
         return hashlib.sha256(env_key.encode()).digest()
-    key_file = os.path.join(BASE_DIR, 'data', '.encryption_key')
-    try:
-        if os.path.exists(key_file):
+
+    explicit = os.environ.get('STULINK_ENCRYPTION_KEY_FILE', '').strip()
+    if explicit:
+        key_file = os.path.abspath(explicit)
+        try:
             with open(key_file, 'rb') as f:
-                return f.read()
-    except Exception as _e:  # noqa: BLE001
-        # 2026-10-10：绝不能在日志里打印密钥内容。此处失败将落到下方"生成新密钥"，
-        # 而新密钥会让**全部历史密文永久无法解密**，属高危分支，必须留痕告警。
-        _log.error('读取加密密钥文件失败(%s)：将生成新密钥，历史加密数据可能永久无法解密: %s',
-                   key_file, _e)
+                key = f.read()
+        except OSError as _e:
+            raise RuntimeError(
+                'STULINK_ENCRYPTION_KEY_FILE 指向的密钥文件无法读取：%s'
+                % key_file) from _e
+        if len(key) != 32:
+            raise RuntimeError(
+                '加密密钥长度必须为 32 字节（当前 %d）：%s'
+                % (len(key), key_file))
+        _warn_key_location(key_file)
+        return key
+
+    key_file = os.path.join(BASE_DIR, 'data', '.encryption_key')
+    if os.path.exists(key_file):
+        try:
+            with open(key_file, 'rb') as f:
+                key = f.read()
+        except OSError as _e:
+            raise RuntimeError(
+                '加密密钥文件存在但无法读取：%s' % key_file) from _e
+        if len(key) != 32:
+            raise RuntimeError(
+                '加密密钥长度必须为 32 字节（当前 %d）：%s'
+                % (len(key), key_file))
+        _warn_key_location(key_file)
+        return key
+
+    # 首次运行：生成并持久化
     new_key = secrets.token_bytes(32)
     os.makedirs(os.path.dirname(key_file), exist_ok=True)
     try:
         with open(key_file, 'wb') as f:
             f.write(new_key)
     except Exception as _e:  # noqa: BLE001
-        _log.error('写入加密密钥文件失败(%s)：进程重启后密钥将变化，历史密文可能无法解密: %s',
-                   key_file, _e)
+        _log.error('写入加密密钥文件失败(%s)：进程重启后密钥将变化，'
+                   '历史密文可能无法解密: %s', key_file, _e)
+    _warn_key_location(key_file)
     return new_key
 
 
@@ -60,7 +112,12 @@ class DecryptError(ValueError):
 
 
 def encrypt(plaintext):
-    """加密明文，返回 base64 字符串；空值返回 None（确定性 IV，支持等值查询）"""
+    """加密明文，返回 base64 字符串；空值返回 None。
+
+    兼容保留（deprecated）：确定性 IV（IV = SHA256(明文)[:16]）。
+    只允许用于"与历史密文比对/双读兜底"，不得再用于写入新的敏感字段；
+    需要等值查询的字段请改用 encrypt_rand() + 盲索引。
+    """
     if not plaintext:
         return None
     plaintext = str(plaintext).strip()
@@ -124,6 +181,33 @@ def blind_index(value):
     if not norm:
         return None
     return _hmac.new(_get_index_key(), norm.encode(), hashlib.sha256).hexdigest()
+
+
+def _get_id_card_index_key():
+    """身份证盲索引密钥：与手机号用途串隔离（H-06）。"""
+    return hashlib.sha256(_ENCRYPTION_KEY + b'|blind-index-idcard-v1').digest()
+
+
+def normalize_id_card(value):
+    """身份证规范化：去空白、去分隔符、末位 x 大写；空值返回 None。"""
+    if not value:
+        return None
+    s = ''.join(ch for ch in str(value) if ch.isalnum()).upper()
+    return s or None
+
+
+def id_card_index(value):
+    """身份证盲索引：HMAC-SHA256(规范化值)，用途串与手机号隔离。
+
+    用于随机 IV 加密后的精确等值查询/去重；相同明文 → 相同索引，
+    索引不可逆，且不能与手机号索引互相推导。
+    """
+    import hmac as _hmac
+    norm = normalize_id_card(value)
+    if not norm:
+        return None
+    return _hmac.new(_get_id_card_index_key(), norm.encode(),
+                     hashlib.sha256).hexdigest()
 
 
 def decrypt(ciphertext_b64):

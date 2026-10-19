@@ -168,6 +168,13 @@ def review_audit(rid):
     """批准 / 驳回（审批与「批准并应用」逻辑见 review_service.audit_review）。"""
     r = _review_or_404(rid)
     back = redirect(url_for('grades.reviews_manage_page'))
+    # H-02：申请人不得审批本人单据（含管理员）。服务层还有一道，
+    # 这里提前拦下并留 WARNING，避免"自己批自己"在页面上看起来合法。
+    if r.applicant_id == current_user.id:
+        log_operation(current_user, '审批被拒', '成绩复核', r.exam_id,
+                      '复核单 #%d：不得审批本人申请' % r.id,
+                      module='grades', severity='WARNING')
+        abort(403, description='不得审批本人提交的复核申请')
     # 审批（「批准并应用」会直接改分并重算排名）必须先过**数据范围**校验：
     # 只有 grades.score_edit 功能权限、但不在本年级范围内的账号不得越权写分。
     _r_exam = db.session.get(Exam, r.exam_id)

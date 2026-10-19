@@ -6,6 +6,7 @@ import time
 import urllib.error
 import urllib.request
 
+from flask import current_app
 from sqlalchemy import or_, and_
 
 from app.extensions import db
@@ -185,10 +186,20 @@ def build_payload(user, exam):
                 if restrict and r.subject not in restrict:
                     continue  # 任课教师只发本人任教科目列
                 subs.setdefault(r.student_no, {})[r.subject] = r.score
+        # P1 M-12：默认匿名化 —— 姓名/学号替换为序号，分数/名次/班级保留。
+        # 用稳定排序保证同一场考试多次生成的序号一致（便于对照/复现）。
+        anon = bool(current_app.config.get('AI_ANONYMIZE', True))
         students = []
-        for no, card in cards.items():
+        seq = 0
+        ordered = sorted(cards.items(),
+                         key=lambda kv: ((kv[1].get('class') or ''), kv[0]))
+        for no, card in ordered:
             card['subjects'] = {k: v for k, v in (subs.get(no) or {}).items()
                                 if v is not None}
+            if anon:
+                seq += 1
+                card['no'] = f'S{seq:03d}'
+                card['name'] = f'学生{seq:03d}'
             students.append(card)
         # 只有科目行、没有总分行的学生也补一张最小卡（不丢人）
         for no, sv in subs.items():
@@ -196,7 +207,12 @@ def build_payload(user, exam):
                 continue
             sv = {k: v for k, v in sv.items() if v is not None}
             if sv:
-                students.append({'no': no, 'subjects': sv})
+                item = {'no': no, 'subjects': sv}
+                if anon:
+                    seq += 1
+                    item['no'] = f'S{seq:03d}'
+                    item['name'] = f'学生{seq:03d}'
+                students.append(item)
         students.sort(key=lambda c: (c.get('class') or '', c.get('no') or ''))
         return {'id': ex.id, 'name': ex.name, 'grade': ex.grade,
                 'date': ex.exam_date.strftime('%Y-%m-%d'),

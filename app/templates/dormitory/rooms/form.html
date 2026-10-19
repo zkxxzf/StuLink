@@ -298,13 +298,24 @@
     function renderTags() {
         tagsBox.innerHTML = '';
         if (!tags.length) {
-            tagsBox.innerHTML = '<span class="rf-empty">未分配班级</span>';
+            var empty = document.createElement('span');
+            empty.className = 'rf-empty';
+            empty.textContent = '未分配班级';
+            tagsBox.appendChild(empty);
         } else {
             tags.forEach(function(t) {
                 var el = document.createElement('span');
                 el.className = 'rf-tag';
                 el.title = '点击删除 ' + t;
-                el.innerHTML = t + ' <i class="bi bi-x-lg"></i>';
+                // M-04：班级名是用户可控数据，必须用 textContent 写入，
+                // 不能用 innerHTML 拼接（否则 <img onerror=...> 直接执行）。
+                var label = document.createElement('span');
+                label.textContent = t;
+                el.appendChild(label);
+                el.appendChild(document.createTextNode(' '));
+                var icon = document.createElement('i');
+                icon.className = 'bi bi-x-lg';
+                el.appendChild(icon);
                 el.onclick = function() {
                     tags.splice(tags.indexOf(t), 1);
                     renderTags();
@@ -332,13 +343,22 @@
         });
         sel.value = '';
 
+        hint.innerHTML = '';
         if (tags.length > 1) {
-            hint.innerHTML = '<span class="badge bg-info">合班宿舍</span> '
-                + '<span class="text-muted small">' + tags.join(' + ') + '</span>';
+            var badge = document.createElement('span');
+            badge.className = 'badge bg-info';
+            badge.textContent = '合班宿舍';
+            hint.appendChild(badge);
+            hint.appendChild(document.createTextNode(' '));
+            var muted = document.createElement('span');
+            muted.className = 'text-muted small';
+            muted.textContent = tags.join(' + ');
+            hint.appendChild(muted);
         } else if (tags.length === 1) {
-            hint.innerHTML = '<span class="text-muted small">已选 1 个班级：' + tags[0] + '（非合班）</span>';
-        } else {
-            hint.innerHTML = '';
+            var only = document.createElement('span');
+            only.className = 'text-muted small';
+            only.textContent = '已选 1 个班级：' + tags[0] + '（非合班）';
+            hint.appendChild(only);
         }
     }
 

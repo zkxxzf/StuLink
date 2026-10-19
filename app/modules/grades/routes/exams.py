@@ -675,6 +675,12 @@ def score_update(exam_id, score_id):
     · 改完自动重算整场排名。
     """
     exam = assert_exam_visible(exam_id)          # H-4
+    # P1 M-18：已毕业年级冻结改分/删分
+    from app.utils.helpers import assert_grade_not_graduated
+    try:
+        assert_grade_not_graduated(exam.grade)
+    except PermissionError as exc:
+        return _score_edit_reply(exam_id, False, str(exc))
     row = ExamScore.query.filter_by(id=score_id, exam_id=exam_id).first_or_404()
     # 总分由各科自动汇总，禁止直接改（避免总分与单科不一致）
     if row.subject == TOTAL_SUBJECT:
@@ -830,6 +836,12 @@ def score_add(exam_id):
 @perm_required('grades.score_edit')
 def score_delete(exam_id, score_id):
     exam = assert_exam_visible(exam_id)          # H-4
+    # P1 M-18：已毕业年级冻结改分/删分
+    from app.utils.helpers import assert_grade_not_graduated
+    try:
+        assert_grade_not_graduated(exam.grade)
+    except PermissionError as exc:
+        return _score_edit_reply(exam_id, False, str(exc))
     row = ExamScore.query.filter_by(id=score_id, exam_id=exam_id).first_or_404()
     # 总分不可单独删除（它随各科自动汇总）
     if row.subject == TOTAL_SUBJECT:
@@ -1188,6 +1200,9 @@ def exam_import_confirm(exam_id):
             'operator': current_user.real_name,
             'time': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
         }, ensure_ascii=False)
+        # P1 M-17：导入 token 一次性 —— 成功提交即作废，同一批次不能重放
+        exam.import_token = None
+        exam.import_draft = None
         db.session.commit()
     except Exception as e:
         db.session.rollback()

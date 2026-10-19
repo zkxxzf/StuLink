@@ -38,7 +38,47 @@ def _store_one_time_password(username, real_name, password):
     session.modified = True
 
 
-def _set_user_groups(user, group_ids):
+# ===== 2026-10-19 审计修复（H-01 权限组提权）=====
+# create() 原来只拦 role=='admin'，edit() 只拦「非超管编辑其他管理员 / 把账号设为
+# admin」；但两条路径最终都通过 _set_user_groups() 写入任意权限组。管理员组
+# （role=='admin' 或 name=='管理员组'）的 menu_keys 覆盖全部权限，非超管把账号
+# （含自己）挂进去即等同提权。口径：管理员组的授予/编辑只允许内置 admin 账号。
+ADMIN_GROUP_NAME = '管理员组'
+
+
+def _actor_is_super(actor=None):
+    """actor 是否超管：唯一口径 = 内置 admin 账号。"""
+    actor = current_user if actor is None else actor
+    return (getattr(actor, 'username', '') or '') == 'admin'
+
+
+def _is_admin_group(group):
+    """是否管理员组：role=='admin' 或名称为「管理员组」。"""
+    if group is None:
+        return False
+    return ((getattr(group, 'role', '') or '') == 'admin'
+            or (getattr(group, 'name', '') or '') == ADMIN_GROUP_NAME)
+
+
+def _admin_group_ids():
+    """全库管理员组 id 集合。"""
+    return {g.id for g in PermissionGroup.query.all() if _is_admin_group(g)}
+
+
+def _submitted_admin_group_ids(group_ids):
+    """提交的 group_id 中落在管理员组的部分。"""
+    ids = {g for g in (group_ids or []) if g}
+    if not ids:
+        return set()
+    return ids & _admin_group_ids()
+
+
+def _user_in_admin_group(user):
+    """用户当前是否属于管理员组（按多身份列表判定）。"""
+    return any(_is_admin_group(g) for g in (user.permission_groups or []))
+
+
+def _set_user_groups(user, group_ids, allow_admin_group=False):
     """设置用户的权限组（多身份，P5）：列表首个为主组。
 
     同步旧字段 permission_group_id 与多身份关联表 user_permission_groups，
@@ -47,12 +87,18 @@ def _set_user_groups(user, group_ids):
     2026-10-14 第四轮审计修复（多身份 B 项）：组 id 先与 permission_groups 实际
     存在的 id 求交 —— SQLite 不强制外键，原实现可写入指向不存在组的悬空关联
     （group_links 里 group=None，该"身份"静默消失）。
+
+    2026-10-19（H-01）：allow_admin_group=False 时**过滤掉管理员组**，
+    防止其它调用点绕过路由层校验直接授予。
     """
     from app.models import UserPermissionGroup, PermissionGroup
     valid_ids = {g.id for g in PermissionGroup.query.all()}
+    admin_ids = _admin_group_ids()
     gids = []
     for g in (group_ids or []):
         if g and g not in gids and g in valid_ids:
+            if g in admin_ids and not allow_admin_group:
+                continue
             gids.append(g)
     user.permission_group_id = gids[0] if gids else None
     keep = set(gids)
@@ -130,6 +176,16 @@ def create():
             flash('只有超管（admin 账号）能新建管理员账号', 'danger')
             return render_template('system/users/form.html', form=form, title='新建用户')
 
+        # H-01：权限组同样不能绕过 —— 非超管即使 role 填普通教师，
+        # 也不能把新账号挂进「管理员组」（否则等于造了一个超管）。
+        if _submitted_admin_group_ids(form.permission_group_ids.data) \
+                and not _actor_is_super():
+            log_operation(current_user, '新建被拒', '用户', None,
+                          '非超管不得授予管理员组',
+                          module='system', severity='WARNING')
+            flash('只有超管（admin 账号）能把账号加入「管理员组」', 'danger')
+            return render_template('system/users/form.html', form=form, title='新建用户')
+
         if role == 'homeroom_teacher':
             if len(grades) != 1 or not class_name:
                 flash('班主任必须指定 1 个管理年级和班级（一个班只属于一个年级）', 'danger')
@@ -154,7 +210,8 @@ def create():
             must_change_pwd=True,
         )
         # P5：多身份（权限组），列表首个为主组
-        _set_user_groups(user, form.permission_group_ids.data)
+        _set_user_groups(user, form.permission_group_ids.data,
+                         allow_admin_group=_actor_is_super())
         generated_pwd = form.password.data or _generate_password()
         user.set_password(generated_pwd)
         db.session.add(user)
@@ -234,6 +291,22 @@ def edit(id):
                 flash('只有超管能把账号设为管理员', 'danger')
                 return render_template('system/users/form.html', form=form,
                                        title='编辑用户')
+            # H-01：权限组是第二条提权路径 —— 非超管不得改管理员组用户的
+            # 任何字段（含密码），也不得把任何账号（含自己）加入管理员组。
+            if _user_in_admin_group(user):
+                log_operation(current_user, '编辑被拒', '用户', user.id,
+                              f'{user.real_name}（非超管不得编辑管理员组用户）',
+                              module='system', severity='WARNING')
+                flash('只有超管（admin 账号）能编辑管理员组用户', 'danger')
+                return render_template('system/users/form.html', form=form,
+                                       title='编辑用户')
+            if _submitted_admin_group_ids(form.permission_group_ids.data):
+                log_operation(current_user, '编辑被拒', '用户', user.id,
+                              f'{user.real_name}（非超管不得授予管理员组）',
+                              module='system', severity='WARNING')
+                flash('只有超管（admin 账号）能把账号加入「管理员组」', 'danger')
+                return render_template('system/users/form.html', form=form,
+                                       title='编辑用户')
         user.username = form.username.data
         # 姓名锁定：真实姓名与任课教师映射/成绩归属绑定，一经创建不可修改（成绩模块约定）
         new_name = (form.real_name.data or '').strip()
@@ -243,7 +316,8 @@ def edit(id):
         user.grade = ','.join(grades) or None
         user.class_name = class_name
         # P5：多身份（权限组），列表首个为主组
-        _set_user_groups(user, form.permission_group_ids.data)
+        _set_user_groups(user, form.permission_group_ids.data,
+                         allow_admin_group=is_super)
         if form.password.data:
             user.set_password(form.password.data)
         db.session.commit()
@@ -267,7 +341,11 @@ def toggle(id):
     if user.id == current_user.id and user.is_active:
         flash('不能禁用当前登录的账号', 'danger')
         return redirect(url_for('users.list_users'))
+    was_active = user.is_active
     user.is_active = not user.is_active
+    # P1 M-03：停用即吊销小程序旧令牌（网页端由 session_guard 的 is_active 检查兜住）
+    if was_active and not user.is_active:
+        user.wx_token_ver = int(user.wx_token_ver or 0) + 1
     db.session.commit()
     # v1.19.49.35：启禁变更 → 同步 Teacher.status (active/left)
     teacher_sync.sync_from_user(user)

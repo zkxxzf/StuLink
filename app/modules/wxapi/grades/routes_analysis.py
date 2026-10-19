@@ -192,6 +192,7 @@ def wx_grades_analysis(tab):
     if limited is not None:
         allowed = {c for gr, c in limited if gr == exam.grade}
         classes = [c for c in classes if c in allowed]
+    from app.modules.grades.routes.analysis import _combos_by_exam
     payload.update({
         'tab': tab,
         'exam': {
@@ -204,7 +205,12 @@ def wx_grades_analysis(tab):
         'options': {
             'classes': classes,
             'subjects': _subjects(exam_id),
+            # 与网页分析页同一份：本场方向 + 出现过的选科组合
+            'directions': payload['meta'].get('directions') or [],
+            'combos': _combos_by_exam().get(str(exam.id)) or [],
         },
         'denom': denom,
+        'direction': direction,
+        'selection': selection,
     })
     return wx_ok(payload)

@@ -521,9 +521,33 @@ def _register_response_middleware(app):
         return response
 
 
+def _env_flag(name, default=False):
+    """读布尔型环境变量：1/true/yes/on 为真。"""
+    raw = (os.environ.get(name) or '').strip().lower()
+    if not raw:
+        return default
+    return raw in ('1', 'true', 'yes', 'on')
+
+
 def create_app():
     app = Flask(__name__)
     app.config.from_object(Config)
+
+    # H-10：反代后启用 ProxyFix（默认关闭，避免伪造 X-Forwarded-* 头）。
+    # 只有明确设置 STULINK_TRUST_PROXY=1 才信任一层代理头。
+    if _env_flag('STULINK_TRUST_PROXY'):
+        from werkzeug.middleware.proxy_fix import ProxyFix
+        app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1,
+                                x_host=1, x_port=1)
+
+    # H-10：HTTPS 模式下强制 Secure Cookie（否则浏览器会通过明文回传会话）。
+    if _env_flag('STULINK_HTTPS'):
+        app.config['SESSION_COOKIE_SECURE'] = True
+    elif app.config.get('SESSION_COOKIE_SECURE'):
+        # 反向误配：声明了 Secure 但没声明 HTTPS，局域网 HTTP 下会全站掉登录。
+        logging.getLogger('stulink.app').warning(
+            '[H-10] SESSION_COOKIE_SECURE=1 但 STULINK_HTTPS 未开：'
+            '若当前仍是 HTTP，登录态会失效；请先上 TLS。')
     
     app.jinja_env.auto_reload = app.config.get('TEMPLATES_AUTO_RELOAD', False)
     # 模板全局函数：选科方向判断与配色
@@ -663,6 +687,51 @@ def create_app():
         flash('登录状态已失效，请重新登录', 'warning')
         return redirect(url_for('auth.login'))
 
+    # P1 M-02：绝对超时。PERMANENT_SESSION_LIFETIME 是滑动续期（每次请求重置），
+    # 只要用户一直活跃，被盗会话可以永久续命。这里用 login_at 卡一个绝对上限。
+    @app.before_request
+    def _enforce_absolute_session_timeout():
+        import time as _time
+        from flask_login import current_user, logout_user
+        if not current_user.is_authenticated:
+            return
+        endpoint = request.endpoint or ''
+        if endpoint in {'static', 'auth.login', 'auth.logout'}:
+            return
+        if request.path.startswith('/static/'):
+            return
+        if request.path in ('/health', '/healthz'):
+            return
+        started = session.get('login_at')
+        if not started:
+            # 旧会话没有 login_at：从本次请求开始计时，避免升级后全员被踢
+            session['login_at'] = _time.time()
+            return
+        try:
+            elapsed = _time.time() - float(started)
+        except (TypeError, ValueError):
+            session['login_at'] = _time.time()
+            return
+        timeout = int(app.config.get('SESSION_ABSOLUTE_TIMEOUT', 43200))
+        if elapsed <= timeout:
+            return
+
+        logout_user()
+        session.clear()
+        flash('登录已超过最长有效期，请重新登录', 'warning')
+        wants_json = (
+            request.accept_mimetypes.best == 'application/json'
+            or request.is_json
+            or request.headers.get('X-Requested-With') == 'XMLHttpRequest'
+            or request.path.startswith('/api/')
+            or request.path.startswith('/grades/api/')
+            or request.path.startswith('/wxapi/'))
+        if wants_json:
+            from flask import jsonify
+            return jsonify(success=False, code='session_expired',
+                           message='登录已超过最长有效期，请重新登录'), 401
+        return redirect(url_for('auth.login', next=request.path))
+
     # H-1：强制改密。must_change_pwd 字段此前「只写不读」（全库 15 处命中全为写入方），
     # 导致新导入教师「手机号即密码」可长期直接登录。这里补上唯一的读取方：
     # 除改密、登出、静态资源外一律 302 到改密页。
@@ -756,6 +825,11 @@ def create_app():
         response.headers['X-Frame-Options'] = 'DENY'
         # M-9：X-XSS-Protection 已被现代浏览器废弃（且旧实现本身可被利用），移除
         response.headers['Referrer-Policy'] = 'strict-origin-when-cross-origin'
+        # H-10：仅在明确声明 HTTPS 时下发 HSTS（HTTP 部署下发会让浏览器强制跳
+        # https 而服务并未监听 443，反而打不开）。
+        if _env_flag('STULINK_HTTPS'):
+            response.headers['Strict-Transport-Security'] = (
+                'max-age=31536000; includeSubDomains')
 
         # M-9：CSP。项目内联 <script>/onclick 数量大，直接 enforcing 会白屏，
         # 因此默认 Report-Only（只上报不拦截），收集一轮违规后再切换：

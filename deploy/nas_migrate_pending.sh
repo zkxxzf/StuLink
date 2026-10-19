@@ -20,7 +20,7 @@
 #   py -3.12 scripts/migration_status.py --data-dir <生产数据目录> --pending
 #
 # 用法（在本地机器执行；该账号在 docker 组，docker 命令无需 sudo）
-#   ssh 17752560383@10.193.191.210 "bash -s" < deploy/nas_migrate_pending.sh
+#   ssh <NAS_USER>@<NAS_HOST> "bash -s" < deploy/nas_migrate_pending.sh
 #
 # 幂等：单个迁移自身幂等（列已存在则跳过；回填只处理未处理过的行），可重复执行。
 # 安全：不停应用就改 SQLite 会有写锁 / 半迁移风险（整包脚本原话），故流程为
@@ -127,6 +127,9 @@ run_mig scripts/migrate/migrate_ai_key_perm_20261014.py              # 权限组
 # 生产会漏跑；必须在 check_columns --fix 之前跑，否则补出来的 idx 列是 NULL）
 run_mig scripts/migrate/migrate_encrypt_student_phone_20261019.py --apply
 run_mig scripts/migrate/migrate_encrypt_teacher_phone_20261019.py --apply
+# 2026-10-19 审计 H-06：身份证确定性 IV → 随机 IV + 盲索引（两库；停机窗口；
+# 脚本内部会先 backup_db，--apply 必须带 --confirm）
+run_mig scripts/migrate/migrate_encrypt_id_card_20261019.py --apply --confirm
 
 echo "[5/6] 兜底：补齐模型声明但现网缺失的列（改库前自动备份对应库）"
 docker run --rm -v "$DATA":/app/data -w /app \

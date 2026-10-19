@@ -22,6 +22,7 @@ from app.modules.wxapi import bp
 from app.modules.wxapi.core.guards import wx_login_required
 from app.modules.wxapi.core.response import wx_err, wx_ok
 from app.modules.wxapi.academic.routes_schedule import _teacher_uid
+from app.utils.text_guard import safe_download_name
 
 LIMIT = 100
 CATEGORY_TEXT = dict(ACHIEVEMENT_CATEGORIES)
@@ -93,7 +94,7 @@ def wx_achievement_attachment(att_id):
     if not root:
         return wx_err('附件文件缺失', 404)
     return send_file(os.path.join(root, stored), as_attachment=True,
-                     download_name=att.file_name or stored)
+                     download_name=safe_download_name(att.file_name or stored))
 
 
 def _row(r, files):

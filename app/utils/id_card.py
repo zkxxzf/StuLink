@@ -4,10 +4,14 @@
 """身份证号工具
 
 - 校验：18 位格式 + GB 11643-1999 校验码
-- 存储：crypto.encrypt 确定性加密（同一号码密文相同，支持唯一性等值查询）
+- 存储（2026-10-19 H-06 起）：crypto.encrypt_rand 随机 IV；
+  唯一性/等值查询走 crypto.id_card_index 盲索引（HMAC，不可逆）。
+  legacy_encrypt_id_card 仅用于与存量确定性密文双读兼容。
 - 展示：脱敏（前 3 后 4）
 """
-from app.utils.crypto import encrypt, decrypt
+from app.utils.crypto import (decrypt, encrypt, encrypt_rand,
+                              id_card_index as _id_card_index,
+                              normalize_id_card)
 
 # 校验码权重与映射（GB 11643-1999）
 _WEIGHTS = (7, 9, 10, 5, 8, 4, 2, 1, 6, 3, 7, 9, 10, 5, 8, 4, 2)
@@ -15,8 +19,8 @@ _CHECK_CODES = '10X98765432'
 
 
 def normalize(value):
-    """去除空格并大写 X；空值返回空串"""
-    return str(value or '').strip().replace(' ', '').upper()
+    """去除空白/分隔符并大写 X；空值返回空串"""
+    return normalize_id_card(value) or ''
 
 
 def validate(value):
@@ -44,9 +48,20 @@ def mask(value):
 
 
 def encrypt_id_card(value):
-    """身份证号 → 密文（空值返回 None）"""
+    """身份证号 → 随机 IV 密文（空值返回 None）。新数据一律走这里。"""
+    s = normalize(value)
+    return encrypt_rand(s) if s else None
+
+
+def legacy_encrypt_id_card(value):
+    """存量兼容：确定性 IV 密文（只用于与旧数据等值比对，禁止写新数据）。"""
     s = normalize(value)
     return encrypt(s) if s else None
+
+
+def id_card_index(value):
+    """身份证盲索引（随机 IV 加密后的精确查询/去重）。"""
+    return _id_card_index(value)
 
 
 def decrypt_id_card(cipher):

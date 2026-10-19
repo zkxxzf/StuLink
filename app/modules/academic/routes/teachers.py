@@ -338,16 +338,19 @@ def teacher_edit(tid):
             if not id_card_util.validate(id_card_raw):
                 flash('身份证号无效（需为 18 位有效号码，含校验码）', 'danger')
                 return back
-            new_cipher = id_card_util.encrypt_id_card(id_card_raw)
-            old_cipher = t.id_card_enc or ''
-            if new_cipher != old_cipher:
-                if old_cipher:
+            # H-06：身份证改盲索引比对；密文随机 IV 不再可比较。
+            new_idx = id_card_util.id_card_index(id_card_raw)
+            old_idx = t.id_card_idx or ''
+            if new_idx != old_idx:
+                if t.id_card_enc:
                     flash('身份证号已录入，如需更正请确认无误后重试', 'warning')
-                exist = Teacher.query.filter_by(id_card_enc=new_cipher).first()
-                if exist and exist.id != t.id:
+                exist = Teacher.query.filter(
+                    Teacher.id_card_filter(id_card_raw),
+                    Teacher.id != t.id).first()
+                if exist:
                     flash(f'该身份证号已属于教师「{exist.name}」，无法重复使用', 'danger')
                     return back
-                t.id_card_enc = new_cipher
+                t.set_id_card(id_card_raw)
 
         changes = []
         if name != t.name:

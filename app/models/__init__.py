@@ -5,6 +5,7 @@ from app.models.student import Student
 from app.models.room import Room, BedAssignment, StudentAccommodation
 from app.models.dictionary import DictCategory, DictItem
 from app.models.operation_log import OperationLog
+from app.models.login_throttle import LoginThrottle
 from app.models.trash import TrashRecord
 from app.models.assignment_history import AssignmentHistory
 from app.models.class_profile import ClassProfile, ClassSubject
@@ -50,7 +51,8 @@ from app.models.timetable import (
 )
 
 __all__ = ['User', 'Student', 'Room', 'BedAssignment', 'StudentAccommodation',
-           'DictCategory', 'DictItem', 'OperationLog', 'AssignmentHistory',
+           'DictCategory', 'DictItem', 'OperationLog', 'LoginThrottle',
+           'AssignmentHistory',
            'ClassProfile', 'ClassSubject',
            'PermissionGroup', 'UserClassLink', 'GradeSetting',
            'Exam', 'ExamScore', 'ExamBand', 'TeacherSubjectLink', 'ExamTeacherLink',

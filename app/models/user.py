@@ -30,6 +30,9 @@ class User(UserMixin, db.Model):
     permission_group_id = db.Column(db.Integer, db.ForeignKey('permission_groups.id'), nullable=True)
     is_active = db.Column(db.Boolean, default=True)
     must_change_pwd = db.Column(db.Boolean, default=True)
+    # P1 M-03：小程序令牌版本。令牌载荷带 ver，登出/改密/停用后递增 → 旧令牌立即失效。
+    wx_token_ver = db.Column(db.Integer, nullable=False, default=0,
+                             server_default='0')
     created_at = db.Column(db.DateTime, default=datetime.now)
     updated_at = db.Column(db.DateTime, default=datetime.now, onupdate=datetime.now)
 
@@ -40,6 +43,8 @@ class User(UserMixin, db.Model):
 
     def set_password(self, password):
         self.password_hash = generate_password_hash(password)
+        # P1 M-03：改密即吊销小程序旧令牌（与网页端 session_guard 的"改密踢会话"同口径）
+        self.wx_token_ver = int(self.wx_token_ver or 0) + 1
 
     def check_password(self, password):
         return check_password_hash(self.password_hash, password)

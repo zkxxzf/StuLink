@@ -1523,12 +1523,46 @@ def review_visible_grades(user):
     return visible_academic_grades(user)
 
 
+def reviewer_teacher_uid(user):
+    """当前审批人对应的教师 uid。
+
+    与网页 `_applicant()` 同口径：有教师档案取 `teacher_uid`，没有则回退
+    用户名（截 16 位）。只在"判断是不是本人申请"时使用，不用于授权。
+    """
+    if user is None:
+        return None
+    try:
+        from app.modules.academic.services import teacher_service
+        t = teacher_service.teacher_of_user(user)
+        if t:
+            return t.teacher_uid
+    except Exception:  # noqa: BLE001  教师档案异常不应阻断审批
+        pass
+    username = getattr(user, 'username', None)
+    user_id = getattr(user, 'id', None)
+    fallback = username or (str(user_id) if user_id is not None else '')
+    return fallback[:16] or None
+
+
+def is_self_review(sw, user):
+    """申请人是否就是当前审批人（H-03 自审自批）。"""
+    if sw is None or user is None:
+        return False
+    applicant_uid = getattr(sw, 'applicant_uid', None)
+    if not applicant_uid:
+        return False
+    return applicant_uid == reviewer_teacher_uid(user)
+
+
 def can_review(sw, user):
     """当前用户能否审批这条申请的"当前这一级"（管理员可审任何一级）。"""
     if not sw or sw.status != 'pending':
         return False
     # v1.19.49.35 换课：对方确认前不进教务审批队列（避免"教务批了、对方还没同意"）
     if getattr(sw, 'partner_status', None) == 'pending':
+        return False
+    # H-03：申请人不能审批自己的单（含 admin / 课表终审）
+    if is_self_review(sw, user):
         return False
     step = review_step_of(sw)
     if not step:
@@ -1560,6 +1594,12 @@ def review_swap(swap_id, reviewer_id, reviewer_name, action, review_note='',
         return False, f'当前状态为「{SWAP_STATUS.get(sw.status, sw.status)}」，仅待审核记录可审核', None
     if action not in ('approve', 'reject'):
         return False, '无效的审核操作', None
+    # H-03：申请人不得审批本人单据（服务层兜底；路由层还会提前 403）
+    if user is None:
+        from app.models import User
+        user = db.session.get(User, reviewer_id)
+    if is_self_review(sw, user):
+        return False, '不得审批本人提交的调课申请', None
 
     if action == 'reject':
         if not (review_note or '').strip():
@@ -1664,7 +1704,8 @@ def batch_pending_siblings(sw, status='pending'):
             .order_by(ScheduleSwap.id).all())
 
 
-def review_swap_batch(swap_id, reviewer_id, reviewer_name, action, review_note=''):
+def review_swap_batch(swap_id, reviewer_id, reviewer_name, action, review_note='',
+                      user=None):
     """调课批次审批（个人多节 / 统一调课共用）：同批次内所有 pending 记录执行同一动作。
 
     单事务、全成全败；返回 (success, message, 代表记录)。
@@ -1678,8 +1719,16 @@ def review_swap_batch(swap_id, reviewer_id, reviewer_name, action, review_note='
         return False, '无效的审核操作', None
     if action == 'reject' and not (review_note or '').strip():
         return False, '驳回必须填写理由', None
+    # H-03：批次审批同样不得由申请人本人执行
+    if user is None:
+        from app.models import User
+        user = db.session.get(User, reviewer_id)
+    if is_self_review(sw, user):
+        return False, '不得审批本人提交的调课申请', None
 
     sibs = batch_pending_siblings(sw)
+    if any(is_self_review(s, user) for s in sibs):
+        return False, '不得审批本人提交的调课申请', None
     if not sibs:
         return False, '没有待审核的记录', None
     # 2026-10-12（v1.19.49.35）批量换课 / 代课：批内每条都有自己的 partner，

@@ -25,6 +25,7 @@ from app.modules.academic import bp
 from app.modules.academic.services import achievement_service as ach_svc
 from app.utils.decorators import perm_required
 from app.utils.helpers import log_operation
+from app.utils.text_guard import safe_download_name
 
 _CATEGORY_KEYS = {k for k, _ in ACHIEVEMENT_CATEGORIES}
 _XLSX_MIME = ('application/vnd.openxmlformats-officedocument'
@@ -511,9 +512,9 @@ def achievement_file_view(fid):
         abort(404)
     if not ach_svc.is_previewable(att.ext):
         return send_from_directory(root, stored, as_attachment=True,
-                                   download_name=att.file_name or stored)
+                                   download_name=safe_download_name(att.file_name or stored))
     return send_from_directory(root, stored, as_attachment=False,
-                               download_name=att.file_name or stored,
+                               download_name=safe_download_name(att.file_name or stored),
                                mimetype=att.mime or 'application/octet-stream')
 
 
@@ -533,4 +534,4 @@ def achievement_file_download(fid):
     if not root:
         abort(404)
     return send_from_directory(root, stored, as_attachment=True,
-                               download_name=att.file_name or stored)
+                               download_name=safe_download_name(att.file_name or stored))

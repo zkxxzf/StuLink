@@ -71,9 +71,12 @@ def _extract_token():
 
 
 def _load_user(payload):
-    """按载荷取用户；不存在或未启用返回 None。"""
+    """按载荷取用户；不存在、未启用或令牌版本过期返回 None。"""
     user = db.session.get(User, payload.get('uid'))
     if user is None or not user.is_active:
+        return None
+    # P1 M-03：登出/改密/停用会递增 wx_token_ver；旧令牌的 ver 不再匹配。
+    if int(payload.get('ver') or 0) != int(user.wx_token_ver or 0):
         return None
     return user
 

@@ -42,6 +42,12 @@ def _apply(r, user, note):
     exam = db.session.get(Exam, r.exam_id)
     if exam is None:
         return False, '该申请对应的考试已不存在，无法应用改分'
+    # P1 M-18：已毕业年级冻结改分
+    from app.utils.helpers import assert_grade_not_graduated
+    try:
+        assert_grade_not_graduated(exam.grade)
+    except PermissionError as exc:
+        return False, str(exc)
     srow = (ExamScore.query
             .filter_by(exam_id=r.exam_id, student_no=r.student_no,
                        subject=r.subject)
@@ -86,11 +92,32 @@ def _apply(r, user, note):
                   '（总分与排名已重算，已写入分数修改记录）' % r.delta)
 
 
+def _is_self_audit(r, user):
+    """申请人是否就是当前审批人（H-02 自审自批）。
+
+    任一侧 id 缺失时不判为本人（避免把没有 applicant_id 的历史单全部锁死）；
+    真正的自审请求由路由层 403 双保险兜住。
+    """
+    if r is None or user is None:
+        return False
+    applicant_id = getattr(r, 'applicant_id', None)
+    user_id = getattr(user, 'id', None)
+    if applicant_id is None or user_id is None:
+        return False
+    return applicant_id == user_id
+
+
 def audit_review(r, user, action, note='', apply_now=False):
     """审批一张复核单，返回 (ok, message)。
 
     r 必须已通过调用方的数据范围校验（考试可见 + 班级可写）。
+
+    2026-10-19 审计修复（H-02 · 自审自批）：**申请人本人不得审批自己的复核单**，
+    管理员同样适用 —— 「批准并应用」会真的改分并重算排名，自己批自己等于没有
+    第二人复核。本判断放在最前，先于状态/动作判断。
     """
+    if _is_self_audit(r, user):
+        return False, '不得审批本人提交的复核申请（请由其他有改分权限的老师审批）'
     if r.status != 'pending':
         return False, '该申请已处理过，不能重复审核'
     if action not in ('approve', 'reject'):

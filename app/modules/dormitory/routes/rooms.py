@@ -7,6 +7,7 @@ from app.models import Room, BedAssignment, Student, StudentAccommodation
 from app.utils.decorators import perm_required
 from app.utils.helpers import get_dict_values, get_active_grades, get_class_options, log_operation, to_int
 from app.utils.err_safe import safe_error   # M-12
+from app.utils.text_guard import sanitize_label   # M-04：班级名入库清洗
 # 2026-10-11 审计：宿舍数据范围唯一口径（房间查询 / 班级归属）
 from app.utils.dormitory_scope import room_scope_query, class_in_scope
 from sqlalchemy import func
@@ -157,7 +158,12 @@ def edit(id):
         new_capacity = to_int(request.form.get('capacity'), room.capacity)
         new_grade = request.form.get('grade', '') or None
         # 分配班级（可多选）：按勾选顺序拼接为 "01班+02班"
-        raw_classes = [c.strip() for c in request.form.getlist('class_names') if c and c.strip()]
+        # M-04：标签型短文本先按字符白名单清洗再入库 —— 模板用它渲染标签，
+        # 原先只 strip 会让 `<img onerror=...>` 原样进库（存储型 XSS）。
+        raw_classes = [sanitize_label(c, 50)
+                       for c in request.form.getlist('class_names')
+                       if c and c.strip()]
+        raw_classes = [c for c in raw_classes if c]
         ordered_classes = []
         for c in raw_classes:
             if c not in ordered_classes:

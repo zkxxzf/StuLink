@@ -38,8 +38,14 @@ from app.utils.text_guard import (sanitize_label, sanitize_prefix,
                                   safe_download_name, pad2)
 from app.utils.upload_guard import validate_upload   # L-8：导入文件类型校验
 from app.utils.export_helpers import xl_row   # M-4：公式注入防护
+from app.utils.trash import archive   # H-04/H-05：删除前归档
 
 MODE_LABEL = {0: '模式0：前缀+考场号+座号', 1: '模式1：学号即考号', 2: '模式2：自定义考号'}
+
+# 2026-10-19 审计 H-05：ExamAffair.status = draft / arranged / linked。
+# 「已编排」= arranged 或 linked —— 名单里的人带着考场/座位/考号，
+# 同步移除等于拆掉编排结果，必须先确认 + 先归档，不能静默批量 delete。
+_ARRANGED_STATUSES = ('arranged', 'linked')
 
 _HF = Font(bold=True, color='FFFFFF')
 _HFL = PatternFill(start_color='4472C4', end_color='4472C4', fill_type='solid')
@@ -674,11 +680,29 @@ def affair_students_sync(aid):
         if row.is_attend is None:
             row.is_attend = True
     # 默认移除：名单中已不属于有效集合的学生（学籍已删/无班级/年级已毕业）
+    # H-05：先算出待删行，不边遍历边删；已编排批次默认拒绝，需显式确认。
     sys_nos = {st.student_number for st in sys_stus}
-    for no, row in exist.items():
-        if no not in sys_nos:
+    to_remove = [row for no, row in exist.items() if no not in sys_nos]
+    confirm_remove = (request.form.get('confirm_remove') or '').strip() \
+        in ('1', 'true', 'yes', 'on')
+    if to_remove and (affair.status or '') in _ARRANGED_STATUSES \
+            and not confirm_remove:
+        return jsonify({
+            'ok': False,
+            'need_confirm': True,
+            'msg': (f'本批次已编排考场/座位，本次同步将移除 {len(to_remove)} 名'
+                    '学生并可能打乱编排结果。确认要继续吗？'),
+        }), 400
+    archived = 0
+    if to_remove:
+        rec = archive('grades', 'affair_student', '考务名单', to_remove,
+                      summary=f'{affair.name}：同步移除 {len(to_remove)} 人',
+                      operator=current_user)
+        if rec is not None:
+            archived = len(to_remove)
+        for row in to_remove:
             db.session.delete(row)
-            removed += 1
+        removed = len(to_remove)
     skipped = len(all_stus) - len(sys_stus)   # 因无班级/已毕业而未导入的学籍数
     # v1.19.49.35 自动匹配「上一场不参加考试的学生」：取本年级**日期早于本批次**的最近一场考务批次，
     # 把其中标记为不参考的学号，在本批次一律同步为不参考（只 是→否；不反向把「否」改回「是」）。
@@ -700,10 +724,13 @@ def affair_students_sync(aid):
                 matched += 1
     db.session.commit()
     log_operation(current_user, '同步', '考务学生', aid,
-                  f'新增{added}人/移除{removed}人/有效{len(sys_stus)}人/跳过无班{skipped}人'
+                  f'新增{added}人/移除{removed}人/归档{archived}人/'
+                  f'有效{len(sys_stus)}人/跳过无班{skipped}人'
                   + (f'/沿用上一场不参考{matched}人' if matched else ''),
-                  module='grades')
+                  module='grades',
+                  severity=('WARNING' if removed else 'INFO'))
     return jsonify({'ok': True, 'added': added, 'removed': removed,
+                    'archived': archived, 'need_confirm': False,
                     'total': len(sys_stus), 'skipped_no_class': skipped,
                     'matched_non_attend': matched,
                     'prev_affair': (prev_affair.name if prev_affair else '')})
@@ -901,12 +928,27 @@ def affair_student_save(aid):
 @login_required
 @perm_required('grades.edit')
 def affair_student_delete(aid, sid):
+    # H-04：批次归属校验（年级范围）+ 删除前归档 + 留痕，缺一不可。
+    # 原实现只比对 st.affair_id != aid，任何 grades.edit 账号枚举 aid/sid
+    # 即可删掉其它年级的考生，且事后没有任何记录。
+    affair = _get_affair_checked(aid)
     st = AffairStudent.query.get_or_404(sid)
-    if st.affair_id != aid:
-        abort(403)
+    if st.affair_id != affair.id:
+        abort(404)
+    rec = archive('grades', 'affair_student', '考务名单', [st],
+                  summary=f'{affair.name}：删除 {st.student_no}',
+                  operator=current_user)
     db.session.delete(st)
-    db.session.commit()
-    return jsonify({'ok': True})
+    try:
+        db.session.commit()
+    except Exception as _e:  # noqa: BLE001
+        db.session.rollback()
+        logger.exception('考务名单删除失败 affair=%s sid=%s', aid, sid)
+        return jsonify({'ok': False, 'msg': '删除失败，本次未写入，请重试'}), 500
+    log_operation(current_user, '删除', '考务学生', st.id,
+                  f'{affair.name} 删除 {st.student_no} {st.name or ""}',
+                  module='grades', severity='WARNING')
+    return jsonify({'ok': True, 'archived': rec is not None})
 
 
 @bp.route('/affairs/<int:aid>/students/clear', methods=['POST'])

@@ -8,8 +8,9 @@
 """
 import logging
 
-from flask import current_app, request
+from flask import current_app, g, request
 
+from app.extensions import db
 from app.models import User
 from app.modules.wxapi import bp
 from app.modules.wxapi.core.guards import (
@@ -124,7 +125,8 @@ def _server_info():
 def login_payload(user, group_id=None, openid=None):
     """统一的登录返回：令牌 + 用户 + 身份组 + 模块 + 能力开关。"""
     ttl = int(current_app.config.get('WX_TOKEN_TTL', 43200))
-    token, real_ttl = issue_token(user.id, group_id, ttl, openid)
+    token, real_ttl = issue_token(user.id, group_id, ttl, openid,
+                                  ver=user.wx_token_ver or 0)
     return {
         'token': token,
         'expires_in': real_ttl,
@@ -189,5 +191,8 @@ def wx_bootstrap():
 @bp.route('/logout', methods=['POST'])
 @wx_login_required
 def wx_logout():
-    """登出：令牌本身无状态，这里只做语义响应（客户端应清除本地令牌）。"""
+    """登出：递增令牌版本，令当前及更早签发的令牌立即失效（P1 M-03）。"""
+    user = g.wx_user
+    user.wx_token_ver = int(user.wx_token_ver or 0) + 1
+    db.session.commit()
     return wx_ok(message='已退出登录')

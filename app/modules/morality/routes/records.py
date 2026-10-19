@@ -18,6 +18,7 @@ from app.models.morality import (RewardPunishment, RewardPunishmentAttachment,
 from app.modules.morality import bp
 from app.modules.morality.services import reward_service as svc
 from app.utils.decorators import perm_required
+from app.utils.text_guard import safe_download_name
 
 
 def _filters():
@@ -221,9 +222,9 @@ def rp_file_view(fid):
         abort(404)
     if not svc.is_previewable(att.ext):
         return send_from_directory(root, stored, as_attachment=True,
-                                   download_name=att.file_name or stored)
+                                   download_name=safe_download_name(att.file_name or stored))
     return send_from_directory(root, stored, as_attachment=False,
-                               download_name=att.file_name or stored,
+                               download_name=safe_download_name(att.file_name or stored),
                                mimetype=att.mime or 'application/octet-stream')
 
 
@@ -241,7 +242,7 @@ def rp_file_download(fid):
     if not root:
         abort(404)
     return send_from_directory(root, stored, as_attachment=True,
-                               download_name=att.file_name or stored)
+                               download_name=safe_download_name(att.file_name or stored))
 
 
 # ==================== 内部工具 ====================

@@ -5,7 +5,8 @@ from markupsafe import Markup
 from flask_login import login_required, current_user
 from app.extensions import db
 from app.models import Student, BedAssignment, StudentAccommodation, Room
-from app.utils.crypto import encrypt as _encrypt_id
+from app.utils.crypto import (encrypt as _legacy_encrypt,
+                              id_card_index as _id_card_index)
 from app.forms.student_forms import StudentForm
 from app.utils.decorators import perm_required
 from app.utils.student_scope import apply_student_scope
@@ -287,8 +288,9 @@ def create():
             flash('身份证号格式不正确', 'danger')
             return render_template('system/students/form.html', form=form, title='新增学生')
         
-        # 2. 检查身份证号是否重复
-        if id_card and Student.query.filter_by(_id_card_encrypted=_encrypt_id(id_card)).first():
+        # 2. 检查身份证号是否重复（H-06：盲索引优先，兼容旧确定性密文双读）
+        if id_card and Student.query.filter(
+                Student.id_card_filter(id_card)).first():
             flash('该身份证号已存在', 'danger')
             return render_template('system/students/form.html', form=form, title='新增学生')
         
@@ -369,7 +371,7 @@ def edit(id):
         # 2. 检查身份证号是否重复（排除自身）
         if id_card:
             existing_id = Student.query.filter(
-                Student._id_card_encrypted == _encrypt_id(id_card),
+                Student.id_card_filter(id_card),
                 Student.id != student.id
             ).first()
             if existing_id:
@@ -889,13 +891,19 @@ def import_students():
             return redirect(url_for('students.list_students'))
 
         # 已有数据: student_number -> (name, id)
+        # H-06：同时收集盲索引与旧确定性密文，迁移未跑时也能正确判重。
         existing_snum_map = {}
         existing_ids = set()
-        for s in db.session.query(Student.student_number, Student.name, Student.id, Student._id_card_encrypted).all():
+        existing_idx = set()
+        for s in db.session.query(
+                Student.student_number, Student.name, Student.id,
+                Student._id_card_encrypted, Student.id_card_idx).all():
             if s[0]:
                 existing_snum_map[s[0]] = (s[1], s[2])
             if s[3]:
                 existing_ids.add(s[3])
+            if s[4]:
+                existing_idx.add(s[4])
 
         errors = []
         students_to_add = []
@@ -903,6 +911,7 @@ def import_students():
         conflicts = []
         seen_snums = set()
         seen_ids = set()
+        seen_idx = set()
 
         for row_idx in range(2, ws.max_row + 1):
             row_data = {}
@@ -943,14 +952,17 @@ def import_students():
                     seen_snums.add(snum)
 
             if id_card and not update_mode:
+                _idx = _id_card_index(id_card)
+                _legacy = _legacy_encrypt(id_card)
                 if not _validate_id_card(id_card):
                     row_errors.append(f'身份证号无效')
-                elif _encrypt_id(id_card) in existing_ids:
+                elif _idx in existing_idx or _legacy in existing_ids:
                     row_errors.append(f'身份证号已存在')
-                elif _encrypt_id(id_card) in seen_ids:
+                elif _idx in seen_idx or _legacy in seen_ids:
                     row_errors.append(f'身份证号文件内重复')
                 else:
-                    seen_ids.add(_encrypt_id(id_card))
+                    seen_idx.add(_idx)
+                    seen_ids.add(_legacy)
 
             # 班级名称校验：只允许两位数数字班级、不分班、已转出
             class_val = row_data.get('class_name', '').strip()
@@ -1450,7 +1462,8 @@ def batch_transfer():
                 continue
 
             if tpl_type == 'id_card':
-                student = Student.query.filter_by(_id_card_encrypted=_encrypt_id(match_val)).first()
+                student = Student.query.filter(
+                    Student.id_card_filter(match_val)).first()
             else:
                 student = Student.query.filter_by(student_number=match_val).first()
 

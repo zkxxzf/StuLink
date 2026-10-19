@@ -1163,18 +1163,24 @@ _syncCapBar();
 // v1.19.49.35 取消 remove_missing 参数：无班级/已转出/已毕业学生一律不进入成绩模块，
 // 名单中不再符合条件的学生（学籍已删等）由服务端默认自动剔除。
 // v1.19.49.35 同步后会「自动沿用上一场不参加考试的学生」（服务端 matched_non_attend）。
-function syncStudents(){
+function syncStudents(forceRemove){
     var fd = new FormData();
+    if(forceRemove){ fd.append('confirm_remove', '1'); }
     fetch('/grades/affairs/'+AID+'/students/sync', {method:'POST', body:fd, headers:{'X-CSRFToken':csrf()}})
         .then(r=>r.json()).then(d=>{
             if(d.ok){
                 var msg = '同步完成：新增 '+d.added+' 人，移除 '+d.removed+' 人，有效学籍共 '+d.total+' 人';
+                if(d.archived){ msg += '\n已归档到回收站 '+d.archived+' 人，可恢复'; }
                 if(d.matched_non_attend){
                     msg += '\n自动沿用上一场不参加考试的学生 '+d.matched_non_attend+' 人'
                          + (d.prev_affair ? ('（上一场：'+d.prev_affair+'）') : '');
                 }
                 if(d.skipped_no_class){ msg += '\n（已跳过无班级学生 '+d.skipped_no_class+' 人：不分班/已转出/已毕业等）'; }
                 alert(msg); location.reload();
+            }
+            else if(d.need_confirm){
+                // H-05：已编排批次移除学生会打乱考场/座位/考号，必须二次确认。
+                if(confirm(d.msg)){ syncStudents(true); }
             }
             else alert(d.msg);
         });
@@ -2717,7 +2723,8 @@ function renderInvigMatrix(d){
                 + '</th>';
         });
     });
-    thead.innerHTML = r1 + '</tr><tr>' + r2 + '</tr>';
+    // r1/r2 的动态段均经 escHtml，静态段为固定标签，故本行为安全拼接
+    thead.innerHTML = r1 + '</tr><tr>' + r2 + '</tr>';  // # sec-allow: 模板-裸innerHTML
 
     var poolNames = d.pool.map(function(p){ return p.name; });
     var rows = [];

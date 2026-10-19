@@ -47,6 +47,7 @@ WX_ROUTES = {
     'exam_new': '/package-grades/pages/exam-new/index',
     'affairs': '/package-exam/pages/index/index',
     'detail': '/package-grades/pages/scores/index',
+    'import': '/package-grades/pages/import/index',
     'score_changes': '/package-grades/pages/manage-view/index?view=score_changes',
     'analysis_grade': '/package-grades/pages/analysis/index?tab=grade',
     'analysis_class': '/package-grades/pages/analysis/index?tab=class',
@@ -62,6 +63,9 @@ WX_ROUTES = {
     'reviews': '/package-grades/pages/review/index',
     'reviews_manage': '/package-grades/pages/review-manage/index',
     'bands': '/package-grades/pages/bands/index',
+    'pivot': '/package-grades/pages/pivot/index',
+    'report': '/package-grades/pages/report/index',
+    'ai': '/package-grades/pages/ai/index',
 }
 
 EXAM_LIMIT = 300

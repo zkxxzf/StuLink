@@ -5,12 +5,13 @@ from flask import (Blueprint, render_template, redirect, url_for, flash, request
 from flask_login import login_user, logout_user, login_required, current_user
 from app.forms.auth_forms import LoginForm, ChangePasswordForm
 from app.models import User
-from app.utils.cache import cache
 from app.utils.helpers import log_operation
+from app.utils.login_throttle import (check as throttle_check,
+                                      clear as throttle_clear,
+                                      register_failure)
 from app.utils.session_guard import stamp
 from urllib.parse import urlparse
 import logging
-import threading
 import time
 
 # 2026-10-10 架构审计修复：本文件原有静默 `except Exception: pass`，失败不可观测。
@@ -34,9 +35,8 @@ _LOGIN_ACCT_LOCK_SECONDS = 900    # 触发后锁定时长（15 分钟）
 # 等于给了一个"无需凭据即可让别人登不进来"的拒绝服务面。
 # 现在锁与计数都按「来源 IP + 账号」双键：只有同一个来源反复打同一个账号才锁，
 # 账号本人在自己电脑上仍可正常登录（与 MCP 侧 M-5 的修复口径一致）。
-# #17：cache 无原子自增，读-改-写之间有窗口，并发失败会互相覆盖、少计数。
-# 这里用模块级锁把「读+写」合成一个临界区。
-_FAIL_LOCK = threading.Lock()
+# 2026-10-19 P1 M-01：计数从进程内 cache 改为 SQLite（login_throttles）——
+# 重启不再清零、多线程写用 BEGIN IMMEDIATE 串行化。
 
 
 def _is_safe_redirect(target):
@@ -70,27 +70,25 @@ def login():
 
     form = LoginForm()
     if form.validate_on_submit():
-        # 频率限制检查
+        # 频率限制检查（P1 M-01：SQLite 持久化，重启/多线程仍生效）
         client_ip = request.remote_addr or 'unknown'
-        cache_key = f'login_attempts_{client_ip}'
-        attempts = cache.get(cache_key) or []
-        now = time.time()
-        # 清理过期记录
-        attempts = [t for t in attempts if now - t < _LOGIN_RATE_WINDOW]
-        if len(attempts) >= _LOGIN_RATE_LIMIT:
-            flash(f'登录尝试过于频繁，请等待 {_LOGIN_RATE_WINDOW} 秒后再试', 'danger')
+        ip_key = f'ip:{client_ip}'
+        allowed, retry = throttle_check(
+            ip_key, _LOGIN_RATE_LIMIT, _LOGIN_RATE_WINDOW, 0)
+        if not allowed:
+            flash(f'登录尝试过于频繁，请等待 {max(1, retry)} 秒后再试', 'danger')
             return render_template('auth/login.html', form=form)
 
         # M-3：账号维度锁定（多 IP 分布式爆破时，IP 限流形同虚设）
         # v1.19.49.35 S-7：归一化 —— strip().lower() 避免“ Admin”“ADMIN” 重置计数绕过锁定
-        # 2026-10-13 #11：锁定键加入来源 IP（login_lock_<ip>_<username>），
-        # 防止"知道用户名即可把别人锁在门外"的拒绝服务（详见上方常量注释）。
+        # 2026-10-13 #11：锁定键加入来源 IP，防止"知道用户名即可把别人锁在门外"。
         username_typed = (form.username.data or '').strip().lower()
-        acct_fail_key = f'login_fail_{client_ip}_{username_typed}'
-        acct_lock_key = f'login_lock_{client_ip}_{username_typed}'
-        locked_until = cache.get(acct_lock_key)
-        if locked_until and time.time() < float(locked_until):
-            left = int(float(locked_until) - time.time()) // 60 + 1
+        acct_key = f'acct:{client_ip}:{username_typed}'
+        allowed, retry = throttle_check(
+            acct_key, _LOGIN_ACCT_FAIL_LIMIT,
+            _LOGIN_ACCT_LOCK_SECONDS, _LOGIN_ACCT_LOCK_SECONDS)
+        if not allowed:
+            left = max(1, retry) // 60 + 1
             flash(f'该账号在本机连续登录失败次数过多，已临时锁定，请 {left} 分钟后再试'
                   '（或改用本人常用设备登录）', 'danger')
             return render_template('auth/login.html', form=form)
@@ -98,12 +96,14 @@ def login():
         user = User.query.filter_by(username=(form.username.data or '').strip()).first()
         if user and user.is_active and user.check_password(form.password.data):
             # 登录成功，清除尝试记录
-            cache.delete(cache_key)
-            cache.delete(acct_fail_key)   # M-3：成功后清零账号失败计数
+            throttle_clear(ip_key)
+            throttle_clear(acct_key)   # M-3：成功后清零账号失败计数
             # M-2：登录前清空旧会话（防会话固定）→ 登录后写入口令摘要并设为持久会话
             session.clear()
             login_user(user)
             session.permanent = True
+            # P1 M-02：绝对超时的起点（滑动续期不会刷新它）
+            session['login_at'] = time.time()
             stamp(user)
             # 会话已清空，重新签发 CSRF token（否则后续页面的 token 校验会失败）
             try:
@@ -118,21 +118,12 @@ def login():
                 return redirect(next_page)
             return redirect(url_for('welcome.index'))
 
-        # 登录失败，记录尝试（IP 维度保留）
-        # 2026-10-13 #17：同样把读改写放进临界区，避免并发失败互相覆盖
-        with _FAIL_LOCK:
-            attempts.append(now)
-            cache.set(cache_key, attempts, timeout=_LOGIN_RATE_WINDOW * 2)
-
-            # M-3：账号维度计数 + 触发锁定 + 安全日志
-            fails = (cache.get(acct_fail_key) or 0) + 1
-            cache.set(acct_fail_key, fails, timeout=_LOGIN_ACCT_LOCK_SECONDS)
-            if fails >= _LOGIN_ACCT_FAIL_LIMIT:
-                cache.set(acct_lock_key, time.time() + _LOGIN_ACCT_LOCK_SECONDS,
-                          timeout=_LOGIN_ACCT_LOCK_SECONDS)
-                just_locked = True
-            else:
-                just_locked = False
+        # 登录失败：账号维度先记（要拿锁定结果），IP 维度再记
+        fails, locked_until = register_failure(
+            acct_key, _LOGIN_ACCT_FAIL_LIMIT,
+            _LOGIN_ACCT_LOCK_SECONDS, _LOGIN_ACCT_LOCK_SECONDS)
+        register_failure(ip_key, _LOGIN_RATE_LIMIT, _LOGIN_RATE_WINDOW, 0)
+        just_locked = bool(locked_until)
         _sec_logger.warning('登录失败：账号=%s 来源IP=%s 连续失败=%s',
                             username_typed, client_ip, fails)
         if just_locked:

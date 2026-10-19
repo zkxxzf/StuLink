@@ -24,19 +24,21 @@ DEFAULTS = {
     'auth_mode': ('account', '接入认证模式：account=每请求校验 StuLink 账号密码（推荐，'
                              '客户端权限与网页端完全一致）；token=仅校验静态访问令牌、'
                              '执行身份固定为 bind_user（兼容旧客户端，安全性较弱）'),
-    'require_token': (False, 'account 模式下是否额外要求 X-StuLink-Token（双重准入，'
-                             '防止端口被随意扫描）；false 时只认账号密码'),
+    # 2026-10-19 审计 H-09：默认改为 True —— 本服务只读，开启令牌是默认安全姿态；
+    # 端口一旦被局域网扫到，仅靠账号密码等于允许反复试探真实教师账号。
+    # 兼容不支持自定义请求头的旧客户端时，才在 config.json 临时改回 false。
+    'require_token': (True, 'account 模式下是否额外要求 X-StuLink-Token（双重准入，'
+                            '防止端口被随意扫描）；默认 true；false 时只认账号密码'),
     'token': ('', '静态访问令牌（token 模式的唯一凭据；account 模式在 require_token=true 时'
                   '作为第二道准入）；留空则自动生成'),
     'bind_user': ('admin', 'token 模式的执行账号（例如 admin）；account 模式不生效——'
                            '每个客户端用自己的账号密码登录。注意 token 模式下该账号'
                            '可见的数据全部可被令牌持有者读取，请按需改成最小权限账号'),
-    # 2026-10-14 审计 API-04：本服务定位为**只读**成绩分析服务（tools/__init__.py 只注册
-    # 只读模块，并在注册后断言不含写工具）。默认值保留 true 只为兼容既有 config.json，
-    # 部署时应在 mcp_server/config.json（或环境变量 STULINK_MCP_ALLOW_WRITE）显式写
-    # "allow_write": false，让"只读"由配置固定下来，而不是只靠"当前没写工具"。
-    'allow_write': (True, '是否允许写入类工具（录入/修改数据）；false 时写工具直接拒绝；'
-                          '本服务为只读服务，部署时应在 config.json 显式设为 false'),
+    # 2026-10-14 审计 API-04 / 2026-10-19 H-09：本服务定位为**只读**成绩分析服务
+    # （tools/__init__.py 只注册只读模块，并在注册后断言不含写工具）。H-09 起默认值
+    # 直接为 false：让"只读"由默认配置固定，而不是只靠"当前没注册写工具"。
+    'allow_write': (False, '是否允许写入类工具（录入/修改数据）；false 时写工具直接拒绝；'
+                           '本服务为只读服务，默认 false'),
     'audit_reads': (False, '是否把只读查询也写入操作日志（写操作始终记录）'),
     'max_rows': (200, '单次返回的最大行数，超出会截断并在结果中提示'),
     'exam_cache_ttl': (300, '成绩分析数据在 MCP 侧的缓存秒数：超过则主动重建（0=沿用主程序默认 900 秒）'),

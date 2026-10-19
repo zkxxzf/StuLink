@@ -1,8 +1,12 @@
 # StuLink v1.7.0 2026-08-02
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 from datetime import datetime
+
+from sqlalchemy import or_
+
 from app.extensions import db
-from app.utils.crypto import blind_index, decrypt, encrypt, encrypt_rand
+from app.utils.crypto import (blind_index, decrypt, encrypt, encrypt_rand,
+                              id_card_index)
 
 
 class Student(db.Model):
@@ -10,7 +14,9 @@ class Student(db.Model):
 
     id = db.Column(db.Integer, primary_key=True)
     # 身份证号透明加密：数据库存密文，Python 侧自动加解密
+    # 2026-10-19 H-06：密文改随机 IV；唯一性/等值查询改走 id_card_idx 盲索引。
     _id_card_encrypted = db.Column('id_card_number', db.String(256))
+    id_card_idx = db.Column(db.String(64), index=True)
     name = db.Column(db.String(50), nullable=False)
     ethnicity = db.Column(db.String(20), default='汉族')
     # 2026-10-18（用户定方案 C）：手机号改成**随机 IV 加密**存储 ——
@@ -64,12 +70,24 @@ class Student(db.Model):
 
     @id_card_number.setter
     def id_card_number(self, value):
-        self._id_card_encrypted = encrypt(value) if value else None
+        # H-06：随机 IV 写密文 + 盲索引；旧确定性密文仍可 decrypt。
+        self._id_card_encrypted = encrypt_rand(value) if value else None
+        self.id_card_idx = id_card_index(value) if value else None
 
     @staticmethod
     def encrypt_id_card(plaintext):
-        """加密身份证号（用于查询时构造等值条件）"""
-        return encrypt(plaintext) if plaintext else None
+        """兼容旧调用：返回身份证盲索引（不再返回确定性密文）。"""
+        return id_card_index(plaintext) if plaintext else None
+
+    @staticmethod
+    def id_card_filter(value):
+        """身份证等值查询条件：盲索引优先，兼容存量确定性密文双读。"""
+        idx = id_card_index(value)
+        if not idx:
+            return None
+        legacy = encrypt(value)
+        return or_(Student.id_card_idx == idx,
+                   Student._id_card_encrypted == legacy)
 
     # ---- 手机号透明加解密（随机 IV + 盲索引） ----
     def _get_phone(self, enc):
