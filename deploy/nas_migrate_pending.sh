@@ -64,6 +64,13 @@ du -sh "$BAK" 2>/dev/null
 echo "[3/6] 提交临时镜像（容器已停，确保迁移用的是容器内代码与依赖）"
 docker commit "$CT" "$IMG" >/dev/null || fail "docker commit 失败"
 
+echo "[3.5/6] 预先补齐模型缺列（**必须早于迁移**：迁移脚本读模型时若缺列会直接报错中止）"
+# 2026-10-19：新增模型列（如 students.phone1_idx / teachers.phone_idx）若排在迁移之后
+# 补，前面用 ORM 读 Student/Teacher 的数据脚本会因 "no such column" 被 allow-fail 跳过
+# （实测 fix_exam_selection_snapshot 因此漏跑）。故把 check_columns --fix 提到 [4] 之前。
+docker run --rm -v "$DATA":/app/data -w /app \
+    --entrypoint python "$IMG" scripts/check_columns.py --fix 2>&1 | tail -n 15 || true
+
 echo "[4/6] 按序补跑缺失的迁移"
 run_mig() {
     # 2026-10-15：支持脚本参数（如「修数据」类脚本的 --apply）；原有单参调用不受影响
