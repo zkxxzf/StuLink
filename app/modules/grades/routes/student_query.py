@@ -12,7 +12,7 @@ from sqlalchemy import or_
 from app.models.grades import Exam, Certificate
 from app.models import Student
 from app.modules.grades import bp
-from app.modules.grades.services import student_service, scope as scope_service
+from app.modules.grades.services import student_service
 from app.utils.decorators import perm_required
 
 # 2026-10-10 架构审计修复：本文件原有静默 `except Exception: pass`，失败不可观测。
