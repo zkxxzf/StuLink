@@ -963,30 +963,32 @@ def teacher_tab(exam_id, subject=None, links=None, grade=None, denom='ref'):
                 dn = od.get('dual_n', 0)
                 row['t_lo_%d_n' % i] = sn
                 row['t_lo_%d_dn' % i] = dn
-                row['t_lo_%d_dr' % i] = _fmt_pct(dn, cls_n)
         t1.append(row)
-    # 列定义
+    # 列定义（2026-10-19 用户口径：表内只做「同学科教师」对比，
+    # 年级恒为本场年级、科目由上方筛选固定 → 两列都不再重复占位）
     teacher_cols = [
-        {'key': 'teacher', 'label': '教师姓名', 'type': 'text'},
-        {'key': 'grade', 'label': '年级', 'type': 'text'},
+        {'key': 'teacher', 'label': '教师', 'type': 'text'},
         {'key': 'class_name', 'label': '班级', 'type': 'text'},
-        {'key': 'subject', 'label': '科目', 'type': 'text'},
-        {'key': 'count', 'label': n_label, 'type': 'int'},
-        {'key': 'avg', 'label': '科目平均分', 'type': 'num'},
-        {'key': 'grd_avg', 'label': '年级该科平均分', 'type': 'num'},
+        {'key': 'count', 'label': n_label.replace('参考', ''), 'type': 'int'},
+        {'key': 'avg', 'label': '班均分', 'type': 'num'},
+        # 年级均分是同科所有班共用的常数，逐行重复没有信息量；
+        # 保留「分差」（= 班均分 − 年级均分）即可对比。
         {'key': 'diff', 'label': '分差', 'type': 'num'},
     ] + _rate_columns(rate_pass, rate_good)
     if subject_layer_names:
         for i, name in enumerate(subject_layer_names):
+            _sn = _short_layer(name)
             teacher_cols += [
-                {'key': 't_lo_%d_n' % i, 'label': f'{name}单上', 'type': 'int'},
-                {'key': 't_lo_%d_dn' % i, 'label': f'{name}双上', 'type': 'int'},
-                {'key': 't_lo_%d_dr' % i, 'label': f'{name}双上率%', 'type': 'num'},
+                {'key': 't_lo_%d_n' % i, 'label': f'{_sn}上线', 'type': 'int'},
+                {'key': 't_lo_%d_dn' % i, 'label': f'{_sn}双上', 'type': 'int'},
             ]
     tables['teacher_data'] = {
         'title': '教师教学数据表',
         'columns': teacher_cols,
         'rows': t1,
+        # 表卡不再自动画「12 个指标混轴」图；同科教师对比由下方
+        # 专用图 teacher_bar（教师·班级 × 班均分）承担。
+        'noChart': True,
     }
     # 任课组合（供前端选择器）
     combos = []
@@ -1009,22 +1011,28 @@ def teacher_tab(exam_id, subject=None, links=None, grade=None, denom='ref'):
         _grd_track = {_r['id']: _r for _r in
                       st.exam_trend_series(exam.grade, combo['subject'])}
         for _r in _cls_track:
-            t2.append({'exam': _r['name'], 'date': _r['date'], 'count': _r['count'],
+            t2.append({'exam': _short_exam_name(_r['name'], exam.grade),
+                       'date': _r['date'], 'count': _r['count'],
                        'avg': _r['avg'],
                        'grd_avg': _grd_track.get(_r['id'], {}).get('avg'),
                        'pass_rate': _r['pass_rate']})
     _track_cols = [{'key': 'exam', 'label': '考试', 'type': 'text'},
                    {'key': 'date', 'label': '日期', 'type': 'text'},
-                   {'key': 'count', 'label': '参考人数', 'type': 'int'},
-                   {'key': 'avg', 'label': '该班该科均分', 'type': 'num'},
-                   {'key': 'grd_avg', 'label': '年级该科均分', 'type': 'num'}]
+                   {'key': 'count', 'label': '人数', 'type': 'int'},
+                   {'key': 'avg', 'label': '班均分', 'type': 'num'},
+                   {'key': 'grd_avg', 'label': '年级均分', 'type': 'num'}]
     if any(r['pass_rate'] is not None for r in t2):
         _track_cols.append({'key': 'pass_rate',
-                            'label': f"{_track_pass or '最低层'}率%", 'type': 'num'})
+                            'label': f"{_short_layer(_track_pass) or '最低层'}率%",
+                            'type': 'num'})
+    _track_keys = ['avg', 'grd_avg'] + [c['key'] for c in _track_cols
+                                        if c['key'] == 'pass_rate']
     tables['teacher_track'] = {
         'title': '教师历次考试跟踪表',
         'columns': _track_cols,
         'rows': t2,
+        'chartHint': {'type': 'groupbar', 'xKey': 'exam',
+                      'seriesKeys': _track_keys},
     }
     # 图：G12 同科目不同教师柱状对比；G13 组合走势
     charts['teacher_bar'] = {

@@ -213,16 +213,23 @@ function fillSubject(){
         if (!state.subject || !opts.subjects.includes(state.subject)) state.subject = opts.subjects[0] || '';
         sel.val(state.subject);
     } else if (state.tab === 'teacher'){
-        sel.append('<option value="">全部科目</option>');
-        var used = {};
-        opts.subjects.forEach(function(s){ used[s] = true; });
-        if (opts.teacher_combos && opts.teacher_combos.length){
-            opts.subjects.forEach(function(s){
-                if (opts.teacher_combos.some(function(c){ return c.subject === s; }))
-                    sel.append('<option value="'+s+'">'+s+'（仅我任课）</option>');
-            });
-        }
-        state.subject = '';
+        // 2026-10-19 用户口径：教师表只做「同学科教师」对比 →
+        // 不再提供「全部科目」，默认落到本场第一个可选科目；
+        // 教师角色只列本人任课科目。
+        var mine = opts.teacher_combos || [];
+        var list = mine.length
+            ? opts.subjects.filter(function(s){
+                  return mine.some(function(c){ return c.subject === s; });
+              })
+            : opts.subjects.slice();
+        if (!state.subject || list.indexOf(state.subject) < 0)
+            state.subject = list[0] || '';
+        list.forEach(function(s){
+            var own = mine.some(function(c){ return c.subject === s; });
+            sel.append('<option value="'+s+'">'+s
+                + (own ? '（仅我任课）' : '') + '</option>');
+        });
+        sel.val(state.subject);
     }
 }
 

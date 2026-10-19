@@ -181,6 +181,9 @@
 /* 首列（名次段/班级/科目）是行标签：不换行，宽度跟着内容走 */
 .tbl-card .g-table thead th:first-child,
 .tbl-card .g-table tbody td:first-child { white-space: nowrap; }
+/* 第二列（班级/日期）也是短标签：不允许被挤成「01 换行 班」 */
+.tbl-card .g-table thead th:nth-child(2),
+.tbl-card .g-table tbody td:nth-child(2) { white-space: nowrap; }
 
 /* 班级多选下拉 */
 #gCmList .cm-item {
