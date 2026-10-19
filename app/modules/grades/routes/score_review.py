@@ -29,12 +29,12 @@ from flask import (render_template, request, redirect, url_for, flash, abort)
 from flask_login import login_required, current_user
 
 from app.extensions import db
-from app.models.grades import (Exam, ExamScore, ScoreReviewRequest, ScoreChangeLog,
+from app.models.grades import (Exam, ScoreReviewRequest,
                                TOTAL_SUBJECT, SUBJECTS)
 from app.modules.grades import bp
-from app.modules.grades.services import (ranking, scope as scope_service,
-                                         score_guard, store_service)
-from app.modules.grades.utils import invalidate_exam_cache
+from app.modules.grades.services import (review_service,
+                                        scope as scope_service,
+                                        score_guard)
 from app.utils.decorators import perm_required
 from app.utils.helpers import log_operation
 
@@ -165,16 +165,11 @@ def reviews_manage_page():
 @login_required
 @perm_required('grades.score_edit')
 def review_audit(rid):
-    """批准 / 驳回。
-
-    approve 时可带 `apply=1`：把增减分写进成绩单（走与手动改分同一条链路）。
-    另外支持 `apply=1` 但分数越界时拒绝落库（不静默截断）。
-    """
+    """批准 / 驳回（审批与「批准并应用」逻辑见 review_service.audit_review）。"""
     r = _review_or_404(rid)
     back = redirect(url_for('grades.reviews_manage_page'))
-    # 2026-10-15 审计修复（P0）：审批（「批准并应用」会直接改分并重算排名）必须先过
-    # **数据范围**校验。此前只有 grades.score_edit 功能权限 + status 检查，
-    # 持该权限的年级长/教务员可以对别的年级的复核单直接改分（越权写）。
+    # 审批（「批准并应用」会直接改分并重算排名）必须先过**数据范围**校验：
+    # 只有 grades.score_edit 功能权限、但不在本年级范围内的账号不得越权写分。
     _r_exam = db.session.get(Exam, r.exam_id)
     if _r_exam is not None:
         try:
@@ -182,85 +177,13 @@ def review_audit(rid):
         except PermissionError:
             abort(403)
     _sc = score_guard.resolve(current_user)
-    if not _sc.can_view_class(r.grade or (_r_exam.grade if _r_exam else ''), r.class_name):
+    if not _sc.can_view_class(
+            r.grade or (_r_exam.grade if _r_exam else ''), r.class_name):
         abort(403)
-    if r.status != 'pending':
-        flash('该申请已处理过，不能重复审核', 'warning')
-        return back
     action = (request.form.get('action') or '').strip()
     note = (request.form.get('review_note') or '').strip()[:200]
-    if action not in ('approve', 'reject'):
-        flash('未知的审核动作', 'danger')
-        return back
-
-    r.reviewer_id = current_user.id
-    r.reviewer_name = current_user.real_name or current_user.username
-    r.reviewed_at = datetime.now()
-    r.review_note = note
-
-    if action == 'reject':
-        r.status = 'rejected'
-        db.session.commit()
-        log_operation(current_user, '驳回', '成绩复核', r.exam_id,
-                      f'复核单 #{r.id}：{note or "无意见"}', module='grades')
-        flash(f'已驳回复核单 #{r.id}', 'success')
-        return back
-
-    # ---- 批准 ----
     apply_now = (request.form.get('apply') or '') in ('1', 'on', 'true')
-    if apply_now:
-        exam = db.session.get(Exam, r.exam_id)
-        if exam is None:
-            flash('该申请对应的考试已不存在，无法应用改分', 'danger')
-            return back
-        srow = (ExamScore.query.filter_by(exam_id=r.exam_id, student_no=r.student_no,
-                                          subject=r.subject).first())
-        if srow is None:
-            flash('该场考试没有这名学生该科的成绩，请先导入成绩后再应用', 'danger')
-            return back
-        limit = float((exam.full_marks() or {}).get(r.subject, 100))
-        old_score, old_raw = srow.score, srow.raw_score
-        new_score = round((old_score or 0) + r.delta, 1)
-        if new_score < 0 or new_score > limit + 0.5:
-            flash(f'应用后分数 {new_score} 超出 0~{limit:g} 的范围，请核对增减分数'
-                  f'（未写库，可先驳回或修改后重提）', 'danger')
-            return back
-        srow.score = new_score
-        if old_raw is not None:
-            srow.raw_score = round(old_raw + r.delta, 1)
-        # 与手动改分同一条链路：留痕 → 重算总分 → 重算排名 → 清缓存 → 操作日志
-        db.session.add(ScoreChangeLog(
-            exam_id=exam.id, exam_name=exam.name, score_id=srow.id,
-            student_no=srow.student_no, student_name=srow.student_name,
-            class_name=srow.class_name, subject=srow.subject, action='update',
-            old_score=old_score, new_score=srow.score,
-            old_raw=old_raw, new_raw=srow.raw_score,
-            operator_id=current_user.id,
-            operator_name=current_user.real_name or current_user.username,
-            note=f'成绩复核单 #{r.id}'))
-        store_service.refresh_student_total(exam, srow.student_no)
-        n = ranking.recalc_exam(exam.id)
-        if exam.status != 'imported':
-            exam.status = 'imported'
-        r.applied = True
-        r.applied_at = datetime.now()
-        r.status = 'approved'
-        db.session.commit()
-        invalidate_exam_cache(exam.id)
-        # 第七轮审计（P-L1）：原此处紧跟一次 tab_service 的缓存清理调用，
-        # 而它内部就是 invalidate_exam_cache —— 同一次提交后清两遍（纯重复），删。
-        log_operation(current_user, '批准并应用', '成绩复核', r.exam_id,
-                      f'复核单 #{r.id}：{srow.student_name or srow.student_no} '
-                      f'{r.subject} {r.delta:+g}（新分 {srow.score}，排名重算 {n} 条）',
-                      module='grades')
-        flash(f'已批准并将 {r.delta:+g} 分应用到成绩单（总分与排名已重算，已写入分数修改记录）',
-              'success')
-        return back
-
-    # 仅批准记录（不写成绩单）
-    r.status = 'approved'
-    db.session.commit()
-    log_operation(current_user, '批准', '成绩复核', r.exam_id,
-                  f'复核单 #{r.id}（仅批准，未应用改分）', module='grades')
-    flash(f'已批准复核单 #{r.id}（未写入成绩单；如需改分请用「批准并应用」）', 'success')
+    ok, msg = review_service.audit_review(
+        r, current_user, action, note, apply_now)
+    flash(msg, 'success' if ok else 'danger')
     return back

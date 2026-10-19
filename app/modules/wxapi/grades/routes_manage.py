@@ -60,6 +60,8 @@ WX_ROUTES = {
     'student_query': '/package-grades/pages/index/index',
     'cert_records': '/package-grades/pages/manage-view/index?view=cert_records',
     'reviews': '/package-grades/pages/review/index',
+    'reviews_manage': '/package-grades/pages/review-manage/index',
+    'bands': '/package-grades/pages/bands/index',
 }
 
 EXAM_LIMIT = 300
