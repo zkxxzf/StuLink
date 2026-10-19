@@ -514,8 +514,14 @@ _import_errors = {}
 
 
 def _save_import_errors(errors):
+    """暂存导入错误明细，返回下载 key。
+
+    2026-10-19 第十三轮审计：元组补第 3 位 owner_id —— 原来只按随机 key
+    取件，任何持 `dormitory.import` 的账号只要拿到 key 就能下载**别人**的
+    错误日志（含学号/姓名），且 pop 即取走。对照 system/students.py 同款校验。
+    """
     key = uuid.uuid4().hex
-    _import_errors[key] = (errors, time.time() + 3600)
+    _import_errors[key] = (errors, time.time() + 3600, current_user.id)
     return key
 
 
@@ -847,13 +853,17 @@ def import_dormitory():
 # download_import_errors 要求 students.import）。
 @perm_required('dormitory.import')
 def download_import_errors(key):
-    """下载导入错误日志"""
+    """下载导入错误日志（仅导入者本人）"""
     _clean_expired_errors()
-    data = _import_errors.pop(key, None)
+    data = _import_errors.get(key)
     if not data:
         flash('错误日志已过期或不存在', 'warning')
         return redirect(url_for('statistics.index'))
-    errors, _ = data
+    if len(data) > 2 and data[2] is not None and data[2] != current_user.id:
+        flash('无权下载该导入日志（它不属于你）', 'danger')
+        return redirect(url_for('statistics.index'))
+    _import_errors.pop(key, None)
+    errors = data[0]
     content = '\r\n'.join(errors)
     from io import BytesIO
     buf = BytesIO()

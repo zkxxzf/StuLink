@@ -862,11 +862,14 @@ def auto_assign_all():
     graduated = get_graduated_grades()
 
     # 0. 确保所有已分配宿舍的房间都有 BedAssignment 记录
+    # 2026-10-19 第十三轮审计：本接口原来整段无范围 —— 年级长一点
+    # 「一键分配」会重排**全校**床位（房间与学生都不过 range）。现与
+    # /auto-assign 同口径：房间走 room_scope_query、学生走 student_scope_query。
     from app.modules.dormitory.services.room_assignment_v7 import _ensure_room_beds
-    all_assigned_rooms = Room.query.filter(
+    all_assigned_rooms = room_scope_query(Room.query.filter(
         Room.class_name.isnot(None),
         Room.class_name != ''
-    ).all()
+    ), current_user).all()
     if all_assigned_rooms:
         _ensure_room_beds([r.id for r in all_assigned_rooms])
 
@@ -881,13 +884,13 @@ def auto_assign_all():
     ).all()]
 
     # 3. 获取所有未分配床位的住校学生（与分宿舍统计口径一致：排除学籍已转出/借读后离校）
-    unassigned_query = Student.query.filter(
+    unassigned_query = student_scope_query(Student.query.filter(
         Student.id.in_(boarding_ids) if boarding_ids else False,
         db.or_(
             Student.enrollment_status.is_(None),
             ~Student.enrollment_status.in_(['学籍已转出', '借读后离校'])
         )
-    )
+    ), current_user)
     if graduated:
         unassigned_query = unassigned_query.filter(~Student.grade.in_(graduated))
     if assigned_ids:
@@ -929,13 +932,16 @@ def auto_assign_all():
         # 1. 非合班宿舍：class_name 匹配（必须同年级，不同年级的同名班级是不同班级）
         # 2. 合班宿舍：class_name 是主班级名 OR combined_class 包含当前班级名
         #    （合班房不限年级：跨年级合班时份额在 combined_details 中带年级，匹配时精确校验）
-        rooms = Room.query.filter(
+        rooms = room_scope_query(Room.query.filter(
             Room.is_active == True,
             db.or_(
-                db.and_(Room.grade == grade, db.or_(Room.combined_details.is_(None), Room.combined_details == '')),
-                db.and_(Room.combined_details.isnot(None), Room.combined_details != ''),
+                db.and_(Room.grade == grade, db.or_(
+                    Room.combined_details.is_(None),
+                    Room.combined_details == '')),
+                db.and_(Room.combined_details.isnot(None),
+                        Room.combined_details != ''),
             )
-        ).filter(
+        ), current_user).filter(
             db.or_(
                 Room.class_name == class_name,
                 Room.class_name.like(class_name + '+%'),

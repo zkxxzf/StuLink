@@ -36,6 +36,61 @@ KIND_OPTIONS = [('school', '全校'), ('self_grade', '本人年级'),
                 ('none', '无')]
 
 
+def _is_super():
+    """超管：内置 admin 账号。"""
+    return (getattr(current_user, 'username', '') or '') == 'admin'
+
+
+def _is_admin_group_member():
+    """是否管理员组成员（内置 admin / role=admin / 名为「管理员组」的身份）。"""
+    if _is_super():
+        return True
+    if (getattr(current_user, 'role', '') or '') == 'admin':
+        return True
+    for g in (current_user.permission_groups or []):
+        if (g.name or '') in PROTECTED_GROUP_NAMES:
+            return True
+    return False
+
+
+def _my_group_ids():
+    """当前用户所在的身份组 id 集合。"""
+    ids = {g.id for g in (current_user.permission_groups or []) if g is not None}
+    if getattr(current_user, 'permission_group_id', None):
+        ids.add(current_user.permission_group_id)
+    return ids
+
+
+def _data_grade_allowed(want):
+    """非超管授权年级时，只能授予自己可见的年级（school 范围 = 全校）。"""
+    if not want:
+        return True
+    from app.utils.scope import resolve_scope
+    s = resolve_scope(current_user)
+    if s.kind == 'school':
+        return True
+    if s.kind == 'grades':
+        return want <= set(s.grades or [])
+    if s.kind == 'classes':
+        return want <= {g for g, _c in (s.classes or set())}
+    return False
+
+
+def _require_super():
+    """权限组 / 数据范围属系统级配置：只有管理员组成员可写。
+
+    2026-10-19 第十三轮审计：原实现只要求 `system.perm_groups` 权限点，
+    而该权限点可以被任意身份组勾上 —— 拿到它的人就能：
+    ① 给自己所在组写入任意权限点（含 system.users / system.perm_groups，横向提权）；
+    ② 给自己或任意用户覆盖式写 UserDataScope（年级范围直接变全校）。
+    现在收紧为「管理员组成员」才可进；`save_perms` / `save_data_scope`
+    另有"不能改自己所在组、不能授予自己没有的权限"的第二道闸。
+    """
+    from flask import abort
+    if not _is_admin_group_member():
+        abort(403, description='权限组与数据范围仅管理员组成员可修改')
+
+
 def _clean_str_list(v):
     """清洗字符串列表（去空、去重、保序）"""
     out = []
@@ -124,6 +179,7 @@ def manage():
 @perm_required('system.perm_groups')
 def save():
     """创建/更新身份（权限组）基础信息（P5：范围类型 7 档 + 指定年级/班级）"""
+    _require_super()
     data = request.get_json() or {}
     group_id = data.get('id')
     name = (data.get('name') or '').strip()
@@ -170,10 +226,12 @@ def save():
 @perm_required('system.perm_groups')
 def save_perms():
     """功能权限表格批量保存：{items: [{id, levels: {子功能标识: 等级}}]}"""
+    _require_super()
     data = request.get_json() or {}
     items = data.get('items') or []
     updated = skipped = 0
     updated_ids = []
+    my_groups = set() if _is_super() else _my_group_ids()
     for it in items:
         group = PermissionGroup.query.get(it.get('id'))
         if not group:
@@ -182,7 +240,15 @@ def save_perms():
             skipped += 1
             continue
         levels = {k: str(v) for k, v in (it.get('levels') or {}).items()}
-        group.set_menu_keys(item_levels_to_keys(levels))
+        new_keys = set(item_levels_to_keys(levels))
+        # 2026-10-19 第十三轮审计（第二道闸）：不允许把「自己原本没有的权限点」
+        # 写进任何组（含自己所在组）——否则可从别的组横向拿权；
+        # 降权（去掉权限）仍允许。管理员组成员 has_perm 恒真，不受影响。
+        if not _is_admin_group_member() and any(
+                not current_user.has_perm(k) for k in new_keys):
+            skipped += 1
+            continue
+        group.set_menu_keys(list(new_keys))   # set 不能直接 json.dumps
         updated_ids.append(group.id)
         updated += 1
     db.session.commit()
@@ -201,6 +267,7 @@ def save_perms():
 @perm_required('system.perm_groups')
 def save_data_scope():
     """数据范围表格保存：{scopes: {user_id: ["2025级", ...]}}（整年级授权，覆盖式）"""
+    _require_super()
     data = request.get_json() or {}
     scopes = data.get('scopes') or {}
     count = 0
@@ -209,6 +276,14 @@ def save_data_scope():
             uid = int(uid)
         except (TypeError, ValueError):
             continue
+        want = {str(g) for g in (grades or []) if str(g).strip()}
+        # 2026-10-19 第十三轮审计（第二道闸）：非内置 admin 不能给自己写范围，
+        # 也不能授予超出自己可见范围的年级。
+        if not _is_super():
+            if uid == current_user.id:
+                continue
+            if want and not _data_grade_allowed(want):
+                continue
         entries = [{'grade': g, 'class_name': None}
                    for g in (grades or []) if str(g).strip()]
         UserDataScope.query.filter_by(user_id=uid).delete()
@@ -224,6 +299,7 @@ def save_data_scope():
 @bp.route('/<int:id>/delete', methods=['POST'])
 @perm_required('system.perm_groups')
 def delete(id):
+    _require_super()
     group = PermissionGroup.query.get_or_404(id)
     if group.name in PROTECTED_GROUP_NAMES:
         return jsonify({'success': False,

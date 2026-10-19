@@ -258,4 +258,8 @@ def _log(action, rec, detail):
         log_operation(current_user, action, '德育奖惩', rec.id, detail,
                       module='morality')
     except Exception:                                # noqa: BLE001
-        pass
+        # 2026-10-19 第十三轮审计：原来静默 pass，审计日志丢失无从发现
+        import logging
+        logging.getLogger('morality.records').warning(
+            '德育操作日志写入失败 action=%s rid=%s', action, getattr(rec, 'id', None),
+            exc_info=True)

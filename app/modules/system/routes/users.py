@@ -351,6 +351,12 @@ def edit(id):
 @perm_required('system.users')
 def toggle(id):
     user = User.query.get_or_404(id)
+    # 2026-10-19 第十三轮审计：与 edit / reset-password 同源补超管闸 ——
+    # 原实现只拦"停用当前活跃 admin"，非超管可停用管理员组其他成员，
+    # 也能把已停用的 admin 原地重新启用。
+    if _user_in_admin_group(user) and not _actor_is_super():
+        flash('管理员组成员只有 admin 本人可以启用/禁用', 'danger')
+        return redirect(url_for('users.list_users'))
     # v1.9.2 防误操作：管理员账号不可禁用；不能禁用当前登录账号
     if user.role == 'admin' and user.is_active:
         flash('管理员账号不允许禁用（防止系统无法登录）', 'danger')

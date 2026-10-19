@@ -354,7 +354,9 @@ def schedule_clear_entries(sid):
 
 @bp.route('/schedule/<int:sid>/grade/<grade>')
 @login_required
-@perm_required('academic.timetable')
+@perm_required('academic.view')   # 2026-10-19 第十三轮审计：只读视图改 view，
+                                  # 编辑仍由页面 can_edit=_editable(ts) 控制；
+                                  # 否则分享链（view=grade）对教师 403
 def schedule_grade(sid, grade):
     """年级课表：年级内班级标签切换（?class= 指定班级）"""
     ts = _get_schedule_or_404(sid)
@@ -385,7 +387,7 @@ def schedule_grade(sid, grade):
 
 @bp.route('/schedule/<int:sid>/class/<grade>/<class_name>')
 @login_required
-@perm_required('academic.timetable')
+@perm_required('academic.view')   # 2026-10-19：同 schedule_grade（分享链可用）
 def schedule_class(sid, grade, class_name):
     """班级课表：13x7 网格 + 学科课时统计"""
     ts = _get_schedule_or_404(sid)
@@ -407,7 +409,8 @@ def schedule_class(sid, grade, class_name):
 
 @bp.route('/schedule/<int:sid>/teacher/<uid>')
 @login_required
-@perm_required('academic.timetable')
+@perm_required('academic.view')   # 2026-10-19：同 schedule_grade；范围仍由
+                                  # `_assert_teacher_view` 收敛（本人/任教年级）
 def schedule_teacher(sid, uid):
     """教师个人课表：搜索选择 + 网格 + 课时统计"""
     ts = _get_schedule_or_404(sid)

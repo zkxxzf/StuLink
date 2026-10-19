@@ -54,6 +54,38 @@ def _classes_in_scope(grade, class_name):
     return all(class_in_scope(current_user, grade, p) for p in parts)
 
 
+def _auto_assign_scope(data):
+    """校验「自动分配」请求里的班级与房间是否都在范围内。
+
+    2026-10-19 第十三轮审计：`/assign-auto/preview|execute` 原样把
+    `selected_keys` / `selected_room_ids` 传进 `auto_assign_preview`，
+    服务层零范围判断 —— 年级长可以给全校任意房间排床位。这里显式拒绝
+    越界项（不静默过滤，避免用户以为"分配成功"其实少了一半）。
+
+    返回 (ok, err_msg)。
+    """
+    for it in (data.get('selected_keys') or []):
+        if not isinstance(it, dict):
+            return False, '参数格式不正确'
+        g = (it.get('grade') or '').strip()
+        c = (it.get('class_name') or '').strip()
+        if not g or not c or not _classes_in_scope(g, c):
+            return False, f'班级 {g} {c} 不在你的数据范围内'
+    rid_list = []
+    for rid in (data.get('selected_room_ids') or []):
+        try:
+            rid_list.append(int(rid))
+        except (TypeError, ValueError):
+            return False, '房间参数不正确'
+    if rid_list:
+        ok_ids = {r.id for r in room_scope_query(
+            Room.query.filter(Room.id.in_(rid_list)), current_user).all()}
+        bad = [r for r in rid_list if r not in ok_ids]
+        if bad:
+            return False, f'{len(bad)} 个房间不在你的数据范围内'
+    return True, ''
+
+
 @bp.route('/')
 @perm_required('dormitory.view')   # H-2
 def list_rooms():
@@ -183,6 +215,12 @@ def edit(id):
                 ordered_classes.append(c)
         new_class = '+'.join(ordered_classes) if ordered_classes else None
         new_notes = request.form.get('notes', '') or None
+        # 2026-10-19 第十三轮审计：房间本身过了范围，但**新挂的年级/班级**没过 ——
+        # 可把本年级房间改挂到他年级别班（之后分配/统计都会错位）。
+        # 与 assign_room(:436) / update_room_assignment(:746) 同口径。
+        if new_class and not _classes_in_scope(new_grade, new_class):
+            flash(f'{new_grade} {new_class} 不在你的数据范围内', 'danger')
+            return redirect(url_for('rooms.detail', id=room.id))
 
         # 检查房间是否已分配班级或已安排床铺
         has_assignment = room.class_name and room.class_name.strip()
@@ -1129,7 +1167,10 @@ def assign_auto_preview():
     
     if not selected_keys or not selected_room_ids:
         return jsonify({'success': False, 'error': '参数不完整：请选择班级和房间'})
-    
+    _ok, _err = _auto_assign_scope(data)
+    if not _ok:
+        return jsonify({'success': False, 'error': _err}), 403
+
     # 检测已有分配的房间
     from app.models import Room as RoomModel, BedAssignment
     rooms_with_assignments = []
@@ -1215,6 +1256,9 @@ def assign_auto_execute():
 
     if not selected_keys or not selected_room_ids:
         return jsonify({'success': False, 'error': '参数不完整：请选择班级和房间'})
+    _ok, _err = _auto_assign_scope(data)
+    if not _ok:
+        return jsonify({'success': False, 'error': _err}), 403
 
     from app.modules.dormitory.services.room_assignment_v8 import auto_assign_preview as do_preview
 
@@ -1238,8 +1282,8 @@ def assign_auto_execute():
 @perm_required('dormitory.assign')  # H-2
 def available_rooms_data():
     """获取可用房间数据（用于自动分配页面）"""
-    # 获取所有激活的房间
-    rooms = Room.query.filter_by(is_active=True).order_by(
+    # 获取所有激活的房间（2026-10-19 第十三轮审计：补范围，原先返回全校房间）
+    rooms = room_scope_query(Room.query.filter_by(is_active=True)).order_by(
         Room.building, Room.floor, Room.room_number
     ).all()
     

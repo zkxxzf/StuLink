@@ -158,6 +158,30 @@ def notification_create():
     elif target_type == 'users':
         target_uids = request.form.getlist('target_uids')
 
+    # 2026-10-19 第十四轮：定向发送也要校验「账号存在 + 活跃 + 非管理员」——
+    # 否则持 workbench.notifications 的账号可以给超管/管理员组私发消息（社工），
+    # 也能塞任意 id 触发收件人解析异常。
+    if target_uids and not current_user.has_perm('system.settings'):
+        from app.models import User as _U
+        from app.utils.permission_map import PROTECTED_GROUP_NAMES
+        ids = []
+        for raw in target_uids:
+            try:
+                ids.append(int(raw))
+            except (TypeError, ValueError):
+                continue
+        rows = _U.query.filter(_U.id.in_(ids)).all() if ids else []
+        if len(rows) != len(set(ids)):
+            flash('收件人里有不存在的账号，请重新选择', 'danger')
+            return redirect(url_for('notifications.notifications_page'))
+        bad = [u for u in rows
+               if not u.is_active or (u.role or '') == 'admin'
+               or any((g.name or '') in PROTECTED_GROUP_NAMES
+                      for g in (u.permission_groups or []))]
+        if bad:
+            flash('当前权限不能向管理员或已停用账号定向发送通知', 'danger')
+            return redirect(url_for('notifications.notifications_page'))
+
     target_scope = json.dumps(scope, ensure_ascii=False)
 
     create_notification(

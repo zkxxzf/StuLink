@@ -342,6 +342,15 @@ def create():
         
         student = Student()
         _populate_student(student, form)
+        # 2026-10-19 第十三轮审计：新建学生也校验目标班级在范围内 ——
+        # 调班（transfer）早有 `_transfer_target_in_scope`，create 却没有，
+        # 年级长可以在任意班级凭空建学生。
+        if student.class_name and not _transfer_target_in_scope(
+                current_user, student.grade, student.class_name):
+            flash(f'无权在「{student.grade} {student.class_name}」建学生'
+                  '（不在你的数据范围内）', 'danger')
+            return render_template('system/students/form.html', form=form,
+                                   title='新增学生')
         db.session.add(student)
         db.session.commit()
         log_operation(current_user, '创建', '学生', student.id, f'{student.name} {student.grade}{student.class_name}')
@@ -700,10 +709,14 @@ def batch_edit_search():
             bed_num = int(bed_number)
         except ValueError:
             return jsonify({'success': False, 'message': '床位号必须是数字'})
-        # 查房间
-        room = Room.query.filter_by(building=building, room_number=room_number, is_active=True).first()
+        # 查房间（2026-10-19 第十三轮审计：目标房间也要在宿舍范围内，
+        # 原来只校验了学生范围 → 可把本年级学生塞进他年级房间）
+        from app.utils.dormitory_scope import room_scope_query
+        room = room_scope_query(Room.query.filter_by(
+            building=building, room_number=room_number, is_active=True)).first()
         if not room:
-            return jsonify({'success': False, 'message': f'{building} {room_number} 不存在'})
+            return jsonify({'success': False,
+                            'message': f'{building} {room_number} 不存在或不在你的数据范围内'})
         # 验证床位有效性
         bed = BedAssignment.query.filter_by(room_id=room.id, bed_number=bed_num).first()
         if not bed:

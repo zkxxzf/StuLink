@@ -34,7 +34,10 @@ MAX_FILE_MB = 10
 def wx_ai_import_analyze():
     """上传一个 Excel：解析全部工作表并给出列识别建议。"""
     data = request.form or {}
-    exam_id = int(data.get('exam_id') or 0)
+    try:
+        exam_id = int(data.get('exam_id') or 0)
+    except (TypeError, ValueError):
+        return wx_err('参数不正确：exam_id 需为数字')
     exam = db.session.get(Exam, exam_id)
     if exam is None:
         return wx_err('考试不存在', 404)

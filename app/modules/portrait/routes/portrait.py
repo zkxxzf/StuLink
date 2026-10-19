@@ -243,6 +243,13 @@ def delete_event(event_id):
     ok, _event, msg = portrait_service.can_manage_event(event_id, current_user.id)
     if not ok:
         return jsonify(success=False, message=msg), 403
+    # 2026-10-19 第十三轮审计：与 delete_comment 同款 —— 再反查 student_no
+    # 确认学生仍在范围内（原仅校验创建人，跨年级事件可被删）
+    if _event is not None and getattr(_event, 'student_no', None):
+        try:
+            _assert_student_in_scope(_event.student_no)
+        except Exception:
+            return jsonify(success=False, message='无权删除该学生事件'), 403
 
     success = portrait_service.delete_event(event_id, operator_id=current_user.id)
     if not success:
@@ -325,6 +332,17 @@ def api_refresh(student_no):
 @login_required
 @perm_required('portrait.view')
 def api_options():
-    """获取筛选选项"""
-    options = portrait_service.get_filter_options()
-    return jsonify(success=True, data=options)
+    """获取筛选选项（2026-10-19 第十四轮：按当前用户数据范围收敛）。
+
+    原来直接回显全校年级/班级（`get_filter_options` 是全校 distinct + 600s 缓存），
+    年级长/班主任因此能看到全部班级名。这里改为走统一学生范围，不吃全局缓存
+    （distinct 一条 SQL，成本可忽略）。
+    """
+    from app.models import Student
+    from app.utils.student_scope import apply_student_scope
+    rows = (apply_student_scope(Student.query)
+            .with_entities(Student.grade, Student.class_name).distinct().all())
+    bad = ('已转出', '离校', '', None)
+    grades = sorted({g for g, _c in rows if g not in bad}, reverse=True)
+    classes = sorted({c for _g, c in rows if c not in bad})
+    return jsonify(success=True, data={'grades': grades, 'classes': classes})

@@ -589,6 +589,10 @@ def review_submission(submission_id, new_status, reviewer_id, note=None):
         raise ValueError('提交记录不存在')
     if sub.status != 'submitted':
         raise ValueError('该记录已审核，不可重复操作')
+    # 2026-10-19 第十三轮审计：原实现可「自己提交 → 自己审核通过」，
+    # 而通过会自动生成 status='approved' 的业绩（整条业绩审核链被绕过）。
+    if sub.submitter_id == reviewer_id:
+        raise ValueError('不得审核本人提交的记录')
     sub.status = new_status
     sub.reviewed_by = reviewer_id
     sub.reviewed_at = datetime.now()

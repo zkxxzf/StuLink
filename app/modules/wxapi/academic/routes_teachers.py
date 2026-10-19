@@ -9,7 +9,7 @@ from sqlalchemy import or_
 
 from app.models.academic import Teacher
 from app.modules.wxapi import bp
-from app.modules.wxapi.core.guards import wx_login_required
+from app.modules.wxapi.core.guards import wx_login_required, wx_perm_required
 from app.modules.wxapi.core.response import wx_ok
 from app.utils import sensitive
 
@@ -18,6 +18,8 @@ LIMIT = 300
 
 @bp.route('/teachers')
 @wx_login_required
+@wx_perm_required('academic.view')   # 2026-10-19 第十三轮审计：网页端同功能要
+                                     # academic.view，这里原只登录即可拉全量通讯录
 def wx_teachers():
     """教师名单（query: q / subject / status，默认在职）。"""
     q = (request.args.get('q') or '').strip()

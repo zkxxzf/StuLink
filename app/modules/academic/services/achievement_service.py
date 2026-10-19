@@ -238,7 +238,11 @@ def attachment_path(att):
 
 
 def can_view(rec, att, user):
-    """预览/下载权限：教务端(academic.view) 或 该条业绩的提交者本人。"""
+    """记录级可见性（**删除**仍用它）：教务端(academic.view) 或 提交者本人。
+
+    2026-10-13 H-1 红线：删除附件必须与"能不能看这条业绩"同口径，
+    只勾 academic.edit、没勾 academic.view 的组不得按 id 删附件。
+    """
     if user is None:
         return False
     try:
@@ -248,6 +252,36 @@ def can_view(rec, att, user):
         logger.warning('achievement_service.py::can_view 异常（已降级处理）: %s', _e)
     if rec is not None and rec.submitted_by and rec.submitted_by == getattr(user, 'id', None):
         return True
+    return False
+
+
+def can_download(rec, att, user):
+    """附件**原件**预览/下载权限（2026-10-19 第十四轮收紧）。
+
+    原实现与 `can_view` 同口径（academic.view 即放行）—— 任何持「教务查看」
+    的账号（含年级长、普通教师）都能拿到全校教师的证书扫描件原件。业绩
+    **条目**仍按 academic.view 校内公示（列表/详情），但**原件**收紧为：
+    `academic.edit`（教务录入管理）、`submitted_by` 提交者本人、
+    `teacher_uid` 对应的教师本人。
+    """
+    if user is None:
+        return False
+    try:
+        if user.has_perm('academic.edit'):
+            return True
+    except Exception as _e:  # noqa: BLE001
+        logger.warning('achievement_service.py::can_download 异常（已降级处理）: %s', _e)
+    uid = getattr(user, 'id', None)
+    if rec is not None and rec.submitted_by and rec.submitted_by == uid:
+        return True
+    if rec is not None and rec.teacher_uid:
+        try:
+            from app.modules.academic.services import teacher_service
+            t = teacher_service.teacher_of_user(user)
+            if t is not None and t.teacher_uid == rec.teacher_uid:
+                return True
+        except Exception as _e:  # noqa: BLE001
+            logger.warning('can_download 教师本人判定失败: %s', _e)
     return False
 
 
@@ -477,6 +511,19 @@ def review_achievement(operator, aid, action, note=''):
         raise ValueError(f'业绩记录不存在：{aid}')
     if action not in ('approve', 'reject'):
         raise ValueError('action 只能是 approve 或 reject')
+    # 2026-10-19 第十三轮审计：原实现既不校验「审核人 ≠ 提交人」，也不校验
+    # 当前状态 —— 持 academic.edit 的账号可以自己提交、自己批准，已通过/已驳回
+    # 的记录也能反复改判。调课模块有 is_self_review 兜底，这里补齐同款。
+    # 自审拦截只针对「教师本人提交」（workbench / form）；教务录入（manual）
+    # 本就是教务操作，允许同一人录入后确认。
+    if (rec.submitted_by and rec.submitted_by == operator.id
+            and (getattr(rec, 'source_type', '') or 'manual') != 'manual'):
+        raise ValueError('不得审核本人提交的业绩')
+    # 状态机：pending 可审；approved 只允许驳回（撤销通过）；rejected 不可复活
+    if rec.status == 'rejected':
+        raise ValueError('该业绩已驳回，不能重新通过')
+    if rec.status == 'approved' and action == 'approve':
+        raise ValueError('该业绩已通过，无需重复审核')
     note = (note or '').strip()
     if action == 'reject' and not note:
         raise ValueError('驳回时请填写审核意见，教师可在工作台看到原因')

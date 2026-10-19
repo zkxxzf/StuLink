@@ -100,10 +100,28 @@ def api_options():
                                    and r[0][:-1].isdigit()],
                                   key=lambda c: int(c[:-1]))
     elif scope == 'grade' and grade:
-        grades = [grade]
-        cls = Student.query.filter_by(grade=grade).with_entities(Student.class_name).distinct().all()
-        class_map = {grade: sorted([r[0] for r in cls if r[0] and r[0].endswith('班')
-                                    and r[0][:-1].isdigit()], key=lambda c: int(c[:-1]))}
+        # 2026-10-19 第十三轮审计：`_scope()` 的 grade 已是**列表**（管理年级可多选），
+        # 原实现按单个字符串用（filter_by(grade=list) 直接报错、grades=[list]）。
+        grades = sorted({g for g in grade if g and g not in gds},
+                        key=lambda g: int(''.join(filter(str.isdigit, g)) or 0),
+                        reverse=True)
+        class_map = {}
+        for g in grades:
+            cls = Student.query.filter_by(grade=g).with_entities(
+                Student.class_name).distinct().all()
+            class_map[g] = sorted([r[0] for r in cls if r[0] and r[0].endswith('班')
+                                   and r[0][:-1].isdigit()], key=lambda c: int(c[:-1]))
+    elif scope == 'user_grades':
+        # 用户级数据范围（多年级，classes 里放的是年级清单）
+        grades = sorted({g for g in (classes or []) if g and g not in gds},
+                        key=lambda g: int(''.join(filter(str.isdigit, g)) or 0),
+                        reverse=True)
+        class_map = {}
+        for g in grades:
+            cls = Student.query.filter_by(grade=g).with_entities(
+                Student.class_name).distinct().all()
+            class_map[g] = sorted([r[0] for r in cls if r[0] and r[0].endswith('班')
+                                   and r[0][:-1].isdigit()], key=lambda c: int(c[:-1]))
     elif scope == 'class':
         grades = sorted({g for g, _c in (classes or [])}, reverse=True)
         class_map = {}
@@ -198,7 +216,10 @@ def api_students():
     if scope == 'school':
         pass
     elif scope == 'grade' and grade:
-        q = q.filter_by(grade=grade)
+        # 2026-10-19：grade 为列表（多选年级），原 filter_by(grade=list) 会抛错
+        q = q.filter(Student.grade.in_(grade))
+    elif scope == 'user_grades':
+        q = q.filter(Student.grade.in_(classes or []))
     elif scope == 'class' and classes:
         from sqlalchemy import or_, and_
         conds = [and_(Student.grade == g, Student.class_name == c) for g, c in classes]

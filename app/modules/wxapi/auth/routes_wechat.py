@@ -94,7 +94,11 @@ def wx_wechat_select():
     openid = wechat.parse_select_token(body.get('select_token'))
     if not openid:
         return wx_err('选择已过期，请重新微信登录', 401)
-    user_id = int(body.get('user_id') or 0)
+    # 2026-10-19 第十三轮审计：非数字 user_id 原来直接 ValueError → 500
+    try:
+        user_id = int(body.get('user_id') or 0)
+    except (TypeError, ValueError):
+        return wx_err('参数不正确')
     binding = WeChatBinding.query.filter_by(
         openid=openid, user_id=user_id).first()
     if binding is None:
@@ -241,7 +245,11 @@ def wx_wechat_scan_confirm():
     ticket = wechat.get_ticket(body.get('ticket') or '')
     if ticket is None or ticket.action != 'login':
         return wx_err('二维码无效或已过期', 404)
-    user_id = int(body.get('user_id') or 0)
+    # 2026-10-19：同 wx_wechat_select，非数字不再 500
+    try:
+        user_id = int(body.get('user_id') or 0)
+    except (TypeError, ValueError):
+        return wx_err('参数不正确')
     binding = WeChatBinding.query.filter_by(
         openid=openid, user_id=user_id).first()
     if binding is None:

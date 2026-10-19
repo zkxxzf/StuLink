@@ -93,6 +93,12 @@ def record_add():
     student_name = request.form.get('student_name', '')
     follow_up = request.form.get('follow_up', '')
 
+    # 2026-10-19 第十三轮审计：同文件已有 wb_scope.student_no_allowed（:198 在用），
+    # 新增接口漏了这道闸 —— 可把任意学号写进自己的家校沟通记录。
+    if student_no and not wb_scope.student_no_allowed(current_user, student_no):
+        flash('该学号不在你的班级范围内', 'danger')
+        return redirect(url_for('records.records_page'))
+
     rec = add_record(
         teacher_uid=teacher.teacher_uid,
         teacher_name=teacher.name,

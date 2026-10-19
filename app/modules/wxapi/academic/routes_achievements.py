@@ -87,8 +87,11 @@ def wx_achievement_attachment(att_id):
     rec = db.session.get(TeacherAchievement, att.achievement_id)
     uid = _teacher_uid(g.wx_user)
     # 本人（teacher_uid）或本人提交（旧数据可能没写 teacher_uid）
-    if rec is None or (rec.teacher_uid != uid
-                       and rec.submitted_by != g.wx_user.id):
+    # 2026-10-19 第十三轮审计：`rec.teacher_uid != uid` 在双方都为 None 时为 False
+    # → 无教师档案的账号可下载 teacher_uid 为空的旧业绩附件（None 短路）。
+    own = (uid is not None and rec is not None and rec.teacher_uid == uid)
+    submitted = rec is not None and rec.submitted_by == g.wx_user.id
+    if not (own or submitted):
         return wx_err('无权查看该附件', 403)
     root, stored = ach.attachment_path(att)
     if not root:

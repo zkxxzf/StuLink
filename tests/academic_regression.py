@@ -4711,9 +4711,11 @@ def check_form_to_achievement():
     """
     from flask import url_for
 
+    from werkzeug.security import generate_password_hash
+
     from app.models.academic import FormRound
     from app.modules.academic.services import (achievement_service as ach_svc,
-                                               form_service)
+                                              form_service)
 
     def _submit(tpl_id, uid, name):
         """模拟教师提交：submitter_uid 故意传 users.id（历史 bug 形态）。"""
@@ -4756,7 +4758,15 @@ def check_form_to_achievement():
         case('提交归属当前轮次', sub.round_id == r1_id)
 
         # 2) 审核通过 → 自动入账
-        form_service.review_submission(sub.id, 'approved', admin_id, '材料齐全')
+        # 2026-10-19 第十三轮审计：审核人不得是提交人本人（新增规则），
+        # 这里临时建一个审核人账号代替原来的 admin 自审。
+        reviewer = User(username='qa_form_reviewer', real_name='表单审核人',
+                        role='staff', permission_group_id=1, is_active=True,
+                        password_hash=generate_password_hash('Qa#2026'))
+        db.session.add(reviewer)
+        db.session.commit()
+        reviewer_id = reviewer.id
+        form_service.review_submission(sub.id, 'approved', reviewer_id, '材料齐全')
         rec = TeacherAchievement.query.filter_by(source_type='form',
                                                  source_id=sub.id).first()
         case('审核通过自动生成业绩', rec is not None)
@@ -4788,7 +4798,7 @@ def check_form_to_achievement():
              f'{r2.round_no}/{r1.status}')
         sub2 = _submit(tpl_id, admin_id, tname)
         case('跨轮次可再次提交（不再被判重复）', sub2.round_id == r2.id)
-        form_service.review_submission(sub2.id, 'approved', admin_id, '')
+        form_service.review_submission(sub2.id, 'approved', reviewer_id, '')
         case('新一轮提交同样入账',
              TeacherAchievement.query.filter_by(source_round_id=r2.id).count() == 1)
 
@@ -4801,7 +4811,7 @@ def check_form_to_achievement():
             created_by=admin_id, ach={'to_achievement': False})
         form_service.publish_form(tpl2.id)
         sub3 = _submit(tpl2.id, admin_id, tname)
-        form_service.review_submission(sub3.id, 'approved', admin_id, '')
+        form_service.review_submission(sub3.id, 'approved', reviewer_id, '')
         case('未开启计入的收集不写业绩',
              TeacherAchievement.query.filter_by(source_type='form',
                                                 source_id=sub3.id).count() == 0)
@@ -4816,7 +4826,7 @@ def check_form_to_achievement():
             ach={'to_achievement': True, 'ach_category': 'honor'})
         form_service.publish_form(tpl3.id)
         sub4 = _submit(tpl3.id, admin_id, tname)
-        form_service.review_submission(sub4.id, 'rejected', admin_id, '材料不全')
+        form_service.review_submission(sub4.id, 'rejected', reviewer_id, '材料不全')
         el_r = form_service.check_eligibility(tpl3.id, admin_id, 'teacher')
         case('被驳回后可重交（资格检查放行）',
              el_r['eligible'] and not el_r['already_submitted'],
@@ -5021,6 +5031,7 @@ def check_form_notify():
     通知中心可按「材料收集」筛选，并可把通知从自己的收件箱移除。
     """
     from flask import url_for
+    from werkzeug.security import generate_password_hash
     from app.models.notification import (Notification, NotificationRecipient,
                                          CATEGORY_LABELS)
     from app.modules.academic.services import form_service, form_summary_service
@@ -5071,10 +5082,18 @@ def check_form_notify():
         case('分类字典含「材料收集」', CATEGORY_LABELS.get('collect') == '材料收集')
 
         # 甲：提交 → 审核通过 → 收到通知（含入账说明）
+        # 2026-10-19 第十三轮审计：审核人不能是提交人本人，另建一个审核账号
+        _rv = User.query.filter_by(username='qa_notice_reviewer').first()
+        if _rv is None:
+            _rv = User(username='qa_notice_reviewer', real_name='通知审核人',
+                       role='staff', permission_group_id=1, is_active=True,
+                       password_hash=generate_password_hash('Qa#2026'))
+            db.session.add(_rv)
+            db.session.commit()
         sub = form_service.submit_form(
             tpl_id, {'submitter_type': 'teacher', 'submitter_id': admin.id,
                      'submitter_name': '通知教师甲', 'submitter_uid': 'TNT01'}, {}, {})
-        form_service.review_submission(sub.id, 'approved', admin.id, '材料齐全')
+        form_service.review_submission(sub.id, 'approved', _rv.id, '材料齐全')
         n_ok = Notification.query.filter_by(biz_type='form_review',
                                             biz_id=sub.id).first()
         case('审核通过后通知提交人且写明已入账',

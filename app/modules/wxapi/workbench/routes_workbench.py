@@ -84,8 +84,11 @@ def _invig_rows(user_id, start, end, real_name=''):
     """
     cond = AffairInvigilation.user_id == user_id
     if real_name:
-        cond = or_(cond, and_(AffairInvigilation.user_id.is_(None),
-                              AffairInvigilation.name == real_name))
+        # 2026-10-19：同 routes_exam._invig_rows —— 同名教师不启用姓名兜底
+        from app.models import User as _U
+        if _U.query.filter(_U.real_name == real_name).count() == 1:
+            cond = or_(cond, and_(AffairInvigilation.user_id.is_(None),
+                                  AffairInvigilation.name == real_name))
     return (db.session.query(AffairInvigilation, AffairSchedule, ExamAffair)
             .join(AffairSchedule,
                   AffairInvigilation.schedule_id == AffairSchedule.id)
