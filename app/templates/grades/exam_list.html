@@ -9,7 +9,7 @@
         {# 2026-10-15 用户口径：任课教师 / 班主任也能进本页，但只给成绩分析
            （考务安排、成绩导入这些不给）。按 grades.edit 分两套提示。 #}
         <span class="text-muted small">
-            {% if can_manage %}点任意一场考试进入它的工作台：<b>考务安排 → 成绩导入 → 成绩分析</b>
+            {% if can_manage %}点任意一场考试：<b>未导入成绩 → 考务安排</b>；<b>已导入 → 成绩总览</b>
             {% else %}点任意一场考试查看<b>成绩分析</b>（只展示您所教 / 所带班级与所在年级）{% endif %}
         </span>
     </div>
@@ -41,22 +41,29 @@
                 <th>年级</th>
                 <th>考试日期</th>
                 <th>状态</th>
-                {# v1.19.0 四步进度：建立考试 → 考务安排 → 成绩导入 → 成绩分析 #}
-                <th title="建立考试 → 考务安排 → 成绩导入 → 成绩分析">进度</th>
+                {# v1.19.0 四步进度：建立考试 → 考务安排 → 数据导入 → 成绩分析 #}
+                <th title="建立考试 → 考务安排 → 数据导入 → 成绩分析">进度</th>
                 <th class="text-end">参考人数</th>
                 <th class="text-end">操作</th>
             </tr>
             </thead>
             <tbody>
             {% for e in exams %}
-            {# v1.19.0 整行可点：直接进本场考试工作台（不再需要“详情”按钮）
-               2026-10-15：无 grades.edit 的账号（任课教师 / 班主任）改跳本场「成绩分析」——
-               考试工作台（成绩单 / 考务 / 导入）都需要管理权限，对他们会 403。 #}
+            {# 2026-10-19 用户口径：进考试的落点按有没有成绩决定 ——
+               还没导入成绩 → 考务安排（第一步学生名单）；已导入 → 成绩总览。
+               无 grades.edit 的账号（任课教师 / 班主任）仍只看本场成绩分析。 #}
+            {% set has_scores = counts.get(e.id, 0) > 0 or e.status in ('imported', 'dirty') %}
+            {% if can_manage and not has_scores %}
+                {% set row_url = url_for('grades.exam_affair_go', exam_id=e.id) %}
+                {% set row_tip = '尚未导入成绩 → 进入考务安排（第一步：学生名单）' %}
+            {% else %}
+                {% set row_url = url_for('grades.index', exam=e.id, tab='grade') %}
+                {% set row_tip = '已导入成绩 → 进入成绩总览' if has_scores else '点击查看本场成绩分析' %}
+            {% endif %}
             <tr class="exam-row"
-                data-href="{{ url_for('grades.exam_detail', exam_id=e.id) if can_manage
-                             else url_for('grades.index', exam=e.id, tab='grade') }}"
+                data-href="{{ row_url }}"
                 style="cursor:pointer"
-                title="点击进入{{ '本场考试工作台' if can_manage else '本场成绩分析' }}">
+                title="{{ row_tip }}">
                 {# 2026-10-12 UI 审计 M1：考试名可能很长 → 文本列允许换行（.wrap），
                    不再把整表撑出横向滚动条 #}
                 <td class="wrap">{{ e.name }}</td>
@@ -75,7 +82,7 @@
                 {% set st = steps_map.get(e.id) %}
                 <td class="text-nowrap">
                     {% if st %}
-                    {% for nm in ['建立考试', '考务安排', '成绩导入', '成绩分析'] %}
+                    {% for nm in ['建立考试', '考务安排', '数据导入', '成绩分析'] %}
                     <span class="badge rounded-pill {{ 'bg-success' if st[loop.index0] else 'bg-secondary-subtle text-secondary-emphasis' }}"
                           title="{{ nm }}{{ '（已完成）' if st[loop.index0] else '（未完成）' }}">{{ loop.index }}</span>
                     {% endfor %}
@@ -85,7 +92,7 @@
                 <td class="text-end" onclick="event.stopPropagation()">
                     {% if can_manage %}
                     <a href="{{ url_for('grades.exam_affair_go', exam_id=e.id) }}" class="btn btn-sm btn-outline-success">考务安排</a>
-                    <a href="{{ url_for('grades.exam_import', exam_id=e.id) }}" class="btn btn-sm btn-outline-warning">成绩导入</a>
+                    <a href="{{ url_for('grades.exam_import', exam_id=e.id) }}" class="btn btn-sm btn-outline-warning">数据导入</a>
                     <a href="{{ url_for('grades.bands_page', exam_id=e.id) }}" class="btn btn-sm btn-outline-info">划线分层</a>
                     <button type="button" class="btn btn-sm btn-outline-danger btn-del-exam"
                             data-id="{{ e.id }}" data-name="{{ e.grade }} {{ e.name }}"

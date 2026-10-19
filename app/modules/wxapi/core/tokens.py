@@ -23,15 +23,17 @@ def _serializer():
                                   salt=SALT)
 
 
-def issue_token(user_id, group_id=None, ttl=DEFAULT_TTL):
+def issue_token(user_id, group_id=None, ttl=DEFAULT_TTL, openid=None):
     """签发访问令牌。
 
     入参：user_id=用户 id；group_id=本次登录使用的身份组 id（可空）；
-    ttl=有效期秒数（超出 MAX_TTL 会被截断）。
+    ttl=有效期秒数（超出 MAX_TTL 会被截断）；openid=微信登录时的绑定标识。
     返回：(token 字符串, 实际有效期秒数)。
     """
     ttl = max(60, min(int(ttl or DEFAULT_TTL), MAX_TTL))
     payload = {'uid': int(user_id), 'gid': group_id, 'iat': int(time.time())}
+    if openid:
+        payload['oid'] = openid
     return _serializer().dumps(payload), ttl
 
 

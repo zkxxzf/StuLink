@@ -71,6 +71,20 @@
   #invigMatrix .iv-mat-sel option { background-color: var(--bs-body-bg); color: var(--sl-text); }
   #invigMatrix .iv-mat-sel:hover, #invigMatrix .iv-mat-sel:focus {
     border: 1px solid var(--sl-border); }
+  /* 2026-10-19 用户反馈「UI 穿模」：工作量弹窗的表头原来只挂 .sticky-top，
+     .table 单元格底色是 transparent —— 表头悬浮时下层行直接透出来，文字叠成一团，
+     看上去像表头飘到弹窗标题上。改成：表格在自己的小容器里滚动，
+     表头给不透明底色 + 分隔阴影，永不再"穿"。 */
+  #wlModal .wl-scroll { max-height: 62vh; overflow: auto; border-radius: 8px; }
+  #wlModal .wl-table thead th {
+      position: sticky; top: 0; z-index: 2;
+      background: var(--sl-head-bg) !important;
+      color: var(--sl-head-text);
+      box-shadow: inset 0 -1px 0 var(--sl-head-border);
+      white-space: nowrap;
+  }
+  #wlModal .wl-table tbody td { background: var(--sl-surface); }
+  #wlModal .wl-table tbody tr.wl-detail > td { background: var(--sl-surface-2); }
 </style>
 {% endblock %}
 {% block content %}
@@ -696,9 +710,20 @@
             <select id="invigSlots" class="form-select form-select-sm w-auto" onchange="saveInvigSlots()">
                 <option value="1">1 人</option><option value="2">2 人</option><option value="3">3 人</option>
             </select>
+            {# 2026-10-19 用户口径：同科回避 / 首场优先班主任由用户勾选，不再写死在算法里 #}
+            <label class="form-check form-check-inline mb-0 small"
+                   title="勾上：任教本场科目的老师不排本场（一场多科时每科都回避）">
+                <input class="form-check-input" type="checkbox" id="invigOptAvoid" checked>
+                <span class="form-check-label">同科回避</span>
+            </label>
+            <label class="form-check form-check-inline mb-0 small"
+                   title="勾上：每天第一场先排班主任（首选，排不下时仍按均衡补其他老师）">
+                <input class="form-check-input" type="checkbox" id="invigOptHead" checked>
+                <span class="form-check-label">首场优先班主任</span>
+            </label>
             <button class="btn btn-primary btn-sm" onclick="autoInvig()">
                 <i class="bi bi-magic"></i> 自动编排监考</button>
-            <span class="small text-muted">（回避本场科目教师；同一场次一人只监一个考场）</span>
+            <span class="small text-muted">（同一场次一人只监一个考场）</span>
             {# 2026-10-13 用户口径：按老师统计监考工作量（格数 × 场次时长） #}
             <button class="btn btn-outline-primary btn-sm" onclick="openWorkload()">
                 <i class="bi bi-stopwatch"></i> 工作量统计</button>
@@ -931,15 +956,17 @@
             </div>
             <div class="modal-body p-2">
                 <div id="wlTip" class="small text-muted mb-2"></div>
-                <table class="table table-sm table-bordered align-middle mb-0">
-                    <thead class="sticky-top"><tr>
-                        <th>教师</th>
-                        <th class="text-center" style="width:92px">监考格数</th>
-                        <th class="text-end" style="width:130px">监考时长</th>
-                        <th class="text-center" style="width:70px">明细</th>
-                    </tr></thead>
-                    <tbody id="wlBody"></tbody>
-                </table>
+                <div class="wl-scroll">
+                    <table class="table table-sm table-bordered align-middle wl-table mb-0">
+                        <thead><tr>
+                            <th>教师</th>
+                            <th class="text-center" style="width:92px">监考格数</th>
+                            <th class="text-end" style="width:130px">监考时长</th>
+                            <th class="text-center" style="width:70px">明细</th>
+                        </tr></thead>
+                        <tbody id="wlBody"></tbody>
+                    </table>
+                </div>
             </div>
             <div class="modal-footer py-1">
                 <span id="wlTotal" class="small text-muted me-auto"></span>
@@ -2734,7 +2761,8 @@ function renderWorkload(d){
         return;
     }
     tip.innerHTML = d.has_time
-        ? '时长按每场次「开始—结束」累加；一人一场次只监一个考场，故格数即场次数。'
+        ? '时长按每场次「开始—结束」累加。自动编排按<b>累计时长</b>均衡（不是按格数），'
+          + '所以格数不完全一样属正常，看「监考时长」和下面的极差即可。'
         : '<span class="text-danger">场次尚未填写开始/结束时间，暂时算不出时长 —— 先到环节⑤ 考试时间表补时间。</span>';
     var srcCn = {teacher: '任课教师', other: '其他监考员'};
     var rows = [];
@@ -2764,8 +2792,15 @@ function renderWorkload(d){
             + '<th class="text-end">时长</th></tr></thead><tbody>' + det + '</tbody></table></td></tr>');
     });
     body.innerHTML = rows.join('');
-    total.textContent = '共 ' + d.items.length + ' 人 / ' + d.total_cells + ' 格'
-        + (d.has_time ? ('，合计 ' + _fmtDuration(d.total_minutes)) : '');
+    var tail = '共 ' + d.items.length + ' 人 / ' + d.total_cells + ' 格';
+    if(d.has_time){
+        var b = d.balance || {};
+        tail += '，合计 ' + _fmtDuration(d.total_minutes)
+              + '；人均 ' + _fmtDuration(b.mean)
+              + '，最长 ' + _fmtDuration(b.max) + ' / 最短 ' + _fmtDuration(b.min)
+              + '（极差 ' + _fmtDuration(b.spread) + '）';
+    }
+    total.textContent = tail;
 }
 function toggleWlDetail(idx){
     var tr = document.querySelector('#wlBody tr.wl-detail[data-idx="' + idx + '"]');
@@ -2789,11 +2824,31 @@ function saveInvigSlots(){
     fetch('/grades/affairs/'+AID+'/invig/settings', {method:'POST', body:fd, headers:{'X-CSRFToken':csrf()}})
         .then(r=>r.json()).then(d=>{ if(d.ok) loadInvig(); });
 }
+function restoreInvigOpts(){
+    // 2026-10-19：两个勾选按批次记在本地，下次打开还是上次的选择
+    try{
+        var v = localStorage.getItem('invigOpts' + AID) || '';
+        if (v.length === 2){
+            var a = document.getElementById('invigOptAvoid');
+            var h = document.getElementById('invigOptHead');
+            if (a) a.checked = (v[0] === '1');
+            if (h) h.checked = (v[1] === '1');
+        }
+    }catch(e){}
+}
+document.addEventListener('DOMContentLoaded', restoreInvigOpts);
 function autoInvig(){
     if(!confirm('自动编排监考将覆盖现有监考安排，继续？')) return;
     var msg = document.getElementById('invigMsg');
+    var avoid = document.getElementById('invigOptAvoid').checked ? '1' : '0';
+    var head = document.getElementById('invigOptHead').checked ? '1' : '0';
+    try{ localStorage.setItem('invigOpts' + AID, avoid + head); }catch(e){}
+    var fd = new URLSearchParams();
+    fd.append('avoid_same', avoid);
+    fd.append('head_first', head);
     msg.className='small text-muted'; msg.textContent='编排中…';
-    fetch('/grades/affairs/'+AID+'/invig/auto', {method:'POST', headers:{'X-CSRFToken':csrf()}})
+    fetch('/grades/affairs/'+AID+'/invig/auto', {method:'POST', body: fd,
+        headers:{'X-CSRFToken':csrf()}})
         .then(r=>r.json()).then(d=>{
             if(!d.ok){ msg.className='small text-danger'; msg.textContent=d.msg||'编排失败'; return; }
             msg.className='small text-success';
@@ -2806,10 +2861,22 @@ function autoInvig(){
                 txt += '；每人 '+Math.min.apply(null,vals)+'~'+Math.max.apply(null,vals)+' 场'
                      + '（共 '+ks.length+' 人有安排）';
             }
+            // 2026-10-19 用户口径：均衡看的是**时长**不是格数 —— 把人均/极差直接报出来
+            var b = d.balance || {};
+            if (b.mean){
+                txt += '；人均 ' + _fmtDuration(b.mean)
+                     + '，极差 ' + _fmtDuration(b.spread)
+                     + '（' + _fmtDuration(b.min) + '~' + _fmtDuration(b.max) + '）';
+            }
             if (d.gap_count){
                 msg.className='small text-warning';
                 txt += '；⚠ 缺 '+d.gap_count+' 格排不下（' + ((d.gaps&&d.gaps[0]) ? d.gaps[0].reason : '无可用教师')
                      + '）—— 请增加监考员或取消部分排除';
+            }
+            // 2026-10-19：首场优先班主任的结果要说出来，否则用户以为勾了没生效
+            var o = d.opts || {};
+            if (o.head_first && o.first_schedules){
+                txt += '；每天首场 '+o.first_schedules+' 个，池内班主任 '+o.head_count+' 人已优先安排';
             }
             msg.textContent = txt;
             loadInvig();

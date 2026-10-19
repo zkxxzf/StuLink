@@ -1,0 +1,37 @@
+{# 2026-10-19：划线分层状态条——直接展示在数据导入两栏下方，不再套卡片。
+   进入划线编辑页的入口保留在导入页卡片 / 考试详情，侧栏不再单列。 #}
+<div class="di-band-strip mt-3">
+    <div class="d-flex flex-wrap align-items-center gap-3">
+        <span class="di-band-icon"><i class="bi bi-bar-chart-line"></i></span>
+        <div class="di-band-main">
+            <div class="d-flex align-items-center flex-wrap gap-2">
+                <span class="fw-semibold">划线分层</span>
+                {% if band_summary.groups %}
+                <span class="di-chip di-chip-ok">已划 {{ band_summary.groups }} 个方向×学科</span>
+                {% if band_summary.template %}<span class="di-chip">模板：{{ band_summary.template }}</span>{% endif %}
+                {% else %}
+                <span class="di-chip">本场未划线</span>
+                {% endif %}
+            </div>
+            <div class="small text-muted mt-1">
+                {% if band_summary.groups %}
+                层：{{ band_summary.names|join(' / ') }}{% if band_summary.names|length >= 8 %} …{% endif %}
+                {% else %}
+                上传「各科分数线」表（科目 × 各条线）即可自动写入；也可进入页面手工填写。
+                {% endif %}
+            </div>
+        </div>
+        <div class="d-flex gap-2 ms-auto">
+            {% if step == 'upload' %}
+            <button type="button" class="btn btn-sm btn-outline-primary" id="aiBandBtn">
+                <i class="bi bi-stars"></i> 用 AI 导入分数线
+            </button>
+            {% endif %}
+            {% if can_view_bands %}
+            <a href="{{ url_for('grades.bands_page', exam_id=exam.id) }}" class="btn btn-sm btn-outline-info">
+                <i class="bi bi-table"></i> 进入划线分层
+            </a>
+            {% endif %}
+        </div>
+    </div>
+</div>

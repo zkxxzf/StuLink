@@ -12,7 +12,9 @@
     <div class="col-md-8">
         <div class="card">
             <div class="card-body">
-                <form method="POST">
+                {# 2026-10-19：autocomplete=off —— 本页含 username+password，
+                   浏览器会当登录表单自动填充口令（编辑用户时被误当成"必须改密"） #}
+                <form method="POST" autocomplete="off">
                     {{ form.hidden_tag() }}
                     <div class="row">
                         <div class="col-md-6 mb-3">
@@ -41,8 +43,31 @@
                             <div class="form-text text-muted">一人可挂多个身份；在顶栏 / 工作台可切换当前身份。</div>
                         </div>
                         <div class="col-md-6 mb-3">
-                            <label class="form-label">密码 {% if not form.password.data %}(默认123456){% endif %}</label>
-                            {{ form.password(class="form-control", placeholder="不填则不修改") }}
+                            {# 2026-10-19：改角色/权限组/班级不需要动密码；口令留空即不改。
+                               口令框强制 new-password + 初始 readonly，避免密码管理器
+                               把登录口令填进来后在保存时被策略拦下。 #}
+                            <label class="form-label">密码
+                                {% if title == '编辑用户' %}
+                                <small class="text-muted">(选填，留空则不修改)</small>
+                                {% else %}
+                                <small class="text-muted">(留空则自动生成随机口令)</small>
+                                {% endif %}
+                            </label>
+                            {% if title == '编辑用户' %}
+                            {{ form.password(class="form-control",
+                                             placeholder="留空则不修改密码",
+                                             autocomplete="new-password",
+                                             readonly=true,
+                                             onfocus="this.removeAttribute('readonly')",
+                                             data_lpignore="true",
+                                             data_1p_ignore="true") }}
+                            {% else %}
+                            {{ form.password(class="form-control",
+                                             placeholder="留空则自动生成",
+                                             autocomplete="new-password",
+                                             data_lpignore="true",
+                                             data_1p_ignore="true") }}
+                            {% endif %}
                             {% for e in form.password.errors %}<div class="text-danger small">{{ e }}</div>{% endfor %}
                         </div>
                         <div class="col-md-6 mb-3" id="gradeField">

@@ -12,6 +12,13 @@ from flask import (Flask, render_template, request, url_for, abort, redirect,
 from sqlalchemy import event as _sa_event
 from sqlalchemy.engine import Engine as _SAEngine
 
+try:  # 本地 .env 读取微信 AppID/Secret 等；显式环境变量优先
+    from dotenv import load_dotenv
+    load_dotenv(os.path.join(
+        os.path.dirname(os.path.dirname(__file__)), '.env'))
+except ImportError:
+    pass
+
 from config import Config
 from app.extensions import db, login_manager, csrf
 from app.utils.permission_map import default_keys as _module_keys

@@ -101,6 +101,12 @@ class Config:
     # 令牌有效时长（秒，默认 12 小时）。均由环境变量注入，不写死在代码里。
     WX_ENV = os.environ.get('STULINK_WX_ENV', 'prod').strip().lower()
     WX_TOKEN_TTL = int(os.environ.get('STULINK_WX_TOKEN_TTL', '43200'))
+    # 微信小程序登录（服务端 code2session）；未配置时只能走账号密码。
+    WX_MP_APPID = os.environ.get('WX_MP_APPID', '').strip()
+    WX_MP_SECRET = os.environ.get('WX_MP_SECRET', '').strip()
+    # 仅供本机联调：code=mock:<openid> 时不访问微信服务器。
+    WX_MP_MOCK = os.environ.get('WX_MP_MOCK', '0') == '1'
+    WX_QR_TTL = int(os.environ.get('STULINK_WX_QR_TTL', '120'))
 
     # 学校名称：成绩证明等对外文书抬头
     # 优先级：环境变量 SCHOOL_NAME > 数据库 system_settings（系统设置页）> 化名占位

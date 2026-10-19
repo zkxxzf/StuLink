@@ -100,6 +100,8 @@ def wx_login_required(f):
             return wx_err('首次登录请先在电脑端修改密码后再使用', 403)
         _attach_identity(user, payload.get('gid'))
         g.wx_user = user
+        g.wx_openid = payload.get('oid') or ''
+        g.wx_group_id = payload.get('gid')
         return f(*args, **kwargs)
 
     return wrapper

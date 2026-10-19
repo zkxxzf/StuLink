@@ -43,18 +43,21 @@
                 <td>{{ g.class_name or '—' }}</td>
                 <td>{{ g.subject }}</td>
                 <td class="text-end">
-                    {{ '—' if g.old_score is none else g.old_score }} →
+                    {% if g.action == 'add' %}<span class="text-muted">缺考</span>
+                    {% else %}{{ '—' if g.old_score is none else g.old_score }}{% endif %} →
                     {% if g.action == 'delete' %}<span class="text-danger">缺考</span>
                     {% else %}<b>{{ '—' if g.new_score is none else g.new_score }}</b>{% endif %}
                 </td>
                 <td class="text-end text-muted">
-                    {{ '—' if g.old_raw is none else g.old_raw }} →
+                    {% if g.action == 'add' %}—{% else %}{{ '—' if g.old_raw is none else g.old_raw }}{% endif %} →
                     {% if g.action == 'delete' %}—
                     {% else %}{{ '—' if g.new_raw is none else g.new_raw }}{% endif %}
                 </td>
                 <td>
                     {% if g.action == 'delete' %}
                     <span class="badge bg-warning text-dark">标记缺考</span>
+                    {% elif g.action == 'add' %}
+                    <span class="badge bg-success">补录</span>
                     {% else %}
                     <span class="badge bg-info text-dark">修改</span>
                     {% endif %}

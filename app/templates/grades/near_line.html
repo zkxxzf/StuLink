@@ -64,6 +64,14 @@
             <div class="col-auto">
                 <button class="btn btn-primary btn-sm"><i class="bi bi-funnel"></i> 应用</button>
             </div>
+            <div class="col-auto ms-auto">
+                {# 同一个表单换 formaction 提交到导出地址：参数与页面筛选天然一致 #}
+                <button class="btn btn-outline-secondary btn-sm" type="submit"
+                        formaction="{{ url_for('grades.near_line_export', exam_id=exam.id) }}"
+                        formmethod="get"
+                        title="按当前筛选导出（Excel：临界生明细 + 班级对比）">
+                    <i class="bi bi-file-earmark-excel"></i> 导出</button>
+            </div>
         </div>
     </div>
 </form>

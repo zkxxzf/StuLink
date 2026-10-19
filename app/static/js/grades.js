@@ -156,9 +156,9 @@ function syncExamNav(){
         ana_grade: '/grades/analysis?exam=' + eid + '&tab=grade',
         ana_class: '/grades/analysis?exam=' + eid + '&tab=class',
         ana_subject: '/grades/analysis?exam=' + eid + '&tab=subject',
-        // 2026-10-13：原侧栏「AI 智能导入」项已并入「成绩导入」（data-nav="import"），
-        // 两种方式在导入页内切换，因此这里不再需要 ai 映射。
-        bands: '/grades/exams/' + eid + '/bands',
+        // 2026-10-19：原侧栏「AI 智能导入」项已并入「数据导入」（data-nav="import"），
+        // 同一页左右两栏，因此这里不再需要 ai 映射；
+        // 划线分层也去掉了独立侧栏项（编辑页从导入页卡片 / 考试详情进入），故无 bands 映射。
         pivot: '/grades/pivot?exam=' + eid,
         near: '/grades/exams/' + eid + '/near-line',
         report: '/grades/report?exam=' + eid,

@@ -2,6 +2,7 @@
 def register_blueprints(app):
     # 认证模块（共享）
     from app.modules.auth.routes import bp as auth_bp
+    from app.modules.auth import wechat_routes  # noqa: F401 注册扫码路由
     app.register_blueprint(auth_bp)
 
     # 欢迎页（/）

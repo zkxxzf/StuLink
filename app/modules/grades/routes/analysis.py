@@ -13,6 +13,7 @@ from app.models import Student
 from app.modules.grades import bp
 from app.modules.grades.services import tab_service, scope as scope_service
 from app.modules.grades.services import compare_service
+from app.modules.grades.services import near_line_view
 from app.modules.grades.utils import numeric_classes
 from app.utils.decorators import perm_required
 from app.utils.cache import cache
@@ -39,80 +40,10 @@ def exam_near_line(exam_id):
     另外：临界生是"总分划线上下"的概念，**任课班级（仅单科授权）不含总分口径**，
     与其他页面一致不进名单（否则等于用临界生名单绕过总分口径）。
     """
-    from app.modules.grades.services.exam_guard import assert_exam_visible
-    from app.modules.grades.services import (report_warning_service as rws,
-                                             report_service as rs)
-    from app.modules.grades.services import score_guard
-    from app.models.grades import ExamBand, TOTAL_SUBJECT
-    exam = assert_exam_visible(exam_id)
-    try:                       # fail-closed：解析不出范围（无授权/毕业年级）一律不放行
-        scope = score_guard.resolve(current_user)
-    except PermissionError as exc:
-        abort(403, description=str(exc))
-    # 2026-10-15：任课授权放宽成"年级 × 学科"后，`visible_classes()` 对有任课的年级
-    # 也返回 None（只代表"班级不成约束"，学科/总分另有收口）。临界生名单含**逐生总分
-    # 与各科明细**，必须按"总分口径"收班级 → 走 `total_visible_classes()`，
-    # 纯任课教师（无总分口径）得到空集 → fail-closed。
-    allowed_classes = scope.total_visible_classes(exam.grade)
-    _visible_now = scope.visible_classes(exam.grade)
-    dropped_classes = (sorted(_visible_now - (allowed_classes or set()))
-                       if _visible_now is not None and allowed_classes is not None
-                       else [])
-
-    cfg_max = rs.NEAR_LINE_MAX
-    direction = (request.args.get('direction') or '').strip()
-    layer = (request.args.get('layer') or '').strip()
-    above = request.args.get('above', default=rs.NEAR_LINE_ABOVE, type=int)
-    below = request.args.get('below', default=rs.NEAR_LINE_BELOW, type=int)
-    above = max(0, min(above or 0, cfg_max))
-    below = max(0, min(below or 0, cfg_max))
-    cls = (request.args.get('cls') or '').strip()   # 班级筛选（服务内校验，非法＝全部）
-
-    # 可选层级（本场总分划线）——不依赖缓存服务，直接查分数线表
-    lq = ExamBand.query.filter_by(exam_id=exam_id, subject=TOTAL_SUBJECT)
-    if direction:
-        lq = lq.filter_by(direction=direction)
-    layers = []
-    for row in lq.order_by(ExamBand.seq).all():
-        if row.name and row.name not in layers:
-            layers.append(row.name)
-
-    data = rws.near_line_report(exam_id, direction, layer, above, below, cls,
-                                allowed_classes=allowed_classes)
-    err = data.get('error') if isinstance(data, dict) else '计算失败'
-    by_class = []
-    if not err:
-        agg = {}
-        for r in data['rows']:
-            b = agg.setdefault(r['class_name'], {'class_name': r['class_name'],
-                                                 'headteacher': r.get('headteacher') or '',
-                                                 'above': 0, 'below': 0})
-            b['above' if r['status'] == '线上' else 'below'] += 1
-            if not b['headteacher'] and r.get('headteacher'):
-                b['headteacher'] = r['headteacher']
-        by_class = sorted(agg.values(),
-                          key=lambda x: (-(x['above'] + x['below']), x['class_name']))
-    if allowed_classes is None:
-        scope_label, scope_tip = '', ''
-    elif not allowed_classes:
-        scope_label = '无本班数据'
-        scope_tip = ('临界生按总分划线统计，只对总分口径已授权的班级开放'
-                     + ('（你只有任教班级：' + '、'.join(dropped_classes) + '）' if dropped_classes
-                        else '（任课教师只授予单科，不含总分口径）'))
-    elif len(allowed_classes) <= 3:
-        scope_label = '仅 ' + '、'.join(sorted(allowed_classes))
-        scope_tip = '临界生名单含逐生总分与各科成绩，只显示你数据范围内的班级'
-    else:
-        scope_label = f'仅你的 {len(allowed_classes)} 个班'
-        scope_tip = '临界生名单含逐生总分与各科成绩，只显示你数据范围内的班级'
-    if dropped_classes:
-        scope_tip += ('；任教班级 ' + '、'.join(dropped_classes)
-                      + ' 仅授予单科，不含总分口径，未计入临界生')
-    return render_template('grades/near_line.html', exam=exam, data=data, error=err,
-                           layers=layers, direction=direction, layer=layer,
-                           above=above, below=below, cfg_max=cfg_max,
-                           by_class=by_class, scope_label=scope_label,
-                           scope_tip=scope_tip, title='临界生对比')
+    # 参数解析 + 数据范围收敛统一在 services/near_line_view，页面与导出同一份
+    # （导出见 routes/near_line_export.py，别各写一套 scope）。
+    ctx = near_line_view.load(exam_id, request.args)
+    return render_template('grades/near_line.html', **ctx, title='临界生对比')
 
 
 @bp.route('/analysis')

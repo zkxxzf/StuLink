@@ -18,7 +18,7 @@ from urllib.request import Request, urlopen
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from app import create_app  # noqa: E402
-from app.models import Exam, Student, User  # noqa: E402
+from app.models import Exam, ExamScore, Student, User  # noqa: E402
 from app.modules.wxapi.core.tokens import issue_token  # noqa: E402
 
 
@@ -46,7 +46,10 @@ def main():
             print('找不到测试用户')
             return 1
         token, _ttl = issue_token(user.id)
-        exam = Exam.query.order_by(Exam.id.desc()).first()
+        exam = (Exam.query.join(
+            ExamScore, ExamScore.exam_id == Exam.id)
+            .order_by(Exam.id.desc()).first()
+            or Exam.query.order_by(Exam.id.desc()).first())
         student = Student.query.first()
         if exam is None or student is None:
             print('缺少考试或学生数据，无法探测')

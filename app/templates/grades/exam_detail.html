@@ -107,11 +107,12 @@
         {# v1.19.49.35：已导入/待重算都要给「重新计算排名」，否则 dirty 状态下按钮消失找不着 #}
         {% if exam.status not in ('imported', 'dirty') %}
         <a href="{{ url_for('grades.exam_import', exam_id=exam.id) }}" class="btn btn-primary btn-sm">
-            <i class="bi bi-upload"></i> 导入成绩
+            <i class="bi bi-upload"></i> 数据导入
         </a>
         {% else %}
-        <a href="{{ url_for('grades.exam_import', exam_id=exam.id) }}" class="btn btn-outline-primary btn-sm">
-            <i class="bi bi-upload"></i> 分批导入/覆盖
+        <a href="{{ url_for('grades.exam_import', exam_id=exam.id) }}" class="btn btn-outline-primary btn-sm"
+           title="成绩 / 分数线 / 考务名单 / 场次都可以在这里导入">
+            <i class="bi bi-upload"></i> 数据导入 / 覆盖
         </a>
         <form method="post" action="{{ url_for('grades.exam_recalc', exam_id=exam.id) }}">
             <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
@@ -154,7 +155,7 @@
 </div>
 {% endif %}
 
-{# v1.19.0 四段式进度条：建立考试 → 考务安排 → 成绩导入 → 成绩分析 #}
+{# v1.19.0 四段式进度条：建立考试 → 考务安排 → 数据导入 → 成绩分析 #}
 {% if steps %}
 <div class="card mb-3">
   <div class="card-body py-2">
@@ -349,7 +350,7 @@
                            autocomplete="current-password" placeholder="请输入当前登录账号的密码">
                 </div>
                 <div class="form-text text-danger d-none" id="scErr"></div>
-                <div class="form-check mt-2">
+                <div class="form-check mt-2" id="scAbsentWrap">
                     <input class="form-check-input" type="checkbox" id="scAbsent">
                     <label class="form-check-label small text-danger" for="scAbsent">该科缺考（删除此科成绩）</label>
                 </div>
@@ -514,26 +515,33 @@ $(function(){
             });
     }
 
-    /* ---------- 单科改分：弹窗二次确认 + 满分校验（赋分/原始分都可改；总分不可改） ---------- */
-    var scCell = null, scSid = null;
+    /* ---------- 单科改分 / 缺考补录：弹窗二次确认 + 满分校验 ----------
+       2026-10-19：缺考格（无成绩行，data-sid 为空）也可点开补录 —— 同一个弹窗，
+       标题/按钮变成「补录」，并隐藏「该科缺考」复选框（本来就是缺考）。 ---------- */
+    var scCell = null, scSid = null, scNo = '', scSubject = '';
 
     // 事件委托绑在表上：AJAX 局部刷新 tbody 后依然有效，无需逐个重新绑定
     function bindScoreCells(){
-        $('#scoreTable').off('click.sc').on('click.sc', 'td.score-cell[data-sid]', function(){
+        $('#scoreTable').off('click.sc').on('click.sc', 'td.score-cell', function(){
             var td = $(this), sid = td.data('sid');
-            if(!sid){ return; }
-            scCell = td; scSid = sid;
-            var label = td.closest('table').find('th').eq(td.index()).text().trim() || '分数';
+            scCell = td; scSid = sid || null;
+            scNo = td.attr('data-no') || td.closest('tr').data('no') || '';
+            scSubject = td.attr('data-subject') || '';
+            var label = scSubject
+                || td.closest('table').find('th').eq(td.index()).text().trim() || '分数';
             var row = td.closest('tr');
             var limit = FULL_MARKS[label];
-            $('#scTitle').text('修改「' + label + '」分数');
-            $('#scWho').text('学号 ' + (row.data('no') || '') + '　' + row.find('td').eq(1).text().trim());
+            var isAdd = !scSid;                 // 无成绩行 = 缺考 → 补录模式
+            $('#scTitle').text((isAdd ? '补录「' : '修改「') + label + '」分数');
+            $('#scWho').text('学号 ' + scNo + '　' + row.find('td').eq(1).text().trim());
             $('#scLimit').text(limit != null ? limit : '—');
             $('#scInput').val(td.attr('data-score') || '').attr('max', limit != null ? limit : '');
             $('#scRaw').val(td.attr('data-raw') || '').attr('max', limit != null ? limit : '');
             $('#scAbsent').prop('checked', false);
+            $('#scAbsentWrap').toggleClass('d-none', isAdd);   // 缺考格不需要再点「缺考」
             $('#scErr').addClass('d-none').text('');
             $('#scPwd').val('');            // 密码不回填、不缓存
+            scResetBtn();
             $('#scoreModal').modal('show');
         });
     }
@@ -542,7 +550,9 @@ $(function(){
 
     // 按钮复位：保存成功 / 失败 / 关闭弹窗后都要复位。
     // 修复：此前成功保存后没复位，按钮一直停在「保存中…」且被禁用，导致后续改不了分。
-    function scResetBtn(){ $('#scSave').prop('disabled', false).text('保存修改'); }
+    function scResetBtn(){
+        $('#scSave').prop('disabled', false).text(scSid ? '保存修改' : '保存补录');
+    }
     $('#scoreModal').on('hidden.bs.modal', scResetBtn);
 
     // 改分成功后的页面提示（几秒后自动消失）
@@ -565,12 +575,12 @@ $(function(){
     }
 
     $('#scSave').on('click', function(){
-        if(!scSid){ return; }
-        var label = scCell
-            ? (scCell.closest('table').find('th').eq(scCell.index()).text().trim() || '分数')
-            : '分数';
+        if(!scCell){ return; }
+        var label = scSubject
+            || (scCell.closest('table').find('th').eq(scCell.index()).text().trim() || '分数');
         var limit = FULL_MARKS[label];
-        var absent = $('#scAbsent').prop('checked');
+        var isAdd = !scSid;                  // 缺考格 → 走补录接口
+        var absent = !isAdd && $('#scAbsent').prop('checked');
         var pwd = $.trim($('#scPwd').val());
         if(!pwd){ scShowErr('请输入当前登录账号的密码以确认本次修改'); $('#scPwd').focus(); return; }
 
@@ -581,12 +591,20 @@ $(function(){
                 raw = scRead('#scRaw', '原始分', limit);
             } catch(e) { scShowErr(e.message); return; }
             if(sc === null && raw === null){
-                scShowErr('请至少填写赋分或原始分，或勾选“该科缺考”'); return;
+                scShowErr(isAdd ? '请至少填写赋分或原始分'
+                                : '请至少填写赋分或原始分，或勾选“该科缺考”');
+                return;
             }
         }
-        var url = absent ? ('/grades/exams/' + examId + '/score/' + scSid + '/delete')
-                         : ('/grades/exams/' + examId + '/score/' + scSid);
+        var url;
+        if(isAdd){ url = '/grades/exams/' + examId + '/score/add'; }
+        else if(absent){ url = '/grades/exams/' + examId + '/score/' + scSid + '/delete'; }
+        else { url = '/grades/exams/' + examId + '/score/' + scSid; }
         var data = {password: pwd};
+        if(isAdd){
+            data.student_no = scNo;
+            data.subject = scSubject || label;
+        }
         if(!absent){
             data.score = (sc === null ? '' : sc);
             data.raw_score = (raw === null ? '' : raw);

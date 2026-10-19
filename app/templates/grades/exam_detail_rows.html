@@ -26,16 +26,19 @@
     {% set cell = stu.subjects.get(s) %}
     {% set unsel = s in (stu.unselected or []) %}
     {% set base = '点击修改（赋分/原始分）' if can_edit_scores else '赋分/原始分' %}
-    {# v1.19.49.35：有成绩且具改分权限的单科才是可点的 score-cell；缺考黄色高亮但不可点；未选灰字 #}
-    <td class="text-end small c-sub {{ 'text-muted' if unsel else ('table-warning' if cell is none else ('score-cell' if can_edit_scores else '')) }}"
+    {# 2026-10-19：缺考（本场该科没有成绩行）也做成可点的 score-cell —— 此前缺考格
+       黄色高亮但不可点，导入缺列/个别缺考时老师没有任何补录入口。未选科仍灰字不可点。 #}
+    <td class="text-end small c-sub {{ 'text-muted' if unsel else ('table-warning' if cell is none else '') }}{{ ' score-cell' if (can_edit_scores and not unsel) else '' }}"
         data-sid="{{ cell.id if cell else '' }}"
+        data-no="{{ stu.no }}"
+        data-subject="{{ s }}"
         data-score="{{ cell.score if cell and cell.score is not none else '' }}"
         data-raw="{{ cell.raw if cell and cell.raw is not none else '' }}"
-        title="{{ '未选（不在该生选科组合内）' if unsel else ('缺考（无该科成绩）' if cell is none else (base + ('｜原始分 ' ~ cell.raw if cell.raw is not none else ''))) }}">{{ cell.score if cell else ('未选' if unsel else '缺') }}{% if cell and cell.raw is not none %}<span class="d-block text-muted small">原{{ cell.raw }}</span>{% endif %}</td>
+        title="{{ '未选（不在该生选科组合内）' if unsel else (('点击补录分数（该科缺考）' if can_edit_scores else '缺考（无该科成绩）') if cell is none else (base + ('｜原始分 ' ~ cell.raw if cell.raw is not none else ''))) }}">{{ cell.score if cell else ('未选' if unsel else '缺') }}{% if cell and cell.raw is not none %}<span class="d-block text-muted small">原{{ cell.raw }}</span>{% endif %}</td>
     {% endfor %}
 </tr>
 {% else %}
 <tr><td colspan="{{ 10 + subjects|length }}" class="text-center text-muted py-5">
-    暂无成绩。点击右上角「导入成绩」，从 Excel 模板导入本场考试成绩。
+    暂无成绩。点击右上角「数据导入」，从 Excel 模板导入本场考试成绩。
 </td></tr>
 {% endfor %}

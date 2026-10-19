@@ -542,9 +542,10 @@ with app.test_client() as c:
 
     # ---- v1.19.49.35 导航高亮唯一性 + 分析子模块「考试态」锁本场 ----
     hb = c.get(f'/grades/exams/{eid}/bands').get_data(as_text=True)
-    check('导航：划线分层页只高亮「划线分层」',
-          re.search(r'class="efn-item active" data-nav="bands"', hb) is not None
-          and re.search(r'class="efn-item active" data-nav="import"', hb) is None)
+    # 2026-10-19：侧栏去掉「划线分层」独立项，划线页归到「数据导入」段
+    check('导航：划线页高亮「数据导入」且不再有划线分层项',
+          re.search(r'class="efn-item active" data-nav="import"', hb) is not None
+          and 'data-nav="bands"' not in hb)
     ha = c.get(f'/grades/analysis?exam={eid}').get_data(as_text=True)
     check('分析页（考试态）隐藏年级/考试下拉',
           'id="gGrade" class="form-select form-select-sm w-auto d-none"' in ha

@@ -98,8 +98,13 @@
         <span class="ms-auto"></span>
         <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('grades.index') }}{% if exam %}?exam={{ exam.id }}{% endif %}">
             <i class="bi bi-graph-up"></i> 成绩分析</a>
+        {% if data %}
+        <button class="btn btn-sm btn-outline-secondary" id="hnExport" type="button"
+                title="导出全部榜单（Excel，各榜一个工作表；按当前班级/关键词筛选）">
+            <i class="bi bi-file-earmark-excel"></i> 导出</button>
         <button class="btn btn-sm btn-outline-dark" id="hnPrint" type="button" title="打印当前页签（卓越班会展开全部班级与科目）">
             <i class="bi bi-printer"></i> 打印</button>
+        {% endif %}
     </div>
 
     {% if not data %}

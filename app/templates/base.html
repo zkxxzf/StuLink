@@ -574,7 +574,7 @@
                     {% endif %}
                 </div>
                 {# 2026-10-15 用户口径：任课教师 / 班主任也能进考试态（只读成绩分析）——
-                   考务 / 导入 / 划线是管理动作，按各自路由的真实门槛包裹，避免"看得见点不进"的
+                   考务 / 导入是管理动作，按各自路由的真实门槛包裹，避免"看得见点不进"的
                    403 死链（用户明确：考务安排、导入这些不给教师）。
                    成绩单（考试概览）例外：教师也能看，但只给本班（仅任课映射的班不含总分口径），
                    入口显隐走后端同一份判定 EN.can_scoresheet（app/utils/exam_nav.py）。 #}
@@ -586,21 +586,14 @@
                 <a class="efn-item {% if EN.section == 'affair' %}active{% endif %}" data-nav="affair"
                    href="{{ url_for('grades.exam_affair_go', exam_id=EN.exam_id) }}">考务安排{% if not EN.steps[1].done %}<span class="efn-tag">待做</span>{% endif %}</a>
                 {% endif %}
-                {# 2026-10-13：原「成绩导入 + AI 智能导入」两个侧栏项合并为**一个入口** ——
-                   两种导入方式（标准模板导入 / AI 智能导入）改在导入页内切换，
-                   见 grades/_import_tabs.html（用户口径：侧栏只留一个入口，页面里再区分）。
-                   两个导入页的 EN.section 都是 'import'，所以这里始终正确高亮。 #}
+                {# 2026-10-19：「成绩导入」升级为「数据导入」——
+                   左栏 AI 智能导入（成绩 / 分数线 / 考生名单 / 考场 / 场次）、
+                   右栏标准模板（成绩），划线分层的导入也在这里。
+                   2026-10-19 用户口径：侧栏**去掉**「划线分层」独立项，编辑页从
+                   导入页下方的划线状态条 / 考试详情进入（不再占一行导航）。 #}
                 {% if current_user.has_perm('grades.import') %}
                 <a class="efn-item {% if EN.section == 'import' %}active{% endif %}" data-nav="import"
-                   href="{{ url_for('grades.exam_import', exam_id=EN.exam_id) }}">成绩导入{% if not EN.steps[2].done %}<span class="efn-tag">待做</span>{% endif %}</a>
-                {% endif %}
-                {# v1.19.49.35：划线分层有自己的段位（'bands'），不再与「成绩导入」同时高亮。
-                   2026-10-15 用户口径：划线分层向所有老师展示（只读），只有教务员 / 管理员 /
-                   年级长可改 → 入口门槛与页面一致取 grades.view（页面内按 grades.settings
-                   分只读 / 可编辑，写接口仍是 grades.settings）。 #}
-                {% if current_user.has_perm('grades.view') %}
-                <a class="efn-item {% if EN.section == 'bands' %}active{% endif %}" data-nav="bands"
-                   href="{{ url_for('grades.bands_page', exam_id=EN.exam_id) }}">划线分层</a>
+                   href="{{ url_for('grades.exam_import', exam_id=EN.exam_id) }}">数据导入{% if not EN.steps[2].done %}<span class="efn-tag">待做</span>{% endif %}</a>
                 {% endif %}
                 {# v1.19.0 成绩分析：折叠组 —— 总览（全年级对比）/ 班级分析（班主任）/ 学科分析（任课教师）
                    + 分析类子模块（临界生对比 / 自由表 / 汇报区）。

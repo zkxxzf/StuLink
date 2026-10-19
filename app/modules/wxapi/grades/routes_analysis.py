@@ -79,6 +79,10 @@ def _compact(data):
             'link': t.get('link') or '',
         }
     meta = data.get('meta') or {}
+    charts = {}
+    for key, c in (data.get('charts') or {}).items():
+        charts[key] = {k: c.get(k) for k in
+                       ('type', 'title', 'xAxis', 'series', 'markLine')}
     return {
         'meta': {
             'classes': meta.get('classes') or [],
@@ -87,6 +91,7 @@ def _compact(data):
             'denom': meta.get('denom') or 'ref',
         },
         'tables': tables,
+        'charts': charts,
     }
 
 

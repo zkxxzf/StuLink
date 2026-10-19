@@ -4,7 +4,9 @@
 
 背景（用户口径）：成绩模块改为**考试上下文驱动** ——
   进入模块先看「历次考试列表」；点进某场考试后，左侧栏切换为该场考试的流程：
-  考务安排 → 成绩导入 → 成绩分析。
+  考务安排 → 数据导入 → 成绩分析。
+（2026-10-19：「成绩导入」升级为「数据导入」——成绩 / 分数线（划线分层）/
+  考生名单 / 考场 / 场次 都在同一页导入。）
 
 本模块只做一件事：**判断当前请求属于哪场考试的哪一段**，供 base.html 渲染悬浮流程栏。
 只读、不写库；同一请求内用 `g` 缓存，避免重复查询。
@@ -13,12 +15,11 @@ from __future__ import annotations
 
 from flask import g, request
 
-# 段位键：overview 概览 / affair 考务 / import 导入 / bands 划线 / analysis 分析
+# 段位键：overview 概览 / affair 考务 / import 导入 / analysis 分析
 SECTION_LABELS = {
     'overview': '考试概览',
     'affair': '考务安排',
-    'import': '成绩导入',
-    'bands': '划线分层',
+    'import': '数据导入',
     'analysis': '成绩分析',
 }
 
@@ -40,8 +41,9 @@ AFFAIR_STEPS = (
 _EP_SECTION = (
     ('grades.exam_ai_import', 'import'),
     ('grades.exam_import', 'import'),
-    # v1.19.49.35 划线分层单独一段：原先归到 'import' 导致侧栏「成绩导入」「划线分层」同时高亮
-    ('grades.bands_page', 'bands'),
+    # 2026-10-19 用户口径：侧栏去掉「划线分层」独立项，划线编辑页归到「数据导入」段
+    # （进入划线页时高亮数据导入；编辑页入口在导入页下方的划线状态条 / 考试详情）。
+    ('grades.bands_page', 'import'),
     ('grades.exam_affair_go', 'affair'),
     ('grades.affair', 'affair'),
     ('grades.affairs', 'affair'),
@@ -138,13 +140,13 @@ def _resolve():
         # 而本场考务其实早已编排完成（有考场·座号·考号）。
         affair = ExamAffair.query.filter_by(exam_id=exam.id).first()
 
-    # 四步进度（与考试详情页同口径：建考试 / 考务 / 导入 / 划线）
+    # 四步进度（与考试详情页同口径：建考试 / 考务 / 导入 / 分析）
     imported = (exam.status == 'imported')
     banded = ExamBand.query.filter_by(exam_id=exam.id).count() > 0
     steps = [
         {'label': '建立考试', 'done': True, 'key': 'exam'},
         {'label': '考务安排', 'done': bool(affair), 'key': 'affair'},
-        {'label': '成绩导入', 'done': imported, 'key': 'import'},
+        {'label': '数据导入', 'done': imported, 'key': 'import'},
         {'label': '成绩分析', 'done': banded, 'key': 'analysis'},
     ]
 
