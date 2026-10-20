@@ -1,4 +1,4 @@
-# StuLink v1.19.49.48 2026-10-19
+# StuLink v1.19.49.49 2026-10-19
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 """小程序划线分层（总分线）。
 

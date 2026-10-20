@@ -34,7 +34,7 @@ config_mod.Config.SQLALCHEMY_BINDS = {
     'history': 'sqlite:///' + os.path.join(_TMP, 'history.db'),
     'grades': 'sqlite:///' + os.path.join(_TMP, 'grades.db'),
     'points': 'sqlite:///' + os.path.join(_TMP, 'points.db'),
-    # 2026-10-13（v1.19.49.48）：德育奖惩库
+    # 2026-10-13（v1.19.49.49）：德育奖惩库
     'morality': 'sqlite:///' + os.path.join(_TMP, 'morality.db'),
     'academic': 'sqlite:///' + os.path.join(_TMP, 'academic.db'),
     # 2026-10-10：教务分库——查课 / 业绩 / 表单 各自独立库
@@ -2748,7 +2748,7 @@ def check_inspection_mark():
 
 @item('SWAPEXCH')
 def check_two_person_exchange():
-    """两人换课（v1.19.49.48）：换时段 / 换班上课 / 请人代课 × 临时与永久，
+    """两人换课（v1.19.49.49）：换时段 / 换班上课 / 请人代课 × 临时与永久，
     覆盖「对方先确认 → 教务审批 → 执行」全链路 + 拒绝 / 越权 / 校验路径。"""
     from app.modules.academic.services import swap_service
 
@@ -3073,7 +3073,7 @@ def check_swap_exchange_batch():
 
 @item('SWAPMIXED')
 def check_swap_mixed_batch():
-    """调课页合并（v1.19.49.48）：一次提交 = 几节调空档 + 几节与同事换上课时间（同一批次）；
+    """调课页合并（v1.19.49.49）：一次提交 = 几节调空档 + 几节与同事换上课时间（同一批次）；
     2026-10-14：对调只换时间（不再连班级一起换）。"""
     from app.models.timetable import ScheduleEntry, ScheduleSwap
     from app.modules.academic.services import swap_service
@@ -3412,7 +3412,7 @@ def check_swap_bulk_offset():
 
 @item('WORKBENCHSWAP')
 def check_workbench_swap():
-    """教师工作台里的调课区块（v1.19.49.48）：入口 + 待我确认 + 我的申请。"""
+    """教师工作台里的调课区块（v1.19.49.49）：入口 + 待我确认 + 我的申请。"""
     with app.test_client() as c:
         login(c, 'ac_admin', TEST_PWD)
         r = c.get('/workbench/')      # 蓝图前缀 /workbench + 路由 '/'（不带斜杠会 308）
@@ -3467,8 +3467,11 @@ def check_workbench_profile():
         r2 = c.get('/workbench/profile')
         h2 = r2.get_data(as_text=True) if r2.status_code == 200 else ''
         case('个人信息页 200', r2.status_code == 200, str(r2.status_code))
+        # 2026-10-20 口径：手机号已独立成 users.phone（加密 + 盲索引），
+        # 页面标签为「手机号（可用于登录）」，不再叫「手机号（登录账号）」
         case('个人信息页：隐私三项齐全（手机号/登录密码/身份证）',
-             all(k in h2 for k in ('手机号（登录账号）', '登录密码', '身份证号')), 'items')
+             all(k in h2 for k in ('手机号（可用于登录）', '登录密码', '身份证号')),
+             'items')
         case('个人信息页：手机号表单回跳本页',
              'name="return_to" value="profile"' in h2, 'return_to')
         case('个人信息页：改密表单复用 auth 改密路由并回跳本页',
@@ -3492,11 +3495,14 @@ def check_workbench_profile():
                           'current_password': TEST_PWD, 'return_to': 'profile'})
         with app.app_context():
             u2, t2 = db.session.get(User, uid), db.session.get(Teacher, tid)
-            case('个人信息：手机号修改成功并同步登录名 / 教师名单',
-                 u2.username == '13800000002' and t2.phone == '13800000002',
-                 f'{u2.username}/{t2.phone}')
+            # 2026-10-20 口径：改手机号只写 users.phone + teachers.phone，
+            # **不再覆盖 username**（用户名是稳定账号标识）
+            case('个人信息：手机号修改成功且用户名不变（账号手机号 + 教师名单）',
+                 u2.username == 'wb_prof' and u2.phone == '13800000002'
+                 and t2.phone == '13800000002',
+                 f'{u2.username}/{u2.phone}/{t2.phone}')
             # 复原（同一进程内后续用例还会登录这个账号）
-            u2.username, t2.phone = 'wb_prof', '13800000001'
+            u2.phone, t2.phone = '13800000001', '13800000001'
             db.session.commit()
         case('个人信息：手机号修改成功回跳个人信息页',
              ok.status_code == 302 and ok.headers['Location'].endswith('/workbench/profile'),

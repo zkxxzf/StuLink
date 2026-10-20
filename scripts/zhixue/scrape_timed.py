@@ -1,4 +1,4 @@
-# StuLink v1.19.49.48  2026-10-20
+# StuLink v1.19.49.49  2026-10-20
 # 抓取智学网全部「限时练 / 标准化作业 / 限时作业」成绩
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 """批量抓取智学网限时练类成绩（全部年级 × 全部学期）。
@@ -34,6 +34,7 @@ from browser_session import attach, ensure_login, log  # noqa: E402
 
 OUT = ROOT / 'data' / 'zhixue' / 'timed'
 INDEX = OUT / 'index.json'
+PLAN = OUT / 'plan.json'
 LIST_URL = ('https://www.zhixue.com/htm-freshreport/'
             '#/schoolReportList/schoolReportListIndex')
 TIMED_WORDS = ('限时练', '标准化作业', '限时作业', '限时训练')
@@ -132,11 +133,13 @@ def do_scrape(context, cfg, exams, force=False):
             log(f'失败：{label} —— {type(exc).__name__}: {exc}')
             fail += 1
             continue
+        # 注意顺序：result 里也有 grade（页面上的「高三年级」文字），
+        # 必须让 exam 的 grade（2024级）覆盖它，否则导入时按年级匹配全落空
         payload = {
+            **result,
             **exam,
             'exam': label, 'url': url,
             'scraped_at': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
-            **result,
             'row_count': len(result.get('rows') or []),
         }
         OUT.mkdir(parents=True, exist_ok=True)
@@ -155,16 +158,50 @@ def do_scrape(context, cfg, exams, force=False):
     return ok, fail, skip
 
 
+def save_plan(exams):
+    """把识别到的场次清单落盘，便于断点续抓（不必每次重扫列表）"""
+    OUT.mkdir(parents=True, exist_ok=True)
+    PLAN.write_text(json.dumps(exams, ensure_ascii=False, indent=1),
+                    encoding='utf-8')
+    log(f'清单已写入 {PLAN.name}（{len(exams)} 场）')
+
+
+def load_plan():
+    if not PLAN.exists():
+        raise SystemExit(f'没有 {PLAN}，先跑一次 --list 生成清单')
+    return json.loads(PLAN.read_text(encoding='utf-8'))
+
+
 def main():
     ap = argparse.ArgumentParser(description='抓取智学网限时练成绩')
     ap.add_argument('--list', action='store_true', help='只列清单不抓取')
     ap.add_argument('--scrape', action='store_true', help='抓取成绩')
     ap.add_argument('--years', default='',
                     help='限定学年，逗号分隔（默认 2024-2027 三学年）')
+    ap.add_argument('--list-only-from-plan', action='store_true',
+                    help='直接读 plan.json，不重新扫列表')
     ap.add_argument('--latest', type=int, default=0, help='只处理最近 N 场')
+    ap.add_argument('--skip', type=int, default=0, help='清单里跳过前 N 场')
+    ap.add_argument('--take', type=int, default=0, help='只处理接下来 N 场（并行分片）')
     ap.add_argument('--max-pages', type=int, default=0, help='调试：每场最多翻 N 页')
     ap.add_argument('--force', action='store_true', help='忽略已抓记录')
     args = ap.parse_args()
+
+    if args.list_only_from_plan:
+        exams = load_plan()
+        end = args.skip + args.take if args.take else None
+        exams = exams[args.skip:end]
+        if args.latest:
+            exams = exams[:args.latest]
+        log(f'从 plan.json 读到 {len(exams)} 场')
+        if args.scrape:
+            cfg = fx.load_config()
+            pw, browser, context = attach()
+            try:
+                do_scrape(context, cfg, exams, args.force)
+            finally:
+                pw.stop()
+        return
 
     years = ([y.strip() for y in args.years.split(',') if y.strip()]
              or list(zl.DEFAULT_YEARS))
@@ -185,6 +222,7 @@ def main():
                   f'{ex["name"]} | {ex["exam_id"]}')
         if not exams:
             raise SystemExit('没有识别到场次（检查 --years 或识别口径）')
+        save_plan(exams)
         if args.scrape:
             do_scrape(context, cfg, exams, args.force)
     finally:

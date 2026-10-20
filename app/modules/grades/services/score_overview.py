@@ -1,4 +1,4 @@
-# StuLink v1.19.49.48 2026-10-15
+# StuLink v1.19.49.49 2026-10-15
 # 考试级概览的授权塑形（Web 端 AI 工具与 MCP 服务共用同一份，避免口径漂移）
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 """考试级概览（考试概览 / get_exam_overview / exam_overview）的授权塑形。

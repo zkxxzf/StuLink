@@ -1,4 +1,4 @@
-# StuLink v1.19.49.48 2026-10-10
+# StuLink v1.19.49.49 2026-10-10
 # 教务 · 查课：统计页（列表筛选 / 月度统计 / 导出 / 图表API）+ 独立录入页（单条/批量）
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 import io

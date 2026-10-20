@@ -49,8 +49,10 @@
         <tbody>
         {% for r in trends.rows %}
         {% set vals = r.now.values()|select('ne', none)|list %}
+        {# 2026-10-20 安全审计 M-10：内联处理器里的动态值必须 |tojson，
+           否则单引号包裹的变量会被静态扫描判为可注入（属性本身用单引号）。 #}
         <tr style="cursor:pointer;"
-            onclick="location.href='{{ url_for('grades.timed_student_detail', tid=exam.id, student_no=r.no) }}'"
+            onclick='location.href={{ url_for("grades.timed_student_detail", tid=exam.id, student_no=r.no)|tojson }}'
             title="点击查看 {{ r.name }} 的全部场次成绩与 T 分走势">
             <td class="text-muted text-nowrap">{{ r.no }}</td>
             <td class="text-nowrap fw-semibold">{{ r.name }}</td>

@@ -55,6 +55,17 @@ def _generate_password():
             return pwd
 
 
+def _generate_initial_password():
+    """批量导出的初始口令：2 位字母 + 6 位数字（2026-10-20 用户口径）。
+
+    仍满足密码策略（≥8 位、含字母与数字），首次登录强制改密。
+    """
+    import string
+    letters = string.ascii_letters
+    return (''.join(secrets.choice(letters) for _ in range(2))
+            + ''.join(secrets.choice(string.digits) for _ in range(6)))
+
+
 def _store_one_time_password(username, real_name, password):
     """L-7：初始/重置口令不再写进 flash（会进响应 HTML 与签名 cookie），
     改为放进 session 的一次性展示区，在用户列表页显示一次即失效。"""
@@ -202,10 +213,18 @@ def list_users():
     # 离职/退休存档名单只在本页展示（其他模块已按 status/archive_kind 排除）
     teacher_map = archive_svc.teacher_map(user_ids)
     archived = archive_svc.archived_teachers()
+    # 2026-10-20：批量导出初始密码 —— 按权限组选择（分组导出）
+    perm_groups = PermissionGroup.query.order_by(PermissionGroup.id).all()
+    # 可勾选导出的账号（与后端排除口径一致：启用 / 非管理员 / 非本人 / 非管理员组）
+    selectable_ids = {u.id for u in users
+                      if u.is_active and u.role != 'admin'
+                      and u.id != current_user.id
+                      and not _user_in_admin_group(u)}
     return render_template('system/users/list.html', users=users, roles=roles,
                            one_time_passwords=one_time_passwords,
                            wx_bindings=wx_bindings, teacher_map=teacher_map,
-                           archived=archived)
+                           archived=archived, perm_groups=perm_groups,
+                           selectable_ids=selectable_ids)
 
 
 @bp.route('/create', methods=['GET', 'POST'])
@@ -281,7 +300,7 @@ def create():
         user.set_password(generated_pwd)
         db.session.add(user)
         db.session.commit()
-        # v1.19.49.48：非管理员自动同步创建教师档案（admin 不写入）
+        # v1.19.49.49：非管理员自动同步创建教师档案（admin 不写入）
         _sync_state, _ = teacher_sync.sync_from_user(user)
         db.session.commit()
         log_operation(current_user, '创建', '用户', user.id, f'{user.real_name} ({user.role_display})')
@@ -424,7 +443,7 @@ def edit(id):
         if form.password.data:
             user.set_password(form.password.data)
         db.session.commit()
-        # v1.19.49.48：教师角色变更 → 同步到 academic.teachers（admin 自动 skip）
+        # v1.19.49.49：教师角色变更 → 同步到 academic.teachers（admin 自动 skip）
         teacher_sync.sync_from_user(user)
         db.session.commit()
         log_operation(current_user, '更新', '用户', user.id, f'{user.real_name} 信息已更新')
@@ -521,7 +540,7 @@ def toggle(id):
     if was_active and not user.is_active:
         user.wx_token_ver = int(user.wx_token_ver or 0) + 1
     db.session.commit()
-    # v1.19.49.48：启禁变更 → 同步 Teacher.status (active/left)
+    # v1.19.49.49：启禁变更 → 同步 Teacher.status (active/left)
     teacher_sync.sync_from_user(user)
     db.session.commit()
     status = '启用' if user.is_active else '禁用'
@@ -547,7 +566,8 @@ def reset_password(id):
                       severity='WARNING')
         flash('只有超管（admin 账号）能重置其他管理员的口令', 'danger')
         return redirect(url_for('users.list_users'))
-    new_pwd = _generate_password()
+    # 2026-10-20：与批量导出统一为「2 字母 + 6 数字」的初始口令
+    new_pwd = _generate_initial_password()
     user.set_password(new_pwd)
     user.must_change_pwd = True
     db.session.commit()
@@ -556,6 +576,97 @@ def reset_password(id):
     _store_one_time_password(user.username, user.real_name, new_pwd)
     flash(f'{user.real_name} 的密码已重置，新口令已在本页一次性显示（仅此一次）', 'success')
     return redirect(url_for('users.list_users'))
+
+
+@bp.route('/export-passwords', methods=['POST'])
+@perm_required('system.users')
+def export_passwords():
+    """批量重置并导出初始密码（可按权限组分组导出）。
+
+    2026-10-20 用户需求。系统只存密码摘要、**无法导出原密码**，因此本功能是
+    「为所选账号生成新的初始密码 → 下载清单」，旧密码立即失效、首次登录强制改密。
+
+    - 范围：优先按「勾选用户」；未勾选时按权限组多选或「全部用户」；
+     - 口令：2 位字母 + 6 位数字，首次登录强制改密；
+     - 排除：管理员账号、管理员组成员、当前登录本人（防批量外发管理入口口令）；
+     - 仅启用账号（禁用账号不分配新口令）；
+     - 全程写操作日志（WARNING 级）。
+    """
+    from datetime import datetime
+
+    from sqlalchemy import or_
+
+    from app.models.user_permission_group import UserPermissionGroup
+
+    uids = [int(v) for v in request.form.getlist('user_ids') if str(v).isdigit()]
+    all_flag = (request.form.get('all') or '') == '1'
+    gids = [int(v) for v in request.form.getlist('group_ids') if str(v).isdigit()]
+    if not uids and not all_flag and not gids:
+        flash('请勾选用户，或选择权限组 / 全部用户', 'danger')
+        return redirect(url_for('users.list_users'))
+
+    if uids:
+        q = User.query.filter(User.id.in_(uids), User.is_active.is_(True))
+    else:
+        q = User.query.filter(User.is_active.is_(True))
+        if not all_flag:
+            sub = db.session.query(UserPermissionGroup.user_id).filter(
+                UserPermissionGroup.group_id.in_(gids))
+            q = q.filter(or_(User.id.in_(sub),
+                             User.permission_group_id.in_(gids)))
+    users = q.order_by(User.role, User.username).all()
+
+    rows = []
+    for u in users:
+        if u.id == current_user.id or u.role == 'admin' or _user_in_admin_group(u):
+            continue
+        pwd = _generate_initial_password()
+        u.set_password(pwd)          # 同时递增 wx_token_ver，吊销小程序旧令牌
+        u.must_change_pwd = True
+        gnames = ('、'.join(g.name for g in u.permission_groups if g and g.name)
+                  or u.role_display)
+        rows.append([u.username, u.real_name or '', gnames, pwd])
+    if not rows:
+        flash('所选范围内没有可导出的账号（管理员与本人已排除）', 'warning')
+        return redirect(url_for('users.list_users'))
+    db.session.commit()
+
+    group_names = [g.name for g in PermissionGroup.query
+                   .filter(PermissionGroup.id.in_(gids)).all()] if gids else []
+    if uids:
+        scope_label = f'勾选用户 {len(rows)} 人'
+    elif all_flag:
+        scope_label = '全部用户'
+    else:
+        scope_label = '、'.join(group_names)
+    log_operation(current_user, '导出初始密码', '用户', None,
+                  f'{len(rows)} 个账号；范围：{scope_label}', module='system',
+                  severity='WARNING')
+
+    import openpyxl
+    from openpyxl.styles import Alignment, Font, PatternFill
+
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = '初始密码'
+    ws.append(['登录用户名', '姓名', '权限组', '初始密码'])
+    for cell in ws[1]:
+        cell.font = Font(bold=True)
+        cell.fill = PatternFill('solid', fgColor='D9E2F3')
+        cell.alignment = Alignment(horizontal='center')
+    for r in rows:
+        ws.append(r)
+    for i, width in enumerate([18, 14, 28, 16], start=1):
+        ws.column_dimensions[chr(64 + i)].width = width
+    ws.freeze_panes = 'A2'
+
+    buf = io.BytesIO()
+    wb.save(buf)
+    buf.seek(0)
+    name = f'初始密码_{datetime.now().strftime("%Y%m%d_%H%M%S")}.xlsx'
+    return send_file(
+        buf, as_attachment=True, download_name=name,
+        mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
 
 
 @bp.route('/download-teacher-template')
@@ -639,7 +750,7 @@ def import_teachers():
 
         created = 0
         errors = []
-        _new_users = []                          # v1.19.49.48：导入后同步至 teachers
+        _new_users = []                          # v1.19.49.49：导入后同步至 teachers
 
         for row_idx in range(2, ws.max_row + 1):
             phone = str(ws.cell(row=row_idx, column=phone_col).value or '').strip()
@@ -681,7 +792,7 @@ def import_teachers():
             created += 1
 
         db.session.commit()
-        # v1.19.49.48：批量导入后同步到 academic.teachers
+        # v1.19.49.49：批量导入后同步到 academic.teachers
         for u in _new_users:
             teacher_sync.sync_from_user(u)
         db.session.commit()

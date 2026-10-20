@@ -3,7 +3,7 @@
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
 [![Python](https://img.shields.io/badge/python-3.11+-green.svg)](https://python.org)
 [![Flask](https://img.shields.io/badge/flask-3.x-lightgrey.svg)](https://flask.palletsprojects.com/)
-[![Version](https://img.shields.io/badge/version-1.19.49.48-orange.svg)](https://gitee.com/zkxxzf/StuLink)
+[![Version](https://img.shields.io/badge/version-1.19.49.49-orange.svg)](https://gitee.com/zkxxzf/StuLink)
 
 面向中学的综合学生管理平台，采用 **双站点 + 多模块 + 一模块一库** 的故障隔离架构：
 
@@ -195,7 +195,7 @@
 
 - **后端**：Python 3.11+ / Flask 3.x / Flask-Login / Flask-SQLAlchemy 2.x（多库 binds）/ Waitress / openpyxl / reportlab / python-pptx
 - **前端**：Bootstrap 5 / jQuery / Jinja2 / ECharts（成绩可视化）/ Chart.js（画像）
-- **安全（v1.19.49.48）**：
+- **安全（v1.19.49.49）**：
   - **身份**：管理员首启随机口令 + 强制改密 · 一次性初始口令展示 · 会话口令摘要（改密即踢）· IP + 账号双维限流与锁定（锁键含来源，防账号被恶意锁定）
   - **数据**：AES 身份证与 AI Key 加密 · CSRF 8h 时效 · 二维权限（功能三档 × 数据范围）· 白名单式教师候选过滤
   - **传输**：`url_guard` 出站白名单 + DNS 解析 + 禁 302 跟随 · CSP（Report-Only 起步，可切 enforce）· HTTPS Cookie Secure
@@ -216,7 +216,7 @@ python run.py --dev
 cd alumni_app && python run.py
 
 # Docker 部署（三个容器：主应用 + 往届查询 + MCP 服务）
-docker build -t stulink:v1.19.49.48 .
+docker build -t stulink:v1.19.49.49 .
 docker build -t stulink-alumni:v1.0.0 ./alumni_app
 docker build -f Dockerfile.mcp -t stulink-mcp:v1.0.0 .
 docker-compose up -d
@@ -301,6 +301,7 @@ StuLink/
 
 | 版本 | 日期 | 亮点 |
 |---|---|---|
+| **1.19.49.49** | 2026-10-20 | **合并 master（v1.19.49.47）回 sakaay**：242 处冲突逐块判定（222 处仅版本号差异、15 处单侧、5 处实质：`users.py` 保留手机号并补批量导出初始密码、`users/list.html` 取 master 超集）；修限时练 `_trends.html` 内联处理器（属性单引号 + `|tojson`，安全扫描 0 命中、安全回归 398/0）；教务回归两条断言跟上手机号新口径；新增迁移 **A41**（按年级回填智学网考号，本地 1,019 行） |
 | **1.19.49.48** | 2026-10-20 | **限时练页面审计（sakaay 分支）**：修空场次「学生分析」页 500（`trends` 未定义）；学生成绩 / 学生分析 / 学生详情三张表字号统一 18px（T 分小字 14px），`.timed-tbl` 样式从 `_analysis.html` 上提到 `base.html` 全局一份；限时练顶栏「点击返回成绩单」改为「点击返回学生成绩」；专项回归 36 项 + 真浏览器 41 项断言全绿 |
 | **1.19.49.47** | 2026-10-20 | **合并 sakaay PR（考试「年级学期」标签与筛选 v1.19.49.46）+ 合并后收尾**：整树对齐 sakaay 后逐项复核既有修复仍生效（`trim_count` 三列口径、`import_exam36` 的 `--apply` 门控、MCP 频控 `_prune_store`、小程序调课 fail-closed、备份调用）；移除 sakaay 误恢复的孤儿 `edustat/services/edu_stat_export.py`（master 已按「教育统计不做 Excel 导出」删除且无引用）；迁移对账工具支持「依赖外部源文件、手工执行」例外（A28），补登记 exam36 修数脚本（A29） |
 | **1.19.49.46** | 2026-10-20 | **考试「年级学期」标签 + 列表筛选**：名称里手写的「（高三上）」升级为独立字段 `exams.grade_semester`（学年 8/1 分界、学期以**春节**为界，空 = 按日期自动推算），列表在名称右侧显示胶囊标签并自动剥掉重复括号；历次考试支持 **年级 / 学期 / 类型 / 考试日期区间** 一条筛选栏（`?grade=&sem=&type=&d1=&d2=`）；新建考试名称留空时自动生成「年级 + 8 位日期 + 阶段」（如 `2024级20261010月考`）；小程序新建页同步学期 picker（新增 A24 迁移） |
