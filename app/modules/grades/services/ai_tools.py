@@ -368,35 +368,38 @@ def _t_my_scope(user, **kw):
     return desc, f'{desc.get("role") or "?"} · {desc.get("visible_grades")}'
 
 
-# ==================== 直接复用 MCP 服务的工具实现 ====================
+# ==================== 直接复用 MCP 服务的取数实现 ====================
 # 2026-10-13：MCP 服务（mcp_server/tools/）与 Web 端原本是"两套封装、同一套口径"
 # （都调用 app 内同一批分析服务 + 同一份 score_guard）。为了彻底消除漂移，
 # 下面这两个 MCP 侧独有、Web 侧原先没有的能力，**直接调用 MCP 的那份实现**：
-#   · mcp_server/tools/scores.py 里的 `_list_classes` / `_class_score_detail` 是
-#     纯同步函数（user 入参 + 返回 dict），不依赖 MCP 框架（register() 才用到 SDK），
+#   · 纯同步函数（user 入参 + 返回 dict），不依赖 MCP 框架（register() 才用到 SDK），
 #     因此可以在 Flask 进程内直接调用，不需要额外的 MCP 服务进程、也不需要账号密码。
 #   · 权限、范围、截断全部沿用 MCP 那一侧的规则（score_guard + config.max_rows）。
+#
+# 2026-10-21：取数实现已搬到 `mcp_server/tools/_exam_views.py`（`tools/scores.py`
+# 只剩注册与参数校验），这里跟着改指过去——**不要**再从注册层取函数。
+# 视图统一用 `brief`：Web 端 AI 同样按 token 计费，默认少给与 MCP 侧保持一致。
 
-def _mcp_scores():
-    """取 MCP 成绩工具模块（延迟导入：MCP 是可选项，缺失时不影响其它工具）。"""
-    from mcp_server.tools import scores as mcp_scores
-    return mcp_scores
+def _mcp_views():
+    """取 MCP 成绩取数模块（延迟导入：MCP 是可选项，缺失时不影响其它工具）。"""
+    from mcp_server.tools import _exam_views
+    return _exam_views
 
 
 def _t_list_classes(user, grade='', exam_id=0, **kw):
     """班级清单（＝ MCP 的 list_classes，同一份实现）。"""
-    ms = _mcp_scores()
-    data = ms._list_classes(user, (grade or '').strip(),
-                            int(exam_id or kw.get('default_exam_id') or 0))
+    data = _mcp_views()._list_classes(
+        user, (grade or '').strip(),
+        int(exam_id or kw.get('default_exam_id') or 0), 'brief')
     return data, f'{data.get("count") or 0} 个班'
 
 
 def _t_class_detail(user, exam_id=0, class_name='', subject='', **kw):
     """某班逐生成绩明细（＝ MCP 的 get_class_score_detail，同一份实现）。"""
     exam, _scope = _exam(user, exam_id, kw.get('default_exam_id'))
-    ms = _mcp_scores()
-    data = ms._class_score_detail(user, exam.id, (class_name or '').strip(),
-                                  (subject or '').strip())
+    data = _mcp_views()._class_score_detail(
+        user, exam.id, (class_name or '').strip(),
+        (subject or '').strip(), 'brief', 0)
     return data, f'{class_name} · {data.get("student_count") or 0} 人'
 
 

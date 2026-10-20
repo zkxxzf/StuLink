@@ -197,7 +197,9 @@ async def run_account_mode_cases(record, expected_tools, probe_tool='list_my_sco
 
         basic = base64.b64encode(f'{username}:{password}'.encode()).decode()
         count, text = await _sdk_session(port, {'Authorization': f'Basic {basic}'}, probe_tool)
-        if count == expected_tools and (not can_call or '"ok": true' in text):
+        # 2026-10-21：返回体改为紧凑 JSON（省额度），ok 判定不能再按带空格的字面量匹配
+        got_ok = '"ok":true' in text.replace(' ', '') or '"ok": true' in text
+        if count == expected_tools and (not can_call or got_ok):
             record('接入认证：正确凭据进入 MCP 并调用成绩工具', [], '')
             print(f'      （工具 {count} 个，{probe_tool} 调用{"成功" if can_call else "已到达工具层"}）')
         else:

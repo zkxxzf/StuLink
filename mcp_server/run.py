@@ -39,22 +39,18 @@ from mcp_server.tools import register_all                      # noqa: E402
 logger = logging.getLogger('stulink.mcp')
 
 INSTRUCTIONS = (
-    '本服务只提供 StuLink 教务系统的「成绩分析」只读能力，无任何写入操作。\n'
-    '可见范围＝接入账号在网页端成绩模块的可见范围，**分两层**（2026-10-15 用户口径）：\n'
-    '· 聚合层（＝年级成绩分析结果）**公开**：年级各班汇总（人数、总分均分/最高/最低、'
-    '分层人数、各科均分、**班级位次**）＋年级基准、年级学科分析、分数段分布、分层上线率、'
-    '班级对比 —— 能看该考试的账号都能看**全年级**；分析某个班时请用 '
-    'get_class_score_summary / compare_classes 拿年级对照，别只报一个孤立的本班数字。\n'
-    '· 逐生层（学生个人成绩、班级逐生明细）**只给自己的班**：任课教师＝所教班级×所教学科，'
-    '班主任＝本班全科，年级长及以上＝本年级，管理员/校级＝全校；班级汇总行里的 '
-    'detail_visible 指出该班能否下钻 get_class_score_detail。\n'
-    '使用约定：\n'
-    '1. 先调用 list_my_score_scope 确认自己能看到哪些年级/班级/学科；\n'
-    '2. 用 list_exams 取 exam_id；list_classes 给的是"可下钻逐生"的班级，'
-    '要看全年级各班用 get_class_score_summary；\n'
-    '3. 越权查询一律返回 {"ok": false, "error": "权限不足：…"}，不要绕过提示继续尝试；\n'
-    '4. 逐生明细里的总分/排名对任课教师仍会隐藏（其只被授予单科）；\n'
-    '5. 返回值为 JSON 文本，形如 {"ok": true, "data": ...} 或 {"ok": false, "error": "原因"}。'
+    '本服务只提供 StuLink 成绩的只读分析，无任何写入能力。\n'
+    '可见范围＝接入账号在网页端的可见范围，**分两层**：\n'
+    '· 聚合层（年级/班级/学科统计·分布·上线率·班级对比）**公开**——能看该考试的账号'
+    '都能看全年级。分析某个班请用 get_class_score_summary / compare_classes 拿年级对照，'
+    '别只报一个孤立的本班数字。\n'
+    '· 逐生层（学生个人成绩、班级逐生明细）只给自己的班：任课教师＝所教年级×所教学科，'
+    '班主任＝本班全科，年级长及以上＝本年级；班级汇总行的 detail_visible 指出能否下钻。\n'
+    '两类考试：kind=exam 普通考试（默认）；kind=timed 限时练（独立库，无总分行、'
+    '单科追加、名次＝该科年级名次；分析用 get_subject_analysis 指定 subject）。\n'
+    '省额度约定：view 默认 brief（精简、明细走列式 cols+rows），要全字段才传 view=full；'
+    '先用 class_name / subject / top 缩小范围，再取数。\n'
+    '越权一律返回 {"ok": false, "error": "权限不足：…"}，不要绕过提示继续尝试。'
 )
 
 
@@ -216,9 +212,11 @@ def _print_banner(cfg, me):
         f"  服务令牌 : {_mask_token(cfg['token'])}（完整值见 mcp_server/config.json；"
         + ('必填' if mode == 'token' or cfg.get('require_token') else '可选') + '）',
         identity_line,
-        '  工具集   : 成绩分析（12 个只读工具，无写入能力）',
+        '  工具集   : 成绩分析（12 个只读工具，无写入能力）；'
+        'kind=timed 查限时练（独立库）',
         '  权限口径 : 聚合层（年级/班级/学科统计·分布·上线率·班级对比）公开，',
-        '             逐生明细=任课教师 所教班级×所教学科 / 班主任 本班全科',
+        '             逐生明细=任课教师 所教年级×所教学科 / 班主任 本班全科',
+        '  省额度   : view 默认 brief（紧凑输出 + 明细列式），view=full 才给全字段',
         '',
     ]
     lines.extend(_client_example(cfg, url, mode))

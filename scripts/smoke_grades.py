@@ -1399,11 +1399,15 @@ with app.test_client() as c:
                                              {'class_name': '02班', 'subject': '数学'},
                                              ru, eid)
         d2 = _json.loads(textd2) if okd2 else {}
-        r2 = d2.get('students') or []
+        # 2026-10-21：brief 视图＝列式 {cols, rows}；列清单直接给出"可见学科"，
+        # 任课教师的列里**不应出现 total**（总分不下发）
+        students = d2.get('students') or {}
+        cols = students.get('cols') or []
+        r2 = students.get('rows') or []
         check('AI工具：他班逐生明细＝仅所教学科、无总分（年级×学科）',
-              okd2 and bool(r2)
-              and all(set(x.get('scores') or {}) <= {'数学'} and 'total_score' not in x
-                      for x in r2), textd2[:140])
+              okd2 and bool(r2) and '数学' in cols and cols == ['no', 'name',
+                                                                '数学', 'rank_g'],
+              f'cols={cols} {textd2[:140]}')
         okd3, textd3, _sd3 = _tools.dispatch('class_detail',
                                              {'class_name': '02班', 'subject': '语文'},
                                              ru, eid)
@@ -1469,17 +1473,20 @@ with app.test_client() as c:
     # ---- 与 MCP 服务同一份实现的两个工具 + 口径一致性（防两套封装漂移） ----
     with app.app_context():
         from app.models import User as U2
-        from mcp_server.tools import scores as _mcp
+        # 2026-10-21：MCP 取数实现搬到 tools/_exam_views.py（scores.py 只剩注册层）
+        from mcp_server.tools import _exam_views as _mcp
         admin_user = U2.query.filter_by(username='admin').first()
         okc, text, _s = _tools.dispatch('list_classes', {'exam_id': eid}, admin_user)
         check('AI工具：班级清单（直接复用 MCP 的 list_classes）',
-              okc and '01班' in text and 'visible_subjects' in text, f'{okc} {text[:120]}')
+              okc and '01班' in text, f'{okc} {text[:120]}')
         okd, textd, _sd = _tools.dispatch('class_detail',
                                           {'exam_id': eid, 'class_name': '01班'}, admin_user)
+        # brief 视图＝列式（cols+rows），不再每行重复键名
         check('AI工具：逐生明细（直接复用 MCP 的 get_class_score_detail）',
-              okd and '"students"' in textd and '"student_no"' in textd, f'{okd} {textd[:120]}')
+              okd and '"students"' in textd and '"cols"' in textd,
+              f'{okd} {textd[:120]}')
         web, _sw = _tools.HANDLERS['class_summary'](admin_user, exam_id=eid)
-        mcp = _mcp._class_scores(admin_user, eid, '')
+        mcp = _mcp._class_scores(admin_user, eid, '', 'brief')
         check('AI工具：Web 与 MCP 同口径（班级数 + 首班均分逐项一致）',
               len(web['rows']) == len(mcp['classes'])
               and web['rows'][0].get('avg') == mcp['classes'][0].get('avg'),
