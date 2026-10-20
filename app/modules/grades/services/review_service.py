@@ -100,9 +100,9 @@ def _is_self_audit(r, user):
     """
     if r is None or user is None:
         return False
-    # 2026-10-20 用户口径：管理员可以审批自己提交的内容 —— 管理员是最高权限，
-    # 不存在"上级"；自审限制只约束非管理员（防普通教师自审自批）。
-    if getattr(user, 'role', None) == 'admin':
+    # 2026-10-20 用户口径：管理员 / 校长可以审批自己提交的内容 —— 最高审批
+    # 身份不存在"上级"；自审限制只约束其他身份（防普通教师自审自批）。
+    if getattr(user, 'is_top_reviewer', False):
         return False
     applicant_id = getattr(r, 'applicant_id', None)
     user_id = getattr(user, 'id', None)

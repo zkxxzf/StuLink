@@ -1547,12 +1547,12 @@ def reviewer_teacher_uid(user):
 def is_self_review(sw, user):
     """申请人是否就是当前审批人（H-03 自审自批）。
 
-    2026-10-20 用户口径：**管理员可以审批自己提交的内容** —— 管理员是最高
-    权限，不存在"上级"，自审限制只约束非管理员（防止普通教师自审自批）。
+    2026-10-20 用户口径：**管理员 / 校长可以审批自己提交的内容** —— 最高
+    审批身份不存在"上级"，自审限制只约束其他身份（防止普通教师自审自批）。
     """
     if sw is None or user is None:
         return False
-    if getattr(user, 'role', None) == 'admin':
+    if getattr(user, 'is_top_reviewer', False):
         return False
     applicant_uid = getattr(sw, 'applicant_uid', None)
     if not applicant_uid:

@@ -14,6 +14,7 @@ class UserForm(FlaskForm):
                                                      Length(max=50)])
     role = SelectField('角色', choices=[
         ('admin', '管理员'),
+        ('principal', '校长'),
         ('dorm_manager', '宿管教师'),
         ('homeroom_teacher', '班主任'),
         ('grade_leader', '年级长'),

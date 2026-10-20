@@ -246,16 +246,43 @@ PERMISSION_GROUPS = [
         ],
     },
     # ===== v1.9.2 新增身份（身份不写死，可在权限页随时新增/调整） =====
-    # 2026-10-14（P4）：按用户裁决删除 校长/副校长/备课组长/教研组长/学生发展中心，
-    # 新增 考试管理员/生活处/政教主任/政教员 —— 系统预置身份定为 11 个。
+    # 2026-10-20 用户口径：恢复「校长」身份 —— 全校查看 + 全校事务审批。
+    # 审批覆盖：调课（一级审批 + 课表终审/执行）、成绩复核/改分、业绩与表单审核、
+    # 德育奖惩审核。不授予 system.users / system.settings（不改账号与系统配置）。
+    {
+        'name': '校长',
+        'role': 'principal',
+        'scope_type': 'school',
+        'description': '校长：全校查看 + 全校事务审批（调课/成绩复核/业绩表单/德育）',
+        'menu_keys': [
+            # 全校查看
+            'students.view', 'dormitory.view', 'statistics.view',
+            'points.view', 'morality.view',
+            'grades.view', 'grades.student_query',
+            'academic.view', 'academic.forms_view',
+            'portrait.view',
+            'workbench.class_view', 'workbench.attendance_view',
+            # 全校审批
+            'academic.swap_approve',   # 调课审批（一级）
+            'academic.timetable',      # 调课终审 / 执行
+            'academic.edit',           # 业绩录入审核 / 表单审核
+            'grades.score_edit',       # 成绩复核审批 / 改分
+            'morality.edit',           # 德育奖惩审核
+        ],
+    },
+    # 2026-10-20 用户口径：教务主任 = 管理教务和成绩（全校范围）。
+    # 2026-10-14（P4）：新增 考试管理员/生活处/政教主任/政教员。
     {
         'name': '教务主任',
         'role': 'staff',
         'scope_type': 'school',
-        'description': '教务主任：学生/成绩/教务写入，其余只读（全校）',
+        'description': '教务主任：学生/成绩/教务写入（含调课与成绩复核审批），全校',
         'menu_keys': _module_keys(
             ('students', 'write'), ('dormitory', 'read'), ('grades', 'write'),
-            ('points', 'read'), ('academic', 'write')),
+            ('points', 'read'), ('academic', 'write')) + [
+            # grades.write 展开不含 standalone 的改分键 → 显式补（复核审批要用）
+            'grades.score_edit',
+        ],
     },
     {
         'name': '教务员',
@@ -325,11 +352,11 @@ for _g in PERMISSION_GROUPS:
     if 'workbench.notifications_view' not in _g['menu_keys']:
         _g['menu_keys'].append('workbench.notifications_view')
 
-# 2026-10-11：一级调课审批（academic.swap_approve）只应由年级长承担。教务主任/教务员的
-# 教务模块取「写入档」，会被 _module_keys 展开顺带带上该 key，使其意外成为全校口径的
-# 一级审批人。此处显式剔除，二者仅保留终审+执行（academic.timetable）职责。
+# 2026-10-11：一级调课审批（academic.swap_approve）原先只由年级长承担。
+# 2026-10-20 用户口径：教务主任「管理教务」含调课审批 → 保留其一级审批；
+# 教务员仍只做教务执行（终审 + 执行），不承担一级调课审批。
 for _g in PERMISSION_GROUPS:
-    if _g['name'] in ('教务主任', '教务员'):
+    if _g['name'] == '教务员':
         _g['menu_keys'] = [k for k in _g['menu_keys'] if k != 'academic.swap_approve']
 
 

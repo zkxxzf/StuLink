@@ -85,8 +85,9 @@ def wx_review_audit(rid):
     if r is None:
         return wx_err('复核单不存在', 404)
     # H-02：申请人不得审批本人单据（服务层还有一道，这里给小程序明确的 403）。
-    # 2026-10-20 用户口径：管理员例外 —— 管理员是最高权限，可审批自己的提交。
-    if r.applicant_id == g.wx_user.id and getattr(g.wx_user, 'role', None) != 'admin':
+    # 2026-10-20 用户口径：管理员 / 校长例外 —— 最高审批身份可审批自己的提交。
+    if r.applicant_id == g.wx_user.id \
+            and not getattr(g.wx_user, 'is_top_reviewer', False):
         return wx_err('不得审批本人提交的复核申请', 403)
     exam = db.session.get(Exam, r.exam_id)
     if exam is not None:
