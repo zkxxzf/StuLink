@@ -152,6 +152,10 @@ class _StubUser:
         self.username = f'stub-{role}'
         self.role = role
         self.grade = grade
+        # 2026-10-20 第十六轮：多选年级改造（10-19）后 score_guard.resolve
+        # 读 `user.grades`（列表），桩对象原来只有单个 grade → 年级长解析成空集，
+        # 「resolve 年级长 → 本年级整年级可见」失败。真实 User 两个属性都有。
+        self.grades = [grade] if grade else []
         self.class_name = class_name
         self.permission_group = None
 

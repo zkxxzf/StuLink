@@ -70,6 +70,7 @@ def limit_rows(rows, max_rows=None, note=None):
     return {
         'total': len(rows),
         'truncated': True,
-        'message': note or f'结果共 {len(rows)} 行，已截断为前 {max_rows} 行；可用分页或更精确的筛选参数缩小范围',
+        # 2026-10-20 第十六轮：工具没有分页参数，原文案"可用分页"是误导
+        'message': note or f'结果共 {len(rows)} 行，已截断为前 {max_rows} 行；请用更精确的筛选参数（年级/班级/学科/考试）缩小范围',
         'rows': rows[:max_rows],
     }

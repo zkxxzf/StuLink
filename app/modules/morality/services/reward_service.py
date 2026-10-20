@@ -310,6 +310,11 @@ def create(form, user, files=None):
 
 
 def update(rec, form, user):
+    # 2026-10-19 第十四轮：已生效的记录不允许直接改内容 —— 否则
+    # 「确认后悄悄改标题/等级/日期」不会留下任何痕迹，破坏奖惩留档的可信度。
+    # 需要更正请先撤销（撤销会留痕），再改/重申。
+    if rec.status == STATUS_CONFIRMED:
+        return False, '已生效的记录不能修改，请先撤销后再更正'
     err = _validate(form)
     if err:
         return False, err
@@ -355,6 +360,11 @@ def delete(rec):
 def set_status(rec, status, user, reason=''):
     if status not in (STATUS_DRAFT, STATUS_CONFIRMED, STATUS_REVOKED):
         return False, '状态不合法'
+    # 2026-10-19 第十四轮：状态机只允许「前进」——
+    # 待确认 → 已生效 / 已撤销；已生效 → 已撤销；已撤销 → 已生效（误撤销可恢复）。
+    # 不允许任何状态退回「待确认」（原来已生效/已撤销都能被"退回草稿"抹掉审核痕迹）。
+    if status == STATUS_DRAFT and rec.status != STATUS_DRAFT:
+        return False, '已生效/已撤销的记录不能退回「待确认」，如需更正请撤销后重新登记'
     rec.status = status
     if status == STATUS_CONFIRMED:
         rec.confirmed_by = (getattr(user, 'real_name', None)

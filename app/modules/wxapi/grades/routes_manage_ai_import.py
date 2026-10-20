@@ -96,7 +96,10 @@ def wx_ai_import_analyze():
 def wx_ai_import_apply():
     """按自动识别列写入成绩（整场覆盖，需 confirmed=1）。"""
     payload = request.get_json(silent=True) or {}
-    exam_id = int(payload.get('exam_id') or 0)
+    try:
+        exam_id = int(payload.get('exam_id') or 0)
+    except (TypeError, ValueError):
+        return wx_err('参数不正确：exam_id 需为数字')
     exam = db.session.get(Exam, exam_id)
     if exam is None:
         return wx_err('考试不存在', 404)

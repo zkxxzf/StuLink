@@ -267,7 +267,16 @@ def wx_grades_teachers_save():
         grade = active[0] if active else ''
     if not grade:
         return wx_err('年级无效')
-    user_ids = {int(v) for v in cells.values() if v}
+    # 2026-10-20 第十六轮：年级必须过数据范围 —— 原来直接取「全校活跃年级」，
+    # 持 grades.teachers 的年级长可写外年级的任课映射/建教师账号改角色。
+    try:
+        assert_grade_visible(grade)
+    except PermissionError:
+        return wx_err('该年级不在你的数据范围内', 403)
+    try:
+        user_ids = {int(v) for v in cells.values() if v}
+    except (TypeError, ValueError):
+        return wx_err('参数不正确：教师账号需为数字')
     if user_ids:
         valid = {u.id for u in User.query.filter(User.id.in_(user_ids)).all()}
         if not user_ids <= valid:
@@ -521,7 +530,12 @@ def wx_room_save():
     note = sanitize_label(data.get('note'), 100)
     if not location:
         return wx_err('房间位置必填')
-    row = db.session.get(AffairRoomLib, int(lid)) if lid else None
+    # 2026-10-20 第十六轮：lib_id 非数字原来直接 ValueError → 500
+    try:
+        lid = int(lid) if lid else None
+    except (TypeError, ValueError):
+        return wx_err('参数不正确：lib_id 需为数字')
+    row = db.session.get(AffairRoomLib, lid) if lid else None
     dup = AffairRoomLib.query.filter(AffairRoomLib.location == location,
                                      AffairRoomLib.id != (row.id if row else 0)
                                      ).first()

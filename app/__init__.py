@@ -776,12 +776,26 @@ def create_app():
                                code=400,
                                message='请求无效，请刷新页面后重试。如果问题持续，请清除浏览器缓存/Cookie后再试。'), 400
 
+    def _wx_error_json(code, message):
+        """小程序路径统一返回 JSON 信封。
+
+        2026-10-20 第十六轮：越界/不存在原来越界会回 `error.html`（HTML），
+        小程序按 JSON 解析直接失败、界面空白。这里按 path 前缀区分。
+        """
+        from flask import jsonify
+        return jsonify({'success': False, 'code': code,
+                        'message': message, 'data': None}), code
+
     @app.errorhandler(403)
     def forbidden(e):
+        if request.path.startswith('/api/wx'):
+            return _wx_error_json(403, '没有权限访问该接口')
         return render_template('error.html', code=403, message='您没有权限访问此页面'), 403
 
     @app.errorhandler(404)
     def not_found(e):
+        if request.path.startswith('/api/wx'):
+            return _wx_error_json(404, '接口或数据不存在')
         return render_template('error.html', code=404, message='页面不存在'), 404
 
     @app.errorhandler(500)
@@ -790,6 +804,8 @@ def create_app():
         # MaskingFilter 已在 create_app 里安装，手机号/身份证等会被脱敏。
         logging.getLogger('stulink.error').exception(
             '未处理异常: %s', getattr(e, 'description', '') or e)
+        if request.path.startswith('/api/wx'):
+            return _wx_error_json(500, '服务器内部错误，请稍后重试')
         return render_template('error.html', code=500, message='服务器内部错误，请联系管理员'), 500
 
     # M-9：为后续切换到 enforcing CSP 预留 nonce（每请求一个，模板可用 {{ csp_nonce }}）

@@ -118,6 +118,12 @@ def wx_import_confirm():
         from app.modules.grades.services import teacher_snapshot_service as tss
         n_tch = tss.snapshot_exam(exam, source='import')
         exam.status = 'imported'
+        # 2026-10-20 第十六轮：import_token 一次性（对照网页 exams.py 的
+        # P1 M-17）—— 原来确认后不作废，同一 token 可无限重放；
+        # mode A + remove_missing 会重复删除"文件里没有"的学生，
+        # 把别人后续录入的成绩反复回滚。
+        exam.import_token = None
+        exam.import_draft = None
         exam.import_info = json.dumps({
             'fname': draft.get('fname', ''), 'mode': mode,
             'summary': summary, 'errors': len(draft.get('errors', [])),

@@ -203,9 +203,17 @@ def _class_score_detail(user, exam_id, class_name, subject):
 
 def _student_scores(user, student_no, exam_id):
     """单个学生在指定考试的成绩；exam_id 传 0 返回该生有成绩的考试清单。"""
-    student = guards.find_student(student_no)
+    # 2026-10-20 第十六轮：先解析范围再查学生，且「不存在」与「不在范围」
+    # 统一文案 —— 原来先 find_student 再 require_student，两者报错不同，
+    # 持 grades.view 的账号可跨年级枚举全校有效学号。
     scope = score_guard.resolve(user)
-    score_guard.require_student(scope, student)
+    student = guards.find_student(student_no)
+    if student is None:
+        raise ValueError('无权查看该学生成绩（学号不存在或不在可见范围内）')
+    try:
+        score_guard.require_student(scope, student)
+    except PermissionError:
+        raise ValueError('无权查看该学生成绩（学号不存在或不在可见范围内）')
     total_ok = scope.class_total_visible(student.grade, student.class_name)
     rank_ok = scope.total_rank_visible(student.grade, student.class_name)
 

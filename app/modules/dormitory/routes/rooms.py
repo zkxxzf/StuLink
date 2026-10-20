@@ -259,6 +259,10 @@ def edit(id):
             room.combined_class = None
         room.notes = new_notes
         db.session.commit()
+        # 2026-10-19 第十四轮：改性别/床位数/班级属敏感变更，补审计
+        log_operation(current_user, '修改', '宿舍', room.id,
+                      f'{room.display_name} 性别={new_gender} 容量={new_capacity} '
+                      f'班级={new_grade}{new_class}', module='dormitory')
         flash(f'{room.display_name} 信息已更新', 'success')
         return redirect(url_for('rooms.detail', id=room.id))
 
@@ -539,7 +543,10 @@ def set_combined():
         room.combined_class = None
         room.combined_details = None
     db.session.commit()
-    
+    # 2026-10-19 第十四轮：合班设置影响床位归属展示，补审计
+    log_operation(current_user, '修改', '宿舍合班', room.id,
+                  f'{room.display_name} 合班={bool(is_combined)}', module='dormitory')
+
     return jsonify({'success': True, 'message': '设置成功'})
 
 
@@ -668,7 +675,10 @@ def save_assignments():
         count += 1
 
     db.session.commit()
-    
+    # 2026-10-19 第十四轮：批量改房间归属（年级/班级）补审计（清空分支原来已有）
+    log_operation(current_user, '保存分配', '宿舍', None,
+                  f'批量保存 {count} 个房间的班级分配', module='dormitory')
+
     return jsonify({'success': True, 'message': f'已保存 {count} 个分配'})
 
 
@@ -794,6 +804,10 @@ def update_room_assignment():
     else:
         room.combined_class = None
     db.session.commit()
+    # 2026-10-19 第十四轮：单个房间改归属补审计
+    log_operation(current_user, '修改', '宿舍分配', room.id,
+                  f'{room.display_name} → {grade or "-"}{class_name or ""}',
+                  module='dormitory')
 
     return jsonify({'success': True, 'message': '更新成功'})
 
@@ -868,6 +882,10 @@ def batch_setting():
             return redirect(url_for('rooms.list_rooms'))
 
         db.session.commit()
+        # 2026-10-19 第十四轮：批量改性别/床位数补审计
+        log_operation(current_user, '批量设置', '宿舍', None,
+                      f'{count} 间：性别={new_gender or "-"} '
+                      f'床位数={new_capacity or "-"}', module='dormitory')
 
         msg_parts = []
         if new_gender:
@@ -950,6 +968,10 @@ def batch_add_rooms():
             created_count += 1
 
         db.session.commit()
+        # 2026-10-19 第十四轮：批量建房间补审计
+        log_operation(current_user, '批量新增', '宿舍', None,
+                      f'{building} 楼新增 {created_count} 间 / 跳过 {skipped_count} 间',
+                      module='dormitory')
 
         msg = f'成功添加 {created_count} 间宿舍'
         if skipped_count > 0:
@@ -1274,6 +1296,15 @@ def assign_auto_execute():
         weights=weights,
         iterations=iterations
     )
+
+    # 2026-10-19 第十四轮：批量写床位是敏感操作，此前无任何审计留痕
+    try:
+        log_operation(current_user, '自动分配', '宿舍床位', None,
+                      f'一键自动分配：{len(selected_keys)} 个班级 / '
+                      f'{len(selected_room_ids)} 间房 / 模式 {mode}',
+                      module='dormitory')
+    except Exception:  # noqa: BLE001
+        pass
 
     return jsonify(result)
 

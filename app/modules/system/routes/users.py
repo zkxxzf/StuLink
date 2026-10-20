@@ -506,6 +506,12 @@ def import_teachers():
             if not pg:
                 errors.append(f'第{row_idx}行（{name}）：权限组"{group_name}"不存在')
                 continue
+            # 2026-10-19 第十四轮：管理员组只能由内置 admin 授予 —— create()/edit()
+            # 早已有这道闸（H-01），批量导入口漏了：往 Excel 的「权限组」列写
+            # 「管理员组」就能批量把人挂成管理员（has_perm 即全权限）。
+            if _is_admin_group(pg) and not _actor_is_super():
+                errors.append(f'第{row_idx}行（{name}）：无权导入到「{pg.name}」')
+                continue
 
             user = User(username=phone, real_name=name, role='teacher',
                         permission_group_id=pg.id,

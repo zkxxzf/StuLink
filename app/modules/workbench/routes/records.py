@@ -129,6 +129,11 @@ def record_edit(record_id):
         return redirect(url_for('workbench.index'))
 
     _check_class(request.form.get('class_name', ''))
+    # 2026-10-19 第十四轮：与 record_add 同口径 —— 编辑同样要校验学号在学生范围内
+    _sno = request.form.get('student_no', '')
+    if _sno and not wb_scope.student_no_allowed(current_user, _sno):
+        flash('该学号不在你的班级范围内', 'danger')
+        return redirect(url_for('records.records_page'))
     rec = update_record(
         record_id, teacher.teacher_uid,
         record_type=request.form.get('record_type', ''),

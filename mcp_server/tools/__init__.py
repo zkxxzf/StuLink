@@ -3,7 +3,9 @@
 
 本服务已收敛为**成绩分析专用**（只读）：只注册 `scores` 一个工具模块。
 权限由 `core/score_guard.py` 按三条规则裁决——
-R1 任课教师（年级+班级同时命中，且仅所教学科）/ R2 班主任（本班）/ R3 年级长及以上（本年级）。
+R1 任课教师（**(年级, 学科) 二元组**命中，仅所教学科；2026-10-15 起从三元组放宽）
+/ R2 班主任（本班）/ R3 年级长及以上（本年级）。真值在
+`app/modules/grades/services/score_guard.py`，这里只是薄转发。
 
 2026-10-14 审计 API-04：`allow_write` 默认值是 true，而本服务的定位是只读。
 此前"只读"只靠"当前没写工具"这一事实保证，一旦有人往模块里加一个写工具就会静默生效。
@@ -26,6 +28,11 @@ MODULES = (
 _WRITE_NAME_PREFIXES = (
     'create_', 'update_', 'delete_', 'remove_', 'add_', 'set_',
     'import_', 'write_', 'save_', 'edit_', 'batch_', 'export_',
+    # 2026-10-20 第十六轮：补上其余写动词 —— 原名单漏 sync_/reset_/submit_/
+    # upload_/apply_/toggle_ 等，新增一个用这些动词命名、内部走 db_call 的写
+    # 工具就会同时绕过「名字判据」与「readOnlyHint 判据」两道软尺子。
+    'sync_', 'reset_', 'submit_', 'upload_', 'apply_', 'toggle_',
+    'approve_', 'reject_', 'publish_', 'assign_', 'grant_', 'revoke_',
 )
 
 

@@ -85,6 +85,10 @@ def add_item():
     
     # 清除字典缓存
     clear_dict_cache()
+    # 2026-10-19 第十四轮：字典新增补审计
+    from app.utils.helpers import log_operation
+    log_operation(current_user, '新增', '字典项', item.id,
+                  f'{category_code} · {value}', module='system')
     
     flash(f'已添加 "{value}"', 'success')
     return redirect(url_for('dictionary.list_items', tab=category_code))
@@ -120,6 +124,10 @@ def delete_item(item_id):
 
     # 清除字典缓存
     clear_dict_cache()
+    # 2026-10-19 第十四轮：字典增删补审计（下拉框数据源，误改影响全局）
+    from app.utils.helpers import log_operation
+    log_operation(current_user, '删除', '字典项', item_id,
+                  f'{cat_code} · {item.value}', module='system')
 
     flash(f'已删除 "{item.value}"（已进回收站，可恢复）', 'success')
     return redirect(url_for('dictionary.list_items', tab=cat_code))

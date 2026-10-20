@@ -510,6 +510,10 @@ def api_rules_create():
                               description=(data.get('description') or '').strip()[:200])
     db.session.add(rule)
     db.session.commit()
+    # 2026-10-19 第十四轮：规则模板增删改启停全部补审计（原先只有积分记录有）
+    log_operation(current_user, '新增', '积分规则', rule.id,
+                  f'{rule.name}（{rule.category}）{rule.default_points}分',
+                  module='points')
     return jsonify(success=True, message='已创建', data=rule.to_dict())
 
 
@@ -534,6 +538,9 @@ def api_rules_edit(rule_id):
     rule.default_points = points
     rule.description = (data.get('description') or '').strip()[:200]
     db.session.commit()
+    log_operation(current_user, '修改', '积分规则', rule.id,
+                  f'{rule.name}（{rule.category}）{rule.default_points}分',
+                  module='points')
     return jsonify(success=True, message='已更新', data=rule.to_dict())
 
 
@@ -544,6 +551,8 @@ def api_rules_toggle(rule_id):
     rule = PointRuleTemplate.query.get_or_404(rule_id)
     rule.is_active = not rule.is_active
     db.session.commit()
+    log_operation(current_user, '启用' if rule.is_active else '禁用',
+                  '积分规则', rule.id, rule.name, module='points')
     return jsonify(success=True, message='已' + ('启用' if rule.is_active else '禁用'),
                    data=rule.to_dict())
 
@@ -553,8 +562,11 @@ def api_rules_toggle(rule_id):
 @perm_required('points.rules')
 def api_rules_delete(rule_id):
     rule = PointRuleTemplate.query.get_or_404(rule_id)
+    _rule_name = rule.name
     db.session.delete(rule)
     db.session.commit()
+    log_operation(current_user, '删除', '积分规则', rule_id, _rule_name,
+                  module='points')
     return jsonify(success=True, message='已删除')
 
 

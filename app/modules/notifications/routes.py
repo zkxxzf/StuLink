@@ -195,6 +195,11 @@ def notification_create():
         category=category,
         link_url=link_url,
     )
+    # 2026-10-19 第十四轮：发布/群发通知补审计（标题 + 目标类型 + 定向人数）
+    log_operation(current_user, '发布', '通知', None,
+                  f'{title}（目标={target_type}'
+                  + (f'，定向 {len(target_uids)} 人' if target_uids else '')
+                  + '）', module='system')
     flash('通知已发布', 'success')
     return redirect(url_for('notifications.notifications_page'))
 

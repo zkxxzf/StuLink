@@ -112,10 +112,14 @@ def wx_wechat_select():
 @bp.route('/wechat/bind', methods=['POST'])
 def wx_wechat_bind():
     """首次绑定：账号密码 + wx.login code。"""
-    if not hit_limit('wxbind_%s' % client_ip(), 20, 300):
-        return wx_err('尝试过于频繁，请稍后再试', 429)
     body = _body()
     username = (body.get('username') or '').strip()
+    if not hit_limit('wxbind_%s' % client_ip(), 20, 300):
+        return wx_err('尝试过于频繁，请稍后再试', 429)
+    # 2026-10-20 第十六轮：加账号级限流（键**不拼 IP**）—— 只按 IP 计数时
+    # 换一个出口就能对同一账号无限猜口令（对照 routes_auth.login 的同款修复）。
+    if username and not hit_limit('wxbind_acct_%s' % username.lower(), 10, 300):
+        return wx_err('该账号尝试过于频繁，请稍后再试', 429)
     password = body.get('password') or ''
     if not username or not password:
         return wx_err('请输入账号和密码')
