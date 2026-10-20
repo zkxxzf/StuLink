@@ -1,4 +1,4 @@
-# StuLink v1.19.49.35 2026-10-19
+# StuLink v1.19.49.39 2026-10-19
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 """小程序调课：我的申请（列表 / 详情 / 撤回）与「待我确认」的换课。
 
@@ -52,11 +52,15 @@ def wx_swap_list():
     """我的调课申请（query: status / page / page_size）。"""
     uid, _name = common.applicant(g.wx_user)
     sched = common.active_schedule()
-    if sched is None:
+    # 2026-10-20 审计修复（越权）：无教师档案时 applicant() 返回 uid=None，而
+    # swap_service.get_swap_list 的过滤条件是 `if not is_reviewer and applicant_uid:`
+    # —— uid 为空就**不加申请人条件**，等于读到本学期全部人的调课单（含理由）。
+    # 与 swap_common.applicant 的 fail-closed 约定一致：这里按空集返回。
+    if not uid or sched is None:
         return wx_ok({'items': [], 'total': 0, 'page': 1, 'pages': 0,
                       'status': '', 'statuses': _status_options(),
                       'pending': 0, 'confirm_count': 0,
-                      'has_schedule': False})
+                      'has_schedule': sched is not None})
     status = _status()
     page = max(1, request.args.get('page', type=int) or 1)
     size = min(MAX_SIZE, max(1, request.args.get('page_size', type=int)

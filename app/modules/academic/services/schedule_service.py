@@ -1,4 +1,4 @@
-# StuLink v1.19.49.35 2026-10-10
+# StuLink v1.19.49.39 2026-10-10
 # 课表服务层：学期管理 / 作息时间（节次与时间） / 视图查询 / 条目CRUD / 冲突检测 / Excel导入导出 / 版本快照
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 """课表核心服务（独立库 timetable.db）。
@@ -1670,19 +1670,27 @@ def leader_roles(schedule_id, subject, grade=None):
     - 给了 grade（备课组页）：只取该年级的备课组长。
     学期口径：登记为空（''＝整学年）或与本学期一致才算数。
     """
-    from app.models.academic import (COMPREHENSIVE_GROUP, COMPREHENSIVE_SUBJECTS,
+    from app.models.academic import (COMPREHENSIVE_ALIAS, COMPREHENSIVE_GROUP,
+                                     COMPREHENSIVE_SUBJECTS,
                                      LEADER_CATEGORY_COMPREHENSIVE,
                                      LEADER_CATEGORY_DEFAULT, LEADER_CATEGORY_RESEARCH,
                                      SubjectLeader)
+    from app.models.grades import normalize_subject
     ts = db.session.get(TermSchedule, schedule_id)
     roles = {}
     if not ts or not subject:
         return roles
+    # 2026-10-16 审计修复：课表侧学科写法与学科组长落库口径不一致 —— 课表存「英语」，
+    # 组长矩阵落库经 _canon_sub 归一为「外语」；此处若不平移归一，英语组的组长徽章
+    # 永远取不到（其余学科恰好同名所以没暴露）。归一顺序与 check_teacher_mapping
+    # 的 _canon_sub 保持一致：先成绩别名（英语→外语），再综合组别名（信息→信息技术）。
+    _canon = normalize_subject(subject or '')
+    _canon = COMPREHENSIVE_ALIAS.get(_canon, _canon)
     # 2026-10-14 用户口径：整个综合组只设 1 名组长 —— 音体美信通心六科共用一位，
     # 所以这些学科的课表都去查「综合组」那条登记，标签写「综合组组长」。
     q_subject = (COMPREHENSIVE_GROUP
-                 if (subject in COMPREHENSIVE_SUBJECTS or subject == COMPREHENSIVE_GROUP)
-                 else subject)
+                 if (_canon in COMPREHENSIVE_SUBJECTS or _canon == COMPREHENSIVE_GROUP)
+                 else _canon)
     for ld in SubjectLeader.query.filter_by(subject=q_subject,
                                             school_year=ts.school_year).all():
         if (ld.term or '') not in ('', ts.term or ''):

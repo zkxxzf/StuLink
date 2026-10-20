@@ -1,4 +1,4 @@
-# StuLink v1.19.49.35 2026-10-10
+# StuLink v1.19.49.39 2026-10-10
 # 考务管理：完整考务流程（对应 Excel 宏工作簿 2025考场学生考号与考场信息编排v1.2）
 #   步骤：① 学生名单（学生信息表） → ② 考场设置（考场信息表）
 #        → ③ 编排与考号生成（三种模式，镜像宏 编排考场考号2）
@@ -995,9 +995,12 @@ def affair_students_clear(aid):
         logger.warning('考务名单清空前备份失败 aid=%s', aid, exc_info=True)
     # 2026-10-18：同时进「回收站」（页面可查看/恢复整批名单，比 JSON 文件更好用）
     from app.utils.trash import archive
-    archive('grades', 'affair_student', '考务名单', rows,
-            summary=f'{affair.name}：{len(rows)} 人（含考场/座位/考号）',
-            operator=current_user)
+    # 2026-10-19 审计修复：回收站归档失败即中止清空（fail-closed）
+    if archive('grades', 'affair_student', '考务名单', rows,
+               summary=f'{affair.name}：{len(rows)} 人（含考场/座位/考号）',
+               operator=current_user) is None:
+        db.session.rollback()
+        return jsonify({'ok': False, 'msg': '清空前归档失败，已中止（避免数据不可恢复）'}), 500
     AffairStudent.query.filter_by(affair_id=aid).delete()
     db.session.commit()
     log_operation(current_user, '清空', '考务名单', aid,
@@ -1259,10 +1262,13 @@ def affair_room_delete(aid, rid):
         abort(403)
     # 2026-10-18：删考场前归档（回收站可恢复），避免"排好的考场点没了"
     from app.utils.trash import archive
-    archive('grades', 'affair_room', '考务考场', room,
-            summary=f'{affair.name} · 考场 {room.room_no}'
-                    f'{("（" + room.location + "）") if room.location else ""}',
-            operator=current_user)
+    # 2026-10-19 审计修复：归档失败即中止删除（fail-closed）
+    if archive('grades', 'affair_room', '考务考场', room,
+               summary=f'{affair.name} · 考场 {room.room_no}'
+                       f'{("（" + room.location + "）") if room.location else ""}',
+               operator=current_user) is None:
+        db.session.rollback()
+        return jsonify({'ok': False, 'msg': '删除前归档失败，已中止（避免数据不可恢复）'}), 500
     db.session.delete(room)
     db.session.commit()
     return jsonify({'ok': True})

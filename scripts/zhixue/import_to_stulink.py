@@ -1,4 +1,4 @@
-# StuLink v1.19.49.35  2026-10-15
+# StuLink v1.19.49.39  2026-10-15
 # 把智学网转换好的成绩 Excel 导入 StuLink（新建考试 + 写入成绩 + 重算排名 + 任课快照）
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 """把 `to_stulink_excel.py` 产出的导入表写进 StuLink。

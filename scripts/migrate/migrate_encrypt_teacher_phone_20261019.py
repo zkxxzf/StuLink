@@ -56,22 +56,36 @@ def main():
     from app.models.academic import Teacher
     from app.utils.crypto import blind_index, encrypt_rand
 
+    if not APPLY:
+        # 预览：直连库按原始存储值统计（不依赖新增的 phone_idx 列）→ 预览零结构改动
+        con = sqlite3.connect(DB, timeout=15)
+        try:
+            rows = con.execute('SELECT phone FROM teachers').fetchall()
+        finally:
+            con.close()
+        cnt = sum(1 for (p_,) in rows if _is_plain(p_))
+        print(f'  共 {len(rows)} 名教师，待加密 {cnt} 行')
+        print('\n  预览模式，未改动（表结构亦未动）。加 --apply 执行。')
+        return
+
+    if _mig_log is not None and _mig_log.is_applied(SCRIPT_NAME):
+        print(f'[SKIP] {SCRIPT_NAME} 已登记为已应用，跳过迁移')
+        return
+
+    _backup()
     a = create_app()
     with a.app_context():
+        # 只有真正执行时才补列（ORM 查询会带 phone_idx，缺列会直接报错）
         ensure_columns()
         rows = Teacher.query.all()
-        todo = [(t, t.phone) for t in rows if _is_plain(t.phone)]
+        todo = []
+        for t in rows:
+            # 2026-10-19 修复：幂等判据用**库里原始存储值**（_phone_encrypted），
+            # 而不是 property 解密后的明文 —— 否则已加密行会被反复判为明文并重加密。
+            raw = t._phone_encrypted
+            if _is_plain(raw):
+                todo.append((t, raw))
         print(f'  共 {len(rows)} 名教师，需要加密 {len(todo)} 行')
-        for t, p in todo[:3]:
-            print(f'    示例 #{t.id} {t.name}：{p} → '
-                  f'{(encrypt_rand(p) or "")[:18]}...')
-
-        if not APPLY:
-            print('\n  预览模式，未改动。加 --apply 执行。')
-            return
-        if _mig_log is not None and _mig_log.is_applied(SCRIPT_NAME):
-            print(f'[SKIP] {SCRIPT_NAME} 已登记为已应用，跳过迁移')
-            return
 
         for t, p in todo:
             t._phone_encrypted = encrypt_rand(p)
@@ -86,10 +100,23 @@ def main():
             except Exception as _e:  # noqa: BLE001
                 print(f'[WARN] 迁移登记失败（不影响迁移结果）：{_e}')
 
+        # 抽检（只打印盲索引与密文长度，不回显明文号码，避免终端/日志泄露）
         t = Teacher.query.filter(Teacher.phone_idx.isnot(None)).first()
         if t is not None:
-            print(f'  抽检 #{t.id} {t.name}：phone={t.phone}')
-            print(f'    库内密文={(t._phone_encrypted or "")[:24]}...')
+            print(f'  抽检 #{t.id} {t.name}：盲索引={t.phone_idx} '
+                  f'密文长度={len(t._phone_encrypted or "")}')
+
+
+def _backup():
+    """执行前备份目标库（.bak-YYYYMMDD_HHMMSS），满足「改库前先备份」约定。"""
+    import shutil
+    from datetime import datetime
+    if not os.path.exists(DB):
+        return None
+    dst = '%s.bak-%s' % (DB, datetime.now().strftime('%Y%m%d_%H%M%S'))
+    shutil.copy2(DB, dst)
+    print(f'  已备份：{os.path.basename(dst)}')
+    return dst
 
 
 if __name__ == '__main__':

@@ -64,14 +64,38 @@ def main():
         os.makedirs(BACKUP_DIR, exist_ok=True)
         ts = datetime.now().strftime('%Y%m%d_%H%M%S')
         out = os.path.join(BACKUP_DIR, f'operation_logs_{ts}.jsonl')
+        written = 0
         with open(out, 'w', encoding='utf-8') as f:
             for row in rows:
                 f.write(json.dumps(dict(row), ensure_ascii=False) + '\n')
-        print(f'  已导出：{out}（{len(rows)} 行）')
+                written += 1
+        print(f'  已导出：{out}（{written} 行）')
+        # 2026-10-20 审计修复：导出必须完整 —— 少写一行就代表那条日志永久丢失。
+        # 校验通过再删；不通过直接中止（宁可留着，也不做不可逆删除）。
+        if written != len(rows):
+            print(f'  中止：导出 {written} 行 ≠ 待删 {len(rows)} 行，未执行删除。')
+            return 2
+        if os.path.getsize(out) <= 0:
+            print('  中止：导出文件为空，未执行删除。')
+            return 2
+        # 删前再整库备份一次（.bak-<ts>-before_prune_oplogs），双保险：
+        # JSONL 便于按行复原，整库快照可整表回滚。备份失败则拒绝删除。
+        sys.path.insert(0, os.path.dirname(os.path.dirname(
+            os.path.abspath(__file__))))
+        try:
+            from _db_backup import backup_db
+            pairs = backup_db(DB, tag='before_prune_oplogs')
+        except Exception as _e:            # noqa: BLE001
+            print(f'  中止：整库备份失败（{_e}），未执行删除。')
+            return 2
+        if not pairs or not pairs[0][1]:
+            print('  中止：整库备份未生成，未执行删除。')
+            return 2
+        print(f'  已备份整库：{os.path.basename(pairs[0][1])}')
 
         con.execute('DELETE FROM operation_logs WHERE created_at < ?', (cutoff,))
         con.commit()
-        print(f'  已删除 {len(rows)} 行；导出文件保留，可人工恢复。')
+        print(f'  已删除 {len(rows)} 行；JSONL 与整库备份均已保留，可人工恢复。')
         return 0
     finally:
         con.close()

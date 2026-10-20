@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-# StuLink v1.19.49.35 2026-10-15
+# StuLink v1.19.49.39 2026-10-15
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 """教师账号口令工具：导出登录清单 / 批量重置为统一初始口令。
 

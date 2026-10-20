@@ -65,6 +65,12 @@ _PAIR_TAGS = frozenset({'div', 'span', 'p', 'table', 'thead', 'tbody', 'tfoot', 
                         'pre', 'code', 'small', 'strong', 'em', 'b', 'i', 'u', 's',
                         'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'a', 'caption'})
 _VOID_TAGS = frozenset({'br', 'hr', 'col'})
+# 空元素（没有结束标签）。若这类标签又落在 DROP_CONTENT_TAGS 里（input/meta/link/
+# base/source/track/area/embed 等），**不能**递增 drop_depth —— 否则永远等不到结束
+# 标签、drop_depth 恒 >0，其后整段报告被吞掉（2026-10-16 审计修复，fail-closed 但
+# 会把模型输出的正常内容一并清空）。
+_DROP_VOID = frozenset({'area', 'base', 'br', 'col', 'embed', 'hr', 'img',
+                        'input', 'link', 'meta', 'param', 'source', 'track', 'wbr'})
 
 
 def _safe_href(value):
@@ -98,7 +104,8 @@ class _ReportSanitizer(HTMLParser):
     def handle_starttag(self, tag, attrs):
         tag = (tag or '').lower()
         if tag in DROP_CONTENT_TAGS:
-            self.drop_depth += 1
+            if tag not in _DROP_VOID:
+                self.drop_depth += 1
             return
         if self.drop_depth or tag not in ALLOWED_TAGS:
             return
@@ -127,8 +134,13 @@ class _ReportSanitizer(HTMLParser):
             self.stack.append(tag)
 
     def handle_startendtag(self, tag, attrs):
+        tag = (tag or '').lower()
+        # 自闭合写法（如 <script/>）：DROP 集合里的标签整块丢弃，且不得递增 drop_depth，
+        # 否则永远等不到匹配的结束标签、其后内容被 handle_data/handle_starttag 一并吞掉。
+        if tag in DROP_CONTENT_TAGS:
+            return
         self.handle_starttag(tag, attrs)
-        if (tag or '').lower() in _VOID_TAGS:
+        if tag in _VOID_TAGS:
             self.handle_endtag(tag)
 
     def handle_endtag(self, tag):

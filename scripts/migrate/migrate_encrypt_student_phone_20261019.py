@@ -58,32 +58,39 @@ def main():
     from app.models.student import Student
     from app.utils.crypto import encrypt_rand, blind_index
 
+    if not APPLY:
+        # 预览：直连库按**库里原始存储值**统计，不依赖新增的 idx 列 → 预览零结构改动
+        con = sqlite3.connect(DB, timeout=15)
+        try:
+            rows = con.execute('SELECT phone1, phone2 FROM students').fetchall()
+        finally:
+            con.close()
+        cnt = sum(1 for a_, b_ in rows if _is_plain(a_) or _is_plain(b_))
+        print(f'  共 {len(rows)} 名学生，待加密 {cnt} 行')
+        print('\n  预览模式，未改动（表结构亦未动）。加 --apply 执行。')
+        return
+
+    if _mig_log is not None and _mig_log.is_applied(SCRIPT_NAME):
+        print(f'[SKIP] {SCRIPT_NAME} 已登记为已应用，跳过迁移')
+        return
+
+    _backup()
     a = create_app()
     with a.app_context():
-        # 先补列：ORM 查询会带上 phone1_idx/phone2_idx，列不存在会直接报错
+        # 只有真正执行时才补列：ORM 查询会带上 phone1_idx/phone2_idx，缺列会直接报错
         ensure_columns()
         rows = Student.query.all()
         todo = []
         for s in rows:
-            p1, p2 = s.phone1, s.phone2
-            need1 = bool(p1) and _is_plain(p1)
-            need2 = bool(p2) and _is_plain(p2)
-            if need1 or need2:
-                todo.append((s, p1, p2, need1, need2))
+            # 2026-10-19 修复：幂等判据用**库里原始存储值**（_phone1_encrypted），
+            # 而不是 property 解密后的明文 —— 后者对已加密行同样返回 11 位明文，
+            # 会让每次重跑都判定「待加密」并全表重加密（与注释「已是密文跳过」不符）。
+            raw1, raw2 = s._phone1_encrypted, s._phone2_encrypted
+            n1, n2 = _is_plain(raw1), _is_plain(raw2)
+            if n1 or n2:
+                todo.append((s, raw1, raw2, n1, n2))
         print(f'  共 {len(rows)} 名学生，需要加密 {len(todo)} 行')
 
-        for s, p1, p2, n1, n2 in todo[:5]:
-            print(f'    示例 #{s.id} {s.name}：{p1} → '
-                  f'{(encrypt_rand(p1) or "")[:18]}...  idx={blind_index(p1)}')
-
-        if not APPLY:
-            print('\n  预览模式，未改动。加 --apply 执行。')
-            return
-        if _mig_log is not None and _mig_log.is_applied(SCRIPT_NAME):
-            print(f'[SKIP] {SCRIPT_NAME} 已登记为已应用，跳过迁移')
-            return
-
-        ensure_columns()
         n = 0
         for s, p1, p2, n1, n2 in todo:
             # 直接写内部列属性，避免 property 读到已加密值时被二次处理
@@ -107,12 +114,23 @@ def main():
             except Exception as _e:  # noqa: BLE001
                 print(f'[WARN] 迁移登记失败（不影响迁移结果）：{_e}')
 
-        # 抽检
+        # 抽检（只打印盲索引与密文长度，不回显明文号码，避免终端/日志泄露）
         s = Student.query.filter(Student.phone1_idx.isnot(None)).first()
         if s is not None:
-            print(f'  抽检 #{s.id} {s.name}：phone1={s.phone1}')
-            print(f'    库内密文={(s._phone1_encrypted or "")[:24]}...')
-            print(f'    盲索引={s.phone1_idx}')
+            print(f'  抽检 #{s.id} {s.name}：盲索引={s.phone1_idx} '
+                  f'密文长度={len(s._phone1_encrypted or "")}')
+
+
+def _backup():
+    """执行前备份目标库（.bak-YYYYMMDD_HHMMSS），满足「改库前先备份」约定。"""
+    import shutil
+    from datetime import datetime
+    if not os.path.exists(DB):
+        return None
+    dst = '%s.bak-%s' % (DB, datetime.now().strftime('%Y%m%d_%H%M%S'))
+    shutil.copy2(DB, dst)
+    print(f'  已备份：{os.path.basename(dst)}')
+    return dst
 
 
 def _is_plain(v):

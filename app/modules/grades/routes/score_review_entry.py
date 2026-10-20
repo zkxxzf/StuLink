@@ -1,4 +1,4 @@
-# StuLink v1.19.49.35 2026-10-19
+# StuLink v1.19.49.39 2026-10-19
 # 成绩复核录入：搜学号/姓名 → 展示全科成绩 → 直接改分 → 批量提交
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 """成绩复核（申请调分）录入接口（用户口径 2026-10-19）。
@@ -17,6 +17,7 @@
 口径）——越界学生在搜索阶段就不返回，提交时再校验一次（403）。
 """
 import json
+import math
 from datetime import datetime
 
 from flask import request, jsonify, redirect, url_for, flash, abort
@@ -63,13 +64,30 @@ def _search_students(exam, kw, sc):
     用 `distinct` 让 limit 按**学生**计（此前按成绩行 400 行 ≈ 44 人，
     搜单姓时只覆盖前几个班，后面班的学生搜不到）。
     """
-    rows = (db.session.query(ExamScore.student_no, ExamScore.student_name,
-                             ExamScore.class_name, ExamScore.grade)
-            .filter(ExamScore.exam_id == exam.id,
-                    ExamScore.subject != TOTAL_SUBJECT,
-                    db.or_(ExamScore.student_no.like(f'%{kw}%'),
-                           ExamScore.student_name.like(f'%{kw}%')))
-            .distinct()
+    q = (db.session.query(ExamScore.student_no, ExamScore.student_name,
+                          ExamScore.class_name, ExamScore.grade)
+         .filter(ExamScore.exam_id == exam.id,
+                 ExamScore.subject != TOTAL_SUBJECT,
+                 db.or_(ExamScore.student_no.like(f'%{kw}%'),
+                        ExamScore.student_name.like(f'%{kw}%'))))
+    # 2026-10-20 审计修复（并入原 reviews_students_api 的修复）：范围条件下推到
+    # SQL 再 limit。原实现先 limit 再在 Python 里按 can_view_class 过滤，而排序是
+    # (class_name, student_no) —— 前 N 个班会把名额占满，班级名靠后的班主任 /
+    # 任课教师搜不到本班学生。口径与 score_guard 一致：任教科目（该年级全部班级）
+    # 或班级白名单，两者取或。
+    _grade = exam.grade
+    if not (sc.full_school or _grade in sc.grades):
+        _teach_subjects = {s for g, s in sc.teach if g == _grade}
+        _granted_classes = {c for g, c in sc.classes if g == _grade}
+        if not _teach_subjects and not _granted_classes:
+            return []                      # 无任何可见范围 → fail-closed
+        _conds = []
+        if _teach_subjects:
+            _conds.append(ExamScore.subject.in_(list(_teach_subjects)))
+        if _granted_classes:
+            _conds.append(ExamScore.class_name.in_(list(_granted_classes)))
+        q = q.filter(db.or_(*_conds))
+    rows = (q.distinct()
             .order_by(ExamScore.class_name, ExamScore.student_no)
             .limit(_MAX_STUDENTS * 3).all())
     out = []
@@ -157,6 +175,11 @@ def _validate_one(exam, sc, by_subj, marks, item):
     try:
         new = round(float(item.get('new_score')), 1)
     except (TypeError, ValueError):
+        return None, f'「{subj}」的修改后分数格式不正确'
+    # 2026-10-20 审计修复（并入原 reviews_students_api/review_new 的修复）：
+    # float('nan')/inf 能解析成功，而 nan<0 / nan>limit / nan==0 / abs(nan)>上限 全为假，
+    # 会绕过下面所有校验把 NaN 写进成绩单。显式拒绝非有限值。
+    if not math.isfinite(new):
         return None, f'「{subj}」的修改后分数格式不正确'
     limit = float(marks.get(subj, 100))
     if new < 0 or new > limit:

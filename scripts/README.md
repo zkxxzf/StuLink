@@ -38,7 +38,7 @@ scripts/
 | `seed_*` / `import_*` / `apply_*` / `setup_*` / `demo_*` / `add_*` | `seed/` | `seed/seed_full_demo.py` |
 | `fix_*` / `backfill_*` / `normalize_*` / `update_*` / `cleanup_*` | `fix/` | `fix/fix_duplicate_rooms.py` |
 | `smoke_*`（低频） | `smoke/` | `smoke/smoke_invig.py` |
-| `verify_*` / `recalc_*` / `perf_*` / `perm_snapshot` | `verify/` | `verify/verify_grade_scope_20261015.py` |
+| `verify_*` / `recalc_*` / `perf_*` / `perm_snapshot` | `verify/` | `verify/recalc_exam_ranks.py` |
 
 ## 运行方式（移动后路径变了）
 
@@ -48,7 +48,7 @@ py -3.12 scripts/migrate/migrate_score_review_20261015.py
 # 演示数据
 py -3.12 scripts/seed/seed_full_demo.py
 # 核对
-py -3.12 scripts/verify/verify_grade_scope_20261015.py
+py -3.12 scripts/verify/recalc_exam_ranks.py
 ```
 
 ## 关于路径自愈（重要）

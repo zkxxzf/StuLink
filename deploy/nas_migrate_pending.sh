@@ -64,15 +64,34 @@ du -sh "$BAK" 2>/dev/null
 echo "[3/6] 提交临时镜像（容器已停，确保迁移用的是容器内代码与依赖）"
 docker commit "$CT" "$IMG" >/dev/null || fail "docker commit 失败"
 
+echo "[3.5/6] 预先补齐模型缺列（**必须早于迁移**：迁移脚本读模型时若缺列会直接报错中止）"
+# 2026-10-19：新增模型列（如 students.phone1_idx / teachers.phone_idx）若排在迁移之后
+# 补，前面用 ORM 读 Student/Teacher 的数据脚本会因 "no such column" 被 allow-fail 跳过
+# （实测 fix_exam_selection_snapshot 因此漏跑）。故把 check_columns --fix 提到 [4] 之前。
+docker run --rm -v "$DATA":/app/data -w /app \
+    --entrypoint python "$IMG" scripts/check_columns.py --fix 2>&1 | tail -n 15 || true
+
 echo "[4/6] 按序补跑缺失的迁移"
 run_mig() {
     # 2026-10-15：支持脚本参数（如「修数据」类脚本的 --apply）；原有单参调用不受影响
+    # 2026-10-17：部分「修数据 / 划线」脚本在**目标数据不存在时主动中止**，返回非 0 是
+    #   预期行为（如 apply_gaokao_bands「该场暂无成绩，先导入成绩」、
+    #   import_bands_20260712「找不到名字含 20260712 的考试」）。这类脚本以
+    #   `--allow-fail` 调用：非 0 只告警不中断整批；结构性迁移仍严格 fail-fast。
     local script="$1"; shift
+    local allow_fail=0
+    if [ "${1:-}" = "--allow-fail" ]; then allow_fail=1; shift; fi
     echo "  --> $script $*"
     docker run --rm -v "$DATA":/app/data -w /app \
         --entrypoint python "$IMG" "$script" "$@" 2>&1 | tail -n 6
     rc=${PIPESTATUS[0]}
-    [ "$rc" = "0" ] || fail "迁移失败：$script（rc=$rc）"
+    if [ "$rc" != "0" ]; then
+        if [ "$allow_fail" = "1" ]; then
+            echo "     [跳过] 脚本主动中止（rc=$rc，目标数据不存在，属预期，不中断）"
+        else
+            fail "迁移失败：$script（rc=$rc）"
+        fi
+    fi
 }
 # ── 结构类：加列 / 建表 / 索引 / 回填 ──────────────────────────────────────
 run_mig scripts/migrate/migrate_term_schedule_dates.py            # 学期起止日期（教学周计算）
@@ -105,10 +124,10 @@ run_mig scripts/migrate/migrate_score_review_20261015.py           # 成绩复�
 # 2026-10-15：组合总分线 —— exam_bands 加 selection 列 + 唯一键扩维（重建表，须停应用，见脚本头）
 run_mig scripts/migrate/migrate_exam_band_selection_20261015.py     # 划线：exam_bands.selection（物化生等组合总分线）
 # 2026-10-15：考试选科快照滞后修正（学生转科后 exam_scores 的选科/方向没跟上；幂等，须 --apply）
-run_mig scripts/fix/fix_exam_selection_snapshot_20261015.py --apply  # 修数据：按实考科目+名册刷新快照并重算排名
-run_mig scripts/seed/apply_gaokao_bands.py --apply               # 划线：按修正后的方向人群重算特控/本科线（幂等）
+run_mig scripts/fix/fix_exam_selection_snapshot_20261015.py --allow-fail --apply  # 修数据：按实考科目+名册刷新快照并重算排名（无不符行时输出「无需修正」）
+run_mig scripts/seed/apply_gaokao_bands.py --allow-fail --apply              # 划线：按修正后的方向人群重算特控/本科线（幂等；该场无成绩时主动中止）
 # 2026-10-16 第七轮审计（C-H1）：官方线表录入 —— exam 33（20260712 期末）特控/本科纯分数线（整场先删后插，幂等）
-run_mig scripts/seed/import_bands_20260712.py --apply            # 划线：该场无成绩/无该场时脚本自行中止，不误伤
+run_mig scripts/seed/import_bands_20260712.py --allow-fail --apply           # 划线：该场无成绩/无该场时脚本自行中止，不误伤
 # 2026-10-19 第十三轮审计：历史名次 1,1,3 跳号重算（代码已是 1,1,3，存量库还是旧的 1,1,2）。
 # 幂等；--apply 前自动整库备份，备份失败直接中止。
 run_mig scripts/fix/recalc_exam_ranks_20261019.py --apply        # 修数据：重算全部考试的方向/班排名
@@ -126,10 +145,10 @@ run_mig scripts/migrate/migrate_sensitive_perm_20261013.py           # 敏感字
 run_mig scripts/migrate/migrate_sensitive_perm_v2_20261013.py        # 敏感字段权限收敛（后）
 # 2026-10-14 第四轮审计（SEC-04）：AI 全局 Key 独立权限点 —— 给原有 system.users 的组补齐
 run_mig scripts/migrate/migrate_ai_key_perm_20261014.py              # 权限组：补 grades.ai_manage
-# 2026-10-19 审计补登记：手机号明文→密文 + 盲索引（原先清单/执行器/ _mig_log 三处都缺，
-# 生产会漏跑；必须在 check_columns --fix 之前跑，否则补出来的 idx 列是 NULL）
-run_mig scripts/migrate/migrate_encrypt_student_phone_20261019.py --apply
-run_mig scripts/migrate/migrate_encrypt_teacher_phone_20261019.py --apply
+# 2026-10-19：手机号加密（方案 C：随机 IV + HMAC 盲索引，只支持精确等值查询）；
+# 脚本自带 --apply 门控与执行前备份，幂等（库里已是密文的行跳过）
+run_mig scripts/migrate/migrate_encrypt_student_phone_20261019.py --apply  # 学生 phone1/phone2 + phone1_idx/phone2_idx
+run_mig scripts/migrate/migrate_encrypt_teacher_phone_20261019.py --apply  # 教师 phone + phone_idx
 # 2026-10-19 审计 H-06：身份证确定性 IV → 随机 IV + 盲索引（两库；停机窗口；
 # 脚本内部会先 backup_db，--apply 必须带 --confirm）
 # 2026-10-19 第十三轮审计：清单 A17 状态是「⏸ 暂缓（用户决定）」，执行器却无条件跑。

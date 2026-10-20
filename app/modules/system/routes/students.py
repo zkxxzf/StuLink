@@ -526,20 +526,27 @@ def delete(id):
         return redirect(url_for('students.list_students'))
     # 2026-10-18 审计（加大修复）：删学籍前归档 —— 学籍/住宿/床位一起进回收站，
     # 误删可在「回收站」按原样恢复（学号唯一，冲突行会跳过）。
+    # 2026-10-19 审计修复：归档返回 None（失败）时必须**中止删除**（fail-closed），
+    # 否则提示"已进回收站可恢复"却实际不可恢复 —— 静默丢数据。
     from app.utils.trash import archive
     _who = f'{student.name} {student.grade}{student.class_name}（学号 {student.student_number}）'
+    _recs = []
     if student.bed_assignment:
-        archive('dormitory', 'bed_assignment', '床位分配',
-                student.bed_assignment, summary=f'{_who} 的床位',
-                operator=current_user)
+        _recs.append(archive('dormitory', 'bed_assignment', '床位分配',
+                             student.bed_assignment, summary=f'{_who} 的床位',
+                             operator=current_user))
     # 同步删除住宿记录（跨库 dormitory）：否则残留记录会在重新导入时因
     # student_id 复用（SQLite 无 AUTOINCREMENT）触发 UNIQUE 冲突
     acc = StudentAccommodation.query.filter_by(student_id=student.id).first()
     if acc:
-        archive('dormitory', 'student_accommodation', '住宿记录', acc,
-                summary=f'{_who} 的住宿记录', operator=current_user)
-    archive('system', 'student', '学籍', student, summary=_who,
-            operator=current_user)
+        _recs.append(archive('dormitory', 'student_accommodation', '住宿记录', acc,
+                             summary=f'{_who} 的住宿记录', operator=current_user))
+    _recs.append(archive('system', 'student', '学籍', student, summary=_who,
+                         operator=current_user))
+    if any(r is None for r in _recs):
+        db.session.rollback()
+        flash('删除前归档失败，已中止（避免数据不可恢复）', 'danger')
+        return redirect(url_for('students.list_students'))
     # 先把归档提交掉，再执行删除：SQLite 下 system / dormitory 两个库文件
     # 同时持写锁容易 `database is locked`（跨库事务顺序问题），拆成两个事务更稳。
     db.session.commit()
@@ -1296,16 +1303,23 @@ def batch_delete():
     # 2026-10-18 审计（加大修复）：批量删学籍前逐人归档（学籍 + 住宿 + 床位），
     # 误删可在「回收站」按原样恢复。
     from app.utils.trash import archive
+    # 2026-10-19 审计修复：任一行归档失败即中止整批（fail-closed），
+    # 避免提示"已进回收站可恢复"却实际不可恢复。
     for s in students:
         _who = f'{s.name} {s.grade}{s.class_name}（学号 {s.student_number}）'
+        _recs = []
         if s.bed_assignment:
-            archive('dormitory', 'bed_assignment', '床位分配', s.bed_assignment,
-                    summary=f'{_who} 的床位', operator=current_user)
+            _recs.append(archive('dormitory', 'bed_assignment', '床位分配', s.bed_assignment,
+                                 summary=f'{_who} 的床位', operator=current_user))
         acc = StudentAccommodation.query.filter_by(student_id=s.id).first()
         if acc:
-            archive('dormitory', 'student_accommodation', '住宿记录', acc,
-                    summary=f'{_who} 的住宿记录', operator=current_user)
-        archive('system', 'student', '学籍', s, summary=_who, operator=current_user)
+            _recs.append(archive('dormitory', 'student_accommodation', '住宿记录', acc,
+                                 summary=f'{_who} 的住宿记录', operator=current_user))
+        _recs.append(archive('system', 'student', '学籍', s, summary=_who, operator=current_user))
+        if any(r is None for r in _recs):
+            db.session.rollback()
+            flash('删除前归档失败，已中止（避免数据不可恢复）', 'danger')
+            return redirect(url_for('students.list_students'))
     # 归档先落库，再执行删除（避免 system/dormitory 跨库同时持写锁）
     db.session.commit()
     for s in students:

@@ -1,4 +1,4 @@
-# StuLink v1.19.49.35 2026-10-10
+# StuLink v1.19.49.39 2026-10-10
 # 教务 · 查课：统计页（列表筛选 / 月度统计 / 导出 / 图表API）+ 独立录入页（单条/批量）
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 import io
@@ -1270,9 +1270,18 @@ def inspection_workload_export():
     grade = (request.args.get('grade') or '').strip()
     class_name = (request.args.get('class_name') or '').strip()
     ug = visible_academic_grades(current_user)
-    if ug is not None and grade and grade not in ug:
-        flash('该年级不在你的可见范围内', 'warning')
-        return redirect(url_for('academic.inspection_page'))
+    # 2026-10-16 审计修复：原判据 `if ug is not None and grade and grade not in ug`
+    # 在「不带 grade」时整体短路放行，受限账号因此可导出**全校**课时量；class_name
+    # 也从未校验。改为：受限账号必须指定可见范围内的年级，且逐班校验（与查课/课表
+    # 同一口径 academic_class_authorizer）。
+    if ug is not None:
+        if not grade or grade not in ug:
+            flash('请选择你可见范围内的年级后再导出' if not grade
+                  else '该年级不在你的可见范围内', 'warning')
+            return redirect(url_for('academic.inspection_page'))
+        if class_name and not academic_class_authorizer(current_user)(grade, class_name):
+            flash('该班级不在你的可见范围内', 'warning')
+            return redirect(url_for('academic.inspection_page'))
     try:
         out, data = wl.export_workload(from_d, to_d, grade=grade,
                                        class_name=class_name)

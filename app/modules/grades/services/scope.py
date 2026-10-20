@@ -1,4 +1,4 @@
-# StuLink v1.19.49.35 2026-10-14
+# StuLink v1.19.49.39 2026-10-14
 # 成绩模块数据范围解析（P2：委托 app.utils.scope 唯一口径，保留本模块公开 API）
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 """成绩模块数据范围（唯一口径的薄封装）
@@ -172,9 +172,13 @@ def student_in_scope(user, student_no):
         # 2026-10-18 审计修复（P1）：此前只校验年级，任课教师能按学号逐个读取
         # **同年级任意班**学生的成绩（实测 licancan 只教 01/04 班，可读 02 班）。
         # 改为精确到任教班级；只有"整年级任教"（class_name 为空）才按年级兜底。
+        # 2026-10-19 审计修复：并入「班主任所带班」（class_pairs）—— 与 check_exam_visible
+        # 同一口径；否则"既任教又带班"的班主任会读不到自己班的学生（口径分裂）。
         tps = teaching_pairs(user)
-        if tps:
-            if (st_obj.grade, st_obj.class_name) not in tps:
+        own_classes = class_pairs(user)
+        if tps or own_classes:
+            if ((st_obj.grade, st_obj.class_name) not in tps
+                    and (st_obj.grade, st_obj.class_name) not in own_classes):
                 raise PermissionError
             return
         if st_obj.grade not in teaching_grades(user):

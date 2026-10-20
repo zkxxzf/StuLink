@@ -148,6 +148,18 @@ def _read_rate_remaining(key):
     window = max(10, _cfg_int('read_rate_window', 60))
     now = time.time()
     with _cred_lock:
+        # 2026-10-20 审计修复：表满时**不得整表清空**（否则攻击者用超量 key
+        # 即可重置所有人的读频控窗口）。先无损清掉窗口已过期的条目；若仍是新 key
+        # 且表已满，则直接拒绝（不动已生效的计数，fail-closed）。
+        if key not in _read_hits and len(_read_hits) >= _READ_HITS_MAX:
+            stale = [k for k, (_c, s) in _read_hits.items()
+                     if now - s >= window]
+            for k in stale:
+                _read_hits.pop(k, None)
+            if len(_read_hits) >= _READ_HITS_MAX:
+                return window
+        # 沿用第十六轮的 _prune_store：超容量时按插入顺序淘汰最旧的一小部分，
+        # 而不是整表清空（同一实现同时服务 _source_fails / _fails 三张表）。
         _prune_store(_read_hits, _READ_HITS_MAX, window)
         count, start = _read_hits.get(key, (0, now))
         if now - start >= window:

@@ -347,15 +347,21 @@ def delete(id):
         return redirect(url_for('rooms.list_rooms'))
 
     # 2026-10-18：删宿舍前把房间与床位一起归档（回收站可恢复）
+    # 2026-10-19 审计修复：归档失败即中止（fail-closed）
     from app.utils.trash import archive
     beds = BedAssignment.query.filter_by(room_id=room.id).all()
+    _recs = []
     if beds:
-        archive('dormitory', 'bed_assignment', '宿舍床位', beds,
-                summary=f'{room.display_name}：{len(beds)} 个床位',
-                operator=current_user)
-    archive('dormitory', 'room', '宿舍', room,
-            summary=f'{room.display_name}（{room.room_number}）',
-            operator=current_user)
+        _recs.append(archive('dormitory', 'bed_assignment', '宿舍床位', beds,
+                             summary=f'{room.display_name}：{len(beds)} 个床位',
+                             operator=current_user))
+    _recs.append(archive('dormitory', 'room', '宿舍', room,
+                         summary=f'{room.display_name}（{room.room_number}）',
+                         operator=current_user))
+    if any(r is None for r in _recs):
+        db.session.rollback()
+        flash('删除前归档失败，已中止（避免数据不可恢复）', 'danger')
+        return redirect(url_for('rooms.list_rooms'))
     BedAssignment.query.filter_by(room_id=room.id).delete()
     db.session.delete(room)
     db.session.commit()
@@ -579,12 +585,18 @@ def save_assignments():
         rooms = Room.query.filter(Room.grade.isnot(None) | Room.class_name.isnot(None) | Room.combined_class.isnot(None)).all()
         bed_rows = BedAssignment.query.filter(
             BedAssignment.student_id.isnot(None)).all()
+        # 2026-10-19 审计修复：快照归档失败即中止清空（fail-closed）
+        _recs = []
         if rooms:
-            archive('dormitory', 'room', '宿舍分配(清空前快照)', rooms,
-                    summary=f'清空全校分配前：{len(rooms)} 间房间', operator=current_user)
+            _recs.append(archive('dormitory', 'room', '宿舍分配(清空前快照)', rooms,
+                                 summary=f'清空全校分配前：{len(rooms)} 间房间', operator=current_user))
         if bed_rows:
-            archive('dormitory', 'bed_assignment', '床位分配(清空前快照)', bed_rows,
-                    summary=f'清空全校分配前：{len(bed_rows)} 个床位', operator=current_user)
+            _recs.append(archive('dormitory', 'bed_assignment', '床位分配(清空前快照)', bed_rows,
+                                 summary=f'清空全校分配前：{len(bed_rows)} 个床位', operator=current_user))
+        if any(r is None for r in _recs):
+            db.session.rollback()
+            return jsonify({'success': False,
+                            'message': '清空前快照归档失败，已中止（避免数据不可恢复）'}), 500
         room_count = 0
         for room in rooms:
             room.grade = None

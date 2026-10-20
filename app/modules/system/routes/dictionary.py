@@ -111,10 +111,15 @@ def delete_item(item_id):
         return redirect(url_for('dictionary.list_items', tab=cat_code))
 
     # 2026-10-18（口径）：字典项删除接回收站 —— 误删会让下拉框缺项，必须可恢复
+    # 2026-10-19 审计修复：归档失败即中止（fail-closed），避免"提示可恢复却真删了"
     from app.utils.trash import archive
-    archive('system', 'dictionary_item', '字典项', item,
-            summary=f'{item.category.name if item.category else cat_code} · {item.value}',
-            operator=current_user)
+    _rec = archive('system', 'dictionary_item', '字典项', item,
+                   summary=f'{item.category.name if item.category else cat_code} · {item.value}',
+                   operator=current_user)
+    if _rec is None:
+        db.session.rollback()
+        flash('删除前归档失败，已中止（避免数据不可恢复）', 'danger')
+        return redirect(url_for('dictionary.list_items', tab=cat_code))
     # 归档先提交、再删除：非 WAL 模式下 SQLite 是**库级锁**，同一事务里
     # "先读后写 + 再删" 容易触发读锁升级失败（database is locked）。
     # 拆成两个事务后，与 students.delete 的做法保持一致。
