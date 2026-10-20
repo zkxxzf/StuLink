@@ -1,4 +1,4 @@
-# StuLink v1.19.49.43 2026-10-10
+# StuLink v1.19.49.44 2026-10-10
 # 教务 · 教师名单：列表 / Excel 导入（模板-预览-确认-密码清单）/ 编辑
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 import io
@@ -392,7 +392,7 @@ def teacher_edit(tid):
             if val is not getattr(t, field):
                 setattr(t, field, val)
                 changes.append(label)
-        # v1.19.49.43：教师档案变更 → 同步回写到关联的 users 账号（admin 自动 skip）
+        # v1.19.49.44：教师档案变更 → 同步回写到关联的 users 账号（admin 自动 skip）
         back_changes = teacher_sync.sync_from_teacher(t, renamed_from=None)
         if back_changes:
             changes.extend(back_changes)

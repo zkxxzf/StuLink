@@ -10,7 +10,7 @@
 面积单位平方米、金额单位万元、个数类为整数；未填留空（None）而不是 0，
 避免把"没填"当成"确实是 0"报进基表。
 """
-# StuLink v1.19.49.43 2026-10-20
+# StuLink v1.19.49.44 2026-10-20
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 from datetime import datetime
 
