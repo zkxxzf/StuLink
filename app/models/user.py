@@ -200,12 +200,17 @@ class User(UserMixin, db.Model):
             link.is_primary = True
 
     def has_perm(self, perm_key):
-        """检查用户是否有指定权限（多身份改造 P1：按当前身份组判定）"""
+        """检查用户是否有指定权限（多身份：**任一**身份组授权即通过）。
+
+        2026-10-20 用户口径：一个人可同时是班主任 + 任课教师，两个组的权限
+        自动合并，不需要切换身份才有其中一组的能力。数据范围仍按当前身份组
+        解析（`resolve_scope` 用 active_group），切换身份可查看不同范围。
+        """
         if self.role == 'admin':
             return True
-        g = self.active_group
-        if g:
-            return g.has_menu(perm_key)
+        for g in self.permission_groups:
+            if g is not None and g.has_menu(perm_key):
+                return True
         return False
 
 

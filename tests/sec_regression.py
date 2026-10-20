@@ -1816,7 +1816,7 @@ def check_SR12():
 
 @item('SR-13')
 def check_SR13():
-    """多身份切换：has_perm 按「当前身份」判定（不并集）。2026-10-14（P1–P3）"""
+    """多身份：权限取「并集」，当前身份只影响显示与数据范围。2026-10-20 用户口径"""
     from flask import session
     from flask_login import login_user
     mid = uid('multi')
@@ -1827,12 +1827,17 @@ def check_SR13():
              str([g.name for g in u.permission_groups]))
         with app.test_request_context('/'):
             login_user(u)
-            # 默认身份 = 主组（任课教师组）：有 academic.swap、无 dormitory.assign
+            # 默认身份 = 主组（任课教师组）
             case('SR-13 默认身份=主组（任课教师）',
-                 u.has_perm('academic.swap') and not u.has_perm('dormitory.assign'))
+                 u.active_group is not None and u.active_group.name == '任课教师组',
+                 getattr(u.active_group, 'name', None))
+            # 2026-10-20：两组权限自动合并（班主任 + 任课教师并存时两组能力都可用）
+            case('SR-13 权限取并集（两组能力都可用）',
+                 u.has_perm('academic.swap') and u.has_perm('dormitory.assign'))
             session['active_group_id'] = dorm_gid
-            case('SR-13 切换宿管后权限随之变化',
-                 u.has_perm('dormitory.assign') and not u.has_perm('academic.swap'))
+            case('SR-13 切换身份只改显示/范围，权限集合不变',
+                 u.active_group is not None and u.active_group.name == '宿管组'
+                 and u.has_perm('academic.swap') and u.has_perm('dormitory.assign'))
 
 
 @item('SR-14')
