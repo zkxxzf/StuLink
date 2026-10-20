@@ -3,7 +3,7 @@
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
 [![Python](https://img.shields.io/badge/python-3.11+-green.svg)](https://python.org)
 [![Flask](https://img.shields.io/badge/flask-3.x-lightgrey.svg)](https://flask.palletsprojects.com/)
-[![Version](https://img.shields.io/badge/version-1.19.49.43-orange.svg)](https://gitee.com/zkxxzf/StuLink)
+[![Version](https://img.shields.io/badge/version-1.19.49.44-orange.svg)](https://gitee.com/zkxxzf/StuLink)
 
 面向中学的综合学生管理平台，采用 **双站点 + 多模块 + 一模块一库** 的故障隔离架构：
 
@@ -301,6 +301,7 @@ StuLink/
 
 | 版本 | 日期 | 亮点 |
 |---|---|---|
+| **1.19.49.44** | 2026-10-20 | **教育统计改为「页面表格 + 一键复制」**：去掉 Excel 导出（用户口径：独立功能、复制粘贴即可）；7 张基表按样表列序/行序重排，3118 用 rowspan/colspan 还原「在校生数」合并表头，4153/4156 补齐「#女 / #少数民族」与职称/学历行；每表「复制」+「复制全部」保留行列结构与合并单元格（ES5 + 事件委托，安全扫描 M-10 与前端兼容均通过）；入口为「系统管理 → 教育统计」 |
 | **1.19.49.43** | 2026-10-20 | **教育事业统计基表（新模块）**：`/system/edu-stat` 从业务库实时计算并导出 **教基2108 班额班数 / 3118 分类型学生数 / 3119 分年龄学生数 / 3045 在校生其他情况**（年级按学年映射、年龄由身份证解析、寄宿生取住宿类型）；教师侧 **4149/4153/4156** 随「教师名单」补录性别/民族/学历/职称/人员类别/在编/外籍后自动生成；`/system/edu-assets` 按学年录入 **5170 校舍 / 5176 资产 / 1102 达标项** 并随基表导出（新增 A24/A25 迁移与 EDUSTAT 回归 12 条） |
 | **1.19.49.42** | 2026-10-20 | **合并 sakaay 增量**：成绩仪表盘动态不再混入调课申请/审批（调课归教务/教师工作台）· 成绩首页新增「开具成绩证明」直达入口 · 打印汇总与小程序入口图标微调 |
 | **1.19.49.41** | 2026-10-20 | **合并 sakaay 新 PR（第 16·17 轮审计）+ 合并后加固**：恢复「校长」身份（全校查看 + 全校事务审批）· 教务主任补审批 · 年级长/教务员补事务权限 · 仪表盘动态调课申请/审批 · 成绩导入班级列丢失与前端图表实例泄漏修复 · MCP 频控加 `_prune_store` 与锁定三元组；合并后加固：`import_exam36` 加 `--apply` 门控/整库备份/失败退出码、`sync_role_groups` 加整库备份与迁移登记、自审口径注释对齐（新增 SR-19；M-4 断言适配 `write_table`） |
