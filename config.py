@@ -6,19 +6,66 @@ import secrets
 BASE_DIR = os.path.abspath(os.path.dirname(__file__))
 
 
+# H-07（2026-10-19）：SECRET_KEY 是"进程身份"——换钥不报错，只会把所有人
+# 静默踢下线。显式指定的密钥文件读不到时必须**启动失败**，不能自动生成新钥。
+_SYNC_MARKERS = ('同步', 'onedrive', 'dropbox', 'nutstore', '百度网盘', '坚果云')
+
+
+def _looks_synced(path):
+    """路径是否落在常见同步盘（本项目实际位于「00同步文件」下）。"""
+    p = os.path.abspath(path).replace('\\', '/').lower()
+    return any(m in p for m in _SYNC_MARKERS)
+
+
+def _warn_secret_location(path, label):
+    """密钥文件在 data/ 或同步盘时打印告警（不打印密钥内容）。"""
+    under_data = os.path.abspath(path).startswith(
+        os.path.join(BASE_DIR, 'data') + os.sep)
+    if under_data or _looks_synced(path):
+        print('[安全警告] %s 位于 data/ 或同步盘：%s；'
+              '建议移出并设置 STULINK_SECRET_KEY_FILE。' % (label, path))
+
+
 def _get_secret_key():
-    """获取 SECRET_KEY：优先环境变量，否则从文件读取，最后自动生成并持久化"""
+    """获取 SECRET_KEY：环境变量 > 显式文件 > data/.secret_key > 自动生成。
+
+    2026-10-19 H-07：新增 STULINK_SECRET_KEY_FILE；显式指定但读不到时
+    抛 RuntimeError（宁可起不来，也不要静默换钥把全员踢下线）。
+    """
     env_key = os.environ.get('SECRET_KEY', '').strip()
     if env_key:
         return env_key
-    key_file = os.path.join(BASE_DIR, 'data', '.secret_key')
-    try:
-        if os.path.exists(key_file):
+
+    explicit = os.environ.get('STULINK_SECRET_KEY_FILE', '').strip()
+    if explicit:
+        key_file = os.path.abspath(explicit)
+        try:
             with open(key_file, 'r') as f:
-                return f.read().strip()
-    except Exception:
-        pass
-    # 自动生成加上持久化
+                key = f.read().strip()
+        except OSError as _e:
+            raise RuntimeError(
+                'STULINK_SECRET_KEY_FILE 指向的密钥文件无法读取：%s'
+                % key_file) from _e
+        if not key:
+            raise RuntimeError(
+                'STULINK_SECRET_KEY_FILE 指向的密钥文件为空：%s' % key_file)
+        _warn_secret_location(key_file, 'SECRET_KEY 文件')
+        return key
+
+    key_file = os.path.join(BASE_DIR, 'data', '.secret_key')
+    if os.path.exists(key_file):
+        try:
+            with open(key_file, 'r') as f:
+                key = f.read().strip()
+        except OSError as _e:
+            raise RuntimeError(
+                'SECRET_KEY 文件存在但无法读取：%s' % key_file) from _e
+        if not key:
+            raise RuntimeError('SECRET_KEY 文件为空：%s' % key_file)
+        _warn_secret_location(key_file, 'SECRET_KEY 文件')
+        return key
+
+    # 首次运行：自动生成并持久化（data/ 下的旧口径，仅兼容存量部署）
     new_key = secrets.token_hex(32)
     os.makedirs(os.path.dirname(key_file), exist_ok=True)
     try:
@@ -31,6 +78,7 @@ def _get_secret_key():
             pass
     except Exception:
         pass
+    _warn_secret_location(key_file, 'SECRET_KEY 文件')
     return new_key
 
 
@@ -53,6 +101,9 @@ class Config:
         'STULINK_SESSION_COOKIE_SECURE', '0').strip() == '1'
     # M-2：服务端会话过期（默认 8 小时），配合 session.permanent=True 生效
     PERMANENT_SESSION_LIFETIME = int(os.environ.get('STULINK_SESSION_LIFETIME', '28800'))
+    # P1 M-02：绝对超时（滑动续期不刷新 login_at；默认 12 小时）
+    SESSION_ABSOLUTE_TIMEOUT = int(os.environ.get(
+        'STULINK_SESSION_ABSOLUTE_TIMEOUT', '43200'))
     SESSION_REFRESH_EACH_REQUEST = True
     SESSION_COOKIE_SAMESITE = 'Lax'
     SESSION_COOKIE_PATH = '/'
@@ -60,6 +111,22 @@ class Config:
     # M-7：CSRF token 有效期（默认 8 小时；None=永不过期，泄露后长期可用）
     WTF_CSRF_TIME_LIMIT = int(os.environ.get('STULINK_CSRF_TIME_LIMIT', '28800'))
     WTF_CSRF_SSL_STRICT = False          # 非 HTTPS 环境关闭严格检查
+    # P1 M-12：AI 外发默认匿名化（姓名/学号替换，分数/名次/班级保留）。
+    # 关闭仅用于校内自查：AI_ANONYMIZE=0。
+    AI_ANONYMIZE = os.environ.get(
+        'AI_ANONYMIZE', '1').strip().lower() not in ('0', 'false', 'no', 'off')
+    # P2：AI 每日配额（按用户；0=不限制）与单次请求超时（秒）
+    AI_DAILY_QUOTA = int(os.environ.get('AI_DAILY_QUOTA', '50'))
+    AI_REQUEST_TIMEOUT = int(os.environ.get('AI_REQUEST_TIMEOUT', '180'))
+    # L-04：只有来自可信反代的请求才信 X-Real-IP / X-Forwarded-For。
+    # 逗号分隔 IP；'*' 表示信任所有来源（仅当应用端口只绑回环时使用）。
+    TRUSTED_PROXIES = tuple(
+        p.strip() for p in os.environ.get('STULINK_TRUSTED_PROXIES', '').split(',')
+        if p.strip())
+    # L-01：小程序通知详情 GET 默认不写已读；兼容期可设 1 恢复旧行为。
+    WX_NOTICE_DETAIL_AUTO_READ = os.environ.get(
+        'WX_NOTICE_DETAIL_AUTO_READ', '0').strip().lower() in ('1', 'true', 'yes', 'on')
+
     # 生产环境关闭模板自动重载（性能）；改版/迭代期间可临时用环境变量打开
     # STULINK_RELOAD_TEMPLATES=1 —— 这样改 .html 不必重启服务。重启会打断正在后台
     # 跑的 AI 分析等长任务（进度在进程内），迭代期频繁重启是"任务老中断"的主因。
@@ -101,6 +168,12 @@ class Config:
     # 令牌有效时长（秒，默认 12 小时）。均由环境变量注入，不写死在代码里。
     WX_ENV = os.environ.get('STULINK_WX_ENV', 'prod').strip().lower()
     WX_TOKEN_TTL = int(os.environ.get('STULINK_WX_TOKEN_TTL', '43200'))
+    # 微信小程序登录（服务端 code2session）；未配置时只能走账号密码。
+    WX_MP_APPID = os.environ.get('WX_MP_APPID', '').strip()
+    WX_MP_SECRET = os.environ.get('WX_MP_SECRET', '').strip()
+    # 仅供本机联调：code=mock:<openid> 时不访问微信服务器。
+    WX_MP_MOCK = os.environ.get('WX_MP_MOCK', '0') == '1'
+    WX_QR_TTL = int(os.environ.get('STULINK_WX_QR_TTL', '120'))
 
     # 学校名称：成绩证明等对外文书抬头
     # 优先级：环境变量 SCHOOL_NAME > 数据库 system_settings（系统设置页）> 化名占位

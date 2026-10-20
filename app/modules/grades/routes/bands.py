@@ -50,8 +50,12 @@ def _log():
         try:
             log_dir = os.path.join(current_app.root_path, '..', 'logs')
             os.makedirs(log_dir, exist_ok=True)
-            fh = logging.FileHandler(os.path.join(log_dir, 'bands.log'),
-                                     encoding='utf-8')
+            # L-07：原 FileHandler 无轮转，bands.log 会无限增长；
+            # 5MB × 3 份足够排查，且不会打满磁盘。
+            from logging.handlers import RotatingFileHandler
+            fh = RotatingFileHandler(
+                os.path.join(log_dir, 'bands.log'), maxBytes=5 * 1024 * 1024,
+                backupCount=3, encoding='utf-8')
             fh.setFormatter(logging.Formatter('%(asctime)s [%(levelname)s] %(message)s',
                                               '%m-%d %H:%M:%S'))
             lg.addHandler(fh)

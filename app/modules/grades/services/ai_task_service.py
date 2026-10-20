@@ -17,6 +17,7 @@
 """
 import json
 import logging
+import os
 import threading
 import time
 from datetime import datetime, timedelta
@@ -31,6 +32,9 @@ from app.modules.grades.services import ai_agent, ai_service, score_guard
 logger = logging.getLogger(__name__)
 
 MAX_RUNNING_PER_USER = 2                 # 同一用户同时进行的任务上限（防刷）
+# P2 M-13/M-22：进程内全局并发上限（单进程 waitress 部署）。
+# 这不是持久队列：进程重启仍会中断；只防止“每任务一个线程”把线程打满。
+MAX_GLOBAL_RUNNING = max(1, int(os.environ.get('AI_MAX_GLOBAL_TASKS', '6')))
 EVENT_KEEP = 300                         # 每任务保留的事件条数
 SSE_IDLE_TIMEOUT = 900                   # 订阅最长等待（秒）
 SSE_PING_EVERY = 20                      # 空闲 ping 间隔（waitress channel_timeout 默认 120s）
@@ -42,6 +46,23 @@ _LOCK = threading.RLock()
 _EVENTS = {}                             # task_id -> [事件 dict]
 _RUNNING = set()                         # 进程内正在执行的任务 id
 _STOP = set()                            # 已请求停止的任务 id（2026-10-14「停止」按钮）
+_ACTIVE = 0                              # 进程内已占槽任务数（含刚提交未起线程）
+
+
+def _reserve_slot():
+    """占一个全局执行槽；满则拒绝，避免线程/内存被瞬间打满。"""
+    global _ACTIVE
+    with _LOCK:
+        if _ACTIVE >= MAX_GLOBAL_RUNNING:
+            return False
+        _ACTIVE += 1
+        return True
+
+
+def _release_slot():
+    global _ACTIVE
+    with _LOCK:
+        _ACTIVE = max(0, _ACTIVE - 1)
 
 
 
@@ -163,26 +184,41 @@ def submit(user, exam, question, direction='', layer='', client_cfg=None, histor
         score_guard.resolve(user)          # 无可见范围直接拒，不浪费一次模型调用
     except PermissionError as e:
         return False, str(e)
+    # P2：每日 AI 配额（任务提交即计数，避免后台任务绕过配额）
+    from app.utils import ai_quota
+    allowed, used, limit = ai_quota.consume(user.id)
+    if not allowed:
+        return False, f'今日 AI 调用次数已用完（{used}/{limit} 次），请明天再试'
+    if not _reserve_slot():
+        return False, f'当前 AI 任务较多（上限 {MAX_GLOBAL_RUNNING} 个），请稍后再试'
     gen_text = ''
     if isinstance(gen, dict) and gen:
         try:
             gen_text = json.dumps(gen, ensure_ascii=False)[:4000]
         except Exception:                  # noqa: BLE001  选项留档失败不影响任务
             gen_text = ''
-    task = AiTask(user_id=user.id, exam_id=exam.id, question=question[:MAX_QUESTION],
-                  gen=gen_text,
-                  direction=(direction or '')[:10], layer=(layer or '')[:30],
-                  status='running', stage='已提交，正在准备成绩数据…',
-                  tool_count=0, heartbeat=datetime.now(), created_at=datetime.now())
-    db.session.add(task)
-    db.session.commit()
-    _push(task.id, {'type': 'stage', 'text': '已提交，正在准备成绩数据…'})
-    _mark_running(task.id)
-    app = current_app._get_current_object()
-    threading.Thread(
-        target=_run, name=f'ai-task-{task.id}', daemon=True,
-        args=(app, task.id, user.id, exam.id, question, direction, layer, cfg,
-              list(history or []))).start()
+    try:
+        task = AiTask(user_id=user.id, exam_id=exam.id,
+                      question=question[:MAX_QUESTION], gen=gen_text,
+                      direction=(direction or '')[:10],
+                      layer=(layer or '')[:30],
+                      status='running', stage='已提交，正在准备成绩数据…',
+                      tool_count=0, heartbeat=datetime.now(),
+                      created_at=datetime.now())
+        db.session.add(task)
+        db.session.commit()
+        _push(task.id, {'type': 'stage', 'text': '已提交，正在准备成绩数据…'})
+        _mark_running(task.id)
+        app = current_app._get_current_object()
+        threading.Thread(
+            target=_run, name=f'ai-task-{task.id}', daemon=True,
+            args=(app, task.id, user.id, exam.id, question, direction, layer,
+                  cfg, list(history or []))).start()
+    except Exception as exc:               # noqa: BLE001
+        _release_slot()
+        db.session.rollback()
+        logger.warning('AI 任务提交失败', exc_info=True)
+        return False, f'任务提交失败：{exc}'
     return True, task.id
 
 
@@ -227,6 +263,7 @@ def _run(app, task_id, user_id, exam_id, question, direction, layer, cfg, histor
                 db.session.rollback()
             _mark_running(task_id, False)
             _clear_stop(task_id)
+            _release_slot()
             _push(task_id, {'type': 'done'})
 
 

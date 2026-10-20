@@ -352,6 +352,33 @@ def auto_assign_preview(selected_keys, selected_room_ids, mode='keep_existing',
         elif has_assigned and mode == 'clear_all':
             logs.append("[INFO] 覆盖模式：将清除所有已分配房间和床位")
             if not dry_run:
+                # P2：覆盖模式会清空房间归属与床位分配，先按原 id 快照；
+                # 归档失败就中止，避免“分配没跑成、旧分配也没了”。
+                from app.utils.trash import archive_snapshot
+                try:
+                    from flask_login import current_user
+                    _op = current_user if current_user.is_authenticated else None
+                except RuntimeError:
+                    _op = None
+                rooms_to_clear = [
+                    r for r in all_rooms
+                    if r.grade or r.class_name or r.combined_class or r.combined_details]
+                bed_rows = BedAssignment.query.filter(
+                    BedAssignment.room_id.in_([r.id for r in all_rooms]),
+                    BedAssignment.student_id.isnot(None)).all()
+                if rooms_to_clear or bed_rows:
+                    snap = archive_snapshot(
+                        'dormitory', 'dorm_assign_before', '宿舍分配(覆盖前)',
+                        tables=[(Room, rooms_to_clear),
+                                (BedAssignment, bed_rows)],
+                        summary=(f'自动分配覆盖模式：{len(rooms_to_clear)} 间房、'
+                                 f'{len(bed_rows)} 个床位'),
+                        operator=_op, update_existing=True)
+                    if snap is None:
+                        return {'success': False,
+                                'error': '覆盖前归档失败，已中止（旧分配未清空）',
+                                'logs': logs, 'stats': total_stats}
+                    db.session.commit()
                 for r in all_rooms:
                     r.grade = None
                     r.class_name = None

@@ -38,7 +38,8 @@ def _scope():
     if s.origin in ('admin', 'school'):
         return 'school', '', None
     if s.origin == 'grade':
-        return 'grade', (current_user.grade or ''), None
+        # 2026-10-19：管理年级可多选，返回完整列表
+        return 'grade', list(current_user.grades or []), None
     if s.origin == 'class':
         return 'class', '', set(s.classes)
     return 'none', '', None
@@ -51,7 +52,7 @@ def _apply_scope(q, scope, grade, classes):
     if scope == 'user_grades':
         return q.filter(PointRecord.grade.in_(classes or []))
     if scope == 'grade' and grade:
-        return q.filter_by(grade=grade)
+        return q.filter(PointRecord.grade.in_(grade))
     if scope == 'class' and classes:
         from sqlalchemy import or_, and_
         conds = [and_(PointRecord.grade == g, PointRecord.class_name == c)
@@ -67,7 +68,7 @@ def _in_scope(student, scope, grade, classes):
     if scope == 'user_grades':
         return student.grade in (classes or [])
     if scope == 'grade':
-        return student.grade == grade
+        return student.grade in (grade or [])
     if scope == 'class':
         return (student.grade, student.class_name) in (classes or [])
     return False
@@ -290,6 +291,10 @@ def api_record_update(rid):
     rec.remark = payload['remark']
     rec.recorded_at = payload['recorded_at']
     db.session.commit()
+    # P1 M-19：积分修改此前无审计（新增/删除都有），补一条精确埋点
+    log_operation(current_user, '修改', '积分', rec.id,
+                  f"{rec.student_name} {rec.points:+d}分 {rec.reason}",
+                  module='points')
     return jsonify(success=True, message='已更新', data=rec.to_dict())
 
 
@@ -303,6 +308,11 @@ def api_record_delete(rid):
     # 2026-10-14 审计 API-02：同 api_record_update，学生缺失时不得短路放行
     if student is None or not _in_scope(student, scope, grade, classes):
         return jsonify(success=False, message='该记录不在您的管理范围内'), 403
+    # 2026-10-19 第十三轮审计：删除前先进回收站（此前删了只剩一行操作日志）
+    from app.utils.trash import archive
+    archive('points', 'point_record', '积分记录', rec,
+            summary=f'{rec.student_name} {rec.points:+d}分 {rec.reason}',
+            operator=current_user)
     db.session.delete(rec)
     db.session.commit()
     log_operation(current_user, '删除', '积分', rid, f'{rec.student_name} {rec.points:+d}', module='points')

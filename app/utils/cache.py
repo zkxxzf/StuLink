@@ -66,6 +66,30 @@ class SimpleCache:
             self._cache.move_to_end(key)
             self._evict_locked()
 
+    def incr(self, key, amount=1, timeout=None):
+        """原子自增并返回新值（L-10：限流计数不能用 get→set）。
+
+        首次写入使用 timeout；已存在的键保留原过期时间，避免每次请求续期
+        把固定窗口变成滑动窗口。timeout<=0 表示永不过期。
+        """
+        now = time.time()
+        ttl = self.default_timeout if timeout is None else timeout
+        with self._lock:
+            ent = self._cache.get(key)
+            if ent is None or (ent[1] is not None and now >= ent[1]):
+                value = amount
+                expires_at = now + ttl if ttl and ttl > 0 else None
+            else:
+                try:
+                    value = int(ent[0]) + amount
+                except (TypeError, ValueError):
+                    value = amount
+                expires_at = ent[1]
+            self._cache[key] = (value, expires_at)
+            self._cache.move_to_end(key)
+            self._evict_locked()
+            return value
+
     def delete(self, key):
         """删除单个键（不存在时静默）"""
         with self._lock:

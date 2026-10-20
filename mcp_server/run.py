@@ -235,7 +235,7 @@ def _print_banner(cfg, me):
         ])
     # 2026-10-13（全面审计 M-5）：局域网暴露时的准入自检 —— 只认账号密码，等于让
     # 同网段任何设备都能拿真实教师账号反复试探本端口，这里显式提醒一次。
-    if (host in ('0.0.0.0', '::', '::0')
+    if (host not in ('127.0.0.1', 'localhost', '::1')
             and not (cfg.get('require_token') or mode == 'token')):
         lines.extend([
             '',

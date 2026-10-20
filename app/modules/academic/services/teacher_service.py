@@ -22,11 +22,11 @@ def gen_teacher_uid():
 
 
 def find_by_id_card(value):
-    """按身份证号明文等值查找教师（确定性密文，支持索引查询）"""
-    cipher = id_card_util.encrypt_id_card(value)
-    if not cipher:
+    """按身份证号明文等值查找教师（盲索引优先，兼容旧确定性密文双读）。"""
+    cond = Teacher.id_card_filter(value)
+    if cond is None:
         return None
-    return Teacher.query.filter_by(id_card_enc=cipher).first()
+    return Teacher.query.filter(cond).first()
 
 
 def match_user(teacher):

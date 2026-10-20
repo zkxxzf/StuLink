@@ -86,6 +86,13 @@ def compare_tab(exam_id, class_names, direction='', denom='ref'):
     t1 = []
     for c in classes:
         vs = score_map[c]
+        # 2026-10-19 第十三轮审计：ref_scores 只保留 score>0，
+        # 整班缺考/全 0 时 vs 为空 → max()/min() ValueError 500。
+        if not vs:
+            t1.append({'class_name': c, 'count': count_map[c], 'avg': None,
+                       'median': None, 'std': None, 'max': None,
+                       'min': None, 'range': None, 'diff': None})
+            continue
         avg = st.avg_by_denom(vs, count_map[c])
         t1.append({'class_name': c, 'count': count_map[c], 'avg': avg,
                    'median': _median(vs), 'std': _stddev(vs),
@@ -215,6 +222,11 @@ def compare_tab(exam_id, class_names, direction='', denom='ref'):
             c = t['class_name']
             if c not in mat:
                 continue
+            # 2026-10-19 审计：名次为空（老考试未回填排名/补录后未重算）
+            # 不能直接进 rank_segment_index（内部 low <= rank 会 TypeError），
+            # 与 stats_service.segment_table 的 `if not rank: continue` 同口径。
+            if by_rank and not t.get('rank_dir'):
+                continue
             idx = (data.rank_segment_index(t['rank_dir']) if by_rank
                    else data.segment_index(t['score']))
             if idx is None or not (0 <= idx < len(segs)):
@@ -254,10 +266,12 @@ def compare_tab(exam_id, class_names, direction='', denom='ref'):
                           for i, c in enumerate(classes)]
                        + [{'key': 'total', 'label': '所选班合计', 'type': 'int'}],
             'rows': t6,
-            'chartHint': {'type': 'stack', 'stackKey': 'class_name',
-                          'xAxis': [r['label'] for r in t6],
-                          'series': [{'name': c, 'data': [r.get('c%d' % i) for r in t6]}
-                                     for i, c in enumerate(classes)]},
+            # 2026-10-19 用户口径：名次段图横轴＝所选班、堆叠＝名次段（同年级分析页）
+            'chartHint': {'type': 'stack', 'xAxis': list(classes),
+                          'series': [{'name': r['label'],
+                                      'data': [r.get('c%d' % j)
+                                               for j in range(len(classes))]}
+                                     for r in t6]},
         }
 
     # ---- T7 分层上线（复用 A1 的累计口径，仅取所选班）----

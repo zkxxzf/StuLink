@@ -159,9 +159,13 @@ with app.test_client() as c:
     check('页头显示本场考试名字', '2025级2026-2027学年第一学期期中考（冒烟）' in ph)
     check('页头显示考试类型（性质/阶段）', '联考' in ph and '期中考' in ph)
     check('页头显示考试时间', '2026-10-08' in ph)
+    # 2026-10-19 审计：断言原先查整页，但顶部导航的 exam-topbar-meta 也按
+    # 设计显示「年级·性质·阶段」串 → 整页永远命中。改为只看侧栏标题元素。
+    _tm = re.search(r'class="efn-title"[^>]*>(.*?)</div>', ph, re.S)
+    _side_title = re.sub(r'\s+', ' ', _tm.group(1)).strip() if _tm else ''
     check('侧栏标题=考试名字（非「年级·性质·阶段·日期」串）',
-          '2025级2026-2027学年第一学期期中考（冒烟）' in ph
-          and '2025级·联考·期中考' not in ph)
+          '2025级2026-2027学年第一学期期中考（冒烟）' in _side_title
+          and '2025级·联考·期中考' not in _side_title)
     # v1.19.47.3 点环节标签不滚动：改用 history.replaceState 写 hash（不再直接赋 location.hash）
     check('点环节标签不滚动（用 history.replaceState）', 'history.replaceState' in ph)
     # v1.19.47.3 侧栏 7 环节：断言**渲染产物**（affair_steps 是 Jinja 变量名，
@@ -298,6 +302,14 @@ with app.test_client() as c:
     jd = r.get_json() or {}
     check('环节⑥ 自动编排成功', jd.get('ok') is True, str(jd))
     check('环节⑥ 编排规模=3场×2考场×2人=12格', jd.get('rows') == 12, str(jd))
+    # 2026-10-19：均衡口径改为"累计时长"，编排结果必须带回 balance 指标
+    _bal = jd.get('balance') or {}
+    check('环节⑥ 编排返回时长均衡指标（人均 = 总时长/人数，极差 = 最长-最短）',
+          _bal.get('mean') > 0
+          and _bal.get('spread') == _bal.get('max', 0) - _bal.get('min', 0),
+          str(_bal))
+    check('环节⑥ 首次编排不再因"旧安排为空"误报归档失败',
+          '归档失败' not in str(jd.get('msg') or ''), str(jd.get('msg')))
 
     with app.app_context():
         scheds = {s.id: s for s in AffairSchedule.query.filter_by(affair_id=aid).all()}
@@ -324,6 +336,62 @@ with app.test_client() as c:
         check('环节⑥ 每考场填满 2 位',
               all(len([iv for iv in ivs if iv.schedule_id == s.id and iv.room_no == rn]) == 2
                   for s in scheds.values() for rn in ('01', '02')))
+
+    # 2026-10-19 用户口径：同科回避 / 首场优先班主任改成页面勾选（不再写死）
+    _opts = jd.get('opts') or {}
+    check('环节⑥ 编排返回两个勾选状态（缺省都开）',
+          _opts.get('avoid_same') is True and _opts.get('head_first') is True,
+          str(_opts))
+    r = c.post(f'/grades/affairs/{aid}/invig/auto',
+               data={'avoid_same': '0', 'head_first': '0'}, headers=H)
+    jo = r.get_json() or {}
+    check('环节⑥ 可关闭同科回避与首场偏好（avoid_same=0 / head_first=0）',
+          jo.get('ok') is True
+          and (jo.get('opts') or {}).get('avoid_same') is False
+          and (jo.get('opts') or {}).get('head_first') is False, str(jo.get('opts')))
+    # 恢复缺省编排，后面的手动指派 / 工作量断言按这份结果走
+    r = c.post(f'/grades/affairs/{aid}/invig/auto', headers=H)
+    check('环节⑥ 恢复缺省编排（12 格）', (r.get_json() or {}).get('rows') == 12,
+          str(r.get_json()))
+
+    # 纯函数：首场格带优先名单时，优先人先拿格；不是硬约束（优先人接不了照样排）
+    from app.modules.grades.services.invig_balance import Cell as _Cell, best_assign as _ba
+    _cs = [_Cell(('s1', '01'), 's1', 60, frozenset({'甲', '乙', '丙', '丁'}),
+                 frozenset({'丙', '丁'})),
+           _Cell(('s1', '02'), 's1', 60, frozenset({'甲', '乙', '丙', '丁'}),
+                 frozenset({'丙', '丁'}))]
+    _plan, _gaps, _st = _ba(_cs, ['甲', '乙', '丙', '丁'], lambda a, b: False)
+    check('环节⑥ 首场优先：优先人先拿到格',
+          {n for _, n in _plan} == {'丙', '丁'}, str(_plan))
+    _cs2 = [_Cell(('s2', '01'), 's2', 60, frozenset({'甲', '乙'}), frozenset({'丙'}))]
+    _p2, _g2, _s2 = _ba(_cs2, ['甲', '乙', '丙'], lambda a, b: False)
+    check('环节⑥ 首场优先不是硬约束（优先人不在候选里也能排）',
+          len(_p2) == 1 and not _g2, str(_p2))
+
+    # 班主任识别口径：role=班主任 与 UserClassLink 挂班 两种都算（多身份账号）
+    from app.models import UserClassLink
+    from app.modules.grades.routes.affair_invig import _head_teacher_names
+    with app.app_context():
+        _h1 = User(username='invhead1', real_name='钱班主任', role='homeroom_teacher',
+                   is_active=True, must_change_pwd=False)
+        _h1.set_password('x')
+        _h2 = User(username='invhead2', real_name='孙副班', role='teacher',
+                   is_active=True, must_change_pwd=False)
+        _h2.set_password('x')
+        db.session.add_all([_h1, _h2])
+        db.session.flush()
+        db.session.add(UserClassLink(user_id=_h2.id, grade='2025级', class_name='01班'))
+        db.session.commit()
+        _h1_id, _h2_id = _h1.id, _h2.id
+        _phys_id = User.query.filter_by(username='t_phys').first().id
+    _heads = _head_teacher_names([
+        {'name': '钱班主任', 'user_id': _h1_id},
+        {'name': '孙副班', 'user_id': _h2_id},
+        {'name': '赵物理', 'user_id': _phys_id},
+        {'name': '校外无账号', 'user_id': None},
+    ])
+    check('环节⑥ 班主任识别（role=班主任 / UserClassLink 挂班；无账号不算）',
+          _heads == {'钱班主任', '孙副班'}, str(_heads))
 
     # 手动指定：化学场次给 王化学 → 应被回避拒绝
     with app.app_context():
@@ -421,6 +489,13 @@ with app.test_client() as c:
           all(it['minutes'] == it['cells'] * 90 and len(it['detail']) == it['cells']
               for it in wl.get('items', [])),
           str([(it['name'], it['cells'], it['minutes']) for it in wl.get('items', [])]))
+    # 2026-10-19：弹窗底部要报「人均 / 最长 / 最短 / 极差」，供用户直接判断公不公平
+    _wb = wl.get('balance') or {}
+    _n = len(wl.get('items') or []) or 1
+    check('环节⑥ 工作量返回均衡指标（人均 / 极差与逐人时长自洽）',
+          _wb.get('spread') == _wb.get('max', 0) - _wb.get('min', 0)
+          and _wb.get('mean') == round(wl.get('total_minutes', 0) / _n),
+          str(_wb))
 
 
     # ---- 环节⑥ 排除名单：批量（多老师 × 多场次，2026-10-13 用户口径） ----

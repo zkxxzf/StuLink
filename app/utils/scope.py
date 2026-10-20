@@ -196,9 +196,10 @@ def resolve_scope(user=None, *, class_fallback=False):
     if kind in ('self_grade', 'pick_grades'):
         gr = set(pg.get_scope_grades()) if pg else set()
         if kind == 'self_grade':
-            gr = {u.grade} if u.grade else set()
-        elif not gr and getattr(u, 'grade', None):
-            gr = {u.grade}          # 指定年级未配置 → 回落本人年级
+            # 2026-10-19：管理年级支持多选（user.grade 逗号串 → grades 列表）
+            gr = set(u.grades)
+        elif not gr and u.grades:
+            gr = set(u.grades)      # 指定年级未配置 → 回落本人年级
         return Scope('grades', grades=gr, origin='grade')
     if kind in ('self_class', 'pick_classes'):
         pairs = (class_pairs(u) if kind == 'self_class' else set())
@@ -206,8 +207,8 @@ def resolve_scope(user=None, *, class_fallback=False):
             pairs = {(c.get('grade'), c.get('class'))
                      for c in pg.get_scope_classes()
                      if isinstance(c, dict) and c.get('grade') and c.get('class')}
-        if not pairs and class_fallback and u.grade and u.class_name:
-            pairs = {(u.grade, u.class_name)}
+        if not pairs and class_fallback and u.grades and u.class_name:
+            pairs = {(g, u.class_name) for g in u.grades}
         return Scope('classes', classes=pairs, origin='class')
     if kind == 'self_teaching':
         tps = teaching_pairs(u)

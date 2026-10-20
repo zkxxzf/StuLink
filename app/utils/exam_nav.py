@@ -4,7 +4,9 @@
 
 背景（用户口径）：成绩模块改为**考试上下文驱动** ——
   进入模块先看「历次考试列表」；点进某场考试后，左侧栏切换为该场考试的流程：
-  考务安排 → 成绩导入 → 成绩分析。
+  考务安排 → 数据导入 → 成绩分析。
+（2026-10-19：「成绩导入」升级为「数据导入」——成绩 / 分数线（划线分层）/
+  考生名单 / 考场 / 场次 都在同一页导入。）
 
 本模块只做一件事：**判断当前请求属于哪场考试的哪一段**，供 base.html 渲染悬浮流程栏。
 只读、不写库；同一请求内用 `g` 缓存，避免重复查询。
@@ -13,16 +15,15 @@ from __future__ import annotations
 
 from flask import g, request
 
-# 段位键：overview 概览 / affair 考务 / import 导入 / bands 划线 / analysis 分析
+# 段位键：overview 概览 / affair 考务 / import 导入 / analysis 分析
 SECTION_LABELS = {
     'overview': '考试概览',
     'affair': '考务安排',
-    'import': '成绩导入',
-    'bands': '划线分层',
+    'import': '数据导入',
     'analysis': '成绩分析',
 }
 
-# v1.19.49.37 考务向导 7 个环节（/grades/affairs/<aid> 的页签 #t1~#t7）。
+# v1.19.49.35 考务向导 7 个环节（/grades/affairs/<aid> 的页签 #t1~#t7）。
 # 侧栏悬浮栏原先只画 4 个圆点（建考试/考务/导入/分析），与考务页真实的 7 个环节对不上；
 # 这里给出 7 环节的标签与完成判定，供模板渲染「当前所处环节」高亮 —— 只亮当前这一步，
 # 不是把前面的全部点亮（用户口径 2026-10-12）。
@@ -40,8 +41,9 @@ AFFAIR_STEPS = (
 _EP_SECTION = (
     ('grades.exam_ai_import', 'import'),
     ('grades.exam_import', 'import'),
-    # v1.19.49.37 划线分层单独一段：原先归到 'import' 导致侧栏「成绩导入」「划线分层」同时高亮
-    ('grades.bands_page', 'bands'),
+    # 2026-10-19 用户口径：侧栏去掉「划线分层」独立项，划线编辑页归到「数据导入」段
+    # （进入划线页时高亮数据导入；编辑页入口在导入页下方的划线状态条 / 考试详情）。
+    ('grades.bands_page', 'import'),
     ('grades.exam_affair_go', 'affair'),
     ('grades.affair', 'affair'),
     ('grades.affairs', 'affair'),
@@ -132,23 +134,23 @@ def _resolve():
     if exam is None:
         return None
     if affair is None:
-        # v1.19.49.37：**任何**进入考试态的页面都要取本场考务批次。
+        # v1.19.49.35：**任何**进入考试态的页面都要取本场考务批次。
         # 此前只在 sec == 'affair' 时查，导致成绩导入/划线分层/分数修改记录等页面里
         # affair 恒为 None → 侧栏「考务安排」永远挂「待做」、进度显示 3/4 步，
         # 而本场考务其实早已编排完成（有考场·座号·考号）。
         affair = ExamAffair.query.filter_by(exam_id=exam.id).first()
 
-    # 四步进度（与考试详情页同口径：建考试 / 考务 / 导入 / 划线）
+    # 四步进度（与考试详情页同口径：建考试 / 考务 / 导入 / 分析）
     imported = (exam.status == 'imported')
     banded = ExamBand.query.filter_by(exam_id=exam.id).count() > 0
     steps = [
         {'label': '建立考试', 'done': True, 'key': 'exam'},
         {'label': '考务安排', 'done': bool(affair), 'key': 'affair'},
-        {'label': '成绩导入', 'done': imported, 'key': 'import'},
+        {'label': '数据导入', 'done': imported, 'key': 'import'},
         {'label': '成绩分析', 'done': banded, 'key': 'analysis'},
     ]
 
-    # v1.19.49.37 考务向导 7 环节：完成状态 + 当前所处环节（由 URL hash / 查询参数决定）。
+    # v1.19.49.35 考务向导 7 环节：完成状态 + 当前所处环节（由 URL hash / 查询参数决定）。
     # 仅考务页（affair 段）需要，其他页为 []（侧栏仍按 4 步渲染）。
     affair_steps = []
     if sec == 'affair' and affair is not None:

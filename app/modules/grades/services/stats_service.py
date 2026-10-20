@@ -1,4 +1,4 @@
-﻿# StuLink v1.19.49.35 2026-10-10
+# StuLink v1.19.49.35 2026-10-10
 # 成绩统计分析服务：一次载入考试成绩数据，提供各 tab 需要的聚合（纯函数 + 内存计算）
 # 口径遵循设计文档第 8 章：参考学生=有总分行（至少一应考科有分），不分学籍状态
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
@@ -67,7 +67,7 @@ _exam_means_cache = OrderedDict()
 def cached_exam_data(exam_id):
     """取共享 ExamData；过期/超限自动重建。
     构造后把涉及的 ORM 实例 expunge 出会话：后续请求的 commit/teardown 不会使其过期，
-    共享实例只读列值始终可用（惰性属性 band_list/prev_totals 走类级查询，同样安全）。"""
+    共享实例只读列值始终可用（惰性方法 band_list 走类级查询，同样安全）。"""
     now = time.time()
     with _exam_data_lock:
         ent = _exam_data_cache.get(exam_id)
@@ -189,30 +189,18 @@ class ExamData:
         for sn in self.snap.values():
             self._by_class.setdefault(sn['class_name'], []).append(sn)
         # 上一场同年级考试（趋势/进退步对比基准）
+        # 2026-10-19 第十三轮审计：排除 draft（结构建好未导成绩）——
+        # 与 trend_exams 的 status='imported' 同口径，否则新建草稿会让
+        # 进退步/趋势基准变成一场没有成绩的考试。
         self.prev_exam = (Exam.query
                           .filter(Exam.grade == self.exam.grade,
+                                  Exam.status != 'draft',
                                   (Exam.exam_date < self.exam.exam_date) |
                                   ((Exam.exam_date == self.exam.exam_date) &
                                    (Exam.id < self.exam.id)))
                           .order_by(Exam.exam_date.desc(), Exam.id.desc()).first())
-        # 惰性：仅班级分析（进退步对比）需要上一场成绩，年级/学科/教师分析用不到，
-        # 故改为首次访问时才查，避免每次构造 ExamData 都白拉一场全量总分行
-        self._prev_totals = None
         # 惰性：班级在籍名单（enrolled 口径才用，跨库查系统库 students）
         self._enrolled = None
-
-    @property
-    def prev_totals(self):
-        """上一场考试 {学号: (总分, 方向排名)}（惰性加载）"""
-        if self._prev_totals is None:
-            out = {}
-            if self.prev_exam:
-                for r in ExamScore.query.filter_by(exam_id=self.prev_exam.id,
-                                                   subject=TOTAL_SUBJECT).all():
-                    if r.score is not None:
-                        out[r.student_no] = (r.score, r.rank_dir)
-            self._prev_totals = out
-        return self._prev_totals
 
     # ---------- 基础 ----------
     def full_marks(self):
@@ -326,7 +314,10 @@ class ExamData:
         key = (direction, subject, selection)
         if key not in cache:
             q = ExamBand.query.filter_by(exam_id=self.exam.id, subject=subject)
-            if selection:
+            # 2026-10-19 第十三轮审计：只有**总分**按组合取线，其余各科按方向
+            # （既有硬口径）。此前 selection 非空即走组合分支，任何场次残留
+            # 单科组合线都会让该科判层/上线率与「按方向」口径分裂。
+            if selection and subject == TOTAL_SUBJECT:
                 bands = (q.filter(ExamBand.direction == direction,
                                   ExamBand.selection == selection)
                          .order_by(ExamBand.seq).all())
@@ -690,8 +681,13 @@ def segment_table(data, class_name=None, direction=None, by_rank=False):
 
 
 def trend_exams(grade):
-    """历次考试（imported）列表（时间升序）"""
-    return (Exam.query.filter_by(grade=grade, status='imported')
+    """历次考试（已导入）列表（时间升序）
+
+    2026-10-19 第十三轮审计：原按 status='imported' 过滤，会漏掉
+    `dirty`（已导入、改过分待重算）的场次 —— 它同样是有效考试。
+    排除未导入的 draft 即可。
+    """
+    return (Exam.query.filter(Exam.grade == grade, Exam.status != 'draft')
             .order_by(Exam.exam_date.asc(), Exam.id.asc()).all())
 
 
@@ -730,10 +726,13 @@ def _ps_class_teachers(grade):
     try:
         from app.models import User, UserClassLink
         links = UserClassLink.query.filter_by(grade=grade).all()
+        # 2026-10-19 第十三轮审计：原循环内 User.query.get()（N+1，20~60 条额外 SQL）
+        users = {u.id: u for u in User.query.filter(
+            User.id.in_({lk.user_id for lk in links})).all()} if links else {}
         for lk in links:
             if lk.class_name in out:
                 continue
-            u = User.query.get(lk.user_id)
+            u = users.get(lk.user_id)
             if u is not None and (u.real_name or u.username):
                 out[lk.class_name] = u.real_name or u.username
     except Exception as _e:  # noqa: BLE001  用户名只是附注，取不到不该让打印页 500

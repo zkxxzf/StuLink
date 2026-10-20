@@ -1,4 +1,4 @@
-# StuLink v1.19.49.37 2026-10-10
+# StuLink v1.19.49.35 2026-10-10
 # AI 分析服务：权限收敛取数（本次+上次原始成绩）→ payload 组装 → LLM 转发
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 import json
@@ -6,6 +6,7 @@ import time
 import urllib.error
 import urllib.request
 
+from flask import current_app
 from sqlalchemy import or_, and_
 
 from app.extensions import db
@@ -18,7 +19,20 @@ from app.utils.url_guard import assert_outbound_url_allowed
 DEFAULT_TEMPERATURE = 0.4
 DEFAULT_TIMEOUT = 180
 
-# v1.19.49.37 S-4：不自动跟随 3xx，防 SSRF 以 approved.com → 302 → 1.19.49.30 绕过 url_guard
+
+def _request_timeout():
+    """P2：优先读 app 配置的 AI_REQUEST_TIMEOUT（秒），无上下文时用默认值。"""
+    try:
+        from flask import current_app, has_app_context
+        if has_app_context():
+            value = int(current_app.config.get('AI_REQUEST_TIMEOUT',
+                                               DEFAULT_TIMEOUT) or DEFAULT_TIMEOUT)
+            return max(10, value)
+    except Exception:  # noqa: BLE001
+        pass
+    return DEFAULT_TIMEOUT
+
+# v1.19.49.35 S-4：不自动跟随 3xx，防 SSRF 以 approved.com → 302 → 1.19.49.30 绕过 url_guard
 
 class _NoRedirect(urllib.request.HTTPRedirectHandler):
     def redirect_request(self, req, fp, code, msg, headers, newurl):
@@ -101,8 +115,9 @@ def scope_of(user, exam):
     if scope == scope_service.SCOPE_SCHOOL:
         return nos, f'{exam.grade}全年级', None
     if scope == scope_service.SCOPE_GRADE or user.has_role('grade_leader'):
-        my_grade = my_grade or user.grade
-        if my_grade and exam.grade != my_grade:
+        # 2026-10-19：管理年级可多选（user.grades）
+        my_grades = set(scope_service.get_scope_grades(user)) or set(user.grades)
+        if my_grades and exam.grade not in my_grades:
             return set(), '非本人年级', None
         return nos, f'{exam.grade}全年级', None
     if user.has_role('homeroom_teacher'):
@@ -184,10 +199,20 @@ def build_payload(user, exam):
                 if restrict and r.subject not in restrict:
                     continue  # 任课教师只发本人任教科目列
                 subs.setdefault(r.student_no, {})[r.subject] = r.score
+        # P1 M-12：默认匿名化 —— 姓名/学号替换为序号，分数/名次/班级保留。
+        # 用稳定排序保证同一场考试多次生成的序号一致（便于对照/复现）。
+        anon = bool(current_app.config.get('AI_ANONYMIZE', True))
         students = []
-        for no, card in cards.items():
+        seq = 0
+        ordered = sorted(cards.items(),
+                         key=lambda kv: ((kv[1].get('class') or ''), kv[0]))
+        for no, card in ordered:
             card['subjects'] = {k: v for k, v in (subs.get(no) or {}).items()
                                 if v is not None}
+            if anon:
+                seq += 1
+                card['no'] = f'S{seq:03d}'
+                card['name'] = f'学生{seq:03d}'
             students.append(card)
         # 只有科目行、没有总分行的学生也补一张最小卡（不丢人）
         for no, sv in subs.items():
@@ -195,7 +220,12 @@ def build_payload(user, exam):
                 continue
             sv = {k: v for k, v in sv.items() if v is not None}
             if sv:
-                students.append({'no': no, 'subjects': sv})
+                item = {'no': no, 'subjects': sv}
+                if anon:
+                    seq += 1
+                    item['no'] = f'S{seq:03d}'
+                    item['name'] = f'学生{seq:03d}'
+                students.append(item)
         students.sort(key=lambda c: (c.get('class') or '', c.get('no') or ''))
         return {'id': ex.id, 'name': ex.name, 'grade': ex.grade,
                 'date': ex.exam_date.strftime('%Y-%m-%d'),
@@ -370,6 +400,8 @@ def _chat_completions(cfg, messages, timeout=None, max_tokens=None, temperature=
     2026-10-13：新增 tools / tool_choice（OpenAI 兼容 function calling），
     供成绩汇报区「AI 一句话分析」的 agent 循环使用；不传则请求体与以前完全一致。
     """
+    if timeout is None:
+        timeout = _request_timeout()
     provider = cfg.get('provider') or ai_providers.DEFAULT_PROVIDER
     base = (cfg.get('base_url') or ai_providers.resolve_base_url(provider)).rstrip('/')
     if not base:
@@ -630,7 +662,7 @@ def build_stats(payload):
                    'values': [_mean(subj[k]) for k in sorted(subj.keys())]}
 
     # 4) 进退步分布
-    # v1.19.49.37 修复：move_rank = 本场方向排名 − 上一场方向排名，
+    # v1.19.49.35 修复：move_rank = 本场方向排名 − 上一场方向排名，
     # 负值 = 名次数字变小 = 进步、正值 = 退步（与成绩单、个人查询同口径）。
     # 原实现把 ≥50 记成"大幅进步"、≤-50 记成"大幅退步"，饼图标签整体标反，此处纠正。
     moves = {'大幅进步(≤-50)': 0, '进步': 0, '持平': 0, '退步': 0, '大幅退步(≥50)': 0}
@@ -757,7 +789,7 @@ def stream_chat(cfg, messages):
                  'Accept': 'text/event-stream'})
 
     try:
-        with _safe_urlopen(req, timeout=DEFAULT_TIMEOUT) as resp:
+        with _safe_urlopen(req, timeout=_request_timeout()) as resp:
             yield {'type': 'stage', 'text': '已连接服务商，正在生成…'}
             for raw in resp:
                 line = raw.decode('utf-8', 'replace').strip()

@@ -4,7 +4,7 @@
 """AI 智能导入路由（挂在 grades 蓝图）
 
 三条接口：
-  GET  /exams/<id>/ai-import          页面
+  GET  /exams/<id>/ai-import          旧地址（与 /import 同一页，2026-10-19 合并）
   POST /exams/<id>/ai-import/analyze   上传（可多文件）→ 存草稿 → AI 给列映射建议
   POST /exams/<id>/ai-import/apply     按确认后的映射解析 → 预览(dry_run) 或 写入
 
@@ -20,14 +20,15 @@ import json
 import uuid
 from datetime import date
 
-from flask import render_template, request, jsonify, redirect, url_for, flash, current_app
+from flask import render_template, request, jsonify, current_app
 from flask_login import login_required, current_user
 
 from app.extensions import db
 from app.models.grades import Exam, SUBJECTS, TOTAL_SUBJECT
 from app.modules.grades import bp
 from app.modules.grades.services import ai_import_service as aisvc
-from app.modules.grades.services import import_service, store_service, ranking, tab_service
+from app.modules.grades.services import (import_service, import_attend,
+                                        store_service, ranking, tab_service)
 from app.modules.grades.services.exam_guard import assert_exam_visible
 from app.utils.decorators import perm_required
 from app.utils.helpers import log_operation
@@ -95,12 +96,15 @@ def _ai_cfg_from_request():
 @login_required
 @perm_required('grades.import')
 def exam_ai_import(exam_id):
+    """旧地址兼容：AI 面板已并入「数据导入」页左栏（2026-10-19）。
+
+    仍返回 200 而不是 302：老师收藏的链接、旧文档与 smoke 脚本都在用这个地址，
+    页面内容与 /import 完全一致（同一模板、同一份上下文）。
+    """
     exam = assert_exam_visible(exam_id)
-    return render_template('grades/ai_import.html', exam=exam,
-                           subjects=SUBJECTS, score_kinds=aisvc.SCORE_KIND_LABEL,
-                           affair_fields=aisvc.AFFAIR_FIELD_LABELS,
-                           schedule_kind=aisvc.SCHEDULE_KIND,
-                           schedule_kind_label=aisvc.SCHEDULE_KIND_LABEL)
+    from app.modules.grades.routes.exams import data_import_context
+    return render_template('grades/import_wizard.html',
+                           **data_import_context(exam))
 
 
 @bp.route('/exams/<int:exam_id>/ai-import/analyze', methods=['POST'])
@@ -230,27 +234,32 @@ def exam_ai_import_analyze(exam_id):
     suggest, ai_err = {}, ''
     cfg = _ai_cfg_from_request()
     if sheets and cfg:
-        from app.modules.grades.services import ai_service
-        try:
-            resolved = ai_service.resolve_key(current_user, cfg)
-            system, user = aisvc.build_ai_prompt({'sheets': sheets}, exam)
-            ok, payload, _sec = ai_service._chat_completions(
-                resolved, [{'role': 'system', 'content': system},
-                           {'role': 'user', 'content': user}],
-                timeout=90, max_tokens=3000)
-            if ok:
-                text = ''
-                try:
-                    text = payload['choices'][0]['message']['content']
-                except (KeyError, IndexError, TypeError):
+        from app.utils import ai_quota
+        _allowed, _used, _limit = ai_quota.consume(current_user.id)
+        if not _allowed:
+            ai_err = f'今日 AI 调用次数已用完（{_used}/{_limit}），已跳过 AI 建议'
+        else:
+            from app.modules.grades.services import ai_service
+            try:
+                resolved = ai_service.resolve_key(current_user, cfg)
+                system, user = aisvc.build_ai_prompt({'sheets': sheets}, exam)
+                ok, payload, _sec = ai_service._chat_completions(
+                    resolved, [{'role': 'system', 'content': system},
+                               {'role': 'user', 'content': user}],
+                    timeout=90, max_tokens=3000)
+                if ok:
                     text = ''
-                suggest = aisvc.parse_ai_mapping(text) or {}
-                if not suggest:
-                    ai_err = 'AI 返回内容无法解析为映射，请手工指定列'
-            else:
-                ai_err = 'AI 调用失败：%s' % str(payload)[:160]
-        except Exception as e:
-            ai_err = 'AI 调用异常：%s' % str(e)[:160]
+                    try:
+                        text = payload['choices'][0]['message']['content']
+                    except (KeyError, IndexError, TypeError):
+                        text = ''
+                    suggest = aisvc.parse_ai_mapping(text) or {}
+                    if not suggest:
+                        ai_err = 'AI 返回内容无法解析为映射，请手工指定列'
+                else:
+                    ai_err = 'AI 调用失败：%s' % str(payload)[:160]
+            except Exception as e:
+                ai_err = 'AI 调用异常：%s' % str(e)[:160]
     elif sheets:
         ai_err = '未检测到本机 AI Key，已跳过 AI 识别，请在下方手工指定每列的用途'
 
@@ -625,16 +634,19 @@ def _apply_schedules(exam, sheet_items, body_sessions, mode='replace', dry=False
     if mode == 'replace':
         # 2026-10-18：覆盖模式会整批清空场次与监考，删前先整组快照（回收站可恢复）；
         # 归档失败就中止覆盖 —— 宁可让用户重试，也不做不可恢复的清空。
+        # 2026-10-19（与 affair_invig 同一修复）：**首次导入没有旧数据**时
+        # archive_snapshot(空组) 返回 None，原实现会误判为「归档失败」中止整批，
+        # 表现为「apply 成功但 DB 里 0 条」。空组不需要归档，直接跳过。
         from app.utils.trash import archive_snapshot
         _old_sch = AffairSchedule.query.filter_by(affair_id=affair.id).all()
         _old_inv = AffairInvigilation.query.filter_by(affair_id=affair.id).all()
-        # 2026-10-19 审计修复：首次覆盖（本批尚无旧场次/监考）时 archive_snapshot 因
-        # items 为空返回 None，属正常，不能当成"归档失败"而中止覆盖。
         if _old_sch or _old_inv:
             _snap = archive_snapshot(
                 'grades', 'affair_schedule_bundle', '考务场次(覆盖前)',
-                tables=[(AffairSchedule, _old_sch), (AffairInvigilation, _old_inv)],
-                summary=f'{affair.name}：覆盖前 {len(_old_sch)} 场 / {len(_old_inv)} 格监考',
+                tables=[(AffairSchedule, _old_sch),
+                        (AffairInvigilation, _old_inv)],
+                summary=(f'{affair.name}：覆盖前 {len(_old_sch)} 场 / '
+                         f'{len(_old_inv)} 格监考'),
                 operator=current_user)
             if _snap is None:
                 return info, ['删除前归档失败，已中止覆盖（避免数据不可恢复）']
@@ -840,6 +852,18 @@ def exam_ai_import_apply(exam_id):
     if rows:
         unmatched = import_service._attach_student_info(exam, rows)
         errors.extend(unmatched)
+    # 2026-10-19 用户口径：考务名单「不参加考试」的学生默认不导入成绩；
+    # AI 导入页勾选「仍然添加」时传 include_skip=1。
+    skipped_n = 0
+    if rows and not bool(data.get('include_skip')):
+        skip_map = import_attend.non_attend_map(exam.id)
+        if skip_map:
+            rows, skipped_rows = import_attend.split_rows(rows, skip_map)
+            skipped_n = len(skipped_rows)
+    if score_items and not rows:
+        return jsonify(success=False,
+                       message='成绩表里的学生都已被标记「不参加考试」，未写入；'
+                               '如需添加请勾选「不参加学生也一并添加」')
     n_subj = sum(len(r['subjects']) for r in rows)
     n_raw = sum(len(r['raw_subjects']) for r in rows)
     preview = {
@@ -848,6 +872,7 @@ def exam_ai_import_apply(exam_id):
         'raw_cells': n_raw,
         'with_exam_no': sum(1 for r in rows if r.get('exam_no')),
         'errors': len(errors),
+        'skipped': skipped_n,
     }
     if band_info:
         preview['bands'] = band_info

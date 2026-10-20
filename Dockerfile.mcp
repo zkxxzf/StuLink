@@ -8,21 +8,23 @@
 #   · 容器内需监听 0.0.0.0 才能被外部访问（默认配置为 127.0.0.1，见下方 ENV）；
 #   · 认证默认 account 模式：每个客户端带自己的 StuLink 账号密码，权限与网页端一致。
 # 详见 docs/MCP服务技术文档.md 与 docs/MCP服务-认证与授权设计.md。
-FROM python:3.11-slim
+FROM python:3.12-slim
 
 WORKDIR /app
 
 # 时区 + UTF-8（中文路径/输出） + 立即刷新日志
 ENV TZ=Asia/Shanghai \
     PYTHONUNBUFFERED=1 \
-    PYTHONUTF8=1
+    PYTHONUTF8=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PIP_NO_CACHE_DIR=1
 RUN ln -snf /usr/share/zoneinfo/$TZ /etc/localtime && echo $TZ > /etc/timezone
 
-# 依赖：mcp_server/requirements.txt 内含 `-r ../requirements.txt`（主应用依赖）
-#       + MCP SDK + uvicorn。两份清单分别 COPY，保证相对路径可解析。
-COPY requirements.txt ./
-COPY mcp_server/requirements.txt ./mcp_server/requirements.txt
-RUN pip install --no-cache-dir -r mcp_server/requirements.txt \
+# 依赖：mcp_server/requirements.lock 已把主应用依赖 + MCP SDK + uvicorn
+#       全部锁定并带 hash；requirements.txt 保留作可读清单。
+COPY requirements.txt requirements.lock ./
+COPY mcp_server/requirements.txt mcp_server/requirements.lock ./mcp_server/
+RUN pip install --no-cache-dir --require-hashes -r mcp_server/requirements.lock \
         -i https://pypi.tuna.tsinghua.edu.cn/simple
 
 # 代码：MCP 复用主应用（app/ + config.py），只需再带上 mcp_server/

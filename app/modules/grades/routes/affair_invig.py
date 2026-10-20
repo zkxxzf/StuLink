@@ -1,4 +1,4 @@
-# StuLink v1.19.49.37 2026-10-12
+# StuLink v1.19.49.35 2026-10-12
 # 考务环节④⑤⑥⑦：核对任课教师 / 考试时间表 / 监考编排 / 监考表导出
 #
 # 用户口径（2026-10-12 定案）：
@@ -7,7 +7,8 @@
 #   · 环节⑤ 考试时间表承载「时间段 → 考试科目」，是环节⑥ 回避教师的依据。
 #   · 环节⑥ 教师池 = 环节④ 任课教师（去重）+ 其他监考员（可为无账号的校外老师，
 #     仅本次考试使用，不开系统账号）；每考场监考人数 1/2/3（默认 1，存 affair.invig_slots）；
-#     回避规则：考化学 → 任教化学的老师不排该场次；监考表一人一格。
+#     回避规则：考化学 → 任教化学的老师不排该场次（2026-10-19 起可勾选关闭）；
+#     每天首场优先排班主任；监考表一人一格。
 #   · 环节⑦ 导出监考表（Excel + PDF）。
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 import io
@@ -25,6 +26,7 @@ from app.models.grades import (AffairTeacher, AffairSchedule, AffairInvigilator,
                                AffairStudent, ExamAffair, TeacherSubjectLink,
                                SUBJECTS, Exam, normalize_subject)
 from app.modules.grades import bp
+from app.modules.grades.services.invig_balance import Cell, best_assign
 from app.modules.grades.utils import numeric_classes
 from app.utils.decorators import perm_required
 from app.utils.helpers import log_operation
@@ -886,12 +888,20 @@ def _invig_workload(affair):
                   key=lambda x: (-x['minutes'], -x['cells'], x['name']))
     for it in rows:
         it['detail'].sort(key=lambda d: (d['date'], d['start'], d['subject']))
+    # 2026-10-19：给出「人均 / 最长 / 最短 / 极差」——用户判断均衡不均衡，
+    # 看的就是这几个数（格数一样多不代表时间一样多）。
+    mins = [it['minutes'] for it in rows if it['cells']]
+    balance = ({'max': max(mins), 'min': min(mins),
+                'mean': int(round(sum(mins) / len(mins))),
+                'spread': max(mins) - min(mins)} if mins else
+               {'max': 0, 'min': 0, 'mean': 0, 'spread': 0})
     return {
         'items': rows,
         'has_time': any(it['minutes'] for it in rows),
         'total_cells': sum(it['cells'] for it in rows),
         'total_minutes': sum(it['minutes'] for it in rows),
         'total_missing': sum(it['missing'] for it in rows),
+        'balance': balance,
     }
 
 
@@ -1333,12 +1343,19 @@ def affair_invig_exclude_del(aid):
 @login_required
 @perm_required('grades.edit')
 def affair_invig_auto(aid):
-    """自动编排监考：场次 × 考场 × 监考位，回避本场科目教师，尽量均衡轮转。"""
+    """自动编排监考：场次 × 考场 × 监考位，尽量均衡轮转。
+
+    2026-10-19 用户口径：两个规则交给页面勾选（缺省都开）——
+      avoid_same=0 时不回避本场科目教师；head_first=1 时每天首场优先排班主任。
+    """
     affair = _affair(aid)
+    avoid_same = _flag('avoid_same', True)
+    head_first = _flag('head_first', True)
     # 2026-10-12（§3.5）：容量不足等前置条件不满足时给 400 + 明确原因，
     # 不要让 ValueError 冒成 500（原实现未捕获，前端只看到"请求失败"）。
     try:
-        rows, info = _auto_arrange(affair)
+        rows, info = _auto_arrange(affair, avoid_same=avoid_same,
+                                   head_first=head_first)
     except ValueError as e:
         return jsonify({'ok': False, 'msg': str(e)}), 400
     db.session.commit()
@@ -1346,9 +1363,19 @@ def affair_invig_auto(aid):
     log_operation(current_user, '编排', '监考表', aid,
                   f'{info["schedules"]}场×{info["rooms"]}考场×{info["slots"]}人 → '
                   f'{rows}/{info.get("total", rows)}格'
+                  + ('，不回避同科' if not avoid_same else '')
+                  + ('，首场优先班主任' if head_first else '')
                   + (f'，缺口 {gaps}' if gaps else ''),
                   module='grades')
     return jsonify({'ok': True, 'rows': rows, **info})
+
+
+def _flag(name, default=True):
+    """表单布尔开关：缺省取 default，'0/off/false/no/空' 视为关。"""
+    raw = request.form.get(name)
+    if raw is None:
+        return default
+    return (raw or '').strip().lower() not in ('0', 'off', 'false', 'no', '')
 
 
 def _excl_rows(affair):
@@ -1393,8 +1420,73 @@ def _time_overlap(s1, s2):
     return a1 < b2 and a2 < b1
 
 
-def _auto_arrange(affair):
-    """自动编排监考（2026-10-13 增强）：
+def _schedule_duration(sch, default=120):
+    """场次时长（分钟）：由 start_time/end_time 计算；缺失或异常时用 default。
+
+    2026-10-19：均衡口径从"格数"改成"累计时长"的前提 —— 各场次时长不同
+    （语文 150 分钟、英语 90 分钟），只按次数均衡会出现"都是 5 场，
+    但一个 750 分钟、一个 450 分钟"的明显不公平。
+    """
+    a, b = (sch.start_time or '').strip(), (sch.end_time or '').strip()
+    try:
+        ah, am = a.split(':')
+        bh, bm = b.split(':')
+        mins = (int(bh) * 60 + int(bm)) - (int(ah) * 60 + int(am))
+        if 0 < mins <= 12 * 60:
+            return mins
+    except Exception:                   # noqa: BLE001  时间格式异常 → 用默认时长
+        pass
+    return default
+
+
+def _default_duration(schedules):
+    """同批场次时长的中位数（给时间缺失的场次兜底）；全缺失时按 120 分钟。"""
+    vals = sorted(_schedule_duration(s, 0) for s in schedules)
+    vals = [v for v in vals if v > 0]
+    return vals[len(vals) // 2] if vals else 120
+
+
+def _first_slot_sids(schedules):
+    """每天「第一场」的场次 id 集合（同日同一起始时间的并行场次都算）。
+
+    2026-10-19 用户口径「第一场次优先编排班主任」：班主任早上本来就要到校
+    （早读 / 班级管理），先排首场最顺；非班主任只在自己有场次时才用到校。
+    没有开始时间的场次按 `_schedule_key` 的先后兜底取第一条。
+    """
+    by_day = {}
+    for s in schedules:
+        by_day.setdefault(s.exam_date, []).append(s)
+    out = set()
+    for group in by_day.values():
+        timed = [s for s in group if (s.start_time or '').strip()]
+        if timed:
+            first = min(s.start_time.strip() for s in timed)
+            out |= {s.id for s in timed if s.start_time.strip() == first}
+        else:
+            out.add(min(group, key=_schedule_key).id)
+    return out
+
+
+def _head_teacher_names(pool):
+    """监考池里的班主任姓名集合。
+
+    口径（2026-10-19）：`User.role == 'homeroom_teacher'` **或** 在
+    `UserClassLink` 里挂了班（多身份账号常见：role 是普通教师却兼班主任）。
+    其他监考员（无账号 / user_id 为空）不参与优先，按普通教师处理。
+    """
+    from app.models import UserClassLink
+    ids = {p['user_id'] for p in pool if p.get('user_id')}
+    if not ids:
+        return set()
+    heads = {u.id for u in User.query.filter(
+        User.id.in_(ids), User.role == 'homeroom_teacher').all()}
+    heads |= {l.user_id for l in UserClassLink.query.filter(
+        UserClassLink.user_id.in_(ids)).all()}
+    return {p['name'] for p in pool if p.get('user_id') in heads}
+
+
+def _auto_arrange(affair, avoid_same=True, head_first=True):
+    """自动编排监考（2026-10-13 增强，2026-10-19 均衡口径改为**累计时长**）：
 
     约束（硬）：
       H1 同科回避：任教该场科目的老师不排（一场多科时每科都回避）
@@ -1402,13 +1494,17 @@ def _auto_arrange(affair):
       H3 排除名单：整批不监考 / 不监考指定场次
       H4 时间冲突：同一人被排的两个场次时间不能重叠
 
-    算法：**MRV（候选最少的场次先排）+ 最小负载均衡** ——
-      1. 先算每场次的静态候选（排除 + 回避后）；
-      2. 按候选数升序处理场次（最受约束的先排，能显著减少"后面排不下"的缺口）；
-      3. 每格在候选里取「当前已排格数最少」的人（天然做到尽量均匀、人人有份）；
-      4. 排不下的格子**记录缺口与原因**并继续，不再无声留空。
+    算法：`services/invig_balance.best_assign` —— 多起点 LPT 贪心 +
+    缺口补位 + 移动/互换降差 + 等长互换收次数，目标是「每人累计监考分钟
+    尽量接近」。只按格数均衡会出现"都是 5 场，但一个 495 分钟、一个
+    345 分钟"（用户 2026-10-19 反馈的正是这种：场次多的人时间也更多）。
 
-    返回 (rows, stat)；stat 含 filled/total/gaps/load（每人格数）。
+    返回 (rows, stat)；stat 含 filled/total/gaps/load（每人格数）/
+    load_minutes（每人分钟）/ balance（max/min/mean/spread）。
+
+    参数（2026-10-19 用户口径：回避与首场偏好都做成页面勾选，不再写死）：
+      avoid_same : True 时同科回避（任教本场科目者不排本场）
+      head_first : True 时**每天第一场**的格优先排班主任（首选，不硬约束）
     """
     pool = invig_pool(affair)
     excl_all, excl_sch = _excludes(affair)
@@ -1430,7 +1526,8 @@ def _auto_arrange(affair):
         return [p for p in pool
                 if p['name'] not in excl_all
                 and p['name'] not in excl_sch.get(sch.id, set())
-                and not (p['subjects'] & _split_subjects(sch.subject))]
+                and (not avoid_same
+                     or not (p['subjects'] & _split_subjects(sch.subject)))]
 
     total_cells = len(schedules) * len(rooms) * slots
     # 2026-10-13：容量预检改为**各场次可排上限之和**（原先用"单场最小可用人数 × 场次数"，
@@ -1441,15 +1538,18 @@ def _auto_arrange(affair):
     if capacity < total_cells:
         raise ValueError(
             '监考教师不足：共需 %d 格（%d 场 × %d 考场 × %d 人），'
-            '而各场次可排教师合计最多 %d 格（已剔除同科回避与排除名单，'
+            '而各场次可排教师合计最多 %d 格（已剔除%s排除名单，'
             '最少的一场只有 %d 人可用）→ 缺 %d 格。'
-            '请增加监考员（环节⑥「其他监考员」）、取消部分排除，或减少每考场监考人数。'
+            '请增加监考员（环节⑥「其他监考员」）、取消部分排除，'
+            '或取消「同科回避」、减少每考场监考人数。'
             % (total_cells, len(schedules), len(rooms), slots,
-               capacity, avail, total_cells - capacity))
+               capacity, '同科回避与' if avoid_same else '', avail,
+               total_cells - capacity))
     # 2026-10-18：自动重排会整批清空旧安排，删前先快照（回收站可恢复）；
     # 归档失败就中止重排，避免"排了一次，旧安排再也找不回来"。
-    # 2026-10-19 审计修复：**无旧安排**（首次编排）时 archive_snapshot 因 items 为空
-    # 返回 None，属正常情况，不能当成"归档失败"而中止 —— 否则首次编排永远排不了。
+    # 2026-10-19：**首次编排没有旧安排可存**，此时 archive_snapshot 返回 None
+    # 属正常（不是失败）—— 原来一律当失败，导致第一次点「自动编排」永远报
+    # 「删除前归档失败」，整批排不出来。
     from app.utils.trash import archive_snapshot
     _old_inv = AffairInvigilation.query.filter_by(affair_id=affair.id).all()
     if _old_inv:
@@ -1460,44 +1560,62 @@ def _auto_arrange(affair):
             operator=current_user)
         if _snap is None:
             raise ValueError('删除前归档失败，已中止重排（避免监考安排不可恢复）')
-        db.session.commit()      # 归档先落库，再清空旧安排
+        db.session.commit()  # 归档先落库，再清空旧安排
     AffairInvigilation.query.filter_by(affair_id=affair.id).delete()
-    load = {p['name']: 0 for p in pool}
-    busy = {p['name']: [] for p in pool}        # name -> 已排入的场次（判时间冲突）
-    rows = 0
-    gaps = []
-    # MRV：候选最少的场次先排（最受约束的先排，避免"前面随便排、后面排不下"）
-    order = sorted(schedules, key=lambda s: (len(_static_cands(s)), _schedule_key(s)))
-    for sch in order:
-        avoid = _split_subjects(sch.subject)
-        used_this = set()          # 同一场次内，一人只监一个考场
+    # 2026-10-19：编排交给 services/invig_balance（均衡口径 = **累计时长**）。
+    # 组装"格"（场次 × 考场 × 监考位），静态候选已剔除同科回避与排除名单；
+    # 时间冲突由 overlap 回调判定，算法内部保证一人一场次一格。
+    dur_of = {s.id: _schedule_duration(s, _default_duration(schedules))
+              for s in schedules}
+    sch_by_id = {s.id: s for s in schedules}
+    by_name = {p['name']: p for p in pool}
+    # 2026-10-19：「每天首场优先排班主任」——只对首场格给优先名单，
+    # 其余场次不带偏好，均衡目标不变。
+    head_names = _head_teacher_names(pool) if head_first else set()
+    first_sids = _first_slot_sids(schedules) if head_names else set()
+    cells = []
+    for sch in schedules:
+        cands = frozenset(p['name'] for p in _static_cands(sch))
+        pref = frozenset(head_names & cands) if sch.id in first_sids else frozenset()
         for room in rooms:
             for slot in range(1, slots + 1):
-                cands = [p for p in pool
-                         if p['name'] not in used_this
-                         and p['name'] not in excl_all
-                         and p['name'] not in excl_sch.get(sch.id, set())
-                         and not (p['subjects'] & avoid)
-                         and not any(_time_overlap(sch, s2) for s2 in busy[p['name']])]
-                if not cands:
-                    gaps.append({'schedule': f'{sch.exam_date or ""} {sch.subject}',
-                                 'room': room.room_no, 'slot': slot,
-                                 'reason': '无可用教师（同科回避 / 排除 / 时间冲突）'})
-                    continue       # 不再 break —— 原来会跳过该考场剩余监考位
-                cands.sort(key=lambda p: (load[p['name']], p['name']))
-                p = cands[0]
-                used_this.add(p['name'])
-                load[p['name']] += 1
-                busy[p['name']].append(sch)
-                db.session.add(AffairInvigilation(
-                    affair_id=affair.id, schedule_id=sch.id, room_no=room.room_no,
-                    slot=slot, name=p['name'], user_id=p['user_id'],
-                    subject='、'.join(sorted(p['subjects']))))
-                rows += 1
+                cells.append(Cell(key=(sch.id, room.room_no, slot), sid=sch.id,
+                                  duration=dur_of[sch.id], cands=cands, pref=pref))
+
+    def _overlap(a, b):
+        return _time_overlap(sch_by_id[a], sch_by_id[b])
+
+    plan, cell_gaps, stat = best_assign(cells, [p['name'] for p in pool], _overlap)
+    gaps = [{'schedule': f'{sch_by_id[c.sid].exam_date or ""} '
+                         f'{sch_by_id[c.sid].subject}',
+             'room': c.key[1], 'slot': c.key[2],
+             'reason': '无可用教师（同科回避 / 排除 / 时间冲突）'}
+            for c in cell_gaps]
+    rows = 0
+    for cell, name in plan:
+        p = by_name[name]
+        sch = sch_by_id[cell.sid]
+        db.session.add(AffairInvigilation(
+            affair_id=affair.id, schedule_id=sch.id, room_no=cell.key[1],
+            slot=cell.key[2], name=name, user_id=p['user_id'],
+            subject='、'.join(sorted(p['subjects']))))
+        rows += 1
     return rows, {'slots': slots, 'schedules': len(schedules), 'rooms': len(rooms),
                   'total': total_cells, 'filled': rows, 'gap_count': len(gaps),
+                  # 2026-10-19：本次编排用的两个勾选 + 优先人数量，供前端提示
+                  'opts': {'avoid_same': bool(avoid_same),
+                           'head_first': bool(head_first),
+                           'head_count': len(head_names),
+                           'first_schedules': len(first_sids)},
                   'gaps': gaps[:8],
-                  'load': {k: v for k, v in sorted(load.items(), key=lambda x: -x[1])}}
+                  'load': {k: v for k, v in sorted(stat['count'].items(),
+                                                   key=lambda x: -x[1])},
+                  # 2026-10-19：每人累计监考时长（分钟），供页面核对是否均衡
+                  'load_minutes': {k: v for k, v in sorted(stat['load'].items(),
+                                                           key=lambda x: -x[1])},
+                  # 时长均衡指标：极差 / 人均，前端直接展示，不用自己算
+                  'balance': {'max': stat['max_load'], 'min': stat['min_load'],
+                              'mean': stat['mean_load'], 'spread': stat['spread']}}
 
 
 @bp.route('/affairs/<int:aid>/invig/set', methods=['POST'])

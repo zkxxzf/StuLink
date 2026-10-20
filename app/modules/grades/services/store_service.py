@@ -25,6 +25,9 @@ def apply_import(exam, parsed, mode='A', remove_missing=False):
     未出现在文件中的旧学生默认保留；remove_missing=True 时移除
     返回差异摘要 dict
     """
+    # P1 M-18：已毕业年级冻结成绩写入（导入/覆盖都拒绝）
+    from app.utils.helpers import assert_grade_not_graduated
+    assert_grade_not_graduated(exam.grade)
     rows = parsed['rows']
     file_subjects = parsed['headers']['subjects']
     summary = {'new_students': 0, 'updated_rows': 0, 'deleted_rows': 0,

@@ -16,6 +16,7 @@ from app.extensions import db
 from app.models.notification import Notification, CATEGORY_LABELS
 from app.models.user import User
 from app.utils.decorators import perm_required
+from app.utils.helpers import log_operation
 from app.modules.notifications.services.notification_service import (
     create_notification,
     get_notifications_for_user,
@@ -200,7 +201,20 @@ def notification_delete(notification_id):
     """删除通知（需通知管理写权限 workbench.notifications 或 system.settings）"""
     if not _can_publish():
         abort(403)
-    delete_notification(notification_id)
+    # P1 M-19：删除前校验发布者（管理员/系统设置权限可越权管理），并留审计
+    notif = db.session.get(Notification, notification_id)
+    if notif is None:
+        abort(404)
+    is_admin = (current_user.role == 'admin'
+                or current_user.has_perm('system.settings'))
+    if notif.published_by != current_user.id and not is_admin:
+        log_operation(current_user, '删除被拒', '通知', notification_id,
+                      f'非发布者尝试删除：{notif.title}', module='system',
+                      severity='WARNING')
+        abort(403)
+    delete_notification(notification_id, operator_id=current_user.id)
+    log_operation(current_user, '删除', '通知', notification_id,
+                  f'删除通知：{notif.title}', module='system')
     flash('通知已删除', 'success')
     return redirect(url_for('notifications.notifications_page'))
 
@@ -290,7 +304,7 @@ def api_search_users():
                             User.username.like(kw)))
              .limit(20).all())
     results = [{'uid': u.username, 'name': u.real_name or u.username,
-                'role': u.role or '', 'grade': u.grade or '',
+                'role': u.role or '', 'grade': u.grade_display,
                 'class_name': u.class_name or ''} for u in users]
     return jsonify(results)
 

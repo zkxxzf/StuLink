@@ -18,10 +18,23 @@ from app.utils.scope import (
 )
 
 
+def get_scope_grades(user):
+    """年级范围的**完整列表**（2026-10-19：管理年级可多选）。
+
+    入参 user；返回去重保序的年级列表（admin / 无配置返回 []）。
+    凡"限定到年级"的判定与查询都应使用本函数，不要再取 user.grade 单值。
+    """
+    if user.role == 'admin':
+        return []
+    return list(getattr(user, 'grades', []) or [])
+
+
 def get_scope(user):
     """返回 (scope_type, grade)，与宿舍统计模块一致
 
     2026-10-12 审计修复（P0-2）：admin 恒为全校（不再落 ('none', None)）。
+    2026-10-19：grade 为**首个**管理年级（兼容旧调用方）；需要全部年级请用
+    ``get_scope_grades``。
     """
     if user.role == 'admin':
         return SCOPE_SCHOOL, None
@@ -29,7 +42,8 @@ def get_scope(user):
     if not pg:
         return 'none', None
     from app.utils.scope import scope_type_of
-    return scope_type_of(user), (user.grade or None)
+    grades = get_scope_grades(user)
+    return scope_type_of(user), (grades[0] if grades else None)
 
 
 def has_user_scope(user):
@@ -49,7 +63,7 @@ def visible_grades(user):
     if scope == SCOPE_SCHOOL:
         return _all_active_grades()
     if scope == SCOPE_GRADE:
-        return [grade] if grade else []
+        return get_scope_grades(user)
     # 班主任/任课教师：所辖班级所在年级
     # 任课教师通常没有 UserClassLink，必须并入本人任课映射的年级，
     # 否则其可见年级为空 → 分析页考试下拉选不到任何考试
@@ -109,7 +123,7 @@ def check_exam_visible(user, exam):
     gds = get_graduated_grades()
     if exam.grade in gds and scope != SCOPE_SCHOOL:
         raise PermissionError
-    if scope == SCOPE_GRADE and exam.grade != grade:
+    if scope == SCOPE_GRADE and exam.grade not in get_scope_grades(user):
         raise PermissionError
     if scope in (SCOPE_CLASS,):
         grades = {g for g, _c in class_pairs(user)}
@@ -174,7 +188,7 @@ def student_in_scope(user, student_no):
     if scope == SCOPE_SCHOOL:
         return
     if scope == SCOPE_GRADE:
-        if st_obj.grade != grade:
+        if st_obj.grade not in get_scope_grades(user):
             raise PermissionError
         return
     if scope == SCOPE_CLASS:

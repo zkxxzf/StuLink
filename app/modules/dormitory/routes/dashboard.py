@@ -464,12 +464,19 @@ def import_dormitory_info():
 
         students_map = {}
         if all_snums:
-            for s in Student.query.filter(Student.student_number.in_(all_snums)).all():
+            # 2026-10-19 第十三轮审计：原查询无数据范围，
+            # 可批量改他年级学生的住宿属性并占床。
+            from app.utils.student_scope import apply_student_scope
+            qs = apply_student_scope(
+                Student.query.filter(Student.student_number.in_(all_snums)))
+            for s in qs.all():
                 students_map[s.student_number] = s
 
         # 预加载所有活跃房间（按 building+room_number 索引）
+        # 2026-10-19：房间同样收敛到可见范围（越界房间不在映射中 → 记错误行）
+        from app.utils.dormitory_scope import room_scope_query
         rooms_map = {}
-        for r in Room.query.filter(Room.is_active == True).all():
+        for r in room_scope_query(Room.query.filter(Room.is_active == True)).all():
             key = f"{r.building}{r.room_number}"
             rooms_map[key] = r
 
@@ -489,7 +496,7 @@ def import_dormitory_info():
 
             student = students_map.get(snum)
             if not student:
-                errors.append(f'第{row_idx}行：学号"{snum}"不存在')
+                errors.append(f'第{row_idx}行：学号"{snum}"不存在或不在你的数据范围内')
                 continue
 
             row_updated = False
@@ -536,7 +543,7 @@ def import_dormitory_info():
 
                     room = rooms_map.get(room_str)
                     if not room:
-                        errors.append(f'第{row_idx}行：宿舍号"{room_str}"不存在')
+                        errors.append(f'第{row_idx}行：宿舍号"{room_str}"不存在或不在你的数据范围内')
                         continue
 
                     if bed_num < 1 or bed_num > room.capacity:
@@ -584,7 +591,7 @@ def import_dormitory_info():
                 elif room_str:
                     room = rooms_map.get(room_str)
                     if not room:
-                        errors.append(f'第{row_idx}行：宿舍号"{room_str}"不存在')
+                        errors.append(f'第{row_idx}行：宿舍号"{room_str}"不存在或不在你的数据范围内')
                         continue
                     old_bed = BedAssignment.query.filter_by(student_id=student.id).first()
                     if old_bed:

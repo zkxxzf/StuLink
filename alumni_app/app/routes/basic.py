@@ -1,11 +1,14 @@
 """往届生基本信息查询"""
 import logging
 import sqlite3
-from flask import Blueprint, render_template, request, flash, redirect, url_for
+from flask import (Blueprint, abort, render_template, request, flash, redirect,
+                   url_for)
 from flask_login import login_required, login_user, logout_user, current_user
 from werkzeug.security import check_password_hash
 from config import Config
 from app.auth import AlumniUser, is_alumni_role_allowed
+from app.scope import filter_grades, grade_visible
+from app import throttle
 from app.utils.crypto import decrypt, mask_id_card, mask_phone
 
 bp = Blueprint('basic', __name__)
@@ -17,6 +20,10 @@ def login():
     if request.method == 'POST':
         username = request.form.get('username', '').strip()
         password = request.form.get('password', '').strip()
+        # 2026-10-19 第十三轮审计：往届站原先零限流，可在线爆破主站账号口令
+        if throttle.is_locked(request.remote_addr, username):
+            flash('尝试次数过多，请 5 分钟后再试', 'danger')
+            return render_template('login.html'), 429
         try:
             conn = sqlite3.connect(f'file:{Config.SYSTEM_DB}?mode=ro', uri=True)
             row = conn.execute(
@@ -29,15 +36,21 @@ def login():
                 # H-7：只验口令的时代结束——必须校验角色白名单，
                 # 否则任一在职主站账号（宿管/任课教师）都能登录本站读往届生数据。
                 if not is_alumni_role_allowed(role):
+                    # 2026-10-19：口令正确但角色不允许时，不再返回可区分文案
+                    # （原 403 明文可判定凭据有效 + 枚举角色）
                     _log.warning('alumni 登录被拒：角色不在白名单（username=%s role=%s）',
                                  username, role)
-                    return '无权访问往届生查询系统（当前账号角色不在允许范围内）', 403
+                    throttle.register_failure(request.remote_addr, username)
+                    flash('用户名或密码错误', 'danger')
+                    return render_template('login.html')
+                throttle.clear(request.remote_addr, username)
                 user = AlumniUser(row[0], row[1], row[3], role)
                 login_user(user)
                 return redirect(url_for('basic.index'))
         except Exception:
             # L-5：认证异常不得静默吞没
             _log.exception('alumni 登录查询异常 username=%s', username)
+        throttle.register_failure(request.remote_addr, username)
         flash('用户名或密码错误', 'danger')
     return render_template('login.html')
 
@@ -62,8 +75,13 @@ def index():
         conn.close()
     except Exception:
         pass
+    # 2026-10-19 第十三轮审计：按用户可见年级收敛（与主站 alumni_scope 同口径，
+    # 年级长只到本人当前年级、班主任/任课教师为空集）
+    graduated_grades = filter_grades(current_user, graduated_grades)
 
     search_grade = request.args.get('grade', '')
+    if search_grade and not grade_visible(current_user, search_grade):
+        abort(403)
     search_name = request.args.get('name', '').strip()
     search_student_number = request.args.get('student_number', '').strip()
     search_school_code = request.args.get('school_code', '').strip()

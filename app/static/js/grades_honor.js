@@ -22,6 +22,20 @@
     $('#hnGroup').on('change', function () { go(this.value); });
     $('#hnPrint').on('click', function () { window.print(); });
 
+    /* 导出：带上当前考试 / 分组维度 / 班级 / 关键词，服务端按同口径过滤 */
+    $('#hnExport').on('click', function () {
+        var qs = [];
+        if (examId) { qs.push('exam=' + encodeURIComponent(examId)); }
+        var group = $('#hnGroup').val();
+        if (group) { qs.push('group=' + encodeURIComponent(group)); }
+        var cls = $('#hnClass').val();
+        if (cls) { qs.push('cls=' + encodeURIComponent(cls)); }
+        var kw = ($('#hnKw').val() || '').trim();
+        if (kw) { qs.push('kw=' + encodeURIComponent(kw)); }
+        window.location.href = '/grades/honor/export'
+            + (qs.length ? '?' + qs.join('&') : '');
+    });
+
     /* ---------- 榜单页签 ---------- */
     $('.hn-tab').on('click', function () {
         $('.hn-tab').removeClass('active');

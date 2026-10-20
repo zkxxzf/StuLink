@@ -23,15 +23,24 @@ import shutil
 from datetime import datetime
 
 
-def _unique_dst(path):
-    """生成不冲突的备份路径：<path>.bak-<时间戳>[_n]"""
+def _unique_dst(path, tag=None):
+    """生成不冲突的备份路径：<path>.bak-<时间戳>[-tag][_n]"""
     stamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-    dst = f'{path}.bak-{stamp}'
+    suffix = f'-{tag}' if tag else ''
+    dst = f'{path}.bak-{stamp}{suffix}'
     n = 1
     while os.path.exists(dst):
         n += 1
-        dst = f'{path}.bak-{stamp}_{n}'
+        dst = f'{path}.bak-{stamp}{suffix}_{n}'
     return dst
+
+
+def _warn_sync_location(path):
+    """备份落在 data/ 或同步盘时告警（H-08；只警告，不阻断）。"""
+    p = os.path.abspath(path).replace('\\', '/').lower()
+    if '同步' in p or 'onedrive' in p or 'dropbox' in p or 'nutstore' in p:
+        print(f'[H-08 警告] 备份目录位于同步盘：{path}；'
+              '建议把备份落到受控目录并加密。')
 
 
 def _prune(path, keep):
@@ -56,11 +65,11 @@ def _prune(path, keep):
             pass
 
 
-def backup_db(db_paths, keep=5):
+def backup_db(db_paths, keep=5, tag=None):
     """备份一个或多个 SQLite 库文件。
 
     返回 [(原路径, 备份路径 or None), ...]，库文件不存在时备份路径为 None。
-    keep 为 0 时不做旧备份清理。
+    keep 为 0 时不做旧备份清理；tag 用于在文件名中标注迁移/批次。
     """
     if isinstance(db_paths, (str, bytes, os.PathLike)):
         db_paths = [db_paths]
@@ -71,7 +80,8 @@ def backup_db(db_paths, keep=5):
             print(f'[备份] 跳过（文件不存在）: {p}')
             result.append((p, None))
             continue
-        dst = _unique_dst(p)
+        _warn_sync_location(p)
+        dst = _unique_dst(p, tag=tag)
         shutil.copy2(p, dst)
         _prune(p, keep)
         print(f'[备份] {os.path.basename(p)} -> {os.path.basename(dst)}')

@@ -11,6 +11,7 @@ from app.extensions import db
 from app.models import Room, BedAssignment, Student, GradeSetting, DictCategory, DictItem
 from app.utils.decorators import perm_required
 from app.utils.helpers import log_operation, write_change_log, get_dict_values, clear_graduated_grades_cache
+from app.utils.locks import with_file_lock
 from app.utils.alumni_scope import filter_alumni_grades, assert_alumni_grade_visible
 from app.utils.crypto import decrypt
 
@@ -147,6 +148,7 @@ def index():
 @bp.route('/graduate', methods=['POST'])
 @login_required
 @perm_required('system.grade_mgmt')
+@with_file_lock('grade_graduate', timeout=8)
 def graduate():
     """设置年级毕业"""
     data = request.get_json() or {}

@@ -1,10 +1,10 @@
 {% extends "base.html" %}
 {% from "grades/_sq_tabs.html" import sq_tabs %}
-{% block title %}个人成绩{% endblock %}
+{% block title %}学生成绩{% endblock %}
 {# 2026-10-12 UI 审计 M8：grades.css 已由 base.html 统一引入 #}
-{# 2026-10-13：按用户口径，菜单与页面统一叫「个人成绩」（原「个人成绩查询」） #}
+{# 2026-10-19：按用户口径，菜单与页面统一叫「学生成绩」（原「个人成绩」） #}
 {% block content %}
-{# 2026-10-13 用户口径：本分区两页（个人成绩 / 成绩证明），共用页签导航；
+{# 2026-10-13 用户口径：本分区两页（学生成绩 / 成绩证明），共用页签导航；
    「成绩核验」页已删除（核验入口在成绩证明台账每行的「核验」按钮） #}
 {{ sq_tabs('grades') }}
 <div id="sqApp" class="no-print">

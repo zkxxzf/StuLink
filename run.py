@@ -95,6 +95,24 @@ def _print_keep_running_notice(url):
         pass
 
 
+def _env_str(name, default):
+    """读字符串型环境变量；未设或全是空白时用默认值。"""
+    val = (os.environ.get(name) or '').strip()
+    return val or default
+
+
+def _env_int(name, default):
+    """读整数型环境变量；未设或写错时退回默认值（不因一个错字起不来）。"""
+    raw = (os.environ.get(name) or '').strip()
+    if not raw:
+        return default
+    try:
+        return int(raw)
+    except ValueError:
+        print(f'[WARN] 环境变量 {name}={raw!r} 不是整数，已改用默认值 {default}')
+        return default
+
+
 if __name__ == '__main__':
     # 生产模式为默认；--dev 显式开启开发模式（仅限本地）
     debug_mode = '--dev' in sys.argv
@@ -114,18 +132,26 @@ if __name__ == '__main__':
         from waitress import serve
         _set_console_title('StuLink 后端服务运行中 —— 请勿关闭此窗口！')
         print('宿舍管理系统已启动 (生产模式)')
-        print('请在浏览器访问: http://localhost:5000')
-        # 局域网地址：启动时探测实际本机 IP 并显示（供其他电脑/手机访问）
-        lan = _lan_ip()
-        lan_url = f'http://{lan}:5000' if lan else 'http://本机IP:5000（未能自动获取，请在网络设置中查看）'
-        _print_keep_running_notice(f'http://localhost:5000  或  {lan_url}')
+        # H-10：反代后建议 STULINK_BIND=127.0.0.1，只让本机反代访问。
+        bind = _env_str('STULINK_BIND', '0.0.0.0')
+        port = _env_int('STULINK_PORT', 5000)
+        if bind in ('0.0.0.0', '::', '::0'):
+            print(f'请在浏览器访问: http://localhost:{port}')
+            # 局域网地址：启动时探测实际本机 IP 并显示（供其他电脑/手机访问）
+            lan = _lan_ip()
+            lan_url = (f'http://{lan}:{port}' if lan
+                       else f'http://本机IP:{port}（未能自动获取，请在网络设置中查看）')
+            _print_keep_running_notice(f'http://localhost:{port}  或  {lan_url}')
+        else:
+            print(f'监听地址: http://{bind}:{port}')
+            _print_keep_running_notice(f'http://{bind}:{port}')
         # 并发调优：waitress 默认只开 4 个线程，成绩分析各 tab / 全局对比（班级×学科宽表）
         # / Excel 导入导出 / AI 分析这类慢请求会长时间占住线程，第 5 个并发请求就开始排队
         # （表现为后台反复刷 “WARNING:waitress.queue:Task queue depth is N”、页面转圈久）。
         # Web 请求多为 I/O 等待，16 足够；不建议再调高——底层是 SQLite，写操作整库串行，
         # 线程过多只会把等待从“网络层”挪到“数据库锁”上，反而容易触发 database is locked。
         # 可用环境变量临时覆盖（本地压测/特殊场景）。
-        serve(app, host='0.0.0.0', port=5000,
+        serve(app, host=bind, port=port,
               threads=int(os.environ.get('STULINK_THREADS', '16')),
               channel_timeout=int(os.environ.get('STULINK_CHANNEL_TIMEOUT', '120')))
 

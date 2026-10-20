@@ -18,30 +18,42 @@ def get_data_path(filename):
 
 
 def _get_secret_key():
-    """获取 SECRET_KEY：环境变量（非空）> 文件 > 自动生成并持久化"""
-    env_key = os.environ.get('SECRET_KEY', '').strip()
+    """获取往届站 SECRET_KEY（P1 M-11：与主站隔离）。
+
+    优先级：ALUMNI_SECRET_KEY 环境变量 > data/.alumni_secret_key > 首次生成。
+    **不再读取主站 data/.secret_key** —— 两站共用一把钥时，任一站泄露即可伪造
+    另一站会话；往届站只读历史数据，没有理由拿主站密钥。
+    旧部署升级后第一次启动会生成新钥，往届站既有会话失效一次（符合预期）。
+    """
+    env_key = os.environ.get('ALUMNI_SECRET_KEY', '').strip()
     if env_key:
-        print(f'[ALUMNI] SECRET_KEY from environment (len={len(env_key)})')
+        print(f'[ALUMNI] SECRET_KEY from ALUMNI_SECRET_KEY (len={len(env_key)})')
         return env_key
-    
-    key_file = get_data_path('.secret_key')
-    
-    try:
-        if os.path.exists(key_file):
+
+    key_file = get_data_path('.alumni_secret_key')
+    if os.path.exists(key_file):
+        try:
             with open(key_file, 'r') as f:
                 key = f.read().strip()
-                print(f'[ALUMNI] SECRET_KEY from file: {key_file} (len={len(key)})')
-                return key
-    except Exception as e:
-        print(f'[ALUMNI] Error reading {key_file}: {e}')
-    
+        except OSError as e:
+            raise RuntimeError(f'[ALUMNI] 无法读取独立密钥文件：{key_file}') from e
+        if not key:
+            raise RuntimeError(f'[ALUMNI] 独立密钥文件为空：{key_file}')
+        print(f'[ALUMNI] SECRET_KEY from file: {key_file} (len={len(key)})')
+        return key
+
     new_key = secrets.token_hex(32)
     os.makedirs(os.path.dirname(key_file), exist_ok=True)
     try:
         with open(key_file, 'w') as f:
             f.write(new_key)
-        print(f'[ALUMNI] SECRET_KEY auto-generated and saved to: {key_file} (len={len(new_key)})')
-    except Exception as e:
+        try:
+            os.chmod(key_file, 0o600)
+        except OSError:
+            pass
+        print(f'[ALUMNI] SECRET_KEY auto-generated and saved to: {key_file} '
+              f'(len={len(new_key)})')
+    except Exception as e:  # noqa: BLE001 写入失败仍可用本次进程密钥
         print(f'[ALUMNI] Error saving SECRET_KEY to {key_file}: {e}')
     return new_key
 

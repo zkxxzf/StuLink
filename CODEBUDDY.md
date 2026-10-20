@@ -24,8 +24,10 @@
   主表列与语义不变（`active=True` 仍＝当前生效映射）；「使用」某方案＝把它的快照**物化**回主表。
   所以既有读取点**一律不用改**，也不要改成读方案快照表。学科组长方案（`subject_leader_plans`）
   ＝学年 × 学期，只影响页面显示，课表组长徽章仍按课表自己的学年学期回查。
-- **不受影响**：备课组长 `/academic/leaders`、晚自习值班 `/academic/schedule/<sid>/night-duty`、
-  学期课表 `/academic/schedule/*`。
+- **不受影响**：备课组长 `/academic/leaders`、学期课表 `/academic/schedule/*`。
+- ⚠ 晚自习值班（原 `/academic/night-duty`、`/academic/schedule/<sid>/night-duty`）
+  **已下线**（2026-10-19 核验：路由/模板/模型均不存在，仅 `subject_leaders.py`
+  里留一行说明注释），不要再引用或恢复。
 - 背景与版本记录见 `docs/设计手册/教务管理设计手册.md`（第 3、4、7 节）。
 
 ## 版本号规则（2026-10-17 用户明确要求：**写入长期记忆，只要更新就按规矩执行**）
@@ -178,24 +180,23 @@ py -3.12 scripts\run_all_regression.py --quick    # 只跑 3 项自检
 - MCP 服务改动另跑：`mcp_server\.venv\Scripts\python.exe mcp_server\smoke_scores.py`。
 - `tests/_archive/` 是**一次性历史脚本**（按日期 `qa_YYYYMMDD/` 归档，被若干批次总结当验证证据引用），
   **不属于回归**，改代码不必管它；新增一次性脚本也请放这里，别堆在 `tests/` 顶层。
-- 当前基线（2026-10-15 综合组整组一位 + 教师映射扩容批次后）：教务 **628**（含本轮新增
-  `LINKEXPAND` 7 条、`LEADMATRIX` 扩到 16 条、课表核对 3 条）、安全 **372**（含 AUDIT4 守卫
-  28 条）、宿舍 **71**、班级范围 **8**，**合计 1079 项全绿**＋四项自检 OK（安全扫描 / 列结构 /
-  索引 / 前端兼容）；另挂 **8 组 smoke 端到端**（成绩 218 / 教务 61 / 权限 38 / 监考·分层·
-  AI 识图·全校对比 OK / 宿舍视图 32，临时库沙箱约 30s）；MCP 自测 76 / 0。
-  ⚠ 安全回归余 1 项**环境相关**失败（H-9：本机代理把 `api.deepseek.com` 解析成保留地址
-  `198.18.0.22`，被 SSRF 校验正确拒绝）—— 非代码问题，别当红项。
-- 已知缺口（不是回归失败，别当红项处理）：①`tests/alumni_regression.py` 未挂进 runner、
-  也未进本文档基线；②`migration_status.py` 里部分老迁移脚本仍靠人工核对（2026-10-14
-  第四轮已给 17 个补 `_mig_log`，可判定面扩大）。
+- 当前基线（2026-10-19 第十三轮审计后实测）：教务 **657**、安全 **373**、宿舍 **71**、
+  班级范围 **8**，**合计 1109 项全绿**＋**六项自检** OK（安全扫描 / 列结构 / 索引 /
+  前端兼容 / 迁移对账 / XML 解析）；另挂 **8 组 smoke 端到端**（成绩 239 / 教务 62 /
+  权限 38 / 监考·分层·AI 识图·全校对比 OK / 宿舍视图 32）；MCP 自测 89 / 0。
+  ⚠ 安全回归的 H-9 项与代理环境有关（本机 TUN 把 `api.deepseek.com` 解析成
+  `198.18.x`，被 SSRF 校验正确拒绝）—— 非代码问题，别当红项。
+- 覆盖说明：`tests/alumni_regression.py` 由 `tests/sec_regression.py` 以子进程调用，
+  不在 runner 里单列；`migration_status.py` 里部分老迁移仍靠人工核对
+  （`历史迁移脚本清单.md` 里 74 个待逐个确认执行状态）。
 
 ### MCP 服务的准入现状（动 mcp_server 前必读）
 
-- 实机 `mcp_server/config.json`：`host=0.0.0.0`、`auth_mode=account`、**`require_token=false`**
-  —— 客户端只需账号密码（`X-StuLink-User/Password` 或 Basic）。
-  **2026-10-13 用户口径：第二道准入（令牌）不开**（开过一次，当天按要求关了）：
-  能力保留，改 `require_token=true` + 重启即启用；若要更严也可把 `host` 收回 `127.0.0.1`。
-  多带 `X-StuLink-Token` 头在 `false` 时会被直接忽略（无害），所以客户端加了也不用撤。
+- 实机 `mcp_server/config.json`（2026-10-19 核验）：`port=8765`、`auth_mode=account`、
+  **`require_token=true`**、**`allow_write=false`**、**`audit_reads=true`**
+  —— 客户端必须同时带账号口令与 `X-StuLink-Token`；令牌已在第十二轮轮换。
+  `host` 仍是 `0.0.0.0`（局域网客户端需要），若要收本机可改 `127.0.0.1`；
+  改动后必须重启 MCP 进程才生效。
 - 令牌只在 `config.json` 与启动横幅（首尾片段）出现：**不要回显、不要写进文档/日志/提交**。
   该文件**从未进过 git**（本地与 `origin` 均无；`.gitignore` 已含它），它的**任何副本/备份/归档
   也不许提交**（`.gitignore` 已封堵 `**/backup_mcp_server*/`、`tests/**/config.json`、

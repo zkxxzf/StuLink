@@ -48,9 +48,21 @@ $ErrorActionPreference = 'Stop'
 # git 输出按 UTF-8 解码：中文 Windows 上 PS5 默认按 GBK 解，含中文的路径会乱码
 try { [Console]::OutputEncoding = [System.Text.Encoding]::UTF8 } catch { }
 
-$NAS = '17752560383@10.193.191.210'
-$DIR = '/volume1/docker/stulink'
-$CT = 'stulink'
+# P1 M-15：NAS 地址/目录/容器名不再硬编码（原文件曾把运维账号与内网 IP 写死）。
+# 用法：$env:STULINK_NAS='user@host'; 可选 $env:STULINK_DIR / $env:STULINK_CT
+$NAS = ($env:STULINK_NAS, $env:STULINK_SSH_TARGET |
+        Where-Object { $_ } | Select-Object -First 1)
+if ([string]::IsNullOrWhiteSpace($NAS)) {
+    throw '未设置 STULINK_NAS（格式 user@host）；拒绝执行，避免连错主机。'
+}
+$DIR = $env:STULINK_DIR
+if ([string]::IsNullOrWhiteSpace($DIR)) { $DIR = '/volume1/docker/stulink' }
+$CT = $env:STULINK_CT
+if ([string]::IsNullOrWhiteSpace($CT)) { $CT = 'stulink' }
+
+# P1 M-15：并发保护（同一台机器同时跑两个热更新会互相覆盖）
+$script:HotMutex = New-Object System.Threading.Mutex($false, 'Global\StuLinkHotUpdate')
+if (-not $script:HotMutex.WaitOne(0)) { throw '另一个热更新正在进行，请稍后再试。' }
 
 $repo = Split-Path -Parent $PSScriptRoot
 if (-not (Test-Path (Join-Path $repo '.git'))) { throw "不是 git 仓库：$repo" }
@@ -144,10 +156,13 @@ if ($LASTEXITCODE -ne 0) { throw 'scp 上传失败' }
 Write-Host '    上传完成'
 
 # ── 5. 送进容器 + 重启 + 验收 + 记录 ─────────────────────────────────────
+$backupList = ($changed -join ' ')
 $remote = @(
     'set -u',
     "echo '  -- 校验上传落点 --'",
     "find $DIR/_hot -type f | wc -l | sed 's/^/    收到文件数: /'",
+    "echo '  -- 备份容器内将被覆盖的文件 --'",
+    "docker exec $CT sh -c 'mkdir -p /app/data/backups && tar -czf /app/data/backups/hot_$stageName.tgz -C /app $backupList' || true",
     "echo '  -- docker cp 进容器 /app --'",
     "docker cp $DIR/_hot/$stageName/. ${CT}:/app/ && echo '    docker cp OK'"
 )
@@ -179,3 +194,7 @@ Remove-Item $stage -Recurse -Force -ErrorAction SilentlyContinue
 Write-Host ''
 Write-Host "增量更新完成：$From -> $head"
 if (-not $NoRestart) { Invoke-Overview }
+if ($script:HotMutex) {
+    try { $script:HotMutex.ReleaseMutex() } catch { }
+    $script:HotMutex.Dispose()
+}

@@ -183,16 +183,18 @@ def _expand_recipients(target_type, target_scope, target_uids, exclude_uids=None
         found[user_id] = {'user_id': user_id, 'user_uid': uid, 'user_name': name}
 
     if tt in ('grade', 'class', 'role'):
-        conds = []
-        if scope.get('grades'):
-            conds.append(User.grade.in_(scope['grades']))
-        if scope.get('classes'):
-            conds.append(User.class_name.in_(scope['classes']))
-        if scope.get('roles'):
-            conds.append(User.role.in_(scope['roles']))
-        if conds:
-            for u in User.query.filter(User.is_active.is_(True), or_(*conds)).all():
-                _add(u.id, u.username, u.real_name)
+        # 2026-10-19：User.grade 改为可多选（逗号串），SQL 的 IN 无法匹配，
+        # 改为在 Python 侧按「集合有交集」判断（用户量级几百，成本可忽略）。
+        gs = set(scope.get('grades') or [])
+        cs = set(scope.get('classes') or [])
+        rs = set(scope.get('roles') or [])
+        if gs or cs or rs:
+            for u in User.query.filter(User.is_active.is_(True)).all():
+                hit = ((gs and (set(u.grades) & gs))
+                       or (cs and u.class_name in cs)
+                       or (rs and u.role in rs))
+                if hit:
+                    _add(u.id, u.username, u.real_name)
     elif tt != 'users':
         # all 及未知类型：全体启用用户（旧逻辑未知类型对所有人可见，保持一致）
         for u in User.query.filter(User.is_active.is_(True)).all():
@@ -394,7 +396,8 @@ def _user_matches_target(user, notif):
 
     if tt == 'grade':
         grades = scope.get('grades', [])
-        return (user.grade or '') in grades
+        # 2026-10-19：管理年级可多选，按交集判断
+        return bool(set(user.grades) & set(grades or []))
 
     if tt == 'class':
         classes = scope.get('classes', [])
@@ -579,6 +582,12 @@ def mark_read(notification_id, user_id):
     notif = db.session.get(Notification, notification_id)
     if not notif or not notif.is_active:
         return False
+    # 2026-10-19 审计：兜底分支必须校验收件人（原来只看通知存在，
+    # 任意登录用户按 id 遍历即可给别人的通知写「已读」并推高 read_count）。
+    # 与 get_notification_detail 的可见性口径一致。
+    user = db.session.get(User, user_id)
+    if user is None or not _user_matches_target(user, notif):
+        return False
     exists = NotificationRead.query.filter_by(
         notification_id=notification_id, user_id=user_id).first()
     if not exists:
@@ -697,7 +706,7 @@ def _enrich_recipients(rows, limit=500):
         if r.user_id > 0:
             u = users.get(r.user_id)
             has_account = True
-            grade = (u.grade if u else '') or ''
+            grade = u.grade_display if u else ''
             cls = (u.class_name if u else '') or ''
         elif -_TEACHER_SENTINEL_BASE < r.user_id < 0:
             s = students.get(-r.user_id)
@@ -740,12 +749,13 @@ def get_read_progress(notification_id):
     }
 
 
-def get_notification_detail(notification_id, user=None):
+def get_notification_detail(notification_id, user=None, mark_read_now=True):
     """获取通知详情。
 
     user 为 None（旧签名）→ 仅返回 Notification 对象（向后兼容）。
     传 user → 返回 (notif, meta)：校验可见性（收件人行优先，旧逻辑兜底）、
-    自动标记已读（保持现有行为）、发布者/管理员附已读进度。
+    可选标记已读、发布者/管理员附已读进度。
+    mark_read_now=False：只读详情，不写已读（L-01：GET 不应产生副作用）。
     meta 为 None 表示当前用户不可见。
     """
     notif = db.session.get(Notification, notification_id)
@@ -761,13 +771,14 @@ def get_notification_detail(notification_id, user=None):
         visible = _user_matches_target(user, notif)
     if not visible:
         return notif, None
-    # 自动标记已读（保持 v1.x 行为）
-    mark_read(notification_id, user.id)
+    was_read = bool(row.is_read) if row is not None else False
+    if mark_read_now:
+        mark_read(notification_id, user.id)
     can_manage = bool(user.role == 'admin'
                       or user.has_perm('system.settings')
                       or notif.published_by == user.id)
     meta = {
-        'is_read': True,
+        'is_read': True if mark_read_now else was_read,
         'can_manage': can_manage,
         'progress': get_read_progress(notification_id) if can_manage else None,
     }

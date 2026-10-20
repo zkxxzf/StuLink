@@ -68,6 +68,11 @@ _ACCOUNT_FAILS_MAX = 4096
 _source_fails = {}              # client -> (count, window_start)
 _SOURCE_FAILS_MAX = 2048
 
+# P2：认证通过后的读请求频控（防令牌/账号被脚本刷）。只限流成功请求，
+# 不参与上面的失败计数；key = 账号+来源 / token 模式下来源。
+_read_hits = {}                 # key -> (count, window_start)
+_READ_HITS_MAX = 4096
+
 
 def _cfg_int(key, default):
     try:
@@ -130,6 +135,26 @@ def _source_block_remaining(client):
         if count < limit or now - start > window:
             return 0
         return int(start + window - now) + 1
+
+
+def _read_rate_remaining(key):
+    """返回 0 表示放行；>0 表示窗口内超限，值为建议等待秒数。"""
+    limit = _cfg_int('read_rate_limit', 120)
+    if limit <= 0:
+        return 0
+    window = max(10, _cfg_int('read_rate_window', 60))
+    now = time.time()
+    with _cred_lock:
+        if len(_read_hits) > _READ_HITS_MAX:
+            _read_hits.clear()
+        count, start = _read_hits.get(key, (0, now))
+        if now - start >= window:
+            _read_hits[key] = (1, now)
+            return 0
+        if count >= limit:
+            return int(start + window - now) + 1
+        _read_hits[key] = (count + 1, start)
+        return 0
 
 
 def _record_source_fail(client):
@@ -434,6 +459,13 @@ class AccessGuard:
             logger.warning('MCP token 模式调用：client=%s path=%s bind_user=%s'
                            '（该模式以固定账号执行，等同该账号可见数据全部可读）',
                            client or '-', scope.get('path', ''), self.bind_user or '-')
+            remain = _read_rate_remaining(f't:{client or "-"}')
+            if remain:
+                await send_json(send, 429, {
+                    'error': 'rate_limited',
+                    'message': f'MCP 请求过于频繁，请 {remain} 秒后再试'},
+                    extra_headers=[(b'retry-after', str(remain).encode())])
+                return
             handle = identity.set_current(bootstrap.default_user_id())
             try:
                 await self.app(scope, receive, send)
@@ -472,7 +504,16 @@ class AccessGuard:
             await send_json(send, 401, {'error': error, 'message': message})
             return
 
-        # 认证通过：身份写入请求上下文，交给 MCP（工具执行时按该身份校验权限与范围）
+        # 认证通过：先做读请求频控，再写身份上下文
+        remain = _read_rate_remaining(f'u:{user_id}:{client or "-"}')
+        if remain:
+            await send_json(send, 429, {
+                'error': 'rate_limited',
+                'message': f'MCP 请求过于频繁，请 {remain} 秒后再试'},
+                extra_headers=[(b'retry-after', str(remain).encode())])
+            return
+
+        # 身份写入请求上下文，交给 MCP（工具执行时按该身份校验权限与范围）
         handle = identity.set_current(user_id)
         try:
             await self.app(scope, receive, send)

@@ -1,0 +1,43 @@
+# StuLink HTTPS overlay（H-10）
+# 用法（Docker Compose >= 2.24，!override 才会替换原 ports）：
+#   docker compose -f deploy/docker-compose.yml \
+#                  -f deploy/docker-compose.tls.yml up -d
+#
+# 若 NAS 的 Compose 版本较旧（不认 !override），改用：
+#   docker compose -f deploy/docker-compose.yml up -d   # 先只起 app
+#   再单独起 caddy，并把 app 的 5000 端口改为 127.0.0.1:5000:5000。
+services:
+  stulink:
+    ports: !override
+      - "127.0.0.1:5000:5000"
+    environment:
+      - TZ=Asia/Shanghai
+      - DATABASE_URL=sqlite:////app/data/system.db
+      # 反代后：信任一层代理头 + 强制 HTTPS + Secure Cookie
+      - STULINK_TRUST_PROXY=1
+      - STULINK_HTTPS=1
+      - STULINK_SESSION_COOKIE_SECURE=1
+      # L-04：应用端口只绑 127.0.0.1，前面只有 Caddy，可信其转发头
+      - STULINK_TRUSTED_PROXIES=*
+
+  caddy:
+    image: caddy:2-alpine
+    container_name: stulink-caddy
+    depends_on:
+      - stulink
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    restart: unless-stopped
+    environment:
+      - TZ=Asia/Shanghai
+      # 内网域名；没有域名时保持 localhost，用 https://localhost 访问
+      - STULINK_HOST=${STULINK_HOST:-localhost}
+
+volumes:
+  caddy_data:
+  caddy_config:

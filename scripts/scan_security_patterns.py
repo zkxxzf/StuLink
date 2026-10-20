@@ -67,6 +67,16 @@ RULES = [
         'pattern': re.compile(r'on(?:click|change|submit|input|mouseover)\s*=\s*"[^"]*\'\{\{'),
         'msg': "内联事件处理器里用单引号包裹模板变量（应改 |tojson）",
     },
+    {
+        # 2026-10-19 M-04：模板内联脚本此前不在裸 innerHTML 规则覆盖范围，
+        # 导致「班级名 → el.innerHTML = t + ...」这类存储型 XSS 漏网。
+        # 先只抓最危险的形态：右值以**变量开头**再拼接（典型 forEach 拼接标签）。
+        'id': '模板-裸innerHTML',
+        'files': ('.html',),
+        'pattern': re.compile(
+            r'\.innerHTML\s*=\s*[A-Za-z_$][\w$.\[\]]*\s*\+'),
+        'msg': '模板内联脚本用变量拼接 innerHTML（应改 textContent 或 escHtml）',
+    },
 ]
 
 # 白名单：历史遗留且已确认无害的文件（清单第 6 节已复核：不可注入）
