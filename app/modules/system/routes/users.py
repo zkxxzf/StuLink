@@ -154,16 +154,9 @@ def list_users():
              .order_by(User.role, User.username).all())
     # L-7：取出一次性初始口令（显示后立即失效）
     one_time_passwords = session.pop('_pwd_once', []) if users is not None else []
-    # v1.14.0：按权限组分组展示（组内按角色/用户名排序），支持分组折叠与搜索
-    from collections import OrderedDict
-    grouped = OrderedDict()
-    for u in users:
-        pg = u.primary_group
-        gname = pg.name if pg else '未分组'
-        grouped.setdefault(gname, []).append(u)
-    group_order = {g.name: g.id for g in PermissionGroup.query.all()}
-    groups = OrderedDict(
-        (g, grouped[g]) for g in sorted(grouped, key=lambda x: (group_order.get(x, 9999), x)))
+    # 2026-10-20：取消按权限组分组 —— 一次列出全部用户，角色由表头下拉筛选；
+    # 页面不再展示系统 UID（id / uuid 均不展示）。
+    roles = sorted({u.display_role for u in users})
     # 2026-10-19：教师管理展示微信绑定状态 / openid / 绑定 UID。
     # 一次查回，避免每个用户 N+1。
     wx_bindings = {}
@@ -178,7 +171,7 @@ def list_users():
     # 离职/退休存档名单只在本页展示（其他模块已按 status/archive_kind 排除）
     teacher_map = archive_svc.teacher_map(user_ids)
     archived = archive_svc.archived_teachers()
-    return render_template('system/users/list.html', users=users, groups=groups,
+    return render_template('system/users/list.html', users=users, roles=roles,
                            one_time_passwords=one_time_passwords,
                            wx_bindings=wx_bindings, teacher_map=teacher_map,
                            archived=archived)
