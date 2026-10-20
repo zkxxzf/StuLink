@@ -402,6 +402,19 @@
                             {% endif %}
                         </select>
                     </div>
+                    <div class="col-md-6">
+                        <label class="form-label small mb-1" for="eiSem">年级学期</label>
+                        <select class="form-select form-select-sm" id="eiSem">
+                            <option value=""{% if not exam.grade_semester %} selected{% endif %}>自动（按考试日期推算）</option>
+                            {% for s in semester_options %}
+                            <option value="{{ s }}"{% if s == exam.grade_semester %} selected{% endif %}>{{ s }}</option>
+                            {% endfor %}
+                        </select>
+                        <div class="form-text">
+                            当前显示「{{ exam.semester_label() or '—' }}」；
+                            选「自动」时随日期变化（学年 8/1 分界、学期春节分界）
+                        </div>
+                    </div>
                     <div class="col-12">
                         <label class="form-label small mb-1" for="eiName">考试名称 <span class="text-danger">*</span></label>
                         <input type="text" class="form-control form-control-sm" id="eiName" maxlength="100"
@@ -442,7 +455,8 @@ $(function(){
             grade: $('#eiGrade').val() || '',
             exam_date: $('#eiDate').val(),
             exam_kind: $('#eiKind').val(),
-            exam_type: $('#eiStage').val()
+            exam_type: $('#eiStage').val(),
+            grade_semester: $('#eiSem').val()
         };
         if(!fd.name){ $('#eiErr').removeClass('d-none').text('考试名称不能为空'); return; }
         $('#eiErr').addClass('d-none').text('');

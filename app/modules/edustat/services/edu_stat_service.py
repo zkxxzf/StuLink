@@ -285,16 +285,10 @@ def _t_age(t, ref):
 
 
 def _t_staff_type(t):
-    """人员类别：未填时**默认按「专任教师」**。
-
-    2026-10-20 用户口径：教师只需填「生日 + 性别」，人员类别属选填 ——
-    若沿用『无学科即其他』的推断，学科未录入时全校会被算成 0 个专任教师，
-    与基表口径明显矛盾。教师名单（teachers）本身收录的就是教职工，
-    其中行政 / 教辅 / 工勤应显式选择；未选的一律按专任教师统计。
-    """
+    """未填人员类别时按「是否有学科」推断：有学科=专任教师，否则=其他。"""
     if t.staff_type in STAFF_TYPES:
         return t.staff_type
-    return '专任教师'
+    return '专任教师' if (t.subject or '').strip() else '其他'
 
 
 def teacher_summary(school_year):

@@ -1,4 +1,4 @@
-# StuLink v1.19.49.45 2026-10-19
+# StuLink v1.19.49.46 2026-10-19
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 """小程序「学生画像 / 德育」列表：对齐网页 portrait.index 的筛选 + 卡片。
 

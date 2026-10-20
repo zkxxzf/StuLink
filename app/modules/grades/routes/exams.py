@@ -14,7 +14,7 @@ from flask import (Blueprint, render_template, request, jsonify, flash,
 from flask_login import login_required, current_user
 from app.extensions import db
 from app.models.grades import (Exam, ExamScore, SUBJECTS, TOTAL_SUBJECT,
-                              normalize_subject,
+                              normalize_subject, GRADE_SEMESTERS, SPRING_FESTIVAL,
                               ExamAffair, AffairRoom, AffairStudent, ScoreChangeLog,
                               ExamTeacherLink, ExamBand)
 from app.modules.grades import bp
@@ -51,6 +51,30 @@ def _exam_date_from(value):
         return date.today()
 
 
+def _semester_from_form(value):
+    """表单里的年级学期：只认白名单，空值/乱值一律当「自动」（按日期推算）"""
+    v = (value or '').strip()
+    return v if v in GRADE_SEMESTERS else ''
+
+
+def _safe_date(value):
+    """URL 里的日期参数（YYYY-MM-DD）：空值/非法值一律返回 None（不参与筛选）"""
+    try:
+        return date.fromisoformat(str(value).strip())
+    except (TypeError, ValueError, AttributeError):
+        return None
+
+
+def _auto_exam_name(grade, exam_date, exam_type):
+    """名称留空时的默认名：年级 + 日期(YYYYMMDD) + 阶段。
+
+    例：2024级 + 2026-10-10 + 月考 → 「2024级20261010月考」；阶段为空只到日期。
+    用户手工填了名称就完全不介入（前端预览同一规则，见 exam_form.html）。
+    """
+    base = f'{grade}{exam_date.strftime("%Y%m%d")}'
+    return base + (exam_type or '')
+
+
 # ==================== 考试列表 / 新建 ====================
 
 @bp.route('/exams')
@@ -73,6 +97,37 @@ def exams_list():
         vg = _grade_options()
         q = Exam.query.filter(Exam.grade.in_(vg)) if vg else Exam.query.filter(False)
     exams = q.order_by(Exam.exam_date.desc(), Exam.id.desc()).all()
+    # 2026-10-20 用户口径：年级之外再加「学期 / 类型 / 考试日期区间」三个筛选，
+    # 全部走 GET 参数，和年级胶囊共用同一条筛选栏（不做多入口）。
+    # 学期是推算值（exams.grade_semester 为空时按 年级+日期 算），只能在内存里过滤。
+    sem = (request.args.get('sem') or '').strip()
+    etype = (request.args.get('type') or '').strip()
+    d1_raw = (request.args.get('d1') or '').strip()
+    d2_raw = (request.args.get('d2') or '').strip()
+    d1, d2 = _safe_date(d1_raw), _safe_date(d2_raw)
+    base_exams = exams
+    if sem:
+        exams = [e for e in exams if e.semester_label() == sem]
+    if etype:
+        exams = [e for e in exams if (e.exam_type or '') == etype]
+    if d1:
+        exams = [e for e in exams if e.exam_date >= d1]
+    if d2:
+        exams = [e for e in exams if e.exam_date <= d2]
+    # 下拉选项取「年级范围内的全部数据」，不跟着别的筛选收窄 ——
+    # 否则选完学期，类型选项里就只剩当前结果里出现的那一种。
+    filter_types = sorted({(e.exam_type or '') for e in base_exams if e.exam_type})
+    seen_sem = {(e.semester_label() or '') for e in base_exams}
+    filter_semesters = [s for s in GRADE_SEMESTERS if s in seen_sem]
+
+    def _list_url(g=None):
+        """年级胶囊链接：带上当前其它筛选条件（None 参数 Flask 会跳过）"""
+        return url_for('grades.exams_list', grade=g, sem=sem or None,
+                       type=etype or None, d1=d1_raw or None, d2=d2_raw or None)
+
+    grade_links = [{'label': '全部', 'url': _list_url(), 'active': not grade}]
+    grade_links += [{'label': g, 'url': _list_url(g), 'active': g == grade}
+                    for g in _grade_options()]
     counts = {}
     # 修复：人数统计改 GROUP BY 聚合（原先把全部总分行载入内存逐条计数）
     if exams:
@@ -105,6 +160,12 @@ def exams_list():
     steps_map = _list_steps_map(exams)
     return render_template('grades/exam_list.html', exams=exams, counts=counts,
                            grade=grade, grade_options=_grade_options(),
+                           grade_links=grade_links,
+                           filter_sem=sem, filter_type=etype,
+                           filter_d1=d1_raw, filter_d2=d2_raw,
+                           filter_semesters=filter_semesters,
+                           filter_types=filter_types,
+                           clear_url=url_for('grades.exams_list'),
                            orphan_affairs=orphan_affairs,
                            steps_map=steps_map, can_manage=can_manage,
                            status_label=EXAM_STATUS_LABEL)
@@ -133,13 +194,16 @@ def _list_steps_map(exams):
 
 
 def _exam_form_ctx(**kw):
-    """新建考试表单的公共上下文（年级 / 性质 / 阶段）"""
+    """新建考试表单的公共上下文（年级 / 性质 / 阶段 / 年级学期）"""
     from app.models.grades import EXAM_KINDS, EXAM_STAGES
     ctx = {
         'grade_options': _grade_options(),
         'kind_options': _dict_values('exam_kind', EXAM_KINDS),
         'stage_options': _dict_values('exam_type', EXAM_STAGES),
         'default_date': date.today().isoformat(),
+        # 年级学期：空 = 自动按日期推算；前端用春节表复刻同一算法做实时预览
+        'semester_options': GRADE_SEMESTERS,
+        'spring_festivals': SPRING_FESTIVAL,
     }
     ctx.update(kw)
     return ctx
@@ -155,16 +219,20 @@ def exam_new():
         name = (request.form.get('name') or '').strip()
         exam_kind = (request.form.get('exam_kind') or '').strip()
         exam_type = (request.form.get('exam_type') or '').strip()
+        # 年级学期：空 = 自动按 年级+日期 推算（列表/详情都用 Exam.semester_label()）
+        grade_semester = _semester_from_form(request.form.get('grade_semester'))
         # v1.19.49.46：不再有「分数口径」表单字段（口径在导入时按文件确定），
         # 新考试 score_mode 一律留空（未指定），展示为「按导入确定」
         if not name:
-            # 名称留空 → 默认「年级 + 日期」（两维度已单独存列，不塞进名称）
-            name = f'{grade}{exam_date.isoformat()}'
+            # 名称留空 → 默认「年级 + 日期 + 阶段」（如 2024级20261010月考）；
+            # 性质/阶段另有独立列，名称只是给人看的
+            name = _auto_exam_name(grade, exam_date, exam_type)
         if not grade or not name:
             flash('请选择年级并填写考试名称', 'danger')
             return render_template('grades/exam_form.html', **_exam_form_ctx(
                 grade=grade, exam_date=exam_date.isoformat(), name=name,
-                exam_kind=exam_kind, exam_type=exam_type))
+                exam_kind=exam_kind, exam_type=exam_type,
+                grade_semester=grade_semester))
         # 2026-10-12 P1：目标年级可见性校验（防止为未授权年级创建考试后导入成绩，
         # 构成跨年级写入；与 H-4 的 assert_grade_visible 同一入口）
         assert_grade_visible(grade)
@@ -175,10 +243,12 @@ def exam_new():
                   'danger')
             return render_template('grades/exam_form.html', **_exam_form_ctx(
                 grade=grade, exam_date=exam_date.isoformat(), name='',
-                exam_kind=exam_kind, exam_type=exam_type))
+                exam_kind=exam_kind, exam_type=exam_type,
+                grade_semester=grade_semester))
         exam = Exam(grade=grade, name=name, exam_date=exam_date,
                     exam_kind=exam_kind, exam_type=exam_type or '其他',
                     term=term_of_date(exam_date),
+                    grade_semester=grade_semester,
                     operator_id=current_user.id)
         db.session.add(exam)
         db.session.commit()
@@ -193,7 +263,8 @@ def exam_new():
     return render_template('grades/exam_form.html', **_exam_form_ctx(
         grade='', exam_date=date.today().isoformat(), name='',
         exam_kind=(kinds[0] if kinds else ''),
-        exam_type=('月考' if '月考' in stages else (stages[0] if stages else ''))))
+        exam_type=('月考' if '月考' in stages else (stages[0] if stages else '')),
+        grade_semester=''))
 
 
 # ==================== 考试详情 / 成绩浏览 / 修正 / 重算 / 删除 ====================
@@ -515,6 +586,7 @@ def exam_detail(exam_id):
                            grade_options=_grade_options(),
                            kind_options=_dict_values('exam_kind', EXAM_KINDS),
                            stage_options=_dict_values('exam_type', EXAM_STAGES),
+                           semester_options=GRADE_SEMESTERS,
                            has_scores=has_scores,
                            full_marks=exam.full_marks(),
                            can_edit_scores=current_user.has_perm('grades.score_edit'),
@@ -585,6 +657,12 @@ def exam_update(exam_id):
     # 性质/阶段：表单未给值（字段被禁用等）时保留原值，避免误清空
     exam_kind = (request.form.get('exam_kind') or '').strip() or (exam.exam_kind or '')
     exam_type = (request.form.get('exam_type') or '').strip() or (exam.exam_type or '其他')
+    # 年级学期：空值合法（= 自动按日期推算），所以不能用「空就保留原值」——
+    # 只有表单里根本没这个字段（老客户端）才保留。
+    if 'grade_semester' in request.form:
+        grade_semester = _semester_from_form(request.form.get('grade_semester'))
+    else:
+        grade_semester = (exam.grade_semester or '')
 
     has_scores = db.session.query(ExamScore.id).filter(
         ExamScore.exam_id == exam_id).first() is not None
@@ -611,6 +689,9 @@ def exam_update(exam_id):
         changes.append(f'性质「{exam.exam_kind or "—"}」→「{exam_kind or "—"}」')
     if exam_type != (exam.exam_type or ''):
         changes.append(f'阶段「{exam.exam_type or "—"}」→「{exam_type or "—"}」')
+    if grade_semester != (exam.grade_semester or ''):
+        changes.append(f'学期标签「{exam.grade_semester or "自动"}」→'
+                       f'「{grade_semester or "自动"}」')
     if not changes:
         return jsonify(success=True, message='未做任何修改')
 
@@ -619,6 +700,7 @@ def exam_update(exam_id):
     exam.exam_date = exam_date
     exam.exam_kind = exam_kind
     exam.exam_type = exam_type
+    exam.grade_semester = grade_semester  # 空 = 自动按新日期推算
     exam.term = term_of_date(exam_date)   # 学年随日期自动重算（不单独编辑）
     db.session.commit()
     invalidate_exam_cache(exam_id)

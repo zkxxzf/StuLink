@@ -56,48 +56,36 @@
                     </div>
 
                     {# 2026-10-20：教育事业统计（教基4149/4153/4156）所需属性。
-                       用户口径：**只填「生日 + 性别」两项即可** —— 年龄与「#女」就能出；
-                       其余（民族/人员类别/学历/职称/在编/外籍）都是选填，
-                       只影响基表里更细的分档行。 #}
+                       年龄由身份证自动解析，这里只收身份证里没有、也无法从任课映射推出的口径。 #}
                     <div class="border-top pt-3 mt-1 mb-3">
                         <div class="fw-semibold small mb-2">
-                            <i class="bi bi-clipboard-data"></i> 教育统计（必填两项）
-                            <span class="text-muted fw-normal">生日 + 性别，其余选填</span>
+                            <i class="bi bi-clipboard-data"></i> 教育事业统计属性
+                            <span class="text-muted fw-normal">（用于自动生成教职工/专任教师基表）</span>
                         </div>
                         <div class="row">
                             <div class="col-md-4 mb-3">
-                                <label class="form-label">出生日期 <span class="text-danger">*</span></label>
-                                <input name="birth_date" type="date" class="form-control"
-                                       value="{{ t.birth_date.strftime('%Y-%m-%d') if t.birth_date else '' }}">
-                                <div class="text-muted small">用于统计年龄，不必填身份证</div>
-                            </div>
-                            <div class="col-md-4 mb-3">
-                                <label class="form-label">性别 <span class="text-danger">*</span></label>
+                                <label class="form-label">性别</label>
                                 <select name="gender" class="form-select">
                                     <option value="">未填</option>
                                     <option value="男" {% if t.gender == '男' %}selected{% endif %}>男</option>
                                     <option value="女" {% if t.gender == '女' %}selected{% endif %}>女</option>
                                 </select>
-                                <div class="text-muted small">用于基表「#女」</div>
                             </div>
-                        </div>
-                    </div>
-
-                    <div class="border-top pt-3 mb-3">
-                        <div class="fw-semibold small mb-2">
-                            <i class="bi bi-sliders"></i> 分档明细（选填）
-                            <span class="text-muted fw-normal">不填则归入「其他 / 未填学历 / 未定职级」</span>
-                        </div>
-                        <div class="row">
+                            <div class="col-md-4 mb-3">
+                                <label class="form-label">出生日期</label>
+                                <input name="birth_date" type="date" class="form-control"
+                                       value="{{ t.birth_date.strftime('%Y-%m-%d') if t.birth_date else '' }}">
+                                <div class="text-muted small">只用于统计年龄，不必填身份证</div>
+                            </div>
                             <div class="col-md-4 mb-3">
                                 <label class="form-label">民族</label>
                                 <input name="ethnicity" class="form-control" maxlength="20"
-                                       value="{{ t.ethnicity or '' }}" placeholder="如：汉族（不填按汉族）">
+                                       value="{{ t.ethnicity or '' }}" placeholder="如：汉族">
                             </div>
                             <div class="col-md-4 mb-3">
                                 <label class="form-label">人员类别</label>
                                 <select name="staff_type" class="form-select">
-                                    <option value="">未填（按「专任教师」统计）</option>
+                                    <option value="">未填（按有无学科推断）</option>
                                     {% for k in ['专任教师', '行政人员', '教辅人员', '工勤人员', '其他'] %}
                                     <option value="{{ k }}" {% if t.staff_type == k %}selected{% endif %}>{{ k }}</option>
                                     {% endfor %}
@@ -115,7 +103,7 @@
                             <div class="col-md-4 mb-3">
                                 <label class="form-label">职称</label>
                                 <select name="title" class="form-select">
-                                    <option value="">未填（按「未定职级」统计）</option>
+                                    <option value="">未填</option>
                                     {% for k in ['正高级', '副高级', '中级', '助理级', '员级', '未定职级'] %}
                                     <option value="{{ k }}" {% if t.title == k %}selected{% endif %}>{{ k }}</option>
                                     {% endfor %}
@@ -140,9 +128,8 @@
                         </div>
                         <div class="text-muted small">
                             <i class="bi bi-lightbulb"></i>
-                            <b>只填「出生日期 + 性别」</b>就能出 4153 的年龄分布与女性人数；
-                            补上学历 / 职称 / 人员类别 / 民族 后，4149 的人员分类、4153 的职称行、
-                            4156 的学历行才会细分（不填分别归入「其他 / 未定职级 / 未填学历 / 汉族」）。
+                            这些属性只用于教育事业统计基表；<b>年龄只需填「出生日期」</b>（身份证选填），
+                            填写后在「系统管理 → 教育统计」即可生成 4149 / 4153 / 4156。
                         </div>
                     </div>
 
