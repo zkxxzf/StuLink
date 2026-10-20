@@ -38,12 +38,12 @@
             {% if q.students_no_idcard %}<span class="text-danger">（{{ q.students_no_idcard }} 人缺身份证，年龄无法统计）</span>{% endif %}
         </span>
         <span>教师 {{ q.teachers_total }} 人
-            {% if q.teachers_no_idcard %}<span class="text-danger">（{{ q.teachers_no_idcard }} 人缺身份证）</span>{% endif %}
+            {% if q.teachers_no_birth %}<span class="text-danger">（{{ q.teachers_no_birth }} 人缺出生日期，年龄无法统计）</span>{% endif %}
             {% if q.teachers_no_subject %}<span class="text-warning">（{{ q.teachers_no_subject }} 人缺学科）</span>{% endif %}
             {% if q.teachers_no_education %}<span class="text-warning">（{{ q.teachers_no_education }} 人缺学历）</span>{% endif %}
             {% if q.teachers_no_staff_type %}<span class="text-warning">（{{ q.teachers_no_staff_type }} 人缺人员类别）</span>{% endif %}
         </span>
-        {% if q.teachers_no_idcard or q.teachers_no_subject or q.teachers_no_education or q.teachers_no_staff_type %}
+        {% if q.teachers_no_birth or q.teachers_no_subject or q.teachers_no_education or q.teachers_no_staff_type %}
         <a class="small" href="{{ url_for('academic.teachers_page') }}">
             去教师名单补录 <i class="bi bi-arrow-right"></i>
         </a>
@@ -326,8 +326,8 @@
     </div>
     <div class="card-footer small text-muted py-1">
         {% if ta.unknown %}
-        <span class="text-danger">{{ ta.unknown }} 人缺身份证，年龄无法统计（未计入本表）</span>
-        {% else %}年龄由身份证解析{% endif %}
+        <span class="text-danger">{{ ta.unknown }} 人缺出生日期（且无身份证），年龄无法统计（未计入本表）</span>
+        {% else %}年龄按出生日期计算（无生日时回退身份证）{% endif %}
     </div>
 </div>
 
