@@ -2357,6 +2357,11 @@ def check_workload():
     from app.modules.academic.services import workload_service as wl
 
     today = date.today()
+    # 2026-10-19 审计：查课夹具会占用 T900001/T900002 的同一时段，
+    # 用独立 uid 才能保证「第 2 节 0.5」只统计本用例造的那一节。
+    WL_UID = 'T_WL_QA'
+    WL_NAME = '李数学'
+    orig_uid = orig_name = None
     with app.app_context():
         u = _urls()
         # 夹具是周课表，不一定覆盖「今天」——这里保证当天有一节确定的课
@@ -2369,15 +2374,16 @@ def check_workload():
         if entry is None:
             e = ScheduleEntry(term_schedule_id=TS_ID, grade='高一', class_name='01班',
                               weekday=today.isoweekday(), period_number=2,
-                              week_range='全周', subject='数学', teacher_uid='T900002',
-                              teacher_name='李数学', room='101', entry_type='normal',
+                              week_range='全周', subject='数学', teacher_uid=WL_UID,
+                              teacher_name=WL_NAME, room='101', entry_type='normal',
                               is_deleted=False)
             db.session.add(e)
             db.session.commit()
             entry_id = e.id
-        elif not entry.teacher_uid:
-            entry.teacher_uid = 'T900002'
-            entry.teacher_name = '李数学'
+        else:
+            orig_uid, orig_name = entry.teacher_uid, entry.teacher_name
+            entry.teacher_uid = WL_UID
+            entry.teacher_name = WL_NAME
             db.session.commit()
 
     with app.test_client() as c:
@@ -2412,13 +2418,19 @@ def check_workload():
              f'period2={r2.factor if r2 else None} invig={ri.factor if ri else None}')
 
         # ③ 基线：今天这节课按 0.5 折算
+        # 2026-10-19 审计：夹具里同一老师当天可能还有第 3 节（查课用例留下的正常课），
+        # 原断言写死「总课时 == 0.5」会误判。改为按 counts 现算期望：
+        # 第 2 节 × 0.5，其余节次按默认 1.0；同时要求第 2 节确实只有 1 节。
         with app.app_context():
             base = wl.calc_workload(today, today, grade='高一')
             bmap = {x['teacher_uid']: x for x in base['rows']}
+        _row = bmap.get(WL_UID) or {}
+        _counts = _row.get('counts') or {}
+        _exp = round(0.5 * _counts.get(2, 0)
+                     + sum(v for p, v in _counts.items() if p != 2), 4)
         case('课时量统计到当天的课（第 2 节 × 0.5）',
-             (bmap.get('T900002') or {}).get('period_hours') == 0.5,
-             f'{(bmap.get("T900002") or {}).get("period_hours")} '
-             f'counts={(bmap.get("T900002") or {}).get("counts")}')
+             _counts.get(2) == 1 and abs((_row.get('period_hours') or 0) - _exp) < 1e-6,
+             f'{_row.get("period_hours")} counts={_counts} exp={_exp}')
 
         # ④ 标记考试期间 → 期间不计工作量
         r = c.post(u['wl_exam_add'],
@@ -2433,7 +2445,7 @@ def check_workload():
         emap = {x['teacher_uid']: x for x in in_exam['rows']}
         case('考试期间不计课时工作量',
              n_exam == 1 and in_exam['summary']['exam_excluded'] >= 1
-             and (emap.get('T900002') or {}).get('period_hours', 0) == 0,
+             and (emap.get(WL_UID) or {}).get('period_hours', 0) == 0,
              f'n={n_exam} excluded={in_exam["summary"]["exam_excluded"]}')
 
         # ⑤ 导出 Excel 可解析
@@ -2457,6 +2469,10 @@ def check_workload():
         with app.app_context():
             back = wl.calc_workload(today, today, grade='高一')
             bkmap = {x['teacher_uid']: x for x in back['rows']}
+            _brow = bkmap.get(WL_UID) or {}
+            _bc = _brow.get('counts') or {}
+            _bexp = round(0.5 * _bc.get(2, 0)
+                          + sum(v for p, v in _bc.items() if p != 2), 4)
             ExamPeriod.query.filter_by(grade='高一', class_name='01班').delete()
             WorkloadRule.query.delete()
             if entry_id:
@@ -2465,13 +2481,14 @@ def check_workload():
                     if added_new:
                         db.session.delete(tmp)
                     else:
-                        tmp.teacher_uid = None
-                        tmp.teacher_name = None
+                        tmp.teacher_uid = orig_uid
+                        tmp.teacher_name = orig_name
             db.session.commit()
         case('删除考试期间后恢复计课时',
              bool((r.get_json() or {}).get('success'))
-             and (bkmap.get('T900002') or {}).get('period_hours') == 0.5,
-             f'{(bkmap.get("T900002") or {}).get("period_hours")}')
+             and _bc.get(2) == 1
+             and abs((_brow.get('period_hours') or 0) - _bexp) < 1e-6,
+             f'{_brow.get("period_hours")} counts={_bc} exp={_bexp}')
 
 
 @item('CHECK')

@@ -26,7 +26,10 @@ def _rank_map(rows):
         end = idx
         while end < n and ordered[end].score == cur_score:
             end += 1
-        rank += 1
+        # 2026-10-19 审计：按「组首位置」取名次（同分同名次、后延跳号
+        # 1,1,3）。原实现 rank += 1 是密集名次（1,1,2），与文件头、表彰
+        # 名单（honor_rank，按位置）以及全系统「并列 1,1,3」口径冲突。
+        rank = idx + 1
         for j in range(idx, end):
             out[ordered[j].id] = rank
         idx = end

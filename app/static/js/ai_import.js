@@ -324,6 +324,16 @@
                     renderMaps();
                     renderSchedules(res);
                     $('#mapBox, #runBox').removeClass('d-none');
+                    // 2026-10-19：AI 面板在「数据导入」页右栏，结果卡片在下方整宽区域，
+                    // 识别完把视线带过去。固定顶栏 56px 会盖住卡片头，手工留 70px 余量
+                    //（旧浏览器不支持 scrollIntoView 的 options 对象，用坐标计算）。
+                    var box = document.getElementById('aiBox');
+                    if (box) {
+                        var top = box.getBoundingClientRect().top
+                                + (window.pageYOffset || 0) - 70;
+                        if (top < 0) { top = 0; }
+                        window.scrollTo(0, top);
+                    }
                     var parts = [];
                     if (SHEETS.length) { parts.push(SHEETS.length + ' 个工作表'); }
                     var nSched = (res.image_schedules || []).length;
@@ -342,7 +352,8 @@
         function run(dry) {
             if (!TOKEN) { msg('#aiRunMsg', false, '请先上传并识别'); return; }
             var body = {token: TOKEN, sheets: collectSheets(), dry_run: !!dry,
-                        mode: $('#aiModeB').prop('checked') ? 'B' : 'A'};
+                        mode: $('#aiModeB').prop('checked') ? 'B' : 'A',
+                        include_skip: $('#aiIncludeSkip').prop('checked')};
             // v1.19.47.4：图片识别出的场次（含用户在表格里的修改）＋ 场次覆盖方式
             var sess = collectSchedules();
             if (sess.length) { body.schedules = sess; }

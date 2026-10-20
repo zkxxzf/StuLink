@@ -1,0 +1,111 @@
+{% extends "base.html" %}
+{% block title %}微信绑定 - 学生管理系统{% endblock %}
+{% block content %}
+<div class="d-flex align-items-center mb-3 flex-wrap gap-2">
+  <h5 class="mb-0"><i class="bi bi-wechat"></i> 微信绑定</h5>
+  <span class="text-muted small">一个微信最多绑定 2 个 StuLink 账号</span>
+</div>
+
+<div class="row g-3">
+  <div class="col-lg-5">
+    <div class="card h-100">
+      <div class="card-header py-2">扫码绑定当前账号</div>
+      <div class="card-body text-center">
+        <div id="bind-qr" class="d-flex justify-content-center align-items-center"
+             style="min-height:240px;">
+          <div class="spinner-border text-primary"></div>
+        </div>
+        <div id="bind-msg" class="text-muted small mt-2">正在生成二维码…</div>
+        <button class="btn btn-outline-primary btn-sm mt-2 d-none"
+                id="bind-refresh" onclick="startBind()">刷新二维码</button>
+        <p class="text-muted small mt-3 mb-0">
+          小程序登录后点「扫一扫」，确认后即绑定到
+          <b>{{ current_user.real_name }}</b>。
+        </p>
+      </div>
+    </div>
+  </div>
+
+  <div class="col-lg-7">
+    <div class="card">
+      <div class="card-header py-2">已绑定微信</div>
+      <div class="card-body p-0">
+        <table class="table table-sm mb-0">
+          <thead><tr><th>微信标识</th><th>绑定时间</th><th>最近使用</th><th></th></tr></thead>
+          <tbody>
+          {% for b in bindings %}
+            <tr>
+              <td><code class="small" style="word-break:break-all">{{ b.openid or '…' + b.openid_tail }}</code></td>
+              <td>{{ b.created_at.strftime('%Y-%m-%d %H:%M') if b.created_at else '—' }}</td>
+              <td>{{ b.last_login_at.strftime('%Y-%m-%d %H:%M') if b.last_login_at else '—' }}</td>
+              <td class="text-end">
+                <form method="POST"
+                      action="{{ url_for('auth.wechat_unbind', binding_id=b.id) }}"
+                      onsubmit="return confirm('确定解绑这个微信？');">
+                  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                  <button class="btn btn-outline-danger btn-sm" type="submit">解绑</button>
+                </form>
+              </td>
+            </tr>
+          {% else %}
+            <tr><td colspan="4" class="text-center text-muted py-4">尚未绑定微信</td></tr>
+          {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+    <a href="{{ url_for('auth.my_settings') }}" class="btn btn-link px-0 mt-2">返回用户设置</a>
+  </div>
+</div>
+
+<style>#bind-qr svg { width: 230px; height: 230px; }</style>
+<script>
+let bindTimer = null;
+let bindTicket = '';
+
+function bindMsg(text, cls) {
+  const el = document.getElementById('bind-msg');
+  el.textContent = text;
+  el.className = 'small mt-2 ' + (cls || 'text-muted');
+}
+
+function stopBind() {
+  if (bindTimer) { clearInterval(bindTimer); bindTimer = null; }
+}
+
+function startBind() {
+  stopBind();
+  bindTicket = '';
+  document.getElementById('bind-refresh').classList.add('d-none');
+  document.getElementById('bind-qr').innerHTML =
+    '<div class="spinner-border text-primary"></div>';
+  bindMsg('正在生成二维码…');
+  fetch('{{ url_for("auth.wechat_bind_new") }}').then(r => r.json()).then(d => {
+    if (!d.ok) { bindMsg(d.message || '生成失败', 'text-danger'); return; }
+    bindTicket = d.ticket;
+    document.getElementById('bind-qr').innerHTML = d.svg;
+    bindMsg('请用小程序「扫一扫」确认绑定');
+    bindTimer = setInterval(pollBind, 2000);
+  }).catch(() => bindMsg('网络异常，请刷新', 'text-danger'));
+}
+
+function pollBind() {
+  if (!bindTicket) return;
+  fetch('{{ url_for("auth.wechat_bind_status", ticket="__T__") }}'
+    .replace('__T__', encodeURIComponent(bindTicket)))
+    .then(r => r.json()).then(d => {
+      if (d.status === 'approved') {
+        stopBind();
+        bindMsg('绑定成功，正在刷新…', 'text-success');
+        setTimeout(() => location.reload(), 800);
+      } else if (d.status === 'expired') {
+        stopBind();
+        bindMsg('二维码已过期，请刷新', 'text-warning');
+        document.getElementById('bind-refresh').classList.remove('d-none');
+      }
+    }).catch(() => {});
+}
+
+startBind();
+</script>
+{% endblock %}

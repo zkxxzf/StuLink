@@ -204,12 +204,19 @@ def edit_record(user, rid, result=None, class_name=None, subject=None,
 
 
 def delete_record(user, rid):
-    """删除查课记录（未 commit）。"""
+    """删除查课记录（未 commit）。
+
+    2026-10-19 第十三轮审计：删除前先进回收站（用户级规则：一切删除可恢复）。
+    """
     rec = db.session.get(InspectionRecord, rid)
     if rec is None:
         raise ValueError(f'查课记录不存在：{rid}')
     if not academic_class_is_visible(user, rec.grade, rec.class_name):
         raise PermissionError('该记录不在你的可见范围内')
+    from app.utils.trash import archive
+    archive('academic', 'inspection_record', '查课记录', rec,
+            summary=f'{rec.inspect_date} {rec.grade}{rec.class_name} '
+                    f'第{rec.period}节', operator=user)
     db.session.delete(rec)
     return rec
 
@@ -291,6 +298,11 @@ def mark_cells(user, inspect_date, cells):
                .order_by(InspectionRecord.id.desc()).first())
         if not result:
             if rec:
+                # 2026-10-19：撤销（删除）也先进回收站
+                from app.utils.trash import archive
+                archive('academic', 'inspection_record', '查课记录(撤销)', rec,
+                        summary=f'{inspect_date} {grade}{class_name} '
+                                f'第{period}节', operator=user)
                 db.session.delete(rec)
                 cleared += 1
                 touched.append({'grade': grade, 'class_name': class_name,

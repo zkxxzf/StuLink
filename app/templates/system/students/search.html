@@ -16,8 +16,11 @@
     <div class="card-header d-flex justify-content-between align-items-center">
         <span>{% if students is defined %}找到 <strong>{{ students|length }}</strong> 条记录{% else %}请输入条件搜索{% endif %}</span>
         <div class="d-flex gap-2">
+            {# 2026-10-19 审计：导出需要 students.export，教师点进来会 403（看得见点不进） #}
+            {% if current_user.has_perm('students.export') %}
             <a href="{{ url_for('students.export_students', name=request.args.get('name',''), student_number=request.args.get('student_number',''), gender=request.args.get('gender',''), grade=request.args.get('grade',''), class_name=request.args.get('class_name',''), subject_selection=request.args.get('subject_selection',''), boarding_type=request.args.get('boarding_type',''), day_student_type=request.args.get('day_student_type',''), room_number=request.args.get('room_number','')) }}"
                class="btn btn-sm btn-outline-success"><i class="bi bi-file-earmark-excel"></i> 导出</a>
+            {% endif %}
             <a href="{{ url_for('students.search') }}" class="btn btn-sm btn-outline-secondary"><i class="bi bi-x-lg"></i> 清除</a>
             {% if current_user.has_perm('dormitory.manage') or current_user.has_perm('students.edit') %}
             <button type="button" class="btn btn-warning btn-sm" id="btnBatchEditSearch" style="display:none;"
@@ -226,18 +229,24 @@
 <script>
 var csrfToken = "{{ csrf_token() }}";
 
-// 全选
-document.getElementById('checkAllSearch').addEventListener('change', function() {
-    document.querySelectorAll('.student-check-search').forEach(cb => cb.checked = this.checked);
-    updateBatchEditBtn();
-});
+// 全选（2026-10-19 审计：教师无批量修改权限时这些元素不渲染，先判空再绑）
+var checkAllSearch = document.getElementById('checkAllSearch');
+if (checkAllSearch) {
+    checkAllSearch.addEventListener('change', function() {
+        document.querySelectorAll('.student-check-search').forEach(cb => cb.checked = this.checked);
+        updateBatchEditBtn();
+    });
+}
 document.querySelectorAll('.student-check-search').forEach(cb => {
     cb.addEventListener('change', updateBatchEditBtn);
 });
 function updateBatchEditBtn() {
     var cnt = document.querySelectorAll('.student-check-search:checked').length;
-    document.getElementById('editSearchCount').textContent = cnt;
-    document.getElementById('btnBatchEditSearch').style.display = cnt > 0 ? '' : 'none';
+    var cntEl = document.getElementById('editSearchCount');
+    var btn = document.getElementById('btnBatchEditSearch');
+    if (!cntEl || !btn) { return; }
+    cntEl.textContent = cnt;
+    btn.style.display = cnt > 0 ? '' : 'none';
 }
 
 // 批量修改

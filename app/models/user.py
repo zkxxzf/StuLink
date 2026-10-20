@@ -23,11 +23,16 @@ class User(UserMixin, db.Model):
     password_hash = db.Column(db.String(256), nullable=False)
     real_name = db.Column(db.String(50), nullable=False)
     role = db.Column(db.String(20), nullable=False)  # 管理员/宿管教师/班主任/普通教师
-    grade = db.Column(db.String(10))       # 班主任所管年级
+    # 管理年级：班主任固定 1 个（与其班级同年级）；年级长可多选（2026-10-19），
+    # 多值时用英文逗号分隔（如 "2025级,2026级"），读取一律走 `grades`。
+    grade = db.Column(db.String(100))
     class_name = db.Column(db.String(10))  # 班主任所管班级
     permission_group_id = db.Column(db.Integer, db.ForeignKey('permission_groups.id'), nullable=True)
     is_active = db.Column(db.Boolean, default=True)
     must_change_pwd = db.Column(db.Boolean, default=True)
+    # P1 M-03：小程序令牌版本。令牌载荷带 ver，登出/改密/停用后递增 → 旧令牌立即失效。
+    wx_token_ver = db.Column(db.Integer, nullable=False, default=0,
+                             server_default='0')
     created_at = db.Column(db.DateTime, default=datetime.now)
     updated_at = db.Column(db.DateTime, default=datetime.now, onupdate=datetime.now)
 
@@ -38,6 +43,8 @@ class User(UserMixin, db.Model):
 
     def set_password(self, password):
         self.password_hash = generate_password_hash(password)
+        # P1 M-03：改密即吊销小程序旧令牌（与网页端 session_guard 的"改密踢会话"同口径）
+        self.wx_token_ver = int(self.wx_token_ver or 0) + 1
 
     def check_password(self, password):
         return check_password_hash(self.password_hash, password)
@@ -62,6 +69,36 @@ class User(UserMixin, db.Model):
         if pg and pg.name:
             return pg.name
         return self.role_display
+
+    @property
+    def grades(self):
+        """管理年级列表（多选；兼容历史单值与中文分隔符）。
+
+        入参：无。返回：去重保序的年级列表（无配置返回 []）。
+        """
+        raw = (self.grade or '').strip()
+        if not raw:
+            return []
+        out = []
+        for part in raw.replace('，', ',').replace('、', ',').split(','):
+            part = part.strip()
+            if part and part not in out:
+                out.append(part)
+        return out
+
+    def set_grades(self, values):
+        """写入管理年级列表（去重保序后逗号拼接；空列表存 NULL）。"""
+        seen = []
+        for val in (values or []):
+            val = (val or '').strip()
+            if val and val not in seen:
+                seen.append(val)
+        self.grade = ','.join(seen) or None
+
+    @property
+    def grade_display(self):
+        """显示用管理年级（多值用「、」分隔）。"""
+        return '、'.join(self.grades)
 
     def has_role(self, *roles):
         return self.role in roles

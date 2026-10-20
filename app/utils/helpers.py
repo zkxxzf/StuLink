@@ -91,6 +91,11 @@ def log_operation(user, action, target_type=None, target_id=None, detail=None,
                 detail = json.dumps(detail, ensure_ascii=False, default=str)
             except Exception:  # noqa: BLE001  序列化失败退化为 str
                 detail = str(detail)
+        # P1 M-06：detail 常含手机号/身份证明文；落库前统一掩码，
+        # 避免审计日志本身成为 PII 泄露源（日志文件层已有 mask_text，这里补 DB 层）。
+        if detail:
+            from app.utils.log_mask import mask_text
+            detail = mask_text(str(detail))
 
         try:
             ip_address = request.remote_addr if request else None
@@ -244,6 +249,12 @@ def get_graduated_grades():
 def clear_graduated_grades_cache():
     """清除已毕业年级缓存（年级毕业标记变更后调用）"""
     cache.delete('graduated_grades')
+
+
+def assert_grade_not_graduated(grade):
+    """P1 M-18：已毕业归档年级的成绩只读（改分/导入/复核应用统一拦截）。"""
+    if grade and grade in get_graduated_grades():
+        raise PermissionError(f'{grade} 已毕业归档，成绩只读，不能再修改或导入')
 
 
 def get_active_grades():

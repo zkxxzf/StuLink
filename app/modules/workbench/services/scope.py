@@ -14,7 +14,7 @@ from app.models import Student
 from app.models.user_data_scope import get_user_scope_classes
 from app.utils.scope import (user_scope_grades, class_pairs, teaching_links)
 from app.modules.grades.services.scope import (
-    get_scope, SCOPE_SCHOOL, SCOPE_GRADE,
+    get_scope, get_scope_grades, SCOPE_SCHOOL, SCOPE_GRADE,
 )
 
 
@@ -42,7 +42,7 @@ def managed_class_pairs(user):
     if scope == SCOPE_SCHOOL:
         return _all_pairs()
     if scope == SCOPE_GRADE:
-        return _grade_pairs([grade] if grade else [])
+        return _grade_pairs(get_scope_grades(user))
     # 班主任（UserClassLink）；任课教师并入任教映射（与成绩模块 visible_grades 口径一致：
     # scope_type=class 的任课教师若只看 UserClassLink 会拿到空列表，页面无班可选）
     pairs = class_pairs(user)
@@ -70,7 +70,7 @@ def class_allowed(user, grade, class_name):
         return True if classes is None else (class_name in classes)
     scope, g = get_scope(user)
     if scope == SCOPE_GRADE:
-        return grade == g
+        return grade in get_scope_grades(user)
     # 班主任（UserClassLink）或任课教师映射（任教年级/班级）
     if (grade, class_name) in class_pairs(user):
         return True

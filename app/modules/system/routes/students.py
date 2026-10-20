@@ -5,7 +5,8 @@ from markupsafe import Markup
 from flask_login import login_required, current_user
 from app.extensions import db
 from app.models import Student, BedAssignment, StudentAccommodation, Room
-from app.utils.crypto import encrypt as _encrypt_id
+from app.utils.crypto import (encrypt as _legacy_encrypt,
+                              id_card_index as _id_card_index)
 from app.forms.student_forms import StudentForm
 from app.utils.decorators import perm_required
 from app.utils.student_scope import apply_student_scope
@@ -27,6 +28,46 @@ import time
 logger = logging.getLogger(__name__)
 
 bp = Blueprint('students', __name__, url_prefix='/students')
+
+
+def _transfer_target_in_scope(user, grade, class_name):
+    """目标 (年级, 班级) 是否在当前用户的数据范围内（唯一口径 resolve_scope）"""
+    from app.utils.scope import resolve_scope
+    s = resolve_scope(user)
+    if s.kind == 'school':
+        return True
+    if s.kind == 'grades':
+        return bool(grade) and grade in s.grades
+    if s.kind == 'classes':
+        return (grade, class_name) in s.classes
+    return False
+
+
+def _transfer_target_error(student, new_grade, new_class):
+    """M-20：调班目标校验（字典内 + 已毕业冻结 + 目标数据范围）。
+
+    返回错误文案；None 表示可调。年级/班级字典为空时跳过字典校验
+    （空库/首次部署不至于完全不能调班），但毕业状态始终校验。
+
+    2026-10-19 第十三轮审计：原来只校验「字典内 + 未毕业」，源学生校验了
+    范围而目标不校验 → 年级长可把本年级学生调进他年级花名册（并从本年级消失）。
+    """
+    if not new_grade or not new_class:
+        return '年级和班级不能为空'
+    valid_grades = set(get_dict_values('grade'))
+    if valid_grades and new_grade not in valid_grades:
+        return f'目标年级「{new_grade}」不在年级字典中'
+    valid_classes = set(get_dict_values('class'))
+    if valid_classes and new_class not in valid_classes:
+        return f'目标班级「{new_class}」不在班级字典中'
+    graduated = set(get_graduated_grades())
+    if student.grade in graduated:
+        return f'{student.grade} 已毕业归档，不能调班'
+    if new_grade in graduated:
+        return f'{new_grade} 已毕业归档，不能调入'
+    if not _transfer_target_in_scope(current_user, new_grade, new_class):
+        return f'无权把学生调入「{new_grade} {new_class}」（不在你的数据范围内）'
+    return None
 
 
 def _student_in_scope(student):
@@ -287,8 +328,9 @@ def create():
             flash('身份证号格式不正确', 'danger')
             return render_template('system/students/form.html', form=form, title='新增学生')
         
-        # 2. 检查身份证号是否重复
-        if id_card and Student.query.filter_by(_id_card_encrypted=_encrypt_id(id_card)).first():
+        # 2. 检查身份证号是否重复（H-06：盲索引优先，兼容旧确定性密文双读）
+        if id_card and Student.query.filter(
+                Student.id_card_filter(id_card)).first():
             flash('该身份证号已存在', 'danger')
             return render_template('system/students/form.html', form=form, title='新增学生')
         
@@ -318,7 +360,8 @@ def create():
         return redirect(url_for('students.list_students'))
     # 班主任默认填入自己管理的年级班级
     if current_user.role == 'homeroom_teacher':
-        form.grade.data = form.grade.data or current_user.grade
+        form.grade.data = form.grade.data or (
+            current_user.grades[0] if current_user.grades else '')
         form.class_name.data = form.class_name.data or current_user.class_name
     return render_template('system/students/form.html', form=form, title='新增学生')
 
@@ -368,7 +411,7 @@ def edit(id):
         # 2. 检查身份证号是否重复（排除自身）
         if id_card:
             existing_id = Student.query.filter(
-                Student._id_card_encrypted == _encrypt_id(id_card),
+                Student.id_card_filter(id_card),
                 Student.id != student.id
             ).first()
             if existing_id:
@@ -895,13 +938,19 @@ def import_students():
             return redirect(url_for('students.list_students'))
 
         # 已有数据: student_number -> (name, id)
+        # H-06：同时收集盲索引与旧确定性密文，迁移未跑时也能正确判重。
         existing_snum_map = {}
         existing_ids = set()
-        for s in db.session.query(Student.student_number, Student.name, Student.id, Student._id_card_encrypted).all():
+        existing_idx = set()
+        for s in db.session.query(
+                Student.student_number, Student.name, Student.id,
+                Student._id_card_encrypted, Student.id_card_idx).all():
             if s[0]:
                 existing_snum_map[s[0]] = (s[1], s[2])
             if s[3]:
                 existing_ids.add(s[3])
+            if s[4]:
+                existing_idx.add(s[4])
 
         errors = []
         students_to_add = []
@@ -909,6 +958,7 @@ def import_students():
         conflicts = []
         seen_snums = set()
         seen_ids = set()
+        seen_idx = set()
 
         for row_idx in range(2, ws.max_row + 1):
             row_data = {}
@@ -949,14 +999,17 @@ def import_students():
                     seen_snums.add(snum)
 
             if id_card and not update_mode:
+                _idx = _id_card_index(id_card)
+                _legacy = _legacy_encrypt(id_card)
                 if not _validate_id_card(id_card):
                     row_errors.append(f'身份证号无效')
-                elif _encrypt_id(id_card) in existing_ids:
+                elif _idx in existing_idx or _legacy in existing_ids:
                     row_errors.append(f'身份证号已存在')
-                elif _encrypt_id(id_card) in seen_ids:
+                elif _idx in seen_idx or _legacy in seen_ids:
                     row_errors.append(f'身份证号文件内重复')
                 else:
-                    seen_ids.add(_encrypt_id(id_card))
+                    seen_idx.add(_idx)
+                    seen_ids.add(_legacy)
 
             # 班级名称校验：只允许两位数数字班级、不分班、已转出
             class_val = row_data.get('class_name', '').strip()
@@ -1237,8 +1290,9 @@ def transfer(id):
     new_grade = request.form.get('new_grade', '').strip()
     new_class = request.form.get('new_class', '').strip()
 
-    if not new_grade or not new_class:
-        flash('年级和班级不能为空', 'danger')
+    _target_err = _transfer_target_error(student, new_grade, new_class)
+    if _target_err:
+        flash(_target_err, 'danger')
         return redirect(url_for('students.list_students'))
 
     old_info = f'{student.grade} {student.class_name}'
@@ -1463,7 +1517,8 @@ def batch_transfer():
                 continue
 
             if tpl_type == 'id_card':
-                student = Student.query.filter_by(_id_card_encrypted=_encrypt_id(match_val)).first()
+                student = Student.query.filter(
+                    Student.id_card_filter(match_val)).first()
             else:
                 student = Student.query.filter_by(student_number=match_val).first()
 
@@ -1476,6 +1531,12 @@ def batch_transfer():
             # （含跨年级）。现在逐行复用 _student_in_scope，越权行跳过并计入错误。
             if not _student_in_scope(student):
                 errors.append(f'{row_label}（{match_val}）：不在你的数据范围内，已跳过')
+                continue
+
+            # M-20：批量调班同样校验目标年级/班级字典与毕业冻结
+            _target_err = _transfer_target_error(student, new_grade, new_class)
+            if _target_err:
+                errors.append(f'{row_label}（{match_val}）：{_target_err}')
                 continue
 
             old_loc = student_location_desc(student)

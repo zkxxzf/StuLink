@@ -1,0 +1,29 @@
+# StuLink HTTPS 反向代理（H-10）
+# 默认使用 Caddy 内部 CA（局域网自签）；换成正式证书时：
+#   1) 把 tls internal 改成 tls you@example.com（或证书文件路径）；
+#   2) 把 STULINK_HOST 设为内网域名并让客户端信任该 CA。
+#
+# 启动（需 Docker Compose >= 2.24，支持 !override）：
+#   docker compose -f deploy/docker-compose.yml \
+#                  -f deploy/docker-compose.tls.yml up -d
+
+{$STULINK_HOST:localhost} {
+	tls internal
+
+	encode gzip
+
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "DENY"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		-Server
+	}
+
+	reverse_proxy stulink:5000 {
+		header_up X-Real-IP {remote_host}
+		header_up X-Forwarded-For {remote_host}
+		header_up X-Forwarded-Proto {scheme}
+		header_up X-Forwarded-Host {host}
+	}
+}

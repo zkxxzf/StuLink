@@ -22,6 +22,9 @@ var state = {grade: '', examId: '', tab: 'grade', class_name: '', subject: '', d
 // tab 业务顺序。注意：Flask jsonify 默认按键名排序，Object.keys(opts.tabs) 的首项会是
 // 'class' 而不是 'grade'，因此不能用它决定默认 tab，必须按此固定顺序取第一个可见项。
 var TAB_ORDER = ['grade', 'class', 'subject', 'teacher', 'compare'];
+// 页签 ↔ 左侧「成绩分析」组子项（base.html 的 data-nav），两处要双向同步
+var TAB_NAV = {grade: 'ana_grade', class: 'ana_class', subject: 'ana_subject',
+               teacher: 'ana_teacher', compare: 'ana_compare'};
 var opts = null;
 var charts = {};
 var chartSpecs = {};   // 图表原始配置（按 key），主题切换重绘时用
@@ -49,9 +52,13 @@ function init(){
         bindClassMulti();
         bindViewToggle();
         syncClassCandidate();
-        // 可见 tab
+        // 可见 tab（页签与侧栏分析组同一份判定，避免「左边点得进 / 上面没这页」）
         Object.keys(opts.tabs).forEach(function(t){
-            if (!opts.tabs[t]) $('li[data-tab="'+t+'"]').hide();
+            if (!opts.tabs[t]){
+                $('li[data-tab="'+t+'"]').hide();
+                var nav = TAB_NAV[t];
+                if (nav) $('.efn-item[data-nav="' + nav + '"]').hide();
+            }
         });
         var first = TAB_ORDER.filter(function(t){ return opts.tabs[t]; })[0];
         if (!first){ showEmpty('grade', '您没有成绩查看权限'); return; }
@@ -156,9 +163,9 @@ function syncExamNav(){
         ana_grade: '/grades/analysis?exam=' + eid + '&tab=grade',
         ana_class: '/grades/analysis?exam=' + eid + '&tab=class',
         ana_subject: '/grades/analysis?exam=' + eid + '&tab=subject',
-        // 2026-10-13：原侧栏「AI 智能导入」项已并入「成绩导入」（data-nav="import"），
-        // 两种方式在导入页内切换，因此这里不再需要 ai 映射。
-        bands: '/grades/exams/' + eid + '/bands',
+        // 2026-10-19：原侧栏「AI 智能导入」项已并入「数据导入」（data-nav="import"），
+        // 同一页左右两栏，因此这里不再需要 ai 映射；
+        // 划线分层也去掉了独立侧栏项（编辑页从导入页卡片 / 考试详情进入），故无 bands 映射。
         pivot: '/grades/pivot?exam=' + eid,
         near: '/grades/exams/' + eid + '/near-line',
         report: '/grades/report?exam=' + eid,
@@ -184,6 +191,8 @@ function classListFor(grade){
     return (opts && opts.classes && opts.classes[grade]) ? opts.classes[grade].slice() : [];
 }
 
+/* 2026-10-19 用户口径：班级筛选改成和成绩单「按班级查看」一样的一排按钮
+   （01班、02班…），点一次即切换，不再用下拉。只在「班级分析」页签显示。 */
 function fillClasses(){
     var grade = $('#gGrade').val() || state.grade;
     var list = classListFor(grade);
@@ -192,31 +201,76 @@ function fillClasses(){
             return opts.locked.classes.some(function(l){ return l.grade === grade && l.class_name === c; });
         });
     }
-    var sel = $('#gClass').empty().append('<option value="">班级…</option>');
-    list.forEach(function(c){ sel.append('<option value="'+c+'">'+c+'</option>'); });
-    if (list.length) sel.val(list[0]);
-    state.class_name = sel.val() || '';
+    var bar = $('#gClassBar').empty();
+    list.forEach(function(c){
+        $('<button type="button" class="btn btn-sm g-class-btn"></button>')
+            .attr('data-cls', c).text(c).appendTo(bar);
+    });
+    if (!list.length){
+        bar.append('<span class="text-muted small">本场考试暂无班级</span>');
+    }
+    // 与原下拉一致：进入/切换考试时默认选第一个班
+    state.class_name = list[0] || '';
+    paintClassBar();
     fillSubject();
 }
 
+/* 班级按钮选中态：当前班=实心主色，其余=描边（与成绩单页按钮同一套观感） */
+function paintClassBar(){
+    $('#gClassBar .g-class-btn').each(function(){
+        var on = $(this).attr('data-cls') === state.class_name;
+        $(this).toggleClass('btn-primary', on)
+               .toggleClass('btn-outline-secondary', !on)
+               .attr('aria-pressed', on ? 'true' : 'false');
+    });
+}
+
+/* 2026-10-19 用户口径：学科筛选同样改成一排按钮（语文、数学…），
+   与班级筛选/成绩单页一致；只在「学科分析」「任课教师」页签显示。 */
 function fillSubject(){
-    var sel = $('#gSubject').empty();
+    var bar = $('#gSubjectBar').empty();
+    var mine = opts.teacher_combos || [];
+    var list = [];
     if (state.tab === 'subject'){
-        opts.subjects.forEach(function(s){ sel.append('<option value="'+s+'">'+s+'</option>'); });
-        if (!state.subject || !opts.subjects.includes(state.subject)) state.subject = opts.subjects[0] || '';
-        sel.val(state.subject);
+        list = opts.subjects.slice();
     } else if (state.tab === 'teacher'){
-        sel.append('<option value="">全部科目</option>');
-        var used = {};
-        opts.subjects.forEach(function(s){ used[s] = true; });
-        if (opts.teacher_combos && opts.teacher_combos.length){
-            opts.subjects.forEach(function(s){
-                if (opts.teacher_combos.some(function(c){ return c.subject === s; }))
-                    sel.append('<option value="'+s+'">'+s+'（仅我任课）</option>');
-            });
-        }
-        state.subject = '';
+        // 教师表只做「同学科教师」对比 → 不再提供「全部科目」，
+        // 默认落到第一个可选科目；教师角色只列本人任课科目（按钮 title 标注）。
+        list = mine.length
+            ? opts.subjects.filter(function(s){
+                  return mine.some(function(c){ return c.subject === s; });
+              })
+            : opts.subjects.slice();
+    } else {
+        return;                       // 其他页签不展示学科筛选
     }
+    if (!state.subject || list.indexOf(state.subject) < 0)
+        state.subject = list[0] || '';
+    list.forEach(function(s){
+        var own = (state.tab === 'teacher') && mine.some(function(c){
+            return c.subject === s;
+        });
+        appendSubjectBtn(bar, s, own);
+    });
+    paintSubjectBar();
+}
+
+/* 生成单个学科按钮（own=true 表示教师页签里"仅我任课"的科目） */
+function appendSubjectBtn(bar, subject, own){
+    $('<button type="button" class="btn btn-sm g-subject-btn"></button>')
+        .attr('data-subject', subject)
+        .attr('title', own ? '仅我任课的科目' : '')
+        .text(subject).appendTo(bar);
+}
+
+/* 学科按钮选中态：当前科目=实心主色，其余=描边（与班级按钮同一套观感） */
+function paintSubjectBar(){
+    $('#gSubjectBar .g-subject-btn').each(function(){
+        var on = $(this).attr('data-subject') === state.subject;
+        $(this).toggleClass('btn-primary', on)
+               .toggleClass('btn-outline-secondary', !on)
+               .attr('aria-pressed', on ? 'true' : 'false');
+    });
 }
 
 /* 2026-10-16 组合维度：本场考试出现过的选科组合 → 「组合」下拉。
@@ -249,10 +303,20 @@ function bindFilters(){
         fillCombos();           // 2026-10-16 组合随考试变
         loadCurrent();
     });
-    $('#gClass').on('change', function(){ state.class_name = $(this).val(); loadCurrent(); });
-    $('#gSubject').on('change', function(){
-        state.subject = $(this).val();
-        if (state.tab === 'teacher' && $(this).val() === '') state.subject = '';
+    // 班级按钮：点一次即切换（同成绩单页「按班级查看」），重复点当前班不重复请求
+    $('#gClassBar').on('click', '.g-class-btn', function(){
+        var cls = $(this).attr('data-cls') || '';
+        if (!cls || cls === state.class_name) return;
+        state.class_name = cls;
+        paintClassBar();
+        loadCurrent();
+    });
+    // 学科按钮：点一次即切换（与班级按钮/成绩单页同一交互）
+    $('#gSubjectBar').on('click', '.g-subject-btn', function(){
+        var sub = $(this).attr('data-subject') || '';
+        if (!sub || sub === state.subject) return;
+        state.subject = sub;
+        paintSubjectBar();
         loadCurrent();
     });
     $('#gDir').on('change', function(){
@@ -380,24 +444,67 @@ function bindViewToggle(){
     });
 }
 
+/* 2026-10-19 用户反馈「这俩位置不会同步」：页签 ↔ 侧栏分析组。
+   ① 侧栏高亮跟着页签走（此前只有服务端按 ?tab= 渲染一次，页内切页签不动）；
+   ② URL 的 tab 跟着页签走（replaceState 不产生历史记录），刷新 / 分享仍停在同一页。
+   侧栏不可见（全局态没有分析组）或该页签无权限时直接跳过，不回退到别的项。 */
+function syncSidebarTab(tab){
+    var nav = TAB_NAV[tab];
+    if (!nav || !opts || !opts.tabs || !opts.tabs[tab]) return;
+    var $item = $('.efn-item[data-nav="' + nav + '"]');
+    if (!$item.length) return;
+    $('.efn-item[data-nav^="ana_"]').removeClass('active');
+    $item.addClass('active');
+}
+
+function syncUrlTab(tab){
+    try {
+        if (!window.history || !window.history.replaceState) return;
+        var href = window.location.href;
+        var hash = '';
+        var hi = href.indexOf('#');
+        if (hi >= 0) { hash = href.slice(hi); href = href.slice(0, hi); }
+        var qi = href.indexOf('?');
+        var base = qi >= 0 ? href.slice(0, qi) : href;
+        var parts = qi >= 0 ? href.slice(qi + 1).split('&') : [];
+        var out = [], found = false;
+        for (var i = 0; i < parts.length; i++) {
+            if (!parts[i]) continue;
+            if (parts[i].split('=')[0] === 'tab') {
+                out.push('tab=' + encodeURIComponent(tab));
+                found = true;
+            } else {
+                out.push(parts[i]);
+            }
+        }
+        if (!found) out.push('tab=' + encodeURIComponent(tab));
+        var url = base + '?' + out.join('&') + hash;
+        if (url !== window.location.href) {
+            window.history.replaceState(null, '', url);
+        }
+    } catch (e) { /* 隐私模式 / 老浏览器不支持 → 只是地址栏不动，功能不受影响 */ }
+}
+
 function activateTab(tab, fromClick){
     state.tab = tab;
     // 筛选器显隐：班级仅班级分析；科目按 tab；班级多选仅对比 tab；
     // 人群（方向/组合）用于年级/学科/班级分析（2026-10-16 班级分析也支持按组合）
-    $('#gClass').toggleClass('d-none', tab !== 'class');
+    // 班级按钮组（班级分析专用）随 tab 显隐
+    $('#gClassBar').toggleClass('d-none', tab !== 'class');
     $('#gClassMulti').toggleClass('d-none', tab !== 'compare');
     var _popOn = (tab === 'grade' || tab === 'subject' || tab === 'class');
     $('#gPopWrap').toggleClass('d-none', !_popOn);
     $('#gSel').toggleClass('d-none', !_popOn);
     // 修复：原条件写反——学科/教师分析 tab 需要显示科目筛选器，年级/班级 tab 隐藏
-    $('#gSubject').toggleClass('d-none', tab !== 'subject' && tab !== 'teacher');
+    $('#gSubjectBar').toggleClass('d-none', tab !== 'subject' && tab !== 'teacher');
     if (tab === 'subject' || tab === 'teacher') fillSubject();
     if (tab === 'compare') renderClassList();
     $('#gTabs a[href="#pane-'+tab+'"]').tab('show');
-    // 班级下拉只随 tab 显隐，**绝不清空其值**：一旦清空，切回班级分析时
-    // state.class_name 读到空 → 后端查不到班级 → 前端误报"该考试尚未导入成绩"。
+    // 班级只随 tab 显隐，**绝不清空其值**：清空会让后端查不到班级 →
+    // 前端误报"该考试尚未导入成绩"。state.class_name 由 fillClasses/点击按钮维护。
     // （buildQuery 仅在 tab==='class' 时带 class_name，其他 tab 保留该值无副作用）
-    state.class_name = $('#gClass').val() || '';
+    syncUrlTab(tab);
+    syncSidebarTab(tab);
     loadCurrent();
 }
 
@@ -477,30 +584,22 @@ var escHtml = window.escHtml || function (s) {
 };
 
 function buildExamInfo(data){
-    if (!data.exam) return null;
-    var wrap = $('<div>');
-    wrap.append($('<div class="alert alert-light border py-2 small mb-2">').append(
-        '<i class="bi bi-info-circle"></i> ' +
-        '当前考试：<strong>' + escHtml(data.exam.name) + '</strong> · ' +
-        escHtml(data.exam.grade) + ' · ' + escHtml(data.exam.date) +
-        (data.class_name ? ' · 班级：' + escHtml(data.class_name) : '') +
-        ((data.classes || []).length ? ' · 对比班级：' + escHtml(data.classes.join('、')) : '') +
-        (data.subject ? ' · 科目：' + escHtml(data.subject) : '')
-    ));
-    // 分批导入（一次导一科）时，总分只是「已导入科目合计」，必须显式提示避免误读
+    // 2026-10-19 用户口径：内容区不再重复「当前考试：…」提示条
+    // （考试态页头已写明本场、全局态顶部有考试下拉，此条属冗余）。
+    // 分批导入（一次导一科）时，总分只是「已导入科目合计」，必须显式提示避免误读。
     var p = data.meta && data.meta.partial;
-    if (p){
-        wrap.append($('<div class="alert alert-warning py-2 small mb-2">').append(
-            // 注：expected 是全年级选科并集（可能 9 科），不是某个学生的应考科，
-            // 所以这里不写「x/y 科」的比例，避免误以为学生要考 9 科
-            '<i class="bi bi-exclamation-triangle"></i> <b>分批导入中</b>：本场已导入 '
-            + escHtml((p.imported || []).join('、') || '—') + '；'
-            + '本年级涉及的科目中尚未导入：<b>' + escHtml((p.missing || []).join('、')) + '</b>。'
-            + '此时<b>总分、总分排名、分数段/名次段及基于总分的上线统计</b>都只是'
-            + '「已导入科目合计」的口径，全部科目导完后才准确；'
-            + '单科分析（科目均分、及格率、单科排名）不受影响。'
-        ));
-    }
+    if (!p) return null;
+    var wrap = $('<div>');
+    wrap.append($('<div class="alert alert-warning py-2 small mb-2">').append(
+        // 注：expected 是全年级选科并集（可能 9 科），不是某个学生的应考科，
+        // 所以这里不写「x/y 科」的比例，避免误以为学生要考 9 科
+        '<i class="bi bi-exclamation-triangle"></i> <b>分批导入中</b>：本场已导入 '
+        + escHtml((p.imported || []).join('、') || '—') + '；'
+        + '本年级涉及的科目中尚未导入：<b>' + escHtml((p.missing || []).join('、')) + '</b>。'
+        + '此时<b>总分、总分排名、分数段/名次段及基于总分的上线统计</b>都只是'
+        + '「已导入科目合计」的口径，全部科目导完后才准确；'
+        + '单科分析（科目均分、及格率、单科排名）不受影响。'
+    ));
     return wrap;
 }
 
@@ -513,8 +612,10 @@ function showEmpty(tab, msg){
 }
 
 /* ============ 指标卡双视图：表格 / 图表 ============ */
-// 每张指标卡默认视图（可被页顶总开关批量改写，也可单卡覆盖）
-var masterView = 'table';
+// 每张指标卡默认视图（可被页顶总开关批量改写）。
+// 2026-10-19 用户口径：默认「图 + 表」同屏（有图的卡片上方画图、下方紧凑数据表），
+// 页顶总开关「表格」只用于需要纯表格（打印 / 抄数）时整体切换。
+var masterView = 'chart';
 
 function isNumVal(v){
     if (v === null || v === undefined || v === '') return false;
@@ -525,6 +626,8 @@ function isNumVal(v){
    优先级：后端 chartHint（完整规格） > chartHint 部分字段 > 自动推断。 */
 function autoChartSpec(t, key){
     var hint = t.chartHint || null;
+    // 后端显式 noChart（如「班级学生各科成绩表」）→ 该卡只出表格，不画图
+    if (t.noChart || hint === false) return null;
     // hint 带 xAxis+series（或 indicators）= 完整规格，直接用
     if (hint && ((hint.xAxis && hint.series) || hint.indicators)){
         return $.extend({title: t.title || key}, hint);
@@ -588,9 +691,6 @@ function buildTbody(t, rows){
     var tbody = $('<tbody>');
     (rows || []).forEach(function(r){
         var tr = $('<tr>');
-        if (t.link && r.no !== null && r.no !== undefined){
-            tr.addClass('stu-link').attr('data-no', r.no);
-        }
         visColsOf(t).forEach(function(c){
             var val = r[c.key];
             var td = $('<td' + (c.type !== 'text' ? ' class="num"' : '') + '>').text(fmt(val));
@@ -605,14 +705,6 @@ function buildTbody(t, rows){
         });
         tbody.append(tr);
     });
-    if (t.link){
-        tbody.on('click', 'tr.stu-link', function(){
-            var no = $(this).data('no');
-            if (no !== null && no !== undefined){
-                window.open('/grades/' + t.link + '?student_no=' + encodeURIComponent(no), '_blank');
-            }
-        });
-    }
     return tbody;
 }
 
@@ -645,9 +737,11 @@ function applyCardRows(card, rows){
     var spec = autoChartSpec($.extend({}, t, {rows: rows}), key);
     card.data('spec', spec);
     card.find('.tbl-wrap table tbody').replaceWith(buildTbody(t, rows));
+    // 图表视图下方的紧凑表与上方图共用同一份行数据 → 排序/列显隐后一起刷新
+    card.find('.chart-data table tbody').replaceWith(buildTbody(t, rows));
     updateSortHead(card);
     var tip = spec ? (spec.title + (spec.note ? '（' + spec.note + '）' : '')) : '';
-    card.find('.chart-tip').text(tip ? '图表数据同上表：' + tip : '');
+    card.find('.chart-tip').text(tip ? '图表数据见右侧数据表：' + tip : '');
     if (card.data('chartReady')){
         var inst = charts[card.data('chartKey')];
         if (inst && spec){
@@ -703,9 +797,20 @@ function buildTableHtml(t){
     return table;
 }
 
+/* 图表视图下方的「紧凑数据表」（2026-10-19 用户口径：上方图、下方表的数据，
+   表格紧凑一点）。与上方图同源（同一份 rows），跟随列显隐/排序刷新；
+   本身不绑排序交互（排序仍走「表格」视图），表头图标由 CSS 隐藏。 */
+function buildCompactTable(t){
+    var table = $('<table class="table g-table g-table-compact mb-0">');
+    table.append(buildThead(t));
+    table.append(buildTbody(t, t.rows || []));
+    return table;
+}
+
 /* 切换单卡的视图：'table' | 'chart'。图表首次切到时才初始化，之后仅显隐。 */
 function setCardView(card, view){
     var spec = card.data('spec');
+    if (view === 'chart' && !spec) view = 'table';   // 无图卡片不能被切成空白
     var tPane = card.find('.view-pane[data-view="table"]');
     var cPane = card.find('.view-pane[data-view="chart"]');
     card.find('.view-switch .btn').each(function(){
@@ -766,29 +871,21 @@ function renderTables(area, tables){
             t.visCols = colsAll.filter(function(c){ return visKeys.indexOf(c.key) >= 0; });
         }
 
-        var titleHtml = '<h6 class="mb-0"><i class="bi bi-table me-1"></i>' + escHtml(t.title || key);
-        // 带 link 的表（如学生明细表）：整行可点击跳转个人成绩查询
-        if (t.link){
-            titleHtml += ' <span class="text-muted small fw-normal ms-2">'
-                + '<i class="bi bi-box-arrow-up-right"></i> 点击行查看学生个人成绩</span>';
-        }
-        titleHtml += '</h6>';
+        var titleHtml = '<h6 class="mb-0"><i class="bi bi-table me-1"></i>'
+            + escHtml(t.title || key) + '</h6>';
 
         var controls = $('<div class="d-flex align-items-center gap-2">');
-        if (spec){
-            controls.append(
-                '<div class="btn-group btn-group-sm view-switch" role="group">'
-                + '<button type="button" class="btn btn-outline-primary' + (masterView === 'table' ? ' active' : '')
-                + '" data-view="table"><i class="bi bi-table"></i> 表格</button>'
-                + '<button type="button" class="btn btn-outline-primary' + (masterView === 'chart' ? ' active' : '')
-                + '" data-view="chart"><i class="bi bi-bar-chart"></i> 图表</button></div>');
-        }
+        // 2026-10-19 用户口径：卡片头的「表格 | 图表」切换去掉 ——
+        // 有图的卡片固定「上方图 + 下方紧凑数据表」，无图的仍是纯表格；
+        // 需要整体只看表格时用页顶总开关。
         if (window.TableCols){
             controls.append(TableCols.menu(ck, colsAll, function(keys){
                 t.visCols = colsAll.filter(function(c){ return keys.indexOf(c.key) >= 0; });
                 // 重建表头 + 行（当前行序保持；排序状态与图表同源不变）
+                // 图表视图下方的紧凑表也要跟着换表头（同一份列显隐口径）
                 var $tbl = card.find('.tbl-wrap table').first();
                 $tbl.find('thead').replaceWith(buildThead(t));
+                card.find('.chart-data table thead').replaceWith(buildThead(t));
                 bindSortHead(card);
                 applyCardRows(card, card.data('rows') || []);
             }));
@@ -801,9 +898,11 @@ function renderTables(area, tables){
         body.append($('<div class="tbl-wrap view-pane" data-view="table">').append(buildTableHtml(t)));
         if (spec){
             body.append($('<div class="view-pane chart-pane" data-view="chart" hidden>')
-                .append('<div class="chart-tip px-3 pt-2 pb-1">图表数据同上表：' + escHtml(t.title || key)
+                .append('<div class="chart-tip px-3 pt-2 pb-1">图表数据见右侧数据表：'
+                    + escHtml(t.title || key)
                     + (spec.note ? '（' + escHtml(spec.note) + '）' : '') + '</div>')
-                .append('<div class="tbl-chart"></div>'));
+                .append('<div class="tbl-chart"></div>')
+                .append($('<div class="chart-data">').append(buildCompactTable(t))));
         }
         card.append(body);
 
@@ -812,7 +911,8 @@ function renderTables(area, tables){
         });
         // 表头排序：升序 → 降序 → 还原原始顺序（数据、图表同份，导出仍取后端原序）
         bindSortHead(card);
-        if (masterView === 'chart') setCardView(card, 'chart');
+        // 只有真的能出图的卡片才切图表视图，否则会把表格藏起来、卡片变空白
+        if (masterView === 'chart' && spec) setCardView(card, 'chart');
         card.find('.tbl-fold').on('click', function(){
             var visible = body.is(':visible');
             body.toggle();
@@ -865,6 +965,7 @@ function chartOption(c){
         case 'boxplot': return boxOption(c);
         case 'line': return lineOption(c);
         case 'dual': return dualOption(c);
+        case 'combo': return comboOption(c);
         case 'radar': return radarOption(c);
         case 'heatmap': return heatOption(c);
         default: return {};
@@ -963,7 +1064,11 @@ function barOption(c, grouped){
 }
 
 function stackOption(c){
-    return {tooltip: {trigger: 'axis'}, legend: {top: 0, type: 'scroll'},
+    // 2026-10-19 左图右表后图宽只有卡片的 42%，默认 12px 图例放不下 8 个名次段
+    // → 图例字号/间距压小，仍保留 scroll 分页兜底
+    return {tooltip: {trigger: 'axis'},
+        legend: {top: 0, type: 'scroll', itemGap: 8, itemWidth: 10,
+                 itemHeight: 10, textStyle: {fontSize: 10}},
         grid: gridOf(c), xAxis: catAxisOf(c), dataZoom: zoomOf(c),
         yAxis: yFmt(),
         series: (c.series || []).map(function(s, i){
@@ -1008,6 +1113,28 @@ function dualOption(c){
         series: (c.series || []).map(function(s){
             return {name: s.name, type: 'line', data: s.data, yAxisIndex: s.yAxis || 0,
                 smooth: true, symbolSize: 5};
+        })};
+}
+
+/* 柱+折线组合（2026-10-19 年级汇总表）：人数走左轴柱形，率% 走右轴折线。 */
+function comboOption(c){
+    var names = c.yAxisNames || ['人数', '上线率%'];
+    return {color: palette(), tooltip: {trigger: 'axis'},
+        legend: {top: 0, type: 'scroll'},
+        grid: gridOf(c), xAxis: catAxisOf(c), dataZoom: zoomOf(c),
+        yAxis: [
+            {type: 'value', name: names[0], axisLabel: {formatter: '{value}'}},
+            {type: 'value', name: names[1], max: 100,
+             axisLabel: {formatter: '{value}%'}}
+        ],
+        series: (c.series || []).map(function(s){
+            var yi = s.axis === 1 ? 1 : 0;
+            if (s.type === 'line'){
+                return {name: s.name, type: 'line', yAxisIndex: yi,
+                    data: s.data, smooth: true, symbolSize: 6,
+                    connectNulls: false};
+            }
+            return {name: s.name, type: 'bar', yAxisIndex: yi, data: s.data};
         })};
 }
 

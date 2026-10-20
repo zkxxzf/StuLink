@@ -8,14 +8,34 @@
     volumes:
       - ./stulink-data:/app/data
     restart: unless-stopped
+    init: true
+    # P2 M-16：最小权限 + 资源/日志上限，避免单容器打满宿主或日志无限增长
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - NET_RAW
+      - SYS_ADMIN
+      - MKNOD
+      - AUDIT_WRITE
+    pids_limit: 256
+    mem_limit: 1g
+    cpus: 2.0
+    tmpfs:
+      - /tmp
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
     environment:
       - TZ=Asia/Shanghai
       - DATABASE_URL=sqlite:////app/data/system.db
     healthcheck:
-      test: ["CMD", "python", "-c", "import os; exit(0 if os.path.exists('/app/data/.secret_key') else 1)"]
-      interval: 10s
+      # 真实健康检查：/health 会执行 SELECT 1；不再只看密钥文件存在
+      test: ["CMD", "python", "-c", "import sys,urllib.request; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:5000/health', timeout=3).status == 200 else 1)"]
+      interval: 30s
       timeout: 5s
-      retries: 10
+      retries: 3
       start_period: 30s
 
   alumni:
@@ -30,6 +50,24 @@
     volumes:
       - ./stulink-data:/app/data:ro
     restart: unless-stopped
+    init: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - NET_RAW
+      - SYS_ADMIN
+      - MKNOD
+      - AUDIT_WRITE
+    pids_limit: 128
+    mem_limit: 256m
+    cpus: 1.0
+    tmpfs:
+      - /tmp
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
     environment:
       - TZ=Asia/Shanghai
 
@@ -43,11 +81,30 @@
       stulink:
         condition: service_healthy
     ports:
-      - "8765:8765"
+      # H-09：只发布到宿主机回环，局域网无法直连；确需远程访问时走反代/隧道。
+      - "127.0.0.1:8765:8765"
     volumes:
       # MCP 直接读取主应用的 SQLite 库：读写挂载（WAL 库无法在只读挂载下打开）
       - ./stulink-data:/app/data
     restart: unless-stopped
+    init: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - NET_RAW
+      - SYS_ADMIN
+      - MKNOD
+      - AUDIT_WRITE
+    pids_limit: 256
+    mem_limit: 512m
+    cpus: 1.0
+    tmpfs:
+      - /tmp
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
     environment:
       - TZ=Asia/Shanghai
       - DATABASE_URL=sqlite:////app/data/system.db

@@ -10,15 +10,18 @@
 - 彻底删除 / 清理过期：仅管理员，且都写操作日志。
 """
 import json
+import os
 from datetime import datetime
 
 from flask import (Blueprint, render_template, request, jsonify)
 from flask_login import login_required, current_user
 
+from config import BASE_DIR
 from app.extensions import db
 from app.models.trash import TrashRecord, TRASH_RETENTION_DAYS
 from app.utils.decorators import perm_required
 from app.utils.helpers import log_operation
+from app.utils.trash import purge_expired_records as purge_expired_impl
 from app.utils.trash import restore as restore_record
 
 bp = Blueprint('trash', __name__, url_prefix='/trash')
@@ -126,13 +129,16 @@ def purge_one(rid):
 @login_required
 @perm_required(PERM)
 def purge_expired():
-    """清理已过期（默认 30 天）且未恢复的归档。"""
-    n = (TrashRecord.query
-         .filter(TrashRecord.restored_at.is_(None),
-                 TrashRecord.expires_at < datetime.now())
-         .delete(synchronize_session=False))
-    db.session.commit()
+    """清理已过期（默认 30 天）且未恢复的归档；删除前自动导出元数据。"""
+    result = purge_expired_impl(
+        dry_run=False,
+        export_dir=os.path.join(BASE_DIR, 'data', 'backups'),
+        include_restored=False)
+    if result.get('error'):
+        return jsonify({'ok': False, 'message': result['error']}), 500
+    n = result.get('deleted', 0)
     log_operation(current_user, '清理', '回收站', None,
-                  f'过期归档 {n} 条', module='system')
-    return jsonify({'ok': True, 'deleted': n,
-                    'message': f'已清理 {n} 条过期归档'})
+                  f'过期归档 {n} 条；导出 {result.get("export") or "无"}',
+                  module='system')
+    return jsonify({'ok': True, 'deleted': n, 'export': result.get('export'),
+                    'message': f'已清理 {n} 条过期归档（删除前已导出元数据）'})

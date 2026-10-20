@@ -2,15 +2,17 @@
 {% block title %}学生列表{% endblock %}
 {% block content %}
 <style>
-.filter-row th { padding: 2px 4px; background: #fafafa; }
-.filter-row select { width: 100%; font-size: 11px; padding: 2px 4px; border: 1px solid #dee2e6; border-radius: 3px; background: #fff; }
+/* 2026-10-19 第十三轮审计：颜色一律走主题变量（原先硬编码浅色，
+   深色主题下白底 + 浅字 → 四列只读信息与筛选下拉全部"看不见"） */
+.filter-row th { padding: 2px 4px; background: var(--sl-surface-3); }
+.filter-row select { width: 100%; font-size: 11px; padding: 2px 4px; border: 1px solid var(--sl-border); border-radius: 3px; background: var(--sl-surface); color: var(--sl-text); }
 .filter-row select:focus { border-color: #86b7fe; outline: none; box-shadow: 0 0 0.15rem rgba(13,110,253,.25); }
-.filter-row input { width: 100%; font-size: 11px; padding: 2px 4px; border: 1px solid #dee2e6; border-radius: 3px; }
+.filter-row input { width: 100%; font-size: 11px; padding: 2px 4px; border: 1px solid var(--sl-border); border-radius: 3px; background: var(--sl-surface); color: var(--sl-text); }
 .filter-row input:focus { border-color: #86b7fe; outline: none; box-shadow: 0 0 0.15rem rgba(13,110,253,.25); }
 /* v1.19.47.4 宿舍信息列（只读）：淡底色 + 锁定小图标，一眼看出"这里不能改" */
-.col-dorm { background: #f8fafc; }
-.col-dorm .bi-lock { color: #94a3b8; font-size: 10px; }
-th.col-dorm-head { background: #eef2f7 !important; }
+.col-dorm { background: var(--sl-surface-2); }
+.col-dorm .bi-lock { color: var(--sl-text-muted); font-size: 10px; }
+th.col-dorm-head { background: var(--sl-surface-3) !important; }
 /* 2026-10-14 UI 审计 H4：手机端（≤768px）表格崩坏 ——
    18 列在 390px 下被压到 min-content，姓名 / 选科 / 毕业学校等中文列**逐字换行变成竖排**，
    整表还把页面顶出横向滚动条（实测溢出 764px）。

@@ -252,7 +252,7 @@ def apply_plan(items, username_overrides=None):
                         subject=it['subject'] or None,
                         note=it['note'] or None)
             if it['id_card']:
-                t.id_card_enc = id_card_util.encrypt_id_card(it['id_card'])
+                t.set_id_card(it['id_card'])
             db.session.add(t)
             db.session.flush()
             n_create += 1
@@ -262,7 +262,7 @@ def apply_plan(items, username_overrides=None):
                 n_skip += 1
                 continue
             if it['id_card'] and not t.id_card_enc:
-                t.id_card_enc = id_card_util.encrypt_id_card(it['id_card'])
+                t.set_id_card(it['id_card'])
             if it['phone']:
                 t.phone = it['phone']
             if it['subject']:

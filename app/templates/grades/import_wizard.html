@@ -1,72 +1,253 @@
 {% extends "base.html" %}
-{% block title %}导入成绩 - {{ exam.name }}{% endblock %}
+{% block title %}数据导入 - {{ exam.name }}{% endblock %}
 {% block content %}
 {% set info = {'A': '增量覆盖（默认）', 'B': '整场重置'} %}
 <div class="d-flex align-items-center mb-3 flex-wrap gap-2">
-    <a href="{{ url_for('grades.exam_detail', exam_id=exam.id) }}" class="btn btn-sm btn-outline-secondary" title="返回" aria-label="返回">
+    <a href="{{ url_for('grades.exam_detail', exam_id=exam.id) }}" class="btn btn-sm btn-outline-secondary" title="返回成绩单" aria-label="返回成绩单">
         <i class="bi bi-arrow-left"></i>
     </a>
-    <h5 class="mb-0"><i class="bi bi-upload"></i> 导入成绩 · 标准模板</h5>
-    <span class="text-muted small">{{ exam.name }} · {{ exam.grade }} · {{ exam.exam_date.strftime('%Y-%m-%d') }} · 状态：{{ status_label[exam.status] }}</span>
-    <a href="{{ url_for('grades.template_download') }}" class="btn btn-outline-primary btn-sm ms-auto">
-        <i class="bi bi-download"></i> 下载成绩导入模板
-    </a>
+    {# 顶部导航栏已固定展示本场考试；这里是本页标题。 #}
+    <h4 class="mb-0"><i class="bi bi-box-arrow-in-down"></i> 数据导入</h4>
+    <span class="badge bg-{{ 'success' if exam.status == 'imported' else ('warning text-dark' if exam.status == 'dirty' else 'secondary') }}">
+        {{ status_label[exam.status] }}
+    </span>
 </div>
 
-{# 2026-10-13：与「AI 智能导入」同一个侧栏入口下的两种方式，页面内切换（见 _import_tabs.html） #}
-{% set import_tab = 'std' %}{% include 'grades/_import_tabs.html' %}
-
+{# 2026-10-19：原「成绩导入」升级为「数据导入」——
+   左侧＝AI 智能导入（成绩 / 分数线 / 考务 / 场次，AI 只识别列，数据仍由系统逐行解析）；
+   右侧＝标准模板（成绩，确定性解析）。两种方式同页并列，不再分两个页面/两个页签。
+   划线分层状态条在两栏下方直接展示，不再套卡片；成绩模板下载移进模板导入卡内。 #}
 {% if step == 'upload' %}
-<div class="card" style="max-width:760px;">
-    <div class="card-body">
-        <form method="post" enctype="multipart/form-data"
-              action="{{ url_for('grades.exam_import_upload', exam_id=exam.id) }}">
-            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-            <div class="mb-3">
-                <label class="form-label fw-semibold">1. 选择成绩 Excel 文件</label>
-                <input type="file" name="file" class="form-control" accept=".xlsx,.xls" required>
-                <div class="form-text">
-                    模板 A：学号/姓名/年级(可选)/班级(可选)/总分(可选)/9 科列 —— 参考 Excel「学生成绩表」可直接整表粘贴；
-                    模板 B：学号/姓名/年级(可选)/若干科目列。两模板均允许分批（只含部分班级/方向/科目）。
-                </div>
+<div class="row g-3 align-items-stretch">
+    {# 2026-10-19 用户口径：AI 智能导入在左、标准模板导入在右 #}
+    <div class="col-lg-5">
+        <div class="card di-card di-ai-card" id="aiPanel">
+            <div class="card-header di-card-head">
+                <span class="di-title"><i class="bi bi-stars"></i> AI 智能导入</span>
+                <span class="di-sub">任意表格 / 图片 · AI 只识别列</span>
             </div>
-            <div class="mb-3">
-                <label class="form-label fw-semibold">2. 导入模式</label>
-                <div class="form-check">
-                    <input class="form-check-input" type="radio" name="mode" id="m_a" value="A" checked>
-                    <label class="form-check-label" for="m_a">
-                        <strong>模式 A：增量覆盖（推荐）</strong> —— 文件中出现的（学生×科目）覆盖旧成绩；
-                        文件为空的科目视为缺考；文件未出现的科目列与未出现的学生保留不动。
-                    </label>
+            <div class="card-body d-flex flex-column">
+                <label class="di-drop" id="aiDrop" for="aiFiles">
+                    <i class="bi bi-cloud-arrow-up"></i>
+                    <span class="di-drop-main">拖入文件，或点击选择</span>
+                    <span class="di-drop-sub">Excel（可多选，最多 8 个）· 图片 jpg/png</span>
+                </label>
+                <input type="file" id="aiFiles" class="d-none" multiple
+                       accept=".xlsx,.xlsm,.xls,.jpg,.jpeg,.png,.webp,.bmp,.gif">
+                <div id="aiFileName" class="di-file-name"></div>
+                <div class="di-chips">
+                    <span class="di-chip" title="赋分 / 原始，可一次上传两个文件自动合并">成绩</span>
+                    <span class="di-chip" title="科目 × 清北/985/211/特控/本科线，识别后写入划线分层">分数线</span>
+                    <span class="di-chip" title="考生名单 / 编排结果（学号、姓名、班级、选科、考场、座号、考号）">考生名单</span>
+                    <span class="di-chip" title="考场编号 / 位置 / 科目 / 容量 / 考号前缀">考场</span>
+                    <span class="di-chip" title="考试时间表 / 监考表，表格或照片都可以">场次</span>
                 </div>
-                <div class="form-check mt-1">
-                    <input class="form-check-input" type="radio" name="mode" id="m_b" value="B">
-                    <label class="form-check-label" for="m_b">
-                        <strong>模式 B：整场重置</strong> —— 清空本场全部成绩后仅按本次文件导入（上次整体导错时用）。
-                    </label>
-                </div>
-                <div class="form-check mt-2" id="rmWrap">
-                    <input class="form-check-input" type="checkbox" name="remove_missing" id="rm" value="1">
-                    <label class="form-check-label" for="rm">一并移除本次文件中未出现的原有学生成绩（模式 A，慎用）</label>
-                </div>
-            </div>
-            <div class="mb-3">
-                <label class="form-label fw-semibold">3. 上传并校验</label>
-                <button type="submit" class="btn btn-primary">
-                    <i class="bi bi-search"></i> 解析并预览差异
+                <button class="btn btn-primary w-100 mt-3" id="aiAnalyze">
+                    <i class="bi bi-magic"></i> 让 AI 识别
                 </button>
+                <span id="aiMsg" class="small mt-2"></span>
+                <div class="di-note">
+                    AI 只判断「哪列是什么」，数据由系统逐行解析；「各科分数线」表会直接
+                    写入划线分层。没配置 AI Key 也能用，识别后手工指定每列用途即可。
+                </div>
             </div>
-        </form>
-        <script>
-        $(function(){
-            $('input[name=mode]').on('change', function(){
-                $('#rmWrap').toggle($(this).val() === 'A');
-            });
-        });
-        </script>
+        </div>
+    </div>
+    <div class="col-lg-7">
+        <div class="card di-card h-100">
+            <div class="card-header di-card-head">
+                <span class="di-title"><i class="bi bi-file-earmark-spreadsheet"></i> 标准模板导入</span>
+                <span class="di-sub">成绩 · 按 A/B 模板确定性解析</span>
+            </div>
+            <div class="card-body">
+                <form method="post" enctype="multipart/form-data"
+                      action="{{ url_for('grades.exam_import_upload', exam_id=exam.id) }}">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                    <div class="mb-3">
+                        <label class="form-label fw-semibold">1. 选择成绩 Excel 文件</label>
+                        <input type="file" name="file" class="form-control" accept=".xlsx,.xls" required>
+                        <div class="form-text">
+                            模板 A：学号/姓名/年级(可选)/班级(可选)/总分(可选)/9 科列；
+                            模板 B：学号/姓名/年级(可选)/若干科目列。允许分批导入。
+                        </div>
+                        {# 2026-10-19 用户口径：模板下载从页头右上角移进模板导入卡内 #}
+                        <div class="mt-2">
+                            <a href="{{ url_for('grades.template_download') }}" class="small">
+                                <i class="bi bi-download"></i> 下载成绩模板
+                            </a>
+                        </div>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label fw-semibold">2. 导入模式</label>
+                        <div class="form-check">
+                            <input class="form-check-input" type="radio" name="mode" id="m_a" value="A" checked>
+                            <label class="form-check-label" for="m_a">
+                                <strong>模式 A：增量覆盖（推荐）</strong> —— 文件中出现的（学生×科目）覆盖旧成绩；
+                                文件为空的科目视为缺考；未出现的科目列与学生保留不动。
+                            </label>
+                        </div>
+                        <div class="form-check mt-1">
+                            <input class="form-check-input" type="radio" name="mode" id="m_b" value="B">
+                            <label class="form-check-label" for="m_b">
+                                <strong>模式 B：整场重置</strong> —— 清空本场全部成绩后仅按本次文件导入（上次整体导错时用）。
+                            </label>
+                        </div>
+                        <div class="form-check mt-2" id="rmWrap">
+                            <input class="form-check-input" type="checkbox" name="remove_missing" id="rm" value="1">
+                            <label class="form-check-label" for="rm">一并移除本次文件中未出现的原有学生成绩（模式 A，慎用）</label>
+                        </div>
+                    </div>
+                    <div class="mb-0">
+                        <label class="form-label fw-semibold">3. 上传并校验</label>
+                        <button type="submit" class="btn btn-primary">
+                            <i class="bi bi-search"></i> 解析并预览差异
+                        </button>
+                    </div>
+                </form>
+            </div>
+        </div>
     </div>
 </div>
 
+{# 划线分层状态条：两栏下方直接展示，不再套卡片 #}
+{% include 'grades/_band_summary.html' %}
+
+{# 2026-10-19 用户口径：分数修改记录属于导入后的数据核对环节，放在数据导入页。 #}
+{% if current_user.has_perm('grades.edit') %}
+<div class="card mt-3" id="scoreChanges">
+    <div class="card-header py-2 d-flex align-items-center flex-wrap gap-2">
+        <span class="fw-semibold">
+            <i class="bi bi-clock-history"></i> 分数修改记录
+        </span>
+        <span class="badge bg-secondary">{{ change_log_count }} 条</span>
+        <span class="text-muted small">最近 {{ change_logs|length }} 条</span>
+        <a href="{{ url_for('grades.score_changes') }}?exam={{ exam.id }}"
+           class="btn btn-sm btn-outline-secondary ms-auto">
+            查看完整记录 <i class="bi bi-arrow-right"></i>
+        </a>
+    </div>
+    <div class="table-responsive" style="max-height:360px;">
+        <table class="table table-sm table-hover align-middle mb-0">
+            <thead class="table-light sticky-top">
+            <tr>
+                <th style="width:140px;">时间</th>
+                <th>学生</th>
+                <th>科目</th>
+                <th class="text-end">赋分（前 → 后）</th>
+                <th class="text-end">原始分（前 → 后）</th>
+                <th>类型</th>
+                <th>操作人</th>
+            </tr>
+            </thead>
+            <tbody>
+            {% for g in change_logs %}
+            <tr>
+                <td class="small text-muted">{{ g.operated_at.strftime('%m-%d %H:%M:%S') if g.operated_at else '—' }}</td>
+                <td>
+                    <span class="fw-semibold">{{ g.student_name or '—' }}</span>
+                    <span class="small text-muted">{{ g.student_no }}{% if g.class_name %} · {{ g.class_name }}{% endif %}</span>
+                </td>
+                <td>{{ g.subject }}</td>
+                <td class="text-end">
+                    {% if g.action == 'add' %}<span class="text-muted">缺考</span>
+                    {% else %}{{ '—' if g.old_score is none else g.old_score }}{% endif %} →
+                    {% if g.action == 'delete' %}<span class="text-danger">缺考</span>
+                    {% else %}<b>{{ '—' if g.new_score is none else g.new_score }}</b>{% endif %}
+                </td>
+                <td class="text-end text-muted">
+                    {% if g.action == 'add' %}—{% else %}{{ '—' if g.old_raw is none else g.old_raw }}{% endif %} →
+                    {% if g.action == 'delete' %}—
+                    {% else %}{{ '—' if g.new_raw is none else g.new_raw }}{% endif %}
+                </td>
+                <td>
+                    {% if g.action == 'delete' %}
+                    <span class="badge bg-warning text-dark">标记缺考</span>
+                    {% elif g.action == 'add' %}
+                    <span class="badge bg-success">补录</span>
+                    {% else %}
+                    <span class="badge bg-info text-dark">修改</span>
+                    {% endif %}
+                </td>
+                <td>{{ g.operator_name or '—' }}</td>
+            </tr>
+            {% else %}
+            <tr><td colspan="7" class="text-center text-muted py-4">
+                本场考试还没有改分记录
+            </td></tr>
+            {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+{% endif %}
+
+{# ② AI 结论 + 待确认问题 #}
+<div class="card mb-3 d-none" id="aiBox">
+    <div class="card-header py-2"><i class="bi bi-stars"></i> AI 识别结果（请核对）</div>
+    <div class="card-body">
+        <div id="aiKind" class="mb-2"></div>
+        <div id="aiQuestions"></div>
+        <div id="aiNotes" class="text-muted small"></div>
+    </div>
+</div>
+
+{# ②-2 考试场次（图片识图 / 监考表解析结果，用于划分场次） #}
+<div class="card mb-3 d-none" id="schedBox">
+    <div class="card-header py-2"><i class="bi bi-calendar3"></i> 识别出的考试场次（划分场次）</div>
+    <div class="card-body">
+        <div class="small text-muted mb-2">
+            以下场次将写入本场考务的<b>环节⑤ 考试时间表</b>；
+            识别结果<b>可直接修改</b>（例如给「四选二」这类没写科目的场次补上科目）。
+        </div>
+        <div class="table-responsive" style="max-height:320px;overflow:auto">
+            <table class="table table-sm align-middle mb-0" id="schedTable">
+                <thead class="table-light">
+                <tr><th style="width:34px">#</th><th>日期</th><th>开始</th><th>结束</th>
+                    <th>科目</th><th>选科/分场</th><th style="width:70px">来源</th>
+                    <th style="width:44px"></th></tr>
+                </thead>
+                <tbody></tbody>
+            </table>
+        </div>
+        <div class="form-check mt-2">
+            <input class="form-check-input" type="checkbox" id="schedReplace" checked>
+            <label class="form-check-label small" for="schedReplace">
+                <b>覆盖本场已有场次</b>（推荐：以本次文件为准重建场次；取消则追加）
+            </label>
+        </div>
+        <div id="schedWarn" class="small text-warning mt-1"></div>
+    </div>
+</div>
+
+{# ③ 列映射 #}
+<div class="card mb-3 d-none" id="mapBox">
+    <div class="card-header py-2"><i class="bi bi-diagram-3"></i> 列映射（可修改）</div>
+    <div class="card-body" id="mapBody"></div>
+</div>
+
+{# ④ 预览 / 导入 #}
+<div class="card mb-3 d-none" id="runBox">
+    <div class="card-header py-2"><i class="bi bi-check2-square"></i> 预览与导入</div>
+    <div class="card-body">
+        <div class="form-check mb-2">
+            <input class="form-check-input" type="checkbox" id="aiModeB" checked>
+            <label class="form-check-label small" for="aiModeB">
+                <b>整场覆盖</b>（推荐：用本次文件的结果替换本场现有成绩）
+            </label>
+        </div>
+        <div class="form-check mb-2">
+            <input class="form-check-input" type="checkbox" id="aiIncludeSkip">
+            <label class="form-check-label small" for="aiIncludeSkip">
+                不参加考试的学生如有成绩，也一并添加（默认跳过）
+            </label>
+        </div>
+        <button class="btn btn-outline-info btn-sm" id="aiPreview"><i class="bi bi-eye"></i> 预览</button>
+        <button class="btn btn-primary btn-sm ms-1" id="aiApply"><i class="bi bi-check-lg"></i> 确认导入</button>
+        <span id="aiRunMsg" class="ms-2 small"></span>
+        <pre id="aiPreviewBox" class="small bg-light border rounded p-2 mt-2 mb-0 d-none"
+             style="max-height:260px;overflow:auto;"></pre>
+    </div>
+</div>
 {% elif step == 'report' %}
 {% set headers = draft.headers %}
 {% set stats = draft.stats %}
@@ -100,6 +281,16 @@
         <div class="stat-label">未出现保留（人）</div></div></div></div>
 </div>
 
+{% if draft.skip_students %}
+{# 2026-10-19 用户口径：考务名单里「不参加考试」的学生，成绩表有分也默认不加 #}
+<div class="alert alert-warning py-2 small">
+    <i class="bi bi-person-dash"></i>
+    成绩表中有 <b>{{ draft.skip_students|length }}</b> 人已在考务名单标记「不参加考试」，
+    默认<b>不导入</b>其成绩：
+    {% for s in draft.skip_students[:10] %}{{ s.class_name }}{{ s.name }}（{{ s.no }}）{% if not loop.last %}、{% endif %}{% endfor %}{% if draft.skip_students|length > 10 %} 等{% endif %}
+</div>
+{% endif %}
+
 {% if draft.errors %}
 <div class="card mb-3">
     <div class="card-header py-2 d-flex justify-content-between align-items-center">
@@ -125,6 +316,16 @@
       onsubmit="return confirm('确认按当前差异导入？导入后自动重算排名。')">
     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
     <input type="hidden" name="token" value="{{ token }}">
+    {% if draft.skip_students %}
+    <div class="form-check mb-2">
+        <input class="form-check-input" type="checkbox" name="include_skip"
+               value="1" id="includeSkip">
+        <label class="form-check-label small" for="includeSkip">
+            仍然添加这 {{ draft.skip_students|length }} 名「不参加考试」学生的成绩
+            （不勾选＝跳过，不给他们添加）
+        </label>
+    </div>
+    {% endif %}
     <div class="d-flex gap-2">
         <button type="submit" class="btn btn-success" {{ 'disabled' if stats.ok_rows == 0 }}>
             <i class="bi bi-check-lg"></i> 确认导入（{{ info.get(draft.mode, draft.mode) }}）
@@ -134,5 +335,66 @@
         </a>
     </div>
 </form>
+
+{# 预览页也保留划线状态条（与上传页同一片段） #}
+{% include 'grades/_band_summary.html' %}
+{% endif %}
+{% endblock %}
+{% block extra_js %}
+{% if step == 'upload' %}
+<script>
+window.AI_IMPORT_EXAM = {{ exam.id }};
+window.AI_SUBJECTS = {{ subjects|tojson }};
+window.AI_KIND_LABEL = {{ score_kinds|tojson }};
+window.AFFAIR_FIELDS = {{ affair_fields|tojson }};
+window.SCHEDULE_KIND = {{ schedule_kind|tojson }};
+window.SCHEDULE_KIND_LABEL = {{ schedule_kind_label|tojson }};
+
+$(function () {
+    var $files = $('#aiFiles');
+    var $drop = $('#aiDrop');
+
+    function showFiles() {
+        var list = $files[0].files, names = [];
+        for (var i = 0; list && i < list.length; i++) { names.push(list[i].name); }
+        $('#aiFileName').text(names.length ? ('已选 ' + names.length + ' 个：' + names.join('、')) : '');
+    }
+
+    $files.on('change', showFiles);
+
+    // 拖拽上传：把拖入的文件塞进真实 input，后续流程与点选完全一致
+    $drop.on('dragover dragenter', function (e) {
+        e.preventDefault();
+        $drop.addClass('di-drop-on');
+    }).on('dragleave dragend drop', function (e) {
+        e.preventDefault();
+        $drop.removeClass('di-drop-on');
+    }).on('drop', function (e) {
+        var dt = e.originalEvent && e.originalEvent.dataTransfer;
+        if (!dt || !dt.files || !dt.files.length) { return; }
+        try {
+            $files[0].files = dt.files;
+            showFiles();
+        } catch (err) {
+            $('#aiMsg').removeClass('text-success').addClass('text-danger')
+                .text('当前浏览器不支持拖拽，请点击选择文件');
+        }
+    });
+
+    // 划线分层状态条：把视线带到左侧 AI 面板（固定顶栏 56px，留 70px 余量）
+    $('#aiBandBtn').on('click', function () {
+        var el = document.getElementById('aiPanel');
+        if (el) {
+            var top = el.getBoundingClientRect().top
+                    + (window.pageYOffset || 0) - 70;
+            if (top < 0) { top = 0; }
+            window.scrollTo(0, top);
+        }
+        $('#aiMsg').removeClass('text-danger').addClass('text-success')
+            .text('请上传「各科分数线」表（科目 × 各条线），识别后会自动写入划线分层');
+    });
+});
+</script>
+<script src="{{ su('js/ai_import.js') }}"></script>
 {% endif %}
 {% endblock %}

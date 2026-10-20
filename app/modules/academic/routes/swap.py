@@ -597,8 +597,11 @@ def swap_detail(swap_id):
     steps = swap_service.approval_chain()
     cur = d.get('approval_step') or 0
     step_now = steps[cur] if (d.get('status') == 'pending' and cur < len(steps)) else None
-    d['can_review'] = bool(step_now and (current_user.role == 'admin'
-                                         or current_user.has_perm(step_now['perm'])))
+    # H-03：按钮可见性也走服务层统一判定（含"不得审批本人申请"）；
+    # 否则页面显示"可审批"，点下去才 403。
+    _sw = db.session.get(ScheduleSwap, swap_id)
+    d['can_review'] = bool(step_now and swap_service.can_review(
+        _sw, current_user))
     d['review_step_name'] = step_now['name'] if step_now else None
     return render_template('academic/swap_detail.html',
                            d=d, is_reviewer=is_reviewer,
@@ -618,6 +621,9 @@ def _reject_if_not_my_step(swap_id):
     sw = db.session.get(ScheduleSwap, swap_id)
     if not sw:
         return None, (jsonify({'success': False, 'message': '调课记录不存在'}), 404)
+    if swap_service.is_self_review(sw, current_user):
+        return None, (jsonify({'success': False,
+                               'message': '不得审批本人提交的调课申请'}), 403)
     if not swap_service.can_review(sw, current_user):
         step = swap_service.review_step_of(sw)
         name = step['name'] if step else '（已结束）'
@@ -642,10 +648,12 @@ def swap_approve(swap_id):
     # 2026-10-10：统一调课批次 —— 一次审批，整批一起推进（不再逐条点）
     if getattr(sw, 'batch_id', None):
         ok, msg, sw = swap_service.review_swap_batch(
-            swap_id, current_user.id, current_user.real_name, 'approve', review_note)
+            swap_id, current_user.id, current_user.real_name, 'approve',
+            review_note, user=current_user)
     else:
         ok, msg, sw = swap_service.review_swap(
-            swap_id, current_user.id, current_user.real_name, 'approve', review_note)
+            swap_id, current_user.id, current_user.real_name, 'approve',
+            review_note, user=current_user)
     if not ok:
         db.session.rollback()
         return jsonify({'success': False, 'message': msg}), 400
@@ -669,10 +677,12 @@ def swap_reject(swap_id):
     # 2026-10-10：统一调课批次 —— 一次驳回，整批一起处理
     if getattr(sw, 'batch_id', None):
         ok, msg, sw = swap_service.review_swap_batch(
-            swap_id, current_user.id, current_user.real_name, 'reject', review_note)
+            swap_id, current_user.id, current_user.real_name, 'reject',
+            review_note, user=current_user)
     else:
         ok, msg, sw = swap_service.review_swap(
-            swap_id, current_user.id, current_user.real_name, 'reject', review_note)
+            swap_id, current_user.id, current_user.real_name, 'reject',
+            review_note, user=current_user)
     if not ok:
         db.session.rollback()
         return jsonify({'success': False, 'message': msg}), 400

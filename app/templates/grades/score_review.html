@@ -1,8 +1,9 @@
 {% extends "base.html" %}
 {% block title %}成绩复核 - 成绩管理{% endblock %}
 {% block content %}
-{# 2026-10-15 用户口径：教师 / 班主任可提交「成绩复核（申请调分）」——
-   填学生的信息、学科、题号、增减分数；有改分权限的人审批，批准时可直接写入成绩单。 #}
+{# 2026-10-19 用户口径：直接输学号/姓名 → 展示学生信息与全科成绩 →
+   在成绩表上直接改分 → 提交复核申请（可一次改多科）。
+   审批与「批准并应用」链路不变（见 score_review.py）。 #}
 <div class="d-flex justify-content-between align-items-start mb-3 flex-wrap gap-2">
     <div class="d-flex align-items-baseline flex-wrap gap-2">
         <h4 class="mb-0"><i class="bi bi-clipboard-check"></i> 成绩复核</h4>
@@ -26,10 +27,13 @@
         </span>
     </div>
     <div class="card-body py-3">
-        <form method="POST" action="{{ url_for('grades.review_new') }}" id="rvForm">
+        <form method="POST" action="{{ url_for('grades.review_submit') }}" id="rvForm">
             <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <input type="hidden" name="student_no" id="rvStudentNo">
+            <input type="hidden" name="payload" id="rvPayload">
+
             <div class="row g-2 align-items-end">
-                <div class="col-md-3">
+                <div class="col-md-5">
                     <label class="form-label small mb-1">考试 <span class="text-danger">*</span></label>
                     <select class="form-select form-select-sm" name="exam_id" id="rvExam" required>
                         <option value="">请选择考试</option>
@@ -38,58 +42,68 @@
                         {% endfor %}
                     </select>
                 </div>
-                <div class="col-md-2">
-                    <label class="form-label small mb-1">班级</label>
-                    <select class="form-select form-select-sm" id="rvClass">
-                        <option value="">全部班级</option>
-                    </select>
-                </div>
-                <div class="col-md-2">
-                    <label class="form-label small mb-1">学号 / 姓名</label>
-                    <input class="form-control form-control-sm" id="rvKw" placeholder="可留空">
+                <div class="col-md-5">
+                    <label class="form-label small mb-1">学号 / 姓名 <span class="text-danger">*</span></label>
+                    <div class="input-group input-group-sm">
+                        <span class="input-group-text"><i class="bi bi-search"></i></span>
+                        <input class="form-control" id="rvKw" autocomplete="off"
+                               placeholder="输入学号或姓名，自动搜索">
+                    </div>
                 </div>
                 <div class="col-md-2">
                     <button type="button" class="btn btn-sm btn-outline-secondary w-100" id="rvSearch">
-                        <i class="bi bi-search"></i> 查询学生
+                        查询
                     </button>
                 </div>
-                <div class="col-md-3">
-                    <label class="form-label small mb-1">学生 <span class="text-danger">*</span></label>
-                    <select class="form-select form-select-sm" name="student_no" id="rvStudent" required>
-                        <option value="">请先查询</option>
-                    </select>
-                </div>
             </div>
-            <div class="row g-2 align-items-end mt-2">
-                <div class="col-md-3">
-                    <label class="form-label small mb-1">学科 <span class="text-danger">*</span></label>
-                    <select class="form-select form-select-sm" name="subject" id="rvSubject" required>
-                        <option value="">请先选择学生</option>
-                    </select>
+            <div class="small mt-1 text-muted" id="rvStatusMsg"></div>
+
+            <div id="rvCandidates" class="mt-2"></div>
+
+            {# ── 学生信息 + 全科成绩（选中后显示） ── #}
+            <div id="rvPanel" class="mt-3 d-none">
+                <div class="d-flex align-items-center gap-2 flex-wrap rounded-3 px-3 py-2 mb-2"
+                     style="background:var(--sl-surface-2);border:1px solid var(--sl-border)">
+                    <i class="bi bi-person-circle fs-5 text-primary"></i>
+                    <span class="fw-bold" id="rvStuName"></span>
+                    <span class="small" id="rvStuMeta" style="color:var(--sl-text-muted)"></span>
+                    <span class="ms-auto small" style="color:var(--sl-text-muted)">
+                        在「修改后」直接填新分数，留空 = 不改
+                    </span>
                 </div>
-                <div class="col-md-2">
-                    <label class="form-label small mb-1">题号</label>
-                    <input class="form-control form-control-sm" name="question_no"
-                           placeholder="如 12 或 12-15，留空=整卷" maxlength="40">
+                <div class="table-responsive rounded-3 mb-2"
+                     style="border:1px solid var(--sl-border)">
+                    <table class="table table-sm align-middle mb-0">
+                        <thead class="table-light">
+                        <tr>
+                            <th style="width:90px">科目</th>
+                            <th class="text-end" style="width:90px">当前分</th>
+                            <th style="width:130px">修改后</th>
+                            <th style="width:150px">题号（可选）</th>
+                            <th>变化</th>
+                        </tr>
+                        </thead>
+                        <tbody id="rvScoreBody"></tbody>
+                    </table>
                 </div>
-                <div class="col-md-2">
-                    <label class="form-label small mb-1">增减分数 <span class="text-danger">*</span></label>
-                    <input type="number" step="0.5" class="form-control form-control-sm"
-                           name="delta" placeholder="如 3 或 -2" required>
+                <div class="small mb-2" id="rvHidden" style="color:var(--sl-text-muted)"></div>
+
+                <div class="row g-2 align-items-end">
+                    <div class="col-md-8">
+                        <label class="form-label small mb-1">申请理由 <span class="text-danger">*</span></label>
+                        <input class="form-control form-control-sm" name="reason"
+                               id="rvReason" maxlength="500"
+                               placeholder="如：第 12 题漏统计，核对答题卡后应为 8 分">
+                    </div>
+                    <div class="col-md-4 d-flex align-items-center justify-content-end gap-2">
+                        <span class="small" style="color:var(--sl-text-muted)">
+                            将提交 <b id="rvCount">0</b> 科
+                        </span>
+                        <button type="submit" class="btn btn-sm btn-primary" id="rvSubmit" disabled>
+                            <i class="bi bi-send"></i> 提交复核申请
+                        </button>
+                    </div>
                 </div>
-                <div class="col-md-5">
-                    <label class="form-label small mb-1">申请理由 <span class="text-danger">*</span></label>
-                    <input class="form-control form-control-sm" name="reason" maxlength="500"
-                           placeholder="如：第 12 题漏统计，核对答题卡后应为 8 分" required>
-                </div>
-            </div>
-            <div class="mt-2 d-flex align-items-center gap-2">
-                <button type="submit" class="btn btn-sm btn-primary">
-                    <i class="bi bi-send"></i> 提交申请
-                </button>
-                <span class="text-muted small" id="rvHint">
-                    先选考试并点「查询学生」，学生下拉会列出您在范围内可申请的学生
-                </span>
             </div>
         </form>
     </div>
@@ -162,7 +176,7 @@
             </tr>
             {% else %}
             <tr><td colspan="11" class="text-center text-muted py-4">
-                还没有提交过复核申请。上方选择考试与学生即可提交。
+                还没有提交过复核申请。上方搜索学生、在成绩表里改分即可提交。
             </td></tr>
             {% endfor %}
             </tbody>
@@ -173,84 +187,233 @@
 
 {% block extra_js %}
 <script>
-{# 学生候选（学生 × 科目）在前端按班/关键词过滤：一次查询即可反复筛选，减少请求。
-   用 ES5 写法（旧微信 X5 兼容，前端自检会拦 ES2020+ 语法）。 #}
-var RVDATA = [];
+{# 提交页交互：搜学生 → 全科成绩 → 直接改分 → 打包 payload。
+   全部 ES5 写法（旧微信 X5 兼容，前端自检会拦 ES2020+ 语法）。 #}
+var rvTimer = null;
+var rvCurrent = null;
 
-function rvFillClasses(){
-    var seen = {}, opts = ['<option value="">全部班级</option>'];
-    for (var i = 0; i < RVDATA.length; i++){
-        var c = RVDATA[i].class_name_full;
-        if (!seen[c]){ seen[c] = 1; opts.push('<option value="' + c + '">' + c + '</option>'); }
-    }
-    $('#rvClass').html(opts.join(''));
+function rvEsc(s){
+    return String(s === null || s === undefined ? '' : s)
+        .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;');
 }
 
-function rvRenderStudents(){
-    var cls = $('#rvClass').val() || '';
-    var kw = ($('#rvKw').val() || '') .trim();
-    var by = {}, order = [];
-    for (var i = 0; i < RVDATA.length; i++){
-        var it = RVDATA[i];
-        if (cls && it.class_name_full !== cls) { continue; }
-        if (kw && it.student_no.indexOf(kw) < 0 && (it.student_name || '').indexOf(kw) < 0) { continue; }
-        if (!by[it.student_no]){
-            by[it.student_no] = {name: it.student_name, cls: it.class_name_full, subs: []};
-            order.push(it.student_no);
-        }
-        by[it.student_no].subs.push(it);
-    }
-    window.RVBY = by;
-    var opts = ['<option value="">请选择学生</option>'];
-    for (var j = 0; j < order.length; j++){
-        var no = order[j], b = by[no];
-        opts.push('<option value="' + no + '">' + b.cls + ' '
-                  + (b.name || '') + '（' + no + '） · ' + b.subs.length + ' 科</option>');
-    }
-    $('#rvStudent').html(opts.join(''));
-    $('#rvSubject').html('<option value="">请先选择学生</option>');
-    $('#rvHint').text(order.length ? ('命中 ' + order.length + ' 名学生') : '没有符合条件的学生（可能不在您的申请范围内）');
+function rvStatus(msg, cls){
+    var $el = $('#rvStatusMsg');
+    $el.text(msg || '')
+       .removeClass('text-danger text-warning text-success text-muted');
+    if (cls) { $el.addClass(cls); }
 }
 
-function rvLoadStudents(){
-    var examId = $('#rvExam').val();
-    if (!examId){ alert('请先选择考试'); return; }
-    $('#rvHint').text('查询中…');
-    $.getJSON('{{ url_for("grades.reviews_students_api") }}',
-              {exam_id: examId, q: ''},
-              function(res){
-        if (!res.success){ $('#rvHint').text(res.message || '查询失败'); return; }
-        RVDATA = res.data || [];
-        rvFillClasses();
-        rvRenderStudents();
-    }).fail(function(){
-        $('#rvHint').text('查询失败，请稍后重试');
+function rvClearPanel(){
+    rvCurrent = null;
+    $('#rvCandidates').empty();
+    $('#rvPanel').addClass('d-none');
+    $('#rvStudentNo').val('');
+    $('#rvPayload').val('');
+    $('#rvCount').text('0');
+    $('#rvSubmit').prop('disabled', true);
+}
+
+function rvRenderCandidates(list){
+    var h = ['<div class="list-group list-group-flush rounded-3"',
+             ' style="border:1px solid var(--sl-border)">'];
+    for (var i = 0; i < list.length; i++){
+        var s = list[i];
+        h.push('<button type="button" class="list-group-item list-group-item-action'
+             + ' d-flex justify-content-between align-items-center" data-idx="' + i + '">'
+             + '<span><span class="fw-bold">' + rvEsc(s.student_name || '未命名') + '</span>'
+             + ' <span class="text-muted small">' + rvEsc(s.student_no) + ' · '
+             + rvEsc(s.class_name_full) + '</span></span>'
+             + '<span class="badge bg-secondary-subtle text-secondary-emphasis">'
+             + (s.subjects || []).length + ' 科</span></button>');
+    }
+    h.push('</div>');
+    $('#rvCandidates').html(h.join(''));
+    $('#rvCandidates button').on('click', function(){
+        var idx = parseInt($(this).attr('data-idx'), 10);
+        rvShowStudent(list[idx]);
     });
+}
+
+function rvScoreCell(it){
+    if (it.missing) { return '<span class="text-muted">无成绩行</span>'; }
+    if (it.score === null || it.score === undefined){
+        return '<span class="text-muted">未录入</span>';
+    }
+    return rvEsc(it.score);
+}
+
+function rvShowStudent(stu){
+    rvCurrent = stu;
+    rvStatus('', 'text-muted');
+    $('#rvCandidates').empty();
+    $('#rvStudentNo').val(stu.student_no);
+    $('#rvStuName').text(stu.student_name || '未命名');
+    var meta = stu.class_name_full + ' · ' + stu.student_no;
+    if (stu.total !== null && stu.total !== undefined){
+        meta += ' · 总分 ' + stu.total;
+    }
+    $('#rvStuMeta').text(meta);
+
+    var rows = [];
+    var subs = stu.subjects || [];
+    for (var i = 0; i < subs.length; i++){
+        var it = subs[i];
+        var old = (it.score === null || it.score === undefined) ? '' : it.score;
+        var dis = it.missing ? ' disabled' : '';
+        rows.push('<tr data-subject="' + rvEsc(it.subject) + '"'
+            + ' data-full="' + it.full + '" data-old="' + old + '">'
+            + '<td class="fw-bold">' + rvEsc(it.subject) + '</td>'
+            + '<td class="text-end">' + rvScoreCell(it) + '</td>'
+            + '<td><input type="number" step="0.5" min="0" max="' + it.full + '"'
+            + ' class="form-control form-control-sm rv-new"' + dis
+            + ' placeholder="' + (it.missing ? '—' : '不改留空') + '"></td>'
+            + '<td><input class="form-control form-control-sm rv-qno"'
+            + ' maxlength="40" placeholder="如 12"'
+            + (it.missing ? ' disabled' : '') + '></td>'
+            + '<td class="rv-diff small text-muted">—</td></tr>');
+    }
+    if (!rows.length){
+        rows.push('<tr><td colspan="5" class="text-center text-muted py-3">'
+            + '本场考试没有可申请的成绩</td></tr>');
+    }
+    $('#rvScoreBody').html(rows.join(''));
+    var hidden = stu.hidden_subjects || [];
+    $('#rvHidden').text(hidden.length
+        ? ('另有 ' + hidden.length + ' 科无查看权限：' + hidden.join('、'))
+        : '');
+    $('#rvPanel').removeClass('d-none');
+    rvRefreshDiff();
+}
+
+function rvRefreshDiff(){
+    var n = 0, bad = 0;
+    $('#rvScoreBody tr[data-subject]').each(function(){
+        var $tr = $(this);
+        var $diff = $tr.find('.rv-diff');
+        var old = $tr.attr('data-old');
+        var val = ($tr.find('.rv-new').val() || '').trim();
+        var full = parseFloat($tr.attr('data-full'));
+        $diff.removeClass('text-success text-danger text-muted');
+        if (val === ''){ $diff.text('—').addClass('text-muted'); return; }
+        var num = parseFloat(val);
+        if (isNaN(num) || num < 0 || num > full){
+            $diff.text('超出 0~' + full).addClass('text-danger');
+            bad++;
+            return;
+        }
+        var base = (old === '' ? 0 : parseFloat(old));
+        var d = Math.round((num - base) * 10) / 10;
+        if (d === 0){ $diff.text('未变化').addClass('text-muted'); return; }
+        n++;
+        $diff.text((d > 0 ? '+' : '') + d)
+             .addClass(d > 0 ? 'text-success' : 'text-danger');
+    });
+    $('#rvCount').text(n);
+    $('#rvSubmit').prop('disabled', n === 0 || bad > 0);
+}
+
+function rvSearch(){
+    var examId = $('#rvExam').val();
+    var kw = ($('#rvKw').val() || '').trim();
+    rvClearPanel();
+    if (!examId){ rvStatus('请先选择考试', 'text-warning'); return; }
+    if (!kw){ rvStatus('输入学号或姓名开始搜索', 'text-muted'); return; }
+    rvStatus('查询中…', 'text-muted');
+    $.getJSON('{{ url_for("grades.reviews_student_api") }}',
+              {exam_id: examId, q: kw},
+              function(res){
+        if (!res.success){
+            rvStatus(res.message || '查询失败', 'text-danger');
+            return;
+        }
+        var list = res.data || [];
+        if (!list.length){
+            rvStatus('没有找到「' + kw + '」（可能不在你的申请范围内）', 'text-warning');
+            return;
+        }
+        var exact = [];
+        for (var i = 0; i < list.length; i++){
+            if (list[i].student_no === kw || list[i].student_name === kw){
+                exact.push(list[i]);
+            }
+        }
+        if (exact.length === 1){ rvShowStudent(exact[0]); return; }
+        if (list.length === 1){ rvShowStudent(list[0]); return; }
+        var cap = res.limit || 20;
+        if (list.length >= cap){
+            rvStatus('匹配较多（显示前 ' + cap + ' 名），请输入更精确的学号或姓名',
+                     'text-warning');
+        } else {
+            rvStatus('找到 ' + list.length + ' 名学生，请点击选择', 'text-muted');
+        }
+        rvRenderCandidates(list);
+    }).fail(function(){
+        rvStatus('查询失败，请稍后重试', 'text-danger');
+    });
+}
+
+function rvCollectItems(){
+    var items = [], bad = false;
+    $('#rvScoreBody tr[data-subject]').each(function(){
+        var $tr = $(this);
+        var val = ($tr.find('.rv-new').val() || '').trim();
+        if (val === ''){ return; }
+        var num = parseFloat(val);
+        var full = parseFloat($tr.attr('data-full'));
+        if (isNaN(num) || num < 0 || num > full){ bad = true; return; }
+        var old = $tr.attr('data-old');
+        var base = (old === '' ? 0 : parseFloat(old));
+        if (Math.round((num - base) * 10) / 10 === 0){ return; }
+        items.push({subject: $tr.attr('data-subject'), new_score: num,
+                    question_no: ($tr.find('.rv-qno').val() || '').trim()});
+    });
+    return {items: items, bad: bad};
 }
 
 $(function(){
-    $('#rvSearch').on('click', rvLoadStudents);
+    $('#rvSearch').on('click', rvSearch);
+    $('#rvKw').on('input', function(){
+        if (rvTimer){ clearTimeout(rvTimer); }
+        rvTimer = setTimeout(rvSearch, 350);
+    });
+    $('#rvKw').on('keydown', function(e){
+        if (e.keyCode === 13){ e.preventDefault(); rvSearch(); }
+    });
     $('#rvExam').on('change', function(){
-        RVDATA = [];
-        $('#rvClass').html('<option value="">全部班级</option>');
-        $('#rvStudent').html('<option value="">请先查询</option>');
-        $('#rvSubject').html('<option value="">请先选择学生</option>');
-        $('#rvHint').text('考试已切换，请重新点「查询学生」');
+        rvClearPanel();
+        $('#rvKw').val('');
+        rvStatus('', 'text-muted');
     });
-    $('#rvClass, #rvKw').on('change', rvRenderStudents);
-    $('#rvStudent').on('change', function(){
-        var no = $(this).val();
-        var b = (window.RVBY || {})[no];
-        var opts = ['<option value="">请选择学科</option>'];
-        if (b){
-            for (var i = 0; i < b.subs.length; i++){
-                var it = b.subs[i];
-                opts.push('<option value="' + it.subject + '">' + it.subject
-                          + '（当前 ' + (it.score === null || it.score === undefined ? '—' : it.score) + ' 分）</option>');
-            }
+    $('#rvScoreBody').on('input', '.rv-new', rvRefreshDiff);
+
+    $('#rvForm').on('submit', function(e){
+        if (!rvCurrent){
+            e.preventDefault();
+            rvStatus('请先搜索并选择学生', 'text-warning');
+            return;
         }
-        $('#rvSubject').html(opts.join(''));
+        var packed = rvCollectItems();
+        if (packed.bad){
+            e.preventDefault();
+            rvStatus('有科目的修改后分数超出范围，请检查', 'text-danger');
+            return;
+        }
+        if (!packed.items.length){
+            e.preventDefault();
+            rvStatus('请至少修改一科成绩', 'text-danger');
+            return;
+        }
+        if (!($('#rvReason').val() || '').trim()){
+            e.preventDefault();
+            rvStatus('请填写申请理由', 'text-danger');
+            $('#rvReason').focus();
+            return;
+        }
+        $('#rvPayload').val(JSON.stringify(packed.items));
     });
+
     $('#rvStatusFilter').on('change', function(){
         var v = $(this).val();
         $('tr[data-status]').each(function(){

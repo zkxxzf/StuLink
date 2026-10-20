@@ -4,7 +4,7 @@ import secrets
 from flask import Blueprint, render_template, redirect, url_for, flash, request, send_file
 from flask_login import login_required, current_user
 from app.extensions import db
-from app.models import User, PermissionGroup
+from app.models import User, PermissionGroup, WeChatBinding
 from app.forms.user_forms import UserForm
 from app.utils.decorators import perm_required
 from app.utils.helpers import log_operation
@@ -38,7 +38,47 @@ def _store_one_time_password(username, real_name, password):
     session.modified = True
 
 
-def _set_user_groups(user, group_ids):
+# ===== 2026-10-19 审计修复（H-01 权限组提权）=====
+# create() 原来只拦 role=='admin'，edit() 只拦「非超管编辑其他管理员 / 把账号设为
+# admin」；但两条路径最终都通过 _set_user_groups() 写入任意权限组。管理员组
+# （role=='admin' 或 name=='管理员组'）的 menu_keys 覆盖全部权限，非超管把账号
+# （含自己）挂进去即等同提权。口径：管理员组的授予/编辑只允许内置 admin 账号。
+ADMIN_GROUP_NAME = '管理员组'
+
+
+def _actor_is_super(actor=None):
+    """actor 是否超管：唯一口径 = 内置 admin 账号。"""
+    actor = current_user if actor is None else actor
+    return (getattr(actor, 'username', '') or '') == 'admin'
+
+
+def _is_admin_group(group):
+    """是否管理员组：role=='admin' 或名称为「管理员组」。"""
+    if group is None:
+        return False
+    return ((getattr(group, 'role', '') or '') == 'admin'
+            or (getattr(group, 'name', '') or '') == ADMIN_GROUP_NAME)
+
+
+def _admin_group_ids():
+    """全库管理员组 id 集合。"""
+    return {g.id for g in PermissionGroup.query.all() if _is_admin_group(g)}
+
+
+def _submitted_admin_group_ids(group_ids):
+    """提交的 group_id 中落在管理员组的部分。"""
+    ids = {g for g in (group_ids or []) if g}
+    if not ids:
+        return set()
+    return ids & _admin_group_ids()
+
+
+def _user_in_admin_group(user):
+    """用户当前是否属于管理员组（按多身份列表判定）。"""
+    return any(_is_admin_group(g) for g in (user.permission_groups or []))
+
+
+def _set_user_groups(user, group_ids, allow_admin_group=False):
     """设置用户的权限组（多身份，P5）：列表首个为主组。
 
     同步旧字段 permission_group_id 与多身份关联表 user_permission_groups，
@@ -47,12 +87,18 @@ def _set_user_groups(user, group_ids):
     2026-10-14 第四轮审计修复（多身份 B 项）：组 id 先与 permission_groups 实际
     存在的 id 求交 —— SQLite 不强制外键，原实现可写入指向不存在组的悬空关联
     （group_links 里 group=None，该"身份"静默消失）。
+
+    2026-10-19（H-01）：allow_admin_group=False 时**过滤掉管理员组**，
+    防止其它调用点绕过路由层校验直接授予。
     """
     from app.models import UserPermissionGroup, PermissionGroup
     valid_ids = {g.id for g in PermissionGroup.query.all()}
+    admin_ids = _admin_group_ids()
     gids = []
     for g in (group_ids or []):
         if g and g not in gids and g in valid_ids:
+            if g in admin_ids and not allow_admin_group:
+                continue
             gids.append(g)
     user.permission_group_id = gids[0] if gids else None
     keep = set(gids)
@@ -93,8 +139,19 @@ def list_users():
     group_order = {g.name: g.id for g in PermissionGroup.query.all()}
     groups = OrderedDict(
         (g, grouped[g]) for g in sorted(grouped, key=lambda x: (group_order.get(x, 9999), x)))
+    # 2026-10-19：教师管理展示微信绑定状态 / openid / 绑定 UID。
+    # 一次查回，避免每个用户 N+1。
+    wx_bindings = {}
+    user_ids = [u.id for u in users]
+    if user_ids:
+        rows = (WeChatBinding.query
+                .filter(WeChatBinding.user_id.in_(user_ids))
+                .order_by(WeChatBinding.user_id, WeChatBinding.id).all())
+        for row in rows:
+            wx_bindings.setdefault(row.user_id, []).append(row)
     return render_template('system/users/list.html', users=users, groups=groups,
-                           one_time_passwords=one_time_passwords)
+                           one_time_passwords=one_time_passwords,
+                           wx_bindings=wx_bindings)
 
 
 @bp.route('/create', methods=['GET', 'POST'])
@@ -108,7 +165,9 @@ def create():
 
         # 校验：班主任最多3人/班，且年级班级必填
         role = form.role.data
-        grade = form.grade.data or None
+        # 2026-10-19：管理年级多选（年级长可多个）；班主任强制 1 个。
+        grades = [g for g in (form.grade.data or []) if g]
+        grade = grades[0] if grades else None
         class_name = form.class_name.data or None
 
         # 2026-10-18 审计修复（P1 横向提权）：非超管不得新建管理员账号
@@ -117,9 +176,19 @@ def create():
             flash('只有超管（admin 账号）能新建管理员账号', 'danger')
             return render_template('system/users/form.html', form=form, title='新建用户')
 
+        # H-01：权限组同样不能绕过 —— 非超管即使 role 填普通教师，
+        # 也不能把新账号挂进「管理员组」（否则等于造了一个超管）。
+        if _submitted_admin_group_ids(form.permission_group_ids.data) \
+                and not _actor_is_super():
+            log_operation(current_user, '新建被拒', '用户', None,
+                          '非超管不得授予管理员组',
+                          module='system', severity='WARNING')
+            flash('只有超管（admin 账号）能把账号加入「管理员组」', 'danger')
+            return render_template('system/users/form.html', form=form, title='新建用户')
+
         if role == 'homeroom_teacher':
-            if not grade or not class_name:
-                flash('班主任必须指定年级和班级', 'danger')
+            if len(grades) != 1 or not class_name:
+                flash('班主任必须指定 1 个管理年级和班级（一个班只属于一个年级）', 'danger')
                 return render_template('system/users/form.html', form=form, title='新建用户')
             existing_count = User.query.filter_by(
                 role='homeroom_teacher', grade=grade, class_name=class_name, is_active=True
@@ -128,20 +197,21 @@ def create():
                 flash(f'{grade}{class_name} 已有 {existing_count} 名班主任，最多设置3名', 'danger')
                 return render_template('system/users/form.html', form=form, title='新建用户')
 
-        if role == 'grade_leader' and not grade:
-            flash('年级长必须指定管理年级', 'danger')
+        if role == 'grade_leader' and not grades:
+            flash('年级长必须指定管理年级（可多选）', 'danger')
             return render_template('system/users/form.html', form=form, title='新建用户')
 
         user = User(
             username=form.username.data,
             real_name=form.real_name.data,
             role=role,
-            grade=grade,
+            grade=','.join(grades) or None,
             class_name=class_name,
             must_change_pwd=True,
         )
         # P5：多身份（权限组），列表首个为主组
-        _set_user_groups(user, form.permission_group_ids.data)
+        _set_user_groups(user, form.permission_group_ids.data,
+                         allow_admin_group=_actor_is_super())
         generated_pwd = form.password.data or _generate_password()
         user.set_password(generated_pwd)
         db.session.add(user)
@@ -169,6 +239,7 @@ def edit(id):
     # P5：多身份多选的回显（GET 时按当前所属组预选；首个为主组）
     if not form.is_submitted():
         form.permission_group_ids.data = [g.id for g in user.permission_groups]
+        form.grade.data = user.grades     # 管理年级多选回显（库内是逗号串）
     if form.validate_on_submit():
         existing = User.query.filter(
             User.username == form.username.data, User.id != user.id).first()
@@ -178,7 +249,9 @@ def edit(id):
 
         # 校验
         role = form.role.data
-        grade = form.grade.data or None
+        # 2026-10-19：管理年级多选（年级长可多个）；班主任强制 1 个。
+        grades = [g for g in (form.grade.data or []) if g]
+        grade = grades[0] if grades else None
         class_name = form.class_name.data or None
 
         # v1.9.2 防误操作：管理员账号的角色不可修改
@@ -187,8 +260,8 @@ def edit(id):
             return render_template('system/users/form.html', form=form, title='编辑用户')
 
         if role == 'homeroom_teacher':
-            if not grade or not class_name:
-                flash('班主任必须指定年级和班级', 'danger')
+            if len(grades) != 1 or not class_name:
+                flash('班主任必须指定 1 个管理年级和班级（一个班只属于一个年级）', 'danger')
                 return render_template('system/users/form.html', form=form, title='编辑用户')
             existing_count = User.query.filter_by(
                 role='homeroom_teacher', grade=grade, class_name=class_name, is_active=True
@@ -197,8 +270,8 @@ def edit(id):
                 flash(f'{grade}{class_name} 已有 {existing_count} 名班主任，最多设置3名', 'danger')
                 return render_template('system/users/form.html', form=form, title='编辑用户')
 
-        if role == 'grade_leader' and not grade:
-            flash('年级长必须指定管理年级', 'danger')
+        if role == 'grade_leader' and not grades:
+            flash('年级长必须指定管理年级（可多选）', 'danger')
             return render_template('system/users/form.html', form=form, title='编辑用户')
 
         # 2026-10-18 审计修复（P1 横向提权）：此页可以改 role / 权限组 / **密码**，
@@ -218,16 +291,50 @@ def edit(id):
                 flash('只有超管能把账号设为管理员', 'danger')
                 return render_template('system/users/form.html', form=form,
                                        title='编辑用户')
+            # H-01：权限组是第二条提权路径 —— 非超管不得改管理员组用户的
+            # 任何字段（含密码），也不得把任何账号（含自己）加入管理员组。
+            if _user_in_admin_group(user):
+                log_operation(current_user, '编辑被拒', '用户', user.id,
+                              f'{user.real_name}（非超管不得编辑管理员组用户）',
+                              module='system', severity='WARNING')
+                flash('只有超管（admin 账号）能编辑管理员组用户', 'danger')
+                return render_template('system/users/form.html', form=form,
+                                       title='编辑用户')
+            if _submitted_admin_group_ids(form.permission_group_ids.data):
+                log_operation(current_user, '编辑被拒', '用户', user.id,
+                              f'{user.real_name}（非超管不得授予管理员组）',
+                              module='system', severity='WARNING')
+                flash('只有超管（admin 账号）能把账号加入「管理员组」', 'danger')
+                return render_template('system/users/form.html', form=form,
+                                       title='编辑用户')
         user.username = form.username.data
         # 姓名锁定：真实姓名与任课教师映射/成绩归属绑定，一经创建不可修改（成绩模块约定）
         new_name = (form.real_name.data or '').strip()
         if new_name and new_name != user.real_name:
             flash('真实姓名不可修改（与任课教师映射/成绩归属绑定），已保留原姓名', 'warning')
         user.role = role
-        user.grade = grade
+        user.grade = ','.join(grades) or None
         user.class_name = class_name
         # P5：多身份（权限组），列表首个为主组
-        _set_user_groups(user, form.permission_group_ids.data)
+        # L-05：编辑页若请求里完全没有权限组字段（旧表单/脚本/半截请求），
+        # 不能把用户的组静默清空；只有显式提交过才覆盖。
+        _groups_submitted = (
+            request.form.get('permission_group_ids_present') == '1'
+            or 'permission_group_ids' in request.form)
+        if _groups_submitted:
+            _old_groups = {g.name for g in user.permission_groups}
+            _set_user_groups(user, form.permission_group_ids.data,
+                             allow_admin_group=is_super)
+            _new_groups = {g.name for g in user.permission_groups}
+            if _old_groups != _new_groups:
+                log_operation(
+                    current_user, '权限组变更', '用户', user.id,
+                    f'{user.real_name}: {sorted(_old_groups)} -> {sorted(_new_groups)}',
+                    module='system', severity='WARNING')
+        else:
+            log_operation(current_user, '更新', '用户', user.id,
+                          '未提交权限组字段，保留原权限组', module='system',
+                          severity='WARNING')
         if form.password.data:
             user.set_password(form.password.data)
         db.session.commit()
@@ -251,7 +358,11 @@ def toggle(id):
     if user.id == current_user.id and user.is_active:
         flash('不能禁用当前登录的账号', 'danger')
         return redirect(url_for('users.list_users'))
+    was_active = user.is_active
     user.is_active = not user.is_active
+    # P1 M-03：停用即吊销小程序旧令牌（网页端由 session_guard 的 is_active 检查兜住）
+    if was_active and not user.is_active:
+        user.wx_token_ver = int(user.wx_token_ver or 0) + 1
     db.session.commit()
     # v1.19.49.37：启禁变更 → 同步 Teacher.status (active/left)
     teacher_sync.sync_from_user(user)

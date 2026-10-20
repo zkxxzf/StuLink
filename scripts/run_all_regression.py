@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""StuLink 一键回归：4 项自检 + 4 套回归（2026-10-13 全面审计 P2 产出）。
+"""StuLink 一键回归：6 项自检 + 4 套回归（2026-10-13 全面审计 P2 产出）。
 
 用法（在项目根目录）：
     py -3.12 scripts\\run_all_regression.py             # 自检 + 4 套回归
@@ -26,6 +26,10 @@ SELF_CHECKS = [
     # 2026-10-14 第三轮审计：手写 JS 的 ES2020+ 语法（旧微信 X5 会整段 ScriptError）
     # 曾被修过又回归（portrait/detail.html），固化成第 4 项自检。
     ('前端兼容自检', ['scripts/check_frontend_compat.py']),
+    # 2026-10-19 P1 M-23：迁移清单 / 执行器 / 登记表自动对账
+    ('迁移对账', ['scripts/check_migrations.py']),
+    # 2026-10-19 P2：禁止业务代码直接用 xml.etree/lxml（统一走 defusedxml）
+    ('XML 解析自检', ['scripts/check_xml_parsers.py']),
 ]
 SUITES = [
     ('教务回归', ['tests/academic_regression.py']),

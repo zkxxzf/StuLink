@@ -171,7 +171,9 @@ def _change_activity_items(exam_ids):
             .limit(ACTIVITY_PER_SOURCE).all())
     items = []
     for r in rows:
-        old = '缺考' if r.action == 'delete' else (f'{r.old_score:g}' if r.old_score is not None else '—')
+        # action=add（2026-10-19 补录）改前也是缺考，与新值并排才看得出来源
+        old = ('缺考' if r.action in ('delete', 'add')
+               else (f'{r.old_score:g}' if r.old_score is not None else '—'))
         new = f'{r.new_score:g}' if r.new_score is not None else '缺考'
         items.append({
             'type': 'score', 'icon': 'bi-pencil-square', 'tone': 'warning',

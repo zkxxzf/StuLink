@@ -93,6 +93,8 @@ app/static/uploads/
 # 迁移脚本产生的数据库备份（scripts 下的 .bak-<时间戳>）
 *.bak-*
 *.bat
+# L-09：启动示例可入库，真实 start.bat 仍忽略（可能含本机路径/口令）
+!start.example.bat
 *.err
 
 # 轻量部署临时打包产物（禁止入库）

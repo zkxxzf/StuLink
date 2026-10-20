@@ -35,10 +35,35 @@
         <div class="text-center text-muted py-5"><div class="spinner-border"></div>
             <div class="mt-2">加载中…</div></div>
     </div>
+    {# 2026-10-19 用户口径（第五次调整后定稿）：
+       「改成依据分层的上线人数堆积图，然后上线率用折线表示」+
+       「柱形图上方不要显示人数了，给我显示去差均分」+
+       「把人数标注在柱子上线的人数，然后上方应该有标签可以点击呀」+
+       「上线率不能丢，最好也能标注一下；未上线的默认不标注，但是要有」——
+       总分 + 各科共 10 个图，每张图里柱＝各分层上线人数堆积（左轴，
+       段＝该层独占人数，底部灰段＝未上线），段内标人数、柱顶标去差均分；
+       折线＝各分层上线率（右轴 %），点上标百分比；未上线段保留但不标数字；
+       图例＝各堆积段（××线人数 / 未上线）+ 各折线，逐个可点显隐。 #}
+    <div id="ldCharts" class="d-none no-print">
+        <div class="ld-chart-sec">
+            <div class="ld-chart-head">
+                <h6><i class="bi bi-bar-chart-line"></i> 分层上线人数 × 上线率</h6>
+                <span class="ld-chart-hint">柱＝各分层上线人数（段内为人数、柱顶为去差均分），折线＝各分层上线率（右轴，点上标百分比）；未上线人数默认收起，点图例可展开；只列参加该科考试的班</span>
+                {# 2026-10-19 用户要求两种横轴排序可自选：勾上＝班型→方向→组合→班号；
+                   取消＝方向→组合→班号（选择记在 localStorage，换考试也保持） #}
+                <label class="ld-sort-toggle" title="横轴排序方式">
+                    <input type="checkbox" id="ldSortType" class="form-check-input" checked>
+                    <span>先按班型排（卓越 / 强基）</span>
+                </label>
+            </div>
+            <div class="ld-chart-grid" id="ldAvgCharts"></div>
+        </div>
+    </div>
 </div>
 {% endblock %}
 {# 脚本放在 base.html 底部 jQuery 引入之后 #}
 {% block extra_js %}
+<script src="{{ su('js/echarts.min.js') }}"></script>
 <script src="{{ su('js/global_compare.js') }}"></script>
 <script>
 /* 打印版链接跟随当前考试/方向/勾选的分数线（2026-10-16）：打印版是服务端渲染，

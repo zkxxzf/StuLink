@@ -8,8 +8,11 @@
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 from datetime import datetime
 
+from sqlalchemy import or_
+
 from app.extensions import db
-from app.utils.crypto import blind_index, decrypt, encrypt_rand
+from app.utils.crypto import (blind_index, decrypt, encrypt, encrypt_rand,
+                              id_card_index)
 
 
 class Teacher(db.Model):
@@ -36,7 +39,9 @@ class Teacher(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     teacher_uid = db.Column(db.String(16), unique=True, nullable=False, index=True)
     name = db.Column(db.String(50), nullable=False)
+    # 2026-10-19 H-06：密文改随机 IV；唯一性/等值查询走 id_card_idx 盲索引。
     id_card_enc = db.Column(db.String(128), unique=True)   # 身份证号密文（唯一，可空）
+    id_card_idx = db.Column(db.String(64), index=True)
     # 2026-10-19（与 Student 同一方案 C）：随机 IV 加密 + HMAC 盲索引。
     # 登录名 users.username 仍是可读的（它本身是账号标识），加密的是本表的展示用号码。
     _phone_encrypted = db.Column('phone', db.String(256))
@@ -60,6 +65,20 @@ class Teacher(db.Model):
     def phone_index(value):
         """手机号盲索引（加密后的精确等值查询）"""
         return blind_index(value)
+
+    def set_id_card(self, value):
+        """写入身份证：随机 IV 密文 + 盲索引（H-06）。"""
+        self.id_card_enc = encrypt_rand(value) if value else None
+        self.id_card_idx = id_card_index(value) if value else None
+
+    @staticmethod
+    def id_card_filter(value):
+        """身份证等值查询条件：盲索引优先，兼容存量确定性密文双读。"""
+        idx = id_card_index(value)
+        if not idx:
+            return None
+        return or_(Teacher.id_card_idx == idx,
+                   Teacher.id_card_enc == encrypt(value))
     subject = db.Column(db.String(20))                     # 任教学科
     status = db.Column(db.String(10), default='active')    # active=在职 / left=离职
     user_id = db.Column(db.Integer)                        # 关联 users.id（快照式）
