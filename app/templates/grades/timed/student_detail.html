@@ -1,0 +1,142 @@
+{% extends "base.html" %}
+{% block title %}{{ name or student_no }} · 学生分析{% endblock %}
+{% block content %}
+<div class="d-flex flex-wrap justify-content-between align-items-start mb-2 gap-2">
+    <div class="d-flex align-items-baseline flex-wrap gap-2">
+        <a href="{{ url_for('grades.timed_detail', tid=exam.id, tab='trends') }}"
+           class="btn btn-sm btn-outline-secondary" title="返回学生分析">
+            <i class="bi bi-arrow-left"></i>
+        </a>
+        <h4 class="mb-0">{{ name or '未知学生' }}</h4>
+        <span class="text-muted small">
+            {{ student_no }}{% if cls %} · {{ cls }}{% endif %} ·
+            {{ exam.grade }} 全部限时练（{{ lines|length }} 场）
+        </span>
+    </div>
+    <div class="text-muted small">
+        当前场次：{{ exam.display_name() }} · {{ exam.exam_date.strftime('%Y-%m-%d') }}
+    </div>
+</div>
+
+{% if not lines %}
+<div class="alert alert-light border">该生在本年级还没有限时练成绩。</div>
+{% else %}
+
+<div class="row g-3 mb-3">
+    {% for s in subjects %}
+    {% set tv = latest.get(s) %}
+    <div class="col-6 col-md-4 col-xl-2">
+        <div class="card h-100">
+            <div class="card-body py-2 px-3">
+                <div class="text-muted small">{{ s }}</div>
+                <div class="fs-4 fw-semibold">
+                    {{ tv if tv is not none else '—' }}
+                </div>
+                <div class="text-muted" style="font-size:11px;">最新 T 分</div>
+            </div>
+        </div>
+    </div>
+    {% endfor %}
+</div>
+
+<div class="card mb-3">
+    <div class="card-header py-2">
+        <span class="fw-semibold">T 分走势</span>
+        <span class="text-muted small ms-2">50 = 该场年级平均；越靠上相对位置越好</span>
+    </div>
+    <div class="card-body py-2">
+        <div id="studentChart" style="height:380px;"></div>
+    </div>
+</div>
+
+<div class="card">
+    <div class="card-header py-2">
+        <span class="fw-semibold">逐场成绩</span>
+        <span class="text-muted small ms-2">单元格上为原始分、下为该科 T 分</span>
+    </div>
+    <table class="table table-sm table-hover align-middle mb-0 timed-tbl">
+        <thead class="table-light">
+        <tr>
+            <th class="text-nowrap">场次</th>
+            <th class="text-nowrap">日期</th>
+            {% for s in subjects %}
+            <th class="text-end text-nowrap">{{ s }}</th>
+            {% endfor %}
+        </tr>
+        </thead>
+        <tbody>
+        {% for it in lines %}
+        <tr>
+            <td class="text-nowrap">
+                <a href="{{ url_for('grades.timed_detail', tid=it.exam.id, tab='students') }}">
+                    {{ it.exam.display_name() }}
+                </a>
+            </td>
+            <td class="text-muted text-nowrap">{{ it.exam.exam_date.strftime('%Y-%m-%d') }}</td>
+            {% for s in subjects %}
+            {% set c = it.cells.get(s) %}
+            <td class="text-end text-nowrap">
+                {% if c %}
+                <div>{{ c.score }}</div>
+                {% if c.t is not none %}
+                <div class="text-muted t-sub">T {{ c.t }}</div>
+                {% endif %}
+                {% else %}
+                <span class="text-muted">—</span>
+                {% endif %}
+            </td>
+            {% endfor %}
+        </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+</div>
+
+<div class="text-muted small mt-2">
+    T 分数 = 10 ×（个人分 − 该场该科年级均分）÷ 标准差 + 50；
+    每科单独算，所以不同科目、不同场次之间可以直接比较相对位置。
+    某科实考少于 {{ t_min }} 人时不算 T 分（显示为 —）。
+</div>
+{% endif %}
+{% endblock %}
+
+{% block extra_js %}
+{% if lines %}
+<script src="{{ su('js/echarts.min.js') }}"></script>
+<script type="application/json" id="studentChartData">{{ chart|tojson }}</script>
+<script>
+(function () {
+    'use strict';
+    var node = document.getElementById('studentChartData');
+    if (!node || !window.echarts) { return; }
+    var data = JSON.parse(node.textContent || '{}');
+    var labels = [];
+    Object.keys(data).forEach(function (s) {
+        data[s].forEach(function (p) {
+            if (labels.indexOf(p[0]) < 0) { labels.push(p[0]); }
+        });
+    });
+    labels.sort();
+    var series = Object.keys(data).map(function (s) {
+        return {
+            name: s, type: 'line', smooth: true, symbolSize: 6,
+            connectNulls: true,
+            data: data[s].map(function (p) { return [p[0], p[1]]; })
+        };
+    });
+    var chart = window.echarts.init(document.getElementById('studentChart'));
+    chart.setOption({
+        tooltip: { trigger: 'axis' },
+        legend: { type: 'scroll', top: 0 },
+        grid: { left: 8, right: 16, top: 40, bottom: 8, containLabel: true },
+        xAxis: { type: 'category', data: labels, axisLabel: { fontSize: 13 } },
+        yAxis: { type: 'value', name: 'T 分', min: 20, max: 80,
+                 axisLabel: { fontSize: 13 },
+                 splitLine: { lineStyle: { type: 'dashed' } } },
+        series: series
+    });
+    window.addEventListener('resize', function () { chart.resize(); });
+})();
+</script>
+{% endif %}
+{% endblock %}

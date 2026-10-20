@@ -29,6 +29,10 @@ class Student(db.Model):
     phone2_idx = db.Column(db.String(64))
     gender = db.Column(db.String(2), nullable=False)  # 男/女
     student_number = db.Column(db.String(20), unique=True, nullable=False)  # 业务主键，必填
+    # 2026-10-20：智学网考号（智学网给的 8 位号，如 59468662）。
+    # 学生档案上的**固定**考号（与每场考试可能重排的 exam_scores.exam_no 不同），
+    # 用于把智学网侧的名单/成绩按考号回挂到本系统（不必再靠姓名 + 班级猜）。
+    zhixue_no = db.Column(db.String(20), index=True)
     grade = db.Column(db.String(10), nullable=False)     # 2025级
     class_name = db.Column(db.String(10), nullable=False) # 01班
     subject_selection = db.Column(db.String(20))  # 史政地

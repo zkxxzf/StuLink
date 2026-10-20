@@ -14,8 +14,8 @@
             <form method="POST">
                 {{ form.hidden_tag() }}
                 <div class="mb-3">
-                    <label class="form-label" for="username">用户名</label>
-                    {{ form.username(class="form-control form-control-lg", placeholder="请输入用户名") }}
+                    <label class="form-label" for="username">用户名 / 手机号</label>
+                    {{ form.username(class="form-control form-control-lg", placeholder="请输入用户名或手机号") }}
                     {% for error in form.username.errors %}
                     <div class="text-danger small mt-1">{{ error }}</div>
                     {% endfor %}
@@ -40,7 +40,7 @@
     </div>
 </div>
 <div class="text-center mt-3">
-    <span class="text-muted small">v1.19.49.47（2026-10-09）</span>
+    <span class="text-muted small">v1.19.49.48（2026-10-09）</span>
     <span class="text-muted small mx-2">|</span>
     <span class="text-muted small">&copy; 2026 StuLink &middot; @zkxxzf</span>
     <span class="text-muted small mx-2">|</span>

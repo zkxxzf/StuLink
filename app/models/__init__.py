@@ -15,11 +15,13 @@ from app.models.user_class_link import UserClassLink
 from app.models.grade_setting import GradeSetting
 from app.models.grades import Exam, ExamScore, ExamBand, TeacherSubjectLink, \
     AiKey, AiGlobalKey, AiReport, AiChatMessage, AffairRoomLib, \
-    ExamTeacherLink, ExamAffair, AffairRoom, AffairStudent  # v1.19.49.47 考试任课快照 / 考务
+    ExamTeacherLink, ExamAffair, AffairRoom, AffairStudent  # v1.19.49.48 考试任课快照 / 考务
 from app.models.grades import TeacherLinkPlan, TeacherLinkPlanRow  # 任课映射方案（2026-10-14）
 from app.models.grades import AffairTeacher, AffairSchedule, AffairInvigilator, \
-    AffairInvigilation  # v1.19.49.47 考务环节④⑤⑥：任课核对 / 考试时间表 / 监考编排
+    AffairInvigilation  # v1.19.49.48 考务环节④⑤⑥：任课核对 / 考试时间表 / 监考编排
 from app.models.grades import ScoreChangeLog, ScoreReviewRequest  # 分数修改留痕 / 成绩复核申请
+# 限时练（2026-10-20）：独立表，不进 exams / exam_scores
+from app.models.timed import TimedExam, TimedScore, TimedBandTemplate
 from app.models.points import PointRecord, PointRuleTemplate
 from app.models.morality import (RewardPunishment, RewardPunishmentAttachment,
                                  KINDS, REWARD_CATEGORIES, PUNISH_CATEGORIES,
@@ -58,11 +60,13 @@ __all__ = ['User', 'Student', 'Room', 'BedAssignment', 'StudentAccommodation',
            'ClassProfile', 'ClassSubject',
            'PermissionGroup', 'UserClassLink', 'GradeSetting',
            'Exam', 'ExamScore', 'ExamBand', 'TeacherSubjectLink', 'ExamTeacherLink',
+           # 限时练（独立表，见 models/timed.py）
+           'TimedExam', 'TimedScore', 'TimedBandTemplate',
            'TeacherLinkPlan', 'TeacherLinkPlanRow',
            'ExamAffair', 'AffairRoom', 'AffairStudent',
            'AiKey', 'AiGlobalKey', 'AiReport', 'AiChatMessage',
            'AffairRoomLib', 'PointRecord', 'PointRuleTemplate',
-           # 德育奖惩（morality.db，2026-10-13 v1.19.49.47）
+           # 德育奖惩（morality.db，2026-10-13 v1.19.49.48）
            'RewardPunishment', 'RewardPunishmentAttachment',
            'REWARD_CATEGORIES', 'PUNISH_CATEGORIES', 'REWARD_LEVELS',
            'PUNISH_LEVELS', 'DOC_TYPES', 'category_options', 'category_label',

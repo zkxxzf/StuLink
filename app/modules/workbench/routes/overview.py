@@ -1,4 +1,4 @@
-# StuLink v1.19.49.47 2026-10-10
+# StuLink v1.19.49.48 2026-10-10
 # 班级概览 / 学生查看 / 成绩整合 / 积分概览 路由
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 from flask import Blueprint, render_template, request, jsonify, abort
@@ -28,7 +28,7 @@ def class_overview_page():
     teacher = _teacher_or_none()
     user_id = current_user.id
     month = request.args.get('month', '')
-    # v1.19.49.47：传 user 走统一可见班级口径 —— 任课教师也能看到自己任教的班
+    # v1.19.49.48：传 user 走统一可见班级口径 —— 任课教师也能看到自己任教的班
     classes = svc.get_class_overview(user_id, month_str=month or None,
                                      user=current_user)
     # JSON 格式（工作台首页 AJAX 加载用）

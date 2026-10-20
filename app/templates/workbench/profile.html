@@ -38,11 +38,14 @@
             </div>
             <div class="card-body">
 
-                {# 手机号（= 登录账号） #}
+                {# 手机号：账号手机号优先（登录用它），回退教师档案/用户名 #}
                 <div class="d-flex justify-content-between align-items-center mb-1">
                     <div>
-                        <div class="text-muted small">手机号（登录账号）</div>
-                        <div class="fw-bold">{{ teacher.phone if teacher and teacher.phone else current_user.username }}</div>
+                        <div class="text-muted small">手机号（可用于登录）</div>
+                        <div class="fw-bold">
+                            {%- set _ph = current_user.phone or (teacher.phone if teacher and teacher.phone else '') -%}
+                            {%- if _ph %}{{ _ph }}{% else %}<span class="text-muted">未填写</span>{% endif -%}
+                        </div>
                     </div>
                     <button class="btn btn-sm btn-outline-primary" type="button"
                             data-bs-toggle="collapse" data-bs-target="#phoneForm" aria-expanded="false">
@@ -57,13 +60,13 @@
                         <div class="mb-2">
                             <label class="form-label small mb-1">新手机号</label>
                             <input name="new_phone" class="form-control form-control-sm" maxlength="11"
-                                   value="{{ teacher.phone if teacher and teacher.phone else '' }}" required>
+                                   value="{{ current_user.phone or (teacher.phone if teacher and teacher.phone else '') }}" required>
                         </div>
                         <div class="mb-2">
                             <label class="form-label small mb-1">当前密码（确认身份）</label>
                             <input type="password" name="current_password" class="form-control form-control-sm" required>
                         </div>
-                        <div class="form-text mb-2">手机号即登录账号，修改后请使用新手机号登录。</div>
+                        <div class="form-text mb-2">修改后可用新手机号登录，用户名不变（两种方式都能登录）。</div>
                         <button type="submit" class="btn btn-primary btn-sm">确认修改</button>
                     </form>
                 </div>
@@ -135,7 +138,7 @@
 
                 <div class="text-muted small mt-3">
                     <i class="bi bi-info-circle"></i>
-                    手机号即登录账号；身份证属于实名信息，本人不可修改，如填写有误请联系管理员在教师名单中更正。
+                    手机号可用于登录（也可继续用用户名登录）；身份证属于实名信息，本人不可修改，如填写有误请联系管理员在教师名单中更正。
                 </div>
             </div>
         </div>

@@ -1,0 +1,97 @@
+{# 限时练 · 学生分析（2026-10-20 用户口径）
+   一行一个学生：学号 / 姓名 / 班级 / 本场平均 T + 每科一条 T 分迷你轨迹。
+   性能：行内折线是**纯 SVG**（后端算好坐标），页面不初始化任何图表；
+   点某一行才弹窗，用 ECharts 画该生 9 科趋势 —— 几百人也不卡。 #}
+{% if not trends.rows %}
+<div class="alert alert-light border">
+    {% if empty_subjects %}
+    还没有成绩，先到
+    <a href="{{ url_for('grades.timed_detail', tid=exam.id, tab='import') }}">数据导入</a>。
+    {% else %}
+    当前筛选下没有学生。
+    {% endif %}
+</div>
+{% else %}
+
+<div class="d-flex flex-wrap gap-2 align-items-center mb-2">
+    <span class="text-muted small me-1"><i class="bi bi-funnel"></i> 班级</span>
+    <a class="btn btn-sm {{ 'btn-primary' if not trends.class_name else 'btn-outline-secondary' }}"
+       href="{{ url_for('grades.timed_detail', tid=exam.id, tab='trends') }}">全部</a>
+    {% for c in classes %}
+    <a class="btn btn-sm {{ 'btn-primary' if c == trends.class_name else 'btn-outline-secondary' }}"
+       href="{{ url_for('grades.timed_detail', tid=exam.id) }}?tab=trends&class={{ c|urlencode }}">{{ c }}</a>
+    {% endfor %}
+</div>
+
+<div class="d-flex flex-wrap gap-2 align-items-center mb-2">
+    <span class="text-muted small">
+        共 <b>{{ trends.total }}</b> 人，按本场各科平均 T 分从高到低；
+        每科折线 = 最近 8 场该科的 T 分（50 = 年级平均，越靠上越好）
+    </span>
+    <span class="ms-auto small text-muted">
+        第 {{ trends.page }} / {{ trends.pages }} 页 · 点击任意一行查看该生 9 科详情
+    </span>
+</div>
+
+<div>
+    <table class="table table-sm table-hover align-middle mb-2 timed-tbl" id="trendTable">
+        <thead class="table-light">
+        <tr>
+            <th class="text-nowrap">学号</th>
+            <th class="text-nowrap">姓名</th>
+            <th class="text-nowrap">班级</th>
+            <th class="text-end text-nowrap" title="本场各科 T 分的平均值">平均 T</th>
+            {% for s in trends.subjects %}
+            <th class="text-center text-nowrap">{{ s }}</th>
+            {% endfor %}
+        </tr>
+        </thead>
+        <tbody>
+        {% for r in trends.rows %}
+        {% set vals = r.now.values()|select('ne', none)|list %}
+        <tr style="cursor:pointer;"
+            onclick="location.href='{{ url_for('grades.timed_student_detail', tid=exam.id, student_no=r.no) }}'"
+            title="点击查看 {{ r.name }} 的全部场次成绩与 T 分走势">
+            <td class="text-muted text-nowrap">{{ r.no }}</td>
+            <td class="text-nowrap fw-semibold">{{ r.name }}</td>
+            <td class="text-nowrap">{{ r.cls }}</td>
+            <td class="text-end fw-semibold">
+                {{ ((vals|sum) / (vals|length))|round(1) if vals else '—' }}
+            </td>
+            {% for s in trends.subjects %}
+            {% set path = r.paths.get(s) %}
+            <td class="text-center text-nowrap">
+                {% if path %}
+                <svg width="72" height="22" viewBox="0 0 72 22" class="align-middle">
+                    <polyline points="{{ path }}" fill="none"
+                              stroke="#4f7cff" stroke-width="1.6"/>
+                </svg>
+                <span class="small ms-1">{{ r.now.get(s) if r.now.get(s) is not none else '—' }}</span>
+                {% else %}
+                <span class="text-muted">—</span>
+                {% endif %}
+            </td>
+            {% endfor %}
+        </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+</div>
+
+{% if trends.pages > 1 %}
+<nav>
+    <ul class="pagination pagination-sm mb-2">
+        {% for p in range(1, trends.pages + 1) %}
+        {% if p == 1 or p == trends.pages or (p >= trends.page - 2 and p <= trends.page + 2) %}
+        <li class="page-item {{ 'active' if p == trends.page }}">
+            <a class="page-link"
+               href="{{ url_for('grades.timed_detail', tid=exam.id) }}?tab=trends{% if trends.class_name %}&class={{ trends.class_name|urlencode }}{% endif %}&page={{ p }}">{{ p }}</a>
+        </li>
+        {% elif p == 2 or p == trends.pages - 1 %}
+        <li class="page-item disabled"><span class="page-link">…</span></li>
+        {% endif %}
+        {% endfor %}
+    </ul>
+</nav>
+{% endif %}
+{% endif %}
