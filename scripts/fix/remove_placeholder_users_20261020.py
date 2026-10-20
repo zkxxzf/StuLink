@@ -11,8 +11,9 @@
 - `system.db / users`：删除这两行；
 - `system.db / user_permission_groups`：随 ORM 级联删除（delete-orphan）；
 - `academic.db / teachers`：「班主任」整行删除；「周继莉」`user_id` 置 NULL；
-- `system.db / operation_logs`：**不动**（审计留痕；bzr001 仅有 2026-08-26 的
-  3 条登录/登出记录，user_id 会变成历史 id，不影响列表查询）。
+- `system.db / operation_logs`：删除这两行账号**自身的**日志（bzr001 只有
+  2026-08-26 的 3 条登录/登出，无业务动作）；`user_id` 上有 `NO ACTION` 外键，
+  不先清日志会 `FOREIGN KEY constraint failed`。
 
 ## 用法
 
@@ -46,6 +47,7 @@ from app import create_app                                  # noqa: E402
 from app.extensions import db                                # noqa: E402
 from app.models import User                                  # noqa: E402
 from app.models.academic import Teacher                      # noqa: E402
+from app.models.operation_log import OperationLog            # noqa: E402
 
 SCRIPT_NAME = os.path.basename(__file__)
 APPLY = '--apply' in sys.argv
@@ -80,13 +82,15 @@ def main():
                 print(f'[ABORT] {username} 的实名是「{u.real_name}」，与预期「{real_name}」不符')
                 return 3
             t = Teacher.query.filter_by(user_id=u.id).first()
-            plan.append((u, t, drop_teacher))
+            n_log = OperationLog.query.filter_by(user_id=u.id).count()
+            plan.append((u, t, drop_teacher, n_log))
 
         print('== 删除账号 ==')
-        for u, t, drop_teacher in plan:
+        for u, t, drop_teacher, n_log in plan:
             print(f'  - {u.username}（{u.real_name}，id={u.id}，{u.role}）'
                   f'；教师记录：{t.name if t else "无"}'
-                  f'{"（一并删除）" if (t and drop_teacher) else "（仅解绑）" if t else ""}')
+                  f'{"（一并删除）" if (t and drop_teacher) else "（仅解绑）" if t else ""}'
+                  f'；自身日志：{n_log} 条（一并删除）')
 
         if not APPLY:
             print('\n[DRY-RUN] 未删库；确认无误后加 --apply')
@@ -97,7 +101,11 @@ def main():
                    os.path.join(_ROOT, 'data', 'academic.db')],
                   tag='before_remove_users_20261020')
 
-        for u, t, drop_teacher in plan:
+        for u, t, drop_teacher, n_log in plan:
+            if n_log:
+                OperationLog.query.filter_by(user_id=u.id).delete(
+                    synchronize_session=False)
+                print(f'[删除] 账号自身日志 {n_log} 条')
             if t is not None:
                 if drop_teacher:
                     db.session.delete(t)
