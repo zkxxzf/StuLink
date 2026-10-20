@@ -289,7 +289,8 @@ PERMISSION_GROUPS = [
         'role': 'staff',
         'scope_type': 'grade',
         'scope_kind': 'pick_grades',
-        'description': '教务员：成绩/教务写入，学生/积分只读（范围按指定年级，专职行政在用户侧勾选）',
+        'description': '教务员：查课 / 调课（含统一调课、课表管理）等教务事务 + '
+                       '成绩/教务写入，学生/积分只读（范围按指定年级）',
         'menu_keys': _module_keys(
             ('students', 'read'), ('dormitory', 'read'), ('grades', 'write'),
             ('points', 'read'), ('academic', 'write')),
