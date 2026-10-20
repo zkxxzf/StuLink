@@ -29,6 +29,17 @@ def _generate_password():
             return pwd
 
 
+def _generate_initial_password():
+    """批量导出的初始口令：2 位字母 + 6 位数字（2026-10-20 用户口径）。
+
+    仍满足密码策略（≥8 位、含字母与数字），首次登录强制改密。
+    """
+    import string
+    letters = string.ascii_letters
+    return (''.join(secrets.choice(letters) for _ in range(2))
+            + ''.join(secrets.choice(string.digits) for _ in range(6)))
+
+
 def _store_one_time_password(username, real_name, password):
     """L-7：初始/重置口令不再写进 flash（会进响应 HTML 与签名 cookie），
     改为放进 session 的一次性展示区，在用户列表页显示一次即失效。"""
@@ -178,10 +189,16 @@ def list_users():
     archived = archive_svc.archived_teachers()
     # 2026-10-20：批量导出初始密码 —— 按权限组选择（分组导出）
     perm_groups = PermissionGroup.query.order_by(PermissionGroup.id).all()
+    # 可勾选导出的账号（与后端排除口径一致：启用 / 非管理员 / 非本人 / 非管理员组）
+    selectable_ids = {u.id for u in users
+                      if u.is_active and u.role != 'admin'
+                      and u.id != current_user.id
+                      and not _user_in_admin_group(u)}
     return render_template('system/users/list.html', users=users, roles=roles,
                            one_time_passwords=one_time_passwords,
                            wx_bindings=wx_bindings, teacher_map=teacher_map,
-                           archived=archived, perm_groups=perm_groups)
+                           archived=archived, perm_groups=perm_groups,
+                           selectable_ids=selectable_ids)
 
 
 @bp.route('/create', methods=['GET', 'POST'])
@@ -510,10 +527,11 @@ def export_passwords():
     2026-10-20 用户需求。系统只存密码摘要、**无法导出原密码**，因此本功能是
     「为所选账号生成新的初始密码 → 下载清单」，旧密码立即失效、首次登录强制改密。
 
-    - 范围：勾选「全部用户」或按权限组多选；
-    - 排除：管理员账号、管理员组成员、当前登录本人（防批量外发管理入口口令）；
-    - 仅启用账号（禁用账号不分配新口令）；
-    - 全程写操作日志（WARNING 级）。
+    - 范围：优先按「勾选用户」；未勾选时按权限组多选或「全部用户」；
+     - 口令：2 位字母 + 6 位数字，首次登录强制改密；
+     - 排除：管理员账号、管理员组成员、当前登录本人（防批量外发管理入口口令）；
+     - 仅启用账号（禁用账号不分配新口令）；
+     - 全程写操作日志（WARNING 级）。
     """
     from datetime import datetime
 
@@ -521,25 +539,29 @@ def export_passwords():
 
     from app.models.user_permission_group import UserPermissionGroup
 
+    uids = [int(v) for v in request.form.getlist('user_ids') if str(v).isdigit()]
     all_flag = (request.form.get('all') or '') == '1'
     gids = [int(v) for v in request.form.getlist('group_ids') if str(v).isdigit()]
-    if not all_flag and not gids:
-        flash('请选择要导出的权限组，或勾选「全部用户」', 'danger')
+    if not uids and not all_flag and not gids:
+        flash('请勾选用户，或选择权限组 / 全部用户', 'danger')
         return redirect(url_for('users.list_users'))
 
-    q = User.query.filter(User.is_active.is_(True))
-    if not all_flag:
-        sub = db.session.query(UserPermissionGroup.user_id).filter(
-            UserPermissionGroup.group_id.in_(gids))
-        q = q.filter(or_(User.id.in_(sub),
-                         User.permission_group_id.in_(gids)))
+    if uids:
+        q = User.query.filter(User.id.in_(uids), User.is_active.is_(True))
+    else:
+        q = User.query.filter(User.is_active.is_(True))
+        if not all_flag:
+            sub = db.session.query(UserPermissionGroup.user_id).filter(
+                UserPermissionGroup.group_id.in_(gids))
+            q = q.filter(or_(User.id.in_(sub),
+                             User.permission_group_id.in_(gids)))
     users = q.order_by(User.role, User.username).all()
 
     rows = []
     for u in users:
         if u.id == current_user.id or u.role == 'admin' or _user_in_admin_group(u):
             continue
-        pwd = _generate_password()
+        pwd = _generate_initial_password()
         u.set_password(pwd)          # 同时递增 wx_token_ver，吊销小程序旧令牌
         u.must_change_pwd = True
         gnames = ('、'.join(g.name for g in u.permission_groups if g and g.name)
@@ -552,7 +574,12 @@ def export_passwords():
 
     group_names = [g.name for g in PermissionGroup.query
                    .filter(PermissionGroup.id.in_(gids)).all()] if gids else []
-    scope_label = '全部用户' if all_flag else '、'.join(group_names)
+    if uids:
+        scope_label = f'勾选用户 {len(rows)} 人'
+    elif all_flag:
+        scope_label = '全部用户'
+    else:
+        scope_label = '、'.join(group_names)
     log_operation(current_user, '导出初始密码', '用户', None,
                   f'{len(rows)} 个账号；范围：{scope_label}', module='system',
                   severity='WARNING')
