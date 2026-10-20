@@ -196,7 +196,15 @@ def parse_score_excel(stream, exam):
         if 'exam_no' in header_idx:
             ei = header_idx['exam_no']
             exam_no = (cells[ei] if ei < len(cells) else '').strip()
+        # 修复（2026-10-20）：此前只识别了表头「班级」列、却从未写进 rows，
+        # 导致 _attach_student_info 里 normalize_class_name(r.get('class_name'))
+        # 恒为 None，历史补导一律回落成主库「当前班级」（分班后失真）。
+        class_name = ''
+        if 'class_name' in header_idx:
+            ci = header_idx['class_name']
+            class_name = (cells[ci] if ci < len(cells) else '').strip()
         rows.append({'no': no, 'line': line_no, 'subjects': subjects, 'total': total,
+                     'class_name': class_name,
                      'raw_subjects': raw_subjects, 'exam_no': exam_no})
         raw_in_file = raw_in_file or bool(raw_subjects)
 

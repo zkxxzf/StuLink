@@ -1108,12 +1108,14 @@
         var stats = CFG.stats || {};
         var data = Object.keys(stats).map(function (k) { return { name: k, value: stats[k] }; });
         data.sort(function (a, b) { return b.value - a.value; });
-        var chart = echarts.init(el);
-        el.__chart = chart;   // 供 updateStats() 在局部刷新后同步饼图
+        // 2026-10-20：空数据要在 init 之前返回 —— 先 init 再 innerHTML 会把画布抹掉，
+        // 而实例仍挂在 echarts 的全局表里，之后再 init 拿到的是一张没有画布的旧实例。
         if (!data.length) {
             el.innerHTML = '<div class="text-center text-muted small pt-5">暂无课时数据</div>';
             return;
         }
+        var chart = echarts.init(el);
+        el.__chart = chart;   // 供 updateStats() 在局部刷新后同步饼图
         chart.setOption({
             tooltip: { trigger: 'item', formatter: '{b}: {c} 节 ({d}%)' },
             legend: { type: 'scroll', orient: 'vertical', right: 4, top: 'center', textStyle: { fontSize: 11 } },
@@ -1122,7 +1124,14 @@
                 label: { show: false }, emphasis: { label: { show: true, fontSize: 13, fontWeight: 'bold' } }
             }]
         });
-        $(window).on('resize', function () { chart.resize(); });
+        // resize 每个容器只绑一次（切页签会重建 IntersectionObserver 再画一遍，
+        // 原来每画一次就多一个监听，长期开着页面会线性累积）
+        if (!el.__chartResizeBound) {
+            el.__chartResizeBound = true;
+            $(window).on('resize', function () {
+                if (el.__chart && !el.__chart.isDisposed()) { el.__chart.resize(); }
+            });
+        }
     }
 
     /* ══════════════════════════════════════════════════════════════
