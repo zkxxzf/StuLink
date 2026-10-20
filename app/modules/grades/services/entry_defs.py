@@ -98,6 +98,11 @@ ENTRIES = (
        exam='query', imported=True, desc='一句话提问 → 后台取数 → HTML 报告'),
 
     # ---------- 个人与证明 ----------
+    # 2026-10-20 用户口径：成绩首页要有一个「开具成绩证明」的直达牌
+    # （和「学生成绩」同一页面，但那页的功能是"开具"，放前面更显眼）
+    _e('cert_issue', '开具成绩证明', 'bi-file-earmark-plus', G_ME,
+       'grades.student_query_page', perm='grades.student_query',
+       desc='选学生 → 生成成绩证明（防伪码 / 打印 / 台账）'),
     _e('student_query', '学生成绩', 'bi-person-vcard', G_ME,
        'grades.student_query_page', perm='grades.student_query',
        desc='按学生查历次成绩，可开具成绩证明'),

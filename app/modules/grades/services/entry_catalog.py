@@ -75,10 +75,13 @@ def build_board(user, exams=None):
     """构建入口板：visible=首页展示，all=自定义弹窗（含被隐藏的）"""
     prefs = entry_prefs.load(user)
     order = {k: i for i, k in enumerate(prefs.get('order') or [])}
+    # 新登记的入口不在用户的旧排序里 → 按定义表位置插回去，
+    # 而不是一律排到最后（否则新加的「开具成绩证明」会掉到组末）
+    default_pos = {e['key']: i for i, e in enumerate(ENTRIES)}
     hidden = set(prefs.get('hidden') or [])
     allowed = [e for e in ENTRIES
                if _allowed(e, user) and _gate_ok(e, user, exams)]
-    allowed.sort(key=lambda e: order.get(e['key'], len(ENTRIES)))
+    allowed.sort(key=lambda e: order.get(e['key'], default_pos[e['key']]))
     visible = [_format(e) for e in allowed if e['key'] not in hidden]
     everything = [_format(e, hidden=e['key'] in hidden) for e in allowed]
     return {'groups': _grouped(visible), 'all_groups': _grouped(everything),
