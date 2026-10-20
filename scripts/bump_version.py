@@ -139,7 +139,8 @@ VERSION_COMMIT_RX = re.compile(r'版本号升级\s+v?(\d+)\.(\d+)\.(\d+)(?:\.(\d
 
 def _git(*args: str) -> str:
     try:
-        r = subprocess.run(['git', *args], cwd=ROOT, capture_output=True, text=True)
+        r = subprocess.run(['git', *args], cwd=ROOT, capture_output=True,
+                           text=True, encoding='utf-8', errors='replace')
         return r.stdout.strip() if r.returncode == 0 else ''
     except Exception:
         return ''
@@ -345,7 +346,9 @@ def bump_files(new_ver: str, dry: bool = False) -> list[str]:
 
 
 def git_commit(new_ver: str, mode: str) -> None:
-    r = subprocess.run(['git', 'status', '--porcelain'], cwd=ROOT, capture_output=True, text=True)
+    r = subprocess.run(['git', 'status', '--porcelain'], cwd=ROOT,
+                       capture_output=True, text=True, encoding='utf-8',
+                       errors='replace')
     if not r.stdout.strip():
         print('工作区无变更，跳过 commit')
         return
