@@ -26,11 +26,21 @@ from app.extensions import db  # noqa: E402
 from app.models import PermissionGroup  # noqa: E402
 
 TARGETS = ('校长', '教务主任', '教务员', '年级长组')
+SCRIPT_NAME = _os.path.basename(__file__)
+
+try:
+    import _mig_log
+except Exception as _e:  # noqa: BLE001
+    _mig_log = None
+    print(f'[WARN] 迁移登记模块不可用（照常同步，仅不登记）：{_e}')
 
 
 def main():
     app = create_app()
     with app.app_context():
+        if _mig_log is not None and _mig_log.is_applied(SCRIPT_NAME):
+            print(f'[SKIP] {SCRIPT_NAME} 已登记为已应用，跳过同步')
+            return 0
         seeds = {p['name']: p for p in PERMISSION_GROUPS if p['name'] in TARGETS}
         changed = 0
         for name in TARGETS:
@@ -75,9 +85,27 @@ def main():
                     print('[OK] 校长：role=principal / 范围=全校')
             if not add and name != '校长':
                 print(f'[SKIP] {name}：无变化')
+        # 2026-10-20 审计加固：改的是生产权限组（决定谁能审批/改分），
+        # 提交前必须整库备份；备份失败则回滚，不做不可恢复的权限变更。
+        if changed:
+            from _db_backup import backup_db
+            pairs = backup_db(_os.path.join(_ROOT, 'data', 'system.db'),
+                              tag='before_sync_role_groups')
+            if not pairs or not pairs[0][1]:
+                print('中止：system.db 备份失败，本次改动已回滚。')
+                db.session.rollback()
+                return 2
+            print(f'已备份：{_os.path.basename(pairs[0][1])}')
         db.session.commit()
         print(f'[DONE] 共变更 {changed} 项')
+        if _mig_log is not None:
+            try:
+                _mig_log.record(SCRIPT_NAME,
+                                note='同步校长/教务主任/教务员/年级长组权限口径')
+            except Exception as _e:  # noqa: BLE001
+                print(f'[WARN] 迁移登记失败（不影响结果）：{_e}')
+        return 0
 
 
 if __name__ == '__main__':
-    main()
+    _sys.exit(main())

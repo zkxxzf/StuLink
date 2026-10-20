@@ -361,7 +361,14 @@ def check_M4():
     case('M-4 整行转义', xl_row(['=1+1', '张三', 3])[0] == "'=1+1")
     src = _read('app/utils/export_helpers.py')
     case('M-4 学生导出两处循环已转义', src.count('xl_safe(v)') >= 2)
-    case('M-4 成绩导出走 xl_row', 'xl_row(' in _read('app/modules/grades/routes/export.py'))
+    # 2026-10-20：成绩分析导出改走 app/utils/xlsx_style.write_table（统一表头样式），
+    # 其内部对每行调用 xl_row 做注入转义 —— 断言随之放宽为「直调 xl_row 或经
+    # write_table 且该工具内部确有 xl_row」，安全语义不变（非降低标准）。
+    _exp_src = _read('app/modules/grades/routes/export.py')
+    case('M-4 成绩导出走 xl_row',
+         'xl_row(' in _exp_src
+         or ('write_table(' in _exp_src
+             and 'xl_row(' in _read('app/utils/xlsx_style.py')))
     case('M-4 考务导出走 xl_row',
          'xl_row(' in _read('app/modules/grades/routes/exam_affairs.py'))
 
@@ -2144,6 +2151,34 @@ def check_SR18():
     _a = _src('mcp_server/core/auth.py')
     case('SR-18 MCP 读频控不清零全部计数',
          '_read_hits.clear()' not in _a and 'if len(_read_hits) >= _READ_HITS_MAX' in _a)
+
+
+@item('SR-19')
+def check_SR19():
+    """2026-10-20 审计加固防回归：改生产数据的修数据/权限同步脚本必须有门控与备份。"""
+
+    def _src(rel):
+        with open(os.path.join(BASE, rel), encoding='utf-8') as f:
+            return f.read()
+
+    # ① import_exam36（整场重置导入 + 清空方向快照）：必须 --apply 门控 + 备份 + 失败退出码
+    _i = _src('scripts/fix/import_exam36_202510.py')
+    case('SR-19 exam36 重导入默认 dry-run（需 --apply）',
+         "APPLY = '--apply' in sys.argv" in _i and 'if not APPLY' in _i)
+    case('SR-19 exam36 重导入改库前备份 grades.db',
+         'backup_db' in _i and 'grades.db' in _i)
+    case('SR-19 exam36 对照 FAIL 时退出码非 0',
+         'sys.exit(main())' in _i and 'return 1 if bad else 0' in _i)
+    # ② 权限组同步（决定谁能审批/改分）：改库前备份 + 迁移登记
+    _r = _src('scripts/seed/sync_role_groups_20261020.py')
+    case('SR-19 权限组同步改库前备份 system.db',
+         'backup_db' in _r and 'system.db' in _r and 'rollback()' in _r)
+    case('SR-19 权限组同步登记迁移日志',
+         '_mig_log' in _r and 'is_applied' in _r and '_mig_log.record' in _r)
+    # ③ 自审口径注释须与实现一致（管理员/校长例外），避免后人误判为回归
+    _v = _src('app/modules/grades/services/review_service.py')
+    case('SR-19 复核审批注释与 is_top_reviewer 口径一致',
+         'is_top_reviewer' in _v and '管理员 / 校长例外' in _v)
 
 
 def main(argv):
