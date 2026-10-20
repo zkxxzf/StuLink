@@ -508,7 +508,8 @@ def reset_password(id):
                       severity='WARNING')
         flash('只有超管（admin 账号）能重置其他管理员的口令', 'danger')
         return redirect(url_for('users.list_users'))
-    new_pwd = _generate_password()
+    # 2026-10-20：与批量导出统一为「2 字母 + 6 数字」的初始口令
+    new_pwd = _generate_initial_password()
     user.set_password(new_pwd)
     user.must_change_pwd = True
     db.session.commit()
