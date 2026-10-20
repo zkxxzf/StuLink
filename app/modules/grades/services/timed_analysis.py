@@ -1,14 +1,23 @@
-# StuLink v1.19.49.49 2026-10-20
+# StuLink v1.19.49.50 2026-10-20
 # 限时练单科分析：班均分 + 名次区间人数（不做多科汇总）
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 """限时练单科分析（2026-10-20 用户口径）。
 
 只做两件事，不加载任何其它分析子页面：
-1. **各班该科平均分**（缺考不落库，天然不计入分母）；
+1. **各班该科去差均分**（缺考不落库，天然不计入分母；去差 = 按班型名额
+   剔除该科成绩末尾 N 人后重算）；
 2. **各班落在指定名次区间内的人数**（区间来自限时练专属分层模板，
    按本场该科的**全年级名次** ``rank_grade`` 落区间）。
+
+去差口径与「全局对比 / 汇报区」共用一份规则（``report_service.TRIM_RULES``，
+卓越班 2 人、其它班型不去差），实际剔除人数也复用 ``global_compare_service``
+的「缺考先顶替名额」算法，跨页同数。
+2026-10-20 用户口径：分析页删掉最高分/最低分，均分改为去差均分。
 """
+import logging
 import time
+
+logger = logging.getLogger(__name__)
 
 from app.extensions import db
 from app.models.timed import TimedScore
@@ -47,7 +56,12 @@ def invalidate(exam_id=None):
 
 
 def save_subject(exam, subject, rows):
-    """整科覆盖写入 + 重算名次（不 commit，事务交给路由层）"""
+    """整科覆盖写入 + 重算名次（不 commit，事务交给路由层）
+
+    2026-10-21 审计：**不在这里清缓存** —— 事务还没提交，清完可能被并发请求
+    用旧数据重建，提交后仍继续存活到 TTL。由路由在 commit 成功后调
+    ``invalidate()``（导入确认 / AI 导入 / 删场次三处）。
+    """
     for row in rows:
         db.session.add(TimedScore(
             exam_id=exam.id, student_no=row['student_no'],
@@ -58,7 +72,6 @@ def save_subject(exam, subject, rows):
     db.session.flush()
     from app.modules.grades.services import timed_service
     timed_service.recalc_subject_ranks(exam.id, subject)
-    invalidate(exam.id)              # 成绩变了，派生的名次 / T 分缓存作废
 
 
 def classes_of(exam_id, subject=None):
@@ -170,7 +183,7 @@ def subject_blocks(exam, tpl):
     """分析页数据：一个学科一块，每块两组「图 + 表」——
 
     上：**人数** 左堆叠图（各班各名次段人数） + 右人数表；
-    下：**平均分** 左柱状图（各班均分） + 右平均分表（含各段均分）。
+    下：**去差均分** 左柱状图（各班去差均分） + 右表（去差均分 + 各段均分）。
     """
     from app.models.grades import SUBJECTS
     have = {r[0] for r in db.session.query(TimedScore.subject)
@@ -198,8 +211,9 @@ def subject_blocks(exam, tpl):
             'subject': s,
             'analysis': a,
             'count_chart': count_chart,
+            # 柱状图画的也是去差均分（与表格同口径，2026-10-20 用户要求）
             'avg_chart': {'classes': classes,
-                          'avgs': [r['avg'] for r in rows]},
+                          'avgs': [r['trim_avg'] for r in rows]},
         })
     return out
 
@@ -246,7 +260,7 @@ def effective_layers(layers, count):
 def _empty_row(name):
     """一行统计骨架（班级 / 合计）"""
     return {'class_name': name, 'teacher': '', 'count': 0, 'sum': 0.0,
-            'max': None, 'min': None, 'bands': [], 'band_scores': {}}
+            'scores': [], 'bands': [], 'band_scores': {}}
 
 
 def _teacher_map(grade, subject):
@@ -280,13 +294,44 @@ def _accumulate(row, score, rank):
     """把一名学生累加进统计行（rank 只用于区间判定，见 subject_analysis）"""
     row['count'] += 1
     row['sum'] += float(score or 0)
-    row['max'] = score if row['max'] is None else max(row['max'], score)
-    row['min'] = score if row['min'] is None else min(row['min'], score)
+    row['scores'].append(float(score or 0))
 
 
-def _finish(row):
-    """结算均分（1 位小数）"""
-    row['avg'] = round(row['sum'] / row['count'], 1) if row['count'] else None
+def _trim_quotas(grade):
+    """{班级: 去差名额}：按班型取名额（与全局对比共用 TRIM_RULES）
+
+    限时练成绩行没有「班型快照」，取当前班型设置（ClassProfile）；
+    班级未登记班型 / 班型不在规则里 → 0（不去差）。
+    """
+    from app.models import ClassProfile
+    from app.modules.grades.services.report_service import (
+        DEFAULT_TRIM, TRIM_RULES)
+    try:
+        profs = ClassProfile.query.filter_by(grade=grade).all()
+    except Exception as _e:                  # noqa: BLE001 配置异常不拖垮分析
+        logger.warning('timed_analysis.py::_trim_quotas 异常（按不去差处理）: %s', _e)
+        return {}
+    return {(p.class_name or '').strip():
+            TRIM_RULES.get(p.class_type or '', DEFAULT_TRIM) for p in profs}
+
+
+def _finish(row, need=0):
+    """结算平均分 + 去差均分（1 位小数）
+
+    need = 该班去差名额（班型规则，卓越班 2 人）；实际剔除收敛到 count-1 以内。
+    去差均分 = 剔除本班该科末尾 need 人后重算（2026-10-20 用户口径：
+    分析页只看去差均分，不再给最高/最低分）。
+    保留 ``kept`` 供「合计」行按去差后合并（取完需 pop）。
+    """
+    cnt = row['count']
+    scores = sorted(row.pop('scores', []))
+    row['avg'] = round(row['sum'] / cnt, 1) if cnt else None
+    # 至少留 1 人：班级人数少到没有可剔除的，去差人数自动收敛为 0
+    row['trim_n'] = min(max(need, 0), max(cnt - 1, 0))
+    # 升序后从**低分端**剔除（去差剔的是末尾/尾巴，不是最高分）
+    keep = scores[row['trim_n']:] if row['trim_n'] else scores
+    row['trim_avg'] = round(sum(keep) / len(keep), 1) if keep else None
+    row['kept'] = keep
     row.pop('sum', None)
     return row
 
@@ -301,12 +346,17 @@ def _no_class(name):
 
 
 def subject_analysis(exam, subject, template):
-    """单科分析表：各班均分 + 各名次区间人数 + 合计行（纯内存，一次查询）
+    """单科分析表：各班去差均分 + 各名次区间人数 + 合计行（纯内存，一次查询）
 
-    2026-10-20 用户口径：「不分班」这类无班级归属的成绩不参与班级统计，
-    表格里不再出现「不分班」这一行（合计与人数口径同步排除）。
+    2026-10-20 用户口径：
+    - 「不分班」这类无班级归属的成绩不参与统计（表里不再出现该行）；
+    - 均分统一给**去差均分**（按班型名额剔除该科末尾 N 人），最高/最低分不再展示。
+    去差名额与全局对比同一份规则（``report_service.TRIM_RULES``）；但这里
+    **不套「缺考先顶替名额」**——限时练常有成批学生不参加（一个班只来 40/49 人），
+    套上去就永远剔不到人，用户要的是「每班去掉末尾 N 人」。
     """
     teachers = _teacher_map(exam.grade, subject)
+    quotas = _trim_quotas(exam.grade)
     rows = (TimedScore.query
             .filter_by(exam_id=exam.id, subject=subject)
             .order_by(TimedScore.class_name.asc()).all())
@@ -354,7 +404,7 @@ def subject_analysis(exam, subject, template):
         return segs
 
     def _row_layer_avgs(item):
-        """本班各累积层的学生均分（平均分表用）"""
+        """本班各累积层的学生均分（去差均分表右侧列用）"""
         out = []
         for lay in layers:
             scores = item['band_scores'].get(lay['name'], [])
@@ -365,17 +415,24 @@ def subject_analysis(exam, subject, template):
         return out
 
     out_rows = []
+    kept_all = []
     for cls in sorted(by_class):
         item = by_class[cls]
         item['bands'] = _band_counts(item)
         item['teacher'] = teachers.get(cls, '')
         item['stack'] = _stack_of(item)
         item['layer_avgs'] = _row_layer_avgs(item)
-        out_rows.append(_finish(item))
+        out_rows.append(_finish(item, quotas.get(cls, 0)))
+        kept_all.extend(item.pop('kept', []))       # 合计要按「各班去差后」合并
     total['bands'] = _band_counts(total)
     total['stack'] = _stack_of(total)
     total['layer_avgs'] = _row_layer_avgs(total)
-    total = _finish(total)
+    total = _finish(total, 0)
+    if kept_all:
+        # 去差均分的合计 = 各班去差后合并（与全局对比的「总计」同口径）
+        total['trim_avg'] = round(sum(kept_all) / len(kept_all), 1)
+        total['trim_n'] = total['count'] - len(kept_all)
+    total.pop('kept', None)
 
     # 每个名次层的学生平均分（累积口径：前10 的均分、前20 的均分…）
     layer_avgs = []
@@ -440,6 +497,29 @@ def subject_t_map(exam_id, subject):
     return _t_map_of({x[0]: x[1] for x in rows})
 
 
+def _allowed_subjects(student_no):
+    """该生**应学**的科目集合（按学籍里的选科组合）；不确定返回 None。
+
+    2026-10-20 用户口径：学生选完科（如物化生）就不该再显示历史/政治/地理
+    —— 他早就不学了，那几列既占地方又容易让人误读。`subjects_of_selection`
+    已覆盖 3+1+2 各种组合（物化生 / 史政地 / 物化地 …）以及「全科/不分科」
+    （高一未选科）：后者返回全部 9 科，这里按"不过滤"处理。
+    """
+    from app.models import Student
+    from app.models.grades import SUBJECTS, subjects_of_selection
+    try:
+        stu = Student.query.filter_by(student_number=student_no).first()
+    except Exception:                                  # noqa: BLE001
+        return None
+    sel = (stu.subject_selection or '').strip() if stu else ''
+    if not sel:
+        return None
+    subs = subjects_of_selection(sel)
+    if not subs or len(subs) >= len(SUBJECTS):
+        return None
+    return set(subs)
+
+
 def _student_detail_base(exam, student_no):
     """单个学生的**全部场次**明细（学生分析详情页）。
 
@@ -471,6 +551,9 @@ def _student_detail_base(exam, student_no):
     name = next((r.student_name for r in rows if r.student_name), '')
     cls = next((r.class_name for r in rows if r.class_name), '')
     subjects = [s for s in SUBJECTS if any(r.subject == s for r in rows)]
+    allowed = _allowed_subjects(student_no)
+    if allowed:
+        subjects = [s for s in subjects if s in allowed]
 
     by_exam = {}
     for r in rows:
@@ -483,12 +566,20 @@ def _student_detail_base(exam, student_no):
     lines = [{'exam': emap[eid], **data} for eid, data in by_exam.items()]
     lines.sort(key=lambda x: (x['exam'].exam_date, x['exam'].id))
 
+    # 走势数据：{科目: [[完整日期, T], …]}
+    # 日期必须带年份 —— 一届限时练跨三个学年，只用 %m-%d 会让
+    # 「2025-09-10」和「2024-09-10」落到同一个类目上，折线错位（2026-10-20 实测：
+    # 43 场被折叠成十几个 x 点，看起来像几根乱线）。
     chart = {}
-    for it in lines:
-        stamp = it['exam'].exam_date.strftime('%m-%d')
-        for subj, cell in it['cells'].items():
-            if cell['t'] is not None:
-                chart.setdefault(subj, []).append([stamp, cell['t']])
+    for subj in subjects:
+        pts = []
+        for it in lines:
+            cell = it['cells'].get(subj)
+            if cell and cell['t'] is not None:
+                pts.append([it['exam'].exam_date.strftime('%Y-%m-%d'),
+                            cell['t']])
+        if pts:
+            chart[subj] = pts
 
     # 每科最近一次 T（卡片上直接看）
     latest = {}
@@ -496,9 +587,39 @@ def _student_detail_base(exam, student_no):
         pts = chart.get(s) or []
         latest[s] = pts[-1][1] if pts else None
 
+    # 学科档案（2026-10-20 用户要求「雷达图看薄弱学科」）：
+    # latest=最近一场 T；avg=该科历史平均 T；sd=波动（越大越不稳）；
+    # trend=最近 3 场均值 − 之前 3 场均值（正=在进步）。
+    stats = []
+    for s in subjects:
+        vals = [p[1] for p in (chart.get(s) or [])]
+        if not vals:
+            continue
+        avg = sum(vals) / len(vals)
+        sd = (sum((v - avg) ** 2 for v in vals) / len(vals)) ** 0.5
+        recent, prev = vals[-3:], vals[-6:-3]
+        trend = ((sum(recent) / len(recent)) - (sum(prev) / len(prev))
+                 if prev else 0.0)
+        stats.append({
+            'subject': s, 'latest': round(vals[-1], 1),
+            'avg': round(avg, 1), 'sd': round(sd, 1), 'n': len(vals),
+            'trend': round(trend, 1),
+            # 47 以下算薄弱（T 50 是年级平均，47 已经低于平均 3 分）；
+            # 60 以上算优势（高一个档次）
+            'weak': vals[-1] < 47, 'strong': vals[-1] >= 60,
+        })
+    stats.sort(key=lambda x: x['latest'])          # 弱的排前面，一眼看到短板
+    by_subj = {x['subject']: x for x in stats}
+    radar_subj = [s for s in subjects if s in by_subj]
+    radar = {'subjects': radar_subj,
+             'latest': [by_subj[s]['latest'] for s in radar_subj],
+             'avg': [by_subj[s]['avg'] for s in radar_subj]}
+
     return {'student_no': student_no, 'name': name, 'cls': cls,
             'subjects': subjects, 'lines': lines, 'chart': chart,
-            'latest': latest, 't_min': T_MIN_SAMPLE}
+            'latest': latest, 'stats': stats, 'radar': radar,
+            'weak': [x for x in stats if x['weak']],
+            't_min': T_MIN_SAMPLE}
 
 
 def student_detail(exam, student_no):

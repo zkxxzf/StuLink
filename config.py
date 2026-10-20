@@ -1,4 +1,4 @@
-# StuLink v1.19.49.49 2026-10-20
+# StuLink v1.19.49.50 2026-10-20
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 import os
 import secrets
@@ -186,9 +186,14 @@ class Config:
         'history': 'sqlite:///' + os.path.join(BASE_DIR, 'data', 'history.db'),
         'grades': 'sqlite:///' + os.path.join(BASE_DIR, 'data', 'grades.db'),
         'points': 'sqlite:///' + os.path.join(BASE_DIR, 'data', 'points.db'),
-        # 2026-10-13（v1.19.49.49）：德育奖惩独立成库 —— 与「积分」业务互不牵连，
+        # 2026-10-13（v1.19.49.50）：德育奖惩独立成库 —— 与「积分」业务互不牵连，
         # 奖惩记录含附件与处分期限等长期档案信息，拆库后单库损坏不影响积分/成绩。
         'morality': 'sqlite:///' + os.path.join(BASE_DIR, 'data', 'morality.db'),
+        # 2026-10-20（用户要求）：限时练独立成库 —— 场次/成绩/分层模板三张表
+        # 单独放在 timed.db。限时练一次全量就是十几万行，与月考成绩混在一个
+        # grades.db 里会让备份、核对、单库修复都变重；两套数据也没有任何
+        # 跨库 JOIN（模块内只查自己的表 + 独立查 students）。
+        'timed': 'sqlite:///' + os.path.join(BASE_DIR, 'data', 'timed.db'),
         'academic': 'sqlite:///' + os.path.join(BASE_DIR, 'data', 'academic.db'),
         # 2026-10-10：教务按「一个功能一个库」拆分（原 academic.db 一库混装四件事）——
         # 查课 / 教师业绩 / 表单收集各自独立成库，academic.db 只留师资基础资料。

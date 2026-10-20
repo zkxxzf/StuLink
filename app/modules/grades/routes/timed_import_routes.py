@@ -1,4 +1,4 @@
-# StuLink v1.19.49.49 2026-10-20
+# StuLink v1.19.49.50 2026-10-20
 # 限时练：模板文件导入（上传预检 → 确认落库）
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 """限时练模板文件导入（追加式单科：一次一科，同科重导 = 整科覆盖）。
@@ -78,12 +78,16 @@ def timed_import_confirm(tid):
         exam.status = 'imported'
         exam.import_draft = None
         exam.import_token = None
+        # 与脚本导入（import_to_timed）同口径：届内按日期重排成「2026级 No.N」
+        timed_service.renumber_grade(exam.grade)
         db.session.commit()
     except Exception as e:                              # noqa: BLE001
         db.session.rollback()
         flash(f'导入失败：{e}', 'danger')
         return redirect(url_for('grades.timed_detail', tid=exam.id,
                                 tab='import'))
+    # 缓存必须在 commit 之后清（save_subject 里清会被并发请求用旧数据重建）
+    timed_analysis.invalidate(exam.id)
     removed = (draft.get('diff') or {}).get('deleted_rows') or 0
     log_operation(current_user, '导入', '限时练成绩', exam.id,
                   f'{exam.grade} {exam.name} · {subject} '
@@ -91,5 +95,6 @@ def timed_import_confirm(tid):
                   module='grades')
     flash(f'{subject} 成绩已导入（{len(draft["rows"])} 人'
           + (f'，替换原有 {removed} 条' if removed else '') + '）', 'success')
+    # 'scoresheet' 页签本批已删除（静默回落到学生成绩），直接给汇总表页签
     return redirect(url_for('grades.timed_detail', tid=exam.id,
-                            tab='scoresheet', subject=subject))
+                            tab='students'))

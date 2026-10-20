@@ -1,4 +1,4 @@
-# StuLink v1.19.49.49  2026-10-20
+# StuLink v1.19.49.50  2026-10-20
 # 抓取智学网全部「限时练 / 标准化作业 / 限时作业」成绩
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 """批量抓取智学网限时练类成绩（全部年级 × 全部学期）。
@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 from datetime import datetime
 from pathlib import Path
@@ -91,8 +92,11 @@ def load_index():
 
 
 def save_index(idx):
+    """合并写入（两个抓取进程并行时，避免后写的把先写的条目覆盖掉）"""
     OUT.mkdir(parents=True, exist_ok=True)
-    INDEX.write_text(json.dumps(idx, ensure_ascii=False, indent=1),
+    merged = load_index()
+    merged.update(idx)
+    INDEX.write_text(json.dumps(merged, ensure_ascii=False, indent=1),
                      encoding='utf-8')
 
 
@@ -121,11 +125,12 @@ def do_scrape(context, cfg, exams, force=False):
     idx = load_index()
     ok = fail = skip = 0
     for exam in exams:
-        if not force and exam['exam_id'] in idx:
+        label = f'{exam["grade"]} {exam["name"]}（{exam["date"]}）'
+        dest = OUT / f'{fx.safe_name(label, 70)}.json'
+        if not force and (dest.exists() or exam['exam_id'] in idx):
             log(f'跳过（已抓过）：{exam["name"]}')
             skip += 1
             continue
-        label = f'{exam["grade"]} {exam["name"]}（{exam["date"]}）'
         log(f'抓取：{label}')
         try:
             result, url = scrape_one(context, cfg, exam)
@@ -142,6 +147,13 @@ def do_scrape(context, cfg, exams, force=False):
             'scraped_at': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
             'row_count': len(result.get('rows') or []),
         }
+        if payload['row_count'] <= 0:
+            # 2026-10-21 审计：0 行（页面改版 / 登录态半失效 / 该场真没成绩）
+            # 不能落盘登记 —— 否则下次按 index 判定"已抓过"永久跳过，
+            # 数据静默缺失只能人工发现。计入失败，下次自动重试。
+            log(f'  [WARN] 0 行，不落盘也不登记（下次自动重抓）：{label}')
+            fail += 1
+            continue
         OUT.mkdir(parents=True, exist_ok=True)
         dest = OUT / f'{fx.safe_name(label, 70)}.json'
         dest.write_text(json.dumps(payload, ensure_ascii=False), encoding='utf-8')
@@ -156,6 +168,30 @@ def do_scrape(context, cfg, exams, force=False):
         ok += 1
     log(f'完成：成功 {ok} / 失败 {fail} / 跳过 {skip}')
     return ok, fail, skip
+
+
+def run_import():
+    """抓完自动入库（两个进程并行时只让一个写库）"""
+    lock = OUT / '.import.lock'
+    try:
+        if lock.exists() and (datetime.now().timestamp()
+                              - lock.stat().st_mtime) > 1800:
+            lock.unlink()
+        fd = os.open(str(lock), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+    except FileExistsError:
+        log('另一个抓取进程已在导入，跳过自动导入')
+        return
+    try:
+        log('开始导入限时练…')
+        sys.argv = ['import_to_timed.py', '--apply']    # 这里必须带 --apply
+        import import_to_timed
+        import_to_timed.main()
+    finally:
+        os.close(fd)
+        try:
+            lock.unlink()
+        except OSError:
+            pass
 
 
 def save_plan(exams):
@@ -185,6 +221,8 @@ def main():
     ap.add_argument('--take', type=int, default=0, help='只处理接下来 N 场（并行分片）')
     ap.add_argument('--max-pages', type=int, default=0, help='调试：每场最多翻 N 页')
     ap.add_argument('--force', action='store_true', help='忽略已抓记录')
+    ap.add_argument('--import-after', action='store_true',
+                    help='抓取结束后自动导入限时练（幂等）')
     args = ap.parse_args()
 
     if args.list_only_from_plan:
@@ -201,6 +239,8 @@ def main():
                 do_scrape(context, cfg, exams, args.force)
             finally:
                 pw.stop()
+            if args.import_after:
+                run_import()
         return
 
     years = ([y.strip() for y in args.years.split(',') if y.strip()]

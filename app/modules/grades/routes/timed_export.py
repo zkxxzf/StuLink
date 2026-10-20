@@ -1,4 +1,4 @@
-# StuLink v1.19.49.49 2026-10-20
+# StuLink v1.19.49.50 2026-10-20
 # 限时练：成绩汇总表导出（xlsx）
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 """限时练汇总表导出。
@@ -39,9 +39,11 @@ def timed_export_summary(tid):
             + ['总分', '年级名次', '班级名次', 'T分数'])
     ws.append(head)
     for r in data['rows']:
+        # 「不分班/未分班」的行不参与班级排名（summary_matrix 不给它 rank_class），
+        # 用 get 兜底 —— 之前用下标会 KeyError → 整场导出 500（2026-10-21 审计）
         ws.append([r['student_no'], r['name'], r['class_name']]
                   + [r['scores'].get(s) for s in data['subjects']]
-                  + [r['total'], r['rank_grade'], r['rank_class'], r['t']])
+                  + [r['total'], r['rank_grade'], r.get('rank_class'), r['t']])
 
     for cell in ws[1]:
         cell.font = Font(bold=True)

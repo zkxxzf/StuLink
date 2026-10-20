@@ -1,4 +1,4 @@
-# StuLink v1.19.49.49 2026-10-20
+# StuLink v1.19.49.50 2026-10-20
 # 限时练场次的侧栏上下文（与普通考试 exam_nav 同一套悬浮流程栏外观）
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 """限时练侧栏上下文：进入某场限时练时把侧栏切成「悬浮流程栏」。
@@ -49,6 +49,10 @@ def _resolve():
     from app.models.timed import TimedExam
     from app.modules.grades.services import timed_service
 
+    # 只有 grades.timed* 的页面才是限时练 —— grades 蓝图里 AI 任务等路由
+    # 也用 <int:tid>，单看 tid 会把限时练流程栏挂到别的页面上（2026-10-21 审计）
+    if not (request.endpoint or '').startswith('grades.timed'):
+        return None
     tid = (request.view_args or {}).get('tid')
     if not tid:
         return None

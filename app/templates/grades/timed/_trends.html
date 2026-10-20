@@ -65,8 +65,10 @@
             <td class="text-center text-nowrap">
                 {% if path %}
                 <svg width="72" height="22" viewBox="0 0 72 22" class="align-middle">
+                    {# 走主题变量的图表信息色：深色下自动提亮一档 #}
                     <polyline points="{{ path }}" fill="none"
-                              stroke="#4f7cff" stroke-width="1.6"/>
+                              stroke="var(--sl-chart-info, #4f7cff)"
+                              stroke-width="1.6"/>
                 </svg>
                 <span class="small ms-1">{{ r.now.get(s) if r.now.get(s) is not none else '—' }}</span>
                 {% else %}

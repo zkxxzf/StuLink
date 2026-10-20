@@ -1,4 +1,4 @@
-# StuLink v1.19.49.49 2026-10-20
+# StuLink v1.19.49.50 2026-10-20
 # 限时练：列表 / 新建 / 详情四页签 / 删除
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 """限时练页面路由（与普通考试零耦合）。
@@ -76,20 +76,27 @@ def timed_list():
         q = q.filter(TimedExam.grade == grade)
     exams = q.order_by(TimedExam.exam_date.desc(), TimedExam.id.desc()).all()
 
-    # 学期筛选：参数缺省 = 本学期；sem=all = 全部；sem=高二上 = 指定学期
-    raw_sem = request.args.get('sem')
-    all_sems = [s for s in GRADE_SEMESTERS
-                if s in {(e.semester_label() or '') for e in exams}]
-    grades = [grade] if grade else timed_service.visible_grades_of()
-    cur_sems = timed_service.current_semesters(grades)
-    if raw_sem is None:
+    # 学期筛选（2026-10-20 用户口径）：按**自然学期**分档，一个档位里
+    # 高一/高二/高三三个年级的场次一起展示；过了春节自动算下学期。
+    # 参数：缺省或空串 = 本学期；all = 全部；2025-2026下 = 指定自然学期。
+    raw_sem = (request.args.get('sem') or '').strip()
+    cur_sem = timed_service.current_natural_semester()
+    sem_keys = sorted({e.natural_semester() for e in exams
+                       if e.natural_semester()}, reverse=True)
+    sem_opts = [(k, timed_service.natural_semester_label(k))
+                for k in sem_keys if k != cur_sem]
+    if raw_sem in ('', 'cur'):
         sem = ''
-        exams = [e for e in exams if e.semester_label() in cur_sems]
+        exams = [e for e in exams if e.natural_semester() == cur_sem]
     elif raw_sem == 'all':
         sem = 'all'
-    else:
+    elif raw_sem in sem_keys or raw_sem == cur_sem:
         sem = raw_sem
-        exams = [e for e in exams if e.semester_label() == sem]
+        exams = [e for e in exams if e.natural_semester() == sem]
+    else:
+        # 旧链接（曾经按「高二上」这类年级学期筛选）不认识就退回全部，
+        # 不能静默给个空列表让人以为没数据
+        sem = 'all'
 
     rows = []
     for e in exams:
@@ -97,8 +104,10 @@ def timed_list():
         rows.append({'e': e, 'subjects': sorted(counts),
                      'total': timed_service.student_total(e.id)})
     return render_template('grades/timed/list.html', rows=rows, grade=grade,
-                           sem=sem, all_sems=all_sems,
-                           cur_sems=sorted(cur_sems),
+                           sem=sem, sem_opts=sem_opts,
+                           cur_sem_label=timed_service.natural_semester_label(
+                               cur_sem),
+                           is_cur_sem=(sem == '' or sem == cur_sem),
                            grade_options=timed_service.visible_grades_of(),
                            can_manage=timed_service.can_manage(),
                            can_create=current_user.has_perm('grades.edit'))

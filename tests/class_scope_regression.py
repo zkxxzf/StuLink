@@ -45,6 +45,7 @@ config_mod.Config.SQLALCHEMY_BINDS = {
     'portrait': 'sqlite:///' + os.path.join(_DATA, 'portrait.db'),
     'system': 'sqlite:///' + os.path.join(_DATA, 'system.db'),
     'timetable': 'sqlite:///' + os.path.join(_DATA, 'timetable.db'),
+    'timed': 'sqlite:///' + os.path.join(_DATA, 'timed.db'),
 }
 config_mod.Config.SECRET_KEY = 'class-scope-regression-secret'
 config_mod.Config.UPLOAD_FOLDER = os.path.join(_TMP, 'uploads')

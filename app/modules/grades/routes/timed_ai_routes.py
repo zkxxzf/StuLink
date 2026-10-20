@@ -1,4 +1,4 @@
-# StuLink v1.19.49.49 2026-10-20
+# StuLink v1.19.49.50 2026-10-20
 # 限时练：AI 智能导入（只让模型做「哪一列是什么」）
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 """限时练 AI 导入路由。
@@ -109,10 +109,12 @@ def timed_ai_apply(tid):
         # 否则老师回到旧预览页点确认会用旧数据覆盖本次结果。
         exam.import_draft = None
         exam.import_token = None
+        timed_service.renumber_grade(exam.grade)     # 与脚本导入同口径
         db.session.commit()
     except Exception as e:                              # noqa: BLE001
         db.session.rollback()
         return {'success': False, 'message': f'导入失败：{e}'}
+    timed_analysis.invalidate(exam.id)                  # 必须在 commit 之后清
     log_operation(current_user, 'AI导入', '限时练成绩', exam.id,
                   f'{exam.grade} {exam.name} · {subject} {len(rows)} 人',
                   module='grades')

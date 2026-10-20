@@ -32,6 +32,8 @@ config_mod.Config.SQLALCHEMY_BINDS = {
     'system': 'sqlite:///' + os.path.join(_TMP, 'system.db'),
     'portrait': 'sqlite:///' + os.path.join(_TMP, 'portrait.db'),
     'morality': 'sqlite:///' + os.path.join(_TMP, 'morality.db'),
+    # 2026-10-20：限时练独立成库
+    'timed': 'sqlite:///' + os.path.join(_TMP, 'timed.db'),
     # 2026-10-10：教师工作台首页读 timetable.db（课表/调课），缺该 bind 会让
     # 教师身份访问 /workbench/ 直接 500（此前两条工作台断言失败的根因）
     'timetable': 'sqlite:///' + os.path.join(_TMP, 'timetable.db'),
@@ -257,9 +259,13 @@ with app.test_client() as c:
                      'current_password': 'pw123456'}, follow_redirects=True)
     with app.app_context():
         u2 = User.query.filter_by(real_name='张老师').first()
-        check('手机号修改同步登录名', u2.username == '13900000009', u2.username)
+        # 2026-10-20 口径：用户名是稳定账号标识，改手机号**不再覆盖 username**
+        check('改手机号不覆盖登录名', u2.username == '13800000001', u2.username)
+        check('用户手机号已更新（脱敏 139****0009）',
+              u2.phone_masked == '139****0009', u2.phone_masked)
         check('教师名单手机号同步',
-              Teacher.query.filter_by(name='张老师').first().phone == '13900000009')
+              Teacher.query.filter_by(name='张老师').first().phone
+              == '13900000009')
 
     # ---- 8.1) 我的成绩：口径收紧到本人任教 + 越权 403（2026-10-10） ----
     with app.app_context():

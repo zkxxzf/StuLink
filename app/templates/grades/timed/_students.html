@@ -19,12 +19,14 @@
        href="{{ base }}">全部</a>
     {% for c in summary.classes %}
     <a class="btn btn-sm {{ 'btn-primary' if c == class_name else 'btn-outline-secondary' }}"
-       href="{{ base }}{% if summary.q %}&{% else %}&{% endif %}class={{ c|urlencode }}">{{ c }}</a>
+       href="{{ base }}&class={{ c|urlencode }}">{{ c }}</a>
     {% endfor %}
 
     <form class="d-flex gap-1 ms-2" method="get"
           action="{{ url_for('grades.timed_detail', tid=exam.id) }}">
         <input type="hidden" name="tab" value="students">
+        {# 搜索不能把「每页条数」重置成默认值 #}
+        <input type="hidden" name="per" value="{{ summary.per_page }}">
         {% if class_name %}<input type="hidden" name="class" value="{{ class_name }}">{% endif %}
         <input class="form-control form-control-sm" style="width:180px;" name="q"
                value="{{ summary.q }}" placeholder="学号 / 姓名">

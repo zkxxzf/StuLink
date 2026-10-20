@@ -1,4 +1,4 @@
-# StuLink v1.19.49.49 2026-10-20
+# StuLink v1.19.49.50 2026-10-20
 # 限时练：与普通考试完全隔离的独立数据表
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 """限时练数据模型（2026-10-20 用户口径）。
@@ -46,7 +46,7 @@ BUILTIN_TIMED_TEMPLATE = '限时练名次分层'
 
 class TimedExam(db.Model):
     """限时练场次：一个年级 × 一次限时练（科目不固定，随导入追加）"""
-    __bind_key__ = 'grades'
+    __bind_key__ = 'timed'                                # 独立库 timed.db
     __tablename__ = 'timed_exams'
 
     id = db.Column(db.Integer, primary_key=True)
@@ -83,6 +83,27 @@ class TimedExam(db.Model):
                 return self.name[:-len(suffix)]
         return self.name
 
+    def natural_semester(self):
+        """自然学期键（学年 + 上/下），如 `2026-2027上`。
+
+        2026-10-20 用户口径：列表的学期筛选按**自然学期**分，一个自然学期
+        里三个年级（高一/高二/高三）的场次一起展示；过了春节自动变下学期。
+        所以不能再用「高三上/高二上/高一上」这种年级学期当筛选值。
+        """
+        from app.models.grades import semester_of, term_of_date
+        term = (self.term or '').strip() or term_of_date(self.exam_date)
+        if not term:
+            return ''
+        half = '上' if semester_of(self.exam_date) == '上学期' else '下'
+        return f'{term}{half}'
+
+    def natural_semester_label(self):
+        """自然学期的展示名，如「2026-2027 上学期」"""
+        key = self.natural_semester()
+        if not key:
+            return ''
+        return f'{key[:9]} {"上学期" if key.endswith("上") else "下学期"}'
+
     def status_label(self):
         """状态展示名（未导入 / 已导入）"""
         return TIMED_STATUS_LABEL.get(self.status or 'draft', self.status or '')
@@ -94,7 +115,7 @@ class TimedExam(db.Model):
 
 class TimedScore(db.Model):
     """限时练成绩：一学生一科目一行（缺考不落库，故 score 非空）"""
-    __bind_key__ = 'grades'
+    __bind_key__ = 'timed'                                # 独立库 timed.db
     __tablename__ = 'timed_scores'
 
     id = db.Column(db.Integer, primary_key=True)
@@ -123,7 +144,7 @@ class TimedBandTemplate(db.Model):
 
     layers_json 结构：[{"name": "前10名", "from_rank": 1, "to_rank": 10}, …]
     """
-    __bind_key__ = 'grades'
+    __bind_key__ = 'timed'                                # 独立库 timed.db
     __tablename__ = 'timed_band_templates'
 
     id = db.Column(db.Integer, primary_key=True)

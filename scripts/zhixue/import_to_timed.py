@@ -160,6 +160,9 @@ def import_one(data, apply, code_map, used_ids):
     if apply:
         exam.status = 'imported' if stats['subjects'] else exam.status
         db.session.commit()
+        # 场次名统一成「2026级 No.1」（届内按日期连续编号）
+        if timed_service.renumber_grade(grade):
+            db.session.commit()
     return stats
 
 

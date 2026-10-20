@@ -15,8 +15,12 @@
    跨考试按 `COUNT(DISTINCT student_no)` **去重**（同一学生考多场只算 1 人）。
 4. **证明条数**：沿用成绩证明台账的可见口径 —— 管理员看全校，其他用户仅看本人开具的
    （与 `/grades/student-query/cert-records` 一致）。
-5. **动态**：最近考试（按更新时间）/ 最近开具的证明 / 最近改分记录 /
-   最近**成绩复核**（2026-10-20 用户口径：复核申请与审批进度必须出现在这里）。
+5. **动态**：最近考试（按更新时间）/ 最近**限时练** / 最近开具的证明 /
+   最近改分记录 / 最近**成绩复核**（2026-10-20 用户口径：复核申请与审批进度
+   必须出现在这里）。
+   · 限时练：它已是独立表（`timed_exams`，独立库），不在 `exams` 里，
+     所以必须单独取一源，否则动态里永远看不到限时练的新建 / 导入；
+     条目链接到限时练详情页（常量路径，理由同下文的复核链接）；
    · 改分记录：只对教学管理口径返回（admin、`grades.edit`、`grades.score_edit`）；
    · 证明开具：只对管理类身份返回（管理员 / 校长 / 年级长 / 教务主任 / 教务员），
      普通教师不必知道；
@@ -66,6 +70,11 @@ REVIEW_MANAGE_URL = '/grades/reviews/manage'
 REVIEW_MY_URL = '/grades/reviews'
 # 复核单要按 ScoreScope 逐条过滤（待审的可能被过滤掉），多扫几倍再截断
 REVIEW_SCAN_FACTOR = 10
+
+# 限时练入口（独立表 / 独立库；同样不能用 url_for —— 本服务会被无请求
+# 上下文调用，见 REVIEW_MANAGE_URL 处的说明）
+TIMED_LIST_URL = '/grades/timed'
+TIMED_DETAIL_URL = '/grades/timed/{tid}'
 
 
 def _s(dt, fmt='%Y-%m-%d'):
@@ -122,7 +131,13 @@ def _timed_exam_count(grades):
     from app.models.timed import TimedExam
     if not grades:
         return 0
-    return TimedExam.query.filter(TimedExam.grade.in_(grades)).count()
+    try:
+        return TimedExam.query.filter(TimedExam.grade.in_(grades)).count()
+    except Exception as e:                          # noqa: BLE001
+        # 与 _cert_stats / _visible_grades 一样 fail-closed：timed.db 没建表
+        # （迁移漏跑）时落地页不能 500，按 0 处理并留痕。
+        logger.warning('dashboard_service.py::_timed_exam_count 异常（按 0 处理）: %s', e)
+        return 0
 
 
 # ==================== 成绩证明 ====================
@@ -200,6 +215,40 @@ def _exam_activity_items(exams):
             'time': _s(e.updated_at or e.created_at, '%m-%d %H:%M'),
             'sort': e.updated_at or e.created_at or datetime.min,
             'exam_id': e.id,
+        })
+    return items
+
+
+def _timed_activity_items(grades):
+    """最近有动作的限时练场次（2026-10-20 用户口径：动态要包含限时练）
+
+    限时练在独立表 / 独立库，`_exam_activity_items` 那份 `exams` 里没有它；
+    排序用 `updated_at`（新建、导入、改了任何字段都会刷新），所以「刚导入
+    一科」也会冒到前面。只按可见年级收敛，链接直达详情页。
+    """
+    from app.models.timed import TimedExam
+    if not grades:
+        return []
+    try:
+        rows = (TimedExam.query.filter(TimedExam.grade.in_(grades))
+                .order_by(TimedExam.updated_at.desc(), TimedExam.id.desc())
+                .limit(ACTIVITY_PER_SOURCE).all())
+    except Exception as e:                          # noqa: BLE001
+        # 独立库不可用时只是少一个动态源，不能让整个仪表盘挂掉
+        logger.warning('dashboard_service.py::_timed_activity_items 异常（空返回）: %s', e)
+        return []
+    items = []
+    for t in rows:
+        when = t.updated_at or t.created_at
+        items.append({
+            'type': 'timed', 'icon': 'bi-stopwatch', 'tone': 'info',
+            'title': f'{t.grade} · {t.display_name()}',
+            'meta': ' · '.join(p for p in [
+                '限时练', _s(t.exam_date), t.status_label()] if p),
+            'time': _s(when, '%m-%d %H:%M'),
+            'sort': when or datetime.min,
+            'exam_id': None,
+            'url': TIMED_DETAIL_URL.format(tid=t.id),
         })
     return items
 
@@ -335,7 +384,7 @@ def _review_items(user, sc, audit):
 
 def _activity_source_names(user):
     """动态来源说明（卡片头那行小字，按本人可见性给出）"""
-    names = ['考试登记']
+    names = ['考试登记', '限时练']
     if can_see_cert_activity(user):
         names.append('证明开具')
     if _can_see_changes(user):
@@ -404,10 +453,14 @@ def build_overview(user):
     cards = []
     for name, kw in STAGE_CARDS:
         if name == '限时练':
-            cards.append({'name': name, 'exams': timed_n})
+            # url：该卡可点击直达限时练列表（其余阶段卡是普通考试的子集，
+            # 没有单一对应页面，url 留空 → 模板渲染成不可点的格子）
+            cards.append({'name': name, 'exams': timed_n,
+                          'url': TIMED_LIST_URL})
             continue
         cards.append({'name': name,
-                      'exams': sum(c for k, c in exam_cnt_by_stage.items() if kw in k)})
+                      'exams': sum(c for k, c in exam_cnt_by_stage.items() if kw in k),
+                      'url': ''})
     payload['kpi']['stage_cards'] = cards
 
     # 阶段明细：按真实取值展示（未命中关键词的排在后面，按场次倒序）
@@ -451,10 +504,12 @@ def build_overview(user):
     } for e in sorted(exams, key=lambda x: (x.exam_date or datetime.min.date(), x.id),
                       reverse=True)[:RECENT_EXAM_LIMIT]]
 
-    # 当前动态：考试 / 证明 / 改分 / 成绩复核 四源合并，按时间倒序取前 N
+    # 当前动态：考试 / 限时练 / 证明 / 改分 / 成绩复核 五源合并，
+    # 按时间倒序取前 N（限时练在独立表，必须单独取一源）
     if payload['can_view_certs']:
         payload['kpi']['cert_total'], payload['kpi']['cert_invalid'] = _cert_stats(user)
     activity = _exam_activity_items(exams)
+    activity += _timed_activity_items(grades)
     if can_see_cert_activity(user):
         activity += _cert_activity_items(user)
     if _can_see_changes(user):
@@ -467,5 +522,7 @@ def build_overview(user):
         it.pop('sort', None)
     payload['activity'] = activity[:ACTIVITY_LIMIT]
 
-    payload['has_data'] = bool(exams)
+    # 只有限时练、没有大型考试时也算"有数据"，否则页面顶部会误报
+    # 「当前范围内还没有任何考试数据」
+    payload['has_data'] = bool(exams) or timed_n > 0
     return payload

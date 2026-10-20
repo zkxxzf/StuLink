@@ -1,4 +1,4 @@
-/* StuLink v1.19.49.49 2026-10-20
+/* StuLink v1.19.49.50 2026-10-20
    限时练分析页：把**某一科的表格**画成 PNG 下载（Canvas 自绘，无第三方依赖）。
    分析页现在一屏多科，所以按按钮的 data-table 定位表格，每科一个按钮。
    Copyright (c) 2026 zkxxzf. Apache License 2.0 */
@@ -18,14 +18,26 @@
 
     function collect(table) {
         var head = [], rows = [], foot = [];
-        if (table.tHead && table.tHead.rows[0]) {
-            head = [].map.call(table.tHead.rows[0].cells, textOf);
+        // 2026-10-21 审计修复：表头优先取 thead；没有 thead 时（模板漏写会被浏览器
+        // 塞进隐式 tbody）退回「第一个 tbody 的首行且单元格是 th」，否则 head 为空
+        // → 列宽算不出来 → 导出的是只有标题的空图。
+        var headRow = (table.tHead && table.tHead.rows[0]) || null;
+        var bodyRows = [];
+        [].forEach.call(table.tBodies, function (tb) {
+            [].forEach.call(tb.rows, function (tr) { bodyRows.push(tr); });
+        });
+        if (!headRow && bodyRows.length) {
+            var first = bodyRows[0];
+            if (first.cells.length && first.cells[0].tagName === 'TH') {
+                headRow = bodyRows.shift();
+            }
         }
-        if (table.tBodies[0]) {
-            [].forEach.call(table.tBodies[0].rows, function (tr) {
-                rows.push([].map.call(tr.cells, textOf));
-            });
+        if (headRow) {
+            head = [].map.call(headRow.cells, textOf);
         }
+        bodyRows.forEach(function (tr) {
+            rows.push([].map.call(tr.cells, textOf));
+        });
         if (table.tFoot && table.tFoot.rows[0]) {
             foot = [].map.call(table.tFoot.rows[0].cells, textOf);
         }

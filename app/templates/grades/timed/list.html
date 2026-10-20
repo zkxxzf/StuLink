@@ -25,16 +25,17 @@
     {% endfor %}
 
     <span class="text-muted small ms-2">学期</span>
-    <select class="form-select form-select-sm w-auto" title="默认只看本学期"
+    <select class="form-select form-select-sm w-auto"
+            title="按自然学期分档：一个学期里高一/高二/高三的场次一起显示"
             onchange="if(this.value){location.href=this.value;}">
         <option value="{{ url_for('grades.timed_list', grade=grade or None, sem='') }}"
-                {% if sem == '' %}selected{% endif %}>本学期{% if cur_sems %}（{{ cur_sems|join(' / ') }}）{% endif %}</option>
+                {% if is_cur_sem %}selected{% endif %}>本学期（{{ cur_sem_label or '—' }}）</option>
+        {% for key, label in sem_opts %}
+        <option value="{{ url_for('grades.timed_list', grade=grade or None, sem=key) }}"
+                {% if sem == key %}selected{% endif %}>{{ label }}</option>
+        {% endfor %}
         <option value="{{ url_for('grades.timed_list', grade=grade or None, sem='all') }}"
                 {% if sem == 'all' %}selected{% endif %}>全部学期</option>
-        {% for s in all_sems %}
-        <option value="{{ url_for('grades.timed_list', grade=grade or None, sem=s) }}"
-                {% if sem == s %}selected{% endif %}>{{ s }}</option>
-        {% endfor %}
     </select>
 </div>
 
@@ -57,11 +58,9 @@
             {% set e = r.e %}
             <tr class="exam-row" data-href="{{ url_for('grades.timed_detail', tid=e.id) }}"
                 style="cursor:pointer">
-                <td class="wrap">
-                    {{ e.display_name() }}
-                    {% set sem = e.semester_label() %}
-                    {% if sem %}<span class="sem-chip ms-1">{{ sem }}</span>{% endif %}
-                </td>
+                <td class="wrap">{{ e.display_name() }}
+                    {% set esem = e.semester_label() %}
+                    {% if esem %}<span class="sem-chip ms-1">{{ esem }}</span>{% endif %}</td>
                 <td>{{ e.grade }}</td>
                 <td>{{ e.exam_date.strftime('%Y-%m-%d') }}</td>
                 <td>
@@ -94,7 +93,7 @@
             </tr>
             {% else %}
             <tr><td colspan="7" class="text-center text-muted py-4">
-                {% if sem == '' %}
+                {% if is_cur_sem %}
                 本学期还没有限时练，<a href="{{ url_for('grades.timed_list', grade=grade or None, sem='all') }}">查看全部学期</a>
                 {% else %}
                 还没有限时练场次{% if can_create %}，点右上角「新建限时练」开始{% endif %}

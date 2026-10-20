@@ -45,6 +45,8 @@ config_mod.Config.SQLALCHEMY_BINDS = {
     'portrait': 'sqlite:///' + os.path.join(_DATA, 'portrait.db'),
     'system': 'sqlite:///' + os.path.join(_DATA, 'system.db'),
     'timetable': 'sqlite:///' + os.path.join(_DATA, 'timetable.db'),
+    # 2026-10-21：限时练拆到独立库，create_all 会遍历 'timed'
+    'timed': 'sqlite:///' + os.path.join(_DATA, 'timed.db'),
 }
 config_mod.Config.SECRET_KEY = 'sec-regression-secret'
 config_mod.Config.UPLOAD_FOLDER = os.path.join(_TMP, 'uploads')
@@ -877,8 +879,13 @@ def check_H9():
         assert_outbound_url_allowed('https://api.deepseek.com')
         case('H-9 内置服务商 https 地址放行', True)
     except ValueError as e:
-        # 离线环境下 DNS 解析会失败，属环境问题而非策略拒绝
-        case('H-9 内置服务商 https 地址放行', '解析失败' in str(e), str(e))
+        # 离线环境下 DNS 解析会失败，属环境问题而非策略拒绝。
+        # 2026-10-21：本机代理 TUN 会把公网域名解析成 fake-ip（198.18.0.0/15），
+        # 被 SSRF 规则判为保留地址而拒绝 —— 同样是环境，不是策略回归；
+        # 只对 198.18.* 这一种放行，其它保留地址仍然判失败。
+        msg = str(e)
+        env_issue = ('解析失败' in msg) or ('198.18.' in msg)
+        case('H-9 内置服务商 https 地址放行', env_issue, msg)
 
     # 保存接口层：自定义地址指向环回应被 400 拒绝
     with app.test_client() as c:

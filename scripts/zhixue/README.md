@@ -24,7 +24,10 @@ Local Storage 复制到 `data/zhixue/.edge-live`，再用调试端口 9222
 # 1) 列清单（生成 data/zhixue/timed/plan.json，可断点续抓）
 py -3.12 -u scripts/zhixue/scrape_timed.py --list
 
-# 2) 抓成绩（已抓过的按 examId 跳过；--force 重抓）
+# 2) 抓成绩（推荐多标签并发；已抓过的按文件名跳过）
+py -3.12 -u scripts/zhixue/scrape_timed_async.py --workers 4 --import-after
+
+#    串行版（并发出问题时的退路）
 py -3.12 -u scripts/zhixue/scrape_timed.py --scrape --list-only-from-plan
 
 # 3) 生成「智学网考号 ↔ 学号」对应表（新考号自动补，冲突不写）
@@ -55,6 +58,7 @@ py -3.12 -u scripts/zhixue/import_to_timed.py --apply
 | `fetch_zhixue.py` | 原始抓取脚本（导出件 / 逐页读表 / 探查） |
 | `zhixue_list.py` | 报告列表：按学年 × 学期 × 分页收集考试清单 |
 | `scrape_timed.py` | 限时练批量抓取（清单 → 逐场读学生成绩） |
+| `scrape_timed_async.py` | 同上的多标签并发版（推荐，4 标签约 45 秒/场） |
 | `build_student_map.py` | 生成考号 ↔ 学号对应表（唯一才认） |
 | `import_to_timed.py` | 限时练入库（逐科覆盖，不碰普通考试） |
 | `to_stulink_excel.py` | 抓取结果 → 普通成绩导入 Excel |

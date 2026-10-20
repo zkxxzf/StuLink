@@ -1,4 +1,4 @@
-# StuLink v1.19.49.49 2026-10-20
+# StuLink v1.19.49.50 2026-10-20
 # 限时练公共服务：可见范围 / 权限 / 分层模板 / 名次重算
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 """限时练公共服务（只做业务规则，不碰模板渲染）。
@@ -173,12 +173,54 @@ def student_total(exam_id):
     return int(n or 0)
 
 
-def current_semesters(grades):
-    """当前学期的「年级学期」标签集合（按今天与各年级入学年推算）"""
+def renumber_grade(grade):
+    """把某一届的场次统一改名为 `2026级 No.1`（届内按日期升序连续编号）。
+
+    2026-10-20 用户口径（第二次修正）：名称只留「届 + No.序号」，
+    **年级学期不进名字** —— 它是列表里的标签（高一上/高一下/高二上/
+    高二下/高三上/高三下），由 `TimedExam.semester_label()` 给出。
+    序号跨学期连续（高一上 No.1 → 高一下 No.3 → 高二上 No.10 …），
+    因为名字里已经没有学期可区分档位。同日按 id 排序。
+    不 commit，由调用方控制事务。
+    """
+    rows = TimedExam.query.filter_by(grade=grade).all()
+    rows.sort(key=lambda e: (e.exam_date, e.id))
+    changed = []
+    for idx, exam in enumerate(rows, start=1):
+        name = f'{grade} No.{idx}'
+        if (exam.name or '') != name:
+            exam.name = name
+            changed.append(exam.id)
+    return changed
+
+
+def renumber_all():
+    """全库重排场次名（按届），返回改动条数。"""
+    grades = {e.grade for e in TimedExam.query.all() if e.grade}
+    n = 0
+    for grade in sorted(grades):
+        n += len(renumber_grade(grade))
+    return n
+
+
+def current_natural_semester():
+    """当前**自然学期**（学年 + 上/下），如 `2026-2027上`。
+
+    列表筛选按它分档：同一档里三个年级的场次一起展示，过春节自动变「下」。
+    """
     from datetime import date
-    from app.models.grades import exam_semester
+    from app.models.grades import semester_of, term_of_date
     today = date.today()
-    return {exam_semester(g, today) for g in grades if g}
+    half = '上' if semester_of(today) == '上学期' else '下'
+    return f'{term_of_date(today)}{half}'
+
+
+def natural_semester_label(key):
+    """自然学期键 → 展示名（`2026-2027上` → `2026-2027 上学期`）"""
+    key = (key or '').strip()
+    if len(key) < 10:
+        return key
+    return f'{key[:9]} {"上学期" if key.endswith("上") else "下学期"}'
 
 
 def report_of(exam):

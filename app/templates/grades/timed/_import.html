@@ -147,7 +147,7 @@
                 </form>
                 <hr class="my-3">
                 <div class="small text-muted">
-                    <div>· 模板列：<b>考号 · 姓名 · 班级 · 分数</b>（考号优先匹配）。</div>
+                    <div>· 模板列：<b>考号 · 学号 · 姓名 · 班级 · 分数</b>（考号优先、学号兜底）。</div>
                     <div>· 缺考不用写字，<b>留空</b>即可（写「缺考」也按空值处理）。</div>
                     <div>· 一次一科；重复导入同科 = 整科覆盖。</div>
                 </div>
@@ -160,7 +160,7 @@
 window.TIMED_IMPORT = {
     analyze: "{{ url_for('grades.timed_ai_analyze', tid=exam.id) }}",
     apply: "{{ url_for('grades.timed_ai_apply', tid=exam.id) }}",
-    detail: "{{ url_for('grades.timed_detail', tid=exam.id, tab='scoresheet') }}"
+    detail: "{{ url_for('grades.timed_detail', tid=exam.id, tab='students') }}"
 };
 </script>
 {% endif %}
