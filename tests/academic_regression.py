@@ -5671,6 +5671,65 @@ def check_audit_p3_inspection_swap_kind():
     case('AUDITP3 服务：exchange_kind 记录传入的 kind', 'exchange_kind=kind' in svc_src)
 
 
+@item('EDUSTAT')
+def check_edu_stat():
+    """教育事业统计（2026-10-20）：基表口径一致性 + 导出结构 + 路由注册。
+
+    只锁「口径之间必须自洽」的结构关系，不锁具体人数（随夹具/学年变化）；
+    这样既能防住"把年级映射写错、把在校生算成四个年级"这类回归，又不脆弱。
+    """
+    import openpyxl
+
+    from app.modules.edustat.services import edu_stat_service as S
+    from app.modules.edustat.services import edu_stat_export as X
+
+    with app.app_context():
+        d = S.collect(2026)
+        case('EDUSTAT 学年→年级映射（一/二/三/毕业）',
+             d['grades'] == {'g1': '2026级', 'g2': '2025级',
+                             'g3': '2024级', 'graduated': '2023级'},
+             str(d['grades']))
+        cs = d['class_size']
+        st = d['student_types']
+        case('EDUSTAT 2108 班数 = 各档之和',
+             cs['class_count'] == sum(cs['total'].values()),
+             f"{cs['class_count']} vs {sum(cs['total'].values())}")
+        case('EDUSTAT 3118 在校生 = 三个年级之和',
+             st['enrolled_total']['total']
+             == sum(st['enrolled'][g]['total']
+                    for g in (d['grades']['g1'], d['grades']['g2'], d['grades']['g3'])))
+        case('EDUSTAT 3118 招生数 = 一年级人数',
+             st['new_students'] == st['enrolled'][d['grades']['g1']]['total'])
+        case('EDUSTAT 3119 分年龄合计 = 在校生（无缺证件时）',
+             d['student_ages']['unknown'] > 0
+             or d['student_ages']['totals']['enrolled'] == st['enrolled_total']['total'])
+        case('EDUSTAT 4149 教职工总数 = 在职教师数',
+             d['teacher_summary']['total'] == d['quality']['teachers_total'])
+        case('EDUSTAT 4153 年龄合计 = 有身份证的教师数',
+             d['teacher_ages']['totals']['total']
+             == d['teacher_summary']['total'] - d['teacher_ages']['unknown'])
+
+        buf = X.build_workbook(d['school_year'], d)
+        wb = openpyxl.load_workbook(io.BytesIO(buf.getvalue()))
+        sheets = [s for s in wb.sheetnames if s.startswith('教基')]
+        case('EDUSTAT 导出含 7 张教师/学生基表', len(sheets) == 7, str(sheets))
+        case('EDUSTAT 导出含 2108/3118/3119',
+             all(any(s.startswith(k) for s in sheets)
+                 for k in ('教基2108', '教基3118', '教基3119')))
+        case('EDUSTAT 导出含 4149/4153/4156',
+             all(any(s.startswith(k) for s in sheets)
+                 for k in ('教基4149', '教基4153', '教基4156')))
+
+        rules = {r.rule for r in app.url_map.iter_rules()}
+        case('EDUSTAT 路由已注册（统计页 + 校舍资产）',
+             '/system/edu-stat' in rules and '/system/edu-assets' in rules,
+             str(sorted(r for r in rules if 'edu' in r)))
+        # 模型与迁移清单一致：校舍资产表按学年唯一
+        from app.models import EduStatAsset
+        case('EDUSTAT 校舍资产按学年唯一',
+             EduStatAsset.__table__.c.school_year.unique is True)
+
+
 if __name__ == '__main__':
     args = [a.upper() for a in sys.argv[1:]]
     targets = args or list(ITEMS)

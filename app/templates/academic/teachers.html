@@ -78,7 +78,7 @@
             <thead class="table-light">
                 <tr>
                     <th>教师编号</th><th>姓名</th><th>学科</th><th>手机号</th>
-                    <th>身份证号</th><th>登录账号</th><th>任课映射</th><th>状态</th><th>操作</th>
+                    <th>身份证号</th><th>统计属性</th><th>登录账号</th><th>任课映射</th><th>状态</th><th>操作</th>
                 </tr>
             </thead>
             <tbody>
@@ -92,6 +92,25 @@
                     <td>
                         {% if r.id_masked %}{{ r.id_masked }}
                         {% else %}<span class="text-muted small">未录入</span>{% endif %}
+                    </td>
+                    {# 2026-10-20：教育事业统计属性摘要（缺项标黄，点编辑补齐） #}
+                    <td class="small">
+                        {% set q = [] %}
+                        {% if r.t.gender %}{% set _ = q.append(r.t.gender) %}{% endif %}
+                        {% if r.t.education %}{% set _ = q.append(r.t.education) %}{% endif %}
+                        {% if r.t.title %}{% set _ = q.append(r.t.title) %}{% endif %}
+                        {% if r.t.staff_type %}{% set _ = q.append(r.t.staff_type) %}{% endif %}
+                        {% if q %}
+                        <span class="text-body">{{ q | join(' · ') }}</span>
+                        {% else %}
+                        <span class="badge bg-warning text-dark">未填</span>
+                        {% endif %}
+                        {% if not r.t.id_card_enc %}
+                        <span class="badge bg-light text-danger border ms-1" title="缺身份证则无法统计年龄">缺证件</span>
+                        {% endif %}
+                        {% if not r.t.subject %}
+                        <span class="badge bg-light text-danger border" title="缺学科则无法统计分课程">缺学科</span>
+                        {% endif %}
                     </td>
                     <td>
                         {% if r.account %}
@@ -114,7 +133,7 @@
                 </tr>
                 {% else %}
                 <tr>
-                    <td colspan="9" class="text-center text-muted py-5">
+                    <td colspan="10" class="text-center text-muted py-5">
                         {% if kw or status or subject %}当前筛选条件下没有匹配的教师{% else %}暂无教师数据，请先点击右上角「批量导入」建立教师名单{% endif %}
                     </td>
                 </tr>
