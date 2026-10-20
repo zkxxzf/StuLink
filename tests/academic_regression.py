@@ -34,7 +34,7 @@ config_mod.Config.SQLALCHEMY_BINDS = {
     'history': 'sqlite:///' + os.path.join(_TMP, 'history.db'),
     'grades': 'sqlite:///' + os.path.join(_TMP, 'grades.db'),
     'points': 'sqlite:///' + os.path.join(_TMP, 'points.db'),
-    # 2026-10-13（v1.19.49.44）：德育奖惩库
+    # 2026-10-13（v1.19.49.45）：德育奖惩库
     'morality': 'sqlite:///' + os.path.join(_TMP, 'morality.db'),
     'academic': 'sqlite:///' + os.path.join(_TMP, 'academic.db'),
     # 2026-10-10：教务分库——查课 / 业绩 / 表单 各自独立库
@@ -2748,7 +2748,7 @@ def check_inspection_mark():
 
 @item('SWAPEXCH')
 def check_two_person_exchange():
-    """两人换课（v1.19.49.44）：换时段 / 换班上课 / 请人代课 × 临时与永久，
+    """两人换课（v1.19.49.45）：换时段 / 换班上课 / 请人代课 × 临时与永久，
     覆盖「对方先确认 → 教务审批 → 执行」全链路 + 拒绝 / 越权 / 校验路径。"""
     from app.modules.academic.services import swap_service
 
@@ -3073,7 +3073,7 @@ def check_swap_exchange_batch():
 
 @item('SWAPMIXED')
 def check_swap_mixed_batch():
-    """调课页合并（v1.19.49.44）：一次提交 = 几节调空档 + 几节与同事换上课时间（同一批次）；
+    """调课页合并（v1.19.49.45）：一次提交 = 几节调空档 + 几节与同事换上课时间（同一批次）；
     2026-10-14：对调只换时间（不再连班级一起换）。"""
     from app.models.timetable import ScheduleEntry, ScheduleSwap
     from app.modules.academic.services import swap_service
@@ -3412,7 +3412,7 @@ def check_swap_bulk_offset():
 
 @item('WORKBENCHSWAP')
 def check_workbench_swap():
-    """教师工作台里的调课区块（v1.19.49.44）：入口 + 待我确认 + 我的申请。"""
+    """教师工作台里的调课区块（v1.19.49.45）：入口 + 待我确认 + 我的申请。"""
     with app.test_client() as c:
         login(c, 'ac_admin', TEST_PWD)
         r = c.get('/workbench/')      # 蓝图前缀 /workbench + 路由 '/'（不带斜杠会 308）
@@ -5732,10 +5732,35 @@ def check_edu_stat():
              html.count("copy_btn('") >= 7 and 'function eduCopy' in html)
         case('EDUSTAT 3118 表头含合并单元格（在校生数 colspan=3）',
              'colspan="3"' in html and 'rowspan="2"' in html)
+        # 2026-10-20 用户隐私口径：只填出生日期即可算年龄，不必收身份证
+        from datetime import date as _date
+
+        from app.modules.edustat.services.edu_stat_service import _t_age
+
+        class _TBirth(object):
+            birth_date = _date(1990, 5, 1)
+            id_card_enc = None
+
+        class _TBoth(object):
+            birth_date = _date(1990, 5, 1)
+            id_card_enc = None      # 生日优先，身份证缺失也照算
+
+        case('EDUSTAT 只填生日即可算年龄（无需身份证）',
+             _t_age(_TBirth(), _date(2026, 9, 1)) == 36,
+             str(_t_age(_TBirth(), _date(2026, 9, 1))))
+        case('EDUSTAT 年龄按生日优先（身份证为空也不影响）',
+             _t_age(_TBoth(), _date(2026, 9, 1)) == 36)
+
         # 模型与迁移清单一致：校舍资产表按学年唯一
         from app.models import EduStatAsset
         case('EDUSTAT 校舍资产按学年唯一',
              EduStatAsset.__table__.c.school_year.unique is True)
+        # 教师页可录入出生日期（教育统计的年龄主口径）
+        with open(os.path.join(BASE, 'app', 'templates', 'academic',
+                               'teacher_edit.html'), encoding='utf-8') as f:
+            tpl = f.read()
+        case('EDUSTAT 教师编辑页含出生日期字段', 'name="birth_date"' in tpl)
+        case('EDUSTAT 身份证在教师页标为选填', '选填' in tpl)
 
 
 if __name__ == '__main__':

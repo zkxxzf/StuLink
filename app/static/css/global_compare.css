@@ -1,4 +1,4 @@
-/* StuLink v1.19.49.44 2026-10-10 全局对比：多级表头宽表
+/* StuLink v1.19.49.45 2026-10-10 全局对比：多级表头宽表
  * 结构：固定列（年级/班级/人数/方向/组合/属性）+ 每科目组（去差均分 + 各分数线）
  * 交互：分数线勾选显隐 + 横向滚动 + 表头两级吸顶 + 前两列冻结；打印按 A3 横向输出。
  * 列宽尽量压缩（小字号/窄内边距/表头换行），窄屏/宽表在容器内滚动，页面不横向溢出。 */
@@ -118,6 +118,35 @@ table.ld-table {
 .ld-table tbody tr.sub:hover td { background: var(--sl-subtotal-bg) !important; }
 .ld-table tbody tr.grand:hover td { background: var(--sl-grand-bg) !important; }
 .ld-table tbody tr.combo:hover td { background: var(--sl-row-hover) !important; }
+
+/* ==================== 2026-10-20 人数三列 + 斑马纹 ====================
+   用户口径：「班级人数列加上参考人数和去差人数……用不同颜色表示」
+             「这个表格有点太大，需要加底纹，防止看串行，一个班级白色，一个班级灰色」。 */
+:root { --sl-zb: #f3f6fa; }
+[data-bs-theme="dark"] { --sl-zb: #1b2331; }
+/* 斑马纹：以「班级（+方向）」为分组单位，混组合班的合计行与组合明细行同色；
+   冻结列（年级/班级）也跟随，否则横向滚动时前两列与表体色不一致。 */
+.ld-table tbody tr.zb-b > td { background: var(--sl-zb); }
+/* 三列用不同颜色区分：名册（灰）/ 参考（蓝）/ 去差后（绿） */
+.ld-table td.c-enr { color: #52606d; }
+.ld-table td.c-ref { color: #1d4ed8; font-weight: 700; }
+.ld-table td.c-trim { color: #047857; font-weight: 700; }
+.ld-table thead th.c-enr { color: #52606d; }
+.ld-table thead th.c-ref { color: #1d4ed8; }
+.ld-table thead th.c-trim { color: #047857; }
+[data-bs-theme="dark"] .ld-table td.c-enr,
+[data-bs-theme="dark"] .ld-table thead th.c-enr { color: #94a3b8; }
+[data-bs-theme="dark"] .ld-table td.c-ref,
+[data-bs-theme="dark"] .ld-table thead th.c-ref { color: #93c5fd; }
+[data-bs-theme="dark"] .ld-table td.c-trim,
+[data-bs-theme="dark"] .ld-table thead th.c-trim { color: #6ee7b7; }
+/* 组合明细行左侧缩进，层级更清楚（与「班级合计行」区分） */
+.ld-table tbody tr.combo td.c-cls { padding-left: 12px; }
+/* 三个数值列等宽数字，竖着扫不会跳 */
+.ld-table td.c-enr, .ld-table td.c-ref, .ld-table td.c-trim {
+    font-variant-numeric: tabular-nums;
+    font-feature-settings: "tnum";
+}
 /* 2026-10-16 第九轮审计（PERF-P11）：未勾选的层列整列隐藏（列头 + 数据格都带 data-line），
    勾选时只切显隐、不重建表格；分组表头 colspan 由 JS 同步缩 */
 .ld-table .ld-line-off { display: none; }
