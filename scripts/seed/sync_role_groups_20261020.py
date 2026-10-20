@@ -25,7 +25,7 @@ from app import create_app, PERMISSION_GROUPS  # noqa: E402
 from app.extensions import db  # noqa: E402
 from app.models import PermissionGroup  # noqa: E402
 
-TARGETS = ('校长', '教务主任', '年级长组')
+TARGETS = ('校长', '教务主任', '教务员', '年级长组')
 
 
 def main():
