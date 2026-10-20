@@ -176,10 +176,12 @@ def list_users():
     # 离职/退休存档名单只在本页展示（其他模块已按 status/archive_kind 排除）
     teacher_map = archive_svc.teacher_map(user_ids)
     archived = archive_svc.archived_teachers()
+    # 2026-10-20：批量导出初始密码 —— 按权限组选择（分组导出）
+    perm_groups = PermissionGroup.query.order_by(PermissionGroup.id).all()
     return render_template('system/users/list.html', users=users, roles=roles,
                            one_time_passwords=one_time_passwords,
                            wx_bindings=wx_bindings, teacher_map=teacher_map,
-                           archived=archived)
+                           archived=archived, perm_groups=perm_groups)
 
 
 @bp.route('/create', methods=['GET', 'POST'])
@@ -498,6 +500,87 @@ def reset_password(id):
     _store_one_time_password(user.username, user.real_name, new_pwd)
     flash(f'{user.real_name} 的密码已重置，新口令已在本页一次性显示（仅此一次）', 'success')
     return redirect(url_for('users.list_users'))
+
+
+@bp.route('/export-passwords', methods=['POST'])
+@perm_required('system.users')
+def export_passwords():
+    """批量重置并导出初始密码（可按权限组分组导出）。
+
+    2026-10-20 用户需求。系统只存密码摘要、**无法导出原密码**，因此本功能是
+    「为所选账号生成新的初始密码 → 下载清单」，旧密码立即失效、首次登录强制改密。
+
+    - 范围：勾选「全部用户」或按权限组多选；
+    - 排除：管理员账号、管理员组成员、当前登录本人（防批量外发管理入口口令）；
+    - 仅启用账号（禁用账号不分配新口令）；
+    - 全程写操作日志（WARNING 级）。
+    """
+    from datetime import datetime
+
+    from sqlalchemy import or_
+
+    from app.models.user_permission_group import UserPermissionGroup
+
+    all_flag = (request.form.get('all') or '') == '1'
+    gids = [int(v) for v in request.form.getlist('group_ids') if str(v).isdigit()]
+    if not all_flag and not gids:
+        flash('请选择要导出的权限组，或勾选「全部用户」', 'danger')
+        return redirect(url_for('users.list_users'))
+
+    q = User.query.filter(User.is_active.is_(True))
+    if not all_flag:
+        sub = db.session.query(UserPermissionGroup.user_id).filter(
+            UserPermissionGroup.group_id.in_(gids))
+        q = q.filter(or_(User.id.in_(sub),
+                         User.permission_group_id.in_(gids)))
+    users = q.order_by(User.role, User.username).all()
+
+    rows = []
+    for u in users:
+        if u.id == current_user.id or u.role == 'admin' or _user_in_admin_group(u):
+            continue
+        pwd = _generate_password()
+        u.set_password(pwd)          # 同时递增 wx_token_ver，吊销小程序旧令牌
+        u.must_change_pwd = True
+        gnames = ('、'.join(g.name for g in u.permission_groups if g and g.name)
+                  or u.role_display)
+        rows.append([u.username, u.real_name or '', gnames, pwd])
+    if not rows:
+        flash('所选范围内没有可导出的账号（管理员与本人已排除）', 'warning')
+        return redirect(url_for('users.list_users'))
+    db.session.commit()
+
+    group_names = [g.name for g in PermissionGroup.query
+                   .filter(PermissionGroup.id.in_(gids)).all()] if gids else []
+    scope_label = '全部用户' if all_flag else '、'.join(group_names)
+    log_operation(current_user, '导出初始密码', '用户', None,
+                  f'{len(rows)} 个账号；范围：{scope_label}', module='system',
+                  severity='WARNING')
+
+    import openpyxl
+    from openpyxl.styles import Alignment, Font, PatternFill
+
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = '初始密码'
+    ws.append(['登录用户名', '姓名', '权限组', '初始密码'])
+    for cell in ws[1]:
+        cell.font = Font(bold=True)
+        cell.fill = PatternFill('solid', fgColor='D9E2F3')
+        cell.alignment = Alignment(horizontal='center')
+    for r in rows:
+        ws.append(r)
+    for i, width in enumerate([18, 14, 28, 16], start=1):
+        ws.column_dimensions[chr(64 + i)].width = width
+    ws.freeze_panes = 'A2'
+
+    buf = io.BytesIO()
+    wb.save(buf)
+    buf.seek(0)
+    name = f'初始密码_{datetime.now().strftime("%Y%m%d_%H%M%S")}.xlsx'
+    return send_file(
+        buf, as_attachment=True, download_name=name,
+        mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
 
 
 @bp.route('/download-teacher-template')

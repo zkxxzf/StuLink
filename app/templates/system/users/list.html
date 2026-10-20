@@ -12,6 +12,9 @@
         </span>
     </h4>
     <div class="d-flex gap-2">
+        <button class="btn btn-outline-secondary" data-bs-toggle="modal" data-bs-target="#exportPwdModal">
+            <i class="bi bi-key"></i> 导出初始密码
+        </button>
         <button class="btn btn-success" data-bs-toggle="modal" data-bs-target="#importTeacherModal">
             <i class="bi bi-file-earmark-excel"></i> 批量导入
         </button>
@@ -281,6 +284,48 @@
     </div>
 </div>
 
+<!-- 批量导出初始密码弹窗 -->
+<div class="modal fade" id="exportPwdModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title"><i class="bi bi-key"></i> 导出初始密码</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <form method="POST" action="{{ url_for('users.export_passwords') }}" id="exportPwdForm">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <div class="modal-body">
+                    <div class="alert alert-warning small">
+                        <i class="bi bi-exclamation-triangle"></i>
+                        系统只保存密码摘要，<strong>无法导出原密码</strong>。确认后将为所选账号
+                        <strong>重新生成初始密码</strong>（旧密码立即失效、首次登录强制改密），
+                        并下载 Excel 清单。<br>
+                        管理员账号、管理员组成员与当前登录本人不参与；仅导出启用账号。
+                    </div>
+                    <div class="form-check mb-2">
+                        <input class="form-check-input" type="checkbox" name="all" value="1" id="epAll">
+                        <label class="form-check-label fw-semibold" for="epAll">全部用户（不限组）</label>
+                    </div>
+                    <div class="mb-1 text-muted small">或按权限组导出（可多选）：</div>
+                    <div class="border rounded p-2" style="max-height:220px; overflow:auto;">
+                        {% for g in perm_groups %}
+                        <div class="form-check">
+                            <input class="form-check-input ep-group" type="checkbox"
+                                   name="group_ids" value="{{ g.id }}" id="epg-{{ g.id }}">
+                            <label class="form-check-label" for="epg-{{ g.id }}">{{ g.name }}</label>
+                        </div>
+                        {% endfor %}
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">取消</button>
+                    <button type="submit" class="btn btn-warning"><i class="bi bi-download"></i> 重置并导出</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
 <!-- 批量导入教师弹窗 -->
 <div class="modal fade" id="importTeacherModal" tabindex="-1">
     <div class="modal-dialog">
@@ -378,6 +423,21 @@
             return confirm('「错误录入」会彻底删除教师记录与登录账号，且不可恢复，确认继续？');
         }
         return true;
+    });
+
+    // 2026-10-20：批量导出初始密码（全部 / 按权限组多选）
+    $('#epAll').on('change', function () {
+        var on = this.checked;
+        $('.ep-group').prop('disabled', on);
+        if (on) { $('.ep-group').prop('checked', false); }
+    });
+    $('#exportPwdForm').on('submit', function () {
+        var all = $('#epAll').is(':checked');
+        if (!all && $('.ep-group:checked').length === 0) {
+            alert('请勾选「全部用户」或至少一个权限组');
+            return false;
+        }
+        return confirm('将为所选账号重置密码并下载初始密码清单，旧密码立即失效，确认继续？');
     });
 })();
 </script>
