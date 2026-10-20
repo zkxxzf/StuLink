@@ -3,7 +3,7 @@
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
 [![Python](https://img.shields.io/badge/python-3.11+-green.svg)](https://python.org)
 [![Flask](https://img.shields.io/badge/flask-3.x-lightgrey.svg)](https://flask.palletsprojects.com/)
-[![Version](https://img.shields.io/badge/version-1.19.49.44-orange.svg)](https://gitee.com/zkxxzf/StuLink)
+[![Version](https://img.shields.io/badge/version-1.19.49.46-orange.svg)](https://gitee.com/zkxxzf/StuLink)
 
 面向中学的综合学生管理平台，采用 **双站点 + 多模块 + 一模块一库** 的故障隔离架构：
 
@@ -195,7 +195,7 @@
 
 - **后端**：Python 3.11+ / Flask 3.x / Flask-Login / Flask-SQLAlchemy 2.x（多库 binds）/ Waitress / openpyxl / reportlab / python-pptx
 - **前端**：Bootstrap 5 / jQuery / Jinja2 / ECharts（成绩可视化）/ Chart.js（画像）
-- **安全（v1.19.49.44）**：
+- **安全（v1.19.49.46）**：
   - **身份**：管理员首启随机口令 + 强制改密 · 一次性初始口令展示 · 会话口令摘要（改密即踢）· IP + 账号双维限流与锁定（锁键含来源，防账号被恶意锁定）
   - **数据**：AES 身份证与 AI Key 加密 · CSRF 8h 时效 · 二维权限（功能三档 × 数据范围）· 白名单式教师候选过滤
   - **传输**：`url_guard` 出站白名单 + DNS 解析 + 禁 302 跟随 · CSP（Report-Only 起步，可切 enforce）· HTTPS Cookie Secure
@@ -216,7 +216,7 @@ python run.py --dev
 cd alumni_app && python run.py
 
 # Docker 部署（三个容器：主应用 + 往届查询 + MCP 服务）
-docker build -t stulink:v1.19.49.44 .
+docker build -t stulink:v1.19.49.46 .
 docker build -t stulink-alumni:v1.0.0 ./alumni_app
 docker build -f Dockerfile.mcp -t stulink-mcp:v1.0.0 .
 docker-compose up -d
@@ -301,7 +301,8 @@ StuLink/
 
 | 版本 | 日期 | 亮点 |
 |---|---|---|
-| **1.19.49.44** | 2026-10-20 | **考试「年级学期」标签 + 列表筛选**：名称里手写的「（高三上）」升级为独立字段 `exams.grade_semester`（学年 8/1 分界、学期以**春节**为界，空 = 按日期自动推算），列表在名称右侧显示胶囊标签并自动剥掉重复括号；历次考试支持 **年级 / 学期 / 类型 / 考试日期区间** 一条筛选栏（`?grade=&sem=&type=&d1=&d2=`）；新建考试名称留空时自动生成「年级 + 8 位日期 + 阶段」（如 `2024级20261010月考`）；小程序新建页同步学期 picker（新增 A24 迁移） |
+| **1.19.49.46** | 2026-10-20 | **考试「年级学期」标签 + 列表筛选**：名称里手写的「（高三上）」升级为独立字段 `exams.grade_semester`（学年 8/1 分界、学期以**春节**为界，空 = 按日期自动推算），列表在名称右侧显示胶囊标签并自动剥掉重复括号；历次考试支持 **年级 / 学期 / 类型 / 考试日期区间** 一条筛选栏（`?grade=&sem=&type=&d1=&d2=`）；新建考试名称留空时自动生成「年级 + 8 位日期 + 阶段」（如 `2024级20261010月考`）；小程序新建页同步学期 picker（新增 A24 迁移） |
+| **1.19.49.45** | 2026-10-20 | **教师年龄改「只填出生日期」，身份证降为选填（隐私）**：教育统计只需年龄分档（教基4153），新增 `teachers.birth_date` 作为年龄主口径，缺失才回退身份证；教师编辑页新增「出生日期」，身份证标为选填，列表缺失标记改为「缺生日」；教育统计页提示与 4153 页脚同步（新增 A26 迁移；EDUSTAT 扩到 19 条） |
 | **1.19.49.44** | 2026-10-20 | **教育统计改为「页面表格 + 一键复制」**：去掉 Excel 导出（用户口径：独立功能、复制粘贴即可）；7 张基表按样表列序/行序重排，3118 用 rowspan/colspan 还原「在校生数」合并表头，4153/4156 补齐「#女 / #少数民族」与职称/学历行；每表「复制」+「复制全部」保留行列结构与合并单元格（ES5 + 事件委托，安全扫描 M-10 与前端兼容均通过）；入口为「系统管理 → 教育统计」 |
 | **1.19.49.43** | 2026-10-20 | **教育事业统计基表（新模块）**：`/system/edu-stat` 从业务库实时计算并导出 **教基2108 班额班数 / 3118 分类型学生数 / 3119 分年龄学生数 / 3045 在校生其他情况**（年级按学年映射、年龄由身份证解析、寄宿生取住宿类型）；教师侧 **4149/4153/4156** 随「教师名单」补录性别/民族/学历/职称/人员类别/在编/外籍后自动生成；`/system/edu-assets` 按学年录入 **5170 校舍 / 5176 资产 / 1102 达标项** 并随基表导出（新增 A24/A25 迁移与 EDUSTAT 回归 12 条） |
 | **1.19.49.42** | 2026-10-20 | **合并 sakaay 增量**：成绩仪表盘动态不再混入调课申请/审批（调课归教务/教师工作台）· 成绩首页新增「开具成绩证明」直达入口 · 打印汇总与小程序入口图标微调 |

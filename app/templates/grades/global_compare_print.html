@@ -61,6 +61,12 @@
     table.gc-t tr.combo td,
     table.gc-t tr.sub.combo td,
     table.gc-t tr.grand.combo td { font-weight: 400; }
+    /* 2026-10-20：人数三列（班级人数/参考人数/去差后）+ 按班级交替底纹，防看串行 */
+    table.gc-t td.enr { color: #52606d; }
+    table.gc-t td.ref { color: #1d4ed8; }
+    table.gc-t td.trim { color: #047857; }
+    table.gc-t tr.zb-b td { background: #f2f5f9; }
+    table.gc-t tr.zb-b td.avg { background: #eef2f7; }
     .gc-foot { font-size: 6.4pt; color: #666; text-align: right; margin-top: 1mm; }
 
     /* 打印：横向 A4，表头跨页重复，行不被切断 */
@@ -80,14 +86,17 @@
 {% block content %}
 {# 2026-10-17：本场无选科组合（高一未选科）时不印「组合」列 —— 与页面同口径 #}
 {% set FIX_SEL = gc.has_selection is not false %}
-{% set NC_FIX = 4 if FIX_SEL else 3 %}
+{% set NC_FIX = 6 if FIX_SEL else 5 %}
 {% set NLV = (lines | length) %}
 {% set NC = NC_FIX + (gc.subjects | length) * (1 + NLV) %}
 
 {# 一个数据行：固定列 + 每科「去差均分 + 各层（人数上/率下）」 #}
 {% macro row_tds(r) %}
     <td class="cls">{{ r.class_name }}</td>
-    <td>{{ r.count }}</td>
+    {# 2026-10-20 用户口径：班级人数 / 参考人数 / 去差后（与页面同口径，三种灰度区分） #}
+    <td class="enr">{{ r.get('enrolled', r.count) }}</td>
+    <td class="ref">{{ r.get('exam_count', r.count) }}</td>
+    <td class="trim">{{ r.get('trim_count', r.count) }}</td>
     {% if FIX_SEL %}
     <td class="sel">{% for s in r.selections %}{{ s.name }}{% if not loop.last %} {% endif %}{% endfor %}</td>
     {% endif %}
@@ -141,14 +150,15 @@
                43mm + 每科(8mm + 层数×7.5mm)，10 科 × 3 层 = 348mm，超出 A4 横向
                可打印宽度（297−2×6=285mm）63mm，右侧科目被裁掉。百分比随科目数缩放。 #}
             {% set NSUB = gc.subjects | length %}
-            {% set GRP_W = (85.0 / NSUB) if NSUB else 85.0 %}
+            {% set GRP_W = (81.0 / NSUB) if NSUB else 81.0 %}
             {% set UNIT_W = 8.0 + 7.5 * NLV %}
             {% set AVG_W = (GRP_W * 8.0 / UNIT_W) if UNIT_W else GRP_W %}
             {% set LV_W = (GRP_W * 7.5 / UNIT_W) if UNIT_W else 0 %}
             <colgroup>
-                <col style="width:4.2%"><col style="width:2.4%">
-                {% if FIX_SEL %}<col style="width:4.5%">{% endif %}
-                <col style="width:3.9%">
+                <col style="width:4.2%"><col style="width:2.5%">
+                <col style="width:2.5%"><col style="width:2.5%">
+                {% if FIX_SEL %}<col style="width:4.0%">{% endif %}
+                <col style="width:3.3%">
                 {% for s in gc.subjects %}
                 <col style="width:{{ AVG_W | round(2) }}%">{% for L in lines %}<col style="width:{{ LV_W | round(2) }}%">{% endfor %}
                 {% endfor %}
@@ -156,7 +166,9 @@
             <thead>
                 <tr>
                     <th class="fix" rowspan="2">班级</th>
-                    <th class="fix" rowspan="2">人数</th>
+                    <th class="fix" rowspan="2">班级<br>人数</th>
+                    <th class="fix" rowspan="2">参考<br>人数</th>
+                    <th class="fix" rowspan="2">去差后</th>
                     {% if FIX_SEL %}<th class="fix" rowspan="2">组合</th>{% endif %}
                     <th class="fix" rowspan="2">属性</th>
                     {% for s in gc.subjects %}
@@ -173,12 +185,16 @@
                 </tr>
             </thead>
             <tbody>
+                {# 2026-10-20：斑马纹以「班级（+方向）」为单位交替（跨方向块也连续） #}
+                {% set zs = namespace(n=0, last='') %}
                 {% for g in gc.groups %}
                 {% if gc.groups | length > 1 %}
                 <tr class="grp"><td colspan="{{ NC }}">{{ g.label }}</td></tr>
                 {% endif %}
                 {% for r in g.rows %}
-                <tr{% if r.get('is_combo') %} class="combo"{% endif %}>{{ row_tds(r) }}</tr>
+                {% set _k = (r.class_name or '') ~ '|' ~ (r.direction or '') %}
+                {% if _k != zs.last %}{% set zs.last = _k %}{% set zs.n = zs.n + 1 %}{% endif %}
+                <tr class="{{ 'combo ' if r.get('is_combo') else '' }}{{ 'zb-a' if zs.n % 2 == 1 else 'zb-b' }}">{{ row_tds(r) }}</tr>
                 {% endfor %}
                 {% if g.subtotal %}
                 <tr class="sub">{{ row_tds(g.subtotal) }}</tr>

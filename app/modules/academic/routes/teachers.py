@@ -1,10 +1,11 @@
-# StuLink v1.19.49.44 2026-10-10
+# StuLink v1.19.49.46 2026-10-10
 # 教务 · 教师名单：列表 / Excel 导入（模板-预览-确认-密码清单）/ 编辑
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 import io
 import re
 import time
 import uuid
+from datetime import datetime
 
 from flask import (render_template, request, redirect, url_for,
                    flash, send_file, abort)
@@ -386,13 +387,25 @@ def teacher_edit(tid):
         if eth != (t.ethnicity or ''):
             t.ethnicity = eth or None
             changes.append('民族')
+        # 2026-10-20 用户口径（隐私）：教育统计只需年龄 → 出生日期为唯一必填项，
+        # 身份证选填。清空即回到「未填」。
+        bd_raw = (request.form.get('birth_date') or '').strip()
+        bd_val = None
+        if bd_raw:
+            try:
+                bd_val = datetime.strptime(bd_raw, '%Y-%m-%d').date()
+            except ValueError:
+                bd_val = None
+        if bd_val != t.birth_date:
+            t.birth_date = bd_val
+            changes.append('出生日期')
         for label, field in (('在编', 'is_official'), ('外籍', 'is_foreign')):
             raw = (request.form.get(field) or '').strip()
             val = True if raw == '1' else (False if raw == '0' else None)
             if val is not getattr(t, field):
                 setattr(t, field, val)
                 changes.append(label)
-        # v1.19.49.44：教师档案变更 → 同步回写到关联的 users 账号（admin 自动 skip）
+        # v1.19.49.46：教师档案变更 → 同步回写到关联的 users 账号（admin 自动 skip）
         back_changes = teacher_sync.sync_from_teacher(t, renamed_from=None)
         if back_changes:
             changes.extend(back_changes)

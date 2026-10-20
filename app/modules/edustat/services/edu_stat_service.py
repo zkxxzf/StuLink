@@ -1,4 +1,4 @@
-# StuLink v1.19.49.44 2026-10-20
+# StuLink v1.19.49.46 2026-10-20
 # 教育事业统计（基表 2108/3118/3119/3045 + 4149/4153/4156）计算服务
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 """教育事业综合统计基表的口径计算（只读）。
@@ -269,6 +269,21 @@ def _t_id_card(t):
         return None
 
 
+def _t_age(t, ref):
+    """教师统计时点年龄：**出生日期优先**，没有才回退身份证解析。
+
+    2026-10-20 用户口径（隐私）：教育统计只需要年龄，不必收身份证 ——
+    只填生日即可满足 4153；身份证保留为选填（人事档案用途）。
+    """
+    bd = getattr(t, 'birth_date', None)
+    if bd:
+        try:
+            return ref.year - bd.year - ((ref.month, ref.day) < (bd.month, bd.day))
+        except (AttributeError, TypeError):
+            pass
+    return _age_on(_t_id_card(t), ref)
+
+
 def _t_staff_type(t):
     """未填人员类别时按「是否有学科」推断：有学科=专任教师，否则=其他。"""
     if t.staff_type in STAFF_TYPES:
@@ -301,7 +316,7 @@ def teacher_ages(school_year):
     female_title_totals = Counter()
     unknown = 0
     for t in ts:
-        age = _age_on(_t_id_card(t), ref)
+        age = _t_age(t, ref)
         band = _band(age, TEACHER_AGE_BANDS)
         if band is None:
             unknown += 1
@@ -391,6 +406,8 @@ def data_quality(school_year):
         'students_no_idcard': sum(1 for s in sts if _age_on(s.id_card_number, ref) is None),
         'students_no_ethnicity': sum(1 for s in sts if not (s.ethnicity or '').strip()),
         'teachers_total': len(ts),
+        'teachers_no_birth': sum(1 for t in ts
+                                 if _t_age(t, ref) is None),
         'teachers_no_idcard': sum(1 for t in ts if _age_on(_t_id_card(t), ref) is None),
         'teachers_no_subject': sum(1 for t in ts if not (t.subject or '').strip()),
         'teachers_no_education': sum(1 for t in ts

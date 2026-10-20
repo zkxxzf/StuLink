@@ -1,4 +1,4 @@
-# StuLink v1.19.49.44 2026-10-10
+# StuLink v1.19.49.46 2026-10-10
 # 全局对比指标引擎：班级 × 学科「去差均分 + 各分数线」宽表
 #
 # 口径与 report_service / report_pivot_service 完全一致（复用其公共函数）：
@@ -15,11 +15,104 @@
 #    选科组合拆明细行）+ 末尾「年级」总计行（跨组合 → 不给均分，只给人数与上线率）；
 #  - 行按「班级 × 选科组合」拆（2026-10-16）：混组合班 = 班级合计行 + 各组合明细行。
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
-from app.models import ClassProfile
+from app.models import ClassProfile, Student
 from app.models.grades import SUBJECTS, TOTAL_SUBJECT, grade_level_label
 from app.modules.grades.services import report_service as rs
 from app.modules.grades.services import stats_service as st
 from app.modules.grades.utils import numeric_classes
+from app.extensions import db
+
+
+# ==================== 2026-10-20 班级人数 / 参考人数 / 去差后人数 ====================
+# 用户口径（原话）：「班级人数列加上参考人数（参加考试的人数）和去差人数。
+#   班级人数/参考人数/去差后人数。例如已经设置卓越班去差2人：
+#   班级40人，参考39人，去差后是38人；班级40人，参考36人，去差后还是36人。
+#   一个班两个组合的分组合去差。参考人数少，就不去差，参考人数足够去差的按组合
+#   去差，人数多的组合先去差。」
+#
+# 由此得出的口径（两个例子唯一自洽的解）：
+#   目标留用人数 = 班级人数 - 去差名额 N；去差后人数 = min(参考人数, 班级人数 - N)
+#   → 缺考的人**先顶替**去差名额：40人班、参考39、N=2 → 只再剔 1 人 = 38；
+#     参考36（不足 38）→ 一个都不剔 = 36。
+#   混组合班：N 按**组合人数降序**分配（人多的先拿名额），每个组合按自己的
+#   参考人数套同一公式，名额不够就不去差。
+_OFF_STATUS = ('已转出', '转出', '离校', '退学')
+
+
+def _enrolled_map(grade, classes):
+    """{班级: 名册人数}：在册学生（排除已转出/离校/退学）。
+
+    名册查不到（历史考试、学生已毕业清理）时返回 {}，调用方回落参考人数。
+    """
+    if not classes:
+        return {}
+    try:
+        from sqlalchemy import func, or_
+        q = (db.session.query(Student.class_name, func.count(Student.id))
+             .filter(Student.grade == grade,
+                     Student.class_name.in_(list(classes))))
+        q = q.filter(or_(Student.enrollment_status.is_(None),
+                         ~Student.enrollment_status.in_(_OFF_STATUS)))
+        return {c: int(n) for c, n in q.group_by(Student.class_name).all()}
+    except Exception as _e:  # noqa: BLE001  名册不可用不该拖垮报表
+        logger.warning('global_compare_service.py::_enrolled_map 异常（回落参考人数）: %s', _e)
+        return {}
+
+
+def _enrolled_by_combo(grade, cls):
+    """{选科组合: 名册人数}：混组合班按组合去差时用（组合名归一）。"""
+    from app.utils.helpers import normalize_subject
+    try:
+        rows = (Student.query.filter_by(grade=grade, class_name=cls).all())
+    except Exception:  # noqa: BLE001
+        return {}
+    out = {}
+    for s in rows:
+        if (s.enrollment_status or '') in _OFF_STATUS:
+            continue
+        sel = normalize_subject((s.subject_selection or '').strip())
+        if sel and sel != '全科':
+            out[sel] = out.get(sel, 0) + 1
+    return out
+
+
+def _trim_need(enrolled, ref, n):
+    """实际剔除人数：缺考先顶替去差名额；参考人数不够时一个都不剔。
+
+    enrolled=班级人数, ref=参考人数, n=班型去差名额。
+    """
+    if n <= 0 or ref <= 0 or enrolled <= 0:
+        return 0
+    keep_target = max(0, enrolled - n)          # 目标留用人数
+    return max(0, min(n, ref - keep_target))
+
+
+def _alloc_by_combo(combos, n):
+    """把班级去差名额 n 分配给各组合：人数多的组合先拿，每组合至少留 1 人。
+
+    combos: [(组合名, rows), …]；返回 {组合名: 该组合名额}。
+    """
+    remain = max(0, n)
+    out = {}
+    for name, rows in sorted(combos, key=lambda kv: (-len(kv[1]), kv[0] or '')):
+        if remain <= 0:
+            out[name] = 0
+            continue
+        cap = max(0, len(rows) - 1)             # 至少留 1 人
+        take = min(remain, cap)
+        out[name] = take
+        remain -= take
+    return out
+
+
+def _pick_lowest(rows, need):
+    """从 rows（总分行）里挑出总分末尾 need 人（同分按 id 确定性截断）→ 学号集合。"""
+    if need <= 0 or not rows:
+        return set()
+    lows = sorted(rows, key=lambda r: (r.score if r.score is not None else -1,
+                                       getattr(r, 'id', 0)))[:need]
+    return {r.student_no for r in lows}
+
 
 # 2026-10-10 架构审计修复：本文件原有静默 `except Exception: pass`，失败不可观测。
 # 统一加 logger 记录 warning（仅留痕，不改变任何降级行为与返回值）。
@@ -174,7 +267,7 @@ def global_compare_report(exam_id, direction=''):
     # 科目列：本场实际有成绩的科目按系统顺序（全科=9 科；分科=各方向并集，缺科显示 —）
     subjects = list(data.imported_subjects)
     trimmed = rs.trimmed_nos(data)
-    # v1.19.49.44 班主任取**本场考试当时**的快照（与任课教师同一机制）：
+    # v1.19.49.46 班主任取**本场考试当时**的快照（与任课教师同一机制）：
     # 历史考试不能再显示现在的班主任；快照缺失时自动回落当前关联
     from app.modules.grades.services import teacher_snapshot_service as _tss
     ht = _tss.headteacher_map_of(data.exam.id, grade=data.exam.grade)
@@ -199,7 +292,7 @@ def global_compare_report(exam_id, direction=''):
     # 2026-10-16 第九轮审计（PERF-P01）：班级→方向原先被 all_dirs / by_dir / class_rows
     # 三处各全表扫一遍（O(班数×总行数)，40 班×2100 人 ≈ 25 万次迭代），改为一次预算
     dir_of = {cls: _row_dir(data, cls) for cls in classes}
-    # v1.19.49.44 方向下拉的**完整**可选集：先按全部班级算出各方向，再按 direction
+    # v1.19.49.46 方向下拉的**完整**可选集：先按全部班级算出各方向，再按 direction
     # 过滤生成展示分组。否则选定某方向后返回值里只剩该方向，前端据此重建下拉
     # 就会丢掉另一个方向（用户反馈的 bug）。
     all_dirs = sorted(set(dir_of.values()),
@@ -217,18 +310,39 @@ def global_compare_report(exam_id, direction=''):
     # 31 个展示行 → pick_layer 被重复算 ~1700 次（同键同值）
     line_cache = {}
 
-    def _one_row(cls, d, rows):
-        """一个展示行（全班 或 班内某组合）"""
-        cells = _cells(data, rows, line_cache, subjects, layer_names, trimmed)
+    # 名册人数（班级人数）：名册不可用时回落参考人数（历史考试/学生已毕业清理）
+    enrolled_map = _enrolled_map(data.exam.grade, classes)
+
+    def trim_of(cls):
+        """该班去差名额：班型快照优先、当前设置为回落（与 rs.trimmed_nos 同口径）。"""
+        ct = snap_ct.get(cls) or live_ct.get(cls, '')
+        return rs.TRIM_RULES.get(ct, rs.DEFAULT_TRIM)
+
+    def _one_row(cls, d, rows, trim_set=None, enrolled=None):
+        """一个展示行（全班 或 班内某组合）
+
+        trim_set 为空时沿用全局 trimmed（旧口径）；班级行/组合行各自传入
+        按「班级人数 / 参考人数 / 去差名额」算出的剔除集合（2026-10-20 口径）。
+        """
+        ts = trimmed if trim_set is None else trim_set
+        cells = _cells(data, rows, line_cache, subjects, layer_names, ts)
         # 每科成绩下方显示该班该科任课教师（v1.18.9.0）。
         # 总分列不放教师：班主任已在总分格下方展示（前端按 sub==总分 取 headteacher）。
         for sub in subjects:
             nm = teachers.get((cls, sub))
             if nm:
                 cells[sub]['teacher'] = nm
+        ref = len(rows)
+        enr = enrolled if enrolled is not None else (enrolled_map.get(cls) or ref)
+        trims = sum(1 for r in rows if r.student_no in ts)
         return {
             'grade': data.exam.grade, 'class_name': cls,
-            'count': len(rows), 'direction': d,
+            'count': ref,                     # 兼容旧列：= 参考人数
+            'enrolled': enr,                  # 班级人数（名册在册）
+            'exam_count': ref,                # 参考人数（有总分＝参加考试）
+            'trim_count': max(0, ref - trims),  # 去差后人数
+            'trim_n': trims,                  # 实际剔除人数（页面可做提示）
+            'direction': d,
             'class_type': snap_ct.get(cls) or live_ct.get(cls, ''),
             'headteacher': ht.get((data.exam.grade, cls), ''),
             'selections': _selection_stats(rows),
@@ -258,19 +372,43 @@ def global_compare_report(exam_id, direction=''):
         groups = {}
         for r in rows:
             groups.setdefault((r.direction or '', r.subject_selection or ''), []).append(r)
+        # 2026-10-20 用户口径：去差按「班级人数 / 参考人数 / 班型名额」算，
+        # 混组合班按组合分别去差（人数多的组合先拿名额）。
+        n_trim = trim_of(cls)
+        enrolled = enrolled_map.get(cls) or len(rows)
+        combo_enr = _enrolled_by_combo(data.exam.grade, cls) if n_trim else {}
         out = []
         for d in sorted({k[0] for k in groups}, key=lambda x: _DIR_ORDER.get(x, 3)):
             combos = [(k[1], groups[k]) for k in groups if k[0] == d]
             combos.sort(key=lambda x: (-len(x[1]), x[0]))
             all_rows = [r for _s, v in combos for r in v]
+            # 该方向块的名册人数：跨方向班（如历史46+物理1）按本块组合名册求和，
+            # 避免用整班人数导致「参考人数 > 班级人数」的错位；取不到回落参考人数。
+            from app.utils.helpers import normalize_subject as _nsel
+            blk_enr = sum(combo_enr.get(_nsel((s or '').strip()), 0)
+                          for s, _v in combos) or enrolled
             if len(combos) <= 1:
-                out.append(_one_row(cls, d, all_rows))     # 纯组合班 / 未分科：一行
+                need = _trim_need(blk_enr, len(all_rows), n_trim)
+                out.append(_one_row(cls, d, all_rows,
+                                    trim_set=_pick_lowest(all_rows, need),
+                                    enrolled=blk_enr))
                 continue
-            total = _one_row(cls, d, all_rows)
+            # 混组合：班级合计行按本块口径（缺考顶替名额）给三列；
+            # 组合明细行按分配到的名额各自去差（名额不足时该组合不去差）。
+            alloc = _alloc_by_combo(combos, n_trim)
+            total_need = _trim_need(blk_enr, len(all_rows), n_trim)
+            total = _one_row(cls, d, all_rows,
+                             trim_set=_pick_lowest(all_rows, total_need),
+                             enrolled=blk_enr)
             total['hide_avg'] = True
             out.append(total)
             for _sel, rs_rows in combos:
-                row = _one_row(cls, d, rs_rows)
+                a = alloc.get(_sel, 0)
+                ce = combo_enr.get(_nsel((_sel or '').strip())) or len(rs_rows)
+                need_i = _trim_need(ce, len(rs_rows), a)
+                row = _one_row(cls, d, rs_rows,
+                               trim_set=_pick_lowest(rs_rows, need_i),
+                               enrolled=ce)
                 row['is_combo'] = True
                 row['headteacher'] = ''   # 班主任只写在班级合计行，组合明细行不重复
                 out.append(row)
@@ -291,13 +429,51 @@ def global_compare_report(exam_id, direction=''):
                 if s and s != '全科']
 
     def _row_base(label, rows, direction='', **extra):
-        """小计/总计类行的骨架：固定列 + 指标（取线口径见 `_cells`：逐生自身）。"""
+        """小计/总计类行的骨架：固定列 + 指标（取线口径见 `_cells`：逐生自身）。
+
+        2026-10-20：三列口径与班级行一致 —— 班级人数＝所覆盖班级名册人数之和
+        （名册不可用得参考人数），去差按各班班型名额、混组合班按组合分配后汇总。
+        """
+        by_cls = {}
+        for r in rows:
+            by_cls.setdefault(r.class_name or '—', []).append(r)
+        ts = set()
+        enr = 0
+        for c, cri in by_cls.items():
+            ce = enrolled_map.get(c) or len(cri)
+            enr += ce
+            n = trim_of(c)
+            if n <= 0:
+                continue
+            combos = _combo_split(cri)
+            from app.utils.helpers import normalize_subject as _nsel
+            if len(combos) <= 1:
+                # 单组合（纯组合班 / 方向小计下的组合明细行）：名册取该组合的人数，
+                # 不能用整班名册 —— 否则「班级40人/参考35的物化生」会被按 40 去差过头。
+                one_enr = (_enrolled_by_combo(data.exam.grade, c).get(combos[0][0])
+                           if combos else None)
+                cee = one_enr or ce
+                ts |= _pick_lowest(cri, _trim_need(cee, len(cri), n))
+                continue
+            c_enr = _enrolled_by_combo(data.exam.grade, c)
+            alloc = _alloc_by_combo(combos, n)
+            for sel, cr in combos:
+                a = alloc.get(sel, 0)
+                cee = c_enr.get(_nsel((sel or '').strip())) or len(cr)
+                ts |= _pick_lowest(cr, _trim_need(cee, len(cr), a))
+        ref = len(rows)
+        trims = sum(1 for r in rows if r.student_no in ts)
         r = {
             'grade': data.exam.grade, 'class_name': label,
-            'count': len(rows), 'direction': direction,
+            'count': ref,
+            'enrolled': enr or ref,
+            'exam_count': ref,
+            'trim_count': max(0, ref - trims),
+            'trim_n': trims,
+            'direction': direction,
             'class_type': '全年级', 'headteacher': '',
             'selections': _selection_stats(rows),
-            'cells': _cells(data, rows, line_cache, subjects, layer_names, trimmed),
+            'cells': _cells(data, rows, line_cache, subjects, layer_names, ts),
         }
         r.update(extra)
         return r
