@@ -74,7 +74,9 @@ def _teacher_filters():
 
 
 def _teacher_query(filters):
-    q = Teacher.query
+    # 2026-10-20：离职/退休已归档教师只允许在「系统管理 → 教师管理」查阅，
+    # 教务名单/导出默认排除（archive_kind 为空才是未归档）。
+    q = Teacher.query.filter(Teacher.archive_kind.is_(None))
     kw = filters.get('kw')
     if kw:
         like = f'%{kw}%'
@@ -99,7 +101,8 @@ def _teacher_query(filters):
 
 
 def _subject_options():
-    rows = db.session.query(Teacher.subject).distinct().all()
+    rows = (db.session.query(Teacher.subject)
+            .filter(Teacher.archive_kind.is_(None)).distinct().all())
     return sorted({r[0] for r in rows if r[0]})
 
 

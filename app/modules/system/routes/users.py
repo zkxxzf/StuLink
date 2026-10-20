@@ -9,6 +9,8 @@ from app.forms.user_forms import UserForm
 from app.utils.decorators import perm_required
 from app.utils.helpers import log_operation
 from app.modules.academic.services import teacher_sync
+from app.modules.academic.services import teacher_archive_service as archive_svc
+from app.models.academic import Teacher
 # 2026-10-14：教师名单子页复用教务侧视图函数（挂到 /users/teachers，见文件末尾）
 from app.modules.academic.routes import teachers as _ac_teachers
 import io
@@ -172,9 +174,14 @@ def list_users():
                 .order_by(WeChatBinding.user_id, WeChatBinding.id).all())
         for row in rows:
             wx_bindings.setdefault(row.user_id, []).append(row)
+    # 2026-10-20：教师删除/归档 —— 行内按钮需要知道「账号是否关联教师档案」；
+    # 离职/退休存档名单只在本页展示（其他模块已按 status/archive_kind 排除）
+    teacher_map = archive_svc.teacher_map(user_ids)
+    archived = archive_svc.archived_teachers()
     return render_template('system/users/list.html', users=users, groups=groups,
                            one_time_passwords=one_time_passwords,
-                           wx_bindings=wx_bindings)
+                           wx_bindings=wx_bindings, teacher_map=teacher_map,
+                           archived=archived)
 
 
 @bp.route('/create', methods=['GET', 'POST'])
@@ -370,6 +377,64 @@ def edit(id):
     return render_template('system/users/form.html', form=form, title='编辑用户')
 
 
+@bp.route('/<int:id>/teacher/remove', methods=['POST'])
+@perm_required('system.users')
+def remove_teacher(id):
+    """删除教师：错误录入=彻底删除；离职/退休=存档（2026-10-20 用户口径）。
+
+    - 必填删除原因；
+    - 只有「错误录入」允许彻底删除，且账号已有任何业务数据时拒绝（只能存档）；
+    - 离职/退休：教师置 left + 归档字段，账号停用并吊销小程序令牌，
+      任课映射置失效，数据保留、仅本页可查阅；
+    - 全程写操作日志。
+    """
+    user = User.query.get_or_404(id)
+    kind = (request.form.get('kind') or '').strip()
+    reason = (request.form.get('reason') or '').strip()
+    back = redirect(url_for('users.list_users'))
+
+    if user.role == 'admin' or _user_in_admin_group(user):
+        flash('管理员账号不能删除或归档', 'danger')
+        return back
+    if user.id == current_user.id:
+        flash('不能删除当前登录的账号', 'danger')
+        return back
+    if kind not in archive_svc.KIND_LABELS:
+        flash('请选择处理方式：错误录入 / 离职 / 退休', 'danger')
+        return back
+    if not reason:
+        flash('必须填写删除原因', 'danger')
+        return back
+    if len(reason) > 200:
+        flash('删除原因不能超过 200 字', 'danger')
+        return back
+
+    teacher = Teacher.query.filter_by(user_id=user.id).first()
+    if teacher is None:
+        flash('该账号未关联教师档案，无法执行教师删除/归档', 'danger')
+        return back
+    if teacher.archive_kind:
+        flash(f'{teacher.name} 已是「{teacher.archive_kind}」存档状态', 'warning')
+        return back
+
+    tid, tname = teacher.id, teacher.name
+    try:
+        if kind == archive_svc.DELETE_KIND:
+            detail = archive_svc.hard_delete_teacher(teacher, reason, current_user)
+            action = '删除教师'
+        else:
+            detail = archive_svc.archive_teacher(teacher, kind, reason, current_user)
+            action = '归档教师'
+    except ValueError as exc:
+        flash(str(exc), 'danger')
+        return back
+
+    log_operation(current_user, action, '教师', tid,
+                  f'{tname}：{detail}', module='system', severity='WARNING')
+    flash(detail, 'success')
+    return back
+
+
 @bp.route('/<int:id>/toggle', methods=['POST'])
 @perm_required('system.users')
 def toggle(id):
@@ -386,6 +451,13 @@ def toggle(id):
         return redirect(url_for('users.list_users'))
     if user.id == current_user.id and user.is_active:
         flash('不能禁用当前登录的账号', 'danger')
+        return redirect(url_for('users.list_users'))
+    # 2026-10-20：已归档（离职/退休）的教师不允许原地重新启用 —— 否则会绕过
+    # 归档口径重新进入课表/监考/任课映射等模块；返聘请重新建档。
+    _t = Teacher.query.filter_by(user_id=user.id).first()
+    if _t is not None and _t.archive_kind and not user.is_active:
+        flash(f'{_t.name} 已按「{_t.archive_kind}」归档，不能重新启用；'
+              f'如返聘请重新建立教师档案', 'danger')
         return redirect(url_for('users.list_users'))
     was_active = user.is_active
     user.is_active = not user.is_active

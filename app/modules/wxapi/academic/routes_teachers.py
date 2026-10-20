@@ -29,7 +29,9 @@ def wx_teachers():
     q = (request.args.get('q') or '').strip()
     subject = (request.args.get('subject') or '').strip()
     status = (request.args.get('status') or 'active').strip()
-    query = Teacher.query
+    # 2026-10-20：离职/退休已归档教师只在「系统管理 → 教师管理」可查，
+    # 小程序通讯录一律不返回（即使显式传 status=left）。
+    query = Teacher.query.filter(Teacher.archive_kind.is_(None))
     if status in ('active', 'left'):
         query = query.filter(Teacher.status == status)
     if subject:

@@ -156,7 +156,13 @@
                                       title="{% for g in _ids %}{{ g.name }}{{ '、' if not loop.last }}{% endfor %}">+{{ _ids|length - 1 }} 身份</span>
                                 {% endif %}
                             </td>
-                            <td>{% if u.is_active %}<span class="badge bg-success">启用</span>{% else %}<span class="badge bg-secondary">禁用</span>{% endif %}</td>
+                            <td>
+                                {% set _t = teacher_map.get(u.id) %}
+                                {% if _t and _t.archive_kind %}
+                                <span class="badge bg-dark">已归档·{{ _t.archive_kind }}</span>
+                                {% elif u.is_active %}<span class="badge bg-success">启用</span>
+                                {% else %}<span class="badge bg-secondary">禁用</span>{% endif %}
+                            </td>
                             <td>
                                 <a href="{{ url_for('users.edit', id=u.id) }}" class="btn btn-sm btn-outline-warning" aria-label="编辑用户"><i class="bi bi-pencil"></i></a>
                                 <form method="POST" action="{{ url_for('users.toggle', id=u.id) }}" style="display:inline;">
@@ -179,6 +185,17 @@
                                     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                                     <button type="submit" class="btn btn-sm btn-outline-info" title="重置密码" aria-label="重置密码"><i class="bi bi-key"></i></button>
                                 </form>
+                                {# 2026-10-20：教师删除/归档 —— 仅有关联教师档案、未归档、非管理员时显示 #}
+                                {% if _t and not _t.archive_kind and u.role != 'admin' and u.id != current_user.id %}
+                                <button type="button" class="btn btn-sm btn-outline-danger js-remove-teacher"
+                                        data-bs-toggle="modal" data-bs-target="#removeTeacherModal"
+                                        data-user-id="{{ u.id }}"
+                                        data-name="{{ u.real_name or u.username }}"
+                                        data-tuid="{{ _t.teacher_uid }}"
+                                        title="删除 / 归档教师" aria-label="删除或归档教师">
+                                    <i class="bi bi-person-x"></i>
+                                </button>
+                                {% endif %}
                             </td>
                         </tr>
                         {% endfor %}
@@ -195,6 +212,100 @@
     <div class="card-body text-center text-muted py-5">暂无账号，请点击右上角「新建教师」或「批量导入」</div>
 </div>
 {% endif %}
+
+{# 2026-10-20：离职 / 退休存档 —— 只在本页可查；其他模块按 status/archive_kind 排除 #}
+<div class="card mt-3">
+    <div class="card-header d-flex justify-content-between align-items-center">
+        <span class="fw-bold"><i class="bi bi-archive"></i> 离职 / 退休存档
+            <span class="badge rounded-pill text-bg-secondary ms-1">{{ archived|length }}</span>
+        </span>
+        <span class="text-muted small">仅此处可查阅；已归档教师不再出现在课表、监考、任课映射等模块</span>
+    </div>
+    {% if archived %}
+    <div class="table-responsive">
+        <table class="table table-sm align-middle mb-0">
+            <thead class="table-light">
+                <tr><th>教师编号</th><th>姓名</th><th>原学科</th><th>类型</th>
+                    <th>原因</th><th>归档时间</th><th>操作人</th><th>账号</th></tr>
+            </thead>
+            <tbody>
+                {% for t in archived %}
+                {% set _u = (users | selectattr('id', 'equalto', t.user_id) | list | first) if t.user_id else None %}
+                <tr>
+                    <td><code>{{ t.teacher_uid }}</code></td>
+                    <td class="fw-bold">{{ t.name }}</td>
+                    <td>{{ t.subject or '-' }}</td>
+                    <td><span class="badge bg-dark">{{ t.archive_kind }}</span></td>
+                    <td class="small">{{ t.archive_reason or '-' }}</td>
+                    <td class="small text-nowrap">{{ t.archived_at.strftime('%Y-%m-%d %H:%M') if t.archived_at else '-' }}</td>
+                    <td class="small">{{ t.archived_by or '-' }}</td>
+                    <td class="small">{{ _u.username if _u else '无' }}{% if _u and not _u.is_active %}（停用）{% endif %}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% else %}
+    <div class="card-body text-muted small py-3">暂无离职 / 退休存档</div>
+    {% endif %}
+</div>
+
+<!-- 删除 / 归档教师弹窗 -->
+<div class="modal fade" id="removeTeacherModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title"><i class="bi bi-person-x"></i> 删除 / 归档教师</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <form method="POST" id="removeTeacherForm"
+                  data-action="{{ url_for('users.remove_teacher', id=0) }}">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <div class="modal-body">
+                    <p class="mb-2">教师：<strong id="rtName">-</strong>
+                        <code class="ms-2" id="rtUid"></code></p>
+                    <div class="mb-3">
+                        <label class="form-label">处理方式 <span class="text-danger">*</span></label>
+                        <div class="form-check">
+                            <input class="form-check-input" type="radio" name="kind" id="rtMistake"
+                                   value="mistake" required>
+                            <label class="form-check-label" for="rtMistake">
+                                <strong>错误录入（彻底删除）</strong>
+                                <span class="text-muted small">— 教师记录与登录账号一并删除，不可恢复；已有业务数据时不允许</span>
+                            </label>
+                        </div>
+                        <div class="form-check">
+                            <input class="form-check-input" type="radio" name="kind" id="rtLeave" value="leave">
+                            <label class="form-check-label" for="rtLeave"><strong>离职</strong>
+                                <span class="text-muted small">— 存档保留，账号停用，其他模块不再调用</span>
+                            </label>
+                        </div>
+                        <div class="form-check">
+                            <input class="form-check-input" type="radio" name="kind" id="rtRetire" value="retire">
+                            <label class="form-check-label" for="rtRetire"><strong>退休</strong>
+                                <span class="text-muted small">— 存档保留，账号停用，其他模块不再调用</span>
+                            </label>
+                        </div>
+                    </div>
+                    <div class="mb-2">
+                        <label class="form-label" for="rtReason">删除原因 <span class="text-danger">*</span></label>
+                        <textarea name="reason" id="rtReason" class="form-control" rows="3"
+                                  maxlength="200" required placeholder="必填，例如：重复录入 / 已调离本单位 / 2026-10 退休"></textarea>
+                    </div>
+                    <div class="alert alert-warning small mb-0">
+                        <i class="bi bi-exclamation-triangle"></i>
+                        离职、退休必须存档，只有「错误录入」才允许彻底删除；操作会写入操作日志。
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">取消</button>
+                    <button type="submit" class="btn btn-danger"><i class="bi bi-check-lg"></i> 确认</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
 
 <!-- 批量导入教师弹窗 -->
 <div class="modal fade" id="importTeacherModal" tabindex="-1">
@@ -274,6 +385,25 @@
     }
 
     $search.on('input', applyFilter);
+
+    // 2026-10-20：删除 / 归档教师弹窗 —— 行内按钮带入姓名、编号，提交前二次确认
+    $('#removeTeacherModal').on('show.bs.modal', function (ev) {
+        var $btn = $(ev.relatedTarget);
+        var uid = $btn.data('user-id');
+        $('#rtName').text($btn.data('name') || '');
+        $('#rtUid').text($btn.data('tuid') || '');
+        var action = $('#removeTeacherForm').data('action') || '';
+        $('#removeTeacherForm').attr('action',
+            action.replace(/\/0\/teacher\/remove$/, '/' + uid + '/teacher/remove'));
+        $('#removeTeacherForm')[0].reset();
+    });
+    $('#removeTeacherForm').on('submit', function () {
+        var kind = $(this).find('input[name=kind]:checked').val();
+        if (kind === 'mistake') {
+            return confirm('「错误录入」会彻底删除教师记录与登录账号，且不可恢复，确认继续？');
+        }
+        return true;
+    });
 })();
 </script>
 {% endblock %}
