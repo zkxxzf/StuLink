@@ -28,11 +28,7 @@
                     <div class="mb-3">
                         <label class="form-label">身份证号 <span class="text-muted small">（选填）</span></label>
                         <input name="id_card" class="form-control" maxlength="18"
-                               placeholder="{% if id_masked %}已录入：{{ id_masked }}（留空保持不变）{% else %}未录入（仅人事档案需要时填写）{% endif %}">
-                        <small class="text-muted">
-                            <i class="bi bi-shield-lock"></i> 加密存储、全局唯一；一经录入教师本人不可修改，仅管理员可在此更新。
-                            <span class="text-success">只为教育统计时<b>不必填身份证</b> —— 填下方「出生日期」即可。</span>
-                        </small>
+                               placeholder="{% if id_masked %}已录入：{{ id_masked }}（留空保持不变）{% else %}未录入{% endif %}">
                     </div>
 
                     <div class="row">
@@ -75,7 +71,6 @@
                                 <label class="form-label">出生日期</label>
                                 <input name="birth_date" type="date" class="form-control"
                                        value="{{ t.birth_date.strftime('%Y-%m-%d') if t.birth_date else '' }}">
-                                <div class="text-muted small">只用于统计年龄，不必填身份证</div>
                             </div>
                             <div class="col-md-4 mb-3">
                                 <label class="form-label">民族</label>
@@ -120,16 +115,14 @@
                             <div class="col-md-2 mb-3">
                                 <label class="form-label">外籍</label>
                                 <select name="is_foreign" class="form-select">
-                                    <option value="" {% if t.is_foreign is none %}selected{% endif %}>未填</option>
-                                    <option value="1" {% if t.is_foreign is true %}selected{% endif %}>是</option>
-                                    <option value="0" {% if t.is_foreign is false %}selected{% endif %}>否</option>
+                                    <option value="0" {% if not t.is_foreign %}selected{% endif %}>否</option>
+                                    <option value="1" {% if t.is_foreign %}selected{% endif %}>是</option>
                                 </select>
                             </div>
                         </div>
                         <div class="text-muted small">
                             <i class="bi bi-lightbulb"></i>
-                            这些属性只用于教育事业统计基表；<b>年龄只需填「出生日期」</b>（身份证选填），
-                            填写后在「系统管理 → 教育统计」即可生成 4149 / 4153 / 4156。
+                            这些属性只用于教育事业统计基表；填写后在「系统管理 → 教育统计」即可生成 4149 / 4153 / 4156。
                         </div>
                     </div>
 
