@@ -1,4 +1,4 @@
-# StuLink v1.19.49.40 2026-10-13
+# StuLink v1.19.49.41 2026-10-13
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 """节次显示名（period_number → 学校口径的节次名）—— 全站唯一口径。
 

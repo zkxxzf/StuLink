@@ -1,4 +1,4 @@
-# StuLink v1.19.49.40 2026-10-18
+# StuLink v1.19.49.41 2026-10-18
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 """小程序访问令牌：签发与校验。
 
