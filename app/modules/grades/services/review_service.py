@@ -118,6 +118,20 @@ def audit_review(r, user, action, note='', apply_now=False):
     """
     if _is_self_audit(r, user):
         return False, '不得审批本人提交的复核申请（请由其他有改分权限的老师审批）'
+    # 2026-10-20 第十七轮审计：审批=「批准并应用」会真改分，属写操作，不能用
+    # 读口径 can_view_class 放行（R1 任课教师对同年级**任意班/任意科**都为真）。
+    # 写口径收口为：班主任本班 / 年级长本年级 / 校级（class_total_visible）。
+    # 路由层已有粗筛，这里做第二道闸，覆盖网页/小程序/MCP 所有调用方。
+    from app.models.grades import Exam
+    from app.modules.grades.services import score_guard as _sg
+    _exam = db.session.get(Exam, r.exam_id)
+    _grade = r.grade or (_exam.grade if _exam else '')
+    try:
+        _sc = _sg.resolve(user)
+    except Exception:  # noqa: BLE001  解析失败一律拒绝（写操作 fail-closed）
+        return False, '审批权限校验失败，请刷新后重试'
+    if not _sc.class_total_visible(_grade, r.class_name):
+        return False, '无权审批该班级的成绩（仅班主任/年级长/管理员可审批）'
     if r.status != 'pending':
         return False, '该申请已处理过，不能重复审核'
     if action not in ('approve', 'reject'):

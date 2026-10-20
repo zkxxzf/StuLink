@@ -286,7 +286,11 @@ def save_data_scope():
                 continue
         entries = [{'grade': g, 'class_name': None}
                    for g in (grades or []) if str(g).strip()]
-        UserDataScope.query.filter_by(user_id=uid).delete()
+        # 2026-10-20 第十七轮审计：只覆盖「年级级」行（class_name IS NULL），
+        # 保留精细到班的授权 —— 原实现全删后只写回 grade，会把「仅某班」
+        # 静默放大成「整个年级」（成绩/学生/宿舍/德育/积分全线放大）。
+        UserDataScope.query.filter_by(user_id=uid).filter(
+            UserDataScope.class_name.is_(None)).delete()
         for e in entries:
             db.session.add(UserDataScope(user_id=uid, grade=e['grade']))
         count += 1

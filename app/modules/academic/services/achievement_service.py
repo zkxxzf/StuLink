@@ -277,7 +277,8 @@ def can_download(rec, att, user):
     if rec is not None and rec.teacher_uid:
         try:
             from app.modules.academic.services import teacher_service
-            t = teacher_service.teacher_of_user(user)
+            # 2026-10-20 第十七轮：鉴权路径禁止同名自动绑定（走严格 user_id 关联）
+            t = teacher_service.teacher_of_user(user, auto_link=False)
             if t is not None and t.teacher_uid == rec.teacher_uid:
                 return True
         except Exception as _e:  # noqa: BLE001

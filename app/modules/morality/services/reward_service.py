@@ -346,15 +346,21 @@ def delete(rec):
     """
     atts = RewardPunishmentAttachment.query.filter_by(record_id=rec.id).all()
     from app.utils.trash import archive
-    archive('morality', 'reward_punishment', '奖惩记录', rec,
-            summary=f'{rec.student_name} {rec.title}')
+    # 2026-10-20 第十七轮审计：归档失败即中止（fail-closed），原来返回值被丢弃 →
+    # 归档抛错时记录仍被真删、回收站空白，界面却提示"已删除（可恢复）"。
+    _recs = [archive('morality', 'reward_punishment', '奖惩记录', rec,
+                     summary=f'{rec.student_name} {rec.title}')]
     if atts:
-        archive('morality', 'reward_attachment', '奖惩附件', atts,
-                summary=f'奖惩记录 #{rec.id}：{len(atts)} 个附件')
+        _recs.append(archive('morality', 'reward_attachment', '奖惩附件', atts,
+                            summary=f'奖惩记录 #{rec.id}：{len(atts)} 个附件'))
+    if any(r is None for r in _recs):
+        db.session.rollback()
+        return False
     for att in atts:
         db.session.delete(att)
     db.session.delete(rec)
     db.session.commit()
+    return True
 
 
 def set_status(rec, status, user, reason=''):

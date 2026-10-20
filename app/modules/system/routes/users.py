@@ -65,6 +65,25 @@ def _admin_group_ids():
     return {g.id for g in PermissionGroup.query.all() if _is_admin_group(g)}
 
 
+def _group_grantable(group, actor=None):
+    """非超管只能授予「权限点 ⊆ 自己」的组（2026-10-20 第十七轮审计）。
+
+    H-01 只封了管理员组；其它高权组（带 system.grade_mgmt / system.users /
+    students.export 等）仍可被持 system.users 的账号授予新账号，再拿页面显示的
+    一次性口令登录，等于纵向提权。这里按权限点子集判定；空组（无任何权限）放行。
+    管理员组成员 has_perm 恒真，不受影响。
+    """
+    actor = current_user if actor is None else actor
+    if _actor_is_super(actor):
+        return True
+    if _is_admin_group(group):
+        return False
+    keys = set(group.get_menu_keys() or [])
+    if not keys:
+        return True
+    return all(actor.has_perm(k) for k in keys)
+
+
 def _submitted_admin_group_ids(group_ids):
     """提交的 group_id 中落在管理员组的部分。"""
     ids = {g for g in (group_ids or []) if g}
@@ -78,7 +97,7 @@ def _user_in_admin_group(user):
     return any(_is_admin_group(g) for g in (user.permission_groups or []))
 
 
-def _set_user_groups(user, group_ids, allow_admin_group=False):
+def _set_user_groups(user, group_ids, allow_admin_group=False, actor=None):
     """设置用户的权限组（多身份，P5）：列表首个为主组。
 
     同步旧字段 permission_group_id 与多身份关联表 user_permission_groups，
@@ -95,9 +114,13 @@ def _set_user_groups(user, group_ids, allow_admin_group=False):
     valid_ids = {g.id for g in PermissionGroup.query.all()}
     admin_ids = _admin_group_ids()
     gids = []
+    groups_by_id = {g.id: g for g in PermissionGroup.query.all()}
     for g in (group_ids or []):
         if g and g not in gids and g in valid_ids:
             if g in admin_ids and not allow_admin_group:
+                continue
+            # 2026-10-20 第十七轮：非超管不得授予超出自身权限的组
+            if not _group_grantable(groups_by_id.get(g), actor):
                 continue
             gids.append(g)
     user.permission_group_id = gids[0] if gids else None
@@ -509,8 +532,10 @@ def import_teachers():
             # 2026-10-19 第十四轮：管理员组只能由内置 admin 授予 —— create()/edit()
             # 早已有这道闸（H-01），批量导入口漏了：往 Excel 的「权限组」列写
             # 「管理员组」就能批量把人挂成管理员（has_perm 即全权限）。
-            if _is_admin_group(pg) and not _actor_is_super():
-                errors.append(f'第{row_idx}行（{name}）：无权导入到「{pg.name}」')
+            # 2026-10-20 第十七轮：不仅管理员组，任何超出操作者权限的组都拒绝
+            if not _group_grantable(pg):
+                errors.append(f'第{row_idx}行（{name}）：无权导入到「{pg.name}」'
+                              '（超出你的权限范围）')
                 continue
 
             user = User(username=phone, real_name=name, role='teacher',

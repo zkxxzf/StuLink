@@ -1731,6 +1731,20 @@ def review_swap_batch(swap_id, reviewer_id, reviewer_name, action, review_note='
         return False, '不得审批本人提交的调课申请', None
     if not sibs:
         return False, '没有待审核的记录', None
+    # 2026-10-20 第十七轮审计：整批审批需**逐条**过年级范围 —— 入口只校验了
+    # 「代表记录」的年级；跨年级统一调课批次共享 batch_id，高一审批人点一次
+    # 就能把高二的课一起批掉（swap_detail 的年级收敛随之失效）。
+    # 注意只判年级，不用 can_review（后者还含"对方未确认/非 pending"，会把
+    # 「还有人没确认」的正常拒绝文案抢先变成"不在审批范围"）。
+    if user is not None:
+        _vg = review_visible_grades(user)
+        if _vg is not None:
+            _bad = [s for s in sibs
+                    if swap_grade(s) and swap_grade(s) not in _vg]
+            if _bad:
+                db.session.rollback()
+                return False, (f'批内有 {len(_bad)} 条不在你的审批范围'
+                               f'（如 #{_bad[0].id}），整批未通过'), None
     # 2026-10-12（v1.19.49.39）批量换课 / 代课：批内每条都有自己的 partner，
     # 通过前必须**全部答复过** —— 避免教务单方面把别人的课批掉。
     if action == 'approve':

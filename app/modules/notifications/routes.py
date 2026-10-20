@@ -148,9 +148,27 @@ def notification_create():
     target_uids = []
     if target_type == 'grade':
         grades = request.form.getlist('target_grades')
+        # 2026-10-20 第十七轮审计：指定年级也必须过数据范围 —— 原实现只拦
+        # 「全体/角色」，持 workbench.notifications 的年级长逐个年级发一遍
+        # 即等价于全校广播。校级/管理员不受限。
+        from app.utils.scope import resolve_scope
+        _s = resolve_scope(current_user)
+        if _s.origin != 'admin' and _s.kind not in ('school',):
+            _allowed = set(_s.grades or ())
+            if any(g not in _allowed for g in grades):
+                flash('所选年级不在你的数据范围内', 'danger')
+                return redirect(url_for('notifications.notifications_page'))
         scope['grades'] = grades
     elif target_type == 'class':
         classes = request.form.getlist('target_classes')
+        # 班级级账号（班主任）只能发自己名下的班级
+        from app.utils.scope import resolve_scope
+        _s2 = resolve_scope(current_user)
+        if _s2.origin != 'admin' and _s2.kind == 'classes':
+            _allowed_cls = {c for _g, c in (_s2.classes or set())}
+            if any(c not in _allowed_cls for c in classes):
+                flash('所选班级不在你的数据范围内', 'danger')
+                return redirect(url_for('notifications.notifications_page'))
         scope['classes'] = classes
     elif target_type == 'role':
         roles = request.form.getlist('target_roles')

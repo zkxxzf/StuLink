@@ -117,8 +117,12 @@ def _lock_remaining(username, client=None):
     now = time.time()
     with _cred_lock:
         record = _fails.get(_fail_key(username, client))
-        if record and record[1] > now:
-            return int(record[1] - now) + 1
+        # 2026-10-20 第十七轮：(count, last_at, locked_until) 三元组；
+        # last_at 供 _prune_store 判过期，locked_until 才是锁定时间。
+        _until = (record[2] if record and len(record) > 2
+                  else (record[1] if record else 0))
+        if _until > now:
+            return int(_until - now) + 1
     return 0
 
 
@@ -244,15 +248,18 @@ def _record_fail(username, client=None):
     window = max(30, _cfg_int('login_throttle_window', 300))
     with _cred_lock:
         _prune_store(_fails, _FAILS_MAX, window)
-        count, _until = _fails.get(key, (0, 0.0))
+        # 2026-10-20 第十七轮：原结构 (count, locked_until) 让 _prune_store 把
+        # 未锁定条的 count 当时间戳 → 表满时整批"过期"删掉，攻击者投放 1024 个
+        # 键即可清零自己的失败计数。改为 (count, last_at, locked_until)。
+        count, _last, _until = _fails.get(key, (0, now, 0.0))
         count += 1
         if count >= limit:
-            _fails[key] = (0, now + lock_seconds)
+            _fails[key] = (0, now, now + lock_seconds)
             logger.warning('MCP 认证失败次数超限：来源 %s 对账号 %s 锁定 %s 秒'
                            '（只锁该来源，账号本人不受影响）',
                            client or '-', username, lock_seconds)
         else:
-            _fails[key] = (count, 0.0)
+            _fails[key] = (count, now, 0.0)
         # 跨来源累计（只用于附加延迟，不参与锁定判定）
         if len(_account_fails) > _ACCOUNT_FAILS_MAX:
             _account_fails.clear()

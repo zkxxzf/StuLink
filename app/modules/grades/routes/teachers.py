@@ -16,10 +16,11 @@ from flask_login import login_required, current_user
 from app.extensions import db
 from app.models import User, Student, PermissionGroup, UserClassLink
 from app.models.grades import (COMPREHENSIVE_SUBJECTS, LINK_SUBJECTS, SUBJECTS,
-                               TeacherSubjectLink)
+                               TeacherLinkPlanRow, TeacherSubjectLink)
 from app.modules.grades import bp
 from app.modules.grades.services import teacher_import, user_account
 from app.modules.grades.services import link_plan_service as link_plan
+from app.modules.grades.services.exam_guard import assert_grade_visible
 from app.modules.grades.services.scope import visible_grades, _all_active_grades
 from app.modules.grades.utils import numeric_classes
 from app.utils.decorators import perm_required
@@ -120,7 +121,9 @@ def _ep(name):
 @login_required
 @perm_required('grades.teachers')
 def teachers_page():
-    grades = _all_active_grades()
+    # 2026-10-20 第十七轮审计：年级下拉按数据范围收敛（原 _all_active_grades
+    # 会向年级长展示全部年级，且可借 URL 参数直接看外年级映射）。
+    grades = visible_grades(current_user)
     grade = request.args.get('grade', '')
     if grade not in grades:
         grade = grades[0] if grades else ''
@@ -137,12 +140,17 @@ def teachers_page():
 @perm_required('grades.teachers')
 def teachers_get():
     grade = request.args.get('grade', '').strip()
-    active = _all_active_grades()
+    active = visible_grades(current_user)
     if grade not in active:
-        # 防御：年级缺失或参数异常时回退到第一个活跃年级（前端下拉固定有值，正常不会触发）
+        # 防御：年级缺失或参数异常时回退到第一个可见年级（前端下拉固定有值）
         grade = active[0] if active else ''
     if not grade:
         return jsonify(success=False, message='年级无效'), 400
+    # 2026-10-20 第十七轮审计：读也要过范围（否则年级长可借 ?grade= 看外年级映射）
+    try:
+        assert_grade_visible(grade)
+    except PermissionError:
+        return jsonify(success=False, message='该年级不在你的数据范围内'), 403
     links = TeacherSubjectLink.query.filter_by(grade=grade, active=True).all()
     # 单元格带姓名：候选下拉只列「启用 + 教师类角色」，历史方案里已停用/已删账号
     # 的绑定仍要能显示出来（否则前端会误显示为「未指定」）
@@ -201,12 +209,18 @@ def teachers_save():
     data = _json_body()
     grade = (data.get('grade') or '').strip()
     cells = data.get('cells') or {}    # {'01班|语文': user_id 或 ''}
-    active = _all_active_grades()
+    active = visible_grades(current_user)
     if grade not in active:
-        # 防御：年级缺失或参数异常时回退到第一个活跃年级（前端下拉固定有值，正常不会触发）
+        # 防御：年级缺失或参数异常时回退到第一个可见年级（前端下拉固定有值）
         grade = active[0] if active else ''
     if not grade:
         return jsonify(success=False, message='年级无效'), 400
+    # 2026-10-20 第十七轮审计：写任课映射必须过年级范围（与小程序同一口径）；
+    # 原实现只认权限点，年级长可写外年级映射 → 反过来提升自己的成绩可见范围。
+    try:
+        assert_grade_visible(grade)
+    except PermissionError:
+        return jsonify(success=False, message='该年级不在你的数据范围内'), 403
     # 校验 user_id 存在
     user_ids = {int(v) for v in cells.values() if v}
     if user_ids:
@@ -306,6 +320,21 @@ def teachers_plans_create():
 def teachers_plans_use():
     """使用某方案：切换为当前生效任课映射（物化到 teacher_subject_links）。"""
     data = _json_body()
+    # 2026-10-20 第十七轮审计：方案物化=整表写任课映射，需限定在可见年级内，
+    # 否则年级长可用任意 plan_id 把外年级映射一次性改成别的快照。
+    try:
+        _pid = int(data.get('plan_id') or 0)
+    except (TypeError, ValueError):
+        return jsonify(success=False, message='参数不正确'), 400
+    _plan_grades = [r[0] for r in (
+        TeacherLinkPlanRow.query.filter_by(plan_id=_pid)
+        .with_entities(TeacherLinkPlanRow.grade).distinct().all())]
+    for _g in _plan_grades:
+        try:
+            assert_grade_visible(_g)
+        except PermissionError:
+            return jsonify(success=False,
+                           message=f'方案覆盖 {_g}，不在你的数据范围内'), 403
     try:
         plan, stats = link_plan.use_plan(data.get('plan_id'),
                                          operator_id=current_user.id)

@@ -390,6 +390,18 @@ def wx_grades_teachers_import_confirm():
     if not draft:
         return wx_err('导入批次已失效（服务重启后需重新上传）')
     preview = draft['preview']
+    # 2026-10-20 第十七轮审计：导入确认必须逐行过年级范围 —— 矩阵保存已有闸
+    # （:270），导入路径原来完全没有：可写外年级任课映射、把账号改成班主任并
+    # 挂进班主任组、批量开户（口令明文回显）。越界整批拒绝，不做静默过滤。
+    from app.modules.grades.services.exam_guard import assert_grade_visible
+    for _it in preview:
+        _g = (_it.get('grade') or '').strip()
+        if not _g:
+            continue
+        try:
+            assert_grade_visible(_g)
+        except PermissionError:
+            return wx_err('导入内容包含不在你数据范围内的年级，已拒绝', 403)
     head_names = {it['teacher_name'] for it in preview if it['kind'] == 'head'}
     head_meta = {}
     for it in preview:

@@ -331,9 +331,12 @@ def api_record_delete(rid):
         return jsonify(success=False, message='该记录不在您的管理范围内'), 403
     # 2026-10-19 第十三轮审计：删除前先进回收站（此前删了只剩一行操作日志）
     from app.utils.trash import archive
-    archive('points', 'point_record', '积分记录', rec,
-            summary=f'{rec.student_name} {rec.points:+d}分 {rec.reason}',
-            operator=current_user)
+    # 2026-10-20 第十七轮：归档失败必须中止（fail-closed），与字典项/宿舍同口径
+    if archive('points', 'point_record', '积分记录', rec,
+               summary=f'{rec.student_name} {rec.points:+d}分 {rec.reason}',
+               operator=current_user) is None:
+        db.session.rollback()
+        return jsonify(success=False, message='删除前归档失败，已中止'), 500
     db.session.delete(rec)
     db.session.commit()
     log_operation(current_user, '删除', '积分', rid, f'{rec.student_name} {rec.points:+d}', module='points')
