@@ -1,4 +1,4 @@
-/* StuLink v1.19.49.44 2026-10-10 全局对比
+/* StuLink v1.19.49.45 2026-10-10 全局对比
  * 班级 × 学科宽表：固定列（年级/班级/人数/方向/组合/属性）+ 每科（去差均分 + 各分数线）。
  * 分数线可选：默认勾选 211线/特控线/本科线，其余层（清北/985…）勾选才显示；
  * 班主任并入「总分」格下方（不再单列），各科成绩下方为本场任课教师快照。
@@ -72,7 +72,7 @@
             return;
         }
         if (missed) {
-            // v1.19.49.44 本场考试不在可见列表（已删除 / 超出数据范围 / 已毕业）：
+            // v1.19.49.45 本场考试不在可见列表（已删除 / 超出数据范围 / 已毕业）：
             // 不能静默显示最近一场让用户误当本场（考试态下下拉原本隐藏）——
             // 恢复下拉并明确提示。
             $('#ldExam').removeClass('d-none');
@@ -230,15 +230,25 @@
            has_selection），这两列整列都是「—」→ 直接不显示（undefined 视为显示，兼容旧缓存） */
         var hasDir = d.has_direction !== false;
         var hasSel = d.has_selection !== false;
-        var fixHeads = ['年级', '班级', '班级人数'];
+        /* 2026-10-20 用户口径：「班级人数 / 参考人数 / 去差后人数」三列并排，
+           不同颜色区分；去差后 = min(参考人数, 班级人数 - 班型去差名额)。 */
+        var fixHeads = ['年级', '班级', '班级人数', '参考人数', '去差后'];
         if (hasDir) { fixHeads.push('方向'); }
         if (hasSel) { fixHeads.push('组合'); }
         fixHeads.push('属性');
 
         var h = ['<div class="ld-wrap"><table class="ld-table" id="ldTable"><thead><tr>'];
+        var headTips = {
+            '班级人数': '名册在册人数（不含已转出/离校/退学）',
+            '参考人数': '参加本场考试的人数（有总分的）',
+            '去差后': '去差后人数 = min(参考人数, 班级人数 - 班型去差名额)；缺考先顶替去差名额'
+        };
         fixHeads.forEach(function (b, i) {
             h.push('<th rowspan="2" class="'
-                + (i === 0 ? 'c-year' : (i === 1 ? 'c-cls' : '')) + '">' + b + '</th>');
+                + (i === 0 ? 'c-year' : (i === 1 ? 'c-cls'
+                    : (b === '班级人数' ? 'c-enr' : (b === '参考人数' ? 'c-ref'
+                        : (b === '去差后' ? 'c-trim' : '')))))
+                + '" title="' + esc(headTips[b] || '') + '">' + b + '</th>');
         });
         subjects.forEach(function (s) {
             h.push('<th colspan="' + per + '" class="grp">' + esc(s) + '</th>');
@@ -254,14 +264,26 @@
         });
         h.push('</tr></thead><tbody>');
 
-        function rowHtml(r) {
+        function rowHtml(r, zebra) {
             var cls = r.is_grand ? 'grand' : (r.is_subtotal ? 'sub' : '');
             /* 2026-10-16 组合明细行（小计/总计按选科组合拆出）：底色随父行、去掉加粗 */
             if (r.is_combo) { cls += (cls ? ' ' : '') + 'combo'; }
+            /* 2026-10-20 用户口径「表格有点太大，需要加底纹，防止看串行」：
+               同一班级（含其组合明细行）共用一个底色，相邻班级交替白/灰。 */
+            if (zebra) { cls += (cls ? ' ' : '') + zebra; }
+            var ref = (r.exam_count == null
+                ? (r.count == null ? null : r.count) : r.exam_count);
+            var tc = (r.trim_count == null ? null : r.trim_count);
+            var trimTip = (r.trim_n ? ('实际剔除 ' + r.trim_n + ' 人：' + r.class_name) : '未去差');
             var tds = [
                 '<td class="c-year">' + esc(r.grade || '') + '</td>',
                 '<td class="c-cls">' + esc(r.class_name || '') + '</td>',
-                '<td>' + (r.count == null ? '—' : r.count) + '</td>'
+                '<td class="c-enr" title="名册在册人数">'
+                    + (r.enrolled == null ? '—' : r.enrolled) + '</td>',
+                '<td class="c-ref" title="参加考试人数（有总分）">'
+                    + (ref == null ? '—' : ref) + '</td>',
+                '<td class="c-trim" title="' + esc(trimTip) + '">'
+                    + (tc == null ? '—' : tc) + '</td>'
             ];
             // 与表头同口径：无方向不出方向列、无组合不出组合列
             if (hasDir) { tds.push('<td>' + dirBadge(r.direction) + '</td>'); }
@@ -317,8 +339,17 @@
             h.push(rowHtml(r));
             (r.combo_rows || []).forEach(function (x) { h.push(rowHtml(x)); });
         }
+        /* 2026-10-20 斑马纹：以「班级（+方向）」为分组单位切换底色，
+           混组合班的合计行与组合明细行同色，看行时不会串到隔壁班。 */
+        var zebraIdx = 0;
+        var lastKey = null;
+        function pushClassRow(r) {
+            var key = (r.class_name || '') + '|' + (r.direction || '');
+            if (key !== lastKey) { lastKey = key; zebraIdx += 1; }
+            h.push(rowHtml(r, zebraIdx % 2 === 1 ? 'zb-a' : 'zb-b'));
+        }
         (d.groups || []).forEach(function (g) {
-            (g.rows || []).forEach(function (r) { h.push(rowHtml(r)); });
+            (g.rows || []).forEach(function (r) { pushClassRow(r); });
             if (g.subtotal) { pushSummary(g.subtotal); }
         });
         if (d.grand) { pushSummary(d.grand); }

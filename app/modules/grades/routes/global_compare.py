@@ -1,4 +1,4 @@
-# StuLink v1.19.49.44 2026-10-10
+# StuLink v1.19.49.45 2026-10-10
 # 全局对比：班级 × 学科宽表（去差均分 + 各分数线），全科与分科自适配
 #  - 页面/接口门槛与「成绩汇报区」一致（_guard_report：管理员/校领导/年级长）
 #  - Excel 导出与页面同口径（复用 global_compare_service 的同一份缓存数据）
@@ -20,9 +20,11 @@ from app.utils.decorators import perm_required
 from app.utils.export_helpers import xl_row   # M-4：公式注入防护
 from app.utils.helpers import log_operation
 
-# 固定列（6 列，两级表头下 rowSpan=2）；班主任已并入「总分」格下方，不再单列
+# 固定列（两级表头下 rowSpan=2）；班主任已并入「总分」格下方，不再单列
 # 2026-10-15 新增「组合」列（方向之后）：本行选科组合分布（读成绩行快照，人数降序）
-_BASE_HEADS = ['年级', '班级', '班级人数', '方向', '组合', '属性']
+# 2026-10-20 用户口径：「班级人数 / 参考人数 / 去差后」三列并排（页面、打印、导出同口径）
+_BASE_HEADS = ['年级', '班级', '班级人数', '参考人数', '去差后',
+               '方向', '组合', '属性']
 
 
 def _base_heads(data):
@@ -31,7 +33,7 @@ def _base_heads(data):
     高一未选科时整场没有方向/组合 → 这两列不导出（页面、打印版同口径）；
     payload 里缺字段（旧缓存）时按「有」处理，保持原行为。
     """
-    heads = ['年级', '班级', '班级人数']
+    heads = ['年级', '班级', '班级人数', '参考人数', '去差后']
     if data.get('has_direction', True) is not False:
         heads.append('方向')
     if data.get('has_selection', True) is not False:
@@ -120,12 +122,15 @@ _CENTER = Alignment(horizontal='center', vertical='center', wrap_text=True)
 # （跨全部列合并 + 自动换行 + 灰字小号）。文案与页面顶部口径说明一致；打印版版面更窄
 # （不印教师小字、层数封顶），故两边详略不同，勿宣称"逐字同源"。
 _GC_NOTE = (
-    '口径：①「去差均分」＝按班型剔除总分末尾 N 人（卓越班 2 人）后的均分，'
+    '口径：①「班级人数 / 参考人数 / 去差后」＝名册在册人数 / 参加考试人数（有总分）/ '
+    '去差后人数（＝min(参考人数, 班级人数 − 班型去差名额)；缺考先顶替去差名额，'
+    '参考人数不足则不去差）；混组合班按组合分别去差、人数多的组合先拿名额；'
+    '②「去差均分」＝按班型剔除总分末尾 N 人（卓越班 2 人）后的均分，'
     '其下方括号＝全体均分（不剔人；与去差一致时不显示）；'
-    '②混选科组合的班级合计 / 方向小计 / 全年级行不给均分（组合线不同、混算无可比性）'
+    '③混选科组合的班级合计 / 方向小计 / 全年级行不给均分（组合线不同、混算无可比性）'
     '显示「—」，均分看其下按组合明细行（不加粗、底色随合计行）；'
-    '③「上线」单元格＝人数 / 上线率，按每生各自选科组合的同名单科线逐生判定；'
-    '④格内下方小字：总分格＝班主任、其余格＝该科任课教师（本场考试当时的快照）。'
+    '④「上线」单元格＝人数 / 上线率，按每生各自选科组合的同名单科线逐生判定；'
+    '⑤格内下方小字：总分格＝班主任、其余格＝该科任课教师（本场考试当时的快照）。'
 )
 _NOTE_FONT = Font(size=9, color='595959')
 _NOTE_ALIGN = Alignment(horizontal='left', vertical='center', wrap_text=True)
@@ -167,7 +172,10 @@ def _row_values(row, subjects, lines, heads=None):
     heads 决定固定列（无方向/无组合的场次不出这两列，见 _base_heads）。
     """
     heads = heads or _BASE_HEADS
-    vals = [row.get('grade', ''), row.get('class_name', ''), row.get('count', '')]
+    vals = [row.get('grade', ''), row.get('class_name', ''),
+            row.get('enrolled', row.get('count', '')),
+            row.get('exam_count', row.get('count', '')),
+            row.get('trim_count', row.get('count', ''))]
     if '方向' in heads:
         vals.append(row.get('direction', ''))
     if '组合' in heads:

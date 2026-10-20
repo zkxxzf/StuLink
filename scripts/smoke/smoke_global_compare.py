@@ -357,17 +357,25 @@ with app.app_context():
           str([x.get('selections') for x in cr]))
     check('ex4 组合行：is_combo + is_subtotal 标记',
           all(x.get('is_combo') and x.get('is_subtotal') for x in cr))
-    # 去差按班剔（卓越班每班剔总分末尾 2 人）：01班剔 560/520 → 物化生只剩 600；
-    # 02班剔 480/400 → 物化地只剩 500、物化政全被剔（None）
-    check('ex4 物化生行：人数=3，去差均分=600.0（剔的是本班末 2 人）',
-          cr[0]['count'] == 3 and cr[0]['cells'][TOTAL_SUBJECT]['trim_avg'] == 600.0,
-          f"{cr[0]['count']} {cr[0]['cells'][TOTAL_SUBJECT]['trim_avg']}")
-    check('ex4 物化地行：人数=2，去差均分=500.0（480 被剔）',
-          cr[1]['count'] == 2 and cr[1]['cells'][TOTAL_SUBJECT]['trim_avg'] == 500.0,
-          f"{cr[1]['count']} {cr[1]['cells'][TOTAL_SUBJECT]['trim_avg']}")
-    check('ex4 物化政行：唯一学生被剔 → 去差均分 None（页面显示 —）',
-          cr[2]['cells'][TOTAL_SUBJECT]['trim_avg'] is None,
-          str(cr[2]['cells'][TOTAL_SUBJECT]['trim_avg']))
+    # 2026-10-20 用户口径变更：去差名额按**组合**分配（人数多的组合先拿），
+    # 且「去差后 = min(参考人数, 班级人数 − 名额)」——缺考先顶替名额。
+    # 01班 3 人参考（卓越班名额 2），02班 物化地 2 人 / 物化政 1 人。
+    check('ex4 物化生行：人数=3 且给出三列（班级/参考/去差后）',
+          cr[0]['count'] == 3
+          and cr[0]['enrolled'] >= cr[0]['exam_count'] >= cr[0]['trim_count'],
+          f"count={cr[0]['count']} enr={cr[0].get('enrolled')} "
+          f"ref={cr[0].get('exam_count')} trim={cr[0].get('trim_count')} "
+          f"n={cr[0].get('trim_n')} avg={cr[0]['cells'][TOTAL_SUBJECT]['trim_avg']}")
+    check('ex4 物化地行：人数=2，去差后 ≤ 参考（名额先给人数多的组合）',
+          cr[1]['count'] == 2
+          and cr[1]['trim_count'] <= cr[1]['exam_count'],
+          f"enr={cr[1].get('enrolled')} ref={cr[1].get('exam_count')} "
+          f"trim={cr[1].get('trim_count')} avg={cr[1]['cells'][TOTAL_SUBJECT]['trim_avg']}")
+    check('ex4 物化政行：仅 1 人的组合不再去差（名额已被大组合拿走）',
+          cr[2]['trim_count'] == cr[2]['exam_count']
+          and cr[2]['cells'][TOTAL_SUBJECT]['trim_avg'] == 400.0,
+          f"ref={cr[2].get('exam_count')} trim={cr[2].get('trim_count')} "
+          f"avg={cr[2]['cells'][TOTAL_SUBJECT]['trim_avg']}")
     # 2026-10-16 用户口径「数据有些重复了」：总计行的组合明细与方向小计**完全重复**
     # （每个组合只属于一个方向，同一批人同一套数字）→ 总计行不再重复拆组合
     check('ex4 全年级总计：不再重复拆组合（combo_rows 为空）',
@@ -468,7 +476,7 @@ with app.app_context():
     dp = ld.global_compare_report(e1, '物理')
     check('筛选物理：仅 1 组 2 班', len(dp['groups']) == 1 and len(dp['groups'][0]['rows']) == 2)
     check('筛选物理：不出全年级行', dp['grand'] is None)
-    # v1.19.49.44 回归：筛选后 directions 仍返回**完整**方向集（否则前端下拉会丢另一个方向）
+    # v1.19.49.45 回归：筛选后 directions 仍返回**完整**方向集（否则前端下拉会丢另一个方向）
     check('筛选物理：方向下拉仍含 物理+历史（不丢另一方向）',
           dp['directions'] == ['物理', '历史'], str(dp.get('directions')))
     check('未筛选：方向下拉含 物理+历史',
@@ -547,14 +555,21 @@ with app.test_client() as c:
         import openpyxl
         wb = openpyxl.load_workbook(io.BytesIO(rx.data))
         ws = wb.active
-        heads = [ws.cell(row=2, column=i).value for i in range(1, 11)]
-        check('导出表头正确（年级/班级/…/组合/总分组，班主任已并入总分）',
-              heads[:6] == ['年级', '班级', '班级人数', '方向', '组合', '属性']
-              and heads[6] == '总分', str(heads))
+        heads = [ws.cell(row=2, column=i).value for i in range(1, 13)]
+        # 2026-10-20 用户口径：新增「参考人数 / 去差后」两列（固定列 5 列）
+        check('导出表头正确（年级/班级/班级人数/参考人数/去差后/…/组合/总分组）',
+              heads[:8] == ['年级', '班级', '班级人数', '参考人数', '去差后',
+                            '方向', '组合', '属性']
+              and heads[8] == '总分', str(heads))
         # 第二行指标名：每科「去差均分 + 特控线 + 本科线」（默认勾选层）
-        heads2 = [ws.cell(row=3, column=i).value for i in range(1, 11)]
+        heads2 = [ws.cell(row=3, column=i).value for i in range(1, 13)]
         check('导出第二行指标名（去差均分/特控线/本科线）',
-              heads2[6:9] == ['去差均分', '特控线', '本科线'], str(heads2))
+              heads2[8:11] == ['去差均分', '特控线', '本科线'], str(heads2))
+        # 2026-10-20：三列人数都要有值（班级人数 ≥ 参考人数 ≥ 去差后）
+        _r4 = [ws.cell(row=4, column=i).value for i in (3, 4, 5)]
+        check('导出人数三列齐全且 班级人数 ≥ 参考人数 ≥ 去差后',
+              all(isinstance(v, int) for v in _r4)
+              and _r4[0] >= _r4[1] >= _r4[2], str(_r4))
         # 2026-10-16 用户口径「excel 导出时没有注释解释」→ 第 1 行是口径注释（合并 + 换行）
         note = ws.cell(row=1, column=1).value or ''
         check('导出首行口径注释（合并单元格 + 去差/全体均分/上线率口径）',
@@ -566,11 +581,11 @@ with app.test_client() as c:
         # 三类汇总行的班级列都是「年级」（方向列区分：物理/历史/空）
         check('导出含方向小计行（班级=年级 + 方向=物理）',
               any(ws.cell(row=r, column=2).value == '年级'
-                  and ws.cell(row=r, column=4).value == '物理'
+                  and ws.cell(row=r, column=6).value == '物理'
                   for r in range(4, ws.max_row + 1)))
         check('导出含全年级总计行（班级=年级 + 方向列空）',
               any(ws.cell(row=r, column=2).value == '年级'
-                  and not (ws.cell(row=r, column=4).value or '')
+                  and not (ws.cell(row=r, column=6).value or '')
                   for r in range(4, ws.max_row + 1)))
         all_vals = [ws.cell(row=r, column=cl).value
                     for r in range(4, ws.max_row + 1)
@@ -594,9 +609,9 @@ with app.test_client() as c:
         import openpyxl
         wb2 = openpyxl.load_workbook(io.BytesIO(rl.data))
         ws2 = wb2.active
-        h2 = [ws2.cell(row=3, column=i).value for i in range(1, 11)]
+        h2 = [ws2.cell(row=3, column=i).value for i in range(1, 13)]
         check('导出仅勾特控：指标行=去差均分/特控线（无本科线）',
-              h2[6:8] == ['去差均分', '特控线'] and h2[8] != '本科线', str(h2))
+              h2[8:10] == ['去差均分', '特控线'] and h2[10] != '本科线', str(h2))
     except Exception as e:  # noqa: BLE001
         check('导出 lines 参数生效', False, str(e))
 
@@ -612,16 +627,16 @@ with app.test_client() as c:
         def _find(cls, direction=''):
             for r in range(4, ws4.max_row + 1):
                 if (ws4.cell(row=r, column=2).value == cls
-                        and (ws4.cell(row=r, column=4).value or '') == direction):
+                        and (ws4.cell(row=r, column=6).value or '') == direction):
                     return r
             return None
 
         n_sub = sum(1 for r in range(4, ws4.max_row + 1)
                     if ws4.cell(row=r, column=2).value == '年级'
-                    and ws4.cell(row=r, column=4).value == '物理')
+                    and ws4.cell(row=r, column=6).value == '物理')
         n_grand = sum(1 for r in range(4, ws4.max_row + 1)
                       if ws4.cell(row=r, column=2).value == '年级'
-                      and not (ws4.cell(row=r, column=4).value or ''))
+                      and not (ws4.cell(row=r, column=6).value or ''))
         check('导出：物理小计 4 行（合计 + 3 组合明细，班级列都是「年级」）',
               n_sub == 4, str(n_sub))
         check('导出：全年级总计 1 行（不再重复列组合明细）', n_grand == 1, str(n_grand))
@@ -631,24 +646,24 @@ with app.test_client() as c:
         check('导出：ex4 02班 3 行（合计 + 物化地 + 物化政）', n_02 == 3, str(n_02))
         rr = _find('02班', '物理')
         check('导出：混组合班合计行总分格=「—」（下方带班主任）',
-              rr and str(ws4.cell(row=rr, column=7).value).startswith('—'),
-              repr(rr and ws4.cell(row=rr, column=7).value))
+              rr and str(ws4.cell(row=rr, column=9).value).startswith('—'),
+              repr(rr and ws4.cell(row=rr, column=9).value))
         check('导出：其下组合明细行有均分（500.0 起，含全体均分换行）',
-              rr and str(ws4.cell(row=rr + 1, column=7).value).startswith('500.0'),
-              repr(rr and ws4.cell(row=rr + 1, column=7).value))
+              rr and str(ws4.cell(row=rr + 1, column=9).value).startswith('500.0'),
+              repr(rr and ws4.cell(row=rr + 1, column=9).value))
         check('导出：班主任只写在班级合计行（周班主），组合明细行不重复',
-              rr and '周班主' in str(ws4.cell(row=rr, column=7).value)
-              and '周班主' not in str(ws4.cell(row=rr + 1, column=7).value),
-              repr(rr and ws4.cell(row=rr, column=7).value))
+              rr and '周班主' in str(ws4.cell(row=rr, column=9).value)
+              and '周班主' not in str(ws4.cell(row=rr + 1, column=9).value),
+              repr(rr and ws4.cell(row=rr, column=9).value))
         # 跨组合合计行的总分格 = 「—」（不给混算均分）；组合明细行仍有均分
         rr = _find('年级', '物理')
         check('导出：跨组合合计行总分格=「—」',
-              rr and ws4.cell(row=rr, column=7).value == '—',
-              str(rr and ws4.cell(row=rr, column=7).value))
+              rr and ws4.cell(row=rr, column=9).value == '—',
+              str(rr and ws4.cell(row=rr, column=9).value))
         check('导出：组合明细行仍有均分（含全体均分换行）',
-              rr and isinstance(ws4.cell(row=rr + 1, column=7).value, str)
-              and '(560.0)' in ws4.cell(row=rr + 1, column=7).value,
-              repr(rr and ws4.cell(row=rr + 1, column=7).value))
+              rr and isinstance(ws4.cell(row=rr + 1, column=9).value, str)
+              and '(560.0)' in ws4.cell(row=rr + 1, column=9).value,
+              repr(rr and ws4.cell(row=rr + 1, column=9).value))
         check('导出：小计行加粗 / 其组合明细行不加粗',
               rr and ws4.cell(row=rr, column=1).font.bold is True
               and ws4.cell(row=rr + 1, column=1).font.bold is False,
@@ -673,7 +688,7 @@ with app.test_client() as c:
               all(ws4.cell(row=r, column=1).font.bold is True
                   for r in range(4, ws4.max_row + 1)
                   if ws4.cell(row=r, column=2).value == '年级'
-                  and not (ws4.cell(row=r, column=4).value or '')),
+                  and not (ws4.cell(row=r, column=6).value or '')),
               '全年级行非加粗')
     except Exception as e:  # noqa: BLE001
         check('导出组合明细可被 openpyxl 打开', False, str(e))
@@ -684,10 +699,13 @@ with app.test_client() as c:
     rp = c.get(f'/grades/global-compare/print?exam={e4}')
     check('打印版 200', rp.status_code == 200, str(rp.status_code))
     html = rp.get_data(as_text=True)
+    # 2026-10-20：班级行额外带斑马纹 class（zb-a / zb-b），故用「combo 开头」匹配
     check('打印版：班级的组合明细行带 class="combo"（不加粗）',
-          '<tr class="combo">' in html, '')
+          'class="combo' in html, '')
     check('打印版：方向小计的组合明细行带 class="sub combo"',
-          '<tr class="sub combo">' in html, '')
+          'class="sub combo' in html, '')
+    check('打印版：班级行带斑马纹 class（zb-a/zb-b 交替）',
+          'zb-a' in html and 'zb-b' in html, '')
     check('打印版：班级列统一为「年级」', '>年级</td>' in html, '')
     check('打印版：hide_avg 行均分位为灰色「—」（avg na）', 'avg na' in html, '')
     check('打印版：层数缺省用 default_lines（211/特控/本科，不是全部 6 层）',

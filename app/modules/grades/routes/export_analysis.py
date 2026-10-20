@@ -1,4 +1,4 @@
-# StuLink v1.19.49.44 2026-10-20
+# StuLink v1.19.49.45 2026-10-20
 # 成绩分析「一键导出」：一场考试的全部模块 → 一个 xlsx
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 """成绩分析一键导出（路由层：参数 + 权限 + 下载；取数在 services）。
