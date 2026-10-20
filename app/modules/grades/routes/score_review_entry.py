@@ -17,6 +17,7 @@
 口径）——越界学生在搜索阶段就不返回，提交时再校验一次（403）。
 """
 import json
+import math
 from datetime import datetime
 
 from flask import request, jsonify, redirect, url_for, flash, abort
@@ -157,6 +158,11 @@ def _validate_one(exam, sc, by_subj, marks, item):
     try:
         new = round(float(item.get('new_score')), 1)
     except (TypeError, ValueError):
+        return None, f'「{subj}」的修改后分数格式不正确'
+    # 2026-10-20 审计修复（并入原 reviews_students_api/review_new 的修复）：
+    # float('nan')/inf 能解析成功，而 nan<0 / nan>limit / nan==0 / abs(nan)>上限 全为假，
+    # 会绕过下面所有校验把 NaN 写进成绩单。显式拒绝非有限值。
+    if not math.isfinite(new):
         return None, f'「{subj}」的修改后分数格式不正确'
     limit = float(marks.get(subj, 100))
     if new < 0 or new > limit:
