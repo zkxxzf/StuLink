@@ -5673,15 +5673,12 @@ def check_audit_p3_inspection_swap_kind():
 
 @item('EDUSTAT')
 def check_edu_stat():
-    """教育事业统计（2026-10-20）：基表口径一致性 + 导出结构 + 路由注册。
+    """教育统计（2026-10-20）：基表口径一致性 + 页面表格结构 + 路由注册。
 
-    只锁「口径之间必须自洽」的结构关系，不锁具体人数（随夹具/学年变化）；
-    这样既能防住"把年级映射写错、把在校生算成四个年级"这类回归，又不脆弱。
+    用户口径：**不导出 Excel**，页面表格与样表同格式、复制粘贴即可。
+    因此这里锁「口径之间必须自洽」+「7 张表都在页面上且带复制按钮」。
     """
-    import openpyxl
-
     from app.modules.edustat.services import edu_stat_service as S
-    from app.modules.edustat.services import edu_stat_export as X
 
     with app.app_context():
         d = S.collect(2026)
@@ -5708,22 +5705,33 @@ def check_edu_stat():
         case('EDUSTAT 4153 年龄合计 = 有身份证的教师数',
              d['teacher_ages']['totals']['total']
              == d['teacher_summary']['total'] - d['teacher_ages']['unknown'])
-
-        buf = X.build_workbook(d['school_year'], d)
-        wb = openpyxl.load_workbook(io.BytesIO(buf.getvalue()))
-        sheets = [s for s in wb.sheetnames if s.startswith('教基')]
-        case('EDUSTAT 导出含 7 张教师/学生基表', len(sheets) == 7, str(sheets))
-        case('EDUSTAT 导出含 2108/3118/3119',
-             all(any(s.startswith(k) for s in sheets)
-                 for k in ('教基2108', '教基3118', '教基3119')))
-        case('EDUSTAT 导出含 4149/4153/4156',
-             all(any(s.startswith(k) for s in sheets)
-                 for k in ('教基4149', '教基4153', '教基4156')))
+        # 4156 行 = 总计 / #女 / #少数民族 / 各学历（与样表行序一致）
+        rows = [r[0] for r in d['teacher_by_subject']['rows']]
+        case('EDUSTAT 4156 行含总计/#女/#少数民族/学历',
+             rows[:3] == ['总计', '#女', '#少数民族']
+             and '本科' in rows, str(rows))
+        case('EDUSTAT 4156 #女 行合计 = 4153 女教师数',
+             d['teacher_by_subject']['rows'][1][1]['合计']
+             == d['teacher_ages']['totals']['female'])
 
         rules = {r.rule for r in app.url_map.iter_rules()}
         case('EDUSTAT 路由已注册（统计页 + 校舍资产）',
              '/system/edu-stat' in rules and '/system/edu-assets' in rules,
              str(sorted(r for r in rules if 'edu' in r)))
+        case('EDUSTAT 不再提供 Excel 导出路由（用户口径：复制粘贴）',
+             '/system/edu-stat/export' not in rules)
+
+        # 页面结构：7 张表 + 每表一个复制按钮 + eduCopy 脚本
+        with open(os.path.join(BASE, 'app', 'templates', 'system',
+                               'edu_stat.html'), encoding='utf-8') as f:
+            html = f.read()
+        tids = ['t2108', 't3118', 't3119', 't3045', 't4149', 't4153', 't4156']
+        case('EDUSTAT 页面含 7 张基表', all(('id="%s"' % t) in html for t in tids),
+             str([t for t in tids if ('id="%s"' % t) not in html]))
+        case('EDUSTAT 每张表都有复制按钮',
+             html.count("copy_btn('") >= 7 and 'function eduCopy' in html)
+        case('EDUSTAT 3118 表头含合并单元格（在校生数 colspan=3）',
+             'colspan="3"' in html and 'rowspan="2"' in html)
         # 模型与迁移清单一致：校舍资产表按学年唯一
         from app.models import EduStatAsset
         case('EDUSTAT 校舍资产按学年唯一',

@@ -1,21 +1,21 @@
 # StuLink v1.19.49.44 2026-10-20
-# 教育事业统计：页面 / 导出 / 校舍资产录入
+# 教育统计：页面（表格可复制粘贴）+ 校舍资产录入
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
-"""教育事业综合统计页面与导出（系统管理 → 教育事业统计 / 校舍资产）。
+"""教育统计页面与校舍资产录入（系统管理 → 教育统计 / 校舍资产）。
 
 数据全部来自既有业务表（students / teachers / student_accommodation），
 校舍与办学条件参数按学年人工录入、逐年复用。
-"""
-from datetime import datetime
 
-from flask import render_template, request, redirect, url_for, flash, send_file
+2026-10-20 用户口径：**不做 Excel 导出** —— 页面表格与样表格式一致，
+直接框选/一键复制后粘贴进 Excel 即可（合并表头也随之带过去）。
+"""
+from flask import render_template, request, redirect, url_for, flash
 from flask_login import login_required, current_user
 
 from app.extensions import db
 from app.models import EduStatAsset
 from app.modules.edustat import bp
 from app.modules.edustat.services import edu_stat_service as stat_service
-from app.modules.edustat.services import edu_stat_export
 from app.utils.decorators import perm_required
 from app.utils.helpers import log_operation
 
@@ -82,34 +82,12 @@ def _parse_bool(raw):
 @login_required
 @perm_required(PERM)
 def edu_stat_page():
-    """教育事业统计预览：学生 4 张表 + 教师 3 张表 + 数据质量提示。"""
+    """教育统计：学生 4 张表 + 教师 3 张表（与样表同格式，可直接复制粘贴）。"""
     year = _year_from_args()
     asset = EduStatAsset.of(stat_service.year_label(year))
     data = stat_service.collect(year, asset)
     return render_template('system/edu_stat.html', d=data, year=year,
                            school_year=data['school_year'])
-
-
-@bp.route('/edu-stat/export')
-@login_required
-@perm_required(PERM)
-def edu_stat_export_page():
-    """导出与基表同结构的 Excel（7 张统计表 + 校舍资产，若已录入）。"""
-    year = _year_from_args()
-    label = stat_service.year_label(year)
-    asset = EduStatAsset.of(label)
-    data = stat_service.collect(year, asset)
-    buf = edu_stat_export.build_workbook(label, data)
-    log_operation(current_user, '导出', '教育事业统计', None,
-                  f'{label} 学年：学生 4 表 + 教师 3 表'
-                  + ('+ 校舍资产' if asset else ''),
-                  module='system')
-    stamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-    return send_file(
-        buf, as_attachment=True,
-        download_name=f'教育事业统计_{label}_{stamp}.xlsx',
-        mimetype='application/vnd.openxmlformats-officedocument'
-                 '.spreadsheetml.sheet')
 
 
 @bp.route('/edu-assets', methods=['GET', 'POST'])

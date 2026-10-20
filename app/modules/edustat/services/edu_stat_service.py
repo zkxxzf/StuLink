@@ -297,6 +297,8 @@ def teacher_ages(school_year):
     rows = OrderedDict(
         (name, {'total': 0, 'female': 0, 'minority': 0, 'titles': Counter()})
         for name, _lo, _hi in TEACHER_AGE_BANDS)
+    title_totals = Counter()
+    female_title_totals = Counter()
     unknown = 0
     for t in ts:
         age = _age_on(_t_id_card(t), ref)
@@ -310,7 +312,11 @@ def teacher_ages(school_year):
             cell['female'] += 1
         if (t.ethnicity or '汉族') != '汉族':
             cell['minority'] += 1
-        cell['titles'][t.title or '未定职级'] += 1
+        title = t.title or '未定职级'
+        cell['titles'][title] += 1
+        title_totals[title] += 1
+        if _t_gender(t) == '女':
+            female_title_totals[title] += 1
     return {
         'rows': [(name, rows[name]) for name, _lo, _hi in TEACHER_AGE_BANDS],
         'totals': {
@@ -318,17 +324,28 @@ def teacher_ages(school_year):
             'female': sum(c['female'] for c in rows.values()),
             'minority': sum(c['minority'] for c in rows.values()),
         },
+        # 各职称的人数（合计列）与其中女教师数（#女 列）—— 与样表的职称行一一对应
+        'title_totals': {k: title_totals.get(k, 0) for k in TITLE_LEVELS},
+        'female_title_totals': {k: female_title_totals.get(k, 0)
+                                for k in TITLE_LEVELS},
         'unknown': unknown,
         'ref_date': ref,
     }
 
 
 def teacher_by_subject(school_year):
-    """按课程列 + 学历分档统计专任教师。"""
+    """按课程列 + 学历分档统计专任教师（与教基4156 的行列一一对应）。
+
+    行：总计 / #女 / #少数民族 / 各学历；列：合计 / #女 / 各课程。
+    说明：样表的「#女」「#少数民族」是**行**（各课程中的人数），
+    与学历行的「#女」列不是同一口径，故这里单独算两份。
+    """
     ts = [t for t in _teachers() if _t_staff_type(t) == '专任教师']
-    grid = OrderedDict(
-        (lv, {c: 0 for c in (['合计', '#女'] + SUBJECT_COLUMNS)})
-        for lv in ['总计'] + EDU_LEVELS)
+    cols = ['合计', '#女'] + SUBJECT_COLUMNS
+    grid = OrderedDict((lv, {c: 0 for c in cols})
+                       for lv in ['总计'] + EDU_LEVELS)
+    female_row = {c: 0 for c in cols}
+    minority_row = {c: 0 for c in cols}
     subject_fallback = 0
     for t in ts:
         raw = (t.subject or '').strip()
@@ -339,15 +356,24 @@ def teacher_by_subject(school_year):
                 subject_fallback += 1
         lv = t.education if t.education in EDU_LEVELS else '未填学历'
         if lv not in grid:
-            grid[lv] = {c: 0 for c in (['合计', '#女'] + SUBJECT_COLUMNS)}
+            grid[lv] = {c: 0 for c in cols}
         for row_key in ('总计', lv):
             grid[row_key]['合计'] += 1
             if _t_gender(t) == '女':
                 grid[row_key]['#女'] += 1
             grid[row_key][col] += 1
+        if _t_gender(t) == '女':
+            female_row['合计'] += 1
+            female_row[col] += 1
+        if (t.ethnicity or '汉族') != '汉族':
+            minority_row['合计'] += 1
+            minority_row[col] += 1
+    rows = [('总计', grid['总计']), ('#女', female_row),
+            ('#少数民族', minority_row)]
+    rows += [(lv, grid[lv]) for lv in grid if lv != '总计']
     return {
-        'columns': ['合计', '#女'] + SUBJECT_COLUMNS,
-        'rows': list(grid.items()),
+        'columns': cols,
+        'rows': rows,
         'unknown_education': sum(1 for t in ts
                                  if t.education not in EDU_LEVELS),
         'unmapped_subject': subject_fallback,
