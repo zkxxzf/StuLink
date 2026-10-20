@@ -1,4 +1,4 @@
-# StuLink v1.19.49.35 2026-10-19
+# StuLink v1.19.49.39 2026-10-19
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 """小程序自由分析（透视）：与网页 `/grades/pivot` 同一个 `pivot_service`。
 
@@ -14,7 +14,6 @@ from app.modules.grades.services.stats_service import cached_exam_data
 from app.modules.wxapi import bp
 from app.modules.wxapi.core.guards import wx_perm_required
 from app.modules.wxapi.core.response import wx_err, wx_ok
-from app.modules.wxapi.grades.routes_grades import PERM
 from app.modules.wxapi.grades.routes_grades_stats import _visible_exam
 
 EXAM_LIMIT = 60
@@ -22,7 +21,8 @@ DIM_KEYS = ['class', 'layer', 'subject', 'direction']
 
 
 @bp.route('/grades/pivot/meta')
-@wx_perm_required(PERM)
+@wx_perm_required('grades.view')   # 2026-10-19 第十四轮：与网页透视表
+                                   # （grades.view）统一，不再借用「学生查询」键
 def wx_pivot_meta():
     """可选考试 / 维度 / 指标 / 科目（与网页 /api/pivot/meta 同源）。"""
     from app.models.grades import Exam
@@ -46,7 +46,8 @@ def wx_pivot_meta():
 
 
 @bp.route('/grades/pivot')
-@wx_perm_required(PERM)
+@wx_perm_required('grades.view')   # 2026-10-19 第十四轮：与网页透视表
+                                   # （grades.view）统一，不再借用「学生查询」键
 def wx_pivot():
     """交叉表：query exam_id / row / col / subject / direction / measures。"""
     exam, err = _visible_exam(request.args.get('exam_id', type=int))

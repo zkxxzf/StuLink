@@ -802,7 +802,9 @@ def form_submit(form_id):
         if q.question_type == 'multi_choice':
             answers_dict[qid_str] = request.form.getlist(f'q_{qid_str}')
         elif q.question_type == 'file':
-            pass  # 文件在 files 中处理
+            # 2026-10-20 第十七轮审计：这里必须建 key，否则 form_service 只遍历
+            # answers_dict → upload_file 永远不执行，附件被静默丢弃（页面仍提示成功）。
+            answers_dict[qid_str] = ''
         else:
             answers_dict[qid_str] = request.form.get(f'q_{qid_str}', '')
 

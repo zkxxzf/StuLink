@@ -73,6 +73,9 @@ _SOURCE_FAILS_MAX = 2048
 _read_hits = {}                 # key -> (count, window_start)
 _READ_HITS_MAX = 4096
 
+# 不存在的账号做等价耗时校验用的占位哈希（懒生成，见 _dummy_check）
+_DUMMY_HASH = None
+
 
 def _cfg_int(key, default):
     try:
@@ -114,8 +117,12 @@ def _lock_remaining(username, client=None):
     now = time.time()
     with _cred_lock:
         record = _fails.get(_fail_key(username, client))
-        if record and record[1] > now:
-            return int(record[1] - now) + 1
+        # 2026-10-20 第十七轮：(count, last_at, locked_until) 三元组；
+        # last_at 供 _prune_store 判过期，locked_until 才是锁定时间。
+        _until = (record[2] if record and len(record) > 2
+                  else (record[1] if record else 0))
+        if _until > now:
+            return int(_until - now) + 1
     return 0
 
 
@@ -145,10 +152,9 @@ def _read_rate_remaining(key):
     window = max(10, _cfg_int('read_rate_window', 60))
     now = time.time()
     with _cred_lock:
-        # 2026-10-20 审计修复：原实现表满时**全量清空**计数表 ——
-        # 攻击者只要用超过 _READ_HITS_MAX 个不同 key 各刷一次，就能把**所有**来源
-        # 的读频控窗口一起重置（429 形同虚设）。改为：先无损清掉窗口已过期的条目；
-        # 若仍满（说明真有大量来源在窗口内），对新 key 直接拒绝，不动已生效的计数。
+        # 2026-10-20 审计修复：表满时**不得整表清空**（否则攻击者用超量 key
+        # 即可重置所有人的读频控窗口）。先无损清掉窗口已过期的条目；若仍是新 key
+        # 且表已满，则直接拒绝（不动已生效的计数，fail-closed）。
         if key not in _read_hits and len(_read_hits) >= _READ_HITS_MAX:
             stale = [k for k, (_c, s) in _read_hits.items()
                      if now - s >= window]
@@ -156,6 +162,9 @@ def _read_rate_remaining(key):
                 _read_hits.pop(k, None)
             if len(_read_hits) >= _READ_HITS_MAX:
                 return window
+        # 沿用第十六轮的 _prune_store：超容量时按插入顺序淘汰最旧的一小部分，
+        # 而不是整表清空（同一实现同时服务 _source_fails / _fails 三张表）。
+        _prune_store(_read_hits, _READ_HITS_MAX, window)
         count, start = _read_hits.get(key, (0, now))
         if now - start >= window:
             _read_hits[key] = (1, now)
@@ -174,12 +183,57 @@ def _record_source_fail(client):
     window = max(30, _cfg_int('login_source_window', 300))
     now = time.time()
     with _cred_lock:
-        if len(_source_fails) > _SOURCE_FAILS_MAX:
-            _source_fails.clear()
+        _prune_store(_source_fails, _SOURCE_FAILS_MAX, window)
         count, start = _source_fails.get(client, (0, now))
         if now - start > window:
             count, start = 0, now
         _source_fails[client] = (count + 1, start)
+
+
+def _prune_store(store, max_size, window):
+    """超容量时**淘汰**而不是整表清空。
+
+    2026-10-20 第十六轮：原来 `if len(store) > MAX: store.clear()` —— 攻击者
+    用 N 个用户名/来源把表撑满，就能连同**自己的锁定状态**一起清掉，等于绕过
+    失败限流。现在先删窗口内已无意义的旧条目，仍超容量时按插入顺序淘汰最旧的
+    一小部分（保留近期活跃记录）。
+    """
+    if len(store) <= max_size:
+        return
+    now = time.time()
+    ttl = max(60, window * 2)
+    stale = []
+    for k, v in store.items():
+        stamp = None
+        if isinstance(v, tuple) and len(v) >= 2:
+            stamp = v[1] or v[0]
+        elif isinstance(v, dict):
+            stamp = v.get('at')
+        if isinstance(stamp, (int, float)) and now - stamp > ttl:
+            stale.append(k)
+    for k in stale:
+        store.pop(k, None)
+    if len(store) > max_size:
+        excess = min(len(store) - max_size + max_size // 4, len(store))
+        for k in list(store)[:excess]:
+            store.pop(k, None)
+
+
+def _dummy_check(password):
+    """对不存在的账号做一次等价耗时的口令校验（抹平时间侧信道）。
+
+    2026-10-20 第十六轮：原实现"用户名不存在"直接返回、不做 scrypt，
+    与"存在但口令错"有 50~150ms 差距 → 可据此枚举账号名。
+    """
+    global _DUMMY_HASH
+    try:
+        if _DUMMY_HASH is None:
+            from werkzeug.security import generate_password_hash
+            _DUMMY_HASH = generate_password_hash('mcp-dummy-password')
+        from werkzeug.security import check_password_hash
+        check_password_hash(_DUMMY_HASH, password or '')
+    except Exception:  # noqa: BLE001  校验失败不影响拒绝结果
+        pass
 
 
 def _record_fail(username, client=None):
@@ -193,17 +247,19 @@ def _record_fail(username, client=None):
     key = _fail_key(username, client)
     window = max(30, _cfg_int('login_throttle_window', 300))
     with _cred_lock:
-        if len(_fails) > _FAILS_MAX:
-            _fails.clear()
-        count, _until = _fails.get(key, (0, 0.0))
+        _prune_store(_fails, _FAILS_MAX, window)
+        # 2026-10-20 第十七轮：原结构 (count, locked_until) 让 _prune_store 把
+        # 未锁定条的 count 当时间戳 → 表满时整批"过期"删掉，攻击者投放 1024 个
+        # 键即可清零自己的失败计数。改为 (count, last_at, locked_until)。
+        count, _last, _until = _fails.get(key, (0, now, 0.0))
         count += 1
         if count >= limit:
-            _fails[key] = (0, now + lock_seconds)
+            _fails[key] = (0, now, now + lock_seconds)
             logger.warning('MCP 认证失败次数超限：来源 %s 对账号 %s 锁定 %s 秒'
                            '（只锁该来源，账号本人不受影响）',
                            client or '-', username, lock_seconds)
         else:
-            _fails[key] = (count, 0.0)
+            _fails[key] = (count, now, 0.0)
         # 跨来源累计（只用于附加延迟，不参与锁定判定）
         if len(_account_fails) > _ACCOUNT_FAILS_MAX:
             _account_fails.clear()
@@ -273,11 +329,15 @@ def verify_credentials(username, password, client=None):
 
     from app.models.user import User
     user = User.query.filter_by(username=username).first()
-    if user is None:
+    if user is None or not user.is_active:
+        # 2026-10-20 第十六轮：
+        # ① 停用账号不再返回独立错误码/文案（原 `account_disabled` + 回显用户名，
+        #    可判定账号是否存在，且该分支**不记失败** → 可无限探活枚举账号名）；
+        # ② 账号不存在时补一次等价耗时的哈希校验，消除响应时间侧信道。
+        if user is None:
+            _dummy_check(password)
         _record_fail(username, client)
         return None, 'invalid_credentials', '账号或密码错误', delay
-    if not user.is_active:
-        return None, 'account_disabled', f'账号 {username} 已停用，请联系管理员', delay
 
     key = _cred_key(username, password)
     ttl = _cfg_int('credential_cache_ttl', 300)

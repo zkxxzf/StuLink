@@ -1,14 +1,32 @@
 # StuLink v1.7.0 2026-08-02
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 from flask import Blueprint, render_template, redirect, url_for, flash, request, jsonify
-from flask_login import login_required
+from flask_login import login_required, current_user
 from app.extensions import db
 from app.models import DictCategory, DictItem, ClassProfile, ClassSubject, User, UserClassLink
 from app.utils.decorators import perm_required
-from app.utils.helpers import (get_dict_values, get_graduated_grades,
+from app.utils.helpers import (get_dict_values, get_graduated_grades, log_operation,
                                subject_direction as _subj_dir)
 
 bp = Blueprint('class_profile', __name__, url_prefix='/class-profile')
+
+
+def _class_pair_in_scope(grade, class_name):
+    """(年级, 班级) 是否在当前用户数据范围内（唯一口径 app.utils.scope）。
+
+    2026-10-19 第十三轮审计：`teachers/<grade>/<class>/add` 原来只查权限点，
+    任何持 system.class_profile 的账号都能把**任意用户**设为**任意班**班主任 ——
+    而 UserClassLink 本身就是班级数据范围的来源之一，等于凭空授权。
+    """
+    from app.utils.scope import resolve_scope
+    s = resolve_scope(current_user)
+    if s.origin in ('admin', 'school'):
+        return True
+    if s.kind == 'grades':
+        return bool(grade) and grade in (s.grades or set())
+    if s.kind == 'classes':
+        return (grade, class_name) in (s.classes or set())
+    return False
 
 
 # v1.19.49.39 方向与选科组合的对应关系（物理→物XX，历史→史XX），供校验复用
@@ -248,6 +266,8 @@ def add_teacher(grade, class_name):
     user_id = data.get('user_id')
     if not user_id:
         return jsonify({'success': False, 'message': '请选择教师'}), 400
+    if not _class_pair_in_scope(grade, class_name):
+        return jsonify({'success': False, 'message': '该班级不在你的数据范围内'}), 403
     user = User.query.get(user_id)
     if not user:
         return jsonify({'success': False, 'message': '用户不存在'}), 404
@@ -266,6 +286,8 @@ def add_teacher(grade, class_name):
     if user.role not in ('homeroom_teacher', 'admin'):
         user.role = 'homeroom_teacher'
     db.session.commit()
+    log_operation(current_user, '新增', '班主任', user.id,
+                  f'{user.real_name} → {grade}{class_name}')
     return jsonify({'success': True, 'message': f'{user.real_name} 已设为 {grade}{class_name} 班主任',
                     'teacher': {'id': user.id, 'name': user.real_name}})
 

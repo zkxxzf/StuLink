@@ -1,4 +1,4 @@
-# StuLink v1.19.49.35 2026-10-19
+# StuLink v1.19.49.39 2026-10-19
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 """小程序调课申请：我的课程 / 可选目标时段 / 提交。
 
@@ -16,6 +16,7 @@ from app.modules.wxapi import bp
 from app.modules.wxapi.academic import swap_common as common
 from app.modules.wxapi.core.guards import wx_perm_required
 from app.modules.wxapi.core.response import wx_err, wx_ok
+from app.utils.helpers import log_operation
 
 PERM = 'academic.swap'
 MAX_ITEMS = 10
@@ -150,5 +151,9 @@ def wx_swap_apply():
         source_weekday=data.get('source_weekday') or None)
     if not ok:
         return wx_err(_conflict_text(msg, result))
+    # 2026-10-20 第十六轮：小程序调课写操作补审计（网页端每条都有，小程序原为 0）
+    log_operation(g.wx_user, '新增', '调课记录', result.get('rep_id'),
+                  '%d 条（小程序）：%s' % (len(items), reason[:40]),
+                  module='academic')
     return wx_ok({'id': result.get('rep_id'),
                   'created': result.get('created') or 0}, msg)

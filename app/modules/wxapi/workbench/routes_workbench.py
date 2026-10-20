@@ -1,4 +1,4 @@
-# StuLink v1.19.49.35 2026-10-19
+# StuLink v1.19.49.39 2026-10-19
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 """小程序工作台：今日课程 / 今日监考 / 未读通知（首页第一屏）。
 
@@ -84,8 +84,11 @@ def _invig_rows(user_id, start, end, real_name=''):
     """
     cond = AffairInvigilation.user_id == user_id
     if real_name:
-        cond = or_(cond, and_(AffairInvigilation.user_id.is_(None),
-                              AffairInvigilation.name == real_name))
+        # 2026-10-19：同 routes_exam._invig_rows —— 同名教师不启用姓名兜底
+        from app.models import User as _U
+        if _U.query.filter(_U.real_name == real_name).count() == 1:
+            cond = or_(cond, and_(AffairInvigilation.user_id.is_(None),
+                                  AffairInvigilation.name == real_name))
     return (db.session.query(AffairInvigilation, AffairSchedule, ExamAffair)
             .join(AffairSchedule,
                   AffairInvigilation.schedule_id == AffairSchedule.id)

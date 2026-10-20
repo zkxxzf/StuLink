@@ -310,6 +310,11 @@ def create(form, user, files=None):
 
 
 def update(rec, form, user):
+    # 2026-10-19 第十四轮：已生效的记录不允许直接改内容 —— 否则
+    # 「确认后悄悄改标题/等级/日期」不会留下任何痕迹，破坏奖惩留档的可信度。
+    # 需要更正请先撤销（撤销会留痕），再改/重申。
+    if rec.status == STATUS_CONFIRMED:
+        return False, '已生效的记录不能修改，请先撤销后再更正'
     err = _validate(form)
     if err:
         return False, err
@@ -341,20 +346,31 @@ def delete(rec):
     """
     atts = RewardPunishmentAttachment.query.filter_by(record_id=rec.id).all()
     from app.utils.trash import archive
-    archive('morality', 'reward_punishment', '奖惩记录', rec,
-            summary=f'{rec.student_name} {rec.title}')
+    # 2026-10-20 第十七轮审计：归档失败即中止（fail-closed），原来返回值被丢弃 →
+    # 归档抛错时记录仍被真删、回收站空白，界面却提示"已删除（可恢复）"。
+    _recs = [archive('morality', 'reward_punishment', '奖惩记录', rec,
+                     summary=f'{rec.student_name} {rec.title}')]
     if atts:
-        archive('morality', 'reward_attachment', '奖惩附件', atts,
-                summary=f'奖惩记录 #{rec.id}：{len(atts)} 个附件')
+        _recs.append(archive('morality', 'reward_attachment', '奖惩附件', atts,
+                            summary=f'奖惩记录 #{rec.id}：{len(atts)} 个附件'))
+    if any(r is None for r in _recs):
+        db.session.rollback()
+        return False
     for att in atts:
         db.session.delete(att)
     db.session.delete(rec)
     db.session.commit()
+    return True
 
 
 def set_status(rec, status, user, reason=''):
     if status not in (STATUS_DRAFT, STATUS_CONFIRMED, STATUS_REVOKED):
         return False, '状态不合法'
+    # 2026-10-19 第十四轮：状态机只允许「前进」——
+    # 待确认 → 已生效 / 已撤销；已生效 → 已撤销；已撤销 → 已生效（误撤销可恢复）。
+    # 不允许任何状态退回「待确认」（原来已生效/已撤销都能被"退回草稿"抹掉审核痕迹）。
+    if status == STATUS_DRAFT and rec.status != STATUS_DRAFT:
+        return False, '已生效/已撤销的记录不能退回「待确认」，如需更正请撤销后重新登记'
     rec.status = status
     if status == STATUS_CONFIRMED:
         rec.confirmed_by = (getattr(user, 'real_name', None)

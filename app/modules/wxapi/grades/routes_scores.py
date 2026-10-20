@@ -1,4 +1,4 @@
-# StuLink v1.19.49.35 2026-10-19
+# StuLink v1.19.49.39 2026-10-19
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 """小程序「班级成绩单」：逐生全科成绩 + 班排 / 方向排，服务端分页。
 
@@ -16,7 +16,6 @@ from app.modules.grades.services import scoresheet
 from app.modules.wxapi import bp
 from app.modules.wxapi.core.guards import wx_perm_required
 from app.modules.wxapi.core.response import wx_err, wx_ok
-from app.modules.wxapi.grades.routes_grades import PERM
 from app.modules.wxapi.grades.routes_grades_stats import _visible_exam
 
 DEFAULT_SIZE = 30
@@ -73,7 +72,7 @@ def _score_row(row):
 
 
 @bp.route('/grades/scores')
-@wx_perm_required(PERM)
+@wx_perm_required('grades.view')   # 2026-10-19 第十四轮：成绩单=grades.view
 def wx_grades_scores():
     """班级成绩单（query: exam_id / class_name / direction / sort / order /
     page / size）。

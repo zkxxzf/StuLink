@@ -1,4 +1,4 @@
-# StuLink v1.19.49.35 2026-10-19
+# StuLink v1.19.49.39 2026-10-19
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 """小程序基础配置：选科维护 / 分层模板 / 任课教师映射 / 教师映射导入 / 考场房间库。
 
@@ -267,7 +267,16 @@ def wx_grades_teachers_save():
         grade = active[0] if active else ''
     if not grade:
         return wx_err('年级无效')
-    user_ids = {int(v) for v in cells.values() if v}
+    # 2026-10-20 第十六轮：年级必须过数据范围 —— 原来直接取「全校活跃年级」，
+    # 持 grades.teachers 的年级长可写外年级的任课映射/建教师账号改角色。
+    try:
+        assert_grade_visible(grade)
+    except PermissionError:
+        return wx_err('该年级不在你的数据范围内', 403)
+    try:
+        user_ids = {int(v) for v in cells.values() if v}
+    except (TypeError, ValueError):
+        return wx_err('参数不正确：教师账号需为数字')
     if user_ids:
         valid = {u.id for u in User.query.filter(User.id.in_(user_ids)).all()}
         if not user_ids <= valid:
@@ -381,6 +390,18 @@ def wx_grades_teachers_import_confirm():
     if not draft:
         return wx_err('导入批次已失效（服务重启后需重新上传）')
     preview = draft['preview']
+    # 2026-10-20 第十七轮审计：导入确认必须逐行过年级范围 —— 矩阵保存已有闸
+    # （:270），导入路径原来完全没有：可写外年级任课映射、把账号改成班主任并
+    # 挂进班主任组、批量开户（口令明文回显）。越界整批拒绝，不做静默过滤。
+    from app.modules.grades.services.exam_guard import assert_grade_visible
+    for _it in preview:
+        _g = (_it.get('grade') or '').strip()
+        if not _g:
+            continue
+        try:
+            assert_grade_visible(_g)
+        except PermissionError:
+            return wx_err('导入内容包含不在你数据范围内的年级，已拒绝', 403)
     head_names = {it['teacher_name'] for it in preview if it['kind'] == 'head'}
     head_meta = {}
     for it in preview:
@@ -521,7 +542,12 @@ def wx_room_save():
     note = sanitize_label(data.get('note'), 100)
     if not location:
         return wx_err('房间位置必填')
-    row = db.session.get(AffairRoomLib, int(lid)) if lid else None
+    # 2026-10-20 第十六轮：lib_id 非数字原来直接 ValueError → 500
+    try:
+        lid = int(lid) if lid else None
+    except (TypeError, ValueError):
+        return wx_err('参数不正确：lib_id 需为数字')
+    row = db.session.get(AffairRoomLib, lid) if lid else None
     dup = AffairRoomLib.query.filter(AffairRoomLib.location == location,
                                      AffairRoomLib.id != (row.id if row else 0)
                                      ).first()

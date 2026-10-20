@@ -86,11 +86,18 @@ def lesson_map_count(teacher_uid):
     return TeacherSubjectLink.query.filter_by(user_id=t.user_id, active=True).count()
 
 
-def teacher_of_user(user):
-    """根据登录账号找教师名单记录：user_id 精确关联，兜底唯一同名自动补关联"""
+def teacher_of_user(user, auto_link=True):
+    """根据登录账号找教师名单记录：user_id 精确关联，兜底同名自动补关联。
+
+    2026-10-20 第十七轮审计：**鉴权路径必须传 auto_link=False** —— 同名兜底会
+    在 GET 请求里写库并永久绑定账号，学生/家长同名学生账号请求一次即拿到该教师
+    身份的权限（业绩附件原件等）。auto_link=False 只认 user_id 精确关联。
+    """
     t = Teacher.query.filter_by(user_id=user.id).first()
     if t:
         return t
+    if not auto_link:
+        return None
     rows = Teacher.query.filter_by(name=user.real_name).all()
     for cand in rows:
         if cand.user_id is None:

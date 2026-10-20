@@ -140,7 +140,7 @@ _FONT_PLAIN = Font(bold=False)
 
 def _safe_fname(name):
     """下载文件名清洗（2026-10-16 审计 SEC-D01）：原只替换 `/`，
-    `\` / `..` / 控制符仍会进 Content-Disposition。"""
+    反斜杠 / `..` / 控制符仍会进 Content-Disposition。"""
     import re
     s = re.sub(r'[\\/:*?"<>|\r\n\t\x00-\x1f]', '_', str(name or ''))
     return s.strip(' .') or '未命名'

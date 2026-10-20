@@ -1,4 +1,4 @@
-# StuLink v1.19.49.35 2026-10-19
+# StuLink v1.19.49.39 2026-10-19
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 """小程序成绩分析：对齐网页 /grades/analysis 的五个页签。
 
@@ -17,7 +17,6 @@ from app.modules.grades.utils import numeric_classes
 from app.modules.wxapi import bp
 from app.modules.wxapi.core.guards import wx_perm_required
 from app.modules.wxapi.core.response import wx_err, wx_ok
-from app.modules.wxapi.grades.routes_grades import PERM
 
 TABS = ('grade', 'class', 'subject', 'teacher', 'compare')
 MAX_ROWS = 120
@@ -124,7 +123,8 @@ def _teacher_data(user, exam, subject, denom):
 
 
 @bp.route('/grades/analysis/<tab>')
-@wx_perm_required(PERM)     # 内含 wx_login_required，勿再叠一层（会双倍限流）
+# 2026-10-19 第十四轮：与网页分析页统一用 grades.view（原借 student_query）
+@wx_perm_required('grades.view')     # 内含 wx_login_required，勿再叠一层（会双倍限流）
 def wx_grades_analysis(tab):
     """query: exam_id / class_name / subject / classes / denom。"""
     if tab not in TABS:

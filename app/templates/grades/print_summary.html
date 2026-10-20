@@ -5,7 +5,11 @@
     /* ============ 汇总打印版（2026-10-16 按用户样表 1:1 复刻）============
        每科目一张「班级 × 指标」网格：表头三行（考试名 / 列组 / 列名），
        表内按方向分组（物理类 / 历史类 各一条分组标签行），组末「班均」「年级」两行。
-       目标：整份（9 科）压进 A4 正反两页 —— 字号 6.6pt、行高 1.12、边距 8mm。 */
+       目标：整份（9 科）压进 A4 正反两页 —— 字号 6.6pt、行高 1.12、边距 8mm。
+
+       2026-10-20：列组改为按本场实际分层动态生成（用户要求「按分层显示」），
+       均分组新增「去差均分」。分层超过 20 列时（如 12 条名次线）自动切 A4 横向、
+       缩到 5.3pt —— 竖版放不下 12 组 × 2 列 + 均分 4 列。 */
     .ps-wrap { background: var(--sl-bg); padding: 14px 0 36px; }
     .ps-toolbar {
         /* 第七轮审计（U-H2）：站点 navbar 是 fixed-top（56px、z-index 200），
@@ -55,8 +59,14 @@
     table.ps-t td.na { color: #999; }
     .ps-foot { font-size: 6.5pt; color: #666; text-align: right; margin-top: 1mm; }
 
+    {% if ps.n_cols > 20 %}
+    /* 12 条名次线这类场次：竖版放不下，屏幕与打印都放宽、缩字号 */
+    .ps-page { width: auto; max-width: 100%; }
+    table.ps-t { font-size: 5.3pt; }
+    {% endif %}
+
     @media print {
-        @page { size: A4 portrait; margin: 6mm; }
+        @page { size: A4 {{ 'landscape' if ps.n_cols > 20 else 'portrait' }}; margin: 6mm; }
         .ps-toolbar, .no-print { display: none !important; }
         .ps-wrap { background: #fff; padding: 0; }
         .ps-page { width: auto; margin: 0; padding: 0; box-shadow: none; border-radius: 0; }
@@ -69,7 +79,24 @@
 {% endblock %}
 {% block content %}
 {% set S = ps %}
-{% set NC = 15 %}   {# 班级 姓名 参考数 + 211上线2 + 特控上线4 + 本科上线3 + 均分3 #}
+{# 列数：班级 姓名 参考数 + 各分层列（按本场实际分层）+ 均分 4 列（去差/上次/排名/最高） #}
+{% macro band_cells(it, cells) %}
+{%- for c in cells %}
+{%- if c == 'move' %}
+{%- set mv = (it.get('move') if it else none) %}
+<td class="{{ 'pos' if (mv or 0) > 0 else ('neg' if (mv or 0) < 0 else '') }}">{{ ('%+d' % mv) if mv is not none else '—' }}</td>
+{%- elif it and it.get(c) is not none %}
+<td>{% if c == 'rate' %}{{ '%.0f%%' % it.get(c) }}{% else %}{{ it.get(c) }}{% endif %}</td>
+{%- else %}
+<td class="na">—</td>
+{%- endif %}
+{%- endfor %}
+{% endmacro %}
+{% macro band_heads(cells) %}
+{%- for c in cells %}
+<th>{% if c == 'n' %}单上线{% elif c == 'move' %}进退步{% elif c == 'rate' %}上线率{% else %}本排名{% endif %}</th>
+{%- endfor %}
+{% endmacro %}
 <div class="ps-wrap">
     <div class="ps-toolbar">
         <span class="ps-title"><i class="bi bi-printer"></i> 汇总打印版</span>
@@ -95,36 +122,36 @@
             <table class="ps-t">
                 <colgroup>
                     <col style="width:9mm"><col style="width:11mm"><col style="width:10mm">
-                    <col style="width:8mm"><col style="width:9mm">
-                    <col style="width:8mm"><col style="width:9mm"><col style="width:9mm"><col style="width:8mm">
-                    <col style="width:8mm"><col style="width:9mm"><col style="width:8mm">
-                    <col style="width:11mm"><col style="width:8mm"><col style="width:11mm">
+                    {% for it in S.layers %}
+                    {% for c in it.cells %}
+                    <col style="width:{{ '7mm' if S.n_cols > 20 else '8mm' }}">
+                    {% endfor %}
+                    {% endfor %}
+                    <col style="width:11mm"><col style="width:10mm">
+                    <col style="width:8mm"><col style="width:11mm">
                 </colgroup>
                 <thead>
                     {# 第 1 行：左科目名格（黄色，**只占本行第 1 列**）+ 考试名。
                        ⚠️ 这里**不能**写 rowspan="2"：科目格若竖跨两行，第 2 行的第 1 列也被它占掉，
-                       而第 2 行还要放满 15 列（班级…均分），于是多出 1 列被浏览器挤到行尾 ——
-                       用户看到的正是「表头和内容不对应」（本科上线与均分之间莫名空一格）。
-                       2026-10-16 修：三行都严格 15 列对 15 列。 #}
+                       而第 2 行还要放满全部列（班级…均分），于是多出 1 列被浏览器挤到行尾 ——
+                       用户看到的正是「表头和内容不对应」。2026-10-16 修：三行严格同列数。 #}
                     <tr>
                         <th class="ps-subj">{{ b.subject }}</th>
-                        <th class="ps-exam" colspan="{{ NC - 1 }}">本次　{{ S.exam.name }}</th>
+                        <th class="ps-exam" colspan="{{ S.n_cols - 1 }}">本次　{{ S.exam.name }}</th>
                     </tr>
-                    {# 第 2 行：列组 #}
+                    {# 第 2 行：列组（按本场实际分层） #}
                     <tr>
                         <th>班级</th><th>姓名</th><th>参考数</th>
-                        <th colspan="2">211上线</th>
-                        <th colspan="4">特控上线</th>
-                        <th colspan="3">本科上线</th>
-                        <th colspan="3">均分</th>
+                        {% for it in S.layers %}
+                        <th colspan="{{ it.cells|length }}">{{ it.label }}</th>
+                        {% endfor %}
+                        <th colspan="4">均分</th>
                     </tr>
                     {# 第 3 行：具体列名 #}
                     <tr>
                         <th></th><th></th><th></th>
-                        <th>单上线</th><th>上线率</th>
-                        <th>单上线</th><th>进退步</th><th>上线率</th><th>本排名</th>
-                        <th>单上线</th><th>上线率</th><th>本排名</th>
-                        <th>上次均分</th><th>排名</th><th>最高分</th>
+                        {% for it in S.layers %}{{ band_heads(it.cells) }}{% endfor %}
+                        <th>去差均分</th><th>上次均分</th><th>排名</th><th>最高分</th>
                     </tr>
                 </thead>
                 <tbody>
@@ -136,18 +163,8 @@
                         <td class="cls">{{ g.direction }}{{ '类' if g.direction != '全体' else '' }}</td>
                         <td>年级</td>
                         <td>{{ _gr.n }}</td>
-                        {% for key in ['211', '特控', '本科'] %}
-                        {% set it = _gr.bands.get(key) %}
-                        {% if it %}
-                        <td>{{ it.get('n') if it.get('n') is not none else '—' }}</td>
-                        {% if key == '特控' %}<td>—</td>{% endif %}
-                        <td>{{ ('%.0f%%' % it.get('rate')) if it.get('rate') is not none else '—' }}</td>
-                        {% if key != '211' %}<td>—</td>{% endif %}
-                        {% else %}
-                        <td>—</td>{% if key == '特控' %}<td>—</td>{% endif %}<td>—</td>
-                        {% if key != '211' %}<td>—</td>{% endif %}
-                        {% endif %}
-                        {% endfor %}
+                        {% for it in S.layers %}{{ band_cells(_gr.bands.get(it.key), it.cells) }}{% endfor %}
+                        <td>{{ _gr.trim_avg if _gr.trim_avg is not none else '—' }}</td>
                         <td>{{ _gr.prev_avg if _gr.prev_avg is not none else '—' }}</td>
                         <td>—</td>
                         <td>{{ _gr.max if _gr.max is not none else '—' }}</td>
@@ -157,27 +174,8 @@
                         <td class="cls">{{ r.cls }}</td>
                         <td class="name">{{ r.teacher or '' }}</td>
                         <td>{{ r.n }}</td>
-                        {# 211 组 2 列（单上线/上线率）；特控组 4 列；本科组 3 列 —— 与表头严格对齐 #}
-                        {% for key in ['211', '特控', '本科'] %}
-                        {% set it = r.bands.get(key) %}
-                        {% if it %}
-                        <td>{{ it.get('n') if it.get('n') is not none else '—' }}</td>
-                        {% if key == '特控' %}
-                        {% set _mv = it.get('move') %}
-                        <td class="{{ 'pos' if (_mv or 0) > 0 else ('neg' if (_mv or 0) < 0 else '') }}">
-                            {{ ('%+d' % _mv) if _mv is not none else '—' }}</td>
-                        {% endif %}
-                        <td>{{ ('%.0f%%' % it.get('rate')) if it.get('rate') is not none else '—' }}</td>
-                        {% if key != '211' %}
-                        <td>{{ it.get('rank') if it.get('rank') is not none else '—' }}</td>
-                        {% endif %}
-                        {% else %}
-                        <td class="na">—</td>
-                        {% if key == '特控' %}<td class="na">—</td>{% endif %}
-                        <td class="na">—</td>
-                        {% if key != '211' %}<td class="na">—</td>{% endif %}
-                        {% endif %}
-                        {% endfor %}
+                        {% for it in S.layers %}{{ band_cells(r.bands.get(it.key), it.cells) }}{% endfor %}
+                        <td>{{ r.trim_avg if r.trim_avg is not none else '—' }}</td>
                         <td>{{ r.prev_avg if r.prev_avg is not none else '—' }}</td>
                         <td>{{ r.avg_rank if r.avg_rank is not none else '—' }}</td>
                         <td>{{ r.max if r.max is not none else '—' }}</td>
@@ -189,18 +187,8 @@
                         <td class="cls">{{ r.cls }}</td>
                         <td></td>
                         <td>{{ r.n }}</td>
-                        {% for key in ['211', '特控', '本科'] %}
-                        {% set it = r.bands.get(key) %}
-                        {% if it %}
-                        <td>{{ it.get('n') if it.get('n') is not none else '—' }}</td>
-                        {% if key == '特控' %}<td>—</td>{% endif %}
-                        <td>{{ ('%.0f%%' % it.get('rate')) if it.get('rate') is not none else '—' }}</td>
-                        {% if key != '211' %}<td>—</td>{% endif %}
-                        {% else %}
-                        <td>—</td>{% if key == '特控' %}<td>—</td>{% endif %}<td>—</td>
-                        {% if key != '211' %}<td>—</td>{% endif %}
-                        {% endif %}
-                        {% endfor %}
+                        {% for it in S.layers %}{{ band_cells(r.bands.get(it.key), it.cells) }}{% endfor %}
+                        <td>{{ r.trim_avg if r.trim_avg is not none else '—' }}</td>
                         <td>{{ r.prev_avg if r.prev_avg is not none else '—' }}</td>
                         <td>—</td>
                         <td>{{ r.max if r.max is not none else '—' }}</td>

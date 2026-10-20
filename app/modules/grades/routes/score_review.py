@@ -1,4 +1,4 @@
-# StuLink v1.19.49.35 2026-10-15
+# StuLink v1.19.49.39 2026-10-15
 # 成绩复核（申请调分）：教师提交 → 有改分权限者审批 → 可选应用到成绩单
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 """成绩复核申请（用户口径 2026-10-15）
@@ -168,9 +168,9 @@ def review_audit(rid):
     """批准 / 驳回（审批与「批准并应用」逻辑见 review_service.audit_review）。"""
     r = _review_or_404(rid)
     back = redirect(url_for('grades.reviews_manage_page'))
-    # H-02：申请人不得审批本人单据（含管理员）。服务层还有一道，
-    # 这里提前拦下并留 WARNING，避免"自己批自己"在页面上看起来合法。
-    if r.applicant_id == current_user.id:
+    # H-02：申请人不得审批本人单据（服务层还有一道）。2026-10-20 用户口径：
+    # **管理员 / 校长例外** —— 最高审批身份不存在"上级"，可审批自己的提交。
+    if r.applicant_id == current_user.id and not current_user.is_top_reviewer:
         log_operation(current_user, '审批被拒', '成绩复核', r.exam_id,
                       '复核单 #%d：不得审批本人申请' % r.id,
                       module='grades', severity='WARNING')

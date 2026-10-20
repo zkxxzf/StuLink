@@ -164,6 +164,9 @@ run_mig scripts/migrate/migrate_wx_token_ver_20261019.py --apply
 # 2026-10-19 P2：AI 每日配额表（仅结构，幂等）
 run_mig scripts/migrate/migrate_ai_usage_20261019.py --apply
 
+# 2026-10-20 用户口径：身份组同步（校长 / 教务主任 / 年级长）—— 纯数据、幂等
+run_mig scripts/seed/sync_role_groups_20261020.py
+
 echo "[5/6] 兜底：补齐模型声明但现网缺失的列（改库前自动备份对应库）"
 docker run --rm -v "$DATA":/app/data -w /app \
     --entrypoint python "$IMG" scripts/check_columns.py --fix 2>&1 | tail -n 20

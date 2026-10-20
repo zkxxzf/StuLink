@@ -1,4 +1,4 @@
-# StuLink v1.19.49.35 2026-10-19
+# StuLink v1.19.49.39 2026-10-19
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 """小程序微信登录、绑定与扫码接口。
 
@@ -94,7 +94,11 @@ def wx_wechat_select():
     openid = wechat.parse_select_token(body.get('select_token'))
     if not openid:
         return wx_err('选择已过期，请重新微信登录', 401)
-    user_id = int(body.get('user_id') or 0)
+    # 2026-10-19 第十三轮审计：非数字 user_id 原来直接 ValueError → 500
+    try:
+        user_id = int(body.get('user_id') or 0)
+    except (TypeError, ValueError):
+        return wx_err('参数不正确')
     binding = WeChatBinding.query.filter_by(
         openid=openid, user_id=user_id).first()
     if binding is None:
@@ -108,10 +112,14 @@ def wx_wechat_select():
 @bp.route('/wechat/bind', methods=['POST'])
 def wx_wechat_bind():
     """首次绑定：账号密码 + wx.login code。"""
-    if not hit_limit('wxbind_%s' % client_ip(), 20, 300):
-        return wx_err('尝试过于频繁，请稍后再试', 429)
     body = _body()
     username = (body.get('username') or '').strip()
+    if not hit_limit('wxbind_%s' % client_ip(), 20, 300):
+        return wx_err('尝试过于频繁，请稍后再试', 429)
+    # 2026-10-20 第十六轮：加账号级限流（键**不拼 IP**）—— 只按 IP 计数时
+    # 换一个出口就能对同一账号无限猜口令（对照 routes_auth.login 的同款修复）。
+    if username and not hit_limit('wxbind_acct_%s' % username.lower(), 10, 300):
+        return wx_err('该账号尝试过于频繁，请稍后再试', 429)
     password = body.get('password') or ''
     if not username or not password:
         return wx_err('请输入账号和密码')
@@ -241,7 +249,11 @@ def wx_wechat_scan_confirm():
     ticket = wechat.get_ticket(body.get('ticket') or '')
     if ticket is None or ticket.action != 'login':
         return wx_err('二维码无效或已过期', 404)
-    user_id = int(body.get('user_id') or 0)
+    # 2026-10-19：同 wx_wechat_select，非数字不再 500
+    try:
+        user_id = int(body.get('user_id') or 0)
+    except (TypeError, ValueError):
+        return wx_err('参数不正确')
     binding = WeChatBinding.query.filter_by(
         openid=openid, user_id=user_id).first()
     if binding is None:

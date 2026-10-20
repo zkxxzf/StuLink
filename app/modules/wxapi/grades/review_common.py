@@ -1,4 +1,4 @@
-# StuLink v1.19.49.35 2026-10-19
+# StuLink v1.19.49.39 2026-10-19
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 """小程序成绩复核：列表字段与本场可见考试。
 
@@ -68,7 +68,11 @@ def exam_of(user, exam_id):
     """按 id 取考试并校验数据范围；越界 / 不存在返回 None。"""
     if not exam_id:
         return None
-    exam = db.session.get(Exam, int(exam_id))
+    # 2026-10-20 第十六轮：非数字 id 原来直接 ValueError → 500
+    try:
+        exam = db.session.get(Exam, int(exam_id))
+    except (TypeError, ValueError):
+        return None
     if exam is None:
         return None
     try:

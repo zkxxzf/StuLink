@@ -148,15 +148,57 @@ def notification_create():
     target_uids = []
     if target_type == 'grade':
         grades = request.form.getlist('target_grades')
+        # 2026-10-20 第十七轮审计：指定年级也必须过数据范围 —— 原实现只拦
+        # 「全体/角色」，持 workbench.notifications 的年级长逐个年级发一遍
+        # 即等价于全校广播。校级/管理员不受限。
+        from app.utils.scope import resolve_scope
+        _s = resolve_scope(current_user)
+        if _s.origin != 'admin' and _s.kind not in ('school',):
+            _allowed = set(_s.grades or ())
+            if any(g not in _allowed for g in grades):
+                flash('所选年级不在你的数据范围内', 'danger')
+                return redirect(url_for('notifications.notifications_page'))
         scope['grades'] = grades
     elif target_type == 'class':
         classes = request.form.getlist('target_classes')
+        # 班级级账号（班主任）只能发自己名下的班级
+        from app.utils.scope import resolve_scope
+        _s2 = resolve_scope(current_user)
+        if _s2.origin != 'admin' and _s2.kind == 'classes':
+            _allowed_cls = {c for _g, c in (_s2.classes or set())}
+            if any(c not in _allowed_cls for c in classes):
+                flash('所选班级不在你的数据范围内', 'danger')
+                return redirect(url_for('notifications.notifications_page'))
         scope['classes'] = classes
     elif target_type == 'role':
         roles = request.form.getlist('target_roles')
         scope['roles'] = roles
     elif target_type == 'users':
         target_uids = request.form.getlist('target_uids')
+
+    # 2026-10-19 第十四轮：定向发送也要校验「账号存在 + 活跃 + 非管理员」——
+    # 否则持 workbench.notifications 的账号可以给超管/管理员组私发消息（社工），
+    # 也能塞任意 id 触发收件人解析异常。
+    if target_uids and not current_user.has_perm('system.settings'):
+        from app.models import User as _U
+        from app.utils.permission_map import PROTECTED_GROUP_NAMES
+        ids = []
+        for raw in target_uids:
+            try:
+                ids.append(int(raw))
+            except (TypeError, ValueError):
+                continue
+        rows = _U.query.filter(_U.id.in_(ids)).all() if ids else []
+        if len(rows) != len(set(ids)):
+            flash('收件人里有不存在的账号，请重新选择', 'danger')
+            return redirect(url_for('notifications.notifications_page'))
+        bad = [u for u in rows
+               if not u.is_active or (u.role or '') == 'admin'
+               or any((g.name or '') in PROTECTED_GROUP_NAMES
+                      for g in (u.permission_groups or []))]
+        if bad:
+            flash('当前权限不能向管理员或已停用账号定向发送通知', 'danger')
+            return redirect(url_for('notifications.notifications_page'))
 
     target_scope = json.dumps(scope, ensure_ascii=False)
 
@@ -171,6 +213,11 @@ def notification_create():
         category=category,
         link_url=link_url,
     )
+    # 2026-10-19 第十四轮：发布/群发通知补审计（标题 + 目标类型 + 定向人数）
+    log_operation(current_user, '发布', '通知', None,
+                  f'{title}（目标={target_type}'
+                  + (f'，定向 {len(target_uids)} 人' if target_uids else '')
+                  + '）', module='system')
     flash('通知已发布', 'success')
     return redirect(url_for('notifications.notifications_page'))
 

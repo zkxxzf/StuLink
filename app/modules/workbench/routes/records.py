@@ -93,6 +93,12 @@ def record_add():
     student_name = request.form.get('student_name', '')
     follow_up = request.form.get('follow_up', '')
 
+    # 2026-10-19 第十三轮审计：同文件已有 wb_scope.student_no_allowed（:198 在用），
+    # 新增接口漏了这道闸 —— 可把任意学号写进自己的家校沟通记录。
+    if student_no and not wb_scope.student_no_allowed(current_user, student_no):
+        flash('该学号不在你的班级范围内', 'danger')
+        return redirect(url_for('records.records_page'))
+
     rec = add_record(
         teacher_uid=teacher.teacher_uid,
         teacher_name=teacher.name,
@@ -123,6 +129,11 @@ def record_edit(record_id):
         return redirect(url_for('workbench.index'))
 
     _check_class(request.form.get('class_name', ''))
+    # 2026-10-19 第十四轮：与 record_add 同口径 —— 编辑同样要校验学号在学生范围内
+    _sno = request.form.get('student_no', '')
+    if _sno and not wb_scope.student_no_allowed(current_user, _sno):
+        flash('该学号不在你的班级范围内', 'danger')
+        return redirect(url_for('records.records_page'))
     rec = update_record(
         record_id, teacher.teacher_uid,
         record_type=request.form.get('record_type', ''),

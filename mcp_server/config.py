@@ -84,8 +84,16 @@ def _env_override(key, value):
 
 
 def _write_default(path, cfg):
-    """写出带说明的初始配置（键顺序固定，方便手改）。"""
-    doc = {k: cfg[k] for k in DEFAULTS}
+    """写出带说明的初始配置（键顺序固定，方便手改）。
+
+    2026-10-20 第十六轮：原来严格按 DEFAULTS 重写，会把用户手加的非 DEFAULTS
+    键（例如 trust_forwarded_for）连同注释一起丢弃 → 安全开关静默失效。
+    现在 DEFAULTS 键在前、未知键追加在后，保证手改内容被保留。
+    """
+    doc = {k: cfg[k] for k in DEFAULTS if k in cfg}
+    for k, v in cfg.items():
+        if k not in doc:
+            doc[k] = v
     with open(path, 'w', encoding='utf-8') as f:
         json.dump(doc, f, ensure_ascii=False, indent=2)
         f.write('\n')

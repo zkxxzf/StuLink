@@ -30,11 +30,37 @@ PERM = 'system.users'          # 与「操作日志」同权限：管理员/受�
 PER_PAGE = 50
 
 
+def _actor_is_super(actor=None):
+    """超管判定：唯一口径 = 内置 admin 账号（同 users.py）。"""
+    actor = current_user if actor is None else actor
+    return (getattr(actor, 'username', '') or '') == 'admin'
+
+
+def _may_view(rec):
+    """能否查看/恢复一条归档：超管全部，其他人只看自己操作产生的。
+
+    2026-10-19 第十三轮审计：原来只查 `system.users` 权限点，任何拿到它的
+    账号都能展开**任意模块**被删 payload（学籍含身份证密文行、账号行、积分
+    记录），也能恢复/彻底删除别人的归档。
+    """
+    return _actor_is_super() or rec.operator_id == current_user.id
+
+
+def _require_super():
+    """彻底删除不可恢复：仅超管。"""
+    from flask import abort
+    if not _actor_is_super():
+        abort(403, description='回收站彻底删除仅管理员可操作')
+
+
 @bp.route('/')
 @login_required
 @perm_required(PERM)
 def list_trash():
     q = TrashRecord.query
+    # 非超管只列自己操作产生的归档（口径见 _may_view）
+    if not _actor_is_super():
+        q = q.filter(TrashRecord.operator_id == current_user.id)
     module = (request.args.get('module') or '').strip()
     kind = (request.args.get('kind') or '').strip()
     kw = (request.args.get('kw') or '').strip()
@@ -82,6 +108,9 @@ def list_trash():
 def detail(rid):
     """返回被删内容的 JSON 预览（页面内展开用）。"""
     rec = TrashRecord.query.get_or_404(rid)
+    if not _may_view(rec):
+        from flask import abort
+        abort(403, description='无权查看该归档')
     try:
         data = json.loads(rec.payload or 'null')
     except (TypeError, ValueError):
@@ -104,6 +133,8 @@ def detail(rid):
 @perm_required(PERM)
 def restore_one(rid):
     rec = TrashRecord.query.get_or_404(rid)
+    if not _may_view(rec):
+        return jsonify({'ok': False, 'message': '无权恢复该归档'}), 403
     if rec.restored_at is not None:
         return jsonify({'ok': False, 'message': '这条已经恢复过，无需重复恢复'}), 400
     ok, msg, n = restore_record(rec)
@@ -117,6 +148,7 @@ def restore_one(rid):
 @perm_required(PERM)
 def purge_one(rid):
     """彻底删除一条归档（不可恢复）。"""
+    _require_super()
     rec = TrashRecord.query.get_or_404(rid)
     label = f'{rec.kind_label or rec.kind}：{rec.summary or ""}'
     db.session.delete(rec)
@@ -130,6 +162,7 @@ def purge_one(rid):
 @perm_required(PERM)
 def purge_expired():
     """清理已过期（默认 30 天）且未恢复的归档；删除前自动导出元数据。"""
+    _require_super()
     result = purge_expired_impl(
         dry_run=False,
         export_dir=os.path.join(BASE_DIR, 'data', 'backups'),

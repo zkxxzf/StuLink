@@ -1,4 +1,4 @@
-# StuLink v1.19.49.35 2026-10-12
+# StuLink v1.19.49.39 2026-10-12
 # 成绩管理与可视化分析系统 模块入口（单蓝图多模块注册，url_prefix=/grades）
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 from flask import Blueprint
@@ -7,7 +7,7 @@ bp = Blueprint('grades', __name__, url_prefix='/grades')
 
 # 各子模块通过 @bp.route 注册（延迟 import，保证 bp 已定义）
 from app.modules.grades.routes import (dashboard, exams, bands, teachers, analysis,  # noqa: E402,F401
-                                       export, ai,
+                                       export, export_analysis, ai,
                                        student_query, pivot, band_templates, exam_affairs,
                                        report, report_pivot, subject_mgmt, global_compare,
                                        ai_import, exam_rooms,

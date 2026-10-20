@@ -1,4 +1,4 @@
-# StuLink v1.19.49.35 2026-10-19
+# StuLink v1.19.49.39 2026-10-19
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 """小程序 AI 分析（与网页 `/grades/ai` 同一个任务链路）。
 
@@ -147,7 +147,10 @@ def wx_ai_task_detail(tid):
 def wx_ai_ask():
     """提交一句话分析：body {exam_id, question}，返回 task_id。"""
     data = request.get_json(silent=True) or {}
-    exam_id = int(data.get('exam_id') or 0)
+    try:
+        exam_id = int(data.get('exam_id') or 0)
+    except (TypeError, ValueError):
+        return wx_err('参数不正确：exam_id 需为数字')
     question = (data.get('question') or '').strip()[:MAX_QUESTION]
     if not question:
         return wx_err('请输入要分析的问题')

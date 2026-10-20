@@ -1,4 +1,4 @@
-# StuLink v1.19.49.35 2026-10-19
+# StuLink v1.19.49.39 2026-10-19
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 """小程序调课：我的申请（列表 / 详情 / 撤回）与「待我确认」的换课。
 
@@ -13,6 +13,7 @@ from app.modules.wxapi import bp
 from app.modules.wxapi.academic import swap_common as common
 from app.modules.wxapi.core.guards import wx_perm_required
 from app.modules.wxapi.core.response import wx_err, wx_ok
+from app.utils.helpers import log_operation
 
 PERM = 'academic.swap'
 PAGE_SIZE = 20
@@ -108,6 +109,8 @@ def wx_swap_cancel(sid):
     ok, msg, _sw = swap_service.cancel_swap(sid, uid)
     if not ok:
         return wx_err(msg)
+    log_operation(g.wx_user, '撤销', '调课记录', sid, '（小程序）',
+                  module='academic')
     return wx_ok({'id': sid}, msg)
 
 
@@ -133,4 +136,6 @@ def wx_swap_partner(sid):
         (data.get('note') or '').strip()[:200])
     if not ok:
         return wx_err(msg)
+    log_operation(g.wx_user, '换课确认', '调课记录', sid,
+                  '%s（小程序）' % action, module='academic')
     return wx_ok({'id': sid}, msg)

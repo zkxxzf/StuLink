@@ -342,6 +342,15 @@ def create():
         
         student = Student()
         _populate_student(student, form)
+        # 2026-10-19 第十三轮审计：新建学生也校验目标班级在范围内 ——
+        # 调班（transfer）早有 `_transfer_target_in_scope`，create 却没有，
+        # 年级长可以在任意班级凭空建学生。
+        if student.class_name and not _transfer_target_in_scope(
+                current_user, student.grade, student.class_name):
+            flash(f'无权在「{student.grade} {student.class_name}」建学生'
+                  '（不在你的数据范围内）', 'danger')
+            return render_template('system/students/form.html', form=form,
+                                   title='新增学生')
         db.session.add(student)
         db.session.commit()
         log_operation(current_user, '创建', '学生', student.id, f'{student.name} {student.grade}{student.class_name}')
@@ -690,10 +699,22 @@ def batch_edit_search():
     subject_selection = data.get('subject_selection', '')
 
     # 2026-10-12 P1：批量修改同样按数据范围收敛（原 else 分支放行全部 id）
-    students = apply_student_scope(Student.query).filter(Student.id.in_(ids)).all()
+    # 2026-10-19 第十四轮：加稳定排序，保证「从起始床号依次分配」的顺序可预期
+    students = (apply_student_scope(Student.query)
+                .filter(Student.id.in_(ids))
+                .order_by(Student.grade, Student.class_name,
+                          Student.student_number).all())
 
     if not students:
         return jsonify({'success': False, 'message': '无匹配学生或无权限'})
+
+    # 2026-10-19 第十四轮：已毕业年级冻结（与 dormitory/assignments.py 同口径）——
+    # 原先可给已归档毕业年级的学生改住宿属性/选科/占床
+    graduated = set(get_graduated_grades())
+    blocked = [s for s in students if s.grade in graduated]
+    if blocked:
+        return jsonify({'success': False,
+                        'message': f'{len(blocked)} 名学生所在年级已毕业归档，不能批量修改'})
 
     if subject_selection and not current_user.has_perm('students.edit'):
         return jsonify({'success': False, 'message': '无修改选科的权限（需学生编辑权限）'})
@@ -701,26 +722,42 @@ def batch_edit_search():
     updated = 0
     # v1.19.47.4 离校联动：批量置「离校」时自动清除床位（计数用于回执）
     released = 0
-    # 批量修改床位
+    placed = 0
+    skipped_bed = 0
+    seat_start = None
+    room = None
+    # 批量修改床位：从「起始床号」开始依次分配
+    # 2026-10-19 第十四轮：原实现循环里对**同一张床**反复赋值 —— 多选学生时
+    # 只有最后一个留下床位，前面的人静默丢失（且校验和写入各查一次房间）。
     if building and room_number and bed_number:
         try:
-            bed_num = int(bed_number)
+            seat_start = int(bed_number)
         except ValueError:
             return jsonify({'success': False, 'message': '床位号必须是数字'})
-        # 查房间
-        room = Room.query.filter_by(building=building, room_number=room_number, is_active=True).first()
+        # 查房间（2026-10-19 第十三轮审计：目标房间也要在宿舍范围内，
+        # 原来只校验了学生范围 → 可把本年级学生塞进他年级房间）
+        from app.utils.dormitory_scope import room_scope_query
+        room = room_scope_query(Room.query.filter_by(
+            building=building, room_number=room_number, is_active=True)).first()
         if not room:
-            return jsonify({'success': False, 'message': f'{building} {room_number} 不存在'})
-        # 验证床位有效性
-        bed = BedAssignment.query.filter_by(room_id=room.id, bed_number=bed_num).first()
+            return jsonify({'success': False,
+                            'message': f'{building} {room_number} 不存在或不在你的数据范围内'})
+        # 验证起始床位有效性
+        bed = BedAssignment.query.filter_by(
+            room_id=room.id, bed_number=seat_start).first()
         if not bed:
-            return jsonify({'success': False, 'message': f'{room_number} {bed_num}床 不存在（容量{room.capacity}人间）'})
-        # 床位已被占
-        if bed.student_id and bed.student_id not in [s.id for s in students]:
+            return jsonify({'success': False,
+                            'message': f'{room_number} {seat_start}床 不存在'
+                                       f'（容量{room.capacity}人间）'})
+        # 起始床位已被（不在本次选择里的）其他学生占用
+        chosen_ids = [s.id for s in students]
+        if bed.student_id and bed.student_id not in chosen_ids:
             occupant = Student.query.get(bed.student_id)
-            return jsonify({'success': False, 'message': f'{building}{room_number} {bed_num}床已被{occupant.name if occupant else "其他学生"}占用'})
+            return jsonify({'success': False,
+                            'message': f'{building}{room_number} {seat_start}床已被'
+                                       f'{occupant.name if occupant else "其他学生"}占用'})
 
-    for s in students:
+    for offset, s in enumerate(students):
         if subject_selection:
             s.subject_selection = subject_selection
         if boarding_type or day_student_type:
@@ -737,31 +774,39 @@ def batch_edit_search():
                         released += 1
             if day_student_type:
                 acc.day_student_type = day_student_type
-        # 分配床位
-        if building and room_number and bed_number:
-            room = Room.query.filter_by(building=building, room_number=room_number, is_active=True).first()
-            if room:
-                bed = BedAssignment.query.filter_by(room_id=room.id, bed_number=int(bed_number)).first()
-                if bed:
-                    # 先清空旧床位
-                    old_bed = BedAssignment.query.filter_by(student_id=s.id).first()
-                    if old_bed:
-                        old_bed.student_id = None
-                    bed.student_id = s.id
-                    # 同步更新房间班级信息
-                    if not room.grade or not room.class_name:
-                        room.grade = s.grade
-                        room.class_name = s.class_name
+        # 分配床位：起始床号 + 序号（复用已校验的 room，按床号逐张落位）
+        if seat_start and room:
+            target_no = seat_start + offset
+            target = BedAssignment.query.filter_by(
+                room_id=room.id, bed_number=target_no).first()
+            if target is None or target.student_id not in (None, s.id):
+                skipped_bed += 1
+            else:
+                old_bed = BedAssignment.query.filter_by(student_id=s.id).first()
+                if old_bed is not None and old_bed.id != target.id:
+                    old_bed.student_id = None
+                target.student_id = s.id
+                placed += 1
+                # 同步更新房间班级信息
+                if not room.grade or not room.class_name:
+                    room.grade = s.grade
+                    room.class_name = s.class_name
         updated += 1
 
     db.session.commit()
     log_operation(current_user, '批量修改', '学生', None,
                   f'搜索页批量修改 {updated} 人'
+                  + (f'，分配床位 {placed} 个（跳过 {skipped_bed}）' if placed else '')
                   + (f'（离校自动清床位 {released} 个）' if released else ''))
     _msg = f'成功修改 {updated} 名学生'
+    if placed:
+        _msg += f'，分配床位 {placed} 个'
+    if skipped_bed:
+        _msg += f'，{skipped_bed} 名学生因床位不足/被占未分配'
     if released:
         _msg += f'，并自动清除 {released} 个床位'
-    return jsonify({'success': True, 'message': _msg, 'released': released})
+    return jsonify({'success': True, 'message': _msg, 'released': released,
+                    'placed': placed, 'skipped_bed': skipped_bed})
 
 
 def _populate_student(student, form):
@@ -1029,6 +1074,12 @@ def import_students():
                     errors.append(f'{row_label}（{name}）：学号{snum}在库中姓名为"{db_name}"，姓名不匹配')
                     continue
                 student = Student.query.get(db_id)
+                # 2026-10-19 第十四轮：增量更新也要过数据范围 —— 原来按学号直接
+                # 取对象就 setattr（字段含年级/班级/身份证/联系方式），
+                # 年级长可跨年级改写学籍（对照 batch_delete 已收敛）。
+                if student and not _student_in_scope(student):
+                    errors.append(f'{row_label}（{name}）：该学生不在你的数据范围内')
+                    continue
                 if student:
                     row_conflicts = []
                     changed = False
@@ -1076,6 +1127,13 @@ def import_students():
                         conflicts.append(f'{row_label}（{name}，学号{snum}）：' + '；'.join(row_conflicts))
                     if changed:
                         students_updated += 1
+                continue
+
+            # 2026-10-19 第十四轮：新建分支同样收敛到目标班级范围
+            _g = (row_data.get('grade') or '').strip()
+            _c = (row_data.get('class_name') or '').strip()
+            if _g and _c and not _transfer_target_in_scope(current_user, _g, _c):
+                errors.append(f'{row_label}（{name}）：{_g} {_c} 不在你的数据范围内')
                 continue
 
             student = Student(
@@ -1569,6 +1627,9 @@ def batch_transfer():
                     _log_reassign()
                 except Exception as _e:  # noqa: BLE001
                     logger.warning('批量调班(部分失败)：调班记录写入失败: %s', _e)
+                # 2026-10-19 第十四轮：批量调班补审计行（原来只有 history 库记录）
+                log_operation(current_user, '批量调班', '学生', None,
+                              f'成功 {updated_count} 名，失败 {len(errors)} 条')
                 flash(f'成功调班 {updated_count} 名学生。{error_summary}', 'warning')
             else:
                 db.session.rollback()
@@ -1579,6 +1640,9 @@ def batch_transfer():
                 _log_reassign()
             except Exception as _e:  # noqa: BLE001
                 logger.warning('批量调班：调班记录写入失败: %s', _e)
+            # 2026-10-19 第十四轮：批量调班补审计行
+            log_operation(current_user, '批量调班', '学生', None,
+                          f'成功 {updated_count} 名')
             flash(f'成功调班 {updated_count} 名学生', 'success')
         else:
             flash('Excel中没有有效的调班数据', 'warning')

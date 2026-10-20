@@ -1,4 +1,4 @@
-# StuLink v1.19.49.35 2026-10-19
+# StuLink v1.19.49.39 2026-10-19
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 """小程序 AI 智能导入：任意格式成绩表 → 自动列识别 → 写入。
 
@@ -34,7 +34,10 @@ MAX_FILE_MB = 10
 def wx_ai_import_analyze():
     """上传一个 Excel：解析全部工作表并给出列识别建议。"""
     data = request.form or {}
-    exam_id = int(data.get('exam_id') or 0)
+    try:
+        exam_id = int(data.get('exam_id') or 0)
+    except (TypeError, ValueError):
+        return wx_err('参数不正确：exam_id 需为数字')
     exam = db.session.get(Exam, exam_id)
     if exam is None:
         return wx_err('考试不存在', 404)
@@ -93,7 +96,10 @@ def wx_ai_import_analyze():
 def wx_ai_import_apply():
     """按自动识别列写入成绩（整场覆盖，需 confirmed=1）。"""
     payload = request.get_json(silent=True) or {}
-    exam_id = int(payload.get('exam_id') or 0)
+    try:
+        exam_id = int(payload.get('exam_id') or 0)
+    except (TypeError, ValueError):
+        return wx_err('参数不正确：exam_id 需为数字')
     exam = db.session.get(Exam, exam_id)
     if exam is None:
         return wx_err('考试不存在', 404)

@@ -1,4 +1,4 @@
-# StuLink v1.19.49.35 2026-10-10
+# StuLink v1.19.49.39 2026-10-10
 # 考务管理：完整考务流程（对应 Excel 宏工作簿 2025考场学生考号与考场信息编排v1.2）
 #   步骤：① 学生名单（学生信息表） → ② 考场设置（考场信息表）
 #        → ③ 编排与考号生成（三种模式，镜像宏 编排考场考号2）
@@ -1879,7 +1879,11 @@ def affair_arrange(aid):
     try:
         assigned, failed = _arrange(affair, students, rooms, mode, log,
                                     layered=layered, rank_map=rank_map)
-        affair.status = 'arranged' if assigned else 'draft'
+        # 2026-10-19 第十三轮审计：已关联考试的批次（status='linked'）重排后
+        # 原来会被改回 'arranged' / 'draft'，而页面判定"已关联"用的是
+        # exam_id → status 与 exam_id 两处判定源打架。保持 linked 不变。
+        if affair.status != 'linked':
+            affair.status = 'arranged' if assigned else 'draft'
         db.session.commit()
     except Exception:
         db.session.rollback()

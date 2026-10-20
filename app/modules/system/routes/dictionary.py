@@ -59,6 +59,11 @@ def add_item():
     if not value:
         flash('值不能为空', 'danger')
         return redirect(url_for('dictionary.list_items', tab=category_code))
+    # 2026-10-19 第十三轮审计：只允许本页管理的 9 个分类（原可往任意
+    # DictCategory 塞值，例如选科/权限相关分类）
+    if category_code not in MANAGED_CATEGORIES:
+        flash('该字典分类不在管理范围内', 'danger')
+        return redirect(url_for('dictionary.list_items'))
 
     cat = DictCategory.query.filter_by(code=category_code).first()
     if not cat:
@@ -80,6 +85,10 @@ def add_item():
     
     # 清除字典缓存
     clear_dict_cache()
+    # 2026-10-19 第十四轮：字典新增补审计
+    from app.utils.helpers import log_operation
+    log_operation(current_user, '新增', '字典项', item.id,
+                  f'{category_code} · {value}', module='system')
     
     flash(f'已添加 "{value}"', 'success')
     return redirect(url_for('dictionary.list_items', tab=category_code))
@@ -92,6 +101,10 @@ def delete_item(item_id):
     item = DictItem.query.get_or_404(item_id)
     # 2026-10-18：category 缺失（脏外键）时不要 AttributeError → 500
     cat_code = (item.category.code if item.category else '')
+    # 2026-10-19 第十三轮审计：同 add_item，只允许删本页管理的分类
+    if cat_code and cat_code not in MANAGED_CATEGORIES:
+        flash('该字典分类不在管理范围内', 'danger')
+        return redirect(url_for('dictionary.list_items'))
 
     if is_dict_value_in_use(cat_code, item.value):
         flash(f'"{item.value}" 已被使用，无法删除', 'danger')
@@ -116,6 +129,10 @@ def delete_item(item_id):
 
     # 清除字典缓存
     clear_dict_cache()
+    # 2026-10-19 第十四轮：字典增删补审计（下拉框数据源，误改影响全局）
+    from app.utils.helpers import log_operation
+    log_operation(current_user, '删除', '字典项', item_id,
+                  f'{cat_code} · {item.value}', module='system')
 
     flash(f'已删除 "{item.value}"（已进回收站，可恢复）', 'success')
     return redirect(url_for('dictionary.list_items', tab=cat_code))

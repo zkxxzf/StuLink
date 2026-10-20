@@ -1,4 +1,4 @@
-# StuLink v1.19.49.35 2026-10-19
+# StuLink v1.19.49.39 2026-10-19
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 """小程序教师名单（只读通讯录）。
 
@@ -21,7 +21,9 @@ LIMIT = 300
 
 
 @bp.route('/teachers')
-@wx_perm_required(PERM)
+@wx_perm_required(PERM)   # 2026-10-19 第十三轮审计：网页端同功能要 academic.view，
+                          # 这里原只登录即可拉全量通讯录；wx_perm_required 内含
+                          # 登录校验，勿再叠 wx_login_required（会双倍限流）
 def wx_teachers():
     """教师名单（query: q / subject / status，默认在职）。"""
     q = (request.args.get('q') or '').strip()
