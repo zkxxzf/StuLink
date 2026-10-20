@@ -95,7 +95,7 @@ class Teacher(db.Model):
     title = db.Column(db.String(20))          # 正高级/副高级/中级/助理级/员级/未定职级
     staff_type = db.Column(db.String(20))     # 专任教师/行政人员/教辅人员/工勤人员/其他
     is_official = db.Column(db.Boolean)       # 是否在编（None=未填）
-    is_foreign = db.Column(db.Boolean)        # 是否外籍（None=未填）
+    is_foreign = db.Column(db.Boolean, default=False)  # 是否外籍（默认否）
     created_at = db.Column(db.DateTime, default=datetime.now)
     updated_at = db.Column(db.DateTime, default=datetime.now, onupdate=datetime.now)
 

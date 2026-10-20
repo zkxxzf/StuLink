@@ -77,40 +77,34 @@
         <table class="table table-hover align-middle mb-0">
             <thead class="table-light">
                 <tr>
-                    <th>教师编号</th><th>姓名</th><th>学科</th><th>手机号</th>
-                    <th>身份证号</th><th>统计属性</th><th>登录账号</th><th>任课映射</th><th>状态</th><th>操作</th>
+                    <th>教师编号</th><th>姓名</th><th>学科</th>
+                    <th>性别</th><th>职称</th><th>人员类别</th><th>学历</th>
+                    <th>手机号</th><th>身份证号</th><th>登录账号</th><th>任课映射</th><th>状态</th><th>操作</th>
                 </tr>
             </thead>
             <tbody>
                 {% for r in rows %}
                 <tr {% if r.t.status != 'active' %}class="text-muted"{% endif %}>
                     <td><code>{{ r.t.teacher_uid }}</code></td>
-                    <td class="fw-bold">{{ r.t.name }}</td>
+                    <td class="fw-bold">{{ r.t.name }}
+                        {% if not r.t.birth_date and not r.t.id_card_enc %}
+                        <span class="badge bg-light text-danger border ms-1" title="缺出生日期则无法统计年龄">缺生日</span>
+                        {% endif %}
+                        {% if not r.t.subject %}
+                        <span class="badge bg-light text-danger border ms-1" title="缺学科则无法统计分课程">缺学科</span>
+                        {% endif %}
+                    </td>
                     <td>{{ r.t.subject or '-' }}</td>
+                    {# 2026-10-20：统计属性拆成独立列，避免挤在一格里看串 #}
+                    <td>{{ r.t.gender or '-' }}</td>
+                    <td>{{ r.t.title or '-' }}</td>
+                    <td>{{ r.t.staff_type or '-' }}</td>
+                    <td>{{ r.t.education or '-' }}</td>
                     {# 2026-10-13 字段级脱敏：无 academic.view_teacher_phone 时显示 138****5678 #}
                     <td>{{ field_value(r.t.phone, 'teacher_phone') or '-' }}</td>
                     <td>
                         {% if r.id_masked %}{{ r.id_masked }}
                         {% else %}<span class="text-muted small">未录入</span>{% endif %}
-                    </td>
-                    {# 2026-10-20：教育事业统计属性摘要（缺项标黄，点编辑补齐） #}
-                    <td class="small">
-                        {% set q = [] %}
-                        {% if r.t.gender %}{% set _ = q.append(r.t.gender) %}{% endif %}
-                        {% if r.t.education %}{% set _ = q.append(r.t.education) %}{% endif %}
-                        {% if r.t.title %}{% set _ = q.append(r.t.title) %}{% endif %}
-                        {% if r.t.staff_type %}{% set _ = q.append(r.t.staff_type) %}{% endif %}
-                        {% if q %}
-                        <span class="text-body">{{ q | join(' · ') }}</span>
-                        {% else %}
-                        <span class="badge bg-warning text-dark">未填</span>
-                        {% endif %}
-                        {% if not r.t.birth_date and not r.t.id_card_enc %}
-                        <span class="badge bg-light text-danger border ms-1" title="缺出生日期则无法统计年龄（教育统计只认生日，不必填身份证）">缺生日</span>
-                        {% endif %}
-                        {% if not r.t.subject %}
-                        <span class="badge bg-light text-danger border" title="缺学科则无法统计分课程">缺学科</span>
-                        {% endif %}
                     </td>
                     <td>
                         {% if r.account %}
@@ -133,7 +127,7 @@
                 </tr>
                 {% else %}
                 <tr>
-                    <td colspan="10" class="text-center text-muted py-5">
+                    <td colspan="13" class="text-center text-muted py-5">
                         {% if kw or status or subject %}当前筛选条件下没有匹配的教师{% else %}暂无教师数据，请先点击右上角「批量导入」建立教师名单{% endif %}
                     </td>
                 </tr>
