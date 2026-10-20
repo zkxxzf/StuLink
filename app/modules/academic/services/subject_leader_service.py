@@ -93,7 +93,9 @@ def teacher_subject_index(with_schedule=True):
     """
     from app.models.academic import Teacher
 
-    teachers = Teacher.query.all()
+    # 2026-10-20：归档（离职/退休）教师不再作为学科组长候选
+    teachers = Teacher.query.filter(Teacher.status == 'active',
+                                    Teacher.archive_kind.is_(None)).all()
     by_user = {t.user_id: t.teacher_uid for t in teachers if t.user_id}
     idx = {t.teacher_uid: {'name': t.name, 'subjects': set(), 'grades': set(),
                            'archive_subject': _canon_subject(t.subject) if t.subject else ''}

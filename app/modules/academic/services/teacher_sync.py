@@ -49,7 +49,9 @@ def sync_from_user(user, renamed_from=None):
             t.phone = phone_like
             changed = True
         want_status = 'active' if user.is_active else 'left'
-        if t.status != want_status:
+        # 2026-10-20：已归档（离职/退休）的教师状态不随账号启停变化，
+        # 否则管理员重新启用账号会把归档记录"复活"，绕过其他模块的排除口径。
+        if not t.archive_kind and t.status != want_status:
             t.status = want_status
             changed = True
         if renamed_from:
