@@ -5702,7 +5702,7 @@ def check_edu_stat():
              or d['student_ages']['totals']['enrolled'] == st['enrolled_total']['total'])
         case('EDUSTAT 4149 教职工总数 = 在职教师数',
              d['teacher_summary']['total'] == d['quality']['teachers_total'])
-        case('EDUSTAT 4153 年龄合计 = 有身份证的教师数',
+        case('EDUSTAT 4153 年龄合计 = 有生日/身份证的教师数',
              d['teacher_ages']['totals']['total']
              == d['teacher_summary']['total'] - d['teacher_ages']['unknown'])
         # 4156 行 = 总计 / #女 / #少数民族 / 各学历（与样表行序一致）
@@ -5710,9 +5710,11 @@ def check_edu_stat():
         case('EDUSTAT 4156 行含总计/#女/#少数民族/学历',
              rows[:3] == ['总计', '#女', '#少数民族']
              and '本科' in rows, str(rows))
-        case('EDUSTAT 4156 #女 行合计 = 4153 女教师数',
-             d['teacher_by_subject']['rows'][1][1]['合计']
-             == d['teacher_ages']['totals']['female'])
+        case('EDUSTAT 4156 总计合计 = 专任教师人数（未填类别默认专任）',
+             d['teacher_by_subject']['rows'][0][1]['合计']
+             == d['teacher_summary']['by_type']['专任教师'],
+             f"{d['teacher_by_subject']['rows'][0][1]['合计']} vs "
+             f"{d['teacher_summary']['by_type']['专任教师']}")
 
         rules = {r.rule for r in app.url_map.iter_rules()}
         case('EDUSTAT 路由已注册（统计页 + 校舍资产）',
