@@ -3,7 +3,7 @@
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
 [![Python](https://img.shields.io/badge/python-3.11+-green.svg)](https://python.org)
 [![Flask](https://img.shields.io/badge/flask-3.x-lightgrey.svg)](https://flask.palletsprojects.com/)
-[![Version](https://img.shields.io/badge/version-1.19.49.37-orange.svg)](https://gitee.com/zkxxzf/StuLink)
+[![Version](https://img.shields.io/badge/version-1.19.49.38-orange.svg)](https://gitee.com/zkxxzf/StuLink)
 
 面向中学的综合学生管理平台，采用 **双站点 + 多模块 + 一模块一库** 的故障隔离架构：
 
@@ -301,6 +301,7 @@ StuLink/
 
 | 版本 | 日期 | 亮点 |
 |---|---|---|
+| **1.19.49.38** | 2026-10-20 | **合并 sakaay 新 PR（第 12·13 轮审计整改）**：wxapi 按领域**分包重构**（core/auth/dorm/exam/grades/notice/workbench/academic）+ 微信绑定返回 openid + 教务课表/业绩/查课接口 · 监考编排改按**累计时长均衡**并加交换降差 · 学生服务补 exam_id 与排名 · 登录限流**持久化**、小程序令牌**版本化**（登出/改密/停用即失效）、AI 每日配额 · 新增运维脚本（日志/明文备份/回收站清理）与容器加固；合并后保留 master 侧修复（手机号加密脚本预览不改库/幂等/备份、`--allow-fail`、迁移执行器补列前置） |
 | **1.19.49.37** | 2026-10-19 | **合并 sakaay PR（第 11 轮审计整改）**：手机号「随机 IV 加密 + HMAC 盲索引」（students.phone1/2、teachers.phone）· 删除可**回收站**恢复（含整表快照按原 id 重建）· 越权收敛与日志补齐 · 新增**微信小程序 API**（`wxapi`，令牌鉴权 + 数据范围过滤）与**表彰名单**（`honor`）模块 · `scripts/` 重组为 `migrate/fix/seed/smoke/verify`；合并后修复 9 项（迁移核对工具路径失效、加密迁移预览改库/不幂等/无备份、回收站归档失败 fail-open、`archive_snapshot` 空集误判致首次编排被中止、`X-Real-IP` 限流可绕过、成绩范围口径分裂等） |
 | **1.19.49.36** | 2026-10-17 | **合并 sakaay 分支（教务 / 成绩新功能）+ 第 10 轮审计补修 6 项**：学科组长三类（备课 / 教研 / 综合组「整组一位」）· 任课映射扩容 15 科 · 课时量统计 · 成绩复核（申请调分）· 成绩看板 / AI 工作室 · 全局对比按选科组合拆行；本次补修：复核候选接口数据范围下推到 SQL、课时量导出越权、课时量重复计临时调课、组长徽章科目名归一、AI 报告净化器空元素吞内容、复核增减分 NaN 校验（新增 SR-17 防回归） |
 | **1.19.49.29** | 2026-10-14 | **日志脱敏修复**：`log_mask` 包装已有 formatter 时误读 `Formatter.style`（不存在）导致启动崩溃——MCP 服务（uvicorn 预配 handler）场景实测暴露，改为按 `_style` 类名推断 style，并保留 `fmt/datefmt/defaults`；新增 SR-16 防回归 |
