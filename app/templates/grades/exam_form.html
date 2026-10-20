@@ -11,7 +11,7 @@
 <div class="alert alert-light border small" style="max-width:760px;">
     考试用<b>两个维度</b>描述：<b>性质</b>（谁组织的、比多大范围 —— 决定有没有全市/多校数据）
     × <b>阶段</b>（教学进度节点 —— 用于找"上一场同阶段考试"作为考场分层依据）。
-    名称可留空，默认「年级 + 日期」。
+    名称可留空，默认「年级 + 日期 + 阶段」（如 2024级20261010月考）。
 </div>
 
 <div class="card" style="max-width:760px;">
@@ -53,15 +53,30 @@
                     <div class="form-text">用于定位"上一场同阶段考试"，作为考场分层依据。</div>
                 </div>
 
+                <div class="col-md-6">
+                    <label class="form-label">年级学期</label>
+                    <select name="grade_semester" id="f_sem" class="form-select">
+                        <option value="" {% if not grade_semester %}selected{% endif %}>自动（按考试日期推算）</option>
+                        {% for s in semester_options %}
+                        <option value="{{ s }}" {% if s == grade_semester %}selected{% endif %}>{{ s }}</option>
+                        {% endfor %}
+                    </select>
+                    <div class="form-text">
+                        学年按 <b>8 月 1 日</b> 分界（2026 级到 2027-07-31 都是高一），
+                        学期按<b>春节</b>分界（春节前都是上学期）。自动：
+                        <span id="semHint" class="fw-semibold">选好年级与日期后推算</span>
+                    </div>
+                </div>
+
                 {# v1.19.49.39：移除「分数口径」——口径在导入时按文件自动确定
                    （有赋分按赋分、只给原始分按原始分），建考试时不需要也不该选 #}
 
                 <div class="col-12">
                     <label class="form-label">考试名称</label>
                     <input type="text" name="name" id="f_name" class="form-control"
-                           placeholder="留空自动生成：年级 + 日期（如 2024级2026-10-10），可手工修改"
+                           placeholder="留空自动生成：年级 + 日期 + 阶段（如 2024级20261010月考），可手工修改"
                            value="{{ name }}">
-                    <div class="form-text">性质与阶段已单独保存，不必写进名称；留空即可。</div>
+                    <div class="form-text">留空时按「年级 + 8 位日期 + 阶段」生成，改年级/日期/阶段会跟着变。</div>
                 </div>
             </div>
             <div class="mt-3">
@@ -77,17 +92,50 @@
 {% block extra_js %}
 <script>
 $(function(){
-    // 名称默认 = 年级+日期（用户手工改过则不覆盖）
+    // 名称默认 = 年级 + 8位日期 + 阶段（如 2024级20261010月考）；
+    // 与后端 _auto_exam_name() 同一规则，用户手工改过则不覆盖
     var auto = true;
     function refreshName(){
         if(!auto) return;
-        var g = $('#f_grade').val(), d = $('#f_date').val();
-        if(g && d){ $('#f_name').val(g + d); }
+        var g = $('#f_grade').val();
+        var d = ($('#f_date').val() || '').replace(/-/g, '');
+        var t = $('select[name=exam_type]').val() || '';
+        if(g && d){ $('#f_name').val(g + d + t); }
     }
     $('#f_grade').change(refreshName);
     $('#f_date').change(refreshName);
+    $('select[name=exam_type]').change(refreshName);
     $('#f_name').on('input', function(){ auto = false; });
     refreshName();
+
+    /* 年级学期「自动」的实时预览：与后端 exam_semester() 同一口径 ——
+       学年 8 月 1 日起算，学期以春节（正月初一）为界。
+       春节表由后端下发（唯一数据源），避免前后端各存一份日期。 */
+    var SPRING = {{ spring_festivals|tojson }};
+    function springDate(y){
+        var v = SPRING[String(y)] || [2, 1];
+        return new Date(y, v[0] - 1, v[1]);
+    }
+    function autoSemester(grade, ds){
+        var m = /^(\d{4})/.exec(grade || '');
+        if(!m || !ds) return '';
+        var d = new Date(ds + 'T00:00:00');
+        if(isNaN(d.getTime())) return '';
+        var month = d.getMonth() + 1;
+        var startYear = month >= 8 ? d.getFullYear() : d.getFullYear() - 1;
+        var level = startYear - parseInt(m[1], 10) + 1;
+        var names = {1: '高一', 2: '高二', 3: '高三'};
+        if(!names[level]) return '';
+        var upper = month >= 8 ? true : d < springDate(d.getFullYear());
+        return names[level] + (upper ? '上' : '下');
+    }
+    function refreshSemester(){
+        var s = autoSemester($('#f_grade').val(), $('#f_date').val());
+        $('#semHint').text(s ? ('「' + s + '」') : '选好年级与日期后推算');
+    }
+    $('#f_grade').on('change', refreshSemester);
+    $('#f_date').on('change', refreshSemester);
+    refreshSemester();
 });
 </script>
 {% endblock %}

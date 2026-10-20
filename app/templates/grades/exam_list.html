@@ -20,16 +20,49 @@
     {% endif %}
 </div>
 
-{# 年级筛选（胶囊） #}
-<div class="d-flex flex-wrap gap-1 mb-3 align-items-center">
+{# 2026-10-20 用户口径：年级胶囊 + 学期 / 类型 / 考试日期区间 收在同一条筛选栏里，
+   点下拉即生效；年级链接带着其它条件走（换年级不丢筛选）。 #}
+<form method="get" action="{{ url_for('grades.exams_list') }}"
+      class="exams-filter d-flex flex-wrap gap-2 align-items-center mb-3">
     <span class="text-muted small me-1"><i class="bi bi-funnel"></i> 年级</span>
-    <a class="btn btn-sm {{ 'btn-primary' if not grade else 'btn-outline-secondary' }}"
-       href="{{ url_for('grades.exams_list') }}">全部</a>
-    {% for g in grade_options %}
-    <a class="btn btn-sm {{ 'btn-primary' if g == grade else 'btn-outline-secondary' }}"
-       href="{{ url_for('grades.exams_list') }}?grade={{ g }}">{{ g }}</a>
+    {% for it in grade_links %}
+    <a class="btn btn-sm {{ 'btn-primary' if it.active else 'btn-outline-secondary' }}"
+       href="{{ it.url }}">{{ it.label }}</a>
     {% endfor %}
-</div>
+    {% if grade %}<input type="hidden" name="grade" value="{{ grade }}">{% endif %}
+
+    {% if filter_semesters %}
+    <select name="sem" class="form-select form-select-sm w-auto ms-1"
+            onchange="this.form.submit()" title="按年级学期筛选">
+        <option value="">全部学期</option>
+        {% for s in filter_semesters %}
+        <option value="{{ s }}" {% if s == filter_sem %}selected{% endif %}>{{ s }}</option>
+        {% endfor %}
+    </select>
+    {% endif %}
+
+    {% if filter_types %}
+    <select name="type" class="form-select form-select-sm w-auto"
+            onchange="this.form.submit()" title="按考试类型筛选">
+        <option value="">全部类型</option>
+        {% for t in filter_types %}
+        <option value="{{ t }}" {% if t == filter_type %}selected{% endif %}>{{ t }}</option>
+        {% endfor %}
+    </select>
+    {% endif %}
+
+    <span class="d-inline-flex align-items-center gap-1">
+        <input type="date" name="d1" value="{{ filter_d1 }}"
+               class="form-control form-control-sm w-auto" title="考试日期起">
+        <span class="text-muted small">~</span>
+        <input type="date" name="d2" value="{{ filter_d2 }}"
+               class="form-control form-control-sm w-auto" title="考试日期止">
+    </span>
+    <button type="submit" class="btn btn-sm btn-outline-primary">筛选</button>
+    {% if filter_sem or filter_type or filter_d1 or filter_d2 %}
+    <a href="{{ clear_url }}" class="btn btn-sm btn-link text-decoration-none">清空条件</a>
+    {% endif %}
+</form>
 
 <div class="card">
     <div class="table-responsive">
@@ -69,7 +102,11 @@
                 title="{{ row_tip }}">
                 {# 2026-10-12 UI 审计 M1：考试名可能很长 → 文本列允许换行（.wrap），
                    不再把整表撑出横向滚动条 #}
-                <td class="wrap">{{ e.name }}</td>
+                {# 2026-10-20 用户口径：年级学期不再靠名称里的「（高三上）」文本，
+                   单独做成标签；名称列自动去掉重复的同一后缀。 #}
+                <td class="wrap">
+                    {{ e.display_name() }}{% set sem = e.semester_label() %}{% if sem %}<span class="sem-chip ms-1">{{ sem }}</span>{% endif %}
+                </td>
                 <td>{{ e.exam_type or '—' }}</td>
                 <td>{{ e.grade }}</td>
                 <td>{{ e.exam_date.strftime('%Y-%m-%d') }}</td>
@@ -98,7 +135,7 @@
                     <a href="{{ url_for('grades.exam_import', exam_id=e.id) }}" class="btn btn-sm btn-outline-warning">数据导入</a>
                     <a href="{{ url_for('grades.bands_page', exam_id=e.id) }}" class="btn btn-sm btn-outline-info">划线分层</a>
                     <button type="button" class="btn btn-sm btn-outline-danger btn-del-exam"
-                            data-id="{{ e.id }}" data-name="{{ e.grade }} {{ e.name }}"
+                            data-id="{{ e.id }}" data-name="{{ e.grade }} {{ e.display_name() }}"
                             data-count="{{ counts.get(e.id, 0) }}">删除</button>
                     {% else %}
                     {# 教师视图：只留成绩分析（数据范围由后端 scope 收敛） #}
@@ -112,7 +149,10 @@
             </tr>
             {% else %}
             <tr><td colspan="8" class="text-center text-muted py-4">
-                {% if can_manage %}暂无考试。先 <a href="{{ url_for('grades.exam_new') }}">新建考试</a>，再导入成绩。
+                {# 记忆：空态也必须能自己走出去 —— 筛选到空时给「清空条件」 #}
+                {% if filter_sem or filter_type or filter_d1 or filter_d2 %}
+                没有符合筛选条件的考试。 <a href="{{ clear_url }}">清空筛选条件</a>
+                {% elif can_manage %}暂无考试。先 <a href="{{ url_for('grades.exam_new') }}">新建考试</a>，再导入成绩。
                 {% else %}暂无考试。{% endif %}
             </td></tr>
             {% endfor %}

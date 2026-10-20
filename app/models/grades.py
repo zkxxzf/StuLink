@@ -4,7 +4,7 @@
 import json
 import logging
 import re
-from datetime import datetime
+from datetime import date, datetime
 from app.extensions import db
 # 综合组六科（体育/音乐/美术/信息技术/通用技术/心理）的**唯一真值**在教务模型；
 # 成绩侧只在「教师-学科映射可维护科目」（LINK_SUBJECTS）里引用它。
@@ -130,11 +130,53 @@ def subject_display(subject):
     return SUBJECT_DISPLAY.get(subject, subject)
 
 
+# ============ 年级学期（高一上 … 高三下）口径 ============
+# 2026-10-20 用户口径（考试列表把「（高三上）」做成标签、创建考试可选）：
+#   ① 学年以 8 月 1 日为界：2026 级在 2026-08-01 ~ 2027-07-31 都算高一，
+#      2027-08-01 起才是高二（term 学年同步从 8/1 起算）；
+#   ② 学期以春节为界：春节（正月初一）前都是上学期，春节起算下学期
+#      —— 所以 2024级 2026-02-06 的期末考仍属「高二上」（2026 春节是 2/17），
+#      旧口径「2 月起=下学期」会把它误判成高二下。
+GRADE_SEMESTERS = ('高一上', '高一下', '高二上', '高二下', '高三上', '高三下')
+
+# 春节（农历正月初一）的公历日期。只用于判定「春节前 = 上学期」，
+# 内置表避免引入农历库；表外年份回落到 2 月 1 日（考试数据都在近些年）。
+SPRING_FESTIVAL = {
+    2015: (2, 19), 2016: (2, 8), 2017: (1, 28), 2018: (2, 16), 2019: (2, 5),
+    2020: (1, 25), 2021: (2, 12), 2022: (2, 1), 2023: (1, 22), 2024: (2, 10),
+    2025: (1, 29), 2026: (2, 17), 2027: (2, 6), 2028: (1, 26), 2029: (2, 13),
+    2030: (2, 3), 2031: (1, 23), 2032: (2, 11), 2033: (1, 31), 2034: (2, 19),
+    2035: (2, 8), 2036: (1, 28), 2037: (2, 15), 2038: (2, 4), 2039: (1, 24),
+    2040: (2, 12), 2041: (2, 1), 2042: (1, 22), 2043: (2, 10), 2044: (1, 30),
+    2045: (2, 17),
+}
+
+
+def spring_festival(year):
+    """year 年春节（正月初一）的公历日期；表外年份回落 2 月 1 日"""
+    try:
+        month, day = SPRING_FESTIVAL.get(int(year), (2, 1))
+        return date(int(year), month, day)
+    except (TypeError, ValueError):
+        return date(2000, 2, 1)
+
+
+def term_of_date(d):
+    """由日期推导学年，如 2025-09-01 → '2025-2026'（8 月 1 日起算新学年）"""
+    if not d:
+        return ''
+    if d.month >= 8:
+        return f'{d.year}-{d.year + 1}'
+    return f'{d.year - 1}-{d.year}'
+
+
 def semester_of(exam_date):
-    """考试日期 → 学期：9月~次年1月=上学期，2月~8月=下学期"""
+    """考试日期 → 学期：春节前=上学期，春节起~7 月底=下学期"""
     if not exam_date:
         return ''
-    return '上学期' if (exam_date.month >= 9 or exam_date.month == 1) else '下学期'
+    if exam_date.month >= 8:        # 8 月起是本学年上半段，必定上学期
+        return '上学期'
+    return '上学期' if exam_date < spring_festival(exam_date.year) else '下学期'
 
 
 def grade_level_label(grade, term):
@@ -146,6 +188,13 @@ def grade_level_label(grade, term):
     except (AttributeError, IndexError, TypeError, ValueError):
         return ''
     return {1: '高一', 2: '高二', 3: '高三'}.get(level, '')
+
+
+def exam_semester(grade, exam_date):
+    """年级 + 考试日期 → 「高三上」这类学期标签；推算不出返回空串"""
+    level = grade_level_label(grade, term_of_date(exam_date))
+    half = {'上学期': '上', '下学期': '下'}.get(semester_of(exam_date), '')
+    return f'{level}{half}' if (level and half) else ''
 
 
 def _default_config():
@@ -192,6 +241,10 @@ class Exam(db.Model):
     grade = db.Column(db.String(10), nullable=False)  # 2024级/2025级…（与字典一致）
     exam_date = db.Column(db.Date, nullable=False)
     term = db.Column(db.String(20))                  # 学年 2025-2026，由日期推导或登记选择
+    # 年级学期标签（高一上…高三下）：空 = 按 grade + exam_date 自动推算，
+    # 非空 = 手工指定（跨年级/复读等例外），见 semester_label()。
+    # 2026-10-20 新增：此前这个信息只写在 name 文本的末尾括号里。
+    grade_semester = db.Column(db.String(10), default='')
     config_json = db.Column(db.Text, default=_default_config)  # 分段宽/名次段/科目线覆盖
     status = db.Column(db.String(10), default='draft', nullable=False)  # draft/imported/dirty
     import_draft = db.Column(db.Text)                # 上传预检结果快照（JSON，确认导入用）
@@ -216,6 +269,30 @@ class Exam(db.Model):
         否则老师没选却被显示成"赋分"，与本场实际口径不符。
         """
         return SCORE_MODE_LABELS.get((self.score_mode or '').strip(), SCORE_MODE_AUTO_LABEL)
+
+    def semester_label(self):
+        """年级学期标签（如「高三上」）：优先手工值，否则按年级+日期推算
+
+        推算不出（年级/日期异常，或届数超出高一~高三）返回空串。
+        """
+        fixed = (self.grade_semester or '').strip()
+        if fixed in GRADE_SEMESTERS:
+            return fixed
+        return exam_semester(self.grade, self.exam_date)
+
+    def display_name(self):
+        """去掉名称末尾与学期标签重复的「（高三上）」
+
+        历史考试的年级学期都写在名称末尾括号里；列表把学期单独做成标签后，
+        名称列再带一遍就重复了。只删与标签**完全一致**的那个后缀，
+        括号里是别的说明（如「（补考）」）时原样保留。
+        """
+        sem = self.semester_label()
+        if sem:
+            suffix = f'（{sem}）'
+            if (self.name or '').endswith(suffix):
+                return self.name[:-len(suffix)]
+        return self.name
 
     def title_with_dimensions(self):
         """“2024级·联考·月考·2026-10-10”式完整标识（缺项自动跳过）"""
