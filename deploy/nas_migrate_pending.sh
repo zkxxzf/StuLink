@@ -136,6 +136,8 @@ run_mig scripts/seed/import_bands_20260712.py --allow-fail --apply           # �
 # 2026-10-19 第十三轮审计：历史名次 1,1,3 跳号重算（代码已是 1,1,3，存量库还是旧的 1,1,2）。
 # 幂等；--apply 前自动整库备份，备份失败直接中止。
 run_mig scripts/fix/recalc_exam_ranks_20261019.py --apply        # 修数据：重算全部考试的方向/班排名
+# 2026-10-20：考试「年级学期」标签独立成列（空=按 年级+日期 自动推算；不回填）
+run_mig scripts/migrate/migrate_exam_grade_semester_20261020.py   # 成绩：exams.grade_semester
 # ── 数据 / 权限类（幂等）──────────────────────────────────────────────────
 # 2026-10-14 第三轮审计（CONS3-02）：多身份改造的两个脚本原先**完全未登记**（只在
 # docs/权限体系多身份改造执行计划.md 里点名）→ 上线必漏跑。按设计文档顺序：

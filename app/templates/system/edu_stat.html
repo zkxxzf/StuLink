@@ -38,15 +38,12 @@
             {% if q.students_no_idcard %}<span class="text-danger">（{{ q.students_no_idcard }} 人缺身份证，年龄无法统计）</span>{% endif %}
         </span>
         <span>教师 {{ q.teachers_total }} 人
-            {% if q.teachers_no_birth %}<span class="text-danger">（{{ q.teachers_no_birth }} 人缺出生日期）</span>{% endif %}
-            {% if q.teachers_no_gender %}<span class="text-danger">（{{ q.teachers_no_gender }} 人缺性别）</span>{% endif %}
-            {% if q.teachers_no_subject or q.teachers_no_education or q.teachers_no_staff_type %}
-            <span class="text-muted">（选填缺项：学科 {{ q.teachers_no_subject }} / 学历 {{ q.teachers_no_education }}
-                / 人员类别 {{ q.teachers_no_staff_type }}，仅影响分档明细）</span>
-            {% endif %}
+            {% if q.teachers_no_birth %}<span class="text-danger">（{{ q.teachers_no_birth }} 人缺出生日期，年龄无法统计）</span>{% endif %}
+            {% if q.teachers_no_subject %}<span class="text-warning">（{{ q.teachers_no_subject }} 人缺学科）</span>{% endif %}
+            {% if q.teachers_no_education %}<span class="text-warning">（{{ q.teachers_no_education }} 人缺学历）</span>{% endif %}
+            {% if q.teachers_no_staff_type %}<span class="text-warning">（{{ q.teachers_no_staff_type }} 人缺人员类别）</span>{% endif %}
         </span>
-        <span class="text-muted small">教育统计只需教师填「生日 + 性别」两项</span>
-        {% if q.teachers_no_birth or q.teachers_no_gender %}
+        {% if q.teachers_no_birth or q.teachers_no_subject or q.teachers_no_education or q.teachers_no_staff_type %}
         <a class="small" href="{{ url_for('academic.teachers_page') }}">
             去教师名单补录 <i class="bi bi-arrow-right"></i>
         </a>
@@ -278,8 +275,8 @@
         </table>
     </div>
     <div class="card-footer small text-muted py-1">
-        未填人员类别时默认按「专任教师」统计（行政 / 教辅 / 工勤请显式选择）
-        {% if tm.untagged_staff_type %}（{{ tm.untagged_staff_type }} 人属默认）{% endif %}
+        未填人员类别时按「有无学科」推断
+        {% if tm.untagged_staff_type %}（{{ tm.untagged_staff_type }} 人属推断）{% endif %}
     </div>
 </div>
 

@@ -8,6 +8,10 @@ from datetime import date
 # 统一加 logger 记录 warning（仅留痕，不改变任何降级行为与返回值）。
 import logging
 
+# 学年口径（8 月 1 日起算新学年）的唯一维护点在 app/models/grades.py
+# ——与 Exam.semester_label() 的年级学期标签必须同源。此处保留旧 import 路径。
+from app.models.grades import term_of_date  # noqa: E402,F401
+
 logger = logging.getLogger(__name__)
 
 
@@ -54,13 +58,6 @@ def normalize_class_name(value):
     if m:
         return '%02d班' % int(m.group(1))
     return ''
-
-
-def term_of_date(d):
-    """由日期推导学年，如 2025-09-01 → '2025-2026'"""
-    if d.month >= 9:
-        return f'{d.year}-{d.year + 1}'
-    return f'{d.year - 1}-{d.year}'
 
 
 def parse_grade_any(value):

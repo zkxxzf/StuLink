@@ -389,6 +389,29 @@
     background: var(--sl-soft-success-bg);
     color: var(--sl-soft-success-fg);
 }
+/* 历次考试：年级学期标签（高一上…高三下），用 --sl-* 变量跟随深浅主题 */
+.sem-chip {
+    display: inline-flex;
+    align-items: center;
+    padding: 1px 8px;
+    border: 1px solid var(--sl-border);
+    border-radius: 999px;
+    background: var(--sl-surface-3);
+    color: var(--sl-text-muted);
+    font-size: 12px;
+    line-height: 1.7;
+    white-space: nowrap;
+    vertical-align: 1px;
+}
+/* 历次考试：筛选栏（年级胶囊 + 学期 / 类型 / 日期区间） */
+.exams-filter .form-select-sm,
+.exams-filter .form-control-sm {
+    min-width: 112px;
+    font-size: 13px;
+}
+.exams-filter input[type="date"] {
+    min-width: 148px;
+}
 .di-note {
     margin-top: 14px;
     padding-top: 10px;
