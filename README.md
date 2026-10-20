@@ -3,7 +3,7 @@
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
 [![Python](https://img.shields.io/badge/python-3.11+-green.svg)](https://python.org)
 [![Flask](https://img.shields.io/badge/flask-3.x-lightgrey.svg)](https://flask.palletsprojects.com/)
-[![Version](https://img.shields.io/badge/version-1.19.49.49-orange.svg)](https://gitee.com/zkxxzf/StuLink)
+[![Version](https://img.shields.io/badge/version-1.19.49.50-orange.svg)](https://gitee.com/zkxxzf/StuLink)
 
 面向中学的综合学生管理平台，采用 **双站点 + 多模块 + 一模块一库** 的故障隔离架构：
 
@@ -301,6 +301,7 @@ StuLink/
 
 | 版本 | 日期 | 亮点 |
 |---|---|---|
+| **1.19.49.50** | 2026-10-21 | **限时练分析页改「去差均分」+ 全量审计**：删最高/最低分两列，均分改按班型去差名额（卓越班 2 人）剔该科末尾 N 人；修分析页表头未进 `<thead>` 导致「下载图片」导出空图；修导出遇到「不分班」行 `rank_class` KeyError 500；限时练三表拆独立库 `timed.db`（迁移 A42）+ 场次统一「年级 No.N」（A43）；仪表盘接入限时练（入口板 / KPI / 动态第五源）；审计修复 20 项（缓存失效时机、导入后重排、仪表盘 fail-closed、抓取 0 行不登记、深色图表配色等），新增 `smoke_timed.py` 21 项回归 |
 | **1.19.49.49** | 2026-10-20 | **合并 master（v1.19.49.47）回 sakaay**：242 处冲突逐块判定（222 处仅版本号差异、15 处单侧、5 处实质：`users.py` 保留手机号并补批量导出初始密码、`users/list.html` 取 master 超集）；修限时练 `_trends.html` 内联处理器（属性单引号 + `|tojson`，安全扫描 0 命中、安全回归 398/0）；教务回归两条断言跟上手机号新口径；新增迁移 **A41**（按年级回填智学网考号，本地 1,019 行） |
 | **1.19.49.48** | 2026-10-20 | **限时练页面审计（sakaay 分支）**：修空场次「学生分析」页 500（`trends` 未定义）；学生成绩 / 学生分析 / 学生详情三张表字号统一 18px（T 分小字 14px），`.timed-tbl` 样式从 `_analysis.html` 上提到 `base.html` 全局一份；限时练顶栏「点击返回成绩单」改为「点击返回学生成绩」；专项回归 36 项 + 真浏览器 41 项断言全绿 |
 | **1.19.49.47** | 2026-10-20 | **合并 sakaay PR（考试「年级学期」标签与筛选 v1.19.49.46）+ 合并后收尾**：整树对齐 sakaay 后逐项复核既有修复仍生效（`trim_count` 三列口径、`import_exam36` 的 `--apply` 门控、MCP 频控 `_prune_store`、小程序调课 fail-closed、备份调用）；移除 sakaay 误恢复的孤儿 `edustat/services/edu_stat_export.py`（master 已按「教育统计不做 Excel 导出」删除且无引用）；迁移对账工具支持「依赖外部源文件、手工执行」例外（A28），补登记 exam36 修数脚本（A29） |
