@@ -127,8 +127,8 @@
                     <col style="width:{{ '7mm' if S.n_cols > 20 else '8mm' }}">
                     {% endfor %}
                     {% endfor %}
-                    <col style="width:11mm"><col style="width:10mm">
-                    <col style="width:8mm"><col style="width:11mm">
+                    <col style="width:11mm"><col style="width:8mm">
+                    <col style="width:11mm"><col style="width:11mm">
                 </colgroup>
                 <thead>
                     {# 第 1 行：左科目名格（黄色，**只占本行第 1 列**）+ 考试名。
@@ -151,7 +151,7 @@
                     <tr>
                         <th></th><th></th><th></th>
                         {% for it in S.layers %}{{ band_heads(it.cells) }}{% endfor %}
-                        <th>去差均分</th><th>上次均分</th><th>排名</th><th>最高分</th>
+                        <th>上次均分</th><th>排名</th><th>最高分</th><th>去差均分</th>
                     </tr>
                 </thead>
                 <tbody>
@@ -164,10 +164,10 @@
                         <td>年级</td>
                         <td>{{ _gr.n }}</td>
                         {% for it in S.layers %}{{ band_cells(_gr.bands.get(it.key), it.cells) }}{% endfor %}
-                        <td>{{ _gr.trim_avg if _gr.trim_avg is not none else '—' }}</td>
                         <td>{{ _gr.prev_avg if _gr.prev_avg is not none else '—' }}</td>
                         <td>—</td>
                         <td>{{ _gr.max if _gr.max is not none else '—' }}</td>
+                        <td>{{ _gr.trim_avg if _gr.trim_avg is not none else '—' }}</td>
                     </tr>
                     {% for r in g.rows %}
                     <tr>
@@ -175,10 +175,10 @@
                         <td class="name">{{ r.teacher or '' }}</td>
                         <td>{{ r.n }}</td>
                         {% for it in S.layers %}{{ band_cells(r.bands.get(it.key), it.cells) }}{% endfor %}
-                        <td>{{ r.trim_avg if r.trim_avg is not none else '—' }}</td>
                         <td>{{ r.prev_avg if r.prev_avg is not none else '—' }}</td>
                         <td>{{ r.avg_rank if r.avg_rank is not none else '—' }}</td>
                         <td>{{ r.max if r.max is not none else '—' }}</td>
+                        <td>{{ r.trim_avg if r.trim_avg is not none else '—' }}</td>
                     </tr>
                     {% endfor %}
                     {# 底部只留「班均」（「年级」已并入上方方向标签行） #}
@@ -188,10 +188,10 @@
                         <td></td>
                         <td>{{ r.n }}</td>
                         {% for it in S.layers %}{{ band_cells(r.bands.get(it.key), it.cells) }}{% endfor %}
-                        <td>{{ r.trim_avg if r.trim_avg is not none else '—' }}</td>
                         <td>{{ r.prev_avg if r.prev_avg is not none else '—' }}</td>
                         <td>—</td>
                         <td>{{ r.max if r.max is not none else '—' }}</td>
+                        <td>{{ r.trim_avg if r.trim_avg is not none else '—' }}</td>
                     </tr>
                     {% endfor %}
                 {% endfor %}
