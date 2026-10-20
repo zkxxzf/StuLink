@@ -145,8 +145,17 @@ def _read_rate_remaining(key):
     window = max(10, _cfg_int('read_rate_window', 60))
     now = time.time()
     with _cred_lock:
-        if len(_read_hits) > _READ_HITS_MAX:
-            _read_hits.clear()
+        # 2026-10-20 审计修复：原实现表满时**全量清空**计数表 ——
+        # 攻击者只要用超过 _READ_HITS_MAX 个不同 key 各刷一次，就能把**所有**来源
+        # 的读频控窗口一起重置（429 形同虚设）。改为：先无损清掉窗口已过期的条目；
+        # 若仍满（说明真有大量来源在窗口内），对新 key 直接拒绝，不动已生效的计数。
+        if key not in _read_hits and len(_read_hits) >= _READ_HITS_MAX:
+            stale = [k for k, (_c, s) in _read_hits.items()
+                     if now - s >= window]
+            for k in stale:
+                _read_hits.pop(k, None)
+            if len(_read_hits) >= _READ_HITS_MAX:
+                return window
         count, start = _read_hits.get(key, (0, now))
         if now - start >= window:
             _read_hits[key] = (1, now)

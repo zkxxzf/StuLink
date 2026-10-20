@@ -64,13 +64,30 @@ def _search_students(exam, kw, sc):
     用 `distinct` 让 limit 按**学生**计（此前按成绩行 400 行 ≈ 44 人，
     搜单姓时只覆盖前几个班，后面班的学生搜不到）。
     """
-    rows = (db.session.query(ExamScore.student_no, ExamScore.student_name,
-                             ExamScore.class_name, ExamScore.grade)
-            .filter(ExamScore.exam_id == exam.id,
-                    ExamScore.subject != TOTAL_SUBJECT,
-                    db.or_(ExamScore.student_no.like(f'%{kw}%'),
-                           ExamScore.student_name.like(f'%{kw}%')))
-            .distinct()
+    q = (db.session.query(ExamScore.student_no, ExamScore.student_name,
+                          ExamScore.class_name, ExamScore.grade)
+         .filter(ExamScore.exam_id == exam.id,
+                 ExamScore.subject != TOTAL_SUBJECT,
+                 db.or_(ExamScore.student_no.like(f'%{kw}%'),
+                        ExamScore.student_name.like(f'%{kw}%'))))
+    # 2026-10-20 审计修复（并入原 reviews_students_api 的修复）：范围条件下推到
+    # SQL 再 limit。原实现先 limit 再在 Python 里按 can_view_class 过滤，而排序是
+    # (class_name, student_no) —— 前 N 个班会把名额占满，班级名靠后的班主任 /
+    # 任课教师搜不到本班学生。口径与 score_guard 一致：任教科目（该年级全部班级）
+    # 或班级白名单，两者取或。
+    _grade = exam.grade
+    if not (sc.full_school or _grade in sc.grades):
+        _teach_subjects = {s for g, s in sc.teach if g == _grade}
+        _granted_classes = {c for g, c in sc.classes if g == _grade}
+        if not _teach_subjects and not _granted_classes:
+            return []                      # 无任何可见范围 → fail-closed
+        _conds = []
+        if _teach_subjects:
+            _conds.append(ExamScore.subject.in_(list(_teach_subjects)))
+        if _granted_classes:
+            _conds.append(ExamScore.class_name.in_(list(_granted_classes)))
+        q = q.filter(db.or_(*_conds))
+    rows = (q.distinct()
             .order_by(ExamScore.class_name, ExamScore.student_no)
             .limit(_MAX_STUDENTS * 3).all())
     out = []

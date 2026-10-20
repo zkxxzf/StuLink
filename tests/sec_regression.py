@@ -2105,6 +2105,47 @@ def check_SR17():
              'academic_class_authorizer' in _ins.getsource(_exp))
 
 
+@item('SR-18')
+def check_SR18():
+    """2026-10-20 审计修复防回归：wxapi 调课列表 fail-closed / 教师名单权限 /
+    复核录入 NaN 与范围下推 / 操作日志清理双保险 / MCP 读频控不清零。"""
+    import inspect as _ins
+
+    def _src(rel):
+        with open(os.path.join(BASE, rel), encoding='utf-8') as f:
+            return f.read()
+
+    # ① 无教师档案时不能退化成「不限申请人」读全校调课单
+    #    注意：wx_swap_list 被 wx_perm_required 包装过，inspect.getsource 拿到的是
+    #    wrapper，故直接按源码切片判断。
+    _s = _src('app/modules/wxapi/academic/routes_swap.py')
+    _body = _s[_s.index('def wx_swap_list'):]
+    _body = _body[:_body.index('@bp.route')] if '@bp.route' in _body else _body
+    case('SR-18 调课列表无档案时 fail-closed（按空集返回）',
+         'if not uid or sched is None' in _body
+         and (_body.index('if not uid or sched is None')
+              < _body.index('items, pag = swap_service.get_swap_list')))
+    # ② 小程序教师名单与网页端同口径（academic.view）
+    _t = _src('app/modules/wxapi/academic/routes_teachers.py')
+    case('SR-18 小程序教师名单要求 academic.view',
+         'wx_perm_required' in _t and "'academic.view'" in _t
+         and '@wx_login_required' not in _t)
+    # ③ 复核录入：NaN 拦截 + 可见范围下推到 SQL 后再 limit
+    _e = _src('app/modules/grades/routes/score_review_entry.py')
+    case('SR-18 复核改分拒绝 NaN/inf', 'math.isfinite(new)' in _e)
+    case('SR-18 学生搜索把范围下推到 SQL',
+         '_teach_subjects' in _e and '_granted_classes' in _e
+         and '_conds.append' in _e)
+    # ④ 操作日志清理：导出完整性校验 + 删前整库备份
+    _l = _src('scripts/ops/prune_operation_logs.py')
+    case('SR-18 操作日志清理先校验导出再删',
+         'written != len(rows)' in _l and 'backup_db' in _l)
+    # ⑤ MCP 读频控表满不得全量清零
+    _a = _src('mcp_server/core/auth.py')
+    case('SR-18 MCP 读频控不清零全部计数',
+         '_read_hits.clear()' not in _a and 'if len(_read_hits) >= _READ_HITS_MAX' in _a)
+
+
 def main(argv):
     selected = [a.upper() for a in argv if a.upper() in ITEMS]
     if not selected:
