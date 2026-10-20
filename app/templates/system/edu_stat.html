@@ -1,11 +1,12 @@
 {% extends "base.html" %}
-{% block title %}教育事业统计{% endblock %}
+{% block title %}教育统计{% endblock %}
 {% block content %}
 <div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
     <div>
-        <h4 class="fw-bold mb-0"><i class="bi bi-clipboard-data"></i> 教育事业统计</h4>
+        <h4 class="fw-bold mb-0"><i class="bi bi-clipboard-data"></i> 教育统计</h4>
         <div class="text-muted small mt-1">
-            按基表口径从系统数据自动计算；学生侧 4 张表、教师侧 3 张表可直接导出
+            表格格式与《教育事业综合统计调查》样表一致：点「复制」后直接粘贴到 Excel
+            （合并表头、行序、列序都会保留）
         </div>
     </div>
     <div class="d-flex gap-2 align-items-center flex-wrap">
@@ -15,14 +16,14 @@
                    style="width:100px" value="{{ year }}" min="2000" max="2100">
             <button class="btn btn-sm btn-outline-secondary">切换</button>
         </form>
-        <a class="btn btn-sm btn-success"
-           href="{{ url_for('edustat.edu_stat_export_page', year=year) }}">
-            <i class="bi bi-file-earmark-excel"></i> 导出基表 Excel
-        </a>
+        <button type="button" class="btn btn-sm btn-outline-primary"
+                data-copy-target="eduAll">
+            <i class="bi bi-clipboard-check"></i> 复制全部表格
+        </button>
     </div>
 </div>
 
-{# ── 数据质量提示 ──────────────────────────────────────────────────── #}
+{# ── 统计口径与数据完整性 ─────────────────────────────────────────── #}
 {% set q = d.quality %}
 <div class="alert alert-light border small mb-3">
     <div class="fw-semibold mb-1"><i class="bi bi-info-circle"></i> 统计口径与数据完整性</div>
@@ -30,7 +31,7 @@
         统计时点 {{ school_year }} 学年（年龄按当年 9 月 1 日计算）；
         年级映射：一年级 {{ d.grades.g1 }}、二年级 {{ d.grades.g2 }}、
         三年级 {{ d.grades.g3 }}、毕业生 {{ d.grades.graduated }}。
-        未填写的属性显示「—」，导出时留空（不按 0 上报）。
+        未填写的属性显示「—」（粘贴后为空，不按 0 上报）。
     </div>
     <div class="d-flex flex-wrap gap-3">
         <span>学生 {{ q.students_total }} 人
@@ -50,75 +51,110 @@
     </div>
 </div>
 
-{# ── 学生侧 4 张表 ─────────────────────────────────────────────────── #}
-<h6 class="fw-bold mt-4 mb-2"><i class="bi bi-people"></i> 学生侧（可全自动）</h6>
+<style>
+    /* 与样表一致：紧凑、居中、细边框；复制到 Excel 时列宽不做预设（由 Excel 自适应） */
+    .edu-tbl { font-size: .82rem; margin-bottom: 0; }
+    .edu-tbl th, .edu-tbl td {
+        text-align: center; vertical-align: middle;
+        padding: .22rem .45rem; white-space: nowrap;
+    }
+    .edu-tbl caption { caption-side: top; padding: .2rem 0; }
+    .edu-cap { font-weight: 600; font-size: .9rem; }
+    .edu-sub { color: #6c757d; font-size: .78rem; }
+    @media print { .edu-noprint { display: none !important; } }
+</style>
 
+{% macro copy_btn(tid) -%}
+<button type="button" class="btn btn-sm btn-outline-secondary edu-noprint"
+        data-copy-target="{{ tid }}" title="复制本表，粘贴到 Excel">
+    <i class="bi bi-clipboard"></i> 复制
+</button>
+{%- endmacro %}
+
+<div id="eduAll">
+
+{# ── 教基2108 ─────────────────────────────────────────────────────── #}
 <div class="card mb-3">
-    <div class="card-header py-2 small fw-semibold">教基2108 · 普通高中班额班数情况</div>
+    <div class="card-header py-2 d-flex justify-content-between align-items-center">
+        <div>
+            <span class="edu-cap">普通高中班额班数情况</span>
+            <span class="edu-sub ms-2">教基2108 · {{ school_year }} 学年</span>
+        </div>
+        {{ copy_btn('t2108') }}
+    </div>
     <div class="table-responsive">
-        <table class="table table-sm table-hover mb-0 text-center align-middle">
+        <table class="table table-sm table-bordered edu-tbl" id="t2108">
             <thead class="table-light">
-                <tr><th>班额</th><th>合计</th><th>一年级</th><th>二年级</th><th>三年级</th></tr>
+                <tr>
+                    <th>指标名称</th><th>代码</th><th>合计</th>
+                    <th>一年级</th><th>二年级</th><th>三年级</th>
+                </tr>
             </thead>
             <tbody>
                 <tr class="fw-semibold">
-                    <td>总计</td><td>{{ d.class_size.class_count }}</td>
+                    <td>总计</td><td>01</td><td>{{ d.class_size.class_count }}</td>
                     {% for g in d.class_size.grades %}<td>{{ d.class_size.total[g] }}</td>{% endfor %}
                 </tr>
                 {% for name, cells in d.class_size.rows %}
                 <tr>
-                    <td>{{ name }}</td><td>{{ cells.values() | sum }}</td>
+                    <td>{{ name }}</td><td>{{ '%02d' % (loop.index + 1) }}</td>
+                    <td>{{ cells.values() | sum }}</td>
                     {% for g in d.class_size.grades %}<td>{{ cells[g] }}</td>{% endfor %}
                 </tr>
                 {% endfor %}
             </tbody>
         </table>
     </div>
-    <div class="card-footer small text-muted py-1">
-        共 {{ d.class_size.student_count }} 名学生、{{ d.class_size.class_count }} 个教学班
-    </div>
 </div>
 
+{# ── 教基3118 ─────────────────────────────────────────────────────── #}
+{% set st = d.student_types %}
+{% set g = d.grades %}
 <div class="card mb-3">
-    <div class="card-header py-2 small fw-semibold">教基3118 · 普通高中分类型学生数</div>
+    <div class="card-header py-2 d-flex justify-content-between align-items-center">
+        <div>
+            <span class="edu-cap">普通高中分类型学生数</span>
+            <span class="edu-sub ms-2">教基3118 · {{ school_year }} 学年</span>
+        </div>
+        {{ copy_btn('t3118') }}
+    </div>
     <div class="table-responsive">
-        <table class="table table-sm table-hover mb-0 text-center align-middle">
+        <table class="table table-sm table-bordered edu-tbl" id="t3118">
             <thead class="table-light">
                 <tr>
-                    <th>指标</th><th>毕业生数</th><th>招生数</th><th>在校生数</th>
-                    <th>一年级</th><th>二年级</th><th>三年级</th><th>预计毕业生数</th>
+                    <th rowspan="2">指标名称</th><th rowspan="2">代码</th>
+                    <th rowspan="2">毕业生数</th><th rowspan="2">招生数</th>
+                    <th colspan="3">在校生数</th>
+                    <th rowspan="2">预计毕业生数</th>
                 </tr>
+                <tr><th>一年级</th><th>二年级</th><th>三年级</th></tr>
             </thead>
             <tbody>
-                {% set st = d.student_types %}
-                {% set g = d.grades %}
                 <tr class="fw-semibold">
-                    <td>总计</td><td>{{ st.graduated }}</td><td>{{ st.new_students }}</td>
-                    <td>{{ st.enrolled_total.total }}</td>
+                    <td>总计</td><td>01</td>
+                    <td>{{ st.graduated }}</td><td>{{ st.new_students }}</td>
                     <td>{{ st.enrolled[g.g1].total }}</td>
                     <td>{{ st.enrolled[g.g2].total }}</td>
                     <td>{{ st.enrolled[g.g3].total }}</td>
                     <td>{{ st.graduates_expected }}</td>
                 </tr>
                 <tr>
-                    <td>#女</td><td>{{ st.graduated_female }}</td><td>—</td>
-                    <td>{{ st.enrolled_total.female }}</td>
+                    <td>#女</td><td>02</td>
+                    <td>{{ st.graduated_female }}</td><td>—</td>
                     <td>{{ st.enrolled[g.g1].female }}</td>
                     <td>{{ st.enrolled[g.g2].female }}</td>
                     <td>{{ st.enrolled[g.g3].female }}</td>
                     <td>—</td>
                 </tr>
                 <tr>
-                    <td>#少数民族</td><td>—</td><td>—</td>
-                    <td>{{ st.enrolled_total.minority }}</td>
+                    <td>#少数民族</td><td>03</td><td>—</td><td>—</td>
                     <td>{{ st.enrolled[g.g1].minority }}</td>
                     <td>{{ st.enrolled[g.g2].minority }}</td>
                     <td>{{ st.enrolled[g.g3].minority }}</td>
                     <td>—</td>
                 </tr>
                 <tr>
-                    <td>#寄宿生</td><td>—</td><td>—</td>
-                    <td>{{ st.enrolled_total.boarding }}</td>
+                    <td>#寄宿生</td><td>04</td><td>—</td><td>—</td>
                     <td>{{ st.enrolled[g.g1].boarding }}</td>
                     <td>{{ st.enrolled[g.g2].boarding }}</td>
                     <td>{{ st.enrolled[g.g3].boarding }}</td>
@@ -127,151 +163,211 @@
             </tbody>
         </table>
     </div>
-    <div class="card-footer small text-muted py-1">
-        寄宿生取「宿舍管理 → 住宿类型=住校」；毕业生数取上学年毕业年级在库人数
-    </div>
 </div>
 
-<div class="row g-3 mb-3">
-    <div class="col-lg-6">
-        <div class="card h-100">
-            <div class="card-header py-2 small fw-semibold">教基3119 · 高中阶段分年龄学生数</div>
-            <div class="table-responsive">
-                <table class="table table-sm mb-0 text-center align-middle">
-                    <thead class="table-light">
-                        <tr><th>年龄</th><th>招生数</th><th>在校生数</th></tr>
-                    </thead>
-                    <tbody>
-                        {% for name, cell in d.student_ages.rows %}
-                        <tr><td>{{ name }}</td><td>{{ cell.new }}</td><td>{{ cell.enrolled }}</td></tr>
-                        {% endfor %}
-                        <tr class="fw-semibold">
-                            <td>合计</td>
-                            <td>{{ d.student_ages.totals.new }}</td>
-                            <td>{{ d.student_ages.totals.enrolled }}</td>
-                        </tr>
-                    </tbody>
-                </table>
-            </div>
-            <div class="card-footer small text-muted py-1">
-                年龄由身份证解析（统计时点 {{ d.student_ages.ref_date }}）
-                {% if d.student_ages.unknown %}；{{ d.student_ages.unknown }} 人缺身份证未计入{% endif %}
-            </div>
-        </div>
-    </div>
-    <div class="col-lg-6">
-        <div class="card h-100">
-            <div class="card-header py-2 small fw-semibold">教基3045 · 在校生中其他情况</div>
-            <div class="table-responsive">
-                <table class="table table-sm mb-0 text-center align-middle">
-                    <thead class="table-light">
-                        <tr><th>指标</th><th>少数民族</th><th>说明</th></tr>
-                    </thead>
-                    <tbody>
-                        <tr><td>普通高中</td><td>{{ d.student_other.minority }}</td>
-                            <td class="text-muted small text-start">在籍学生民族自动统计</td></tr>
-                        <tr><td>#女</td><td>{{ d.student_other.female_minority }}</td>
-                            <td class="text-muted small text-start">—</td></tr>
-                    </tbody>
-                </table>
-            </div>
-            <div class="card-footer small text-muted py-1">
-                党员 / 团员 / 民主党派 / 港澳台 / 华侨 / 残疾人：系统无对应字段，需人工补填
-            </div>
-        </div>
-    </div>
-</div>
-
-{# ── 教师侧 3 张表 ─────────────────────────────────────────────────── #}
-<h6 class="fw-bold mt-4 mb-2"><i class="bi bi-person-badge"></i> 教师侧（补录后自动）</h6>
-
-<div class="row g-3 mb-3">
-    <div class="col-lg-6">
-        <div class="card h-100">
-            <div class="card-header py-2 small fw-semibold">教基4149 · 中小学教职工情况</div>
-            <div class="table-responsive">
-                <table class="table table-sm mb-0 text-center align-middle">
-                    <thead class="table-light">
-                        <tr><th>项目</th><th>人数</th></tr>
-                    </thead>
-                    <tbody>
-                        <tr class="fw-semibold"><td>教职工总计</td><td>{{ d.teacher_summary.total }}</td></tr>
-                        {% for k in ['专任教师', '行政人员', '教辅人员', '工勤人员', '其他'] %}
-                        <tr><td>{{ k }}</td><td>{{ d.teacher_summary.by_type[k] }}</td></tr>
-                        {% endfor %}
-                        <tr><td>#女</td><td>{{ d.teacher_summary.female }}</td></tr>
-                        <tr><td>#少数民族</td><td>{{ d.teacher_summary.minority }}</td></tr>
-                        <tr><td>#在编人员</td><td>{{ d.teacher_summary.official }}</td></tr>
-                        <tr><td>#外籍人员</td><td>{{ d.teacher_summary.foreign }}</td></tr>
-                    </tbody>
-                </table>
-            </div>
-            <div class="card-footer small text-muted py-1">
-                未填人员类别时按「有无学科」推断
-                {% if d.teacher_summary.untagged_staff_type %}
-                （{{ d.teacher_summary.untagged_staff_type }} 人属推断）
-                {% endif %}
-            </div>
-        </div>
-    </div>
-    <div class="col-lg-6">
-        <div class="card h-100">
-            <div class="card-header py-2 small fw-semibold">教基4153 · 专任教师分年龄</div>
-            <div class="table-responsive">
-                <table class="table table-sm mb-0 text-center align-middle">
-                    <thead class="table-light">
-                        <tr><th>年龄</th><th>合计</th><th>#女</th><th>#少数民族</th></tr>
-                    </thead>
-                    <tbody>
-                        {% for name, cell in d.teacher_ages.rows %}
-                        <tr><td>{{ name }}</td><td>{{ cell.total }}</td>
-                            <td>{{ cell.female }}</td><td>{{ cell.minority }}</td></tr>
-                        {% endfor %}
-                        <tr class="fw-semibold">
-                            <td>合计</td>
-                            <td>{{ d.teacher_ages.totals.total }}</td>
-                            <td>{{ d.teacher_ages.totals.female }}</td>
-                            <td>{{ d.teacher_ages.totals.minority }}</td>
-                        </tr>
-                    </tbody>
-                </table>
-            </div>
-            <div class="card-footer small text-muted py-1">
-                {% if d.teacher_ages.unknown %}
-                <span class="text-danger">{{ d.teacher_ages.unknown }} 人缺身份证，年龄无法统计</span>
-                {% else %}年龄由身份证解析（统计时点 {{ d.teacher_ages.ref_date }}）{% endif %}
-            </div>
-        </div>
-    </div>
-</div>
-
+{# ── 教基3119 ─────────────────────────────────────────────────────── #}
 <div class="card mb-3">
-    <div class="card-header py-2 small fw-semibold">教基4156 · 普通高中专任教师分课程、分学历情况</div>
+    <div class="card-header py-2 d-flex justify-content-between align-items-center">
+        <div>
+            <span class="edu-cap">高中阶段分年龄学生数</span>
+            <span class="edu-sub ms-2">教基3119 · {{ school_year }} 学年 ·
+                年龄按 {{ d.student_ages.ref_date }} 计算</span>
+        </div>
+        {{ copy_btn('t3119') }}
+    </div>
     <div class="table-responsive">
-        <table class="table table-sm table-hover mb-0 text-center align-middle">
+        <table class="table table-sm table-bordered edu-tbl" id="t3119">
+            <thead class="table-light">
+                <tr><th>指标名称</th><th>代码</th><th>招生数</th><th>在校生数</th></tr>
+            </thead>
+            <tbody>
+                <tr class="fw-semibold">
+                    <td>总计</td><td>01</td>
+                    <td>{{ d.student_ages.totals.new }}</td>
+                    <td>{{ d.student_ages.totals.enrolled }}</td>
+                </tr>
+                {% for name, cell in d.student_ages.rows %}
+                <tr>
+                    <td>{{ name }}</td><td>{{ '%02d' % (loop.index + 1) }}</td>
+                    <td>{{ cell.new }}</td><td>{{ cell.enrolled }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+
+{# ── 教基3045 ─────────────────────────────────────────────────────── #}
+<div class="card mb-3">
+    <div class="card-header py-2 d-flex justify-content-between align-items-center">
+        <div>
+            <span class="edu-cap">在校生中其他情况</span>
+            <span class="edu-sub ms-2">教基3045 · {{ school_year }} 学年</span>
+        </div>
+        {{ copy_btn('t3045') }}
+    </div>
+    <div class="table-responsive">
+        <table class="table table-sm table-bordered edu-tbl" id="t3045">
             <thead class="table-light">
                 <tr>
-                    <th>学历</th>
-                    {% for c in d.teacher_by_subject.columns %}<th>{{ c }}</th>{% endfor %}
+                    <th>指标名称</th><th>代码</th><th>中共党员</th><th>共青团员</th>
+                    <th>民主党派</th><th>香港</th><th>澳门</th><th>台湾</th>
+                    <th>华侨</th><th>少数民族</th><th>残疾人</th>
                 </tr>
             </thead>
             <tbody>
-                {% for lv, cells in d.teacher_by_subject.rows %}
                 <tr>
-                    <td class="text-start">{{ lv }}</td>
-                    {% for c in d.teacher_by_subject.columns %}<td>{{ cells[c] }}</td>{% endfor %}
+                    <td>普通高中</td><td>07</td><td>—</td><td>—</td><td>—</td>
+                    <td>—</td><td>—</td><td>—</td><td>—</td>
+                    <td>{{ d.student_other.minority }}</td><td>—</td>
+                </tr>
+                <tr>
+                    <td>#女</td><td>08</td><td>—</td><td>—</td><td>—</td>
+                    <td>—</td><td>—</td><td>—</td><td>—</td>
+                    <td>{{ d.student_other.female_minority }}</td><td>—</td>
+                </tr>
+            </tbody>
+        </table>
+    </div>
+    <div class="card-footer small text-muted py-1">
+        党员 / 团员 / 民主党派 / 港澳台 / 华侨 / 残疾人：系统无对应字段，粘贴后手工补填
+    </div>
+</div>
+
+{# ── 教基4149 ─────────────────────────────────────────────────────── #}
+{% set tm = d.teacher_summary %}
+<div class="card mb-3">
+    <div class="card-header py-2 d-flex justify-content-between align-items-center">
+        <div>
+            <span class="edu-cap">中小学教职工情况</span>
+            <span class="edu-sub ms-2">教基4149 · {{ school_year }} 学年</span>
+        </div>
+        {{ copy_btn('t4149') }}
+    </div>
+    <div class="table-responsive">
+        <table class="table table-sm table-bordered edu-tbl" id="t4149">
+            <thead class="table-light">
+                <tr>
+                    <th>指标名称</th><th>代码</th><th>教职工数</th>
+                    <th>专任教师</th><th>行政人员</th><th>教辅人员</th>
+                    <th>工勤人员</th><th>其他</th><th>校外教师</th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr class="fw-semibold">
+                    <td>总计</td><td>01</td><td>{{ tm.total }}</td>
+                    <td>{{ tm.by_type['专任教师'] }}</td>
+                    <td>{{ tm.by_type['行政人员'] }}</td>
+                    <td>{{ tm.by_type['教辅人员'] }}</td>
+                    <td>{{ tm.by_type['工勤人员'] }}</td>
+                    <td>{{ tm.by_type['其他'] }}</td>
+                    <td>—</td>
+                </tr>
+                <tr><td>#女</td><td>02</td><td>{{ tm.female }}</td>
+                    <td>—</td><td>—</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+                <tr><td>#少数民族</td><td>03</td><td>{{ tm.minority }}</td>
+                    <td>—</td><td>—</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+                <tr><td>#在编人员</td><td>04</td><td>{{ tm.official }}</td>
+                    <td>—</td><td>—</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+                <tr><td>#外籍人员</td><td>05</td><td>{{ tm.foreign }}</td>
+                    <td>—</td><td>—</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+            </tbody>
+        </table>
+    </div>
+    <div class="card-footer small text-muted py-1">
+        未填人员类别时按「有无学科」推断
+        {% if tm.untagged_staff_type %}（{{ tm.untagged_staff_type }} 人属推断）{% endif %}
+    </div>
+</div>
+
+{# ── 教基4153 ─────────────────────────────────────────────────────── #}
+{% set ta = d.teacher_ages %}
+<div class="card mb-3">
+    <div class="card-header py-2 d-flex justify-content-between align-items-center">
+        <div>
+            <span class="edu-cap">基础教育专任教师分年龄情况</span>
+            <span class="edu-sub ms-2">教基4153 · {{ school_year }} 学年 ·
+                年龄按 {{ ta.ref_date }} 计算</span>
+        </div>
+        {{ copy_btn('t4153') }}
+    </div>
+    <div class="table-responsive">
+        <table class="table table-sm table-bordered edu-tbl" id="t4153">
+            <thead class="table-light">
+                <tr>
+                    <th>指标名称</th><th>代码</th><th>合计</th><th>#女</th>
+                    {% for name, _cell in ta.rows %}<th>{{ name }}</th>{% endfor %}
+                </tr>
+            </thead>
+            <tbody>
+                <tr class="fw-semibold">
+                    <td>普通高中</td><td>28</td>
+                    <td>{{ ta.totals.total }}</td><td>{{ ta.totals.female }}</td>
+                    {% for name, cell in ta.rows %}<td>{{ cell.total }}</td>{% endfor %}
+                </tr>
+                <tr>
+                    <td>#女</td><td>29</td><td>{{ ta.totals.female }}</td><td>—</td>
+                    {% for name, cell in ta.rows %}<td>{{ cell.female }}</td>{% endfor %}
+                </tr>
+                <tr>
+                    <td>#少数民族</td><td>30</td><td>{{ ta.totals.minority }}</td><td>—</td>
+                    {% for name, cell in ta.rows %}<td>{{ cell.minority }}</td>{% endfor %}
+                </tr>
+                {% for title in ['正高级', '副高级', '中级', '助理级', '员级', '未定职级'] %}
+                <tr>
+                    <td>{{ title }}</td><td>{{ 31 + loop.index0 }}</td>
+                    <td>{{ ta.title_totals[title] }}</td>
+                    <td>{{ ta.female_title_totals[title] }}</td>
+                    {% for name, cell in ta.rows %}<td>{{ cell.titles[title] }}</td>{% endfor %}
                 </tr>
                 {% endfor %}
             </tbody>
         </table>
     </div>
     <div class="card-footer small text-muted py-1">
-        课程列由「任教学科」映射；未填学历单列一行、未映射学科归「其他」
-        {% if d.teacher_by_subject.unknown_education %}
-        （{{ d.teacher_by_subject.unknown_education }} 人未填学历）
-        {% endif %}
+        {% if ta.unknown %}
+        <span class="text-danger">{{ ta.unknown }} 人缺身份证，年龄无法统计（未计入本表）</span>
+        {% else %}年龄由身份证解析{% endif %}
     </div>
 </div>
+
+{# ── 教基4156 ─────────────────────────────────────────────────────── #}
+{% set tsub = d.teacher_by_subject %}
+<div class="card mb-3">
+    <div class="card-header py-2 d-flex justify-content-between align-items-center">
+        <div>
+            <span class="edu-cap">普通高中专任教师分课程、分学历情况</span>
+            <span class="edu-sub ms-2">教基4156 · {{ school_year }} 学年</span>
+        </div>
+        {{ copy_btn('t4156') }}
+    </div>
+    <div class="table-responsive">
+        <table class="table table-sm table-bordered edu-tbl" id="t4156">
+            <thead class="table-light">
+                <tr>
+                    <th>指标名称</th><th>代码</th>
+                    {% for c in tsub.columns %}<th>{{ c }}</th>{% endfor %}
+                    <th>本学年不授课</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for lv, cells in tsub.rows %}
+                <tr {% if loop.first %}class="fw-semibold"{% endif %}>
+                    <td>{{ lv }}</td><td>{{ '%02d' % loop.index }}</td>
+                    {% for c in tsub.columns %}<td>{{ cells[c] }}</td>{% endfor %}
+                    <td>—</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    <div class="card-footer small text-muted py-1">
+        课程列由「任教学科」映射，未映射的归「其他」
+        {% if tsub.unknown_education %}；{{ tsub.unknown_education }} 人未填学历（单列一行）{% endif %}
+    </div>
+</div>
+
+</div>{# /#eduAll #}
 
 <div class="card mb-4">
     <div class="card-body py-3 d-flex justify-content-between align-items-center flex-wrap gap-2">
@@ -284,4 +380,40 @@
         </a>
     </div>
 </div>
+
+<script>
+    /* 复制表格：选中节点 → execCommand('copy')。
+       用 Range 选中整个 <table>（含 thead/tbody），粘贴到 Excel 时保留
+       行列结构（含 rowspan/colspan 合并表头）。
+       全部用 ES5 写法：项目自检 check_frontend_compat 禁止 ES2020+ 语法。
+       事件用委托绑定（不在内联 onclick 里拼模板变量，避免安全扫描 M-10）。 */
+    function eduCopy(id) {
+        var node = document.getElementById(id);
+        if (!node) { return; }
+        var sel = window.getSelection();
+        var range = document.createRange();
+        range.selectNode(node);
+        sel.removeAllRanges();
+        sel.addRange(range);
+        var ok = false;
+        try { ok = document.execCommand('copy'); } catch (e) { ok = false; }
+        sel.removeAllRanges();
+        if (typeof window.stuToast === 'function') {
+            window.stuToast(ok ? '已复制，可直接粘贴到 Excel' : '复制失败，请手动框选表格后按 Ctrl+C');
+        } else if (window.alert) {
+            window.alert(ok ? '已复制，可直接粘贴到 Excel' : '复制失败，请手动框选表格后按 Ctrl+C');
+        }
+    }
+
+    document.addEventListener('click', function (ev) {
+        var node = ev.target;
+        while (node && node !== document) {
+            if (node.getAttribute) {
+                var target = node.getAttribute('data-copy-target');
+                if (target) { eduCopy(target); return; }
+            }
+            node = node.parentNode;
+        }
+    });
+</script>
 {% endblock %}
