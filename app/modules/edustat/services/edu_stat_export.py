@@ -1,4 +1,4 @@
-# StuLink v1.19.49.42 2026-10-20
+# StuLink v1.19.49.43 2026-10-20
 # 教育事业统计基表导出（Excel）
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 """把计算结果写成与基表同结构的 Excel（多 sheet）。
