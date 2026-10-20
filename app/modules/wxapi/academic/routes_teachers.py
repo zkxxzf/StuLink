@@ -3,21 +3,25 @@
 """小程序教师名单（只读通讯录）。
 
 字段级脱敏与网页端一致：无 `academic.view_teacher_phone` 时手机号返回掩码。
+权限也与网页端 `/academic/teachers` 同口径（`academic.view`）——
+2026-10-20 审计：原来只要求登录，任意小程序账号都能枚举全校教师
+姓名 / 工号 / 学科 / 备注。
 """
 from flask import g, request
 from sqlalchemy import or_
 
 from app.models.academic import Teacher
 from app.modules.wxapi import bp
-from app.modules.wxapi.core.guards import wx_login_required
+from app.modules.wxapi.core.guards import wx_perm_required
 from app.modules.wxapi.core.response import wx_ok
 from app.utils import sensitive
 
+PERM = 'academic.view'
 LIMIT = 300
 
 
 @bp.route('/teachers')
-@wx_login_required
+@wx_perm_required(PERM)
 def wx_teachers():
     """教师名单（query: q / subject / status，默认在职）。"""
     q = (request.args.get('q') or '').strip()

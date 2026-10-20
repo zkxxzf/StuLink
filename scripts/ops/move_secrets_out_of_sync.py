@@ -75,7 +75,10 @@ def main():
     args = ap.parse_args()
 
     target_dir = os.path.abspath(args.target_dir)
-    if '同步' in target_dir.lower() or 'onedrive' in target_dir.lower():
+    # 2026-10-20 审计修复：同步盘判定与 app/utils/crypto.py 的 _is_unsafe_path 同口径
+    # （原先只看「同步 / onedrive」，漏了 dropbox / nutstore / 百度网盘 / 坚果云）。
+    _sync_marks = ('同步', 'onedrive', 'dropbox', 'nutstore', '百度网盘', '坚果云')
+    if any(m in target_dir.lower() for m in _sync_marks):
         print('拒绝：目标目录仍在同步盘内，请换到本地受控目录。')
         return 2
     if args.apply and not args.confirm:
