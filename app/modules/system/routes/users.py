@@ -156,7 +156,12 @@ def list_users():
     one_time_passwords = session.pop('_pwd_once', []) if users is not None else []
     # 2026-10-20：取消按权限组分组 —— 一次列出全部用户，角色由表头下拉筛选；
     # 页面不再展示系统 UID（id / uuid 均不展示）。
-    roles = sorted({u.display_role for u in users})
+    # 角色筛选选项 = 所有身份组名（一人多组时每个组都算一个可筛角色）。
+    role_names = set()
+    for u in users:
+        gs = [g.name for g in u.permission_groups if g and g.name]
+        role_names.update(gs or [u.display_role])
+    roles = sorted(role_names)
     # 2026-10-19：教师管理展示微信绑定状态 / openid / 绑定 UID。
     # 一次查回，避免每个用户 N+1。
     wx_bindings = {}

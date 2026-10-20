@@ -104,6 +104,8 @@
                 {% for u in users %}
                 {% set _t = teacher_map.get(u.id) %}
                 {% set wx_items = wx_bindings.get(u.id, []) %}
+                {% set _gs = u.permission_groups %}
+                {% set _primary = u.primary_group %}
                 {% set _phone = field_value(_t.phone, 'teacher_phone') if _t else '' %}
                 {% set _status = 'archived' if (_t and _t.archive_kind) else ('active' if u.is_active else 'disabled') %}
                 {% set wx_ids = wx_items|map(attribute='openid')|join(' ') %}
@@ -111,7 +113,7 @@
                     data-name="{{ (u.real_name or '')|lower }}"
                     data-phone="{{ (_phone or '')|lower }}"
                     data-wx="{{ wx_ids|lower }}"
-                    data-role="{{ u.display_role }}"
+                    data-role="{{ _gs|map(attribute='name')|join('|') or u.display_role }}"
                     data-status="{{ _status }}">
                     <td>{{ u.username }}</td>
                     <td class="fw-bold">{{ u.real_name }}</td>
@@ -127,11 +129,13 @@
                         {% endif %}
                     </td>
                     <td>
-                        <span class="badge bg-{% if u.role=='admin' %}danger{% elif u.role=='dorm_manager' %}warning text-dark{% elif u.role=='homeroom_teacher' %}primary{% elif u.role=='grade_leader' %}info{% elif u.role=='school_viewer' %}success{% else %}secondary{% endif %}">{{ u.display_role }}</span>
-                        {% set _ids = u.permission_groups %}
-                        {% if _ids|length > 1 %}
-                        <span class="badge bg-light text-dark border ms-1"
-                              title="{% for g in _ids %}{{ g.name }}{{ '、' if not loop.last }}{% endfor %}">+{{ _ids|length - 1 }} 身份</span>
+                        {# 2026-10-20：一人多身份时把全部身份组一并显示，主身份高亮 #}
+                        {% if _gs %}
+                        {% for g in _gs %}
+                        <span class="badge me-1 {{ 'bg-primary' if _primary and g.id == _primary.id else 'bg-light text-dark border' }}">{{ g.name }}</span>
+                        {% endfor %}
+                        {% else %}
+                        <span class="badge bg-secondary">{{ u.display_role }}</span>
                         {% endif %}
                     </td>
                     <td>
@@ -341,7 +345,7 @@
                 if (!ok || !q[k]) { return; }
                 if (String($r.data(k) || '').indexOf(q[k]) < 0) { ok = false; }
             });
-            if (ok && role && String($r.data('role')) !== role) { ok = false; }
+            if (ok && role && String($r.data('role')).split('|').indexOf(role) < 0) { ok = false; }
             if (ok && status && String($r.data('status')) !== status) { ok = false; }
             $r.toggle(ok);
             if (ok) { hit++; }
