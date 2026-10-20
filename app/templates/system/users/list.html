@@ -8,7 +8,7 @@
     <h4 class="fw-bold mb-0">
         <i class="bi bi-person-gear"></i> 教师管理
         <span class="text-muted small fw-normal ms-2">
-            共 {{ users|length }} 个账号 / {{ groups|length }} 个分组
+            共 {{ users|length }} 个账号
         </span>
     </h4>
     <div class="d-flex gap-2">
@@ -46,172 +46,143 @@
 </div>
 {% endif %}
 
-<div class="card mb-3">
-    <div class="card-body py-2">
-        <div class="row g-2 align-items-center">
-            <div class="col-auto">
-                <input id="userSearch" class="form-control form-control-sm" style="width:300px"
-                       placeholder="搜索姓名 / 用户名 / 微信 ID / UID"
-                       aria-label="搜索姓名 / 用户名 / 微信 ID / UID">
-            </div>
-            <div class="col-auto text-muted small">
-                按权限组切换，搜索会自动跳到命中的分组
-            </div>
-        </div>
-    </div>
-</div>
-
 <style>
-.user-group-tabs {
-    flex-wrap: nowrap;
-    overflow-x: auto;
-    overflow-y: hidden;
-    scrollbar-width: thin;
-}
-.user-group-tabs .nav-link {
-    white-space: nowrap;
-    color: var(--sl-text-muted);
-}
-.user-group-tabs .nav-link.active {
-    font-weight: 600;
-}
+#userTable .filter-row th { padding-top: 4px; padding-bottom: 4px; }
+#userTable .filter-row .form-control,
+#userTable .filter-row .form-select { min-width: 96px; font-size: 12px; }
 .wx-id {
     display: inline-block;
-    max-width: 210px;
-    font-size: 11px;
-    line-height: 1.35;
-    word-break: break-all;
-    white-space: normal;
+    max-width: 150px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
     vertical-align: middle;
 }
-.wx-sub { font-size: 11px; color: var(--sl-text-subtle); margin-top: 2px; }
 </style>
 
-{% if groups %}
-<ul class="nav nav-tabs user-group-tabs mb-3" id="userGroupTabs" role="tablist">
-    {% for gname, gusers in groups.items() %}
-    <li class="nav-item" role="presentation">
-        <button class="nav-link user-group-tab {{ 'active' if loop.first }}"
-                id="grp-tab-{{ loop.index }}"
-                data-bs-toggle="tab"
-                data-bs-target="#grp-{{ loop.index }}"
-                data-group="{{ gname }}"
-                type="button" role="tab"
-                aria-controls="grp-{{ loop.index }}"
-                aria-selected="{{ 'true' if loop.first else 'false' }}">
-            {{ gname }}
-            <span class="badge rounded-pill text-bg-light border ms-1">{{ gusers|length }}</span>
-        </button>
-    </li>
-    {% endfor %}
-</ul>
-
-<div class="tab-content" id="userGroupPanes">
-    {% for gname, gusers in groups.items() %}
-    <div class="tab-pane fade {{ 'show active' if loop.first }}"
-         id="grp-{{ loop.index }}" role="tabpanel"
-         aria-labelledby="grp-tab-{{ loop.index }}">
-        <div class="card">
-            <div class="table-responsive">
-                <table class="table table-hover mb-0 align-middle">
-                    <thead class="table-light">
-                        <tr>
-                            <th>用户名</th>
-                            <th>姓名</th>
-                            <th>微信绑定</th>
-                            <th>系统 UID</th>
-                            <th>角色</th>
-                            <th>状态</th>
-                            <th>操作</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        {% for u in gusers %}
-                        {% set wx_items = wx_bindings.get(u.id, []) %}
-                        {% set wx_ids = wx_items|map(attribute='openid')|join(' ') %}
-                        <tr data-search="{{ (u.real_name ~ ' ' ~ u.username ~ ' ' ~ gname ~ ' UID ' ~ u.id ~ ' ' ~ wx_ids)|lower }}">
-                            <td>{{ u.username }}</td>
-                            <td class="fw-bold">{{ u.real_name }}</td>
-                            <td>
-                                {% if wx_items %}
-                                <span class="badge bg-success">已绑定 {{ wx_items|length }}</span>
-                                {% for b in wx_items %}
-                                <div class="mt-1">
-                                    <code class="wx-id" title="openid: {{ b.openid }}{% if b.unionid %} | unionid: {{ b.unionid }}{% endif %}">{{ b.openid }}</code>
-                                </div>
-                                <div class="wx-sub">
-                                    绑定 #{{ b.id }} · UID {{ b.user_id }}
-                                    {% if b.last_login_at %} · {{ b.last_login_at.strftime('%m-%d %H:%M') }}{% endif %}
-                                </div>
-                                {% endfor %}
-                                {% else %}
-                                <span class="badge bg-light text-secondary border">未绑定</span>
-                                {% endif %}
-                            </td>
-                            <td class="text-nowrap"><code>{{ u.id }}</code></td>
-                            <td><span class="badge bg-{% if u.role=='admin' %}danger{% elif u.role=='dorm_manager' %}warning text-dark{% elif u.role=='homeroom_teacher' %}primary{% elif u.role=='grade_leader' %}info{% elif u.role=='school_viewer' %}success{% else %}secondary{% endif %}">{{ u.display_role }}</span>
-                                {% set _ids = u.permission_groups %}
-                                {% if _ids|length > 1 %}
-                                <span class="badge bg-light text-dark border ms-1"
-                                      title="{% for g in _ids %}{{ g.name }}{{ '、' if not loop.last }}{% endfor %}">+{{ _ids|length - 1 }} 身份</span>
-                                {% endif %}
-                            </td>
-                            <td>
-                                {% set _t = teacher_map.get(u.id) %}
-                                {% if _t and _t.archive_kind %}
-                                <span class="badge bg-dark">已归档·{{ _t.archive_kind }}</span>
-                                {% elif u.is_active %}<span class="badge bg-success">启用</span>
-                                {% else %}<span class="badge bg-secondary">禁用</span>{% endif %}
-                            </td>
-                            <td>
-                                <a href="{{ url_for('users.edit', id=u.id) }}" class="btn btn-sm btn-outline-warning" aria-label="编辑用户"><i class="bi bi-pencil"></i></a>
-                                <form method="POST" action="{{ url_for('users.toggle', id=u.id) }}" style="display:inline;">
-                                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                                    {% if u.role == 'admin' and u.is_active %}
-                                    <button type="button" class="btn btn-sm btn-outline-secondary" disabled
-                                            title="管理员账号不可禁用" aria-label="管理员账号不可禁用">
-                                        <i class="bi bi-shield-lock"></i>
-                                    </button>
-                                    {% else %}
-                                    <button type="submit" class="btn btn-sm btn-outline-{% if u.is_active %}secondary{% else %}success{% endif %}"
-                                            title="{% if u.is_active %}禁用{% else %}启用{% endif %}" aria-label="{% if u.is_active %}禁用{% else %}启用{% endif %}">
-                                        <i class="bi bi-{% if u.is_active %}pause{% else %}play{% endif %}-circle"></i>
-                                    </button>
-                                    {% endif %}
-                                </form>
-                                {# M-10（2026-10-15 审计补漏）：姓名可能含单引号 → 提示文案整体 |tojson + 单引号属性 #}
-                                <form method="POST" action="{{ url_for('users.reset_password', id=u.id) }}" style="display:inline;"
-                                      onsubmit='return confirm({{ ("确定重置 " + (u.real_name or u.username or "") + " 的密码？新口令是随机生成的，重置后在本页一次性显示。")|tojson }})'>
-                                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                                    <button type="submit" class="btn btn-sm btn-outline-info" title="重置密码" aria-label="重置密码"><i class="bi bi-key"></i></button>
-                                </form>
-                                {# 2026-10-20：教师删除/归档 —— 仅有关联教师档案、未归档、非管理员时显示 #}
-                                {% if _t and not _t.archive_kind and u.role != 'admin' and u.id != current_user.id %}
-                                <button type="button" class="btn btn-sm btn-outline-danger js-remove-teacher"
-                                        data-bs-toggle="modal" data-bs-target="#removeTeacherModal"
-                                        data-user-id="{{ u.id }}"
-                                        data-name="{{ u.real_name or u.username }}"
-                                        data-tuid="{{ _t.teacher_uid }}"
-                                        title="删除 / 归档教师" aria-label="删除或归档教师">
-                                    <i class="bi bi-person-x"></i>
-                                </button>
-                                {% endif %}
-                            </td>
-                        </tr>
-                        {% endfor %}
-                    </tbody>
-                </table>
-            </div>
-        </div>
-    </div>
-    {% endfor %}
-</div>
-<div id="userNoMatch" class="text-center text-muted py-4 d-none">没有匹配的账号</div>
-{% else %}
+{# 2026-10-20：一次列出全部用户（不再按权限组分组），表头逐列筛选；不展示系统 UID #}
 <div class="card">
-    <div class="card-body text-center text-muted py-5">暂无账号，请点击右上角「新建教师」或「批量导入」</div>
+    <div class="table-responsive">
+        <table class="table table-hover align-middle mb-0" id="userTable">
+            <thead class="table-light">
+                <tr>
+                    <th>用户名</th>
+                    <th>姓名</th>
+                    <th>电话</th>
+                    <th>微信</th>
+                    <th>角色</th>
+                    <th>状态</th>
+                    <th>操作</th>
+                </tr>
+                <tr class="filter-row">
+                    <th><input class="form-control form-control-sm col-filter" data-col="user"
+                               placeholder="筛选用户名" aria-label="筛选用户名"></th>
+                    <th><input class="form-control form-control-sm col-filter" data-col="name"
+                               placeholder="筛选姓名" aria-label="筛选姓名"></th>
+                    <th><input class="form-control form-control-sm col-filter" data-col="phone"
+                               placeholder="筛选电话" aria-label="筛选电话"></th>
+                    <th><input class="form-control form-control-sm col-filter" data-col="wx"
+                               placeholder="筛选微信" aria-label="筛选微信"></th>
+                    <th>
+                        <select id="filterRole" class="form-select form-select-sm" aria-label="按角色筛选">
+                            <option value="">全部角色</option>
+                            {% for r in roles %}<option value="{{ r }}">{{ r }}</option>{% endfor %}
+                        </select>
+                    </th>
+                    <th>
+                        <select id="filterStatus" class="form-select form-select-sm" aria-label="按状态筛选">
+                            <option value="">全部状态</option>
+                            <option value="active">启用</option>
+                            <option value="disabled">禁用</option>
+                            <option value="archived">已归档</option>
+                        </select>
+                    </th>
+                    <th><button type="button" id="clearFilters" class="btn btn-sm btn-outline-secondary">重置</button></th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for u in users %}
+                {% set _t = teacher_map.get(u.id) %}
+                {% set wx_items = wx_bindings.get(u.id, []) %}
+                {% set _phone = field_value(_t.phone, 'teacher_phone') if _t else '' %}
+                {% set _status = 'archived' if (_t and _t.archive_kind) else ('active' if u.is_active else 'disabled') %}
+                {% set wx_ids = wx_items|map(attribute='openid')|join(' ') %}
+                <tr data-user="{{ u.username|lower }}"
+                    data-name="{{ (u.real_name or '')|lower }}"
+                    data-phone="{{ (_phone or '')|lower }}"
+                    data-wx="{{ wx_ids|lower }}"
+                    data-role="{{ u.display_role }}"
+                    data-status="{{ _status }}">
+                    <td>{{ u.username }}</td>
+                    <td class="fw-bold">{{ u.real_name }}</td>
+                    <td>{{ _phone or '-' }}</td>
+                    <td>
+                        {% if wx_items %}
+                        <span class="badge bg-success">已绑定 {{ wx_items|length }}</span>
+                        <div class="text-muted small" title="{{ wx_ids }}">
+                            <code class="wx-id">{{ wx_items[0].openid }}</code>
+                        </div>
+                        {% else %}
+                        <span class="badge bg-light text-secondary border">未绑定</span>
+                        {% endif %}
+                    </td>
+                    <td>
+                        <span class="badge bg-{% if u.role=='admin' %}danger{% elif u.role=='dorm_manager' %}warning text-dark{% elif u.role=='homeroom_teacher' %}primary{% elif u.role=='grade_leader' %}info{% elif u.role=='school_viewer' %}success{% else %}secondary{% endif %}">{{ u.display_role }}</span>
+                        {% set _ids = u.permission_groups %}
+                        {% if _ids|length > 1 %}
+                        <span class="badge bg-light text-dark border ms-1"
+                              title="{% for g in _ids %}{{ g.name }}{{ '、' if not loop.last }}{% endfor %}">+{{ _ids|length - 1 }} 身份</span>
+                        {% endif %}
+                    </td>
+                    <td>
+                        {% if _t and _t.archive_kind %}
+                        <span class="badge bg-dark">已归档·{{ _t.archive_kind }}</span>
+                        {% elif u.is_active %}<span class="badge bg-success">启用</span>
+                        {% else %}<span class="badge bg-secondary">禁用</span>{% endif %}
+                    </td>
+                    <td class="text-nowrap">
+                        <a href="{{ url_for('users.edit', id=u.id) }}" class="btn btn-sm btn-outline-warning" aria-label="编辑用户"><i class="bi bi-pencil"></i></a>
+                        <form method="POST" action="{{ url_for('users.toggle', id=u.id) }}" style="display:inline;">
+                            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                            {% if u.role == 'admin' and u.is_active %}
+                            <button type="button" class="btn btn-sm btn-outline-secondary" disabled
+                                    title="管理员账号不可禁用" aria-label="管理员账号不可禁用">
+                                <i class="bi bi-shield-lock"></i>
+                            </button>
+                            {% else %}
+                            <button type="submit" class="btn btn-sm btn-outline-{% if u.is_active %}secondary{% else %}success{% endif %}"
+                                    title="{% if u.is_active %}禁用{% else %}启用{% endif %}" aria-label="{% if u.is_active %}禁用{% else %}启用{% endif %}">
+                                <i class="bi bi-{% if u.is_active %}pause{% else %}play{% endif %}-circle"></i>
+                            </button>
+                            {% endif %}
+                        </form>
+                        {# M-10（2026-10-15 审计补漏）：姓名可能含单引号 → 提示文案整体 |tojson + 单引号属性 #}
+                        <form method="POST" action="{{ url_for('users.reset_password', id=u.id) }}" style="display:inline;"
+                              onsubmit='return confirm({{ ("确定重置 " + (u.real_name or u.username or "") + " 的密码？新口令是随机生成的，重置后在本页一次性显示。")|tojson }})'>
+                            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                            <button type="submit" class="btn btn-sm btn-outline-info" title="重置密码" aria-label="重置密码"><i class="bi bi-key"></i></button>
+                        </form>
+                        {# 2026-10-20：教师删除/归档 —— 仅有关联教师档案、未归档、非管理员时显示 #}
+                        {% if _t and not _t.archive_kind and u.role != 'admin' and u.id != current_user.id %}
+                        <button type="button" class="btn btn-sm btn-outline-danger js-remove-teacher"
+                                data-bs-toggle="modal" data-bs-target="#removeTeacherModal"
+                                data-user-id="{{ u.id }}"
+                                data-name="{{ u.real_name or u.username }}"
+                                data-tuid="{{ _t.teacher_uid }}"
+                                title="删除 / 归档教师" aria-label="删除或归档教师">
+                            <i class="bi bi-person-x"></i>
+                        </button>
+                        {% endif %}
+                    </td>
+                </tr>
+                {% endfor %}
+                <tr id="userNoMatch" class="d-none">
+                    <td colspan="7" class="text-center text-muted py-4">没有匹配的账号</td>
+                </tr>
+            </tbody>
+        </table>
+    </div>
 </div>
-{% endif %}
 
 {# 2026-10-20：离职 / 退休存档 —— 只在本页可查；其他模块按 status/archive_kind 排除 #}
 <div class="card mt-3">
@@ -306,7 +277,6 @@
     </div>
 </div>
 
-
 <!-- 批量导入教师弹窗 -->
 <div class="modal fade" id="importTeacherModal" tabindex="-1">
     <div class="modal-dialog">
@@ -352,39 +322,40 @@
 {% block extra_js %}
 <script>
 (function () {
-    // 2026-10-19：分组改为顶部选项卡；搜索时自动切到第一个命中分组。
-    var $search = $('#userSearch');
-    var $tabs = $('.user-group-tab');
+    // 2026-10-20：表头逐列筛选（用户名/姓名/电话/微信输入，角色/状态下拉）
+    var $rows = $('#userTable tbody tr[data-user]');
     var $noMatch = $('#userNoMatch');
 
     function applyFilter() {
-        var kw = ($search.val() || '').trim().toLowerCase();
-        var firstHit = null;
-        var totalHit = 0;
-
-        $tabs.each(function () {
-            var $tab = $(this);
-            var target = $tab.attr('data-bs-target');
-            var $pane = $(target);
-            var hit = 0;
-            $pane.find('tbody tr[data-search]').each(function () {
-                var ok = !kw
-                    || ($(this).attr('data-search') || '').indexOf(kw) >= 0;
-                $(this).toggle(ok);
-                if (ok) { hit++; }
-            });
-            $tab.toggle(!kw || hit > 0);
-            if (hit > 0 && !firstHit) { firstHit = $tab; }
-            totalHit += hit;
+        var q = {};
+        $('.col-filter').each(function () {
+            q[$(this).data('col')] = ($(this).val() || '').trim().toLowerCase();
         });
-
-        if (kw && firstHit && !$('.user-group-tab.active').is(':visible')) {
-            firstHit.trigger('click');
-        }
-        $noMatch.toggleClass('d-none', !kw || totalHit > 0);
+        var role = $('#filterRole').val() || '';
+        var status = $('#filterStatus').val() || '';
+        var hit = 0;
+        $rows.each(function () {
+            var $r = $(this);
+            var ok = true;
+            ['user', 'name', 'phone', 'wx'].forEach(function (k) {
+                if (!ok || !q[k]) { return; }
+                if (String($r.data(k) || '').indexOf(q[k]) < 0) { ok = false; }
+            });
+            if (ok && role && String($r.data('role')) !== role) { ok = false; }
+            if (ok && status && String($r.data('status')) !== status) { ok = false; }
+            $r.toggle(ok);
+            if (ok) { hit++; }
+        });
+        $noMatch.toggleClass('d-none', hit > 0);
     }
 
-    $search.on('input', applyFilter);
+    $('.col-filter').on('input', applyFilter);
+    $('#filterRole, #filterStatus').on('change', applyFilter);
+    $('#clearFilters').on('click', function () {
+        $('.col-filter').val('');
+        $('#filterRole, #filterStatus').val('');
+        applyFilter();
+    });
 
     // 2026-10-20：删除 / 归档教师弹窗 —— 行内按钮带入姓名、编号，提交前二次确认
     $('#removeTeacherModal').on('show.bs.modal', function (ev) {

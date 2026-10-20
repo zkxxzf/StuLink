@@ -1,6 +1,8 @@
 # StuLink v1.7.0 2026-08-02
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 from datetime import datetime
+import uuid as _uuid
+
 from flask_login import UserMixin
 from werkzeug.security import generate_password_hash, check_password_hash
 from app.extensions import db, login_manager
@@ -19,6 +21,10 @@ class User(UserMixin, db.Model):
     __tablename__ = 'users'
 
     id = db.Column(db.Integer, primary_key=True)
+    # 2026-10-20：对外身份标识改为标准 UUID（内部外键仍用自增 id）；
+    # 页面不展示该值，仅作为稳定、不可枚举的账号标识供接口/导出使用。
+    uuid = db.Column(db.String(36), unique=True, index=True,
+                     default=lambda: str(_uuid.uuid4()))
     username = db.Column(db.String(50), unique=True, nullable=False)
     password_hash = db.Column(db.String(256), nullable=False)
     real_name = db.Column(db.String(50), nullable=False)
