@@ -138,6 +138,10 @@ run_mig scripts/seed/import_bands_20260712.py --allow-fail --apply           # �
 run_mig scripts/fix/recalc_exam_ranks_20261019.py --apply        # 修数据：重算全部考试的方向/班排名
 # 2026-10-20：考试「年级学期」标签独立成列（空=按 年级+日期 自动推算；不回填）
 run_mig scripts/migrate/migrate_exam_grade_semester_20261020.py   # 成绩：exams.grade_semester
+# 2026-10-20：教师离职/退休存档字段（/users/ 删除教师功能；须在代码上线前执行）
+run_mig scripts/migrate/migrate_teacher_archive_20261020.py       # 教务：teachers.archive_*
+# 2026-10-20：用户对外标识改标准 UUID（内部外键仍用自增 id；页面不展示）
+run_mig scripts/migrate/migrate_user_uuid_20261020.py             # 系统：users.uuid（UUID4 + 唯一索引）
 # ── 数据 / 权限类（幂等）──────────────────────────────────────────────────
 # 2026-10-14 第三轮审计（CONS3-02）：多身份改造的两个脚本原先**完全未登记**（只在
 # docs/权限体系多身份改造执行计划.md 里点名）→ 上线必漏跑。按设计文档顺序：

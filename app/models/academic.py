@@ -1,4 +1,4 @@
-# StuLink v1.19.49.46 2026-10-10
+# StuLink v1.19.49.47 2026-10-10
 # 教务模块模型（2026-10-10 按「一个功能一个库」分库）：
 #   academic.db    师资基础（教师名单 / 学科组长 / 班主任记录 / 考勤）
 #   timetable.db   课表与晚自习值班
@@ -95,12 +95,24 @@ class Teacher(db.Model):
     title = db.Column(db.String(20))          # 正高级/副高级/中级/助理级/员级/未定职级
     staff_type = db.Column(db.String(20))     # 专任教师/行政人员/教辅人员/工勤人员/其他
     is_official = db.Column(db.Boolean)       # 是否在编（None=未填）
-    is_foreign = db.Column(db.Boolean)        # 是否外籍（None=未填）
+    is_foreign = db.Column(db.Boolean, default=False)  # 是否外籍（默认否）
+    # ── 离职 / 退休存档（2026-10-20 用户口径）────────────────────────────
+    # 只有「错误录入」允许彻底删除；离职/退休必须存档，存档后其他模块不再调用，
+    # 只能到「系统管理 → 教师管理」查阅。archive_kind 为空 = 未归档。
+    archive_kind = db.Column(db.String(10))     # 离职 / 退休
+    archive_reason = db.Column(db.String(200))  # 归档/删除原因（必填）
+    archived_at = db.Column(db.DateTime)
+    archived_by = db.Column(db.String(50))      # 操作人用户名
     created_at = db.Column(db.DateTime, default=datetime.now)
     updated_at = db.Column(db.DateTime, default=datetime.now, onupdate=datetime.now)
 
     def __repr__(self):
         return f'<Teacher {self.teacher_uid} {self.name}>'
+
+    @property
+    def is_archived(self):
+        """是否已归档（离职/退休），归档后其他模块不得再调用。"""
+        return bool(self.archive_kind)
 
 
 class InspectionRecord(db.Model):

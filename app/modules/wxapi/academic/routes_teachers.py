@@ -1,4 +1,4 @@
-# StuLink v1.19.49.46 2026-10-19
+# StuLink v1.19.49.47 2026-10-19
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 """小程序教师名单（只读通讯录）。
 
@@ -29,7 +29,9 @@ def wx_teachers():
     q = (request.args.get('q') or '').strip()
     subject = (request.args.get('subject') or '').strip()
     status = (request.args.get('status') or 'active').strip()
-    query = Teacher.query
+    # 2026-10-20：离职/退休已归档教师只在「系统管理 → 教师管理」可查，
+    # 小程序通讯录一律不返回（即使显式传 status=left）。
+    query = Teacher.query.filter(Teacher.archive_kind.is_(None))
     if status in ('active', 'left'):
         query = query.filter(Teacher.status == status)
     if subject:

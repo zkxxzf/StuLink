@@ -9,6 +9,8 @@ from app.forms.user_forms import UserForm
 from app.utils.decorators import perm_required
 from app.utils.helpers import log_operation
 from app.modules.academic.services import teacher_sync
+from app.modules.academic.services import teacher_archive_service as archive_svc
+from app.models.academic import Teacher
 # 2026-10-14：教师名单子页复用教务侧视图函数（挂到 /users/teachers，见文件末尾）
 from app.modules.academic.routes import teachers as _ac_teachers
 import io
@@ -152,16 +154,14 @@ def list_users():
              .order_by(User.role, User.username).all())
     # L-7：取出一次性初始口令（显示后立即失效）
     one_time_passwords = session.pop('_pwd_once', []) if users is not None else []
-    # v1.14.0：按权限组分组展示（组内按角色/用户名排序），支持分组折叠与搜索
-    from collections import OrderedDict
-    grouped = OrderedDict()
+    # 2026-10-20：取消按权限组分组 —— 一次列出全部用户，角色由表头下拉筛选；
+    # 页面不再展示系统 UID（id / uuid 均不展示）。
+    # 角色筛选选项 = 所有身份组名（一人多组时每个组都算一个可筛角色）。
+    role_names = set()
     for u in users:
-        pg = u.primary_group
-        gname = pg.name if pg else '未分组'
-        grouped.setdefault(gname, []).append(u)
-    group_order = {g.name: g.id for g in PermissionGroup.query.all()}
-    groups = OrderedDict(
-        (g, grouped[g]) for g in sorted(grouped, key=lambda x: (group_order.get(x, 9999), x)))
+        gs = [g.name for g in u.permission_groups if g and g.name]
+        role_names.update(gs or [u.display_role])
+    roles = sorted(role_names)
     # 2026-10-19：教师管理展示微信绑定状态 / openid / 绑定 UID。
     # 一次查回，避免每个用户 N+1。
     wx_bindings = {}
@@ -172,9 +172,14 @@ def list_users():
                 .order_by(WeChatBinding.user_id, WeChatBinding.id).all())
         for row in rows:
             wx_bindings.setdefault(row.user_id, []).append(row)
-    return render_template('system/users/list.html', users=users, groups=groups,
+    # 2026-10-20：教师删除/归档 —— 行内按钮需要知道「账号是否关联教师档案」；
+    # 离职/退休存档名单只在本页展示（其他模块已按 status/archive_kind 排除）
+    teacher_map = archive_svc.teacher_map(user_ids)
+    archived = archive_svc.archived_teachers()
+    return render_template('system/users/list.html', users=users, roles=roles,
                            one_time_passwords=one_time_passwords,
-                           wx_bindings=wx_bindings)
+                           wx_bindings=wx_bindings, teacher_map=teacher_map,
+                           archived=archived)
 
 
 @bp.route('/create', methods=['GET', 'POST'])
@@ -239,7 +244,7 @@ def create():
         user.set_password(generated_pwd)
         db.session.add(user)
         db.session.commit()
-        # v1.19.49.46：非管理员自动同步创建教师档案（admin 不写入）
+        # v1.19.49.47：非管理员自动同步创建教师档案（admin 不写入）
         _sync_state, _ = teacher_sync.sync_from_user(user)
         db.session.commit()
         log_operation(current_user, '创建', '用户', user.id, f'{user.real_name} ({user.role_display})')
@@ -361,13 +366,71 @@ def edit(id):
         if form.password.data:
             user.set_password(form.password.data)
         db.session.commit()
-        # v1.19.49.46：教师角色变更 → 同步到 academic.teachers（admin 自动 skip）
+        # v1.19.49.47：教师角色变更 → 同步到 academic.teachers（admin 自动 skip）
         teacher_sync.sync_from_user(user)
         db.session.commit()
         log_operation(current_user, '更新', '用户', user.id, f'{user.real_name} 信息已更新')
         flash('用户信息已更新', 'success')
         return redirect(url_for('users.list_users'))
     return render_template('system/users/form.html', form=form, title='编辑用户')
+
+
+@bp.route('/<int:id>/teacher/remove', methods=['POST'])
+@perm_required('system.users')
+def remove_teacher(id):
+    """删除教师：错误录入=彻底删除；离职/退休=存档（2026-10-20 用户口径）。
+
+    - 必填删除原因；
+    - 只有「错误录入」允许彻底删除，且账号已有任何业务数据时拒绝（只能存档）；
+    - 离职/退休：教师置 left + 归档字段，账号停用并吊销小程序令牌，
+      任课映射置失效，数据保留、仅本页可查阅；
+    - 全程写操作日志。
+    """
+    user = User.query.get_or_404(id)
+    kind = (request.form.get('kind') or '').strip()
+    reason = (request.form.get('reason') or '').strip()
+    back = redirect(url_for('users.list_users'))
+
+    if user.role == 'admin' or _user_in_admin_group(user):
+        flash('管理员账号不能删除或归档', 'danger')
+        return back
+    if user.id == current_user.id:
+        flash('不能删除当前登录的账号', 'danger')
+        return back
+    if kind not in archive_svc.KIND_LABELS:
+        flash('请选择处理方式：错误录入 / 离职 / 退休', 'danger')
+        return back
+    if not reason:
+        flash('必须填写删除原因', 'danger')
+        return back
+    if len(reason) > 200:
+        flash('删除原因不能超过 200 字', 'danger')
+        return back
+
+    teacher = Teacher.query.filter_by(user_id=user.id).first()
+    if teacher is None:
+        flash('该账号未关联教师档案，无法执行教师删除/归档', 'danger')
+        return back
+    if teacher.archive_kind:
+        flash(f'{teacher.name} 已是「{teacher.archive_kind}」存档状态', 'warning')
+        return back
+
+    tid, tname = teacher.id, teacher.name
+    try:
+        if kind == archive_svc.DELETE_KIND:
+            detail = archive_svc.hard_delete_teacher(teacher, reason, current_user)
+            action = '删除教师'
+        else:
+            detail = archive_svc.archive_teacher(teacher, kind, reason, current_user)
+            action = '归档教师'
+    except ValueError as exc:
+        flash(str(exc), 'danger')
+        return back
+
+    log_operation(current_user, action, '教师', tid,
+                  f'{tname}：{detail}', module='system', severity='WARNING')
+    flash(detail, 'success')
+    return back
 
 
 @bp.route('/<int:id>/toggle', methods=['POST'])
@@ -387,13 +450,20 @@ def toggle(id):
     if user.id == current_user.id and user.is_active:
         flash('不能禁用当前登录的账号', 'danger')
         return redirect(url_for('users.list_users'))
+    # 2026-10-20：已归档（离职/退休）的教师不允许原地重新启用 —— 否则会绕过
+    # 归档口径重新进入课表/监考/任课映射等模块；返聘请重新建档。
+    _t = Teacher.query.filter_by(user_id=user.id).first()
+    if _t is not None and _t.archive_kind and not user.is_active:
+        flash(f'{_t.name} 已按「{_t.archive_kind}」归档，不能重新启用；'
+              f'如返聘请重新建立教师档案', 'danger')
+        return redirect(url_for('users.list_users'))
     was_active = user.is_active
     user.is_active = not user.is_active
     # P1 M-03：停用即吊销小程序旧令牌（网页端由 session_guard 的 is_active 检查兜住）
     if was_active and not user.is_active:
         user.wx_token_ver = int(user.wx_token_ver or 0) + 1
     db.session.commit()
-    # v1.19.49.46：启禁变更 → 同步 Teacher.status (active/left)
+    # v1.19.49.47：启禁变更 → 同步 Teacher.status (active/left)
     teacher_sync.sync_from_user(user)
     db.session.commit()
     status = '启用' if user.is_active else '禁用'
@@ -511,7 +581,7 @@ def import_teachers():
 
         created = 0
         errors = []
-        _new_users = []                          # v1.19.49.46：导入后同步至 teachers
+        _new_users = []                          # v1.19.49.47：导入后同步至 teachers
 
         for row_idx in range(2, ws.max_row + 1):
             phone = str(ws.cell(row=row_idx, column=phone_col).value or '').strip()
@@ -553,7 +623,7 @@ def import_teachers():
             created += 1
 
         db.session.commit()
-        # v1.19.49.46：批量导入后同步到 academic.teachers
+        # v1.19.49.47：批量导入后同步到 academic.teachers
         for u in _new_users:
             teacher_sync.sync_from_user(u)
         db.session.commit()

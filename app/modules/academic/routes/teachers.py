@@ -1,4 +1,4 @@
-# StuLink v1.19.49.46 2026-10-10
+# StuLink v1.19.49.47 2026-10-10
 # 教务 · 教师名单：列表 / Excel 导入（模板-预览-确认-密码清单）/ 编辑
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 import io
@@ -74,7 +74,9 @@ def _teacher_filters():
 
 
 def _teacher_query(filters):
-    q = Teacher.query
+    # 2026-10-20：离职/退休已归档教师只允许在「系统管理 → 教师管理」查阅，
+    # 教务名单/导出默认排除（archive_kind 为空才是未归档）。
+    q = Teacher.query.filter(Teacher.archive_kind.is_(None))
     kw = filters.get('kw')
     if kw:
         like = f'%{kw}%'
@@ -99,7 +101,8 @@ def _teacher_query(filters):
 
 
 def _subject_options():
-    rows = db.session.query(Teacher.subject).distinct().all()
+    rows = (db.session.query(Teacher.subject)
+            .filter(Teacher.archive_kind.is_(None)).distinct().all())
     return sorted({r[0] for r in rows if r[0]})
 
 
@@ -405,7 +408,7 @@ def teacher_edit(tid):
             if val is not getattr(t, field):
                 setattr(t, field, val)
                 changes.append(label)
-        # v1.19.49.46：教师档案变更 → 同步回写到关联的 users 账号（admin 自动 skip）
+        # v1.19.49.47：教师档案变更 → 同步回写到关联的 users 账号（admin 自动 skip）
         back_changes = teacher_sync.sync_from_teacher(t, renamed_from=None)
         if back_changes:
             changes.extend(back_changes)
