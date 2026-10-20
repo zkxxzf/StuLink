@@ -105,8 +105,8 @@
                         {% else %}
                         <span class="badge bg-warning text-dark">未填</span>
                         {% endif %}
-                        {% if not r.t.id_card_enc %}
-                        <span class="badge bg-light text-danger border ms-1" title="缺身份证则无法统计年龄">缺证件</span>
+                        {% if not r.t.birth_date and not r.t.id_card_enc %}
+                        <span class="badge bg-light text-danger border ms-1" title="缺出生日期则无法统计年龄（教育统计只认生日，不必填身份证）">缺生日</span>
                         {% endif %}
                         {% if not r.t.subject %}
                         <span class="badge bg-light text-danger border" title="缺学科则无法统计分课程">缺学科</span>

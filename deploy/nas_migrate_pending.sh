@@ -126,6 +126,7 @@ run_mig scripts/migrate/migrate_exam_band_selection_20261015.py     # 划线：e
 # 2026-10-20：教育事业统计 —— teachers 补统计属性列 + 新建校舍资产年度参数表
 # （必须在其它"读 Teacher/Student 模型"的数据脚本之前跑，否则 ORM 缺列会报错）
 run_mig scripts/migrate/migrate_teacher_edu_fields_20261020.py --apply  # teachers：性别/民族/学历/职称/人员类别/在编/外籍
+run_mig scripts/migrate/migrate_teacher_birth_20261020.py --apply       # teachers：出生日期（教育统计年龄主口径）
 run_mig scripts/migrate/migrate_edu_stat_asset_20261020.py --apply      # 新建 edu_stat_assets（校舍/资产/达标项）
 # 2026-10-15：考试选科快照滞后修正（学生转科后 exam_scores 的选科/方向没跟上；幂等，须 --apply）
 run_mig scripts/fix/fix_exam_selection_snapshot_20261015.py --allow-fail --apply  # 修数据：按实考科目+名册刷新快照并重算排名（无不符行时输出「无需修正」）
