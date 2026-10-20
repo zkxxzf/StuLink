@@ -81,7 +81,10 @@
         box.innerHTML = rows.map(function (a) {
             return '<li>'
                 + '<span class="gd-tl-ic text-' + esc(a.tone) + '"><i class="bi ' + esc(a.icon) + '"></i></span>'
-                + '<div class="flex-grow-1"><div class="small">' + esc(a.title) + '</div>'
+                + '<div class="flex-grow-1"><div class="small">'
+                + (a.url ? '<a class="text-reset text-decoration-none" href="'
+                    + esc(a.url) + '">' + esc(a.title) + '</a>' : esc(a.title))
+                + '</div>'
                 + '<div class="text-muted small">' + esc(a.meta) + '</div></div>'
                 + '<span class="gd-tl-time">' + esc(a.time) + '</span></li>';
         }).join('');

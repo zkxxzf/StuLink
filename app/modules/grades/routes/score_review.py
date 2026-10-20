@@ -168,9 +168,9 @@ def review_audit(rid):
     """批准 / 驳回（审批与「批准并应用」逻辑见 review_service.audit_review）。"""
     r = _review_or_404(rid)
     back = redirect(url_for('grades.reviews_manage_page'))
-    # H-02：申请人不得审批本人单据（含管理员）。服务层还有一道，
-    # 这里提前拦下并留 WARNING，避免"自己批自己"在页面上看起来合法。
-    if r.applicant_id == current_user.id:
+    # H-02：申请人不得审批本人单据（服务层还有一道）。2026-10-20 用户口径：
+    # **管理员例外** —— 管理员是最高权限、不存在"上级"，可审批自己的提交。
+    if r.applicant_id == current_user.id and current_user.role != 'admin':
         log_operation(current_user, '审批被拒', '成绩复核', r.exam_id,
                       '复核单 #%d：不得审批本人申请' % r.id,
                       module='grades', severity='WARNING')
