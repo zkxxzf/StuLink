@@ -177,7 +177,9 @@
                         <form method="POST" action="{{ url_for('users.reset_password', id=u.id) }}" style="display:inline;"
                               onsubmit='return confirm({{ ("确定重置 " + (u.real_name or u.username or "") + " 的密码？新口令是随机生成的，重置后在本页一次性显示。")|tojson }})'>
                             <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                            <button type="submit" class="btn btn-sm btn-outline-info" title="重置密码" aria-label="重置密码"><i class="bi bi-key"></i></button>
+                            <button type="submit" class="btn btn-sm btn-outline-info" title="重置该用户密码" aria-label="重置该用户密码">
+                                <i class="bi bi-key"></i> 重置密码
+                            </button>
                         </form>
                         {# 2026-10-20：教师删除/归档 —— 仅有关联教师档案、未归档、非管理员时显示 #}
                         {% if _t and not _t.archive_kind and u.role != 'admin' and u.id != current_user.id %}
