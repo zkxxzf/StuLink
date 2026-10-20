@@ -21,9 +21,15 @@ HISTORY_DOC = os.path.join(ROOT, 'docs', '规范与说明', '历史迁移脚本�
 RUNNER = os.path.join(ROOT, 'deploy', 'nas_migrate_pending.sh')
 
 # 迁移脚本命名：migrate_/fix_/backfill_/apply_/import_bands_ 等，统一在 scripts/ 下
+# 2026-10-20：只认**单层**脚本（scripts/<子目录>/<文件名>.py）——
+# `scripts/seed/g2025/specs.py` 这类包内模块不是可执行迁移，不能算「清单登记」。
 _SCRIPT_RE = re.compile(
-    r'scripts/(?:migrate|fix|backfill|apply|seed)/[A-Za-z0-9_./-]+\.py')
+    r'scripts/(?:migrate|fix|backfill|apply|seed)/[A-Za-z0-9_.-]+\.py')
 _RUN_RE = re.compile(r'run_mig\s+(scripts/[A-Za-z0-9_./-]+\.py)')
+# 清单里明确写「手工执行 / 未加进执行器」的条目：不要求出现在 nas_migrate_pending.sh
+# （典型：依赖外部源文件的一次性导入，生产按需手工跑）
+_MANUAL_HINTS = ('未加进 `nas_migrate_pending.sh`', '未加进执行器',
+                 '手工执行', '手工跑', '人工执行')
 # 清单正文里只要点到文件名（C 组「已随版本执行」只写模块名、不带路径/后缀）也算已登记
 _DOC_NAME_RE = re.compile(r'([A-Za-z][A-Za-z0-9_]*\.py)')
 _DOC_STEM_RE = re.compile(
@@ -73,6 +79,15 @@ def _unregistered(doc_text, doc, runner):
                   if os.path.basename(p) not in known)
 
 
+def _manual_scripts(doc_text):
+    """清单里标注「手工执行 / 未加进执行器」的脚本（不要求出现在执行器）。"""
+    out = set()
+    for line in doc_text.splitlines():
+        if any(h in line for h in _MANUAL_HINTS):
+            out |= {_norm(m) for m in _SCRIPT_RE.findall(line)}
+    return out
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('--strict', action='store_true',
@@ -90,8 +105,9 @@ def main():
     # 只保留真实存在的脚本，避免文档里的示例路径干扰
     doc = {p for p in doc if os.path.exists(os.path.join(ROOT, p))}
     runner = {p for p in runner if os.path.exists(os.path.join(ROOT, p))}
+    manual = _manual_scripts(doc_text)
 
-    only_doc = sorted(doc - runner)
+    only_doc = sorted(doc - runner - manual)
     only_run = sorted(runner - doc)
 
     unregistered = _unregistered(doc_text, doc, runner)
