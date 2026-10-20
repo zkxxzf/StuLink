@@ -3,7 +3,7 @@
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
 [![Python](https://img.shields.io/badge/python-3.11+-green.svg)](https://python.org)
 [![Flask](https://img.shields.io/badge/flask-3.x-lightgrey.svg)](https://flask.palletsprojects.com/)
-[![Version](https://img.shields.io/badge/version-1.19.49.41-orange.svg)](https://gitee.com/zkxxzf/StuLink)
+[![Version](https://img.shields.io/badge/version-1.19.49.42-orange.svg)](https://gitee.com/zkxxzf/StuLink)
 
 面向中学的综合学生管理平台，采用 **双站点 + 多模块 + 一模块一库** 的故障隔离架构：
 
@@ -301,6 +301,7 @@ StuLink/
 
 | 版本 | 日期 | 亮点 |
 |---|---|---|
+| **1.19.49.42** | 2026-10-20 | **合并 sakaay 增量**：成绩仪表盘动态不再混入调课申请/审批（调课归教务/教师工作台）· 成绩首页新增「开具成绩证明」直达入口 · 打印汇总与小程序入口图标微调 |
 | **1.19.49.41** | 2026-10-20 | **合并 sakaay 新 PR（第 16·17 轮审计）+ 合并后加固**：恢复「校长」身份（全校查看 + 全校事务审批）· 教务主任补审批 · 年级长/教务员补事务权限 · 仪表盘动态调课申请/审批 · 成绩导入班级列丢失与前端图表实例泄漏修复 · MCP 频控加 `_prune_store` 与锁定三元组；合并后加固：`import_exam36` 加 `--apply` 门控/整库备份/失败退出码、`sync_role_groups` 加整库备份与迁移登记、自审口径注释对齐（新增 SR-19；M-4 断言适配 `write_table`） |
 | **1.19.49.39** | 2026-10-20 | **合并后复核修复 5 项**：小程序调课列表无教师档案时 fail-closed（原会读到全校调课单）· 成绩复核录入补 NaN/inf 拦截与可见范围下推 SQL · 小程序教师名单改为 `academic.view`（与网页端同口径）· 操作日志清理先校验导出完整性并整库备份再删 · MCP 读频控表满不再全量清零（新增 SR-18 六条防回归） |
 | **1.19.49.38** | 2026-10-20 | **合并 sakaay 新 PR（第 12·13 轮审计整改）**：wxapi 按领域**分包重构**（core/auth/dorm/exam/grades/notice/workbench/academic）+ 微信绑定返回 openid + 教务课表/业绩/查课接口 · 监考编排改按**累计时长均衡**并加交换降差 · 学生服务补 exam_id 与排名 · 登录限流**持久化**、小程序令牌**版本化**（登出/改密/停用即失效）、AI 每日配额 · 新增运维脚本（日志/明文备份/回收站清理）与容器加固；合并后保留 master 侧修复（手机号加密脚本预览不改库/幂等/备份、`--allow-fail`、迁移执行器补列前置） |
