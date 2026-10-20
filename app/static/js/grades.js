@@ -338,6 +338,23 @@ function bindFilters(){
         var q = buildQuery();
         window.location.href = '/grades/export/' + state.tab + q;
     });
+    /* 2026-10-20 一键导出：与当前页签无关 —— 年级/学科/教师一次带走；
+       班级逐生明细只在「班级分析」页（明确在看某个班）时才带上。 */
+    $('#gExportAll').on('click', function(){
+        if (!state.examId){ alert('请先选择考试'); return; }
+        var qs = ['exam_id=' + state.examId];
+        if (state.tab === 'class' && state.class_name)
+            qs.push('class_name=' + encodeURIComponent(state.class_name));
+        if (state.classes.length)
+            qs.push('classes=' + encodeURIComponent(state.classes.join(',')));
+        if (state.direction)
+            qs.push('direction=' + encodeURIComponent(state.direction));
+        if (state.selection)
+            qs.push('selection=' + encodeURIComponent(state.selection));
+        if (state.denom && state.denom !== 'ref')
+            qs.push('denom=' + state.denom);
+        window.location.href = '/grades/export/full?' + qs.join('&');
+    });
     // 2026-10-16 汇总打印版：链接跟着当前考试走（考试态 ?exam= 已由服务端带入，
     // 这里兜底用 state.examId；新窗口打开，不影响当前分析页的筛选状态）
     $('#gPrintSummary').attr('href', '/grades/print-summary?exam=' + (state.examId || ''));
@@ -366,12 +383,10 @@ function classCandidates(){
     return list;
 }
 
-// 默认对比班：约班级总数的 1/3（至少 2 个，且不超过后端 20 班上限）
+// 默认对比班：本场**全部班级**（2026-10-20 用户口径：对比表要能看全年级，
+// 原来是取 1/3 → 11 个班只出 4 个，用户以为数据缺了班级）
 function defaultClasses(){
-    var list = classCandidates();
-    if (list.length <= 2) return list.slice();
-    var n = Math.min(MAX_COMPARE, Math.max(2, Math.ceil(list.length / 3)));
-    return list.slice(0, n);
+    return classCandidates().slice(0, MAX_COMPARE);
 }
 
 // 年级变化时同步候选列表，并把选中值收敛到仍存在的班级
@@ -416,8 +431,7 @@ function bindClassMulti(){
         if (state.tab === 'compare') loadCurrent();
     });
     // 快捷操作：只在对比 tab 生效时重新拉数据，避免在其他 tab 触发无意义请求
-    [['#gCmDefault', function(){ return defaultClasses(); }],
-     ['#gCmAll', function(){ return classCandidates().slice(0, MAX_COMPARE); }],
+    [['#gCmAll', function(){ return classCandidates().slice(0, MAX_COMPARE); }],
      ['#gCmClear', function(){ return []; }]].forEach(function(pair){
         $(pair[0]).on('click', function(){
             state.classes = pair[1]();
@@ -1219,8 +1233,21 @@ $(function(){
         $('#aiModalTitle').text(title);
         $('#aiModalBody').html(bodyHtml);
         $('#aiModalFoot').html(footHtml || '');
-        var m = new bootstrap.Modal(document.getElementById(aiModalId));
-        m.show();
+        // 2026-10-20：复用已有实例 —— 每次 new Modal 都会再挂一套事件监听与
+        // 一个 backdrop 节点（Bootstrap 不允许同元素多实例，Data.set 会静默失败），
+        // AI 面板开 20 次就多 60 个监听、20 个节点。
+        var el = document.getElementById(aiModalId);
+        var m = bootstrap.Modal.getOrCreateInstance(el);
+        if (m._isTransitioning) {
+            // 关闭动画还没走完时 show() 会被 Bootstrap 直接 return（点了像没反应），
+            // 复用实例后必须等 hidden 再显示 —— 原先是 new 一个新对象绕过去的。
+            el.addEventListener('hidden.bs.modal', function once(){
+                el.removeEventListener('hidden.bs.modal', once);
+                m.show();
+            });
+        } else {
+            m.show();
+        }
         return m;
     }
     function hideAi(){
@@ -1529,6 +1556,18 @@ $(function(){
         return [p[0], p[2], p[3], p[4], p[1], p[5]].filter(function(c){ return !!c; });
     }
     var aiCharts = [];   // {chart, spec} —— 主题切换时按新色板重绘
+    var aiResizeBound = false;
+    /* resize 只绑一次，遍历当前存活实例 —— 原先是每张图各绑一个匿名函数，
+       重绘后旧图的监听还留在 window 上（既泄漏闭包，又对已销毁实例调 resize）。 */
+    function bindAiResize(){
+        if (aiResizeBound) { return; }
+        aiResizeBound = true;
+        window.addEventListener('resize', function(){
+            aiCharts.forEach(function(x){
+                try { if (!x.chart.isDisposed()) { x.chart.resize(); } } catch (e) {}
+            });
+        });
+    }
     function aiChartOption(s){
         var P = aiPalette();
         var opt;
@@ -1592,6 +1631,22 @@ $(function(){
             specs.push(['cp', '本次 vs 上次 均分', 'bar', cp.labels, cp.values, '均分']);
 
         if (!specs.length) return;
+        // 2026-10-20：重绘前销毁上一轮实例 —— 每跑一次分析都会整块替换 #aiChatCharts，
+        // 不 dispose 的话旧 ECharts 实例连同 canvas 会留在 echarts 的全局实例表里，
+        // 连跑十次就是几十个图表对象（约占几十 MB），属于真泄漏。
+        var host = $(container)[0];
+        aiCharts = aiCharts.filter(function(x){
+            var dom = x.chart.getDom ? x.chart.getDom() : null;
+            // 每点一次「AI 分析」都会重建弹窗 body（showAi 里 .html(...)），
+            // 旧图的 dom 早已脱离文档 —— 用 contains(document) 而不是 contains(host)，
+            // 否则跨轮次的实例永远清不掉。
+            var gone = !dom || !document.documentElement.contains(dom);
+            if (gone || (host && $.contains(host, dom))) {
+                try { x.chart.dispose(); } catch (e) {}
+                return false;
+            }
+            return true;
+        });
         var html = '<div class="row g-3 mt-1">';
         specs.forEach(function(s){ html += chartCard(s[1], 'aiChart_' + s[0]); });
         html += '</div>';
@@ -1630,7 +1685,7 @@ $(function(){
             }
             chart.setOption(opt);
             aiCharts.push({chart: chart, spec: s});
-            window.addEventListener('resize', function(){ chart.resize(); });
+            bindAiResize();
         });
     }
 

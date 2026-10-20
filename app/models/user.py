@@ -56,11 +56,36 @@ class User(UserMixin, db.Model):
             'dorm_manager': '宿管教师',
             'homeroom_teacher': '班主任',
             'grade_leader': '年级长',
+            'principal': '校长',
             'school_viewer': '全校组',
             'teacher': '普通教师',
             'staff': '教职人员',
         }
         return role_names.get(self.role, self.role)
+
+    @property
+    def is_top_reviewer(self):
+        """是否最高审批身份：内置 admin 或「校长」身份组（2026-10-20 用户口径）。
+
+        最高审批身份可以审批自己提交的调课/成绩复核（不存在"上级"）；
+        其他身份仍然禁止自审自批。校长与管理员的判断放在一处，避免各入口
+        各写一份 role == 'admin' 漏改。
+        """
+        if (self.role or '') == 'admin':
+            return True
+        pg = (getattr(self, 'active_group', None)
+              or getattr(self, 'permission_group', None))
+        if pg is None and self.permission_group_id:
+            # 新建/刚改组时 backref 可能未刷新，按外键直查兜底
+            try:
+                from app.models.permission_group import PermissionGroup
+                pg = PermissionGroup.query.get(self.permission_group_id)
+            except Exception:  # noqa: BLE001
+                pg = None
+        if pg is None:
+            return False
+        return ((getattr(pg, 'role', '') or '') == 'principal'
+                or (getattr(pg, 'name', '') or '') == '校长')
 
     @property
     def display_role(self):

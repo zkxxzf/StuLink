@@ -102,6 +102,12 @@ def attendance_record():
         msg = f'已记录 {len(created)} 条考勤'
         if skipped:
             msg += f'；{skipped} 条因学号不属于该班被忽略'
+        # 2026-10-19 第十四轮：批量写考勤补审计
+        from app.utils.helpers import log_operation
+        log_operation(current_user, '记录', '考勤', None,
+                      f'{grade}{class_name} {attend_date} 第{period}节：'
+                      f'{len(created)} 条（跳过 {skipped}）',
+                      module='workbench')
         flash(msg, 'success' if created else 'warning')
     else:
         flash('未找到考勤数据', 'warning')

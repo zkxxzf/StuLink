@@ -1,4 +1,4 @@
-# StuLink v1.19.49.35 2026-10-19
+# StuLink v1.19.49.39 2026-10-19
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 """小程序成绩复核审批（grades.score_edit）。
 
@@ -84,8 +84,10 @@ def wx_review_audit(rid):
     r = db.session.get(ScoreReviewRequest, rid)
     if r is None:
         return wx_err('复核单不存在', 404)
-    # H-02：申请人不得审批本人单据（服务层还有一道，这里给小程序明确的 403）
-    if r.applicant_id == g.wx_user.id:
+    # H-02：申请人不得审批本人单据（服务层还有一道，这里给小程序明确的 403）。
+    # 2026-10-20 用户口径：管理员 / 校长例外 —— 最高审批身份可审批自己的提交。
+    if r.applicant_id == g.wx_user.id \
+            and not getattr(g.wx_user, 'is_top_reviewer', False):
         return wx_err('不得审批本人提交的复核申请', 403)
     exam = db.session.get(Exam, r.exam_id)
     if exam is not None:

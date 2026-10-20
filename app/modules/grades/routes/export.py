@@ -5,7 +5,6 @@ import io
 from datetime import datetime
 
 import openpyxl
-from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
 from flask import send_file, abort, request, current_app
 from flask_login import login_required, current_user
 from app.models.grades import Exam
@@ -13,21 +12,14 @@ from app.modules.grades import bp
 from app.modules.grades.services import tab_service, scope as scope_service
 from app.modules.grades.services import compare_service
 from app.utils.decorators import perm_required
-from app.utils.export_helpers import xl_row   # M-4：公式注入防护
 from app.utils.helpers import log_operation
+from app.utils.xlsx_style import write_table   # 表头样式 + xl_row 注入防护
 
 _TAB_LABEL = {'grade': '年级分析', 'class': '班级分析', 'subject': '学科分析',
               'teacher': '任课教师分析', 'compare': '班级对比分析'}
 # 注：tab 可见性统一由 analysis._guard_tab 判定（含 scope_type=school 校级领导档），
 # 此处不再维护第二份 _TAB_BY_ROLE —— 2026-10-12 审计 L-1：两份字典口径不一致
 # 曾导致校级领导能看不能导。
-
-_HF = Font(bold=True, color='FFFFFF')
-_HFL = PatternFill(start_color='4472C4', end_color='4472C4', fill_type='solid')
-_TB = Border(left=Side(style='thin'), right=Side(style='thin'),
-             top=Side(style='thin'), bottom=Side(style='thin'))
-_CENTER = Alignment(horizontal='center', vertical='center')
-
 
 def _build_workbook(tab_label, exam_name, tables):
     wb = openpyxl.Workbook()
@@ -47,22 +39,33 @@ def _build_workbook(tab_label, exam_name, tables):
 
     for tkey, table in tables.items():
         ws = wb.create_sheet(title=(table.get('title') or tkey)[:31])
-        headers = [c['label'] for c in table['columns']]
-        ws.append(headers)
-        for ci in range(1, len(headers) + 1):
-            c = ws.cell(row=1, column=ci)
-            c.font = _HF
-            c.fill = _HFL
-            c.alignment = _CENTER
-            c.border = _TB
-        for row in table['rows']:
-            # M-4：单元格值统一走 xl_row（防 Excel/WPS 公式注入）
-            ws.append(xl_row([row.get(c['key']) for c in table['columns']]))
-        for row_cells in ws.iter_rows(min_row=2):
-            for c in row_cells:
-                c.border = _TB
-        ws.freeze_panes = 'A2'
+        # 表头样式与 M-4 公式注入防护都在 write_table 里（与一键导出同一份）
+        write_table(ws, table)
     return wb
+
+
+def _teacher_payload(exam, subject, denom):
+    """教师分析取数（/export/teacher 与一键导出共用同一份权限口径）"""
+    scope_type, _ = scope_service.get_scope(current_user)
+    if current_user.has_role('teacher'):
+        links = scope_service.teacher_links(current_user)
+        return tab_service.teacher_tab(exam.id, subject=subject or None,
+                                       links=links, grade=exam.grade,
+                                       denom=denom)
+    if (current_user.role == 'admin'
+            or scope_service.has_user_scope(current_user)):
+        return tab_service.teacher_tab(exam.id, subject=subject or None,
+                                       links=None, grade=exam.grade,
+                                       denom=denom)
+    if scope_type == 'grade':
+        from app.models.grades import TeacherSubjectLink
+        # 2026-10-19：管理年级可多选，取本场考试年级（已校验可见）
+        links = TeacherSubjectLink.query.filter_by(
+            grade=exam.grade, active=True).all()
+        return tab_service.teacher_tab(exam.id, subject=subject or None,
+                                       links=links, grade=exam.grade,
+                                       denom=denom)
+    abort(403)
 
 
 @bp.route('/export/<tab>')
@@ -123,28 +126,7 @@ def export_tab(tab):
                                                   direction, denom)
         else:
             # 教师分析：与 analysis API 同权限
-            scope_type, _ = scope_service.get_scope(current_user)
-            if current_user.has_role('teacher'):
-                links = scope_service.teacher_links(current_user)
-                payload = tab_service.teacher_tab(exam_id, subject=subject or None,
-                                                  links=links, grade=exam.grade,
-                                                  denom=denom)
-            elif (current_user.role == 'admin'
-                    or scope_service.has_user_scope(current_user)):
-                payload = tab_service.teacher_tab(exam_id, subject=subject or None,
-                                                  links=None, grade=exam.grade,
-                                                  denom=denom)
-            elif scope_type == 'grade':
-                from app.models.grades import TeacherSubjectLink
-                # 2026-10-19：管理年级可多选，取本场考试年级（已校验可见）
-                links = TeacherSubjectLink.query.filter_by(
-                    grade=exam.grade, active=True).all()
-                payload = tab_service.teacher_tab(exam_id, subject=subject or None,
-                                                  links=links,
-                                                  grade=exam.grade,
-                                                  denom=denom)
-            else:
-                abort(403)
+            payload = _teacher_payload(exam, subject, denom)
         tables = payload.get('tables') or {}
         if not tables:
             tables = {'__empty': {'title': '提示', 'columns': [{'key': 'msg', 'label': '说明',

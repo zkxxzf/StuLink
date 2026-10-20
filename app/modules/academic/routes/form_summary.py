@@ -25,6 +25,31 @@ import os
 _XLSX_MIME = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
 
 
+def _may_take_materials(tpl):
+    """材料包（附件本体）下载权：表单创建人 / 内置 admin / 管理员组成员。
+
+    2026-10-19 第十四轮（用户要求"坚决解决高危"）：原只查 `academic.edit`，
+    而该权限点可以被下发给年级长 —— 一次 GET 就能打包全校教师/学生上传的
+    证照扫描件（材料包是**文件本体**，不是统计）。
+    统计类接口（汇总表 / 未交名单 / 导出 Excel）仍按 `academic.edit`，
+    它们不含附件内容；材料清单页只列文件名，也不再对外提供单文件下载。
+    """
+    if tpl is None:
+        return False
+    me = getattr(current_user, 'id', None)
+    if me is not None and tpl.created_by and tpl.created_by == me:
+        return True
+    if (getattr(current_user, 'role', '') or '') == 'admin':
+        return True
+    if (getattr(current_user, 'username', '') or '') == 'admin':
+        return True
+    from app.utils.permission_map import PROTECTED_GROUP_NAMES
+    for g in (current_user.permission_groups or []):
+        if (g.name or '') in PROTECTED_GROUP_NAMES:
+            return True
+    return False
+
+
 def _json(success, message='', data=None):
     return jsonify({'success': success, 'message': message, 'data': data or {}})
 
@@ -152,8 +177,11 @@ def cleanup_stale_packages(max_age_hours=24):
 @perm_required('academic.edit')
 def form_package_download(form_id):
     """执行打包并 send_file"""
-    cleanup_stale_packages()   # M-6：顺带清扫残留临时包
     tpl = _tpl_or_404(form_id)
+    # 2026-10-19 第十四轮：材料包=附件本体，收口到创建人/管理员（见 helper 注释）
+    if not _may_take_materials(tpl):
+        abort(403, description='仅表单创建人或管理员可打包下载材料')
+    cleanup_stale_packages()   # M-6：顺带清扫残留临时包
     f = _filters()
     structure = (request.args.get('structure') or 'class_student').strip()
     if structure not in ('class_student', 'question_class', 'flat'):

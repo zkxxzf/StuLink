@@ -67,10 +67,18 @@ def _step_of(item):
 
 
 def _decorate_review(items):
-    """给列表项补 `can_review`（当前这一级是否轮到我审）与 `review_step_name`。"""
+    """给列表项补 `can_review`（当前这一级是否轮到我审）与 `review_step_name`。
+
+    2026-10-19 第十三轮审计：原来只判权限点，与 `swap_service.can_review`
+    （自审拦截）不一致 —— 会出现"列表上显示可审批、点进去 403"。
+    这里先补自审拦截；更细的 partner_status 仍由服务层在提交时兜住。
+    """
+    my_uid = _applicant()[0]
     for item in items:
         step = _step_of(item) if item.get('status') == 'pending' else None
-        item['can_review'] = bool(step and _has_perm(step['perm']))
+        is_mine = (item.get('applicant_uid') == my_uid)
+        item['can_review'] = bool(step and _has_perm(step['perm'])
+                                  and not is_mine)
         item['review_step_name'] = step['name'] if step else None
     return items
 

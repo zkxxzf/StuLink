@@ -283,8 +283,13 @@ def restore(rec):
             savepoint.rollback()
             skipped.append(f'{type(e).__name__}')
             logger.info('回收站恢复跳过一行 kind=%s err=%s', rec.kind, e)
-    rec.restored_at = datetime.now()
-    db.session.commit()
+    # 2026-10-20 第十七轮审计：0 行成功时不得写 restored_at —— 否则路由判
+    # "已恢复过"拒绝重试，而实际一行都没恢复（主键/唯一键冲突时会发生）。
+    if okn:
+        rec.restored_at = datetime.now()
+        db.session.commit()
+    else:
+        db.session.rollback()
     # 2026-10-18：字典项恢复后必须清缓存，否则下拉框在缓存 TTL 内仍看不到它
     if okn and rec.kind == 'dictionary_item':
         try:

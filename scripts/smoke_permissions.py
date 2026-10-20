@@ -182,7 +182,8 @@ with app.test_client() as c:
                                   'grades:manage': 'write', 'points:view': 'read',
                                   'academic:view': 'read'}}]},
         headers={'X-CSRFToken': csrf})
-    check('矩阵保存 API', r.status_code == 200 and r.get_json()['success'])
+    check('矩阵保存 API', r.status_code == 200 and r.get_json()['success'],
+          f'HTTP {r.status_code} {r.get_data(as_text=True)[:120]}')
     with app.app_context():
         xz_g = PermissionGroup.query.get(xz_gid)
         check('保存后只读组教学管理=写入', 'grades.edit' in xz_g.get_menu_keys())

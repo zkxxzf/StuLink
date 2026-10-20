@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-# StuLink v1.19.49.35 2026-10-15
+# StuLink v1.19.49.39 2026-10-15
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 """组合总分线（2026-10-15）：给 exam_bands 补 selection 列 + 唯一键扩到含 selection。
 

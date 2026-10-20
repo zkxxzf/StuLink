@@ -1,9 +1,10 @@
-# StuLink v1.19.49.35 2026-10-10
+# StuLink v1.19.49.39 2026-10-10
 # 成绩统计分析服务：一次载入考试成绩数据，提供各 tab 需要的聚合（纯函数 + 内存计算）
 # 口径遵循设计文档第 8 章：参考学生=有总分行（至少一应考科有分），不分学籍状态
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 import logging
 import math
+import re
 import statistics
 import threading
 import time
@@ -701,12 +702,73 @@ def trend_exams(grade):
 #   ⑤ 均分：   上届均分 | 排名 | 最高分
 # 每科一张表（总赋/语文/数学/外语/物理/化学/生物/政治/地理），表内按方向分组
 # （物理类 / 历史类），每组各班 + 「班均」「年级」两个汇总行。
-# 「211 / 特控 / 本科」直接取本场该（方向×科目）的分层线（库里的层名就是这三个）；
 # 「进退步」= 与上一场同层上线人数之差（多了为正）；「上届均分」= 上一场该班该科均分。
+#
+# 2026-10-20 用户反馈：本场没划 211 线，页面却还挂着「211上线」；均分组缺「去差均分」。
+# 于是列组改为**按本场实际分层动态生成** —— 211/特控/本科 沿用样表的差异化列
+# （2 / 4 / 3 列），其余层（前10…前550 等）统一 2 列；均分组新增「去差均分」
+# （按班型剔除各班总分末尾 N 人，与全局对比同一口径）。层数多的场次由模板自动切
+# A4 横向并缩字号，见 print_summary.html。
 
-_PS_TAGS = (('211', '211', '211上线'),
-            ('特控', '特控', '特控上线'),
-            ('本科', '本科', '本科上线'))
+_PS_LAYER_ORDER = {'211': 0, '特控': 1, '本科': 2, 'rank': 3}
+# 小程序端仍按这三个 key 取数（wx_manage_print_summary），补别名用
+_PS_LEGACY = ('211', '特控', '本科')
+
+
+def _ps_layer_kind(name):
+    """层名 → 列组类型：211/特控/本科 沿用样表列，其余（前N 等）统一 2 列"""
+    for kind in _PS_LEGACY:
+        if kind in (name or ''):
+            return kind
+    return 'rank'
+
+
+def _ps_layer_cells(kind):
+    """每层占哪几列（顺序即显示顺序）"""
+    if kind == '特控':
+        return ['n', 'move', 'rate', 'rank']
+    if kind == '本科':
+        return ['n', 'rate', 'rank']
+    return ['n', 'rate']
+
+
+def _ps_layer_num(name):
+    m = re.search(r'(\d+)', name or '')
+    return int(m.group(1)) if m else 10 ** 9
+
+
+def _ps_layers(data):
+    """本场实际存在的分层（总分优先，取不到再看单科），按 211→特控→本科→前N 排好"""
+    names = []
+
+    def _collect(subject):
+        for d in (data.directions or ['']):
+            for n, _lo in data.band_list(d or '', subject):
+                if n and n not in names:
+                    names.append(n)
+
+    _collect(TOTAL_SUBJECT)
+    if not names:
+        for subject in SUBJECTS:
+            _collect(subject)
+    names.sort(key=lambda n: (_PS_LAYER_ORDER[_ps_layer_kind(n)],
+                              _ps_layer_num(n)))
+    out = []
+    for n in names:
+        kind = _ps_layer_kind(n)
+        # 样表列组名是「211上线 / 特控上线 / 本科上线」；名次段直接叫「前10」
+        label = n if kind == 'rank' else (
+            (n[:-1] if n.endswith('线') else n) + '上线')
+        out.append({'key': n, 'label': label, 'kind': kind,
+                    'cells': _ps_layer_cells(kind)})
+    return out
+
+
+def _ps_alias_legacy(row, layers):
+    """小程序端按 211/特控/本科 取 key：补一份别名，老客户端不会变成空白"""
+    for it in layers:
+        if it['kind'] in _PS_LEGACY:
+            row['bands'].setdefault(it['kind'], row['bands'].get(it['key']))
 
 
 def _ps_find_band(bands, key):
@@ -740,7 +802,7 @@ def _ps_class_teachers(grade):
     return out
 
 
-def _ps_class_pass(data, sub, cls, d):
+def _ps_class_pass(data, sub, cls, d, layers, trim_nos=frozenset()):
     """某班某科**逐生**统计：分数列表 + 各层上线人数。
 
     ⚠️ 2026-10-16 用户要求复查「不同学科时上线数的计算是否正确」，查出真问题：
@@ -752,16 +814,17 @@ def _ps_class_pass(data, sub, cls, d):
     选科组合取线**（`band_list(d, sub, 学生组合)`，该组合没线才回落方向线/通用线）。
     单科同理 —— 单科线若挂在组合下（如某组合单独的化学线），也必须逐生取。
 
-    返回 (scores, on_map, band_dir)：
+    返回 (scores, on_map, band_dir, trim_avg)：
       scores    该班该科有效分数（均分/最高分用）
-      on_map    {'211': n|None, '特控': n|None, '本科': n|None}；None = 本场没这条层
+      on_map    {层名: n|None}；None = 本场没这条层（层名来自 `_ps_layers`）
       band_dir  方向级层序列（仅用于表头展示下界）
+      trim_avg  去差均分（剔除本班总分末尾 N 人后重算，无去差规则时为全体均分）
     """
     bl_dir = data.band_list(d or '', sub)
     bl_cache = {}
-    scores = []
-    hit = {k: 0 for k, _a, _b in _PS_TAGS}
-    exists = {k: False for k, _a, _b in _PS_TAGS}
+    scores, trim_scores = [], []
+    hit = {it['key']: 0 for it in layers}
+    exists = {it['key']: False for it in layers}
     for r in data.totals_of(class_name=cls, direction=d):
         if sub == TOTAL_SUBJECT:
             sc = r.get('score')
@@ -770,38 +833,45 @@ def _ps_class_pass(data, sub, cls, d):
         if sc is None:
             continue
         scores.append(sc)
+        if r.get('no') not in trim_nos:
+            trim_scores.append(sc)
         sel = r.get('selection') or ''
         if sel not in bl_cache:
             bl_cache[sel] = data.band_list(d or '', sub, sel) if sel else bl_dir
         bset = bl_cache[sel]
-        for key, _a, _b in _PS_TAGS:
-            b = _ps_find_band(bset, key)
+        for it in layers:
+            b = _ps_find_band(bset, it['key'])
             if b is None:
                 continue
-            exists[key] = True
+            exists[it['key']] = True
             if sc >= b[1]:
-                hit[key] += 1
-    on_map = {k: (hit[k] if exists[k] else None) for k, _a, _b in _PS_TAGS}
-    return scores, on_map, bl_dir
+                hit[it['key']] += 1
+    on_map = {k: (hit[k] if exists[k] else None) for k in hit}
+    trim_avg = round(mean(trim_scores), 1) if trim_scores else None
+    return scores, on_map, bl_dir, trim_avg
 
 
-def _ps_metrics(sc, bands, on_map=None, prev_n=None, prev_avg=None):
+def _ps_metrics(sc, bands, layers, on_map=None, prev_on=None,
+                prev_avg=None, trim_avg=None):
     """一个班在该科的完整指标行（上线人数由 `_ps_class_pass` 逐生算好传进来）"""
     n = len(sc)
     row = {'n': n, 'avg': mean(sc), 'max': max(sc) if sc else None,
-           'prev_avg': prev_avg, 'bands': {}}
-    for key, _k2, _label in _PS_TAGS:
+           'prev_avg': prev_avg, 'trim_avg': trim_avg, 'bands': {}}
+    for it in layers:
+        key = it['key']
         cnt = (on_map or {}).get(key)
         if cnt is None or not sc:
             row['bands'][key] = None
             continue
         b = _ps_find_band(bands, key)        # 仅用于展示层名/下界
+        prev_n = (prev_on or {}).get(key)
         # ⚠️ `move` 必须**总是**存在（值可为 None）：模板在严格模式下取不存在的键会直接
         # 500 UndefinedError —— 2026-10-16 用户点开 exam 23（该场没有上一场）时就踩到了。
         row['bands'][key] = {
             'band_name': b[0] if b else '', 'lower': round(b[1], 1) if b else None,
             'n': cnt, 'rate': fmt_rate(cnt, n), 'rank': None,
             'move': (cnt - prev_n) if prev_n is not None else None}
+    _ps_alias_legacy(row, layers)
     return row
 
 
@@ -835,6 +905,11 @@ def print_summary(exam_id):
     teachers = _ps_class_teachers(exam.grade)
     prev = data.prev_exam
     pdata = cached_exam_data(prev.id) if prev is not None else None
+    # 2026-10-20：列组按本场实际分层生成；去差名单两场各算一份（班型口径按场快照）
+    from app.modules.grades.services import report_service as _rs
+    layers = _ps_layers(data)
+    trim_nos = _rs.trimmed_nos(data) if data.total_rows else set()
+    ptrim = _rs.trimmed_nos(pdata) if pdata is not None else set()
 
     subjects = [TOTAL_SUBJECT] + list(SUBJECTS)
     blocks = []
@@ -850,46 +925,51 @@ def print_summary(exam_id):
             # 只统计正规教学班（排除 不分班/已转出/离校），否则这些班会当成一个班显示、还参与排名
             for cls in numeric_classes(data.classes):
                 # 逐生按各自选科组合取线（2026-10-16 复查上线数口径后统一，见 _ps_class_pass）
-                sc, on_map, bands = _ps_class_pass(data, sub, cls, d)
+                sc, on_map, bands, trim_avg = _ps_class_pass(
+                    data, sub, cls, d, layers, trim_nos)
                 if not sc:
                     continue
                 # 上一场同口径：逐生按组合取线算「上次各层上线人数」；取不到再回落不分方向
-                prev_sc, prev_on, _pbl = ([], {}, [])
+                prev_sc, prev_on, _pbl, _ptrim = ([], {}, [], None)
                 if pdata is not None:
-                    prev_sc, prev_on, _pbl = _ps_class_pass(pdata, sub, cls, d)
+                    prev_sc, prev_on, _pbl, _ptrim = _ps_class_pass(
+                        pdata, sub, cls, d, layers, ptrim)
                     if not prev_sc:
-                        prev_sc, prev_on, _pbl = _ps_class_pass(pdata, sub, cls, None)
-                r = _ps_metrics(sc, bands, on_map,
-                                prev_n=prev_on.get('特控'),
-                                prev_avg=mean(prev_sc) if prev_sc else None)
+                        prev_sc, prev_on, _pbl, _ptrim = _ps_class_pass(
+                            pdata, sub, cls, None, layers, ptrim)
+                r = _ps_metrics(sc, bands, layers, on_map, prev_on,
+                                mean(prev_sc) if prev_sc else None, trim_avg)
                 r['cls'] = cls
                 r['teacher'] = teachers.get(cls, '')
                 cls_rows.append(r)
             if not cls_rows:
                 continue
             # 排名：各上线人数排名 + 均分排名（都在本方向内比）
-            for key, _k2, _l in _PS_TAGS:
+            for it in layers:
                 _ps_rank(cls_rows,
-                         lambda r, k=key: (r['bands'].get(k) or {}).get('n'), key)
+                         lambda r, k=it['key']:
+                         (r['bands'].get(k) or {}).get('n'), it['key'])
             _ps_rank(cls_rows, lambda r: r['avg'], 'avg')
             for r in cls_rows:
-                for key, _k2, _l in _PS_TAGS:
-                    it = r['bands'].get(key)
-                    if it is not None:
-                        it['rank'] = r['rank'][key]
+                for it in layers:
+                    band = r['bands'].get(it['key'])
+                    if band is not None:
+                        band['rank'] = r['rank'][it['key']]
                 r['avg_rank'] = r['rank']['avg']
             cls_rows.sort(key=lambda r: r['cls'])
             groups.append({
                 'direction': d or '全体',
                 'rows': cls_rows,
-                'sum_rows': _ps_sum_rows(cls_rows, sub, d, data, pdata),
+                'sum_rows': _ps_sum_rows(cls_rows, sub, d, data, pdata,
+                                         layers, trim_nos, ptrim),
             })
         if groups:
             blocks.append({'subject': sub, 'groups': groups})
+    n_cols = 3 + sum(len(it['cells']) for it in layers) + 4
     return {'exam': {'name': exam.name, 'grade': exam.grade,
                      'date': exam.exam_date.strftime('%Y-%m-%d')},
             'prev_name': prev.name if prev is not None else '',
-            'blocks': blocks}
+            'blocks': blocks, 'layers': layers, 'n_cols': n_cols}
 
 
 def _ps_scores(data, sub, cls, direction):
@@ -907,17 +987,39 @@ def _ps_scores(data, sub, cls, direction):
             if s is not None]
 
 
-def _ps_sum_rows(rows, sub, direction, data, pdata=None):
-    """组末汇总行：班均（各班均分的平均/上线合计）、年级（该方向全体）"""
-    def _agg(label, n_total, avg_v, max_v, bands_n, prev_avg):
-        return {'cls': label, 'teacher': '', 'n': n_total,
-                'avg': avg_v, 'max': max_v, 'prev_avg': prev_avg, 'is_sum': True,
-                'bands': {k: ({'n': (bands_n or {}).get(k), 'rank': None, 'move': None,
-                               'rate': fmt_rate((bands_n or {}).get(k), n_total),
-                               'lower': None, 'band_name': ''}
-                              if (bands_n or {}).get(k) is not None else None)
-                          for k, _k2, _l in _PS_TAGS},
-                'avg_rank': None}
+def _ps_trim_avg(data, sub, cls, direction, trim_nos):
+    """去差均分：剔除各班总分末尾 N 人后的均分（与全局对比同一口径）"""
+    if data is None:
+        return None
+    vals = []
+    for r in data.totals_of(class_name=cls, direction=direction):
+        if r.get('no') in trim_nos:
+            continue
+        sc = r.get('score') if sub == TOTAL_SUBJECT else data.subj.get(
+            (r.get('no'), sub))
+        if sc is not None:
+            vals.append(sc)
+    return round(mean(vals), 1) if vals else None
+
+
+def _ps_sum_rows(rows, sub, direction, data, pdata=None, layers=None,
+                 trim_nos=frozenset(), ptrim=frozenset()):
+    """组末汇总行：班均（各班均分的加权平均/上线合计）、年级（该方向全体）"""
+    layers = layers or []
+
+    def _agg(label, n_total, avg_v, max_v, bands_n, prev_avg, trim_v):
+        row = {'cls': label, 'teacher': '', 'n': n_total, 'avg': avg_v,
+               'max': max_v, 'prev_avg': prev_avg, 'trim_avg': trim_v,
+               'is_sum': True, 'avg_rank': None, 'bands': {}}
+        for it in layers:
+            key = it['key']
+            cnt = (bands_n or {}).get(key)
+            row['bands'][key] = (None if cnt is None else {
+                'n': cnt, 'rank': None, 'move': None,
+                'rate': fmt_rate(cnt, n_total), 'lower': None,
+                'band_name': ''})
+        _ps_alias_legacy(row, layers)
+        return row
 
     all_sc = _ps_scores(data, sub, None, direction) if hasattr(data, 'classes') else []
 
@@ -935,16 +1037,19 @@ def _ps_sum_rows(rows, sub, direction, data, pdata=None):
     _num = sum((r['avg'] or 0) * (r['n'] or 0) for r in rows if r['avg'] is not None)
     _avgs = [r['avg'] for r in rows if r['avg'] is not None]
     cls_avg = round(_num / _den, 1) if _den else (mean(_avgs) if _avgs else None)
-    cls_n = {'211': sum((r['bands'].get('211') or {}).get('n') or 0 for r in rows),
-             '特控': sum((r['bands'].get('特控') or {}).get('n') or 0 for r in rows),
-             '本科': sum((r['bands'].get('本科') or {}).get('n') or 0 for r in rows)}
+    cls_n = {it['key']: sum((r['bands'].get(it['key']) or {}).get('n') or 0
+                            for r in rows) for it in layers}
+    _tn = sum(r['n'] or 0 for r in rows if r.get('trim_avg') is not None)
+    _tv = sum((r['trim_avg'] or 0) * (r['n'] or 0)
+              for r in rows if r.get('trim_avg') is not None)
+    cls_trim = round(_tv / _tn, 1) if _tn else None
     _prev_all = _ps_scores(pdata, sub, None, direction)
     if not _prev_all:
         _prev_all = _ps_scores(pdata, sub, None, None)
     avg_row = _agg('班均', n_stu, cls_avg,
                    max(all_sc) if all_sc else max([r['max'] for r in rows
                                                    if r['max'] is not None] or [None]),
-                   cls_n, mean(_prev_all) if _prev_all else None)
+                   cls_n, mean(_prev_all) if _prev_all else None, cls_trim)
     avg_row['n_cls'] = n_cls
 
     # 年级行的上线人数＝**各班逐生结果之和**（口径与班级行严格一致；
@@ -954,7 +1059,7 @@ def _ps_sum_rows(rows, sub, direction, data, pdata=None):
         vals = [v for v in vals if v is not None]
         return sum(vals) if vals else None
 
-    grd_n = {k: _sum_of(k) for k, _a, _b in _PS_TAGS}
+    grd_n = {it['key']: _sum_of(it['key']) for it in layers}
     # 「年级」行的「上次均分」：上一场该（方向×科目）全体学生的均分
     # （同方向取不到时回落不分方向，与逐班口径一致；取不到则空着显示 —）
     _prev_all = _ps_scores(pdata, sub, None, direction)
@@ -962,7 +1067,8 @@ def _ps_sum_rows(rows, sub, direction, data, pdata=None):
         _prev_all = _ps_scores(pdata, sub, None, None)
     grade_row = _agg('年级', len(all_sc), mean(all_sc),
                      max(all_sc) if all_sc else None, grd_n,
-                     mean(_prev_all) if _prev_all else None)
+                     mean(_prev_all) if _prev_all else None,
+                     _ps_trim_avg(data, sub, None, direction, trim_nos))
     return [avg_row, grade_row]
 
 

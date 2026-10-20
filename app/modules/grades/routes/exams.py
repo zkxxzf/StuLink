@@ -3,6 +3,7 @@
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 import io
 import json
+import math
 import uuid
 from datetime import date, datetime
 
@@ -704,6 +705,10 @@ def score_update(exam_id, score_id):
                 changed[field] = None
                 continue
             val = float(raw)
+            # 2026-10-20 第十七轮：nan/inf 能通过 float() 且所有比较都为假 ——
+            # 必须显式拒绝，否则会写进成绩单并把总分/排名污染成 NULL。
+            if not math.isfinite(val):
+                return _score_edit_reply(exam_id, False, f'{label} 格式不正确')
             if val < 0 or val > limit + 0.5:
                 return _score_edit_reply(exam_id, False, f'{label} {val} 超出范围(0~{limit})')
             changed[field] = val
@@ -798,6 +803,10 @@ def score_add(exam_id):
                 vals[field] = None
                 continue
             val = float(raw)
+            # 2026-10-20 第十七轮：nan/inf 能通过 float() 且所有比较都为假 ——
+            # 必须显式拒绝，否则会写进成绩单并把总分/排名污染成 NULL。
+            if not math.isfinite(val):
+                return _score_edit_reply(exam_id, False, f'{label} 格式不正确')
             if val < 0 or val > limit + 0.5:
                 return _score_edit_reply(exam_id, False,
                                          f'{label} {val} 超出范围(0~{limit})')

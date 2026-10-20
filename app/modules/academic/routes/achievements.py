@@ -193,7 +193,9 @@ def achievements_page():
 
 @bp.route('/achievements/export')
 @login_required
-@perm_required('academic.view')
+@perm_required('academic.edit')   # 2026-10-19 第十四轮：批量导出含教师编号/
+                                  # 颁发单位/审核意见/备注，收紧到教务写权限
+                                  # （列表页仍 academic.view 可看）
 def achievements_export():
     """导出教师业绩 Excel（遵循当前筛选条件）"""
     from openpyxl import Workbook
@@ -499,13 +501,14 @@ def achievement_attachment_delete(fid):
 def achievement_file_view(fid):
     """附件预览：图片/PDF 内联打开，其它类型强制下载（避免浏览器渲染意外内容）。
 
-    权限：有 academic.view 的教务端，或该条业绩的提交者本人。
+    权限（2026-10-19 第十四轮收紧）：`academic.edit` 教务、提交者本人、
+    该业绩的教师本人 —— 见 `ach_svc.can_download`；`academic.view` 只能看条目。
     """
     att = db.session.get(AchievementAttachment, fid)
     if not att:
         abort(404)
     rec = db.session.get(TeacherAchievement, att.achievement_id)
-    if not ach_svc.can_view(rec, att, current_user):
+    if not ach_svc.can_download(rec, att, current_user):
         abort(403)
     root, stored = ach_svc.attachment_path(att)
     if not root:
@@ -523,12 +526,12 @@ def achievement_file_view(fid):
 # v1.19.49.39 审核（S2）：同 achievement_file_view，权限由 ach_svc.can_view 收敛，
 # 豁免 @perm_required 是为保留“提交者本人下载自己附件”路径（与工作台协作）。
 def achievement_file_download(fid):
-    """附件下载（与预览同一套权限）"""
+    """附件下载（与预览同一套权限：can_download，原件不对 academic.view 开放）"""
     att = db.session.get(AchievementAttachment, fid)
     if not att:
         abort(404)
     rec = db.session.get(TeacherAchievement, att.achievement_id)
-    if not ach_svc.can_view(rec, att, current_user):
+    if not ach_svc.can_download(rec, att, current_user):
         abort(403)
     root, stored = ach_svc.attachment_path(att)
     if not root:

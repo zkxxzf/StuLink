@@ -19,6 +19,17 @@ os.chdir(_ROOT)
 
 APPLY = '--apply' in sys.argv
 DB = 'data/academic.db'
+SCRIPT_NAME = os.path.basename(__file__)
+
+# 2026-10-19 审计：迁移必须登记（本脚本原先没有 _mig_log，生产漏跑不可查）
+for _p in (_ROOT, os.path.join(_ROOT, 'scripts')):
+    if _p not in sys.path:
+        sys.path.insert(0, _p)
+try:
+    import _mig_log
+except Exception as _e:  # noqa: BLE001
+    _mig_log = None
+    print(f'[WARN] 迁移登记模块不可用（迁移照常执行，仅不登记）：{_e}')
 
 
 def ensure_columns():
@@ -57,6 +68,10 @@ def main():
         print('\n  预览模式，未改动（表结构亦未动）。加 --apply 执行。')
         return
 
+    if _mig_log is not None and _mig_log.is_applied(SCRIPT_NAME):
+        print(f'[SKIP] {SCRIPT_NAME} 已登记为已应用，跳过迁移')
+        return
+
     _backup()
     a = create_app()
     with a.app_context():
@@ -77,6 +92,13 @@ def main():
             t.phone_idx = blind_index(p)
         db.session.commit()
         print(f'\n  完成：加密 {len(todo)} 行')
+        if _mig_log is not None:
+            try:
+                _mig_log.record(
+                    SCRIPT_NAME,
+                    note='teachers.phone 明文→随机IV密文 + 盲索引回填')
+            except Exception as _e:  # noqa: BLE001
+                print(f'[WARN] 迁移登记失败（不影响迁移结果）：{_e}')
 
         # 抽检（只打印盲索引与密文长度，不回显明文号码，避免终端/日志泄露）
         t = Teacher.query.filter(Teacher.phone_idx.isnot(None)).first()

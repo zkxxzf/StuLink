@@ -29,6 +29,7 @@ from sqlalchemy import func
 from app.extensions import db
 from app.models.grades import (TOTAL_SUBJECT, Certificate, Exam, ExamScore,
                                ScoreChangeLog)
+from app.models.timetable import ScheduleSwap
 from app.modules.grades.services import scope as scope_service
 
 logger = logging.getLogger(__name__)
@@ -187,6 +188,68 @@ def _change_activity_items(exam_ids):
     return items
 
 
+SWAP_TONE = {'pending': 'primary', 'approved': 'success',
+             'rejected': 'danger', 'executed': 'secondary'}
+SWAP_LABEL = {'pending': '待审批', 'approved': '已通过',
+              'rejected': '已驳回', 'executed': '已执行'}
+
+
+def _swap_activity_items(user):
+    """调课申请 / 审批动态（2026-10-20 用户口径：动态里要能申请审批）。
+
+    可见性 fail-closed（宁可少推，不泄露他人调课信息）：
+    - 本人申请：始终可见（便于跟踪审批进度）；
+    - 待审批：仅 `swap_service.can_review` 通过者可见（管理员 / 年级长 /
+      课表终审；**不需要"上级"关系**，有审批权限点且在年级范围内即可）；
+    - 已审：仅本人或管理员/审批权限者，且按可见年级过滤。
+    异常一律返回空，不影响仪表盘其它数据。
+    """
+    try:
+        rows = (ScheduleSwap.query
+                .order_by(ScheduleSwap.created_at.desc())
+                .limit(ACTIVITY_PER_SOURCE).all())
+        from app.modules.academic.services import swap_service
+    except Exception as e:  # noqa: BLE001
+        logger.warning('仪表盘调课动态查询失败（已跳过）: %s', e)
+        return []
+    try:
+        me = swap_service.reviewer_teacher_uid(user)
+    except Exception:  # noqa: BLE001
+        me = None
+    is_admin = getattr(user, 'role', None) == 'admin'
+    has_review = (is_admin or user.has_perm('academic.swap_approve')
+                  or user.has_perm('academic.timetable'))
+    visible = swap_service.review_visible_grades(user)
+    items = []
+    for sw in rows:
+        mine = bool(me and sw.applicant_uid == me)
+        if sw.status == 'pending':
+            if not (mine or swap_service.can_review(sw, user)):
+                continue
+        else:
+            if not (mine or has_review):
+                continue
+            grade = swap_service.swap_grade(sw)
+            if visible is not None and grade and grade not in visible:
+                continue
+        grade = swap_service.swap_grade(sw) or ''
+        meta = ' · '.join(p for p in [
+            SWAP_LABEL.get(sw.status, sw.status or ''),
+            sw.applicant_name or '',
+            _s(sw.swap_date),
+        ] if p)
+        items.append({
+            'type': 'swap', 'icon': 'bi-arrow-left-right',
+            'tone': SWAP_TONE.get(sw.status, 'secondary'),
+            'title': f'调课申请 #{sw.id}' + (f'：{grade}' if grade else ''),
+            'meta': meta,
+            'time': _s(sw.reviewed_at or sw.created_at, '%m-%d %H:%M'),
+            'sort': sw.reviewed_at or sw.created_at or datetime.min,
+            'url': f'/academic/swap/{sw.id}',
+        })
+    return items
+
+
 # ==================== 主入口 ====================
 
 def build_overview(user):
@@ -296,6 +359,8 @@ def build_overview(user):
         activity += _cert_activity_items(user)
     if _can_see_changes(user):
         activity += _change_activity_items(exam_ids)
+    # 2026-10-20 用户口径：动态里要能看到「调课申请 / 审批」
+    activity += _swap_activity_items(user)
     activity.sort(key=lambda it: it['sort'], reverse=True)
     for it in activity:
         it.pop('sort', None)

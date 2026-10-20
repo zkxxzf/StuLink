@@ -128,8 +128,11 @@ def rewards_edit(rid):
 @perm_required('morality.edit')
 def rewards_delete(rid):
     rec = _or_404(rid)
+    # 2026-10-20 第十七轮：归档失败时不得删库，也不得写"删除"审计
+    if not svc.delete(rec):
+        return jsonify({'success': False,
+                        'message': '删除前归档失败，已中止（避免数据不可恢复）'}), 500
     _log('删除', rec, f'{rec.student_name} {rec.title}')
-    svc.delete(rec)
     return jsonify({'success': True, 'message': '已删除'})
 
 
@@ -258,4 +261,8 @@ def _log(action, rec, detail):
         log_operation(current_user, action, '德育奖惩', rec.id, detail,
                       module='morality')
     except Exception:                                # noqa: BLE001
-        pass
+        # 2026-10-19 第十三轮审计：原来静默 pass，审计日志丢失无从发现
+        import logging
+        logging.getLogger('morality.records').warning(
+            '德育操作日志写入失败 action=%s rid=%s', action, getattr(rec, 'id', None),
+            exc_info=True)

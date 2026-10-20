@@ -1,4 +1,4 @@
-# StuLink v1.19.49.35 2026-10-19
+# StuLink v1.19.49.39 2026-10-19
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 """小程序考务接口：我的监考 / 我参与的考务批次时间表（只读）。
 
@@ -44,8 +44,12 @@ def _invig_rows(user_id, affair_id=None, real_name=''):
     """
     cond = AffairInvigilation.user_id == user_id
     if real_name:
-        cond = or_(cond, and_(AffairInvigilation.user_id.is_(None),
-                              AffairInvigilation.name == real_name))
+        # 2026-10-19 第十三轮审计：同名学生会让两人互相看到对方的考场与学生
+        # 名单（姓名/学号/座号），因此仅当全校只有这一个姓名时才启用姓名兜底
+        from app.models import User as _U
+        if _U.query.filter(_U.real_name == real_name).count() == 1:
+            cond = or_(cond, and_(AffairInvigilation.user_id.is_(None),
+                                  AffairInvigilation.name == real_name))
     q = (db.session.query(AffairInvigilation, AffairSchedule, ExamAffair)
          .join(AffairSchedule,
                AffairInvigilation.schedule_id == AffairSchedule.id)
