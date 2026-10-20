@@ -338,6 +338,23 @@ function bindFilters(){
         var q = buildQuery();
         window.location.href = '/grades/export/' + state.tab + q;
     });
+    /* 2026-10-20 一键导出：与当前页签无关 —— 年级/学科/教师一次带走；
+       班级逐生明细只在「班级分析」页（明确在看某个班）时才带上。 */
+    $('#gExportAll').on('click', function(){
+        if (!state.examId){ alert('请先选择考试'); return; }
+        var qs = ['exam_id=' + state.examId];
+        if (state.tab === 'class' && state.class_name)
+            qs.push('class_name=' + encodeURIComponent(state.class_name));
+        if (state.classes.length)
+            qs.push('classes=' + encodeURIComponent(state.classes.join(',')));
+        if (state.direction)
+            qs.push('direction=' + encodeURIComponent(state.direction));
+        if (state.selection)
+            qs.push('selection=' + encodeURIComponent(state.selection));
+        if (state.denom && state.denom !== 'ref')
+            qs.push('denom=' + state.denom);
+        window.location.href = '/grades/export/full?' + qs.join('&');
+    });
     // 2026-10-16 汇总打印版：链接跟着当前考试走（考试态 ?exam= 已由服务端带入，
     // 这里兜底用 state.examId；新窗口打开，不影响当前分析页的筛选状态）
     $('#gPrintSummary').attr('href', '/grades/print-summary?exam=' + (state.examId || ''));
@@ -366,12 +383,10 @@ function classCandidates(){
     return list;
 }
 
-// 默认对比班：约班级总数的 1/3（至少 2 个，且不超过后端 20 班上限）
+// 默认对比班：本场**全部班级**（2026-10-20 用户口径：对比表要能看全年级，
+// 原来是取 1/3 → 11 个班只出 4 个，用户以为数据缺了班级）
 function defaultClasses(){
-    var list = classCandidates();
-    if (list.length <= 2) return list.slice();
-    var n = Math.min(MAX_COMPARE, Math.max(2, Math.ceil(list.length / 3)));
-    return list.slice(0, n);
+    return classCandidates().slice(0, MAX_COMPARE);
 }
 
 // 年级变化时同步候选列表，并把选中值收敛到仍存在的班级
@@ -416,8 +431,7 @@ function bindClassMulti(){
         if (state.tab === 'compare') loadCurrent();
     });
     // 快捷操作：只在对比 tab 生效时重新拉数据，避免在其他 tab 触发无意义请求
-    [['#gCmDefault', function(){ return defaultClasses(); }],
-     ['#gCmAll', function(){ return classCandidates().slice(0, MAX_COMPARE); }],
+    [['#gCmAll', function(){ return classCandidates().slice(0, MAX_COMPARE); }],
      ['#gCmClear', function(){ return []; }]].forEach(function(pair){
         $(pair[0]).on('click', function(){
             state.classes = pair[1]();

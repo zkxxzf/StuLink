@@ -56,9 +56,10 @@
             <i class="bi bi-collection"></i> 选择对比班级 <span id="gCmCount" class="badge bg-primary">0</span>
         </button>
         <div class="dropdown-menu shadow p-2" id="gCmMenu" style="min-width:220px;max-height:320px;overflow:auto;">
+            {# 2026-10-20 用户口径：默认＝本场全部班级（原来默认只取 1/3，11 个班只出 4 个），
+               于是"默认"与"全选"重复，去掉前者。 #}
             <div class="d-flex gap-1 mb-2 pb-2 border-bottom">
-                <button class="btn btn-sm btn-outline-primary flex-fill" id="gCmDefault">默认</button>
-                <button class="btn btn-sm btn-outline-secondary flex-fill" id="gCmAll">全选</button>
+                <button class="btn btn-sm btn-outline-primary flex-fill" id="gCmAll">全选</button>
                 <button class="btn btn-sm btn-outline-secondary flex-fill" id="gCmClear">清空</button>
             </div>
             <div id="gCmList" class="small"></div>
@@ -87,8 +88,13 @@
            href="{{ url_for('grades.honor') }}{% if initial_exam_id %}?exam={{ initial_exam_id }}{% endif %}"
            title="表彰名单（年级总分榜 / 卓越班榜 / 单科榜，同分并列全列）">
             <i class="bi bi-trophy"></i> 表彰名单</a>
-        <button class="btn btn-sm btn-outline-success" id="gExport" title="导出当前模块全部表格为 Excel">
-            <i class="bi bi-file-earmark-excel"></i> 导出 Excel
+        <button class="btn btn-sm btn-outline-success" id="gExport" title="仅导出当前页签的全部表格为 Excel">
+            <i class="bi bi-file-earmark-excel"></i> 当前页签
+        </button>
+        {# 2026-10-20：一键导出 —— 年级/学科/教师 + 当前班级 + 已选对比班，一个工作簿 #}
+        <button class="btn btn-sm btn-success" id="gExportAll"
+                title="一键导出本场考试的全部分析（年级 / 学科 / 任课教师 / 当前班级 / 已选对比班）为一个 Excel">
+            <i class="bi bi-file-earmark-arrow-down"></i> 一键导出
         </button>
         {# 2026-10-16：汇总打印版（A4 网格：每科目一张班级汇总表，直接打印/存 PDF） #}
         <a class="btn btn-sm btn-outline-success" id="gPrintSummary" href="#" target="_blank"
