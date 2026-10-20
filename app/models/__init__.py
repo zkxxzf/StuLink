@@ -27,6 +27,7 @@ from app.models.morality import (RewardPunishment, RewardPunishmentAttachment,
                                  DOC_TYPES, category_options, category_label,
                                  level_options, level_label)
 from app.models.system_setting import SystemSetting
+from app.models.edu_stat import EduStatAsset  # 教育事业统计：校舍/办学条件年度参数
 from app.models.academic import Teacher, \
     InspectionRecord, TeacherAchievement, \
     FormCategory, FormTemplate, FormQuestion, FormSubmission, FormAnswer, \
@@ -67,6 +68,7 @@ __all__ = ['User', 'Student', 'Room', 'BedAssignment', 'StudentAccommodation',
            'PUNISH_LEVELS', 'DOC_TYPES', 'category_options', 'category_label',
            'level_options', 'level_label',
            'SystemSetting',
+           'EduStatAsset',
            'Teacher',
            'InspectionRecord', 'TeacherAchievement',
            'FormCategory', 'FormTemplate', 'FormQuestion', 'FormSubmission', 'FormAnswer',

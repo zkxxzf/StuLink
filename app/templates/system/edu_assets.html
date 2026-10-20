@@ -1,0 +1,147 @@
+{% extends "base.html" %}
+{% block title %}校舍资产{% endblock %}
+{% block content %}
+{% set v = {} %}
+<div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
+    <div>
+        <h4 class="fw-bold mb-0"><i class="bi bi-buildings"></i> 校舍资产</h4>
+        <div class="text-muted small mt-1">
+            教育事业统计基表 5170（校舍）/ 5176（资产与办学条件）/ 1102（达标项）
+            · 按学年录入，一次填好逐年复用
+        </div>
+    </div>
+    <div class="d-flex gap-2 align-items-center flex-wrap">
+        <form method="get" class="d-flex gap-2 align-items-center">
+            <label class="small text-muted mb-0">学年</label>
+            <input name="year" type="number" class="form-control form-control-sm"
+                   style="width:100px" value="{{ year }}" min="2000" max="2100">
+            <button class="btn btn-sm btn-outline-secondary">切换</button>
+        </form>
+        <a class="btn btn-sm btn-outline-primary"
+           href="{{ url_for('edustat.edu_stat_page', year=year) }}">
+            <i class="bi bi-clipboard-data"></i> 回到统计页
+        </a>
+    </div>
+</div>
+
+{% if years %}
+<div class="mb-3 small text-muted">
+    已录入学年：
+    {% for y in years %}
+    <a class="badge text-bg-light border text-decoration-none"
+       href="{{ url_for('edustat.edu_assets', year=y[:4]) }}">{{ y }}</a>
+    {% endfor %}
+</div>
+{% endif %}
+
+<form method="post">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <input type="hidden" name="school_year" value="{{ school_year }}">
+
+    <div class="alert alert-light border small py-2">
+        <i class="bi bi-info-circle"></i>
+        正在编辑 <b>{{ school_year }}</b> 学年；留空表示「未填」（导出时留空，不按 0 上报）。
+    </div>
+
+    {% set groups = [
+      ('一、校舍建筑面积（教基5170）', '平方米', [
+        ('本学年校舍建筑面积（总计）', 'building_total'),
+        ('#C级危房', 'building_c_danger'),
+        ('#D级危房', 'building_d_danger'),
+        ('#租用外单位', 'building_rented'),
+        ('教学及辅助用房', 'room_teaching'),
+        ('　普通教室', 'room_classroom'),
+        ('　专用教室', 'room_special'),
+        ('　　理化生实验室', 'room_lab'),
+        ('　公共教学用房', 'room_public'),
+        ('　　图书阅览室', 'room_library'),
+        ('　　室内体育用房', 'room_sports_indoor'),
+        ('　　心理辅导室', 'room_psych'),
+        ('行政办公用房', 'room_office'),
+        ('　教师办公室', 'room_teacher_office'),
+        ('生活用房', 'room_living'),
+        ('　教工值班宿舍', 'room_staff_dorm'),
+        ('　教师周转宿舍', 'room_teacher_turnover'),
+        ('　学生宿舍', 'room_student_dorm'),
+        ('　学生餐厅', 'room_canteen'),
+        ('　厕所', 'room_toilet'),
+        ('其他用房', 'room_other'),
+        ('#被外单位租（借）用', 'room_lent_out')
+      ]),
+      ('二、资产与办学条件（教基5176）', '', [
+        ('占地面积（平方米）', 'land_area'),
+        ('#绿化用地面积（平方米）', 'green_area'),
+        ('#运动场地面积（平方米）', 'sports_field_area'),
+        ('11人制足球场（个）', 'football_11'),
+        ('7人制足球场（个）', 'football_7'),
+        ('5人制足球场（个）', 'football_5'),
+        ('图书（册）', 'books'),
+        ('数字终端数（台）', 'terminal_total'),
+        ('#教师终端数（台）', 'terminal_teacher'),
+        ('#学生终端数（台）', 'terminal_student'),
+        ('教室（间）', 'classroom_total'),
+        ('#网络多媒体教室（间）', 'classroom_multimedia'),
+        ('固定资产总值（万元）', 'asset_fixed'),
+        ('#教学仪器设备资产值（万元）', 'asset_teaching_equipment')
+      ])
+    ] %}
+
+    {% for title, unit, fields in groups %}
+    <div class="card mb-3">
+        <div class="card-header py-2 small fw-semibold">{{ title }}</div>
+        <div class="card-body">
+            <div class="row g-3">
+                {% for label, name in fields %}
+                <div class="col-md-4 col-lg-3">
+                    <label class="form-label small mb-1">{{ label }}</label>
+                    <input name="{{ name }}" type="number" step="0.01" min="0"
+                           class="form-control form-control-sm"
+                           value="{{ values[name] if values[name] is not none else '' }}">
+                </div>
+                {% endfor %}
+            </div>
+        </div>
+    </div>
+    {% endfor %}
+
+    <div class="card mb-3">
+        <div class="card-header py-2 small fw-semibold">三、达标项（教基1102）</div>
+        <div class="card-body">
+            <div class="row g-3">
+                {% for label, name in [
+                    ('体育运动场（馆）面积是否达标', 'ok_sports_venue'),
+                    ('体育器械配备是否达标', 'ok_sports_equipment'),
+                    ('音乐器材配备是否达标', 'ok_music_equipment'),
+                    ('美术器材配备是否达标', 'ok_art_equipment'),
+                    ('理科实验仪器是否达标（中学）', 'ok_science_lab')
+                ] %}
+                {% set cur = values[name] %}
+                <div class="col-md-4">
+                    <label class="form-label small mb-1">{{ label }}</label>
+                    <select name="{{ name }}" class="form-select form-select-sm">
+                        <option value="" {% if cur is none %}selected{% endif %}>未填</option>
+                        <option value="1" {% if cur is true %}selected{% endif %}>是</option>
+                        <option value="0" {% if cur is false %}selected{% endif %}>否</option>
+                    </select>
+                </div>
+                {% endfor %}
+            </div>
+        </div>
+    </div>
+
+    <div class="card mb-4">
+        <div class="card-body">
+            <label class="form-label small mb-1">备注</label>
+            <input name="note" class="form-control form-control-sm" maxlength="200"
+                   value="{{ asset.note if asset else '' }}"
+                   placeholder="如：校舍面积来源、危房鉴定年份等">
+        </div>
+    </div>
+
+    <div class="d-flex gap-2">
+        <button class="btn btn-primary"><i class="bi bi-check-lg"></i> 保存 {{ school_year }} 学年</button>
+        <a class="btn btn-outline-secondary"
+           href="{{ url_for('edustat.edu_stat_page', year=year) }}">取消</a>
+    </div>
+</form>
+{% endblock %}

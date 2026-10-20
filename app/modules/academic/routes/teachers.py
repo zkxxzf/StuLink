@@ -366,6 +366,32 @@ def teacher_edit(tid):
         if status in ('active', 'left') and status != t.status:
             t.status = status
             changes.append('状态变更')
+        # 2026-10-20：教育事业统计属性（教基4149/4153/4156）—— 首存才参与统计，
+        # 清空即回到「未填」，不做默认值（避免把"没填"当成"无/否"报进基表）。
+        for label, field, allowed in (
+                ('性别', 'gender', ('男', '女')),
+                ('人员类别', 'staff_type',
+                 ('专任教师', '行政人员', '教辅人员', '工勤人员', '其他')),
+                ('学历', 'education',
+                 ('博士研究生', '硕士研究生', '本科', '专科', '高中阶段', '高中阶段以下')),
+                ('职称', 'title',
+                 ('正高级', '副高级', '中级', '助理级', '员级', '未定职级'))):
+            val = (request.form.get(field) or '').strip()
+            if val and val not in allowed:
+                continue                                # 非法值忽略（防手改表单）
+            if val != (getattr(t, field) or ''):
+                setattr(t, field, val or None)
+                changes.append(label)
+        eth = (request.form.get('ethnicity') or '').strip()[:20]
+        if eth != (t.ethnicity or ''):
+            t.ethnicity = eth or None
+            changes.append('民族')
+        for label, field in (('在编', 'is_official'), ('外籍', 'is_foreign')):
+            raw = (request.form.get(field) or '').strip()
+            val = True if raw == '1' else (False if raw == '0' else None)
+            if val is not getattr(t, field):
+                setattr(t, field, val)
+                changes.append(label)
         # v1.19.49.42：教师档案变更 → 同步回写到关联的 users 账号（admin 自动 skip）
         back_changes = teacher_sync.sync_from_teacher(t, renamed_from=None)
         if back_changes:
