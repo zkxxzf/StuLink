@@ -3,7 +3,7 @@
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
 [![Python](https://img.shields.io/badge/python-3.11+-green.svg)](https://python.org)
 [![Flask](https://img.shields.io/badge/flask-3.x-lightgrey.svg)](https://flask.palletsprojects.com/)
-[![Version](https://img.shields.io/badge/version-1.19.49.39-orange.svg)](https://gitee.com/zkxxzf/StuLink)
+[![Version](https://img.shields.io/badge/version-1.19.49.44-orange.svg)](https://gitee.com/zkxxzf/StuLink)
 
 面向中学的综合学生管理平台，采用 **双站点 + 多模块 + 一模块一库** 的故障隔离架构：
 
@@ -195,7 +195,7 @@
 
 - **后端**：Python 3.11+ / Flask 3.x / Flask-Login / Flask-SQLAlchemy 2.x（多库 binds）/ Waitress / openpyxl / reportlab / python-pptx
 - **前端**：Bootstrap 5 / jQuery / Jinja2 / ECharts（成绩可视化）/ Chart.js（画像）
-- **安全（v1.19.49.39）**：
+- **安全（v1.19.49.44）**：
   - **身份**：管理员首启随机口令 + 强制改密 · 一次性初始口令展示 · 会话口令摘要（改密即踢）· IP + 账号双维限流与锁定（锁键含来源，防账号被恶意锁定）
   - **数据**：AES 身份证与 AI Key 加密 · CSRF 8h 时效 · 二维权限（功能三档 × 数据范围）· 白名单式教师候选过滤
   - **传输**：`url_guard` 出站白名单 + DNS 解析 + 禁 302 跟随 · CSP（Report-Only 起步，可切 enforce）· HTTPS Cookie Secure
@@ -216,7 +216,7 @@ python run.py --dev
 cd alumni_app && python run.py
 
 # Docker 部署（三个容器：主应用 + 往届查询 + MCP 服务）
-docker build -t stulink:v1.19.49.39 .
+docker build -t stulink:v1.19.49.44 .
 docker build -t stulink-alumni:v1.0.0 ./alumni_app
 docker build -f Dockerfile.mcp -t stulink-mcp:v1.0.0 .
 docker-compose up -d
@@ -301,6 +301,10 @@ StuLink/
 
 | 版本 | 日期 | 亮点 |
 |---|---|---|
+| **1.19.49.44** | 2026-10-20 | **考试「年级学期」标签 + 列表筛选**：名称里手写的「（高三上）」升级为独立字段 `exams.grade_semester`（学年 8/1 分界、学期以**春节**为界，空 = 按日期自动推算），列表在名称右侧显示胶囊标签并自动剥掉重复括号；历次考试支持 **年级 / 学期 / 类型 / 考试日期区间** 一条筛选栏（`?grade=&sem=&type=&d1=&d2=`）；新建考试名称留空时自动生成「年级 + 8 位日期 + 阶段」（如 `2024级20261010月考`）；小程序新建页同步学期 picker（新增 A24 迁移） |
+| **1.19.49.43** | 2026-10-20 | **教育事业统计基表（新模块）**：`/system/edu-stat` 从业务库实时计算并导出 **教基2108 班额班数 / 3118 分类型学生数 / 3119 分年龄学生数 / 3045 在校生其他情况**（年级按学年映射、年龄由身份证解析、寄宿生取住宿类型）；教师侧 **4149/4153/4156** 随「教师名单」补录性别/民族/学历/职称/人员类别/在编/外籍后自动生成；`/system/edu-assets` 按学年录入 **5170 校舍 / 5176 资产 / 1102 达标项** 并随基表导出（新增 A24/A25 迁移与 EDUSTAT 回归 12 条） |
+| **1.19.49.42** | 2026-10-20 | **合并 sakaay 增量**：成绩仪表盘动态不再混入调课申请/审批（调课归教务/教师工作台）· 成绩首页新增「开具成绩证明」直达入口 · 打印汇总与小程序入口图标微调 |
+| **1.19.49.41** | 2026-10-20 | **合并 sakaay 新 PR（第 16·17 轮审计）+ 合并后加固**：恢复「校长」身份（全校查看 + 全校事务审批）· 教务主任补审批 · 年级长/教务员补事务权限 · 仪表盘动态调课申请/审批 · 成绩导入班级列丢失与前端图表实例泄漏修复 · MCP 频控加 `_prune_store` 与锁定三元组；合并后加固：`import_exam36` 加 `--apply` 门控/整库备份/失败退出码、`sync_role_groups` 加整库备份与迁移登记、自审口径注释对齐（新增 SR-19；M-4 断言适配 `write_table`） |
 | **1.19.49.39** | 2026-10-20 | **合并后复核修复 5 项**：小程序调课列表无教师档案时 fail-closed（原会读到全校调课单）· 成绩复核录入补 NaN/inf 拦截与可见范围下推 SQL · 小程序教师名单改为 `academic.view`（与网页端同口径）· 操作日志清理先校验导出完整性并整库备份再删 · MCP 读频控表满不再全量清零（新增 SR-18 六条防回归） |
 | **1.19.49.38** | 2026-10-20 | **合并 sakaay 新 PR（第 12·13 轮审计整改）**：wxapi 按领域**分包重构**（core/auth/dorm/exam/grades/notice/workbench/academic）+ 微信绑定返回 openid + 教务课表/业绩/查课接口 · 监考编排改按**累计时长均衡**并加交换降差 · 学生服务补 exam_id 与排名 · 登录限流**持久化**、小程序令牌**版本化**（登出/改密/停用即失效）、AI 每日配额 · 新增运维脚本（日志/明文备份/回收站清理）与容器加固；合并后保留 master 侧修复（手机号加密脚本预览不改库/幂等/备份、`--allow-fail`、迁移执行器补列前置） |
 | **1.19.49.37** | 2026-10-19 | **合并 sakaay PR（第 11 轮审计整改）**：手机号「随机 IV 加密 + HMAC 盲索引」（students.phone1/2、teachers.phone）· 删除可**回收站**恢复（含整表快照按原 id 重建）· 越权收敛与日志补齐 · 新增**微信小程序 API**（`wxapi`，令牌鉴权 + 数据范围过滤）与**表彰名单**（`honor`）模块 · `scripts/` 重组为 `migrate/fix/seed/smoke/verify`；合并后修复 9 项（迁移核对工具路径失效、加密迁移预览改库/不幂等/无备份、回收站归档失败 fail-open、`archive_snapshot` 空集误判致首次编排被中止、`X-Real-IP` 限流可绕过、成绩范围口径分裂等） |

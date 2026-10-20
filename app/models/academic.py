@@ -1,4 +1,4 @@
-# StuLink v1.19.49.39 2026-10-10
+# StuLink v1.19.49.44 2026-10-10
 # 教务模块模型（2026-10-10 按「一个功能一个库」分库）：
 #   academic.db    师资基础（教师名单 / 学科组长 / 班主任记录 / 考勤）
 #   timetable.db   课表与晚自习值班
@@ -83,6 +83,17 @@ class Teacher(db.Model):
     status = db.Column(db.String(10), default='active')    # active=在职 / left=离职
     user_id = db.Column(db.Integer)                        # 关联 users.id（快照式）
     note = db.Column(db.String(200))
+    # ── 教育事业统计基表所需属性（2026-10-20 新增）────────────────────────
+    # 依据：教基4149（教职工分类）、4153（专任教师分年龄）、4156（分课程分学历）。
+    # 年龄由身份证解析（id_card_enc），故不单独存出生日期；其余是统计专有口径，
+    # 既不在身份证里、也无法从任课映射推出，必须人工录入。
+    gender = db.Column(db.String(2))          # 男 / 女
+    ethnicity = db.Column(db.String(20))      # 民族（基表「#少数民族」用，默认汉族）
+    education = db.Column(db.String(20))      # 博士研究生/硕士研究生/本科/专科/高中阶段/高中阶段以下
+    title = db.Column(db.String(20))          # 正高级/副高级/中级/助理级/员级/未定职级
+    staff_type = db.Column(db.String(20))     # 专任教师/行政人员/教辅人员/工勤人员/其他
+    is_official = db.Column(db.Boolean)       # 是否在编（None=未填）
+    is_foreign = db.Column(db.Boolean)        # 是否外籍（None=未填）
     created_at = db.Column(db.DateTime, default=datetime.now)
     updated_at = db.Column(db.DateTime, default=datetime.now, onupdate=datetime.now)
 

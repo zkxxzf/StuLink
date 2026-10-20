@@ -15,10 +15,10 @@ from app.models.user_class_link import UserClassLink
 from app.models.grade_setting import GradeSetting
 from app.models.grades import Exam, ExamScore, ExamBand, TeacherSubjectLink, \
     AiKey, AiGlobalKey, AiReport, AiChatMessage, AffairRoomLib, \
-    ExamTeacherLink, ExamAffair, AffairRoom, AffairStudent  # v1.19.49.39 考试任课快照 / 考务
+    ExamTeacherLink, ExamAffair, AffairRoom, AffairStudent  # v1.19.49.44 考试任课快照 / 考务
 from app.models.grades import TeacherLinkPlan, TeacherLinkPlanRow  # 任课映射方案（2026-10-14）
 from app.models.grades import AffairTeacher, AffairSchedule, AffairInvigilator, \
-    AffairInvigilation  # v1.19.49.39 考务环节④⑤⑥：任课核对 / 考试时间表 / 监考编排
+    AffairInvigilation  # v1.19.49.44 考务环节④⑤⑥：任课核对 / 考试时间表 / 监考编排
 from app.models.grades import ScoreChangeLog, ScoreReviewRequest  # 分数修改留痕 / 成绩复核申请
 from app.models.points import PointRecord, PointRuleTemplate
 from app.models.morality import (RewardPunishment, RewardPunishmentAttachment,
@@ -27,6 +27,7 @@ from app.models.morality import (RewardPunishment, RewardPunishmentAttachment,
                                  DOC_TYPES, category_options, category_label,
                                  level_options, level_label)
 from app.models.system_setting import SystemSetting
+from app.models.edu_stat import EduStatAsset  # 教育事业统计：校舍/办学条件年度参数
 from app.models.academic import Teacher, \
     InspectionRecord, TeacherAchievement, \
     FormCategory, FormTemplate, FormQuestion, FormSubmission, FormAnswer, \
@@ -61,12 +62,13 @@ __all__ = ['User', 'Student', 'Room', 'BedAssignment', 'StudentAccommodation',
            'ExamAffair', 'AffairRoom', 'AffairStudent',
            'AiKey', 'AiGlobalKey', 'AiReport', 'AiChatMessage',
            'AffairRoomLib', 'PointRecord', 'PointRuleTemplate',
-           # 德育奖惩（morality.db，2026-10-13 v1.19.49.39）
+           # 德育奖惩（morality.db，2026-10-13 v1.19.49.44）
            'RewardPunishment', 'RewardPunishmentAttachment',
            'REWARD_CATEGORIES', 'PUNISH_CATEGORIES', 'REWARD_LEVELS',
            'PUNISH_LEVELS', 'DOC_TYPES', 'category_options', 'category_label',
            'level_options', 'level_label',
            'SystemSetting',
+           'EduStatAsset',
            'Teacher',
            'InspectionRecord', 'TeacherAchievement',
            'FormCategory', 'FormTemplate', 'FormQuestion', 'FormSubmission', 'FormAnswer',

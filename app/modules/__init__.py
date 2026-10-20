@@ -39,13 +39,17 @@ def register_blueprints(app):
     app.register_blueprint(operation_logs_bp)
     app.register_blueprint(trash_bp)      # 2026-10-18：删除记录回收站
 
+    # 教育事业统计（2026-10-20）：/system/edu-stat 统计与导出、/system/edu-assets 校舍资产
+    from app.modules.edustat import bp as edustat_bp
+    app.register_blueprint(edustat_bp)
+
     # 占位模块
     from app.modules.points.routes import bp as points_bp
     from app.modules.grades import bp as grades_bp
     app.register_blueprint(points_bp)
     app.register_blueprint(grades_bp)
 
-    # 德育奖惩模块（v1.19.49.39，独立库 morality.db）
+    # 德育奖惩模块（v1.19.49.44，独立库 morality.db）
     from app.modules.morality import bp as morality_bp
     app.register_blueprint(morality_bp)
 

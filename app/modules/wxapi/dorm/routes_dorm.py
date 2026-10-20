@@ -1,4 +1,4 @@
-# StuLink v1.19.49.39 2026-10-18
+# StuLink v1.19.49.44 2026-10-18
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 """小程序宿舍接口：概览统计 / 房间列表 / 房间成员。
 

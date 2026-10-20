@@ -54,6 +54,78 @@
                         </div>
                     </div>
 
+                    {# 2026-10-20：教育事业统计（教基4149/4153/4156）所需属性。
+                       年龄由身份证自动解析，这里只收身份证里没有、也无法从任课映射推出的口径。 #}
+                    <div class="border-top pt-3 mt-1 mb-3">
+                        <div class="fw-semibold small mb-2">
+                            <i class="bi bi-clipboard-data"></i> 教育事业统计属性
+                            <span class="text-muted fw-normal">（用于自动生成教职工/专任教师基表）</span>
+                        </div>
+                        <div class="row">
+                            <div class="col-md-4 mb-3">
+                                <label class="form-label">性别</label>
+                                <select name="gender" class="form-select">
+                                    <option value="">未填</option>
+                                    <option value="男" {% if t.gender == '男' %}selected{% endif %}>男</option>
+                                    <option value="女" {% if t.gender == '女' %}selected{% endif %}>女</option>
+                                </select>
+                            </div>
+                            <div class="col-md-4 mb-3">
+                                <label class="form-label">民族</label>
+                                <input name="ethnicity" class="form-control" maxlength="20"
+                                       value="{{ t.ethnicity or '' }}" placeholder="如：汉族">
+                            </div>
+                            <div class="col-md-4 mb-3">
+                                <label class="form-label">人员类别</label>
+                                <select name="staff_type" class="form-select">
+                                    <option value="">未填（按有无学科推断）</option>
+                                    {% for k in ['专任教师', '行政人员', '教辅人员', '工勤人员', '其他'] %}
+                                    <option value="{{ k }}" {% if t.staff_type == k %}selected{% endif %}>{{ k }}</option>
+                                    {% endfor %}
+                                </select>
+                            </div>
+                            <div class="col-md-4 mb-3">
+                                <label class="form-label">学历</label>
+                                <select name="education" class="form-select">
+                                    <option value="">未填</option>
+                                    {% for k in ['博士研究生', '硕士研究生', '本科', '专科', '高中阶段', '高中阶段以下'] %}
+                                    <option value="{{ k }}" {% if t.education == k %}selected{% endif %}>{{ k }}</option>
+                                    {% endfor %}
+                                </select>
+                            </div>
+                            <div class="col-md-4 mb-3">
+                                <label class="form-label">职称</label>
+                                <select name="title" class="form-select">
+                                    <option value="">未填</option>
+                                    {% for k in ['正高级', '副高级', '中级', '助理级', '员级', '未定职级'] %}
+                                    <option value="{{ k }}" {% if t.title == k %}selected{% endif %}>{{ k }}</option>
+                                    {% endfor %}
+                                </select>
+                            </div>
+                            <div class="col-md-2 mb-3">
+                                <label class="form-label">在编</label>
+                                <select name="is_official" class="form-select">
+                                    <option value="" {% if t.is_official is none %}selected{% endif %}>未填</option>
+                                    <option value="1" {% if t.is_official is true %}selected{% endif %}>是</option>
+                                    <option value="0" {% if t.is_official is false %}selected{% endif %}>否</option>
+                                </select>
+                            </div>
+                            <div class="col-md-2 mb-3">
+                                <label class="form-label">外籍</label>
+                                <select name="is_foreign" class="form-select">
+                                    <option value="" {% if t.is_foreign is none %}selected{% endif %}>未填</option>
+                                    <option value="1" {% if t.is_foreign is true %}selected{% endif %}>是</option>
+                                    <option value="0" {% if t.is_foreign is false %}selected{% endif %}>否</option>
+                                </select>
+                            </div>
+                        </div>
+                        <div class="text-muted small">
+                            <i class="bi bi-lightbulb"></i>
+                            这些属性只用于教育事业统计基表；年龄由身份证自动计算，无需填写。
+                            填写后在「系统管理 → 教育事业统计」可一键生成 4149 / 4153 / 4156。
+                        </div>
+                    </div>
+
                     <div class="mb-3">
                         <label class="form-label">状态</label>
                         <select name="status" class="form-select">
