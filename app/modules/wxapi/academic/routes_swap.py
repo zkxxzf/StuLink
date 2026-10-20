@@ -1,4 +1,4 @@
-# StuLink v1.19.49.46 2026-10-19
+# StuLink v1.19.49.47 2026-10-19
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 """小程序调课：我的申请（列表 / 详情 / 撤回）与「待我确认」的换课。
 
