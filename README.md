@@ -3,7 +3,7 @@
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
 [![Python](https://img.shields.io/badge/python-3.11+-green.svg)](https://python.org)
 [![Flask](https://img.shields.io/badge/flask-3.x-lightgrey.svg)](https://flask.palletsprojects.com/)
-[![Version](https://img.shields.io/badge/version-1.19.50.57-orange.svg)](https://gitee.com/zkxxzf/StuLink)
+[![Version](https://img.shields.io/badge/version-1.19.50.58-orange.svg)](https://gitee.com/zkxxzf/StuLink)
 
 面向中学的综合学生管理平台，采用 **双站点 + 多模块 + 一模块一库** 的故障隔离架构：
 
@@ -301,6 +301,7 @@ StuLink/
 
 | 版本 | 日期 | 亮点 |
 |---|---|---|
+| **1.19.50.58** | 2026-10-21 | **`/users/create` 增加用途提示**：页面顶部明确「本页仅用于建立系统管理员账号」，教师账号需先在「教务管理 → 教师」录入档案由系统自动开通，再回到「教师管理」启用并分配权限，避免在错误入口重复建号 |
 | **1.19.50.57** | 2026-10-21 | **系统管理 `/users/` 收紧为「只加管理员」**：删除教师批量导入（`download_teacher_template` / `import_teachers`）与 `/users/teachers/import/*` 三条挂载路由，「新建教师」改为「新建管理员」（仅超管可见，角色后端固定 `admin`、表单隐藏年级/班级）；教师档案与账号统一从「教务管理 → 教师」新增/导入，导入确认时自动建号并同步到本列表，系统管理侧只做启用/停用与重置密码；`/users/teachers` 同步隐藏导入按钮、模板下载与弹窗，并加跳转提示 |
 | **1.19.50.56** | 2026-10-21 | **补登记智学网账号迁移（A46）**：合并带进来的 `students.zhixue_account` 只加了模型列、迁移脚本放在 `scripts/` 根目录且未进执行器与清单 → 生产 `check_columns` 报 1 处缺列（学生页会 500）。已把脚本移入 `scripts/migrate/migrate_student_zhixue_account_20261021.py`、加入 `nas_migrate_pending.sh` 与迁移清单 A46，并在生产补跑（0 缺列） |
 | **1.19.50.55** | 2026-10-21 | **全站教师下拉统一「拼音排序 + 可搜索」**：新增全局 `js/teacher_picker.js`（随 base.html 加载）——自动识别页面里「选项大多是教师姓名」的 `<select>`（≥60% 命中教师目录），升级为可输入浮层：按**姓氏首字母**排（拼音全拼升序），支持**姓名 / 全拼 / 每字首字母**三路匹配；动态渲染的表格由 MutationObserver 自动接管，也可 `data-teacher-pick="1"` 强制、`data-no-pick="1"` 排除。浮层定位改为**先渲染再量高**：下方放不下且上方更宽裕时**向上弹出**，高度按可视区裁剪、列表内部滚动，页面底部不再被截断。新增 `/grades/api/teacher-options`（姓名 + 拼音码，登录可读），考务④⑥ 改用同一浮层 |
