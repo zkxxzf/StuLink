@@ -1,4 +1,4 @@
-# StuLink v1.19.56.64 2026-10-10
+# StuLink v1.19.57.64 2026-10-10
 # 个人成绩查询与分析：教职工在自身权限范围内查询单个学生
 # 聚合口径复用 stats_service（排名等已落库 exam_scores，不重算）
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
@@ -12,7 +12,8 @@ from app.modules.grades.services.scope import student_in_scope
 from app.modules.grades.utils import term_of_date
 
 # 成绩证明底部默认说明（生成时可由经办人在弹窗中改写；改写内容随证明快照固化并参与防伪签名）
-DEFAULT_CERT_NOTE = '本证明由系统依据已导入成绩数据生成，排名按方向内统计；仅作在校成绩凭证，不代表最终学历结论。'
+# 2026-10-21 用户口径：默认文案不再提「排名按方向内统计」
+DEFAULT_CERT_NOTE = '本证明由系统依据已导入成绩数据生成；仅作在校成绩凭证，不代表最终学历结论。'
 # 自定义说明最大长度（防御性限制，防止异常长文本写入快照）
 CERT_NOTE_MAX = 500
 
@@ -139,13 +140,14 @@ def build_cert_matrix(grade, exams, student_scores, student_sel, chosen_ids=None
         sel = st.subjects_of_selection(student_sel.get(e.id))
         for sub in CERT_SUBJECT_ORDER:
             sc = student_scores.get((e.id, sub))
-            full = DEFAULT_FULL_MARKS.get(sub, 100)
             if sel is not None and sub not in sel:
                 row[sub] = '未选'
             elif sc is None:
                 row[sub] = '未参加'
             else:
-                row[sub] = f'{sc:.1f}/{full}'
+                # 2026-10-21 用户口径：满分已经写在表头（「数学(满分150)」），
+                # 格子里只出得分，不再重复「97.0/150」
+                row[sub] = f'{sc:.1f}'
         rows.append(row)
 
     return {'cols': cols, 'rows': rows,

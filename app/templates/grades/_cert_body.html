@@ -33,8 +33,12 @@
             <tr>
                 <td class="subj">{{ r.exam_label }}</td>
                 {% for c in m.cols %}
-                {# 2026-10-12 UI 审计 L1：空值统一 em dash「—」 #}
-                <td{% if r[c.key] is string and r[c.key] != '' and r[c.key] in ['未选','未参加'] %} class="muted"{% endif %}>{{ r[c.key] if r[c.key] is not none else '—' }}</td>
+                {# 2026-10-12 UI 审计 L1：空值统一 em dash「—」
+                   2026-10-21 用户口径：满分已在表头（「数学(满分150)」），格子里只显示得分。
+                   历史快照存的是「97.0/150」这种拼串 → 渲染时截掉「/满分」部分。 #}
+                {% set v = r[c.key] %}
+                {% if v is string and '/' in v %}{% set v = v.split('/')[0] %}{% endif %}
+                <td{% if v is string and v != '' and v in ['未选','未参加'] %} class="muted"{% endif %}>{{ v if v is not none else '—' }}</td>
                 {% endfor %}
             </tr>
             {% endfor %}
@@ -63,7 +67,14 @@
             <div>{{ school }}<br>{{ cert.generated_at.strftime('%Y年%m月%d日') if cert.generated_at else '年&nbsp;&nbsp;&nbsp;月&nbsp;&nbsp;&nbsp;日'|safe }}</div>
         </div>
     </div>
-    {# v1.12.3 底部说明支持生成时自定义；v1.12.2 及更早的历史证明快照无此字段，兜底默认文案 #}
-    <div class="cert-note" style="white-space: pre-wrap;">说明：{{ content.cert_note or '本证明由系统依据已导入成绩数据生成，排名按方向内统计；仅作在校成绩凭证，不代表最终学历结论。' }}</div>
+    {# v1.12.3 底部说明支持生成时自定义；v1.12.2 及更早的历史证明快照无此字段，兜底默认文案。
+       2026-10-21：默认文案去掉「排名按方向内统计」；历史快照里存过旧默认文案的，
+       渲染时按新默认显示（自定义过的说明原样保留）。 #}
+    {% set _note_default = '本证明由系统依据已导入成绩数据生成；仅作在校成绩凭证，不代表最终学历结论。' %}
+    {% set _note = content.cert_note or _note_default %}
+    {% if _note == '本证明由系统依据已导入成绩数据生成，排名按方向内统计；仅作在校成绩凭证，不代表最终学历结论。' %}
+        {% set _note = _note_default %}
+    {% endif %}
+    <div class="cert-note" style="white-space: pre-wrap;">说明：{{ _note }}</div>
 </div>
 {% endmacro %}
