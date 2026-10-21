@@ -2,7 +2,7 @@
 {% block title %}考场维护{% endblock %}
 {% block extra_css %}
 <style>
-  /* v1.19.50.53 考场维护：左（全部房间）— 中（箭头）— 右（分组）三栏，页面不再铺满全宽 */
+  /* v1.19.50.54 考场维护：左（全部房间）— 中（箭头）— 右（分组）三栏，页面不再铺满全宽 */
   .rm-list { max-height: 62vh; overflow: auto; padding: 4px; }
   .rm-item {
     display: flex; align-items: center; gap: 8px;
@@ -158,7 +158,7 @@ var URL_ROOMS = '{{ url_for("grades.exam_rooms") }}';            // /grades/room
 var URL_ROOM_SAVE = '{{ url_for("grades.exam_room_save") }}';
 var URL_GROUP_SAVE = '{{ url_for("grades.exam_room_group_save") }}';
 
-// v1.19.50.53 三栏式房间归集：状态全部放前端，增删改后就地重渲染（不再整页刷新）
+// v1.19.50.54 三栏式房间归集：状态全部放前端，增删改后就地重渲染（不再整页刷新）
 var state = {
     rooms: {{ rooms|tojson }}.map(function (r) {
         return {id: r.id, location: r.location, note: r.note || '',
@@ -406,7 +406,7 @@ function delRoom(id) {
     });
 }
 
-// v1.19.50.53 批量导入学校房间（Excel：位置 / 备注；按位置去重，已有则更新备注）
+// v1.19.50.54 批量导入学校房间（Excel：位置 / 备注；按位置去重，已有则更新备注）
 function importRooms(input) {
     if (!input.files.length) return;
     var fd = new FormData();
