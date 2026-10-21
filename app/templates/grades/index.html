@@ -19,7 +19,7 @@
     .g-class-bar, .g-subject-bar { display: flex; flex-wrap: wrap; gap: 4px; }
     .g-class-bar .btn, .g-subject-bar .btn { min-width: 52px; }
 </style>
-{# v1.19.50.61 考试态（从侧栏「班级分析 / 学科分析」进入，带 ?exam=<id>）：
+{# v1.19.50.62 考试态（从侧栏「班级分析 / 学科分析」进入，带 ?exam=<id>）：
    本页只看这一场，顶部不再让用户选年级/考试 —— 直接按本场加载（initial_exam_id 已由服务端带入，
    JS 会选中它；这里把两个下拉隐藏）。非考试态（全局成绩分析）保持原样。 #}
 {% set _en = exam_nav() %}

@@ -1,4 +1,4 @@
-# StuLink v1.19.50.61 2026-10-19
+# StuLink v1.19.50.62 2026-10-19
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 """小程序「按学生查住宿」接口（只读）。
 
