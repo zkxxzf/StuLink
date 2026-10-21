@@ -1,15 +1,13 @@
-# StuLink v1.19.50.58 2026-10-20
+# StuLink v1.19.50.59 2026-10-20
 # 限时练场次的侧栏上下文（与普通考试 exam_nav 同一套悬浮流程栏外观）
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 """限时练侧栏上下文：进入某场限时练时把侧栏切成「悬浮流程栏」。
 
-普通考试的考试态由 ``exam_nav()`` 提供（场次 / 四步进度 / 分组导航）；
+普通考试的考试态由 ``exam_nav()`` 提供（场次 / 分组导航）；
 限时练是独立表，需要在 ``/grades/timed/<tid>`` 系列页面上单独解析，
 外观与交互复用同一批 ``.exam-flow-nav`` / ``.efn-*`` 样式，避免第二套 UI。
 
-三步进度与页内页签对应：建场次 → 导入成绩 → 成绩分析；后两步依赖
-"至少导入一科"，没有成绩时显示为未完成。（2026-10-20 审计：原注释还写着
-"四步 / 划线分层"，该页签早已删除，改为与代码一致的三步。）
+2026-10-21 用户口径：与普通考试一致，侧栏不再显示分步骤进度圆点。
 """
 from flask import g, request, url_for
 
@@ -22,8 +20,6 @@ TIMED_TABS = (
     ('import', '数据导入'),
     ('analysis', '成绩总览分析'),
 )
-# 页签 → 进度圆点下标
-_TAB_STEP = {'students': 2, 'trends': 2, 'import': 1, 'analysis': 2}
 _TAB_KEYS = [t[0] for t in TIMED_TABS]
 
 
@@ -44,7 +40,7 @@ def timed_nav():
 
 
 def _resolve():
-    """按 view_args 里的 tid 还原场次 + 当前页签 + 四步进度"""
+    """按 view_args 里的 tid 还原场次 + 当前页签"""
     from app.extensions import db
     from app.models.timed import TimedExam
     from app.modules.grades.services import timed_service
@@ -64,17 +60,9 @@ def _resolve():
         return None
 
     subjects = timed_service.subjects_of(exam.id)
-    has_scores = bool(subjects)
     tab = (request.args.get('tab') or 'students').strip()
     if tab not in _TAB_KEYS:
         tab = 'students'
-    cur = _TAB_STEP.get(tab, 0)
-
-    labels = ('建场次', '导入成绩', '成绩分析')
-    steps = []
-    for i, label in enumerate(labels):
-        steps.append({'label': label, 'done': True if i == 0 else has_scores,
-                      'current': cur == i})
 
     subject = (request.args.get('subject') or '').strip()
     class_name = (request.args.get('class') or '').strip()
@@ -94,6 +82,5 @@ def _resolve():
             params['class'] = class_name
         nav.append({'tab': key, 'label': label,
                     'url': url_for('grades.timed_detail', **params)})
-    return {'exam': exam, 'exam_id': exam.id, 'tab': tab, 'steps': steps,
-            'nav': nav, 'subjects': subjects,
-            'done_count': sum(1 for s in steps if s['done'])}
+    return {'exam': exam, 'exam_id': exam.id, 'tab': tab,
+            'nav': nav, 'subjects': subjects}

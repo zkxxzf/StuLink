@@ -2,16 +2,17 @@
 {% block title %}数据导入 - {{ exam.name }}{% endblock %}
 {% block content %}
 {% set info = {'A': '增量覆盖（默认）', 'B': '整场重置'} %}
-<div class="d-flex align-items-center mb-3 flex-wrap gap-2">
-    <a href="{{ url_for('grades.exam_detail', exam_id=exam.id) }}" class="btn btn-sm btn-outline-secondary" title="返回成绩单" aria-label="返回成绩单">
-        <i class="bi bi-arrow-left"></i>
-    </a>
-    {# 顶部导航栏已固定展示本场考试；这里是本页标题。 #}
-    <h4 class="mb-0"><i class="bi bi-box-arrow-in-down"></i> 数据导入</h4>
-    <span class="badge bg-{{ 'success' if exam.status == 'imported' else ('warning text-dark' if exam.status == 'dirty' else 'secondary') }}">
-        {{ status_label[exam.status] }}
-    </span>
-</div>
+{# 2026-10-21 用户口径：成绩单 / 考务安排 / 数据导入 三页统一页头（见 _exam_head.html）。 #}
+{% from 'grades/_exam_head.html' import exam_head %}
+{% call exam_head('数据导入', 'bi-box-arrow-in-down', url_for('grades.exam_detail', exam_id=exam.id),
+                  exam.name or exam.title_with_dimensions(),
+                  grade=exam.grade, kind=exam.kind_label(), stage=exam.stage_label(),
+                  exam_date=exam.exam_date.strftime('%Y-%m-%d') if exam.exam_date else None,
+                  term=exam.term, score_mode=exam.score_mode_label(),
+                  status=status_label.get(exam.status, exam.status),
+                  status_class=('success' if exam.status == 'imported'
+                                else ('warning text-dark' if exam.status == 'dirty' else 'secondary'))) %}
+{% endcall %}
 
 {# 2026-10-19：原「成绩导入」升级为「数据导入」——
    左侧＝AI 智能导入（成绩 / 分数线 / 考务 / 场次，AI 只识别列，数据仍由系统逐行解析）；
@@ -64,7 +65,7 @@
                       action="{{ url_for('grades.exam_import_upload', exam_id=exam.id) }}">
                     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                     <div class="mb-3">
-                        <label class="form-label fw-semibold">1. 选择成绩 Excel 文件</label>
+                        <label class="form-label fw-semibold">选择成绩 Excel 文件</label>
                         <input type="file" name="file" class="form-control" accept=".xlsx,.xls" required>
                         <div class="form-text">
                             模板 A：学号/姓名/年级(可选)/班级(可选)/总分(可选)/9 科列；
@@ -78,7 +79,7 @@
                         </div>
                     </div>
                     <div class="mb-3">
-                        <label class="form-label fw-semibold">2. 导入模式</label>
+                        <label class="form-label fw-semibold">导入模式</label>
                         <div class="form-check">
                             <input class="form-check-input" type="radio" name="mode" id="m_a" value="A" checked>
                             <label class="form-check-label" for="m_a">
@@ -98,7 +99,7 @@
                         </div>
                     </div>
                     <div class="mb-0">
-                        <label class="form-label fw-semibold">3. 上传并校验</label>
+                        <label class="form-label fw-semibold">上传并校验</label>
                         <button type="submit" class="btn btn-primary">
                             <i class="bi bi-search"></i> 解析并预览差异
                         </button>
@@ -196,7 +197,7 @@
     <div class="card-header py-2"><i class="bi bi-calendar3"></i> 识别出的考试场次（划分场次）</div>
     <div class="card-body">
         <div class="small text-muted mb-2">
-            以下场次将写入本场考务的<b>环节⑤ 考试时间表</b>；
+            以下场次将写入本场考务的<b>考试时间表</b>；
             识别结果<b>可直接修改</b>（例如给「四选二」这类没写科目的场次补上科目）。
         </div>
         <div class="table-responsive" style="max-height:320px;overflow:auto">
