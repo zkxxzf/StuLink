@@ -1,4 +1,4 @@
-# StuLink v1.19.50.61 2026-10-10
+# StuLink v1.19.50.62 2026-10-10
 # 班级概览服务：聚合班主任管辖班级数据（跨库查询）
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 from datetime import date, datetime
@@ -54,7 +54,7 @@ def get_class_overview(user_id, month_str=None, user=None):
     返回: [{class_name, grade, student_count, points_plus, points_minus,
             latest_exam_name, latest_exam_avg, attendance_rate}, ...]
 
-    v1.19.50.61：班级来源改用**统一可见班级口径** `wb_scope.managed_class_pairs(user)`
+    v1.19.50.62：班级来源改用**统一可见班级口径** `wb_scope.managed_class_pairs(user)`
     —— 任课教师（凭 TeacherSubjectLink 任教班）也能看到自己教的班；
     此前只认 UserClassLink（班主任关联），任课教师的班级概览恒为空。
     不传 user 时沿用旧口径，保持向后兼容。

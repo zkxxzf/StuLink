@@ -15,8 +15,11 @@
 {% endcall %}
 
 {% if step == 'upload' %}
+{# 2026-10-21 用户口径：两张表内容不多，宽屏（≥xl）左右并排，窄屏上下堆叠。 #}
+<div class="row g-3 mb-3 align-items-stretch">
+<div class="col-12 col-xl-6 d-flex">
 {# ===== 2026-10-21 用户口径：划线分层表放到页面最上面，默认展开、可折叠 ===== #}
-<div class="card mb-3" id="bandOverviewCard">
+<div class="card mb-0 w-100" id="bandOverviewCard">
     <div class="card-header py-2 d-flex align-items-center flex-wrap gap-2">
         <span class="fw-semibold"><i class="bi bi-bar-chart-line"></i> 划线分层</span>
         {% if band_summary.groups %}
@@ -70,8 +73,10 @@
     </div>
 </div>
 
+</div>
+<div class="col-12 col-xl-6 d-flex">
 {# ===== 2026-10-21 用户口径：去差人数设置（默认展开、可折叠；仅去差人数可改） ===== #}
-<div class="card mb-3" id="trimCard">
+<div class="card mb-0 w-100" id="trimCard">
     <div class="card-header py-2 d-flex align-items-center flex-wrap gap-2">
         <span class="fw-semibold"><i class="bi bi-scissors"></i> 去差人数设置</span>
         <span class="text-muted small">默认卓越班 2 人、强基班 0 人；只改「去差人数」</span>
@@ -136,6 +141,8 @@
             </div>
         </form>
     </div>
+</div>
+</div>
 </div>
 {% endif %}
 

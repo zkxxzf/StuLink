@@ -1,4 +1,4 @@
-# StuLink v1.19.50.61 2026-10-10
+# StuLink v1.19.50.62 2026-10-10
 # 课表服务层：学期管理 / 作息时间（节次与时间） / 视图查询 / 条目CRUD / 冲突检测 / Excel导入导出 / 版本快照
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 """课表核心服务（独立库 timetable.db）。
