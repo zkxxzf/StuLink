@@ -1,4 +1,4 @@
-# StuLink v1.19.57.64 2026-10-19
+# StuLink v1.19.58.64 2026-10-19
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 """小程序通知公告接口：列表 / 未读数 / 详情 / 已读。
 
