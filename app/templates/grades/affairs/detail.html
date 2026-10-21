@@ -2293,6 +2293,12 @@ function loadAffairTeachers(){
     fetch('/grades/affairs/'+AID+'/teachers').then(r=>r.json()).then(d=>{
         if(!d.success){ box.innerHTML = '<div class="alert alert-warning mb-0">'+escHtml(d.message||'加载失败')+'</div>'; return; }
         _affTeachers = d.data; renderAffairTeachers();
+    }).catch(function(e){
+        // 2026-10-21：原来请求/解析失败时没有任何 catch，加载圈会一直转；
+        // 现在直接把原因显示出来（会话过期时会是登录页 HTML，JSON 解析失败）。
+        box.innerHTML = '<div class="alert alert-danger mb-0">'
+            + '任课表加载失败：' + escHtml((e && e.message) || e)
+            + '。请刷新页面重试；若仍失败请重新登录。</div>';
     });
 }
 function renderAffairTeachers(){
@@ -2321,18 +2327,19 @@ function renderAffairTeachers(){
     d.classes.forEach(cls=>{
         h.push('<tr><td class="t4-cls text-nowrap fw-bold">'+escHtml(cls)+'</td>');
         groups.forEach(function(g){
-        g.subjects.forEach(function(s){
-            var c = d.cells[cls+'|'+s] || {};
-            var cur = c.user_id ? String(c.user_id) : '';
-            // 2026-10-21：格子换成「按钮 + 可输入浮层」（原先 180 个原生下拉，找一个人
-            // 要在上百个选项里翻）。历史教师（有姓名无账号）照旧显示姓名。
-            var label = c.name || '';
-            var tip = (c.name && !cur) ? '历史教师（无账号）；重新选人后按账号绑定' : '';
-            h.push('<td><button type="button" class="at-cell' + (label ? '' : ' empty') + '"'
-                   + ' data-k="' + escHtml(cls+'|'+s) + '" data-uid="' + escHtml(cur) + '"'
-                   + ' data-init="' + escHtml(cur) + '"'
-                   + (tip ? ' title="' + escHtml(tip) + '"' : '') + '>'
-                   + escHtml(label || '—') + '</button></td>');
+            g.subjects.forEach(function(s){
+                var c = d.cells[cls+'|'+s] || {};
+                var cur = c.user_id ? String(c.user_id) : '';
+                // 2026-10-21：格子换成「按钮 + 可输入浮层」（原先 180 个原生下拉，找一个人
+                // 要在上百个选项里翻）。历史教师（有姓名无账号）照旧显示姓名。
+                var label = c.name || '';
+                var tip = (c.name && !cur) ? '历史教师（无账号）；重新选人后按账号绑定' : '';
+                h.push('<td><button type="button" class="at-cell' + (label ? '' : ' empty') + '"'
+                       + ' data-k="' + escHtml(cls+'|'+s) + '" data-uid="' + escHtml(cur) + '"'
+                       + ' data-init="' + escHtml(cur) + '"'
+                       + (tip ? ' title="' + escHtml(tip) + '"' : '') + '>'
+                       + escHtml(label || '—') + '</button></td>');
+            });
         });
         h.push('</tr>');
     });

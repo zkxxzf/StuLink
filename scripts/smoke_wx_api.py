@@ -1,4 +1,4 @@
-# StuLink v1.19.50.53 2026-10-19
+# StuLink v1.19.50.54 2026-10-19
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 """小程序 /api/wx 接口冒烟（只读）。
 
