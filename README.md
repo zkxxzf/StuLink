@@ -3,7 +3,7 @@
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
 [![Python](https://img.shields.io/badge/python-3.11+-green.svg)](https://python.org)
 [![Flask](https://img.shields.io/badge/flask-3.x-lightgrey.svg)](https://flask.palletsprojects.com/)
-[![Version](https://img.shields.io/badge/version-1.19.50.63-orange.svg)](https://gitee.com/zkxxzf/StuLink)
+[![Version](https://img.shields.io/badge/version-1.19.50.64-orange.svg)](https://gitee.com/zkxxzf/StuLink)
 
 面向中学的综合学生管理平台，采用 **双站点 + 多模块 + 一模块一库** 的故障隔离架构：
 
@@ -301,6 +301,7 @@ StuLink/
 
 | 版本 | 日期 | 亮点 |
 |---|---|---|
+| **1.19.50.64** | 2026-10-21 | **导入页内嵌矩阵补齐编辑功能**：数据导入页的划线分层不再只读，与「划线分层」页共用同一套能力 —— 下界方式 / 录入形态 / 含总分 / 分层模板（套用层名）/ 按组合开关 / 显示空列 / 新增层 / 保存划线全部可直接操作（按 `grades.settings` 权限决定是否可编辑）；共用模板新增 `bare=True` 形态，嵌在导入页卡片内不重复描边 |
 | **1.19.50.63** | 2026-10-21 | **导入页内嵌划线分层矩阵**：顶部划线卡片直接复用「划线分层」页的矩阵表格（只读、同一份渲染脚本 `js/bands_matrix.js`），删除上一版手写的扁平表与「用 AI 导入分数线」「进入划线分层」两个按钮；矩阵 markup 抽为 `grades/_bands_matrix.html`，划线页与导入页共用，避免两套实现 |
 | **1.19.50.62** | 2026-10-21 | **数据导入页两表宽屏并排**：「划线分层」与「去差人数设置」在 ≥xl（1200px）宽屏左右各占一半（`col-xl-6`），窄屏仍上下堆叠；两卡等高对齐，保持默认展开与折叠能力 |
 | **1.19.50.61** | 2026-10-21 | **数据导入页：划线分层表格置顶 + 去差人数设置**：划线分层改为页首表格卡片（方向/选科/学科/层/下界，默认展开、可折叠）；其下新增「去差人数设置」表（班级 / 班型 / 班级人数 / 参考人数 / 去差人数 / 去差后人数，仅去差人数可改，默认卓越班 2、强基班 0），支持页面保存、Excel 导入/模板下载，AI 智能导入可自动识别「班级 × 去差人数」表；设置存 `Exam.config_json.class_trim`，`report_service.trim_quota` 统一读取（本场按班设置 > 班型规则），汇报区与全局对比的去差均分同步生效 |
