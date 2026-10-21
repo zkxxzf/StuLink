@@ -1,4 +1,4 @@
-# StuLink v1.19.54.64 2026-10-19
+# StuLink v1.19.55.64 2026-10-19
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 """小程序 AI 分析（与网页 `/grades/ai` 同一个任务链路）。
 
