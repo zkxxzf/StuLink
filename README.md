@@ -3,7 +3,7 @@
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
 [![Python](https://img.shields.io/badge/python-3.11+-green.svg)](https://python.org)
 [![Flask](https://img.shields.io/badge/flask-3.x-lightgrey.svg)](https://flask.palletsprojects.com/)
-[![Version](https://img.shields.io/badge/version-1.19.59.64-orange.svg)](https://gitee.com/zkxxzf/StuLink)
+[![Version](https://img.shields.io/badge/version-1.19.60.64-orange.svg)](https://gitee.com/zkxxzf/StuLink)
 
 面向中学的综合学生管理平台，采用 **双站点 + 多模块 + 一模块一库** 的故障隔离架构：
 
@@ -301,6 +301,7 @@ StuLink/
 
 | 版本 | 日期 | 亮点 |
 |---|---|---|
+| **1.19.60.64** | 2026-10-21 | **（第三位 zk +1）全局对比图表可放大**：每张图表（总分 + 各科）右上角新增放大按钮，点击后该图改为固定在视口内的浮层、铺满整个屏幕宽度并自动 resize；再点一次或按 Esc 退出，退出后回到原网格位置 |
 | **1.19.59.64** | 2026-10-21 | **（第三位 zk +1）成绩模块侧栏分组默认折叠**：「成绩分析」「基础配置」两个可折叠分组不再用 localStorage 记忆展开状态，所有页面每次加载（含刷新、换页）都回到折叠态，展开/收起仍由右侧箭头控制 |
 | **1.19.58.64** | 2026-10-21 | **（第三位 zk +1）仪表盘页头文案精简**：去掉「数据范围」后面的「（已排除毕业年级）」括号说明，只保留年级清单与更新时间 |
 | **1.19.57.64** | 2026-10-21 | **（第三位 zk +1）成绩认定证明精简**：成绩格只显示得分（满分已在表头「数学(满分150)」，不再重复「97.0/150」；历史快照的拼串在渲染时截掉）；底部默认说明改为「本证明由系统依据已导入成绩数据生成；仅作在校成绩凭证，不代表最终学历结论。」，历史快照里存过旧默认文案的按新默认显示，自定义说明原样保留 |
