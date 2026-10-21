@@ -1,4 +1,4 @@
-# StuLink v1.19.51.64 2026-10-21
+# StuLink v1.19.52.64 2026-10-21
 # 成绩 · 去差人数设置（按班覆盖，导入页展示 / 手工改 / Excel / AI 导入共用）
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 """去差人数设置。
