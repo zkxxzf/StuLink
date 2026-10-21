@@ -1,4 +1,4 @@
-# StuLink v1.19.60.64 2026-10-19
+# StuLink v1.19.61.64 2026-10-19
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 """小程序宿舍统计（只读）：各年级床位供给 / 入住率 + 各班住校人数。
 
