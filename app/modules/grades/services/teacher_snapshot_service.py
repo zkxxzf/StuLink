@@ -1,6 +1,6 @@
-# StuLink v1.19.49.52 2026-10-10
+# StuLink v1.19.50.52 2026-10-10
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
-"""考试任课快照服务（v1.19.49.52）
+"""考试任课快照服务（v1.19.50.52）
 
 背景：`TeacherSubjectLink` 只存"当前"任课映射。教师一换（尤其重新分班后），
 历史考试的教师维度分析会全部归到现在的教师名下，上线率/去差均分排名失真。
@@ -28,9 +28,14 @@ from app.models.grades import ExamTeacherLink, TeacherSubjectLink
 
 logger = logging.getLogger(__name__)
 
-# v1.19.49.52 班主任也归入同一张快照表：它和任课教师一样是“本场考试该班的老师”，
+# v1.19.50.52 班主任也归入同一张快照表：它和任课教师一样是“本场考试该班的老师”，
 # 区别仅在于任课老师看单科成绩、班主任看总分。用伪科目名占位，不污染 SUBJECTS。
 HEAD_SUBJECT = '班主任'
+
+# 2026-10-21 用户口径：班主任不是一个格子里的三个人，而是**三列**（正班 / 副班1 / 副班2）。
+# 顺序依据 `UserClassLink.id`（登记先后）：教师安排表导入按 正班→副班1→副班2 写入，
+# 天然对位；手工在班型设置里补的人按添加先后排。
+HOMEROOM_POSITIONS = ('正班', '副班1', '副班2')
 
 # 快照来源说明
 SOURCE_DESC = {
@@ -41,12 +46,45 @@ SOURCE_DESC = {
 }
 
 
-def current_headteacher_rows(grade):
-    """从当前 UserClassLink 取该年级各班班主任（作为快照 / 考务任课表的源）
+def current_homeroom_positions(grade, classes=None):
+    """该年级各班班主任，按「正班 / 副班1 / 副班2」**分列**返回。
 
-    ⚠ 同班常有主/副两位班主任，而表上 `UNIQUE(exam_id, class_name, subject)`，
-    所以合并为一行（姓名顿号连接，与 headteacher_map 输出口径一致）。
-    只有一个班主任时给出 user_id（考务环节④ 可直接改派）；多人时置空。
+    返回 ``[{class_name, subject, teacher_name, user_id}]``；``subject`` 是本班
+    第几班主任（不是学科）。顺序依据 `UserClassLink.id`（登记先后），与
+    教师安排表导入的 正班→副班1→副班2 一致。超出 3 人的不再列出。
+    """
+    from app.models import User, UserClassLink
+    links = (UserClassLink.query.filter_by(grade=grade)
+             .order_by(UserClassLink.id).all())
+    if not links:
+        return []
+    uids = {lk.user_id for lk in links}
+    users = {u.id: u for u in
+             User.query.filter(User.id.in_(uids), User.is_active.is_(True)).all()}
+    per_cls = {}
+    for lk in links:
+        u = users.get(lk.user_id)
+        if not (u and lk.class_name and u.real_name):
+            continue
+        if classes and lk.class_name not in classes:
+            continue
+        bag = per_cls.setdefault(lk.class_name, [])
+        if all(x['user_id'] != lk.user_id for x in bag):
+            bag.append({'user_id': lk.user_id, 'name': u.real_name})
+    out = []
+    for cls, people in per_cls.items():
+        for idx, p in enumerate(people[:len(HOMEROOM_POSITIONS)]):
+            out.append({'class_name': cls, 'subject': HOMEROOM_POSITIONS[idx],
+                        'teacher_name': p['name'], 'user_id': p['user_id']})
+    return out
+
+
+def current_headteacher_rows(grade):
+    """从当前 UserClassLink 取该年级各班班主任（**合并**成一行，快照/展示用）
+
+    ⚠ 表上 `UNIQUE(exam_id, class_name, subject)`，同班多人只能合并为一行
+    （姓名顿号连接，与 headteacher_map 输出口径一致）。只有一个班主任时给出
+    user_id；多人时置空。考务环节④ 要分列请用 ``current_homeroom_positions``。
     """
     from app.models import User, UserClassLink
     links = UserClassLink.query.filter_by(grade=grade).all()
@@ -93,7 +131,7 @@ def snapshot_exam(exam, source='import', rows=None, replace=False):
             for l in TeacherSubjectLink.query.filter_by(
                 grade=exam.grade, active=True).all()
         ]
-        # v1.19.49.52 班主任一并快照（以前只存了任课老师，历史考试的班主任会跟到现在）
+        # v1.19.50.52 班主任一并快照（以前只存了任课老师，历史考试的班主任会跟到现在）
         rows += current_headteacher_rows(exam.grade)
 
     # 姓名补全（无 user_id 时留空，由调用方给 teacher_name）

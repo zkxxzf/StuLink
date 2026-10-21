@@ -611,8 +611,10 @@
         </div>
         <div class="alert alert-light border py-2 small">
             表格为「班级 × 科目 → 任课教师」，留空表示该班不开设该科；
-            最后一列 <span class="badge text-bg-warning">班主任</span> 与任课教师同级别（负责本班总分），
-            默认按「班主任名单」带入，可临时改派（仅本场）。
+            左侧 <span class="badge text-bg-warning">正班</span>
+            <span class="badge text-bg-warning">副班1</span>
+            <span class="badge text-bg-warning">副班2</span>
+            三列是班主任（与任课教师同级别，负责本班总分），默认按班主任名单带入，可临时改派（仅本场）。
         </div>
         <div id="t4Body" class="table-responsive" style="max-height:66vh;overflow:auto">
             <div class="text-center text-muted py-4"><div class="spinner-border spinner-border-sm"></div>
@@ -2119,10 +2121,12 @@ function loadAffairTeachers(){
 }
 function renderAffairTeachers(){
     var d = _affTeachers; if(!d) return;
-    var headSubj = d.head_subject || '班主任';
+    // 班主任三列（正班 / 副班1 / 副班2）在学科左边，与任课教师同级别
+    var heads = d.head_subjects || [];
+    function isHead(s){ return heads.indexOf(s) >= 0; }
     var h = ['<table class="table table-sm table-bordered align-middle mb-0"><thead class="sticky-top bg-white"><tr><th>班级</th>'];
     d.subjects.forEach(s=>{
-        h.push('<th class="text-center'+(s===headSubj?' table-warning':'')+'">'+escHtml(s)+'</th>');
+        h.push('<th class="text-center'+(isHead(s)?' table-warning':'')+'">'+escHtml(s)+'</th>');
     });
     h.push('</tr></thead><tbody>');
     d.classes.forEach(cls=>{
@@ -2130,15 +2134,19 @@ function renderAffairTeachers(){
         d.subjects.forEach(s=>{
             var c = d.cells[cls+'|'+s] || {};
             var cur = c.user_id ? String(c.user_id) : '';
-            var legacy = (c.name && !cur);   // 历史教师：有姓名无账号
+            var legacy = (c.name && !cur);   // 有姓名无账号（校外/未开户）
             var optHtml = '<option value=""'+(cur||legacy?'':' selected')+'>—</option>';
             (d.users||[]).forEach(function(u){
                 var uid = String(u.id);
                 optHtml += '<option value="'+uid+'"'+(uid===cur?' selected':'')+'>'
                          + escHtml(u.name||u.username||'')+'</option>';
             });
-            if(legacy){ optHtml += '<option value="" selected>'+escHtml(c.name)+'（历史，无账号）</option>'; }
-            h.push('<td'+(s===headSubj?' class="table-warning"':'')+'>'
+            // 班主任三列每格只有一个人，直接显示姓名，不加「历史/无账号」字样
+            if(legacy){
+                optHtml += '<option value="" selected>'+escHtml(c.name)
+                         + (isHead(s) ? '' : '（历史，无账号）')+'</option>';
+            }
+            h.push('<td'+(isHead(s)?' class="table-warning"':'')+'>'
                    + '<select class="form-select form-select-sm at-sel" data-k="'+escHtml(cls+'|'+s)+'"'
                    + ' data-init="'+escHtml(cur)+'">'
                    + optHtml + '</select></td>');

@@ -404,7 +404,7 @@ with app.test_client() as c:
     check('环节⑥ 手动指派回避教师被拒', (r.get_json() or {}).get('ok') is False,
           str(r.get_json()))
     # 手动指定：派一个从未被编排的校外监考员 → 允许
-    # 2026-10-13 审计修复：v1.19.49.52 起手动指派与自动编排共用
+    # 2026-10-13 审计修复：v1.19.50.52 起手动指派与自动编排共用
     # 「一人一场次一考场」硬约束，而自动编排已把 12 格填满，
     # 已入池的老师（含校外陈老师）都已被排到某场某考场 —— 再派他们都会被拒
     # （这是产品的正确行为，不是缺陷）。
@@ -547,19 +547,25 @@ with app.test_client() as c:
           r.status_code == 400 and jd.get('ok') is False and '格' in (jd.get('msg') or ''),
           str(jd))
 
-    # ---- 环节④「班主任」列（2026-10-21 用户口径：与任课教师同级别，负责本班总分）----
+    # ---- 环节④「班主任」三列（2026-10-21 用户口径：正班/副班1/副班2，在学科左边）----
     # 放在排除名单之后：本段会重新带入任课表（班主任进教师池），不影响上面的容量断言
     r = c.get(f'/grades/affairs/{aid}/teachers')
     _d4 = (r.get_json() or {}).get('data') or {}
-    check('环节④ 科目列末尾含「班主任」', (_d4.get('subjects') or [])[-1] == '班主任',
-          str((_d4.get('subjects') or [])[-2:]))
+    check('环节④ 前 3 列是 正班/副班1/副班2',
+          (_d4.get('subjects') or [])[:3] == ['正班', '副班1', '副班2'],
+          str((_d4.get('subjects') or [])[:5]))
     r = c.post(f'/grades/affairs/{aid}/teachers/sync', headers=H)
     with app.app_context():
         _hd = AffairTeacher.query.filter_by(affair_id=aid, class_name='01班',
-                                            subject='班主任').first()
-    check('环节④ 重新带入含班主任（孙副班）',
+                                            subject='正班').first()
+        _hd_all = AffairTeacher.query.filter(
+            AffairTeacher.affair_id == aid,
+            AffairTeacher.subject.in_(['正班', '副班1', '副班2'])).all()
+    check('环节④ 重新带入含班主任（01班 正班=孙副班）',
           _hd is not None and _hd.teacher_name == '孙副班',
           str(_hd and _hd.teacher_name))
+    check('环节④ 班主任按位次分行（不是一格三人）',
+          len(_hd_all) == 1, str([(x.subject, x.teacher_name) for x in _hd_all]))
 
     # ==================== 环节⑤ 内置每科时长：自动算结束时间（2026-10-14 用户口径） ====================
     # 规则：语文 150 分钟 · 数学/英语（外语）120 分钟 · 其它 75 分钟；一场多科取最长。
