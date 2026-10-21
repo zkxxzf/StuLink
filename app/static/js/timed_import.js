@@ -1,4 +1,4 @@
-/* StuLink v1.19.61.64 2026-10-20
+/* StuLink v1.19.62.64 2026-10-20
    限时练 AI 智能导入：上传 → 识别列 → 列映射（可改）→ 预览 → 导入
    Key 走浏览器本机（window.StuLinkAI），服务器只用不存。
    Copyright (c) 2026 zkxxzf. Apache License 2.0 */
