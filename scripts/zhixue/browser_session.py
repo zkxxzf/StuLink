@@ -1,4 +1,4 @@
-# StuLink v1.19.52.64  2026-10-20
+# StuLink v1.19.53.64  2026-10-20
 # 复用用户本机 Edge 登录态的浏览器会话（只附着，不登录）
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 """复用用户自己 Edge 的登录态来访问智学网。

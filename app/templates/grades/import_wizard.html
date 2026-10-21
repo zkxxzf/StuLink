@@ -92,11 +92,8 @@
 {% endcall %}
 
 {% if step == 'upload' %}
-{# 2026-10-21 用户口径：两张表内容不多，宽屏（≥xl）左右并排，窄屏上下堆叠。 #}
-<div class="row g-3 mb-3 align-items-stretch">
-<div class="col-12 col-xl-6 d-flex">
-{# ===== 2026-10-21 用户口径：划线分层表放到页面最上面，默认展开、可折叠 ===== #}
-<div class="card mb-0 w-100" id="bandOverviewCard">
+{# 2026-10-21 布局：划线分层是宽矩阵（可编辑），独占整行 #}
+<div class="card mb-3" id="bandOverviewCard">
     <div class="card-header d-flex align-items-center flex-wrap gap-2">
         <span class="imp-card-title"><i class="bi bi-bar-chart-line"></i> 划线分层</span>
         {% if band_summary.groups %}
@@ -122,88 +119,10 @@
         {% endwith %}
     </div>
 </div>
-
-</div>
-<div class="col-12 col-xl-6 d-flex">
-{# ===== 2026-10-21 用户口径：去差人数设置（默认展开、可折叠；仅去差人数可改） ===== #}
-<div class="card mb-0 w-100" id="trimCard">
-    <div class="card-header d-flex align-items-center flex-wrap gap-2">
-        <span class="imp-card-title"><i class="bi bi-scissors"></i> 去差人数设置</span>
-        <span class="badge bg-light text-dark border">{{ trim_rows|length }} 个班</span>
-        <div class="ms-auto d-flex gap-2 align-items-center flex-wrap">
-            <button class="btn btn-sm btn-primary" type="submit" form="trimForm">
-                <i class="bi bi-save"></i> 保存设置
-            </button>
-            <button class="btn btn-sm btn-outline-secondary" type="button"
-                    data-bs-toggle="collapse" data-bs-target="#trimBody"
-                    aria-expanded="true" aria-controls="trimBody" title="展开 / 收起">
-                <i class="bi bi-chevron-expand"></i>
-            </button>
-        </div>
-    </div>
-    <div class="collapse show" id="trimBody">
-        <div class="trim-toolbar">
-            <form method="post" enctype="multipart/form-data" class="d-flex gap-2 align-items-center m-0"
-                  action="{{ url_for('grades.exam_trim_settings_import', exam_id=exam.id) }}">
-                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                <input type="file" name="file" class="form-control form-control-sm"
-                       accept=".xlsx,.xls" required aria-label="去差设置 Excel">
-                <button class="btn btn-sm btn-outline-success text-nowrap" type="submit">
-                    <i class="bi bi-upload"></i> 导入 Excel
-                </button>
-            </form>
-            <a class="btn btn-sm btn-outline-secondary text-nowrap"
-               href="{{ url_for('grades.exam_trim_settings_template', exam_id=exam.id) }}">
-                <i class="bi bi-download"></i> 下载模板
-            </a>
-            <span class="imp-tip ms-auto">默认卓越班 2 人、强基班 0 人；只改「去差人数」</span>
-        </div>
-        <form method="post" id="trimForm" action="{{ url_for('grades.exam_trim_settings', exam_id=exam.id) }}">
-            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-            <div class="table-responsive" style="max-height:360px;">
-                <table class="table table-sm g-table align-middle mb-0" id="trimTable">
-                    <thead>
-                    <tr>
-                        <th>班级</th><th>班型</th>
-                        <th class="text-end">班级人数</th>
-                        <th class="text-end">参考人数</th>
-                        <th class="text-end" style="width:130px;">去差人数</th>
-                        <th class="text-end">去差后人数</th>
-                    </tr>
-                    </thead>
-                    <tbody>
-                    {% for r in trim_rows %}
-                    <tr data-attend="{{ r.attend }}" data-max="{{ r.max_trim }}">
-                        <td class="fw-semibold text-nowrap">{{ r.class_name }}</td>
-                        <td class="small text-muted text-nowrap">{{ r.class_type or '—' }}</td>
-                        <td class="text-end">{{ r.class_size }}</td>
-                        <td class="text-end">{{ r.attend }}</td>
-                        <td class="text-end">
-                            <input type="number" class="form-control form-control-sm trim-in text-end"
-                                   name="trim_{{ r.class_name }}" value="{{ r.trim }}"
-                                   min="0" max="{{ r.max_trim }}" step="1"
-                                   aria-label="{{ r.class_name }} 去差人数">
-                        </td>
-                        <td class="text-end fw-semibold trim-after">{{ r.after }}</td>
-                    </tr>
-                    {% else %}
-                    <tr><td colspan="6" class="text-center text-muted py-3">暂无班级数据</td></tr>
-                    {% endfor %}
-                    </tbody>
-                </table>
-            </div>
-        </form>
-    </div>
-</div>
-</div>
-</div>
 {% endif %}
 
-{# 2026-10-19：原「成绩导入」升级为「数据导入」——
-   左侧＝AI 智能导入（成绩 / 分数线 / 考务 / 场次，AI 只识别列，数据仍由系统逐行解析）；
-   右侧＝标准模板（成绩，确定性解析）。两种方式同页并列，不再分两个页面/两个页签。
-   划线分层状态条在两栏下方直接展示，不再套卡片；成绩模板下载移进模板导入卡内。 #}
 {% if step == 'upload' %}
+{# 2026-10-21 布局：两种导入方式并列（AI 智能导入窄、标准模板导入宽） #}
 <div class="row g-3 align-items-stretch">
     {# 2026-10-19 用户口径：AI 智能导入在左、标准模板导入在右 #}
     <div class="col-lg-5">
@@ -300,11 +219,83 @@
     </div>
 </div>
 
-{# 2026-10-21：划线分层已改为页首表格卡片（见上方 bandOverviewCard），此处不再重复。 #}
-
-{# 2026-10-19 用户口径：分数修改记录属于导入后的数据核对环节，放在数据导入页。 #}
+{# 2026-10-21 布局：去差人数设置（窄表）+ 分数修改记录（宽表）并排；无改分权限时去差独占整行 #}
+<div class="row g-3 mt-0 align-items-stretch">
+<div class="col-12 {{ 'col-xl-5' if current_user.has_perm('grades.edit') else '' }} d-flex">
+{# ===== 2026-10-21 用户口径：去差人数设置（默认展开、可折叠；仅去差人数可改） ===== #}
+<div class="card mb-0 w-100" id="trimCard">
+    <div class="card-header d-flex align-items-center flex-wrap gap-2">
+        <span class="imp-card-title"><i class="bi bi-scissors"></i> 去差人数设置</span>
+        <span class="badge bg-light text-dark border">{{ trim_rows|length }} 个班</span>
+        <div class="ms-auto d-flex gap-2 align-items-center flex-wrap">
+            <button class="btn btn-sm btn-primary" type="submit" form="trimForm">
+                <i class="bi bi-save"></i> 保存设置
+            </button>
+            <button class="btn btn-sm btn-outline-secondary" type="button"
+                    data-bs-toggle="collapse" data-bs-target="#trimBody"
+                    aria-expanded="true" aria-controls="trimBody" title="展开 / 收起">
+                <i class="bi bi-chevron-expand"></i>
+            </button>
+        </div>
+    </div>
+    <div class="collapse show" id="trimBody">
+        <div class="trim-toolbar">
+            <form method="post" enctype="multipart/form-data" class="d-flex gap-2 align-items-center m-0"
+                  action="{{ url_for('grades.exam_trim_settings_import', exam_id=exam.id) }}">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <input type="file" name="file" class="form-control form-control-sm"
+                       accept=".xlsx,.xls" required aria-label="去差设置 Excel">
+                <button class="btn btn-sm btn-outline-success text-nowrap" type="submit">
+                    <i class="bi bi-upload"></i> 导入 Excel
+                </button>
+            </form>
+            <a class="btn btn-sm btn-outline-secondary text-nowrap"
+               href="{{ url_for('grades.exam_trim_settings_template', exam_id=exam.id) }}">
+                <i class="bi bi-download"></i> 下载模板
+            </a>
+            <span class="imp-tip ms-auto">默认卓越班 2 人、强基班 0 人；只改「去差人数」</span>
+        </div>
+        <form method="post" id="trimForm" action="{{ url_for('grades.exam_trim_settings', exam_id=exam.id) }}">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <div class="table-responsive" style="max-height:360px;">
+                <table class="table table-sm g-table align-middle mb-0" id="trimTable">
+                    <thead>
+                    <tr>
+                        <th>班级</th><th>班型</th>
+                        <th class="text-end">班级人数</th>
+                        <th class="text-end">参考人数</th>
+                        <th class="text-end" style="width:130px;">去差人数</th>
+                        <th class="text-end">去差后人数</th>
+                    </tr>
+                    </thead>
+                    <tbody>
+                    {% for r in trim_rows %}
+                    <tr data-attend="{{ r.attend }}" data-max="{{ r.max_trim }}">
+                        <td class="fw-semibold text-nowrap">{{ r.class_name }}</td>
+                        <td class="small text-muted text-nowrap">{{ r.class_type or '—' }}</td>
+                        <td class="text-end">{{ r.class_size }}</td>
+                        <td class="text-end">{{ r.attend }}</td>
+                        <td class="text-end">
+                            <input type="number" class="form-control form-control-sm trim-in text-end"
+                                   name="trim_{{ r.class_name }}" value="{{ r.trim }}"
+                                   min="0" max="{{ r.max_trim }}" step="1"
+                                   aria-label="{{ r.class_name }} 去差人数">
+                        </td>
+                        <td class="text-end fw-semibold trim-after">{{ r.after }}</td>
+                    </tr>
+                    {% else %}
+                    <tr><td colspan="6" class="text-center text-muted py-3">暂无班级数据</td></tr>
+                    {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </form>
+    </div>
+</div>
+</div>
 {% if current_user.has_perm('grades.edit') %}
-<div class="card mt-3" id="scoreChanges">
+<div class="col-12 col-xl-7 d-flex">
+<div class="card mb-0 w-100" id="scoreChanges">
     <div class="card-header d-flex align-items-center flex-wrap gap-2">
         <span class="imp-card-title"><i class="bi bi-clock-history"></i> 分数修改记录</span>
         <span class="badge bg-secondary">{{ change_log_count }} 条</span>
@@ -367,7 +358,9 @@
         </table>
     </div>
 </div>
+</div>
 {% endif %}
+</div>
 
 {# ② AI 结论 + 待确认问题 #}
 <div class="card mb-3 d-none" id="aiBox">
