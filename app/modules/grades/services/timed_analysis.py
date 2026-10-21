@@ -1,4 +1,4 @@
-# StuLink v1.19.49.50 2026-10-20
+# StuLink v1.19.49.51 2026-10-20
 # 限时练单科分析：班均分 + 名次区间人数（不做多科汇总）
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 """限时练单科分析（2026-10-20 用户口径）。
@@ -74,13 +74,21 @@ def save_subject(exam, subject, rows):
     timed_service.recalc_subject_ranks(exam.id, subject)
 
 
-def classes_of(exam_id, subject=None):
-    """本场出现过的班级（按班级名排序，供成绩单 / 分析页筛选）"""
+def classes_of(exam_id, subject=None, user=None):
+    """本场出现过的班级（按班级名排序，供成绩单 / 分析页筛选）
+
+    ``user`` 给出时只留可见班级（筛选按钮本身也不该暴露不可见班级名）。
+    """
     q = db.session.query(TimedScore.class_name).filter(
         TimedScore.exam_id == int(exam_id))
     if subject:
         q = q.filter(TimedScore.subject == subject)
     names = {r[0] for r in q.distinct().all() if r[0]}
+    scope = _scope_of(user)
+    if scope is not None:
+        grade = (db.session.query(TimedScore.grade)
+                 .filter(TimedScore.exam_id == int(exam_id)).limit(1).scalar())
+        names = {n for n in names if scope.can_view_class(grade, n)}
     return sorted(names)
 
 
@@ -130,20 +138,47 @@ def _summary_base(exam):
             't_ready': bool(tmap)}
 
 
-def summary_matrix(exam, class_name='', q='', page=None, per_page=50):
+def summary_matrix(exam, class_name='', q='', page=None, per_page=50, user=None):
     """汇总表：一行一个学生 × 各科分数 + 总分 + 年级名次 + 班级名次 + 总分 T 分。
 
     2026-10-20 用户口径：限时练没有「总分」行，总分由各科现算；
     名次按总分降序（同分并列 1,1,3），班级名次在**同班**内部再排一次。
     全量结果按场次缓存，翻页 / 搜索 / 换班级都只做内存过滤。
+
+    2026-10-21 权限收口：按 ``user`` 的成绩可见范围裁剪（见 ``_mask_summary_row``）。
+    返回里带 ``total_visible`` / ``rank_g_visible`` / ``rank_c_visible`` 三个开关，
+    模板与导出据此决定是否渲染总分、年级名次、班级名次这几列。
     """
     base = _cached(('summary', exam.id), lambda: _summary_base(exam))
-    subjects = base['subjects']
-    out = base['out']
-    classes = list(base['classes'])
-    t_ready = base['t_ready']
+    scope = _scope_of(user)
+    grade = exam.grade
+    all_classes = list(base['classes'])
+    classes = (all_classes if scope is None
+               else [c for c in all_classes if scope.can_view_class(grade, c)])
+    subjects = _column_subjects(scope, grade, class_name, classes, base['subjects'])
 
-    shown = [x for x in out if not class_name or x['class_name'] == class_name]
+    shown = [x for x in base['out']
+             if not class_name or x['class_name'] == class_name]
+    if scope is not None:
+        # 非可见班级整行都不给。「—」无班级行按年级口径判定：年级长 / 任课教师
+        # 可见（R1 本来就是「年级 × 学科」），班主任不可见。
+        shown = [x for x in shown if scope.can_view_class(grade, x['class_name'])]
+        shown = [_mask_summary_row(x, scope, grade) for x in shown]
+
+    # 列开关：以当前筛选下真实存在的字段为准；没有行时按范围口径给默认值
+    if shown:
+        total_visible = any('total' in x for x in shown)
+        rank_g_visible = any('rank_grade' in x for x in shown)
+        rank_c_visible = any('rank_class' in x for x in shown)
+    else:
+        probe = class_name or (classes[0] if classes else '')
+        if scope is None:
+            total_visible = rank_g_visible = rank_c_visible = True
+        else:
+            total_visible = bool(probe and scope.class_total_visible(grade, probe))
+            rank_c_visible = total_visible
+            rank_g_visible = bool(probe and scope.total_rank_visible(grade, probe))
+
     # 搜索：学号 / 姓名包含即可（不区分大小写）
     kw = (q or '').strip().lower()
     if kw:
@@ -163,9 +198,31 @@ def summary_matrix(exam, class_name='', q='', page=None, per_page=50):
         page_no = min(max(1, page_no), pages)
         rows = shown[(page_no - 1) * per_page: page_no * per_page]
     return {'subjects': subjects, 'rows': rows, 'classes': classes,
-            't_ready': t_ready, 't_min': T_MIN_SAMPLE,
+            't_ready': base['t_ready'], 't_min': T_MIN_SAMPLE,
+            'total_visible': total_visible, 'rank_g_visible': rank_g_visible,
+            'rank_c_visible': rank_c_visible,
             'count': total, 'page': page_no, 'pages': pages,
             'per_page': per_page, 'q': q}
+
+
+def _column_subjects(scope, grade, class_name, classes, subjects):
+    """表头可见科目。
+
+    指定了班级 → 按该班口径；否则取可见班级的并集（任课教师＝所教科，
+    班主任＝本班全科，所以浏览「全部」时表头仍是全科）。
+    """
+    if scope is None:
+        return list(subjects)
+    if class_name:
+        allowed = scope.class_subjects(grade, class_name)
+        return list(subjects) if allowed is None else [
+            s for s in subjects if s in allowed]
+    if not classes:
+        allowed = scope.grade_subjects(grade)
+        return list(subjects) if allowed is None else [
+            s for s in subjects if s in allowed]
+    return [s for s in subjects
+            if any(scope.can_view_subject(grade, c, s) for c in classes)]
 
 
 def _assign_ranks(items, key):
@@ -179,21 +236,29 @@ def _assign_ranks(items, key):
         it[key] = rank
 
 
-def subject_blocks(exam, tpl):
+def subject_blocks(exam, tpl, user=None):
     """分析页数据：一个学科一块，每块两组「图 + 表」——
 
     上：**人数** 左堆叠图（各班各名次段人数） + 右人数表；
     下：**去差均分** 左柱状图（各班去差均分） + 右表（去差均分 + 各段均分）。
+
+    2026-10-21 权限收口：只保留当前账号可见的「班级 × 学科」组合；
+    任课教师只出本学科（本年级全部班），班主任出本班全科，无可见数据的科目
+    整块不出（避免出现空图）。
     """
     from app.models.grades import SUBJECTS
+    scope = _scope_of(user)
+    skey = _scope_key(scope)
     have = {r[0] for r in db.session.query(TimedScore.subject)
             .filter_by(exam_id=exam.id).distinct().all()}
     out = []
     for s in SUBJECTS:
         if s not in have:
             continue
-        a = _cached(('analysis', exam.id, s, getattr(tpl, 'id', 0)),
-                    lambda s=s: subject_analysis(exam, s, tpl))
+        a = _cached(('analysis', exam.id, s, getattr(tpl, 'id', 0), skey),
+                    lambda s=s: subject_analysis(exam, s, tpl, scope=scope))
+        if not a['rows']:
+            continue                    # 该科没有任何可见班级
         rows = a['rows']
         classes = [r['class_name'] for r in rows]
         # 堆积图：互斥段，各班段内人数
@@ -345,7 +410,69 @@ def _no_class(name):
     return not (name or '').strip() or (name or '').strip() in NO_CLASS_NAMES
 
 
-def subject_analysis(exam, subject, template):
+# ==================== 成绩可见范围（2026-10-21 权限收口） ====================
+# 审计发现：限时练此前只校验「年级可见」，逐生层（汇总表 / 学生详情 / T 分走势）
+# 对任何持 `grades.view` 的账号全开 —— 任课教师能看到整个年级全部科目的分数和
+# 总分，比普通考试的收口还宽，属越权。
+# 现在统一走 `score_guard.ScoreScope`（与普通考试同一份口径）：
+#   · 任课教师：本年级所教科目的分数 + 该生总分年级名次（不给总分分数、不给班名次）；
+#   · 班主任：本班全科 + 总分 + 名次；
+#   · 年级长及以上 / 校级 / 管理员：本年级 / 全校。
+# **只在出结果时裁剪，不动缓存里的全量对象** —— 否则一次低权限请求会把收窄后的
+# 对象写回缓存，后续正常请求反而看不到数据。
+
+def _scope_of(user=None):
+    """解析账号的成绩可见范围。
+
+    ``user`` 缺省时取当前登录账号（Web 端各页都在登录态）；**没有请求上下文**
+    （脚本 / 后台任务）返回 ``None`` = 不做裁剪，这类调用方自己已有边界。
+    请求内取不到有效身份时按空范围处理（``resolve`` 失败同样 fail-closed）。
+    """
+    from app.modules.grades.services import score_guard
+    if user is None:
+        from flask import has_request_context
+        if not has_request_context():
+            return None
+        from flask_login import current_user
+        user = current_user
+    try:
+        return score_guard.resolve(user)
+    except PermissionError:
+        return score_guard.ScoreScope()
+
+
+def _scope_key(scope):
+    """范围指纹（缓存键用）：同一份分析结果对不同范围不能混用。"""
+    if scope is None:
+        return 'all'
+    return (bool(scope.full_school), tuple(sorted(scope.grades)),
+            tuple(sorted(scope.classes)), tuple(sorted(scope.teach)))
+
+
+def _mask_summary_row(row, scope, grade):
+    """按可见范围裁一行汇总数据（返回新 dict，绝不改缓存对象）。
+
+    - 科目：只留该班可见学科（任课教师＝所教科；班主任本班＝全部）；
+    - 总分：`class_total_visible` 为假时删掉总分 / 班级名次 / 总分 T；
+    - 年级名次：`total_rank_visible` 为真时保留（任课教师只给名次，不给分数）。
+    """
+    item = dict(row)
+    item['scores'] = dict(row.get('scores') or {})
+    item['ts'] = dict(row.get('ts') or {})
+    cls = row.get('class_name')
+    allowed = scope.class_subjects(grade, cls)
+    if allowed is not None:
+        item['scores'] = {k: v for k, v in item['scores'].items() if k in allowed}
+        item['ts'] = {k: v for k, v in item['ts'].items() if k in allowed}
+    if not scope.class_total_visible(grade, cls):
+        for key in ('total', 'rank_class', 't'):
+            item.pop(key, None)
+        if not scope.total_rank_visible(grade, cls):
+            item.pop('rank_grade', None)
+    return item
+
+
+def subject_analysis(exam, subject, template, user=None, scope=None):
     """单科分析表：各班去差均分 + 各名次区间人数 + 合计行（纯内存，一次查询）
 
     2026-10-20 用户口径：
@@ -354,7 +481,12 @@ def subject_analysis(exam, subject, template):
     去差名额与全局对比同一份规则（``report_service.TRIM_RULES``）；但这里
     **不套「缺考先顶替名额」**——限时练常有成批学生不参加（一个班只来 40/49 人），
     套上去就永远剔不到人，用户要的是「每班去掉末尾 N 人」。
+
+    2026-10-21 权限收口：``user`` / ``scope`` 给出时只统计可见班级，
+    且只统计该班可见的学科（任课教师＝所教科；班主任本班＝全科）。
     """
+    if scope is None:
+        scope = _scope_of(user)
     teachers = _teacher_map(exam.grade, subject)
     quotas = _trim_quotas(exam.grade)
     rows = (TimedScore.query
@@ -362,6 +494,10 @@ def subject_analysis(exam, subject, template):
             .order_by(TimedScore.class_name.asc()).all())
     # 无班级归属的不参与统计（先剔除，人数口径才准）
     rows = [r for r in rows if not _no_class((r.class_name or '').strip())]
+    if scope is not None:
+        rows = [r for r in rows
+                if scope.can_view_subject(exam.grade,
+                                          (r.class_name or '').strip(), subject)]
     # 分层按实考人数自适应：<100 人按 10 人一组；≥100 人丢掉超过人数的层
     layers = effective_layers(
         template.get_layers() if template else [], len(rows))
@@ -622,10 +758,43 @@ def _student_detail_base(exam, student_no):
             't_min': T_MIN_SAMPLE}
 
 
-def student_detail(exam, student_no):
-    """学生详情（按年级 + 学号缓存，重复点同一人不再扫全表）"""
-    return _cached(('detail', exam.grade, student_no),
+def student_detail(exam, student_no, user=None):
+    """学生详情（按年级 + 学号缓存，重复点同一人不再扫全表）。
+
+    2026-10-21 权限收口：先校验该生所在班级可见（不可见直接 ``PermissionError``，
+    防止靠 URL 枚举学号），再按班级口径裁掉不可见科目的分数 / T 分 / 走势 / 学科档案。
+    """
+    data = _cached(('detail', exam.grade, student_no),
                    lambda: _student_detail_base(exam, student_no))
+    scope = _scope_of(user)
+    if scope is None:
+        return data
+    cls = data.get('cls') or ''
+    if not scope.can_view_class(exam.grade, cls):
+        raise PermissionError(
+            f'无权查看 {exam.grade} {cls or "（无班级）"} 的学生成绩：'
+            '任课教师仅能查看所教年级所教科目的成绩，班主任仅能查看本班成绩')
+    allowed = scope.class_subjects(exam.grade, cls)
+    if allowed is None:
+        return data
+
+    subjects = [s for s in data['subjects'] if s in allowed]
+    keep = set(subjects)
+    lines = [{'exam': it['exam'],
+              'cells': {k: v for k, v in it['cells'].items() if k in keep}}
+             for it in data['lines']]
+    chart = {k: v for k, v in data['chart'].items() if k in keep}
+    latest = {k: v for k, v in data['latest'].items() if k in keep}
+    stats = [x for x in data['stats'] if x['subject'] in keep]
+    by_subj = {x['subject']: x for x in stats}
+    radar_subj = [s for s in subjects if s in by_subj]
+    return {**data, 'subjects': subjects, 'lines': lines, 'chart': chart,
+            'latest': latest, 'stats': stats,
+            'radar': {'subjects': radar_subj,
+                      'latest': [by_subj[s]['latest'] for s in radar_subj],
+                      'avg': [by_subj[s]['avg'] for s in radar_subj]},
+            'weak': [x for x in stats if x['weak']],
+            'subject_limited': True}
 
 
 TREND_MAX_POINTS = 8      # 迷你折线最多回溯几场
@@ -706,11 +875,35 @@ def _trends_base(exam):
     return {'subjects': subjects, 'rows': out}
 
 
-def student_trends(exam, class_name='', page=1, per_page=20):
-    """学生分析页：班级筛选 + 分页（全量结果按年级缓存，翻页不再重算）"""
+def student_trends(exam, class_name='', page=1, per_page=20, user=None):
+    """学生分析页：班级筛选 + 分页（全量结果按年级缓存，翻页不再重算）
+
+    2026-10-21 权限收口：只出行级可见班级；每行的科目键按该班口径裁剪
+    （表头取可见班级的并集，行里没有的科目显示「—」）。
+    """
     base = _cached(('trends', exam.grade), lambda: _trends_base(exam))
-    subjects = base['subjects']
+    scope = _scope_of(user)
+    grade = exam.grade
+    subjects = list(base['subjects'])
     out = base['rows']
+    if scope is not None:
+        out = [x for x in out if scope.can_view_class(grade, x['cls'])]
+        vis_classes = {x['cls'] for x in out}
+        subjects = ([s for s in subjects
+                     if any(scope.can_view_subject(grade, c, s) for c in vis_classes)]
+                    if vis_classes else [])
+        rows = []
+        for x in out:
+            allowed = scope.class_subjects(grade, x['cls'])
+            if allowed is None:
+                rows.append(x)
+                continue
+            rows.append({**x,
+                         'now': {k: v for k, v in x['now'].items() if k in allowed},
+                         'pts': {k: v for k, v in x['pts'].items() if k in allowed},
+                         'paths': {k: v for k, v in x['paths'].items()
+                                   if k in allowed}})
+        out = rows
     if class_name:
         out = [x for x in out if x['cls'] == class_name]
 

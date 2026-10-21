@@ -1,4 +1,4 @@
-# StuLink v1.19.49.50 2026-10-20
+# StuLink v1.19.49.51 2026-10-20
 # 限时练：模板文件导入（上传预检 → 确认落库）
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 """限时练模板文件导入（追加式单科：一次一科，同科重导 = 整科覆盖）。
@@ -25,13 +25,14 @@ from app.utils.helpers import log_operation
 
 @bp.route('/timed/<int:tid>/import/upload', methods=['POST'])
 @login_required
-@perm_required('grades.view')
+@perm_required('grades.import')
 def timed_import_upload(tid):
     """模板文件导入预检：解析 → 匹配 → 差异预览（不写成绩）"""
     exam = timed_service.assert_visible(tid)
     timed_service.assert_grade_writable(exam.grade)
     try:
         subject = subject_from_form()
+        timed_service.assert_subject_importable(exam.grade, subject)
         raw = read_upload()
         parsed = timed_import.parse_sheet(raw, subject, exam.grade)
         rows, errors, mstats = timed_match.match_students(
@@ -54,7 +55,7 @@ def timed_import_upload(tid):
 
 @bp.route('/timed/<int:tid>/import/confirm', methods=['POST'])
 @login_required
-@perm_required('grades.view')
+@perm_required('grades.import')
 def timed_import_confirm(tid):
     """确认导入：整科覆盖 + 重算名次（一次性 token，防串批）"""
     exam = timed_service.assert_visible(tid)
@@ -71,6 +72,8 @@ def timed_import_confirm(tid):
         return redirect(url_for('grades.timed_detail', tid=exam.id,
                                 tab='import'))
     subject = draft['subject']
+    # 草稿可能是别人（有权限的账号）留下的：确认前再校验一次本账号能否导入该科
+    timed_service.assert_subject_importable(exam.grade, subject)
     try:
         timed_service.delete_scores_of(exam.id, subject)
         db.session.flush()
