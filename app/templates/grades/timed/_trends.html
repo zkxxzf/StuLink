@@ -5,8 +5,12 @@
 {% if not trends.rows %}
 <div class="alert alert-light border">
     {% if empty_subjects %}
+    {% if current_user.has_perm('grades.import') %}
     还没有成绩，先到
     <a href="{{ url_for('grades.timed_detail', tid=exam.id, tab='import') }}">数据导入</a>。
+    {% else %}
+    还没有成绩（导入需要「成绩导入」权限，请联系管理员）。
+    {% endif %}
     {% else %}
     当前筛选下没有学生。
     {% endif %}

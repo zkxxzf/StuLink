@@ -1,4 +1,4 @@
-# StuLink v1.19.49.50 2026-10-20
+# StuLink v1.19.49.51 2026-10-20
 # 限时练：AI 智能导入（只让模型做「哪一列是什么」）
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 """限时练 AI 导入路由。
@@ -40,7 +40,7 @@ def _ai_cfg():
 
 @bp.route('/timed/<int:tid>/ai/analyze', methods=['POST'])
 @login_required
-@perm_required('grades.view')
+@perm_required('grades.import')
 def timed_ai_analyze(tid):
     """上传文件 → 表头 + 样本 + 自动/智能列映射（JSON）"""
     exam = timed_service.assert_visible(tid)
@@ -51,6 +51,10 @@ def timed_ai_analyze(tid):
         info = timed_ai.probe(raw)
     except timed_import.TimedParseError as e:
         return {'success': False, 'message': str(e)}
+    allowed = timed_service.importable_subjects(exam.grade)
+    if allowed is not None and subject not in allowed:
+        return {'success': False,
+                'message': f'无权导入「{subject}」：只能导入本人任教学科'}
     mapping, ai_error = info['auto'], ''
     cfg = _ai_cfg()
     if cfg:
@@ -77,7 +81,7 @@ def timed_ai_analyze(tid):
 
 @bp.route('/timed/<int:tid>/ai/apply', methods=['POST'])
 @login_required
-@perm_required('grades.view')
+@perm_required('grades.import')
 def timed_ai_apply(tid):
     """按列映射解析：dry_run=1 只预览，否则整科覆盖落库"""
     exam = timed_service.assert_visible(tid)
@@ -91,6 +95,10 @@ def timed_ai_apply(tid):
             parsed['rows'], exam.grade)
     except (timed_import.TimedParseError, ValueError) as e:
         return {'success': False, 'message': str(e)}
+    allowed = timed_service.importable_subjects(exam.grade)
+    if allowed is not None and subject not in allowed:
+        return {'success': False,
+                'message': f'无权导入「{subject}」：只能导入本人任教学科'}
     diff = timed_match.preview_diff(exam.id, subject, rows)
     if not rows and request.form.get('dry_run') != '1':
         # 整科覆盖前必须保证本次至少匹配到 1 人，否则会把该科清空

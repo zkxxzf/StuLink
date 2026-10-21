@@ -7,9 +7,13 @@
    一次展开全部学科，不再按科目切换；每张表可单独下载图片。 #}
 {% if empty_subjects %}
 <div class="alert alert-light border">
+    {% if current_user.has_perm('grades.import') %}
     还没有成绩，先到
     <a href="{{ url_for('grades.timed_detail', tid=exam.id, tab='import') }}">数据导入</a>
     导入一科。
+    {% else %}
+    还没有成绩（导入需要「成绩导入」权限，请联系管理员）。
+    {% endif %}
 </div>
 {% else %}
 

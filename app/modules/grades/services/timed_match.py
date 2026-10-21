@@ -1,4 +1,4 @@
-# StuLink v1.19.49.50 2026-10-20
+# StuLink v1.19.49.51 2026-10-20
 # 限时练学生匹配：考号优先、学号兜底；不做姓名猜测
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 """限时练导入的学生匹配与差异预览（不写库）。
@@ -76,7 +76,10 @@ def match_students(rows, grade=''):
         out.append({'line': r['line'], 'student_no': stu.student_number,
                     'student_name': stu.name or r.get('name', ''),
                     'zhixue_no': _code(stu.zhixue_no) or r.get('zhixue_no', ''),
-                    'class_name': r.get('class_name') or stu.class_name or '',
+                    # 2026-10-21：班级**以主库学籍为准**。文件里的班级是导入方
+                    # 自己填的，若当真，导入人可把成绩挂到任意班级 —— 而班级正是
+                    # 成绩可见范围的判定依据（班主任按班授权）。
+                    'class_name': stu.class_name or r.get('class_name') or '',
                     'score': r['score']})
     stats = {'matched': len(out), 'unmatched': len(errors)}
     return out, errors, stats

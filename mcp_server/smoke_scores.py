@@ -223,6 +223,45 @@ async def timed_cases(call):
           await call('get_exam_overview', dict(k, exam_id=999999)),
           expect_ok=False, must_contain=['不存在'])
 
+    # ---- 2026-10-21 权限收口：真实账号的逐生层收窄（此前完全敞开）----
+    accounts = core_db.run(_pick_accounts)
+    tea = accounts.get('teacher')
+    if tea and tea['grade'] == grade:
+        bootstrap.warm_up(tea['username'])
+        tsum = _data(await call('get_class_score_summary',
+                                dict(k, exam_id=exam_id)))
+        expect('限时练：任课教师看不到总分分数',
+               tsum.get('total_visible') is False, tsum.get('total_visible'))
+        expect('限时练：任课教师仍拿到总分年级名次',
+               tsum.get('total_rank_visible') is True)
+        cols = (tsum.get('students') or {}).get('cols') or []
+        expect('限时练：任课教师响应里没有班级名次列', 'rank_c' not in cols, cols)
+        overview = _data(await call('get_exam_overview', dict(k, exam_id=exam_id)))
+        other = next((s for s in (overview.get('subjects') or [])
+                      if s != tea['subject']), None)
+        if other:
+            denied = await call('get_class_score_detail',
+                                dict(k, exam_id=exam_id, class_name=class_name,
+                                     subject=other))
+            expect(f'限时练：任课教师查他科（{other}）逐生明细被拒',
+                   not _is_ok(denied) and '无权' in denied, denied[:160])
+        bootstrap.warm_up('admin')
+
+    bzr = accounts.get('homeroom')
+    if bzr and bzr['grade'] == grade and not bzr.get('has_teach'):
+        bootstrap.warm_up(bzr['username'])
+        mine = await call('get_class_score_summary',
+                          dict(k, exam_id=exam_id, class_name=bzr['class_name']))
+        expect('限时练：班主任本班可见总分',
+               _is_ok(mine) and _data(mine).get('total_visible') is True,
+               mine[:160])
+        denied = await call('get_class_score_summary',
+                            dict(k, exam_id=exam_id,
+                                 class_name=bzr['other_class']))
+        expect('限时练：班主任查他班被拒',
+               not _is_ok(denied) and '无权' in denied, denied[:160])
+        bootstrap.warm_up('admin')
+
     outsider = core_db.run(lambda: _pick_outsider(grade))
     if outsider:
         bootstrap.warm_up(outsider)

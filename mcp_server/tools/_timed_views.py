@@ -9,13 +9,15 @@
 **复用网页端服务**（`timed_service` / `timed_analysis`）而不是自己写聚合，
 保证 AI 与网页分析页同口径（缺考不计入分母、去差名额、累积门槛…）。
 注意：那些服务里带 `user=None` 的参数必须**显式传 user**——MCP 进程没有
-`current_user`（`flask_login` 未登录)，取默认值会直接报错。
+登录态（`flask_login` 取不到当前用户），不传就等同于「不裁剪可见范围」。
 
-权限口径（2026-10-20 用户定案，与网页端一致）：
-  · 查看＝`grades.view` + 该年级在可见年级范围内（`scope_service.visible_grades`）；
+权限口径（2026-10-21 用户定案，与网页端同一份 `score_guard`）：
+  · 场次级＝`grades.view` + 该年级在可见年级范围内（失败即空集，fail-closed）；
+  · 逐生层＝任课教师只出所教科目的分数 + 总分年级名次（不给总分分数、
+    不给班级名次）；班主任本班全科；年级长及以上 / 校级 / 管理员本年级 / 全校。
   · 本服务只读，不涉及改分 / 删除（那需要 `grades.edit`）。
 """
-from ..core import respond, timeddata
+from ..core import respond, score_guard, timeddata
 from ._score_common import brief, note
 
 TIMED_EXAM_FIELDS = ('id', 'name', 'grade', 'exam_date', 'term', 'status')
@@ -83,6 +85,7 @@ def list_classes(user, exam_id, view):
     from sqlalchemy import func
     from app.extensions import db
     from app.models.timed import TimedExam, TimedScore
+    scope = score_guard.resolve(user)
     query = db.session.query(TimedScore.grade, TimedScore.class_name,
                              func.count(func.distinct(TimedScore.student_no)))
     if exam_id:
@@ -99,21 +102,31 @@ def list_classes(user, exam_id, view):
             query = query.filter(TimedScore.exam_id.in_(ids or [-1]))
     rows = (query.group_by(TimedScore.grade, TimedScore.class_name)
             .order_by(TimedScore.grade.desc(), TimedScore.class_name).all())
-    out = [{'grade': g, 'class_name': c, 'student_count': n}
-           for g, c, n in rows if c and c not in ('不分班', '未分班')]
+    out = [{'grade': g, 'class_name': c,
+            'student_count': n,
+            **({} if brief(view) else {
+                'total_visible': scope.class_total_visible(g, c)})}
+           for g, c, n in rows
+           if c and c not in ('不分班', '未分班') and scope.can_view_class(g, c)]
     return {'count': len(out), 'classes': respond.limit_rows(out),
-            'note': note(view, '班级取自本场成绩行（当时班级）',
+            'note': note(view, '只列可下钻逐生明细的班级',
                          '班级取自限时练成绩行里的班级快照；'
                          '"不分班 / 未分班"（无班级归属）不计入统计。'
+                         '本清单只含当前账号可见的班级（任课教师＝所教年级全部班级，'
+                         '但逐生层只有所教学科）。'
                          '逐生明细用 get_class_score_detail(kind="timed")')}
 
 
 def overview(user, exam_id, view):
-    """场次概览：科目与人数、班级数、去重学生数、已用分层模板。"""
+    """场次概览：科目与人数、班级数、去重学生数、已用分层模板。
+
+    年级级聚合信息（各科人数、班级数）属「成绩分析结果」，对可见年级内账号公开；
+    逐生数据才按 `score_guard` 逐人收口。
+    """
     from app.modules.grades.services import timed_analysis, timed_service
     exam = timed_exam(user, exam_id)
     counts = timed_service.student_counts(exam.id)
-    classes = timed_analysis.classes_of(exam.id)
+    classes = timed_analysis.classes_of(exam.id, user=user)
     out = {'exam': respond.pick(exam, TIMED_EXAM_FIELDS),
            'status': exam.status_label(),
            'semester': exam.natural_semester_label(),
@@ -131,29 +144,53 @@ def class_summary(user, exam_id, class_name, view, top):
 
     口径与网页端「成绩单」页同一份（`timed_analysis.summary_matrix`）：
     缺考不落库自然不计入分母、名次同级并列 1,1,3。
+    2026-10-21：逐生层按 `score_guard` 收口 —— 任课教师只有所教科目的分数
+    与总分年级名次，总分分数 / 班级名次不下发。
     """
     from app.modules.grades.services import timed_analysis
     exam = timed_exam(user, exam_id)
-    matrix = timed_analysis.summary_matrix(exam, class_name, q='', page=None)
+    scope = score_guard.resolve(user)
+    if class_name:
+        score_guard.require_class(scope, exam.grade, class_name)
+    matrix = timed_analysis.summary_matrix(exam, class_name, q='', page=None,
+                                           user=user)
     rows = matrix['rows']
     subjects = matrix['subjects']
     if top and top > 0:
         rows = rows[:top]
     # 各科分数在 rows[i]['scores'] 子字典里，列式前摊平（省掉每层键名）
-    flat = [{'no': r['student_no'], 'name': r['name'], 'cls': r['class_name'],
-             'total': r['total'], 'rank_g': r['rank_grade'],
-             'rank_c': r['rank_class'], **r['scores']} for r in rows]
-    cols = ['no', 'name', 'cls'] + subjects + ['total', 'rank_g', 'rank_c']
+    # 「不分班」行没有班级名次，这里一律用 get 取值（下标会 KeyError → 整场 500）
+    flat = []
+    for r in rows:
+        item = {'no': r['student_no'], 'name': r['name'], 'cls': r['class_name'],
+                **r['scores']}
+        if 'total' in r:
+            item['total'] = r['total']
+        if 'rank_grade' in r:
+            item['rank_g'] = r['rank_grade']
+        if 'rank_class' in r:
+            item['rank_c'] = r['rank_class']
+        flat.append(item)
+    cols = ['no', 'name', 'cls'] + subjects
+    if matrix['total_visible']:
+        cols.append('total')
+    if matrix['rank_g_visible']:
+        cols.append('rank_g')
+    if matrix['rank_c_visible']:
+        cols.append('rank_c')
     out = {'exam_id': exam.id, 'exam_name': exam.name, 'grade': exam.grade,
            'class_name': class_name or '全年级', 'subjects': subjects,
+           'total_visible': matrix['total_visible'],
+           'total_rank_visible': matrix['rank_g_visible'],
            'student_count': len(rows)}
     if brief(view):
         out['students'] = respond.table_view(flat, cols)
     else:
-        out['students'] = respond.limit_rows(rows)
-    out['note'] = note(view, 'rank_g=该科年级名次',
+        out['students'] = respond.limit_rows(flat)
+    out['note'] = note(view, 'rank_g=总分年级名次',
                        '总分＝各科现算（限时练不存总分行）；rank_g＝总分年级名次，'
-                       'rank_c＝总分班名次，同分并列后延跳号（1,1,3）')
+                       'rank_c＝总分班名次，同分并列后延跳号（1,1,3）。'
+                       '任课教师只下发所教学科的分数与 rank_g，总分分数与 rank_c 不下发。')
     return out
 
 
@@ -162,6 +199,9 @@ def subject_detail_rows(user, exam_id, class_name, subject, view, top):
     from app.models.timed import TimedScore
     from app.modules.grades.services import timed_service
     exam = timed_exam(user, exam_id)
+    scope = score_guard.resolve(user)
+    if class_name:
+        score_guard.require_class(scope, exam.grade, class_name)
     subjects = timed_service.subjects_of(exam.id)
     if not subjects:
         raise ValueError(f'限时练 {exam.name} 还没有导入任何科目成绩')
@@ -174,7 +214,15 @@ def subject_detail_rows(user, exam_id, class_name, subject, view, top):
         query = query.filter(TimedScore.class_name == class_name)
     if picked:
         query = query.filter(TimedScore.subject == picked)
-    rows = query.order_by(TimedScore.student_no.asc()).all()
+    # 逐生层收口：班级可见 + 该班该科可见（任课教师＝只自己那科）
+    rows = [r for r in query.order_by(TimedScore.student_no.asc()).all()
+            if scope.can_view_subject(exam.grade, (r.class_name or '').strip(),
+                                      r.subject)]
+    visible = sorted({r.subject for r in rows})
+    if picked and picked not in visible:
+        raise PermissionError(
+            f'无权查看 {exam.grade}「{picked}」的逐生成绩'
+            '（任课教师仅能查看自己所教学科）')
     items = [{'no': r.student_no, 'name': r.student_name, 'class': r.class_name,
               'subject': r.subject, 'score': r.score, 'rank': r.rank_grade}
              for r in rows]
@@ -194,15 +242,17 @@ def subject_detail_rows(user, exam_id, class_name, subject, view, top):
 def student_scores(user, student_no, exam_id, view):
     """该生在某场限时练的各科成绩；exam_id 传 0 给该生参加过的场次清单。"""
     from app.models.timed import TimedExam, TimedScore
-    grades = visible_grades(user)
+    scope = score_guard.resolve(user)
     rows_all = (TimedScore.query.filter_by(student_no=student_no)
                 .order_by(TimedScore.exam_id.desc()).all())
     if not rows_all:
         raise ValueError('无权查看该学生成绩（学号不存在或不在可见范围内）')
-    if getattr(user, 'role', '') != 'admin':
-        rows_all = [r for r in rows_all if r.grade in grades]
-        if not rows_all:
-            raise ValueError('无权查看该学生成绩（学号不存在或不在可见范围内）')
+    # 班级 / 学科双向收口：只看得到「可见班级的可见科目」，其余连存在性都不透露
+    rows_all = [r for r in rows_all
+                if scope.can_view_subject(r.grade, (r.class_name or '').strip(),
+                                          r.subject)]
+    if not rows_all:
+        raise ValueError('无权查看该学生成绩（学号不存在或不在可见范围内）')
 
     if not exam_id:
         eids = sorted({r.exam_id for r in rows_all}, reverse=True)
@@ -250,7 +300,11 @@ def student_trend(user, student_no, subject, limit, view):
     if latest is None:
         raise ValueError('无权查看该学生成绩（学号不存在或不在可见范围内）')
     exam = timed_exam(user, latest.exam_id)       # 顺带校验该年级可见
-    detail = timed_analysis.student_detail(exam, student_no)
+    try:
+        detail = timed_analysis.student_detail(exam, student_no, user=user)
+    except PermissionError:
+        # 「不在可见范围」与「学号不存在」统一文案，防枚举
+        raise ValueError('无权查看该学生成绩（学号不存在或不在可见范围内）')
     chart = detail.get('chart') or {}
     picked = (subject or '').strip()
     if picked and picked not in chart:
