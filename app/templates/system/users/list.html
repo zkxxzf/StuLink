@@ -17,13 +17,22 @@
             <i class="bi bi-key"></i> 导出初始密码
             <span id="epSelCount" class="badge bg-primary ms-1 d-none">0</span>
         </button>
-        <button class="btn btn-success" data-bs-toggle="modal" data-bs-target="#importTeacherModal">
-            <i class="bi bi-file-earmark-excel"></i> 批量导入
-        </button>
+        {# 2026-10-21 用户口径：本页只允许**单个添加管理员账号**；
+           不再提供批量导入 / 新建教师 —— 教师统一在「教务管理 → 教师」新增，
+           账号自动同步到这里，再在此启用、重置密码。 #}
+        {% if current_user.username == 'admin' %}
         <a href="{{ url_for('users.create') }}" class="btn btn-primary">
-            <i class="bi bi-plus-lg"></i> 新建教师
+            <i class="bi bi-person-plus"></i> 新建管理员
         </a>
+        {% endif %}
     </div>
+</div>
+
+<div class="alert alert-light border py-2 small">
+    <i class="bi bi-info-circle"></i>
+    教师账号不再在此新建或批量导入：请在
+    <a href="{{ url_for('academic.teachers_page') }}">教务管理 → 教师</a>
+    新增/导入教师，档案与账号会自动同步到本列表；在这里「启用 / 停用」「重置密码」即可。
 </div>
 
 {% if one_time_passwords %}
@@ -342,46 +351,6 @@
     </div>
 </div>
 
-<!-- 批量导入教师弹窗 -->
-<div class="modal fade" id="importTeacherModal" tabindex="-1">
-    <div class="modal-dialog">
-        <div class="modal-content">
-            <div class="modal-header">
-                <h5 class="modal-title"><i class="bi bi-file-earmark-excel"></i> 批量导入教师</h5>
-                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
-            </div>
-            <form method="POST" action="{{ url_for('users.import_teachers') }}" enctype="multipart/form-data">
-                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                <div class="modal-body">
-                    <div class="mb-3">
-                        <label class="form-label" for="importFile">选择Excel文件</label>
-                        <input type="file" name="file" id="importFile" class="form-control" accept=".xlsx,.xls" required>
-                    </div>
-                    <div class="alert alert-info small mb-0">
-                        <i class="bi bi-info-circle"></i> <strong>导入说明：</strong>
-                        <ul class="mb-0 mt-1">
-                            <li>必填列：<strong>手机号、真实姓名、权限组</strong></li>
-                            <li>手机号即登录名，默认密码=手机号</li>
-                            <li>首次登录强制修改密码</li>
-                            <li>已有手机号不会重复创建</li>
-                            <li>如需建立教务教师名单（推荐），请使用「教务管理 - 教师名单」导入</li>
-                        </ul>
-                        <hr class="my-2">
-                        <a href="{{ url_for('users.download_teacher_template') }}" class="text-decoration-none">
-                            <i class="bi bi-download"></i> 下载导入模板
-                        </a>
-                    </div>
-                </div>
-                <div class="modal-footer">
-                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">取消</button>
-                    <button type="submit" class="btn btn-success">
-                        <i class="bi bi-upload"></i> 开始导入
-                    </button>
-                </div>
-            </form>
-        </div>
-    </div>
-</div>
 {% endblock %}
 
 {% block extra_js %}
