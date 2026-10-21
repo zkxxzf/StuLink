@@ -10,6 +10,8 @@
     var AFFAIR_FIELDS = window.AFFAIR_FIELDS || {};   // 考务字段：考生名单 / 考场信息表
     var SCHEDULE_KIND = window.SCHEDULE_KIND || 'exam_schedule';   // 考试时间表/监考表（划分场次）
     var SCHEDULE_KIND_LABEL = window.SCHEDULE_KIND_LABEL || '考试时间表 / 监考表（划分场次）';
+    var TRIM_KIND = window.TRIM_KIND || 'trim_settings';           // 去差人数设置（班级 × 去差人数）
+    var TRIM_KIND_LABEL = window.TRIM_KIND_LABEL || '去差人数设置（班级 × 去差人数）';
     var TOKEN = '';
     var SHEETS = [];          // 服务端返回的 sheet 概要
     var SUGGEST = {};         // AI 建议
@@ -74,6 +76,20 @@
             || role === 'affair_seats';
     }
 
+    /** 不需要逐列映射的角色（分数线 / 场次 / 去差设置）：直接按表头确定性解析 */
+    function isNoMapRole(role) {
+        return role === 'bands' || role === SCHEDULE_KIND || role === TRIM_KIND;
+    }
+
+    /** 某角色下「列映射区」应显示的内容 */
+    function colBoxFor(sh, idx, role, flat) {
+        if (role === TRIM_KIND) {
+            return $('<div>').addClass('small text-muted')
+                .text('按「班级 + 去差人数」两列识别，无需逐列映射；导入后写入本场去差设置。');
+        }
+        return buildColTable(sh, idx, role, flat);
+    }
+
     /** 服务端「考务自动归类」（{字段: 列号}）→ {列名: 字段} */
     function affairAutoFlat(sh) {
         var out = {}, a = sh.affair_auto || {}, heads = sh.headers || [];
@@ -132,6 +148,8 @@
                     .append('<option value="bands">这份是：各科分数线</option>')
                     .append($('<option>').val(SCHEDULE_KIND)
                         .text('这份是：' + SCHEDULE_KIND_LABEL))
+                    .append($('<option>').val(TRIM_KIND)
+                        .text('这份是：' + TRIM_KIND_LABEL))
                     .append('<option value="affair_students">这份是：考生名单／编排结果（学生信息表）</option>')
                     .append('<option value="affair_rooms">这份是：考场设置（考场信息表）</option>')
                     .append('<option value="affair_seats">这份是：座位表／桌签（仅用于考场容量）</option>')
@@ -142,6 +160,7 @@
                        || Object.keys(auto.raw_subjects || {}).length;
             var role = (sh.kind === 'bands') ? 'bands'
                      : (sh.kind === SCHEDULE_KIND) ? SCHEDULE_KIND
+                     : (sh.kind === TRIM_KIND) ? TRIM_KIND
                      : (sh.kind === 'affair_students') ? 'affair_students'
                      : (sh.kind === 'affair_rooms') ? 'affair_rooms'
                      : (sh.kind === 'affair_seats') ? 'affair_seats'
@@ -153,11 +172,11 @@
                 .attr('id', 'roleHint' + idx).text(KIND_LABEL[SUGGEST.score_kind] || '')));
             card.find('.ai-role').val(role);
             var $cb = $('<div>').addClass('ai-colbox').attr('data-idx', idx)
-                .append(buildColTable(sh, idx, role, flat));
+                .append(colBoxFor(sh, idx, role, flat));
             card.append($cb);
             card.find('.ai-role').on('change', function () {   // 切换用途 → 换一套字段词表
                 var r = $(this).val();
-                $cb.empty().append(buildColTable(sh, idx, r, flat));
+                $cb.empty().append(colBoxFor(sh, idx, r, flat));
             });
             $box.append(card);
         });
@@ -238,7 +257,7 @@
         $('.ai-role').each(function () { roles[+$(this).data('idx')] = $(this).val() || 'converted'; });
         $('.ai-col').each(function () {
             var i = +$(this).data('idx'), col = $(this).data('col'), v = $(this).val();
-            if (!v || isAffairRole(roles[i])) { return; }   // 考务字段单独收集
+            if (!v || isAffairRole(roles[i]) || isNoMapRole(roles[i])) { return; }
             var b = byIdx[i] = byIdx[i] || {cols: {}, subjects: {}, raw_subjects: {}};
             if (v.indexOf('raw:') === 0) {
                 b.raw_subjects[v.slice(4)] = col;
@@ -257,6 +276,9 @@
                     if (v) { m[v] = $(this).data('col'); }
                 });
                 return {name: sh.name, mapping: m, score_kind: role};
+            }
+            if (isNoMapRole(role)) {           // 分数线 / 场次 / 去差设置：不需要列映射
+                return {name: sh.name, mapping: {}, score_kind: role};
             }
             // 同一 sheet 内“两者都有” → 原始分列归 raw_subjects；
             // 若整表是原始表，则所有科目列按原始处理（后端会按 role 再处理一次）
@@ -404,6 +426,7 @@
                         }
                         if (res.bands) { parts.push('分数线 ' + res.bands.bands + ' 条'); }
                         if (res.affair) { parts.push('考务 ' + res.affair.students + ' 人'); }
+                        if (res.trim) { parts.push('去差设置 ' + res.trim.classes + ' 个班'); }
                         msg('#aiRunMsg', true, '导入成功：' + (parts.join('；') || '已完成')
                             + '，正在跳转…');
                         setTimeout(function () {
