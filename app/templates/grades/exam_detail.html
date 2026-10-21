@@ -74,19 +74,23 @@
 </style>
 {% endblock %}
 {% block content %}
-<div class="d-flex align-items-center mb-3 flex-wrap gap-2" id="examToolbar" data-exam-id="{{ exam.id }}">
-    <a href="{{ url_for('grades.exams_list') }}" class="btn btn-sm btn-outline-secondary" title="返回考试列表" aria-label="返回考试列表">
-        <i class="bi bi-arrow-left"></i>
-    </a>
-    {# 2026-10-19 用户口径：顶部固定展示本场考试标题；这个位置改回本页标题。 #}
-    <h4 class="mb-0"><i class="bi bi-table"></i> 成绩单</h4>
-    {% if current_user.has_perm('grades.edit') %}
-    <button type="button" class="btn btn-sm btn-outline-secondary"
-            id="examEditBtn" title="修改考试信息（名称 / 年级 / 日期 / 性质 / 阶段）">
-        <i class="bi bi-pencil-square"></i>
-    </button>
-    {% endif %}
-    <div class="ms-auto d-flex align-items-center gap-2 flex-wrap">
+{# 2026-10-21 用户口径：成绩单 / 考务安排 / 数据导入 三页统一页头（见 _exam_head.html）。 #}
+{% from 'grades/_exam_head.html' import exam_head %}
+{% call exam_head('成绩单', 'bi-table', url_for('grades.exams_list'),
+                  exam.name or exam.title_with_dimensions(),
+                  grade=exam.grade, kind=exam.kind_label(), stage=exam.stage_label(),
+                  exam_date=exam.exam_date.strftime('%Y-%m-%d') if exam.exam_date else None,
+                  term=exam.term, score_mode=exam.score_mode_label(),
+                  status=status_label.get(exam.status, exam.status),
+                  status_class=('success' if exam.status == 'imported'
+                                else ('warning text-dark' if exam.status == 'dirty' else 'secondary')),
+                  head_id='examToolbar', exam_id=exam.id) %}
+        {% if current_user.has_perm('grades.edit') %}
+        <button type="button" class="btn btn-sm btn-outline-secondary"
+                id="examEditBtn" title="修改考试信息（名称 / 年级 / 日期 / 性质 / 阶段）">
+            <i class="bi bi-pencil-square"></i>
+        </button>
+        {% endif %}
         {% if current_user.has_perm('grades.edit') %}
         <a href="{{ url_for('grades.exam_import', exam_id=exam.id) }}"
            class="btn btn-sm {{ 'btn-outline-primary' if exam.status in ('imported', 'dirty') else 'btn-primary' }}"
@@ -122,8 +126,7 @@
             <i class="bi bi-trash"></i> 删除考试
         </button>
         {% endif %}
-    </div>
-</div>
+{% endcall %}
 
 {# 2026-10-12 数据可信度审计（§3.3）：分批导入中途的「半场总分」警示。
    模式 A 下未出现的科目列会保留，因此总分＝已导入科目合计；
@@ -142,34 +145,7 @@
 </div>
 {% endif %}
 
-{# v1.19.0 四段式进度条：建立考试 → 考务安排 → 数据导入 → 成绩分析 #}
-{% if steps %}
-<div class="card mb-3">
-  <div class="card-body py-2">
-    <div class="d-flex align-items-center flex-wrap gap-2">
-      {% for s in steps %}
-      <a href="{{ s.url }}"
-         class="text-decoration-none d-flex align-items-center gap-1 px-2 py-1 rounded
-                {{ 'bg-success-subtle text-success' if s.done else 'bg-light text-muted border' }}"
-         title="{{ s.hint }}">
-        <span class="badge {{ 'bg-success' if s.done else 'bg-secondary' }}">{{ loop.index }}</span>
-        <span class="small fw-semibold">{{ s.label }}</span>
-        {% if s.done %}<i class="bi bi-check-lg small"></i>{% endif %}
-      </a>
-      {% if not loop.last %}<i class="bi bi-chevron-right text-muted small"></i>{% endif %}
-      {% endfor %}
-      <span class="text-muted small ms-2">{{ steps[-1].hint }}</span>
-      {% if next_step %}
-      <a href="{{ next_step.url }}" class="btn btn-sm btn-primary ms-auto">
-        下一步：{{ next_step.label }} <i class="bi bi-arrow-right"></i>
-      </a>
-      {% else %}
-      <span class="badge bg-success ms-auto"><i class="bi bi-check2-all"></i> 四步已走完</span>
-      {% endif %}
-    </div>
-  </div>
-</div>
-{% endif %}
+{# 2026-10-21 用户口径：去掉四段式进度条（分步骤显示），页头状态徽标已能表示导入状态。 #}
 
 {% if import_info %}
 <div class="alert alert-light border small py-2">

@@ -1,5 +1,5 @@
 /* =============================================================================
-   StuLink 主题层（浅色 / 深色）—— v1.19.50.52（2026-10-13）
+   StuLink 主题层（浅色 / 深色）—— v1.19.50.60（2026-10-13）
    -----------------------------------------------------------------------------
    背景：此前全站颜色是「字面量满天飞」——base.html 内联 56 处、业务 css 201 处、
    模板内联 style 665 处；成绩分析（考试态 .sidebar-float）侧栏是白底卡，
@@ -19,7 +19,7 @@
 :root,
 [data-bs-theme="light"] {
     /* —— 页面与面板 —— */
-    /* 2026-10-13（v1.19.50.52）：页面底色原 #f0f2f5 偏灰，整体提亮一档 */
+    /* 2026-10-13（v1.19.50.60）：页面底色原 #f0f2f5 偏灰，整体提亮一档 */
     --sl-bg: #f6f8fb;                  /* 页面底色 */
     --sl-surface: #ffffff;             /* 卡片 / 面板 / 弹层 */
     --sl-surface-2: #f8fafc;           /* 次级面：表头、卡片头、斑马行 */
@@ -61,7 +61,7 @@
     --sl-navbar-border: #e2e8f0;
 
     /* —— 表格 ——
-       2026-10-13（v1.19.50.52）：成绩类表头原是写死的深色 #1e293b + 白字
+       2026-10-13（v1.19.50.60）：成绩类表头原是写死的深色 #1e293b + 白字
        （grades.css 加了 !important）。页面整体主题化后这条黑表头就成了突兀的
        「黑条」（用户反馈「页面区域还有黑色的，比如表头」）→ 改为跟随主题：
        浅色 = 浅灰底深字，深色 = 深底浅字。 */
@@ -315,14 +315,7 @@ body {
     background: var(--sl-sidebar-hover);
 }
 .sidebar-float .efn-title { color: var(--sl-sidebar-title); }
-.sidebar-float .efn-steps { border-bottom: 1px solid var(--sl-sidebar-line); }
-.sidebar-float .efn-dot { background: var(--sl-sidebar-chip); color: var(--sl-sidebar-text); }
-.sidebar-float .efn-dot.on { background: #16a34a; color: #fff; }
-.sidebar-float .efn-dot.done {
-    background: var(--sl-sidebar-done-bg);
-    color: var(--sl-sidebar-done-text);
-}
-.sidebar-float .efn-count,
+/* 2026-10-21 侧栏去掉分步骤圆点（.efn-steps / .efn-dot / .efn-count） */
 .sidebar-float .efn-item .text-muted { color: var(--sl-sidebar-muted) !important; }
 .sidebar-float .efn-item { color: var(--sl-sidebar-text); }
 .sidebar-float .efn-item:hover {
@@ -382,7 +375,7 @@ body {
 /* =============================================================================
    两行表头 / 合并分组单元格：**层级用同族色阶**（纵深靠明度，不靠黑白对比）
    -----------------------------------------------------------------------------
-   2026-10-13（v1.19.50.52）用户反馈：宽表「两行表头 + 合并单元格」样式割裂 ——
+   2026-10-13（v1.19.50.60）用户反馈：宽表「两行表头 + 合并单元格」样式割裂 ——
    第 1 行 #1e293b 深、第 2 行 #334155 次深、冻结列又回 #1e293b，
    与浅色表体拼在一起像三张表。现统一为：
      第 1 行（分组/大标题）→ --sl-head-bg（稍深）
@@ -995,14 +988,6 @@ table.tt thead th {
 [data-bs-theme="dark"] .subj-history {
     background: rgba(249, 115, 22, .16); color: #fdba74; border-color: rgba(249, 115, 22, .38) !important;
 }
-[data-bs-theme="dark"] .sidebar-float .efn-tag {
-    background: rgba(245, 158, 11, .18) !important;
-    color: #fcd34d !important;
-}
-[data-bs-theme="dark"] .sidebar-float .efn-dot.on {
-    background: #22c55e !important;
-    color: #06210f !important;
-}
 
 /* —— 表单汇总迷你条（_fx_style.html 内联 #edf1f8，模板不在可改清单）—— */
 [data-bs-theme="dark"] .fx-mini-bar { background: var(--sl-surface-3) !important; }
@@ -1154,4 +1139,47 @@ table.tt thead th {
         --sl-th-bg: #f1f4f9; --sl-th-text: #64748b;
     }
     body { background: #fff !important; color: #000 !important; }
+}
+
+/* ========== 考试成绩上下文统一页头（2026-10-21 用户口径）==========
+   成绩单 / 考务安排 / 数据导入 三页共用同一套页头（app/templates/grades/_exam_head.html）：
+   返回按钮 → 页面标题 + 考试名 → 元信息徽标 → 右侧操作区。
+   颜色全部走主题变量，浅色 / 深色模式一致。 */
+.sl-exam-head {
+    border: 1px solid var(--sl-border); border-radius: 12px;
+    background: var(--sl-surface); box-shadow: var(--sl-shadow);
+}
+.sl-exam-head .card-body { padding: .55rem .9rem; }
+.sl-exam-back {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 32px; height: 32px; flex: 0 0 auto;
+    border: 1px solid var(--sl-border); border-radius: 9px;
+    background: var(--sl-surface-2); color: var(--sl-text-muted);
+    text-decoration: none; transition: color .12s ease, border-color .12s ease, background-color .12s ease;
+}
+.sl-exam-back:hover {
+    color: var(--sl-sidebar-accent-text); border-color: var(--sl-sidebar-accent);
+    background: var(--sl-surface-3);
+}
+.sl-exam-id { min-width: 0; }
+.sl-exam-title {
+    display: flex; align-items: center; gap: .42rem;
+    font-size: 1.02rem; font-weight: 700; line-height: 1.25; color: var(--sl-text);
+}
+.sl-exam-title .bi { color: var(--sl-sidebar-accent); }
+.sl-exam-name {
+    margin-top: 1px; font-size: .78rem; color: var(--sl-text-muted);
+    max-width: min(44vw, 520px); overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.sl-exam-meta { display: flex; align-items: center; flex-wrap: wrap; gap: .3rem .55rem; }
+.sl-exam-meta .sl-meta-item {
+    display: inline-flex; align-items: center; gap: .22rem;
+    font-size: .76rem; color: var(--sl-text-muted); white-space: nowrap;
+}
+.sl-exam-meta .badge { font-weight: 600; }
+.sl-exam-actions { min-width: 0; }
+.sl-exam-actions .btn { white-space: nowrap; }
+@media (max-width: 575.98px) {
+    .sl-exam-name { max-width: 60vw; }
+    .sl-exam-actions { width: 100%; }
 }

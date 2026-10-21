@@ -1,4 +1,4 @@
-# StuLink v1.19.50.52 2026-10-19
+# StuLink v1.19.50.60 2026-10-19
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 """小程序课表视图：教师课表 / 班级课表 / 本人课表。
 

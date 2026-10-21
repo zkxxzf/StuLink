@@ -1,4 +1,4 @@
-# StuLink v1.19.50.52 2026-10-10
+# StuLink v1.19.50.60 2026-10-10
 # 考务管理：完整考务流程（对应 Excel 宏工作簿 2025考场学生考号与考场信息编排v1.2）
 #   步骤：① 学生名单（学生信息表） → ② 考场设置（考场信息表）
 #        → ③ 编排与考号生成（三种模式，镜像宏 编排考场考号2）
@@ -818,7 +818,7 @@ def affair_student_fixed(aid, sid):
         return jsonify({'ok': False, 'msg': '座号需为正整数'})
     room_by_no = {r.room_no: r for r in AffairRoom.query.filter_by(affair_id=aid).all()}
     if room and room not in room_by_no:
-        return jsonify({'ok': False, 'msg': f'本批次没有 {room} 考场，请先在「② 考场设置」中添加'})
+        return jsonify({'ok': False, 'msg': f'本批次没有 {room} 考场，请先在「考场设置」中添加'})
     if seat is not None and not room:
         return jsonify({'ok': False, 'msg': '填了座号就要先填考场号'})
     if seat is not None and seat > (room_by_no[room].capacity or 0):

@@ -126,38 +126,23 @@
 {% set _ex = linked_exam %}
 {% set _head_name = _ex.name if _ex else affair.name %}
 {% set _head_date = (_ex.exam_date if _ex else affair.exam_date) %}
-<div class="card px-3 py-2 mb-2">
-    <div class="d-flex justify-content-between align-items-start flex-wrap gap-2">
-        <div class="flex-grow-1" style="min-width:0">
-            {# v1.19.49.35：考务已并入考试管理，面包屑直接返回考试列表 #}
-            <a href="{{ url_for('grades.exams_list') }}" class="text-decoration-none text-muted small">
-                <i class="bi bi-arrow-left"></i> 返回考试管理</a>
-{# 2026-10-14 用户口径：考试信息（年级/性质/阶段/日期/学年/口径/状态）与名称同一行，
-   不再单独占一行 —— 与成绩录入页 exam_detail.html 的标题行写法保持一致 #}
-            <div class="d-flex flex-wrap align-items-center gap-1 mt-1">
-                <h5 class="mb-0 me-1 text-break">
-                    <i class="bi bi-clipboard-check"></i> {{ _head_name }}
-                </h5>
-                <span class="badge bg-secondary">{{ affair.grade }}</span>
-                {% if _ex and _ex.kind_label() %}<span class="badge bg-primary">{{ _ex.kind_label() }}</span>{% endif %}
-                {% if _ex and _ex.stage_label() %}<span class="badge bg-info text-dark">{{ _ex.stage_label() }}</span>{% endif %}
-                {% if _head_date %}<span class="text-muted small"><i class="bi bi-calendar3"></i> {{ _head_date.strftime('%Y-%m-%d') }}</span>{% endif %}
-                {% if _ex and _ex.term %}<span class="text-muted small">· 学年 {{ _ex.term }}</span>{% endif %}
-                {% if _ex and _ex.score_mode %}<span class="text-muted small">· 口径 {{ _ex.score_mode_label() }}</span>{% endif %}
-                {% if affair.status == 'linked' %}<span class="badge bg-info">已关联成绩</span>
-                {% elif affair.status == 'arranged' %}<span class="badge bg-success">已编排</span>
-                {% else %}<span class="badge bg-light text-dark border">草稿</span>{% endif %}
-                {% if not _ex %}<span class="badge bg-warning text-dark">未绑定考试</span>{% endif %}
-            </div>
-        </div>
-        {# 2026-10-14 用户口径：页头只放元信息（v1.12.1 的「批次设置」按钮撤下）
-           —— 它里面的「选科考号前后缀」与步骤③ 自定义模式重复、已删；
-           余下的「编排模式 / 非参考学生处理」是编排口径，入口挪到步骤③ 工具栏右侧齿轮 #}
-        <div class="d-flex align-items-center gap-2 text-muted small flex-shrink-0">
-            参考 {{ scope_students|length }} 人 · 已编排 {{ arranged|length }} 人 · 考场 {{ rooms|length }} 个
-        </div>
-    </div>
-</div>
+{% if affair.status == 'linked' %}{% set _st, _stc = '已关联成绩', 'info' %}
+{% elif affair.status == 'arranged' %}{% set _st, _stc = '已编排', 'success' %}
+{% else %}{% set _st, _stc = '草稿', 'light text-dark border' %}{% endif %}
+{# 2026-10-21 用户口径：成绩单 / 考务安排 / 数据导入 三页统一页头（见 _exam_head.html）。 #}
+{% from 'grades/_exam_head.html' import exam_head %}
+{% call exam_head('考务安排', 'bi-clipboard-check', url_for('grades.exams_list'), _head_name,
+                  grade=affair.grade,
+                  kind=(_ex.kind_label() if _ex else None),
+                  stage=(_ex.stage_label() if _ex else None),
+                  exam_date=(_head_date.strftime('%Y-%m-%d') if _head_date else None),
+                  term=(_ex.term if _ex else None),
+                  score_mode=(_ex.score_mode_label() if _ex and _ex.score_mode else None),
+                  status=_st, status_class=_stc,
+                  warn=(None if _ex else '未绑定考试'),
+                  extra='参考 ' ~ (scope_students|length) ~ ' 人 · 已编排 ' ~ (arranged|length)
+                        ~ ' 人 · 考场 ' ~ (rooms|length) ~ ' 个') %}
+{% endcall %}
 
 <!-- v1.12.2 移除步骤⑤成绩关联：功能使用率低，按考场查成绩走成绩模块自身入口即可 -->
 {# v1.19.49.35：删掉与下方页签重复的「1-7 步骤胶囊条」——完成状态已由页签上的对勾体现 #}
@@ -168,13 +153,14 @@
 {% set _s5 = invig_stat.n_schedules > 0 %}
 {% set _s6 = invig_stat.n_invig > 0 %}
 <ul class="nav nav-tabs mb-3" id="affairTabs" role="tablist">
-    <li class="nav-item"><button class="nav-link active" data-bs-toggle="tab" data-bs-target="#t1">① 学生名单{% if _s1 %} <i class="bi bi-check-lg small text-success"></i>{% endif %}</button></li>
-    <li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#t2">② 考场设置{% if _s2 %} <i class="bi bi-check-lg small text-success"></i>{% endif %}</button></li>
-    <li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#t3">③ 编排考号{% if _s3 %} <i class="bi bi-check-lg small text-success"></i>{% endif %}</button></li>
-    <li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#t4">④ 核对任课教师{% if _s4 %} <i class="bi bi-check-lg small text-success"></i>{% endif %}</button></li>
-    <li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#t5">⑤ 考试时间表{% if _s5 %} <i class="bi bi-check-lg small text-success"></i>{% endif %}</button></li>
-    <li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#t6">⑥ 编排监考表{% if _s6 %} <i class="bi bi-check-lg small text-success"></i>{% endif %}</button></li>
-    <li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#t7">⑦ 导出</button></li>
+    {# 2026-10-21 用户口径：页签去掉序号（分步骤显示），只保留功能区名称与完成对勾。 #}
+    <li class="nav-item"><button class="nav-link active" data-bs-toggle="tab" data-bs-target="#t1">学生名单{% if _s1 %} <i class="bi bi-check-lg small text-success"></i>{% endif %}</button></li>
+    <li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#t2">考场设置{% if _s2 %} <i class="bi bi-check-lg small text-success"></i>{% endif %}</button></li>
+    <li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#t3">编排考号{% if _s3 %} <i class="bi bi-check-lg small text-success"></i>{% endif %}</button></li>
+    <li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#t4">核对任课教师{% if _s4 %} <i class="bi bi-check-lg small text-success"></i>{% endif %}</button></li>
+    <li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#t5">考试时间表{% if _s5 %} <i class="bi bi-check-lg small text-success"></i>{% endif %}</button></li>
+    <li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#t6">编排监考表{% if _s6 %} <i class="bi bi-check-lg small text-success"></i>{% endif %}</button></li>
+    <li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#t7">导出</button></li>
 </ul>
 
 <div class="tab-content">
@@ -537,7 +523,7 @@
                     <button class="btn btn-primary btn-sm" onclick="runArrange()">
                         <i class="bi bi-shuffle"></i> 开始编排并生成考号</button>
                     <i class="bi bi-question-circle text-muted"
-                       title="编排规则：先安置「固定考场 / 固定座号」学生（步骤① 名单里填写）—— 只填考场号、座号留空时，编排会在该考场内自动取靠前的空位，用于不同选科混编考场；其余按选科分组（未勾选分层时：同班邻座 ≤1 随机分配）。"></i>
+                       title="编排规则：先安置「固定考场 / 固定座号」学生（在「学生名单」里填写）—— 只填考场号、座号留空时，编排会在该考场内自动取靠前的空位，用于不同选科混编考场；其余按选科分组（未勾选分层时：同班邻座 ≤1 随机分配）。"></i>
                     {# 2026-10-14 用户口径：v1.12.1 的「批次设置」从页头撤下 —— 里面的选科前后缀
                        与下方自定义模式重复（已删），余下的「编排模式 / 非参考学生处理」都是编排口径，
                        入口收在这里（低频设置，不占主界面）；打开后同样走 /affairs/<aid>/settings #}
@@ -635,7 +621,7 @@
     <div class="tab-pane fade" id="t4">
         <div class="d-flex flex-wrap align-items-center gap-2 mb-2">
             <span class="small text-muted">核对本场考试的年级任课安排（仅作用于本批次，不改全局任课表）；
-                临时换老师可直接改，供环节⑥ 监考回避使用。</span>
+                临时换老师可直接改，供监考编排时回避使用。</span>
             <span class="ms-auto"></span>
             <button class="btn btn-outline-secondary btn-sm" onclick="syncAffairTeachers()">
                 <i class="bi bi-arrow-repeat"></i> 从任课安排表重新带入</button>
@@ -652,7 +638,7 @@
             （体育 / 音乐 / 美术 / 信息技术 / 心理）；留空表示该班没有该科任课教师或该职务。
             点格子后可直接输入 <b>姓名 / 全拼 / 每个字的首字母</b> 检索
             （例：蒋雪静 → 蒋雪静 / jiangxuejing / jxj）。这里的每一位老师都会进入
-            环节⑥ 的监考教师池，班主任还会用于「每天首场优先排班主任」。
+            监考教师池，班主任还会用于「每天首场优先排班主任」。
         </div>
         <div id="t4Body" class="table-responsive" style="max-height:66vh;overflow:auto">
             <div class="text-center text-muted py-4"><div class="spinner-border spinner-border-sm"></div>
@@ -666,7 +652,7 @@
     <!-- ===== 环节⑤ 考试时间表（时段 → 科目，回避依据） ===== -->
     <div class="tab-pane fade" id="t5">
         <div class="d-flex flex-wrap align-items-center gap-2 mb-2">
-            <span class="small text-muted">一行 = 一个场次（时间段 + 考试科目）；科目用于环节⑥ 回避同科教师。</span>
+            <span class="small text-muted">一行 = 一个场次（时间段 + 考试科目）；科目用于监考编排时回避同科教师。</span>
             <span class="ms-auto"></span>
             <a href="{{ url_for('grades.affair_schedules_template', aid=affair.id) }}"
                class="btn btn-outline-secondary btn-sm"><i class="bi bi-download"></i> 下载模板</a>
@@ -793,7 +779,7 @@
                                 onclick="openPickInvig()">+ 其他监考员</button>
                     </div>
                     <div class="card-body p-2" style="max-height:60vh;overflow:auto">
-                        <div class="text-muted small mb-1">任课教师（环节④，自动带入）</div>
+                        <div class="text-muted small mb-1">任课教师（自动带入）</div>
                         <div id="poolTeachers" class="mb-2"></div>
                         <div class="text-muted small mb-1">其他监考员（可无账号：校外老师）</div>
                         <div id="poolOthers"></div>
@@ -878,7 +864,7 @@
                 </div>
                 <div class="col-12">
                     <div class="border rounded p-2">
-                        <div class="fw-bold small mb-2"><i class="bi bi-clipboard-check"></i> 监考表（环节⑥）</div>
+                        <div class="fw-bold small mb-2"><i class="bi bi-clipboard-check"></i> 监考表</div>
                         <div class="d-flex gap-2 flex-wrap">
                             {# 2026-10-13 用户口径：监考表只要一个导出 —— 教师安排矩阵（行=考场、
                                列=日期×时段×科目）与工作量统计合在同一张表里，不再分开成四个入口。 #}
@@ -888,7 +874,7 @@
                     </div>
                 </div>
             </div>
-            {% if not arranged %}<div class="alert alert-warning mt-3 py-2 small">尚未编排，请先完成步骤③。</div>{% endif %}
+            {% if not arranged %}<div class="alert alert-warning mt-3 py-2 small">尚未编排，请先完成「编排考号」。</div>{% endif %}
         </div>
     </div>
 
@@ -1157,21 +1143,8 @@ document.querySelectorAll('#affairTabs button[data-bs-toggle="tab"]').forEach(fu
         } catch (e) {
             location.hash = hash;   // 极老浏览器兜底
         }
-        syncSidebarSteps(hash);
     });
 });
-// v1.19.49.35 把侧栏圆点的高亮改到「当前环节」上（done 状态保持不变）
-function syncSidebarSteps(hash){
-    var dots = document.querySelectorAll('.sidebar-float .efn-steps .efn-dot');
-    if(!dots.length) return;
-    var idx = ['#t1','#t2','#t3','#t4','#t5','#t6','#t7'].indexOf(hash);
-    if(idx < 0) return;                        // 非考务页（4 步）不处理
-    dots.forEach(function(d, i){
-        d.classList.toggle('on', i === idx);
-        var done = d.classList.contains('done');
-        d.title = '环节' + (i+1) + (i === idx ? '（当前）' : (done ? '（已完成）' : '（未完成）'));
-    });
-}
 if(location.hash){
     var triggerEl = document.querySelector('#affairTabs button[data-bs-target="'+location.hash+'"]');
     if(triggerEl){
@@ -2152,133 +2125,10 @@ document.querySelector('#affairTabs button[data-bs-target="#t6"]').addEventListe
 if(location.hash === '#t4'){ loadAffairTeachers(); }
 if(location.hash === '#t6'){ loadInvig(); }
 
-// ---------- 通用选人浮层：可输入姓名 / 全拼 / 每字首字母（2026-10-21） ----------
-// 全页只建一个浮层（④ 矩阵 + ⑥ 监考表共用）：格子有一百多个，每格一套下拉会卡。
-// 拼音码由后端下发（py / ini），前端只做字符串匹配，不引第三方 JS。
-var _PK = null;
-function _pkNorm(s){
-    return String(s == null ? '' : s).trim().toLowerCase().replace(/[\s·]+/g, '');
-}
-// 匹配打分：全等 > 姓名前缀 > 全拼前缀 > 首字母前缀 > 包含；0 = 不匹配
-function _pkScore(it, q){
-    if(!q){ return 1; }
-    var nm = _pkNorm(it.label), py = it.py || '', ini = it.ini || '';
-    if(nm === q){ return 100; }
-    if(nm.indexOf(q) === 0){ return 90; }
-    if(py.indexOf(q) === 0){ return 80; }
-    if(ini.indexOf(q) === 0){ return 70; }
-    if(nm.indexOf(q) >= 0){ return 60; }
-    if(py.indexOf(q) >= 0){ return 50; }
-    if(ini.indexOf(q) >= 0){ return 40; }
-    return 0;
-}
-function _pkScroll(ev){
-    if(_PK && _PK.box && _PK.box.contains(ev.target)){ return; }   // 列表内部滚动不算
-    closePicker();
-}
-function _pkOutside(ev){
-    if(_PK && _PK.box && !_PK.box.contains(ev.target)){ closePicker(); }
-}
-function closePicker(){
-    if(_PK && _PK.box){ _PK.box.remove(); }
-    _PK = null;
-    document.removeEventListener('mousedown', _pkOutside, true);
-    document.removeEventListener('keydown', _pkKey, true);
-    window.removeEventListener('scroll', _pkScroll, true);
-    window.removeEventListener('resize', closePicker);
-}
-function _pkDraw(){
-    var box = _PK.box;
-    var html = _PK.shown.length ? _PK.shown.map(function(it, i){
-        return '<div class="pk-opt' + (i === _PK.idx ? ' on' : '')
-            + (!it._clear && String(it.key) === String(_PK.current) ? ' sel' : '')
-            + '" data-i="' + i + '">'
-            + '<span>' + escHtml(it.label) + '</span>'
-            + (!it._clear && it.sub ? '<span class="pk-sub">' + escHtml(it.sub) + '</span>' : '')
-            + '</div>';
-    }).join('') : '<div class="pk-empty">没有匹配的人</div>';
-    box.querySelector('.pk-list').innerHTML = html;
-    box.querySelector('.pk-title').textContent = _PK.title || '';
-    var on = box.querySelector('.pk-opt.on');
-    if(on){ on.scrollIntoView({block: 'nearest'}); }
-}
-function _pkRender(){
-    var q = _pkNorm(_PK.input.value);
-    var shown = _PK.items.map(function(it){ return {it: it, s: _pkScore(it, q)}; })
-        .filter(function(x){ return x.s > 0; })
-        .sort(function(a, b){
-            return b.s - a.s || (a.it.label < b.it.label ? -1 : (a.it.label > b.it.label ? 1 : 0));
-        })
-        .slice(0, 60)
-        .map(function(x){ return x.it; });
-    if(_PK.allowClear && !q){
-        shown.unshift({key: '', label: '— 不指定（清除）—', _clear: true});
-    }
-    _PK.shown = shown;
-    _PK.idx = (q || !_PK.allowClear) ? 0 : Math.min(1, shown.length - 1);
-    _pkDraw();
-}
-function _pkPick(i){
-    var it = _PK.shown[i];
-    if(!it){ return; }
-    var cb = it._clear ? _PK.onClear : _PK.onPick;
-    closePicker();
-    if(cb){ cb(it); }
-}
-function _pkKey(ev){
-    if(!_PK){ return; }
-    if(ev.key === 'Escape'){ ev.preventDefault(); closePicker(); return; }
-    if(ev.key === 'ArrowDown' || ev.key === 'ArrowUp'){
-        if(!_PK.shown.length){ return; }
-        ev.preventDefault();
-        _PK.idx = (_PK.idx + (ev.key === 'ArrowDown' ? 1 : -1) + _PK.shown.length) % _PK.shown.length;
-        _pkDraw();
-        return;
-    }
-    if(ev.key === 'Enter'){ ev.preventDefault(); _pkPick(_PK.idx); }
-}
-function openPicker(cfg){
-    closePicker();
-    var box = document.createElement('div');
-    box.className = 'sl-picker';
-    box.innerHTML = '<div class="pk-title"></div>'
-        + '<input type="text" class="form-control form-control-sm pk-inp" autocomplete="off"'
-        + ' aria-label="搜索教师" placeholder="姓名 / 全拼 / 首字母">'
-        + '<div class="pk-list"></div>';
-    document.body.appendChild(box);
-    _PK = {box: box, input: box.querySelector('.pk-inp'),
-           items: (cfg.items || []).filter(function(it){ return it && it.label; }),
-           current: cfg.current == null ? '' : String(cfg.current),
-           allowClear: !!cfg.allowClear, title: cfg.title || '',
-           onPick: cfg.onPick, onClear: cfg.onClear, shown: [], idx: 0};
-    // 定位：优先格子下方，放不下翻到上方；左右不出视口（fixed 定位，跟滚动解耦）
-    var r = cfg.anchor.getBoundingClientRect();
-    var w = 248, h = Math.min(340, box.offsetHeight || 340);
-    var left = Math.min(Math.max(8, r.left), Math.max(8, window.innerWidth - w - 8));
-    var top = r.bottom + 4;
-    if(top + h > window.innerHeight - 8 && r.top - 4 - h > 8){ top = r.top - 4 - h; }
-    box.style.left = Math.round(left) + 'px';
-    box.style.top = Math.round(Math.max(8, top)) + 'px';
-    _PK.input.addEventListener('input', function(){ _pkRender(); });
-    box.querySelector('.pk-list').addEventListener('click', function(ev){
-        var el = ev.target.closest('.pk-opt');
-        if(el){ _pkPick(parseInt(el.dataset.i, 10)); }
-    });
-    box.querySelector('.pk-list').addEventListener('mouseover', function(ev){
-        var el = ev.target.closest('.pk-opt');
-        if(!el){ return; }
-        _PK.idx = parseInt(el.dataset.i, 10);
-        box.querySelectorAll('.pk-opt').forEach(function(x, i){
-            x.classList.toggle('on', i === _PK.idx);
-        });
-    });
-    document.addEventListener('mousedown', _pkOutside, true);
-    document.addEventListener('keydown', _pkKey, true);
-    window.addEventListener('scroll', _pkScroll, true);
-    window.addEventListener('resize', closePicker);
-    _pkRender();
-    _PK.input.focus();
-}
+// 2026-10-21：通用选人浮层已抽到全局 js/teacher_picker.js（全站共用、
+// 且靠近页面底部时自动向上弹出）。这里保留原调用点的同名包装。
+function closePicker(){ if(window.slTP){ window.slTP.close(); } }
+function openPicker(cfg){ if(window.slTP){ window.slTP.open(cfg); } }
 // ④ 矩阵格子（按 user_id 存）与 ⑥ 监考表格子（按姓名存）共用一套事件委托
 document.addEventListener('click', function(ev){
     var t4 = ev.target.closest && ev.target.closest('#t4Body .at-cell');
@@ -2293,6 +2143,12 @@ function loadAffairTeachers(){
     fetch('/grades/affairs/'+AID+'/teachers').then(r=>r.json()).then(d=>{
         if(!d.success){ box.innerHTML = '<div class="alert alert-warning mb-0">'+escHtml(d.message||'加载失败')+'</div>'; return; }
         _affTeachers = d.data; renderAffairTeachers();
+    }).catch(function(e){
+        // 2026-10-21：原来请求/解析失败时没有任何 catch，加载圈会一直转；
+        // 现在直接把原因显示出来（会话过期时会是登录页 HTML，JSON 解析失败）。
+        box.innerHTML = '<div class="alert alert-danger mb-0">'
+            + '任课表加载失败：' + escHtml((e && e.message) || e)
+            + '。请刷新页面重试；若仍失败请重新登录。</div>';
     });
 }
 function renderAffairTeachers(){
@@ -2321,17 +2177,19 @@ function renderAffairTeachers(){
     d.classes.forEach(cls=>{
         h.push('<tr><td class="t4-cls text-nowrap fw-bold">'+escHtml(cls)+'</td>');
         groups.forEach(function(g){
-        g.subjects.forEach(function(s){
-            var c = d.cells[cls+'|'+s] || {};
-            var cur = c.user_id ? String(c.user_id) : '';
-            // 2026-10-21：格子换成「按钮 + 可输入浮层」（原先 180 个原生下拉，找一个人
-            // 要在上百个选项里翻）。历史教师（有姓名无账号）照旧显示姓名。
-            var label = c.name || '';
-            var tip = (c.name && !cur) ? '历史教师（无账号）；重新选人后按账号绑定' : '';
-            h.push('<td><button type="button" class="at-cell' + (label ? '' : ' empty') + '"'
-                   + ' data-k="' + escHtml(cls+'|'+s) + '" data-uid="' + escHtml(cur) + '"'
-                   + (tip ? ' title="' + escHtml(tip) + '"' : '') + '>'
-                   + escHtml(label || '—') + '</button></td>');
+            g.subjects.forEach(function(s){
+                var c = d.cells[cls+'|'+s] || {};
+                var cur = c.user_id ? String(c.user_id) : '';
+                // 2026-10-21：格子换成「按钮 + 可输入浮层」（原先 180 个原生下拉，找一个人
+                // 要在上百个选项里翻）。历史教师（有姓名无账号）照旧显示姓名。
+                var label = c.name || '';
+                var tip = (c.name && !cur) ? '历史教师（无账号）；重新选人后按账号绑定' : '';
+                h.push('<td><button type="button" class="at-cell' + (label ? '' : ' empty') + '"'
+                       + ' data-k="' + escHtml(cls+'|'+s) + '" data-uid="' + escHtml(cur) + '"'
+                       + ' data-init="' + escHtml(cur) + '"'
+                       + (tip ? ' title="' + escHtml(tip) + '"' : '') + '>'
+                       + escHtml(label || '—') + '</button></td>');
+            });
         });
         h.push('</tr>');
     });
@@ -2364,10 +2222,15 @@ function _t4OpenPicker(btn){
     });
 }
 function saveAffairTeachers(){
-    var cells = {};
+    // 2026-10-21 审计修复：只提交**改动过**的格。原来整表提交，历史教师（有姓名、
+    // 无账号 → data-uid 为空）会被当成"清空"提交，后端把 teacher_name 置空 → 姓名丢失。
+    var cells = {}, n = 0;
     document.querySelectorAll('#t4Body .at-cell').forEach(function(el){
-        cells[el.dataset.k] = el.dataset.uid || '';
+        var uid = el.dataset.uid || '';
+        if (uid === (el.dataset.init || '')) { return; }
+        cells[el.dataset.k] = uid; n++;
     });
+    if (!n) { alert('没有改动'); return; }
     fetch('/grades/affairs/'+AID+'/teachers/save', {method:'POST',
         headers:{'Content-Type':'application/json','X-CSRFToken':csrf()},
         body: JSON.stringify({cells: cells})})
@@ -3087,7 +2950,7 @@ function renderWorkload(d){
     tip.innerHTML = d.has_time
         ? '时长按每场次「开始—结束」累加。自动编排按<b>累计时长</b>均衡（不是按格数），'
           + '所以格数不完全一样属正常，看「监考时长」和下面的极差即可。'
-        : '<span class="text-danger">场次尚未填写开始/结束时间，暂时算不出时长 —— 先到环节⑤ 考试时间表补时间。</span>';
+        : '<span class="text-danger">场次尚未填写开始/结束时间，暂时算不出时长 —— 先到「考试时间表」补时间。</span>';
     var srcCn = {teacher: '任课教师', other: '其他监考员'};
     var rows = [];
     d.items.forEach(function(it, idx){

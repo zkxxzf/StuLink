@@ -234,20 +234,17 @@ def create():
     if form.validate_on_submit():
         if User.query.filter_by(username=form.username.data).first():
             flash('用户名已存在', 'danger')
-            return render_template('system/users/form.html', form=form, title='新建用户')
+            return render_template('system/users/form.html', form=form, title='新建管理员')
 
-        # 校验：班主任最多3人/班，且年级班级必填
-        role = form.role.data
-        # 2026-10-19：管理年级多选（年级长可多个）；班主任强制 1 个。
-        grades = [g for g in (form.grade.data or []) if g]
-        grade = grades[0] if grades else None
-        class_name = form.class_name.data or None
+        # 2026-10-21 用户口径：/users/ 只允许**单个添加管理员账号**；
+        # 教师一律在「教务管理 → 教师」新增/导入，账号由那边自动同步过来。
+        role = 'admin'
 
         # 2026-10-18 审计修复（P1 横向提权）：非超管不得新建管理员账号
         # （否则任何有 system.users 的账号都能造一个 admin 给自己用）。
         if role == 'admin' and (current_user.username or '') != 'admin':
             flash('只有超管（admin 账号）能新建管理员账号', 'danger')
-            return render_template('system/users/form.html', form=form, title='新建用户')
+            return render_template('system/users/form.html', form=form, title='新建管理员')
 
         # H-01：权限组同样不能绕过 —— 非超管即使 role 填普通教师，
         # 也不能把新账号挂进「管理员组」（否则等于造了一个超管）。
@@ -257,32 +254,17 @@ def create():
                           '非超管不得授予管理员组',
                           module='system', severity='WARNING')
             flash('只有超管（admin 账号）能把账号加入「管理员组」', 'danger')
-            return render_template('system/users/form.html', form=form, title='新建用户')
-
-        if role == 'homeroom_teacher':
-            if len(grades) != 1 or not class_name:
-                flash('班主任必须指定 1 个管理年级和班级（一个班只属于一个年级）', 'danger')
-                return render_template('system/users/form.html', form=form, title='新建用户')
-            existing_count = User.query.filter_by(
-                role='homeroom_teacher', grade=grade, class_name=class_name, is_active=True
-            ).count()
-            if existing_count >= 3:
-                flash(f'{grade}{class_name} 已有 {existing_count} 名班主任，最多设置3名', 'danger')
-                return render_template('system/users/form.html', form=form, title='新建用户')
-
-        if role == 'grade_leader' and not grades:
-            flash('年级长必须指定管理年级（可多选）', 'danger')
-            return render_template('system/users/form.html', form=form, title='新建用户')
+            return render_template('system/users/form.html', form=form, title='新建管理员')
 
         # 2026-10-20：手机号（选填）——填了就能用手机号登录，要求格式正确且不被占用
         phone_norm, phone_err = _normalize_user_phone(form.phone.data)
         if phone_err:
             flash(phone_err, 'danger')
-            return render_template('system/users/form.html', form=form, title='新建用户')
+            return render_template('system/users/form.html', form=form, title='新建管理员')
         dup = _phone_taken(phone_norm)
         if dup:
             flash(f'手机号已被「{dup.real_name}」使用，请换一个', 'danger')
-            return render_template('system/users/form.html', form=form, title='新建用户')
+            return render_template('system/users/form.html', form=form, title='新建管理员')
 
         user = User(
             username=form.username.data,
@@ -300,7 +282,7 @@ def create():
         user.set_password(generated_pwd)
         db.session.add(user)
         db.session.commit()
-        # v1.19.50.52：非管理员自动同步创建教师档案（admin 不写入）
+        # v1.19.50.60：非管理员自动同步创建教师档案（admin 不写入）
         _sync_state, _ = teacher_sync.sync_from_user(user)
         db.session.commit()
         log_operation(current_user, '创建', '用户', user.id, f'{user.real_name} ({user.role_display})')
@@ -312,7 +294,7 @@ def create():
               + ('，初始口令已在本页一次性显示（仅此一次，请立即转交本人）' if auto_pwd else ''),
               'success')
         return redirect(url_for('users.list_users'))
-    return render_template('system/users/form.html', form=form, title='新建用户')
+    return render_template('system/users/form.html', form=form, title='新建管理员')
 
 
 @bp.route('/<int:id>/edit', methods=['GET', 'POST'])
@@ -443,7 +425,7 @@ def edit(id):
         if form.password.data:
             user.set_password(form.password.data)
         db.session.commit()
-        # v1.19.50.52：教师角色变更 → 同步到 academic.teachers（admin 自动 skip）
+        # v1.19.50.60：教师角色变更 → 同步到 academic.teachers（admin 自动 skip）
         teacher_sync.sync_from_user(user)
         db.session.commit()
         log_operation(current_user, '更新', '用户', user.id, f'{user.real_name} 信息已更新')
@@ -540,7 +522,7 @@ def toggle(id):
     if was_active and not user.is_active:
         user.wx_token_ver = int(user.wx_token_ver or 0) + 1
     db.session.commit()
-    # v1.19.50.52：启禁变更 → 同步 Teacher.status (active/left)
+    # v1.19.50.60：启禁变更 → 同步 Teacher.status (active/left)
     teacher_sync.sync_from_user(user)
     db.session.commit()
     status = '启用' if user.is_active else '禁用'
@@ -669,152 +651,6 @@ def export_passwords():
         mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
 
 
-@bp.route('/download-teacher-template')
-@perm_required('system.users')
-def download_teacher_template():
-    """下载教师批量导入模板"""
-    import openpyxl
-    from openpyxl.styles import Font, Alignment, PatternFill, Border, Side
-
-    wb = openpyxl.Workbook()
-    ws = wb.active
-    ws.title = '教师导入模板'
-
-    headers = ['手机号', '真实姓名', '权限组']
-    header_fill = PatternFill(start_color='ED7D31', end_color='ED7D31', fill_type='solid')
-    header_font = Font(color='FFFFFF', bold=True, size=11)
-    thin_border = Border(left=Side(style='thin'), right=Side(style='thin'),
-                         top=Side(style='thin'), bottom=Side(style='thin'))
-
-    for col_idx, header in enumerate(headers, 1):
-        cell = ws.cell(row=1, column=col_idx, value=header)
-        cell.font = header_font
-        cell.fill = header_fill
-        cell.alignment = Alignment(horizontal='center')
-        cell.border = thin_border
-
-    ws.column_dimensions['A'].width = 16
-    ws.column_dimensions['B'].width = 14
-    ws.column_dimensions['C'].width = 14
-
-    # example row
-    ws.append(['13800138000', '张老师', '管理员'])
-
-    # instruction row
-    ws.merge_cells('A4:C4')
-    instr = ws.cell(row=4, column=1, value='说明：手机号即登录名，初始口令由系统随机生成（导入后在本页一次性展示），首次登录需改密 | 权限组填写系统已有权限组名称 | 第 2 行起填数据，删除本行和示例')
-    instr.font = Font(color='FF0000', bold=True, size=10)
-
-    buf = io.BytesIO()
-    wb.save(buf)
-    buf.seek(0)
-    return send_file(buf, as_attachment=True,
-                     download_name='教师导入模板.xlsx',
-                     mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
-
-
-@bp.route('/import-teachers', methods=['POST'])
-@perm_required('system.users')
-def import_teachers():
-    """批量导入教师：手机号=登录名，初始口令为随机一次性口令（H-1③），
-    首次登录强制改密（由 app/__init__.py 的 _force_password_change 兜底）"""
-    file = request.files.get('file')
-    # L-8：统一上传校验（白名单 + 危险类型 + magic），不再只看扩展名
-    from app.utils.upload_guard import validate_upload
-    if not file:
-        flash('请上传 .xlsx 格式的Excel文件', 'danger')
-        return redirect(url_for('users.list_users'))
-    ok, msg = validate_upload(file.filename, allowed_exts=['xlsx', 'xls'],
-                              stream=file.stream)
-    if not ok:
-        flash(msg, 'danger')
-        return redirect(url_for('users.list_users'))
-
-    try:
-        # 2026-10-10：改用公共 excel 读取层（含 openpyxl 兼容性 patch，幂等）
-        from app.utils.excel_patch import load_sheet, read_header_map
-        ws = load_sheet(file)
-        header_map = read_header_map(ws)
-
-        phone_col = header_map.get('手机号')
-        name_col = header_map.get('真实姓名')
-        group_col = header_map.get('权限组')
-
-        if not phone_col or not name_col or not group_col:
-            flash('Excel缺少必填列：手机号、真实姓名、权限组', 'danger')
-            return redirect(url_for('users.list_users'))
-
-        # load existing phones and permission groups
-        existing_phones = set(r[0] for r in db.session.query(User.username).all() if r[0])
-        pg_map = {pg.name: pg for pg in PermissionGroup.query.all()}
-
-        created = 0
-        errors = []
-        _new_users = []                          # v1.19.50.52：导入后同步至 teachers
-
-        for row_idx in range(2, ws.max_row + 1):
-            phone = str(ws.cell(row=row_idx, column=phone_col).value or '').strip()
-            name = str(ws.cell(row=row_idx, column=name_col).value or '').strip()
-            group_name = str(ws.cell(row=row_idx, column=group_col).value or '').strip()
-
-            if not phone or not name or not group_name:
-                continue
-
-            if phone in existing_phones:
-                errors.append(f'第{row_idx}行（{name}）：手机号{phone}已存在')
-                continue
-
-            pg = pg_map.get(group_name)
-            if not pg:
-                errors.append(f'第{row_idx}行（{name}）：权限组"{group_name}"不存在')
-                continue
-            # 2026-10-19 第十四轮：管理员组只能由内置 admin 授予 —— create()/edit()
-            # 早已有这道闸（H-01），批量导入口漏了：往 Excel 的「权限组」列写
-            # 「管理员组」就能批量把人挂成管理员（has_perm 即全权限）。
-            # 2026-10-20 第十七轮：不仅管理员组，任何超出操作者权限的组都拒绝
-            if not _group_grantable(pg):
-                errors.append(f'第{row_idx}行（{name}）：无权导入到「{pg.name}」'
-                              '（超出你的权限范围）')
-                continue
-
-            user = User(username=phone, real_name=name, role='teacher',
-                        permission_group_id=pg.id,
-                        must_change_pwd=True, is_active=True)
-            # H-1③：不再用手机号当口令（半公开信息 = 批量可登录），改随机一次性口令
-            one_time_pwd = _generate_password()
-            user.set_password(one_time_pwd)
-            db.session.add(user)
-            db.session.flush()
-            user.sync_primary_link()   # P5：同步多身份关联表
-            _store_one_time_password(phone, name, one_time_pwd)
-            _new_users.append(user)
-            existing_phones.add(phone)
-            created += 1
-
-        db.session.commit()
-        # v1.19.50.52：批量导入后同步到 academic.teachers
-        for u in _new_users:
-            teacher_sync.sync_from_user(u)
-        db.session.commit()
-
-        if created:
-            log_operation(current_user, '导入', '教师', None, f'批量导入 {created} 名教师')
-        msg = f'成功导入 {created} 名教师，初始口令已在本页一次性显示（仅此一次）'
-        if errors:
-            msg += f'，{len(errors)} 条失败：' + '；'.join(errors[:20])
-            if len(errors) > 20:
-                msg += f'...还有{len(errors)-20}条'
-            flash(msg, 'warning')
-        else:
-            flash(msg, 'success')
-
-    except Exception as e:
-        db.session.rollback()
-        flash(f'导入失败：{str(e)}', 'danger')
-
-    return redirect(url_for('users.list_users'))
-
-
 # ==================== 教师名单子页（2026-10-14） ====================
 # 用户要求：系统管理「教师管理」拆成两个子页 —— 教师名单 / 教师权限管理（本页）。
 # 教师名单与教务管理的 /academic/teachers 是**同一份数据、同一批视图函数**
@@ -830,12 +666,6 @@ bp.add_url_rule('/teachers', 'teachers_page', _ac_teachers.teachers_page)
 bp.add_url_rule('/teachers/export', 'teachers_export', _ac_teachers.teachers_export)
 bp.add_url_rule('/teachers/template.xlsx', 'teachers_template',
                 _ac_teachers.teachers_template)
-bp.add_url_rule('/teachers/import/upload', 'teachers_import_upload',
-                _ac_teachers.teachers_import_upload, methods=['POST'])
-bp.add_url_rule('/teachers/import/confirm', 'teachers_import_confirm',
-                _ac_teachers.teachers_import_confirm, methods=['POST'])
-bp.add_url_rule('/teachers/import/passwords/<token>.csv', 'teachers_import_passwords',
-                _ac_teachers.teachers_import_passwords)
 bp.add_url_rule('/teachers/<int:tid>/edit', 'teacher_edit', _ac_teachers.teacher_edit,
                 methods=['GET', 'POST'])
 

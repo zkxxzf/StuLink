@@ -1,4 +1,4 @@
-# StuLink v1.19.50.52 2026-10-10
+# StuLink v1.19.50.60 2026-10-10
 # 教务 · 教师名单：列表 / Excel 导入（模板-预览-确认-密码清单）/ 编辑
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 import io
@@ -38,9 +38,7 @@ _USERS_ENDPOINTS = {
     'teachers_page': 'users.teachers_page',
     'teachers_export': 'users.teachers_export',
     'teachers_template': 'users.teachers_template',
-    'teachers_import_upload': 'users.teachers_import_upload',
-    'teachers_import_confirm': 'users.teachers_import_confirm',
-    'teachers_import_passwords': 'users.teachers_import_passwords',
+    # 2026-10-21：教师导入只保留教务入口，users 蓝图下已不再挂载导入路由。
     'teacher_edit': 'users.teacher_edit',
 }
 
@@ -408,7 +406,7 @@ def teacher_edit(tid):
             if val is not getattr(t, field):
                 setattr(t, field, val)
                 changes.append(label)
-        # v1.19.50.52：教师档案变更 → 同步回写到关联的 users 账号（admin 自动 skip）
+        # v1.19.50.60：教师档案变更 → 同步回写到关联的 users 账号（admin 自动 skip）
         back_changes = teacher_sync.sync_from_teacher(t, renamed_from=None)
         if back_changes:
             changes.extend(back_changes)

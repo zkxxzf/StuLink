@@ -1,0 +1,55 @@
+{# StuLink v1.19.50.60 2026-10-21
+   考试成绩上下文的统一页头（成绩单 / 考务安排 / 数据导入 三页共用）。
+
+   结构：返回 → 页面标题 + 考试名 → 元信息（年级 / 性质 / 阶段 / 日期 / 学年 / 口径 / 状态）→ 右侧操作。
+   样式见 theme.css 的 .sl-exam-head 段。
+
+   用法：
+   {% from 'grades/_exam_head.html' import exam_head %}
+   {% call exam_head('成绩单', 'bi-table', url_for('grades.exams_list'), exam.name) %}
+       ...右侧按钮...
+   {% endcall %}
+#}
+{% macro exam_head(title, icon, back_url, exam_name,
+                   grade=None, kind=None, stage=None,
+                   exam_date=None, term=None, score_mode=None,
+                   status=None, status_class='secondary', warn=None, extra=None,
+                   head_id=None, exam_id=None) %}
+<div class="card sl-exam-head mb-3"
+     {% if head_id %}id="{{ head_id }}"{% endif %}
+     {% if exam_id %}data-exam-id="{{ exam_id }}"{% endif %}>
+    <div class="card-body">
+        <div class="d-flex align-items-center flex-wrap gap-2 gap-lg-3">
+            <a class="sl-exam-back" href="{{ back_url }}" title="返回" aria-label="返回">
+                <i class="bi bi-arrow-left"></i>
+            </a>
+            <div class="sl-exam-id">
+                <div class="sl-exam-title"><i class="bi {{ icon }}"></i>{{ title }}</div>
+                {% if exam_name %}
+                <div class="sl-exam-name" title="{{ exam_name }}">{{ exam_name }}</div>
+                {% endif %}
+            </div>
+            <div class="sl-exam-meta">
+                {% if grade %}<span class="badge bg-secondary">{{ grade }}</span>{% endif %}
+                {% if kind %}<span class="badge bg-primary">{{ kind }}</span>{% endif %}
+                {% if stage %}<span class="badge bg-info text-dark">{{ stage }}</span>{% endif %}
+                {% if exam_date %}
+                <span class="sl-meta-item"><i class="bi bi-calendar3"></i>{{ exam_date }}</span>
+                {% endif %}
+                {% if term %}
+                <span class="sl-meta-item"><i class="bi bi-journal-bookmark"></i>{{ term }}</span>
+                {% endif %}
+                {% if score_mode %}
+                <span class="sl-meta-item"><i class="bi bi-sliders"></i>{{ score_mode }}</span>
+                {% endif %}
+                {% if status %}<span class="badge bg-{{ status_class }}">{{ status }}</span>{% endif %}
+                {% if warn %}<span class="badge bg-warning text-dark">{{ warn }}</span>{% endif %}
+                {% if extra %}<span class="sl-meta-item">{{ extra }}</span>{% endif %}
+            </div>
+            <div class="sl-exam-actions ms-auto d-flex align-items-center gap-2 flex-wrap">
+                {{ caller() }}
+            </div>
+        </div>
+    </div>
+</div>
+{% endmacro %}

@@ -4,12 +4,29 @@
 {# 2026-10-20：非超管编辑自己时，权限组只读（后端也会跳过写入，避免自降权/自提权） #}
 {% set _edit_id = request.view_args.get('id')|int if request.view_args and request.view_args.get('id') else 0 %}
 {% set _lock_groups = title == '编辑用户' and _edit_id == current_user.id and current_user.username != 'admin' %}
+{# 2026-10-21 用户口径：/users/ 只新建管理员；教师档案统一在教务模块维护 #}
+{% set admin_only = (title == '新建管理员') %}
 <div class="d-flex align-items-center mb-3">
     <a href="{{ url_for('users.list_users') }}" class="btn btn-sm btn-outline-secondary me-3">
         <i class="bi bi-arrow-left"></i> 返回
     </a>
     <h4 class="fw-bold mb-0">{{ title }}</h4>
 </div>
+
+{% if admin_only %}
+{# 2026-10-21 用户口径：本页只建管理员，教师账号从教务模块同步 #}
+<div class="alert alert-info d-flex align-items-start" role="alert">
+    <i class="bi bi-info-circle-fill me-2 mt-1"></i>
+    <div class="small">
+        <strong>本页仅用于建立系统管理员账号。</strong>
+        教师账号不在此处创建：请先在
+        <a href="{{ url_for('academic.teachers_page') }}" class="alert-link">教务管理 → 教师</a>
+        录入教师档案，系统会自动为其开通账号；随后回到
+        <a href="{{ url_for('users.list_users') }}" class="alert-link">教师管理</a>
+        列表中启用并分配权限即可。
+    </div>
+</div>
+{% endif %}
 
 <div class="row justify-content-center">
     <div class="col-md-8">
@@ -46,7 +63,14 @@
                         </div>
                         <div class="col-md-6 mb-3">
                             <label class="form-label">角色 <span class="text-danger">*</span></label>
+                            {% if admin_only %}
+                            {# 表单需要 role 字段通过校验；实际角色由后端固定为管理员 #}
+                            <input type="hidden" name="role" value="admin">
+                            <input class="form-control" value="管理员（固定）" disabled>
+                            <div class="form-text text-muted">本页只新增管理员；教师请到「教务管理 → 教师」新增/导入。</div>
+                            {% else %}
                             {{ form.role(class="form-select", id="roleSelect") }}
+                            {% endif %}
                         </div>
                         <div class="col-md-6 mb-3">
                             <label class="form-label">权限组
@@ -93,6 +117,7 @@
                             {% endif %}
                             {% for e in form.password.errors %}<div class="text-danger small">{{ e }}</div>{% endfor %}
                         </div>
+                        {% if not admin_only %}
                         <div class="col-md-6 mb-3" id="gradeField">
                             <label class="form-label">管理年级
                                 <small class="text-muted">(可多选；班主任须与班级同年级)</small>
@@ -105,6 +130,7 @@
                             <label class="form-label">管理班级 <small class="text-muted">(班主任必填)</small></label>
                             {{ form.class_name(class="form-select") }}
                         </div>
+                        {% endif %}
                     </div>
                     <hr>
                     <button type="submit" class="btn btn-primary"><i class="bi bi-check-lg"></i> 保存</button>

@@ -141,9 +141,10 @@ with app.test_client() as c:
     rp = c.get(f'/grades/affairs/{aid}')
     ph = rp.get_data(as_text=True)
     check('考务页面 200', rp.status_code == 200, str(rp.status_code))
-    check('页面含 7 个环节标签',
-          all(x in ph for x in ['① 学生名单', '② 考场设置', '③ 编排考号',
-                                '④ 核对任课教师', '⑤ 考试时间表', '⑥ 编排监考表', '⑦ 导出']))
+    # 2026-10-21 用户口径：页签去掉序号，只保留功能区名称
+    check('页面含 7 个功能页签',
+          all(x in ph for x in ['>学生名单', '>考场设置', '>编排考号',
+                                '>核对任课教师', '>考试时间表', '>编排监考表', '>导出']))
     check('页面只保留一个监考表导出入口（含工作量统计；无 PDF / 长表）',
           '导出监考表（含工作量统计）' in ph
           and '监考表 PDF' not in ph and '导出监考表 Excel' not in ph)
@@ -169,20 +170,13 @@ with app.test_client() as c:
           and '2025级·联考·期中考' not in _side_title)
     # v1.19.47.3 点环节标签不滚动：改用 history.replaceState 写 hash（不再直接赋 location.hash）
     check('点环节标签不滚动（用 history.replaceState）', 'history.replaceState' in ph)
-    # v1.19.47.3 侧栏 7 环节：断言**渲染产物**（affair_steps 是 Jinja 变量名，
-    # 不会出现在 HTML 里，故改数圆点 / 数「环节」文案）。
-    # 默认不带 hash 打开 → 当前环节 = 第 1 步：恰好 1 个圆点带 on，其余 6 个既非 on 也非 done
-    #（此刻 4/5/6 环节无数据），以此证明「只亮当前、不把前面的全亮」。
-    _n_dot = ph.count('class="efn-dot')
-    check('侧栏渲染 7 个环节圆点', _n_dot == 7, f'efn-dot 数={_n_dot}')
-    check('侧栏圆点只亮当前 1 个（其余未完成不亮）',
-          ph.count('efn-dot on"') == 1 and ph.count('efn-dot on done"') == 0,
-          f'on={ph.count("efn-dot on"+chr(34))}')
-    check('侧栏标注 7 环节', '/7 环节' in ph)
-    check('侧栏圆点带环节标题（鼠标悬浮可见第几步叫什么）', '环节1 学生名单' in ph)
+    # 2026-10-21 用户口径：侧栏去掉所有分步骤显示 → 不再渲染环节圆点 / 进度计数。
+    check('侧栏不再渲染分步骤圆点', 'efn-dot' not in ph and 'efn-steps' not in ph)
+    check('侧栏不再渲染进度计数', '/7 环节' not in ph and 'efn-count' not in ph)
+    check('页内页签无序号（分步骤显示已去掉）', '#t1">①' not in ph and '#t1">学生名单' in ph)
     check('选科明细默认展开（collapse show）', 'collapse show' in ph)
     check('改容量实时刷新选科明细（refreshStats）', 'refreshStats' in ph)
-    check('侧栏圆点只亮当前环节（syncSidebarSteps）', 'syncSidebarSteps' in ph)
+    check('侧栏圆点同步脚本已移除', 'syncSidebarSteps' not in ph)
     # 2026-10-13 用户口径：⑤ 点「新增场次」不再给空白 yyyy/mm/dd —— 页面下发默认日期（本场考试日期）
     # 与每天场次上限，新行日期由 nextSchedDate() 给出（延续上一场 → 缺省考试日期 → 满员顺延）
     check('环节⑤ 新增场次默认日期已下发（本场 2026-10-08 / 每天 6 场）',
@@ -404,7 +398,7 @@ with app.test_client() as c:
     check('环节⑥ 手动指派回避教师被拒', (r.get_json() or {}).get('ok') is False,
           str(r.get_json()))
     # 手动指定：派一个从未被编排的校外监考员 → 允许
-    # 2026-10-13 审计修复：v1.19.50.52 起手动指派与自动编排共用
+    # 2026-10-13 审计修复：v1.19.50.60 起手动指派与自动编排共用
     # 「一人一场次一考场」硬约束，而自动编排已把 12 格填满，
     # 已入池的老师（含校外陈老师）都已被排到某场某考场 —— 再派他们都会被拒
     # （这是产品的正确行为，不是缺陷）。
