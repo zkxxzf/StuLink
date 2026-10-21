@@ -1,11 +1,13 @@
-# StuLink v1.19.49.50 2026-10-20
+# StuLink v1.19.50.52 2026-10-20
 # 限时练公共服务：可见范围 / 权限 / 分层模板 / 名次重算
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 """限时练公共服务（只做业务规则，不碰模板渲染）。
 
-权限口径（2026-10-20 用户明确）：
-- **查看 / 导入**：所有能看到该年级的老师（`grades.view` + 年级可见性）；
-  普通任课老师即可执行单科成绩导入，不要求教学管理权限。
+权限口径（2026-10-21 用户定案）：
+- **查看**：`grades.view` + 该年级在可见年级范围内；逐生数据再按
+  `score_guard` 收口（任课教师＝所教科目，班主任＝本班全科）。
+- **导入**：`grades.import` + 年级可见；无管理权的账号只能导入本人任教学科
+  （`importable_subjects`）——此前只校验 `grades.view`，只读账号也能覆盖成绩。
 - **改分 / 删成绩 / 删场次 / 改分层模板**：仅年级长与管理员
   （admin、`grades.edit`、数据范围为年级/全校的身份）。
 """
@@ -73,6 +75,35 @@ def assert_grade_readable(grade):
     if current_user.role == 'admin':
         return
     if grade not in visible_grades_of(current_user):
+        abort(403)
+
+
+def importable_subjects(grade, user=None):
+    """该账号在该年级可导入的科目集合；``None`` ＝ 不限学科。
+
+    2026-10-21 权限收口：限时练导入此前只校验 `grades.view`（读权限），
+    任何能看该年级的账号都能靠 POST 覆盖整科成绩。现在路由层要求
+    `grades.import`，本函数再按「年级 × 学科」收一层：
+      · 年级长 / 管理岗（`can_manage`）→ 不限学科；
+      · 只有导入权但无管理权的账号 → 仅本人任教的年级学科。
+    """
+    u = user or current_user
+    if can_manage(u):
+        return None
+    from app.modules.grades.services import score_guard
+    try:
+        scope = score_guard.resolve(u)
+    except PermissionError:
+        return set()
+    if scope.full_school or grade in scope.grades:
+        return None
+    return {s for g, s in scope.teach if g == grade}
+
+
+def assert_subject_importable(grade, subject, user=None):
+    """导入 / AI 解析前的「年级 + 学科」写校验（越界 403）"""
+    allowed = importable_subjects(grade, user)
+    if allowed is not None and subject not in allowed:
         abort(403)
 
 

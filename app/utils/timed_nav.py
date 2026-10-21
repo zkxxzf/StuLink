@@ -1,4 +1,4 @@
-# StuLink v1.19.49.50 2026-10-20
+# StuLink v1.19.50.52 2026-10-20
 # 限时练场次的侧栏上下文（与普通考试 exam_nav 同一套悬浮流程栏外观）
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 """限时练侧栏上下文：进入某场限时练时把侧栏切成「悬浮流程栏」。
@@ -78,8 +78,14 @@ def _resolve():
 
     subject = (request.args.get('subject') or '').strip()
     class_name = (request.args.get('class') or '').strip()
+    # 2026-10-21：导入是写操作，入口与路由同门槛（grades.import），
+    # 只读账号不显示该页签，避免「看得见点不进」的 403 死链。
+    from flask_login import current_user
+    can_import = current_user.has_perm('grades.import')
     nav = []
     for key, label in TIMED_TABS:
+        if key == 'import' and not can_import:
+            continue
         # 查询参数名就叫 class —— 是 Python 关键字，不能直接写关键字实参
         params = {'tid': exam.id, 'tab': key}
         if subject:

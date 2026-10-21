@@ -1,4 +1,4 @@
-# StuLink v1.19.49.50 2026-10-20
+# StuLink v1.19.50.52 2026-10-20
 # 限时练：列表 / 新建 / 详情四页签 / 删除
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 """限时练页面路由（与普通考试零耦合）。
@@ -203,7 +203,7 @@ def _detail_ctx(exam, tab, subject, class_name):
             'class_name': class_name, 'subjects': []})
         ctx.setdefault('blocks', [])
         return ctx
-    ctx['classes'] = timed_analysis.classes_of(exam.id)
+    ctx['classes'] = timed_analysis.classes_of(exam.id, user=current_user)
     if tab == 'students':
         # 汇总表：各科分数 + 总分 + 年级/班级名次 + 总分 T 分
         # 每页条数：?per=20/50/100/200，缺省 50（前端会读「我的设置」里的本机偏好）
@@ -216,14 +216,16 @@ def _detail_ctx(exam, tab, subject, class_name):
         ctx['summary'] = timed_analysis.summary_matrix(
             exam, class_name,
             q=(request.args.get('q') or '').strip(),
-            page=request.args.get('page') or 1, per_page=per)
+            page=request.args.get('page') or 1, per_page=per,
+            user=current_user)
     elif tab == 'trends':
         # 学生分析：每人每科 T 分轨迹（分页 + SVG 迷你折线）
         ctx['trends'] = timed_analysis.student_trends(
-            exam, class_name, page=request.args.get('page') or 1)
+            exam, class_name, page=request.args.get('page') or 1,
+            user=current_user)
     else:
-        # 分析页一次给出全部学科（每科左图右表）
-        ctx['blocks'] = timed_analysis.subject_blocks(exam, tpl)
+        # 分析页一次给出全部学科（每科左图右表；按可见范围收口）
+        ctx['blocks'] = timed_analysis.subject_blocks(exam, tpl, user=current_user)
     return ctx
 
 
@@ -236,6 +238,11 @@ def timed_detail(tid):
     tab = (request.args.get('tab') or DEFAULT_TAB).strip()
     if tab not in TABS:
         tab = DEFAULT_TAB
+    # 2026-10-21：导入页是写入口，与导入路由同门槛（grades.import）；
+    # 只读账号直接落到学生成绩，不再渲染一个提交必 403 的表单。
+    if tab == 'import' and not current_user.has_perm('grades.import'):
+        flash('没有成绩导入权限', 'warning')
+        return redirect(url_for('grades.timed_detail', tid=exam.id))
     subject = (request.args.get('subject') or '').strip()
     class_name = (request.args.get('class') or '').strip()
     ctx = _detail_ctx(exam, tab, subject, class_name)
@@ -252,7 +259,13 @@ def timed_detail(tid):
 def timed_student_detail(tid, student_no):
     """学生分析详情：该生**本年级所有限时练场次**的成绩 + T 分走势"""
     exam = timed_service.assert_visible(tid)
-    data = timed_analysis.student_detail(exam, (student_no or '').strip(),
-                                         request.args.get('page'))
+    try:
+        data = timed_analysis.student_detail(exam, (student_no or '').strip(),
+                                             request.args.get('page'),
+                                             user=current_user)
+    except PermissionError as e:
+        # 越权（他班学生）不报 500，退回成绩总览并提示
+        flash(str(e), 'warning')
+        return redirect(url_for('grades.timed_detail', tid=exam.id, tab='students'))
     return render_template('grades/timed/student_detail.html',
                            exam=exam, **data)

@@ -1,11 +1,11 @@
-# StuLink v1.19.49.50 2026-10-12
+# StuLink v1.19.50.52 2026-10-12
 # 考务环节④⑤⑥⑦：核对任课教师 / 考试时间表 / 监考编排 / 监考表导出
 #
 # 用户口径（2026-10-12 定案）：
 #   · 环节④ 仅涉及「本次考试」：把该年级任课安排核对/临时调整后落在本批次，
 #     不回写全局 TeacherSubjectLink（应对临时换老师 1-2 月）。
 #     2026-10-21 用户口径：科目列 = 9 个文化科 + 综合组 6 科（体育/音乐/美术/
-#     信息技术/通用技术/心理）+ 本班班主任（正班主任 / 副班主任1 / 副班主任2），
+#     信息技术/通用技术/心理）+ 本班班主任（正班 / 副班1 / 副班2），
 #     与任课教师映射页、教师安排表导入模板同一份口径。
 #   · 环节⑤ 考试时间表承载「时间段 → 考试科目」，是环节⑥ 回避教师的依据。
 #   · 环节⑥ 教师池 = 环节④ 任课教师（去重）+ 班主任 + 其他监考员（可为无账号的
@@ -32,6 +32,10 @@ from app.models.grades import (AFFAIR_EXCLUDED_SUBJECTS, AFFAIR_HEAD_SUBJECTS,
                                SUBJECTS, Exam, normalize_subject)
 from app.modules.grades import bp
 from app.modules.grades.services.invig_balance import Cell, best_assign
+# 2026-10-21 用户口径：环节④ 任课表恢复「班主任」三列（正班/副班1/副班2），
+# 与任课教师同级别、负责本班总分
+from app.modules.grades.services.teacher_snapshot_service import (
+    HEAD_SUBJECT, HOMEROOM_POSITIONS, current_homeroom_positions)
 from app.modules.grades.utils import numeric_classes
 from app.utils.decorators import perm_required
 from app.utils.helpers import log_operation
@@ -55,25 +59,37 @@ SCHED_DEFAULT_START = '08:00'
 SCHED_DURATION_MINUTES = {'语文': 150, '数学': 120, '英语': 120, '外语': 120}
 SCHED_DURATION_FALLBACK = 75
 
-# 2026-10-21 用户口径：考务④「核对任课教师」的列 = 文化科 9 + 综合组 5 + 班主任 3。
+# 2026-10-21 用户口径：考务④「核对任课教师」的列 = 班主任 3 + 文化科 9 + 综合组 5。
+#   · 班主任三列是「正班 / 副班1 / 副班2」（master 口径，放在学科左边），
+#     用**伪科目名**占位存进 affair_teachers，不写回 TeacherSubjectLink；
+#     旧库里的「正班主任 / 副班主任1 / 副班主任2」是同位次的历史别名，
+#     读取 / 保存时统一归一（见 _canon_subject），存量数据不用先迁移也能显示；
 #   · 综合组科目从教务模型取（COMPREHENSIVE_SUBJECTS），与任课映射页同源；
 #     **「通用技术」在考务里去掉**（用户 2026-10-21 明确要求，本校不带这门课；
 #     任课映射页仍保留它 —— 那边是全校口径，删了会牵动导入模板与既有映射）；
-#   · 班主任不是科目，用**伪科目名**占位（一个班最多 3 位，与模板的正班 / 副班1 /
-#     副班2 一一对应），存进 affair_teachers 表，不写回 TeacherSubjectLink；
 #   · 伪科目绝不会进考试科目字典 —— 环节⑤ 时间表仍只认 SUBJECTS 9 科，否则
 #     「体育」会被当成考试科目，触发莫名其妙的同科回避。
-HEAD_SUBJECTS = AFFAIR_HEAD_SUBJECTS   # 本文件内部沿用的短名字（真值在 models）
+HEAD_SUBJECTS = AFFAIR_HEAD_SUBJECTS   # 历史别名（真值在 models）
+_HEAD_ALIAS = dict(zip(AFFAIR_HEAD_SUBJECTS, HOMEROOM_POSITIONS))
+
 AFFAIR_EXTRA_SUBJECTS = tuple(s for s in COMPREHENSIVE_SUBJECTS
                               if s not in AFFAIR_EXCLUDED_SUBJECTS)
 AFFAIR_SUBJECTS = list(SUBJECTS) + list(AFFAIR_EXTRA_SUBJECTS)
-AFFAIR_COLUMNS = AFFAIR_SUBJECTS + list(HEAD_SUBJECTS)
-# 前端表头分组（顺序即列顺序；班主任排最后，避免把「班级 × 科目」矩阵挤散）
+# 环节⑥ 教师池 / 排除名单的分组顺序：文化科 → 综合组 → 班主任
+# （班主任的历史别名也放末尾，避免 _subjRank 落 999 排到「未标注」之后）
+AFFAIR_COLUMNS = (AFFAIR_SUBJECTS + list(HOMEROOM_POSITIONS)
+                  + list(HEAD_SUBJECTS))
+# 环节④ 表头分组（顺序即列顺序：班主任三列在最左，其次文化科、综合组）
 AFFAIR_SUBJECT_GROUPS = [
+    {'name': '班主任', 'subjects': list(HOMEROOM_POSITIONS)},
     {'name': '', 'subjects': list(SUBJECTS)},
     {'name': '综合组', 'subjects': list(AFFAIR_EXTRA_SUBJECTS)},
-    {'name': '班主任', 'subjects': list(HEAD_SUBJECTS)},
 ]
+
+
+def _canon_subject(subj):
+    """班主任旧伪科目名 → 新三列名（正班主任→正班，其余原样返回）。"""
+    return _HEAD_ALIAS.get((subj or '').strip(), subj)
 
 
 # ==================== 公共小工具 ====================
@@ -149,25 +165,25 @@ def _headteacher_cells(grade):
     out = {}
     for lk in links:
         bag = out.setdefault(lk.class_name, [])
-        if len(bag) < len(HEAD_SUBJECTS):
+        if len(bag) < len(HOMEROOM_POSITIONS):
             bag.append({'user_id': lk.user_id,
                         'teacher_name': (names.get(lk.user_id) or '').strip() or None})
     return out
 
 
 def _head_rows(grade):
-    """班主任 → AffairTeacher 行（正班主任 / 副班主任1 / 副班主任2）。"""
+    """班主任 → AffairTeacher 行（正班 / 副班1 / 副班2）。"""
     rows = []
     for cls, people in _headteacher_cells(grade).items():
         for i, p in enumerate(people):
-            rows.append({'class_name': cls, 'subject': HEAD_SUBJECTS[i],
+            rows.append({'class_name': cls, 'subject': HOMEROOM_POSITIONS[i],
                          'user_id': p['user_id'],
                          'teacher_name': p['teacher_name']})
     return rows
 
 
 def _sync_teachers_from_links(affair):
-    """用当前 TeacherSubjectLink（同年级 active）+ 班主任覆盖写入本批次任课核对表。"""
+    """用当前 TeacherSubjectLink（同年级 active）+ 班主任名单覆盖写入本批次任课核对表。"""
     AffairTeacher.query.filter_by(affair_id=affair.id).delete()
     links = TeacherSubjectLink.query.filter_by(grade=affair.grade, active=True).all()
     uids = {l.user_id for l in links if l.user_id}
@@ -184,9 +200,19 @@ def _sync_teachers_from_links(affair):
             subject=l.subject, user_id=l.user_id,
             teacher_name=names.get(l.user_id), source='sync'))
         n += 1
-    for r in _head_rows(affair.grade):
-        db.session.add(AffairTeacher(affair_id=affair.id, grade=affair.grade,
-                                     source='sync', **r))
+    # 2026-10-21 用户口径：班主任和任课教师同级别（负责本班总分），按
+    # 正班 / 副班1 / 副班2 **三列**一并带入本场任课表。
+    # 批次还没名单/学籍（_class_list 为空）时按**全年级**带入，否则新批次首次
+    # 进来三列会全空，得等有名单后再手动「重新带入」。
+    classes = set(_class_list(affair))
+    heads = (current_homeroom_positions(affair.grade, classes=classes)
+             if classes else current_homeroom_positions(affair.grade))
+    for hr in heads:
+        db.session.add(AffairTeacher(
+            affair_id=affair.id, grade=affair.grade,
+            class_name=hr['class_name'], subject=hr['subject'],
+            user_id=hr.get('user_id'), teacher_name=hr['teacher_name'],
+            source='sync'))
         n += 1
     return n
 
@@ -198,7 +224,8 @@ def _ensure_head_rows(affair):
     """
     has = (AffairTeacher.query
            .filter_by(affair_id=affair.id)
-           .filter(AffairTeacher.subject.in_(list(HEAD_SUBJECTS)))
+           .filter(AffairTeacher.subject.in_(
+               list(HOMEROOM_POSITIONS) + list(AFFAIR_HEAD_SUBJECTS)))
            .count())
     if has:
         return 0
@@ -233,10 +260,10 @@ def invig_pool(affair):
     返回 [{name, user_id, subjects(set), is_head(bool), source}]
     （保持「先任课教师、后其他」的稳定顺序）。
 
-    2026-10-21：班主任的伪科目（正班主任 / 副班主任1 / 副班主任2）**不进 subjects**
-    —— subjects 是环节⑥「同科回避」的匹配键，混进伪科目只会让一位老师同时出现在
-    「语文」和「正班主任」两个分组里；班主任身份单独用 is_head 标记，供教师池分组
-    与「首场优先班主任」使用。
+    2026-10-21：班主任的伪科目（正班 / 副班1 / 副班2，及历史别名
+    正班主任 / 副班主任1 / 副班主任2）**不进 subjects** —— subjects 是环节⑥
+    「同科回避」的匹配键，混进伪科目只会让一位老师同时出现在「语文」和「班主任」
+    两个分组里；班主任身份单独用 is_head 标记，供教师池分组与「首场优先班主任」使用。
     """
     pool = {}
 
@@ -255,9 +282,11 @@ def invig_pool(affair):
         if not nm:
             continue
         e = _entry(nm, t.user_id, 'teacher')
-        if t.subject in HEAD_SUBJECTS:
+        # 「正班/副班1/副班2」是角色列不是学科：进教师池（要排监考），
+        # 但不能当学科参与同科回避（旧伪科目名与旧合并列「班主任」同样跳过）
+        if t.subject in HOMEROOM_POSITIONS or t.subject in AFFAIR_HEAD_SUBJECTS:
             e['is_head'] = True
-        elif t.subject:
+        elif t.subject and t.subject != HEAD_SUBJECT:
             e['subjects'].add(t.subject)
     for o in AffairInvigilator.query.filter_by(affair_id=affair.id).all():
         nm = (o.name or '').strip()
@@ -282,14 +311,17 @@ def affair_teachers_get(aid):
     ensure_teachers_synced(affair)
     cells = {}
     for t in AffairTeacher.query.filter_by(affair_id=affair.id).all():
-        cells[f'{t.class_name}|{t.subject}'] = {
+        # 旧伪科目名（正班主任/副班主任1/副班主任2）按新三列名返回，存量数据直接可见
+        cells[f'{t.class_name}|{_canon_subject(t.subject)}'] = {
             'user_id': t.user_id, 'name': t.teacher_name, 'source': t.source}
     return jsonify(success=True, data={
         'grade': affair.grade,
         'classes': _class_list(affair),
-        # 2026-10-21：列 = 文化科 9 + 综合组 6 + 班主任 3（subject_groups 供表头分组）
-        'subjects': AFFAIR_SUBJECTS,
-        'head_subjects': list(HEAD_SUBJECTS),
+        # 2026-10-21：班主任三列放在学科**左边**（正班/副班1/副班2），
+        # 与任课教师同级别、负责本班总分；学科 = 文化科 9 + 综合组 5
+        # （通用技术考务侧不带），subject_groups 供两行表头分组
+        'subjects': list(HOMEROOM_POSITIONS) + list(AFFAIR_SUBJECTS),
+        'head_subjects': list(HOMEROOM_POSITIONS),
         'subject_groups': AFFAIR_SUBJECT_GROUPS,
         'cells': cells,
         'users': _with_pinyin(_teacher_candidates(affair.grade)),
@@ -343,11 +375,14 @@ def affair_teachers_save(aid):
             continue
         cls, subj = key.split('|', 1)
         # 2026-10-13：科目别名归一（英语/日语→外语 等）后再做白名单校验
-        # 2026-10-21：班主任伪科目不做别名归一，白名单放宽到 AFFAIR_COLUMNS
-        subj = (subj or '').strip()
-        if subj not in HEAD_SUBJECTS:
+        # 2026-10-21：班主任伪科目不做别名归一（否则可能被当成学科），
+        # 旧伪科目名统一映射到新三列；白名单 = 学科列 + 班主任三列 + 旧合并列
+        subj = _canon_subject(subj)
+        if subj not in HOMEROOM_POSITIONS:
             subj = normalize_subject(subj)
-        if cls not in classes or subj not in AFFAIR_COLUMNS:
+        if cls not in classes or (subj not in AFFAIR_SUBJECTS
+                                  and subj not in HOMEROOM_POSITIONS
+                                  and subj != HEAD_SUBJECT):
             continue
         uid = int(val) if str(val).strip() else None
         row = existing.get((cls, subj))
@@ -359,6 +394,7 @@ def affair_teachers_save(aid):
             db.session.add(row)
             existing[(cls, subj)] = row
         row.user_id = uid
+        # 班主任已拆成三列、每列一个人，清空就是清空（不存在多人合并值被误清的问题）
         row.teacher_name = name_of.get(uid) if uid else None
         row.source = 'manual'
     db.session.commit()

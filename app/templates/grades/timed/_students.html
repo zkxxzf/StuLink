@@ -4,9 +4,13 @@
    不再一次性把 500 多人全渲染出来。 #}
 {% if empty_subjects %}
 <div class="alert alert-light border">
+    {% if current_user.has_perm('grades.import') %}
     还没有成绩，先到
     <a href="{{ url_for('grades.timed_detail', tid=exam.id, tab='import') }}">数据导入</a>
     导入一科。
+    {% else %}
+    还没有成绩（导入需要「成绩导入」权限，请联系管理员）。
+    {% endif %}
 </div>
 {% else %}
 
@@ -72,9 +76,17 @@
             {% for s in summary.subjects %}
             <th class="text-end text-nowrap">{{ s }}</th>
             {% endfor %}
+            {# 总分 / 名次列按当前账号的成绩可见范围显示：
+               任课教师只有所教科目的分数 + 总分年级名次（无总分、无班级名次） #}
+            {% if summary.total_visible %}
             <th class="text-end text-nowrap" title="下方浅色小字为该生总分 T 分">总分</th>
+            {% endif %}
+            {% if summary.rank_g_visible %}
             <th class="text-end text-nowrap">年级名次</th>
+            {% endif %}
+            {% if summary.rank_c_visible %}
             <th class="text-end text-nowrap">班级名次</th>
+            {% endif %}
         </tr>
         </thead>
         <tbody>
@@ -95,17 +107,26 @@
                 {% endif %}
             </td>
             {% endfor %}
+            {% if summary.total_visible %}
             <td class="text-end fw-semibold text-nowrap">
                 <div>{{ r.total }}</div>
                 {% if r.t is not none %}
                 <div class="text-muted fw-normal t-sub">T {{ r.t }}</div>
                 {% endif %}
             </td>
+            {% endif %}
+            {% if summary.rank_g_visible %}
             <td class="text-end">{{ r.rank_grade }}</td>
+            {% endif %}
+            {% if summary.rank_c_visible %}
             <td class="text-end">{{ r.rank_class }}</td>
+            {% endif %}
         </tr>
         {% else %}
-        <tr><td colspan="{{ 6 + summary.subjects|length }}"
+        <tr><td colspan="{{ 3 + summary.subjects|length
+                + (1 if summary.total_visible else 0)
+                + (1 if summary.rank_g_visible else 0)
+                + (1 if summary.rank_c_visible else 0) }}"
                 class="text-center text-muted py-4">
             {% if summary.q %}没有匹配「{{ summary.q }}」的学生{% else %}暂无成绩{% endif %}
         </td></tr>
@@ -141,8 +162,13 @@
 {% endif %}
 
 <div class="text-muted small mt-2">
+    {% if summary.total_visible %}
     总分 = 已导入各科之和（限时练不存总分行，按当前科目现算）；
     名次按总分降序、同分并列；班级名次在同班内部再排。
+    {% else %}
+    <span class="text-warning-emphasis">当前账号仅可见所教学科的分数与总分年级名次，
+    总分分数与班级名次不对任课教师开放。</span>
+    {% endif %}
     <b>T 分数</b> = 10 ×（个人分 − 同群体均分）÷ 标准差 + 50：
     每科分数下方浅色小字是<b>该科 T 分</b>（同科内比），总分下方是<b>总分 T 分</b>；
     50 = 与平均持平，60 = 高一个档次，40 = 低一个档次。

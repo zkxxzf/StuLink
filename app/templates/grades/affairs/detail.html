@@ -643,10 +643,14 @@
                 <i class="bi bi-save"></i> 保存</button>
         </div>
         <div class="alert alert-light border py-2 small">
-            表格为「班级 × 科目 → 任课教师」：<b>9 个文化科 + 综合组 5 科</b>
-            （体育 / 音乐 / 美术 / 信息技术 / 心理）+ <b>班主任</b>
-            （正班主任 / 副班主任1 / 副班主任2，与教师映射同一口径）；留空表示该班没有该科
-            任课教师或该职务。点格子后可直接输入 <b>姓名 / 全拼 / 每个字的首字母</b> 检索
+            表格为「班级 × 科目 → 任课教师」：左侧
+            <span class="badge text-bg-warning">正班</span>
+            <span class="badge text-bg-warning">副班1</span>
+            <span class="badge text-bg-warning">副班2</span>
+            三列是班主任（与任课教师同级别，负责本班总分），默认按班主任名单带入，
+            可临时改派（仅本场）；其后是 <b>9 个文化科 + 综合组 5 科</b>
+            （体育 / 音乐 / 美术 / 信息技术 / 心理）；留空表示该班没有该科任课教师或该职务。
+            点格子后可直接输入 <b>姓名 / 全拼 / 每个字的首字母</b> 检索
             （例：蒋雪静 → 蒋雪静 / jiangxuejing / jxj）。这里的每一位老师都会进入
             环节⑥ 的监考教师池，班主任还会用于「每天首场优先排班主任」。
         </div>
@@ -2293,8 +2297,8 @@ function loadAffairTeachers(){
 }
 function renderAffairTeachers(){
     var d = _affTeachers; if(!d) return;
-    // 2026-10-21：两行表头 —— 第一行按「文化科目 / 综合组 / 班主任」合并分组，
-    // 第二行列科目名（18 列，容器横向滚动，首列班级冻结）。
+    // 2026-10-21：两行表头 —— 第一行按「班主任 / 文化科目 / 综合组」合并分组，
+    // 第二行列科目名（17 列：3 + 9 + 5，容器横向滚动，首列班级冻结）。
     var groups = (d.subject_groups && d.subject_groups.length)
         ? d.subject_groups : [{name: '', subjects: d.subjects || []}];
     var h = ['<table class="table table-sm table-bordered align-middle mb-0" id="t4Table">'];
@@ -2328,7 +2332,6 @@ function renderAffairTeachers(){
                    + ' data-k="' + escHtml(cls+'|'+s) + '" data-uid="' + escHtml(cur) + '"'
                    + (tip ? ' title="' + escHtml(tip) + '"' : '') + '>'
                    + escHtml(label || '—') + '</button></td>');
-        });
         });
         h.push('</tr>');
     });
@@ -2368,7 +2371,7 @@ function saveAffairTeachers(){
     fetch('/grades/affairs/'+AID+'/teachers/save', {method:'POST',
         headers:{'Content-Type':'application/json','X-CSRFToken':csrf()},
         body: JSON.stringify({cells: cells})})
-        .then(r=>r.json()).then(d=>{ alert(d.ok?'已保存':'保存失败：'+(d.msg||'')); });
+        .then(r=>r.json()).then(d=>{ alert(d.ok?'已保存':'保存失败：'+(d.msg||'')); if(d.ok) loadAffairTeachers(); });
 }
 function syncAffairTeachers(){
     if(!confirm('从「任课安排表 + 班主任」重新带入将覆盖本批次已做的临时调整（含综合组与班主任三列），继续？')) return;

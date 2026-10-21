@@ -85,8 +85,15 @@ def seed():
         db.session.add(TimedScore(
             exam_id=exam.id, student_no=no, student_name=no, grade='2024级',
             class_name=cls, subject='语文', score=sc))
+    # 第二科（数学）：只给 01 班，用来验证「任课教师只出所教科目的列」
+    for i in range(30):
+        db.session.add(TimedScore(
+            exam_id=exam.id, student_no='2401%02d' % i,
+            student_name='2401%02d' % i, grade='2024级', class_name='01班',
+            subject='数学', score=40 + i))
     db.session.commit()
     timed_service.recalc_subject_ranks(exam.id, '语文')
+    timed_service.recalc_subject_ranks(exam.id, '数学')
     db.session.commit()
     return exam, tpl
 
@@ -107,6 +114,79 @@ def check_analysis(exam, tpl):
           a['total']['trim_avg'] == 67.2, a['total']['trim_avg'])
     check('行里不再有 max/min 字段',
           'max' not in rows['01班'] and 'min' not in rows['01班'])
+
+
+def check_scope(exam, tpl):
+    """2026-10-21 权限收口：任课教师只本学科 / 班主任只本班 / 他班明细被拒。
+
+    这是上一轮审计里两个 P1 的回归用例：此前限时练逐生层对任何持
+    `grades.view` 的账号全开，任课教师能看到全年级全部科目和总分。
+    """
+    from app.models import UserClassLink
+    from app.models.grades import TeacherSubjectLink
+
+    tea = User(username='timedtea', real_name='限时练任课', role='teacher',
+               must_change_pwd=False)
+    tea.set_password('TimedTea#2026')
+    bzr = User(username='timedbzr', real_name='限时练班主任',
+               role='homeroom_teacher', must_change_pwd=False)
+    bzr.set_password('TimedBzr#2026')
+    db.session.add_all([tea, bzr])
+    db.session.flush()
+    db.session.add(TeacherSubjectLink(user_id=tea.id, grade='2024级',
+                                      subject='语文', class_name='01班',
+                                      active=True))
+    db.session.add(UserClassLink(user_id=bzr.id, grade='2024级',
+                                 class_name='02班'))
+    db.session.commit()
+
+    # ---- 任课教师（语文 × 2024级）----
+    m = timed_analysis.summary_matrix(exam, '', page=None, user=tea)
+    check('任课：可见本年级全部班级（年级×学科口径）',
+          {r['class_name'] for r in m['rows']} == {'01班', '02班', '—'},
+          {r['class_name'] for r in m['rows']})
+    check('任课：表头只有所教科目', m['subjects'] == ['语文'], m['subjects'])
+    check('任课：不显示总分列', m['total_visible'] is False)
+    check('任课：不显示班级名次', m['rank_c_visible'] is False)
+    check('任课：保留总分年级名次', m['rank_g_visible'] is True)
+    check('任课：行里没有 total 键', all('total' not in r for r in m['rows']))
+    check('任课：行里没有数学分', all('数学' not in r['scores'] for r in m['rows']))
+
+    a = timed_analysis.subject_analysis(exam, '语文', tpl, user=tea)
+    check('任课：本学科分析有各班', len(a['rows']) == 2, len(a['rows']))
+    a2 = timed_analysis.subject_analysis(exam, '数学', tpl, user=tea)
+    check('任课：非任教学科分析为空', a2['rows'] == [], len(a2['rows']))
+
+    d = timed_analysis.student_detail(exam, '240100', user=tea)
+    check('任课：学生详情只出所教科', d['subjects'] == ['语文'], d['subjects'])
+
+    tr = timed_analysis.student_trends(exam, user=tea)
+    check('任课：T 分走势只出所教科', tr['subjects'] == ['语文'], tr['subjects'])
+
+    # ---- 班主任（02班）----
+    m2 = timed_analysis.summary_matrix(exam, '', page=None, user=bzr)
+    check('班主任：只看到本班', {r['class_name'] for r in m2['rows']} == {'02班'},
+          {r['class_name'] for r in m2['rows']})
+    check('班主任：可见总分', m2['total_visible'] is True
+          and all('total' in r for r in m2['rows']))
+    check('班主任：可见本班名次', m2['rank_c_visible'] is True)
+    try:
+        timed_analysis.student_detail(exam, '240100', user=bzr)
+        check('班主任：他班学生详情被拒', False)
+    except PermissionError:
+        check('班主任：他班学生详情被拒', True)
+    d2 = timed_analysis.student_detail(exam, '241100', user=bzr)
+    check('班主任：本班学生详情可看', d2['student_no'] == '241100')
+
+    # ---- 管理员（不裁剪）----
+    adm = User.query.filter_by(username='timedadm').first()
+    ma = timed_analysis.summary_matrix(exam, '', page=None, user=adm)
+    check('管理员：全部班级与全部科目',
+          {r['class_name'] for r in ma['rows']} == {'01班', '02班', '—'}
+          # 2026-10-21：列固定展示全部 9 科（本场没导入的科也留列，显示「—」）
+          and ma['subjects'] == ['语文', '数学', '外语', '物理', '历史',
+                                 '化学', '生物', '政治', '地理'],
+          (ma['subjects'], {r['class_name'] for r in ma['rows']}))
 
 
 def login(c):
@@ -205,6 +285,7 @@ def check_pages(c, tid):
 with app.app_context():
     _exam, _tpl = seed()
     check_analysis(_exam, _tpl)
+    check_scope(_exam, _tpl)
     _eid = _exam.id
 
 # 注意：test_client 内部会自己推/弹 app context，外层**不要**再 push，

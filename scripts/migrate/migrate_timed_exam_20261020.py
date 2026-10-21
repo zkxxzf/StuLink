@@ -109,6 +109,18 @@ def main():
     if not _os.path.exists(GRD_DB):
         print(f'[ERROR] 找不到 {GRD_DB}')
         return 1
+    # 2026-10-21 审计修复：本脚本建的三张表在 A42 之后已迁到 timed.db 并从 grades.db 删除，
+    # 若执行器重跑本脚本，会在 grades.db **重新造出空表**，随后 A42 的防覆盖守卫会中止
+    # 整批迁移（实测 2026-10-21 第二次部署被卡在 A42）。已登记过就直接跳过。
+    if APPLY:
+        try:
+            import _mig_log as _log
+            if _log.is_applied(SCRIPT_NAME):
+                print(f'[SKIP] {SCRIPT_NAME} 已登记为已应用，跳过迁移'
+                      '（限时练表已在 A42 迁入 timed.db）')
+                return 0
+        except Exception as _e:  # noqa: BLE001
+            print(f'[WARN] 迁移登记查询失败（按未应用继续）：{_e}')
     con = sqlite3.connect(GRD_DB)
     existing = _table_names(con)
     need = [t for t in ('timed_exams', 'timed_scores',
