@@ -1,4 +1,4 @@
-# StuLink v1.19.51.64 2026-10-19
+# StuLink v1.19.52.64 2026-10-19
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 """小程序成绩管理：写操作。
 

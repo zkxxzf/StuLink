@@ -1,4 +1,4 @@
-# StuLink v1.19.51.64 2026-10-19
+# StuLink v1.19.52.64 2026-10-19
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 """小程序「成绩管理」入口板：与网页首页 31 个功能入口同一份定义。
 

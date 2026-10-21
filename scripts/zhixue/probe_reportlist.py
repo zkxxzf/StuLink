@@ -1,4 +1,4 @@
-# StuLink v1.19.51.64  2026-10-20
+# StuLink v1.19.52.64  2026-10-20
 # 探查智学网「学校报告列表」的筛选项与 reportlist 接口
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 """一次性探查：打印列表页筛选项 + 拦截 reportlist 请求/响应结构。
