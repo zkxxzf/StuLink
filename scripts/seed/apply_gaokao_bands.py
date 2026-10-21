@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-# StuLink v1.19.50.57 2026-10-15
+# StuLink v1.19.50.58 2026-10-15
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 """按「特控线 + 本科线」给考试划线（2026-10-15 用户口径，当日三次定案）。
 

@@ -1,4 +1,4 @@
-/* StuLink · AI 分析工作台（v1.19.50.57 2026-10-14）
+/* StuLink · AI 分析工作台（v1.19.50.58 2026-10-14）
  * 对接服务端 AI 任务：
  *   POST /grades/ai/ask                → 建任务，拿 task_id（可附 gen＝生成器选项留档）
  *   GET  /grades/ai/tasks?…            → 我的任务列表
