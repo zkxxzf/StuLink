@@ -1,4 +1,4 @@
-/* StuLink v1.19.59.64 2026-10-10 全局对比
+/* StuLink v1.19.60.64 2026-10-10 全局对比
  * 班级 × 学科宽表：固定列（年级/班级/人数/方向/组合/属性）+ 每科（去差均分 + 各分数线）。
  * 分数线可选：默认勾选 211线/特控线/本科线，其余层（清北/985…）勾选才显示；
  * 班主任并入「总分」格下方（不再单列），各科成绩下方为本场任课教师快照。
@@ -72,7 +72,7 @@
             return;
         }
         if (missed) {
-            // v1.19.59.64 本场考试不在可见列表（已删除 / 超出数据范围 / 已毕业）：
+            // v1.19.60.64 本场考试不在可见列表（已删除 / 超出数据范围 / 已毕业）：
             // 不能静默显示最近一场让用户误当本场（考试态下下拉原本隐藏）——
             // 恢复下拉并明确提示。
             $('#ldExam').removeClass('d-none');
@@ -422,6 +422,8 @@
         });
         charts = [];
         $('#ldAvgCharts').empty();
+        // 重绘会把「放大」浮层连带销毁 → 同步解锁页面滚动
+        $('body').removeClass('ld-chart-max-open');
     }
 
     /* 显示名：混组合明细行带组合；同班跨方向时带方向（否则两根同名柱） */
@@ -808,10 +810,15 @@
         }
 
         // 总分 + 各科各一张图：堆积柱＝分层上线人数、折线＝各分层上线率
+        // 2026-10-21 用户口径：每张图右上角加一个「放大」按钮，点一下铺满屏幕宽度（Esc 退出）
         var html = cards.map(function (c, i) {
-            return '<div class="ld-chart-card"><div class="ld-chart-title">'
-                + esc(c.subject)
-                + '</div><div class="ld-chart" id="ldAvgChart' + i + '"></div></div>';
+            return '<div class="ld-chart-card" data-idx="' + i + '">'
+                + '<div class="ld-chart-title"><span>' + esc(c.subject) + '</span>'
+                + '<button type="button" class="ld-chart-max" title="放大到全屏宽度（再点一次或 Esc 退出）"'
+                + ' aria-label="放大 ' + esc(c.subject) + ' 图表">'
+                + '<i class="bi bi-arrows-fullscreen"></i><i class="bi bi-fullscreen-exit"></i>'
+                + '</button></div>'
+                + '<div class="ld-chart" id="ldAvgChart' + i + '"></div></div>';
         }).join('');
         $('#ldAvgCharts').html(html);
         cards.forEach(function (c, i) {
@@ -829,6 +836,31 @@
             });
         }
     }
+
+    /* 2026-10-21 用户口径：每张图右上角的「放大」按钮 —— 点一下把该图铺满整个屏幕宽度
+       （卡片改为固定在视口内的浮层，再点一次或按 Esc 退出），退出/进入后都要 resize，
+       ECharts 不会自己跟着容器变。 */
+    function resizeChartCard($card) {
+        var i = parseInt($card.attr('data-idx'), 10);
+        var ch = charts[i];
+        if (ch) { try { ch.resize(); } catch (e) { /* 已销毁 */ } }
+    }
+    function closeMaxChart() {
+        var $c = $('.ld-chart-card.is-max').removeClass('is-max');
+        $('body').removeClass('ld-chart-max-open');
+        if ($c.length) { setTimeout(function () { resizeChartCard($c); }, 60); }
+    }
+    $(document).on('click', '.ld-chart-max', function () {
+        var $card = $(this).closest('.ld-chart-card');
+        var toMax = !$card.hasClass('is-max');
+        $('.ld-chart-card.is-max').removeClass('is-max');
+        $card.toggleClass('is-max', toMax);
+        $('body').toggleClass('ld-chart-max-open', toMax);
+        setTimeout(function () { resizeChartCard($card); }, 60);
+    });
+    $(document).on('keydown', function (e) {
+        if (e.key === 'Escape' || e.keyCode === 27) { closeMaxChart(); }
+    });
 
     // 深浅色切换：图表颜色来自 CSS 变量，主题变了按新色重绘
     if (window.stuOnThemeChange) {
