@@ -1,4 +1,4 @@
-# StuLink v1.19.58.64 2026-10-14
+# StuLink v1.19.59.64 2026-10-14
 # 成绩模块数据范围解析（P2：委托 app.utils.scope 唯一口径，保留本模块公开 API）
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 """成绩模块数据范围（唯一口径的薄封装）
