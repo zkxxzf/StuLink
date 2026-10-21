@@ -1,4 +1,4 @@
-# StuLink v1.19.50.64 2026-10-20
+# StuLink v1.19.51.64 2026-10-20
 # 限时练单科导入：考号优先匹配 + 缺考文字摒弃
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 """限时练单科成绩解析（只解析，不写库；学生匹配见 ``timed_match``）。
