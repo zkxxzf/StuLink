@@ -3,7 +3,7 @@
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
 [![Python](https://img.shields.io/badge/python-3.11+-green.svg)](https://python.org)
 [![Flask](https://img.shields.io/badge/flask-3.x-lightgrey.svg)](https://flask.palletsprojects.com/)
-[![Version](https://img.shields.io/badge/version-1.19.50.61-orange.svg)](https://gitee.com/zkxxzf/StuLink)
+[![Version](https://img.shields.io/badge/version-1.19.50.62-orange.svg)](https://gitee.com/zkxxzf/StuLink)
 
 面向中学的综合学生管理平台，采用 **双站点 + 多模块 + 一模块一库** 的故障隔离架构：
 
@@ -301,6 +301,7 @@ StuLink/
 
 | 版本 | 日期 | 亮点 |
 |---|---|---|
+| **1.19.50.62** | 2026-10-21 | **数据导入页两表宽屏并排**：「划线分层」与「去差人数设置」在 ≥xl（1200px）宽屏左右各占一半（`col-xl-6`），窄屏仍上下堆叠；两卡等高对齐，保持默认展开与折叠能力 |
 | **1.19.50.61** | 2026-10-21 | **数据导入页：划线分层表格置顶 + 去差人数设置**：划线分层改为页首表格卡片（方向/选科/学科/层/下界，默认展开、可折叠）；其下新增「去差人数设置」表（班级 / 班型 / 班级人数 / 参考人数 / 去差人数 / 去差后人数，仅去差人数可改，默认卓越班 2、强基班 0），支持页面保存、Excel 导入/模板下载，AI 智能导入可自动识别「班级 × 去差人数」表；设置存 `Exam.config_json.class_trim`，`report_service.trim_quota` 统一读取（本场按班设置 > 班型规则），汇报区与全局对比的去差均分同步生效 |
 | **1.19.50.60** | 2026-10-21 | **侧栏成绩分析组精简**：原「年级分析 / 班级分析 / 学科分析 / 任课教师 / 班级对比」五项合并为单个「详细分析」入口（这五项本身就是分析页内的页签）；删除「自由分析」「成绩汇报区」两个侧栏入口（页面保留，仅不再占导航）。`grades.js` 的页签高亮与考试切换同步逻辑随之收敛为单一 `ana_detail` 项 |
 | **1.19.50.59** | 2026-10-21 | **成绩上下文三页统一页头 + 侧栏去掉分步骤**：新增 `grades/_exam_head.html` 统一页头（返回 → 页面标题 + 考试名 → 年级/性质/阶段/日期/学年/口径/状态 → 右侧操作），成绩单 `/grades/exams/<id>`、考务安排 `/grades/affairs/<id>`、数据导入 `/grades/exams/<id>/import` 三页共用；侧栏移除 4 步 / 7 环节圆点、「待做」标签与进度计数（普通考试与限时练同步），考务页签去掉 ①②③ 序号、导入表单去掉 1./2./3. 编号；配套删除不再使用的四段进度条与 `_four_step_status` |
