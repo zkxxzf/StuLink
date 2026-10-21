@@ -26,7 +26,7 @@ def _print_keep_running_notice(url):
 
 
 if __name__ == '__main__':
-    # v1.19.50.60 H-7 P0 修复：debug=True 会开启 Werkzeug 交互式调试器，PIN 可爆破 => RCE
+    # v1.19.50.61 H-7 P0 修复：debug=True 会开启 Werkzeug 交互式调试器，PIN 可爆破 => RCE
     # 默认生产模式；开发时显式传 --dev 才开 debug（且仅限本地）
     debug_mode = '--dev' in sys.argv
     # 2026-10-12 H-7 收敛：--dev 只绑回环，调试器/源码回溯不再对局域网可达；

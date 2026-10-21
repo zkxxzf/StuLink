@@ -724,10 +724,24 @@ def parse_bands(sheet):
     return res, []
 
 
+# 去差人数设置（2026-10-21）：班级 × 去差人数，写入 exam.config_json.class_trim
+TRIM_KIND = 'trim_settings'
+TRIM_KIND_LABEL = '去差人数设置（班级 × 去差人数）'
+
+
+def looks_like_trim_sheet(headers):
+    """表头是否像「去差人数设置」：同时含「班级」与「去差人数」"""
+    heads = [str(h or '').strip() for h in (headers or [])]
+    has_cls = any('班级' in h for h in heads)
+    has_trim = any('去差' in h and '后' not in h for h in heads)
+    return has_cls and has_trim
+
+
 def guess_sheet_kind(headers, rows=None):
     """猜一张工作表的用途（成绩页/考务页共用）：
 
     'bands' 各科分数线 ｜ 'scores' 成绩 ｜ 'exam_schedule' 考试时间表/监考表（划分场次）｜
+    'trim_settings' 去差人数设置 ｜
     'affair_students' 考生安排 ｜ 'affair_rooms' 考场位置 ｜ 'skip' 不使用
 
     rows（可选）传入该表前若干行，用于识别「监考表 / 考试时间表」——
@@ -736,6 +750,8 @@ def guess_sheet_kind(headers, rows=None):
     """
     if looks_like_band_sheet(headers):
         return 'bands'
+    if looks_like_trim_sheet(headers):
+        return TRIM_KIND
     # v1.19.47.4：监考表/时间表优先于考务判定（它同样有「考场/人数」列，容易误判成考场表）。
     # 但**含学号/姓名/考号列的表一定不是时间表**（是成绩表或名单），据此排除误判。
     if rows and looks_like_schedule_sheet(rows):
