@@ -3,7 +3,7 @@
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
 [![Python](https://img.shields.io/badge/python-3.11+-green.svg)](https://python.org)
 [![Flask](https://img.shields.io/badge/flask-3.x-lightgrey.svg)](https://flask.palletsprojects.com/)
-[![Version](https://img.shields.io/badge/version-1.19.51.64-orange.svg)](https://gitee.com/zkxxzf/StuLink)
+[![Version](https://img.shields.io/badge/version-1.19.52.64-orange.svg)](https://gitee.com/zkxxzf/StuLink)
 
 面向中学的综合学生管理平台，采用 **双站点 + 多模块 + 一模块一库** 的故障隔离架构：
 
@@ -301,6 +301,7 @@ StuLink/
 
 | 版本 | 日期 | 亮点 |
 |---|---|---|
+| **1.19.52.64** | 2026-10-21 | **（第三位 zk +1）数据导入页界面美化**：三个卡片统一图标标题与卡片头；去差设置的 Excel 导入/模板下载收进独立工具条，不再挤在标题行；标准模板导入改为「文件面板 + 可选模式卡片（A/B）+ 右侧主按钮」，AI 面板补充标签悬停与主按钮层次；全部配色走主题变量，深浅色一致 |
 | **1.19.51.64** | 2026-10-21 | **（第三位 zk +1，用户侧改动）**：数据导入页顶部内嵌「划线分层」矩阵并保留完整编辑能力（下界方式 / 录入形态 / 含总分 / 分层模板 / 按组合 / 新增层 / 保存划线），与划线页共用 `_bands_matrix.html` + `bands_matrix.js`；同页「去差人数设置」支持按班修改、Excel / AI 导入；两表宽屏左右并排 |
 | **1.19.50.64** | 2026-10-21 | **导入页内嵌矩阵补齐编辑功能**：数据导入页的划线分层不再只读，与「划线分层」页共用同一套能力 —— 下界方式 / 录入形态 / 含总分 / 分层模板（套用层名）/ 按组合开关 / 显示空列 / 新增层 / 保存划线全部可直接操作（按 `grades.settings` 权限决定是否可编辑）；共用模板新增 `bare=True` 形态，嵌在导入页卡片内不重复描边 |
 | **1.19.50.63** | 2026-10-21 | **导入页内嵌划线分层矩阵**：顶部划线卡片直接复用「划线分层」页的矩阵表格（只读、同一份渲染脚本 `js/bands_matrix.js`），删除上一版手写的扁平表与「用 AI 导入分数线」「进入划线分层」两个按钮；矩阵 markup 抽为 `grades/_bands_matrix.html`，划线页与导入页共用，避免两套实现 |
