@@ -171,7 +171,7 @@
                 </a>
                 {% endif %}
                 <a class="btn btn-outline-secondary btn-sm" href="{{ url_for('grades.exams_list') }}">
-                    <i class="bi bi-journals"></i> 历次考试
+                    <i class="bi bi-journals"></i> 大型考试
                 </a>
             </div>
         </div>
@@ -181,7 +181,7 @@
     {# ---------- 关键指标：3 项总览 + 4 类阶段场次，合并成一行 ---------- #}
     <div class="gd-kpi-strip mb-3">
         <a class="gd-cell" href="{{ url_for('grades.exams_list') }}"
-           title="点击进入「历次考试」">
+           title="点击进入「大型考试」">
             <div class="gd-label"><i class="bi bi-journals"></i> 考试总次数</div>
             <div class="gd-num" id="gdKpiExams">{{ d.kpi.total_exams }}</div>
             <div class="gd-sub" title="最近一场考试日期">最近一场：{{ d.kpi.latest_date or '—' }}</div>
@@ -206,10 +206,15 @@
         </div>
         {% endif %}
         {% for c in d.kpi.stage_cards %}
-        <div class="gd-cell gd-cell-sm" title="{{ c.name }}：{{ c.exams }} 场">
+        {# 限时练是独立场次（独立表），这张卡带 url → 可点进限时练列表；
+           其余阶段卡是普通考试的子集，保持不可点 #}
+        {% if c.url %}<a class="gd-cell gd-cell-sm" href="{{ c.url }}"
+           title="{{ c.name }}：{{ c.exams }} 场（点击进入限时练）">
+        {% else %}<div class="gd-cell gd-cell-sm" title="{{ c.name }}：{{ c.exams }} 场">
+        {% endif %}
             <div class="gd-label">{{ c.name }}</div>
             <div class="gd-num gd-stage-num" data-stage="{{ c.name }}">{{ c.exams }}</div>
-        </div>
+        {% if c.url %}</a>{% else %}</div>{% endif %}
         {% endfor %}
     </div>
 
@@ -255,7 +260,7 @@
             <div class="card tbl-card h-100">
                 <div class="card-header">
                     <span class="fw-semibold small"><i class="bi bi-activity"></i> 当前动态</span>
-                    <span class="text-muted small ms-1">考试登记 · 证明开具 · 分数修改</span>
+                    <span class="text-muted small ms-1">{{ d.activity_sources|join(' · ') }}</span>
                 </div>
                 <div class="card-body py-2">
                     <ul class="gd-tl" id="gdActivity">

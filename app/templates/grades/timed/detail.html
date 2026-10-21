@@ -1,0 +1,53 @@
+{% extends "base.html" %}
+{% block title %}{{ exam.name }} - 限时练{% endblock %}
+{% block content %}
+<div class="d-flex justify-content-between align-items-start mb-2 flex-wrap gap-2">
+    <div class="d-flex align-items-baseline flex-wrap gap-2">
+        <a href="{{ url_for('grades.timed_list') }}" class="btn btn-sm btn-outline-secondary"
+           title="返回限时练列表" aria-label="返回"><i class="bi bi-arrow-left"></i></a>
+        <h4 class="mb-0">{{ exam.display_name() }}</h4>
+        {% set sem = exam.semester_label() %}
+        {% if sem %}<span class="sem-chip">{{ sem }}</span>{% endif %}
+        <span class="text-muted small">
+            {{ exam.grade }} · {{ exam.exam_date.strftime('%Y-%m-%d') }} ·
+            {% if exam.status == 'imported' %}
+            <span class="text-success">已导入</span>
+            {% else %}
+            <span class="text-secondary">未导入</span>
+            {% endif %}
+            {% if exam.remark %} · {{ exam.remark }}{% endif %}
+        </span>
+    </div>
+    {% if can_manage %}
+    <form method="post" action="{{ url_for('grades.timed_delete', tid=exam.id) }}"
+          onsubmit="return confirm('删除这场限时练及其全部成绩？此操作不可恢复。');">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <button class="btn btn-sm btn-outline-danger" type="submit">
+            <i class="bi bi-trash"></i> 删除场次
+        </button>
+    </form>
+    {% endif %}
+</div>
+
+{% if tab == 'import' %}
+    {% include 'grades/timed/_import.html' %}
+{% elif tab == 'analysis' %}
+    {% include 'grades/timed/_analysis.html' %}
+{% elif tab == 'trends' %}
+    {% include 'grades/timed/_trends.html' %}
+{% else %}
+    {% include 'grades/timed/_students.html' %}
+{% endif %}
+{% endblock %}
+
+{% block extra_js %}
+{% if tab == 'import' %}
+<script src="{{ su('js/timed_import.js') }}"></script>
+{% endif %}
+{% if tab == 'analysis' %}
+<script src="{{ su('js/echarts.min.js') }}"></script>
+<script src="{{ su('js/timed_analysis_charts.js') }}"></script>
+<script src="{{ su('js/timed_copy_image.js') }}"></script>
+{% endif %}
+
+{% endblock %}

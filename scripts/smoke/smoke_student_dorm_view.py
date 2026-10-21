@@ -37,7 +37,8 @@ config_mod.Config.SQLALCHEMY_DATABASE_URI = 'sqlite:///' + os.path.join(_TMP, 's
 config_mod.Config.SQLALCHEMY_BINDS = {
     k: 'sqlite:///' + os.path.join(_TMP, k + '.db')
     for k in ('dormitory', 'history', 'grades', 'points', 'academic', 'inspection',
-              'achievement', 'forms', 'system', 'portrait', 'timetable', 'morality')
+              'achievement', 'forms', 'system', 'portrait', 'timetable', 'morality',
+              'timed')
 }
 config_mod.Config.SECRET_KEY = 'stu-dorm-check'
 

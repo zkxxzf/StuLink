@@ -4,7 +4,7 @@
 {# v1.19.0 成绩模块落地页（第一屏）：历次考试看板 #}
 <div class="d-flex justify-content-between align-items-start mb-3 flex-wrap gap-2">
     <div class="d-flex align-items-baseline flex-wrap gap-2">
-        <h4 class="mb-0"><i class="bi bi-journals"></i> 历次考试</h4>
+        <h4 class="mb-0"><i class="bi bi-journals"></i> 大型考试</h4>
         {# 2026-10-13 用户口径：该提示紧跟标题右侧，不再单独占一行 #}
         {# 2026-10-15 用户口径：任课教师 / 班主任也能进本页，但只给成绩分析
            （考务安排、成绩导入这些不给）。按 grades.edit 分两套提示。 #}
@@ -161,7 +161,7 @@
     </div>
 </div>
 
-{# v1.19.49.47：待处理的考务批次（孤儿兜底）——考试已删或未关联考试的批次
+{# v1.19.49.50：待处理的考务批次（孤儿兜底）——考试已删或未关联考试的批次
    2026-10-15：考务类内容，只对管理侧（can_manage）渲染；教师视图整体不出现。 #}
 {% if can_manage and orphan_affairs %}
 <div class="card border-warning mt-3">

@@ -34,6 +34,8 @@ config_mod.Config.SQLALCHEMY_BINDS = {
     'portrait': 'sqlite:///' + os.path.join(_TMP, 'portrait.db'),
     'timetable': 'sqlite:///' + os.path.join(_TMP, 'timetable.db'),
     'morality': 'sqlite:///' + os.path.join(_TMP, 'morality.db'),
+    # 2026-10-20：限时练独立成库
+    'timed': 'sqlite:///' + os.path.join(_TMP, 'timed.db'),
 }
 config_mod.Config.SECRET_KEY = 'perm-verify-secret'
 

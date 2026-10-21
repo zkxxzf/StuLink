@@ -18,6 +18,32 @@ import io
 bp = Blueprint('users', __name__, url_prefix='/users')
 
 
+def _normalize_user_phone(raw):
+    """账号手机号规范化 + 格式校验。
+
+    返回 (规范值 或 None, 错误信息 或 None)；空值合法（= 不填手机号）。
+    带分隔符的写法（138-0000-8000 / +86…）由 normalize_phone 统一成 11 位数字。
+    """
+    from app.utils.crypto import normalize_phone
+    raw = (raw or '').strip()
+    if not raw:
+        return None, None
+    norm = normalize_phone(raw)
+    if not norm or len(norm) != 11 or not norm.startswith('1'):
+        return None, '手机号格式不正确（应为 11 位手机号，可含 - 或 +86）'
+    return norm, None
+
+
+def _phone_taken(norm, exclude_id=None):
+    """手机号是否已被其他账号占用（盲索引等值查询，不依赖明文）"""
+    if not norm:
+        return None
+    q = User.query.filter(User.phone_idx == User.phone_index(norm))
+    if exclude_id:
+        q = q.filter(User.id != exclude_id)
+    return q.first()
+
+
 def _generate_password():
     """生成随机一次性口令（12 位字母数字，保证同时含字母与数字以符合
     app/utils/password_policy.py 的策略）"""
@@ -248,6 +274,16 @@ def create():
             flash('年级长必须指定管理年级（可多选）', 'danger')
             return render_template('system/users/form.html', form=form, title='新建用户')
 
+        # 2026-10-20：手机号（选填）——填了就能用手机号登录，要求格式正确且不被占用
+        phone_norm, phone_err = _normalize_user_phone(form.phone.data)
+        if phone_err:
+            flash(phone_err, 'danger')
+            return render_template('system/users/form.html', form=form, title='新建用户')
+        dup = _phone_taken(phone_norm)
+        if dup:
+            flash(f'手机号已被「{dup.real_name}」使用，请换一个', 'danger')
+            return render_template('system/users/form.html', form=form, title='新建用户')
+
         user = User(
             username=form.username.data,
             real_name=form.real_name.data,
@@ -256,6 +292,7 @@ def create():
             class_name=class_name,
             must_change_pwd=True,
         )
+        user.phone = phone_norm
         # P5：多身份（权限组），列表首个为主组
         _set_user_groups(user, form.permission_group_ids.data,
                          allow_admin_group=_actor_is_super())
@@ -263,7 +300,7 @@ def create():
         user.set_password(generated_pwd)
         db.session.add(user)
         db.session.commit()
-        # v1.19.49.47：非管理员自动同步创建教师档案（admin 不写入）
+        # v1.19.49.50：非管理员自动同步创建教师档案（admin 不写入）
         _sync_state, _ = teacher_sync.sync_from_user(user)
         db.session.commit()
         log_operation(current_user, '创建', '用户', user.id, f'{user.real_name} ({user.role_display})')
@@ -287,6 +324,7 @@ def edit(id):
     if not form.is_submitted():
         form.permission_group_ids.data = [g.id for g in user.permission_groups]
         form.grade.data = user.grades     # 管理年级多选回显（库内是逗号串）
+        form.phone.data = user.phone or ''   # 手机号回显（仅本页管理员可见完整值）
     if form.validate_on_submit():
         existing = User.query.filter(
             User.username == form.username.data, User.id != user.id).first()
@@ -321,11 +359,24 @@ def edit(id):
             flash('年级长必须指定管理年级（可多选）', 'danger')
             return render_template('system/users/form.html', form=form, title='编辑用户')
 
+        # 2026-10-20：手机号（留空 = 清空，改用用户名登录）
+        phone_norm, phone_err = _normalize_user_phone(form.phone.data)
+        if phone_err:
+            flash(phone_err, 'danger')
+            return render_template('system/users/form.html', form=form, title='编辑用户')
+        dup = _phone_taken(phone_norm, exclude_id=user.id)
+        if dup:
+            flash(f'手机号已被「{dup.real_name}」使用，请换一个', 'danger')
+            return render_template('system/users/form.html', form=form, title='编辑用户')
+
         # 2026-10-18 审计修复（P1 横向提权）：此页可以改 role / 权限组 / **密码**，
         # 原来没有任何授权上限 —— 非超管管理员能编辑其他管理员（含超管），
         # 也能借 password 字段直接改他人密码，绕过 reset_password 的口径。
         # 现在：① 非超管不得编辑其他管理员；② 非超管不得把账号设为 admin。
         is_super = (current_user.username or '') == 'admin'
+        # 2026-10-20：自己编辑自己 —— 允许改手机号 / 密码等自我维护字段，
+        # 但权限组一律不动（见下方 _set_user_groups），避免自提权或自降权。
+        own_edit = (user.id == current_user.id)
         if not is_super:
             if user.role == 'admin' and user.id != current_user.id:
                 log_operation(current_user, '编辑被拒', '用户', user.id,
@@ -338,16 +389,19 @@ def edit(id):
                 flash('只有超管能把账号设为管理员', 'danger')
                 return render_template('system/users/form.html', form=form,
                                        title='编辑用户')
-            # H-01：权限组是第二条提权路径 —— 非超管不得改管理员组用户的
-            # 任何字段（含密码），也不得把任何账号（含自己）加入管理员组。
-            if _user_in_admin_group(user):
+            # H-01：权限组是第二条提权路径 —— 非超管不得改**别人**的管理员组
+            # 账号；自己编辑自己放行（否则管理员组账号连自己的手机号都存不了）。
+            if _user_in_admin_group(user) and not own_edit:
                 log_operation(current_user, '编辑被拒', '用户', user.id,
                               f'{user.real_name}（非超管不得编辑管理员组用户）',
                               module='system', severity='WARNING')
-                flash('只有超管（admin 账号）能编辑管理员组用户', 'danger')
+                flash('只有超管（admin 账号）能编辑其他管理员组用户', 'danger')
                 return render_template('system/users/form.html', form=form,
                                        title='编辑用户')
-            if _submitted_admin_group_ids(form.permission_group_ids.data):
+            # 非超管不得把账号**新加**进管理员组；自己本来就在管理员组时，
+            # 表单回显里自然带着它，不算"新加"。
+            if _submitted_admin_group_ids(form.permission_group_ids.data) \
+                    and not own_edit:
                 log_operation(current_user, '编辑被拒', '用户', user.id,
                               f'{user.real_name}（非超管不得授予管理员组）',
                               module='system', severity='WARNING')
@@ -362,13 +416,17 @@ def edit(id):
         user.role = role
         user.grade = ','.join(grades) or None
         user.class_name = class_name
+        user.phone = phone_norm
         # P5：多身份（权限组），列表首个为主组
         # L-05：编辑页若请求里完全没有权限组字段（旧表单/脚本/半截请求），
         # 不能把用户的组静默清空；只有显式提交过才覆盖。
         _groups_submitted = (
             request.form.get('permission_group_ids_present') == '1'
             or 'permission_group_ids' in request.form)
-        if _groups_submitted:
+        # 2026-10-20：非超管编辑自己时**不动权限组** —— 表单里的组可能是旧回显，
+        # 而 _set_user_groups(allow_admin_group=False) 会把管理员组过滤掉，
+        # 一保存就把自己的管理员身份弄丢（自降权）；其它字段照常保存。
+        if _groups_submitted and not (own_edit and not is_super):
             _old_groups = {g.name for g in user.permission_groups}
             _set_user_groups(user, form.permission_group_ids.data,
                              allow_admin_group=is_super)
@@ -385,7 +443,7 @@ def edit(id):
         if form.password.data:
             user.set_password(form.password.data)
         db.session.commit()
-        # v1.19.49.47：教师角色变更 → 同步到 academic.teachers（admin 自动 skip）
+        # v1.19.49.50：教师角色变更 → 同步到 academic.teachers（admin 自动 skip）
         teacher_sync.sync_from_user(user)
         db.session.commit()
         log_operation(current_user, '更新', '用户', user.id, f'{user.real_name} 信息已更新')
@@ -482,7 +540,7 @@ def toggle(id):
     if was_active and not user.is_active:
         user.wx_token_ver = int(user.wx_token_ver or 0) + 1
     db.session.commit()
-    # v1.19.49.47：启禁变更 → 同步 Teacher.status (active/left)
+    # v1.19.49.50：启禁变更 → 同步 Teacher.status (active/left)
     teacher_sync.sync_from_user(user)
     db.session.commit()
     status = '启用' if user.is_active else '禁用'
@@ -692,7 +750,7 @@ def import_teachers():
 
         created = 0
         errors = []
-        _new_users = []                          # v1.19.49.47：导入后同步至 teachers
+        _new_users = []                          # v1.19.49.50：导入后同步至 teachers
 
         for row_idx in range(2, ws.max_row + 1):
             phone = str(ws.cell(row=row_idx, column=phone_col).value or '').strip()
@@ -734,7 +792,7 @@ def import_teachers():
             created += 1
 
         db.session.commit()
-        # v1.19.49.47：批量导入后同步到 academic.teachers
+        # v1.19.49.50：批量导入后同步到 academic.teachers
         for u in _new_users:
             teacher_sync.sync_from_user(u)
         db.session.commit()

@@ -42,6 +42,8 @@ config_mod.Config.SQLALCHEMY_BINDS = {
     'portrait': 'sqlite:///' + os.path.join(_TMP, 'portrait.db'),
     'system': 'sqlite:///' + os.path.join(_TMP, 'system.db'),
     'timetable': 'sqlite:///' + os.path.join(_TMP, 'timetable.db'),
+    # 2026-10-21：限时练拆到独立库，create_all 会遍历 'timed'，缺它直接崩
+    'timed': 'sqlite:///' + os.path.join(_TMP, 'timed.db'),
 }
 config_mod.Config.SECRET_KEY = 'dormitory-regression-secret'
 

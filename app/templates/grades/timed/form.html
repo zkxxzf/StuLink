@@ -1,0 +1,82 @@
+{% extends "base.html" %}
+{% block title %}新建限时练 - 成绩管理{% endblock %}
+{% block content %}
+<div class="d-flex align-items-center mb-3">
+    <a href="{{ url_for('grades.timed_list') }}" class="btn btn-sm btn-outline-secondary me-2"
+       title="返回" aria-label="返回"><i class="bi bi-arrow-left"></i></a>
+    <h5 class="mb-0"><i class="bi bi-stopwatch"></i> 新建限时练</h5>
+</div>
+
+<div class="alert alert-light border small" style="max-width:760px;">
+    限时练是<b>独立的一类场次</b>：没有考务编排，成绩<b>按科目追加导入</b>，
+    只做单科分析。创建后<b>不能转换成普通考试</b>，普通考试也不会出现在限时练列表里。
+</div>
+
+<div class="card" style="max-width:760px;">
+    <div class="card-body">
+        <form method="post">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <div class="row g-3">
+                <div class="col-md-6">
+                    <label class="form-label">年级 <span class="text-danger">*</span></label>
+                    <select name="grade" id="f_grade" class="form-select" required>
+                        <option value="">请选择年级</option>
+                        {% for g in grade_options %}
+                        <option value="{{ g }}" {% if g == grade %}selected{% endif %}>{{ g }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div class="col-md-6">
+                    <label class="form-label">日期 <span class="text-danger">*</span></label>
+                    <input type="date" name="exam_date" id="f_date" class="form-control"
+                           value="{{ exam_date }}" required>
+                </div>
+                <div class="col-md-6">
+                    <label class="form-label">年级学期</label>
+                    <select name="grade_semester" class="form-select">
+                        <option value="">自动（按日期推算）</option>
+                        {% for s in semester_options %}
+                        <option value="{{ s }}" {% if s == grade_semester %}selected{% endif %}>{{ s }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div class="col-md-6">
+                    <label class="form-label">备注</label>
+                    <input type="text" name="remark" class="form-control"
+                           placeholder="选填，如：周三第 8 节" value="{{ remark or '' }}">
+                </div>
+                <div class="col-12">
+                    <label class="form-label">名称</label>
+                    <input type="text" name="name" id="f_name" class="form-control"
+                           placeholder="留空自动生成：年级 + 8 位日期 + 限时练" value="{{ name }}">
+                    <div class="form-text">留空时按「年级 + 8 位日期 + 限时练」生成。</div>
+                </div>
+            </div>
+            <div class="mt-3">
+                <button type="submit" class="btn btn-primary">
+                    <i class="bi bi-check-lg"></i> 创建限时练
+                </button>
+                <a href="{{ url_for('grades.timed_list') }}"
+                   class="btn btn-outline-secondary ms-2">取消</a>
+            </div>
+        </form>
+    </div>
+</div>
+{% endblock %}
+{% block extra_js %}
+<script>
+$(function () {
+    // 名称默认 = 年级 + 8位日期 + 限时练（与后端 _auto_name 同一规则）
+    var auto = {{ 'true' if not name else 'false' }};
+    function refreshName() {
+        if (!auto) { return; }
+        var g = $('#f_grade').val();
+        var d = ($('#f_date').val() || '').replace(/-/g, '');
+        if (g && d) { $('#f_name').val(g + d + '限时练'); }
+    }
+    $('#f_grade, #f_date').on('change', refreshName);
+    $('#f_name').on('input', function () { auto = false; });
+    refreshName();
+});
+</script>
+{% endblock %}

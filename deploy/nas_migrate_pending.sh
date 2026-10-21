@@ -142,6 +142,22 @@ run_mig scripts/migrate/migrate_exam_grade_semester_20261020.py   # 成绩：exa
 run_mig scripts/migrate/migrate_teacher_archive_20261020.py       # 教务：teachers.archive_*
 # 2026-10-20：用户对外标识改标准 UUID（内部外键仍用自增 id；页面不展示）
 run_mig scripts/migrate/migrate_user_uuid_20261020.py             # 系统：users.uuid（UUID4 + 唯一索引）
+# 2026-10-20：账号手机号（随机 IV 加密 + 盲索引；支持「手机号 + 密码」登录；不回填）
+run_mig scripts/migrate/migrate_user_phone_20261020.py --apply    # 系统：users.phone / phone_idx
+# 2026-10-20：学生档案智学网考号（从最近一场带考号的考试按学号回填，只填空不覆盖）
+run_mig scripts/migrate/migrate_student_zhixue_no_20261020.py --apply  # 系统：students.zhixue_no
+# 2026-10-20：限时练三张独立表（与普通考试完全隔离；须在代码上线前执行）
+run_mig scripts/migrate/migrate_timed_exam_20261020.py --apply         # 成绩：timed_exams / timed_scores / timed_band_templates
+# 2026-10-20：历次考试里的「限时练」场次搬入限时练表并删除原考试（须在 A38 之后；先归档）
+run_mig scripts/migrate/migrate_timed_from_exams_20261020.py --apply   # 成绩：exams → timed_*
+# 2026-10-20：限时练内置分层模板 5 层 → 12 层（与现有模板一致；须在 A38 之后）
+run_mig scripts/migrate/migrate_timed_layers_20261020.py --apply      # 成绩：timed_band_templates
+# 2026-10-20：按年级回填智学网考号（A37 只填了 2026 级；须在 A37 之后）
+run_mig scripts/migrate/backfill_zhixue_no_by_grade_20261020.py --apply  # 系统：students.zhixue_no
+# 2026-10-20：限时练三表搬到独立库 timed.db（须在 A38/A39/A40 之后）
+run_mig scripts/migrate/migrate_timed_db_20261020.py --apply          # 成绩：grades.db → timed.db
+# 2026-10-20：限时练场次名统一「2024级 No.N」（幂等；年级学期只作列表标签，不进名字）
+run_mig scripts/migrate/migrate_timed_rename_20261020.py --apply      # 限时练：timed_exams.name
 # ── 数据 / 权限类（幂等）──────────────────────────────────────────────────
 # 2026-10-14 第三轮审计（CONS3-02）：多身份改造的两个脚本原先**完全未登记**（只在
 # docs/权限体系多身份改造执行计划.md 里点名）→ 上线必漏跑。按设计文档顺序：

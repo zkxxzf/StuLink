@@ -36,6 +36,11 @@
                         <label class="text-muted small d-block">学号</label>
                         <span class="fw-bold">{{ student.student_number or '-' }}</span>
                     </div>
+                    {# 2026-10-20：智学网考号（学生档案上的固定号，用于按考号回挂智学网数据） #}
+                    <div class="col-sm-3">
+                        <label class="text-muted small d-block">智学网考号</label>
+                        <span class="font-monospace fw-bold">{{ student.zhixue_no or '-' }}</span>
+                    </div>
                     <div class="col-sm-3">
                         <label class="text-muted small d-block">民族</label>
                         <span>{{ student.ethnicity or '-' }}</span>
@@ -153,7 +158,7 @@
         </div>
         {% endif %}
 
-        {# 变迁记录（v1.19.49.47 增强：班级类变更细分中文标签 + 旧→新 + 操作人） #}
+        {# 变迁记录（v1.19.49.50 增强：班级类变更细分中文标签 + 旧→新 + 操作人） #}
         {% if change_logs %}
         {% set TYPE_LABELS = {'enroll': ('入校分班', 'primary'),
                               'reassign': ('重新分班', 'warning'),

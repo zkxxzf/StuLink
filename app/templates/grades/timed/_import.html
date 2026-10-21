@@ -1,0 +1,166 @@
+{# 限时练数据导入：模板文件 + AI 智能导入；追加式单科（同科重导 = 整科覆盖） #}
+{% if report %}
+{# ---------- 预检报告（确认页） ---------- #}
+<div class="d-flex align-items-center gap-2 mb-3 flex-wrap">
+    <h6 class="mb-0"><i class="bi bi-clipboard-check"></i>
+        {{ report.subject }} 导入预览</h6>
+    <span class="text-muted small">
+        来源：模板文件（AI 导入在识别后直接预览，不落预检草稿） ·
+        {{ report.created_at }}
+    </span>
+    <a class="btn btn-sm btn-outline-secondary ms-auto"
+       href="{{ url_for('grades.timed_detail', tid=exam.id, tab='import') }}">
+        <i class="bi bi-arrow-left"></i> 重新选择文件
+    </a>
+</div>
+
+<div class="row g-2 mb-3">
+    {% set cards = [
+        ('将写入', report.rows|length, 'primary'),
+        ('新增', report.diff.new_students, 'success'),
+        ('改分', report.diff.updated_rows, 'warning'),
+        ('移除(缺考/未出现)', report.diff.deleted_rows, 'danger'),
+        ('错误行', report.errors|length, 'secondary'),
+        ('缺考(已忽略)', report.stats.absent_rows, 'secondary'),
+    ] %}
+    {% for label, value, tone in cards %}
+    <div class="col-6 col-md-2">
+        <div class="card h-100">
+            <div class="card-body py-2">
+                <div class="text-muted small">{{ label }}</div>
+                <div class="fs-5 fw-semibold text-{{ tone }}">{{ value }}</div>
+            </div>
+        </div>
+    </div>
+    {% endfor %}
+</div>
+
+<div class="alert alert-warning small py-2">
+    <i class="bi bi-exclamation-triangle"></i>
+    确认后<b>本场「{{ report.subject }}」整科覆盖</b>：名单以本次文件为准，
+    上次有、这次没有的学生会被移除。其它科目不受影响。
+</div>
+
+{% if report.errors %}
+<div class="card mb-3">
+    <div class="card-header py-2 d-flex align-items-center">
+        <span class="fw-semibold">错误明细（{{ report.errors|length }} 行）</span>
+        <a class="btn btn-sm btn-outline-secondary ms-auto"
+           href="{{ url_for('grades.timed_import_errors', tid=exam.id) }}">
+            <i class="bi bi-download"></i> 下载
+        </a>
+    </div>
+    <div class="table-responsive" style="max-height:260px">
+        <table class="table table-sm mb-0">
+            <thead><tr><th style="width:90px">行号</th>
+                <th style="width:160px">考号/学号</th><th>原因</th></tr></thead>
+            <tbody>
+            {% for e in report.errors[:50] %}
+            <tr><td>{{ e.line }}</td><td>{{ e.code or '—' }}</td><td>{{ e.reason }}</td></tr>
+            {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+{% endif %}
+
+<form method="post" action="{{ url_for('grades.timed_import_confirm', tid=exam.id) }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <input type="hidden" name="token" value="{{ exam.import_token }}">
+    <button class="btn btn-primary" type="submit"
+            {% if not report.rows %}disabled{% endif %}>
+        <i class="bi bi-check-lg"></i> 确认导入 {{ report.rows|length }} 人
+    </button>
+</form>
+
+{% else %}
+{# ---------- 上传入口 ---------- #}
+<div class="row g-3">
+    {# 左：AI 智能导入 #}
+    <div class="col-lg-6">
+        <div class="card h-100">
+            <div class="card-header py-2 fw-semibold">
+                <i class="bi bi-stars"></i> AI 智能导入
+            </div>
+            <div class="card-body">
+                <div class="mb-2">
+                    <label class="form-label small mb-1">科目</label>
+                    <select id="aiSubject" class="form-select form-select-sm">
+                        {% for s in subject_options %}
+                        <option value="{{ s }}" {% if s == subject %}selected{% endif %}>{{ s }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div class="mb-2">
+                    <label class="form-label small mb-1">成绩文件</label>
+                    <input type="file" id="aiFile" class="form-control form-control-sm"
+                           accept=".xlsx,.xls">
+                    <div class="form-text">
+                        智学网导出表可直接用：优先按【考号】列匹配学生。
+                    </div>
+                </div>
+                <button class="btn btn-sm btn-primary" id="aiAnalyze" type="button">
+                    <i class="bi bi-magic"></i> 识别列并预览
+                </button>
+                <div id="aiMsg" class="small mt-2"></div>
+                <div id="aiMapping" class="mt-3 d-none">
+                    <div class="fw-semibold small mb-1">列映射（可手工调整）</div>
+                    <div id="aiMappingBody" class="row g-2"></div>
+                    <button class="btn btn-sm btn-outline-primary mt-2" id="aiPreview"
+                            type="button"><i class="bi bi-eye"></i> 预览解析结果</button>
+                </div>
+                <div id="aiPreviewBox" class="mt-3"></div>
+            </div>
+        </div>
+    </div>
+
+    {# 右：模板文件导入 #}
+    <div class="col-lg-6">
+        <div class="card h-100">
+            <div class="card-header py-2 fw-semibold d-flex align-items-center">
+                <span><i class="bi bi-file-earmark-spreadsheet"></i> 模板文件导入</span>
+                <a class="btn btn-sm btn-outline-secondary ms-auto"
+                   href="{{ url_for('grades.timed_template_xlsx') }}">
+                    <i class="bi bi-download"></i> 下载模板
+                </a>
+            </div>
+            <div class="card-body">
+                <form method="post" enctype="multipart/form-data"
+                      action="{{ url_for('grades.timed_import_upload', tid=exam.id) }}">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                    <div class="mb-2">
+                        <label class="form-label small mb-1">科目</label>
+                        <select name="subject" class="form-select form-select-sm" required>
+                            {% for s in subject_options %}
+                            <option value="{{ s }}" {% if s == subject %}selected{% endif %}>{{ s }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label small mb-1">成绩文件</label>
+                        <input type="file" name="file" class="form-control form-control-sm"
+                               accept=".xlsx,.xls" required>
+                    </div>
+                    <button class="btn btn-sm btn-primary" type="submit">
+                        <i class="bi bi-upload"></i> 上传并预览
+                    </button>
+                </form>
+                <hr class="my-3">
+                <div class="small text-muted">
+                    <div>· 模板列：<b>考号 · 学号 · 姓名 · 班级 · 分数</b>（考号优先、学号兜底）。</div>
+                    <div>· 缺考不用写字，<b>留空</b>即可（写「缺考」也按空值处理）。</div>
+                    <div>· 一次一科；重复导入同科 = 整科覆盖。</div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+window.TIMED_IMPORT = {
+    analyze: "{{ url_for('grades.timed_ai_analyze', tid=exam.id) }}",
+    apply: "{{ url_for('grades.timed_ai_apply', tid=exam.id) }}",
+    detail: "{{ url_for('grades.timed_detail', tid=exam.id, tab='students') }}"
+};
+</script>
+{% endif %}

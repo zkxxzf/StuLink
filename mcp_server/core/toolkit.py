@@ -17,8 +17,8 @@ logger = logging.getLogger('stulink.mcp.toolkit')
 
 
 def ok(data):
-    """成功响应。"""
-    return respond.to_json({'ok': True, 'data': data})
+    """成功响应：先剔除空值、再做体积预算兜底（2026-10-21 省额度）。"""
+    return respond.to_json({'ok': True, 'data': respond.fit(respond.drop_none(data))})
 
 
 def fail(message):

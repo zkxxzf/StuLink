@@ -1,4 +1,4 @@
-# StuLink v1.19.49.47 2026-10-10
+# StuLink v1.19.49.50 2026-10-10
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 import logging
 import os
@@ -140,7 +140,7 @@ PERMISSION_GROUPS = [
             'system.perm_groups', 'system.grade_mgmt', 'system.settings',
             'points.view', 'points.edit',
             'points.import', 'points.export', 'points.rules',
-            'morality.view', 'morality.edit',   # v1.19.49.47 德育奖惩信息
+            'morality.view', 'morality.edit',   # v1.19.49.50 德育奖惩信息
             'grades.view', 'grades.edit',
             'grades.import', 'grades.settings', 'grades.teachers', 'grades.student_query',
             'grades.score_edit',   # v1.19.47.6：成绩单改分（管理员天然可用；考务管理员另建组授予）
@@ -177,7 +177,7 @@ PERMISSION_GROUPS = [
             'grades.subject_mgmt',
             'portrait.view', 'portrait.edit',
             'points.import', 'points.rules',
-            # v1.19.49.47：年级长可登记/管理本年级奖惩
+            # v1.19.49.50：年级长可登记/管理本年级奖惩
             'morality.view', 'morality.edit',
             'academic.view', 'academic.forms_view',
             # 2026-10-11：年级长本人任课时需能自助申请调课（此前缺 academic.swap，申请入口 403）
@@ -208,7 +208,7 @@ PERMISSION_GROUPS = [
             'points.view', 'grades.view', 'grades.student_query',
             'portrait.view', 'portrait.edit',
             'points.import',
-            # v1.19.49.47：班主任可查看本班奖惩（登记/处理由德育处统一口径，故只给只读）
+            # v1.19.49.50：班主任可查看本班奖惩（登记/处理由德育处统一口径，故只给只读）
             'morality.view',
             'academic.view', 'academic.swap', 'academic.forms_view',
             # v1.17.0：写权限必须配套只读权限，否则「有考勤录入权却打不开考勤页」
@@ -594,11 +594,14 @@ def create_app():
     from app.utils.text_guard import pad2
     # 2026-10-14：顶栏品牌后缀（StuLink 后面标出 成绩工作台 / 教务工作台 / 我的工作台…）。
     from app.utils.workbench_name import workbench_name
+    # 2026-10-20：限时练进入某场时的侧栏流程栏（与 exam_nav 同一套外观）
+    from app.utils.timed_nav import timed_nav
     app.jinja_env.globals.update(
         subject_direction=subject_direction,
         subject_badge_class=subject_badge_class,
         normalize_subject=normalize_subject,
         exam_nav=exam_nav,
+        timed_nav=timed_nav,
         period_label=period_label,
         period_name_map=period_name_map,
         field_value=field_value,
@@ -641,7 +644,8 @@ def create_app():
         # 2026-10-10：教务分库后新增 inspection / achievement / forms 三个模块库
         # （漏在此列表里会让新库的表建不出来 —— 页面报 no such table）
         for _bind in (None, 'dormitory', 'history', 'grades', 'points',
-                      'morality', 'academic', 'inspection', 'achievement', 'forms',
+                      'morality', 'timed', 'academic', 'inspection',
+                      'achievement', 'forms',
                       'portrait', 'system', 'timetable'):
             try:
                 db.create_all(bind_key=_bind)

@@ -1,4 +1,4 @@
-# StuLink v1.19.49.47 2026-10-19
+# StuLink v1.19.49.50 2026-10-19
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 """小程序 /api/wx 接口冒烟（只读）。
 
@@ -104,6 +104,22 @@ def main():
     print('[成绩]')
     exams = expect_ok(client, headers, '/grades/exams') or []
     check('考试列表非空', len(exams) > 0, 'len=%d' % len(exams))
+    board = maybe_ok(client, headers, '/grades/manage/entries')
+    if board:
+        check('成绩管理入口板含 groups',
+              isinstance(board.get('groups'), list))
+        check('入口板带可见考试',
+              isinstance(board.get('exams'), list))
+    exam_rows = maybe_ok(client, headers, '/grades/manage/exams')
+    if exam_rows:
+        check('历次考试含 items',
+              isinstance(exam_rows.get('items'), list))
+        items = exam_rows.get('items') or []
+        if items:
+            check('历次考试含四步进度',
+                  isinstance(items[0].get('steps'), list)
+                  and len(items[0]['steps']) == 4)
+            check('历次考试含参考人数', 'count' in items[0])
     classes = expect_ok(client, headers, '/grades/classes') or []
     check('班级列表含 grade/classes',
           bool(classes) and 'classes' in classes[0])
