@@ -15,10 +15,14 @@
         <span class="text-muted small fw-normal ms-2">共 {{ pagination.total }} 人</span>
     </h4>
     {# 2026-10-14 按钮分层：主操作 + 更多（导出 / 模板下载进下拉） #}
+    {# 2026-10-21 用户口径：教师一律在「教务管理 → 教师」新增/批量导入，
+       系统管理 /users 下只查看名单与启停账号，不再提供导入入口。 #}
     <div class="d-flex gap-2 flex-wrap">
+        {% if request.blueprint != 'users' %}
         <button class="btn btn-sm btn-success" data-bs-toggle="modal" data-bs-target="#importModal">
             <i class="bi bi-file-earmark-excel"></i> 批量导入
         </button>
+        {% endif %}
         <div class="dropdown">
             <button type="button" class="btn btn-sm btn-outline-secondary dropdown-toggle"
                     data-bs-toggle="dropdown" aria-expanded="false">
@@ -31,15 +35,26 @@
                         <i class="bi bi-file-earmark-excel"></i> 导出名单
                     </a>
                 </li>
+                {% if request.blueprint != 'users' %}
                 <li>
                     <a class="dropdown-item" href="{{ url_for(ep('teachers_template')) }}">
                         <i class="bi bi-download"></i> 下载导入模板
                     </a>
                 </li>
+                {% endif %}
             </ul>
         </div>
     </div>
 </div>
+
+{% if request.blueprint == 'users' %}
+<div class="alert alert-light border py-2 small">
+    <i class="bi bi-info-circle"></i>
+    教师档案与登录账号统一在
+    <a href="{{ url_for('academic.teachers_page') }}">教务管理 → 教师</a>
+    新增/批量导入，保存后会自动同步到系统管理；本页仅用于查看名单、启停账号与重置密码。
+</div>
+{% endif %}
 
 <div class="card mb-3">
     <div class="card-body py-2">
@@ -128,7 +143,7 @@
                 {% else %}
                 <tr>
                     <td colspan="13" class="text-center text-muted py-5">
-                        {% if kw or status or subject %}当前筛选条件下没有匹配的教师{% else %}暂无教师数据，请先点击右上角「批量导入」建立教师名单{% endif %}
+                        {% if kw or status or subject %}当前筛选条件下没有匹配的教师{% elif request.blueprint == 'users' %}暂无教师数据，请先在「教务管理 → 教师」新增或批量导入{% else %}暂无教师数据，请先点击右上角「批量导入」建立教师名单{% endif %}
                     </td>
                 </tr>
                 {% endfor %}
@@ -161,6 +176,7 @@
     {% endif %}
 </div>
 
+{% if request.blueprint != 'users' %}
 <div class="modal fade" id="importModal" tabindex="-1">
     <div class="modal-dialog">
         <div class="modal-content">
@@ -197,4 +213,5 @@
         </div>
     </div>
 </div>
+{% endif %}
 {% endblock %}
