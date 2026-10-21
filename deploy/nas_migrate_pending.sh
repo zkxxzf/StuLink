@@ -146,6 +146,8 @@ run_mig scripts/migrate/migrate_user_uuid_20261020.py             # 系统：use
 run_mig scripts/migrate/migrate_user_phone_20261020.py --apply    # 系统：users.phone / phone_idx
 # 2026-10-20：学生档案智学网考号（从最近一场带考号的考试按学号回填，只填空不覆盖）
 run_mig scripts/migrate/migrate_student_zhixue_no_20261020.py --apply  # 系统：students.zhixue_no
+# 2026-10-21：学生档案智学网**账号**（准考证号每场重排，账号稳定，导入时两个都试）
+run_mig scripts/migrate/migrate_student_zhixue_account_20261021.py    # 系统：students.zhixue_account
 # 2026-10-20：限时练三张独立表（与普通考试完全隔离；须在代码上线前执行）
 run_mig scripts/migrate/migrate_timed_exam_20261020.py --apply         # 成绩：timed_exams / timed_scores / timed_band_templates
 # 2026-10-20：历次考试里的「限时练」场次搬入限时练表并删除原考试（须在 A38 之后；先归档）
