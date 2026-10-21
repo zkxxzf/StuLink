@@ -3,7 +3,7 @@
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
 [![Python](https://img.shields.io/badge/python-3.11+-green.svg)](https://python.org)
 [![Flask](https://img.shields.io/badge/flask-3.x-lightgrey.svg)](https://flask.palletsprojects.com/)
-[![Version](https://img.shields.io/badge/version-1.19.54.64-orange.svg)](https://gitee.com/zkxxzf/StuLink)
+[![Version](https://img.shields.io/badge/version-1.19.55.64-orange.svg)](https://gitee.com/zkxxzf/StuLink)
 
 面向中学的综合学生管理平台，采用 **双站点 + 多模块 + 一模块一库** 的故障隔离架构：
 
@@ -301,6 +301,7 @@ StuLink/
 
 | 版本 | 日期 | 亮点 |
 |---|---|---|
+| **1.19.55.64** | 2026-10-21 | **（第三位 zk +1）仪表盘页头精简**：移除 `/grades/` 首页仪表盘右上角的「自动刷新」开关、「刷新」按钮与「新建考试」按钮（创建考试仍可从功能入口板 / 历次考试页进入；无数据空态下的新建入口保留） |
 | **1.19.54.64** | 2026-10-21 | **（第三位 zk +1）划线分层表格列宽优化**：层名列 300px → 120px、科目列 100px → 72px、输入框收窄；≥1200px 时改为 `table-layout: fixed` 整表铺满容器、科目列均分，常用分辨率下一屏显示全部方向×科目（不再横向滚动）；窄屏仍按最小列宽、必要时滚动；组合线格在窄列内自动上下排 |
 | **1.19.53.64** | 2026-10-21 | **（第三位 zk +1）导入页布局按内容重排 + 表格错位修复**：划线分层宽矩阵独占整行；AI 智能导入与标准模板导入并排（5/7）；去差人数设置（5）与分数修改记录（7）并排且等高；修复横向滚动时表头「层名」列未冻结、与数值列错位的问题（表头首列改为横向 sticky，仅 left 不做 top 吸附） |
 | **1.19.52.64** | 2026-10-21 | **（第三位 zk +1）数据导入页界面美化**：三个卡片统一图标标题与卡片头；去差设置的 Excel 导入/模板下载收进独立工具条，不再挤在标题行；标准模板导入改为「文件面板 + 可选模式卡片（A/B）+ 右侧主按钮」，AI 面板补充标签悬停与主按钮层次；全部配色走主题变量，深浅色一致 |
