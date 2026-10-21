@@ -20,10 +20,10 @@
 <div class="d-flex flex-wrap gap-2 align-items-center mb-2">
     <span class="text-muted small me-1"><i class="bi bi-people"></i> 班级</span>
     <a class="btn btn-sm {{ 'btn-primary' if not class_name else 'btn-outline-secondary' }}"
-       href="{{ base }}">全部</a>
+       data-pane-nav href="{{ base }}">全部</a>
     {% for c in summary.classes %}
     <a class="btn btn-sm {{ 'btn-primary' if c == class_name else 'btn-outline-secondary' }}"
-       href="{{ base }}&class={{ c|urlencode }}">{{ c }}</a>
+       data-pane-nav href="{{ base }}&class={{ c|urlencode }}">{{ c }}</a>
     {% endfor %}
 
     <form class="d-flex gap-1 ms-2" method="get"
@@ -45,7 +45,7 @@
 
     <div class="ms-auto d-flex align-items-center gap-2">
         <span class="text-muted small">
-            {{ summary.count }} 人 · {{ summary.subjects|length }} 科
+            {{ summary.count }} 人 · 已导入 {{ summary.have_count }} / {{ summary.subjects|length }} 科
             {% if summary.pages > 1 %}（第 {{ summary.page }}/{{ summary.pages }} 页）{% endif %}
         </span>
         <label class="text-muted small mb-0" for="pageSize">每页</label>
@@ -64,6 +64,8 @@
 </div>
 
 <div class="card">
+    {# 9 科固定全列 + 总分 + 两个名次，窄屏会超宽：套一层可横向滚动 #}
+    <div class="table-responsive">
     <table class="table table-sm table-hover align-middle mb-0 timed-tbl"
            id="timedSummaryTable">
         <thead class="table-light">
@@ -131,6 +133,7 @@
         {% endfor %}
         </tbody>
     </table>
+    </div>
 </div>
 
 {% if summary.pages > 1 %}
@@ -138,19 +141,21 @@
 <nav class="mt-2">
     <ul class="pagination pagination-sm mb-1">
         <li class="page-item {{ 'disabled' if summary.page <= 1 }}">
-            <a class="page-link" href="{{ nav_base }}&page={{ summary.page - 1 }}">上一页</a>
+            <a class="page-link" data-pane-nav
+               href="{{ nav_base }}&page={{ summary.page - 1 }}">上一页</a>
         </li>
         {% for p in range(1, summary.pages + 1) %}
         {% if p == 1 or p == summary.pages or (p >= summary.page - 2 and p <= summary.page + 2) %}
         <li class="page-item {{ 'active' if p == summary.page }}">
-            <a class="page-link" href="{{ nav_base }}&page={{ p }}">{{ p }}</a>
+            <a class="page-link" data-pane-nav href="{{ nav_base }}&page={{ p }}">{{ p }}</a>
         </li>
         {% elif p == 2 or p == summary.pages - 1 %}
         <li class="page-item disabled"><span class="page-link">…</span></li>
         {% endif %}
         {% endfor %}
         <li class="page-item {{ 'disabled' if summary.page >= summary.pages }}">
-            <a class="page-link" href="{{ nav_base }}&page={{ summary.page + 1 }}">下一页</a>
+            <a class="page-link" data-pane-nav
+               href="{{ nav_base }}&page={{ summary.page + 1 }}">下一页</a>
         </li>
     </ul>
 </nav>
@@ -174,39 +179,6 @@
     分数有误请重新导入该科覆盖（同科重导 = 整科覆盖）。
 </div>
 
-<script>
-(function () {
-    // 每页条数：跟随「我的设置 → 列表每页条数」（本机偏好 stulink.pref.size），
-    // 这里改了也会写回同一份偏好，别的列表页跟着变。
-    var sel = document.getElementById('pageSize');
-    if (!sel) { return; }
-    var PREF_KEY = 'stulink.pref';
-
-    function readPref() {
-        try { return JSON.parse(localStorage.getItem(PREF_KEY) || '{}'); }
-        catch (e) { return {}; }
-    }
-    function urlWith(per) {
-        var u = new URL(location.href);
-        u.searchParams.set('per', per);
-        u.searchParams.delete('page');
-        return u.toString();
-    }
-
-    var hasPer = new URL(location.href).searchParams.get('per');
-    if (!hasPer) {
-        var pref = readPref();
-        if (pref.size && String(pref.size) !== sel.value) {
-            location.replace(urlWith(pref.size));
-            return;
-        }
-    }
-    sel.addEventListener('change', function () {
-        var p = readPref();
-        p.size = parseInt(sel.value, 10) || 50;
-        try { localStorage.setItem(PREF_KEY, JSON.stringify(p)); } catch (e) { /* 忽略 */ }
-        location.href = urlWith(sel.value);
-    });
-})();
-</script>
+{# 每页条数 / 偏好记忆 / 局部刷新都在 static/js/timed_pane.js：
+   整块会被局部替换，内联脚本不会再执行，逻辑必须放全局脚本里。 #}
 {% endif %}

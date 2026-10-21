@@ -205,20 +205,20 @@ def student_total(exam_id):
 
 
 def renumber_grade(grade):
-    """把某一届的场次统一改名为 `2026级 No.1`（届内按日期升序连续编号）。
+    """把某一届的场次统一改名为 `2025级20260905限时练No.17`。
 
-    2026-10-20 用户口径（第二次修正）：名称只留「届 + No.序号」，
-    **年级学期不进名字** —— 它是列表里的标签（高一上/高一下/高二上/
-    高二下/高三上/高三下），由 `TimedExam.semester_label()` 给出。
-    序号跨学期连续（高一上 No.1 → 高一下 No.3 → 高二上 No.10 …），
-    因为名字里已经没有学期可区分档位。同日按 id 排序。
+    2026-10-21 用户口径（取代 10-20 的「2025级 No.1」）：
+    **届 + 8 位日期 + 限时练 + No.序号**。年级学期仍只作列表标签
+    （`TimedExam.semester_label()`），不进名字。
+    序号按届内日期升序连续（同日按 id），跨学期不重置。
     不 commit，由调用方控制事务。
     """
+    from app.modules.grades.services.timed_naming import exam_name
     rows = TimedExam.query.filter_by(grade=grade).all()
     rows.sort(key=lambda e: (e.exam_date, e.id))
     changed = []
     for idx, exam in enumerate(rows, start=1):
-        name = f'{grade} No.{idx}'
+        name = exam_name(grade, exam.exam_date, idx)
         if (exam.name or '') != name:
             exam.name = name
             changed.append(exam.id)

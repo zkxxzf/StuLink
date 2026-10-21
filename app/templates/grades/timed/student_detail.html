@@ -10,7 +10,7 @@
         <h4 class="mb-0">{{ name or '未知学生' }}</h4>
         <span class="text-muted small">
             {{ student_no }}{% if cls %} · {{ cls }}{% endif %} ·
-            {{ exam.grade }} 全部限时练（{{ lines|length }} 场）
+            {{ exam.grade }} 全部限时练（{{ count }} 场）
         </span>
     </div>
     <div class="text-muted small">
@@ -124,10 +124,18 @@
 {% endif %}
 
 <div class="card">
-    <div class="card-header py-2">
-        <span class="fw-semibold">逐场成绩</span>
-        <span class="text-muted small ms-2">单元格上为原始分、下为该科 T 分</span>
+    <div class="card-header py-2 d-flex flex-wrap justify-content-between
+                align-items-center gap-2">
+        <div>
+            <span class="fw-semibold">逐场成绩</span>
+            <span class="text-muted small ms-2">
+                按日期倒序（新的在上），每页 {{ page_size }} 场；
+                单元格上为原始分、下为该科 T 分
+            </span>
+        </div>
+        <span class="text-muted small">共 {{ count }} 场 · 第 {{ page }}/{{ pages }} 页</span>
     </div>
+    <div class="table-responsive">
     <table class="table table-sm table-hover align-middle mb-0 timed-tbl">
         <thead class="table-light">
         <tr>
@@ -164,6 +172,33 @@
         {% endfor %}
         </tbody>
     </table>
+    </div>
+    {% if pages > 1 %}
+    <div class="card-footer py-2">
+        <nav aria-label="逐场成绩分页">
+            <ul class="pagination pagination-sm mb-0 flex-wrap">
+                <li class="page-item {{ 'disabled' if page <= 1 }}">
+                    <a class="page-link"
+                       href="{{ url_for('grades.timed_student_detail', tid=exam.id, student_no=student_no, page=page - 1) }}">上一页</a>
+                </li>
+                {% for p in range(1, pages + 1) %}
+                {% if p == 1 or p == pages or (p >= page - 2 and p <= page + 2) %}
+                <li class="page-item {{ 'active' if p == page }}">
+                    <a class="page-link"
+                       href="{{ url_for('grades.timed_student_detail', tid=exam.id, student_no=student_no, page=p) }}">{{ p }}</a>
+                </li>
+                {% elif p == 2 or p == pages - 1 %}
+                <li class="page-item disabled"><span class="page-link">…</span></li>
+                {% endif %}
+                {% endfor %}
+                <li class="page-item {{ 'disabled' if page >= pages }}">
+                    <a class="page-link"
+                       href="{{ url_for('grades.timed_student_detail', tid=exam.id, student_no=student_no, page=page + 1) }}">下一页</a>
+                </li>
+            </ul>
+        </nav>
+    </div>
+    {% endif %}
 </div>
 
 <div class="text-muted small mt-2">

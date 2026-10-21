@@ -15,6 +15,7 @@ from app.modules.grades.routes import (dashboard, exams, bands, teachers, analys
                                        score_review_entry,  # 复核录入（搜学生/批量改分）
                                        honor,  # 表彰名单
                                        near_line_export,  # 临界生名单导出
+                                       scoresheet_export,  # 成绩单导出
                                        timed, timed_import_routes,
                                        timed_ai_routes, timed_export,
                                        timed_files)  # 限时练（独立表）

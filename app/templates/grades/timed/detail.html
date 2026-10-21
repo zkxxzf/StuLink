@@ -33,10 +33,9 @@
     {% include 'grades/timed/_import.html' %}
 {% elif tab == 'analysis' %}
     {% include 'grades/timed/_analysis.html' %}
-{% elif tab == 'trends' %}
-    {% include 'grades/timed/_trends.html' %}
 {% else %}
-    {% include 'grades/timed/_students.html' %}
+    {# 学生成绩 / 学生分析：包在 #timedPane 里，切班与翻页走局部刷新 #}
+    {% include 'grades/timed/_pane.html' %}
 {% endif %}
 {% endblock %}
 
@@ -47,7 +46,11 @@
 {% if tab == 'analysis' %}
 <script src="{{ su('js/echarts.min.js') }}"></script>
 <script src="{{ su('js/timed_analysis_charts.js') }}"></script>
+<script src="{{ su('js/timed_tbl_canvas.js') }}"></script>
 <script src="{{ su('js/timed_copy_image.js') }}"></script>
+{% endif %}
+{% if tab in ('students', 'trends') %}
+<script src="{{ su('js/timed_pane.js') }}"></script>
 {% endif %}
 
 {% endblock %}

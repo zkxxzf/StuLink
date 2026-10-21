@@ -55,6 +55,24 @@ def _code(value):
     return s
 
 
+def _norm_class(value):
+    """班级名归一化：'高三01班' / '1班' / '高一（01）班' → '01班'
+
+    2026-10-21 用户反馈「导入的成绩任课教师全没了」：智学网导出的班级写
+    「高三01班」，而任课映射 / 班型 / 历史成绩都写「01班」，两边对不上 ——
+    分析表按班级名分组，于是同一班被拆成两行、任课教师查不到。
+    入库统一存归一化写法；老的「高三01班」由展示层同样归一化兜住。
+    非数字班级（不分班 / 未分班）原样返回。
+    """
+    s = _code(value).replace(' ', '').replace('（', '').replace('）', '')
+    s = s.replace('(', '').replace(')', '')
+    s = re.sub(r'^(高一|高二|高三|高[一二三]|[初高]\d?)[^\d]*', '', s)
+    m = re.match(r'^(\d{1,2})班?$', s)
+    if m:
+        return '%02d班' % int(m.group(1))
+    return s
+
+
 def _score(value):
     """分数单元格 → (分数 or None, 是否缺考)
 
@@ -143,7 +161,8 @@ def parse_sheet(stream, subject, grade=''):
         zhixue = _code(values[idx['zhixue']]) if idx['zhixue'] is not None else ''
         no = _code(values[idx['no']]) if idx['no'] is not None else ''
         name = values[idx['name']] if idx['name'] is not None else ''
-        class_name = values[idx['class']] if idx['class'] is not None else ''
+        class_name = (_norm_class(values[idx['class']])
+                      if idx['class'] is not None else '')
         raw_score = values[idx['score']] if idx['score'] is not None else ''
         key = zhixue or no
         if not key:

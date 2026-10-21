@@ -13,7 +13,7 @@ from collections import OrderedDict
 from sqlalchemy import func
 
 from app.extensions import db
-from app.modules.grades.utils import numeric_classes
+from app.modules.grades.services.class_order import teaching_classes
 from app.models.grades import Exam, ExamScore, ExamBand, SUBJECTS, TOTAL_SUBJECT, \
     subjects_of_selection
 
@@ -530,8 +530,9 @@ def class_summary_table(data, direction=None):
     """A1-T1 年级各班汇总表行（含分层计数列）"""
     fm = data.full_marks()
     rows = []
-    # 只统计正规教学班（排除 不分班/已转出/离校 等），与全局对比页 numeric_classes 口径一致
-    for cls in numeric_classes(data.classes):
+    # 只统计正规教学班（排除 不分班/已转出/离校 等），与全局对比页同一口径；
+    # 行序＝班型分组 + 组内班号升序（2026-10-21 用户口径：同班型班级相邻）
+    for cls in teaching_classes(data):
         totals = data.totals_of(class_name=cls, direction=direction)
         if not totals:
             continue
@@ -913,6 +914,8 @@ def print_summary(exam_id):
 
     subjects = [TOTAL_SUBJECT] + list(SUBJECTS)
     blocks = []
+    # 班级展示顺序（2026-10-21 用户口径：同班型相邻、组内班号升序）
+    _cls_order = {c: i for i, c in enumerate(teaching_classes(data))}
     for sub in subjects:
         if sub != TOTAL_SUBJECT and not data.scores_of_subject(sub):
             continue                      # 本场没有的科目不出版块
@@ -923,7 +926,7 @@ def print_summary(exam_id):
             # 本方向有哪些班：该科该方向有分数行即算（班可能混方向，按有数据归属）
             cls_rows = []
             # 只统计正规教学班（排除 不分班/已转出/离校），否则这些班会当成一个班显示、还参与排名
-            for cls in numeric_classes(data.classes):
+            for cls in teaching_classes(data):
                 # 逐生按各自选科组合取线（2026-10-16 复查上线数口径后统一，见 _ps_class_pass）
                 sc, on_map, bands, trim_avg = _ps_class_pass(
                     data, sub, cls, d, layers, trim_nos)
@@ -956,7 +959,7 @@ def print_summary(exam_id):
                     if band is not None:
                         band['rank'] = r['rank'][it['key']]
                 r['avg_rank'] = r['rank']['avg']
-            cls_rows.sort(key=lambda r: r['cls'])
+            cls_rows.sort(key=lambda r: _cls_order.get(r['cls'], 9999))
             groups.append({
                 'direction': d or '全体',
                 'rows': cls_rows,
