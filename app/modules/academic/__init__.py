@@ -1,4 +1,4 @@
-# StuLink v1.19.55.64 2026-10-10
+# StuLink v1.19.56.64 2026-10-10
 # 教务模块：教师名单 / 课表 / 查课记录 / 教师业绩 / 调课 / 表单收集
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 from flask import Blueprint

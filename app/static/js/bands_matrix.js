@@ -1,4 +1,4 @@
-/* StuLink v1.19.55.64 2026-10-21
+/* StuLink v1.19.56.64 2026-10-21
    划线分层矩阵（从 grades/bands.html 抽出，供「划线分层」页与「数据导入」页共用）。
    依赖 jQuery 与 DOM 元素 #bandApp / #bandTable；只读/可编辑由 data-can-edit 决定。 */
 $(function(){
@@ -228,13 +228,21 @@ $(function(){
                 $name.append($('<div class="small">').addClass('text-warning')
                     .text('不在当前模板内'));
             }
+            // 2026-10-21 用户反馈「显示不一致」：模板的比例定义只在**当前下界方式就是
+            // 比例/名次**时贴出来；表格按固定分数存/填时不再显示「比例 50%」——
+            // 否则「下界方式＝固定分数」与层名下的「比例 50%」自相矛盾。
+            // 分数口径下这条定义仍然有用（知道这层该取前 50%），挂在层名输入框的
+            // title 上做悬浮提示，不占版面、也不会压到右边「总分」格。
             if (l.ratio !== '' && l.ratio != null && !isNaN(parseFloat(l.ratio))){
                 var r = parseFloat(l.ratio);
                 // 组合维度下按该组合人数估算（否则「约 N 人」会拿全年级人数套，误导填比例）
                 var base = isCombo() ? (comboMeta().count || 0) : totalCount;
                 var est = base ? Math.round(base * r / 100) : 0;
-                $name.append($('<div class="small text-muted">').text(
-                    '模板定义：比例 ' + r + '%' + (est ? ' · 约 ' + est + ' 人' : '')));
+                var tip = '模板定义：比例 ' + r + '%' + (est ? ' · 约 ' + est + ' 人' : '');
+                if (canEdit){ $name.find('.q-name').attr('title', tip); }
+                if (mode() === 'ratio' || mode() === 'rank'){
+                    $name.append($('<div class="small text-muted q-tpl-def">').text(tip));
+                }
             }
             tr.append($('<td>').append($name));
             if (scope() === 'all'){
@@ -454,6 +462,25 @@ $(function(){
                                  value: '', values: {}, extra: true}); }
             });
             layers.sort(function(a, c){ return a.seq - c.seq; });
+            // 2026-10-21 用户反馈「显示不一致」：先定「下界方式」再回填数值。
+            // 库里存的一定是换算后的分数（batch 保存时 lower_mode 统一写 score），
+            // 而模板常按比例定义（特控线 50% / 本科线 90%），applyTemplate() 已把比例值
+            // （50/90）预填进格子 —— 若方式与库不一致，这些预填值会被当成「50 分」显示，
+            // 与「固定分数」自相矛盾。先把预填值清掉，全部以库里的分数为准。
+            var modes = {};
+            colKeys().forEach(function(k){
+                (all[k] || []).forEach(function(b){
+                    if (!b.selection && b.lower_mode){
+                        modes[b.lower_mode] = (modes[b.lower_mode] || 0) + 1;
+                    }
+                });
+            });
+            var mkeys = Object.keys(modes);
+            var storedMode = (mkeys.length === 1) ? mkeys[0] : '';
+            if (storedMode && mode() !== storedMode){
+                $('#qMode').val(storedMode);   // 静默切换，不触发 change 的「清空确认」
+                layers.forEach(function(l){ l.value = ''; l.values = {}; });
+            }
             colKeys().forEach(function(k){
                 var byKey = {};
                 (all[k] || []).forEach(function(b){
@@ -466,17 +493,17 @@ $(function(){
             });
             // 2026-10-15：回填后让「下界方式」跟随库里的线 —— 模板常带「人数比例%」模式，
             // 而库里存的是换算后的分数，不改的话回填的 496.5 会被当比例校验、保存必然失败
-            var modes = {};
-            colKeys().forEach(function(k){
-                (all[k] || []).forEach(function(b){
-                    if (!b.selection && b.lower_mode){
-                        modes[b.lower_mode] = (modes[b.lower_mode] || 0) + 1;
-                    }
-                });
-            });
-            var mkeys = Object.keys(modes);
-            if (mkeys.length === 1 && $('#qMode').val() !== mkeys[0]){
-                $('#qMode').val(mkeys[0]);   // 静默切换，不触发 change 的「清空确认」
+            // （切换逻辑已上移到回填数值之前，见上）
+            // 2026-10-21：模板按比例定义、而表格按分数存时，在顶部说明一句 —— 否则
+            // 「下界方式＝固定分数」与层名下的「比例 50%」看起来互相打架（用户反馈）。
+            var _tpl = tplById($('#qTpl').val());
+            if (storedMode === 'score' && _tpl
+                && (_tpl.lower_mode === 'ratio' || _tpl.lower_mode === 'rank')){
+                // 先去掉上一次追加的同一句（保存后会重新 load，避免叠两遍）
+                var $bound = $('#qTplBound');
+                var base = ('' + $bound.text()).split(' · 模板按')[0];
+                $bound.text(base + ' · 模板按'
+                    + (_tpl.lower_mode === 'ratio' ? '比例' : '名次') + '定义，当前表格按分数显示');
             }
             $('#qMsg').removeClass('text-success text-danger');
             if (appended.length){

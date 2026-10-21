@@ -1,4 +1,4 @@
-# StuLink v1.19.55.64 2026-10-19
+# StuLink v1.19.56.64 2026-10-19
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 """小程序成绩管理：只读数据视图（分数修改记录 / 证明台账 / 汇总打印）。
 

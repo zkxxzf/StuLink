@@ -1,4 +1,4 @@
-# StuLink v1.19.55.64 2026-10-19
+# StuLink v1.19.56.64 2026-10-19
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 """小程序「班级成绩单」：逐生全科成绩 + 班排 / 方向排，服务端分页。
 
