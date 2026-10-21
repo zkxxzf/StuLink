@@ -1,4 +1,4 @@
-# StuLink v1.19.53.64 2026-10-10
+# StuLink v1.19.54.64 2026-10-10
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 """学科配色（课表网格用）。
 
