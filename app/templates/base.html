@@ -297,6 +297,18 @@
             .tab-pane { display: none !important; }
             .tab-pane.active { display: block !important; }
         }
+        /* ===== 限时练（2026-10-20 用户口径）= 字号不低于 18px，表格铺满可用宽度、
+           不设内滚动条（要整表截图/复制）。学生成绩 / 学生分析 / 成绩总览分析
+           三个页签共用 .timed-tbl；单元格内 T 分小字用 .t-sub 单独收小。
+           注：2026-10-20 审计发现该样式原先只写在 _analysis.html，其余页签
+           拿不到字号，故上提到全局一份。 */
+        .timed-tbl { font-size: 18px !important; width: 100%; }
+        .timed-tbl th, .timed-tbl td {
+            font-size: 18px !important;
+            padding: .12rem .22rem;
+            white-space: nowrap;
+        }
+        .timed-tbl .t-sub { font-size: 14px; line-height: 1.1; }
         /* 2026-10-19 用户口径：考试成绩单 / 数据导入等页面顶部固定展示本场考试标题，
            原来的页头位置改为各页面自己的标题。 */
         .exam-topbar-context {
@@ -351,7 +363,11 @@
    考试态由 exam_nav() 判定（本请求内已缓存，重复调用无额外查询）。
    v1.19.49.35 起 body 加 .exam-ctx：为悬浮浮层让出左内边距（UI 审计 H1）。 #}
 {% set EN = exam_nav() if request.blueprint == 'grades' else None %}
-{% set exam_mode = (request.blueprint == 'grades' and EN) %}
+{# 2026-10-20 用户口径：进入某场限时练时，侧栏要和普通考试一样切成悬浮流程栏
+   （返回 → 场次名 → 四步 → 页签导航）。限时练是独立表，exam_nav 拿不到它，
+   用 timed_nav 补一份同形状上下文，外观复用同一批 .efn-* 样式。 #}
+{% set TIMED = timed_nav() if (request.blueprint == 'grades' and not EN) else None %}
+{% set exam_mode = (request.blueprint == 'grades' and (EN or TIMED)) %}
 <body class="{{ 'exam-ctx' if exam_mode }}">
     <!-- 顶部导航 -->
     <nav class="navbar navbar-expand-lg navbar-dark bg-dark fixed-top px-3" style="height:56px;">
@@ -371,7 +387,7 @@
            登录页 / 首页 / 通知公告无归属 → 不渲染后缀。 #}
         {% set brand_module = workbench_name() %}
         <a class="navbar-brand fw-bold" href="{{ url_for('welcome.index') if current_user.is_authenticated else '#' }}">
-            <i class="bi bi-building"></i> StuLink{% if brand_module and not EN %}<span class="brand-module">{{ brand_module }}</span>{% endif %}
+            <i class="bi bi-building"></i> StuLink{% if brand_module and not EN and not TIMED %}<span class="brand-module">{{ brand_module }}</span>{% endif %}
         </a>
         {% if EN %}
         {# 本场考试标题：只要请求带考试上下文（exam_id 或 ?exam=）就一直在顶部，
@@ -391,6 +407,22 @@
             <span class="badge bg-secondary">未导入</span>
             {% endif %}
             <span class="exam-topbar-meta">{{ EN.exam.title_with_dimensions() }}</span>
+        </div>
+        {% elif TIMED %}
+        {# 限时练场次：同样把名字固定到顶部（点击回学生成绩汇总表），状态/年级日期并列 #}
+        <div class="exam-topbar-context d-none d-sm-flex align-items-center ms-1">
+            <span class="exam-topbar-divider"></span>
+            <a class="exam-topbar-name"
+               href="{{ url_for('grades.timed_detail', tid=TIMED.exam_id) }}"
+               title="{{ TIMED.exam.display_name() }}（点击返回学生成绩）">
+                {{ TIMED.exam.display_name() }}
+            </a>
+            {% if TIMED.subjects %}
+            <span class="badge bg-success">已导入</span>
+            {% else %}
+            <span class="badge bg-secondary">未导入</span>
+            {% endif %}
+            <span class="exam-topbar-meta">{{ TIMED.exam.grade }} · {{ TIMED.exam.exam_date.strftime('%Y-%m-%d') }}</span>
         </div>
         {% endif %}
         <div class="ms-auto d-flex align-items-center">
@@ -750,6 +782,27 @@
                 </script>
                 {% endif %}
             </div>
+            {% elif TIMED %}
+            {# ---------- 限时练态：悬浮流程栏（与普通考试同一外观） ----------
+               四步与页内页签一一对应：建场次 → 导入成绩 → 划线分层 → 单科分析。
+               圆点：当前页签=绿实心，已完成的其它步=浅绿，未完成=灰。 #}
+            <div class="exam-flow-nav">
+                <a class="efn-back" href="{{ url_for('grades.timed_list') }}">
+                    <i class="bi bi-arrow-left"></i>返回限时练列表
+                </a>
+                <div class="efn-title" title="{{ TIMED.exam.display_name() }}">{{ TIMED.exam.display_name() }}</div>
+                <div class="efn-steps">
+                    {% for s in TIMED.steps %}
+                    <span class="efn-dot {{ 'on' if s.current }}{{ ' done' if s.done and not s.current }}"
+                          title="{{ s.label }}{% if s.current %}（当前）{% elif s.done %}（已完成）{% else %}（未完成）{% endif %}">{{ loop.index }}</span>
+                    {% endfor %}
+                    <span class="efn-count">{{ TIMED.done_count }}/{{ TIMED.steps|length }} 步</span>
+                </div>
+                {% for it in TIMED.nav %}
+                <a class="efn-item {% if TIMED.tab == it.tab %}active{% endif %}"
+                   data-nav="timed-{{ it.tab }}" href="{{ it.url }}">{{ it.label }}</a>
+                {% endfor %}
+            </div>
             {% else %}
             {# ---------- 全局态：精简菜单 ----------
                2026-10-13 用户口径：成绩模块落地页＝「首页仪表盘」（跨考试总览），
@@ -764,7 +817,12 @@
                教师看得见菜单、点进去必 403（用户截图反馈的问题）。 #}
             <a class="nav-link {% if request.endpoint in ('grades.exams_list','grades.exam_new') %}active{% endif %}"
                href="{{ url_for('grades.exams_list') }}">
-                <i class="bi bi-journals"></i>历次考试
+                <i class="bi bi-journals"></i>大型考试
+            </a>
+            {# 2026-10-20 用户口径（第二版）：限时练从考试列表的 tab 改为侧栏独立入口 #}
+            <a class="nav-link {% if request.endpoint in ('grades.timed_list','grades.timed_new','grades.timed_detail') %}active{% endif %}"
+               href="{{ url_for('grades.timed_list') }}">
+                <i class="bi bi-stopwatch"></i>限时练
             </a>
             {# 2026-10-15 用户口径：「申请调分可以」—— 教师/班主任提交成绩复核，
                有改分权限的人在同一页面的「复核审批」里处理（入口按权限在页内显隐）。 #}
@@ -1054,7 +1112,7 @@
         {# 第七轮审计（U-M2）：补 .footer 类 —— 上面 @media print 的隐藏清单匹配的是
            .footer，此前 footer 元素无此类，导致打印时多打一条版权/版本行。 #}
         <footer class="footer text-center text-muted small mt-4 pt-3 border-top">
-            StuLink v1.19.49.47（2026-10-20） · © 2026 @zkxxzf · 感谢协作开发 @Sakaay
+            StuLink v1.19.49.50（2026-10-21） · © 2026 @zkxxzf · 感谢协作开发 @Sakaay
         </footer>
         {% endif %}
     </div>

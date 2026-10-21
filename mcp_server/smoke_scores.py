@@ -53,8 +53,11 @@ def check(name, text, expect_ok=True, must_contain=None):
     """检查工具返回：ok 标志 + 必须包含的文本。
 
     expect_ok=None 表示"权限必须放行、业务结果不作要求"（例如该场考试没配置分层线）。
+
+    2026-10-21：返回体改为紧凑 JSON（省额度），`'"ok": true'` 这种带空格的
+    字面量匹配会全线误判 —— 统一改成解析 JSON 取值，紧凑 / 缩进都能过。
     """
-    got_ok = '"ok": true' in text
+    got_ok = _is_ok(text)
     problems = []
     if expect_ok is None:
         if '权限不足' in text:
@@ -65,6 +68,14 @@ def check(name, text, expect_ok=True, must_contain=None):
         if token not in text:
             problems.append(f'缺少内容：{token}')
     _record(name, problems, text)
+
+
+def _is_ok(text):
+    """取返回体的 ok 标志（容错：解析失败时退化为无空格匹配）。"""
+    try:
+        return json.loads(text).get('ok') is True
+    except Exception:                        # noqa: BLE001
+        return '"ok":true' in text.replace(' ', '')
 
 
 def expect(name, condition, detail=''):
@@ -142,6 +153,109 @@ def engine_matrix():
     expect('无任何范围：年级拒绝', not empty.can_view_grade('2024级'))
     expect('无任何范围：班级拒绝', not empty.can_view_class('2024级', '01班'))
     expect('无任何范围：可见年级为空集', empty.visible_grades() == set())
+
+
+async def timed_cases(call):
+    """限时练（kind=timed，独立库 timed.db）端到端：同一批工具 + 越权拒绝。
+
+    口径要点（与普通考试不同，断言即文档）：
+      · 无总分行——总分由各科现算；名次＝**该科全年级名次**；
+      · 无分数线 / 无分数段——`get_exam_score_segments` 与
+        `get_layer_online_stats` 对限时练显式提示改用 `get_subject_analysis`；
+      · 权限＝`grades.view` + 年级在可见范围内（与网页端同一份口径）。
+    """
+    picked = core_db.run(_pick_timed)
+    if not picked:
+        print('注意：库中没有带成绩的限时练，跳过限时练用例')
+        return
+    exam_id, grade, class_name, subject, student_no = picked
+    k = {'kind': 'timed'}
+    print(f'\n限时练样本：exam_id={exam_id} {grade} {class_name} '
+          f'{subject} 学号={student_no}')
+
+    check('限时练：list_exams(kind=timed)',
+          await call('list_exams', dict(k, limit=5)), must_contain=['"exams"'])
+    check('限时练：list_classes(kind=timed)',
+          await call('list_classes', dict(k, exam_id=exam_id)),
+          must_contain=['student_count'])
+    check('限时练：get_exam_overview',
+          await call('get_exam_overview', dict(k, exam_id=exam_id)),
+          must_contain=['subjects'])
+    summary = await call('get_class_score_summary',
+                         dict(k, exam_id=exam_id, class_name=class_name))
+    check('限时练：get_class_score_summary（汇总表）', summary,
+          must_contain=['subjects'])
+    check('限时练：get_class_score_detail（某班某科）',
+          await call('get_class_score_detail',
+                     dict(k, exam_id=exam_id, class_name=class_name,
+                          subject=subject)),
+          must_contain=['rank'])
+    check('限时练：get_student_scores',
+          await call('get_student_scores',
+                     dict(k, student_no=student_no, exam_id=exam_id)),
+          must_contain=['rank_g'])
+    check('限时练：get_student_score_trend（T 分序列）',
+          await call('get_student_score_trend',
+                     dict(k, student_no=student_no, subject=subject)),
+          must_contain=['points'])
+    analysis = await call('get_subject_analysis',
+                          dict(k, exam_id=exam_id, subject=subject))
+    check('限时练：get_subject_analysis（去差均分 + 名次区间）', analysis,
+          must_contain=['trim_avg'])
+    # 参与对比的班级必须是**该科有成绩**的班（本场可能只有部分班参加了该科）
+    peers = _data(await call('get_subject_analysis',
+                             dict(k, exam_id=exam_id, subject=subject,
+                                  view='full'))).get('classes') or []
+    two = ','.join(c['class_name'] for c in peers[:2])
+    if len(peers) >= 2:
+        check('限时练：compare_classes（按科比班）',
+              await call('compare_classes',
+                         dict(k, exam_id=exam_id, class_names=two,
+                              subject=subject)),
+              must_contain=['trim_avg'])
+    seg = await call('get_exam_score_segments', dict(k, exam_id=exam_id))
+    expect('限时练：分数段不支持 → 提示改用单科分析',
+           'get_subject_analysis' in seg, seg[:160])
+    line = await call('get_layer_online_stats', dict(k, exam_id=exam_id))
+    expect('限时练：分层上线不支持 → 提示改用单科分析',
+           'get_subject_analysis' in line, line[:160])
+    check('限时练：场次不存在统一文案（防枚举）',
+          await call('get_exam_overview', dict(k, exam_id=999999)),
+          expect_ok=False, must_contain=['不存在'])
+
+    outsider = core_db.run(lambda: _pick_outsider(grade))
+    if outsider:
+        bootstrap.warm_up(outsider)
+        check(f'限时练：非可见年级（{outsider}）被拒',
+              await call('get_exam_overview', dict(k, exam_id=exam_id)),
+              expect_ok=False, must_contain=['无权'])
+        bootstrap.warm_up('admin')
+
+
+def _pick_timed():
+    """挑一场带成绩的限时练：返回 (exam_id, grade, class_name, subject, 学号)。"""
+    from app.models.timed import TimedExam, TimedScore
+    from app.modules.grades.services import timed_service
+    for exam in TimedExam.query.order_by(TimedExam.exam_date.desc()).all():
+        row = TimedScore.query.filter_by(exam_id=exam.id).first()
+        if row is None:
+            continue
+        subjects = timed_service.subjects_of(exam.id)
+        return (exam.id, exam.grade, row.class_name or '',
+                subjects[0] if subjects else '', row.student_no)
+    return None
+
+
+def _pick_outsider(grade):
+    """挑一个看不到该年级限时练的真实账号（不改动任何账号）。"""
+    from app.models.user import User
+    from app.modules.grades.services import timed_service
+    for user in User.query.filter_by(is_active=True).order_by(User.id).all():
+        if user.role == 'admin' or not user.has_perm('grades.view'):
+            continue
+        if grade not in timed_service.visible_grades_of(user):
+            return user.username
+    return None
 
 
 class _StubUser:
@@ -278,9 +392,12 @@ async def main():
 
     # ── 管理员：全校可见 ────────────────────────────────────────
     scope_text = await call('list_my_score_scope', {})
-    check('管理员：范围=全校', scope_text, must_contain=['"full_school": true'])
+    check('管理员：范围=全校', scope_text, must_contain=['"full_school":true'])
     check('管理员：list_exams',
           await call('list_exams', {'limit': 3}), must_contain=['"exams"'])
+    check('管理员：list_exams(view=full) 仍可用',
+          await call('list_exams', {'limit': 3, 'view': 'full'}),
+          must_contain=['"exams"'])
     classes_text = await call('list_classes', {})
     check('管理员：list_classes', classes_text, must_contain=['"classes"'])
     class_names = [c.get('class_name') for c in (_data(classes_text).get('classes') or [])]
@@ -296,13 +413,18 @@ async def main():
               await call('get_exam_overview', {'exam_id': exam_id}),
               must_contain=['student_count'])
         check('管理员：get_class_score_summary',
-              await call('get_class_score_summary', {'exam_id': exam_id}),
+              await call('get_class_score_summary',
+                         {'exam_id': exam_id, 'view': 'full'}),
               must_contain=['subject_avg'])
+        check('管理员：get_class_score_summary(view=brief 默认) 更省',
+              await call('get_class_score_summary', {'exam_id': exam_id}),
+              must_contain=['class_rank'])
         if class_names:
             check('管理员：get_class_score_detail（逐生明细）',
                   await call('get_class_score_detail',
-                             {'exam_id': exam_id, 'class_name': class_names[0]}),
-                  must_contain=['student_count', '"scores"'])
+                             {'exam_id': exam_id, 'class_name': class_names[0],
+                              'view': 'full'}),
+                  must_contain=['student_count', 'rank_g'])
         check('管理员：get_subject_analysis',
               await call('get_subject_analysis', {'exam_id': exam_id}),
               must_contain=['"subjects"'])
@@ -331,7 +453,8 @@ async def main():
             lambda: _pick_exam(home['grade'], home['class_name']))
         if exam_id:
             text = await call('get_class_score_summary',
-                              {'exam_id': exam_id, 'class_name': home['class_name']})
+                              {'exam_id': exam_id, 'class_name': home['class_name'],
+                               'view': 'full'})
             check('班主任：本班成绩可查', text, must_contain=['subject_avg'])
             rows = _data(text).get('classes') or []
             expect('班主任：本班总分口径可见（非任课收窄）',
@@ -340,7 +463,8 @@ async def main():
             # 2026-10-15 用户口径：年级成绩分析结果公开 —— 他班汇总不再拒绝
             check('班主任：他班汇总可查（年级聚合公开）',
                   await call('get_class_score_summary',
-                             {'exam_id': exam_id, 'class_name': home['other_class']}),
+                             {'exam_id': exam_id, 'class_name': home['other_class'],
+                              'view': 'full'}),
                   must_contain=['subject_avg'])
             whole = _data(await call('get_class_score_summary', {'exam_id': exam_id}))
             whole_rows = whole.get('classes') or []
@@ -365,11 +489,19 @@ async def main():
                   await call('list_classes', {'exam_id': exam_id}),
                   must_contain=[home['class_name']])
             detail = await call('get_class_score_detail',
-                                {'exam_id': exam_id, 'class_name': home['class_name']})
+                                {'exam_id': exam_id, 'class_name': home['class_name'],
+                                 'view': 'full'})
             check('班主任：逐生明细可查', detail, must_contain=['student_count'])
             detail_rows = _data(detail).get('students') or []
             expect('班主任：逐生明细含总分与排名',
-                   bool(detail_rows) and all('total_score' in r for r in detail_rows))
+                   bool(detail_rows) and all('total' in r for r in detail_rows))
+            brief_detail = await call('get_class_score_detail',
+                                      {'exam_id': exam_id,
+                                       'class_name': home['class_name']})
+            expect('省额度：逐生明细 brief＝列式（cols+rows，不重复键名）',
+                   isinstance(_data(brief_detail).get('students'), dict)
+                   and 'cols' in (_data(brief_detail).get('students') or {}),
+                   f'样例={str(_data(brief_detail).get("students"))[:120]}')
             check('班主任：他班逐生明细被拒',
                   await call('get_class_score_detail',
                              {'exam_id': exam_id, 'class_name': home['other_class']}),
@@ -413,7 +545,8 @@ async def main():
             lambda: _pick_exam(teacher['grade'], teacher['class_name']))
         if exam_id:
             text = await call('get_class_score_summary',
-                              {'exam_id': exam_id, 'class_name': teacher['class_name']})
+                              {'exam_id': exam_id, 'class_name': teacher['class_name'],
+                               'view': 'full'})
             check('任课教师：所教班级可查', text, must_contain=['subject_avg'])
             data = _data(text)
             rows = data.get('classes') or []
@@ -434,12 +567,14 @@ async def main():
                    f'班数={len(whole_rows)}')
             check('任课教师：他班汇总可查（年级聚合公开）',
                   await call('get_class_score_summary',
-                             {'exam_id': exam_id, 'class_name': teacher['other_class']}),
+                             {'exam_id': exam_id, 'class_name': teacher['other_class'],
+                              'view': 'full'}),
                   must_contain=['subject_avg'])
             # R1 新口径：任课＝年级×学科 → 清单给出该年级**全部班**（含非任教班），
             # 但每行仍标出"可见学科＝所教学科、总分口径不可见"（清单只影响可下钻范围）
             cls_rows = _data(await call('list_classes',
-                                        {'exam_id': exam_id})).get('classes') or []
+                                        {'exam_id': exam_id,
+                                         'view': 'full'})).get('classes') or []
             expect('任课教师：班级清单含同年级非任教班（年级×学科口径）',
                    any(r.get('class_name') == teacher['other_class'] for r in cls_rows),
                    f'清单={[r.get("class_name") for r in cls_rows]}')
@@ -450,13 +585,14 @@ async def main():
                                           for r in cls_rows),
                    f'样例={cls_rows[:1]}')
             detail = await call('get_class_score_detail',
-                                {'exam_id': exam_id, 'class_name': teacher['class_name']})
+                                {'exam_id': exam_id, 'class_name': teacher['class_name'],
+                                 'view': 'full'})
             check('任课教师：逐生明细可查', detail, must_contain=['student_count'])
             detail_rows = _data(detail).get('students') or []
             expect('任课教师：逐生明细只含所教学科且无总分',
                    bool(detail_rows) and all(
-                       set(r.get('scores') or {}) <= {teacher['subject']}
-                       and 'total_score' not in r for r in detail_rows),
+                       teacher['subject'] in r and 'total' not in r
+                       for r in detail_rows),
                    f'样例：{detail_rows[:1]}')
             ctx = _data(detail).get('grade_context') or {}
             expect('年级维度：逐生明细附"本班位次 + 年级基准 + 各班横向"',
@@ -475,12 +611,13 @@ async def main():
             other_rows = _data(await call('get_class_score_detail',
                                           {'exam_id': exam_id,
                                            'class_name': teacher['other_class'],
-                                           'subject': teacher['subject']})
+                                           'subject': teacher['subject'],
+                                           'view': 'full'})
                                ).get('students') or []
             expect('任课教师：他班逐生明细＝仅所教学科、无总分（年级×学科）',
                    bool(other_rows) and all(
-                       set(r.get('scores') or {}) <= {teacher['subject']}
-                       and 'total_score' not in r for r in other_rows),
+                       teacher['subject'] in r and 'total' not in r
+                       for r in other_rows),
                    f'样例={other_rows[:1]}')
             check('任课教师：他班逐生明细指定他科被拒',
                   await call('get_class_score_detail',
@@ -504,7 +641,7 @@ async def main():
             _nl = await call('get_layer_online_stats', {'exam_id': exam_id})
             check('任课教师：分层上线统计可查（聚合公开；未划线属正常）',
                   _nl, expect_ok=None)
-            if '"ok": true' in _nl:
+            if _is_ok(_nl):
                 # 2026-10-15：网页「划线分层」对全体教师只读展示 → AI 端同口径带上分数线
                 expect('任课教师：已划线场次的返回体带各层分数线（lines + lower）',
                        '"lines"' in _nl and '"lower"' in _nl, _nl[:200])
@@ -530,7 +667,10 @@ async def main():
 
     bootstrap.warm_up('admin')
     check('切回管理员：恢复全校可见',
-          await call('list_my_score_scope', {}), must_contain=['"full_school": true'])
+          await call('list_my_score_scope', {}), must_contain=['"full_school":true'])
+
+    # ── 限时练（独立库 timed.db，同一批工具 kind=timed） ──────────
+    await timed_cases(call)
 
     # ── 接入认证（account 模式：账号密码 + 拒绝策略，端到端） ──────
     await run_account_mode_cases(_record, len(EXPECTED_TOOLS))

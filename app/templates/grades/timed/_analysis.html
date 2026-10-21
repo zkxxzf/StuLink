@@ -1,0 +1,168 @@
+{# 限时练成绩总览分析
+   （.timed-tbl 字号样式已上移到 detail.html，4 个页签共用）
+   2026-10-20 用户口径（最终版）：每个学科 **两组「图 + 表」**——
+     ① 人数：左 = 各班各名次段的堆积图，右 = 人数表（班级 × 各段人数）
+     ② 去差均分：左 = 各班去差均分柱状图，右 = 表（班级 × 去差均分 + 各段均分）
+   最高分 / 最低分两列已按用户要求删掉（2026-10-20），均分改用去差均分。
+   一次展开全部学科，不再按科目切换；每张表可单独下载图片。 #}
+{% if empty_subjects %}
+<div class="alert alert-light border">
+    还没有成绩，先到
+    <a href="{{ url_for('grades.timed_detail', tid=exam.id, tab='import') }}">数据导入</a>
+    导入一科。
+</div>
+{% else %}
+
+{# 堆积图配色只在 static/js/timed_analysis_charts.js 里维护一份（模板不再重复） #}
+{% for b in blocks %}
+{% set i = loop.index %}
+<div class="card mb-3">
+    <div class="card-header d-flex justify-content-between align-items-center py-2 flex-wrap gap-2">
+        <div>
+            <span class="fw-semibold">{{ b.subject }}</span>
+            <span class="text-muted small ms-2">
+                {{ b.analysis.student_count }} 人 · {{ b.analysis.class_count }} 个班 ·
+                分层：{{ b.analysis.template_name }}
+            </span>
+        </div>
+    </div>
+    <div class="card-body py-2">
+
+        {# ---------- ① 人数：左堆积图 / 右人数表 ---------- #}
+        <div class="row g-3 align-items-start">
+            {# 2026-10-20 用户口径：图加高、宽度收窄 —— 纵轴可读，表格也能完整展开 #}
+            <div class="col-xl-3 col-lg-3">
+                <div class="timed-chart" data-chart="cntData{{ i }}" data-type="stack"
+                     style="height:380px;"></div>
+            </div>
+            <div class="col-xl-9 col-lg-9">
+                <div class="d-flex justify-content-between align-items-center mb-1">
+                    <span class="small text-muted"><i class="bi bi-people"></i> 人数</span>
+                    <button class="btn btn-sm btn-link p-0 text-decoration-none" type="button"
+                            data-timed-shot data-table="cntTable{{ i }}"
+                            data-title="{{ exam.display_name() }} · {{ b.subject }} · 人数"
+                            data-sub="{{ exam.grade }} · {{ exam.exam_date.strftime('%Y-%m-%d') }} · {{ b.analysis.student_count }} 人 / {{ b.analysis.class_count }} 个班"
+                            data-file="{{ exam.grade }}_{{ b.subject }}_人数分布">
+                        <i class="bi bi-download"></i> 下载图片
+                    </button>
+                </div>
+                <div class="table-responsive">
+                    <table class="table table-sm table-hover align-middle mb-0 timed-tbl"
+                           id="cntTable{{ i }}">
+                        {# 表头必须在 <thead> 里：copy_image 取 tHead 画 PNG，
+                           且 base.html 的表头底色/吸顶样式只对 thead th 生效 #}
+                        <thead>
+                        <tr>
+                            <th class="text-nowrap">班级</th>
+                            <th class="text-nowrap" style="width:1%;">任课教师</th>
+                            <th class="text-end text-nowrap">人数</th>
+                            {% for lay in b.analysis.layers %}
+                            <th class="text-end text-nowrap" title="{{ lay.label }}">{{ lay.name }}</th>
+                            {% endfor %}
+                        </tr>
+                        </thead>
+                        <tbody>
+                        {% for r in b.analysis.rows %}
+                        <tr>
+                            <td class="text-nowrap">{{ r.class_name }}</td>
+                            <td class="text-nowrap small">{{ r.teacher or '—' }}</td>
+                            <td class="text-end">{{ r.count }}</td>
+                            {% for band in r.bands %}
+                            <td class="text-end">{{ band.count }}</td>
+                            {% endfor %}
+                        </tr>
+                        {% endfor %}
+                        </tbody>
+                        <tfoot>
+                        <tr class="fw-semibold table-light">
+                            <td>合计</td>
+                            <td></td>
+                            <td class="text-end">{{ b.analysis.total.count }}</td>
+                            {% for band in b.analysis.total.bands %}
+                            <td class="text-end">{{ band.count }}</td>
+                            {% endfor %}
+                        </tr>
+                        </tfoot>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <hr class="my-2">
+
+        {# ---------- ② 去差均分：左柱状图 / 右去差均分表 ---------- #}
+        <div class="row g-3 align-items-start">
+            <div class="col-xl-3 col-lg-3">
+                <div class="timed-chart" data-chart="avgData{{ i }}" data-type="bar"
+                     style="height:380px;"></div>
+            </div>
+            <div class="col-xl-9 col-lg-9">
+                <div class="d-flex justify-content-between align-items-center mb-1">
+                    <span class="small text-muted"><i class="bi bi-graph-up"></i> 去差均分</span>
+                    <button class="btn btn-sm btn-link p-0 text-decoration-none" type="button"
+                            data-timed-shot data-table="avgTable{{ i }}"
+                            data-title="{{ exam.display_name() }} · {{ b.subject }} · 去差均分"
+                            data-sub="{{ exam.grade }} · {{ exam.exam_date.strftime('%Y-%m-%d') }} · {{ b.analysis.student_count }} 人 / {{ b.analysis.class_count }} 个班"
+                            data-file="{{ exam.grade }}_{{ b.subject }}_去差均分">
+                        <i class="bi bi-download"></i> 下载图片
+                    </button>
+                </div>
+                <div class="table-responsive">
+                    <table class="table table-sm table-hover align-middle mb-0 timed-tbl"
+                           id="avgTable{{ i }}">
+                        <thead>
+                        <tr>
+                            <th class="text-nowrap">班级</th>
+                            <th class="text-nowrap" style="width:1%;">任课教师</th>
+                            <th class="text-end text-nowrap"
+                                title="剔除本班该科末尾 N 人后重算（N = 班型去差名额，卓越班 2 人、其它班型不去差）">去差均分</th>
+                            {% for lay in b.analysis.layers %}
+                            <th class="text-end text-nowrap" title="{{ lay.label }}的均分">{{ lay.name }}</th>
+                            {% endfor %}
+                        </tr>
+                        </thead>
+                        <tbody>
+                        {% for r in b.analysis.rows %}
+                        <tr>
+                            <td class="text-nowrap">{{ r.class_name }}</td>
+                            <td class="text-nowrap small">{{ r.teacher or '—' }}</td>
+                            <td class="text-end fw-semibold">{{ r.trim_avg if r.trim_avg is not none else '—' }}</td>
+                            {% for la in r.layer_avgs %}
+                            <td class="text-end text-muted">{{ la.avg if la.avg is not none else '—' }}</td>
+                            {% endfor %}
+                        </tr>
+                        {% endfor %}
+                        </tbody>
+                        <tfoot>
+                        <tr class="fw-semibold table-light">
+                            <td>合计</td>
+                            <td></td>
+                            <td class="text-end">{{ b.analysis.total.trim_avg if b.analysis.total.trim_avg is not none else '—' }}</td>
+                            {% for la in b.analysis.layer_avgs %}
+                            <td class="text-end">{{ la.avg if la.avg is not none else '—' }}</td>
+                            {% endfor %}
+                        </tr>
+                        </tfoot>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+    </div>
+</div>
+<script type="application/json" id="cntData{{ i }}">{{ b.count_chart|tojson }}</script>
+<script type="application/json" id="avgData{{ i }}">{{ b.avg_chart|tojson }}</script>
+{% endfor %}
+
+<div class="text-muted small">
+    口径：<b>去差均分</b>＝按班型去差名额（卓越班 2 人，其它班型不去差）
+    剔除该班该科成绩末尾 N 人后重算，缺考不记成绩、不计入分母；
+    合计行＝各班去差后合并。
+    分层层名「前N」= 全年级该科名次 ≤ N（累积门槛，同分同名次、后延跳号），
+    所以人数表里「前10 的 6 人」也包含在「前20 的 15 人」里；
+    堆积图用的是**互斥段人数**（相邻两层之差），各段相加 = 该班人数。
+    <br>
+    分层按实考人数自适应：<b>不足 100 人</b>按 10 人一组（前10、前20…刚好覆盖全体）；
+    <b>够 100 人</b>沿用模板层，但<b>门槛超过实考人数的层不再显示</b>（无区分度）。
+</div>
+{% endif %}

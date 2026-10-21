@@ -26,6 +26,11 @@ class User(UserMixin, db.Model):
     uuid = db.Column(db.String(36), unique=True, index=True,
                      default=lambda: str(_uuid.uuid4()))
     username = db.Column(db.String(50), unique=True, nullable=False)
+    # 2026-10-20：账号手机号（可选）——用于「手机号登录」与个人信息展示。
+    # 与 students 同套路：随机 IV 加密存储 + HMAC 盲索引（登录时精确等值查询），
+    # 页面一律脱敏展示；留空 = 该账号只能用用户名登录。
+    _phone_encrypted = db.Column('phone', db.String(256))
+    phone_idx = db.Column(db.String(64), index=True)
     password_hash = db.Column(db.String(256), nullable=False)
     real_name = db.Column(db.String(50), nullable=False)
     role = db.Column(db.String(20), nullable=False)  # 管理员/宿管教师/班主任/普通教师
@@ -54,6 +59,38 @@ class User(UserMixin, db.Model):
 
     def check_password(self, password):
         return check_password_hash(self.password_hash, password)
+
+    # ---- 手机号（随机 IV 加密 + 盲索引，支持手机号登录） ----
+    @property
+    def phone(self):
+        if not self._phone_encrypted:
+            return None
+        from app.utils.crypto import decrypt
+        try:
+            return decrypt(self._phone_encrypted)
+        except Exception:   # noqa: BLE001  密钥轮换/脏数据：当作未填，不影响登录
+            return None
+
+    @phone.setter
+    def phone(self, value):
+        from app.utils.crypto import blind_index, encrypt_rand
+        value = (value or '').strip()
+        self._phone_encrypted = encrypt_rand(value) if value else None
+        self.phone_idx = blind_index(value) if value else None
+
+    @property
+    def phone_masked(self):
+        """脱敏展示：138****8000（页面/日志一律用这个，不输出完整号码）"""
+        p = self.phone
+        if not p:
+            return ''
+        return f'{p[:3]}****{p[-4:]}' if len(p) >= 7 else p
+
+    @staticmethod
+    def phone_index(value):
+        """手机号盲索引（登录与唯一性校验；与 students 同一密钥与规范化口径）"""
+        from app.utils.crypto import blind_index
+        return blind_index(value)
 
     @property
     def role_display(self):

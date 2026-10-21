@@ -1,4 +1,4 @@
-# StuLink v1.19.49.47 2026-10-10
+# StuLink v1.19.49.50 2026-10-10
 # 教师工作台：我的信息 / 今日课程 / 我的课表 / 我的业绩 / 手机号修改
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 import re
@@ -66,11 +66,11 @@ def index():
     pending_swaps = []
     partner_pending = []
     active_term = None
-    # 2026-10-13（v1.19.49.47）：调课入口挂到工作台 —— 能否申请由 academic.swap 决定，
+    # 2026-10-13（v1.19.49.50）：调课入口挂到工作台 —— 能否申请由 academic.swap 决定，
     # 菜单/按钮可见性与 perm_required 保持一致，避免"看得见、点了 403"。
     can_swap = current_user.has_perm('academic.swap')
     is_head = (current_user.role == 'homeroom_teacher')
-    # 2026-10-13（v1.19.49.47）：左侧「个人工作」菜单已精简，工作台内需自备这些入口
+    # 2026-10-13（v1.19.49.50）：左侧「个人工作」菜单已精简，工作台内需自备这些入口
     can_class_view = current_user.has_perm('workbench.class_view')
     can_records = current_user.has_perm('workbench.records')
     can_attendance = current_user.has_perm('workbench.attendance_view')
@@ -143,7 +143,7 @@ def index():
                                          teacher.teacher_uid)
             partner_pending = []
 
-    # 2026-10-13（v1.19.49.47）：班主任在工作台直接看**本班班级课表**（多个班用页签切换）。
+    # 2026-10-13（v1.19.49.50）：班主任在工作台直接看**本班班级课表**（多个班用页签切换）。
     # 取数与教务端班级课表同源（get_class_view），并沿用同一套可见范围，避免越权。
     class_schedules = []
     if is_head and active_term:
@@ -164,7 +164,7 @@ def index():
                                          current_user.id)
             class_schedules = []
 
-    # 2026-10-13（v1.19.49.47）：待办与通知 —— 换课待我确认 / 问卷待填 / 最近通知 + 未读数
+    # 2026-10-13（v1.19.49.50）：待办与通知 —— 换课待我确认 / 问卷待填 / 最近通知 + 未读数
     try:
         todo = todo_service.get_teacher_todo(current_user, teacher)
     except Exception:                       # 聚合层已逐项降级，这里只兜底
@@ -262,6 +262,12 @@ def change_phone():
     if exist and exist.id != current_user.id:
         flash('该手机号已被其他账号使用', 'danger')
         return _back()
+    # 2026-10-20：账号手机号改为加密列 + 盲索引（登录按索引匹配），同样要查重
+    taken = User.query.filter_by(
+        phone_idx=User.phone_index(new_phone)).first()
+    if taken and taken.id != current_user.id:
+        flash('该手机号已被其他账号使用', 'danger')
+        return _back()
     if teacher:
         # 2026-10-19：手机号加密存储，查重改走盲索引
         dup = Teacher.query.filter_by(
@@ -270,14 +276,15 @@ def change_phone():
             flash('该手机号已被其他教师使用', 'danger')
             return _back()
 
-    old_username = current_user.username
-    current_user.username = new_phone
+    # 2026-10-20：手机号写进账号手机号（users.phone），**不再覆盖 username** ——
+    # 用户名是稳定账号标识（工号/拼音），登录同时支持「用户名」与「手机号」。
+    current_user.phone = new_phone
     if teacher:
         teacher.phone = new_phone
     db.session.commit()
     log_operation(current_user, '修改', '手机号', current_user.id,
-                  f'{old_username} → {new_phone}', module='workbench')
-    flash('手机号已更新，下次登录请使用新手机号', 'success')
+                  f'新号 {current_user.phone_masked}', module='workbench')
+    flash('手机号已更新，下次可用新手机号登录（用户名不变）', 'success')
     return _back()
 
 

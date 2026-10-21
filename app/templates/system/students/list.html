@@ -39,7 +39,7 @@ th.col-dorm-head { background: var(--sl-surface-3) !important; }
             <i class="bi bi-arrow-left-right"></i> 批量调班
         </button>
         {% endif %}
-        {# v1.19.49.47 调班记录总览 #}
+        {# v1.19.49.50 调班记录总览 #}
         <a href="{{ url_for('students.class_changes') }}" class="btn btn-outline-info">
             <i class="bi bi-clock-history"></i> 调班记录
         </a>
@@ -98,6 +98,7 @@ th.col-dorm-head { background: var(--sl-surface-3) !important; }
                     </th>
                     {% endif %}
                     <th>学号</th>
+                    <th class="text-nowrap" title="智学网考号（学生档案上的固定号，来自智学网名单/成绩）">智学网考号</th>
                     <th>姓名</th>
                     <th>性别</th>
                     <th>年级</th>
@@ -122,6 +123,8 @@ th.col-dorm-head { background: var(--sl-surface-3) !important; }
                     {% endif %}
                     <th><input type="text" name="student_number" placeholder="学号"
                            value="{{ request.args.get('student_number','') }}" onkeydown="if(event.key==='Enter')this.form.submit()" aria-label="学号"></th>
+                    <th><input type="text" name="zhixue_no" placeholder="智学网考号"
+                           value="{{ request.args.get('zhixue_no','') }}" onkeydown="if(event.key==='Enter')this.form.submit()" aria-label="智学网考号"></th>
                     <th><input type="text" name="name" placeholder="姓名"
                            value="{{ request.args.get('name','') }}" onkeydown="if(event.key==='Enter')this.form.submit()" aria-label="姓名"></th>
                     <th><select name="gender" onchange="this.form.submit()" aria-label="性别">
@@ -188,6 +191,10 @@ th.col-dorm-head { background: var(--sl-surface-3) !important; }
                         <span class="text-danger fw-bold"><i class="bi bi-exclamation-triangle"></i> 缺少学号</span>
                         {% endif %}
                     </td>
+                    <td class="text-nowrap">
+                        {% if s.zhixue_no %}<small class="font-monospace">{{ s.zhixue_no }}</small>
+                        {% else %}<span class="text-muted">-</span>{% endif %}
+                    </td>
                     <td><a href="{{ url_for('students.detail', id=s.id) }}" class="text-decoration-none fw-bold">{{ s.name }}</a></td>
                     <td>
                         {% if s.gender == '男' %}
@@ -198,7 +205,7 @@ th.col-dorm-head { background: var(--sl-surface-3) !important; }
                     </td>
                     <td>{{ s.grade }}</td>
                     <td>{{ s.class_name }}</td>
-                    {# v1.19.49.47 调班次数：点击跳到调班记录（按学号筛选） #}
+                    {# v1.19.49.50 调班次数：点击跳到调班记录（按学号筛选） #}
                     <td class="text-center">
                         {% set cc = change_counts.get(s.id, 0) %}
                         {% if cc %}
@@ -395,7 +402,7 @@ th.col-dorm-head { background: var(--sl-surface-3) !important; }
                             </select>
                         </div>
                     </div>
-                    {# v1.19.49.47 调班记录：变更性质（写入变迁日志，用于区分真实换班与改错） #}
+                    {# v1.19.49.50 调班记录：变更性质（写入变迁日志，用于区分真实换班与改错） #}
                     <div class="mb-2">
                         <label for="transferKind" class="form-label">变更性质</label>
                         <select class="form-select" id="transferKind" name="class_change_kind">

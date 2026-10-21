@@ -7,7 +7,8 @@ from app.utils.password_policy import validate_password, MIN_LENGTH
 
 
 class LoginForm(FlaskForm):
-    username = StringField('用户名', validators=[DataRequired(message='请输入用户名')])
+    username = StringField('用户名 / 手机号',
+                           validators=[DataRequired(message='请输入用户名或手机号')])
     password = PasswordField('密码', validators=[DataRequired(message='请输入密码')])
 
 

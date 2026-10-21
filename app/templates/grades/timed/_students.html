@@ -1,0 +1,186 @@
+{# 限时练「学生成绩」= 汇总表
+   一行一个学生：各科分数（下方小字=该科 T）+ 总分（小字=总分 T）+ 两列名次。
+   2026-10-20 用户口径：成绩单页已删除；**支持学号/姓名搜索 + 分页（50 人/页）**，
+   不再一次性把 500 多人全渲染出来。 #}
+{% if empty_subjects %}
+<div class="alert alert-light border">
+    还没有成绩，先到
+    <a href="{{ url_for('grades.timed_detail', tid=exam.id, tab='import') }}">数据导入</a>
+    导入一科。
+</div>
+{% else %}
+
+{% set base = url_for('grades.timed_detail', tid=exam.id) ~ '?tab=students&per=' ~ summary.per_page %}
+{% if summary.q %}{% set base = base ~ '&q=' ~ (summary.q|urlencode) %}{% endif %}
+
+<div class="d-flex flex-wrap gap-2 align-items-center mb-2">
+    <span class="text-muted small me-1"><i class="bi bi-people"></i> 班级</span>
+    <a class="btn btn-sm {{ 'btn-primary' if not class_name else 'btn-outline-secondary' }}"
+       href="{{ base }}">全部</a>
+    {% for c in summary.classes %}
+    <a class="btn btn-sm {{ 'btn-primary' if c == class_name else 'btn-outline-secondary' }}"
+       href="{{ base }}&class={{ c|urlencode }}">{{ c }}</a>
+    {% endfor %}
+
+    <form class="d-flex gap-1 ms-2" method="get"
+          action="{{ url_for('grades.timed_detail', tid=exam.id) }}">
+        <input type="hidden" name="tab" value="students">
+        {# 搜索不能把「每页条数」重置成默认值 #}
+        <input type="hidden" name="per" value="{{ summary.per_page }}">
+        {% if class_name %}<input type="hidden" name="class" value="{{ class_name }}">{% endif %}
+        <input class="form-control form-control-sm" style="width:180px;" name="q"
+               value="{{ summary.q }}" placeholder="学号 / 姓名">
+        <button class="btn btn-sm btn-outline-primary" type="submit">
+            <i class="bi bi-search"></i>
+        </button>
+        {% if summary.q %}
+        <a class="btn btn-sm btn-outline-secondary"
+           href="{{ url_for('grades.timed_detail', tid=exam.id) }}?tab=students{% if class_name %}&class={{ class_name|urlencode }}{% endif %}">清空</a>
+        {% endif %}
+    </form>
+
+    <div class="ms-auto d-flex align-items-center gap-2">
+        <span class="text-muted small">
+            {{ summary.count }} 人 · {{ summary.subjects|length }} 科
+            {% if summary.pages > 1 %}（第 {{ summary.page }}/{{ summary.pages }} 页）{% endif %}
+        </span>
+        <label class="text-muted small mb-0" for="pageSize">每页</label>
+        <select class="form-select form-select-sm" id="pageSize" style="width:auto;"
+                title="跟随「我的设置 → 列表每页条数」，改了会记住">
+            {% for n in [20, 50, 100, 200] %}
+            <option value="{{ n }}" {% if n == summary.per_page %}selected{% endif %}>{{ n }}</option>
+            {% endfor %}
+        </select>
+        <a class="btn btn-sm btn-outline-success"
+           href="{{ url_for('grades.timed_export_summary', tid=exam.id,
+                            class=class_name or None, q=summary.q or None) }}">
+            <i class="bi bi-file-earmark-excel"></i> 导出 Excel
+        </a>
+    </div>
+</div>
+
+<div class="card">
+    <table class="table table-sm table-hover align-middle mb-0 timed-tbl"
+           id="timedSummaryTable">
+        <thead class="table-light">
+        <tr>
+            <th class="text-nowrap">学号</th>
+            <th class="text-nowrap">姓名</th>
+            <th class="text-nowrap">班级</th>
+            {% for s in summary.subjects %}
+            <th class="text-end text-nowrap">{{ s }}</th>
+            {% endfor %}
+            <th class="text-end text-nowrap" title="下方浅色小字为该生总分 T 分">总分</th>
+            <th class="text-end text-nowrap">年级名次</th>
+            <th class="text-end text-nowrap">班级名次</th>
+        </tr>
+        </thead>
+        <tbody>
+        {% for r in summary.rows %}
+        <tr>
+            <td class="text-muted text-nowrap">{{ r.student_no }}</td>
+            <td class="text-nowrap">
+                <a href="{{ url_for('grades.timed_student_detail', tid=exam.id, student_no=r.student_no) }}"
+                   title="查看 {{ r.name }} 的全部场次成绩与 T 分走势">{{ r.name }}</a>
+            </td>
+            <td class="text-nowrap">{{ r.class_name }}</td>
+            {% for s in summary.subjects %}
+            {% set tv = r.ts.get(s) %}
+            <td class="text-end text-nowrap">
+                <div>{{ r.scores.get(s, '—') }}</div>
+                {% if tv is not none %}
+                <div class="text-muted t-sub">T {{ tv }}</div>
+                {% endif %}
+            </td>
+            {% endfor %}
+            <td class="text-end fw-semibold text-nowrap">
+                <div>{{ r.total }}</div>
+                {% if r.t is not none %}
+                <div class="text-muted fw-normal t-sub">T {{ r.t }}</div>
+                {% endif %}
+            </td>
+            <td class="text-end">{{ r.rank_grade }}</td>
+            <td class="text-end">{{ r.rank_class }}</td>
+        </tr>
+        {% else %}
+        <tr><td colspan="{{ 6 + summary.subjects|length }}"
+                class="text-center text-muted py-4">
+            {% if summary.q %}没有匹配「{{ summary.q }}」的学生{% else %}暂无成绩{% endif %}
+        </td></tr>
+        {% endfor %}
+        </tbody>
+    </table>
+</div>
+
+{% if summary.pages > 1 %}
+{% set nav_base = base %}{% if class_name %}{% set nav_base = nav_base ~ '&class=' ~ (class_name|urlencode) %}{% endif %}
+<nav class="mt-2">
+    <ul class="pagination pagination-sm mb-1">
+        <li class="page-item {{ 'disabled' if summary.page <= 1 }}">
+            <a class="page-link" href="{{ nav_base }}&page={{ summary.page - 1 }}">上一页</a>
+        </li>
+        {% for p in range(1, summary.pages + 1) %}
+        {% if p == 1 or p == summary.pages or (p >= summary.page - 2 and p <= summary.page + 2) %}
+        <li class="page-item {{ 'active' if p == summary.page }}">
+            <a class="page-link" href="{{ nav_base }}&page={{ p }}">{{ p }}</a>
+        </li>
+        {% elif p == 2 or p == summary.pages - 1 %}
+        <li class="page-item disabled"><span class="page-link">…</span></li>
+        {% endif %}
+        {% endfor %}
+        <li class="page-item {{ 'disabled' if summary.page >= summary.pages }}">
+            <a class="page-link" href="{{ nav_base }}&page={{ summary.page + 1 }}">下一页</a>
+        </li>
+    </ul>
+</nav>
+{% endif %}
+
+<div class="text-muted small mt-2">
+    总分 = 已导入各科之和（限时练不存总分行，按当前科目现算）；
+    名次按总分降序、同分并列；班级名次在同班内部再排。
+    <b>T 分数</b> = 10 ×（个人分 − 同群体均分）÷ 标准差 + 50：
+    每科分数下方浅色小字是<b>该科 T 分</b>（同科内比），总分下方是<b>总分 T 分</b>；
+    50 = 与平均持平，60 = 高一个档次，40 = 低一个档次。
+    某科实考少于 {{ summary.t_min }} 人时该科不算 T 分。
+    {% if not summary.t_ready %}
+    <span class="text-danger">本场实考不足 {{ summary.t_min }} 人，总分 T 分不计算。</span>
+    {% endif %}
+    分数有误请重新导入该科覆盖（同科重导 = 整科覆盖）。
+</div>
+
+<script>
+(function () {
+    // 每页条数：跟随「我的设置 → 列表每页条数」（本机偏好 stulink.pref.size），
+    // 这里改了也会写回同一份偏好，别的列表页跟着变。
+    var sel = document.getElementById('pageSize');
+    if (!sel) { return; }
+    var PREF_KEY = 'stulink.pref';
+
+    function readPref() {
+        try { return JSON.parse(localStorage.getItem(PREF_KEY) || '{}'); }
+        catch (e) { return {}; }
+    }
+    function urlWith(per) {
+        var u = new URL(location.href);
+        u.searchParams.set('per', per);
+        u.searchParams.delete('page');
+        return u.toString();
+    }
+
+    var hasPer = new URL(location.href).searchParams.get('per');
+    if (!hasPer) {
+        var pref = readPref();
+        if (pref.size && String(pref.size) !== sel.value) {
+            location.replace(urlWith(pref.size));
+            return;
+        }
+    }
+    sel.addEventListener('change', function () {
+        var p = readPref();
+        p.size = parseInt(sel.value, 10) || 50;
+        try { localStorage.setItem(PREF_KEY, JSON.stringify(p)); } catch (e) { /* 忽略 */ }
+        location.href = urlWith(sel.value);
+    });
+})();
+</script>
+{% endif %}

@@ -175,6 +175,8 @@ def list_students():
     filter_enrollment = request.args.get('enrollment_status', '')
     filter_name = request.args.get('name', '').strip()
     filter_student_number = request.args.get('student_number', '').strip()
+    # 2026-10-20：智学网考号（学生档案固定号，支持前缀/片段搜索）
+    filter_zhixue_no = request.args.get('zhixue_no', '').strip()
 
     # 班级必须与年级成对使用：只按班级名筛选会串到其他年级的同名班级
     if filter_class and not filter_grade:
@@ -196,6 +198,8 @@ def list_students():
         query = query.filter(Student.name.contains(filter_name))
     if filter_student_number:
         query = query.filter(Student.student_number.contains(filter_student_number))
+    if filter_zhixue_no:
+        query = query.filter(Student.zhixue_no.contains(filter_zhixue_no))
     
     # 分页参数
     page = request.args.get('page', 1, type=int)

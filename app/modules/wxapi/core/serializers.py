@@ -1,4 +1,4 @@
-# StuLink v1.19.49.47 2026-10-18
+# StuLink v1.19.49.50 2026-10-18
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 """小程序数据裁剪层。
 
@@ -56,7 +56,19 @@ def exam_item(exam):
         'type': _pick(exam, 'exam_type') or '',
         'term': _pick(exam, 'term') or '',
         'grade': _pick(exam, 'grade') or '',
+        # 2026-10-20：批次选择器与网页一致显示「高一上…」
+        'semester': _exam_semester(exam),
     }
+
+
+def _exam_semester(exam):
+    """模型取 semester_label()；dict 结构退回自身 semester 字段。"""
+    try:
+        if hasattr(exam, 'semester_label'):
+            return exam.semester_label() or ''
+    except Exception:  # noqa: BLE001  # 仅展示字段，失败留空
+        return ''
+    return _pick(exam, 'semester') or ''
 
 
 def student_item(stu):

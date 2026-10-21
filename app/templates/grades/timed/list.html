@@ -1,0 +1,118 @@
+{% extends "base.html" %}
+{% block title %}限时练 - 成绩管理{% endblock %}
+{% block content %}
+<div class="d-flex justify-content-between align-items-start mb-3 flex-wrap gap-2">
+    <div class="d-flex align-items-baseline flex-wrap gap-2">
+        <h4 class="mb-0"><i class="bi bi-stopwatch"></i> 限时练</h4>
+        <span class="text-muted small">
+            单科导入 · 单科分析；与普通考试的列表、成绩完全隔离
+        </span>
+    </div>
+    {% if can_create %}
+    <a href="{{ url_for('grades.timed_new') }}" class="btn btn-primary">
+        <i class="bi bi-plus-lg"></i> 新建限时练
+    </a>
+    {% endif %}
+</div>
+
+<div class="d-flex flex-wrap gap-2 align-items-center mb-3">
+    <span class="text-muted small me-1"><i class="bi bi-funnel"></i> 年级</span>
+    <a class="btn btn-sm {{ 'btn-primary' if not grade else 'btn-outline-secondary' }}"
+       href="{{ url_for('grades.timed_list', sem=sem) }}">全部</a>
+    {% for g in grade_options %}
+    <a class="btn btn-sm {{ 'btn-primary' if g == grade else 'btn-outline-secondary' }}"
+       href="{{ url_for('grades.timed_list', grade=g, sem=sem) }}">{{ g }}</a>
+    {% endfor %}
+
+    <span class="text-muted small ms-2">学期</span>
+    <select class="form-select form-select-sm w-auto"
+            title="按自然学期分档：一个学期里高一/高二/高三的场次一起显示"
+            onchange="if(this.value){location.href=this.value;}">
+        <option value="{{ url_for('grades.timed_list', grade=grade or None, sem='') }}"
+                {% if is_cur_sem %}selected{% endif %}>本学期（{{ cur_sem_label or '—' }}）</option>
+        {% for key, label in sem_opts %}
+        <option value="{{ url_for('grades.timed_list', grade=grade or None, sem=key) }}"
+                {% if sem == key %}selected{% endif %}>{{ label }}</option>
+        {% endfor %}
+        <option value="{{ url_for('grades.timed_list', grade=grade or None, sem='all') }}"
+                {% if sem == 'all' %}selected{% endif %}>全部学期</option>
+    </select>
+</div>
+
+<div class="card">
+    <div class="table-responsive">
+        <table class="table table-hover align-middle g-table mb-0">
+            <thead>
+            <tr>
+                <th>场次名称</th>
+                <th>年级</th>
+                <th>日期</th>
+                <th>已导入科目</th>
+                <th class="text-end" title="本场出现过的学生数（去重，不是成绩行数）">人数</th>
+                <th>状态</th>
+                <th class="text-end">操作</th>
+            </tr>
+            </thead>
+            <tbody>
+            {% for r in rows %}
+            {% set e = r.e %}
+            <tr class="exam-row" data-href="{{ url_for('grades.timed_detail', tid=e.id) }}"
+                style="cursor:pointer">
+                <td class="wrap">{{ e.display_name() }}
+                    {% set esem = e.semester_label() %}
+                    {% if esem %}<span class="sem-chip ms-1">{{ esem }}</span>{% endif %}</td>
+                <td>{{ e.grade }}</td>
+                <td>{{ e.exam_date.strftime('%Y-%m-%d') }}</td>
+                <td>
+                    {% for s in r.subjects %}
+                    <span class="badge bg-light text-dark border me-1">{{ s }}</span>
+                    {% else %}
+                    <span class="text-muted small">未导入</span>
+                    {% endfor %}
+                </td>
+                <td class="text-end">{{ r.total or '—' }}</td>
+                <td>
+                    {% if e.status == 'imported' %}
+                    <span class="badge bg-success">已导入</span>
+                    {% else %}
+                    <span class="badge bg-secondary">未导入</span>
+                    {% endif %}
+                </td>
+                <td class="text-end text-nowrap">
+                    <a class="btn btn-sm btn-outline-primary"
+                       href="{{ url_for('grades.timed_detail', tid=e.id) }}">打开</a>
+                    {% if can_manage %}
+                    <form method="post" class="d-inline"
+                          action="{{ url_for('grades.timed_delete', tid=e.id) }}"
+                          onsubmit="return confirm('删除这场限时练及其全部成绩？此操作不可恢复。');">
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                        <button class="btn btn-sm btn-outline-danger" type="submit">删除</button>
+                    </form>
+                    {% endif %}
+                </td>
+            </tr>
+            {% else %}
+            <tr><td colspan="7" class="text-center text-muted py-4">
+                {% if is_cur_sem %}
+                本学期还没有限时练，<a href="{{ url_for('grades.timed_list', grade=grade or None, sem='all') }}">查看全部学期</a>
+                {% else %}
+                还没有限时练场次{% if can_create %}，点右上角「新建限时练」开始{% endif %}
+                {% endif %}
+            </td></tr>
+            {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+{% endblock %}
+{% block extra_js %}
+<script>
+$(function () {
+    $('.exam-row').on('click', function (e) {
+        if ($(e.target).closest('a, button, form').length) { return; }
+        var href = $(this).data('href');
+        if (href) { location.href = href; }
+    });
+});
+</script>
+{% endblock %}

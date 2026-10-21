@@ -37,7 +37,8 @@ config_mod.Config.SQLALCHEMY_DATABASE_URI = 'sqlite:///' + os.path.join(_TMP, 's
 config_mod.Config.SQLALCHEMY_BINDS = {
     k: 'sqlite:///' + os.path.join(_TMP, k + '.db')
     for k in ('dormitory', 'history', 'grades', 'points', 'academic', 'inspection',
-              'achievement', 'forms', 'system', 'portrait', 'timetable', 'morality')
+              'achievement', 'forms', 'system', 'portrait', 'timetable',
+              'morality', 'timed')
 }
 config_mod.Config.SECRET_KEY = 'invig-check-secret'
 
@@ -403,7 +404,7 @@ with app.test_client() as c:
     check('环节⑥ 手动指派回避教师被拒', (r.get_json() or {}).get('ok') is False,
           str(r.get_json()))
     # 手动指定：派一个从未被编排的校外监考员 → 允许
-    # 2026-10-13 审计修复：v1.19.49.47 起手动指派与自动编排共用
+    # 2026-10-13 审计修复：v1.19.49.50 起手动指派与自动编排共用
     # 「一人一场次一考场」硬约束，而自动编排已把 12 格填满，
     # 已入池的老师（含校外陈老师）都已被排到某场某考场 —— 再派他们都会被拒
     # （这是产品的正确行为，不是缺陷）。

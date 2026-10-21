@@ -95,7 +95,16 @@ def login():
                   '（或改用本人常用设备登录）', 'danger')
             return render_template('auth/login.html', form=form)
 
-        user = User.query.filter_by(username=(form.username.data or '').strip()).first()
+        identifier = (form.username.data or '').strip()
+        user = User.query.filter_by(username=identifier).first()
+        # 2026-10-20：支持「手机号 + 密码」登录 —— 用户名未命中、且输入形如手机号时，
+        # 走盲索引等值查询（手机号是加密存储的，只能用索引匹配）。
+        if not user:
+            from app.utils.crypto import normalize_phone
+            norm = normalize_phone(identifier)
+            if norm and len(norm) == 11 and norm.startswith('1'):
+                user = User.query.filter_by(
+                    phone_idx=User.phone_index(norm)).first()
         if user and user.is_active and user.check_password(form.password.data):
             # 登录成功，清除尝试记录
             throttle_clear(ip_key)

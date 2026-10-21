@@ -15,9 +15,18 @@
    跨考试按 `COUNT(DISTINCT student_no)` **去重**（同一学生考多场只算 1 人）。
 4. **证明条数**：沿用成绩证明台账的可见口径 —— 管理员看全校，其他用户仅看本人开具的
    （与 `/grades/student-query/cert-records` 一致）。
-5. **动态**：最近考试（按更新时间）/ 最近开具的证明 / 最近改分记录。
-   其中改分记录只对具备教学管理口径的用户返回（admin、`grades.edit`、
-   `grades.score_edit`），避免把改分留痕推到只读身份面前。
+5. **动态**：最近考试（按更新时间）/ 最近**限时练** / 最近开具的证明 /
+   最近改分记录 / 最近**成绩复核**（2026-10-20 用户口径：复核申请与审批进度
+   必须出现在这里）。
+   · 限时练：它已是独立表（`timed_exams`，独立库），不在 `exams` 里，
+     所以必须单独取一源，否则动态里永远看不到限时练的新建 / 导入；
+     条目链接到限时练详情页（常量路径，理由同下文的复核链接）；
+   · 改分记录：只对教学管理口径返回（admin、`grades.edit`、`grades.score_edit`）；
+   · 证明开具：只对管理类身份返回（管理员 / 校长 / 年级长 / 教务主任 / 教务员），
+     普通教师不必知道；
+   · 成绩复核：按 `score_guard.ScoreScope` 收敛 —— **别人发起的也要显示**
+     （同年级同科即可见），不再只推本人操作；可审批者给审批页链接，
+     其他人只有自己的单子可点（别人的单子只作信息展示）。
 """
 from __future__ import annotations
 
@@ -28,7 +37,7 @@ from sqlalchemy import func
 
 from app.extensions import db
 from app.models.grades import (TOTAL_SUBJECT, Certificate, Exam, ExamScore,
-                               ScoreChangeLog)
+                               ScoreChangeLog, ScoreReviewRequest)
 from app.modules.grades.services import scope as scope_service
 
 logger = logging.getLogger(__name__)
@@ -49,6 +58,23 @@ STAGE_ORDER_KEYWORDS = ('期末', '期中', '月考', '限时练', '一测', '�
 RECENT_EXAM_LIMIT = 8
 ACTIVITY_LIMIT = 12
 ACTIVITY_PER_SOURCE = 6
+
+# 成绩复核（score_review_requests）：状态文案与时间线配色
+REVIEW_STATUS_LABEL = {'pending': '待审核', 'approved': '已批准',
+                       'rejected': '已驳回', 'withdrawn': '已撤回'}
+REVIEW_TONE = {'pending': 'danger', 'approved': 'success',
+               'rejected': 'secondary', 'withdrawn': 'secondary'}
+# 复核入口（与 score_review.py 的 bp.route 对应；不能用 url_for —— 本服务
+# 也会在无请求上下文时被调用，如脚本/CLI）
+REVIEW_MANAGE_URL = '/grades/reviews/manage'
+REVIEW_MY_URL = '/grades/reviews'
+# 复核单要按 ScoreScope 逐条过滤（待审的可能被过滤掉），多扫几倍再截断
+REVIEW_SCAN_FACTOR = 10
+
+# 限时练入口（独立表 / 独立库；同样不能用 url_for —— 本服务会被无请求
+# 上下文调用，见 REVIEW_MANAGE_URL 处的说明）
+TIMED_LIST_URL = '/grades/timed'
+TIMED_DETAIL_URL = '/grades/timed/{tid}'
 
 
 def _s(dt, fmt='%Y-%m-%d'):
@@ -99,6 +125,21 @@ def _participants_total(grades):
     return int(n or 0)
 
 
+def _timed_exam_count(grades):
+    """限时练场次数（2026-10-20：限时练改独立表，与 exams 的 exam_type
+    关键词统计分开 —— 否则 KPI 上「限时练」会恒为 0）。"""
+    from app.models.timed import TimedExam
+    if not grades:
+        return 0
+    try:
+        return TimedExam.query.filter(TimedExam.grade.in_(grades)).count()
+    except Exception as e:                          # noqa: BLE001
+        # 与 _cert_stats / _visible_grades 一样 fail-closed：timed.db 没建表
+        # （迁移漏跑）时落地页不能 500，按 0 处理并留痕。
+        logger.warning('dashboard_service.py::_timed_exam_count 异常（按 0 处理）: %s', e)
+        return 0
+
+
 # ==================== 成绩证明 ====================
 
 def can_view_certs(user):
@@ -127,6 +168,35 @@ def _cert_stats(user):
 
 # ==================== 动态 ====================
 
+# 2026-10-20 用户口径：证明开具属于教务/管理事务，**普通教师不必知道** ——
+# 动态里只对 管理员 / 校长 / 年级长 / 教务主任 / 教务员 开放。
+CERT_ACTIVITY_ROLES = {'admin', 'principal', 'grade_leader'}
+CERT_ACTIVITY_GROUPS = {'管理员组', '校长', '年级长组', '教务主任', '教务员'}
+
+
+def _active_group(user):
+    pg = (getattr(user, 'active_group', None)
+          or getattr(user, 'permission_group', None))
+    if pg is None and getattr(user, 'permission_group_id', None):
+        try:                                     # 新建/改组后 backref 未刷新
+            from app.models.permission_group import PermissionGroup
+            pg = PermissionGroup.query.get(user.permission_group_id)
+        except Exception:                        # noqa: BLE001
+            pg = None
+    return pg
+
+
+def can_see_cert_activity(user):
+    """证明开具动态：仅管理类身份可见（比 `can_view_certs` 更严）"""
+    if (user.role or '') in CERT_ACTIVITY_ROLES:
+        return True
+    pg = _active_group(user)
+    if pg is None:
+        return False
+    return ((getattr(pg, 'name', '') or '') in CERT_ACTIVITY_GROUPS
+            or (getattr(pg, 'role', '') or '') in ('principal', 'grade_leader'))
+
+
 def _can_see_changes(user):
     """改分留痕：只有教学管理口径的身份看得到（只读身份不推）"""
     return (user.role == 'admin' or user.has_perm('grades.edit')
@@ -145,6 +215,40 @@ def _exam_activity_items(exams):
             'time': _s(e.updated_at or e.created_at, '%m-%d %H:%M'),
             'sort': e.updated_at or e.created_at or datetime.min,
             'exam_id': e.id,
+        })
+    return items
+
+
+def _timed_activity_items(grades):
+    """最近有动作的限时练场次（2026-10-20 用户口径：动态要包含限时练）
+
+    限时练在独立表 / 独立库，`_exam_activity_items` 那份 `exams` 里没有它；
+    排序用 `updated_at`（新建、导入、改了任何字段都会刷新），所以「刚导入
+    一科」也会冒到前面。只按可见年级收敛，链接直达详情页。
+    """
+    from app.models.timed import TimedExam
+    if not grades:
+        return []
+    try:
+        rows = (TimedExam.query.filter(TimedExam.grade.in_(grades))
+                .order_by(TimedExam.updated_at.desc(), TimedExam.id.desc())
+                .limit(ACTIVITY_PER_SOURCE).all())
+    except Exception as e:                          # noqa: BLE001
+        # 独立库不可用时只是少一个动态源，不能让整个仪表盘挂掉
+        logger.warning('dashboard_service.py::_timed_activity_items 异常（空返回）: %s', e)
+        return []
+    items = []
+    for t in rows:
+        when = t.updated_at or t.created_at
+        items.append({
+            'type': 'timed', 'icon': 'bi-stopwatch', 'tone': 'info',
+            'title': f'{t.grade} · {t.display_name()}',
+            'meta': ' · '.join(p for p in [
+                '限时练', _s(t.exam_date), t.status_label()] if p),
+            'time': _s(when, '%m-%d %H:%M'),
+            'sort': when or datetime.min,
+            'exam_id': None,
+            'url': TIMED_DETAIL_URL.format(tid=t.id),
         })
     return items
 
@@ -187,6 +291,108 @@ def _change_activity_items(exam_ids):
     return items
 
 
+def can_audit_reviews(user):
+    """复核审批权限（与 /grades/reviews/manage 的 perm_required 同口径）"""
+    return user.role == 'admin' or user.has_perm('grades.score_edit')
+
+
+def _review_title(r):
+    """时间线标题：成绩复核 · 考试 · 学生 科目"""
+    who = ' '.join(p for p in [r.student_name or '', r.subject or ''] if p)
+    return '成绩复核 · ' + ' · '.join(p for p in [r.exam_name or '', who] if p)
+
+
+def _review_meta(r):
+    """时间线副标题：申请人 · 增减分 · 状态 （审批人）"""
+    pending = r.status == 'pending'
+    parts = []
+    if r.applicant_name:
+        parts.append(f'{r.applicant_name} 申请')
+    parts.append(f'{r.delta:+g} 分' if r.delta is not None else '增减分未填')
+    parts.append(REVIEW_STATUS_LABEL.get(r.status, r.status or ''))
+    if r.reviewer_name and not pending:
+        parts.append(f'{r.reviewer_name} 审批')
+    return ' · '.join(p for p in parts if p)
+
+
+def _review_scope(user):
+    """复核动态的可见范围：与成绩分析同一份口径（ScoreScope）。
+
+    解析失败一律 fail-closed（返回 None → 不推任何复核动态）。
+    """
+    from app.modules.grades.services import score_guard
+    try:
+        return score_guard.resolve(user)
+    except Exception as e:                                   # noqa: BLE001
+        logger.warning('复核动态范围解析失败，按空集处理: %s', e)
+        return None
+
+
+def _review_visible(sc, r):
+    """这条复核单是否落在本人可见范围内（年级班级 + 学科双收口）"""
+    grade = (r.grade or '').strip()
+    if not grade:
+        return False
+    class_name = (r.class_name or '').strip()
+    if not sc.can_view_class(grade, class_name):
+        return False
+    return sc.can_view_subject(grade, class_name, (r.subject or '').strip())
+
+
+def _review_items(user, sc, audit):
+    """最近复核单（待审优先，最多 ACTIVITY_PER_SOURCE 条）"""
+    if sc is None:
+        return []
+    q = ScoreReviewRequest.query
+    scan = ACTIVITY_PER_SOURCE * REVIEW_SCAN_FACTOR
+    pending_rows = (q.filter(ScoreReviewRequest.status == 'pending')
+                    .order_by(ScoreReviewRequest.id.desc()).limit(scan).all())
+    done_rows = (q.filter(ScoreReviewRequest.status != 'pending')
+                 .order_by(ScoreReviewRequest.reviewed_at.desc())
+                 .limit(scan).all())
+    picked, seen = [], set()
+    for r in list(pending_rows) + list(done_rows):
+        if len(picked) >= ACTIVITY_PER_SOURCE:
+            break
+        if r.id in seen or not _review_visible(sc, r):
+            continue
+        seen.add(r.id)
+        picked.append(r)
+    items = []
+    for r in picked:
+        pending = r.status == 'pending'
+        when = r.created_at if pending else (r.reviewed_at or r.created_at)
+        if audit:
+            url = (REVIEW_MANAGE_URL + '?status='
+                   + ('pending' if pending else (r.status or 'pending')))
+        elif r.applicant_id == user.id:
+            url = REVIEW_MY_URL           # 自己的单子：点进去看进度
+        else:
+            url = None                    # 别人的单子：只展示（我的复核里没有它）
+        items.append({
+            'type': 'review', 'icon': 'bi-clipboard-check',
+            'tone': REVIEW_TONE.get(r.status, 'secondary'),
+            'title': _review_title(r),
+            'meta': _review_meta(r),
+            'time': _s(when, '%m-%d %H:%M'),
+            'sort': when or datetime.min,
+            'exam_id': r.exam_id,
+            'url': url,
+        })
+    return items
+
+
+def _activity_source_names(user):
+    """动态来源说明（卡片头那行小字，按本人可见性给出）"""
+    names = ['考试登记', '限时练']
+    if can_see_cert_activity(user):
+        names.append('证明开具')
+    if _can_see_changes(user):
+        names.append('分数修改')
+    names.append('成绩复核')
+    return names
+
+
 # ==================== 主入口 ====================
 
 def build_overview(user):
@@ -212,6 +418,7 @@ def build_overview(user):
         'grade_rows': [],
         'recent_exams': [],
         'activity': [],
+        'activity_sources': _activity_source_names(user),
     }
 
     if not grades:
@@ -240,11 +447,20 @@ def build_overview(user):
     payload['kpi']['latest_date'] = _s(max((e.exam_date for e in exams
                                             if e.exam_date), default=None))
 
-    # KPI 阶段卡：按关键词包含匹配求和（'期中' 同时命中「期中」与「期中考试」）
+    # KPI 阶段卡：按关键词包含匹配求和（'期中' 同时命中「期中」与「期中考试」）。
+    # 「限时练」例外：它已是独立表，按 TimedExam 计数（2026-10-20）。
+    timed_n = _timed_exam_count(grades)
     cards = []
     for name, kw in STAGE_CARDS:
+        if name == '限时练':
+            # url：该卡可点击直达限时练列表（其余阶段卡是普通考试的子集，
+            # 没有单一对应页面，url 留空 → 模板渲染成不可点的格子）
+            cards.append({'name': name, 'exams': timed_n,
+                          'url': TIMED_LIST_URL})
+            continue
         cards.append({'name': name,
-                      'exams': sum(c for k, c in exam_cnt_by_stage.items() if kw in k)})
+                      'exams': sum(c for k, c in exam_cnt_by_stage.items() if kw in k),
+                      'url': ''})
     payload['kpi']['stage_cards'] = cards
 
     # 阶段明细：按真实取值展示（未命中关键词的排在后面，按场次倒序）
@@ -288,14 +504,17 @@ def build_overview(user):
     } for e in sorted(exams, key=lambda x: (x.exam_date or datetime.min.date(), x.id),
                       reverse=True)[:RECENT_EXAM_LIMIT]]
 
-    # 当前动态：考试 / 证明 / 改分 三源合并，按时间倒序取前 N
+    # 当前动态：考试 / 限时练 / 证明 / 改分 / 成绩复核 五源合并，
+    # 按时间倒序取前 N（限时练在独立表，必须单独取一源）
     if payload['can_view_certs']:
         payload['kpi']['cert_total'], payload['kpi']['cert_invalid'] = _cert_stats(user)
     activity = _exam_activity_items(exams)
-    if payload['can_view_certs']:
+    activity += _timed_activity_items(grades)
+    if can_see_cert_activity(user):
         activity += _cert_activity_items(user)
     if _can_see_changes(user):
         activity += _change_activity_items(exam_ids)
+    activity += _review_items(user, _review_scope(user), can_audit_reviews(user))
     # 2026-10-20 用户口径（修正）：成绩仪表盘只放成绩自己的事 —— 调课属于教务，
     # 不放这里（调课入口在教师工作台 / 教务模块）。
     activity.sort(key=lambda it: it['sort'], reverse=True)
@@ -303,5 +522,7 @@ def build_overview(user):
         it.pop('sort', None)
     payload['activity'] = activity[:ACTIVITY_LIMIT]
 
-    payload['has_data'] = bool(exams)
+    # 只有限时练、没有大型考试时也算"有数据"，否则页面顶部会误报
+    # 「当前范围内还没有任何考试数据」
+    payload['has_data'] = bool(exams) or timed_n > 0
     return payload

@@ -1,0 +1,303 @@
+{% extends "base.html" %}
+{% block title %}{{ name or student_no }} · 学生分析{% endblock %}
+{% block content %}
+<div class="d-flex flex-wrap justify-content-between align-items-start mb-2 gap-2">
+    <div class="d-flex align-items-baseline flex-wrap gap-2">
+        <a href="{{ url_for('grades.timed_detail', tid=exam.id, tab='trends') }}"
+           class="btn btn-sm btn-outline-secondary" title="返回学生分析">
+            <i class="bi bi-arrow-left"></i>
+        </a>
+        <h4 class="mb-0">{{ name or '未知学生' }}</h4>
+        <span class="text-muted small">
+            {{ student_no }}{% if cls %} · {{ cls }}{% endif %} ·
+            {{ exam.grade }} 全部限时练（{{ lines|length }} 场）
+        </span>
+    </div>
+    <div class="text-muted small">
+        当前场次：{{ exam.display_name() }} · {{ exam.exam_date.strftime('%Y-%m-%d') }}
+    </div>
+</div>
+
+{% if not lines %}
+<div class="alert alert-light border">该生在本年级还没有限时练成绩。</div>
+{% else %}
+
+<div class="row g-3 mb-3">
+    {% for s in subjects %}
+    {% set tv = latest.get(s) %}
+    <div class="col-6 col-md-4 col-xl-2">
+        <div class="card h-100">
+            <div class="card-body py-2 px-3">
+                <div class="text-muted small">{{ s }}</div>
+                <div class="fs-4 fw-semibold">
+                    {{ tv if tv is not none else '—' }}
+                </div>
+                <div class="text-muted" style="font-size:11px;">最新 T 分</div>
+            </div>
+        </div>
+    </div>
+    {% endfor %}
+</div>
+
+{% if stats %}
+<div class="card mb-3">
+    <div class="card-header py-2 d-flex flex-wrap align-items-center gap-2">
+        <span class="fw-semibold">学科分析</span>
+        <span class="text-muted small">最新 T：60 以上优势科（绿），47 以下薄弱科（红）；雷达越「凹」的角越弱</span>
+        {% if weak %}
+        <span class="ms-auto small">
+            薄弱：{% for w in weak %}<span
+                class="badge bg-danger-subtle text-danger-emphasis border border-danger-subtle me-1">{{ w.subject }} T{{ w.latest }}</span>{% endfor %}
+        </span>
+        {% endif %}
+    </div>
+    <div class="card-body py-2">
+        <div class="row g-2 align-items-center">
+            <div class="col-lg-5">
+                <div id="radarChart" style="height:330px;"></div>
+            </div>
+            <div class="col-lg-7">
+                <table class="table table-sm align-middle mb-0 timed-tbl">
+                    <thead class="table-light">
+                    <tr>
+                        <th class="text-nowrap">学科</th>
+                        <th class="text-end text-nowrap">最新 T</th>
+                        <th class="text-end text-nowrap" title="该科历史平均 T">平均 T</th>
+                        <th class="text-end text-nowrap" title="T 分的标准差，越大越不稳定">波动</th>
+                        <th class="text-end text-nowrap" title="最近 3 场均值 − 之前 3 场均值">近况</th>
+                        <th class="text-end text-nowrap">场次</th>
+                    </tr>
+                    </thead>
+                    <tbody>
+                    {% for x in stats %}
+                    <tr>
+                        <td class="text-nowrap">{{ x.subject }}</td>
+                        <td class="text-end fw-semibold text-nowrap
+                            {{ 'text-danger' if x.weak else ('text-success' if x.strong else '') }}">
+                            {{ x.latest }}
+                        </td>
+                        <td class="text-end text-muted text-nowrap">{{ x.avg }}</td>
+                        <td class="text-end text-muted text-nowrap">{{ x.sd }}</td>
+                        <td class="text-end text-nowrap">
+                            {% if x.trend > 1 %}
+                            <span class="text-success">↑ {{ x.trend }}</span>
+                            {% elif x.trend < -1 %}
+                            <span class="text-danger">↓ {{ -x.trend }}</span>
+                            {% else %}
+                            <span class="text-muted">→</span>
+                            {% endif %}
+                        </td>
+                        <td class="text-end text-muted text-nowrap">{{ x.n }}</td>
+                    </tr>
+                    {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+</div>
+{% endif %}
+
+{# 没有任何可算 T 分的科目时不要留一张 380px 的空白卡（2026-10-21 审计） #}
+{% if chart %}
+<div class="card mb-3">
+    <div class="card-header py-2 d-flex flex-wrap align-items-center gap-2">
+        <span class="fw-semibold">T 分走势</span>
+        <span class="text-muted small">50 = 该场年级平均；越靠上相对位置越好</span>
+        {# 2026-10-20 用户口径：一次只看一个学科，点上面的按钮切换 #}
+        <div class="btn-group btn-group-sm ms-auto" id="subjectTabs">
+            {% for s in chart.keys() %}
+            <button type="button"
+                    class="btn btn-outline-primary{% if loop.first %} active{% endif %}"
+                    data-subject="{{ s }}">{{ s }}</button>
+            {% endfor %}
+        </div>
+    </div>
+    <div class="card-body py-2">
+        <div id="studentChart" style="height:380px;"></div>
+    </div>
+</div>
+{% else %}
+<div class="alert alert-light border small mb-3">
+    各科实考人数都不足 {{ t_min }} 人，暂不计算 T 分（没有可比的年级样本）。
+</div>
+{% endif %}
+
+<div class="card">
+    <div class="card-header py-2">
+        <span class="fw-semibold">逐场成绩</span>
+        <span class="text-muted small ms-2">单元格上为原始分、下为该科 T 分</span>
+    </div>
+    <table class="table table-sm table-hover align-middle mb-0 timed-tbl">
+        <thead class="table-light">
+        <tr>
+            <th class="text-nowrap">场次</th>
+            <th class="text-nowrap">日期</th>
+            {% for s in subjects %}
+            <th class="text-end text-nowrap">{{ s }}</th>
+            {% endfor %}
+        </tr>
+        </thead>
+        <tbody>
+        {% for it in lines %}
+        <tr>
+            <td class="text-nowrap">
+                <a href="{{ url_for('grades.timed_detail', tid=it.exam.id, tab='students') }}">
+                    {{ it.exam.display_name() }}
+                </a>
+            </td>
+            <td class="text-muted text-nowrap">{{ it.exam.exam_date.strftime('%Y-%m-%d') }}</td>
+            {% for s in subjects %}
+            {% set c = it.cells.get(s) %}
+            <td class="text-end text-nowrap">
+                {% if c %}
+                <div>{{ c.score }}</div>
+                {% if c.t is not none %}
+                <div class="text-muted t-sub">T {{ c.t }}</div>
+                {% endif %}
+                {% else %}
+                <span class="text-muted">—</span>
+                {% endif %}
+            </td>
+            {% endfor %}
+        </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+</div>
+
+<div class="text-muted small mt-2">
+    T 分数 = 10 ×（个人分 − 该场该科年级均分）÷ 标准差 + 50；
+    每科单独算，所以不同科目、不同场次之间可以直接比较相对位置。
+    某科实考少于 {{ t_min }} 人时不算 T 分（显示为 —）。
+</div>
+{% endif %}
+{% endblock %}
+
+{% block extra_js %}
+{% if lines %}
+<script src="{{ su('js/echarts.min.js') }}"></script>
+<script type="application/json" id="radarData">{{ radar|tojson }}</script>
+<script type="application/json" id="studentChartData">{{ chart|tojson }}</script>
+<script>
+(function () {
+    'use strict';
+
+    // 2026-10-21 审计：ECharts 默认深灰文字在深色主题下不可读，
+    // 统一从 --sl-* 取色（与 timed_analysis_charts.js 同一做法）
+    function cssVar(name, fallback) {
+        var v = getComputedStyle(document.documentElement)
+            .getPropertyValue(name).trim();
+        return v || fallback;
+    }
+    var C = {
+        text: cssVar('--sl-text', '#1e293b'),
+        muted: cssVar('--sl-text-muted', '#64748b'),
+        border: cssVar('--sl-border', '#e2e8f0')
+    };
+
+    // 学科雷达：最新一场 T 分 vs 该科历史平均，短板在图上会明显「凹进去」
+    var rnode = document.getElementById('radarData');
+    var rbox = document.getElementById('radarChart');
+    if (rnode && rbox) {
+        var rd = JSON.parse(rnode.textContent || '{}');
+        var rc = window.echarts.init(rbox);
+        rc.setOption({
+            tooltip: {},
+            legend: { data: ['最新 T', '历史平均'], bottom: 0, itemWidth: 12,
+                      textStyle: { color: C.text } },
+            radar: {
+                indicator: (rd.subjects || []).map(function (s) {
+                    return { name: s, min: 30, max: 80 };
+                }),
+                radius: '62%', center: ['50%', '45%'],
+                splitLine: { lineStyle: { color: C.border } },
+                axisLine: { lineStyle: { color: C.border } },
+                splitArea: { show: false },
+                axisName: { fontSize: 12, color: C.muted }
+            },
+            series: [{
+                type: 'radar', symbolSize: 5,
+                areaStyle: { opacity: 0.12 },
+                data: [
+                    { value: rd.latest || [], name: '最新 T' },
+                    { value: rd.avg || [], name: '历史平均' }
+                ]
+            }]
+        });
+        window.addEventListener('resize', function () { rc.resize(); });
+    }
+
+    var node = document.getElementById('studentChartData');
+    var tabs = document.getElementById('subjectTabs');
+    if (!node || !window.echarts) { return; }
+    var data = JSON.parse(node.textContent || '{}');
+    var subs = Object.keys(data);
+    if (!subs.length) { return; }
+    var chart = window.echarts.init(document.getElementById('studentChart'));
+
+    // 一次只画一个学科：科目之间量纲相同但走势无关，混在一张图里
+    // 只会互相压线（2026-10-20 用户反馈「怎么变成三条线了」）。
+    // x 轴也跟着科目走（历史/地理等后期不考的科目场次少，铺满更好看）。
+    function optionOf(subj) {
+        var cats = data[subj].map(function (p) { return p[0]; });
+        return {
+            tooltip: {
+                trigger: 'axis',
+                formatter: function (ps) {
+                    var p = ps && ps[0];
+                    if (!p) { return ''; }
+                    return p.axisValue + '<br/>' + p.marker + subj
+                        + '：T ' + p.value;
+                }
+            },
+            grid: { left: 8, right: 16, top: 32, bottom: 8, containLabel: true },
+            xAxis: {
+                type: 'category', data: cats, boundaryGap: false,
+                axisLabel: {
+                    fontSize: 12, color: C.muted,
+                    formatter: function (v) { return v.slice(5); }
+                },
+                axisLine: { lineStyle: { color: C.border } }
+            },
+            yAxis: {
+                type: 'value', name: 'T 分',
+                min: function (v) { return Math.min(20, Math.floor((v.min - 2) / 5) * 5); },
+                max: function (v) { return Math.max(80, Math.ceil((v.max + 2) / 5) * 5); },
+                nameTextStyle: { color: C.muted },
+                axisLabel: { fontSize: 13, color: C.muted },
+                splitLine: { lineStyle: { type: 'dashed', color: C.border } }
+            },
+            series: [{
+                name: subj, type: 'line', smooth: true, symbolSize: 6,
+                connectNulls: true,
+                data: data[subj].map(function (p) { return p[1]; }),
+                // 50 = 该场年级平均，画一条基准线便于判断"高于/低于平均"
+                markLine: {
+                    silent: true, symbol: 'none',
+                    lineStyle: { type: 'dashed', color: C.muted },
+                    label: { formatter: '年级平均 50', position: 'insideEndTop',
+                             fontSize: 11, color: C.muted },
+                    data: [{ yAxis: 50 }]
+                }
+            }]
+        };
+    }
+
+    chart.setOption(optionOf(subs[0]));
+    if (tabs) {
+        tabs.addEventListener('click', function (e) {
+            var btn = e.target.closest('[data-subject]');
+            if (!btn) { return; }
+            var subj = btn.getAttribute('data-subject');
+            Array.prototype.forEach.call(
+                tabs.querySelectorAll('button'),
+                function (b) { b.classList.toggle('active', b === btn); });
+            chart.setOption(optionOf(subj), true);
+        });
+    }
+    window.addEventListener('resize', function () { chart.resize(); });
+})();
+</script>
+{% endif %}
+{% endblock %}

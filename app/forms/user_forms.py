@@ -11,7 +11,10 @@ class UserForm(FlaskForm):
     username = StringField('用户名', validators=[DataRequired(message='请输入用户名'),
                                                  Length(max=50)])
     real_name = StringField('真实姓名', validators=[DataRequired(message='请输入真实姓名'),
-                                                     Length(max=50)])
+                                                    Length(max=50)])
+    # 2026-10-20：账号手机号（选填）。填了就能用手机号登录；格式与唯一性在路由里校验
+    # （这里只管长度，避免把 138-0000-0000 这类带分隔符的写法挡在表单层）。
+    phone = StringField('手机号', validators=[Optional(), Length(max=20)])
     role = SelectField('角色', choices=[
         ('admin', '管理员'),
         ('principal', '校长'),

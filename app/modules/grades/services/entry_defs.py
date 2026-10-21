@@ -34,8 +34,14 @@ def _e(key, title, icon, group, endpoint, perm='grades.view',
 
 ENTRIES = (
     # ---------- 考试管理（跨考试） ----------
-    _e('exams', '历次考试', 'bi-journals', G_MAIN, 'grades.exams_list',
+    _e('exams', '大型考试', 'bi-journals', G_MAIN, 'grades.exams_list',
        desc='全部考试列表：新建 / 导入状态 / 考务批次'),
+    # 2026-10-20 用户口径：限时练是独立场次（独立表 / 独立库），首页要能
+    # 直达它的列表与新建页；它不走普通考试的选考试弹窗（exam=None）。
+    _e('timed', '限时练', 'bi-stopwatch', G_MAIN, 'grades.timed_list',
+       desc='单科导入 · 单科分析的独立场次，与大型考试完全隔离'),
+    _e('timed_new', '新建限时练', 'bi-plus-square', G_MAIN, 'grades.timed_new',
+       perm='grades.edit', desc='登记一场限时练（按科目追加导入成绩）'),
     _e('exam_new', '新建考试', 'bi-plus-circle', G_MAIN, 'grades.exam_new',
        perm='grades.edit', desc='登记一场新考试（年级 / 阶段 / 日期）'),
     _e('affairs', '考务批次总览', 'bi-kanban', G_MAIN,

@@ -1,4 +1,4 @@
-# StuLink v1.19.49.47 2026-10-19
+# StuLink v1.19.49.50 2026-10-19
 # 微信小程序 API 模块（/api/wx）
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 """微信小程序 API 模块。
