@@ -3,7 +3,7 @@
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
 [![Python](https://img.shields.io/badge/python-3.11+-green.svg)](https://python.org)
 [![Flask](https://img.shields.io/badge/flask-3.x-lightgrey.svg)](https://flask.palletsprojects.com/)
-[![Version](https://img.shields.io/badge/version-1.19.49.51-orange.svg)](https://gitee.com/zkxxzf/StuLink)
+[![Version](https://img.shields.io/badge/version-1.19.49.52-orange.svg)](https://gitee.com/zkxxzf/StuLink)
 
 面向中学的综合学生管理平台，采用 **双站点 + 多模块 + 一模块一库** 的故障隔离架构：
 
@@ -195,7 +195,7 @@
 
 - **后端**：Python 3.11+ / Flask 3.x / Flask-Login / Flask-SQLAlchemy 2.x（多库 binds）/ Waitress / openpyxl / reportlab / python-pptx
 - **前端**：Bootstrap 5 / jQuery / Jinja2 / ECharts（成绩可视化）/ Chart.js（画像）
-- **安全（v1.19.49.51）**：
+- **安全（v1.19.49.52）**：
   - **身份**：管理员首启随机口令 + 强制改密 · 一次性初始口令展示 · 会话口令摘要（改密即踢）· IP + 账号双维限流与锁定（锁键含来源，防账号被恶意锁定）
   - **数据**：AES 身份证与 AI Key 加密 · CSRF 8h 时效 · 二维权限（功能三档 × 数据范围）· 白名单式教师候选过滤
   - **传输**：`url_guard` 出站白名单 + DNS 解析 + 禁 302 跟随 · CSP（Report-Only 起步，可切 enforce）· HTTPS Cookie Secure
@@ -216,7 +216,7 @@ python run.py --dev
 cd alumni_app && python run.py
 
 # Docker 部署（三个容器：主应用 + 往届查询 + MCP 服务）
-docker build -t stulink:v1.19.49.51 .
+docker build -t stulink:v1.19.49.52 .
 docker build -t stulink-alumni:v1.0.0 ./alumni_app
 docker build -f Dockerfile.mcp -t stulink-mcp:v1.0.0 .
 docker-compose up -d
@@ -301,6 +301,7 @@ StuLink/
 
 | 版本 | 日期 | 亮点 |
 |---|---|---|
+| **1.19.49.52** | 2026-10-21 | **考务环节④ 任课表恢复「班主任」列**：表格＝「班级 × 科目」，最后一列补回 `班主任`（与任课教师同级别、负责本班总分），带入/重新带入时按班主任名单写入（同班多人顿号合并，单人回填账号便于改派）；保存改为只提交改动过的格，人工改派不再被整表覆盖；班主任进监考教师池但不参与同科回避；新增迁移 **A44** 给历史批次只补不覆盖地回填（优先取本场考试任课快照＝考试当时的班主任，无快照回落当前班主任名单） |
 | **1.19.49.51** | 2026-10-21 | **限时练权限收口（Web + MCP 同口径）**：限时练此前只校验「年级可见」，逐生层（汇总表 / 学生详情 / T 分走势 / 导出）对任何持 `grades.view` 的账号全开 —— 任课教师可看全年级全部科目与总分；现统一走 `score_guard`（任课教师＝所教科目的分数 + 总分年级名次，班主任＝本班全科 + 总分，年级长及以上＝本年级/全校），并在表头/导出按口径隐藏总分与名次列；单科分析按「班级 × 学科」收口；MCP `_timed_views` 同步收口并修「不分班」行 `rank_class` KeyError；导入 / AI 导入改 `grades.import` 并按本人任教学科限制（含导入页签与空态入口同门槛）；导入班级改以主库学籍为准（防挂错班）；新增 `smoke_timed.py` 权限回归 17 项 |
 | **1.19.49.50** | 2026-10-21 | **限时练分析页改「去差均分」+ 全量审计**：删最高/最低分两列，均分改按班型去差名额（卓越班 2 人）剔该科末尾 N 人；修分析页表头未进 `<thead>` 导致「下载图片」导出空图；修导出遇到「不分班」行 `rank_class` KeyError 500；限时练三表拆独立库 `timed.db`（迁移 A42）+ 场次统一「年级 No.N」（A43）；仪表盘接入限时练（入口板 / KPI / 动态第五源）；审计修复 20 项（缓存失效时机、导入后重排、仪表盘 fail-closed、抓取 0 行不登记、深色图表配色等），新增 `smoke_timed.py` 21 项回归 |
 | **1.19.49.49** | 2026-10-20 | **合并 master（v1.19.49.47）回 sakaay**：242 处冲突逐块判定（222 处仅版本号差异、15 处单侧、5 处实质：`users.py` 保留手机号并补批量导出初始密码、`users/list.html` 取 master 超集）；修限时练 `_trends.html` 内联处理器（属性单引号 + `|tojson`，安全扫描 0 命中、安全回归 398/0）；教务回归两条断言跟上手机号新口径；新增迁移 **A41**（按年级回填智学网考号，本地 1,019 行） |

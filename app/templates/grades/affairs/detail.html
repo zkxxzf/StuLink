@@ -610,7 +610,9 @@
                 <i class="bi bi-save"></i> 保存</button>
         </div>
         <div class="alert alert-light border py-2 small">
-            表格为「班级 × 科目 → 任课教师」，留空表示该班不开设该科。
+            表格为「班级 × 科目 → 任课教师」，留空表示该班不开设该科；
+            最后一列 <span class="badge text-bg-warning">班主任</span> 与任课教师同级别（负责本班总分），
+            默认按「班主任名单」带入，可临时改派（仅本场）。
         </div>
         <div id="t4Body" class="table-responsive" style="max-height:66vh;overflow:auto">
             <div class="text-center text-muted py-4"><div class="spinner-border spinner-border-sm"></div>
@@ -2117,8 +2119,11 @@ function loadAffairTeachers(){
 }
 function renderAffairTeachers(){
     var d = _affTeachers; if(!d) return;
+    var headSubj = d.head_subject || '班主任';
     var h = ['<table class="table table-sm table-bordered align-middle mb-0"><thead class="sticky-top bg-white"><tr><th>班级</th>'];
-    d.subjects.forEach(s=>{ h.push('<th class="text-center">'+escHtml(s)+'</th>'); });
+    d.subjects.forEach(s=>{
+        h.push('<th class="text-center'+(s===headSubj?' table-warning':'')+'">'+escHtml(s)+'</th>');
+    });
     h.push('</tr></thead><tbody>');
     d.classes.forEach(cls=>{
         h.push('<tr><td class="text-nowrap fw-bold">'+escHtml(cls)+'</td>');
@@ -2133,7 +2138,9 @@ function renderAffairTeachers(){
                          + escHtml(u.name||u.username||'')+'</option>';
             });
             if(legacy){ optHtml += '<option value="" selected>'+escHtml(c.name)+'（历史，无账号）</option>'; }
-            h.push('<td><select class="form-select form-select-sm at-sel" data-k="'+escHtml(cls+'|'+s)+'">'
+            h.push('<td'+(s===headSubj?' class="table-warning"':'')+'>'
+                   + '<select class="form-select form-select-sm at-sel" data-k="'+escHtml(cls+'|'+s)+'"'
+                   + ' data-init="'+escHtml(cur)+'">'
                    + optHtml + '</select></td>');
         });
         h.push('</tr>');
@@ -2142,12 +2149,18 @@ function renderAffairTeachers(){
     document.getElementById('t4Body').innerHTML = h.join('');
 }
 function saveAffairTeachers(){
-    var cells = {};
-    document.querySelectorAll('#t4Body .at-sel').forEach(function(el){ cells[el.dataset.k] = el.value || ''; });
+    // 只提交改动过的格：未改的不回写（否则「多人班主任」这类无单一账号的旧值会被清空）
+    var cells = {}, n = 0;
+    document.querySelectorAll('#t4Body .at-sel').forEach(function(el){
+        var cur = el.value || '';
+        if (cur === (el.dataset.init || '')) return;
+        cells[el.dataset.k] = cur; n++;
+    });
+    if(!n){ alert('没有改动'); return; }
     fetch('/grades/affairs/'+AID+'/teachers/save', {method:'POST',
         headers:{'Content-Type':'application/json','X-CSRFToken':csrf()},
         body: JSON.stringify({cells: cells})})
-        .then(r=>r.json()).then(d=>{ alert(d.ok?'已保存':'保存失败：'+(d.msg||'')); });
+        .then(r=>r.json()).then(d=>{ alert(d.ok?'已保存':'保存失败：'+(d.msg||'')); if(d.ok) loadAffairTeachers(); });
 }
 function syncAffairTeachers(){
     if(!confirm('从「任课安排表」重新带入将覆盖本批次已做的临时调整，继续？')) return;

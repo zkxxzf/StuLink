@@ -1,4 +1,4 @@
-# StuLink v1.19.49.51 2026-10-12
+# StuLink v1.19.49.52 2026-10-12
 # 考务环节④⑤⑥⑦：核对任课教师 / 考试时间表 / 监考编排 / 监考表导出
 #
 # 用户口径（2026-10-12 定案）：
@@ -27,6 +27,9 @@ from app.models.grades import (AffairTeacher, AffairSchedule, AffairInvigilator,
                                SUBJECTS, Exam, normalize_subject)
 from app.modules.grades import bp
 from app.modules.grades.services.invig_balance import Cell, best_assign
+# 2026-10-21 用户口径：环节④ 任课表恢复「班主任」列（与任课教师同级别，负责本班总分）
+from app.modules.grades.services.teacher_snapshot_service import (
+    HEAD_SUBJECT, current_headteacher_rows)
 from app.modules.grades.utils import numeric_classes
 from app.utils.decorators import perm_required
 from app.utils.helpers import log_operation
@@ -78,7 +81,7 @@ def _teacher_candidates(grade):
 
 
 def _sync_teachers_from_links(affair):
-    """用当前 TeacherSubjectLink（同年级 active）覆盖写入本批次任课核对表。"""
+    """用当前 TeacherSubjectLink（同年级 active）+ 班主任名单覆盖写入本批次任课核对表。"""
     AffairTeacher.query.filter_by(affair_id=affair.id).delete()
     links = TeacherSubjectLink.query.filter_by(grade=affair.grade, active=True).all()
     uids = {l.user_id for l in links if l.user_id}
@@ -90,6 +93,17 @@ def _sync_teachers_from_links(affair):
             affair_id=affair.id, grade=affair.grade, class_name=l.class_name,
             subject=l.subject, user_id=l.user_id,
             teacher_name=names.get(l.user_id), source='sync'))
+        n += 1
+    # 2026-10-21 用户口径：班主任和任课教师同级别（负责本班总分），一并带入本场任课表
+    classes = set(_class_list(affair))
+    for hr in current_headteacher_rows(affair.grade):
+        if classes and hr['class_name'] not in classes:
+            continue                    # 只写本批次有的班，不凭空扩班
+        db.session.add(AffairTeacher(
+            affair_id=affair.id, grade=affair.grade,
+            class_name=hr['class_name'], subject=HEAD_SUBJECT,
+            user_id=hr.get('user_id'), teacher_name=hr['teacher_name'],
+            source='sync'))
         n += 1
     return n
 
@@ -127,7 +141,8 @@ def invig_pool(affair):
         if not nm:
             continue
         e = _entry(nm, t.user_id, 'teacher')
-        if t.subject:
+        # 「班主任」是角色列不是学科：进教师池（要排监考），但不能当学科参与同科回避
+        if t.subject and t.subject != HEAD_SUBJECT:
             e['subjects'].add(t.subject)
     for o in AffairInvigilator.query.filter_by(affair_id=affair.id).all():
         nm = (o.name or '').strip()
@@ -157,7 +172,9 @@ def affair_teachers_get(aid):
     return jsonify(success=True, data={
         'grade': affair.grade,
         'classes': _class_list(affair),
-        'subjects': SUBJECTS,
+        # 2026-10-21：科目列之后追加「班主任」列（本班总分负责人，与任课教师同级别）
+        'subjects': list(SUBJECTS) + [HEAD_SUBJECT],
+        'head_subject': HEAD_SUBJECT,
         'cells': cells,
         'users': _teacher_candidates(affair.grade),
     })
@@ -210,7 +227,8 @@ def affair_teachers_save(aid):
         cls, subj = key.split('|', 1)
         # 2026-10-13：科目别名归一（英语/日语→外语 等）后再做白名单校验
         subj = normalize_subject(subj)
-        if cls not in classes or subj not in SUBJECTS:
+        # 2026-10-21：白名单放行「班主任」列（角色列，不是学科）
+        if cls not in classes or (subj not in SUBJECTS and subj != HEAD_SUBJECT):
             continue
         uid = int(val) if str(val).strip() else None
         row = existing.get((cls, subj))
@@ -222,7 +240,9 @@ def affair_teachers_save(aid):
             db.session.add(row)
             existing[(cls, subj)] = row
         row.user_id = uid
-        row.teacher_name = name_of.get(uid) if uid else None
+        # 清空「班主任」格时不抹掉姓名快照（多人班主任没有单一账号，清空即丢历史）
+        if uid or subj != HEAD_SUBJECT:
+            row.teacher_name = name_of.get(uid) if uid else None
         row.source = 'manual'
     db.session.commit()
     log_operation(current_user, '维护', '考务任课核对', aid,

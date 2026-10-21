@@ -1,4 +1,4 @@
-# StuLink v1.19.49.51 2026-10-19
+# StuLink v1.19.49.52 2026-10-19
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 """小程序微信登录、绑定与扫码接口。
 
