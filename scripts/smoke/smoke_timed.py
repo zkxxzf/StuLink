@@ -10,6 +10,7 @@
 
 用法：py -3.12 scripts/smoke/smoke_timed.py
 """
+import io
 import os
 import re
 import sys
@@ -67,7 +68,7 @@ def seed():
     db.session.add(adm)
     db.session.add(ClassProfile(grade='2024级', class_name='02班',
                                 class_type='卓越班'))
-    exam = TimedExam(name='2024级 No.1', grade='2024级',
+    exam = TimedExam(name='2024级20260901限时练No.1', grade='2024级',
                      exam_date=date(2026, 9, 1), term='2026-2027',
                      status='imported')
     db.session.add(exam)
@@ -127,6 +128,20 @@ def check_pages(c, tid):
     check('分析页有去差均分', '去差均分' in html)
     check('两张表都有 thead（否则下载图片是空图）',
           html.count('<thead>') >= 2, html.count('<thead>'))
+    # 2026-10-21 用户口径：一科一张图，卡片头部两个动作（复制 / 下载），
+    # 不再按单张表各给一个按钮
+    check('一科两个动作按钮且只在卡片头部',
+          html.count('data-timed-action') == html.count('card mb-3') * 2,
+          '%s/%s' % (html.count('data-timed-action'),
+                     html.count('card mb-3')))
+    check('复制 + 下载两个动作都在',
+          'data-timed-action="copy"' in html and
+          'data-timed-action="download"' in html)
+    check('整科图片脚本已引入', 'js/timed_tbl_canvas.js' in html)
+    check('整科图片元信息指向本科卡片与两张表',
+          'data-card="subj1"' in html and 'id="subj1"' in html and
+          'data-cnt-table="cntTable1"' in html and
+          'data-avg-table="avgTable1"' in html)
 
     r = c.get('/grades/timed/%s/export.xlsx' % tid)
     check('导出 xlsx 200（含不分班行不 500）',
@@ -136,8 +151,41 @@ def check_pages(c, tid):
     for tab in ('students', 'trends', 'import', 'analysis'):
         r = c.get('/grades/timed/%s?tab=%s' % (tid, tab))
         check('页签 %s 200' % tab, r.status_code == 200, r.status_code)
+
+    # 2026-10-21：切班级/翻页走局部刷新（?partial=1 只回 #timedPane）
+    for tab in ('students', 'trends'):
+        r = c.get('/grades/timed/%s?tab=%s&partial=1' % (tid, tab))
+        frag = r.get_data(as_text=True)
+        check('%s 局部片段 200 且只含面板' % tab,
+              r.status_code == 200 and 'id="timedPane"' in frag
+              and '<html' not in frag.lower(), r.status_code)
+        check('%s 局部片段带切班链接' % tab, 'data-pane-nav' in frag)
+
+    # 2026-10-21：长表往下翻时表头吸顶（JS 克隆 fixed 表头）
+    r = c.get('/static/js/timed_pane.js')
+    check('timed_pane.js 含吸顶表头逻辑',
+          r.status_code == 200 and b'timed-sticky-head' in r.data
+          and b'syncSticky' in r.data, r.status_code)
+    # 2026-10-21：油猴脚本传 CSV（read_upload 里转 xlsx），走模板导入同一条通路
+    imp = c.get('/grades/timed/%s?tab=import' % tid).get_data(as_text=True)
+    tk = re.search(r'name="csrf_token"[^>]*value="([^"]+)"', imp)
+    csv_bytes = ('考号,姓名,班级,分数\n'
+                 '240100,甲,01班,91\n').encode('utf-8-sig')
+    r = c.post('/grades/timed/%s/import/upload' % tid,
+               data={'csrf_token': tk.group(1) if tk else '',
+                     'subject': '语文',
+                     'file': (io.BytesIO(csv_bytes), 'zhixue_语文.csv')},
+               content_type='multipart/form-data', follow_redirects=True)
+    page = r.get_data(as_text=True)
+    check('CSV 上传走通模板导入（不报无法读取 Excel）',
+          r.status_code == 200 and '无法读取 Excel' not in page, r.status_code)
+
     r = c.get('/grades/timed/%s/student/240100' % tid)
     check('学生详情 200', r.status_code == 200, r.status_code)
+    detail = r.get_data(as_text=True)
+    # 2026-10-21 用户口径：逐场成绩按日期倒序、10 条一页
+    check('学生详情逐场成绩倒序 + 分页',
+          '按日期倒序' in detail and '第 1/' in detail)
 
     r = c.get('/grades/')
     html = r.get_data(as_text=True)

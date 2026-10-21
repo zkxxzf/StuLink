@@ -491,7 +491,10 @@ def affair_detail(aid):
                            # 2026-10-14 用户口径：⑤ 内置每科考试时长（选科目自动算结束时间）
                            sched_default_start=_ai.SCHED_DEFAULT_START,
                            sched_duration=_ai.SCHED_DURATION_MINUTES,
-                           sched_duration_fallback=_ai.SCHED_DURATION_FALLBACK)
+                           sched_duration_fallback=_ai.SCHED_DURATION_FALLBACK,
+                           # 2026-10-21：环节④/⑥ 的科目展示顺序（文化科 → 综合组 →
+                           # 班主任），教师池按学科分组、排除名单分组都走这一份。
+                           affair_subject_order=_ai.AFFAIR_COLUMNS)
 
 
 # ==================== 步骤① 学生名单：导入 / 模板 / 增删改 ====================

@@ -1,84 +1,128 @@
-# StuLink v1.19.49.50 2026-10-20
-# 限时练学生匹配：考号优先、学号兜底；不做姓名猜测
+# StuLink v1.19.49.50 2026-10-21
+# 限时练学生匹配：考号 / 学号 / 智学网账号 / 姓名+班级 四级
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 """限时练导入的学生匹配与差异预览（不写库）。
 
-匹配优先级（2026-10-20 用户口径）：
-1. 文件【考号】→ ``students.zhixue_no``（智学网固定考号）；
-2. 文件【学号】→ ``students.student_number``（含前导 0 的数值兜底）。
-姓名 / 班级**不参与匹配**：同名同班在分班后极易误挂，宁可报错让老师核对。
+匹配优先级（2026-10-21 用户口径：要"智能匹配"，别再整表未匹配）：
+
+1. 文件【考号】或【学号】→ ``students.student_number``（学号，最稳）；
+2. 同一串号 → ``students.zhixue_no``（智学网准考证号）；
+3. 同一串号 → ``students.zhixue_account``（智学网账号，10 位，最稳定）；
+4. 都不中 → **姓名 + 班级**（本年级内唯一才采用；同名同班报歧义，不猜）。
+
+为什么要第 4 级：智学网成绩表只给"准考证号"，而准考证号**每场重排**
+（同一届 47637703 → 47642671），只靠号必然大面积未匹配；名单里的
+账号/准考证号靠 ``scripts/sync_zhixue_roster.py`` 同步进来。
 """
-from app.extensions import db
 from app.models import Student
-from app.modules.grades.services.timed_import import _code
+from app.modules.grades.services.timed_import import _code, _norm_class
+
+
+def _norm_name(value):
+    return (value or '').replace('\u3000', ' ').strip()
 
 
 def _norm_student_no(value):
-    """学号归一化（同普通导入：数值型去前导零差异）"""
+    """学号/考号归一化：去空白、去前导 0（数字才去）"""
     s = _code(value)
     return str(int(s)) if s.isdigit() else s
 
 
-def _load_students(grade, zhixue, nos):
-    """批量载入学生：{归一化考号: 学生} / {归一化学号: 学生}"""
-    by_zhixue, by_no = {}, {}
-    for i in range(0, len(zhixue), 500):
-        chunk = list(zhixue)[i:i + 500]
-        q = Student.query.filter(Student.zhixue_no.in_(chunk))
-        if grade:
-            q = q.filter(Student.grade == grade)
-        for s in q.all():
-            by_zhixue.setdefault(_code(s.zhixue_no), s)
-    for i in range(0, len(nos), 500):
-        chunk = list(nos)[i:i + 500]
-        q = Student.query.filter(Student.student_number.in_(chunk))
-        if grade:
-            q = q.filter(Student.grade == grade)
-        for s in q.all():
-            by_no.setdefault(_norm_student_no(s.student_number), s)
-        # 主库学号含前导 0（如 020250006）时字面量 IN 命中不到，按数值再查一次
-        ints = [int(n) for n in chunk if n.isdigit() and int(n) > 0]
-        if not ints:
-            continue
-        q2 = Student.query.filter(
-            db.func.cast(Student.student_number, db.Integer).in_(ints))
-        if grade:
-            q2 = q2.filter(Student.grade == grade)
-        for s in q2.all():
-            by_no.setdefault(_norm_student_no(s.student_number), s)
-    return by_zhixue, by_no
+def _load_index(grade):
+    """一次把本年级学生读进内存，建四个索引（全校两千人，毫秒级）"""
+    q = Student.query
+    if grade:
+        q = q.filter(Student.grade == grade)
+    by_no, by_zhixue, by_acct, by_name = {}, {}, {}, {}
+    for s in q.all():
+        by_no.setdefault(_norm_student_no(s.student_number), s)
+        if s.zhixue_no:
+            by_zhixue.setdefault(_norm_student_no(s.zhixue_no), s)
+        acct = getattr(s, 'zhixue_account', None)
+        if acct:
+            by_acct.setdefault(_norm_student_no(acct), s)
+        if s.name:
+            key = (_norm_name(s.name), _norm_class(s.class_name))
+            by_name.setdefault(key, []).append(s)
+    return by_no, by_zhixue, by_acct, by_name
+
+
+# 兼容旧调用：以前按"考号集合 + 学号集合"分块查库
+def _load_students(grade, zhixue=None, nos=None):
+    idx = _load_index(grade)
+    if zhixue is None and nos is None:
+        return idx[1], idx[0]
+
+    def _keep(d, keys):
+        want = {_norm_student_no(k) for k in keys if k}
+        return {k: v for k, v in d.items() if k in want}
+
+    return _keep(idx[1], zhixue or []), _keep(idx[0], nos or [])
+
+
+def _pick(r, by_no, by_zhixue, by_acct, by_name):
+    """返回 (学生, 匹配方式) 或 (None, '')"""
+    codes = []
+    for key in (r.get('zhixue_no'), r.get('student_no')):
+        k = _norm_student_no(key)
+        if k and k not in codes:
+            codes.append(k)
+    name = _norm_name(r.get('name'))
+    for k in codes:
+        for idx, how in ((by_no, '学号'), (by_zhixue, '考号'),
+                         (by_acct, '智学网账号')):
+            stu = idx.get(k)
+            if stu is None:
+                continue
+            # 准考证号每场重排、会被复用：号对上了但名字不是他 → 不认这个号，
+            # 交给姓名+班级兜底（宁可不匹配，也不挂错人）。
+            if name and stu.name and _norm_name(stu.name) != name:
+                continue
+            return stu, how
+    # 姓名 + 班级：唯一才认（同名同班宁可不匹配，也不挂错人）
+    name = _norm_name(r.get('name'))
+    cls = _norm_class(r.get('class_name'))
+    if name and cls:
+        hits = by_name.get((name, cls)) or []
+        if len(hits) == 1:
+            return hits[0], '姓名+班级'
+    return None, ''
 
 
 def match_students(rows, grade=''):
-    """把解析行挂到主库学生上（考号 → 学号，两级）。
+    """把解析行挂到主库学生上（考号/学号/账号/姓名+班级）。
 
     返回 (matched_rows, errors, stats)；matched_rows 的 ``student_no``
-    一律以主库原值为准，并补 ``student_name`` / ``class_name`` / ``zhixue_no``。
+    一律以主库原值为准，并补 ``student_name`` / ``class_name`` / ``zhixue_no``
+    与 ``match_by``（怎么匹配上的，预览页可核对）。
     """
-    zhixue = {_code(r['zhixue_no']) for r in rows if r.get('zhixue_no')}
-    nos = {_norm_student_no(r['student_no']) for r in rows if r.get('student_no')}
-    by_zhixue, by_no = _load_students(grade, zhixue, nos)
+    by_no, by_zhixue, by_acct, by_name = _load_index(grade)
 
     out, errors, seen = [], [], set()
+    hows = {}
     for r in rows:
-        stu = (by_zhixue.get(_code(r.get('zhixue_no')))
-               or by_no.get(_norm_student_no(r.get('student_no'))))
+        stu, how = _pick(r, by_no, by_zhixue, by_acct, by_name)
         if stu is None:
-            errors.append({'line': r['line'],
-                           'code': r.get('zhixue_no') or r.get('student_no'),
-                           'reason': '考号/学号未匹配到本年级学生'})
+            code = (r.get('zhixue_no') or r.get('student_no') or '').strip()
+            name = (r.get('name') or '').strip()
+            errors.append({
+                'line': r['line'], 'code': code,
+                'reason': ('考号 %s 未匹配；姓名+班级（%s %s）也没对上'
+                           % (code, name or '?', r.get('class_name') or '?'))
+                if code else '缺少考号/学号'})
             continue
         if stu.student_number in seen:
             errors.append({'line': r['line'], 'code': stu.student_number,
                            'reason': '匹配到同一学生，已跳过重复行'})
             continue
         seen.add(stu.student_number)
+        hows[how] = hows.get(how, 0) + 1
         out.append({'line': r['line'], 'student_no': stu.student_number,
                     'student_name': stu.name or r.get('name', ''),
                     'zhixue_no': _code(stu.zhixue_no) or r.get('zhixue_no', ''),
                     'class_name': r.get('class_name') or stu.class_name or '',
-                    'score': r['score']})
-    stats = {'matched': len(out), 'unmatched': len(errors)}
+                    'score': r['score'], 'match_by': how})
+    stats = {'matched': len(out), 'unmatched': len(errors), 'by_kind': hows}
     return out, errors, stats
 
 

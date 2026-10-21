@@ -349,8 +349,12 @@ def _sort_args(args):
 
 
 def _exam_page_rows(exam_id, page, size, class_name=None, direction=None,
-                    sort_key='', order='desc', allowed_classes=None):
+                    sort_key='', order='desc', allowed_classes=None,
+                    all_rows=False):
     """服务端分页：仅查询当前页的学生成绩，避免整场 8000 人一次性载入。
+
+    all_rows（2026-10-21）：成绩单导出用 —— 不分页，一次取出全部匹配学生；
+    取数/排序/班级收敛仍在同一处，导出与页面口径不会分叉。
 
     返回 (students, page, total_pages, total)：
       - 先用「总分行」做分页元数据（每生 1 行，远小于全部科目行），
@@ -388,11 +392,14 @@ def _exam_page_rows(exam_id, page, size, class_name=None, direction=None,
     total = q.count()
     if total == 0:
         return [], 1, 0, 0
-    size = max(1, min(int(size or 50), 500))   # 单页上限 500，避免「全部」拖垮
-    page = max(1, int(page or 1))
-    total_pages = (total + size - 1) // size
-    if page > total_pages:
-        page = total_pages
+    if all_rows:                               # 导出：一次取全，不做分页切片
+        size, page, total_pages = total, 1, 1
+    else:
+        size = max(1, min(int(size or 50), 500))   # 单页上限 500，避免「全部」拖垮
+        page = max(1, int(page or 1))
+        total_pages = (total + size - 1) // size
+        if page > total_pages:
+            page = total_pages
 
     # ---- 排序键解析（只认白名单/本场科目，避免拼接注入） ----
     order_col = None
@@ -414,23 +421,30 @@ def _exam_page_rows(exam_id, page, size, class_name=None, direction=None,
         seqq = [db.case((order_col.is_(None), 1), else_=0),
                 order_col.asc() if order == 'asc' else order_col.desc(),
                 ExamScore.student_no]
-        meta = q.order_by(*seqq).limit(size).offset((page - 1) * size).all()
+        meta_q = q.order_by(*seqq)
     else:
         # 默认次序（v1.19.49.50）：按**总分名次**排列 —— 先分方向（历史在前、物理在后），
         # 方向内按方向排（= 该方向的总分名次）升序，缺考（无方向排）排在本方向最后，
         # 末尾按学号定序保证翻页稳定。注意：不按班级分组（老师要看的是名次榜）。
         dir_seq = db.case((ExamScore.direction == '历史', 0),
                           (ExamScore.direction == '物理', 1), else_=2)
-        meta = (q.order_by(dir_seq, db.func.coalesce(ExamScore.rank_dir, 99999),
-                           ExamScore.student_no)
-                .limit(size).offset((page - 1) * size).all())
+        meta_q = q.order_by(dir_seq,
+                            db.func.coalesce(ExamScore.rank_dir, 99999),
+                            ExamScore.student_no)
+    if all_rows:
+        meta = meta_q.all()
+    else:
+        meta = meta_q.limit(size).offset((page - 1) * size).all()
     nos = [r.student_no for r in meta]
     if not nos:
         return [], page, total_pages, total
-    rows = (ExamScore.query.filter_by(exam_id=exam_id)
-            .filter(ExamScore.student_no.in_(nos))
-            .order_by(ExamScore.subject == TOTAL_SUBJECT, ExamScore.subject,
-                      ExamScore.rank_dir).all())
+    # 分块 IN：整年级导出（all_rows）时学号可能上千，避免触碰 SQLite 变量上限
+    rows = []
+    for i in range(0, len(nos), 500):
+        rows.extend(ExamScore.query.filter_by(exam_id=exam_id)
+                    .filter(ExamScore.student_no.in_(nos[i:i + 500]))
+                    .order_by(ExamScore.subject == TOTAL_SUBJECT,
+                              ExamScore.subject, ExamScore.rank_dir).all())
     data = {}
     for r in rows:
         d = data.setdefault(r.student_no, {

@@ -59,6 +59,15 @@ DEFAULT_FULL_MARKS = {s: (150 if s in ('语文', '数学', '外语') else 100) f
 #   课表导入核对」里流动（成绩表里本就没有这些科目）。
 LINK_SUBJECTS = SUBJECTS + list(COMPREHENSIVE_SUBJECTS)
 
+# 考务④「核对任课教师」的两组口径（2026-10-21 用户口径；唯一真值放模型层，
+# 供考务路由与分析侧的 teacher_snapshot_service 共用，避免两边各写一份）：
+#   · AFFAIR_HEAD_SUBJECTS：班主任三列＝**伪科目**，只存在 affair_teachers 表，
+#     绝不写回 TeacherSubjectLink、也不进成绩科目字典；
+#   · AFFAIR_EXCLUDED_SUBJECTS：考务侧不看的综合组科目（本校不带「通用技术」；
+#     任课映射页 / 导入模板仍保留它，故只排除考务列）。
+AFFAIR_HEAD_SUBJECTS = ('正班主任', '副班主任1', '副班主任2')
+AFFAIR_EXCLUDED_SUBJECTS = ('通用技术',)
+
 # 选科组合字符 → 科目全名（用于由选科组合推断应考科目）
 _SEL_CHAR_MAP = {'物': '物理', '化': '化学', '生': '生物', '政': '政治', '史': '历史', '地': '地理'}
 _SUBJECT_FULL = {'语文', '数学', '外语', '物理', '历史', '化学', '生物', '政治', '地理'}

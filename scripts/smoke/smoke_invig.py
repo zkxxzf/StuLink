@@ -641,5 +641,111 @@ with app.test_client() as c:
           _r2 == ('2026-10-08', '语文', '09:00', '11:30')
           and _r3 == ('2026-10-08', '数学', '14:00', '16:00'), str([_r2, _r3]))
 
+    # ==================== 环节④ 综合组 + 班主任（2026-10-21 用户口径） ====================
+    # 列 = 9 文化科 + 综合组 6 科 + 班主任 3 列；班主任从 UserClassLink 带入
+    # （与教师映射的 正班/副班1/副班2 同源），没账号的班主任也算班主任。
+    with app.app_context():
+        _a3 = ExamAffair(name='任课核对冒烟', grade='2025级',
+                         exam_date=date(2026, 10, 8), status='draft')
+        db.session.add(_a3)
+        db.session.commit()
+        aid3 = _a3.id
+        _zhao = User.query.filter_by(username='t_phys').first().id
+    r = c.get(f'/grades/affairs/{aid3}/teachers', headers=H)
+    _d3 = (r.get_json() or {}).get('data') or {}
+    # 2026-10-21 用户口径：综合组只看 5 科（本校不带「通用技术」，考务里去掉）
+    check('④ 科目列 = 9 文化科 + 综合组 5 科（不含通用技术）',
+          _d3.get('subjects') == ['语文', '数学', '外语', '物理', '历史', '化学',
+                                  '生物', '政治', '地理', '体育', '音乐', '美术',
+                                  '信息技术', '心理'],
+          str(_d3.get('subjects')))
+    check('④ 班主任三列（正班主任 / 副班主任1 / 副班主任2）',
+          _d3.get('head_subjects') == ['正班主任', '副班主任1', '副班主任2'],
+          str(_d3.get('head_subjects')))
+    check('④ 表头三组（文化科目 / 综合组 / 班主任）',
+          [g.get('name') for g in (_d3.get('subject_groups') or [])]
+          == ['', '综合组', '班主任'],
+          str(_d3.get('subject_groups')))
+    # 2026-10-21：选人支持「姓名 / 全拼 / 每字首字母」—— 拼音码由后端下发
+    _u3 = {u.get('name'): u for u in (_d3.get('users') or [])}
+    _zy = _u3.get('张语文') or {}
+    check('④ 教师下拉带 py/ini（全拼 + 首字母）',
+          _zy.get('py') == 'zhangyuwen' and _zy.get('ini') == 'zyw', str(_zy))
+    _cell_head = (_d3.get('cells') or {}).get('01班|正班主任') or {}
+    check('④ 班主任从 UserClassLink 带入（孙副班 = 01班 正班主任）',
+          _cell_head.get('name') == '孙副班', str(_cell_head))
+    r = c.post(f'/grades/affairs/{aid3}/teachers/save',
+               json={'cells': {'01班|体育': str(_zhao)}}, headers=H)
+    check('④ 综合组（体育）可保存（白名单不再丢弃）',
+          (r.get_json() or {}).get('ok') is True, str(r.get_json()))
+    with app.app_context():
+        _t3 = AffairTeacher.query.filter_by(
+            affair_id=aid3, class_name='01班', subject='体育').first()
+        check('④ 体育落库 + source=manual',
+              _t3 is not None and _t3.user_id == _zhao and _t3.source == 'manual',
+              str(_t3 and (_t3.subject, _t3.user_id, _t3.source)))
+    _p3 = {p['name']: p for p in
+           ((c.get(f'/grades/affairs/{aid3}/invig', headers=H).get_json()
+             or {}).get('data') or {}).get('pool', [])}
+    check('⑥ 班主任进教师池且带 is_head（没有任课映射也算）',
+          _p3.get('孙副班', {}).get('is_head') is True, str(_p3.get('孙副班')))
+    check('⑥ 监考池带 py/ini（监考表换人也能拼音搜）',
+          _p3.get('孙副班', {}).get('ini') == 'sfb'
+          and _p3.get('孙副班', {}).get('py') == 'sunfuban',
+          str(_p3.get('孙副班')))
+    check('⑥ 综合组老师进池且学科=体育',
+          '体育' in (_p3.get('赵物理', {}).get('subjects') or []),
+          str(_p3.get('赵物理')))
+    # 无账号的班主任也要能命中「首场优先」（以前只认 role / UserClassLink 的账号）
+    with app.app_context():
+        from app.modules.grades.routes.affair_invig import _head_teacher_names
+        _h3 = _head_teacher_names([{'name': '校外班主任', 'user_id': None,
+                                    'is_head': True},
+                                   {'name': '普通老师', 'user_id': None,
+                                    'is_head': False}])
+        check('⑥ 无账号班主任也算首场优先对象', _h3 == {'校外班主任'}, str(_h3))
+
+
+    # ============ 考务④ 覆盖成绩分析（2026-10-21 用户口径：考务跟着老师走） ============
+    # 用户口径：④ 里改过的任课教师，成绩分析（学科分析 / 教师排名 / 汇报区 / 全局对比）
+    # 必须跟着变。实现是在 teacher_snapshot_service 读路径上叠一层 ④ 覆盖。
+    # 先把 ④ 重新带入一次：孙副班的 UserClassLink 是上面那一段才建的，
+    # 主批次 aid 的 ④ 里此前还没有班主任三列
+    r = c.post(f'/grades/affairs/{aid}/teachers/sync', headers=H)
+    check('④ 重新带入后班主任三列进库（供成绩分析读）',
+          (r.get_json() or {}).get('ok') is True, str(r.get_json()))
+    with app.app_context():
+        from app.models.grades import ExamTeacherLink
+        from app.modules.grades.services import teacher_snapshot_service as _tss
+        # 注意：这里 push 了新的 app_context（新 session），外层 teachers 对象已
+        # 脱离 session，故按账号重新查一次拿 id，避免 DetachedInstanceError
+        _ids = {u.username: u.id for u in User.query.filter(
+            User.username.in_(['t_chem', 't_math', 't_chinese'])).all()}
+        _chem, _math, _chinese = _ids['t_chem'], _ids['t_math'], _ids['t_chinese']
+        _eid = db.session.get(ExamAffair, aid).exam_id      # 主批次绑定的考试
+        # 导入时的快照：语文=王化学（故意与 ④ 的张语文不同）；心理=李数学（④ 没这一列）
+        db.session.add_all([
+            ExamTeacherLink(exam_id=_eid, grade='2025级', class_name='01班',
+                            subject='语文', user_id=_chem, teacher_name='王化学',
+                            source='import'),
+            ExamTeacherLink(exam_id=_eid, grade='2025级', class_name='01班',
+                            subject='心理', user_id=_math, teacher_name='李数学',
+                            source='import'),
+        ])
+        db.session.commit()
+        _nm = _tss.name_map_of(_eid)
+        _um = _tss.teacher_user_map(_eid)
+        _ht = _tss.headteacher_map_of(_eid)
+    check('④ 考务改动覆盖成绩分析的任课教师（不再用导入快照的旧老师）',
+          _nm.get(('01班', '语文')) == '张语文', str(_nm.get(('01班', '语文'))))
+    check('④ 覆盖后教师聚合用 ④ 的账号（不用旧快照账号）',
+          _um.get(('01班', '语文')) == _chinese, str(_um.get(('01班', '语文'))))
+    check('④ 没配的科目仍用导入快照（不凭空消失/不新增科目）',
+          _nm.get(('01班', '心理')) == '李数学', str(_nm.get(('01班', '心理'))))
+    check('④ 班主任三列 → 成绩分析的班主任',
+          (_ht.get(('2025级', '01班')) or '') == '孙副班',
+          str(_ht.get(('2025级', '01班'))))
+
+
 print(f'\n===== 考务监考冒烟：{ok} 通过 / {fail} 失败 =====')
 sys.exit(1 if fail else 0)

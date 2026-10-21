@@ -4,7 +4,9 @@
      ① 人数：左 = 各班各名次段的堆积图，右 = 人数表（班级 × 各段人数）
      ② 去差均分：左 = 各班去差均分柱状图，右 = 表（班级 × 去差均分 + 各段均分）
    最高分 / 最低分两列已按用户要求删掉（2026-10-20），均分改用去差均分。
-   一次展开全部学科，不再按科目切换；每张表可单独下载图片。 #}
+   一次展开全部学科，不再按科目切换。
+   2026-10-21 用户口径：一科就是一个整体，**只留一个「下载图片」按钮**
+   （科目卡片头部），导出的是一张把两组「图 + 表」拼在一起的 PNG。 #}
 {% if empty_subjects %}
 <div class="alert alert-light border">
     还没有成绩，先到
@@ -16,7 +18,7 @@
 {# 堆积图配色只在 static/js/timed_analysis_charts.js 里维护一份（模板不再重复） #}
 {% for b in blocks %}
 {% set i = loop.index %}
-<div class="card mb-3">
+<div class="card mb-3" id="subj{{ i }}">
     <div class="card-header d-flex justify-content-between align-items-center py-2 flex-wrap gap-2">
         <div>
             <span class="fw-semibold">{{ b.subject }}</span>
@@ -25,6 +27,26 @@
                 分层：{{ b.analysis.template_name }}
             </span>
         </div>
+        {# 一科一张图：人数 + 去差均分（两组图 + 表）合成一张 PNG；
+           复制到剪贴板 / 下载 两个动作共用同一份 data-* 元信息 #}
+        <div class="d-flex align-items-center gap-3 flex-shrink-0"
+             data-timed-meta
+             data-card="subj{{ i }}"
+             data-cnt-table="cntTable{{ i }}"
+             data-avg-table="avgTable{{ i }}"
+             data-cnt-label="人数" data-avg-label="去差均分"
+             data-title="{{ exam.display_name() }} · {{ b.subject }}"
+             data-sub="{{ exam.grade }} · {{ exam.exam_date.strftime('%Y-%m-%d') }} · {{ b.analysis.student_count }} 人 / {{ b.analysis.class_count }} 个班 · 分层：{{ b.analysis.template_name }}"
+             data-file="{{ exam.grade }}_{{ b.subject }}_分析">
+            <button class="btn btn-sm btn-link p-0 text-decoration-none" type="button"
+                    data-timed-action="copy" title="复制这张图，可直接粘贴到 Word / 微信">
+                <i class="bi bi-clipboard"></i> 复制图片
+            </button>
+            <button class="btn btn-sm btn-link p-0 text-decoration-none" type="button"
+                    data-timed-action="download" title="保存为 PNG 文件">
+                <i class="bi bi-download"></i> 下载图片
+            </button>
+        </div>
     </div>
     <div class="card-body py-2">
 
@@ -32,19 +54,13 @@
         <div class="row g-3 align-items-start">
             {# 2026-10-20 用户口径：图加高、宽度收窄 —— 纵轴可读，表格也能完整展开 #}
             <div class="col-xl-3 col-lg-3">
-                <div class="timed-chart" data-chart="cntData{{ i }}" data-type="stack"
+                <div class="timed-chart" data-chart="cntData{{ i }}"
+                     data-type="stack" data-shot-chart="cnt"
                      style="height:380px;"></div>
             </div>
             <div class="col-xl-9 col-lg-9">
                 <div class="d-flex justify-content-between align-items-center mb-1">
                     <span class="small text-muted"><i class="bi bi-people"></i> 人数</span>
-                    <button class="btn btn-sm btn-link p-0 text-decoration-none" type="button"
-                            data-timed-shot data-table="cntTable{{ i }}"
-                            data-title="{{ exam.display_name() }} · {{ b.subject }} · 人数"
-                            data-sub="{{ exam.grade }} · {{ exam.exam_date.strftime('%Y-%m-%d') }} · {{ b.analysis.student_count }} 人 / {{ b.analysis.class_count }} 个班"
-                            data-file="{{ exam.grade }}_{{ b.subject }}_人数分布">
-                        <i class="bi bi-download"></i> 下载图片
-                    </button>
                 </div>
                 <div class="table-responsive">
                     <table class="table table-sm table-hover align-middle mb-0 timed-tbl"
@@ -93,19 +109,13 @@
         {# ---------- ② 去差均分：左柱状图 / 右去差均分表 ---------- #}
         <div class="row g-3 align-items-start">
             <div class="col-xl-3 col-lg-3">
-                <div class="timed-chart" data-chart="avgData{{ i }}" data-type="bar"
+                <div class="timed-chart" data-chart="avgData{{ i }}"
+                     data-type="bar" data-shot-chart="avg"
                      style="height:380px;"></div>
             </div>
             <div class="col-xl-9 col-lg-9">
                 <div class="d-flex justify-content-between align-items-center mb-1">
                     <span class="small text-muted"><i class="bi bi-graph-up"></i> 去差均分</span>
-                    <button class="btn btn-sm btn-link p-0 text-decoration-none" type="button"
-                            data-timed-shot data-table="avgTable{{ i }}"
-                            data-title="{{ exam.display_name() }} · {{ b.subject }} · 去差均分"
-                            data-sub="{{ exam.grade }} · {{ exam.exam_date.strftime('%Y-%m-%d') }} · {{ b.analysis.student_count }} 人 / {{ b.analysis.class_count }} 个班"
-                            data-file="{{ exam.grade }}_{{ b.subject }}_去差均分">
-                        <i class="bi bi-download"></i> 下载图片
-                    </button>
                 </div>
                 <div class="table-responsive">
                     <table class="table table-sm table-hover align-middle mb-0 timed-tbl"

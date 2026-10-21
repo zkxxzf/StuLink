@@ -246,7 +246,13 @@ with app.app_context():
 
     g_phy, g_his = d1['groups'][0], d1['groups'][1]
     check('物理组 2 个班', len(g_phy['rows']) == 2)
-    r01, r02 = g_phy['rows']
+    # 2026-10-21 用户口径：同班型班级相邻（卓越班在前、强基班在后），
+    # 所以物理组的行序是 02班(卓越) → 01班(强基)。断言一律按班名取行，不写下标。
+    check('物理组行序：卓越班 02班 排在强基班 01班 之前（同班型相邻）',
+          [x['class_name'] for x in g_phy['rows']] == ['02班', '01班'],
+          str([x['class_name'] for x in g_phy['rows']]))
+    r01 = next(x for x in g_phy['rows'] if x['class_name'] == '01班')
+    r02 = next(x for x in g_phy['rows'] if x['class_name'] == '02班')
     check('01班：班型快照=强基班', r01['class_type'] == '强基班', r01['class_type'])
     check('01班：方向=物理', r01['direction'] == '物理')
     c = r01['cells']
@@ -515,6 +521,23 @@ with app.app_context():
     d3 = ld.global_compare_report(e3)
     check('未划线：返回 error 提示', 'error' in d3 and '划线' in d3['error'],
           str(d3.get('error')))
+
+    # ============ 学科分析各班对比表：班型分组 + 组内均分降序（2026-10-21）============
+    # 用户口径「学科分析也改成班型分组 + 组内按均分降序」——卓越班在前、
+    # 强基班在后，组内仍是排名视图（均分降序）。
+    from app.modules.grades.services.tab_service import subject_tab
+    _t1 = subject_tab(e1, '语文')['tables']['class_compare']['rows']
+    _names = [r['class_name'] for r in _t1]
+    _avgs = [r['avg'] for r in _t1]
+    check('学科分析：卓越班（02/03）排在强基班（01）之前',
+          _names[-1] == '01班' and set(_names[:2]) == {'02班', '03班'},
+          str(_names))
+    check('学科分析：同班型组内仍按均分降序',
+          _avgs[0] is not None and _avgs[1] is not None and _avgs[0] >= _avgs[1],
+          str(_avgs))
+    _hm = subject_tab(e1, '语文')['charts']['heatmap']
+    check('学科分析热力图横轴：同班型相邻（02/03 在前、01 在后）',
+          _hm['xAxis'][-1] == '01班', str(_hm['xAxis']))
 
 # ================= HTTP 层断言 =================
 with app.test_client() as c:

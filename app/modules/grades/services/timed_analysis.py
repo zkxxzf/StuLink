@@ -21,6 +21,7 @@ logger = logging.getLogger(__name__)
 
 from app.extensions import db
 from app.models.timed import TimedScore
+from app.modules.grades.services.timed_import import _norm_class
 
 
 # ==================== 进程内缓存（2026-10-20 性能优化） ====================
@@ -80,8 +81,10 @@ def classes_of(exam_id, subject=None):
         TimedScore.exam_id == int(exam_id))
     if subject:
         q = q.filter(TimedScore.subject == subject)
-    names = {r[0] for r in q.distinct().all() if r[0]}
-    return sorted(names)
+    # 2026-10-21：同一个班可能存成「01班」与「高三01班」两种写法，
+    # 归一化后再去重，筛选按钮不会出现两个同名班
+    names = {_norm_class(r[0]) for r in q.distinct().all() if r[0]}
+    return sorted(n for n in names if n)
 
 
 def _summary_base(exam):
@@ -90,11 +93,13 @@ def _summary_base(exam):
 
     rows = TimedScore.query.filter_by(exam_id=exam.id).all()
     subs = {r.subject for r in rows}
-    subjects = [s for s in SUBJECTS if s in subs]
+    # 2026-10-21 用户口径：列固定展示**全部 9 科**（+总分），本场没导入的科
+    # 留「—」。导入后要能一眼看出哪科还没导，不能按"有的科"收窄列。
+    subjects = list(SUBJECTS)
     by = {}
     by_subject = {}
     for r in rows:
-        raw_cls = (r.class_name or '').strip()
+        raw_cls = _norm_class(r.class_name)
         it = by.setdefault(r.student_no, {
             'student_no': r.student_no, 'name': r.student_name or '',
             # 无班级归属的（不分班/未分班）显示为「—」，页面与导出里不再出现「不分班」
@@ -127,7 +132,7 @@ def _summary_base(exam):
         x['t'] = tmap.get(x['student_no'])
 
     return {'subjects': subjects, 'out': out, 'classes': classes,
-            't_ready': bool(tmap)}
+            'have_count': len(subs), 't_ready': bool(tmap)}
 
 
 def summary_matrix(exam, class_name='', q='', page=None, per_page=50):
@@ -164,6 +169,7 @@ def summary_matrix(exam, class_name='', q='', page=None, per_page=50):
         rows = shown[(page_no - 1) * per_page: page_no * per_page]
     return {'subjects': subjects, 'rows': rows, 'classes': classes,
             't_ready': t_ready, 't_min': T_MIN_SAMPLE,
+            'have_count': base['have_count'],
             'count': total, 'page': page_no, 'pages': pages,
             'per_page': per_page, 'q': q}
 
@@ -278,7 +284,9 @@ def _teacher_map(grade, subject):
     for link in links:
         u = users.get(link.user_id)
         if u:
-            out[link.class_name] = u.real_name or u.username
+            # 2026-10-21：映射里存「01班」，成绩里可能是「高三01班」，
+            # 不归一化就会整列「—」
+            out[_norm_class(link.class_name)] = u.real_name or u.username
     return out
 
 
@@ -311,7 +319,7 @@ def _trim_quotas(grade):
     except Exception as _e:                  # noqa: BLE001 配置异常不拖垮分析
         logger.warning('timed_analysis.py::_trim_quotas 异常（按不去差处理）: %s', _e)
         return {}
-    return {(p.class_name or '').strip():
+    return {_norm_class(p.class_name):
             TRIM_RULES.get(p.class_type or '', DEFAULT_TRIM) for p in profs}
 
 
@@ -369,7 +377,8 @@ def subject_analysis(exam, subject, template):
     total = _empty_row('合计')
     layer_scores = {}
     for r in rows:
-        cls = (r.class_name or '').strip()
+        # 「高三01班」与「01班」按同一班统计（老数据兼容，新导入已归一化）
+        cls = _norm_class(r.class_name)
         row = by_class.setdefault(cls, _empty_row(cls))
         _accumulate(row, r.score, r.rank_grade)
         _accumulate(total, r.score, r.rank_grade)
@@ -497,27 +506,41 @@ def subject_t_map(exam_id, subject):
     return _t_map_of({x[0]: x[1] for x in rows})
 
 
-def _allowed_subjects(student_no):
-    """该生**应学**的科目集合（按学籍里的选科组合）；不确定返回 None。
+def _selection_map(student_numbers):
+    """{学号: 该生**应学**科目集合}；未选科 / 全科 / 查不到的不进表（＝不过滤）。
 
-    2026-10-20 用户口径：学生选完科（如物化生）就不该再显示历史/政治/地理
-    —— 他早就不学了，那几列既占地方又容易让人误读。`subjects_of_selection`
-    已覆盖 3+1+2 各种组合（物化生 / 史政地 / 物化地 …）以及「全科/不分科」
-    （高一未选科）：后者返回全部 9 科，这里按"不过滤"处理。
+    2026-10-20 用户口径（学生详情）：选完科就不该再显示没选的科目。
+    2026-10-21 同一口径补到「学生分析」：往日全科场留下的物化生折线
+    不该挂在文科班格里，否则看着像"文科生也在考理化生"。
+    `subjects_of_selection` 已覆盖 3+1+2 各组合（物化生 / 史政地 / 物化地…）
+    与「全科/不分科」（高一未选科）——后者返回 9 科，这里按不过滤处理。
     """
+    nums = [n for n in student_numbers if n]
+    if not nums:
+        return {}
     from app.models import Student
     from app.models.grades import SUBJECTS, subjects_of_selection
     try:
-        stu = Student.query.filter_by(student_number=student_no).first()
+        rows = (db.session.query(Student.student_number,
+                                 Student.subject_selection)
+                .filter(Student.student_number.in_(nums))
+                .all())
     except Exception:                                  # noqa: BLE001
-        return None
-    sel = (stu.subject_selection or '').strip() if stu else ''
-    if not sel:
-        return None
-    subs = subjects_of_selection(sel)
-    if not subs or len(subs) >= len(SUBJECTS):
-        return None
-    return set(subs)
+        return {}
+    out = {}
+    for no, sel in rows:
+        sel = (sel or '').strip()
+        if not sel:
+            continue
+        subs = subjects_of_selection(sel)
+        if subs and len(subs) < len(SUBJECTS):
+            out[no] = set(subs)
+    return out
+
+
+def _allowed_subjects(student_no):
+    """该生应学科目集合（单个学生版）；不确定返回 None ＝ 不过滤"""
+    return _selection_map([student_no]).get(student_no)
 
 
 def _student_detail_base(exam, student_no):
@@ -549,7 +572,7 @@ def _student_detail_base(exam, student_no):
     tmaps = {k: _t_map_of(m) for k, m in groups.items()}
 
     name = next((r.student_name for r in rows if r.student_name), '')
-    cls = next((r.class_name for r in rows if r.class_name), '')
+    cls = _norm_class(next((r.class_name for r in rows if r.class_name), ''))
     subjects = [s for s in SUBJECTS if any(r.subject == s for r in rows)]
     allowed = _allowed_subjects(student_no)
     if allowed:
@@ -622,10 +645,42 @@ def _student_detail_base(exam, student_no):
             't_min': T_MIN_SAMPLE}
 
 
-def student_detail(exam, student_no):
-    """学生详情（按年级 + 学号缓存，重复点同一人不再扫全表）"""
-    return _cached(('detail', exam.grade, student_no),
+def student_detail(exam, student_no, page=1):
+    """学生详情（按年级 + 学号缓存，重复点同一人不再扫全表）
+
+    2026-10-21 用户口径：逐场成绩表按日期**倒序**（新的在上），10 条一页。
+    缓存里仍保留按时间升序的 lines（走势图/最新 T/统计都依赖这个顺序），
+    只在返回时切出当页，避免每翻一页重算整份数据。
+    """
+    base = _cached(('detail', exam.grade, student_no),
                    lambda: _student_detail_base(exam, student_no))
+    return _paged_lines(base, page)
+
+
+DETAIL_PAGE_SIZE = 10
+
+
+def _paged_lines(base, page):
+    """逐场成绩：日期倒序 + 10 条一页（page 越界自动收敛到首/末页）"""
+    if not base.get('lines'):
+        return dict(base, page=1, pages=1, count=0,
+                    page_size=DETAIL_PAGE_SIZE)
+    newest = sorted(base['lines'],
+                    key=lambda x: (x['exam'].exam_date, x['exam'].id),
+                    reverse=True)
+    total = len(newest)
+    pages = max(1, (total + DETAIL_PAGE_SIZE - 1) // DETAIL_PAGE_SIZE)
+    try:
+        page_no = int(page or 1)
+    except (TypeError, ValueError):
+        page_no = 1
+    page_no = min(max(page_no, 1), pages)
+    start = (page_no - 1) * DETAIL_PAGE_SIZE
+    out = dict(base)
+    out.update({'lines': newest[start:start + DETAIL_PAGE_SIZE],
+                'page': page_no, 'pages': pages, 'count': total,
+                'page_size': DETAIL_PAGE_SIZE})
+    return out
 
 
 TREND_MAX_POINTS = 8      # 迷你折线最多回溯几场
@@ -670,13 +725,18 @@ def _trends_base(exam):
     tmaps = {k: _t_map_of(m) for k, m in groups.items()}
 
     cur = [r for r in rows if r[0] == exam.id]
-    subjects = [s for s in SUBJECTS if any(r[1] == s for r in cur)]
+    # 2026-10-21 用户口径：一列不缺 —— 限时练场次可能是全 9 科，也可能是
+    # 物化生这类选科组合，列固定按 9 科展开，本场没考的科留「—」，
+    # 导入后一眼能看出哪科还没导。
+    subjects = list(SUBJECTS)
 
     info = {}
-    for eid, subj, no, name, cls, _score in cur:
+    for eid, subj, no, name, cls, score in cur:
         it = info.setdefault(no, {'no': no, 'name': name or '',
-                                  'cls': cls or '', 'now': {}})
+                                  'cls': _norm_class(cls), 'now': {},
+                                  'scores': {}})
         it['now'][subj] = tmaps.get((eid, subj), {}).get(no)
+        it['scores'][subj] = score
 
     series = {}
     for (eid, subj), m in tmaps.items():
@@ -686,11 +746,20 @@ def _trends_base(exam):
             if no in info:
                 series.setdefault((no, subj), []).append((dates[eid], t))
 
+    # 列固定 9 科，但**折线只画该生选科内的科目**：文科班的物化生格不该挂
+    # 高一全科场的历史折线（看着像"文科生也在考理化生"），本场没分就显示「—」。
+    allowed = _selection_map(list(info.keys()))
     out = []
     for no, it in info.items():
+        allow = allowed.get(no)
         pts = {}
         for s in subjects:
-            pts[s] = sorted(series.get((no, s), []))[-TREND_MAX_POINTS:]
+            if allow is not None and s not in allow:
+                pts[s] = []
+            else:
+                pts[s] = sorted(series.get((no, s), []))[-TREND_MAX_POINTS:]
+        it['total'] = (round(sum(it['scores'].values()), 1)
+                       if it['scores'] else None)
         out.append({
             **it, 'pts': pts,
             # 行内迷你折线：后端直接给 SVG 坐标串，前端不画图

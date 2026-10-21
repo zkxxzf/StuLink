@@ -309,6 +309,18 @@
             white-space: nowrap;
         }
         .timed-tbl .t-sub { font-size: 14px; line-height: 1.1; }
+        /* 限时练切班/翻页走局部刷新：加载中整块压暗，避免白屏闪烁 */
+        .timed-pane-loading { opacity: .45; pointer-events: none; }
+        /* 限时练长表：页面往下翻时表头吸顶（2026-10-21 用户口径「表头不能说翻就消失」）。
+           表格在 .table-responsive 里，overflow 会让 position:sticky 失效，
+           所以由 timed_pane.js 克隆一层 fixed 表头，这里只管外观。 */
+        .timed-sticky-head {
+            position: fixed; top: 56px; z-index: 120; display: none;
+            overflow: hidden; pointer-events: none;
+            box-shadow: 0 3px 8px rgba(0, 0, 0, .16);
+        }
+        .timed-sticky-head table { margin-bottom: 0; }
+        .timed-sticky-head .timed-sticky-inner { will-change: transform; }
         /* 2026-10-19 用户口径：考试成绩单 / 数据导入等页面顶部固定展示本场考试标题，
            原来的页头位置改为各页面自己的标题。 */
         .exam-topbar-context {

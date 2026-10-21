@@ -234,6 +234,25 @@ with app.test_client() as c:
     js = r.get_json()
     check('学科分析 API（含热力）',
           'class_compare' in js['data']['tables'] and 'heatmap' in js['data']['charts'])
+    # 2026-10-21 用户口径：列顺序 = 班级 → 任课教师 → 人数 →
+    # 各层「上线数 / 上线率 / 双上线数 / 双上线率」→ 均分等
+    _cmp = js['data']['tables']['class_compare']
+    _cols = [x['label'] for x in _cmp['columns']]
+    check('学科分析列顺序：班级/任课教师/人数在前',
+          _cols[:3] == ['班级', '任课教师', '人数'], str(_cols[:5]))
+    _lay = [x for x in _cols if x.endswith('上线')]
+    if _lay:
+        check('学科分析：每层出上线/上线率/双上线/双上线率四列',
+              all((x[:-2] + '上线率%') in _cols
+                  and (x[:-2] + '双上线') in _cols
+                  and (x[:-2] + '双上线率%') in _cols for x in _lay), str(_cols))
+    else:
+        check('学科分析：未划线不出层列（跳过四列检查）', True, str(_cols))
+    _row0 = _cmp['rows'][0]
+    _ok = 'teacher' in _row0 and (
+        not _lay or any(k.endswith('_r') or k.endswith('_dr') for k in _row0))
+    check('学科分析：行内带任课教师与层率字段', _ok,
+          str({k: v for k, v in _row0.items() if k.startswith('lo_')}))
 
     # ---- 班级对比分析（第五 tab） ----
     from urllib.parse import quote
@@ -550,6 +569,31 @@ with app.test_client() as c:
           and '<a class="efn-group"' not in html)
     check('侧栏：分析组展开仍由箭头负责',
           'data-bs-toggle="collapse" href="#efnAnalysis"' in html)
+
+    # ---- 2026-10-21 成绩单导出（页面「导出数据」按钮的落点） ----
+    # 口径：导出走 _exam_page_rows(all_rows=True)，与页面同一份取数/排序/
+    # 班级收敛；这里只验「按钮在 + 能下 xlsx + 行数对得上 + 班级筛选生效」。
+    from openpyxl import load_workbook as _load_wb
+    with app.app_context():
+        _n_all = ExamScore.query.filter_by(exam_id=eid, subject='总分').count()
+        _n_cls = ExamScore.query.filter_by(exam_id=eid, subject='总分',
+                                           class_name='01班').count()
+
+    def _export_rows(url):
+        """下载导出文件并返回「成绩单」表的数据行数（失败返回 (None, 状态码)）"""
+        r = c.get(url)
+        if r.status_code != 200 or 'spreadsheetml' not in r.mimetype:
+            return None, r.status_code
+        ws = _load_wb(io.BytesIO(r.data))['成绩单']
+        return ws.max_row - 2, r.status_code
+
+    _rows, _code = _export_rows(f'/grades/exams/{eid}/scores/export')
+    check('成绩单导出：能下 xlsx 且行数=全部学生',
+          _rows == _n_all, f'{_code} rows={_rows}/{_n_all}')
+    _rows, _code = _export_rows(f'/grades/exams/{eid}/scores/export?cls=01班')
+    check('成绩单导出：按班筛选生效', _rows == _n_cls, f'{_rows}/{_n_cls}')
+    check('成绩单页：有「导出数据」按钮且指向导出路由',
+          '导出数据' in html and f'/grades/exams/{eid}/scores/export' in html)
 
     # ---- v1.19.49.50 表头/数字严格对齐 + 名次列次序 + 进退步悬浮说明 ----
     # th 内若残留空白，右对齐时行尾空格不会被折掉，会把表头文字往左推几个像素 → 与数字错开

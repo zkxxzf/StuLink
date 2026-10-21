@@ -46,10 +46,10 @@
                            placeholder="选填，如：周三第 8 节" value="{{ remark or '' }}">
                 </div>
                 <div class="col-12">
-                    <label class="form-label">名称</label>
-                    <input type="text" name="name" id="f_name" class="form-control"
-                           placeholder="留空自动生成：年级 + 8 位日期 + 限时练" value="{{ name }}">
-                    <div class="form-text">留空时按「年级 + 8 位日期 + 限时练」生成。</div>
+                    <div class="form-text">
+                        名称由系统统一生成：年级 + 8 位日期 + 限时练No.序号，
+                        如「2025级20260905限时练No.17」，序号按届内日期自动连续。
+                    </div>
                 </div>
             </div>
             <div class="mt-3">
@@ -62,21 +62,4 @@
         </form>
     </div>
 </div>
-{% endblock %}
-{% block extra_js %}
-<script>
-$(function () {
-    // 名称默认 = 年级 + 8位日期 + 限时练（与后端 _auto_name 同一规则）
-    var auto = {{ 'true' if not name else 'false' }};
-    function refreshName() {
-        if (!auto) { return; }
-        var g = $('#f_grade').val();
-        var d = ($('#f_date').val() || '').replace(/-/g, '');
-        if (g && d) { $('#f_name').val(g + d + '限时练'); }
-    }
-    $('#f_grade, #f_date').on('change', refreshName);
-    $('#f_name').on('input', function () { auto = false; });
-    refreshName();
-});
-</script>
 {% endblock %}

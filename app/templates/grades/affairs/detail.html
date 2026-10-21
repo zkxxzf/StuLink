@@ -58,19 +58,8 @@
   #invigMatrix thead th:first-child { z-index: 4; background: var(--sl-head-bg); }
   #invigMatrix th:nth-child(2), #invigMatrix td:nth-child(2) { min-width: 72px; }
   #invigMatrix th:nth-child(3), #invigMatrix td:nth-child(3) { min-width: 48px; }
-  /* 2026-10-14 用户反馈「监考编排的下拉列表颜色不对」：
-     原生 <select> 展开的弹层是拿**元素自身**的 background-color / color 去画的。
-     原来写 background: transparent，弹层背景就回落成白色，而文字仍是深色主题的浅色
-     → 展开后一长条白底浅字、选项几乎看不见。
-     改为与单元格同色（表体底色 = --bs-body-bg），深浅主题都读得清，
-     格子里也不会多出一块异色矩形（仍是「隐形下拉」）；option 也显式给一遍，
-     Chromium 弹层内逐项才稳。 */
-  #invigMatrix .iv-mat-sel { border: 0; background: var(--bs-body-bg);
-                            color: var(--sl-text); text-align: center;
-                            font-size: .8rem; padding: .1rem .2rem; cursor: pointer; }
-  #invigMatrix .iv-mat-sel option { background-color: var(--bs-body-bg); color: var(--sl-text); }
-  #invigMatrix .iv-mat-sel:hover, #invigMatrix .iv-mat-sel:focus {
-    border: 1px solid var(--sl-border); }
+  /* 2026-10-21：格内原生下拉已换成「按钮 + 可输入浮层」（见 .iv-cell / .sl-picker），
+     原先为原生 select 处理「深色模式弹层白底浅字」的 .iv-mat-sel 规则随之删除。 */
   /* 2026-10-19 用户反馈「UI 穿模」：工作量弹窗的表头原来只挂 .sticky-top，
      .table 单元格底色是 transparent —— 表头悬浮时下层行直接透出来，文字叠成一团，
      看上去像表头飘到弹窗标题上。改成：表格在自己的小容器里滚动，
@@ -85,6 +74,50 @@
   }
   #wlModal .wl-table tbody td { background: var(--sl-surface); }
   #wlModal .wl-table tbody tr.wl-detail > td { background: var(--sl-surface-2); }
+  /* 2026-10-21 用户口径：选人时可直接输入「姓名 / 全拼 / 每字首字母」。
+     下拉浮层全局只建一个（页面上一百多个格子共用），所以放 body 下、fixed 定位。 */
+  .sl-picker { position: fixed; z-index: 2090; width: 248px; padding: 8px;
+              background: var(--sl-surface); color: var(--sl-text);
+              border: 1px solid var(--sl-border); border-radius: 10px;
+              box-shadow: 0 12px 32px rgba(15, 30, 61, .22); }
+  .sl-picker .pk-title { font-size: .72rem; color: var(--sl-text-muted); margin: 0 2px 6px; }
+  .sl-picker .pk-list { max-height: 264px; overflow: auto; margin-top: 6px; }
+  .sl-picker .pk-opt { display: flex; align-items: center; gap: .4rem;
+                      padding: .26rem .45rem; border-radius: 6px; cursor: pointer;
+                      font-size: .82rem; line-height: 1.4; }
+  .sl-picker .pk-opt:hover, .sl-picker .pk-opt.on { background: var(--sl-surface-2); }
+  .sl-picker .pk-opt.sel { font-weight: 600; }
+  .sl-picker .pk-opt .pk-sub { margin-left: auto; font-size: .7rem;
+                               color: var(--sl-text-muted); }
+  .sl-picker .pk-empty { padding: .6rem 0; text-align: center; font-size: .78rem;
+                        color: var(--sl-text-muted); }
+  /* ④ 矩阵格子：原来是隐形下拉，现在换成「可点的按钮 + 搜索浮层」，外观保持一致 */
+  #t4Table .at-cell { width: 100%; border: 1px solid transparent; border-radius: 6px;
+                     background: transparent; color: var(--sl-text); text-align: left;
+                     font-size: .8rem; padding: .1rem .3rem; }
+  #t4Table .at-cell:hover, #t4Table .at-cell:focus { border-color: var(--sl-border);
+                     background: var(--sl-surface-2); outline: none; }
+  #t4Table .at-cell.empty { color: var(--sl-text-muted); }
+  #invigMatrix .iv-cell { border: 1px solid transparent; border-radius: 6px;
+                          background: var(--bs-body-bg); color: var(--sl-text);
+                          font-size: .8rem; padding: .1rem .2rem; width: 100%; }
+  #invigMatrix .iv-cell:hover, #invigMatrix .iv-cell:focus {
+      border-color: var(--sl-border); outline: none; }
+  #invigMatrix .iv-cell.empty { color: var(--sl-text-muted); }
+  /* 2026-10-21 环节④：列 = 文化科 9 + 综合组 5（通用技术在考务里去掉）+ 班主任 3，
+     17 列必须横向滚动；首列（班级）冻结，第二行表头分组带（文化科目 / 综合组 /
+     班主任）。每列 96px 是为了 3 个字的名字不被截断。 */
+  #t4Table { width: auto; min-width: 100%; }
+  #t4Table th, #t4Table td { white-space: nowrap; min-width: 96px; }
+  #t4Table thead th { background: var(--sl-head-bg); color: var(--sl-head-text);
+                      border-color: var(--sl-head-border); font-size: .78rem; }
+  #t4Table th.t4-cls, #t4Table td.t4-cls {
+      position: sticky; left: 0; z-index: 2; background: var(--sl-surface);
+      box-shadow: 2px 0 4px -2px rgba(15, 30, 61, .25); min-width: 62px;
+  }
+  #t4Table thead th.t4-cls { z-index: 4; background: var(--sl-head-bg); }
+  #t4Table .t4-band { text-align: center; font-weight: 700; letter-spacing: .5px; }
+  #t4Table .t4-head-col { background: color-mix(in srgb, var(--sl-head-bg) 88%, #198754 12%); }
 </style>
 {% endblock %}
 {% block content %}
@@ -610,7 +643,12 @@
                 <i class="bi bi-save"></i> 保存</button>
         </div>
         <div class="alert alert-light border py-2 small">
-            表格为「班级 × 科目 → 任课教师」，留空表示该班不开设该科。
+            表格为「班级 × 科目 → 任课教师」：<b>9 个文化科 + 综合组 5 科</b>
+            （体育 / 音乐 / 美术 / 信息技术 / 心理）+ <b>班主任</b>
+            （正班主任 / 副班主任1 / 副班主任2，与教师映射同一口径）；留空表示该班没有该科
+            任课教师或该职务。点格子后可直接输入 <b>姓名 / 全拼 / 每个字的首字母</b> 检索
+            （例：蒋雪静 → 蒋雪静 / jiangxuejing / jxj）。这里的每一位老师都会进入
+            环节⑥ 的监考教师池，班主任还会用于「每天首场优先排班主任」。
         </div>
         <div id="t4Body" class="table-responsive" style="max-height:66vh;overflow:auto">
             <div class="text-center text-muted py-4"><div class="spinner-border spinner-border-sm"></div>
@@ -789,7 +827,7 @@
             </div>
             <div class="col-lg-8">
                 <div class="card">
-                    <div class="card-header py-2 small fw-bold"><i class="bi bi-table"></i> 监考表（教师安排 · 学校格式，一格一人 · 可直接下拉换人）</div>
+                    <div class="card-header py-2 small fw-bold"><i class="bi bi-table"></i> 监考表（教师安排 · 学校格式，一格一人 · 点格子输入姓名 / 拼音换人）</div>
                     <div class="card-body p-0" style="max-height:62vh;overflow:auto">
                         <table class="table table-sm table-bordered align-middle mb-0 text-center"
                                id="invigMatrix">
@@ -863,8 +901,9 @@
         </div>
         <div class="modal-body py-2">
             <div class="d-flex flex-wrap gap-2 align-items-center mb-2">
-                <input id="piSearch" class="form-control form-control-sm" style="width:180px"
-                       placeholder="搜索姓名 / 学科" oninput="renderPickInvig()" aria-label="搜索教师">
+                <input id="piSearch" class="form-control form-control-sm" style="width:220px"
+                       placeholder="姓名 / 全拼 / 首字母 / 学科"
+                       oninput="renderPickInvig()" aria-label="搜索教师">
                 <select id="piSubj" class="form-select form-select-sm w-auto"
                         onchange="renderPickInvig()"><option value="">全部学科</option></select>
                 <div class="form-check">
@@ -1090,7 +1129,9 @@
 <script>
 const AID = {{ affair.id }};
 const AFFAIR_GRADE = {{ affair.grade | tojson }};   // v1.19.47.31：步骤② 自动选同名考场模板用
-const _SUBJECTS = {{ subjects | tojson }};   // 科目字典（时间表科目多选下拉用）
+const _SUBJECTS = {{ subjects | tojson }};   // 科目字典（时间表科目多选下拉用，只有 9 个文化科）
+// 2026-10-21：环节④ 的列 / 环节⑥ 教师池分组顺序 = 文化科 → 综合组 → 班主任
+const _AFFAIR_SUBJ_ORDER = {{ affair_subject_order | tojson }};
 // 2026-10-13 用户口径：⑤ 新增场次的日期默认口径 —— 与导入（缺省日期 / 每天上限）同源
 const SCHED_DEFAULT_DATE = '{{ sched_default_date.strftime("%Y-%m-%d") }}';
 const SCHED_DAILY_MAX = {{ sched_daily_max }};
@@ -2107,6 +2148,141 @@ document.querySelector('#affairTabs button[data-bs-target="#t6"]').addEventListe
 if(location.hash === '#t4'){ loadAffairTeachers(); }
 if(location.hash === '#t6'){ loadInvig(); }
 
+// ---------- 通用选人浮层：可输入姓名 / 全拼 / 每字首字母（2026-10-21） ----------
+// 全页只建一个浮层（④ 矩阵 + ⑥ 监考表共用）：格子有一百多个，每格一套下拉会卡。
+// 拼音码由后端下发（py / ini），前端只做字符串匹配，不引第三方 JS。
+var _PK = null;
+function _pkNorm(s){
+    return String(s == null ? '' : s).trim().toLowerCase().replace(/[\s·]+/g, '');
+}
+// 匹配打分：全等 > 姓名前缀 > 全拼前缀 > 首字母前缀 > 包含；0 = 不匹配
+function _pkScore(it, q){
+    if(!q){ return 1; }
+    var nm = _pkNorm(it.label), py = it.py || '', ini = it.ini || '';
+    if(nm === q){ return 100; }
+    if(nm.indexOf(q) === 0){ return 90; }
+    if(py.indexOf(q) === 0){ return 80; }
+    if(ini.indexOf(q) === 0){ return 70; }
+    if(nm.indexOf(q) >= 0){ return 60; }
+    if(py.indexOf(q) >= 0){ return 50; }
+    if(ini.indexOf(q) >= 0){ return 40; }
+    return 0;
+}
+function _pkScroll(ev){
+    if(_PK && _PK.box && _PK.box.contains(ev.target)){ return; }   // 列表内部滚动不算
+    closePicker();
+}
+function _pkOutside(ev){
+    if(_PK && _PK.box && !_PK.box.contains(ev.target)){ closePicker(); }
+}
+function closePicker(){
+    if(_PK && _PK.box){ _PK.box.remove(); }
+    _PK = null;
+    document.removeEventListener('mousedown', _pkOutside, true);
+    document.removeEventListener('keydown', _pkKey, true);
+    window.removeEventListener('scroll', _pkScroll, true);
+    window.removeEventListener('resize', closePicker);
+}
+function _pkDraw(){
+    var box = _PK.box;
+    var html = _PK.shown.length ? _PK.shown.map(function(it, i){
+        return '<div class="pk-opt' + (i === _PK.idx ? ' on' : '')
+            + (!it._clear && String(it.key) === String(_PK.current) ? ' sel' : '')
+            + '" data-i="' + i + '">'
+            + '<span>' + escHtml(it.label) + '</span>'
+            + (!it._clear && it.sub ? '<span class="pk-sub">' + escHtml(it.sub) + '</span>' : '')
+            + '</div>';
+    }).join('') : '<div class="pk-empty">没有匹配的人</div>';
+    box.querySelector('.pk-list').innerHTML = html;
+    box.querySelector('.pk-title').textContent = _PK.title || '';
+    var on = box.querySelector('.pk-opt.on');
+    if(on){ on.scrollIntoView({block: 'nearest'}); }
+}
+function _pkRender(){
+    var q = _pkNorm(_PK.input.value);
+    var shown = _PK.items.map(function(it){ return {it: it, s: _pkScore(it, q)}; })
+        .filter(function(x){ return x.s > 0; })
+        .sort(function(a, b){
+            return b.s - a.s || (a.it.label < b.it.label ? -1 : (a.it.label > b.it.label ? 1 : 0));
+        })
+        .slice(0, 60)
+        .map(function(x){ return x.it; });
+    if(_PK.allowClear && !q){
+        shown.unshift({key: '', label: '— 不指定（清除）—', _clear: true});
+    }
+    _PK.shown = shown;
+    _PK.idx = (q || !_PK.allowClear) ? 0 : Math.min(1, shown.length - 1);
+    _pkDraw();
+}
+function _pkPick(i){
+    var it = _PK.shown[i];
+    if(!it){ return; }
+    var cb = it._clear ? _PK.onClear : _PK.onPick;
+    closePicker();
+    if(cb){ cb(it); }
+}
+function _pkKey(ev){
+    if(!_PK){ return; }
+    if(ev.key === 'Escape'){ ev.preventDefault(); closePicker(); return; }
+    if(ev.key === 'ArrowDown' || ev.key === 'ArrowUp'){
+        if(!_PK.shown.length){ return; }
+        ev.preventDefault();
+        _PK.idx = (_PK.idx + (ev.key === 'ArrowDown' ? 1 : -1) + _PK.shown.length) % _PK.shown.length;
+        _pkDraw();
+        return;
+    }
+    if(ev.key === 'Enter'){ ev.preventDefault(); _pkPick(_PK.idx); }
+}
+function openPicker(cfg){
+    closePicker();
+    var box = document.createElement('div');
+    box.className = 'sl-picker';
+    box.innerHTML = '<div class="pk-title"></div>'
+        + '<input type="text" class="form-control form-control-sm pk-inp" autocomplete="off"'
+        + ' aria-label="搜索教师" placeholder="姓名 / 全拼 / 首字母">'
+        + '<div class="pk-list"></div>';
+    document.body.appendChild(box);
+    _PK = {box: box, input: box.querySelector('.pk-inp'),
+           items: (cfg.items || []).filter(function(it){ return it && it.label; }),
+           current: cfg.current == null ? '' : String(cfg.current),
+           allowClear: !!cfg.allowClear, title: cfg.title || '',
+           onPick: cfg.onPick, onClear: cfg.onClear, shown: [], idx: 0};
+    // 定位：优先格子下方，放不下翻到上方；左右不出视口（fixed 定位，跟滚动解耦）
+    var r = cfg.anchor.getBoundingClientRect();
+    var w = 248, h = Math.min(340, box.offsetHeight || 340);
+    var left = Math.min(Math.max(8, r.left), Math.max(8, window.innerWidth - w - 8));
+    var top = r.bottom + 4;
+    if(top + h > window.innerHeight - 8 && r.top - 4 - h > 8){ top = r.top - 4 - h; }
+    box.style.left = Math.round(left) + 'px';
+    box.style.top = Math.round(Math.max(8, top)) + 'px';
+    _PK.input.addEventListener('input', function(){ _pkRender(); });
+    box.querySelector('.pk-list').addEventListener('click', function(ev){
+        var el = ev.target.closest('.pk-opt');
+        if(el){ _pkPick(parseInt(el.dataset.i, 10)); }
+    });
+    box.querySelector('.pk-list').addEventListener('mouseover', function(ev){
+        var el = ev.target.closest('.pk-opt');
+        if(!el){ return; }
+        _PK.idx = parseInt(el.dataset.i, 10);
+        box.querySelectorAll('.pk-opt').forEach(function(x, i){
+            x.classList.toggle('on', i === _PK.idx);
+        });
+    });
+    document.addEventListener('mousedown', _pkOutside, true);
+    document.addEventListener('keydown', _pkKey, true);
+    window.addEventListener('scroll', _pkScroll, true);
+    window.addEventListener('resize', closePicker);
+    _pkRender();
+    _PK.input.focus();
+}
+// ④ 矩阵格子（按 user_id 存）与 ⑥ 监考表格子（按姓名存）共用一套事件委托
+document.addEventListener('click', function(ev){
+    var t4 = ev.target.closest && ev.target.closest('#t4Body .at-cell');
+    if(t4){ _t4OpenPicker(t4); return; }
+    var iv = ev.target.closest && ev.target.closest('#invigMatrix .iv-cell');
+    if(iv){ _ivOpenPicker(iv); }
+});
+
 // ---------- 环节④ 任课核对 ----------
 function loadAffairTeachers(){
     var box = document.getElementById('t4Body');
@@ -2117,40 +2293,85 @@ function loadAffairTeachers(){
 }
 function renderAffairTeachers(){
     var d = _affTeachers; if(!d) return;
-    var h = ['<table class="table table-sm table-bordered align-middle mb-0"><thead class="sticky-top bg-white"><tr><th>班级</th>'];
-    d.subjects.forEach(s=>{ h.push('<th class="text-center">'+escHtml(s)+'</th>'); });
+    // 2026-10-21：两行表头 —— 第一行按「文化科目 / 综合组 / 班主任」合并分组，
+    // 第二行列科目名（18 列，容器横向滚动，首列班级冻结）。
+    var groups = (d.subject_groups && d.subject_groups.length)
+        ? d.subject_groups : [{name: '', subjects: d.subjects || []}];
+    var h = ['<table class="table table-sm table-bordered align-middle mb-0" id="t4Table">'];
+    // ---- 表头第一行：分组带 ----
+    h.push('<thead><tr><th class="t4-cls" rowspan="2">班级</th>');
+    groups.forEach(function(g){
+        if(!g.subjects.length) return;
+        var cls = g.name === '班主任' ? 't4-band t4-head-col' : 't4-band';
+        h.push('<th class="'+cls+'" colspan="'+g.subjects.length+'">'
+               + escHtml(g.name || '文化科目') + '</th>');
+    });
+    h.push('</tr><tr>');
+    groups.forEach(function(g){
+        g.subjects.forEach(function(s){
+            var cls = g.name === '班主任' ? 'text-center t4-head-col' : 'text-center';
+            h.push('<th class="'+cls+'">'+escHtml(s)+'</th>');
+        });
+    });
     h.push('</tr></thead><tbody>');
     d.classes.forEach(cls=>{
-        h.push('<tr><td class="text-nowrap fw-bold">'+escHtml(cls)+'</td>');
-        d.subjects.forEach(s=>{
+        h.push('<tr><td class="t4-cls text-nowrap fw-bold">'+escHtml(cls)+'</td>');
+        groups.forEach(function(g){
+        g.subjects.forEach(function(s){
             var c = d.cells[cls+'|'+s] || {};
             var cur = c.user_id ? String(c.user_id) : '';
-            var legacy = (c.name && !cur);   // 历史教师：有姓名无账号
-            var optHtml = '<option value=""'+(cur||legacy?'':' selected')+'>—</option>';
-            (d.users||[]).forEach(function(u){
-                var uid = String(u.id);
-                optHtml += '<option value="'+uid+'"'+(uid===cur?' selected':'')+'>'
-                         + escHtml(u.name||u.username||'')+'</option>';
-            });
-            if(legacy){ optHtml += '<option value="" selected>'+escHtml(c.name)+'（历史，无账号）</option>'; }
-            h.push('<td><select class="form-select form-select-sm at-sel" data-k="'+escHtml(cls+'|'+s)+'">'
-                   + optHtml + '</select></td>');
+            // 2026-10-21：格子换成「按钮 + 可输入浮层」（原先 180 个原生下拉，找一个人
+            // 要在上百个选项里翻）。历史教师（有姓名无账号）照旧显示姓名。
+            var label = c.name || '';
+            var tip = (c.name && !cur) ? '历史教师（无账号）；重新选人后按账号绑定' : '';
+            h.push('<td><button type="button" class="at-cell' + (label ? '' : ' empty') + '"'
+                   + ' data-k="' + escHtml(cls+'|'+s) + '" data-uid="' + escHtml(cur) + '"'
+                   + (tip ? ' title="' + escHtml(tip) + '"' : '') + '>'
+                   + escHtml(label || '—') + '</button></td>');
+        });
         });
         h.push('</tr>');
     });
     h.push('</tbody></table>');
     document.getElementById('t4Body').innerHTML = h.join('');
 }
+// ④ 点格子 → 可输入浮层选人（姓名 / 全拼 / 首字母）
+function _t4OpenPicker(btn){
+    var users = (_affTeachers && _affTeachers.users) || [];
+    openPicker({
+        anchor: btn,
+        title: (btn.dataset.k || '').replace('|', ' · '),
+        current: btn.dataset.uid || '',
+        allowClear: true,
+        items: users.map(function(u){
+            return {key: String(u.id), label: u.name || u.username || '',
+                    py: u.py || '', ini: u.ini || ''};
+        }),
+        onPick: function(it){
+            btn.dataset.uid = it.key;
+            btn.textContent = it.label;
+            btn.classList.remove('empty');
+            btn.removeAttribute('title');
+        },
+        onClear: function(){
+            btn.dataset.uid = '';
+            btn.textContent = '—';
+            btn.classList.add('empty');
+        }
+    });
+}
 function saveAffairTeachers(){
     var cells = {};
-    document.querySelectorAll('#t4Body .at-sel').forEach(function(el){ cells[el.dataset.k] = el.value || ''; });
+    document.querySelectorAll('#t4Body .at-cell').forEach(function(el){
+        cells[el.dataset.k] = el.dataset.uid || '';
+    });
     fetch('/grades/affairs/'+AID+'/teachers/save', {method:'POST',
         headers:{'Content-Type':'application/json','X-CSRFToken':csrf()},
         body: JSON.stringify({cells: cells})})
         .then(r=>r.json()).then(d=>{ alert(d.ok?'已保存':'保存失败：'+(d.msg||'')); });
 }
 function syncAffairTeachers(){
-    if(!confirm('从「任课安排表」重新带入将覆盖本批次已做的临时调整，继续？')) return;
+    if(!confirm('从「任课安排表 + 班主任」重新带入将覆盖本批次已做的临时调整（含综合组与班主任三列），继续？')) return;
     fetch('/grades/affairs/'+AID+'/teachers/sync', {method:'POST', headers:{'X-CSRFToken':csrf()}})
         .then(r=>r.json()).then(d=>{ if(d.ok){ alert('已带入 '+d.synced+' 条'); loadAffairTeachers(); } else alert(d.msg||'失败'); });
 }
@@ -2495,14 +2716,19 @@ function renderPool(d){
     renderExcludes(d);
 }
 function _subjRank(s){
-    var i = (_SUBJECTS || []).indexOf(s);
+    // 2026-10-21：分组顺序 = 文化科 → 综合组 → 班主任（与环节④ 列顺序同一份）
+    var order = _AFFAIR_SUBJ_ORDER || _SUBJECTS || [];
+    var i = order.indexOf(s);
     return i < 0 ? 999 : i;
 }
-// 任课教师按学科分组（科目顺序跟页面科目字典；「未标注学科 / 其他监考员」排最后）
+// 任课教师按学科分组（科目顺序跟环节④ 列顺序；「未标注学科 / 其他监考员」排最后）
 function renderPoolBySubject(list, d){
     var groups = {}, order = [];
     list.forEach(function(p){
-        var subs = (p.subjects && p.subjects.length) ? p.subjects : ['未标注学科'];
+        // 班主任但没任教任何一科（如专职班主任/综合组老师）→ 归到「班主任」组，
+        // 不要掉进「未标注学科」；同时任教某科的仍按科目分组，徽章上另标班主任。
+        var subs = (p.subjects && p.subjects.length) ? p.subjects
+                   : [p.is_head ? '班主任' : '未标注学科'];
         subs.forEach(function(s){
             if(!groups[s]){ groups[s] = []; order.push(s); }
             groups[s].push(p);
@@ -2519,13 +2745,18 @@ function renderPoolBySubject(list, d){
 function poolChip(p, d){
     var n = (d.load||{})[p.name] || 0;
     var ex = !!p.excluded, exs = (p.excl_schedules||[]).length;
-    var tip = '任教：' + ((p.subjects||[]).join('、') || '—') + '｜已排 ' + n + ' 格';
+    var tip = (p.is_head ? '班主任｜' : '') + '任教：'
+        + ((p.subjects||[]).join('、') || '—') + '｜已排 ' + n + ' 格';
     if(ex) tip += '｜已排除：整批次不监考（在下方排除名单里删）';
     else if(exs) tip += '｜已排除 ' + exs + ' 场不监考';
+    // 2026-10-21：班主任身份在徽章上单独标（多身份账号很常见：既教语文又当班主任）
+    var headTag = p.is_head
+        ? '<span class="ms-1" style="font-size:.66rem;opacity:.85">班主任</span>' : '';
     return '<span class="badge ' + (ex ? 'bg-light text-muted border text-decoration-line-through'
                                        : 'bg-primary-subtle text-primary-emphasis border')
         + ' me-1 mb-1" title="' + escHtml(tip) + '">'
-        + escHtml(p.name) + (n ? ('<span class="ms-1 small">(' + n + ')</span>') : '') + '</span>';
+        + escHtml(p.name) + headTag
+        + (n ? ('<span class="ms-1 small">(' + n + ')</span>') : '') + '</span>';
 }
 function isExcluded(d, name, sid){
     return (d.excludes || []).some(e => e.name === name && (e.schedule_id || 0) === (sid || 0));
@@ -2567,29 +2798,21 @@ function exclOnPick(kind, key, cb){
     }
     updateExclButtons();
 }
-function renderExcludePickers(d){
-    var whoMenu = document.getElementById('exclWhoMenu'), schMenu = document.getElementById('exclSchMenu');
-    if(!whoMenu || !schMenu) return;
-    // 老师菜单：按学科分组（其他监考员单列）
-    var groups = {}, order = [];
-    function _add(key, p){
-        if(!groups[key]){ groups[key] = []; order.push(key); }
-        if(!groups[key].some(function(x){ return x.name === p.name; })) groups[key].push(p);
-    }
+var _exclGroups = {}, _exclOrder = [];
+// 老师多选列表（按搜索词过滤；_exclWho 与渲染顺序一一对应，勾选回调按下标取姓名）
+function drawExclWhoList(q){
+    var box = document.getElementById('exclWhoList');
+    if(!box){ return; }
+    q = _pkNorm(q || '');
     _exclWho = [];
-    (d.pool || []).forEach(function(p){
-        if(p.source !== 'teacher'){ _add('其他监考员', p); return; }
-        var subs = (p.subjects && p.subjects.length) ? p.subjects : ['未标注学科'];
-        subs.forEach(function(s){ _add(s, p); });
-    });
-    var tail = {'未标注学科': 1, '其他监考员': 1};
-    order.sort(function(a, b){
-        var ra = tail[a] ? 999 : _subjRank(a), rb = tail[b] ? 999 : _subjRank(b);
-        return ra - rb || (a < b ? -1 : (a > b ? 1 : 0));
-    });
-    whoMenu.innerHTML = order.map(function(k){
+    var html = _exclOrder.map(function(k){
+        var items = (_exclGroups[k] || []).filter(function(p){
+            if(!q){ return true; }
+            return _pkNorm((p.name || '') + (p.py || '') + (p.ini || '')).indexOf(q) >= 0;
+        });
+        if(!items.length){ return ''; }
         return '<div class="dropdown-header px-1 py-0 small text-muted">' + escHtml(k) + '</div>'
-            + groups[k].map(function(p){
+            + items.map(function(p){
                 _exclWho.push(p.name);
                 var i = _exclWho.length - 1;
                 var ex = (p.source === 'teacher' && p.excluded)
@@ -2599,7 +2822,38 @@ function renderExcludePickers(d){
                     + (_exclSel.who[p.name] ? ' checked' : '') + '>'
                     + escHtml(p.name) + ex + '</label>';
             }).join('');
-    }).join('') || '<div class="text-muted small px-1">暂无老师</div>';
+    }).join('');
+    box.innerHTML = html || '<div class="text-muted small px-1">没有匹配的老师</div>';
+}
+function renderExcludePickers(d){
+    var whoMenu = document.getElementById('exclWhoMenu'), schMenu = document.getElementById('exclSchMenu');
+    if(!whoMenu || !schMenu) return;
+    // 老师菜单：按学科分组（其他监考员单列）
+    var groups = {}, order = [];
+    function _add(key, p){
+        if(!groups[key]){ groups[key] = []; order.push(key); }
+        if(!groups[key].some(function(x){ return x.name === p.name; })) groups[key].push(p);
+    }
+    (d.pool || []).forEach(function(p){
+        if(p.source !== 'teacher'){ _add('其他监考员', p); return; }
+        var subs = (p.subjects && p.subjects.length) ? p.subjects
+                   : [p.is_head ? '班主任' : '未标注学科'];
+        subs.forEach(function(s){ _add(s, p); });
+    });
+    var tail = {'未标注学科': 1, '其他监考员': 1};
+    order.sort(function(a, b){
+        var ra = tail[a] ? 999 : _subjRank(a), rb = tail[b] ? 999 : _subjRank(b);
+        return ra - rb || (a < b ? -1 : (a > b ? 1 : 0));
+    });
+    // 2026-10-21：老师多选菜单加搜索框（姓名 / 全拼 / 首字母）——列表按输入重画，
+    // 已勾选状态存在 _exclSel.who（按姓名），重画不会丢。
+    _exclGroups = groups;
+    _exclOrder = order;
+    whoMenu.innerHTML = '<input type="text" id="exclWhoQ" class="form-control form-control-sm mb-1"'
+        + ' autocomplete="off" placeholder="搜姓名 / 全拼 / 首字母" aria-label="搜索老师"'
+        + ' oninput="drawExclWhoList(this.value)">'
+        + '<div id="exclWhoList"></div>';
+    drawExclWhoList('');
     // 场次菜单：整批次 + 每场（可多选）
     schMenu.innerHTML = '<label class="dropdown-item-text form-check mb-0" style="font-size:.85rem">'
         + '<input type="checkbox" class="form-check-input mt-0 me-1" data-whole="1"'
@@ -2726,7 +2980,6 @@ function renderInvigMatrix(d){
     // r1/r2 的动态段均经 escHtml，静态段为固定标签，故本行为安全拼接
     thead.innerHTML = r1 + '</tr><tr>' + r2 + '</tr>';  // # sec-allow: 模板-裸innerHTML
 
-    var poolNames = d.pool.map(function(p){ return p.name; });
     var rows = [];
     d.rooms.forEach(function(rm){
         var tds = ['<td class="fw-bold">' + escHtml(stuPad2(rm.room_no)) + '</td>',
@@ -2736,29 +2989,63 @@ function renderInvigMatrix(d){
                        + (rm.capacity == null ? '' : escHtml(String(rm.capacity))) + '</td>'];
         d.schedules.forEach(function(s){
             var cell = d.invig[s.id + '|' + rm.room_no] || {};
-            var avoid = s.subject ? [s.subject] : [];
             var sels = [];
             for(var n = 1; n <= slots; n++){
                 var val = (cell[n] && cell[n].name) || '';
-                var opts = '<option value="">—</option>' + poolNames.map(function(nm){
-                    var p = d.pool.find(function(x){ return x.name === nm; }) || {};
-                    var conf = (p.subjects || []).some(function(sj){ return avoid.indexOf(sj) >= 0; });
-                    return '<option value="' + escHtml(nm) + '"' + (nm === val ? ' selected' : '')
-                         + (conf ? ' data-conf="1"' : '') + '>'
-                         + escHtml(nm) + (conf ? '（回避）' : '') + '</option>';
-                }).join('');
-                sels.push('<select class="form-select form-select-sm iv-sel iv-mat-sel" data-sid="'
-                          + s.id + '" data-room="' + escHtml(rm.room_no) + '" data-slot="' + n + '">'
-                          + opts + '</select>');
+                // 2026-10-21：格内换成「按钮 + 可输入浮层」（姓名 / 全拼 / 首字母），
+                // 回避科目在浮层里以「回避」小字标出（原先是选项后缀）
+                sels.push('<button type="button" class="iv-cell' + (val ? '' : ' empty') + '"'
+                          + ' data-sid="' + s.id + '" data-room="' + escHtml(rm.room_no)
+                          + '" data-slot="' + n + '" data-name="' + escHtml(val)
+                          + '" data-avoid="' + escHtml(s.subject || '') + '">'
+                          + escHtml(val || '—') + '</button>');
             }
             tds.push('<td><div class="d-flex flex-column gap-1">' + sels.join('') + '</div></td>');
         });
         rows.push('<tr>' + tds.join('') + '</tr>');
     });
     tbody.innerHTML = rows.join('');
-    tbody.querySelectorAll('.iv-sel').forEach(function(el){
-        el.addEventListener('change', function(){ setInvig(el); });
+}
+// ⑥ 监考表格子点开 → 可输入浮层（池里的人都可搜；教本场科目的标「回避」）
+function _ivOpenPicker(btn){
+    var pool = (_invigData && _invigData.pool) || [];
+    var avoid = btn.dataset.avoid || '';
+    openPicker({
+        anchor: btn, title: '换监考员', current: btn.dataset.name || '',
+        allowClear: true,
+        items: pool.map(function(p){
+            var subs = p.subjects || [];
+            var conf = !!avoid && subs.indexOf(avoid) >= 0;
+            return {key: p.name, label: p.name, py: p.py || '', ini: p.ini || '',
+                    sub: conf ? '回避' : (subs.join('、') || '')};
+        }),
+        onPick: function(it){ _setInvig(btn, it.key); },
+        onClear: function(){ _setInvig(btn, ''); }
     });
+}
+function _setInvig(btn, name){
+    btn.dataset.name = name;
+    btn.textContent = name || '—';
+    btn.classList.toggle('empty', !name);
+    var fd = new FormData();
+    fd.append('schedule_id', btn.dataset.sid);
+    fd.append('room_no', btn.dataset.room);
+    fd.append('slot', btn.dataset.slot);
+    fd.append('name', name);
+    fetch('/grades/affairs/'+AID+'/invig/set', {method:'POST', body:fd, headers:{'X-CSRFToken':csrf()}})
+        .then(r=>r.json()).then(function(d){
+            var msg = document.getElementById('invigMsg');
+            if(!d.ok){
+                msg.className = 'small text-danger';
+                msg.textContent = d.msg;
+                btn.dataset.name = '';
+                btn.textContent = '—';
+                btn.classList.add('empty');
+                return;
+            }
+            msg.className = 'small text-success';
+            msg.textContent = '已保存';
+        });
 }
 // ---------- 环节⑥ 工作量统计（2026-10-13 用户口径：看每位老师监考多长时间） ----------
 function _fmtDuration(min){
@@ -2801,8 +3088,11 @@ function renderWorkload(d){
     var srcCn = {teacher: '任课教师', other: '其他监考员'};
     var rows = [];
     d.items.forEach(function(it, idx){
-        var badge = srcCn[it.source]
-            ? '<span class="badge bg-light text-dark border ms-1">' + srcCn[it.source] + '</span>' : '';
+        // 2026-10-21：班主任单独标（班主任多半也任教某科，只写「任课教师」看不出来）
+        var badge = it.is_head
+            ? '<span class="badge bg-success-subtle text-success-emphasis border ms-1">班主任</span>'
+            : (srcCn[it.source]
+               ? '<span class="badge bg-light text-dark border ms-1">' + srcCn[it.source] + '</span>' : '');
         var miss = it.missing
             ? '<span class="text-danger small ms-1">（' + it.missing + ' 格缺时间）</span>' : '';
         rows.push('<tr>'
@@ -2839,19 +3129,6 @@ function renderWorkload(d){
 function toggleWlDetail(idx){
     var tr = document.querySelector('#wlBody tr.wl-detail[data-idx="' + idx + '"]');
     if(tr){ tr.classList.toggle('d-none'); }
-}
-function setInvig(el){
-    var fd = new FormData();
-    fd.append('schedule_id', el.dataset.sid);
-    fd.append('room_no', el.dataset.room);
-    fd.append('slot', el.dataset.slot);
-    fd.append('name', el.value);
-    fetch('/grades/affairs/'+AID+'/invig/set', {method:'POST', body:fd, headers:{'X-CSRFToken':csrf()}})
-        .then(r=>r.json()).then(d=>{
-            var msg = document.getElementById('invigMsg');
-            if(!d.ok){ msg.className='small text-danger'; msg.textContent=d.msg; el.value=''; return; }
-            msg.className='small text-success'; msg.textContent='已保存';
-        });
 }
 function saveInvigSlots(){
     var fd = new FormData(); fd.append('slots', document.getElementById('invigSlots').value);
@@ -2958,13 +3235,18 @@ function _piGroupName(t){ return t.subject || '未标注学科'; }
 // 一位老师可能教多科（subjects 数组）→ 在各学科组里都出现，勾选状态按姓名联动
 function _piGroups(t){ return (t.subjects && t.subjects.length) ? t.subjects : ['未标注学科']; }
 function renderPickInvig(){
-    var q = (document.getElementById('piSearch').value || '').trim().toLowerCase();
+    // 2026-10-21：搜索框支持「姓名 / 全拼 / 每字首字母 / 学科」四路匹配
+    var q = _pkNorm(document.getElementById('piSearch').value || '');
     var sj = document.getElementById('piSubj').value || '';
     var hideIn = document.getElementById('piHideIn').checked;
     var groups = {}, order = [];
     _piAll.forEach(function(t){
         if(hideIn && _piIn.has(t.name)) return;
-        if(q && ((t.name||'') + ' ' + (t.subject||'')).toLowerCase().indexOf(q) < 0) return;
+        if(q){
+            var hay = _pkNorm((t.name || '') + (t.py || '') + (t.ini || ''));
+            var hit = hay.indexOf(q) >= 0 || _pkNorm(t.subject || '').indexOf(q) >= 0;
+            if(!hit) return;
+        }
         _piGroups(t).forEach(function(k){
             if(sj && k !== sj) return;
             if(!groups[k]){ groups[k] = []; order.push(k); }

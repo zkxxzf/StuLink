@@ -4,11 +4,14 @@
 # 用户口径（2026-10-12 定案）：
 #   · 环节④ 仅涉及「本次考试」：把该年级任课安排核对/临时调整后落在本批次，
 #     不回写全局 TeacherSubjectLink（应对临时换老师 1-2 月）。
+#     2026-10-21 用户口径：科目列 = 9 个文化科 + 综合组 6 科（体育/音乐/美术/
+#     信息技术/通用技术/心理）+ 本班班主任（正班主任 / 副班主任1 / 副班主任2），
+#     与任课教师映射页、教师安排表导入模板同一份口径。
 #   · 环节⑤ 考试时间表承载「时间段 → 考试科目」，是环节⑥ 回避教师的依据。
-#   · 环节⑥ 教师池 = 环节④ 任课教师（去重）+ 其他监考员（可为无账号的校外老师，
-#     仅本次考试使用，不开系统账号）；每考场监考人数 1/2/3（默认 1，存 affair.invig_slots）；
-#     回避规则：考化学 → 任教化学的老师不排该场次（2026-10-19 起可勾选关闭）；
-#     每天首场优先排班主任；监考表一人一格。
+#   · 环节⑥ 教师池 = 环节④ 任课教师（去重）+ 班主任 + 其他监考员（可为无账号的
+#     校外老师，仅本次考试使用，不开系统账号）；每考场监考人数 1/2/3（默认 1，
+#     存 affair.invig_slots）；回避规则：考化学 → 任教化学的老师不排该场次
+#     （2026-10-19 起可勾选关闭）；每天首场优先排班主任；监考表一人一格。
 #   · 环节⑦ 导出监考表（Excel + PDF）。
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 import io
@@ -21,9 +24,11 @@ from flask_login import login_required, current_user
 
 from app.extensions import db
 from app.models import User
-from app.models.grades import (AffairTeacher, AffairSchedule, AffairInvigilator,
+from app.models.grades import (AFFAIR_EXCLUDED_SUBJECTS, AFFAIR_HEAD_SUBJECTS,
+                               AffairTeacher, AffairSchedule, AffairInvigilator,
                                AffairInvigExclude, AffairInvigilation, AffairRoom,
-                               AffairStudent, ExamAffair, TeacherSubjectLink,
+                               AffairStudent, COMPREHENSIVE_SUBJECTS, ExamAffair,
+                               TeacherSubjectLink,
                                SUBJECTS, Exam, normalize_subject)
 from app.modules.grades import bp
 from app.modules.grades.services.invig_balance import Cell, best_assign
@@ -49,6 +54,26 @@ _SUBJ_SET = set(SUBJECTS)
 SCHED_DEFAULT_START = '08:00'
 SCHED_DURATION_MINUTES = {'语文': 150, '数学': 120, '英语': 120, '外语': 120}
 SCHED_DURATION_FALLBACK = 75
+
+# 2026-10-21 用户口径：考务④「核对任课教师」的列 = 文化科 9 + 综合组 5 + 班主任 3。
+#   · 综合组科目从教务模型取（COMPREHENSIVE_SUBJECTS），与任课映射页同源；
+#     **「通用技术」在考务里去掉**（用户 2026-10-21 明确要求，本校不带这门课；
+#     任课映射页仍保留它 —— 那边是全校口径，删了会牵动导入模板与既有映射）；
+#   · 班主任不是科目，用**伪科目名**占位（一个班最多 3 位，与模板的正班 / 副班1 /
+#     副班2 一一对应），存进 affair_teachers 表，不写回 TeacherSubjectLink；
+#   · 伪科目绝不会进考试科目字典 —— 环节⑤ 时间表仍只认 SUBJECTS 9 科，否则
+#     「体育」会被当成考试科目，触发莫名其妙的同科回避。
+HEAD_SUBJECTS = AFFAIR_HEAD_SUBJECTS   # 本文件内部沿用的短名字（真值在 models）
+AFFAIR_EXTRA_SUBJECTS = tuple(s for s in COMPREHENSIVE_SUBJECTS
+                              if s not in AFFAIR_EXCLUDED_SUBJECTS)
+AFFAIR_SUBJECTS = list(SUBJECTS) + list(AFFAIR_EXTRA_SUBJECTS)
+AFFAIR_COLUMNS = AFFAIR_SUBJECTS + list(HEAD_SUBJECTS)
+# 前端表头分组（顺序即列顺序；班主任排最后，避免把「班级 × 科目」矩阵挤散）
+AFFAIR_SUBJECT_GROUPS = [
+    {'name': '', 'subjects': list(SUBJECTS)},
+    {'name': '综合组', 'subjects': list(AFFAIR_EXTRA_SUBJECTS)},
+    {'name': '班主任', 'subjects': list(HEAD_SUBJECTS)},
+]
 
 
 # ==================== 公共小工具 ====================
@@ -77,8 +102,72 @@ def _teacher_candidates(grade):
     return _matrix_users(grade)
 
 
+def _invalidate_analysis_cache(affair):
+    """④ 改完立刻反映到成绩分析：清该场考试的分析缓存。
+
+    2026-10-21 用户口径：考务安排跟着老师走 —— ④ 的调整要马上出现在成绩分析
+    （学科分析各班对比 / 任课教师分析 / 汇报区 / 全局对比），不能等 900s
+    页面缓存自然过期。孤儿批次（未绑定考试）没有分析缓存，直接跳过。
+    """
+    if not affair.exam_id:
+        return
+    from app.modules.grades.utils import invalidate_exam_cache
+    invalidate_exam_cache(affair.exam_id)
+
+
+def _with_pinyin(items):
+    """给 [{name: ...}] 补 py（全拼）/ ini（每字首字母）——前端选人三路输入用。
+
+    2026-10-21 用户口径：选人时可以直接输入姓名、全拼、或每个字的首字母。
+    拼音在服务端算（pypinyin 已装），前端只做字符串匹配，不引第三方 JS。
+    """
+    from app.modules.grades.services.user_account import pinyin_codes
+    out = []
+    for it in items:
+        py, ini = pinyin_codes(it.get('name') or '')
+        row = dict(it)
+        row['py'], row['ini'] = py, ini
+        out.append(row)
+    return out
+
+
+def _headteacher_cells(grade):
+    """该年级各班班主任 → {class_name: [{user_id, teacher_name}, ...]}。
+
+    数据源是 `UserClassLink`（与教师映射导入模板的「正班 / 副班1 / 副班2」同源），
+    按 id 升序即正班在前；一个班超过 3 位时只保留前 3 位（表上就 3 列）。
+    停用账号也保留姓名（老师不上系统不代表不当班主任），只是没有 user_id。
+    """
+    from app.models import UserClassLink
+    links = (UserClassLink.query.filter_by(grade=grade)
+             .order_by(UserClassLink.class_name, UserClassLink.id).all())
+    if not links:
+        return {}
+    uids = {l.user_id for l in links}
+    names = {u.id: u.real_name for u in
+             User.query.filter(User.id.in_(uids)).all()} if uids else {}
+    out = {}
+    for lk in links:
+        bag = out.setdefault(lk.class_name, [])
+        if len(bag) < len(HEAD_SUBJECTS):
+            bag.append({'user_id': lk.user_id,
+                        'teacher_name': (names.get(lk.user_id) or '').strip() or None})
+    return out
+
+
+def _head_rows(grade):
+    """班主任 → AffairTeacher 行（正班主任 / 副班主任1 / 副班主任2）。"""
+    rows = []
+    for cls, people in _headteacher_cells(grade).items():
+        for i, p in enumerate(people):
+            rows.append({'class_name': cls, 'subject': HEAD_SUBJECTS[i],
+                         'user_id': p['user_id'],
+                         'teacher_name': p['teacher_name']})
+    return rows
+
+
 def _sync_teachers_from_links(affair):
-    """用当前 TeacherSubjectLink（同年级 active）覆盖写入本批次任课核对表。"""
+    """用当前 TeacherSubjectLink（同年级 active）+ 班主任覆盖写入本批次任课核对表。"""
     AffairTeacher.query.filter_by(affair_id=affair.id).delete()
     links = TeacherSubjectLink.query.filter_by(grade=affair.grade, active=True).all()
     uids = {l.user_id for l in links if l.user_id}
@@ -86,12 +175,39 @@ def _sync_teachers_from_links(affair):
              if uids else {})
     n = 0
     for l in links:
+        # 2026-10-21：考务不看综合组里被排除的科目（通用技术）—— 不同步进来，
+        # 免得教师池里多一条「页面上看不到、也无法编辑」的记录
+        if l.subject not in AFFAIR_SUBJECTS:
+            continue
         db.session.add(AffairTeacher(
             affair_id=affair.id, grade=affair.grade, class_name=l.class_name,
             subject=l.subject, user_id=l.user_id,
             teacher_name=names.get(l.user_id), source='sync'))
         n += 1
+    for r in _head_rows(affair.grade):
+        db.session.add(AffairTeacher(affair_id=affair.id, grade=affair.grade,
+                                     source='sync', **r))
+        n += 1
     return n
+
+
+def _ensure_head_rows(affair):
+    """老批次补班主任列（2026-10-21 之前同步进来的批次没有这三列）。
+
+    幂等且不覆盖人工修订：只要本批次已有任意一行班主任伪科目就不再补。
+    """
+    has = (AffairTeacher.query
+           .filter_by(affair_id=affair.id)
+           .filter(AffairTeacher.subject.in_(list(HEAD_SUBJECTS)))
+           .count())
+    if has:
+        return 0
+    added = 0
+    for r in _head_rows(affair.grade):
+        db.session.add(AffairTeacher(affair_id=affair.id, grade=affair.grade,
+                                     source='sync', **r))
+        added += 1
+    return added
 
 
 def ensure_teachers_synced(affair):
@@ -99,6 +215,11 @@ def ensure_teachers_synced(affair):
     if AffairTeacher.query.filter_by(affair_id=affair.id).count() == 0:
         _sync_teachers_from_links(affair)
         db.session.commit()
+        _invalidate_analysis_cache(affair)   # 首次带入的任课会进入成绩分析
+        return
+    if _ensure_head_rows(affair):
+        db.session.commit()
+        _invalidate_analysis_cache(affair)   # 老批次补班主任列，全局对比的班主任要跟着变
 
 
 def _split_subjects(text):
@@ -107,16 +228,23 @@ def _split_subjects(text):
 
 
 def invig_pool(affair):
-    """监考教师池：环节④ 任课教师（按姓名去重，学科取并集）+ 其他监考员。
+    """监考教师池：环节④ 任课教师 + 班主任（按姓名去重，学科取并集）+ 其他监考员。
 
-    返回 [{name, user_id, subjects(set), source}]（保持「先任课教师、后其他」的稳定顺序）。
+    返回 [{name, user_id, subjects(set), is_head(bool), source}]
+    （保持「先任课教师、后其他」的稳定顺序）。
+
+    2026-10-21：班主任的伪科目（正班主任 / 副班主任1 / 副班主任2）**不进 subjects**
+    —— subjects 是环节⑥「同科回避」的匹配键，混进伪科目只会让一位老师同时出现在
+    「语文」和「正班主任」两个分组里；班主任身份单独用 is_head 标记，供教师池分组
+    与「首场优先班主任」使用。
     """
     pool = {}
 
     def _entry(name, user_id, source):
         e = pool.get(name)
         if e is None:
-            e = {'name': name, 'user_id': user_id, 'subjects': set(), 'source': source}
+            e = {'name': name, 'user_id': user_id, 'subjects': set(),
+                 'is_head': False, 'source': source}
             pool[name] = e
         elif user_id and not e['user_id']:
             e['user_id'] = user_id
@@ -127,7 +255,9 @@ def invig_pool(affair):
         if not nm:
             continue
         e = _entry(nm, t.user_id, 'teacher')
-        if t.subject:
+        if t.subject in HEAD_SUBJECTS:
+            e['is_head'] = True
+        elif t.subject:
             e['subjects'].add(t.subject)
     for o in AffairInvigilator.query.filter_by(affair_id=affair.id).all():
         nm = (o.name or '').strip()
@@ -157,9 +287,12 @@ def affair_teachers_get(aid):
     return jsonify(success=True, data={
         'grade': affair.grade,
         'classes': _class_list(affair),
-        'subjects': SUBJECTS,
+        # 2026-10-21：列 = 文化科 9 + 综合组 6 + 班主任 3（subject_groups 供表头分组）
+        'subjects': AFFAIR_SUBJECTS,
+        'head_subjects': list(HEAD_SUBJECTS),
+        'subject_groups': AFFAIR_SUBJECT_GROUPS,
         'cells': cells,
-        'users': _teacher_candidates(affair.grade),
+        'users': _with_pinyin(_teacher_candidates(affair.grade)),
     })
 
 
@@ -173,6 +306,7 @@ def affair_teachers_sync(aid):
     db.session.commit()
     log_operation(current_user, '同步', '考务任课核对', aid,
                   f'{affair.grade} 带入 {n} 条', module='grades')
+    _invalidate_analysis_cache(affair)
     return jsonify({'ok': True, 'synced': n})
 
 
@@ -209,8 +343,11 @@ def affair_teachers_save(aid):
             continue
         cls, subj = key.split('|', 1)
         # 2026-10-13：科目别名归一（英语/日语→外语 等）后再做白名单校验
-        subj = normalize_subject(subj)
-        if cls not in classes or subj not in SUBJECTS:
+        # 2026-10-21：班主任伪科目不做别名归一，白名单放宽到 AFFAIR_COLUMNS
+        subj = (subj or '').strip()
+        if subj not in HEAD_SUBJECTS:
+            subj = normalize_subject(subj)
+        if cls not in classes or subj not in AFFAIR_COLUMNS:
             continue
         uid = int(val) if str(val).strip() else None
         row = existing.get((cls, subj))
@@ -227,6 +364,8 @@ def affair_teachers_save(aid):
     db.session.commit()
     log_operation(current_user, '维护', '考务任课核对', aid,
                   f'{affair.grade} 保存 {len(cells)} 格', module='grades')
+    # 2026-10-21：④ 的调整要立刻出现在成绩分析（任课教师列 / 教师排名 / 汇报区）
+    _invalidate_analysis_cache(affair)
     return jsonify({'ok': True})
 
 
@@ -800,12 +939,14 @@ def affair_invig_get(aid):
             load[iv.name] = load.get(iv.name, 0) + 1
     return jsonify(success=True, data={
         'slots': max(1, min(_MAX_SLOTS, affair.invig_slots or 1)),
-        'pool': [{'name': p['name'], 'user_id': p['user_id'],
-                  'subjects': sorted(p['subjects']), 'source': p['source'],
-                  'excluded': p['name'] in excl_all,
-                  'excl_schedules': sorted(sid for sid, names in excl_sch.items()
-                                           if p['name'] in names)}
-                 for p in pool],
+        # py / ini：监考表「一格一人」换人时也能按全拼 / 首字母搜（2026-10-21）
+        'pool': _with_pinyin([{'name': p['name'], 'user_id': p['user_id'],
+                               'subjects': sorted(p['subjects']), 'source': p['source'],
+                               'is_head': bool(p.get('is_head')),
+                               'excluded': p['name'] in excl_all,
+                               'excl_schedules': sorted(sid for sid, names in excl_sch.items()
+                                                        if p['name'] in names)}
+                              for p in pool]),
         'load': load,
         'excludes': [{'id': e.id, 'name': e.name, 'schedule_id': e.schedule_id,
                       'note': e.note or ''}
@@ -869,6 +1010,7 @@ def _invig_workload(affair):
             'name': nm,
             'user_id': iv.user_id or (pool.get(nm) or {}).get('user_id'),
             'source': (pool.get(nm) or {}).get('source') or 'unknown',
+            'is_head': bool((pool.get(nm) or {}).get('is_head')),
             'cells': 0, 'minutes': 0, 'missing': 0, 'detail': []})
         it['cells'] += 1
         if mins is None:
@@ -986,7 +1128,7 @@ def affair_invig_teacher_candidates(aid):
                          'subject': '、'.join(subs),   # 展示 / 去重串（与教师池 subject 同格式）
                          'user_id': t.user_id})
     return jsonify({'success': True, 'data': {
-        'teachers': teachers,
+        'teachers': _with_pinyin(teachers),
         'in_pool': sorted({p['name'] for p in invig_pool(affair)}),
         'others': sorted(o.name for o in
                          AffairInvigilator.query.filter_by(affair_id=affair.id).all()),
@@ -1470,19 +1612,22 @@ def _first_slot_sids(schedules):
 def _head_teacher_names(pool):
     """监考池里的班主任姓名集合。
 
-    口径（2026-10-19）：`User.role == 'homeroom_teacher'` **或** 在
-    `UserClassLink` 里挂了班（多身份账号常见：role 是普通教师却兼班主任）。
-    其他监考员（无账号 / user_id 为空）不参与优先，按普通教师处理。
+    口径（2026-10-19，2026-10-21 扩充）：满足任一即算班主任 ——
+      ① 环节④ 班主任三列里出现的人（`invig_pool` 打的 is_head 标记，**没有账号也算**）；
+      ② `User.role == 'homeroom_teacher'`；
+      ③ 在 `UserClassLink` 里挂了班（多身份账号常见：role 是普通教师却兼班主任）。
+    其他监考员（无账号 / user_id 为空且不在班主任列）不参与优先。
     """
     from app.models import UserClassLink
+    names = {p['name'] for p in pool if p.get('is_head')}
     ids = {p['user_id'] for p in pool if p.get('user_id')}
     if not ids:
-        return set()
+        return names
     heads = {u.id for u in User.query.filter(
         User.id.in_(ids), User.role == 'homeroom_teacher').all()}
     heads |= {l.user_id for l in UserClassLink.query.filter(
         UserClassLink.user_id.in_(ids)).all()}
-    return {p['name'] for p in pool if p.get('user_id') in heads}
+    return names | {p['name'] for p in pool if p.get('user_id') in heads}
 
 
 def _auto_arrange(affair, avoid_same=True, head_first=True):
@@ -1866,7 +2011,9 @@ def affair_export_invig(aid):
     if wl['items']:
         for it in wl['items']:
             paint(row, 1, row, 1, it['name'])
-            paint(row, 2, row, 2, _SRC_CN.get(it['source'], ''))
+            # 2026-10-21：班主任身份单独标（班主任也多任教某科，写「任课教师」看不出）
+            paint(row, 2, row, 2,
+                  '班主任' if it.get('is_head') else _SRC_CN.get(it['source'], ''))
             paint(row, 3, row, 3, it['cells'])
             paint(row, 4, row, 4, it['minutes'])
             paint(row, 5, row, 5, round(it['minutes'] / 60, 2))

@@ -1,5 +1,6 @@
-{# 限时练 · 学生分析（2026-10-20 用户口径）
-   一行一个学生：学号 / 姓名 / 班级 / 本场平均 T + 每科一条 T 分迷你轨迹。
+{# 限时练 · 学生分析（2026-10-20 用户口径，2026-10-21 补列）
+   一行一个学生：学号 / 姓名 / 班级 / 本场总分 / 平均 T + 九科各一条 T 分
+   迷你轨迹（列固定 9 科，本场没导入的科显示「—」，便于核对导入完整性）。
    性能：行内折线是**纯 SVG**（后端算好坐标），页面不初始化任何图表；
    点某一行才弹窗，用 ECharts 画该生 9 科趋势 —— 几百人也不卡。 #}
 {% if not trends.rows %}
@@ -16,9 +17,11 @@
 <div class="d-flex flex-wrap gap-2 align-items-center mb-2">
     <span class="text-muted small me-1"><i class="bi bi-funnel"></i> 班级</span>
     <a class="btn btn-sm {{ 'btn-primary' if not trends.class_name else 'btn-outline-secondary' }}"
+       data-pane-nav
        href="{{ url_for('grades.timed_detail', tid=exam.id, tab='trends') }}">全部</a>
     {% for c in classes %}
     <a class="btn btn-sm {{ 'btn-primary' if c == trends.class_name else 'btn-outline-secondary' }}"
+       data-pane-nav
        href="{{ url_for('grades.timed_detail', tid=exam.id) }}?tab=trends&class={{ c|urlencode }}">{{ c }}</a>
     {% endfor %}
 </div>
@@ -26,20 +29,23 @@
 <div class="d-flex flex-wrap gap-2 align-items-center mb-2">
     <span class="text-muted small">
         共 <b>{{ trends.total }}</b> 人，按本场各科平均 T 分从高到低；
-        每科折线 = 最近 8 场该科的 T 分（50 = 年级平均，越靠上越好）
+        每科折线 = 最近 8 场该科的 T 分（50 = 年级平均，越靠上越好）；
+        九科固定全列，「—」= 本场没导入该科
     </span>
     <span class="ms-auto small text-muted">
         第 {{ trends.page }} / {{ trends.pages }} 页 · 点击任意一行查看该生 9 科详情
     </span>
 </div>
 
-<div>
+<div class="table-responsive">
     <table class="table table-sm table-hover align-middle mb-2 timed-tbl" id="trendTable">
         <thead class="table-light">
         <tr>
             <th class="text-nowrap">学号</th>
             <th class="text-nowrap">姓名</th>
             <th class="text-nowrap">班级</th>
+            <th class="text-end text-nowrap"
+                title="本场已导入各科原始分之和（缺考不计）">总分</th>
             <th class="text-end text-nowrap" title="本场各科 T 分的平均值">平均 T</th>
             {% for s in trends.subjects %}
             <th class="text-center text-nowrap">{{ s }}</th>
@@ -57,6 +63,9 @@
             <td class="text-muted text-nowrap">{{ r.no }}</td>
             <td class="text-nowrap fw-semibold">{{ r.name }}</td>
             <td class="text-nowrap">{{ r.cls }}</td>
+            <td class="text-end fw-semibold">
+                {{ r.total if r.total is not none else '—' }}
+            </td>
             <td class="text-end fw-semibold">
                 {{ ((vals|sum) / (vals|length))|round(1) if vals else '—' }}
             </td>
@@ -88,7 +97,7 @@
         {% for p in range(1, trends.pages + 1) %}
         {% if p == 1 or p == trends.pages or (p >= trends.page - 2 and p <= trends.page + 2) %}
         <li class="page-item {{ 'active' if p == trends.page }}">
-            <a class="page-link"
+            <a class="page-link" data-pane-nav
                href="{{ url_for('grades.timed_detail', tid=exam.id) }}?tab=trends{% if trends.class_name %}&class={{ trends.class_name|urlencode }}{% endif %}&page={{ p }}">{{ p }}</a>
         </li>
         {% elif p == 2 or p == trends.pages - 1 %}
