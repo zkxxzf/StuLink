@@ -126,38 +126,23 @@
 {% set _ex = linked_exam %}
 {% set _head_name = _ex.name if _ex else affair.name %}
 {% set _head_date = (_ex.exam_date if _ex else affair.exam_date) %}
-<div class="card px-3 py-2 mb-2">
-    <div class="d-flex justify-content-between align-items-start flex-wrap gap-2">
-        <div class="flex-grow-1" style="min-width:0">
-            {# v1.19.49.35：考务已并入考试管理，面包屑直接返回考试列表 #}
-            <a href="{{ url_for('grades.exams_list') }}" class="text-decoration-none text-muted small">
-                <i class="bi bi-arrow-left"></i> 返回考试管理</a>
-{# 2026-10-14 用户口径：考试信息（年级/性质/阶段/日期/学年/口径/状态）与名称同一行，
-   不再单独占一行 —— 与成绩录入页 exam_detail.html 的标题行写法保持一致 #}
-            <div class="d-flex flex-wrap align-items-center gap-1 mt-1">
-                <h5 class="mb-0 me-1 text-break">
-                    <i class="bi bi-clipboard-check"></i> {{ _head_name }}
-                </h5>
-                <span class="badge bg-secondary">{{ affair.grade }}</span>
-                {% if _ex and _ex.kind_label() %}<span class="badge bg-primary">{{ _ex.kind_label() }}</span>{% endif %}
-                {% if _ex and _ex.stage_label() %}<span class="badge bg-info text-dark">{{ _ex.stage_label() }}</span>{% endif %}
-                {% if _head_date %}<span class="text-muted small"><i class="bi bi-calendar3"></i> {{ _head_date.strftime('%Y-%m-%d') }}</span>{% endif %}
-                {% if _ex and _ex.term %}<span class="text-muted small">· 学年 {{ _ex.term }}</span>{% endif %}
-                {% if _ex and _ex.score_mode %}<span class="text-muted small">· 口径 {{ _ex.score_mode_label() }}</span>{% endif %}
-                {% if affair.status == 'linked' %}<span class="badge bg-info">已关联成绩</span>
-                {% elif affair.status == 'arranged' %}<span class="badge bg-success">已编排</span>
-                {% else %}<span class="badge bg-light text-dark border">草稿</span>{% endif %}
-                {% if not _ex %}<span class="badge bg-warning text-dark">未绑定考试</span>{% endif %}
-            </div>
-        </div>
-        {# 2026-10-14 用户口径：页头只放元信息（v1.12.1 的「批次设置」按钮撤下）
-           —— 它里面的「选科考号前后缀」与步骤③ 自定义模式重复、已删；
-           余下的「编排模式 / 非参考学生处理」是编排口径，入口挪到步骤③ 工具栏右侧齿轮 #}
-        <div class="d-flex align-items-center gap-2 text-muted small flex-shrink-0">
-            参考 {{ scope_students|length }} 人 · 已编排 {{ arranged|length }} 人 · 考场 {{ rooms|length }} 个
-        </div>
-    </div>
-</div>
+{% if affair.status == 'linked' %}{% set _st, _stc = '已关联成绩', 'info' %}
+{% elif affair.status == 'arranged' %}{% set _st, _stc = '已编排', 'success' %}
+{% else %}{% set _st, _stc = '草稿', 'light text-dark border' %}{% endif %}
+{# 2026-10-21 用户口径：成绩单 / 考务安排 / 数据导入 三页统一页头（见 _exam_head.html）。 #}
+{% from 'grades/_exam_head.html' import exam_head %}
+{% call exam_head('考务安排', 'bi-clipboard-check', url_for('grades.exams_list'), _head_name,
+                  grade=affair.grade,
+                  kind=(_ex.kind_label() if _ex else None),
+                  stage=(_ex.stage_label() if _ex else None),
+                  exam_date=(_head_date.strftime('%Y-%m-%d') if _head_date else None),
+                  term=(_ex.term if _ex else None),
+                  score_mode=(_ex.score_mode_label() if _ex and _ex.score_mode else None),
+                  status=_st, status_class=_stc,
+                  warn=(None if _ex else '未绑定考试'),
+                  extra='参考 ' ~ (scope_students|length) ~ ' 人 · 已编排 ' ~ (arranged|length)
+                        ~ ' 人 · 考场 ' ~ (rooms|length) ~ ' 个') %}
+{% endcall %}
 
 <!-- v1.12.2 移除步骤⑤成绩关联：功能使用率低，按考场查成绩走成绩模块自身入口即可 -->
 {# v1.19.49.35：删掉与下方页签重复的「1-7 步骤胶囊条」——完成状态已由页签上的对勾体现 #}
@@ -168,13 +153,14 @@
 {% set _s5 = invig_stat.n_schedules > 0 %}
 {% set _s6 = invig_stat.n_invig > 0 %}
 <ul class="nav nav-tabs mb-3" id="affairTabs" role="tablist">
-    <li class="nav-item"><button class="nav-link active" data-bs-toggle="tab" data-bs-target="#t1">① 学生名单{% if _s1 %} <i class="bi bi-check-lg small text-success"></i>{% endif %}</button></li>
-    <li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#t2">② 考场设置{% if _s2 %} <i class="bi bi-check-lg small text-success"></i>{% endif %}</button></li>
-    <li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#t3">③ 编排考号{% if _s3 %} <i class="bi bi-check-lg small text-success"></i>{% endif %}</button></li>
-    <li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#t4">④ 核对任课教师{% if _s4 %} <i class="bi bi-check-lg small text-success"></i>{% endif %}</button></li>
-    <li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#t5">⑤ 考试时间表{% if _s5 %} <i class="bi bi-check-lg small text-success"></i>{% endif %}</button></li>
-    <li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#t6">⑥ 编排监考表{% if _s6 %} <i class="bi bi-check-lg small text-success"></i>{% endif %}</button></li>
-    <li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#t7">⑦ 导出</button></li>
+    {# 2026-10-21 用户口径：页签去掉序号（分步骤显示），只保留功能区名称与完成对勾。 #}
+    <li class="nav-item"><button class="nav-link active" data-bs-toggle="tab" data-bs-target="#t1">学生名单{% if _s1 %} <i class="bi bi-check-lg small text-success"></i>{% endif %}</button></li>
+    <li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#t2">考场设置{% if _s2 %} <i class="bi bi-check-lg small text-success"></i>{% endif %}</button></li>
+    <li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#t3">编排考号{% if _s3 %} <i class="bi bi-check-lg small text-success"></i>{% endif %}</button></li>
+    <li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#t4">核对任课教师{% if _s4 %} <i class="bi bi-check-lg small text-success"></i>{% endif %}</button></li>
+    <li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#t5">考试时间表{% if _s5 %} <i class="bi bi-check-lg small text-success"></i>{% endif %}</button></li>
+    <li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#t6">编排监考表{% if _s6 %} <i class="bi bi-check-lg small text-success"></i>{% endif %}</button></li>
+    <li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#t7">导出</button></li>
 </ul>
 
 <div class="tab-content">
@@ -537,7 +523,7 @@
                     <button class="btn btn-primary btn-sm" onclick="runArrange()">
                         <i class="bi bi-shuffle"></i> 开始编排并生成考号</button>
                     <i class="bi bi-question-circle text-muted"
-                       title="编排规则：先安置「固定考场 / 固定座号」学生（步骤① 名单里填写）—— 只填考场号、座号留空时，编排会在该考场内自动取靠前的空位，用于不同选科混编考场；其余按选科分组（未勾选分层时：同班邻座 ≤1 随机分配）。"></i>
+                       title="编排规则：先安置「固定考场 / 固定座号」学生（在「学生名单」里填写）—— 只填考场号、座号留空时，编排会在该考场内自动取靠前的空位，用于不同选科混编考场；其余按选科分组（未勾选分层时：同班邻座 ≤1 随机分配）。"></i>
                     {# 2026-10-14 用户口径：v1.12.1 的「批次设置」从页头撤下 —— 里面的选科前后缀
                        与下方自定义模式重复（已删），余下的「编排模式 / 非参考学生处理」都是编排口径，
                        入口收在这里（低频设置，不占主界面）；打开后同样走 /affairs/<aid>/settings #}
@@ -635,7 +621,7 @@
     <div class="tab-pane fade" id="t4">
         <div class="d-flex flex-wrap align-items-center gap-2 mb-2">
             <span class="small text-muted">核对本场考试的年级任课安排（仅作用于本批次，不改全局任课表）；
-                临时换老师可直接改，供环节⑥ 监考回避使用。</span>
+                临时换老师可直接改，供监考编排时回避使用。</span>
             <span class="ms-auto"></span>
             <button class="btn btn-outline-secondary btn-sm" onclick="syncAffairTeachers()">
                 <i class="bi bi-arrow-repeat"></i> 从任课安排表重新带入</button>
@@ -652,7 +638,7 @@
             （体育 / 音乐 / 美术 / 信息技术 / 心理）；留空表示该班没有该科任课教师或该职务。
             点格子后可直接输入 <b>姓名 / 全拼 / 每个字的首字母</b> 检索
             （例：蒋雪静 → 蒋雪静 / jiangxuejing / jxj）。这里的每一位老师都会进入
-            环节⑥ 的监考教师池，班主任还会用于「每天首场优先排班主任」。
+            监考教师池，班主任还会用于「每天首场优先排班主任」。
         </div>
         <div id="t4Body" class="table-responsive" style="max-height:66vh;overflow:auto">
             <div class="text-center text-muted py-4"><div class="spinner-border spinner-border-sm"></div>
@@ -666,7 +652,7 @@
     <!-- ===== 环节⑤ 考试时间表（时段 → 科目，回避依据） ===== -->
     <div class="tab-pane fade" id="t5">
         <div class="d-flex flex-wrap align-items-center gap-2 mb-2">
-            <span class="small text-muted">一行 = 一个场次（时间段 + 考试科目）；科目用于环节⑥ 回避同科教师。</span>
+            <span class="small text-muted">一行 = 一个场次（时间段 + 考试科目）；科目用于监考编排时回避同科教师。</span>
             <span class="ms-auto"></span>
             <a href="{{ url_for('grades.affair_schedules_template', aid=affair.id) }}"
                class="btn btn-outline-secondary btn-sm"><i class="bi bi-download"></i> 下载模板</a>
@@ -793,7 +779,7 @@
                                 onclick="openPickInvig()">+ 其他监考员</button>
                     </div>
                     <div class="card-body p-2" style="max-height:60vh;overflow:auto">
-                        <div class="text-muted small mb-1">任课教师（环节④，自动带入）</div>
+                        <div class="text-muted small mb-1">任课教师（自动带入）</div>
                         <div id="poolTeachers" class="mb-2"></div>
                         <div class="text-muted small mb-1">其他监考员（可无账号：校外老师）</div>
                         <div id="poolOthers"></div>
@@ -878,7 +864,7 @@
                 </div>
                 <div class="col-12">
                     <div class="border rounded p-2">
-                        <div class="fw-bold small mb-2"><i class="bi bi-clipboard-check"></i> 监考表（环节⑥）</div>
+                        <div class="fw-bold small mb-2"><i class="bi bi-clipboard-check"></i> 监考表</div>
                         <div class="d-flex gap-2 flex-wrap">
                             {# 2026-10-13 用户口径：监考表只要一个导出 —— 教师安排矩阵（行=考场、
                                列=日期×时段×科目）与工作量统计合在同一张表里，不再分开成四个入口。 #}
@@ -888,7 +874,7 @@
                     </div>
                 </div>
             </div>
-            {% if not arranged %}<div class="alert alert-warning mt-3 py-2 small">尚未编排，请先完成步骤③。</div>{% endif %}
+            {% if not arranged %}<div class="alert alert-warning mt-3 py-2 small">尚未编排，请先完成「编排考号」。</div>{% endif %}
         </div>
     </div>
 
@@ -1157,21 +1143,8 @@ document.querySelectorAll('#affairTabs button[data-bs-toggle="tab"]').forEach(fu
         } catch (e) {
             location.hash = hash;   // 极老浏览器兜底
         }
-        syncSidebarSteps(hash);
     });
 });
-// v1.19.49.35 把侧栏圆点的高亮改到「当前环节」上（done 状态保持不变）
-function syncSidebarSteps(hash){
-    var dots = document.querySelectorAll('.sidebar-float .efn-steps .efn-dot');
-    if(!dots.length) return;
-    var idx = ['#t1','#t2','#t3','#t4','#t5','#t6','#t7'].indexOf(hash);
-    if(idx < 0) return;                        // 非考务页（4 步）不处理
-    dots.forEach(function(d, i){
-        d.classList.toggle('on', i === idx);
-        var done = d.classList.contains('done');
-        d.title = '环节' + (i+1) + (i === idx ? '（当前）' : (done ? '（已完成）' : '（未完成）'));
-    });
-}
 if(location.hash){
     var triggerEl = document.querySelector('#affairTabs button[data-bs-target="'+location.hash+'"]');
     if(triggerEl){
@@ -2977,7 +2950,7 @@ function renderWorkload(d){
     tip.innerHTML = d.has_time
         ? '时长按每场次「开始—结束」累加。自动编排按<b>累计时长</b>均衡（不是按格数），'
           + '所以格数不完全一样属正常，看「监考时长」和下面的极差即可。'
-        : '<span class="text-danger">场次尚未填写开始/结束时间，暂时算不出时长 —— 先到环节⑤ 考试时间表补时间。</span>';
+        : '<span class="text-danger">场次尚未填写开始/结束时间，暂时算不出时长 —— 先到「考试时间表」补时间。</span>';
     var srcCn = {teacher: '任课教师', other: '其他监考员'};
     var rows = [];
     d.items.forEach(function(it, idx){

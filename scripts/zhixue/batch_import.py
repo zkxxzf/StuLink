@@ -1,4 +1,4 @@
-# StuLink v1.19.50.58  2026-10-15
+# StuLink v1.19.50.59  2026-10-15
 # 批量：scraped/*.json → 转换 → 新建考试 → 导入成绩
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 """把 `--scrape` 抓到的所有考试批量导入 StuLink（一场一场建考试 + 写成绩）。

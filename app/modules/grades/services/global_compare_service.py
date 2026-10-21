@@ -1,4 +1,4 @@
-# StuLink v1.19.50.58 2026-10-10
+# StuLink v1.19.50.59 2026-10-10
 # 全局对比指标引擎：班级 × 学科「去差均分 + 各分数线」宽表
 #
 # 口径与 report_service / report_pivot_service 完全一致（复用其公共函数）：
@@ -270,7 +270,7 @@ def global_compare_report(exam_id, direction=''):
     # 科目列：本场实际有成绩的科目按系统顺序（全科=9 科；分科=各方向并集，缺科显示 —）
     subjects = list(data.imported_subjects)
     trimmed = rs.trimmed_nos(data)
-    # v1.19.50.58 班主任取**本场考试当时**的快照（与任课教师同一机制）：
+    # v1.19.50.59 班主任取**本场考试当时**的快照（与任课教师同一机制）：
     # 历史考试不能再显示现在的班主任；快照缺失时自动回落当前关联
     from app.modules.grades.services import teacher_snapshot_service as _tss
     ht = _tss.headteacher_map_of(data.exam.id, grade=data.exam.grade)
@@ -287,7 +287,7 @@ def global_compare_report(exam_id, direction=''):
     # 2026-10-16 第九轮审计（PERF-P01）：班级→方向原先被 all_dirs / by_dir / class_rows
     # 三处各全表扫一遍（O(班数×总行数)，40 班×2100 人 ≈ 25 万次迭代），改为一次预算
     dir_of = {cls: _row_dir(data, cls) for cls in classes}
-    # v1.19.50.58 方向下拉的**完整**可选集：先按全部班级算出各方向，再按 direction
+    # v1.19.50.59 方向下拉的**完整**可选集：先按全部班级算出各方向，再按 direction
     # 过滤生成展示分组。否则选定某方向后返回值里只剩该方向，前端据此重建下拉
     # 就会丢掉另一个方向（用户反馈的 bug）。
     all_dirs = sorted(set(dir_of.values()),
