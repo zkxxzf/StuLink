@@ -3,7 +3,7 @@
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
 [![Python](https://img.shields.io/badge/python-3.11+-green.svg)](https://python.org)
 [![Flask](https://img.shields.io/badge/flask-3.x-lightgrey.svg)](https://flask.palletsprojects.com/)
-[![Version](https://img.shields.io/badge/version-1.19.50.59-orange.svg)](https://gitee.com/zkxxzf/StuLink)
+[![Version](https://img.shields.io/badge/version-1.19.50.60-orange.svg)](https://gitee.com/zkxxzf/StuLink)
 
 面向中学的综合学生管理平台，采用 **双站点 + 多模块 + 一模块一库** 的故障隔离架构：
 
@@ -301,6 +301,7 @@ StuLink/
 
 | 版本 | 日期 | 亮点 |
 |---|---|---|
+| **1.19.50.60** | 2026-10-21 | **侧栏成绩分析组精简**：原「年级分析 / 班级分析 / 学科分析 / 任课教师 / 班级对比」五项合并为单个「详细分析」入口（这五项本身就是分析页内的页签）；删除「自由分析」「成绩汇报区」两个侧栏入口（页面保留，仅不再占导航）。`grades.js` 的页签高亮与考试切换同步逻辑随之收敛为单一 `ana_detail` 项 |
 | **1.19.50.59** | 2026-10-21 | **成绩上下文三页统一页头 + 侧栏去掉分步骤**：新增 `grades/_exam_head.html` 统一页头（返回 → 页面标题 + 考试名 → 年级/性质/阶段/日期/学年/口径/状态 → 右侧操作），成绩单 `/grades/exams/<id>`、考务安排 `/grades/affairs/<id>`、数据导入 `/grades/exams/<id>/import` 三页共用；侧栏移除 4 步 / 7 环节圆点、「待做」标签与进度计数（普通考试与限时练同步），考务页签去掉 ①②③ 序号、导入表单去掉 1./2./3. 编号；配套删除不再使用的四段进度条与 `_four_step_status` |
 | **1.19.50.58** | 2026-10-21 | **`/users/create` 增加用途提示**：页面顶部明确「本页仅用于建立系统管理员账号」，教师账号需先在「教务管理 → 教师」录入档案由系统自动开通，再回到「教师管理」启用并分配权限，避免在错误入口重复建号 |
 | **1.19.50.57** | 2026-10-21 | **系统管理 `/users/` 收紧为「只加管理员」**：删除教师批量导入（`download_teacher_template` / `import_teachers`）与 `/users/teachers/import/*` 三条挂载路由，「新建教师」改为「新建管理员」（仅超管可见，角色后端固定 `admin`、表单隐藏年级/班级）；教师档案与账号统一从「教务管理 → 教师」新增/导入，导入确认时自动建号并同步到本列表，系统管理侧只做启用/停用与重置密码；`/users/teachers` 同步隐藏导入按钮、模板下载与弹窗，并加跳转提示 |
