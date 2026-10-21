@@ -3,7 +3,7 @@
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
 [![Python](https://img.shields.io/badge/python-3.11+-green.svg)](https://python.org)
 [![Flask](https://img.shields.io/badge/flask-3.x-lightgrey.svg)](https://flask.palletsprojects.com/)
-[![Version](https://img.shields.io/badge/version-1.19.52.64-orange.svg)](https://gitee.com/zkxxzf/StuLink)
+[![Version](https://img.shields.io/badge/version-1.19.53.64-orange.svg)](https://gitee.com/zkxxzf/StuLink)
 
 面向中学的综合学生管理平台，采用 **双站点 + 多模块 + 一模块一库** 的故障隔离架构：
 
@@ -195,7 +195,7 @@
 
 - **后端**：Python 3.11+ / Flask 3.x / Flask-Login / Flask-SQLAlchemy 2.x（多库 binds）/ Waitress / openpyxl / reportlab / python-pptx
 - **前端**：Bootstrap 5 / jQuery / Jinja2 / ECharts（成绩可视化）/ Chart.js（画像）
-- **安全（v1.19.52.64）**：
+- **安全（v1.19.53.64）**：
   - **身份**：管理员首启随机口令 + 强制改密 · 一次性初始口令展示 · 会话口令摘要（改密即踢）· IP + 账号双维限流与锁定（锁键含来源，防账号被恶意锁定）
   - **数据**：AES 身份证与 AI Key 加密 · CSRF 8h 时效 · 二维权限（功能三档 × 数据范围）· 白名单式教师候选过滤
   - **传输**：`url_guard` 出站白名单 + DNS 解析 + 禁 302 跟随 · CSP（Report-Only 起步，可切 enforce）· HTTPS Cookie Secure
@@ -216,7 +216,7 @@ python run.py --dev
 cd alumni_app && python run.py
 
 # Docker 部署（三个容器：主应用 + 往届查询 + MCP 服务）
-docker build -t stulink:v1.19.52.64 .
+docker build -t stulink:v1.19.53.64 .
 docker build -t stulink-alumni:v1.0.0 ./alumni_app
 docker build -f Dockerfile.mcp -t stulink-mcp:v1.0.0 .
 docker-compose up -d
@@ -301,6 +301,7 @@ StuLink/
 
 | 版本 | 日期 | 亮点 |
 |---|---|---|
+| **1.19.53.64** | 2026-10-21 | **（第三位 zk +1）导入页布局按内容重排 + 表格错位修复**：划线分层宽矩阵独占整行；AI 智能导入与标准模板导入并排（5/7）；去差人数设置（5）与分数修改记录（7）并排且等高；修复横向滚动时表头「层名」列未冻结、与数值列错位的问题（表头首列改为横向 sticky，仅 left 不做 top 吸附） |
 | **1.19.52.64** | 2026-10-21 | **（第三位 zk +1）数据导入页界面美化**：三个卡片统一图标标题与卡片头；去差设置的 Excel 导入/模板下载收进独立工具条，不再挤在标题行；标准模板导入改为「文件面板 + 可选模式卡片（A/B）+ 右侧主按钮」，AI 面板补充标签悬停与主按钮层次；全部配色走主题变量，深浅色一致 |
 | **1.19.51.64** | 2026-10-21 | **（第三位 zk +1，用户侧改动）**：数据导入页顶部内嵌「划线分层」矩阵并保留完整编辑能力（下界方式 / 录入形态 / 含总分 / 分层模板 / 按组合 / 新增层 / 保存划线），与划线页共用 `_bands_matrix.html` + `bands_matrix.js`；同页「去差人数设置」支持按班修改、Excel / AI 导入；两表宽屏左右并排 |
 | **1.19.50.64** | 2026-10-21 | **导入页内嵌矩阵补齐编辑功能**：数据导入页的划线分层不再只读，与「划线分层」页共用同一套能力 —— 下界方式 / 录入形态 / 含总分 / 分层模板（套用层名）/ 按组合开关 / 显示空列 / 新增层 / 保存划线全部可直接操作（按 `grades.settings` 权限决定是否可编辑）；共用模板新增 `bare=True` 形态，嵌在导入页卡片内不重复描边 |
