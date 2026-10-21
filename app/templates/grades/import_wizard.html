@@ -37,8 +37,10 @@
         </div>
     </div>
     <div class="collapse show" id="bandOverviewBody">
-        {# 2026-10-21 用户口径：直接展示「划线分层」页的矩阵表格（只读、无编辑控件）。 #}
-        {% with simple=True, can_edit=False %}
+        {# 2026-10-21 用户口径：把「划线分层」页的矩阵与编辑功能整体挪到导入页
+           （改下界方式 / 分层模板 / 按组合 / 新增层 / 保存划线都在这里直接可用）。 #}
+        {% set _can_edit_bands = current_user.has_perm('grades.settings') %}
+        {% with bare=True, can_edit=_can_edit_bands %}
         {% include 'grades/_bands_matrix.html' %}
         {% endwith %}
     </div>

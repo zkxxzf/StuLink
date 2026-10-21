@@ -1,4 +1,4 @@
-# StuLink v1.19.50.63 2026-10-20
+# StuLink v1.19.50.64 2026-10-20
 # Excel 导出统一样式：表头蓝底白字、细边框、冻结首行
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 """Excel 导出统一样式（单页签导出与一键导出共用，避免两份样式漂移）。"""

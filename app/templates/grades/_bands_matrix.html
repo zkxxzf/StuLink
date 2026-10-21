@@ -1,15 +1,17 @@
-{# StuLink v1.19.50.63 2026-10-21
+{# StuLink v1.19.50.64 2026-10-21
    划线分层矩阵（「划线分层」页与「数据导入」页共用）。
 
    上下文：exam / total_count / can_edit / directions / dir_subjects /
            combo_subjects / sel_meta
-   可选：simple=True → 只出表格（无卡片外壳、无编辑控件、强制只读），
-         供数据导入页顶部内嵌；默认 False = 划线分层页完整形态。
+   可选：bare=True → 不出卡片外壳（嵌在别的卡片里用），但保留完整功能；
+         simple=True → 只出表格（无编辑控件、强制只读）。
+   数据导入页用 bare=True，与「划线分层」页同一套编辑/保存功能。
 
    脚本：static/js/bands_matrix.js（依赖 jQuery；DOM 就绪后自动渲染 #bandTable）。 #}
 {% set _simple = simple|default(false) %}
+{% set _bare = bare|default(false) %}
 {% set ro = ' d-none' if not can_edit else '' %}
-<div class="{{ '' if _simple else 'card' }}" id="bandApp"
+<div class="{{ '' if (_simple or _bare) else 'card' }}" id="bandApp"
      data-exam-id="{{ exam.id }}"
      data-total-count="{{ total_count }}"
      data-can-edit="{{ 1 if can_edit and not _simple else 0 }}"
@@ -17,7 +19,7 @@
      data-dir-subjects='{{ dir_subjects|tojson }}'
      data-combo-subjects='{{ combo_subjects|tojson }}'
      data-sel-meta='{{ sel_meta|tojson }}'>
-    <div class="{{ 'p-2' if _simple else 'card-body' }}">
+    <div class="{{ 'p-2' if (_simple or _bare) else 'card-body' }}">
         {% if not _simple %}
         <div class="row g-2 align-items-center mb-3">
             <div class="col-auto{{ ro }}">
