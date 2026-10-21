@@ -1,6 +1,6 @@
-# StuLink v1.19.49.51 2026-10-10
+# StuLink v1.19.49.52 2026-10-10
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
-"""考试任课快照服务（v1.19.49.51）
+"""考试任课快照服务（v1.19.49.52）
 
 背景：`TeacherSubjectLink` 只存"当前"任课映射。教师一换（尤其重新分班后），
 历史考试的教师维度分析会全部归到现在的教师名下，上线率/去差均分排名失真。
@@ -28,7 +28,7 @@ from app.models.grades import ExamTeacherLink, TeacherSubjectLink
 
 logger = logging.getLogger(__name__)
 
-# v1.19.49.51 班主任也归入同一张快照表：它和任课教师一样是“本场考试该班的老师”，
+# v1.19.49.52 班主任也归入同一张快照表：它和任课教师一样是“本场考试该班的老师”，
 # 区别仅在于任课老师看单科成绩、班主任看总分。用伪科目名占位，不污染 SUBJECTS。
 HEAD_SUBJECT = '班主任'
 
@@ -41,28 +41,34 @@ SOURCE_DESC = {
 }
 
 
-def _current_headteacher_rows(grade):
-    """从当前 UserClassLink 取该年级各班班主任（作为快照源）
+def current_headteacher_rows(grade):
+    """从当前 UserClassLink 取该年级各班班主任（作为快照 / 考务任课表的源）
 
     ⚠ 同班常有主/副两位班主任，而表上 `UNIQUE(exam_id, class_name, subject)`，
-    所以合并为一行（姓名顿号连接，与 headteacher_map 输出口径一致）；
-    user_id 置空（多师无法对应单个账号，班主任也不参与分数聚合）。
+    所以合并为一行（姓名顿号连接，与 headteacher_map 输出口径一致）。
+    只有一个班主任时给出 user_id（考务环节④ 可直接改派）；多人时置空。
     """
     from app.models import User, UserClassLink
     links = UserClassLink.query.filter_by(grade=grade).all()
     uids = {lk.user_id for lk in links}
-    names = {u.id: u.real_name for u in
+    users = {u.id: u for u in
              User.query.filter(User.id.in_(uids), User.is_active.is_(True)).all()} if uids else {}
     per_cls = {}
     for lk in links:
-        nm = names.get(lk.user_id)
-        if nm and lk.class_name:
-            bag = per_cls.setdefault(lk.class_name, [])
-            if nm not in bag:
-                bag.append(nm)
-    return [{'class_name': c, 'subject': HEAD_SUBJECT,
-             'teacher_name': '、'.join(v), 'user_id': None}
-            for c, v in per_cls.items()]
+        u = users.get(lk.user_id)
+        if not (u and lk.class_name and u.real_name):
+            continue
+        bag = per_cls.setdefault(lk.class_name, [])
+        if u.real_name not in bag:
+            bag.append(u.real_name)
+    out = []
+    for cls, names in per_cls.items():
+        ids = [lk.user_id for lk in links
+               if lk.class_name == cls and lk.user_id in users]
+        out.append({'class_name': cls, 'subject': HEAD_SUBJECT,
+                    'teacher_name': '、'.join(names),
+                    'user_id': ids[0] if len(ids) == 1 else None})
+    return out
 
 
 def snapshot_exam(exam, source='import', rows=None, replace=False):
@@ -87,8 +93,8 @@ def snapshot_exam(exam, source='import', rows=None, replace=False):
             for l in TeacherSubjectLink.query.filter_by(
                 grade=exam.grade, active=True).all()
         ]
-        # v1.19.49.51 班主任一并快照（以前只存了任课老师，历史考试的班主任会跟到现在）
-        rows += _current_headteacher_rows(exam.grade)
+        # v1.19.49.52 班主任一并快照（以前只存了任课老师，历史考试的班主任会跟到现在）
+        rows += current_headteacher_rows(exam.grade)
 
     # 姓名补全（无 user_id 时留空，由调用方给 teacher_name）
     need_uid = {r['user_id'] for r in rows if r.get('user_id')}

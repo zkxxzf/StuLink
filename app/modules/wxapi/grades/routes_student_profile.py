@@ -1,4 +1,4 @@
-# StuLink v1.19.49.51 2026-10-19
+# StuLink v1.19.49.52 2026-10-19
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 """小程序学生档案：画像 / 积分 / 奖惩 / 考勤（只读）。
 

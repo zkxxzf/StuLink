@@ -1,4 +1,4 @@
-/* StuLink v1.19.49.51 2026-10-20
+/* StuLink v1.19.49.52 2026-10-20
    限时练分析页：把**某一科的表格**画成 PNG 下载（Canvas 自绘，无第三方依赖）。
    分析页现在一屏多科，所以按按钮的 data-table 定位表格，每科一个按钮。
    Copyright (c) 2026 zkxxzf. Apache License 2.0 */
