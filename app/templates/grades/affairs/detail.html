@@ -2330,6 +2330,7 @@ function renderAffairTeachers(){
             var tip = (c.name && !cur) ? '历史教师（无账号）；重新选人后按账号绑定' : '';
             h.push('<td><button type="button" class="at-cell' + (label ? '' : ' empty') + '"'
                    + ' data-k="' + escHtml(cls+'|'+s) + '" data-uid="' + escHtml(cur) + '"'
+                   + ' data-init="' + escHtml(cur) + '"'
                    + (tip ? ' title="' + escHtml(tip) + '"' : '') + '>'
                    + escHtml(label || '—') + '</button></td>');
         });
@@ -2364,10 +2365,15 @@ function _t4OpenPicker(btn){
     });
 }
 function saveAffairTeachers(){
-    var cells = {};
+    // 2026-10-21 审计修复：只提交**改动过**的格。原来整表提交，历史教师（有姓名、
+    // 无账号 → data-uid 为空）会被当成"清空"提交，后端把 teacher_name 置空 → 姓名丢失。
+    var cells = {}, n = 0;
     document.querySelectorAll('#t4Body .at-cell').forEach(function(el){
-        cells[el.dataset.k] = el.dataset.uid || '';
+        var uid = el.dataset.uid || '';
+        if (uid === (el.dataset.init || '')) { return; }
+        cells[el.dataset.k] = uid; n++;
     });
+    if (!n) { alert('没有改动'); return; }
     fetch('/grades/affairs/'+AID+'/teachers/save', {method:'POST',
         headers:{'Content-Type':'application/json','X-CSRFToken':csrf()},
         body: JSON.stringify({cells: cells})})

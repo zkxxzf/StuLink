@@ -1,6 +1,6 @@
-# StuLink v1.19.50.52 2026-10-10
+# StuLink v1.19.50.53 2026-10-10
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
-"""考试任课快照服务（v1.19.50.52）
+"""考试任课快照服务（v1.19.50.53）
 
 背景：`TeacherSubjectLink` 只存"当前"任课映射。教师一换（尤其重新分班后），
 历史考试的教师维度分析会全部归到现在的教师名下，上线率/去差均分排名失真。
@@ -36,7 +36,7 @@ from app.models.grades import (AFFAIR_EXCLUDED_SUBJECTS, AFFAIR_HEAD_SUBJECTS,
 
 logger = logging.getLogger(__name__)
 
-# v1.19.50.52 班主任也归入同一张快照表：它和任课教师一样是“本场考试该班的老师”，
+# v1.19.50.53 班主任也归入同一张快照表：它和任课教师一样是“本场考试该班的老师”，
 # 区别仅在于任课老师看单科成绩、班主任看总分。用伪科目名占位，不污染 SUBJECTS。
 HEAD_SUBJECT = '班主任'
 
@@ -67,8 +67,11 @@ def current_homeroom_positions(grade, classes=None):
     if not links:
         return []
     uids = {lk.user_id for lk in links}
+    # 2026-10-21 审计修复：**不按 is_active 过滤**。班主任账号停用/离职不代表这个位次
+    # 不存在；过滤掉会让「副班1」顶到「正班」列（位次错乱）。停用账号仍保留姓名与
+    # user_id，页面按姓名显示，重新选人时再绑定新账号。
     users = {u.id: u for u in
-             User.query.filter(User.id.in_(uids), User.is_active.is_(True)).all()}
+             User.query.filter(User.id.in_(uids)).all()}
     per_cls = {}
     for lk in links:
         u = users.get(lk.user_id)
@@ -238,7 +241,7 @@ def snapshot_exam(exam, source='import', rows=None, replace=False):
             for l in TeacherSubjectLink.query.filter_by(
                 grade=exam.grade, active=True).all()
         ]
-        # v1.19.50.52 班主任一并快照（以前只存了任课老师，历史考试的班主任会跟到现在）
+        # v1.19.50.53 班主任一并快照（以前只存了任课老师，历史考试的班主任会跟到现在）
         rows += current_headteacher_rows(exam.grade)
 
     # 姓名补全（无 user_id 时留空，由调用方给 teacher_name）
