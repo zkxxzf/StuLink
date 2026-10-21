@@ -13,6 +13,21 @@
     <h4 class="fw-bold mb-0">{{ title }}</h4>
 </div>
 
+{% if admin_only %}
+{# 2026-10-21 用户口径：本页只建管理员，教师账号从教务模块同步 #}
+<div class="alert alert-info d-flex align-items-start" role="alert">
+    <i class="bi bi-info-circle-fill me-2 mt-1"></i>
+    <div class="small">
+        <strong>本页仅用于建立系统管理员账号。</strong>
+        教师账号不在此处创建：请先在
+        <a href="{{ url_for('academic.teachers_page') }}" class="alert-link">教务管理 → 教师</a>
+        录入教师档案，系统会自动为其开通账号；随后回到
+        <a href="{{ url_for('users.list_users') }}" class="alert-link">教师管理</a>
+        列表中启用并分配权限即可。
+    </div>
+</div>
+{% endif %}
+
 <div class="row justify-content-center">
     <div class="col-md-8">
         <div class="card">
