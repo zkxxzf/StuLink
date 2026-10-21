@@ -1,4 +1,4 @@
-/* StuLink v1.19.50.60 2026-10-10 全局对比：多级表头宽表
+/* StuLink v1.19.62.64 2026-10-10 全局对比：多级表头宽表
  * 结构：固定列（年级/班级/人数/方向/组合/属性）+ 每科目组（去差均分 + 各分数线）
  * 交互：分数线勾选显隐 + 横向滚动 + 表头两级吸顶 + 前两列冻结；打印按 A3 横向输出。
  * 列宽尽量压缩（小字号/窄内边距/表头换行），窄屏/宽表在容器内滚动，页面不横向溢出。 */
@@ -217,9 +217,34 @@ table.ld-table {
     padding: 6px 8px 2px;
 }
 .ld-chart-title {
+    display: flex; align-items: center; gap: 6px;
     font-size: 12.5px; font-weight: 600; color: var(--sl-text);
     margin-bottom: 2px;
 }
+/* 2026-10-21 用户口径：每张图右上角一个「放大」按钮，点一下铺满屏幕宽度，再点 / Esc 退出 */
+.ld-chart-max {
+    margin-left: auto;
+    width: 24px; height: 22px; padding: 0;
+    display: inline-flex; align-items: center; justify-content: center;
+    font-size: 12px; line-height: 1;
+    border: 1px solid var(--sl-border); border-radius: 6px;
+    background: var(--sl-surface); color: var(--sl-text-muted);
+    cursor: pointer;
+}
+.ld-chart-max:hover { color: var(--sl-text); border-color: var(--sl-text-muted); }
+.ld-chart-max .bi-fullscreen-exit { display: none; }
+.ld-chart-card.is-max .ld-chart-max .bi-arrows-fullscreen { display: none; }
+.ld-chart-card.is-max .ld-chart-max .bi-fullscreen-exit { display: inline; }
+.ld-chart-card.is-max {
+    position: fixed; inset: 10px; z-index: 1085;
+    display: flex; flex-direction: column;
+    padding: 10px 12px 6px;
+    box-shadow: 0 18px 50px rgba(15, 23, 42, .35);
+    background: var(--sl-surface);
+}
+.ld-chart-card.is-max .ld-chart-title { font-size: 14px; }
+.ld-chart-card.is-max .ld-chart { flex: 1 1 auto; height: auto; min-height: 0; }
+body.ld-chart-max-open { overflow: hidden; }
 /* 人数堆积柱 + 上线率折线（双轴），图例占一行 → 比纯柱状图高一些 */
 .ld-chart { height: 260px; }
 @media (max-width: 900px) {

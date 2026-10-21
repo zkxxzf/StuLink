@@ -101,26 +101,11 @@
             <h4 class="mb-0"><i class="bi bi-speedometer2"></i> 首页仪表盘</h4>
             <div class="text-muted small mt-1">
                 数据范围：{{ d.grades | join('、') if d.grades else '暂无可查看年级' }}
-                <span class="text-secondary">（已排除毕业年级）</span>
                 <span class="ms-2 gd-live" id="gdLive">
                     <i class="bi bi-clock-history"></i> 更新于 <span id="gdUpdated">{{ d.generated_at }}</span>
                     <span id="gdState" class="ms-1"></span>
                 </span>
             </div>
-        </div>
-        <div class="d-flex align-items-center gap-2 flex-wrap">
-            <div class="form-check form-switch mb-0 small" title="每 30 秒自动拉取一次（页面切到后台时暂停）">
-                <input class="form-check-input" type="checkbox" id="gdAuto" checked>
-                <label class="form-check-label" for="gdAuto">自动刷新</label>
-            </div>
-            <button type="button" class="btn btn-sm btn-outline-secondary" id="gdRefresh">
-                <i class="bi bi-arrow-clockwise"></i> 刷新
-            </button>
-            {% if d.can_edit_exam %}
-            <a class="btn btn-sm btn-primary" href="{{ url_for('grades.exam_new') }}">
-                <i class="bi bi-plus-lg"></i> 新建考试
-            </a>
-            {% endif %}
         </div>
     </div>
 

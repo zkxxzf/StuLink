@@ -1,5 +1,82 @@
 {% extends "base.html" %}
 {% block title %}数据导入 - {{ exam.name }}{% endblock %}
+{% block extra_css %}
+<style>
+  /* 2026-10-21 数据导入页界面美化（只影响本页，全部走主题变量） */
+  .imp-card-title {
+      display: flex; align-items: center; gap: .5rem;
+      font-size: .95rem; font-weight: 700; color: var(--sl-text);
+  }
+  .imp-card-title .bi {
+      display: inline-flex; align-items: center; justify-content: center;
+      width: 26px; height: 26px; border-radius: 8px;
+      background: var(--sl-soft-info-bg); color: var(--sl-soft-info-fg);
+      font-size: .9rem;
+  }
+  #bandOverviewCard, #trimCard, #scoreChanges, .di-card {
+      border-radius: 14px; border: 1px solid var(--sl-border);
+      box-shadow: var(--sl-shadow); overflow: hidden;
+  }
+  #bandOverviewCard > .card-header,
+  #trimCard > .card-header,
+  #scoreChanges > .card-header {
+      background: var(--sl-surface-2);
+      border-bottom: 1px solid var(--sl-border);
+      padding: .62rem .9rem;
+  }
+  /* 去差设置：导入工具条独立成行，避免与标题挤在一起 */
+  .trim-toolbar {
+      display: flex; flex-wrap: wrap; align-items: center; gap: .5rem;
+      padding: .55rem .9rem;
+      background: var(--sl-surface-2);
+      border-bottom: 1px dashed var(--sl-border);
+  }
+  .trim-toolbar .form-control-sm { max-width: 220px; }
+  .trim-toolbar .imp-tip { font-size: .76rem; color: var(--sl-text-muted); }
+  #trimTable thead th {
+      background: var(--sl-head-bg); color: var(--sl-head-text);
+      border-bottom: 1px solid var(--sl-head-border);
+      font-size: .78rem; font-weight: 600; white-space: nowrap;
+  }
+  #trimTable tbody td { font-size: .84rem; }
+  #trimTable tbody tr:hover { background: var(--sl-surface-3); }
+  #trimTable .trim-in { max-width: 92px; margin-left: auto; }
+  #trimTable .trim-after { color: var(--sl-accent); }
+  /* 标准模板：文件区 + 模式选项做成轻量面板/可选卡片 */
+  .di-file-panel {
+      padding: .8rem .9rem;
+      border: 1px dashed var(--sl-border); border-radius: 12px;
+      background: var(--sl-surface-2);
+  }
+  .di-file-panel .form-label { margin-bottom: .45rem; }
+  .di-mode {
+      display: flex; gap: .55rem; align-items: flex-start;
+      padding: .6rem .7rem; border: 1px solid var(--sl-border); border-radius: 10px;
+      background: var(--sl-surface); cursor: pointer;
+      transition: border-color .12s ease, background-color .12s ease;
+  }
+  .di-mode + .di-mode { margin-top: .5rem; }
+  .di-mode:hover { border-color: var(--sl-accent); background: var(--sl-surface-2); }
+  .di-mode .form-check-input { margin-top: .18rem; flex: 0 0 auto; }
+  .di-mode-t { display: block; font-size: .86rem; font-weight: 600; color: var(--sl-text); }
+  .di-mode-d { display: block; font-size: .78rem; color: var(--sl-text-muted); line-height: 1.55; }
+  .di-mode:has(input:checked) {
+      border-color: var(--sl-accent);
+      background: var(--sl-soft-info-bg);
+  }
+  .di-cta { min-width: 190px; }
+  /* AI 卡：标题与副标题层级更清楚 */
+  .di-card .di-card-head { align-items: center; }
+  .di-card .di-title { display: inline-flex; align-items: center; gap: .45rem; font-size: .95rem; }
+  .di-card .di-drop { min-height: 158px; }
+  .di-card .di-chips { margin-top: 12px; }
+  .di-card .di-chip:hover {
+      border-color: var(--sl-accent); color: var(--sl-accent);
+      background: var(--sl-soft-info-bg);
+  }
+  .di-card #aiAnalyze { box-shadow: 0 2px 8px rgba(13, 110, 253, .18); }
+</style>
+{% endblock %}
 {% block content %}
 {% set info = {'A': '增量覆盖（默认）', 'B': '整场重置'} %}
 {# 2026-10-21 用户口径：成绩单 / 考务安排 / 数据导入 三页统一页头（见 _exam_head.html）。 #}
@@ -14,11 +91,38 @@
                                 else ('warning text-dark' if exam.status == 'dirty' else 'secondary'))) %}
 {% endcall %}
 
-{# 2026-10-19：原「成绩导入」升级为「数据导入」——
-   左侧＝AI 智能导入（成绩 / 分数线 / 考务 / 场次，AI 只识别列，数据仍由系统逐行解析）；
-   右侧＝标准模板（成绩，确定性解析）。两种方式同页并列，不再分两个页面/两个页签。
-   划线分层状态条在两栏下方直接展示，不再套卡片；成绩模板下载移进模板导入卡内。 #}
 {% if step == 'upload' %}
+{# 2026-10-21 布局：划线分层是宽矩阵（可编辑），独占整行 #}
+<div class="card mb-3" id="bandOverviewCard">
+    <div class="card-header d-flex align-items-center flex-wrap gap-2">
+        <span class="imp-card-title"><i class="bi bi-bar-chart-line"></i> 划线分层</span>
+        {% if band_summary.groups %}
+        <span class="badge bg-success-subtle text-success-emphasis border">已划 {{ band_summary.groups }} 个方向×学科</span>
+        {% if band_summary.template %}<span class="text-muted small">模板：{{ band_summary.template }}</span>{% endif %}
+        {% else %}
+        <span class="badge bg-secondary">本场未划线</span>
+        {% endif %}
+        <div class="ms-auto d-flex gap-2 align-items-center flex-wrap">
+            <button class="btn btn-sm btn-outline-secondary" type="button"
+                    data-bs-toggle="collapse" data-bs-target="#bandOverviewBody"
+                    aria-expanded="true" aria-controls="bandOverviewBody" title="展开 / 收起">
+                <i class="bi bi-chevron-expand"></i>
+            </button>
+        </div>
+    </div>
+    <div class="collapse show" id="bandOverviewBody">
+        {# 2026-10-21 用户口径：把「划线分层」页的矩阵与编辑功能整体挪到导入页
+           （改下界方式 / 分层模板 / 按组合 / 新增层 / 保存划线都在这里直接可用）。 #}
+        {% set _can_edit_bands = current_user.has_perm('grades.settings') %}
+        {% with bare=True, can_edit=_can_edit_bands %}
+        {% include 'grades/_bands_matrix.html' %}
+        {% endwith %}
+    </div>
+</div>
+{% endif %}
+
+{% if step == 'upload' %}
+{# 2026-10-21 布局：两种导入方式并列（AI 智能导入窄、标准模板导入宽） #}
 <div class="row g-3 align-items-stretch">
     {# 2026-10-19 用户口径：AI 智能导入在左、标准模板导入在右 #}
     <div class="col-lg-5">
@@ -42,6 +146,7 @@
                     <span class="di-chip" title="考生名单 / 编排结果（学号、姓名、班级、选科、考场、座号、考号）">考生名单</span>
                     <span class="di-chip" title="考场编号 / 位置 / 科目 / 容量 / 考号前缀">考场</span>
                     <span class="di-chip" title="考试时间表 / 监考表，表格或照片都可以">场次</span>
+                    <span class="di-chip" title="班级 × 去差人数，识别后写入本场「去差人数设置」">去差设置</span>
                 </div>
                 <button class="btn btn-primary w-100 mt-3" id="aiAnalyze">
                     <i class="bi bi-magic"></i> 让 AI 识别
@@ -64,43 +169,47 @@
                 <form method="post" enctype="multipart/form-data"
                       action="{{ url_for('grades.exam_import_upload', exam_id=exam.id) }}">
                     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                    <div class="mb-3">
-                        <label class="form-label fw-semibold">选择成绩 Excel 文件</label>
-                        <input type="file" name="file" class="form-control" accept=".xlsx,.xls" required>
-                        <div class="form-text">
-                            模板 A：学号/姓名/年级(可选)/班级(可选)/总分(可选)/9 科列；
-                            模板 B：学号/姓名/年级(可选)/若干科目列。允许分批导入。
-                        </div>
-                        {# 2026-10-19 用户口径：模板下载从页头右上角移进模板导入卡内 #}
-                        <div class="mt-2">
-                            <a href="{{ url_for('grades.template_download') }}" class="small">
+                    <div class="di-file-panel mb-3">
+                        <label class="form-label fw-semibold" for="scoreFile">
+                            <i class="bi bi-file-earmark-excel text-success"></i> 选择成绩 Excel 文件
+                        </label>
+                        <input type="file" name="file" id="scoreFile" class="form-control"
+                               accept=".xlsx,.xls" required>
+                        <div class="d-flex justify-content-between align-items-start flex-wrap gap-2 mt-2">
+                            <div class="form-text mb-0" style="max-width:80%">
+                                模板 A：学号/姓名/年级(可选)/班级(可选)/总分(可选)/9 科列；
+                                模板 B：学号/姓名/年级(可选)/若干科目列。允许分批导入。
+                            </div>
+                            {# 2026-10-19 用户口径：模板下载从页头右上角移进模板导入卡内 #}
+                            <a href="{{ url_for('grades.template_download') }}"
+                               class="small text-nowrap">
                                 <i class="bi bi-download"></i> 下载成绩模板
                             </a>
                         </div>
                     </div>
                     <div class="mb-3">
-                        <label class="form-label fw-semibold">导入模式</label>
-                        <div class="form-check">
+                        <div class="form-label fw-semibold">导入模式</div>
+                        <label class="di-mode" for="m_a">
                             <input class="form-check-input" type="radio" name="mode" id="m_a" value="A" checked>
-                            <label class="form-check-label" for="m_a">
-                                <strong>模式 A：增量覆盖（推荐）</strong> —— 文件中出现的（学生×科目）覆盖旧成绩；
-                                文件为空的科目视为缺考；未出现的科目列与学生保留不动。
-                            </label>
-                        </div>
-                        <div class="form-check mt-1">
+                            <span>
+                                <span class="di-mode-t">模式 A：增量覆盖（推荐）</span>
+                                <span class="di-mode-d">文件中出现的（学生×科目）覆盖旧成绩；文件为空的科目视为缺考；未出现的科目列与学生保留不动。</span>
+                            </span>
+                        </label>
+                        <label class="di-mode" for="m_b">
                             <input class="form-check-input" type="radio" name="mode" id="m_b" value="B">
-                            <label class="form-check-label" for="m_b">
-                                <strong>模式 B：整场重置</strong> —— 清空本场全部成绩后仅按本次文件导入（上次整体导错时用）。
-                            </label>
-                        </div>
+                            <span>
+                                <span class="di-mode-t">模式 B：整场重置</span>
+                                <span class="di-mode-d">清空本场全部成绩后仅按本次文件导入（上次整体导错时用）。</span>
+                            </span>
+                        </label>
                         <div class="form-check mt-2" id="rmWrap">
                             <input class="form-check-input" type="checkbox" name="remove_missing" id="rm" value="1">
-                            <label class="form-check-label" for="rm">一并移除本次文件中未出现的原有学生成绩（模式 A，慎用）</label>
+                            <label class="form-check-label small" for="rm">一并移除本次文件中未出现的原有学生成绩（模式 A，慎用）</label>
                         </div>
                     </div>
-                    <div class="mb-0">
-                        <label class="form-label fw-semibold">上传并校验</label>
-                        <button type="submit" class="btn btn-primary">
+                    <div class="d-flex justify-content-end">
+                        <button type="submit" class="btn btn-primary di-cta">
                             <i class="bi bi-search"></i> 解析并预览差异
                         </button>
                     </div>
@@ -110,16 +219,85 @@
     </div>
 </div>
 
-{# 划线分层状态条：两栏下方直接展示，不再套卡片 #}
-{% include 'grades/_band_summary.html' %}
-
-{# 2026-10-19 用户口径：分数修改记录属于导入后的数据核对环节，放在数据导入页。 #}
+{# 2026-10-21 布局：去差人数设置（窄表）+ 分数修改记录（宽表）并排；无改分权限时去差独占整行 #}
+<div class="row g-3 mt-0 align-items-stretch">
+<div class="col-12 {{ 'col-xl-5' if current_user.has_perm('grades.edit') else '' }} d-flex">
+{# ===== 2026-10-21 用户口径：去差人数设置（默认展开、可折叠；仅去差人数可改） ===== #}
+<div class="card mb-0 w-100" id="trimCard">
+    <div class="card-header d-flex align-items-center flex-wrap gap-2">
+        <span class="imp-card-title"><i class="bi bi-scissors"></i> 去差人数设置</span>
+        <span class="badge bg-light text-dark border">{{ trim_rows|length }} 个班</span>
+        <div class="ms-auto d-flex gap-2 align-items-center flex-wrap">
+            <button class="btn btn-sm btn-primary" type="submit" form="trimForm">
+                <i class="bi bi-save"></i> 保存设置
+            </button>
+            <button class="btn btn-sm btn-outline-secondary" type="button"
+                    data-bs-toggle="collapse" data-bs-target="#trimBody"
+                    aria-expanded="true" aria-controls="trimBody" title="展开 / 收起">
+                <i class="bi bi-chevron-expand"></i>
+            </button>
+        </div>
+    </div>
+    <div class="collapse show" id="trimBody">
+        <div class="trim-toolbar">
+            <form method="post" enctype="multipart/form-data" class="d-flex gap-2 align-items-center m-0"
+                  action="{{ url_for('grades.exam_trim_settings_import', exam_id=exam.id) }}">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <input type="file" name="file" class="form-control form-control-sm"
+                       accept=".xlsx,.xls" required aria-label="去差设置 Excel">
+                <button class="btn btn-sm btn-outline-success text-nowrap" type="submit">
+                    <i class="bi bi-upload"></i> 导入 Excel
+                </button>
+            </form>
+            <a class="btn btn-sm btn-outline-secondary text-nowrap"
+               href="{{ url_for('grades.exam_trim_settings_template', exam_id=exam.id) }}">
+                <i class="bi bi-download"></i> 下载模板
+            </a>
+            <span class="imp-tip ms-auto">默认卓越班 2 人、强基班 0 人；只改「去差人数」</span>
+        </div>
+        <form method="post" id="trimForm" action="{{ url_for('grades.exam_trim_settings', exam_id=exam.id) }}">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <div class="table-responsive" style="max-height:360px;">
+                <table class="table table-sm g-table align-middle mb-0" id="trimTable">
+                    <thead>
+                    <tr>
+                        <th>班级</th><th>班型</th>
+                        <th class="text-end">班级人数</th>
+                        <th class="text-end">参考人数</th>
+                        <th class="text-end" style="width:130px;">去差人数</th>
+                        <th class="text-end">去差后人数</th>
+                    </tr>
+                    </thead>
+                    <tbody>
+                    {% for r in trim_rows %}
+                    <tr data-attend="{{ r.attend }}" data-max="{{ r.max_trim }}">
+                        <td class="fw-semibold text-nowrap">{{ r.class_name }}</td>
+                        <td class="small text-muted text-nowrap">{{ r.class_type or '—' }}</td>
+                        <td class="text-end">{{ r.class_size }}</td>
+                        <td class="text-end">{{ r.attend }}</td>
+                        <td class="text-end">
+                            <input type="number" class="form-control form-control-sm trim-in text-end"
+                                   name="trim_{{ r.class_name }}" value="{{ r.trim }}"
+                                   min="0" max="{{ r.max_trim }}" step="1"
+                                   aria-label="{{ r.class_name }} 去差人数">
+                        </td>
+                        <td class="text-end fw-semibold trim-after">{{ r.after }}</td>
+                    </tr>
+                    {% else %}
+                    <tr><td colspan="6" class="text-center text-muted py-3">暂无班级数据</td></tr>
+                    {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </form>
+    </div>
+</div>
+</div>
 {% if current_user.has_perm('grades.edit') %}
-<div class="card mt-3" id="scoreChanges">
-    <div class="card-header py-2 d-flex align-items-center flex-wrap gap-2">
-        <span class="fw-semibold">
-            <i class="bi bi-clock-history"></i> 分数修改记录
-        </span>
+<div class="col-12 col-xl-7 d-flex">
+<div class="card mb-0 w-100" id="scoreChanges">
+    <div class="card-header d-flex align-items-center flex-wrap gap-2">
+        <span class="imp-card-title"><i class="bi bi-clock-history"></i> 分数修改记录</span>
         <span class="badge bg-secondary">{{ change_log_count }} 条</span>
         <span class="text-muted small">最近 {{ change_logs|length }} 条</span>
         <a href="{{ url_for('grades.score_changes') }}?exam={{ exam.id }}"
@@ -180,7 +358,9 @@
         </table>
     </div>
 </div>
+</div>
 {% endif %}
+</div>
 
 {# ② AI 结论 + 待确认问题 #}
 <div class="card mb-3 d-none" id="aiBox">
@@ -327,13 +507,30 @@
         </label>
     </div>
     {% endif %}
-    <div class="d-flex gap-2">
+    <div class="d-flex gap-2 align-items-center flex-wrap">
         <button type="submit" class="btn btn-success" {{ 'disabled' if stats.ok_rows == 0 }}>
             <i class="bi bi-check-lg"></i> 确认导入（{{ info.get(draft.mode, draft.mode) }}）
         </button>
         <a href="{{ url_for('grades.exam_import', exam_id=exam.id) }}" class="btn btn-outline-secondary">
             修改文件重新上传
         </a>
+        {# 2026-10-22 用户口径：可导入 0 行时按钮是 disabled 的，此前没有任何说明，
+           点了像"卡住/没反应"。这里把禁用的**原因**直接写在按钮旁边。 #}
+        {% if stats.ok_rows == 0 %}
+        <span class="text-danger small">
+            <i class="bi bi-exclamation-circle"></i>
+            当前可导入 0 行，无法提交：
+            {% if not (stats.total_lines or 0) %}
+                文件里没有数据行（请以下载的模板为准填写）
+            {% elif stats.error_rows %}
+                {{ stats.error_rows }} 行解析失败（见上方「错误行」），修正后重新上传
+            {% elif stats.absent_rows %}
+                {{ stats.absent_rows }} 行都没有分数（会被判为缺考），请确认列是否选中
+            {% else %}
+                没有可导入的成绩行，请检查文件内容后重新上传
+            {% endif %}
+        </span>
+        {% endif %}
     </div>
 </form>
 
@@ -350,8 +547,20 @@ window.AI_KIND_LABEL = {{ score_kinds|tojson }};
 window.AFFAIR_FIELDS = {{ affair_fields|tojson }};
 window.SCHEDULE_KIND = {{ schedule_kind|tojson }};
 window.SCHEDULE_KIND_LABEL = {{ schedule_kind_label|tojson }};
+window.TRIM_KIND = {{ trim_kind|tojson }};
+window.TRIM_KIND_LABEL = {{ trim_kind_label|tojson }};
 
 $(function () {
+    // 2026-10-21 去差人数设置：改「去差人数」时就地更新「去差后人数」（不提交）
+    $('#trimTable').on('input change', '.trim-in', function () {
+        var $tr = $(this).closest('tr');
+        var ref = parseInt($tr.data('attend'), 10) || 0;
+        var max = parseInt($tr.data('max'), 10) || 0;
+        var v = parseInt($(this).val(), 10);
+        if (isNaN(v) || v < 0) { v = 0; }
+        if (v > max) { v = max; $(this).val(v); }
+        $tr.find('.trim-after').text(Math.max(ref - v, 0));
+    });
     var $files = $('#aiFiles');
     var $drop = $('#aiDrop');
 
@@ -382,20 +591,10 @@ $(function () {
         }
     });
 
-    // 划线分层状态条：把视线带到左侧 AI 面板（固定顶栏 56px，留 70px 余量）
-    $('#aiBandBtn').on('click', function () {
-        var el = document.getElementById('aiPanel');
-        if (el) {
-            var top = el.getBoundingClientRect().top
-                    + (window.pageYOffset || 0) - 70;
-            if (top < 0) { top = 0; }
-            window.scrollTo(0, top);
-        }
-        $('#aiMsg').removeClass('text-danger').addClass('text-success')
-            .text('请上传「各科分数线」表（科目 × 各条线），识别后会自动写入划线分层');
-    });
 });
 </script>
+{# 2026-10-21：顶部划线分层矩阵与「划线分层」页共用同一份渲染脚本 #}
+<script src="{{ su('js/bands_matrix.js') }}"></script>
 <script src="{{ su('js/ai_import.js') }}"></script>
 {% endif %}
 {% endblock %}

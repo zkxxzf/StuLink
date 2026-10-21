@@ -683,9 +683,9 @@
                      current_user.active_group.scope_type in ('school', 'grade')) %}
                 {# v1.19.49.35：点「成绩分析」文字直接进入本场分析（领导=总览（全年级对比），
                    其他角色=班级分析，避免非领导点总览被 403）；展开/收起改由右侧箭头负责。
-                   2026-10-13：**不再随当前页面自动展开 / 折叠** —— 原先进分析页自动展开、
-                   回到导入页又自动收起，每次导航侧栏高度都在变（用户反馈"画面跳动感"）。
-                   现在恒定展开；用户手动收起后记在本机 localStorage，跨页面保持，不再自己变。 #}
+                   2026-10-21 曾改为每次加载都折叠；2026-10-22 用户口径：
+                   **成绩分析分组默认展开**（进入考试态即可见到「总览 / 详细分析 / …」，
+                   不必先点一次箭头）。基础配置仍保持默认折叠。 #}
                 <div class="efn-group">
                     <a class="efn-group-title" data-nav="ana_home"
                        href="{{ url_for('grades.global_compare_page', exam=EN.exam_id) if _is_lead
@@ -716,30 +716,8 @@
                     {% endif %}
                     {# 2026-10-21 用户口径：侧栏删除「自由分析」「成绩汇报区」入口（页面仍在，仅不再占导航）。 #}
                 </div>
-                <script>
-                {# 2026-10-13：分析组展开状态记在本机（键 stulink-efn-analysis），
-                   服务端不再按当前路由写死 show —— 跨页面导航时侧栏高度恒定，不跳动。
-                   脚本放在元素正后方：解析到即执行，先于首屏绘制，不会闪一下再收起。 #}
-                (function () {
-                    var box = document.getElementById('efnAnalysis');
-                    if (!box) { return; }
-                    var KEY = 'stulink-efn-analysis';
-                    var prev = box.previousElementSibling;
-                    var caret = prev ? prev.querySelector('[data-bs-toggle="collapse"]') : null;
-                    try {
-                        if (localStorage.getItem(KEY) === '0') {
-                            box.classList.remove('show');
-                            if (caret) { caret.setAttribute('aria-expanded', 'false'); }
-                        }
-                    } catch (e) { /* 隐私模式等读不到 → 保持默认展开 */ }
-                    box.addEventListener('hidden.bs.collapse', function () {
-                        try { localStorage.setItem(KEY, '0'); } catch (e) {}
-                    });
-                    box.addEventListener('shown.bs.collapse', function () {
-                        try { localStorage.setItem(KEY, '1'); } catch (e) {}
-                    });
-                })();
-                </script>
+                {# 2026-10-21 用户口径：成绩模块侧栏的分组（成绩分析 / 基础配置）**每次加载都默认折叠**，
+                   不再用 localStorage 记住上次的展开状态 —— 刷新或换页后统一回到折叠态。 #}
                 {% endif %}
             </div>
             {% elif TIMED %}
@@ -799,8 +777,8 @@
             {# v1.19.49.35 移除「毕业生成绩（二期）」入口：暂无用处，后期单独做毕业生数据库 #}
 
             {# v1.19.0 基础配置：长期基础数据，不属于四段流程，默认折叠
-               2026-10-13：同样**不再随当前页面自动展开**（进「选科维护」展开、离开又收起，
-               侧栏高度来回变 → 画面跳动）；状态记在本机 localStorage，用户手动展开后一直保持。 #}
+               2026-10-21 用户口径：**每次加载都默认折叠**（不再记忆展开状态），
+               刷新 / 换页后统一回到折叠态。 #}
             {% set _cfg_eps = ('grades.subject_mgmt', 'grades.band_templates_page',
                                'grades.teachers_page', 'grades.teachers_import_page',
                                'grades.exam_rooms') %}
@@ -836,28 +814,6 @@
                 </a>
                 {% endif %}
             </div>
-            <script>
-            {# 2026-10-13：「基础配置」展开状态记在本机（键 stulink-nav-cfg），默认折叠。
-               跟「成绩分析」同一套做法：服务端不再按路由自动展开，避免导航时侧栏跳动。 #}
-            (function () {
-                var box = document.getElementById('navCfg');
-                if (!box) { return; }
-                var KEY = 'stulink-nav-cfg';
-                var toggle = document.querySelector('[data-bs-toggle="collapse"][href="#navCfg"]');
-                try {
-                    if (localStorage.getItem(KEY) === '1') {
-                        box.classList.add('show');
-                        if (toggle) { toggle.setAttribute('aria-expanded', 'true'); }
-                    }
-                } catch (e) { /* 读不到本机存储 → 保持默认折叠 */ }
-                box.addEventListener('shown.bs.collapse', function () {
-                    try { localStorage.setItem(KEY, '1'); } catch (e) {}
-                });
-                box.addEventListener('hidden.bs.collapse', function () {
-                    try { localStorage.setItem(KEY, '0'); } catch (e) {}
-                });
-            })();
-            </script>
             {% endif %}
             {% endif %}
 
@@ -1064,7 +1020,7 @@
         {# 第七轮审计（U-M2）：补 .footer 类 —— 上面 @media print 的隐藏清单匹配的是
            .footer，此前 footer 元素无此类，导致打印时多打一条版权/版本行。 #}
         <footer class="footer text-center text-muted small mt-4 pt-3 border-top">
-            StuLink v1.19.50.60（2026-10-21） · © 2026 @zkxxzf · 感谢协作开发 @Sakaay
+            StuLink v1.19.62.64（2026-10-21） · © 2026 @zkxxzf · 感谢协作开发 @Sakaay
         </footer>
         {% endif %}
     </div>

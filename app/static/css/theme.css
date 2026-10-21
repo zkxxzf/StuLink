@@ -1,5 +1,5 @@
 /* =============================================================================
-   StuLink 主题层（浅色 / 深色）—— v1.19.50.60（2026-10-13）
+   StuLink 主题层（浅色 / 深色）—— v1.19.62.64（2026-10-13）
    -----------------------------------------------------------------------------
    背景：此前全站颜色是「字面量满天飞」——base.html 内联 56 处、业务 css 201 处、
    模板内联 style 665 处；成绩分析（考试态 .sidebar-float）侧栏是白底卡，
@@ -19,7 +19,7 @@
 :root,
 [data-bs-theme="light"] {
     /* —— 页面与面板 —— */
-    /* 2026-10-13（v1.19.50.60）：页面底色原 #f0f2f5 偏灰，整体提亮一档 */
+    /* 2026-10-13（v1.19.62.64）：页面底色原 #f0f2f5 偏灰，整体提亮一档 */
     --sl-bg: #f6f8fb;                  /* 页面底色 */
     --sl-surface: #ffffff;             /* 卡片 / 面板 / 弹层 */
     --sl-surface-2: #f8fafc;           /* 次级面：表头、卡片头、斑马行 */
@@ -61,7 +61,7 @@
     --sl-navbar-border: #e2e8f0;
 
     /* —— 表格 ——
-       2026-10-13（v1.19.50.60）：成绩类表头原是写死的深色 #1e293b + 白字
+       2026-10-13（v1.19.62.64）：成绩类表头原是写死的深色 #1e293b + 白字
        （grades.css 加了 !important）。页面整体主题化后这条黑表头就成了突兀的
        「黑条」（用户反馈「页面区域还有黑色的，比如表头」）→ 改为跟随主题：
        浅色 = 浅灰底深字，深色 = 深底浅字。 */
@@ -375,7 +375,7 @@ body {
 /* =============================================================================
    两行表头 / 合并分组单元格：**层级用同族色阶**（纵深靠明度，不靠黑白对比）
    -----------------------------------------------------------------------------
-   2026-10-13（v1.19.50.60）用户反馈：宽表「两行表头 + 合并单元格」样式割裂 ——
+   2026-10-13（v1.19.62.64）用户反馈：宽表「两行表头 + 合并单元格」样式割裂 ——
    第 1 行 #1e293b 深、第 2 行 #334155 次深、冻结列又回 #1e293b，
    与浅色表体拼在一起像三张表。现统一为：
      第 1 行（分组/大标题）→ --sl-head-bg（稍深）
@@ -589,11 +589,23 @@ body {
    于是「层名」格的底边比右侧「总分」行的底边高出一截（用户反馈"没有对齐高度"）。
    本表最多几行层，垂直吸附本来也没用 —— 直接去掉 sticky，底边即对齐。 */
 #bandTable thead th { position: static; }
+/* 2026-10-21 用户反馈「表格有偏差」：表体首列（层名）是 sticky（base.html 的
+   .table-responsive td:first-child），而上面刚把 thead 全部设为 static —— 表宽超过容器
+   横向滚动时，表体层名列钉在左侧、表头整体左移，表头与数值列就对不上了。
+   这里单独把**表头首列**也横向冻结（只 left，不 top，避免重新引入上一条说的下推问题）。 */
+#bandTable thead th.col-layer {
+    position: sticky; left: 0; top: auto; z-index: 4;
+    background: var(--sl-head-bg);
+    box-shadow: 2px 0 4px -2px rgba(15, 30, 61, .25);
+}
 /* 第 2 行表头的那条横分隔线在 rowspan 格（层名 / 操作）处必然断开，
    反而像一条裂缝；去掉它，两行表头用同族色阶（--sl-head-bg / -2）区分。 */
 #bandTable thead tr:nth-child(2) th { border-top: 0 !important; }
-#bandTable th.col-layer, #bandTable td:first-child { width: 300px; min-width: 220px; }
-#bandTable th.col-sub, #bandTable td.q-sub { width: 100px; min-width: 96px; }
+/* 2026-10-21 用户口径：常用分辨率下尽量一屏显示完所有科目列 —— 列宽整体收窄。
+   层名列原来 300px（层名只有「985线」几个字）太浪费，收到 120px；
+   科目列 100px → 72px（格内是 3~5 个字符的数字，够用）。 */
+#bandTable th.col-layer, #bandTable td:first-child { width: 120px; min-width: 96px; }
+#bandTable th.col-sub, #bandTable td.q-sub { width: 72px; min-width: 60px; }
 /* 操作列（删除按钮）窄、居中；表头格留空（与分层模板页一致） */
 #bandTable th.col-op, #bandTable td:last-child { width: 56px; min-width: 52px; text-align: center; }
 #bandTable tbody tr:nth-child(even) td { background: var(--sl-zebra-bg); }
@@ -606,11 +618,22 @@ body {
     color: var(--sl-text);
     /* 13.5px：与 100px 列的格子成比例（原 12.5px 配 110px 格显得小） */
     font-size: 13.5px;
-    padding: 5px 7px;
-    min-width: 66px;
+    padding: 4px 5px;
+    min-width: 56px;
     height: auto;
 }
-#bandTable td .q-name { min-width: 120px; }
+#bandTable td .q-name { min-width: 0; width: 100%; }
+/* 2026-10-21 用户反馈：层名列（120/112px）里的「模板定义：比例 50% · 约 210 人」
+   是一整行不换行的文本，会横向溢出压到右边「总分」格上。允许换行并按格宽折行；
+   比例/名次口径下这行最多两行，行高可控。 */
+#bandTable td:first-child { white-space: normal; }
+#bandTable td .q-tpl-def {
+    font-size: 10.5px;
+    line-height: 1.25;
+    white-space: normal;
+    word-break: break-word;
+    overflow-wrap: anywhere;
+}
 #bandTable td .q-cell { text-align: center; font-variant-numeric: tabular-nums; }
 /* —— 组合线格（.q-selrow / .q-sel-name / .q-selcell，2026-10-15）——
    上面「td .form-control」把全表 input 的边框与底色去掉了，组合格因此看不出
@@ -629,12 +652,24 @@ body {
     white-space: nowrap;
 }
 #bandTable td .q-selcell {
-    width: 5em;
+    width: 4.2em;
     flex: 0 0 auto;
     border: 2px solid var(--sl-accent);
     background: var(--sl-surface);
     text-align: center;
     font-variant-numeric: tabular-nums;
+}
+/* 2026-10-21 宽屏自适应列宽：≥1200px 时整表铺满容器、科目列均分（不再横向滚动）；
+   更窄的屏幕仍按上面的最小列宽排版，必要时横向滚动，不会把数字挤没。 */
+@media (min-width: 1200px) {
+    #bandTable { width: 100%; table-layout: fixed; }
+    #bandTable th.col-layer, #bandTable td:first-child { width: 112px; min-width: 0; }
+    #bandTable th.col-sub, #bandTable td.q-sub { width: auto; min-width: 0; }
+    #bandTable th.col-op, #bandTable td:last-child { width: 48px; min-width: 0; }
+    #bandTable td .form-control { min-width: 0; }
+    /* 组合格（组合名 + 输入框）在窄列里改为上下排，避免横向溢出 */
+    #bandTable td .q-selrow { flex-wrap: wrap; }
+    #bandTable td .q-selcell { width: 100%; }
 }
 #bandTable td .form-control:focus {
     background: var(--sl-surface);

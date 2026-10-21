@@ -522,6 +522,35 @@ def _apply_bands(exam, band_items, dry=False):
     return info, errors
 
 
+def _apply_trims(exam, trim_items, dry=False):
+    """解析「去差人数设置」表 → 写 exam.config_json.class_trim
+
+    返回 (info, errors)。info: {classes, ignored, values}
+    """
+    from app.modules.grades.services import trim_settings as tsvc
+    parsed, errors = {}, []
+    for it in trim_items:
+        sh = it.get('_sheet')
+        if sh is None:
+            continue
+        got, errs = tsvc.parse_sheet(sh)
+        parsed.update(got or {})
+        errors.extend(errs or [])
+    if not parsed:
+        return None, errors
+    # Excel/AI 只给部分班级时，其余班保持原设置（增量合并）
+    merged = dict(exam.class_trim())
+    merged.update(parsed)
+    clean = tsvc.save_trims(exam, merged, dry=dry)
+    if not dry:
+        db.session.add(exam)
+        db.session.commit()
+    info = {'classes': len(clean),
+            'ignored': sorted(set(parsed) - set(clean)),
+            'values': clean}
+    return info, errors
+
+
 def _apply_schedules(exam, sheet_items, body_sessions, mode='replace', dry=False):
     """把「考试时间表 / 监考表」写成本场考务的**场次**（环节⑤），
     若表里带监考老师/考场，顺带写环节⑥ 监考安排与考场。
@@ -804,8 +833,11 @@ def exam_ai_import_apply(exam_id):
     _AFF_KINDS = ('affair_students', 'affair_rooms', 'affair_seats')
     score_items = [it for it in payload
                    if (it.get('score_kind') or 'converted')
-                   not in ('bands', 'skip', aisvc.SCHEDULE_KIND) + _AFF_KINDS]
+                   not in ('bands', 'skip', aisvc.SCHEDULE_KIND, aisvc.TRIM_KIND) + _AFF_KINDS]
     band_items = [it for it in payload if (it.get('score_kind') or '') == 'bands']
+    trim_items = [{'_sheet': it['_sheet'], 'mapping': it.get('mapping')}
+                  for it in payload
+                  if (it.get('score_kind') or '') == aisvc.TRIM_KIND]
     sched_items = [{'_sheet': it['_sheet'], 'mapping': it.get('mapping')}
                    for it in payload
                    if (it.get('score_kind') or '') == aisvc.SCHEDULE_KIND]
@@ -821,6 +853,10 @@ def exam_ai_import_apply(exam_id):
     band_info = None
     affair_info = None
     schedule_info = None
+    trim_info = None
+    if trim_items:
+        trim_info, terr = _apply_trims(exam, trim_items, dry=dry)
+        errors.extend(terr or [])
     if band_items:
         band_info, berr = _apply_bands(exam, band_items, dry=dry)
         errors.extend(berr or [])
@@ -843,9 +879,9 @@ def exam_ai_import_apply(exam_id):
         errors.extend(e1)
         rows, rerr = _resolve_student_no(exam, rows)      # 只有考号时按考号/姓名反查学号
         errors.extend(rerr)
-    if not rows and not band_info and not affair_info and not schedule_info:
+    if not rows and not band_info and not affair_info and not schedule_info and not trim_info:
         return jsonify(success=False,
-                       message='未解析出任何成绩/分数线/考务/场次，请检查列映射与工作表用途',
+                       message='未解析出任何成绩/分数线/考务/场次/去差设置，请检查列映射与工作表用途',
                        errors=errors[:20])
 
     # 补齐学生快照（姓名/班级/班型/方向…）并统计
@@ -880,6 +916,8 @@ def exam_ai_import_apply(exam_id):
         preview['affair'] = affair_info
     if schedule_info:
         preview['schedule'] = schedule_info
+    if trim_info:
+        preview['trim'] = trim_info
     if dry:
         return jsonify(success=True, preview=preview, errors=errors[:20])
     # 2026-10-12 数据可信度审计（§3.4）：AI 导入默认 mode='B' **整场覆盖**，
@@ -918,6 +956,8 @@ def exam_ai_import_apply(exam_id):
                             % (schedule_info.get('cleared_sessions', 0),
                                schedule_info.get('cleared_invigs', 0))
                             if schedule_info.get('cleared_sessions') else ''))
+        if trim_info:
+            parts.append('去差设置 %d 个班' % trim_info['classes'])
         log_operation(current_user, '导入', '考试', exam_id,
                       'AI 导入（无成绩）：' + '；'.join(parts), module='grades')
         out = {'success': True, 'applied': True, 'summary': {'non_score_only': True},
@@ -928,6 +968,8 @@ def exam_ai_import_apply(exam_id):
             out['affair'] = affair_info
         if schedule_info:
             out['schedule'] = schedule_info
+        if trim_info:
+            out['trim'] = trim_info
         return jsonify(**out)
 
     # 正式写入（复用既有导入管道；整场覆盖式，避免与旧数据混在一起）
@@ -986,6 +1028,8 @@ def exam_ai_import_apply(exam_id):
         out['affair'] = affair_info
     if schedule_info:
         out['schedule'] = schedule_info
+    if trim_info:
+        out['trim'] = trim_info
     return jsonify(**out)
 
 

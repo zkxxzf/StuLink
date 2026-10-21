@@ -1,4 +1,4 @@
-# StuLink v1.19.50.60 2026-10-10
+# StuLink v1.19.62.64 2026-10-10
 # 成绩汇报区指标引擎：对标年级汇报 PPT 口径
 #  - 单上线：单科（或总分）≥ 对应层下界
 #  - 双上线：单科过该科层线 且 总分过同层线（如一本双上线）
@@ -95,13 +95,30 @@ def pick_layer(data, direction, subject=TOTAL_SUBJECT, layer_name='', selection=
     return bl[0]
 
 
+def trim_quota(exam, cls, class_type=''):
+    """某班去差人数：**本场按班设置优先**，其次按班型规则（2026-10-21）
+
+    数据导入页的「去差人数设置」按班写入 exam.config_json.class_trim；
+    没有显式设置的班仍走 TRIM_RULES（卓越班 2、其它 0）。
+    """
+    over = {}
+    try:
+        over = exam.class_trim() if exam is not None else {}
+    except Exception as _e:  # noqa: BLE001
+        logger.warning('report_service.py::trim_quota 读取本场设置失败（回落班型规则）: %s', _e)
+    if cls in over:
+        return over[cls]
+    return TRIM_RULES.get(class_type, DEFAULT_TRIM)
+
+
 def trimmed_nos(data):
     """去差学生学号集合：各班按班型规则剔除总分末尾 N 人
 
-    v1.19.50.60 班型取数改为**快照优先**：
+    v1.19.62.64 班型取数改为**快照优先**：
       ① 优先用成绩行上的 class_type（该场考试导入时的「当时班型」）；
       ② 快照为空（迁移前导入的历史考试）→ 回落读 ClassProfile（过渡兼容）。
     这样班型一旦调整（强基↔卓越），历史考试的去差口径不会跟着变。
+    2026-10-21：本场「去差人数设置」（exam.class_trim）优先于班型规则。
     """
     # ① 快照班型：同班内一致，取首个非空值
     snap_ct = {}
@@ -123,7 +140,7 @@ def trimmed_nos(data):
 
     def _trim_of(cls):
         ct = snap_ct.get(cls) or live_ct.get(cls, '')
-        return TRIM_RULES.get(ct, DEFAULT_TRIM)
+        return trim_quota(data.exam, cls, ct)
 
     out = set()
     for cls, rows in by_class.items():
@@ -140,7 +157,7 @@ def subject_teacher_map(grade, exam_id=None):
     """{科目展示名: '教师A、教师B'}：该年级各班任课教师按科目去重合并。
 
     板块一「任课教师」列数据源——不依赖划线，教师未配置/停用则科目对应空串。
-    v1.19.50.60：传入 exam_id 时优先读**本场考试的任课快照**（考试当时），
+    v1.19.62.64：传入 exam_id 时优先读**本场考试的任课快照**（考试当时），
     教师调动/重新分班后历史考试的展示不会跟着变。
     """
     pairs = []          # [(subject, 姓名)]

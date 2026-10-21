@@ -11,6 +11,9 @@
 .cat-collect { background: var(--sl-soft-amber-bg); color: var(--sl-soft-amber-fg); }
 .cat-workbench { background: var(--sl-soft-purple-bg); color: var(--sl-soft-purple-fg); }
 .cat-other { background: var(--sl-surface-2); color: var(--sl-text-muted); }
+/* 2026-10-21：今天那一行在「我的课表」里置顶高亮（原「今日课程」卡片并入后） */
+.today-row { background: var(--sl-soft-info-bg); border: 1px solid var(--sl-soft-info-bd);
+             border-radius: 8px; padding: 5px 8px; }
 </style>
 {% endblock %}
 {% block content %}
@@ -88,30 +91,56 @@
     <div class="col-lg-7">
         <div class="card h-100">
             <div class="card-header d-flex justify-content-between align-items-center">
-                <span><i class="bi bi-alarm"></i> 今日课程</span>
-                <a href="{{ url_for('workbench.my_schedule') }}" class="btn btn-sm btn-outline-primary">
-                    查看完整课表 <i class="bi bi-arrow-right"></i>
-                </a>
+                <span>
+                    <i class="bi bi-calendar3"></i> 我的课表
+                    {% if active_term %}<span class="badge bg-light text-dark border ms-1">{{ active_term.name }}</span>{% endif %}
+                </span>
+                <div class="d-flex gap-1">
+                    <a href="{{ url_for('overview.grades_page') }}" class="btn btn-sm btn-outline-secondary">
+                        <i class="bi bi-graph-up"></i> 我的成绩
+                    </a>
+                    <a href="{{ url_for('workbench.my_schedule') }}" class="btn btn-sm btn-outline-primary">
+                        查看完整课表 <i class="bi bi-arrow-right"></i>
+                    </a>
+                </div>
             </div>
             <div class="card-body">
-                {% if today_entries %}
-                <div class="d-flex flex-wrap gap-2">
-                    {% for e in today_entries %}
-                    <div class="border rounded px-3 py-2">
-                        <div class="fw-bold">
-                            {# 2026-10-13：节次用 PeriodDef 的显示名（period_number 只是行号，
-                               1=早读 → period_number=8 实为「第7节」），取不到才回落「第N节」 #}
-                            {{ period_labels.get(e.period_number) or ('第%d节' % e.period_number) }} · {{ e.subject or '—' }}
-                            {% if e.week_badge %}<span class="badge bg-warning text-dark ms-1">{{ e.week_badge }}</span>{% endif %}
-                        </div>
-                        <div class="text-muted small">{{ e.class_name or '' }} {{ e.room or '' }}</div>
+                {% if entries %}
+                {# 2026-10-21：原「今日课程」卡片并入本卡 —— 两张卡本就是同一份课表数据
+                   （今日＝今天的子集），重复；改为今天那一行置顶 + 强调色，今天没课也显式说明。 #}
+                {% set _today_wd = today.isoweekday() %}
+                {% set _day_order = [_today_wd] +
+                     ([1, 2, 3, 4, 5, 6, 7] | reject('equalto', _today_wd) | list) %}
+                {% for wd in _day_order %}
+                {% set day_items = entries | selectattr('weekday', 'equalto', wd) | list %}
+                {% if day_items or wd == _today_wd %}
+                <div class="d-flex mb-2 {{ 'today-row' if wd == _today_wd }}">
+                    <span class="badge {{ 'bg-primary' if wd == _today_wd else 'bg-light text-dark border' }} me-2 align-self-start"
+                          style="min-width:44px;">{{ '今天' if wd == _today_wd else weekday_names[wd - 1] }}</span>
+                    <div class="d-flex flex-wrap gap-1">
+                        {% if not day_items %}
+                        <span class="small text-muted align-self-center">今天没课</span>
+                        {% endif %}
+                        {% for e in day_items %}
+                        <span class="badge {{ 'bg-warning-subtle text-dark border border-warning' if e.entry_type != 'normal' else 'bg-white text-dark border' }} fw-normal">
+                            {{ period_labels.get(e.period_number) or ('第%d节' % e.period_number) }} {{ e.subject or '—' }} {{ e.class_name or '' }}{% if e.room %} · {{ e.room }}{% endif %}
+                            {% if e.week_badge %}<span class="text-warning-emphasis">{{ e.week_badge }}</span>{% endif %}
+                        </span>
+                        {% endfor %}
                     </div>
-                    {% endfor %}
                 </div>
+                {% endif %}
+                {% endfor %}
                 {% else %}
                 <div class="text-muted text-center py-4">
-                    <i class="bi bi-cup-hot" style="font-size:32px;"></i>
-                    <p class="mb-0 mt-2">今天暂无课程安排</p>
+                    <i class="bi bi-calendar-x" style="font-size:32px;"></i>
+                    {% if active_term %}
+                    <p class="mb-0 mt-2">本学期暂无您的课表数据</p>
+                    <p class="small mb-0">（教务排课发布后会自动展示在这里）</p>
+                    {% else %}
+                    <p class="mb-0 mt-2">尚未建立学期课表</p>
+                    <p class="small mb-0">（请联系教务创建学期并排课后自动展示）</p>
+                    {% endif %}
                 </div>
                 {% endif %}
             </div>
@@ -119,7 +148,7 @@
     </div>
 </div>
 
-{# 2026-10-13（v1.19.50.60）：待办与通知 #}
+{# 2026-10-13（v1.19.62.64）：待办与通知 #}
 <div class="row g-3 mb-3">
     <div class="col-12">
         <div class="card">
@@ -188,58 +217,8 @@
 </div>
 
 <div class="row g-3 mb-3">
-    <div class="col-lg-7">
-        <div class="card h-100">
-            <div class="card-header d-flex justify-content-between align-items-center">
-                <span>
-                    <i class="bi bi-calendar3"></i> 我的课表
-                    {% if active_term %}<span class="badge bg-light text-dark border ms-1">{{ active_term.name }}</span>{% endif %}
-                </span>
-                <div class="d-flex gap-1">
-                    <a href="{{ url_for('overview.grades_page') }}" class="btn btn-sm btn-outline-secondary">
-                        <i class="bi bi-graph-up"></i> 我的成绩
-                    </a>
-                    <a href="{{ url_for('workbench.my_schedule') }}" class="btn btn-sm btn-outline-primary">
-                        查看完整课表 <i class="bi bi-arrow-right"></i>
-                    </a>
-                </div>
-            </div>
-            <div class="card-body">
-                {% if entries %}
-                {% for wd in range(1, 8) %}
-                {% set day_items = entries | selectattr('weekday', 'equalto', wd) | list %}
-                {% if day_items %}
-                <div class="d-flex mb-2">
-                    <span class="badge {{ 'bg-primary' if wd == today.isoweekday() else 'bg-light text-dark border' }} me-2 align-self-start"
-                          style="min-width:44px;">{{ weekday_names[wd - 1] }}</span>
-                    <div class="d-flex flex-wrap gap-1">
-                        {% for e in day_items %}
-                        <span class="badge {{ 'bg-warning-subtle text-dark border border-warning' if e.entry_type != 'normal' else 'bg-white text-dark border' }} fw-normal">
-                            {{ period_labels.get(e.period_number) or ('第%d节' % e.period_number) }} {{ e.subject or '—' }} {{ e.class_name or '' }}{% if e.room %} · {{ e.room }}{% endif %}
-                            {% if e.week_badge %}<span class="text-warning-emphasis">{{ e.week_badge }}</span>{% endif %}
-                        </span>
-                        {% endfor %}
-                    </div>
-                </div>
-                {% endif %}
-                {% endfor %}
-                {% else %}
-                <div class="text-muted text-center py-4">
-                    <i class="bi bi-calendar-x" style="font-size:32px;"></i>
-                    {% if active_term %}
-                    <p class="mb-0 mt-2">本学期暂无您的课表数据</p>
-                    <p class="small mb-0">（教务排课发布后会自动展示在这里）</p>
-                    {% else %}
-                    <p class="mb-0 mt-2">尚未建立学期课表</p>
-                    <p class="small mb-0">（请联系教务创建学期并排课后自动展示）</p>
-                    {% endif %}
-                </div>
-                {% endif %}
-            </div>
-        </div>
-    </div>
 
-    <div class="col-lg-5">
+    <div class="col-lg-12">
         <div class="card h-100">
             <div class="card-header"><i class="bi bi-clipboard-check"></i> 班主任工作记录</div>
             <div class="card-body text-muted text-center py-4">
@@ -262,7 +241,7 @@
     </div>
 </div>
 
-{# 2026-10-13（v1.19.50.60）：班主任 —— 工作台直接看本班班级课表（带多个班时用页签切换） #}
+{# 2026-10-13（v1.19.62.64）：班主任 —— 工作台直接看本班班级课表（带多个班时用页签切换） #}
 {% if is_head %}
 <div class="row g-3 mb-3">
     <div class="col-12">
@@ -349,7 +328,7 @@
     </div>
 </div>
 
-<!-- 调课（v1.19.50.60：入口 + 待我确认 + 我的申请，都在工作台完成） -->
+<!-- 调课（v1.19.62.64：入口 + 待我确认 + 我的申请，都在工作台完成） -->
 <div class="card mt-3 mb-3">
     <div class="card-header d-flex justify-content-between align-items-center">
         <span><i class="bi bi-arrow-left-right"></i> 调课
@@ -589,7 +568,7 @@
 </script>
 {% endif %}
 
-{# v1.19.50.60：工作台内直接确认 / 拒绝同事发起的换课、代课 #}
+{# v1.19.62.64：工作台内直接确认 / 拒绝同事发起的换课、代课 #}
 <script>
 (function () {
     var respondUrl = {{ url_for('academic.swap_partner_respond', swap_id=0)|tojson }};

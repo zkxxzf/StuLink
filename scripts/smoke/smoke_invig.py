@@ -174,7 +174,13 @@ with app.test_client() as c:
     check('侧栏不再渲染分步骤圆点', 'efn-dot' not in ph and 'efn-steps' not in ph)
     check('侧栏不再渲染进度计数', '/7 环节' not in ph and 'efn-count' not in ph)
     check('页内页签无序号（分步骤显示已去掉）', '#t1">①' not in ph and '#t1">学生名单' in ph)
-    check('选科明细默认展开（collapse show）', 'collapse show' in ph)
+    # 2026-10-21 合并后审计修正：原断言查整页含 'collapse show'，命中的其实是
+    # base.html 侧栏「成绩分析」分组（v1.19.59.64 起该分组默认折叠 → 不再命中）。
+    # 考务页「选科明细」按 2026-10-14 用户口径本就是**默认折叠**（不白占一行），
+    # 因此改为精确定位 #statsDetail 断言默认折叠。
+    _sd = re.search(r'<div class="collapse[^"]*" id="statsDetail"', ph)
+    check('选科明细默认折叠（不白占一行）',
+          bool(_sd) and ' show' not in _sd.group(0))
     check('改容量实时刷新选科明细（refreshStats）', 'refreshStats' in ph)
     check('侧栏圆点同步脚本已移除', 'syncSidebarSteps' not in ph)
     # 2026-10-13 用户口径：⑤ 点「新增场次」不再给空白 yyyy/mm/dd —— 页面下发默认日期（本场考试日期）
@@ -398,7 +404,7 @@ with app.test_client() as c:
     check('环节⑥ 手动指派回避教师被拒', (r.get_json() or {}).get('ok') is False,
           str(r.get_json()))
     # 手动指定：派一个从未被编排的校外监考员 → 允许
-    # 2026-10-13 审计修复：v1.19.50.60 起手动指派与自动编排共用
+    # 2026-10-13 审计修复：v1.19.62.64 起手动指派与自动编排共用
     # 「一人一场次一考场」硬约束，而自动编排已把 12 格填满，
     # 已入池的老师（含校外陈老师）都已被排到某场某考场 —— 再派他们都会被拒
     # （这是产品的正确行为，不是缺陷）。

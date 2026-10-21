@@ -49,6 +49,10 @@ _MODELS = {
     'point_record': ('app.models.points', 'PointRecord'),
     'reward_punishment': ('app.models.morality', 'RewardPunishment'),
     'reward_attachment': ('app.models.morality', 'RewardPunishmentAttachment'),
+    # 2026-10-22 逐路由审计：画像评语 / 事件删除此前直接 delete 且未登记，
+    # 误删不可恢复 —— 删前归档（fail-closed）+ 登记 kind 后可从回收站恢复。
+    'portrait_comment': ('app.models.portrait', 'PortraitComment'),
+    'portrait_event': ('app.models.portrait', 'PortraitEvent'),
 }
 
 
