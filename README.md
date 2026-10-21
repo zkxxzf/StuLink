@@ -3,7 +3,7 @@
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
 [![Python](https://img.shields.io/badge/python-3.11+-green.svg)](https://python.org)
 [![Flask](https://img.shields.io/badge/flask-3.x-lightgrey.svg)](https://flask.palletsprojects.com/)
-[![Version](https://img.shields.io/badge/version-1.19.50.54-orange.svg)](https://gitee.com/zkxxzf/StuLink)
+[![Version](https://img.shields.io/badge/version-1.19.50.55-orange.svg)](https://gitee.com/zkxxzf/StuLink)
 
 面向中学的综合学生管理平台，采用 **双站点 + 多模块 + 一模块一库** 的故障隔离架构：
 
@@ -195,7 +195,7 @@
 
 - **后端**：Python 3.11+ / Flask 3.x / Flask-Login / Flask-SQLAlchemy 2.x（多库 binds）/ Waitress / openpyxl / reportlab / python-pptx
 - **前端**：Bootstrap 5 / jQuery / Jinja2 / ECharts（成绩可视化）/ Chart.js（画像）
-- **安全（v1.19.50.54）**：
+- **安全（v1.19.50.55）**：
   - **身份**：管理员首启随机口令 + 强制改密 · 一次性初始口令展示 · 会话口令摘要（改密即踢）· IP + 账号双维限流与锁定（锁键含来源，防账号被恶意锁定）
   - **数据**：AES 身份证与 AI Key 加密 · CSRF 8h 时效 · 二维权限（功能三档 × 数据范围）· 白名单式教师候选过滤
   - **传输**：`url_guard` 出站白名单 + DNS 解析 + 禁 302 跟随 · CSP（Report-Only 起步，可切 enforce）· HTTPS Cookie Secure
@@ -216,7 +216,7 @@ python run.py --dev
 cd alumni_app && python run.py
 
 # Docker 部署（三个容器：主应用 + 往届查询 + MCP 服务）
-docker build -t stulink:v1.19.50.54 .
+docker build -t stulink:v1.19.50.55 .
 docker build -t stulink-alumni:v1.0.0 ./alumni_app
 docker build -f Dockerfile.mcp -t stulink-mcp:v1.0.0 .
 docker-compose up -d
@@ -301,6 +301,7 @@ StuLink/
 
 | 版本 | 日期 | 亮点 |
 |---|---|---|
+| **1.19.50.55** | 2026-10-21 | **全站教师下拉统一「拼音排序 + 可搜索」**：新增全局 `js/teacher_picker.js`（随 base.html 加载）——自动识别页面里「选项大多是教师姓名」的 `<select>`（≥60% 命中教师目录），升级为可输入浮层：按**姓氏首字母**排（拼音全拼升序），支持**姓名 / 全拼 / 每字首字母**三路匹配；动态渲染的表格由 MutationObserver 自动接管，也可 `data-teacher-pick="1"` 强制、`data-no-pick="1"` 排除。浮层定位改为**先渲染再量高**：下方放不下且上方更宽裕时**向上弹出**，高度按可视区裁剪、列表内部滚动，页面底部不再被截断。新增 `/grades/api/teacher-options`（姓名 + 拼音码，登录可读），考务④⑥ 改用同一浮层 |
 | **1.19.50.54** | 2026-10-21 | **修考务④ 任课表一直转圈**：合并进来的模板 `renderAffairTeachers()` 少一个 `});`（`d.classes.forEach` 未闭合），整个内联脚本语法错误 → 事件绑定与 `fetch` 都没执行，页面停在加载圈；同时补 `.catch()`，请求/JSON 解析失败时直接把原因显示出来（之前无 catch，失败也只会一直转） |
 | **1.19.50.53** | 2026-10-21 | **合并 sakaay v1.19.50.52 + 审计修复**：考务④ 班主任三列兼容历史别名（`正班主任/副班主任1/副班主任2` → `正班/副班1/副班2`，A45 改名去重）、列扩为「班主任 3 + 文化科 9 + 综合组 5（去通用技术）」并两行表头分组；选人换成**可输入浮层**（姓名 / 全拼 / 每字首字母，④ 与 ⑥ 共用）；考务④ 改为**覆盖成绩分析**的任课与班主任（改完即清分析缓存）。合并后修复两处：①④ 保存改为只提交改动过的格（原来整表提交会把「有姓名无账号」的历史教师清空）；②班主任位次不再按 `is_active` 过滤（正班账号停用不会让副班1顶到正班列） |
 | **1.19.50.52** | 2026-10-21 | **考务环节④ 任课表恢复「班主任」三列（正班 / 副班1 / 副班2，在学科左侧）**：班主任与任课教师同级别、负责本班总分，按位次**分三列**而不是把三个人挤在一格；带入/重新带入按班主任名单逐位写入（顺序＝登记先后，与教师安排表 正班→副班1→副班2 一致），单格可改派、无账号时只显示姓名（不再出现「历史，无账号」）；保存改为只提交改动过的格；班主任进监考教师池但不参与同科回避；新增迁移 **A44**：把历史批次的合并行按原顺序拆成三行（优先本场考试快照），只补不覆盖 |

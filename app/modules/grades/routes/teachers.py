@@ -1,4 +1,4 @@
-# StuLink v1.19.50.54 2026-10-10
+# StuLink v1.19.50.55 2026-10-10
 # 任课教师映射：矩阵维护（按年级）+ 教师安排表批量导入 + 自动开户
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 import io
@@ -47,13 +47,13 @@ def _grade_classes(grade):
 
 
 def _teacher_roles_filter():
-    """v1.19.50.54：教师候选的合法角色集合（明确排除 admin）"""
+    """v1.19.50.55：教师候选的合法角色集合（明确排除 admin）"""
     return ('teacher', 'homeroom_teacher', 'grade_leader',
             'dorm_manager', 'school_viewer', 'staff')
 
 
 def _teacher_candidates():
-    """v1.19.50.54：所有启用且属于教师类角色的账号 id 集合"""
+    """v1.19.50.55：所有启用且属于教师类角色的账号 id 集合"""
     rows = db.session.query(User.id).filter(
         User.role.in_(_teacher_roles_filter()),
         User.is_active.is_(True)
@@ -64,10 +64,10 @@ def _teacher_candidates():
 def _matrix_users(grade):
     """下拉候选教师：启用 + 教师类角色（明确排除 admin）。
 
-    v1.19.50.54：历史逻辑“已绑定 user_id 即可入选”会导致 admin 错配后一直显示在下拉里，
+    v1.19.50.55：历史逻辑“已绑定 user_id 即可入选”会导致 admin 错配后一直显示在下拉里，
     现改为仅按角色过滤；已绑定但非教师类的行依旧可在矩阵中显示历史名字（由 _build_matrix 侧），
     但下拉中不再提供 admin 作为新选择。
-    v1.19.50.54：候选**按老师名字首字母排序**（拼音 A→Z；无姓名时用账号拼音兜底）。"""
+    v1.19.50.55：候选**按老师名字首字母排序**（拼音 A→Z；无姓名时用账号拼音兜底）。"""
     valid = _teacher_candidates()
     if not valid:
         return []
@@ -80,7 +80,7 @@ def _matrix_users(grade):
 def _name_sort_key(name, username):
     """姓名 → 拼音排序键：(首字母, 全拼, 姓名)。
 
-    v1.19.50.54：用 pypinyin 把「付冰洋」排到 f、把「何楠」排到 h；
+    v1.19.50.55：用 pypinyin 把「付冰洋」排到 f、把「何楠」排到 h；
     没有姓名（real_name 为空）的账号退化为用账号（pinyin）排序，仍保证稳定有序。"""
     py = user_account.pinyin_of(name) if name else None
     py = (py or '').lower() or (username or '').lower() or (name or '')
@@ -176,7 +176,7 @@ def teachers_get():
 
 
 def _json_body():
-    """请求体 → dict（v1.19.50.54 兼容两种提交方式）。
+    """请求体 → dict（v1.19.50.55 兼容两种提交方式）。
 
     背景：前端历史上用 `$.post(url, JSON.stringify({...}))`，jQuery 会以
     `application/x-www-form-urlencoded` 发送**JSON 文本**，而 Flask 的
@@ -200,6 +200,28 @@ def _json_body():
             return {}
         return data if isinstance(data, dict) else {}
     return {}
+
+
+@bp.route('/api/teacher-options')
+@login_required
+def teacher_options():
+    """教师目录（姓名 + 拼音码）—— 前端「教师下拉」统一用。
+
+    2026-10-21 用户口径：所有页面凡是选教师的下拉，都要
+    ①按姓氏首字母排序；②支持输入 姓名 / 全拼 / 每字首字母 搜索。
+    拼音码在服务端算（pypinyin），前端只做字符串匹配，不引第三方 JS。
+    只返回姓名/账号/拼音码，不含手机号等敏感字段；登录即可读。
+    """
+    users = User.query.filter(
+        User.is_active.is_(True),
+        User.role.in_(_teacher_roles_filter())).all()
+    out = []
+    for u in users:
+        py, ini = user_account.pinyin_codes(u.real_name or '')
+        out.append({'id': u.id, 'name': u.real_name or '',
+                    'username': u.username or '', 'py': py, 'ini': ini})
+    out.sort(key=lambda x: _name_sort_key(x['name'], x['username']))
+    return jsonify(success=True, data={'users': out})
 
 
 @bp.route('/api/teachers/save', methods=['POST'])
