@@ -1,4 +1,4 @@
-/* StuLink v1.19.53.64 2026-10-21
+/* StuLink v1.19.54.64 2026-10-21
    划线分层矩阵（从 grades/bands.html 抽出，供「划线分层」页与「数据导入」页共用）。
    依赖 jQuery 与 DOM 元素 #bandApp / #bandTable；只读/可编辑由 data-can-edit 决定。 */
 $(function(){
@@ -219,7 +219,7 @@ $(function(){
             // （N = 参考人数 × 比例，估算值，帮助先对上模板再填数值）
             var $name = $('<div>');
             if (canEdit){
-                $name.append($('<input class="form-control form-control-sm q-name" style="min-width:120px">')
+                $name.append($('<input class="form-control form-control-sm q-name">')
                     .val(l.name).attr('data-ratio', (l.ratio == null ? '' : l.ratio)));
             } else {
                 $name.append($('<span class="fw-semibold">').text(l.name));   // 只读：层名出文本
