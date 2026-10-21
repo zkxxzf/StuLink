@@ -1,0 +1,11 @@
+{# 限时练「学生成绩 / 学生分析」的局部刷新容器（2026-10-21）。
+   切班级、翻页、改每页条数只换这一块（static/js/timed_pane.js），
+   不再整页重载：避免每次点班级都重新渲染侧栏/外层框架、闪白、丢滚动位置。
+   路由带 ?partial=1 时只渲染本模板（不套 base.html）。 #}
+<div id="timedPane">
+{% if tab == 'trends' %}
+    {% include 'grades/timed/_trends.html' %}
+{% else %}
+    {% include 'grades/timed/_students.html' %}
+{% endif %}
+</div>

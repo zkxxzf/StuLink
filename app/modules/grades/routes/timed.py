@@ -121,6 +121,9 @@ def timed_new():
     if request.method == 'POST':
         grade = (request.form.get('grade') or '').strip()
         exam_date = _safe_date(request.form.get('exam_date'))
+        # 名称由系统统一生成（2026-10-21 用户口径）：页面不再提供手填框，
+        # 这里的 name 只是临时值，创建后立刻由 renumber_grade 重排成
+        # `2025级20260905限时练No.17`
         name = (request.form.get('name') or '').strip() or _auto_name(
             grade, exam_date)
         grade_semester = _semester_from_form(request.form.get('grade_semester'))
@@ -141,9 +144,13 @@ def timed_new():
                          operator_id=current_user.id)
         exam.template_id = timed_service.ensure_builtin_templates().id
         db.session.add(exam)
+        db.session.flush()
+        # 与导入入口同口径（2026-10-21）：新建后立刻按届内日期重排成
+        # `2025级20260905限时练No.17`，未导入的场次也不会停在无序号的名字上
+        timed_service.renumber_grade(grade)
         db.session.commit()
         log_operation(current_user, '新建', '限时练', exam.id,
-                      f'{grade} {name}', module='grades')
+                      exam.name, module='grades')
         flash('限时练已创建，先导入一科成绩', 'success')
         return redirect(url_for('grades.timed_detail', tid=exam.id,
                                 tab='import'))
@@ -238,8 +245,12 @@ def timed_detail(tid):
         return redirect(url_for('grades.timed_detail', tid=exam.id))
     subject = (request.args.get('subject') or '').strip()
     class_name = (request.args.get('class') or '').strip()
-    return render_template('grades/timed/detail.html',
-                           **_detail_ctx(exam, tab, subject, class_name))
+    ctx = _detail_ctx(exam, tab, subject, class_name)
+    # 2026-10-21：学生成绩 / 学生分析 切班、翻页走局部刷新（只回 #timedPane），
+    # 不再整页重载；其余页签照常整页渲染。
+    if tab in ('students', 'trends') and request.args.get('partial') == '1':
+        return render_template('grades/timed/_pane.html', **ctx)
+    return render_template('grades/timed/detail.html', **ctx)
 
 
 @bp.route('/timed/<int:tid>/student/<student_no>')
@@ -250,6 +261,7 @@ def timed_student_detail(tid, student_no):
     exam = timed_service.assert_visible(tid)
     try:
         data = timed_analysis.student_detail(exam, (student_no or '').strip(),
+                                             request.args.get('page'),
                                              user=current_user)
     except PermissionError as e:
         # 越权（他班学生）不报 500，退回成绩总览并提示

@@ -2,9 +2,13 @@
 # 四大分析模块数据组装（供 /api/analysis/* 与 Excel 导出共用）
 # 表/图编号与设计文档 2.3 对应：A1(年级) A2(班级) A3(学科) A4(任课教师)
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
+import re
+
 from app.models.grades import SUBJECTS, TOTAL_SUBJECT
 from app.modules.grades.services import stats_service as st
 from app.modules.grades.services import pivot_service as pv
+from app.modules.grades.services.class_order import (
+    order_key, type_map_of, type_rank)
 from app.modules.grades.utils import delete_cache_prefix
 
 
@@ -88,6 +92,16 @@ def _fmt_pct(n, d):
 
 # 原「及格率/优秀率」两列在本场划线里对应的层名（统一实现见 stats_service.rate_names_for）
 _rate_names_for = st.rate_names_for
+
+
+def _norm_cls(value):
+    """班级名归一化：'高三01班' / '1班' → '01班'（与限时练导入同一口径），
+    防止成绩里的班名带年级前缀时查不到任课教师。"""
+    s = (value or '').strip().replace(' ', '')
+    m = re.search(r'(\d{1,2})\s*班?\s*$', s)
+    if m:
+        return '%02d班' % int(m.group(1))
+    return s
 
 
 def _short_layer(name):
@@ -612,6 +626,15 @@ def subject_tab(exam_id, subject, direction='', selection='', denom='ref'):
     n_label = '在籍人数' if data.denom == st.DENOM_ENROLLED else '参考人数'
     tables, charts = {}, {}
     scores_map = {}   # class -> scores
+    # 任课教师：本场考试当时的快照（缺则回落当前关联）；班名归一化兜底
+    from app.modules.grades.services import teacher_snapshot_service as _tss
+    _tmap = {}
+    for (_c, _s), _nm in _tss.name_map_of(exam.id, grade=exam.grade).items():
+        _tmap[(_c, _s)] = _nm
+        _tmap[(_norm_cls(_c), _s)] = _nm
+
+    def _teacher_of(c, s):
+        return _tmap.get((c, s), '') or _tmap.get((_norm_cls(c), s), '')
     grd_scores = st.ref_scores(data, subject)
     grd_n = st.base_count(data, subject)
     grd_avg = st.avg_by_denom(grd_scores, grd_n)
@@ -656,6 +679,8 @@ def subject_tab(exam_id, subject, direction='', selection='', denom='ref'):
         cls_avg = st.avg_by_denom(cls_s, cls_n)
         row = {
             'subject': subject, 'class_name': cls, 'count': cls_n,
+            # 任课教师取本场考试当时的快照（与汇报区/对比页同一机制，缺则回落当前关联）
+            'teacher': _teacher_of(cls, subject),
             'avg': cls_avg,
             'pass_rate': _rate_of(online, rate_pass, cls_n),
             'good_rate': _rate_of(online, rate_good, cls_n),
@@ -669,31 +694,40 @@ def subject_tab(exam_id, subject, direction='', selection='', denom='ref'):
                 sn = od.get('single_n', 0)
                 dn = od.get('dual_n', 0)
                 row['lo_%d_n' % i] = sn
+                row['lo_%d_r' % i] = _fmt_pct(sn, cls_n)
                 row['lo_%d_dn' % i] = dn
+                row['lo_%d_dr' % i] = _fmt_pct(dn, cls_n)
         t1.append(row)
-    t1.sort(key=lambda r: -(r['avg'] or 0))
+    # 2026-10-21 用户口径：同班型班级相邻（卓越班 → 强基班 → …），
+    # 组内仍按均分降序（保留「组内排名」的可读性）；未登记班型排最后。
+    _ct = type_map_of(data)
+    t1.sort(key=lambda r: (type_rank(_ct.get(r['class_name'], '')),
+                           -(r['avg'] or 0), r['class_name']))
     # 2026-10-19 修复：原第一列「科目」恒为当前学科（整列重复），已删除；
     # 班级直接作为首列，图表横轴也随之取班级（原横轴 12 个标签全是「语文」）。
-    cmp_cols = ([{'key': 'class_name', 'label': '班级', 'type': 'text'},
-                 {'key': 'count', 'label': n_label.replace('参考', ''),
-                  'type': 'int'},
-                 {'key': 'avg', 'label': '均分', 'type': 'num'}]
-                + _rate_columns(rate_pass, rate_good)
-                + [{'key': 'max', 'label': '最高', 'type': 'num'},
-                   {'key': 'low_count', 'label': '低分', 'type': 'int'},
-                   {'key': 'diff', 'label': '均分差', 'type': 'num'}])
+    # 2026-10-21 用户口径：列顺序 = 班级 → 任课教师 → 人数 →
+    # 各层「上线数 / 上线率 / 双上线数 / 双上线率」→ 均分等其余指标。
+    # 原来的「X率%」两列（=最低层/最高层的单科上线率）与层列重复，已去掉。
+    cmp_cols = [{'key': 'class_name', 'label': '班级', 'type': 'text'},
+                {'key': 'teacher', 'label': '任课教师', 'type': 'text'},
+                {'key': 'count', 'label': n_label.replace('参考', ''),
+                 'type': 'int'}]
     if layer_names:
-        # 2026-10-19 用户口径：删「X线人数」（落层人数，互斥）——
-        # 最高层的落层人数与「X线单上」完全相等，低层又易被误读为上线人数。
-        # 只留累计口径的「上线 / 双上」两列；双上率=双上÷人数，不再单列。
         for i, name in enumerate(layer_names):
             _sn = _short_layer(name)
             cmp_cols += [
                 {'key': 'lo_%d_n' % i, 'label': f'{_sn}上线', 'type': 'int'},
-                {'key': 'lo_%d_dn' % i, 'label': f'{_sn}双上', 'type': 'int'},
+                {'key': 'lo_%d_r' % i, 'label': f'{_sn}上线率%', 'type': 'num'},
+                {'key': 'lo_%d_dn' % i, 'label': f'{_sn}双上线', 'type': 'int'},
+                {'key': 'lo_%d_dr' % i, 'label': f'{_sn}双上线率%', 'type': 'num'},
             ]
-    _chart_keys = ['avg'] + [c['key'] for c in cmp_cols
-                             if c['key'] in ('pass_rate', 'good_rate')]
+    cmp_cols += [{'key': 'avg', 'label': '均分', 'type': 'num'},
+                 {'key': 'max', 'label': '最高', 'type': 'num'},
+                 {'key': 'low_count', 'label': '低分', 'type': 'int'},
+                 {'key': 'diff', 'label': '均分差', 'type': 'num'}]
+    _rate_keys = [c['key'] for c in cmp_cols
+                  if c['key'].startswith('lo_') and c['key'].endswith('_r')]
+    _chart_keys = ['avg'] + _rate_keys[:3]
     tables['class_compare'] = {
         'title': f'{subject}学科各班对比表',
         'columns': cmp_cols,
@@ -858,9 +892,16 @@ def subject_tab(exam_id, subject, direction='', selection='', denom='ref'):
 
 
 def _heatmap(data, direction=None):
-    """科目 × 班级 平均分热力矩阵（direction 过滤：只显示该方向班级与该方向实际开考科目）"""
-    shown_classes = [c for c in data.classes
-                     if data.totals_of(class_name=c, direction=direction)]
+    """科目 × 班级 平均分热力矩阵（direction 过滤：只显示该方向班级与该方向实际开考科目）
+
+    横轴顺序（2026-10-21）：与其他按班级列出的表一致 —— 同班型相邻、组内班号升序
+    （热力图跨全部科目，无「组内均分」可比，故组内按班号而不是按均分）。
+    """
+    _ct = type_map_of(data)
+    shown_classes = sorted(
+        [c for c in data.classes
+         if data.totals_of(class_name=c, direction=direction)],
+        key=lambda c: order_key(c, _ct))
     values = []
     y_labels = []
     for sub in SUBJECTS:

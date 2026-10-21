@@ -116,6 +116,10 @@ backups/
 # QA 过程产物（勿入库）：如 tests/qa_20261010/backup_before_delete 这类"删除前备份"副本目录
 tests
 
+# 浏览器油猴脚本（2026-10-21 用户要求：只在本机用，**不要上传到远端仓库**；
+# 自动更新地址走 dd.sakaay.com/flies/ 那一套）
+tools/userscript/
+
 # 误把 %VAR% 当字面路径（PowerShell 不展开 %VAR%）产生的 Windows 缓存目录（勿入库）
 %SystemDrive%/
 %SystemRoot%/

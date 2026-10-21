@@ -38,7 +38,8 @@ sys.path.insert(0, str(ROOT / 'scripts'))       # _db_backup / _mig_log
 from app import create_app                                    # noqa: E402
 from app.extensions import db                                 # noqa: E402
 from app.models import User                                   # noqa: E402
-from app.models.grades import (AffairStudent, AffairTeacher,   # noqa: E402
+from app.models.grades import (AFFAIR_HEAD_SUBJECTS,           # noqa: E402
+                               AffairStudent, AffairTeacher,
                                ExamAffair, ExamTeacherLink)
 from app.modules.grades.services.teacher_snapshot_service import (  # noqa: E402
     HEAD_SUBJECT, HOMEROOM_POSITIONS, current_homeroom_positions)
@@ -84,7 +85,8 @@ def main():
             ids = name_to_uid.get(name) or []
             return ids[0] if len(ids) == 1 else None
 
-        n_split = n_fill = n_del = 0
+        n_split = n_fill = n_del = n_rename = 0
+        legacy_names = dict(zip(AFFAIR_HEAD_SUBJECTS, HOMEROOM_POSITIONS))
         for a in affairs:
             classes = _classes_of(a)
             if not classes:
@@ -92,6 +94,23 @@ def main():
             rows = AffairTeacher.query.filter_by(affair_id=a.id).all()
             have = {(r.class_name, r.subject) for r in rows}
             touched = []
+
+            # 0) 旧伪科目名（正班主任/副班主任1/副班主任2）→ 新三列名
+            #    2026-10-21 合并 master：两套实现都写过库，这里统一成
+            #    正班 / 副班1 / 副班2；同名位次已存在时删掉旧行，不重复
+            for r in [x for x in rows if x.subject in legacy_names]:
+                pos = legacy_names[r.subject]
+                if (r.class_name, pos) in have:
+                    if args.apply:
+                        db.session.delete(r)
+                    have.discard((r.class_name, r.subject))
+                    n_del += 1
+                    continue
+                have.discard((r.class_name, r.subject))
+                have.add((r.class_name, pos))
+                if args.apply:
+                    r.subject = pos
+                n_rename += 1
 
             # 1) 拆分旧的合并列「班主任」
             for r in [x for x in rows if x.subject == HEAD_SUBJECT]:
@@ -152,7 +171,8 @@ def main():
                 for cls, pos, nm, uid in touched:
                     print(f'  + {cls:6s} {pos:4s} {nm}（uid={uid}）')
 
-        print(f'\n拆分合并行 {n_del} 条 / 新增 {n_split + n_fill} 行')
+        print(f'\n旧名改新 {n_rename} 行 / 拆分合并行 {n_del} 条 /'
+              f' 新增 {n_split + n_fill} 行')
         if not args.apply:
             print('[dry-run] 未写库；确认后加 --apply')
             return
@@ -164,8 +184,8 @@ def main():
         try:
             import _mig_log
             _mig_log.record(Path(__file__).name,
-                            note=f'考务环节④ 班主任拆三列：拆 {n_del} / 补 '
-                                 f'{n_split + n_fill} 行')
+                            note=f'考务环节④ 班主任拆三列：改名 {n_rename} /'
+                                 f' 拆 {n_del} / 补 {n_split + n_fill} 行')
         except Exception as exc:                # noqa: BLE001
             print(f'[WARN] 迁移登记失败：{exc}')
 

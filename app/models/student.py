@@ -33,6 +33,9 @@ class Student(db.Model):
     # 学生档案上的**固定**考号（与每场考试可能重排的 exam_scores.exam_no 不同），
     # 用于把智学网侧的名单/成绩按考号回挂到本系统（不必再靠姓名 + 班级猜）。
     zhixue_no = db.Column(db.String(20), index=True)
+    # 2026-10-21：智学网**账号**（10 位，如 4159474334）。准考证号每场考试
+    # 会重排（同一届 47637703 → 47642671），账号是稳定的，导入时两个都试。
+    zhixue_account = db.Column(db.String(20), index=True)
     grade = db.Column(db.String(10), nullable=False)     # 2025级
     class_name = db.Column(db.String(10), nullable=False) # 01班
     subject_selection = db.Column(db.String(20))  # 史政地

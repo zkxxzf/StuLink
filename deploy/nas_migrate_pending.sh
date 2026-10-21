@@ -158,7 +158,9 @@ run_mig scripts/migrate/backfill_zhixue_no_by_grade_20261020.py --apply  # 系�
 run_mig scripts/migrate/migrate_timed_db_20261020.py --apply          # 成绩：grades.db → timed.db
 # 2026-10-20：限时练场次名统一「2024级 No.N」（幂等；年级学期只作列表标签，不进名字）
 run_mig scripts/migrate/migrate_timed_rename_20261020.py --apply      # 限时练：timed_exams.name
-# 2026-10-21：考务环节④ 任课表恢复「班主任」列（历史批次只补不覆盖；优先用本场考试快照）
+# 2026-10-21：场次名改为「2025级20260905限时练No.17」（届+8位日期+限时练+序号；须在 A43 之后）
+run_mig scripts/migrate/migrate_timed_rename_format_20261021.py --apply  # 限时练：timed_exams.name
+# 2026-10-21（A45）：考务环节④ 任课表恢复「班主任」列（历史批次只补不覆盖；优先用本场考试快照）
 run_mig scripts/migrate/backfill_affair_headteacher_20261021.py --apply  # 考务：affair_teachers 补班主任行
 # ── 数据 / 权限类（幂等）──────────────────────────────────────────────────
 # 2026-10-14 第三轮审计（CONS3-02）：多身份改造的两个脚本原先**完全未登记**（只在

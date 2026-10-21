@@ -81,7 +81,7 @@ def timed_import_confirm(tid):
         exam.status = 'imported'
         exam.import_draft = None
         exam.import_token = None
-        # 与脚本导入（import_to_timed）同口径：届内按日期重排成「2026级 No.N」
+        # 与脚本导入同口径：届内按日期重排成「2026级20260918限时练No.N」
         timed_service.renumber_grade(exam.grade)
         db.session.commit()
     except Exception as e:                              # noqa: BLE001

@@ -107,6 +107,16 @@
         <a href="{{ url_for('grades.bands_page', exam_id=exam.id) }}" class="btn btn-sm btn-outline-info">
             <i class="bi bi-bar-chart"></i> 划线分层
         </a>
+        {# 2026-10-21 用户要求：成绩单缺少导出入口。导出与页面同口径
+           （班级/方向/排序一起带走，数据范围由服务端按账号收敛，不受当前页限制） #}
+        <a class="btn btn-sm btn-outline-success"
+           href="{{ url_for('grades.exam_scores_export', exam_id=exam.id,
+                            cls=(cur_class or none), dir=(cur_dir or none),
+                            sort=(cur_sort or none),
+                            order=(cur_order if cur_sort else none)) }}"
+           title="按当前筛选与排序导出全部学生成绩（Excel）">
+            <i class="bi bi-file-earmark-excel"></i> 导出数据
+        </a>
         {% if current_user.has_perm('grades.edit') %}
         <button class="btn btn-sm btn-outline-danger" data-bs-toggle="modal" data-bs-target="#delModal">
             <i class="bi bi-trash"></i> 删除考试

@@ -13,13 +13,16 @@
 #  - 全科（高一未分科）：所有班方向为空 → 单组，只出「年级」总计行；
 #  - 分科（物理/历史方向并存）：按方向分组的班级段 + 各方向「年级」小计行（其下按
 #    选科组合拆明细行）+ 末尾「年级」总计行（跨组合 → 不给均分，只给人数与上线率）；
-#  - 行按「班级 × 选科组合」拆（2026-10-16）：混组合班 = 班级合计行 + 各组合明细行。
+#  - 行按「班级 × 选科组合」拆（2026-10-16）：混组合班 = 班级合计行 + 各组合明细行；
+#  - 班级行序（2026-10-21）：同班型相邻（卓越班 → 强基班 → …）、组内班号升序，
+#    统一由 class_order.teaching_classes 决定（与年级分析 / 汇总打印同一口径）。
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
-from app.models import ClassProfile, Student
+from app.models import Student
 from app.models.grades import SUBJECTS, TOTAL_SUBJECT, grade_level_label
 from app.modules.grades.services import report_service as rs
 from app.modules.grades.services import stats_service as st
-from app.modules.grades.utils import numeric_classes
+from app.modules.grades.services.class_order import (
+    teaching_classes, type_map_of)
 from app.extensions import db
 
 
@@ -275,20 +278,12 @@ def global_compare_report(exam_id, direction=''):
     # 供每班每科「成绩下方」展示「这科当时谁教的」——与班主任同一套快照机制
     teachers = _tss.name_map_of(data.exam.id, grade=data.exam.grade)
 
-    # 班型快照优先、当前设置为回落（与 trimmed_nos 同口径）
-    snap_ct, live_ct = {}, {}
-    for r in data.total_rows:
-        cls = r.class_name or '—'
-        if cls not in snap_ct and getattr(r, 'class_type', None):
-            snap_ct[cls] = r.class_type
-    try:
-        for p in ClassProfile.query.filter_by(grade=data.exam.grade).all():
-            live_ct[p.class_name] = p.class_type or ''
-    except Exception as _e:  # noqa: BLE001  模型/库缺失时属性列留空，不阻断报表
-        logger.warning('global_compare_service.py::global_compare_report 异常（已降级处理）: %s', _e)
+    # 班型快照优先、当前设置为回落（与 trimmed_nos 同口径）；
+    # 同一份映射还决定班级行序（2026-10-21 用户口径：同班型班级相邻）
+    ct_map = type_map_of(data)
 
-    # 行集合：数字班（过滤 不分班/离校 等非教学班），保持班号顺序
-    classes = numeric_classes(data.classes)
+    # 行集合：教学班（过滤 不分班/离校 等），按班型分组、组内班号升序
+    classes = teaching_classes(data)
     # 2026-10-16 第九轮审计（PERF-P01）：班级→方向原先被 all_dirs / by_dir / class_rows
     # 三处各全表扫一遍（O(班数×总行数)，40 班×2100 人 ≈ 25 万次迭代），改为一次预算
     dir_of = {cls: _row_dir(data, cls) for cls in classes}
@@ -315,7 +310,7 @@ def global_compare_report(exam_id, direction=''):
 
     def trim_of(cls):
         """该班去差名额：班型快照优先、当前设置为回落（与 rs.trimmed_nos 同口径）。"""
-        ct = snap_ct.get(cls) or live_ct.get(cls, '')
+        ct = ct_map.get(cls, '')
         return rs.TRIM_RULES.get(ct, rs.DEFAULT_TRIM)
 
     def _one_row(cls, d, rows, trim_set=None, enrolled=None):
@@ -343,7 +338,7 @@ def global_compare_report(exam_id, direction=''):
             'trim_count': max(0, ref - trims),  # 去差后人数
             'trim_n': trims,                  # 实际剔除人数（页面可做提示）
             'direction': d,
-            'class_type': snap_ct.get(cls) or live_ct.get(cls, ''),
+            'class_type': ct_map.get(cls, ''),
             'headteacher': ht.get((data.exam.grade, cls), ''),
             'selections': _selection_stats(rows),
             'cells': cells,
