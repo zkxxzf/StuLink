@@ -1,0 +1,103 @@
+{# StuLink v1.19.50.63 2026-10-21
+   划线分层矩阵（「划线分层」页与「数据导入」页共用）。
+
+   上下文：exam / total_count / can_edit / directions / dir_subjects /
+           combo_subjects / sel_meta
+   可选：simple=True → 只出表格（无卡片外壳、无编辑控件、强制只读），
+         供数据导入页顶部内嵌；默认 False = 划线分层页完整形态。
+
+   脚本：static/js/bands_matrix.js（依赖 jQuery；DOM 就绪后自动渲染 #bandTable）。 #}
+{% set _simple = simple|default(false) %}
+{% set ro = ' d-none' if not can_edit else '' %}
+<div class="{{ '' if _simple else 'card' }}" id="bandApp"
+     data-exam-id="{{ exam.id }}"
+     data-total-count="{{ total_count }}"
+     data-can-edit="{{ 1 if can_edit and not _simple else 0 }}"
+     data-dirs='{{ directions|tojson }}'
+     data-dir-subjects='{{ dir_subjects|tojson }}'
+     data-combo-subjects='{{ combo_subjects|tojson }}'
+     data-sel-meta='{{ sel_meta|tojson }}'>
+    <div class="{{ 'p-2' if _simple else 'card-body' }}">
+        {% if not _simple %}
+        <div class="row g-2 align-items-center mb-3">
+            <div class="col-auto{{ ro }}">
+                <label class="form-label mb-0 me-1">下界方式</label>
+                <select id="qMode" class="form-select form-select-sm d-inline-block w-auto">
+                    <option value="score">固定分数</option>
+                    <option value="ratio">人数比例%</option>
+                    <option value="rank">人数（名次）</option>
+                </select>
+            </div>
+            {# 2026-10-15 用户口径：改「列级开关」—— 每列顶部勾「按组合」就按组合分行填，
+               不勾就是该科按方向一个标准（不再是整表切维度） #}
+            <div class="col-auto{{ ro }}">
+                <label class="form-label mb-0 me-1">录入形态</label>
+                <select id="qScope" class="form-select form-select-sm d-inline-block w-auto">
+                    <option value="per_subject">分科（各科分别填）</option>
+                    <option value="all">全科统一（一套值套所有科）</option>
+                </select>
+            </div>
+            <div class="col-auto form-check{{ ro }}">
+                <input class="form-check-input" type="checkbox" id="qTotal" checked>
+                <label class="form-check-label small" for="qTotal">含总分</label>
+            </div>
+            <div class="col-auto{{ ro }}">
+                <label class="form-label mb-0 me-1">分层模板</label>
+                <select id="qTpl" class="form-select form-select-sm d-inline-block w-auto">
+                    <option value="">（不套用）</option>
+                </select>
+            </div>
+            <div class="col-auto{{ ro }}">
+                <button class="btn btn-sm btn-outline-secondary" id="qTplApply">套用层名</button>
+            </div>
+            <div class="col-auto{{ ro }}">
+                <a class="btn btn-sm btn-outline-dark" href="{{ url_for('grades.band_templates_page') }}" target="_blank">
+                    <i class="bi bi-collection"></i> 管理模板
+                </a>
+            </div>
+            {# 2026-10-13 用户口径：形如「历史类·物理」这种逐格永远是空的列默认收起，
+               按钮可随时展开；整场考试一列都没填（初次录入）时不收起 #}
+            <div class="col-auto">
+                <button class="btn btn-sm btn-outline-secondary" id="qEmpty" type="button">
+                    <i class="bi bi-eye"></i> 显示空列
+                </button>
+            </div>
+            <div class="col-auto ms-auto">
+                <span class="text-muted small" id="qTplBound"></span>
+            </div>
+        </div>
+        {% endif %}
+        <div class="table-responsive">
+            <table class="table g-table align-middle" id="bandTable">
+                <thead></thead>
+                <tbody></tbody>
+            </table>
+        </div>
+        {% if not _simple %}
+        <div class="d-flex gap-2">
+            <button class="btn btn-sm btn-outline-success{{ ro }}" id="qAdd"><i class="bi bi-plus"></i> 新增层</button>
+            <button class="btn btn-sm btn-primary{{ ro }}" id="qSave"><i class="bi bi-save"></i> 保存划线</button>
+            <span class="text-muted small align-self-center" id="qMsg"></span>
+        </div>
+        {% if can_edit %}
+        <div class="text-muted small mt-2">
+            行 = 层（第 1 层最高），列 = 科目（已分科时按物理类 / 历史类分组，两组可填不同的线）。
+            同一层内下界需从高到低；留空的格子不划线，也不会改动已有设置。
+            选「人数比例」(前 n%) 或「人数（名次）」(前 n 名) 时，按该组该科自己的排名换算成分数落库。
+            <br>
+            <strong>「按组合」开关（科目列头的小方框）</strong>：<strong>勾上</strong> → 该列按选科组合分行填写
+            （化学＝物化生 / 物化地 / 物化政 各一条；总分＝该方向各组合一条；每行一个输入框，
+            改完点「保存划线」即写入）；<strong>不勾</strong> → 该科按方向一个标准（一整格一条线）。
+            比例/名次按<strong>该组合自己的学生排名</strong>换算（如「化学 前 50%」＝该组合化学的第 50% 名次分数），
+            留空的组合不会改动已有线。
+        </div>
+        {% else %}
+        <div class="text-muted small mt-2">
+            行 = 层（第 1 层最高），列 = 科目；格内为该层的<b>下界分数</b>，
+            组合行（物化生 / 物化地 / 物化政 / 史地政）为该组合单独划的线。
+            划线由教务员 / 管理员 / 年级长维护，本页为只读查看。
+        </div>
+        {% endif %}
+        {% endif %}
+    </div>
+</div>

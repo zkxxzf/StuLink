@@ -29,14 +29,6 @@
         <span class="badge bg-secondary">本场未划线</span>
         {% endif %}
         <div class="ms-auto d-flex gap-2 align-items-center flex-wrap">
-            <button type="button" class="btn btn-sm btn-outline-primary" id="aiBandBtn">
-                <i class="bi bi-stars"></i> 用 AI 导入分数线
-            </button>
-            {% if can_view_bands %}
-            <a href="{{ url_for('grades.bands_page', exam_id=exam.id) }}" class="btn btn-sm btn-outline-info">
-                <i class="bi bi-table"></i> 进入划线分层
-            </a>
-            {% endif %}
             <button class="btn btn-sm btn-outline-secondary" type="button"
                     data-bs-toggle="collapse" data-bs-target="#bandOverviewBody"
                     aria-expanded="true" aria-controls="bandOverviewBody" title="展开 / 收起">
@@ -45,31 +37,10 @@
         </div>
     </div>
     <div class="collapse show" id="bandOverviewBody">
-        {% if band_rows %}
-        <div class="table-responsive" style="max-height:320px;">
-            <table class="table table-sm g-table align-middle mb-0">
-                <thead>
-                <tr><th>方向</th><th>选科</th><th>学科</th><th>层</th><th class="text-end">下界</th></tr>
-                </thead>
-                <tbody>
-                {% for b in band_rows %}
-                <tr>
-                    <td class="small text-muted text-nowrap">{{ b.direction }}</td>
-                    <td class="small text-muted text-nowrap">{{ b.selection }}</td>
-                    <td class="small">{{ b.subject }}</td>
-                    <td class="small">{{ b.name }}</td>
-                    <td class="small text-end fw-semibold">{{ b.value }}</td>
-                </tr>
-                {% endfor %}
-                </tbody>
-            </table>
-        </div>
-        {% else %}
-        <div class="card-body text-muted small py-3">
-            <i class="bi bi-info-circle"></i>
-            本场还没有划线：上传「各科分数线」表（科目 × 各条线）即可自动写入，也可进入划线分层手工填写。
-        </div>
-        {% endif %}
+        {# 2026-10-21 用户口径：直接展示「划线分层」页的矩阵表格（只读、无编辑控件）。 #}
+        {% with simple=True, can_edit=False %}
+        {% include 'grades/_bands_matrix.html' %}
+        {% endwith %}
     </div>
 </div>
 
@@ -526,20 +497,10 @@ $(function () {
         }
     });
 
-    // 划线分层状态条：把视线带到左侧 AI 面板（固定顶栏 56px，留 70px 余量）
-    $('#aiBandBtn').on('click', function () {
-        var el = document.getElementById('aiPanel');
-        if (el) {
-            var top = el.getBoundingClientRect().top
-                    + (window.pageYOffset || 0) - 70;
-            if (top < 0) { top = 0; }
-            window.scrollTo(0, top);
-        }
-        $('#aiMsg').removeClass('text-danger').addClass('text-success')
-            .text('请上传「各科分数线」表（科目 × 各条线），识别后会自动写入划线分层');
-    });
 });
 </script>
+{# 2026-10-21：顶部划线分层矩阵与「划线分层」页共用同一份渲染脚本 #}
+<script src="{{ su('js/bands_matrix.js') }}"></script>
 <script src="{{ su('js/ai_import.js') }}"></script>
 {% endif %}
 {% endblock %}
