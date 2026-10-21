@@ -671,16 +671,14 @@
                 <a class="efn-item {% if EN.section == 'import' %}active{% endif %}" data-nav="import"
                    href="{{ url_for('grades.exam_import', exam_id=EN.exam_id) }}">数据导入</a>
                 {% endif %}
-                {# v1.19.0 成绩分析：折叠组 —— 总览（全年级对比）/ 班级分析（班主任）/ 学科分析（任课教师）
-                   + 分析类子模块（临界生对比 / 自由表 / 汇报区）。
-                   入口按角色分层：总览与汇报区同门槛（管理员/校领导/年级长）；其余按 grades.view，
+                {# v1.19.0 成绩分析：折叠组 —— 总览（全年级对比）/ 详细分析（页内五个页签）
+                   + 分析类子模块（临界生对比 / 表彰名单 / AI 分析）。
+                   入口按角色分层：总览仅管理员/校领导/年级长；其余按 grades.view，
                    数据范围由后端 scope 过滤（班主任只见本班、任课教师只见任教班）。 #}
                 {# 2026-10-14 第四轮审计修复：身份判断统一走 active_group（当前身份），
                    原读旧单值 permission_group —— 切换多身份后与实际权限不一致。 #}
                 {% if current_user.has_perm('grades.view') or current_user.role == 'admin' or
                      (current_user.active_group and current_user.active_group.scope_type in ('school', 'grade')) %}
-                {% set _ana_ep = ('grades.index', 'grades.global_compare_page', 'grades.pivot_page',
-                                  'grades.report_page', 'grades.exam_near_line') %}
                 {% set _is_lead = current_user.role == 'admin' or (current_user.active_group and
                      current_user.active_group.scope_type in ('school', 'grade')) %}
                 {# v1.19.49.35：点「成绩分析」文字直接进入本场分析（领导=总览（全年级对比），
@@ -702,26 +700,13 @@
                        href="{{ url_for('grades.global_compare_page') }}?exam={{ EN.exam_id }}">总览（全年级对比）</a>
                     {% endif %}
                     {% if current_user.has_perm('grades.view') %}
-                    {# 2026-10-19 用户口径：「你左侧缺一个年级分析呀」——分析组补上
-                       年级分析入口，顺序与页内页签一致（年级 → 班级 → 学科）。
-                       年级分析就是分析页的默认页签（不带 tab 或 tab=grade）。 #}
-                    <a class="efn-item ps-4 {% if request.endpoint == 'grades.index' and request.args.get('tab', 'grade') == 'grade' %}active{% endif %}" data-nav="ana_grade"
-                       href="{{ url_for('grades.index') }}?exam={{ EN.exam_id }}&tab=grade">年级分析</a>
-                    <a class="efn-item ps-4 {% if request.endpoint == 'grades.index' and request.args.get('tab') == 'class' %}active{% endif %}" data-nav="ana_class"
-                       href="{{ url_for('grades.index') }}?exam={{ EN.exam_id }}&tab=class">班级分析</a>
-                    <a class="efn-item ps-4 {% if request.endpoint == 'grades.index' and request.args.get('tab') == 'subject' %}active{% endif %}" data-nav="ana_subject"
-                       href="{{ url_for('grades.index') }}?exam={{ EN.exam_id }}&tab=subject">学科分析</a>
-                    {# 2026-10-19 用户口径「侧栏与页内页签不同步」：页签里的
-                       任课教师 / 班级对比 也要在侧栏有对应项，顺序与页签一致。
-                       前端拿到 opts.tabs 后会把无权限的项隐藏（唯一口径仍在后端）。 #}
-                    <a class="efn-item ps-4 {% if request.endpoint == 'grades.index' and request.args.get('tab') == 'teacher' %}active{% endif %}" data-nav="ana_teacher"
-                       href="{{ url_for('grades.index') }}?exam={{ EN.exam_id }}&tab=teacher">任课教师</a>
-                    <a class="efn-item ps-4 {% if request.endpoint == 'grades.index' and request.args.get('tab') == 'compare' %}active{% endif %}" data-nav="ana_compare"
-                       href="{{ url_for('grades.index') }}?exam={{ EN.exam_id }}&tab=compare">班级对比</a>
+                    {# 2026-10-21 用户口径：原侧栏的「年级分析 / 班级分析 / 学科分析 / 任课教师 /
+                       班级对比」五项合并为一个「详细分析」入口 —— 这五项本来就是分析页内的
+                       页签，侧栏不再逐项重复。 #}
+                    <a class="efn-item ps-4 {% if request.endpoint == 'grades.index' %}active{% endif %}" data-nav="ana_detail"
+                       href="{{ url_for('grades.index') }}?exam={{ EN.exam_id }}">详细分析</a>
                     <a class="efn-item ps-4 {% if request.endpoint == 'grades.exam_near_line' %}active{% endif %}" data-nav="near"
                        href="{{ url_for('grades.exam_near_line', exam_id=EN.exam_id) }}">临界生对比</a>
-                    <a class="efn-item ps-4 {% if request.endpoint == 'grades.pivot_page' %}active{% endif %}" data-nav="pivot"
-                       href="{{ url_for('grades.pivot_page') }}?exam={{ EN.exam_id }}">自由分析</a>
                     {# 2026-10-18 表彰名单：年级前 30 / 卓越班前 10 / 单科前 10（并列全列） #}
                     <a class="efn-item ps-4 {% if request.endpoint == 'grades.honor' %}active{% endif %}" data-nav="honor"
                        href="{{ url_for('grades.honor') }}?exam={{ EN.exam_id }}">表彰名单</a>
@@ -729,10 +714,7 @@
                     <a class="efn-item ps-4 {% if request.endpoint == 'grades.ai_studio' %}active{% endif %}" data-nav="ai"
                        href="{{ url_for('grades.ai_studio') }}?exam={{ EN.exam_id }}">AI 分析</a>
                     {% endif %}
-                    {% if _is_lead %}
-                    <a class="efn-item ps-4 {% if request.endpoint == 'grades.report_page' %}active{% endif %}" data-nav="report"
-                       href="{{ url_for('grades.report_page') }}?exam={{ EN.exam_id }}">成绩汇报区</a>
-                    {% endif %}
+                    {# 2026-10-21 用户口径：侧栏删除「自由分析」「成绩汇报区」入口（页面仍在，仅不再占导航）。 #}
                 </div>
                 <script>
                 {# 2026-10-13：分析组展开状态记在本机（键 stulink-efn-analysis），
@@ -1082,7 +1064,7 @@
         {# 第七轮审计（U-M2）：补 .footer 类 —— 上面 @media print 的隐藏清单匹配的是
            .footer，此前 footer 元素无此类，导致打印时多打一条版权/版本行。 #}
         <footer class="footer text-center text-muted small mt-4 pt-3 border-top">
-            StuLink v1.19.50.59（2026-10-21） · © 2026 @zkxxzf · 感谢协作开发 @Sakaay
+            StuLink v1.19.50.60（2026-10-21） · © 2026 @zkxxzf · 感谢协作开发 @Sakaay
         </footer>
         {% endif %}
     </div>

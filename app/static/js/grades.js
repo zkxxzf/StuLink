@@ -1,4 +1,4 @@
-/* StuLink 成绩管理：分析页前端 v1.19.50.59
+/* StuLink 成绩管理：分析页前端 v1.19.50.60
  * 五 tab 联动加载 / 统一表格渲染 / 每张指标卡「表格 | 图表」双视图 / ECharts 图表渲染
  */
 (function(){
@@ -22,13 +22,13 @@ var state = {grade: '', examId: '', tab: 'grade', class_name: '', subject: '', d
 // tab 业务顺序。注意：Flask jsonify 默认按键名排序，Object.keys(opts.tabs) 的首项会是
 // 'class' 而不是 'grade'，因此不能用它决定默认 tab，必须按此固定顺序取第一个可见项。
 var TAB_ORDER = ['grade', 'class', 'subject', 'teacher', 'compare'];
-// 页签 ↔ 左侧「成绩分析」组子项（base.html 的 data-nav），两处要双向同步
-var TAB_NAV = {grade: 'ana_grade', class: 'ana_class', subject: 'ana_subject',
-               teacher: 'ana_teacher', compare: 'ana_compare'};
+// 2026-10-21 用户口径：侧栏五个分析项合并为「详细分析」（data-nav="ana_detail"），
+// 页签切换时只需要保持这一项高亮。
+var ANA_NAV = 'ana_detail';
 var opts = null;
 var charts = {};
 var chartSpecs = {};   // 图表原始配置（按 key），主题切换重绘时用
-// v1.19.50.59：?exam=（本场考试）只在首次填充时应用一次；
+// v1.19.50.60：?exam=（本场考试）只在首次填充时应用一次；
 // 之后用户手动切换年级/考试不再被拉回本场，也避免「切换年级」被误判为本场不可见。
 var initExamApplied = false;
 
@@ -53,13 +53,12 @@ function init(){
         bindViewToggle();
         syncClassCandidate();
         // 可见 tab（页签与侧栏分析组同一份判定，避免「左边点得进 / 上面没这页」）
+        var anyTab = false;
         Object.keys(opts.tabs).forEach(function(t){
-            if (!opts.tabs[t]){
-                $('li[data-tab="'+t+'"]').hide();
-                var nav = TAB_NAV[t];
-                if (nav) $('.efn-item[data-nav="' + nav + '"]').hide();
-            }
+            if (!opts.tabs[t]) { $('li[data-tab="'+t+'"]').hide(); }
+            else { anyTab = true; }
         });
+        if (!anyTab) $('.efn-item[data-nav="' + ANA_NAV + '"]').hide();
         var first = TAB_ORDER.filter(function(t){ return opts.tabs[t]; })[0];
         if (!first){ showEmpty('grade', '您没有成绩查看权限'); return; }
         // v1.19.0 三分栏深链：侧栏「班级分析 / 学科分析」等带 ?tab= 进来的初始页签优先
@@ -76,7 +75,7 @@ function fillGrades(){
     if (opts.locked.grade){
         $('#gGrade').val(opts.locked.grade).prop('disabled', true);
     } else {
-        // v1.19.50.59 侧栏带进来的本场考试（?exam=）**优先落到它所在的年级**：
+        // v1.19.50.60 侧栏带进来的本场考试（?exam=）**优先落到它所在的年级**：
         // 此前无脑默认「第一个有考试的年级」（= 年份最大 = 最新年级），
         // 跨年级进入（如在 2024/2025 级考试里点「班级分析 / 学科分析」）时
         // 本场 id 在最新年级的列表里找不到 → fillExams 回落「该年级最近一场已导入」
@@ -119,7 +118,7 @@ function fillExams(){
         sel.append('<option value="'+e.id+'" data-status="'+e.status+'">'+label+'</option>');
     });
     // v1.19.0 优先用侧栏带进来的本场考试（?exam=），否则按原逻辑默认选最近一场已导入
-    // v1.19.50.59 only-once：只有首次填充应用 ?exam=，用户手动换年级/考试后不再强制回本场
+    // v1.19.50.60 only-once：只有首次填充应用 ?exam=，用户手动换年级/考试后不再强制回本场
     var want = '';
     if (!initExamApplied){
         want = ($('#gInitialExam').text() || '').trim();
@@ -141,7 +140,7 @@ function fillExams(){
     fillCombos();           // 2026-10-16 组合随考试变（初始化也要填）
 }
 
-/* v1.19.50.59 筛选栏上方的警示条（重复调用只保留一条） */
+/* v1.19.50.60 筛选栏上方的警示条（重复调用只保留一条） */
 function gradeAppNotice(msg){
     $('#gAppNotice').remove();
     $('<div id="gAppNotice" class="alert alert-warning py-2 small mb-2"></div>')
@@ -160,18 +159,15 @@ function syncExamNav(){
         affair: '/grades/exams/' + eid + '/affair',
         import: '/grades/exams/' + eid + '/import',
         analysis: '/grades/analysis?exam=' + eid,
-        ana_grade: '/grades/analysis?exam=' + eid + '&tab=grade',
-        ana_class: '/grades/analysis?exam=' + eid + '&tab=class',
-        ana_subject: '/grades/analysis?exam=' + eid + '&tab=subject',
+        // 2026-10-21：五个分析子项合并为「详细分析」，统一指向分析页（页内页签切换）。
+        ana_detail: '/grades/analysis?exam=' + eid,
         // 2026-10-19：原侧栏「AI 智能导入」项已并入「数据导入」（data-nav="import"），
         // 同一页左右两栏，因此这里不再需要 ai 映射；
         // 划线分层也去掉了独立侧栏项（编辑页从导入页卡片 / 考试详情进入），故无 bands 映射。
-        pivot: '/grades/pivot?exam=' + eid,
         near: '/grades/exams/' + eid + '/near-line',
-        report: '/grades/report?exam=' + eid,
         global: '/grades/global-compare?exam=' + eid
     };
-    // v1.19.50.59 侧栏「成绩分析」文字入口（领导=总览（全年级对比）/ 其余=班级分析）此前
+    // v1.19.50.60 侧栏「成绩分析」文字入口（领导=总览（全年级对比）/ 其余=班级分析）此前
     // 未纳入同步：页面内切换考试后点它会回到**进入本页时**的考试，与当前选中不一致。
     // 有无「总览」项即区分领导入口（与 base.html 的 _is_lead 分支一致）。
     urls.ana_home = $nav.find('a[data-nav="global"]').length
@@ -182,7 +178,7 @@ function syncExamNav(){
     });
 }
 
-/* v1.19.50.59 班级筛选仅限本场考试：优先用该场考试自己的班级
+/* v1.19.50.60 班级筛选仅限本场考试：优先用该场考试自己的班级
    （该场学生名册 ∪ 该场任课教师表）；未选考试/旧库无快照时回落年级班级 */
 function classListFor(grade){
     var eid = state.examId || $('#gExam').val() || '';
@@ -299,7 +295,7 @@ function bindFilters(){
     $('#gExam').on('change', function(){
         state.examId = $(this).val();
         syncExamNav();          // v1.19.0 同步侧栏本场流程链接
-        fillClasses();          // v1.19.50.59 班级随考试变：仅列本场考试的班级
+        fillClasses();          // v1.19.50.60 班级随考试变：仅列本场考试的班级
         fillCombos();           // 2026-10-16 组合随考试变
         loadCurrent();
     });
@@ -463,9 +459,8 @@ function bindViewToggle(){
    ② URL 的 tab 跟着页签走（replaceState 不产生历史记录），刷新 / 分享仍停在同一页。
    侧栏不可见（全局态没有分析组）或该页签无权限时直接跳过，不回退到别的项。 */
 function syncSidebarTab(tab){
-    var nav = TAB_NAV[tab];
-    if (!nav || !opts || !opts.tabs || !opts.tabs[tab]) return;
-    var $item = $('.efn-item[data-nav="' + nav + '"]');
+    if (!opts || !opts.tabs || !opts.tabs[tab]) return;
+    var $item = $('.efn-item[data-nav="' + ANA_NAV + '"]');
     if (!$item.length) return;
     $('.efn-item[data-nav^="ana_"]').removeClass('active');
     $item.addClass('active');
@@ -1778,7 +1773,7 @@ $(function(){
         $('#aiToPage').on('click', function(){
             var txt = lastReportText;
             if (!txt){ alert('还没有生成报告'); return; }
-            // 2026-10-13（v1.19.50.59）：原提示「已保存到 AI 报告历史」是假的 ——
+            // 2026-10-13（v1.19.50.60）：原提示「已保存到 AI 报告历史」是假的 ——
             // 这里只把报告插入页面，并不写库；报告只有在「AI 分析」成功时才自动落库，
             // 聊天追问生成的内容不会进历史。文案必须与事实一致，别误导用户。
             showReport(txt, '已插入到当前页签（仅「AI 分析」生成的报告会存入报告历史）');

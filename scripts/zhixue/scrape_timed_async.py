@@ -1,4 +1,4 @@
-# StuLink v1.19.50.59  2026-10-20
+# StuLink v1.19.50.60  2026-10-20
 # 多标签页并发抓取智学网限时练成绩（async Playwright + 同一个 Edge）
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 """多标签页并发抓取限时练成绩。
