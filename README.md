@@ -3,7 +3,7 @@
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
 [![Python](https://img.shields.io/badge/python-3.11+-green.svg)](https://python.org)
 [![Flask](https://img.shields.io/badge/flask-3.x-lightgrey.svg)](https://flask.palletsprojects.com/)
-[![Version](https://img.shields.io/badge/version-1.19.62.64-orange.svg)](https://gitee.com/zkxxzf/StuLink)
+[![Version](https://img.shields.io/badge/version-1.19.62.65-orange.svg)](https://gitee.com/zkxxzf/StuLink)
 
 面向中学的综合学生管理平台，采用 **双站点 + 多模块 + 一模块一库** 的故障隔离架构：
 
@@ -301,6 +301,7 @@ StuLink/
 
 | 版本 | 日期 | 亮点 |
 |---|---|---|
+| **1.19.62.65** | 2026-10-22 | **（第四位 sakay +1）侧栏默认展开 + 导入 0 行提示 + 4 处 P0 归档修复**：侧栏「成绩分析」进入考试态即展开；导入页可导入 0 行时按钮旁写明原因（原先静默禁用像「点了没反应」）；修复新建管理员 NameError 500、限时练删除 / 分床清空 / 画像评语事件删除缺回收站归档；全站 693 路由逐路由审计（含限时练专项） |
 | **1.19.62.64** | 2026-10-21 | **（第三位 zk +1）成绩分析页签层级调整**：班级（01班…）/ 学科（语文…）按钮行移到主页签（年级分析 / 班级分析 / 学科分析 / 任课教师 / 班级对比）**下方**，顺序变为「筛选栏 → 主页签 → 班级或学科按钮 → 内容」 |
 | **1.19.61.64** | 2026-10-21 | **（第三位 zk +1）全局对比横轴排序修正**：不勾「先按班型排（卓越 / 强基）」时，图表横轴改为**按班级序号从小到大**（01班 → 02班 → …），同号再按方向 / 组合 / 班名兜底；勾选时仍为班型 → 方向 → 组合 → 班号 |
 | **1.19.60.64** | 2026-10-21 | **（第三位 zk +1）全局对比图表可放大**：每张图表（总分 + 各科）右上角新增放大按钮，点击后该图改为固定在视口内的浮层、铺满整个屏幕宽度并自动 resize；再点一次或按 Esc 退出，退出后回到原网格位置 |
