@@ -3,7 +3,7 @@
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
 [![Python](https://img.shields.io/badge/python-3.11+-green.svg)](https://python.org)
 [![Flask](https://img.shields.io/badge/flask-3.x-lightgrey.svg)](https://flask.palletsprojects.com/)
-[![Version](https://img.shields.io/badge/version-1.19.65.65-orange.svg)](https://gitee.com/zkxxzf/StuLink)
+[![Version](https://img.shields.io/badge/version-1.19.65.66-orange.svg)](https://gitee.com/zkxxzf/StuLink)
 
 面向中学的综合学生管理平台，采用 **双站点 + 多模块 + 一模块一库** 的故障隔离架构：
 
@@ -302,6 +302,7 @@ StuLink/
 
 | 版本 | 日期 | 亮点 |
 |---|---|---|
+| **1.19.65.66** | 2026-10-23 | **（第四位 sakay +1）AI 报告修复**：部分中转把工具调用写成 DSML 文本，旧逻辑当正文渲染 → 解析成 tool_calls 后真执行；模型整篇输出 `<!DOCTYPE html><html>…` 时消毒器连 `<body>` 正文一起吞掉 → `html`/`body` 只丢外壳、保留正文；空白报告不再落库 |
 | **1.19.65.64** | 2026-10-21 | **（第三位 zk +1）全局对比横轴默认顺序 + 柱顶标注**：横轴**默认按班级序号**（01班 → 02班 …，不再记忆上次选择），需要时手动勾「先按班型排（卓越 / 强基）」切班型优先；柱顶分数改为两行标注「去差均分 / 数值」，一眼看出这个数字是什么 |
 | **1.19.64.64** | 2026-10-21 | **（第三位 zk +1）全局对比图表改百分比堆积 + 比例折线**：每根柱固定 100%（段高＝该段人数占比，段内仍标人数），自下而上按分数线由高到低、未上线在最上；叠加各线「上线率」折线沿各自段顶边连接各班（同一 0~100% 轴），柱顶仍标去差均分；图例 12px、轴标签 12px、层名 14px、段内人数 11px、图表高度 320px，适合大屏阅读；悬停显示人数与占比 |
 | **1.19.63.64** | 2026-10-21 | **（第三位 zk +1）全局对比图表改为全量堆积**：柱＝班级全部参考学生，自下而上按分数线由高到低堆积（清北 → 985 → 211 → 特控 → 本科 → 未上线压在最上，以后新增分数线同样按高低插入）；每段标人数（不再按占比隐藏），分界线处标该线「上线率」（如「特控 44%」），柱顶仍标去差均分；去掉右轴上线率折线与双 Y 轴，未上线默认显示 |
