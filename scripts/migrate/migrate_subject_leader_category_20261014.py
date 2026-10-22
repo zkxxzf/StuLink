@@ -100,7 +100,7 @@ DDL_INDEX = ("CREATE INDEX IF NOT EXISTS idx_leader_year_subject "
 
 # 2026-10-14：模型还声明了两个**单列索引**（app/models/academic.py::SubjectLeader 的
 # school_year / subject 均为 index=True → ix_subject_leaders_school_year / _subject）。
-# 本脚本重建表时必须一并补建，否则 scripts/check_indexes.py 会以
+# 本脚本重建表时必须一并补建，否则 tests/check_indexes.py 会以
 # 「模型声明、现网缺失」报红（run_all_regression 的索引自检因此失败）。
 DDL_INDEXES = (
     "CREATE INDEX IF NOT EXISTS ix_subject_leaders_school_year "

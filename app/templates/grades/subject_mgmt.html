@@ -34,6 +34,34 @@
     </div>
 </div>
 
+{# 2026-10-22 用户口径：选科维护要能模板导入 —— 下载带学生名单的模板，
+   只填「选科组合」列再上传，其它列一律忽略。 #}
+<div class="card mb-3">
+    <div class="card-body py-2 d-flex flex-wrap gap-2 align-items-center">
+        <span class="text-muted small me-2">
+            <i class="bi bi-info-circle"></i>
+            批量导入：先「下载模板」（含本班学生名单与现有选科），
+            只改「选科组合」列再上传；留空的行不生效。
+        </span>
+        <a class="btn btn-sm btn-outline-primary{% if not grade %} disabled{% endif %}"
+           {% if grade %}href="{{ url_for('grades.subject_mgmt_template', grade=grade, class_name=class_name) }}"{% else %}aria-disabled="true"{% endif %}>
+            <i class="bi bi-file-earmark-arrow-down"></i> 下载模板
+        </a>
+        <form method="POST" action="{{ url_for('grades.subject_mgmt_import') }}"
+              enctype="multipart/form-data" class="d-flex gap-1 align-items-center mb-0">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <input type="hidden" name="grade" value="{{ grade }}">
+            <input type="hidden" name="class_name" value="{{ class_name }}">
+            <input type="file" name="file" accept=".xlsx,.xlsm" required
+                   class="form-control form-control-sm" style="width:210px;"
+                   {% if not grade %}disabled{% endif %}>
+            <button class="btn btn-sm btn-primary" {% if not grade %}disabled{% endif %}>
+                <i class="bi bi-upload"></i> 导入选科
+            </button>
+        </form>
+    </div>
+</div>
+
 {% if students %}
 <form method="POST" action="{{ url_for('grades.subject_mgmt_save') }}">
     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">

@@ -1,4 +1,4 @@
-# StuLink v1.19.62.65 2026-10-20
+# StuLink v1.19.65.64 2026-10-20
 # 限时练公共服务：可见范围 / 权限 / 分层模板 / 名次重算
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 """限时练公共服务（只做业务规则，不碰模板渲染）。
@@ -109,8 +109,27 @@ def assert_subject_importable(grade, subject, user=None):
 
 # ==================== 分层模板 ====================
 
+def _norm_layers(layers):
+    """层列表归一化（只留 name/from_rank/to_rank，便于比对）"""
+    out = []
+    for x in layers or []:
+        if not isinstance(x, dict):
+            continue
+        to_rank = x.get('to_rank')
+        out.append((str(x.get('name') or '').strip(),
+                    int(x.get('from_rank') or 1),
+                    int(to_rank) if to_rank not in (None, '') else None))
+    return out
+
+
 def ensure_builtin_templates():
     """幂等创建内置分层模板（首次进入限时练页面时调用）。
+
+    2026-10-22 用户口径：限时练的分层**内置固化为**
+    前10 / 20 / 50 / 80 / 100 / 150 / 200 / 250 / 300 / 400 / 500 / 550
+    这 12 层，并自动适配**所有**限时练场次 —— 所以这里不只"没有就建"，
+    已存在时也校验一遍：被改过（层数/边界/名称不一致，或 is_builtin 被清）
+    就按常量回正，保证所有年级、所有场次的统计口径永远一致。
 
     并发安全：两个请求同时首访会撞 name 唯一约束 —— 捕获后回查即可，
     不能让只读页面的渲染因建模板失败而 500。
@@ -118,6 +137,14 @@ def ensure_builtin_templates():
     from sqlalchemy.exc import IntegrityError
     exists = TimedBandTemplate.query.filter_by(name=BUILTIN_TIMED_TEMPLATE).first()
     if exists:
+        want = [dict(x) for x in DEFAULT_TIMED_LAYERS]
+        if (not exists.is_builtin) or _norm_layers(exists.get_layers()) != _norm_layers(want):
+            exists.is_builtin = True
+            exists.set_layers(want)
+            try:
+                db.session.commit()
+            except Exception:                       # noqa: BLE001
+                db.session.rollback()
         return exists
     tpl = TimedBandTemplate(name=BUILTIN_TIMED_TEMPLATE, is_builtin=True,
                             sort_order=0)
@@ -132,16 +159,16 @@ def ensure_builtin_templates():
     return tpl
 
 
-def current_template(exam):
-    """本场当前使用的分层模板。
+def current_template(exam=None):
+    """本场当前使用的分层模板 —— **一律用内置模板**。
 
     2026-10-20 用户口径：限时练固定用内置「名次分层」模板，
     不再提供选模板 / 自定义模板（模板维护接口与弹窗已一并删除）。
+    2026-10-22 用户口径：内置模板要「适配到所有限时练考试」，
+    所以**不再读 exam.template_id** —— 历史场次即使绑过别的模板，
+    统计也自动跟着内置的 12 层走，不会出现同一批限时练两套口径。
+    `exam` 参数保留只为兼容调用方。
     """
-    if exam.template_id:
-        tpl = db.session.get(TimedBandTemplate, int(exam.template_id))
-        if tpl:
-            return tpl
     return ensure_builtin_templates()
 
 

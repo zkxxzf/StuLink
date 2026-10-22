@@ -1,4 +1,4 @@
-/* StuLink · AI 分析工作台（v1.19.62.65 2026-10-14）
+/* StuLink · AI 分析工作台（v1.19.65.64 2026-10-14）
  * 对接服务端 AI 任务：
  *   POST /grades/ai/ask                → 建任务，拿 task_id（可附 gen＝生成器选项留档）
  *   GET  /grades/ai/tasks?…            → 我的任务列表
@@ -111,8 +111,14 @@
     }
     function refreshDelBtn() {
         var rid = state.task && state.task.report_id;
-        $('#aiDel').prop('disabled', rid === undefined || rid === null || rid === '')
-            .attr('title', rid ? '删除该报告' : '任务尚未生成报告');
+        if (state.task && state.task.report_missing) { rid = null; }   // 报告行已丢失，删不了
+        var has = !(rid === undefined || rid === null || rid === '');
+        $('#aiDel').prop('disabled', !has)
+            .attr('title', has ? '删除该报告' : '任务尚未生成报告');
+        // 2026-10-22：当前报告 id 暴露给「分享」模块（ai_share.js）——
+        // 让分享逻辑只依赖 DOM，不必再复制一份 state，避免两处状态漂移。
+        $('#aiProgress').attr('data-report-id', has ? rid : '');
+        $(document).trigger('ai:report-changed', [has ? rid : '']);
     }
     function showProgress() {
         $('#aiEmpty').addClass('d-none');
@@ -206,7 +212,16 @@
             state.task = t;
             $('#aiTools').empty();
             UI.applyEvents($('#aiStage'), $('#aiTools'), t.events || []);
-            if (t.md) {
+            if (t.report_missing) {
+                // 2026-10-22：任务「已完成」但报告行不存在（删除报告 / 恢复数据库时
+                // 任务表与报告表不同步）——明确告诉用户，不让报告区白屏。
+                var $miss = reportBody().empty();
+                $('<div class="ai-report-missing">'
+                    + '<i class="bi bi-exclamation-triangle"></i>'
+                    + '<b>这份报告的内容已不存在</b>'
+                    + '<p>可能是报告已被删除，或恢复数据库时任务记录与报告不同步。'
+                    + '可以重新生成一份。</p></div>').appendTo($miss);
+            } else if (t.md) {
                 // 旧口径报告（早期「AI 分析」按钮产出的 Markdown，或已无任务的报告，
                 // 后端用负数 id 包装成条目）：走 grades_md.js 白名单渲染
                 var $body = reportBody();

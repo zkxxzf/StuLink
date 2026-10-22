@@ -17,7 +17,7 @@
 # 2026-10-14 更新：清单已补齐 —— 追加 10-13/10-14 新增的 5 个（AI 任务表、AI 报告
 # kind/trace、管理员组 academic.edit、敏感字段权限 v1/v2）与学科组长 category 重建键。
 # **上线要跑哪些迁移，以 docs/数据库迁移清单.md 为唯一真值**（本文件是执行器）：
-#   py -3.12 scripts/migration_status.py --data-dir <生产数据目录> --pending
+#   py -3.12 tests/migration_status.py --data-dir <生产数据目录> --pending
 #
 # 用法（在本地机器执行；该账号在 docker 组，docker 命令无需 sudo）
 #   ssh <NAS_USER>@<NAS_HOST> "bash -s" < deploy/nas_migrate_pending.sh
@@ -51,7 +51,7 @@ echo "[0/6] 现状快照（只读）"
 echo "  容器版本：$(docker exec "$CT" grep -m1 'StuLink v' /app/config.py || echo 取不到)"
 echo "  base.html 冲突标记数：$(docker exec "$CT" grep -c '<<<<<<<' /app/app/templates/base.html || echo 0)（应为 0；不为 0 请先更新代码）"
 echo "  -- 缺列清单（模型列 vs 现网列，只读；有缺口会列出并返回非 0）--"
-docker exec "$CT" python scripts/check_columns.py 2>&1 | tail -n 30 || true
+docker exec "$CT" python tests/check_columns.py 2>&1 | tail -n 30 || true
 
 echo "[1/6] 停容器（迁移必须在应用停止状态跑）"
 docker stop "$CT" >/dev/null || fail "停止容器失败"
@@ -69,7 +69,7 @@ echo "[3.5/6] 预先补齐模型缺列（**必须早于迁移**：迁移脚本�
 # 补，前面用 ORM 读 Student/Teacher 的数据脚本会因 "no such column" 被 allow-fail 跳过
 # （实测 fix_exam_selection_snapshot 因此漏跑）。故把 check_columns --fix 提到 [4] 之前。
 docker run --rm -v "$DATA":/app/data -w /app \
-    --entrypoint python "$IMG" scripts/check_columns.py --fix 2>&1 | tail -n 15 || true
+    --entrypoint python "$IMG" tests/check_columns.py --fix 2>&1 | tail -n 15 || true
 
 echo "[4/6] 按序补跑缺失的迁移"
 run_mig() {
@@ -202,7 +202,7 @@ run_mig scripts/seed/sync_role_groups_20261020.py
 
 echo "[5/6] 兜底：补齐模型声明但现网缺失的列（改库前自动备份对应库）"
 docker run --rm -v "$DATA":/app/data -w /app \
-    --entrypoint python "$IMG" scripts/check_columns.py --fix 2>&1 | tail -n 20
+    --entrypoint python "$IMG" tests/check_columns.py --fix 2>&1 | tail -n 20
 echo "      （非 0 退出不中断：下一步会只读复核）"
 
 echo "[6/6] 启动容器 + 复核"
@@ -214,11 +214,11 @@ for i in $(seq 1 40); do
 done
 docker rmi "$IMG" >/dev/null 2>&1 && echo "      临时镜像已清理"
 docker ps --filter "name=^$CT$" --format '  {{.Names}} | {{.Status}}'
-if docker exec "$CT" python scripts/check_columns.py >/dev/null 2>&1; then
+if docker exec "$CT" python tests/check_columns.py >/dev/null 2>&1; then
     echo "  ✓ 缺列复核：0 处缺口"
 else
     echo "  ✗ 仍有缺口 —— 请把下面输出发出来："
-    docker exec "$CT" python scripts/check_columns.py 2>&1 | tail -n 20
+    docker exec "$CT" python tests/check_columns.py 2>&1 | tail -n 20
 fi
 
 echo "  请手工点一次：教师工作台 / 调课审批"
@@ -226,3 +226,4 @@ echo "==================== 补迁移完成 ===================="
 echo "回滚方式（如需）："
 echo "  数据：docker stop $CT && rm -rf $DATA && cp -a $BAK $DATA && docker start $CT"
 echo "  代码：本脚本未改动容器内代码，无需回滚"
+run_mig scripts/migrate/migrate_ai_report_share_20261022.py --apply  # A47 AI 报告分享链接表

@@ -1,0 +1,22 @@
+{# 分享链接失效页（410）：不存在 / 已撤销 / 已过期 / 报告已删除。
+   独立页面，深色看板皮肤，只给"什么原因 + 下一步怎么办"。 #}
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow, noarchive">
+<title>{{ title }} · StuLink</title>
+<link href="{{ su('css/ai_board.css') }}" rel="stylesheet">
+</head>
+<body class="share-body ai-board">
+<div class="share-wrap">
+    <div class="share-invalid">
+        <div class="ico">!</div>
+        <h1>{{ title }}</h1>
+        <p>{{ message }}</p>
+        <a href="{{ url_for('welcome.index') }}">返回首页</a>
+    </div>
+</div>
+</body>
+</html>

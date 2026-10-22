@@ -107,7 +107,7 @@
 @keyframes viewFade { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
 .tbl-chart { width: 100%; height: 360px; }
 .tbl-chart.tall { height: 460px; }
-.chart-tip { color: #64748b; font-size: 12px; }
+.chart-tip { color: var(--sl-text-muted); font-size: 12px; }
 /* ==================== 图表视图：左图 + 右表（2026-10-19 用户口径） ====================
    「图也变小一点，不要直接铺满；图和表格左右并排」——
    左栏固定 38%（图不铺满），右栏数据表（同源同列），窄屏自动回上下堆叠。
@@ -206,12 +206,12 @@
 .tab-pane-loading {
     padding: 60px 0;
     text-align: center;
-    color: #94a3b8;
+    color: var(--sl-text-subtle);
 }
 .empty-state {
     padding: 50px 20px;
     text-align: center;
-    color: #64748b;
+    color: var(--sl-text-muted);
 }
 .empty-state .bi { font-size: 40px; color: #cbd5e1; }
 
@@ -246,20 +246,20 @@
     background: #f1f5f9; padding: 1px 5px; border-radius: 4px; font-size: 12px;
 }
 .ai-bubble blockquote {
-    border-left: 3px solid #cbd5e1; margin: 8px 0; padding: 4px 10px; color: #64748b;
+    border-left: 3px solid #cbd5e1; margin: 8px 0; padding: 4px 10px; color: var(--sl-text-muted);
 }
 .ai-caret {
     display: inline-block; width: 6px; height: 14px; margin-left: 2px;
     background: #0d6efd; vertical-align: -2px; animation: aiBlink .9s steps(2, start) infinite;
 }
 @keyframes aiBlink { to { visibility: hidden; } }
-.ai-stage { color: #64748b; font-size: 12.5px; }
+.ai-stage { color: var(--sl-text-muted); font-size: 12.5px; }
 .ai-think {
     margin-top: 8px; border: 1px dashed #cbd5e1; border-radius: 8px;
     background: #fbfcfe; padding: 6px 10px;
 }
 .ai-think summary {
-    cursor: pointer; color: #64748b; font-size: 12.5px; user-select: none;
+    cursor: pointer; color: var(--sl-text-muted); font-size: 12.5px; user-select: none;
 }
 .ai-think-body {
     margin-top: 6px; max-height: 220px; overflow: auto;
@@ -283,7 +283,7 @@
 .cert-tbl th, .cert-tbl td { border: 1px solid #333; padding: 6px 8px; text-align: center; }
 .cert-tbl thead th { background: #f1f5f9; font-weight: 600; }
 .cert-tbl td.subj { font-weight: 600; white-space: nowrap; background: #f8fafc; }
-.cert-tbl td.muted { color: #94a3b8; font-size: 13px; }
+.cert-tbl td.muted { color: var(--sl-text-subtle); font-size: 13px; }
 .cert-note { font-size: 13px; color: #475569; margin-top: 10px; }
 .cert-foot { display: flex; justify-content: space-between; align-items: flex-end; margin-top: 36px; }
 .cert-sign { text-align: center; font-size: 14px; line-height: 1.9; white-space: nowrap; }

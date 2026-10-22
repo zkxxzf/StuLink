@@ -11,7 +11,8 @@
 策略（与前端 `static/js/grades_md.js` 同口径：先丢弃、再转义、绝不透传）：
   1. 只保留 `ALLOWED_TAGS`，其它标签一律丢弃（标签不要，文字留下）；
      `DROP_CONTENT_TAGS`（script/style/iframe/svg/表单控件等）**连内容一起丢**，
-     避免脚本源码被当正文渲染出来。
+     避免脚本源码被当正文渲染出来。**`html` / `body` 例外（2026-10-23）**：
+     模型常整篇输出 HTML 文档，这两个容器只丢标签本身、正文必须保留。
   2. 只保留 `ALLOWED_ATTRS`：`class`（字符集过滤）、`colspan`/`rowspan`（数字）、
      `title`/`align`、`href`（仅 http/https）。**`style` 属性一律丢弃**——
      CSS 不是执行面，但 `position:fixed` 之类可做视觉钓鱼，颜色/字号一律走项目
@@ -39,12 +40,15 @@ ALLOWED_TAGS = frozenset({
 })
 
 # 连内容一起丢弃的标签（丢标签但留文字会让脚本源码变成正文，很难看也很危险）
+# 2026-10-23：**不要把 html/body 放进来** —— 模型常把报告写成整篇 HTML 文档，
+# 若这两个容器也"连内容丢"，`<body>` 里的正文会整段消失（用户看到空报告）。
+# 它们只丢标签本身（不在 ALLOWED_TAGS 即可），正文必须保留。
 DROP_CONTENT_TAGS = frozenset({
     'script', 'style', 'iframe', 'frame', 'frameset', 'object', 'embed', 'applet',
     'svg', 'math', 'template', 'noscript', 'canvas', 'audio', 'video', 'source',
     'track', 'map', 'area', 'form', 'input', 'button', 'select', 'option', 'optgroup',
-    'textarea', 'label', 'fieldset', 'legend', 'link', 'meta', 'base', 'html', 'head',
-    'body', 'title', 'dialog', 'slot',
+    'textarea', 'label', 'fieldset', 'legend', 'link', 'meta', 'base', 'head',
+    'title', 'dialog', 'slot',
 })
 
 # 允许带属性的标签 → 允许的属性名（其余一律丢弃）
@@ -103,6 +107,12 @@ class _ReportSanitizer(HTMLParser):
     # ---------- 标签 ----------
     def handle_starttag(self, tag, attrs):
         tag = (tag or '').lower()
+        # 整篇文档容器：只丢标签本身；<body> 开始 = 头部结束，恢复正文收集
+        # （模型漏写 </head> 时也不会把整篇正文吞掉）。
+        if tag in ('html', 'body'):
+            if tag == 'body':
+                self.drop_depth = 0
+            return
         if tag in DROP_CONTENT_TAGS:
             if tag not in _DROP_VOID:
                 self.drop_depth += 1
@@ -145,6 +155,10 @@ class _ReportSanitizer(HTMLParser):
 
     def handle_endtag(self, tag):
         tag = (tag or '').lower()
+        if tag in ('html', 'body'):
+            if tag == 'body':
+                self.drop_depth = 0
+            return
         if tag in DROP_CONTENT_TAGS:
             if self.drop_depth:
                 self.drop_depth -= 1

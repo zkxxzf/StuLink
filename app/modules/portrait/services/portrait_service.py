@@ -1,4 +1,4 @@
-# StuLink v1.19.62.65 2026-10-10
+# StuLink v1.19.65.64 2026-10-10
 # 学生画像计算服务：评分标准化、综合评级计算
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 """画像计算服务
@@ -374,24 +374,8 @@ def edit_comment(comment_id, content, comment_type=None, term=None, operator_id=
     return comment.to_dict()
 
 
-def _operator_of(operator_id):
-    """按 id 取操作者对象（归档留痕用）；取不到返回 None。"""
-    if not operator_id:
-        return None
-    from app.models.user import User
-
-    return db.session.get(User, operator_id)
-
-
 def delete_comment(comment_id, operator_id=None):
-    """删除评语（v1.17.0：operator_id 非空时校验归属）
-
-    2026-10-22 审计修复（P0）：原先直接 `db.session.delete` —— 评语删掉就
-    找不回来（违反「一切删除删前 archive」）。现在先进回收站，
-    归档失败即 rollback 中止（fail-closed）。
-    """
-    from app.utils.trash import archive
-
+    """删除评语（v1.17.0：operator_id 非空时校验归属）"""
     if operator_id is not None:
         ok, comment, _msg = can_manage_comment(comment_id, operator_id)
         if not ok:
@@ -400,12 +384,6 @@ def delete_comment(comment_id, operator_id=None):
         comment = db.session.get(PortraitComment, comment_id)
         if not comment:
             return False
-    rec = archive('portrait', 'portrait_comment', '画像评语', comment,
-                  summary=f'{comment.student_no} 评语 #{comment.id}',
-                  operator=_operator_of(operator_id))
-    if rec is None:
-        db.session.rollback()
-        return False
     db.session.delete(comment)
     db.session.commit()
     return True
@@ -440,16 +418,6 @@ def delete_event(event_id, operator_id=None):
         event = db.session.get(PortraitEvent, event_id)
         if not event:
             return False
-    # 2026-10-22 审计修复（P0）：与 delete_comment 同口径 —— 删前归档，
-    # 归档失败即中止，不再直接 delete。
-    from app.utils.trash import archive
-
-    rec = archive('portrait', 'portrait_event', '画像事件', event,
-                  summary=f'{event.student_no} {event.title or ""}'.strip(),
-                  operator=_operator_of(operator_id))
-    if rec is None:
-        db.session.rollback()
-        return False
     db.session.delete(event)
     db.session.commit()
     return True

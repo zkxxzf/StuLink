@@ -227,16 +227,22 @@
         }
         /* ---- 折叠组（成绩分析）：浅底胶囊，与菜单项同左右内边距 ---- */
         .sidebar-float .efn-group {
-            display: flex; align-items: center; justify-content: space-between;
-            padding: 7px 10px; margin-top: 4px; border-radius: 6px;
+            display: flex; align-items: stretch; justify-content: space-between;
+            padding: 0 0 0 10px; margin-top: 4px; border-radius: 6px;
             background: var(--sl-sidebar-group);
             color: var(--sl-sidebar-text); font-size: 12.5px; font-weight: 600;
         }
         .sidebar-float .efn-group:hover { background: var(--sl-sidebar-hover); }
         .sidebar-float .efn-group .bi { font-size: 11px; color: var(--sl-sidebar-muted); }
-        /* v1.19.49.35：「成绩分析」标题本身是入口链接，右侧箭头单独负责展开/收起 */
-        .sidebar-float .efn-group-title { flex: 1 1 auto; color: inherit; }
+        /* v1.19.49.35：「成绩分析」标题本身是入口链接，右侧箭头单独负责展开/收起。
+           2026-10-22 用户反馈「点击范围有点小」：标题撑满整块胶囊并吃满上下高度
+           （原来只有文字行高可点，胶囊上下 7px 是死的），箭头也补足内边距。 */
+        .sidebar-float .efn-group-title {
+            display: flex; align-items: center; flex: 1 1 auto;
+            padding: 7px 0; min-width: 0; color: inherit;
+        }
         .sidebar-float .efn-group-title:hover { color: var(--sl-sidebar-accent-text); }
+        .sidebar-float .efn-group .bi[data-bs-toggle] { padding: 7px 10px 7px 6px; }
         .sidebar-float .efn-group .bi[data-bs-toggle] {
             cursor: pointer; transition: transform .15s ease;
         }
@@ -683,9 +689,7 @@
                      current_user.active_group.scope_type in ('school', 'grade')) %}
                 {# v1.19.49.35：点「成绩分析」文字直接进入本场分析（领导=总览（全年级对比），
                    其他角色=班级分析，避免非领导点总览被 403）；展开/收起改由右侧箭头负责。
-                   2026-10-21 曾改为每次加载都折叠；2026-10-22 用户口径：
-                   **成绩分析分组默认展开**（进入考试态即可见到「总览 / 详细分析 / …」，
-                   不必先点一次箭头）。基础配置仍保持默认折叠。 #}
+                   2026-10-22 用户口径：**默认展开**（推翻 2026-10-21 的默认折叠）。 #}
                 <div class="efn-group">
                     <a class="efn-group-title" data-nav="ana_home"
                        href="{{ url_for('grades.global_compare_page', exam=EN.exam_id) if _is_lead
@@ -716,8 +720,8 @@
                     {% endif %}
                     {# 2026-10-21 用户口径：侧栏删除「自由分析」「成绩汇报区」入口（页面仍在，仅不再占导航）。 #}
                 </div>
-                {# 2026-10-21 用户口径：成绩模块侧栏的分组（成绩分析 / 基础配置）**每次加载都默认折叠**，
-                   不再用 localStorage 记住上次的展开状态 —— 刷新或换页后统一回到折叠态。 #}
+                {# 2026-10-22 用户口径：成绩模块侧栏的分组（成绩分析 / 基础配置）**默认展开**，
+                   不再用 localStorage 记忆展开状态。 #}
                 {% endif %}
             </div>
             {% elif TIMED %}
@@ -776,19 +780,18 @@
             {# v1.19.49.35 移除「分数修改记录」全局入口：它属于单场考试的数据，只在该场成绩单页右上角进入 #}
             {# v1.19.49.35 移除「毕业生成绩（二期）」入口：暂无用处，后期单独做毕业生数据库 #}
 
-            {# v1.19.0 基础配置：长期基础数据，不属于四段流程，默认折叠
-               2026-10-21 用户口径：**每次加载都默认折叠**（不再记忆展开状态），
-               刷新 / 换页后统一回到折叠态。 #}
+            {# v1.19.0 基础配置：长期基础数据，不属于四段流程。
+               2026-10-22 用户口径：**默认展开**（推翻 2026-10-21 的默认折叠）。 #}
             {% set _cfg_eps = ('grades.subject_mgmt', 'grades.band_templates_page',
                                'grades.teachers_page', 'grades.teachers_import_page',
                                'grades.exam_rooms') %}
             <a class="nav-link d-flex align-items-center" data-bs-toggle="collapse" href="#navCfg"
-               role="button" aria-expanded="false" data-nav="cfg"
+               role="button" aria-expanded="true" data-nav="cfg"
                aria-label="展开 / 收起 基础配置" aria-controls="navCfg">
                 <i class="bi bi-sliders"></i>基础配置
                 <i class="bi bi-chevron-down small ms-auto"></i>
             </a>
-            <div class="collapse" id="navCfg">
+            <div class="collapse show" id="navCfg">
                 {% if current_user.has_perm('grades.subject_mgmt') %}
                 <a class="nav-link ps-4 {% if request.endpoint == 'grades.subject_mgmt' %}active{% endif %}"
                    href="{{ url_for('grades.subject_mgmt') }}">
@@ -1020,7 +1023,7 @@
         {# 第七轮审计（U-M2）：补 .footer 类 —— 上面 @media print 的隐藏清单匹配的是
            .footer，此前 footer 元素无此类，导致打印时多打一条版权/版本行。 #}
         <footer class="footer text-center text-muted small mt-4 pt-3 border-top">
-            StuLink v1.19.62.65（2026-10-21） · © 2026 @zkxxzf · 感谢协作开发 @Sakaay
+            StuLink v1.19.65.64（2026-10-21） · © 2026 @zkxxzf · 感谢协作开发 @Sakaay
         </footer>
         {% endif %}
     </div>

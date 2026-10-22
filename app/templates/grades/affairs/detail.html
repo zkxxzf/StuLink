@@ -104,11 +104,15 @@
   #invigMatrix .iv-cell:hover, #invigMatrix .iv-cell:focus {
       border-color: var(--sl-border); outline: none; }
   #invigMatrix .iv-cell.empty { color: var(--sl-text-muted); }
-  /* 2026-10-21 环节④：列 = 文化科 9 + 综合组 5（通用技术在考务里去掉）+ 班主任 3，
-     17 列必须横向滚动；首列（班级）冻结，第二行表头分组带（文化科目 / 综合组 /
-     班主任）。每列 96px 是为了 3 个字的名字不被截断。 */
-  #t4Table { width: auto; min-width: 100%; }
-  #t4Table th, #t4Table td { white-space: nowrap; min-width: 96px; }
+  /* 2026-10-21 环节④：列 = 文化科 9 + 综合组 5（通用技术在考务里去掉）+ 班主任 3。
+     2026-10-22 用户口径「紧缩到一页」：18 列 × 96px 会横向滚动、右侧看不到，
+     改为 table-layout:fixed + 100% 宽，平均每列 ~60px（11.5px 字号下 3 个汉字
+     约 35px，够放），一屏能看全；窄屏仍由 .table-responsive 兜底横向滚动。 */
+  #t4Table { width: 100%; min-width: 0; table-layout: fixed; }
+  #t4Table th, #t4Table td { white-space: nowrap; min-width: 0;
+                             padding: 2px 2px; font-size: 11.5px; }
+  #t4Table th.t4-cls, #t4Table td.t4-cls { width: 54px; min-width: 54px; }
+  #t4Table .at-cell { font-size: 11.5px; padding: 0; text-align: center; }
   #t4Table thead th { background: var(--sl-head-bg); color: var(--sl-head-text);
                       border-color: var(--sl-head-border); font-size: .78rem; }
   #t4Table th.t4-cls, #t4Table td.t4-cls {
@@ -118,6 +122,16 @@
   #t4Table thead th.t4-cls { z-index: 4; background: var(--sl-head-bg); }
   #t4Table .t4-band { text-align: center; font-weight: 700; letter-spacing: .5px; }
   #t4Table .t4-head-col { background: color-mix(in srgb, var(--sl-head-bg) 88%, #198754 12%); }
+  /* 2026-10-22 用户反馈「双行表头时前面留两行空白、没有贴合」：
+     base.html 给 .table-responsive thead th 统一了 sticky top:0，第 2 行又按
+     --sl-thead-h(38px) 下推；本表第一行有 rowspan=2 的「班级」格（行高≈两行），
+     38px 对不上 → 表头吸附时整体错位、上方留白。
+     这张表只有 10 行数据、纵向无需吸顶：表头改回 static（只保留首列横向冻结）。 */
+  #t4Table thead th { position: static; }
+  #t4Table thead th.t4-cls {
+      position: sticky; left: 0; top: auto; z-index: 4;
+      background: var(--sl-head-bg);
+  }
 </style>
 {% endblock %}
 {% block content %}
@@ -628,18 +642,6 @@
             <button class="btn btn-primary btn-sm" onclick="saveAffairTeachers()">
                 <i class="bi bi-save"></i> 保存</button>
         </div>
-        <div class="alert alert-light border py-2 small">
-            表格为「班级 × 科目 → 任课教师」：左侧
-            <span class="badge text-bg-warning">正班</span>
-            <span class="badge text-bg-warning">副班1</span>
-            <span class="badge text-bg-warning">副班2</span>
-            三列是班主任（与任课教师同级别，负责本班总分），默认按班主任名单带入，
-            可临时改派（仅本场）；其后是 <b>9 个文化科 + 综合组 5 科</b>
-            （体育 / 音乐 / 美术 / 信息技术 / 心理）；留空表示该班没有该科任课教师或该职务。
-            点格子后可直接输入 <b>姓名 / 全拼 / 每个字的首字母</b> 检索
-            （例：蒋雪静 → 蒋雪静 / jiangxuejing / jxj）。这里的每一位老师都会进入
-            监考教师池，班主任还会用于「每天首场优先排班主任」。
-        </div>
         <div id="t4Body" class="table-responsive" style="max-height:66vh;overflow:auto">
             <div class="text-center text-muted py-4"><div class="spinner-border spinner-border-sm"></div>
                 <span class="ms-2">加载中…</span></div>
@@ -721,16 +723,8 @@
         {# 2026-10-14 用户口径：内置每科考试时长 —— 选科目就自动算出结束时间（语文 2.5 小时 /
            数学·英语 2 小时 / 其它 75 分钟），开始时间接同一天上一场的结束（当天首场
            {{ sched_default_start }}），都不用自己算。 #}
-        <div class="form-text mt-1">点「新增场次」的日期默认沿用上一场（表格为空时用本场考试日期
-            {{ sched_default_date.strftime('%Y-%m-%d') }}），同一天满 {{ sched_daily_max }} 场自动顺延到次日，都可手动改。<br>
-            <b>时间自动算</b>：选完科目自动带出开始/结束 —— 结束 = 开始 + 本场科目时长
-            （语文 {{ sched_duration['语文'] }} 分钟〔2.5 小时〕 ·
-            数学/英语 {{ sched_duration['数学'] }} 分钟〔2 小时〕 ·
-            其它 {{ sched_duration_fallback }} 分钟，一场多科取最长），
-            开始时间接同一天上一场的结束（当天首场 {{ sched_default_start }}）；
-            <b>改开始时间或换科目，结束按科目时长自动重排</b>；只改结束则按你填的存；时间都可留空。
-            老数据缺时间的，点上方「按科目补时间」。
-            <b>改完即自动保存</b>（日期/科目/时间/选科/备注，失焦就存），不用再点保存；科目必填。</div>
+        {# 2026-10-22 用户口径：这一段说明文字用处不大，去掉（功能不变：
+           日期沿用上一场、时间按科目时长自动算、失焦自动保存） #}
     </div>
 
     <!-- ===== 环节⑥ 编排监考表 ===== -->

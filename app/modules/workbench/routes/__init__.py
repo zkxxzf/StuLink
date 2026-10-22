@@ -1,5 +1,5 @@
-# StuLink v1.19.62.65 2026-10-10
-# 教师工作台：我的信息 / 我的课表（今日置顶） / 我的业绩 / 手机号修改
+# StuLink v1.19.65.64 2026-10-10
+# 教师工作台：我的信息 / 今日课程 / 我的课表 / 我的业绩 / 手机号修改
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 import re
 from datetime import date, datetime
@@ -58,7 +58,7 @@ def index():
     """教师工作台首页：只展示当前登录教师本人的数据"""
     teacher = teacher_service.teacher_of_user(current_user)
 
-    entries, achievements = [], []
+    entries, today_entries, achievements = [], [], []
     # 2026-10-13：节次显示名映射 —— period_number 只是行号（1=早读、2=第1节…），
     # 学校实际叫法在 PeriodDef.period_name（见 timetable.db period_defs）。
     # 卡片原先直接印 period_number，整节次都错一位（period_number=8 实为「第7节」）。
@@ -66,11 +66,11 @@ def index():
     pending_swaps = []
     partner_pending = []
     active_term = None
-    # 2026-10-13（v1.19.62.65）：调课入口挂到工作台 —— 能否申请由 academic.swap 决定，
+    # 2026-10-13（v1.19.65.64）：调课入口挂到工作台 —— 能否申请由 academic.swap 决定，
     # 菜单/按钮可见性与 perm_required 保持一致，避免"看得见、点了 403"。
     can_swap = current_user.has_perm('academic.swap')
     is_head = (current_user.role == 'homeroom_teacher')
-    # 2026-10-13（v1.19.62.65）：左侧「个人工作」菜单已精简，工作台内需自备这些入口
+    # 2026-10-13（v1.19.65.64）：左侧「个人工作」菜单已精简，工作台内需自备这些入口
     can_class_view = current_user.has_perm('workbench.class_view')
     can_records = current_user.has_perm('workbench.records')
     can_attendance = current_user.has_perm('workbench.attendance_view')
@@ -95,8 +95,8 @@ def index():
             db.session.rollback()
             current_app.logger.exception('工作台课表加载失败 teacher_uid=%s',
                                          teacher.teacher_uid)
-        # 2026-10-21：原「今日课程」卡片与「我的课表」同源重复，已合并为一张卡；
-        # 今天那一行由模板按 today.isoweekday() 置顶高亮，后端不再单算 today_entries。
+        weekday_today = date.today().isoweekday()
+        today_entries = [e for e in entries if e['weekday'] == weekday_today]
         achievements = (TeacherAchievement.query
                         .filter_by(teacher_uid=teacher.teacher_uid)
                         .order_by(TeacherAchievement.created_at.desc()).all())
@@ -143,7 +143,7 @@ def index():
                                          teacher.teacher_uid)
             partner_pending = []
 
-    # 2026-10-13（v1.19.62.65）：班主任在工作台直接看**本班班级课表**（多个班用页签切换）。
+    # 2026-10-13（v1.19.65.64）：班主任在工作台直接看**本班班级课表**（多个班用页签切换）。
     # 取数与教务端班级课表同源（get_class_view），并沿用同一套可见范围，避免越权。
     class_schedules = []
     if is_head and active_term:
@@ -164,7 +164,7 @@ def index():
                                          current_user.id)
             class_schedules = []
 
-    # 2026-10-13（v1.19.62.65）：待办与通知 —— 换课待我确认 / 问卷待填 / 最近通知 + 未读数
+    # 2026-10-13（v1.19.65.64）：待办与通知 —— 换课待我确认 / 问卷待填 / 最近通知 + 未读数
     try:
         todo = todo_service.get_teacher_todo(current_user, teacher)
     except Exception:                       # 聚合层已逐项降级，这里只兜底
@@ -190,7 +190,7 @@ def index():
                            can_attendance=can_attendance,
                            partner_pending=partner_pending,
                            can_swap=can_swap,
-                           entries=entries,
+                           entries=entries, today_entries=today_entries,
                            active_term=active_term,
                            achievements=achievements,
                            categories=ACHIEVEMENT_CATEGORIES,

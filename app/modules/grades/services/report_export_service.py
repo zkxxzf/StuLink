@@ -1,10 +1,10 @@
-# StuLink v1.19.62.65 2026-10-10
+# StuLink v1.19.65.64 2026-10-10
 # 成绩汇报区交付物导出：把前端表格数据渲染为 PowerPoint（python-pptx）
 # 前端 _rpExportPptx 收集每张表的单元格文本与颜色（rgb(r,g,b) 内联样式解析后传入），
 # 本模块按「一表一页、超行数自动分页」生成 16:9 幻灯片，表头绿底、数据行白底、细灰框。
 #
 # 母版继承方案（v1.13.2 最终版）：
-#   使用 report_template_clean.pptx —— 由 scripts/make_pptx_clean_template.py 从
+#   使用 report_template_clean.pptx —— 由 tools/make_pptx_clean_template.py 从
 #   郑开学校原始母版 report_template.pptx 制备：删除了模板自带的 8 张示例 slide，
 #   但完整保留 slideLayout（含 Logo/背景装饰图）、slideMaster、media、theme。
 #   python-pptx 加载干净模板 → add_slide → save 全程走标准流程，
@@ -182,7 +182,7 @@ def build_pptx(tables):
     if tpl_path is None:
         # 无任何模板：全新空白演示文稿（无母版装饰，仅保证可导出）
         # 注：母版文件本身不在仓库里（体积/版权原因），需先用原始母版执行
-        # scripts/make_pptx_clean_template.py 制备 report_template_clean.pptx。
+        # tools/make_pptx_clean_template.py 制备 report_template_clean.pptx。
         try:
             from flask import current_app
             current_app.logger.warning(

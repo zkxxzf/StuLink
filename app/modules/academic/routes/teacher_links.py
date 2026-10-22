@@ -33,6 +33,9 @@ bp.add_url_rule('/teacher-links', 'teacher_links_page', gt.teachers_page)
 bp.add_url_rule('/teacher-links/api', 'teacher_links_api', gt.teachers_get)
 bp.add_url_rule('/teacher-links/api/save', 'teacher_links_save_api',
                 gt.teachers_save, methods=['POST'])
+# 2026-10-22：班主任位次（正班/副班1/副班2）维护，数据源 UserClassLink
+bp.add_url_rule('/teacher-links/api/headteacher', 'teacher_links_headteacher_api',
+                gt.teachers_headteacher_save, methods=['POST'])
 
 # 批量导入链路（上传 → 预览核对 → 确认写入）
 bp.add_url_rule('/teacher-links/import', 'teacher_links_import_page',

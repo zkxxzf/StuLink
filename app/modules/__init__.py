@@ -49,7 +49,7 @@ def register_blueprints(app):
     app.register_blueprint(points_bp)
     app.register_blueprint(grades_bp)
 
-    # 德育奖惩模块（v1.19.62.65，独立库 morality.db）
+    # 德育奖惩模块（v1.19.65.64，独立库 morality.db）
     from app.modules.morality import bp as morality_bp
     app.register_blueprint(morality_bp)
 
@@ -72,6 +72,10 @@ def register_blueprints(app):
     # 通知公告模块（v1.9.3，独立模块）
     from app.modules.notifications.routes import bp as notifications_bp
     app.register_blueprint(notifications_bp)
+
+    # 对外只读分享（2026-10-22）：AI 报告 `/s/<token>`（登录即可，token 授权）
+    from app.modules.share import bp as share_bp
+    app.register_blueprint(share_bp)
 
     # 微信小程序 API（2026-10-18）：令牌鉴权（X-Wx-Token 头），
     # 小程序拿不到网页的 CSRF cookie，故整块豁免 CSRF，改由令牌本身防冒用。

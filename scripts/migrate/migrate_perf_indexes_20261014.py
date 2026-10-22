@@ -1,6 +1,6 @@
 """迁移：第四轮审计性能索引补建（2026-10-14，PERF-117 / PERF-118）。
 
-补 3 个库共 6 条索引（模型 `__table_args__` 已同步声明，`scripts/check_indexes.py` 可复验）：
+补 3 个库共 6 条索引（模型 `__table_args__` 已同步声明，`tests/check_indexes.py` 可复验）：
   system.db     operation_logs      idx_oplog_created / idx_oplog_module_created /
                                     idx_oplog_action_created / idx_oplog_user_created
   grades.db     certificates        idx_cert_generated_by

@@ -23,7 +23,7 @@ tab_service._short_exam_name），既不能筛选也不保证一致。
 - 学年以 8 月 1 日为界：2026 级在 2026-08-01 ~ 2027-07-31 都是高一；
 - 学期以春节为界：春节（正月初一）前都是上学期，春节起算下学期。
 
-表结构必须与 `app/models/grades.py::Exam` 一致（`scripts/check_columns.py` 逐列比对）。
+表结构必须与 `app/models/grades.py::Exam` 一致（`tests/check_columns.py` 逐列比对）。
 """
 import os as _os
 import sys as _sys

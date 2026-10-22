@@ -1,4 +1,4 @@
-/* StuLink 成绩管理：分析页前端 v1.19.62.65
+/* StuLink 成绩管理：分析页前端 v1.19.65.64
  * 五 tab 联动加载 / 统一表格渲染 / 每张指标卡「表格 | 图表」双视图 / ECharts 图表渲染
  */
 (function(){
@@ -28,7 +28,7 @@ var ANA_NAV = 'ana_detail';
 var opts = null;
 var charts = {};
 var chartSpecs = {};   // 图表原始配置（按 key），主题切换重绘时用
-// v1.19.62.65：?exam=（本场考试）只在首次填充时应用一次；
+// v1.19.65.64：?exam=（本场考试）只在首次填充时应用一次；
 // 之后用户手动切换年级/考试不再被拉回本场，也避免「切换年级」被误判为本场不可见。
 var initExamApplied = false;
 
@@ -75,7 +75,7 @@ function fillGrades(){
     if (opts.locked.grade){
         $('#gGrade').val(opts.locked.grade).prop('disabled', true);
     } else {
-        // v1.19.62.65 侧栏带进来的本场考试（?exam=）**优先落到它所在的年级**：
+        // v1.19.65.64 侧栏带进来的本场考试（?exam=）**优先落到它所在的年级**：
         // 此前无脑默认「第一个有考试的年级」（= 年份最大 = 最新年级），
         // 跨年级进入（如在 2024/2025 级考试里点「班级分析 / 学科分析」）时
         // 本场 id 在最新年级的列表里找不到 → fillExams 回落「该年级最近一场已导入」
@@ -118,7 +118,7 @@ function fillExams(){
         sel.append('<option value="'+e.id+'" data-status="'+e.status+'">'+label+'</option>');
     });
     // v1.19.0 优先用侧栏带进来的本场考试（?exam=），否则按原逻辑默认选最近一场已导入
-    // v1.19.62.65 only-once：只有首次填充应用 ?exam=，用户手动换年级/考试后不再强制回本场
+    // v1.19.65.64 only-once：只有首次填充应用 ?exam=，用户手动换年级/考试后不再强制回本场
     var want = '';
     if (!initExamApplied){
         want = ($('#gInitialExam').text() || '').trim();
@@ -140,7 +140,7 @@ function fillExams(){
     fillCombos();           // 2026-10-16 组合随考试变（初始化也要填）
 }
 
-/* v1.19.62.65 筛选栏上方的警示条（重复调用只保留一条） */
+/* v1.19.65.64 筛选栏上方的警示条（重复调用只保留一条） */
 function gradeAppNotice(msg){
     $('#gAppNotice').remove();
     $('<div id="gAppNotice" class="alert alert-warning py-2 small mb-2"></div>')
@@ -167,7 +167,7 @@ function syncExamNav(){
         near: '/grades/exams/' + eid + '/near-line',
         global: '/grades/global-compare?exam=' + eid
     };
-    // v1.19.62.65 侧栏「成绩分析」文字入口（领导=总览（全年级对比）/ 其余=班级分析）此前
+    // v1.19.65.64 侧栏「成绩分析」文字入口（领导=总览（全年级对比）/ 其余=班级分析）此前
     // 未纳入同步：页面内切换考试后点它会回到**进入本页时**的考试，与当前选中不一致。
     // 有无「总览」项即区分领导入口（与 base.html 的 _is_lead 分支一致）。
     urls.ana_home = $nav.find('a[data-nav="global"]').length
@@ -178,7 +178,7 @@ function syncExamNav(){
     });
 }
 
-/* v1.19.62.65 班级筛选仅限本场考试：优先用该场考试自己的班级
+/* v1.19.65.64 班级筛选仅限本场考试：优先用该场考试自己的班级
    （该场学生名册 ∪ 该场任课教师表）；未选考试/旧库无快照时回落年级班级 */
 function classListFor(grade){
     var eid = state.examId || $('#gExam').val() || '';
@@ -295,7 +295,7 @@ function bindFilters(){
     $('#gExam').on('change', function(){
         state.examId = $(this).val();
         syncExamNav();          // v1.19.0 同步侧栏本场流程链接
-        fillClasses();          // v1.19.62.65 班级随考试变：仅列本场考试的班级
+        fillClasses();          // v1.19.65.64 班级随考试变：仅列本场考试的班级
         fillCombos();           // 2026-10-16 组合随考试变
         loadCurrent();
     });
@@ -506,12 +506,6 @@ function activateTab(tab, fromClick){
     $('#gSel').toggleClass('d-none', !_popOn);
     // 修复：原条件写反——学科/教师分析 tab 需要显示科目筛选器，年级/班级 tab 隐藏
     $('#gSubjectBar').toggleClass('d-none', tab !== 'subject' && tab !== 'teacher');
-    // 2026-10-22 用户口径：班级/学科按钮行放进 tab 面板**里面**（面板顶部），
-    // 不再悬在主页签与内容之间；gSubjectBar 被「学科/任课教师」两页签共用，
-    // 所以随激活页签搬进当前面板（所有切页签路径都经过本函数，含深链初始）。
-    if (tab === 'class') $('#gClassBar').prependTo('#pane-class');
-    if (tab === 'subject' || tab === 'teacher')
-        $('#gSubjectBar').prependTo('#pane-' + tab);
     if (tab === 'subject' || tab === 'teacher') fillSubject();
     if (tab === 'compare') renderClassList();
     $('#gTabs a[href="#pane-'+tab+'"]').tab('show');
@@ -972,19 +966,54 @@ function renderCharts(area, chartsData){
     area.append(wrap);
 }
 
-function chartOption(c){
-    switch (c.type) {
-        case 'bar': return barOption(c, false);
-        case 'groupbar': return barOption(c, true);
-        case 'stack': return stackOption(c);
-        case 'boxplot': return boxOption(c);
-        case 'line': return lineOption(c);
-        case 'dual': return dualOption(c);
-        case 'combo': return comboOption(c);
-        case 'radar': return radarOption(c);
-        case 'heatmap': return heatOption(c);
-        default: return {};
+/* 2026-10-22 用户口径：深色模式下图表里的图例 / 坐标轴文字太暗（ECharts 默认
+   #333，在深底上几乎看不清）——统一从主题变量 --sl-text 取色；切主题时
+   repaintCharts() 会按新变量整体重绘。 */
+function chartTextColor(){
+    var v = '';
+    try {
+        v = getComputedStyle(document.documentElement)
+            .getPropertyValue('--sl-text').trim();
+    } catch (e) { /* 取不到就回落 */ }
+    return v || '#1e293b';
+}
+function withChartText(opt){
+    if (!opt || typeof opt !== 'object') { return opt; }
+    var col = chartTextColor();
+    opt.textStyle = Object.assign({}, opt.textStyle, {color: col});
+    var legends = opt.legend == null ? [] :
+        (Array.isArray(opt.legend) ? opt.legend : [opt.legend]);
+    legends.forEach(function(l){
+        l.textStyle = Object.assign({color: col}, l.textStyle || {});
+    });
+    ['xAxis', 'yAxis'].forEach(function(k){
+        var axes = opt[k];
+        if (!axes) { return; }
+        (Array.isArray(axes) ? axes : [axes]).forEach(function(a){
+            a.axisLabel = Object.assign({color: col}, a.axisLabel || {});
+            a.nameTextStyle = Object.assign({color: col}, a.nameTextStyle || {});
+        });
+    });
+    if (opt.title && !Array.isArray(opt.title)) {
+        opt.title.textStyle = Object.assign({color: col}, opt.title.textStyle || {});
     }
+    return opt;
+}
+function chartOption(c){
+    var opt;
+    switch (c.type) {
+        case 'bar': opt = barOption(c, false); break;
+        case 'groupbar': opt = barOption(c, true); break;
+        case 'stack': opt = stackOption(c); break;
+        case 'boxplot': opt = boxOption(c); break;
+        case 'line': opt = lineOption(c); break;
+        case 'dual': opt = dualOption(c); break;
+        case 'combo': opt = comboOption(c); break;
+        case 'radar': opt = radarOption(c); break;
+        case 'heatmap': opt = heatOption(c); break;
+        default: opt = {};
+    }
+    return withChartText(opt);
 }
 
 function renderChart(dom, key, c){
@@ -1779,7 +1808,7 @@ $(function(){
         $('#aiToPage').on('click', function(){
             var txt = lastReportText;
             if (!txt){ alert('还没有生成报告'); return; }
-            // 2026-10-13（v1.19.62.65）：原提示「已保存到 AI 报告历史」是假的 ——
+            // 2026-10-13（v1.19.65.64）：原提示「已保存到 AI 报告历史」是假的 ——
             // 这里只把报告插入页面，并不写库；报告只有在「AI 分析」成功时才自动落库，
             // 聊天追问生成的内容不会进历史。文案必须与事实一致，别误导用户。
             showReport(txt, '已插入到当前页签（仅「AI 分析」生成的报告会存入报告历史）');

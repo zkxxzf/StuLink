@@ -18,7 +18,7 @@
 重建后数据原样保留（selection 一律补 ''），行为零变化；
 组合线由 scripts/seed/apply_gaokao_bands.py 按需写入。
 
-表结构必须与 `app/models/grades.py::ExamBand` 一致（`scripts/check_columns.py` 逐列比对）。
+表结构必须与 `app/models/grades.py::ExamBand` 一致（`tests/check_columns.py` 逐列比对）。
 """
 import os as _os
 import sys as _sys

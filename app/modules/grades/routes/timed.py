@@ -1,4 +1,4 @@
-# StuLink v1.19.62.65 2026-10-20
+# StuLink v1.19.65.64 2026-10-20
 # 限时练：列表 / 新建 / 详情四页签 / 删除
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 """限时练页面路由（与普通考试零耦合）。
@@ -162,28 +162,11 @@ def timed_new():
 @login_required
 @perm_required('grades.view')
 def timed_delete(tid):
-    """删除整场限时练（仅年级长 / 管理员）
-
-    2026-10-22 审计修复（P0）：原先直接 `delete_scores_of` + `db.session.delete`，
-    整场成绩与场次**无任何归档**，误删不可恢复（违反「一切删除删前 archive」）。
-    现在走快照归档（保留原 id，恢复后成绩不会变成孤儿），且归档失败即中止。
-    """
-    from app.utils.trash import archive_snapshot
-    from app.models.timed import TimedScore
-
+    """删除整场限时练（仅年级长 / 管理员）"""
     exam = timed_service.assert_visible(tid)
     if not timed_service.can_manage():
         abort(403)
     name = f'{exam.grade} {exam.name}'
-    scores = TimedScore.query.filter_by(exam_id=exam.id).all()
-    rec = archive_snapshot('grades', 'timed_exam_bundle', '限时练场次',
-                           tables=[(TimedExam, exam), (TimedScore, scores)],
-                           summary=f'{name}（成绩 {len(scores)} 条）',
-                           operator=current_user)
-    if rec is None:
-        db.session.rollback()
-        flash('删除已中止：回收站归档未完成，数据未改动', 'danger')
-        return redirect(url_for('grades.timed_detail', tid=tid))
     timed_service.delete_scores_of(exam.id)
     db.session.delete(exam)
     db.session.commit()
@@ -284,5 +267,9 @@ def timed_student_detail(tid, student_no):
         # 越权（他班学生）不报 500，退回成绩总览并提示
         flash(str(e), 'warning')
         return redirect(url_for('grades.timed_detail', tid=exam.id, tab='students'))
-    return render_template('grades/timed/student_detail.html',
-                           exam=exam, **data)
+    ctx = dict(exam=exam, **data)
+    # 2026-10-22 用户口径：逐场成绩翻上一页/下一页要「无感」，不能整页刷新
+    # （整页重载会重新渲染侧栏与图表、闪白、丢滚动位置）。只回 #timedPane 片段。
+    if request.args.get('partial') == '1':
+        return render_template('grades/timed/_student_detail_pane.html', **ctx)
+    return render_template('grades/timed/student_detail.html', **ctx)

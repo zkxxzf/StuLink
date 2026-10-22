@@ -137,8 +137,8 @@
   状态；上线后改成 `✅ 已在生产执行 · 日期` 并补「四、生产执行记录」。
 - 同步把脚本加进执行器 `deploy/nas_migrate_pending.sh` 的 `run_mig` 清单（否则上线漏跑），
   新脚本必须幂等并调用 `scripts/_mig_log.py` 登记。
-- 核对别再靠记忆：`py -3.12 scripts/migration_status.py --data-dir <生产数据目录> --pending`
-  （配合 `scripts/check_columns.py`、`check_indexes.py`）。
+- 核对别再靠记忆：`py -3.12 tests/migration_status.py --data-dir <生产数据目录> --pending`
+  （配合 `tests/check_columns.py`、`check_indexes.py`）。
 - **别写进文档**：NAS 地址、账号口令、令牌 —— 用 `<NAS>` / `<生产数据目录>` 之类占位符。
 
 ## 考务/考场口径（2026-10-11 定案）
@@ -205,23 +205,35 @@
 - **历史方向（史*）没有物理课/物理成绩**，不要给该方向班级配物理老师（原表若填了属笔误）。
 - `exam_teacher_links.source='excel'` 表示来自旧成绩 Excel；`backfill` 为按当前映射推测，可信度低。
 
+## 脚本目录归属（2026-10-22 定稿，新增脚本必须遵守）
+
+- `tests/`：校验、断言、冒烟、回归。根目录只放 `*_regression.py`、
+  `check_*.py`、`scan_security_patterns.py`、`run_all_regression.py`；
+  端到端冒烟放 `tests/smoke/`，审计脚本放 `tests/audit/`。
+- `scripts/`：改数据、导数据、部署、备份、迁移、同步外部业务。
+  子目录 `migrate/` `seed/` `fix/` `ops/` `zhixue/`；
+  `_db_backup.py` / `_ddl_guard.py` / `_mig_log.py` 是共用库，**不要移动**。
+- `tools/`：只放开发期辅助（生成代码/配置、解析 schema、调试 MCP 客户端），
+  **不放**冒烟/check/回归，也不放迁移/备份/同步业务脚本。
+- `_tmp*`、一次性截图/调试脚本只能放 `tests/_local/`（已 gitignore，不入库）。
+
 ## 回归与自检（2026-10-13 起，改代码前后都跑）
 
 **一键跑全部**（4 项自检 + 4 套回归，末行给汇总，失败退出码 1）：
 
 ```powershell
-py -3.12 scripts\run_all_regression.py            # 自检 + 4 套回归
-py -3.12 scripts\run_all_regression.py --with-mcp # 额外跑 MCP 端到端自测（需 mcp_server\.venv）
-py -3.12 scripts\run_all_regression.py --quick    # 只跑 3 项自检
+py -3.12 tests\run_all_regression.py            # 自检 + 4 套回归
+py -3.12 tests\run_all_regression.py --with-mcp # 额外跑 MCP 端到端自测（需 mcp_server\.venv）
+py -3.12 tests\run_all_regression.py --quick    # 只跑静态自检
 ```
 
 - 单项也可单独跑：`tests/academic_regression.py`（教务，含 `item` 名可只跑一项，如
   `py -3.12 tests/academic_regression.py AUDITP2`）、`tests/sec_regression.py`、
   `tests/dormitory_regression.py`、`tests/class_scope_regression.py`。
-- 自检：`scripts/scan_security_patterns.py`（六类安全红线，必须 0 命中）、
-  `scripts/check_columns.py`（模型列 vs 现网列）、`scripts/check_indexes.py`
+- 自检：`tests/scan_security_patterns.py`（六类安全红线，必须 0 命中）、
+  `tests/check_columns.py`（模型列 vs 现网列）、`tests/check_indexes.py`
   （模型声明索引 vs 现网；`--fix` 可补，改库前会先备份）、
-  `scripts/check_frontend_compat.py`（2026-10-14 新增：模板内联脚本 + 手写 JS 不得出现
+  `tests/check_frontend_compat.py`（2026-10-14 新增：模板内联脚本 + 手写 JS 不得出现
   ES2020+ 语法 —— 旧微信 X5 会让整段脚本 SyntaxError；UI-07 回归过，故固化成自检）。
 - MCP 服务改动另跑：`mcp_server\.venv\Scripts\python.exe mcp_server\smoke_scores.py`。
 - `tests/_archive/` 是**一次性历史脚本**（按日期 `qa_YYYYMMDD/` 归档，被若干批次总结当验证证据引用），
@@ -246,8 +258,8 @@ py -3.12 scripts\run_all_regression.py --quick    # 只跑 3 项自检
 - 令牌只在 `config.json` 与启动横幅（首尾片段）出现：**不要回显、不要写进文档/日志/提交**。
   该文件**从未进过 git**（本地与 `origin` 均无；`.gitignore` 已含它），它的**任何副本/备份/归档
   也不许提交**（`.gitignore` 已封堵 `**/backup_mcp_server*/`、`tests/**/config.json`、
-  `**/config.json.bak*`）；`scripts/scan_security_patterns.py` 第 7 项会按令牌**字面值**
-  全仓搜一遍并拦截（含 `backup*` 目录，命令 `py -3.12 scripts/scan_security_patterns.py` 必须 0 命中）。
+  `**/config.json.bak*`）；`tests/scan_security_patterns.py` 第 7 项会按令牌**字面值**
+  全仓搜一遍并拦截（含 `backup*` 目录，命令 `py -3.12 tests/scan_security_patterns.py` 必须 0 命中）。
 - 认证限速三层：同来源+同账号连错 5 次 → 只锁该来源（**不锁账号**）；同来源失败总数 20 次
   → 挡该来源；跨来源累计 → 只加延迟不拒绝。改这块别把"锁来源"退回"锁账号"（那会被人拿错口令锁死老师账号）。
 - lint（本仓库不装进依赖，按需 `py -3.12 -m pip install ruff`）：

@@ -7,6 +7,7 @@
 {% set _task_id = task_id|default(request.args.get('task') or '', true) %}
 {% block extra_css_head %}
 <link href="{{ su('css/ai_report.css') }}" rel="stylesheet">
+<link href="{{ su('css/ai_board.css') }}" rel="stylesheet">
 <style>
     .ai-studio-list { max-height: 62vh; overflow: auto; }
     .ai-stage-err { color: var(--bs-danger); }
@@ -166,11 +167,13 @@
                     <div id="aiProgress" class="mt-4 d-none">
                         <div id="aiStage" class="small text-muted mb-2"></div>
                         <div id="aiTools" class="ai-tools mb-3"></div>
-                        <div class="ai-doc-paper">
+                        {# 2026-10-22：报告画布改为深色看板皮肤（ai_board.css），
+                           与「分享链接」打开的对外页面同一套视觉。 #}
+                        <div class="ai-doc-paper ai-board-paper">
                             <div class="ai-doc-head">
                                 <i class="bi bi-file-earmark-text"></i> 分析报告
                             </div>
-                            <div class="ai-report-body ai-doc"></div>
+                            <div class="ai-report-body ai-doc ai-board-doc"></div>
                         </div>
                         <div class="d-flex flex-wrap gap-2 mt-3 pt-2 border-top">
                             {# 进行中：可请求停止（当前步骤完成即停）；结束后：可把当时的选择+提示词带回生成器改 #}
@@ -182,6 +185,11 @@
                             </button>
                             <button class="btn btn-sm btn-outline-secondary" type="button" id="aiCopy">
                                 <i class="bi bi-clipboard"></i> 复制
+                            </button>
+                            {# 2026-10-22：分享链接（登录即可查看）。生成后才能点。 #}
+                            <button class="btn btn-sm btn-outline-primary" type="button" id="aiShare" disabled
+                                    title="报告生成后才能分享">
+                                <i class="bi bi-share"></i> 分享
                             </button>
                             <button class="btn btn-sm btn-outline-secondary" type="button" id="aiExport">
                                 <i class="bi bi-filetype-html"></i> 导出 HTML
@@ -211,6 +219,56 @@
     </div>
 </div>
 
+{# 分享报告弹窗（2026-10-22）：生成/复制/预览/撤销链接。
+   只在这一份报告上授权，不改变「AI 分析仅本人可见」的默认口径。 #}
+<div class="modal fade" id="aiShareModal" tabindex="-1" aria-labelledby="aiShareTitle" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content ai-share-modal">
+            <div class="modal-header py-2">
+                <h6 class="modal-title" id="aiShareTitle"><i class="bi bi-share"></i> 分享这份报告</h6>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="关闭"></button>
+            </div>
+            <div class="modal-body">
+                <div class="ai-share-tip">
+                    <i class="bi bi-info-circle"></i>
+                    <span>任何<b>能登录 StuLink 的账号</b>打开链接都能查看，未登录会先跳登录页。
+                        报告里可能包含学生姓名与成绩，请确认内容可以外发。</span>
+                </div>
+
+                <div id="aiShareSetup">
+                    <label class="form-label small text-muted mb-1">链接有效期</label>
+                    <div class="ai-share-days" role="group" aria-label="链接有效期">
+                        <button type="button" class="ai-share-day" data-days="7">7 天</button>
+                        <button type="button" class="ai-share-day active" data-days="30">30 天</button>
+                        <button type="button" class="ai-share-day" data-days="90">90 天</button>
+                        <button type="button" class="ai-share-day" data-days="0">长期</button>
+                    </div>
+                    <button type="button" class="btn btn-primary btn-sm w-100 mt-3" id="aiShareCreate">
+                        <i class="bi bi-link-45deg"></i> 生成分享链接
+                    </button>
+                </div>
+
+                <div id="aiShareReady" class="d-none">
+                    <label class="form-label small text-muted mb-1">分享链接</label>
+                    <div class="input-group input-group-sm">
+                        <input type="text" class="form-control" id="aiShareUrl" readonly>
+                        <button type="button" class="btn btn-primary" id="aiShareCopy">复制</button>
+                    </div>
+                    <div class="ai-share-stat" id="aiShareStat"></div>
+                    <div class="d-flex align-items-center gap-2 mt-3">
+                        <button type="button" class="btn btn-sm btn-outline-secondary" id="aiShareOpen">
+                            <i class="bi bi-box-arrow-up-right"></i> 打开预览
+                        </button>
+                        <button type="button" class="btn btn-sm btn-outline-danger ms-auto" id="aiShareRevoke">
+                            撤销链接
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
 {# 路径一律由服务端注入，JS 不硬编码 #}
 <script type="application/json" id="aiStudioCfg">{
     "exam_id": {{ _exam_id|tojson }},
@@ -230,4 +288,6 @@
 <script src="{{ su('js/ai_task_ui.js') }}"></script>
 <script src="{{ su('js/ai_prompt_gen.js') }}"></script>
 <script src="{{ su('js/ai_studio.js') }}"></script>
+{# 分享链接：生成/复制/撤销（独立文件，避免 ai_studio.js 继续膨胀） #}
+<script src="{{ su('js/ai_share.js') }}"></script>
 {% endblock %}

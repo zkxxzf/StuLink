@@ -3,6 +3,8 @@
 {% block extra_css_head %}
 <link href="{{ su('css/report.css') }}" rel="stylesheet">
 <link href="{{ su('css/ai_report.css') }}" rel="stylesheet">
+{# 2026-10-22：AI 报告使用深色看板皮肤，与 AI 工作台/分享页同一视觉 #}
+<link href="{{ su('css/ai_board.css') }}" rel="stylesheet">
 <style>
     /* AI 一句话分析：报告排版 / 胶囊 / 工具行统一样式在 css/ai_report.css（与 AI 分析工作台共用） */
     .rp-ai-card { border: 1px solid var(--sl-border); }
@@ -10,7 +12,7 @@
 </style>
 {% endblock %}
 {% block content %}
-{# v1.19.62.65 考试态：侧栏入口带 ?exam=<id>（此前这里只认 exam_id，本场 id 被丢掉）。
+{# v1.19.65.64 考试态：侧栏入口带 ?exam=<id>（此前这里只认 exam_id，本场 id 被丢掉）。
    统一先问 exam_nav()（认 ?exam / exam_id / 路径），考试态下隐藏「考试」下拉（只看本场）。 #}
 {% set _en = exam_nav() %}
 {% set _eid = _en.exam_id if _en else (request.args.get('exam') or request.args.get('exam_id') or '') %}
@@ -133,11 +135,11 @@
             <div id="rpAiOut" class="mt-4 d-none">
                 <div id="rpAiStage" class="small text-muted mb-2"></div>
                 <div id="rpAiTools" class="rp-ai-tools mb-3"></div>
-                <div class="ai-doc-paper">
+                <div class="ai-doc-paper ai-board-paper">
                     <div class="ai-doc-head">
                         <i class="bi bi-file-earmark-text"></i> 分析报告
                     </div>
-                    <div class="rp-ai-report ai-doc"></div>
+                    <div class="rp-ai-report ai-doc ai-board-doc"></div>
                 </div>
                 <div class="d-flex flex-wrap gap-2 mt-3 pt-2 border-top">
                     {# 进行中可停止；中断/失败/停止后可把当时的选择与提示词带回生成器 #}

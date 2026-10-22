@@ -249,7 +249,8 @@ def _run(app, task_id, user_id, exam_id, question, direction, layer, cfg, histor
                 elif ev.get('type') == 'error':
                     status, err = 'error', str(ev.get('text') or '')
                     break
-            if status == 'done' and not html_text:
+            if status == 'done' and not (html_text or '').strip():
+                # 2026-10-23：只有空白字符也算"没有内容"，否则会落一条空报告
                 status, err = 'error', '模型没有返回报告内容，请把问题描述得更具体一些'
         except Exception as e:              # noqa: BLE001  线程内异常必须自己兜住
             logger.warning('AI 任务执行异常 task=%s', task_id, exc_info=True)
@@ -294,7 +295,7 @@ def _finish(task_id, status, err, html_text, trace, scope_text, cfg, question):
     task.error = (err or '')[:500]
     task.finished_at = datetime.now()
     task.trace = json.dumps(trace, ensure_ascii=False)
-    if status == 'done' and html_text:
+    if status == 'done' and (html_text or '').strip():
         exam = db.session.get(Exam, task.exam_id)
         report = AiReport(user_id=task.user_id, exam_id=task.exam_id,
                           grade=(exam.grade if exam is not None else None),

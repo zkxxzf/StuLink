@@ -270,11 +270,8 @@ def create():
             username=form.username.data,
             real_name=form.real_name.data,
             role=role,
-            # 2026-10-22 审计修复（P0）：此处原样引用 `grades` / `class_name`，
-            # 但这两个变量只在 `edit()` 里定义 —— 新建管理员一提交就 NameError
-            # → 500。/users/create 只建管理员账号，年级与班级本就不适用。
-            grade=None,
-            class_name=None,
+            grade=','.join(grades) or None,
+            class_name=class_name,
             must_change_pwd=True,
         )
         user.phone = phone_norm
@@ -285,7 +282,7 @@ def create():
         user.set_password(generated_pwd)
         db.session.add(user)
         db.session.commit()
-        # v1.19.62.65：非管理员自动同步创建教师档案（admin 不写入）
+        # v1.19.65.64：非管理员自动同步创建教师档案（admin 不写入）
         _sync_state, _ = teacher_sync.sync_from_user(user)
         db.session.commit()
         log_operation(current_user, '创建', '用户', user.id, f'{user.real_name} ({user.role_display})')
@@ -428,7 +425,7 @@ def edit(id):
         if form.password.data:
             user.set_password(form.password.data)
         db.session.commit()
-        # v1.19.62.65：教师角色变更 → 同步到 academic.teachers（admin 自动 skip）
+        # v1.19.65.64：教师角色变更 → 同步到 academic.teachers（admin 自动 skip）
         teacher_sync.sync_from_user(user)
         db.session.commit()
         log_operation(current_user, '更新', '用户', user.id, f'{user.real_name} 信息已更新')
@@ -525,7 +522,7 @@ def toggle(id):
     if was_active and not user.is_active:
         user.wx_token_ver = int(user.wx_token_ver or 0) + 1
     db.session.commit()
-    # v1.19.62.65：启禁变更 → 同步 Teacher.status (active/left)
+    # v1.19.65.64：启禁变更 → 同步 Teacher.status (active/left)
     teacher_sync.sync_from_user(user)
     db.session.commit()
     status = '启用' if user.is_active else '禁用'

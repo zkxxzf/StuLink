@@ -22,7 +22,7 @@ __pycache__/
 screenshot*
 step*
 img-*
-verify*
+verify*.png
 _tmp_*
 test_debug.py
 
@@ -113,8 +113,10 @@ data_backup_*/
 backups/
 .ruff_cache/
 
-# QA 过程产物（勿入库）：如 tests/qa_20261010/backup_before_delete 这类"删除前备份"副本目录
-tests
+# QA 过程产物（勿入库）：tests 本身要入库，只忽略本地归档与临时目录。
+# 2026-10-22 修正：原规则写成 `tests`，把整个 tests/ 都忽略了（新回归脚本无法入库）。
+tests/_archive/
+tests/_local/
 
 # 浏览器油猴脚本（2026-10-21 用户要求：只在本机用，**不要上传到远端仓库**；
 # 自动更新地址走 dd.sakaay.com/flies/ 那一套）

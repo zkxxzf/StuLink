@@ -7,7 +7,7 @@
 
 背景：两表的「当前方案唯一」原先只由服务层循环翻转保证（正常路径 OK），手工改库 /
 并发提交仍可能留下两个 is_current=1，页面会随机取到其中一个。模型 `__table_args__`
-已同步声明（`scripts/check_indexes.py` 可复验）。
+已同步声明（`tests/check_indexes.py` 可复验）。
 
 安全：建索引前先只读核对 `COUNT(*) WHERE is_current=1`，若 > 1 则**报错退出不建**
 （先去数据里把多余的当前方案收敛为一个）；幂等；改库前经 _db_backup 备份。

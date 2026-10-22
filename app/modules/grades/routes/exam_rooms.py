@@ -129,7 +129,7 @@ def exam_room_delete(lid):
 @login_required
 @perm_required('grades.edit')
 def exam_rooms_template():
-    """v1.19.62.65 房间库批量导入模板（只需「位置」列，「备注」可选）"""
+    """v1.19.65.64 房间库批量导入模板（只需「位置」列，「备注」可选）"""
     wb = openpyxl.Workbook()
     ws = wb.active
     ws.title = '房间'
@@ -150,7 +150,7 @@ def exam_rooms_template():
 @login_required
 @perm_required('grades.edit')
 def exam_rooms_import():
-    """v1.19.62.65 批量导入学校房间（写入房间库 affair_room_libs）。
+    """v1.19.65.64 批量导入学校房间（写入房间库 affair_room_libs）。
 
     表头容错：位置/房间/地点/考场 任一即可，备注/说明 可选（大小写与空格不敏感）。
     按「位置」去重：库里已有 → 仅更新备注；没有 → 新增。返回新增/更新/跳过条数。

@@ -19,7 +19,7 @@
     .g-class-bar, .g-subject-bar { display: flex; flex-wrap: wrap; gap: 4px; }
     .g-class-bar .btn, .g-subject-bar .btn { min-width: 52px; }
 </style>
-{# v1.19.62.65 考试态（从侧栏「班级分析 / 学科分析」进入，带 ?exam=<id>）：
+{# v1.19.65.64 考试态（从侧栏「班级分析 / 学科分析」进入，带 ?exam=<id>）：
    本页只看这一场，顶部不再让用户选年级/考试 —— 直接按本场加载（initial_exam_id 已由服务端带入，
    JS 会选中它；这里把两个下拉隐藏）。非考试态（全局成绩分析）保持原样。 #}
 {% set _en = exam_nav() %}
@@ -110,9 +110,8 @@
 
 {# 2026-10-19 用户口径：班级/学科筛选从下拉改成一排按钮（01班…、语文…），
    与成绩单「按班级查看」一致；只在对应用页签显示，点击即切换。
-   2026-10-21 曾放到主页签下面，但仍在 tab 面板外；
-   2026-10-22 用户口径：按钮行必须放进 tab 面板**里面**（面板顶部、内容之上），
-   由 grades.js::activateTab 随页签把按钮行搬进当前面板。 #}
+   2026-10-21 用户口径：这两个子标签（班级 / 学科）放到主页签**下面**，
+   即「筛选栏 → 年级分析/班级分析/… → 班级或学科按钮 → 内容」。 #}
 <ul class="nav nav-tabs mb-2" id="gTabs" role="tablist">
     <li class="nav-item" data-tab="grade"><a class="nav-link" data-bs-toggle="tab" href="#pane-grade">年级分析</a></li>
     <li class="nav-item" data-tab="class"><a class="nav-link" data-bs-toggle="tab" href="#pane-class">班级分析</a></li>

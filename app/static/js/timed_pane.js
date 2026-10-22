@@ -198,6 +198,9 @@
         if (!a || e.defaultPrevented || e.button !== 0) { return; }
         if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) { return; }
         if (a.target && a.target !== '_self') { return; }
+        // 2026-10-22：分页「上一页」在第一页时是 li.disabled —— 视觉不可点，
+        // 但链接还在，点下去会请求 page=0；这里直接吞掉，别再发无意义请求。
+        if (a.closest && a.closest('.disabled')) { e.preventDefault(); return; }
         e.preventDefault();
         load(a.href, true);
     });

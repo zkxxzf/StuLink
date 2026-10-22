@@ -1,4 +1,4 @@
-/* StuLink v1.19.62.65 2026-10-10 全局对比
+/* StuLink v1.19.65.64 2026-10-10 全局对比
  * 班级 × 学科宽表：固定列（年级/班级/人数/方向/组合/属性）+ 每科（去差均分 + 各分数线）。
  * 分数线可选：默认勾选 211线/特控线/本科线，其余层（清北/985…）勾选才显示；
  * 班主任并入「总分」格下方（不再单列），各科成绩下方为本场任课教师快照。
@@ -72,7 +72,7 @@
             return;
         }
         if (missed) {
-            // v1.19.62.65 本场考试不在可见列表（已删除 / 超出数据范围 / 已毕业）：
+            // v1.19.65.64 本场考试不在可见列表（已删除 / 超出数据范围 / 已毕业）：
             // 不能静默显示最近一场让用户误当本场（考试态下下拉原本隐藏）——
             // 恢复下拉并明确提示。
             $('#ldExam').removeClass('d-none');
@@ -89,12 +89,9 @@
 
     $('#ldExam').on('change', function () { checkedLines = null; load(); });
     $('#ldDir').on('change', load);
-    // 横轴排序：勾上=班型优先，取消=方向优先（只重画图表，不重新拉数据）
+    // 横轴排序：默认按班级序号，勾上「先按班型排」＝班型优先（只重画图表，不重新拉数据）
     $('#ldSortType').prop('checked', sortByType).on('change', function () {
         sortByType = !!this.checked;
-        try {
-            window.localStorage.setItem(SORT_STORE, sortByType ? 'type' : 'dir');
-        } catch (e) { /* 隐私模式忽略 */ }
         if (lastChartData) { renderCharts(lastChartData); }
     });
     $('#ldExport').on('click', function () {
@@ -448,13 +445,10 @@
          · 勾上「先按班型」：班型 → 方向 → 组合 → 班号
          · 取消勾选：     方向 → 组合 → 班号
        原来直接吃后端 groups 的顺序，同一方向里组合来回跳，看着乱。 */
-    var SORT_STORE = 'stulink.gc.chartSort';
-    var sortByType = true;      // 默认先按班型（用户口径：先班型再方向）
-    try {
-        var _savedSort = window.localStorage.getItem(SORT_STORE);
-        if (_savedSort === 'dir') { sortByType = false; }
-        if (_savedSort === 'type') { sortByType = true; }
-    } catch (e) { /* 隐私模式读不到就按默认 */ }
+    /* 2026-10-21 用户口径：横轴**默认按班级序号**（01班 → 02班 …），
+       需要时用户手动勾「先按班型排」再切成班型优先；不记忆到 localStorage，
+       每次进页面都回到默认的班级顺序。 */
+    var sortByType = false;
 
     var CHART_TYPE_ORDER = { '卓越班': 0, '强基班': 1 };   // 未知班型排最后
     var CHART_DIR_ORDER = { '物理': 0, '历史': 1 };
@@ -538,9 +532,9 @@
         };
     }
 
-    /* 一张图 = 分层上线人数堆积柱（左轴）+ 各分层上线率折线（右轴 %）。
-       图例只列上线率折线，点一下显隐；默认只开特控线、本科线。
-       柱顶数字＝去差均分（柱高才是人数）。 */
+    /* 一张图 = 百分比堆积柱（每班都 100%）+ 各分层上线率折线（同一 0~100% 轴）。
+       柱：自下而上按分数线由高到低堆积，未上线在最上；段内标人数。
+       线：每层沿自己那一段的顶边走，把各班占比连起来看趋势。 */
     function comboOption(subject, items, d, colors) {
         var layers = d.layers || [];
         // 一张图里有 ≥2 个组合时，横轴带上组合名（否则按组合分组后
@@ -560,48 +554,42 @@
         var series = [];
         var legendData = [];
         var selected = {};
-        var rotate = names.length > 9 ? 32 : 0;
+        var rotate = names.length > 9 ? 30 : 0;
+        var countOfSeries = {};      // 系列名 → 各班人数（tooltip 用）
 
-        // 左轴留 35% 余量：柱顶落在 3/4 高处，柱顶均分那一排与
-        // 上线率（右轴 0~100%）的数值标签错开，不会叠字；
-        // 「柱高比」也能精确换算，供 labelLayout 再兜一层避让
-        var maxTotal = 1;
-        stacks.forEach(function (s) {
-            maxTotal = Math.max(maxTotal, s.total || 0);
-        });
-        var yMax = Math.ceil(maxTotal * 1.35 / 10) * 10 || 10;
-
-        function rateOf(x, name) {
+        /* 某班某科的某条线：{n（该线及以上人数）, rate（上线率%）} */
+        function lineOf(x, name) {
             var c = (x.row.cells || {})[subject] || {};
-            var ln = (c.lines || {})[name];
-            return (ln && ln.rate !== null && ln.rate !== undefined)
-                ? ln.rate : null;
+            return (c.lines || {})[name] || null;
         }
 
-        /* 柱顶标签＝去差均分（挂在最顶那段，零高段也落在堆顶）；
-           该科没成绩/没均分时留空，不显示占位数字。 */
+        /* 2026-10-21 用户口径（第二轮）：改成**百分比堆积柱**——每根柱都是 100%，
+           段高＝该段人数占本班参考人数的比例，便于班与班之间横向比较。 */
+        function pctOf(s, n) {
+            return s.total ? +(n * 100 / s.total).toFixed(2) : 0;
+        }
+
+        /* 柱顶标签＝去差均分（2026-10-21 用户口径：分数上方要写清是「去差均分」）。
+           两行显示：上「去差均分」小字、下分数大字，比一行纯数字更窄也更好读。 */
         function avgLabel() {
             return {
-                show: true, position: 'top', color: colors.text, fontSize: 9,
+                show: true, position: 'top', distance: 4,
                 formatter: function (p) {
                     var it = items[p.dataIndex] || {};
                     var c = (it.row.cells || {})[subject] || {};
                     var v = c.trim_avg;
-                    return (v === null || v === undefined) ? '' : v;
-                }
-            };
-        }
-
-        /* 段内标签＝该段人数；太窄的段（不足 5%）不标，免得压到相邻段，
-           精确数字看悬浮提示。 */
-        function segLabel(color) {
-            return {
-                show: true, position: 'inside', color: color, fontSize: 9,
-                formatter: function (p) {
-                    var st = stacks[p.dataIndex] || { total: 0 };
-                    var v = p.value;
-                    if (!v || !st.total) { return ''; }
-                    return (v * 20 >= st.total) ? v : '';
+                    return (v === null || v === undefined)
+                        ? '' : '{t|去差均分}\n{v|' + v + '}';
+                },
+                rich: {
+                    t: {
+                        fontSize: 10, lineHeight: 12, color: colors.text,
+                        align: 'center'
+                    },
+                    v: {
+                        fontSize: 13, fontWeight: 600, lineHeight: 15,
+                        color: colors.text, align: 'center'
+                    }
                 }
             };
         }
@@ -620,52 +608,70 @@
         }
 
         if (!segNames.length) {
-            /* 该科一层都没划：只画一根参考人数，别把全班算成「未上线」 */
-            var only = {
-                name: '参考人数', type: 'bar', yAxisIndex: 0, barMaxWidth: 24,
-                data: stacks.map(function (s) { return s.total; }),
-                itemStyle: { color: colors.palette[0], borderRadius: [3, 3, 0, 0] },
-                label: avgLabel()
-            };
-            series.push(only);
-        } else {
-            // 自下而上：未上线（灰）→ 最低层 → … → 最高层
+            /* 该科一层都没划：一根满格柱，只标参考人数，别把全班算成「未上线」 */
+            var totals = stacks.map(function (s) { return s.total; });
+            countOfSeries['参考人数'] = totals;
             series.push({
-                // 「未上线」段保留，但默认不在段内标人数（用户口径）；
-                // 名字带「人数」、灰色不透明到 0.55 —— 太淡会被看成
-                // 图例里「未选中」的置灰项（用户反馈过）
-                name: '未上线人数', type: 'bar', yAxisIndex: 0, stack: 'cnt',
-                barMaxWidth: 24,
-                data: stacks.map(function (s) { return s.off; }),
-                itemStyle: { color: withAlpha(colors.muted, 0.55) },
+                name: '参考人数', type: 'bar', yAxisIndex: 0, barMaxWidth: 26,
+                data: stacks.map(function () { return 100; }),
+                itemStyle: { color: colors.palette[0], borderRadius: [4, 4, 0, 0] },
+                label: {
+                    show: true, position: 'inside', color: '#fff',
+                    fontSize: 12, fontWeight: 600,
+                    formatter: function (p) { return totals[p.dataIndex] || ''; }
+                },
                 emphasis: { disabled: true }
             });
-            for (var j = segNames.length - 1; j >= 0; j--) {
-                var sn = segNames[j];
-                var sname = lineLabel(sn) + '人数';
+        } else {
+            /* 2026-10-21 用户口径：柱子显示**班级内全部学生**的占比，自下而上按
+               分数线由高到低堆积 —— 清北（最高线）在最底、依次 985 / 211 / 特控 /
+               本科，未上线压在最上面；以后新增分数线同样按高低插进这条顺序。 */
+            segNames.forEach(function (sn, j) {
+                var counts = stacks.map(function (s) { return segOf(s, sn); });
+                var nm = lineLabel(sn) + '人数';
+                countOfSeries[nm] = counts;
                 series.push({
-                    name: sname, type: 'bar', yAxisIndex: 0, stack: 'cnt',
-                    barMaxWidth: 24,
-                    data: stacks.map(function (s) { return segOf(s, sn); }),
+                    name: nm, type: 'bar', yAxisIndex: 0, stack: 'cnt',
+                    barMaxWidth: 26,
+                    data: stacks.map(function (s, i) { return pctOf(s, counts[i]); }),
                     itemStyle: {
                         color: colors.palette[j % colors.palette.length]
                     },
-                    label: segLabel('#fff'),
+                    label: {
+                        // 段内标**人数**（柱高是百分比，人数才是教务要看的口径）
+                        show: true, position: 'inside', color: '#fff',
+                        fontSize: 11, fontWeight: 600,
+                        formatter: function (p) {
+                            var v = counts[p.dataIndex];
+                            return (v == null || v === 0) ? '' : v;
+                        }
+                    },
                     emphasis: { disabled: true }
                 });
-            }
-            // 图例：堆积段（高→低）+ 未上线，全部默认开启、可点隐藏
+            });
+            // 未上线（灰）＝最后一段，堆在最上面
+            var offs = stacks.map(function (s) { return s.off; });
+            countOfSeries['未上线人数'] = offs;
+            series.push({
+                name: '未上线人数', type: 'bar', yAxisIndex: 0, stack: 'cnt',
+                barMaxWidth: 26,
+                data: stacks.map(function (s, i) { return pctOf(s, offs[i]); }),
+                itemStyle: { color: withAlpha(colors.muted, 0.55) },
+                label: {
+                    show: true, position: 'inside', color: '#fff',
+                    fontSize: 11, fontWeight: 600,
+                    formatter: function (p) {
+                        var v = offs[p.dataIndex];
+                        return v ? v : '';
+                    }
+                },
+                emphasis: { disabled: true }
+            });
             legendData = segNames.map(function (n) {
                 return lineLabel(n) + '人数';
             });
             legendData.push('未上线人数');
-            // 用户口径：「未上线人数」默认不展示（图例里仍留着，点一下才出来）；
-            // 其余堆积段默认全开
-            legendData.forEach(function (n) {
-                selected[n] = (n !== '未上线人数');
-            });
-            // 均分标签锚点：不可见的零高段堆在最上面，图例里隐藏某一层后
-            // 数字仍停在新的堆顶（挂在最高层系列上会跟着被一起隐藏）
+            // 均分标签锚点：零高段堆在 100% 顶端，柱顶那排数字不随图例显隐跑掉
             series.push({
                 name: '__avg', type: 'bar', yAxisIndex: 0, stack: 'cnt',
                 data: stacks.map(function () { return 0; }),
@@ -673,77 +679,48 @@
                 emphasis: { disabled: true },
                 label: avgLabel()
             });
-        }
 
-        var prefer = layers.filter(function (n) { return /特控|本科/.test(n); });
-        if (!prefer.length) { prefer = (d.default_lines || []).slice(0, 2); }
-        var lineBase = segNames.length || 1;   // 折线配色避开堆积段用过的颜色
-        layers.forEach(function (name, i) {
-            var nm = lineLabel(name) + '上线率';
-            var lc = colors.palette[(i + lineBase) % colors.palette.length];
-            series.push({
-                name: nm, type: 'line', yAxisIndex: 1,
-                data: items.map(function (x) { return rateOf(x, name); }),
-                smooth: true, symbol: 'circle', symbolSize: 4, connectNulls: true,
-                lineStyle: { width: 2 },
-                itemStyle: { color: lc },
-                // 折线数值也标出来：默认在点右侧；与柱顶均分标签同高时
-                // 用 labelLayout 把数值上下挪开，别和均分叠字
-                label: {
-                    show: true, position: 'right', distance: 4,
-                    fontSize: 8, color: lc,
-                    backgroundColor: withAlpha(colors.surface, 0.82),
-                    padding: [1, 2], borderRadius: 2,
-                    formatter: function (p) {
-                        return (p.value === null || p.value === undefined)
-                            ? '' : p.value + '%';
-                    }
-                },
-                labelLayout: function (p) {
-                    var x = items[p.dataIndex];
-                    var r = x ? rateOf(x, name) : null;
-                    if (r === null || r === undefined) { return; }
-                    var st = stacks[p.dataIndex] || { total: 0 };
-                    var dy = 0;
-                    // ① 撞上柱顶那一排均分标签：往上/下挪开
-                    var diff = r / 100 - st.total / yMax;
-                    if (Math.abs(diff) < 0.08) {
-                        dy += (diff > 0 ? -16 : 16);
-                    }
-                    // ② 同一横坐标上有别的上线率数值贴得很近：低的那条让开
-                    var near = null;
-                    layers.forEach(function (o) {
-                        if (o === name) { return; }
-                        var rv = rateOf(x, o);
-                        if (rv === null || rv === undefined) { return; }
-                        if (Math.abs(rv - r) < 6 && (near === null
-                                || Math.abs(rv - r) < Math.abs(near - r))) {
-                            near = rv;
+            /* 2026-10-21 用户口径（第二轮）：加上**比例折线**把各班连起来 ——
+               每条线走自己那一段的顶边（＝该线及以上占比），趋势一眼可见。 */
+            segNames.forEach(function (name, i) {
+                var lc = colors.palette[i % colors.palette.length];
+                var nm = lineLabel(name) + '上线率';
+                series.push({
+                    name: nm, type: 'line', yAxisIndex: 0,
+                    data: items.map(function (x) {
+                        var ln = lineOf(x, name);
+                        return (ln && ln.rate != null) ? ln.rate : null;
+                    }),
+                    smooth: true, symbol: 'circle', symbolSize: 5,
+                    connectNulls: true,
+                    lineStyle: { width: 2 },
+                    itemStyle: { color: lc },
+                    label: {
+                        show: true, position: 'right', distance: 3,
+                        fontSize: 10, color: lc,
+                        backgroundColor: withAlpha(colors.surface, 0.85),
+                        padding: [1, 2], borderRadius: 2,
+                        formatter: function (p) {
+                            return (p.value == null) ? '' : p.value + '%';
                         }
-                    });
-                    if (near !== null) {
-                        if (r > near) {
-                            // 高的那条在上、后画的会压住它 → 只要不贴顶就上移
-                            if (r <= 88) { dy -= 14; }
-                        } else {
-                            dy += 14;
-                        }
-                    }
-                    return dy ? { dy: dy } : undefined;
-                }
+                    },
+                    labelLayout: { hideOverlap: true },
+                    z: 6,
+                    emphasis: { disabled: true }
+                });
+                legendData.push(nm);
             });
-            legendData.push(nm);
-            selected[nm] = prefer.indexOf(name) >= 0;
-        });
+            legendData.forEach(function (n) { selected[n] = true; });
+        }
         return {
             animationDuration: 260,
-            // 图例改为换行排（原来 scroll 会分页 1/2，多层的场的标签点不到），
-            // 顶部多留两行的高度；右侧留出折线数值标签的位置
-            grid: { left: 6, right: 36, top: 54, bottom: 4, containLabel: true },
+            // 图例行数比原来多（堆积段 + 比例折线），顶部留两到三行；
+            // 再加柱顶「去差均分」两行标签的高度
+            grid: { left: 8, right: 52, top: 86, bottom: 4, containLabel: true },
             legend: {
-                top: 0, type: 'plain', itemWidth: 10, itemHeight: 8,
-                itemGap: 8,
-                textStyle: { color: colors.text, fontSize: 10 },
+                top: 0, type: 'plain', itemWidth: 12, itemHeight: 9,
+                itemGap: 10,
+                textStyle: { color: colors.text, fontSize: 12 },
                 data: legendData, selected: selected
             },
             tooltip: {
@@ -759,28 +736,33 @@
                     var out = esc(ps[0].axisValue) + '　参考 ' + st.total
                         + ' 人 · 去差均分 ' + av + '<br>';
                     ps.forEach(function (p) {
-                        if (p.seriesName === '__avg') { return; }   // 均分锚点
-                        var unit = p.seriesType === 'bar' ? ' 人' : '%';
-                        out += p.marker + esc(p.seriesName) + '：'
-                            + (p.value == null ? '—' : p.value + unit) + '<br>';
+                        if (('' + p.seriesName).indexOf('__') === 0) { return; }  // 均分锚点
+                        var cnt = countOfSeries[p.seriesName];
+                        if (cnt) {       // 堆积段：人数 + 占比
+                            out += p.marker + esc(p.seriesName) + '：'
+                                + (cnt[p.dataIndex] == null ? '—' : cnt[p.dataIndex] + ' 人')
+                                + '（' + p.value + '%）<br>';
+                        } else {         // 比例折线：只给百分比
+                            out += p.marker + esc(p.seriesName) + '：'
+                                + (p.value == null ? '—' : p.value + '%') + '<br>';
+                        }
                     });
                     return out;
                 }
             },
             xAxis: {
                 type: 'category', data: names,
-                axisLabel: { color: colors.text, fontSize: 10, interval: 0, rotate: rotate },
+                axisLabel: { color: colors.text, fontSize: 12, interval: 0, rotate: rotate },
                 axisTick: { show: false },
                 axisLine: { lineStyle: { color: colors.line } }
             },
             yAxis: [{
-                type: 'value', min: 0, max: yMax,
-                axisLabel: { color: colors.text, fontSize: 10 },
+                type: 'value', min: 0, max: 100, interval: 20,
+                axisLabel: {
+                    color: colors.text, fontSize: 12,
+                    formatter: '{value}%'
+                },
                 splitLine: { lineStyle: { color: colors.line } }
-            }, {
-                type: 'value', min: 0, max: 100,
-                axisLabel: { color: colors.text, fontSize: 10, formatter: '{value}%' },
-                splitLine: { show: false }
             }],
             series: series
         };

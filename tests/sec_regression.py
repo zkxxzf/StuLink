@@ -5,7 +5,7 @@
 每项断言的是**修复后的正确行为**：未修复时该项 FAIL，修复后 PASS。
 
 设计要点：
-- 完全沿用 `scripts/smoke_permissions.py` 的套路：临时目录 + 临时 SQLite 库 + create_app()，
+- 完全沿用 `tests/smoke_permissions.py` 的套路：临时目录 + 临时 SQLite 库 + create_app()，
   不触碰本地 `data/`；每次运行都是全新临时库，可重复执行、互不影响。
 - 按项号分组（`python tests/sec_regression.py H-1 M-1` 只跑指定项，不带参数跑全量）。
 - 退出码非 0 表示存在未通过项。
@@ -1357,7 +1357,11 @@ def check_R8():
     case('R-8 安全回归脚本存在', os.path.exists(
         os.path.join(BASE, 'tests', 'sec_regression.py')))
     case('R-8 覆盖 30 个以上清单项', len(ITEMS) >= 30, str(len(ITEMS)))
-    scan = os.path.join(BASE, 'scripts', 'scan_security_patterns.py')
+    # 2026-10-22：脚本随「scripts → tests」结构治理移动，这里跟着改；
+    # 保留旧路径兼容（若有人还在旧分支上跑）。
+    scan = os.path.join(BASE, 'tests', 'scan_security_patterns.py')
+    if not os.path.exists(scan):
+        scan = os.path.join(BASE, 'scripts', 'scan_security_patterns.py')
     case('R-8 CI 正则扫描脚本存在', os.path.exists(scan))
     import subprocess
     rc = subprocess.run([sys.executable, scan], cwd=BASE,
@@ -2088,8 +2092,8 @@ def check_audit4():
          and _has_idx('grades.db', 'idx_cert_generated_by')
          and _has_idx('timetable.db', 'idx_entry_deleted_teacher'))
     case('CONS-07 新功能 smoke 已挂进一键回归', (
-        lambda r: 'SMOKES' in r and 'scripts/smoke_grades.py' in r)(
-            _read_src('scripts/run_all_regression.py')))
+        lambda r: 'SMOKES' in r and 'tests/smoke_grades.py' in r)(
+            _read_src('tests/run_all_regression.py')))
 
 
 ITEMS['AUDIT4'] = check_audit4
@@ -2111,6 +2115,15 @@ def check_SR17():
          'b' in sanitize_report_html('<p>a</p><script>alert(1)</script><p>b</p>'))
     case('SR-17 XSS 仍被中和',
          'onerror' not in sanitize_report_html('<img src=x onerror=alert(1)>'))
+    # 2026-10-23：整篇 HTML 文档（html/head/body 外壳）不得把正文一起丢掉
+    _doc = ('<!DOCTYPE html><html><head><title>T</title><style>x{}</style>'
+            '</head><body><h4>报告</h4><p>正文</p></body></html>')
+    case('SR-17 整篇 HTML 文档保留正文',
+         '报告' in sanitize_report_html(_doc)
+         and '正文' in sanitize_report_html(_doc))
+    case('SR-17 整篇文档里的脚本仍被丢弃',
+         'alert' not in sanitize_report_html(
+             '<html><body><script>alert(1)</script><p>ok</p></body></html>'))
     with app.app_context():
         from app.modules.academic.services import workload_service as _wl
         case('SR-17 课时量统计排除临时调课条目',

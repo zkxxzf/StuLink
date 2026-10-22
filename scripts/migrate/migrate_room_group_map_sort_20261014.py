@@ -19,7 +19,7 @@
    「重排为 10、20、30…」重写，永远无重复值）。
 
 表结构必须与 `app/models/grades.py::ExamRoomGroupMap` 一致
-（`scripts/check_columns.py` 会逐列比对）。
+（`tests/check_columns.py` 会逐列比对）。
 """
 import os as _os
 import sys as _sys

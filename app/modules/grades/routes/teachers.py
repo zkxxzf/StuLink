@@ -1,4 +1,4 @@
-# StuLink v1.19.62.65 2026-10-10
+# StuLink v1.19.65.64 2026-10-10
 # 任课教师映射：矩阵维护（按年级）+ 教师安排表批量导入 + 自动开户
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 import io
@@ -17,6 +17,8 @@ from app.extensions import db
 from app.models import User, Student, PermissionGroup, UserClassLink
 from app.models.grades import (COMPREHENSIVE_SUBJECTS, LINK_SUBJECTS, SUBJECTS,
                                TeacherLinkPlanRow, TeacherSubjectLink)
+from app.modules.grades.services.teacher_snapshot_service import (
+    current_homeroom_positions)
 from app.modules.grades import bp
 from app.modules.grades.services import teacher_import, user_account
 from app.modules.grades.services import link_plan_service as link_plan
@@ -47,13 +49,13 @@ def _grade_classes(grade):
 
 
 def _teacher_roles_filter():
-    """v1.19.62.65：教师候选的合法角色集合（明确排除 admin）"""
+    """v1.19.65.64：教师候选的合法角色集合（明确排除 admin）"""
     return ('teacher', 'homeroom_teacher', 'grade_leader',
             'dorm_manager', 'school_viewer', 'staff')
 
 
 def _teacher_candidates():
-    """v1.19.62.65：所有启用且属于教师类角色的账号 id 集合"""
+    """v1.19.65.64：所有启用且属于教师类角色的账号 id 集合"""
     rows = db.session.query(User.id).filter(
         User.role.in_(_teacher_roles_filter()),
         User.is_active.is_(True)
@@ -64,10 +66,10 @@ def _teacher_candidates():
 def _matrix_users(grade):
     """下拉候选教师：启用 + 教师类角色（明确排除 admin）。
 
-    v1.19.62.65：历史逻辑“已绑定 user_id 即可入选”会导致 admin 错配后一直显示在下拉里，
+    v1.19.65.64：历史逻辑“已绑定 user_id 即可入选”会导致 admin 错配后一直显示在下拉里，
     现改为仅按角色过滤；已绑定但非教师类的行依旧可在矩阵中显示历史名字（由 _build_matrix 侧），
     但下拉中不再提供 admin 作为新选择。
-    v1.19.62.65：候选**按老师名字首字母排序**（拼音 A→Z；无姓名时用账号拼音兜底）。"""
+    v1.19.65.64：候选**按老师名字首字母排序**（拼音 A→Z；无姓名时用账号拼音兜底）。"""
     valid = _teacher_candidates()
     if not valid:
         return []
@@ -80,7 +82,7 @@ def _matrix_users(grade):
 def _name_sort_key(name, username):
     """姓名 → 拼音排序键：(首字母, 全拼, 姓名)。
 
-    v1.19.62.65：用 pypinyin 把「付冰洋」排到 f、把「何楠」排到 h；
+    v1.19.65.64：用 pypinyin 把「付冰洋」排到 f、把「何楠」排到 h；
     没有姓名（real_name 为空）的账号退化为用账号（pinyin）排序，仍保证稳定有序。"""
     py = user_account.pinyin_of(name) if name else None
     py = (py or '').lower() or (username or '').lower() or (name or '')
@@ -95,6 +97,7 @@ _ACADEMIC_ENDPOINTS = {
     'teachers_page': 'academic.teacher_links_page',
     'teachers_get': 'academic.teacher_links_api',
     'teachers_save': 'academic.teacher_links_save_api',
+    'teachers_headteacher_save': 'academic.teacher_links_headteacher_api',
     'teachers_import_page': 'academic.teacher_links_import_page',
     'teachers_import_upload': 'academic.teacher_links_import_upload',
     'teachers_import_confirm': 'academic.teacher_links_import_confirm',
@@ -171,12 +174,16 @@ def teachers_get():
             {'name': '综合组', 'subjects': list(COMPREHENSIVE_SUBJECTS)},
         ],
         'cells': cells,
+        # 2026-10-22 用户口径：任课映射里也要看得到班主任（正班/副班1/副班2）。
+        # 数据源是班级管理的 UserClassLink，不是 TeacherSubjectLink —— 这里**只读展示**，
+        # 避免与「班级管理」两处维护同一事实造成漂移。
+        'headteachers': current_homeroom_positions(grade),
         'users': _matrix_users(grade),
     })
 
 
 def _json_body():
-    """请求体 → dict（v1.19.62.65 兼容两种提交方式）。
+    """请求体 → dict（v1.19.65.64 兼容两种提交方式）。
 
     背景：前端历史上用 `$.post(url, JSON.stringify({...}))`，jQuery 会以
     `application/x-www-form-urlencoded` 发送**JSON 文本**，而 Flask 的
@@ -300,6 +307,79 @@ def teachers_save():
 # ==================== 方案（历史记录，2026-10-14） ====================
 # 用户口径：每学期任课都会变，要有记录、可新增方案、可切回历史方案。
 # 方案 = 整套任课映射的留档；「使用」＝把该方案物化回当前生效映射（全站即时生效）。
+
+_HOMEROOM_POSITIONS = ('正班', '副班1', '副班2')
+
+
+@bp.route('/api/teachers/headteacher', methods=['POST'])
+@login_required
+@perm_required('grades.teachers')
+def teachers_headteacher_save():
+    """班主任位次维护（2026-10-22 用户要求：正班/副班也要能在映射页直接改）。
+
+    数据源是班级管理的 ``UserClassLink``（一个班最多 3 条，按 id 顺序对应
+    正班 / 副班1 / 副班2）。按位次操作：
+      · user_id 有值 → 目标位次有记录则换人，没有记录则追加（必须紧接前一位）；
+      · user_id 为空 → 删除该位次（后面的位次按 UserClassLink 顺序自然前移）。
+    只接受启用中的教师类角色；同一教师不能在同一班占两个位次。
+    """
+    data = _json_body()
+    grade = (data.get('grade') or '').strip()
+    cls = (data.get('class_name') or '').strip()
+    pos = (data.get('position') or '').strip()
+    uid = data.get('user_id')
+    if grade not in visible_grades(current_user):
+        return jsonify(success=False, message='该年级不在你的数据范围内'), 403
+    try:
+        assert_grade_visible(grade)
+    except PermissionError:
+        return jsonify(success=False, message='该年级不在你的数据范围内'), 403
+    if pos not in _HOMEROOM_POSITIONS:
+        return jsonify(success=False, message='位次无效'), 400
+    if cls not in _grade_classes(grade):
+        return jsonify(success=False, message='班级无效'), 400
+
+    links = (UserClassLink.query.filter_by(grade=grade, class_name=cls)
+             .order_by(UserClassLink.id).all())
+    idx = _HOMEROOM_POSITIONS.index(pos)
+
+    if not uid:
+        if idx < len(links):
+            old_uid = links[idx].user_id
+            db.session.delete(links[idx])
+            db.session.commit()
+            log_operation(current_user, '修改', '班主任', old_uid,
+                          f'{grade}{cls} 清空{pos}')
+        return jsonify(success=True, message=f'已清空 {cls} 的{pos}')
+
+    try:
+        uid = int(uid)
+    except (TypeError, ValueError):
+        return jsonify(success=False, message='教师无效'), 400
+    user = db.session.get(User, uid)
+    if user is None or not user.is_active:
+        return jsonify(success=False, message='教师不存在或已停用'), 400
+    if uid not in _teacher_candidates():
+        return jsonify(success=False, message='该账号不是教师类角色'), 400
+    for i, lk in enumerate(links):
+        if lk.user_id == uid and i != idx:
+            return jsonify(success=False,
+                           message=f'该教师已是本班{_HOMEROOM_POSITIONS[i]}'), 400
+
+    if idx < len(links):
+        links[idx].user_id = uid
+        msg = f'已更新 {cls} 的{pos}'
+    elif idx == len(links):
+        db.session.add(UserClassLink(user_id=uid, grade=grade, class_name=cls))
+        msg = f'已设置 {cls} 的{pos}'
+    else:
+        return jsonify(success=False,
+                       message=f'请先设置{_HOMEROOM_POSITIONS[idx - 1]}'), 400
+    db.session.commit()
+    log_operation(current_user, '修改', '班主任', uid, f'{grade}{cls} {pos}')
+    return jsonify(success=True, message=msg,
+                   user={'id': uid, 'name': user.real_name})
+
 
 @bp.route('/teachers/plans')
 @login_required

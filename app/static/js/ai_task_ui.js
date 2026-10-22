@@ -106,25 +106,81 @@
         return (doc.body.textContent || '').replace(/\n{3,}/g, '\n\n').trim();
     }
 
-    /* ---------- 导出独立 HTML ---------- */
+    /* ---------- 导出独立 HTML ----------
+     * 2026-10-22：导出文件改用「深色看板」样式，与站内报告画布、分享页同一套视觉
+     * （用户参照的数据看板风格：深底 + 金色小标题 + 青色小标题层级）。
+     * 样式必须**内联**：导出文件要能离机双击打开，不依赖站内静态资源。 */
+    var EXPORT_CSS = [
+        ':root{--bg:#0a0e14;--bg2:#0f1620;--panel:#121a26;--line:#223044;',
+        '--gold:#f5c542;--cyan:#2dd4bf;--txt:#e6edf5;--txt2:#93a4b8;--txt3:#5d7186;',
+        '--mono:"JetBrains Mono",Consolas,"Courier New",monospace}',
+        '*{box-sizing:border-box}',
+        'body{margin:0;background:radial-gradient(1100px 460px at 50% -14%,',
+        'rgba(245,197,66,.10),transparent 68%),var(--bg);color:var(--txt);',
+        'font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","Microsoft YaHei",',
+        '"PingFang SC",system-ui,sans-serif;line-height:1.8;-webkit-font-smoothing:antialiased}',
+        '.wrap{max-width:1000px;margin:0 auto;padding:0 20px 56px}',
+        '.bar{display:flex;align-items:center;gap:10px;height:56px;',
+        'border-bottom:1px solid var(--line);font-size:12px;color:var(--txt3)}',
+        '.bar b{font-family:var(--mono);letter-spacing:.18em;color:var(--gold);font-weight:700}',
+        '.hero{margin:24px 0 18px;padding:24px 26px;border:1px solid var(--line);',
+        'border-radius:18px;background:linear-gradient(135deg,#16202e,#0b1119)}',
+        '.hero .tag{display:inline-block;padding:3px 10px;border-radius:999px;',
+        'border:1px solid rgba(245,197,66,.34);background:rgba(245,197,66,.08);',
+        'font-family:var(--mono);font-size:10px;letter-spacing:.16em;color:var(--gold)}',
+        '.hero h1{margin:12px 0 0;font-size:22px;line-height:1.4;color:#fff}',
+        '.paper{padding:28px 30px;border:1px solid var(--line);border-radius:18px;',
+        'background:linear-gradient(180deg,var(--panel),var(--bg2));',
+        'box-shadow:0 22px 54px rgba(0,0,0,.34)}',
+        '.bdoc{counter-reset:sec;font-size:14px;line-height:1.85;color:var(--txt)}',
+        '.bdoc>:first-child{margin-top:0}.bdoc>:last-child{margin-bottom:0}',
+        '.bdoc h4{position:relative;margin:4px 0 20px;padding-bottom:13px;font-size:22px;',
+        'color:#fff;border-bottom:1px solid var(--line)}',
+        '.bdoc h4::before{content:"AI REPORT";display:block;margin-bottom:7px;',
+        'font-family:var(--mono);font-size:10px;letter-spacing:.22em;color:var(--gold)}',
+        '.bdoc h4::after{content:"";position:absolute;left:0;bottom:-1px;width:86px;height:2px;',
+        'background:linear-gradient(90deg,var(--gold),rgba(245,197,66,0))}',
+        '.bdoc h5{counter-increment:sec;display:flex;align-items:baseline;gap:9px;',
+        'margin:28px 0 12px;font-size:16px;color:var(--gold)}',
+        '.bdoc h5::before{content:counter(sec,decimal-leading-zero);font-family:var(--mono);',
+        'font-size:11px;color:var(--txt3);letter-spacing:.08em}',
+        '.bdoc h6{margin:16px 0 8px;font-size:14px;color:var(--cyan)}',
+        '.bdoc p{margin:0 0 10px;color:var(--txt2)}',
+        '.bdoc strong{color:var(--txt)}.bdoc em{color:var(--gold);font-style:normal}',
+        '.bdoc ul,.bdoc ol{margin:0 0 14px;padding-left:22px}',
+        '.bdoc li{margin-bottom:6px;color:var(--txt2)}',
+        '.bdoc li::marker{color:var(--gold);font-weight:700}',
+        '.bdoc table{width:100%;margin:12px 0 18px;border-collapse:collapse;font-size:13px;',
+        'border:1px solid var(--line)}',
+        '.bdoc th,.bdoc td{padding:8px 11px;text-align:left;color:var(--txt2);',
+        'border-bottom:1px solid var(--line)}',
+        '.bdoc thead th{background:rgba(245,197,66,.10);color:var(--gold);white-space:nowrap}',
+        '.bdoc tbody tr:nth-child(even){background:rgba(255,255,255,.022)}',
+        '.bdoc blockquote{margin:12px 0;padding:9px 14px;border-left:3px solid var(--gold);',
+        'background:rgba(245,197,66,.06);color:var(--txt2)}',
+        '.bdoc hr{border:0;border-top:1px dashed var(--line);margin:20px 0}',
+        '.foot{margin-top:16px;font-size:12px;color:var(--txt3)}',
+        '.foot .warn{color:#ff9d2e}'
+    ].join('');
+
     function exportHtml(title, html) {
         var t = title || 'AI 分析';
         var body = html || '';
         if (!body) { return false; }
-        var css = 'body{font-family:"Microsoft YaHei",微软雅黑,system-ui,sans-serif;'
-            + 'max-width:900px;margin:32px auto;padding:0 18px;line-height:1.7;color:#1e293b;}'
-            + 'h1{font-size:20px;}h5{color:#1d4ed8;margin-top:22px;}table{border-collapse:collapse;}'
-            + 'td,th{border:1px solid #cbd5e1;padding:4px 8px;}'
-            + '.foot{margin-top:28px;color:#94a3b8;font-size:12px;}';
         var parts = [
             '<!DOCTYPE html><html lang="zh-CN"><head><meta charset="utf-8">',
             '<meta name="viewport" content="width=device-width, initial-scale=1">',
+            '<meta name="robots" content="noindex, nofollow">',
             '<title>', esc(t), '</title>',
-            '<style>', css, '</style></head><body>',
-            '<h1>', esc(t), '</h1>',
-            body,
-            '<p class="foot">本报告由 AI 生成，仅供参考，不代表学校评价结论。</p>',
-            '</body></html>'
+            '<style>', EXPORT_CSS, '</style></head><body>',
+            '<div class="wrap">',
+            '<div class="bar"><b>STULINK</b> AI 分析报告</div>',
+            '<div class="hero"><span class="tag">AI REPORT</span>',
+            '<h1>', esc(t), '</h1></div>',
+            '<div class="paper"><div class="bdoc">', body, '</div></div>',
+            '<p class="foot"><span class="warn">本报告由 AI 生成，仅供参考，',
+            '不代表学校评价结论。</span></p>',
+            '</div></body></html>'
         ];
         var blob = new Blob([parts.join('')], { type: 'text/html;charset=utf-8' });
         var url = URL.createObjectURL(blob);

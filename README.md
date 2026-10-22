@@ -3,7 +3,7 @@
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
 [![Python](https://img.shields.io/badge/python-3.11+-green.svg)](https://python.org)
 [![Flask](https://img.shields.io/badge/flask-3.x-lightgrey.svg)](https://flask.palletsprojects.com/)
-[![Version](https://img.shields.io/badge/version-1.19.62.64-orange.svg)](https://gitee.com/zkxxzf/StuLink)
+[![Version](https://img.shields.io/badge/version-1.19.65.64-orange.svg)](https://gitee.com/zkxxzf/StuLink)
 
 面向中学的综合学生管理平台，采用 **双站点 + 多模块 + 一模块一库** 的故障隔离架构：
 
@@ -195,7 +195,7 @@
 
 - **后端**：Python 3.11+ / Flask 3.x / Flask-Login / Flask-SQLAlchemy 2.x（多库 binds）/ Waitress / openpyxl / reportlab / python-pptx
 - **前端**：Bootstrap 5 / jQuery / Jinja2 / ECharts（成绩可视化）/ Chart.js（画像）
-- **安全（v1.19.62.65）**：
+- **安全（v1.19.65.64）**：
   - **身份**：管理员首启随机口令 + 强制改密 · 一次性初始口令展示 · 会话口令摘要（改密即踢）· IP + 账号双维限流与锁定（锁键含来源，防账号被恶意锁定）
   - **数据**：AES 身份证与 AI Key 加密 · CSRF 8h 时效 · 二维权限（功能三档 × 数据范围）· 白名单式教师候选过滤
   - **传输**：`url_guard` 出站白名单 + DNS 解析 + 禁 302 跟随 · CSP（Report-Only 起步，可切 enforce）· HTTPS Cookie Secure
@@ -216,7 +216,7 @@ python run.py --dev
 cd alumni_app && python run.py
 
 # Docker 部署（三个容器：主应用 + 往届查询 + MCP 服务）
-docker build -t stulink:v1.19.62.65 .
+docker build -t stulink:v1.19.65.64 .
 docker build -t stulink-alumni:v1.0.0 ./alumni_app
 docker build -f Dockerfile.mcp -t stulink-mcp:v1.0.0 .
 docker-compose up -d
@@ -229,10 +229,10 @@ docker-compose up -d
 - **密码复杂度**：强制 ≥8 位 + 含字母与数字 + 非弱口令黑名单 + 不等于用户名/姓名/手机号。
 - **升级即全站掉登录**（会话口令摘要：旧会话缺 `_pwd_fp` 视为无效）。
 - **教务分库版本需依次执行两条幂等脚本**：`py -3.12 scripts/migrate/migrate_split_academic_20261010.py`（教务分库 + 搬数据）与 `py -3.12 scripts/seed/add_performance_indexes.py`（补历史漏建索引）——改动数据库前自动备份。
-- **模型加新字段后，存量库必须补列**（`create_all` 只建缺表、不加列）：跑 `py -3.12 scripts/check_columns.py` 只读自检，`--fix` 幂等补列（改前自动备份）。
+- **模型加新字段后，存量库必须补列**（`create_all` 只建缺表、不加列）：跑 `py -3.12 tests/check_columns.py` 只读自检，`--fix` 幂等补列（改前自动备份）。
 - **本次合并新增 5 个迁移脚本**（morality 建表 / 调课换课两版 / 调课自动确认 / 监考排除名单），按需执行；脚本均已幂等且改库前自动备份。
 - 生产启用 HTTPS 后建议设置：`STULINK_SESSION_COOKIE_SECURE=1`、`STULINK_CSP_MODE=enforce`、`STULINK_SESSION_LIFETIME=28800`、`STULINK_CSRF_TIME_LIMIT=28800`。
-- 提交前自检：`python tests/sec_regression.py` 与 `python scripts/scan_security_patterns.py`。
+- 提交前自检：`python tests/sec_regression.py` 与 `python tests/scan_security_patterns.py`。
 
 ---
 
@@ -261,8 +261,9 @@ StuLink/
 │                              #    student_scope/text_guard/err_safe/log_mask)
 ├── alumni_app/                # 往届生查询（独立 Flask 应用 :5001）
 ├── mcp_server/                # MCP 成绩分析工具服务（:8765）
-├── tests/                     # 安全回归测试
-├── scripts/                   # 初始化 / 迁移 / 版本 bump / 安全扫描 / 冒烟测试
+├── tests/                     # 校验 / 断言 / 冒烟 / 回归（run_all_regression.py）
+├── scripts/                   # 改数据 / 迁移 / 初始化 / 运维 / 同步
+├── tools/                     # 开发期辅助（生成模板 / MCP 调试 / 合并分析）
 ├── data/                      # SQLite 库 + 密钥 + 备份
 ├── docs/                      # 设计手册 / 用户手册 / 算法手册
 ├── Dockerfile                 # 主应用镜像
@@ -301,6 +302,9 @@ StuLink/
 
 | 版本 | 日期 | 亮点 |
 |---|---|---|
+| **1.19.65.64** | 2026-10-21 | **（第三位 zk +1）全局对比横轴默认顺序 + 柱顶标注**：横轴**默认按班级序号**（01班 → 02班 …，不再记忆上次选择），需要时手动勾「先按班型排（卓越 / 强基）」切班型优先；柱顶分数改为两行标注「去差均分 / 数值」，一眼看出这个数字是什么 |
+| **1.19.64.64** | 2026-10-21 | **（第三位 zk +1）全局对比图表改百分比堆积 + 比例折线**：每根柱固定 100%（段高＝该段人数占比，段内仍标人数），自下而上按分数线由高到低、未上线在最上；叠加各线「上线率」折线沿各自段顶边连接各班（同一 0~100% 轴），柱顶仍标去差均分；图例 12px、轴标签 12px、层名 14px、段内人数 11px、图表高度 320px，适合大屏阅读；悬停显示人数与占比 |
+| **1.19.63.64** | 2026-10-21 | **（第三位 zk +1）全局对比图表改为全量堆积**：柱＝班级全部参考学生，自下而上按分数线由高到低堆积（清北 → 985 → 211 → 特控 → 本科 → 未上线压在最上，以后新增分数线同样按高低插入）；每段标人数（不再按占比隐藏），分界线处标该线「上线率」（如「特控 44%」），柱顶仍标去差均分；去掉右轴上线率折线与双 Y 轴，未上线默认显示 |
 | **1.19.62.64** | 2026-10-21 | **（第三位 zk +1）成绩分析页签层级调整**：班级（01班…）/ 学科（语文…）按钮行移到主页签（年级分析 / 班级分析 / 学科分析 / 任课教师 / 班级对比）**下方**，顺序变为「筛选栏 → 主页签 → 班级或学科按钮 → 内容」 |
 | **1.19.61.64** | 2026-10-21 | **（第三位 zk +1）全局对比横轴排序修正**：不勾「先按班型排（卓越 / 强基）」时，图表横轴改为**按班级序号从小到大**（01班 → 02班 → …），同号再按方向 / 组合 / 班名兜底；勾选时仍为班型 → 方向 → 组合 → 班号 |
 | **1.19.60.64** | 2026-10-21 | **（第三位 zk +1）全局对比图表可放大**：每张图表（总分 + 各科）右上角新增放大按钮，点击后该图改为固定在视口内的浮层、铺满整个屏幕宽度并自动 resize；再点一次或按 Esc 退出，退出后回到原网格位置 |

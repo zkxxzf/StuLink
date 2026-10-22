@@ -16,7 +16,7 @@ AI 分析工作台（/grades/ai）新增「提示词生成器」：老师用下�
    靠它把表单选项无损回填；老任务该列为空串，走"只回填提示词文本"的降级路径。
 
 表结构必须与 ``app/models/grades.py::AiPromptTemplate / AiTask`` 一致
-（``scripts/check_columns.py`` / ``check_indexes.py`` 会逐列逐索引比对）。
+（``tests/check_columns.py`` / ``check_indexes.py`` 会逐列逐索引比对）。
 
 用法：
     py -3.12 scripts/migrate/migrate_ai_prompt_tpl_20261014.py

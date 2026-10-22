@@ -12,11 +12,19 @@ import os
 import sqlite3
 import sys
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+# 2026-10-22：脚本随「scripts → scripts/migrate」规整移了一层，
+# `_mig_log` 现在在 scripts/ 下、库在项目根 data/ —— 两层 dirname 会算成
+# scripts/data/system.db（找不到库直接跳过），改成三层 + 同时把 scripts/ 加进
+# 搜索路径，否则 `import _mig_log` 直接 ModuleNotFoundError。
+_SELF_DIR = os.path.dirname(os.path.abspath(__file__))     # scripts/migrate
+_PARENT_DIR = os.path.dirname(_SELF_DIR)                   # scripts
+for _p in (_SELF_DIR, _PARENT_DIR):
+    if _p not in sys.path:
+        sys.path.insert(0, _p)
 import _mig_log  # noqa: E402
 
 SCRIPT_NAME = os.path.basename(__file__)
-BASE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+BASE = os.path.dirname(_PARENT_DIR)                        # 项目根
 DB = os.path.join(BASE, 'data', 'system.db')
 
 

@@ -5,7 +5,7 @@
 > **审查日期**：2026-09-23。**代码基线**：StuLink v1.17.0（行号为当时快照，改动后会漂移，以符号名/函数名为准）。
 > **约定**：`[ ]` 未处理 / `[x]` 已修复；完成一项改 `[x]` 并补「YYYY-MM-DD 完成（改动点）」；需作废用 ~~删除线~~ 并写原因。
 > **审查方式**：只读走查（鉴权与会话 / SQL / 文件路径 / 前端渲染 / 上传与导出 / 双站点）＋ 脚本扫描全部 390 路由装饰器覆盖 ＋ 关键点人工复核 ＋ Windows 文件系统大小写实测。
-> **对照基线**：本仓库**没有** `tests/sec_test.py`（属「局域网答题」项目）；对照 `docs/审计报告/安全审计报告_20260807.md`（v1.7.0）与 `scripts/smoke_permissions.py` / `smoke_grades.py` / `smoke_academic.py`。
+> **对照基线**：本仓库**没有** `tests/sec_test.py`（属「局域网答题」项目）；对照 `docs/审计报告/安全审计报告_20260807.md`（v1.7.0）与 `tests/smoke_permissions.py` / `smoke_grades.py` / `smoke_academic.py`。
 > **说明**：需求提及的 `main.py`/`core`/`exepack`/题库更新/自动升级/MD5 校验在本仓库不存在（自动升级属另一项目），已据实映射到等价环节；证书防伪用 HMAC-SHA256 非 MD5。
 
 ---
@@ -51,7 +51,7 @@
 - **影响**：全校学生名册（学号/姓名/年级/班级/选科/民族）与全校住宿分布外泄；身份证/手机等列仍受 `export_helpers.py:140-144` 独立权限保护。
 - **修复**：逐个补 `@perm_required('students.view'|'students.export'|'dormitory.view'|'dormitory.assign')`；内联角色过滤统一替换为 `scope_service`；`_get_scope()` 无权限组改为拒绝而非 `SCHOOL`。
 - **验证**：任课教师 `GET /students/export?columns=name` 期望 403（当前 200+xlsx）；无权限组账号 `GET /statistics/` 期望 403。
-- **2026-09-23 完成（改动点）**：① 新增 `app/utils/student_scope.py::apply_student_scope()` 作为 Student 查询范围的唯一口径（用户级范围 > 班主任/年级长字段 > 班级映射 > 任课年级 > 组级范围；无任何范围→空集，不再回落全校），接入 `students.py` 列表/搜索、`export_helpers.py` 两个导出函数（原先只处理班主任）；② 权限补齐：`students.py` 的 `/`、`/export`、`/search`、`/<id>`、`/batch-edit-search`、`/download-errors/<key>`；`dormitory/dashboard.py` 的 `/`、`/search`、`/export`、`/search/import-template`；`rooms.py` 的 `/`、`/<id>`、`/assign-data`、`/class-bed-requirement`、`/assign-auto/stats`、`/available-rooms-data`、`/assign-auto/room-stats`、`/report`、`/report/export`、`/swap-data`；`statistics.py` 的 `/`；③ `statistics._get_scope()` 无权限组不再回落 `SCOPE_SCHOOL`，改为 `abort(403)`（admin 例外）。`tests/sec_regression.py` 增 H-2 断言 20 条，全部通过；`scripts/smoke_permissions.py` 仍 38/38。
+- **2026-09-23 完成（改动点）**：① 新增 `app/utils/student_scope.py::apply_student_scope()` 作为 Student 查询范围的唯一口径（用户级范围 > 班主任/年级长字段 > 班级映射 > 任课年级 > 组级范围；无任何范围→空集，不再回落全校），接入 `students.py` 列表/搜索、`export_helpers.py` 两个导出函数（原先只处理班主任）；② 权限补齐：`students.py` 的 `/`、`/export`、`/search`、`/<id>`、`/batch-edit-search`、`/download-errors/<key>`；`dormitory/dashboard.py` 的 `/`、`/search`、`/export`、`/search/import-template`；`rooms.py` 的 `/`、`/<id>`、`/assign-data`、`/class-bed-requirement`、`/assign-auto/stats`、`/available-rooms-data`、`/assign-auto/room-stats`、`/report`、`/report/export`、`/swap-data`；`statistics.py` 的 `/`；③ `statistics._get_scope()` 无权限组不再回落 `SCOPE_SCHOOL`，改为 `abort(403)`（admin 例外）。`tests/sec_regression.py` 增 H-2 断言 20 条，全部通过；`tests/smoke_permissions.py` 仍 38/38。
 
 ### [x] H-3. 学生画像模块全链路无数据范围校验（可读且可写范围外学生）
 - **来源**：01-H-3、03-H4
@@ -69,7 +69,7 @@
 - **影响**：跨年级查看/删除成绩、改分档线、操作考务编排。
 - **修复**：入口统一 `scope_service.check_exam_visible(current_user, exam)`（`analysis.py:163`、`report.py:28`、`pivot.py:64`、`ai.py:274/310/414`、`export.py:82` 已示范）；考务按 `affair.grade` 校验。
 - **验证**：教务员张三 `GET /grades/exams/<非授权年级考试id>` 期望 403（`smoke_permissions.py:120-129` 已断言服务层，搬到 HTTP 层）。
-- **2026-09-23 完成（改动点）**：新增 `app/modules/grades/services/exam_guard.py`（`assert_exam_visible(exam_id)` / `assert_grade_visible(grade)`，越界 403、不存在 404）作为唯一入口；接入 `exams.py`（详情/成绩分页/改名/改分/删分/重算/删除/导入四处，共 11 处）、`bands.py`（分档页 + 读取/矩阵/单个保存/批量/应用共 6 处）、`exam_affairs.py`（新增 `_get_affair_checked()` 替换 20 处裸 `get_or_404`，并补创建与「考试→考务」入口的年级校验）。`tests/sec_regression.py` 增 H-4 断言 10 条，全部通过；`scripts/smoke_grades.py` 随 H-1 调整账号后 98/98。
+- **2026-09-23 完成（改动点）**：新增 `app/modules/grades/services/exam_guard.py`（`assert_exam_visible(exam_id)` / `assert_grade_visible(grade)`，越界 403、不存在 404）作为唯一入口；接入 `exams.py`（详情/成绩分页/改名/改分/删分/重算/删除/导入四处，共 11 处）、`bands.py`（分档页 + 读取/矩阵/单个保存/批量/应用共 6 处）、`exam_affairs.py`（新增 `_get_affair_checked()` 替换 20 处裸 `get_or_404`，并补创建与「考试→考务」入口的年级校验）。`tests/sec_regression.py` 增 H-4 断言 10 条，全部通过；`tests/smoke_grades.py` 随 H-1 调整账号后 98/98。
 
 ### [x] H-5. 考务页面存储型 DOM XSS
 - **来源**：01-H-5
@@ -366,7 +366,7 @@
 - [x] **R-5. 会话与限流强化**：见 M-2（口令摘要会话失效 / 会话保护 / 过期 / 登出清会话）与 M-3（账号维度锁定 + 安全日志）。⏸ 未做：admin 等高价值账号的**额外**保护（验证码/更严阈值）——已由账号锁定 + 日志覆盖大部分场景。断言 3 条全过。（01-R-5）
 - [x] **R-6. 加密升级**：`decrypt` 失败语义已改为抛 `DecryptError` + 服务端审计日志（M-5 后半）。⏸ 未做：随机 IV + 盲索引 + 回填（同 M-5，暂缓）。断言 2 条全过。（01-R-6）
 - [x] **R-7. 部署与传输**：CSP 已接入并可由 `STULINK_CSP_MODE` 切换（默认 Report-Only），`SESSION_COOKIE_SECURE` 改由 `STULINK_SESSION_COOKIE_SECURE` 打开，README 增加部署安全基线说明。⏸ 未做：生产上 HTTPS 与 HSTS（属运维）。断言 3 条全过。（01-R-7）
-- [x] **R-8. 安全回归测试化**：新增 `tests/sec_regression.py`（临时库 + `create_app()` + `test_client()`，按项号分组，当前 **244 条断言全绿**，支持 `python tests/sec_regression.py H-1 M-2` 局部运行）；新增 `scripts/scan_security_patterns.py`（正则扫描：SQL 拼接 / 路径含 `request.*` / `csrf.exempt` / `|safe` / 裸 `innerHTML` / 内联处理器单引号变量，当前 0 命中、退出码 0），提交前必跑。断言 4 条全过。（01-R-8、03-S6）
+- [x] **R-8. 安全回归测试化**：新增 `tests/sec_regression.py`（临时库 + `create_app()` + `test_client()`，按项号分组，当前 **244 条断言全绿**，支持 `python tests/sec_regression.py H-1 M-2` 局部运行）；新增 `tests/scan_security_patterns.py`（正则扫描：SQL 拼接 / 路径含 `request.*` / `csrf.exempt` / `|safe` / 裸 `innerHTML` / 内联处理器单引号变量，当前 0 命中、退出码 0），提交前必跑。断言 4 条全过。（01-R-8、03-S6）
 - [x] **R-9. 定期轮换 SECRET_KEY**：**支持但未自动执行**——`SECRET_KEY` 可经环境变量注入（`config.py`），配合 M-2 的口令摘要机制，轮换后旧会话全部失效。⏸ 轮换动作本身属运维范畴（会踢掉全部在线用户），未写入代码自动流程。断言 2 条全过。（03-S3）
 - [x] **R-10. `_asset_mtime` 路径拼接**：新增 `_is_safe_asset_name()` 白名单（相对路径、禁 `..`/反斜杠/盘符/空字节、仅允许 `[A-Za-z0-9_./-]`），非法名直接返回 0 并记 `stulink.app` 警告；保持不接受请求参数。断言 3 条全过。（03-S4）
 - [x] **R-11. `scripts/` 标识符拼接 DDL 加白名单**：新增 `scripts/_ddl_guard.py`（`safe_ident` / `assert_ident` / `assert_table` + 表名白名单），接入 7 个拼接 DDL 的迁移脚本（cleanup_student_columns / migrate_notification_recipients / migrate_cert_sign_v1122 / migrate_affair_v1121 / migrate_term_schedule_dates / add_performance_indexes / migrate_split_db）。断言 4 条全过。（03-S5）
@@ -433,10 +433,10 @@
 
 ```powershell
 python tests/sec_regression.py            # 安全回归：244 条断言，全绿（支持按项号过滤：... H-1 M-2）
-python scripts/scan_security_patterns.py  # 禁用模式正则扫描：0 命中（退出码 0）
-python scripts/smoke_permissions.py       # 业务冒烟：38/38
-python scripts/smoke_grades.py            # 业务冒烟：98/98
-python scripts/smoke_academic.py          # 业务冒烟：31/31
+python tests/scan_security_patterns.py  # 禁用模式正则扫描：0 命中（退出码 0）
+python tests/smoke_permissions.py       # 业务冒烟：38/38
+python tests/smoke_grades.py            # 业务冒烟：98/98
+python tests/smoke_academic.py          # 业务冒烟：31/31
 ```
 
 ### 本轮新增/改造的关键文件
@@ -445,7 +445,7 @@ python scripts/smoke_academic.py          # 业务冒烟：31/31
 |---|---|
 | `tests/sec_regression.py` | R-8 安全回归（临时库 + HTTP 断言，按项号分组） |
 | `tests/alumni_regression.py` | H-7 往届站独立回归（子进程隔离） |
-| `scripts/scan_security_patterns.py` | R-8 CI 正则扫描（SQL 拼接/路径含 request/csrf.exempt/\|safe/裸 innerHTML/内联单引号变量） |
+| `tests/scan_security_patterns.py` | R-8 CI 正则扫描（SQL 拼接/路径含 request/csrf.exempt/\|safe/裸 innerHTML/内联单引号变量） |
 | `scripts/_ddl_guard.py` | R-11 DDL 标识符白名单 |
 | `app/utils/session_guard.py` | M-2 会话口令摘要（无迁移实现改密/禁用踢会话） |
 | `app/utils/password_policy.py` | H-1④ / M-15 唯一口令策略 |
@@ -509,14 +509,14 @@ python scripts/smoke_academic.py          # 业务冒烟：31/31
 
 ### [x] SR-6. `grades/rooms.html` 分组按钮内联处理器单引号未转义（M-10 同类残留）
 - **位置**：`app/templates/grades/rooms.html:29,33`（`onclick="renameGroup({{ g.id }}, '{{ g.name|e }}')"`）。
-- **触发/影响**：分组名含 `'` 时 `&#39;` 交 JS 引擎前还原为 `'` 打断字符串，构成内联处理器 JS 上下文 XSS（`scripts/scan_security_patterns.py` 长期 2 命中、`M-10`/`R-8` 断言长期红）。
+- **触发/影响**：分组名含 `'` 时 `&#39;` 交 JS 引擎前还原为 `'` 打断字符串，构成内联处理器 JS 上下文 XSS（`tests/scan_security_patterns.py` 长期 2 命中、`M-10`/`R-8` 断言长期红）。
 - **修复**：按 M-10 既定口径改 `{{ g.name|tojson }}`；扫描器 0 命中。
 
 **验证（2026-10-11）**：
 ```powershell
 python tests/sec_regression.py            # 264 条断言，0 失败（新增 SR 组 14 条；SR-6 修复后原 M-10/R-8 两处红转绿）
 python tests/sec_regression.py SR         # 本轮缺口专项：14/14
-python scripts/scan_security_patterns.py  # 禁扫 0 命中（退出码 0）
+python tests/scan_security_patterns.py  # 禁扫 0 命中（退出码 0）
 python tests/dormitory_regression.py      # 31/31
 python tests/academic_regression.py       # 298/298
 ```
@@ -541,7 +541,7 @@ python tests/academic_regression.py       # 298/298
 - 位置：`app/modules/grades/services/scope.py`。
 - 修复：`get_scope` admin 恒返回 `(SCOPE_SCHOOL, None)`；`visible_grades(admin)` → 全部未毕业年级；`visible_classes(admin)` → None（不限班）。与 `check_exam_visible`/`student_in_scope`/`_guard_tab`/`access_scope` 既有 admin 特判同口径。
 - 背景：SR-5 的 `is not None` fail-closed 修复把“admin 无 link → 空列表”也关进去，班级对比/导出 400、分析页考试下拉全空；smoke 因 INIT 演示 `teacher_links.user_id` 与 smokeadm(id=1) 相撞而“假绿”。
-- 回归：SR-7（6 条：裸 admin 三函数 + 登录 + options 下拉 + 班级对比 200）；`scripts/smoke_grades.py` 建账号前清 INIT 演示 links。
+- 回归：SR-7（6 条：裸 admin 三函数 + 登录 + options 下拉 + 班级对比 200）；`tests/smoke_grades.py` 建账号前清 INIT 演示 links。
 
 ### [x] P0-3. `/grades/score-changes` 仅 `@login_required` + exams 列表/new 无年级范围
 - 位置：`app/modules/grades/routes/exams.py`。
@@ -577,10 +577,10 @@ tests/sec_regression.py        285/285（新增 SR-7/SR-8/SR-9 共 24 条；原 
 tests/dormitory_regression.py   31/31
 tests/academic_regression.py   302/302
 tests/alumni_regression.py       9 项全 true
-scripts/smoke_grades.py        135/135（P0-2 修复前 128/135）
-scripts/smoke_permissions.py    38/38
-scripts/smoke_academic.py       60/60
-scripts/scan_security_patterns.py  0 命中
+tests/smoke_grades.py        135/135（P0-2 修复前 128/135）
+tests/smoke_permissions.py    38/38
+tests/smoke_academic.py       60/60
+tests/scan_security_patterns.py  0 命中
 tests/class_scope_regression.py  8/8
 mcp_server/smoke_mcp.py          40/40（MCP venv）
 read_lints（20 个改动文件）        0 诊断
@@ -612,7 +612,7 @@ read_lints（20 个改动文件）        0 诊断
 - [x] **M-6 7 处 Excel 上传未走统一 `upload_guard`**：成绩导入 / 课表导入 / 教师名单导入 / 智能课表导入 / 教师安排表导入 / 宿舍信息导入 / 宿舍批量导入全部接入（白名单 + 危险类型 + magic）。2026-10-13 完成（回归 `AUDITP2`）。
 - [x] **M-5（锁号一侧）MCP 失败锁定按账号 → 按「来源 + 账号」**：原口径下局域网任意设备用 5 次错误口令即可把老师账号锁死 300 秒；另加跨来源失败累计的递增延迟兜底（只延迟不拒绝）。2026-10-13 完成（`mcp_server/core/auth.py`；MCP 自测 72/0）。
 - [x] **L-4 勘误**：`scope_required` 并非僵尸件 —— 2026-10-10 已删除，`decorators.py:34` 只剩说明注释（本轮审计初稿为误报，已更正）。
-- [x] **L-8（部分）**：新增一键回归 `scripts/run_all_regression.py` + 根目录 `ruff.toml`（只开真错级规则，工具不入依赖）+ `CODEBUDDY.md` 回归与自检章节。
+- [x] **L-8（部分）**：新增一键回归 `tests/run_all_regression.py` + 根目录 `ruff.toml`（只开真错级规则，工具不入依赖）+ `CODEBUDDY.md` 回归与自检章节。
 - [x] **M-5（第二道准入）能力具备、实机按用户口径保持关闭**：`mcp_server/config.json` 当天曾开 `require_token=true` 并跑通端到端用例（无令牌 401 / 带令牌通过 / 错令牌 401），随后**按要求改回 `false`**（客户端只带账号密码，减少摩擦）；启用只需改 `true` + 重启。暴露且未开时启动横幅打印安全提示（含"开令牌 / 收 host"两种收紧方式）。2026-10-13 完成。
 - [x] **M-5（单来源总闸）**：新增 `login_source_fail_limit`（20）/`login_source_window`（300s）——同一来源换着账号扫口令时，该来源整段窗口内 429，与账号无关。2026-10-13 完成。
 - [x] **P2 清理**：`tests/qa_20261010|12|13` 39 个一次性脚本归档到 `tests/_archive/`（未删：其中 38 个未被 git 跟踪，且被多份总结当证据引用）；项目侧 Python 字节码缓存 348 个 / 5.0MB 已清（`.venv` 内保留）。

@@ -416,11 +416,11 @@ STDIO 定位为"连接本地运行的程序"——即 HTTP 请求极可能由豆
 
 ```powershell
 # 只生成配置并打印要填的字段（不联网）
-powershell -ExecutionPolicy Bypass -File scripts\mcp_doubao_connector.ps1 `
+powershell -ExecutionPolicy Bypass -File tools\mcp_doubao_connector.ps1 `
     -User <你的账号> -Password '<你的密码>' -SkipProbe
 
 # 生成 + 探活（推荐：先用它自证服务可达、凭据有效，再去豆包里填）
-powershell -ExecutionPolicy Bypass -File scripts\mcp_doubao_connector.ps1 `
+powershell -ExecutionPolicy Bypass -File tools\mcp_doubao_connector.ps1 `
     -User <你的账号> -Password '<你的密码>' -Json -Copy
 
 # 端点不是默认 8765 时（如直接跑 mcp_server\run.py 的 8766 端口）

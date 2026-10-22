@@ -1,0 +1,89 @@
+{# 限时练「单个学生逐场成绩」的局部刷新容器（2026-10-22 用户口径：
+   翻上一页 / 下一页不要整页刷新，只换这一块）。
+   路由 `timed_student_detail?partial=1` 时只渲染本模板，由
+   static/js/timed_pane.js 用 fetch 替换 #timedPane。 #}
+<div id="timedPane">
+<div class="card">
+    <div class="card-header py-2 d-flex flex-wrap justify-content-between
+                align-items-center gap-2">
+        <div>
+            <span class="fw-semibold">逐场成绩</span>
+            <span class="text-muted small ms-2">
+                按日期倒序（新的在上），每页 {{ page_size }} 场；
+                单元格上为原始分、下为该科 T 分
+            </span>
+        </div>
+        <span class="text-muted small">共 {{ count }} 场 · 第 {{ page }}/{{ pages }} 页</span>
+    </div>
+    <div class="table-responsive">
+    <table class="table table-sm table-hover align-middle mb-0 timed-tbl">
+        <thead class="table-light">
+        <tr>
+            <th class="text-nowrap">场次</th>
+            <th class="text-nowrap">日期</th>
+            {% for s in subjects %}
+            <th class="text-end text-nowrap">{{ s }}</th>
+            {% endfor %}
+        </tr>
+        </thead>
+        <tbody>
+        {% for it in lines %}
+        <tr>
+            <td class="text-nowrap">
+                <a href="{{ url_for('grades.timed_detail', tid=it.exam.id, tab='students') }}">
+                    {{ it.exam.display_name() }}
+                </a>
+            </td>
+            <td class="text-muted text-nowrap">{{ it.exam.exam_date.strftime('%Y-%m-%d') }}</td>
+            {% for s in subjects %}
+            {% set c = it.cells.get(s) %}
+            <td class="text-end text-nowrap">
+                {% if c %}
+                <div>{{ c.score }}</div>
+                {% if c.t is not none %}
+                <div class="text-muted t-sub">T {{ c.t }}</div>
+                {% endif %}
+                {% else %}
+                <span class="text-muted">—</span>
+                {% endif %}
+            </td>
+            {% endfor %}
+        </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+    </div>
+    {% if pages > 1 %}
+    <div class="card-footer py-2">
+        <nav aria-label="逐场成绩分页">
+            <ul class="pagination pagination-sm mb-0 flex-wrap">
+                <li class="page-item {{ 'disabled' if page <= 1 }}">
+                    <a class="page-link" data-pane-nav
+                       href="{{ url_for('grades.timed_student_detail', tid=exam.id, student_no=student_no, page=page - 1) }}">上一页</a>
+                </li>
+                {% for p in range(1, pages + 1) %}
+                {% if p == 1 or p == pages or (p >= page - 2 and p <= page + 2) %}
+                <li class="page-item {{ 'active' if p == page }}">
+                    <a class="page-link" data-pane-nav
+                       href="{{ url_for('grades.timed_student_detail', tid=exam.id, student_no=student_no, page=p) }}">{{ p }}</a>
+                </li>
+                {% elif p == 2 or p == pages - 1 %}
+                <li class="page-item disabled"><span class="page-link">…</span></li>
+                {% endif %}
+                {% endfor %}
+                <li class="page-item {{ 'disabled' if page >= pages }}">
+                    <a class="page-link" data-pane-nav
+                       href="{{ url_for('grades.timed_student_detail', tid=exam.id, student_no=student_no, page=page + 1) }}">下一页</a>
+                </li>
+            </ul>
+        </nav>
+    </div>
+    {% endif %}
+</div>
+
+<div class="text-muted small mt-2">
+    T 分数 = 10 ×（个人分 − 该场该科年级均分）÷ 标准差 + 50；
+    每科单独算，所以不同科目、不同场次之间可以直接比较相对位置。
+    某科实考少于 {{ t_min }} 人时不算 T 分（显示为 —）。
+</div>
+</div>

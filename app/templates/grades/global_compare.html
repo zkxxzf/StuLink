@@ -7,7 +7,7 @@
 {% block content %}
 {# 全局对比：班级 × 学科宽表（去差均分 / 特优线 / 本科线）
    入口条件与「成绩汇报区」一致（管理员/校级领导/年级长），后端 _guard_report 硬校验 #}
-{# v1.19.62.65 考试态：侧栏入口带的是 ?exam=<id>（此前这里只认 exam_id，参数被丢掉 →
+{# v1.19.65.64 考试态：侧栏入口带的是 ?exam=<id>（此前这里只认 exam_id，参数被丢掉 →
    退化成下拉第一项并提示「该考试暂无成绩」）。改为统一先问 exam_nav()（认 ?exam / exam_id / 路径），
    考试态下把「考试」下拉隐藏（只看本场），非考试态保持可选。 #}
 {% set _en = exam_nav() %}
@@ -29,30 +29,26 @@
             <i class="bi bi-file-earmark-excel"></i> 导出 Excel</button>
     </div>
     <div id="ldMeta" class="text-muted small mb-2"></div>
-    {# v1.19.62.65 分数线勾选：默认 211/特控/本科，其余层（清北/985…）勾选才显示 #}
+    {# v1.19.65.64 分数线勾选：默认 211/特控/本科，其余层（清北/985…）勾选才显示 #}
     <div id="ldLines" class="ld-lines mb-2 no-print"></div>
     <div id="ldBody">
         <div class="text-center text-muted py-5"><div class="spinner-border"></div>
             <div class="mt-2">加载中…</div></div>
     </div>
-    {# 2026-10-19 用户口径（第五次调整后定稿）：
-       「改成依据分层的上线人数堆积图，然后上线率用折线表示」+
-       「柱形图上方不要显示人数了，给我显示去差均分」+
-       「把人数标注在柱子上线的人数，然后上方应该有标签可以点击呀」+
-       「上线率不能丢，最好也能标注一下；未上线的默认不标注，但是要有」——
-       总分 + 各科共 10 个图，每张图里柱＝各分层上线人数堆积（左轴，
-       段＝该层独占人数，底部灰段＝未上线），段内标人数、柱顶标去差均分；
-       折线＝各分层上线率（右轴 %），点上标百分比；未上线段保留但不标数字；
-       图例＝各堆积段（××线人数 / 未上线）+ 各折线，逐个可点显隐。 #}
+    {# 2026-10-21 用户口径（第二轮，覆盖同日第一版）：
+       百分比堆积柱——每班都 100%，段高＝该段人数占比（段内标人数），
+       自下而上按分数线由高到低（清北在底 → … → 未上线在最上）；
+       叠加各线的「上线率」折线（沿自己那一段的顶边连接各班）；
+       柱顶标去差均分。图例＝各堆积段 + 各上线率折线，均可点选显隐。 #}
     <div id="ldCharts" class="d-none no-print">
         <div class="ld-chart-sec">
             <div class="ld-chart-head">
                 <h6><i class="bi bi-bar-chart-line"></i> 分层上线人数 × 上线率</h6>
-                <span class="ld-chart-hint">柱＝各分层上线人数（段内为人数、柱顶为去差均分），折线＝各分层上线率（右轴，点上标百分比）；未上线人数默认收起，点图例可展开；只列参加该科考试的班</span>
-                {# 2026-10-19 用户要求两种横轴排序可自选：勾上＝班型→方向→组合→班号；
-                   取消＝方向→组合→班号（选择记在 localStorage，换考试也保持） #}
-                <label class="ld-sort-toggle" title="横轴排序方式">
-                    <input type="checkbox" id="ldSortType" class="form-check-input" checked>
+                <span class="ld-chart-hint">百分比堆积柱（每班都 100%：段内为人数、段高为占比，自下而上按分数线由高到低、未上线在最上），折线＝各线上线率，柱顶为去差均分；点图例可显隐各层；只列参加该科考试的班</span>
+                {# 2026-10-21 用户口径：默认按班级序号排（勾选框**不预选**），
+                   勾上「先按班型排（卓越 / 强基）」才切成班型优先 #}
+                <label class="ld-sort-toggle" title="横轴排序方式（默认按班级序号，勾上＝班型优先）">
+                    <input type="checkbox" id="ldSortType" class="form-check-input">
                     <span>先按班型排（卓越 / 强基）</span>
                 </label>
             </div>

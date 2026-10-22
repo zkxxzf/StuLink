@@ -4,8 +4,28 @@
 <style>
 /* 2026-10-15 用户口径「教师映射扩容，增加综合组」：科目行按 文化科目 / 综合组 分段
    （与学科组长页的分组带同形） */
-#tcTable .subj-band td { background: var(--bs-tertiary-bg, #f1f3f5);
-                         font-weight: 700; letter-spacing: .5px; text-align: left; }
+/* 2026-10-22 用户口径：任课映射照「考务④ 核对任课教师」的双行表头做 ——
+   行＝班级，列＝班主任（正班/副班1/副班2）+ 文化科目 9 + 综合组 6。
+   班主任三列只读（数据源＝班级管理 UserClassLink），学科列仍是可编辑下拉。 */
+#tcTable .t4-band { background: var(--bs-tertiary-bg, #f1f3f5);
+                    font-weight: 700; letter-spacing: .5px; text-align: center; }
+#tcTable .t4-head-col { background: color-mix(in srgb, var(--bs-tertiary-bg, #f1f3f5) 82%, #198754 18%); }
+#tcTable .at-head { color: var(--bs-secondary-color, #6c757d); }
+#tcTable .t4-cls { position: sticky; left: 0; z-index: 1; background: var(--bs-body-bg, #fff); }
+/* 2026-10-22 用户口径「紧缩到一页」：20 列（班主任3 + 文化9 + 综合6 + 班级）
+   平均分配 100% 宽度，一屏看全；不再用 92px 下限撑出横向滚动。 */
+#tcTable { width: 100%; min-width: 0; table-layout: fixed; }
+#tcTable th, #tcTable td { white-space: nowrap; min-width: 0; padding: 2px 2px; font-size: 11px; }
+#tcTable th:first-child, #tcTable td:first-child { width: 58px; min-width: 58px; }
+/* 单元格下拉再压一档：11px 字号、右侧箭头留白收窄，3 个汉字仍放得下 */
+#tcTable .tcell { font-size: 11px; padding: .1rem 1rem .1rem .1rem;
+                  background-position: right .25rem center; }
+#tcTable .htcell { font-size: 11px; padding: .1rem .45rem .1rem .1rem;
+                   background-position: right .15rem center; }
+/* base.html 的 .table-responsive thead th 是 sticky top:0，双行表头会错位留白 ——
+   本表纵向不需要吸顶，表头 static（首列仍横向冻结）。 */
+#tcTable thead th { position: static; }
+#tcTable thead th:first-child { position: sticky; left: 0; top: auto; z-index: 3; }
 </style>
 {% endblock %}
 {% block content %}
@@ -49,7 +69,8 @@
 </div>
 
 <div class="card" id="tcApp" data-url="{{ url_for(ep('teachers_get')) }}"
-     data-save-url="{{ url_for(ep('teachers_save')) }}">
+     data-save-url="{{ url_for(ep('teachers_save')) }}"
+     data-ht-url="{{ url_for(ep('teachers_headteacher_save')) }}">
     <div class="card-body">
         <div class="d-flex align-items-center mb-2 flex-wrap gap-2">
             <label class="form-label mb-0 me-1">年级</label>
@@ -102,9 +123,11 @@ $(function(){
     // 绑定要按 user_name 显示出来，否则会被误显示成「未指定」（值其实还在 cells 里）。
     function singleOptHtml(v, name){
         var u = v ? usersStore.filter(function(x){ return String(x.id) === String(v); })[0] : null;
-        if (u){ return userOptHtml(u); }
+        // 轻量态只显示姓名（不带「（账号）」）：20 列下每格只有 ~90px，
+        // 带账号会被截成「蒋雪…」；展开下拉（optsHtml）里仍带账号可搜索。
+        if (u){ return '<option value="' + esc(u.id) + '">' + esc(u.name) + '</option>'; }
         if (v && name){
-            return '<option value="' + esc(v) + '">' + esc(name) + '（已停用 / 不在候选）</option>';
+            return '<option value="' + esc(v) + '">' + esc(name) + '（已停用）</option>';
         }
         return '<option value="">— 未指定 —</option>';
     }
@@ -134,30 +157,57 @@ $(function(){
     function renderMatrix(d){
         usersStore = d.users || [];
         optsHtml = buildOptsHtml();
-        var $head = $('#tcTable thead tr').empty()
-            .append('<th style="min-width:90px;">科目</th>');
-        d.classes.forEach(function(c){
-            var th = $('<th class="text-center" style="min-width:120px;"></th>');
-            th.append('<div class="d-flex align-items-center justify-content-center gap-1">' +
-                '<span>' + esc(c) + '</span>' +
-                '<button type="button" class="btn btn-sm btn-outline-secondary colfill px-1 py-0" ' +
-                'data-cls="' + esc(c) + '" title="为该班全部科目批量指定同一教师（整列填充）">' +
-                '<i class="bi bi-arrow-down"></i></button></div>');
-            $head.append(th);
-        });
-        // 性能优化：整表 tbody 一次性拼 HTML 写入（单次解析），远快于逐格 jQuery 构建
-        // 2026-10-15：按 subject_groups 分段渲染（文化科目 / 综合组，组间一条分组带）
-        var rows = [];
         var groups = d.subject_groups && d.subject_groups.length
             ? d.subject_groups : [{name: '', subjects: d.subjects || []}];
+        var heads = {};
+        (d.headteachers || []).forEach(function(h){
+            heads[h.class_name + '|' + h.subject] = h;
+        });
+        var POS = ['正班', '副班1', '副班2'];
+
+        // ---- 双行表头（照考务④「核对任课教师」）：班级 | 班主任(3) | 文化科目(9) | 综合组(6) ----
+        var $thead = $('#tcTable thead').empty();
+        var $r1 = $('<tr>');
+        $r1.append('<th rowspan="2" style="min-width:90px;">班级</th>');
+        $r1.append('<th colspan="' + POS.length + '" class="t4-band t4-head-col">班主任</th>');
         groups.forEach(function(g){
-            if (g.name){
-                rows.push('<tr class="subj-band"><td colspan="' + (d.classes.length + 1) + '">' +
-                    esc(g.name) + '（' + g.subjects.length + ' 科）</td></tr>');
-            }
+            if (!g.subjects.length) { return; }
+            $r1.append('<th colspan="' + g.subjects.length + '" class="t4-band">' +
+                esc(g.name || '文化科目') + '</th>');
+        });
+        $thead.append($r1);
+        var $r2 = $('<tr>');
+        POS.forEach(function(pos){
+            // 班主任三列固定 64px：3 个汉字的姓名 + 下拉箭头放得下（学科列吃剩余宽度）
+            $r2.append('<th class="text-center t4-head-col" style="width:64px;">' +
+                esc(pos) + '</th>');
+        });
+        groups.forEach(function(g){
             g.subjects.forEach(function(sub){
-                var tds = ['<td><strong>' + esc(sub) + '</strong></td>'];
-                d.classes.forEach(function(cls){
+                $r2.append('<th class="text-center">' + esc(sub) + '</th>');
+            });
+        });
+        $thead.append($r2);
+
+        // ---- 表体：一行一个班（班主任三列只读，学科列是下拉） ----
+        var rows = [];
+        d.classes.forEach(function(cls){
+            var tds = ['<td class="fw-bold text-nowrap t4-cls">' + esc(cls) +
+                ' <button type="button" class="btn btn-sm btn-outline-secondary rowfill px-1 py-0" ' +
+                'data-cls="' + esc(cls) + '" title="为该班全部科目批量指定同一教师（整行填充）">' +
+                '<i class="bi bi-arrow-right"></i></button></td>'];
+            POS.forEach(function(pos){
+                var h = heads[cls + '|' + pos];
+                var cur = h && h.user_id != null ? String(h.user_id) : '';
+                // 2026-10-22 用户口径：正班/副班也要能改 → 下拉直接写 UserClassLink
+                tds.push('<td class="text-center at-head"><select ' +
+                    'class="form-select form-select-sm htcell" data-cls="' + esc(cls) +
+                    '" data-pos="' + esc(pos) + '" title="' +
+                    esc(h && h.teacher_name ? h.teacher_name : pos) + '">' +
+                    singleOptHtml(cur, h ? h.teacher_name : '') + '</select></td>');
+            });
+            groups.forEach(function(g){
+                g.subjects.forEach(function(sub){
                     var key = cls + '|' + sub;
                     var cell = d.cells[key];
                     var cur = cell && cell.user_id != null ? String(cell.user_id) : '';
@@ -166,8 +216,8 @@ $(function(){
                         'data-key="' + esc(key) + '">' + singleOptHtml(cur, cell ? cell.user_name : '') +
                         '</select></td>');
                 });
-                rows.push('<tr>' + tds.join('') + '</tr>');
             });
+            rows.push('<tr>' + tds.join('') + '</tr>');
         });
         $('#tcTable tbody').html(rows.join(''));
     }
@@ -176,9 +226,30 @@ $(function(){
         cells[$(this).data('key')] = $(this).val();
     });
     // 悬停/聚焦时补全下拉项（原生 select 点击才展开，故悬停即预热，展开时已是完整列表）
-    $('#tcTable').on('mouseenter focus', '.tcell', function(){ hydrate($(this)); });
-    // 整列填充：为该班全部科目指定同一教师（按姓名/账号匹配）
-    $('#tcTable').on('click', '.colfill', function(){
+    $('#tcTable').on('mouseenter focus', '.tcell, .htcell', function(){ hydrate($(this)); });
+
+    // 班主任位次（正班/副班1/副班2）：change 即存（数据源 UserClassLink）
+    $('#tcTable').on('change', '.htcell', function(){
+        var $s = $(this);
+        $.ajax({
+            url: app.data('htUrl'), type: 'POST',
+            contentType: 'application/json',
+            data: JSON.stringify({
+                grade: $('#tcGrade').val(),
+                class_name: $s.data('cls'),
+                position: $s.data('pos'),
+                user_id: $s.val() || null
+            })
+        }).done(function(res){
+            if (res && res.success){ $('#tcMsg').text(res.message || '已保存'); }
+            else { alert((res && res.message) || '保存失败'); load(); }
+        }).fail(function(x){
+            alert((x.responseJSON && x.responseJSON.message) || '保存失败');
+            load();
+        });
+    });
+    // 整行填充：为该班全部科目指定同一教师（按姓名/账号匹配）
+    $('#tcTable').on('click', '.rowfill', function(){
         var cls = $(this).data('cls');
         var input = prompt('为 ' + cls + ' 全部科目指定同一教师：\n输入教师姓名或账号（留空=清除该班全部科目）', '');
         if (input === null){ return; }
@@ -190,14 +261,14 @@ $(function(){
         }
         var v = u ? String(u.id) : '';
         $('#tcTable tbody tr').each(function(){
-            $(this).find('.tcell').each(function(){
+            var $tr = $(this);
+            if ($tr.find('td.t4-cls').text().indexOf(cls) !== 0){ return; }
+            $tr.find('.tcell').each(function(){
                 var $c = $(this);
-                if ($c.data('key').indexOf(cls + '|') === 0){
-                    // 轻量态下没有完整 option，直接改写为"单一当前值"并复位 hydrated，
-                    // 待下次悬停/聚焦时再按最新值重新补全，避免 val() 落空
-                    $c.html(singleOptHtml(v)).attr('data-hydrated', '0');
-                    cells[$c.data('key')] = v;
-                }
+                // 轻量态下没有完整 option，直接改写为"单一当前值"并复位 hydrated，
+                // 待下次悬停/聚焦时再按最新值重新补全，避免 val() 落空
+                $c.html(singleOptHtml(v)).attr('data-hydrated', '0');
+                cells[$c.data('key')] = v;
             });
         });
     });
@@ -208,7 +279,7 @@ $(function(){
         var grade = $('#tcGrade').val();
         if (!grade) { alert('请先选择年级'); return; }
         $('#tcMsg').text('保存中…');
-        // v1.19.62.65：必须显式声明 JSON —— 原来 $.post(url, JSON.stringify(...)) 会以
+        // v1.19.65.64：必须显式声明 JSON —— 原来 $.post(url, JSON.stringify(...)) 会以
         // application/x-www-form-urlencoded 发送 JSON 文本，后端 get_json 取不到 → 保存静默失效
         $.ajax({
             url: app.data('saveUrl'), type: 'POST',

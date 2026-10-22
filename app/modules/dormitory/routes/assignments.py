@@ -326,20 +326,6 @@ def clear_class():
         if student and room:
             record_assignment('clear', student, room, bed.bed_number, current_user)
     if cleared_beds:
-        # 2026-10-22 审计修复（P0）：清空本班床位原为「改字段、不删行」，
-        # 回收站里什么都没有 → 误清不可恢复。这里按原 id 快照归档
-        # （update_existing=恢复时按 id 更新现有行），归档失败即中止。
-        from app.utils.trash import archive_snapshot
-
-        rec = archive_snapshot('dormitory', 'bed_assignment', '床位分配',
-                               tables=[(BedAssignment, cleared_beds)],
-                               summary=(f'{grade}{class_name} 清空 '
-                                        f'{len(cleared_beds)} 个床位'),
-                               operator=current_user, update_existing=True)
-        if rec is None:
-            db.session.rollback()
-            return jsonify({'success': False,
-                            'message': '归档未完成，已中止（数据未改动）'}), 500
         BedAssignment.query.filter(
             BedAssignment.student_id.in_(student_ids)
         ).update({'student_id': None, 'assigned_by': None, 'assigned_at': None}, synchronize_session=False)

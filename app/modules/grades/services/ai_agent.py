@@ -15,14 +15,14 @@
 LLM 侧只用到 `ai_service._chat_completions(..., tools=…)`（OpenAI 兼容 function calling），
 Key 仍走 `ai_service.resolve_key`（浏览器本地 / 个人 / 全局），服务器不留存。
 """
-import html
 import json
 import logging
 import re
 import time
 
-from app.modules.grades.services import ai_service, ai_tools
+from app.modules.grades.services import ai_service, ai_text_tools, ai_tools
 from app.utils.html_guard import sanitize_report_html
+from app.utils.md_guard import normalize_report_html
 
 logger = logging.getLogger(__name__)
 
@@ -48,6 +48,7 @@ AGENT_SYSTEM_PROMPT = (
     '4. 通常 1~3 轮、2~4 次工具调用就能回答：每轮尽量把需要的工具一次调齐，'
     '不要重复调用同一个工具凑数，尽早给出报告。\n\n'
     '【输出格式】最终**只输出 HTML 片段**（不要 Markdown、不要 JSON、不要解释性前后缀）：\n'
+    '- **只给片段**：不要 <!DOCTYPE html>、<html>、<head>、<body> 等整篇文档外壳；\n'
     '- 用 <h4>/<h5> 小标题、<p>、<ul>/<li>、<table class="table table-sm"> 组织内容；\n'
     '- 允许标签：h1~h6、p、br、hr、div、span、small、strong、em、ul、ol、li、'
     'table、thead、tbody、tr、th、td、blockquote、code、a；\n'
@@ -63,31 +64,26 @@ AGENT_SYSTEM_PROMPT = (
 )
 
 _FENCE_RE = re.compile(r'```(?:html|HTML)?\s*(.*?)```', re.S)
-_TAG_RE = re.compile(r'<[a-zA-Z][^>]*>')
 
 
 def _extract_html(text):
-    """从模型输出里取 HTML 片段（容错：模型用 ```html 围栏包起来时剥掉围栏）。"""
-    body = str(text or '').strip()
+    """从模型输出里取 HTML 片段。
+
+    容错四件事（2026-10-22 用户截图反馈后补）：
+      1. 模型用 ```html 围栏包起来 → 剥掉围栏；
+      2. 模型直接返回 **Markdown**（`# 标题`、`**加粗**`、`| 表 |`）→
+         用 `md_guard.markdown_to_html` 转成 HTML（与 grades_md.js 同口径），
+         否则会以源码形式显示在报告里；
+      3. 纯文本 → 同样走 Markdown 转换（至少分段成 <p>）；
+      4. 混进正文的 DSML / <tool_call> 工具调用标记 → 先剔除再排版。
+    """
+    body = ai_text_tools.strip_markup(text)
     if not body:
         return ''
     m = _FENCE_RE.search(body)
     if m:
         body = m.group(1).strip()
-    return _wrap_plain(body)
-
-
-def _wrap_plain(text):
-    """模型偶尔不按 HTML 输出（直接写纯文本/Markdown）时的兜底：
-
-    没有任何标签就按空行分段包装，至少不会挤成一坨（消毒器会把 Markdown 的
-    `|`、`#` 当普通文本，这是可接受的降级：内容仍真实，只是排版朴素）。
-    """
-    if _TAG_RE.search(text):
-        return text
-    escaped = html.escape(text, quote=False)
-    blocks = [b.strip() for b in re.split(r'\n\s*\n', escaped) if b.strip()]
-    return ''.join('<p>%s</p>' % b.replace('\n', '<br>') for b in blocks)
+    return normalize_report_html(body)
 
 
 def _context_note(user, exam, direction='', layer='', scope_desc=''):
@@ -153,6 +149,11 @@ def run(cfg, user, exam, question, direction='', layer='', scope_desc='',
             yield {'type': 'stage',
                    'text': '正在思考需要哪些数据…' if round_no == 1
                            else f'正在整理第 {round_no} 轮分析…（已用 {used} 秒）'}
+        if forced:
+            # tool_choice=none 对部分中转无效，再用一句话把模型按回收尾
+            messages.append({'role': 'user',
+                             'content': '【系统】不要再调用任何工具，直接基于'
+                                        '已查询到的数据输出最终 HTML 报告。'})
         ok, payload, sec = ai_service._chat_completions(
             cfg, messages, tools=ai_tools.TOOLS, temperature=0.2,
             tool_choice='none' if forced else None)
@@ -170,24 +171,62 @@ def run(cfg, user, exam, question, direction='', layer='', scope_desc='',
             return
 
         calls = msg.get('tool_calls') or []
+        text_mode = False
+        if not calls:
+            # 2026-10-22：部分中转/模型把工具调用写进 content 的 DSML 文本
+            # （<|DSML|invoke name="…">），旧逻辑会当成最终报告原样显示。
+            calls, cleaned = ai_text_tools.parse(msg.get('content') or '')
+            if calls:
+                text_mode = True
+                msg['content'] = cleaned
+                logger.info('文本态工具调用：%s',
+                            ','.join(c.get('function', {}).get('name', '')
+                                     for c in calls))
+        elif ai_text_tools.has_markup(msg.get('content') or ''):
+            # 原生 tool_calls 与文本标记并存时，正文里的标记也要剔掉
+            msg['content'] = ai_text_tools.strip_markup(
+                msg.get('content') or '')
         if forced and calls:
             # 少数服务商不认 tool_choice='none' → 忽略这轮的工具请求，避免又白白多跑一轮
             calls = []
         if not calls:
             # 收敛：这一轮没有工具调用 → 内容即最终报告
-            html = _extract_html(msg.get('content') or '')
+            raw = msg.get('content') or ''
+            html = _extract_html(raw)
             if not html:
-                yield {'type': 'error',
-                       'text': (f'模型没有返回报告内容（本轮已查询 {len(trace)} 项数据），'
-                                '请把问题描述得更具体一些后重试')}
+                if ai_text_tools.has_markup(raw):
+                    yield {'type': 'error',
+                           'text': ('模型把工具调用写成了文本标签，但格式无法解析；'
+                                    '请换用支持 function calling 的模型'
+                                    '（如 deepseek-chat / qwen-plus / glm-4-plus）'
+                                    '后重试')}
+                else:
+                    yield {'type': 'error',
+                           'text': (f'模型没有返回报告内容'
+                                    f'（本轮已查询 {len(trace)} 项数据），'
+                                    '请把问题描述得更具体一些后重试')}
                 return
-            yield {'type': 'html', 'text': sanitize_report_html(html), 'trace': trace}
+            safe = sanitize_report_html(html)
+            if not safe.strip():
+                # 2026-10-23：模型可能只回了空白/被安全过滤清空的内容，
+                # 旧逻辑会把它当"成功报告"落库，页面显示"报告内容已不存在"。
+                yield {'type': 'error',
+                       'text': '模型返回的报告内容为空（空白片段或被安全过滤'
+                               '清空），请重试或换用其他模型'}
+                return
+            yield {'type': 'html', 'text': safe, 'trace': trace}
             return
 
-        # 回灌 assistant 的 tool_calls 消息（OpenAI 协议要求）
-        messages.append({'role': 'assistant',
-                         'content': msg.get('content') or '',
-                         'tool_calls': calls})
+        if text_mode:
+            # 文本模式：服务商不认 tool_calls，只回灌模型自己说过的话
+            messages.append({'role': 'assistant',
+                             'content': msg.get('content') or '（已请求取数）'})
+        else:
+            # 回灌 assistant 的 tool_calls 消息（OpenAI 协议要求）
+            messages.append({'role': 'assistant',
+                             'content': msg.get('content') or '',
+                             'tool_calls': calls})
+        results = []
         for call in calls:
             if cancel_check and cancel_check():
                 yield {'type': 'canceled', 'text': '已按你的要求停止'}
@@ -224,8 +263,15 @@ def run(cfg, user, exam, question, direction='', layer='', scope_desc='',
             trace.append({'tool': name, 'args': args, 'ok': bool(okc),
                           'summary': summ or (str(text)[:160] if not okc else ''),
                           'ms': elapsed})
-            messages.append({'role': 'tool', 'tool_call_id': call.get('id') or '',
-                             'content': str(text)[:MAX_TOOL_CHARS]})
+            if text_mode:
+                results.append((name, args, bool(okc), text))
+            else:
+                messages.append({'role': 'tool',
+                                 'tool_call_id': call.get('id') or '',
+                                 'content': str(text)[:MAX_TOOL_CHARS]})
+        if text_mode:
+            messages.append({'role': 'user',
+                             'content': ai_text_tools.results_message(results)})
 
     yield {'type': 'error',
            'text': f'已达到最大分析轮数（{max_rounds} 轮）仍未收敛，'

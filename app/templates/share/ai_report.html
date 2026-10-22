@@ -1,0 +1,82 @@
+{# AI 报告分享页（2026-10-22）：只读、独立页面，不继承站内 base.html。
+   为什么独立：① 别人打开链接时不该看到站内导航与侧栏；② 深色看板皮肤是
+   「报告画布」专用，不能污染站内浅色主题。 #}
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow, noarchive">
+<title>{{ exam_title }} · AI 分析报告</title>
+<link href="{{ su('css/ai_board.css') }}" rel="stylesheet">
+</head>
+<body class="share-body ai-board">
+<nav class="share-bar">
+    <a class="brand" href="{{ url_for('welcome.index') }}">STULINK</a>
+    <span class="sep">/</span>
+    <span>AI 分析报告</span>
+    <span class="spacer"></span>
+    {% if is_owner %}
+    <a class="plain" href="{{ url_for('grades.ai_studio', exam=report.exam_id) }}">AI 工作台</a>
+    <span class="sep">/</span>
+    {% endif %}
+    <a class="plain" href="{{ url_for('welcome.index') }}">返回首页</a>
+</nav>
+
+<div class="share-wrap">
+    <header class="share-hero">
+        <span class="share-tag"><span class="dot"></span>STULINK · AI REPORT · 只读分享</span>
+        <h1>{{ exam_title }}</h1>
+        <p class="share-sub">
+            {{ report.scope_desc or '基于分享者可见的成绩数据生成' }}。
+            本页只呈现这一份报告，不含提问记录、其它分析或学生名单导出。
+        </p>
+        <div class="share-meta">
+            <span>生成时间 <b>{{ report.created_at.strftime('%Y-%m-%d %H:%M') if report.created_at else '—' }}</b></span>
+            <span>分享者 <b>{{ owner_name }}</b></span>
+            <span>有效期
+                <b>{% if share.expires_at %}{{ share.expires_at.strftime('%Y-%m-%d %H:%M') }} 到期{% else %}长期有效{% endif %}</b>
+            </span>
+            <span>浏览 <b>{{ share.view_count or 1 }}</b> 次</span>
+        </div>
+    </header>
+
+    <section class="share-paper">
+        <div class="share-doc-scroll">
+            <div class="ai-board-doc" id="shareDoc">
+                {%- if kind == 'html' -%}
+                {# 正文已由 app/utils/html_guard.py 白名单重建两次（写入时 + 渲染前） #}
+                {{ safe_html|safe }}{# sec-allow: 模板-不安全输出 白名单重建两次，只插入这一份，不拼接动态 HTML #}
+                {%- endif -%}
+            </div>
+        </div>
+    </section>
+
+    <div class="share-foot">
+        <div class="warn">本报告由 AI 生成，仅供参考，不代表学校评价结论。</div>
+        <div>分享链接由报告生成者创建，可随时撤销；链接仅供校内账号登录后查看，请勿转发到校外。</div>
+    </div>
+</div>
+
+{% if kind != 'html' %}
+{# 旧口径 Markdown 报告：文本以 JSON 传递（Jinja tojson 会转义 </script>），
+   交给站内白名单渲染器 grades_md.js（先转义再按子集转换，不拼接原始 HTML）。 #}
+<script type="application/json" id="shareMdData">{{ (report.content or '')|tojson }}</script>
+<script src="{{ su('js/grades_md.js') }}"></script>
+<script>
+(function () {
+    var data = document.getElementById('shareMdData');
+    var box = document.getElementById('shareDoc');
+    if (!data || !box) { return; }
+    var md = '';
+    try { md = JSON.parse(data.textContent || '""') || ''; } catch (e) { md = ''; }
+    if (typeof window.renderGradeMd === 'function') {
+        box.innerHTML = window.renderGradeMd(md);
+    } else {
+        box.textContent = md;
+    }
+})();
+</script>
+{% endif %}
+</body>
+</html>

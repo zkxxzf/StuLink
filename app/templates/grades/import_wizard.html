@@ -507,30 +507,13 @@
         </label>
     </div>
     {% endif %}
-    <div class="d-flex gap-2 align-items-center flex-wrap">
+    <div class="d-flex gap-2">
         <button type="submit" class="btn btn-success" {{ 'disabled' if stats.ok_rows == 0 }}>
             <i class="bi bi-check-lg"></i> 确认导入（{{ info.get(draft.mode, draft.mode) }}）
         </button>
         <a href="{{ url_for('grades.exam_import', exam_id=exam.id) }}" class="btn btn-outline-secondary">
             修改文件重新上传
         </a>
-        {# 2026-10-22 用户口径：可导入 0 行时按钮是 disabled 的，此前没有任何说明，
-           点了像"卡住/没反应"。这里把禁用的**原因**直接写在按钮旁边。 #}
-        {% if stats.ok_rows == 0 %}
-        <span class="text-danger small">
-            <i class="bi bi-exclamation-circle"></i>
-            当前可导入 0 行，无法提交：
-            {% if not (stats.total_lines or 0) %}
-                文件里没有数据行（请以下载的模板为准填写）
-            {% elif stats.error_rows %}
-                {{ stats.error_rows }} 行解析失败（见上方「错误行」），修正后重新上传
-            {% elif stats.absent_rows %}
-                {{ stats.absent_rows }} 行都没有分数（会被判为缺考），请确认列是否选中
-            {% else %}
-                没有可导入的成绩行，请检查文件内容后重新上传
-            {% endif %}
-        </span>
-        {% endif %}
     </div>
 </form>
 

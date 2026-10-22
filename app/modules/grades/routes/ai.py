@@ -1,4 +1,4 @@
-# StuLink v1.19.62.65 2026-10-10
+# StuLink v1.19.65.64 2026-10-10
 # AI 分析：服务商注册表 / 个人与全局 Key 管理 / 连通性测试 / 发送范围预览 /
 #          分析生成 / 报告历史
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
@@ -14,12 +14,14 @@ from app.models.grades import (Exam, AiKey, AiGlobalKey, AiReport, AiChatMessage
                                AiTask, AiTrash)
 from app.modules.grades import bp
 from app.modules.grades.services import (ai_prompt, ai_service, ai_task_service,
+                                         ai_share_service,
                                          scope as scope_service)
 from app.modules.grades.services import ai_providers
 from app.utils import ai_quota
 from app.utils.crypto import encrypt_rand, decrypt
 from app.utils.decorators import perm_required
 from app.utils.helpers import log_operation
+from app.utils.md_guard import normalize_report_html
 
 logger = logging.getLogger(__name__)
 MAX_KEY_LEN = 300
@@ -650,14 +652,28 @@ def _task_json(task, with_body=False, names=None):
     if with_body:
         out['events'] = [ev for ev in ai_task_service.task_events(task.id)
                          if ev.get('type') in ('stage', 'tool')]
-        html_text = None
+        html_text, md_text = None, None
+        report = None
         if task.report_id:
             report = AiReport.query.get(task.report_id)
             if report is not None:
-                html_text = report.content
-                out['kind'] = report.kind or 'html'
+                kind = report.kind or 'html'
+                out['kind'] = kind
+                if kind == 'html':
+                    html_text = report.content
+                    # 历史脏数据：kind 标成 html、正文却是 Markdown（2026-10-22
+                    # 用户截图里的 `# 标题` / `| 表 |`）→ 在这里转一次，旧报告也能看
+                    html_text = normalize_report_html(html_text)
+                else:
+                    md_text = report.content
         out['html'] = html_text
-        out['md'] = None
+        out['md'] = md_text
+        # 2026-10-22：任务显示「已完成」但拿不到正文（report_id 指向的报告行不存在，
+        # 或删除报告时把 report_id 清了）→ 前端明确提示"报告已丢失"，
+        # 不能让报告区白屏（用户截图反馈的就是这种情况）。
+        out['report_missing'] = bool(
+            not html_text and not md_text
+            and (task.status == 'done' or (task.stage or '') == '报告已删除'))
         try:
             out['trace'] = json.loads(task.trace) if task.trace else []
         except Exception:                      # noqa: BLE001  轨迹坏掉不影响看报告
@@ -673,6 +689,10 @@ def _report_as_task(report, names=None):
     """
     exam = Exam.query.get(report.exam_id)
     kind = report.kind or 'md'
+    html_text = report.content if kind == 'html' else None
+    if html_text:
+        # 历史脏数据：kind=html 但正文是 Markdown（2026-10-22 截图）
+        html_text = normalize_report_html(html_text)
     return {
         'id': -report.id, 'origin': 'report', 'exam_id': report.exam_id,
         'exam_name': exam.name if exam else '（考试已删除）',
@@ -680,7 +700,7 @@ def _report_as_task(report, names=None):
         'question': '（旧口径 AI 报告，来自「AI 分析」按钮）',
         'status': 'done', 'stage': '已完成', 'error': '', 'tool_count': 0,
         'report_id': report.id, 'kind': kind, 'events': [],
-        'html': report.content if kind == 'html' else None,
+        'html': html_text,
         'md': report.content if kind != 'html' else None,
         'trace': [],
         'operator': (names or {}).get(report.user_id, ''),
@@ -718,11 +738,24 @@ def ai_tasks():
     return jsonify(success=True, data=items)
 
 
-@bp.route('/ai/tasks/<int:tid>')
+def _task_tid(raw):
+    """解析任务 id：**必须支持负数**（`-report_id` = 无对应任务的旧口径报告）。
+
+    2026-10-22：此前路由写 `<int:tid>`，Werkzeug 的 int 转换器不接受负号，
+    列表里的旧报告点开一律 404（本次做分享时在截图链路里发现）。
+    """
+    try:
+        return int(raw)
+    except (TypeError, ValueError):
+        abort(404)
+
+
+@bp.route('/ai/tasks/<tid>')
 @login_required
 @perm_required('grades.view')
 def ai_task_detail(tid):
     """任务详情（含进度回放与报告正文）；负数 id = 旧口径报告。"""
+    tid = _task_tid(tid)
     if tid < 0:
         report = AiReport.query.get_or_404(-tid)
         if not _report_visible(report):
@@ -735,7 +768,7 @@ def ai_task_detail(tid):
     return jsonify(success=True, data=_task_json(task, with_body=True))
 
 
-@bp.route('/ai/tasks/<int:tid>/stream')
+@bp.route('/ai/tasks/<tid>/stream')
 @login_required
 @perm_required('grades.view')
 def ai_task_stream(tid):
@@ -744,6 +777,7 @@ def ai_task_stream(tid):
     先补发已产生的事件，再实时推；任务结束即发 `done` 并收尾。
     `{'type':'ping'}` 转成 SSE 注释帧保活（waitress channel_timeout 默认 120s）。
     """
+    tid = _task_tid(tid)
     if tid < 0:
         def gen_old():
             yield ': open\n\n'
@@ -786,6 +820,8 @@ def ai_task_delete(tid):
         rep = db.session.get(AiReport, rid)
         if rep is not None and rep.user_id == current_user.id:
             _archive_ai_row('report', rep)
+            # 2026-10-22：报告删了，分享链接必须一起失效（否则 /s/<token> 指向空报告）
+            ai_share_service.purge_for_report(rep.id)
             db.session.delete(rep)
     db.session.delete(task)
     db.session.commit()
@@ -815,6 +851,7 @@ def ai_clear():
                                      status='running').count()
     for r in reports:
         _archive_ai_row('report', r)
+        ai_share_service.purge_for_report(r.id)   # 2026-10-22：清空时一并撤销分享
     for t in tasks:
         _archive_ai_row('task', t)
     db.session.flush()
@@ -1000,6 +1037,15 @@ def ai_report_delete(rid):
     if not _report_visible(r):
         abort(403)
     _archive_ai_row('report', r)      # 2026-10-18：删除前归档，误删可恢复
+    ai_share_service.purge_for_report(r.id)   # 2026-10-22：分享链接随之失效
+    # 2026-10-22：报告删了，指向它的任务不能继续显示「已完成 + 空白报告」。
+    # report_id 置空并标记中断，任务详情会提示「报告已删除」，而不是白屏。
+    # 只解除 report_id 指向；任务状态/阶段保持原样（列表仍显示「已完成」，
+    # 点开由 `_task_json.report_missing` 给出「报告已丢失」提示）。
+    # 不在这里改 status/stage：SQLite 单写锁下另开事务会 database is locked，
+    # 而在同一 session 里改这两列会被删除事务的 flush 顺序吃掉。
+    for _t in AiTask.query.filter_by(report_id=r.id).all():
+        _t.report_id = None
     db.session.delete(r)
     db.session.commit()
     log_operation(current_user, '删除', 'AI 报告', rid, '', module='grades')

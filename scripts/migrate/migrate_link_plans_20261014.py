@@ -23,7 +23,7 @@ MCP 等读取点零改动）；「方案」是它的留档：
    （``is_current=1``），这样页面第一次打开就落在"当前方案"上，不会空转。
 
 表结构必须与 ``app/models/grades.py::TeacherLinkPlan / TeacherLinkPlanRow`` 一致
-（``scripts/check_columns.py`` / ``check_indexes.py`` 会逐列逐索引比对）。
+（``tests/check_columns.py`` / ``check_indexes.py`` 会逐列逐索引比对）。
 """
 import os as _os
 import sys as _sys
