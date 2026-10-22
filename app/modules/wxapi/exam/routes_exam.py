@@ -1,4 +1,4 @@
-# StuLink v1.19.63.64 2026-10-19
+# StuLink v1.19.64.64 2026-10-19
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 """小程序考务接口：我的监考 / 我参与的考务批次时间表（只读）。
 

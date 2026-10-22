@@ -39,7 +39,7 @@ th.col-dorm-head { background: var(--sl-surface-3) !important; }
             <i class="bi bi-arrow-left-right"></i> 批量调班
         </button>
         {% endif %}
-        {# v1.19.63.64 调班记录总览 #}
+        {# v1.19.64.64 调班记录总览 #}
         <a href="{{ url_for('students.class_changes') }}" class="btn btn-outline-info">
             <i class="bi bi-clock-history"></i> 调班记录
         </a>
@@ -205,7 +205,7 @@ th.col-dorm-head { background: var(--sl-surface-3) !important; }
                     </td>
                     <td>{{ s.grade }}</td>
                     <td>{{ s.class_name }}</td>
-                    {# v1.19.63.64 调班次数：点击跳到调班记录（按学号筛选） #}
+                    {# v1.19.64.64 调班次数：点击跳到调班记录（按学号筛选） #}
                     <td class="text-center">
                         {% set cc = change_counts.get(s.id, 0) %}
                         {% if cc %}
@@ -402,7 +402,7 @@ th.col-dorm-head { background: var(--sl-surface-3) !important; }
                             </select>
                         </div>
                     </div>
-                    {# v1.19.63.64 调班记录：变更性质（写入变迁日志，用于区分真实换班与改错） #}
+                    {# v1.19.64.64 调班记录：变更性质（写入变迁日志，用于区分真实换班与改错） #}
                     <div class="mb-2">
                         <label for="transferKind" class="form-label">变更性质</label>
                         <select class="form-select" id="transferKind" name="class_change_kind">

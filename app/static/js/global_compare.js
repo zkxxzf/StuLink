@@ -1,4 +1,4 @@
-/* StuLink v1.19.63.64 2026-10-10 全局对比
+/* StuLink v1.19.64.64 2026-10-10 全局对比
  * 班级 × 学科宽表：固定列（年级/班级/人数/方向/组合/属性）+ 每科（去差均分 + 各分数线）。
  * 分数线可选：默认勾选 211线/特控线/本科线，其余层（清北/985…）勾选才显示；
  * 班主任并入「总分」格下方（不再单列），各科成绩下方为本场任课教师快照。
@@ -72,7 +72,7 @@
             return;
         }
         if (missed) {
-            // v1.19.63.64 本场考试不在可见列表（已删除 / 超出数据范围 / 已毕业）：
+            // v1.19.64.64 本场考试不在可见列表（已删除 / 超出数据范围 / 已毕业）：
             // 不能静默显示最近一场让用户误当本场（考试态下下拉原本隐藏）——
             // 恢复下拉并明确提示。
             $('#ldExam').removeClass('d-none');
@@ -538,9 +538,9 @@
         };
     }
 
-    /* 一张图 = 分层上线人数堆积柱（左轴）+ 各分层上线率折线（右轴 %）。
-       图例只列上线率折线，点一下显隐；默认只开特控线、本科线。
-       柱顶数字＝去差均分（柱高才是人数）。 */
+    /* 一张图 = 百分比堆积柱（每班都 100%）+ 各分层上线率折线（同一 0~100% 轴）。
+       柱：自下而上按分数线由高到低堆积，未上线在最上；段内标人数。
+       线：每层沿自己那一段的顶边走，把各班占比连起来看趋势。 */
     function comboOption(subject, items, d, colors) {
         var layers = d.layers || [];
         // 一张图里有 ≥2 个组合时，横轴带上组合名（否则按组合分组后
@@ -560,16 +560,8 @@
         var series = [];
         var legendData = [];
         var selected = {};
-        var rotate = names.length > 9 ? 32 : 0;
-
-        // 左轴留 35% 余量：柱顶落在 3/4 高处，柱顶均分那一排与
-        // 上线率（右轴 0~100%）的数值标签错开，不会叠字；
-        // 「柱高比」也能精确换算，供 labelLayout 再兜一层避让
-        var maxTotal = 1;
-        stacks.forEach(function (s) {
-            maxTotal = Math.max(maxTotal, s.total || 0);
-        });
-        var yMax = Math.ceil(maxTotal * 1.35 / 10) * 10 || 10;
+        var rotate = names.length > 9 ? 30 : 0;
+        var countOfSeries = {};      // 系列名 → 各班人数（tooltip 用）
 
         /* 某班某科的某条线：{n（该线及以上人数）, rate（上线率%）} */
         function lineOf(x, name) {
@@ -577,28 +569,22 @@
             return (c.lines || {})[name] || null;
         }
 
-        /* 柱顶标签＝去差均分（挂在最顶那段，零高段也落在堆顶）；
-           该科没成绩/没均分时留空，不显示占位数字。 */
+        /* 2026-10-21 用户口径（第二轮）：改成**百分比堆积柱**——每根柱都是 100%，
+           段高＝该段人数占本班参考人数的比例，便于班与班之间横向比较。 */
+        function pctOf(s, n) {
+            return s.total ? +(n * 100 / s.total).toFixed(2) : 0;
+        }
+
+        /* 柱顶标签＝去差均分（100% 柱顶一排），该科没均分时留空 */
         function avgLabel() {
             return {
-                show: true, position: 'top', color: colors.text, fontSize: 9,
+                show: true, position: 'top', color: colors.text,
+                fontSize: 12, fontWeight: 600,
                 formatter: function (p) {
                     var it = items[p.dataIndex] || {};
                     var c = (it.row.cells || {})[subject] || {};
                     var v = c.trim_avg;
                     return (v === null || v === undefined) ? '' : v;
-                }
-            };
-        }
-
-        /* 段内标签＝该段人数（2026-10-21 用户口径：每一段都要标，不再按占比隐藏；
-           段高不足时 ECharts 会溢出一点，可接受，精确值也能悬浮看） */
-        function segLabel(color) {
-            return {
-                show: true, position: 'inside', color: color, fontSize: 8,
-                formatter: function (p) {
-                    var v = p.value;
-                    return (v === null || v === undefined || v === 0) ? '' : v;
                 }
             };
         }
@@ -617,47 +603,70 @@
         }
 
         if (!segNames.length) {
-            /* 该科一层都没划：只画一根参考人数，别把全班算成「未上线」 */
-            var only = {
-                name: '参考人数', type: 'bar', yAxisIndex: 0, barMaxWidth: 24,
-                data: stacks.map(function (s) { return s.total; }),
-                itemStyle: { color: colors.palette[0], borderRadius: [3, 3, 0, 0] },
-                label: avgLabel()
-            };
-            series.push(only);
+            /* 该科一层都没划：一根满格柱，只标参考人数，别把全班算成「未上线」 */
+            var totals = stacks.map(function (s) { return s.total; });
+            countOfSeries['参考人数'] = totals;
+            series.push({
+                name: '参考人数', type: 'bar', yAxisIndex: 0, barMaxWidth: 26,
+                data: stacks.map(function () { return 100; }),
+                itemStyle: { color: colors.palette[0], borderRadius: [4, 4, 0, 0] },
+                label: {
+                    show: true, position: 'inside', color: '#fff',
+                    fontSize: 12, fontWeight: 600,
+                    formatter: function (p) { return totals[p.dataIndex] || ''; }
+                },
+                emphasis: { disabled: true }
+            });
         } else {
-            /* 2026-10-21 用户口径：柱子要显示**班级内全部学生**，且自下而上按分数线
-               由高到低堆积 —— 清北（最高线）在最底、依次 985 / 211 / 特控 / 本科，
-               未上线压在最上面；以后新增的分数线同样按分数线高低插进这条顺序。 */
+            /* 2026-10-21 用户口径：柱子显示**班级内全部学生**的占比，自下而上按
+               分数线由高到低堆积 —— 清北（最高线）在最底、依次 985 / 211 / 特控 /
+               本科，未上线压在最上面；以后新增分数线同样按高低插进这条顺序。 */
             segNames.forEach(function (sn, j) {
+                var counts = stacks.map(function (s) { return segOf(s, sn); });
+                var nm = lineLabel(sn) + '人数';
+                countOfSeries[nm] = counts;
                 series.push({
-                    name: lineLabel(sn) + '人数', type: 'bar', yAxisIndex: 0, stack: 'cnt',
-                    barMaxWidth: 24,
-                    data: stacks.map(function (s) { return segOf(s, sn); }),
+                    name: nm, type: 'bar', yAxisIndex: 0, stack: 'cnt',
+                    barMaxWidth: 26,
+                    data: stacks.map(function (s, i) { return pctOf(s, counts[i]); }),
                     itemStyle: {
                         color: colors.palette[j % colors.palette.length]
                     },
-                    label: segLabel('#fff'),
+                    label: {
+                        // 段内标**人数**（柱高是百分比，人数才是教务要看的口径）
+                        show: true, position: 'inside', color: '#fff',
+                        fontSize: 11, fontWeight: 600,
+                        formatter: function (p) {
+                            var v = counts[p.dataIndex];
+                            return (v == null || v === 0) ? '' : v;
+                        }
+                    },
                     emphasis: { disabled: true }
                 });
             });
-            // 未上线（灰）＝最后一段，堆在最上面，占满「全部学生」的另一截
+            // 未上线（灰）＝最后一段，堆在最上面
+            var offs = stacks.map(function (s) { return s.off; });
+            countOfSeries['未上线人数'] = offs;
             series.push({
                 name: '未上线人数', type: 'bar', yAxisIndex: 0, stack: 'cnt',
-                barMaxWidth: 24,
-                data: stacks.map(function (s) { return s.off; }),
+                barMaxWidth: 26,
+                data: stacks.map(function (s, i) { return pctOf(s, offs[i]); }),
                 itemStyle: { color: withAlpha(colors.muted, 0.55) },
-                label: segLabel('#fff'),
+                label: {
+                    show: true, position: 'inside', color: '#fff',
+                    fontSize: 11, fontWeight: 600,
+                    formatter: function (p) {
+                        var v = offs[p.dataIndex];
+                        return v ? v : '';
+                    }
+                },
                 emphasis: { disabled: true }
             });
-            // 图例：堆积段（高→低）+ 未上线，全部默认开启、可点隐藏
             legendData = segNames.map(function (n) {
                 return lineLabel(n) + '人数';
             });
             legendData.push('未上线人数');
-            legendData.forEach(function (n) { selected[n] = true; });
-            // 均分标签锚点：不可见的零高段堆在最上面，图例里隐藏某一层后
-            // 数字仍停在新的堆顶（挂在最高层系列上会跟着被一起隐藏）
+            // 均分标签锚点：零高段堆在 100% 顶端，柱顶那排数字不随图例显隐跑掉
             series.push({
                 name: '__avg', type: 'bar', yAxisIndex: 0, stack: 'cnt',
                 data: stacks.map(function () { return 0; }),
@@ -665,50 +674,48 @@
                 emphasis: { disabled: true },
                 label: avgLabel()
             });
-        }
 
-        /* 2026-10-21 用户口径：不再画上线率折线，改为在**分界线**上标该线的上线率
-           （如「特控 44%」压在特控段与相邻段的分界处）。位置＝该线及以上人数
-           （lines[name].n）在左轴（人数）上的高度，用散点系列定位、只显示文字。 */
-        if (segNames.length) {
+            /* 2026-10-21 用户口径（第二轮）：加上**比例折线**把各班连起来 ——
+               每条线走自己那一段的顶边（＝该线及以上占比），趋势一眼可见。 */
             segNames.forEach(function (name, i) {
                 var lc = colors.palette[i % colors.palette.length];
+                var nm = lineLabel(name) + '上线率';
                 series.push({
-                    name: '__rate_' + name,
-                    type: 'scatter', yAxisIndex: 0,
-                    symbol: 'circle', symbolSize: 2,
-                    itemStyle: { color: lc, opacity: .55 },
+                    name: nm, type: 'line', yAxisIndex: 0,
                     data: items.map(function (x) {
                         var ln = lineOf(x, name);
-                        return (ln && ln.n != null && ln.n > 0) ? ln.n : null;
+                        return (ln && ln.rate != null) ? ln.rate : null;
                     }),
+                    smooth: true, symbol: 'circle', symbolSize: 5,
+                    connectNulls: true,
+                    lineStyle: { width: 2 },
+                    itemStyle: { color: lc },
                     label: {
-                        show: true, position: 'right', distance: 2,
-                        fontSize: 8, color: lc,
+                        show: true, position: 'right', distance: 3,
+                        fontSize: 10, color: lc,
                         backgroundColor: withAlpha(colors.surface, 0.85),
                         padding: [1, 2], borderRadius: 2,
                         formatter: function (p) {
-                            var ln = lineOf(items[p.dataIndex], name);
-                            if (!ln || ln.rate === null || ln.rate === undefined) { return ''; }
-                            return name.replace(/线$/, '') + ' ' + ln.rate + '%';
+                            return (p.value == null) ? '' : p.value + '%';
                         }
                     },
                     labelLayout: { hideOverlap: true },
-                    silent: true,
-                    z: 5,
-                    tooltip: { show: false }
+                    z: 6,
+                    emphasis: { disabled: true }
                 });
+                legendData.push(nm);
             });
+            legendData.forEach(function (n) { selected[n] = true; });
         }
         return {
             animationDuration: 260,
-            // 图例改为换行排（原来 scroll 会分页 1/2，多层的场的标签点不到），
-            // 顶部多留两行的高度；右侧留出分界线「上线率」标签的位置
-            grid: { left: 6, right: 46, top: 54, bottom: 4, containLabel: true },
+            // 图例行数比原来多（堆积段 + 比例折线），顶部留两到三行；
+            // 右侧留出折线百分比的数值标签位置
+            grid: { left: 8, right: 52, top: 78, bottom: 4, containLabel: true },
             legend: {
-                top: 0, type: 'plain', itemWidth: 10, itemHeight: 8,
-                itemGap: 8,
-                textStyle: { color: colors.text, fontSize: 10 },
+                top: 0, type: 'plain', itemWidth: 12, itemHeight: 9,
+                itemGap: 10,
+                textStyle: { color: colors.text, fontSize: 12 },
                 data: legendData, selected: selected
             },
             tooltip: {
@@ -724,22 +731,32 @@
                     var out = esc(ps[0].axisValue) + '　参考 ' + st.total
                         + ' 人 · 去差均分 ' + av + '<br>';
                     ps.forEach(function (p) {
-                        if (('' + p.seriesName).indexOf('__') === 0) { return; }  // 均分锚点 / 上线率定位点
-                        out += p.marker + esc(p.seriesName) + '：'
-                            + (p.value == null ? '—' : p.value + ' 人') + '<br>';
+                        if (('' + p.seriesName).indexOf('__') === 0) { return; }  // 均分锚点
+                        var cnt = countOfSeries[p.seriesName];
+                        if (cnt) {       // 堆积段：人数 + 占比
+                            out += p.marker + esc(p.seriesName) + '：'
+                                + (cnt[p.dataIndex] == null ? '—' : cnt[p.dataIndex] + ' 人')
+                                + '（' + p.value + '%）<br>';
+                        } else {         // 比例折线：只给百分比
+                            out += p.marker + esc(p.seriesName) + '：'
+                                + (p.value == null ? '—' : p.value + '%') + '<br>';
+                        }
                     });
                     return out;
                 }
             },
             xAxis: {
                 type: 'category', data: names,
-                axisLabel: { color: colors.text, fontSize: 10, interval: 0, rotate: rotate },
+                axisLabel: { color: colors.text, fontSize: 12, interval: 0, rotate: rotate },
                 axisTick: { show: false },
                 axisLine: { lineStyle: { color: colors.line } }
             },
             yAxis: [{
-                type: 'value', min: 0, max: yMax,
-                axisLabel: { color: colors.text, fontSize: 10 },
+                type: 'value', min: 0, max: 100, interval: 20,
+                axisLabel: {
+                    color: colors.text, fontSize: 12,
+                    formatter: '{value}%'
+                },
                 splitLine: { lineStyle: { color: colors.line } }
             }],
             series: series

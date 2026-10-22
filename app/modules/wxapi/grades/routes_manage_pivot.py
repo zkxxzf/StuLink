@@ -1,4 +1,4 @@
-# StuLink v1.19.63.64 2026-10-19
+# StuLink v1.19.64.64 2026-10-19
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 """小程序自由分析（透视）：与网页 `/grades/pivot` 同一个 `pivot_service`。
 

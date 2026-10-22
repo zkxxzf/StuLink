@@ -1,4 +1,4 @@
-/* StuLink v1.19.63.64 2026-10-10 全局对比：多级表头宽表
+/* StuLink v1.19.64.64 2026-10-10 全局对比：多级表头宽表
  * 结构：固定列（年级/班级/人数/方向/组合/属性）+ 每科目组（去差均分 + 各分数线）
  * 交互：分数线勾选显隐 + 横向滚动 + 表头两级吸顶 + 前两列冻结；打印按 A3 横向输出。
  * 列宽尽量压缩（小字号/窄内边距/表头换行），窄屏/宽表在容器内滚动，页面不横向溢出。 */
@@ -218,7 +218,7 @@ table.ld-table {
 }
 .ld-chart-title {
     display: flex; align-items: center; gap: 6px;
-    font-size: 12.5px; font-weight: 600; color: var(--sl-text);
+    font-size: 14px; font-weight: 600; color: var(--sl-text);
     margin-bottom: 2px;
 }
 /* 2026-10-21 用户口径：每张图右上角一个「放大」按钮，点一下铺满屏幕宽度，再点 / Esc 退出 */
@@ -245,8 +245,8 @@ table.ld-table {
 .ld-chart-card.is-max .ld-chart-title { font-size: 14px; }
 .ld-chart-card.is-max .ld-chart { flex: 1 1 auto; height: auto; min-height: 0; }
 body.ld-chart-max-open { overflow: hidden; }
-/* 人数堆积柱 + 上线率折线（双轴），图例占一行 → 比纯柱状图高一些 */
-.ld-chart { height: 260px; }
+/* 百分比堆积柱 + 上线率折线：图例 + 双行标签，字号按大屏阅读放大（2026-10-21） */
+.ld-chart { height: 320px; }
 @media (max-width: 900px) {
     .ld-chart-grid { grid-template-columns: 1fr; }
 }

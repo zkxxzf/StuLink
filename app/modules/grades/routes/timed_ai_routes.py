@@ -1,4 +1,4 @@
-# StuLink v1.19.63.64 2026-10-20
+# StuLink v1.19.64.64 2026-10-20
 # 限时练：AI 智能导入（只让模型做「哪一列是什么」）
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 """限时练 AI 导入路由。

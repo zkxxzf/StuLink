@@ -1,4 +1,4 @@
-# StuLink v1.19.63.64 2026-10-19
+# StuLink v1.19.64.64 2026-10-19
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 """微信小程序登录 / 绑定 / 扫码票据的公共实现。"""
 import json
