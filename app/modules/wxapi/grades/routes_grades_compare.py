@@ -1,4 +1,4 @@
-# StuLink v1.19.64.64 2026-10-19
+# StuLink v1.19.65.64 2026-10-19
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 """小程序成绩进阶（二）：班级对比 / 全局对比（只读）。"""
 from flask import g, request

@@ -1,5 +1,5 @@
 """系统级配置模型（存库，可在「系统管理 → 学校设置」中维护）"""
-# StuLink v1.19.64.64 2026-10-10
+# StuLink v1.19.65.64 2026-10-10
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 from datetime import datetime
 

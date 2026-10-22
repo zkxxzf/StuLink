@@ -1,4 +1,4 @@
-/* StuLink v1.19.64.64 2026-10-10 全局对比
+/* StuLink v1.19.65.64 2026-10-10 全局对比
  * 班级 × 学科宽表：固定列（年级/班级/人数/方向/组合/属性）+ 每科（去差均分 + 各分数线）。
  * 分数线可选：默认勾选 211线/特控线/本科线，其余层（清北/985…）勾选才显示；
  * 班主任并入「总分」格下方（不再单列），各科成绩下方为本场任课教师快照。
@@ -72,7 +72,7 @@
             return;
         }
         if (missed) {
-            // v1.19.64.64 本场考试不在可见列表（已删除 / 超出数据范围 / 已毕业）：
+            // v1.19.65.64 本场考试不在可见列表（已删除 / 超出数据范围 / 已毕业）：
             // 不能静默显示最近一场让用户误当本场（考试态下下拉原本隐藏）——
             // 恢复下拉并明确提示。
             $('#ldExam').removeClass('d-none');
@@ -89,12 +89,9 @@
 
     $('#ldExam').on('change', function () { checkedLines = null; load(); });
     $('#ldDir').on('change', load);
-    // 横轴排序：勾上=班型优先，取消=方向优先（只重画图表，不重新拉数据）
+    // 横轴排序：默认按班级序号，勾上「先按班型排」＝班型优先（只重画图表，不重新拉数据）
     $('#ldSortType').prop('checked', sortByType).on('change', function () {
         sortByType = !!this.checked;
-        try {
-            window.localStorage.setItem(SORT_STORE, sortByType ? 'type' : 'dir');
-        } catch (e) { /* 隐私模式忽略 */ }
         if (lastChartData) { renderCharts(lastChartData); }
     });
     $('#ldExport').on('click', function () {
@@ -448,13 +445,10 @@
          · 勾上「先按班型」：班型 → 方向 → 组合 → 班号
          · 取消勾选：     方向 → 组合 → 班号
        原来直接吃后端 groups 的顺序，同一方向里组合来回跳，看着乱。 */
-    var SORT_STORE = 'stulink.gc.chartSort';
-    var sortByType = true;      // 默认先按班型（用户口径：先班型再方向）
-    try {
-        var _savedSort = window.localStorage.getItem(SORT_STORE);
-        if (_savedSort === 'dir') { sortByType = false; }
-        if (_savedSort === 'type') { sortByType = true; }
-    } catch (e) { /* 隐私模式读不到就按默认 */ }
+    /* 2026-10-21 用户口径：横轴**默认按班级序号**（01班 → 02班 …），
+       需要时用户手动勾「先按班型排」再切成班型优先；不记忆到 localStorage，
+       每次进页面都回到默认的班级顺序。 */
+    var sortByType = false;
 
     var CHART_TYPE_ORDER = { '卓越班': 0, '强基班': 1 };   // 未知班型排最后
     var CHART_DIR_ORDER = { '物理': 0, '历史': 1 };
@@ -575,16 +569,27 @@
             return s.total ? +(n * 100 / s.total).toFixed(2) : 0;
         }
 
-        /* 柱顶标签＝去差均分（100% 柱顶一排），该科没均分时留空 */
+        /* 柱顶标签＝去差均分（2026-10-21 用户口径：分数上方要写清是「去差均分」）。
+           两行显示：上「去差均分」小字、下分数大字，比一行纯数字更窄也更好读。 */
         function avgLabel() {
             return {
-                show: true, position: 'top', color: colors.text,
-                fontSize: 12, fontWeight: 600,
+                show: true, position: 'top', distance: 4,
                 formatter: function (p) {
                     var it = items[p.dataIndex] || {};
                     var c = (it.row.cells || {})[subject] || {};
                     var v = c.trim_avg;
-                    return (v === null || v === undefined) ? '' : v;
+                    return (v === null || v === undefined)
+                        ? '' : '{t|去差均分}\n{v|' + v + '}';
+                },
+                rich: {
+                    t: {
+                        fontSize: 10, lineHeight: 12, color: colors.text,
+                        align: 'center'
+                    },
+                    v: {
+                        fontSize: 13, fontWeight: 600, lineHeight: 15,
+                        color: colors.text, align: 'center'
+                    }
                 }
             };
         }
@@ -710,8 +715,8 @@
         return {
             animationDuration: 260,
             // 图例行数比原来多（堆积段 + 比例折线），顶部留两到三行；
-            // 右侧留出折线百分比的数值标签位置
-            grid: { left: 8, right: 52, top: 78, bottom: 4, containLabel: true },
+            // 再加柱顶「去差均分」两行标签的高度
+            grid: { left: 8, right: 52, top: 86, bottom: 4, containLabel: true },
             legend: {
                 top: 0, type: 'plain', itemWidth: 12, itemHeight: 9,
                 itemGap: 10,

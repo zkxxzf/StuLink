@@ -49,7 +49,7 @@ def register_blueprints(app):
     app.register_blueprint(points_bp)
     app.register_blueprint(grades_bp)
 
-    # 德育奖惩模块（v1.19.64.64，独立库 morality.db）
+    # 德育奖惩模块（v1.19.65.64，独立库 morality.db）
     from app.modules.morality import bp as morality_bp
     app.register_blueprint(morality_bp)
 
