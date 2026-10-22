@@ -1,4 +1,4 @@
-/* StuLink v1.19.65.64 2026-10-10 全局对比
+/* StuLink v1.19.66.64 2026-10-10 全局对比
  * 班级 × 学科宽表：固定列（年级/班级/人数/方向/组合/属性）+ 每科（去差均分 + 各分数线）。
  * 分数线可选：默认勾选 211线/特控线/本科线，其余层（清北/985…）勾选才显示；
  * 班主任并入「总分」格下方（不再单列），各科成绩下方为本场任课教师快照。
@@ -72,7 +72,7 @@
             return;
         }
         if (missed) {
-            // v1.19.65.64 本场考试不在可见列表（已删除 / 超出数据范围 / 已毕业）：
+            // v1.19.66.64 本场考试不在可见列表（已删除 / 超出数据范围 / 已毕业）：
             // 不能静默显示最近一场让用户误当本场（考试态下下拉原本隐藏）——
             // 恢复下拉并明确提示。
             $('#ldExam').removeClass('d-none');
@@ -478,6 +478,12 @@
                 if (ta !== tb) { return ta - tb; }
                 var na0 = a.class_type || '', nb0 = b.class_type || '';
                 if (na0 !== nb0) { return na0 < nb0 ? -1 : 1; }
+                // 2026-10-21 用户口径：同一班型内**先按班号**（01→02→03…）；
+                // 原来这里落到「方向 → 组合 → 班号」，同一班型里混组合的班会按
+                // 组合名分组（物化地全部排在物化生之前），看起来就成了
+                // 03/04/07/08/09/10 → 01/02/…，与班号顺序不符。
+                var nt = chartClassNo(a) - chartClassNo(b);
+                if (nt) { return nt; }
             } else {
                 // 2026-10-21 用户口径：不勾「先按班型排」时，横轴按**班级序号从小到大**
                 //（01班 → 02班 → …；同号再按方向 / 组合 / 班名兜底，保证顺序稳定）
@@ -535,8 +541,12 @@
     /* 一张图 = 百分比堆积柱（每班都 100%）+ 各分层上线率折线（同一 0~100% 轴）。
        柱：自下而上按分数线由高到低堆积，未上线在最上；段内标人数。
        线：每层沿自己那一段的顶边走，把各班占比连起来看趋势。 */
-    function comboOption(subject, items, d, colors) {
+    function comboOption(subject, items, d, colors, big) {
         var layers = d.layers || [];
+        // 2026-10-21 用户口径：全屏放大态下柱更粗、字更大（同一个 option 换一套尺寸）
+        var BIG = !!big;
+        var BAR_W = BIG ? 60 : 26;
+        function fs(n) { return BIG ? Math.round(n * 1.4) : n; }
         // 一张图里有 ≥2 个组合时，横轴带上组合名（否则按组合分组后
         // 班号看着是跳的：03、04、10、05…，加上「·物化地」才看得懂）
         var comboSet = {};
@@ -583,11 +593,11 @@
                 },
                 rich: {
                     t: {
-                        fontSize: 10, lineHeight: 12, color: colors.text,
+                        fontSize: fs(10), lineHeight: fs(12), color: colors.text,
                         align: 'center'
                     },
                     v: {
-                        fontSize: 13, fontWeight: 600, lineHeight: 15,
+                        fontSize: fs(13), fontWeight: 600, lineHeight: fs(15),
                         color: colors.text, align: 'center'
                     }
                 }
@@ -612,12 +622,12 @@
             var totals = stacks.map(function (s) { return s.total; });
             countOfSeries['参考人数'] = totals;
             series.push({
-                name: '参考人数', type: 'bar', yAxisIndex: 0, barMaxWidth: 26,
+                name: '参考人数', type: 'bar', yAxisIndex: 0, barMaxWidth: BAR_W,
                 data: stacks.map(function () { return 100; }),
                 itemStyle: { color: colors.palette[0], borderRadius: [4, 4, 0, 0] },
                 label: {
                     show: true, position: 'inside', color: '#fff',
-                    fontSize: 12, fontWeight: 600,
+                    fontSize: fs(12), fontWeight: 600,
                     formatter: function (p) { return totals[p.dataIndex] || ''; }
                 },
                 emphasis: { disabled: true }
@@ -632,7 +642,7 @@
                 countOfSeries[nm] = counts;
                 series.push({
                     name: nm, type: 'bar', yAxisIndex: 0, stack: 'cnt',
-                    barMaxWidth: 26,
+                    barMaxWidth: BAR_W,
                     data: stacks.map(function (s, i) { return pctOf(s, counts[i]); }),
                     itemStyle: {
                         color: colors.palette[j % colors.palette.length]
@@ -640,7 +650,7 @@
                     label: {
                         // 段内标**人数**（柱高是百分比，人数才是教务要看的口径）
                         show: true, position: 'inside', color: '#fff',
-                        fontSize: 11, fontWeight: 600,
+                        fontSize: fs(11), fontWeight: 600,
                         formatter: function (p) {
                             var v = counts[p.dataIndex];
                             return (v == null || v === 0) ? '' : v;
@@ -654,12 +664,12 @@
             countOfSeries['未上线人数'] = offs;
             series.push({
                 name: '未上线人数', type: 'bar', yAxisIndex: 0, stack: 'cnt',
-                barMaxWidth: 26,
+                barMaxWidth: BAR_W,
                 data: stacks.map(function (s, i) { return pctOf(s, offs[i]); }),
                 itemStyle: { color: withAlpha(colors.muted, 0.55) },
                 label: {
                     show: true, position: 'inside', color: '#fff',
-                    fontSize: 11, fontWeight: 600,
+                    fontSize: fs(11), fontWeight: 600,
                     formatter: function (p) {
                         var v = offs[p.dataIndex];
                         return v ? v : '';
@@ -691,13 +701,13 @@
                         var ln = lineOf(x, name);
                         return (ln && ln.rate != null) ? ln.rate : null;
                     }),
-                    smooth: true, symbol: 'circle', symbolSize: 5,
+                    smooth: true, symbol: 'circle', symbolSize: BIG ? 8 : 5,
                     connectNulls: true,
-                    lineStyle: { width: 2 },
+                    lineStyle: { width: BIG ? 3 : 2 },
                     itemStyle: { color: lc },
                     label: {
                         show: true, position: 'right', distance: 3,
-                        fontSize: 10, color: lc,
+                        fontSize: fs(10), color: lc,
                         backgroundColor: withAlpha(colors.surface, 0.85),
                         padding: [1, 2], borderRadius: 2,
                         formatter: function (p) {
@@ -715,12 +725,16 @@
         return {
             animationDuration: 260,
             // 图例行数比原来多（堆积段 + 比例折线），顶部留两到三行；
-            // 再加柱顶「去差均分」两行标签的高度
-            grid: { left: 8, right: 52, top: 86, bottom: 4, containLabel: true },
+            // 再加柱顶「去差均分」两行标签的高度（放大态整体再放宽）
+            grid: {
+                left: 8, right: BIG ? 84 : 52,
+                top: BIG ? 130 : 86, bottom: 4, containLabel: true
+            },
             legend: {
-                top: 0, type: 'plain', itemWidth: 12, itemHeight: 9,
-                itemGap: 10,
-                textStyle: { color: colors.text, fontSize: 12 },
+                top: 0, type: 'plain',
+                itemWidth: BIG ? 18 : 12, itemHeight: BIG ? 13 : 9,
+                itemGap: BIG ? 16 : 10,
+                textStyle: { color: colors.text, fontSize: fs(12) },
                 data: legendData, selected: selected
             },
             tooltip: {
@@ -752,14 +766,14 @@
             },
             xAxis: {
                 type: 'category', data: names,
-                axisLabel: { color: colors.text, fontSize: 12, interval: 0, rotate: rotate },
+                axisLabel: { color: colors.text, fontSize: fs(12), interval: 0, rotate: rotate },
                 axisTick: { show: false },
                 axisLine: { lineStyle: { color: colors.line } }
             },
             yAxis: [{
                 type: 'value', min: 0, max: 100, interval: 20,
                 axisLabel: {
-                    color: colors.text, fontSize: 12,
+                    color: colors.text, fontSize: fs(12),
                     formatter: '{value}%'
                 },
                 splitLine: { lineStyle: { color: colors.line } }
@@ -812,7 +826,10 @@
             var el = document.getElementById('ldAvgChart' + i);
             if (!el) { return; }
             var ch = window.echarts.init(el);
-            ch.setOption(comboOption(c.subject, c.rows, d, colors), true);
+            // 放大态要重画一套「加粗柱 + 大字号」，所以把渲染入参挂在元素上备用
+            el.__slCfg = { subject: c.subject, rows: c.rows, d: d, colors: colors };
+            el.__slChart = ch;
+            ch.setOption(comboOption(c.subject, c.rows, d, colors, false), true);
             charts.push(ch);
         });
 
@@ -825,8 +842,18 @@
     }
 
     /* 2026-10-21 用户口径：每张图右上角的「放大」按钮 —— 点一下把该图铺满整个屏幕宽度
-       （卡片改为固定在视口内的浮层，再点一次或按 Esc 退出），退出/进入后都要 resize，
-       ECharts 不会自己跟着容器变。 */
+       （卡片改为固定在视口内的浮层，再点一次或按 Esc 退出）。
+       放大态还要**柱更粗、字更大**：按 big 参数重画一遍 option，再 resize。 */
+    function applyChartMode($card, big) {
+        var el = $card.find('.ld-chart')[0];
+        if (!el || !el.__slCfg || !el.__slChart) { return; }
+        var cfg = el.__slCfg;
+        try {
+            el.__slChart.setOption(
+                comboOption(cfg.subject, cfg.rows, cfg.d, cfg.colors, big), true);
+            el.__slChart.resize();
+        } catch (e) { /* 图表已销毁 */ }
+    }
     function resizeChartCard($card) {
         var i = parseInt($card.attr('data-idx'), 10);
         var ch = charts[i];
@@ -835,7 +862,12 @@
     function closeMaxChart() {
         var $c = $('.ld-chart-card.is-max').removeClass('is-max');
         $('body').removeClass('ld-chart-max-open');
-        if ($c.length) { setTimeout(function () { resizeChartCard($c); }, 60); }
+        if ($c.length) {
+            setTimeout(function () {
+                applyChartMode($c, false);
+                resizeChartCard($c);
+            }, 60);
+        }
     }
     $(document).on('click', '.ld-chart-max', function () {
         var $card = $(this).closest('.ld-chart-card');
@@ -843,7 +875,10 @@
         $('.ld-chart-card.is-max').removeClass('is-max');
         $card.toggleClass('is-max', toMax);
         $('body').toggleClass('ld-chart-max-open', toMax);
-        setTimeout(function () { resizeChartCard($card); }, 60);
+        setTimeout(function () {
+            applyChartMode($card, toMax);
+            resizeChartCard($card);
+        }, 60);
     });
     $(document).on('keydown', function (e) {
         if (e.key === 'Escape' || e.keyCode === 27) { closeMaxChart(); }

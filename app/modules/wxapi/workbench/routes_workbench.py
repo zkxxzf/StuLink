@@ -1,4 +1,4 @@
-# StuLink v1.19.65.64 2026-10-19
+# StuLink v1.19.66.64 2026-10-19
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 """小程序工作台：今日课程 / 今日监考 / 未读通知（首页第一屏）。
 
