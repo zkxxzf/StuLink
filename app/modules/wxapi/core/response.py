@@ -1,4 +1,4 @@
-# StuLink v1.19.62.64 2026-10-18
+# StuLink v1.19.62.65 2026-10-18
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 """小程序接口统一响应封装。
 

@@ -1,4 +1,4 @@
-# StuLink v1.19.62.64 2026-10-19
+# StuLink v1.19.62.65 2026-10-19
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 """小程序调课申请：我的课程 / 可选目标时段 / 提交。
 

@@ -1,4 +1,4 @@
-# StuLink v1.19.62.64 2026-10-21
+# StuLink v1.19.62.65 2026-10-21
 # 合并冲突分析器：判定每个冲突块是否只是「文件头版本号行」冲突。
 # 用法：py -3.12 scripts/merge/analyze_conflicts.py [--fix]
 #   --fix 时只处理「全部冲突块均为版本头行」的文件，采用 theirs（master）一侧。
