@@ -3,7 +3,7 @@
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
 [![Python](https://img.shields.io/badge/python-3.11+-green.svg)](https://python.org)
 [![Flask](https://img.shields.io/badge/flask-3.x-lightgrey.svg)](https://flask.palletsprojects.com/)
-[![Version](https://img.shields.io/badge/version-1.19.70.64-orange.svg)](https://gitee.com/zkxxzf/StuLink)
+[![Version](https://img.shields.io/badge/version-1.19.71.64-orange.svg)](https://gitee.com/zkxxzf/StuLink)
 
 面向中学的综合学生管理平台，采用 **双站点 + 多模块 + 一模块一库** 的故障隔离架构：
 
@@ -301,6 +301,7 @@ StuLink/
 
 | 版本 | 日期 | 亮点 |
 |---|---|---|
+| **1.19.71.64** | 2026-10-21 | **（第三位 zk +1）成绩单页删除「最近导入」摘要条**：该条会显示导入批次统计与**操作人脚本路径**（`scripts/zhixue/import_to_stulink.py`），属后台实现细节。页面不再渲染，路由也不再解析 `import_info`（数据仍保留在库中供排查） |
 | **1.19.70.64** | 2026-10-21 | **（第三位 zk +1）首页删除功能入口板**：`/grades/` 仪表盘移除「功能入口」芯片板，连同「自定义入口」弹窗、「选择考试」弹窗与相关样式/脚本；入口统一走左侧栏。路由同步不再构造 board / exam_rows（省两次查询） |
 | **1.19.69.64** | 2026-10-21 | **（第三位 zk +1）侧栏高亮修复**：临界生对比 / AI 分析页未登记在考试态段位表里，`section` 兜底成 overview → 「考试概览·成绩单」被误点亮（与「临界生对比」双高亮）。现补登记为 analysis，并去掉「未登记即当 overview」的兜底；二级菜单字号再降到 12px（一级 13px），层级更明显 |
 | **1.19.68.64** | 2026-10-21 | **（第三位 zk +1）全局对比图表与表格对齐**：混组合班（物化地+物化政）柱顶改为**按组合各占一行**显示去差均分（与表格组合明细行同口径，不再用跨组合的混算值）；班级横轴标签下方补一行教师名（总分＝班主任、单科＝该科任课教师）；放大态标题显示「考试名-科目」；混组合班不再挂主组合后缀 |
