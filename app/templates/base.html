@@ -244,6 +244,29 @@
         .sidebar-float .efn-group .bi[data-bs-toggle][aria-expanded="false"] {
             transform: rotate(-90deg);
         }
+        /* ===== 2026-10-21 用户口径：成绩分析二级目录的层级感 =====
+           ① 更靠右缩进（一级 10px → 二级：18px 引导线 + 12px）；
+           ② 字号/字重比一级小一档（一级分组标题 12.5px / 600，二级 12.5px / 400，
+              字号与颜色都区分开，一眼能看出是子项）；
+           ③ 当前就在这个分组里时：组标题转强调色 + 左侧竖条，明确「我现在在这一级下面」；
+           ④ 展开动画从 Bootstrap 默认 .35s 收到 .16s（原来展开时明显卡一下）。 */
+        .sidebar-float #efnAnalysis {
+            margin-left: 18px; padding-left: 0;
+            border-left: 1px solid var(--sl-sidebar-line);
+        }
+        .sidebar-float #efnAnalysis .efn-item {
+            padding-left: 12px;
+            font-size: 12.5px; font-weight: 400; line-height: 1.45;
+        }
+        .sidebar-float #efnAnalysis .efn-item.active { font-weight: 600; }
+        .sidebar-float .efn-group.is-open { box-shadow: inset 3px 0 0 0 var(--sl-sidebar-accent); }
+        .sidebar-float .efn-group.is-open .efn-group-title {
+            color: var(--sl-sidebar-accent-text); font-weight: 600;
+        }
+        .sidebar-float #efnAnalysis.collapsing {
+            transition: height .16s ease-out !important;
+            overflow-anchor: none;
+        }
         /* 2026-10-14 UI 审计 H1：原先这里写的是 .sidebar.sidebar-float { display: none; } ——
            考试态悬浮流程栏在手机上被整个隐藏，而汉堡按钮又因为 exam_mode 不渲染，
            进入 /grades/exams/<id> 后「概览 / 考务 / 导入 / 划线 / 分析」之间**完全无法跳转**
@@ -682,41 +705,58 @@
                 {% set _is_lead = current_user.role == 'admin' or (current_user.active_group and
                      current_user.active_group.scope_type in ('school', 'grade')) %}
                 {# v1.19.49.35：点「成绩分析」文字直接进入本场分析（领导=总览（全年级对比），
-                   其他角色=班级分析，避免非领导点总览被 403）；展开/收起改由右侧箭头负责。
-                   2026-10-21 用户口径：**每次加载都默认折叠**（不再记忆展开状态），
-                   刷新 / 换页后统一回到折叠态。 #}
-                <div class="efn-group">
-                    <a class="efn-group-title" data-nav="ana_home"
+                   其他角色=班级分析，避免非领导点总览被 403）；展开/收起由右侧箭头负责。
+                   2026-10-21 用户口径（第三版）：
+                     · 当前页就在「成绩分析」的子栏目里 → **自动展开**，并把组标题点亮
+                       （左侧竖条 + 强调色），明确「我现在在这个一级目录下」；
+                     · 当前页在别的一级目录（成绩单 / 考务 / 导入）→ 收起，只留「成绩分析」一行；
+                     · 点「成绩分析」进入分析页后同样是展开态 —— 等价于「点一下自动展开」。 #}
+                {% set _ana_eps = ('grades.global_compare_page', 'grades.index',
+                                   'grades.exam_near_line', 'grades.honor',
+                                   'grades.ai_studio') %}
+                {% set _ana_active = request.endpoint in _ana_eps %}
+                <div class="efn-group{% if _ana_active %} is-open{% endif %}">
+                    <a class="efn-group-title{% if _ana_active %} active{% endif %}" data-nav="ana_home"
                        href="{{ url_for('grades.global_compare_page', exam=EN.exam_id) if _is_lead
                                  else url_for('grades.index', exam=EN.exam_id, tab='class') }}">成绩分析</a>
                     <i class="bi bi-chevron-down" data-bs-toggle="collapse" href="#efnAnalysis"
-                       role="button" title="展开 / 收起" aria-expanded="false"
+                       role="button" title="展开 / 收起" aria-expanded="{{ 'true' if _ana_active else 'false' }}"
                        aria-label="展开 / 收起 成绩分析" aria-controls="efnAnalysis"></i>
                 </div>
-                <div class="collapse" id="efnAnalysis">
+                <div class="collapse{% if _ana_active %} show{% endif %}" id="efnAnalysis">
                     {% if _is_lead %}
-                    <a class="efn-item ps-4 {% if request.endpoint == 'grades.global_compare_page' %}active{% endif %}" data-nav="global"
+                    <a class="efn-item {% if request.endpoint == 'grades.global_compare_page' %}active{% endif %}" data-nav="global"
                        href="{{ url_for('grades.global_compare_page') }}?exam={{ EN.exam_id }}">总览（全年级对比）</a>
                     {% endif %}
                     {% if current_user.has_perm('grades.view') %}
                     {# 2026-10-21 用户口径：原侧栏的「年级分析 / 班级分析 / 学科分析 / 任课教师 /
                        班级对比」五项合并为一个「详细分析」入口 —— 这五项本来就是分析页内的
                        页签，侧栏不再逐项重复。 #}
-                    <a class="efn-item ps-4 {% if request.endpoint == 'grades.index' %}active{% endif %}" data-nav="ana_detail"
+                    <a class="efn-item {% if request.endpoint == 'grades.index' %}active{% endif %}" data-nav="ana_detail"
                        href="{{ url_for('grades.index') }}?exam={{ EN.exam_id }}">详细分析</a>
-                    <a class="efn-item ps-4 {% if request.endpoint == 'grades.exam_near_line' %}active{% endif %}" data-nav="near"
+                    <a class="efn-item {% if request.endpoint == 'grades.exam_near_line' %}active{% endif %}" data-nav="near"
                        href="{{ url_for('grades.exam_near_line', exam_id=EN.exam_id) }}">临界生对比</a>
                     {# 2026-10-18 表彰名单：年级前 30 / 卓越班前 10 / 单科前 10（并列全列） #}
-                    <a class="efn-item ps-4 {% if request.endpoint == 'grades.honor' %}active{% endif %}" data-nav="honor"
+                    <a class="efn-item {% if request.endpoint == 'grades.honor' %}active{% endif %}" data-nav="honor"
                        href="{{ url_for('grades.honor') }}?exam={{ EN.exam_id }}">表彰名单</a>
                     {# 2026-10-13：AI 分析工作台（一句话提问 → 工具取数 → HTML 报告；任务在后台跑，切页可续看） #}
-                    <a class="efn-item ps-4 {% if request.endpoint == 'grades.ai_studio' %}active{% endif %}" data-nav="ai"
+                    <a class="efn-item {% if request.endpoint == 'grades.ai_studio' %}active{% endif %}" data-nav="ai"
                        href="{{ url_for('grades.ai_studio') }}?exam={{ EN.exam_id }}">AI 分析</a>
                     {% endif %}
                     {# 2026-10-21 用户口径：侧栏删除「自由分析」「成绩汇报区」入口（页面仍在，仅不再占导航）。 #}
                 </div>
-                {# 2026-10-21 用户口径：成绩模块侧栏的分组（成绩分析 / 基础配置）**每次加载都默认折叠**，
-                   不再用 localStorage 记住上次的展开状态 —— 刷新或换页后统一回到折叠态。 #}
+                <script>
+                /* 2026-10-21：点「成绩分析」时若分组是收起的，先就地展开再跳转 ——
+                   跳转后的页面同样会按 _ana_active 渲染为展开态，视觉上不会"点开又收起"。 */
+                (function () {
+                    var box = document.getElementById('efnAnalysis');
+                    var title = document.querySelector('.efn-group-title[data-nav="ana_home"]');
+                    if (!box || !title) { return; }
+                    title.addEventListener('click', function () {
+                        if (!box.classList.contains('show')) { box.classList.add('show'); }
+                    });
+                })();
+                </script>
                 {% endif %}
             </div>
             {% elif TIMED %}
@@ -1019,7 +1059,7 @@
         {# 第七轮审计（U-M2）：补 .footer 类 —— 上面 @media print 的隐藏清单匹配的是
            .footer，此前 footer 元素无此类，导致打印时多打一条版权/版本行。 #}
         <footer class="footer text-center text-muted small mt-4 pt-3 border-top">
-            StuLink v1.19.66.64（2026-10-21） · © 2026 @zkxxzf · 感谢协作开发 @Sakaay
+            StuLink v1.19.67.64（2026-10-21） · © 2026 @zkxxzf · 感谢协作开发 @Sakaay
         </footer>
         {% endif %}
     </div>

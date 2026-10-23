@@ -80,7 +80,7 @@
         var missed = !!(examId && sel.val() !== String(examId));
         if (!sel.val() && sel.find('option').length) sel.prop('selectedIndex', 0);
         if (missed) {
-            // v1.19.66.64 本场考试不在可见列表（已删除 / 超出数据范围 / 已毕业）：
+            // v1.19.67.64 本场考试不在可见列表（已删除 / 超出数据范围 / 已毕业）：
             // 不能静默显示最近一场让用户误当本场（考试态下下拉原本隐藏）——
             // 恢复下拉并明确提示。
             $('#rpExam').removeClass('d-none');
