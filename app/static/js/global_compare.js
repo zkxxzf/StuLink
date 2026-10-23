@@ -1,4 +1,4 @@
-/* StuLink v1.19.67.64 2026-10-10 全局对比
+/* StuLink v1.19.68.64 2026-10-10 全局对比
  * 班级 × 学科宽表：固定列（年级/班级/人数/方向/组合/属性）+ 每科（去差均分 + 各分数线）。
  * 分数线可选：默认勾选 211线/特控线/本科线，其余层（清北/985…）勾选才显示；
  * 班主任并入「总分」格下方（不再单列），各科成绩下方为本场任课教师快照。
@@ -72,7 +72,7 @@
             return;
         }
         if (missed) {
-            // v1.19.67.64 本场考试不在可见列表（已删除 / 超出数据范围 / 已毕业）：
+            // v1.19.68.64 本场考试不在可见列表（已删除 / 超出数据范围 / 已毕业）：
             // 不能静默显示最近一场让用户误当本场（考试态下下拉原本隐藏）——
             // 恢复下拉并明确提示。
             $('#ldExam').removeClass('d-none');
@@ -556,7 +556,10 @@
         }).length > 1;
         var names = items.map(function (x) {
             var cmb = chartCombo(x.row);
-            return (showCombo && cmb) ? (x.label + '·' + cmb) : x.label;
+            // 混组合班的「班级合计」行不再挂主组合名（否则看着像只有物化地），
+            // 它的组合口径改由柱顶的两个「去差均分」说明
+            var mixed = ((x.row.selections || []).length > 1);
+            return (showCombo && cmb && !mixed) ? (x.label + '·' + cmb) : x.label;
         });
         var stacks = items.map(function (x) {
             return countStacks((x.row.cells || {})[subject] || {}, layers);
@@ -573,6 +576,31 @@
             return (c.lines || {})[name] || null;
         }
 
+        /* 该行在本科上的任课教师：总分列＝班主任，单科＝该科任课教师（来自本场快照） */
+        function teacherOf(x) {
+            if (!x || !x.row) { return ''; }
+            if (subject === '总分') { return x.row.headteacher || ''; }
+            var c = (x.row.cells || {})[subject] || {};
+            return c.teacher || '';
+        }
+
+        /* 2026-10-21 用户口径：混组合班（如 03 班＝物化地 + 物化政）在柱头要显示**两个**
+           去差均分，且必须与表格里按组合明细行显示的数一致 —— 从同班的组合明细行取。
+           只收该科有成绩的组合（如 03 班的政治只有物化政有人考）。 */
+        function comboAvgsOf(row) {
+            var out = [];
+            (d.groups || []).forEach(function (g) {
+                (g.rows || []).forEach(function (r) {
+                    if (!r.is_combo || r.class_name !== row.class_name) { return; }
+                    if ((r.direction || '') !== (row.direction || '')) { return; }
+                    var c = (r.cells || {})[subject] || {};
+                    if (!(c.count > 0)) { return; }
+                    out.push({ sel: chartCombo(r) || '组合', avg: c.trim_avg });
+                });
+            });
+            return out;
+        }
+
         /* 2026-10-21 用户口径（第二轮）：改成**百分比堆积柱**——每根柱都是 100%，
            段高＝该段人数占本班参考人数的比例，便于班与班之间横向比较。 */
         function pctOf(s, n) {
@@ -580,14 +608,24 @@
         }
 
         /* 柱顶标签＝去差均分（2026-10-21 用户口径：分数上方要写清是「去差均分」）。
-           两行显示：上「去差均分」小字、下分数大字，比一行纯数字更窄也更好读。 */
+           纯组合班/单组合：两行「去差均分 / 数值」；
+           混组合班（物化地+物化政）：每个组合各一行，与表格组合明细行一致。 */
         function avgLabel() {
             return {
                 show: true, position: 'top', distance: 4,
                 formatter: function (p) {
                     var it = items[p.dataIndex] || {};
                     var c = (it.row.cells || {})[subject] || {};
+                    var combos = comboAvgsOf(it.row);
+                    if (combos.length > 1) {
+                        var lines = ['{t|去差均分}'];
+                        combos.forEach(function (x) {
+                            lines.push('{c|' + x.sel + ' ' + (x.avg == null ? '—' : x.avg) + '}');
+                        });
+                        return lines.join('\n');
+                    }
                     var v = c.trim_avg;
+                    if (combos.length === 1) { v = combos[0].avg; }   // 该科只有一个组合有成绩
                     return (v === null || v === undefined)
                         ? '' : '{t|去差均分}\n{v|' + v + '}';
                 },
@@ -599,6 +637,10 @@
                     v: {
                         fontSize: fs(13), fontWeight: 600, lineHeight: fs(15),
                         color: colors.text, align: 'center'
+                    },
+                    c: {
+                        fontSize: fs(10), lineHeight: fs(13), color: colors.text,
+                        align: 'center'
                     }
                 }
             };
@@ -725,10 +767,10 @@
         return {
             animationDuration: 260,
             // 图例行数比原来多（堆积段 + 比例折线），顶部留两到三行；
-            // 再加柱顶「去差均分」两行标签的高度（放大态整体再放宽）
+            // 再加柱顶「去差均分」标签（混组合班是 3 行）的高度
             grid: {
                 left: 8, right: BIG ? 84 : 52,
-                top: BIG ? 130 : 86, bottom: 4, containLabel: true
+                top: BIG ? 152 : 104, bottom: 4, containLabel: true
             },
             legend: {
                 top: 0, type: 'plain',
@@ -745,8 +787,16 @@
                     var it = items[ps[0].dataIndex] || {};
                     var cc = (it.row && it.row.cells
                         ? it.row.cells[subject] : {}) || {};
-                    var av = (cc.trim_avg === null || cc.trim_avg === undefined)
-                        ? '—' : cc.trim_avg;
+                    var _combos = comboAvgsOf(it.row);
+                    var av;
+                    if (_combos.length > 1) {
+                        av = _combos.map(function (x) {
+                            return x.sel + ' ' + (x.avg == null ? '—' : x.avg);
+                        }).join(' / ');
+                    } else {
+                        var _v = _combos.length === 1 ? _combos[0].avg : cc.trim_avg;
+                        av = (_v === null || _v === undefined) ? '—' : _v;
+                    }
                     var out = esc(ps[0].axisValue) + '　参考 ' + st.total
                         + ' 人 · 去差均分 ' + av + '<br>';
                     ps.forEach(function (p) {
@@ -766,7 +816,24 @@
             },
             xAxis: {
                 type: 'category', data: names,
-                axisLabel: { color: colors.text, fontSize: fs(12), interval: 0, rotate: rotate },
+                axisLabel: {
+                    interval: 0, rotate: rotate, color: colors.text,
+                    // 2026-10-21 用户口径：班级下面再挂一行教师名（总分＝班主任，单科＝任课教师）
+                    formatter: function (v, i) {
+                        var t = teacherOf(items[i]);
+                        return t ? '{n|' + v + '}\n{t|' + t + '}' : '{n|' + v + '}';
+                    },
+                    rich: {
+                        n: {
+                            fontSize: fs(12), lineHeight: fs(15),
+                            color: colors.text, align: 'center'
+                        },
+                        t: {
+                            fontSize: fs(10), lineHeight: fs(13),
+                            color: colors.muted, align: 'center'
+                        }
+                    }
+                },
                 axisTick: { show: false },
                 axisLine: { lineStyle: { color: colors.line } }
             },
@@ -811,10 +878,13 @@
         }
 
         // 总分 + 各科各一张图：堆积柱＝分层上线人数、折线＝各分层上线率
-        // 2026-10-21 用户口径：每张图右上角加一个「放大」按钮，点一下铺满屏幕宽度（Esc 退出）
+        // 2026-10-21 用户口径：每张图右上角加一个「放大」按钮，点一下铺满屏幕宽度（Esc 退出）；
+        // 放大态标题要带上本场考试名（「2024级…月考（高三上）-总分」）。
+        var examName = (d.exam && d.exam.name) || '';
         var html = cards.map(function (c, i) {
-            return '<div class="ld-chart-card" data-idx="' + i + '">'
-                + '<div class="ld-chart-title"><span>' + esc(c.subject) + '</span>'
+            return '<div class="ld-chart-card" data-idx="' + i + '"'
+                + ' data-subject="' + esc(c.subject) + '" data-exam="' + esc(examName) + '">'
+                + '<div class="ld-chart-title"><span class="ld-chart-name">' + esc(c.subject) + '</span>'
                 + '<button type="button" class="ld-chart-max" title="放大到全屏宽度（再点一次或 Esc 退出）"'
                 + ' aria-label="放大 ' + esc(c.subject) + ' 图表">'
                 + '<i class="bi bi-arrows-fullscreen"></i><i class="bi bi-fullscreen-exit"></i>'
@@ -844,6 +914,13 @@
     /* 2026-10-21 用户口径：每张图右上角的「放大」按钮 —— 点一下把该图铺满整个屏幕宽度
        （卡片改为固定在视口内的浮层，再点一次或按 Esc 退出）。
        放大态还要**柱更粗、字更大**：按 big 参数重画一遍 option，再 resize。 */
+    /* 标题：常规只写科目名；放大态写成「考试名-科目」（用户口径 2026-10-21） */
+    function setCardTitle($card, big) {
+        var $nm = $card.find('.ld-chart-name');
+        var sub = $card.attr('data-subject') || '';
+        var ex = $card.attr('data-exam') || '';
+        $nm.text((big && ex) ? (ex + '-' + sub) : sub);
+    }
     function applyChartMode($card, big) {
         var el = $card.find('.ld-chart')[0];
         if (!el || !el.__slCfg || !el.__slChart) { return; }
@@ -864,6 +941,7 @@
         $('body').removeClass('ld-chart-max-open');
         if ($c.length) {
             setTimeout(function () {
+                setCardTitle($c, false);
                 applyChartMode($c, false);
                 resizeChartCard($c);
             }, 60);
@@ -876,6 +954,7 @@
         $card.toggleClass('is-max', toMax);
         $('body').toggleClass('ld-chart-max-open', toMax);
         setTimeout(function () {
+            setCardTitle($card, toMax);
             applyChartMode($card, toMax);
             resizeChartCard($card);
         }, 60);
