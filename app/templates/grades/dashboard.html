@@ -33,37 +33,7 @@
     @media (max-width: 575.98px) {
         .gd-kpi-strip { grid-template-columns: repeat(2, minmax(0, 1fr)); }
     }
-    /* 功能入口板（2026-10-19）：芯片式入口，比卡片省一半高度 */
-    .gd-board { border: none; border-radius: 12px; box-shadow: var(--sl-shadow); }
-    .gd-entry-row { display: flex; gap: .65rem; padding: .3rem 0;
-                    border-bottom: 1px dashed var(--sl-border); }
-    .gd-entry-row:last-child { border-bottom: none; }
-    .gd-entry-group { flex: 0 0 78px; font-size: .76rem; padding-top: .32rem;
-                      color: var(--sl-text-subtle); letter-spacing: .02em; }
-    .gd-entry-chips { display: flex; flex-wrap: wrap; gap: .4rem; }
-    .gd-chip { display: inline-flex; align-items: center; gap: .34rem;
-               padding: .28rem .62rem; border-radius: 999px; font-size: .82rem;
-               color: var(--sl-text); background: var(--sl-surface-2);
-               border: 1px solid var(--sl-border); text-decoration: none;
-               transition: background .15s, border-color .15s, color .15s; }
-    .gd-chip:hover { background: var(--sl-soft-info-bg); border-color: var(--sl-soft-info-bd);
-                     color: var(--sl-soft-info-fg); }
-    .gd-chip i { font-size: .86rem; color: var(--sl-text-muted); }
-    .gd-chip:hover i { color: var(--sl-soft-info-fg); }
-    .gd-chip .gd-chip-arrow { font-size: .62rem; opacity: .5; }
-    @media (max-width: 575.98px) {
-        .gd-entry-row { flex-direction: column; gap: .25rem; }
-        .gd-entry-group { flex: none; padding-top: 0; }
-    }
-    /* 自定义入口弹窗 */
-    .gd-pref-group { margin-bottom: .75rem; }
-    .gd-pref-title { font-size: .76rem; color: var(--sl-text-subtle); margin: .2rem 0 .35rem; }
-    .gd-pref-row { display: flex; align-items: center; gap: .5rem;
-                   padding: .3rem .5rem; border-radius: 8px; }
-    .gd-pref-row:hover { background: var(--sl-surface-3); }
-    .gd-pref-row .gd-move { color: var(--sl-text-muted); text-decoration: none; }
-    .gd-pref-row .gd-move:hover { color: var(--sl-accent); }
-    .gd-pick-exam { cursor: pointer; }
+    /* 2026-10-21 用户口径：首页「功能入口」板已删除，其芯片/自定义弹窗样式一并移除 */
     .gd-tl { list-style: none; margin: 0; padding: 0; max-height: 430px; overflow: auto; }
     .gd-tl li { display: flex; gap: .55rem; padding: .45rem .2rem;
                 border-bottom: 1px dashed var(--sl-border); }
@@ -109,40 +79,8 @@
         </div>
     </div>
 
-    {# ---------- 功能入口板（2026-10-19 取代原两块图表） ---------- #}
-    <div class="card gd-board mb-3">
-        <div class="card-header d-flex justify-content-between align-items-center py-2">
-            <span class="fw-semibold small">
-                <i class="bi bi-grid-3x3-gap"></i> 功能入口
-                <span class="text-muted fw-normal ms-1" id="gdBrdCount">{{ board.shown }}/{{ board.total }}</span>
-            </span>
-            <button type="button" class="btn btn-sm btn-outline-secondary" id="gdEntryCustomize"
-                    title="勾选要显示的入口、调整顺序">
-                <i class="bi bi-sliders2"></i> 自定义
-            </button>
-        </div>
-        <div class="card-body py-2">
-            {% for g in board.groups %}
-            <div class="gd-entry-row">
-                <span class="gd-entry-group">{{ g.name }}</span>
-                <div class="gd-entry-chips">
-                    {% for it in g.entries %}
-                    <a class="gd-chip" href="{{ it.href }}" data-entry-key="{{ it.key }}"
-                       {% if it.needs_exam %}data-exam-tpl="{{ it.tpl }}"
-                       data-exam-filter="{{ 'imported' if it.imported_only else 'all' }}"
-                       data-exam-title="{{ it.title }}"{% endif %}
-                       title="{{ it.desc }}{{ '（点击后选择考试）' if it.needs_exam else '' }}">
-                        <i class="bi {{ it.icon }}"></i>{{ it.title }}
-                        {% if it.needs_exam %}<i class="bi bi-chevron-right gd-chip-arrow"></i>{% endif %}
-                    </a>
-                    {% endfor %}
-                </div>
-            </div>
-            {% else %}
-            <div class="text-muted small py-3">当前账号还没有可用的成绩功能入口。</div>
-            {% endfor %}
-        </div>
-    </div>
+    {# 2026-10-21 用户口径：删除首页「功能入口」板（含其自定义弹窗与选考试弹窗）——
+       入口已在左侧栏按模块组织，首页只保留汇总指标与最近考试，不再重复一遍。 #}
 
     {% if not d.has_data %}
     <div class="card mb-3">
@@ -268,105 +206,9 @@
             </div>
         </div>
     </div>
-
-    {# ---------- 选考试弹窗（入口 → 考试 → 目标页面） ---------- #}
-    <div class="modal fade" id="gdExamModal" tabindex="-1" aria-hidden="true">
-        <div class="modal-dialog modal-lg modal-dialog-scrollable">
-            <div class="modal-content">
-                <div class="modal-header py-2">
-                    <h6 class="modal-title">选择考试
-                        <span class="text-muted fw-normal small ms-1" id="gdExamEntry"></span>
-                    </h6>
-                    <button type="button" class="btn-close" data-bs-dismiss="modal"
-                            aria-label="关闭"></button>
-                </div>
-                <div class="modal-body">
-                    <input type="search" class="form-control form-control-sm mb-2"
-                           id="gdExamSearch" autocomplete="off"
-                           placeholder="搜索考试名称 / 年级 / 阶段">
-                    <div class="table-responsive" style="max-height:58vh;">
-                        <table class="table table-sm table-hover g-table align-middle mb-0">
-                            <thead>
-                            <tr><th>考试名称</th><th>年级</th><th>阶段</th>
-                                <th>日期</th><th>状态</th></tr>
-                            </thead>
-                            <tbody id="gdExamBody">
-                            {% for e in exam_rows %}
-                            <tr class="gd-pick-exam" data-id="{{ e.id }}"
-                                data-imported="{{ 1 if e.imported else 0 }}"
-                                data-search="{{ (e.name ~ ' ' ~ e.grade ~ ' ' ~ e.stage)|lower }}">
-                                <td class="wrap">{{ e.name }}</td>
-                                <td class="text-nowrap">{{ e.grade }}</td>
-                                <td class="text-nowrap">{{ e.stage or '—' }}</td>
-                                <td class="text-nowrap">{{ e.date or '—' }}</td>
-                                <td class="text-nowrap">
-                                    {% if e.status == 'imported' %}<span class="badge bg-success">{{ e.status_label }}</span>
-                                    {% elif e.status == 'dirty' %}<span class="badge bg-warning text-dark">{{ e.status_label }}</span>
-                                    {% else %}<span class="badge bg-secondary">{{ e.status_label }}</span>{% endif %}
-                                </td>
-                            </tr>
-                            {% else %}
-                            <tr><td colspan="5" class="text-center text-muted py-4">当前范围还没有考试</td></tr>
-                            {% endfor %}
-                            </tbody>
-                        </table>
-                    </div>
-                    <div class="text-muted small mt-2 d-none" id="gdExamEmpty">没有匹配的考试</div>
-                </div>
-            </div>
-        </div>
-    </div>
-
-    {# ---------- 自定义入口弹窗（勾选显示 + 排序，存个人偏好） ---------- #}
-    <div class="modal fade" id="gdEntryModal" tabindex="-1" aria-hidden="true">
-        <div class="modal-dialog modal-lg modal-dialog-scrollable">
-            <div class="modal-content">
-                <div class="modal-header py-2">
-                    <h6 class="modal-title"><i class="bi bi-sliders2"></i> 自定义功能入口</h6>
-                    <button type="button" class="btn-close" data-bs-dismiss="modal"
-                            aria-label="关闭"></button>
-                </div>
-                <div class="modal-body" id="gdEntryEditor">
-                    {% for g in board.all_groups %}
-                    <div class="gd-pref-group" data-group="{{ g.name }}">
-                        <div class="gd-pref-title">{{ g.name }}</div>
-                        {% for it in g.entries %}
-                        <div class="gd-pref-row" data-key="{{ it.key }}">
-                            <input class="form-check-input mt-0 gd-pref-on" type="checkbox"
-                                   id="gdp_{{ it.key }}" {% if not it.hidden %}checked{% endif %}>
-                            <label class="form-check-label flex-grow-1" for="gdp_{{ it.key }}">
-                                <i class="bi {{ it.icon }} me-1"></i>{{ it.title }}
-                            </label>
-                            <button type="button" class="btn btn-sm btn-link p-0 gd-move"
-                                    data-move="-1" title="上移" aria-label="上移">
-                                <i class="bi bi-arrow-up"></i>
-                            </button>
-                            <button type="button" class="btn btn-sm btn-link p-0 gd-move"
-                                    data-move="1" title="下移" aria-label="下移">
-                                <i class="bi bi-arrow-down"></i>
-                            </button>
-                        </div>
-                        {% endfor %}
-                    </div>
-                    {% endfor %}
-                </div>
-                <div class="modal-footer py-2">
-                    <button type="button" class="btn btn-sm btn-outline-secondary"
-                            id="gdEntryReset">恢复默认</button>
-                    <div class="ms-auto d-flex gap-2">
-                        <button type="button" class="btn btn-sm btn-outline-secondary"
-                                data-bs-dismiss="modal">取消</button>
-                        <button type="button" class="btn btn-sm btn-primary"
-                                id="gdEntrySave">保存</button>
-                    </div>
-                </div>
-            </div>
-        </div>
-    </div>
 </div>
 {% endblock %}
 
 {% block extra_js %}
 <script src="{{ su('js/grades_dashboard.js') }}"></script>
-<script src="{{ su('js/grades_home_entries.js') }}"></script>
 {% endblock %}

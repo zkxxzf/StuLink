@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-# StuLink v1.19.69.64 2026-10-15
+# StuLink v1.19.70.64 2026-10-15
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 """按「名次档」批量划层：建一个名次分层模板，并把它套用到限时练考试。
 

@@ -1,4 +1,4 @@
-# StuLink v1.19.69.64 2026-10-20
+# StuLink v1.19.70.64 2026-10-20
 # 成绩工作台：首页仪表盘（模块落地页）+ 实时刷新接口 + 功能入口偏好
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 """成绩工作台首页仪表盘。
@@ -47,12 +47,12 @@ def _overview_for(user):
 @login_required
 @perm_required('grades.view')
 def dashboard():
-    """首页仪表盘：KPI + 功能入口板（模块默认落地页）"""
-    data = _overview_for(current_user)
-    exam_rows = entry_catalog.exam_options(current_user)
-    board = entry_catalog.build_board(current_user, exam_rows)
-    return render_template('grades/dashboard.html', d=data,
-                           board=board, exam_rows=exam_rows)
+    """首页仪表盘：KPI + 最近考试（模块默认落地页）
+
+    2026-10-21 用户口径：首页「功能入口」板已删除（入口统一走左侧栏），
+    因此这里不再构造 board / exam_rows，省掉两次查询。
+    """
+    return render_template('grades/dashboard.html', d=_overview_for(current_user))
 
 
 @bp.route('/api/dashboard')

@@ -1,4 +1,4 @@
-# StuLink v1.19.69.64  2026-10-15
+# StuLink v1.19.70.64  2026-10-15
 # 智学网抓取结果 → StuLink 成绩导入 Excel
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 """把 --scrape 抓到的学生成绩 JSON 转成 StuLink「成绩导入」用的 Excel。
