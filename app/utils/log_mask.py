@@ -100,7 +100,7 @@ def _install_on_handlers():
 # logging.basicConfig 建了标准 Formatter，之后 create_app 才装脱敏）抛
 #     AttributeError: 'Formatter' object has no attribute 'style'
 # 把异常抛到 build_asgi_app → 整个 MCP 服务起不来（[MCP] 启动失败：…）。
-# 2026-10-14（v1.19.71.64 合并）复核：uvicorn 预配 handler 的 MCP 场景同样复现，
+# 2026-10-14（v1.19.72.64 合并）复核：uvicorn 预配 handler 的 MCP 场景同样复现，
 # 包装时把 fmt/datefmt/style/defaults 一起复用（SR-16 回归）。
 
 

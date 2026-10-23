@@ -1,4 +1,4 @@
-/* StuLink v1.19.71.64 2026-10-21
+/* StuLink v1.19.70.64 2026-10-21
    划线分层矩阵（从 grades/bands.html 抽出，供「划线分层」页与「数据导入」页共用）。
    依赖 jQuery 与 DOM 元素 #bandApp / #bandTable；只读/可编辑由 data-can-edit 决定。 */
 $(function(){

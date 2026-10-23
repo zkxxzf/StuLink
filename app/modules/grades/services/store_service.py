@@ -1,4 +1,4 @@
-# StuLink v1.19.71.64 2026-10-10
+# StuLink v1.19.72.64 2026-10-10
 # 成绩落库服务：解析结果按 模式A(增量覆盖)/模式B(整场重置) 合并写入 exam_scores
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 from collections import defaultdict
@@ -187,8 +187,14 @@ def _refresh_snapshot(rows, r, skip_deleted=False):
         row.student_name = r.get('name', row.student_name)
         row.grade = r.get('grade', row.grade)
         row.class_name = r.get('class_name', row.class_name)
-        row.class_type = r.get('class_type', row.class_type)   # v1.19.71.64 班型快照
-        row.direction = r.get('direction', row.direction)
-        row.subject_selection = r.get('subject_selection', row.subject_selection)
+        row.class_type = r.get('class_type', row.class_type)   # v1.19.72.64 班型快照
+        # 2026-10-21 用户口径：选科 / 方向是**本场考试的快照**（与任课快照同理）。
+        # 已有值不再被主库当前值覆盖 —— 否则学生中途换科后，同一场考试里
+        # 「先导的科目」与「后补的科目」会带上不同组合口径（分批导入尤其明显，
+        # 会让同一班的组合统计自相矛盾）。只有历史行还没有快照（空）时才补一次。
+        if not (row.direction or '').strip():
+            row.direction = r.get('direction', '') or ''
+        if not (row.subject_selection or '').strip():
+            row.subject_selection = r.get('subject_selection', '') or ''
         if r.get('exam_no'):
             row.exam_no = r['exam_no']                 # v1.19.0 考号快照（文件没给就不覆盖）

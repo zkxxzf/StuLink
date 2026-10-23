@@ -1,4 +1,4 @@
-/* StuLink v1.19.71.64 2026-10-10 全局对比
+/* StuLink v1.19.70.64 2026-10-10 全局对比
  * 班级 × 学科宽表：固定列（年级/班级/人数/方向/组合/属性）+ 每科（去差均分 + 各分数线）。
  * 分数线可选：默认勾选 211线/特控线/本科线，其余层（清北/985…）勾选才显示；
  * 班主任并入「总分」格下方（不再单列），各科成绩下方为本场任课教师快照。
@@ -72,7 +72,7 @@
             return;
         }
         if (missed) {
-            // v1.19.71.64 本场考试不在可见列表（已删除 / 超出数据范围 / 已毕业）：
+            // v1.19.70.64 本场考试不在可见列表（已删除 / 超出数据范围 / 已毕业）：
             // 不能静默显示最近一场让用户误当本场（考试态下下拉原本隐藏）——
             // 恢复下拉并明确提示。
             $('#ldExam').removeClass('d-none');
@@ -556,10 +556,13 @@
         }).length > 1;
         var names = items.map(function (x) {
             var cmb = chartCombo(x.row);
-            // 混组合班的「班级合计」行不再挂主组合名（否则看着像只有物化地），
-            // 它的组合口径改由柱顶的两个「去差均分」说明
-            var mixed = ((x.row.selections || []).length > 1);
-            return (showCombo && cmb && !mixed) ? (x.label + '·' + cmb) : x.label;
+            // 2026-10-21 用户口径：一个班有两个选科时**都要显示**（如「03班·物化地/物化政」），
+            // 不再只挂主组合或干脆不挂
+            var sels = (x.row.selections || []).map(function (s) {
+                return (s && s.name) ? s.name : '';
+            }).filter(function (s) { return s && s !== '全科'; });
+            if (sels.length > 1) { return x.label + '·' + sels.join('/'); }
+            return (showCombo && cmb) ? (x.label + '·' + cmb) : x.label;
         });
         var stacks = items.map(function (x) {
             return countStacks((x.row.cells || {})[subject] || {}, layers);
@@ -602,10 +605,8 @@
         }
 
         /* 2026-10-21 用户口径（第二轮）：改成**百分比堆积柱**——每根柱都是 100%，
-           段高＝该段人数占本班参考人数的比例，便于班与班之间横向比较。 */
-        function pctOf(s, n) {
-            return s.total ? +(n * 100 / s.total).toFixed(2) : 0;
-        }
+           段高＝该段人数占本班参考人数的比例，便于班与班之间横向比较。
+           各列百分比在 segNames 定下来之后统一算（见下方 pcts）。 */
 
         /* 柱顶标签＝去差均分（2026-10-21 用户口径：分数上方要写清是「去差均分」）。
            纯组合班/单组合：两行「去差均分 / 数值」；
@@ -659,6 +660,30 @@
             return 0;
         }
 
+        /* 每列百分比（最大余数法补齐到 100.00）：
+           逐段四舍五入后一列之和可能是 100.01%，堆叠顶端那一格就落到 yAxis.max(=100)
+           之外，ECharts 会把柱顶「去差均分」标签整块丢掉（实测 03班语文 100.01% → 标签
+           消失，与用户截图一致）。这里把 100−Σ 的残差并进人数最多的一段，
+           保证每列合计正好 100.00%，柱顶永远落在坐标轴内。 */
+        var pcts = stacks.map(function (s) {
+            var raw = segNames.map(function (sn) { return segOf(s, sn); });
+            raw.push(s.off);
+            var tot = s.total || 0;
+            if (!tot) { return raw.map(function () { return 0; }); }
+            var vals = raw.map(function (n) { return +(n * 100 / tot).toFixed(2); });
+            var sum = 0;
+            vals.forEach(function (v) { sum += v; });
+            var diff = +(100 - sum).toFixed(2);
+            if (diff) {
+                var k = 0;
+                for (var i = 1; i < vals.length; i++) {
+                    if (vals[i] > vals[k]) { k = i; }
+                }
+                vals[k] = +(vals[k] + diff).toFixed(2);
+            }
+            return vals;
+        });
+
         if (!segNames.length) {
             /* 该科一层都没划：一根满格柱，只标参考人数，别把全班算成「未上线」 */
             var totals = stacks.map(function (s) { return s.total; });
@@ -685,7 +710,7 @@
                 series.push({
                     name: nm, type: 'bar', yAxisIndex: 0, stack: 'cnt',
                     barMaxWidth: BAR_W,
-                    data: stacks.map(function (s, i) { return pctOf(s, counts[i]); }),
+                    data: pcts.map(function (v) { return v[j]; }),
                     itemStyle: {
                         color: colors.palette[j % colors.palette.length]
                     },
@@ -707,7 +732,7 @@
             series.push({
                 name: '未上线人数', type: 'bar', yAxisIndex: 0, stack: 'cnt',
                 barMaxWidth: BAR_W,
-                data: stacks.map(function (s, i) { return pctOf(s, offs[i]); }),
+                data: pcts.map(function (v) { return v[segNames.length]; }),
                 itemStyle: { color: withAlpha(colors.muted, 0.55) },
                 label: {
                     show: true, position: 'inside', color: '#fff',
