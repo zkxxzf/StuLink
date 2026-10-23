@@ -43,6 +43,10 @@ _EP_SECTION = (
     ('grades.exam_delete', 'overview'),
     ('grades.index', 'analysis'),
     ('grades.honor', 'analysis'),
+    # 2026-10-21 修：临界生对比 / AI 分析漏登记 → _section_of 返回 '' →
+    # 下面 `sec or 'overview'` 把「考试概览·成绩单」误点亮（用户截图：两个菜单同时高亮）。
+    ('grades.exam_near_line', 'analysis'),
+    ('grades.ai_studio', 'analysis'),
     ('grades.pivot_page', 'analysis'),
     ('grades.report_page', 'analysis'),
     ('grades.global_compare_page', 'analysis'),
@@ -122,5 +126,7 @@ def _resolve():
 
     # 2026-10-21 用户口径：侧栏不再显示分步骤进度（4 步圆点 / 考务 7 环节圆点），
     # 只保留「当前页面高亮」，因此不再查考务批次、也不再计算 steps / affair_steps。
-    return {'exam': exam, 'exam_id': exam.id, 'section': sec or 'overview',
+    # 2026-10-21 修：未登记的 endpoint 不再兜底成 'overview'（会把「考试概览·成绩单」
+    # 误点亮成双高亮），改为 ''（= 不点亮任何一级项）。
+    return {'exam': exam, 'exam_id': exam.id, 'section': sec,
             'can_scoresheet': _can_open_scoresheet(exam)}

@@ -256,7 +256,8 @@
         }
         .sidebar-float #efnAnalysis .efn-item {
             padding-left: 12px;
-            font-size: 12.5px; font-weight: 400; line-height: 1.45;
+            /* 二级字号比一级（13px）小一档，肉眼可分；激活仍走强调色 + 600 */
+            font-size: 12px; font-weight: 400; line-height: 1.5;
         }
         .sidebar-float #efnAnalysis .efn-item.active { font-weight: 600; }
         .sidebar-float .efn-group.is-open { box-shadow: inset 3px 0 0 0 var(--sl-sidebar-accent); }
@@ -1059,7 +1060,7 @@
         {# 第七轮审计（U-M2）：补 .footer 类 —— 上面 @media print 的隐藏清单匹配的是
            .footer，此前 footer 元素无此类，导致打印时多打一条版权/版本行。 #}
         <footer class="footer text-center text-muted small mt-4 pt-3 border-top">
-            StuLink v1.19.68.64（2026-10-21） · © 2026 @zkxxzf · 感谢协作开发 @Sakaay
+            StuLink v1.19.69.64（2026-10-21） · © 2026 @zkxxzf · 感谢协作开发 @Sakaay
         </footer>
         {% endif %}
     </div>

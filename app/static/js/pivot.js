@@ -54,14 +54,14 @@ function fillGrades() {
     else if (first) { sel.val(first); }
     else if (grades.length) { sel.val(grades[0]); }
     if (initial && !ie) {
-        // v1.19.68.64 本场考试不在可见列表（已删除 / 超出数据范围 / 已毕业）：
+        // v1.19.69.64 本场考试不在可见列表（已删除 / 超出数据范围 / 已毕业）：
         // 不能静默显示最近一场让用户误当本场 —— 恢复两个下拉并明确提示。
         $('#pvGrade, #pvExam').removeClass('d-none');
         pvNotice('本场考试不可见（可能已删除或不在您的数据范围），已改为显示最近一场，请重新选择。');
     }
     fillExams(initial);
 }
-/* v1.19.68.64 筛选栏上方的警示条（重复调用只保留一条） */
+/* v1.19.69.64 筛选栏上方的警示条（重复调用只保留一条） */
 function pvNotice(msg) {
     $('#pvNotice').remove();
     $('<div id="pvNotice" class="alert alert-warning py-2 small mb-2"></div>')

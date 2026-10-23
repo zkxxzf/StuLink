@@ -1,4 +1,4 @@
-# StuLink v1.19.68.64 2026-10-21
+# StuLink v1.19.69.64 2026-10-21
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 import os
 import secrets
@@ -186,7 +186,7 @@ class Config:
         'history': 'sqlite:///' + os.path.join(BASE_DIR, 'data', 'history.db'),
         'grades': 'sqlite:///' + os.path.join(BASE_DIR, 'data', 'grades.db'),
         'points': 'sqlite:///' + os.path.join(BASE_DIR, 'data', 'points.db'),
-        # 2026-10-13（v1.19.68.64）：德育奖惩独立成库 —— 与「积分」业务互不牵连，
+        # 2026-10-13（v1.19.69.64）：德育奖惩独立成库 —— 与「积分」业务互不牵连，
         # 奖惩记录含附件与处分期限等长期档案信息，拆库后单库损坏不影响积分/成绩。
         'morality': 'sqlite:///' + os.path.join(BASE_DIR, 'data', 'morality.db'),
         # 2026-10-20（用户要求）：限时练独立成库 —— 场次/成绩/分层模板三张表
