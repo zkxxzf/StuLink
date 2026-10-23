@@ -1,4 +1,4 @@
-# StuLink v1.19.70.64 2026-10-20
+# StuLink v1.19.71.64 2026-10-20
 # 限时练 AI 智能导入：只让模型做「列映射」，逐行解析仍走确定性代码
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 """限时练 AI 导入的列映射。

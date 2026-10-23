@@ -1,4 +1,4 @@
-# StuLink v1.19.70.64 2026-10-20
+# StuLink v1.19.71.64 2026-10-20
 # 限时练：成绩汇总表导出（xlsx）
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 """限时练汇总表导出。

@@ -1,4 +1,4 @@
-# StuLink v1.19.70.64 2026-10-19
+# StuLink v1.19.71.64 2026-10-19
 # Copyright (c) 2026 zkxxzf. Apache License 2.0
 """小程序考务扩展：我的考场名单 + 我的监考工作量（只读）。
 

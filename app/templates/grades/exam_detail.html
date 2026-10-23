@@ -147,14 +147,8 @@
 
 {# 2026-10-21 用户口径：去掉四段式进度条（分步骤显示），页头状态徽标已能表示导入状态。 #}
 
-{% if import_info %}
-<div class="alert alert-light border small py-2">
-    <i class="bi bi-info-circle"></i> 最近导入：{{ import_info.fname }}（{{ import_info.mode }}模式，
-    新增{{ import_info.summary.new_students }}人 / 更新{{ import_info.summary.updated_rows }}条 /
-    删除{{ import_info.summary.deleted_rows }}条 / 未出现保留{{ import_info.summary.unseen }}人，
-    错误{{ import_info.errors }}条），操作人 {{ import_info.operator }}，{{ import_info.time }}
-</div>
-{% endif %}
+{# 2026-10-21 用户口径：删除「最近导入」摘要条 —— 它会显示导入脚本路径（操作人
+   scripts/zhixue/import_to_stulink.py）与批次统计，属于后台实现细节，不对外展示。 #}
 
 {% if exam.status == 'dirty' %}
 <div class="alert alert-warning small">
